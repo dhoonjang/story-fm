@@ -8,6 +8,9 @@ import {
   positionGroupOfPlayer,
   ATTRIBUTE_AXES,
   naturalPositionOf,
+  numberGrievanceStands,
+  numberWishOf,
+  PLAYER_ARCHETYPE_TRAITS,
   type GamePlayer,
 } from "@story-fm/domain";
 import {
@@ -34,7 +37,14 @@ import {
   userTactics,
 } from "../src";
 import { createMiniGame, createTestGame, playMockMatch } from "./helpers";
-import { assignSquadNumber, ensureSquadNumbers } from "@story-fm/engine";
+import {
+  assignRequestedNumber,
+  assignSquadNumber,
+  ensureSquadNumbers,
+  numberBlockText,
+  numberLineageOf,
+  type GameState,
+} from "@story-fm/engine";
 
 /** 열두 달 뒤에도 찾을 수 있어야 하는 첫 달의 표식 — 문장이 아니라 축이다 */
 const FIRST_MONTH_AXIS = "passing";
@@ -529,6 +539,139 @@ describe("등번호 배정 (squad/numbers.ts)", () => {
     ensureSquadNumbers(squad);
     expect(numbersOf(squad)).toEqual([1, 13]);
     expect(naturalPositionOf(squad[0]!).position).toBe("GK");
+  });
+});
+
+// ─── 감독이 지목하는 번호 · 번호의 뜻 (player.md §1.1 · people.md §5·§6) ───
+
+const NUMBER_TEAM = "alpha";
+const NUMBER_SEASON = 3;
+
+/** 그 팀 그 번호를 달고 뛴 한 시즌 — 계보의 유일한 원본이다 */
+const numberStat = (playerId: string, season: number, squadNumber: number) =>
+  ({
+    gamePlayerId: playerId,
+    season,
+    teamId: NUMBER_TEAM,
+    squadNumber,
+    apps: 20,
+    goals: 0,
+  }) as unknown as GameState["seasonStats"][number];
+
+/**
+ * 등번호만 보는 최소 세계 — 배정은 명단과 시즌 기록만 읽는다.
+ * (`createTestGame`은 한 번에 수 초라 순수 규칙을 재는 자리에서는 부르지 않는다)
+ */
+function numberState(players: GamePlayer[], seasonStats: GameState["seasonStats"] = []): GameState {
+  return {
+    date: `${2020 + NUMBER_SEASON}-03-01`,
+    season: NUMBER_SEASON,
+    userTeamId: NUMBER_TEAM,
+    players,
+    seasonStats,
+    retired: [],
+    issues: [],
+  } as unknown as GameState;
+}
+
+describe("감독이 지목하는 등번호 (assignRequestedNumber)", () => {
+  it("1~99 밖은 배정되지 않고 지금 번호도 흔들리지 않는다", () => {
+    const one = player("mine", NUMBER_TEAM, "ST", 20);
+    const state = numberState([one]);
+    for (const asked of [0, 100]) {
+      const result = assignRequestedNumber(state, one, asked);
+      expect(result.ok, `${asked}번`).toBe(false);
+      if (!result.ok) expect(result.block.code).toBe("out-of-range");
+    }
+    expect(one.squadNumber).toBe(20);
+  });
+
+  it("동료가 달고 있으면 반려하고, 반려 카드가 그 동료를 들고 나간다", () => {
+    const mine = player("mine", NUMBER_TEAM, "ST", 20);
+    const holder = player("holder", NUMBER_TEAM, "AM", 10);
+    const state = numberState([mine, holder]);
+
+    const result = assignRequestedNumber(state, mine, 10);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.block.code).toBe("number-taken");
+    // 감독이 넘길지를 고르려면 지금 그 번호를 단 사람의 이름이 반려 줄에 있어야 한다
+    expect(numberBlockText(result.block)).toContain("holder");
+    expect(mine.squadNumber).toBe(20);
+    expect(holder.squadNumber).toBe(10);
+  });
+
+  it("take는 번호를 넘기고 — 뺏긴 선수는 **빈 번호를 새로 받는다**", () => {
+    const mine = player("mine", NUMBER_TEAM, "ST", 20);
+    const holder = player("holder", NUMBER_TEAM, "AM", 10);
+    const mate = player("mate", NUMBER_TEAM, "CM", 8);
+    const state = numberState([mine, holder, mate]);
+
+    const result = assignRequestedNumber(state, mine, 10, { take: true });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const displaced = result.assignment.displaced;
+    expect(mine.squadNumber).toBe(10);
+    expect(displaced?.player.id).toBe("holder");
+    expect(displaced?.lost).toBe(10);
+    // 번호 없이 남겨 두면 다음 로드가 아무 번호나 채운다
+    expect(holder.squadNumber).toBe(displaced?.gained);
+    const numbers = [mine, holder, mate].map((one) => one.squadNumber);
+    expect(numbers.every((n) => n !== undefined)).toBe(true);
+    expect(new Set(numbers).size).toBe(numbers.length);
+  });
+});
+
+describe("번호의 계보 (numberLineageOf)", () => {
+  it("시즌 기록에서 앞사람과 시즌 수를 세운다 — 두 번 물어도 같은 답", () => {
+    const now = player("now", NUMBER_TEAM, "ST", 9);
+    const before = player("before", NUMBER_TEAM, "AM", 21);
+    const state = numberState(
+      [now, before],
+      [
+        numberStat("before", NUMBER_SEASON - 2, 9),
+        numberStat("before", NUMBER_SEASON - 1, 9),
+        numberStat("now", NUMBER_SEASON, 9),
+      ],
+    );
+
+    const lineage = numberLineageOf(state, NUMBER_TEAM, 9);
+    expect(lineage.holder?.playerId).toBe("now");
+    expect(lineage.holder?.seasons).toBe(1);
+    // 지금 그 번호를 단 사람은 계보에 서지 않는다 — 그는 홀더다
+    expect(lineage.past.map((entry) => entry.playerId)).toEqual(["before"]);
+    expect(lineage.past[0]?.seasons).toBe(2);
+    expect(lineage.past[0]?.lastSeason).toBe(NUMBER_SEASON - 1);
+    // 저장하지 않고 매번 파생하므로 결정적이어야 한다
+    expect(numberLineageOf(state, NUMBER_TEAM, 9)).toEqual(lineage);
+  });
+});
+
+describe("번호의 뜻 (numberWishOf · numberGrievanceStands)", () => {
+  it("원형과 자리가 함께 서야 뜻이 선다 — 없는 것이 정상 결과다", () => {
+    const striker = { position: "ST", squadNumber: 20 };
+
+    // 야심가는 자리의 상징 번호를, 앞선 것부터
+    expect(numberWishOf("ambitious", striker)).toEqual({ motive: "symbolic", numbers: [9, 10] });
+    // 구단 애착형은 지금 번호를 지킨다
+    expect(numberWishOf("homegrown_heart", striker)).toEqual({ motive: "keep", numbers: [20] });
+    // 자리에 상징 번호가 없으면 야심가도 요구하지 않는다
+    expect(numberWishOf("ambitious", { position: "CB", squadNumber: 5 })).toBeNull();
+    // 우상은 계보가 만든다 — 물려받을 사람이 없으면 뜻도 서지 않는다
+    expect(numberWishOf("anxious_prospect", striker)).toBeNull();
+    const idol = { number: 9, playerId: "legend", name: "legend", seasons: 6, lastSeason: 1 };
+    expect(numberWishOf("anxious_prospect", striker, [idol])).toEqual({
+      motive: "idol",
+      numbers: [9],
+      after: idol,
+    });
+  });
+
+  it("불만은 원형·번호의 무게·재적이 함께 있어야 선다 (문턱 하나, 굴림 없음)", () => {
+    // 상징 번호라도 갓 받은 프로페셔널에게는 서지 않는다
+    expect(numberGrievanceStands(PLAYER_ARCHETYPE_TRAITS.professional.number, 10, 0)).toBe(false);
+    // 평범한 번호라도 네 시즌을 단 구단 애착형에게는 선다
+    expect(numberGrievanceStands(PLAYER_ARCHETYPE_TRAITS.homegrown_heart.number, 34, 4)).toBe(true);
   });
 });
 

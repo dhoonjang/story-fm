@@ -68,6 +68,7 @@ import {
   setPlayerTactic,
   setPlayerTraining,
   setSquadLevels,
+  setSquadNumber,
   setSetPieceTakers,
   setTactics,
   setTraining,
@@ -100,6 +101,7 @@ import {
   PLAYER_DIRECTIVE_KINDS,
   PRESS_STANCES,
   PROMISE_KINDS,
+  SQUAD_NUMBER_MAX,
   RESERVE_TRAINING_POLICIES,
   SQUAD_STATUSES,
   TACKLING_LEVELS,
@@ -144,15 +146,16 @@ const settlingArg = (kind: "talk" | "team_talk") =>
 
 /**
  * 감독이 그 자리에서 한 **약속** — 면담과 다가옴의 응대가 같은 인자를 쓴다
- * (→ docs/data/people.md §5-2). 갈래·기한만 받는다: 무슨 말로 약속했는지는
- * 장면의 것이고 코어는 그것을 들지 않는다. 대상에 맞지 않는 약속은 코어가 반려한다.
+ * (→ docs/data/people.md §5-2). 갈래·기한과, **`number` 갈래만** 번호를 받는다:
+ * 무슨 말로 약속했는지는 장면의 것이고 코어는 그것을 들지 않는다. 대상에 맞지 않는
+ * 약속은 코어가 반려한다.
  */
 const promiseArg = z
   .object({
     kind: z
       .enum(PROMISE_KINDS)
       .describe(
-        "minutes=선발로 쓰겠다 · transfer=내보내 주겠다 · renewal=재계약을 열겠다 · captain=주장을 맡기겠다",
+        "minutes=선발로 쓰겠다 · transfer=내보내 주겠다 · renewal=재계약을 열겠다 · captain=주장을 맡기겠다 · number=그 등번호를 주겠다",
       ),
     days: z
       .number()
@@ -161,6 +164,13 @@ const promiseArg = z
       .max(PROMISE_DAYS_MAX)
       .optional()
       .describe("감독이 못 박은 기한(일). 생략하면 갈래의 기본 기한"),
+    number: z
+      .number()
+      .int()
+      .min(1)
+      .max(SQUAD_NUMBER_MAX)
+      .optional()
+      .describe("kind=number일 때 약속한 등번호 — 번호가 곧 약속이라 그 갈래에는 반드시 넣는다"),
   })
   .optional()
   .describe(
@@ -357,6 +367,21 @@ export function buildGmTools(
         vice: playerRef.nullable().optional().describe("부주장으로 세울 선수 — null이면 지정 해제"),
       }),
       (input) => setCaptain(state, input),
+    ),
+    wrap(
+      "set_squad_number",
+      descriptions.set_squad_number,
+      z.object({
+        playerId: playerRef.describe("번호를 줄 선수"),
+        number: z.number().int().min(1).max(99).describe("등번호 — 1~99"),
+        take: z
+          .boolean()
+          .optional()
+          .describe(
+            "이미 그 번호를 단 동료가 있어도 넘겨받는다 — 뺏긴 선수는 새 번호를 받고 원형에 따라 불만이 선다",
+          ),
+      }),
+      (input) => setSquadNumber(state, input),
     ),
     wrap(
       "set_development_focus",
@@ -641,7 +666,10 @@ export function buildGmTools(
           .int()
           .min(1)
           .max(MONEY_MAX)
-          .describe("이적 예산·주급 한도는 금액(원), 구장은 좌석 수"),
+          .describe("이적 예산·주급 한도·영입 승인은 금액(원), 구장은 좌석 수"),
+        playerId: playerRef
+          .optional()
+          .describe("영입 승인(signing)일 때 그 선수 — 이름 그대로 실어도 된다"),
       }),
       (input) => requestBoard(state, input),
     ),

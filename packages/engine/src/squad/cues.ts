@@ -2,13 +2,18 @@ import type { GamePlayer } from "@story-fm/domain";
 import {
   INTEREST_STAGE_KO,
   isReserveMatch,
+  naturalPositionOf,
   normalizeSpeaker,
+  numberWishOf,
+  pressFactText,
   TRANSFER_REQUEST_REASON_KO,
 } from "@story-fm/domain";
 import { formLabel } from "./form";
 import { isSettling } from "./settling";
+import { openSymbolicNumbers, type NumberLineage } from "./numbers";
 import { diffDays } from "../competition/calendar";
 import { pendingApproach } from "../club/approach";
+import { playerArchetypeOf } from "../world/player-persona";
 import {
   announcedInterestsOn,
   openInjury,
@@ -113,8 +118,40 @@ export function recentSpeakers(state: GameState, turns: number): ReadonlySet<str
   return names;
 }
 
+/**
+ * **비어 있는 상징 번호가 이 선수의 근황인가** (people.md §7 · §6).
+ *
+ * 카드는 **원하는 선수에게** 선다 — 팀에 걸린 사실을 한 사람의 근황 줄에 싣지
+ * 않는다. 원형이 그 번호를 **첫 지망**으로 부를 때만이다: 둘째 지망까지 세우면
+ * 자리에 상징 번호가 셋인 윙어가 공석 하나마다 근황을 갖는다.
+ *
+ * 우상(`idol`)이 고르는 표는 **비어 있는 번호들의 계보를 이은 것**이다 — 그가
+ * 물려받을 수 있는 번호가 지금 그것들뿐이라, 주인이 있는 번호의 계보를 함께 주면
+ * 서지도 못할 번호가 첫 지망이 된다.
+ */
+function openNumberFor(
+  state: GameState,
+  player: GamePlayer,
+  open: readonly NumberLineage[],
+): NumberLineage | null {
+  if (open.length === 0) return null;
+  const wish = numberWishOf(
+    playerArchetypeOf(state.seed, player),
+    { position: naturalPositionOf(player).position, squadNumber: player.squadNumber },
+    open.flatMap((lineage) => lineage.past),
+  );
+  const first = wish?.numbers[0];
+  if (first === undefined) return null;
+  return open.find((lineage) => lineage.number === first) ?? null;
+}
+
 /** 이 선수에게 지금 있는 일 — 없으면 null */
-function factOf(state: GameState, player: GamePlayer, benched: number): string | null {
+function factOf(
+  state: GameState,
+  player: GamePlayer,
+  benched: number,
+  openNumbers: readonly NumberLineage[],
+): string | null {
   /**
    * **이번 시즌 뒤 은퇴** — 맨 앞이다 (people.md §7 · season.md §6). 폼도 명단 제외도
    * 그 사실 위에서 읽히므로, 뒤로 밀면 마지막 시즌을 보내는 선수가 「3경기 명단 제외」로만
@@ -153,6 +190,31 @@ function factOf(state: GameState, player: GamePlayer, benched: number): string |
   if (form >= PEAK) return `폼 ${formLabel(form)}`;
   if (form <= SLUMP) return `폼 ${formLabel(form)}`;
   if (benched >= BENCHED_RUN) return `${benched}경기 연속 명단 제외`;
+  /**
+   * **사실 여덟 중 마지막이다** — 뛰지 못하는 것도 나가겠다는 말도 폼도 지금
+   * 벌어지는 일이고, 비어 있는 번호는 그 밑에 깔린 사정이다.
+   *
+   * 문장은 `pressFactText`가 만든다 — 회견·다가옴과 **같은 카드**라, 두 벌을 두면
+   * 같은 계보가 근황에서와 회견에서 다른 말로 선다 (people.md §7).
+   */
+  const open = openNumberFor(state, player, openNumbers);
+  if (open) {
+    const after = open.past[0];
+    return pressFactText({
+      kind: "number-open",
+      data: {
+        ...(after === undefined ? {} : { name: after.name }),
+        values: {
+          number: open.number,
+          ...(after === undefined
+            ? {}
+            : { seasons: after.seasons, since: state.season - after.lastSeason }),
+        },
+      },
+      about: player.id,
+      sharp: false,
+    });
+  }
   return null;
 }
 
@@ -165,6 +227,12 @@ function factOf(state: GameState, player: GamePlayer, benched: number): string |
 export function speakerCues(state: GameState, limit = 3): SpeakerCue[] {
   const lineups = recentLineups(state, BENCHED_RUN);
   const spoke = recentSpeakers(state, CUE_ROTATION_TURNS);
+  /**
+   * ⚠️ **한 번만 센다.** 계보는 시즌 기록 전체를 훑어 파생하므로, 1군 전원 루프
+   * 안에서 부르면 같은 원장을 사람 수만큼 다시 읽는다 (`recentLineups`·`spoke`와
+   * 같은 이유로 밖에서 선다).
+   */
+  const openNumbers = openSymbolicNumbers(state, state.userTeamId);
   const cues: Array<SpeakerCue & { rank: number }> = [];
 
   /**
@@ -182,7 +250,7 @@ export function speakerCues(state: GameState, limit = 3): SpeakerCue[] {
       if (lineup.has(player.id)) break;
       benched += 1;
     }
-    const fact = factOf(state, player, benched);
+    const fact = factOf(state, player, benched, openNumbers);
     if (fact === null) continue;
     cues.push({
       playerId: player.id,

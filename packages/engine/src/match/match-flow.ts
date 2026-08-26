@@ -405,6 +405,8 @@ function buildPacketFor(
     {
       neutral: match.neutral === true,
       inMatch,
+      // 구간마다 다시 세우므로 지금 스코어가 곧 다음 구간의 노출이다 (match.md §1.4)
+      lead: pending.ledger.score.home - pending.ledger.score.away,
       ...(derby ? { derby: { name: derby.name, heat: derby.heat } } : {}),
     },
   );
@@ -1798,7 +1800,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
          * 얹는 문은 **간이 시뮬과 같은 하나다**(`addToSeasonStat` — match.md §6).
          * 카드는 여기서 세지 않는다: `recordCard`가 지나는 문에서 함께 적힌다.
          */
-        addToSeasonStat(ensureSeasonStat(state, id, player.teamId), {
+        addToSeasonStat(ensureSeasonStat(state, id, player.teamId, player), {
           apps: 1,
           goals: scoredBy,
           assists,

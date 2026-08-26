@@ -242,3 +242,155 @@ export function startShortfall(starts: number, played: number, status: SquadStat
   const need = Math.ceil(SQUAD_STATUS_STARTS[status] * played);
   return Math.max(0, need - starts);
 }
+
+// ── 등번호 — 상징과 뜻 (→ docs/data/player.md §1.1 · people.md §5·§6) ──
+
+/**
+ * 등번호의 아래끝 — 위끝은 `SQUAD_NUMBER_MAX`(player.ts)다. 스키마·스킬·화면이
+ * 같은 두 값을 읽어야 한 곳만 넓혔을 때 다른 곳이 그 번호를 반려하지 않는다.
+ */
+export const SQUAD_NUMBER_MIN = 1;
+
+/**
+ * **상징 번호** — 실제로 뜻이 실린 다섯 (player.md §1.1).
+ *
+ * 번호 전부에 무게를 매기면 34번을 잃은 것과 10번을 잃은 것이 같은 사실이 되고,
+ * 아무도 번호를 두고 다투지 않는다. 다섯인 것은 축구가 그렇게 부르기 때문이다 —
+ * 1은 골문, 7·11은 측면, 9는 최전방, 10은 그 뒤.
+ */
+export const SYMBOLIC_NUMBERS: readonly number[] = [1, 7, 9, 10, 11];
+
+/** 이 번호가 상징인가 — **자리를 묻지 않는다.** 센터백의 9번도 내줄 때는 9번이다 */
+export function isSymbolicNumber(number: number): boolean {
+  return SYMBOLIC_NUMBERS.includes(number);
+}
+
+/**
+ * **그 자리의 상징 번호** — 앞선 것이 첫 지망이다 (player.md §1.1).
+ *
+ * 자리에 맞지 않으면 빈 배열이다: 야심가형 센터백은 10번을 달라고 하지 않는다.
+ * 원형은 세계를 설명하되 가두지 않으므로, 요구가 서지 않는 것이 정상 결과다.
+ */
+export function symbolicNumbersFor(position: string): readonly number[] {
+  const code = position.toUpperCase();
+  if (code === "GK") return [1];
+  if (["ST", "LST", "RST", "CF", "SS", "LF", "RF"].includes(code)) return [9, 10];
+  if (["AM", "CAM", "LAM", "RAM"].includes(code)) return [10, 7, 11];
+  if (["RW", "LW", "RM", "LM"].includes(code)) return [7, 11, 10];
+  return [];
+}
+
+/** 상징이 아닌 번호의 무게 — 잃어도 절반쯤의 일이다 */
+export const NUMBER_PLAIN = 0.6;
+/** 그 번호로 뛴 한 시즌이 애착에 얹는 몫 */
+export const NUMBER_TENURE_STEP = 0.15;
+/** 재적이 애착을 키우는 상한 — 그 위는 서사의 차이가 아니라 숫자의 차이다 */
+export const NUMBER_TENURE_CAP = 4;
+/** 이 점수 위면 불만이 선다 — 굴림이 없다 (people.md §5) */
+export const NUMBER_GRIEVANCE_AT = 1.0;
+
+/**
+ * 등번호를 잃었을 때의 **애착 점수** — 원형 × 번호의 무게 × 재적 (people.md §5).
+ *
+ * 셋을 곱하는 것은 셋 다 있어야 사건이 되기 때문이다: 애착 없는 사람은 10번도
+ * 그냥 옷이고, 애착 있는 사람도 어제 받은 34번은 아무것도 아니다.
+ *
+ * @param attachment 원형의 `number` 계수 (`PLAYER_ARCHETYPE_TRAITS`)
+ * @param seasons 그 번호를 달고 뛴 시즌 수 — 계보(`numberLineageOf`)가 세는 값
+ */
+export function numberAttachmentScore(attachment: number, number: number, seasons: number): number {
+  const weight = isSymbolicNumber(number) ? 1 : NUMBER_PLAIN;
+  const tenure = 1 + NUMBER_TENURE_STEP * Math.min(Math.max(0, seasons), NUMBER_TENURE_CAP);
+  return attachment * weight * tenure;
+}
+
+/** 번호를 잃은 것이 **불만이 되는가** — 문턱 하나, 주사위 없음 */
+export function numberGrievanceStands(
+  attachment: number,
+  number: number,
+  seasons: number,
+): boolean {
+  return numberAttachmentScore(attachment, number, seasons) >= NUMBER_GRIEVANCE_AT;
+}
+
+/**
+ * 그 번호를 **앞서 달던 사람** — 계보 한 줄 (`numberLineageOf`가 채운다).
+ * 도메인이 아는 것은 모양뿐이고, 시즌 기록에서 세우는 것은 엔진의 일이다.
+ */
+export interface NumberLineageEntry {
+  /** 어느 번호의 계보인가 */
+  number: number;
+  playerId: string;
+  name: string;
+  /** 그 번호를 달고 뛴 시즌 수 */
+  seasons: number;
+  /** 마지막으로 그 번호를 달았던 시즌 */
+  lastSeason: number;
+}
+
+/** 선수가 번호에 두는 뜻의 갈래 (people.md §6) */
+export type NumberWishMotive =
+  /** 자리에 맞는 상징 번호를 원한다 — 야심가형 · 저울질하는 스타 */
+  | "symbolic"
+  /** 지금 번호를 지키고 싶다 — 구단 애착형 · 팀 우선 베테랑 */
+  | "keep"
+  /** 우상의 번호를 잇고 싶다 — 불안한 유망주 */
+  | "idol";
+
+export interface NumberWish {
+  motive: NumberWishMotive;
+  /** 원하는 번호 — **앞선 것이 첫 지망**이다 */
+  numbers: readonly number[];
+  /** `idol`이면 그 번호를 앞서 달던 사람 */
+  after?: NumberLineageEntry;
+}
+
+/** 이 원형이 상징 번호를 원하는가 */
+const SYMBOLIC_SEEKERS: readonly string[] = ["ambitious", "weighing_star"];
+/** 이 원형이 지금 번호를 지키려 하는가 */
+const KEEPERS: readonly string[] = ["homegrown_heart", "team_first"];
+/** 우상의 번호를 잇고 싶어 하는 원형 */
+const IDOL_SEEKER = "anxious_prospect";
+
+/**
+ * **원형이 정하는 번호의 뜻** — 순수 규칙, 결정적이다 (people.md §6).
+ *
+ * 페르소나가 (시드, 선수 id)에서 결정적으로 파생하므로 이것도 결정적이다: 같은
+ * 세이브의 같은 선수는 언제 물어도 같은 번호를 원한다. 뜻이 없으면 `null`이고,
+ * **다섯 원형에는 언제나 `null`이다** — 아무나 번호를 부르면 요구가 값을 잃는다.
+ *
+ * @param archetype 선수 원형 코드 (`PlayerArchetypeKey`)
+ * @param player 지금 자리와 지금 번호
+ * @param lineage 그 팀 상징 번호들의 계보 — `idol`이 우상을 고르는 표
+ */
+export function numberWishOf(
+  archetype: string,
+  player: { position: string; squadNumber?: number | undefined },
+  lineage: readonly NumberLineageEntry[] = [],
+): NumberWish | null {
+  if (KEEPERS.includes(archetype)) {
+    // 지킬 번호가 없으면 지킬 뜻도 없다 — 자유계약·미배정 선수
+    return player.squadNumber === undefined
+      ? null
+      : { motive: "keep", numbers: [player.squadNumber] };
+  }
+  const symbolic = symbolicNumbersFor(player.position);
+  if (symbolic.length === 0) return null;
+  if (SYMBOLIC_SEEKERS.includes(archetype)) return { motive: "symbolic", numbers: symbolic };
+  if (archetype === IDOL_SEEKER) {
+    /**
+     * **우상은 계보가 만든다** — 자리의 상징 번호 중 가장 오래 그 셔츠를 지킨 사람의
+     * 번호다. 계보에 아무도 없으면 물려받을 것이 없어 뜻도 서지 않는다.
+     */
+    const idol = lineage
+      .filter((entry) => symbolic.includes(entry.number))
+      .sort(
+        (a, b) =>
+          b.seasons - a.seasons ||
+          b.lastSeason - a.lastSeason ||
+          symbolic.indexOf(a.number) - symbolic.indexOf(b.number),
+      )[0];
+    return idol ? { motive: "idol", numbers: [idol.number], after: idol } : null;
+  }
+  return null;
+}

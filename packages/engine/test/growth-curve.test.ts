@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   AXIS_AGING,
+  AXIS_GROWTH_PER_SEASON,
   FOCUS_BOOST,
   LOAN_APP_BOOST,
   LOAN_APP_BOOST_MAX,
+  MAX_AXES_PER_MONTH,
   RESERVE_APP_BOOST,
   RESERVE_APP_BOOST_MAX,
   ageGrowthFactor,
@@ -15,6 +17,7 @@ import {
   loanAppsBoost,
   loanAppsByPlayer,
   loanLevelFactor,
+  monthlyChance,
   reserveAppsBoost,
   reserveAppsByPlayer,
   rollAxis,
@@ -187,14 +190,56 @@ describe("나이 배율 — 월간·결산이 한 열을 읽는다", () => {
    */
   it("월간 성장의 나이 가중이 결산 배율 그 값이다", () => {
     for (const age of [17, 21, 24, 31]) {
-      expect(growChance(50, age), `${age}`).toBe(Math.min(0.35, ageGrowthFactor(age)));
+      // 여유 50은 포화 끝이라 나이 배율만 남는다
+      expect(growChance(50, age), `${age}`).toBeCloseTo(
+        AXIS_GROWTH_PER_SEASON * ageGrowthFactor(age),
+        1,
+      );
     }
+  });
+
+  /**
+   * **시즌 기대치가 실제 유망주의 눈금에 선다** — 여유가 찬 열아홉의 축 하나가 한
+   * 시즌에 두세 칸. 그 아래면 잠재력은 닿지 않는 천장이고, 그 위면 열여덟이 두 시즌에
+   * 완성된다 (player.md §6.3).
+   */
+  it("여유가 찬 유망주는 한 시즌에 축마다 두세 칸을 기대한다", () => {
+    expect(growChance(50, 19)).toBeGreaterThanOrEqual(2);
+    expect(growChance(50, 19)).toBeLessThanOrEqual(3);
+    // 열여덟은 그보다 조금 빠르고, 스물넷부터는 눈에 띄게 준다
+    expect(growChance(50, 17)).toBeGreaterThan(growChance(50, 19));
+    expect(growChance(50, 25)).toBeLessThan(growChance(50, 19) * 0.7);
   });
 
   it("여유가 없으면 안 자라고, 조금이라도 있으면 완전히 멎지는 않는다", () => {
     expect(growChance(0, 18)).toBe(0);
     expect(growChance(1, 40)).toBeGreaterThan(0);
-    expect(growChance(50, 18)).toBeLessThanOrEqual(0.35);
+  });
+
+  /**
+   * **여유에 포화한다** — 세기는 여유에 비례해 오르되 한 시즌이 담을 양에 천장이 있다
+   * (`1 − e^(−여유/눈금)`). 여유 30인 열여섯이 여유 12인 스물보다 세 배 빨리 크지는 않는다.
+   */
+  it("여유에 비례해 오르되 포화한다 — 두 배 여유가 두 배 속도는 아니다", () => {
+    expect(growChance(6, 19)).toBeGreaterThan(growChance(3, 19));
+    expect(growChance(12, 19)).toBeGreaterThan(growChance(6, 19));
+    expect(growChance(24, 19)).toBeGreaterThan(growChance(12, 19));
+    // 오목하다 — 앞 구간의 증가가 뒤 구간보다 크다
+    expect(growChance(12, 19) - growChance(6, 19)).toBeGreaterThan(
+      growChance(24, 19) - growChance(12, 19),
+    );
+    expect(growChance(24, 19)).toBeLessThan(growChance(12, 19) * 1.5);
+  });
+
+  /**
+   * **월 확률은 시즌 세기의 푸아송 분할이다** — `1 − e^(−λ/12)`. 세기가 작으면 λ/12와
+   * 같고, 세기가 아무리 커도 1을 넘지 않는다 — 자르는 상수가 필요 없다.
+   */
+  it("월 확률 — 작은 세기에서는 12분의 1, 큰 세기에서도 1 아래", () => {
+    expect(monthlyChance(0)).toBe(0);
+    expect(monthlyChance(0.12)).toBeCloseTo(0.12 / 12, 3);
+    expect(monthlyChance(100)).toBeLessThan(1);
+    expect(monthlyChance(12)).toBeCloseTo(1 - Math.exp(-1));
   });
 
   /**
@@ -206,8 +251,12 @@ describe("나이 배율 — 월간·결산이 한 열을 읽는다", () => {
    */
   it("직업의식은 유망주에게도 갈린다 — 상한이 계수를 삼키지 않는다", () => {
     const [lazy, diligent] = [0.85, 1.25];
-    /** 난수를 고정값으로 훑어 **확률의 폭**을 센다 — 통과하는 눈금 수가 곧 확률이다 */
-    const ROLLS = Array.from({ length: 2000 }, (_, i) => i / 20_000);
+    /**
+     * 난수를 고정값으로 훑어 **확률의 폭**을 센다 — 통과하는 눈금 수가 곧 확률이다.
+     * 격자는 [0, 1)을 통째로 덮어야 한다: 좁게 깔면 월 확률이 그 위로 올라간 순간
+     * 세 팔이 전부 만점을 받아 계수가 보이지 않는다.
+     */
+    const ROLLS = Array.from({ length: 2000 }, (_, i) => i / 2000);
     const stepsAt = (age: number, value: number, professionalism: number) =>
       ROLLS.filter((r) => rollAxis("pace", age, value, 80, () => r, 1, professionalism) !== 0)
         .length;
@@ -251,7 +300,7 @@ describe("월간 성장 판정", () => {
   });
 
   it("하락은 곡선의 기대치를 열두 달에 나눠 담는다 — 깊은 곡선일수록 자주 떨어진다", () => {
-    // −1(1/12)은 못 넘고 −2(2/12)는 넘는 난수
+    // −1(1 − e^(−1/12) ≈ 0.08)은 못 넘고 −2(≈ 0.15)는 넘는 난수
     const between = () => 0.12;
     expect(rollAxis("pace", 29, 70, 90, between), "−1 곡선이 문턱을 넘었다").toBe(0);
     expect(rollAxis("pace", 30, 70, 90, between), "−2 곡선이 문턱에 못 미쳤다").toBe(-1);
@@ -310,19 +359,22 @@ describe("월간 축 선택", () => {
     }
   });
 
-  it("한 달에 두 축까지만 움직인다", () => {
+  it("한 달에 상한까지만 움직인다 — 종합이 한 달에 반 칸 넘게 뛰지 않는다", () => {
     for (let seed = 1; seed <= 300; seed++) {
-      expect(rollMonthlyAxes(input(seed, 37)).length, `시드 ${seed}`).toBeLessThanOrEqual(2);
+      expect(
+        rollMonthlyAxes(input(seed, 17), ATTRIBUTE_AXES).length,
+        `시드 ${seed}`,
+      ).toBeLessThanOrEqual(MAX_AXES_PER_MONTH);
     }
   });
 
   it("목록 뒤쪽 축이 굶지 않는다 — 같은 곡선이면 뽑히는 빈도가 같아야 한다", () => {
-    // 서른일곱이면 여러 축이 한 달에 동시에 움직이려 해 상한(2축)이 자주 걸린다 —
+    // 여유가 찬 열일곱은 여러 축이 한 달에 동시에 움직이려 해 상한이 걸린다 —
     // 순서로 자르던 시절 뒤쪽 축이 굶던 자리가 여기다. 같은 곡선을 쓰는 축끼리는
     // 확률이 같으므로 뽑힌 횟수도 같아야 한다(목록에서 strength는 앞, goalkeeping은 끝).
     const picks = new Map<AttributeAxis, number>(ATTRIBUTE_AXES.map((a) => [a, 0]));
     for (let seed = 1; seed <= 8000; seed++) {
-      for (const { axis } of rollMonthlyAxes(input(seed, 37))) {
+      for (const { axis } of rollMonthlyAxes({ ...input(seed, 17), boost: 3 })) {
         picks.set(axis, (picks.get(axis) ?? 0) + 1);
       }
     }
@@ -399,17 +451,29 @@ describe("개인 훈련 축이 월간 성장의 축 선택에 닿는다", () => 
 });
 
 describe("2군 출전·집중 육성 배율 (season.md §2 2군 리그)", () => {
-  it("출전 배율 — 0경기는 1, 경기당 +0.3, 상한 1.6", () => {
+  it("출전 배율 — 0경기는 1, 경기당 한 눈금, 격주 일정을 다 뛰면 상한에 찬다", () => {
     expect(reserveAppsBoost(0)).toBe(1);
-    expect(reserveAppsBoost(1)).toBeCloseTo(1.3);
-    expect(reserveAppsBoost(2)).toBeCloseTo(1.6);
-    expect(reserveAppsBoost(9)).toBeCloseTo(1.6);
+    expect(reserveAppsBoost(1)).toBeCloseTo(1 + RESERVE_APP_BOOST);
+    expect(reserveAppsBoost(2)).toBeCloseTo(RESERVE_APP_BOOST_MAX);
+    expect(reserveAppsBoost(9)).toBeCloseTo(RESERVE_APP_BOOST_MAX);
+  });
+
+  /**
+   * **배율을 다 곱해도 결산 경로와 같은 자릿수다** — 열여덟이 출전·집중 육성을 다 받은
+   * 시즌 기대가 축당 서너 칸. 그 위면 1군 승격이 손해가 되고, 그 아래면 2군이 배경 시뮬로
+   * 돌아간다 (season.md §2).
+   */
+  it("출전과 집중 육성을 다 받은 열여덟의 시즌 기대는 축당 3.5~5칸이다", () => {
+    const full = growChance(50, 18) * RESERVE_APP_BOOST_MAX * FOCUS_BOOST;
+    expect(full).toBeGreaterThanOrEqual(3.5);
+    expect(full).toBeLessThanOrEqual(5);
   });
 
   it("배율은 성장 확률에만 곱한다 — 문턱 사이의 난수가 배율로만 넘어간다", () => {
-    // passing은 25세에 노화 곡선이 +1(늦게까지 성장)이라 성장 확률이 그대로 선다
-    const monthly = growChance(12, 25) / 12;
-    const rng = () => monthly * 1.2; // 기본 문턱과 ×1.5 문턱 사이
+    // passing은 25세에 늦게 크는 축(×1.15)이다 — 그 문턱과 ×1.5 배율 문턱 사이의 난수
+    const base = monthlyChance(growChance(25, 25) * 1.15);
+    const boosted = monthlyChance(growChance(25, 25) * 1.15 * 1.5);
+    const rng = () => (base + boosted) / 2;
     expect(rollAxis("passing", 25, 60, 85, rng)).toBe(0);
     expect(rollAxis("passing", 25, 60, 85, rng, 1.5)).toBe(1);
   });
@@ -528,13 +592,13 @@ describe("임대 성장 (season.md §2 임대)", () => {
     return `${prev.y}-${String(prev.m).padStart(2, "0")}-${String(index + 2).padStart(2, "0")}`;
   }
 
-  it("출전 배율 — 0경기는 1, 경기당 +0.3×계수, 상한 2.4", () => {
+  it("출전 배율 — 0경기는 1, 경기당 한 눈금×계수, 상한에서 멎는다", () => {
     expect(loanAppsBoost(0, 1)).toBe(1);
-    expect(loanAppsBoost(1, 1)).toBeCloseTo(1.3);
-    expect(loanAppsBoost(4, 1)).toBeCloseTo(2.2);
-    expect(loanAppsBoost(9, 1)).toBeCloseTo(LOAN_APP_BOOST_MAX);
+    expect(loanAppsBoost(1, 1)).toBeCloseTo(1 + LOAN_APP_BOOST);
+    expect(loanAppsBoost(4, 1)).toBeCloseTo(1 + LOAN_APP_BOOST * 4);
+    expect(loanAppsBoost(20, 1)).toBeCloseTo(LOAN_APP_BOOST_MAX);
     // 수준 계수는 경기 수에 곱해진다 — 2부에서 네 경기는 1부 네 경기보다 덜 얹힌다
-    expect(loanAppsBoost(4, 0.85)).toBeCloseTo(2.02);
+    expect(loanAppsBoost(4, 0.85)).toBeCloseTo(1 + LOAN_APP_BOOST * 4 * 0.85);
   });
 
   it("눈금이 2군과 같은 자 위에 있다 — 증분은 같고 꼭대기만 다르다", () => {

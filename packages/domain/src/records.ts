@@ -1,7 +1,13 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
 import { MATCH_MINUTE_MAX } from "./match";
-import { AXIS_KO, RetirementReasonSchema, type AttributeAxis, type PositionGroup } from "./player";
+import {
+  AXIS_KO,
+  RetirementReasonSchema,
+  SQUAD_NUMBER_MAX,
+  type AttributeAxis,
+  type PositionGroup,
+} from "./player";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 import { SQUAD_STATUSES } from "./squad-rules";
 
@@ -518,6 +524,12 @@ export const NegotiationRoundSchema = z.object({
    * 구 세이브엔 없어 optional.
    */
   squadStatus: z.enum(SQUAD_STATUSES).optional(),
+  /**
+   * 이 오퍼에서 **선수가 요구하는 등번호** — 합의되면 도착하는 날 그 번호가 배정된다
+   * (transfer.md §3 · people.md §6). 원형이 번호에 뜻을 두는 선수만 채운다:
+   * 아무나 번호를 부르면 요구가 값을 잃는다. 구 세이브엔 없어 optional.
+   */
+  squadNumber: z.number().int().min(1).max(SQUAD_NUMBER_MAX).optional(),
 });
 /**
  * 메디컬 — **합의와 계약 사이에 놓인 하루.**
@@ -750,6 +762,16 @@ export const SeasonStatSchema = z.object({
   /** 경고·퇴장 — `BOOKING`이 원본이고 합계는 `recordCard`가 함께 적는다 */
   yellows: z.number().int().min(0).optional(),
   reds: z.number().int().min(0).optional(),
+  /**
+   * 그 시즌 그 셔츠의 **등번호** — 번호 계보(`numberLineageOf`)가 읽는 유일한 원본이다
+   * (player.md §1.1).
+   *
+   * `GamePlayer.squadNumber`는 **지금** 번호라 지난 시즌 누가 10번이었는지를 모른다.
+   * 그것을 아는 표가 없으면 "누구 뒤를 잇는가"가 세계에 설 자리가 없다.
+   * `ensureSeasonStat`가 부를 때마다 지금 번호로 덮어쓴다 — 시즌 중에 바뀌면
+   * 마지막 번호가 그 시즌의 번호다. 구 세이브엔 없어 optional.
+   */
+  squadNumber: z.number().int().min(1).max(SQUAD_NUMBER_MAX).optional(),
 });
 export type SeasonStat = z.infer<typeof SeasonStatSchema>;
 
@@ -983,6 +1005,11 @@ export const PLAYER_ISSUE_REASONS = [
   "out-of-position",
   /** 감독이 한 약속의 기한이 지났는데 장부가 이행을 못 찾았다 — 약속은 `state.promises` */
   "promise",
+  /**
+   * 감독이 그의 등번호를 동료에게 넘겼다 — 날이 아니라 **한 번의 결정**이 세운다
+   * (`blocked-move`와 같은 축). `count`가 그가 잃은 번호다 (people.md §5).
+   */
+  "number",
 ] as const;
 export type PlayerIssueReason = (typeof PLAYER_ISSUE_REASONS)[number];
 
@@ -992,7 +1019,8 @@ export const PlayerIssueSchema = z.object({
   reason: z.enum(PLAYER_ISSUE_REASONS).optional(),
   /**
    * 사유에 딸린 수치 — `losing-run`이면 연패 수, `out-of-position`이면 연속 경기 수,
-   * `minutes`면 그 지위에 **모자란 선발 수**다 (people.md §5).
+   * `minutes`면 그 지위에 **모자란 선발 수**, `number`면 **그가 잃은 번호**다
+   * (people.md §5).
    */
   count: z.number().int().min(1).optional(),
   /** 옛 세이브가 들고 있는 사유 문장 — 더는 쓰지 않는다 (`reason`의 폴백) */
@@ -1008,7 +1036,7 @@ export type PlayerIssue = z.infer<typeof PlayerIssueSchema>;
  * 무슨 말로 약속했는지는 장면의 것이다. 코어가 드는 것은 갈래·기한·상태뿐이고,
  * 이행 판정도 전부 장부에서 나온다 — 어느 자리에서도 문장을 읽지 않는다.
  */
-export const PROMISE_KINDS = ["minutes", "transfer", "renewal", "captain"] as const;
+export const PROMISE_KINDS = ["minutes", "transfer", "renewal", "captain", "number"] as const;
 export type PromiseKind = (typeof PROMISE_KINDS)[number];
 
 export const PROMISE_KIND_KO: Record<PromiseKind, string> = {
@@ -1016,6 +1044,7 @@ export const PROMISE_KIND_KO: Record<PromiseKind, string> = {
   transfer: "이적 허용",
   renewal: "재계약",
   captain: "주장",
+  number: "등번호",
 };
 
 /**
@@ -1031,6 +1060,14 @@ export const ManagerPromiseSchema = z.object({
   dueOn: DateString,
   /** `open` = 아직 기한 전. 판정이 끝나면 이력으로 남는다 */
   status: z.enum(["open", "kept", "broken"]),
+  /**
+   * **`number` 약속만 든다** — 어느 번호를 주기로 했는가 (people.md §5-2).
+   *
+   * 다른 넷은 갈래가 곧 약속이라 장부에 숫자가 설 자리가 없지만, "다음 시즌엔
+   * 10번"은 **번호가 곧 약속의 내용**이라 이것 없이는 이행을 판정할 자가 없다.
+   * 옛 세이브엔 없다(optional) — `number` 갈래 자체가 그때는 없었다.
+   */
+  number: z.number().int().min(1).max(SQUAD_NUMBER_MAX).optional(),
 });
 export type ManagerPromise = z.infer<typeof ManagerPromiseSchema>;
 
@@ -1315,6 +1352,28 @@ export const TeamFinanceSchema = z.object({
    * 옛 세이브엔 없다 (optional — 세이브 버전 유지).
    */
   wageLift: z.object({ amount: z.number().min(0), until: DateString }).optional(),
+  /**
+   * **건별 영입 승인분** — 보드가 `request_board`의 `signing`으로 내준 몫
+   * (finance.md §9.6).
+   *
+   * `transferBudget`에 얹지 **않는** 것이 이 축의 정체다: 승인은 이름 하나에 대한
+   * 것이라 그 선수의 딜에만 쓰이고, 딜이 확정되는 날 오늘 나갈 만큼이 예산으로
+   * 옮겨 앉으며 남은 몫은 그 자리에서 사라진다. 만료가 없으면 그것은 허가가 아니라
+   * 예산이다. 감독의 구단에만 선다.
+   * 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+   */
+  earmarked: z
+    .array(
+      z.object({
+        /** 이 몫을 세운 요청 (`BOARD_REQUEST.id`) — 되짚을 자리가 여기뿐이다 */
+        requestId: z.string().min(1),
+        gamePlayerId: z.string().min(1),
+        amount: z.number().min(0),
+        /** 허가의 기한 — 지나면 tick이 줄을 지운다 */
+        until: DateString,
+      }),
+    )
+    .optional(),
   /**
    * **파라슈트 페이먼트** — 강등 클럽이 떠나온 리그에서 받는 낙하산.
    *

@@ -6,7 +6,7 @@ import type {
   ReserveTrainingPolicy,
 } from "@story-fm/domain";
 import { ATTRIBUTE_AXES, ageOf, isReserveMatch, RATING_MAX } from "@story-fm/domain";
-import { ageGrowthFactor, agingDelta } from "../world/attributes";
+import { ageGrowthFactor, agingDelta, axisClockFactor } from "../world/attributes";
 import { archetypeTraitsOf } from "../world/player-persona";
 import { makeRng } from "../core/rng";
 import { isTopLeague, leagueCatalogById } from "../data/league-catalog";
@@ -42,35 +42,52 @@ import {
 
 /** 시즌 기대 변화량을 월 확률로 환산하는 나눗수 — 12개월에 나눠 담는다 */
 const MONTHS_PER_SEASON = 12;
-/** 한 달에 한 선수가 움직일 수 있는 축 수 — 몰아서 변하면 "조금씩"이 아니다 */
-const MAX_AXES_PER_MONTH = 2;
-/** 잠재력 여유가 이만큼이면 성장 확률이 최대가 된다 */
-const ROOM_FULL = 12;
-/** 성장 확률의 상한·하한 — 여유가 없어도 아주 가끔은 는다 */
+/**
+ * 한 달에 한 선수가 움직일 수 있는 축 수 — 몰아서 변하면 "조금씩"이 아니다.
+ * 여유가 찬 열여덟은 한 달에 넉 대여섯 축이 기대치라 이 상한은 난간이다 — 종합이
+ * 한 달에 반 칸 넘게 뛰지 않는다.
+ */
+export const MAX_AXES_PER_MONTH = 8;
+/**
+ * 잠재력 여유가 성장 세기로 포화하는 눈금 — `1 − e^(−여유/눈금)`.
+ *
+ * 성장은 남은 여유에 비례하되 한 시즌이 담을 수 있는 양에는 천장이 있다 — 여유 30인
+ * 열여섯이 여유 12인 스물보다 세 배 빨리 크지는 않는다. 그 모양이 포화 지수다: 여유
+ * 8에서 천장의 63%, 12에서 78%, 24에서 95%.
+ */
+const ROOM_SCALE = 8;
 /** 능력치가 내려갈 수 있는 바닥 — 0은 "값이 없다"로 읽히므로 쓰지 않는다 */
 const ATTRIBUTE_FLOOR = 1;
 
-/** 이미 노화 곡선이 꺾인 축이 그래도 오를 확률의 배율 */
-const DECLINING_AXIS_GROWTH = 0.6;
-
-const GROW_MIN = 0.02;
-const GROW_MAX = 0.35;
+/**
+ * 여유가 찬 축 하나가 한 시즌에 기대하는 칸 수의 천장 (나이 배율 1 = 열아홉·스물) — ⚠️ 밸런스 값.
+ *
+ * 열여섯 축이 저마다 이만큼 오르면 종합도 그만큼 오른다. 실제 유망주의 종합은 열일곱에서
+ * 스물셋까지 해마다 2~4칸씩 자라 잠재력 대역(player.md §6.5 — 열여덟의 간격 상한 28)을
+ * 스물일곱 언저리에 닿는다. 여기가 그보다 낮으면 잠재력은 닿지 않는 천장이 되고,
+ * 노화는 실제 눈금으로 깎이므로 리그가 해마다 늙는다(0.25면 세 시즌에 EPL 1군이 −1).
+ * 그보다 높으면 세계가 해마다 자란다(2.4면 세 시즌에 +0.6) — 두 값 사이에서 실제
+ * 유망주의 눈금 쪽에 둔다. 우리 2군의 배율(아래)까지 다 곱해도 결산 판정을 부지런히
+ * 받는 1군 유망주(판정마다 한 칸 · 시즌 +3~4)와 같은 자릿수에 선다 — 2군은 자라는
+ * 곳이고, 뛰는 곳은 1군이다.
+ */
+export const AXIS_GROWTH_PER_SEASON = 2.6;
 
 // ── 감독의 육성 손잡이 (season.md §2 2군 리그) ──────────────────────
 // 배율은 **성장 쪽에만** 붙는다 — 노화 하락은 출전과 무관하다. 감독이 다 걸어도
-// 1.6 × 1.5 = 2.4이고, 그 위에 사람됨(원형 `professionalism` 0.85~1.25 —
-// people.md §6)이 한 항으로 더 붙어 꼭대기가 3.0(시즌 기대 1.05칸/축)이 된다.
-// 그 자리에 서려면 셋이 다 맞아야 한다: 격주 2군 일정을 만근하고, 집중 육성 셋
-// 안에 들고, 표 꼭대기의 직업의식을 타고났을 것. 축을 겨냥하는 손잡이(방침 ·
-// 개인 훈련)는 얼마나 빨리가 아니라 어느 쪽으로를 정하므로 총량 이동이고,
-// 원본은 `training-plan.ts`다.
+// 1.3 × 1.25 ≈ 1.6이고, 그 위에 사람됨(원형 `professionalism` 0.85~1.25 —
+// people.md §6)이 한 항으로 더 붙어 꼭대기가 2.0이 된다. 그 자리에 서려면 셋이 다
+// 맞아야 한다: 격주 2군 일정을 만근하고, 집중 육성 셋 안에 들고, 표 꼭대기의
+// 직업의식을 타고났을 것 — 열여덟이면 시즌 기대가 축당 여섯 칸으로, 실제 원더키드가
+// 한 해에 자라는 폭이다. 축을 겨냥하는 손잡이(방침 · 개인 훈련)는 얼마나 빨리가
+// 아니라 어느 쪽으로를 정하므로 총량 이동이고, 원본은 `training-plan.ts`다.
 
 /** 지난달 2군 출전 한 경기가 성장 확률에 얹는 배율 증분 */
-export const RESERVE_APP_BOOST = 0.3;
+export const RESERVE_APP_BOOST = 0.15;
 /** 출전 배율 상한 — 격주 일정(월 2경기)을 다 뛰면 찬다 */
-export const RESERVE_APP_BOOST_MAX = 1.6;
+export const RESERVE_APP_BOOST_MAX = 1.3;
 /** 집중 육성 배율 — `set_development_focus`가 지정한 유망주 */
-export const FOCUS_BOOST = 1.5;
+export const FOCUS_BOOST = 1.25;
 /** 집중 육성 인원 상한 — 코치진의 눈이 닿는 수 */
 export const DEVELOPMENT_FOCUS_LIMIT = 3;
 
@@ -156,12 +173,12 @@ export function loanAppsByPlayer(state: GameState): Map<string, number> {
 // ── 임대 배율 (season.md §2 임대 — 2군과 1군 사이의 길) ──────────────
 // 눈금은 2군과 **같은 자** 위에 있다: 출전 한 경기가 `RESERVE_APP_BOOST`와 같은
 // 값이고 상한만 다르다. 2군은 격주 일정이라 월 2경기가 만근이고 1군 일정은 월
-// 4~5경기라, 같은 리그에서 매주 뛰면 우리 2군의 출전×집중 육성 꼭대기(2.4)에 닿는다.
+// 4~5경기라, 같은 리그에서 매주 뛰면 우리 2군의 출전×집중 육성 꼭대기에 닿는다.
 
 /** 지난달 임대처 1군 출전 한 경기가 성장 확률에 얹는 배율 증분 */
-export const LOAN_APP_BOOST = 0.3;
+export const LOAN_APP_BOOST = RESERVE_APP_BOOST;
 /** 임대 출전 배율 상한 — 우리 2군의 출전 만근 × 집중 육성과 같은 꼭대기 */
-export const LOAN_APP_BOOST_MAX = 2.4;
+export const LOAN_APP_BOOST_MAX = RESERVE_APP_BOOST_MAX * FOCUS_BOOST;
 /** 리그 계수(UEFA 어림 순위) 한 칸이 임대처 수준 계수에 얹는 몫 */
 export const LOAN_LEAGUE_STEP = 0.05;
 /** 2부 임대의 배율 — 리그전을 돌지 않는 컵 전용 리그 (`isTopLeague`가 false) */
@@ -204,27 +221,35 @@ export function developsByCore(state: GameState, player: GamePlayer): boolean {
 }
 
 /**
- * 성장 쪽 확률 (시즌 기대치 — 월 확률은 이 값을 열두 달로 나눈다).
- * 잠재력 여유가 클수록, 어릴수록 높다. 나이 배율은 결산 경로와 같은 한 열에서 온다
- * (`ageGrowthFactor` — player.md §6.3). 노화 곡선이 이미 꺾인 축(음수)은
- * 여기 들어오지 않는다.
+ * 성장 쪽 시즌 세기 — **한 축이 한 시즌에 오르는 칸 수의 기대치**. 월 확률은 이
+ * 세기를 열두 달로 나눈 푸아송 분할(`monthlyChance`)이다. 잠재력 여유에 포화 지수로
+ * 붙고 어릴수록 높다. 나이 배율은 결산 경로와 같은 한 열에서 온다(`ageGrowthFactor` —
+ * player.md §6.3). 노화 곡선이 이미 꺾인 축(음수)은 여기 들어오지 않는다.
  *
- * ⚠️ **사람됨은 여기 곱하지 않는다.** `GROW_MAX`가 여유 6 이상인 U21을 이미 전부
- * 0.35에 붙여 놓아서, 대역 안에서 곱한 계수는 **유망주에게만 통째로 먹힌다** —
- * 원형이 성장을 가른다는 말이 정작 자라는 나이에서만 거짓이 된다. 직업의식은
- * 감독의 손잡이와 같은 자리, 즉 대역 **밖**에서 곱한다 (`rollAxis`).
+ * ⚠️ **사람됨은 여기 곱하지 않는다** — 감독의 손잡이(출전·집중 육성)와 같은 자리,
+ * 곧 `rollAxis`에서 곱한다. 여유와 나이가 정하는 것은 그 선수가 자랄 수 있는 폭이고,
+ * 직업의식은 그 폭을 얼마나 쓰는가다.
  */
 export function growChance(room: number, age: number): number {
   if (room <= 0) return 0;
-  const byRoom = Math.min(1, room / ROOM_FULL);
-  return Math.max(GROW_MIN, Math.min(GROW_MAX, byRoom * ageGrowthFactor(age)));
+  const byRoom = 1 - Math.exp(-room / ROOM_SCALE);
+  return AXIS_GROWTH_PER_SEASON * byRoom * ageGrowthFactor(age);
+}
+
+/**
+ * 시즌 세기 λ를 한 달로 나눈 확률 — **푸아송 과정의 달 분할** `1 − e^(−λ/12)`.
+ * λ/12를 그대로 확률로 쓰면 세기가 커질 때 1을 넘고 자르는 상수가 필요해진다;
+ * 이 꼴은 어떤 세기에도 1 아래이고 작은 세기에서는 λ/12와 같다.
+ */
+export function monthlyChance(seasonRate: number): number {
+  return 1 - Math.exp(-Math.max(0, seasonRate) / MONTHS_PER_SEASON);
 }
 
 /**
  * 이번 달 이 선수가 실제로 움직이는 축 — 최대 `MAX_AXES_PER_MONTH`개.
  *
  * **축은 목록 순서가 아니라 시드가 고른다.** 16축이 저마다 제 난수 채널을 받고,
- * 움직인 축 중 시드가 정한 순서로 둘까지 반영한다. 앞에서부터 굴리다 둘이 차면
+ * 움직인 축 중 시드가 정한 순서로 상한까지 반영한다. 앞에서부터 굴리다 상한이 차면
  * 멈추는 방식은 `ATTRIBUTE_AXES` 앞쪽(pace·stamina)만 키우고 뒤쪽(leadership·
  * goalkeeping)을 구조적으로 굳힌다 — `axes`를 어떤 순서로 넘겨도 결과가 같아야 한다.
  */
@@ -369,13 +394,12 @@ export function rollAxis(
   // 꺾이는 축 — 시즌 기대치를 열두 달에 나눠 담는다
   if (bias < 0) {
     if (value <= ATTRIBUTE_FLOOR) return 0;
-    return rng() < Math.abs(bias) / MONTHS_PER_SEASON ? -1 : 0;
+    return rng() < monthlyChance(Math.abs(bias)) ? -1 : 0;
   }
 
-  // 자라는 축 — 잠재력이 천장이다. 노화 곡선이 미는 축은 조금 더 잘 자란다
+  // 자라는 축 — 잠재력이 천장이다. 늦게까지 크는 축은 결산과 같은 시계로 조금 더 자란다
   const room = potential - value;
   if (room <= 0) return 0;
-  const chance =
-    growChance(room, age) * (bias > 0 ? 1 : DECLINING_AXIS_GROWTH) * boost * professionalism;
-  return rng() < chance / MONTHS_PER_SEASON ? 1 : 0;
+  const rate = growChance(room, age) * axisClockFactor(axis, age) * boost * professionalism;
+  return rng() < monthlyChance(rate) ? 1 : 0;
 }

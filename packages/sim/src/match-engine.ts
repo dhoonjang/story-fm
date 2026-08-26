@@ -173,10 +173,14 @@ const MAX_SEGMENT_EVENTS = 15;
 /**
  * 경기당 기대 카드 수 — 양팀 합. **카드 빈도의 단일 손잡이다.**
  *
+ * 실제 1부의 경고는 2023년 여름의 판정 지침(항의·시간 끌기) 뒤로 경기당 4.1~4.2장이다
+ * (2022-23 3.6 · 2023-24 4.2 · 2024-25 4.1). 이 값은 카드 **사건**이라 경고에 곧장
+ * 퇴장(`STRAIGHT_RED_CHANCE`)이 섞여 있다.
+ *
  * 간이 시뮬(`engine/quick-sim.ts`)도 이 값에서 나온다 — 두 시뮬레이터가 다른
  * 눈금을 가지면 "우리 팀만 카드를 받는다"가 된다 (부상의 `INJURY_PER_MATCH`와 같은 이유).
  */
-export const CARDS_PER_MATCH = 3.4;
+export const CARDS_PER_MATCH = 4;
 /**
  * 경기당 기대 부상 건수 — 양팀 합. **부상 빈도의 단일 손잡이다.**
  *
@@ -425,7 +429,7 @@ function pickAssister(
  * 뒀을 땐 두 번째 경고까지 겹쳐 **경기당 0.43회**가 나왔다 — 두 경기에 한 번씩
  * 누가 나가는 리그다. 간이 시뮬도 이 값을 함께 쓴다 (`engine/quick-sim.ts`).
  */
-export const STRAIGHT_RED_CHANCE = 0.03;
+export const STRAIGHT_RED_CHANCE = 0.02;
 
 /**
  * 이미 경고를 받은 선수가 또 받을 상대 가중.
@@ -434,7 +438,7 @@ export const STRAIGHT_RED_CHANCE = 0.03;
  * 보정이 없으면 열한 명에게 카드가 고르게 흩어져 **두 번째 경고가 우연히 자주**
  * 나온다(경기당 0.24회 — 실제의 세 배).
  */
-export const BOOKED_AGAIN_WEIGHT = 0.35;
+export const BOOKED_AGAIN_WEIGHT = 0.22;
 
 /**
  * 카드를 받을 상대 가중 — 적극성이 높고 태클이 약한 선수가 자주 받는다.

@@ -17,6 +17,7 @@ export const SKILL_LABEL: Record<string, string> = {
   set_lineup: "라인업",
   set_squad_level: "1·2군 이동",
   set_captain: "완장 지정",
+  set_squad_number: "등번호",
   set_development_focus: "집중 육성",
   set_reserve_training: "2군 훈련 방침",
   set_tactics: "팀 전술 변경",

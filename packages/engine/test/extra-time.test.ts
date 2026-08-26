@@ -630,7 +630,8 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
     const state = extraTimeWorld().state;
     /** 120분 무승부로 끝나 승부차기 정지점에 선 컵 경기 하나 — 갈린 경기는 닫고 넘어간다 */
     const stageShootout = (): MatchRecord => {
-      for (let pair = 600; pair < 640; pair++) {
+      // 120분 무승부는 대여섯 판에 하나라 넉넉히 훑는다 — 첫 무승부에서 멈춘다
+      for (let pair = 600; pair < 760; pair++) {
         for (const teamId of ["arsenal", "chelsea"]) {
           for (const p of playersOf(state, teamId)) p.state.condition = 100;
         }
