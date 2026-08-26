@@ -13,7 +13,9 @@ import {
   contractUntil,
   counterHeadroom,
   counterManagerOffer,
+  KNOCK_BOARD_HIT,
   KNOCK_SALARY_RATE,
+  LOYALTY_BOARD_LIFT,
   applyTrainingOutcomes,
   askingPriceFor,
   assignmentsOf,
@@ -1669,5 +1671,127 @@ describe("사재는 문턱을 넘어야 세계에 보인다", () => {
     // 카드는 보너스만으로도 선다 — 인원이 함께 실린다
     const fact = fundingFactOf(state);
     expect(fact?.data?.values?.players).toBe(MANAGER_WALLET.BONUS_PLAYERS_PER_SEASON);
+  });
+});
+
+/**
+ * **재직 중 접근·노크** (career.md §5.1) — 계약을 남기고 떠나는 길이다.
+ *
+ * 여기서 재는 것은 셋이다: 보상금이 **구단과 구단 사이에서만** 움직이는 경계
+ * (§7 — 지갑은 감독의 것이다), 부름을 흘려보낸 값, 그리고 재직 중 노크의 대가.
+ * 문턱과 확률은 `pnpm balance manager-market`이 잰다.
+ */
+describe("재직 중에도 다른 구단이 손을 뻗는다", () => {
+  /** tier 3 감독 — 위가 열려 있는 자리여야 부를 구단이 있다 */
+  const inPost = (reputation: number): GameState => {
+    const state = createTestGame(7, "brentford");
+    // 부임 유예(`GRACE_DAYS`)를 지난 자리 — 갓 앉은 벤치는 부르지 않는다
+    state.date = addDays(state.calendar.preseasonStart, 120);
+    state.manager.reputation.board = reputation;
+    state.manager.reputation.media = reputation;
+    return state;
+  };
+
+  /** 확률의 문만 남기고 하루씩 민다 — 같은 시드·같은 날이면 같은 답이다 */
+  function poachUntilOffered(state: GameState, teamId: string, days = 180): ManagerOffer | null {
+    for (let i = 0; i < days; i++) {
+      if (offerVacancy(state, teamId, 3, [])) return openManagerOffers(state)[0] ?? null;
+      state.date = addDays(state.date, 1);
+    }
+    return null;
+  }
+
+  it("등급과 평판이 문이다 — 낮은 등급도, 문턱 아래 평판도 부르지 않는다", () => {
+    // tier 4는 우리(tier 3)보다 아래다 — 내려가는 이직은 세계가 먼저 부르지 않는다
+    expect(poachUntilOffered(inPost(90), "coventry", 60), "아래 등급이 불렀다").toBeNull();
+    // tier 1의 문턱은 70 + 여유라 90에서도 열리고 40에서는 닫힌다
+    expect(poachUntilOffered(inPost(40), "napoli", 60), "문턱 아래인데 불렀다").toBeNull();
+  });
+
+  it("보상금은 두 구단 원장 사이에서만 움직인다 — 감독의 지갑은 그대로다", () => {
+    const state = inPost(70);
+    const from = state.userTeamId;
+    const contract = { ...state.manager.contract! };
+    const wallet = state.manager.wallet ?? 0;
+
+    const offer = poachUntilOffered(state, "napoli");
+    expect(offer, "문턱을 다 넘었는데 한 번도 부르지 않았다").not.toBeNull();
+    expect(offer!.via).toBe("poach");
+    // 금액은 **부를 때** 잰다 — 경질 위약금과 같은 식이다
+    expect(offer!.compensation).toBe(managerSeveranceOf(contract, offer!.madeOn));
+    const compensation = offer!.compensation!;
+    expect(compensation, "잔여가 남은 계약인데 보상금이 0이다").toBeGreaterThan(0);
+
+    const took = acceptManagerOffer(state, offer!.id);
+    expect(took.ok, "message" in took ? took.message : undefined).toBe(true);
+    expect(state.userTeamId).toBe("napoli");
+    expect(state.manager.wallet ?? 0, "보상금이 감독의 지갑을 지났다").toBe(wallet);
+
+    const got = financeOf(state, from).ledger.filter((e) => e.category === "manager_compensation");
+    expect(got, "보상금이 옛 구단 원장에 서지 않았다").toHaveLength(1);
+    expect(got[0]!.amount).toBe(compensation);
+    const paid = financeOf(state, "napoli").ledger.filter((e) => e.category === "severance");
+    expect(paid, "무는 쪽 원장이 비어 있다").toHaveLength(1);
+    expect(paid[0]!.amount).toBe(compensation);
+
+    // 무직을 거치지 않는 유일한 갈래다 — 카드는 그 자리에서 이력으로 간다
+    expect(state.dismissal, "이적이 감독을 무직으로 만들었다").toBeUndefined();
+    const card = state.dismissals!.at(-1)!;
+    expect(card.kind).toBe("moved");
+    expect(card.teamId).toBe(from);
+    expect(card.severance, "카드가 든 위약금이 보상금과 다르다").toBe(compensation);
+
+    // 옛 구단은 그날로 후임을 세우고, 감독 자신은 무직 풀에 앉지 않는다
+    const old = state.teams.find((t) => t.id === from)!;
+    expect(old.managerName).not.toBe(state.manager.name);
+    expect(
+      (state.managerPool ?? []).some((e) => e.name === state.manager.name),
+      "감독이 무직 풀에 앉아 세계에 둘이 됐다",
+    ).toBe(false);
+  });
+
+  it("답 없이 지나간 접근은 보드 평판을 올린다 — 자기가 두드린 자리는 아니다", () => {
+    const state = inPost(70);
+    const offer = poachUntilOffered(state, "napoli");
+    expect(offer).not.toBeNull();
+
+    const before = state.manager.reputation.board;
+    state.date = addDays(offer!.expiresOn, 1);
+    runManagerMarket(state, []);
+    expect(offer!.status).toBe("expired");
+    expect(state.manager.reputation.board, "흘려보낸 부름이 보드에 닿지 않았다").toBe(
+      before + LOYALTY_BOARD_LIFT,
+    );
+
+    // 감독이 두드려 선 제안은 남은 것이 아니다 — 만료에 값이 붙지 않는다
+    const knock = {
+      ...offer!,
+      id: "mgr-offer-knock",
+      via: "knock" as const,
+      status: "open" as const,
+    };
+    state.managerOffers = [...(state.managerOffers ?? []), knock];
+    const held = state.manager.reputation.board;
+    state.date = addDays(knock.expiresOn, 1);
+    runManagerMarket(state, []);
+    expect(knock.status).toBe("expired");
+    expect(state.manager.reputation.board, "두드려 놓고 안 간 것이 충성이 됐다").toBe(held);
+  });
+
+  it("재직 중 노크는 자리를 열고 그 값을 보드에 남긴다", () => {
+    const state = inPost(70);
+    state.managerVacancies = [{ teamId: "fulham", on: state.date, position: 18 }];
+    const before = state.manager.reputation.board;
+
+    const knocked = applyForManagerJob(state, "fulham");
+    expect(knocked.ok, "message" in knocked ? knocked.message : undefined).toBe(true);
+    expect(pendingInterview(state)?.teamId, "면접 자리가 서지 않았다").toBe("fulham");
+    expect(state.manager.reputation.board, "재직 중 노크가 공짜였다").toBe(
+      before - KNOCK_BOARD_HIT,
+    );
+
+    // 같은 임기에 같은 문을 두 번 두드릴 수는 없다
+    const again = applyForManagerJob(state, "fulham");
+    expect(again.ok).toBe(false);
   });
 });

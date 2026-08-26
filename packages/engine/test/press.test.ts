@@ -823,6 +823,74 @@ describe("기자회견 — 문턱을 넘은 사재는 창 안의 자리가 싣�
   });
 });
 
+/**
+ * **재직 중인 감독의 거취도 사실이다** (career.md §5.1 · people.md §4) — 여기서 재는
+ * 것은 두 갈래가 갈리는 자리와 노크의 창이다. 문턱과 대가는 감독 시장이 갖는다
+ * (`manager-market.test.ts`).
+ */
+describe("기자회견 — 재직 중인 감독의 거취", () => {
+  it("열린 접근이 먼저 서고, 노크는 이레가 지나면 내려간다", () => {
+    const state = newGame();
+    const league = leagueOfTeamIn(state, state.userTeamId);
+    const other = state.teams.find(
+      (t) => t.id !== state.userTeamId && leagueOfTeamIn(state, t.id) === league,
+    )!;
+
+    // 두드린 자리 하나 — 재직 중에 선 면접만 `state.approaches`에 남는다
+    state.approaches = [
+      {
+        id: "approach-interview-test",
+        date: state.date,
+        channel: "owner",
+        topic: "interview",
+        speakerId: "누군가",
+        about: null,
+        teamId: other.id,
+        facts: [{ kind: "vacancy", data: { values: { days: 1 } }, about: null, sharp: true }],
+        step: 3,
+        status: "pending",
+      },
+    ];
+    const knocked = fakeConference({ id: "press-knock", weight: 1 });
+    openPress(state, knocked);
+    const knock = knocked.facts.find((f) => f.kind === "job-link");
+    expect(knock, "재직 중 노크가 회견에 서지 않았다").toBeDefined();
+    expect(knock!.sharp).toBe(true);
+    expect(knock!.data?.tags?.[0]).toBe("knock");
+    expect(knocked.weight).toBeGreaterThanOrEqual(2);
+
+    /**
+     * **열린 접근이 먼저다** — 지금 답을 기다리는 제안이 지난주에 두드린 것보다
+     * 무거운 사실이라, 둘이 함께 서 있어도 카드는 한 장이고 그쪽이다.
+     */
+    state.managerOffers = [
+      {
+        id: "mgr-poach-test",
+        teamId: other.id,
+        madeOn: state.date,
+        expiresOn: addDays(state.date, 10),
+        tier: tierOfTeamIn(state, other.id),
+        target: 6,
+        via: "poach",
+        status: "open",
+      },
+    ];
+    const called = fakeConference({ id: "press-poach", weight: 1 });
+    openPress(state, called);
+    expect(called.facts.find((f) => f.kind === "job-link")?.data?.tags?.[0]).toBe("approach");
+
+    // 제안이 닫히고 노크의 창도 지나면 남는 사실이 없다
+    state.managerOffers[0]!.status = "expired";
+    state.date = addDays(state.date, 8);
+    const gone = fakeConference({ id: "press-gone", weight: 1 });
+    openPress(state, gone);
+    expect(
+      gone.facts.some((f) => f.kind === "job-link"),
+      "창이 지난 노크가 회견에 남았다",
+    ).toBe(false);
+  });
+});
+
 describe("기자회견 — 전야", () => {
   /** 우리 리그 경기 — 컵도 대항전도 친선도 아닌 것 */
   function leagueMatches(state: GameState): MatchRecord[] {

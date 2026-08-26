@@ -1481,6 +1481,7 @@ export const FINANCE_INCOME_CATEGORIES = [
   "prize",
   "transfer_in",
   "manager_buyout",
+  "manager_compensation",
 ] as const;
 
 export const FINANCE_EXPENSE_CATEGORIES = [
@@ -1517,6 +1518,11 @@ export const FINANCE_CATEGORY_KO: Record<FinanceCategory, string> = {
   transfer_in: "이적료 수입",
   /** 감독이 계약을 물고 나간 돈 — 구단이 무는 `severance`의 반대편 (career.md §5.4) */
   manager_buyout: "감독 사임 위약금",
+  /**
+   * 재직 중인 감독을 데려간 구단이 문 돈 — **구단이 구단에 무는 돈**이라 감독의
+   * 지갑을 지나지 않는다 (career.md §5.1). 무는 쪽은 `severance`로 선다.
+   */
+  manager_compensation: "감독 이적 보상금",
   player_wages: "선수 주급",
   staff_wages: "스태프 급여",
   bonus: "성적 보너스",
@@ -1527,7 +1533,10 @@ export const FINANCE_CATEGORY_KO: Record<FinanceCategory, string> = {
   transfer_out: "이적료 지출",
   /** 감독이 읽는 이름 — `이적료 지출`(한 번에 나간 현금)과 이름만으로 갈린다 */
   amortisation: "이적료 분할 비용",
-  /** 경질 위약금 — 급여가 아니라 일회성 지출이라 인건비 축과 갈린다 (career.md §5.4) */
+  /**
+   * 감독 계약이 부르는 일회성 지출 — 경질 위약금(§5.4)과 재직 감독을 데려오며 무는
+   * 이적 보상금(§5.1). 급여가 아니라 인건비 축과 갈린다 (career.md).
+   */
   severance: "감독 위약금",
   /** 자산을 산 현금 — 손익 밖이다. 선수 쪽의 `transfer_out`과 같은 자리 */
   capex: "구장·시설 투자",

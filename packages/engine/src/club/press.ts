@@ -944,6 +944,70 @@ function renewalCode(contract: ManagerContract): string {
   return contract.renewalOffered ? "renewal" : "no-renewal";
 }
 
+// ── 감독의 거취가 밖으로 향했다 (career.md §5.1) ───────
+
+/**
+ * **노크가 뉴스로 사는 날 수** — 두드린 그날부터 이레.
+ *
+ * 노크는 자리를 남기지 않고 지나가는 사실이라 창이 필요하고(사재의 창과 같은 결 —
+ * `manager-fund`), 접근은 **제안이 열려 있는 동안** 서 있는 사실이라 창이 없다.
+ */
+const JOB_LINK_PRESS_DAYS = 7;
+
+/**
+ * 감독의 거취가 밖으로 향한 사실 한 장 — 없으면 `null` (career.md §5.1).
+ *
+ * **열린 접근이 먼저다.** 지금 답을 기다리는 제안이 있는 것이 지난주에 두드린 것보다
+ * 무거운 사실이고, 기자가 먼저 묻는 것도 그쪽이다. 카드가 드는 것은 갈래와 구단
+ * 하나뿐 — 감독이 무슨 생각으로 두드렸는지는 카드가 아는 사실이 아니다.
+ */
+function jobLinkFactOf(state: GameState): PressFact | null {
+  const card = (code: "approach" | "knock", teamId: string): PressFact => ({
+    kind: "job-link",
+    data: { name: teamNameIn(state, teamId), refId: teamId, tags: [code] },
+    about: null,
+    // 감독의 자리를 두고 묻는 자리다 — 날 서지 않으면 기자가 물을 이유가 없다
+    sharp: true,
+  });
+
+  const approach = (state.managerOffers ?? []).find(
+    (o) => o.via === "poach" && o.status === "open" && o.expiresOn >= state.date,
+  );
+  if (approach) return card("approach", approach.teamId);
+
+  /**
+   * 재직 중에 선 면접만 남는다 — 부임이 `state.approaches`를 비우므로(career.md §5.1)
+   * 여기 남아 있는 면접은 지금 임기에 감독이 두드려 연 자리뿐이다.
+   */
+  const knock = (state.approaches ?? [])
+    .filter(
+      (a) =>
+        a.topic === "interview" &&
+        a.teamId !== undefined &&
+        diffDays(a.date, state.date) >= 0 &&
+        diffDays(a.date, state.date) <= JOB_LINK_PRESS_DAYS,
+    )
+    .reduce<{ date: string; teamId?: string } | null>(
+      (latest, a) => (latest === null || a.date > latest.date ? a : latest),
+      null,
+    );
+  return knock?.teamId === undefined ? null : card("knock", knock.teamId);
+}
+
+/**
+ * **재직 중인 감독의 거취도 사실이다** (career.md §5.1 · people.md §4).
+ *
+ * 무직이면 서지 않는다 — 무직 감독은 회견에 서지 않고, 그에게 거취는 사실이 아니라
+ * 상태다.
+ */
+function loadJobLink(state: GameState, conference: PressConference): void {
+  if (state.dismissal) return;
+  const fact = jobLinkFactOf(state);
+  if (!fact) return;
+  conference.facts.push(fact);
+  conference.weight = Math.max(conference.weight, 2);
+}
+
 // ── 라이벌의 경질 (people.md §4) ───────────────────────
 
 /**
@@ -1691,6 +1755,7 @@ export function openPress(state: GameState, conference: PressConference, digest?
   loadSackings(state, conference);
   loadManagerContract(state, conference);
   loadManagerFund(state, conference);
+  loadJobLink(state, conference);
   state.pressConferences.push(conference);
   // 지나간 회견은 서사에 남지 상태로 쌓일 이유가 없다
   if (state.pressConferences.length > KEPT_CONFERENCES) {
