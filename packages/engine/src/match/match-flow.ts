@@ -1736,6 +1736,12 @@ export function finalizeMatch(state: GameState): MatchDigest {
    */
   const friendly = isFriendly(match);
   /**
+   * 시즌 행이 얹히는 **대회** — 행의 넷째 열쇠다 (game-state.md §3.4). 널이면
+   * 친선이라 장부에 닿지 않는다: `!friendly`와 같은 물음이되 이쪽은 타입에서도
+   * 널이 사라져, 대회를 빠뜨린 자리를 컴파일이 먼저 잡는다.
+   */
+  const competitionId = match.competitionId;
+  /**
    * **경기가 실제로 가져간 만큼 깎는다** (`pendingMatch.matchFatigue`).
    *
    * 출전자 전원에게 상수를 물리면 90분 뛴 윙백과 85분에 들어간 교체 선수와
@@ -1793,7 +1799,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
           conceded,
           outcome: result,
         });
-      if (!friendly) {
+      if (competitionId !== null) {
         /**
          * **문턱은 스탯을 얹기 전의 수로 센다** (match.md §6). 나중에 원장을 훑어
          * 세면 "언제 넘었나"가 사라져 회견도 여운도 그 경기에 매달 수 없다.
@@ -1814,7 +1820,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
          * 얹는 문은 **간이 시뮬과 같은 하나다**(`addToSeasonStat` — match.md §6).
          * 카드는 여기서 세지 않는다: `recordCard`가 지나는 문에서 함께 적힌다.
          */
-        addToSeasonStat(ensureSeasonStat(state, id, player.teamId, player), {
+        addToSeasonStat(ensureSeasonStat(state, id, player.teamId, competitionId, player), {
           apps: 1,
           goals: scoredBy,
           assists,

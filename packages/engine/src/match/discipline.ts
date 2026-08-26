@@ -92,7 +92,7 @@ export function recordCard(
    * 받는다: 장부에 남는 모양과 같다.
    */
   addToSeasonStat(
-    ensureSeasonStat(state, input.playerId, player.teamId, player),
+    ensureSeasonStat(state, input.playerId, player.teamId, competitionId, player),
     input.card === "yellow" ? { yellows: 1 } : { reds: 1 },
   );
 

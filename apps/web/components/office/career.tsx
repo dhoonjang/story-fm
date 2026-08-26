@@ -596,7 +596,8 @@ export function CareerView({
           <div className="achv" key={i}>
             <div>{awardTitle(a.code)}</div>
             <div className="desc">
-              시즌 {a.season} · {a.leagueName} — {a.playerName} ({a.teamName}) · {awardDetailOf(a)}
+              시즌 {a.season} · {a.competitionName} — {a.playerName} ({a.teamName}) ·{" "}
+              {awardDetailOf(a)}
             </div>
           </div>
         ))}

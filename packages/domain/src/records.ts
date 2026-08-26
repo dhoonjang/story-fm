@@ -11,7 +11,7 @@ import {
 } from "./player";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 import { SQUAD_STATUSES } from "./squad-rules";
-import { stageDepth, type MatchStage } from "./schedule";
+import { RESERVE_COMPETITION_PREFIX, stageDepth, type MatchStage } from "./schedule";
 import {
   TACTIC_SCALE_MAX,
   TACTIC_SCALE_MIN,
@@ -968,6 +968,17 @@ export const SeasonStatSchema = z.object({
   season: z.number().int(),
   /** 그 시즌 소속 — 시즌 중 이적하면 팀별로 row가 분리된다 */
   teamId: z.string().min(1),
+  /**
+   * **어느 대회의 기록인가** — 행의 네 번째 열쇠다 (→ docs/data/game-state.md §3.4).
+   * 리그·컵·대항전이 저마다 행을 갖고, 2군 리그는 그 대회 id(`reserve:<리그>`)의
+   * 행에 `reserve*` 칸으로 쌓인다. 축이 없으면 "리그 12경기 3골"을 말할 자리가 없다.
+   *
+   * ⚠️ **없으면 옛 세이브의 행이다** — 그 한 행이 그 시즌 전 대회의 합계다. 더하는
+   * 쪽은 그대로 세고(`sumSeasonStats` — 합이 맞는다), 대회를 묻는 쪽은 그 팀이 속한
+   * 리그의 행으로 읽는다(옛 규칙 그대로 — docs/simulation/season.md §6).
+   * SAVE_VERSION 유지.
+   */
+  competitionId: z.string().min(1).optional(),
   apps: z.number().int().min(0),
   goals: z.number().int().min(0),
   /** 도움 — 골 이벤트의 actors[1]. 구 세이브엔 없어 optional (SAVE_VERSION 유지) */
@@ -1086,6 +1097,81 @@ export function addToSeasonStat(stat: SeasonStat, delta: Partial<SeasonStatDelta
 }
 
 /**
+ * 대회 행 여럿을 **한 행처럼 접는다** — 시즌 합계는 저장하지 않고 여기서 나온다
+ * (→ docs/data/game-state.md §5 파생). 행이 없으면 null: 0으로 채운 행과 "기록
+ * 없음"은 다르다.
+ *
+ * ⚠️ **낸 행은 읽기 전용이고 `competitionId`는 뜻이 없다.** 쌓는 자리는 언제나
+ * `ensureSeasonStat` 하나이므로 여기서 낸 행에 값을 얹으면 다음 파생에서 사라지고,
+ * 행이 하나뿐이면 **그 행을 그대로 낸다**(합계를 새로 짓지 않는다) — 그때는 그 한
+ * 대회의 축이 그대로 실려 온다. 합계에서 대회를 묻지 말 것.
+ *
+ * 등번호·이름은 **마지막으로 적힌 행의 것**이다. 시즌 중에 바뀌면 마지막 값이 그
+ * 시즌의 값이라는 `ensureSeasonStat`의 규약을 대회 행 여럿에서도 그대로 잇는다.
+ */
+export function sumSeasonStats(rows: readonly SeasonStat[]): SeasonStat | null {
+  const first = rows[0];
+  if (first === undefined) return null;
+  if (rows.length === 1) return first;
+  const total: SeasonStat = {
+    gamePlayerId: first.gamePlayerId,
+    season: first.season,
+    teamId: first.teamId,
+    apps: 0,
+    goals: 0,
+  };
+  for (const row of rows) {
+    addToSeasonStat(total, {
+      apps: row.apps,
+      goals: row.goals,
+      assists: row.assists,
+      ratingSum: row.ratingSum,
+      minutes: row.minutes,
+      shots: row.shots,
+      xg: row.xg,
+      saves: row.saves,
+      cleanSheets: row.cleanSheets,
+      yellows: row.yellows,
+      reds: row.reds,
+    });
+    if (row.reserveApps) total.reserveApps = (total.reserveApps ?? 0) + row.reserveApps;
+    if (row.reserveGoals) total.reserveGoals = (total.reserveGoals ?? 0) + row.reserveGoals;
+    if (row.reserveAssists) total.reserveAssists = (total.reserveAssists ?? 0) + row.reserveAssists;
+    if (row.reserveRatingSum)
+      total.reserveRatingSum = (total.reserveRatingSum ?? 0) + row.reserveRatingSum;
+    if (row.squadNumber !== undefined) total.squadNumber = row.squadNumber;
+    if (row.playerName !== undefined) total.playerName = row.playerName;
+  }
+  return total;
+}
+
+/** 대회 행 하나 — 어느 대회인지 아는 행만 이 꼴로 선다 */
+export type CompetitionSeasonStat = SeasonStat & { competitionId: string };
+
+/**
+ * 행 묶음에서 **대회별로 세울 수 있는 1군 줄만** 골라 정렬한다 — 많이 뛴 대회부터,
+ * 같으면 대회 id 사전순 (→ docs/data/game-state.md §3.4).
+ *
+ * 선수 카드(GM)와 스쿼드 상세(화면)가 이 한 함수를 지난다 — 두 벌로 두면 채팅에서
+ * 듣는 대회별 줄과 표의 줄이 다른 규칙으로 서고 갈린다.
+ *
+ * ⚠️ **세 종류의 행이 빠진다.** 출전 0인 행("0경기 0골"은 줄이 아니다), 2군 리그
+ * 행(1군의 줄이 아니다 — `reserve*` 칸은 시즌 합계가 따로 낸다), 그리고 **옛
+ * 세이브의 축 없는 행**이다: 어느 대회의 것인지 모르는 행에 대회 이름을 붙이면
+ * 없는 사실이 된다. 그래서 옛 세이브에는 이 줄이 서지 않고 시즌 합계만 남는다.
+ */
+export function competitionRowsOf(rows: readonly SeasonStat[]): CompetitionSeasonStat[] {
+  return rows
+    .filter(
+      (s): s is CompetitionSeasonStat =>
+        s.apps > 0 &&
+        s.competitionId !== undefined &&
+        !s.competitionId.startsWith(RESERVE_COMPETITION_PREFIX),
+    )
+    .sort((a, b) => b.apps - a.apps || (a.competitionId < b.competitionId ? -1 : 1));
+}
+
+/**
  * 시즌 평균 평점 — 출전이 없으면 null(0.0과 "기록 없음"은 다르다).
  * 경기당 평점은 engine/match/ratings.ts가 장부 사실로 결정적으로 매긴다.
  */
@@ -1135,6 +1221,49 @@ export const RED_CARD_POINTS = 3;
 /** 징계 점수 — 경고 1점 · 퇴장 `RED_CARD_POINTS`점 (competition.md §2) */
 export function disciplinePoints(stat: Pick<SeasonStat, "yellows" | "reds">): number {
   return (stat.yellows ?? 0) + (stat.reds ?? 0) * RED_CARD_POINTS;
+}
+
+// ── 그 경기의 최우수 선수 ──────────────────────────────
+/** 한 경기가 남긴 그 선수의 값 — MOTM 사슬이 보는 전부다 */
+export interface MotmCandidate {
+  id: string;
+  /** 평점이 없으면 후보가 아니다 (`motmOf`가 먼저 거른다) */
+  rating: number | null;
+  goals: number;
+  assists: number;
+  /** 출전 분 — 모르는 자리는 전원 0을 주면 이 칸에서 갈리지 않는다 */
+  minutes: number;
+}
+
+/**
+ * 그 경기 최우수 선수의 **동점 사슬** — 평점 ↓ → 골 ↓ → 도움 ↓ → 출전 분 ↓ →
+ * `id` 사전순 ↑. 앞선 쪽이 음수다.
+ *
+ * 경기 리포트의 MOTM(engine/views `motmOf`)과 대회의 **결승 MOM** 시상
+ * (engine/competition/season.ts — season.md §6)이 이 한 사슬을 쓴다. 두 벌로 두면
+ * 같은 결승의 최우수 선수가 화면과 시상에서 다른 사람이 된다.
+ *
+ * 마지막 칸이 id인 것은 뜻이 아니라 결정성을 위한 것이다 — 네 칸까지 같은 두 선수가
+ * 화면을 열 때마다 번갈아 뽑히면 그건 판정이 아니다.
+ */
+export function compareMotm(a: MotmCandidate, b: MotmCandidate): number {
+  return (
+    (b.rating ?? 0) - (a.rating ?? 0) ||
+    b.goals - a.goals ||
+    b.assists - a.assists ||
+    b.minutes - a.minutes ||
+    a.id.localeCompare(b.id)
+  );
+}
+
+/** 사슬로 한 명을 고른다 — 평점이 없는 사람은 후보가 아니다 */
+export function pickMotm<T extends MotmCandidate>(players: readonly T[]): T | null {
+  let best: T | null = null;
+  for (const p of players) {
+    if (p.rating === null) continue;
+    if (!best || compareMotm(p, best) < 0) best = p;
+  }
+  return best;
 }
 
 // ── 마일스톤 ──────────────────────────────────────────
@@ -2282,22 +2411,32 @@ export type Achievement = z.infer<typeof AchievementSchema>;
 
 // ── 시상 ──────────────────────────────────────────────
 /**
- * 리그 시상 코드 — **세이브에 남는 것은 이 코드와 근거 수치뿐이다**
+ * 시상 코드 — **세이브에 남는 것은 이 코드와 근거 수치뿐이다**
  * (overview.md §1 철칙 4 · `AchievementCode`와 같은 규약).
  *
  * 표시명("올해의 선수")도 평가 문장("빛나는 시즌이었다")도 적지 않는다. 이름은
  * `awardTitle`이 코드에서 만들고, 문장은 GM(장면)과 화면(커리어 표)이 쓴다.
  * 선정과 동점 처리 규칙은 simulation/season.md §6이 원본이다.
+ *
+ * ⚠️ **대회마다 코드를 늘리지 않는다.** 「UCL 득점왕」도 코드는 `top-scorer`이고
+ * 어느 대회의 상인지는 `SeasonAward.competitionId`가 갖는다 — 코드를 늘리면
+ * 화면·프롬프트·커리어 표가 저마다 표를 하나씩 더 들고, 새 컵이 서는 날 그 넷이
+ * 같이 늘어난다.
  */
 export const SEASON_AWARD_CODES = [
-  /** 그 리그 소속 선수의 시즌 최다 득점 */
+  /** 그 대회 최다 득점 — 리그에도 컵·대항전에도 선다 */
   "top-scorer",
-  /** 최다 도움 */
+  /** 최다 도움 — 리그의 상이다 */
   "top-assister",
-  /** 출전 문턱을 넘은 선수 중 시즌 평점 1위 */
+  /** 출전 문턱을 넘은 선수 중 시즌 평점 1위 — 리그의 상이다 */
   "player-of-season",
-  /** 같은 눈금, 시즌 종료일 기준 `YOUNG_PLAYER_MAX_AGE`세 이하 */
+  /** 같은 눈금, 시즌 종료일 기준 `YOUNG_PLAYER_MAX_AGE`세 이하 — 리그의 상이다 */
   "young-player",
+  /**
+   * 그 대회 **결승 한 경기**의 평점 1위 — 컵·대항전의 상이다.
+   * 근거 수치도 그 경기의 것이라 `apps`는 언제나 1이다 (season.md §6).
+   */
+  "final-motm",
 ] as const;
 export type SeasonAwardCode = (typeof SEASON_AWARD_CODES)[number];
 
@@ -2310,6 +2449,7 @@ const SEASON_AWARD_TITLES: Record<string, string> = {
   "top-assister": "도움왕",
   "player-of-season": "올해의 선수",
   "young-player": "영플레이어",
+  "final-motm": "결승 MOM",
 };
 
 export function awardTitle(code: string): string {
@@ -2325,12 +2465,18 @@ export function awardTitle(code: string): string {
 export const SeasonAwardSchema = z.object({
   code: z.string().min(1),
   season: z.number().int(),
-  /** 어느 리그의 상인가 — 그해 그 선수가 뛴 리그 */
-  leagueId: z.string().min(1),
+  /**
+   * **어느 대회의 상인가** — 리그 id 또는 컵·대항전 id. 코드가 아니라 이 칸이
+   * 「UCL 득점왕」과 「리그 득점왕」을 가른다 (season.md §6).
+   *
+   * 옛 세이브는 이 칸을 `leagueId`로 갖고 있었고 로드 마이그레이션이 이름을
+   * 옮긴다(`migrateAwardCompetition` — SAVE_VERSION 유지).
+   */
+  competitionId: z.string().min(1),
   gamePlayerId: z.string().min(1),
   /** 그때의 이름 */
   playerName: z.string().min(1),
-  /** 그 리그에서 가장 많이 뛴 팀 */
+  /** 그 대회에서 가장 많이 뛴 팀 */
   teamId: z.string().min(1),
   /** 근거 수치 — 어느 칸을 채우는가는 코드가 정한다 */
   apps: z.number().int().nonnegative(),

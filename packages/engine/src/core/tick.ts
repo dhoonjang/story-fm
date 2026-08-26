@@ -1450,6 +1450,18 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
     // 친선은 어느 대회에도 속하지 않는다 — 몸에 남는 것만 정산하고 장부는 건너뛴다
     const friendly = isFriendly(match);
     /**
+     * 시즌 행이 얹히는 **대회** — 행의 넷째 열쇠다 (game-state.md §3.4). `!friendly`와
+     * 같은 물음이되 이쪽은 타입에서도 널이 사라진다.
+     */
+    const competitionId = match.competitionId;
+    /**
+     * **결승만은 경기별 평점을 남긴다** (match.md §6 · season.md §6). 간이 시뮬은
+     * 평점을 시즌 합계에만 쌓지만, 남의 팀끼리 치른 결승에 대회의 결승 MOM을 매길
+     * 재료는 그 한 경기의 평점뿐이다. 한 시즌에 대회 수만큼이라 장부가 붇지 않는다.
+     */
+    const finalRatings: Record<string, number> | null =
+      competitionId !== null && match.stage === "final" ? {} : null;
+    /**
      * 실제로 그라운드를 밟은 선수 — 교체 투입까지 (스카우팅 지식의 원본이다).
      * 출전 기록·평점·폼·피로·부상·성향이 전부 이 **한 목록**에 걸린다. 하나라도
      * 선발로 좁히면 로테이션 자원만 그 눈금 밖에 남는다.
@@ -1525,12 +1537,13 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
           conceded,
           outcome,
         });
+        if (finalRatings) finalRatings[p.id] = rating;
         // 친선은 시즌 기록에 남지 않는다 — 평점은 폼을 움직이는 데만 쓰인다
-        if (!friendly) {
+        if (competitionId !== null) {
           const line = playerStats[p.id];
           const minutes = minutesIn(side, p.id);
           // 얹는 문은 **구간 시뮬과 같은 하나다**(match.md §6). 카드는 `recordCard`가 센다
-          addToSeasonStat(ensureSeasonStat(state, p.id, teamId, p), {
+          addToSeasonStat(ensureSeasonStat(state, p.id, teamId, competitionId, p), {
             apps: 1,
             goals,
             assists,
@@ -1565,6 +1578,8 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
         derby?.heat ?? 0,
       );
     }
+    // 결승의 평점은 두 팀을 다 센 뒤에 한 번 적는다 — 결승 MOM이 읽을 유일한 재료다
+    if (finalRatings && match.result) match.result = { ...match.result, ratings: finalRatings };
     /**
      * 피로 — **뛴 시간만큼, 그리고 자리와 전술이 정한 만큼.**
      *
@@ -1705,6 +1720,12 @@ function reserveXI(state: GameState, teamId: string): GamePlayer[] {
 const RESERVE_MATCH_MINUTES = 90;
 
 export function simulateReserveMatch(state: GameState, match: MatchRecord, digest: string[]): void {
+  /**
+   * 2군 리그의 대회 id — 편성이 언제나 붙여 주지만(`reserveCompetitionId`), 없으면
+   * 얹을 행이 없다. 축 없는 행에 2군 기록을 섞으면 그 행이 무엇의 합인지 사라진다.
+   */
+  const reserveCompetitionId = match.competitionId;
+  if (reserveCompetitionId === null) return;
   const squads = {
     home: simSquadFor(state, match.homeTeamId, reserveXI(state, match.homeTeamId)),
     away: simSquadFor(state, match.awayTeamId, reserveXI(state, match.awayTeamId)),
@@ -1774,7 +1795,8 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
       p.state.sharpness = clampSharpness(
         sharpnessAfterMinutes(sharpnessOf(p.state), RESERVE_MATCH_MINUTES),
       );
-      const stat = ensureSeasonStat(state, p.id, teamId, p);
+      // 2군 리그도 제 대회 id를 갖는다(`reserve:<리그>`) — 1군 행과 섞이지 않는다
+      const stat = ensureSeasonStat(state, p.id, teamId, reserveCompetitionId, p);
       stat.reserveApps = (stat.reserveApps ?? 0) + 1;
       if (goals > 0) stat.reserveGoals = (stat.reserveGoals ?? 0) + goals;
       if (assists > 0) stat.reserveAssists = (stat.reserveAssists ?? 0) + assists;

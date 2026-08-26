@@ -145,24 +145,26 @@ export function numberLineageOf(state: GameState, teamId: string, number: number
   const holderPlayer =
     state.players.find((p) => p.teamId === teamId && p.squadNumber === number) ?? null;
 
-  const worn = new Map<string, { seasons: number; lastSeason: number }>();
+  /**
+   * ⚠️ **행이 아니라 시즌을 센다** — 원장 행은 대회별로 갈려 있어(game-state.md §3.4)
+   * 행을 세면 리그·컵을 함께 뛴 한 시즌이 "두 시즌 달았다"가 된다.
+   */
+  const worn = new Map<string, Set<number>>();
   for (const stat of state.seasonStats) {
     if (stat.teamId !== teamId || stat.squadNumber !== number) continue;
     const before = worn.get(stat.gamePlayerId);
-    worn.set(stat.gamePlayerId, {
-      seasons: (before?.seasons ?? 0) + 1,
-      lastSeason: Math.max(before?.lastSeason ?? 0, stat.season),
-    });
+    if (before) before.add(stat.season);
+    else worn.set(stat.gamePlayerId, new Set([stat.season]));
   }
 
   const past = [...worn.entries()]
     .filter(([playerId]) => playerId !== holderPlayer?.id)
-    .map(([playerId, read]): NumberLineageEntry => ({
+    .map(([playerId, seasons]): NumberLineageEntry => ({
       number,
       playerId,
       name: nameOf(state, playerId),
-      seasons: read.seasons,
-      lastSeason: read.lastSeason,
+      seasons: seasons.size,
+      lastSeason: Math.max(...seasons),
     }))
     // 최근이 먼저 — 같은 시즌이면 오래 단 쪽이, 그래도 같으면 id로 갈라 결정적이다
     .sort(
@@ -177,7 +179,7 @@ export function numberLineageOf(state: GameState, teamId: string, number: number
       ? {
           playerId: holderPlayer.id,
           name: holderPlayer.name,
-          seasons: worn.get(holderPlayer.id)?.seasons ?? 0,
+          seasons: worn.get(holderPlayer.id)?.size ?? 0,
         }
       : null,
     past,

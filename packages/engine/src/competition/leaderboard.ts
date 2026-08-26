@@ -26,11 +26,11 @@ export const MIN_LEADER_TALLY = 1;
 /** 한 표에 세우는 줄 수 — FM의 리더보드와 같은 열 길이다 */
 export const LEADERBOARD_LIMIT = 10;
 
-/** 한 리그 안에서 합산된 한 선수의 시즌 기록 — 개인 순위와 시상이 견주는 유일한 재료 */
+/** 한 대회 안에서 합산된 한 선수의 시즌 기록 — 개인 순위와 시상이 견주는 유일한 재료 */
 export interface LeagueTally {
   gamePlayerId: string;
   playerName: string;
-  /** 그 리그에서 가장 많이 뛴 팀 (동률이면 팀 id 사전순) */
+  /** 그 대회에서 가장 많이 뛴 팀 (동률이면 팀 id 사전순) */
   teamId: string;
   apps: number;
   goals: number;
@@ -122,17 +122,29 @@ export function pickWinner(
   return sortByChain(candidates, order)[0] ?? null;
 }
 
-/** 한 리그의 시즌 기록을 선수별로 합산한다 — 시즌 중 이적하면 행이 팀별로 갈린다 */
-export function talliesOfLeague(state: GameState, leagueId: string, onDate: string): LeagueTally[] {
+/**
+ * 한 대회의 시즌 기록을 선수별로 합산한다 — **개인 순위와 시상이 같이 읽는 한 벌이다.**
+ *
+ * 행이 대회 축을 가지므로(→ docs/data/game-state.md §3.4) 리그의 표는 리그 경기만,
+ * 컵의 표는 그 컵의 경기만 센다. 시즌 중 이적하면 행이 팀별로도 갈려 여기서 합쳐진다.
+ *
+ * ⚠️ **옛 세이브의 축 없는 행은 「그 팀이 속한 리그」의 것으로 읽는다** — 그 한 행이
+ * 그 시즌 전 대회의 합계이고, 옛 규칙이 정확히 그것이었다(그 리그 소속 선수의 시즌
+ * 최다 득점 — season.md §6). 컵 id로는 어느 팀의 리그와도 같지 않으므로 컵의 표는
+ * 옛 세이브에서 비어 있다: 없는 사실을 지어내는 대신 그 상이 없는 해로 남는다.
+ */
+export function talliesOf(state: GameState, competitionId: string, onDate: string): LeagueTally[] {
   const players = new Map(state.players.map((p) => [p.id, p]));
   const merged = new Map<string, LeagueTally & { ratingSum: number | null }>();
-  /** 그 리그에서 팀마다 몇 경기 뛰었나 — 그 선수의 팀을 고르는 근거 */
+  /** 그 대회에서 팀마다 몇 경기 뛰었나 — 그 선수의 팀을 고르는 근거 */
   const appsByTeam = new Map<string, Map<string, number>>();
 
   for (const stat of state.seasonStats) {
     if (stat.season !== state.season) continue;
-    // 승강은 아직 적용되기 전이다 — 소속의 원본은 카탈로그가 아니라 세이브다 (§8 불변식)
-    if (leagueOfTeamIn(state, stat.teamId) !== leagueId) continue;
+    if (stat.competitionId === undefined) {
+      // 승강은 아직 적용되기 전이다 — 소속의 원본은 카탈로그가 아니라 세이브다 (§8 불변식)
+      if (leagueOfTeamIn(state, stat.teamId) !== competitionId) continue;
+    } else if (stat.competitionId !== competitionId) continue;
     // 은퇴·이적으로 명단에서 빠진 선수는 이름을 채울 수 없다. 결산은 전환보다
     // 앞이라 실제로는 다 있지만, 없으면 후보에서 뺀다 (빈 이름의 상은 사실이 아니다)
     const player = players.get(stat.gamePlayerId);
@@ -195,11 +207,11 @@ export interface LeaderRow {
 }
 
 /**
- * 그 리그의 개인 순위 상위 `limit`명.
+ * 그 리그의 개인 순위 상위 `limit`명 — **그 리그 경기만의 표다** (`talliesOf`).
  *
- * ⚠️ **리그의 표다.** `SEASON_STAT`은 시즌·팀 단위라 대회별로 갈려 있지 않아
- * (season.md §8 미해결) 이 표는 "그 리그 소속 선수의 **시즌** 기록 순위"이고
- * 대항전에는 서지 않는다 — 시상이 지는 한계를 같은 자리에서 같이 진다.
+ * ⚠️ **대항전에는 아직 서지 않는다** (season.md §9). 집계는 대회별로 나오지만
+ * 평점·클린시트 축의 출전 문턱이 순위표에서 나오는데(`ratingFloorOf`) 컵에는
+ * 순위표가 없다. 대회의 개인상은 시즌 끝에 선다(`seasonAwards`).
  */
 export function leaderboardOf(
   state: GameState,
@@ -207,7 +219,7 @@ export function leaderboardOf(
   key: LeaderboardKey,
   limit = LEADERBOARD_LIMIT,
 ): LeaderRow[] {
-  const tallies = talliesOfLeague(state, leagueId, state.date);
+  const tallies = talliesOf(state, leagueId, state.date);
   return boardFrom(state, tallies, key, () => ratingFloorOf(state, leagueId), limit);
 }
 
@@ -226,7 +238,7 @@ export function leaderboardsOf(
   leagueId: string,
   limit = LEADERBOARD_LIMIT,
 ): LeaderBoard[] {
-  const tallies = talliesOfLeague(state, leagueId, state.date);
+  const tallies = talliesOf(state, leagueId, state.date);
   // 문턱은 순위표를 한 번 세우는 값이라 축마다 다시 세지 않는다
   let floor: Map<string, number> | null = null;
   const floorOf = (): Map<string, number> => (floor ??= ratingFloorOf(state, leagueId));

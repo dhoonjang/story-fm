@@ -226,6 +226,12 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
   if (!result || result.aet) return false;
   // 연장이 필요한 경기인지도 같은 문에서 묻는다 — 호출부마다 따로 판단하지 않는다
   if (!needsExtraTime(state, decider)) return false;
+  /**
+   * 연장 몫이 얹히는 **대회 행** (game-state.md §3.4). 연장은 녹아웃뿐이라 실제로
+   * 널이 오지 않지만, 널을 앞에서 끊어야 장부가 축 없는 행에 섞이지 않는다.
+   */
+  const competitionId = decider.competitionId;
+  if (competitionId === null) return false;
 
   const xi = {
     home: finishingXi(state, decider, "home"),
@@ -284,7 +290,7 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
       const line = extra.playerStats[player.id];
       // 연장의 퇴장은 그 분에서 시간을 끊는다 — 90분의 규칙 그대로다
       const red = extra.cards.find((c) => c.playerId === player.id && c.card === "red");
-      addToSeasonStat(ensureSeasonStat(state, player.id, teamId, player), {
+      addToSeasonStat(ensureSeasonStat(state, player.id, teamId, competitionId, player), {
         goals: countIn(extra.scorers, player.id),
         assists: countIn(extra.assists, player.id),
         minutes: red ? Math.max(0, red.minute - FULL_TIME_MINUTES) : EXTRA_TIME_MINUTES,
@@ -312,7 +318,7 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
     const keeper = xi[side].find((p) => positionGroupOfPlayer(p) === "GK" && started.has(p.id));
     if (!keeper) continue;
     const teamId = side === "home" ? decider.homeTeamId : decider.awayTeamId;
-    const stat = ensureSeasonStat(state, keeper.id, teamId, keeper);
+    const stat = ensureSeasonStat(state, keeper.id, teamId, competitionId, keeper);
     if (stat.cleanSheets) stat.cleanSheets -= 1;
   }
 

@@ -33,6 +33,8 @@ import {
   awardTitle,
   boardExpectationText,
   naturalPositionOf,
+  parseScorerEntry,
+  pickMotm,
   presetOf,
   retiresAtSeasonEnd,
   visionItemText,
@@ -109,7 +111,7 @@ import {
   TOP_ASSISTER_ORDER,
   TOP_SCORER_ORDER,
   pickWinner,
-  talliesOfLeague,
+  talliesOf,
   type LeagueTally,
 } from "./leaderboard";
 import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
@@ -123,6 +125,7 @@ import {
   clampReputation,
   groupOf,
   managedTeamId,
+  playerById,
   playersOf,
   pushNarrative,
   tacticsOf,
@@ -524,19 +527,27 @@ function checkAchievements(state: GameState, position: number, row: StandingRow)
     add("ucl-spot", { position, leagueId });
   }
 
-  const topScorer = state.seasonStats
-    .filter(
-      (s) =>
-        s.season === state.season && s.teamId === state.userTeamId && s.goals >= SHARPSHOOTER_GOALS,
-    )
-    .sort((a, b) => b.goals - a.goals)[0];
+  /**
+   * 골잡이 조련사는 **시즌 전 대회의 골**로 센다 — 감독이 키운 것은 골잡이이지
+   * 리그 골잡이가 아니다. 행이 대회별로 갈리므로(game-state.md §3.4) 선수마다 먼저
+   * 더한다: 안 더하면 리그 12 + 컵 5로 열일곱 골을 넣은 공격수가 문턱에 못 닿는다.
+   */
+  const goalsByPlayer = new Map<string, number>();
+  for (const s of state.seasonStats) {
+    if (s.season !== state.season || s.teamId !== state.userTeamId) continue;
+    goalsByPlayer.set(s.gamePlayerId, (goalsByPlayer.get(s.gamePlayerId) ?? 0) + s.goals);
+  }
+  const topScorer = [...goalsByPlayer]
+    .filter(([, goals]) => goals >= SHARPSHOOTER_GOALS)
+    // 동률은 id로 끊는다 — 명단 순서가 업적의 주인을 정하면 안 된다 (§8 불변식)
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0];
   if (topScorer) {
-    const player = playersOf(state, state.userTeamId).find((p) => p.id === topScorer.gamePlayerId);
+    const player = playersOf(state, state.userTeamId).find((p) => p.id === topScorer[0]);
     if (player) {
       add("sharpshooter", {
         gamePlayerId: player.id,
         playerName: player.name,
-        goals: topScorer.goals,
+        goals: topScorer[1],
       });
     }
   }
@@ -612,29 +623,30 @@ export function seasonAwards(state: GameState): SeasonAward[] {
   if (endDate === null) return [];
 
   const awards: SeasonAward[] = [];
+  const add = (competitionId: string, code: SeasonAwardCode, winner: LeagueTally | null): void => {
+    if (!winner) return;
+    awards.push({
+      code,
+      season: state.season,
+      competitionId,
+      gamePlayerId: winner.gamePlayerId,
+      playerName: winner.playerName,
+      teamId: winner.teamId,
+      apps: winner.apps,
+      goals: winner.goals,
+      assists: winner.assists,
+      ...(winner.rating !== null ? { rating: winner.rating } : {}),
+      ...(code === "young-player" ? { age: winner.age } : {}),
+    });
+  };
+
   for (const leagueId of leaguesPlayedIn(state)) {
-    const tallies = talliesOfLeague(state, leagueId, endDate);
+    const tallies = talliesOf(state, leagueId, endDate);
     const rounds = leagueRounds(teamsOfLeagueIn(state, leagueId).length);
     const rated = tallies.filter((t) => t.rating !== null);
 
-    const add = (code: SeasonAwardCode, winner: LeagueTally | null): void => {
-      if (!winner) return;
-      awards.push({
-        code,
-        season: state.season,
-        leagueId,
-        gamePlayerId: winner.gamePlayerId,
-        playerName: winner.playerName,
-        teamId: winner.teamId,
-        apps: winner.apps,
-        goals: winner.goals,
-        assists: winner.assists,
-        ...(winner.rating !== null ? { rating: winner.rating } : {}),
-        ...(code === "young-player" ? { age: winner.age } : {}),
-      });
-    };
-
     add(
+      leagueId,
       "top-scorer",
       pickWinner(
         tallies.filter((t) => t.goals >= MIN_LEADER_TALLY),
@@ -642,6 +654,7 @@ export function seasonAwards(state: GameState): SeasonAward[] {
       ),
     );
     add(
+      leagueId,
       "top-assister",
       pickWinner(
         tallies.filter((t) => t.assists >= MIN_LEADER_TALLY),
@@ -649,6 +662,7 @@ export function seasonAwards(state: GameState): SeasonAward[] {
       ),
     );
     add(
+      leagueId,
       "player-of-season",
       pickWinner(
         rated.filter((t) => t.apps >= Math.ceil(rounds / RATING_APPS_DIVISOR)),
@@ -656,6 +670,7 @@ export function seasonAwards(state: GameState): SeasonAward[] {
       ),
     );
     add(
+      leagueId,
       "young-player",
       pickWinner(
         rated.filter(
@@ -667,7 +682,103 @@ export function seasonAwards(state: GameState): SeasonAward[] {
       ),
     );
   }
+
+  /**
+   * 컵·대항전의 상 — **득점왕과 결승 MOM 둘뿐이다** (season.md §6). 평점의 상은
+   * 서지 않는다: 대부분의 팀이 한두 경기라 평균 평점의 상은 뽑기가 된다.
+   */
+  for (const [competitionId, decider] of finalsPlayedIn(state)) {
+    /**
+     * **한 경기가 대회의 전부면 득점왕은 서지 않는다** — 슈퍼컵이 그렇다. 한 골로
+     * 「득점왕」을 세우면 결승 MOM이 이미 말한 사실이 다른 이름으로 한 번 더 선다.
+     */
+    const played = state.matches.filter(
+      (m) => m.season === state.season && m.competitionId === competitionId && m.result,
+    ).length;
+    if (played > 1) {
+      add(
+        competitionId,
+        "top-scorer",
+        pickWinner(
+          talliesOf(state, competitionId, endDate).filter((t) => t.goals >= MIN_LEADER_TALLY),
+          TOP_SCORER_ORDER,
+        ),
+      );
+    }
+    const motm = finalMotmOf(state, decider);
+    if (motm) awards.push({ ...motm, season: state.season, competitionId, code: "final-motm" });
+  }
   return awards;
+}
+
+/**
+ * 그해 **결승이 치러진** 컵·대항전과 그 결승 경기 (season.md §6).
+ *
+ * 2차전제 결승은 마지막 경기가 결승이다 — 트로피가 들리는 경기의 평점이 그 대회의
+ * 결승 MOM이다. 결승이 아직 없는 대회(열리지 않았거나 시즌 중)는 이 표에 없다.
+ */
+function finalsPlayedIn(state: GameState): Map<string, MatchRecord> {
+  const finals = new Map<string, MatchRecord>();
+  for (const match of state.matches) {
+    if (match.season !== state.season || !match.result) continue;
+    if (match.stage !== "final" || match.competitionId === null) continue;
+    const before = finals.get(match.competitionId);
+    // 날짜가 같으면 id로 끊는다 — 순위와 마찬가지로 배열 순서가 답을 정하면 안 된다
+    if (
+      before &&
+      (before.date > match.date || (before.date === match.date && before.id > match.id))
+    )
+      continue;
+    finals.set(match.competitionId, match);
+  }
+  return new Map([...finals].sort((a, b) => (a[0] < b[0] ? -1 : 1)));
+}
+
+/**
+ * 결승 **한 경기**의 최우수 선수 — 시즌 합계가 아니다 (season.md §6).
+ *
+ * 사슬은 경기 리포트의 MOTM과 **같은 하나다**(`compareMotm` — domain/records.ts).
+ * 출전 분은 경기 결과에 남지 않으므로 전원 0으로 두고 앞 세 칸과 id로 끊는다.
+ * 근거 수치도 그 경기의 것이라 `apps`는 언제나 1이다.
+ *
+ * 평점이 없는 결승은 상이 서지 않는다 — 간이 시뮬이 결승만 평점을 남기기 시작하기
+ * 전(옛 세이브)의 결승이 그렇다 (match.md §6).
+ */
+function finalMotmOf(
+  state: GameState,
+  decider: MatchRecord,
+): Omit<SeasonAward, "season" | "competitionId" | "code"> | null {
+  const ratings = decider.result?.ratings;
+  if (!ratings) return null;
+  const goalsOf = (tags: readonly string[], playerId: string): number =>
+    tags.filter((tag) => parseScorerEntry(tag).playerId === playerId).length;
+  const best = pickMotm(
+    Object.entries(ratings).map(([id, rating]) => ({
+      id,
+      rating,
+      goals: goalsOf(decider.result?.scorers ?? [], id),
+      assists: goalsOf(decider.result?.assists ?? [], id),
+      minutes: 0,
+    })),
+  );
+  if (!best) return null;
+  const player = playerById(state, best.id);
+  if (!player) return null;
+  /**
+   * 팀은 **그날 어느 쪽에 섰는가**다 — 지금 소속으로 적으면 결승 뒤 이적한 선수의
+   * 상이 새 셔츠로 남는다. 명단이 없는 옛 경기만 지금 소속으로 떨어진다.
+   */
+  const home = decider.result?.homeLineup?.includes(best.id) ?? false;
+  const away = decider.result?.awayLineup?.includes(best.id) ?? false;
+  return {
+    gamePlayerId: best.id,
+    playerName: player.name,
+    teamId: home ? decider.homeTeamId : away ? decider.awayTeamId : player.teamId,
+    apps: 1,
+    goals: best.goals,
+    assists: best.assists,
+    rating: best.rating ?? undefined,
+  };
 }
 
 /**
@@ -676,11 +787,21 @@ export function seasonAwards(state: GameState): SeasonAward[] {
  * (`achievementLine`과 같은 규약 — season.md §6).
  */
 export function awardLine(a: SeasonAward): string {
-  return `${awardTitle(a.code)}: ${a.playerName} (${teamName(a.teamId)}) — ${awardDetail(a)}`;
+  return (
+    `${competitionShortName(a.competitionId)} ${awardTitle(a.code)}: ` +
+    `${a.playerName} (${teamName(a.teamId)}) — ${awardDetail(a)}`
+  );
 }
 
 function awardDetail(a: SeasonAward): string {
   const rating = a.rating === undefined ? "" : ` · 평점 ${a.rating.toFixed(2)}`;
+  // 결승 MOM의 근거는 **그 한 경기**다 — 출전 수를 적으면 "1경기"가 되어 사실을 흐린다
+  if (a.code === "final-motm") {
+    const scored = [a.goals > 0 ? `${a.goals}골` : null, a.assists > 0 ? `${a.assists}도움` : null]
+      .filter((x) => x !== null)
+      .join(" ");
+    return `결승${rating}${scored === "" ? "" : ` · ${scored}`}`;
+  }
   if (a.code === "top-scorer") return `${a.apps}경기 ${a.goals}골`;
   if (a.code === "top-assister") return `${a.apps}경기 ${a.assists}도움`;
   if (a.code === "young-player") return `만 ${a.age}세 · ${a.apps}경기${rating}`;
@@ -713,18 +834,34 @@ export function recordBreakLine(broken: RecordBreak): string {
 function gradeAwards(state: GameState): string[] {
   if (!state.awards) state.awards = [];
   const awards = state.awards;
-  const ourLeague = leagueOfTeamIn(state, state.userTeamId);
   const lines: string[] = [];
   for (const a of seasonAwards(state)) {
-    // 재실행 방어 — 같은 시즌·같은 리그·같은 코드는 한 번만 선다
+    // 재실행 방어 — 같은 시즌·같은 대회·같은 코드는 한 번만 선다
     const dup = awards.some(
-      (x) => x.season === a.season && x.leagueId === a.leagueId && x.code === a.code,
+      (x) => x.season === a.season && x.competitionId === a.competitionId && x.code === a.code,
     );
     if (dup) continue;
     awards.push(a);
-    if (a.leagueId === ourLeague) lines.push(awardLine(a));
+    if (awardReachesManager(state, a)) lines.push(awardLine(a));
   }
   return lines;
+}
+
+/**
+ * 감독에게 가는 상인가 — **우리 리그의 상과 컵·대항전의 상 전부** (season.md §6).
+ *
+ * 다섯 리그 스무 줄은 감독의 화면이 아니라 남의 리그 득점왕이 빠지지만, 컵과
+ * 대항전의 상은 대회마다 두 줄뿐이고 **챔피언스리그 득점왕은 세계의 뉴스**다 —
+ * 우리가 그 대회에 나갔는지로 자르면 8강에서 떨어진 해에 그해 유럽의 득점왕을
+ * 모르는 감독이 된다.
+ *
+ * 시즌 다이제스트(`gradeAwards`)와 오프시즌 사실 블록(agents `awardFacts`)이 같은
+ * 문을 쓴다 — 두 벌로 두면 결산 그 턴과 그 다음 턴이 다른 상을 말한다.
+ */
+export function awardReachesManager(state: GameState, award: SeasonAward): boolean {
+  return (
+    isCup(award.competitionId) || award.competitionId === leagueOfTeamIn(state, state.userTeamId)
+  );
 }
 
 /**
@@ -1190,10 +1327,12 @@ export function declareRetirements(state: GameState, digest: string[]): void {
   /** 계약 만료의 경계 — 다음 시즌이 시작하기 전에 끝나는 계약이 「이번 시즌 끝」이다 */
   const expiryCutoff = buildSeasonCalendar(state.season + 1).preseasonStart;
 
+  // 대회별로 갈린 행을 **더한다** — 덮어쓰면 리그 30경기를 뛴 주장이 컵 한 경기로 읽힌다
   const apps = new Map<string, number>();
   for (const stat of state.seasonStats) {
     if (stat.season !== state.season) continue;
-    apps.set(`${stat.gamePlayerId}:${stat.teamId}`, stat.apps);
+    const key = `${stat.gamePlayerId}:${stat.teamId}`;
+    apps.set(key, (apps.get(key) ?? 0) + stat.apps);
   }
   const expiring = new Set<string>();
   for (const contract of state.contracts) {

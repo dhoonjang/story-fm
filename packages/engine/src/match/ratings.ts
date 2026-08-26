@@ -1,7 +1,6 @@
 import type { AttributeAxis, PositionGroup } from "@story-fm/domain";
 import { AXIS_KO, applyFamiliarityGain, tacticalUptake } from "@story-fm/domain";
 import { ensureSeasonStat, playerById, type GameState } from "../core/state";
-import { isFriendly } from "../competition/friendly";
 import { MATCH_ATTR_CAP, applyAttributeStep } from "../squad/training-report";
 
 /**
@@ -259,7 +258,11 @@ export function applyMatchRatings(
   const ratings = { ...match.result.ratings };
   const notes = { ...(match.result.ratingNotes ?? {}) };
   // 친선 평점은 경기에만 남는다 — 앵커가 시즌 합계에 안 들어갔으니 보정분도 안 들어간다
-  const friendly = isFriendly(match);
+  /**
+   * 평점 보정이 얹히는 **대회 행** — 널이면 친선이라 장부에 닿지 않는다
+   * (`isFriendly`와 같은 물음이되 타입에서도 널이 사라진다 — game-state.md §3.4).
+   */
+  const competitionId = match.competitionId;
   const seen = new Set<string>();
   let applied = 0;
   let skipped = 0;
@@ -288,8 +291,8 @@ export function applyMatchRatings(
     const delta = bounded - anchor;
     ratings[entry.playerId] = bounded;
     if (entry.note) notes[entry.playerId] = entry.note.slice(0, NOTE_MAX);
-    if (delta !== 0 && !friendly) {
-      const stat = ensureSeasonStat(state, entry.playerId, player.teamId, player);
+    if (delta !== 0 && competitionId !== null) {
+      const stat = ensureSeasonStat(state, entry.playerId, player.teamId, competitionId, player);
       stat.ratingSum = Math.max(0, (stat.ratingSum ?? 0) + delta);
     }
     applied += 1;
