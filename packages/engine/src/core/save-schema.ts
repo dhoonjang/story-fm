@@ -36,6 +36,7 @@ import {
   ReserveTrainingPolicySchema,
   RetiredPlayerSchema,
   YouthCandidateSchema,
+  CallUpSchema,
   RoleMemorySchema,
   ScheduleEntrySchema,
   ScoutReportSchema,
@@ -143,6 +144,7 @@ export const SaveSchema = z
     milestones: z.array(MilestoneSchema).optional(),
     retired: z.array(RetiredPlayerSchema).optional(),
     youthCandidates: z.array(YouthCandidateSchema).optional(),
+    callUps: z.array(CallUpSchema).optional(),
     trainingReports: z.array(TrainingReportSchema).optional(),
     reserveTraining: ReserveTrainingPolicySchema.optional(),
   })
