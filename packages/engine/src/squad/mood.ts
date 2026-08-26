@@ -30,12 +30,15 @@ import type {
   SharpnessBand,
   SquadStatus,
 } from "@story-fm/domain";
+import { RELATION_TIER_RANK } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { milestonesOf } from "./career";
 import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
 import { injuryRiskFor } from "./injury";
 import { settlingOf } from "./settling";
 import { playerArchetypeOf } from "../world/player-persona";
+// 해지 카드는 떠난 사람과 가까웠던 사람에게만 선다 (people.md §5·§6)
+import { relationTierOf } from "../world/relations";
 import { leaderRoleOf } from "./hierarchy";
 import { numberLineageOf } from "./numbers";
 // 장부를 읽는 문은 하나다 — 심경과 근황이 갈리면 같은 사이가 자리마다 다른 말로 선다
@@ -389,8 +392,12 @@ function demotionDaysOf(state: GameState, player: GamePlayer): number | null {
  * 문장으로 떨어진다(`isRelease`, game-state.md §6의 유일한 판정 예외).
  * 원장은 날짜 순이므로 뒤에서부터 훑고 창을 벗어나면 멈춘다 — 원장이 아무리 커도
  * 보는 줄은 몇 줄이다.
+ *
+ * ⚠️ **`mate`와 `close` 이상이던 사람에게만 선다** (people.md §5·§6). 떠난 사람의
+ * 관계 줄은 이미 걷혔으므로 이 물음에 답하는 것은 첫인상이다 — 함께 뛴 해도 협회도
+ * 원장에 남아 있다.
  */
-function recentDeparture(state: GameState): MoodFact | null {
+function recentDeparture(state: GameState, mate: GamePlayer): MoodFact | null {
   for (let i = state.transfers.length - 1; i >= 0; i -= 1) {
     const transfer = state.transfers[i];
     if (transfer === undefined) continue;
@@ -399,8 +406,11 @@ function recentDeparture(state: GameState): MoodFact | null {
     if (days > DEPARTURE_ECHO_DAYS) break;
     if (transfer.fromTeamId !== state.userTeamId) continue;
     if (!isRelease(transfer)) continue;
+    if (transfer.gamePlayerId === mate.id) continue;
     const name = playerById(state, transfer.gamePlayerId)?.name;
     if (name === undefined) continue;
+    const tier = relationTierOf(state, transfer.gamePlayerId, mate.id);
+    if (RELATION_TIER_RANK[tier] <= 0) continue;
     return { cause: "departure", name, days };
   }
   return null;
@@ -643,14 +653,14 @@ export function moodFactsOf(
     facts.push(mentoring);
   }
   /**
-   * 방금 누가 팀을 떠났다 — 라커룸 전체가 같은 사실을 든다. 누가 그와 가까웠는지를
-   * 가를 관계 점수가 아직 없어 카드도 하나뿐이다 (people.md §5).
+   * 방금 누가 팀을 떠났다 — **그와 `close` 이상이던 사람에게만 선다** (people.md §5·§6).
+   * 라커룸 전원이 같은 무게로 드는 사실이 아니다.
    *
    * ⚠️ **우리 라커룸의 사실이다.** 스카우트가 보는 남의 선수에게 우리 구단의
    * 해지가 걸리면 그 카드는 거짓말이다.
    */
   if (player.teamId === state.userTeamId && facts.length < MOOD_FACT_LIMIT) {
-    const departure = recentDeparture(state);
+    const departure = recentDeparture(state, player);
     if (departure) facts.push(departure);
   }
   /**

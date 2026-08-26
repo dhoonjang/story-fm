@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { addDays, advanceTime, diffDays, pendingApproach, pendingPress } from "@story-fm/engine";
+import {
+  addDays,
+  advanceTime,
+  diffDays,
+  MANAGER_SUBJECT,
+  pendingApproach,
+  pendingPress,
+  playersOf,
+  relationOf,
+  relationTierOf,
+  type GameState,
+} from "@story-fm/engine";
 import type { Approach, TransferRequestReason } from "@story-fm/domain";
+import { RELATION_TIER_RANK } from "@story-fm/domain";
 import { createMiniGame, keepSeat, playMockMatch } from "../test/helpers";
 import { APPROACH_RATE } from "./catalog";
 import { outOfBand, reportOf, type Readings } from "./harness";
@@ -43,6 +55,21 @@ const ADVANCE_LIMIT = 480;
  * 불만도 순위도 새 시즌에서 다시 세는 자리라 프리시즌 초반에는 원인이 없다.
  */
 const REVIEW_TAIL_DAYS = 7;
+
+/** 시즌 끝에 감독과 `strained` 이하인 우리 선수 */
+function sourPlayers(state: GameState) {
+  return playersOf(state, state.userTeamId).filter(
+    (p) => RELATION_TIER_RANK[relationTierOf(state, MANAGER_SUBJECT, p.id)] < 0,
+  );
+}
+
+/** 감독이 누군가와 가장 멀어진 자리 — 아무도 없으면 0 */
+function lowestRelation(state: GameState): number {
+  return Math.min(
+    0,
+    ...playersOf(state, state.userTeamId).map((p) => relationOf(state, MANAGER_SUBJECT, p.id)),
+  );
+}
 
 describe("한 시즌의 다가옴", () => {
   it("시드 42 · 축소 세계 · 아무것도 하지 않는 감독", () => {
@@ -166,6 +193,14 @@ describe("한 시즌의 다가옴", () => {
       "갓 열린 회견과 겹친 자리": withPress,
       "가장 높이 오른 계단": Math.max(0, ...opened.map((a) => a.step)),
       "첫 자리까지 걸린 날": opened[0] ? diffDays(start, opened[0].date) : Number.NaN,
+      /**
+       * **관계는 되먹임이다** (people.md §6) — 답하지 않은 자리마다 사이가 내려가고,
+       * 사이가 내려가면 압력이 빨리 쌓여 자리가 더 자주 열린다. 그 고리가 눈덩이가
+       * 되는지는 시즌을 굴려야만 보인다.
+       */
+      "사이가 상한 선수": sourPlayers(state).length,
+      "가장 낮은 관계 점수": lowestRelation(state),
+      "관계 줄": (state.relations ?? []).length,
     };
     console.log(
       reportOf(

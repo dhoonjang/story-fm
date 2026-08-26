@@ -476,12 +476,18 @@ describe("자기 일이 아닌 자리는 대신 오는 사람이 있다", () => 
 const rowOf = (state: GameState, subject: string) =>
   state.approachPressure!.find((r) => r.subject === subject)!;
 
-/** 사다리를 그 계단까지 올린다 — 자리가 열릴 때마다 감독이 답한다(압력은 0으로) */
+/**
+ * 사다리를 그 계단까지 올린다 — 자리가 열릴 때마다 감독이 답한다(압력은 0으로).
+ *
+ * **답은 `deflect`다** — 사이를 옮기지 않는 유일한 스탠스라(people.md §6 사건 표)
+ * 그 뒤에 재는 임계가 관계 배수를 타지 않는다. 여기서 재려는 것은 사다리의 눈금이지
+ * 감독이 무슨 말을 했느냐가 아니다.
+ */
 function climbTo(state: GameState, subject: string, step: number): void {
   for (let day = 0; day < 400; day++) {
     if ((state.approachPressure?.find((r) => r.subject === subject)?.step ?? 0) >= step) return;
     pressDays(state, 1);
-    if (pendingApproach(state)) respondToApproach(state, { stance: "defend" });
+    if (pendingApproach(state)) respondToApproach(state, { stance: "deflect" });
   }
   throw new Error(`${subject}의 사다리가 ${step}계단까지 오르지 않았다`);
 }

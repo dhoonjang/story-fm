@@ -9,6 +9,9 @@ import {
   PLAYER_ARCHETYPE_KEYS,
   PLAYER_ARCHETYPE_LABEL,
   PLAYER_ARCHETYPE_TRAITS,
+  RELATION_TIER_BOUNDS,
+  relationTier,
+  stanceOfTier,
   type GamePlayer,
 } from "@story-fm/domain";
 import {
@@ -43,7 +46,20 @@ import {
   playerArchetypeOf,
   PLAYER_ARCHETYPE_LABELS,
 } from "../src/world/player-persona";
-import { personaRelations } from "../src/world/relations";
+import {
+  clearRelationsOf,
+  MANAGER_SUBJECT,
+  moveRelation,
+  personaRelations,
+  RELATION_EVENT_BOUND,
+  RELATION_EVENTS,
+  relationFactor,
+  relationOf,
+  relationPressureWeight,
+  relationTierOf,
+} from "../src/world/relations";
+import { applyTalkToPlayer } from "../src/skills";
+import { playersOf } from "../src/core/state";
 import { selectCharacters } from "../src/world/character-book";
 import type { GameState } from "../src/core/state";
 import { createTestGame } from "./helpers";
@@ -924,12 +940,13 @@ describe("페르소나 사이의 관계 초기값 (people.md §6)", () => {
     expect(
       stanceWith(neutral, headCoachOf(neutral).characterId, ownerOf(neutral).characterId),
     ).toBe(undefined);
-    // 그 코치에게 서는 것은 전국지 기자(몸 · 경기) 하나뿐이다
+    // 그 코치에게 서는 것은 전국지 기자(몸 · 경기) 하나뿐이다 — 등급을 함께 든다
     expect(personaRelations(neutral, headCoachOf(neutral).characterId)).toEqual([
       {
         characterId: national.characterId,
         name: national.name,
         stance: "aligned",
+        tier: "close",
         ours: "몸",
         theirs: "경기",
       },
@@ -955,11 +972,128 @@ describe("페르소나 사이의 관계 초기값 (people.md §6)", () => {
     )!;
     expect(card.depth).toBe("full");
     expect(card.relations).toEqual(personaRelations(state, coach.characterId));
-    // 선수 카드에는 관계 필드 자체가 없다
-    const player = state.players[0]!;
-    const playerCard = selectCharacters(state, { pointed: [player.name] }).find(
-      (e) => e.characterId === player.name,
+    // 남의 팀 선수에게는 관계가 서지 않는다 — 점수 장부의 열쇠가 없다
+    const theirs = state.players.find((p) => p.teamId !== state.userTeamId)!;
+    const theirCard = selectCharacters(state, { pointed: [theirs.name] }).find(
+      (e) => e.characterId === theirs.name,
     )!;
-    expect(playerCard.relations).toBeUndefined();
+    expect(theirCard.relations).toBeUndefined();
+  });
+});
+
+describe("관계 점수 — 사건이 사이를 움직인다 (people.md §6)", () => {
+  const base = createTestGame(42);
+  /** 장부를 건드리는 시험이라 매번 새 판을 뜬다 — 관계 줄은 세이브의 값이다 */
+  const fresh = (): GameState => ({ ...base, relations: [] });
+
+  it("쌍은 무순서다 — 어느 쪽으로 물어도 같은 값이고 줄은 하나다", () => {
+    const state = fresh();
+    const [a, b] = [state.players[0]!.id, state.players[1]!.id];
+    moveRelation(state, a, b, "talk-motivated");
+    moveRelation(state, b, a, "talk-motivated");
+    expect(state.relations).toHaveLength(1);
+    expect(relationOf(state, a, b)).toBe(relationOf(state, b, a));
+  });
+
+  it("눈금의 끝에서 멈춘다 — 같은 사건을 몇 번 겪어도 100을 넘지 않는다", () => {
+    const state = fresh();
+    const [a, b] = [state.players[0]!.id, state.players[1]!.id];
+    for (let i = 0; i < 50; i += 1) moveRelation(state, a, b, "captain-named");
+    expect(relationOf(state, a, b)).toBe(100);
+    for (let i = 0; i < 100; i += 1) moveRelation(state, a, b, "promise-broken");
+    expect(relationOf(state, a, b)).toBe(-100);
+  });
+
+  it("한 사건의 폭은 이름 붙인 상한 하나를 넘지 않는다", () => {
+    for (const delta of Object.values(RELATION_EVENTS)) {
+      expect(Math.abs(delta)).toBeLessThanOrEqual(RELATION_EVENT_BOUND);
+    }
+    // 등급 한 칸(20)보다 좁다 — 한 번으로는 사이가 뒤집히지 않는다
+    expect(RELATION_EVENT_BOUND).toBeLessThan(RELATION_TIER_BOUNDS.close);
+  });
+
+  it("등급의 경계 — 0은 중립이고 경계값은 위 칸에 든다", () => {
+    expect(relationTier(0)).toBe("neutral");
+    expect(relationTier(RELATION_TIER_BOUNDS.close - 1)).toBe("neutral");
+    expect(relationTier(RELATION_TIER_BOUNDS.close)).toBe("close");
+    expect(relationTier(RELATION_TIER_BOUNDS.trusted)).toBe("trusted");
+    expect(relationTier(-RELATION_TIER_BOUNDS.close)).toBe("strained");
+    expect(relationTier(-RELATION_TIER_BOUNDS.trusted)).toBe("hostile");
+    // 중립에는 결이 없다 — 그래서 카드에 서지 않는다
+    expect(stanceOfTier("neutral")).toBeNull();
+  });
+
+  it("감독은 0에서 시작하고 같은 협회의 동포는 가깝게 출발한다", () => {
+    const state = fresh();
+    const player = state.players.find((p) => p.teamId === state.userTeamId)!;
+    expect(relationOf(state, MANAGER_SUBJECT, player.id)).toBe(0);
+
+    const mates = playersOf(state, state.userTeamId);
+    const pair = mates.flatMap((a, i) =>
+      mates
+        .slice(i + 1)
+        .filter(
+          (b) => a.homegrownCountry !== undefined && a.homegrownCountry === b.homegrownCountry,
+        )
+        .map((b) => [a, b] as const),
+    )[0]!;
+    expect(relationTierOf(state, pair[0].id, pair[1].id)).toBe("close");
+  });
+
+  it("면담 결과가 사이를 옮기고, 그 사이가 다음 면담의 폭을 정한다", () => {
+    const state = fresh();
+    const player = playersOf(state, state.userTeamId)[0]!;
+    const before = relationOf(state, MANAGER_SUBJECT, player.id);
+
+    applyTalkToPlayer(state, { playerId: player.id, outcome: "angered", intensity: 2 });
+    expect(relationOf(state, MANAGER_SUBJECT, player.id)).toBe(
+      before + RELATION_EVENTS["talk-angered"],
+    );
+
+    // 계수는 부호를 가리지 않는다 — 사이가 좋을수록 같은 말이 크게 울린다
+    const cold = { ...fresh(), relations: [] };
+    const warm = { ...fresh(), relations: [] };
+    for (let i = 0; i < 8; i += 1) moveRelation(cold, MANAGER_SUBJECT, player.id, "promise-broken");
+    for (let i = 0; i < 8; i += 1) moveRelation(warm, MANAGER_SUBJECT, player.id, "promise-kept");
+    expect(relationFactor(cold, MANAGER_SUBJECT, player.id)).toBeLessThan(
+      relationFactor(warm, MANAGER_SUBJECT, player.id),
+    );
+  });
+
+  it("떠난 사람의 줄은 걷히고, 첫인상은 남는다", () => {
+    const state = fresh();
+    const mates = playersOf(state, state.userTeamId);
+    const [a, b] = [mates[0]!, mates[1]!];
+    moveRelation(state, MANAGER_SUBJECT, a.id, "captain-named");
+    moveRelation(state, a.id, b.id, "talk-motivated");
+    expect(state.relations!.length).toBe(2);
+
+    clearRelationsOf(state, a.id);
+    expect(state.relations!.some((r) => r.a === a.id || r.b === a.id)).toBe(false);
+    // 파생은 상하지 않는다 — 함께 뛴 해도 협회도 원장의 사실이다
+    expect(relationOf(state, a.id, b.id)).toBe(relationOf(fresh(), a.id, b.id));
+  });
+
+  it("압력 배수는 사이가 나쁜 쪽으로만 커진다", () => {
+    const state = fresh();
+    const player = playersOf(state, state.userTeamId)[0]!;
+    expect(relationPressureWeight(state, player.id)).toBe(1);
+    for (let i = 0; i < 6; i += 1)
+      moveRelation(state, MANAGER_SUBJECT, player.id, "promise-broken");
+    expect(relationPressureWeight(state, player.id)).toBeGreaterThan(1);
+  });
+
+  it("우리 선수의 카드가 감독과의 사이를 맨 앞에 싣는다 — 중립은 서지 않는다", () => {
+    const state = fresh();
+    const player = playersOf(state, state.userTeamId)[0]!;
+    const cardOf = (s: GameState) =>
+      selectCharacters(s, { pointed: [player.name] }).find((e) => e.characterId === player.name)!;
+
+    const cold = { ...state, relations: [] };
+    for (let i = 0; i < 6; i += 1) moveRelation(cold, MANAGER_SUBJECT, player.id, "promise-broken");
+    const line = cardOf(cold).relations![0]!;
+    expect(line.name).toBe(cold.manager.name);
+    expect(line.stance).toBe("tense");
+    expect(line.tier).toBe(relationTierOf(cold, MANAGER_SUBJECT, player.id));
   });
 });
