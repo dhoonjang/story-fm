@@ -34,6 +34,8 @@ import {
   PressConferenceSchema,
   PressLeakSchema,
   PressSackingSchema,
+  MediaFactSchema,
+  SeasonPredictionSchema,
   RelationSchema,
   ReserveTrainingPolicySchema,
   RetiredPlayerSchema,
@@ -132,6 +134,10 @@ export const SaveSchema = z
     managerOffers: z.array(ManagerOfferSchema).optional(),
     managerVacancies: z.array(ManagerVacancySchema).optional(),
     pressSackings: z.array(PressSackingSchema).optional(),
+    /** 언론의 시즌 예상 순위 — 소집일에 리그마다 한 줄 (season.md §2). 옛 세이브엔 없다 */
+    predictions: z.array(SeasonPredictionSchema).optional(),
+    /** 아직 읽지 않은 회견 밖의 기사 (people.md §4-1). 옛 세이브엔 없다 */
+    media: z.array(MediaFactSchema).optional(),
     /** 클럽 비전 — 구단주 원형이 건 다년 계획 (career.md §5). 옛 세이브엔 없다 */
     clubVision: ClubVisionSchema.optional(),
     boardDemands: z.array(BoardDemandSchema).optional(),

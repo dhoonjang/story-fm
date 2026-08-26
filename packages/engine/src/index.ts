@@ -64,6 +64,7 @@ export * from "./competition/euro-prize";
 export * from "./competition/shootout";
 export * from "./competition/extra-time";
 export * from "./competition/promotion";
+export * from "./competition/prediction";
 export * from "./competition/international";
 export * from "./competition/club-tier-recompute";
 export * from "./competition/domestic-cup";
@@ -117,6 +118,7 @@ export * from "./market/persuasion";
 // club — 구단 재정·기자회견
 export * from "./club/finance";
 export * from "./club/press";
+export * from "./club/media";
 export * from "./club/approach";
 export * from "./club/board-demand";
 export * from "./club/board-request";

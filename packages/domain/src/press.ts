@@ -668,6 +668,7 @@ export const MANAGER_EXIT_KO: Record<string, string> = {
   sacked: "경질",
   expired: "계약 만료",
   resigned: "사임",
+  moved: "이적",
 };
 
 /**
@@ -798,6 +799,14 @@ export function pressFactText(fact: PressFact): string {
         );
       }
       if (sub === "warnings") return `보드 경고 ${v.count ?? 0}/${v.limit ?? 3}`;
+      /**
+       * **언론이 매긴 예상** — 보드 기대와 같은 갈래의 카드다 (people.md §4-1).
+       * 구단주가 거는 목표와 언론이 매기는 순위는 다른 사실이고, 둘이 갈릴 때가
+       * 기자가 물을 자리다.
+       */
+      if (sub === "media-prediction") {
+        return `언론 예상 ${v.rank ?? 0}위/${v.teams ?? 0}팀`;
+      }
       if (sub === "versus") return `리그 ${v.rank ?? 0}위 · ${name} ${v.opponentRank ?? 0}위`;
       return `리그 ${v.rank ?? 0}위 · ${v.played ?? 0}경기`;
     case "fixture":
@@ -1109,6 +1118,130 @@ export function approachContextText(
         `${who ? `${who} ` : ""}감독직 면접` +
         (context.value === undefined ? "" : ` · 현재 ${context.value}위`) +
         ` · 기대 ${context.limit ?? 0}위`
+      );
+  }
+}
+
+// ── 언론 — 회견 밖의 기사 (people.md §4-1) ─────────────
+
+/**
+ * 회견 밖에서 언론이 쓴 것 — **감독이 답하지 않고 읽기만 하는 사실** (people.md §4-1).
+ *
+ * 회견(`PressFact`)은 세계가 감독에게 **묻는** 자리라 답이 장부를 옮기지만, 기사는
+ * 세계가 감독에 **대해 쓰는** 것이라 아무것도 옮기지 않는다. 대신 이야기의 기준선을
+ * 세운다 — 「예상 12위가 4위」는 그 예상이 세계 어딘가에 적혀 있어야 나오는 문장이다.
+ */
+export const MEDIA_FACT_KINDS = [
+  /** 그해 예상 순위표가 나왔다 — 소집일 (season.md §2) */
+  "prediction",
+  /** 해설 한 사람의 중간 평가 — 우리 리그 5경기마다 */
+  "pundit-verdict",
+  /** 벤치가 비었다 — 우리·우리 리그의 경질 */
+  "sacking",
+  /** 그 벤치에 후임이 앉았다 */
+  "appointment",
+] as const;
+export const MediaFactKindSchema = z.enum(MEDIA_FACT_KINDS);
+export type MediaFactKind = z.infer<typeof MediaFactKindSchema>;
+
+/**
+ * 예상과 지금의 거리 — **등급 코드다.** 문장이 아니라 코드인 이유는 회견 카드와 같다:
+ * 저장된 산문은 문구를 고쳐도 옛 말로 남고, 화자의 성격이 닿지 못한다 (people.md §4-1).
+ */
+export const MEDIA_VERDICTS = [
+  "overachieving",
+  "above",
+  "on-track",
+  "below",
+  "underachieving",
+] as const;
+export const MediaVerdictSchema = z.enum(MEDIA_VERDICTS);
+export type MediaVerdict = z.infer<typeof MediaVerdictSchema>;
+
+/** 등급의 한국어 이름 — 평가어 없이 사실만 (people.md §4-1) */
+export const MEDIA_VERDICT_KO: Record<MediaVerdict, string> = {
+  overachieving: "예상을 크게 웃돈다",
+  above: "예상 위",
+  "on-track": "예상대로",
+  below: "예상 아래",
+  underachieving: "예상을 크게 밑돈다",
+};
+
+/**
+ * 등급이 갈리는 계단 — **한두 계단은 아직 아무 뜻도 아니다** (people.md §4-1).
+ * 1위 차이로 등급이 갈리면 매 다섯 경기 등급이 흔들려 평가가 잡음이 된다.
+ */
+const VERDICT_BIG_GAP = 5;
+const VERDICT_GAP = 2;
+
+/**
+ * 예상 대비 등급 — `diff = 예상 순위 − 지금 순위` (양수면 예상보다 위).
+ *
+ * 펀딧의 중간 평가와 시즌 리뷰의 「예상 → 최종」이 **같은 자를 쓴다**: 두 벌을 두면
+ * 5경기마다의 등급과 시즌 끝의 등급이 언젠가 갈린다 (AGENTS.md §5).
+ */
+export function mediaVerdictOf(diff: number): MediaVerdict {
+  if (diff >= VERDICT_BIG_GAP) return "overachieving";
+  if (diff >= VERDICT_GAP) return "above";
+  if (diff <= -VERDICT_BIG_GAP) return "underachieving";
+  if (diff <= -VERDICT_GAP) return "below";
+  return "on-track";
+}
+
+/**
+ * 기사 한 장 — **사실 한 줄.** 문장은 GM이 쓴다 (people.md §4-1).
+ *
+ * `data`가 회견 카드와 같은 모양(`PressFactData`)인 것은 재는 것이 같아서다:
+ * 수치와 코드와 「그때의 이름」. 한 줄의 한국어는 `mediaFactText` 하나가 만든다.
+ */
+export const MediaFactSchema = z.object({
+  kind: MediaFactKindSchema,
+  /** 실린 날 */
+  date: DateString,
+  /**
+   * 이름이 걸린 사람 (`Persona.characterId`) — 없으면 지면 전체의 사실이다.
+   * 화자가 있는 기사는 회견의 기자처럼 그 턴 캐릭터북에 지목된다 (people.md §6).
+   */
+  speakerId: z.string().min(1).optional(),
+  data: PressFactDataSchema,
+});
+export type MediaFact = z.infer<typeof MediaFactSchema>;
+
+/**
+ * 기사 한 줄 — **화면·스냅샷·테스트가 같은 함수를 부른다** (people.md §4-1).
+ * 물음표도 평가어도 없다: 무엇이 실렸는가라는 사실이다.
+ */
+export function mediaFactText(fact: MediaFact): string {
+  const v = fact.data.values ?? {};
+  const tags = fact.data.tags ?? [];
+  const name = fact.data.name ?? "";
+  switch (fact.kind) {
+    case "prediction":
+      return (
+        `언론 시즌 예상 — 우리 ${v.rank ?? 0}위/${v.teams ?? 0}팀` +
+        (name ? ` · 우승 후보 ${name}` : "")
+      );
+    case "pundit-verdict":
+      // 이름이 문장 안에 선다 — 읽는 쪽이 화자를 따로 붙이면 같은 이름이 두 번 실린다
+      return (
+        `${name ? `${name}: ` : ""}예상 ${v.predicted ?? 0}위 · ` +
+        `${v.played ?? 0}경기 뒤 ${v.position ?? 0}위 — ` +
+        `${MEDIA_VERDICT_KO[(tags[0] ?? "on-track") as MediaVerdict]}`
+      );
+    case "sacking":
+      return (
+        `${name} 감독 ${MANAGER_EXIT_KO[tags[0] ?? ""] ?? "떠남"}` +
+        (v.position === undefined ? "" : ` · 그날 ${v.position}위`) +
+        (v.target === undefined ? "" : `/기대 ${v.target}위`) +
+        (v.days === undefined ? "" : ` · 재임 ${v.days}일`)
+      );
+    case "appointment":
+      // `tags[1]`이 그 구단의 이름이다 — 카드 하나가 이름 둘을 들어야 하는 자리라,
+      // 더비 이름을 `tags[1]`에 싣는 `result` 카드와 같은 규약을 쓴다
+      return (
+        `${tags[1] ?? ""} 새 감독 ${name}` +
+        (tags[0] === "pool" ? " (다른 벤치에 있던 사람)" : "") +
+        (v.position === undefined ? "" : ` · 그 구단 ${v.position}위`)
       );
   }
 }

@@ -7,6 +7,7 @@ import type {
   BoardRequest,
   PressLeak,
   PressSacking,
+  MediaFact,
   AxisValues,
   Booking,
   CharacterInjection,
@@ -24,6 +25,7 @@ import type {
   CompetingBid,
   Interest,
   SeasonHistory,
+  SeasonPrediction,
   Dismissal,
   Manager,
   ManagerAttributes,
@@ -898,6 +900,24 @@ export interface GameState {
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   pressSackings?: PressSacking[];
+  /**
+   * **언론의 시즌 예상 순위** — 리그 하나에 한 줄 (season.md §2 「시즌 예상 순위」).
+   *
+   * 파생처럼 보이지만 되돌릴 수 없다: `preseasonPrediction`은 결정적 순수 함수여도
+   * **소집일의** 스쿼드를 읽으므로, 여름 창이 닫히고 나면 같은 답이 나오지 않는다.
+   * 그래서 그날 세워 여기 적어 둔다 — **얇은 장부다.**
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  predictions?: SeasonPrediction[];
+  /**
+   * **아직 GM이 읽지 않은 기사** — 회견 밖에서 언론이 쓴 것 (people.md §4-1).
+   *
+   * `pendingNews`와 같은 규약이다: 모아 두었다가 스냅샷에 실린 턴에 비워진다
+   * (`takeMedia`). 회견과 달리 두 시점에 걸쳐 있지 않으므로 — 감독이 답할 자리가
+   * 아니라 읽을 배경이므로 — 열린 채 기다리는 상태가 없다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  media?: MediaFact[];
   /**
    * 보드 요청 — 구단주 원형이 이적창마다 거는 조건 (career.md §5.2). 발행 시점과
    * 판정 시점이 갈리고 발행 순간의 기준값(주급 총액·기준 이적료)을 들므로 세이브가
@@ -3416,6 +3436,27 @@ export function takeNews(state: GameState): string[] {
   const news = state.pendingNews ?? [];
   state.pendingNews = [];
   return news;
+}
+
+/**
+ * 모델이 읽을 기사 수 상한 — 아무도 꺼내지 않는 경로(mock)에서 줄이 무한히 자라지
+ * 않게 하는 자리지 보관 기간이 아니다 (people.md §4-1).
+ */
+export const MEDIA_LIMIT = 30;
+
+/** 회견 밖의 기사를 모아 둔다 — 다음 평시 턴의 GM 입력에 실린다 */
+export function pushMedia(state: GameState, facts: readonly MediaFact[]): void {
+  if (facts.length === 0) return;
+  const media = (state.media ??= []);
+  media.push(...facts);
+  if (media.length > MEDIA_LIMIT) media.splice(0, media.length - MEDIA_LIMIT);
+}
+
+/** 모아 둔 기사를 꺼내 비운다 — `takeNews`와 같은 자리에서 부른다 */
+export function takeMedia(state: GameState): MediaFact[] {
+  const media = state.media ?? [];
+  state.media = [];
+  return media;
 }
 
 /**

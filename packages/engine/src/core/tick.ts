@@ -87,6 +87,7 @@ import {
 // 출전 불만과 약속 판정은 **같은 자**를 쓴다 (people.md §5·§5-2)
 import { minutesShortfalls, shortfallText, tickPromises } from "../squad/promises";
 import { tickApproaches } from "../club/approach";
+import { tickMedia } from "../club/media";
 import { tickBoardDemands } from "../club/board-demand";
 import { tickBoardRequests } from "../club/board-request";
 import { tickArcs } from "../world/arcs";
@@ -629,6 +630,13 @@ function dailyTick(
   if ((state.youthCandidates ?? []).length > 0 && state.date >= youthIntakeDeadline(state)) {
     settleYouthIntake(state, digest);
   }
+
+  /**
+   * **언론 — 회견 밖의 기사** (people.md §4-1). 프리시즌의 예상표와 우리 리그 다섯
+   * 경기마다의 평가가 여기서 선다. 무직이어도 돈다: 예상표는 세계가 매기는 것이고,
+   * 감독이 없다고 리그의 순서를 아무도 짐작하지 않는 것은 아니다.
+   */
+  tickMedia(state);
 
   // 월초 정산 — 지난달 마감(재정 보고서) + 이번 달 정액 항목 (finance.ts).
   // 게임/시즌이 시작하는 7월 1일엔 tick이 돌지 않으므로 첫 tick에서 보정한다
