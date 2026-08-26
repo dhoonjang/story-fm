@@ -51,6 +51,7 @@ export const SKILL_LABEL: Record<string, string> = {
   get_match_report: "경기 리포트",
   get_opponent_report: "상대 분석",
   scout_player: "스카우트 파견",
+  scout_mission: "스카우트 임무",
   deal_odds: "딜 성공 확률",
   list_negotiations: "협상 목록",
   send_offer: "오퍼",

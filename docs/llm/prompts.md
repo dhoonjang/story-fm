@@ -107,7 +107,7 @@
 | 경기      | 1   | `substitute`                                                                                                                                                                                                                                                                |
 | 이적      | 13  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `respond_transfer_request` · `withdraw_offer` · `release_player` · `recall_loan` · `exercise_buyback`                          |
 | 재정      | 6   | `apply_finance_event` · `adjust_transfer_budget` · `request_board` · `set_ticket_price` · `fund_transfer_budget` · `pay_player_bonus`                                                                                                                                       |
-| 조회      | 10  | `search_players` · `get_squad` · `get_team` · `get_league` · `get_match_report` · `get_opponent_report` · `get_career` · `get_history` · `get_finance` · `scout_player`                                                                                                     |
+| 조회      | 11  | `search_players` · `get_squad` · `get_team` · `get_league` · `get_match_report` · `get_opponent_report` · `get_career` · `get_history` · `get_finance` · `scout_player` · `scout_mission`                                                                                   |
 
 ### 계약은 넷으로 갈린다
 
@@ -119,7 +119,7 @@
 | 거래형 | 상대 판정은 LLM, 확률 앵커·한도는 코어 ([../simulation/transfer.md](../simulation/transfer.md)) |
 
 - **읽기 전용 열하나**(조회 9 + `deal_odds` + `list_negotiations`)는 호출 기록을 남기지
-  않는다 — 조회 로그가 스킬 칩을 덮는다. `scout_player`는 상태를 바꾸므로 조회 그룹이지만
+  않는다 — 조회 로그가 스킬 칩을 덮는다. `scout_player`·`scout_mission`은 상태를 바꾸므로 조회 그룹이지만
   읽기 전용이 아니다.
 - **도구 설명도 프롬프트다.** `SKILL_CATALOG`이 원본이고 표시 이름(label)·그룹까지 함께
   갖는다. 화면의 칩 이름은 웹이 따로 가진 표를 쓰고 어긋남은 테스트가 지킨다. **위

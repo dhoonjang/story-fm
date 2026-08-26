@@ -101,8 +101,9 @@ import { recordCard } from "../match/discipline";
 import { runAiTransfers } from "../market/ai-market";
 import { reviewManagerContract, reviewUserSeat, runManagerMarket } from "../market/manager-market";
 import { matchRating } from "../match/ratings";
-import { scoutReportLine } from "../views/views";
-import { pruneDeferredScouts } from "../squad/scouting";
+import { missionReportLine, scoutReportLine } from "../views/views";
+import { missionLabel, pruneDeferredScouts, pruneWaitingMissions } from "../squad/scouting";
+import { rankMissionCandidates } from "../squad/scout-mission";
 import { grantManagerXP, settleTactics } from "../skills";
 import {
   allMatchesDone,
@@ -202,14 +203,21 @@ function isHardSession(session: TrainingSession): boolean {
 
 /** 보고서 한 장이 감독의 분석 축에 남기는 XP — 파견이 아니라 **도착**에 붙는다 */
 const SCOUT_REPORT_XP = 8;
+/**
+ * 임무 보고 한 장의 XP — **보고서의 두 배**(career.md §3). 두 주를 들여 다섯을
+ * 견준 것이라 한 사람을 이레 본 것과 같은 값일 수 없다.
+ */
+const MISSION_REPORT_XP = SCOUT_REPORT_XP * 2;
 
 /**
  * 스카우트 파견 완료 — dueOn에 도달한 리포트를 닫고 보고한다.
  * 완료 이후 그 선수의 능력치 안개가 걷힌다 (scouting.ts).
  */
 function resolveScouting(state: GameState, digest: string[]): void {
-  // 한도에 막혀 못 나간 요청은 일주일이면 뜻이 지나간다 (player.md §9.4)
+  // 한도에 막혀 못 나간 요청은 대기 기간이 지나면 뜻이 지나간다 (player.md §9.4)
   pruneDeferredScouts(state);
+  pruneWaitingMissions(state);
+  resolveMissions(state, digest);
   for (const report of state.scoutReports) {
     if (report.completedOn !== null) continue;
     if (state.date < report.dueOn) continue;
@@ -231,6 +239,34 @@ function resolveScouting(state: GameState, digest: string[]): void {
     pushNarrative(state, `${player.name} 스카우트 보고서 입수`, 2);
     // 보고서를 읽는 것이 감독의 눈을 기른다 (docs/simulation/career.md §3)
     const grown = grantManagerXP(state, "analysis", SCOUT_REPORT_XP);
+    if (grown) digest.push(grown);
+  }
+}
+
+/**
+ * 스카우트 임무 완료 — `dueOn`에 도달한 임무에 **그날의 상태로** 후보를 적는다.
+ *
+ * ⚠️ **줄을 세운 뒤에 적는다.** 후보로 적히는 순간 그 다섯의 지식 수준이 `seen`으로
+ * 오르므로(`pickedByMission`), 적은 뒤에 다시 세우면 관측값이 달라져 카드와 어긋난다.
+ * 그래서 후보는 **한 번만** 적고 카드는 적힌 목록을 읽는다 (player.md §9.4).
+ */
+function resolveMissions(state: GameState, digest: string[]): void {
+  for (const mission of state.scoutMissions ?? []) {
+    if (mission.dueOn === null || mission.completedOn !== null) continue;
+    if (state.date < mission.dueOn) continue;
+    mission.candidates = rankMissionCandidates(state, mission);
+    mission.completedOn = state.date;
+    /**
+     * 후보의 값을 함께 낸다 — 카드는 프롬프트에 가지 않으므로 도착 사건의 사실이
+     * 모델에 닿는 통로는 이 줄이다 (agents.md §6).
+     */
+    digest.push(
+      `스카우트 임무 보고 도착 — ${missionReportLine(state, mission.id) ?? missionLabel(mission)}`,
+    );
+    // 카드는 모델이 그 줄을 읽은 턴에 선다 — 보고서와 같은 줄에 세운다
+    pushReportCards(state, [mission.id]);
+    pushNarrative(state, `스카우트 임무 보고 입수 — ${missionLabel(mission)}`, 2);
+    const grown = grantManagerXP(state, "analysis", MISSION_REPORT_XP);
     if (grown) digest.push(grown);
   }
 }
