@@ -14,6 +14,7 @@ import {
   counterpartyAnchor,
   settleCounterparty,
   type CounterpartyAnchor,
+  agentProfileOf,
   askingPriceFor,
   contractUntil,
   DEADLINE_DAYS,
@@ -64,6 +65,7 @@ import {
   renewalYearsExpectation,
   RENEWAL_YEARS_MAX,
   respondOffer,
+  standingDeadlineOf,
   respondTransferRequest,
   responseDelayDays,
   resolveMedical,
@@ -2604,6 +2606,101 @@ describe("협상 상대의 앵커와 한도", () => {
     expect(settled.input.verdict).toBe(anchor.verdict);
     // 답한 오퍼는 다시 답을 기다리지 않는다
     expect(arrivedResponses(state).some((x) => x.id === n.id)).toBe(false);
+  });
+
+  it("앵커의 기한은 대리인의 원형이 정한다 — 없는 원형에는 서지 않는다", () => {
+    const state = createTestGame();
+    state.date = "2026-08-01";
+    const n = arrived(state);
+    const anchor = counterpartyAnchor(state, n)!;
+    const days = agentProfileOf(state, n.gamePlayerId).ultimatumDays;
+    /**
+     * 원형은 시드가 정하므로 날짜를 손으로 적지 않는다 — **규칙을 되짚어** 잰다:
+     * 기한을 거는 원형이고, 조정이 가능하고, 지금 기한을 당길 수 있을 때만 선다.
+     */
+    const asked = addDays(state.date, days);
+    expect(anchor.ultimatumOn).toBe(
+      days > 0 && anchor.allowed.includes("counter") && asked < n.expiresOn ? asked : undefined,
+    );
+  });
+
+  it("최후통첩은 기한을 당기기만 한다 — 뒤로는 못 민다", () => {
+    const state = createTestGame();
+    state.date = "2026-08-01";
+    const n = arrived(state);
+    const before = n.expiresOn;
+    // 뒤로 미는 값은 조용히 버려진다 (`minDate`)
+    const pushed = respondOffer(state, {
+      negotiationId: n.id,
+      verdict: "counter",
+      deadlineOn: addDays(before, 7),
+    });
+    expect(pushed.ok, pushed.message).toBe(true);
+    expect(n.expiresOn).toBe(before);
+    expect(n.rounds.some((r) => r.deadlineOn !== undefined)).toBe(false);
+    expect(standingDeadlineOf(n)).toBeNull();
+  });
+
+  it("건 기한이 협상의 기한이 되고, 그날이 지나면 무산이 아니라 결렬이다", () => {
+    const state = createTestGame();
+    state.date = "2026-08-01";
+    const n = arrived(state);
+    const deadline = addDays(state.date, 3);
+    expect(deadline < n.expiresOn).toBe(true);
+    const ruled = respondOffer(state, {
+      negotiationId: n.id,
+      verdict: "counter",
+      deadlineOn: deadline,
+    });
+    expect(ruled.ok, ruled.message).toBe(true);
+    expect(n.expiresOn).toBe(deadline);
+    expect(standingDeadlineOf(n)).toBe(deadline);
+    // 요약과 스냅샷이 그 기한을 든다 — 감독이 오늘 움직여야 하는 이유다
+    expect(describeNegotiations(state)).toContain(`상대가 건 기한 ${deadline}`);
+    // 기한 하루 전에는 브리핑이 한 번 더 세운다
+    state.date = addDays(deadline, -1);
+    const warning: string[] = [];
+    expireNegotiations(state, warning);
+    expect(warning.join("\n")).toContain("상대가 건 기한이 내일입니다");
+
+    state.date = addDays(deadline, 1);
+    const digest: string[] = [];
+    expireNegotiations(state, digest);
+    // 문을 닫은 것은 달력이 아니라 기한을 건 쪽이다 — 이번 창에서 다시 못 연다
+    expect(n.status).toBe("rejected");
+    expect(digest.join("\n")).toContain("기한이 지났습니다");
+  });
+
+  it("기한이 없으면 그대로 무산이다", () => {
+    const state = createTestGame();
+    state.date = "2026-08-01";
+    const n = arrived(state);
+    const ruled = respondOffer(state, { negotiationId: n.id, verdict: "counter" });
+    expect(ruled.ok, ruled.message).toBe(true);
+    state.date = addDays(n.expiresOn, 1);
+    const digest: string[] = [];
+    expireNegotiations(state, digest);
+    expect(n.status).toBe("expired");
+  });
+
+  it("기한은 코어가 정하고 모델은 뺄 수만 있다", () => {
+    const anchor = anchorOf({ ultimatumOn: "2026-08-10" });
+    // 비우면 걸린다 — 호출이 죽은 자리·mock이 실모드와 같은 사다리를 쓴다
+    expect(clampCounterpartyRuling(anchor, { verdict: "counter" }).deadlineOn).toBe("2026-08-10");
+    expect(clampCounterpartyRuling(anchor).deadlineOn).toBe("2026-08-10");
+    expect(
+      clampCounterpartyRuling(anchor, { verdict: "counter", ultimatum: false }).deadlineOn,
+    ).toBeUndefined();
+    // 되부르지 않는 판정에는 기한이 실리지 않는다
+    expect(
+      clampCounterpartyRuling(anchorOf({ ultimatumOn: "2026-08-10", verdict: "accept" }), {
+        verdict: "accept",
+      }).deadlineOn,
+    ).toBeUndefined();
+    // 앵커에 기한이 없으면 모델이 켜도 서지 않는다
+    expect(
+      clampCounterpartyRuling(anchorOf(), { verdict: "counter", ultimatum: true }).deadlineOn,
+    ).toBeUndefined();
   });
 
   it("재계약도 같은 문을 지난다 — 터무니없는 주급을 불러도 코어가 받는다", () => {

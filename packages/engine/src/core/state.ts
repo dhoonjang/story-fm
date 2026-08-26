@@ -19,6 +19,7 @@ import type {
   GrowthEntry,
   HistoryDigest,
   Injury,
+  CompetingBid,
   Interest,
   SeasonHistory,
   Dismissal,
@@ -681,6 +682,15 @@ export interface GameState {
    * 옛 세이브엔 없다 (로드 시 빈 배열 — 세이브 버전을 올리지 않는다).
    */
   interests?: Interest[];
+  /**
+   * **경쟁 입찰** — 우리가 협상 중인 선수에게 다른 구단이 값을 부른 사실
+   * (→ docs/simulation/transfer.md §1-2).
+   *
+   * 관심(`interests`)이 「보고 있다」라면 이 줄은 「불렀다」다. 호가를 올리고 협상
+   * 서류·스냅샷에 실리며, 그 협상이 끝나면 걷힌다.
+   * 옛 세이브엔 없다 (로드가 채우지 않는다 — 없는 것이 곧 뜻이다).
+   */
+  competingBids?: CompetingBid[];
   /** 개인 훈련 프로그램 — 팀 훈련 위에 한 선수만 겨냥해 얹는다 */
   playerTraining: PlayerTraining[];
   /**
@@ -1430,6 +1440,25 @@ export function announcedInterestsOn(state: GameState, playerId: string): Intere
 /** 관심을 걷는다 — 그 선수가 팀을 떠났거나, 그 줄이 오퍼가 됐을 때 */
 export function clearInterests(state: GameState, match: (interest: Interest) => boolean): void {
   state.interests = (state.interests ?? []).filter((i) => !match(i));
+}
+
+/**
+ * **이 선수에게 선 경쟁 입찰** — 늦게 선 것이 먼저 (→ transfer.md §1-2).
+ *
+ * 정렬이 여기 있는 이유는 관심과 같다: 읽는 자리가 셋(협상 서류·스냅샷·호가)이라
+ * 각자 정렬하면 같은 날 같은 세이브가 자리마다 다른 순서를 낸다.
+ */
+export function competingBidsOn(state: GameState, playerId: string): CompetingBid[] {
+  return (state.competingBids ?? [])
+    .filter((b) => b.gamePlayerId === playerId)
+    .sort((a, b) =>
+      a.date === b.date ? (a.teamId < b.teamId ? -1 : 1) : a.date < b.date ? 1 : -1,
+    );
+}
+
+/** 경쟁 입찰을 걷는다 — 그 협상이 끝났거나 선수가 우리 손을 떠났을 때 */
+export function clearCompetingBids(state: GameState, match: (bid: CompetingBid) => boolean): void {
+  state.competingBids = (state.competingBids ?? []).filter((b) => !match(b));
 }
 
 export function isInjured(state: GameState, playerId: string): boolean {

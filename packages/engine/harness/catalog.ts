@@ -376,6 +376,10 @@ export const NEGOTIATION = defineHarness({
     { metric: "영입 기대치 · 중앙값", role: "measure", unit: "score", why: "호가·희망 주급을 그대로 맞춘 4년 오퍼의 성사 확률" },
     { metric: "영입 기대치 · p90−p10", role: "guard", min: 20, unit: "score", why: "선수 관문이 구단 관문 뒤에 숨은 도장이 아니다" },
     { metric: "영입 기대치 · 90% 이상 비율", role: "guard", max: 0.2, unit: "ratio", why: "호가를 맞췄다고 선수까지 자동으로 오지 않는다" },
+    { metric: "영입 · 원형별 중앙값 폭", role: "guard", min: 5, max: 35, unit: "score", why: "대리인의 `askingLift`가 확률에 실제로 걸리는가 — **중립 오퍼**(원형을 걷어 낸 값)를 원형별로 잰 중앙값의 최대−최소. 감독이 실제로 겪는 폭이 아니다: `suggest_terms`가 이미 원형이 얹힌 값을 부르므로 그 자리의 확률은 원형과 무관하다. 0이면 원형이 죽었고, 너무 넓으면 같은 돈이 대리인 추첨이 된다 (transfer.md §3)" },
+    { metric: "영입 · 승부사형 중앙값", role: "measure", unit: "score", why: "값을 가장 높이 부르는 원형 — 중립 오퍼가 가장 안 통하는 자리다" },
+    { metric: "영입 · 제국형 중앙값", role: "measure", unit: "score", why: "배수가 1인 원형 — 「영입 기대치 · 중앙값」 근처에 서야 셈이 맞는다" },
+    { metric: "영입 · 법률가형 중앙값", role: "measure", unit: "score", why: "값을 가장 낮게 부르는 원형 — 같은 오퍼가 가장 잘 통한다" },
   ],
 });
 

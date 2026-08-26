@@ -92,6 +92,10 @@ const RulingSchema = z.object({
     .max(MAX_PAYMENT_YEARS)
     .optional()
     .describe("같은 금액을 나눠 받겠다면 그 연수 — 나눌 수 있는 갈래에서만 뜻이 있다"),
+  ultimatum: z
+    .boolean()
+    .optional()
+    .describe("서류에 기한이 적힌 조정에서, 그 기한을 걸 것인가. 비우면 건다"),
   note: z.string().min(1).max(NOTE_MAX).optional().describe("감독에게 전하는 한 줄"),
 });
 
@@ -144,6 +148,17 @@ export function describeAnchor(anchor: CounterpartyAnchor): string {
     ...(anchor.splittable
       ? [`나눠 받겠다면 paymentYears로 연수를 적는다 (2~${MAX_PAYMENT_YEARS})`]
       : []),
+    /**
+     * **기한은 날짜가 아니라 참·거짓으로 온다** (transfer.md §12-1). 코어가 날짜를
+     * 박아 두었으므로 모델이 고를 것은 「걸 것인가」뿐이고, 비우면 걸린다 — 호출이
+     * 죽은 자리·mock과 같은 사다리를 쓰기 위해서다.
+     */
+    ...(anchor.ultimatumOn === undefined
+      ? []
+      : [
+          `조정에 걸 수 있는 기한: ${anchor.ultimatumOn} — 걸면 협상이 그날 끝난다. ` +
+            `걸지 않으려면 ultimatum: false`,
+        ]),
     `</anchor>`,
   ].join("\n");
 }

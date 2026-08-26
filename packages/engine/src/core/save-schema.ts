@@ -49,6 +49,7 @@ import {
   TrainingSessionSchema,
   TransferListingSchema,
   TransferRequestSchema,
+  CompetingBidSchema,
   InterestSchema,
   TransferSchema,
   TransferWindowSchema,
@@ -126,6 +127,7 @@ export const SaveSchema = z
     /** 클럽 비전 — 구단주 원형이 건 다년 계획 (career.md §5). 옛 세이브엔 없다 */
     clubVision: ClubVisionSchema.optional(),
     boardDemands: z.array(BoardDemandSchema).optional(),
+    competingBids: z.array(CompetingBidSchema).optional(),
     boardRequests: z.array(BoardRequestSchema).optional(),
     historyDigest: HistoryDigestSchema.optional(),
     characterMemories: z.array(CharacterMemorySchema).optional(),
