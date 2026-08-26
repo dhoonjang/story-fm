@@ -17,24 +17,21 @@ import {
   headCoachOf,
   humanizePlayerIds,
   markEntered,
-  missionReportCard,
   minutesOfClock,
   arrivedResponses,
   pendingVerdicts,
   pushNews,
-  scoutReportCard,
   selectCharacters,
   takeMedia,
   takeNews,
-  takeReportCards,
   type AdvanceOutcome,
   type CardMark,
   type GameState,
   type GoalMark,
   type TrainingBrief,
 } from "@story-fm/engine";
-import type { MissionReportCard, ScoutReportCard } from "@story-fm/domain";
 import { agentConfig, createGameLLM, hasKey, type GameLLM } from "@story-fm/llm";
+import { MAX_REPORT_CARDS, NO_CARDS, takeArrivedReports } from "./report-cards";
 import { rateMatchPerformances } from "./match-rater";
 import { reportMood } from "./mood-rater";
 import { reportTraining } from "./training-rater";
@@ -145,44 +142,6 @@ function sceneFromToolCalls(calls: readonly GmToolCall[]): string | null {
     .filter((line) => line.length > 0)
     .map((line) => `@: *${line}*`);
   return lines.length > 0 ? lines.join("\n") : null;
-}
-
-/** 한 턴에 세우는 스카우팅 보고서 카드 상한 — 화면이 카드로 덮이면 장면이 안 읽힌다 */
-const MAX_REPORT_CARDS = 3;
-
-/** 이번 턴에 도착한 카드 — 지목의 보고서와 임무의 후보 목록이 한 줄에서 나온다 */
-interface ArrivedCards {
-  reports: ScoutReportCard[];
-  missions: MissionReportCard[];
-}
-
-/** 꺼낼 줄이 없는 턴 — 경기 중이거나 시계가 안 돌았다 */
-const NO_CARDS: ArrivedCards = { reports: [], missions: [] };
-
-/**
- * 카드로 세울 보고서를 줄에서 꺼낸다 — **꺼낸 그 턴의 입력이 같은 값을 싣는다.**
- *
- * 코어가 장면보다 먼저 구른 턴(손잡이)은 그 사이 벌어진 일이, 장면 뒤에 구른
- * 턴(모델 헤더)은 다음 턴의 도착 블록이 그 값을 싣는다. 어느 쪽이든 카드가 붙은
- * 턴의 모델은 금액을 읽었다 (agents.md §6).
- *
- * ⚠️ **줄은 한 번만 꺼내고 여기서 가른다.** 도착 줄(`pendingReportCards`)에는 지목의
- * 선수 id와 임무 id가 섞여 온다 — 갈래마다 따로 꺼내면 앞의 호출이 줄을 비워 뒤는
- * 언제나 빈손이다. 임무 표(`state.scoutMissions`)에서 찾히는 id가 임무다.
- */
-function takeArrivedReports(state: GameState, limit: number): ArrivedCards {
-  const missionIds = new Set((state.scoutMissions ?? []).map((m) => m.id));
-  const cards: ArrivedCards = { reports: [], missions: [] };
-  for (const id of takeReportCards(state, limit)) {
-    if (missionIds.has(id)) {
-      const card = missionReportCard(state, id);
-      if (card) cards.missions.push(card);
-    } else {
-      const card = scoutReportCard(state, id);
-      if (card) cards.reports.push(card);
-    }
-  }
-  return cards;
 }
 
 /**
@@ -338,12 +297,18 @@ async function runRealGmTurn(
   /** 이번 턴의 경고·퇴장 — 같은 경로다. 경고는 다음 교체 판단의 입력이다 */
   const cards: CardMark[] = [];
   /**
+   * 이번 턴에 조립이 안 된 보고서 — 줄에는 그대로 남아 있다. 아래에서 줄을 한 번 더
+   * 보므로(손잡이가 시계를 옮긴 턴) 적어 두지 않으면 두 번째 호출이 같은 자리에서
+   * 다시 멎어, 그 뒤에 서 있던 카드가 이번 턴에도 못 선다.
+   */
+  const stuckCards = new Set<string>();
+  /**
    * 지난 턴이 **장면 뒤에** 받아 둔 보고서 — 이번 턴 스냅샷이 값을 싣고 카드도 이번
    * 턴에 선다. ⚠️ 손잡이가 시계를 옮기기 **전에** 꺼낸다: 그 뒤에 도착하는 것은
    * 「그 사이 벌어진 일」이 따로 실으므로, 여기 섞이면 한 프롬프트에 같은 값이 두 번
    * 실린다 (agents.md §6).
    */
-  const carriedCards = inMatch ? NO_CARDS : takeArrivedReports(state, MAX_REPORT_CARDS);
+  const carriedCards = inMatch ? NO_CARDS : takeArrivedReports(state, MAX_REPORT_CARDS, stuckCards);
   // 손잡이로 넘긴 시간은 모델보다 먼저 흐른다 — 코어가 먼저 굴리고 "그 사이
   // 벌어진 일"을 상태에 실어, 모델은 도착한 자리에서 보고한다
   const pendingBeforeSkip = new Set(pendingVerdicts(state).map((v) => v.negotiation.id));
@@ -376,6 +341,7 @@ async function runRealGmTurn(
     ? takeArrivedReports(
         state,
         MAX_REPORT_CARDS - carriedCards.reports.length - carriedCards.missions.length,
+        stuckCards,
       )
     : NO_CARDS;
   /** 시간 이동 중 새로 생긴 오퍼는 이번 장면에서 보고만 하고 감독의 답을 기다린다. */
@@ -719,7 +685,8 @@ async function runRealGmTurn(
         : body;
   /**
    * 카드는 **모델이 값을 읽은 것만** 선다. 장면 헤더가 시계를 옮긴 턴은 코어가 방금
-   * 굴렀으므로 그 도착은 줄에 남아 다음 턴에 선다 (`pendingReportCards`).
+   * 굴렀으므로 그 도착은 줄에 남아 다음 턴에 선다 (`pendingReportCards`) — 이번 턴에
+   * 조립이 안 된 것도 마찬가지로 줄에 남는다 (player.md §9.4-1).
    */
   const reports = [...carriedCards.reports, ...skippedCards.reports];
   const missions = [...carriedCards.missions, ...skippedCards.missions];

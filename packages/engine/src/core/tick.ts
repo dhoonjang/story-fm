@@ -153,9 +153,13 @@ import {
   openInjuryIds,
   pendingContractOf,
   playerById,
+  playerName,
   proficiencyAt,
   pushNarrative,
+  pushNews,
   pushReportCards,
+  pruneReportCards,
+  PENDING_REPORT_CARD_LIMIT,
   reservePlayers,
   squadLevelOf,
   tacticsOf,
@@ -231,6 +235,28 @@ const SCOUT_REPORT_XP = 8;
  */
 const MISSION_REPORT_XP = SCOUT_REPORT_XP * 2;
 
+/** 도착 줄에 선 id 하나를 부르는 이름 — 임무면 조건 한 줄, 아니면 선수 이름 */
+function reportCardLabel(state: GameState, id: string): string {
+  const mission = (state.scoutMissions ?? []).find((m) => m.id === id);
+  return mission ? `임무 「${missionLabel(mission)}」` : playerName(state, id);
+}
+
+/**
+ * 카드로 세우지 못한 보고서 — **소식으로 남긴다.**
+ *
+ * 다이제스트로는 감독에게 닿지 않는다: 모델의 장면 헤더가 시계를 옮긴 턴의
+ * 다이제스트는 화면에 서지 않는 `silent` 기록이다 (agents.md §6). 소식은 다음 평시
+ * 턴의 스냅샷 `<news>`에 실려 GM이 감독에게 말한다 — 며칠을 기다려 산 정보가 아무
+ * 말 없이 없어지지 않는 것이 이 줄의 계약이다 (player.md §9.4-1).
+ */
+function reportCardLost(state: GameState, ids: readonly string[], why: string): void {
+  if (ids.length === 0) return;
+  pushNews(
+    state,
+    ids.map((id) => `${reportCardLabel(state, id)} 스카우트 보고서 — ${why}`),
+  );
+}
+
 /**
  * 스카우트 파견 완료 — dueOn에 도달한 리포트를 닫고 보고한다.
  * 완료 이후 그 선수의 능력치 안개가 걷힌다 (scouting.ts).
@@ -239,13 +265,24 @@ function resolveScouting(state: GameState, digest: string[]): void {
   // 한도에 막혀 못 나간 요청은 대기 기간이 지나면 뜻이 지나간다 (player.md §9.4)
   pruneDeferredScouts(state);
   pruneWaitingMissions(state);
+  /**
+   * 카드를 영영 못 세울 것을 닫는다 — **줄에서 조용히 지우는 자는 여기 하나뿐이다.**
+   * 꺼내는 쪽(GM 턴)은 조립에 실패하면 되돌리므로, 그 실패가 영구적일 때 줄이
+   * 막히지 않게 하는 자리가 필요하다 (player.md §9.4-1).
+   */
+  reportCardLost(state, pruneReportCards(state), "그 선수가 세계를 떠나 카드를 세우지 못했다");
   resolveMissions(state, digest);
   for (const report of state.scoutReports) {
     if (report.completedOn !== null) continue;
     if (state.date < report.dueOn) continue;
     report.completedOn = state.date;
     const player = playerById(state, report.gamePlayerId);
-    if (!player) continue;
+    if (!player) {
+      // 파견 나간 사이에 은퇴했다 — 보고서는 닫히되 세울 카드가 없다. 조용히
+      // 넘기면 감독은 며칠을 기다린 파견이 어떻게 됐는지 알 길이 없다
+      reportCardLost(state, [report.gamePlayerId], "보고가 돌아오기 전에 그 선수가 은퇴했다");
+      continue;
+    }
     /**
      * 값을 함께 낸다 — 카드는 프롬프트에 가지 않으므로 도착 사건의 사실이 모델에
      * 닿는 통로는 이 줄이다 (agents.md §6).
@@ -256,8 +293,12 @@ function resolveScouting(state: GameState, digest: string[]): void {
       }`,
     );
     // 카드는 모델이 그 줄을 읽은 턴에 선다 — 이 다이제스트가 장면 뒤에 굴러온
-    // 것일 수 있어서다 (`takeReportCards` — agents.md §6)
-    pushReportCards(state, [player.id]);
+    // 것일 수 있어서다 (`peekReportCards` — agents.md §6)
+    reportCardLost(
+      state,
+      pushReportCards(state, [player.id]),
+      `대기 줄이 가득 찼다 (${PENDING_REPORT_CARD_LIMIT}장)`,
+    );
     pushNarrative(state, `${player.name} 스카우트 보고서 입수`, 2);
     // 보고서를 읽는 것이 감독의 눈을 기른다 (docs/simulation/career.md §3)
     const grown = grantManagerXP(state, "analysis", SCOUT_REPORT_XP);
@@ -286,7 +327,11 @@ function resolveMissions(state: GameState, digest: string[]): void {
       `스카우트 임무 보고 도착 — ${missionReportLine(state, mission.id) ?? missionLabel(mission)}`,
     );
     // 카드는 모델이 그 줄을 읽은 턴에 선다 — 보고서와 같은 줄에 세운다
-    pushReportCards(state, [mission.id]);
+    reportCardLost(
+      state,
+      pushReportCards(state, [mission.id]),
+      `대기 줄이 가득 찼다 (${PENDING_REPORT_CARD_LIMIT}장)`,
+    );
     pushNarrative(state, `스카우트 임무 보고 입수 — ${missionLabel(mission)}`, 2);
     const grown = grantManagerXP(state, "analysis", MISSION_REPORT_XP);
     if (grown) digest.push(grown);

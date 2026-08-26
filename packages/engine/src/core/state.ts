@@ -828,8 +828,12 @@ export interface GameState {
    * 붙이면 모델은 못 읽은 금액을 지어내고, 카드와 대사가 갈린다
    * (→ [docs/llm/agents.md](../../../../docs/llm/agents.md) §6).
    *
-   * `pendingNews`와 같은 규약이다 — 모아 두었다가 스냅샷에 실린 턴에 비워진다
-   * (`takeReportCards`). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * ⚠️ **`pendingNews`와 비우는 조건이 다르다.** 저쪽은 실린 턴에 무조건 비워지고,
+   * 이 줄은 **카드가 실제로 선 것만** 비운다(`peekReportCards` → `consumeReportCards`).
+   * 조립에 실패한 id는 줄에 남고, 영영 못 세울 것만 `pruneReportCards`가 닫는다 —
+   * 사무실에 스카우팅 화면이 없어 이 줄에서 사라진 보고서는 되찾을 자리가 없다
+   * (→ [docs/data/player.md](../../../../docs/data/player.md) §9.4-1).
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   pendingReportCards?: string[];
   /** 스카우트 파견·완료 이력 — 타 팀 선수 안개의 근거 (scouting.ts) */
@@ -1329,8 +1333,22 @@ export function resolvePlayerRef(pool: readonly GamePlayer[], ref: string): Play
   return { player: best, candidates: matches };
 }
 
+/**
+ * 이름 하나 — **세계를 떠난 사람도 부를 수 있어야 한다.** id가 화면이나 프롬프트에
+ * 그대로 실리면 감독은 그것이 누구였는지 알 길이 없다.
+ *
+ * 명단에서 빠진 사람을 찾는 자리는 둘이고 순서가 있다: 우리 팀에서 그만둔 사람은
+ * **은퇴 명부**(`retired` — 감독 팀만 담는다), 남의 팀 사람은 **시즌 기록**의
+ * `playerName`(사라진 이름을 위해 적어 두는 칸 — records.ts). 둘 다 없으면 id다.
+ */
 export function playerName(state: GameState, id: string): string {
-  return playerById(state, id)?.name ?? id;
+  return (
+    playerById(state, id)?.name ??
+    (state.retired ?? []).find((r) => r.gamePlayerId === id)?.name ??
+    state.seasonStats.find((s) => s.gamePlayerId === id && s.playerName !== undefined)
+      ?.playerName ??
+    id
+  );
 }
 
 export function groupOf(player: GamePlayer): PositionGroup {
@@ -3460,30 +3478,78 @@ export function takeMedia(state: GameState): MediaFact[] {
 }
 
 /**
- * 카드를 기다리는 보고서 수 상한 — 아무도 꺼내지 않는 경로(mock)에서 줄이 무한히
- * 자라지 않게. 실모드는 매 평시 턴 꺼내므로 파견 한도(3) 위로 잘 가지 않는다.
+ * 카드를 기다리는 보고서 수 상한 — 경기가 여러 턴 이어지는 동안처럼 아무도 꺼내지
+ * 않는 구간에서 줄이 무한히 자라지 않게. 평시 턴은 실모드도 mock도 매 턴 꺼내므로
+ * 파견 한도(3) 위로 잘 가지 않는다.
  */
 export const PENDING_REPORT_CARD_LIMIT = 12;
 
-/** 아직 카드로 세우지 않은 보고서를 줄에 세운다 — 도착한 순서대로 */
-export function pushReportCards(state: GameState, playerIds: readonly string[]): void {
-  if (playerIds.length === 0) return;
+/**
+ * 아직 카드로 세우지 않은 보고서를 줄에 세운다 — 도착한 순서대로.
+ *
+ * 넘치면 **뒤에서** 자르고 잘린 id를 돌려준다. 앞에서 자르면 가장 오래 기다린
+ * 보고서가 카드 한 번 없이 사라지는데, 그것이 카드에 가장 가까운 한 장이다.
+ * 방금 도착한 것은 그 값이 이번 턴 다이제스트에 이미 실려 모델이 읽은 뒤다.
+ * 부르는 쪽은 돌려받은 것을 반드시 사실로 남긴다 (player.md §9.4-1).
+ */
+export function pushReportCards(state: GameState, ids: readonly string[]): string[] {
+  if (ids.length === 0) return [];
   const queue = (state.pendingReportCards ??= []);
-  for (const id of playerIds) if (!queue.includes(id)) queue.push(id);
-  if (queue.length > PENDING_REPORT_CARD_LIMIT) {
-    queue.splice(0, queue.length - PENDING_REPORT_CARD_LIMIT);
-  }
+  for (const id of ids) if (!queue.includes(id)) queue.push(id);
+  return queue.length > PENDING_REPORT_CARD_LIMIT
+    ? queue.splice(PENDING_REPORT_CARD_LIMIT, queue.length - PENDING_REPORT_CARD_LIMIT)
+    : [];
 }
 
 /**
- * 카드로 세울 보고서를 앞에서 `limit`개만 꺼내 비운다.
+ * 카드로 세울 후보를 줄 앞에서 `limit`개만 **본다** — 줄은 건드리지 않는다.
  *
- * 남은 것은 줄에 그대로 둔다 — 잘라 버리면 며칠을 기다려 산 보고서가 화면에
- * 한 번도 안 뜬다. 다음 턴이 이어서 세운다.
+ * 꺼내는 것과 지우는 것이 갈려 있는 이유는 조립이 실패할 수 있어서다(그 사이
+ * 은퇴해 `state.players`에서 빠진 선수). 꺼내면서 지우면 카드가 서지 않은 보고서가
+ * 아무 말 없이 없어지고, 사무실에 스카우팅 화면이 없어 되찾을 자리가 없다
+ * (player.md §9.4-1).
+ *
+ * `skip`은 이번 턴에 이미 조립을 시도했다가 실패해 줄에 되돌린 id다 — 한 턴에 줄을
+ * 두 번 보는 경로(손잡이가 시계를 옮긴 턴)가 같은 자리에서 다시 멎지 않게 한다.
  */
-export function takeReportCards(state: GameState, limit: number): string[] {
+export function peekReportCards(
+  state: GameState,
+  limit: number,
+  skip: ReadonlySet<string> = new Set(),
+): string[] {
   const take = Math.max(0, limit);
+  if (take === 0) return [];
+  return (state.pendingReportCards ?? []).filter((id) => !skip.has(id)).slice(0, take);
+}
+
+/** 줄에서 id를 걷어낸다 — 아래 두 자가 쓰는 한 자리 */
+function removeReportCards(state: GameState, ids: readonly string[]): void {
+  if (ids.length === 0) return;
+  const gone = new Set(ids);
+  state.pendingReportCards = (state.pendingReportCards ?? []).filter((id) => !gone.has(id));
+}
+
+/** 카드가 **실제로 선** id만 줄에서 지운다 — 줄에서 빼는 두 자리 중 하나 */
+export function consumeReportCards(state: GameState, ids: readonly string[]): void {
+  removeReportCards(state, ids);
+}
+
+/**
+ * 영영 못 세울 보고서를 줄에서 닫는다 — 줄에서 빼는 나머지 한 자리, tick 전용.
+ *
+ * 되돌려 봐야 다음 턴도 실패하는 것만 닫는다: 카드를 조립할 선수가 장부에 없고
+ * (은퇴로 `state.players`에서 빠졌다) 완료된 임무도 아닌 id다. 닫은 id를 돌려주므로
+ * 부르는 쪽이 그 사실을 감독에게 닿는 자리에 남긴다 (player.md §9.4-1).
+ */
+export function pruneReportCards(state: GameState): string[] {
   const queue = state.pendingReportCards ?? [];
-  state.pendingReportCards = queue.slice(take);
-  return queue.slice(0, take);
+  if (queue.length === 0) return [];
+  const done = new Set(
+    (state.scoutMissions ?? []).filter((m) => m.completedOn !== null).map((m) => m.id),
+  );
+  // 명단은 한 번만 훑는다 — tick이 하루에 한 번 부르는 자리라 줄 길이만큼 되훑지 않는다
+  const alive = new Set(state.players.map((p) => p.id));
+  const dead = queue.filter((id) => !done.has(id) && !alive.has(id));
+  removeReportCards(state, dead);
+  return dead;
 }
