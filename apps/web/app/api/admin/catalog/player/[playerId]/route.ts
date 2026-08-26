@@ -25,6 +25,9 @@ const PatchSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, "출생년월일 형식(YYYY-MM-DD)이 올바르지 않습니다")
     .optional(),
   position: z.string().min(1).optional(),
+  /** 국적 — 협회 코드. 둘째는 빈 문자열이 "지운다"는 뜻이라 `min(1)`이 아니다 */
+  nationality: z.string().length(3).optional(),
+  secondNationality: z.string().max(3).optional(),
   /** 소속 팀 이동 — 방출은 `freeagents`로 옮기는 것이다 */
   teamId: z.string().min(1).optional(),
   ...axisFields,

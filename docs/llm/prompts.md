@@ -89,7 +89,7 @@
 
 ## 2. 스킬 표면 — 한 판단은 한 도구
 
-도구는 **40개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
+도구는 **50개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
 지시 해석이 JSON 하나를 내고 코어가 같은 스킬 함수를 부른다
 ([agents.md](./agents.md) §3). 같은 순간에 함께 정해지는 것들이
 갈려 있으면 GM이 하나를 빠뜨린다 — 라인업은 1·2군 이동까지 한 요청(`set_lineup`의
@@ -99,15 +99,15 @@
 층만 옮기는 1·2군 이동은 `set_squad_level`이 따로 받는다. `set_lineup`으로 보내면 선발
 열한 자리를 다시 적게 해, 감독이 말하지 않은 배치까지 이 한마디에 딸려 바뀐다.
 
-| 그룹      | 수  | 도구                                                                                                                                                                                                                  |
-| --------- | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 진행      | 5   | `start_match` · `accept_manager_offer` · `counter_manager_offer` · `apply_manager_job` · `resign`                                                                                                                     |
-| 전술·훈련 | 10  | `set_lineup` · `set_squad_level` · `set_captain` · `set_tactics` · `set_player_tactic` · `exploit_point` · `set_match_plan` · `set_training` · `set_development_focus` · `set_reserve_training`                       |
-| 대화·서사 | 5   | `team_talk` · `talk_to_player` · `respond_to_media` · `respond_to_approach` · `apply_narrative_event`                                                                                                                 |
-| 경기      | 1   | `substitute`                                                                                                                                                                                                          |
-| 이적      | 12  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `withdraw_offer` · `release_player` · `recall_loan` · `exercise_buyback` |
-| 재정      | 6   | `apply_finance_event` · `adjust_transfer_budget` · `request_board` · `set_ticket_price` · `fund_transfer_budget` · `pay_player_bonus`                                                                                 |
-| 조회      | 7   | `search_players` · `get_squad` · `get_team` · `get_league` · `get_career` · `get_finance` · `scout_player`                                                                                                            |
+| 그룹      | 수  | 도구                                                                                                                                                                                                                                               |
+| --------- | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 진행      | 5   | `start_match` · `accept_manager_offer` · `counter_manager_offer` · `apply_manager_job` · `resign`                                                                                                                                                  |
+| 전술·훈련 | 11  | `set_lineup` · `set_squad_level` · `set_captain` · `set_tactics` · `set_player_tactic` · `set_set_piece_takers` · `exploit_point` · `set_match_plan` · `set_training` · `set_development_focus` · `set_reserve_training`                           |
+| 대화·서사 | 5   | `team_talk` · `talk_to_player` · `respond_to_media` · `respond_to_approach` · `apply_narrative_event`                                                                                                                                              |
+| 경기      | 1   | `substitute`                                                                                                                                                                                                                                       |
+| 이적      | 13  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `respond_transfer_request` · `withdraw_offer` · `release_player` · `recall_loan` · `exercise_buyback` |
+| 재정      | 6   | `apply_finance_event` · `adjust_transfer_budget` · `request_board` · `set_ticket_price` · `fund_transfer_budget` · `pay_player_bonus`                                                                                                              |
+| 조회      | 9   | `search_players` · `get_squad` · `get_team` · `get_league` · `get_match_report` · `get_opponent_report` · `get_career` · `get_finance` · `scout_player`                                                                                            |
 
 ### 계약은 넷으로 갈린다
 
@@ -323,6 +323,10 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
   이름을 대므로 **같은 말을 하는 레이블 줄은 지운다**(`<press id="…">` 안에 "기자회견
   대기"를 다시 적지 않는다). 어느 태그가 무엇을 싣는지는
   [agents.md](./agents.md) §6.
+- **이름이 몫을 말하지 않는 태그는 「입력」이 한 낱말로 붙인다** — `alerts(주의)` ·
+  `coach(코치가 고른 사실)`. `<coach>`는 이름이 코치를 대도 안에 든 것이 그 코치가
+  **고른 사실**이라는 것까지는 말하지 않고, 블록은 지시문을 싣지 않으므로(원칙 7)
+  그 자리를 「입력」이 진다. 새 태그가 서면 그 열거를 함께 고친다.
 - **협상 서류 안의 줄(`[오퍼 이력] …`)은 레이블로 남는다** — 한 서류 안의 항목이라 경계가
   레이블로 족하다. 결산·압축의 브리프는 메시지 하나가 문서 하나라 마크다운 절로 구분한다.
 
@@ -415,12 +419,13 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
   장면은 B에서 연다". 헤더에 적힌 날짜가 화면에 그대로 서므로 날짜 하나는 일러 준다.
 
 **`<club>`의 선수단 줄 — 이름만.** 인원 한 줄 아래에 1군과 2군의 이름을 각각 한 줄로
-싣고, 주장은 이름 뒤에 `(주장)`으로 붙는다. 구분자는 쉼표가 아니라 가운뎃점이다 — 한국어
-성명에 공백이 들어가서 쉼표로 이으면 어디서 한 사람이 끝나는지가 흐려진다.
+싣고, 완장은 이름 뒤에 `(주장)`·`(부주장)`으로 붙는다. 구분자는 쉼표가 아니라
+가운뎃점이다 — 한국어 성명에 공백이 들어가서 쉼표로 이으면 어디서 한 사람이 끝나는지가
+흐려진다.
 
 ```
 선수단 40명
-- 1군 25: 김태훈(주장) · 박승우 · 이도현 · …
+- 1군 25: 김태훈(주장) · 박승우(부주장) · 이도현 · …
 - 2군 15: 정하늘 · 윤재민 · …
 ```
 

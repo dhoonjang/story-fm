@@ -41,7 +41,9 @@ import {
   digestLines,
   finalizeMatch,
   openRenewal,
+  openTransferRequests,
   renewalExpectation,
+  respondTransferRequest,
   incomingOffer,
   incomingOffers,
   pendingOffer,
@@ -78,6 +80,7 @@ import {
   packetTagContext,
   packetTagText,
   pressFactText,
+  TRANSFER_REQUEST_REASON_KO,
 } from "@story-fm/domain";
 import type { ShootoutOutcome } from "@story-fm/domain";
 import {
@@ -174,17 +177,27 @@ function renderSegment(state: GameState, events: MatchEvent[], stop: string): st
   return lines.join("\n");
 }
 
+/** 죽은 공에서 나온 슛인가 — 목 GM도 그 사실을 문장에 싣는다 (match.md §1.4) */
+const MOCK_ORIGIN_KO: Record<string, string> = {
+  corner: "코너에서 ",
+  free_kick: "프리킥에서 ",
+  penalty: "페널티킥 — ",
+};
+
 function renderEvent(state: GameState, ev: MatchEvent): string[] {
   const name = ev.actors[0] ? playerName(state, ev.actors[0]) : "";
+  const from = ev.shotOrigin ? (MOCK_ORIGIN_KO[ev.shotOrigin] ?? "") : "";
   switch (ev.type) {
     case "kickoff":
       return [`@중계: 킥오프! 경기가 시작됩니다.`];
     case "goal": {
       const cause = ev.causes[0] ? ` (${packetTagText(ev.causes[0])})` : "";
-      return [`@중계: *${ev.minute}′ — ${name}, 골입니다!* ${scoreLine(state)}${cause}`];
+      return [`@중계: *${ev.minute}′ — ${from}${name}, 골입니다!* ${scoreLine(state)}${cause}`];
     }
     case "shot":
-      return [`@중계: ${ev.minute}′ ${name}의 슛 — 아깝게 빗나갑니다.`];
+      return [`@중계: ${ev.minute}′ ${from}${name}의 슛 — 아깝게 빗나갑니다.`];
+    case "foul":
+      return [`@중계: ${ev.minute}′ ${name}의 반칙 — 주심이 점을 가리킵니다!`];
     case "chance":
       return [`@중계: ${ev.minute}′ ${name}에게 기회가 왔지만 마무리가 아쉽습니다.`];
     case "save":
@@ -197,6 +210,11 @@ function renderEvent(state: GameState, ev: MatchEvent): string[] {
       return [
         `@: *교체 보드가 올라간다 — ${playerName(state, ev.actors[0] ?? "")} OUT, ${playerName(state, ev.actors[1] ?? "")} IN*`,
       ];
+    // 상대 벤치가 판을 옮겼다 — 문장은 근거 태그의 렌더러가 만든다 (match.md §2)
+    case "tactical_shift":
+      return ev.causes[0]
+        ? [`@중계: ${ev.minute}′ 상대 벤치가 움직입니다 — ${packetTagText(ev.causes[0])}.`]
+        : [];
     default:
       return [];
   }
@@ -797,6 +815,26 @@ function computeMockGmTurn(
     };
   }
 
+  /**
+   * 이적 요청에 답한다 — **이적 분기보다 먼저 본다.** 요청을 말하는 문장에는
+   * 「이적」이 들어 있어 뒤에 두면 협상 분기가 먼저 삼킨다.
+   *
+   * 기본은 거부다 — mock은 세계를 최소로 움직인다.
+   */
+  const request = openTransferRequests(state)[0];
+  if (request && /이적 요청|요청.*(수락|받아들|거부|거절)|안 판다|못 판다|보낸다/u.test(msg)) {
+    const input = {
+      playerId: request.gamePlayerId,
+      answer: /수락|받아들|보낸다|보내겠/u.test(msg) ? ("accept" as const) : ("refuse" as const),
+    } as const;
+    const result = respondTransferRequest(state, input);
+    recordCall(calls, "respond_transfer_request", result, { input, line: 2 });
+    return {
+      text: `@: *책상 위에 놓인 요청서 한 장*\n@${playerName(state, request.gamePlayerId)}: ${TRANSFER_REQUEST_REASON_KO[request.reason]} 때문입니다. 보내 주십시오.\n${coach(state)} ${result.message}`,
+      toolCalls: calls,
+    };
+  }
+
   // ── 이적 협상 (mock) — 실모드는 LLM이 상대편이 되어 판정하지만 mock은 테스트
   // 재현성을 위해 확률 구간으로 가른다 (수락 / 조정 / 결렬)
   if (/협상|오퍼|이적|영입|매각|팔|사자|데려/u.test(msg)) {
@@ -968,7 +1006,7 @@ function computeMockGmTurn(
   if (/주장/u.test(msg)) {
     const target = detectPlayer(state, msg);
     if (target) {
-      const result = setCaptain(state, target.id);
+      const result = setCaptain(state, { playerId: target.id });
       recordCall(calls, "set_captain", result, { input: { playerId: target.id } });
       return { text: `${coach(state)} ${result.message}`, toolCalls: calls };
     }

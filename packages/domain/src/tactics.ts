@@ -69,6 +69,21 @@ export const TACTIC_SCALE_NEUTRAL = 3;
 
 const Scale5 = z.number().int().min(TACTIC_SCALE_MIN).max(TACTIC_SCALE_MAX);
 
+/**
+ * 전환 국면의 갈래 — **공을 뺏은 뒤 무엇을 하나.**
+ * 곧장 앞으로(`counter`)냐 자리부터(`regroup`)냐는 1~5 사이 어딘가가 아니라 둘 중 하나다.
+ */
+export const TRANSITION_MODES = ["counter", "regroup"] as const;
+export type TransitionMode = (typeof TRANSITION_MODES)[number];
+
+/** 태클 강도 — `normal`이 중립이라 델타가 0인 자리다 */
+export const TACKLING_LEVELS = ["soft", "normal", "hard"] as const;
+export type TacklingLevel = (typeof TACKLING_LEVELS)[number];
+
+/** 골키퍼 배급 — 뒤에서 풀어 나가나(`short`) 넘겨 버리나(`long`) */
+export const KEEPER_DISTRIBUTIONS = ["short", "long"] as const;
+export type KeeperDistribution = (typeof KEEPER_DISTRIBUTIONS)[number];
+
 /** 전술 본체 (TACTICS) — 개인 지시는 배치(TacticAssignment)로 이동 */
 export const TacticsSpecSchema = z.object({
   /** 지금 판의 모양 — 배치 좌표의 파생값이다 (`shapeOf`) */
@@ -82,11 +97,25 @@ export const TacticsSpecSchema = z.object({
   width: Scale5,
   /** 1(짧게) ~ 5(길게) */
   passStyle: Scale5,
+  /**
+   * ── 토글 넷 — **축이 아니라 갈래다** (→ docs/simulation/match.md §1.2).
+   *
+   * 여섯 축은 늘리지 않는다(대칭·프리셋 리그 평균 3·`TACTIC_SWING` 예산이 전부 다시
+   * 서야 한다). 넷 모두 optional이고 **없으면 중립**이라 옛 세이브는 셈이 한 칸도
+   * 달라지지 않는다 — SAVE_VERSION 유지. `null`은 감독이 지시를 푼 자리다.
+   */
+  transition: z.enum(TRANSITION_MODES).nullable().optional(),
+  offsideTrap: z.boolean().optional(),
+  tackling: z.enum(TACKLING_LEVELS).optional(),
+  keeperDistribution: z.enum(KEEPER_DISTRIBUTIONS).nullable().optional(),
 });
 export type TacticsSpec = z.infer<typeof TacticsSpecSchema>;
 
+/** 갈래로 서는 넷 — 눈금이 없으므로 `TacticAxisKey`와 자리가 다르다 */
+export type TacticToggleKey = "transition" | "offsideTrap" | "tackling" | "keeperDistribution";
+
 /** 슬라이더가 아닌 축 — 모양은 좌표에서 읽는 이름이라 눈금이 없다 */
-export type TacticAxisKey = Exclude<keyof TacticsSpec, "formation">;
+export type TacticAxisKey = Exclude<keyof TacticsSpec, "formation" | TacticToggleKey>;
 
 export interface TacticAxis {
   key: TacticAxisKey;
@@ -144,6 +173,102 @@ export const TACTIC_AXES: readonly TacticAxis[] = [
   },
 ];
 
+/**
+ * 갈래 하나 — 눈금이 없어 `TacticAxis`와 그릇이 다르다.
+ *
+ * 값이 `string`·`boolean`·`null`로 갈리므로 낱말표의 키는 **값을 문자열로 적은 것**
+ * 하나로 모은다(`true`·`false`도 그렇다). 두 벌로 두면 같은 값이 판과 카드에서 다른
+ * 낱말로 선다 — `TACTIC_AXES`가 하나여야 하는 이유와 같다.
+ */
+export interface TacticToggle {
+  key: TacticToggleKey;
+  /** 갈래의 이름 — 전술판·상대 전술 카드가 세우는 그것 */
+  label: string;
+  /** 값과 **함께** 한 줄에 설 때의 짧은 이름 */
+  brief: string;
+  /** 값(문자열) → 낱말 */
+  words: Readonly<Record<string, string>>;
+  /**
+   * 중립으로 읽는 값 — 이 값이면 **지시하지 않은 것과 같다**(델타 0, 지문에 안 붙는다).
+   * 값이 없는 옛 세이브도 여기로 접힌다.
+   */
+  neutralValue: string | null;
+  /** 중립일 때의 낱말 */
+  neutralWord: string;
+}
+
+/**
+ * **갈래 넷의 낱말표는 여기 하나다** (→ docs/simulation/match.md §1.2).
+ *
+ * 축은 3이 중립이고 위아래가 대칭이어야 하지만, 갈래는 **아무 데도 서지 않은 상태가
+ * 중립**이고 켠 쪽만 이득과 대가를 함께 낸다. 그래서 지시하지 않는 것이 손해가 아니다.
+ */
+export const TACTIC_TOGGLES: readonly TacticToggle[] = [
+  {
+    key: "transition",
+    label: "전환",
+    brief: "전환",
+    words: { counter: "역습", regroup: "재정비" },
+    neutralValue: null,
+    neutralWord: "지시 없음",
+  },
+  {
+    key: "offsideTrap",
+    label: "오프사이드 트랩",
+    brief: "트랩",
+    words: { true: "건다" },
+    neutralValue: "false",
+    neutralWord: "걸지 않는다",
+  },
+  {
+    key: "tackling",
+    label: "태클",
+    brief: "태클",
+    words: { soft: "약하게", hard: "강하게" },
+    neutralValue: "normal",
+    neutralWord: "보통",
+  },
+  {
+    key: "keeperDistribution",
+    label: "GK 배급",
+    brief: "배급",
+    words: { short: "짧게", long: "길게" },
+    neutralValue: null,
+    neutralWord: "지시 없음",
+  },
+];
+
+/** 갈래의 키만 — 지문·거리·화면이 훑는 순서다 */
+export const TACTIC_TOGGLE_KEYS: readonly TacticToggleKey[] = TACTIC_TOGGLES.map((t) => t.key);
+
+const TACTIC_TOGGLE_BY_KEY: ReadonlyMap<TacticToggleKey, TacticToggle> = new Map(
+  TACTIC_TOGGLES.map((toggle) => [toggle.key, toggle]),
+);
+
+export function tacticToggleOf(key: TacticToggleKey): TacticToggle {
+  return TACTIC_TOGGLE_BY_KEY.get(key)!;
+}
+
+/**
+ * 지금 이 갈래에 서 있는 값 — **중립이면 `null`**.
+ *
+ * 델타·지문·거리·화면이 전부 이 함수 하나로 "감독이 이 갈래를 지시했나"를 묻는다.
+ * 각자 `=== undefined || === null || === false || === "normal"`을 적으면 어느 하나가
+ * 빠지는 날 같은 전술이 두 지문을 갖는다.
+ */
+export function tacticToggleValue(spec: TacticsSpec, key: TacticToggleKey): string | null {
+  const raw = spec[key];
+  if (raw === undefined || raw === null) return null;
+  const value = String(raw);
+  return value === tacticToggleOf(key).neutralValue ? null : value;
+}
+
+/** 갈래 하나의 낱말 — `null`(중립)도 낱말을 갖는다 */
+export function tacticToggleWord(key: TacticToggleKey, value: string | null): string {
+  const toggle = tacticToggleOf(key);
+  return value === null ? toggle.neutralWord : (toggle.words[value] ?? toggle.neutralWord);
+}
+
 const TACTIC_AXIS_BY_KEY: ReadonlyMap<TacticAxisKey, TacticAxis> = new Map(
   TACTIC_AXES.map((axis) => [axis.key, axis]),
 );
@@ -164,6 +289,24 @@ export function tacticAxisScaleText(axis: TacticAxis): string {
   const low = axis.words[0];
   const high = axis.words[axis.words.length - 1]!;
   return `${axis.label}(${TACTIC_SCALE_MIN} ${low}~${TACTIC_SCALE_MAX} ${high})`;
+}
+
+/**
+ * 한 팀의 판을 한 줄로 — `4-2-3-1 · 멘탈 균형 · 라인 낮게 · …` (짧은 이름 `brief`).
+ *
+ * 읽는 곳이 둘이라(경기 전 상대 분석의 조회 도구와 GM 스냅샷) 각자 이으면 같은
+ * 전술이 두 문장으로 읽힌다. 화면은 축을 칩으로 따로 세우므로 이 줄을 쓰지 않는다.
+ */
+export function tacticsBrief(spec: TacticsSpec): string {
+  return [
+    spec.formation,
+    ...TACTIC_AXES.map((axis) => `${axis.brief} ${tacticWord(axis.key, spec[axis.key])}`),
+    // 중립인 갈래는 서지 않는다 — 지시하지 않은 것을 줄로 세우면 넷이 늘 붙어 있다
+    ...TACTIC_TOGGLES.flatMap((toggle) => {
+      const value = tacticToggleValue(spec, toggle.key);
+      return value === null ? [] : [`${toggle.brief} ${tacticToggleWord(toggle.key, value)}`];
+    }),
+  ].join(" · ");
 }
 
 /** 리서치 값이 없는 구단이 서는 모양 — 프리셋이어야 좌표를 꺼낼 수 있다 */
@@ -206,9 +349,11 @@ export function migratePassStyle(value: unknown): number {
  */
 export function migrateSignature(signature: string): string {
   const parts = signature.split("|");
-  const last = parts[parts.length - 1];
-  if (last === undefined || !Number.isNaN(Number(last))) return signature;
-  parts[parts.length - 1] = String(migratePassStyle(last));
+  // 마지막 칸이 아니라 **여섯째 축의 자리**다 — 뒤에 켜 둔 갈래가 붙을 수 있다
+  const at = TACTIC_AXES.length;
+  const passStyle = parts[at];
+  if (passStyle === undefined || !Number.isNaN(Number(passStyle))) return signature;
+  parts[at] = String(migratePassStyle(passStyle));
   return parts.join("|");
 }
 
@@ -294,7 +439,16 @@ export function tacticsAffinityShift(
  * 되찾을 수 있다 (`drilled` 기억의 키).
  */
 export function tacticsSignature(spec: TacticsSpec): string {
-  return [spec.formation, ...TACTIC_AXIS_KEYS.map((a) => spec[a])].join("|");
+  /**
+   * **중립이 아닌 갈래만 뒤에 붙인다.** 아무 데도 서지 않은 전술의 지문은 갈래가
+   * 생기기 전과 바이트까지 같아, 옛 세이브의 기억이 그대로 이어진다 — 늘 붙이면
+   * 모든 기억이 한 번에 "처음 보는 전술"이 되고 `drilled`가 두 벌로 불어난다.
+   */
+  const toggles = TACTIC_TOGGLE_KEYS.flatMap((key) => {
+    const value = tacticToggleValue(spec, key);
+    return value === null ? [] : [`${key}=${value}`];
+  });
+  return [spec.formation, ...TACTIC_AXIS_KEYS.map((a) => spec[a]), ...toggles].join("|");
 }
 
 /**
@@ -306,9 +460,20 @@ export function tacticsSignature(spec: TacticsSpec): string {
 /** 포메이션을 갈아엎는 값 — 슬라이더 한 축을 끝까지 미는 것보다 크다 */
 export const FORMATION_CHANGE_COST = 25;
 
+/**
+ * 갈래 하나를 새로 익히는 값 — **라인·압박 한 칸과 같은 4**.
+ *
+ * 칸 수를 세지 않는다(`hard`↔`soft`도 4). 갈래는 눈금이 아니라 약속이라 "몇 칸
+ * 떨어졌나"를 물을 자리가 없고, 드는 품은 열한 명이 손발을 다시 맞추는 그것이다.
+ */
+const TOGGLE_COST = 4;
+
 export function tacticsDistance(a: TacticsSpec, b: TacticsSpec): number {
   let d = a.formation !== b.formation ? FORMATION_CHANGE_COST : 0;
   for (const axis of TACTIC_AXIS_KEYS) d += Math.abs(a[axis] - b[axis]) * AXIS_COST[axis];
+  for (const key of TACTIC_TOGGLE_KEYS) {
+    if (tacticToggleValue(a, key) !== tacticToggleValue(b, key)) d += TOGGLE_COST;
+  }
   return d;
 }
 
@@ -978,9 +1143,13 @@ export type AssignmentRole = z.infer<typeof AssignmentRoleSchema>;
  * 팀 전체의 성향이라면 이쪽은 **특정 상대·특정 선수를 겨눈 지시**다.
  *
  * 이득·대가·체력 소모의 계수는 전부 `packages/sim/src/directives.ts`의
- * `DIRECTIVE_TUNING` 한 표에 있다. **종류를 늘리지 않는다** — 이 목록은 감독이
- * 말할 법한 것의 목록이지 효과의 목록이 아니라서, 자연어의 다양함은 `instruction`이
- * 받고 장부는 이 다섯으로 접힌다.
+ * `DIRECTIVE_TUNING` 한 표에 있다.
+ *
+ * **자연어를 옮길 그릇이 부족할 때만 늘린다.** 이 목록은 감독이 말할 법한 것의
+ * 목록이지 효과의 목록이 아니라서, 표현의 다양함은 `instruction`이 받고 장부는 여기로
+ * 접힌다 — 같은 뜻의 말에 갈래를 하나 더 파는 것은 접는 일을 그만두는 것이다.
+ * 갈래가 서는 것은 **접을 곳이 아예 없을 때**뿐이고, 그때는 그 갈래가 판에서 움직이는
+ * 자리가 다른 넷과 달라야 한다 (`careful`은 존 전력이 아니라 카드 가중을 움직인다).
  */
 export const PLAYER_DIRECTIVE_KINDS = [
   /** 상대 한 명을 전담 마크 — 그를 지우는 대신 본업을 덜 한다 */
@@ -993,6 +1162,8 @@ export const PLAYER_DIRECTIVE_KINDS = [
   "stay_back",
   /** 적극적으로 공격 가담 */
   "join_attack",
+  /** 발을 뺀다 — 카드 위험을 낮추는 대신 그 자리의 수비가 얇아진다 */
+  "careful",
 ] as const;
 export const PlayerDirectiveKindSchema = z.enum(PLAYER_DIRECTIVE_KINDS);
 export type PlayerDirectiveKind = z.infer<typeof PlayerDirectiveKindSchema>;
@@ -1003,13 +1174,14 @@ export const PLAYER_DIRECTIVE_KO: Record<PlayerDirectiveKind, string> = {
   focus_play: "공격 집중",
   stay_back: "수비 위치 유지",
   join_attack: "공격 가담",
+  careful: "태클 자제",
 };
 
 /**
  * 지시의 **세기** — 종류가 접는 것은 *무엇을*이고, 이 축이 남기는 것은 *얼마나*다.
  *
  * "붙어서 아예 지워버려"와 "따라가진 말고 견제만"은 같은 `man_mark`지만 같은 지시가
- * 아니다. 종류가 다섯으로 접히는 것은 설계지만(자연어의 다양함은 `instruction`이
+ * 아니다. 종류가 몇으로 접히는 것은 설계지만(자연어의 다양함은 `instruction`이
  * 받는다) 정도까지 접히면 언어가 인터페이스인 게임에서 **감독이 고른 세기가 결과에
  * 남지 않는다.** 이득·대가·체력 소모가 함께 이 배수를 탄다 — 세게 걸수록 얻는 것만
  * 크는 것이 아니다 (`packages/sim/src/directives.ts`의 `DIRECTIVE_TUNING`).
@@ -1367,8 +1539,19 @@ function daysBetween(from: string, to: string): number {
 
 /** 지문 → 설정 (기억에서 거리를 재려면 되돌려야 한다). 형식이 깨졌으면 null */
 function specOfSignature(signature: string): TacticsSpec | null {
-  const [formation, mentality, defensiveLine, pressing, tempo, width, passStyle] =
-    signature.split("|");
+  const parts = signature.split("|");
+  const [formation, mentality, defensiveLine, pressing, tempo, width, passStyle] = parts;
+  /**
+   * 축 뒤에 붙은 `키=값` — 중립이 아닌 갈래만 붙으므로 없는 키는 곧 중립이다.
+   * `offsideTrap=true`만 불리언이라 문자열 그대로 두면 스키마가 반려한다.
+   */
+  const toggles: Record<string, unknown> = {};
+  for (const part of parts.slice(TACTIC_AXIS_KEYS.length + 1)) {
+    const at = part.indexOf("=");
+    if (at < 0) continue;
+    const value = part.slice(at + 1);
+    toggles[part.slice(0, at)] = value === "true" ? true : value === "false" ? false : value;
+  }
   const parsed = TacticsSpecSchema.safeParse({
     formation,
     mentality: Number(mentality),
@@ -1376,8 +1559,9 @@ function specOfSignature(signature: string): TacticsSpec | null {
     pressing: Number(pressing),
     tempo: Number(tempo),
     width: Number(width),
-    // 옛 지문은 마지막 칸이 `mixed` 같은 문자열이다
+    // 옛 지문은 여섯째 칸이 `mixed` 같은 문자열이다
     passStyle: migratePassStyle(Number.isNaN(Number(passStyle)) ? passStyle : Number(passStyle)),
+    ...toggles,
   });
   return parsed.success ? parsed.data : null;
 }
@@ -1464,6 +1648,27 @@ export function familiarityForSetup(
   return clampFamiliarity(best);
 }
 
+/**
+ * **죽은 공을 차는 사람** — 코너·프리킥·페널티 각각 (match.md §1.4).
+ *
+ * 셋을 따로 두는 이유는 실제 축구가 그렇게 나누기 때문이다: 코너를 올리는 발과
+ * 페널티를 넣는 배짱은 다른 능력이고(`kicking` vs `penaltySkill`) 한 사람이 셋을
+ * 다 맡는 팀도 있다. 비어 있는 자리는 코어의 기본값(그라운드 위 최고)이 채운다 —
+ * 지정하지 않은 감독이 손해 보지 않는다.
+ *
+ * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+ */
+export const SetPieceTakersSchema = z.object({
+  corner: z.string().min(1).optional(),
+  freeKick: z.string().min(1).optional(),
+  penalty: z.string().min(1).optional(),
+});
+export type SetPieceTakers = z.infer<typeof SetPieceTakersSchema>;
+
+/** 지정할 수 있는 죽은 공의 갈래 — 스킬·해석·화면이 나눠 쓰는 한 낱말 */
+export const SET_PIECE_ROLES = ["corner", "freeKick", "penalty"] as const;
+export type SetPieceRole = (typeof SET_PIECE_ROLES)[number];
+
 /** 팀의 현재 전술 + 배치 — GAME_TEAM당 1개 (프리셋 확장 여지) */
 export const TeamTacticsSchema = z.object({
   teamId: z.string().min(1),
@@ -1485,5 +1690,10 @@ export const TeamTacticsSchema = z.object({
    * 각자에게 승계할 출발점으로만 남는다.
    */
   drilled: z.array(DrilledTacticsSchema).optional(),
+  /**
+   * **죽은 공 키커** — 코너·프리킥·페널티. 옛 세이브엔 없다 (SAVE_VERSION 유지).
+   * 없거나 그 선수가 그라운드에 없으면 코어의 기본값이 선다 (match.md §1.4).
+   */
+  setPieceTakers: SetPieceTakersSchema.optional(),
 });
 export type TeamTactics = z.infer<typeof TeamTacticsSchema>;

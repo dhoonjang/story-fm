@@ -69,12 +69,14 @@ export const SKILL_CATALOG = [
   },
   {
     name: "set_captain",
-    label: "주장 지정",
+    label: "완장 지정",
     group: "전술·훈련",
     readOnly: false,
     description:
-      "우리 팀 선수 한 명을 주장으로 지명한다. 지명된 선수는 상태가 오르고, 새 영입이면 적응이 앞당겨진다. " +
-      "2군으로 내리면 주장 자리는 자동으로 비워진다.",
+      "우리 팀의 완장을 채운다 — 주장(playerId)과 부주장(vice)을 한 번에 옮길 수 있고, 말한 자리만 바뀐다. " +
+      "주장으로 지명된 선수는 상태가 오르고 새 영입이면 적응이 앞당겨진다(부주장에는 붙지 않는다). " +
+      "완장을 찬 선수의 리더십이 팀토크의 폭을 키우고, 주장이 명단에 없는 경기는 부주장이 완장을 잇는다. " +
+      "2군으로 내리면 완장은 자동으로 비워진다.",
   },
   {
     name: "set_tactics",
@@ -92,7 +94,15 @@ export const SKILL_CATALOG = [
     group: "전술·훈련",
     readOnly: false,
     description:
-      "한 선수의 자리·역할·개인 지시 중 감독이 명시한 항목만 바꾼다. 생략한 항목은 기존 값을 유지한다. 이미 그라운드에 있는 선수만 옮기며 벤치 선수를 넣으려면 substitute를 쓴다. 자리는 move로 옮긴다 — 특정 자리로 바꾸라는 지시에만 position에 코드를 적는다. instruction은 kind를 함께 보내야 판이 움직인다 — 다섯 갈래에 담기지 않는 말이면 지역을 겨냥한 지시인지 보고 set_match_plan을 쓴다. 자연어 포메이션 변경은 get_squad로 현재 배치를 본 뒤 목표 모양에 꼭 필요한 최소 선수만 이동한다. 프리셋을 적용하거나 전원을 자동 재배치하지 않는다.",
+      "한 선수의 자리·역할·개인 지시 중 감독이 명시한 항목만 바꾼다. 생략한 항목은 기존 값을 유지한다. 이미 그라운드에 있는 선수만 옮기며 벤치 선수를 넣으려면 substitute를 쓴다. 자리는 move로 옮긴다 — 특정 자리로 바꾸라는 지시에만 position에 코드를 적는다. instruction은 kind를 함께 보내야 판이 움직인다 — 갈래에 담기지 않는 말이면 지역을 겨냥한 지시인지 보고 set_match_plan을 쓴다. 자연어 포메이션 변경은 get_squad로 현재 배치를 본 뒤 목표 모양에 꼭 필요한 최소 선수만 이동한다. 프리셋을 적용하거나 전원을 자동 재배치하지 않는다.",
+  },
+  {
+    name: "set_set_piece_takers",
+    label: "세트피스 키커",
+    group: "전술·훈련",
+    readOnly: false,
+    description:
+      "죽은 공을 차는 사람을 지정한다 — corner(코너)·freeKick(프리킥)·penalty(페널티) 셋을 따로 둔다. 감독이 말한 자리만 보내고 나머지는 생략한다. 지정을 풀라는 지시에는 그 자리에 null을 보낸다 — 그러면 그라운드 위 킥력 최고(페널티는 결정력·침착성·킥력이 섞인 기량 최고)가 다시 찬다. 지정은 팀 전술에 남아 다음 경기에도 이어지고, 경기 중에도 같은 도구로 바꾼다. 승부차기 순서는 이것이 아니라 경기 중 승부차기 정지점에서 정한다.",
   },
   {
     name: "exploit_point",
@@ -252,10 +262,11 @@ export const SKILL_CATALOG = [
     group: "조회",
     readOnly: true,
     description:
-      '포지션·이름·나이·가용 상태 등으로 선수를 찾는다. team="mine"은 우리 팀, 팀 id·이름은 특정 팀. ' +
+      '포지션·이름·나이·가용 상태에 계약 잔여·값·주급·리스트·홈그로운·잠재력·주발까지 걸어 찾는다. team="mine"은 우리 팀, 팀 id·이름은 특정 팀. ' +
       "team을 생략하면 풀이 5대 리그 1·2부 전체이므로, 우리 리그 안에서 비교할 때는 competition(epl 등)으로 좁힌다. " +
-      'squadLevel="reserve"로 2군 유망주만 볼 수 있고, sortBy는 rating·age·fatigue·goals·apps·wage. ' +
-      "우리 선수는 정확한 정보, 타 팀 선수는 지식 수준에 따른 평가를 반환한다. " +
+      'squadLevel="reserve"는 2군 유망주. 조건은 도구가 걸어라 — limit만큼 훑어 고르지 마라. ' +
+      "sortBy는 age·fatigue·contract만 낮은 쪽이 앞이다. " +
+      "우리 선수는 정확한 정보, 타 팀 선수는 지식 수준에 따른 평가와 값·계약 만료일을 준다. " +
       "playerId를 주면 능력치·컨디션·계약·배치에 부상 이력과 이번 시즌 경고 누적·이동 이력까지 붙은 상세 카드가 나온다 — 감독이 특정 선수를 두고 물으면 그 선수를 논하기 전에 먼저 호출한다.",
   },
   {
@@ -284,10 +295,32 @@ export const SKILL_CATALOG = [
     readOnly: true,
     description:
       'view="standings"는 순위표(competition으로 다른 리그·대항전도 가능), view="fixtures"는 일정 검색이다. ' +
-      '국내 컵은 순위표가 없는 녹아웃이라 view="standings"가 대진표를 돌려준다. ' +
-      '일정은 조건으로 찾는다 — team(기준 팀, 생략하면 우리 팀, "all"이면 대회 전체), opponent(상대 팀 — 주면 그 팀과의 맞대결만 보고 전적 요약이 붙는다), competition(epl·ucl·facup 등), when(past·upcoming·both), from·to(YYYY-MM-DD 범위), round, count. ' +
+      '국내 컵은 view="standings"가 대진표를 돌려준다. ' +
+      '일정은 조건으로 찾는다 — team(기준 팀, 생략하면 우리 팀, "all"이면 대회 전체), opponent(상대 팀 — 맞대결만 보고 전적 요약이 붙는다), competition(epl·ucl·facup 등), when(past·upcoming·both), from·to(YYYY-MM-DD 범위), round, count. ' +
       "순위표에는 최근 5경기 폼이 함께 나온다. " +
-      'view="calendar"는 감독의 달력 — 경기·훈련·이적창 개폐를 한 축에서 날짜순으로 본다. 기본은 오늘부터 14일이고 from·to·days로 범위를, type="training"으로 훈련만 볼 수 있다. 훈련 계획을 묻거나 새 훈련을 잡기 전에 이걸로 확인하라.',
+      'view="calendar"는 감독의 달력 — 경기·훈련·이적창 개폐를 한 축에서 날짜순으로 본다. 기본은 오늘부터 14일이고 from·to·days로 범위를, type="training"으로 훈련만 볼 수 있다. 훈련 계획을 묻거나 새 훈련을 잡기 전에 이걸로 확인하라. from이 지난 날이면 그 사이 벌어진 일이 일지로 함께 온다.',
+  },
+  {
+    name: "get_match_report",
+    label: "경기 리포트",
+    group: "조회",
+    readOnly: true,
+    description:
+      "끝난 경기 하나를 통째로 읽는다 — 타임라인(골의 원인 태그 포함)·팀 스탯(점유·슛·xG·기대 득점·패스·코너·파울·카드)·선수별 기록·평점과 그 한 줄 근거·MOTM. " +
+      "감독이 지난 경기의 내용·패인·누가 잘했는지를 물으면 스코어만 들고 답하지 말고 이걸 부른다. " +
+      "경기는 opponent(상대 팀 이름·약칭)·competition(epl·ucl·facup 등)·date(YYYY-MM-DD)로 고르고, 아무것도 주지 않으면 가장 최근에 끝난 우리 경기다. matchId를 알면 그것만 준다.",
+  },
+  {
+    name: "get_opponent_report",
+    label: "상대 분석",
+    group: "조회",
+    readOnly: true,
+    description:
+      "다음 경기 상대를 경기 전에 읽는다 — 예상 XI(상대의 직전 경기 선발에서 투영)·결장자(부상·정지)·상대 모양과 전술 6축·감독이 읽어 낸 지점(전술 상성과 미스매치). " +
+      '감독이 경기 전에 상대를 묻거나("쟤네 어떻게 나와") 누굴 노릴지·누굴 세울지 상의하면 순위와 최근 5경기만 들고 답하지 말고 이걸 부른다. ' +
+      "지점 줄의 +는 우리에게 이로운 것, -는 상대에게 이로운 것이다. 몇 개가 보이는지는 감독의 분석 능력이, 이름과 수치가 보이는지는 전술 능력이 정한다 — 흐린 줄을 또렷한 척 옮기지 않는다. " +
+      "경기는 opponent(상대 팀 이름·약칭)·competition(epl·ucl·facup 등)·date(YYYY-MM-DD)로 고르고, 아무것도 주지 않으면 다음 우리 경기다. " +
+      "⚠️ 예상 XI는 예상이다 — 상대가 로테이션을 돌리면 갈리므로 확정으로 말하지 않는다. 경기 중에는 부를 수 없다(판세 화면이 지금 판을 들고 있다).",
   },
   {
     name: "get_career",
@@ -393,6 +426,17 @@ export const SKILL_CATALOG = [
     readOnly: false,
     description:
       "우리 선수를 이적 리스트에 올리거나 뺀다 — 감독이 '이 선수는 팔겠다'고 할 때 여기로 온다. askingPrice(호가)를 생략하면 코어의 요구가를 쓴다. 등재하면 그 선수를 노리는 오퍼가 들어오기 시작하고, 비싸게 부를수록 더디 붙는다.",
+  },
+  {
+    name: "respond_transfer_request",
+    label: "이적 요청 응답",
+    group: "이적",
+    readOnly: false,
+    description:
+      "선수가 낸 이적 요청에 답한다 — 요청이 서 있는 선수에게만 부른다. 감독이 먼저 팔기로 한 것은 set_transfer_list다. " +
+      "accept는 그 선수를 이적 리스트에 올리는 것이고 값을 포기하는 결정이다 — askingPrice를 높이 불러도 코어가 요청 할인선까지 끌어내린다. " +
+      "refuse는 요청을 걷지 못한다 — 불만은 남고, 라커룸과 보드가 그 자리에서 움직이며, 거부한 사실은 다음 회견에 실린다. " +
+      "감독이 답을 정하지 않았으면 부르지 말고 먼저 물어라. note에 감독이 밝힌 한 줄을 남긴다.",
   },
   {
     name: "withdraw_offer",

@@ -168,61 +168,73 @@
 
 ### 3.2 팀 · 선수
 
-| 엔티티                           | 무엇                                                                                               | 정의                |
-| -------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------- |
-| `teams` `GameTeam`               | AI 전술 역량치 · 현 감독 이름/부임일 + 카탈로그에서 복사한 정체성(이름·약칭·소속·체급·구장·브랜드) | `domain/team.ts`    |
-| `players` `GamePlayer`           | 16축·상태·포지션 목록·주장·임대·성장 캐리                                                          | `domain/player.ts`  |
-| ↳ `PlayerAttributes`             | 16축 + `overall`(파생 캐시) + `potential`                                                          | `domain/player.ts`  |
-| ↳ `PlayerState`                  | 폼(−1\~1) · 체력(0\~100) · 부상 성향 · 심경 한 줄                                                  | `domain/player.ts`  |
-| ↳ `PlayerPosition`               | 가능 포지션 + 적응도 + `isNatural`(하나 이상)                                                      | `domain/player.ts`  |
-| `tactics` `TeamTactics`          | 팀당 1개 — `spec` + `assignments` + `shelved` + 팀 기억                                            | `domain/tactics.ts` |
-| ↳ `TacticsSpec`                  | 모양 이름(파생 — 프리셋 밖도 담는다) + 전술 6축(각 1\~5)                                           | `domain/tactics.ts` |
-| ↳ `TacticAssignment`             | **라인업의 원본** — 자리·좌표·역할·적응도·개인 지시·개인 기억                                      | `domain/tactics.ts` |
-| ↳ `PlayerDirective`              | 결과에 닿는 개인 지시 5종 (`instruction`은 사람이 읽는 말)                                         | `domain/tactics.ts` |
-| ↳ `DrilledTactics`               | 전술 지문 → 그때 도달한 적응도 (선수별)                                                            | `domain/tactics.ts` |
-| ↳ `ShelvedFamiliarity`           | **배치가 없는 동안 적응도·기억이 머무는 자리** (2군·예비)                                          | `domain/tactics.ts` |
-| `contracts` `Contract`           | **주급의 원본** — 선수당 `active` 정확히 1건                                                       | `domain/records.ts` |
-| `finances` `TeamFinance`         | 팀당 1개 — 잔고·이적 예산·원장·낙하산                                                              | `domain/records.ts` |
-| ↳ `LedgerEntry`                  | 원장 한 줄 — 유저 팀만 상세, 최근 3개월 롤링                                                       | `domain/records.ts` |
-| `financeReports` `FinanceReport` | 월간 보고서 — 영구 보존, 매월 1일 발행                                                             | `domain/records.ts` |
-| ↳ `highlights`                   | 그달의 큰 비정기 항목 — 원장이 잘려도 남는 날짜·금액                                               | `domain/records.ts` |
+| 엔티티                           | 무엇                                                                                                         | 정의                |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------- |
+| `teams` `GameTeam`               | AI 전술 역량치 · 현 감독 이름/부임일 + 카탈로그에서 복사한 정체성(이름·약칭·소속·체급·구장·브랜드)           | `domain/team.ts`    |
+| `players` `GamePlayer`           | 16축·상태·포지션 목록·주장·부주장·임대·성장 캐리 + 국적(협회 코드)·홈그로운 협회                             | `domain/player.ts`  |
+| ↳ `PlayerAttributes`             | 16축 + `overall`(파생 캐시) + `potential`                                                                    | `domain/player.ts`  |
+| ↳ `PlayerState`                  | 폼(−1\~1) · 체력(0\~100) · 부상 성향 · 심경 한 줄                                                            | `domain/player.ts`  |
+| ↳ `PlayerPosition`               | 가능 포지션 + 적응도 + `isNatural`(하나 이상)                                                                | `domain/player.ts`  |
+| `tactics` `TeamTactics`          | 팀당 1개 — `spec` + `assignments` + `shelved` + `setPieceTakers` + 팀 기억                                   | `domain/tactics.ts` |
+| ↳ `TacticsSpec`                  | 모양 이름(파생 — 프리셋 밖도 담는다) + 전술 6축(각 1\~5) + 토글 넷(전환·트랩·태클·GK 배급, 옛 세이브엔 없다) | `domain/tactics.ts` |
+| ↳ `TacticAssignment`             | **라인업의 원본** — 자리·좌표·역할·적응도·개인 지시·개인 기억                                                | `domain/tactics.ts` |
+| ↳ `PlayerDirective`              | 결과에 닿는 개인 지시 5종 (`instruction`은 사람이 읽는 말)                                                   | `domain/tactics.ts` |
+| ↳ `DrilledTactics`               | 전술 지문 → 그때 도달한 적응도 (선수별)                                                                      | `domain/tactics.ts` |
+| ↳ `ShelvedFamiliarity`           | **배치가 없는 동안 적응도·기억이 머무는 자리** (2군·예비)                                                    | `domain/tactics.ts` |
+| ↳ `SetPieceTakers`               | 죽은 공을 차는 사람 — `corner`·`freeKick`·`penalty` 각각 선수 id(옛 세이브엔 없다)                           | `domain/tactics.ts` |
+| `contracts` `Contract`           | **주급의 원본** — 선수당 `active` 정확히 1건                                                                 | `domain/records.ts` |
+| `finances` `TeamFinance`         | 팀당 1개 — 잔고·이적 예산·원장·낙하산                                                                        | `domain/records.ts` |
+| ↳ `LedgerEntry`                  | 원장 한 줄 — 유저 팀만 상세, 최근 3개월 롤링                                                                 | `domain/records.ts` |
+| `financeReports` `FinanceReport` | 월간 보고서 — 영구 보존, 매월 1일 발행                                                                       | `domain/records.ts` |
+| ↳ `highlights`                   | 그달의 큰 비정기 항목 — 원장이 잘려도 남는 날짜·금액                                                         | `domain/records.ts` |
 
 ### 3.3 일정 · 대회
 
-| 엔티티                               | 무엇                                                                                  | 정의                    |
-| ------------------------------------ | ------------------------------------------------------------------------------------- | ----------------------- |
-| `schedule` `ScheduleEntry`           | **일정 축 단일화** — 경기·훈련·이적창 개폐·추첨·컵 라운드                             | `domain/schedule.ts`    |
-| `matches` `MatchRecord`              | 경기 — 대회·단계·라운드·킥오프·중립 여부                                              | `domain/schedule.ts`    |
-| ↳ `MatchResult`                      | `null`=미진행. 스코어·득점자·도움·분·출전 명단·연장·승부차기(합계 + 킥 하나하나)·평점 | `domain/schedule.ts`    |
-| `trainingSessions` `TrainingSession` | 라벨 + `focus` + `auto`(기본 배치) + `rest`(비워 둔 자리)                             | `domain/schedule.ts`    |
-| `windows` `TransferWindow`           | 이적창 — 리그별(`leagueId`)이면 그 협회만                                             | `domain/records.ts`     |
-| `euroEntrants` `EuroEntry`           | 이번 시즌 대항전 참가 팀 — **추첨은 이미 일어난 사실**                                | `competition/europe.ts` |
-| `leagueHistory` `LeagueFinalTable`   | 최근 세 시즌 리그별 최종 순위 — 체급 재산정의 성적 축이 읽는다                        | `domain/records.ts`     |
+| 엔티티                               | 무엇                                                                                                                              | 정의                    |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `schedule` `ScheduleEntry`           | **일정 축 단일화** — 경기·훈련·이적창 개폐·추첨·컵 라운드                                                                         | `domain/schedule.ts`    |
+| `matches` `MatchRecord`              | 경기 — 대회·단계·라운드·킥오프·중립 여부                                                                                          | `domain/schedule.ts`    |
+| ↳ `MatchResult`                      | `null`=미진행. 스코어·득점자·도움·분·출전 명단·연장·승부차기(합계 + 킥 하나하나)·평점 + **사건 타임라인·선수별 기록·점유** (아래) | `domain/schedule.ts`    |
+| `trainingSessions` `TrainingSession` | 라벨 + `focus` + `auto`(기본 배치) + `rest`(비워 둔 자리)                                                                         | `domain/schedule.ts`    |
+| `windows` `TransferWindow`           | 이적창 — 리그별(`leagueId`)이면 그 협회만                                                                                         | `domain/records.ts`     |
+| `euroEntrants` `EuroEntry`           | 이번 시즌 대항전 참가 팀 — **추첨은 이미 일어난 사실**                                                                            | `competition/europe.ts` |
+| `leagueHistory` `LeagueFinalTable`   | 최근 세 시즌 리그별 최종 순위 — 체급 재산정의 성적 축이 읽는다                                                                    | `domain/records.ts`     |
 
 `ScheduleEntry.refId`가 type별 대상을 가리킨다: `match`→`MATCH.id`,
 `training`→`TRAINING_SESSION.id`, `window-*`→`TRANSFER_WINDOW.id`,
 `draw`·`cup-round`→`"<대회id>:<단계>"`(별도 엔티티 없음).
+
+⚠️ **끝난 경기의 사건과 기록은 결과에 남는다** — `MatchResult.events`(장부의
+`ledger.events` 그대로) · `playerStats`(양 팀, `MatchStatLine`) · `possession`.
+셋 다 optional이라 옛 세이브는 그대로 열리고 `SAVE_VERSION`은 6 그대로다. 사건과
+선수별 기록은 **감독의 경기에만** 남고(간이 시뮬에는 장부가 없다) 점유는 모든
+경기에 남는다. 크기는 잰 값으로 경기당 10.3KB · 한 시즌 60경기 ≈600KB이며, 시즌
+롤오버가 `matches`를 통째로 갈아 끼우므로 쌓이지 않는다
+(→ [match](../simulation/match.md) §4).
 
 ### 3.4 선수 부속 기록
 
 전부 `gamePlayerId`로 선수를 참조한다. 공통 패턴: **현재 상태 = 아직 닫히지 않은
 row, 지난 일 = 그대로 이력.**
 
-| 엔티티                            | 무엇 · "현재"의 표현                                                                             | 정의                |
-| --------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------- |
-| `injuries` `Injury`               | 부위·심각도·원인 — `returnedOn === null`이 현재 부상                                             | `domain/records.ts` |
-| `bookings` `Booking`              | 경고·퇴장 (경기·분)                                                                              | `domain/records.ts` |
-| `suspensions` `Suspension`        | 정지 — `status === "active"`, 잔여는 `length − served`                                           | `domain/records.ts` |
-| `transfers` `Transfer`            | **팀 변경 원장** — 이적·임대·자유·유스·은퇴                                                      | `domain/records.ts` |
-| `growthLog` `GrowthEntry`         | 성장 한 칸 — 대상은 축·`pos:CODE`·`tactical`, 출처는 `origin` 코드. **감독 팀 선수만** (아래 ⚠️) | `domain/records.ts` |
-| `seasonStats` `SeasonStat`        | 시즌 × 팀 — 출전·득점·도움·`ratingSum`                                                           | `domain/records.ts` |
-| `issues` `PlayerIssue`            | 라커룸 불만 (`unhappy`)                                                                          | `domain/records.ts` |
-| `settlingEvents` `SettlingEvent`  | 면담·팀토크·주장 지명이 새 영입에게 남긴 크레딧                                                  | `domain/records.ts` |
-| `transferList` `TransferListing`  | 이적 리스트 등재 — 호가와 함께                                                                   | `domain/records.ts` |
-| `playerTraining` `PlayerTraining` | 개인 훈련 — 겨냥한 축·배우는 자리                                                                | `domain/records.ts` |
-| `roleMemory` `RoleMemory`         | 역할 기억 — 선수 × 자리 → 마지막에 맡긴 역할                                                     | `domain/tactics.ts` |
-| `scoutReports` `ScoutReport`      | 스카우트 파견 — `completedOn === null`이 파견 중                                                 | `domain/records.ts` |
-| `deferredScouts` `DeferredScout`  | 동시 한도에 막혀 못 나간 파견 요청 — 다음 턴 입력에 사실로 남는다 ([player.md](player.md) §9.4)  | `domain/records.ts` |
+| 엔티티                             | 무엇 · "현재"의 표현                                                                                          | 정의                |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------- |
+| `injuries` `Injury`                | 부위·심각도·원인 — `returnedOn === null`이 현재 부상                                                          | `domain/records.ts` |
+| `bookings` `Booking`               | 경고·퇴장 (경기·분)                                                                                           | `domain/records.ts` |
+| `suspensions` `Suspension`         | 정지 — `status === "active"`, 잔여는 `length − served`                                                        | `domain/records.ts` |
+| `transfers` `Transfer`             | **팀 변경 원장** — 이적·임대·자유·유스·은퇴                                                                   | `domain/records.ts` |
+| `growthLog` `GrowthEntry`          | 성장 한 칸 — 대상은 축·`pos:CODE`·`tactical`, 출처는 `origin` 코드. **감독 팀 선수만** (아래 ⚠️)              | `domain/records.ts` |
+| `trainingReports` `TrainingReport` | 훈련 결산 카드 — 한 구간(`from`~`to`)이 남긴 것: 세션 수 · `moved` · `marks`(갈래 코드와 근거 한 줄). 40장 링 | `domain/records.ts` |
+| `seasonStats` `SeasonStat`         | 시즌 × 팀 — 출전·득점·도움·`ratingSum`                                                                        | `domain/records.ts` |
+| `issues` `PlayerIssue`             | 라커룸 불만 (`unhappy`)                                                                                       | `domain/records.ts` |
+| `settlingEvents` `SettlingEvent`   | 면담·팀토크·주장 지명이 새 영입에게 남긴 크레딧                                                               | `domain/records.ts` |
+| `transferList` `TransferListing`   | 이적 리스트 등재 — 호가와 함께                                                                                | `domain/records.ts` |
+| `playerTraining` `PlayerTraining`  | 개인 훈련 — 겨냥한 축(1·2군) · 배우는 자리(1군만)                                                             | `domain/records.ts` |
+| `roleMemory` `RoleMemory`          | 역할 기억 — 선수 × 자리 → 마지막에 맡긴 역할                                                                  | `domain/tactics.ts` |
+| `scoutReports` `ScoutReport`       | 스카우트 파견 — `completedOn === null`이 파견 중                                                              | `domain/records.ts` |
+| `deferredScouts` `DeferredScout`   | 동시 한도에 막혀 못 나간 파견 요청 — 다음 턴 입력에 사실로 남는다 ([player.md](player.md) §9.4)               | `domain/records.ts` |
+| `milestones` `Milestone`           | 마일스톤 — 데뷔·첫 골·구단 통산 문턱·해트트릭. **감독 팀 선수만** (아래 ⚠️)                                   | `domain/records.ts` |
+| `retired` `RetiredPlayer`          | **은퇴 명부** — 그만둔 사람의 id·이름·생일·주 포지션·마지막 팀·날짜·시즌·사유. **감독 팀에서 은퇴한 선수만**  | `domain/records.ts` |
 
 ⚠️ **`growthLog`는 감독 팀 선수 것만 담는다.** 4,000행에서 오래된 쪽부터 잘리는
 로그인데, 코어 월간 성장(`developsByCore` — 우리 2군 + 모든 타 팀)을 전부 남기면
@@ -230,6 +242,25 @@ row, 지난 일 = 그대로 이력.**
 성장 일지·선수 카드 "최근 성장"·달력 요약 셋뿐이고 전부 우리 선수만 거르므로 타 팀
 행은 자리만 차지한다. **능력치 자체는 소속과 무관하게 그대로 움직인다** — 로그에
 안 남는 것이지 안 자라는 것이 아니다 ([player.md](player.md) §6.3).
+
+⚠️ **`milestones`도 감독 팀 선수 것만 담는다.** 읽는 곳이 회견 사실 카드·심경
+여운·서사 메모·선수 상세 넷인데 전부 우리 선수의 자리다. 리그 전체를 적으면 시즌마다
+수백 행이 들어와 우리 선수의 기록이 그 안에 묻히고, 아무도 읽지 않는다. **기록 자체는
+소속과 무관하게 그대로 쌓인다** — `seasonStats`는 모든 팀의 것이라 남의 선수 통산도
+`careerOf`가 그대로 낸다(§5 파생). 남는 것이 우리 것뿐인 것이지, 남의 선수가 100경기를
+못 채우는 것이 아니다.
+
+⚠️ **은퇴 명부는 이름을 잃지 않기 위한 표다.** 은퇴한 선수는 `state.players`에서
+빠지므로 id로는 아무것도 되찾지 못한다 — 시상 기록·회견·캐릭터북이 그 이름을 부르려면
+그 사람이 어디엔가 남아 있어야 한다. **통산은 적지 않는다**: `seasonStats` 행은
+그대로 남아 `careerTotalsOf`가 같은 수를 낸다
+([../simulation/season.md](../simulation/season.md) §6).
+
+⚠️ **마일스톤은 클럽 단위다** — "우리 팀에서 100경기"이지 "통산 100경기"가 아니다.
+원장은 게임 시작 뒤의 출전만 알고 **부임 전 커리어는 시드에 없으므로**, 서른 살에
+들어온 선수에게 통산 문턱을 세우면 코어가 사실이 아닌 것을 사실로 낸다. 클럽 안의 수는
+전부 원장 안에 있어 정직하다. 시즌·팀별 표와 통산 합계는 그와 별개로 `careerOf`가
+`seasonStats`에서 파생한다.
 
 ### 3.5 진행 중인 흥정 · 세계의 부름
 
@@ -340,23 +371,25 @@ erDiagram
 **계산으로 되돌릴 수 있으면 저장하지 않는다.** 저장하면 원본이 둘이 되고, 둘은
 언젠가 갈린다.
 
-| 값                    | 어디서 나오나                                               | 왜 파생인가                                                                                                     |
-| --------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| 나이                  | `ageOf(birthdate, date)`                                    | 저장하면 생일마다 전 선수를 훑어 올려야 하고, 안 올리면 틀린다                                                  |
-| 포메이션 이름         | `shapeOf(points)`                                           | 좌표가 원본이다 — 칩을 옮기면 이름이 따라와야 한다. 프리셋 다섯이 아니어도 된다(자유 배치는 `4-1-3-2`를 만든다) |
-| 순위표                | `computeStandings(state, competitionId)`                    | 경기 결과가 원본. 컵은 순위표 자체가 없어 빈 배열이다                                                           |
-| 등록 명단 현황        | `squadRegistrationOf(state, teamId)`                        | 1군 명단 + 생년월일 + 홈그로운 협회에서 전부 나온다                                                             |
-| 시즌 평점             | `seasonRating(stat)` = `ratingSum ÷ apps`                   | 평균을 저장하면 경기마다 재계산하고 반올림 오차가 쌓인다                                                        |
-| 팀 주급 총액          | `weeklyWagesOf` — 활성 `CONTRACT` 합 + 임대 분담            | 계약이 원본. 임대 분담(`loan.wageShare`)도 여기서 함께 나온다                                                   |
-| 이적료 상각           | 활성 계약 + `TRANSFER` 원장                                 | 자산 테이블이 없다 — 계약이 끝나면 상각도 저절로 멈춘다                                                         |
-| 지식 수준(안개)       | `knowledgeOf`/`observationOf` — 출전 명단 + 스카우트 리포트 | 오차는 시드 해시라 결정적이다: 같은 질문에 늘 같은 답, 참값은 언제나 구간 안                                    |
-| 정착 진행도           | `settlingOf` — 출전·훈련 + `SETTLING_EVENT`                 | 대화만이 표로 남지 않아 그 한 갈래만 원장에 남긴다                                                              |
-| 팀 전술 적응도        | `TacticAssignment.familiarity`의 평균                       | 개인 기억이 원본. 팀 값을 저장하면 왕복만으로 값이 불어난다                                                     |
-| 임대 복귀             | `GamePlayer.loan{fromTeamId, until}`                        | `teamId`는 "지금 뛰는 팀"일 뿐                                                                                  |
-| 현재 부상 · 잔여 정지 | `returnedOn === null` · `lengthMatches − served`            | 닫히지 않은 row가 곧 현재다                                                                                     |
-| 일지(diary)           | 기록 테이블 전체                                            | 사건은 이미 다 남아 있다 — `NARRATIVE_NOTE`(GM 기억)만 저장한다                                                 |
-| 이적 일지의 금액      | `TRANSFER.fee`                                              | 이적 원장은 잘리지 않는다 — 이름 옆의 금액도 거기서 나온다                                                      |
-| 리그 소속             | `leagueOfTeamIn` = `state.leagueOf?.[id] ?? 카탈로그`       | 카탈로그가 기본, 세이브는 승강이 있을 때만 덮는다 (§1)                                                          |
+| 값                    | 어디서 나오나                                                   | 왜 파생인가                                                                                                     |
+| --------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| 나이                  | `ageOf(birthdate, date)`                                        | 저장하면 생일마다 전 선수를 훑어 올려야 하고, 안 올리면 틀린다                                                  |
+| 포메이션 이름         | `shapeOf(points)`                                               | 좌표가 원본이다 — 칩을 옮기면 이름이 따라와야 한다. 프리셋 다섯이 아니어도 된다(자유 배치는 `4-1-3-2`를 만든다) |
+| 순위표                | `computeStandings(state, competitionId)`                        | 경기 결과가 원본. 컵은 순위표 자체가 없어 빈 배열이다                                                           |
+| 등록 명단 현황        | `squadRegistrationOf(state, teamId)`                            | 1군 명단 + 생년월일 + 홈그로운 협회에서 전부 나온다                                                             |
+| 시즌 평점             | `seasonRating(stat)` = `ratingSum ÷ apps`                       | 평균을 저장하면 경기마다 재계산하고 반올림 오차가 쌓인다                                                        |
+| 통산·시즌별 기록      | `careerOf(state, playerId)` — `SEASON_STAT` 전 행을 접는다      | 행이 이미 시즌 × 팀이다. 합계를 따로 저장하면 원장과 갈리고, 소급 수정이 합계에 닿지 않는다                     |
+| 팀 주급 총액          | `weeklyWagesOf` — 활성 `CONTRACT` 합 + 임대 분담                | 계약이 원본. 임대 분담(`loan.wageShare`)도 여기서 함께 나온다                                                   |
+| 이적료 상각           | 활성 계약 + `TRANSFER` 원장                                     | 자산 테이블이 없다 — 계약이 끝나면 상각도 저절로 멈춘다                                                         |
+| 지식 수준(안개)       | `knowledgeOf`/`observationOf` — 출전 명단 + 스카우트 리포트     | 오차는 시드 해시라 결정적이다: 같은 질문에 늘 같은 답, 참값은 언제나 구간 안                                    |
+| 정착 진행도           | `settlingOf` — 출전·훈련 + `SETTLING_EVENT`                     | 대화만이 표로 남지 않아 그 한 갈래만 원장에 남긴다                                                              |
+| 팀 전술 적응도        | `TacticAssignment.familiarity`의 평균                           | 개인 기억이 원본. 팀 값을 저장하면 왕복만으로 값이 불어난다                                                     |
+| 임대 복귀             | `GamePlayer.loan{fromTeamId, until}`                            | `teamId`는 "지금 뛰는 팀"일 뿐                                                                                  |
+| 현재 부상 · 잔여 정지 | `returnedOn === null` · `lengthMatches − served`                | 닫히지 않은 row가 곧 현재다                                                                                     |
+| 일지(diary)           | 기록 테이블 전체                                                | 사건은 이미 다 남아 있다 — `NARRATIVE_NOTE`(GM 기억)만 저장한다                                                 |
+| MOTM                  | `motmOf` — `MatchResult.ratings` 최고(동점은 골·도움·출전 시간) | 평점이 원본이다. 저장하면 결산 판정이 평점을 다듬은 뒤 MOTM만 옛 값으로 남는다                                  |
+| 이적 일지의 금액      | `TRANSFER.fee`                                                  | 이적 원장은 잘리지 않는다 — 이름 옆의 금액도 거기서 나온다                                                      |
+| 리그 소속             | `leagueOfTeamIn` = `state.leagueOf?.[id] ?? 카탈로그`           | 카탈로그가 기본, 세이브는 승강이 있을 때만 덮는다 (§1)                                                          |
 
 **저장하는 파생값 둘** — 예외에는 이유가 있다.
 
@@ -454,6 +487,7 @@ optional로 넓혀 두고 읽는 쪽이 `카드 ?? 옛 문장` 순으로 본다.
 | 경기 중 통계 축            | 중단된 경기(`pendingMatch`)의 선수별 기록에 `scoringExpectation`이 없으면 0으로 — 합산이 `NaN`이 되는 자리다 (`match-flow.ts`)                                                                                                                                         |
 | 성장 로그 출처             | `source: "reserve"`(폐기된 2군 개발 프로그램)를 `development`로 옮긴다. 스키마에서 그 갈래를 지우려면 parse 앞에서 값이 사라져 있어야 한다 — 남아 있으면 3걸음에서 `schema`로 막힌다. 옮기고 나면 옮길 것이 없어 멱등이다                                              |
 | 미러 자리 주발 보정        | `mirrorProficiencyStripped`가 없을 때만 — 좌우 미러 묶음(CB↔LCB·RCB…)에 적혀 있던 주발 보정을 주 포지션 값으로 벗기고 마커를 세운다. 다시 돌면 경기·훈련이 그 자리에 쌓은 적응도를 같이 민다 (→ [player](player.md) §8)                                                |
+| 국적                       | 국적이 없는 선수만 — 카탈로그가 아는 선수는 시드가 조사한 값, 모르는 선수는 그 클럽 협회로 세운다. **빈칸을 남기지 않는 것이 이 축의 규칙이다**: 등록 규정도 대표팀도 "국적을 모르는 선수" 갈래를 들 수 없다 (→ [sources.md](sources.md) §4.1)                         |
 | 종합 재계산                | 전 선수 `overall`을 16축에서 다시 굴린다. 파생 캐시라 멱등이고, 저장된 옛 눈금이 새 눈금과 한 표에 서지 않게 한다 (→ [player](player.md) §4)                                                                                                                           |
 | `addMissingClubs`          | 세이브에 없는 **시드 카탈로그** 클럽(2부 등)을 인스턴스화해 채우고, 그 클럽의 이름·소속·체급·프로필도 시드에서 복사한다. 어드민이 추가한 팀은 시드에 없으므로 진행 중인 세이브에 들어가지 않는다                                                                       |
 | 등번호                     | **비어 있는 번호만** — 시드 소속 그대로면 공식 번호를 복원하고, 나머지 빈칸과 팀 안에서 겹친 번호를 결정적으로 채운다. 세이브가 이미 가진 번호는 건드리지 않는다                                                                                                       |

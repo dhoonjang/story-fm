@@ -20,14 +20,14 @@ import { GAP_CONDITION } from "@story-fm/sim";
 import { isSettling, settlingNote, settlingOf } from "./settling";
 import { diffDays } from "../competition/calendar";
 import { hashChannel } from "../core/rng";
-import { playerById, teamNameIn, type GameState } from "../core/state";
+import { isOurPlayer, playerById, teamNameIn, type GameState } from "../core/state";
 
 /**
  * 스카우팅 지식 — 정보 비대칭(안개)의 단일 소스.
  *
  * 규약 (선수 단위 5단계 × 축 단위 2계층 — player.md §9):
  * | 수준       | 조건                                   | 관측형 | 분석형 | 잠재력 |
- * | own       | 우리 팀 선수                            | 정확   | 정확   | ±6→±2 |
+ * | own       | 우리 계약 선수 (임대 송출 포함)          | 정확   | 정확   | ±6→±2 |
  * | adapting  | 영입 후 아직 적응 중                     | ±1→0  | ±3→0  | ±9→±2 |
  * | scouted   | 스카우트 리포트 완료                      | ±1    | ±3    | ±12→±6 |
  * | seen      | 우리와의 경기에 **실제로 출전**한 걸 봤다    | ±3    | ±6    | ±16   |
@@ -58,6 +58,19 @@ export const KNOWLEDGE_KO: Record<Knowledge, string> = {
   scouted: "스카우팅 완료",
   seen: "직접 상대해 본 선수",
   rumoured: "평판으로만 아는 선수",
+};
+
+/**
+ * 눈금의 순서 — **얼마나 아는가**로 줄을 세운다. `OBSERVATION_MARGIN`이 좁아지는
+ * 순서 그대로다(`adapting`은 스카우트 폭에서 시작해 적응만큼 더 걷힌다).
+ * "스카우팅을 마친 선수만"처럼 **최소 수준**을 묻는 자리가 이 자를 읽는다.
+ */
+export const KNOWLEDGE_RANK: Record<Knowledge, number> = {
+  rumoured: 0,
+  seen: 1,
+  scouted: 2,
+  adapting: 3,
+  own: 4,
 };
 
 /**
@@ -180,7 +193,13 @@ export function hasSeenPlay(state: GameState, playerId: string): boolean {
 export function knowledgeOf(state: GameState, playerId: string): Knowledge {
   const player = playerById(state, playerId);
   if (!player) return "rumoured";
-  if (player.teamId === state.userTeamId) {
+  /**
+   * **소속이 아니라 계약을 읽는다** (player.md §9). 임대 보낸 선수는 남에게 준 것이
+   * 아니라 남의 경기장에 보낸 것이라, 우리 코치진은 스카우팅과 무관하게 그를 안다 —
+   * `teamId`로 가르면 우리 계약의 유망주가 나가는 순간 능력치에 오차가 붙어, 돌아온
+   * 날 감독이 "누가 얼마나 자랐는가"를 잃는다.
+   */
+  if (isOurPlayer(state, player)) {
     return isSettling(state, playerId) ? "adapting" : "own";
   }
   if (isScouted(state, playerId)) return "scouted";
@@ -500,7 +519,12 @@ export function completedScoutReports(state: GameState, playerId: string): numbe
     .length;
 }
 
-/** 우리 팀에서 뛴 총 경기 수 — 잠재력을 좁히는 표본 (시즌을 넘어 누적) */
+/**
+ * **우리 셔츠로** 뛴 총 경기 수 — 잠재력을 좁히는 표본 (시즌을 넘어 누적).
+ *
+ * 임대 나간 선수는 지식이 `own`이어도 그 구단의 출전으로는 폭이 좁아지지 않는다 —
+ * 매일 보는 것과 리포트로 받는 것은 같은 표본이 아니다 (player.md §9.1).
+ */
 export function appsForUs(state: GameState, playerId: string): number {
   return state.seasonStats
     .filter((s) => s.gamePlayerId === playerId && s.teamId === state.userTeamId)

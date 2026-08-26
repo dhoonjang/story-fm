@@ -19,6 +19,13 @@ export const MatchEventTypeSchema = z.enum([
   "red_card",
   "substitution",
   "injury",
+  /**
+   * **벤치가 판을 옮겼다** — AI 팀의 6축 이동·모양 전환 (match.md §2·§4).
+   *
+   * 선수의 사건이 아니라 팀의 판단이라 `actors`는 비어 있다. 근거 태그
+   * (`source: "ai-shift"`) 하나가 갈래와 옮긴 뒤의 축 값, 갈아 낀 모양을 싣는다.
+   */
+  "tactical_shift",
   "half_time",
   /**
    * **연장 개시** — 정규 90분이 끝났는데 승부가 남았다.
@@ -45,6 +52,7 @@ export const TEAM_EVENT_TYPES: ReadonlySet<MatchEventType> = new Set([
   "red_card",
   "substitution",
   "injury",
+  "tactical_shift",
 ]);
 
 /**
@@ -52,6 +60,21 @@ export const TEAM_EVENT_TYPES: ReadonlySet<MatchEventType> = new Set([
  * 장부가 받아들이는 마지막 분이지, 경기가 끝나는 분이 아니다.
  */
 export const MATCH_MINUTE_MAX = 130;
+
+/**
+ * **슛의 출처** — 열린 플레이 · 코너 · 프리킥 · 페널티 (match.md §1.4).
+ *
+ * 죽은 공은 열린 플레이와 **같은 총량 안의 별도 채널**이라, 무엇이 그 슛을 만들었는지가
+ * 슛마다 붙는다. 세트피스 득점 비율은 이 칸 하나로 세어진다.
+ */
+export const SHOT_ORIGINS = ["open", "corner", "free_kick", "penalty"] as const;
+export const ShotOriginSchema = z.enum(SHOT_ORIGINS);
+export type ShotOrigin = z.infer<typeof ShotOriginSchema>;
+
+/** 죽은 공에서 나온 슛인가 — 세트피스 몫을 세는 자리가 하나여야 한다 */
+export function isSetPieceOrigin(origin: ShotOrigin | undefined): boolean {
+  return origin !== undefined && origin !== "open";
+}
 
 /**
  * 벤치가 교체를 낸 이유 — **코드다.** 중계가 인용하는 문장은 이 코드를 읽는 쪽이
@@ -66,19 +89,41 @@ export type SubCause = z.infer<typeof SubCauseSchema>;
  * 패킷 자체는 세이브 스키마의 검사 밖이지만(진행 중인 경기 한 덩어리) 장부의
  * 사건은 스키마를 지나므로 여기에 한 벌이 있어야 한다.
  */
+/**
+ * 사실 태그의 갈래 — **목록은 한 벌이다.** Zod 판과 `PacketTag`(packet.ts)가 같은
+ * 배열을 읽는다: 두 벌로 두면 갈래를 하나 늘린 날 스키마만 옛 목록으로 남는다.
+ */
+export const PACKET_TAG_SOURCES = [
+  "counter",
+  "gap",
+  "mismatch",
+  "zone-plan",
+  "directive",
+  "directive-dropped",
+  "exploit",
+  "exploit-dropped",
+  "tactical",
+  /** 죽은 공에서 나온 골 — 키커와 마무리한 선수를 함께 싣는다 (match.md §1.4) */
+  "set-piece",
+  /**
+   * **AI 벤치가 판을 옮겼다** — `tactical_shift` 사건의 근거 (match.md §2).
+   *
+   * `code`가 갈래(`chase`·`hold`)고, `values`는 **옮긴 뒤의** 축 값이다. 방향은
+   * 갈래가 이미 말하므로 델타를 따로 싣지 않는다. 갈아 낀 모양은 `formation:` flag.
+   */
+  "ai-shift",
+  /**
+   * 전력에서 나오지 않는, **이 경기가 무슨 경기인가** — 더비가 첫 갈래다.
+   * 편이 없고(`favours: null`) 이름은 카탈로그의 것이라 `text`가 든다 (match.md §1).
+   */
+  "context",
+  /** 진행 중인 옛 세이브가 들고 있던 문장 — `text`만 갖는다 */
+  "legacy",
+] as const;
+export type PacketTagSource = (typeof PACKET_TAG_SOURCES)[number];
+
 export const PacketTagSchema = z.object({
-  source: z.enum([
-    "counter",
-    "gap",
-    "mismatch",
-    "zone-plan",
-    "directive",
-    "directive-dropped",
-    "exploit",
-    "exploit-dropped",
-    "tactical",
-    "legacy",
-  ]),
+  source: z.enum(PACKET_TAG_SOURCES),
   code: z.string().min(1),
   favours: MatchSideSchema.nullable(),
   /** 그 사실을 가진 쪽 — 미스매치만 싣는다. 없으면 이로운 편의 반대다 */
@@ -162,6 +207,15 @@ export const MatchEventSchema = z.object({
   goalProbability: z.number().min(0).max(1).optional(),
   /** 골도 독립 사건이 아니라 슈팅 결과다. */
   shotOutcome: z.enum(["goal", "saved", "blocked", "off_target"]).optional(),
+  /**
+   * **이 슛이 어디서 나왔나** — 열린 플레이인가 죽은 공인가 (match.md §1.4).
+   *
+   * 죽은 공을 사건으로 따로 적지 않는 이유는 §4의 원칙이다: 코너는 경기당
+   * 스물한 개고 그것을 한 줄씩 적으면 구간 이벤트 상한에 훨씬 자주 닿아 벤치
+   * 정지점과 교체 총량이 조용히 움직인다. 갈래는 **그 슛의 성질**이라 여기 산다.
+   * 옛 세이브엔 없다 — 없으면 `open`으로 읽는다 (optional).
+   */
+  shotOrigin: ShotOriginSchema.optional(),
 });
 export type MatchEvent = z.infer<typeof MatchEventSchema>;
 
@@ -273,6 +327,13 @@ export const MatchStatLineSchema = z.object({
   /** 실제 슈터의 결정력을 반영한 골 확률 합. 옛 세이브는 0으로 읽는다. */
   scoringExpectation: z.number().min(0).default(0),
   saves: z.number().int().min(0),
+  /**
+   * 그 선수가 **찬 코너** — 얻는 것은 팀이지만 차는 것은 한 사람이다.
+   * 사건이 아니라 굴리지 않고 나누는 양이다 (match.md §4). 옛 세이브는 0.
+   */
+  corners: z.number().int().min(0).default(0),
+  /** 그 선수가 **범한 파울** — 같은 자리. 옛 세이브는 0. */
+  fouls: z.number().int().min(0).default(0),
 });
 export type MatchStatLine = z.infer<typeof MatchStatLineSchema>;
 
@@ -282,6 +343,44 @@ export type MatchStatLine = z.infer<typeof MatchStatLineSchema>;
  * 연장 두 하프가 뒤에 붙어도 **옛 세이브는 그대로 읽힌다**: enum에 값을 더하는 것은
  * 이미 저장된 값의 유효성을 건드리지 않는다 (SAVE_VERSION 유지).
  */
+/** 정규 경기의 길이 — 출전 시간의 분모다 */
+export const FULL_TIME_MINUTES = 90;
+/** 연장까지 간 경기의 길이 */
+export const EXTRA_TIME_FULL_MINUTES = 120;
+
+/**
+ * 한 경기의 **출전 시간** — 사건 목록이 원본이다.
+ *
+ * 교체의 [나가는 선수, 들어오는 선수] 짝과 **퇴장**이 같은 자격으로 시간을 끊는다 —
+ * 퇴장을 세지 않으면 20′에 나간 선수도 90분으로 남는다.
+ *
+ * 규칙이 여기 한 벌만 있는 이유는 읽는 자리가 둘이기 때문이다: 진행 중인 장부를
+ * 읽는 평점 브리프(`match-flow.ts`)와 끝난 경기의 결과를 읽는 리포트·MOTM
+ * (`views.ts`). 두 벌로 두면 같은 선수의 출전 시간이 화면과 판정에서 갈린다.
+ */
+export function matchMinutesOf(
+  events: readonly MatchEvent[],
+  aet: boolean,
+): (playerId: string) => number {
+  const full = aet ? EXTRA_TIME_FULL_MINUTES : FULL_TIME_MINUTES;
+  const wentOff = new Map<string, number>();
+  const cameOn = new Map<string, number>();
+  for (const e of events) {
+    const [first, second] = e.actors;
+    if (e.type === "substitution") {
+      if (first) wentOff.set(first, Math.min(wentOff.get(first) ?? e.minute, e.minute));
+      if (second) cameOn.set(second, e.minute);
+    } else if (e.type === "red_card" && first) {
+      wentOff.set(first, Math.min(wentOff.get(first) ?? e.minute, e.minute));
+    }
+  }
+  return (playerId) => {
+    const from = Math.min(cameOn.get(playerId) ?? 0, full);
+    const to = Math.min(wentOff.get(playerId) ?? full, full);
+    return Math.max(0, to - from);
+  };
+}
+
 export const MatchPhaseSchema = z.enum([
   "first_half",
   "second_half",

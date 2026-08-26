@@ -32,6 +32,7 @@ import {
 } from "../core/state";
 import { WAGE_HEADROOM, clubWageBudget, estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { assignSquadNumber } from "../squad/numbers";
+import { admitOnLoan } from "../squad/registration";
 import { clearDepartedState } from "./departures";
 import { attachClauses, runBuyBacks, settleSellOn } from "./clauses";
 
@@ -573,6 +574,9 @@ function settle(
     player.teamId = deal.toTeamId;
     player.squadNumber = undefined;
     assignSquadNumber(state.players, player);
+    // 임대 도착은 감독의 송출과 **같은 함수**를 지난다 — 여기서만 "first"를 박아 두면
+    // 자리를 내는 규칙이 한쪽에만 살고, 둘 중 하나만 고치는 날이 온다
+    admitOnLoan(state, player, deal.toTeamId);
     player.squadLevel = "first";
     // 계약은 원소속에 남는다 — 복귀는 이 값이 파생시킨다 (`returnDueLoans`)
     player.loan = {

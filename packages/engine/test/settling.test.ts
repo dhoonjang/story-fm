@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PLAYER_ARCHETYPE_LABEL, PLAYER_ARCHETYPE_TRAITS } from "@story-fm/domain";
 import {
   EVENT_BAND,
   EVENT_CREDIT,
@@ -14,10 +15,12 @@ import {
   knowledgeOf,
   loanPlayer,
   observedRating,
+  playerArchetypeOf,
   playerById,
   playersOf,
   recallLoan,
   returnDueLoans,
+  settlingFactorText,
   settlingOf,
   settlingPercent,
   type GameState,
@@ -119,6 +122,28 @@ describe("정착은 감독이 무엇을 하느냐로 갈린다", () => {
     // 배수는 곱해져 목표에 그대로 반영된다
     const expected = SETTLING_TARGET * settling.factors.reduce((mult, f) => mult * f.multiplier, 1);
     expect(settling.target).toBeCloseTo(expected, 6);
+  });
+
+  /**
+   * 사람됨도 배수 한 줄이다 — 라커룸 리더는 첫 주에 이름을 부르고 다니고 불안한
+   * 유망주는 몇 달을 겉돈다 (people.md §6 · player.md §9.3).
+   */
+  it("원형이 배수 한 줄로 선다 — 배수 1인 원형에는 서지 않는다", () => {
+    const state = createTestGame(11);
+    for (const target of opponentsOf(state).slice(0, 8)) {
+      sign(state, target.id);
+      const settling = settlingOf(state, target.id)!;
+      const key = playerArchetypeOf(state.seed, playerById(state, target.id)!);
+      const multiplier = PLAYER_ARCHETYPE_TRAITS[key].settling;
+      const row = settling.factors.find((f) => f.code === "archetype");
+      if (multiplier === 1) {
+        expect(row).toBeUndefined();
+        continue;
+      }
+      expect(row).toEqual({ code: "archetype", multiplier, archetype: key });
+      // 문장은 이름뿐이다 — 왜 빨리 녹아드는지는 인물 카드가 이미 안다
+      expect(settlingFactorText(state, row!)).toBe(PLAYER_ARCHETYPE_LABEL[key]);
+    }
   });
 
   it("원소속 선수는 정착 과정이 없다", () => {
@@ -318,11 +343,11 @@ describe("감독의 말도 정착을 움직인다 (SETTLING_EVENT)", () => {
     const state = createTestGame(11);
     const target = opponentsOf(state)[0]!;
     sign(state, target.id);
-    setCaptain(state, target.id);
+    setCaptain(state, { playerId: target.id });
     const once = settlingOf(state, target.id)!.eventCredit;
     expect(once).toBeGreaterThan(0);
-    setCaptain(state, playersOf(state, state.userTeamId)[0]!.id);
-    setCaptain(state, target.id);
+    setCaptain(state, { playerId: playersOf(state, state.userTeamId)[0]!.id });
+    setCaptain(state, { playerId: target.id });
     expect(settlingOf(state, target.id)!.eventCredit).toBe(once);
   });
 

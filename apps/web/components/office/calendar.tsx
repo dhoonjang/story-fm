@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import type { OfficeViews } from "@story-fm/engine";
 import { scheduleRowOf, type CalRowIcon, type CalScheduleRow } from "@/lib/calendar-detail";
+import { MatchReportPanel } from "./match-report";
+import { IconChevron } from "../icons";
 
 // ── 달력 (일정 축: 경기·훈련·이적창 + 일자 상세) ─────────────
 function isoOf(d: Date): string {
@@ -82,6 +84,14 @@ function EventIcon({ kind }: { kind: IconKind }) {
         <circle cx="8" cy="8" r="1.9" {...line} />
       </>
     ),
+    // 소식 — 전해 들은 말이라 말풍선이다. 왼쪽 아래로 빠지는 꼬리와 지폐·창보다
+    // 큰 모서리 반경이 같은 "둥근 사각" 셋을 한눈에 가른다
+    news: (
+      <path
+        d="M5 3.2H11A2.4 2.4 0 0 1 13.4 5.6V7.8A2.4 2.4 0 0 1 11 10.2H7L4.2 12.6 5 10.2A2.4 2.4 0 0 1 2.6 7.8V5.6A2.4 2.4 0 0 1 5 3.2Z"
+        {...line}
+      />
+    ),
     // 추첨 — 둘이 만나 하나가 되는 대진표
     draw: (
       <>
@@ -105,29 +115,56 @@ const VENUE_KO = { home: "홈", away: "원정", neutral: "중립" } as const;
  * 아이콘은 일지와 같은 체계, 대회 칩은 달력 칸의 경기 칩(`cal-fx-comp`)과 같은 색,
  * 승패는 달력 칸과 같은 세 가지 색이다. 한 패널이 세 가지 말을 하지 않도록.
  */
-function ScheduleRow({ row }: { row: CalScheduleRow }) {
+function ScheduleRow({ row, gameId }: { row: CalScheduleRow; gameId: string }) {
+  /**
+   * 리포트는 접혀 있다 — 한 날에 여러 줄이 서는데 열한 명짜리 표가 기본으로
+   * 펼쳐져 있으면 상세 패널이 그것 하나가 된다. 열 때 한 번 받아 오고
+   * (`MatchReportPanel`), 받은 것은 다시 요청하지 않는다.
+   */
+  const [open, setOpen] = useState(false);
   return (
-    <div
-      className={`cal-sched k-${row.icon}${row.pending ? " pending" : ""}${row.next ? " next" : ""}`}
-      data-testid={`cal-sched-${row.icon}`}
-    >
-      <span className="cal-sched-time">{row.time}</span>
-      <EventIcon kind={row.icon} />
-      <div className="cal-sched-body">
-        {row.competition && <span className="cal-sched-comp">{row.competition}</span>}
-        {row.stage && <span className="cal-sched-stage">{row.stage}</span>}
-        {row.venue && <span className={`cal-sched-venue ${row.venue}`}>{VENUE_KO[row.venue]}</span>}
-        <span className="cal-sched-name">{row.name}</span>
-        {row.tags.map((t) => (
-          <span className="cal-sched-tag" key={t}>
-            {t}
-          </span>
-        ))}
-        {row.result && (
-          <span className={`cal-detail-result${row.win ? ` r-${row.win}` : ""}`}>{row.result}</span>
-        )}
+    <div className="cal-sched-wrap">
+      <div
+        className={`cal-sched k-${row.icon}${row.pending ? " pending" : ""}${row.next ? " next" : ""}`}
+        data-testid={`cal-sched-${row.icon}`}
+      >
+        <span className="cal-sched-time">{row.time}</span>
+        <EventIcon kind={row.icon} />
+        <div className="cal-sched-body">
+          {row.competition && <span className="cal-sched-comp">{row.competition}</span>}
+          {row.stage && <span className="cal-sched-stage">{row.stage}</span>}
+          {row.venue && (
+            <span className={`cal-sched-venue ${row.venue}`}>{VENUE_KO[row.venue]}</span>
+          )}
+          <span className="cal-sched-name">{row.name}</span>
+          {row.tags.map((t) => (
+            <span className="cal-sched-tag" key={t}>
+              {t}
+            </span>
+          ))}
+          {row.result && (
+            <span className={`cal-detail-result${row.win ? ` r-${row.win}` : ""}`}>
+              {row.result}
+            </span>
+          )}
+        </div>
+        {row.note && <div className="cal-sched-note">{row.note}</div>}
       </div>
-      {row.note && <div className="cal-sched-note">{row.note}</div>}
+      {row.matchId !== null && (
+        <>
+          <button
+            className={`cal-report-btn${open ? " open" : ""}`}
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+            data-testid={`cal-report-${row.matchId}`}
+          >
+            <span>경기 리포트</span>
+            <IconChevron size={12} />
+          </button>
+          {open && <MatchReportPanel gameId={gameId} matchId={row.matchId} />}
+        </>
+      )}
     </div>
   );
 }
@@ -159,7 +196,13 @@ function EventLine({ event }: { event: CalEvent }) {
   );
 }
 
-export function CalendarView({ calendar }: { calendar: OfficeViews["calendar"] }) {
+export function CalendarView({
+  calendar,
+  gameId,
+}: {
+  calendar: OfficeViews["calendar"];
+  gameId: string;
+}) {
   const [selected, setSelected] = useState<string | null>(null);
 
   // 날짜 → 일정 엔트리 목록 (한 날에 여러 개 가능: 훈련 오전/오후 + 경기)
@@ -172,6 +215,16 @@ export function CalendarView({ calendar }: { calendar: OfficeViews["calendar"] }
     }
     return map;
   }, [calendar.entries]);
+
+  // 날짜 → 그날의 소식 줄 — 칸마다 일지를 다시 훑지 않도록 한 번만 모은다
+  const newsByDate = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const [iso, events] of Object.entries(calendar.events)) {
+      const texts = events.filter((e) => e.kind === "news").map((e) => e.text);
+      if (texts.length > 0) map.set(iso, texts);
+    }
+    return map;
+  }, [calendar.events]);
 
   // 달력 범위 — 프리시즌 시작(7/1)부터 시즌 마지막 경기까지
   const start = new Date(`${calendar.preseasonStart}T00:00:00Z`);
@@ -226,7 +279,7 @@ export function CalendarView({ calendar }: { calendar: OfficeViews["calendar"] }
         <div className="cal-detail-block">
           <div className="cal-detail-title">일정</div>
           {detail.entries.map((e) => (
-            <ScheduleRow row={scheduleRowOf(e)} key={e.id} />
+            <ScheduleRow row={scheduleRowOf(e)} gameId={gameId} key={e.id} />
           ))}
         </div>
       )}
@@ -301,6 +354,8 @@ export function CalendarView({ calendar }: { calendar: OfficeViews["calendar"] }
                   // 그날 결산이 남긴 성과 — 있으면 점을 채워 구분한다
                   const gained = trainings.some((e) => e.result !== null);
                   const others = otherOf(cell.iso);
+                  // 그날 일지에 오른 소식 — 몇 줄이든 점은 하나다
+                  const news = newsByDate.get(cell.iso) ?? [];
                   const pending = pendingRoundOf(cell.iso);
                   const dow = dowOf(cell.iso);
                   return (
@@ -353,10 +408,12 @@ export function CalendarView({ calendar }: { calendar: OfficeViews["calendar"] }
                           <span className="cal-fx-opp">{pending.cup.stage}</span>
                         </div>
                       )}
-                      {/* 표식은 "달력에서 알아야 할 것"만 — 매일 쌓이는 기록 점은
-                          정보가 아니라 얼룩이라 상세 패널에만 둔다.
-                          훈련은 노란 점, 추첨은 보라 점, 그 밖(이적창)은 파란 점 —
-                          무슨 일정인지는 툴팁과 칸을 눌러 여는 상세가 말한다 */}
+                      {/* 표식은 "달력에서 알아야 할 것"만 — 매일 쌓이는 기록 점(성장·
+                          카드)은 정보가 아니라 얼룩이라 상세 패널에만 둔다. 소식은
+                          다르다: 며칠을 한 번에 넘긴 턴에 벌어진 일이라 달력 말고는
+                          되짚을 자리가 없다.
+                          훈련은 노란 점, 추첨은 보라 점, 그 밖(이적창)은 파란 점,
+                          소식은 회색 점 — 무엇인지는 툴팁과 상세가 말한다 */}
                       <div className="cal-marks">
                         {trainings.length > 0 && (
                           <span
@@ -384,6 +441,13 @@ export function CalendarView({ calendar }: { calendar: OfficeViews["calendar"] }
                             }
                           />
                         ))}
+                        {news.length > 0 && (
+                          <span
+                            className="cal-mark news"
+                            title={news.join("\n")}
+                            data-testid={`cal-news-${cell.iso}`}
+                          />
+                        )}
                       </div>
                     </button>
                   );

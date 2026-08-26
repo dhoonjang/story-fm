@@ -1,10 +1,16 @@
 import type { GamePlayer } from "@story-fm/domain";
-import { isReserveMatch, normalizeSpeaker } from "@story-fm/domain";
+import { isReserveMatch, normalizeSpeaker, TRANSFER_REQUEST_REASON_KO } from "@story-fm/domain";
 import { formLabel } from "./form";
 import { isSettling } from "./settling";
 import { diffDays } from "../competition/calendar";
 import { pendingApproach } from "../club/approach";
-import { openInjury, playersOf, squadLevelOf, type GameState } from "../core/state";
+import {
+  openInjury,
+  playersOf,
+  squadLevelOf,
+  transferRequestOf,
+  type GameState,
+} from "../core/state";
 
 /**
  * **선수 근황 — 세계에 지금 무슨 이야기가 있는가.**
@@ -35,6 +41,20 @@ const BENCHED_RUN = 3;
 const RETURN_SOON = 14;
 /** 회전의 기준점 — 날짜를 수로 바꾸기만 하는 자리라 값 자체에 뜻은 없다 */
 const EPOCH = "2000-01-01";
+
+/**
+ * 최근 이만큼의 모델 턴에 이름이 섰으면 뒤로 민다 — 근황과 코치의 눈이 **같은 창**을
+ * 본다. 창이 둘이면 한쪽에서 밀린 이름이 다른 쪽에서 그대로 맨 앞에 선다.
+ */
+export const CUE_ROTATION_TURNS = 6;
+
+/**
+ * 날짜를 회전 눈금으로 — 시드가 아니라 날짜인 이유는 같은 날 같은 세이브면 같은
+ * 목록이어야 해서다(하루 안의 회전은 "최근에 말한 사람"이 맡는다).
+ */
+export function rotationDay(date: string): number {
+  return diffDays(EPOCH, date);
+}
 
 /**
  * 최근 우리 경기의 출전 명단 — 새 경기가 앞에 온다.
@@ -70,8 +90,11 @@ function recentLineups(state: GameState, limit: number): Array<ReadonlySet<strin
  * ⚠️ 이름은 `normalizeSpeaker`로 맞춘 뒤 견준다 — 모델은 같은 사람을 "스티브 홀랜드"로도
  * "스티브홀랜드"로도 쓴다. 원문 그대로 견주면 공백 하나가 다른 순간 방금 말한 선수가
  * 회전에서 빠져 계속 맨 앞에 선다 (people.md §1과 같은 규칙 · 부분 일치는 하지 않는다).
+ *
+ * 수석코치의 눈(`coach-cues.ts`)도 같은 이 함수로 회전한다 — 두 벌이면 한쪽만
+ * 고쳐져 같은 이름이 근황에서는 밀리고 코치의 카드에서는 안 밀린다.
  */
-function recentSpeakers(state: GameState, turns: number): ReadonlySet<string> {
+export function recentSpeakers(state: GameState, turns: number): ReadonlySet<string> {
   const names = new Set<string>();
   const models = state.chat.filter((t) => t.role === "model").slice(-turns);
   for (const turn of models) {
@@ -85,11 +108,28 @@ function recentSpeakers(state: GameState, turns: number): ReadonlySet<string> {
 
 /** 이 선수에게 지금 있는 일 — 없으면 null */
 function factOf(state: GameState, player: GamePlayer, benched: number): string | null {
+  /**
+   * **이번 시즌 뒤 은퇴** — 맨 앞이다 (people.md §7 · season.md §6). 폼도 명단 제외도
+   * 그 사실 위에서 읽히므로, 뒤로 밀면 마지막 시즌을 보내는 선수가 「3경기 명단 제외」로만
+   * 세계에 선다.
+   */
+  const retiring = player.state.retiringAfterSeason;
+  if (retiring) return `이번 시즌 뒤 은퇴 (${retiring.on} 예고)`;
   const injury = openInjury(state, player.id);
   if (injury) {
     return diffDays(state.date, injury.expectedReturn) <= RETURN_SOON
       ? `복귀 임박 (${injury.bodyPart}~${injury.expectedReturn})`
       : null; // 재활 초입은 이미 주의 줄의 부상 항목이 말한다
+  }
+  /**
+   * **나가겠다고 말한 것은 폼보다 큰 사실이다** (transfer.md §1-1) — 뛸 수 없는 것
+   * 다음이고 나머지보다는 앞이다. 수락한 요청은 서지 않는다: 그 사실은 이적
+   * 리스트가 이미 말한다.
+   */
+  const request = transferRequestOf(state, player.id);
+  if (request && request.answer !== "accept") {
+    const reason = TRANSFER_REQUEST_REASON_KO[request.reason];
+    return `이적 요청 (${reason}) — ${request.answer === "refuse" ? "감독이 거부했다" : "아직 답하지 않았다"}`;
   }
   if (isSettling(state, player.id)) return "새 영입, 아직 적응 중";
   const form = player.state.form;
@@ -107,7 +147,7 @@ function factOf(state: GameState, player: GamePlayer, benched: number): string |
  */
 export function speakerCues(state: GameState, limit = 3): SpeakerCue[] {
   const lineups = recentLineups(state, BENCHED_RUN);
-  const spoke = recentSpeakers(state, 6);
+  const spoke = recentSpeakers(state, CUE_ROTATION_TURNS);
   const cues: Array<SpeakerCue & { rank: number }> = [];
 
   /**
@@ -140,10 +180,9 @@ export function speakerCues(state: GameState, limit = 3): SpeakerCue[] {
   cues.sort((a, b) => (a.rank === b.rank ? (a.playerId < b.playerId ? -1 : 1) : a.rank - b.rank));
   /**
    * 아직 말하지 않은 후보들을 **날짜로 굴린다** — 근황은 며칠씩 그대로라 정렬만으로는
-   * 같은 이름이 몇 주 내내 맨 앞이다. 시드가 아니라 날짜인 이유: 같은 날 같은 세이브면
-   * 같은 목록이어야 한다(하루 안의 회전은 "최근에 말한 사람"이 맡는다).
+   * 같은 이름이 몇 주 내내 맨 앞이다.
    */
-  const day = diffDays(EPOCH, state.date);
+  const day = rotationDay(state.date);
   const fresh = cues.filter((c) => c.rank === 0);
   const spoken = cues.filter((c) => c.rank !== 0);
   const rotated = fresh.map((_, i) => fresh[(i + day) % fresh.length]!);

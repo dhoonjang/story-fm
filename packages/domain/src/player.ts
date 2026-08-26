@@ -10,6 +10,15 @@ export const RATING_MAX = 99;
 /** 체력 눈금의 위끝 — 0~100, 높을수록 좋다 */
 export const CONDITION_MAX = 100;
 
+/**
+ * **경기 감각 눈금의 위끝 — 그리고 기준점이다** (player.md §5.4).
+ *
+ * 전력 계수는 여기서 0이고 아래로만 깎이므로, 값이 없는 선수(옛 세이브)를 이 값으로
+ * 읽으면 셈이 한 칸도 달라지지 않는다. "보존한다"가 스키마가 열린다는 뜻이 아니라
+ * **숫자가 그대로다**라는 뜻이 되는 자리다.
+ */
+export const SHARPNESS_MAX = 100;
+
 /** 0~99 능력치 스케일 — 선수·감독 공통 (player.md §1) */
 export const RatingSchema = z.number().int().min(0).max(RATING_MAX);
 
@@ -208,6 +217,14 @@ export function footLabel(foot: Foot | undefined): string {
   return `왼발 ${foot.left} · 오른발 ${foot.right}`;
 }
 
+/** 주발 — `footLabel`이 가르는 그 세 갈래. 데이터가 없으면 부를 이름이 없다(null) */
+export type StrongFoot = "left" | "right" | "both";
+export function strongFootOf(foot: Foot | undefined): StrongFoot | null {
+  if (!foot) return null;
+  if (isTwoFooted(foot)) return "both";
+  return foot.left > foot.right ? "left" : "right";
+}
+
 /**
  * 두 발 차이 1당 보정 폭. 차이가 클수록 좌우가 갈린다 —
  * 5/4는 ±1, 5/3·5/2는 ±2, 5/1은 ±3. 양발(5/5)은 0이다.
@@ -268,6 +285,19 @@ export const ATTRIBUTE_AXES = [
   "goalkeeping",
 ] as const;
 export type AttributeAxis = (typeof ATTRIBUTE_AXES)[number];
+
+/**
+ * 이 이름이 16축 중 하나인가 — 세이브·판정·스킬 입력이 들고 온 문자열을 좁히는
+ * 유일한 문. 축 이름은 저장에 `string`으로 남으므로(`PlayerTraining.axis`) 읽는
+ * 쪽마다 좁히면 한쪽만 조여진다.
+ */
+export function attributeAxisOf(value: string | null | undefined): AttributeAxis | null {
+  return value !== null &&
+    value !== undefined &&
+    (ATTRIBUTE_AXES as readonly string[]).includes(value)
+    ? (value as AttributeAxis)
+    : null;
+}
 
 export const AXIS_KO: Record<AttributeAxis, string> = {
   pace: "스피드",
@@ -1682,6 +1712,55 @@ export function bestOverall(axes: AxisValues, positions: readonly { position: st
  */
 export const MOOD_NOTE_MAX = 120;
 
+// ── 은퇴 (season.md §6) ─────────────────────────────
+
+/**
+ * 서른셋을 넘겨 이 아래면 은퇴한다 — **종합의 눈금을 탄다** (season.md §6).
+ *
+ * 옛 72와 같은 인원 비율(상위 37%)에 서는 값이다 (player.md §4). 72를 그대로 두면
+ * 새 눈금에서 그 선이 전체의 63%를 덮어 서른서넛이 한 시즌에 통째로 은퇴한다.
+ */
+export const RETIRE_OVERALL = 68;
+/** 종합과 무관하게 은퇴하는 나이 */
+export const RETIRE_AGE = 35;
+/** 이 나이부터는 `RETIRE_OVERALL` 아래면 은퇴한다 */
+export const RETIRE_AGE_MARGINAL = 33;
+/**
+ * 이만큼도 못 뛴 시즌이면 계약 만료가 곧 은퇴다 — **`RETIRE_AGE_MARGINAL` 위에서만**
+ * (season.md §6).
+ *
+ * 나가는 문이 자유이적 하나뿐이면 서른넷의 백업이 매년 무소속 명단에 쌓인다. 눈금이
+ * 다섯인 것은 컵 한 라운드와 리그 몇 경기를 합친 수라 "명단에 있었다"와 "뛰지 않았다"를
+ * 가르기 때문이다 — 1군 공식전 누계 하나로 센다(`SeasonStat.apps`).
+ */
+export const RETIRE_IDLE_APPS = 5;
+
+/**
+ * 왜 그만두는가 — **코드다** (season.md §6). 판정한 사유는 은퇴 뒤에 되돌릴 수 없어
+ * (종합도 계약도 그 사람과 함께 사라진다) 명부가 이 값을 그대로 든다.
+ */
+export const RETIREMENT_REASONS = [
+  /** 판정일에 `RETIRE_AGE` 이상 — 종합도 계약도 출전도 보지 않는다 */
+  "age",
+  /** `RETIRE_AGE_MARGINAL` 이상이고 종합이 `RETIRE_OVERALL` 아래 */
+  "decline",
+  /** `RETIRE_AGE_MARGINAL` 이상 · 계약이 시즌 끝에 만료 · 출전이 `RETIRE_IDLE_APPS` 미만 */
+  "idle",
+] as const;
+export const RetirementReasonSchema = z.enum(RETIREMENT_REASONS);
+export type RetirementReason = z.infer<typeof RetirementReasonSchema>;
+
+/**
+ * 이 나이·종합이면 시즌이 끝날 때 은퇴한다 — 세계를 보지 않는 순수 규칙.
+ *
+ * 시즌 전환(`transitionSeason`)만의 자가 아니다: 베테랑 황혼 아크의 절정도 같은 자를
+ * 읽는다(people.md §9). 두 벌로 두면 한쪽만 튜닝한 날 이야기와 판정이 갈린다
+ * (AGENTS.md §5 "한 규칙, 한 정의").
+ */
+export function retiresAtSeasonEnd(age: number, overall: number): boolean {
+  return age >= RETIRE_AGE || (age >= RETIRE_AGE_MARGINAL && overall < RETIRE_OVERALL);
+}
+
 /** 빠르게 변하는 컨디션 — 부상은 별도 INJURY 테이블 (player.md §5) */
 export const PlayerStateSchema = z.object({
   /**
@@ -1774,8 +1853,64 @@ export const PlayerStateSchema = z.object({
    * 옛 세이브엔 없다 — 없으면 요청한 적 없는 것으로 읽고 버전을 올리지 않는다.
    */
   transferRequestedOn: DateString.optional(),
+  /**
+   * **주 포지션 묶음 밖 선발이 이어진 경기 수** — 자리 밖 기용 불만의 유일한 원본
+   * (people.md §5).
+   *
+   * 원장은 누가 뛰었는지(`homeLineup`)만 알고 **어느 자리에 섰는지**는 모른다. 경기가
+   * 끝나면 그 배치는 사라지므로 연속을 파생할 표가 없다 — 강등의 `demotedOn`과 같은
+   * 이유로 저장한다.
+   *
+   * 제자리에 서거나 선발에서 빠지면 0으로 돌아간다. 날이 아니라 경기로 세는 이유는
+   * 그것이 선수가 실제로 겪는 단위여서다.
+   *
+   * 옛 세이브엔 없다 — 없으면 0으로 읽고 버전을 올리지 않는다.
+   */
+  outOfPositionRun: z.number().int().min(0).optional(),
+  /**
+   * **이번 시즌 뒤 은퇴한다는 예고** — 있다는 것 자체가 그 사실이다 (season.md §6).
+   *
+   * 1월 1일 tick이 나이·종합·출전·계약으로 결정적으로 판정해 적고(`declareRetirements`),
+   * 시즌 전환이 이 표식을 보고 집행한다. 파생하지 않고 저장하는 이유는 **예고와 실행
+   * 사이에 반년이 있기 때문**이다 — 그 사이 종합이 한 칸 내려가거나 출전이 늘면
+   * 7월에 다시 판정한 명단이 1월에 감독이 들은 명단과 달라진다. 사유도 함께 드는 것은
+   * 같은 이유다: 판정한 순간의 사실이라 나중에 다시 세울 수 없다.
+   *
+   * 감독의 재계약 성사가 거둘 수 있다 — 나이 상한 안에서만(`withdrawRetirement`).
+   * `on`이 예고한 날이다 — 회견·근황·심경이 "예고한 지 며칠째"를 여기서 센다.
+   *
+   * 옛 세이브엔 없다 — 없으면 예고가 선 적 없는 것으로 읽고 버전을 올리지 않는다.
+   */
+  retiringAfterSeason: z.object({ on: DateString, reason: RetirementReasonSchema }).optional(),
+  /**
+   * **경기 감각 0~100** — 지금 이 선수가 90분의 리듬 안에 있는가 (player.md §5.4).
+   *
+   * 체력과 다른 축이다. 몸의 준비 상태는 하루 쉬면 돌아오지만 경기 감각은 그렇지
+   * 않다 — 두 달을 재활실에서 보낸 선수는 다리가 다 나은 날에도 리듬을 잃은 채로
+   * 돌아온다. **출전 분이 올리고 결장이 깎으며**, 시즌 전환이 낮은 값으로 리셋해
+   * 프리시즌이 그것을 채운다.
+   *
+   * ⚠️ **정수가 아니다.** 하루치 감쇠는 평형 근처에서 0.2 남짓이라, 정수로 반올림해
+   * 저장하면 그 구간에서 값이 통째로 멈춘다 — 폼과 같은 이유로 실수로 둔다.
+   *
+   * 옛 세이브엔 없다 — 없으면 `SHARPNESS_MAX`(기준점)로 읽고 버전을 올리지 않는다.
+   */
+  sharpness: z.number().min(0).max(SHARPNESS_MAX).optional(),
 });
 export type PlayerState = z.infer<typeof PlayerStateSchema>;
+
+/**
+ * 저장된 경기 감각을 읽는 **유일한 문** — 없으면 기준점이다.
+ * 읽는 자리가 저마다 `?? 100`을 적으면 기본값이 코드베이스에 흩어진다.
+ */
+export function sharpnessOf(state: Pick<PlayerState, "sharpness">): number {
+  return state.sharpness ?? SHARPNESS_MAX;
+}
+
+/** 경기 감각을 0~100 안으로 — 모든 변화가 이 문을 지난다 */
+export function clampSharpness(value: number): number {
+  return Math.max(0, Math.min(SHARPNESS_MAX, value));
+}
 
 /** 체력을 0~100 안으로 — 모든 변화가 이 문을 지난다 */
 export function clampCondition(value: number): number {
@@ -1822,6 +1957,45 @@ export function conditionLabel(condition: number): string {
   return CONDITION_BAND_KO[conditionBand(condition)];
 }
 
+/**
+ * 경기 감각 구간 — **화면·조회·심경이 같은 경계를 쓴다** (player.md §5.4).
+ *
+ * 이 축은 숫자로 내보내지 않고 등급으로만 선다. 감독이 관측할 수 있는 것은 출전
+ * 기록과 부상이지 "감각 73"이 아니고, 등급이면 그 두 사실에서 읽어 낼 수 있다.
+ */
+export type SharpnessBand = "sharp" | "rising" | "rusty" | "blunt";
+
+/** 각 구간이 시작되는 값 — 이 아래는 다음(더 무딘) 구간이다 */
+export const SHARPNESS_BAND_FLOOR = {
+  sharp: 80,
+  rising: 60,
+  rusty: 40,
+} as const;
+
+export function sharpnessBand(sharpness: number): SharpnessBand {
+  if (sharpness >= SHARPNESS_BAND_FLOOR.sharp) return "sharp";
+  if (sharpness >= SHARPNESS_BAND_FLOOR.rising) return "rising";
+  if (sharpness >= SHARPNESS_BAND_FLOOR.rusty) return "rusty";
+  return "blunt";
+}
+
+const SHARPNESS_BAND_KO: Record<SharpnessBand, string> = {
+  sharp: "실전",
+  rising: "올라옴",
+  rusty: "무딤",
+  blunt: "굳음",
+};
+
+/** 등급의 말 — 등급을 이미 손에 쥔 자리(심경 카드)가 부른다 */
+export function sharpnessBandLabel(band: SharpnessBand): string {
+  return SHARPNESS_BAND_KO[band];
+}
+
+/** 경기 감각 등급 라벨 — 명단·조회·심경이 같은 낱말을 쓴다 */
+export function sharpnessLabel(sharpness: number): string {
+  return sharpnessBandLabel(sharpnessBand(sharpness));
+}
+
 /** 가능 포지션 + 포지션 적응도 — 선수당 여러 개, isNatural은 **하나 이상** */
 export const PlayerPositionSchema = z.object({
   position: z.string().min(1),
@@ -1861,6 +2035,18 @@ export const GamePlayerSchema = z.object({
    * 구 세이브엔 없어 optional (SAVE_VERSION 유지).
    */
   homegrownCountry: z.string().optional(),
+  /**
+   * **국적 — 그 선수가 대표하는 협회** (FIFA 3자 코드 · `nationality.ts`).
+   * 홈그로운과 다른 축이다: 홈그로운은 어디서 자랐는가이고 이것은 누구인가라,
+   * 비EU 쿼터·대표팀 소집·워크퍼밋이 전부 이 값에 걸린다.
+   * 구 세이브엔 없어 optional — 로드 보정이 카탈로그·리그 협회에서 채운다.
+   */
+  nationality: z.string().optional(),
+  /**
+   * 둘째 국적 — **하나만 담는다.** 등록 자격을 가르는 것은 "EU 여권이 있는가"이지
+   * 여권의 개수가 아니라서, 셋째 칸은 판정에 아무것도 더하지 않는다.
+   */
+  secondNationality: z.string().optional(),
   /** 주발 — 구 세이브엔 없어 optional (없으면 양발로 다뤄 보정 0) */
   foot: FootSchema.optional(),
   /** 키(cm) · 체중(kg) — 묘사용. 구 세이브엔 없어 optional */
@@ -1870,6 +2056,17 @@ export const GamePlayerSchema = z.object({
   state: PlayerStateSchema,
   /** 주장 — 팀당 최대 1명 (검증 레이어 보장) */
   isCaptain: z.boolean(),
+  /**
+   * 부주장 — 팀당 최대 1명. **완장은 둘이고 주장은 그중 하나다**
+   * (→ docs/data/people.md §5-1): 주장이 명단에 없는 경기의 완장을 잇고, 주장이
+   * 비면 승계 1순위이며, 리더 배수도 주장 다음으로 무겁다.
+   *
+   * 서열(리더 그룹)은 저장하지 않고 파생하는데 이 값만 저장하는 것은 **감독의
+   * 결정**이라서다 — 장부 어디에서도 파생되지 않는 유일한 라커룸 사실이다.
+   *
+   * 옛 세이브엔 없다 — 없으면 부주장이 없는 것으로 읽고 버전을 올리지 않는다.
+   */
+  isViceCaptain: z.boolean().optional(),
   /**
    * 임대 중이면 원소속과 복귀일 — `teamId`는 **지금 뛰는 팀**이라 임대를 나가면
    * 그쪽으로 바뀐다. 되돌릴 근거가 여기 있어야 복귀가 파생된다.
@@ -1931,6 +2128,10 @@ export interface PlayerCatalogMeta {
   potential: number;
   /** 홈그로운 자격 협회 (나라) — 없으면 어느 리그에서도 홈그로운이 아니다 */
   homegrownCountry?: string;
+  /** 국적 — 대표하는 협회의 FIFA 3자 코드 (`nationality.ts`) */
+  nationality?: string;
+  /** 둘째 국적 — 하나만 담는다 (EU 자격을 가르는 자리다) */
+  secondNationality?: string;
   /** 주발 */
   foot?: Foot;
   /** 키(cm) · 체중(kg) */
@@ -1967,6 +2168,8 @@ export const PlayerCatalogEntrySchema = z.object({
   positions: z.array(PlayerPositionSchema).min(1),
   potential: RatingSchema,
   homegrownCountry: z.string().min(1).optional(),
+  nationality: z.string().min(1).optional(),
+  secondNationality: z.string().min(1).optional(),
   foot: FootSchema.optional(),
   height: HeightSchema.optional(),
   weight: WeightSchema.optional(),
@@ -2023,6 +2226,55 @@ export function ageOf(birthdate: string, onDate: string): number {
   const m = d.getUTCMonth() - b.getUTCMonth();
   if (m < 0 || (m === 0 && d.getUTCDate() < b.getUTCDate())) age -= 1;
   return age;
+}
+
+// ── 라커룸 서열 점수 (people.md §5-1) ───────────────
+
+/**
+ * 서열 점수의 네 항이 나눠 갖는 지분 — **합이 1**이라 점수가 축과 같은 눈금(0~99)에
+ * 선다. 리더십이 절반을 넘게 가지고, 나머지 셋은 "라커룸이 그를 얼마나 오래 봤는가"라
+ * 같은 리더십이면 오래 있은 쪽이 앞선다.
+ */
+const STANDING_LEADERSHIP_SHARE = 0.55;
+const STANDING_AGE_SHARE = 0.15;
+const STANDING_APPS_SHARE = 0.2;
+const STANDING_TENURE_SHARE = 0.1;
+
+/** 나이가 라커룸의 무게가 되기 시작하는 나이와, 더는 늘지 않는 나이 */
+const STANDING_AGE_FLOOR = 21;
+const STANDING_AGE_CEIL = 30;
+
+/** 그 셔츠로 이만큼 뛰면 출전 항이 만점 — 100경기면 어느 라커룸에서도 고참이다 */
+const STANDING_APPS_CEIL = 100;
+
+/** 재적 항이 만점에 닿는 시즌 수 */
+const STANDING_TENURE_CEIL = 4;
+
+/** 0~1로 자른 뒤 축의 눈금으로 — 네 항이 같은 자를 쓴다 */
+function standingTerm(value: number, ceil: number): number {
+  return Math.max(0, Math.min(1, value / ceil)) * RATING_MAX;
+}
+
+/**
+ * 라커룸 서열 점수 (0~99) — **세계를 보지 않는 순수 규칙이라 도메인이 갖는다.**
+ * 새 게임의 첫 주장(`createGame`)과 매 순간의 리더 그룹(`engine/squad/hierarchy.ts`)이
+ * 같은 자를 써야 개막 전과 개막 후의 서열이 다른 뜻이 되지 않는다.
+ */
+export function standingScore(input: {
+  leadership: number;
+  age: number;
+  /** 그 셔츠의 통산 1군 출전 */
+  apps: number;
+  /** 그 셔츠로 기록이 남은 시즌 수 */
+  seasons: number;
+}): number {
+  return (
+    STANDING_LEADERSHIP_SHARE * input.leadership +
+    STANDING_AGE_SHARE *
+      standingTerm(input.age - STANDING_AGE_FLOOR, STANDING_AGE_CEIL - STANDING_AGE_FLOOR) +
+    STANDING_APPS_SHARE * standingTerm(input.apps, STANDING_APPS_CEIL) +
+    STANDING_TENURE_SHARE * standingTerm(input.seasons, STANDING_TENURE_CEIL)
+  );
 }
 
 // ── 스카우팅 보고서 — 채팅이 카드로 그리는 구조체 ──────

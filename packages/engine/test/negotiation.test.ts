@@ -25,6 +25,8 @@ import {
   incomingOffer,
   incomingOffers,
   isClubTeam,
+  listingOf,
+  MARKET_NEAR_LOW,
   marketValueOf,
   loanPlayer,
   LOAN_FEE_RATE,
@@ -40,12 +42,15 @@ import {
   pendingVerdicts,
   playerById,
   playersOf,
+  REQUEST_BLOCKS,
+  REQUESTED_DISCOUNT,
   recallLoan,
   releasePlayer,
   renewalExpectation,
   renewalYearsExpectation,
   RENEWAL_YEARS_MAX,
   respondOffer,
+  respondTransferRequest,
   responseDelayDays,
   resolveMedical,
   sendOffer,
@@ -53,11 +58,13 @@ import {
   setTransferList,
   suggestTerms,
   teamName,
+  transferRequestOf,
   unilateralSeveranceOf,
   USER_WAGE_HEADROOM,
   wageExpectationOf,
   wageRoomOf,
   weeklyWagesOf,
+  windowStartFor,
   withdrawOffer,
 } from "@story-fm/engine";
 import {
@@ -882,6 +889,135 @@ describe("매각 — 들어오는 오퍼", () => {
     expect((countered.payload as MarketCard).counterTerms?.weeklyWage).toBe(
       offer.weeklyWage + 20_000,
     );
+  });
+});
+
+/**
+ * 이적 요청 — **선수가 시작하는 매각** (transfer.md §1-1).
+ *
+ * 여기서 재는 것은 셋이다: 값이 붙은 오퍼를 가르는 **경계**, 같은 창의 두 번째
+ * 거절이 요청을 세우는 **전이**, 수락한 호가가 요청 할인선을 넘지 못하는 **불변식**.
+ */
+describe("이적 요청 — 막힌 이적이 세우고 감독이 답한다", () => {
+  const shared = createTestGame(42);
+
+  /** 우리 선수 하나 — 케이스마다 다른 사람을 쓴다 (한 픽스처를 나눠 쓴다) */
+  function ours(state: GameState, index: number) {
+    return playersOf(state, state.userTeamId)[index]!;
+  }
+
+  /**
+   * 우리 선수에게 들어온 매각 오퍼 하나를 손으로 세운다 — 여기서 재는 것은 오퍼가
+   * 오는 확률이 아니라 **거절이 남기는 것**이라, 값을 정확히 겨눠야 한다.
+   */
+  function incomingSell(state: GameState, playerId: string, fee: number, id: string): Negotiation {
+    const buyer = state.teams.find((t) => t.id !== state.userTeamId && isClubTeam(t.id))!;
+    const negotiation: Negotiation = {
+      id,
+      gamePlayerId: playerId,
+      kind: "sell",
+      counterpartTeamId: buyer.id,
+      windowId: null,
+      openedOn: state.date,
+      expiresOn: addDays(state.date, 10),
+      status: "open",
+      rounds: [
+        {
+          date: state.date,
+          by: "them",
+          fee,
+          weeklyWage: 40_000,
+          contractYears: 4,
+          respondsOn: null,
+          probability: 60,
+          verdict: null,
+        },
+      ],
+    };
+    state.negotiations.push(negotiation);
+    return negotiation;
+  }
+
+  /** 그 선수에게 선 막힌 이적 불만 */
+  const blocked = (state: GameState, playerId: string) =>
+    state.issues.find((i) => i.gamePlayerId === playerId && i.reason === "blocked-move") ?? null;
+
+  it("헐값을 물린 것은 라커룸에 닿지 않는다 — 경계는 시장가 언저리의 아래 끝이다", () => {
+    const state = shared;
+    const player = ours(state, 0);
+    state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
+    const near = Math.ceil(marketValueOf(state, player) * MARKET_NEAR_LOW);
+
+    const cheap = incomingSell(state, player.id, near - 1, "neg-cheap");
+    answerIncomingOffer(state, { negotiationId: cheap.id, verdict: "reject" });
+    expect(blocked(state, player.id), "바로 아래는 헐값이다").toBeNull();
+
+    const serious = incomingSell(state, player.id, near, "neg-serious");
+    answerIncomingOffer(state, { negotiationId: serious.id, verdict: "reject" });
+    expect(blocked(state, player.id)?.count).toBe(1);
+    expect(transferRequestOf(state, player.id), "한 번은 감독의 결정이다").toBeNull();
+  });
+
+  it("같은 창의 두 번째 거절이 요청을 세우고, 창이 바뀌면 1부터 다시 센다", () => {
+    const state = shared;
+    const player = ours(state, 1);
+    state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
+    const near = Math.ceil(marketValueOf(state, player) * MARKET_NEAR_LOW);
+
+    const first = incomingSell(state, player.id, near, "neg-block-1");
+    answerIncomingOffer(state, { negotiationId: first.id, verdict: "reject" });
+    expect(blocked(state, player.id)?.count).toBe(1);
+
+    // ── 지난 창에서 막은 일은 이번 창의 두 번째가 되지 않는다
+    const windowStart = windowStartFor(state, state.userTeamId)!;
+    blocked(state, player.id)!.since = addDays(windowStart, -30);
+    const stale = incomingSell(state, player.id, near, "neg-block-stale");
+    answerIncomingOffer(state, { negotiationId: stale.id, verdict: "reject" });
+    expect(blocked(state, player.id)?.count, "창이 바뀌면 1부터다").toBe(1);
+    expect(transferRequestOf(state, player.id)).toBeNull();
+
+    // ── 같은 창의 두 번째는 불만이 아니라 요청이다
+    const second = incomingSell(state, player.id, near, "neg-block-2");
+    const answered = answerIncomingOffer(state, { negotiationId: second.id, verdict: "reject" });
+    expect(blocked(state, player.id)?.count).toBe(REQUEST_BLOCKS);
+    const request = transferRequestOf(state, player.id);
+    expect(request?.reason).toBe("blocked-move");
+    expect(request?.answeredOn, "요청은 답을 기다린다").toBeUndefined();
+    expect(answered.message).toContain("이적을 요청");
+    // 장부가 원본이고 옛 필드도 같은 값을 든다
+    expect(state.transferRequests?.some((r) => r.gamePlayerId === player.id)).toBe(true);
+    expect(playerById(state, player.id)!.state.transferRequestedOn).toBe(state.date);
+  });
+
+  it("수락한 호가는 요청 할인선 위로 서지 못한다", () => {
+    const state = shared;
+    const player = ours(state, 2);
+    state.transferRequests = (state.transferRequests ?? []).filter(
+      (r) => r.gamePlayerId !== player.id,
+    );
+    state.transferRequests.push({
+      gamePlayerId: player.id,
+      since: state.date,
+      reason: "grievance",
+      pressedOn: state.date,
+    });
+
+    const ceiling = Math.round(marketValueOf(state, player) * (1 - REQUESTED_DISCOUNT));
+    const accepted = respondTransferRequest(state, {
+      playerId: player.id,
+      answer: "accept",
+      askingPrice: 999_000_000,
+    });
+    expect(accepted.ok, accepted.message).toBe(true);
+    expect(listingOf(state, player.id)!.askingPrice).toBeLessThanOrEqual(ceiling);
+
+    const request = transferRequestOf(state, player.id)!;
+    expect(request.answer).toBe("accept");
+    expect(request.answeredOn).toBe(state.date);
+    // 답한 사실은 다음 회견이 다시 싣는다 — 실려 간 자리는 비워진다
+    expect(request.pressedOn).toBeUndefined();
+    // 감독은 한 번만 답한다
+    expect(respondTransferRequest(state, { playerId: player.id, answer: "refuse" }).ok).toBe(false);
   });
 });
 
@@ -2375,6 +2511,7 @@ describe("협상 상대의 앵커와 한도", () => {
       fee: { expectation: 1000, min: 500, max: 2000 },
       wage: null,
       years: null,
+      status: null,
       splittable: true,
     },
     ...over,

@@ -1,4 +1,11 @@
-import type { GamePlayer, Player, SubCause, TacticsSpec } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  Player,
+  SetPieceTakers,
+  ShotOrigin,
+  SubCause,
+  TacticsSpec,
+} from "@story-fm/domain";
 import {
   AI_MANAGER_RATING_FALLBACK,
   CONDITION_MAX,
@@ -14,6 +21,8 @@ import {
 import type { StrengthPacket } from "@story-fm/domain";
 import {
   ASSIST_RATE,
+  CORNER_SHOT_SHARE,
+  DIRECT_FREE_KICK_SHARE,
   EVEN_POSSESSION,
   EXTRA_TIME_DENSITY,
   EXTRA_TIME_MINUTES,
@@ -24,9 +33,12 @@ import {
   conditionDrain,
   injuryWeight,
   matchIntensity,
+  penaltyRate,
   planBenchSubs,
   samplePoisson,
   sampleShot,
+  savedShare,
+  setPieceTaker,
   teamCardRate,
   teamInjuryRate,
   type LineupSlot,
@@ -55,6 +67,12 @@ export interface SimSquad {
    * 누가 다치는지만 가르고 발생 건수는 바꾸지 않는다.
    */
   proneness?: Record<string, number>;
+  /**
+   * 감독이 지정한 죽은 공 키커 — AI 팀에는 대개 없고, 그때는 패킷이 기본값을
+   * 세운다 (match.md §1.4). 감독 팀이 간이 시뮬을 지나는 자리(연장 추정 등)에서도
+   * 같은 사람이 차야 한다.
+   */
+  setPieceTakers?: SetPieceTakers;
 }
 
 /**
@@ -124,14 +142,14 @@ export function quickStrengthFactor(ours: number, theirs: number): number {
 }
 
 /**
- * 이 팀이 경기에 싣는 강도 — 압박·템포에서 나온다(`matchIntensity`, 0.8~1.3).
+ * 이 팀이 경기에 싣는 강도 — 압박·템포가 만들고 더비가 곱한다(`matchIntensity`).
  *
  * 구간 시뮬은 패킷의 `guide.intensity`를 읽지만, 카드·부상은 슈팅과 달리 **경기
  * 전에 한 번** 뽑아 타임라인 위에 얹으므로 여기서는 패킷을 세우기 전에 같은
  * 함수를 직접 부른다. 패킷의 값도 이 함수가 낸 것이라 두 경로가 같은 수를 준다.
  */
-function intensityOf(squad: SimSquad): number {
-  return matchIntensity(squad.tactics ?? DEFAULT_TACTICS);
+function intensityOf(squad: SimSquad, derbyHeat = 0): number {
+  return matchIntensity(squad.tactics ?? DEFAULT_TACTICS, derbyHeat);
 }
 
 function outfield(players: readonly GamePlayer[]): GamePlayer[] {
@@ -185,8 +203,10 @@ function sampleCardMinutes(
   /** 경기당 기대치에서 이 구간이 차지하는 몫 — 90분은 1, 연장은 30/90 */
   share: number,
   minuteOf: () => number,
+  /** 더비면 1~3 — 강도 배수가 카드 기대치에 그대로 실린다 (match.md §7) */
+  derbyHeat = 0,
 ): number[] {
-  const count = samplePoisson(rng, teamCardRate(intensityOf(squad)) * share);
+  const count = samplePoisson(rng, teamCardRate(intensityOf(squad, derbyHeat)) * share);
   return Array.from({ length: count }, minuteOf).sort((a, b) => a - b);
 }
 
@@ -245,6 +265,8 @@ function rollInjury(
   into: string[],
   /** 경기당 기대치에서 이 구간이 차지하는 몫 — 90분은 1, 연장은 30/90 */
   share = 1,
+  /** 더비면 1~3 — 카드와 같은 강도 배수를 탄다 */
+  derbyHeat = 0,
 ): void {
   if (played.length === 0) return;
   const proneOf = (p: GamePlayer) => squad.proneness?.[p.id] ?? 1;
@@ -256,7 +278,7 @@ function rollInjury(
    * 팀당 기대치가 0.05~0.07이라 둘의 차이는 λ와 1 − e^(−λ), 3% 안쪽이다 — 대신
    * 여기서는 한 팀이 한 경기에 두 명을 잃지 않는다.
    */
-  if (rng() >= teamInjuryRate(intensityOf(squad), avgProneness) * share) return;
+  if (rng() >= teamInjuryRate(intensityOf(squad, derbyHeat), avgProneness) * share) return;
   const weights = played.map((p) => injuryWeight(p, 0, proneOf(p)));
   const total = weights.reduce((s, w) => s + w, 0);
   if (total <= 0) return;
@@ -299,6 +321,8 @@ export interface QuickResult {
   assists: string[];
   /** 골이 들어간 분 — `scorers`와 같은 순서·같은 길이 */
   goalMinutes: number[];
+  /** 골이 어디서 나왔나 — `scorers`와 같은 순서·같은 길이 (match.md §1.4) */
+  goalOrigins: ShotOrigin[];
   /** 경고·퇴장 — 호출부가 BOOKING·SUSPENSION으로 옮긴다 */
   cards: QuickCard[];
   /** 교체 — 호출부가 출전 기록·체력에 반영한다 */
@@ -332,6 +356,8 @@ interface QuickShot {
   xg: number;
   goalProbability: number;
   outcome: "goal" | "saved" | "blocked" | "off_target";
+  /** 어디서 나온 슛인가 — 세트피스 득점 비율이 이 칸으로 세어진다 (match.md §1.4) */
+  origin: ShotOrigin;
 }
 
 const fallbackSlot = (player: GamePlayer): LineupSlot => {
@@ -412,6 +438,8 @@ interface TimelineInput {
   /** 구간이 끝나는 분의 슈팅 밀도 — 90분 본 경기는 하프별, 연장은 상수 */
   densityOf: (end: number) => number;
   neutral: boolean;
+  /** 이 대진이 더비인가 — 패킷의 강도 배수와 컨텍스트 태그가 여기서 선다 */
+  derby?: { name: string; heat: number };
   /** 경기 전에 뽑은 카드의 분 — 수신자는 워크가 그 분의 온필드에서 고른다 */
   cardMinutes: { home: readonly number[]; away: readonly number[] };
   /** 벤치 정책 가동 — 90분 본 경기만. 연장은 교체가 없다 (match.md §9) */
@@ -469,6 +497,8 @@ function runTimeline(input: TimelineInput): {
     bench: [],
     tactics: squads[side].tactics ?? DEFAULT_TACTICS,
     managerTactics: squads[side].managerTactics ?? AI_MANAGER_RATING_FALLBACK,
+    // 지정 키커는 감독의 팀에만 있다 — 없으면 패킷이 기본값을 세운다
+    ...(squads[side].setPieceTakers ? { setPieceTakers: squads[side].setPieceTakers } : {}),
   });
 
   /** 그 분까지 뛴 시간 — 교체 투입은 들어온 분부터 센다 */
@@ -574,9 +604,13 @@ function runTimeline(input: TimelineInput): {
         neutral: input.neutral,
         // 골 정지점마다 다시 세운다 — 골 차의 노출은 구간 시뮬과 같은 문을 지난다
         lead: score.home - score.away,
+        ...(input.derby ? { derby: input.derby } : {}),
       });
       const density = input.densityOf(next);
       const rolled: QuickShot[] = [];
+      /** 이 구간이 90분에서 차지하는 몫 — 열린 플레이·죽은 공·페널티가 함께 탄다 */
+      const window = ((next - t) / PHASE_END.second_half) * density;
+      const minuteIn = () => Math.max(1, Math.ceil(t + rng() * (next - t)));
       for (const side of ["home", "away"] as const) {
         const active = activeAt(side, t);
         const byId = new Map(active.map((player) => [player.id, player] as const));
@@ -584,20 +618,68 @@ function runTimeline(input: TimelineInput): {
           const shooter = byId.get(profile.playerId);
           if (!shooter) continue;
           for (const route of profile.routes) {
-            const count = samplePoisson(rng, route.expectedShots * ((next - t) / 90) * density);
+            const count = samplePoisson(rng, route.expectedShots * window);
             for (let shot = 0; shot < count; shot++) {
               const result = sampleShot(rng, route, shooter.attributes.finishing);
               const assister =
                 result.outcome === "goal" ? pickAssister(rng, active, shooter.id) : null;
               rolled.push({
                 side,
-                minute: Math.max(1, Math.ceil(t + rng() * (next - t))),
+                minute: minuteIn(),
                 shooterId: shooter.id,
                 assistId: assister?.id,
+                origin: "open",
                 ...result,
               });
             }
           }
+        }
+        /**
+         * **죽은 공과 페널티도 같은 채널로 굴린다** (match.md §1.4·§7). 발생률도
+         * 슛 결과도 구간 시뮬과 같은 함수를 지난다 — 여기가 갈리면 리그의 95%는
+         * 세트피스가 없는 축구를 한다.
+         */
+        const sp = packet.guide.setPieces?.[side];
+        if (!sp) continue;
+        const field = outfield(active);
+        for (let shot = samplePoisson(rng, sp.expectedShots * window); shot > 0; shot--) {
+          if (field.length === 0) break;
+          const corner = rng() < CORNER_SHOT_SHARE;
+          const taker = setPieceTaker(packet, side, corner ? "corner" : "freeKick", field);
+          const direct = !corner && taker !== null && rng() < DIRECT_FREE_KICK_SHARE;
+          const shooter = direct ? taker : weightedPick(rng, field, (p) => p.attributes.aerial);
+          if (!shooter) continue;
+          const result = sampleShot(rng, { meanXg: sp.meanXg }, shooter.attributes.finishing);
+          // 올린 사람이 곧 도움이다 — 죽은 공의 도움은 추첨을 지나지 않는다
+          const assister = taker && taker.id !== shooter.id ? taker : null;
+          rolled.push({
+            side,
+            minute: minuteIn(),
+            shooterId: shooter.id,
+            ...(result.outcome === "goal" && assister ? { assistId: assister.id } : {}),
+            origin: corner ? "corner" : "free_kick",
+            ...result,
+          });
+        }
+        for (let kick = samplePoisson(rng, sp.penalties * window); kick > 0; kick--) {
+          const taker = setPieceTaker(packet, side, "penalty", field);
+          if (!taker) break;
+          const keeper =
+            activeAt(side === "home" ? "away" : "home", t).find(
+              (p) => positionGroupOfPlayer(p) === "GK",
+            ) ?? null;
+          /** 성공률이 곧 xG다 — 승부차기와 같은 식이고 결정력을 두 번 세지 않는다 */
+          const rate = penaltyRate(taker, keeper);
+          const isGoal = rng() < rate;
+          rolled.push({
+            side,
+            minute: minuteIn(),
+            shooterId: taker.id,
+            origin: "penalty",
+            xg: rate,
+            goalProbability: rate,
+            outcome: isGoal ? "goal" : rng() < savedShare(rate) ? "saved" : "off_target",
+          });
         }
       }
       rolled.sort((a, b) => a.minute - b.minute);
@@ -659,6 +741,8 @@ export interface ExtraTimeResult {
   assists: string[];
   /** 91~120 */
   goalMinutes: number[];
+  /** 골이 어디서 나왔나 — `scorers`와 같은 순서·같은 길이 */
+  goalOrigins: ShotOrigin[];
   /** 연장의 경고·퇴장 — 호출부가 90분과 같은 문(`discipline.ts`)으로 옮긴다 */
   cards: QuickCard[];
   /** 연장에서 다친 선수 — `"home:playerId"`. 기간·심각도는 호출부가 굴린다 */
@@ -681,13 +765,18 @@ export interface ExtraTimeResult {
  * @param options.neutral 중립 경기장(결승) — 홈 어드밴티지를 주지 않는다
  * @param options.bookedIn90 90분에 경고를 받은 선수 — 연장의 경고가 이어져
  *   두 번째 경고 퇴장(경고 한 줄 + 퇴장 한 줄)이 성립한다
+ * @param options.derby 더비 표의 줄 — 연장도 같은 경기다 (§7)
  */
 export function simulateExtraTime(
   home: SimSquad,
   away: SimSquad,
   seed: number,
   channel: string,
-  options: { neutral?: boolean; bookedIn90?: readonly string[] } = {},
+  options: {
+    neutral?: boolean;
+    bookedIn90?: readonly string[];
+    derby?: { name: string; heat: number };
+  } = {},
 ): ExtraTimeResult {
   const rng = makeRng(seed, `et:${channel}`);
   const squads = { home, away };
@@ -696,9 +785,10 @@ export function simulateExtraTime(
   const etMinute = () =>
     EXTRA_TIME_FIRST_MINUTE +
     Math.min(EXTRA_TIME_MINUTES - 1, Math.floor(rng() * EXTRA_TIME_MINUTES));
+  const derbyHeat = options.derby?.heat ?? 0;
   const cardMinutes = {
-    home: sampleCardMinutes(rng, home, share, etMinute),
-    away: sampleCardMinutes(rng, away, share, etMinute),
+    home: sampleCardMinutes(rng, home, share, etMinute, derbyHeat),
+    away: sampleCardMinutes(rng, away, share, etMinute, derbyHeat),
   };
   const sampled = runTimeline({
     squads,
@@ -706,6 +796,7 @@ export function simulateExtraTime(
     to: EXTRA_TIME_FIRST_MINUTE - 1 + EXTRA_TIME_MINUTES,
     densityOf: () => EXTRA_TIME_DENSITY,
     neutral: options.neutral === true,
+    ...(options.derby ? { derby: options.derby } : {}),
     cardMinutes,
     bench: false,
     priorYellows: new Set(options.bookedIn90 ?? []),
@@ -716,12 +807,14 @@ export function simulateExtraTime(
   const scorers: string[] = [];
   const assists: string[] = [];
   const goalMinutes: number[] = [];
-  for (const { side, minute, shooterId, assistId } of timeline) {
+  const goalOrigins: ShotOrigin[] = [];
+  for (const { side, minute, shooterId, assistId, origin } of timeline) {
     const pool = squads[side].starters;
     const scorer = pool.find((player) => player.id === shooterId);
     if (!scorer) continue;
     scorers.push(`${side}:${scorer.id}`);
     goalMinutes.push(minute);
+    goalOrigins.push(origin);
     assists.push(assistId ? `${side}:${assistId}` : "");
   }
   /**
@@ -740,6 +833,7 @@ export function simulateExtraTime(
       side,
       injuries,
       share,
+      derbyHeat,
     );
   }
   const sum = (side: "home" | "away", read: (shot: QuickShot) => number) =>
@@ -752,6 +846,7 @@ export function simulateExtraTime(
     scorers,
     assists,
     goalMinutes,
+    goalOrigins,
     cards: sampled.cards,
     injuries,
     homeShots: sampled.shots.filter((shot) => shot.side === "home").length,
@@ -769,21 +864,24 @@ export function simulateExtraTime(
  * @param options.neutral 중립 경기장(결승) — 홈 어드밴티지를 주지 않는다. 경기가
  *   갖고 있는 사실(`MatchRecord.neutral`)이라 호출부가 그대로 넘긴다: 여기서
  *   `false`로 굳으면 명목상의 홈이 결승에서 공짜 우위를 얻는다.
+ * @param options.derby 더비 표의 줄 — 중립과 같은 결의 사실이다. 넘기지 않으면
+ *   리그의 95%에서 더비가 카드·부상·판세에 닿지 않는다 (match.md §7)
  */
 export function quickSimulate(
   home: SimSquad,
   away: SimSquad,
   seed: number,
   channel: string,
-  options: { neutral?: boolean } = {},
+  options: { neutral?: boolean; derby?: { name: string; heat: number } } = {},
 ): QuickResult {
   const rng = makeRng(seed, `quick:${channel}`);
   const squads = { home, away };
+  const derbyHeat = options.derby?.heat ?? 0;
 
   /** 카드의 수·분을 먼저 뽑고, 시간순 워크가 수신자·교체·슈팅을 차례로 확정한다. */
   const cardMinutes = {
-    home: sampleCardMinutes(rng, home, 1, () => sampleMinute(rng)),
-    away: sampleCardMinutes(rng, away, 1, () => sampleMinute(rng)),
+    home: sampleCardMinutes(rng, home, 1, () => sampleMinute(rng), derbyHeat),
+    away: sampleCardMinutes(rng, away, 1, () => sampleMinute(rng), derbyHeat),
   };
   const sampled = runTimeline({
     squads,
@@ -791,6 +889,7 @@ export function quickSimulate(
     to: LAST_MINUTE,
     densityOf: (end) => (end <= HALF_TIME ? FIRST_HALF_DENSITY : SECOND_HALF_DENSITY),
     neutral: options.neutral === true,
+    ...(options.derby ? { derby: options.derby } : {}),
     cardMinutes,
     bench: true,
     rng,
@@ -799,6 +898,7 @@ export function quickSimulate(
   const scorers: string[] = [];
   const assists: string[] = [];
   const goalMinutes: number[] = [];
+  const goalOrigins: ShotOrigin[] = [];
   for (const shot of sampled.shots.filter((item) => item.outcome === "goal")) {
     const { side, minute } = shot;
     const pool = [...squads[side].starters, ...(squads[side].bench ?? [])];
@@ -806,6 +906,7 @@ export function quickSimulate(
     if (!scorer) continue;
     scorers.push(`${side}:${scorer.id}`);
     goalMinutes.push(minute);
+    goalOrigins.push(shot.origin);
     assists.push(shot.assistId ? `${side}:${shot.assistId}` : "");
   }
 
@@ -820,6 +921,8 @@ export function quickSimulate(
       injuryCandidates(playedIn(squad, side, subs), side, cards),
       side,
       injuries,
+      1,
+      derbyHeat,
     );
   }
   const sum = (side: "home" | "away", read: (shot: QuickShot) => number) =>
@@ -832,6 +935,7 @@ export function quickSimulate(
     scorers,
     assists,
     goalMinutes,
+    goalOrigins,
     cards,
     subs,
     injuries,

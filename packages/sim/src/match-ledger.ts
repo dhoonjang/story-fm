@@ -37,6 +37,20 @@ export interface MatchLedgerState {
   stats?: Record<string, MatchStatLine>;
 }
 
+/** 빈 기록 한 줄 — 누적 기록의 출발점이 한 곳이어야 칸이 늘 때 갈리지 않는다 */
+export function emptyStatLine(): MatchStatLine {
+  return {
+    passes: 0,
+    progressive: 0,
+    shots: 0,
+    xg: 0,
+    scoringExpectation: 0,
+    saves: 0,
+    corners: 0,
+    fouls: 0,
+  };
+}
+
 /** 구간이 만든 증가분을 장부에 더한다 — 패스는 사건이 아니므로 이 경로로만 쌓인다 */
 export function addStats(
   state: MatchLedgerState,
@@ -44,14 +58,7 @@ export function addStats(
 ): MatchLedgerState {
   const stats = { ...(state.stats ?? {}) };
   for (const [id, line] of Object.entries(add)) {
-    const before = stats[id] ?? {
-      passes: 0,
-      progressive: 0,
-      shots: 0,
-      xg: 0,
-      scoringExpectation: 0,
-      saves: 0,
-    };
+    const before = stats[id] ?? emptyStatLine();
     stats[id] = {
       passes: before.passes + line.passes,
       progressive: before.progressive + line.progressive,
@@ -59,6 +66,9 @@ export function addStats(
       xg: round2(before.xg + line.xg),
       scoringExpectation: round2((before.scoringExpectation ?? 0) + line.scoringExpectation),
       saves: before.saves + line.saves,
+      // 옛 세이브의 줄에는 없는 칸이라 0으로 읽는다 (SAVE_VERSION 유지)
+      corners: (before.corners ?? 0) + line.corners,
+      fouls: (before.fouls ?? 0) + line.fouls,
     };
   }
   return { ...state, stats };
@@ -162,24 +172,35 @@ const BREAK_KO: Record<string, string> = {
 const BREAK_EVENTS: ReadonlySet<string> = new Set(Object.keys(BREAK_KO));
 
 /**
+ * **벤치가 한 정지점에 올리는 줄** — 경기가 재개됐다는 표시가 아니다.
+ *
+ * 교체 여러 장은 한 창의 같은 자리이고, 전술 전환도 그 정지점에서 벤치가 낸 판단이라
+ * 둘 다 시계를 밀지 않는다. 여기 없는 사건이 정지 사건 뒤에 오면 그때부터 경기다.
+ */
+const BENCH_STOP_EVENTS: ReadonlySet<MatchEvent["type"]> = new Set([
+  "substitution",
+  "tactical_shift",
+]);
+
+/**
  * 이 교체가 **휴식 정지점에 붙어 있는가** — 창 미소모의 판정 (match.md §5).
  *
  * 분으로 재면 안 된다: 정지 사건의 시각은 국면이 끝나는 분이고, 그 값이 조금만
  * 움직여도 "45′·46′면 면제"가 통째로 사라진다. 정지점 자체를 본다.
  *
  * 자리는 정지 사건의 **앞뒤 양쪽**이다 — 다음 배치에서 감독이 부르는 교체는 뒤에
- * 오고, 구간 시뮬이 정지 사건과 함께 올리는 AI 교체는 같은 배치의 앞에 온다
- * (`insertBeforeStop`). 경기가 재개되면 — 정지 사건 뒤에 교체가 아닌 사건이
+ * 오고, 구간 시뮬이 정지 사건과 함께 올리는 AI 교체·전술 전환은 같은 배치의 앞에 온다
+ * (`insertBeforeStop`). 경기가 재개되면 — 정지 사건 뒤에 벤치의 줄이 아닌 사건이
  * 기록되거나 시계가 그 분을 지나면 — 다시 보통의 교체다.
  */
 function atBreakStop(state: MatchLedgerState, incoming: MatchEvent[], i: number): boolean {
   const sub = incoming[i];
   if (!sub) return false;
-  /** 교체를 건너뛰고 만나는 첫 사건 — 교체 여러 장은 한 정지점의 같은 자리다 */
+  /** 벤치의 줄을 건너뛰고 만나는 첫 사건 */
   const around = (events: readonly MatchEvent[], from: number, step: number): MatchEvent | null => {
     for (let j = from; j >= 0 && j < events.length; j += step) {
       const found = events[j];
-      if (!found || found.type === "substitution") continue;
+      if (!found || BENCH_STOP_EVENTS.has(found.type)) continue;
       return found;
     }
     return null;

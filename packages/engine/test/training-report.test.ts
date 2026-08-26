@@ -14,7 +14,12 @@ import {
   buildTrainingBrief,
   playerById,
   playersOf,
+  recordEmptyTrainingReport,
+  reservePlayers,
   setPlayerTraining,
+  trainingSettled,
+  trainsWithFirstTeam,
+  userPlayers,
   setTraining,
   userTactics,
   type GameState,
@@ -324,14 +329,14 @@ describe("판정의 상한 — 한 번에 게임을 크게 흔들 수 없다", (
     setPlayerTraining(state, { playerId: target, position: learned });
 
     const brief = trainOneDay(state, ["tactical"])!;
-    const lines = applyTrainingOutcomes(state, brief, [
+    const report = applyTrainingOutcomes(state, brief, [
       { playerId: target, tacticGain: 0, attribute: null, positionGain: 2, note: "" },
-    ]);
-    // 아무것도 오르지 않았으면 성장 로그에도 요약에도 그렇게 적힌다
+    ])!;
+    // 아무것도 오르지 않았으면 성장 로그에도 결산 카드에도 그렇게 적힌다
     expect(state.growthLog.filter((g) => g.target === `pos:${learned}`)).toHaveLength(0);
     expect(
-      lines.some((l) => l.includes("적응 +")),
-      "천장에서 적응 +N이 남았다",
+      report.moved.some((m) => m.target === `pos:${learned}`),
+      "천장에서 적응 +N이 카드에 남았다",
     ).toBe(false);
   });
 
@@ -418,7 +423,7 @@ describe("한 결산은 장부를 한 번만 움직인다", () => {
     expect(
       applyTrainingOutcomes(state, brief, [outcome]),
       "두 번째 반영이 장부를 건드렸다",
-    ).toEqual([]);
+    ).toBeNull();
     expect(famOf(), "적응도가 두 번 반영됐다").toBe(after.fam);
     expect(posOf(), "자리 적응도가 두 번 반영됐다").toBe(after.pos);
     expect(player.attributes.stamina, "능력치가 두 번 반영됐다").toBe(after.stamina);
@@ -456,6 +461,27 @@ describe("대상은 그 구간을 팀과 함께 보낸 선수다", () => {
     expect(ids.has(hurt), "재활 중인 선수가 판정 대상에 있다").toBe(false);
     expect(ids.has(banned), "출장 정지 선수가 판정 대상에 있다").toBe(false);
     expect(ids.size, "대상이 통째로 비었다").toBeGreaterThan(0);
+    expect(trainsWithFirstTeam(state, playerById(state, hurt)!)).toBe(false);
+    expect(trainsWithFirstTeam(state, playerById(state, banned)!)).toBe(false);
+  });
+
+  /**
+   * 훈련장에 선 집합은 **문 하나**다(`trainsWithFirstTeam` — season.md §8 불변식).
+   * 결산 브리프도 tick의 훈련 부상 후보도 여기를 지난다: 갈라 두면 2군이 훈련
+   * 중에만 다치고 결산은 받지 못한다.
+   */
+  it("2군은 훈련장에 서지 않는다 — 결산도 부상 후보도 같은 문이다", () => {
+    const state = afterSquadReturn(createTestGame(7));
+    const reserve = reservePlayers(state, state.userTeamId)[0]!;
+    expect(trainsWithFirstTeam(state, reserve), "2군이 훈련장에 서 있다").toBe(false);
+
+    const brief = trainOneDay(state, ["stamina"], "러닝")!;
+    const ids = [...new Set(brief.subjects.map((s) => s.playerId))].sort();
+    const gate = userPlayers(state)
+      .filter((p) => trainsWithFirstTeam(state, p))
+      .map((p) => p.id)
+      .sort();
+    expect(ids, "결산 대상과 훈련장에 선 집합이 갈렸다").toEqual(gate);
   });
 });
 
@@ -712,5 +738,137 @@ describe("한 칸의 규칙 (applyAttributeStep)", () => {
     };
     expect(carryAfterDecline(0.5)).toBe(carryAfterDecline(1));
     expect(carryAfterDecline(1)).toBeLessThan(0);
+  });
+});
+
+/**
+ * 결산 카드 — **판정이 감독에게 닿는 유일한 자리다** (docs/simulation/season.md §4).
+ *
+ * 그 전까지 판정의 산출은 요약 줄 배열이었고 그 배열을 읽는 곳이 없어, 근거 한 줄이
+ * 호출 자리에서 그대로 사라졌다. 여기서 보는 것은 **카드가 장부의 문을 함께 지나는가**다.
+ */
+describe("훈련 결산 카드", () => {
+  it("한 구간에 한 장 — 움직인 눈금과 갈래·근거가 함께 실린다", () => {
+    const state = afterSquadReturn(createTestGame(7));
+    const brief = trainOneDay(state, ["stamina"], "체력 훈련")!;
+    const [a, b] = brief.subjects;
+    const report = applyTrainingOutcomes(state, brief, [
+      {
+        playerId: a!.playerId,
+        tacticGain: TACTIC_GAIN_MAX,
+        attribute: "stamina",
+        attributeStep: 1,
+        note: "  마지막까지  남아  뛰었다 ",
+        mark: "standout",
+      },
+      { playerId: b!.playerId, tacticGain: 0, attribute: null, note: "", mark: "slack" },
+    ])!;
+
+    expect(state.trainingReports, "카드가 장부에 서지 않았다").toHaveLength(1);
+    expect(state.trainingReports![0]).toBe(report);
+    expect(report.from).toBe(brief.from);
+    expect(report.to).toBe(brief.to);
+    expect(report.sessions).toBe(brief.sessions.length);
+
+    // 근거 한 줄은 한 줄로 펴서 남는다 — 자르지는 않는다
+    const marked = report.marks.find((m) => m.gamePlayerId === a!.playerId)!;
+    expect(marked.code).toBe("standout");
+    expect(marked.note).toBe("마지막까지 남아 뛰었다");
+
+    // 아무것도 안 움직인 선수도 갈래가 있으면 카드에 선다
+    expect(report.marks.find((m) => m.gamePlayerId === b!.playerId)!.code).toBe("slack");
+
+    /**
+     * `moved`는 판정이 낸 값이 아니라 **성장 로그에 적힌 그 줄**이다 — 둘이 갈리면
+     * 달력의 눈금과 카드의 문장이 서로 다른 것을 말한다.
+     */
+    const logged = state.growthLog
+      .filter((g) => g.origin === "training-settlement" || g.origin === "position-conversion")
+      .map((g) => `${g.gamePlayerId} ${g.target} ${g.delta}`)
+      .sort();
+    expect([...report.moved.map((m) => `${m.gamePlayerId} ${m.target} ${m.delta}`)].sort()).toEqual(
+      logged,
+    );
+  });
+
+  it("아무 일도 없던 줄은 카드에 적지 않는다 — 여백은 사실이 아니다", () => {
+    const state = afterSquadReturn(createTestGame(7));
+    const brief = trainOneDay(state, ["tactical"])!;
+    const report = applyTrainingOutcomes(
+      state,
+      brief,
+      // 판정자는 대상 전원에게 한 줄씩 답한다 — 그대로 받으면 카드가 "변화 없음"의 벽이 된다
+      brief.subjects.map((s) => ({
+        playerId: s.playerId,
+        tacticGain: 0,
+        attribute: null,
+        note: "특별한 변화 없음",
+        mark: null,
+      })),
+    )!;
+    expect(report.moved).toEqual([]);
+    expect(report.marks, "아무것도 안 움직인 줄이 카드에 남았다").toEqual([]);
+  });
+
+  it("갈래는 대상 안에서만 — 명단 밖·표 밖·둘째 줄은 반려된다", () => {
+    const state = afterSquadReturn(createTestGame(7));
+    const brief = trainOneDay(state, ["tactical"])!;
+    const inside = brief.subjects[0]!.playerId;
+    const outside = reservePlayers(state, state.userTeamId)[0]?.id ?? "gp_nobody";
+    expect(brief.subjects.some((s) => s.playerId === outside)).toBe(false);
+
+    const report = applyTrainingOutcomes(state, brief, [
+      { playerId: inside, tacticGain: 0, attribute: null, note: "", mark: "tired" },
+      // 같은 선수의 둘째 줄 — 첫 줄만 받는다 (agents.md §4)
+      { playerId: inside, tacticGain: 0, attribute: null, note: "", mark: "standout" },
+      // 브리프 밖 선수 — 우리 2군이라도 그 구간 훈련장에 서지 않았다
+      { playerId: outside, tacticGain: 0, attribute: null, note: "", mark: "slack" },
+      // 표에 없는 갈래 — 코어가 잘라 낸다
+      {
+        playerId: brief.subjects[1]!.playerId,
+        tacticGain: 0,
+        attribute: null,
+        note: "",
+        mark: "lazy" as never,
+      },
+    ])!;
+    expect(report.marks).toHaveLength(1);
+    expect(report.marks[0]!.gamePlayerId).toBe(inside);
+    expect(report.marks[0]!.code).toBe("tired");
+  });
+
+  it("두 번 제출해도 카드는 한 장 — 반영 표식과 같은 문을 지난다", () => {
+    const state = afterSquadReturn(createTestGame(7));
+    const brief = trainOneDay(state, ["tactical"])!;
+    const row = {
+      playerId: brief.subjects[0]!.playerId,
+      tacticGain: TACTIC_GAIN_MAX,
+      attribute: null,
+      note: "",
+      mark: "standout" as const,
+    };
+    expect(applyTrainingOutcomes(state, brief, [row])).not.toBeNull();
+    expect(applyTrainingOutcomes(state, brief, [row])).toBeNull();
+    expect(state.trainingReports).toHaveLength(1);
+  });
+
+  it("판정이 없던 구간에도 빈 카드가 선다 — 장부가 안 움직인 것이 사실이다", () => {
+    const state = afterSquadReturn(createTestGame(7));
+    const brief = trainOneDay(state, ["tactical"])!;
+    const report = applyTrainingOutcomes(state, brief, [])!;
+    expect(report.sessions).toBeGreaterThan(0);
+    expect(report.moved).toEqual([]);
+    expect(report.marks).toEqual([]);
+    expect(state.trainingReports).toHaveLength(1);
+  });
+
+  it("mock·실패 구간의 빈 카드는 반영 표식을 세우지 않는다", () => {
+    const state = afterSquadReturn(createTestGame(7));
+    const brief = trainOneDay(state, ["tactical"])!;
+    const report = recordEmptyTrainingReport(state, brief);
+    expect(report.sessions).toBe(brief.sessions.length);
+    expect(state.trainingReports).toHaveLength(1);
+    // 장부는 정말로 움직이지 않았다 — "반영됨"이라고 적으면 표식이 카드와 다른 말을 한다
+    expect(trainingSettled(state, brief), "실패한 판정이 반영 표식을 세웠다").toBe(false);
   });
 });

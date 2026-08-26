@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
 import { MATCH_MINUTE_MAX } from "./match";
-import { AXIS_KO, type AttributeAxis } from "./player";
+import { AXIS_KO, RetirementReasonSchema, type AttributeAxis } from "./player";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
+import { SQUAD_STATUSES } from "./squad-rules";
 
 /**
  * 기록 테이블 (v6) — 선수·팀·일정에 딸린 이력.
@@ -76,6 +77,14 @@ export const ContractSchema = z.object({
   until: DateString,
   /** active = 선수당 정확히 1건 */
   status: z.enum(["active", "ended"]),
+  /**
+   * **어떤 자리로 왔는가** — 계약에 적히는 약속이다 (→ docs/data/people.md §5-2).
+   *
+   * 출전 불만도 약속 이행도 이 칸을 읽는다: 백업으로 온 선수와 주전으로 온 선수를
+   * 같은 자로 재면 스쿼드를 채우는 일 자체가 반란의 씨앗이 된다. 옛 계약엔 없어
+   * optional이고, 없으면 **지금 서열에서 파생한다**(`squadStatusOf` — SAVE_VERSION 유지).
+   */
+  squadStatus: z.enum(SQUAD_STATUSES).optional(),
   /**
    * 이 계약에 대해 이미 낸 만료 경고 중 **가장 낮은 문턱**(일). 없으면 아직 안 냈다.
    * 문턱을 하루로 재면 tick이 지나지 않은 날의 경고는 영영 오지 않으므로,
@@ -281,6 +290,43 @@ export const TransferSchema = z.object({
 });
 export type Transfer = z.infer<typeof TransferSchema>;
 
+// ── 은퇴 명부 ─────────────────────────────────────────
+/**
+ * 은퇴 명부 (RETIRED_PLAYER) — **그만둔 사람이 남기는 한 줄** (season.md §6).
+ *
+ * 은퇴하면 `state.players`에서 빠지므로 id로는 이름도 나이도 되찾지 못한다. 원장의
+ * `TRANSFER.type = "retire"` 줄은 **누가**를 id로만 아는 줄이라, 그 줄만으로는
+ * 오프시즌 블록도 캐릭터북도 시상 기록도 그 사람을 부를 수 없다.
+ *
+ * ⚠️ **통산은 여기 적지 않는다.** `seasonStats`의 행은 은퇴로 지워지지 않아
+ * `careerTotalsOf`가 같은 수를 그대로 낸다 — 한 값을 두 곳에 적으면 언젠가 갈린다
+ * (game-state.md §3.4).
+ *
+ * ⚠️ **감독 팀에서 은퇴한 선수만 담는다** — `growthLog`·`milestones`와 같은 규약이다.
+ * 세계 전체는 시즌마다 수백 명이 그만두고, 그 이름을 읽는 자리는 전부 우리 사람의
+ * 자리다. 은퇴 자체는 소속과 무관하게 일어난다.
+ */
+export const RetiredPlayerSchema = z.object({
+  /** 현역 시절 `GAME_PLAYER.id` 그대로 — 새 유스에게 다시 주지 않는 id다 */
+  gamePlayerId: z.string().min(1),
+  name: z.string().min(1),
+  /**
+   * 생일과 주 포지션 — **페르소나를 현역 때와 같은 채널에서 되짚는 열쇠다**
+   * (people.md §6). 원형 뽑기가 (시드, 선수 id, 자리, 나이대)를 타므로, 이 둘이
+   * 없으면 은퇴한 사람이 다른 목소리로 돌아온다.
+   */
+  birthdate: DateString,
+  position: z.string().min(1),
+  /** 마지막 셔츠 */
+  teamId: z.string().min(1),
+  /** 그만둔 날 — 전환이 집행하는 날(다음 시즌 프리시즌 첫날) */
+  on: DateString,
+  /** 마지막으로 뛴 시즌 */
+  season: z.number().int().min(1),
+  reason: RetirementReasonSchema,
+});
+export type RetiredPlayer = z.infer<typeof RetiredPlayerSchema>;
+
 // ── 지급 일정 ─────────────────────────────────────────
 /**
  * 분할 지급의 연수 상한 — 실제 이적의 분할이 2~4년이고, 그 위는 흥정의 폭이
@@ -465,6 +511,13 @@ export const NegotiationRoundSchema = z.object({
    * (transfer.md §5-2 · 구 세이브엔 없어 optional).
    */
   paymentYears: z.number().int().min(1).max(MAX_PAYMENT_YEARS).optional(),
+  /**
+   * 이 오퍼가 제시하는 **스쿼드 지위** — 합의되는 순간 새 계약에 적힌다
+   * (transfer.md §1 · people.md §5-2). 라운드는 그것을 **나를 뿐이다**: 성사되지
+   * 않은 협상이 남긴 지위가 계약에 적히면 어기지도 않은 약속이 라커룸에 선다.
+   * 구 세이브엔 없어 optional.
+   */
+  squadStatus: z.enum(SQUAD_STATUSES).optional(),
 });
 /**
  * 메디컬 — **합의와 계약 사이에 놓인 하루.**
@@ -603,6 +656,60 @@ export function growthLabel(target: string): string {
   return AXIS_KO[target as AttributeAxis] ?? target;
 }
 
+// ── 훈련 결산 카드 ────────────────────────────────────
+/**
+ * 훈련장에서 눈에 띈 갈래 — **문장이 아니라 코드다.**
+ *
+ * "두드러졌다"를 세이브에 문장으로 적으면 그 문구가 굳고, 화면과 프롬프트가
+ * 각자 그 문장을 다시 다듬는다. 갈래는 셋이면 족하다 — 올라온 사람, 안 한 사람,
+ * 지쳐서 흐트러진 사람.
+ */
+export const TRAINING_MARKS = ["standout", "slack", "tired"] as const;
+export const TrainingMarkSchema = z.enum(TRAINING_MARKS);
+export type TrainingMark = z.infer<typeof TrainingMarkSchema>;
+
+/** 갈래의 낱말 — 화면과 스냅샷이 같은 표를 읽는다 */
+export const TRAINING_MARK_KO: Record<TrainingMark, string> = {
+  standout: "두드러짐",
+  slack: "태만",
+  tired: "지침",
+};
+
+/**
+ * 한 구간의 훈련 결산이 남기는 **사실 카드 한 장**
+ * (→ docs/simulation/season.md §4).
+ *
+ * 판정의 산출이 요약 줄 배열이던 동안 근거 한 줄(`note`)은 호출 자리에서
+ * 사라졌고, 감독이 훈련장에 쓴 며칠은 달력의 「+1 3명」한 묶음으로만 남았다.
+ *
+ * ⚠️ **`moved`는 판정이 낸 값이 아니라 코어가 실제로 남긴 것이다** — 천장에 막혀
+ * 한 칸도 안 오른 `+2`는 카드에도 없다. 성장 로그에 적힌 그 줄이 곧 카드의 줄이다.
+ */
+export const TrainingReportSchema = z.object({
+  from: DateString,
+  to: DateString,
+  /** 이 구간에 소화된 훈련 세션 수 */
+  sessions: z.number().int().min(0),
+  moved: z.array(
+    z.object({
+      gamePlayerId: z.string().min(1),
+      /** "shooting", "pos:ST", "tactical" — 성장 로그와 같은 눈금 */
+      target: z.string().min(1),
+      delta: z.number().int(),
+    }),
+  ),
+  marks: z.array(
+    z.object({
+      gamePlayerId: z.string().min(1),
+      /** 판정이 갈래를 적지 않고 근거만 냈으면 null */
+      code: TrainingMarkSchema.nullable(),
+      /** 판정의 근거 한 줄 — 감독이 읽는다. 없으면 빈 문자열 */
+      note: z.string(),
+    }),
+  ),
+});
+export type TrainingReport = z.infer<typeof TrainingReportSchema>;
+
 // ── 시즌 기록 ─────────────────────────────────────────
 export const SeasonStatSchema = z.object({
   gamePlayerId: z.string().min(1),
@@ -639,6 +746,97 @@ export function seasonRating(
 ): number | null {
   if (!stat || stat.apps <= 0 || stat.ratingSum === undefined) return null;
   return Math.round((stat.ratingSum / stat.apps) * 100) / 100;
+}
+
+// ── 마일스톤 ──────────────────────────────────────────
+/**
+ * 그 경기가 세운 기록 — **코드와 수치뿐이다.** 문장은 읽는 쪽이 만든다
+ * (→ docs/simulation/match.md §6 · overview.md §1 철칙 4).
+ *
+ * ⚠️ **클럽 단위다.** 원장은 게임 시작 뒤의 출전만 알고 부임 전 커리어는 시드에
+ * 없으므로, 통산 문턱을 세우면 코어가 사실이 아닌 것을 사실로 낸다. 클럽 안의 수는
+ * 전부 원장 안에 있어 정직하다.
+ */
+export const MILESTONE_CODES = ["debut", "first-goal", "apps", "goals", "hat-trick"] as const;
+export type MilestoneCode = (typeof MILESTONE_CODES)[number];
+
+/**
+ * 문턱 — 리그·컵·유럽을 합쳐 한 시즌이 40~50경기라 50은 한 시즌 남짓, 100은 두세
+ * 시즌이다. 득점의 25는 최상급 공격수의 한 시즌치. 더 촘촘하면 회견이 매주
+ * 시상식이 되고, 더 성기면 3년을 함께한 주장에게 아무 일도 일어나지 않는다.
+ */
+export const MILESTONE_APP_STEPS = [50, 100, 200, 300, 400, 500] as const;
+export const MILESTONE_GOAL_STEPS = [25, 50, 100, 150, 200] as const;
+
+/** 한 경기에 몇 골부터 해트트릭인가 */
+export const HAT_TRICK_GOALS = 3;
+
+export const MilestoneSchema = z.object({
+  gamePlayerId: z.string().min(1),
+  /** 어느 셔츠로 세운 기록인가 — 문턱은 이 팀 안에서만 센다 */
+  teamId: z.string().min(1),
+  matchId: z.string().min(1),
+  season: z.number().int(),
+  date: DateString,
+  code: z.enum(MILESTONE_CODES),
+  /** 눈금 — 경기·골은 넘은 문턱, 해트트릭은 그 경기의 골 수, 데뷔·첫 골은 1 */
+  value: z.number().int().min(1),
+});
+export type Milestone = z.infer<typeof MilestoneSchema>;
+
+/**
+ * 드문 순서 — 한 경기가 여럿을 세우면 **회견에 오르는 것은 하나**이고 이 순서가
+ * 그것을 고른다 (people.md §4). 큰 수일수록 앞이므로 같은 코드 안에서는 값으로 갈린다.
+ */
+const MILESTONE_RARITY: Record<MilestoneCode, number> = {
+  goals: 4,
+  apps: 3,
+  "hat-trick": 2,
+  "first-goal": 1,
+  debut: 0,
+};
+
+/**
+ * 둘 중 어느 쪽이 더 드문가 — 음수면 `a`가 앞이다 (정렬 비교자).
+ * 코드와 값만 본다 — 장부에 적히기 전의 판정 결과도 같은 자로 세운다.
+ */
+export function compareMilestones(
+  a: Pick<Milestone, "code" | "value">,
+  b: Pick<Milestone, "code" | "value">,
+): number {
+  return MILESTONE_RARITY[b.code] - MILESTONE_RARITY[a.code] || b.value - a.value;
+}
+
+/**
+ * 마일스톤의 **라벨** — "데뷔전"·"100경기"까지가 코어의 말이고, 그것을 문장에
+ * 앉히는 것은 회견 카드(`pressFactText`)와 화면의 몫이다.
+ */
+export function milestoneTitle(code: MilestoneCode, value: number): string {
+  switch (code) {
+    case "debut":
+      return "데뷔전";
+    case "first-goal":
+      return "첫 골";
+    case "apps":
+      return `${value}경기`;
+    case "goals":
+      return `${value}골`;
+    case "hat-trick":
+      return value > HAT_TRICK_GOALS ? `한 경기 ${value}골` : "해트트릭";
+  }
+}
+
+/**
+ * 라벨에 **어느 범위의 수인가**를 붙인 말 — "구단 통산 100경기".
+ *
+ * 문턱은 클럽 안의 수인데(match.md §6) "100경기"만 적으면 읽는 쪽이 통산으로 읽고,
+ * 원장에 없는 부임 전 커리어를 이야기에 지어 넣는다. 이 말을 회견 카드·경기 말풍선·
+ * 서사 메모·심경의 사실 줄이 함께 쓴다 — **네 곳이 각자 접두를 붙이면** 어느 하나를
+ * 고친 날 나머지 셋이 다른 말을 한다.
+ */
+export function milestonePhrase(code: MilestoneCode, value: number): string {
+  const title = milestoneTitle(code, value);
+  return code === "apps" || code === "goals" ? `구단 통산 ${title}` : title;
 }
 
 // ── 스카우팅 ──────────────────────────────────────────
@@ -695,6 +893,16 @@ export const PLAYER_ISSUE_REASONS = [
   "early-return",
   /** 2군에 내려간 채 방치된 기간 — 기간은 `PlayerState.demotedOn`이 갖는다 */
   "demotion",
+  /** 이적 리스트에 올린 채 방치된 기간 — 기간은 `TransferListing.listedOn`이 갖는다 */
+  "listed",
+  /** 시장가 이상 오퍼를 감독이 거절했다 — 날이 아니라 한 번의 결정이 세운다 */
+  "blocked-move",
+  /** 만료가 다가오는데 열린 재계약이 없다 — 남은 일수는 `Contract.until`이 갖는다 */
+  "contract",
+  /** 주 포지션 묶음 밖 선발이 이어진다 — 연속 경기는 `PlayerState.outOfPositionRun` */
+  "out-of-position",
+  /** 감독이 한 약속의 기한이 지났는데 장부가 이행을 못 찾았다 — 약속은 `state.promises` */
+  "promise",
 ] as const;
 export type PlayerIssueReason = (typeof PLAYER_ISSUE_REASONS)[number];
 
@@ -702,13 +910,49 @@ export const PlayerIssueSchema = z.object({
   gamePlayerId: z.string().min(1),
   kind: z.enum(["unhappy"]),
   reason: z.enum(PLAYER_ISSUE_REASONS).optional(),
-  /** 사유에 딸린 수치 — `losing-run`이면 연패 수. 그 밖엔 없다 */
+  /**
+   * 사유에 딸린 수치 — `losing-run`이면 연패 수, `out-of-position`이면 연속 경기 수,
+   * `minutes`면 그 지위에 **모자란 선발 수**다 (people.md §5).
+   */
   count: z.number().int().min(1).optional(),
   /** 옛 세이브가 들고 있는 사유 문장 — 더는 쓰지 않는다 (`reason`의 폴백) */
   note: z.string().optional(),
   since: DateString,
 });
 export type PlayerIssue = z.infer<typeof PlayerIssueSchema>;
+
+// ── 약속 — 감독의 말이 장부에 서는 자리 ───────────────
+/**
+ * 감독이 한 약속의 **갈래** (→ docs/data/people.md §5-2).
+ *
+ * 무슨 말로 약속했는지는 장면의 것이다. 코어가 드는 것은 갈래·기한·상태뿐이고,
+ * 이행 판정도 전부 장부에서 나온다 — 어느 자리에서도 문장을 읽지 않는다.
+ */
+export const PROMISE_KINDS = ["minutes", "transfer", "renewal", "captain"] as const;
+export type PromiseKind = (typeof PROMISE_KINDS)[number];
+
+export const PROMISE_KIND_KO: Record<PromiseKind, string> = {
+  minutes: "출전",
+  transfer: "이적 허용",
+  renewal: "재계약",
+  captain: "주장",
+};
+
+/**
+ * 약속 한 줄 — **`Promise`가 아니라 `ManagerPromise`다.** 전역 `Promise`를 가리는
+ * 타입 이름은 이 패키지를 import 하는 모든 파일에서 비동기 코드의 뜻을 바꾼다.
+ */
+export const ManagerPromiseSchema = z.object({
+  id: z.string().min(1),
+  gamePlayerId: z.string().min(1),
+  kind: z.enum(PROMISE_KINDS),
+  madeOn: DateString,
+  /** 이 날 장부가 판정한다 — 하루뿐이다 */
+  dueOn: DateString,
+  /** `open` = 아직 기한 전. 판정이 끝나면 이력으로 남는다 */
+  status: z.enum(["open", "kept", "broken"]),
+});
+export type ManagerPromise = z.infer<typeof ManagerPromiseSchema>;
 
 /**
  * 정착 이벤트 — **감독이 새 영입에게 한 일**의 원장 (settling.ts).
@@ -743,12 +987,59 @@ export const TransferListingSchema = z.object({
 export type TransferListing = z.infer<typeof TransferListingSchema>;
 
 /**
+ * **이적 요청의 사유** — 선수가 나가겠다고 말한 이유
+ * (→ docs/simulation/transfer.md §1-1).
+ *
+ * 셋이 두 곳에서 온다: `grievance`는 방치된 불만이 다가옴 사다리의 꼭대기까지 오른
+ * 것이고(docs/data/people.md §8), 나머지 둘은 **시장**이 세운다 — 감독이 값이 붙은
+ * 오퍼를 같은 창에서 두 번 막았거나(`blocked-move`), 갈 곳 많은 젊은 선수에게
+ * 우리보다 큰 구단의 관심이 붙었거나(`bigger-club`).
+ */
+export const TRANSFER_REQUEST_REASONS = ["grievance", "blocked-move", "bigger-club"] as const;
+export type TransferRequestReason = (typeof TRANSFER_REQUEST_REASONS)[number];
+
+export const TRANSFER_REQUEST_REASON_KO: Record<TransferRequestReason, string> = {
+  grievance: "쌓인 불만",
+  "blocked-move": "막힌 이적",
+  "bigger-club": "더 큰 무대",
+};
+
+/**
+ * 이적 요청 한 줄 — **선수가 감독에게 하는 가장 큰 말이 서는 자리.**
+ *
+ * 코어가 드는 것은 사유·날짜·감독의 답뿐이다. 무슨 말로 요청했는지는 장면의
+ * 것이고, 요청이 걷히는가는 전부 다른 장부에서 파생한다(불만 줄 · 이적창).
+ *
+ * **한 선수에게 서 있는 요청은 하나다** — 사유가 셋이라 두 줄이 설 수 있는데,
+ * 그러면 감독의 답 하나가 다른 줄을 답하지 않은 채로 남긴다
+ * (→ docs/simulation/transfer.md §11).
+ */
+export const TransferRequestSchema = z.object({
+  gamePlayerId: z.string().min(1),
+  since: DateString,
+  reason: z.enum(TRANSFER_REQUEST_REASONS),
+  /** 감독이 답한 날 — 없으면 아직 책상 위에 있다 */
+  answeredOn: DateString.optional(),
+  answer: z.enum(["accept", "refuse"]).optional(),
+  /**
+   * 회견이 이 요청을 실어 간 날 — 같은 사실을 두 번 묻지 않게 하는 자다
+   * (`pressLeaks`가 소비되는 것과 같은 결). **감독이 답하면 비워진다** — 요청이
+   * 선 날과 답한 날은 다른 사실이라 회견이 둘 다 싣는다.
+   */
+  pressedOn: DateString.optional(),
+});
+export type TransferRequest = z.infer<typeof TransferRequestSchema>;
+
+/**
  * 개인 훈련 프로그램 — **팀 훈련 위에 한 선수만 겨냥해 얹는 것.**
  *
  * `set_training`은 팀 전체 메뉴라 "이 선수의 결정력을 손보자", "풀백을 센터백으로
  * 전향시키자" 같은 판단이 표현되지 않았다. 축(`axis`)도 자리(`position`)도 훈련
  * 결산의 입력이고, 자리는 결산 한 번에 `POSITION_TRAIN_MAX`까지만 오른다 —
  * 실전보다 느리게.
+ *
+ * **2군에는 축만 걸린다** — 결산이 없는 층이라 축은 월간 성장의 겨냥으로 넘어가고
+ * 자리는 갈 문이 없다 (→ docs/simulation/season.md §2).
  */
 export const PlayerTrainingSchema = z.object({
   gamePlayerId: z.string().min(1),
@@ -1080,6 +1371,17 @@ export function boardExpectationText(code: BoardExpectationCode, target?: number
   }
 }
 
+/**
+ * GM이 읽는 **기대 한 줄** — 이름과 목표 순위를 함께 낸다 (career.md §5).
+ *
+ * `boardExpectationText`와 갈리는 것은 우승 경쟁 하나다. 화면의 라벨은 1위 말고 달 자리가
+ * 없어 tier 1에서 순위를 떼지만, 경고가 지워지는 문턱은 그래도 `target`이다 — 숫자가
+ * 빠지면 모델은 3위가 이미 문턱 밖이라는 것을 모른 채 장면을 쓴다.
+ */
+export function boardExpectationLine(code: BoardExpectationCode, target: number): string {
+  return `보드 기대: ${boardExpectationText(code)} (${target}위 이내)`;
+}
+
 export const SeasonRecordSchema = z.object({
   season: z.number().int(),
   /** 재임 팀 — 감독이 팀을 옮겨도 기록이 유지된다 */
@@ -1333,6 +1635,14 @@ export const ARC_KINDS = [
   "losing-run",
   /** 협상 2라운드 이상 — 한 방에 끝난 오퍼는 사가가 아니다 */
   "transfer-saga",
+  /** 21세 이하 · 시즌 1군 출전 5 · 시즌 평점이 기준선 위 — 셋이 함께 서야 열린다 */
+  "prospect-rise",
+  /** 33세 이상의 계약 마지막 해 — 재계약·은퇴·이적 중 하나로 닫힌다 */
+  "veteran-twilight",
+  /** 완장의 승계 — 주장의 나이·계약·결장과 부주장 공석을 겹쳐 읽는다. 주인은 팀 id */
+  "captain-succession",
+  /** 보드 경고 1회부터 — 감독 자신의 자리가 걸린 이야기. 주인은 팀 id */
+  "board-standoff",
 ] as const;
 export const ArcKindSchema = z.enum(ARC_KINDS);
 export type ArcKind = z.infer<typeof ArcKindSchema>;

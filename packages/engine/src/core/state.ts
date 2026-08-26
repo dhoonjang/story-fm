@@ -31,8 +31,11 @@ import type {
   PaymentSchedule,
   Persona,
   PlayerIssue,
+  ManagerPromise,
   SettlingEvent,
   TransferListing,
+  TransferRequest,
+  TransferRequestReason,
   PlayerTraining,
   PositionGroup,
   ReserveTrainingPolicy,
@@ -40,9 +43,11 @@ import type {
   ScheduleEntry,
   Negotiation,
   PressConference,
+  RetiredPlayer,
   ScoutReport,
   ScoutReportCard,
   SeasonAward,
+  Milestone,
   SeasonRecord,
   SeasonStat,
   ShootoutKick,
@@ -52,6 +57,7 @@ import type {
   TeamFinance,
   RegistrablePlayer,
   TeamTactics,
+  TrainingReport,
   TrainingSession,
   Transfer,
   TransferWindow,
@@ -68,8 +74,10 @@ import {
   FIRST_TEAM_LIMIT,
   MATCHDAY_BENCH,
   MATCHDAY_SQUAD,
+  ageOf,
   bestOverall,
   canRegister,
+  isReserveMatch,
   isUnder21,
   FORMATION_LAYOUTS,
   FORMATION_SLOTS,
@@ -79,8 +87,9 @@ import {
   positionProficiency,
   weightSlotOf,
   roleFit,
+  standingScore,
 } from "@story-fm/domain";
-import { profFactor, type MatchLedgerState } from "@story-fm/sim";
+import { profFactor, SHARPNESS_PRESEASON, type MatchLedgerState } from "@story-fm/sim";
 import type { AiDeal } from "../market/ai-market";
 import {
   buildScheduleEntries,
@@ -347,6 +356,13 @@ export interface PendingMatch {
   matchId: string;
   packet: StrengthPacket;
   ledger: MatchLedgerState;
+  /**
+   * **첫 휘슬에 선 열한 명** (양 팀) — 장부의 `onPitch`는 교체를 따라 움직이므로
+   * 킥오프에 한 번 뜬다. 경기가 끝나면 결과의 `homeStarters`로 옮겨져 계약 지위가
+   * 부르는 출전을 재는 자가 된다 (→ docs/data/people.md §5-2).
+   * 옛 세이브엔 없다 (optional — 없으면 결과에 선발이 적히지 않는다).
+   */
+  startingXI?: { home: string[]; away: string[] };
   /** 진행한 구간 수 — 난수 채널에 들어가 같은 경기가 재현된다 */
   segment?: number;
   /**
@@ -596,6 +612,14 @@ export interface GameState {
   suspensions: Suspension[];
   transfers: Transfer[];
   growthLog: GrowthEntry[];
+  /**
+   * 훈련 결산 카드 — 한 구간의 훈련이 무엇을 남겼나 (season.md §4).
+   *
+   * 낱낱의 성장은 `growthLog`가 갖는다. 여기 남는 것은 **구간**의 것이다 —
+   * 세션 수, 그 구간에 움직인 것, 훈련장에서 눈에 띈 선수의 갈래와 근거 한 줄.
+   * 상한 있는 링(`TRAINING_REPORT_LIMIT`). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  trainingReports?: TrainingReport[];
   seasonStats: SeasonStat[];
   /**
    * 집중 육성 명단 — 감독이 지정한 우리 2군 유망주(`set_development_focus`).
@@ -612,6 +636,15 @@ export interface GameState {
   reserveTraining?: ReserveTrainingPolicy;
   issues: PlayerIssue[];
   /**
+   * **감독이 한 약속** — 갈래·기한·상태뿐이다 (→ docs/data/people.md §5-2).
+   *
+   * 무슨 말로 약속했는지는 장면의 것이고, 이행 판정은 전부 다른 장부에서 나온다
+   * (출전 명단 · 이적 리스트 · 열린 협상 · 완장). 여기 남는 것은 **감독이 그것을
+   * 약속했다는 사실과 기한**뿐이라, 파생할 원본이 없는 유일한 값이다.
+   * 옛 세이브엔 없다 (로드 시 빈 배열 — 세이브 버전을 올리지 않는다).
+   */
+  promises: ManagerPromise[];
+  /**
    * 정착 이벤트 — 면담·팀토크·주장 지명이 새 영입의 적응에 남긴 것.
    * 나중에 추가된 테이블이라 옛 세이브엔 없다(로드 시 빈 배열).
    */
@@ -621,6 +654,17 @@ export interface GameState {
    * (`generateIncomingOffers`). 옛 세이브엔 없다(로드 시 빈 배열).
    */
   transferList: TransferListing[];
+  /**
+   * **이적 요청** — 선수가 나가겠다고 말한 사실과 감독의 답
+   * (→ docs/simulation/transfer.md §1-1).
+   *
+   * 사유가 셋이라(사다리 · 막힌 이적 · 더 큰 무대) `PlayerState.transferRequestedOn`
+   * 하나로는 「왜」도 「감독이 답했는가」도 적을 자리가 없다. 그 필드는 파생의
+   * 폴백으로 남는다 — 장부가 비어 있는 옛 세이브에서 `transferRequestOf`가 그
+   * 날짜에서 `grievance` 한 줄을 만든다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  transferRequests?: TransferRequest[];
   /** 개인 훈련 프로그램 — 팀 훈련 위에 한 선수만 겨냥해 얹는다 */
   playerTraining: PlayerTraining[];
   /**
@@ -777,6 +821,26 @@ export interface GameState {
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   awards?: SeasonAward[];
+  /**
+   * 마일스톤 — 데뷔·첫 골·구단 통산 문턱·해트트릭 (match.md §6).
+   *
+   * **감독 팀 선수 것만 담는다** — `growthLog`와 같은 결이다(game-state.md §3.4).
+   * 읽는 곳이 회견·심경·서사·선수 상세 넷인데 전부 우리 선수의 자리라, 리그 전체를
+   * 적으면 시즌마다 수백 행이 들어와 우리 것이 그 안에 묻힌다. 기록 자체는 모든 팀에
+   * 쌓이므로 남의 선수 통산도 `careerOf`가 그대로 낸다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  milestones?: Milestone[];
+  /**
+   * **은퇴 명부** — 그만둔 사람이 남기는 한 줄 (season.md §6).
+   *
+   * 은퇴하면 `state.players`에서 빠지므로 id로는 이름도 나이도 되찾지 못한다 — 원장의
+   * `retire` 줄만으로는 오프시즌 블록도 캐릭터북도 그 사람을 부를 수 없다. 통산은 여기
+   * 적지 않는다: `seasonStats`가 그대로 남아 `careerTotalsOf`가 같은 수를 낸다.
+   * **감독 팀에서 은퇴한 선수만** 담는다 — `milestones`와 같은 규약이다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  retired?: RetiredPlayer[];
 
   // ── 서사 ──
   /**
@@ -994,6 +1058,75 @@ export function userPlayers(state: GameState): GamePlayer[] {
 }
 
 /**
+ * 우리가 **임대 보낸** 선수인가 — 계약은 우리 것이고 `teamId`만 남의 것이다
+ * (→ docs/simulation/transfer.md §2).
+ *
+ * ⚠️ 빌려 **온** 임대는 우리 `teamId`를 달아도 이게 아니다. 두 방향이 같은 칸
+ * (`loan`)에 앉으므로 방향을 읽지 않으면 우리에게 온 임대가 함께 걸린다.
+ */
+export function onLoanFromUs(state: GameState, player: GamePlayer): boolean {
+  return player.loan?.fromTeamId === state.userTeamId;
+}
+
+/**
+ * **빌려 온 임대인가** — 그 팀에게.
+ *
+ * `loan`이 붙어 있는 동안 `teamId`는 언제나 **빌린 구단**이다(→
+ * docs/simulation/transfer.md §2). 그래서 방향을 따로 묻지 않아도 되고, 이 사람은
+ * 자기 `teamId`의 스쿼드에서 임대 자원이다 — 빌린 구단이 그에게 치르는 값(라인업의
+ * 자리)을 `simSquadOf`가 여기서 읽는다 (→ docs/simulation/season.md §2 임대).
+ */
+export function isLoanedIn(player: Pick<GamePlayer, "loan">): boolean {
+  return player.loan !== undefined;
+}
+
+/**
+ * 그 구단의 **1군 경기**에서 연속 몇 번 명단 밖이었나 — 명단에 든 경기가 나오면
+ * 멈춘다.
+ *
+ * 두 자리가 같은 수를 읽는다: 감독에게 가는 임대 리포트(`loanReportOf`의
+ * `benchRun`)와 빌린 구단의 라인업(`simSquadOf`의 연속 미출전 상한). 갈라 두면
+ * 리포트가 "4경기 명단 밖"이라 적은 날 시뮬은 다른 수를 세게 된다.
+ *
+ * 2군 리그 경기는 세지 않는다: 그 대진은 감독 팀만 편성되므로(season.md §2) 상대
+ * 클럽 선수에게는 "1군에서 못 뛰었다"의 반증이 되지 못한다.
+ */
+export function benchRunOf(state: GameState, player: Pick<GamePlayer, "id" | "teamId">): number {
+  const played = state.matches
+    .filter(
+      (m) =>
+        m.result !== null &&
+        !isReserveMatch(m) &&
+        (m.homeTeamId === player.teamId || m.awayTeamId === player.teamId),
+    )
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  let run = 0;
+  for (const match of played) {
+    const lineup =
+      match.homeTeamId === player.teamId ? match.result?.homeLineup : match.result?.awayLineup;
+    if (lineup?.includes(player.id)) break;
+    run += 1;
+  }
+  return run;
+}
+
+/**
+ * **감독이 자기 선수로 세는 사람** — 우리 스쿼드에 있거나 우리가 임대 보냈다.
+ *
+ * 안개(지식 눈금) · 월간 성장 · 조회 도구 · 명단 화면이 전부 이 문을 지난다. 한
+ * 자리만 소속(`teamId`)으로 가르면 나머지와 어긋난다 — 능력치는 정확한데 검색에는
+ * 안 나오거나, 화면에는 서는데 자라지 않는다.
+ */
+export function isOurPlayer(state: GameState, player: GamePlayer): boolean {
+  return player.teamId === state.userTeamId || onLoanFromUs(state, player);
+}
+
+/** 그 사람들 전부 — 우리 스쿼드 + 우리가 임대 보낸 선수 */
+export function ourPlayers(state: GameState): GamePlayer[] {
+  return state.players.filter((p) => isOurPlayer(state, p));
+}
+
+/**
  * **감독이 지금 맡고 있는 팀** — 경질돼 무직이면 없다 (career.md §5.1).
  *
  * `userTeamId`는 경질된 뒤에도 옛 구단을 가리킨다. 그 구단의 선수단과 장부는
@@ -1138,6 +1271,20 @@ export function openInjury(state: GameState, playerId: string): Injury | null {
 }
 
 /**
+ * 지금 부상 중인 선수 id 전부 — **세계 전체를 하루에 한 번 훑는 자리**를 위한 것이다.
+ *
+ * `isInjured`를 선수마다 부르면 장부를 선수 수만큼 다시 훑는다. 한 번 만들어 두고
+ * 묻는 쪽이 재사용한다. 열린 부상의 정의(`returnedOn === null`)는 위와 같은 자다.
+ */
+export function openInjuryIds(state: GameState): Set<string> {
+  const ids = new Set<string>();
+  for (const injury of state.injuries) {
+    if (injury.returnedOn === null) ids.add(injury.gamePlayerId);
+  }
+  return ids;
+}
+
+/**
  * **마음이 떠 있는가** — 라커룸 불만(`state.issues`)이 걸린 선수.
  *
  * ⚠️ 이 질문에 `condition`으로 답하지 마라. 그 축은 경기 한 판에 30~50이 빠지는
@@ -1147,6 +1294,59 @@ export function openInjury(state: GameState, playerId: string): Injury | null {
  */
 export function hasIssue(state: GameState, playerId: string): boolean {
   return state.issues.some((i) => i.gamePlayerId === playerId);
+}
+
+/**
+ * **이 선수의 이적 요청** — 장부가 원본이고 `transferRequestedOn`이 폴백이다
+ * (→ docs/simulation/transfer.md §1-1).
+ *
+ * 옛 세이브는 날짜만 들고 있으므로 사유를 `grievance`로 읽는다: 그때는 요청이 서는
+ * 자리가 다가옴 사다리의 꼭대기뿐이었다.
+ */
+export function transferRequestOf(state: GameState, playerId: string): TransferRequest | null {
+  const row = (state.transferRequests ?? []).find((r) => r.gamePlayerId === playerId);
+  if (row) return row;
+  const since = playerById(state, playerId)?.state.transferRequestedOn;
+  return since === undefined ? null : { gamePlayerId: playerId, since, reason: "grievance" };
+}
+
+/** 아직 감독이 답하지 않은 요청들 — 책상 위에 놓인 것 */
+export function openTransferRequests(state: GameState): TransferRequest[] {
+  return (state.transferRequests ?? []).filter((r) => r.answeredOn === undefined);
+}
+
+/**
+ * 요청을 세운다 — **한 선수에게 한 줄뿐이다** (transfer.md §11). 이미 서 있으면
+ * 아무것도 하지 않고 `false`를 돌려준다: 사유가 셋이라 두 자리에서 같은 날 같은
+ * 선수를 세울 수 있는데, 그러면 감독의 답 하나가 다른 줄을 남긴다.
+ *
+ * ⚠️ **서 있는지는 `transferRequestOf`가 판정한다** — 장부만 보면 옛 세이브
+ * (`transferRequestedOn`만 있는 상태)에서 이미 선 요청 위에 오늘 날짜의 새 줄이
+ * 서고 다이제스트가 한 번 더 나간다.
+ *
+ * `PlayerState.transferRequestedOn`도 함께 적는다 — 시장·압력 눈금이 그 필드를
+ * 읽고, 옛 세이브와 새 세이브가 같은 값을 들어야 한다.
+ */
+export function standTransferRequest(
+  state: GameState,
+  playerId: string,
+  reason: TransferRequestReason,
+): boolean {
+  if (transferRequestOf(state, playerId) !== null) return false;
+  const player = playerById(state, playerId);
+  if (!player) return false;
+  (state.transferRequests ??= []).push({ gamePlayerId: playerId, since: state.date, reason });
+  player.state.transferRequestedOn = state.date;
+  return true;
+}
+
+/** 요청을 걷는다 — 원인이 사라졌거나 그 선수가 팀을 떠났을 때 */
+export function withdrawTransferRequest(state: GameState, playerId: string): void {
+  state.transferRequests = (state.transferRequests ?? []).filter(
+    (r) => r.gamePlayerId !== playerId,
+  );
+  const player = playerById(state, playerId);
+  if (player) player.state.transferRequestedOn = undefined;
 }
 
 export function isInjured(state: GameState, playerId: string): boolean {
@@ -1317,6 +1517,30 @@ export function recordGrowth(
 }
 
 /**
+ * 훈련 결산 카드 보관 한도 — **40장.**
+ *
+ * 결산은 시즌에 백 번 넘게 돈다. 전부 들고 있으면 세이브가 읽히지 않는 카드로
+ * 불어나는데, 감독이 되짚어 읽는 것은 최근 몇 주고 **낱낱의 성장은 `growthLog`가
+ * 따로 영구히 갖는다** — 여기서 잘리는 것은 근거 한 줄과 갈래뿐이다.
+ */
+const TRAINING_REPORT_LIMIT = 40;
+
+/** 한 구간의 결산 카드를 장부에 남긴다 — 오래된 것부터 밀려난다 */
+export function recordTrainingReport(state: GameState, report: TrainingReport): void {
+  const ring = (state.trainingReports ??= []);
+  ring.push(report);
+  if (ring.length > TRAINING_REPORT_LIMIT) {
+    ring.splice(0, ring.length - TRAINING_REPORT_LIMIT);
+  }
+}
+
+/** 가장 최근의 결산 카드 — 없으면 null */
+export function latestTrainingReport(state: GameState): TrainingReport | null {
+  const ring = state.trainingReports ?? [];
+  return ring[ring.length - 1] ?? null;
+}
+
+/**
  * 서사 노트 보관 한도 — 넘치면 **오래된 것부터** 버린다.
  *
  * 세이브에 통째로 담기고 GM 프롬프트의 이력 층이 여기서 나오므로, 한도가 곧
@@ -1480,6 +1704,10 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
       birthdate: entry.birthdate,
       positions: entry.positions.map((p) => ({ ...p })),
       ...(entry.homegrownCountry === undefined ? {} : { homegrownCountry: entry.homegrownCountry }),
+      ...(entry.nationality === undefined ? {} : { nationality: entry.nationality }),
+      ...(entry.secondNationality === undefined
+        ? {}
+        : { secondNationality: entry.secondNationality }),
       ...(entry.foot === undefined ? {} : { foot: entry.foot }),
       ...(entry.height === undefined ? {} : { height: entry.height }),
       ...(entry.weight === undefined ? {} : { weight: entry.weight }),
@@ -1498,6 +1726,12 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
         form: randInt(rng, -1, 1) * 0.15,
         // 프리시즌 시작 — 잘 쉬고 돌아왔다
         condition: randInt(rng, 70, 86),
+        /**
+         * 몸은 쉬고 왔지만 **경기 감각은 무뎌진 채로 온다** (player.md §5.4).
+         * 시즌 전환이 세우는 값과 같은 자리에서 출발해야 첫 시즌의 프리시즌도
+         * 두 번째 시즌의 프리시즌과 같은 판이 된다.
+         */
+        sharpness: SHARPNESS_PRESEASON,
       },
       isCaptain: false,
     };
@@ -1988,13 +2222,23 @@ function memoFit(preferred?: ReadonlySet<string>): (p: GamePlayer, slot: string)
  * 그래서 각 스타일은 **올린 축만큼 내린 축을 갖는다** — 점유는 라인과 폭을 올리는
  * 대신 템포와 패스 길이를 내리고, 역습·롱볼은 라인과 압박을 내린다. 프리셋을
  * 고칠 때는 리그 평균을 다시 재라(`docs/simulation/match.md` §1.2).
+ *
+ * ⚠️ **갈래 넷(`TACTIC_TOGGLES`)도 같은 규칙을 탄다.** 갈래는 중립이 "아무 데도 서지
+ * 않은 것"이라 평균이 아니라 **리그 합**으로 잰다. 그리고 그 합은 **스타일별 팀 수로
+ * 가중해야** 한다 — `TACTICAL_STYLE_SEED`의 96팀은 스타일마다 수가 다르므로(high-press
+ * 26 · possession 24 · direct 15 · transition 13 · low-block 10 · balanced 8) 여섯을
+ * 같은 무게로 놓고 맞춘 표는 실제 리그에서 기운다. 지금 표의 96팀 가중 합은
+ * 공격 +0.29% · 중원 +0.11% · 수비 −0.02% · 강도 +1.0%다. **빈칸은 필드를 쓰지 않는다**
+ * — 프리셋은 자기 스타일이 실제로 말하는 갈래에만 선다. 갈래를 더하거나 옮길 때는 그
+ * 가중 합을 다시 재라(`docs/data/team.md` §6).
  */
 function initialTactics(
   teamId: string,
   formation: Formation,
 ): import("@story-fm/domain").TacticsSpec {
   switch (tacticalStyleOf(teamId)) {
-    // 라인을 올려 압축하되 천천히 넓게 짧은 패스로 돌린다
+    // 라인을 올려 압축하되 천천히 넓게 짧은 패스로 돌린다 — 공을 잃으면 자리부터
+    // 잡고, 올린 라인은 트랩으로 지키며, 뒤에서 짧게 풀어 나간다
     case "possession":
       return {
         formation,
@@ -2004,8 +2248,15 @@ function initialTactics(
         tempo: 2,
         width: 4,
         passStyle: 2,
+        transition: "regroup",
+        offsideTrap: true,
+        tackling: "soft",
+        keeperDistribution: "short",
       };
-    // 앞으로 무게를 싣고 라인을 올려 빠르게 — 대신 좁게 압축한다
+    // 앞으로 무게를 싣고 라인을 올려 빠르게 — 대신 좁게 압축한다. 높은 곳에서 뺏어
+    // 곧장 나가고, 올린 라인을 트랩으로 지키며, 거칠게 문다.
+    // ⚠️ GK 배급은 비운다 — 압박으로 이미 공을 상대 진영에서 얻는다. 배급까지 짧게
+    // 묶으면 "앞에서 시작한다"는 **같은 사실을 두 번 싣는다**.
     case "high-press":
       return {
         formation,
@@ -2015,8 +2266,13 @@ function initialTactics(
         tempo: 4,
         width: 2,
         passStyle: 3,
+        transition: "counter",
+        offsideTrap: true,
+        tackling: "hard",
       };
-    // 내려서서 기다리다 빠르고 넓게 나간다
+    // 내려서서 기다리다 빠르고 넓게 나간다 — 뺏으면 곧장 앞으로, GK도 넘겨서 그
+    // 출발을 앞당긴다. 트랩은 라인 2 앞에 걸 자리가 없고, 태클은 기다리는 쪽이라
+    // 어느 끝에도 서지 않는다
     case "transition":
       return {
         formation,
@@ -2026,8 +2282,13 @@ function initialTactics(
         tempo: 4,
         width: 4,
         passStyle: 4,
+        transition: "counter",
+        keeperDistribution: "long",
       };
-    // 내려서서 길게 찬다 — 폭보다 타깃이 먼저다
+    // 내려서서 길게 찬다 — 폭보다 타깃이 먼저다. 라인 2로 내려서서 자리부터 잡으므로
+    // 전환은 `regroup`이다.
+    // ⚠️ GK 배급은 비운다 — 롱볼은 이미 `passStyle` 5가 말하고 있어 배급까지 길게 두면
+    // **같은 사실을 두 번 싣는다**(team.md §6). 태클도 어느 끝에도 서지 않는다.
     case "direct":
       return {
         formation,
@@ -2037,8 +2298,11 @@ function initialTactics(
         tempo: 4,
         width: 3,
         passStyle: 5,
+        transition: "regroup",
       };
-    // 전부 내린다
+    // 전부 내린다 — 뺏어도 자리부터 잡고(`counter`가 아니다: 역습으로 사는 팀은
+    // `transition` 프리셋이 맡는다), 낮은 블록 앞에서 거칠게 물고, GK는 넘겨 버린다.
+    // 라인이 낮아 트랩은 걸 자리가 없다
     case "low-block":
       return {
         formation,
@@ -2048,6 +2312,9 @@ function initialTactics(
         tempo: 2,
         width: 2,
         passStyle: 4,
+        transition: "regroup",
+        tackling: "hard",
+        keeperDistribution: "long",
       };
     case "balanced":
       break;
@@ -2392,11 +2659,24 @@ export function createGame(input: CreateGameInput): GameState {
       };
     });
 
-  // 주장 — 유저 팀은 선발 중 최고 OVR 필드 플레이어
+  /**
+   * 주장 — **서열 최상위** (people.md §5-1). 개막 전에는 출전도 재적도 0이라
+   * 리더십과 나이가 그 자리를 정한다. OVR로 세우던 자리였는데, 그러면 리더십 20인
+   * 최고 선수가 완장을 차고 감독이 첫 팀토크부터 가장 나쁜 라커룸 계수를 받는다.
+   * 골키퍼를 거르지 않는다 — 누가 라커룸을 이끄는가는 포지션이 아니라 리더십이 답한다.
+   */
   const userSquad = players.filter((p) => p.teamId === input.userTeamId);
   const captain = [...userSquad]
-    .filter((p) => groupOf(p) !== "GK")
-    .sort((a, b) => b.attributes.overall - a.attributes.overall)[0];
+    .map((p) => ({
+      player: p,
+      standing: standingScore({
+        leadership: p.attributes.leadership,
+        age: ageOf(p.birthdate, calendar.preseasonStart),
+        apps: 0,
+        seasons: 0,
+      }),
+    }))
+    .sort((a, b) => b.standing - a.standing || (a.player.id < b.player.id ? -1 : 1))[0]?.player;
   if (captain) captain.isCaptain = true;
 
   // 재정 + 계약(주급의 원본) — 무소속은 장부를 갖지 않는다 (team.md §4)
@@ -2484,11 +2764,14 @@ export function createGame(input: CreateGameInput): GameState {
     suspensions: [],
     transfers: [],
     growthLog: [],
+    trainingReports: [],
     seasonStats: [],
     issues: [],
+    promises: [],
     scoutReports: [],
     settlingEvents: [],
     transferList: [],
+    transferRequests: [],
     playerTraining: [],
     roleMemory: [],
     aiDeals: [],
@@ -2525,6 +2808,7 @@ export function createGame(input: CreateGameInput): GameState {
     trophies: [],
     achievements: [],
     awards: [],
+    milestones: [],
 
     narrative: [],
     chat: [],

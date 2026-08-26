@@ -115,6 +115,17 @@ function seasonReadings(state: GameState): Readings<typeof WORLD_SEASON> {
   const ourYellows = ratio(cardsIn(true, "yellow"), ourGames);
   const otherYellows = ratio(cardsIn(false, "yellow"), otherGames);
 
+  /**
+   * **세트피스 득점 비율** — 골마다 붙는 `goalOrigins`가 원본이다 (match.md §1.4).
+   * 감독의 38경기(구간 시뮬)와 나머지 342경기(간이 시뮬)가 한 눈금에 서야 하므로
+   * 리그 전체를 통째로 센다 — 두 채널이 갈리면 여기가 밴드 밖으로 나간다.
+   */
+  const origins = played.flatMap((m) => m.result!.goalOrigins ?? []);
+  const originShare = (kinds: readonly string[]) =>
+    ratio(origins.filter((o) => kinds.includes(o)).length, origins.length);
+  const originPerMatch = (kinds: readonly string[]) =>
+    ratio(origins.filter((o) => kinds.includes(o)).length, played.length);
+
   const homeWin = played.filter((m) => m.result!.homeGoals > m.result!.awayGoals).length;
   const draw = played.filter((m) => m.result!.homeGoals === m.result!.awayGoals).length;
 
@@ -145,6 +156,9 @@ function seasonReadings(state: GameState): Readings<typeof WORLD_SEASON> {
     "팀득점 2골 비율": share(teamGoals, 2),
     "팀득점 3골 비율": share(teamGoals, 3),
     "팀득점 4골+ 비율": share(teamGoals, 4, true),
+    "세트피스 득점 비율": originShare(["corner", "free_kick", "penalty"]),
+    "코너·프리킥 득점/경기": originPerMatch(["corner", "free_kick"]),
+    "페널티 득점/경기": originPerMatch(["penalty"]),
     "팀당 슈팅/경기": shotMean,
     "팀당 슈팅 분산":
       shots.reduce((a, b) => a + (b - shotMean) ** 2, 0) / Math.max(1, shots.length),

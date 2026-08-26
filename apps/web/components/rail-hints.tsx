@@ -42,11 +42,15 @@ const SKILL_ICON: Record<string, IconComponent> = {
   set_tactics: IconBoard,
   set_lineup: IconSquad,
   set_player_tactic: IconJersey,
+  // 키커 지정은 판의 약속이다 — 사람이 아니라 판 쪽 그림으로 읽힌다
+  set_set_piece_takers: IconBoard,
   set_captain: IconCaptain,
   // 1·2군 이동은 판이 아니라 사람이 오가는 일이다 — 라인업과 같은 그림을 쓰면 갈래가 겹친다
   set_squad_level: IconPerson,
   substitute: IconPerson,
   set_transfer_list: IconPerson,
+  // 요청에 답하는 것도 사람이 오가는 일이다 — 등재와 한 갈래로 읽힌다
+  respond_transfer_request: IconPerson,
   release_player: IconPerson,
   // 해지 제안도 사람이 오가는 일이다 — 일방 해지(release_player)와 같은 그림으로 한 갈래로 읽힌다
   open_release: IconPerson,

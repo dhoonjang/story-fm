@@ -342,6 +342,17 @@
 .reg-chip.over b {
   color: var(--danger);
 }
+/* 국적 — **사실이지 표식이 아니다.** 알약(.tag)으로 두면 자격 표식과 한 물건으로
+   읽혀 "국적에 해당한다"가 된다. 배경 없이 코드만 두고, 등번호와 같은 회색 층에
+   세운다 — 이름 뒤에서 조용히 읽히는 값이다. */
+.squad-table .nat {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: var(--fs-3xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  vertical-align: 1px;
+}
 /* 명단 행의 자격 표식 — 이름 뒤에 조용히 붙는다 */
 /* 등록 표식(HG·U21) — **이름 뒤에 붙는 각주**다.
    강조색을 그대로 쓰면 이름보다 먼저 눈에 들어와, 명단을 훑는 눈이 선수가 아니라
@@ -362,6 +373,12 @@
 .squad-table .tag.u21 {
   background: rgba(148, 163, 184, 0.07);
   color: #78828f;
+}
+/* 임대 — 자격 표식이 아니라 **지금 어디에 있는가**라, 각주보다 한 층 앞에 선다
+   (행의 왼쪽 선 색과 같은 계열이라 둘이 한 사실로 읽힌다) */
+.squad-table .tag.loan {
+  background: rgba(251, 191, 36, 0.1);
+  color: #a3854f;
 }
 /**
  * 상태 표식(부상·정지·불만·이적 리스트) — **자격 표식과 같은 크기·모양**이고

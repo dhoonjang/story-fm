@@ -2,9 +2,11 @@ import type { GamePlayer, MatchRecord, ScheduleEntry, TrainingSession } from "@s
 import {
   FAMILIARITY_BASELINE,
   clampCondition,
+  clampSharpness,
   isReserveMatch,
   naturalPositionOf,
   positionGroupOfPlayer,
+  sharpnessOf,
   slotOfTime,
 } from "@story-fm/domain";
 import {
@@ -12,6 +14,9 @@ import {
   dailyRecovery,
   drainVariance,
   injuryWeight,
+  sharpnessAfterDay,
+  sharpnessAfterMinutes,
+  sharpnessDayOf,
   type RecoveryKind,
 } from "@story-fm/sim";
 import {
@@ -30,12 +35,17 @@ import { advanceDomesticCups } from "../competition/domestic-cup";
 import { hasCups } from "../world/scope";
 import { driftFamiliarity, tickOtherClubs } from "../squad/other-clubs";
 import { applyResultMood } from "../squad/slump";
+import { derbyForMatch } from "../club/derby";
 import { advanceEuroKnockouts } from "../competition/euro-knockout";
 import { advanceSuperCups } from "../competition/super-cup";
 import { applyMonthlyDevelopment } from "../squad/development";
-import { returnDueLoans, signFreeAgents } from "../market/departures";
+import { loanReports, returnDueLoans, signFreeAgents, type LoanReport } from "../market/departures";
 import { clampForm, decayedForm, formDeltaFromMatch } from "../squad/form";
-import { TRAINING_XP_PER_SESSION, type TrainedSession } from "../squad/training-report";
+import {
+  TRAINING_XP_PER_SESSION,
+  trainsWithFirstTeam,
+  type TrainedSession,
+} from "../squad/training-report";
 import {
   applyAiMatchFinance,
   ensureMonthlyPosted,
@@ -45,7 +55,10 @@ import {
   settleDuePayments,
 } from "../club/finance";
 // 핵심 자원의 경계는 회견이 쥔다 — 같은 자를 두 곳에 적으면 한쪽만 움직인다
-import { openEvePress, SQUAD_CORE_SIZE } from "../club/press";
+import { betterThanInSquad, openEvePress, SQUAD_CORE_SIZE } from "../club/press";
+import { demotionPatienceDaysOf, listedPatienceDaysOf } from "../squad/demotion";
+// 출전 불만과 약속 판정은 **같은 자**를 쓴다 (people.md §5·§5-2)
+import { minutesShortfalls, shortfallText, tickPromises } from "../squad/promises";
 import { tickApproaches } from "../club/approach";
 import { tickBoardDemands } from "../club/board-demand";
 import { tickBoardRequests } from "../club/board-request";
@@ -64,11 +77,14 @@ import {
   expiringContracts,
   expireNegotiations,
   generateIncomingOffers,
+  listingOf,
   runAiRenewals,
   pendingOffer,
   pendingVerdicts,
   runMedicals,
 } from "../market/negotiation";
+// 서열대로 받고 있는가를 묻는 곡선 — 재계약·이적이 읽는 것과 같은 자다
+import { wageByRating } from "../market/market";
 import { playedIn, quickSimulate, type SimSquad } from "../match/quick-sim";
 import { managerTacticsOf } from "../match/manager-tactics";
 import { recordCard } from "../match/discipline";
@@ -78,25 +94,33 @@ import { matchRating } from "../match/ratings";
 import { scoutReportLine } from "../views/views";
 import { pruneDeferredScouts } from "../squad/scouting";
 import { grantManagerXP, settleTactics } from "../skills";
-import { allMatchesDone, endSeason } from "../competition/season";
+import {
+  allMatchesDone,
+  declareRetirements,
+  endSeason,
+  retirementDeclarationDate,
+} from "../competition/season";
 import { cancelTrainingOn, syncDefaultTraining } from "../squad/training-plan";
 import {
   groupOf,
+  activeContract,
   activeSuspension,
   assignmentFor,
   assignmentsOf,
+  benchRunOf,
   ensureSeasonStat,
   firstTeamPlayers,
   isInjured,
+  isLoanedIn,
   isSuspended,
   managedTeamId,
   MATCHDAY_BENCH,
+  openInjuryIds,
   playerById,
   proficiencyAt,
   pushNarrative,
   pushReportCards,
   reservePlayers,
-  seasonStatOf,
   squadLevelOf,
   tacticsOf,
   teamNameIn,
@@ -108,7 +132,7 @@ import {
   DAY_START,
   type GameState,
 } from "./state";
-import { makeRng, pick } from "./rng";
+import { makeRng } from "./rng";
 
 /**
  * advance_time — 캘린더 시계가 흐르는 유일한 경로 (season.md §5).
@@ -199,6 +223,56 @@ function resolveScouting(state: GameState, digest: string[]): void {
 }
 
 /**
+ * 서열 대비 주급이 **밀려 있는** 선수가 재계약을 묻기 시작하는 잔여 일수 — 반년
+ * 전이다 (→ docs/data/people.md §5).
+ */
+export const CONTRACT_DEMAND_DAYS = 180;
+/** 서열대로 받고 있으면 급할 것이 없다 — 그 절반에서 묻는다 */
+export const CONTRACT_DEMAND_PAID_DAYS = 90;
+
+/**
+ * 오늘 이 선수에게 **등재 불만이 설 자리인가** (→ docs/data/people.md §5).
+ *
+ * 문턱은 `LISTED_PATIENCE_DAYS`(14일)에 그 사람의 `patience`를 곱한 날이고, 대상은
+ * 우리 스쿼드에서 그보다 나은 선수가 `SQUAD_CORE_SIZE` 미만인 자원뿐이다 — 백업
+ * 정리까지 반란이 되면 리스트가 못 쓰는 손잡이가 된다. 추첨은 없다: 문턱을 넘으면
+ * 걸리므로 감독이 날짜를 셀 수 있다.
+ */
+export function listedGrievanceDue(state: GameState, player: GamePlayer): boolean {
+  const listing = listingOf(state, player.id);
+  if (!listing) return false;
+  // 문턱은 사람마다 다르다 — 등재의 대가도 시간의 결과이되 그 시간은 그의 것이다
+  if (diffDays(listing.listedOn, state.date) < listedPatienceDaysOf(state, player)) return false;
+  if (state.issues.some((i) => i.gamePlayerId === player.id)) return false;
+  // 백업 정리는 조용하다 — 자격은 회견이 쥔 그 자다 (`betterThanInSquad`)
+  return betterThanInSquad(state, player) < SQUAD_CORE_SIZE;
+}
+
+/**
+ * 오늘 이 선수에게 **계약 만료 불만이 설 자리인가** (→ docs/data/people.md §5).
+ *
+ * 문턱이 둘인 이유는 서열대로 받는 선수는 급할 것이 없어서다 — 주급이 그의 기량이
+ * 부르는 값(`wageByRating`)에 못 미치면 반년 전부터 묻고, 아니면 그 절반에서 묻는다.
+ * 자격은 등재와 같은 자다. 이미 만료된 계약에는 서지 않고, **열린 재계약 협상이
+ * 있으면** 서지 않는다 — 감독이 이미 문을 연 일이다.
+ */
+export function contractGrievanceDue(state: GameState, player: GamePlayer): boolean {
+  const contract = activeContract(state, player.id);
+  if (!contract) return false;
+  const days = diffDays(state.date, contract.until);
+  // 이미 만료된 계약에는 불만이 설 자리가 없다 — 남은 것은 떠나는 일뿐이다
+  if (days < 0) return false;
+  const paid = contract.weeklyWage >= wageByRating(player.attributes.overall);
+  if (days > (paid ? CONTRACT_DEMAND_PAID_DAYS : CONTRACT_DEMAND_DAYS)) return false;
+  if (state.issues.some((i) => i.gamePlayerId === player.id)) return false;
+  if (betterThanInSquad(state, player) >= SQUAD_CORE_SIZE) return false;
+  // 협상을 여는 것은 불만을 세우지 않는다 — 지우는 것은 성사뿐이다 (people.md §5)
+  return !state.negotiations.some(
+    (n) => n.gamePlayerId === player.id && n.kind === "renew" && n.status === "open",
+  );
+}
+
+/**
  * 하루를 소화한다.
  *
  * @returns **오늘 결정하지 않으면 사라지는 일**이 있으면 true — 그때만 시계가 선다.
@@ -208,14 +282,6 @@ function resolveScouting(state: GameState, digest: string[]): void {
  * 하루 뒤에 처리해도 결과가 같다. 그것들은 digest로 쌓여 **그 구간이 끝난 뒤 한
  * 번에** 보고된다. 멈춰야 하는 것은 오늘이 지나면 기회 자체가 없어지는 일뿐이다.
  */
-/**
- * **2군에 내려둔 채 방치할 수 있는 기간** — 이 날수를 그대로 두면 불만이 걸린다
- * (→ docs/data/people.md §5).
- *
- * 짧으면 로테이션이 곧 반란이 되고 길면 강등이 지금처럼 **비용 0인 손잡이**로 남는다.
- * 2주 강등은 대가 없이 되돌릴 수 있고 한 달을 두면 값을 치른다는 폭이다.
- */
-export const DEMOTION_PATIENCE_DAYS = 21;
 
 function dailyTick(
   state: GameState,
@@ -272,6 +338,8 @@ function dailyTick(
       : "training";
 
   resolveInjuries(state, digest);
+  // 오늘 재활 중인 선수 — 경기 감각의 자리를 가르는 유일한 사실 (아래 루프)
+  const injuredPlayers = openInjuryIds(state);
 
   for (const player of players) {
     /**
@@ -289,6 +357,21 @@ function dailyTick(
      * 순간부터 식고, 오래 쉬면 무디어진다 — 폼에 시간 축이 생긴다.
      */
     player.state.form = decayedForm(player.state.form);
+    /**
+     * **경기 감각은 그날이 무엇이었나로 끌린다** (player.md §5.4) — 본훈련이면 55,
+     * 훈련이 없으면 25, 재활 중이면 10 쪽이다. 회복 눈금(`recoveryKind`)과 **같은
+     * 하루**를 읽으므로 두 축이 서로 다른 날을 살지 않는다.
+     *
+     * ⚠️ 부상자를 갈라 보는 것은 이 축뿐이다. 체력은 위에서 부상 중에도 회복하지만
+     * (그게 복귀일에 몸이 준비돼 있는 이유다), 재활실은 훈련장이 아니라서 감각은
+     * 그동안 굳는다 — 장기 부상 복귀 선수가 곧장 온전한 전력이 아닌 이유다.
+     */
+    player.state.sharpness = clampSharpness(
+      sharpnessAfterDay(
+        sharpnessOf(player.state),
+        sharpnessDayOf(recoveryKind, injuredPlayers.has(player.id)),
+      ),
+    );
     if (issuePlayers.has(player.id)) {
       player.state.condition = clampCondition(player.state.condition - 1);
     }
@@ -354,9 +437,13 @@ function dailyTick(
    *
    * 빈도도 대상도 **개인 성향**을 탄다: 유리몸이 많은 선수단은 실제로 더 자주
    * 쓰러지고, 그중 누가 걸리는지도 경기와 같은 저울(`injuryWeight`)로 정한다.
+   *
+   * ⚠️ **대상은 결산과 같은 문을 지난다**(`trainsWithFirstTeam` — season.md §8
+   * 불변식). 갈라 두면 훈련장에 서지도 않은 2군이 훈련 중에 다치고, 다치지 않고
+   * 소화한 몫(`easeProneness`)도 함께 받는다.
    */
   if (hardSessions > 0) {
-    const candidates = players.filter((p) => !isInjured(state, p.id));
+    const candidates = players.filter((p) => trainsWithFirstTeam(state, p));
     if (candidates.length > 0) {
       const avgProneness =
         candidates.reduce((s, p) => s + pronenessValue(p), 0) / candidates.length;
@@ -382,6 +469,14 @@ function dailyTick(
     }
   }
 
+  /**
+   * **은퇴 예고** — 1월 1일, 세계 전체가 같은 규칙으로 (season.md §6).
+   *
+   * 무직이어도 돈다: 판정은 세계의 일이고, 감독이 없다고 서른다섯이 한 시즌을 더
+   * 뛰지는 않는다. 우리 팀 이름만 다이제스트에 선다.
+   */
+  if (state.date === retirementDeclarationDate(state.season)) declareRetirements(state, digest);
+
   // 월초 정산 — 지난달 마감(재정 보고서) + 이번 달 정액 항목 (finance.ts).
   // 게임/시즌이 시작하는 7월 1일엔 tick이 돌지 않으므로 첫 tick에서 보정한다
   if (state.date.endsWith("-01")) {
@@ -392,8 +487,11 @@ function dailyTick(
      */
     const grown = applyMonthlyDevelopment(state);
     if (grown.length > 0) {
-      digest.push(`2군 성장: ${grown.slice(0, 5).join(", ")}`);
+      // 우리 2군과 **임대 보낸 선수**가 한 줄에 선다 — 성장 경로가 하나이므로 (season.md §2)
+      digest.push(`월간 성장: ${grown.slice(0, 5).join(", ")}`);
     }
+    // 임대 리포트 — 남의 경기장 장부에서 파생한다. 한 건에 한 줄 (season.md §2 임대)
+    for (const report of loanReports(state)) digest.push(loanDigestLine(state, report));
   } else if (state.date === addDays(state.calendar.preseasonStart, 1)) ensureMonthlyPosted(state);
 
   // 주급 (월요일) — 활성 계약 합에서 파생, 구단 전체에 적용 (무소속 제외 — finance.ts)
@@ -404,39 +502,53 @@ function dailyTick(
   settleDuePayments(state, digest);
 
   /**
-   * 벤치 불만을 낼 만한 자원인가 — **종합의 눈금을 탄다.**
-   * 옛 78과 같은 인원 비율(상위 17%)에 서는 값이다 (player.md §4).
+   * 감독의 약속 — **기한이 된 것만 판정한다** (→ docs/data/people.md §5-2).
+   *
+   * 요일 문이 없다: 기한은 감독이 좁힐 수 있어 아무 날에나 떨어지고, 판정은 기한
+   * 하루뿐이라 그날을 지나치면 영영 판정되지 않는다. 이행 여부는 전부 다른 장부에서
+   * 나온다 — 출전 명단 · 이적 리스트 · 열린 협상 · 완장.
+   *
+   * ⚠️ **출전 불만보다 먼저 선다** — 한 선수에게 불만 줄은 하나라, 같은 날 둘이
+   * 겹치면 먼저 선 쪽이 자리를 지킨다. 어긴 약속이 이기는 것은 그것이 **감독 자신이
+   * 세운 원인**이기 때문이다 (people.md §5): 출전이 모자란 것과 세우겠다고 말해 놓고
+   * 안 세운 것은 라커룸에서 다른 사실이고, 다가옴의 눈금도 그렇게 말한다(§8 — 약속 9 ·
+   * 출전 7).
    */
-  const BENCHED_GRIPE_OVERALL = 74;
-  /** 자격이 되는 주에 실제로 불만이 터질 확률 — 매주 나면 불만이 배경음이 된다 */
-  const BENCHED_GRIPE_CHANCE = 0.15;
-  // 벤치 불만 발생 — 월요일, 고평가 비선발 자원 (간이).
-  // 리그 개막 후에만 — 프리시즌엔 아직 "출전 기회"를 논할 경기가 없다 (v6)
-  if (
-    managed &&
-    dow === MONDAY &&
-    state.date >= state.calendar.start &&
-    rng() < BENCHED_GRIPE_CHANCE
-  ) {
-    const starters = new Set(assignmentsOf(state, managed, "starting").map((a) => a.playerId));
-    const benched = players.filter(
-      (p) =>
-        squadLevelOf(p) === "first" &&
-        !starters.has(p.id) &&
-        p.attributes.overall >= BENCHED_GRIPE_OVERALL &&
-        !issuePlayers.has(p.id),
-    );
-    if (benched.length > 0) {
-      const gripe = pick(rng, benched);
-      state.issues.push({
-        gamePlayerId: gripe.id,
-        kind: "unhappy",
-        reason: "minutes",
-        since: state.date,
-      });
-      const apps = seasonStatOf(state, gripe.id)?.apps ?? 0;
-      digest.push(`${gripe.name} 출전 기회 불만 — 시즌 출전 ${apps}경기, 비선발`);
-      pushNarrative(state, `${gripe.name} 출전 불만`, 3);
+  if (managed) tickPromises(state, digest);
+
+  /**
+   * 출전 기회 불만 — **주사위가 없다. 지위가 잰다** (→ docs/data/people.md §5).
+   *
+   * 최근 `PROMISE_WINDOW_MATCHES`(8)경기 선발 비율이 그의 **계약 지위**가 부르는
+   * 비율에 못 미치면 그 자리에서 선다. 확률을 걷어 낸 이유는 강등·등재와 같다 —
+   * 방치의 대가는 규칙이 아니라 시간의 결과여야 하고(overview.md §1 철칙 4),
+   * 감독이 예측할 수 없는 불만은 손잡이가 아니라 소음이다.
+   *
+   * 대상도 문턱도 전부 `minutesShortfalls`가 쥔다 — **약속 이행 판정과 같은 자다**
+   * (`promiseKept`). 자를 둘 두면 "약속은 지켰는데 불만이 서는" 상태가 생긴다.
+   * 리그 개막 후에만 본다: 프리시즌엔 논할 경기가 없다.
+   */
+  if (managed && dow === MONDAY && state.date >= state.calendar.start) {
+    const shortfalls = minutesShortfalls(state);
+    if (shortfalls.length > 0) {
+      for (const row of shortfalls) {
+        state.issues.push({
+          gamePlayerId: row.player.id,
+          kind: "unhappy",
+          reason: "minutes",
+          // 창 안에서 몇 번을 더 세웠어야 했는가 — 기간이 아니라 모자란 선발 수다
+          count: row.short,
+          since: state.date,
+        });
+      }
+      /** 여럿이 한날 문턱을 넘으면 전부 걸리되, 줄은 하나다 — 이름이 화면을 채우지 않게 */
+      const worst = Math.max(...shortfalls.map((row) => row.short));
+      const line =
+        shortfalls.length === 1
+          ? shortfallText(shortfalls[0]!)
+          : `출전 기회 불만 ${shortfalls.length}명 — 최대 선발 ${worst}회 부족`;
+      digest.push(line);
+      pushNarrative(state, line, 3);
     }
   }
 
@@ -447,16 +559,14 @@ function dailyTick(
    * 개막일 문을 걸지 않는 이유: 벤치 불만은 "아직 뛸 경기가 없다"가 성립하지만,
    * 프리시즌에 2군으로 내려 21일을 둔 것은 개막 뒤와 같은 사실이다.
    */
-  if (dow === 1) {
+  if (dow === MONDAY) {
     const neglected = players.filter((p) => {
       if (squadLevelOf(p) !== "reserve") return false;
       const since = p.state.demotedOn;
-      if (!since || diffDays(since, state.date) < DEMOTION_PATIENCE_DAYS) return false;
+      // 문턱은 사람마다 다르다 — 방치의 대가는 시간의 결과이되 그 시간은 그의 것이다
+      if (!since || diffDays(since, state.date) < demotionPatienceDaysOf(state, p)) return false;
       if (state.issues.some((i) => i.gamePlayerId === p.id)) return false;
-      const better = players.filter(
-        (o) => o.id !== p.id && o.attributes.overall > p.attributes.overall,
-      ).length;
-      return better < SQUAD_CORE_SIZE;
+      return betterThanInSquad(state, p) < SQUAD_CORE_SIZE;
     });
     if (neglected.length > 0) {
       for (const p of neglected) {
@@ -476,6 +586,73 @@ function dailyTick(
         neglected.length === 1
           ? `${neglected[0]!.name} 2군 방치 불만 — 2군 ${longest}일째`
           : `2군 방치 불만 ${neglected.length}명 — 최장 ${longest}일째`;
+      digest.push(line);
+      pushNarrative(state, line, 3);
+    }
+  }
+
+  /**
+   * 등재 방치 불만 — 2군 방치와 **같은 결이다**: 추첨 없이 문턱을 넘으면 걸린다
+   * (→ docs/data/people.md §5). 등재는 감독이 값을 부르며 시장에 내놓은 **공개된
+   * 결정**이라 문턱만 강등보다 짧다.
+   */
+  if (dow === MONDAY) {
+    const shelved = players.flatMap((p): { player: GamePlayer; days: number }[] => {
+      if (!listedGrievanceDue(state, p)) return [];
+      // 판정이 통과했으니 등재는 있다 — 줄에 적을 며칠째만 여기서 센다
+      const listing = listingOf(state, p.id);
+      return listing ? [{ player: p, days: diffDays(listing.listedOn, state.date) }] : [];
+    });
+    if (shelved.length > 0) {
+      for (const { player } of shelved) {
+        // `count`는 없다 — 기간은 `TransferListing.listedOn`이 갖는다
+        state.issues.push({
+          gamePlayerId: player.id,
+          kind: "unhappy",
+          reason: "listed",
+          since: state.date,
+        });
+      }
+      /** 여럿이 한날 문턱을 넘으면 전부 걸리되, 줄은 하나다 — 이름이 화면을 채우지 않게 */
+      const longest = Math.max(...shelved.map((row) => row.days));
+      const line =
+        shelved.length === 1
+          ? `${shelved[0]!.player.name} 이적 리스트 불만 — 등재 ${longest}일째`
+          : `이적 리스트 불만 ${shelved.length}명 — 최장 ${longest}일째`;
+      digest.push(line);
+      pushNarrative(state, line, 3);
+    }
+  }
+
+  /**
+   * 계약 만료 불만 — 만료가 문턱 안인데 **열린 재계약이 없을 때** (people.md §5).
+   *
+   * ⚠️ `warnExpiringContracts`와 다른 일이다 — 그것은 감독에게 알리는 주의 줄이고,
+   * 이것은 감독이 열지 않아서 서는 **선수의 불만**이다.
+   */
+  if (dow === MONDAY) {
+    const unrenewed = players.flatMap((p): { player: GamePlayer; days: number }[] => {
+      if (!contractGrievanceDue(state, p)) return [];
+      // 판정이 통과했으니 활성 계약은 있다 — 줄에 적을 남은 일수만 여기서 센다
+      const contract = activeContract(state, p.id);
+      return contract ? [{ player: p, days: diffDays(state.date, contract.until) }] : [];
+    });
+    if (unrenewed.length > 0) {
+      for (const { player } of unrenewed) {
+        // `count`는 없다 — 남은 일수는 `Contract.until`이 갖는다
+        state.issues.push({
+          gamePlayerId: player.id,
+          kind: "unhappy",
+          reason: "contract",
+          since: state.date,
+        });
+      }
+      /** 줄은 하나다 — 급한 쪽이 앞에 선다 */
+      const soonest = Math.min(...unrenewed.map((u) => u.days));
+      const line =
+        unrenewed.length === 1
+          ? `${unrenewed[0]!.player.name} 재계약 불만 — 계약 ${soonest}일 남음`
+          : `재계약 불만 ${unrenewed.length}명 — 최단 ${soonest}일 남음`;
       digest.push(line);
       pushNarrative(state, line, 3);
     }
@@ -507,6 +684,16 @@ function dailyTick(
       if (!player || !offer) continue;
       digest.push(
         `📨 ${teamNameIn(state, negotiation.counterpartTeamId ?? "")}에서 ${player.name} 오퍼(${formatMoney(offer.fee)})에 대한 답이 도착했습니다`,
+      );
+      /**
+       * 다이제스트는 그 턴에만 서고 사라진다 — 되짚을 자리는 서사 표뿐이다.
+       * 무게 3은 **오늘 답해야 하는 일**의 눈금이다 (people.md §9 — `계약 만료
+       * 30일 남음` 4, `타 구단 이적` 2 사이). 표의 문장에는 이모지를 넣지 않는다.
+       */
+      pushNarrative(
+        state,
+        `${teamNameIn(state, negotiation.counterpartTeamId ?? "")} — ${player.name} 오퍼 답 도착 (${formatMoney(offer.fee)})`,
+        3,
       );
     }
     warnExpiringContracts(state, digest);
@@ -571,6 +758,32 @@ function dailyTick(
   return approached || offered || (managed !== null && standsToday(state, digest));
 }
 
+/**
+ * 임대 한 건의 월초 다이제스트 줄 — **사실만 선다** (overview.md §1 철칙 4).
+ *
+ * 구단·출전·평점·연속 미출전·부상·성장 칸 수까지다. "불러들이시죠"는 이 자리의
+ * 것이 아니다 — 근거 코드가 뜻하는 **사실**을 짚고, 그 사실로 무슨 말을 할지는
+ * GM이 쓴다.
+ */
+function loanDigestLine(state: GameState, report: LoanReport): string {
+  const record =
+    report.apps > 0
+      ? `${report.apps}경기 ${report.goals}골 ${report.assists}도움${
+          report.rating !== null ? ` 평점 ${report.rating.toFixed(1)}` : ""
+        }`
+      : "1군 출전 없음";
+  const parts = [
+    report.reserveApps > 0 ? `2군 ${report.reserveApps}경기` : null,
+    report.growth > 0 ? `능력치 +${report.growth}` : null,
+    // 근거 코드는 코드가 아니라 그것이 **뜻하는 사실**로 적는다 (departures.ts `LoanConcern`)
+    report.concerns.includes("no-minutes") ? `최근 ${report.benchRun}경기 명단 밖` : null,
+    report.injury ? `부상 ${report.injury.bodyPart}~${report.injury.expectedReturn}` : null,
+  ].filter((x): x is string => x !== null);
+  return `임대 리포트 · ${report.name} (${teamNameIn(state, report.teamId)}) ${record}${
+    parts.length > 0 ? ` · ${parts.join(" · ")}` : ""
+  } · 복귀 ${report.until}`;
+}
+
 /** 계약 만료 예고 문턱 — 내림차순, 날 단위 (season.md §5) */
 const EXPIRY_WARN_STAGES = [180, 90, 30] as const;
 
@@ -624,6 +837,9 @@ function standsToday(state: GameState, digest: string[]): boolean {
   if (due.length === 0) return false;
   for (const v of due) {
     digest.push(`⛔ ${v.label} — 오늘이 기한입니다. 넘기면 협상이 사라집니다`);
+    // 오퍼 답 도착과 같은 눈금 — 오늘 답해야 하는 일은 3이다 (people.md §9).
+    // `label`이 아니라 `subject`를 싣는다: 표에는 도구 이름이 아니라 사실만 선다
+    pushNarrative(state, `${v.subject} — 오늘이 협상 기한`, 3);
   }
   return true;
 }
@@ -662,6 +878,34 @@ export const ROTATION_FRESHER = 15;
  * 조금 위에서, 뛸 수 있는 아무나로 바꾼다. 라인업은 약해지지만 그게 대가다.
  */
 export const EXHAUSTED_CONDITION = 35;
+
+/**
+ * **임대 자원이 자리를 얻는 기량 여유** — 로테이션 문턱(`ROTATION_OVR_DROP` 7)보다
+ * 넓다 (→ docs/simulation/season.md §2 임대).
+ *
+ * 로테이션이 묻는 것은 "더 나은 선택이 있는가"이고 임대가 묻는 것은 "쓰겠다고 하고
+ * 데려왔는가"다. 임대는 **출전을 사는 거래**라 빌린 구단이 주급을 나눠 내는 대가로
+ * 그를 세운다 — 7이면 아카데미 유망주는 어떤 자리도 받지 못한다(1부 최약체의 선발
+ * 커트가 71인데 유망주의 종합은 60대 중반이다).
+ *
+ * ⚠️ **넓히면 임대처를 고르는 일이 판단이 아니게 된다.** 창이 사라지면 어디로
+ * 보내도 뛰므로 감독이 "뛸 수 있는 곳"을 찾을 이유가 없어진다. 10은 같은 1부
+ * 안에서 약체와 강호를 가르는 폭이다(선발 커트 71 대 80).
+ */
+export const LOAN_ROTATION_OVR_DROP = 10;
+/**
+ * **빌린 구단이 임대 자원을 연속으로 앉혀 두는 상한** — 그 구단 1군 경기 기준.
+ *
+ * 상한에 닿으면 그는 같은 포지션군에서 가장 약한 선발과 자리를 바꾼다(`LOAN_ROTATION_OVR_DROP`
+ * 창 안일 때만). 셋은 한 달치가 채 안 되는 일정이라, 리포트가 `no-minutes`를 켜는
+ * 문턱(`LOAN_BENCH_RUN_ALERT` 4)보다 **한 칸 앞**이다 — 뛸 자리가 있는 임대는
+ * 근거가 켜지기 전에 뛰고, 그래도 켜졌다면 그건 배경음이 아니라 사건이다(부상·
+ * 정지이거나 그 구단에 그가 설 자리가 없다).
+ *
+ * 지금은 모든 임대가 같은 상한을 진다. 계약에 출전 보장 조항이 서면 상한이 계약마다
+ * 갈리고, 집행하는 자리는 여기 하나다.
+ */
+export const LOAN_REST_LIMIT = 3;
 
 /**
  * 전술판이 이 선수에게 준 자리 — 좌표·역할은 판의 것, 숙련도는 사람의 것.
@@ -708,12 +952,79 @@ export function simSquadFor(
   };
 }
 
+/** 전술판이 한 자리에 세운 값 — `boardSlotOf`가 내고 로테이션이 갈아 끼운다 */
+type SlotSetup = ReturnType<typeof boardSlotOf>;
+
+/** 이 선수가 로테이션 자리를 받는 기량 여유 — 임대 자원은 창이 넓다 (season.md §2 임대) */
+function rotationDropFor(player: GamePlayer): number {
+  return isLoanedIn(player) ? LOAN_ROTATION_OVR_DROP : ROTATION_OVR_DROP;
+}
+
+/**
+ * **임대 자원이 먼저 선다** — 자리가 열리면 그 자리는 빌린 구단이 그를 데려온
+ * 자리다 (season.md §2 임대). 같은 조건의 스쿼드 자원과 나란히 서면 임대가 이기고,
+ * 그다음은 원래의 잣대(기량·체력)가 가른다.
+ */
+function loanFirstThen(
+  then: (a: GamePlayer, b: GamePlayer) => number,
+): (a: GamePlayer, b: GamePlayer) => number {
+  return (a, b) => (isLoanedIn(b) ? 1 : 0) - (isLoanedIn(a) ? 1 : 0) || then(a, b);
+}
+
+/**
+ * **연속 미출전 상한** — 그 구단 1군 경기 `LOAN_REST_LIMIT`회 연속 명단 밖이던 임대
+ * 자원을 선발에 세운다 (season.md §2 임대).
+ *
+ * 자리는 **같은 포지션군에서 가장 약한 선발**의 것이고, 그와의 기량 차가
+ * `LOAN_ROTATION_OVR_DROP` 창 안일 때만 바꾼다 — 창 밖으로 보낸 유망주는 한 경기도
+ * 못 뛰고, 그 사실이 `no-minutes`로 감독에게 온다(그래서 임대처 선택이 판단이 된다).
+ *
+ * 자리 자체는 판의 것이다: 좌표·역할은 그대로 두고 숙련도·적응도만 들어온 선수의
+ * 것으로 다시 선다 — 로테이션과 같은 규약이다.
+ */
+function seatOverdueLoanees(
+  state: GameState,
+  squad: readonly GamePlayer[],
+  starters: GamePlayer[],
+  slotSetups: SlotSetup[],
+  available: (player: GamePlayer) => boolean,
+): void {
+  // 대부분의 구단에 임대 자원이 없다 — 장부를 훑기 전에 여기서 끝난다
+  const loanees = squad.filter((p) => isLoanedIn(p) && available(p));
+  if (loanees.length === 0) return;
+  const seated = new Set(starters.map((p) => p.id));
+  for (const loanee of loanees) {
+    if (seated.has(loanee.id)) continue;
+    if (benchRunOf(state, loanee) < LOAN_REST_LIMIT) continue;
+    let index = -1;
+    for (let i = 0; i < starters.length; i++) {
+      const seat = starters[i]!;
+      // 임대 자원끼리는 자리를 뺏지 않는다 — 그쪽에도 같은 빚이 있다 (`admitOnLoan`과 같은 규약)
+      if (isLoanedIn(seat)) continue;
+      if (groupOf(seat) !== groupOf(loanee)) continue;
+      if (loanee.attributes.overall < seat.attributes.overall - LOAN_ROTATION_OVR_DROP) continue;
+      if (index < 0 || seat.attributes.overall < starters[index]!.attributes.overall) index = i;
+    }
+    if (index < 0) continue;
+    const setup = slotSetups[index]!;
+    slotSetups[index] = {
+      ...setup,
+      proficiency: proficiencyAt(loanee, setup.position),
+      familiarity: assignmentFor(state, loanee.id)?.familiarity ?? FAMILIARITY_BASELINE,
+    };
+    seated.delete(starters[index]!.id);
+    starters[index] = loanee;
+    seated.add(loanee.id);
+  }
+}
+
 /**
  * 간이 시뮬 입력 조립 — 전술 배치에서 가용 선발을 뽑는다.
  *
- * 부상·정지로 빈 자리를 메우고, **지친 선발은 로테이션**한다. 대항전에 나가는
- * 팀은 주중 경기가 늘어 이 부담을 실제로 지고, 그 대가는 약해진 라인업이다
- * (유저 팀은 감독이 직접 라인업을 짜므로 이 함수를 쓰지 않는다).
+ * 부상·정지로 빈 자리를 메우고, **임대 자원에게 진 빚을 갚고**(season.md §2 임대),
+ * **지친 선발은 로테이션**한다. 대항전에 나가는 팀은 주중 경기가 늘어 이 부담을
+ * 실제로 지고, 그 대가는 약해진 라인업이다 (유저 팀은 감독이 직접 라인업을 짜므로
+ * 이 함수를 쓰지 않는다 — 우리가 빌려 온 선수를 세울지는 라인업 화면의 결정이다).
  */
 export function simSquadOf(state: GameState, teamId: string): SimSquad {
   const squad = firstTeamPlayers(state, teamId);
@@ -746,6 +1057,17 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
     }
   }
 
+  /**
+   * **앉혀만 두지는 못한다** — 임대는 출전을 사는 거래다 (season.md §2 임대).
+   *
+   * 그 구단 1군 경기 `LOAN_REST_LIMIT`회 연속 명단 밖이던 임대 자원은 같은
+   * 포지션군에서 **가장 약한 선발**과 자리를 바꾼다. 로테이션보다 먼저 서는 이유는
+   * 이 문이 피로를 묻지 않기 때문이다: 주 1경기 리듬의 팀은 로테이션 문턱에 아무도
+   * 닿지 않아, 로테이션에만 얹으면 대항전 없는 구단으로 나간 유망주가 한 시즌을
+   * 통째로 앉아 있게 된다.
+   */
+  seatOverdueLoanees(state, squad, starters, slotSetups, available);
+
   // 로테이션 — 지친 선발을 같은 포지션군의 신선한 자원으로 바꾼다
   const used = new Set(starters.map((p) => p.id));
   /**
@@ -767,10 +1089,10 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
           // 대체 자원으로 그라운드에 선다** (실제로 그랬다: 정지 중인 선수가 선발)
           available(p) &&
           groupOf(p) === groupOf(tired) &&
-          p.attributes.overall >= tired.attributes.overall - ROTATION_OVR_DROP &&
+          p.attributes.overall >= tired.attributes.overall - rotationDropFor(p) &&
           p.state.condition >= tired.state.condition + ROTATION_FRESHER,
       )
-      .sort((a, b) => b.attributes.overall - a.attributes.overall)[0];
+      .sort(loanFirstThen((a, b) => b.attributes.overall - a.attributes.overall))[0];
     /**
      * 조건에 맞는 자원이 없어도 **다리가 멎었으면 뺀다** — 같은 포지션군에서
      * 가장 신선한 사람으로. 이 갈래가 없으면 대체 불가한 스타는 0까지 간다.
@@ -785,7 +1107,7 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
                 groupOf(p) === groupOf(tired) &&
                 p.state.condition > tired.state.condition + 10,
             )
-            .sort((a, b) => b.state.condition - a.state.condition)[0]
+            .sort(loanFirstThen((a, b) => b.state.condition - a.state.condition))[0]
         : undefined;
     const picked = replacement ?? fallback;
     if (!picked) continue;
@@ -872,14 +1194,19 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       home: simSquadOf(state, match.homeTeamId),
       away: simSquadOf(state, match.awayTeamId),
     };
+    const derby = derbyForMatch(match);
     const result = quickSimulate(
       squads.home,
       squads.away,
       state.seed,
       `${state.season}:${match.competitionId ?? "friendly"}:${match.stage ?? "league"}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`,
-      // 중립 경기장은 **경기가 갖고 있는 사실**이다 — 안 넘기면 결승의 명목상
-      // 홈이 홈 어드밴티지를 그대로 받는다 (match.md §7)
-      { neutral: match.neutral === true },
+      // 중립 경기장과 더비는 **경기가 갖고 있는 사실**이다 — 안 넘기면 결승의
+      // 명목상 홈이 홈 어드밴티지를 그대로 받고, 리그의 더비는 카드·부상·판세에
+      // 닿지 않는다 (match.md §7)
+      {
+        neutral: match.neutral === true,
+        ...(derby ? { derby: { name: derby.name, heat: derby.heat } } : {}),
+      },
     );
     // 부상·카드·교체는 각자의 표가 갖는다 — 경기 결과에 섞어 넣지 않는다
     const { injuries: hurt, cards, subs, possession, ...scoreline } = result;
@@ -909,8 +1236,17 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       ...scoreline,
       homeLineup: onPitch.home.map((p) => p.id),
       awayLineup: onPitch.away.map((p) => p.id),
+      // 선발은 교체 전의 명단이다 — 지위가 부르는 출전을 재는 자다 (people.md §5-2)
+      homeStarters: squads.home.starters.map((p) => p.id),
+      awayStarters: squads.away.starters.map((p) => p.id),
       homeOnPitch: finished("home"),
       awayOnPitch: finished("away"),
+      /**
+       * 점유는 **결과에 남는다** — 간이 시뮬이 구간마다 가중해 이미 내놓은 값이고
+       * (바로 아래 체력 정산이 그 값을 읽는다) 여기서 버리면 우리 경기에만 있는
+       * 칸이 된다. 사건·선수별 기록과 달리 장부 없이도 나오는 값이다 (match.md §4).
+       */
+      possession,
     };
     // 출전·득점·도움·평점 — AI 팀도 시즌 스탯을 쌓아야 득점왕·평점 비교가 성립한다.
     // 경기별 평점은 남기지 않는다(장부가 없다) — 시즌 합계만 누적한다
@@ -960,6 +1296,7 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
         teamId,
         goalsFor - conceded,
         onPitch[side].map((p) => p.id),
+        derby?.heat ?? 0,
       );
     }
     /**
@@ -993,6 +1330,12 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
           p.state.condition -
             conditionDrain(p, position, spec, minutes, today, 1, possession[side]),
         );
+        /**
+         * 뛴 만큼 경기 감각이 오른다 — **친선도 그대로 올린다** (season.md §2).
+         * 몸에 남는 것은 친선도 겪는 자리이고, 프리시즌이 몸을 만든다는 말이
+         * 장부에 서는 곳이 여기다.
+         */
+        p.state.sharpness = clampSharpness(sharpnessAfterMinutes(sharpnessOf(p.state), minutes));
       }
     }
     /**
@@ -1091,24 +1434,29 @@ function reserveXI(state: GameState, teamId: string): GamePlayer[] {
  * 벤치 없이 열한 명으로 90분을 굴린다(`simSquadFor`) — 교체가 없으니 출전자가 곧
  * 선발이고, 라인업이 그대로 출전 기록의 원본이다.
  */
+/** 2군 경기의 출전 분 — 교체가 없으므로 선발 열한 명이 정규 시간을 다 뛴다 */
+const RESERVE_MATCH_MINUTES = 90;
+
 export function simulateReserveMatch(state: GameState, match: MatchRecord, digest: string[]): void {
   const squads = {
     home: simSquadFor(state, match.homeTeamId, reserveXI(state, match.homeTeamId)),
     away: simSquadFor(state, match.awayTeamId, reserveXI(state, match.awayTeamId)),
   };
+  // 2군 경기는 라이벌 축을 타지 않는다 — 결과가 출전과 성장에만 닿는 경기다
   const result = quickSimulate(
     squads.home,
     squads.away,
     state.seed,
     `${state.season}:${match.competitionId}:${match.stage ?? "league"}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`,
   );
-  // 벤치가 없어 교체가 없고, 카드·부상·점유율은 정산하지 않는다 — 결과만 남긴다
+  // 벤치가 없어 교체가 없고, 카드·부상은 정산하지 않는다 — 결과만 남긴다
   match.result = {
     homeGoals: result.homeGoals,
     awayGoals: result.awayGoals,
     scorers: result.scorers,
     assists: result.assists,
     goalMinutes: result.goalMinutes,
+    goalOrigins: result.goalOrigins,
     homeShots: result.homeShots,
     awayShots: result.awayShots,
     homeXg: result.homeXg,
@@ -1117,8 +1465,12 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
     awayExpectedGoals: result.awayExpectedGoals,
     homeLineup: squads.home.starters.map((p) => p.id),
     awayLineup: squads.away.starters.map((p) => p.id),
+    // 벤치가 없는 시뮬이라 뛴 사람이 곧 선발이다 — 그래도 칸은 따로 적는다
+    homeStarters: squads.home.starters.map((p) => p.id),
+    awayStarters: squads.away.starters.map((p) => p.id),
     homeOnPitch: squads.home.starters.map((p) => p.id),
     awayOnPitch: squads.away.starters.map((p) => p.id),
+    possession: result.possession,
   };
   for (const side of ["home", "away"] as const) {
     const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
@@ -1143,6 +1495,18 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
         conceded,
         outcome,
       });
+      /**
+       * **2군 경기가 1군 몸에 닿는 유일한 자리** (season.md §2 · player.md §5.4).
+       *
+       * 나머지(폼·체력·부상·카드)를 닫아 둔 이유는 감독에게 그 일정을 조정할
+       * 손잡이가 없어서인데, 경기 감각만은 반대다: 2군에서 90분을 뛴 유망주가
+       * 1군에 올라왔을 때 감각이 그대로면 감독이 그를 내려보낸 일이 아무것도
+       * 아니었던 것이 된다. 장기 부상 복귀 선수를 끌어올리는 길도 이 한 칸이 연다.
+       * 벤치 없이 열한 명이 90분을 굴리므로 출전 분은 전원 정규 시간이다.
+       */
+      p.state.sharpness = clampSharpness(
+        sharpnessAfterMinutes(sharpnessOf(p.state), RESERVE_MATCH_MINUTES),
+      );
       const stat = ensureSeasonStat(state, p.id, teamId);
       stat.reserveApps = (stat.reserveApps ?? 0) + 1;
       if (goals > 0) stat.reserveGoals = (stat.reserveGoals ?? 0) + goals;

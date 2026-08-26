@@ -9,6 +9,8 @@ import type {
   PlayerShotProfile,
   Player,
   PositionGroup,
+  SetPieceProfile,
+  SetPieceTakers,
   RegionalBand,
   RegionalInstruction,
   RegionalIntent,
@@ -33,6 +35,7 @@ import {
   roleFit,
   roleWeights,
   tacticalSensitivityOf,
+  tacticToggleValue,
 } from "@story-fm/domain";
 import { applyDirectives, type DirectiveInput } from "./directives";
 import { applyExploits, autoExploits, exploitTargets } from "./exploits";
@@ -40,7 +43,13 @@ import { buildKeyPoints, readKeyPoints } from "./key-points";
 import { stateModifier } from "./state-modifier";
 import { buildCounterContext, evaluateCounters, type CounterResult } from "./tactical-counters";
 import { GAP_PENALTY, GAP_THRESHOLD } from "./stamina";
-import { finishingGoalProbability, FINISHING_PIVOT, FINISHING_SCALE } from "./shot-model";
+import {
+  finishingGoalProbability,
+  FINISHING_PIVOT,
+  FINISHING_SCALE,
+  penaltyRate,
+  penaltySkill,
+} from "./shot-model";
 import {
   addCells,
   GRID_LANES,
@@ -106,6 +115,11 @@ export interface SideInput {
     intent: RegionalIntent;
     note: string;
   }>;
+  /**
+   * 감독이 지정한 죽은 공 키커 (`TeamTactics.setPieceTakers`) — 없거나 그 선수가
+   * 선발에 없으면 코어의 기본값이 선다 (match.md §1.4).
+   */
+  setPieceTakers?: SetPieceTakers;
 }
 
 /**
@@ -264,11 +278,25 @@ interface ZoneDelta {
   notes: PacketTag[];
 }
 
+/** 전환 갈래가 존 하나를 움직이는 폭 — 축 한 칸(2~3.5%)·상성 이득(2.5~8%)과 같은 자리 */
+const TRANSITION_SWING = 0.03;
+/** 태클 갈래가 수비 존을 움직이는 폭 — 대가는 존이 아니라 `matchIntensity`로 나간다 */
+const TACKLING_SWING = 0.03;
+/** 오프사이드 트랩이 중원·수비를 움직이는 폭 */
+const TRAP_SWING = 0.025;
+/** GK 배급이 존을 움직이는 폭 */
+const KEEPER_SWING = 0.025;
+
 /**
- * 전술 5축 + 패스 스타일이 존 전력에 남기는 **이득과 대가**.
+ * 전술 여섯 축 + **갈래 넷**이 존 전력에 남기는 **이득과 대가**.
  *
- * 여섯 축 전부가 이득과 대가를 함께 낸다 — 수치를 안 움직이는 축이 있으면 그
- * 지시는 대화에만 남고 결과에 닿지 않는다.
+ * 열 전부가 이득과 대가를 함께 낸다 — 수치를 안 움직이는 지시가 있으면 그 말은
+ * 대화에만 남고 결과에 닿지 않는다. 태클만 짝의 한쪽이 존이 아니라 강도로 나간다
+ * (`matchIntensity`).
+ *
+ * 축은 3이 중립이라 위아래가 대칭이지만, 갈래는 **아무 데도 서지 않은 상태가
+ * 중립**이라 켠 쪽만 값을 움직인다 (match.md §1.2) — 지시하지 않는 것이 손해가
+ * 아니고, 갈래가 전부 중립인 전술은 갈래 도입 전과 델타가 같다.
  *
  * @param uptake 지시 적용률 — 이득에는 온전히, 대가에는 절반만 곱한다 (`cost`)
  * @param opponentPace 상대 최전방 스피드 평균 — 라인을 올릴 때 치르는 대가의 크기
@@ -281,10 +309,11 @@ function tacticalDeltas(
 ): ZoneDelta {
   const d: ZoneDelta = { attack: 0, midfield: 0, defense: 0, notes: [] };
   /**
-   * 축 하나가 남기는 사실 태그 — 코드는 축 이름, 눈금(`step`)과 팀 성향이 값이다.
+   * 축·갈래 하나가 남기는 사실 태그 — 코드는 그 이름, 눈금(`step`)과 팀 성향이
+   * 값이고, 눈금이 없는 갈래는 어느 쪽에 섰는지를 `flags`가 든다.
    * 편은 없다: 이 노트는 그 팀의 `tactical.notes`에 실려 자리로 이미 편을 갖는다.
    */
-  const note = (code: string, values: Record<string, number>) =>
+  const note = (code: string, values: Record<string, number>, flags: string[] = []) =>
     d.notes.push({
       source: "tactical",
       code,
@@ -292,7 +321,7 @@ function tacticalDeltas(
       sharp: true,
       playerIds: [],
       values,
-      flags: [],
+      flags,
     });
   const gain = (v: number) => v * uptake;
   /**
@@ -393,14 +422,101 @@ function tacticalDeltas(
     note("pass-style", { step: ps, passing });
   }
 
+  // ⑦ 전환 — 뺏은 공을 곧장 앞으로 보낼지 자리부터 잡을지. 중립이면 아무 일도 없다
+  const transition = tacticToggleValue(spec, "transition");
+  if (transition === "counter") {
+    const pace = squadTrait(slots, (p) => p.attributes.pace);
+    d.attack += gain(TRANSITION_SWING * pace);
+    d.midfield -= cost(TRANSITION_SWING); // 전환에 인원을 앞으로 던지면 2차 볼을 내준다
+    note("transition", { trait: pace }, ["counter"]);
+  } else if (transition === "regroup") {
+    const shape = squadTrait(slots, (p) => p.attributes.positioning);
+    d.defense += gain(TRANSITION_SWING * shape);
+    d.attack -= cost(TRANSITION_SWING); // 되받을 기회를 스스로 접는다
+    note("transition", { trait: shape }, ["regroup"]);
+  }
+
+  // ⑧ 오프사이드 트랩 — 상대를 라인 앞에 가둔다. 타이밍이 어긋나면 그대로 열린다
+  if (tacticToggleValue(spec, "offsideTrap") !== null) {
+    d.midfield += gain(TRAP_SWING);
+    d.defense -= cost(TRAP_SWING);
+    note("offside-trap", {});
+  }
+
+  // ⑨ 태클 강도 — 존 쪽만 여기다. 파울·카드·부상은 `matchIntensity`가 쥔다
+  const tackling = tacticToggleValue(spec, "tackling");
+  if (tackling === "hard") {
+    const bite = squadTrait(slots, (p) => (p.attributes.tackling + p.attributes.aggression) / 2);
+    d.defense += gain(TACKLING_SWING * bite);
+    note("tackling", { trait: bite }, ["hard"]);
+  } else if (tackling === "soft") {
+    d.defense -= cost(TACKLING_SWING);
+    note("tackling", {}, ["soft"]);
+  }
+
+  // ⑩ GK 배급 — 뒤에서 풀어 나가나 넘겨 버리나
+  const keeper = tacticToggleValue(spec, "keeperDistribution");
+  if (keeper === "short") {
+    const link = squadTrait(slots, (p) => (p.attributes.passing + p.attributes.composure) / 2);
+    d.midfield += gain(KEEPER_SWING * link);
+    d.defense -= cost(KEEPER_SWING); // 우리 문 앞에서 잃을 위험
+    note("keeper-distribution", { trait: link }, ["short"]);
+  } else if (keeper === "long") {
+    const aerial = squadTrait(slots, (p) => p.attributes.aerial);
+    d.attack += gain(KEEPER_SWING * aerial);
+    d.midfield -= cost(KEEPER_SWING); // 2차 볼을 내준다
+    note("keeper-distribution", { trait: aerial }, ["long"]);
+  }
+
   return d;
 }
 
-/** 경기 강도 — 압박·템포가 만든다. 피로·파울·부상률을 함께 끌어올린다 */
-export function matchIntensity(spec: TacticsSpec): number {
-  return round2(
-    Math.max(0.8, Math.min(1.3, 1 + (spec.pressing - 3) * 0.07 + (spec.tempo - 3) * 0.04)),
+/**
+ * 더비 `heat` 한 계단이 경기 강도에 **곱하는** 몫 (match.md §1).
+ *
+ * 압박·템포의 clamp **밖**이다: 더비는 감독이 만드는 것이 아니라 대진이 갖고 있는
+ * 사실이라, 이미 압박 5로 선 팀에서도 한 계단 더 거칠어져야 한다. 실제 더비의 카드
+ * 프리미엄(리그 평균 대비 +20~30%)이 heat 3의 +18%가 서는 자리다.
+ */
+export const DERBY_INTENSITY_STEP = 0.06;
+
+/** 더비가 양 팀 강도에 함께 거는 배수 — 더비가 아니면 1 */
+export function derbyIntensityFactor(heat = 0): number {
+  return 1 + DERBY_INTENSITY_STEP * heat;
+}
+
+/**
+ * 태클 강도 한 갈래가 강도에 더하는 몫 — 압박(0.07)·템포(0.04)보다 크다:
+ * 태클은 이 축 **자체**다 (match.md §1.2).
+ */
+export const TACKLING_INTENSITY_STEP = 0.08;
+
+/**
+ * 세 항의 합이 clamp와 정확히 같다 — 압박 ±0.14 · 템포 ±0.08 · 태클 ±0.08 = ±0.30.
+ * 잘리는 구간이 없어야 감독이 "왜 안 올라가지"를 겪지 않는다.
+ */
+const INTENSITY_MIN = 0.7;
+const INTENSITY_MAX = 1.3;
+
+/**
+ * 경기 강도 — 압박·템포·태클 강도가 만들고 더비가 곱한다. 파울·카드·부상률을 함께
+ * 끌어올린다.
+ *
+ * ⚠️ **두 시뮬이 같은 문을 지나야 한다** (match.md §7). 구간 시뮬은 패킷의
+ * `guide.intensity`를 읽지만 간이 시뮬은 카드·부상을 뽑기 전에 이 함수를 직접
+ * 부르므로, 더비 배수를 한쪽에만 걸면 리그의 95%에서 더비가 카드에 닿지 않는다.
+ */
+export function matchIntensity(spec: TacticsSpec, derbyHeat = 0): number {
+  const tackling = tacticToggleValue(spec, "tackling");
+  const bite = tackling === "hard" ? 1 : tackling === "soft" ? -1 : 0;
+  const tactical = Math.max(
+    INTENSITY_MIN,
+    Math.min(
+      INTENSITY_MAX,
+      1 + (spec.pressing - 3) * 0.07 + (spec.tempo - 3) * 0.04 + bite * TACKLING_INTENSITY_STEP,
+    ),
   );
+  return round2(tactical * derbyIntensityFactor(derbyHeat));
 }
 
 /**
@@ -478,7 +594,7 @@ export const CREATION_SKILL_LOG_WEIGHT = 0.75;
  * 대등한 경로에서 슈팅 하나의 평균 기회 xG.
  * 실제 1부 리그의 슛당 xG는 0.11 언저리다(2.8골 ÷ 25슛).
  */
-export const BASE_SHOT_XG = 0.084;
+export const BASE_SHOT_XG = 0.0905;
 /** 최종 공격 지역 우위가 슈팅 질에 닿는 세기. */
 export const ROUTE_XG_LOGIT_WEIGHT = 0.7;
 /** 선수의 전진 위치가 슈팅 질에 닿는 세기. */
@@ -489,19 +605,21 @@ export const CHANCE_SKILL_XG_LOGIT_WEIGHT = 0.45;
 /**
  * 능력 → 전력 곡선 — **평점의 지수** (match.md §1.1). ⚠️ 밸런스 값.
  *
- * 축구 득점의 표준 통계 모델(Maher 1982 · Dixon–Coles 1997)은 log λ가 공격·수비
+ * 축구 득점의 표준 통계 모델(Maher 1982 · Dixon–Coles 1997)은 `log λ`가 공격·수비
  * 평점의 **차**에 선형이다 — 전력은 평점의 지수이고, 같은 5점 차는 60 대 65에서도
- * 80 대 85에서도 같은 승률 차다(Elo와 같은 꼴). 존의 XI 가중 평균을 그대로 비율로
- * 맞세우면(거듭제곱을 포함해) 같은 점 차가 위에서는 작게, 아래에서는 크게 세어져
- * 우승 후보가 중위권에 발목을 잡히고 강등권만 짓눌린다.
+ * 80 대 85에서도 같은 승률 차다(Elo와 같은 꼴). 그런데 종합의 눈금은 위가 눌려 있어
+ * 81과 76이 비율로는 1.07뿐이고, 그 비를 그대로 맞세우면 격차가 xG 1.25:1로만 번역돼
+ * 우승 승점이 70점대에 주저앉는다(실제 1부 84~93).
  *
- * 그래서 세 존의 가중 평균 x를 리그 평균(`ABILITY_PIVOT`)을 축으로 `exp(기울기 × (x −
- * 축))`에 올린다. 두 팀의 전력 비는 `exp(기울기 × 평점 차)`이고 축의 위치와 무관하다.
- * 기울기는 리그 안 최대 격차(XI 평균 12점)가 시즌 xG 비 2.5~4:1에 닿는 값이다 —
- * 전술·상성·공략·개인 지시는 이 곡선 **뒤에** 곱해지므로 지시 한 칸이 존을 움직이는
- * 폭은 그대로다. 존 안의 폼·체력·적응도가 깎은 몫은 같은 지수를 탄다.
+ * 그래서 XI 가중 평균 x를 리그 평균(`ABILITY_PIVOT`)을 축으로 `exp(기울기 × (x − 축))`에
+ * 올린다 — 두 팀의 전력 비는 `exp(기울기 × 평점 차)`이고 축의 위치와 무관하다.
+ *
+ * ⚠️ **곡선은 능력 항에만 건다.** 전술·상성·공략·개인 지시는 존이 완성되는 자리에서
+ * **곱**으로 얹히므로(`tacticShift`) 이 곡선 밖에 남는다 — 그 폭은 §1.2·§1.3이 이미
+ * 자기 눈금(2.5~15%)으로 정해 둔 값이라, 함께 부풀리면 지시 한 칸이 능력 차만큼 무거워지고
+ * 개인 지시가 공짜 이득을 낸다.
  */
-export const ABILITY_LOG_SLOPE = 0.017;
+export const ABILITY_LOG_SLOPE = 0.019;
 export const ABILITY_PIVOT = 72;
 
 /** 존의 XI 가중 평균(평점) → 전력. 축에서는 그대로다 */
@@ -595,6 +713,13 @@ function buildZones(
   delta: ZoneDelta,
   counter: { attack: number; midfield: number; defense: number },
   readEffective: (slot: LineupSlot) => number = effectiveOf,
+  /**
+   * 능력 곡선(`abilityCurve`)을 태울 것인가 — **점유를 재는 자리만 끈다.**
+   * 곡선은 능력 차를 **득점**으로 옮기는 눈금이고(§1.1), 점유는 그보다 훨씬 평평하다
+   * (최상위도 한 시즌 평균 65%). 켠 값을 점유에 그대로 물리면 같은 격차를 두 번 세고,
+   * 중원을 지운 개인 지시가 슈팅 총량을 되레 올린다.
+   */
+  curved = true,
 ): ZoneStrength {
   const of = (g: PositionGroup) => slots.filter((s) => slotGroup(s) === g);
 
@@ -653,23 +778,26 @@ function buildZones(
    * 같은 값이 되어 "더 공격적으로"가 아무 일도 안 하게 된다.
    */
   const tacticShift = (raw: number) => 1 + TACTIC_SWING * Math.tanh(raw / TACTIC_SWING);
+  /** 능력 항 — 곡선은 여기까지다. 전술·상성·지시는 아래에서 곱으로 얹힌다 */
+  const zoneStrength = (kind: keyof typeof ZONE_CONTRIBUTION) =>
+    curved ? abilityCurve(zoneOf(kind)) : zoneOf(kind);
 
   const attack =
-    abilityCurve(zoneOf("attack")) *
+    zoneStrength("attack") *
     ZONE_BASELINE.attack *
     tacticShift(delta.attack + counter.attack) *
     fit *
     gapPenalty("FW") *
     shorthanded;
   const midfield =
-    abilityCurve(zoneOf("midfield")) *
+    zoneStrength("midfield") *
     ZONE_BASELINE.midfield *
     tacticShift(delta.midfield + counter.midfield) *
     fit *
     gapPenalty("MF") *
     shorthanded;
   const defense =
-    abilityCurve(zoneOf("defense")) *
+    zoneStrength("defense") *
     ZONE_BASELINE.defense *
     tacticShift(delta.defense + counter.defense) *
     fit *
@@ -780,6 +908,11 @@ export interface PacketOptions {
    * 킥오프·시험은 비워 둔다.
    */
   lead?: number;
+  /**
+   * 이 대진이 더비인가 — **표가 정하는 사실**이라 엔진이 넘긴다 (team.md §3.2).
+   * `keyPoints` 첫 줄의 컨텍스트 태그와 양 팀 강도 배수가 여기서 선다.
+   */
+  derby?: { name: string; heat: number };
 }
 
 /** 경기 중 지시의 소화율 보정 — 남은 거리의 절반을 메운다 (0.82 → 0.91) */
@@ -822,6 +955,25 @@ export function gameStateExposure(side: MatchSide, lead: number | undefined): nu
 
 const sigmoid = (z: number): number => 1 / (1 + Math.exp(-z));
 const logit = (p: number): number => Math.log(p / (1 - p));
+
+/**
+ * 더비의 사실 태그 — 이름은 카탈로그의 고유 명사라 `text`가 들고, 열기는 수치다.
+ * 문장은 언제나처럼 읽는 쪽의 렌더러 하나가 만든다 (`packetTagText`).
+ */
+function derbyTag(derby: { name: string; heat: number }): PacketTag {
+  return {
+    source: "context",
+    code: "derby",
+    // 어느 쪽에도 이롭지 않다 — 더비는 두 팀이 함께 지는 조건이다
+    favours: null,
+    // 대진은 감독의 눈과 무관한 공개 사실이다
+    sharp: true,
+    playerIds: [],
+    values: { heat: derby.heat },
+    flags: [],
+    text: derby.name,
+  };
+}
 
 /**
  * 지역 플랜이 공격 배분을 그 레인으로 끌어오는 세기 — 의도가 무게를 정한다.
@@ -985,6 +1137,215 @@ function buildPlayerShotProfiles(
         expectedGoals: round4(expectedGoals),
       };
     });
+}
+
+// ── 죽은 공 — 열린 플레이와 **같은 총량 안의** 별도 채널 (match.md §1.4) ────────
+
+/**
+ * 팀 기대 슈팅 중 **죽은 공**(코너·프리킥)에서 나오는 몫 — ⚠️ 밸런스 값.
+ *
+ * 실제 1부의 슈팅 출처 분해가 근거다(코너 ~2.2 · 프리킥 ~1.5 / 팀당 12.5회).
+ * ⚠️ **위에 더하는 값이 아니라 안에서 옮기는 값이다** — 팀 기대 슈팅은 실제 1부의
+ * 슈팅 총량에 맞춰 세운 눈금이고 그 총량에는 코너 헤더도 페널티도 이미 들어 있다.
+ */
+export const SET_PIECE_SHOT_SHARE = 0.31;
+/**
+ * 경기당 페널티 — 양 팀 합. ⚠️ 밸런스 값. 실제 1부가 0.2~0.3회다.
+ *
+ * 두 팀의 몫을 **합이 1이 되도록 정규화**하므로 리그 빈도가 정확히 이 값이다 —
+ * 거칠기는 그 한 경기 안에서 누가 내주는가만 기울인다.
+ */
+export const PENALTY_PER_MATCH = 0.25;
+/** 대등한 제공권·평범한 키커가 올린 죽은 공 슛 하나의 기회 xG — ⚠️ 밸런스 값 */
+export const CORNER_XG_BASE = 0.08;
+/** 키커의 킥력이 죽은 공 질에 닿는 세기 — 킥력 90은 65보다 1.35배 */
+export const SET_PIECE_KICK_XG_LOGIT_WEIGHT = 0.45;
+/** 박스 안 제공권 우열이 죽은 공 질에 닿는 세기 */
+export const SET_PIECE_AERIAL_XG_LOGIT_WEIGHT = 0.5;
+/** 죽은 공 슛 중 코너에서 나온 몫 — 나머지가 프리킥 */
+export const CORNER_SHOT_SHARE = 0.58;
+/** 프리킥 슛 중 키커가 **직접** 차는 몫 (직접 프리킥 — 도움이 없다) */
+export const DIRECT_FREE_KICK_SHARE = 0.2;
+/** 팀 기대 슈팅 하나가 데려오는 코너 — 실제 1부의 팀당 10.5개 */
+export const CORNERS_PER_SHOT = 0.84;
+/** 경기당 파울 — 양 팀 합. 실제 1부가 21~22회다 */
+export const FOULS_PER_MATCH = 21;
+
+/**
+ * 한 팀이 90분에 범할 파울 — 카드와 같은 모양으로 **자기 강도에 비례한다**
+ * (`teamCardRate`). 나누는 2는 손잡이가 양 팀 합이라는 사실이지 눈금이 아니다.
+ */
+export function teamFoulRate(intensity: number): number {
+  return (FOULS_PER_MATCH / 2) * intensity;
+}
+
+/**
+ * 수비 라인의 거칠기가 페널티 헌납 몫을 기울이는 눈금.
+ * ⚠️ **두 팀 사이의 비로만 뜻을 갖는다** — 정규화되므로 중립점은 결과에 닿지 않는다.
+ */
+const PENALTY_ROUGH_SCALE = 40;
+/** 죽은 공에 올라가는 사람 수 — 우리 제공권을 재는 창 */
+const SET_PIECE_TARGETS = 4;
+/** 박스를 지키는 사람 수 — 골키퍼를 포함한다(공중볼은 그의 영역이다) */
+const SET_PIECE_DEFENDERS = 5;
+/** 킥력·제공권을 로그오즈로 옮기는 기준점과 눈금 — 슈팅 질의 그것과 같은 축 */
+const SET_PIECE_SKILL_PIVOT = 65;
+const SET_PIECE_SKILL_SCALE = 34;
+
+/** 상위 n명의 평균 — 죽은 공은 열한 명이 아니라 박스에 선 몇 명이 정한다 */
+function topMean(values: number[], take: number): number {
+  if (values.length === 0) return SET_PIECE_SKILL_PIVOT;
+  const sorted = [...values].sort((a, b) => b - a).slice(0, Math.max(1, take));
+  return sorted.reduce((sum, v) => sum + v, 0) / sorted.length;
+}
+
+/**
+ * 죽은 공을 차는 사람 — **지정이 먼저, 없으면 그라운드 위 최고**.
+ *
+ * 지정한 선수가 선발에 없으면(교체·퇴장·로테이션) 그 자리는 곧바로 기본값으로
+ * 돌아간다. 지정 자체는 전술에 남는다 — 한 경기의 명단이 감독의 지시를 지우지 않는다.
+ */
+function resolveTakers(
+  slots: readonly LineupSlot[],
+  designated?: SetPieceTakers,
+): SetPieceProfile["takers"] {
+  const onPitch = new Map(slots.map((slot) => [slot.player.id, slot] as const));
+  const field = slots.filter((slot) => slotGroup(slot) !== "GK");
+  const best = (read: (p: Player) => number): string | null => {
+    if (field.length === 0) return null;
+    return field.reduce((a, b) => (read(b.player) > read(a.player) ? b : a)).player.id;
+  };
+  const pick = (id: string | undefined, read: (p: Player) => number): string | null =>
+    id !== undefined && onPitch.has(id) ? id : best(read);
+  const kicking = (p: Player) => p.attributes.kicking;
+  return {
+    corner: pick(designated?.corner, kicking),
+    freeKick: pick(designated?.freeKick, kicking),
+    penalty: pick(designated?.penalty, penaltySkill),
+  };
+}
+
+/** 죽은 공 채널이 팀 판독값에 더하는 몫 — 프로필과 함께 한 번에 낸다 */
+interface SetPieceBuild {
+  profile: SetPieceProfile;
+  /** 죽은 공 + 페널티가 팀 기회 xG에 더하는 몫 */
+  chanceXg: number;
+  /** 같은 몫의 결정력 반영 기대 득점 */
+  expectedGoals: number;
+  /** 열린 플레이에 남는 비율 — 선수×경로 프로필을 여기에 맞춰 깎는다 */
+  openShare: number;
+}
+
+/**
+ * 페널티를 내줄 상대적 무게 — **공격 몫 × 거칠기**.
+ *
+ * 박스 안으로 자주 들어가는 팀이 자주 얻고(공격 몫 = 그 팀의 기대 슈팅), 거칠게
+ * 수비하는 팀이 자주 내준다(`aggression − composure`의 XI 평균). 이 값은
+ * 정규화되어 쓰이므로 **절대 크기에 뜻이 없다** — 두 팀 사이의 비만 남는다.
+ */
+function penaltyWeight(attackShots: number, defenders: readonly LineupSlot[]): number {
+  if (defenders.length === 0) return attackShots;
+  const rough =
+    defenders.reduce(
+      (sum, slot) => sum + slot.player.attributes.aggression - slot.player.attributes.composure,
+      0,
+    ) / defenders.length;
+  return attackShots * Math.exp(rough / PENALTY_ROUGH_SCALE);
+}
+
+/**
+ * 팀 하나의 죽은 공 프로필 — 발생률은 팀 기대 슈팅에서 떼어 내고, 질은 **키커의
+ * 킥력과 박스 안 제공권**이 정한다 (match.md §1.4).
+ */
+function buildSetPiece(
+  slots: readonly LineupSlot[],
+  oppSlots: readonly LineupSlot[],
+  teamShots: number,
+  penalties: number,
+  intensity: number,
+  designated?: SetPieceTakers,
+): SetPieceBuild {
+  const takers = resolveTakers(slots, designated);
+  const byId = new Map(slots.map((slot) => [slot.player.id, slot.player] as const));
+  const field = slots.filter((slot) => slotGroup(slot) !== "GK");
+
+  const deadBall = Math.max(0, SET_PIECE_SHOT_SHARE * teamShots);
+  const usedPenalties = Math.max(0, Math.min(penalties, Math.max(0, teamShots - deadBall)));
+  const openShare =
+    teamShots > 0 ? Math.max(0, (teamShots - deadBall - usedPenalties) / teamShots) : 1;
+
+  /** 죽은 공에 올라가는 사람들 vs 박스를 지키는 사람들 — 골키퍼는 지키는 쪽에 든다 */
+  const ourAerial = topMean(
+    field.map((slot) => slot.player.attributes.aerial),
+    SET_PIECE_TARGETS,
+  );
+  const theirAerial = topMean(
+    oppSlots.map((slot) => slot.player.attributes.aerial),
+    SET_PIECE_DEFENDERS,
+  );
+  const kickingOf = (id: string | null) =>
+    (id !== null ? byId.get(id)?.attributes.kicking : undefined) ?? SET_PIECE_SKILL_PIVOT;
+  // 코너와 프리킥을 다른 사람이 차면 둘의 평균이 그 팀의 배급 수준이다
+  const delivery = (kickingOf(takers.corner) + kickingOf(takers.freeKick)) / 2;
+  const meanXg = sigmoid(
+    logit(CORNER_XG_BASE) +
+      SET_PIECE_KICK_XG_LOGIT_WEIGHT *
+        ((delivery - SET_PIECE_SKILL_PIVOT) / SET_PIECE_SKILL_SCALE) +
+      SET_PIECE_AERIAL_XG_LOGIT_WEIGHT * ((ourAerial - theirAerial) / SET_PIECE_SKILL_SCALE),
+  );
+
+  /**
+   * 죽은 공을 마무리하는 사람은 **공중볼 가중 추첨**이라(match-engine) 기대값도 같은
+   * 가중으로 읽는다. 직접 프리킥 몫만 키커의 결정력이 선다.
+   */
+  const aerialSum = field.reduce((sum, slot) => sum + slot.player.attributes.aerial, 0);
+  const targetFinishing =
+    aerialSum > 0
+      ? field.reduce(
+          (sum, slot) => sum + slot.player.attributes.aerial * slot.player.attributes.finishing,
+          0,
+        ) / aerialSum
+      : FINISHING_PIVOT;
+  const directShare = (1 - CORNER_SHOT_SHARE) * DIRECT_FREE_KICK_SHARE;
+  const takerFinishing =
+    (takers.freeKick !== null ? byId.get(takers.freeKick)?.attributes.finishing : undefined) ??
+    FINISHING_PIVOT;
+  const finishing = (1 - directShare) * targetFinishing + directShare * takerFinishing;
+
+  const keeper = oppSlots.find((slot) => slotGroup(slot) === "GK")?.player ?? null;
+  const kicker = takers.penalty !== null ? (byId.get(takers.penalty) ?? null) : null;
+  /** 페널티의 성공률이 곧 그 슛의 xG다 — 결정력을 한 번 더 얹지 않는다 (shot-model.ts) */
+  const penaltyXg = kicker ? penaltyRate(kicker, keeper) : 0;
+
+  return {
+    profile: {
+      expectedShots: round4(deadBall),
+      meanXg: round4(meanXg),
+      penalties: round4(usedPenalties),
+      corners: round4(CORNERS_PER_SHOT * teamShots),
+      fouls: round4(teamFoulRate(intensity)),
+      takers,
+    },
+    chanceXg: deadBall * meanXg + usedPenalties * penaltyXg,
+    expectedGoals:
+      deadBall * finishingGoalProbability(meanXg, finishing) + usedPenalties * penaltyXg,
+    openShare,
+  };
+}
+
+/** 선수×경로 프로필을 **열린 플레이 몫으로** 깎는다 — 배분은 그대로, 크기만 줄인다 */
+function scaleProfiles(profiles: PlayerShotProfile[], share: number): PlayerShotProfile[] {
+  if (share === 1) return profiles;
+  return profiles.map((profile) => ({
+    ...profile,
+    routes: profile.routes.map((route) => ({
+      ...route,
+      expectedShots: round4(route.expectedShots * share),
+    })),
+    expectedShots: round4(profile.expectedShots * share),
+    chanceXg: round4(profile.chanceXg * share),
+    expectedGoals: round4(profile.expectedGoals * share),
+  }));
 }
 
 /**
@@ -1177,20 +1538,32 @@ export function buildStrengthPacket(
     return { zone, edge, size, homeValue: round2(hv), awayValue: round2(av) };
   });
 
-  /** 점유 — 중원 우위가 선수별 공격 노출과 체력 소모에 함께 들어간다. */
+  /**
+   * 점유 — 중원 우위가 선수별 공격 노출과 체력 소모에 함께 들어간다.
+   *
+   * ⚠️ **곡선을 태우지 않은 중원을 읽는다** (§1.1). 곡선은 능력 차를 득점으로 옮기는
+   * 눈금이라 점유에 그대로 물리면 같은 격차를 두 번 센다 — 전술·상성·지시는 그대로
+   * 실린다(같은 `buildZones`가 낸 값이다).
+   */
+  const rawMidfield = {
+    home: buildZones(homeXI, homeFit, homeDelta, counters.home, creationEffectiveOf, false)
+      .midfield,
+    away: buildZones(awayXI, awayFit, awayDelta, counters.away, creationEffectiveOf, false)
+      .midfield,
+  };
   const possession = {
-    home: possessionShare(
-      home.creationZones?.midfield ?? home.zones.midfield,
-      away.creationZones?.midfield ?? away.zones.midfield,
-    ),
-    away: possessionShare(
-      away.creationZones?.midfield ?? away.zones.midfield,
-      home.creationZones?.midfield ?? home.zones.midfield,
-    ),
+    home: possessionShare(rawMidfield.home, rawMidfield.away),
+    away: possessionShare(rawMidfield.away, rawMidfield.home),
   };
   const neutral = options.neutral === true;
-  // 경기장 노출 × 경기 상황 노출 — 둘 다 슈팅량에만 곱한다 (match.md §1.4)
-  const shotProfiles = {
+  /**
+   * **선수×경로 프로필이 먼저다** — 그 합이 팀 기대 슈팅이고, 죽은 공 채널은 그
+   * 총량 **안에서** 몫을 가져간다 (match.md §1.4). 그래서 여기서 한 번 통째로
+   * 세우고, 죽은 공을 떼어 낸 뒤 남은 비율로 프로필을 다시 깎는다.
+   *
+   * 경기장 노출 × 경기 상황 노출은 여기서 슈팅량에만 곱한다 (match.md §1.4).
+   */
+  const rawProfiles = {
     home: buildPlayerShotProfiles(
       { home, away },
       "home",
@@ -1206,19 +1579,78 @@ export function buildStrengthPacket(
       (neutral ? 1 : AWAY_SHOT_EXPOSURE) * gameStateExposure("away", options.lead),
     ),
   };
-  const sumProfiles = (side: MatchSide, read: (profile: PlayerShotProfile) => number) =>
-    shotProfiles[side].reduce((sum, profile) => sum + read(profile), 0);
+  const sumOf = (list: readonly PlayerShotProfile[], read: (p: PlayerShotProfile) => number) =>
+    list.reduce((sum, profile) => sum + read(profile), 0);
+  const teamShots = {
+    home: sumOf(rawProfiles.home, (profile) => profile.expectedShots),
+    away: sumOf(rawProfiles.away, (profile) => profile.expectedShots),
+  };
+  const derbyHeat = options.derby?.heat ?? 0;
+  const intensity = {
+    home: matchIntensity(homeIn.tactics, derbyHeat),
+    away: matchIntensity(awayIn.tactics, derbyHeat),
+  };
+  /**
+   * 페널티는 **양 팀 몫의 합이 `PENALTY_PER_MATCH`가 되도록 정규화한다** — 그래야
+   * 리그 빈도를 손잡이 하나가 쥐고, 거칠기는 그 한 경기 안에서 누가 내주는가만
+   * 기울인다 (match.md §1.4).
+   */
+  const penaltyWeights = {
+    home: penaltyWeight(teamShots.home, awayXI),
+    away: penaltyWeight(teamShots.away, homeXI),
+  };
+  const weightSum = penaltyWeights.home + penaltyWeights.away;
+  const penaltiesOf = (side: MatchSide) =>
+    weightSum > 0 ? (PENALTY_PER_MATCH * penaltyWeights[side]) / weightSum : 0;
+  const setPieceBuilds = {
+    home: buildSetPiece(
+      homeXI,
+      awayXI,
+      teamShots.home,
+      penaltiesOf("home"),
+      intensity.home,
+      homeIn.setPieceTakers,
+    ),
+    away: buildSetPiece(
+      awayXI,
+      homeXI,
+      teamShots.away,
+      penaltiesOf("away"),
+      intensity.away,
+      awayIn.setPieceTakers,
+    ),
+  };
+  const setPieces = {
+    home: setPieceBuilds.home.profile,
+    away: setPieceBuilds.away.profile,
+  };
+  /** 프로필은 이제 **열린 플레이만** 싣는다 — 죽은 공과 페널티는 위에서 떼어 냈다 */
+  const shotProfiles = {
+    home: scaleProfiles(rawProfiles.home, setPieceBuilds.home.openShare),
+    away: scaleProfiles(rawProfiles.away, setPieceBuilds.away.openShare),
+  };
+  /** 세 채널의 합 — 예전과 같은 한 값이라 "실측 슈팅 = 패킷 기대 슈팅"이 그대로 산다 */
   const expectedShots = {
-    home: round2(sumProfiles("home", (profile) => profile.expectedShots)),
-    away: round2(sumProfiles("away", (profile) => profile.expectedShots)),
+    home: round2(teamShots.home),
+    away: round2(teamShots.away),
   };
   const chanceXg = {
-    home: round2(sumProfiles("home", (profile) => profile.chanceXg)),
-    away: round2(sumProfiles("away", (profile) => profile.chanceXg)),
+    home: round2(
+      sumOf(shotProfiles.home, (profile) => profile.chanceXg) + setPieceBuilds.home.chanceXg,
+    ),
+    away: round2(
+      sumOf(shotProfiles.away, (profile) => profile.chanceXg) + setPieceBuilds.away.chanceXg,
+    ),
   };
   const expectedGoals = {
-    home: round2(sumProfiles("home", (profile) => profile.expectedGoals)),
-    away: round2(sumProfiles("away", (profile) => profile.expectedGoals)),
+    home: round2(
+      sumOf(shotProfiles.home, (profile) => profile.expectedGoals) +
+        setPieceBuilds.home.expectedGoals,
+    ),
+    away: round2(
+      sumOf(shotProfiles.away, (profile) => profile.expectedGoals) +
+        setPieceBuilds.away.expectedGoals,
+    ),
   };
 
   /**
@@ -1241,6 +1673,12 @@ export function buildStrengthPacket(
     text: plan.note,
   });
   const keyPoints: PacketTag[] = [
+    /**
+     * **컨텍스트가 첫 줄이다** — 전력에서 나오지 않았지만 판을 읽는 사람이 가장
+     * 먼저 알아야 하는 사실이다. 편이 없어(`favours: null`) 골의 원인 태그로
+     * 뽑히지 않는다 (match-engine `causesFor`).
+     */
+    ...(options.derby ? [derbyTag(options.derby)] : []),
     ...counters.notes,
     ...gapNotes(homeXI, "home"),
     ...gapNotes(awayXI, "away"),
@@ -1261,11 +1699,9 @@ export function buildStrengthPacket(
       expectedShots,
       chanceXg,
       shotProfiles,
+      setPieces,
       possession,
-      intensity: {
-        home: matchIntensity(homeIn.tactics),
-        away: matchIntensity(awayIn.tactics),
-      },
+      intensity,
     },
   };
 }

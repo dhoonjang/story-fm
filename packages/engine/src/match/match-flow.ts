@@ -4,18 +4,24 @@ import type {
   MatchEvent,
   MatchRecord,
   MatchSide,
+  MilestoneCode,
   RegionalBand,
   RegionalIntent,
   RegionalLane,
   ShootoutKick,
   StrengthPacket,
   TacticAssignment,
+  TacticsSpec,
 } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import {
   ageOf,
   FORMATION_CHANGE_COST,
   clampCondition,
+  clampSharpness,
+  compareMilestones,
+  matchMinutesOf,
+  milestonePhrase,
   naturalPositionOf,
   normalizeCauses,
   normalizePacket,
@@ -25,6 +31,7 @@ import {
   positionGroupOfPlayer,
   positionGrowthTarget,
   PROFICIENCY_MAX,
+  sharpnessOf,
   shootoutSettled,
   shootoutTally,
   storedProficiencyFor,
@@ -40,19 +47,25 @@ import {
   buildStrengthPacket,
   createLedger,
   GAP_THRESHOLD,
+  insertBeforeStop,
   mergeSubstitutions,
   planAiSubstitution,
   planAiTacticalShift,
+  sharpnessAfterMinutes,
   simulateSegment,
   subLimitsOf,
   type LineupSlot,
+  type MatchLedgerState,
   type SegmentPlan,
   type SegmentStop,
 } from "@story-fm/sim";
 import { matchesOn } from "../competition/calendar";
 import { applyMatchFinance } from "../club/finance";
+import { careerTotalsOf, settleMilestones } from "../squad/career";
 import { clampForm, formDeltaFromMatch } from "../squad/form";
+import { matchCaptainOf } from "../squad/hierarchy";
 import { applyResultMood } from "../squad/slump";
+import { derbyForMatch } from "../club/derby";
 import { managerTacticsOf } from "./manager-tactics";
 import { matchRating, type MatchRatingBrief, type PlayerMatchBrief } from "./ratings";
 import { grantManagerXP, IN_MATCH_FAMILIARITY_LOSS } from "../skills";
@@ -126,7 +139,7 @@ type Seat = Pick<TacticAssignment, "position"> &
   Partial<Pick<TacticAssignment, "point" | "roleId">>;
 
 /** 배치 + 선수 → 패킷 입력 슬롯. 온필드 id 목록으로 필터해 교체·퇴장을 반영한다 */
-function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[] {
+export function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[] {
   const assignments = new Map(assignmentsOf(state, teamId).map((a) => [a.playerId, a] as const));
   const squad = new Map(playersOf(state, teamId).map((p) => [p.id, p] as const));
   const worn = state.pendingMatch?.matchFatigue ?? {};
@@ -293,7 +306,7 @@ function reseatOnAiShape(state: GameState, teamId: string, slots: LineupSlot[]):
  * 경기 중에는 장부의 현재 온필드 명단으로 계산한다 (교체·퇴장 반영).
  */
 /** 그라운드에 선 선수의 개인 지시 — 교체로 나간 선수의 지시는 따라 나간다 */
-function directivesOnPitch(state: GameState, teamId: string, onPitch: readonly string[]) {
+export function directivesOnPitch(state: GameState, teamId: string, onPitch: readonly string[]) {
   return assignmentsOf(state, teamId)
     .filter((a) => a.directive && onPitch.includes(a.playerId))
     .map((a) => ({
@@ -358,6 +371,13 @@ function buildPacketFor(
           : tacticsOf(state, teamId).spec,
       managerTactics: managerTacticsOf(state, teamId),
       /**
+       * 죽은 공 키커 — **양 팀이 같은 문을 지난다**(§7). 지정이 없거나 그 선수가
+       * 그라운드에 없으면 패킷이 기본값(킥력·`penaltySkill` 최고)을 세운다.
+       */
+      ...(tacticsOf(state, teamId).setPieceTakers
+        ? { setPieceTakers: tacticsOf(state, teamId).setPieceTakers }
+        : {}),
+      /**
        * 감독의 **분석 능력** — 키포인트를 몇 개나 발견하는가 (key-points.ts).
        * 우리 팀에만 준다: 이 패킷은 감독이 보는 화면이고, 상대 벤치의 눈은 여기 없다.
        */
@@ -372,6 +392,11 @@ function buildPacketFor(
       directives: directivesOnPitch(state, teamId, ledgerSide.onPitch),
     };
   };
+  /**
+   * 더비도 **경기가 갖고 있는 사실**이다 (중립 경기장과 같은 결) — 표가 정하고
+   * 패킷이 컨텍스트 태그와 강도 배수로 싣는다 (match.md §1 · team.md §3.2).
+   */
+  const derby = derbyForMatch(match);
   return buildStrengthPacket(
     build(match.homeTeamId, pending.ledger.home),
     build(match.awayTeamId, pending.ledger.away),
@@ -380,6 +405,7 @@ function buildPacketFor(
       inMatch,
       // 구간마다 다시 세우므로 지금 스코어가 곧 다음 구간의 노출이다 (match.md §1.4)
       lead: pending.ledger.score.home - pending.ledger.score.away,
+      ...(derby ? { derby: { name: derby.name, heat: derby.heat } } : {}),
     },
   );
 }
@@ -388,7 +414,7 @@ function buildPacketFor(
  * 킥오프 라인업 조립 — 배치(starting)에서 가용 선수를 뽑고, 부상·정지로 빈 자리는
  * 같은 그룹 우선으로 자동 대체한다. GK 자리는 반드시 GK 그룹으로 채운다.
  */
-function assembleUserLineup(state: GameState): {
+export function assembleUserLineup(state: GameState): {
   onPitch: string[];
   bench: string[];
   replaced: string[];
@@ -598,6 +624,15 @@ export function startMatch(state: GameState): FlowResult {
       userIsHome ? userSideLedger : aiSideLedger,
       userIsHome ? aiSideLedger : userSideLedger,
     ),
+    /**
+     * **첫 휘슬에 선 열한 명** — 장부의 `onPitch`는 교체를 따라 움직이므로 여기서
+     * 한 번 뜬다. 경기가 끝나면 그대로 결과의 `homeStarters`가 되어 계약 지위가
+     * 부르는 출전을 재는 자가 된다 (people.md §5-2).
+     */
+    startingXI: {
+      home: [...(userIsHome ? userSideLedger : aiSideLedger).onPitch],
+      away: [...(userIsHome ? aiSideLedger : userSideLedger).onPitch],
+    },
     segment: 0,
     matchFatigue: {},
     casterHistory: [],
@@ -608,16 +643,30 @@ export function startMatch(state: GameState): FlowResult {
   state.pendingMatch = { ...opening, packet };
   state.phase = "match";
   const note = lineup.replaced.length > 0 ? ` (자동 대체: ${lineup.replaced.join(", ")})` : "";
+  /**
+   * **그 경기의 완장** (people.md §5-1) — 주장이 명단에 없으면 부주장이, 둘 다
+   * 없으면 명단 안 서열 최상위가 찬다. 승계가 일어났을 때만 알린다: 감독이 세운
+   * 주장이 그대로 섰다면 알릴 것이 없고, 그렇지 않은 날은 하프타임의 라커룸 계수를
+   * 그 사람이 정한다.
+   */
+  const squadIds = new Set([...lineup.onPitch, ...lineup.bench]);
+  const wornBy = matchCaptainOf(state, state.userTeamId, squadIds);
+  const captain = userPlayers(state).find((p) => p.isCaptain);
+  const inherited =
+    wornBy !== null && wornBy !== captain?.id ? (playerById(state, wornBy)?.name ?? null) : null;
+  if (inherited) pushNarrative(state, `${inherited}이(가) 완장을 찼다`, 2);
   return {
     ok: true,
     message: `킥오프 준비 완료${note}`,
     brief: {
       head: "킥오프 준비",
       // 감독이 짠 대로 섰으면 알릴 것은 머리줄뿐이다 — 대체가 있었을 때만 항목이 선다
-      items:
-        lineup.replaced.length > 0
+      items: [
+        ...(lineup.replaced.length > 0
           ? [item({ label: "자동 대체", text: briefNames(lineup.replaced) })]
-          : [],
+          : []),
+        ...(inherited ? [item({ label: "완장", text: inherited, note: "주장 결장" })] : []),
+      ],
     },
   };
 }
@@ -641,6 +690,90 @@ export function markEntered(state: GameState): void {
  */
 const CHASE_SHAPES: readonly Formation[] = ["4-3-3", "3-5-2"];
 const HOLD_SHAPES: readonly Formation[] = ["5-4-1"];
+
+/**
+ * **상대 벤치도 판단한다** — 스코어와 남은 시간을 보고 무게를 옮긴다 (match.md §2).
+ *
+ * 옮긴 값은 `pendingMatch`에만 남아 그 경기에서만 쓰인다(저장된 팀 전술은 불변).
+ * 그리고 **옮겼다는 사실은 사건으로 남는다** — 상태만 바꾸면 중계는 사건 목록에 없는
+ * 것을 쓸 수 없어 "상대가 던졌다"를 말할 수 없고, 감독은 팀 탭의 점 눈금을 정지점마다
+ * 외워 견줘야 그 승부수를 안다.
+ *
+ * @returns 실제로 옮겨졌을 때만 `tactical_shift` 한 줄 — 아니면 null
+ */
+function planAiShift(
+  state: GameState,
+  pending: PendingMatch,
+  ctx: {
+    aiSide: MatchSide;
+    /** 상대의 킥오프 전술 — 축 이동의 상한이 여기서 선다 */
+    aiKickoff: TacticsSpec;
+    /** 이 구간이 끝난 판 — 방금 들어간 골까지 반영된 장부다 */
+    ledger: MatchLedgerState;
+    plan: SegmentPlan;
+  },
+): MatchEvent | null {
+  const { aiSide, aiKickoff, ledger, plan } = ctx;
+  /**
+   * **종료 휘슬에는 판단하지 않는다.** 끝난 경기의 벤치 판단은 판에 닿지 않으므로
+   * 그 한 줄은 정보가 아니라 소음이다 (연장으로 가는 경기의 90분은 `full_time`이
+   * 아니라 `extra_time_start`이라 여기서 걸리지 않는다).
+   */
+  if (plan.stop === "full_time") return null;
+  const aiNow = pending.aiTactics ?? aiKickoff;
+  // 라커룸에서 판을 다시 짜는 자리 — 하프타임과 연장의 두 휴식이 같다
+  const shift = planAiTacticalShift(
+    aiSide,
+    aiNow,
+    aiKickoff,
+    ledger,
+    isBreak(plan.stop),
+    pending.aiShape !== undefined,
+  );
+  if (!shift) return null;
+  /**
+   * **모양은 여기서 고른다** — 구간 시뮬은 의도만 낸다. 후보 프리셋 중 지금
+   * 그라운드에 선 열한 명이 가장 잘 서는 것 하나이고, 그게 지금 모양과 같으면
+   * 아무 일도 일어나지 않는다 (`bestShapeFor`).
+   */
+  let reshaped: Formation | null = null;
+  if (shift.shape && !pending.aiShape) {
+    const onPitch = ledger[aiSide].onPitch
+      .map((id) => playerById(state, id))
+      .filter((p): p is GamePlayer => p !== null);
+    const candidates = shift.shape === "chase" ? CHASE_SHAPES : HOLD_SHAPES;
+    const picked = onPitch.length > 0 ? bestShapeFor(onPitch, candidates) : null;
+    if (picked && picked !== aiNow.formation) {
+      pending.aiShape = { formation: picked, intent: shift.shape };
+      reshaped = picked;
+    }
+  }
+  /**
+   * AI의 런타임 전술도 사람과 같은 스키마를 지난다. 모양 이름은 **갈아 깐 판에서**
+   * 온다 — 실제 좌표를 옮기지 않은 채 이름만 바꾸면 판은 그대로인데 장부의 모양만
+   * 달라져 화면과 갈라진다 (`reseatOnAiShape`가 그 좌표를 세운다).
+   */
+  const guarded = TacticsSpecSchema.safeParse({
+    ...aiNow,
+    ...shift.axes,
+    formation: pending.aiShape?.formation ?? aiNow.formation,
+  });
+  pending.aiTactics = guarded.success ? guarded.data : aiNow;
+  /**
+   * **전환이 실제로 일어났을 때만 사건이 선다.** 판단이 났어도 축이 상한에 걸려
+   * 그대로고 모양도 이미 갈아 낀 뒤라면 판 위에서 달라진 것이 없다 — 그 한 줄은
+   * 중계가 인용할 사실이 아니라 매 정지점의 잡음이 된다.
+   */
+  if (!shift.axes && !reshaped) return null;
+  return {
+    minute: plan.minute,
+    type: "tactical_shift",
+    team: aiSide,
+    // 선수의 사건이 아니라 팀의 판단이다 (match.md §4)
+    actors: [],
+    causes: [{ ...shift.note, flags: reshaped ? [`formation:${reshaped}`] : [] }],
+  };
+}
 
 /**
  * 다음 정지점까지 코어가 굴린다 — **경기 결과가 정해지는 단일 지점**.
@@ -719,7 +852,7 @@ export function advanceSegment(state: GameState): {
         ...squads.away.bench,
       ].map((p) => p.id),
     ),
-    // 개인 지시 — 체력 배율도 지시를 탄다 (무리한 지시는 더 지치게)
+    // 개인 지시 — 존 전력 밖에서 다리(무리한 지시는 더 지치게)와 카드(`careful`)가 탄다
     directives: {
       home: directivesOnPitch(state, match.homeTeamId, pending.ledger.home.onPitch),
       away: directivesOnPitch(state, match.awayTeamId, pending.ledger.away.onPitch),
@@ -752,7 +885,26 @@ export function advanceSegment(state: GameState): {
     pending.matchFatigue ?? {},
   );
   // 끼우는 순서의 규칙은 sim이 쥔다 — match-cli도 같은 것을 부른다 (segment.ts)
-  const events = mergeSubstitutions(plan.events, aiSubs);
+  const segmentEvents = mergeSubstitutions(plan.events, aiSubs);
+
+  /**
+   * **벤치의 판단은 이 구간이 끝난 판을 본다** — 방금 들어간 골 다음의 스코어다.
+   * 그래서 장부에 적기 전에 한 번 굴려 보고(`applyEvents`는 순수 함수다) 그 판으로
+   * 전환을 정한 뒤, 전환 사건을 끼워 **한 번에** 적는다. 적고 나서 끼우면 그 줄이
+   * 정지 사건 뒤에 서고, 하프타임에 붙은 감독의 교체가 창을 문다 (match.md §5).
+   */
+  const rolled = segmentEvents.length > 0 ? applyEvents(pending.ledger, segmentEvents) : null;
+  if (rolled && !rolled.ok) {
+    return { ok: false, plan: null, message: rolled.errors.join("\n") };
+  }
+  const afterSegment = rolled?.state ?? pending.ledger;
+  const shiftEvent = planAiShift(state, pending, {
+    aiSide,
+    aiKickoff,
+    ledger: afterSegment,
+    plan,
+  });
+  const events = shiftEvent ? insertBeforeStop(segmentEvents, shiftEvent) : segmentEvents;
 
   let message = `사건 없이 ${plan.minute}′까지 흘렀습니다`;
   if (events.length > 0) {
@@ -765,48 +917,6 @@ export function advanceSegment(state: GameState): {
   pending.segment = segment + 1;
   // 다음 구간이 이어받을 연속 시계 — 장부의 정수 분이 잘라 버린 소수 자리를 여기 남긴다
   pending.segmentClock = plan.clock;
-  /**
-   * **상대 벤치도 판단한다** — 스코어와 남은 시간을 보고 무게를 옮긴다.
-   * 이 값은 pendingMatch에만 남아 그 경기에서만 쓰인다 (저장된 팀 전술은 불변).
-   */
-  const aiNow = pending.aiTactics ?? aiKickoff;
-  // 라커룸에서 판을 다시 짜는 자리 — 하프타임과 연장의 두 휴식이 같다
-  const shift = planAiTacticalShift(
-    aiSide,
-    aiNow,
-    aiKickoff,
-    pending.ledger,
-    isBreak(plan.stop),
-    pending.aiShape !== undefined,
-  );
-  if (shift) {
-    /**
-     * **모양은 여기서 고른다** — 구간 시뮬은 의도만 낸다. 후보 프리셋 중 지금
-     * 그라운드에 선 열한 명이 가장 잘 서는 것 하나이고, 그게 지금 모양과 같으면
-     * 아무 일도 일어나지 않는다 (`bestShapeFor`).
-     */
-    if (shift.shape && !pending.aiShape) {
-      const onPitch = pending.ledger[aiSide].onPitch
-        .map((id) => playerById(state, id))
-        .filter((p): p is GamePlayer => p !== null);
-      const candidates = shift.shape === "chase" ? CHASE_SHAPES : HOLD_SHAPES;
-      const picked = onPitch.length > 0 ? bestShapeFor(onPitch, candidates) : null;
-      if (picked && picked !== aiNow.formation) {
-        pending.aiShape = { formation: picked, intent: shift.shape };
-      }
-    }
-    /**
-     * AI의 런타임 전술도 사람과 같은 스키마를 지난다. 모양 이름은 **갈아 깐 판에서**
-     * 온다 — 실제 좌표를 옮기지 않은 채 이름만 바꾸면 판은 그대로인데 장부의 모양만
-     * 달라져 화면과 갈라진다 (`reseatOnAiShape`가 그 좌표를 세운다).
-     */
-    const guarded = TacticsSpecSchema.safeParse({
-      ...aiNow,
-      ...shift.axes,
-      formation: pending.aiShape?.formation ?? aiNow.formation,
-    });
-    pending.aiTactics = guarded.success ? guarded.data : aiNow;
-  }
   accumulateFatigue((pending.matchFatigue ??= {}), plan.fatigue);
   // 피로가 쌓였으니 다음 구간의 전력이 달라진다 (교체·전술 변경과 같은 경로)
   refreshPacket(state);
@@ -1210,30 +1320,11 @@ export function buildRatingBrief(state: GameState): MatchRatingBrief | null {
   const ours = ledger.events.filter((e) => e.team === side);
   const goals = ours.filter((e) => e.type === "goal");
   /**
-   * 그라운드를 떠난 시각 — 교체의 [나가는 선수, 들어오는 선수] 짝과 **퇴장**이 같은
-   * 자격으로 출전 시간을 끊는다 (match.md §6). 퇴장을 세지 않으면 20′에 나간 선수도
-   * 90분으로 남아, LLM 채점이 "풀타임을 뛰고 퇴장까지 당한 선수"를 읽는다.
+   * 출전 시간 — 규칙은 도메인이 갖는다 (`matchMinutesOf`). 끝난 경기의 리포트·MOTM이
+   * **같은 함수**를 결과의 사건 목록에 대고 부르므로, 같은 선수의 출전 시간이 평점
+   * 판정과 화면에서 갈리지 않는다 (match.md §6).
    */
-  const wentOff = new Map<string, number>();
-  const cameOn = new Map<string, number>();
-  for (const e of ours) {
-    const [first, second] = e.actors;
-    if (e.type === "substitution") {
-      if (first) wentOff.set(first, e.minute);
-      if (second) cameOn.set(second, e.minute);
-    } else if (e.type === "red_card" && first) {
-      wentOff.set(first, Math.min(wentOff.get(first) ?? e.minute, e.minute));
-    }
-  }
-  /** 이 경기의 길이 — 연장을 치렀으면 120분이다 (출전 시간이 평점의 기준값이다) */
-  const FULL_TIME = wentToExtraTime(ledger) ? 120 : 90;
-  const minutesOf = (id: string): number => {
-    const on = cameOn.get(id);
-    const off = wentOff.get(id);
-    const from = on ?? 0;
-    const to = off ?? FULL_TIME;
-    return Math.max(0, Math.min(FULL_TIME, to) - Math.min(from, FULL_TIME));
-  };
+  const minutesOf = matchMinutesOf(ours, wentToExtraTime(ledger));
 
   const played = new Set<string>(ledger[side].onPitch);
   for (const e of ours) {
@@ -1317,6 +1408,49 @@ function seatOf(state: GameState, player: GamePlayer): string {
   if (recorded) return recorded;
   const assignment = assignmentsOf(state, player.teamId).find((a) => a.playerId === player.id);
   return assignment?.position ?? naturalPositionOf(player).position;
+}
+
+/**
+ * **주 포지션 묶음 밖 선발이 이만큼 이어지면 불만이 선다** (→ docs/data/people.md §5).
+ *
+ * 날이 아니라 경기로 세는 이유는 그것이 선수가 실제로 겪는 단위여서다 — 2주에 한
+ * 경기를 뛰는 선수와 사흘에 한 경기를 뛰는 선수에게 같은 날짜를 걸면 뒤쪽만 화를 낸다.
+ */
+export const OUT_OF_POSITION_RUN = 4;
+
+/**
+ * 자리 밖 기용을 한 경기 센다 — **묶음으로 잰다**(`positionGroupOf`): CB에서 FB로
+ * 옮긴 것과 CB에서 ST로 올린 것은 다른 일이다 (people.md §5).
+ *
+ * 이 눈금이 재는 것은 **그가 선발로 선 최근 경기들**이다. 벤치에 앉힌 경기가 사이에
+ * 끼어도 연속은 이어진다 — 로테이션 한 번이 값을 지우면 감독이 눈금을 껐다 켰다 할
+ * 수 있고, 그 선수가 실제로 겪는 것(내가 선발로 설 때마다 딴 자리다)과도 다르다.
+ *
+ * @param started 이 경기에 선발로 섰는가 — 아니면 **세지도 지우지도 않는다**
+ * @returns 이 경기에서 불만이 **새로 걸렸으면** true
+ */
+function trackOutOfPosition(state: GameState, player: GamePlayer, started: boolean): boolean {
+  if (!started) return false;
+  const seatGroup = positionGroupOf(seatOf(state, player));
+  // 묶음을 모르는 자리는 다르다고 보지 않는다 — 셀 수 없는 것을 방치로 적지 않는다
+  if (seatGroup === null || seatGroup === positionGroupOfPlayer(player)) {
+    // 0을 적지 않는다 — optional 필드라 비워 두면 세이브에 나가지 않는다
+    player.state.outOfPositionRun = undefined;
+    return false;
+  }
+  const run = (player.state.outOfPositionRun ?? 0) + 1;
+  player.state.outOfPositionRun = run;
+  // **문턱에 닿는 그 경기에서만** — `>=`로 걸면 5·6경기째마다 새 줄이 선다
+  if (run !== OUT_OF_POSITION_RUN) return false;
+  if (state.issues.some((i) => i.gamePlayerId === player.id)) return false;
+  state.issues.push({
+    gamePlayerId: player.id,
+    kind: "unhappy",
+    reason: "out-of-position",
+    count: run,
+    since: state.date,
+  });
+  return true;
 }
 
 /**
@@ -1404,6 +1538,25 @@ export function tacticalXpFor(taggedGoals: number): number {
 /** 경기 한 줄의 서사 무게 (1~5 눈금, `pushNarrative`) — 승리만 한 칸 위다 */
 const MATCH_SALIENCE_WIN = 4;
 const MATCH_SALIENCE_OTHER = 3;
+/**
+ * 그 경기가 세운 기록의 무게 — **결과 줄 아래다.** 기록은 승점을 바꾸지 않는
+ * 곁가지 사실이라, 결과와 같은 눈금에 두면 이긴 날의 기억이 "누가 100경기를
+ * 채웠다"가 된다. 2면 반감기 한 번(7일)에 그날의 새 소식에 자리를 내주고,
+ * 그 뒤로는 장부(`state.milestones`)와 선수 상세가 그 사실을 든다.
+ */
+const MATCH_SALIENCE_MILESTONE = 2;
+
+/** 마감이 모으는 기록 한 조각 — 누가 무엇을 세웠는지, 그뿐이다 */
+interface MilestoneNote {
+  name: string;
+  code: MilestoneCode;
+  value: number;
+}
+
+/** 기록 한 조각을 한 마디로 — 말은 도메인이 갖는다 (`milestonePhrase`) */
+function milestoneNote(m: MilestoneNote): string {
+  return `${m.name} ${milestonePhrase(m.code, m.value)}`;
+}
 
 /** 경기 후 반영 — 사건은 창발, 반영은 공식 (match.md §6) */
 export function finalizeMatch(state: GameState): MatchDigest {
@@ -1415,6 +1568,11 @@ export function finalizeMatch(state: GameState): MatchDigest {
   const brief = buildRatingBrief(state);
   /** 우리 경기 사건만 — 이 갈래가 대회 말풍선의 항목이 된다 */
   const digest: string[] = [];
+  /**
+   * 이 경기가 세운 기록 — 마감이 양 팀을 도는 동안 모았다가 마지막에 한 줄로 낸다.
+   * (담기는 것은 감독 팀 선수 것뿐이다 — game-state.md §3.4 ⚠️)
+   */
+  const milestoneNotes: MilestoneNote[] = [];
   /** 재정·다른 경기는 화면(재정·대회)이 이미 갖고 있다 — 모델만 읽는다 */
   const financeLines: string[] = [];
   const otherLines: string[] = [];
@@ -1452,6 +1610,15 @@ export function finalizeMatch(state: GameState): MatchDigest {
       return sum + (line ? read(line) : 0);
     }, 0);
 
+  /**
+   * 점유 — 진행 중이던 옛 세이브의 패킷에는 없을 수 있다. 없으면 **적지 않는다**:
+   * 0.5를 지어 적으면 그 경기 하나만 "완벽히 팽팽했던 경기"로 장부에 남는다.
+   */
+  const share = pending.packet?.guide.possession as { home?: number; away?: number } | undefined;
+  const possession =
+    typeof share?.home === "number" && typeof share.away === "number"
+      ? { home: share.home, away: share.away }
+      : null;
   // 결과를 MATCH에 기록하고 일정 엔트리를 닫는다
   const goalEvents = ledger.events.filter((e) => e.type === "goal");
   match.result = {
@@ -1462,6 +1629,8 @@ export function finalizeMatch(state: GameState): MatchDigest {
     assists: goalEvents.map((e) => (e.actors[1] ? `${e.team}:${e.actors[1]}` : "")),
     // 분도 같은 순서로 — 장부에 이미 있는 사실이라 버릴 이유가 없다
     goalMinutes: goalEvents.map((e) => e.minute),
+    // 어디서 나온 골인가 — 갈래를 잃은 옛 장부의 줄은 열린 플레이로 읽는다
+    goalOrigins: goalEvents.map((e) => e.shotOrigin ?? "open"),
     homeShots: statSum(homeLineup, (line) => line.shots),
     awayShots: statSum(awayLineup, (line) => line.shots),
     homeXg: statSum(homeLineup, (line) => line.xg),
@@ -1470,6 +1639,29 @@ export function finalizeMatch(state: GameState): MatchDigest {
     awayExpectedGoals: statSum(awayLineup, (line) => line.scoringExpectation),
     homeLineup,
     awayLineup,
+    // 선발은 킥오프에 떴다 — 뛴 사람 전부와 갈리는 자리다 (people.md §5-2)
+    ...(pending.startingXI
+      ? { homeStarters: pending.startingXI.home, awayStarters: pending.startingXI.away }
+      : {}),
+    /**
+     * **사건과 선수별 기록은 장부에서 결과로 건너온다** (match.md §4).
+     *
+     * 여기서 옮기지 않으면 `pendingMatch = null`과 함께 사라져, 끝난 경기에 남는
+     * 것은 스코어와 득점자뿐이다 — "그 경기 왜 졌지"를 되물을 자리가 없어지고
+     * 원인 태그가 달린 골도(전술 XP의 근거다) 다시 볼 수 없다.
+     *
+     * **자르지 않는다.** 몇 줄만 골라 남기면 그 기준이 두 번째 원본이 되고, 슛을
+     * 버리면 "슛 열여덟에 xG 2.3으로 진 경기"가 다시 사라진다. 세우는 것을 고르는
+     * 일은 읽는 쪽(`buildMatchReport`)의 몫이다.
+     */
+    events: [...ledger.events],
+    ...(ledger.stats ? { playerStats: { ...ledger.stats } } : {}),
+    /**
+     * 점유는 **패킷이 이미 계산해 둔 값**이다 — 경기 중 슈팅 노출과 체력 소모가
+     * 그 값으로 굴러갔으므로(§1.5) 결과에 적히는 것도 같은 값이어야 한다.
+     * 간이 시뮬도 자기 계산을 같은 칸에 적는다 (`core/tick.ts`).
+     */
+    ...(possession ? { possession } : {}),
     /**
      * 종료 휘슬에 서 있던 사람 — 명단은 뛴 사람 전부라 교체 아웃·퇴장이 섞여 있다.
      * 감독의 경기는 구간 시뮬이 연장까지 직접 가므로 여기서 쓰이지는 않지만,
@@ -1512,6 +1704,16 @@ export function finalizeMatch(state: GameState): MatchDigest {
   const anchorOfPlayer = new Map((brief?.players ?? []).map((p) => [p.playerId, p.anchor]));
 
   /**
+   * 이 경기에 **선발로 선 우리 선수** — 브리프가 상태를 바꾸기 전의 배치를 이미 읽었다.
+   * 자리 밖 기용(people.md §5)이 이 집합을 지난다.
+   */
+  const ourStarters = new Set(
+    (brief?.players ?? []).filter((p) => p.started).map((p) => p.playerId),
+  );
+  /** 이 경기에서 자리 밖 기용 문턱에 닿은 선수 — 마감이 끝난 뒤 한 줄로 낸다 */
+  const misplaced: string[] = [];
+
+  /**
    * **친선은 장부에 남지 않는다** (season.md §2의 닿는다/닿지 않는다 표).
    * 몸에 남는 것(체력·폼·부상·적응도)은 그대로 정산하고, 시즌 기록·징계처럼
    * 대회에 매달린 것만 건너뛴다.
@@ -1549,6 +1751,12 @@ export function finalizeMatch(state: GameState): MatchDigest {
     const result = scored > conceded ? "win" : scored === conceded ? "draw" : "loss";
     const cardsOf = (id: string, type: MatchEvent["type"]) =>
       events.filter((e) => e.type === type && e.actors[0] === id).length;
+    /**
+     * 출전 시간 — 브리프가 우리 선수에게 쓴 것과 **같은 함수**(`matchMinutesOf`)를
+     * 양 팀의 사건 목록에 대고 부른다. 갈라 두면 같은 경기가 우리 쪽과 상대 쪽에서
+     * 다른 분(分)으로 정산된다 (match.md §6).
+     */
+    const minutesOf = matchMinutesOf(events, wentToExtraTime(ledger));
 
     for (const id of lineupOf[which]) {
       const player = playerById(state, id);
@@ -1567,16 +1775,53 @@ export function finalizeMatch(state: GameState): MatchDigest {
           outcome: result,
         });
       if (!friendly) {
+        /**
+         * **문턱은 스탯을 얹기 전의 수로 센다** (match.md §6). 나중에 원장을 훑어
+         * 세면 "언제 넘었나"가 사라져 회견도 여운도 그 경기에 매달 수 없다.
+         *
+         * 적는 것은 **감독 팀 선수뿐이다** — 리그 전체를 적으면 시즌마다 수백 행이
+         * 들어와 우리 선수의 기록이 그 안에 묻히고 아무도 읽지 않는다
+         * (game-state.md §3.4 ⚠️). 친선은 바깥의 `!friendly`가 이미 막았다: 장부에
+         * 안 남는 경기가 문턱을 밀면 프리시즌만으로 100경기가 채워진다.
+         *
+         * ⚠️ **원장은 한 번만 훑는다.** `careerTotalsOf`가 `seasonStats` 전체를
+         * 지나므로 얹은 뒤의 수를 다시 물으면 마감 한 번이 스물두 명 × 두 번이
+         * 된다. 이번 경기 몫(출전 1 · 골 `scoredBy`)을 앞의 수에 더해 뒤의 수를
+         * 만든다 — 방금 우리가 얹을 그 값이다.
+         */
+        const before =
+          player.teamId === state.userTeamId ? careerTotalsOf(state, id, player.teamId) : null;
         const stat = ensureSeasonStat(state, id, player.teamId);
         stat.apps += 1;
         stat.goals += scoredBy;
         if (assists > 0) stat.assists = (stat.assists ?? 0) + assists;
         stat.ratingSum = (stat.ratingSum ?? 0) + rating;
+        if (before) {
+          const rows = settleMilestones(state, {
+            playerId: id,
+            teamId: player.teamId,
+            matchId: match.id,
+            before,
+            after: { apps: before.apps + 1, goals: before.goals + scoredBy },
+            goalsInMatch: scoredBy,
+          });
+          for (const row of rows) {
+            milestoneNotes.push({ name: player.name, code: row.code, value: row.value });
+          }
+        }
       }
       // 체력은 몸의 소모만 정산한다. 승패의 심리 효과는 formDeltaFromMatch가 맡는다.
       // 폼에 골을 따로 더하지 않는 이유도 같다 — 골은 이미 평점에 크게 들어가 있고,
       // 또 올리면 이중 계산이라 "골 넣은 선수만 즉시 최고 폼"이 된다.
       player.state.condition = clampCondition(player.state.condition - (drained[id] ?? 0));
+      /**
+       * **뛴 만큼 경기 감각이 오른다** (player.md §5.4) — 체력과 반대 방향의 축이다.
+       * 경기는 몸을 깎으면서 리듬을 돌려준다. 친선도 그대로 올린다(season.md §2):
+       * 몸에 남는 것은 대회가 아닌 경기도 남긴다.
+       */
+      player.state.sharpness = clampSharpness(
+        sharpnessAfterMinutes(sharpnessOf(player.state), minutesOf(id)),
+      );
       player.state.form = clampForm(player.state.form + formDeltaFromMatch(player, rating, result));
       /**
        * ⚠️ **전술 적응도는 여기서 올리지 않는다.** 경기가 그 선수에게 무엇을 남겼는지는
@@ -1584,6 +1829,16 @@ export function finalizeMatch(state: GameState): MatchDigest {
        * 출전 시간은 그 판정의 기준값으로만 넘어간다.
        */
       gainMatchProficiency(state, player, seatOf(state, player), entry?.id ?? null);
+      /**
+       * 자리 밖 기용 — **우리 선수에게만.** 남의 벤치가 누구를 어디에 세우는지는
+       * 우리 라커룸의 일이 아니다.
+       */
+      if (
+        player.teamId === state.userTeamId &&
+        trackOutOfPosition(state, player, ourStarters.has(player.id))
+      ) {
+        misplaced.push(player.name);
+      }
     }
 
     /**
@@ -1631,6 +1886,18 @@ export function finalizeMatch(state: GameState): MatchDigest {
   };
   settleSide("home");
   settleSide("away");
+
+  /**
+   * 자리 밖 기용 불만 — 여럿이 한 경기에 문턱에 닿아도 **줄은 하나다**.
+   * 이름이 화면을 채우면 스코어가 그 아래로 밀린다.
+   */
+  if (misplaced.length > 0) {
+    const line =
+      (misplaced.length === 1 ? misplaced[0]! : `${misplaced.length}명`) +
+      ` 자리 밖 기용 불만 — 주 포지션 밖 선발 ${OUT_OF_POSITION_RUN}경기째`;
+    digest.push(line);
+    pushNarrative(state, line, 3);
+  }
 
   // 경기 평점 — 기준선은 여기서 결정적으로 박고, 경기 후 LLM이 이 위에서 다듬는다.
   // **brief를 반드시 같은 함수로 만든다** — 앵커가 두 곳에서 따로 계산되면
@@ -1725,16 +1992,33 @@ export function finalizeMatch(state: GameState): MatchDigest {
   );
   digest.push(`최종 스코어 ${scoreline} — ${outcomeKo}`, ...messages);
   /**
+   * 이 경기가 세운 기록 — **말풍선도 서사 메모도 한 줄이다.**
+   *
+   * 선수마다 한 줄로 나누면 데뷔전 둘에 해트트릭이 겹친 날 서사 메모가 서너 줄이
+   * 된다. 하루 한도가 막아 주지도 않는다 — 한도는 `gm-event` 갈래에만 걸린다
+   * (records.ts `NarrativeKind`). 막는 것은 GM 스냅샷 쪽이라 더 나쁘다: 스냅샷은
+   * 무게×최신으로 상위 몇 건만 뽑으므로(`topNarrative`, people.md §9) 그 서너 줄이
+   * 그 주의 기억을 통째로 밀어낸다. **한 경기가 세운 기록은 한 사건이다** —
+   * 드문 것부터 이어 붙여 한 줄로 내고, 낱낱은 장부(`state.milestones`)에 그대로
+   * 남아 선수 상세·회견 카드·심경의 여운이 읽는다.
+   */
+  if (milestoneNotes.length > 0) {
+    const line = `기록: ${[...milestoneNotes].sort(compareMilestones).map(milestoneNote).join(" · ")}`;
+    pushNarrative(state, line, MATCH_SALIENCE_MILESTONE, "match");
+    digest.push(line);
+  }
+  /**
    * 연패·대패·연승이 라커룸에 남기는 것 (slump.ts) — **양 팀 모두.** 리그 전체와
    * 같은 규칙이다. 경기 결과가 장부에 쓰인 **뒤**라야 이번 경기가 연속 기록에
    * 들어간다. 남의 라커룸 소식은 브리핑하지 않는다 — 감독은 조회로 안다.
    */
+  const derbyHeat = derbyForMatch(match)?.heat ?? 0;
   for (const which of ["home", "away"] as const) {
     const diff =
       which === "home"
         ? ledger.score.home - ledger.score.away
         : ledger.score.away - ledger.score.home;
-    const runNote = applyResultMood(state, teamIdOf[which], diff, lineupOf[which]);
+    const runNote = applyResultMood(state, teamIdOf[which], diff, lineupOf[which], derbyHeat);
     if (runNote && which === side) digest.push(runNote);
   }
 

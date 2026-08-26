@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEMOTION_PATIENCE_DAYS,
   advanceTime,
+  demotionPatienceDaysOf,
   diffDays,
   groupOf,
   seasonStatOf,
@@ -90,8 +91,20 @@ describe("한 시즌의 2군 강등", () => {
      * 로테이션이 낳은 불만이 통째로 사라진다.
      */
     const grieved = new Map<string, string>(); // id → 걸린 날
+    /**
+     * 강등 밴드의 분모를 흔드는 이웃 — **먼저 걸린 불만은 다음 불만을 막는다**
+     * (people.md §5). 지위 대비 출전이 낳는 `minutes` 불만이 로테이션 자원에 먼저
+     * 걸리면 그 선수의 강등 불만은 영영 서지 않으므로, 같은 자리에서 함께 센다.
+     */
+    const otherGrieved = new Map<string, Set<string>>();
     function sample(): void {
       for (const issue of state.issues) {
+        if (issue.reason === "minutes" || issue.reason === "promise") {
+          const seen = otherGrieved.get(issue.reason) ?? new Set<string>();
+          seen.add(`${issue.gamePlayerId}:${issue.since}`);
+          otherGrieved.set(issue.reason, seen);
+          continue;
+        }
         if (issue.reason !== "demotion") continue;
         if (!grieved.has(issue.gamePlayerId)) grieved.set(issue.gamePlayerId, issue.since);
       }
@@ -122,8 +135,21 @@ describe("한 시즌의 2군 강등", () => {
     expect(finished).toBe(true);
 
     const neglectedGrieved = [...grieved.keys()].filter((id) => neglected.has(id));
-    const firstWait = Math.min(
-      ...neglectedGrieved.map((id) => diffDays(neglected.get(id)!, grieved.get(id)!)),
+    const waits = neglectedGrieved.map((id) => diffDays(neglected.get(id)!, grieved.get(id)!));
+    const firstWait = Math.min(...waits);
+    /**
+     * 문턱은 이제 **그 사람의 것**이다 (people.md §6) — 날짜로 재면 밴드가 원형 추첨을
+     * 따라간다. 대신 각자의 문턱을 넘고 실제로 걸리기까지 밀린 날을 잰다: 판정이
+     * 주에 한 번이라 0~6일이고, 음수면 문턱을 지키지 않고 걸린 것이다.
+     */
+    const patienceOf = (id: string) =>
+      demotionPatienceDaysOf(
+        state,
+        userPlayers(state).find((p) => p.id === id)!,
+      );
+    const thresholds = [...neglected.keys()].map(patienceOf);
+    const slack = neglectedGrieved.map(
+      (id) => diffDays(neglected.get(id)!, grieved.get(id)!) - patienceOf(id),
     );
 
     const readings: Readings<typeof DEMOTION_GRIEVANCE> = {
@@ -133,13 +159,20 @@ describe("한 시즌의 2군 강등", () => {
       "방치한 핵심 자원": neglected.size,
       "방치 끝에 불만이 걸린 수": neglectedGrieved.length,
       "첫 방치 불만까지 걸린 날": Number.isFinite(firstWait) ? firstWait : Number.NaN,
+      "방치 자원의 문턱 폭": Math.max(...thresholds) - Math.min(...thresholds),
+      "제 문턱을 넘고 밀린 날": slack.length > 0 ? Math.max(...slack) : Number.NaN,
       "시즌 강등발 불만 건수": grieved.size,
+      "시즌 출전 불만 건수": otherGrieved.get("minutes")?.size ?? 0,
+      "시즌 약속 파기 건수": otherGrieved.get("promise")?.size ?? 0,
     };
     console.log(
       reportOf(
         DEMOTION_GRIEVANCE,
         readings,
-        `시드 42 · 문턱 ${DEMOTION_PATIENCE_DAYS}일 · 복귀 ${ROTATION_RETURN_DAYS}일 · ${state.date}`,
+        `시드 42 · 기준 문턱 ${DEMOTION_PATIENCE_DAYS}일(원형 배수 전) · 방치 셋의 문턱 ${thresholds
+          .slice()
+          .sort((a, b) => a - b)
+          .join("·")}일 · 복귀 ${ROTATION_RETURN_DAYS}일 · ${state.date}`,
       ),
     );
     expect(outOfBand(DEMOTION_GRIEVANCE, readings)).toEqual([]);

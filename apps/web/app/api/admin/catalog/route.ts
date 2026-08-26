@@ -32,6 +32,9 @@ const AddSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "출생년월일 형식(YYYY-MM-DD)이 올바르지 않습니다"),
   position: z.string().min(1),
+  /** 국적 — 협회 코드. 비우면 카탈로그가 그 클럽 협회로 세운다 */
+  nationality: z.string().length(3).optional(),
+  secondNationality: z.string().length(3).optional(),
   // 능력치 16축 — 도메인 상수에서 펼친다. `Record<string, …>`으로 적으면 추론이
   // 색인 서명으로 뭉개져 파싱 결과에서 축 이름이 통째로 사라진다
   ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, attr])) as Record<

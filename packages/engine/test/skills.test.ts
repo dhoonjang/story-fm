@@ -39,6 +39,8 @@ import {
   startingIdsOf,
   takeEdits,
   setCaptain,
+  leaderGroupOf,
+  LEADER_GROUP_SIZE,
   setLineup,
   setPlayerInstruction,
   setPlayerPosition,
@@ -120,6 +122,43 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
     expect(targetHigh.state.form - highBefore).toBeGreaterThanOrEqual(
       target.state.form - lowBefore,
     );
+  });
+
+  /**
+   * 라커룸 계수 — 완장을 어디에 채웠는지가 **장부에서 갈리는** 자리다
+   * (people.md §5-1 · career.md §2). 이 값이 죽으면 주장 지명은 다시 서사에서만
+   * 뜻을 갖는 결정이 된다.
+   */
+  it("리더십 80인 라커룸과 30인 라커룸이 같은 팀토크에서 다른 폭을 낸다", () => {
+    const play = (leadership: number) => {
+      const state = createTestGame();
+      state.manager.attributes.leadership = 60; // 감독 계수는 양쪽이 같다
+      for (const p of userPlayers(state)) p.attributes.leadership = leadership;
+      const target = userPlayers(state)[0]!;
+      const before = target.state.form;
+      const result = applyTeamTalk(state, { occasion: "pre", outcome: "inspired", intensity: 3 });
+      return { gain: target.state.form - before, result };
+    };
+    const strong = play(80);
+    const weak = play(30);
+    expect(strong.gain).toBeGreaterThan(weak.gain);
+    // **폭이 왜 그만큼이었는지가 그 자리에 남는다** — 숫자만 돌려주면 근거가 없다
+    const room = strong.result.brief?.items.find((i) => i.label === "라커룸");
+    expect(room?.text).toMatch(/^×1\.\d\d$/);
+    expect(room?.note).toContain("리더십");
+  });
+
+  it("잘 통하는 라커룸에서는 어긋난 말도 그만큼 크게 울린다 — 계수는 부호를 가리지 않는다", () => {
+    const drop = (leadership: number) => {
+      const state = createTestGame();
+      state.manager.attributes.leadership = 60;
+      for (const p of userPlayers(state)) p.attributes.leadership = leadership;
+      const target = userPlayers(state)[0]!;
+      const before = target.state.form;
+      applyTeamTalk(state, { occasion: "pre", outcome: "backfired", intensity: 3 });
+      return target.state.form - before;
+    };
+    expect(drop(80)).toBeLessThan(drop(30));
   });
 
   it("한 번의 말이 움직이는 폭엔 한도가 있다 — 면담 ±8 (overview §7)", () => {
@@ -636,7 +675,7 @@ describe("주장·전술·개인 지시", () => {
     const state = createTestGame();
     const before = userPlayers(state).find((p) => p.isCaptain)!;
     const next = userPlayers(state).find((p) => !p.isCaptain)!;
-    expect(setCaptain(state, next.id).ok).toBe(true);
+    expect(setCaptain(state, { playerId: next.id }).ok).toBe(true);
     expect(next.isCaptain).toBe(true);
     expect(before.isCaptain).toBe(false);
     expect(userPlayers(state).filter((p) => p.isCaptain)).toHaveLength(1);
@@ -648,18 +687,82 @@ describe("주장·전술·개인 지시", () => {
     first!.state.condition = 70;
     second!.state.condition = 70;
 
-    expect(setCaptain(state, first!.id).ok).toBe(true);
+    expect(setCaptain(state, { playerId: first!.id }).ok).toBe(true);
     expect(first!.state.condition).toBe(74);
     expect(first!.state.captainedOn).toBe(state.date);
-    expect(setCaptain(state, second!.id).ok).toBe(true);
+    expect(setCaptain(state, { playerId: second!.id }).ok).toBe(true);
     expect(second!.state.condition).toBe(74);
 
     // 둘을 번갈아 지명하는 것만으로 둘 다 체력이 차던 자리
-    expect(setCaptain(state, first!.id).ok).toBe(true);
-    expect(setCaptain(state, second!.id).ok).toBe(true);
+    expect(setCaptain(state, { playerId: first!.id }).ok).toBe(true);
+    expect(setCaptain(state, { playerId: second!.id }).ok).toBe(true);
     expect(first!.state.condition).toBe(74);
     expect(second!.state.condition).toBe(74);
     expect(second!.isCaptain).toBe(true);
+  });
+
+  it("완장은 둘 — 부주장을 세우고, 주장으로 올리면 그 자리는 빈다", () => {
+    const state = createTestGame();
+    const [a, b] = userPlayers(state).filter((p) => !p.isCaptain);
+    expect(setCaptain(state, { vice: b!.id }).ok).toBe(true);
+    expect(b!.isViceCaptain).toBe(true);
+
+    // 부주장을 주장으로 — 한 사람이 완장 둘을 차지 않는다
+    expect(setCaptain(state, { playerId: b!.id }).ok).toBe(true);
+    expect(b!.isCaptain).toBe(true);
+    expect(b!.isViceCaptain).not.toBe(true);
+
+    // 주장을 부주장으로 세우려는 지시는 반려된다
+    expect(setCaptain(state, { vice: b!.id }).ok).toBe(false);
+
+    // 팀당 하나 — 새로 세우면 앞사람이 벗는다
+    expect(setCaptain(state, { vice: a!.id }).ok).toBe(true);
+    expect(userPlayers(state).filter((p) => p.isViceCaptain === true)).toHaveLength(1);
+    expect(setCaptain(state, { vice: null }).ok).toBe(true);
+    expect(userPlayers(state).filter((p) => p.isViceCaptain === true)).toHaveLength(0);
+  });
+
+  /**
+   * 서열은 저장하지 않는 파생이라 **같은 세이브가 언제나 같은 명단**을 내야 한다
+   * (people.md §5-1) — 동점이 id로 갈리지 않으면 화면과 판정이 다른 서열을 읽는다.
+   */
+  it("라커룸 서열은 리더십이 절반을 넘게 가르고, 완장은 서열을 이긴다", () => {
+    const state = createTestGame();
+    const squad = userPlayers(state).filter((p) => squadLevelOf(p) === "first");
+    // 완장을 비운 라커룸 — 순수한 서열만 남긴다 (시드 주장은 OVR이 세운 자리다)
+    for (const p of squad) {
+      p.attributes.leadership = 20;
+      p.isCaptain = false;
+    }
+    const top = squad[0]!;
+    top.attributes.leadership = 90;
+
+    const first = leaderGroupOf(state, state.userTeamId);
+    expect(first).toHaveLength(LEADER_GROUP_SIZE);
+    // 리더십 하나만 90이면 나머지가 어떻든 그 사람이 맨 위다 (지분 0.55)
+    expect(first[0]?.playerId).toBe(top.id);
+    // 두 번 불러도 같은 명단 — 동점은 id로 갈린다
+    expect(leaderGroupOf(state, state.userTeamId).map((r) => r.playerId)).toEqual(
+      first.map((r) => r.playerId),
+    );
+
+    // 서열 밖의 두 사람에게 완장을 채우면 둘 다 그룹에 들어온다
+    const outside = squad.filter((p) => !first.some((r) => r.playerId === p.id));
+    const [captain, vice] = outside;
+    expect(setCaptain(state, { playerId: captain!.id, vice: vice!.id }).ok).toBe(true);
+    const after = leaderGroupOf(state, state.userTeamId);
+    expect(after.find((r) => r.playerId === captain!.id)?.role).toBe("captain");
+    expect(after.find((r) => r.playerId === vice!.id)?.role).toBe("vice");
+    expect(after).toHaveLength(LEADER_GROUP_SIZE + 2);
+  });
+
+  it("2군으로 내리면 완장이 둘 다 빠진다 — 서열의 후보는 1군뿐이다", () => {
+    const state = createTestGame();
+    const vice = userPlayers(state).find((p) => !p.isCaptain)!;
+    expect(setCaptain(state, { vice: vice.id }).ok).toBe(true);
+    expect(setSquadLevel(state, { playerId: vice.id, level: "reserve" }).ok).toBe(true);
+    expect(vice.isViceCaptain).not.toBe(true);
+    expect(leaderGroupOf(state, state.userTeamId).some((r) => r.playerId === vice.id)).toBe(false);
   });
 
   it("전술: Zod 검증을 통과해야 반영된다", () => {
@@ -1663,9 +1766,11 @@ describe("자리 이동 — 교체 없이 선발 안에서만", () => {
 });
 
 describe("개인 훈련 — 팀 훈련 위에 한 선수만", () => {
-  /** 주전이 아닌 선수 — 개인 프로그램을 걸 대상 */
+  /** 주전이 아닌 1군 — 개인 프로그램을 걸 대상 (자리까지 걸 수 있는 층) */
   const spare = (state: GameState) =>
-    userPlayers(state).sort((a, b) => a.attributes.overall - b.attributes.overall)[0]!;
+    userPlayers(state)
+      .filter((p) => squadLevelOf(p) === "first")
+      .sort((a, b) => a.attributes.overall - b.attributes.overall)[0]!;
 
   it("축과 자리를 걸고 거둘 수 있다", () => {
     const state = createTestGame();
@@ -1687,6 +1792,51 @@ describe("개인 훈련 — 팀 훈련 위에 한 선수만", () => {
     const target = spare(state);
     expect(setPlayerTraining(state, { playerId: target.id, axis: "wizardry" }).ok).toBe(false);
     expect(setPlayerTraining(state, { playerId: target.id, position: "XX" }).ok).toBe(false);
+  });
+
+  /**
+   * 2군에는 축만 걸린다 — 자리를 올리는 문은 훈련 결산 하나뿐이고 2군은 결산을
+   * 받지 않는다 (season.md §2). 성공으로 답해 놓고 아무 데도 닿지 않는 것이 버그였다.
+   */
+  it("2군에는 자리를 걸 수 없고, 축은 걸린다", () => {
+    const state = createTestGame();
+    const reserve = reservePlayers(state, state.userTeamId)[0]!;
+
+    const rejected = setPlayerTraining(state, { playerId: reserve.id, position: "CB" });
+    expect(rejected.ok).toBe(false);
+    expect(state.playerTraining).toHaveLength(0);
+
+    // 반려는 요청 전체에 걸린다 — 축만 남기고 걸지 않는다
+    expect(
+      setPlayerTraining(state, { playerId: reserve.id, axis: "finishing", position: "CB" }).ok,
+    ).toBe(false);
+    expect(state.playerTraining).toHaveLength(0);
+
+    expect(setPlayerTraining(state, { playerId: reserve.id, axis: "finishing" }).ok).toBe(true);
+    expect(state.playerTraining[0]!.axis).toBe("finishing");
+  });
+
+  it("강등하면 자리 프로그램만 거둬지고 겨냥한 축은 남는다", () => {
+    const state = createTestGame();
+    const target = spare(state);
+    expect(
+      setPlayerTraining(state, { playerId: target.id, axis: "passing", position: "CB" }).ok,
+    ).toBe(true);
+
+    const moved = setSquadLevel(state, { playerId: target.id, level: "reserve" });
+    expect(moved.ok, moved.message).toBe(true);
+    expect(moved.message).toContain("전향 훈련은 거뒀습니다");
+    expect(state.playerTraining[0]!.position).toBeUndefined();
+    // 축은 월간 성장이 이어 받는다
+    expect(state.playerTraining[0]!.axis).toBe("passing");
+  });
+
+  it("자리만 걸린 선수를 강등하면 프로그램 자체가 걷힌다", () => {
+    const state = createTestGame();
+    const target = spare(state);
+    expect(setPlayerTraining(state, { playerId: target.id, position: "CB" }).ok).toBe(true);
+    expect(setSquadLevel(state, { playerId: target.id, level: "reserve" }).ok).toBe(true);
+    expect(state.playerTraining).toHaveLength(0);
   });
 });
 

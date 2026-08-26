@@ -1,5 +1,6 @@
 import {
   CAPTAIN_ROLE_LABEL,
+  LEADER_ROLE_LABEL,
   CharacterMemorySchema,
   HEAD_COACH_ROLE_LABEL,
   normalizeSpeaker,
@@ -401,6 +402,28 @@ export const OWNER_ARCHETYPE_LABELS = OWNER_ARCHETYPES.map((a) => a.label);
 export const HEAD_COACH_ARCHETYPES = COACH_ARCHETYPES.map((a) => a.label);
 
 /**
+ * 수석코치 원형 **키 → 라벨** 전수 — 키는 원형이 무엇을 먼저 보는지 가르는 축이고
+ * (people.md §7-1), 라벨은 세이브에 남는 것이다. 둘을 잇는 표가 여기 하나다.
+ */
+export const COACH_ARCHETYPE_LABELS: Readonly<Record<string, string>> = Object.fromEntries(
+  COACH_ARCHETYPES.map((a) => [a.key, a.label]),
+);
+
+/**
+ * 저장된 원형 **라벨 → 키**.
+ *
+ * 세이브에 남는 것은 `"데이터 분석가형"` 같은 라벨이다(`generateHeadCoach`가 키를
+ * 버리고 라벨만 적는다 — 페르소나는 사람이 읽는 데이터라서다). 그런데 코치가 무엇을
+ * 먼저 보는지 가르는 표는 **키**로 갈리므로, 그 사이를 여기서 되짚는다.
+ *
+ * 표에 없는 라벨은 `null`이다 — 옛 세이브가 사라진 원형을 들고 있어도 조용히 빈손이
+ * 되고, 다른 코치의 눈이 대신 서지는 않는다.
+ */
+export function coachArchetypeKeyOf(persona: Pick<Persona, "archetype">): string | null {
+  return COACH_ARCHETYPES.find((a) => a.label === persona.archetype)?.key ?? null;
+}
+
+/**
  * 타 팀 감독 원형 — **어떤 축구로 이기려는 사람이고, 마이크 앞에서 무엇을 말하는가.**
  *
  * 수석코치(감독을 돕는 사람)·구단주(감독을 고용한 사람)와 자리가 다르다: 이 사람들은
@@ -574,6 +597,7 @@ interface SpeakerSource {
     name: string;
     teamId: string;
     isCaptain?: boolean;
+    isViceCaptain?: boolean;
     /** 이름난 현역 판정용 — 없으면(축약 픽스처) 이름난 현역으로 서지 않는다 */
     attributes?: { overall: number };
   }>;
@@ -666,11 +690,17 @@ function collectSpeakers(state: SpeakerSource): Map<string, SpeakerRole | null> 
     });
   }
 
-  // 우리 선수단 — 주장만 직책을 글자로 얻고, 나머지는 아이콘으로만 선다
+  /**
+   * 우리 선수단 — **완장만 직책을 글자로 얻고**, 나머지는 아이콘으로만 선다.
+   * 부주장도 같은 아이콘을 쓴다: 그림이 가리키는 것은 완장이고, 둘 중 어느
+   * 자리인지는 글자가 말한다 (people.md §5-1).
+   */
   const squad = (state.players ?? []).filter((p) => p.teamId === state.userTeamId);
   for (const player of squad) {
     if (player.isCaptain === true) put(player.name, { kind: "captain", label: CAPTAIN_ROLE_LABEL });
-    else put(player.name, { kind: "player" });
+    else if (player.isViceCaptain === true) {
+      put(player.name, { kind: "captain", label: LEADER_ROLE_LABEL.vice });
+    } else put(player.name, { kind: "player" });
   }
 
   // 협상 테이블의 상대 선수 — 남의 팀이지만 지금 대화에 앉아 있다.

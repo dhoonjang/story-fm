@@ -12,19 +12,24 @@ import {
   cupCatalogById,
   domesticCupById,
   financeOf,
-  groupOf,
+  leaderGroupOf,
   isFriendly,
   leagueOfTeamIn,
   MINI_WORLD,
   playersOf,
   quickSimulate,
+  declareRetirements,
   recordLeagueHistory,
+  retirementDeclarationDate,
+  retirementJudgeDate,
+  retirementVerdict,
   reviewSeason,
   seasonAwards,
   teamsOfLeagueIn,
   transitionSeason,
   userPlayers,
   weeklyWagesOf,
+  withdrawRetirement,
   type GameState,
 } from "@story-fm/engine";
 import { createMiniGame, createTestGame, playFullSeason, simSquad } from "./helpers";
@@ -320,15 +325,35 @@ describe("시즌 전환 (season.md §6)", () => {
     expect(state).toEqual(before);
   });
 
-  it("주장이 은퇴하면 새 주장이 지명된다", () => {
+  it("주장이 은퇴하면 부주장이 완장을 잇는다 — 서열 최상위보다 먼저다", () => {
     const state = createTestGame(5);
     const captain = userPlayers(state).find((p) => p.isCaptain)!;
+    /**
+     * 서열 2위를 부주장으로 — 1위가 아닌 사람이 완장을 이어야 "부주장이 먼저"가
+     * 증명된다. 리더 그룹 안에서 고르는 것은 그래야 시즌을 넘겨도 남아 있어서다
+     * (명단 끝의 선수는 롤오버의 계약 만료로 사라질 수 있다).
+     */
+    const vice = userPlayers(state).find(
+      (p) => p.id === leaderGroupOf(state, state.userTeamId)[1]?.playerId,
+    )!;
+    vice.isViceCaptain = true;
     captain.birthdate = "1988-01-01"; // 강제 은퇴
     transitionSeason(state);
     const captains = userPlayers(state).filter((p) => p.isCaptain);
     expect(captains).toHaveLength(1);
-    expect(captains[0]?.id).not.toBe(captain.id);
-    expect(groupOf(captains[0]!)).not.toBe("GK");
+    expect(captains[0]?.id).toBe(vice.id);
+    // 올라간 자리는 비운다 — 한 사람이 완장 둘을 차지 않는다
+    expect(captains[0]?.isViceCaptain).not.toBe(true);
+  });
+
+  it("부주장이 없으면 서열 최상위가 완장을 받는다", () => {
+    const state = createTestGame(5);
+    const captain = userPlayers(state).find((p) => p.isCaptain)!;
+    captain.birthdate = "1988-01-01"; // 강제 은퇴
+    transitionSeason(state);
+    const next = userPlayers(state).find((p) => p.isCaptain)!;
+    expect(next.id).not.toBe(captain.id);
+    expect(leaderGroupOf(state, state.userTeamId)[0]?.playerId).toBe(next.id);
   });
 });
 
@@ -338,6 +363,137 @@ describe("시즌 전환 (season.md §6)", () => {
  * 분데스리가 17위는 **강등**인데 보드는 "잔류 충족"으로 읽어 평판 +8과 `survivor`를
  * 줬고, 34라운드 리그에 `invincible`(38경기)은 있을 수 없었다.
  */
+/**
+ * 은퇴 — **1월의 예고가 명단을 정하고 7월의 전환은 집행만 한다** (season.md §6).
+ * 문턱과 되돌림은 화면에 보이지 않는 규칙이라 여기서 잰다.
+ */
+describe("은퇴 — 예고와 집행 (season.md §6)", () => {
+  /** 판정일(다음 시즌 개막)에 이 나이가 되는 생일 — 시즌 1의 판정일은 2027년 8월이다 */
+  const birthFor = (age: number) => `${2027 - age}-01-01`;
+  const state = createTestGame(5);
+  const judgeDate = retirementJudgeDate(state.season);
+
+  const verdict = (
+    age: number,
+    overall: number,
+    read: { apps: number; expiring: boolean } = { apps: 20, expiring: false },
+  ) => {
+    const player = { ...userPlayers(state)[0]! };
+    player.birthdate = birthFor(age);
+    player.attributes = { ...player.attributes, overall };
+    return retirementVerdict(player, judgeDate, read);
+  };
+
+  it("나이·기량·출전의 세 문턱에서 갈린다", () => {
+    // 서른다섯은 종합도 계약도 보지 않는다
+    expect(verdict(35, 90)).toBe("age");
+    expect(verdict(34, 90)).toBeNull();
+    // 서른셋부터 종합의 눈금을 탄다 (RETIRE_OVERALL = 68)
+    expect(verdict(33, 67)).toBe("decline");
+    expect(verdict(33, 68)).toBeNull();
+    expect(verdict(32, 40), "서른둘은 아무리 낮아도 그만두지 않는다").toBeNull();
+    // 뛰지 않은 베테랑의 계약 만료는 자유이적이 아니라 은퇴다 (RETIRE_IDLE_APPS = 5)
+    expect(verdict(34, 75, { apps: 4, expiring: true })).toBe("idle");
+    expect(verdict(34, 75, { apps: 5, expiring: true })).toBeNull();
+    expect(verdict(34, 75, { apps: 0, expiring: false }), "계약이 남았으면 아니다").toBeNull();
+    expect(verdict(32, 75, { apps: 0, expiring: true }), "서른둘은 아직 시장이 있다").toBeNull();
+  });
+
+  it("1월에 예고가 서고, 7월 전환이 그 명단 그대로 집행한다", () => {
+    const game = createTestGame(5);
+    const leaving = userPlayers(game)[0]!;
+    leaving.birthdate = birthFor(33);
+    leaving.attributes.overall = 60;
+    const staying = userPlayers(game)[1]!;
+    staying.birthdate = birthFor(30);
+    staying.attributes.overall = 60;
+
+    const digest: string[] = [];
+    declareRetirements(game, digest);
+
+    expect(leaving.state.retiringAfterSeason?.reason).toBe("decline");
+    expect(staying.state.retiringAfterSeason).toBeUndefined();
+    expect(digest.some((d) => d.includes(leaving.name))).toBe(true);
+
+    const declared = game.players.filter((p) => p.state.retiringAfterSeason).map((p) => p.id);
+    expect(declared).toContain(leaving.id);
+
+    transitionSeason(game);
+
+    for (const id of declared) {
+      expect(
+        game.players.find((p) => p.id === id),
+        id,
+      ).toBeUndefined();
+    }
+    expect(game.players.find((p) => p.id === staying.id)).toBeTruthy();
+  });
+
+  it("예고 없이 그만두는 것은 나이뿐이다 — 기량은 다음 1월을 기다린다", () => {
+    const game = createTestGame(5);
+    const declining = userPlayers(game)[0]!;
+    declining.birthdate = birthFor(34);
+    declining.attributes.overall = 50;
+
+    transitionSeason(game); // 1월을 지나지 않았다 (tick 없이 전환만)
+
+    expect(
+      game.players.find((p) => p.id === declining.id),
+      "예고 없이 사라졌다",
+    ).toBeTruthy();
+  });
+
+  it("은퇴한 우리 선수는 명부에 남는다 — 남의 팀 은퇴는 남기지 않는다", () => {
+    const game = createTestGame(5);
+    const ours = userPlayers(game)[0]!;
+    ours.birthdate = birthFor(36);
+    const rivalTeam = game.teams.find((t) => isClubTeam(t.id) && t.id !== game.userTeamId)!;
+    const theirs = playersOf(game, rivalTeam.id)[0]!;
+    theirs.birthdate = birthFor(36);
+
+    transitionSeason(game);
+
+    const row = (game.retired ?? []).find((r) => r.gamePlayerId === ours.id);
+    expect(row?.name).toBe(ours.name);
+    expect(row?.teamId).toBe(game.userTeamId);
+    expect(row?.season).toBe(1);
+    expect(row?.reason).toBe("age");
+    expect(row?.on).toBe(game.calendar.preseasonStart);
+    expect((game.retired ?? []).some((r) => r.gamePlayerId === theirs.id)).toBe(false);
+  });
+
+  /**
+   * 예고가 tick에 걸리지 않으면 이 절의 나머지가 통째로 죽는다 — 화면에는 아무 표시도
+   * 나지 않고 은퇴만 옛날처럼 7월에 선다. 그래서 그 하루를 실제로 지나 본다.
+   */
+  it("1월 1일 tick이 예고를 세운다", () => {
+    const game = createTestGame(5);
+    const leaving = userPlayers(game)[0]!;
+    leaving.birthdate = birthFor(36);
+    game.date = "2026-12-31";
+
+    advanceTime(game, { days: 1 });
+
+    expect(game.date).toBe(retirementDeclarationDate(game.season));
+    expect(leaving.state.retiringAfterSeason?.reason).toBe("age");
+  });
+
+  it("재계약이 예고를 거둔다 — 서른다섯은 거두지 못한다", () => {
+    const game = createTestGame(5);
+    const young = userPlayers(game)[0]!;
+    young.birthdate = birthFor(34);
+    young.state.retiringAfterSeason = { on: game.date, reason: "idle" };
+    const old = userPlayers(game)[1]!;
+    old.birthdate = birthFor(35);
+    old.state.retiringAfterSeason = { on: game.date, reason: "age" };
+
+    expect(withdrawRetirement(game, young)).toBe(true);
+    expect(young.state.retiringAfterSeason).toBeUndefined();
+    expect(withdrawRetirement(game, old)).toBe(false);
+    expect(old.state.retiringAfterSeason?.reason).toBe("age");
+  });
+});
+
 describe("18팀 리그의 시즌 리뷰", () => {
   /** 그 리그의 리그전 결과를 손으로 채운다 — 경기 모델에 기대지 않는다 */
   function fabricateLeague(

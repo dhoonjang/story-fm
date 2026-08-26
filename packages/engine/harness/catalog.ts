@@ -44,6 +44,9 @@ export const WORLD_SEASON = defineHarness({
     { metric: "팀득점 2골 비율", role: "reference", min: 0.21, max: 0.25, unit: "ratio", why: "같은 분포" },
     { metric: "팀득점 3골 비율", role: "reference", min: 0.09, max: 0.13, unit: "ratio", why: "같은 분포" },
     { metric: "팀득점 4골+ 비율", role: "reference", min: 0.04, max: 0.075, unit: "ratio", why: "실제 5~6% — 앞선 팀이 내려서는 몫이 여기를 잡는다 (`LEAD_SHOT_LOG_RATE`)" },
+    { metric: "세트피스 득점 비율", role: "reference", min: 0.22, max: 0.32, unit: "ratio", why: "실제 1부가 25~30%(페널티 포함) — 손잡이는 `SET_PIECE_SHOT_SHARE`·`CORNER_XG_BASE`·`PENALTY_PER_MATCH`다. 시드 편차를 양쪽으로 2%p 열어 둔다" },
+    { metric: "코너·프리킥 득점/경기", role: "measure", why: "실제 1부가 0.55~0.6 — 위 비율의 큰 몫" },
+    { metric: "페널티 득점/경기", role: "reference", min: 0.13, max: 0.24, why: "경기당 페널티 `PENALTY_PER_MATCH`(0.25) × 성공률(0.62~0.80) = 0.16~0.2. 시즌 380경기라 잡음이 15%다" },
     { metric: "팀당 슈팅/경기", role: "measure", why: "위 양 팀 합의 절반 — 분산과 함께 읽는다" },
     { metric: "팀당 슈팅 분산", role: "measure", why: "슈팅이 몇몇 경기에 몰리는지" },
     { metric: "승점 1위", role: "reference", min: 80, max: 100, unit: "score", why: "실제 1부 우승 승점은 보통 84~93이고 역대 최고가 100(2017-18) — 전력 곡선(`ABILITY_LOG_SLOPE`)이 여기를 세운다" },
@@ -203,6 +206,12 @@ export const AI_FITNESS = defineHarness({
     { metric: "상대 상위 14명 체력 (최저 팀)", role: "guard", min: 70, why: "라인업에 설 14명이 어느 시점에도 쓸 만해야 한다" },
     { metric: "우리와 상대의 체력 격차", role: "guard", max: 10, why: "하루 회복이 우리 팀에만 있던 시절 이 차이가 20을 넘었다" },
     { metric: "한 시즌 출전 인원 (맨시티)", role: "guard", min: 18, unit: "count", why: "열한 명이 다 뛰면 로테이션이 없는 것이다" },
+    { metric: "개막 감각 — 친선 3경기 이상", role: "guard", min: 60, unit: "score", why: "프리시즌을 다 치른 몸은 개막에 `올라옴`(60) 위여야 한다 — 그 아래면 친선 넷으로도 판을 못 맞춘다는 뜻이다 (player.md §5.4)" },
+    { metric: "개막 감각 — 친선 0경기", role: "measure", unit: "score", why: "한 경기도 안 뛴 몸이 어디에 서는가 — 훈련장의 천장(55) 부근이어야 정상이다" },
+    { metric: "개막 감각 차 (친선 3+ vs 0)", role: "guard", min: 10, unit: "score", why: "이 값이 0이면 프리시즌이 몸에 관해 아무것도 결정하지 않는 것이다 — 이 축이 존재하는 이유 자체의 단일 지표 (#539)" },
+    { metric: "개막 감각을 잰 인원", role: "measure", unit: "count", why: "두 무리가 비어 있으면 위 두 값이 뜻을 잃는다" },
+    { metric: "시즌 말 감각 (상위 14명)", role: "guard", min: 70, unit: "score", why: "시즌을 돈 주전은 개막보다 날카로워야 한다 — 아래로 새면 감쇠가 적립을 이기고 있다" },
+    { metric: "우리와 상대의 감각 격차", role: "guard", max: 10, unit: "score", why: "체력 격차와 같은 이유 — 이 축이 감독 팀에만 걸리면 리그 절반이 다른 규칙으로 무뎌진다" },
   ],
 });
 
@@ -278,7 +287,7 @@ export const SQUAD_LONGEVITY = defineHarness({
  */
 export const YOUTH_DEVELOPMENT = defineHarness({
   id: "youth-development",
-  what: "2군 경기 수 · 출전·집중 육성이 가르는 성장 격차",
+  what: "2군 경기 수 · 출전·집중 육성·임대가 가르는 성장 격차",
   doc: "docs/simulation/season.md §2",
   cost: "세계 하나 · 한 시즌 완주 · 수 분",
   // prettier-ignore
@@ -290,6 +299,14 @@ export const YOUTH_DEVELOPMENT = defineHarness({
     { metric: "무지정 우리 2군 U21 성장", role: "measure", unit: "score", why: "출전 배율만 받은 유망주 — 손잡이 하나의 몫을 가른다" },
     { metric: "타 팀 2군 U21 성장", role: "reference", min: 1.2, max: 3.5, unit: "score", why: "배율이 없는 기준선 — 코어 월간 성장 그대로. 실제 U21의 해마다 +2 안팎, 여유가 작은 선수가 섞여 평균은 그 아래다" },
     { metric: "집중 육성 격차", role: "reference", min: 0.5, unit: "score", why: "집중 육성 − 타 팀 기준선. 0이면 손잡이가 아무것도 가르지 않은 것이다" },
+    { metric: "임대 표본", role: "guard", min: 2, unit: "count", why: "같은 리그로 보내 시즌 끝까지 임대로 남은 U21 — 표본이 줄면 아래 세 줄이 격차가 아니라 잡음이다" },
+    { metric: "임대 U21 성장", role: "measure", unit: "score", why: "임대처 1군 출전 × 수준 계수만 받은 유망주의 종합 상승 (season.md §2 임대)" },
+    { metric: "임대처 평균 출전", role: "guard", min: 2, max: 25, unit: "count", why: "그 구단 1군 경기를 실제로 몇 번 뛰었나 — **성장 배율에 곱할 분(分)이 있는가.** 빌린 구단이 임대 자원에게 치르는 값(로테이션 우선권 · 연속 미출전 상한 `LOAN_REST_LIMIT`)이 닫히면 이 줄이 0 언저리로 내려간다(문이 없던 시절 0.20이었다). 표본이 다섯이고 그중 기량 창 밖으로 나간 아이는 0이라, 하한은 '문이 닫혔다'와 '한둘이 자리를 못 얻었다'를 가르는 자리에 둔다. 상한 25는 그 반대편 — 아카데미 유망주가 1부 클럽의 주전이 되면 그건 임대가 아니라 이적이고 AI 순위표가 임대로 흔들린다" },
+    { metric: "경보 전에 뛴 임대", role: "guard", min: 0.4, unit: "ratio", why: "그 구단 경기에서 **가장 긴 연속 미출전**이 `LOAN_BENCH_RUN_ALERT`(4) 미만인 임대의 몫 — 리콜 근거 `no-minutes`가 배경음인지 사건인지를 가른다. 연속 미출전 상한(`LOAN_REST_LIMIT` 3)이 경보 문턱보다 한 칸 앞이므로, 자리를 얻은 임대는 경보가 켜지기 전에 뛴다. **1.0을 요구하지 않는다**: 기량 창(`LOAN_ROTATION_OVR_DROP`) 밖으로 보낸 유망주는 한 경기도 못 뛰어야 하고, 그때 켜지는 경보가 곧 리콜 판단이다 — 다섯 중 둘이 하한이다" },
+    { metric: "임대 격차", role: "reference", unit: "score", why: "임대 − 타 팀 기준선. ⚠️ **밴드를 두지 않는다 — 눈금 아래의 값이다.** 한 시즌 U21의 종합 상승이 0.2인데 임대 배율이 1.2~1.3이라 격차의 참값은 0.05 안쪽이고, 종합은 정수라 한 사람의 잡음이 0.45다(표본 다섯이면 부호가 동전이다). 배율 자체가 사는지는 `growth-curve` 단위 테스트가 같은 시드·같은 난수열에서 지키고, **세계가 그 배율에 곱할 분을 주는가**는 위의 `임대처 평균 출전`이 지킨다" },
+    { metric: "성실한 U21 표본", role: "guard", min: 20, unit: "count", why: "아래 줄의 분모 — 배율 없는 타 팀 2군 U21 중 `professionalism` ≥ 1.1. 표본이 줄면 격차가 아니라 잡음이다" },
+    { metric: "게으른 U21 표본", role: "guard", min: 20, unit: "count", why: "같은 줄의 반대쪽 — `professionalism` ≤ 0.95" },
+    { metric: "직업의식 격차", role: "reference", min: 0, unit: "score", why: "성실 − 게으름. 배율이 없는 표본이라 남는 차이는 원형뿐이다 — 0 이하면 계수가 세계에 닿지 않았다 (people.md §6)" },
   ],
 });
 
@@ -300,6 +317,9 @@ export const YOUTH_DEVELOPMENT = defineHarness({
  * 올리는 로테이션이 곧 반란이 되고, 길면 강등이 지금처럼 **비용 0인 손잡이**로
  * 남는다. 어느 쪽인지는 한 시즌을 굴려 봐야 보인다 — 코드를 읽어서는 알 수 없고,
  * 고정 기댓값이 있는 단위 테스트로도 잡히지 않는다.
+ *
+ * 문턱에 원형의 `patience`가 곱해진 뒤로(people.md §6) 날짜 자체는 사람마다 다르다 —
+ * 그래서 밴드는 날짜가 아니라 **제 문턱을 넘고 밀린 날**을 쥔다.
  */
 export const NEGOTIATION = defineHarness({
   id: "negotiation",
@@ -335,8 +355,12 @@ export const DEMOTION_GRIEVANCE = defineHarness({
     { metric: "로테이션 자원에 걸린 불만", role: "guard", max: 0, unit: "count", why: "열흘 안에 되돌리는 감독은 대가를 치르지 않는다 — 여기가 1이면 로테이션이 곧 반란이다" },
     { metric: "방치한 핵심 자원", role: "guard", min: 3, max: 3, unit: "count", why: "아래 줄의 분모 — 스쿼드 하한에 걸려 덜 내려갔으면 밴드가 공허하다" },
     { metric: "방치 끝에 불만이 걸린 수", role: "guard", min: 3, max: 3, unit: "count", why: "한 시즌을 그대로 두고도 조용하면 강등은 여전히 비용 0인 손잡이다" },
-    { metric: "첫 방치 불만까지 걸린 날", role: "guard", min: 21, max: 27, unit: "count", why: "문턱 21일 + 판정이 주에 한 번이라 최대 엿새가 밀린다" },
+    { metric: "첫 방치 불만까지 걸린 날", role: "measure", unit: "count", why: "가장 먼저 문을 두드린 사람이 며칠을 참았나 — 문턱이 사람마다 다르므로(people.md §6) 밴드는 아래 두 줄이 쥔다" },
+    { metric: "방치 자원의 문턱 폭", role: "reference", min: 1, unit: "count", why: "방치한 셋의 문턱 최대−최소. 0이면 셋이 같은 원형이거나 계수가 닿지 않은 것이다" },
+    { metric: "제 문턱을 넘고 밀린 날", role: "guard", min: 0, max: 6, unit: "count", why: "**그 사람의** 문턱을 넘은 뒤 실제로 걸리기까지. 판정이 주에 한 번이라 최대 엿새이고, 음수면 문턱을 안 지키고 걸린 것이다" },
     { metric: "시즌 강등발 불만 건수", role: "measure", unit: "count", why: "감독 하나가 한 시즌에 몇 번 이 자리를 만나는가" },
+    { metric: "시즌 출전 불만 건수", role: "measure", unit: "count", why: "지위 대비 출전이 낳는 불만 (people.md §5). 강등 밴드의 분모를 흔드는 것이 이 줄이다 — 먼저 걸린 `minutes` 불만은 같은 선수의 `demotion` 불만을 막는다" },
+    { metric: "시즌 약속 파기 건수", role: "measure", unit: "count", why: "아무 약속도 하지 않는 감독에게는 0이어야 한다 (people.md §5-2)" },
   ],
 });
 
@@ -357,10 +381,19 @@ export const APPROACH_RATE = defineHarness({
   bands: [
     { metric: "시즌 다가옴 건수", role: "guard", min: 3, max: 36, unit: "count", why: "**방치만 하는 감독의 상한**이다. 아래끝은 세계가 조용한 것이고, 위끝은 열흘에 한 번 — 그보다 잦으면 답하는 감독에게도 소음이 된다" },
     { metric: "선수 채널", role: "measure", unit: "count", why: "자기 일로 온 사람 — 불만 수를 따라간다" },
+    { metric: "에이전트 채널", role: "measure", unit: "count", why: "대리인이 온 자리 — 계약 만료·타 구단 관심·이적 요청" },
     { metric: "주장 채널", role: "measure", unit: "count", why: "라커룸이 식은 구간이 있었는가" },
     { metric: "구단주 채널", role: "measure", unit: "count", why: "순위가 기대 아래에 머문 구간 — 보드 요청" },
+    { metric: "출전 기회(minutes)", role: "measure", unit: "count", why: "지위 대비 출전으로 결정적으로 서는 불만이 몇 번 감독실 문을 두드리는가 (people.md §5) — 주사위를 걷은 뒤 이 줄이 위 합계를 밀어 올리는지가 재는 것이다" },
+    { metric: "어긴 약속(promise)", role: "measure", unit: "count", why: "아무 약속도 하지 않는 감독에게는 0이어야 한다 — 0이 아니면 약속을 하지 않은 자리에서 장부가 약속을 세운 것이다" },
+    { metric: "계약 만료(contract)", role: "measure", unit: "count", why: "재계약을 한 번도 열지 않은 감독에게 에이전트가 몇 번 오는가" },
+    { metric: "타 구단 관심(interest)", role: "measure", unit: "count", why: "오퍼를 그냥 흘려보낸 뒤 대리인이 오는 빈도 — 창 14일 안에 임계를 넘어야 선다" },
     { metric: "언론 유출(계단 4)", role: "guard", max: 8, unit: "count", why: "방치만 하는 감독의 상한. 자리가 아니라 사건이라 답할 곳이 없고 값은 다음 회견이 치른다 — 그보다 잦으면 회견이 유출 카드로만 채워진다" },
-    { metric: "이적 요청(계단 5)", role: "guard", max: 5, unit: "count", why: "사다리 끝까지 방치된 불만의 수. 한 시즌 스쿼드의 한 줌을 넘으면 방치의 대가가 아니라 스쿼드 붕괴다" },
+    { metric: "이적 요청(계단 5)", role: "guard", max: 7, unit: "count", why: "사다리 끝까지 방치된 불만의 수. 한 시즌 스쿼드의 한 줌을 넘으면 방치의 대가가 아니라 스쿼드 붕괴다 — 사유가 넷에서 여덟이 되며(people.md §5) 끝까지 갈 수 있는 갈래도 두 배가 됐고, 43명 스쿼드에서 일곱은 여전히 한 줌이다" },
+    { metric: "이적 요청(장부)", role: "guard", max: 10, unit: "count", why: "사유 셋이 함께 세운 요청의 총합 (transfer.md §1-1). 사다리에서 오는 것만 세는 위 줄과 달리 시장이 세우는 둘까지 든다 — 43명 스쿼드에서 한 시즌 열 건이면 이미 스쿼드의 한 줌이고, 그보다 잦으면 감독이 답하는 것이 아니라 매일 답하게 된다" },
+    { metric: "요청 사유 grievance", role: "measure", unit: "count", why: "사다리에서 온 것 — 위의 계단 5 줄과 같은 사건을 장부 쪽에서 센다. 둘이 어긋나면 계단 5가 장부에 안 적혔거나 요청이 걷힌 뒤 다시 섰다는 뜻이다" },
+    { metric: "요청 사유 blocked-move", role: "measure", unit: "count", why: "값이 붙은 오퍼를 같은 창에서 두 번 막은 수 — 아무 오퍼도 판정하지 않는 감독에게는 0이어야 한다" },
+    { metric: "요청 사유 bigger-club", role: "measure", unit: "count", why: "`BIGGER_CLUB_CHANCE`가 창이 열린 날마다 굴린 결과. 축소 세계의 감독 팀은 그 세계에서 가장 큰 구단이라 「우리보다 큰 구애자」가 서지 않아 **0이 정상**이다 — 0이 아니면 조건이나 전력 눈금이 움직인 것이고, 그때 재는 값은 이 줄이 아니라 시즌당 몇 건인가다" },
     { metric: "하루 두 건이 열린 날", role: "guard", max: 0, unit: "count", why: "하루 한 건의 문 (people.md §8)" },
     { metric: "동시에 열린 자리", role: "guard", max: 0, unit: "count", why: "열려 있는 다가옴은 하나뿐" },
     { metric: "같은 화자 7일 내 재개", role: "guard", max: 0, unit: "count", why: "같은 화자 쿨다운" },

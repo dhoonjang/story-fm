@@ -5,9 +5,12 @@ import type {
   TrainingSession,
   Transfer,
 } from "@story-fm/domain";
-import { ageOf, isReserveMatch } from "@story-fm/domain";
+import { ageOf, isReserveMatch, PLAYER_ARCHETYPE_LABEL } from "@story-fm/domain";
+import type { PlayerArchetypeKey } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { countryOfTeam } from "../data/team-catalog";
+import { archetypeTraitsOf, playerArchetypeOf } from "../world/player-persona";
+import { leaderSettlingRelief } from "./hierarchy";
 import { playerById, playersOf, teamNameIn, type GameState } from "../core/state";
 
 /**
@@ -88,7 +91,7 @@ export const EVENT_BAND: Record<SettlingEvent["kind"], number> = {
  * 문장은 `settlingFactorText`가 만든다 (overview.md §1 철칙 4).
  */
 export interface SettlingFactor {
-  code: "abroad" | "compatriot" | "young" | "veteran";
+  code: "abroad" | "compatriot" | "young" | "veteran" | "archetype" | "leaders";
   multiplier: number;
   /** `abroad` — 건너온 나라 */
   from?: string;
@@ -96,6 +99,10 @@ export interface SettlingFactor {
   playerId?: string;
   /** `young`·`veteran` — 그때의 나이 */
   age?: number;
+  /** `archetype` — 그 사람의 원형 코드 (people.md §6) */
+  archetype?: PlayerArchetypeKey;
+  /** `leaders` — 본인을 뺀 리더 그룹의 리더십 평균 (people.md §5-1) */
+  leadership?: number;
 }
 
 export interface Settling {
@@ -256,6 +263,28 @@ function loadFactors(state: GameState, player: GamePlayer, from: string | null):
   if (age <= 21) factors.push({ code: "young", multiplier: 1.2, age });
   else if (age >= 30) factors.push({ code: "veteran", multiplier: 0.9, age });
 
+  /**
+   * 사람됨도 한 항이다 — 라커룸 리더는 첫 주에 이름을 부르고 다니고, 불안한 유망주는
+   * 몇 달을 겉돈다 (people.md §6). **배수가 1인 원형에는 서지 않는다** — 아무것도
+   * 곱하지 않는 줄은 이유가 아니다.
+   */
+  const archetype = playerArchetypeOf(state.seed, player);
+  const multiplier = archetypeTraitsOf(state.seed, player).settling;
+  if (multiplier !== 1) factors.push({ code: "archetype", multiplier, archetype });
+
+  /**
+   * **리더가 선 라커룸은 새 사람을 더 빨리 받아들인다** (people.md §5-1). 본인은
+   * 빼고 센다 — "라커룸에 리더가 서 있다"는 다른 사람들에 대한 말이다.
+   */
+  const leaders = leaderSettlingRelief(state, state.userTeamId, player.id);
+  if (leaders) {
+    factors.push({
+      code: "leaders",
+      multiplier: leaders.multiplier,
+      leadership: leaders.leadership,
+    });
+  }
+
   return factors;
 }
 
@@ -275,6 +304,13 @@ export function settlingFactorText(state: GameState, factor: SettlingFactor): st
       return factor.age === undefined ? null : `${factor.age}세 — 처음 겪는 무대다`;
     case "veteran":
       return factor.age === undefined ? null : `${factor.age}세 — 여러 팀을 겪어 봤다`;
+    /** 원형은 **이름**만 낸다 — 그 사람이 왜 빨리 녹아드는지는 인물 카드가 이미 안다 */
+    case "archetype":
+      return factor.archetype === undefined ? null : PLAYER_ARCHETYPE_LABEL[factor.archetype];
+    case "leaders":
+      return factor.leadership === undefined
+        ? null
+        : `라커룸에 리더가 서 있다 (리더십 ${factor.leadership})`;
   }
 }
 

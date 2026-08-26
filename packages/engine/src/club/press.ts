@@ -10,6 +10,7 @@ import type {
   PressTrigger,
 } from "@story-fm/domain";
 import {
+  ageOf,
   isNaturalAt,
   naturalPositionOf,
   PLAYER_ISSUE_REASONS,
@@ -19,15 +20,17 @@ import {
 import type { GameState } from "../core/state";
 import { playerById, playersOf, pushNarrative, teamNameIn, userPlayers } from "../core/state";
 import { pickPlayerAmong } from "../core/player-ref";
-import { addDays } from "../core/dates";
+import { addDays, diffDays } from "../core/dates";
 import { formatMoney } from "./finance";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
+import { careerTotalsOf, matchMilestones } from "../squad/career";
 import { recentOutcomes } from "../squad/slump";
 import { isFriendly } from "../competition/friendly";
-import { boardExpectation, computeStandings } from "../competition/season";
+import { boardExpectation, computeStandings, retirementJudgeDate } from "../competition/season";
 import { leagueOfTeamIn } from "../competition/promotion";
-import { derbyNameOf } from "../data/derbies";
+import { derbyNameOf, derbyOf } from "../data/derbies";
+import { derbyRecordOf } from "./derby";
 import { reportersOf } from "../world/persona";
 import type { SkillResult } from "../skills";
 import { deltaItems } from "../skills/brief";
@@ -104,6 +107,8 @@ function leadershipFactor(state: GameState): number {
 function weightOf(trigger: PressTrigger, sharp: boolean): 1 | 2 | 3 {
   if (trigger === "pressure") return 3;
   if (trigger === "transfer") return 2;
+  // 작별은 결과와 무관하게 구단의 자리다 — 더비 전야가 무게 2인 것과 같은 이유
+  if (trigger === "farewell") return 2;
   return sharp ? 2 : 1;
 }
 
@@ -124,6 +129,8 @@ const REPORTER_AT: Record<PressTrigger, number> = {
   // 전야 회견은 팬을 대신해 묻는 자리다 — 개막의 기대도 더비의 정서도 지역지의 것
   opening: 0,
   derby: 0,
+  // 한 사람의 마지막 홈경기는 구단과 팬의 자리다 — 전술도 뒷이야기도 아니다
+  farewell: 0,
 };
 
 /** 그 자리를 여는 기자의 `characterId` — 기자단이 짧으면 첫 기자가, 없으면 아무도 묻지 않는다 */
@@ -159,6 +166,16 @@ const SLUMP_CANDIDATES = 3;
 
 function questionablePlayer(state: GameState, seed: number): GamePlayer | null {
   const squad = userPlayers(state);
+  /**
+   * **어긴 약속이 가장 먼저다** (people.md §5·§5-2) — 부진도 다른 불만도 세계가
+   * 만든 일이지만, 어긴 약속은 **감독 자신이 세운 원인**이라 기자가 가장 먼저 묻는
+   * 자리다. 폼보다 앞에 두는 것은 그래서다: 부진은 물어볼 일이고 약속 파기는
+   * 해명을 요구할 일이다.
+   */
+  const promiseHolder = squad.find((p) =>
+    state.issues.some((i) => i.gamePlayerId === p.id && i.reason === "promise"),
+  );
+  if (promiseHolder) return promiseHolder;
   const slumping = squad
     .filter((p) => p.state.form < SLUMPING_FORM)
     .sort((a, b) => a.state.form - b.state.form)
@@ -220,6 +237,28 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
       sharp: outcome === "loss" || (outcome === "draw" && winless),
     },
   ];
+  /**
+   * **더비는 끝난 뒤에도 자리를 남긴다** (people.md §4). 이기고도 묻는 것은 더비가
+   * 결과와 무관하게 팬과 구단의 자리이기 때문이고(전야 회견이 무게 2인 것과 같은
+   * 이유), 날 선 카드라 이 회견의 무게가 언제나 2가 된다.
+   *
+   * 전적은 **이번 경기를 빼고** 센다 — 넣으면 첫 더비가 이미 1승 0패로 시작한다.
+   */
+  const derby = derbyOf(state.userTeamId, opponentId);
+  if (derby) {
+    const record = derbyRecordOf(state, opponentId, matchId);
+    facts.push({
+      kind: "result",
+      data: {
+        refId: opponentId,
+        name: opponent,
+        values: { won: record.won, drawn: record.drawn, lost: record.lost, heat: derby.heat },
+        tags: ["derby", derby.name],
+      },
+      about: null,
+      sharp: true,
+    });
+  }
   if (winless) {
     facts.push({
       kind: "winless",
@@ -230,8 +269,13 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
   }
   const target = questionablePlayer(state, state.seed + state.matches.length);
   if (target) {
-    const slumping = target.state.form < SLUMPING_FORM;
     const reason = issueReasonOf(state, target.id);
+    /**
+     * ⚠️ **어긴 약속은 폼을 이긴다.** 약속 파기는 사기를 `PROMISE.brokenMorale`(−8)
+     * 깎으므로 그 선수의 폼은 대개 함께 내려가 있다 — 폼으로 카드를 고르면 그를
+     * 부른 이유가 지워지고 기자가 "폼이 떨어졌다"를 묻는다 (people.md §5-2).
+     */
+    const slumping = reason !== "promise" && target.state.form < SLUMPING_FORM;
     facts.push({
       kind: slumping ? "slump" : "unhappy",
       data: slumping
@@ -242,6 +286,36 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
     });
   }
 
+  /**
+   * **마일스톤은 그 경기의 회견에만 실린다** (people.md §4). 이 함수는 마감이
+   * 정산을 끝낸 **뒤**에 불리므로(`finalizeMatch`) 그 경기의 기록이 이미 장부에 있다.
+   *
+   * 한 경기에 여럿이 서면 **드문 것 하나만** 오른다 — 셋을 다 실으면 그 회견이
+   * 시상식이 된다. 목록은 이미 드문 순으로 온다(`compareMilestones`)므로 첫 줄이
+   * 그 하나다. 나머지는 선수 상세와 서사 메모에 그대로 있다.
+   *
+   * 선수가 명부에서 잡히지 않으면 카드를 세우지 않는다 — 이름 자리에 id를 흘리면
+   * 기자가 그것을 사람 이름으로 읽는다.
+   */
+  const milestone = matchMilestones(state, matchId)[0];
+  const achiever = milestone ? playerById(state, milestone.gamePlayerId) : null;
+  if (milestone && achiever) {
+    facts.push({
+      kind: "milestone",
+      data: { name: achiever.name, values: { value: milestone.value }, tags: [milestone.code] },
+      about: achiever.id,
+      /** 날 선 자리가 아니다 — 기자가 캐물을 일이 아니라 물어봐 줄 일이다 (people.md §4) */
+      sharp: false,
+    });
+  }
+
+  /**
+   * 은퇴 예고와 작별 — 1월에 선 예고는 2주 안의 회견에, 마지막 홈경기의 결과는 그
+   * 경기의 회견에 실린다 (season.md §6). 둘은 같은 자리에 함께 서지 않는다: 예고는
+   * 1월이고 마지막 홈경기는 5월이다.
+   */
+  facts.push(...retirementFacts(state), ...farewellResultFacts(state, match));
+
   const trigger: PressTrigger = winless ? "pressure" : "match";
   const outcomeKo = outcome === "win" ? "승리" : outcome === "draw" ? "무승부" : "패배";
   return {
@@ -249,8 +323,14 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
     date: state.date,
     trigger,
     reporterId: reporterFor(state, trigger),
+    /**
+     * 자리의 국면 한 줄 — **기록은 여기 오지 않는다.** 사실 카드가 이름과 눈금을
+     * 이미 들고 있어(`milestone`), 같은 사실을 국면에도 적으면 기자가 한 회견에서
+     * 두 번 묻는다. 국면은 그 자리의 온도(스코어·무승 계단)이지 그날의 사건 목록이 아니다.
+     */
     context:
-      `${opponent}전 ${score} ${outcomeKo}` + (winless ? ` · 최근 ${recent.length}경기 무승` : ""),
+      `${derby ? `${derby.name} · ` : ""}${opponent}전 ${score} ${outcomeKo}` +
+      (winless ? ` · 최근 ${recent.length}경기 무승` : ""),
     facts,
     status: "pending",
     weight: weightOf(
@@ -349,8 +429,11 @@ export function buildTransferPress(
  * 우리 스쿼드에서 그보다 나은 선수가 몇인가 — **명단 순위가 아니라 스쿼드 대비다.**
  * 나간 선수는 이미 우리 명단에 없으므로 "상위 14명 안"으로 물으면 떠난 순간
  * 아무도 핵심이 아니다 (people.md §4).
+ *
+ * 회견이 열릴 자격(§4)과 라커룸 불만이 걸릴 자격(§5 — 등재·계약)이 **같은 자를
+ * 쓴다.** 둘이 갈리면 회견은 열리는데 불만은 안 서는 선수가 생긴다.
  */
-function betterThanInSquad(state: GameState, player: GamePlayer): number {
+export function betterThanInSquad(state: GameState, player: GamePlayer): number {
   return playersOf(state, state.userTeamId).filter(
     (p) => p.id !== player.id && p.attributes.overall > player.attributes.overall,
   ).length;
@@ -428,6 +511,40 @@ function loadLeaks(state: GameState, conference: PressConference): void {
   }
   // 실렸든 버려졌든 유출은 이 자리를 지나면 없다 — 다음 회견이 같은 사실을 다시 묻지 않는다
   state.pressLeaks = [];
+  if (loaded) conference.weight = Math.max(conference.weight, 2);
+}
+
+// ── 이적 요청 ──────────────────────────────────────────────────
+
+/**
+ * 선수가 나가겠다고 말했다 — **유출과 같은 문을 지난다** (people.md §4 ·
+ * transfer.md §1-1). 요청이 선 날과 감독이 답한 날, 다음에 열리는 회견이 그 사실을
+ * sharp로 싣고 그 자리의 무게는 최소 2가 된다.
+ *
+ * ⚠️ **요청 장부는 유출과 달리 소비되지 않는다.** 실어 간 자리(`pressedOn`)만
+ * 적어 같은 사실을 두 번 묻지 않게 하고, 줄 자체는 원인이 사라질 때까지 남는다 —
+ * 감독이 답하면 그 칸이 비워져 답한 사실이 다음 회견에 다시 실린다.
+ */
+function loadTransferRequests(state: GameState, conference: PressConference): void {
+  let loaded = false;
+  for (const request of state.transferRequests ?? []) {
+    if (request.pressedOn !== undefined) continue;
+    const player = playerById(state, request.gamePlayerId);
+    // 떠난 선수의 요청은 조용히 건너뛴다 — 우리 라커룸에 없는 사람에게 물을 자리가 아니다
+    if (!player || player.teamId !== state.userTeamId) continue;
+    conference.facts.push({
+      kind: "transfer-request",
+      data: {
+        name: player.name,
+        values: { days: diffDays(request.since, state.date) },
+        tags: [request.reason, ...(request.answer ? [request.answer] : [])],
+      },
+      about: player.id,
+      sharp: true,
+    });
+    request.pressedOn = state.date;
+    loaded = true;
+  }
   if (loaded) conference.weight = Math.max(conference.weight, 2);
 }
 
@@ -598,12 +715,20 @@ export function openEvePress(state: GameState, digest?: string[]): void {
   const opponent = teamNameIn(state, opponentId);
   const derby = derbyNameOf(state.userTeamId, opponentId);
 
+  /**
+   * **전야의 자리는 하나다** (people.md §4). 더비·개막이 그날을 이미 잡았으면 작별은
+   * 자리를 빼앗지 않고 카드만 얹힌다 — 같은 날 회견 둘을 열면 하나가 방치로 닫힌다.
+   */
+  const farewell = farewellFacts(state, match);
   const conference = derby
     ? buildDerbyPress(state, match, { derby, opponentId, opponent, home })
     : isSeasonOpener(state, match, leagueId)
       ? buildOpeningPress(state, { opponent, home })
-      : null;
+      : farewell.length > 0
+        ? buildFarewellPress(state, { opponent, facts: farewell })
+        : null;
   if (!conference) return;
+  if (conference.trigger !== "farewell") conference.facts.push(...farewell);
   // 하루에 한 번 — 같은 날을 다시 지나도 자리가 둘이 되지 않는다
   if ((state.pressConferences ?? []).some((c) => c.id === conference.id)) return;
   openPress(state, conference, digest);
@@ -616,6 +741,136 @@ function isSeasonOpener(state: GameState, match: MatchRecord, leagueId: string):
     null,
   );
   return first !== null && match.date === first;
+}
+
+// ── 은퇴 예고와 작별 (season.md §6) ────────────────────
+
+/**
+ * 예고가 회견에 실리는 창 — 지나면 그 사실은 근황·심경의 것이다 (people.md §4).
+ * 반년을 회견마다 다시 물으면 그 자리가 매번 같은 질문으로 채워진다.
+ */
+const RETIREMENT_PRESS_DAYS = 14;
+
+/** 한 자리에 세우는 이름의 수 — 회견이 명단 낭독이 되지 않게 하는 상한 */
+const FAREWELL_NAMES_SHOWN = 2;
+
+/**
+ * 예고가 선 우리 선수 — **우리 셔츠로 오래 뛴 순서다.** 자리가 하나뿐일 때 서는 사람은
+ * 그 구단에서 가장 오래 있은 사람이고, 같으면 id가 가른다(명단 순서가 정하면 같은
+ * 세이브가 두 번 다른 답을 낸다 — season.md §6 시상의 마지막 칸과 같은 규약).
+ */
+function retiringPlayers(state: GameState): GamePlayer[] {
+  return userPlayers(state)
+    .filter((p) => p.state.retiringAfterSeason !== undefined)
+    .map((p) => ({ player: p, apps: careerTotalsOf(state, p.id, state.userTeamId).apps }))
+    .sort((a, b) => b.apps - a.apps || (a.player.id < b.player.id ? -1 : 1))
+    .map((row) => row.player);
+}
+
+/**
+ * 방금 선 은퇴 예고 — 경기 뒤 회견이 싣는다 (people.md §4).
+ *
+ * 날 선 자리가 아니다: 감독을 몰아세우는 사실이 아니라 그 자리에 있는 사람의 마지막
+ * 시즌이다. 사유 코드를 함께 드는 것은 서른다섯의 은퇴와 뛰지 못한 서른넷의 은퇴가
+ * 기자에게 다른 질문이기 때문이다.
+ */
+function retirementFacts(state: GameState): PressFact[] {
+  const judgeDate = retirementJudgeDate(state.season);
+  const facts: PressFact[] = [];
+  for (const player of retiringPlayers(state)) {
+    const declared = player.state.retiringAfterSeason;
+    if (!declared || diffDays(declared.on, state.date) > RETIREMENT_PRESS_DAYS) continue;
+    const ours = careerTotalsOf(state, player.id, state.userTeamId);
+    facts.push({
+      kind: "retirement",
+      data: {
+        name: player.name,
+        values: {
+          age: ageOf(player.birthdate, judgeDate),
+          apps: ours.apps,
+          goals: ours.goals,
+        },
+        tags: [declared.reason],
+        date: declared.on,
+      },
+      about: player.id,
+      sharp: false,
+    });
+    if (facts.length >= FAREWELL_NAMES_SHOWN) break;
+  }
+  return facts;
+}
+
+/**
+ * 그 시즌 우리 **마지막 홈 리그 경기** — 달력이 이미 아는 사실이다 (season.md §6).
+ * 컵·대항전을 세지 않는 것은 그쪽이 대진에 따라 홈이 될지도 모르는 자리여서다:
+ * 리그 일정만이 시즌 초부터 "그날이 마지막"이라고 말할 수 있다.
+ */
+function lastHomeLeagueMatch(state: GameState): MatchRecord | null {
+  const leagueId = leagueOfTeamIn(state, state.userTeamId);
+  return leagueMatchesOfSeason(state, leagueId)
+    .filter((m) => m.homeTeamId === state.userTeamId)
+    .reduce<MatchRecord | null>(
+      (best, m) => (best === null || m.date > best.date ? m : best),
+      null,
+    );
+}
+
+/**
+ * 작별의 카드 — 전야에는 날짜만 (people.md §4).
+ *
+ * ⚠️ **코어는 그를 세우지 않는다.** 선발은 감독의 결정이고, 코어가 하는 일은 그날이
+ * 그의 마지막 홈경기라는 사실을 킥오프 **전에** 감독 앞에 세우는 것까지다.
+ */
+function farewellFacts(state: GameState, match: MatchRecord): PressFact[] {
+  if (lastHomeLeagueMatch(state)?.id !== match.id) return [];
+  return retiringPlayers(state)
+    .slice(0, FAREWELL_NAMES_SHOWN)
+    .map((player) => ({
+      kind: "farewell" as const,
+      data: { name: player.name, tags: ["eve"], date: match.date },
+      about: player.id,
+      sharp: false,
+    }));
+}
+
+/**
+ * 경기 뒤의 작별 — **그가 뛰었는가**가 사실이다 (people.md §4).
+ *
+ * 뛰지 않았으면 날 선 자리가 된다: 은퇴하는 선수를 마지막 홈경기에 세우지 않은 것은
+ * 감독의 결정이고, 회견은 결정을 묻는 자리다.
+ */
+function farewellResultFacts(state: GameState, match: MatchRecord): PressFact[] {
+  if (lastHomeLeagueMatch(state)?.id !== match.id) return [];
+  const played = new Set(match.result?.homeLineup ?? []);
+  return retiringPlayers(state)
+    .slice(0, FAREWELL_NAMES_SHOWN)
+    .map((player) => {
+      const on = played.has(player.id);
+      return {
+        kind: "farewell" as const,
+        data: { name: player.name, tags: [on ? "played" : "unused"] },
+        about: player.id,
+        sharp: !on,
+      };
+    });
+}
+
+/** 작별 전야 — 더비도 개막도 아닌 날, 마지막 홈경기가 여는 자리 */
+function buildFarewellPress(
+  state: GameState,
+  input: { opponent: string; facts: PressFact[] },
+): PressConference {
+  return {
+    id: `press-farewell-${state.season}`,
+    date: state.date,
+    trigger: "farewell",
+    reporterId: reporterFor(state, "farewell"),
+    context: `시즌 마지막 홈경기 전야 · ${input.opponent}전`,
+    facts: input.facts,
+    status: "pending",
+    weight: weightOf("farewell", false),
+  };
 }
 
 /** 답을 기다리는 회견 — 언제나 하나뿐이다 */
@@ -652,6 +907,7 @@ export function openPress(state: GameState, conference: PressConference, digest?
     pushNarrative(state, `기자회견 불참 (${stale.context})`, 2);
   }
   loadLeaks(state, conference);
+  loadTransferRequests(state, conference);
   state.pressConferences.push(conference);
   // 지나간 회견은 서사에 남지 상태로 쌓일 이유가 없다
   if (state.pressConferences.length > KEPT_CONFERENCES) {

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  leaderGroupOf,
   addDays,
   APPROACH_THRESHOLD,
+  marketValueOf,
   approachThreshold,
   BOARD_DEMAND,
   BOARD_REQUEST,
@@ -10,6 +12,11 @@ import {
   boardThriftFactor,
   boardTrustFactor,
   clubProfileIn,
+  coachArchetypeKeyOf,
+  coachCues,
+  COACH_ARCHETYPE_LABELS,
+  COACH_EYE_KEYS,
+  assignmentsOf,
   DEMAND_OF_ARCHETYPE,
   financeOf,
   openBoardDemand,
@@ -48,6 +55,18 @@ const firsts = (state: GameState, n: number) =>
   userPlayers(state)
     .filter((p) => p.squadLevel === "first")
     .slice(0, n);
+
+/**
+ * 리더 그룹 밖의 1군 — **압력의 눈금을 재는 자리는 리더 배수가 걸리지 않아야 한다**
+ * (people.md §5-1). 명단 앞쪽은 서열도 앞쪽이라, 그대로 쓰면 사다리 테스트가 재는
+ * 것이 계단이 아니라 배수가 된다.
+ */
+const plains = (state: GameState, n: number) => {
+  const leaders = new Set(leaderGroupOf(state, state.userTeamId).map((r) => r.playerId));
+  return userPlayers(state)
+    .filter((p) => p.squadLevel === "first" && !leaders.has(p.id))
+    .slice(0, n);
+};
 
 /** 근황이 하나도 없는 판 — 폼을 전부 평소로 눕힌다 */
 function quiet(state: GameState) {
@@ -241,7 +260,7 @@ function pressDays(state: GameState, days: number): string[] {
 describe("압력이 임계를 넘어야 자리가 열린다", () => {
   it("임계 직전까지는 아무도 오지 않는다 — 넘은 날 온다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
 
     // minutes는 하루 7 — 14일이면 98로 임계 100에 못 미친다
@@ -255,9 +274,26 @@ describe("압력이 임계를 넘어야 자리가 열린다", () => {
     expect(open?.step).toBe(1);
   });
 
+  /**
+   * 리더 배수 — 주장의 불만은 15일이 아니라 8일 만에 문을 두드린다
+   * (people.md §5-1 · §8). 배수가 죽으면 완장이 다시 서사에서만 뜻을 갖는다.
+   */
+  it("리더의 불만은 더 빨리 임계에 닿는다 — 주장은 배수 2.0", () => {
+    const state = quiet(createTestGame(11));
+    const captain = userPlayers(state).find((p) => p.isCaptain)!;
+    gripe(state, captain.id);
+    // 하루 7 × 2.0 = 14 — 7일이면 98로 아직 임계 아래다
+    pressDays(state, 7);
+    expect(pendingApproach(state)).toBeNull();
+    pressDays(state, 1);
+    expect(pendingApproach(state)?.about).toBe(captain.id);
+    // 자리를 연 배경 카드가 그 사람의 완장을 함께 든다
+    expect(pendingApproach(state)?.contextCard?.leader).toBe("captain");
+  });
+
   it("열려 있는 동안에는 다음 자리가 열리지 않는다", () => {
     const state = quiet(createTestGame(11));
-    const [a, b] = firsts(state, 2);
+    const [a, b] = plains(state, 2);
     gripe(state, a!.id);
     gripe(state, b!.id);
     pressDays(state, 15);
@@ -273,7 +309,7 @@ describe("압력이 임계를 넘어야 자리가 열린다", () => {
 describe("답한 것과 답하지 않은 것의 차이는 남는 압력이다", () => {
   it("답하면 압력이 0으로, 계단이 하나 오른다 — 다음 임계는 두 배다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     pressDays(state, 15);
 
@@ -292,7 +328,7 @@ describe("답한 것과 답하지 않은 것의 차이는 남는 압력이다", 
 
   it("돌려보내면 직전 임계의 75%가 남는다 — 무시가 다음 계단을 앞당긴다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     pressDays(state, 15);
 
@@ -304,7 +340,7 @@ describe("답한 것과 답하지 않은 것의 차이는 남는 압력이다", 
 
   it("답이 원인을 지우지는 않는다 — 불만은 그대로 남는다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     pressDays(state, 15);
     respondToApproach(state, { stance: "own" });
@@ -315,7 +351,7 @@ describe("답한 것과 답하지 않은 것의 차이는 남는 압력이다", 
 describe("원인이 사라지면 식는다", () => {
   it("불만이 풀리면 압력이 빠지고, 계단은 남는다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     pressDays(state, 15);
     respondToApproach(state, { stance: "defend" });
@@ -332,7 +368,7 @@ describe("원인이 사라지면 식는다", () => {
 describe("찾아온 사람은 근황 줄에 다시 서지 않는다", () => {
   it("같은 선수를 두 자리가 함께 밀지 않는다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     target.state.form = -0.8; // 근황이 붙는 폼
     gripe(state, target.id);
     pressDays(state, 15);
@@ -367,7 +403,7 @@ describe("자리는 그 자리에 있던 사람에게만 닿는다", () => {
 
   it("갓 열린 회견이 있으면 아무도 오지 않는다 — 감독이 지나친 회견은 자리를 다투지 않는다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     pressDays(state, 14); // 압력 98 — 임계 한 칸 앞
 
@@ -432,7 +468,7 @@ function climbTo(state: GameState, subject: string, step: number): void {
 describe("계단 4·5 — 언론 유출과 이적 요청", () => {
   it("계단 3을 지나 임계 400을 채우면 자리가 아니라 유출이 선다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     climbTo(state, target.id, 3);
 
@@ -451,7 +487,7 @@ describe("계단 4·5 — 언론 유출과 이적 요청", () => {
 
   it("유출 뒤 임계 500을 채우면 에이전트가 이적 요청을 들고 온다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     climbTo(state, target.id, 3);
     pressDays(state, 58); // 유출 — 300이 남는다
@@ -469,7 +505,7 @@ describe("계단 4·5 — 언론 유출과 이적 요청", () => {
 
   it("요청이 서 있는 동안 압력은 더 쌓이지 않고, 불만이 풀리면 걷힌다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     climbTo(state, target.id, 3);
     pressDays(state, 58);
@@ -499,6 +535,213 @@ describe("계단 4·5 — 언론 유출과 이적 요청", () => {
     expect(open?.channel).toBe("captain");
     expect(open?.step).toBe(3);
     expect(state.pressLeaks ?? []).toEqual([]);
+  });
+});
+
+/** 우리 스쿼드에서 가장 나은 선수 — 상위 14명 문을 확실히 지나는 대상 */
+function best(state: GameState) {
+  return [...userPlayers(state)].sort((a, b) => b.attributes.overall - a.attributes.overall)[0]!;
+}
+
+/**
+ * 스쿼드에 **서로 다른 종합**을 매겨 순위를 정확히 만든다 — 상위 14명 경계를 재려면
+ * 동점이 없어야 한다(`betterThanInSquad`는 자기보다 **높은** 선수만 센다).
+ */
+function rankedSquad(state: GameState) {
+  const squad = [...userPlayers(state)].sort((a, b) => b.attributes.overall - a.attributes.overall);
+  squad.forEach((p, i) => {
+    p.attributes.overall = 90 - i;
+  });
+  return squad;
+}
+
+/**
+ * 최근에 끝난 타 구단의 매각 오퍼 하나 — `interest`의 유일한 원인.
+ * `feeRatio`는 **시장가 대비**다 — `MARKET_NEAR_LOW` 이상이라야 값이 붙은 오퍼다.
+ */
+function closedOffer(
+  state: GameState,
+  playerId: string,
+  input: { feeRatio: number; status: "rejected" | "expired"; daysAgo: number },
+) {
+  const on = addDays(state.date, -input.daysAgo);
+  const fee = Math.round(marketValueOf(state, playerById(state, playerId)!) * input.feeRatio);
+  state.negotiations.push({
+    id: `neg-in-${playerId}-${on}`,
+    gamePlayerId: playerId,
+    kind: "sell",
+    counterpartTeamId: state.teams.find((t) => t.id !== state.userTeamId)!.id,
+    windowId: null,
+    openedOn: on,
+    expiresOn: on,
+    status: input.status,
+    rounds: [
+      {
+        date: on,
+        by: "them",
+        fee,
+        weeklyWage: 0,
+        contractYears: 4,
+        respondsOn: null,
+        probability: 50,
+        verdict: null,
+      },
+    ],
+  });
+}
+
+/**
+ * 에이전트 채널 — **계약과 관심은 협상 테이블 건너편에서 온다** (people.md §8).
+ *
+ * 사다리 꼭대기(계단 5)에서만 서던 대리인이 계단 1부터 서는 자리라, 「누가 오는가」와
+ * 「어디서 멈추는가」가 주제마다 갈리는지가 여기서 결정된다.
+ */
+describe("계약과 관심 — 에이전트가 계단 1부터 온다", () => {
+  it("계약 만료 불만은 대리인이 들고 온다 — 계단 1도 에이전트다", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    gripe(state, target.id, "contract");
+
+    // contract는 하루 5 — 19일이면 95로 임계 100에 못 미친다
+    pressDays(state, 19);
+    expect(pendingApproach(state)).toBeNull();
+
+    pressDays(state, 1);
+    const open = pendingApproach(state)!;
+    expect(open.step).toBe(1);
+    expect(open.channel).toBe("agent");
+    expect(worldFigures(state).some((f) => f.characterId === open.speakerId)).toBe(true);
+    expect(open.about).toBe(target.id);
+    expect(open.facts[0]?.kind).toBe("contract-demand");
+    expect(open.contextCard?.code).toBe("contract-demand");
+  });
+
+  it("재계약을 열면 압력이 식는다 — 불만은 그대로 남는다", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    gripe(state, target.id, "contract");
+    pressDays(state, 10); // 50
+
+    state.negotiations.push({
+      id: `neg-renew-${target.id}`,
+      gamePlayerId: target.id,
+      kind: "renew",
+      counterpartTeamId: null,
+      windowId: null,
+      openedOn: state.date,
+      expiresOn: addDays(state.date, 14),
+      status: "open",
+      rounds: [],
+    });
+
+    // 원인이 서지 않으니 하루 12씩 식는다
+    pressDays(state, 2);
+    expect(rowOf(state, target.id).value).toBe(26);
+    // 0에서 멈추고, 계단도 0인 줄은 장부에서 사라진다
+    pressDays(state, 3);
+    expect(state.approachPressure!.some((r) => r.subject === target.id)).toBe(false);
+    // 협상을 여는 것은 압력만 멈춘다 — 불만을 푸는 것은 성사뿐이다
+    expect(state.issues.some((i) => i.gamePlayerId === target.id)).toBe(true);
+  });
+
+  it("계약 만료도 같은 사다리를 탄다 — 계단 4는 유출이다", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    gripe(state, target.id, "contract");
+    climbTo(state, target.id, 3);
+
+    // contract는 하루 5 — 80일이면 400을 채운다
+    pressDays(state, 80);
+    expect(pendingApproach(state)).toBeNull();
+    expect(state.pressLeaks).toEqual([
+      { playerId: target.id, topic: "contract", date: state.date },
+    ]);
+  });
+
+  it("최근 창에서 끝난 오퍼가 대리인을 부른다 — 사유가 없어도 온다", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    closedOffer(state, target.id, { feeRatio: 1, status: "expired", daysAgo: 0 });
+
+    // interest는 하루 8 — 12일이면 96으로 임계 100에 못 미친다
+    pressDays(state, 12);
+    expect(pendingApproach(state)).toBeNull();
+
+    pressDays(state, 1);
+    const open = pendingApproach(state)!;
+    expect(open.topic).toBe("interest");
+    expect(open.channel).toBe("agent");
+    expect(open.about).toBe(target.id);
+    expect(open.facts[0]?.kind).toBe("interest");
+    // 불만이 아니다 — 라커룸 장부에는 아무것도 남지 않는다
+    expect(state.issues).toEqual([]);
+  });
+
+  it("창이 지나면 식는다 — 답으로 지울 원인이 없다", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    closedOffer(state, target.id, { feeRatio: 1, status: "expired", daysAgo: 0 });
+    pressDays(state, 13);
+    expect(respondToApproach(state, { stance: "defend" }).ok).toBe(true);
+
+    // 창(14일)이 지난 뒤로는 원인이 서지 않아 하루 12씩 식는다
+    pressDays(state, 10);
+    expect(rowOf(state, target.id).value).toBe(0);
+    expect(rowOf(state, target.id).step).toBe(1);
+  });
+
+  it("관심의 사다리는 3에서 멈춘다 — 유출도 요청도 서지 않는다", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    /**
+     * 창이 14일뿐이라 사다리를 굴려서는 3계단에 닿지 못한다 — 계단 3의 임계(400)를
+     * 코앞에 둔 줄을 세워 두고 하루만 민다.
+     */
+    state.approachPressure = [{ subject: target.id, topic: "interest", value: 399, step: 3 }];
+    closedOffer(state, target.id, { feeRatio: 1, status: "expired", daysAgo: 0 });
+
+    pressDays(state, 1);
+    const open = pendingApproach(state);
+    expect(open?.topic).toBe("interest");
+    expect(open?.step).toBe(3);
+    expect(state.pressLeaks ?? []).toEqual([]);
+    expect(target.state.transferRequestedOn).toBeUndefined();
+  });
+
+  it("헐값 오퍼가 흘러간 것은 세지 않는다 — 값의 자는 막힌 이적과 같다 (`isSeriousOffer`)", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    closedOffer(state, target.id, { feeRatio: 0.5, status: "expired", daysAgo: 0 });
+
+    pressDays(state, 13);
+    expect(state.approachPressure!.some((r) => r.topic === "interest")).toBe(false);
+  });
+
+  it("경계는 상위 14명이다 — 열넷째까지 서고 열다섯째는 서지 않는다", () => {
+    const state = quiet(createTestGame(11));
+    const squad = rankedSquad(state);
+    const core = squad[13]!; // 그보다 나은 선수 13명 — 안
+    const fringe = squad[14]!; // 14명 — 밖
+    closedOffer(state, core.id, { feeRatio: 1, status: "rejected", daysAgo: 0 });
+    closedOffer(state, fringe.id, { feeRatio: 1, status: "expired", daysAgo: 0 });
+
+    pressDays(state, 13);
+    expect(rowOf(state, core.id).topic).toBe("interest");
+    expect(state.approachPressure!.some((r) => r.subject === fringe.id)).toBe(false);
+  });
+
+  it("막힌 이적 불만과 함께 선다 — 한 사건의 두 얼굴이고 화자가 다르다", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    closedOffer(state, target.id, { feeRatio: 1, status: "rejected", daysAgo: 0 });
+    gripe(state, target.id, "blocked-move");
+
+    pressDays(state, 13);
+    const rows = state.approachPressure!.filter((r) => r.subject === target.id);
+    expect(rows.map((r) => r.topic).sort()).toEqual(["blocked-move", "interest"]);
+    // 그래도 열린 자리는 하나다 — 먼저 임계를 넘은 쪽(하루 9)이 선다
+    expect((state.approaches ?? []).filter((a) => a.status === "pending")).toHaveLength(1);
+    expect(pendingApproach(state)?.topic).toBe("blocked-move");
   });
 });
 
@@ -881,5 +1124,184 @@ describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () 
     state.date = addDays(state.date, 1);
     tickBoardRequests(state, []);
     expect(clubProfileIn(state, teamId).capacity).toBe(before + seats);
+  });
+});
+
+/**
+ * 수석코치의 눈 — **원형이 같은 장부에서 무엇을 먼저 보는가** (coach-cues.ts).
+ *
+ * 이 표가 없으면 6원형은 말투에만 남는다 — 데이터 분석가형과 야전 조련사형이
+ * 같은 스냅샷을 읽고 같은 것을 말한다 (people.md §7-1).
+ */
+describe("수석코치의 눈", () => {
+  /** 이 세이브의 수석코치를 그 원형으로 갈아 끼운다 — 원형은 시드가 뽑으므로 */
+  const asCoach = (state: GameState, key: string) => {
+    const coach = (state.personas ?? []).find((p) => p.role === "head_coach");
+    coach!.archetype = COACH_ARCHETYPE_LABELS[key]!;
+    return state;
+  };
+
+  /** 다음 경기를 오늘로부터 `days` 뒤로 옮긴다 — 그 앞의 다른 대진은 뒤로 민다 */
+  const fixtureIn = (state: GameState, days: number) => {
+    const next = state.matches
+      .filter(
+        (m) =>
+          m.result === null &&
+          (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+      )
+      .sort((a, b) => (a.date < b.date ? -1 : 1))[0]!;
+    state.date = addDays(next.date, -days);
+    return next;
+  };
+
+  it("6원형 전부가 표에 있다 — 빠진 원형은 빈 카드가 된다", () => {
+    expect([...COACH_EYE_KEYS].sort()).toEqual(Object.keys(COACH_ARCHETYPE_LABELS).sort());
+    // 세이브에 남는 것은 라벨이다 — 라벨로 키를 되찾지 못하면 그 코치는 빈손이다
+    for (const [key, label] of Object.entries(COACH_ARCHETYPE_LABELS)) {
+      expect(coachArchetypeKeyOf({ archetype: label })).toBe(key);
+    }
+    expect(coachArchetypeKeyOf({ archetype: "사라진 원형" })).toBeNull();
+  });
+
+  it("조련사는 경기 3일 안일 때만 지친 선발을 짚는다 — 체력 60이 경계다", () => {
+    const state = asCoach(createTestGame(11), "drill_sergeant");
+    fixtureIn(state, 3);
+    const starters = assignmentsOf(state, state.userTeamId, "starting")
+      .map((a) => playerById(state, a.playerId))
+      .filter((p): p is NonNullable<typeof p> => p !== null);
+    for (const p of starters) p.state.condition = 90;
+    const worn = starters[0]!;
+
+    worn.state.condition = 61;
+    expect(coachCues(state).some((c) => c.code === "tired")).toBe(false);
+
+    worn.state.condition = 60;
+    const cue = coachCues(state).find((c) => c.code === "tired");
+    expect(cue?.fact).toContain(`${worn.name} 60`);
+    expect(cue?.playerIds).toContain(worn.id);
+
+    // 나흘 뒤 경기는 아직 회복이 걸리는 자리가 아니다
+    state.date = addDays(state.date, -1);
+    expect(coachCues(state).some((c) => c.code === "tired")).toBe(false);
+  });
+
+  it("원형이 다르면 다른 갈래의 사실이 선다 — 같은 세이브, 같은 날", () => {
+    const base = createTestGame(11);
+    fixtureIn(base, 2);
+    const codesOf = (key: string) =>
+      coachCues(asCoach(structuredClone(base), key)).map((c) => c.code);
+
+    const sergeant = codesOf("drill_sergeant");
+    const analyst = codesOf("analyst");
+    const tactician = codesOf("veteran_tactician");
+    expect(analyst.length).toBeGreaterThan(0);
+    expect(tactician.length).toBeGreaterThan(0);
+    for (const code of analyst) expect(sergeant).not.toContain(code);
+    for (const code of tactician) expect(analyst).not.toContain(code);
+    // 한 턴에 두 장까지 — 갈래가 셋인 원형도 자리는 둘이다
+    expect(analyst.length).toBeLessThanOrEqual(2);
+  });
+
+  it("자리보다 갈래가 많으면 날짜로 굴러 뒷 사실도 차례가 온다", () => {
+    const base = asCoach(createTestGame(11), "analyst");
+    fixtureIn(base, 5);
+    const one = (offset: number) => {
+      const day = structuredClone(base);
+      day.date = addDays(base.date, offset);
+      return coachCues(day, 1).map((c) => c.code);
+    };
+    const seen = new Set([...one(0), ...one(1)]);
+    // 한 장만 실리는 날에도 같은 사실이 이틀 연속 맨 앞에 서지 않는다
+    expect(seen.size).toBe(2);
+  });
+
+  it("무직이면 벤치에 앉을 사람이 없다 — 한 장도 서지 않는다", () => {
+    const state = asCoach(createTestGame(11), "club_loyalist");
+    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    expect(coachCues(state)).toEqual([]);
+  });
+
+  /**
+   * 훈련 결산은 **원형이 고르지 않는다** — 훈련장은 어느 원형이든 이 코치가 여는
+   * 자리라, 눈 하나로 넣으면 그 원형을 쓰는 감독에게만 자기 훈련의 결과가 닿는다
+   * (people.md §7-1 · season.md §4).
+   */
+  it("훈련 결산은 원형 앞에 서고 2장 상한을 지지 않는다", () => {
+    const base = createTestGame(11);
+    fixtureIn(base, 2);
+    const someone = userPlayers(base)[0]!;
+    base.trainingReports = [
+      {
+        from: addDays(base.date, -6),
+        to: base.date,
+        sessions: 6,
+        moved: [{ gamePlayerId: someone.id, target: "tactical", delta: 1 }],
+        marks: [{ gamePlayerId: someone.id, code: "standout", note: "마지막까지 남았다" }],
+      },
+    ];
+    const cuesOf = (key: string) => coachCues(asCoach(structuredClone(base), key));
+
+    for (const key of COACH_EYE_KEYS) {
+      expect(cuesOf(key)[0]?.code, `${key}에게 결산이 첫 줄로 서지 않았다`).toBe("training-report");
+    }
+    // 원형의 두 장은 그대로다 — 결산이 자리를 뺏지 않는다 (갈래가 셋인 원형)
+    const analyst = cuesOf("analyst");
+    expect(analyst.filter((c) => c.code !== "training-report")).toHaveLength(2);
+    // 눈을 되찾지 못한 원형에게도 이 한 장은 간다
+    const orphan = coachCues(asCoach(structuredClone(base), "club_loyalist"));
+    expect(orphan[0]!.fact).toContain(`${someone.name}`);
+    expect(orphan[0]!.fact).toContain("두드러짐");
+
+    // 창(3일)을 넘긴 카드는 소식이 아니라 기록이다 — 달력이 갖는다
+    const stale = structuredClone(base);
+    stale.date = addDays(base.date, 4);
+    expect(coachCues(stale).some((c) => c.code === "training-report")).toBe(false);
+  });
+
+  /**
+   * 임대 리포트도 **원형이 고르지 않는다** — 리콜은 이적 창 안에서만 되는 결정이라,
+   * 유스형이 아닌 코치를 쓰는 감독이 근거 없이 복귀일을 맞으면 안 된다
+   * (season.md §2 임대).
+   */
+  it("임대 리포트는 이달 1일에 서고 사흘 뒤 사라진다 — 임대가 없으면 서지 않는다", () => {
+    const base = createTestGame(11);
+    base.date = `${base.date.slice(0, 7)}-01`;
+    // 임대가 하나도 없으면 자리를 채우려고 사실을 만들지 않는다
+    expect(coachCues(base).some((c) => c.code === "loan-report")).toBe(false);
+
+    const target =
+      userPlayers(base).find((p) => p.squadLevel === "reserve") ?? userPlayers(base)[0]!;
+    target.teamId = "chelsea";
+    target.loan = {
+      fromTeamId: base.userTeamId,
+      until: addDays(base.date, 180),
+      wageShare: 0.5,
+    };
+
+    // 유망주를 보지 않는 원형에게도 이 한 장은 간다 — 원형의 자리를 쓰지 않는다
+    const elsewhere = coachCues(asCoach(structuredClone(base), "club_loyalist"));
+    const cue = elsewhere.find((c) => c.code === "loan-report");
+    expect(cue?.fact).toContain(target.name);
+    expect(cue?.playerIds).toContain(target.id);
+
+    // 창 안이면 선다 — 사흘째까지
+    const on = (offset: number) => {
+      const day = structuredClone(base);
+      day.date = addDays(base.date, offset);
+      return coachCues(day).some((c) => c.code === "loan-report");
+    };
+    expect(on(3)).toBe(true);
+    // 나흘째는 소식이 아니라 기록이다 — 다음 달 1일이 새로 세운다
+    expect(on(4)).toBe(false);
+  });
+
+  it("아무것도 안 움직인 구간도 사실로 선다 — 빈자리는 지어낸다", () => {
+    const state = createTestGame(11);
+    state.trainingReports = [
+      { from: state.date, to: state.date, sessions: 2, moved: [], marks: [] },
+    ];
+    const cue = coachCues(state).find((c) => c.code === "training-report");
+    expect(cue?.fact).toContain("훈련 2회 결산");
+    expect(cue?.fact).toContain("장부에 남은 변화 없음");
   });
 });

@@ -36,6 +36,11 @@ export interface CalScheduleRow {
   note: string | null;
   /** 날짜만 잡혀 있고 대진은 아직 없다 (`cup-round`) */
   pending: boolean;
+  /**
+   * 되돌아볼 경기 (`MATCH.id`) — **결과가 남은 행만** 갖는다 (match.md §8).
+   * 리포트를 여는 열쇠이고, 종료 카드가 쓰는 것과 같은 id다.
+   */
+  matchId: string | null;
   /** 다음 경기 */
   next: boolean;
 }
@@ -50,6 +55,7 @@ const EMPTY = {
   note: null,
   pending: false,
   next: false,
+  matchId: null,
 } satisfies Omit<CalScheduleRow, "id" | "time" | "icon" | "name">;
 
 export function scheduleRowOf(e: CalEntry): CalScheduleRow {
@@ -69,6 +75,8 @@ export function scheduleRowOf(e: CalEntry): CalScheduleRow {
       // 득점자 — 경기 엔트리의 `detail`이 그것 하나다
       note: e.detail,
       next: e.isNext,
+      // 결과가 없는 경기에는 되돌아볼 것이 아직 없다
+      matchId: e.result === null ? null : e.match.matchId,
     };
   }
 
