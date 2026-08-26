@@ -251,6 +251,8 @@ export const AI_MARKET = defineHarness({
     { metric: "문의까지 오른 비중", role: "guard", min: 0.15, unit: "ratio", why: "밖에 나지 않는 관심만 쌓이면 사다리가 장식이다" },
     { metric: "오퍼가 된 비중", role: "guard", min: 0.05, max: 0.6, unit: "ratio", why: "관심이 전부 오퍼가 되면 사다리가 지연일 뿐이고, 하나도 안 되면 오퍼가 마른다" },
     { metric: "우리에게 온 오퍼", role: "measure", unit: "count", why: "우리에게 도착한 매각 오퍼 전부 — 관심 갈래와 이적 요청 갈래(§1-1)가 함께 든다" },
+    { metric: "AI 사전 계약", role: "measure", unit: "count", why: "한 시즌에 다른 구단이 우리 만료 선수에게 건 예약 수 (§1-4). 감독이 재계약을 한 번도 열지 않는 하네스라 0이면 노림이 죽은 것이고, 스쿼드의 만료 주전 수보다 크면 무언가 두 번 세고 있다" },
+    { metric: "사전 계약 창 선수", role: "measure", unit: "count", why: "발효일 기준 창(§1-4) 안에 든 타 구단 선수 수 — 감독 쪽 손잡이에 과녁이 있기는 한가. `runAiRenewals`가 만료 240일 안의 주전을 서둘러 잡으므로 여기 남는 것은 대체로 노장과 잉여다" },
   ],
 });
 
