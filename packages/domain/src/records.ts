@@ -772,6 +772,12 @@ export const SeasonStatSchema = z.object({
    * 마지막 번호가 그 시즌의 번호다. 구 세이브엔 없어 optional.
    */
   squadNumber: z.number().int().min(1).max(SQUAD_NUMBER_MAX).optional(),
+  /**
+   * 그때의 **이름** — 은퇴하면 선수가 `state.players`에서 빠져 id로는 더 못 찾는다
+   * (`SeasonAward.playerName`·`Achievement.playerName`과 같은 이유). 역대 득점왕과
+   * 통산 표가 사라진 이름을 되찾는 유일한 자리다. 구 세이브엔 없어 optional.
+   */
+  playerName: z.string().min(1).optional(),
 });
 export type SeasonStat = z.infer<typeof SeasonStatSchema>;
 
@@ -1520,19 +1526,81 @@ export const FinanceReportSchema = z.object({
 export type FinanceReport = z.infer<typeof FinanceReportSchema>;
 
 /**
- * 한 시즌 한 리그의 **최종 순위** — 구단 체급 재산정의 성적 축이 읽는다
- * (team.md §2.1). 시즌 롤오버가 승강을 적용하기 **전에** 남기고 최근 세 시즌만 든다.
+ * 한 시즌 한 리그의 최종 순위표 **한 행** (game-state.md §3.3).
  *
- * 감독의 `SEASON_RECORD`로는 이 축을 잴 수 없다 — 그 표는 감독 팀만 쌓이므로
- * 나머지 클럽은 영원히 중립이 된다.
+ * 이름도 득실도 적지 않는다 — 이름은 카탈로그가 갖고 득실은 두 수의 차다. 저장하는
+ * 것은 그 시즌이 지나면 되돌릴 수 없는 것뿐이다.
  */
-export const LeagueFinalTableSchema = z.object({
-  season: z.number().int(),
-  leagueId: z.string().min(1),
-  /** 1위부터 차례로 */
-  order: z.array(z.string().min(1)),
+export const SeasonTableRowSchema = z.object({
+  teamId: z.string().min(1),
+  /**
+   * 그 시즌 그 리그의 성적. **옛 `leagueHistory`에서 이관된 행은 순서만 안다** —
+   * 그때 남긴 것이 팀 id 순서뿐이라 없는 수를 0으로 지어내지 않는다 (optional).
+   */
+  record: z
+    .object({
+      played: z.number().int().min(0),
+      wins: z.number().int().min(0),
+      draws: z.number().int().min(0),
+      losses: z.number().int().min(0),
+      goalsFor: z.number().int().min(0),
+      goalsAgainst: z.number().int().min(0),
+      points: z.number().int(),
+    })
+    .optional(),
 });
-export type LeagueFinalTable = z.infer<typeof LeagueFinalTableSchema>;
+export type SeasonTableRow = z.infer<typeof SeasonTableRowSchema>;
+
+/** 한 시즌 한 리그의 최종 순위표 — 1위부터 차례로 */
+export const SeasonLeagueTableSchema = z.object({
+  leagueId: z.string().min(1),
+  rows: z.array(SeasonTableRowSchema),
+});
+export type SeasonLeagueTable = z.infer<typeof SeasonLeagueTableSchema>;
+
+/**
+ * 지난 시즌 **감독 팀의 경기 한 줄** (season.md §6).
+ *
+ * `state.matches`는 새 시즌 일정으로 통째로 교체되므로 여기 옮겨 적지 않으면 사라진다.
+ * 옮기는 것은 감독 팀의 경기뿐이다 — 세계 전체 2,300경기는 시즌당 수 MB다.
+ */
+export const SeasonMatchRowSchema = z.object({
+  date: DateString,
+  /** 대회 id — 친선은 남기지 않으므로 언제나 있다 */
+  competitionId: z.string().min(1),
+  /** 녹아웃 단계(`final`·`sf`…) — 리그 경기엔 없다 */
+  stage: z.string().min(1).optional(),
+  opponentTeamId: z.string().min(1),
+  venue: z.enum(["home", "away", "neutral"]),
+  goalsFor: z.number().int().min(0),
+  goalsAgainst: z.number().int().min(0),
+  /** 승부차기로 갈린 경기만 — 스코어를 바꾸지 않고 옆에 선다 */
+  penalties: z
+    .object({ for: z.number().int().min(0), against: z.number().int().min(0) })
+    .optional(),
+});
+export type SeasonMatchRow = z.infer<typeof SeasonMatchRowSchema>;
+
+/**
+ * **시즌 결산 스냅샷** — 지나간 시즌마다 한 행 (game-state.md §3.3 · season.md §6).
+ *
+ * 시즌 전환이 `state.matches`를 갈아 끼우기 **전에**, 승강을 적용하기 **전에**
+ * 남긴다. 구단 체급의 성적 축·역대 순위표·기록 경신·`get_history`가 전부 이 한 표를
+ * 읽는다 — 우승자는 여기 없다(리그는 표의 1위, 녹아웃은 `TROPHY`).
+ */
+export const SeasonHistorySchema = z.object({
+  season: z.number().int(),
+  /** 그해 리그전을 돈 리그마다 하나 — 리그 id 오름차순 */
+  leagues: z.array(SeasonLeagueTableSchema),
+  /**
+   * 그 시즌 감독의 팀 — 아래 경기 줄이 누구의 것인가. 이적하면 시즌마다 다르다.
+   * 옛 `leagueHistory`에서 이관된 행엔 없다 (optional).
+   */
+  teamId: z.string().min(1).optional(),
+  /** 그 팀의 경기 — 날짜 오름차순. 이관된 행은 빈 배열이다 */
+  matches: z.array(SeasonMatchRowSchema),
+});
+export type SeasonHistory = z.infer<typeof SeasonHistorySchema>;
 
 // ── 감독 커리어 (정규화) ──────────────────────────────
 /**
@@ -1622,7 +1690,13 @@ export const TrophySchema = z.object({
   competitionId: z.string().min(1).optional(),
   /** 옛 세이브가 들고 있는 표시 이름 — 새 줄은 적지 않는다 (`competitionId`의 폴백) */
   competition: z.string().min(1).optional(),
+  /** 우승 팀 */
   teamId: z.string().min(1),
+  /**
+   * 결승에서 진 팀 — **준우승은 그 우승이 누구를 꺾은 것인가라는 사실**이라 같은 줄에
+   * 선다. 리그에는 결승이 없어 비고(그 시즌 2위는 순위표의 2위다), 옛 세이브엔 없다.
+   */
+  runnerUpTeamId: z.string().min(1).optional(),
 });
 export type Trophy = z.infer<typeof TrophySchema>;
 
