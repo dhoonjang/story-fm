@@ -26,7 +26,10 @@ const AXIS_WEIGHTS = { size: 0.5, squad: 0.3, recent: 0.2 } as const;
 /** 규모 축 안에서 구장과 브랜드를 반씩 — 둘 다 클럽의 크기를 재는 자다 */
 const SIZE_MIX = { capacity: 0.5, brand: 0.5 } as const;
 
-/** 최근 성적으로 세는 시즌 수 — 순위표를 남기는 쪽(`recordLeagueHistory`)도 이 값을 쓴다 */
+/**
+ * 최근 성적으로 세는 시즌 수 — **자르는 자리는 여기 하나다.** 결산 스냅샷
+ * (`state.history`)은 역사라 시즌을 버리지 않는다 (season.md §6).
+ */
 export const RECENT_SEASONS = 3;
 
 /** 기록도 자료도 없을 때의 값 — 위로도 아래로도 밀지 않는다 */
@@ -84,23 +87,31 @@ function percentileIn(values: readonly number[], value: number): number {
 }
 
 /**
- * 최근 성적 — 최근 세 시즌 리그 최종 순위의 **리그 크기 대비 백분위** 평균 (1위가 1.0,
- * 꼴찌가 0.0). 기록이 없는 클럽(첫 시즌, 리그전을 돌지 않는 2부)은 중립이다.
+ * 최근 성적 — 최근 `RECENT_SEASONS`시즌 리그 최종 순위의 **리그 크기 대비 백분위**
+ * 평균 (1위가 1.0, 꼴찌가 0.0). 기록이 없는 클럽(첫 시즌, 리그전을 돌지 않는 2부)은
+ * 중립이다.
  *
- * 원본은 시즌 롤오버가 남긴 리그별 순위표(`state.leagueHistory`)다 — **전 클럽이 같은
- * 표를 읽는다.** 감독의 `SEASON_RECORD`를 읽던 시절엔 그 표가 감독 팀만 쌓여서 나머지
- * 96클럽이 언제나 중립이었고, 세 축 중 하나가 AI 구단에게는 없는 축이었다.
+ * 원본은 시즌 결산 스냅샷(`state.history`)이다 — **전 클럽이 같은 표를 읽는다.**
+ * 감독의 `SEASON_RECORD`를 읽던 시절엔 그 표가 감독 팀만 쌓여서 나머지 96클럽이
+ * 언제나 중립이었고, 세 축 중 하나가 AI 구단에게는 없는 축이었다.
+ *
+ * ⚠️ **창을 자르는 것은 읽는 이 자리다.** 장부는 지나간 시즌을 다 들고 있으므로
+ * (역사다 — season.md §6), 여기서 자르지 않으면 열 시즌 전 순위가 오늘의 체급을 민다.
+ * 승점을 모르는 이관 행도 **순서는 안다** — 이 축은 순위만 보므로 그대로 든다.
  *
  * 이 축만은 따로 정규화하지 않는다 — 순위를 리그 크기로 나눈 값이 이미 백분위다.
  */
 function recentForm(state: GameState, teamId: string): number {
   const scores: number[] = [];
-  for (const table of state.leagueHistory ?? []) {
-    const index = table.order.indexOf(teamId);
-    if (index < 0) continue;
-    const size = table.order.length;
-    if (size <= 1) continue;
-    scores.push((size - (index + 1)) / (size - 1));
+  for (const past of state.history ?? []) {
+    if (past.season <= state.season - RECENT_SEASONS) continue;
+    for (const league of past.leagues) {
+      const index = league.rows.findIndex((r) => r.teamId === teamId);
+      if (index < 0) continue;
+      const size = league.rows.length;
+      if (size <= 1) continue;
+      scores.push((size - (index + 1)) / (size - 1));
+    }
   }
   if (scores.length === 0) return NEUTRAL;
   return scores.reduce((sum, s) => sum + s, 0) / scores.length;

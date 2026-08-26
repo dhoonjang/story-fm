@@ -174,8 +174,19 @@ export function advanceSuperCups(state: GameState, digest: string[]): void {
     );
     if (!settled) continue;
 
+    /**
+     * **우승은 세계의 사실이라 전 구단의 것으로 적힌다** (career.md §6). 슈퍼컵만은
+     * 시즌 리뷰가 아니라 tick이 정산하므로 원장도 여기서 적는다 — 위 `settled`가
+     * `payPrize`의 멱등 키라, 매일 부르는 이 함수가 같은 줄을 두 번 적지 않는다.
+     */
+    state.trophies.push({
+      season: state.season,
+      competitionId: cup.id,
+      teamId: champion,
+      runnerUpTeamId: runnerUp,
+    });
+
     if (champion === state.userTeamId) {
-      state.trophies.push({ season: state.season, competitionId: cup.id, teamId: champion });
       digest.push(`🏆 ${cup.name} 우승 — ${teamNameIn(state, runnerUp)}을 꺾었다`);
       pushNarrative(state, `${cup.name} 우승`, 4);
     } else if (runnerUp === state.userTeamId) {

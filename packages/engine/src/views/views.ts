@@ -97,6 +97,15 @@ import {
   knockoutStages,
 } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
+import {
+  championOf,
+  clubRecordsOf,
+  leagueTableOf,
+  managerTenureOf,
+  managerTrophiesOf,
+  pastSeasonsOf,
+  seasonLabelOf,
+} from "../competition/records";
 import { DOMESTIC_STAGES, domesticCupById } from "../data/domestic-cup-catalog";
 import { domesticCupsOf, userStillIn } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
@@ -883,6 +892,107 @@ export interface RecentResultView {
 }
 
 /**
+ * 그 대회에서 **우리 구단**의 역대 우승 — 시드와 게임 안의 우승을 더한 것
+ * (career.md §6 · `clubRecordsOf`).
+ *
+ * ⚠️ **없으면 이 조각 자체가 `null`이다.** 카탈로그에 `honours`가 없는 구단은
+ * 0회가 아니라 **모르는** 것이라(team.md §1) 화면에 `0회`를 세우면 안 된다.
+ * `"3년 만의 우승"` 같은 문장도 여기 없다 — 사실만 내고 문장은 화면이 잇는다.
+ */
+export interface CompetitionHonoursView {
+  /** 시드 + 게임 안 = 역대 */
+  count: number;
+  /** 게임이 시작되기 전의 몫 (카탈로그 `honours`) */
+  seeded: number;
+  /** 게임 안에서 든 우승 — 최근이 앞 */
+  won: { season: number; label: string }[];
+  /** 카탈로그가 든 마지막 연도 — `won`이 있으면 그쪽이 더 최신이다 */
+  lastYear: number | null;
+}
+
+/**
+ * 지난 시즌 순위표의 한 줄 — **이름은 코어가 붙여 내린다.**
+ *
+ * 결산 스냅샷은 팀 id만 들고(game-state.md §3.3) 이름은 카탈로그·세이브가 갖는데,
+ * 화면이 그걸 뒤지면 엔진을 값으로 import하게 된다 (AGENTS.md §5).
+ */
+export interface SeasonTableRowView {
+  /** 1부터 — 스냅샷의 행 순서가 곧 순위다 */
+  position: number;
+  teamId: string;
+  name: string;
+  short: string;
+  /** 우리 구단인가 — 지금 맡은 구단 기준이다 (아래 `pastSeasons`) */
+  ours: boolean;
+  /**
+   * 그 시즌 성적 — **옛 세이브에서 이관된 행은 `null`이다.** 그런 행이 아는 것은
+   * 순서뿐이라(game-state.md §3.3) 승점 칸을 0으로 채우면 없는 사실이 생긴다.
+   */
+  record: {
+    played: number;
+    wins: number;
+    draws: number;
+    losses: number;
+    goalsFor: number;
+    goalsAgainst: number;
+    goalDiff: number;
+    points: number;
+  } | null;
+}
+
+/**
+ * 그 시즌 그 리그의 시상 한 건 — **코드와 근거 수치만** (season.md §6 · 철칙 4).
+ * 상의 이름은 `awardTitle(code)`가 주고 문장은 화면이 쓴다.
+ */
+export interface CompetitionAwardView {
+  code: string;
+  playerName: string;
+  teamName: string;
+  teamShort: string;
+  apps: number;
+  goals: number;
+  assists: number;
+  /** 시즌 평점 — 출전이 없으면 없다 */
+  rating?: number;
+  /** `young-player`가 센 나이 */
+  age?: number;
+}
+
+/** 역대 절에 서는 팀 한 칸 — 우승·준우승이 같은 조각을 쓴다 */
+export interface SeasonTeamView {
+  teamId: string;
+  name: string;
+  short: string;
+  /** 우리 구단인가 — 컵은 순위표가 없어 이 칸만이 "우리 해였나"를 말한다 */
+  ours: boolean;
+}
+
+/**
+ * 지나간 시즌 한 줄 — 그 시즌 이 대회가 남긴 것 (season.md §6).
+ *
+ * 우승·준우승은 **표와 트로피에서 파생한다**: 리그는 순위표의 1위·2위, 녹아웃은
+ * `TROPHY`의 우승 팀·결승에서 진 팀. 우승자를 따로 적지 않는 이유가 그것이다
+ * (game-state.md §3.3).
+ *
+ * ⚠️ **우리**는 언제나 **지금 맡은 구단**이다. 감독이 옮겨 다녀도 대회 탭의 역대
+ * 절은 이 구단의 역사이고, 감독의 이력은 커리어 화면이 따로 든다 (career.md §6).
+ */
+export interface CompetitionSeasonView {
+  season: number;
+  /** `2026-27` — 시즌 번호를 연도로 읽는 한 자리 (`seasonLabelOf`) */
+  label: string;
+  champion: SeasonTeamView | null;
+  /** 준우승 — 리그는 표의 2위, 녹아웃은 결승에서 진 팀. 옛 트로피엔 없다 */
+  runnerUp: SeasonTeamView | null;
+  /** 그 시즌 우리 구단의 순위 — 그 리그에 없었으면 null (다른 리그·컵) */
+  ourPosition: number | null;
+  /** 그 시즌 최종 순위표 — 리그전을 돈 대회만. 컵은 빈 배열이다 */
+  table: SeasonTableRowView[];
+  /** 그 시즌 이 리그의 시상 — 리그의 상뿐이라 컵은 빈 배열이다 (season.md §6) */
+  awards: CompetitionAwardView[];
+}
+
+/**
  * 대회 하나 — 순위표 + 라운드별 일정 (+ 대항전이면 브래킷).
  * 우리가 나가는 대회만 만든다 (감독의 관심 범위 = 우리 리그 + 우리 대항전).
  */
@@ -910,6 +1020,16 @@ export interface CompetitionView {
   cupProgress: CupProgressView;
   /** 대항전 전용 — 리그 페이즈 통과 경계선 */
   europe: EuropeView | null;
+  /**
+   * 이 대회에서 **우리 구단**의 역대 우승 — 시드도 게임 안의 우승도 없으면 null.
+   * 없는 것은 0회가 아니라 모르는 것이다 (team.md §1).
+   */
+  honours: CompetitionHonoursView | null;
+  /**
+   * 지나간 시즌 — 최근이 앞. 첫 시즌엔 빈 배열이고, 그 시즌 이 대회에 대해 아는
+   * 것이 하나도 없는 해는 줄을 세우지 않는다.
+   */
+  pastSeasons: CompetitionSeasonView[];
 }
 
 /**
@@ -2086,6 +2206,99 @@ function nextMatchView(state: GameState, m: MatchRecord, label: string): NextMat
  * 대항전은 리그 페이즈(R1~8) 뒤에 2차전제 녹아웃 단계가 붙는다. `current`는 오늘
  * 이후 첫 라운드(전부 끝났으면 마지막)로, UI가 여기서부터 보여준다.
  */
+/**
+ * 역대 절 — **원장을 접는 자리는 `competition/records.ts` 하나다.**
+ *
+ * 여기서 하는 일은 그 파생값에 이름을 붙여 화면으로 내리는 것뿐이다: 화면이
+ * 카탈로그를 뒤지면 엔진을 값으로 import하게 되고, 그 순간 `next build`가 죽는다
+ * (AGENTS.md §5). 문장은 만들지 않는다 — `"3년 만의 우승"`은 화면이 잇는다.
+ */
+function competitionHonoursOf(
+  state: GameState,
+  competitionId: string,
+): CompetitionHonoursView | null {
+  const title = clubRecordsOf(state, state.userTeamId).titles.find(
+    (t) => t.competitionId === competitionId,
+  );
+  // 시드도 게임 안의 우승도 없다 — 0회가 아니라 **모른다** (team.md §1)
+  if (!title) return null;
+  return {
+    count: title.count,
+    seeded: title.seeded,
+    won: title.seasons.map((season) => ({ season, label: seasonLabelOf(season) })),
+    lastYear: title.lastYear ?? null,
+  };
+}
+
+/** 지난 시즌 표·트로피에 서는 팀 한 칸 — 이름은 그때가 아니라 지금 것이다 */
+function seasonTeamView(state: GameState, teamId: string): SeasonTeamView {
+  return {
+    teamId,
+    name: teamNameIn(state, teamId),
+    short: teamShortNameIn(state, teamId),
+    ours: teamId === state.userTeamId,
+  };
+}
+
+/**
+ * 지나간 시즌들 — 결산 스냅샷(`state.history`)에서 이 대회의 몫만 접는다.
+ *
+ * ⚠️ **이 대회에 대해 아는 것이 하나도 없는 해는 줄을 세우지 않는다.** 다른 리그에
+ * 있었거나 그해 이 컵이 열리지 않았으면 표도 우승자도 없고, 빈 줄은 "우승 없음"이라는
+ * 없는 사실이 된다.
+ */
+function competitionSeasonsOf(state: GameState, competitionId: string): CompetitionSeasonView[] {
+  const awards = state.awards ?? [];
+  const seasons: CompetitionSeasonView[] = [];
+  for (const history of pastSeasonsOf(state)) {
+    const season = history.season;
+    const rows = leagueTableOf(state, season, competitionId);
+    const champion = championOf(state, season, competitionId);
+    if (!rows && champion === null) continue;
+    // 녹아웃은 트로피가 준우승까지 한 줄에 든다. 리그는 결승이 없어 2위가 그 자리다
+    const runnerUp = rows
+      ? (rows[1]?.teamId ?? null)
+      : (state.trophies.find((t) => t.season === season && t.competitionId === competitionId)
+          ?.runnerUpTeamId ?? null);
+    const table = (rows ?? []).map((row, i): SeasonTableRowView => {
+      const record = row.record;
+      return {
+        position: i + 1,
+        teamId: row.teamId,
+        name: teamNameIn(state, row.teamId),
+        short: teamShortNameIn(state, row.teamId),
+        ours: row.teamId === state.userTeamId,
+        // 이관된 행은 순서만 안다 — 없는 수를 0으로 지어내지 않는다 (game-state.md §3.3)
+        record: record ? { ...record, goalDiff: record.goalsFor - record.goalsAgainst } : null,
+      };
+    });
+    const ourRow = table.findIndex((r) => r.ours);
+    seasons.push({
+      season,
+      label: seasonLabelOf(season),
+      champion: champion === null ? null : seasonTeamView(state, champion),
+      runnerUp: runnerUp === null ? null : seasonTeamView(state, runnerUp),
+      ourPosition: ourRow < 0 ? null : ourRow + 1,
+      table,
+      // 시상은 리그의 상뿐이라(season.md §6) 컵 id로는 한 건도 걸리지 않는다
+      awards: awards
+        .filter((a) => a.season === season && a.leagueId === competitionId)
+        .map((a) => ({
+          code: a.code,
+          playerName: a.playerName,
+          teamName: teamNameIn(state, a.teamId),
+          teamShort: teamShortNameIn(state, a.teamId),
+          apps: a.apps,
+          goals: a.goals,
+          assists: a.assists,
+          ...(a.rating === undefined ? {} : { rating: a.rating }),
+          ...(a.age === undefined ? {} : { age: a.age }),
+        })),
+    });
+  }
+  return seasons;
+}
+
 function buildCompetitionView(state: GameState, competitionId: string): CompetitionView {
   const cup = isCup(competitionId);
   const matches = state.matches
@@ -2176,6 +2389,8 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
     cupProgress,
     // 통과 경계선은 리그 페이즈가 있는 대항전에만 있다 (국내 컵은 순위표가 없다)
     europe: isEuroCup(competitionId) ? buildEuropeView(state, competitionId) : null,
+    honours: competitionHonoursOf(state, competitionId),
+    pastSeasons: competitionSeasonsOf(state, competitionId),
   };
 }
 
@@ -2438,6 +2653,8 @@ function boardView(state: GameState): OfficeViews["finance"]["board"] {
 
 export function buildOfficeViews(state: GameState): OfficeViews {
   const userTeamId = state.userTeamId;
+  /** 감독의 것을 가르는 자 — 보관함과 시상 줄이 같은 판정을 쓴다 (career.md §6) */
+  const managedThen = managerTenureOf(state);
   /**
    * 명단 표는 **우리 계약**을 센다 — 임대 보낸 선수도 우리 선수다 (transfer.md §2).
    * 넓히는 것은 이 표 하나뿐이다: 재정·등록 명단·전술은 **부릴 수 있는 인원**을
@@ -3197,7 +3414,11 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           playerName:
             s.kind === "player-bonus" && s.ref ? (playerById(state, s.ref)?.name ?? null) : null,
         })),
-      trophies: state.trophies.map((t) => ({
+      /**
+       * 보관함은 **감독의 것만** — 원장은 전 구단의 우승을 든다 (career.md §6).
+       * 그대로 실으면 AI 구단의 우승이 감독의 보관함에 선다.
+       */
+      trophies: managerTrophiesOf(state).map((t) => ({
         competition: t.competitionId ? competitionName(t.competitionId) : (t.competition ?? ""),
         season: t.season,
         teamName: teamNameIn(state, t.teamId),
@@ -3212,11 +3433,9 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         goals: a.goals,
         matches: a.matches,
       })),
-      // 감독이 그 시즌 그 팀에 있었는가 — 시즌 기록이 그 답을 갖고 있다 (career.md §6)
+      // 감독이 그 시즌 그 팀에 있었는가 — 트로피 보관함과 **같은 자**로 잰다 (career.md §6)
       awards: (state.awards ?? [])
-        .filter((a) =>
-          state.seasonRecords.some((r) => r.season === a.season && r.teamId === a.teamId),
-        )
+        .filter((a) => managedThen(a.season, a.teamId))
         .map((a) => ({
           code: a.code,
           season: a.season,

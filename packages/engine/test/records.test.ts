@@ -4,12 +4,15 @@ import {
   activeSuspension,
   assignmentsOf,
   buildOfficeViews,
+  clubRecordsOf,
   foldCareer,
   isSuspended,
   milestonesReached,
+  recordBreaksOf,
   seasonYellowsOf,
   userPlayers,
   weeklyWagesOf,
+  type GameState,
 } from "@story-fm/engine";
 import {
   BookingSchema,
@@ -334,5 +337,158 @@ describe("통산 기록 · 마일스톤", () => {
     expect(milestoneTitle("goals", 50)).toBe("50골");
     expect(milestoneTitle("hat-trick", 3)).toBe("해트트릭");
     expect(milestoneTitle("hat-trick", 4)).toBe("한 경기 4골");
+  });
+});
+
+/**
+ * 구단의 역사는 **전부 파생이다** — 원본은 시즌 결산 스냅샷(`state.history`)과 우승
+ * 원장(`state.trophies`), 그리고 카탈로그의 시드 우승뿐이다 (career.md §6).
+ *
+ * 재는 것은 그 접는 공식과 경계다: 견줄 표가 없을 때, 승점을 모르는 이관 행이 섞였을
+ * 때, 시드와 게임 안의 우승이 만났을 때.
+ *
+ * **두 함수가 읽는 조각만 든 세계다** — `clubRecordsOf`·`recordBreaksOf`는 `history`·
+ * `trophies`·`awards`와 카탈로그의 시드 우승만 보므로, `createTestGame()`으로 세계를
+ * 지으면 한 번에 1초를 내고 얻는 것이 없다 (AGENTS.md §5 · `season.test.ts`의 시상 판정과
+ * 같은 규약).
+ */
+describe("구단 역대 기록 · 기록 경신", () => {
+  /** 카탈로그가 시드 우승을 든 실제 구단 — 역대 표는 그 시드 위에 게임 안의 우승을 얹는다 */
+  const us = "arsenal";
+  const LEAGUE = "epl";
+
+  /** 그 시즌 그 리그의 표 한 장 — 앞이 1위다. `points`가 없으면 **이관된 행**이다 */
+  function table(season: number, order: readonly string[], points?: (teamId: string) => number) {
+    return {
+      season,
+      leagues: [
+        {
+          leagueId: LEAGUE,
+          rows: order.map((teamId) => ({
+            teamId,
+            ...(points === undefined
+              ? {}
+              : {
+                  record: {
+                    played: 38,
+                    wins: 0,
+                    draws: 0,
+                    losses: 0,
+                    goalsFor: points(teamId),
+                    goalsAgainst: 0,
+                    points: points(teamId),
+                  },
+                }),
+          })),
+        },
+      ],
+      matches: [],
+    };
+  }
+
+  function recordState(
+    history: ReturnType<typeof table>[],
+    trophies: { season: number; competitionId: string; teamId: string }[] = [],
+  ): GameState {
+    return { season: 4, history, trophies, awards: [] } as unknown as GameState;
+  }
+
+  const mark = (over: Partial<{ points: number; goalsFor: number; position: number }> = {}) => ({
+    season: 4,
+    leagueId: LEAGUE,
+    points: 50,
+    goalsFor: 50,
+    position: 5,
+    ...over,
+  });
+
+  it("견줄 표가 없으면 경신도 없다 — 첫 시즌은 무엇을 해도 역대가 아니다", () => {
+    const state = recordState([]);
+    expect(clubRecordsOf(state, us).seasons).toBe(0);
+    expect(recordBreaksOf(state, us, mark({ points: 999, goalsFor: 999, position: 1 }))).toEqual(
+      [],
+    );
+  });
+
+  it("세 축은 옛 기록을 **넘었을 때만** 선다 — 같은 값은 경신이 아니다", () => {
+    const state = recordState([table(3, [us, "chelsea"], () => 80)]);
+
+    expect(recordBreaksOf(state, us, mark({ points: 80, goalsFor: 80, position: 1 }))).toEqual([]);
+
+    const broken = recordBreaksOf(state, us, mark({ points: 81, goalsFor: 81, position: 1 }));
+    expect(broken.map((b) => b.code)).toEqual(["club-record:points", "club-record:goals"]);
+    expect(broken[0]).toMatchObject({
+      season: 4,
+      leagueId: LEAGUE,
+      value: 81,
+      previous: 80,
+      previousSeason: 3,
+    });
+  });
+
+  it("순위는 작을수록 좋다 — 넘어선 것은 더 낮은 숫자다", () => {
+    const state = recordState([table(3, ["chelsea", us], () => 80)]);
+    expect(clubRecordsOf(state, us).bestPosition).toMatchObject({ season: 3, value: 2 });
+    expect(recordBreaksOf(state, us, mark({ position: 2 }))).toEqual([]);
+    expect(recordBreaksOf(state, us, mark({ position: 1 }))[0]).toMatchObject({
+      code: "club-record:position",
+      value: 1,
+      previous: 2,
+      previousSeason: 3,
+    });
+  });
+
+  /**
+   * 옛 세이브에서 이관된 행은 팀 id 순서뿐이다 (game-state.md §3.3). 0승 0패로 세면
+   * 그 시즌이 구단 최저 승점이 되므로 승점·득점 축에서는 아예 빠지고, **순위만은**
+   * 그 행도 아는 사실이라 함께 센다.
+   */
+  it("이관된 행은 승점 축에서 빠지고 순위 축에는 든다", () => {
+    const state = recordState([table(3, [us, "chelsea"])]);
+    const records = clubRecordsOf(state, us);
+    expect(records.bestPoints).toBeNull();
+    expect(records.mostGoals).toBeNull();
+    expect(records.bestPosition).toMatchObject({ season: 3, value: 1 });
+    // 그 시즌도 "장부가 아는 시즌"이다 — 순위를 알기 때문이다
+    expect(records.seasons).toBe(1);
+
+    expect(recordBreaksOf(state, us, mark({ points: 999, goalsFor: 999, position: 1 }))).toEqual(
+      [],
+    );
+  });
+
+  it("승점을 아는 시즌과 모르는 시즌이 섞이면 아는 쪽만 견준다", () => {
+    const state = recordState([table(2, [us, "chelsea"], () => 70), table(3, ["chelsea", us])]);
+    const records = clubRecordsOf(state, us);
+    expect(records.bestPoints).toMatchObject({ season: 2, value: 70 });
+    // 최고 순위는 두 시즌을 다 보고 고른다
+    expect(records.bestPosition).toMatchObject({ season: 2, value: 1 });
+    expect(records.seasons).toBe(2);
+  });
+
+  it("역대 우승은 카탈로그 시드와 게임 안의 우승을 더한 것이다", () => {
+    const seeded = clubRecordsOf(recordState([]), us).titles.find(
+      (t) => t.competitionId === LEAGUE,
+    )!;
+    expect(seeded.seeded).toBe(seeded.count);
+    expect(seeded.seasons).toEqual([]);
+
+    const state = recordState(
+      [],
+      [
+        { season: 2, competitionId: LEAGUE, teamId: us },
+        { season: 3, competitionId: LEAGUE, teamId: us },
+        // 남의 우승은 이 구단의 역대에 들지 않는다
+        { season: 3, competitionId: "facup", teamId: "chelsea" },
+      ],
+    );
+    const titles = clubRecordsOf(state, us).titles.find((t) => t.competitionId === LEAGUE)!;
+    expect(titles.count).toBe(seeded.seeded + 2);
+    expect(titles.seeded).toBe(seeded.seeded);
+    // 최근이 앞이다 — 역대 한 줄이 "마지막 우승"을 여기서 읽는다
+    expect(titles.seasons).toEqual([3, 2]);
+    // 남의 우승은 시드 그대로 둔다
+    const facup = clubRecordsOf(state, us).titles.find((t) => t.competitionId === "facup")!;
+    expect(facup.count).toBe(facup.seeded);
   });
 });

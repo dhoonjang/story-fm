@@ -19,7 +19,7 @@ import type {
   HistoryDigest,
   Injury,
   Interest,
-  LeagueFinalTable,
+  SeasonHistory,
   Dismissal,
   Manager,
   ManagerAttributes,
@@ -601,13 +601,15 @@ export interface GameState {
    */
   euroEntrants: EuroEntry[];
   /**
-   * 지난 시즌들의 리그 최종 순위 — 구단 체급 재산정의 성적 축이 읽는다
-   * (team.md §2.1). 시즌 전환에서 승강을 적용하기 **전에** 그해 리그전을 돈 리그마다
-   * 한 줄씩 남기고 최근 세 시즌만 든다. 새 시즌의 일정이 옛 경기를 밀어내므로
-   * (`state.matches` 교체) 순위표로 되돌릴 수 없는 값이다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * **시즌 결산 스냅샷** — 지나간 시즌마다 한 행 (game-state.md §3.3 · season.md §6).
+   *
+   * 시즌 전환이 승강을 적용하기 **전에**, `state.matches`를 새 시즌 일정으로 갈아
+   * 끼우기 **전에** 남긴다: 그해 리그전을 돈 리그의 최종 순위표 행 전체와 감독 팀의
+   * 경기 결과다. 새 시즌의 일정이 옛 경기를 밀어내므로 순위표로 되돌릴 수 없다.
+   * 구단 체급의 성적 축·역대 조회·기록 경신이 전부 이 한 표를 읽는다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지 · `migrateLeagueHistory`가 옮긴다).
    */
-  leagueHistory?: LeagueFinalTable[];
+  history?: SeasonHistory[];
 
   // ── 기록 ──
   injuries: Injury[];
@@ -1559,7 +1561,7 @@ export function ensureSeasonStat(
   state: GameState,
   playerId: string,
   teamId: string,
-  player?: Pick<GamePlayer, "squadNumber">,
+  player?: Pick<GamePlayer, "squadNumber" | "name">,
 ): SeasonStat {
   let stat = state.seasonStats.find(
     (s) => s.gamePlayerId === playerId && s.season === state.season && s.teamId === teamId,
@@ -1572,8 +1574,14 @@ export function ensureSeasonStat(
    * **그 시즌 그 셔츠의 등번호** — 번호 계보가 읽는 유일한 원본이다 (player.md §1.1).
    * 부를 때마다 덮어쓴다: 시즌 중에 번호가 바뀌면 마지막 번호가 그 시즌의 번호다.
    */
-  const number = (player ?? playerById(state, playerId))?.squadNumber;
-  if (number !== undefined) stat.squadNumber = number;
+  const known = player ?? playerById(state, playerId);
+  if (known?.squadNumber !== undefined) stat.squadNumber = known.squadNumber;
+  /**
+   * **그때의 이름** — 은퇴하면 선수가 `state.players`에서 빠져 id로는 더 못 찾는다
+   * (records.ts `SeasonStat.playerName`). 역대 득점왕과 통산 표가 사라진 이름을
+   * 되찾는 유일한 자리라, 등번호와 같은 자리에서 같은 규약으로 덮어쓴다.
+   */
+  if (known?.name !== undefined) stat.playerName = known.name;
   return stat;
 }
 
@@ -2896,7 +2904,7 @@ export function createGame(input: CreateGameInput): GameState {
     // 카탈로그는 읽을 때 이미 벗겨져 들어온다(`world/catalog.ts`) — 새 세이브에
     // 벗길 것은 없고, 여기서 서는 자리부터 적립이 쌓인다
     mirrorProficiencyStripped: true,
-    leagueHistory: [],
+    history: [],
     seasonRecords: [],
     trophies: [],
     achievements: [],

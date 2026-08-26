@@ -19,6 +19,7 @@ import {
   migrateConditions,
   migrateFormScale,
   migrateGrowthSources,
+  migrateLeagueHistory,
   migrateManagerAxes,
   migrateMatchStats,
   migrateMirrorProficiency,
@@ -368,6 +369,8 @@ const REQUIRED_TABLES = [
 function migrate(save: Record<string, unknown>, state: GameState): void {
   fillEmptyTables(save);
   migrateManagerAxes(save);
+  // 옛 리그 순위표 → 시즌 결산 스냅샷 (game-state.md §3.3)
+  migrateLeagueHistory(save);
   // 위치선정 한 축 → 위치선정·침투. `offTheBall`의 부재가 마커라 한 번만 돈다
   // (player.md §13.5) — 아래 종합 재계산이 갈린 두 축을 읽는다
   splitPositioningAxis(state);

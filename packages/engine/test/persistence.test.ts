@@ -34,6 +34,7 @@ import {
   migrateConditions,
   migrateFormScale,
   migrateGrowthSources,
+  migrateLeagueHistory,
   migrateMatchStats,
   migrateMirrorProficiency,
   migrateNationalities,
@@ -43,6 +44,7 @@ import {
   stripStoredFootAdjust,
 } from "../src/core/migrations";
 import { SLOT_ATTACK_SHARE } from "@story-fm/domain";
+import type { SeasonHistory } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -667,6 +669,45 @@ describe("조각 저장 — 바뀐 것만 쓴다", () => {
  * 넘겨 전/후를 고정한다 — 옛 세이브 형태 하나에 케이스 하나다.
  */
 describe("옛 세이브를 지금 모양으로", () => {
+  /**
+   * 옛 `leagueHistory`는 리그별 **팀 id 순서**뿐이었다 (game-state.md §3.3 폐기 필드).
+   * 옮겨진 행이 `record`를 갖지 않는 것이 이 이관의 핵심이다 — 0으로 채우면 그 시즌이
+   * 구단 최저 승점 기록으로 서고, 체급 재산정이 읽는 순위만은 그대로 살아남는다.
+   */
+  it("옛 리그 순위표가 결산 스냅샷으로 옮겨지고, 없던 승점은 지어내지 않는다", () => {
+    const save: Record<string, unknown> = {
+      history: [],
+      leagueHistory: [
+        { season: 2, leagueId: "epl", order: ["arsenal", "mancity"] },
+        { season: 1, leagueId: "epl", order: ["mancity", "arsenal"] },
+        { season: 1, leagueId: "laliga", order: ["realmadrid"] },
+      ],
+    };
+    migrateLeagueHistory(save);
+
+    // 옛 필드는 남지 않는다 — 두 표가 같은 사실을 들면 언젠가 갈린다
+    expect(save.leagueHistory).toBeUndefined();
+    const history = save.history as SeasonHistory[];
+    expect(history.map((h) => h.season)).toEqual([1, 2]);
+    expect(history[0]!.leagues.map((l) => l.leagueId)).toEqual(["epl", "laliga"]);
+    expect(history[0]!.leagues[0]!.rows).toEqual([{ teamId: "mancity" }, { teamId: "arsenal" }]);
+    // 우리 경기도 그 시즌 팀도 옛 표엔 없었다 — 없는 것은 비워 둔다
+    expect(history[0]!.matches).toEqual([]);
+    expect(history[0]!.teamId).toBeUndefined();
+  });
+
+  it("이미 결산 스냅샷을 든 세이브는 옛 표로 덮이지 않는다", () => {
+    const already: SeasonHistory[] = [{ season: 9, leagues: [], matches: [] }];
+    const save: Record<string, unknown> = {
+      history: already,
+      leagueHistory: [{ season: 1, leagueId: "epl", order: ["arsenal"] }],
+    };
+    migrateLeagueHistory(save);
+
+    expect(save.history).toEqual(already);
+    expect(save.leagueHistory).toBeUndefined();
+  });
+
   it("폼이 −3~3 정수에서 −1~1 실수로 옮겨지고, 마커가 두 번 옮기는 것을 막는다", () => {
     const save = { players: [3, -3, 1, 0].map((form) => ({ state: { form } })) };
     migrateFormScale(save);

@@ -69,6 +69,26 @@ export interface TeamCatalogEntry {
    * 그대로 쓴다. 스쿼드가 감당하지 못할 때만 다섯 프리셋을 다시 채점한다.
    */
   formation?: Formation;
+  /**
+   * **게임이 시작되기 전의 우승** — 세계에 역사가 있게 하는 시드 (team.md §1).
+   *
+   * 장부에는 t=0 이후의 우승만 쌓이므로, 이것이 없으면 시즌 3의 감독이 "이 구단이
+   * 리그를 몇 번 들었나"를 물었을 때 GM이 지어낸다. 역대 횟수는 이 시드와 게임 안의
+   * `TROPHY`를 더한 것이다 (`clubRecordsOf`).
+   *
+   * ⚠️ **없는 것은 0회가 아니라 "모른다"다** — 시드가 없는 구단은 역대 줄이 서지
+   * 않는다. 전수가 아니라 확인된 클럽만 든다 (`CLUB_HONOURS_SEED`).
+   */
+  honours?: readonly ClubHonour[];
+}
+
+/** 한 대회의 역대 우승 — 대회 id별로 한 줄 */
+export interface ClubHonour {
+  /** 리그 id · 국내 컵 id · 대항전 id */
+  competitionId: string;
+  count: number;
+  /** 마지막 우승 연도 — **확인된 것만** 든다. 시드는 들지 않는다 (team.md §1) */
+  lastYear?: number;
 }
 
 export type TacticalStyle =
@@ -191,7 +211,285 @@ export function tacticalStyleOf(teamId: string): TacticalStyle {
 }
 
 /** 팀 카탈로그 시드 — 편집 전 원본. 읽는 자리는 `teamCatalog()`를 쓴다 */
-export const TEAM_CATALOG_SEED: readonly TeamCatalogEntry[] = [
+/**
+ * 역대 우승 시드 — **게임이 시작되기 전까지** 그 구단이 든 것 (team.md §1).
+ *
+ * 우승 횟수는 사실이지 남의 저작이 아니라 라이선스 부채가 아니다 (sources.md §7).
+ * 가명화가 끝나면 이 표의 클럽도 다른 이름이 되므로 그때 함께 정리되는 딸림 값이다.
+ *
+ * ⚠️ **전수가 아니다.** 다섯 리그의 잘 알려진 클럽만 들고, 나머지 클럽은 값이 없다 —
+ * **없는 것은 0회가 아니라 "모른다"이므로** 조회도 화면도 그 구단의 역대 줄을 세우지
+ * 않는다. 표에 있는 클럽의 숫자가 틀린 것이 없는 것보다 나쁘기 때문에, 확인된 대회만
+ * 적고 확인되지 않은 대회는 줄 자체를 두지 않는다.
+ *
+ * 리그 id는 **그 나라 1부의 통산 우승**이다 — 프리미어리그 출범 전의 잉글랜드 1부
+ * 우승도 `epl`에 든다. 분데스리가만 예외로 **1963년 출범 이후**만 센다: 그 전의
+ * 독일 챔피언십은 리그가 아니라 다른 대회였다.
+ */
+const CLUB_HONOURS_SEED: Readonly<Record<string, readonly ClubHonour[]>> = {
+  // ── 잉글랜드 ──
+  manutd: [
+    { competitionId: "epl", count: 20 },
+    { competitionId: "facup", count: 13 },
+    { competitionId: "eflcup", count: 6 },
+    { competitionId: "ucl", count: 3 },
+  ],
+  liverpool: [
+    { competitionId: "epl", count: 20 },
+    { competitionId: "facup", count: 8 },
+    { competitionId: "eflcup", count: 10 },
+    { competitionId: "ucl", count: 6 },
+  ],
+  arsenal: [
+    { competitionId: "epl", count: 13 },
+    { competitionId: "facup", count: 14 },
+    { competitionId: "eflcup", count: 2 },
+  ],
+  mancity: [
+    { competitionId: "epl", count: 10 },
+    { competitionId: "facup", count: 7 },
+    { competitionId: "eflcup", count: 8 },
+    { competitionId: "ucl", count: 1 },
+  ],
+  everton: [
+    { competitionId: "epl", count: 9 },
+    { competitionId: "facup", count: 5 },
+  ],
+  astonvilla: [
+    { competitionId: "epl", count: 7 },
+    { competitionId: "facup", count: 7 },
+    { competitionId: "eflcup", count: 5 },
+    { competitionId: "ucl", count: 1 },
+  ],
+  sunderland: [
+    { competitionId: "epl", count: 6 },
+    { competitionId: "facup", count: 2 },
+  ],
+  newcastle: [
+    { competitionId: "epl", count: 4 },
+    { competitionId: "facup", count: 6 },
+    { competitionId: "eflcup", count: 1 },
+  ],
+  leeds: [
+    { competitionId: "epl", count: 3 },
+    { competitionId: "facup", count: 1 },
+    { competitionId: "eflcup", count: 1 },
+  ],
+  tottenham: [
+    { competitionId: "epl", count: 2 },
+    { competitionId: "facup", count: 8 },
+    { competitionId: "eflcup", count: 4 },
+    { competitionId: "uel", count: 3 },
+  ],
+  preston: [
+    { competitionId: "epl", count: 2 },
+    { competitionId: "facup", count: 2 },
+  ],
+  nottingham: [
+    { competitionId: "epl", count: 1 },
+    { competitionId: "facup", count: 2 },
+    { competitionId: "eflcup", count: 4 },
+    { competitionId: "ucl", count: 2 },
+  ],
+  sheffieldutd: [
+    { competitionId: "epl", count: 1 },
+    { competitionId: "facup", count: 4 },
+  ],
+  westbrom: [
+    { competitionId: "epl", count: 1 },
+    { competitionId: "facup", count: 5 },
+    { competitionId: "eflcup", count: 1 },
+  ],
+  ipswich: [
+    { competitionId: "epl", count: 1 },
+    { competitionId: "facup", count: 1 },
+    { competitionId: "uel", count: 1 },
+  ],
+  westham: [
+    { competitionId: "facup", count: 3 },
+    { competitionId: "uecl", count: 1 },
+  ],
+  crystalpalace: [{ competitionId: "facup", count: 1 }],
+  coventry: [{ competitionId: "facup", count: 1 }],
+
+  // ── 스페인 ──
+  realmadrid: [
+    { competitionId: "laliga", count: 36 },
+    { competitionId: "copadelrey", count: 20 },
+    { competitionId: "ucl", count: 15 },
+  ],
+  barcelona: [
+    { competitionId: "laliga", count: 28 },
+    { competitionId: "copadelrey", count: 32 },
+    { competitionId: "ucl", count: 5 },
+  ],
+  atletico: [
+    { competitionId: "laliga", count: 11 },
+    { competitionId: "copadelrey", count: 10 },
+    { competitionId: "uel", count: 3 },
+  ],
+  athletic: [
+    { competitionId: "laliga", count: 8 },
+    { competitionId: "copadelrey", count: 24 },
+  ],
+  valencia: [
+    { competitionId: "laliga", count: 6 },
+    { competitionId: "copadelrey", count: 8 },
+    { competitionId: "uel", count: 1 },
+  ],
+  realsociedad: [
+    { competitionId: "laliga", count: 2 },
+    { competitionId: "copadelrey", count: 3 },
+  ],
+  sevilla: [
+    { competitionId: "laliga", count: 1 },
+    { competitionId: "copadelrey", count: 5 },
+    { competitionId: "uel", count: 7 },
+  ],
+  betis: [
+    { competitionId: "laliga", count: 1 },
+    { competitionId: "copadelrey", count: 3 },
+  ],
+  deportivo: [
+    { competitionId: "laliga", count: 1 },
+    { competitionId: "copadelrey", count: 2 },
+  ],
+  espanyol: [{ competitionId: "copadelrey", count: 4 }],
+  villarreal: [{ competitionId: "uel", count: 1 }],
+
+  // ── 이탈리아 ──
+  juventus: [
+    { competitionId: "seriea", count: 36 },
+    { competitionId: "coppaitalia", count: 15 },
+    { competitionId: "ucl", count: 2 },
+  ],
+  inter: [
+    { competitionId: "seriea", count: 20 },
+    { competitionId: "coppaitalia", count: 9 },
+    { competitionId: "ucl", count: 3 },
+  ],
+  milan: [
+    { competitionId: "seriea", count: 19 },
+    { competitionId: "coppaitalia", count: 5 },
+    { competitionId: "ucl", count: 7 },
+  ],
+  genoa: [
+    { competitionId: "seriea", count: 9 },
+    { competitionId: "coppaitalia", count: 1 },
+  ],
+  torino: [
+    { competitionId: "seriea", count: 7 },
+    { competitionId: "coppaitalia", count: 5 },
+  ],
+  bologna: [
+    { competitionId: "seriea", count: 7 },
+    { competitionId: "coppaitalia", count: 3 },
+  ],
+  napoli: [
+    { competitionId: "seriea", count: 4 },
+    { competitionId: "coppaitalia", count: 6 },
+    { competitionId: "uel", count: 1 },
+  ],
+  lazio: [
+    { competitionId: "seriea", count: 2 },
+    { competitionId: "coppaitalia", count: 7 },
+  ],
+  fiorentina: [
+    { competitionId: "seriea", count: 2 },
+    { competitionId: "coppaitalia", count: 6 },
+  ],
+  cagliari: [{ competitionId: "seriea", count: 1 }],
+  parma: [
+    { competitionId: "coppaitalia", count: 3 },
+    { competitionId: "uel", count: 2 },
+  ],
+  atalanta: [
+    { competitionId: "coppaitalia", count: 1 },
+    { competitionId: "uel", count: 1 },
+  ],
+
+  // ── 독일 (분데스리가는 1963년 출범 이후) ──
+  bayern: [
+    { competitionId: "bundesliga", count: 34 },
+    { competitionId: "dfbpokal", count: 20 },
+    { competitionId: "ucl", count: 6 },
+  ],
+  dortmund: [
+    { competitionId: "bundesliga", count: 5 },
+    { competitionId: "dfbpokal", count: 5 },
+    { competitionId: "ucl", count: 1 },
+  ],
+  gladbach: [
+    { competitionId: "bundesliga", count: 5 },
+    { competitionId: "dfbpokal", count: 3 },
+    { competitionId: "uel", count: 2 },
+  ],
+  werder: [
+    { competitionId: "bundesliga", count: 4 },
+    { competitionId: "dfbpokal", count: 6 },
+  ],
+  hamburg: [
+    { competitionId: "bundesliga", count: 3 },
+    { competitionId: "dfbpokal", count: 3 },
+    { competitionId: "ucl", count: 1 },
+  ],
+  stuttgart: [
+    { competitionId: "bundesliga", count: 3 },
+    { competitionId: "dfbpokal", count: 3 },
+  ],
+  koln: [
+    { competitionId: "bundesliga", count: 2 },
+    { competitionId: "dfbpokal", count: 4 },
+  ],
+  kaiserslautern: [
+    { competitionId: "bundesliga", count: 2 },
+    { competitionId: "dfbpokal", count: 2 },
+  ],
+  leverkusen: [
+    { competitionId: "bundesliga", count: 1 },
+    { competitionId: "dfbpokal", count: 1 },
+    { competitionId: "uel", count: 1 },
+  ],
+  frankfurt: [
+    { competitionId: "dfbpokal", count: 5 },
+    { competitionId: "uel", count: 2 },
+  ],
+  schalke: [
+    { competitionId: "dfbpokal", count: 5 },
+    { competitionId: "uel", count: 1 },
+  ],
+  leipzig: [{ competitionId: "dfbpokal", count: 2 }],
+
+  // ── 프랑스 ──
+  psg: [
+    { competitionId: "ligue1", count: 13 },
+    { competitionId: "coupedefrance", count: 15 },
+    { competitionId: "ucl", count: 1 },
+  ],
+  marseille: [
+    { competitionId: "ligue1", count: 9 },
+    { competitionId: "coupedefrance", count: 10 },
+    { competitionId: "ucl", count: 1 },
+  ],
+  monaco: [
+    { competitionId: "ligue1", count: 8 },
+    { competitionId: "coupedefrance", count: 5 },
+  ],
+  strasbourg: [
+    { competitionId: "ligue1", count: 1 },
+    { competitionId: "coupedefrance", count: 3 },
+  ],
+  auxerre: [
+    { competitionId: "ligue1", count: 1 },
+    { competitionId: "coupedefrance", count: 4 },
+  ],
+  toulouse: [{ competitionId: "coupedefrance", count: 2 }],
+  lorient: [{ competitionId: "coupedefrance", count: 1 }],
+  lehavre: [{ competitionId: "coupedefrance", count: 1 }],
+};
+
+/** 시드 본체 — 역대 우승은 `CLUB_HONOURS_SEED`가 따로 들고 아래에서 합쳐진다 */
+const TEAM_SEED_BASE: readonly TeamCatalogEntry[] = [
   // ── 프리미어리그 (잉글랜드) ──
   {
     id: "arsenal",
@@ -1034,6 +1332,15 @@ export const TEAM_CATALOG_SEED: readonly TeamCatalogEntry[] = [
   { id: "clermont", name: "클레르몽", shortName: "CLF", leagueId: "ligue2", tier: 4 },
 ];
 
+/**
+ * 팀 카탈로그 시드 — 정체성 표에 역대 우승을 얹은 것. 어드민이 편집하면 합쳐진 이
+ * 모양이 오버라이드 파일에 그대로 저장된다 (team.md §1).
+ */
+export const TEAM_CATALOG_SEED: readonly TeamCatalogEntry[] = TEAM_SEED_BASE.map((team) => {
+  const honours = CLUB_HONOURS_SEED[team.id];
+  return honours ? { ...team, honours } : team;
+});
+
 /** tier별 능력치 기준선 (overall 평균 어림) */
 export const TIER_BASE: Record<1 | 2 | 3 | 4, number> = {
   1: 84,
@@ -1065,6 +1372,14 @@ const byId = catalogSource(() => new Map(teamCatalog().map((t) => [t.id, t])));
 /** 팀 정체성 조회 — 게임 팀 엔티티는 이름을 갖지 않으므로 표시명은 여기서 온다 */
 export function teamCatalogById(id: string): TeamCatalogEntry | null {
   return byId().get(id) ?? null;
+}
+
+/**
+ * 게임 시작 전의 우승 — **없으면 빈 배열이고, 그것은 0회가 아니라 "모른다"다**
+ * (team.md §1). 어드민 편집본이 있으면 그쪽이 답한다.
+ */
+export function honoursOf(teamId: string): readonly ClubHonour[] {
+  return teamCatalogById(teamId)?.honours ?? [];
 }
 
 /** 리그 소속 팀 — 리그별 일정·순위표의 참가자 목록 */

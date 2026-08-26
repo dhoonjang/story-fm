@@ -8,6 +8,10 @@ import type {
   RetirementReason,
   SeasonAward,
   SeasonAwardCode,
+  SeasonLeagueTable,
+  SeasonMatchRow,
+  SeasonTableRow,
+  Trophy,
 } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import { SHARPNESS_PRESEASON } from "@story-fm/sim";
@@ -54,6 +58,7 @@ import {
   cupRunsThisSeason,
   domesticChampion,
   domesticCupWinners,
+  domesticRunnerUp,
   payDomesticCupPrizes,
   reviewDomesticCups,
 } from "./domestic-cup";
@@ -85,7 +90,8 @@ import {
   leagueSizeIn,
   teamsOfLeagueIn,
 } from "./promotion";
-import { RECENT_SEASONS, recomputeClubTiers } from "./club-tier-recompute";
+import { recomputeClubTiers } from "./club-tier-recompute";
+import { recordBreaksOf, type ClubRecordCode, type RecordBreak } from "./records";
 import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
 import { leagueRounds, safetyLine } from "../core/league-shape";
 import { generateYouthPlayer } from "../world/generate";
@@ -674,6 +680,25 @@ function awardDetail(a: SeasonAward): string {
   return `${a.apps}경기${rating}`;
 }
 
+/** 기록 경신 코드가 가리키는 것 — 세이브에 남는 것은 코드와 수치뿐이다 (season.md §6) */
+const CLUB_RECORD_TITLE: Record<ClubRecordCode, string> = {
+  "club-record:points": "한 시즌 최다 승점",
+  "club-record:goals": "한 시즌 최다 득점",
+  "club-record:position": "역대 최고 리그 순위",
+};
+
+/**
+ * 기록 경신 한 줄 — 코드가 주는 이름과 근거 수치로 **읽는 자리에서** 쓴다
+ * (`achievementLine`·`awardLine`과 같은 규약). 물음표도 평가어도 없는 사실이다.
+ */
+export function recordBreakLine(broken: RecordBreak): string {
+  const unit = broken.code === "club-record:position" ? "위" : "";
+  return (
+    `구단 기록 경신 — ${CLUB_RECORD_TITLE[broken.code]} ${broken.value}${unit}` +
+    ` (종전 ${broken.previous}${unit}, 시즌 ${broken.previousSeason})`
+  );
+}
+
 /**
  * 시상을 매겨 세이브에 앉히고 **우리 리그의 것만** 다이제스트에 남긴다 —
  * 다섯 리그 스무 줄은 감독의 화면이 아니다.
@@ -735,8 +760,8 @@ function payEuropeanWinnerPrizes(state: GameState, digest: string[]): void {
 }
 
 /**
- * 대항전 결산 — 우승/준우승을 트로피·평판에 반영한다. **상금은 여기 없다**
- * (`payEuropeanWinnerPrizes`).
+ * 대항전 결산 — 우승/준우승을 **감독의 평판**과 다이제스트에 반영한다. 상금도
+ * 트로피도 여기 없다 (`payEuropeanWinnerPrizes` · `recordChampions`).
  *
  * 결승은 리그 최종전 다음 토요일이라 `allMatchesDone`이 그것까지 기다린다.
  * 시즌 리뷰가 우승을 확정하는 단일 지점이다 (매일 tick에서 중복 보고하지 않는다).
@@ -751,7 +776,6 @@ function reviewEuropeanCampaign(state: GameState): string[] {
       finalMatch !== undefined &&
       (finalMatch.homeTeamId === state.userTeamId || finalMatch.awayTeamId === state.userTeamId);
     if (champion === state.userTeamId) {
-      state.trophies.push({ season: state.season, competitionId: cup.id, teamId: champion });
       state.manager.reputation.media = clampReputation(
         state.manager.reputation.media + EURO_TITLE_MEDIA,
       );
@@ -777,10 +801,11 @@ function reviewEuropeanCampaign(state: GameState): string[] {
 export function reviewSeason(state: GameState): string[] {
   const digest: string[] = [];
   /**
-   * **시상은 리그가 주는 상이지 감독의 것이 아니다** — 무직으로 맞은 시즌에도
+   * **우승과 시상은 리그가 주는 것이지 감독의 것이 아니다** — 무직으로 맞은 시즌에도
    * 선다(상금과 같은 결 — career.md §5.1). 그래서 아래 이른 return보다 앞이고,
    * 승강을 적용하기 전인 이 자리라야 옛 소속으로 매겨진다 (season.md §8).
    */
+  recordChampions(state);
   digest.push(...gradeAwards(state));
   const standings = computeStandings(state);
   const position = standings.findIndex((r) => r.teamId === state.userTeamId) + 1;
@@ -838,12 +863,8 @@ export function reviewSeason(state: GameState): string[] {
     );
   }
 
+  // 트로피는 이미 원장에 있다 — 전 구단의 우승을 `recordChampions`가 먼저 적었다
   if (position === 1) {
-    state.trophies.push({
-      season: state.season,
-      competitionId: leagueOfTeamIn(state, state.userTeamId),
-      teamId: state.userTeamId,
-    });
     digest.push(`🏆 ${leagueName(leagueOfTeamIn(state, state.userTeamId))} 우승`);
   }
   payEuropeanWinnerPrizes(state, digest);
@@ -854,6 +875,20 @@ export function reviewSeason(state: GameState): string[] {
   payLeaguePrizes(state, digest);
   paySeasonBonuses(state, position, digest);
   checkAchievements(state, position, row);
+  /**
+   * **기록 경신은 지나간 시즌들과 견줘야 나온다** — 결산 스냅샷은 전환이 남기므로
+   * (`recordSeasonHistory`) 이 시점의 `state.history`엔 이번 시즌이 아직 없다.
+   * 그래서 이번 시즌의 성적만 인자로 건넨다.
+   */
+  for (const broken of recordBreaksOf(state, state.userTeamId, {
+    season: state.season,
+    leagueId: leagueOfTeamIn(state, state.userTeamId),
+    points: row.points,
+    goalsFor: row.goalsFor,
+    position,
+  })) {
+    digest.push(recordBreakLine(broken));
+  }
 
   state.seasonRecords.push({
     season: state.season,
@@ -885,28 +920,132 @@ export function reviewSeason(state: GameState): string[] {
 }
 
 /**
- * 그해 리그전을 돈 리그의 **최종 순위표를 통째로 남긴다** — 구단 체급 재산정의 성적
- * 축이 읽는 유일한 원본이다 (team.md §2.1).
+ * 넘어가는 시즌이 장부에 남기는 **결산 스냅샷** — 리그별 최종 순위표 전체와 감독
+ * 팀의 경기다 (season.md §6 · game-state.md §3.3).
  *
  * ⚠️ **승강을 적용하기 전에, 새 일정을 짜기 전에** 불러야 한다. `computeStandings`는
  * 지금 소속(`leagueOfTeamIn`)과 `state.season`의 경기로 표를 세우므로, 승강 뒤에
- * 부르면 방금 올라온 팀이 0경기로 표에 서고 강등된 팀은 사라진다.
+ * 부르면 방금 올라온 팀이 0경기로 표에 서고 강등된 팀은 사라진다. 경기 쪽은 더
+ * 급하다 — `state.matches`가 새 시즌 일정으로 통째로 교체되면 되돌릴 길이 없다.
  *
- * 감독의 `SEASON_RECORD`로는 이 축을 잴 수 없다 — 그 표는 감독 팀만 쌓여서 나머지
- * 96클럽이 영원히 중립(0.5)이 된다. 최근 세 시즌만 든다(그 밖은 아무도 안 읽는다).
+ * **시즌을 잘라내지 않는다** — 역사는 다 쌓인다. 최근 세 시즌만 보는 것은 구단 체급의
+ * 성적 축이고, 자르는 자리는 읽는 쪽이다(`recentForm`, `RECENT_SEASONS`).
  */
-export function recordLeagueHistory(state: GameState): void {
-  const kept = (state.leagueHistory ?? []).filter(
-    (table) => table.season !== state.season && table.season > state.season - RECENT_SEASONS,
-  );
-  for (const leagueId of leaguesPlayedIn(state)) {
-    kept.push({
-      season: state.season,
-      leagueId,
-      order: computeStandings(state, leagueId).map((r) => r.teamId),
+export function recordSeasonHistory(state: GameState): void {
+  /**
+   * 아래 경기 줄이 누구의 것인가. `managedTeamId`가 아니라 `state.userTeamId`인 이유는
+   * **경질이 소속을 지우지 않기** 때문이다 — 잘린 감독의 옛 구단은 시즌 끝까지 그
+   * 팀이고, 그 경기를 무직이라는 이유로 버리면 그 시즌만 경기가 비어 남는다.
+   */
+  const teamId = state.userTeamId;
+  const leagues: SeasonLeagueTable[] = leaguesPlayedIn(state).map((leagueId) => ({
+    leagueId,
+    rows: computeStandings(state, leagueId).map((r): SeasonTableRow => ({
+      teamId: r.teamId,
+      // 골득실과 이름은 파생이라 적지 않는다 (game-state.md §3.3)
+      record: {
+        played: r.played,
+        wins: r.wins,
+        draws: r.draws,
+        losses: r.losses,
+        goalsFor: r.goalsFor,
+        goalsAgainst: r.goalsAgainst,
+        points: r.points,
+      },
+    })),
+  }));
+
+  const matches: SeasonMatchRow[] = [];
+  for (const match of state.matches) {
+    if (match.season !== state.season || !match.result) continue;
+    // 친선(대회 없음)도 2군 리그도 시즌의 것이 아니다 (season.md §2)
+    if (match.competitionId === null || isReserveMatch(match)) continue;
+    const home = match.homeTeamId === teamId;
+    if (!home && match.awayTeamId !== teamId) continue;
+    const { homeGoals, awayGoals, penalties } = match.result;
+    const stage = match.stage === undefined || match.stage === "league" ? undefined : match.stage;
+    matches.push({
+      date: match.date,
+      competitionId: match.competitionId,
+      ...(stage === undefined ? {} : { stage }),
+      opponentTeamId: home ? match.awayTeamId : match.homeTeamId,
+      // 중립이 홈/원정보다 앞선다 — 결승은 편성상 한쪽이 홈이지만 구장은 누구의 것도 아니다
+      venue: match.neutral === true ? "neutral" : home ? "home" : "away",
+      goalsFor: home ? homeGoals : awayGoals,
+      goalsAgainst: home ? awayGoals : homeGoals,
+      ...(penalties === undefined
+        ? {}
+        : {
+            penalties: {
+              for: home ? penalties.home : penalties.away,
+              against: home ? penalties.away : penalties.home,
+            },
+          }),
     });
   }
-  state.leagueHistory = kept;
+  // 같은 날 두 경기는 없지만, 정렬이 세이브의 배열 순서를 타면 안 된다
+  matches.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  // 같은 시즌을 두 번 결산해도 행은 하나다 — 그 시즌의 행을 지우고 다시 쓴다
+  const kept = (state.history ?? []).filter((row) => row.season !== state.season);
+  kept.push({ season: state.season, leagues, teamId, matches });
+  kept.sort((a, b) => a.season - b.season);
+  state.history = kept;
+}
+
+/**
+ * 그 시즌 우승을 **전 구단의 것으로** 원장에 적는다 (season.md §6 · career.md §6).
+ *
+ * 유저 팀만 적던 시절엔 AI 구단의 우승이 어디에도 남지 않아, 세계에 기억이 없고
+ * 스폰서 성과 조항이 감독 구단에만 붙었다(finance.md §5.3). 그래서 이것은 감독의
+ * 일이 아니라 **리그가 주는 것**이다 — 시상·상금과 같이 무직이어도 돈다.
+ *
+ * 준우승은 **결승에서 진 팀**이라 녹아웃에만 선다 — 리그의 2위는 순위표가 이미 답한다.
+ */
+export function recordChampions(state: GameState): void {
+  for (const leagueId of leaguesPlayedIn(state)) {
+    const champion = computeStandings(state, leagueId)[0];
+    if (champion) putTrophy(state, leagueId, champion.teamId, null);
+  }
+  for (const cup of domesticCupCatalog()) {
+    const champion = domesticChampion(state, cup.id);
+    if (champion) putTrophy(state, cup.id, champion, domesticRunnerUp(state, cup.id));
+  }
+  for (const cup of cupCatalog()) {
+    const champion = euroChampion(state, cup.id);
+    if (!champion) continue;
+    const decider = euroStageMatches(state, cup.id, "final")[0];
+    const runnerUp =
+      decider === undefined
+        ? null
+        : decider.homeTeamId === champion
+          ? decider.awayTeamId
+          : decider.homeTeamId;
+    putTrophy(state, cup.id, champion, runnerUp);
+  }
+}
+
+/**
+ * 한 대회 한 시즌의 우승은 원장에 **한 줄**이다 — 같은 시즌을 두 번 결산해도 덧나지
+ * 않게 그 줄을 갈아 끼운다. 슈퍼컵은 tick이 먼저 적으므로(super-cup.ts) 여기 없다.
+ */
+function putTrophy(
+  state: GameState,
+  competitionId: string,
+  teamId: string,
+  runnerUpTeamId: string | null,
+): void {
+  const row: Trophy = {
+    season: state.season,
+    competitionId,
+    teamId,
+    ...(runnerUpTeamId === null ? {} : { runnerUpTeamId }),
+  };
+  const at = state.trophies.findIndex(
+    (t) => t.season === state.season && t.competitionId === competitionId,
+  );
+  if (at < 0) state.trophies.push(row);
+  else state.trophies[at] = row;
 }
 
 /**
@@ -1424,8 +1563,9 @@ function applyTransition(state: GameState): string[] {
         euroChampions: championsOf(cupCatalog(), (id) => euroChampion(state, id)),
       }
     : null;
-  // 성적 축의 원본 — 승강이 소속을 옮기기 **전에** 그해 순위표를 남긴다 (team.md §2.1)
-  recordLeagueHistory(state);
+  // 지나간 시즌이 남는 유일한 자리 — 승강이 소속을 옮기고 새 일정이 경기를 밀어내기
+  // **전에** 그해 순위표와 우리 경기를 옮겨 적는다 (season.md §6)
+  recordSeasonHistory(state);
   /**
    * 승강 — 티켓과 **같은 최종 순위표**를 쓰고, 새 일정을 짜기 **전에** 자리를 바꾼다.
    * 순서가 뒤집히면 강등된 팀이 그 리그의 다음 시즌 일정에 그대로 남는다.

@@ -1054,8 +1054,8 @@ export function payDomesticCupPrizes(state: GameState, digest: string[]): void {
 }
 
 /**
- * 시즌 리뷰의 국내 컵 결산 — 우승 트로피·평판. **상금은 여기 없다**
- * (`payDomesticCupPrizes`).
+ * 시즌 리뷰의 국내 컵 결산 — **감독의 평판**과 다이제스트. 상금도 트로피도 여기 없다
+ * (`payDomesticCupPrizes` · `recordChampions` — 우승은 전 구단의 것이다).
  * 결승이 리그 최종전보다 앞설 수 있지만, 우승 확정은 시즌 리뷰 한 곳에서만 한다
  * (매일 tick에서 중복 보고하지 않기 위해서다).
  */
@@ -1068,7 +1068,6 @@ export function reviewDomesticCups(state: GameState): string[] {
     const ours = champion === state.userTeamId || runnerUp === state.userTeamId;
 
     if (champion === state.userTeamId) {
-      state.trophies.push({ season: state.season, competitionId: cup.id, teamId: champion });
       state.manager.reputation.media = clampReputation(
         state.manager.reputation.media + CUP_TITLE_MEDIA,
       );

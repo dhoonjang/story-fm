@@ -26,6 +26,7 @@ import {
   EVENT_BAND,
   EVENT_CREDIT,
   financeLookup,
+  historyView,
   leagueView,
   LOAN_FEE_RATE,
   marketValueOf,
@@ -131,6 +132,8 @@ const TICKET_PRICE_MAX = 1_000;
 const money = (max: number) => z.number().int().min(0).max(max);
 /** 장부 한 줄에 남는 자유 문구 */
 const LEDGER_NOTE = 120;
+/** 시즌 번호의 상한 — 한 세이브가 이보다 오래 가지 않는다. 오타를 막는 자리다 */
+const SEASON_MAX = 200;
 
 /** 정착 무게 인자 — 코어가 앵커 ±EVENT_BAND로 자른다 (settling.ts) */
 const settlingArg = (kind: "talk" | "team_talk") =>
@@ -773,6 +776,20 @@ export function buildGmTools(
     ),
 
     read("get_career", descriptions.get_career, z.object({}), () => careerView(state)),
+    read(
+      "get_history",
+      descriptions.get_history,
+      z
+        .object({
+          season: z.number().int().min(1).max(SEASON_MAX),
+          competition: z.string().min(1),
+          team: z.string().min(1),
+          player: playerRef,
+          count: z.number().int().min(1).max(15),
+        })
+        .partial(),
+      (input) => historyView(state, input),
+    ),
     wrap(
       "accept_manager_offer",
       descriptions.accept_manager_offer,
@@ -822,6 +839,13 @@ export function buildGmTools(
         team: z.string().min(1).optional(),
         opponent: z.string().min(1).optional(),
         competition: z.string().min(1).optional(),
+        season: z
+          .number()
+          .int()
+          .min(1)
+          .max(SEASON_MAX)
+          .optional()
+          .describe("지나간 시즌 — 순위표는 그때의 최종 표, 일정은 감독 팀의 경기"),
         when: z.enum(["past", "upcoming", "both"]).optional(),
         from: dateArg.optional(),
         to: dateArg.optional(),
