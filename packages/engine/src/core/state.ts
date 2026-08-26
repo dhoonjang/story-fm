@@ -1448,6 +1448,33 @@ export function activeContract(state: GameState, playerId: string): Contract | n
 }
 
 /**
+ * **발효를 기다리는 계약** — 사전 계약이 남긴 줄 (→ docs/simulation/transfer.md §1-4).
+ *
+ * `activeContract`의 짝이다. 활성 계약과 함께 설 수 있고(그가 아직 남의 선수인
+ * 동안이 그 상태다) 서로를 대신하지 않는다 — 주급도 명단도 활성만 센다.
+ * 한 선수에게 발효 대기 계약은 하나다 (§11).
+ */
+export function pendingContractOf(state: GameState, playerId: string): Contract | null {
+  return state.contracts.find((c) => c.gamePlayerId === playerId && c.status === "pending") ?? null;
+}
+
+/**
+ * 예약을 걷는다 — 발효 전에 그 선수의 사정이 달라졌을 때 (§1-4).
+ *
+ * **지우지 않고 `ended`로 접는다.** 원장의 다른 줄들과 같은 규약이다: 지워 버리면
+ * 「예약이 있었다」는 사실이 세계에서 사라져, 무산을 알리는 줄이 무엇을 가리키는지
+ * 되짚을 길이 없다.
+ *
+ * @returns 걷힌 계약 — 없었으면 null
+ */
+export function voidPendingContract(state: GameState, playerId: string): Contract | null {
+  const pending = pendingContractOf(state, playerId);
+  if (!pending) return null;
+  pending.status = "ended";
+  return pending;
+}
+
+/**
  * 계약 잔여 연수 (소수, 만료 뒤는 0) — 몸값·설득·재계약이 같은 자를 읽는다.
  *
  * 이적가(`market.ts`)와 설득 판정(`persuasion.ts`)이 각자 적던 값이다. 그 둘은

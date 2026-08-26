@@ -86,4 +86,12 @@ export interface MarketCard {
    * 없는 카드에는 서지 않고, 이 축이 생기기 전에 남은 카드에도 없다 — 그래서 optional.
    */
   direction?: MarketDirection;
+  /**
+   * **사전 계약인가** — 이적료 없이 다음 7월 1일 합류를 미리 약속하는 영입
+   * (→ docs/simulation/transfer.md §1-4).
+   *
+   * 방향(`in`)만으로는 평범한 영입과 갈리지 않는데, 감독이 읽어야 하는 사실은
+   * "지금 오는 게 아니라 여름에 온다"는 것이다 — 배지가 그 낱말을 든다.
+   */
+  precontract?: boolean;
 }
