@@ -1,6 +1,8 @@
 import type {
+  AgentArchetype,
   GamePlayer,
   NegotiationKind,
+  Persona,
   PitchClaim,
   PitchClaimKind,
   SquadStatus,
@@ -642,6 +644,30 @@ export function observedMarketValue(state: GameState, player: GamePlayer): numbe
  * 여기에 **인내심 감쇠**(같은 조건 반복)가 곱해진다. `factors`가 그 분해다 —
  * 확률만 주면 LLM이 "왜"를 지어내므로 근거를 함께 준다.
  */
+/**
+ * 근거 목록의 **`에이전트` 한 줄** — 「그 사람이 없었다면 확률이 얼마였는가」.
+ *
+ * 대리인의 `askingLift`는 항이 아니라 **호가·주급 기대 자체**를 움직이므로 항 하나를
+ * 빼는 방식으로는 잴 수 없다. 그래서 관문의 모양을 아는 쪽이 「원형을 걷어 낸 확률」을
+ * 넘기고, 문장은 여기 한 곳이 만든다 — 갈래마다 적으면 같은 사람이 갈래에 따라 다르게
+ * 불린다 (transfer.md §3).
+ */
+function agentFactor(
+  agent: { persona: Persona; archetype: AgentArchetype } | null,
+  lift: number,
+  raw: number,
+  neutral: () => number,
+): DealFactor | null {
+  if (agent === null || lift === 1) return null;
+  return {
+    label: "에이전트",
+    delta: Math.round(raw - neutral()),
+    why:
+      `${agentLabelOf(agent)}이(가) 그를 대리한다 — ` +
+      `부르는 값이 ${Math.round((lift - 1) * 100)}% 다르다`,
+  };
+}
+
 export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   const player = playerById(state, terms.playerId);
   const knowledge = player ? knowledgeOf(state, terms.playerId) : "rumoured";
@@ -1049,24 +1075,16 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     });
   }
   /**
-   * **대리인 한 줄** — 그 사람이 없었다면 확률이 얼마였는가.
-   *
    * 호가가 `askingLift`배 오르지 않았다면 두 비율은 그만큼 컸을 테니, 되돌리는 폭은
    * 각 비율 × (배수 − 1) × 그 항의 눈금이다. 인내심의 몫은 위 줄이 이미 셌다.
    */
-  if (agent !== null && profile.askingLift !== 1) {
-    const bump = {
+  const agentLine = agentFactor(agent, profile.askingLift, raw, () =>
+    chance(NONE, multiplier, {
       club: feeRatio * (profile.askingLift - 1) * FEE_RATIO_SCORE,
       player: wageRatio * (profile.askingLift - 1) * WAGE_RATIO_SCORE,
-    };
-    factors.push({
-      label: "에이전트",
-      delta: Math.round(raw - chance(NONE, multiplier, bump)),
-      why:
-        `${agentLabelOf(agent)}이(가) 그를 대리한다 — ` +
-        `부르는 값이 ${Math.round((profile.askingLift - 1) * 100)}% 다르다`,
-    });
-  }
+    }),
+  );
+  if (agentLine) factors.push(agentLine);
 
   // 안개는 **선수별 고정 편향**이다. 제시액마다 새로 뽑으면 "더 줬는데 확률이
   // 떨어지는" 일이 생겨 흥정이 무의미해진다 (단조성은 테스트로 고정).
@@ -1847,10 +1865,15 @@ function renewOdds(
     });
   }
 
-  const sum = (skip?: number) =>
-    contributions.reduce((acc, c, i) => acc + (i === skip ? 0 : c.score), MEETS_ASKING_SCORE_SOLO);
+  const sum = (skip?: number, bump = 0) =>
+    contributions.reduce(
+      (acc, c, i) => acc + (i === skip ? 0 : c.score),
+      MEETS_ASKING_SCORE_SOLO + bump,
+    );
   // 관문이 하나이므로 확률은 시그모이드 하나다 (곱하지 않는다)
   const raw = sigmoid(sum()) * 100;
+  const agent = agentOfPlayer(state, player.id);
+  const lift = agent === null ? 1 : AGENT_PROFILE[agent.archetype].askingLift;
   const factors: DealFactor[] = [
     {
       label: "기준",
@@ -1863,6 +1886,12 @@ function renewOdds(
       why: c.why,
     })),
   ];
+  // 재계약의 기대 주급에도 대리인이 얹혀 있다 — 되돌리는 폭은 영입의 주급 항과 같은 셈
+  const agentLine = agentFactor(agent, lift, raw, () => {
+    const neutral = sum(undefined, wageRatio * (lift - 1) * WAGE_RATIO_SCORE);
+    return sigmoid(neutral) * 100;
+  });
+  if (agentLine) factors.push(agentLine);
 
   return {
     latitude: 0,
