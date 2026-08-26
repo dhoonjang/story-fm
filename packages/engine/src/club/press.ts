@@ -10,6 +10,7 @@ import type {
   PressTrigger,
 } from "@story-fm/domain";
 import {
+  interestStageRank,
   isNaturalAt,
   naturalPositionOf,
   PLAYER_ISSUE_REASONS,
@@ -536,6 +537,55 @@ function loadTransferRequests(state: GameState, conference: PressConference): vo
   if (loaded) conference.weight = Math.max(conference.weight, 2);
 }
 
+// ── 이적 루머 ──────────────────────────────────────────────────
+
+/**
+ * 한 회견에 오르는 루머 카드 수 — 셋을 실으면 그 자리가 이적 시장 브리핑이 된다
+ * (people.md §4).
+ */
+const RUMOURS_PER_CONFERENCE = 2;
+
+/**
+ * 타 구단의 관심이 문의 이상으로 올랐다 — **유출·이적 요청과 같은 문을 지난다**
+ * (people.md §4 · transfer.md §1-2).
+ *
+ * ⚠️ **관심 장부는 요청과 같이 소비되지 않는다.** 실어 간 자리(`pressedOn`)만
+ * 적어 같은 사실을 두 번 묻지 않게 하고, 줄 자체는 사다리가 걷힐 때까지 남는다 —
+ * 칸이 오르면 `market/interest.ts`가 그 자리를 비워, 「보고 있다」와 「값을 부를
+ * 참이다」가 각각 한 번씩 회견에 선다.
+ */
+function loadRumours(state: GameState, conference: PressConference): void {
+  const rows = (state.interests ?? [])
+    .filter((row) => row.stage !== "watching" && row.pressedOn === undefined)
+    // 우리 선수의 줄만 회견에 선다 — 떠난 선수도, 우리가 노리는 남의 선수도 물을 자리가 아니다
+    .filter((row) => playerById(state, row.gamePlayerId)?.teamId === state.userTeamId)
+    // 위 칸이 먼저다 — 값을 부를 참인 구단이 문의만 한 구단에 밀리지 않는다.
+    // 같은 칸끼리는 id로 세운다: 같은 날 같은 세이브면 같은 두 장이어야 한다
+    .sort((a, b) => {
+      const byStage = interestStageRank(b.stage) - interestStageRank(a.stage);
+      if (byStage !== 0) return byStage;
+      if (a.gamePlayerId !== b.gamePlayerId) return a.gamePlayerId < b.gamePlayerId ? -1 : 1;
+      return a.teamId < b.teamId ? -1 : 1;
+    })
+    .slice(0, RUMOURS_PER_CONFERENCE);
+  if (rows.length === 0) return;
+  for (const row of rows) {
+    conference.facts.push({
+      kind: "rumour",
+      data: {
+        name: teamNameIn(state, row.teamId),
+        refId: row.teamId,
+        values: { days: diffDays(row.since, state.date) },
+        tags: [row.stage],
+      },
+      about: row.gamePlayerId,
+      sharp: true,
+    });
+    row.pressedOn = state.date;
+  }
+  conference.weight = Math.max(conference.weight, 2);
+}
+
 // ── 전야 회견 ──────────────────────────────────────────────────
 
 /** 전야에 실리는 최근 폼의 창 — 경기 뒤 회견의 무승 창과 같은 자 */
@@ -758,6 +808,7 @@ export function openPress(state: GameState, conference: PressConference, digest?
   }
   loadLeaks(state, conference);
   loadTransferRequests(state, conference);
+  loadRumours(state, conference);
   state.pressConferences.push(conference);
   // 지나간 회견은 서사에 남지 상태로 쌓일 이유가 없다
   if (state.pressConferences.length > KEPT_CONFERENCES) {

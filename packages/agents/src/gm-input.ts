@@ -16,6 +16,7 @@ import {
   computeStandings,
   dayOfWeek,
   describeBuyBackRights,
+  describeInterests,
   describeNegotiations,
   describeNextFixture,
   describeBoardRequests,
@@ -852,6 +853,16 @@ export function buildGmStateNote(
      * (finance.md §9.6). 답이 도착한 날은 `<time_passed>`가 나른다.
      */
     block("board", describeBoardRequests(state)),
+    /**
+     * 오퍼 앞에 서 있는 관심 — 우리 선수를 보는 구단과, 우리가 노리는 선수에게
+     * 붙은 경쟁 구단 (transfer.md §1-2).
+     *
+     * 협상 블록보다 앞에 서는 이유가 시간 순서다: 이 사실이 없으면 모델은 오퍼가
+     * 열린 날에야 그 구단의 이름을 처음 듣는다. 그러면 회견의 질문도, 라커룸의
+     * 수군거림도, 재계약 테이블의 압박도 설 자리가 없다 — 소문은 오퍼 앞에서만
+     * 장면이 된다. 관심이 없으면 덩어리도 서지 않는다.
+     */
+    block("interest", describeInterests(state).join("\n")),
     // 협상은 있을 때만 — 매 턴 정가로 읽히는 블록이다
     block("negotiations", negotiations.startsWith("진행 중인 협상 없음") ? null : negotiations),
     // 쓸 수 있는 되사기 권리 — 이 덩어리가 없으면 모델은 그 자리가 있는 줄도 모른다

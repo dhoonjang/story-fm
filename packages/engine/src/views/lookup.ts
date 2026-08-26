@@ -92,6 +92,7 @@ import { tierOfTeamIn } from "../core/club-tier";
 import { achievementLine, boardExpectation, computeStandings } from "../competition/season";
 import { openManagerOffers, USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import { observedMarketValue } from "../market/market";
+import { interestLine } from "../market/interest";
 import {
   attributeLine,
   KNOWLEDGE_RANK,
@@ -1011,6 +1012,16 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
       ...ledger,
     ].join(" · "),
   );
+  /**
+   * 오퍼 앞에 서 있는 관심 — 구단과 사다리의 칸뿐이다 (transfer.md §1-2).
+   *
+   * ⚠️ **안개를 견주지 않고 그대로 싣는다.** 장부에 관심 줄이 서는 선수는 둘뿐이라
+   * (우리 선수와 우리가 협상을 열어 둔 남의 선수 — `tickInterests`) 어느 쪽이든
+   * 감독이 알 자격이 있는 사실이다. 관심이 그 밖으로 번지는 날 가장 먼저 새는
+   * 자리가 여기다 — 그때는 `knowledge`로 걸러야 한다.
+   */
+  const interest = interestLine(state, p.id);
+  if (interest !== null) lines.push(`관심: ${interest}`);
   if (injury) {
     lines.push(
       `부상: ${injury.bodyPart} (${INJURY_SEVERITY_KO[injury.severity]}) — 복귀 예상 ${injury.expectedReturn}`,
