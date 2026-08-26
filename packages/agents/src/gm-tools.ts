@@ -98,6 +98,7 @@ import {
   DateString,
   DIRECTIVE_INTENSITIES,
   KEEPER_DISTRIBUTIONS,
+  LEADERBOARD_KEYS,
   type MatchEvent,
   MAX_PAYMENT_YEARS,
   MAX_PITCH_CLAIMS,
@@ -902,10 +903,18 @@ export function buildGmTools(
       descriptions.get_league,
       z.object({
         view: z
-          .enum(["standings", "fixtures", "calendar"])
+          .enum(["standings", "fixtures", "leaders", "calendar"])
           .describe(
-            "standings=순위표/대진표 · fixtures=경기 검색 · calendar=감독의 달력(경기+훈련+이적창)",
+            "standings=순위표/대진표 · fixtures=경기 검색 · leaders=개인 순위와 팀 열 · calendar=감독의 달력(경기+훈련+이적창)",
           ),
+        split: z
+          .enum(["all", "home", "away"])
+          .optional()
+          .describe("standings 전용 — 홈 표·원정 표로 다시 세운다"),
+        key: z
+          .enum(LEADERBOARD_KEYS)
+          .optional()
+          .describe("leaders 전용 — 한 축만. 생략하면 다섯 축 전부"),
         team: z.string().min(1).optional(),
         opponent: z.string().min(1).optional(),
         competition: z.string().min(1).optional(),

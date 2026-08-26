@@ -55,6 +55,7 @@ export * from "./competition/fixtures";
 export * from "./competition/friendly";
 export * from "./competition/reserve";
 export * from "./competition/season";
+export * from "./competition/leaderboard";
 export * from "./competition/records";
 export * from "./competition/europe";
 export * from "./competition/euro-knockout";

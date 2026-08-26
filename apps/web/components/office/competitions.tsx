@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { TACTIC_AXES, awardTitle, tacticWord } from "@story-fm/domain";
+import {
+  TACTIC_AXES,
+  awardTitle,
+  leaderboardTitle,
+  outcomeLabel,
+  tacticWord,
+} from "@story-fm/domain";
 import type { OfficeViews } from "@story-fm/engine";
 import { IconChevron } from "../icons";
 
@@ -17,63 +23,156 @@ type MatchPreview = NonNullable<OfficeViews["competitions"]["preview"]>;
 type PastSeason = Competition["pastSeasons"][number];
 /** 그 시즌 그 리그의 시상 — 코어는 코드와 수치만 내고 이름·문장은 여기서 만든다 */
 type SeasonAwardRow = PastSeason["awards"][number];
+/** 개인 순위·팀 열 — 순위표가 없는 국내 컵은 null이다 */
+type Leaders = NonNullable<Competition["leaders"]>;
+type LeaderBoard = Leaders["players"][number];
+type LeaderRow = LeaderBoard["rows"][number];
+
+/**
+ * 눈금 고르기 — 고를 수 있는 것은 라디오 묶음이라 무엇이 골라졌는지가 색만이 아니라
+ * `aria-checked`로도 전해진다 (overview.md §5).
+ */
+function PillPicker<T extends string>({
+  value,
+  options,
+  onPick,
+  label,
+  testId,
+}: {
+  value: T;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  onPick: (value: T) => void;
+  label: string;
+  testId: string;
+}) {
+  return (
+    <div className="pill-picker" role="radiogroup" aria-label={label} data-testid={testId}>
+      {options.map((o) => (
+        <button
+          key={o.value}
+          role="radio"
+          aria-checked={o.value === value}
+          className={o.value === value ? "active" : ""}
+          onClick={() => onPick(o.value)}
+          data-testid={`${testId}-${o.value}`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** 순위표 세 벌 — 행은 같고 순서만 다르다 (docs/data/competition.md §2) */
+const STANDING_SPLITS = [
+  { value: "all", label: "전체" },
+  { value: "home", label: "홈" },
+  { value: "away", label: "원정" },
+] as const;
+type StandingSplit = (typeof STANDING_SPLITS)[number]["value"];
 
 const venueLabel = (venue: NextMatch["venue"]) =>
   venue === "home" ? "홈" : venue === "away" ? "원정" : "중립";
 
-/** 순위표 — 리그는 그대로, 대항전은 통과 경계선을 긋는다 */
+/**
+ * 순위표 — 리그는 그대로, 대항전은 통과 경계선을 긋는다.
+ *
+ * 전체·홈·원정 세 벌은 **코어가 이미 세워 둔 순서**를 고를 뿐이다 (overview.md §5) —
+ * 여기서 다시 정렬하면 순위 규칙이 두 곳에 서고 그중 하나만 고쳐지는 날이 온다.
+ */
 function StandingsTable({ competition }: { competition: Competition }) {
   // 순위표를 갖는 대회는 리그와 대항전 리그 페이즈뿐이다 (국내 컵은 브래킷을 본다)
   const europe = competition.europe;
-  const zones = competition.zones;
+  const [split, setSplit] = useState<StandingSplit>("all");
+  // 대회를 바꾸면 합계표로 돌아간다 — 남의 대회에서 고른 눈금이 따라오지 않는다
+  const [ownerId, setOwnerId] = useState(competition.id);
+  if (ownerId !== competition.id) {
+    setOwnerId(competition.id);
+    setSplit("all");
+  }
+  const rows =
+    split === "home"
+      ? competition.homeTable
+      : split === "away"
+        ? competition.awayTable
+        : competition.standings;
+  /**
+   * 구역선은 **합계표의 사실**이다 — 원정 표 4위에 챔스 띠를 그으면 지키지 않을
+   * 약속이 선다. 홈/원정 표에서는 띠도 범례도 서지 않는다.
+   */
+  const zones = split === "all" ? competition.zones : [];
   // 순위 → 그 순위가 속한 구역 (없으면 아무 뜻도 없는 자리)
   const zoneAt = (rank: number) => zones.find((z) => rank <= z.through) ?? null;
   return (
-    <table data-testid={europe ? "europe-standings" : "standings"}>
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>팀</th>
-          <th>경기</th>
-          <th>승</th>
-          <th>무</th>
-          <th>패</th>
-          <th>득실</th>
-          <th>승점</th>
-        </tr>
-      </thead>
-      <tbody>
-        {competition.standings.map((row, i) => {
-          const zone = zoneAt(i + 1);
-          return (
-            <tr
-              key={row.teamId}
-              className={[
-                row.ours ? "me" : "",
-                zone ? `zone zone-${zone.kind}` : "",
-                // 구역의 마지막 행 아래에 선을 긋는다 — 4위와 5위의 차이가 한 계단이 아니다
-                zone && zone.through === i + 1 ? "cut" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              data-testid={zone ? `standing-zone-${zone.kind}` : undefined}
-            >
-              {/* 순위 앞의 색 띠가 구역이다 — 무슨 구역인지는 툴팁과 표 아래 범례에 있다 */}
-              <td title={zone?.label}>{i + 1}</td>
-              <td className="team-cell">{row.name}</td>
-              <td>{row.played}</td>
-              <td>{row.wins}</td>
-              <td>{row.draws}</td>
-              <td>{row.losses}</td>
-              <td>{row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}</td>
-              <td>
-                <b>{row.points}</b>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <>
+      <PillPicker
+        value={split}
+        options={STANDING_SPLITS}
+        onPick={setSplit}
+        label="순위표 범위"
+        testId="standings-split"
+      />
+      <table data-testid={europe ? "europe-standings" : "standings"}>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>팀</th>
+            <th>경기</th>
+            <th>승</th>
+            <th>무</th>
+            <th>패</th>
+            <th>득실</th>
+            <th>승점</th>
+            <th className="form-col">폼</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => {
+            const zone = zoneAt(i + 1);
+            // 홈 표·원정 표는 그 소계를 찍는다 — 합계를 찍으면 순서와 숫자가 어긋난다
+            const box = split === "all" ? row : row[split];
+            const diff = box.goalsFor - box.goalsAgainst;
+            return (
+              <tr
+                key={row.teamId}
+                className={[
+                  row.ours ? "me" : "",
+                  zone ? `zone zone-${zone.kind}` : "",
+                  // 구역의 마지막 행 아래에 선을 긋는다 — 4위와 5위의 차이가 한 계단이 아니다
+                  zone && zone.through === i + 1 ? "cut" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                data-testid={zone ? `standing-zone-${zone.kind}` : undefined}
+              >
+                {/* 순위 앞의 색 띠가 구역이다 — 무슨 구역인지는 툴팁과 표 아래 범례에 있다 */}
+                <td title={zone?.label}>{i + 1}</td>
+                <td className="team-cell">{row.name}</td>
+                <td>{box.played}</td>
+                <td>{box.wins}</td>
+                <td>{box.draws}</td>
+                <td>{box.losses}</td>
+                <td>{diff > 0 ? `+${diff}` : diff}</td>
+                <td>
+                  <b>{box.points}</b>
+                </td>
+                {/* 폼은 **합계의 최근 다섯**이다 — 홈 표에서도 흐름은 하나다 */}
+                <td className="form-col">
+                  <span className="form-run">
+                    {row.form.map((o, k) => (
+                      <i className={`form-mark form-${o}`} key={k}>
+                        {outcomeLabel(o)}
+                      </i>
+                    ))}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <ZoneLegend zones={zones} />
+    </>
   );
 }
 
@@ -94,6 +193,132 @@ function ZoneLegend({ zones }: { zones: Competition["zones"] }) {
         );
       })}
     </div>
+  );
+}
+
+/**
+ * 개인 순위 한 표가 세우는 열 — 축마다 다르고 **줄 세운 축이 굵게** 선다.
+ * 코어가 준 수를 그대로 찍는다: 화면은 표기만 붙인다.
+ */
+function leaderColumns(
+  key: LeaderBoard["key"],
+): Array<{ head: string; of: (r: LeaderRow) => string; strong: boolean }> {
+  const apps = { head: "경기", of: (r: LeaderRow) => String(r.apps), strong: false };
+  if (key === "cleanSheets") {
+    return [apps, { head: "무실점", of: (r) => String(r.cleanSheets), strong: true }];
+  }
+  if (key === "cards") {
+    return [
+      apps,
+      { head: "경고", of: (r) => String(r.yellows), strong: false },
+      { head: "퇴장", of: (r) => String(r.reds), strong: false },
+      { head: "점수", of: (r) => String(r.value), strong: true },
+    ];
+  }
+  return [
+    apps,
+    { head: "득점", of: (r) => String(r.goals), strong: key === "goals" },
+    { head: "도움", of: (r) => String(r.assists), strong: key === "assists" },
+    // 평점은 문턱을 넘은 선수만 서는 표라 다른 축에서는 기록 없음이 있을 수 있다
+    {
+      head: "평점",
+      of: (r) => (r.rating === null ? "—" : r.rating.toFixed(2)),
+      strong: key === "rating",
+    },
+  ];
+}
+
+/**
+ * 개인 순위 — 축을 하나 골라 상위 열 명을 본다.
+ *
+ * 시즌 끝에만 서던 시상을 시즌 중에 미리 읽는 자리다
+ * (docs/data/competition.md §2 「개인 순위」). ⚠️ 대항전은 시즌 기록이 대회별로
+ * 갈리지 않아 개인 순위가 서지 않고 팀 열만 선다.
+ */
+function LeadersSection({ competition }: { competition: Competition }) {
+  const leaders = competition.leaders;
+  const boards = leaders?.players ?? [];
+  const [pickedKey, setPickedKey] = useState<LeaderBoard["key"] | null>(null);
+  const [ownerId, setOwnerId] = useState(competition.id);
+  if (ownerId !== competition.id) {
+    setOwnerId(competition.id);
+    setPickedKey(null);
+  }
+  if (!leaders) return null;
+  const board = boards.find((b) => b.key === pickedKey) ?? boards[0];
+  const columns = board ? leaderColumns(board.key) : [];
+  return (
+    <>
+      {board && (
+        <>
+          <div className="section-title">개인 순위</div>
+          <PillPicker
+            value={board.key}
+            options={boards.map((b) => ({ value: b.key, label: leaderboardTitle(b.key) }))}
+            onPick={setPickedKey}
+            label="개인 순위 항목"
+            testId="leader-key"
+          />
+          <table data-testid="leaderboard">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>선수</th>
+                <th>팀</th>
+                {columns.map((c) => (
+                  <th key={c.head}>{c.head}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {board.rows.map((row, i) => (
+                <tr key={row.gamePlayerId} className={row.ours ? "me" : ""}>
+                  <td>{i + 1}</td>
+                  <td className="team-cell">{row.playerName}</td>
+                  <td className="dim-cell">{row.teamShortName}</td>
+                  {columns.map((c) => (
+                    <td key={c.head}>{c.strong ? <b>{c.of(row)}</b> : c.of(row)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+      {leaders.teams.length > 0 && (
+        <>
+          <div className="section-title">팀 통계</div>
+          <table data-testid="team-stats">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>팀</th>
+                <th>경기</th>
+                <th>득점</th>
+                <th>실점</th>
+                <th>무실점</th>
+                <th>슛</th>
+                <th>xG</th>
+              </tr>
+            </thead>
+            <tbody>
+              {leaders.teams.map((t, i) => (
+                <tr key={t.teamId} className={t.ours ? "me" : ""}>
+                  <td>{i + 1}</td>
+                  <td className="team-cell">{t.name}</td>
+                  <td>{t.played}</td>
+                  <td>{t.goalsFor}</td>
+                  <td>{t.goalsAgainst}</td>
+                  <td>{t.cleanSheets}</td>
+                  <td>{t.shots}</td>
+                  <td>{t.xg.toFixed(1)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </>
   );
 }
 
@@ -557,7 +782,6 @@ export function CompetitionsView({
             <>
               <div className="section-title">순위</div>
               <StandingsTable competition={active} />
-              <ZoneLegend zones={active.zones} />
             </>
           )}
 
@@ -574,6 +798,9 @@ export function CompetitionsView({
               <RoundFixtures competition={active} />
             </>
           )}
+
+          {/* 개인 순위·팀 열은 순위표와 같은 표 계열이라 일정 다음에 이어 선다 */}
+          <LeadersSection competition={active} />
 
           {competitions.recentResults.length > 0 && (
             <>

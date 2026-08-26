@@ -820,6 +820,11 @@ tick은 없다 (§5).
 것은 유망주가 원래 덜 뛰기 때문이다. 자격자가 없으면 **그 상은 그해 서지 않는다** —
 빈 수상자를 만들지 않는다.
 
+**집계와 동점 사슬은 시즌 중 리더보드와 한 자리에 있다**
+(`competition/leaderboard.ts` — [../data/competition.md](../data/competition.md) §2
+「개인 순위」). 시상은 그 표에서 1위 하나씩을 꺼내 갈 뿐이다: 두 벌로 두면 3월의
+득점 순위 1위와 5월의 득점왕이 다른 규칙으로 뽑힌다.
+
 **동점은 규칙으로 끝난다.** 사슬이 앞에서부터 자르고 마지막 칸은 반드시 유일하다:
 
 | 상                       | 동점 처리 사슬                                            |
@@ -1120,7 +1125,9 @@ id·이름·생일·주 포지션·마지막 팀·날짜·시즌·사유. 통산
   트로피 · 재임 기간)와 시즌 전환의 어느 자리에 세울지.
 - **시상이 읽는 기록은 대회별로 갈려 있지 않다** (§6) — `SEASON_STAT`이 리그·컵·
   대항전을 한 행에 쌓으므로 "리그 득점왕"을 리그 경기만으로 매길 수 없다. 대회별
-  누계를 나누려면 `SEASON_STAT`이 대회 축을 하나 더 가져야 한다
+  누계를 나누려면 `SEASON_STAT`이 대회 축을 하나 더 가져야 한다. **시즌 중 리더보드도
+  같은 한계를 진다** — 대항전에는 개인 순위가 서지 않는다
+  ([../data/competition.md](../data/competition.md) §2 「개인 순위」)
 - **시상은 아직 아무것도 움직이지 않는다** — 커리어 표와 오프시즌 장면에 서지만
   선수의 몸값·사기·재계약 요구엔 닿지 않는다. 닿게 하려면 상마다 무게를 정해야
   하는데, 그 무게는 이적 시장의 값매김([transfer.md](./transfer.md))과 같은 눈금에서
@@ -1136,7 +1143,7 @@ id·이름·생일·주 포지션·마지막 팀·날짜·시즌·사유. 통산
 | 유럽 대항전                         | `competition/europe.ts` · `euro-knockout.ts` · `euro-prize.ts`                                                         |
 | 추첨 일정                           | `competition/draw-schedule.ts`                                                                                         |
 | 시즌 리뷰·전환·승강                 | `competition/season.ts` · `competition/promotion.ts`                                                                   |
-| 시상 선정·동점 처리                 | `competition/season.ts` (`seasonAwards`)                                                                               |
+| 시상 선정·동점 처리                 | `competition/season.ts` (`seasonAwards`) · 집계·사슬은 `competition/leaderboard.ts`                                    |
 | 은퇴 판정·예고·명부                 | `competition/season.ts` (`retirementVerdict`·`declareRetirements`·`withdrawRetirement`)                                |
 | 유스 인테이크 — 후보·결정·기본값    | `competition/season.ts` (`youthIntakeOf`·`standYouthCandidates`·`settleYouthIntake`) · `skills/index.ts` (`signYouth`) |
 | 마지막 홈경기 회견                  | `packages/engine/src/club/press.ts` (`farewell`)                                                                       |
