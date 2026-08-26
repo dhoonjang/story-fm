@@ -288,21 +288,22 @@ row, 지난 일 = 그대로 이력.**
 
 ### 3.5 진행 중인 흥정 · 세계의 부름
 
-| 엔티티                                | 무엇                                                                                                      | 정의                   |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `negotiations` `Negotiation`          | 진행 중 협상 — 영입·매각·재계약·임대(양방향)                                                              | `domain/records.ts`    |
-| ↳ `NegotiationRound`                  | 오퍼 한 번 — 조건·응답 예정일·코어 확률·판정·`pitch`                                                      | `domain/records.ts`    |
-| ↳ `Medical`                           | 합의와 계약 사이의 검진 — `scheduled`/`passed`/`flagged`                                                  | `domain/records.ts`    |
-| ↳ `PitchClaim`                        | 설득 논거 10종 — 코어가 사실 대조한다                                                                     | `domain/persuasion.ts` |
-| `pressConferences` `PressConference`  | 기자회견 — 열린 시점과 답한 시점이 갈린다                                                                 | `domain/press.ts`      |
-| ↳ `PressFact`                         | **사실 카드** (질문 문장이 아니다) — 기자는 이 밖을 못 묻는다                                             | `domain/press.ts`      |
-| `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리 (people.md §8)                                                 | `domain/press.ts`      |
-| `approachPressure` `ApproachPressure` | 압력 눈금 — 주제별 누적과 계단. 파생할 수 없는 유일한 값                                                  | `domain/press.ts`      |
-| `pressLeaks` `PressLeak`              | 언론 유출 — 다음 회견이 실어 갈 때까지만 남는다 (§8 계단 4)                                               | `domain/press.ts`      |
-| `pressSackings` `PressSacking`        | 라이벌 구단의 경질 — 다음 회견이 실어 갈 때까지만 남는다                                                  | `domain/press.ts`      |
-| `clubVision` `ClubVision`             | **클럽 비전** — 구단주 원형이 건 다년 계획. 코드·목표·가중치·기한만 남고 진행도는 파생이다 (career.md §5) | `domain/records.ts`    |
-| `youthCandidates` `YouthCandidate`    | 여름의 유스 후보 — 소집일까지 감독의 답을 기다린다 (season.md §6)                                         | `domain/records.ts`    |
-| `aiDeals` `AiDeal`                    | 이번 주에 정해진, 날짜가 흩어진 AI 이적                                                                   | `market/ai-market.ts`  |
+| 엔티티                                | 무엇                                                                                                          | 정의                   |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `negotiations` `Negotiation`          | 진행 중 협상 — 영입·매각·재계약·임대(양방향)                                                                  | `domain/records.ts`    |
+| ↳ `NegotiationRound`                  | 오퍼 한 번 — 조건·응답 예정일·코어 확률·판정·`pitch`                                                          | `domain/records.ts`    |
+| ↳ `Medical`                           | 합의와 계약 사이의 검진 — `scheduled`/`passed`/`flagged`                                                      | `domain/records.ts`    |
+| ↳ `PitchClaim`                        | 설득 논거 10종 — 코어가 사실 대조한다                                                                         | `domain/persuasion.ts` |
+| `pressConferences` `PressConference`  | 기자회견 — 열린 시점과 답한 시점이 갈린다                                                                     | `domain/press.ts`      |
+| ↳ `PressFact`                         | **사실 카드** (질문 문장이 아니다) — 기자는 이 밖을 못 묻는다                                                 | `domain/press.ts`      |
+| `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리 (people.md §8)                                                     | `domain/press.ts`      |
+| `approachPressure` `ApproachPressure` | 압력 눈금 — 주제별 누적과 계단. 파생할 수 없는 유일한 값                                                      | `domain/press.ts`      |
+| `pressLeaks` `PressLeak`              | 언론 유출 — 다음 회견이 실어 갈 때까지만 남는다 (§8 계단 4)                                                   | `domain/press.ts`      |
+| `pressSackings` `PressSacking`        | 라이벌 구단의 경질 — 다음 회견이 실어 갈 때까지만 남는다                                                      | `domain/press.ts`      |
+| `clubVision` `ClubVision`             | **클럽 비전** — 구단주 원형이 건 다년 계획. 코드·목표·가중치·기한만 남고 진행도는 파생이다 (career.md §5)     | `domain/records.ts`    |
+| `youthCandidates` `YouthCandidate`    | 여름의 유스 후보 — 소집일까지 감독의 답을 기다린다 (season.md §6)                                             | `domain/records.ts`    |
+| `callUps` `CallUp`                    | **A매치 소집** — `returnedOn === null`이 소집 중. 정산 뒤엔 감독 팀 것만 두 시즌 남는다 (competition.md §5-1) | `domain/records.ts`    |
+| `aiDeals` `AiDeal`                    | 이번 주에 정해진, 날짜가 흩어진 AI 이적                                                                       | `market/ai-market.ts`  |
 
 이것들이 세이브에 남는 이유는 같다 — **두 시점 사이에 걸쳐 있어** 파생으로 되돌릴
 수 없다. 협상은 며칠에 걸쳐 오퍼가 오가고, 회견과 다가옴은 열린 뒤 감독이 다음 날
@@ -438,6 +439,10 @@ erDiagram
 - `PlayerState.talkedOn`(마지막 면담 날짜)도 같다. `SETTLING_EVENT`는 **정착 중인
   선수만** 남기므로, 나머지 선수에게 "오늘 이미 이야기했나"를 물을 표가 없다.
   옛 세이브엔 없다 — 없으면 아직 이야기한 적 없는 것으로 읽고 버전을 올리지 않는다.
+- `PlayerState.caps` · `internationalGoals`(통산 A매치 출전·골)도 같다 — 소집 표는
+  최근 두 시즌만 남으므로 표에서 파생하면 통산이 세 시즌 뒤에 사라진다
+  (→ [competition](competition.md) §5-1). `summerReturn`(여름 대회로 늦어진 합류일)도
+  대회가 남기는 유일한 사실이라 저장한다. 셋 다 옛 세이브엔 없다(optional).
 - `PlayerState.demotedOn`(2군으로 내린 날)도 같다 — 1·2군 이동은 원장에 남지
   않아 "며칠째 2군인가"를 물을 표가 없다. 1군으로 올리면 지워진다. 옛 세이브엔
   없다 — 없으면 감독이 내린 적 없는 것으로 읽고 버전을 올리지 않는다
