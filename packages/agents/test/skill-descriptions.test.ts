@@ -68,14 +68,14 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
     for (const skill of SKILL_CATALOG) perGroup[skill.group] = (perGroup[skill.group] ?? 0) + 1;
     expect(perGroup).toEqual({
       진행: 5,
-      "전술·훈련": 11,
+      "전술·훈련": 12,
       "대화·서사": 5,
       경기: 1,
       이적: 13,
       재정: 6,
       조회: 9,
     });
-    expect(SKILL_CATALOG.length).toBe(50);
+    expect(SKILL_CATALOG.length).toBe(51);
     expect(SKILL_CATALOG.filter((s) => s.readOnly).length).toBe(10);
   });
 });

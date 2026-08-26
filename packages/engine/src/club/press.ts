@@ -13,6 +13,7 @@ import {
   ageOf,
   interestStageRank,
   isNaturalAt,
+  isSymbolicNumber,
   naturalPositionOf,
   PLAYER_ISSUE_REASONS,
   pressFactText,
@@ -26,6 +27,7 @@ import { formatMoney } from "./finance";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
 import { careerTotalsOf, matchMilestones } from "../squad/career";
+import { numberLineageOf } from "../squad/numbers";
 import { recentOutcomes } from "../squad/slump";
 import { isFriendly } from "../competition/friendly";
 import { boardExpectation, computeStandings, retirementJudgeDate } from "../competition/season";
@@ -356,6 +358,29 @@ function squeezedBy(state: GameState, arrival: GamePlayer): GamePlayer[] {
 /** 같은 자리를 두고 다투는 선수를 이름으로 몇까지 넘기는가 */
 const RIVAL_NAMES_SHOWN = 2;
 
+/**
+ * **번호를 물려받았다** — 계보가 있는 번호를 지금 달고 있을 때만 (player.md §1.1).
+ *
+ * 앞서 아무도 뛰지 않은 번호에는 물려받을 것이 없어 카드가 서지 않는다 — 없는 계보를
+ * 카드로 세우면 기자가 그 없음을 사실로 옮겨 적는다.
+ */
+function numberInheritedFact(state: GameState, player: GamePlayer): PressFact | null {
+  const number = player.squadNumber;
+  if (number === undefined) return null;
+  const after = numberLineageOf(state, player.teamId, number).past[0];
+  if (!after) return null;
+  return {
+    kind: "number-inherited",
+    data: {
+      name: after.name,
+      values: { number, seasons: after.seasons, since: state.season - after.lastSeason },
+      tags: [],
+    },
+    about: player.id,
+    sharp: false,
+  };
+}
+
 /** 회견이 열릴 만한 이적료 — 이 아래는 1군 상위 자원일 때만 */
 const BIG_FEE = 25_000_000;
 
@@ -402,6 +427,8 @@ export function buildTransferPress(
             about: p.id,
             sharp: true,
           })),
+          // 새 셔츠가 누구의 것이었나 — 계보가 없는 번호에는 서지 않는다
+          ...[numberInheritedFact(state, player)].filter((f): f is PressFact => f !== null),
         ]
       : [
           {
@@ -710,6 +737,8 @@ function buildOpeningPress(
       sharp: false,
     });
   }
+  const inherited = summerNumberInheritance(state);
+  if (inherited) facts.push(inherited);
 
   return {
     id: `press-opening-${state.season}`,
@@ -721,6 +750,24 @@ function buildOpeningPress(
     status: "pending",
     weight: 1,
   };
+}
+
+/**
+ * 이번 여름 감독이 **새로 물려준 상징 번호** — 없으면 카드도 없다 (player.md §1.1).
+ *
+ * 프리시즌 이후 번호가 움직인 사람만 본다(`squadNumberOn`) — 시즌 내내 같은 셔츠를
+ * 입어 온 10번은 개막 전야에 물을 일이 아니다. **한 장뿐이다**: 여름에 번호가 여럿
+ * 움직였다고 개막 회견이 번호 명부가 되지는 않는다.
+ */
+function summerNumberInheritance(state: GameState): PressFact | null {
+  for (const player of userPlayers(state)) {
+    const on = player.state.squadNumberOn;
+    if (on === undefined || on < state.calendar.preseasonStart) continue;
+    if (player.squadNumber === undefined || !isSymbolicNumber(player.squadNumber)) continue;
+    const fact = numberInheritedFact(state, player);
+    if (fact) return fact;
+  }
+  return null;
 }
 
 /** 이번 시즌 우리가 가장 크게 지른 영입 — 없으면 없는 대로 (이적료 0은 지른 것이 아니다) */
