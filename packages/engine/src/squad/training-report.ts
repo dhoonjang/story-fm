@@ -277,18 +277,31 @@ function allowedAxesFor(
 }
 
 /**
+ * **오늘 감독이 훈련에서 뺀 선수인가** (→ docs/simulation/season.md §4).
+ *
+ * 개인 휴식은 기간이라 「걸려 있다」와 「오늘 해당한다」가 다르다 — 기한이 지난 프로그램은
+ * 지우지 않고 그냥 지나가므로, 묻는 자리는 전부 **날짜와 함께** 묻는다.
+ */
+export function restingOn(state: GameState, playerId: string, on = state.date): boolean {
+  const until = state.playerTraining.find((t) => t.gamePlayerId === playerId)?.rest?.until;
+  return until !== undefined && on <= until;
+}
+
+/**
  * **그 구간 훈련장에 선 선수인가** — 결산도 훈련 부상도 이 문 하나를 지난다
  * (→ docs/simulation/season.md §4·§8 불변식).
  *
  * 1군만 훈련장에 선다 — 2군은 코어 월간 성장으로 자란다(season.md §2). 재활 중이거나
- * 출장 정지인 선수는 팀과 함께 보내지 않았다(player.md §6.1). 두 문이 갈리면 훈련
- * 부상만 맞고 결산은 받지 못하는 선수가 생긴다.
+ * 출장 정지인 선수는 팀과 함께 보내지 않았다(player.md §6.1). **감독이 기간을 정해
+ * 훈련에서 뺀 선수**도 같다 — 훈련장에 서지 않았으니 결산의 대상도 훈련 부상의
+ * 후보도 아니다. 두 문이 갈리면 훈련 부상만 맞고 결산은 받지 못하는 선수가 생긴다.
  */
 export function trainsWithFirstTeam(state: GameState, player: GamePlayer): boolean {
   return (
     player.teamId === state.userTeamId &&
     squadLevelOf(player) === "first" &&
-    isAvailable(state, player.id)
+    isAvailable(state, player.id) &&
+    !restingOn(state, player.id)
   );
 }
 

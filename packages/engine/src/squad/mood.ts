@@ -1,5 +1,8 @@
 import {
   ageOf,
+  fatigueBand,
+  fatigueBandLabel,
+  fatigueOf,
   injuryRiskText,
   isRelease,
   issueReasonKo,
@@ -13,6 +16,7 @@ import {
   SQUAD_STATUS_KO,
 } from "@story-fm/domain";
 import type {
+  FatigueBand,
   GamePlayer,
   InjuryRiskCause,
   InjuryRiskGrade,
@@ -181,6 +185,15 @@ export type MoodFact =
    * 것은 출전 기록이지 숫자가 아니고, 말은 화면·GM이 붙인다.
    */
   | { cause: "sharpness"; band: SharpnessBand }
+  /**
+   * **시즌이 몸에 쌓아 둔 것** (player.md §5.5) — 오늘의 체력과도, 경기 감각과도
+   * 다른 사실이다. 하루 쉬어서 돌아오는 것이 아니라 몇 주를 덜어 내야 빠지는
+   * 잔고라, 감독이 쥐는 손잡이가 다르다(로테이션·개인 휴식).
+   *
+   * 「가뿐」·「쌓임」은 서지 않는다 — 말할 거리가 아니다. 등급만 낸다: 감독이
+   * 관측하는 것은 출전 기록과 일정이지 숫자가 아니다.
+   */
+  | { cause: "fatigue"; band: Extract<FatigueBand, "heavy" | "overloaded"> }
   /** 최근 우리 구단에서 계약이 해지된 선수 — 남은 선수단 전원이 같은 카드를 든다 */
   | { cause: "departure"; name: string; days: number }
   | { cause: "contract-ending"; daysLeft: number }
@@ -590,13 +603,30 @@ export function moodFactsOf(
      * 재지는 못한다 (player.md §10). 임대 보낸 선수는 우리 선수다(`isOurPlayer`) —
      * `teamId`로 가르면 명단의 「위험」 열과 그 선수의 심경이 서로 다른 말을 한다.
      */
-    const risk = isOurPlayer(state, player) ? injuryRiskFor(player) : null;
-    if (risk?.grade === "high") {
+    const ours = isOurPlayer(state, player);
+    const risk = ours ? injuryRiskFor(player) : null;
+    /**
+     * **누적 피로가 맨 앞이다** (player.md §5.5) — 셋 중 그것만이 며칠 안에 손을
+     * 쓰지 않으면 라커룸으로 가는 사실이고(`overload` 불만), 나머지 둘은 오늘의
+     * 사실이다. 「지침」은 달리 할 말이 없을 때만이다 — 시즌 중반이면 주전 대부분이
+     * 그 등급이라 늘 내면 소음이 된다 (`sharpness`·위험 `elevated`와 같은 규칙).
+     *
+     * ⚠️ **개막 전에는 내지 않는다** — 시즌 전환이 전원을 0으로 비우므로 7월에는
+     * 아무에게도 설 수 없지만, 문을 명시적으로 두는 것은 `sharpness`와 같은 이유다.
+     * ⚠️ **우리 선수에게만** — 남의 선수의 몸은 감독이 재지 못한다 (player.md §10).
+     */
+    const band =
+      ours && state.date >= state.calendar.start ? fatigueBand(fatigueOf(player.state)) : null;
+    if (band === "overloaded") {
+      facts.push({ cause: "fatigue", band });
+    } else if (risk?.grade === "high") {
       facts.push({ cause: "risk", grade: "high", causes: risk.causes });
     } else if (condition <= CONDITION_HEAVY) {
       facts.push({ cause: "condition", level: "heavy" });
     } else if (risk?.grade === "elevated" && facts.length === 0) {
       facts.push({ cause: "risk", grade: "elevated", causes: risk.causes });
+    } else if (band === "heavy" && facts.length === 0) {
+      facts.push({ cause: "fatigue", band });
     } else if (condition >= CONDITION_LIGHT && facts.length === 0) {
       facts.push({ cause: "condition", level: "light" });
     }
@@ -765,6 +795,9 @@ function factLine(fact: MoodFact): string {
         : `체력 ${CONDITION_LIGHT} 이상`;
     case "sharpness":
       return `경기 감각 ${sharpnessBandLabel(fact.band)}`;
+    // 잔고의 숫자는 적지 않는다 — 감독이 관측하는 것은 출전 기록과 일정이다
+    case "fatigue":
+      return `누적 피로 ${fatigueBandLabel(fact.band)}`;
     case "risk":
       // 배수는 적지 않는다 — 감독이 읽는 것은 등급과 그것을 들어 올린 항이다
       return `부상 위험 ${injuryRiskText(fact.grade, fact.causes)}`;

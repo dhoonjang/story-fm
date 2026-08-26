@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TACTICS, type StrengthPacket } from "@story-fm/domain";
+import { CONDITION_MAX, DEFAULT_TACTICS, type StrengthPacket } from "@story-fm/domain";
 import {
   advanceClock,
   applyEvents,
@@ -184,6 +184,52 @@ function riskSpread(index: number): { condition: number; proneness: number } {
   return { condition: 45, proneness: 1.7 };
 }
 
+/**
+ * **잔고만 다른 두 무리** — 시즌이 쌓아 둔 부하가 굴림에 닿는가 (player.md §5.5).
+ *
+ * 등급 팔(`gradeArm`)이 재는 것은 「등급이 부상률 순서로 서는가」라 체력·성향으로
+ * 등급을 갈라 심는다. 여기서 재는 것은 그와 다른 질문이다: **체력이 가득한 선수끼리**
+ * 잔고만 갈랐을 때 저울이 실제로 기우는가. 갈라 두지 않으면 새 항이 0으로 곱해져도
+ * 다른 항의 신호에 묻혀 아무도 눈치채지 못한다.
+ */
+const LOADED = 70;
+
+/** 잔고 팔의 몸싸움 — 열한 명을 같은 값으로 눕힌다 (저울의 다른 항이 갈리면 안 된다) */
+const LOAD_ARM_STRENGTH = 70;
+
+function loadArm(runs: number): { fresh: number; loaded: number; injuries: [number, number] } {
+  const state = createTestGame(11);
+  const home = flat({ ...simSquadOf(state, HOME), bench: [] });
+  /**
+   * ⚠️ **스쿼드를 세운 뒤에 심는다** — `simSquadOf`가 잔고로도 로테이션하므로
+   * (`ROTATION_LOAD`), 세우기 전에 심으면 재려던 선수가 그 경기에 서지 않는다.
+   *
+   * 체력·몸싸움을 전원 같은 값으로 눕히고 성향은 `flat`이 지운다 — 갈리는 항이
+   * 잔고 하나뿐이라야 비가 곧 그 항의 크기다.
+   */
+  const loadedIds = new Set<string>();
+  home.starters.forEach((p, i) => {
+    p.state.condition = CONDITION_MAX;
+    p.attributes.strength = LOAD_ARM_STRENGTH;
+    if (i % 2 === 0) return;
+    p.state.fatigue = LOADED;
+    loadedIds.add(p.id);
+  });
+  const away = flat({ ...simSquadOf(state, AWAY), bench: [] });
+  const injuries: [number, number] = [0, 0];
+  for (let i = 0; i < runs; i++) {
+    for (const tag of quickSimulate(home, away, 7000 + i, `load:${i}`).injuries) {
+      if (!tag.startsWith("home:")) continue;
+      injuries[loadedIds.has(tag.slice("home:".length)) ? 1 : 0] += 1;
+    }
+  }
+  return {
+    fresh: home.starters.length - loadedIds.size,
+    loaded: loadedIds.size,
+    injuries,
+  };
+}
+
 /** 등급별 노출(선수 × 경기)과 실제 부상 건수 */
 interface GradeTally {
   exposure: Record<InjuryRiskGrade, number>;
@@ -280,6 +326,10 @@ describe("간이 시뮬과 구간 시뮬은 같은 눈금으로 카드와 부상
     const gradeRate = (grade: InjuryRiskGrade) =>
       grades.injuries[grade] / Math.max(1, grades.exposure[grade]);
 
+    const load = loadArm(MATCHES);
+    const freshRate = load.injuries[0] / Math.max(1, load.fresh * MATCHES);
+    const loadedRate = load.injuries[1] / Math.max(1, load.loaded * MATCHES);
+
     const per = (n: number) => n / MATCHES;
     const readings: Readings<typeof INJURY_RATE> = {
       "경기 강도 (양 팀 평균)": (intensity.home + intensity.away) / 2,
@@ -303,12 +353,15 @@ describe("간이 시뮬과 구간 시뮬은 같은 눈금으로 카드와 부상
       "1인당 부상률 — 위험 높음": gradeRate("high"),
       "부상률 — 보통/낮음": gradeRate("elevated") / Math.max(1e-9, gradeRate("low")),
       "부상률 — 높음/낮음": gradeRate("high") / Math.max(1e-9, gradeRate("low")),
+      "1인당 부상률 — 잔고 0": freshRate,
+      [`1인당 부상률 — 잔고 ${LOADED}`]: loadedRate,
+      [`부상률 — 잔고 ${LOADED}/0`]: loadedRate / Math.max(1e-9, freshRate),
     };
     console.log(
       reportOf(
         INJURY_RATE,
         readings,
-        `${HOME} vs ${AWAY} · 간이 ${(MATCHES * 5).toLocaleString()}판 · 구간 ${MATCHES.toLocaleString()}판 · 기대 부상 ${expected.injuries.toFixed(3)}건 · 기대 카드 ${expected.cards.toFixed(2)}장 (개인 확률 ${(expected.injuries / ON_PITCH).toFixed(4)})`,
+        `${HOME} vs ${AWAY} · 간이 ${(MATCHES * 6).toLocaleString()}판 · 구간 ${MATCHES.toLocaleString()}판 · 기대 부상 ${expected.injuries.toFixed(3)}건 · 기대 카드 ${expected.cards.toFixed(2)}장 (개인 확률 ${(expected.injuries / ON_PITCH).toFixed(4)})`,
       ),
     );
     expect(outOfBand(INJURY_RATE, readings)).toEqual([]);

@@ -54,9 +54,13 @@ import {
   anchorOf,
   clampCondition,
   conditionLabel,
+  fatigueBand,
+  fatigueLabel,
+  fatigueOf,
   sharpnessBand,
   sharpnessLabel,
   sharpnessOf,
+  type FatigueBand,
   type SharpnessBand,
   defaultRoleOf,
   growthLabel,
@@ -630,6 +634,16 @@ interface SquadViewRowMeta {
   sharpnessLabel: string;
   /** 등급 자체 — 화면이 색과 정렬을 이 경계로 맞춘다 */
   sharpnessBand: SharpnessBand;
+  /**
+   * **누적 피로의 말** — "가뿐"·"쌓임"·"지침"·"과부하" (player.md §5.5).
+   *
+   * 체력 막대와 다른 축이다: 저건 오늘 아침의 예산이고 이건 시즌이 쌓아 둔 잔고라,
+   * 경기 다음 날 바닥인 선수와 12월까지 쉬지 못한 선수가 여기서 갈린다. **숫자는
+   * 싣지 않는다** — 감독이 관측하는 것은 출전 기록과 일정이다.
+   */
+  fatigueLabel: string;
+  /** 등급 자체 — 화면이 색과 정렬을 이 경계로 맞춘다 */
+  fatigueBand: FatigueBand;
   /**
    * **부상 위험 등급과 그 원인** (player.md §5.3) — 경기가 누가 다칠지 고를 때 쓰는
    * 저울(`injuryWeight`)을 그대로 읽은 값이다. 체력 막대와 다른 축이다: 잘 쉰
@@ -3031,6 +3045,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         sharpness: Math.round(sharpnessOf(p.state)),
         sharpnessLabel: sharpnessLabel(sharpnessOf(p.state)),
         sharpnessBand: sharpnessBand(sharpnessOf(p.state)),
+        fatigueLabel: fatigueLabel(fatigueOf(p.state)),
+        fatigueBand: fatigueBand(fatigueOf(p.state)),
         injuryRisk: injuryRiskFor(p),
         mood: moodOf(state, p),
         role: (livePacket

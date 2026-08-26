@@ -249,9 +249,15 @@ const TRAINING_INPUT = z
         playerId: playerRef,
         axis: z.enum(ATTRIBUTE_AXES).optional(),
         position: z.string().min(1).optional(),
+        rest: z
+          .object({ until: dateArg })
+          .describe("그날까지 이 선수만 훈련에서 뺀다 — 누적 피로가 빠지고 경기 감각은 무뎌진다")
+          .optional(),
         clear: z.boolean().optional(),
       })
-      .describe("한 선수만 겨냥한 개인 훈련 — 팀 훈련 위에 얹힌다. clear=true면 거둔다"),
+      .describe(
+        "한 선수만 겨냥한 개인 훈련 — 팀 훈련 위에 얹힌다. clear=true면 축·자리·휴식을 함께 거둔다",
+      ),
   })
   .partial();
 

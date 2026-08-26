@@ -80,6 +80,8 @@ import {
   describeReputation,
   diffDays,
   familiarityLabel,
+  fatigueBand,
+  fatigueOf,
   formatMoney,
   matchupText,
   normalizePacket,
@@ -368,6 +370,8 @@ const PRECONTRACTED_SHOWN = 2;
 const PROMISE_SHOWN = 3;
 const TRANSFER_REQUEST_SHOWN = 3;
 const AT_RISK_SHOWN = 3;
+/** 과부하로 이름을 적는 인원 — 위험 줄과 같은 폭 */
+const OVERLOADED_SHOWN = 3;
 const RECENT_NARRATIVE = 4;
 
 /**
@@ -743,6 +747,20 @@ export function buildGmStateNote(
         squadLevelOf(p) === "first" && !isInjured(state, p.id) && injuryRiskFor(p).grade === "high",
     )
     .map((p) => p.name);
+  /**
+   * **시즌이 몸에 쌓아 둔 것** (player.md §5.5) — 위험 줄과 **다른 줄인 이유는 감독이
+   * 쥐는 손잡이가 다르기 때문이다.** 위험은 이번 경기의 라인업으로 답하고 과부하는
+   * 몇 주의 로테이션·개인 휴식으로 답한다. 한 줄로 접으면 GM이 "오늘 빼시죠"만
+   * 말하게 되고, 잔고는 그것으로 빠지지 않는다.
+   */
+  const overloaded = players
+    .filter(
+      (p) =>
+        squadLevelOf(p) === "first" &&
+        !isInjured(state, p.id) &&
+        fatigueBand(fatigueOf(p.state)) === "overloaded",
+    )
+    .map((p) => p.name);
   const unhappy = state.issues.map((i) => playerName(state, i.gamePlayerId));
 
   const training = state.schedule
@@ -782,6 +800,11 @@ export function buildGmStateNote(
     atRisk.length > 0
       ? `부상 위험 높음 ${atRisk.length} (${atRisk.slice(0, AT_RISK_SHOWN).join(", ")}${
           atRisk.length > AT_RISK_SHOWN ? " …" : ""
+        })`
+      : null,
+    overloaded.length > 0
+      ? `과부하 ${overloaded.length} (${overloaded.slice(0, OVERLOADED_SHOWN).join(", ")}${
+          overloaded.length > OVERLOADED_SHOWN ? " …" : ""
         })`
       : null,
     suspended.length > 0 ? `정지 ${suspended.length} (${suspended.join(", ")})` : null,

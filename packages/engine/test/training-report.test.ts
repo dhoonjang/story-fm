@@ -483,6 +483,30 @@ describe("대상은 그 구간을 팀과 함께 보낸 선수다", () => {
       .sort();
     expect(ids, "결산 대상과 훈련장에 선 집합이 갈렸다").toEqual(gate);
   });
+
+  /**
+   * **감독이 뺀 선수도 같은 문을 지난다** (season.md §4 · player.md §5.5).
+   *
+   * 브리프에 남아 있으면 훈련장에 서지도 않은 선수가 그 구간의 능력치 판정을
+   * 받고, 훈련 부상 후보에도 남아 "쉬게 했는데 훈련 중에 다쳤다"가 된다.
+   */
+  it("개인 휴식이 걸린 선수는 결산 브리프에서 빠지고, 기간이 끝나면 돌아온다", () => {
+    const state = afterSquadReturn(createTestGame(7));
+    const resting = assignmentsOf(state, state.userTeamId, "starting")[0]!.playerId;
+    const until = addDays(state.date, 5);
+    expect(setPlayerTraining(state, { playerId: resting, rest: { until } }).ok).toBe(true);
+
+    const brief = trainOneDay(state, ["stamina"], "러닝")!;
+    expect(
+      brief.subjects.some((s) => s.playerId === resting),
+      "훈련에서 뺀 선수가 판정 대상에 있다",
+    ).toBe(false);
+    expect(brief.subjects.length, "대상이 통째로 비었다").toBeGreaterThan(0);
+
+    // 기간이 지나면 저절로 돌아온다 — 거두는 손이 따로 필요하지 않다
+    state.date = addDays(until, 1);
+    expect(trainsWithFirstTeam(state, playerById(state, resting)!)).toBe(true);
+  });
 });
 
 describe("개인 훈련 축은 걸어 둔 선수에게만 열린다", () => {

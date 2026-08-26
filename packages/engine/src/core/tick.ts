@@ -1,10 +1,13 @@
 import type { GamePlayer, MatchRecord, ScheduleEntry, TrainingSession } from "@story-fm/domain";
 import {
   FAMILIARITY_BASELINE,
+  FATIGUE_BAND_FLOOR,
   FULL_TIME_MINUTES,
   addToSeasonStat,
   clampCondition,
+  clampFatigue,
   clampSharpness,
+  fatigueOf,
   isReserveMatch,
   keptCleanSheet,
   naturalPositionOf,
@@ -16,6 +19,10 @@ import {
   conditionDrain,
   dailyRecovery,
   drainVariance,
+  fatigueAfterDay,
+  fatigueDayOf,
+  fatigueFromMinutes,
+  fatigueFromSessions,
   injuryWeight,
   sharpnessAfterDay,
   sharpnessAfterMinutes,
@@ -46,6 +53,7 @@ import { loanReports, returnDueLoans, signFreeAgents, type LoanReport } from "..
 import { clampForm, decayedForm, formDeltaFromMatch } from "../squad/form";
 import {
   TRAINING_XP_PER_SESSION,
+  restingOn,
   trainsWithFirstTeam,
   type TrainedSession,
 } from "../squad/training-report";
@@ -64,7 +72,11 @@ import {
   openEvePress,
   SQUAD_CORE_SIZE,
 } from "../club/press";
-import { demotionPatienceDaysOf, listedPatienceDaysOf } from "../squad/demotion";
+import {
+  demotionPatienceDaysOf,
+  listedPatienceDaysOf,
+  overloadPatienceDaysOf,
+} from "../squad/demotion";
 // 출전 불만과 약속 판정은 **같은 자**를 쓴다 (people.md §5·§5-2)
 import { minutesShortfalls, shortfallText, tickPromises } from "../squad/promises";
 import { tickApproaches } from "../club/approach";
@@ -355,15 +367,61 @@ function dailyTick(
   resolveInjuries(state, digest);
   // 오늘 재활 중인 선수 — 경기 감각의 자리를 가르는 유일한 사실 (아래 루프)
   const injuredPlayers = openInjuryIds(state);
+  /**
+   * **오늘 몸을 쓰는 세션 수** — 누적 피로와 훈련 부상이 같은 이 수를 읽는다.
+   *
+   * 여기서 한 번만 세는 것은 순서 때문이다: 잔고를 적립하는 루프가 세션 루프보다
+   * 앞에 서야 하고(회복·폼·감각과 한 하루에 얹힌다), 세션 루프는 엔트리에 `done`을
+   * 찍으므로 뒤로 옮길 수 없다. 두 곳에서 따로 세면 프리시즌 이중 세션이 한쪽에만
+   * 잡히는 날이 온다.
+   */
+  const hardSessions = workEntries.filter((e) => {
+    const session = sessionById(state, e.refId);
+    return session !== null && isHardSession(session);
+  }).length;
 
   for (const player of players) {
     /**
+     * **오늘 이 선수가 훈련장에 있었나** — 감독이 기간을 정해 뺐거나 재활 중이면
+     * 아니다 (season.md §4 · player.md §5.5). 잔고가 가장 빨리 빠지는 하루이고,
+     * 그 대신 경기 감각은 훈련장을 떠난 값(25) 쪽으로 끌린다.
+     */
+    const away = restingOn(state, player.id) || injuredPlayers.has(player.id);
+    /**
      * 하루가 지나며 되찾는다 — **지구력이 회복 속도도 정한다**(stamina.ts).
      * 그래서 같은 −70을 안고도 사흘 뒤에 누구는 80이고 누구는 60이다.
+     *
+     * ⚠️ **누적 피로가 이 배율에 곱해진다**(`recoveryFactor` — player.md §5.5).
+     * 그래서 아래 잔고 적립·해소보다 **먼저** 서야 한다: 오늘의 회복은 오늘 아침의
+     * 몸이 정하는 것이지 오늘 밤의 몸이 정하는 것이 아니다.
      */
     player.state.condition = clampCondition(
       player.state.condition + dailyRecovery(player, recoveryKind),
     );
+    /**
+     * **시즌이 쌓아 둔 잔고** (player.md §5.5) — 본훈련이 얹고 하루가 뺀다.
+     * 경기 분은 경기 마감이 따로 얹는다(`finalizeMatch` · 간이 시뮬), 그쪽이
+     * 자리·분·킥오프 체력을 아는 유일한 자리여서다.
+     *
+     * 쉬는 선수는 세션을 소화하지 않았으므로 적립도 없다 — 훈련장에 서지 않은
+     * 사람에게 세션 수를 물리면 "빼 줬다"가 장부에서 거짓이 된다.
+     */
+    player.state.fatigue = clampFatigue(
+      fatigueAfterDay(
+        fatigueOf(player.state) + (away ? 0 : fatigueFromSessions(hardSessions)),
+        fatigueDayOf(recoveryKind, away),
+      ),
+    );
+    /**
+     * **과부하가 시작된 날** — "며칠째인가"의 유일한 원본 (people.md §5).
+     * 문턱 아래로 내려가면 지운다: 감독이 손을 써서 잔고가 빠졌다면 그 시계는
+     * 이어지는 것이 아니라 **끝난** 것이고, 다시 넘으면 그날부터 새로 센다.
+     */
+    if (fatigueOf(player.state) >= FATIGUE_BAND_FLOOR.overloaded) {
+      player.state.overloadedOn ??= state.date;
+    } else {
+      delete player.state.overloadedOn;
+    }
     /**
      * 폼은 **매일** 평균으로 조금 끌린다 (form.ts).
      *
@@ -384,7 +442,11 @@ function dailyTick(
     player.state.sharpness = clampSharpness(
       sharpnessAfterDay(
         sharpnessOf(player.state),
-        sharpnessDayOf(recoveryKind, injuredPlayers.has(player.id)),
+        sharpnessDayOf(
+          // 훈련에서 뺀 선수의 하루는 **훈련이 없는 날**이다 — 재활실이 아니다
+          restingOn(state, player.id) ? "idle" : recoveryKind,
+          injuredPlayers.has(player.id),
+        ),
       ),
     );
     if (issuePlayers.has(player.id)) {
@@ -416,14 +478,12 @@ function dailyTick(
   }
 
   // 훈련 세션 적용 — 등록된 엔트리만 (기본 훈련 없음)
-  let hardSessions = 0;
   // 결산이 보는 세션 수와 갈리면 안 된다 — `trained.sessions`에 실리는 것과 같게 센다
   let doneSessions = 0;
   for (const entry of workEntries) {
     const session = sessionById(state, entry.refId);
     entry.status = "done";
     if (!session) continue;
-    if (isHardSession(session)) hardSessions++;
     doneSessions++;
     trained?.sessions.push({
       entryId: entry.id,
@@ -645,6 +705,51 @@ function dailyTick(
         shelved.length === 1
           ? `${shelved[0]!.player.name} 이적 리스트 불만 — 등재 ${longest}일째`
           : `이적 리스트 불만 ${shelved.length}명 — 최장 ${longest}일째`;
+      digest.push(line);
+      pushNarrative(state, line, 3);
+    }
+  }
+
+  /**
+   * 과부하 불만 — 2군·등재 방치와 **같은 결이다**: 추첨 없이 문턱을 넘으면 걸린다
+   * (→ docs/data/people.md §5 · docs/data/player.md §5.5).
+   *
+   * 대상을 핵심 자원으로 좁히지 않는 이유는 **원인이 출전이기 때문**이다. 백업이
+   * 「과부하」에 닿았다면 그는 이미 뛰고 있는 선수이고, 정리 대상이 조용한 것과는
+   * 다른 사실이다 — 강등·등재가 `betterThanInSquad` 문을 지나는 것은 그 둘이
+   * **안 쓰는 자원**에 대한 결정이어서다.
+   *
+   * 몸을 쓰지 않는 사람에게는 서지 않는다: 훈련에서 빠져 있거나 다쳐 있으면 잔고는
+   * 이미 가장 빠르게 빠지는 중이라, 그 며칠을 감독의 방치로 셀 수 없다.
+   */
+  if (dow === MONDAY) {
+    const overworked = players.flatMap((p): { player: GamePlayer; days: number }[] => {
+      const since = p.state.overloadedOn;
+      if (!since) return [];
+      if (restingOn(state, p.id) || isInjured(state, p.id)) return [];
+      const days = diffDays(since, state.date);
+      // 문턱은 사람마다 다르다 — 과부하의 대가도 시간의 결과이되 그 시간은 그의 것이다
+      if (days < overloadPatienceDaysOf(state, p)) return [];
+      if (state.issues.some((i) => i.gamePlayerId === p.id)) return [];
+      return [{ player: p, days }];
+    });
+    if (overworked.length > 0) {
+      for (const { player, days } of overworked) {
+        // `count`는 **며칠째**다 — 시작점은 `PlayerState.overloadedOn`이 갖는다
+        state.issues.push({
+          gamePlayerId: player.id,
+          kind: "unhappy",
+          reason: "overload",
+          count: days,
+          since: state.date,
+        });
+      }
+      /** 여럿이 한날 문턱을 넘으면 전부 걸리되, 줄은 하나다 — 이름이 화면을 채우지 않게 */
+      const longest = Math.max(...overworked.map((row) => row.days));
+      const line =
+        overworked.length === 1
+          ? `${overworked[0]!.player.name} 과부하 불만 — ${longest}일째`
+          : `과부하 불만 ${overworked.length}명 — 최장 ${longest}일째`;
       digest.push(line);
       pushNarrative(state, line, 3);
     }
@@ -899,6 +1004,18 @@ function standsToday(state: GameState, digest: string[]): boolean {
  */
 export const ROTATION_FATIGUE = 20;
 /**
+ * **시즌의 몸도 자리를 내주게 한다** — 누적 피로가 「지침」 위인 선발 (player.md §5.5).
+ *
+ * 위 문턱은 **오늘의 몸**만 묻는다. 그래서 주 1경기 리듬의 팀은 아무도 닿지 않고
+ * (만 7일이면 체력이 100이다), 대항전 없는 구단은 시즌 내내 같은 열한 명을 세우고도
+ * 로테이션을 한 번도 하지 않았다 — 그 팀의 12월 스쿼드가 8월과 똑같았다는 뜻이다.
+ * 잔고는 주 1경기에서도 차오르므로 둘째 이유가 그 자리를 잡는다.
+ *
+ * 값을 따로 적지 않고 **명단의 등급 경계**를 그대로 읽는다 — 감독의 화면이
+ * 「지침」이라 적은 선수를 AI도 뺀다. 두 벌을 두면 화면과 상대 벤치가 다른 눈금을 산다.
+ */
+export const ROTATION_LOAD = FATIGUE_BAND_FLOOR.heavy;
+/**
  * 대체가 허용되는 기량 손실 — 이보다 떨어지면 지쳐도 그냥 뛴다.
  * ⚠️ 종합의 눈금을 탄다 (player.md §4 — 축 가중 평균이 되며 분포가 좁아져 8 → 7).
  */
@@ -1116,7 +1233,13 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
   const rested = new Set<string>();
   for (let i = 0; i < starters.length; i++) {
     const tired = starters[i]!;
-    if (100 - tired.state.condition < ROTATION_FATIGUE) continue;
+    /**
+     * **자리를 내주는 이유가 둘이다** — 오늘의 몸(체력 결손)과 시즌의 몸(누적 피로).
+     * 둘 중 하나면 대체 자원을 찾는다 (match.md §7 · player.md §5.5).
+     */
+    if (100 - tired.state.condition < ROTATION_FATIGUE && fatigueOf(tired.state) < ROTATION_LOAD) {
+      continue;
+    }
     const replacement = squad
       .filter(
         (p) =>
@@ -1126,7 +1249,9 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
           available(p) &&
           groupOf(p) === groupOf(tired) &&
           p.attributes.overall >= tired.attributes.overall - rotationDropFor(p) &&
-          p.state.condition >= tired.state.condition + ROTATION_FRESHER,
+          p.state.condition >= tired.state.condition + ROTATION_FRESHER &&
+          // 시즌의 몸도 함께 본다 — 더 지친 사람으로 바꾸면 로테이션이 뒤로 간다
+          fatigueOf(p.state) <= fatigueOf(tired.state),
       )
       .sort(loanFirstThen((a, b) => b.attributes.overall - a.attributes.overall))[0];
     /**
@@ -1387,6 +1512,14 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
         const position = slotOf.get(p.id) ?? naturalPositionOf(p).position;
         // 그날의 몫 — 유저 경기와 같은 키 모양이라 리그 전체가 한 규칙을 쓴다
         const today = drainVariance(`${state.seed}:${match.id}:${p.id}`);
+        /**
+         * **잔고는 킥오프 체력으로 잰다** — 아래에서 체력을 깎기 전이어야 한다
+         * (player.md §5.5). 덜 회복된 몸으로 나선 90분이 더 남는다는 것이 이 축의
+         * 연전 간격 항이고, 그 「덜 회복된」은 경기 **뒤**가 아니라 **앞**의 값이다.
+         */
+        p.state.fatigue = clampFatigue(
+          fatigueOf(p.state) + fatigueFromMinutes(minutes, p.state.condition),
+        );
         p.state.condition = clampCondition(
           p.state.condition -
             conditionDrain(p, position, spec, minutes, today, 1, possession[side]),

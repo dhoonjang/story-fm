@@ -1669,6 +1669,26 @@
 }
 
 /**
+ * 누적 피로 — **시즌의 몸이 서는 한 낱말** (player.md §5.5).
+ *
+ * 「가뿐」은 글자가 없다(행에 `—`가 선다) — 위험 열과 같은 규약이다. 감독이 이 열에서
+ * 찾는 것은 손을 써야 하는 두세 줄이지 스물다섯 줄의 현황이 아니다. 「쌓임」은
+ * 칠하지 않는다: 시즌 중반이면 절반이 그 자리라, 칠하면 표가 색으로 덮인다.
+ */
+.squad-table .load {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.squad-table .load.heavy {
+  color: var(--gold-soft);
+}
+.squad-table .load.overloaded {
+  color: var(--danger);
+}
+
+/**
  * 부상 위험 — **다치기 전에 서는 한 낱말** (player.md §5.3).
  *
  * 낮음은 글자가 없다(행에 `—`가 선다) — 스물몇 줄이 「낮음」으로 차면 정작

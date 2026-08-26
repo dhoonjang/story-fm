@@ -1886,11 +1886,25 @@ export function movePlayerSlot(
 }
 
 /**
+ * **한 선수를 기간을 정해 훈련에서 뺄 수 있는 최장 길이** (→ docs/simulation/season.md §4).
+ *
+ * 한 달을 넘기는 것은 훈련 조정이 아니라 스쿼드에서 빼는 결정이고, 그 손잡이는
+ * 2군(`set_squad_level`)이다. 상한이 없으면 "당분간 쉬게 해"가 시즌 끝까지 걸린
+ * 프로그램이 되어 감독이 잊은 채 반년이 지난다.
+ */
+export const PLAYER_REST_MAX_DAYS = 28;
+
+/**
  * 개인 훈련 — **팀 훈련 위에 한 선수만 겨냥해 얹는다.**
  *
  * 축(`axis`)도 자리(`position`)도 훈련 결산(LLM)의 입력이고, 자리는 결산 한 번에
  * `POSITION_TRAIN_MAX`까지만 오른다 — **실전보다 느리게**(경기 1회 = +1).
  * "자리는 커리어가 만든다"를 지키되 전향이라는 판단이 가능해진다.
+ *
+ * **휴식(`rest`)은 그 위의 셋째 갈래다** — 감독이 기간을 정해 이 선수를 훈련에서
+ * 뺀다 (season.md §4 · player.md §5.5). 축·자리와 서로를 지우지 않는다: 쉬는 것과
+ * 무엇을 배우는지는 다른 지시이고, 한쪽만 보낸 요청이 다른 쪽을 조용히 거두면
+ * 감독이 걸어 둔 전향이 "이번 주 쉬게 해" 한마디에 사라진다.
  *
  * ⚠️ **층마다 닿는 것이 다르다** (season.md §2). 2군은 결산을 받지 않으므로 축은
  * 월간 성장의 겨냥으로 넘어가고, **자리는 갈 곳이 없어 반려한다** — 걸어 두고
@@ -1898,14 +1912,20 @@ export function movePlayerSlot(
  */
 export function setPlayerTraining(
   state: GameState,
-  input: { playerId: string; axis?: string; position?: string; clear?: boolean },
+  input: {
+    playerId: string;
+    axis?: string;
+    position?: string;
+    rest?: { until: string };
+    clear?: boolean;
+  },
 ): SkillResult {
   const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
   const index = state.playerTraining.findIndex((t) => t.gamePlayerId === player.id);
 
-  if (input.clear || (!input.axis && !input.position)) {
+  if (input.clear || (!input.axis && !input.position && !input.rest)) {
     if (index < 0) return { ok: false, message: `${player.name}에게 걸린 개인 훈련이 없습니다` };
     state.playerTraining.splice(index, 1);
     return {
@@ -1915,6 +1935,7 @@ export function setPlayerTraining(
     };
   }
 
+  // ── 검증 ── 여기서는 아무것도 바꾸지 않는다 (season.md §4 — `setTraining`과 같은 규약)
   const axis = attributeAxisOf(input.axis?.trim());
   if (input.axis?.trim() && !axis) {
     return { ok: false, message: `알 수 없는 능력치 축: ${input.axis.trim()}` };
@@ -1930,11 +1951,34 @@ export function setPlayerTraining(
       message: `${player.name}은(는) 2군이라 자리를 배울 수 없습니다 — 자리는 훈련 결산이 올리고 2군은 결산을 받지 않습니다. 1군으로 올린 뒤에 거세요`,
     };
   }
+  const restUntil = input.rest?.until;
+  if (restUntil !== undefined) {
+    if (!DATE_RE.test(restUntil)) {
+      return { ok: false, message: `날짜 형식이 잘못됨: ${restUntil}` };
+    }
+    if (restUntil < state.date) {
+      return {
+        ok: false,
+        message: `${restUntil}은 이미 지난 날입니다 — 휴식은 오늘(${state.date})까지로만 끊을 수 있습니다`,
+      };
+    }
+    const days = diffDays(state.date, restUntil) + 1;
+    if (days > PLAYER_REST_MAX_DAYS) {
+      return {
+        ok: false,
+        message: `${days}일은 너무 깁니다 — 개인 휴식은 ${PLAYER_REST_MAX_DAYS}일까지입니다. 그보다 오래 빼려면 2군으로 내리세요`,
+      };
+    }
+  }
 
+  // ── 적용 ──
+  const before = index >= 0 ? state.playerTraining[index] : undefined;
   const program = {
     gamePlayerId: player.id,
-    ...(axis ? { axis } : {}),
-    ...(position ? { position } : {}),
+    // 주지 않은 갈래는 지금 값을 그대로 잇는다 — 서로를 지우지 않는다
+    ...(axis ? { axis } : before?.axis ? { axis: before.axis } : {}),
+    ...(position ? { position } : before?.position ? { position: before.position } : {}),
+    ...(restUntil ? { rest: { until: restUntil } } : before?.rest ? { rest: before.rest } : {}),
     since: state.date,
   };
   if (index >= 0) state.playerTraining[index] = program;
@@ -1951,6 +1995,11 @@ export function setPlayerTraining(
     const fit = player.positions.find((p) => p.position === position)?.proficiency ?? 0;
     parts.push(`${position} 전향 (지금 적응도 ${fit})`);
     items.push(item({ label: "전향", text: position, note: `적응도 ${fit}` }));
+  }
+  if (restUntil) {
+    const days = diffDays(state.date, restUntil) + 1;
+    parts.push(`${restUntil}까지 훈련 제외 (${days}일)`);
+    items.push(item({ label: "휴식", text: `~${briefDate(restUntil)}`, note: `${days}일` }));
   }
   // 어디에 닿는지까지 답한다 — 층에 따라 경로가 갈린다 (season.md §2)
   const where = squadLevelOf(player) === "reserve" ? " (2군 — 월간 성장의 축 배율)" : "";
