@@ -803,4 +803,15 @@ describe("기자회견 — 부임과 시즌의 마디", () => {
     expect(fact.data?.values?.days).toBe(2);
     expect(state.pressSackings, "대기열이 비지 않았다").toHaveLength(0);
   });
+
+  it("이직하면 앞 구단의 라이벌 경질은 실리지 않는다 — 남의 더비다", () => {
+    const state = newGame();
+    state.pressSackings = [{ teamId: "tottenham", date: state.date, position: 17 }];
+    const offer = moveTo(state);
+    expect(acceptManagerOffer(state, offer.id).ok).toBe(true);
+
+    const press = pendingPress(state)!;
+    expect(press.facts.some((f) => f.data?.tags?.[0] === "rival")).toBe(false);
+    expect(state.pressSackings).toHaveLength(0);
+  });
 });

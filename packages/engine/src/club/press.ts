@@ -821,6 +821,8 @@ function loadSackings(state: GameState, conference: PressConference): void {
   const rows = state.pressSackings ?? [];
   if (rows.length === 0) return;
   for (const row of rows) {
+    // 이직하면 앞 구단의 라이벌은 라이벌이 아니다 — 남의 더비를 새 구단 기자가 묻지 않는다
+    if (!derbyOf(state.userTeamId, row.teamId)) continue;
     conference.facts.push({
       kind: "sacking",
       data: {
