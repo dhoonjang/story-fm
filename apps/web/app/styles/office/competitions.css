@@ -370,3 +370,70 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* ── 눈금 고르기 — 전체/홈/원정 · 개인 순위 항목 ─────────────── */
+
+/**
+ * 대회 탭과 같은 알약 꼴이되 한 단 작다 — 무대를 고르는 것(대회 탭)과 보고 있는
+ * 표의 눈금을 고르는 것은 같은 무게가 아니다. 고를 수 있는 것이라 눌리는 생김새를
+ * 갖는다 (overview.md §5 「읽는 값과 조작 대상」).
+ */
+.pill-picker {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  margin-bottom: 8px;
+}
+.pill-picker button {
+  flex: 0 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  padding: 4px 11px;
+}
+.pill-picker button.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+/* ── 순위표의 폼 열 — 최근 다섯 경기 ─────────────────────────── */
+
+/**
+ * 승패는 **글자 하나에 색**이다. 표의 마지막 칸이라 좁은 화면에서는 접힌다 —
+ * 승점과 득실이 먼저다.
+ */
+.form-run {
+  display: inline-flex;
+  gap: 2px;
+}
+.form-mark {
+  font-style: normal;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  width: 1.35em;
+  text-align: center;
+  border-radius: var(--r-xs);
+  background: var(--panel-2);
+}
+.form-mark.form-W {
+  color: var(--accent);
+}
+.form-mark.form-D {
+  color: var(--muted);
+}
+.form-mark.form-L {
+  color: var(--danger);
+}
+@media (max-width: 700px) {
+  .form-col {
+    display: none;
+  }
+}
+
+/* 개인 순위의 팀 칸 — 이름 옆에 서는 약칭이라 한 톤 낮춘다 */
+.dim-cell {
+  color: var(--muted);
+}
