@@ -37,6 +37,21 @@ export function tierOfTeamIn(state: GameState, teamId: string): 1 | 2 | 3 | 4 {
 const EXPECTATION_BAND = { 1: 0.1, 2: 0.3, 3: 0.6 } as const;
 
 /**
+ * 기대 갈래 → 체급. `boardExpectationOfTier`의 **역**이라 같은 자리에 둔다 — 두 벌을
+ * 두면 체급 표를 옮긴 날 한쪽만 따라온다.
+ *
+ * 지난 시즌을 읽는 자리가 이것을 쓴다: 시즌 기록은 체급을 남기지 않고 기대 갈래를
+ * 남기므로(`SeasonRecord.board.expectationCode`), 승강이 체급을 옮긴 해에 **그때의
+ * 체급**을 되짚는 통로는 이 표뿐이다.
+ */
+export const TIER_OF_EXPECTATION: Record<BoardExpectationCode, 1 | 2 | 3 | 4> = {
+  title: 1,
+  europe: 2,
+  mid: 3,
+  survival: 4,
+};
+
+/**
  * 체급 하나가 뜻하는 **보드 기대치** — 난이도는 별도 옵션이 아니라 이 표다
  * (career.md §5). 세이브가 있으면 `boardExpectation(state, teamId)`(`competition/season.ts`),
  * 부임 **전** 팀 목록처럼 세이브가 아직 없는 자리는 카탈로그 체급과 카탈로그 리그

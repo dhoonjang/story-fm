@@ -44,7 +44,9 @@ import {
   withdrawTransferRequest,
 } from "../core/state";
 import { makeRng } from "../core/rng";
+import { TIER_OF_EXPECTATION } from "../core/club-tier";
 import { buildSeasonCalendar, diffDays } from "../competition/calendar";
+import { fundingFactOf } from "./manager-wallet";
 import { boardExpectation, computeStandings } from "../competition/season";
 import { formLabel } from "../squad/form";
 import { issueReasonText } from "../squad/mood";
@@ -814,6 +816,13 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
    * 온 자리라도 자기가 건 조건을 빼놓고 말하지 않는다.
    */
   if (demand) facts.push(demand);
+  /**
+   * **감독의 사재도 구단주가 아는 사실이다** (career.md §5.4). 회견과 달리 창이 없다 —
+   * 기자는 뉴스를 묻고 구단주는 장부를 읽으므로, 넘긴 날이 언제였든 그 시즌 내내
+   * 그가 아는 사실이다.
+   */
+  const fund = fundingFactOf(state);
+  if (fund) facts.push(fund);
   return {
     channel: "owner",
     speakerId: ownerOf(state).characterId,
@@ -1390,6 +1399,17 @@ function openSeasonReview(state: GameState, digest: string[]): boolean {
     about: null,
     sharp: false,
   });
+  /**
+   * **지난 시즌 감독이 건 사재** (career.md §5.4). 체급은 그 시즌의 기대 갈래에서
+   * 되짚는다 — 승강이 지나간 해에 지금 등급의 약속으로 재면 같은 £1M이 다른 비율로
+   * 읽힌다. 갈래를 남기지 않은 옛 줄은 지금 등급 그대로다.
+   */
+  const code = record.board?.expectationCode;
+  const fund = fundingFactOf(state, {
+    season: record.season,
+    ...(code ? { tier: TIER_OF_EXPECTATION[code] } : {}),
+  });
+  if (fund) facts.push(fund);
 
   const contextCard: ApproachContext = {
     code: "season-review",

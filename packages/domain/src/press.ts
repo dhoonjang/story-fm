@@ -140,6 +140,12 @@ export const PressFactKindSchema = z.enum([
    */
   "manager-contract",
   /**
+   * **감독이 사재를 구단에 넣었다** — 시즌 누적이 문턱을 넘은 자리 (career.md §5.4).
+   * `tags[0]`이 등급 코드, `values`가 시즌 누계(`amount`)·구단 예산 약속 대비
+   * 백분율(`percent`)·사재 보너스를 받은 인원(`players`)이다.
+   */
+  "manager-fund",
+  /**
    * **벤치가 비었다** — 전임이 어떻게 물러났나(부임 회견), 또는 라이벌 구단의 경질.
    * `tags[0]`이 그 둘을 가른다.
    */
@@ -804,6 +810,17 @@ export function pressFactText(fact: PressFact): string {
           : sub === "no-renewal"
             ? " · 보드가 재계약하지 않기로 했다"
             : " · 보드는 아직 말이 없다")
+      );
+    case "manager-fund":
+      /**
+       * 등급은 `tags[0]`이 들지만 줄에는 서지 않는다 — 백분율이 이미 그 사실이고,
+       * 등급은 평판과 회견 창이 읽는 코드다 (career.md §5.4). 보너스 인원은 **있을
+       * 때만**: 예산에만 부은 감독의 줄에 "보너스 0명"을 적으면 라커룸이 그 돈을
+       * 아는 것처럼 읽힌다.
+       */
+      return (
+        `사재 출연 ${formatMoney(v.amount ?? 0)} — 구단 이적 예산 약속의 ${v.percent ?? 0}%` +
+        (v.players ? ` · 사재 보너스 ${v.players}명` : "")
       );
     case "sacking":
       /**

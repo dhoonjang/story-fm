@@ -8,6 +8,8 @@ import {
   declinePress,
   describePendingPress,
   leagueOfTeamIn,
+  fundTransferBudget,
+  MANAGER_WALLET,
   openEvePress,
   openPress,
   pendingPress,
@@ -17,7 +19,7 @@ import {
   userPlayers,
   type GameState,
 } from "@story-fm/engine";
-import { PressConferenceSchema, pressFactText } from "@story-fm/domain";
+import { MANAGER_TERMS_BY_TIER, PressConferenceSchema, pressFactText } from "@story-fm/domain";
 import type {
   GamePlayer,
   ManagerOffer,
@@ -539,6 +541,39 @@ describe("기자회견 — 언론 유출은 다음 자리가 싣는다", () => {
     expect(conference.weight).toBe(1);
     // 버린 것도 비운다 — 우리 라커룸 밖의 불만이 장부에 눌러앉지 않는다
     expect(state.pressLeaks).toEqual([]);
+  });
+});
+
+/**
+ * 사재 카드는 대기열이 아니라 **지출 이력에서** 나온다 (career.md §5.4) — 등급이
+ * 오른 날부터 이레 안의 자리가 싣는다. 여기서 재는 것은 그 창의 두 끝이다.
+ */
+describe("기자회견 — 문턱을 넘은 사재는 창 안의 자리가 싣는다", () => {
+  it("등급이 오른 날의 회견은 싣고, 창이 지난 회견은 싣지 않는다", () => {
+    const state = newGame();
+    const pledge = MANAGER_TERMS_BY_TIER[tierOfTeamIn(state, state.userTeamId)].budgetPledge;
+    state.manager.wallet = pledge;
+    const paid = fundTransferBudget(state, {
+      amount: pledge * MANAGER_WALLET.FUND_GRADE_STEPS.notable,
+    });
+    expect(paid.ok, "message" in paid ? paid.message : undefined).toBe(true);
+
+    const inside = fakeConference({ id: "press-in", weight: 1 });
+    openPress(state, inside);
+    const fund = inside.facts.find((f) => f.kind === "manager-fund");
+    expect(fund, "문턱을 넘은 사재가 회견에 서지 않았다").toBeDefined();
+    expect(fund!.sharp).toBe(true);
+    expect(fund!.data?.tags?.[0]).toBe("notable");
+    expect(inside.weight).toBeGreaterThanOrEqual(2);
+
+    // 유출과 달리 소비되지 않는다 — 창이 닫혀야 사라진다
+    state.date = addDays(state.date, MANAGER_WALLET.FUND_PRESS_DAYS + 1);
+    const outside = fakeConference({ id: "press-out", weight: 1 });
+    openPress(state, outside);
+    expect(
+      outside.facts.some((f) => f.kind === "manager-fund"),
+      "창이 지난 사재가 회견에 남았다",
+    ).toBe(false);
   });
 });
 
