@@ -206,6 +206,12 @@ export const AI_FITNESS = defineHarness({
     { metric: "상대 상위 14명 체력 (최저 팀)", role: "guard", min: 70, why: "라인업에 설 14명이 어느 시점에도 쓸 만해야 한다" },
     { metric: "우리와 상대의 체력 격차", role: "guard", max: 10, why: "하루 회복이 우리 팀에만 있던 시절 이 차이가 20을 넘었다" },
     { metric: "한 시즌 출전 인원 (맨시티)", role: "guard", min: 18, unit: "count", why: "열한 명이 다 뛰면 로테이션이 없는 것이다" },
+    { metric: "개막 감각 — 친선 3경기 이상", role: "guard", min: 60, unit: "score", why: "프리시즌을 다 치른 몸은 개막에 `올라옴`(60) 위여야 한다 — 그 아래면 친선 넷으로도 판을 못 맞춘다는 뜻이다 (player.md §5.4)" },
+    { metric: "개막 감각 — 친선 0경기", role: "measure", unit: "score", why: "한 경기도 안 뛴 몸이 어디에 서는가 — 훈련장의 천장(55) 부근이어야 정상이다" },
+    { metric: "개막 감각 차 (친선 3+ vs 0)", role: "guard", min: 10, unit: "score", why: "이 값이 0이면 프리시즌이 몸에 관해 아무것도 결정하지 않는 것이다 — 이 축이 존재하는 이유 자체의 단일 지표 (#539)" },
+    { metric: "개막 감각을 잰 인원", role: "measure", unit: "count", why: "두 무리가 비어 있으면 위 두 값이 뜻을 잃는다" },
+    { metric: "시즌 말 감각 (상위 14명)", role: "guard", min: 70, unit: "score", why: "시즌을 돈 주전은 개막보다 날카로워야 한다 — 아래로 새면 감쇠가 적립을 이기고 있다" },
+    { metric: "우리와 상대의 감각 격차", role: "guard", max: 10, unit: "score", why: "체력 격차와 같은 이유 — 이 축이 감독 팀에만 걸리면 리그 절반이 다른 규칙으로 무뎌진다" },
   ],
 });
 
