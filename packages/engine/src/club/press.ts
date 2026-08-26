@@ -719,7 +719,7 @@ export function openEvePress(state: GameState, digest?: string[]): void {
    * **전야의 자리는 하나다** (people.md §4). 더비·개막이 그날을 이미 잡았으면 작별은
    * 자리를 빼앗지 않고 카드만 얹힌다 — 같은 날 회견 둘을 열면 하나가 방치로 닫힌다.
    */
-  const farewell = home ? farewellFacts(state, match) : [];
+  const farewell = farewellFacts(state, match);
   const conference = derby
     ? buildDerbyPress(state, match, { derby, opponentId, opponent, home })
     : isSeasonOpener(state, match, leagueId)
