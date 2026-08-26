@@ -96,6 +96,7 @@ import {
   fatigueOf,
   formatMoney,
   matchupText,
+  mediaFactText,
   normalizePacket,
   packetTagContext,
   packetTagText,
@@ -666,6 +667,11 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
         ? lines(`경질 뒤 ${VACANCY_KNOCK_DAYS}일 안:`, ...vacancyRows(state))
         : null,
     ),
+    /**
+     * 무직에게도 신문은 온다 — **벤치가 비었다는 소식이 지금 가장 큰 사실이다**
+     * (people.md §4-1). 공석 명부는 두드릴 문의 목록이고, 이쪽은 그 문이 왜 열렸나다.
+     */
+    block("media", mediaBlock(state)),
     block("time_passed", timePassedLine(state, passed)),
     block("recent", recent.length > 0 ? recent.map((r) => `- ${r}`).join("\n") : null),
     `</snapshot>`,
@@ -792,6 +798,18 @@ function offseasonFacts(state: GameState): string | null {
   return `지난 시즌이 닫히며 남은 것 — 자리를 어떻게 열지, 누가 무슨 말을 하는지는 네가 정한다:\n${facts
     .map((f) => `- ${f}`)
     .join("\n")}`;
+}
+
+/**
+ * 회견 밖의 기사 — **이번 턴의 새 것만** (people.md §4-1 · agents.md §6).
+ *
+ * `<news>`와 같은 소비 규약이라 읽기만 하고 비우지 않는다 (`takeMedia`는 gm.ts).
+ * 줄은 도메인이 만든다(`mediaFactText`) — 화면·스냅샷·테스트가 같은 자를 쓴다.
+ */
+function mediaBlock(state: GameState): string | null {
+  const facts = state.media ?? [];
+  if (facts.length === 0) return null;
+  return facts.map((f) => `- ${f.date} · ${mediaFactText(f)}`).join("\n");
 }
 
 /**
@@ -1254,6 +1272,11 @@ export function buildGmStateNote(
      * 하나로 멈춘 것처럼 읽힌다. 읽기만 하고 비우지 않는다 (`takeNews`는 gm.ts).
      */
     block("news", news.map((n) => `- ${n}`).join("\n")),
+    /**
+     * 회견 밖에서 언론이 쓴 것 — 시즌 예상·펀딧 평가·경질과 부임 (people.md §4-1).
+     * 감독이 답하는 자리가 아니라 배경이라 `<news>` 옆에 선다.
+     */
+    block("media", mediaBlock(state)),
     // 채팅 턴 없는 화면 조작(전술판·명단·역할) — 이미 반영된 사실이라 모델은 반응만 한다
     block("edits", edits.map((e) => `- ${e.text}`).join("\n")),
     // 답을 기다리는 기자회견 — 이 덩어리가 없으면 모델은 회견이 열린 사실 자체를 모른다

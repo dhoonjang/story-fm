@@ -24,6 +24,7 @@ import {
   pushNews,
   scoutReportCard,
   selectCharacters,
+  takeMedia,
   takeNews,
   takeReportCards,
   type AdvanceOutcome,
@@ -485,7 +486,11 @@ async function runRealGmTurn(
    * 소식은 **스냅샷에 실린 그 턴에 비워진다** — `pendingEdits`와 같은 규약이다.
    * 경기 중 스냅샷은 장부(`buildLedgerNote`)라 소식을 읽지 않으므로 그때는 남겨 둔다.
    */
-  if (!inMatch) takeNews(state);
+  if (!inMatch) {
+    takeNews(state);
+    // 기사도 같은 규약이다 — 스냅샷과 캐릭터북이 둘 다 읽은 뒤에 비운다 (people.md §4-1)
+    takeMedia(state);
+  }
   // 킥오프 턴의 이력은 경기 전 대화다 — `relevantTurns`가 그 한 턴만 평시로 읽는다
   const history =
     inMatch && !kickoff ? (state.pendingMatch?.casterHistory ?? []) : buildGmHistory(state);

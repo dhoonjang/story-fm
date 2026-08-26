@@ -56,6 +56,7 @@ import {
   type InternationalBreak,
 } from "../competition/international";
 import { boardExpectation, computeStandings, retirementJudgeDate } from "../competition/season";
+import { predictedPlaceOf, predictionOf } from "../competition/prediction";
 import { leagueOfTeamIn } from "../competition/promotion";
 import { derbyNameOf, derbyOf } from "../data/derbies";
 import { derbyRecordOf } from "./derby";
@@ -1399,6 +1400,25 @@ function buildOpeningPress(
       sharp: false,
     },
   ];
+  /**
+   * **언론이 매긴 예상** — 보드 기대 카드 바로 옆이다 (people.md §4-1 · season.md §2).
+   * 둘이 갈릴 때가 기자가 물을 자리라, 하나만 서면 그 질문이 서지 않는다. 예상이
+   * 서지 않은 세이브(옛 세이브·소집일을 지나지 않은 시즌)에는 카드도 없다.
+   */
+  const predictionRow = predictionOf(state, leagueOfTeamIn(state, state.userTeamId));
+  const predicted = predictedPlaceOf(state, state.userTeamId);
+  if (predictionRow && predicted !== null) {
+    facts.push({
+      kind: "standing",
+      data: {
+        values: { rank: predicted, teams: predictionRow.order.length },
+        tags: ["media-prediction"],
+      },
+      about: null,
+      // 예상이 보드 기대보다 아래면 날 선 자리다 — 감독이 답해야 할 것이 그것이다
+      sharp: predicted > expectation.target,
+    });
+  }
   const signing = biggestSigning(state);
   if (signing) {
     facts.push({

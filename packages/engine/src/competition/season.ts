@@ -32,6 +32,8 @@ import {
   anchorOf,
   awardTitle,
   boardExpectationText,
+  mediaVerdictOf,
+  MEDIA_VERDICT_KO,
   naturalPositionOf,
   parseScorerEntry,
   pickMotm,
@@ -42,6 +44,7 @@ import {
   visionTargetText,
   VISION_CODE_KO,
 } from "@story-fm/domain";
+import { predictedPlaceOf, predictionOf } from "./prediction";
 import {
   buildScheduleEntries,
   buildSeasonCalendar,
@@ -168,6 +171,14 @@ export interface StandingRow {
    * 리그전) 녹아웃은 들어오지 않는다. 승점만 보면 무너지는 팀과 오르는 팀이 같다.
    */
   form: Outcome[];
+  /**
+   * 개막 전 언론이 매긴 예상 순위 (→ [prediction.ts](./prediction.ts) · season.md §2).
+   *
+   * 예상이 서지 않은 시즌·대회(옛 세이브 · 컵 · 대항전)에는 없다 — **없는 것은 예상
+   * 밖이라는 뜻이 아니라 예상이 없다는 뜻이다.** 순서에는 들어오지 않는다: 표를 세우는
+   * 것은 승점이고, 이 칸은 그 옆에 서는 열이다.
+   */
+  predicted?: number;
 }
 
 /** 순위표의 한 칸 묶음 — 합계·홈·원정이 같은 모양이라 화면이 열을 하나로 그린다 */
@@ -292,7 +303,14 @@ export function computeStandings(
     }
   }
   const list = [...rows.values()];
+  /**
+   * 예상 순위 — 그 대회의 예상 줄이 있을 때만 (season.md §2). 컵·대항전은 줄이 없어
+   * 한 행도 채워지지 않는다.
+   */
+  const predictionRow = predictionOf(state, competitionId);
   for (const row of list) {
+    const predicted = predictionRow ? predictionRow.order.indexOf(row.teamId) : -1;
+    if (predicted >= 0) row.predicted = predicted + 1;
     row.goalDiff = row.goalsFor - row.goalsAgainst;
     // 경기 배열은 날짜순이 아니다(연기·추첨으로 뒤에 붙는다) — 폼은 달력이 정한다
     row.form = (recent.get(row.teamId) ?? [])
@@ -1077,6 +1095,18 @@ export function reviewSeason(state: GameState): string[] {
     // 항목 줄의 문장은 도메인이 만든다 — 화면·사실 카드·여기가 같은 자를 쓴다
     ...readings.map((reading) => `· ${visionItemText(reading)}`),
   );
+  /**
+   * **언론 예상 대비** — 보드 평가와 **갈리는 자리가 이야기다** (people.md §4-1).
+   * 구단주는 못 미쳤다고 하는데 언론은 예상을 웃돌았다고 하는 시즌이 있다. 등급은
+   * 펀딧의 중간 평가와 같은 자를 쓴다(`mediaVerdictOf`) — 두 벌을 두면 시즌 안의
+   * 등급과 시즌 끝의 등급이 언젠가 갈린다. 예상이 서지 않은 시즌은 줄이 없다.
+   */
+  const predicted = predictedPlaceOf(state, state.userTeamId);
+  if (predicted !== null) {
+    digest.push(
+      `언론 예상 ${predicted}위 → 최종 ${position}위 — ${MEDIA_VERDICT_KO[mediaVerdictOf(predicted - position)]}`,
+    );
+  }
   for (const a of state.achievements.filter((x) => x.season === state.season)) {
     digest.push(`업적 달성: ${achievementLine(a)}`);
   }

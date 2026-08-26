@@ -21,7 +21,9 @@ import {
   respondToMedia,
   rivalVoiceOf,
   tierOfTeamIn,
+  punditForRound,
   userPlayers,
+  worldFigures,
   type GameState,
 } from "@story-fm/engine";
 import {
@@ -29,6 +31,7 @@ import {
   PRESS_STANCES,
   PressConferenceSchema,
   RIVAL_VOICES,
+  mediaVerdictOf,
   pressFactText,
 } from "@story-fm/domain";
 import type {
@@ -1243,5 +1246,32 @@ describe("기자회견 — 부임과 시즌의 마디", () => {
     const press = pendingPress(state)!;
     expect(press.facts.some((f) => f.data?.tags?.[0] === "rival")).toBe(false);
     expect(state.pressSackings).toHaveLength(0);
+  });
+});
+
+describe("언론 — 회견 밖의 기사 (people.md §4-1)", () => {
+  it("예상 대비 등급의 계단 — 한두 계단은 아직 아무 뜻도 아니다", () => {
+    // `diff = 예상 순위 − 지금 순위` (양수면 예상보다 위)
+    expect(mediaVerdictOf(12)).toBe("overachieving");
+    expect(mediaVerdictOf(5)).toBe("overachieving");
+    expect(mediaVerdictOf(4)).toBe("above");
+    expect(mediaVerdictOf(2)).toBe("above");
+    expect(mediaVerdictOf(1)).toBe("on-track");
+    expect(mediaVerdictOf(0)).toBe("on-track");
+    expect(mediaVerdictOf(-1)).toBe("on-track");
+    expect(mediaVerdictOf(-2)).toBe("below");
+    expect(mediaVerdictOf(-4)).toBe("below");
+    expect(mediaVerdictOf(-5)).toBe("underachieving");
+    expect(mediaVerdictOf(-12)).toBe("underachieving");
+  });
+
+  it("화자는 명부의 해설이고, 같은 라운드는 같은 사람이다", () => {
+    const state = createTestGame();
+    const first = punditForRound(state, state.season, 3);
+    expect(first, "명부에 해설이 있는데 아무도 서지 않았다").not.toBeNull();
+    // 코어는 화자를 지어내지 않는다 — 그 이름이 명부에 있어야 인물지가 실린다
+    expect(first!.role).toBe("pundit");
+    expect(worldFigures(state).some((f) => f.characterId === first!.characterId)).toBe(true);
+    expect(punditForRound(state, state.season, 3)?.characterId).toBe(first!.characterId);
   });
 });

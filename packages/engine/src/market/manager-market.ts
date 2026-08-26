@@ -16,6 +16,7 @@ import { addDays, contractUntil, diffDays } from "../core/dates";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { syncDefaultTraining } from "../squad/training-plan";
 import { expirePendingPress, openAppointmentPress } from "../club/press";
+import { reportAppointment, reportSacking } from "../club/media";
 import { derbyOf } from "../data/derbies";
 import { isWorldFigureName } from "../data/world-figures";
 import { clearClubVision, standClubVision } from "../club/vision";
@@ -758,6 +759,8 @@ export function runManagerMarket(state: GameState, digest: string[]): boolean {
         { teamId: team.id, date: state.date, position: standing.position },
       ];
     }
+    /** 재임 일수는 후임이 앉는 순간 사라진다 — 그날의 사실은 그날 읽어 둔다 */
+    const wasSince = team.managerSince;
     const hired = installNewManager(state, team, rng);
     sacked += 1;
 
@@ -779,6 +782,26 @@ export function runManagerMarket(state: GameState, digest: string[]): boolean {
           (hired === null ? "" : ` (전 ${teamShortNameIn(state, hired.lastTeamId)} 감독)`),
       );
       pushNarrative(state, `${teamName(team.id)} 감독 경질`, 3);
+      /**
+       * **다이제스트 한 줄 옆에 기사 두 장이 선다** (people.md §4-1). 줄은 그 턴에
+       * 흘러가고 마는 사실이지만, 기사는 화자를 지목해 GM이 그 사람의 말을 쓸 수 있게
+       * 한다 — 부임한 감독이 무슨 말을 했는지가 라이벌 이야기의 시작이다.
+       */
+      reportSacking(state, {
+        teamId: team.id,
+        kind: "sacked",
+        position: standing.position,
+        target: boardExpectation(state, team.id).target,
+        ...(wasSince === undefined ? {} : { since: wasSince }),
+      });
+      if (team.managerName !== undefined) {
+        reportAppointment(state, {
+          teamId: team.id,
+          managerName: team.managerName,
+          fromPool: hired !== null,
+          position: standing.position,
+        });
+      }
     }
 
     // 그 자리가 무직 감독의 것이 될 수도 있다
@@ -839,7 +862,28 @@ function leaveClub(state: GameState, card: Dismissal, channel: string): void {
 
   // 감독이 없는 구단은 세계에 없다 — 옛 구단은 그날로 후임을 세운다
   const team = state.teams.find((t) => t.id === teamId);
-  if (team) installNewManager(state, team, makeRng(state.seed, `${channel}:${state.date}`));
+  /**
+   * **감독 자신의 이별도 기사가 된다** (people.md §4-1) — 원인 코드는 카드의 `kind`
+   * 그대로다. 재임 일수는 후임이 앉기 전에 읽는다.
+   */
+  reportSacking(state, {
+    teamId,
+    kind: card.kind ?? "sacked",
+    ...(card.position === undefined ? {} : { position: card.position }),
+    ...(card.target === undefined ? {} : { target: card.target }),
+    ...(team?.managerSince === undefined ? {} : { since: team.managerSince }),
+  });
+  if (team) {
+    const hired = installNewManager(state, team, makeRng(state.seed, `${channel}:${state.date}`));
+    if (team.managerName !== undefined) {
+      reportAppointment(state, {
+        teamId,
+        managerName: team.managerName,
+        fromPool: hired !== null,
+        ...(card.position === undefined ? {} : { position: card.position }),
+      });
+    }
+  }
 
   /**
    * **진행 중이던 협상은 전부 사라진다** — 감독이 없는 구단의 흥정이고, 무직인

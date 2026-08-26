@@ -34,6 +34,7 @@ import {
   MINI_WORLD,
   OWNER_ARCHETYPE_LABELS,
   playersOf,
+  preseasonPrediction,
   quickSimulate,
   declareRetirements,
   settleYouthIntake,
@@ -51,6 +52,7 @@ import {
   seasonAwards,
   seasonStatOf,
   standClubVision,
+  standPredictions,
   teamsOfLeagueIn,
   tierOfTeamIn,
   transitionSeason,
@@ -1594,5 +1596,65 @@ describe("클럽 비전 — 구단주 원형이 거는 다년 계획 (career.md 
       shapeOf(before.items),
     );
     expect(after?.items).toEqual(buildVision(state).items);
+  });
+});
+
+describe("시즌 예상 순위 (season.md §2)", () => {
+  // 한 세이브를 공유한다 — 예상은 스쿼드를 읽기만 하므로 케이스가 서로를 더럽히지 않는다
+  const state = createTestGame();
+  const league = leagueOfTeamIn(state, state.userTeamId);
+
+  it("같은 스쿼드면 같은 순서다 — 난수가 없다", () => {
+    const first = preseasonPrediction(state, league);
+    const second = preseasonPrediction(state, league);
+    expect(first.length, "리그 전 구단이 줄에 서지 않았다").toBe(
+      teamsOfLeagueIn(state, league).length,
+    );
+    expect(second).toEqual(first);
+    // 같은 시드의 다른 세이브도 같은 답이어야 한다 — 배열 순서가 정하면 여기서 갈린다
+    expect(preseasonPrediction(createTestGame(), league)).toEqual(first);
+  });
+
+  it("여름 순이적이 순서를 움직인다 — 스쿼드가 같아도", () => {
+    const before = preseasonPrediction(state, league);
+    const mid = Math.floor(before.length / 2);
+    const above = before[mid]!;
+    const below = before[mid + 1]!;
+    /**
+     * **스쿼드는 한 명도 건드리지 않는다** — 지금 있는 선수를 「이번 여름에 왔다」·
+     * 「이번 여름에 나갔다」로 원장에만 적는다. 전력 항이 그대로라 순서가 움직였다면
+     * 그것은 순이적 항이 움직인 것이다.
+     */
+    const mark = (teamId: string, arrived: boolean) => {
+      for (const player of playersOf(state, teamId)) {
+        state.transfers.push({
+          id: `t-${player.id}`,
+          gamePlayerId: player.id,
+          windowId: null,
+          fromTeamId: arrived ? null : teamId,
+          toTeamId: arrived ? teamId : null,
+          date: state.calendar.preseasonStart,
+          type: "transfer",
+          fee: 0,
+        });
+      }
+    };
+    mark(below, true);
+    mark(above, false);
+
+    const after = preseasonPrediction(state, league);
+    expect(after.indexOf(below), "보강한 팀이 위로 오지 않았다").toBeLessThan(after.indexOf(above));
+    state.transfers = [];
+  });
+
+  it("한 시즌의 예상표는 한 번만 선다 — 다시 부르면 그대로다", () => {
+    const fresh = createTestGame();
+    const stood = standPredictions(fresh);
+    expect(stood.length, "리그가 한 줄도 서지 않았다").toBeGreaterThan(0);
+    const rows = structuredClone(fresh.predictions ?? []);
+    // 스쿼드가 달라져도 이미 선 줄은 움직이지 않는다 — 예상을 결과로 고쳐 쓰지 않는다
+    fresh.players = fresh.players.filter((p) => p.teamId !== fresh.userTeamId);
+    expect(standPredictions(fresh)).toEqual([]);
+    expect(fresh.predictions).toEqual(rows);
   });
 });

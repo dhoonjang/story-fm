@@ -66,7 +66,23 @@ const MIN_KEYWORD_LENGTH = 2;
  */
 const RANK_POINTED = 0;
 const RANK_MESSAGE = 1;
-const RANK_HISTORY = 2;
+/**
+ * **기사에 이름이 걸린 사람** — 감독의 이번 발화 **뒤**다 (people.md §4-1).
+ *
+ * 마이크 앞에 앉은 기자와 달리 이 사람은 지면 저쪽에 있다. 감독이 방금 이름을 부른
+ * 우리 선수보다 앞세우면, 신문이 온 날마다 라커룸이 카드에서 밀려난다.
+ */
+const RANK_MEDIA = 2;
+const RANK_HISTORY = 3;
+
+/**
+ * 한 턴에 카드가 서는 기사 화자 — **한 사람뿐이다.**
+ *
+ * 한 주에 네 구단이 감독을 갈아 치우는 주가 있다(감독 시장). 그 넷을 다 세우면 상한
+ * 셋을 남의 벤치가 통째로 먹고, GM은 한 장면에서 네 사람의 말투를 지어내야 한다.
+ * 가장 새로운 기사 하나가 그날의 목소리다.
+ */
+const MEDIA_SPEAKERS_SHOWN = 1;
 
 /**
  * 같은 자리 안의 순서 — **우리 사람이 먼저 선다** (people.md §6).
@@ -315,11 +331,12 @@ export function selectCharacters(
   const message = input.message ?? "";
   const history = historyWindow(state);
   const pointed = pointedIds(state, input.pointed);
+  const mediaVoices = mediaSpeakers(state);
   const standing = standingOf(input.injected ?? []);
 
   const picked: Array<{ rank: number; candidate: Candidate }> = [];
   for (const candidate of candidatesOf(state)) {
-    const rank = rankOf(candidate.persona, message, history, pointed);
+    const rank = rankOf(candidate.persona, message, history, pointed, mediaVoices);
     if (rank === null) continue;
     const shown = standing.get(candidate.persona.characterId);
     // 창 안에 이미 서 있으면 다시 싣지 않는다. 눈금이 올랐거나 기억이 늘었을 때만 예외다
@@ -360,9 +377,11 @@ function rankOf(
   message: string,
   history: string,
   pointed: ReadonlySet<string>,
+  media: ReadonlySet<string>,
 ): number | null {
   if (pointed.has(persona.characterId)) return RANK_POINTED;
   if (mentions(message, persona)) return RANK_MESSAGE;
+  if (media.has(persona.characterId)) return RANK_MEDIA;
   if (mentions(history, persona)) return RANK_HISTORY;
   return null;
 }
@@ -509,6 +528,23 @@ function pointedIds(
   // 감독실 문 앞에 서 있는 사람 — 감독이 이름을 부르기를 기다리지 않는다 (people.md §8)
   const speakerId = pendingApproach(state)?.speakerId;
   if (speakerId !== undefined) ids.add(speakerId);
+  return ids;
+}
+
+/**
+ * **이번 턴의 기사에 이름이 걸린 사람** (people.md §4-1) — 해설의 평가를 카드로 넘겨
+ * 놓고 인물지를 싣지 않으면 GM이 그 이름으로 즉흥의 말투를 지어낸다.
+ *
+ * 기사는 스냅샷에 실린 턴에 비워지므로(`takeMedia`) 여기 걸리는 것은 그 턴의 새
+ * 기사뿐이고, **가장 새로운 것부터 한 사람만** 선다.
+ */
+function mediaSpeakers(state: GameState): ReadonlySet<string> {
+  const ids = new Set<string>();
+  const facts = state.media ?? [];
+  for (let i = facts.length - 1; i >= 0 && ids.size < MEDIA_SPEAKERS_SHOWN; i -= 1) {
+    const speakerId = facts[i]?.speakerId;
+    if (speakerId !== undefined) ids.add(speakerId);
+  }
   return ids;
 }
 

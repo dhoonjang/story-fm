@@ -101,6 +101,12 @@ function StandingsTable({ competition }: { competition: Competition }) {
    * 약속이 선다. 홈/원정 표에서는 띠도 범례도 서지 않는다.
    */
   const zones = split === "all" ? competition.zones : [];
+  /**
+   * 개막 전 언론이 매긴 예상 순위 (docs/simulation/season.md §2). 예상이 없는 대회·
+   * 시즌(컵·대항전·옛 세이브)에는 **열 자체가 서지 않는다** — 전 행이 빈 열은 표를
+   * 넓히기만 한다.
+   */
+  const predicted = rows.some((row) => row.predicted !== undefined);
   // 순위 → 그 순위가 속한 구역 (없으면 아무 뜻도 없는 자리)
   const zoneAt = (rank: number) => zones.find((z) => rank <= z.through) ?? null;
   return (
@@ -117,6 +123,7 @@ function StandingsTable({ competition }: { competition: Competition }) {
           <tr>
             <th>#</th>
             <th>팀</th>
+            {predicted ? <th className="dim-cell">예상</th> : null}
             <th>경기</th>
             <th>승</th>
             <th>무</th>
@@ -148,7 +155,9 @@ function StandingsTable({ competition }: { competition: Competition }) {
                 {/* 순위 앞의 색 띠가 구역이다 — 무슨 구역인지는 툴팁과 표 아래 범례에 있다 */}
                 <td title={zone?.label}>{i + 1}</td>
                 <td className="team-cell">{row.name}</td>
-                <td>{box.played}</td>
+                {predicted ? <td className="dim-cell">{row.predicted ?? "—"}</td> : null}
+                {/* 열 하나가 늘면 자리로 짚던 것이 다 밀린다 — 세는 칸은 이름으로 짚는다 */}
+                <td data-testid="standing-played">{box.played}</td>
                 <td>{box.wins}</td>
                 <td>{box.draws}</td>
                 <td>{box.losses}</td>

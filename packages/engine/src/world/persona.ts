@@ -1083,6 +1083,25 @@ export function agentForPlayer(
   return pick(makeRng(state.seed, `agent-of:${playerId}`), agents);
 }
 
+/**
+ * 그 라운드의 평가를 낸 해설 — **(시드, 시즌, 라운드)에서 결정적으로 뽑는다**
+ * (people.md §4-1). 같은 세이브의 같은 라운드는 언제나 같은 사람이 말한다.
+ *
+ * `agentForPlayer`와 **같은 자리, 같은 규약**이다: 명부에서 역할 하나로 한 사람을
+ * 뽑는 규칙은 여기 하나에 산다 (AGENTS.md §5). 명부에 해설이 한 사람도 없으면
+ * `null`이다 — 표를 비우는 것이 곧 라이선스 청산이라(§2-1), 코어는 화자를 지어내지
+ * 않고 그 갈래가 세계에서 조용히 사라진다.
+ */
+export function punditForRound(
+  state: WorldFigureScope & { seed: number },
+  season: number,
+  round: number,
+): Persona | null {
+  const pundits = worldFigures(state).filter((f) => f.role === "pundit");
+  if (pundits.length === 0) return null;
+  return pick(makeRng(state.seed, `pundit:${season}:${round}`), pundits);
+}
+
 /** 명부에서 이 이름을 찾는다 — 이력을 다시 그릴 때의 입구 (`characterEntryOf`) */
 export function worldFigureByName(state: WorldFigureScope, name: string): Persona | null {
   const seed = WORLD_FIGURE_SEEDS.find((f) => f.name === name);
