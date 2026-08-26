@@ -242,7 +242,7 @@ row, 지난 일 = 그대로 이력.**
 | `transfers` `Transfer`             | **팀 변경 원장** — 이적·임대·자유·유스·은퇴                                                                      | `domain/records.ts` |
 | `growthLog` `GrowthEntry`          | 성장 한 칸 — 대상은 축·`pos:CODE`·`tactical`, 출처는 `origin` 코드. **감독 팀 선수만** (아래 ⚠️)                 | `domain/records.ts` |
 | `trainingReports` `TrainingReport` | 훈련 결산 카드 — 한 구간(`from`~`to`)이 남긴 것: 세션 수 · `moved` · `marks`(갈래 코드와 근거 한 줄). 40장 링    | `domain/records.ts` |
-| `seasonStats` `SeasonStat`         | 시즌 × 팀 — 출전·출전 분·득점·도움·`ratingSum`·슛·xG·선방·클린시트·카드 (2군은 `reserve*`로 갈린다)              | `domain/records.ts` |
+| `seasonStats` `SeasonStat`         | 시즌 × 팀 × **대회** — 출전·출전 분·득점·도움·`ratingSum`·슛·xG·선방·클린시트·카드 (2군은 `reserve*`로 갈린다)   | `domain/records.ts` |
 | `issues` `PlayerIssue`             | 라커룸 불만 (`unhappy`)                                                                                          | `domain/records.ts` |
 | `settlingEvents` `SettlingEvent`   | 면담·팀토크·주장 지명이 새 영입에게 남긴 크레딧                                                                  | `domain/records.ts` |
 | `mentoring` `Mentoring`            | **멘토링 쌍** — 감독이 붙여 준 고참과 유망주. `until === undefined`가 서 있는 사이 ([people.md](people.md) §5-3) | `domain/records.ts` |
@@ -286,6 +286,24 @@ row, 지난 일 = 그대로 이력.**
 ([season.md](../simulation/season.md) §2) 2군 리그는 `reserve*` 칸으로 갈린다. 카드는
 `BOOKING`이 원본이라 시즌 합계도 그 문(`match/discipline.ts`)이 함께 적는다: 세는 자리를
 마감 쪽에 따로 두면 연장의 카드가 한쪽에만 남는다.
+
+⚠️ **행의 열쇠는 (선수, 시즌, 팀, 대회) 넷이다.** 리그·컵·대항전이 저마다 행을 갖고,
+2군 리그는 그 대회 id(`reserve:<리그>`)의 행에 `reserve*` 칸으로 쌓인다. 대회 축이
+없으면 "리그 12경기 3골"을 말할 자리가 없고, FA컵에서 여섯 골을 넣은 로테이션 공격수가
+리그 득점왕이 된다 ([season.md](../simulation/season.md) §6).
+
+**시즌 합계는 저장하지 않고 더한다** — `seasonStatOf(state, playerId)`가 같은 시즌·팀의
+대회 행을 모두 접어 한 행처럼 낸다(§5 파생). 대회 하나만 물으면
+`seasonStatOf(state, playerId, { competition })`이 그 행 하나를 준다. **접어 낸 행은
+읽기 전용이다**: 쌓는 자리는 언제나 `ensureSeasonStat(state, id, teamId, competitionId)`
+하나이고, 파생 행에 값을 얹으면 다음 파생에서 사라진다.
+
+⚠️ **옛 세이브의 행은 `competitionId`를 갖지 않는다** — 그 한 행이 그 시즌 전 대회의
+합계다. 없는 축을 지어내지 않으므로 마이그레이션도 없다: **합계를 더하는 쪽은 그 행을
+그대로 세고**(합이 맞는다), 대회를 묻는 쪽은 그 행을 **그 팀이 속한 리그의 것으로**
+읽는다(옛 규칙이 정확히 그것이었다 — [season.md](../simulation/season.md) §6). 옛
+세이브를 시즌 중에 이어서 열면 그 시즌만 「축 없는 앞부분 + 대회별 뒷부분」으로 남는데,
+합계는 그대로 맞고 리그 순위만 그 시즌 한 해 컵 골을 함께 센다. SAVE_VERSION은 그대로다.
 
 ### 3.5 진행 중인 흥정 · 세계의 부름
 
@@ -372,7 +390,7 @@ erDiagram
     GAME_PLAYER ||--o{ BOOKING : "경고 이력"
     GAME_PLAYER ||--o{ SUSPENSION : "정지"
     GAME_PLAYER ||--o{ GROWTH_ENTRY : "성장 로그"
-    GAME_PLAYER ||--o{ SEASON_STAT : "시즌 x 팀"
+    GAME_PLAYER ||--o{ SEASON_STAT : "시즌 x 팀 x 대회"
     GAME_PLAYER ||--o{ SCOUT_REPORT : "스카우팅"
     GAME_PLAYER ||--o{ SETTLING_EVENT : "정착"
     GAME_PLAYER ||--o| TRANSFER_LISTING : "이적 리스트"
@@ -410,7 +428,8 @@ erDiagram
 | 순위표                | `computeStandings(state, competitionId)`                          | 경기 결과가 원본. 컵은 순위표 자체가 없어 빈 배열이다                                                           |
 | 등록 명단 현황        | `squadRegistrationOf(state, teamId)`                              | 1군 명단 + 생년월일 + 홈그로운 협회에서 전부 나온다                                                             |
 | 시즌 평점             | `seasonRating(stat)` = `ratingSum ÷ apps`                         | 평균을 저장하면 경기마다 재계산하고 반올림 오차가 쌓인다                                                        |
-| 통산·시즌별 기록      | `careerOf(state, playerId)` — `SEASON_STAT` 전 행을 접는다        | 행이 이미 시즌 × 팀이다. 합계를 따로 저장하면 원장과 갈리고, 소급 수정이 합계에 닿지 않는다                     |
+| 통산·시즌별 기록      | `careerOf(state, playerId)` — `SEASON_STAT` 전 행을 접는다        | 행이 이미 시즌 × 팀 × 대회다. 합계를 따로 저장하면 원장과 갈리고, 소급 수정이 합계에 닿지 않는다                |
+| 시즌 합계(대회 무관)  | `seasonStatOf(state, playerId)` — 같은 시즌·팀의 대회 행을 더한다 | 대회 행이 원본이다. "리그 12경기"와 "시즌 20경기"를 둘 다 저장하면 소급 수정이 한쪽에만 닿는다                  |
 | 지난 시즌 순위·우승팀 | `state.history` — 리그는 그 표의 1위, 녹아웃은 `TROPHY`           | 결산 스냅샷이 원본이다. 우승자를 따로 적으면 표와 갈린다                                                        |
 | 구단 역대 기록        | `clubRecordsOf(state, teamId)` — `history` + `TROPHY` + `honours` | 최다 승점·최다 득점 시즌·우승 횟수는 전부 남은 표를 접은 것이다                                                 |
 | 최근 세 시즌 성적 축  | `recentForm` — `state.history`의 리그 순위                        | 체급 재산정이 읽던 `leagueHistory`는 이 파생으로 접혔다 (§3.3)                                                  |

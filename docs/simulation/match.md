@@ -1412,25 +1412,27 @@ MatchEvent { minute, type, team, actors[], causes, xg, goalProbability, shotOutc
 어긋난다 — 리그가 우리 팀만의 규칙으로 돌면 안 된다(§7). 쓰는 함수도 간이 시뮬과
 같은 것이다.
 
-| 무엇                                                  | 우리 | 상대 |
-| ----------------------------------------------------- | ---- | ---- |
-| 시즌 기록 (`SEASON_STAT` — 아래 표)                   | ○    | ○    |
-| 폼 Δ (`squad/form.ts` `formDeltaFromMatch`)           | ○    | ○    |
-| 체력 소모 (`pendingMatch.matchFatigue` 그대로)        | ○    | ○    |
-| 부상 확정 · 부상 성향 하강 (`squad/injury.ts`)        | ○    | ○    |
-| 카드 → BOOKING·SUSPENSION (`match/discipline.ts`)     | ○    | ○    |
-| 출장 정지 소화 (`serveSuspensions`)                   | ○    | ○    |
-| 연패·연승의 라커룸 (`squad/slump.ts`)                 | ○    | ○    |
-| 더비 결과의 라커룸 (아래)                             | ○    | ○    |
-| 포지션 적응도 (아래)                                  | ○    | ○    |
-| 사건·선수별 기록·점유 (`MATCH.result` · §4)           | ○    | ○    |
-| 경기별 평점 (`MATCH.result.ratings`) · 결산 판정(LLM) | ○    | ✗    |
-| 말풍선 한 줄 (카드·정지·부상 일수·무드)               | ○    | ✗    |
-| 마일스톤 (`MILESTONE` · 아래)                         | ○    | ✗    |
+| 무엇                                                  | 우리 | 상대   |
+| ----------------------------------------------------- | ---- | ------ |
+| 시즌 기록 (`SEASON_STAT` — 아래 표)                   | ○    | ○      |
+| 폼 Δ (`squad/form.ts` `formDeltaFromMatch`)           | ○    | ○      |
+| 체력 소모 (`pendingMatch.matchFatigue` 그대로)        | ○    | ○      |
+| 부상 확정 · 부상 성향 하강 (`squad/injury.ts`)        | ○    | ○      |
+| 카드 → BOOKING·SUSPENSION (`match/discipline.ts`)     | ○    | ○      |
+| 출장 정지 소화 (`serveSuspensions`)                   | ○    | ○      |
+| 연패·연승의 라커룸 (`squad/slump.ts`)                 | ○    | ○      |
+| 더비 결과의 라커룸 (아래)                             | ○    | ○      |
+| 포지션 적응도 (아래)                                  | ○    | ○      |
+| 사건·선수별 기록·점유 (`MATCH.result` · §4)           | ○    | ○      |
+| 경기별 평점 (`MATCH.result.ratings`) · 결산 판정(LLM) | ○    | 결승만 |
+| 말풍선 한 줄 (카드·정지·부상 일수·무드)               | ○    | ✗      |
+| 마일스톤 (`MILESTONE` · 아래)                         | ○    | ✗      |
 
 아래 세 줄이 우리 팀만인 것은 **감독이 읽는 화면**이기 때문이다. 경기별 평점은
-간이 시뮬도 남기지 않고 시즌 합계만 쌓는다(§7) — 상대의 평점도 같은 눈금으로
-`ratingSum`에만 들어간다. 남의 팀 카드·정지·부상 일수는 브리핑하지 않는다(하루 열
+간이 시뮬이 시즌 합계에만 쌓는다(§7) — 상대의 평점도 같은 눈금으로 `ratingSum`에만
+들어간다. **결승만 예외다**: 그 한 경기의 평점이 대회의 결승 MOM을 정하므로
+(→ [season.md](./season.md) §6) 간이 시뮬도 `MATCH.result.ratings`에 남긴다. 한 시즌에
+대회 수만큼이라 장부가 붇지 않는다. 남의 팀 카드·정지·부상 일수는 브리핑하지 않는다(하루 열
 경기의 카드를 나열하면 소음이다) — 조회 도구가 알려 준다.
 
 ### 시즌 기록 — 두 시뮬이 같은 눈금으로 적는다
@@ -1438,6 +1440,11 @@ MatchEvent { minute, type, team, actors[], causes, xg, goalProbability, shotOutc
 한 경기가 시즌 행에 얹는 몫은 **한 함수가 센다**(`domain/records.ts`
 `addToSeasonStat`). 구간 시뮬의 마감과 간이 시뮬(§7)이 같은 문을 지나므로, 리그
 리더보드가 감독의 경기만 세는 표가 되지 않는다.
+
+**얹히는 행은 그 경기의 대회 행이다** — 행의 열쇠가 (선수, 시즌, 팀, 대회)라
+(→ [../data/game-state.md](../data/game-state.md) §3.4) 리그 경기는 리그 행에, 컵
+경기는 컵 행에 쌓인다. 확보하는 문도 하나다: `ensureSeasonStat(state, id, teamId,
+competitionId)`. 대회가 없는 경기(친선)는 애초에 이 문을 지나지 않는다.
 
 | 칸                | 무엇         | 구간 시뮬의 원본                      | 간이 시뮬의 원본                    |
 | ----------------- | ------------ | ------------------------------------- | ----------------------------------- |
