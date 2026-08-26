@@ -51,6 +51,8 @@ const ARRAY_FIELDS = [
   "scoutReports",
   "settlingEvents",
   "transferList",
+  // 이적 요청 장부 — 옛 세이브엔 없다 (transfer.md §1-1)
+  "transferRequests",
   "playerTraining",
   "roleMemory",
   "pressConferences",

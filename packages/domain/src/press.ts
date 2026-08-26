@@ -13,10 +13,12 @@ import {
   milestonePhrase,
   PLAYER_ISSUE_REASONS,
   PROMISE_KIND_KO,
+  TRANSFER_REQUEST_REASON_KO,
   type BoardExpectationCode,
   type MilestoneCode,
   type PlayerIssueReason,
   type PromiseKind,
+  type TransferRequestReason,
 } from "./records";
 import { SQUAD_STATUS_KO, type SquadStatus } from "./squad-rules";
 
@@ -512,7 +514,20 @@ export function pressFactText(fact: PressFact): string {
     case "leak":
       return `${name}의 ${reasonOf(tags[0])} 불만이 언론에 보도됐다`;
     case "transfer-request":
-      return `${name} 이적 요청 — ${reasonOf(tags[0])} 불만 ${v.days ?? 0}일째`;
+      /**
+       * `tags[0]`이 **요청의 사유**(`TRANSFER_REQUEST_REASONS`), `tags[1]`이 감독의
+       * 답이다 (transfer.md §1-1). 옛 세이브의 카드는 `tags[0]`에 불만 사유를 들고
+       * 있어 표에서 안 잡히고, 그때만 사유 이름으로 떨어진다.
+       */
+      return (
+        `${name} 이적 요청 (${TRANSFER_REQUEST_REASON_KO[sub as TransferRequestReason] ?? reasonOf(sub)})` +
+        ` — ${v.days ?? 0}일째` +
+        (tags[1] === "accept"
+          ? " · 감독이 받아들였다"
+          : tags[1] === "refuse"
+            ? " · 감독이 거부했다"
+            : "")
+      );
     case "board-demand":
       return `보드 요청 — ${demandText(sub, name, v.baseline)}${d.date ? ` · 기한 ${d.date}` : ""}`;
     case "milestone":

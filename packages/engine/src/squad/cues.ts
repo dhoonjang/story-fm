@@ -1,10 +1,16 @@
 import type { GamePlayer } from "@story-fm/domain";
-import { isReserveMatch, normalizeSpeaker } from "@story-fm/domain";
+import { isReserveMatch, normalizeSpeaker, TRANSFER_REQUEST_REASON_KO } from "@story-fm/domain";
 import { formLabel } from "./form";
 import { isSettling } from "./settling";
 import { diffDays } from "../competition/calendar";
 import { pendingApproach } from "../club/approach";
-import { openInjury, playersOf, squadLevelOf, type GameState } from "../core/state";
+import {
+  openInjury,
+  playersOf,
+  squadLevelOf,
+  transferRequestOf,
+  type GameState,
+} from "../core/state";
 
 /**
  * **선수 근황 — 세계에 지금 무슨 이야기가 있는가.**
@@ -114,6 +120,16 @@ function factOf(state: GameState, player: GamePlayer, benched: number): string |
     return diffDays(state.date, injury.expectedReturn) <= RETURN_SOON
       ? `복귀 임박 (${injury.bodyPart}~${injury.expectedReturn})`
       : null; // 재활 초입은 이미 주의 줄의 부상 항목이 말한다
+  }
+  /**
+   * **나가겠다고 말한 것은 폼보다 큰 사실이다** (transfer.md §1-1) — 뛸 수 없는 것
+   * 다음이고 나머지보다는 앞이다. 수락한 요청은 서지 않는다: 그 사실은 이적
+   * 리스트가 이미 말한다.
+   */
+  const request = transferRequestOf(state, player.id);
+  if (request && request.answer !== "accept") {
+    const reason = TRANSFER_REQUEST_REASON_KO[request.reason];
+    return `이적 요청 (${reason}) — ${request.answer === "refuse" ? "감독이 거부했다" : "아직 답하지 않았다"}`;
   }
   if (isSettling(state, player.id)) return "새 영입, 아직 적응 중";
   const form = player.state.form;
