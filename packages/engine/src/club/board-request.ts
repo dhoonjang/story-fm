@@ -4,7 +4,7 @@ import type {
   BoardRequest,
   BoardRequestKind,
 } from "@story-fm/domain";
-import { BOARD_REQUEST_LABEL, BOARD_REQUEST_UNIT } from "@story-fm/domain";
+import { BOARD_REQUEST_LABEL, boardRequestAmountText } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import {
   clubProfileIn,
@@ -424,7 +424,7 @@ function approve(state: GameState, request: BoardRequest, granted: number, diges
 
   const partial = granted < request.amount;
   const line = partial
-    ? `보드 요청 부분 승인 — ${describeAsk(state, request)} 중 ${amountText(request.kind, granted)}`
+    ? `보드 요청 부분 승인 — ${describeAsk(state, request)} 중 ${boardRequestAmountText(request.kind, granted)}`
     : `보드 요청 승인 — ${describeAsk(state, request)}`;
   digest.push(line);
   pushNarrative(state, line, partial ? 3 : 4);
@@ -584,18 +584,6 @@ function deliverStadium(state: GameState, request: BoardRequest, digest: string[
 
 // ── 사실 카드 ──────────────────────────────────────────────────
 
-/** 값 한 덩이 — 단위가 금액인지 좌석인지는 종류가 안다 */
-function amountText(kind: BoardRequestKind, value: number): string {
-  switch (BOARD_REQUEST_UNIT[kind]) {
-    case "money":
-      return formatMoney(value);
-    case "weekly":
-      return `${formatMoney(value)}/주`;
-    case "seats":
-      return `${value.toLocaleString("en-US")}석`;
-  }
-}
-
 /** 이름이 사라진 선수도 있다 — 카드가 빈칸을 내지 않게 id를 폴백으로 든다 */
 function playerName(state: GameState, gamePlayerId: string): string {
   return playerById(state, gamePlayerId)?.name ?? gamePlayerId;
@@ -603,7 +591,7 @@ function playerName(state: GameState, gamePlayerId: string): string {
 
 /** 부른 값 한 덩이 — `signing`만 선수 이름이 앞에 붙는다 */
 function askText(state: GameState, request: BoardRequest): string {
-  const amount = amountText(request.kind, request.amount);
+  const amount = boardRequestAmountText(request.kind, request.amount);
   if (request.kind !== "signing" || !request.playerId) return amount;
   return `${playerName(state, request.playerId)} ${amount}`;
 }

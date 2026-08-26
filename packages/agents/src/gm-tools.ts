@@ -646,7 +646,10 @@ export function buildGmTools(
           .int()
           .min(1)
           .max(MONEY_MAX)
-          .describe("이적 예산·주급 한도는 금액(원), 구장은 좌석 수"),
+          .describe("이적 예산·주급 한도·영입 승인은 금액(원), 구장은 좌석 수"),
+        playerId: playerRef
+          .optional()
+          .describe("영입 승인(signing)일 때 그 선수 — 이름 그대로 실어도 된다"),
       }),
       (input) => requestBoard(state, input),
     ),

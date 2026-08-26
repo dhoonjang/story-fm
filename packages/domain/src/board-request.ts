@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
+import { formatMoney } from "./money";
 
 /**
  * 보드 요청 (BOARD_REQUEST) — **감독이 보드에 무엇을 달라고 거는 것**
@@ -43,6 +44,23 @@ export const BOARD_REQUEST_UNIT: Record<BoardRequestKind, "money" | "weekly" | "
 };
 
 /**
+ * 값 한 덩이 — 단위가 금액인지 주급인지 좌석인지는 종류가 안다.
+ *
+ * 사실 카드(`club/board-request.ts`)와 재정 뷰가 **같은 자를 쓴다**: 두 벌이면
+ * 화면과 GM이 같은 승인을 다른 단위로 적는 날이 온다.
+ */
+export function boardRequestAmountText(kind: BoardRequestKind, value: number): string {
+  switch (BOARD_REQUEST_UNIT[kind]) {
+    case "money":
+      return formatMoney(value);
+    case "weekly":
+      return `${formatMoney(value)}/주`;
+    case "seats":
+      return `${value.toLocaleString("en-US")}석`;
+  }
+}
+
+/**
  * `pending` 답을 기다린다 · `conditional` 조건을 되걸었다 · `approved` 나왔다 ·
  * `rejected` 안 나왔다.
  *
@@ -84,6 +102,19 @@ export const BoardConditionSchema = z.object({
   until: DateString,
 });
 export type BoardCondition = z.infer<typeof BoardConditionSchema>;
+
+/** 조건의 이름 — 화면·GM이 읽는 라벨. 문장은 읽는 쪽이 쓴다 */
+export const BOARD_CONDITION_LABEL: Record<BoardConditionKind, string> = {
+  raise: "매각으로 마련",
+  "wage-cut": "주급 총액 감축",
+};
+
+/** 조건이 요구하는 값 — `wage-cut`만 주급이라 단위가 다르다 */
+export function boardConditionAmountText(condition: BoardCondition): string {
+  return condition.kind === "wage-cut"
+    ? `${formatMoney(condition.amount)}/주 아래로`
+    : formatMoney(condition.amount);
+}
 
 export const BoardRequestSchema = z.object({
   id: z.string().min(1),
