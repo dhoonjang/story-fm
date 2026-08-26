@@ -2,6 +2,7 @@ import type {
   CallUp,
   Contract,
   GamePlayer,
+  LeaderboardKey,
   MatchEventType,
   MatchRecord,
   MatchStage,
@@ -20,6 +21,7 @@ import type {
 } from "@story-fm/domain";
 import {
   DERBY_HEAT_KO,
+  leaderboardTitle,
   VISION_CODE_KO,
   injuryRiskText,
   isReserveMatch,
@@ -122,8 +124,17 @@ import {
   boardExpectation,
   computeStandings,
   ourYouthCandidates,
+  standingsBySplit,
   youthIntakeDeadline,
+  type StandingSplitKey,
 } from "../competition/season";
+import {
+  LEADERBOARD_LIMIT,
+  leaderboardOf,
+  leaderboardsOf,
+  teamStatsOf,
+  type LeaderRow,
+} from "../competition/leaderboard";
 import { visionOf, visionReadings, visionSpanOf, visionYearOf } from "../club/vision";
 import {
   clubHonoursLine,
@@ -1532,7 +1543,7 @@ export function teamProfile(state: GameState, team: string): LookupResult {
 // ── 리그 (순위·일정) ────────────────────────────────────
 
 export interface LeagueViewInput {
-  view: "standings" | "fixtures";
+  view: "standings" | "fixtures" | "leaders";
   /**
    * 기준 팀 — 생략하면 우리 팀. "all"이면 대회 전체 경기를 본다.
    * standings에서는 그 팀이 속한 리그의 순위표를 뜻한다.
@@ -1555,8 +1566,15 @@ export interface LeagueViewInput {
   to?: string;
   /** 라운드 (리그는 R번호, 녹아웃은 차수) */
   round?: number;
-  /** 방향별 최대 경기 수 (기본 5, 맞대결·대회 전체는 10) */
+  /** 방향별 최대 경기 수 (기본 5, 맞대결·대회 전체는 10) · leaders에서는 표당 줄 수 */
   count?: number;
+  /**
+   * standings 전용 — 합계 표인가 홈 표인가 원정 표인가 (기본 `all`).
+   * 행은 같고 **순서만 다르다** (competition.md §2).
+   */
+  split?: StandingSplitKey;
+  /** leaders 전용 — 한 축만 보기. 생략하면 다섯 축 전부 */
+  key?: LeaderboardKey;
 }
 
 const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
@@ -1644,24 +1662,6 @@ function matchLine(
     `  지난 ${when} ${tag}${side} ${score}${mark}` +
     `${detail ? `${shotNote(m)}${scorerNote(state, m)}` : ""}`
   );
-}
-
-/**
- * 최근 5경기 폼 — 오래된 것부터 "승승무패승". 순위표에 붙여 `get_team`을 20번
- * 부르지 않아도 흐름을 읽게 한다 (승점만 보면 무너지는 팀과 오르는 팀이 같다).
- */
-function recentForm(state: GameState, teamId: string, competitionId: string): string {
-  return state.matches
-    .filter(
-      (m) =>
-        m.result &&
-        m.competitionId === competitionId &&
-        (m.homeTeamId === teamId || m.awayTeamId === teamId),
-    )
-    .sort((a, b) => (a.date < b.date ? -1 : 1))
-    .slice(-5)
-    .map((m) => outcomeLabel(outcomeFor(m, teamId)))
-    .join("");
 }
 
 /**
@@ -1771,8 +1771,15 @@ function pastCompetitionView(
   };
 }
 
-function standingsView(state: GameState, input: LeagueViewInput): LookupResult {
-  const past = input.season !== undefined && input.season !== state.season ? input.season : null;
+/**
+ * 어느 대회의 표인가 — 순위표와 개인 순위가 **같은 자로** 고른다. 지나간 시즌이면
+ * 그때의 소속을 본다(지금 승격한 팀이 옛 리그의 표에 서지 않게 한다).
+ */
+function competitionOfInput(
+  state: GameState,
+  input: LeagueViewInput,
+  past: number | null,
+): { ok: true; competitionId: string } | LookupResult {
   let competitionId =
     (past === null ? null : leagueOfTeamInSeason(state, past, state.userTeamId)) ??
     leagueOfTeamIn(state, state.userTeamId);
@@ -1786,13 +1793,36 @@ function standingsView(state: GameState, input: LeagueViewInput): LookupResult {
     }
     competitionId = resolved;
   } else if (input.team && !EVERY_TEAM.has(norm(input.team))) {
-    // 팀을 주면 그 팀이 속한 리그의 순위표를 본다 — 지나간 시즌은 **그때의** 소속이다
+    // 팀을 주면 그 팀이 속한 리그의 표를 본다 — 지나간 시즌은 **그때의** 소속이다
     const team = resolveTeam(state, input.team);
     if (!team.ok) return team;
     competitionId =
       (past === null ? null : leagueOfTeamInSeason(state, past, team.teamId)) ??
       leagueOfTeamIn(state, team.teamId);
   }
+  return { ok: true, competitionId };
+}
+
+/** 지나간 시즌인가 — 지금 시즌이면 null (표를 세우는 자리가 갈린다) */
+function pastSeasonOf(state: GameState, input: LeagueViewInput): number | null {
+  return input.season !== undefined && input.season !== state.season ? input.season : null;
+}
+
+/** 표 머리줄 — 리그와 대항전 리그 페이즈가 같은 모양으로 선다 */
+function tableTitle(competitionId: string, what: string): string {
+  return isCup(competitionId)
+    ? `[${competitionShortName(competitionId)} 리그 페이즈 ${what}]`
+    : `[리그 ${what}] ${competitionName(competitionId)}`;
+}
+
+/** 홈 표·원정 표의 머리줄 꼬리 — 합계표는 아무것도 붙이지 않는다 */
+const SPLIT_KO: Record<StandingSplitKey, string> = { all: "", home: " · 홈", away: " · 원정" };
+
+function standingsView(state: GameState, input: LeagueViewInput): LookupResult {
+  const past = pastSeasonOf(state, input);
+  const picked = competitionOfInput(state, input, past);
+  if (!("competitionId" in picked)) return picked;
+  const { competitionId } = picked;
 
   // 지나간 시즌은 결산 스냅샷이 답한다 — 지금 경기로 세우는 표가 아니다 (§3.3)
   if (past !== null) return pastCompetitionView(state, past, competitionId);
@@ -1800,7 +1830,8 @@ function standingsView(state: GameState, input: LeagueViewInput): LookupResult {
   // 국내 컵은 순수 녹아웃이라 순위표가 없다 — 대신 대진표를 돌려준다
   if (isDomesticCup(competitionId)) return cupBracketView(state, competitionId);
 
-  const table = computeStandings(state, competitionId);
+  const split = input.split ?? "all";
+  const table = standingsBySplit(computeStandings(state, competitionId), split);
   if (table.length === 0) {
     return {
       ok: true,
@@ -1809,18 +1840,104 @@ function standingsView(state: GameState, input: LeagueViewInput): LookupResult {
   }
   const rows = table.map((r, i) => {
     const mark = r.teamId === state.userTeamId ? " ←우리" : "";
-    const form = recentForm(state, r.teamId, competitionId);
+    // 홈 표·원정 표는 그 소계를 찍는다 — 합계를 찍으면 순서와 숫자가 어긋난다
+    const box = split === "all" ? r : r[split];
+    const diff = box.goalsFor - box.goalsAgainst;
+    const form = r.form.map(outcomeLabel).join("");
     return (
-      `${String(i + 1).padStart(2)} ${r.name} ${r.played}경기 ${r.wins}승 ${r.draws}무 ${r.losses}패 ` +
-      `${r.points}점 (${r.goalDiff >= 0 ? "+" : ""}${r.goalDiff})${form ? ` 폼 ${form}` : ""}${mark}`
+      `${String(i + 1).padStart(2)} ${r.name} ${box.played}경기 ${box.wins}승 ${box.draws}무 ${box.losses}패 ` +
+      `${box.points}점 (${diff >= 0 ? "+" : ""}${diff})${form ? ` 폼 ${form}` : ""}${mark}`
     );
   });
-  const title = isCup(competitionId)
-    ? `[${competitionShortName(competitionId)} 리그 페이즈 순위]`
-    : `[리그 순위] ${competitionName(competitionId)}`;
   return {
     ok: true,
-    message: [`${title} ${seasonLabel(state.season)} · ${state.date}`, ...rows].join("\n"),
+    message: [
+      `${tableTitle(competitionId, "순위")}${SPLIT_KO[split]} ${seasonLabel(state.season)} · ${state.date}`,
+      ...rows,
+    ].join("\n"),
+  };
+}
+
+/** 개인 순위 한 줄이 찍는 값 — 표가 줄 세운 그 값이다 (competition.md §2) */
+function leaderValueLine(key: LeaderboardKey, row: LeaderRow): string {
+  switch (key) {
+    case "goals":
+      return `${row.goals}골 ${row.assists}도움`;
+    case "assists":
+      return `${row.assists}도움 ${row.goals}골`;
+    case "rating":
+      return `평점 ${(row.rating ?? 0).toFixed(2)}`;
+    case "cleanSheets":
+      return `무실점 ${row.cleanSheets}경기`;
+    default:
+      return `징계 ${row.value}점 (경고 ${row.yellows} 퇴장 ${row.reds})`;
+  }
+}
+
+/**
+ * 리그 개인 순위 + 팀 열 — 시즌 끝의 시상을 시즌 중에 미리 읽는 자리다.
+ *
+ * ⚠️ **개인 순위는 리그에만 선다** — 시즌 기록표가 대회별로 갈려 있지 않아
+ * 대항전 득점왕은 세울 수 없다 (competition.md §2). 없는 것은 없다고 답한다.
+ */
+function leadersView(state: GameState, input: LeagueViewInput): LookupResult {
+  const past = pastSeasonOf(state, input);
+  if (past !== null) {
+    return {
+      ok: false,
+      message: `지나간 시즌의 개인 순위는 남지 않습니다 — 그 시즌 시상은 get_career로 봅니다`,
+    };
+  }
+  const picked = competitionOfInput(state, input, null);
+  if (!("competitionId" in picked)) return picked;
+  const { competitionId } = picked;
+  if (isDomesticCup(competitionId)) {
+    return {
+      ok: true,
+      message: `${competitionName(competitionId)}는 순수 녹아웃이라 순위표도 개인 순위도 없습니다`,
+    };
+  }
+
+  const limit = input.count ?? LEADERBOARD_LIMIT;
+  const lines: string[] = [];
+  // 대항전은 개인 순위를 세우지 않는다 — 시즌 기록표가 대회별로 갈려 있지 않다
+  if (isCup(competitionId)) {
+    lines.push("· 개인 순위 — 대항전은 시즌 기록이 대회별로 갈리지 않아 세우지 않습니다");
+  } else {
+    const boards = input.key
+      ? [{ key: input.key, rows: leaderboardOf(state, competitionId, input.key, limit) }]
+      : leaderboardsOf(state, competitionId, limit);
+    for (const board of boards) {
+      if (board.rows.length === 0) continue;
+      lines.push(`· ${leaderboardTitle(board.key)}`);
+      board.rows.forEach((row, i) => {
+        lines.push(
+          `  ${String(i + 1).padStart(2)} ${row.playerName} (${row.teamShortName}) ` +
+            `${leaderValueLine(board.key, row)} · ${row.apps}경기${row.ours ? " ←우리" : ""}`,
+        );
+      });
+    }
+  }
+
+  const teams = teamStatsOf(state, competitionId);
+  if (teams.length > 0) {
+    lines.push("· 팀");
+    teams.forEach((t, i) => {
+      lines.push(
+        `  ${String(i + 1).padStart(2)} ${t.shortName} ${t.played}경기 ${t.goalsFor}득점 ${t.goalsAgainst}실점 ` +
+          `무실점${t.cleanSheets} 슛${t.shots} xG${t.xg.toFixed(1)}${t.ours ? " ←우리" : ""}`,
+      );
+    });
+  }
+  if (lines.length === 0) {
+    return { ok: true, message: `${competitionName(competitionId)}는 아직 기록이 없습니다` };
+  }
+  return {
+    ok: true,
+    message: [
+      `${tableTitle(competitionId, "개인 순위")} ${seasonLabel(state.season)} · ${state.date}`,
+      ...lines,
+    ].join("\n"),
   };
 }
 
@@ -2132,7 +2249,9 @@ function fixturesView(state: GameState, input: LeagueViewInput): LookupResult {
 }
 
 export function leagueView(state: GameState, input: LeagueViewInput): LookupResult {
-  return input.view === "standings" ? standingsView(state, input) : fixturesView(state, input);
+  if (input.view === "standings") return standingsView(state, input);
+  if (input.view === "leaders") return leadersView(state, input);
+  return fixturesView(state, input);
 }
 
 // ── 감독의 달력 (경기 + 훈련 + 이적창) ──────────────────

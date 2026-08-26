@@ -308,6 +308,9 @@ export function isReserveMatch(match: Pick<MatchRecord, "competitionId">): boole
   return match.competitionId !== null && match.competitionId.startsWith(RESERVE_COMPETITION_PREFIX);
 }
 
+/** 기준 팀 시점의 한 경기 결말 — 승·무·패. 한글 표기는 `outcomeLabel`이 붙인다 */
+export type Outcome = "W" | "D" | "L";
+
 /**
  * 기준 팀 시점의 승패 — 정규시간이 같으면 승부차기로 갈린다.
  *
@@ -317,7 +320,7 @@ export function isReserveMatch(match: Pick<MatchRecord, "competitionId">): boole
  *
  * (폼의 연속 기록은 승부차기를 보지 않는다 — `recentOutcomes`, engine/squad/slump.ts.)
  */
-export function outcomeFor(match: MatchRecord, teamId: string): "W" | "D" | "L" | null {
+export function outcomeFor(match: MatchRecord, teamId: string): Outcome | null {
   const home = match.homeTeamId === teamId;
   if (!match.result || (!home && match.awayTeamId !== teamId)) return null;
   const { homeGoals, awayGoals, penalties } = match.result;
@@ -335,7 +338,7 @@ export function outcomeFor(match: MatchRecord, teamId: string): "W" | "D" | "L" 
 const OUTCOME_KO = { W: "승", D: "무", L: "패" } as const;
 
 /** 승패의 한글 표기 — 판정은 `outcomeFor`가 하고 여기서는 라벨만 붙인다 */
-export function outcomeLabel(outcome: "W" | "D" | "L" | null): "승" | "무" | "패" {
+export function outcomeLabel(outcome: Outcome | null): "승" | "무" | "패" {
   return OUTCOME_KO[outcome ?? "D"];
 }
 
