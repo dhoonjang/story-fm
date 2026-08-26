@@ -1951,8 +1951,42 @@ export const PlayerStateSchema = z.object({
    * 옛 세이브엔 없다 — 없으면 넘은 적 없는 것으로 읽고 버전을 올리지 않는다.
    */
   overloadedOn: DateString.optional(),
+  /**
+   * **통산 A매치 출전·골** (→ docs/data/competition.md §5-1).
+   *
+   * 소집 표(`state.callUps`)에서 파생하지 않고 저장하는 이유는 그 표가 **최근 두
+   * 시즌만** 남기 때문이다 — 합쳐서 세면 통산이 세 시즌 뒤에 사라진다. 새 게임의
+   * 선수는 0이 아니다: 세계 생성이 나이·서열로 통산을 미리 세운다
+   * (`seedInternationalCaps`). 그러지 않으면 서른 살 주전이 첫 소집에서 데뷔한다.
+   *
+   * 옛 세이브엔 없다 — 없으면 0으로 읽고 버전을 올리지 않는다. 0인 선수에게는
+   * 칸을 적지 않는다(세계의 대다수가 그렇다).
+   */
+  caps: z.number().int().min(0).optional(),
+  internationalGoals: z.number().int().min(0).optional(),
+  /**
+   * **여름 대회를 뛰고 늦게 합류하는 날** (→ docs/data/competition.md §5-1).
+   *
+   * 짝수 해 여름의 대회가 남기는 유일한 사실이다 — 경기는 굴리지 않으므로 대회가
+   * 세계에 남기는 것은 「누가 늦게 오나」뿐이고, 그 날짜는 어디에서도 파생되지
+   * 않는다(나라 서열은 그해 전환 시점의 것이다). 그날까지 훈련장에도 프리시즌
+   * 친선에도 서지 않는다.
+   *
+   * 대회가 없는 해엔 지워진다. 옛 세이브엔 없다(optional — SAVE_VERSION 유지).
+   */
+  summerReturn: DateString.optional(),
 });
 export type PlayerState = z.infer<typeof PlayerStateSchema>;
+
+/** 통산 A매치 출전 — 없으면 0. 읽는 자리마다 `?? 0`을 적지 않게 하는 문 */
+export function capsOf(state: Pick<PlayerState, "caps">): number {
+  return state.caps ?? 0;
+}
+
+/** 통산 A매치 골 — 없으면 0 */
+export function internationalGoalsOf(state: Pick<PlayerState, "internationalGoals">): number {
+  return state.internationalGoals ?? 0;
+}
 
 /**
  * 저장된 경기 감각을 읽는 **유일한 문** — 없으면 기준점이다.

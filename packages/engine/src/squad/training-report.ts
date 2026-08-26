@@ -300,7 +300,7 @@ export function trainsWithFirstTeam(state: GameState, player: GamePlayer): boole
   return (
     player.teamId === state.userTeamId &&
     squadLevelOf(player) === "first" &&
-    isAvailable(state, player.id) &&
+    isAvailable(state, player) &&
     !restingOn(state, player.id)
   );
 }

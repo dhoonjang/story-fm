@@ -531,7 +531,7 @@ describe("set_lineup은 조정해 둔 좌표를 건드리지 않는다", () => {
     const out = starters.find((a) => positionGroupOf(a.position) === "FW")!;
     const vacated = { ...out.point! };
     const replacement = userPlayers(state).find(
-      (p) => !starters.some((a) => a.playerId === p.id) && isAvailable(state, p.id),
+      (p) => !starters.some((a) => a.playerId === p.id) && isAvailable(state, p),
     )!;
 
     const next = starters.map((a) => (a.playerId === out.playerId ? replacement.id : a.playerId));
@@ -598,7 +598,7 @@ describe("라인업 스킬은 검증 뒤에 적용한다 (team.md §6)", () => {
   const state = createTestGame();
   const promotable = () =>
     reservePlayers(state, state.userTeamId).find(
-      (p) => canRegisterFor(state, p, state.userTeamId).ok && isAvailable(state, p.id),
+      (p) => canRegisterFor(state, p, state.userTeamId).ok && isAvailable(state, p),
     );
   const benchIds = () => assignmentsOf(state, state.userTeamId, "bench").map((a) => a.playerId);
 
@@ -1546,7 +1546,7 @@ describe("역할 기억 — 벤치를 다녀와도 감독의 결정이 남는다
     const spare = userPlayers(state).find(
       (p) =>
         p.squadLevel === "first" &&
-        isAvailable(state, p.id) &&
+        isAvailable(state, p) &&
         !lineup.some((s) => s.playerId === p.id),
     )!;
     return lineup.map((s) =>
@@ -1687,7 +1687,7 @@ describe("적응도 왕복 — 2군 · 자리 · 천장 100", () => {
     const spare = userPlayers(state).find(
       (p) =>
         p.squadLevel === "first" &&
-        isAvailable(state, p.id) &&
+        isAvailable(state, p) &&
         !lineup.some((s) => s.playerId === p.id),
     )!;
     return lineup.map((s) =>
