@@ -106,7 +106,7 @@ import { formAngle, formLabel, formTone } from "../squad/form";
 import { leaderGroupOf } from "../squad/hierarchy";
 import { ratingTone, type RatingTone } from "../match/ratings";
 import { buildOpponentReport } from "../match/preview";
-import { GAP_CONDITION, edgeOf, subLimitsOf, zoneGrid } from "@story-fm/sim";
+import { GAP_CONDITION, edgeOf, subLimitsOf, zoneGrid, type InjuryRisk } from "@story-fm/sim";
 import { moodOf, type MoodRead } from "../squad/mood";
 import { openPromises, squadStatusOf } from "../squad/promises";
 import { isHomegrownFor, occupiesSquadList, squadRegistrationOf } from "../squad/registration";
@@ -131,7 +131,7 @@ import { openManagerOffers, USER_WARNINGS_BEFORE_SACK } from "../market/manager-
 import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../skills";
 import { askingPriceFor, marketValueOf, wageExpectationOf } from "../market/market";
 import { settlingPercent } from "../squad/settling";
-import { INJURY_SEVERITY_KO } from "../squad/injury";
+import { INJURY_SEVERITY_KO, injuryRiskFor } from "../squad/injury";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { hasRelegation, leagueOfTeamIn } from "../competition/promotion";
 import { RELEGATION_SLOTS } from "../core/league-shape";
@@ -554,6 +554,16 @@ interface SquadViewRowMeta {
   sharpnessLabel: string;
   /** 등급 자체 — 화면이 색과 정렬을 이 경계로 맞춘다 */
   sharpnessBand: SharpnessBand;
+  /**
+   * **부상 위험 등급과 그 원인** (player.md §5.3) — 경기가 누가 다칠지 고를 때 쓰는
+   * 저울(`injuryWeight`)을 그대로 읽은 값이다. 체력 막대와 다른 축이다: 잘 쉰
+   * 유리몸도 여기서는 위로 선다.
+   *
+   * 성향 배수는 싣지 않는다 — 감독이 읽을 눈금이 없는 수다 (§10). 라벨은 화면이
+   * 도메인 표에서 붙인다(`INJURY_RISK_GRADE_KO`) — 여기서 문장을 만들면 GM 조회와
+   * 화면이 같은 등급을 두 낱말로 부른다.
+   */
+  injuryRisk: InjuryRisk;
   /**
    * 지금 심경 — **코어가 고른 사실 카드**와, 결산(LLM)이 다시 쓴 한 줄(`moodOf`).
    * 문장은 화면이 쓴다 (`apps/web/lib/mood.ts` · overview.md §1 철칙 4).
@@ -2669,6 +2679,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         sharpness: Math.round(sharpnessOf(p.state)),
         sharpnessLabel: sharpnessLabel(sharpnessOf(p.state)),
         sharpnessBand: sharpnessBand(sharpnessOf(p.state)),
+        injuryRisk: injuryRiskFor(p),
         mood: moodOf(state, p),
         role: (livePacket
           ? liveSlot

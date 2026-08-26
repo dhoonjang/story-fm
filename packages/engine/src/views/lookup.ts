@@ -12,6 +12,7 @@ import type {
 } from "@story-fm/domain";
 import {
   DERBY_HEAT_KO,
+  injuryRiskText,
   isReserveMatch,
   packetTagText,
   PROMISE_KIND_KO,
@@ -62,7 +63,7 @@ import { entrantsOf } from "../competition/europe";
 import { careerOf, careerTotalsOf, type CareerTotals } from "../squad/career";
 import { leaderGroupOf } from "../squad/hierarchy";
 import { formLabel } from "../squad/form";
-import { INJURY_SEVERITY_KO } from "../squad/injury";
+import { INJURY_SEVERITY_KO, injuryRiskFor } from "../squad/injury";
 import { ABSENT_REASON_KO, buildOpponentReport } from "../match/preview";
 import { issueReasonText, moodAnchor, moodOf } from "../squad/mood";
 import { numberLineageOf } from "../squad/numbers";
@@ -937,9 +938,12 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
   ];
 
   if (knowledge === "own") {
+    const risk = injuryRiskFor(p);
     lines.push(
       `컨디션: 폼 ${formLabel(p.state.form)} · 체력 ${p.state.condition} (${conditionLabel(p.state.condition)})` +
-        ` · 경기 감각 ${sharpnessLabel(sharpnessOf(p.state))}`,
+        ` · 경기 감각 ${sharpnessLabel(sharpnessOf(p.state))}` +
+        // 성향 배수는 싣지 않는다 — 감독이 읽을 눈금이 없는 수다 (player.md §10)
+        ` · 부상 위험 ${injuryRiskText(risk.grade, risk.causes)}`,
       `심경: ${moodLine(state, p)}`,
       `소화 포지션: ${p.positions
         .map((x) => `${x.position}${x.isNatural ? "*" : ""}${x.proficiency}`)
@@ -1133,6 +1137,13 @@ function assignedRow(
     yellows >= YELLOWS_PER_SUSPENSION - 1 ? `경고 ${yellows}장(정지 임박)` : null,
     // 사유 없는 옛 불만은 사유 없이 낸다
     grievance ? (reason ? `불만(${reason})` : "불만") : null,
+    /**
+     * **다치기 전에 서는 유일한 줄이다** (player.md §5.3) — 부상 플래그는 이미
+     * 쓰러진 뒤의 사실이라, 이 줄이 없으면 라인업을 세우는 자리에서 감독이
+     * 위험을 읽을 자리가 없다. `elevated`는 싣지 않는다: 스쿼드의 15%가 그 등급이라
+     * 스물몇 줄이 통째로 ⚠를 달면 진짜 경고가 묻힌다.
+     */
+    injuryRiskFor(p).grade === "high" ? "부상 위험 높음" : null,
   ].filter((x): x is string => x !== null);
   return (
     `  ${position.padEnd(4)} ${p.name}${armband(p)} (${p.id}) ${ageOf(p.birthdate, state.date)}세 · ` +

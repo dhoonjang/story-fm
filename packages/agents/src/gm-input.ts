@@ -30,6 +30,8 @@ import {
   formatClock,
   headCoachOf,
   historyStart,
+  injuryRiskFor,
+  isInjured,
   isSuspended,
   leagueOfTeamIn,
   loanedOut,
@@ -335,6 +337,7 @@ const TRAINING_SHOWN = 3;
 const EXPIRING_SHOWN = 3;
 const PROMISE_SHOWN = 3;
 const TRANSFER_REQUEST_SHOWN = 3;
+const AT_RISK_SHOWN = 3;
 const RECENT_NARRATIVE = 4;
 
 /**
@@ -632,6 +635,18 @@ export function buildGmStateNote(
     })
     .filter((x): x is string => x !== null);
   const suspended = players.filter((p) => isSuspended(state, p.id)).map((p) => p.name);
+  /**
+   * **다치기 전에 서는 줄** (player.md §5.3) — 부상 줄은 이미 쓰러진 뒤의 사실이라,
+   * 이것이 없으면 수석코치가 "쉬게 하시죠"라고 말할 근거가 어디에도 없다.
+   * 지금 뛸 수 있는 **1군**만 센다 — 다친 선수의 위험은 감독이 손쓸 일이 아니고,
+   * 2군의 몸은 이번 주 라인업의 사정이 아니다 (수석코치의 눈도 같은 문이다).
+   */
+  const atRisk = players
+    .filter(
+      (p) =>
+        squadLevelOf(p) === "first" && !isInjured(state, p.id) && injuryRiskFor(p).grade === "high",
+    )
+    .map((p) => p.name);
   const unhappy = state.issues.map((i) => playerName(state, i.gamePlayerId));
 
   const training = state.schedule
@@ -668,6 +683,11 @@ export function buildGmStateNote(
         : null;
     })(),
     injured.length > 0 ? `부상 ${injured.length} (${injured.join(", ")})` : null,
+    atRisk.length > 0
+      ? `부상 위험 높음 ${atRisk.length} (${atRisk.slice(0, AT_RISK_SHOWN).join(", ")}${
+          atRisk.length > AT_RISK_SHOWN ? " …" : ""
+        })`
+      : null,
     suspended.length > 0 ? `정지 ${suspended.length} (${suspended.join(", ")})` : null,
     unhappy.length > 0 ? `불만 ${unhappy.length} (${unhappy.join(", ")})` : null,
     ...scoutingSummary(state),

@@ -1,5 +1,6 @@
 import {
   ageOf,
+  injuryRiskText,
   isRelease,
   issueReasonKo,
   LEADER_ROLE_LABEL,
@@ -13,6 +14,8 @@ import {
 } from "@story-fm/domain";
 import type {
   GamePlayer,
+  InjuryRiskCause,
+  InjuryRiskGrade,
   LeaderRole,
   MatchRecord,
   MilestoneCode,
@@ -25,6 +28,7 @@ import type {
 import { diffDays } from "../competition/calendar";
 import { milestonesOf } from "./career";
 import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
+import { injuryRiskFor } from "./injury";
 import { settlingOf } from "./settling";
 import { playerArchetypeOf } from "../world/player-persona";
 import { leaderRoleOf } from "./hierarchy";
@@ -36,6 +40,7 @@ import {
   activeContract,
   activeSuspension,
   assignmentFor,
+  isOurPlayer,
   openInjury,
   playerById,
   playersOf,
@@ -158,6 +163,15 @@ export type MoodFact =
   | { cause: "no-minutes"; place: "bench" | "out" }
   | { cause: "form"; label: FormLabel }
   | { cause: "condition"; level: "heavy" | "light" }
+  /**
+   * **지금 세우면 다칠 몸이다** (player.md §5.3) — 체력 카드와 다른 사실이다.
+   * 저 축은 오늘 다리가 무겁다는 말이고 이쪽은 **누가 다칠지 고르는 저울**에서
+   * 그가 어디에 서 있는가다. 잘 쉰 유리몸이 여기서 갈린다.
+   *
+   * `low`는 서지 않는다 — 짚을 것이 없어서 낮음이다. 원인은 큰 순의 코드고, 말은
+   * 화면·GM이 붙인다.
+   */
+  | { cause: "risk"; grade: Exclude<InjuryRiskGrade, "low">; causes: InjuryRiskCause[] }
   /**
    * **경기 감각**이 무뎌졌다 (player.md §5.4) — 몸의 예산(`condition`)과 다른 사실이다.
    * 잘 쉬었지만 몇 주째 못 뛴 선수가 여기서 갈린다. 등급만 낸다: 감독이 관측하는
@@ -516,8 +530,24 @@ export function moodFactsOf(
      * 선수단 전원이 침울해진다. 여운이 남은 경기가 있으면 그쪽이 이미 마음을
      * 말했으니 몸은 곁들임으로만 붙는다.
      */
-    if (condition <= CONDITION_HEAVY) facts.push({ cause: "condition", level: "heavy" });
-    else if (condition >= CONDITION_LIGHT && facts.length === 0) {
+    /**
+     * **위험 `high`가 체력보다 먼저 선다** (people.md §5) — 「다리가 무겁다」는
+     * 오늘의 사실이고 「지금 세우면 다칠 몸이다」는 감독이 라인업에서 손을 써야
+     * 하는 사실이다. `elevated`는 달리 할 말이 없을 때만이다 — 스쿼드의 15%가
+     * 그 등급이라 늘 내면 소음이 된다 (`sharpness`와 같은 규칙).
+     *
+     * ⚠️ **우리 선수에게만 선다** — 성향은 장부에 있어도 남의 선수의 몸을 감독이
+     * 재지는 못한다 (player.md §10). 임대 보낸 선수는 우리 선수다(`isOurPlayer`) —
+     * `teamId`로 가르면 명단의 「위험」 열과 그 선수의 심경이 서로 다른 말을 한다.
+     */
+    const risk = isOurPlayer(state, player) ? injuryRiskFor(player) : null;
+    if (risk?.grade === "high") {
+      facts.push({ cause: "risk", grade: "high", causes: risk.causes });
+    } else if (condition <= CONDITION_HEAVY) {
+      facts.push({ cause: "condition", level: "heavy" });
+    } else if (risk?.grade === "elevated" && facts.length === 0) {
+      facts.push({ cause: "risk", grade: "elevated", causes: risk.causes });
+    } else if (condition >= CONDITION_LIGHT && facts.length === 0) {
       facts.push({ cause: "condition", level: "light" });
     }
   }
@@ -661,6 +691,9 @@ function factLine(fact: MoodFact): string {
         : `체력 ${CONDITION_LIGHT} 이상`;
     case "sharpness":
       return `경기 감각 ${sharpnessBandLabel(fact.band)}`;
+    case "risk":
+      // 배수는 적지 않는다 — 감독이 읽는 것은 등급과 그것을 들어 올린 항이다
+      return `부상 위험 ${injuryRiskText(fact.grade, fact.causes)}`;
     case "departure":
       return `${fact.name} 계약 해지 · ${dayWord(fact.days)}`;
     case "contract-ending":
