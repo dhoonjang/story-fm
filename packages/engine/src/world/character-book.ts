@@ -20,7 +20,7 @@ import {
   worldFigureByName,
   worldFigures,
 } from "./persona";
-import { generatePlayerPersona } from "./player-persona";
+import { generatePlayerPersona, retiredPersona } from "./player-persona";
 import { personaRelations } from "./relations";
 
 /**
@@ -204,6 +204,9 @@ function personaOf(state: GameState, characterId: string): Persona | null {
   }
   const player = state.players.find((p) => p.name === characterId);
   if (player) return generatePlayerPersona(state.seed, player);
+  // 은퇴한 사람 — 명단에는 없어도 명부가 그를 안다 (season.md §6). 순서는 `candidatesOf`와 같다
+  const retired = (state.retired ?? []).find((r) => r.name === characterId);
+  if (retired) return retiredPersona(state.seed, retired);
   const figure = worldFigureByName(state, characterId);
   if (figure) return figure;
   // 타 팀 벤치의 가상 감독 — 후보를 모으는 순서(candidatesOf)의 마지막 겹 그대로
@@ -352,6 +355,17 @@ function candidatesOf(state: GameState): Candidate[] {
   for (const player of state.players) {
     if (player.teamId !== state.userTeamId && !negotiating.has(player.id)) continue;
     add(generatePlayerPersona(state.seed, player), NEAR_OURS, asKnown(player.id));
+  }
+
+  /**
+   * **은퇴한 사람도 우리 사람이다** (people.md §6 · season.md §6). 명단에 없다는 것이
+   * 부를 수 없다는 뜻이면 열 해를 뛴 주장이 은퇴한 이튿날 세계에서 사라진다. 깊이는
+   * 언제나 `full`이다 — 감독이 몇 해를 데리고 있던 사람이라 안개가 남을 자리가 없고,
+   * 지식 눈금은 명단에 있는 선수에게만 답한다. 현역을 먼저 담은 뒤라 이름이 겹치면
+   * 현역이 자리를 지킨다.
+   */
+  for (const retired of state.retired ?? []) {
+    add(retiredPersona(state.seed, retired), NEAR_OURS, always("full"));
   }
 
   // ── 이름난 현역 ── 우리 선수단을 먼저 담은 **뒤**여야 동명이인 자리를 우리가 지킨다

@@ -41,6 +41,7 @@ import type {
   ScheduleEntry,
   Negotiation,
   PressConference,
+  RetiredPlayer,
   ScoutReport,
   ScoutReportCard,
   SeasonAward,
@@ -817,6 +818,16 @@ export interface GameState {
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   milestones?: Milestone[];
+  /**
+   * **은퇴 명부** — 그만둔 사람이 남기는 한 줄 (season.md §6).
+   *
+   * 은퇴하면 `state.players`에서 빠지므로 id로는 이름도 나이도 되찾지 못한다 — 원장의
+   * `retire` 줄만으로는 오프시즌 블록도 캐릭터북도 그 사람을 부를 수 없다. 통산은 여기
+   * 적지 않는다: `seasonStats`가 그대로 남아 `careerTotalsOf`가 같은 수를 낸다.
+   * **감독 팀에서 은퇴한 선수만** 담는다 — `milestones`와 같은 규약이다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  retired?: RetiredPlayer[];
 
   // ── 서사 ──
   /**

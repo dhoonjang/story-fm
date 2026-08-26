@@ -327,8 +327,14 @@ function candidatesToday(state: GameState, teamId: string): Map<string, ArcCandi
       kind: "veteran-twilight",
       subjectId: player.id,
       stage:
-        // 이미 은퇴 문턱을 넘었으면 계약이 얼마나 남았든 이번 시즌이 마지막이다
-        left <= VETERAN_CLIMAX_DAYS || retiresAtSeasonEnd(age, player.attributes.overall)
+        /**
+         * 이번 시즌이 마지막이면 계약이 얼마나 남았든 절정이다. **예고가 원본이고**
+         * (season.md §6), 문턱은 1월 전의 자리다 — 예고가 서기 전에도 감독이 읽을 수
+         * 있어야 이야기가 겨울에 갑자기 시작되지 않는다.
+         */
+        left <= VETERAN_CLIMAX_DAYS ||
+        player.state.retiringAfterSeason !== undefined ||
+        retiresAtSeasonEnd(age, player.attributes.overall)
           ? "climax"
           : left <= VETERAN_RISING_DAYS
             ? "rising"

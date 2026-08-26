@@ -3,6 +3,7 @@ import { ageOf } from "@story-fm/domain";
 import {
   activeContract,
   assignmentsOf,
+  declareRetirements,
   groupOf,
   isClubTeam,
   playersOf,
@@ -28,7 +29,15 @@ const SEASONS = 15;
 describe("15시즌을 전환한 뒤의 스쿼드", () => {
   it("시드 42", () => {
     const state = createTestGame(42);
-    for (let s = 0; s < SEASONS; s++) transitionSeason(state);
+    /**
+     * **예고를 함께 굴린다** — 전환은 집행일 뿐이고 명단은 1월의 예고가 정한다
+     * (season.md §6). 여기서 tick을 돌리지 않으므로 그 하루를 직접 부른다: 빼면
+     * 나이(35) 밖의 은퇴가 통째로 사라져 실제 게임보다 늙고 두꺼운 스쿼드를 잰다.
+     */
+    for (let s = 0; s < SEASONS; s++) {
+      declareRetirements(state, []);
+      transitionSeason(state);
+    }
 
     const clubs = state.teams.filter((t) => isClubTeam(t.id));
     let shortXI = 0;

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
 import { MATCH_MINUTE_MAX } from "./match";
-import { AXIS_KO, type AttributeAxis } from "./player";
+import { AXIS_KO, RetirementReasonSchema, type AttributeAxis } from "./player";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 import { SQUAD_STATUSES } from "./squad-rules";
 
@@ -289,6 +289,43 @@ export const TransferSchema = z.object({
   clauses: TransferClausesSchema.optional(),
 });
 export type Transfer = z.infer<typeof TransferSchema>;
+
+// ── 은퇴 명부 ─────────────────────────────────────────
+/**
+ * 은퇴 명부 (RETIRED_PLAYER) — **그만둔 사람이 남기는 한 줄** (season.md §6).
+ *
+ * 은퇴하면 `state.players`에서 빠지므로 id로는 이름도 나이도 되찾지 못한다. 원장의
+ * `TRANSFER.type = "retire"` 줄은 **누가**를 id로만 아는 줄이라, 그 줄만으로는
+ * 오프시즌 블록도 캐릭터북도 시상 기록도 그 사람을 부를 수 없다.
+ *
+ * ⚠️ **통산은 여기 적지 않는다.** `seasonStats`의 행은 은퇴로 지워지지 않아
+ * `careerTotalsOf`가 같은 수를 그대로 낸다 — 한 값을 두 곳에 적으면 언젠가 갈린다
+ * (game-state.md §3.4).
+ *
+ * ⚠️ **감독 팀에서 은퇴한 선수만 담는다** — `growthLog`·`milestones`와 같은 규약이다.
+ * 세계 전체는 시즌마다 수백 명이 그만두고, 그 이름을 읽는 자리는 전부 우리 사람의
+ * 자리다. 은퇴 자체는 소속과 무관하게 일어난다.
+ */
+export const RetiredPlayerSchema = z.object({
+  /** 현역 시절 `GAME_PLAYER.id` 그대로 — 새 유스에게 다시 주지 않는 id다 */
+  gamePlayerId: z.string().min(1),
+  name: z.string().min(1),
+  /**
+   * 생일과 주 포지션 — **페르소나를 현역 때와 같은 채널에서 되짚는 열쇠다**
+   * (people.md §6). 원형 뽑기가 (시드, 선수 id, 자리, 나이대)를 타므로, 이 둘이
+   * 없으면 은퇴한 사람이 다른 목소리로 돌아온다.
+   */
+  birthdate: DateString,
+  position: z.string().min(1),
+  /** 마지막 셔츠 */
+  teamId: z.string().min(1),
+  /** 그만둔 날 — 전환이 집행하는 날(다음 시즌 프리시즌 첫날) */
+  on: DateString,
+  /** 마지막으로 뛴 시즌 */
+  season: z.number().int().min(1),
+  reason: RetirementReasonSchema,
+});
+export type RetiredPlayer = z.infer<typeof RetiredPlayerSchema>;
 
 // ── 지급 일정 ─────────────────────────────────────────
 /**

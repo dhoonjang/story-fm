@@ -57,7 +57,7 @@ import {
 } from "./views";
 import { addDays, dayOfWeek, diffDays, seasonYear, squadReturnOf } from "../competition/calendar";
 import { entrantsOf } from "../competition/europe";
-import { careerOf, type CareerTotals } from "../squad/career";
+import { careerOf, careerTotalsOf, type CareerTotals } from "../squad/career";
 import { leaderGroupOf } from "../squad/hierarchy";
 import { formLabel } from "../squad/form";
 import { INJURY_SEVERITY_KO } from "../squad/injury";
@@ -2051,8 +2051,30 @@ export function careerView(state: GameState): LookupResult {
         .join(" / ")}`,
     );
   }
+  /**
+   * **은퇴 명부** — 감독이 데리고 있다 보낸 사람들 (season.md §6). 명단에서 사라진
+   * 이름을 되찾을 수 있는 유일한 자리라 통산과 함께 선다 — 통산은 명부가 아니라
+   * `seasonStats`에서 온다(`careerTotalsOf`), 한 값을 두 곳에 적지 않는다.
+   */
+  const retired = [...(state.retired ?? [])].sort((a, b) => b.season - a.season);
+  if (retired.length > 0) {
+    lines.push(`은퇴 ${retired.length}명 (우리 팀에서):`);
+    for (const r of retired.slice(0, RETIRED_SHOWN)) {
+      const totals = careerTotalsOf(state, r.gamePlayerId, r.teamId);
+      lines.push(
+        `  시즌 ${r.season} ${r.name} (${r.position}) — 만 ${ageOf(r.birthdate, r.on)}세 · ` +
+          `${teamShortNameIn(state, r.teamId)}에서 ${totals.apps}경기 ${totals.goals}골 ${totals.assists}도움`,
+      );
+    }
+    if (retired.length > RETIRED_SHOWN) {
+      lines.push(`  …그 외 ${retired.length - RETIRED_SHOWN}명`);
+    }
+  }
   return { ok: true, message: lines.join("\n") };
 }
+
+/** 커리어 카드에 세우는 은퇴 이름의 수 — 스무 시즌이면 명부가 카드를 통째로 덮는다 */
+const RETIRED_SHOWN = 8;
 
 // ── 끝난 경기 리포트 (match.md §8) ──────────────────────
 
