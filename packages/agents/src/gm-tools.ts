@@ -459,7 +459,9 @@ export function buildGmTools(
           width: z.number().int().min(1).max(5),
           passStyle: z.number().int().min(1).max(5),
           // 축이 아니라 갈래 넷 — 눈금이 없고, 지시하지 않은 것이 중립이다 (match.md §1.2).
-          // 낱말은 도구 설명이 `TACTIC_TOGGLES`에서 만들어 싣는다 (prompts.md §5-2)
+          // 낱말은 도구 설명이 `TACTIC_TOGGLES`에서 만들어 싣는다 (prompts.md §5-2).
+          // 해제는 열거 안의 중립 토큰(`none`)이 받는다 — `.nullable()`은 없음을 `null`로
+          // 적는 모델을 함께 받는 관용이고, 모델에게 보이지 않는다 (prompts.md §2)
           transition: z.enum(TRANSITION_MODES).nullable(),
           offsideTrap: z.boolean(),
           tackling: z.enum(TACKLING_LEVELS),

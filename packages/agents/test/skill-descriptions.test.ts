@@ -13,6 +13,7 @@ import {
   REPORT_TRAINING_INPUT,
   REPORT_TRAINING_TOOL,
   MATCH_RATER_SYSTEM,
+  MatchIntentSchema,
   SKILL_CATALOG,
   SKILL_NAMES,
   TRAINING_RATER_SYSTEM,
@@ -20,7 +21,7 @@ import {
   buildGmTools,
   toToolSchema,
 } from "@story-fm/agents";
-import { ATTRIBUTE_AXES, AXIS_KO } from "@story-fm/domain";
+import { ATTRIBUTE_AXES, AXIS_KO, TACTIC_TOGGLES } from "@story-fm/domain";
 import { AXIS_AGING, agingDelta, createGame, interpretBackgroundHeuristic } from "@story-fm/engine";
 
 /** 세계는 한 번만 세운다 — 여기서는 아무도 상태를 고치지 않는다 (`createGame`은 판당 수 초) */
@@ -211,6 +212,36 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
     expect(derived.properties?.axis).toEqual({ type: "string", enum: ["pace", "vision"] });
     expect(derived.properties?.weight).toEqual({ type: "integer", minimum: 1, maximum: 5 });
     expect(derived.required).toEqual(["kept"]);
+  });
+
+  /**
+   * **갈래의 중립은 모델이 낼 수 있는 값이어야 한다** (match.md §1.2 · prompts.md §2).
+   *
+   * 위 규칙 때문에 `.nullable()`은 안쪽 갈래만 모델에게 보인다 — 그래서 중립이 `null`인
+   * 갈래는 열거에서 중립이 통째로 지워지고, 제공자가 열거를 강제하므로 감독의 "그만해"에
+   * **반대쪽 값이 걸린다.** 걸린 갈래를 푸는 길이 이 토큰 하나뿐이라 여기서 고정한다.
+   */
+  it("갈래 넷의 중립 토큰이 모델이 보는 열거 안에 있다", () => {
+    /** 모델이 그 자리에서 고를 수 있는 값 — 열거면 그 목록, 불린이면 참·거짓 둘 */
+    const choices = (node: unknown): string[] => {
+      const n = node as { enum?: unknown[]; type?: unknown };
+      if (Array.isArray(n.enum)) return n.enum.map(String);
+      return n.type === "boolean" ? ["true", "false"] : [];
+    };
+    const setTactics = TOOLS.find((t) => t.name === "set_tactics")!.inputSchema.properties;
+    const intent = toToolSchema(MatchIntentSchema).properties?.tactics as {
+      properties?: Record<string, unknown>;
+    };
+    for (const toggle of TACTIC_TOGGLES) {
+      for (const [where, props] of [
+        ["set_tactics", setTactics],
+        ["match-intent", intent.properties],
+      ] as const) {
+        expect(choices(props?.[toggle.key]), `${where}.${toggle.key}`).toContain(
+          toggle.neutralValue,
+        );
+      }
+    }
   });
 
   /** 중첩된 객체·배열도 같은 규칙을 지난다 — 안쪽에서 제약이 사라지면 아무도 못 본다 */
