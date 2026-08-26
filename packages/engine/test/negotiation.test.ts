@@ -16,8 +16,17 @@ import {
   type CounterpartyAnchor,
   askingPriceFor,
   contractUntil,
+  DEADLINE_DAYS,
+  DEADLINE_RUSH,
+  deadlineRushOf,
   dealOdds,
   describeNegotiations,
+  inDeadlineWeek,
+  leagueOfTeamIn,
+  stageScaleOf,
+  tierOfTeamIn,
+  VETERAN_AGE,
+  windowOpenForTeam,
   expireNegotiations,
   expiringContracts,
   exerciseBuyBack,
@@ -71,6 +80,7 @@ import {
   withdrawOffer,
 } from "@story-fm/engine";
 import {
+  ageOf,
   BUYBACK_MARKUP,
   BUYBACK_MAX_AGE,
   CLAUSE_MAX_AGE,
@@ -2714,5 +2724,126 @@ describe("관심이 오퍼 앞에 선다", () => {
     player.teamId = "chelsea";
     tickInterests(state, []);
     expect(state.interests).toHaveLength(0);
+  });
+});
+
+/**
+ * **무대와 마감** (→ docs/simulation/transfer.md §1-3).
+ *
+ * 재는 것은 셋이다. 무대 차가 매각 확률에 **단조**로 실리는가 — 「레알이면 간다,
+ * 브렌트포드면 안 간다」가 성립하는 자리다. 마감 주의 **경계**가 마감일을 포함한
+ * 마지막 이레인가, 그리고 그 안의 오퍼가 마감일에 기한을 세우는가. 마지막으로
+ * 체급도 카탈로그도 없는 옛 세이브에서 무대 값이 무너지지 않는가.
+ */
+describe("무대와 마감 — 누가 오퍼를 내고 언제 몰리는가", () => {
+  it("같은 값이라도 큰 무대에서 온 오퍼가 성사에 가깝다", () => {
+    const state = createTestGame(42);
+    // 노장 선호(`veteranAppetite`)가 무대 차에 얹히지 않는 나이 — 잴 것은 구단의 크기뿐이다
+    const player = playersOf(state, state.userTeamId).find(
+      (p) => ageOf(p.birthdate, state.date) < VETERAN_AGE,
+    )!;
+    const scale = stageScaleOf(state);
+    /**
+     * 실제 세계에서 가장 큰 곳과 가장 작은 곳 — 팀 id를 적어 두면 시드가 바뀌는 날
+     * 그 줄이 무엇을 재는지 아무도 모른다. **두 곳 다 창이 열려 있어야** `blockers`가
+     * 서지 않고, **마감 주가 아니어야** 사는 쪽 상한이 같아 무대만 남는다.
+     */
+    const buyers = state.teams
+      .map((t) => t.id)
+      .filter(
+        (id) =>
+          id !== state.userTeamId &&
+          isClubTeam(id) &&
+          windowOpenForTeam(state, id) !== null &&
+          !inDeadlineWeek(state, id),
+      )
+      .sort((a, b) => scale.gapTo(a) - scale.gapTo(b));
+    const small = buyers[0]!;
+    const big = buyers[buyers.length - 1]!;
+    expect(scale.gapTo(big)).toBeGreaterThan(scale.gapTo(small));
+
+    const terms = {
+      playerId: player.id,
+      fee: marketValueOf(state, player),
+      weeklyWage: wageExpectationOf(state, player),
+      years: 4,
+      kind: "sell" as const,
+    };
+    const onBig = dealOdds(state, { ...terms, counterpartTeamId: big });
+    const onSmall = dealOdds(state, { ...terms, counterpartTeamId: small });
+    expect(onBig.blockers).toEqual([]);
+    expect(onSmall.blockers).toEqual([]);
+    expect(onBig.probability).toBeGreaterThan(onSmall.probability);
+  });
+
+  it("마감 주는 마감일을 포함한 마지막 이레이고, 그 안의 오퍼는 마감일에 기한이 선다", () => {
+    const state = createTestGame(42);
+    const window = windowOpenForTeam(state, state.userTeamId)!;
+
+    // 정확히 이레 전은 아직 마감 주가 아니다 — 마감일을 **포함해서** 세기 때문이다
+    const before = addDays(window.closesOn, -DEADLINE_DAYS);
+    expect(inDeadlineWeek(state, state.userTeamId, before)).toBe(false);
+    expect(deadlineRushOf(state, state.userTeamId, before)).toBe(1);
+    const inside = addDays(before, 1);
+    expect(inDeadlineWeek(state, state.userTeamId, inside)).toBe(true);
+    expect(deadlineRushOf(state, state.userTeamId, inside)).toBe(DEADLINE_RUSH);
+
+    state.date = inside;
+    // 그날 열려 있는 창을 한 날로 모은다 — 사는 구단이 어디든 같은 마감 주가 된다
+    for (const w of state.windows) {
+      if (w.opensOn <= state.date && state.date <= w.closesOn) w.closesOn = window.closesOn;
+    }
+    // 예산으로 후보가 갈리지 않게 한다 — 여기서 재는 것은 기한이다
+    for (const f of state.finances) f.transferBudget = 1_000_000_000;
+    const player = [...playersOf(state, state.userTeamId)].sort(
+      (a, b) => b.attributes.overall - a.attributes.overall,
+    )[0]!;
+    // 시장가 절반에 내놓으면 리스트 갈래의 하루 확률이 마감 배수와 함께 1에서 눌린다
+    setTransferList(state, {
+      playerId: player.id,
+      listed: true,
+      askingPrice: Math.round(marketValueOf(state, player) / 2),
+    });
+
+    const digest: string[] = [];
+    for (let i = 0; i < DEADLINE_DAYS && incomingOffers(state).length === 0; i++) {
+      generateIncomingOffers(state, digest);
+      state.date = addDays(state.date, 1);
+    }
+    const negotiation = incomingOffers(state)[0];
+    expect(negotiation, "마감 주의 등재 선수에게 이레 안에 오퍼가 온다").toBeDefined();
+    // `min(오늘 + NEGOTIATION_DAYS, 창 마감일)`이라 저절로 마감일에 앉는다 — 그날
+    // `standsToday`가 시간 이동을 멈춰 세운다 (season.md §5)
+    expect(negotiation!.expiresOn).toBe(window.closesOn);
+  });
+
+  it("체급도 카탈로그도 없는 옛 세이브의 구단이 섞여도 무대는 유한하다", () => {
+    const state = createTestGame(42);
+    /**
+     * 장부에는 남았는데 카탈로그가 모르는 클럽 — `tier` 칸도 비어 있다.
+     * `tierOfTeamIn`이 세이브 → 카탈로그 → 3으로 떨어지므로 무대 값이 `null`이
+     * 되는 길은 없다: 후보가 사라지지 않는다.
+     */
+    const ghostId = "ghost-fc";
+    state.teams.push({
+      id: ghostId,
+      name: "고스트 FC",
+      leagueId: leagueOfTeamIn(state, state.userTeamId),
+    });
+    state.finances.push({
+      teamId: ghostId,
+      balance: 0,
+      transferBudget: 1_000_000_000,
+      ledger: [],
+    });
+    expect(tierOfTeamIn(state, ghostId)).toBe(3);
+
+    const scale = stageScaleOf(state);
+    expect(Number.isFinite(scale.stageOf(ghostId))).toBe(true);
+    expect(Number.isFinite(scale.gapTo(ghostId))).toBe(true);
+
+    // 그 세계에서도 오퍼 생성은 후보를 낸다
+    const { negotiation } = waitForIncoming(state);
+    expect(negotiation, "옛 세이브 구단이 섞여도 오퍼가 붙는다").toBeDefined();
   });
 });

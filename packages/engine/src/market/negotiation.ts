@@ -62,7 +62,7 @@ import {
   wageExpectationOf,
   type DealTerms,
 } from "./market";
-import { squadDepthOf } from "../squad/depth";
+import { betterAtPosition, squadDepthOf } from "../squad/depth";
 import { clearDepartedState, isFreeAgent, loanPlayer, releasePlayer } from "./departures";
 import {
   describeMedical,
@@ -86,8 +86,12 @@ import {
 } from "../squad/numbers";
 import { consumeEarmark, signingBudgetOf, userWageRoom } from "../club/board-request";
 import {
+  deadlinePremiumOf,
+  deadlineRushOf,
   marketBiasOf,
   squadShortfallText,
+  stageScaleOf,
+  suitorWeightOf,
   transferWindowLabel,
   windowOpenForTeam,
   windowStartFor,
@@ -95,7 +99,7 @@ import {
 import { evaluatePitch, latitudeOf } from "./persuasion";
 import { bandOpen, clampToBand, counterBoundsOf, outgoingCounterFloor } from "./counter-bounds";
 import { derivedSquadStatus } from "../squad/promises";
-import { makeRng } from "../core/rng";
+import { makeRng, pickWeighted } from "../core/rng";
 import type { MarketSkillResult, SkillResult } from "../skills";
 import { grantManagerXP } from "../skills";
 import { deltaItems, item } from "../skills/brief";
@@ -1461,7 +1465,13 @@ export function generateIncomingOffers(state: GameState, digest: string[]): void
       0.25,
       Math.min(1.4, market / Math.max(1, pick.listing.askingPrice)),
     );
-    if (rng() < LISTED_OFFER_CHANCE * priceAppeal) {
+    /**
+     * **마감 주에는 몰린다** (transfer.md §1-3). 사는 구단은 아직 정해지지 않았으므로
+     * 재는 창은 **우리 것**이다 — 우리 창이 닫힌 날은 배수가 1이라, 사우디 창 하나
+     * 때문에 우리 리스트가 통째로 마감 주가 되는 일이 없다.
+     */
+    const rush = deadlineRushOf(state, state.userTeamId);
+    if (rng() < Math.min(1, LISTED_OFFER_CHANCE * priceAppeal * rush)) {
       openListedOffer(state, pick.player, pick.listing.askingPrice, rng, digest);
       return;
     }
@@ -1489,7 +1499,9 @@ export function generateIncomingOffers(state: GameState, digest: string[]): void
   });
   if (requested.length > 0) {
     const pick = requested[Math.floor(rng() * requested.length)]!;
-    if (rng() < REQUESTED_OFFER_CHANCE) {
+    // 리스트 갈래와 같은 자 — 사는 구단이 없으므로 우리 창으로 마감 주를 잰다
+    const rush = deadlineRushOf(state, state.userTeamId);
+    if (rng() < Math.min(1, REQUESTED_OFFER_CHANCE * rush)) {
       openRequestedOffer(state, pick, rng, digest);
       return;
     }
@@ -1503,7 +1515,6 @@ export function generateIncomingOffers(state: GameState, digest: string[]): void
    * 사고다: 그 앞에 아무 소리도 없었으므로 준비할 자리도, 회견에서 물을 것도,
    * 재계약 테이블에서 쓸 카드도 없다.
    */
-  if (rng() > INCOMING_OFFER_CHANCE) return;
   const bidding = (state.interests ?? [])
     .map((interest) => ({ interest, player: playerById(state, interest.gamePlayerId) }))
     .filter(
@@ -1515,7 +1526,15 @@ export function generateIncomingOffers(state: GameState, digest: string[]): void
     );
   if (bidding.length === 0) return;
 
+  /**
+   * **줄을 먼저 고르고 그 구단의 창으로 마감 주를 잰다** — 여기서는 사는 구단이 이미
+   * 그 줄의 주인이라, 우리 창으로 재면 9월의 사우디 마감이 조용해지고 8월 말의 우리
+   * 마감이 사우디의 오퍼까지 몰아붙인다.
+   */
   const bid = bidding[Math.floor(rng() * bidding.length)]!;
+  if (rng() > Math.min(1, INCOMING_OFFER_CHANCE * deadlineRushOf(state, bid.interest.teamId))) {
+    return;
+  }
   const marketValue = marketValueOf(state, bid.player);
   const opened = openIncomingSellOffer(
     state,
@@ -1552,7 +1571,12 @@ function openIncomingSellOffer(
   if (!window) return false;
 
   const bias = marketBiasOf(state, buyer);
-  const fee = quote(bias.fee);
+  /**
+   * **마감 주의 오퍼는 값이 시장가 위로 온다** (transfer.md §1-3) — 세 갈래가 여기
+   * 한 자리에서 함께 탄다. 갈래마다 곱하면 배수가 세 벌이 되고, `sellOdds`가 같은
+   * 수로 올리는 사는 쪽 상한(`deadlinePremiumOf`)과 어긋난다.
+   */
+  const fee = quote(bias.fee * deadlinePremiumOf(state, buyer));
   const wage = Math.round(wageExpectationOf(state, player) * (1.05 + rng() * 0.2) * bias.wage);
   const negotiation: Negotiation = {
     id: `neg-in-${player.id}-${state.date}`,
@@ -1561,6 +1585,11 @@ function openIncomingSellOffer(
     counterpartTeamId: buyer,
     windowId: window.id,
     openedOn: state.date,
+    /**
+     * 창을 넘겨 살아 있는 협상은 없다. **마감 주에 온 오퍼의 기한은 곧 마감일이다**
+     * — 그날 `standsToday`(core/tick.ts)가 시계를 세우므로 데드라인 데이가 감독의
+     * 하루가 된다 (transfer.md §1-3 · season.md §5).
+     */
     expiresOn: minDate(addDays(state.date, NEGOTIATION_DAYS), window.closesOn),
     status: "open",
     rounds: [
@@ -1635,11 +1664,16 @@ function openRequestedOffer(
   );
 }
 
-/** 오퍼를 넣을 구단 — 그 자리가 우리보다 약하고 예산이 되는 곳 */
+/**
+ * 오퍼를 넣을 구단 — 그 자리가 우리보다 약하고 예산이 되는 곳 가운데 **무대로 뽑는다**
+ * (→ docs/simulation/transfer.md §1-3).
+ *
+ * 균등이 아니다: 우리 주전에게는 우리보다 큰 무대가, 잉여에게는 옆이나 아래가
+ * 붙는다(`suitorWeightOf`). 노장 선호도 그 자 안에 들어 있어 여기서 따로 재지 않는다.
+ */
 function pickBuyer(state: GameState, player: GamePlayer, rng: () => number): string | null {
   const position = naturalPositionOf(player).position;
   const value = marketValueOf(state, player);
-  const age = ageOf(player.birthdate, state.date);
   const options: string[] = [];
   /**
    * 그 자리를 이미 메운 구단 — **선수 배열을 팀마다가 아니라 한 번만 훑는다.**
@@ -1660,13 +1694,17 @@ function pickBuyer(state: GameState, player: GamePlayer, rng: () => number): str
     if (!finance || finance.transferBudget < value) continue;
     // 그 자리에 우리 선수보다 나은 자원이 없는 팀이 노린다
     if (covered.has(team.id)) continue;
-    // 노장 선호 — 사우디·MLS는 30세 이상에게 훨씬 적극적이다. 가중치는
-    // 후보를 여러 번 넣어 표현한다 (결정적 rng 하나로 뽑기 위해)
-    const weight = age >= 30 ? Math.round(marketBiasOf(state, team.id).veteranAppetite * 2) : 2;
-    for (let i = 0; i < weight; i++) options.push(team.id);
+    options.push(team.id);
   }
   if (options.length === 0) return null;
-  return options[Math.floor(rng() * options.length)] ?? null;
+  /**
+   * 무대는 세계 전체를 한 번 훑는 **읽기 전용 파생**이라 후보가 선 뒤에 세운다.
+   * `pickWeighted`는 rng를 한 번만 쓴다 — 후보를 여러 번 밀어 넣던 옛 요령과 같은
+   * 소비량이다.
+   */
+  const scale = stageScaleOf(state);
+  const blockedHere = betterAtPosition(state, state.userTeamId, player);
+  return pickWeighted(rng, options, (id) => suitorWeightOf(state, id, player, scale, blockedHere));
 }
 
 /**

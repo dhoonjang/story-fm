@@ -16,7 +16,13 @@ import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { isMarketOnlyLeague } from "../data/league-catalog";
 import { isTopFlightIn, leagueOfTeamIn } from "../competition/promotion";
 import { AGENT_FEE_RATE, formatMoney, recordFinance } from "../club/finance";
-import { marketBiasOf, marketValueOf, windowOpenForTeam } from "./market";
+import {
+  DEADLINE_RUSH,
+  isDeadlineWeek,
+  marketBiasOf,
+  marketValueOf,
+  windowOpenForTeam,
+} from "./market";
 import { makeRng } from "../core/rng";
 import {
   activeContract,
@@ -55,8 +61,6 @@ import { attachClauses, runBuyBacks, settleSellOn } from "./clauses";
 const ATTEMPTS_PER_DAY = 62;
 /** 그중 임대의 비중 — 조건이 까다로워(어린 자원 · 한 단계 아래 팀) 성사율이 낮다 */
 const LOAN_SHARE = 0.42;
-/** 마감이 든 주에는 시도가 배로 늘고 날짜도 뒤로 쏠린다 (실제 데드라인 데이) */
-const DEADLINE_RUSH = 2.2;
 /**
  * 파는 쪽이 지켜야 할 **1군 인원** — 매치데이 명단(선발 11 + 벤치 9)이 바닥이다.
  * 전체 인원만 보면 2군을 잔뜩 안은 구단이 1군을 17명까지 팔아넘긴다.
@@ -624,7 +628,9 @@ function planWeek(state: GameState, rng: () => number): { deals: AiDeal[]; throu
   const closesOn = planHorizon(state);
   const lastDay = closesOn ? minDate(closesOn, addDays(state.date, WEEK - 1)) : state.date;
   const span = Math.max(0, diffDays(state.date, lastDay));
-  const deadlineWeek = closesOn ? closesOn <= addDays(state.date, WEEK - 1) : false;
+  // 마감이 든 주에는 시도가 배로 늘고 날짜도 뒤로 쏠린다 — 우리에게 오는 오퍼가
+  // 타는 것과 **같은 배수**다 (transfer.md §1-3)
+  const deadlineWeek = closesOn !== null && isDeadlineWeek(state.date, closesOn);
 
   const attempts = Math.round(ATTEMPTS_PER_DAY * WEEK * (deadlineWeek ? DEADLINE_RUSH : 1));
   const deals: AiDeal[] = [];
