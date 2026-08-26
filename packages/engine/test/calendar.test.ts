@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   addDays,
+  breakEndingOn,
+  breakStartingOn,
   buildEuroEntrants,
   buildMatches,
   buildMatchweekDates,
@@ -17,10 +19,12 @@ import {
   diffDays,
   cupBlankWeekend,
   domesticCupCatalog,
+  internationalBreaksOf,
   isReserveMatch,
   isSuperCup,
   restHours,
   seasonDate,
+  seasonYear,
   squadReturnOf,
   stageTarget,
   stageTieTarget,
@@ -428,6 +432,44 @@ describe("시즌 캘린더", () => {
     // 첫 경기가 개막일에 열린다
     const first = buildMatches(1, ids).reduce((min, m) => (m.date < min ? m.date : min), "9999");
     expect(first).toBe(cal.start);
+  });
+});
+
+/**
+ * A매치 휴식기 — 달력이 라운드를 비우는 네 창이자 **소집이 서고 지는 창**이다
+ * (→ docs/data/competition.md §5-1). 소집·복귀 정산이 이 판정 하나에 걸려 있어,
+ * 하루가 밀리면 그 창은 열리지 않거나 닫히지 않는다.
+ */
+describe("A매치 휴식기 창", () => {
+  it("네 창이 서고, 3월 창만 이듬해 연도다", () => {
+    for (let season = 1; season <= 4; season++) {
+      const windows = internationalBreaksOf(season);
+      expect(windows).toHaveLength(4);
+      const year = seasonYear(season);
+      for (const w of windows) {
+        expect(w.from < w.to, `${w.key} ${w.from}~${w.to}`).toBe(true);
+        expect(w.key.startsWith(`${season}:`)).toBe(true);
+      }
+      // 9·10·11월은 시즌 연도, 3월만 이듬해 — 시즌은 7월에 시작한다
+      for (const w of windows.slice(0, 3)) expect(w.from.slice(0, 4)).toBe(String(year));
+      expect(windows[3]!.from.slice(0, 4)).toBe(String(year + 1));
+      expect(windows[3]!.to.slice(0, 4)).toBe(String(year + 1));
+    }
+  });
+
+  it("소집은 첫날에만, 정산은 마지막 날에만 답한다", () => {
+    const season = 2;
+    for (const w of internationalBreaksOf(season)) {
+      expect(breakStartingOn(season, w.from)?.key).toBe(w.key);
+      expect(breakEndingOn(season, w.to)?.key).toBe(w.key);
+      // 하루 앞·하루 뒤·창 한가운데는 아무 문도 열리지 않는다
+      for (const date of [addDays(w.from, -1), addDays(w.from, 1), addDays(w.to, 1)]) {
+        expect(breakStartingOn(season, date), `${w.key} start@${date}`).toBeNull();
+      }
+      for (const date of [addDays(w.to, -1), addDays(w.to, 1), addDays(w.from, 1)]) {
+        expect(breakEndingOn(season, date), `${w.key} end@${date}`).toBeNull();
+      }
+    }
   });
 });
 

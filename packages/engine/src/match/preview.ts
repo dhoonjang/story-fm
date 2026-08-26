@@ -17,8 +17,7 @@ import {
   activeSuspension,
   assignmentsOf,
   firstTeamPlayers,
-  isInjured,
-  isSuspended,
+  isAvailable,
   openInjury,
   tacticsOf,
   teamNameIn,
@@ -142,7 +141,7 @@ function lastPlayedBefore(
  * `simSquadOf`를 부르지 않는 것이 이 함수의 전부다. 그쪽은 로테이션·임대 빚까지
  * 반영해 **내일 실제로 설 열한 명**을 돌려주므로, 경기 전에 보여 주는 순간 감독은
  * 상대 벤치의 결정을 미리 읽는다. 여기서 쓰는 것은 감독이 실제로 관측할 수 있는
- * 것뿐이다 — 이미 벌어진 경기의 선발, 그리고 공개 기록인 부상·정지.
+ * 것뿐이다 — 이미 벌어진 경기의 선발, 그리고 공개 기록인 부상·정지·대표팀 소집.
  */
 function projectXI(
   state: GameState,
@@ -151,7 +150,7 @@ function projectXI(
 ): { xi: GamePlayer[]; carried: Set<string> } {
   const squad = firstTeamPlayers(state, teamId);
   const byId = new Map(squad.map((p) => [p.id, p] as const));
-  const available = (p: GamePlayer) => !isInjured(state, p.id) && !isSuspended(state, p.id);
+  const available = (p: GamePlayer) => isAvailable(state, p.id);
 
   const started =
     basis === null

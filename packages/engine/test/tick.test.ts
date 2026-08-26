@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ageOf,
+  CONDITION_MAX,
   sharpnessBand,
   sharpnessOf,
   SHARPNESS_BAND_FLOOR,
@@ -19,6 +20,8 @@ import type { GameState } from "@story-fm/engine";
 import {
   addDays,
   advanceTime,
+  CALL_UP_FATIGUE_PER_APP,
+  CALL_UP_TRAVEL_FATIGUE,
   contractGrievanceDue,
   diffDays,
   endSeason,
@@ -30,7 +33,10 @@ import {
   assignmentsOf,
   financeOf,
   groupOf,
+  internationalBreaksOf,
+  openCallUp,
   simSquadOf,
+  trainsWithFirstTeam,
   LOAN_REST_LIMIT,
   LOAN_ROTATION_OVR_DROP,
   ROTATION_FATIGUE,
@@ -830,5 +836,86 @@ describe("경기 감각 (player.md §5.4)", () => {
     endSeason(state);
     expect(state.players.length).toBeGreaterThan(0);
     for (const p of state.players) expect(p.state.sharpness).toBe(SHARPNESS_PRESEASON);
+  });
+});
+
+/**
+ * **A매치 휴식기는 빈 주말이 아니라 사건이다** (→ docs/data/competition.md §5-1).
+ *
+ * tick이 창의 첫날에 세계의 소집을 열고 마지막 날에 정산한다. 창까지 두 달을
+ * 굴리지 않고 **전야로 옮겨** 하루씩 민다 — 지나온 경기들은 결과 없이 남지만
+ * 소집이 읽는 것은 오늘의 명단과 시즌 출전뿐이다.
+ */
+describe("A매치 휴식기 — 소집과 복귀", () => {
+  /** 9월 창의 전야에 선 세이브 */
+  function atBreakEve(): { state: GameState; window: { from: string; to: string } } {
+    const state = createTestGame();
+    const window = internationalBreaksOf(state.season)[0]!;
+    state.date = addDays(window.from, -1);
+    return { state, window };
+  }
+
+  /** 그 날짜까지 하루씩 — 창 안에 경기가 걸리면 치르고 지나간다 (3월 창엔 컵 결승이 선다) */
+  function tickTo(state: GameState, target: string): void {
+    let guard = 20;
+    while (state.date < target && guard-- > 0) {
+      const advanced = advanceTime(state, { days: 1 });
+      if (!advanced.ok) throw new Error(advanced.digest.join(" / "));
+      if (advanced.stopped === "matchday") playMockMatch(state);
+    }
+    expect(state.date).toBe(target);
+  }
+
+  /** 그 창이 남긴 사실 전부 — 누가 몇 경기 뛰고 어떤 몸으로 돌아왔나 */
+  function snapshot(state: GameState): string {
+    const condition = new Map(userPlayers(state).map((p) => [p.id, p.state.condition]));
+    return (state.callUps ?? [])
+      .map((c) =>
+        [c.gamePlayerId, c.apps, c.goals, c.returnState, condition.get(c.gamePlayerId)].join(":"),
+      )
+      .sort()
+      .join("|");
+  }
+
+  it("같은 세이브는 같은 명단·같은 몸을 돌려주고, 열린 소집을 남기지 않는다", () => {
+    const runs = [0, 1].map(() => {
+      const { state, window } = atBreakEve();
+      tickTo(state, window.to);
+      return state;
+    });
+    const first = snapshot(runs[0]!);
+    expect(first).not.toBe("");
+    expect(snapshot(runs[1]!)).toBe(first);
+    // 소집과 복귀는 짝이다 — 창이 닫히면 클럽 밖에 남는 선수가 없다
+    for (const state of runs) {
+      expect((state.callUps ?? []).filter((c) => c.returnedOn === null)).toHaveLength(0);
+    }
+  });
+
+  it("소집된 선수는 우리 훈련장에 서지 않는다", () => {
+    const { state, window } = atBreakEve();
+    tickTo(state, window.from);
+    const called = userPlayers(state).filter((p) => openCallUp(state, p.id) !== null);
+    expect(called.length).toBeGreaterThan(0);
+    for (const player of called) expect(trainsWithFirstTeam(state, player)).toBe(false);
+    // 창이 팀을 통째로 비우지는 않는다 — 남은 선수의 훈련장은 그대로다
+    expect(userPlayers(state).some((p) => trainsWithFirstTeam(state, p))).toBe(true);
+  });
+
+  it("이동과 출전만큼 깎여 돌아온다", () => {
+    const { state, window } = atBreakEve();
+    tickTo(state, addDays(window.to, -1));
+    // 불만 있는 선수는 하루에 −1을 따로 문다 — 정산의 몫만 남기려면 그를 피한다
+    const troubled = new Set(state.issues.map((i) => i.gamePlayerId));
+    const twoCaps = userPlayers(state).find(
+      (p) => !troubled.has(p.id) && openCallUp(state, p.id)?.apps === 2,
+    );
+    expect(twoCaps).toBeDefined();
+    // 마지막 날의 회복은 상한에 막힌다 — 그 위에 얹히는 것이 정산뿐이 되도록
+    twoCaps!.state.condition = CONDITION_MAX;
+    tickTo(state, window.to);
+    expect(twoCaps!.state.condition).toBe(
+      CONDITION_MAX - CALL_UP_TRAVEL_FATIGUE - 2 * CALL_UP_FATIGUE_PER_APP,
+    );
   });
 });

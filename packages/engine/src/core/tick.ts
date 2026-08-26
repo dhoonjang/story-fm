@@ -32,6 +32,13 @@ import {
   nextMatchFor,
   windowOpenOn,
 } from "../competition/calendar";
+import {
+  breakEndingOn,
+  breakStartingOn,
+  isAwayFromClub,
+  openCallUps,
+  settleCallUps,
+} from "../competition/international";
 import { competitionLabel } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
 import { advanceDomesticCups } from "../competition/domestic-cup";
@@ -122,6 +129,7 @@ import {
   benchRunOf,
   ensureSeasonStat,
   firstTeamPlayers,
+  isAvailable,
   isInjured,
   isLoanedIn,
   isSuspended,
@@ -358,11 +366,20 @@ function dailyTick(
 
   for (const player of players) {
     /**
+     * **클럽을 떠나 있는 선수의 하루는 우리 훈련장의 하루가 아니다**
+     * (competition.md §5-1) — A매치 소집도 여름 대회의 늦은 합류도 같다.
+     *
+     * 우리가 깐 세션을 그가 소화하지 않으므로 오늘은 쉬는 날이다. 회복과 감각이
+     * **한 값에서** 갈리는 이유는 아래 감각 축과 같다 — 두 축이 하루를 따로
+     * 분류하면 설명할 수 없는 조합이 생긴다.
+     */
+    const dayKind: RecoveryKind = isAwayFromClub(state, player) ? "idle" : recoveryKind;
+    /**
      * 하루가 지나며 되찾는다 — **지구력이 회복 속도도 정한다**(stamina.ts).
      * 그래서 같은 −70을 안고도 사흘 뒤에 누구는 80이고 누구는 60이다.
      */
     player.state.condition = clampCondition(
-      player.state.condition + dailyRecovery(player, recoveryKind),
+      player.state.condition + dailyRecovery(player, dayKind),
     );
     /**
      * 폼은 **매일** 평균으로 조금 끌린다 (form.ts).
@@ -374,7 +391,7 @@ function dailyTick(
     player.state.form = decayedForm(player.state.form);
     /**
      * **경기 감각은 그날이 무엇이었나로 끌린다** (player.md §5.4) — 본훈련이면 55,
-     * 훈련이 없으면 25, 재활 중이면 10 쪽이다. 회복 눈금(`recoveryKind`)과 **같은
+     * 훈련이 없으면 25, 재활 중이면 10 쪽이다. 회복 눈금(`dayKind`)과 **같은
      * 하루**를 읽으므로 두 축이 서로 다른 날을 살지 않는다.
      *
      * ⚠️ 부상자를 갈라 보는 것은 이 축뿐이다. 체력은 위에서 부상 중에도 회복하지만
@@ -384,7 +401,7 @@ function dailyTick(
     player.state.sharpness = clampSharpness(
       sharpnessAfterDay(
         sharpnessOf(player.state),
-        sharpnessDayOf(recoveryKind, injuredPlayers.has(player.id)),
+        sharpnessDayOf(dayKind, injuredPlayers.has(player.id)),
       ),
     );
     if (issuePlayers.has(player.id)) {
@@ -393,6 +410,22 @@ function dailyTick(
   }
 
   tickOtherClubs(state);
+
+  /**
+   * **A매치 휴식기 — 첫날 소집, 마지막 날 복귀** (competition.md §5-1).
+   *
+   * 무직이어도 돈다 — 대표팀은 세계의 일이고, 감독이 없다고 명단이 서지 않는 것은
+   * 아니다 (`declareRetirements`와 같은 결).
+   *
+   * ⚠️ 정산은 **그날의 회복이 이미 얹힌 뒤**에 선다(위 루프). 소집된 선수는 열흘
+   * 내내 쉬는 날의 눈금으로 회복했고, 이동과 출전의 대가는 그 위에 한 번에 얹는다 —
+   * 순서가 뒤집히면 정산이 깎은 만큼을 그날의 회복이 도로 채운다.
+   */
+  const callUpStart = breakStartingOn(state.season, state.date);
+  if (callUpStart) openCallUps(state, callUpStart, digest);
+  const callUpEnd = breakEndingOn(state.season, state.date);
+  if (callUpEnd) settleCallUps(state, callUpEnd, digest);
+
   /**
    * 스카우팅 도착은 **그날의 폼·체력이 다 움직인 뒤에** 알린다.
    *
@@ -1066,10 +1099,11 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
   const squad = firstTeamPlayers(state, teamId);
   const byId = new Map(squad.map((p) => [p.id, p]));
   /**
-   * **정지 선수는 못 나온다** — 부상과 같다. 간이 시뮬도 리그 전체에 카드를
-   * 만들므로, 부상만 거르면 AI 팀이 정지 선수를 그대로 내보내 규칙이 갈라진다.
+   * **못 나오는 선수는 한 문으로 거른다** (`isAvailable` — season.md §8 불변식).
+   * 간이 시뮬도 리그 전체에 카드를 만들고 A매치 휴식기에 컵 결승이 걸리므로,
+   * 부상만 거르면 AI 팀이 정지 선수나 소집된 선수를 그대로 내보낸다.
    */
-  const available = (p: GamePlayer) => !isInjured(state, p.id) && !isSuspended(state, p.id);
+  const available = (p: GamePlayer) => isAvailable(state, p.id);
   const startingAssignments = assignmentsOf(state, teamId, "starting");
   const starters = startingAssignments
     .map((a) => byId.get(a.playerId))
@@ -1465,7 +1499,7 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
  * 가용 1군으로 채운다. 상대가 2부 클럽이면 2군이 없다(전원 1군 — team.md §5).
  */
 function reserveXI(state: GameState, teamId: string): GamePlayer[] {
-  const available = (p: GamePlayer) => !isInjured(state, p.id) && !isSuspended(state, p.id);
+  const available = (p: GamePlayer) => isAvailable(state, p.id);
   const xi = reservePlayers(state, teamId)
     .filter(available)
     .sort((a, b) => b.attributes.overall - a.attributes.overall)
