@@ -1,9 +1,11 @@
-import type { ManagerSpend, ManagerSpendKind } from "@story-fm/domain";
+import type { ManagerSpend, ManagerSpendKind, PressFact } from "@story-fm/domain";
 import { formatMoney, MANAGER_SPEND_KIND_KO, MANAGER_TERMS_BY_TIER } from "@story-fm/domain";
 import type { GameState } from "../core/state";
-import { financeOf, managedTeamId, pushNarrative } from "../core/state";
+import { clampReputation, financeOf, managedTeamId, pushNarrative } from "../core/state";
 import { tierOfTeamIn } from "../core/club-tier";
+import { diffDays } from "../core/dates";
 import { pickOurPlayer } from "../core/player-ref";
+import { ownerOf } from "../world/persona";
 import { clampForm, moraleToForm } from "../squad/form";
 import { item } from "../skills/brief";
 import type { SkillResult } from "../skills";
@@ -43,7 +45,48 @@ export const MANAGER_WALLET = {
   BONUS_MORALE_MAX: 10,
   /** 한 시즌에 사재 보너스를 받을 수 있는 인원 */
   BONUS_PLAYERS_PER_SEASON: 3,
+  /**
+   * **사재가 세계에 보이는 계단** — 시즌 누적 사재 / 그 등급의 예산 약속
+   * (career.md §5.4 「사재가 세계에 닿는 자리」). 문턱 아래는 세계에 없다:
+   * £10,000을 넣은 것은 기사도 평판도 아니다.
+   *
+   * 분모가 **약속**이지 남은 잔액이 아닌 이유 — 잔액은 감독이 쓸 때마다 줄고 사재를
+   * 넣을 때마다 늘어, 같은 £1M이 8월과 1월에 다른 비율로 읽힌다.
+   */
+  FUND_GRADE_STEPS: { notable: 0.1, major: 0.25, decisive: 0.4 },
+  /** 등급이 오른 날부터 그 사실이 회견에 실리는 창 (일) */
+  FUND_PRESS_DAYS: 7,
+  /** 문턱을 넘는 첫 출연이 보드 평판을 움직이는 폭 — 시즌 1회, 부호는 원형이 정한다 */
+  FUND_BOARD_SWING: 4,
+  /** 사재 보너스가 시즌 내내 선수단 평판에 얹을 수 있는 최대 */
+  FUND_SQUAD_LIFT: 3,
 } as const;
+
+/** 사재 누계의 등급 — 낮은 계단부터 오른다 */
+export type FundGrade = keyof typeof MANAGER_WALLET.FUND_GRADE_STEPS;
+
+/** 계단을 큰 쪽부터 — 등급 판정이 위에서 내려온다 */
+const FUND_GRADES = ["decisive", "major", "notable"] as const satisfies readonly FundGrade[];
+
+/**
+ * **구단주 원형이 감독의 사재를 어떻게 보는가** (people.md §2 · career.md §5.4).
+ *
+ * 자산을 보는 사람과 구조를 보는 사람에게 감독의 돈은 장부에 공짜로 들어온 자본이고,
+ * 지속성과 연고를 보는 사람에게는 구단이 한 사람에게 지는 빚이다. 나머지 셋은 그
+ * 돈을 읽을 자가 없다 — 넉넉한 구단은 감독의 돈이 필요 없고, 경기 내용의 사람과
+ * 화제성의 사람은 장부를 보지 않는다.
+ *
+ * **여섯 원형 밖의 카드는 아무 부호도 없다** — 옛 세이브의 커스텀 구단주에게 없는
+ * 성격을 지어내지 않는다 (`DEMAND_OF_ARCHETYPE`와 같은 규약이다).
+ */
+export const FUND_BOARD_SIGN_BY_OWNER: Record<string, number> = {
+  산업가형: 1,
+  투자자형: 1,
+  축구광형: 0,
+  국부펀드형: 0,
+  "지역 유지형": -1,
+  흥행가형: 0,
+};
 
 /** 지갑 잔고 — 옛 세이브엔 필드가 없다 (career.md §5.4) */
 export function walletOf(state: GameState): number {
@@ -70,10 +113,10 @@ export function seasonSpentOn(state: GameState, kind: ManagerSpendKind): number 
     .reduce((sum, s) => sum + s.amount, 0);
 }
 
-/** 이 시즌에 사재 보너스를 받은 선수들 */
-export function bonusPaidThisSeason(state: GameState): string[] {
+/** 그 시즌에 사재 보너스를 받은 선수들 — 기본은 이번 시즌이다 */
+export function bonusPaidThisSeason(state: GameState, season: number = state.season): string[] {
   return (state.manager.spending ?? [])
-    .filter((s) => s.kind === "player-bonus" && s.season === state.season && s.ref !== undefined)
+    .filter((s) => s.kind === "player-bonus" && s.season === season && s.ref !== undefined)
     .map((s) => s.ref as string);
 }
 
@@ -123,6 +166,147 @@ export function spendFromWallet(
   return { ok: true, spent: amount };
 }
 
+// ── 사재가 세계에 닿는 자리 (career.md §5.4) ──────────────────
+
+/**
+ * **감독이 이 시즌 구단에 건 돈** — 이적 예산 출연과 선수 보너스의 합.
+ *
+ * ⚠️ **사임 위약금은 세지 않는다.** 같은 지갑에서 나가도 그것은 구단을 떠나려고 무는
+ * 돈이지 구단에 거는 돈이 아니다 — 세계가 읽는 사실이 반대다.
+ */
+export function fundedInSeason(state: GameState, season: number = state.season): number {
+  return (state.manager.spending ?? [])
+    .filter((s) => s.season === season && (s.kind === "transfer-fund" || s.kind === "player-bonus"))
+    .reduce((sum, s) => sum + s.amount, 0);
+}
+
+/** 이 구단이 그 등급에서 한 시즌 약속하는 이적 예산 — 비율의 분모다 */
+function pledgeOf(state: GameState, tier?: 1 | 2 | 3 | 4): number | null {
+  const teamId = managedTeamId(state);
+  if (teamId === null) return null;
+  return MANAGER_TERMS_BY_TIER[tier ?? tierOfTeamIn(state, teamId)].budgetPledge;
+}
+
+/** 비율이 앉는 계단 — 문턱 아래는 `null`이고, 그것이 「세계에 없다」는 뜻이다 */
+export function fundGradeOf(ratio: number): FundGrade | null {
+  return FUND_GRADES.find((grade) => ratio >= MANAGER_WALLET.FUND_GRADE_STEPS[grade]) ?? null;
+}
+
+/**
+ * **지금 등급으로 올라선 그 지출의 날** — 대기열을 두지 않는 이유다.
+ *
+ * 이번 시즌 항목은 이력에서 절단되지 않으므로(`spendFromWallet`) 누계를 순서대로
+ * 되짚으면 그 날이 그대로 나온다. 감독이 또 부어 등급이 오르면 이 날도 뒤로 옮겨
+ * 가, 회견의 창이 새 사실로 다시 열린다.
+ */
+function fundGradeReachedOn(state: GameState, pledge: number, grade: FundGrade): string | null {
+  const need = pledge * MANAGER_WALLET.FUND_GRADE_STEPS[grade];
+  let sum = 0;
+  for (const spend of state.manager.spending ?? []) {
+    if (spend.season !== state.season) continue;
+    if (spend.kind !== "transfer-fund" && spend.kind !== "player-bonus") continue;
+    sum += spend.amount;
+    if (sum >= need) return spend.on;
+  }
+  return null;
+}
+
+/**
+ * **사재 사실 카드 한 장** — 회견·구단주 자리·시즌 리뷰가 같은 함수를 부른다
+ * (career.md §5.4). 문턱 아래면 `null`이다.
+ *
+ * `tier`는 **지난 시즌을 읽는 자리**를 위한 것이다 — 승강이 체급을 옮긴 해에는 지금
+ * 등급의 약속으로 재면 같은 £1M이 다른 비율로 읽힌다. 시즌 리뷰가 그 시즌의 기대
+ * 갈래에서 체급을 되짚어 넘긴다.
+ */
+export function fundingFactOf(
+  state: GameState,
+  window: { season?: number; tier?: 1 | 2 | 3 | 4 } = {},
+): PressFact | null {
+  const pledge = pledgeOf(state, window.tier);
+  if (pledge === null) return null;
+  const season = window.season ?? state.season;
+  const amount = fundedInSeason(state, season);
+  const grade = fundGradeOf(amount / pledge);
+  if (!grade) return null;
+  return {
+    kind: "manager-fund",
+    data: {
+      values: {
+        amount,
+        percent: Math.round((amount / pledge) * 100),
+        players: new Set(bonusPaidThisSeason(state, season)).size,
+      },
+      tags: [grade],
+    },
+    about: null,
+    sharp: true,
+  };
+}
+
+/**
+ * 회견이 싣는 사재 사실 — **등급이 오른 날부터 `FUND_PRESS_DAYS` 안**일 때만.
+ *
+ * 구단주에게 창이 없는 것과 갈리는 자리다 (people.md §4 · §8): 기자는 뉴스를 묻고
+ * 구단주는 장부를 읽는다.
+ */
+export function fundingPressFactOf(state: GameState): PressFact | null {
+  const fact = fundingFactOf(state);
+  const pledge = pledgeOf(state);
+  if (!fact || pledge === null) return null;
+  const grade = fact.data?.tags?.[0] as FundGrade | undefined;
+  if (!grade) return null;
+  const on = fundGradeReachedOn(state, pledge, grade);
+  if (on === null) return null;
+  const since = diffDays(on, state.date);
+  return since >= 0 && since <= MANAGER_WALLET.FUND_PRESS_DAYS ? fact : null;
+}
+
+/**
+ * **문턱을 넘는 첫 출연 하나가 보드를 움직인다** — 시즌 1회 (career.md §5.4).
+ *
+ * 「시즌 1회」에 새 상태가 들지 않는 이유: 지출 **직전**의 누계가 문턱 아래였는가가
+ * 곧 그 조건이다. 등급이 더 올라도 보드는 다시 움직이지 않는다 — 같은 사실을 세 번
+ * 사는 자리가 아니다.
+ */
+function creditFundingToBoard(state: GameState, before: number): number {
+  const pledge = pledgeOf(state);
+  if (pledge === null) return 0;
+  if (fundGradeOf(before / pledge) !== null) return 0;
+  if (fundGradeOf(fundedInSeason(state) / pledge) === null) return 0;
+  const sign = FUND_BOARD_SIGN_BY_OWNER[ownerOf(state).archetype] ?? 0;
+  if (sign === 0) return 0;
+  const delta = sign * MANAGER_WALLET.FUND_BOARD_SWING;
+  const board = state.manager.reputation.board;
+  state.manager.reputation.board = clampReputation(board + delta);
+  return state.manager.reputation.board - board;
+}
+
+/**
+ * **라커룸은 문턱을 보지 않는다** — 아는 것은 이적 예산에 들어간 돈이 아니라 자기
+ * 주머니에 꽂힌 돈이라, 보너스 한 건마다 오른다 (career.md §5.4).
+ *
+ * 폭은 시즌 전체의 것이고 보너스는 시즌 `BONUS_PLAYERS_PER_SEASON`명까지이므로, 한
+ * 건이 얹는 값은 **누적의 차**다 — 두 수 중 하나를 튜닝해도 상한이 그대로 선다.
+ */
+function creditBonusToSquad(state: GameState, paidPlayers: number): number {
+  const upTo = (n: number) =>
+    Math.round(
+      (MANAGER_WALLET.FUND_SQUAD_LIFT * Math.min(n, MANAGER_WALLET.BONUS_PLAYERS_PER_SEASON)) /
+        MANAGER_WALLET.BONUS_PLAYERS_PER_SEASON,
+    );
+  const delta = upTo(paidPlayers) - upTo(paidPlayers - 1);
+  if (delta === 0) return 0;
+  const squad = state.manager.reputation.squad;
+  state.manager.reputation.squad = clampReputation(squad + delta);
+  return state.manager.reputation.squad - squad;
+}
+
+/** 평판 한 줄 — 움직인 축만 브리핑에 선다 */
+function reputationItem(label: string, delta: number) {
+  return item({ label, text: `${delta > 0 ? "+" : ""}${delta}`, delta });
+}
+
 // ── 갈래 ① 이적 예산 사재 출연 ────────────────────────────────
 
 /**
@@ -161,14 +345,23 @@ export function fundTransferBudget(state: GameState, input: { amount: number }):
       message: `사재 출연의 최소 단위는 ${formatMoney(MANAGER_WALLET.MIN_SPEND)}입니다`,
     };
   }
+  const funded = fundedInSeason(state);
   const spend = spendFromWallet(state, { kind: "transfer-fund", amount, ref: teamId });
   if (!spend.ok) return spend;
 
   const finance = financeOf(state, teamId);
   finance.transferBudget += spend.spent;
+  const board = creditFundingToBoard(state, funded);
 
   const line = `사재 출연 — 이적 예산 +${formatMoney(spend.spent)}`;
   pushNarrative(state, line, 4);
+  if (board !== 0) {
+    pushNarrative(
+      state,
+      `구단주가 감독의 사재를 읽었다 — 보드 평판 ${board > 0 ? "+" : ""}${board}`,
+      4,
+    );
+  }
   return {
     ok: true,
     tone: "good",
@@ -180,6 +373,7 @@ export function fundTransferBudget(state: GameState, input: { amount: number }):
       items: [
         item({ label: "이적 예산", text: `+${formatMoney(spend.spent)}`, delta: spend.spent }),
         item({ label: "지갑", text: formatMoney(walletOf(state)) }),
+        ...(board === 0 ? [] : [reputationItem("보드 평판", board)]),
       ],
     },
   };
@@ -259,14 +453,24 @@ export function payPlayerBonus(
     };
   }
 
+  const funded = fundedInSeason(state);
   const spend = spendFromWallet(state, { kind: "player-bonus", amount, ref: player.id });
   if (!spend.ok) return spend;
 
   const morale = bonusMoraleOf(weeks);
   player.state.form = clampForm(player.state.form + moraleToForm(morale));
+  const board = creditFundingToBoard(state, funded);
+  const squad = creditBonusToSquad(state, new Set(bonusPaidThisSeason(state)).size);
 
   const line = `사재 보너스 — ${player.name} ${formatMoney(spend.spent)} · 사기 +${morale}`;
   pushNarrative(state, line, 3);
+  if (board !== 0) {
+    pushNarrative(
+      state,
+      `구단주가 감독의 사재를 읽었다 — 보드 평판 ${board > 0 ? "+" : ""}${board}`,
+      4,
+    );
+  }
   return {
     ok: true,
     tone: "good",
@@ -277,6 +481,8 @@ export function payPlayerBonus(
         item({ label: player.name, text: formatMoney(spend.spent) }),
         item({ label: "사기", text: `+${morale}`, delta: morale }),
         item({ label: "지갑", text: formatMoney(walletOf(state)) }),
+        ...(squad === 0 ? [] : [reputationItem("선수단 평판", squad)]),
+        ...(board === 0 ? [] : [reputationItem("보드 평판", board)]),
       ],
     },
   };

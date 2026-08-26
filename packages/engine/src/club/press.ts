@@ -35,6 +35,7 @@ import {
 import { pickPlayerAmong } from "../core/player-ref";
 import { addDays, diffDays } from "../core/dates";
 import { formatMoney } from "./finance";
+import { fundingPressFactOf } from "./manager-wallet";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
 import { careerTotalsOf, matchMilestones } from "../squad/career";
@@ -787,6 +788,18 @@ function keyPlayerFact(state: GameState): PressFact | null {
  * ⚠️ 유출과 달리 **소비되지 않는다.** 원인이 계약 그 자체라 만료일까지 사라지지
  * 않고, 보드의 판정이 갈리면 다음 회견이 새 코드로 다시 묻는다.
  */
+/**
+ * **감독이 사재를 구단에 넣었다** — 등급이 오른 날부터 이레 안의 회견이 싣는다
+ * (career.md §5.4 · people.md §4). 대기열이 없는 것은 그 날이 지출 이력에서 그대로
+ * 나오기 때문이고, 감독이 또 부어 등급이 오르면 창이 새 사실로 다시 열린다.
+ */
+function loadManagerFund(state: GameState, conference: PressConference): void {
+  const fact = fundingPressFactOf(state);
+  if (!fact) return;
+  conference.facts.push(fact);
+  conference.weight = Math.max(conference.weight, 2);
+}
+
 function loadManagerContract(state: GameState, conference: PressConference): void {
   // 부임 회견은 새로 선 계약을 이미 들고 있다 — 같은 사실을 두 줄로 묻지 않는다
   if (conference.trigger === "appointment") return;
@@ -1359,6 +1372,7 @@ export function openPress(state: GameState, conference: PressConference, digest?
   loadRumours(state, conference);
   loadSackings(state, conference);
   loadManagerContract(state, conference);
+  loadManagerFund(state, conference);
   state.pressConferences.push(conference);
   // 지나간 회견은 서사에 남지 상태로 쌓일 이유가 없다
   if (state.pressConferences.length > KEPT_CONFERENCES) {
