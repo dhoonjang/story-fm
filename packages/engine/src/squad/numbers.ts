@@ -267,22 +267,29 @@ export function assignRequestedNumber(
     return { ok: true, assignment: { number, from, displaced: null, after: null } };
   }
 
+  /**
+   * ⚠️ **요구한 선수가 먼저 잡는다.** `assignSquadNumber`는 명부에서 「지금 쓰인
+   * 번호」를 그 자리에서 다시 모으므로, 뺏긴 선수를 먼저 배정하면 방금 비운 번호가
+   * 후보로 되살아난다 — 상징 번호는 대개 그 자리의 첫 지망이라 AM에게서 AM에게
+   * 10번을 옮기면 뺏긴 쪽이 10번을 다시 집고 한 팀에 같은 번호가 둘 남는다.
+   * (계보는 위에서 이미 읽었으므로 순서가 값을 바꾸지 않는다.)
+   */
+  player.squadNumber = number;
+  if (from !== null) player.state.formerSquadNumber = from;
+  player.state.squadNumberOn = state.date;
+
   let displaced: NumberAssignment["displaced"] = null;
   if (holder) {
     const other = state.players.find((p) => p.id === holder.playerId);
     if (other) {
       other.squadNumber = undefined;
-      // 뺏긴 선수의 새 번호는 자리 관례가 고른다 — 아래 배정이 이 번호를 다시 잡지 않게 먼저 비운다
+      // 뺏긴 선수의 새 번호는 자리 관례가 고른다 — 위에서 이 번호는 이미 임자가 있다
       const gained = assignSquadNumber(state.players, other);
       other.state.formerSquadNumber = number;
       other.state.squadNumberOn = state.date;
       displaced = { player: other, lost: number, seasons: holder.seasons, gained };
     }
   }
-
-  player.squadNumber = number;
-  if (from !== null) player.state.formerSquadNumber = from;
-  player.state.squadNumberOn = state.date;
 
   return { ok: true, assignment: { number, from, displaced, after: lineage.past[0] ?? null } };
 }
