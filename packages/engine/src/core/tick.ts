@@ -81,6 +81,7 @@ import {
   expireNegotiations,
   generateIncomingOffers,
   listingOf,
+  runAiPrecontracts,
   runAiRenewals,
   pendingOffer,
   pendingVerdicts,
@@ -120,6 +121,7 @@ import {
   managedTeamId,
   MATCHDAY_BENCH,
   openInjuryIds,
+  pendingContractOf,
   playerById,
   proficiencyAt,
   pushNarrative,
@@ -263,6 +265,8 @@ export function listedGrievanceDue(state: GameState, player: GamePlayer): boolea
 export function contractGrievanceDue(state: GameState, player: GamePlayer): boolean {
   const contract = activeContract(state, player.id);
   if (!contract) return false;
+  // 이미 갈 곳을 정한 사람에게는 요구할 것이 없다 (people.md §8 · transfer.md §1-4)
+  if (pendingContractOf(state, player.id)) return false;
   const days = diffDays(state.date, contract.until);
   // 이미 만료된 계약에는 불만이 설 자리가 없다 — 남은 것은 떠나는 일뿐이다
   if (days < 0) return false;
@@ -673,6 +677,11 @@ function dailyTick(
   if (managed) runMedicals(state, digest);
   // 다른 구단의 재계약 — 노리던 선수를 놓칠 수 있다
   runAiRenewals(state, digest);
+  /**
+   * 그 거울상 — 다른 구단이 **우리** 만료 선수를 예약한다 (transfer.md §1-4).
+   * 지킬 스쿼드가 없는 무직에게는 뺏길 선수도 없다.
+   */
+  if (managed) runAiPrecontracts(state, digest);
   // 무소속 시장 — 우리가 안 데려가면 남이 데려간다
   if (windowOpenOn(state.windows, state.date)) signFreeAgents(state, digest);
   // 남의 팀끼리의 이적·임대 — 세계는 감독 없이도 돈다 (ai-market.ts)

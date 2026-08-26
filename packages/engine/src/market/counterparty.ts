@@ -27,7 +27,13 @@ import {
   type CounterBounds,
 } from "./counter-bounds";
 import { squadStatusOf } from "../squad/promises";
-import { KIND_KO, counterpartOf, pendingOffer, respondOffer, splitLabel } from "./negotiation";
+import {
+  counterpartOf,
+  negotiationKindKo,
+  pendingOffer,
+  respondOffer,
+  splitLabel,
+} from "./negotiation";
 import { agentForPlayer } from "../world/persona";
 import { playerArchetypeOf } from "../world/player-persona";
 import { numberLineageOf } from "../squad/numbers";
@@ -430,7 +436,7 @@ export function buildCounterpartyBrief(
   const years = contractYearsLeft(state, player.id);
   return {
     negotiationId: negotiation.id,
-    kindKo: KIND_KO[negotiation.kind],
+    kindKo: negotiationKindKo(negotiation),
     counterpart: counterpartOf(negotiation, player),
     ourClub: teamName(state.userTeamId),
     playerFacts: [

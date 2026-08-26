@@ -33,6 +33,7 @@ import {
   squadFloorShortfall,
   squadLevelOf,
   teamShortNameIn,
+  voidPendingContract,
   weeklyWagesOf,
   type GameState,
 } from "../core/state";
@@ -280,6 +281,17 @@ function moveClub(
     until: contractUntil(state.date, years),
     status: "active",
   });
+  /**
+   * **새 계약이 다음 시즌을 덮으므로 예약은 설 자리가 없다** (transfer.md §1-4).
+   * 우리 예약이 걷히는 자리라 그날 일지에 오른다 — 반년을 기다린 영입이 남의
+   * 이적 한 건으로 사라지는 것을 감독이 모르면 여름에야 알게 된다.
+   */
+  const voided = voidPendingContract(state, player.id);
+  if (voided?.teamId === state.userTeamId) {
+    const line = `${player.name} 사전 계약 무산 — ${teamShortNameIn(state, toTeamId)}로 이적했습니다`;
+    input.digest?.push(`🚪 ${line}`);
+    pushNarrative(state, line, 4);
+  }
 
   if (input.fee > 0) {
     const ref = { type: "player" as const, id: player.id };
