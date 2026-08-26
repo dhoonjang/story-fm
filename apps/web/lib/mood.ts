@@ -1,4 +1,9 @@
-import { milestonePhrase, PLAYER_ARCHETYPE_LABEL, SQUAD_STATUS_KO } from "@story-fm/domain";
+import {
+  INJURY_RISK_CAUSE_KO,
+  milestonePhrase,
+  PLAYER_ARCHETYPE_LABEL,
+  SQUAD_STATUS_KO,
+} from "@story-fm/domain";
 import type { MilestoneCode } from "@story-fm/domain";
 import type { MoodFact, MoodRead } from "@story-fm/engine";
 
@@ -194,6 +199,17 @@ function sentenceOf(fact: MoodFact): string {
       return fact.band === "blunt"
         ? "오래 못 뛰어 경기 감각이 굳었다"
         : "경기 감각이 아직 덜 올라왔다";
+    case "risk": {
+      /**
+       * 몸의 두 축과 또 다른 사실이다 — 오늘 다리가 무거운 것도, 감각이 굳은 것도
+       * 아니고 **누가 다칠지 고르는 저울에서 위에 서 있다**는 뜻이다.
+       * 원인은 코어가 큰 순으로 골라 준 것이라 여기서 다시 세우지 않는다.
+       */
+      const why = fact.causes.map((c) => INJURY_RISK_CAUSE_KO[c]).join(" · ");
+      return fact.grade === "high"
+        ? `지금 세우면 다칠 몸이다 — ${why}`
+        : `몸이 아슬아슬하다 — ${why}`;
+    }
     case "departure":
       // 라커룸 전체가 같은 사실을 든다 — 누가 그와 가까웠는지는 아직 아무도 모른다
       return `${dayWord(fact.days)} ${fact.name} 계약 해지 소식에 라커룸이 뒤숭숭하다`;

@@ -1667,3 +1667,26 @@
 .squad-table .sharpness.blunt {
   color: var(--danger);
 }
+
+/**
+ * 부상 위험 — **다치기 전에 서는 한 낱말** (player.md §5.3).
+ *
+ * 낮음은 글자가 없다(행에 `—`가 선다) — 스물몇 줄이 「낮음」으로 차면 정작
+ * 위태로운 두 줄이 그 안에 묻힌다. 감각 열과 같은 이유로 가운데를 칠하지 않는
+ * 것이 아니라, 여기는 **색이 곧 등급**이라 둘 다 칠하고 세기로 가른다:
+ * 「보통」은 금색으로 눈에 걸리기만 하고 「높음」만 붉게 선다.
+ */
+.squad-table .injury-risk {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.squad-table .injury-risk.low {
+  color: var(--muted);
+}
+.squad-table .injury-risk.elevated {
+  color: var(--gold-soft);
+}
+.squad-table .injury-risk.high {
+  color: var(--danger);
+}

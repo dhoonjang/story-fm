@@ -1,7 +1,14 @@
 "use client";
 
 import { Fragment, useMemo } from "react";
-import { PROMISE_KIND_KO, SQUAD_STATUS_KO, squadStatusRank } from "@story-fm/domain";
+import {
+  INJURY_RISK_CAUSE_KO,
+  INJURY_RISK_GRADE_KO,
+  PROMISE_KIND_KO,
+  SQUAD_STATUS_KO,
+  squadStatusRank,
+} from "@story-fm/domain";
+import type { InjuryRiskGrade } from "@story-fm/domain";
 import { ConditionBar } from "@/components/condition-bar";
 import { moodSentence } from "@/lib/mood";
 import { Armband, FitGauge, FormArrow, Margin, StatusBadges, ovrTitle } from "./marks";
@@ -24,6 +31,7 @@ export type SortKey =
   | "form"
   | "condition"
   | "sharpness"
+  | "risk"
   | "rating";
 const ROLE_ORDER: Record<string, number> = { 선발: 0, 벤치: 1, 스쿼드: 2 };
 /**
@@ -34,6 +42,8 @@ const ROLE_ORDER: Record<string, number> = { 선발: 0, 벤치: 1, 스쿼드: 2 
  */
 const TIER_ORDER: Record<Tier, number> = { 선발: 0, 벤치: 1, 예비: 2, "2군": 3, 임대: 4 };
 const GROUP_ORDER: Record<string, number> = { GK: 0, DF: 1, MF: 2, FW: 3 };
+/** 위험 열의 정렬 — 큰 수가 위태롭다. 기본 방향(내림)에서 높음이 맨 위에 선다 */
+const RISK_ORDER: Record<InjuryRiskGrade, number> = { low: 0, elevated: 1, high: 2 };
 
 /** 명단 표 — 열 머리를 눌러 정렬한다. 기본은 역할 → 포지션 라인 → OVR */
 export function SquadTable({
@@ -94,6 +104,9 @@ export function SquadTable({
           return p.condition.value;
         case "sharpness":
           return p.sharpness;
+        // 등급 순 — 낮음이 맨 아래다. 같은 등급 안의 순서는 OVR이 아니라 안정 정렬이다
+        case "risk":
+          return RISK_ORDER[p.injuryRisk.grade];
         case "rating":
           // 기록 없는 선수는 정렬 맨 아래로 — 0.00과 "아직 없음"은 다르다
           return p.seasonRating ?? -1;
@@ -158,6 +171,13 @@ export function SquadTable({
             "hide-sm",
             "경기 감각 — 출전 분이 올리고 결장이 깎는다. 체력과 다른 축이다",
           )}
+          {/* 다치기 전에 서는 유일한 열이다 — 체력 막대와 다른 축이다 (player.md §5.3) */}
+          {th(
+            "risk",
+            "위험",
+            "hide-sm",
+            "부상 위험 — 경기가 누가 다칠지 고를 때 쓰는 저울이다. 체력·몸싸움·부상 이력이 함께 정한다",
+          )}
           {th("rating", "평점", "hide-sm")}
         </tr>
       </thead>
@@ -181,7 +201,7 @@ export function SquadTable({
                  가리키는 셀렉터에 머리까지 걸려 첫 선수 대신 머리가 잡힌다.
                  첫 칸에는 긋지 않는다 — 표 머리 바로 아래에 선이 하나 더 서는 꼴이다 */
                 <tr className="tier-head" data-tier={TIER_SLUG[tierOf(p.id)]} aria-hidden>
-                  <td colSpan={10} />
+                  <td colSpan={11} />
                 </tr>
               )}
             <tr
@@ -361,6 +381,20 @@ export function SquadTable({
               <td className="hide-sm">
                 <span className={`sharpness ${p.sharpnessBand}`}>{p.sharpnessLabel}</span>
               </td>
+              {/* 낮음은 글자를 세우지 않는다 — 스물몇 줄이 「낮음」으로 차면
+                  정작 위태로운 두 줄이 그 안에 묻힌다 */}
+              <td className="hide-sm">
+                {p.injuryRisk.grade === "low" ? (
+                  <span className="injury-risk low">—</span>
+                ) : (
+                  <span
+                    className={`injury-risk ${p.injuryRisk.grade}`}
+                    title={p.injuryRisk.causes.map((c) => INJURY_RISK_CAUSE_KO[c]).join(" · ")}
+                  >
+                    {INJURY_RISK_GRADE_KO[p.injuryRisk.grade]}
+                  </span>
+                )}
+              </td>
               {/* 골 대신 평점 — 골 수는 행을 펼치면 시즌 기록에 그대로 있다 */}
               <td
                 className="hide-sm"
@@ -381,7 +415,7 @@ export function SquadTable({
                 className={`detail-row row-tier t-${tierOf ? TIER_SLUG[tierOf(p.id)] : "squad"}`}
                 data-testid={`squad-detail-${p.id}`}
               >
-                <td colSpan={10}>{renderDetail(p)}</td>
+                <td colSpan={11}>{renderDetail(p)}</td>
               </tr>
             )}
           </Fragment>
