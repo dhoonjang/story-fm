@@ -71,6 +71,7 @@ import { recallRole, rememberRole } from "./role-memory";
 import { diffLineup, type LineupSide, type LineupSlotRef } from "./lineup-diff";
 import { addDays, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
 import { clampForm, moraleToForm } from "../squad/form";
+import { injuryRiskFor } from "../squad/injury";
 import { DEVELOPMENT_FOCUS_LIMIT, pruneDevelopmentFocus } from "../squad/development";
 import { reserveTrainingAxes } from "../squad/training-plan";
 import {
@@ -1366,6 +1367,17 @@ export function setLineup(
     levelMoved.reserve.push(player.name);
   }
   const items = [...changes.items];
+  /**
+   * **오늘 세운 열한 명 중 위험이 높은 사람** (player.md §5.3) — 명단이 확정되는
+   * 그 자리에서만 뜻이 있는 항목이라, 배치가 그대로여도 선다. 선발만 센다:
+   * 벤치의 위험은 감독이 그를 넣기로 하는 그 순간의 결정이다.
+   */
+  const atRisk = startingAssignments
+    .map((a) => userPlayerById(state, a.playerId))
+    .filter((p): p is GamePlayer => p !== null && injuryRiskFor(p).grade === "high");
+  if (atRisk.length > 0) {
+    items.push(item({ label: "부상 위험", text: briefNames(atRisk.map((p) => p.name)) }));
+  }
   if (levelMoved.first.length > 0) {
     items.push(item({ label: "1군 승격", text: briefNames(levelMoved.first) }));
   }

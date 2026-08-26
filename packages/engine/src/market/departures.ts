@@ -31,6 +31,7 @@ import {
   groupOf,
   onLoanFromUs,
   openInjury,
+  pendingContractOf,
   playerById,
   playersOf,
   pushNarrative,
@@ -595,6 +596,12 @@ export function signFreeAgents(state: GameState, digest: string[]): void {
 
   for (const player of pool) {
     if (signed >= FREE_AGENT_SIGNINGS_PER_DAY) return;
+    /**
+     * **이미 갈 곳을 정한 사람은 시장이 데려가지 않는다** (transfer.md §1-4).
+     * 무소속이 되어도 예약은 살아 있다 — 계약이 끝난 것과 발효를 기다리는 것은
+     * 다른 사실이라, 여기서 새 활성 계약을 쓰면 예약이 조용히 덮인다.
+     */
+    if (pendingContractOf(state, player.id)) continue;
     const age = ageOf(player.birthdate, state.date);
     // 이름값이 클수록 빨리, 나이가 많을수록 더디게 (기준 등급은 종합 눈금을 탄다)
     const appeal =

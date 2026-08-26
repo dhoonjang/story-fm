@@ -1,6 +1,7 @@
 import {
   ageOf,
   growthLabel,
+  injuryRiskText,
   isReserveMatch,
   TRAINING_MARK_KO,
   normalizeSpeaker,
@@ -16,7 +17,9 @@ import {
   type TacticsSpec,
   type TrainingReport,
 } from "@story-fm/domain";
+import { injuryWeight } from "@story-fm/sim";
 import { formLabel } from "./form";
+import { injuryRiskFor, pronenessValue } from "./injury";
 import { isSettling } from "./settling";
 import { CUE_ROTATION_TURNS, recentSpeakers, rotationDay } from "./cues";
 import { diffDays, nextMatchFor } from "../competition/calendar";
@@ -30,6 +33,7 @@ import { coachArchetypeKeyOf, headCoachOf } from "../world/persona";
 import { loanReports } from "../market/departures";
 import {
   assignmentsOf,
+  isInjured,
   latestTrainingReport,
   managedTeamId,
   playerById,
@@ -222,6 +226,35 @@ const injuryLog: CoachEye = (state) => {
     fact:
       "이번 시즌 부상 이력: " +
       rows.map((r) => `${r.player.name} ${r.spells}회 ${r.missed}경기 결장`).join(" · "),
+    playerIds: rows.map((r) => r.player.id),
+  };
+};
+
+/**
+ * 지금 이 몸으로 세우면 위험한 사람 — **다치기 전에 서는 눈이다** (player.md §5.3).
+ *
+ * `injury-log`가 이미 쓰러진 뒤의 장부라면 이쪽은 그 앞이다. 다친 선수는 빼고
+ * (그 사실은 주의 줄이 이미 말한다) 등급이 오른 1군만, 저울이 무거운 순으로 셋까지.
+ */
+const injuryRisk: CoachEye = (state) => {
+  const rows = playersOf(state, state.userTeamId)
+    .filter((p) => squadLevelOf(p) === "first" && !isInjured(state, p.id))
+    .map((p) => ({
+      player: p,
+      risk: injuryRiskFor(p),
+      weight: injuryWeight(p, 0, pronenessValue(p)),
+    }))
+    .filter((r) => r.risk.grade !== "low")
+    .sort((a, b) => b.weight - a.weight || (a.player.id < b.player.id ? -1 : 1))
+    .slice(0, NAMES_SHOWN);
+  if (rows.length === 0) return null;
+  return {
+    code: "injury-risk",
+    fact:
+      "부상 위험: " +
+      rows
+        .map((r) => `${r.player.name} ${injuryRiskText(r.risk.grade, r.risk.causes)}`)
+        .join(" · "),
     playerIds: rows.map((r) => r.player.id),
   };
 };
@@ -593,7 +626,7 @@ function markCounts(state: GameState, report: TrainingReport): string[] {
  * 다른 코치의 눈이 대신 서지는 않는다.
  */
 const COACH_EYE: Readonly<Record<string, readonly CoachEye[]>> = {
-  drill_sergeant: [tiredStarters, injuryLog],
+  drill_sergeant: [tiredStarters, injuryLog, injuryRisk],
   analyst: [opponentTable, opponentForm, matchupAxis],
   youth_developer: [prospects, reserveRecord],
   man_manager: [dressingRoom, captain],

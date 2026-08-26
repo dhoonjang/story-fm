@@ -9,6 +9,7 @@ import type {
 } from "@story-fm/domain";
 import {
   MAX_PAYMENT_YEARS,
+  PRECONTRACT_DAYS,
   SQUAD_STATUS_KO,
   SYMBOLIC_NUMBERS,
   ageOf,
@@ -19,7 +20,7 @@ import {
   squadStatusRank,
   type NumberWish,
 } from "@story-fm/domain";
-import { diffDays, windowOpenOn } from "../competition/calendar";
+import { buildSeasonCalendar, diffDays, windowOpenOn } from "../competition/calendar";
 import { claimLabel, evaluatePitch } from "./persuasion";
 import { isMarketOnlyLeague, leagueCatalogById } from "../data/league-catalog";
 import { leagueEconomyLevel } from "../data/league-economy";
@@ -49,6 +50,7 @@ import {
   financeOf,
   interestsOn,
   openFinanceDemand,
+  pendingContractOf,
   playerById,
   squadShortfall,
   teamName,
@@ -668,6 +670,77 @@ function agentFactor(
   };
 }
 
+// ── 사전 계약 — 반년 앞의 시장 (transfer.md §1-4) ────────
+
+/**
+ * 그 선수가 **사전 계약 창 안에 있는가** — 남은 일수, 아니면 null
+ * (→ docs/simulation/transfer.md §1-4).
+ *
+ * 창을 여는 것은 이적창이 아니라 **계약의 만료일**이다. 계약은 어느 문으로 들어왔든
+ * 6월 30일에 끝나므로(§5-1) 이 창은 12월 말에 열려 만료일에 닫힌다.
+ *
+ * **활성 계약이 있어야 한다** — 이미 끝난 계약은 무소속 영입(§6)이지 예약이 아니고,
+ * 만료 당일(잔여 0일)은 아직 남의 선수이므로 창 안이다.
+ */
+export function precontractDaysLeft(state: GameState, playerId: string): number | null {
+  const contract = activeContract(state, playerId);
+  if (!contract) return null;
+  const days = diffDays(state.date, contract.until);
+  if (days < 0 || days > PRECONTRACT_DAYS) return null;
+  return days;
+}
+
+/**
+ * **이 조건이 사전 계약인가** (§1-4) — 감독이 고르는 갈래가 아니라 조건이 정하는
+ * 성격이다. 셋이 함께 서야 한다: 남의 **클럽** 선수 · 창 안 · 이적료 0.
+ *
+ * 갈래가 영입(`buy`)이 아니면 서지 않는다 — 임대·매각·재계약에는 예약할 것이 없다.
+ */
+export function isPrecontractTerms(state: GameState, terms: DealTerms): boolean {
+  if (terms.kind !== undefined && terms.kind !== "buy") return false;
+  if (terms.fee > 0) return false;
+  const player = playerById(state, terms.playerId);
+  if (!player) return false;
+  return isPrecontractTarget(state, player);
+}
+
+/** 그 선수가 사전 계약의 대상이 될 수 있는가 — 남의 클럽 소속이고 창 안이다 */
+export function isPrecontractTarget(state: GameState, player: GamePlayer): boolean {
+  if (player.teamId === state.userTeamId) return false;
+  if (!isClubTeam(player.teamId)) return false;
+  return precontractDaysLeft(state, player.id) !== null;
+}
+
+/**
+ * 사전 계약의 **발효일** — 다음 시즌의 프리시즌 시작일(7월 1일)이다 (§1-4·§5-1).
+ *
+ * 모든 계약이 6월 30일에 끝나므로 이 날과 옛 계약의 만료일 사이에는 틈도 겹침도
+ * 없다. 연수를 세는 기준도 계약일이 아니라 이 날이다.
+ */
+export function precontractStartOf(state: GameState): string {
+  return buildSeasonCalendar(state.season + 1).preseasonStart;
+}
+
+/**
+ * 예약을 막는 사실 — 있으면 그 문장, 없으면 null (§1-4).
+ *
+ * 확률로 재는 것이 아니라 **가능한가**를 재는 자리라 `dealOdds`의 blocker와
+ * `runAiPrecontracts`의 후보 거르기가 같은 함수를 읽는다: 두 벌이 되면 감독에게는
+ * 막힌 자리를 AI는 통과한다.
+ */
+export function precontractBlockerOf(state: GameState, player: GamePlayer): string | null {
+  const pending = pendingContractOf(state, player.id);
+  if (pending) {
+    return pending.teamId === state.userTeamId
+      ? `${player.name}과는 이미 사전 계약을 맺었습니다`
+      : `${player.name}은(는) 이미 ${teamName(pending.teamId)}와 사전 계약을 맺었습니다`;
+  }
+  if (player.state.retiringAfterSeason) {
+    return `${player.name}은(는) 이번 시즌 뒤 은퇴를 예고했습니다`;
+  }
+  return null;
+}
+
 export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   const player = playerById(state, terms.playerId);
   const knowledge = player ? knowledgeOf(state, terms.playerId) : "rumoured";
@@ -690,6 +763,12 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   const wageExpectation = wageExpectationOf(state, player);
   const window = windowOpenOn(state.windows, state.date);
   const freeAgent = contractYearsLeft(state, player.id) <= 0;
+  /**
+   * **사전 계약** — 잔여 반년 이하인 남의 클럽 선수에게 이적료 0을 부른 자리 (§1-4).
+   * `freeAgent`(계약이 이미 끝났다)와는 다른 축이다: 계약이 아직 남아 있는 사람이라,
+   * 이 판을 여는 것은 협회의 창이 아니라 그 계약의 만료일이다.
+   */
+  const precontract = isPrecontractTerms(state, terms);
 
   // 임대는 갈래를 가리지 않고 막힌다 — 영입·매각·임대·재계약이 모두 남의 계약을 건드린다
   const loanLock = loanLockOf(player);
@@ -734,40 +813,53 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     if (player.teamId === state.userTeamId) {
       blockers.push(`${player.name}은(는) 이미 우리 선수입니다`);
     }
-    if (!window && !freeAgent) {
-      blockers.push("이적시장이 닫혀 있습니다");
-    }
     /**
-     * **무소속엔 이적료를 받을 구단이 없다** (team.md §4). 막지 않으면 그 돈이
-     * 세계 밖으로 나간다 — 아무도 쓰지 않는 잔고로 사라진다.
+     * **사전 계약은 돈이 나가지 않는 영입이다** (§1-4). 그래서 나갈 돈을 재는 문이
+     * 통째로 빠진다 — 이적창·무소속 이적료·예산 동결·이적 예산. 창이 빠지는 것은
+     * 이 판을 여는 것이 협회의 달력이 아니라 계약의 만료일이기 때문이고, 예산이
+     * 빠지는 것은 가난한 구단의 유일한 큰 영입 수단이 여기이기 때문이다.
      */
-    if (!isClubTeam(player.teamId) && terms.fee > 0) {
-      blockers.push(`${player.name}은(는) 무소속이라 이적료가 붙지 않습니다`);
-    }
-    const ourFinance = financeOf(state, state.userTeamId);
-    if (ourFinance.budgetFrozen && terms.fee > 0) {
-      // 동결에는 두 출구가 있다 — PSR과 부채 (finance.md §9.2·§9.4)
-      blockers.push(
-        `보드가 이적 예산을 동결했습니다${budgetFreezeLabel(state, state.userTeamId)} — 먼저 매각해야 합니다`,
-      );
-    }
-    /**
-     * **보드가 그 선수 앞으로 승인한 몫은 예산 위에 얹혀 있다** (finance.md §9.6).
-     * 확정 관문(`negotiation.ts`의 `affordabilityGate`)이 보는 자와 같아야 한다 —
-     * 갈리면 "가능하다"고 말한 오퍼가 도장 앞에서 막힌다 (transfer.md §11).
-     *
-     * 임대는 그 자를 쓰지 않는다: 보드가 승인한 것은 영입이지 임대가 아니다.
-     */
-    const signingBudget =
-      terms.kind === "loan" ? ourFinance.transferBudget : signingBudgetOf(state, player.id);
-    // 분할이면 이번 창에 나갈 것은 첫 회분뿐이다 (transfer.md §5-2)
-    if (firstInstallmentOf(terms.fee, terms.paymentYears) > signingBudget) {
-      blockers.push(`이적 예산을 넘습니다 — 가용 ${formatMoney(signingBudget)}`);
+    if (precontract) {
+      const reserved = precontractBlockerOf(state, player);
+      if (reserved) blockers.push(reserved);
+    } else {
+      if (!window && !freeAgent) {
+        blockers.push("이적시장이 닫혀 있습니다");
+      }
+      /**
+       * **무소속엔 이적료를 받을 구단이 없다** (team.md §4). 막지 않으면 그 돈이
+       * 세계 밖으로 나간다 — 아무도 쓰지 않는 잔고로 사라진다.
+       */
+      if (!isClubTeam(player.teamId) && terms.fee > 0) {
+        blockers.push(`${player.name}은(는) 무소속이라 이적료가 붙지 않습니다`);
+      }
+      const ourFinance = financeOf(state, state.userTeamId);
+      if (ourFinance.budgetFrozen && terms.fee > 0) {
+        // 동결에는 두 출구가 있다 — PSR과 부채 (finance.md §9.2·§9.4)
+        blockers.push(
+          `보드가 이적 예산을 동결했습니다${budgetFreezeLabel(state, state.userTeamId)} — 먼저 매각해야 합니다`,
+        );
+      }
+      /**
+       * **보드가 그 선수 앞으로 승인한 몫은 예산 위에 얹혀 있다** (finance.md §9.6).
+       * 확정 관문(`negotiation.ts`의 `affordabilityGate`)이 보는 자와 같아야 한다 —
+       * 갈리면 "가능하다"고 말한 오퍼가 도장 앞에서 막힌다 (transfer.md §11).
+       *
+       * 임대는 그 자를 쓰지 않는다: 보드가 승인한 것은 영입이지 임대가 아니다.
+       */
+      const signingBudget =
+        terms.kind === "loan" ? ourFinance.transferBudget : signingBudgetOf(state, player.id);
+      // 분할이면 이번 창에 나갈 것은 첫 회분뿐이다 (transfer.md §5-2)
+      if (firstInstallmentOf(terms.fee, terms.paymentYears) > signingBudget) {
+        blockers.push(`이적 예산을 넘습니다 — 가용 ${formatMoney(signingBudget)}`);
+      }
     }
     /**
      * **주급 여력** — 이적료를 낼 수 있어도 매주 나갈 돈이 없으면 못 데려온다.
      * AI 시장이 지키는 것과 같은 자다(`wageRoomOf`) — 이 관문이 감독에게도
-     * 걸려야 임금 총액이 구단 한도 안에 머문다.
+     * 걸려야 임금 총액이 구단 한도 안에 머문다. **사전 계약에도 걸린다**: 돈이
+     * 나가지 않아도 다음 시즌부터 매주 나갈 주급은 구단 한도 안이어야 한다 —
+     * 이 문이 없으면 겨울마다 여력 밖의 스타 다섯을 공짜로 예약할 수 있다 (§1-4).
      */
     const room = userWageRoom(state);
     if (terms.weeklyWage > room) {
@@ -806,30 +898,37 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     why: string;
   }> = [];
 
-  // ① 파는 구단 — 제시 이적료와 상대 사정
-  const stance = sellerStance(state, player);
   /**
    * **파는 쪽은 늦게 오는 돈을 깎아 본다** — 분할 오퍼는 유효 이적료(현재가치)로
    * 재어진다. 같은 확률을 원하면 총액을 올려 불러야 한다 (transfer.md §5-2).
+   *
+   * 비율은 관문 밖에서 센다 — 사전 계약이라 이 항이 서지 않는 판에서도 `에이전트`
+   * 줄이 「그 사람이 없었다면」을 되계산할 때 같은 눈금을 읽어야 한다.
    */
   const offeredFee = effectiveFeeOf(terms.fee, terms.paymentYears);
   const feeRatio = askingPrice > 0 ? offeredFee / askingPrice : 2;
-  contributions.push({
-    gate: "club",
-    score: (feeRatio - 1) * FEE_RATIO_SCORE,
-    label: "제시 이적료",
-    why:
-      askingPrice > 0
-        ? `상대는 ${formatMoney(askingPrice)}을 기대한다 (제시액은 그 ${Math.round(feeRatio * 100)}%${splitNote(terms, offeredFee)})`
-        : "계약이 만료돼 이적료가 필요 없다",
-  });
-  for (const reason of stance.reasons) {
+  // ① 파는 구단 — 제시 이적료와 상대 사정.
+  // **사전 계약에는 이 관문이 없다** (§1-4) — 이적료가 0이라 파는 구단이 협상 상대가
+  // 아니다. 호가는 그대로 돌려주되 근거 줄에는 서지 않는다.
+  if (!precontract) {
+    const stance = sellerStance(state, player);
     contributions.push({
       gate: "club",
-      score: SELLER_REASON_SCORE[reason.kind],
-      label: "상대 사정",
-      why: reason.why,
+      score: (feeRatio - 1) * FEE_RATIO_SCORE,
+      label: "제시 이적료",
+      why:
+        askingPrice > 0
+          ? `상대는 ${formatMoney(askingPrice)}을 기대한다 (제시액은 그 ${Math.round(feeRatio * 100)}%${splitNote(terms, offeredFee)})`
+          : "계약이 만료돼 이적료가 필요 없다",
     });
+    for (const reason of stance.reasons) {
+      contributions.push({
+        gate: "club",
+        score: SELLER_REASON_SCORE[reason.kind],
+        label: "상대 사정",
+        why: reason.why,
+      });
+    }
   }
 
   /**
@@ -997,12 +1096,13 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     });
   }
 
-  // ③ 감독 협상력 — 두 관문에 함께 (career.md §2)
+  // ③ 감독 협상력 — 두 관문에 함께 (career.md §2). 관문이 하나면 한 줄뿐이다
   const negotiation = state.manager.attributes.negotiation;
   if (Math.abs(negotiation - 50) >= 5) {
     const score = (negotiation - 50) / 100;
-    contributions.push({ gate: "club", score, label: "감독 협상력", why: `협상 ${negotiation}` });
-    contributions.push({ gate: "player", score, label: "감독 협상력", why: `협상 ${negotiation}` });
+    const why = `협상 ${negotiation}`;
+    if (!precontract) contributions.push({ gate: "club", score, label: "감독 협상력", why });
+    contributions.push({ gate: "player", score, label: "감독 협상력", why });
   }
 
   // ④ 창 마감 압박 · ⑤ 인내심 — 확률에 곱해지는 항
@@ -1010,16 +1110,23 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   const profile = agent === null ? NO_AGENT_PROFILE : AGENT_PROFILE[agent.archetype];
   let multiplier = 1;
   const repeats = sameTermsRepeats(state, terms);
-  const closingSoon = window ? diffDays(state.date, window.closesOn) <= 3 : false;
+  const daysToClose = window ? diffDays(state.date, window.closesOn) : null;
+  // 사전 계약은 창과 무관하다 — 마감 배수가 걸리지 않는다 (§1-4)
+  const closingSoon = !precontract && daysToClose !== null && daysToClose <= 3;
   if (closingSoon) multiplier *= 1.15;
   // 인내심은 사람마다 다르다 — 원형이 감쇠의 **지수를 나눈다** (transfer.md §3)
   const decay = Math.pow(PATIENCE_DECAY, repeats / profile.patience);
   if (repeats > 0) multiplier *= decay;
 
+  /**
+   * **관문의 수가 기준점을 정한다** (§3 「관문의 수와 기준점」). 사전 계약은 영입이면서
+   * 관문이 하나라, 재계약·해지가 쓰는 기준점과 시그모이드 하나를 그대로 쓴다.
+   */
+  const baseline = precontract ? MEETS_ASKING_SCORE_SOLO : MEETS_ASKING_SCORE_PAIR;
   const sumOf = (gate: "club" | "player", skip: ReadonlySet<number>) =>
     contributions.reduce(
       (acc, c, i) => acc + (c.gate === gate && !skip.has(i) ? c.score : 0),
-      MEETS_ASKING_SCORE_PAIR,
+      baseline,
     );
   const NONE: ReadonlySet<number> = new Set();
   /**
@@ -1033,10 +1140,12 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     withMultiplier = multiplier,
     bump: { club: number; player: number } = NO_BUMP,
   ) =>
-    sigmoid(sumOf("club", skip) + bump.club) *
-    sigmoid(sumOf("player", skip) + bump.player) *
-    withMultiplier *
-    100;
+    precontract
+      ? sigmoid(sumOf("player", skip) + bump.player) * withMultiplier * 100
+      : sigmoid(sumOf("club", skip) + bump.club) *
+        sigmoid(sumOf("player", skip) + bump.player) *
+        withMultiplier *
+        100;
 
   const raw = chance();
   // 같은 항목명(예: 두 관문에 함께 들어가는 감독 협상력)은 한 줄로 합친다
@@ -1047,12 +1156,28 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     if (found) found.indices.push(i);
     else grouped.set(key, { why: c.why, indices: [i] });
   });
+  /**
+   * **이 판이 무엇인지 말하는 줄** — `delta`가 0인 것은 확률을 움직이는 항이 아니기
+   * 때문이다. 한계 기여를 꾸며 내면 근거 목록이 거짓이 된다 (디자인 원칙 2).
+   */
+  const precontractFactor: DealFactor | null = precontract
+    ? {
+        label: "사전 계약",
+        delta: 0,
+        why: `계약이 ${precontractDaysLeft(state, player.id) ?? 0}일 뒤 끝난다 — 이적료 없이 ${precontractStartOf(state)}에 합류한다`,
+      }
+    : null;
   const factors: DealFactor[] = [
     {
       label: "기준",
-      delta: Math.round(sigmoid(MEETS_ASKING_SCORE_PAIR) ** 2 * 100),
-      why: "이적료·주급 기대치를 그대로 맞췄을 때",
+      delta: precontract
+        ? Math.round(sigmoid(MEETS_ASKING_SCORE_SOLO) * 100)
+        : Math.round(sigmoid(MEETS_ASKING_SCORE_PAIR) ** 2 * 100),
+      why: precontract
+        ? "주급 기대치를 그대로 맞췄을 때 — 이적료가 없어 파는 구단은 관문이 아니다"
+        : "이적료·주급 기대치를 그대로 맞췄을 때",
     },
+    ...(precontractFactor ? [precontractFactor] : []),
     // 각 항의 기여 = 그 항만 빼고 다시 계산한 값과의 차이 (한계 기여)
     ...[...grouped.entries()].map(([key, group]) => ({
       label: key.split("|")[0]!,
@@ -1064,7 +1189,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     factors.push({
       label: "마감 임박",
       delta: Math.round(raw - chance(NONE, multiplier / 1.15)),
-      why: `이적시장 마감까지 ${window ? diffDays(state.date, window.closesOn) : 0}일`,
+      why: `이적시장 마감까지 ${daysToClose ?? 0}일`,
     });
   }
   if (repeats > 0) {

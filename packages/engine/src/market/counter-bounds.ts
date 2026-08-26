@@ -231,8 +231,30 @@ export function counterBoundsOf(
    * 주급의 자는 희망 주급과 **우리 제시액 중 큰 쪽**이라, 우리가 이미 기대 위를
    * 부른 오퍼에도 상대가 부를 수 있는 값이 남는다.
    */
-  const asking = incomingAsking(state, kind, player);
   const wageAnchor = Math.max(offer.weeklyWage, wageExpectationOf(state, player));
+  /**
+   * **사전 계약에는 이적료 축이 없다** (transfer.md §1-4) — 이적료가 0인 것이 이
+   * 갈래의 정의라, 상대가 값을 올려 부를 수 있으면 그 조정에 합의하는 순간
+   * 이적료가 붙은 협상이 `pending` 계약 하나로 확정된다: 코어가 받지도 않을 돈이
+   * 라운드에 적히고 파는 구단은 그 돈을 영영 못 받는다. 흥정은 주급과 지위로 한다.
+   */
+  if (negotiation.precontract === true) {
+    return {
+      ...base,
+      fee: null,
+      wage: {
+        expectation: Math.round(wageExpectationOf(state, player)),
+        min: offer.weeklyWage,
+        max: Math.round(wageAnchor * COUNTER_WAGE_CEILING),
+      },
+      years: null,
+      status: statusBandOf(state, player, offer.squadStatus),
+      // 나눌 이적료가 없다 (§5-2)
+      splittable: false,
+    };
+  }
+
+  const asking = incomingAsking(state, kind, player);
   return {
     ...base,
     fee: {

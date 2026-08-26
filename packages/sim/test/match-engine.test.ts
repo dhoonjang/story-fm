@@ -24,6 +24,8 @@ import {
   buildStrengthPacket,
   createLedger,
   injuryWeight,
+  injuryRiskOf,
+  INJURY_RISK_FLOOR,
   penaltyRate,
   sampleShot,
   sampleShotXg,
@@ -1010,6 +1012,80 @@ describe("카드·부상·연장의 눈금", () => {
       { condition: 75 },
     );
     expect(injuryWeight(sturdy)).toBeLessThan(injuryWeight(p));
+  });
+
+  /**
+   * 등급은 **저울의 다른 이름**이다 (player.md §5.3). 경계 숫자를 여기 적지 않고
+   * `INJURY_RISK_FLOOR`에서 유도하는 이유는, 분위를 다시 재서 경계를 옮기는 날
+   * 고쳐져야 하는 것이 이 파일이 아니어서다.
+   */
+  it("위험 등급의 경계는 저울의 경계 그대로다", () => {
+    /** 저울이 정확히 `target`이 되는 선수 — 체력만 움직여 만든다 */
+    const at = (target: number) =>
+      makePlayer(
+        "p",
+        "home",
+        "CB",
+        "DF",
+        70,
+        { strength: 99 },
+        { condition: 100 - (target - 40) / 0.8 },
+      );
+
+    expect(injuryWeight(at(INJURY_RISK_FLOOR.high))).toBeCloseTo(INJURY_RISK_FLOOR.high);
+    expect(injuryRiskOf(at(INJURY_RISK_FLOOR.high)).grade).toBe("high");
+    expect(injuryRiskOf(at(INJURY_RISK_FLOOR.high - 0.01)).grade).toBe("elevated");
+    expect(injuryRiskOf(at(INJURY_RISK_FLOOR.elevated)).grade).toBe("elevated");
+    expect(injuryRiskOf(at(INJURY_RISK_FLOOR.elevated - 0.01)).grade).toBe("low");
+    // 성향도 같은 경계를 지난다 — 배수가 저울을 넘기면 신선한 몸도 등급이 오른다
+    const fresh = makePlayer("fresh", "home", "CB", "DF", 70, { strength: 67 }, { condition: 100 });
+    expect(injuryRiskOf(fresh).grade).toBe("low");
+    expect(injuryRiskOf(fresh, INJURY_RISK_FLOOR.high / injuryWeight(fresh)).grade).toBe("high");
+  });
+
+  it("원인은 저울을 들어 올린 순서로 서고, 낮음에는 원인이 없다", () => {
+    const sound = makePlayer("sound", "home", "CB", "DF", 70, { strength: 99 }, { condition: 100 });
+    expect(injuryRiskOf(sound)).toEqual({ grade: "low", causes: [] });
+
+    // 축 하나만 밀면 그 축만 이름을 댄다 — 나머지 둘은 몫이 0이다
+    const tired = makePlayer("tired", "home", "CB", "DF", 70, { strength: 99 }, { condition: 30 });
+    expect(injuryRiskOf(tired).causes).toEqual(["fatigue"]);
+    const glass = makePlayer("glass", "home", "CB", "DF", 70, { strength: 99 }, { condition: 100 });
+    expect(injuryRiskOf(glass, 2.2).causes).toEqual(["proneness"]);
+    const soft = makePlayer("soft", "home", "CB", "DF", 70, { strength: 20 }, { condition: 100 });
+    expect(injuryRiskOf(soft).causes).toEqual(["strength"]);
+
+    /**
+     * 둘이 함께 밀면 **더 크게 들어 올린 쪽이 앞**이다. 지친 정도가 성향보다
+     * 크면 「피로 · 부상 이력」, 그 반대면 순서가 뒤집힌다 — 코어가 정하는 것은
+     * 이 순서이고 문장은 화면과 GM이 쓴다.
+     */
+    const drained = makePlayer(
+      "drained",
+      "home",
+      "CB",
+      "DF",
+      70,
+      { strength: 99 },
+      { condition: 40 },
+    );
+    expect(injuryRiskOf(drained, 1.5).causes).toEqual(["fatigue", "proneness"]);
+    const worn = makePlayer("worn", "home", "CB", "DF", 70, { strength: 99 }, { condition: 70 });
+    expect(injuryRiskOf(worn, 1.8).causes).toEqual(["proneness", "fatigue"]);
+  });
+
+  it("등급이 오른 선수에게는 원인이 반드시 하나 이상 선다", () => {
+    // 세 몫의 합이 곧 들림이라 최대 몫은 언제나 문턱(1/4)을 넘는다
+    for (const condition of [100, 80, 60, 40, 20, 0]) {
+      for (const strength of [20, 50, 70, 99]) {
+        for (const proneness of [0.55, 1, 1.4, 2.2]) {
+          const p = makePlayer("p", "home", "CB", "DF", 70, { strength }, { condition });
+          const risk = injuryRiskOf(p, proneness);
+          if (risk.grade === "low") expect(risk.causes).toEqual([]);
+          else expect(risk.causes.length).toBeGreaterThan(0);
+        }
+      }
+    }
   });
 
   /**

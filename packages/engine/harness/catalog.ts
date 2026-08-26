@@ -120,9 +120,9 @@ export const SEGMENT_SHOTS = defineHarness({
 
 export const INJURY_RATE = defineHarness({
   id: "injury-rate",
-  what: "경기당 부상·카드 — 간이 시뮬과 구간 시뮬이 같은 눈금에 서는가 · 성향이 빈도에 닿는 폭",
+  what: "경기당 부상·카드 — 두 시뮬이 같은 눈금에 서는가 · 성향이 빈도에 닿는 폭 · 위험 등급별 실제 부상률",
   doc: MATCH,
-  cost: "간이 시뮬 48,000판 + 구간 시뮬 12,000판 · 2분쯤",
+  cost: "간이 시뮬 60,000판 + 구간 시뮬 12,000판 · 2~3분",
   // prettier-ignore
   bands: [
     { metric: "경기 강도 (양 팀 평균)", role: "measure", why: "`matchIntensity` — 카드·부상 기대치가 이 배수를 탄다. 두 시뮬이 같은 값을 읽어야 한다" },
@@ -138,6 +138,14 @@ export const INJURY_RATE = defineHarness({
     { metric: "카드 — 간이/구간", role: "guard", min: 0.96, max: 1.04, unit: "ratio", why: "**두 시뮬이 한 눈금에 서는가 — 가장 날카로운 지표.** 강도를 한쪽만 곱하면 여기가 1/강도로 벌어진다 — 압박 5 팀에서 15%다. 표본이 팔당 45,000장이라 잡음은 1% 아래다" },
     { metric: "유리몸 팀 배율", role: "guard", min: 1.3, why: "선발 전원 성향 2.2일 때 건강한 팀 대비 — 성향이 빈도에 닿는지" },
     { metric: "유리몸 한 명의 부상 점유율", role: "guard", min: 0.08, unit: "ratio", why: "뛴 선수(선발 11 + 교체 최대 5) 중 한 명이면 균등은 6~7% — 성향 2.2가 그 위로 띄운다" },
+    { metric: "위험 낮음 인원", role: "guard", min: 1, unit: "count", why: "등급을 갈라 심은 선발 열한(4·4·3) 중 실제로 그 등급에 선 인원. **경계가 분포에서 떨어지면 여기가 먼저 빨개진다** — 셋 중 하나라도 0이면 아래 비는 잴 대상이 없다" },
+    { metric: "위험 보통 인원", role: "guard", min: 1, unit: "count", why: "같은 이유 — 가운데 등급이 비면 세 칸이 두 칸이 된다" },
+    { metric: "위험 높음 인원", role: "guard", min: 1, unit: "count", why: "같은 이유" },
+    { metric: "1인당 부상률 — 위험 낮음", role: "measure", unit: "ratio", why: "선수 하나가 한 경기에 다칠 확률 — 세 등급을 나란히 읽는다" },
+    { metric: "1인당 부상률 — 위험 보통", role: "measure", unit: "ratio", why: "같은 눈금" },
+    { metric: "1인당 부상률 — 위험 높음", role: "measure", unit: "ratio", why: "같은 눈금" },
+    { metric: "부상률 — 보통/낮음", role: "guard", min: 1.25, unit: "ratio", why: "등급이 **실제 부상률과 같은 순서로 서는가** (player.md §5.3). 추첨이 저울에 비례하므로 기대는 1.6배쯤이고, 낮음 쪽 표본이 팔당 140건이라 잡음이 10%다 — 밴드는 그 아래에 둔다" },
+    { metric: "부상률 — 높음/낮음", role: "guard", min: 2.4, unit: "ratio", why: "같은 판정의 본론. 저울의 비가 3.2배쯤이라 **순서만 서면 넉넉히 넘는다** — 여기가 무너졌다면 경계가 분포에서 떨어져 나갔거나 저울의 항이 움직인 것이다" },
   ],
 });
 
@@ -251,6 +259,8 @@ export const AI_MARKET = defineHarness({
     { metric: "문의까지 오른 비중", role: "guard", min: 0.15, unit: "ratio", why: "밖에 나지 않는 관심만 쌓이면 사다리가 장식이다" },
     { metric: "오퍼가 된 비중", role: "guard", min: 0.05, max: 0.6, unit: "ratio", why: "관심이 전부 오퍼가 되면 사다리가 지연일 뿐이고, 하나도 안 되면 오퍼가 마른다" },
     { metric: "우리에게 온 오퍼", role: "measure", unit: "count", why: "우리에게 도착한 매각 오퍼 전부 — 관심 갈래와 이적 요청 갈래(§1-1)가 함께 든다" },
+    { metric: "AI 사전 계약", role: "measure", unit: "count", why: "한 시즌에 다른 구단이 우리 만료 선수에게 건 예약 수 (§1-4). 감독이 재계약을 한 번도 열지 않는 하네스라 0이면 노림이 죽은 것이고, 스쿼드의 만료 주전 수보다 크면 무언가 두 번 세고 있다" },
+    { metric: "사전 계약 창 선수", role: "measure", unit: "count", why: "발효일 기준 창(§1-4) 안에 든 타 구단 선수 수 — 감독 쪽 손잡이에 과녁이 있기는 한가. `runAiRenewals`가 만료 240일 안의 주전을 서둘러 잡으므로 여기 남는 것은 대체로 노장과 잉여다" },
   ],
 });
 

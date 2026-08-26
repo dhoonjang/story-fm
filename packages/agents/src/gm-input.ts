@@ -31,6 +31,8 @@ import {
   formatClock,
   headCoachOf,
   historyStart,
+  injuryRiskFor,
+  isInjured,
   isSuspended,
   leagueOfTeamIn,
   loanedOut,
@@ -41,6 +43,7 @@ import {
   openManagerOffers,
   openPromises,
   openTransferRequests,
+  pendingContractOf,
   pendingVerdicts,
   playerName,
   recordBreakLine,
@@ -345,8 +348,15 @@ export interface TimePassed {
 const TOP_RATED_SHOWN = 2;
 const TRAINING_SHOWN = 3;
 const EXPIRING_SHOWN = 3;
+/**
+ * 떠나기로 한 선수를 몇 명까지 이름으로 적나 — **만료 임박보다 짧다.** 그 자리는
+ * 감독이 아직 할 일이 있는 목록이라 길이가 뜻을 갖지만, 이쪽은 이미 끝난 일이라
+ * 「몇 명이고 누가 먼저 가는가」면 족하다 (transfer.md §1-4).
+ */
+const PRECONTRACTED_SHOWN = 2;
 const PROMISE_SHOWN = 3;
 const TRANSFER_REQUEST_SHOWN = 3;
+const AT_RISK_SHOWN = 3;
 const RECENT_NARRATIVE = 4;
 
 /**
@@ -674,6 +684,18 @@ export function buildGmStateNote(
     })
     .filter((x): x is string => x !== null);
   const suspended = players.filter((p) => isSuspended(state, p.id)).map((p) => p.name);
+  /**
+   * **다치기 전에 서는 줄** (player.md §5.3) — 부상 줄은 이미 쓰러진 뒤의 사실이라,
+   * 이것이 없으면 수석코치가 "쉬게 하시죠"라고 말할 근거가 어디에도 없다.
+   * 지금 뛸 수 있는 **1군**만 센다 — 다친 선수의 위험은 감독이 손쓸 일이 아니고,
+   * 2군의 몸은 이번 주 라인업의 사정이 아니다 (수석코치의 눈도 같은 문이다).
+   */
+  const atRisk = players
+    .filter(
+      (p) =>
+        squadLevelOf(p) === "first" && !isInjured(state, p.id) && injuryRiskFor(p).grade === "high",
+    )
+    .map((p) => p.name);
   const unhappy = state.issues.map((i) => playerName(state, i.gamePlayerId));
 
   const training = state.schedule
@@ -710,17 +732,48 @@ export function buildGmStateNote(
         : null;
     })(),
     injured.length > 0 ? `부상 ${injured.length} (${injured.join(", ")})` : null,
+    atRisk.length > 0
+      ? `부상 위험 높음 ${atRisk.length} (${atRisk.slice(0, AT_RISK_SHOWN).join(", ")}${
+          atRisk.length > AT_RISK_SHOWN ? " …" : ""
+        })`
+      : null,
     suspended.length > 0 ? `정지 ${suspended.length} (${suspended.join(", ")})` : null,
     unhappy.length > 0 ? `불만 ${unhappy.length} (${unhappy.join(", ")})` : null,
     ...scoutingSummary(state),
-    // 만료 임박 계약 — 재계약 서사의 씨앗. 놓치면 자유계약으로 떠난다
+    /**
+     * 만료 임박 계약 — 재계약 서사의 씨앗. 놓치면 자유계약으로 떠난다.
+     *
+     * **이미 다른 구단과 사전 계약을 맺은 선수는 이 줄에서 빠진다**
+     * (→ docs/simulation/transfer.md §1-4). 그는 재계약을 열 수 있는 사람이 아니라
+     * 떠나기로 한 사람이라, 같은 줄에 세우면 GM이 매 턴 감독에게 없는 손잡이를
+     * 권한다. 아래 별도의 줄이 그 사실을 든다.
+     */
     (() => {
-      const expiring = expiringContracts(state, EXPIRING_ALERT_DAYS);
+      const expiring = expiringContracts(state, EXPIRING_ALERT_DAYS).filter(
+        (row) => pendingContractOf(state, row.player.id) === null,
+      );
       return expiring.length > 0
         ? `계약 만료 임박 ${expiring.length} (${expiring
             .slice(0, EXPIRING_SHOWN)
             .map((row) => `${row.player.name}~${row.contract.until}`)
             .join(", ")}${expiring.length > EXPIRING_SHOWN ? " …" : ""})`
+        : null;
+    })(),
+    /**
+     * **떠나기로 한 선수** — 다른 구단과 사전 계약을 맺어 발효일에 나갈 사람들
+     * (transfer.md §1-4). 감독이 할 수 있는 일은 없지만 스쿼드 계획의 사실이라,
+     * 이 줄이 없으면 GM은 여름에 사라질 주전을 이번 시즌 내내 붙박이로 말한다.
+     */
+    (() => {
+      const leaving = userPlayers(state).flatMap((player) => {
+        const pending = pendingContractOf(state, player.id);
+        return pending ? [{ player, pending }] : [];
+      });
+      return leaving.length > 0
+        ? `사전 계약으로 떠남 ${leaving.length} (${leaving
+            .slice(0, PRECONTRACTED_SHOWN)
+            .map((row) => `${row.player.name}→${teamName(row.pending.teamId)} ${row.pending.since}`)
+            .join(", ")}${leaving.length > PRECONTRACTED_SHOWN ? " …" : ""})`
         : null;
     })(),
     /**

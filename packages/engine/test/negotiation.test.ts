@@ -21,6 +21,7 @@ import {
   DEADLINE_RUSH,
   deadlineRushOf,
   dealOdds,
+  describeNegotiation,
   describeNegotiations,
   inDeadlineWeek,
   leagueOfTeamIn,
@@ -50,10 +51,12 @@ import {
   openRelease,
   openRenewal,
   ourBuyBackRights,
+  pendingContractOf,
   pendingOffer,
   pendingVerdicts,
   playerById,
   playersOf,
+  precontractStartOf,
   REQUEST_BLOCKS,
   REQUESTED_DISCOUNT,
   recallLoan,
@@ -195,6 +198,8 @@ function stagedNegotiation(
     expiresOn?: string;
     /** 이적창을 30일 열어 둔다 (기본) — 창 자체를 보는 케이스는 끈다 */
     openWindow?: boolean;
+    /** 사전 계약인가 — `sendOffer`가 오퍼를 넣는 날 굳히는 값 (transfer.md §1-4) */
+    precontract?: boolean;
   },
 ): Negotiation {
   if (input.openWindow !== false) {
@@ -209,6 +214,7 @@ function stagedNegotiation(
     openedOn: state.date,
     expiresOn: input.expiresOn ?? addDays(state.date, 10),
     status: input.status ?? "agreed",
+    ...(input.precontract ? { precontract: true } : {}),
     ...(input.medical === null
       ? {}
       : { medical: { onDate: state.date, status: input.medical ?? "passed" } }),
@@ -2942,5 +2948,140 @@ describe("무대와 마감 — 누가 오퍼를 내고 언제 몰리는가", () 
     // 그 세계에서도 오퍼 생성은 후보를 낸다
     const { negotiation } = waitForIncoming(state);
     expect(negotiation, "옛 세이브 구단이 섞여도 오퍼가 붙는다").toBeDefined();
+  });
+});
+
+/**
+ * 사전 계약 — **계약이 먼저 서고 사람은 나중에 온다** (transfer.md §1-4).
+ *
+ * 여기서 재는 것은 상태 전이와 불변식이다: 확정이 무엇을 남기고 **무엇을 남기지
+ * 않는가**, 그리고 예약이 선 뒤에 어느 문이 닫히는가. 확률·판정은 이 갈래의 것이
+ * 아니라 관문의 것이라 다른 자리에서 재진다.
+ */
+describe("사전 계약 — 계약이 먼저 서고 사람은 나중에 온다", () => {
+  const state = createTestGame(42);
+  /** 다음 7월 1일 — 발효일이자 연수를 세는 기준 */
+  const start = precontractStartOf(state);
+  const startYear = Number(start.slice(0, 4));
+  /**
+   * 창을 여는 것은 협회의 달력이 아니라 **계약의 만료일**이다 — 그 해 12월 31일이면
+   * 만료(6월 30일)까지 반년 안이라 창이 열려 있다.
+   */
+  state.date = `${startYear - 1}-12-31`;
+  const outsider = state.players.find(
+    (p) => p.teamId !== state.userTeamId && isClubTeam(p.teamId) && activeContract(state, p.id),
+  )!;
+  activeContract(state, outsider.id)!.until = `${startYear}-06-30`;
+
+  const YEARS = 3;
+  const WAGE = 20_000;
+  const before = {
+    teamId: outsider.teamId,
+    wages: weeklyWagesOf(state, state.userTeamId),
+    budget: financeOf(state, state.userTeamId).transferBudget,
+    balance: financeOf(state, state.userTeamId).balance,
+    transfers: state.transfers.length,
+  };
+  const negotiation = stagedNegotiation(state, {
+    id: "neg-pre-fixture",
+    kind: "buy",
+    playerId: outsider.id,
+    counterpartTeamId: outsider.teamId,
+    fee: 0,
+    weeklyWage: WAGE,
+    years: YEARS,
+    medical: null,
+    precontract: true,
+  });
+  const settled = acceptDeal(state, negotiation.id);
+  const pending = pendingContractOf(state, outsider.id);
+
+  it("확정해도 선수는 옮기지 않는다 — `pending` 계약 한 줄만 선다", () => {
+    expect(settled.ok).toBe(true);
+    expect(outsider.teamId).toBe(before.teamId);
+    expect(pending?.teamId).toBe(state.userTeamId);
+    // 옛 계약은 발효일까지 그대로 활성이다 — 발효 전까지 그는 남의 선수다
+    expect(activeContract(state, outsider.id)?.teamId).toBe(before.teamId);
+    expect(
+      state.contracts.filter((c) => c.gamePlayerId === outsider.id && c.status === "pending"),
+    ).toHaveLength(1);
+  });
+
+  it("원장도 돈도 움직이지 않는다 — 이적료가 없다", () => {
+    expect(state.transfers).toHaveLength(before.transfers);
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(before.budget);
+    expect(financeOf(state, state.userTeamId).balance).toBe(before.balance);
+  });
+
+  it("`pending`은 주급 총액에 세어지지 않는다", () => {
+    expect(weeklyWagesOf(state, state.userTeamId)).toBe(before.wages);
+  });
+
+  it("연수는 계약일이 아니라 발효일이 센다", () => {
+    expect(pending?.since).toBe(start);
+    // 계약일(12월 31일)로 세면 한 해 짧은 `${startYear + 2}-06-30`이 된다 (§5-1)
+    expect(pending?.until).toBe(`${startYear + YEARS}-06-30`);
+  });
+
+  it("같은 선수를 두 번 예약하지 못한다", () => {
+    const again = stagedNegotiation(state, {
+      id: "neg-pre-fixture-2",
+      kind: "buy",
+      playerId: outsider.id,
+      counterpartTeamId: outsider.teamId,
+      fee: 0,
+      weeklyWage: WAGE,
+      years: YEARS,
+      medical: null,
+      precontract: true,
+    });
+    const twice = acceptDeal(state, again.id);
+    expect(twice.ok).toBe(false);
+    expect(again.status).toBe("expired");
+    expect(
+      state.contracts.filter((c) => c.gamePlayerId === outsider.id && c.status === "pending"),
+    ).toHaveLength(1);
+  });
+
+  /**
+   * 「방향은 모든 줄에 실린다」의 사전 계약판 (transfer.md §1) — 빠지는 자리를 하나
+   * 두면 GM이 「영입」을 읽고 오늘 합류하는 장면을 확정한다.
+   */
+  it("요약 줄·단건·주의 줄이 모두 갈래를 `사전 계약`으로 적는다", () => {
+    const live = stagedNegotiation(state, {
+      id: "neg-pre-fixture-3",
+      kind: "buy",
+      playerId: outsider.id,
+      counterpartTeamId: outsider.teamId,
+      fee: 0,
+      weeklyWage: WAGE,
+      years: YEARS,
+      medical: null,
+      precontract: true,
+    });
+    expect(describeNegotiations(state)).toContain("사전 계약");
+    expect(describeNegotiation(state, live.id)).toContain("사전 계약");
+    expect(pendingVerdicts(state).find((v) => v.negotiation.id === live.id)?.subject).toContain(
+      "사전 계약",
+    );
+    live.status = "expired";
+  });
+
+  it("남과 약속한 우리 선수에게는 재계약을 열 수 없다", () => {
+    const ours = playersOf(state, state.userTeamId)[0]!;
+    const rival = state.teams.find((t) => t.id !== state.userTeamId && isClubTeam(t.id))!;
+    state.contracts.push({
+      id: `c-pre-rival-${ours.id}`,
+      gamePlayerId: ours.id,
+      teamId: rival.id,
+      weeklyWage: 50_000,
+      since: start,
+      until: `${startYear + 2}-06-30`,
+      status: "pending",
+    });
+    const opened = openRenewal(state, { playerId: ours.id, weeklyWage: 90_000, years: 3 });
+    expect(opened.ok).toBe(false);
+    expect(opened.message).toContain("다른 구단");
+    expect(openNegotiationFor(state, ours.id)).toBeNull();
   });
 });

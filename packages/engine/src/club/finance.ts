@@ -1237,6 +1237,8 @@ function contractChainsOf(state: GameState, teamId: string): Map<string, Contrac
   const chains = new Map<string, Contract[]>();
   for (const contract of state.contracts) {
     if (contract.teamId !== teamId) continue;
+    // 발효 대기 계약은 취득 사슬에 들지 않는다 — 아직 우리 선수가 아니다 (transfer.md §11)
+    if (contract.status === "pending") continue;
     const chain = chains.get(contract.gamePlayerId);
     if (chain) chain.push(contract);
     else chains.set(contract.gamePlayerId, [contract]);

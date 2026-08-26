@@ -44,6 +44,50 @@ export const InjurySchema = z.object({
 });
 export type Injury = z.infer<typeof InjurySchema>;
 
+/**
+ * **부상 위험 등급과 그 원인** — 세이브에 남지 않는 파생의 낱말 (player.md §5.3).
+ *
+ * 값을 만드는 것은 시뮬의 저울 하나뿐이다(`injuryRiskOf` — `packages/sim`이 경기의
+ * `injuryWeight`에서 곧장 파생한다). 여기 있는 것은 **화면·조회·GM이 같은 말을
+ * 쓰게 하는 표**다 — 등급의 라벨이 두 벌이면 같은 선수가 명단에서는 「높음」,
+ * 대사에서는 「위험」이 된다 (`INJURY_SEVERITY_KO`와 같은 규칙).
+ */
+export type InjuryRiskGrade = "low" | "elevated" | "high";
+
+/** 저울을 들어 올린 항 — 세 코드가 곧 `injuryWeight`의 세 항이다 */
+export type InjuryRiskCause = "fatigue" | "proneness" | "strength";
+
+export const INJURY_RISK_GRADE_KO: Record<InjuryRiskGrade, string> = {
+  low: "낮음",
+  elevated: "보통",
+  high: "높음",
+};
+
+/**
+ * 원인의 한 낱말 — **성향은 배수가 아니라 「부상 이력」으로 읽힌다.**
+ * 감독에게 1.8이라는 수는 리그 평균이 1.0이라는 사실을 함께 쥐어야 뜻이 서고,
+ * 그 분포를 볼 자리는 어디에도 없다 (player.md §10).
+ */
+export const INJURY_RISK_CAUSE_KO: Record<InjuryRiskCause, string> = {
+  fatigue: "피로",
+  proneness: "부상 이력",
+  strength: "몸싸움",
+};
+
+/**
+ * 등급과 원인 한 덩어리 — `높음(피로·부상 이력)`.
+ *
+ * 조회 카드·명단 줄·스냅샷 주의 줄·수석코치 카드·심경 앵커가 **같은 모양**을 쓴다.
+ * 자리마다 따로 이으면 같은 사실이 「높음 — 피로, 이력」과 「위험(피로·성향)」으로
+ * 갈리고, 감독은 그게 같은 값인지 알 수 없다.
+ *
+ * 원인이 비면(`low`) 등급만 낸다 — 빈 괄호는 사실이 아니라 자국이다.
+ */
+export function injuryRiskText(grade: InjuryRiskGrade, causes: readonly InjuryRiskCause[]): string {
+  const why = causes.map((c) => INJURY_RISK_CAUSE_KO[c]).join("·");
+  return why.length === 0 ? INJURY_RISK_GRADE_KO[grade] : `${INJURY_RISK_GRADE_KO[grade]}(${why})`;
+}
+
 // ── 징계 ──────────────────────────────────────────────
 export const BookingSchema = z.object({
   gamePlayerId: z.string().min(1),
@@ -81,8 +125,17 @@ export const ContractSchema = z.object({
   weeklyWage: z.number().min(0),
   since: DateString,
   until: DateString,
-  /** active = 선수당 정확히 1건 */
-  status: z.enum(["active", "ended"]),
+  /**
+   * `active` = 선수당 정확히 1건 · `ended` = 지난 계약 · **`pending` = 아직 발효하지
+   * 않은 계약**.
+   *
+   * `pending`은 사전 계약(보스만)이 남기는 줄이다 (→ docs/simulation/transfer.md §1-4).
+   * `since`가 미래(다음 7월 1일)이고, 시즌 전환이 그날 `active`로 바꾸며 선수를 옮긴다.
+   * ⚠️ **활성이 아니다** — 주급 총액·등록 명단·계약 사슬 어디에도 세어지지 않고
+   * `activeContract`가 고르지 않는다. 세면 아직 오지도 않은 선수의 주급이 이번 주
+   * 원장에 실린다 (§11).
+   */
+  status: z.enum(["active", "ended", "pending"]),
   /**
    * **어떤 자리로 왔는가** — 계약에 적히는 약속이다 (→ docs/data/people.md §5-2).
    *
@@ -99,6 +152,22 @@ export const ContractSchema = z.object({
   expiryWarnedStage: z.number().int().positive().optional(),
 });
 export type Contract = z.infer<typeof ContractSchema>;
+
+/**
+ * **사전 계약이 열리는 잔여 계약 기간(개월)** — 반년이다
+ * (→ docs/simulation/transfer.md §1-4).
+ *
+ * 계약은 어느 문으로 들어왔든 6월 30일에 끝나므로(§5-1) 이 창은 실제로 **12월 말에
+ * 열려 만료일에 닫힌다** — 1월 1일이면 언제나 열려 있다.
+ */
+export const PRECONTRACT_MONTHS = 6;
+
+/**
+ * 그 개월을 **일수로** — 경계를 하루로 딱 떨어지게 재기 위해서다. 잔여를 연 단위
+ * 소수(`contractYearsLeft`)로 재면 같은 날이 부동소수 나눗셈의 어느 쪽에 앉느냐로
+ * 갈린다: 창의 문턱은 감독이 달력에서 셀 수 있는 값이어야 한다.
+ */
+export const PRECONTRACT_DAYS = Math.round((365 * PRECONTRACT_MONTHS) / 12);
 
 // ── 이적 ──────────────────────────────────────────────
 export const TransferWindowSchema = z.object({
@@ -135,6 +204,12 @@ export const TransferReasonSchema = z.enum([
   "release-unilateral",
   /** 계약이 그냥 끝났다 */
   "contract-expiry",
+  /**
+   * 반년 전에 맺은 사전 계약이 발효했다 (→ docs/simulation/transfer.md §1-4).
+   * `contract-expiry`와 갈라 적는 이유는 라커룸이 받는 사실이 다르기 때문이다 —
+   * 하나는 계약이 끝나 무소속으로 나간 것이고, 이것은 **가기로 정해 두고 간 것**이다.
+   */
+  "precontract",
   "retire",
   "youth-callup",
 ]);
@@ -605,6 +680,17 @@ export const NegotiationSchema = z.object({
    * 일이 없다. 구 세이브엔 없어 optional (세이브 버전을 올리지 않는다).
    */
   medical: MedicalSchema.optional(),
+  /**
+   * **사전 계약인가** — 이적료 없이 다음 7월 1일 합류를 약속하는 영입
+   * (→ docs/simulation/transfer.md §1-4). 갈래는 여전히 `buy`다: 사전 계약은
+   * `NegotiationKind`의 새 갈래가 아니라 **영입 갈래의 조건**이라, 관문이 하나로
+   * 줄고 확정이 `pending` 계약을 쓴다는 것만 다르다.
+   *
+   * 오퍼를 넣는 날 조건(잔여 ≤ `PRECONTRACT_DAYS` · 이적료 0)으로 정해져 협상에
+   * 굳는다 — 라운드마다 다시 파생하면 흥정 중에 창이 닫히는 날 같은 테이블이
+   * 중간부터 다른 갈래가 된다. 구 세이브엔 없어 optional.
+   */
+  precontract: z.boolean().optional(),
 });
 export type Negotiation = z.infer<typeof NegotiationSchema>;
 

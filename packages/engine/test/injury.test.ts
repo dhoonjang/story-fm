@@ -10,6 +10,7 @@ import {
   easeProneness,
   finalizeMatch,
   injuryProneness,
+  injuryRiskFor,
   isInjured,
   openInjuryFor,
   playerById,
@@ -117,6 +118,23 @@ describe("부상 성향 — 개인별 확률로 관리된다", () => {
     const seasonsToFloor = (1 - 0.55) / FALL_PER_APPEARANCE / 50;
     expect(seasonsToFloor).toBeGreaterThan(3);
     expect(seasonsToFloor).toBeLessThan(10);
+  });
+
+  /**
+   * **등급이 장부의 성향을 읽는가** — 저울과 경계는 시뮬의 몫이고
+   * (`packages/sim/test/match-engine.test.ts`) 여기서 재는 것은 그 사이의 배선이다.
+   * 이 한 줄이 없으면 성향이 아무리 쌓여도 화면·GM은 언제나 성향 1의 등급을 본다.
+   */
+  it("성향이 쌓이면 위험 등급도 따라 오른다 (injuryRiskFor)", () => {
+    const state = createTestGame(11);
+    const [p] = playersOf(state, state.userTeamId);
+    p!.state.condition = 100;
+    expect(injuryRiskFor(p!).grade).toBe("low");
+    for (let i = 0; i < 40; i++) raiseProneness(p!, "major");
+    expect(pronenessValue(p!)).toBe(2.2);
+    const risk = injuryRiskFor(p!);
+    expect(risk.grade).not.toBe("low");
+    expect(risk.causes).toContain("proneness");
   });
 
   it("부상 발생이 그 선수의 성향을 실제로 올린다 (openInjuryFor)", () => {
