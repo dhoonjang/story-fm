@@ -1,5 +1,5 @@
-import { YELLOWS_PER_SUSPENSION } from "@story-fm/domain";
-import { playerById, seasonYellowsOf, type GameState } from "../core/state";
+import { addToSeasonStat, YELLOWS_PER_SUSPENSION } from "@story-fm/domain";
+import { ensureSeasonStat, playerById, seasonYellowsOf, type GameState } from "../core/state";
 
 /** 한 장의 카드가 장부에 남긴 것 — 발부한 정지, 물린 정지, 감독에게 갈 한 줄 */
 export type CardRuling = {
@@ -50,6 +50,16 @@ export function recordCard(
     card: input.card,
     minute: input.minute,
   });
+  /**
+   * **시즌 합계도 카드가 지나는 이 문에서 적힌다** (match.md §6). 마감 쪽에서 따로
+   * 세면 연장의 카드가 한쪽에만 남는다 — 연장은 마감을 다시 지나지 않는다.
+   * 두 번째 경고는 `yellow` 한 줄 + `red` 한 줄로 들어오므로 합계도 그 두 줄을 그대로
+   * 받는다: 장부에 남는 모양과 같다.
+   */
+  addToSeasonStat(
+    ensureSeasonStat(state, input.playerId, player.teamId),
+    input.card === "yellow" ? { yellows: 1 } : { reds: 1 },
+  );
 
   if (input.card === "yellow") {
     // 두 번째 경고 — 곧 올 `red_card` 한 건이 이 사건의 정지다. 누적은 세지 않는다

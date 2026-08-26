@@ -44,6 +44,8 @@ import {
   playPreseason,
 } from "./helpers";
 import {
+  EXTRA_TIME_FULL_MINUTES,
+  FULL_TIME_MINUTES,
   normalizeCauses,
   positionGroupOf,
   positionGroupOfPlayer,
@@ -160,6 +162,62 @@ describe("경기 흐름 (overview §4)", () => {
     const possession = result.possession;
     if (!possession) throw new Error("점유가 결과에 남지 않았습니다");
     expect(possession.home + possession.away).toBeCloseTo(1, 6);
+  });
+
+  /**
+   * **시즌 기록은 그 경기가 낸 수 그대로 쌓인다** (match.md §6).
+   *
+   * 마감이 선수별 기록을 팀 합계로만 접고 버리던 자리다. 리더보드(#556)가 읽는
+   * 것이 이 합이므로, 여기서 한 칸이라도 새면 "슛 대비 골"이 조용히 틀린다.
+   * 양 팀 모두 본다 — 우리 것만 적으면 리그가 우리 팀만의 규칙으로 돈다.
+   */
+  it("마감이 시즌에 얹은 슛·선방이 그 경기의 팀 합계와 같다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    const fixture = state.matches.find(
+      (m) =>
+        m.date === state.date &&
+        !m.result &&
+        (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    );
+    if (!fixture) throw new Error("오늘 경기를 찾지 못했습니다");
+    // 마감이 얹은 몫만 본다 — 이 경기 앞의 행은 그대로 두고 차이를 잰다
+    const before = new Map(
+      state.seasonStats.map((s) => [`${s.gamePlayerId}\u0000${s.teamId}`, { ...s }] as const),
+    );
+    playMockMatch(state);
+
+    const result = state.matches.find((m) => m.id === fixture.id)?.result;
+    if (!result) throw new Error("결과가 남지 않았습니다");
+    const added = (playerId: string, teamId: string, key: "shots" | "saves" | "minutes") => {
+      const row = state.seasonStats.find(
+        (s) => s.gamePlayerId === playerId && s.teamId === teamId && s.season === state.season,
+      );
+      return (row?.[key] ?? 0) - (before.get(`${playerId}\u0000${teamId}`)?.[key] ?? 0);
+    };
+    const sumOver = (
+      lineup: readonly string[],
+      teamId: string,
+      key: "shots" | "saves" | "minutes",
+    ) => lineup.reduce((total, id) => total + added(id, teamId, key), 0);
+
+    const home = result.homeLineup ?? [];
+    const away = result.awayLineup ?? [];
+    expect(home.length).toBeGreaterThanOrEqual(11);
+    expect(sumOver(home, fixture.homeTeamId, "shots")).toBe(result.homeShots ?? 0);
+    expect(sumOver(away, fixture.awayTeamId, "shots")).toBe(result.awayShots ?? 0);
+    // 선방은 골키퍼의 칸이다 — 상대의 유효슈팅이 그 수의 상한이다
+    expect(sumOver(home, fixture.homeTeamId, "saves")).toBeLessThanOrEqual(result.awayShots ?? 0);
+    /**
+     * 출전 분의 합은 **셔츠 열한 장 × 경기 길이**에서 퇴장이 비운 시간을 뺀 값이다 —
+     * 교체는 짝으로 시간을 이어받고, 퇴장은 그 자리를 끝까지 비운다.
+     */
+    const fullMinutes = result.aet ? EXTRA_TIME_FULL_MINUTES : FULL_TIME_MINUTES;
+    const emptied = (which: "home" | "away") =>
+      (result.events ?? [])
+        .filter((e) => e.type === "red_card" && e.team === which)
+        .reduce((sum, e) => sum + Math.max(0, fullMinutes - e.minute), 0);
+    expect(sumOver(home, fixture.homeTeamId, "minutes")).toBe(11 * fullMinutes - emptied("home"));
+    expect(sumOver(away, fixture.awayTeamId, "minutes")).toBe(11 * fullMinutes - emptied("away"));
   });
 
   it("경기 중 전술 변경은 패킷을 재계산한다", () => {

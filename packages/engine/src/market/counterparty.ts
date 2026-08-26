@@ -27,6 +27,7 @@ import {
 import { squadStatusOf } from "../squad/promises";
 import { KIND_KO, counterpartOf, pendingOffer, respondOffer, splitLabel } from "./negotiation";
 import { agentForPlayer } from "../world/persona";
+import { interestLine } from "./interest";
 import { contractYearsLeft, hasIssue, playerById, teamName, type GameState } from "../core/state";
 import { formatMoney } from "../club/finance";
 
@@ -346,6 +347,7 @@ function dossierOf(state: GameState, negotiation: Negotiation, player: GamePlaye
   const us = teamName(state.userTeamId);
   const them = counterpartOf(negotiation, player);
   const money = negotiation.kind === "release" ? "정산금" : "이적료";
+  const rivals = interestLine(state, player.id);
   return [
     `[오퍼 이력] 기한 ${negotiation.expiresOn}`,
     ...negotiation.rounds.map(
@@ -371,6 +373,15 @@ function dossierOf(state: GameState, negotiation: Negotiation, player: GamePlaye
     ...((negotiation.pitched?.length ?? 0) > 0
       ? [`[사실로 확인된 이야기] ${negotiation.pitched!.map((k) => PITCH_CLAIM_KO[k]).join(" · ")}`]
       : []),
+    /**
+     * **경쟁 관심** — 이 테이블 밖에서 같은 선수를 두고 움직이는 구단
+     * (→ docs/simulation/transfer.md §1-2). 없으면 줄이 서지 않는다.
+     *
+     * 판정하는 쪽이 알아야 할 사실이라 서류에 든다: 갈 곳이 여럿인 선수는 우리
+     * 오퍼를 기다릴 이유가 그만큼 적다. 그 값은 코어가 이미 확률에 넣었고
+     * (`dealOdds`의 「다른 구단의 관심」), 여기 실리는 것은 그 근거다.
+     */
+    ...(rivals === null ? [] : [`[경쟁 관심] ${rivals}`]),
   ];
 }
 

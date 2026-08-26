@@ -7,6 +7,7 @@ import {
   createGame,
   financeOf,
   generateIncomingOffers,
+  tickInterests,
   incomingOffers,
   interpretBackgroundHeuristic,
   openNegotiationFor,
@@ -252,8 +253,10 @@ describe("mock GM — 이적 협상", () => {
   it("받은 오퍼는 감독의 말에 따라 거절·조정·수락된다", () => {
     const state = newGame();
     const digest: string[] = [];
-    for (let i = 0; i < 60 && incomingOffers(state).length === 0; i++) {
+    // tick과 같은 순서 — 오퍼는 `bidding`까지 오른 관심에서 나온다 (transfer.md §1-2)
+    for (let i = 0; i < 90 && incomingOffers(state).length === 0; i++) {
       state.date = addDays(state.date, 1);
+      tickInterests(state, digest);
       generateIncomingOffers(state, digest);
     }
     const incoming = incomingOffers(state)[0]!;

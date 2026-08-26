@@ -337,6 +337,8 @@ export interface QuickResult {
   awayXg: number;
   homeExpectedGoals: number;
   awayExpectedGoals: number;
+  /** 선수별 슛·xG·선방 — 호출부가 시즌 기록으로 접는다 (match.md §6) */
+  playerStats: Record<string, QuickStatLine>;
 }
 
 /**
@@ -358,6 +360,37 @@ interface QuickShot {
   outcome: "goal" | "saved" | "blocked" | "off_target";
   /** 어디서 나온 슛인가 — 세트피스 득점 비율이 이 칸으로 세어진다 (match.md §1.4) */
   origin: ShotOrigin;
+}
+
+/**
+ * 간이 시뮬이 **시즌 기록에 넘기는 선수 한 줄** (match.md §7).
+ *
+ * 구간 시뮬의 `MatchStatLine`과 같은 칸을 쓰되 셋뿐이다 — 결과에 남기지 않고 곧바로
+ * 접히므로(§4) 패스·코너처럼 시즌이 읽지 않는 것은 세지 않는다.
+ */
+export interface QuickStatLine {
+  shots: number;
+  xg: number;
+  saves: number;
+}
+
+/**
+ * 슛과 선방을 선수별로 접는다 — 슛·xG는 슈터에게, 선방은 막아선 골키퍼에게.
+ * 팀 합계(`homeShots`·`homeXg`)와 **같은 슛 목록**에서 나오므로 두 수가 갈리지 않는다.
+ */
+function statLinesOf(
+  shots: readonly QuickShot[],
+  saves: Readonly<Record<string, number>>,
+): Record<string, QuickStatLine> {
+  const lines: Record<string, QuickStatLine> = {};
+  const lineOf = (id: string): QuickStatLine => (lines[id] ??= { shots: 0, xg: 0, saves: 0 });
+  for (const shot of shots) {
+    const line = lineOf(shot.shooterId);
+    line.shots += 1;
+    line.xg += shot.xg;
+  }
+  for (const [id, count] of Object.entries(saves)) lineOf(id).saves += count;
+  return lines;
 }
 
 const fallbackSlot = (player: GamePlayer): LineupSlot => {
@@ -463,11 +496,14 @@ function runTimeline(input: TimelineInput): {
   cards: QuickCard[];
   subs: QuickSub[];
   possession: { home: number; away: number };
+  /** 골키퍼 id → 선방 수 — 막아선 사람은 그 분의 온필드에서만 나온다 */
+  saves: Record<string, number>;
 } {
   const { squads, from, to, rng } = input;
   const shots: QuickShot[] = [];
   const cards: QuickCard[] = [];
   const subs: QuickSub[] = [];
+  const saves: Record<string, number> = {};
   const yellowed = new Set<string>(input.priorYellows ?? []);
   const sentOffAt = new Map<string, number>();
   const score = { home: 0, away: 0 };
@@ -689,7 +725,22 @@ function runTimeline(input: TimelineInput): {
       const cut = goalAt ?? next;
       const kept = goalAt === undefined ? rolled : rolled.filter((s) => s.minute <= goalAt);
       shots.push(...kept);
-      for (const shot of kept) if (shot.outcome === "goal") score[shot.side] += 1;
+      for (const shot of kept) {
+        if (shot.outcome === "goal") {
+          score[shot.side] += 1;
+          continue;
+        }
+        if (shot.outcome !== "saved") continue;
+        /**
+         * 막아선 골키퍼 — **구간 시뮬의 `pushSave`와 같은 규칙**이다: 그 분에 골문에
+         * 선 사람이고, 퇴장한 사람은 막지 않는다(`activeAt`이 이미 뺀다).
+         */
+        const against = shot.side === "home" ? "away" : "home";
+        const keeper = activeAt(against, shot.minute).find(
+          (p) => positionGroupOfPlayer(p) === "GK",
+        );
+        if (keeper) saves[keeper.id] = (saves[keeper.id] ?? 0) + 1;
+      }
       weighted.home += packet.guide.possession.home * (cut - t);
       weighted.away += packet.guide.possession.away * (cut - t);
       totalMinutes += cut - t;
@@ -724,6 +775,7 @@ function runTimeline(input: TimelineInput): {
     shots: shots.sort((a, b) => a.minute - b.minute),
     cards,
     subs,
+    saves,
     possession:
       totalMinutes > 0
         ? { home: weighted.home / totalMinutes, away: weighted.away / totalMinutes }
@@ -753,6 +805,8 @@ export interface ExtraTimeResult {
   awayXg: number;
   homeExpectedGoals: number;
   awayExpectedGoals: number;
+  /** 선수별 슛·xG·선방 — 90분과 같은 칸이다. 출전은 이미 섰으므로 얹는 것은 이것뿐 */
+  playerStats: Record<string, QuickStatLine>;
 }
 
 /**
@@ -855,6 +909,7 @@ export function simulateExtraTime(
     awayXg: sum("away", (shot) => shot.xg),
     homeExpectedGoals: sum("home", (shot) => shot.goalProbability),
     awayExpectedGoals: sum("away", (shot) => shot.goalProbability),
+    playerStats: statLinesOf(sampled.shots, sampled.saves),
   };
 }
 
@@ -946,5 +1001,6 @@ export function quickSimulate(
     awayXg: sum("away", (shot) => shot.xg),
     homeExpectedGoals: sum("home", (shot) => shot.goalProbability),
     awayExpectedGoals: sum("away", (shot) => shot.goalProbability),
+    playerStats: statLinesOf(sampled.shots, sampled.saves),
   };
 }

@@ -10,11 +10,13 @@ import {
 } from "./persona";
 import {
   boardExpectationText,
+  INTEREST_STAGE_KO,
   milestonePhrase,
   PLAYER_ISSUE_REASONS,
   PROMISE_KIND_KO,
   TRANSFER_REQUEST_REASON_KO,
   type BoardExpectationCode,
+  type InterestStage,
   type MilestoneCode,
   type PlayerIssueReason,
   type PromiseKind,
@@ -89,6 +91,12 @@ export const PressFactKindSchema = z.enum([
   "contract-demand",
   /** 타 구단의 관심 — 최근 창에서 거절·만료된 오퍼 (다가옴 · people.md §8) */
   "interest",
+  /**
+   * **이적 루머** — 타 구단의 관심이 문의 이상으로 올랐다 (transfer.md §1-2).
+   * `interest`와 재는 것이 다르다: 그쪽은 **끝난 오퍼**를 세고 이쪽은 **아직 오퍼가
+   * 아닌 관심**을 센다.
+   */
+  "rumour",
   /** 방금 끝난 경기가 세운 기록 — 데뷔·첫 골·구단 통산 문턱·해트트릭 (match.md §6) */
   "milestone",
   /** 이번 시즌 뒤 은퇴 — 1월에 선 예고 (season.md §6) */
@@ -542,6 +550,12 @@ export function pressFactText(fact: PressFact): string {
         `최근 ${v.days ?? 0}일 타 구단 오퍼 ${v.offers ?? 0}건` +
         ` · 최고 ${formatMoney(v.fee ?? 0)}${name ? ` (${name})` : ""}` +
         ` · 시즌 출전 ${v.apps ?? 0}경기`
+      );
+    case "rumour":
+      // `tags[0]`이 사다리의 칸, `name`이 그 구단, `days`가 관심이 선 뒤 흐른 날
+      return (
+        `${name || "타 구단"} 관심 ${INTEREST_STAGE_KO[(sub ?? "watching") as InterestStage] ?? sub}` +
+        ` · ${v.days ?? 0}일째`
       );
     case "retirement":
       return (
