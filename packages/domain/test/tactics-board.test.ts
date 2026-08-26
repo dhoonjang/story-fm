@@ -4,6 +4,7 @@ import {
   DEFAULT_TACTICS,
   TACTIC_TOGGLE_KEYS,
   TacticsSpecSchema,
+  tacticToggleOf,
   migratePassStyle,
   migrateSignature,
   tacticToggleValue,
@@ -526,15 +527,29 @@ describe("전술 갈래 넷 — 축이 아니라 토글이다", () => {
     expect(tacticsDistance(on, { ...on, keeperDistribution: undefined })).toBe(4);
   });
 
-  /** 옛 세이브의 지문(갈래 없음)은 중립 spec으로 되돌아와야 거리가 0이 된다 */
-  it("중립을 적는 네 가지가 전부 한 값으로 접힌다", () => {
-    for (const spec of [
-      DEFAULT_TACTICS,
-      { ...DEFAULT_TACTICS, transition: null },
-      { ...DEFAULT_TACTICS, offsideTrap: false },
-      { ...DEFAULT_TACTICS, tackling: "normal" as const },
-    ]) {
-      for (const key of TACTIC_TOGGLE_KEYS) expect(tacticToggleValue(spec, key)).toBeNull();
+  /**
+   * 옛 세이브의 지문(갈래 없음)은 중립 spec으로 되돌아와야 거리가 0이 된다.
+   *
+   * 중립을 적는 길은 셋이다 — **없음**(옛 세이브), **`null`**(옛 세이브와 관용),
+   * **중립 토큰**(감독이 지시를 푸는 값). 셋이 한 값으로 접히지 않으면 같은 전술이
+   * 두 지문을 갖고 `drilled` 기억이 두 벌로 불어난다.
+   */
+  it("중립을 적는 세 가지가 전부 한 값으로 접힌다", () => {
+    for (const key of TACTIC_TOGGLE_KEYS) {
+      const token = tacticToggleOf(key).neutralValue;
+      // 불린 자리의 토큰은 문자열로 적혀 있다 — 세이브에 들어가는 것은 원시 값이다
+      const raw: unknown = token === "false" ? false : token;
+      for (const spec of [
+        DEFAULT_TACTICS,
+        { ...DEFAULT_TACTICS, [key]: null },
+        { ...DEFAULT_TACTICS, [key]: raw },
+      ] as TacticsSpec[]) {
+        expect(tacticToggleValue(spec, key), `${key}=${String(raw)}`).toBeNull();
+      }
+      // 그 토큰은 세이브에 그대로 들어간다 — 스키마가 받지 않으면 해제가 반려된다
+      expect(TacticsSpecSchema.safeParse({ ...DEFAULT_TACTICS, [key]: raw }).success, key).toBe(
+        true,
+      );
     }
   });
 });
