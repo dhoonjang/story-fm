@@ -206,6 +206,12 @@ export const AI_FITNESS = defineHarness({
     { metric: "상대 상위 14명 체력 (최저 팀)", role: "guard", min: 70, why: "라인업에 설 14명이 어느 시점에도 쓸 만해야 한다" },
     { metric: "우리와 상대의 체력 격차", role: "guard", max: 10, why: "하루 회복이 우리 팀에만 있던 시절 이 차이가 20을 넘었다" },
     { metric: "한 시즌 출전 인원 (맨시티)", role: "guard", min: 18, unit: "count", why: "열한 명이 다 뛰면 로테이션이 없는 것이다" },
+    { metric: "개막 감각 — 친선 3경기 이상", role: "guard", min: 60, unit: "score", why: "프리시즌을 다 치른 몸은 개막에 `올라옴`(60) 위여야 한다 — 그 아래면 친선 넷으로도 판을 못 맞춘다는 뜻이다 (player.md §5.4)" },
+    { metric: "개막 감각 — 친선 0경기", role: "measure", unit: "score", why: "한 경기도 안 뛴 몸이 어디에 서는가 — 훈련장의 천장(55) 부근이어야 정상이다" },
+    { metric: "개막 감각 차 (친선 3+ vs 0)", role: "guard", min: 10, unit: "score", why: "이 값이 0이면 프리시즌이 몸에 관해 아무것도 결정하지 않는 것이다 — 이 축이 존재하는 이유 자체의 단일 지표 (#539)" },
+    { metric: "개막 감각을 잰 인원", role: "measure", unit: "count", why: "두 무리가 비어 있으면 위 두 값이 뜻을 잃는다" },
+    { metric: "시즌 말 감각 (상위 14명)", role: "guard", min: 70, unit: "score", why: "시즌을 돈 주전은 개막보다 날카로워야 한다 — 아래로 새면 감쇠가 적립을 이기고 있다" },
+    { metric: "우리와 상대의 감각 격차", role: "guard", max: 10, unit: "score", why: "체력 격차와 같은 이유 — 이 축이 감독 팀에만 걸리면 리그 절반이 다른 규칙으로 무뎌진다" },
   ],
 });
 
@@ -384,6 +390,10 @@ export const APPROACH_RATE = defineHarness({
     { metric: "타 구단 관심(interest)", role: "measure", unit: "count", why: "오퍼를 그냥 흘려보낸 뒤 대리인이 오는 빈도 — 창 14일 안에 임계를 넘어야 선다" },
     { metric: "언론 유출(계단 4)", role: "guard", max: 8, unit: "count", why: "방치만 하는 감독의 상한. 자리가 아니라 사건이라 답할 곳이 없고 값은 다음 회견이 치른다 — 그보다 잦으면 회견이 유출 카드로만 채워진다" },
     { metric: "이적 요청(계단 5)", role: "guard", max: 7, unit: "count", why: "사다리 끝까지 방치된 불만의 수. 한 시즌 스쿼드의 한 줌을 넘으면 방치의 대가가 아니라 스쿼드 붕괴다 — 사유가 넷에서 여덟이 되며(people.md §5) 끝까지 갈 수 있는 갈래도 두 배가 됐고, 43명 스쿼드에서 일곱은 여전히 한 줌이다" },
+    { metric: "이적 요청(장부)", role: "guard", max: 10, unit: "count", why: "사유 셋이 함께 세운 요청의 총합 (transfer.md §1-1). 사다리에서 오는 것만 세는 위 줄과 달리 시장이 세우는 둘까지 든다 — 43명 스쿼드에서 한 시즌 열 건이면 이미 스쿼드의 한 줌이고, 그보다 잦으면 감독이 답하는 것이 아니라 매일 답하게 된다" },
+    { metric: "요청 사유 grievance", role: "measure", unit: "count", why: "사다리에서 온 것 — 위의 계단 5 줄과 같은 사건을 장부 쪽에서 센다. 둘이 어긋나면 계단 5가 장부에 안 적혔거나 요청이 걷힌 뒤 다시 섰다는 뜻이다" },
+    { metric: "요청 사유 blocked-move", role: "measure", unit: "count", why: "값이 붙은 오퍼를 같은 창에서 두 번 막은 수 — 아무 오퍼도 판정하지 않는 감독에게는 0이어야 한다" },
+    { metric: "요청 사유 bigger-club", role: "measure", unit: "count", why: "`BIGGER_CLUB_CHANCE`가 창이 열린 날마다 굴린 결과. 축소 세계의 감독 팀은 그 세계에서 가장 큰 구단이라 「우리보다 큰 구애자」가 서지 않아 **0이 정상**이다 — 0이 아니면 조건이나 전력 눈금이 움직인 것이고, 그때 재는 값은 이 줄이 아니라 시즌당 몇 건인가다" },
     { metric: "하루 두 건이 열린 날", role: "guard", max: 0, unit: "count", why: "하루 한 건의 문 (people.md §8)" },
     { metric: "동시에 열린 자리", role: "guard", max: 0, unit: "count", why: "열려 있는 다가옴은 하나뿐" },
     { metric: "같은 화자 7일 내 재개", role: "guard", max: 0, unit: "count", why: "같은 화자 쿨다운" },

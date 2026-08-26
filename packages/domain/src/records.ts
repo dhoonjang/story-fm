@@ -950,6 +950,50 @@ export const TransferListingSchema = z.object({
 export type TransferListing = z.infer<typeof TransferListingSchema>;
 
 /**
+ * **이적 요청의 사유** — 선수가 나가겠다고 말한 이유
+ * (→ docs/simulation/transfer.md §1-1).
+ *
+ * 셋이 두 곳에서 온다: `grievance`는 방치된 불만이 다가옴 사다리의 꼭대기까지 오른
+ * 것이고(docs/data/people.md §8), 나머지 둘은 **시장**이 세운다 — 감독이 값이 붙은
+ * 오퍼를 같은 창에서 두 번 막았거나(`blocked-move`), 갈 곳 많은 젊은 선수에게
+ * 우리보다 큰 구단의 관심이 붙었거나(`bigger-club`).
+ */
+export const TRANSFER_REQUEST_REASONS = ["grievance", "blocked-move", "bigger-club"] as const;
+export type TransferRequestReason = (typeof TRANSFER_REQUEST_REASONS)[number];
+
+export const TRANSFER_REQUEST_REASON_KO: Record<TransferRequestReason, string> = {
+  grievance: "쌓인 불만",
+  "blocked-move": "막힌 이적",
+  "bigger-club": "더 큰 무대",
+};
+
+/**
+ * 이적 요청 한 줄 — **선수가 감독에게 하는 가장 큰 말이 서는 자리.**
+ *
+ * 코어가 드는 것은 사유·날짜·감독의 답뿐이다. 무슨 말로 요청했는지는 장면의
+ * 것이고, 요청이 걷히는가는 전부 다른 장부에서 파생한다(불만 줄 · 이적창).
+ *
+ * **한 선수에게 서 있는 요청은 하나다** — 사유가 셋이라 두 줄이 설 수 있는데,
+ * 그러면 감독의 답 하나가 다른 줄을 답하지 않은 채로 남긴다
+ * (→ docs/simulation/transfer.md §11).
+ */
+export const TransferRequestSchema = z.object({
+  gamePlayerId: z.string().min(1),
+  since: DateString,
+  reason: z.enum(TRANSFER_REQUEST_REASONS),
+  /** 감독이 답한 날 — 없으면 아직 책상 위에 있다 */
+  answeredOn: DateString.optional(),
+  answer: z.enum(["accept", "refuse"]).optional(),
+  /**
+   * 회견이 이 요청을 실어 간 날 — 같은 사실을 두 번 묻지 않게 하는 자다
+   * (`pressLeaks`가 소비되는 것과 같은 결). **감독이 답하면 비워진다** — 요청이
+   * 선 날과 답한 날은 다른 사실이라 회견이 둘 다 싣는다.
+   */
+  pressedOn: DateString.optional(),
+});
+export type TransferRequest = z.infer<typeof TransferRequestSchema>;
+
+/**
  * 개인 훈련 프로그램 — **팀 훈련 위에 한 선수만 겨냥해 얹는 것.**
  *
  * `set_training`은 팀 전체 메뉴라 "이 선수의 결정력을 손보자", "풀백을 센터백으로

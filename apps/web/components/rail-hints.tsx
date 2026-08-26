@@ -49,6 +49,8 @@ const SKILL_ICON: Record<string, IconComponent> = {
   set_squad_level: IconPerson,
   substitute: IconPerson,
   set_transfer_list: IconPerson,
+  // 요청에 답하는 것도 사람이 오가는 일이다 — 등재와 한 갈래로 읽힌다
+  respond_transfer_request: IconPerson,
   release_player: IconPerson,
   // 해지 제안도 사람이 오가는 일이다 — 일방 해지(release_player)와 같은 그림으로 한 갈래로 읽힌다
   open_release: IconPerson,

@@ -7,6 +7,7 @@ import type {
   Negotiation,
   NegotiationVerdict,
   PlayerIssueReason,
+  PressAxis,
   SquadStatus,
   Transfer,
 } from "@story-fm/domain";
@@ -76,15 +77,21 @@ import { isClubTeam } from "../data/team-catalog";
 import { arrivingSquadLevel, canRegisterFor } from "../squad/registration";
 import { assignSquadNumber } from "../squad/numbers";
 import { userWageRoom } from "../club/board-request";
-import { marketBiasOf, squadShortfallText, transferWindowLabel, windowOpenForTeam } from "./market";
+import {
+  marketBiasOf,
+  squadShortfallText,
+  transferWindowLabel,
+  windowOpenForTeam,
+  windowStartFor,
+} from "./market";
 import { evaluatePitch, latitudeOf } from "./persuasion";
 import { bandOpen, clampToBand, counterBoundsOf, outgoingCounterFloor } from "./counter-bounds";
 import { derivedSquadStatus } from "../squad/promises";
 import { makeRng } from "../core/rng";
 import type { MarketSkillResult, SkillResult } from "../skills";
 import { grantManagerXP } from "../skills";
-import { item } from "../skills/brief";
-import { buildTransferPress, openPress } from "../club/press";
+import { deltaItems, item } from "../skills/brief";
+import { applyStanceOutcome, buildTransferPress, openPress, signed } from "../club/press";
 import { pickAnyPlayer } from "../core/player-ref";
 import {
   activeContract,
@@ -93,7 +100,9 @@ import {
   playerById,
   playersOf,
   pushNarrative,
+  standTransferRequest,
   teamName,
+  transferRequestOf,
   type GameState,
   hasIssue,
 } from "../core/state";
@@ -950,8 +959,11 @@ const LISTED_OFFER_CHANCE = 0.34;
 const LISTED_DISCOUNT = 0.22;
 /** 이적 요청이 선 선수에게 오퍼가 올 확률 — 나가고 싶다는 말은 시장에도 들린다 */
 const REQUESTED_OFFER_CHANCE = 0.25;
-/** 사는 쪽이 시장가에서 깎고 들어오는 폭 — 급한 쪽이 파는 쪽인 걸 안다 */
-const REQUESTED_DISCOUNT = 0.3;
+/**
+ * 사는 쪽이 시장가에서 깎고 들어오는 폭 — 급한 쪽이 파는 쪽인 걸 안다.
+ * 감독이 요청을 수락할 때 부를 수 있는 호가의 상한도 같은 선이다 (transfer.md §11).
+ */
+export const REQUESTED_DISCOUNT = 0.3;
 
 /**
  * 한 **사유의** 불만만 지운다 — 원인이 사라진 것만 푼다 (→ docs/data/people.md §5).
@@ -1047,6 +1059,159 @@ export function setTransferList(
       items: [
         item({ label: "등재", text: player.name }),
         item({ label: "호가", text: formatMoney(askingPrice), note: STANCE_NOTE[stance] }),
+      ],
+    },
+  };
+}
+
+/**
+ * 감독이 요청을 거부한 뒤 요청 확률이 걸리지 않는 기간 — 불만은 그대로 남는다
+ * (→ docs/simulation/transfer.md §1-1).
+ */
+export const REQUEST_REFUSED_COOLDOWN_DAYS = 30;
+
+/** 요청 하나가 옮기는 폭 — 사다리 꼭대기의 자리와 같은 자다 (`APPROACH_BAND` 3 × 계단 상한 3) */
+const REQUEST_BAND = 9;
+
+/**
+ * 답의 방향 — 공짜인 답은 없다. 놓아주면 라커룸을 얻고 보드를 잃고, 붙잡으면 그 반대다.
+ * 언론 축은 죽인다: 이 결정이 신문에 실리는 자리는 회견의 사실 카드이지 이 답이 아니다.
+ */
+const REQUEST_ANSWER: Record<"accept" | "refuse", Record<PressAxis, number>> = {
+  accept: { board: -0.4, media: 0, squad: 0.5, target: 1, team: 0 },
+  refuse: { board: 0.4, media: 0, squad: -0.6, target: -1, team: -0.3 },
+};
+
+/** 사석의 대화라 언론 축은 닿지 않는다 (다가옴과 같은 벌) */
+const REQUEST_AXES: readonly PressAxis[] = ["board", "squad", "target", "team"];
+
+const REQUEST_ANSWER_KO: Record<"accept" | "refuse", string> = {
+  accept: "수락",
+  refuse: "거부",
+};
+
+/**
+ * 요청을 수락할 때 서는 호가 — **요청 할인선 위로는 서지 못한다** (transfer.md §11).
+ * 감독이 더 높이 불러도 코어가 끌어내린다: 나가겠다고 말한 선수를 시장가에 파는 길이
+ * 있으면 수락이 아무것도 포기하지 않는 답이 된다.
+ */
+function requestedAskingPrice(state: GameState, player: GamePlayer, asked?: number) {
+  const market = marketValueOf(state, player);
+  const wanted = Math.max(0, Math.round(asked ?? askingPriceFor(state, player)));
+  const askingPrice = Math.min(wanted, Math.round(market * (1 - REQUESTED_DISCOUNT)));
+  return { market, askingPrice, capped: wanted > askingPrice };
+}
+
+/**
+ * `respond_transfer_request` — 감독이 이적 요청에 답한다. **판정형**이다.
+ *
+ * 수락은 값을 포기하는 결정이고 거부는 값을 미루는 결정이다
+ * (→ docs/simulation/transfer.md §1-1). 어느 쪽도 요청을 걷지 못한다 — 걷는 것은
+ * 원인(불만·창·이적)이지 답이 아니다.
+ *
+ * **감독은 한 번만 답한다.** 이미 답한 요청에 다시 답하면 사기와 평판이 같은
+ * 결정으로 몇 번이든 움직인다.
+ */
+export function respondTransferRequest(
+  state: GameState,
+  input: {
+    playerId: string;
+    answer: "accept" | "refuse";
+    /** 수락할 때 부르는 호가 — 요청 할인선 위로는 서지 못한다 */
+    askingPrice?: number;
+    note?: string;
+  },
+): SkillResult {
+  const pick = pickAnyPlayer(state, input.playerId);
+  if (!pick.ok) return { ok: false, message: pick.message };
+  const player = pick.player;
+  if (player.teamId !== state.userTeamId) {
+    return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
+  }
+  const found = transferRequestOf(state, player.id);
+  if (!found) {
+    return { ok: false, message: `${player.name}은(는) 이적을 요청하지 않았습니다` };
+  }
+  if (found.answeredOn !== undefined) {
+    const said = found.answer ? ` · ${REQUEST_ANSWER_KO[found.answer]}` : "";
+    return {
+      ok: false,
+      message: `${player.name}의 이적 요청에는 이미 답했습니다 (${found.answeredOn}${said})`,
+    };
+  }
+
+  const priced =
+    input.answer === "accept" ? requestedAskingPrice(state, player, input.askingPrice) : null;
+  if (priced) {
+    // 등재의 규칙(임대 잠금·소속)은 `setTransferList` 한 벌뿐이다 — 두 벌로 만들지 않는다
+    const listed = setTransferList(state, {
+      playerId: player.id,
+      listed: true,
+      askingPrice: priced.askingPrice,
+      ...(input.note === undefined ? {} : { note: input.note }),
+    });
+    if (!listed.ok) return listed;
+  }
+
+  /**
+   * 옛 세이브의 요청은 `PlayerState.transferRequestedOn`에서 파생된 줄이라 장부에
+   * 없다 — 밀어 넣지 않으면 감독의 답이 아무 데도 남지 않는다 (transfer.md §1-1).
+   */
+  const rows = (state.transferRequests ??= []);
+  let request = rows.find((r) => r.gamePlayerId === player.id);
+  if (!request) {
+    request = found;
+    rows.push(request);
+  }
+  request.answeredOn = state.date;
+  request.answer = input.answer;
+  // 요청이 선 날과 감독이 답한 날은 다른 사실이라, 회견이 둘 다 싣는다
+  delete request.pressedOn;
+
+  const effect = applyStanceOutcome(state, {
+    row: REQUEST_ANSWER[input.answer],
+    band: REQUEST_BAND,
+    targetPlayerId: player.id,
+    axes: REQUEST_AXES,
+  });
+  const axes: (readonly [label: string, value: number] | null)[] = [
+    ["보드", effect.board],
+    ["선수단", effect.squad],
+    effect.targetName ? [`${effect.targetName} 사기`, effect.target] : null,
+    ["팀 사기", effect.team],
+  ];
+  const moved = axes
+    .map((axis) => (axis === null ? null : signed(axis[0], axis[1])))
+    .filter((line): line is string => line !== null);
+  const suffix = moved.length > 0 ? ` — ${moved.join(" · ")}` : "";
+
+  const label = REQUEST_ANSWER_KO[input.answer];
+  pushNarrative(state, `${player.name} 이적 요청 ${label}`, 4);
+  const net = effect.board + effect.squad + effect.target + effect.team;
+  return {
+    ok: true,
+    tone: net >= 0 ? "good" : "bad",
+    message:
+      (priced
+        ? `${player.name}의 이적 요청을 수락했습니다 — 이적 리스트 등재, 호가 ${formatMoney(priced.askingPrice)}` +
+          (priced.capped
+            ? ` (요청 할인선까지 내렸습니다 · 시장가 ${formatMoney(priced.market)})`
+            : "")
+        : `${player.name}의 이적 요청을 거부했습니다 — 요청은 그대로 남고 ${REQUEST_REFUSED_COOLDOWN_DAYS}일간 오퍼가 붙지 않습니다`) +
+      suffix,
+    brief: {
+      head: `${player.name} 이적 요청 ${label}`,
+      items: [
+        ...(priced
+          ? [
+              item({
+                label: "호가",
+                text: formatMoney(priced.askingPrice),
+                ...(priced.capped ? { note: "요청 할인선" } : {}),
+              }),
+            ]
+          : []),
+        ...deltaItems(axes),
       ],
     },
   };
@@ -1268,12 +1433,25 @@ export function generateIncomingOffers(state: GameState, digest: string[]): void
   }
 
   /**
-   * **이적 요청이 선 선수가 그다음이다** (people.md §8 계단 5). 감독이 내놓지
+   * **이적 요청이 선 선수가 그다음이다** (transfer.md §1-1). 감독이 내놓지
    * 않았어도 나가고 싶어 하는 것을 시장이 알고, 그만큼 시장가 아래로 들어온다.
+   *
+   * 감독이 답한 요청에는 이 확률이 걸리지 않는다 — 수락한 선수는 이미 리스트에
+   * 올라 위의 리스트 확률이 태우고(등재된 선수에게 요청 확률이 다시 걸리면 같은
+   * 선수에게 하루 확률이 두 번 구른다 — transfer.md §11), 거부한 선수는
+   * `REQUEST_REFUSED_COOLDOWN_DAYS` 동안 식는다: 안 판다고 했는데 시장이 계속
+   * 두드리면 거부가 아무것도 아닌 것이 된다.
    */
-  const requested = playersOf(state, state.userTeamId).filter(
-    (p) => p.state.transferRequestedOn !== undefined && free(p),
-  );
+  const requested = playersOf(state, state.userTeamId).filter((p) => {
+    if (!free(p)) return false;
+    const request = transferRequestOf(state, p.id);
+    if (!request) return false;
+    if (request.answer === "accept" || listingOf(state, p.id) !== null) return false;
+    if (request.answer === "refuse" && request.answeredOn !== undefined) {
+      return diffDays(request.answeredOn, state.date) >= REQUEST_REFUSED_COOLDOWN_DAYS;
+    }
+    return true;
+  });
   if (requested.length > 0) {
     const pick = requested[Math.floor(rng() * requested.length)]!;
     if (rng() < REQUESTED_OFFER_CHANCE) {
@@ -1494,6 +1672,15 @@ function pickBuyer(state: GameState, player: GamePlayer, rng: () => number): str
 }
 
 /**
+ * 같은 창에서 값이 붙은 오퍼를 이만큼 막으면 그 자리에서 이적 요청이 선다 —
+ * 한 번은 감독의 결정이고 두 번은 선수의 결론이다 (→ docs/simulation/transfer.md §1-1).
+ */
+export const REQUEST_BLOCKS = 2;
+
+/** 막힌 이적이 남긴 것 — 아무것도, 불만만, 아니면 요청까지 */
+type BlockedMove = "none" | "issue" | "request";
+
+/**
  * 감독이 막은 이적 — **값이 붙은 자리를 막았을 때만 라커룸에 남는다**
  * (→ docs/data/people.md §5). 여덟 사유 가운데 이것만 문턱이 날짜가 아니라
  * **한 번의 결정**이다.
@@ -1502,7 +1689,11 @@ function pickBuyer(state: GameState, player: GamePlayer, rng: () => number): str
  *
  * 세 자리에서 걸러진다 — 임대 오퍼는 나가는 것이 아니라 다녀오는 것이라 세지 않고,
  * 헐값 오퍼(`isSeriousOffer`)를 물리는 것은 선수도 아는 옳은 결정이라 세지 않으며,
- * 이미 불만이 있는 선수에게 사유를 하나 더 얹지 않는다 — 라커룸은 사람으로 센다.
+ * **다른 사유의** 불만이 이미 있는 선수에게 사유를 하나 더 얹지 않는다 — 라커룸은
+ * 사람으로 센다.
+ *
+ * 두 번째부터는 줄이 늘지 않고 `count`만 오른다. `REQUEST_BLOCKS`에 이르면 불만이
+ * 아니라 **이적 요청**이 선다 (transfer.md §1-1).
  */
 function resentBlockedMove(
   state: GameState,
@@ -1510,18 +1701,51 @@ function resentBlockedMove(
   offer: Negotiation["rounds"][number],
   player: GamePlayer,
   counterpart: string,
-): boolean {
-  if (negotiation.kind !== "sell") return false;
-  if (!isSeriousOffer(state, player, offer.fee)) return false;
-  if (hasIssue(state, player.id)) return false;
-  state.issues.push({
-    gamePlayerId: player.id,
-    kind: "unhappy",
-    reason: "blocked-move",
-    since: state.date,
-  });
+): BlockedMove {
+  if (negotiation.kind !== "sell") return "none";
+  if (!isSeriousOffer(state, player, offer.fee)) return "none";
+  const issue = state.issues.find(
+    (i) => i.gamePlayerId === player.id && i.reason === "blocked-move",
+  );
+  if (!issue) {
+    if (hasIssue(state, player.id)) return "none";
+    state.issues.push({
+      gamePlayerId: player.id,
+      kind: "unhappy",
+      reason: "blocked-move",
+      count: 1,
+      since: state.date,
+    });
+    pushNarrative(state, `${player.name} 이적 거절 — ${counterpart} ${formatMoney(offer.fee)}`, 3);
+    return "issue";
+  }
+
+  /**
+   * **창이 바뀌면 1부터 다시 센다.** 지난 창에서 막은 일이 이번 창의 두 번째가 되면
+   * 감독이 한 시즌에 한 번씩 물린 거절 둘이 요청 하나로 합쳐진다.
+   */
+  const windowStart = windowStartFor(state, state.userTeamId);
+  const sameWindow = windowStart !== null && issue.since >= windowStart;
+  if (sameWindow) {
+    issue.count = (issue.count ?? 1) + 1;
+  } else {
+    issue.since = state.date;
+    issue.count = 1;
+  }
+
+  if (
+    (issue.count ?? 1) >= REQUEST_BLOCKS &&
+    standTransferRequest(state, player.id, "blocked-move")
+  ) {
+    pushNarrative(
+      state,
+      `${player.name} 이적 요청 — 막힌 이적 (${counterpart} ${formatMoney(offer.fee)})`,
+      4,
+    );
+    return "request";
+  }
   pushNarrative(state, `${player.name} 이적 거절 — ${counterpart} ${formatMoney(offer.fee)}`, 3);
-  return true;
+  return "issue";
 }
 
 /**
@@ -1582,12 +1806,17 @@ export function answerIncomingOffer(
     offer.verdict = "reject";
     negotiation.status = "rejected";
     const resented = resentBlockedMove(state, negotiation, offer, player, counterpart);
+    /** 불만이 남은 것과 요청이 선 것은 다른 사실이다 — 한 문장으로 접으면 감독이 못 읽는다 */
+    const RESENT_LINE: Record<Exclude<BlockedMove, "none">, string> = {
+      issue: ` · 값이 붙은 오퍼였습니다 — ${player.name}이(가) 알고 불만이 남습니다`,
+      request: ` · 이 창에서 값이 붙은 오퍼를 ${REQUEST_BLOCKS}번 막았습니다 — ${player.name}이(가) 이적을 요청했습니다`,
+    };
     return {
       ok: true,
       payload: card,
       message:
         `${counterpart}의 ${player.name} 오퍼를 거절했습니다` +
-        (resented ? ` · 값이 붙은 오퍼였습니다 — ${player.name}이(가) 알고 불만이 남습니다` : ""),
+        (resented === "none" ? "" : RESENT_LINE[resented]),
     };
   }
 

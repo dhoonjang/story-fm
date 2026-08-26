@@ -34,6 +34,8 @@ import type {
   ManagerPromise,
   SettlingEvent,
   TransferListing,
+  TransferRequest,
+  TransferRequestReason,
   PlayerTraining,
   PositionGroup,
   ReserveTrainingPolicy,
@@ -86,7 +88,7 @@ import {
   roleFit,
   standingScore,
 } from "@story-fm/domain";
-import { profFactor, type MatchLedgerState } from "@story-fm/sim";
+import { profFactor, SHARPNESS_PRESEASON, type MatchLedgerState } from "@story-fm/sim";
 import type { AiDeal } from "../market/ai-market";
 import {
   buildScheduleEntries,
@@ -651,6 +653,17 @@ export interface GameState {
    * (`generateIncomingOffers`). 옛 세이브엔 없다(로드 시 빈 배열).
    */
   transferList: TransferListing[];
+  /**
+   * **이적 요청** — 선수가 나가겠다고 말한 사실과 감독의 답
+   * (→ docs/simulation/transfer.md §1-1).
+   *
+   * 사유가 셋이라(사다리 · 막힌 이적 · 더 큰 무대) `PlayerState.transferRequestedOn`
+   * 하나로는 「왜」도 「감독이 답했는가」도 적을 자리가 없다. 그 필드는 파생의
+   * 폴백으로 남는다 — 장부가 비어 있는 옛 세이브에서 `transferRequestOf`가 그
+   * 날짜에서 `grievance` 한 줄을 만든다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  transferRequests?: TransferRequest[];
   /** 개인 훈련 프로그램 — 팀 훈련 위에 한 선수만 겨냥해 얹는다 */
   playerTraining: PlayerTraining[];
   /**
@@ -1247,6 +1260,20 @@ export function openInjury(state: GameState, playerId: string): Injury | null {
 }
 
 /**
+ * 지금 부상 중인 선수 id 전부 — **세계 전체를 하루에 한 번 훑는 자리**를 위한 것이다.
+ *
+ * `isInjured`를 선수마다 부르면 장부를 선수 수만큼 다시 훑는다. 한 번 만들어 두고
+ * 묻는 쪽이 재사용한다. 열린 부상의 정의(`returnedOn === null`)는 위와 같은 자다.
+ */
+export function openInjuryIds(state: GameState): Set<string> {
+  const ids = new Set<string>();
+  for (const injury of state.injuries) {
+    if (injury.returnedOn === null) ids.add(injury.gamePlayerId);
+  }
+  return ids;
+}
+
+/**
  * **마음이 떠 있는가** — 라커룸 불만(`state.issues`)이 걸린 선수.
  *
  * ⚠️ 이 질문에 `condition`으로 답하지 마라. 그 축은 경기 한 판에 30~50이 빠지는
@@ -1256,6 +1283,59 @@ export function openInjury(state: GameState, playerId: string): Injury | null {
  */
 export function hasIssue(state: GameState, playerId: string): boolean {
   return state.issues.some((i) => i.gamePlayerId === playerId);
+}
+
+/**
+ * **이 선수의 이적 요청** — 장부가 원본이고 `transferRequestedOn`이 폴백이다
+ * (→ docs/simulation/transfer.md §1-1).
+ *
+ * 옛 세이브는 날짜만 들고 있으므로 사유를 `grievance`로 읽는다: 그때는 요청이 서는
+ * 자리가 다가옴 사다리의 꼭대기뿐이었다.
+ */
+export function transferRequestOf(state: GameState, playerId: string): TransferRequest | null {
+  const row = (state.transferRequests ?? []).find((r) => r.gamePlayerId === playerId);
+  if (row) return row;
+  const since = playerById(state, playerId)?.state.transferRequestedOn;
+  return since === undefined ? null : { gamePlayerId: playerId, since, reason: "grievance" };
+}
+
+/** 아직 감독이 답하지 않은 요청들 — 책상 위에 놓인 것 */
+export function openTransferRequests(state: GameState): TransferRequest[] {
+  return (state.transferRequests ?? []).filter((r) => r.answeredOn === undefined);
+}
+
+/**
+ * 요청을 세운다 — **한 선수에게 한 줄뿐이다** (transfer.md §11). 이미 서 있으면
+ * 아무것도 하지 않고 `false`를 돌려준다: 사유가 셋이라 두 자리에서 같은 날 같은
+ * 선수를 세울 수 있는데, 그러면 감독의 답 하나가 다른 줄을 남긴다.
+ *
+ * ⚠️ **서 있는지는 `transferRequestOf`가 판정한다** — 장부만 보면 옛 세이브
+ * (`transferRequestedOn`만 있는 상태)에서 이미 선 요청 위에 오늘 날짜의 새 줄이
+ * 서고 다이제스트가 한 번 더 나간다.
+ *
+ * `PlayerState.transferRequestedOn`도 함께 적는다 — 시장·압력 눈금이 그 필드를
+ * 읽고, 옛 세이브와 새 세이브가 같은 값을 들어야 한다.
+ */
+export function standTransferRequest(
+  state: GameState,
+  playerId: string,
+  reason: TransferRequestReason,
+): boolean {
+  if (transferRequestOf(state, playerId) !== null) return false;
+  const player = playerById(state, playerId);
+  if (!player) return false;
+  (state.transferRequests ??= []).push({ gamePlayerId: playerId, since: state.date, reason });
+  player.state.transferRequestedOn = state.date;
+  return true;
+}
+
+/** 요청을 걷는다 — 원인이 사라졌거나 그 선수가 팀을 떠났을 때 */
+export function withdrawTransferRequest(state: GameState, playerId: string): void {
+  state.transferRequests = (state.transferRequests ?? []).filter(
+    (r) => r.gamePlayerId !== playerId,
+  );
+  const player = playerById(state, playerId);
+  if (player) player.state.transferRequestedOn = undefined;
 }
 
 export function isInjured(state: GameState, playerId: string): boolean {
@@ -1635,6 +1715,12 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
         form: randInt(rng, -1, 1) * 0.15,
         // 프리시즌 시작 — 잘 쉬고 돌아왔다
         condition: randInt(rng, 70, 86),
+        /**
+         * 몸은 쉬고 왔지만 **경기 감각은 무뎌진 채로 온다** (player.md §5.4).
+         * 시즌 전환이 세우는 값과 같은 자리에서 출발해야 첫 시즌의 프리시즌도
+         * 두 번째 시즌의 프리시즌과 같은 판이 된다.
+         */
+        sharpness: SHARPNESS_PRESEASON,
       },
       isCaptain: false,
     };
@@ -2674,6 +2760,7 @@ export function createGame(input: CreateGameInput): GameState {
     scoutReports: [],
     settlingEvents: [],
     transferList: [],
+    transferRequests: [],
     playerTraining: [],
     roleMemory: [],
     aiDeals: [],

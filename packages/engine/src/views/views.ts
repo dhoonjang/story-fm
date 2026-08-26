@@ -46,6 +46,10 @@ import {
   anchorOf,
   clampCondition,
   conditionLabel,
+  sharpnessBand,
+  sharpnessLabel,
+  sharpnessOf,
+  type SharpnessBand,
   defaultRoleOf,
   growthLabel,
   naturalPositionOf,
@@ -534,6 +538,17 @@ interface SquadViewRowMeta {
    * 쓰면 감독이 두 탭을 견주는 것만으로 안개가 걷힌다.
    */
   condition: ConditionRead;
+  /**
+   * **경기 감각 0~100** — 최근에 뛰었는가 (player.md §5.4). 체력과 다른 축이다:
+   * 하루 쉬어서 돌아오는 것이 아니라 출전 분이 올리고 결장이 깎는다.
+   *
+   * 안개를 지나지 않는다 — 원본이 출전 기록과 부상이고 둘 다 공개 사실이다.
+   */
+  sharpness: number;
+  /** 경기 감각의 말 — "실전"·"올라옴"·"무딤"·"굳음" (player.ts와 같은 경계) */
+  sharpnessLabel: string;
+  /** 등급 자체 — 화면이 색과 정렬을 이 경계로 맞춘다 */
+  sharpnessBand: SharpnessBand;
   /**
    * 지금 심경 — **코어가 고른 사실 카드**와, 결산(LLM)이 다시 쓴 한 줄(`moodOf`).
    * 문장은 화면이 쓴다 (`apps/web/lib/mood.ts` · overview.md §1 철칙 4).
@@ -2564,6 +2579,9 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           p.state.condition,
           liveSlot && liveMatchId ? { drain: worn[p.id] ?? 0, matchId: liveMatchId } : null,
         ),
+        sharpness: Math.round(sharpnessOf(p.state)),
+        sharpnessLabel: sharpnessLabel(sharpnessOf(p.state)),
+        sharpnessBand: sharpnessBand(sharpnessOf(p.state)),
         mood: moodOf(state, p),
         role: (livePacket
           ? liveSlot

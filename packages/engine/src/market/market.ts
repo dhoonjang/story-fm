@@ -22,7 +22,7 @@ import { isClubTeam, leagueOfTeam, teamCatalogById } from "../data/team-catalog"
 import { leagueOfTeamIn } from "../competition/promotion";
 import { euroCompetitionOf } from "../competition/europe";
 import { hashChannel } from "../core/rng";
-import { betterAtPosition, squadDepthOf } from "../squad/depth";
+import { betterAtPosition, squadDepthOf, type SquadDepth } from "../squad/depth";
 import { derivedSquadStatus } from "../squad/promises";
 import { archetypeTraitsOf } from "../world/player-persona";
 import { knowledgeOf, KNOWLEDGE_KO, type Knowledge } from "../squad/scouting";
@@ -1142,18 +1142,29 @@ export function unilateralSeveranceOf(state: GameState, playerId: string): numbe
  *
  * **선수가 없는 팀은 세지 않는다** — 그 자리에 아무도 없어 "더 나은 선수 0명"이
  * 되지만, 스쿼드가 빈 팀은 데려갈 구단이 아니라 데이터의 빈자리다.
+ *
+ * `suitorsOf`는 **구단 id를 돌려준다** — 「몇 곳인가」만이 아니라 「그중 우리보다 큰
+ * 곳이 있는가」를 묻는 자리가 있어서다(「더 큰 무대」 이적 요청 — transfer.md §1-1).
+ * 색인(`depth`)을 밖에서 넘기면 하루에 여러 선수를 재도 세계를 한 번만 훑는다.
  */
-function suitorCountOf(state: GameState, player: GamePlayer): number {
-  const depth = squadDepthOf(state);
+export function suitorsOf(
+  state: GameState,
+  player: GamePlayer,
+  depth: SquadDepth = squadDepthOf(state),
+): string[] {
   const squadSize = new Map<string, number>();
   for (const p of state.players) squadSize.set(p.teamId, (squadSize.get(p.teamId) ?? 0) + 1);
-  let count = 0;
+  const suitors: string[] = [];
   for (const team of state.teams) {
     if (team.id === state.userTeamId || !isClubTeam(team.id)) continue;
     if ((squadSize.get(team.id) ?? 0) === 0) continue;
-    if (depth.betterThan(team.id, player) === 0) count += 1;
+    if (depth.betterThan(team.id, player) === 0) suitors.push(team.id);
   }
-  return count;
+  return suitors;
+}
+
+function suitorCountOf(state: GameState, player: GamePlayer): number {
+  return suitorsOf(state, player).length;
 }
 
 /**
@@ -1670,6 +1681,25 @@ export { teamName, teamCatalogById };
 export function windowOpenForTeam(state: GameState, teamId: string, date = state.date) {
   const leagueId = leagueOfTeamIn(state, teamId);
   return windowOpenOn(state.windows, date, isMarketOnlyLeague(leagueId) ? leagueId : undefined);
+}
+
+/**
+ * **지금 세는 창의 시작일** — 두 사건이 같은 창의 것인지 재는 자
+ * (막힌 이적의 두 번째 거절 — transfer.md §1-1).
+ *
+ * 창이 닫혀 있어도 **마지막으로 열렸던 창**의 시작일을 돌려준다: 우리 창이 닫힌
+ * 9월에도 사우디·MLS는 우리 선수를 사 갈 수 있어(§1) 그 오퍼를 막은 일이 어느 창의
+ * 것인지 물을 자리가 있다. 아직 어떤 창도 열린 적이 없으면 `null`이다.
+ */
+export function windowStartFor(state: GameState, teamId: string, date = state.date): string | null {
+  const leagueId = leagueOfTeamIn(state, teamId);
+  const key = isMarketOnlyLeague(leagueId) ? leagueId : undefined;
+  let latest: string | null = null;
+  for (const w of state.windows) {
+    if (w.leagueId !== key || w.opensOn > date) continue;
+    if (latest === null || w.opensOn > latest) latest = w.opensOn;
+  }
+  return latest;
 }
 
 /**

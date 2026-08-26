@@ -38,6 +38,7 @@ import {
   openInjury,
   openManagerOffers,
   openPromises,
+  openTransferRequests,
   pendingVerdicts,
   playerById,
   playerName,
@@ -74,6 +75,7 @@ import {
   PROMISE_KIND_KO,
   slotOfTime,
   tacticsBrief,
+  TRANSFER_REQUEST_REASON_KO,
   type CharacterEntry,
   type CharacterInjection,
   type ScoutReportCard,
@@ -329,6 +331,7 @@ const TOP_RATED_SHOWN = 2;
 const TRAINING_SHOWN = 3;
 const EXPIRING_SHOWN = 3;
 const PROMISE_SHOWN = 3;
+const TRANSFER_REQUEST_SHOWN = 3;
 const RECENT_NARRATIVE = 4;
 
 /**
@@ -651,6 +654,23 @@ export function buildGmStateNote(
     ...counterpartyReplies.map((line) => `📨 ${line}`),
     // 판정 대기 협상이 그다음 — 답은 다음 턴 입력에 실리므로 여기서 세우지 않으면 잊힌다
     ...pendingVerdicts(state).map((v) => `❗ ${v.label} (${v.negotiation.id})`),
+    /**
+     * 감독이 아직 답하지 않은 이적 요청 — 기한이 없어 저절로 사라지지 않는다
+     * (transfer.md §1-1). 우리 선수의 것만 센다 — 떠난 선수의 줄이 섞이면 남의
+     * 선수가 감독이 답해야 할 일로 주의 줄에 유령처럼 선다.
+     */
+    (() => {
+      const ours = new Set(players.map((p) => p.id));
+      const requests = openTransferRequests(state).filter((r) => ours.has(r.gamePlayerId));
+      return requests.length > 0
+        ? `❗ 이적 요청 ${requests.length} (${requests
+            .slice(0, TRANSFER_REQUEST_SHOWN)
+            .map(
+              (r) => `${playerName(state, r.gamePlayerId)} ${TRANSFER_REQUEST_REASON_KO[r.reason]}`,
+            )
+            .join(", ")}${requests.length > TRANSFER_REQUEST_SHOWN ? " …" : ""})`
+        : null;
+    })(),
     injured.length > 0 ? `부상 ${injured.length} (${injured.join(", ")})` : null,
     suspended.length > 0 ? `정지 ${suspended.length} (${suspended.join(", ")})` : null,
     unhappy.length > 0 ? `불만 ${unhappy.length} (${unhappy.join(", ")})` : null,
