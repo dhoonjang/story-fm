@@ -289,7 +289,7 @@ export function applyMatchRatings(
     ratings[entry.playerId] = bounded;
     if (entry.note) notes[entry.playerId] = entry.note.slice(0, NOTE_MAX);
     if (delta !== 0 && !friendly) {
-      const stat = ensureSeasonStat(state, entry.playerId, player.teamId);
+      const stat = ensureSeasonStat(state, entry.playerId, player.teamId, player);
       stat.ratingSum = Math.max(0, (stat.ratingSum ?? 0) + delta);
     }
     applied += 1;

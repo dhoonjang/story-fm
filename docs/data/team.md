@@ -9,6 +9,8 @@
 등번호도 팀 자체 필드가 아니라 현재 소속 선수의 `squadNumber`가 갖는다. 같은 팀의
 배정 번호는 중복될 수 없다. 공식 번호 시드가 없는 선수도 포지션 관례와 남은 번호로
 결정적 배정하며, 이적·임대·복귀로 소속이 바뀌면 새 팀의 빈 번호를 즉시 받는다.
+**누가 몇 번을 다는가는 감독이 정한다**(`set_squad_number`) — 그 규칙과 번호의
+계보는 [player.md](player.md) §1.1에 있다.
 
 2-레이어의 원칙과 엔티티 전체 지도는 [game-state.md](game-state.md), 선수 값의
 의미는 [player.md](player.md), 데이터 출처는 [sources.md](sources.md).

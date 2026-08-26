@@ -206,6 +206,17 @@ function sentenceOf(fact: MoodFact): string {
         : fact.role === "vice"
           ? "부주장으로 주장 옆에 선다"
           : "라커룸에서 목소리가 서는 축이다";
+    case "number":
+      /**
+       * 물려받은 셔츠에는 앞사람이 있고 뺏긴 셔츠에는 없다 — 계보가 있을 때만 이름을
+       * 말한다 (people.md §5). 아무도 달지 않았던 번호에 "앞서 아무도"를 붙이면
+       * 화면이 없는 과거를 말한다.
+       */
+      if (fact.event === "lost") return `${fact.number}번을 내주고 새 번호를 받았다`;
+      return fact.after === undefined
+        ? `${fact.number}번을 새로 달았다`
+        : `${fact.after.name}이(가) ${fact.after.seasons}시즌 달던 ${fact.number}번을 ` +
+            `${fact.after.since}시즌 만에 물려받았다`;
     case "young":
       return "아직 어리고 배울 게 많다";
     case "steady":

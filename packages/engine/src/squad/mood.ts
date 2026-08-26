@@ -28,6 +28,7 @@ import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
 import { settlingOf } from "./settling";
 import { playerArchetypeOf } from "../world/player-persona";
 import { leaderRoleOf } from "./hierarchy";
+import { numberLineageOf } from "./numbers";
 import { demotionPatienceDaysOf } from "./demotion";
 // 출전 불만이 어느 기대에 못 미친 것인가 — 약속 판정과 같은 자다 (people.md §5-2)
 import { squadStatusOf, startsInWindow } from "./promises";
@@ -68,6 +69,13 @@ const AFTERGLOW_DAYS = 3;
 
 /** 계약 해지의 여운이 라커룸에 남아 있는 기간 — 지나면 아무도 그 이름을 말하지 않는다 */
 const DEPARTURE_ECHO_DAYS = 3;
+
+/**
+ * 번호가 움직인 여운이 남아 있는 기간 (people.md §5) — 계약 해지보다 길다.
+ * 셔츠는 며칠이 아니라 시즌 단위로 입는 것이라, 물려받은 번호도 뺏긴 번호도
+ * 그 주 안에 잊히지 않는다.
+ */
+const NUMBER_ECHO_DAYS = 14;
 
 /** 자기 경기를 잘했다/못했다로 가르는 평점 폭 — 기준선에서 이만큼 떨어지면 등급이 선다 */
 const AFTERGLOW_RATING_BAND = 0.6;
@@ -164,6 +172,21 @@ export type MoodFact =
    * 감독에게 보이지 않고, 리더의 불만이 왜 더 빨리 쌓이는지도 어디에도 서지 않는다.
    */
   | { cause: "leader"; role: LeaderRole }
+  /**
+   * **등번호가 움직였다** — 물려받았거나 내려놓았다 (people.md §5 · player.md §1.1).
+   *
+   * 곁들임이다: 불만이 설 만큼 무거우면 그것은 `grievance`가 말한다. 여기 서는 것은
+   * 번호가 옮겨 갔다는 사실뿐이고, 그것이 라커룸에 닿았는지는 원형이 정한다.
+   */
+  | {
+      cause: "number";
+      event: "inherited" | "lost";
+      /** 물려받은 번호 · 내려놓은 번호 — 갈래가 어느 쪽을 가리키는지 정한다 */
+      number: number;
+      days: number;
+      /** 앞서 그 번호를 달던 사람 — `since`는 몇 시즌 만인가다 (물려받았을 때만) */
+      after?: { name: string; seasons: number; since: number };
+    }
   | { cause: "young"; age: number }
   | { cause: "steady" };
 
@@ -335,6 +358,46 @@ function recentDeparture(state: GameState): MoodFact | null {
 }
 
 /**
+ * 감독이 옮긴 번호의 여운 — 물려받았나 내려놓았나, 아니면 null (people.md §5).
+ *
+ * ⚠️ **뺏긴 쪽을 먼저 가른다.** 번호를 잃은 선수도 그 자리에서 자리 관례로 새 번호를
+ * 받으므로(`assignRequestedNumber`) 지금 번호의 계보만 보면 오래된 구단에서는 그
+ * 새 번호에도 앞사람이 있어, 뺏긴 사람이 「물려받았다」로 선다. 그가 잃은 번호를
+ * **지금 동료가 달고 있다**는 것이 뺏김의 사실이다.
+ *
+ * ⚠️ **우리 라커룸의 사실이다.** `squadNumberOn`은 우리 선수에게만 찍히지만
+ * (`assignRequestedNumber`가 `not-ours`로 반려한다) 그 뒤 팔려 간 선수에게는 남아
+ * 있고, 그때 읽는 계보는 빌린 구단의 것이다 — 감독의 결정이 아닌 번호가 감독의
+ * 결정으로 선다.
+ */
+function numberEchoOf(state: GameState, player: GamePlayer): MoodFact | null {
+  if (player.teamId !== state.userTeamId) return null;
+  const on = player.state.squadNumberOn;
+  if (on === undefined) return null;
+  const days = diffDays(on, state.date);
+  if (days < 0 || days > NUMBER_ECHO_DAYS) return null;
+
+  const lost = player.state.formerSquadNumber;
+  if (
+    lost !== undefined &&
+    state.players.some((p) => p.teamId === player.teamId && p.squadNumber === lost)
+  ) {
+    return { cause: "number", event: "lost", number: lost, days };
+  }
+  const number = player.squadNumber;
+  if (number === undefined) return null;
+  const after = numberLineageOf(state, player.teamId, number).past[0];
+  if (!after) return null;
+  return {
+    cause: "number",
+    event: "inherited",
+    number,
+    days,
+    after: { name: after.name, seasons: after.seasons, since: state.season - after.lastSeason },
+  };
+}
+
+/**
  * **코어가 고른 심경의 사실** — 우선순위 순 최대 2장.
  *
  * 화면·조회 도구는 `moodOf`를 부른다. 이 함수를 직접 부르는 곳은 앵커를 세우는
@@ -482,6 +545,10 @@ export function moodFactsOf(
     }
   }
   if (facts.length < MOOD_FACT_LIMIT) {
+    const number = numberEchoOf(state, player);
+    if (number) facts.push(number);
+  }
+  if (facts.length < MOOD_FACT_LIMIT) {
     const seat = leaderRoleOf(state, player);
     if (seat) facts.push({ cause: "leader", role: seat });
   }
@@ -600,6 +667,15 @@ function factLine(fact: MoodFact): string {
       return `계약 만료 ${fact.daysLeft}일`;
     case "leader":
       return LEADER_ROLE_LABEL[fact.role];
+    case "number":
+      // 계보의 말은 `pressFactText`가 쓰는 것과 같은 사실이다 — 화면이 읽는 줄이라 짧게만
+      return (
+        `${fact.number}번 ${fact.event === "inherited" ? "물려받음" : "내려놓음"}` +
+        (fact.after === undefined
+          ? ""
+          : ` (앞서 ${fact.after.name} ${fact.after.seasons}시즌 · ${fact.after.since}시즌 만에)`) +
+        ` · ${fact.days}일째`
+      );
     case "young":
       return `${fact.age}세`;
     case "steady":

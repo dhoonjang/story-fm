@@ -1868,6 +1868,24 @@ export const PlayerStateSchema = z.object({
    */
   outOfPositionRun: z.number().int().min(0).optional(),
   /**
+   * **지금 번호를 받은 날** — 등번호가 움직인 사실의 유일한 원본 (player.md §1.1).
+   *
+   * 번호 자체(`squadNumber`)는 지금의 상태일 뿐 언제 바뀌었는지를 모른다. 물려받음도
+   * 뺏김도 **며칠째인가**가 있어야 심경 카드가 서므로, 강등의 `demotedOn`과 같은
+   * 이유로 시작점을 저장한다.
+   *
+   * 감독이 옮긴 번호에만 선다 — 세계가 배정한 번호(입단·이적의 자리 관례)는 사건이
+   * 아니라 기본값이다. 옛 세이브엔 없다(optional, SAVE_VERSION 유지).
+   */
+  squadNumberOn: DateString.optional(),
+  /**
+   * **감독이 옮기기 전에 달던 번호** — 뺏김의 사실이다 (people.md §5).
+   *
+   * `squadNumberOn`과 짝이다: 언제 바뀌었는지만으로는 무엇을 잃었는지가 서지 않는다.
+   * 새 번호를 받을 때마다 덮어쓰고, 옛 세이브엔 없다(optional).
+   */
+  formerSquadNumber: z.number().int().min(1).max(SQUAD_NUMBER_MAX).optional(),
+  /**
    * **이번 시즌 뒤 은퇴한다는 예고** — 있다는 것 자체가 그 사실이다 (season.md §6).
    *
    * 1월 1일 tick이 나이·종합·출전·계약으로 결정적으로 판정해 적고(`declareRetirements`),
