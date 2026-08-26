@@ -10,6 +10,14 @@ import {
 } from "./player";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 import { SQUAD_STATUSES } from "./squad-rules";
+import {
+  TACTIC_SCALE_MAX,
+  TACTIC_SCALE_MIN,
+  TacticAxisKeySchema,
+  tacticAxisOf,
+  tacticWord,
+  type TacticAxisKey,
+} from "./tactics";
 
 /**
  * 기록 테이블 (v6) — 선수·팀·일정에 딸린 이력.
@@ -1756,6 +1764,133 @@ export function boardExpectationLine(code: BoardExpectationCode, target: number)
   return `보드 기대: ${boardExpectationText(code)} (${target}위 이내)`;
 }
 
+// ── 클럽 비전 — 구단주가 거는 다년 계획 ─────────────────
+/**
+ * 비전 항목의 코드 — **구단주가 무엇으로 감독을 보는가**
+ * (docs/simulation/career.md §5).
+ *
+ * 순위 하나로는 국부펀드형과 지역 유지형이 갈리지 않는다. 원형이 이 코드들 중 셋을
+ * 가중치와 함께 고르고, 시즌 리뷰의 보드 평판 폭이 그 가중합이 된다.
+ */
+export const VISION_CODES = [
+  /** 리그 목표 순위 — 계획이 설 때의 체급 표에서 온다 */
+  "league-position",
+  /** 유스 출신의 1군 출전 분 비중 */
+  "youth-minutes",
+  /** 전술 6축 중 한 축의 눈금 — `axis`가 그 축이다 */
+  "style",
+  /** 재정 건전성 — 부채 0과 급여 비중 상한 */
+  "solvency",
+  /** 컵·대항전 녹아웃 승수 */
+  "cup-run",
+] as const;
+export const VisionCodeSchema = z.enum(VISION_CODES);
+export type VisionCode = z.infer<typeof VisionCodeSchema>;
+
+/** 코드 → 항목의 이름. 화면·사실 카드·GM이 같은 표를 읽는다 (overview.md §1 철칙 4) */
+export const VISION_CODE_KO: Record<VisionCode, string> = {
+  "league-position": "리그 순위",
+  "youth-minutes": "유스 출전",
+  style: "플레이 스타일",
+  solvency: "재정 건전성",
+  "cup-run": "컵 여정",
+};
+
+export const ClubVisionItemSchema = z.object({
+  code: VisionCodeSchema,
+  /**
+   * 목표 — **코드마다 단위가 다르다.** 순위는 등수, 유스는 비중(0~1), 스타일은 축의
+   * 눈금(1~5), 재정은 급여 비중 상한(0~1), 컵은 승수다. 단위를 적지 않는 것은 코드가
+   * 곧 단위라서다 — `visionTargetText`가 그 하나를 문장으로 옮긴다.
+   */
+  target: z.number(),
+  /** 가중치 — 한 비전의 합은 10이다. 폭이 `BOARD_SEASON_SWING`을 넘지 못하는 근거 */
+  weight: z.number().int().min(1),
+  /** `style`만 — 겨누는 전술 축 */
+  axis: TacticAxisKeySchema.optional(),
+});
+export type ClubVisionItem = z.infer<typeof ClubVisionItemSchema>;
+
+/**
+ * 클럽 비전 (CLUB_VISION) — **구단주 원형이 건 다년 계획** (career.md §5).
+ *
+ * ⚠️ **진행도는 여기 없다.** 매 시즌 장부(`seasonStats`·`finance`·`tactics.spec`)에서
+ * 다시 매기는 파생값이라, 적어 두면 언젠가 장부와 갈린다. 남는 것은 코드·목표·
+ * 가중치·기한뿐이다.
+ */
+export const ClubVisionSchema = z.object({
+  /** 이 계획을 건 구단 — 이직하면 새 구단의 원형이 새로 세운다 */
+  teamId: z.string().min(1),
+  /** 계획이 선 시즌 */
+  since: z.number().int(),
+  /** 계획의 마지막 시즌 — 지나면 다음 전환에서 새로 선다 */
+  horizonSeason: z.number().int(),
+  items: z.array(ClubVisionItemSchema).min(1),
+});
+export type ClubVision = z.infer<typeof ClubVisionSchema>;
+
+/** 항목 + 그 시즌의 진행도(0~1) — 시즌 기록·사실 카드·화면이 같은 그릇을 쓴다 */
+export const VisionReadingSchema = ClubVisionItemSchema.extend({
+  progress: z.number().min(0).max(1),
+});
+export type VisionReading = z.infer<typeof VisionReadingSchema>;
+
+/** 목표 한 조각 — 코드가 단위를 정한다. 표가 하나라 화면과 카드가 같은 말을 한다 */
+export function visionTargetText(item: {
+  code: VisionCode;
+  target: number;
+  axis?: TacticAxisKey;
+}): string {
+  switch (item.code) {
+    case "league-position":
+      return `${item.target}위 이내`;
+    case "youth-minutes":
+      return `${Math.round(item.target * 100)}%`;
+    case "style":
+      return item.axis
+        ? `${tacticAxisOf(item.axis).label} ${tacticWord(item.axis, item.target)}`
+        : "지정 없음";
+    case "solvency":
+      return `무차입 · 급여 ${Math.round(item.target * 100)}%`;
+    case "cup-run":
+      return `녹아웃 ${item.target}승`;
+  }
+}
+
+/** 항목 한 줄 — 이름·목표·달성률·가중치. 사실 카드와 화면이 같은 자를 쓴다 */
+export function visionItemText(reading: VisionReading): string {
+  return (
+    `${VISION_CODE_KO[reading.code]} ${visionTargetText(reading)}` +
+    ` — 달성률 ${Math.round(reading.progress * 100)}% (가중치 ${reading.weight})`
+  );
+}
+
+/**
+ * 항목의 **등급** — 진행도 0~1을 −1~+1로 편다 (career.md §5).
+ *
+ * 목표에 닿으면 +1이라 옛 판정(달성 +8)과 같고, 못 닿으면 바닥까지 선형으로 내려간다.
+ * 한 칸 차이의 미달과 꼴찌가 같은 값이던 자리가 여기서 갈린다.
+ */
+export function visionGrade(progress: number): number {
+  return progress * 2 - 1;
+}
+
+/**
+ * 항목 가중합 — **−1~+1이다.** 폭(`BOARD_SEASON_SWING`)을 곱하는 것은 부르는 쪽이라,
+ * 가중치를 어떻게 잡아도 시즌 리뷰가 옮기는 평판이 그 폭을 넘지 못한다 (career.md §5).
+ */
+export function visionScore(readings: readonly VisionReading[]): number {
+  const total = readings.reduce((sum, r) => sum + r.weight, 0);
+  if (total <= 0) return 0;
+  return readings.reduce((sum, r) => sum + r.weight * visionGrade(r.progress), 0) / total;
+}
+
+/** 스타일 항목의 진행도 — 축 눈금의 거리. 눈금 폭을 아는 자리가 여기 하나다 */
+export function visionStyleProgress(current: number, target: number): number {
+  const span = TACTIC_SCALE_MAX - TACTIC_SCALE_MIN;
+  return Math.max(0, Math.min(1, 1 - Math.abs(current - target) / span));
+}
+
 export const SeasonRecordSchema = z.object({
   season: z.number().int(),
   /** 재임 팀 — 감독이 팀을 옮겨도 기록이 유지된다 */
@@ -1781,6 +1916,12 @@ export const SeasonRecordSchema = z.object({
       expectationCode: BoardExpectationCodeSchema.optional(),
       /** 옛 세이브가 들고 있는 기대의 이름 — 새 줄은 적지 않는다 (`expectationCode`의 폴백) */
       expectation: z.string().min(1).optional(),
+      /**
+       * 그 시즌 **클럽 비전의 항목별 진행도** (career.md §5). 평판 ±8을 만든 가중합이
+       * 무엇으로 이뤄졌는지가 남지 않으면 커리어 표는 "달성인데 평판이 +2"를 설명하지
+       * 못한다. 비전이 서기 전의 시즌엔 없다 (optional).
+       */
+      items: z.array(VisionReadingSchema).optional(),
     })
     .optional(),
   /** 옛 세이브가 들고 있는 평가 문장 — 더는 쓰지 않는다 (`board`의 폴백) */

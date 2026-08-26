@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { ageOf } from "@story-fm/domain";
+import { ageOf, type ManagerOffer } from "@story-fm/domain";
 import {
+  acceptManagerOffer,
   activeContract,
+  addDays,
   advanceTime,
   awardLine,
   assignmentsOf,
   boardExpectation,
   buildAllLeagueMatches,
+  buildVision,
+  generateOwner,
   isClubTeam,
   computeStandings,
   cupCatalogById,
@@ -16,6 +20,7 @@ import {
   isFriendly,
   leagueOfTeamIn,
   MINI_WORLD,
+  OWNER_ARCHETYPE_LABELS,
   playersOf,
   quickSimulate,
   declareRetirements,
@@ -26,11 +31,16 @@ import {
   retirementVerdict,
   reviewSeason,
   seasonAwards,
+  standClubVision,
   teamsOfLeagueIn,
+  tierOfTeamIn,
   transitionSeason,
   userPlayers,
+  visionProgress,
+  visionScore,
   weeklyWagesOf,
   withdrawRetirement,
+  type ClubVisionItem,
   type GameState,
 } from "@story-fm/engine";
 import { createMiniGame, createTestGame, playFullSeason, simSquad } from "./helpers";
@@ -584,7 +594,12 @@ describe("18팀 리그의 시즌 리뷰", () => {
     const before = state.manager.reputation.board;
     reviewSeason(state);
 
-    expect(state.manager.reputation.board).toBe(before - 8);
+    /**
+     * **평판 폭은 순위 하나가 아니라 클럽 비전 항목의 가중합이다** (career.md §5) —
+     * 순위가 미달이어도 다른 항목이 채우면 폭은 +로 설 수 있다. 미달이라는 사실은
+     * 아래 `grade`가 적는다.
+     */
+    expect(Math.abs(state.manager.reputation.board - before)).toBeLessThanOrEqual(8);
     expect(state.achievements.some((a) => a.code === "survivor")).toBe(false);
     expect(state.seasonRecords[0]?.position).toBe(17);
     // 보드 평가는 문장이 아니라 등급과 근거 수치다 (overview.md §1 철칙 4)
@@ -997,5 +1012,147 @@ describe("시즌 시상 (season.md §6)", () => {
     expect(awardLine(award)).toContain("득점왕");
     expect(awardLine(award)).toContain("선수 p1");
     expect(awardLine(award)).toContain("25골");
+  });
+});
+
+describe("클럽 비전 — 구단주 원형이 거는 다년 계획 (career.md §5)", () => {
+  /**
+   * `season.ts`의 `BOARD_SEASON_SWING` — 모듈 밖으로 나오지 않는 값이라 여기 다시 적는다.
+   * 이 파일이 재는 것은 그 숫자가 아니라 **가중합이 그 폭을 넘지 못한다**는 불변식이다.
+   */
+  const BOARD_SEASON_SWING = 8;
+  const world = createTestGame(7, "paderborn");
+  const seat = { position: 1, leagueSize: 18 };
+
+  /** 원형을 심은 세이브 — 세이브에 남는 것은 라벨이라 표를 되짚는 열쇠도 라벨이다 */
+  function withOwner(archetype: string): GameState {
+    const state = structuredClone(world);
+    const owner = state.personas?.find((p) => p.role === "owner");
+    if (owner) owner.archetype = archetype;
+    return state;
+  }
+
+  it("유스 항목은 출전 분 비중이고 0과 목표 도달이 양 끝이다", () => {
+    const state = structuredClone(world);
+    const us = state.userTeamId;
+    const item = { code: "youth-minutes", target: 0.2, weight: 2 } as const;
+    state.seasonStats = ["p1", "p2"].map((gamePlayerId) => ({
+      gamePlayerId,
+      season: state.season,
+      teamId: us,
+      apps: 10,
+      goals: 0,
+      minutes: 900,
+    }));
+
+    // 유스 콜업 원장이 비어 있으면 뛴 사람 중 우리 아카데미 출신이 없다
+    state.transfers = [];
+    expect(visionProgress(state, item, seat)).toBe(0);
+
+    // 전부 우리 아카데미 출신이면 비중 1 — 목표(20%)를 훌쩍 넘어도 1에서 잘린다
+    state.transfers = ["p1", "p2"].map((gamePlayerId) => ({
+      id: `youth:${gamePlayerId}`,
+      gamePlayerId,
+      windowId: null,
+      fromTeamId: null,
+      toTeamId: us,
+      date: state.date,
+      type: "youth" as const,
+      fee: 0,
+    }));
+    expect(visionProgress(state, item, seat)).toBe(1);
+  });
+
+  it("재정 항목의 부채 항은 부채 0에서 1이고, 한도를 넘기면 0이 된다", () => {
+    const state = structuredClone(world);
+    const us = state.userTeamId;
+    // 급여 비중 상한을 열어 두면 급여 항이 언제나 1이라, 움직이는 것은 부채 항뿐이다
+    const item = { code: "solvency", target: 5, weight: 3 } as const;
+
+    financeOf(state, us).balance = 0;
+    expect(visionProgress(state, item, seat)).toBe(1);
+
+    // 부채 한도를 한참 넘긴 잔고 — 부채 항이 0이라 두 항의 평균은 정확히 절반이다
+    financeOf(state, us).balance = -1_000_000_000_000;
+    expect(visionProgress(state, item, seat)).toBe(0.5);
+  });
+
+  it("여섯 원형 모두 가중치 합이 10이고, 가중합이 만드는 폭은 ±8을 넘지 않는다", () => {
+    /** 진행도 격자 — 항목 수만큼의 조합을 전수로 훑는다 */
+    const LEVELS = [0, 0.25, 0.5, 0.75, 1];
+    const grids = (n: number): number[][] =>
+      n === 0 ? [[]] : grids(n - 1).flatMap((rest) => LEVELS.map((v) => [v, ...rest]));
+
+    for (const archetype of OWNER_ARCHETYPE_LABELS) {
+      const vision = buildVision(withOwner(archetype));
+      expect(
+        vision.items.reduce((sum, i) => sum + i.weight, 0),
+        archetype,
+      ).toBe(10);
+
+      const swingAt = (progresses: readonly number[]): number =>
+        Math.round(
+          BOARD_SEASON_SWING *
+            visionScore(vision.items.map((i, n) => ({ ...i, progress: progresses[n]! }))),
+        );
+      expect(swingAt(vision.items.map(() => 0)), archetype).toBe(-BOARD_SEASON_SWING);
+      expect(swingAt(vision.items.map(() => 1)), archetype).toBe(BOARD_SEASON_SWING);
+      for (const grid of grids(vision.items.length)) {
+        expect(Math.abs(swingAt(grid)), `${archetype} ${grid.join(",")}`).toBeLessThanOrEqual(
+          BOARD_SEASON_SWING,
+        );
+      }
+    }
+  });
+
+  it("부임하면 계획이 그 자리에서 새 구단주의 결로 선다 — 앞 구단의 것은 남지 않는다", () => {
+    // 지역 유지형 — 순위 4 · 유스 4 · 재정 2, 4시즌 (career.md §5의 표)
+    const OLD_ARCHETYPE = "지역 유지형";
+    const state = withOwner(OLD_ARCHETYPE);
+    const before = standClubVision(state);
+    expect(before.items.map((i) => i.code)).toEqual([
+      "league-position",
+      "youth-minutes",
+      "solvency",
+    ]);
+    expect(before.horizonSeason - before.since + 1).toBe(4);
+
+    /**
+     * 새 구단의 구단주는 부임이 시드로 앉힌다 — 앞 구단주와 **원형이 다른** 자리를
+     * 골라야 계획이 누구의 결로 섰는지가 드러난다.
+     */
+    const next = teamsOfLeagueIn(state, "bundesliga").find(
+      (id) => id !== state.userTeamId && generateOwner(state.seed, id).archetype !== OLD_ARCHETYPE,
+    )!;
+    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    const offer: ManagerOffer = {
+      id: "offer-vision",
+      teamId: next,
+      madeOn: state.date,
+      expiresOn: addDays(state.date, 10),
+      tier: tierOfTeamIn(state, next),
+      target: 10,
+      expectationCode: "mid",
+      status: "open",
+    };
+    state.managerOffers = [offer];
+    const accepted = acceptManagerOffer(state, offer.id);
+    expect(accepted.ok, accepted.message).toBe(true);
+
+    const after = state.clubVision;
+    expect(after?.teamId).toBe(next);
+    // 계획은 **부임 시즌에** 못 박힌다 — 다음 전환까지 미루면 1년차가 두 시즌 뜬다
+    expect(after?.since).toBe(state.season);
+    /**
+     * 항목의 코드·가중치·축은 원형만이 정한다(목표는 체급이 정한다). 앞 구단주의
+     * 결이 아니고, **지금 앉은** 구단주로 다시 세운 것과 같아야 한다 — 계획이
+     * 페르소나가 갈린 뒤에 선다는 사실이 여기서 갈린다.
+     */
+    const shapeOf = (items: readonly ClubVisionItem[]): string[] =>
+      items.map((i) => `${i.code}:${i.weight}:${i.axis ?? "-"}`);
+    expect(shapeOf(after!.items), "앞 구단주의 결로 계획이 섰다").not.toEqual(
+      shapeOf(before.items),
+    );
+    expect(after?.items).toEqual(buildVision(state).items);
   });
 });

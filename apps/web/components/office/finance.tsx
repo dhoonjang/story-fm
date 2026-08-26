@@ -26,6 +26,17 @@ const NONCASH_CATEGORIES = new Set(["amortisation", "depreciation"]);
 
 type FinanceFeedRow = OfficeViews["finance"]["feed"][number];
 type FinanceBoard = OfficeViews["finance"]["board"];
+type BoardVision = NonNullable<OfficeViews["finance"]["boardExpectation"]["vision"]>;
+
+/**
+ * 「보드 기대」 아래 한 줄 — **구단주가 건 다년 계획의 몇 년차인가와 항목별 달성률**
+ * (career.md §5). 이번 시즌의 기대가 감독의 자리를 재는 자라면 이쪽은 구단이 몇 년에
+ * 걸쳐 가려는 자리다. 목표 수치까지 적으면 통계 한 칸이 표가 된다 — 그건 커리어
+ * 화면의 몫이다.
+ */
+const visionSubOf = (v: BoardVision): string =>
+  `${v.year}년차/${v.span}년 계획` +
+  v.items.map((i) => ` · ${i.label} ${percent(i.progress)}`).join("");
 
 /** 열린 요청이 선 자리 — 코어가 갈래를 내고 화면이 말을 고른다 */
 const BOARD_STATUS_TEXT: Record<NonNullable<FinanceBoard["request"]>["status"], string> = {
@@ -249,6 +260,9 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
         <div className="fin-stat">
           <div className="label">보드 기대</div>
           <div className="value words">{finance.boardExpectation.label}</div>
+          {finance.boardExpectation.vision && (
+            <div className="sub">{visionSubOf(finance.boardExpectation.vision)}</div>
+          )}
         </div>
         <div className="fin-stat">
           <div className="label">홈 구장</div>

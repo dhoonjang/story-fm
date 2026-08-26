@@ -27,6 +27,7 @@ import {
   ApproachPressureSchema,
   ApproachSchema,
   BoardDemandSchema,
+  ClubVisionSchema,
   BoardRequestSchema,
   PressConferenceSchema,
   PressLeakSchema,
@@ -123,6 +124,8 @@ export const SaveSchema = z
     dismissals: z.array(DismissalSchema).optional(),
     managerOffers: z.array(ManagerOfferSchema).optional(),
     managerVacancies: z.array(ManagerVacancySchema).optional(),
+    /** 클럽 비전 — 구단주 원형이 건 다년 계획 (career.md §5). 옛 세이브엔 없다 */
+    clubVision: ClubVisionSchema.optional(),
     boardDemands: z.array(BoardDemandSchema).optional(),
     competingBids: z.array(CompetingBidSchema).optional(),
     boardRequests: z.array(BoardRequestSchema).optional(),
