@@ -48,6 +48,7 @@ import { issueReasonText } from "../squad/mood";
 import { leaderGroupOf, leaderRoleOf, leaderWeightOf } from "../squad/hierarchy";
 import { recentOutcomes } from "../squad/slump";
 import { agentForPlayer, ownerOf } from "../world/persona";
+import { relationPressureWeight } from "../world/relations";
 import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import {
   biggerSuitorsOf,
@@ -360,8 +361,14 @@ function causesToday(state: GameState): Cause[] {
      * 세우는 것보다 더 큰 해명일 이유는 없다 — 배수를 양쪽에 걸면 리더의 불만은
      * 빨리 쌓이는 만큼 빨리 풀려 결국 아무것도 달라지지 않는다.
      */
+    /**
+     * **사이가 나쁜 선수의 불만이 더 빨리 쌓인다** (people.md §6) — 리더 배수와 같은
+     * 자리에 함께 곱해지고 같은 규약을 지킨다: 식는 쪽에는 걸리지 않는다.
+     */
     const owner = playerById(state, issue.gamePlayerId);
-    const weight = owner ? leaderWeightOf(state, owner) : 1;
+    const weight = owner
+      ? leaderWeightOf(state, owner) * relationPressureWeight(state, owner.id)
+      : 1;
     causes.push({
       subject: issue.gamePlayerId,
       topic,
@@ -1410,11 +1417,14 @@ function closeApproach(
   approach: Approach,
   stance: PressStance | null,
 ): ApproachEffect {
+  const counterpart = relationCounterpartOf(state, approach);
   const effect = applyStanceOutcome(state, {
     row: stance === null ? IGNORED : stanceRow(stance),
     band: APPROACH_BAND * Math.min(approach.step, BAND_STEP_CAP),
     targetPlayerId: approach.about,
     axes: APPROACH_AXES[approach.channel],
+    stance,
+    ...(counterpart === null ? {} : { relationWith: counterpart }),
   });
 
   /**
@@ -1442,6 +1452,19 @@ function closeApproach(
     row.step = approach.step;
   }
   return effect;
+}
+
+/**
+ * 감독의 맞은편에 있던 사람 — **관계가 움직이는 상대다** (people.md §6).
+ *
+ * 압력 열쇠(`subjectOf`)와 갈라져 있는 것은 라커룸과 보드가 **자리**이지 사람이
+ * 아니기 때문이다: 압력은 주장이 바뀌어도 이어지지만 사이는 그날 문을 두드린 사람의
+ * 것이다. 주장이 비어 있으면 옮길 사이가 없다.
+ */
+function relationCounterpartOf(state: GameState, approach: Approach): string | null {
+  if (approach.channel === "player" || approach.channel === "agent") return approach.about ?? null;
+  if (approach.channel === "owner") return ownerOf(state).characterId;
+  return userPlayers(state).find((p) => p.isCaptain)?.id ?? null;
 }
 
 /** 그 자리의 압력 열쇠 — 선수 채널만 사람을 가리킨다 */

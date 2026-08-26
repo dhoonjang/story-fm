@@ -109,6 +109,8 @@ import { openPromise, type PromiseOpened } from "../squad/promises";
 // 감독이 지목한 번호는 코어가 배정하고, 사실만 돌려준다 (player.md §1.1)
 import { assignRequestedNumber, numberBlockText } from "../squad/numbers";
 import { archetypeTraitsOf } from "../world/player-persona";
+// 면담과 완장은 사이를 옮긴다 (people.md §6 「관계 점수」)
+import { MANAGER_SUBJECT, moveRelation, relationFactor } from "../world/relations";
 import { dressingRoomFactor, dressingRoomVoice, leaderGroupOf } from "../squad/hierarchy";
 import {
   groupOf,
@@ -1139,11 +1141,23 @@ export function applyTalkToPlayer(
   player.state.talkedOn = state.date;
 
   const base = TALK_BASE[input.outcome];
+  /**
+   * **계수가 둘이다** (career.md §2) — 감독의 리더십이 말을 하는 사람이라면 관계는
+   * 그 말을 듣는 사람이다. 부호를 가리지 않는 것은 리더십·라커룸 계수와 같은 규약이라,
+   * 믿는 선수는 칭찬도 질책도 크게 듣는다.
+   *
+   * ⚠️ **계수를 읽는 것이 관계를 옮기는 것보다 먼저다** — 오늘의 말은 어제까지의
+   * 사이로 울린다.
+   */
   const delta = Math.round(
-    base * (input.intensity / TALK_INTENSITY_PIVOT) * leadershipFactor(state),
+    base *
+      (input.intensity / TALK_INTENSITY_PIVOT) *
+      leadershipFactor(state) *
+      relationFactor(state, MANAGER_SUBJECT, player.id),
   );
   const bounded = Math.max(-TALK_MORALE_BOUND, Math.min(TALK_MORALE_BOUND, delta));
   player.state.form = clampForm(player.state.form + moraleToForm(bounded));
+  moveRelation(state, MANAGER_SUBJECT, player.id, `talk-${input.outcome}`);
 
   /**
    * 면담은 방치 이슈를 해소한다 — **잘 풀렸을 때만** (career.md §2). 결과와 무관하게
@@ -2257,6 +2271,8 @@ export function setCaptain(
       player.state.captainedOn = state.date;
       player.state.condition = clampCondition(player.state.condition + CAPTAIN_FIRST_LIFT);
     }
+    // 완장은 감독이 그를 어떻게 보는지의 선언이다 — 사이가 그만큼 움직인다 (people.md §6)
+    moveRelation(state, MANAGER_SUBJECT, player.id, "captain-named");
     // 새 영입에게 완장을 채우는 건 라커룸 한가운데 세우는 일이다 (settling.ts)
     const settled = creditSettling(state, player.id, "captain") > 0;
     const settling = settled ? settlingOf(state, player.id) : null;
