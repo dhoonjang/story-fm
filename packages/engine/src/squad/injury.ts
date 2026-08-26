@@ -125,9 +125,14 @@ const RISE: Record<InjurySeverity, number> = { minor: 0.25, moderate: 0.49, majo
 /**
  * 심각도 분포 — `openInjuryFor`의 굴림과 **같은 상수를 쓴다.**
  * 두 곳에 흩어 두면 굴림만 고쳤을 때 균형식이 조용히 어긋난다.
+ *
+ * 실제(UEFA 엘리트 클럽 연구)는 결장 4주 넘는 부상이 전체의 13~15%, 석 달 넘는 것이
+ * 3~4%다. 발생 빈도(`INJURY_PER_MATCH`)는 실제보다 성기게 두되 심각도의 모양은
+ * 실제를 따른다 — 장기가 이보다 드물면 구단 하나가 열다섯 시즌에 한 번 만나는
+ * 사건이 되어 "그 자리를 누가 메우나"가 이야기가 되지 못한다.
  */
-const P_MINOR = 0.72;
-const P_MODERATE_GIVEN_WORSE = 0.93;
+const P_MINOR = 0.66;
+const P_MODERATE_GIVEN_WORSE = 0.82;
 
 /** 부상 한 번의 평균 상승 — 심각도 분포로 가중한 값 */
 export const AVG_PRONENESS_RISE =

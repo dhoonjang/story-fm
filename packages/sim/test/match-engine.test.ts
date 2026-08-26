@@ -524,7 +524,12 @@ describe("연장 — 구간 시뮬이 120분까지 간다", () => {
     let extra = 0;
     let extraMinutes = 0;
     let matches = 0;
-    for (let seed = 0; seed < 120; seed++) {
+    /**
+     * **연장까지 가는 경기는 열에 하나꼴이다** — 시드를 넉넉히 훑어야 30분의 표본이
+     * 밀도 차(0.84)를 잡아낸다. 백 남짓이면 연장 표본이 네댓 경기라 푸아송 잡음(15%)이
+     * 그 차이를 통째로 덮는다.
+     */
+    for (let seed = 0; seed < 600; seed++) {
       const { ledger } = playMatch(setup(80, 80), seed, true);
       matches++;
       let enteredExtraTime = false;
@@ -539,7 +544,7 @@ describe("연장 — 구간 시뮬이 120분까지 간다", () => {
       }
       if (ledger.events.some((x) => x.type === "extra_time_start")) extraMinutes += 30;
     }
-    expect(extraMinutes).toBeGreaterThan(100); // 표본이 있어야 한다
+    expect(extraMinutes).toBeGreaterThan(600); // 표본이 있어야 한다 — 연장 스무 경기
     const perMinuteRegulation = regulation / (matches * 90);
     const perMinuteExtra = extra / extraMinutes;
     // 눈금은 0.84배 — 다운스트림 골 표본이 아니라 직접 슈팅 발생률을 잰다
