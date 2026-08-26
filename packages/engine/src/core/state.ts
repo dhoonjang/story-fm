@@ -28,6 +28,7 @@ import type {
   Manager,
   ManagerAttributes,
   ManagerOffer,
+  ManagerPoolEntry,
   ManagerVacancy,
   MatchRecord,
   MatchSide,
@@ -87,6 +88,7 @@ import {
   ageOf,
   bestOverall,
   isFinanceDemand,
+  opensOwnerSeat,
   interestStageRank,
   canRegister,
   isReserveMatch,
@@ -774,6 +776,19 @@ export interface GameState {
    */
   managerVacancies?: ManagerVacancy[];
   /**
+   * **무직 감독 풀** — 자리를 잃은 AI 감독들 (transfer.md §7 「감독 풀」).
+   *
+   * 감독은 자리가 아니라 사람이라, 잘린 사람은 지워지지 않고 여기 앉아 다음 벤치를
+   * 기다린다. 명부의 실명 감독도 같은 줄에 앉는다. 상한(`MANAGER_POOL_MAX`)을 넘으면
+   * 자리를 잃은 지 오래된 순으로 밀린다.
+   *
+   * 옛 세이브엔 없다 — **없는 것과 빈 것이 다른 뜻인 유일한 표다**: 로드 보정
+   * (`ensureManagerPool`)이 없는 것을 보고 그 세이브가 옛 사람됨 채널을 쓰던
+   * 시절임을 안다 (people.md §2). 그 보정이 끝나면 빈 배열이다
+   * (optional — SAVE_VERSION 유지).
+   */
+  managerPool?: ManagerPoolEntry[];
+  /**
    * **아직 GM이 읽지 않은 화면 조작** — 전술판·명단·역할을 직접 만진 것.
    *
    * 이 조작들은 채팅 턴을 만들지 않는다(장부 편집이다). 그런데 감독은 판을
@@ -1441,6 +1456,15 @@ export function openBoardDemand(state: GameState): BoardDemand | null {
 export function openFinanceDemand(state: GameState): BoardDemand | null {
   const demand = openBoardDemand(state);
   return demand && isFinanceDemand(demand.kind) ? demand : null;
+}
+
+/**
+ * 열린 **스스로 자리를 여는 요청** — 재정 갈래와 시즌 갈래 (career.md §5.2).
+ * 감독이 장부가 아니라 결정으로 답해야 하는 것들이라 순위 압력을 기다리지 않는다.
+ */
+export function openSeatDemand(state: GameState): BoardDemand | null {
+  const demand = openBoardDemand(state);
+  return demand && opensOwnerSeat(demand.kind) ? demand : null;
 }
 
 /**
@@ -3080,6 +3104,9 @@ export function createGame(input: CreateGameInput): GameState {
     approachPressure: [],
     pressLeaks: [],
     pressSackings: [],
+    // 새 게임의 풀은 비어 있다 — 아직 아무도 자리를 잃지 않았다. **빈 배열로 세우는
+    // 것이 곧 표식이다**: 로드 보정이 옛 사람됨 채널을 쓰던 세이브를 이것으로 가른다
+    managerPool: [],
     boardDemands: [],
     boardRequests: [],
 

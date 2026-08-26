@@ -433,3 +433,14 @@ export const WORLD_FIGURE_SEEDS: readonly WorldFigureSeed[] = [...MANAGERS, ...A
 export function worldFigureManagerOf(teamId: string): WorldFigureSeed | null {
   return MANAGERS.find((m) => m.teamId === teamId) ?? null;
 }
+
+/**
+ * 이 이름이 명부의 실명 인물인가 — **팀을 묻지 않는다** (people.md §2-1).
+ *
+ * 감독은 벤치를 옮겨 다니므로(transfer.md §7 「감독 풀」) 팀으로 되짚으면 이사한
+ * 사람을 놓친다. 실명 표식(`real`)을 붙이는 자리와 사람됨을 명부에서 읽을지
+ * 가르는 자리가 같은 답을 봐야 한다.
+ */
+export function isWorldFigureName(name: string): boolean {
+  return WORLD_FIGURE_SEEDS.some((f) => f.name === name);
+}

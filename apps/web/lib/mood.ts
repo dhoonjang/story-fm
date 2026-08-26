@@ -258,6 +258,16 @@ function sentenceOf(fact: MoodFact): string {
     case "departure":
       // 라커룸 전체가 같은 사실을 든다 — 누가 그와 가까웠는지는 아직 아무도 모른다
       return `${dayWord(fact.days)} ${fact.name} 계약 해지 소식에 라커룸이 뒤숭숭하다`;
+    case "former-club":
+      /**
+       * 그날이 며칠 남았는가로 결이 갈린다 — 두 주 앞의 대진은 달력의 일이고,
+       * 전야는 그 사람의 일이다. 어떻게 떠났는지는 회견 카드의 것이라 여기 오지 않는다.
+       */
+      return fact.days === 0
+        ? `오늘 옛 소속 ${fact.club}을(를) 상대한다`
+        : fact.days === 1
+          ? `내일 옛 소속 ${fact.club}과(와) 만난다`
+          : `${fact.days}일 뒤 옛 소속 ${fact.club}과(와)의 경기가 잡혀 있다`;
     case "contract-ending":
       return "계약이 반년 안에 끝난다";
     case "leader":

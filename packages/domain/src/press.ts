@@ -55,6 +55,12 @@ export const PressTriggerSchema = z.enum([
   "opening",
   /** 더비 전야 — 더비 표의 대진 전날 */
   "derby",
+  /**
+   * **복귀전 전야** — 감독이 떠난 구단과 다시 만나는 날 (people.md §4).
+   * 전야의 자리는 하나라, 더비·개막이 그날을 이미 잡았으면 이 자리는 서지 않고
+   * 사실 카드만 그쪽에 얹힌다.
+   */
+  "former-club",
   /** 마지막 홈경기 전야 — 은퇴 예고가 선 선수가 있을 때 (season.md §6) */
   "farewell",
   /**
@@ -197,6 +203,17 @@ export const PressFactKindSchema = z.enum([
    * 시즌 내내 같은 말을 한다 (overview.md §1 철칙 4).
    */
   "rival-quote",
+  /**
+   * **옛 구단** — 대진이 갖고 있는 사실 (people.md §4). 새 상태가 아니라 원장의
+   * 파생이다: 감독은 경질 이력(`state.dismissals`)·재임 시즌 수(`seasonRecords`),
+   * 선수는 이적 원장(`state.transfers`)에서 결정적으로 선다.
+   *
+   * `tags[0]`이 누구의 사실인가(`manager` · `player` 우리 선수의 친정 대결 ·
+   * `rival-player` 우리가 내보낸 선수), `tags[1]`이 어떻게 떠났나의 코드,
+   * `refId`가 그 구단이다. `values`는 떠난 지 흐른 날(`days`) · 이적료(`fee`) ·
+   * 감독의 재임 시즌 수(`seasons`) · 그가 이 경기에 넣은 골(`goals`)이다.
+   */
+  "former-club",
 ]);
 /**
  * 회견의 재료 — **사실 한 줄.** 질문이 아니다.
@@ -436,6 +453,13 @@ export const ApproachContextSchema = z.object({
      */
     "board-demand",
     /**
+     * 창 밖에서 선 경기 단위 구단주 요청 — 지목한 선수를 세우라는 것이다
+     * (career.md §5.2 「시즌 갈래」). 자리의 주인이 그 선수이고 `value`가 세워야 할
+     * 선발 횟수다. 매각 요구(`board-demand`)와 코드가 갈린 것은 배경 한 줄이 「매각」과
+     * 「기용」을 가려 읽어야 하기 때문이다.
+     */
+    "demand-starts",
+    /**
      * 시즌 리뷰 면담 — `value`가 지난 시즌 최종 순위, `limit`이 그 시즌의 기대 순위다
      * (career.md §5). 시즌 번호는 사실 카드가 든다.
      */
@@ -630,6 +654,35 @@ const FINANCE_GRADE_KO: Record<string, string> = {
 };
 
 /**
+ * 감독이 그 구단을 떠난 갈래 — `Dismissal.kind` 그대로 (career.md §5.1).
+ * 회견 카드와 서사 아크의 사실 줄이 같은 표를 읽는다: 두 벌을 두면 같은 이별이
+ * 회견에서와 아크에서 다른 이름으로 선다.
+ */
+export const MANAGER_EXIT_KO: Record<string, string> = {
+  sacked: "경질",
+  expired: "계약 만료",
+  resigned: "사임",
+};
+
+/**
+ * 선수가 그 구단을 떠난 갈래 — 이적 원장의 사유 코드(`TransferReason`), 없으면
+ * 갈래 코드(`TransferType`)다 (transfer.md §2). 두 열거의 코드가 겹치지 않아
+ * 한 표가 둘을 다 든다.
+ */
+const PLAYER_EXIT_KO: Record<string, string> = {
+  transfer: "이적",
+  loan: "임대",
+  free: "자유계약",
+  youth: "유스 승격",
+  retire: "은퇴",
+  "release-agreed": "합의 해지",
+  "release-unilateral": "일방 해지",
+  "contract-expiry": "계약 만료",
+  precontract: "사전 계약",
+  "youth-callup": "유스 승격",
+};
+
+/**
  * 돌아온 몸 — `CallUpReturnState`의 한국어 이름 (competition.md §5-1). 장부가 드는
  * 것은 코드뿐이고, 「지쳐서 돌아왔다」는 이 표 하나에서만 문장이 된다.
  */
@@ -763,8 +816,9 @@ export function pressFactText(fact: PressFact): string {
             : "")
       );
     case "board-demand":
+      // 종류가 든 숫자는 하나다 — 채워야 할 목표(`target`)이거나 발행 시점의 기준값
       return (
-        `보드 요청 — ${boardDemandText(sub, name, v.baseline)}` +
+        `보드 요청 — ${boardDemandText(sub, name, v.target ?? v.baseline)}` +
         causeTail(d.tags?.[1]) +
         (d.date ? ` · 기한 ${d.date}` : "")
       );
@@ -928,6 +982,28 @@ export function pressFactText(fact: PressFact): string {
     case "rival-quote":
       // 이름과 결 하나 — 카드가 아는 것이 그 둘뿐이다 (people.md §4)
       return `상대 감독 ${name} — ${RIVAL_VOICE_KO[(sub ?? "") as RivalVoice] ?? "마이크 앞에 섰다"}`;
+    case "former-club": {
+      /**
+       * 세 갈래가 한 카드를 쓴다 — `tags[0]`이 누구의 사실인가, `tags[1]`이 어떻게
+       * 떠났나다 (people.md §4).
+       *
+       * 상대 구단의 이름은 **감독의 줄에만** 선다: 자리의 국면 줄이 이미 그 이름을
+       * 들고 있어, 선수의 줄이 다시 부르면 한 회견에서 같은 구단이 세 번 선다.
+       */
+      if (sub === "manager") {
+        return (
+          `감독의 옛 구단 ${name}` +
+          (v.seasons ? ` · ${v.seasons}시즌 재임` : "") +
+          ` · ${MANAGER_EXIT_KO[tags[1] ?? ""] ?? "떠남"} 뒤 ${v.days ?? 0}일`
+        );
+      }
+      return (
+        `${name} — ${sub === "rival-player" ? "우리가 내보낸 선수" : "상대는 옛 소속 구단"}` +
+        ` · ${PLAYER_EXIT_KO[tags[1] ?? ""] ?? "이동"} 뒤 ${v.days ?? 0}일` +
+        (v.fee ? ` · 이적료 ${formatMoney(v.fee)}` : "") +
+        (v.goals ? ` · 이 경기 ${v.goals}골` : "")
+      );
+    }
     case "vacancy":
       /**
        * 전임의 순위는 **있을 때만** 선다 (career.md §5.1) — 순위표가 없는 구단(컵만
@@ -1009,6 +1085,8 @@ export function approachContextText(
       return who
         ? `구단주 요청 · ${who} 매각`
         : `구단주 요청 · 매각 ${formatMoney(context.value ?? 0)}`;
+    case "demand-starts":
+      return `구단주 요청 · ${who ?? "지목 선수"} 선발 ${context.value ?? 0}회`;
     case "season-review":
       return `시즌 결산 · 최종 ${context.value ?? 0}위 · 기대 ${context.limit ?? 0}위`;
     case "interview":

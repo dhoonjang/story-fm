@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ManagerSpellSchema } from "./manager";
 
 /**
  * 게임 팀 (GAME_TEAM) — 정규화 v6. 라인업은 TACTIC_ASSIGNMENT에, 재정은 FINANCE에
@@ -71,6 +72,23 @@ export const GameTeamSchema = z.object({
    */
   managerName: z.string().min(1).optional(),
   managerSince: z.string().optional(),
+  /**
+   * **지금 이 벤치에 선 사람의 지난 재임들** — 무직 감독 풀에서 데려왔으면 그가
+   * 들고 온 이력이다 (→ transfer.md §7 「감독 풀」). 지어낸 사람은 비어 있고, 옛
+   * 세이브엔 없다 (optional — 세이브 버전 유지).
+   *
+   * 이력이 풀이 아니라 벤치에 앉는 이유: 재직 중인 감독은 풀에 없다. 그가 다시
+   * 자리를 잃는 날 이 목록에 지금 재임이 더해져 풀로 돌아간다.
+   */
+  managerSpells: z.array(ManagerSpellSchema).optional(),
+  /**
+   * **사람됨을 읽는 옛 채널의 팀** — 로드 보정만 심는다 (people.md §2).
+   *
+   * 가상 감독의 사람됨 채널이 `(시드, 팀, 이름)`에서 `(시드, 이름)`으로 바뀌기
+   * 전의 세이브에서, 그때 서 있던 벤치의 사람이 그대로이게 하는 표식이다. 그
+   * 사람이 옮겨 가면 풀을 타고 함께 간다. 새 게임에는 없다.
+   */
+  managerPersonaSeat: z.string().min(1).optional(),
 });
 export type GameTeam = z.infer<typeof GameTeamSchema>;
 /** 관례상 짧은 별칭 */

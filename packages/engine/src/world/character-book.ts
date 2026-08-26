@@ -238,7 +238,22 @@ function personaOf(state: GameState, characterId: string): Persona | null {
   // 타 팀 벤치의 가상 감독 — 후보를 모으는 순서(candidatesOf)의 마지막 겹 그대로
   const bench = state.teams.find((t) => t.id !== state.userTeamId && t.managerName === characterId);
   if (bench?.managerName !== undefined) {
-    return generateVirtualManager(state.seed, bench.id, bench.managerName);
+    return generateVirtualManager(state.seed, bench.managerName, bench.managerPersonaSeat);
+  }
+  /**
+   * **무직 감독** — 어느 벤치에도 없지만 세계에는 있다 (transfer.md §7 「감독 풀」).
+   *
+   * `candidatesOf`에는 없는 겹이다: 무직인 사람은 감독이 이번 턴에 마주칠 사람이
+   * 아니라 후보로 담을 자리가 없다. 그런데 이 함수는 **이력이 이미 실은 카드를
+   * 되찾는** 자리라 규약이 다르다 — 지난 시즌 우리와 말을 섞은 상대 감독이 잘린
+   * 이튿날 그 이력의 화자가 빈 카드가 되면 안 된다.
+   */
+  const unemployed = (state.managerPool ?? []).find((e) => e.name === characterId);
+  if (unemployed) {
+    return (
+      worldFigureByName(state, unemployed.name) ??
+      generateVirtualManager(state.seed, unemployed.name, unemployed.personaSeat)
+    );
   }
   return null;
 }
@@ -426,7 +441,11 @@ function candidatesOf(state: GameState): Candidate[] {
   // 감독은 스카우팅으로 알게 되는 상대가 아니라 깊이는 명부와 같이 `full`이다
   for (const team of state.teams) {
     if (team.id === state.userTeamId || team.managerName === undefined) continue;
-    add(generateVirtualManager(state.seed, team.id, team.managerName), NEAR_WORLD, always("full"));
+    add(
+      generateVirtualManager(state.seed, team.managerName, team.managerPersonaSeat),
+      NEAR_WORLD,
+      always("full"),
+    );
   }
 
   return [...byId.values()];
