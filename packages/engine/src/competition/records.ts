@@ -55,17 +55,27 @@ export function championOf(
 // ── 감독의 보관함 ─────────────────────────────────────
 
 /**
- * 트로피 원장에서 **감독의 것만** (career.md §6).
+ * 감독이 **그 시즌 그 팀에 있었는가** — 트로피 보관함과 시상 줄이 같은 자를 쓴다
+ * (career.md §6).
  *
- * 원장은 전 구단의 우승을 든다 — 감독의 것은 그가 그 시즌 그 팀에 있던 줄이고,
- * 재임 여부는 `SEASON_RECORD`의 (시즌, 팀)이 답한다. 이번 시즌은 아직 결산 전이라
- * 그 표에 없으므로 지금 맡은 팀으로 함께 본다.
+ * 재임 여부는 `SEASON_RECORD`의 (시즌, 팀)이 답한다 — 무직으로 맞은 시즌 끝은 그
+ * 표에 줄이 없으므로 옛 팀이 그해 든 컵도 감독의 것이 아니다 (career.md §5.1).
+ * 이번 시즌은 아직 결산 전이라 그 표에 없어 지금 맡은 팀으로 함께 본다.
  */
-export function managerTrophiesOf(state: GameState): Trophy[] {
+export function managerTenureOf(state: GameState): (season: number, teamId: string) => boolean {
   const tenure = new Set(state.seasonRecords.map((r) => `${r.season}:${r.teamId}`));
   const now = managedTeamId(state);
   if (now !== null) tenure.add(`${state.season}:${now}`);
-  return state.trophies.filter((t) => tenure.has(`${t.season}:${t.teamId}`));
+  return (season, teamId) => tenure.has(`${season}:${teamId}`);
+}
+
+/**
+ * 트로피 원장에서 **감독의 것만** — 원장은 전 구단의 우승을 든다 (career.md §6).
+ * 그대로 실으면 AI 구단의 우승이 감독의 보관함에 선다.
+ */
+export function managerTrophiesOf(state: GameState): Trophy[] {
+  const managed = managerTenureOf(state);
+  return state.trophies.filter((t) => managed(t.season, t.teamId));
 }
 
 // ── 구단 기록 ─────────────────────────────────────────

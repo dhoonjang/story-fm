@@ -101,6 +101,7 @@ import {
   championOf,
   clubRecordsOf,
   leagueTableOf,
+  managerTenureOf,
   managerTrophiesOf,
   pastSeasonsOf,
   seasonLabelOf,
@@ -2652,6 +2653,8 @@ function boardView(state: GameState): OfficeViews["finance"]["board"] {
 
 export function buildOfficeViews(state: GameState): OfficeViews {
   const userTeamId = state.userTeamId;
+  /** 감독의 것을 가르는 자 — 보관함과 시상 줄이 같은 판정을 쓴다 (career.md §6) */
+  const managedThen = managerTenureOf(state);
   /**
    * 명단 표는 **우리 계약**을 센다 — 임대 보낸 선수도 우리 선수다 (transfer.md §2).
    * 넓히는 것은 이 표 하나뿐이다: 재정·등록 명단·전술은 **부릴 수 있는 인원**을
@@ -3430,11 +3433,9 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         goals: a.goals,
         matches: a.matches,
       })),
-      // 감독이 그 시즌 그 팀에 있었는가 — 시즌 기록이 그 답을 갖고 있다 (career.md §6)
+      // 감독이 그 시즌 그 팀에 있었는가 — 트로피 보관함과 **같은 자**로 잰다 (career.md §6)
       awards: (state.awards ?? [])
-        .filter((a) =>
-          state.seasonRecords.some((r) => r.season === a.season && r.teamId === a.teamId),
-        )
+        .filter((a) => managedThen(a.season, a.teamId))
         .map((a) => ({
           code: a.code,
           season: a.season,
