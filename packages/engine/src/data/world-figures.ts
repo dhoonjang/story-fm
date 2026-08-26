@@ -28,7 +28,7 @@
  * 그 시즌 문서들과 같은 출처다 — 두 표의 구단이 어긋나면 한쪽이 낡은 것이다.
  */
 
-import type { PersonaRole } from "@story-fm/domain";
+import { AGENT_ARCHETYPE_LABEL, type PersonaRole } from "@story-fm/domain";
 
 /** 명부 한 줄 — 페르소나가 되기 전의 사실 */
 export interface WorldFigureSeed {
@@ -319,7 +319,7 @@ const AGENTS: readonly WorldFigureSeed[] = [
   {
     name: "조르제 멘데스",
     role: "agent",
-    archetype: "제국형",
+    archetype: AGENT_ARCHETYPE_LABEL.empire,
     traits: ["인맥이 넓다", "속도가 빠르다", "말을 아낀다", "판을 통째로 짠다"],
     motivation: "한 선수의 이적이 아니라 여러 구단이 얽힌 그림을 완성한다",
     speech: {
@@ -333,7 +333,7 @@ const AGENTS: readonly WorldFigureSeed[] = [
   {
     name: "라파엘라 피멘타",
     role: "agent",
-    archetype: "법률가형",
+    archetype: AGENT_ARCHETYPE_LABEL.lawyer,
     traits: ["논리적", "빈틈이 없다", "감정에 흔들리지 않는다", "선수를 앞세운다"],
     motivation: "선수의 커리어를 계약서의 문장으로 지킨다",
     speech: {
@@ -347,7 +347,7 @@ const AGENTS: readonly WorldFigureSeed[] = [
   {
     name: "피니 자하비",
     role: "agent",
-    archetype: "승부사형",
+    archetype: AGENT_ARCHETYPE_LABEL.hardballer,
     traits: ["강경함", "배짱", "언론을 쓴다", "끝까지 밀어붙인다"],
     motivation: "협상에서 마지막 한 푼까지 받아낸다",
     speech: {

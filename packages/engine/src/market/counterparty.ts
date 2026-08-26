@@ -26,12 +26,14 @@ import {
   type CounterBand,
   type CounterBounds,
 } from "./counter-bounds";
+import { addDays } from "../competition/calendar";
 import { squadStatusOf } from "../squad/promises";
 import { KIND_KO, counterpartOf, pendingOffer, respondOffer, splitLabel } from "./negotiation";
 import { agentForPlayer } from "../world/persona";
 import { playerArchetypeOf } from "../world/player-persona";
 import { numberLineageOf } from "../squad/numbers";
-import { interestLine } from "./interest";
+import { competingBidLine, interestLine } from "./interest";
+import { agentProfileOf } from "./agent-profile";
 import { contractYearsLeft, hasIssue, playerById, teamName, type GameState } from "../core/state";
 import { formatMoney } from "../club/finance";
 
@@ -129,12 +131,27 @@ export interface CounterpartyAnchor {
   statusRoom?: TermsRoom;
   /** 분할 연수를 되부를 수 있는 갈래인가 */
   splittable: boolean;
+  /**
+   * **조정에 걸 수 있는 기한** — 대리인 원형의 `ultimatumDays`가 정한다
+   * (transfer.md §12-1). 날짜는 코어가 박고 모델은 넣을지만 고른다.
+   *
+   * 지금 기한을 **당길 수 있을 때만** 선다: 남은 기한이 이미 더 짧으면 아무것도
+   * 달라지지 않으므로, 그 자리에 날짜를 적으면 모델이 값하지 않는 압박을 말한다.
+   */
+  ultimatumOn?: string;
   bounds: CounterBounds;
 }
 
 /** 모델이 낸 판정 — 어느 값도 믿지 않는다 */
 export interface CounterpartyRulingInput {
   verdict: NegotiationVerdict;
+  /**
+   * 앵커가 실은 기한을 **걸 것인가** — 날짜는 고르지 못한다 (transfer.md §12-1).
+   *
+   * 비어 있으면 **걸린다.** 그래야 호출이 죽은 자리와 mock 모드가 실모드와 같은
+   * 사다리를 쓴다 — 앵커가 그대로 서는 것이 이 파일의 규약이다.
+   */
+  ultimatum?: boolean;
   fee?: number;
   weeklyWage?: number;
   contractYears?: number;
@@ -147,6 +164,8 @@ export interface CounterpartyRulingInput {
 export interface CounterpartyRuling {
   negotiationId: string;
   verdict: NegotiationVerdict;
+  /** 상대가 건 기한 — 코어가 박은 날짜 그대로다 (모델은 날짜를 부르지 못한다) */
+  deadlineOn?: string;
   fee?: number;
   weeklyWage?: number;
   contractYears?: number;
@@ -214,12 +233,24 @@ export function counterpartyAnchor(
    * 닫히고 주급·연수의 흥정은 그대로 남는다. 그래서 `canCounter`에 들지 않는다.
    */
   const status = bounds.status ? clampToBand(bounds.status, bounds.status.expectation) : null;
+  /**
+   * **최후통첩** — 조정이 가능한 판에서만, 그리고 기한을 당길 수 있을 때만.
+   * 앵커의 판정이 아니라 `allowed`를 보는 이유: 모델이 사다리에서 한 칸 내려와
+   * 조정을 고를 수 있다면 그 조정에도 기한이 실려야 한다.
+   */
+  const ultimatumDays = agentProfileOf(state, negotiation.gamePlayerId).ultimatumDays;
+  const deadline = ultimatumDays > 0 ? addDays(state.date, ultimatumDays) : null;
+  const ultimatumOn =
+    deadline !== null && allowed.includes("counter") && deadline < negotiation.expiresOn
+      ? deadline
+      : undefined;
   return {
     negotiationId: negotiation.id,
     probability,
     latitude: bounds.latitude,
     verdict,
     allowed,
+    ...(ultimatumOn === undefined ? {} : { ultimatumOn }),
     ...(fee === null || !bounds.fee ? {} : { fee, feeRoom: roomOf(fee, bounds.fee) }),
     ...(wage === null || !bounds.wage
       ? {}
@@ -289,9 +320,12 @@ export function clampCounterpartyRuling(
     anchor.splittable && years !== undefined && years >= 1 && years <= MAX_PAYMENT_YEARS
       ? years
       : undefined;
+  // 기한은 앵커의 날짜뿐이다 — 모델은 `false`로 빼기만 한다
+  const deadlineOn = ruling?.ultimatum === false ? undefined : anchor.ultimatumOn;
   return {
     negotiationId: anchor.negotiationId,
     verdict,
+    ...(deadlineOn === undefined ? {} : { deadlineOn }),
     ...(fee === undefined ? {} : { fee }),
     ...(weeklyWage === undefined ? {} : { weeklyWage }),
     ...(contractYears === undefined ? {} : { contractYears }),
@@ -352,6 +386,7 @@ function dossierOf(state: GameState, negotiation: Negotiation, player: GamePlaye
   const them = counterpartOf(negotiation, player);
   const money = negotiation.kind === "release" ? "정산금" : "이적료";
   const rivals = interestLine(state, player.id);
+  const bids = competingBidLine(state, player.id);
   const numberLine = numberLineOf(state, negotiation, player);
   return [
     `[오퍼 이력] 기한 ${negotiation.expiresOn}`,
@@ -387,6 +422,14 @@ function dossierOf(state: GameState, negotiation: Negotiation, player: GamePlaye
      * (`dealOdds`의 「다른 구단의 관심」), 여기 실리는 것은 그 근거다.
      */
     ...(rivals === null ? [] : [`[경쟁 관심] ${rivals}`]),
+    /**
+     * **경쟁 입찰** — 그 구단이 실제로 값을 부른 사실 (transfer.md §1-2).
+     *
+     * 관심 줄과 따로 서는 이유가 무게다: 「보고 있다」와 「불렀다」는 이 테이블에서
+     * 다른 사실이고, 뒤엣것만 호가를 올린다. 이 줄이 서야 상대가 "다른 구단이
+     * 있다"고 말할 수 있다 — 없으면 그 말은 지어낸 것이다.
+     */
+    ...(bids === null ? [] : [`[경쟁 입찰] ${bids}`]),
     ...(numberLine === null ? [] : [`[등번호] ${numberLine}`]),
   ];
 }

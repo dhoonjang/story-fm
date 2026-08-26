@@ -108,6 +108,7 @@ import { pickAnyPlayer } from "../core/player-ref";
 import {
   activeContract,
   clearInterests,
+  competingBidsOn,
   releaseFromTactics,
   squadShortfall,
   playerById,
@@ -666,6 +667,12 @@ export function respondOffer(
     /** 재계약·영입의 조정에서 선수가 부르는 계약 지위 — 다른 갈래는 무시된다 */
     squadStatus?: SquadStatus;
     paymentYears?: number;
+    /**
+     * **상대가 조정에 거는 기한** — 최후통첩 (transfer.md §12-1). 날짜는 코어가 박은
+     * 것이고(`CounterpartyAnchor.ultimatumOn`), 여기서는 협상의 기한을 그날로
+     * **당기기만** 한다. 뒤로 미는 값은 조용히 버려진다.
+     */
+    deadlineOn?: string;
     note?: string;
   },
 ): MarketSkillResult {
@@ -844,6 +851,22 @@ export function respondOffer(
   offer.verdict = input.verdict;
   if (input.note) offer.note = input.note;
 
+  /**
+   * **상대가 건 기한 — 당길 때만 선다** (transfer.md §12-1).
+   *
+   * `minDate`가 문지기다: 기한은 상대가 조이는 손잡이지 늘리는 손잡이가 아니라,
+   * 남은 기한이 이미 더 짧으면 아무 일도 일어나지 않는다. 오늘 이전의 날짜도
+   * 서지 않는다 — 이미 지난 기한은 통첩이 아니라 결렬이다.
+   */
+  const deadlineOn = ((): string | undefined => {
+    const asked = countering ? input.deadlineOn : undefined;
+    if (asked === undefined || asked <= state.date) return undefined;
+    const pulled = minDate(asked, negotiation.expiresOn);
+    return pulled === negotiation.expiresOn ? undefined : pulled;
+  })();
+  if (deadlineOn !== undefined) negotiation.expiresOn = deadlineOn;
+  const deadlineNote = deadlineOn === undefined ? "" : ` ${deadlineOn}까지 답을 달라고 합니다.`;
+
   const counterpart = counterpartOf(negotiation, player);
   const verdictCard = (rest: Partial<MarketCard>): MarketCard => ({
     ...verdictCardOf({
@@ -855,6 +878,8 @@ export function respondOffer(
       // 조정만 답이 남는다 — 카드는 그때만 확률을 세운다 (`verdictCardOf`)
       odds: oddsText(odds),
       loan: loaning,
+      // 기한이 걸린 조정은 그날이 곧 우리가 답해야 하는 날이다
+      ...(deadlineOn === undefined ? {} : { dueOn: deadlineOn }),
       ...(input.note ? { note: input.note } : {}),
     }),
     ...rest,
@@ -911,6 +936,7 @@ export function respondOffer(
       verdict: "counter",
       note: input.note,
       ...(counterYears === undefined ? {} : { paymentYears: counterYears }),
+      ...(deadlineOn === undefined ? {} : { deadlineOn }),
     });
     return {
       ok: true,
@@ -922,7 +948,7 @@ export function respondOffer(
       }),
       message:
         `${player.name}은(는) 정산금 ${formatMoney(counterSeverance)}${splitLabel(counterYears)}을 원합니다. ` +
-        `그 조건으로 다시 제안하면 받아들일 것입니다`,
+        `그 조건으로 다시 제안하면 받아들일 것입니다.${deadlineNote}`,
     };
   }
   if (renewing) {
@@ -937,6 +963,7 @@ export function respondOffer(
       verdict: "counter",
       note: input.note,
       ...(statusAsked === undefined ? {} : { squadStatus: statusAsked }),
+      ...(deadlineOn === undefined ? {} : { deadlineOn }),
     });
     return {
       ok: true,
@@ -945,7 +972,8 @@ export function respondOffer(
       }),
       message:
         `${player.name}은(는) 주급 ${formatMoney(counterWageDemand)} · ${yearsAsked}년 계약` +
-        `${statusLabel(statusAsked)}을(를) 원합니다. 그 조건으로 다시 제안하면 받아들일 것입니다`,
+        `${statusLabel(statusAsked)}을(를) 원합니다. 그 조건으로 다시 제안하면 받아들일 것입니다.` +
+        deadlineNote,
     };
   }
   negotiation.rounds.push({
@@ -961,6 +989,7 @@ export function respondOffer(
     ...(counterYears === undefined ? {} : { paymentYears: counterYears }),
     ...(statusAsked === undefined ? {} : { squadStatus: statusAsked }),
     ...(numberAsked === undefined ? {} : { squadNumber: numberAsked }),
+    ...(deadlineOn === undefined ? {} : { deadlineOn }),
   });
   return {
     ok: true,
@@ -973,7 +1002,8 @@ export function respondOffer(
     }),
     message:
       `${counterpart}의 조정 — 이적료 ${formatMoney(counterFee)}${splitLabel(counterYears)} · 주급 ${formatMoney(counterWage)}` +
-      `${statusLabel(statusAsked)}${numberLabel(numberAsked)}. 받아들이려면 그 조건으로 오퍼를 다시 넣으세요`,
+      `${statusLabel(statusAsked)}${numberLabel(numberAsked)}. 받아들이려면 그 조건으로 오퍼를 다시 넣으세요.` +
+      deadlineNote,
   };
 }
 
@@ -3322,6 +3352,20 @@ function medicalDecisionOutOfWindow(state: GameState, negotiation: Negotiation):
 }
 
 /** 만료 처리 — tick이 매일 부른다 (창 마감·유효기간 경과) */
+/**
+ * **지금 서 있는 최후통첩** — 상대가 건 기한이 곧 이 협상의 기한인가
+ * (transfer.md §12-1). 없으면 `null`.
+ *
+ * 협상이 쥔 `expiresOn`만으로는 그 날이 코어의 2주인지 상대가 조인 날인지 알 수 없다.
+ * 기한이 지났을 때 무산과 결렬을 가르는 것도, 주의 줄에 「기한」을 세우는 것도 이
+ * 한 자다 — 두 자리에 따로 적으면 화면은 통첩이라 하고 장부는 무산으로 닫는다.
+ */
+export function standingDeadlineOf(negotiation: Negotiation): string | null {
+  return negotiation.rounds.some((r) => r.by === "them" && r.deadlineOn === negotiation.expiresOn)
+    ? negotiation.expiresOn
+    : null;
+}
+
 export function expireNegotiations(state: GameState, digest: string[]): void {
   for (const negotiation of state.negotiations) {
     if (negotiation.status !== "open" && negotiation.status !== "agreed") continue;
@@ -3343,19 +3387,36 @@ export function expireNegotiations(state: GameState, digest: string[]): void {
       );
       continue;
     }
+    const deadline = standingDeadlineOf(negotiation);
     // 기한 하루 전 — 결정하지 못한 채 사라지는 일이 없게 한 번 더 세운다
     if (negotiation.expiresOn === addDays(state.date, 1)) {
       const player = playerById(state, negotiation.gamePlayerId);
       digest.push(
-        `⏳ ${player?.name ?? negotiation.gamePlayerId} 협상이 내일 만료됩니다 — 오늘 안에 결정해야 합니다`,
+        deadline
+          ? `⏳ ${player?.name ?? negotiation.gamePlayerId} — 상대가 건 기한이 내일입니다. ` +
+              `넘기면 협상이 끝납니다`
+          : `⏳ ${player?.name ?? negotiation.gamePlayerId} 협상이 내일 만료됩니다 — 오늘 안에 결정해야 합니다`,
       );
     }
     if (state.date <= negotiation.expiresOn) continue;
-    negotiation.status = "expired";
     const player = playerById(state, negotiation.gamePlayerId);
-    digest.push(`${player?.name ?? negotiation.gamePlayerId} 협상이 기한을 넘겨 무효가 됐습니다`);
+    const name = player?.name ?? negotiation.gamePlayerId;
+    /**
+     * **기한을 건 쪽이 있으면 문을 닫은 것은 달력이 아니라 그 사람이다**
+     * (transfer.md §12-1). 그래서 무산(`expired`)이 아니라 결렬(`rejected`)이고,
+     * 이번 창에서는 다시 열 수 없다(`rejectedThisWindow`).
+     */
+    if (deadline) {
+      negotiation.status = "rejected";
+      digest.push(`${name} — 상대가 건 기한이 지났습니다. 협상은 이번 창에서 끝났습니다`);
+      // 이번 창에 다시 못 여는 문이라 기한 초과(3)보다 무겁다 (people.md §9)
+      pushNarrative(state, `${name} 협상 결렬 — 상대가 건 기한 경과`, 4);
+      continue;
+    }
+    negotiation.status = "expired";
+    digest.push(`${name} 협상이 기한을 넘겨 무효가 됐습니다`);
     // 기한은 다시 열 수 있는 문이라 3 — 창이 닫힌 위의 건(4)보다 한 눈금 가볍다
-    pushNarrative(state, `${player?.name ?? negotiation.gamePlayerId} 협상 기한 초과로 무효`, 3);
+    pushNarrative(state, `${name} 협상 기한 초과로 무효`, 3);
   }
 }
 
@@ -3387,7 +3448,11 @@ export function pendingVerdicts(state: GameState): Array<{
   for (const negotiation of state.negotiations) {
     const player = playerById(state, negotiation.gamePlayerId);
     // 라벨은 방향을 함께 싣는다 — 이름만 서면 GM이 사는 건지 파는 건지 뒤집는다
-    const who = `${player?.name ?? negotiation.gamePlayerId} ${KIND_KO[negotiation.kind]}`;
+    const deadline = standingDeadlineOf(negotiation);
+    // 상대가 건 기한은 **오늘 답해야 하는 이유**라 주의 줄이 그것을 함께 든다 (§12-1)
+    const who =
+      `${player?.name ?? negotiation.gamePlayerId} ${KIND_KO[negotiation.kind]}` +
+      (deadline ? ` (상대가 건 기한 ${deadline})` : "");
     if (negotiation.status === "agreed") {
       const medical = negotiation.medical;
       /**
@@ -3462,29 +3527,39 @@ export function describeNegotiations(state: GameState): string {
       /** 이 갈래에서 금액이 무엇인가 — 해지의 숫자는 이적료가 아니라 정산금이다 */
       const moneyKo = n.kind === "release" ? "정산금" : "오퍼";
       const direction = KIND_KO[n.kind];
+      /**
+       * **판을 흔드는 두 사실** — 상대가 건 기한과 붙은 경쟁 입찰
+       * (transfer.md §12-1 · §1-2). 갈래마다 여섯 줄이 갈리므로 `direction` 뒤에
+       * 한 번만 붙인다 — 줄마다 적으면 한쪽만 고쳐진다.
+       */
+      const deadline = standingDeadlineOf(n);
+      const bids = competingBidsOn(state, n.gamePlayerId).length;
+      const marks =
+        (deadline === null ? "" : ` · 상대가 건 기한 ${deadline}`) +
+        (bids === 0 ? "" : ` · 경쟁 입찰 ${bids}건`);
       if (n.status === "agreed") {
         const medical = describeMedical(state, n);
-        return `${n.id} ${who} ${direction} — 합의됨, ${medical ?? "확정 대기"}`;
+        return `${n.id} ${who} ${direction}${marks} — 합의됨, ${medical ?? "확정 대기"}`;
       }
-      if (!last) return `${n.id} ${who} ${direction} — 오퍼 없음`;
+      if (!last) return `${n.id} ${who} ${direction}${marks} — 오퍼 없음`;
       // 분할은 방향과 같은 이유로 어느 줄에서든 함께 적는다 (transfer.md §1·§5-2)
       const split = splitLabel(last.paymentYears);
       if (last.by === "them") {
         // 내보내는 갈래는 상대가 **오퍼**를 낸 것이고, 데려오는 갈래는 **조정**이다
         if (n.kind === "sell" || n.kind === "loan_out") {
-          return `${n.id} ${who} ${direction} — 상대 오퍼 ${formatMoney(last.fee)}${split} 도착, 답이 필요합니다`;
+          return `${n.id} ${who} ${direction}${marks} — 상대 오퍼 ${formatMoney(last.fee)}${split} 도착, 답이 필요합니다`;
         }
         // 재계약의 조정은 이적료가 아니라 주급과 연수다
         if (n.kind === "renew") {
-          return `${n.id} ${who} ${direction} — 조정 주급 ${formatMoney(last.weeklyWage)} · ${last.contractYears}년 도착`;
+          return `${n.id} ${who} ${direction}${marks} — 조정 주급 ${formatMoney(last.weeklyWage)} · ${last.contractYears}년 도착`;
         }
-        return `${n.id} ${who} ${direction} — 조정 ${moneyKo} ${formatMoney(last.fee)}${split} 도착`;
+        return `${n.id} ${who} ${direction}${marks} — 조정 ${moneyKo} ${formatMoney(last.fee)}${split} 도착`;
       }
       const waiting =
         last.respondsOn !== null && last.respondsOn > state.date
           ? describeWait(diffDays(state.date, last.respondsOn))
           : "답 도착 — 판정 필요";
-      return `${n.id} ${who} ${direction} — 우리 ${moneyKo} ${formatMoney(last.fee)}${split} (${waiting})`;
+      return `${n.id} ${who} ${direction}${marks} — 우리 ${moneyKo} ${formatMoney(last.fee)}${split} (${waiting})`;
     })
     .join("\n");
 }

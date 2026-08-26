@@ -34,7 +34,15 @@ import { knowledgeOf, KNOWLEDGE_KO, type Knowledge } from "../squad/scouting";
 import { signingBudgetOf, userWageRoom } from "../club/board-request";
 import { budgetFreezeLabel, formatMoney } from "../club/finance";
 import {
+  AGENT_PROFILE,
+  NO_AGENT_PROFILE,
+  agentLabelOf,
+  agentOfPlayer,
+  agentProfileOf,
+} from "./agent-profile";
+import {
   activeContract,
+  competingBidsOn,
   contractYearsLeft,
   financeOf,
   interestsOn,
@@ -79,6 +87,20 @@ const VALUE_FLOOR_RATING = 55;
 
 /** 인내심 감쇠 — 같은 조건을 반복할 때마다 확률에 곱해진다 */
 export const PATIENCE_DECAY = 0.72;
+/**
+ * **조정 상한 — 요구액의 이 배수를 넘게 부를 수 없다.**
+ *
+ * `counter-bounds.ts`에 있던 값이 여기로 내려왔다: 경쟁 입찰이 호가에 얹는 폭의
+ * 상한(`competingBidLiftOf`)이 같은 값이어야 하는데, 조정 범위 쪽은 이미 이 파일을
+ * 읽으므로 되읽으면 순환이 된다. 두 자리에 다른 폭을 두면 경쟁이 조정 구간 밖으로
+ * 호가를 밀어낸다 (AGENTS.md §5 — 한 규칙 한 정의).
+ */
+export const COUNTER_CEILING = 1.15;
+/**
+ * 경쟁 입찰 한 줄이 호가에 얹는 폭 — 누적되며 `COUNTER_CEILING`에서 멈춘다.
+ * ⚠️ 밸런스 값 (→ docs/simulation/transfer.md §1-2).
+ */
+export const COMPETING_BID_LIFT = 1.05;
 /** "같은 조건"의 기준 — 이적료·주급이 각각 이 비율 안이면 반복으로 본다 */
 export const SAME_TERMS_TOLERANCE = 0.03;
 
@@ -89,6 +111,14 @@ export const SAME_TERMS_TOLERANCE = 0.03;
  */
 const MEETS_ASKING_SCORE_PAIR = 1.73;
 const MEETS_ASKING_SCORE_SOLO = 0.94;
+
+/**
+ * 제시액이 기대치에서 1%p 벌어질 때 관문 점수가 움직이는 폭 — 이적료와 주급.
+ * 이름을 준 이유는 `에이전트` 근거 줄이 **같은 눈금으로** 되계산하기 때문이다:
+ * 여기만 고치면 그 줄이 조용히 틀린 %p를 적는다.
+ */
+const FEE_RATIO_SCORE = 8;
+const WAGE_RATIO_SCORE = 6;
 
 /** 관심이 많다고 보는 기준 — 곧바로 주전으로 쓸 구단이 이만큼이면 갈 곳이 있다 */
 export const SUITORS_MANY = 3;
@@ -323,7 +353,9 @@ export function wageExpectationOf(state: GameState, player: GamePlayer): number 
   const current = activeContract(state, player.id)?.weeklyWage ?? 0;
   const byRating = wageByRating(player.attributes.overall);
   // 이적은 인상을 전제한다 — 현 주급의 115% 또는 등급 기대치 중 높은 쪽
-  return Math.round(Math.max(current * 1.15, byRating) / 1_000) * 1_000;
+  const want = Math.max(current * 1.15, byRating);
+  // 부르는 사람이 있다 — 원형이 값에 얹는 폭 (transfer.md §3)
+  return Math.round((want * agentProfileOf(state, player.id).askingLift) / 1_000) * 1_000;
 }
 
 /**
@@ -421,10 +453,27 @@ function boardDemandsSale(state: GameState, player: GamePlayer): string | null {
   return "보드가 이 창에 매각으로 자금을 만들라고 요구했다";
 }
 
-/** 상대가 기대하는 이적료 */
+/**
+ * **이 선수에게 선 경쟁 입찰이 호가에 얹는 배수** (→ transfer.md §1-2).
+ *
+ * 줄마다 곱하되 `COUNTER_CEILING`에서 멈춘다 — 경쟁이 조정 구간(`counterBoundsOf`의
+ * `asking × COUNTER_CEILING`) 밖으로 호가를 밀어내면 상대가 부를 수 있는 값이
+ * 자기 호가보다 낮아진다.
+ */
+export function competingBidLiftOf(state: GameState, playerId: string): number {
+  const bids = competingBidsOn(state, playerId);
+  if (bids.length === 0) return 1;
+  return Math.min(
+    COUNTER_CEILING,
+    bids.reduce((acc, bid) => acc * bid.lift, 1),
+  );
+}
+
+/** 상대가 기대하는 이적료 — 파는 쪽 사정 × 대리인의 원형 × 경쟁 입찰 */
 export function askingPriceFor(state: GameState, player: GamePlayer): number {
   const stance = sellerStance(state, player);
-  return Math.round((marketValueOf(state, player) * stance.multiple) / 100_000) * 100_000;
+  const lift = agentProfileOf(state, player.id).askingLift * competingBidLiftOf(state, player.id);
+  return Math.round((marketValueOf(state, player) * stance.multiple * lift) / 100_000) * 100_000;
 }
 
 export interface DealFactor {
@@ -741,7 +790,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   const feeRatio = askingPrice > 0 ? offeredFee / askingPrice : 2;
   contributions.push({
     gate: "club",
-    score: (feeRatio - 1) * 8,
+    score: (feeRatio - 1) * FEE_RATIO_SCORE,
     label: "제시 이적료",
     why:
       askingPrice > 0
@@ -773,7 +822,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   const wageRatio = wageExpectation > 0 ? terms.weeklyWage / wageExpectation : 1.2;
   contributions.push({
     gate: "player",
-    score: (wageRatio - 1) * 6,
+    score: (wageRatio - 1) * WAGE_RATIO_SCORE,
     label: "제시 주급",
     why: `선수 기대는 ${formatMoney(wageExpectation)}/주 (제시액은 그 ${Math.round(wageRatio * 100)}%)`,
   });
@@ -931,11 +980,15 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   }
 
   // ④ 창 마감 압박 · ⑤ 인내심 — 확률에 곱해지는 항
+  const agent = agentOfPlayer(state, player.id);
+  const profile = agent === null ? NO_AGENT_PROFILE : AGENT_PROFILE[agent.archetype];
   let multiplier = 1;
   const repeats = sameTermsRepeats(state, terms);
   const closingSoon = window ? diffDays(state.date, window.closesOn) <= 3 : false;
   if (closingSoon) multiplier *= 1.15;
-  if (repeats > 0) multiplier *= Math.pow(PATIENCE_DECAY, repeats);
+  // 인내심은 사람마다 다르다 — 원형이 감쇠의 **지수를 나눈다** (transfer.md §3)
+  const decay = Math.pow(PATIENCE_DECAY, repeats / profile.patience);
+  if (repeats > 0) multiplier *= decay;
 
   const sumOf = (gate: "club" | "player", skip: ReadonlySet<number>) =>
     contributions.reduce(
@@ -943,8 +996,21 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
       MEETS_ASKING_SCORE_PAIR,
     );
   const NONE: ReadonlySet<number> = new Set();
-  const chance = (skip: ReadonlySet<number> = NONE, withMultiplier = multiplier) =>
-    sigmoid(sumOf("club", skip)) * sigmoid(sumOf("player", skip)) * withMultiplier * 100;
+  /**
+   * `bump`은 **관문 점수에 직접 얹는 보정**이다 — 항 하나를 빼는 `skip`으로는 잴 수
+   * 없는 것을 재는 자리다. 대리인의 `askingLift`는 항이 아니라 호가·주급 기대 자체를
+   * 움직이므로, "그 사람이 없었다면" 확률은 두 비율 항의 점수를 되돌려야 나온다.
+   */
+  const NO_BUMP = { club: 0, player: 0 };
+  const chance = (
+    skip: ReadonlySet<number> = NONE,
+    withMultiplier = multiplier,
+    bump: { club: number; player: number } = NO_BUMP,
+  ) =>
+    sigmoid(sumOf("club", skip) + bump.club) *
+    sigmoid(sumOf("player", skip) + bump.player) *
+    withMultiplier *
+    100;
 
   const raw = chance();
   // 같은 항목명(예: 두 관문에 함께 들어가는 감독 협상력)은 한 줄로 합친다
@@ -978,8 +1044,27 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   if (repeats > 0) {
     factors.push({
       label: "상대의 인내심",
-      delta: Math.round(raw - chance(NONE, multiplier / Math.pow(PATIENCE_DECAY, repeats))),
+      delta: Math.round(raw - chance(NONE, multiplier / decay)),
       why: `같은 조건으로 ${repeats + 1}번째 제안이다 — 조건을 올려야 움직인다`,
+    });
+  }
+  /**
+   * **대리인 한 줄** — 그 사람이 없었다면 확률이 얼마였는가.
+   *
+   * 호가가 `askingLift`배 오르지 않았다면 두 비율은 그만큼 컸을 테니, 되돌리는 폭은
+   * 각 비율 × (배수 − 1) × 그 항의 눈금이다. 인내심의 몫은 위 줄이 이미 셌다.
+   */
+  if (agent !== null && profile.askingLift !== 1) {
+    const bump = {
+      club: feeRatio * (profile.askingLift - 1) * FEE_RATIO_SCORE,
+      player: wageRatio * (profile.askingLift - 1) * WAGE_RATIO_SCORE,
+    };
+    factors.push({
+      label: "에이전트",
+      delta: Math.round(raw - chance(NONE, multiplier, bump)),
+      why:
+        `${agentLabelOf(agent)}이(가) 그를 대리한다 — ` +
+        `부르는 값이 ${Math.round((profile.askingLift - 1) * 100)}% 다르다`,
     });
   }
 
@@ -1624,7 +1709,9 @@ export function renewalExpectation(state: GameState, player: GamePlayer): number
   const yearsLeft = contractYearsLeft(state, player.id);
   // 만료가 가까우면 몸값을 더 부른다 (1년 미만 ×1.25 · 2년 미만 ×1.15)
   const leverage = yearsLeft < 1 ? 1.25 : yearsLeft < 2 ? 1.15 : 1.05;
-  return Math.round((Math.max(current, byRating) * leverage) / 1_000) * 1_000;
+  // 재계약도 그의 대리인이 부른다 — 이적 주급 기대와 같은 폭 (transfer.md §3)
+  const lift = agentProfileOf(state, player.id).askingLift;
+  return Math.round((Math.max(current, byRating) * leverage * lift) / 1_000) * 1_000;
 }
 
 /**
@@ -1990,6 +2077,14 @@ export function responseDelayDays(
    * 있고, `>>`로 자르면 음수가 나와 답신일이 오늘보다 앞서 버린다.
    */
   if ((h >>> 8) % 6 === 0) days += 4 + ((h >>> 12) % 6);
+  /**
+   * **답의 속도는 그 사람의 것이다** (transfer.md §3). 제국형은 그날로 답하고
+   * 승부사형은 침묵을 무기로 쓴다.
+   *
+   * ⚠️ **마감의 절반보다 먼저 곱한다.** 뒤에 곱하면 원형이 절반을 되밀어, "마감이
+   * 임박하면 절반으로 줄어든다"가 대리인에 따라 참이 아니게 된다.
+   */
+  days = Math.round(days * agentProfileOf(state, terms.playerId).delayDays);
   const window = windowOpenOn(state.windows, state.date);
   if (window && diffDays(state.date, window.closesOn) <= 3)
     days = Math.max(0, Math.floor(days / 2));

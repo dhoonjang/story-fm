@@ -530,6 +530,15 @@ export const NegotiationRoundSchema = z.object({
    * 아무나 번호를 부르면 요구가 값을 잃는다. 구 세이브엔 없어 optional.
    */
   squadNumber: z.number().int().min(1).max(SQUAD_NUMBER_MAX).optional(),
+  /**
+   * **상대가 이 라운드에 건 기한** — 최후통첩 (transfer.md §12-1).
+   *
+   * 협상의 `expiresOn`을 이 날로 **당긴다**(뒤로는 못 민다). 협상이 쥔 기한과 따로
+   * 남기는 이유는 그 기한이 지났을 때 무산이 아니라 **결렬**이어야 하기 때문이다 —
+   * 문을 닫은 것이 달력인지 사람인지는 이 칸에만 적혀 있다.
+   * 구 세이브엔 없어 optional.
+   */
+  deadlineOn: DateString.optional(),
 });
 /**
  * 메디컬 — **합의와 계약 사이에 놓인 하루.**
@@ -1196,6 +1205,28 @@ export const InterestSchema = z.object({
   pressedOn: DateString.optional(),
 });
 export type Interest = z.infer<typeof InterestSchema>;
+
+/**
+ * **경쟁 입찰 한 줄** — 관심이 값을 부른 사실
+ * (→ docs/simulation/transfer.md §1-2).
+ *
+ * 관심(`Interest`)은 「그 구단이 보고 있다」이고 이 줄은 「그 구단이 값을 불렀다」다.
+ * 둘을 한 표에 접을 수 없는 이유는 사다리의 칸이 협상 밖의 사실인 데 비해 이 줄은
+ * **우리 협상 테이블 위에서만 서고 협상이 끝나면 걷히기** 때문이다.
+ *
+ * 이 줄이 없으면 "다른 구단이 있다"는 상대의 말은 지어낸 것이다 — 코어가 사실로
+ * 세워야 모델이 그것을 말할 수 있다 (overview.md §1 철칙 4).
+ */
+export const CompetingBidSchema = z.object({
+  gamePlayerId: z.string().min(1),
+  /** 값을 부른 구단 — **그 선수에게 이미 관심이 서 있는 구단**이다 (`TEAM.id`) */
+  teamId: z.string().min(1),
+  /** 그 사실이 선 날 */
+  date: DateString,
+  /** 이 한 줄이 호가를 올리는 비율 — 누적 상한은 `COUNTER_CEILING`이다 */
+  lift: z.number().min(1),
+});
+export type CompetingBid = z.infer<typeof CompetingBidSchema>;
 
 /**
  * 개인 훈련 프로그램 — **팀 훈련 위에 한 선수만 겨냥해 얹는 것.**
