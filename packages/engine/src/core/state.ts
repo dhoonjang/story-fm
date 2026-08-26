@@ -88,6 +88,7 @@ import {
   FIRST_TEAM_LIMIT,
   MATCHDAY_BENCH,
   MATCHDAY_SQUAD,
+  SET_PIECE_ROLES,
   ageOf,
   bestOverall,
   isFinanceDemand,
@@ -3382,8 +3383,16 @@ export function squadShortfall(
 }
 
 /**
- * 떠난 선수를 전술 배치에서 뺀다 — **선반도 함께 비운다.**
+ * 떠난 선수를 전술 배치에서 뺀다 — **선반과 죽은 공 지정도 함께 비운다.**
  * 적응도는 이 팀의 전술에 대한 값이라 다른 팀에서 뜻이 없다 (player.md §7.3).
+ *
+ * **키커 지정은 완장과 같은 결이다** (match.md §2 키커 지정 · people.md §5-1) —
+ * 우리 판에 설 수 없게 된 사람이 우리 코너를 차는 장부는 남지 않는다. 이탈 경로가
+ * 여럿이라(매각·방출·계약 만료·임대 복귀) 호출부마다 따로 지우면 다음 경로가 생길 때
+ * 또 샌다. 배치가 걷히는 문 하나가 지정도 함께 걷는다.
+ *
+ * ⚠️ **2군 강등은 이 문이 아니다.** 내려간 선수는 여전히 우리 선수고, 지정은 한
+ * 경기의 명단이 지우지 못하는 값이다 — 그 경기에만 기본값이 설 뿐이다 (match.md §1.4).
  */
 export function releaseFromTactics(state: GameState, teamId: string, playerId: string): void {
   // 무소속처럼 전술이 없는 자리에서 오는 선수는 뺄 배치도 없다 (team.md §4)
@@ -3391,6 +3400,12 @@ export function releaseFromTactics(state: GameState, teamId: string, playerId: s
   if (!tactics) return;
   tactics.assignments = tactics.assignments.filter((a) => a.playerId !== playerId);
   if (tactics.shelved) tactics.shelved = tactics.shelved.filter((s) => s.playerId !== playerId);
+  const takers = tactics.setPieceTakers;
+  if (takers) {
+    for (const role of SET_PIECE_ROLES) {
+      if (takers[role] === playerId) delete takers[role];
+    }
+  }
 }
 
 // ── 화면 조작 모으기 ────────────────────────────────────

@@ -1706,6 +1706,27 @@ export type SetPieceTakers = z.infer<typeof SetPieceTakersSchema>;
 export const SET_PIECE_ROLES = ["corner", "freeKick", "penalty"] as const;
 export type SetPieceRole = (typeof SET_PIECE_ROLES)[number];
 
+/**
+ * 죽은 공 자리의 이름 — **스킬이 감독에게 되돌리는 말과 화면의 라벨이 한 벌이다.**
+ * 채팅이 "코너 키커 지정 해제"라 답하고 전술판이 다른 낱말을 쓰면, 감독은 같은
+ * 자리를 두 이름으로 배운다.
+ */
+export const SET_PIECE_ROLE_KO: Record<SetPieceRole, string> = {
+  corner: "코너",
+  freeKick: "프리킥",
+  penalty: "페널티",
+};
+
+/**
+ * 명단 표식의 한 글자 — 완장(Ⓒ·Ⓥ·Ⓛ)과 같은 자리에 서므로 이름을 다 적을 폭이 없다.
+ * 세 자리를 한 글자로 가르는 낱말은 위 이름의 첫 글자다.
+ */
+export const SET_PIECE_ROLE_MARK: Record<SetPieceRole, string> = {
+  corner: "코",
+  freeKick: "프",
+  penalty: "페",
+};
+
 /** 팀의 현재 전술 + 배치 — GAME_TEAM당 1개 (프리셋 확장 여지) */
 export const TeamTacticsSchema = z.object({
   teamId: z.string().min(1),
