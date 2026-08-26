@@ -64,6 +64,7 @@ export const WORLD_SEASON = defineHarness({
     { metric: "감독 팀 순위", role: "measure", unit: "score", why: "지시하지 않는 감독의 성적 — 목표값을 두지 않는다" },
     { metric: "감독 팀 승점", role: "measure", unit: "score", why: "지시하지 않는 감독의 성적 — 목표값을 두지 않는다" },
     { metric: "리그 경기 수", role: "measure", unit: "count", why: "시즌을 끝까지 돌았는지 — 380이어야 한다" },
+    { metric: "상대 감독이 말하는 경기 비율", role: "reference", min: 0.18, max: 0.5, unit: "ratio", why: "감독의 리그 경기 중 반대편 벤치가 마이크 앞에 서는 몫 — 원형별 확률 0.20~0.45에 더비 가산(+0.25)이 얹힌 실측 (people.md §4). 38경기라 시드마다 ±7%p가 잡음이다. **위쪽 승점·득점 밴드와 함께 읽는다**: 설전이 리그 분포를 미는 힘은 이 횟수 × 한 번의 폭(`RIVAL_BAND` 6 = 상대 폼 0.139)이고, 폭의 상한은 `press.test.ts`가 지킨다" },
   ],
 });
 

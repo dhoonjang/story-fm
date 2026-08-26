@@ -11,6 +11,7 @@ import {
   groupOf,
   isInjured,
   isSuspended,
+  rivalQuoteFact,
   simSquadOf,
   type GameState,
 } from "@story-fm/engine";
@@ -126,6 +127,15 @@ function seasonReadings(state: GameState): Readings<typeof WORLD_SEASON> {
   const originPerMatch = (kinds: readonly string[]) =>
     ratio(origins.filter((o) => kinds.includes(o)).length, played.length);
 
+  /**
+   * **반대편 벤치가 마이크 앞에 서는 몫** (people.md §4) — 추첨은 `(시드, 경기, 자리)`라
+   * 시즌을 다시 돌지 않고 대진표만 훑으면 된다. 감독은 여기서 회견에 답하지 않으므로
+   * 상대 라커룸이 실제로 움직이지는 않는다 — 이 값은 **자리가 얼마나 자주 서는가**이고,
+   * 한 번의 폭은 `RIVAL_BAND`가 정한다.
+   */
+  const ourLeagueMatches = played.filter((m) => ourMatchIds.has(m.id));
+  const spoke = ourLeagueMatches.filter((m) => rivalQuoteFact(state, m, "post") !== null).length;
+
   const homeWin = played.filter((m) => m.result!.homeGoals > m.result!.awayGoals).length;
   const draw = played.filter((m) => m.result!.homeGoals === m.result!.awayGoals).length;
 
@@ -177,6 +187,7 @@ function seasonReadings(state: GameState): Readings<typeof WORLD_SEASON> {
     "감독 팀 순위": usIndex + 1,
     "감독 팀 승점": table[usIndex]?.points ?? 0,
     "리그 경기 수": played.length,
+    "상대 감독이 말하는 경기 비율": ratio(spoke, ourLeagueMatches.length),
   };
 }
 

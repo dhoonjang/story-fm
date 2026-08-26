@@ -11,11 +11,13 @@ import type {
   PlayerIssueReason,
   PressStance,
   PressTrigger,
+  RivalVoice,
 } from "@story-fm/domain";
 import {
   ageOf,
   interestStageRank,
   isNaturalAt,
+  isReserveMatch,
   isSymbolicNumber,
   naturalPositionOf,
   PLAYER_ISSUE_REASONS,
@@ -26,6 +28,7 @@ import {
 import type { GameState } from "../core/state";
 import {
   activeContract,
+  firstTeamPlayers,
   playerById,
   playersOf,
   pushNarrative,
@@ -46,7 +49,7 @@ import { boardExpectation, computeStandings, retirementJudgeDate } from "../comp
 import { leagueOfTeamIn } from "../competition/promotion";
 import { derbyNameOf, derbyOf } from "../data/derbies";
 import { derbyRecordOf } from "./derby";
-import { reportersOf } from "../world/persona";
+import { reportersOf, rivalVoiceOf } from "../world/persona";
 import { MANAGER_SUBJECT, moveRelation, stanceRelationEvent } from "../world/relations";
 import type { SkillResult } from "../skills";
 import { deltaItems } from "../skills/brief";
@@ -81,11 +84,11 @@ export const PRESS_BAND = 4;
  * 날을 세우면 그 반대다. 어느 행도 전부 양수이지 않다 — 그러면 그 스탠스만 쓴다.
  */
 const STANCE_TABLE: Record<PressStance, Record<PressAxis, number>> = {
-  defend: { board: -0.2, media: -0.4, squad: 1, target: 1, team: 0.5 },
-  own: { board: 0.6, media: 0.2, squad: 0.6, target: 0.3, team: 0.25 },
-  criticise: { board: 0.3, media: 0.8, squad: -0.9, target: -1, team: -0.5 },
-  bold: { board: -0.3, media: 1, squad: 0.4, target: 0.4, team: 0.4 },
-  deflect: { board: 0, media: -0.3, squad: 0, target: 0, team: 0 },
+  defend: { board: -0.2, media: -0.4, squad: 1, target: 1, team: 0.5, rival: -0.3 },
+  own: { board: 0.6, media: 0.2, squad: 0.6, target: 0.3, team: 0.25, rival: 0 },
+  criticise: { board: 0.3, media: 0.8, squad: -0.9, target: -1, team: -0.5, rival: -0.8 },
+  bold: { board: -0.3, media: 1, squad: 0.4, target: 0.4, team: 0.4, rival: -0.6 },
+  deflect: { board: 0, media: -0.3, squad: 0, target: 0, team: 0, rival: 0 },
 };
 
 /**
@@ -99,7 +102,99 @@ const DECLINE: Record<PressAxis, number> = {
   squad: 0.2,
   target: 0,
   team: 0,
+  // 답하지 않은 자리는 남의 라커룸에 닿지 않는다 — 겨눈 사람이 없다
+  rival: 0,
 };
+
+// ── 상대 감독의 말 (people.md §4) ──────────────────────────────
+
+/**
+ * 상대 라커룸이 움직일 수 있는 폭 — **회견의 `weight`를 곱하지 않는다.**
+ *
+ * 남의 라커룸은 우리 회견이 얼마나 큰 자리였는지를 모른다. 최대치는 공개 비판의
+ * 0.8 × 6 = 4.8 → 사기 5점이고, 폼으로는 0.139(유효 능력치 1.25%)다. 매일 평균으로
+ * 0.0167씩 빠지므로 여드레면 사라진다 — **전야에 한 말이 그 경기에 닿고 시즌에는
+ * 남지 않는다.**
+ */
+export const RIVAL_BAND = 6;
+
+/**
+ * 상대 감독을 겨눈 답이 **우리 라커룸**에 남기는 몫 — 표의 팀 사기 열을 갈아 끼운다.
+ *
+ * 어떤 스탠스든 같은 값인 이유: 그 말이 우리 선수를 향한 적이 없다. 라커룸이 읽는
+ * 것은 「감독이 우리 편을 들었다」 하나뿐이라 공개 비판이 우리 방을 식히지 않는다.
+ */
+const RIVAL_TALK_LIFT = 0.3;
+
+/**
+ * **같은 말도 누구에게 하느냐로 방향이 뒤집힌다** (people.md §4).
+ *
+ * 표의 `rival` 열은 「도발이 먹히는 상대」 기준이고, 여기가 그 부호를 정한다.
+ * 그래서 이 게임에서 설전은 도박이 아니라 판단이다 — 반대편 벤치가 누구인지는
+ * 카드가 이미 들고 있다.
+ */
+const RIVAL_TEMPER: Record<RivalVoice, number> = {
+  /** 되받아친다 — 찌르면 그 라커룸이 더 뛴다 */
+  provoke: -1,
+  respect: 1,
+  patience: 1,
+  defensive: 1,
+  /** 흔들리지 않는다 — 경기를 구조로만 보는 사람이다 */
+  analysis: 0,
+};
+
+/**
+ * 더비가 그 말이 설 확률에 더하는 몫 — 원형이 정한 확률 위에 얹는다.
+ * 더비 전야에 아무도 말하지 않으면 이 자리가 있을 이유가 없다.
+ */
+const RIVAL_VOICE_DERBY_BONUS = 0.25;
+
+/**
+ * 이 대진의 반대편 벤치가 마이크 앞에 서는가 — 서면 사실 한 장 (people.md §4).
+ *
+ * **친선과 2군 경기는 지나간다**: 친선 뒤에는 회견이 없고(season.md §2), 2군 경기는
+ * 감독이 보지도 않는 자리다. 추첨은 `(시드, 경기, 자리)`라 전야와 경기 뒤가 독립이고,
+ * 같은 세이브를 다시 지나도 같은 결과다.
+ */
+export function rivalQuoteFact(
+  state: GameState,
+  match: MatchRecord,
+  seat: "eve" | "post",
+): PressFact | null {
+  if (isFriendly(match) || isReserveMatch(match)) return null;
+  const opponentId = match.homeTeamId === state.userTeamId ? match.awayTeamId : match.homeTeamId;
+  const voice = rivalVoiceOf(state, opponentId);
+  if (!voice) return null;
+  const chance =
+    voice.chance + (derbyOf(state.userTeamId, opponentId) ? RIVAL_VOICE_DERBY_BONUS : 0);
+  if (makeRng(state.seed, `rival-quote:${seat}:${match.id}`)() >= chance) return null;
+  return {
+    kind: "rival-quote",
+    data: { refId: opponentId, name: voice.name, tags: [voice.code] },
+    about: null,
+    /** 찌르는 말만 날 선 자리다 — 나머지는 기자가 물어봐 줄 일이다 */
+    sharp: voice.code === "provoke",
+  };
+}
+
+/**
+ * 이 회견에서 감독이 겨눌 수 있는 상대 감독 — **카드에 오른 그 사람이 전부다.**
+ * 선수 지목과 같은 규약이다 (people.md §4).
+ */
+function cardManager(
+  conference: PressConference,
+): { name: string; teamId: string; code: RivalVoice } | null {
+  for (const fact of conference.facts) {
+    if (fact.kind !== "rival-quote") continue;
+    const name = fact.data?.name;
+    const teamId = fact.data?.refId;
+    const code = fact.data?.tags?.[0] as RivalVoice | undefined;
+    if (name !== undefined && teamId !== undefined && code !== undefined) {
+      return { name, teamId, code };
+    }
+  }
+  return null;
+}
 
 /** 평판 눈금의 위끝 — 0~100 */
 const REPUTATION_MAX = 100;
@@ -292,6 +387,13 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
       sharp: true,
     });
   }
+  /**
+   * **상대 벤치도 그날 마이크 앞에 섰다** (people.md §4) — 자리를 열지 않고 이미
+   * 열리는 자리에 얹힌다. 결과 카드 바로 뒤인 것은 그 말이 이 경기에 대한 것이라서다.
+   */
+  const rivalQuote = rivalQuoteFact(state, match, "post");
+  if (rivalQuote) facts.push(rivalQuote);
+
   if (winless) {
     facts.push({
       kind: "winless",
@@ -1166,6 +1268,15 @@ export function openEvePress(state: GameState, digest?: string[]): void {
         : null;
   if (!conference) return;
   if (conference.trigger !== "farewell") conference.facts.push(...farewell);
+  /**
+   * 전야의 상대 감독 — 경기 뒤와 **다른 채널로 뽑는다** (people.md §4). 찌르는 말은
+   * 유출·루머와 같은 규약으로 자리를 키운다.
+   */
+  const rivalQuote = rivalQuoteFact(state, match, "eve");
+  if (rivalQuote) {
+    conference.facts.push(rivalQuote);
+    if (rivalQuote.sharp) conference.weight = Math.max(conference.weight, 2);
+  }
   // 하루에 한 번 — 같은 날을 다시 지나도 자리가 둘이 되지 않는다
   if ((state.pressConferences ?? []).some((c) => c.id === conference.id)) return;
   openPress(state, conference, digest);
@@ -1376,6 +1487,8 @@ export interface PressEffect {
   targetName: string | null;
   /** 팀 전체 사기 변화 */
   team: number;
+  /** 상대 선수단 사기 변화 — 상대 감독을 겨눴을 때만 있다 (people.md §4) */
+  rival?: number;
 }
 
 /**
@@ -1389,7 +1502,19 @@ export function applyPressOutcome(
   conference: PressConference,
   stance: PressStance | null,
   targetPlayerId?: string | null,
+  /** 감독이 상대 감독을 겨눴나 — 카드에 오른 그 사람이어야 한다 (`cardManager`) */
+  targetManager?: { teamId: string; code: RivalVoice } | null,
 ): PressEffect {
+  if (stance !== null && targetManager) {
+    return applyStanceOutcome(state, {
+      row: rivalRow(stance, targetManager.code),
+      band: PRESS_BAND * conference.weight,
+      /** 지목된 선수는 없다 — 감독이 부른 이름이 남의 벤치다 */
+      targetPlayerId: null,
+      stance,
+      rivalTeamId: targetManager.teamId,
+    });
+  }
   /**
    * 지목된 선수 — **팀 전체 위에 더 얹는다.** 공개적으로 감싸이거나 잘린 당사자는
    * 같은 말을 남의 이야기로 듣지 않는다. 이름을 부른 질문이 없으면 없다.
@@ -1404,13 +1529,32 @@ export function applyPressOutcome(
   });
 }
 
+/**
+ * 상대 감독을 겨눈 답의 한 줄 — **표의 세 열이 갈린다** (people.md §4).
+ *
+ * 보드·언론은 표 그대로(도발은 언론이 물고 보드는 불안해한다), 우리 선수단과 지목
+ * 선수 열은 죽고(우리 선수를 향한 말이 아니다), 팀 사기는 `RIVAL_TALK_LIFT` 하나로
+ * 선다. 상대 열은 그 사람의 결이 부호를 뒤집는다.
+ */
+function rivalRow(stance: PressStance, code: RivalVoice): Record<PressAxis, number> {
+  const row = STANCE_TABLE[stance];
+  return {
+    board: row.board,
+    media: row.media,
+    squad: 0,
+    target: 0,
+    team: RIVAL_TALK_LIFT,
+    rival: row.rival * RIVAL_TEMPER[code],
+  };
+}
+
 /** 스탠스 한 줄 — `null`이면 답하지 않은 것이다. 표를 여는 유일한 문 */
 export function stanceRow(stance: PressStance | null): Record<PressAxis, number> {
   return stance === null ? DECLINE : STANCE_TABLE[stance];
 }
 
 /** 자리가 닿을 수 있는 축 전부 — 회견은 마이크 앞이라 하나도 죽지 않는다 */
-const ALL_AXES: readonly PressAxis[] = ["board", "media", "squad", "target", "team"];
+const ALL_AXES: readonly PressAxis[] = ["board", "media", "squad", "target", "team", "rival"];
 
 /**
  * 스탠스 한 줄을 실제 변화로 옮긴다 — **표도 리더십 계수도 여기 하나뿐이다.**
@@ -1439,6 +1583,11 @@ export function applyStanceOutcome(
      * 다가옴의 주장·구단주 자리처럼 선수가 아닌 상대가 있을 때 채운다.
      */
     relationWith?: string;
+    /**
+     * 감독의 말이 닿은 **남의 라커룸** — 회견에서 상대 감독을 겨눴을 때만 선다
+     * (people.md §4). 없으면 `rival` 축은 죽는다: 겨눈 사람이 없으면 닿을 방도 없다.
+     */
+    rivalTeamId?: string;
   },
 ): PressEffect {
   const live = new Set(input.axes ?? ALL_AXES);
@@ -1481,7 +1630,27 @@ export function applyStanceOutcome(
     moveRelation(state, MANAGER_SUBJECT, counterpart, stanceRelationEvent(input.stance));
   }
 
-  return { board, media, squad, target, targetName: targetPlayer?.name ?? null, team };
+  /**
+   * **남의 라커룸** — 폭은 `RIVAL_BAND` 한 값이고 자리의 무게도 우리 감독의 리더십도
+   * 곱하지 않는다 (people.md §4). 저쪽 방은 이 회견이 얼마나 큰 자리였는지도,
+   * 우리 감독이 어떤 사람인지도 모른다.
+   */
+  const rival = input.rivalTeamId ? Math.round(on("rival") * RIVAL_BAND) : 0;
+  if (input.rivalTeamId && rival !== 0) {
+    for (const p of firstTeamPlayers(state, input.rivalTeamId)) {
+      p.state.form = clampForm(p.state.form + moraleToForm(rival));
+    }
+  }
+
+  return {
+    board,
+    media,
+    squad,
+    target,
+    targetName: targetPlayer?.name ?? null,
+    team,
+    ...(rival === 0 ? {} : { rival }),
+  };
 }
 
 /** 반려에서 후보 목록을 가리키는 이름 — 감독에게 할 말이 아니라 어디를 봤는지의 사실이다 */
@@ -1503,10 +1672,34 @@ export const signed = (label: string, v: number) =>
  */
 export function respondToMedia(
   state: GameState,
-  input: { stance: PressStance; targetPlayerId?: string | null },
+  input: { stance: PressStance; targetPlayerId?: string | null; targetManager?: string | null },
 ): SkillResult {
   const conference = pendingPress(state);
   if (!conference) return { ok: false, message: "지금 답할 기자회견이 없습니다" };
+
+  /**
+   * **상대 감독 지목** — 선수 지목과 같은 규약이다 (people.md §4): 카드에 오른 그
+   * 사람만 겨눌 수 있고, 밖을 겨누면 반려한다. 이름 하나뿐이라 후보를 고를 일이
+   * 없어 `pickPlayerAmong`을 지나지 않는다.
+   */
+  const onCard = cardManager(conference);
+  const managerRef = input.targetManager?.trim() ?? "";
+  if (managerRef !== "" && (!onCard || !sameManager(onCard.name, managerRef))) {
+    return {
+      ok: false,
+      message: onCard
+        ? `이 회견에서 겨눌 수 있는 상대 감독은 ${onCard.name}뿐입니다`
+        : "이 회견에는 상대 감독의 말이 서지 않았습니다",
+    };
+  }
+  const targetManager = managerRef === "" ? null : onCard;
+  /**
+   * ⚠️ **한 자리에서 겨누는 사람은 하나다.** 둘을 다 받으면 표의 어느 줄을 타야 하는지가
+   * 코드의 선택이 되고, 감독이 겨눈 줄 알았던 선수의 사기가 조용히 움직이지 않는다.
+   */
+  if (targetManager && (input.targetPlayerId?.trim() ?? "") !== "") {
+    return { ok: false, message: "한 자리에서 선수와 상대 감독을 함께 겨눌 수는 없습니다" };
+  }
 
   /**
    * 지목은 **사실 카드 안에서만** 선다 — 기자가 묻지 못한 사실(people.md §4)에
@@ -1521,7 +1714,7 @@ export function respondToMedia(
     target = picked.player.id;
   }
 
-  const effect = applyPressOutcome(state, conference, input.stance, target);
+  const effect = applyPressOutcome(state, conference, input.stance, target, targetManager);
   conference.status = "answered";
 
   const parts = [
@@ -1530,6 +1723,9 @@ export function respondToMedia(
     signed("선수단", effect.squad),
     effect.targetName ? signed(`${effect.targetName} 사기`, effect.target) : null,
     signed("팀 사기", effect.team),
+    targetManager
+      ? signed(`${teamNameIn(state, targetManager.teamId)} 사기`, effect.rival ?? 0)
+      : null,
   ].filter((x): x is string => x !== null);
 
   pushNarrative(
@@ -1539,7 +1735,8 @@ export function respondToMedia(
   );
   // 여러 축이 갈리므로 **합**으로 결을 읽는다 — 보드는 올랐는데 라커룸이 상했으면
   // 좋은 회견이 아니다. 색 하나가 그 종합이고, 항목별 숫자는 펼쳤을 때 보인다
-  const net = effect.board + effect.media + effect.squad + effect.team + effect.target;
+  const net =
+    effect.board + effect.media + effect.squad + effect.team + effect.target - (effect.rival ?? 0);
   return {
     ok: true,
     tone: net >= 0 ? ("good" as const) : ("bad" as const),
@@ -1558,9 +1755,22 @@ export function respondToMedia(
         ["선수단", effect.squad],
         effect.targetName ? [`${effect.targetName} 사기`, effect.target] : null,
         ["팀 사기", effect.team],
+        targetManager
+          ? [`${teamNameIn(state, targetManager.teamId)} 사기`, effect.rival ?? 0]
+          : null,
       ]),
     },
   };
+}
+
+/**
+ * 감독이 부른 이름이 그 사람인가 — 전체 이름이거나 **성**이면 같은 사람이다.
+ * 카드에 선 이름이 하나뿐이라 `normalizeSpeaker`의 동명이인 문제가 여기엔 없다.
+ */
+function sameManager(name: string, ref: string): boolean {
+  const needle = ref.toLowerCase();
+  const parts = name.toLowerCase().split(/\s+/u);
+  return name.toLowerCase() === needle || parts[parts.length - 1] === needle;
 }
 
 /**
