@@ -18,6 +18,7 @@ import type {
   GrowthEntry,
   HistoryDigest,
   Injury,
+  Interest,
   LeagueFinalTable,
   Dismissal,
   Manager,
@@ -75,6 +76,7 @@ import {
   MATCHDAY_SQUAD,
   ageOf,
   bestOverall,
+  interestStageRank,
   canRegister,
   isReserveMatch,
   isUnder21,
@@ -664,6 +666,16 @@ export interface GameState {
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   transferRequests?: TransferRequest[];
+  /**
+   * **타 구단의 관심** — 오퍼 앞에 서는 사다리
+   * (→ docs/simulation/transfer.md §1-2).
+   *
+   * 오퍼는 시장의 첫 사건이 아니라 마지막 사건이다. 어느 구단이 보고 있고, 문의가
+   * 왔고, 값을 부를 참이라는 세 칸이 여기 남는다 — 협상이 열리는 순간 그 줄은
+   * 걷힌다(사실을 이제 협상이 든다).
+   * 옛 세이브엔 없다 (로드 시 빈 배열 — 세이브 버전을 올리지 않는다).
+   */
+  interests?: Interest[];
   /** 개인 훈련 프로그램 — 팀 훈련 위에 한 선수만 겨냥해 얹는다 */
   playerTraining: PlayerTraining[];
   /**
@@ -1322,6 +1334,51 @@ export function withdrawTransferRequest(state: GameState, playerId: string): voi
   );
   const player = playerById(state, playerId);
   if (player) player.state.transferRequestedOn = undefined;
+}
+
+/**
+ * **이 선수에게 서 있는 관심들** — 사다리 위 칸이 먼저, 같은 칸이면 구단 id 순
+ * (→ docs/simulation/transfer.md §1-2).
+ *
+ * 정렬이 여기 있는 이유: 읽는 자리가 여섯이라(회견·근황·스냅샷·조회·협상 서류·딜
+ * 확률) 각자 정렬하면 같은 날 같은 세이브가 자리마다 다른 순서를 낸다.
+ *
+ * ⚠️ **틱이 쓰는 장부는 이 배열이 아니다** — 여기서 돌려주는 것은 복사본이 아니라
+ * 원본 row라 `stage`를 고치면 장부가 바뀐다. 고치는 것은 `market/interest.ts`
+ * 한 곳뿐이다.
+ */
+export function interestsOn(state: GameState, playerId: string): Interest[] {
+  return (state.interests ?? [])
+    .filter((i) => i.gamePlayerId === playerId)
+    .sort((a, b) =>
+      a.stage === b.stage
+        ? a.teamId < b.teamId
+          ? -1
+          : 1
+        : interestStageRank(b.stage) - interestStageRank(a.stage),
+    );
+}
+
+/** 이 구단이 이 선수를 보고 있는가 — 한 구단 × 한 선수에 한 줄이다 */
+export function interestOf(
+  state: GameState,
+  teamId: string,
+  playerId: string,
+): Interest | undefined {
+  return (state.interests ?? []).find((i) => i.teamId === teamId && i.gamePlayerId === playerId);
+}
+
+/**
+ * 밖에 난 관심만 — `enquired` 이상. `watching`은 아직 아무 말도 오지 않은 것이라
+ * 회견도 근황도 물을 자리가 아니다 (transfer.md §1-2).
+ */
+export function announcedInterestsOn(state: GameState, playerId: string): Interest[] {
+  return interestsOn(state, playerId).filter((i) => i.stage !== "watching");
+}
+
+/** 관심을 걷는다 — 그 선수가 팀을 떠났거나, 그 줄이 오퍼가 됐을 때 */
+export function clearInterests(state: GameState, match: (interest: Interest) => boolean): void {
+  state.interests = (state.interests ?? []).filter((i) => !match(i));
 }
 
 export function isInjured(state: GameState, playerId: string): boolean {
@@ -2708,6 +2765,7 @@ export function createGame(input: CreateGameInput): GameState {
     settlingEvents: [],
     transferList: [],
     transferRequests: [],
+    interests: [],
     playerTraining: [],
     roleMemory: [],
     aiDeals: [],

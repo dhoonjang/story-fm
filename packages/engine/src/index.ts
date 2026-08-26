@@ -95,6 +95,7 @@ export * from "./squad/career";
 
 // market — 이적 시장·협상·메디컬·감독 시장
 export * from "./market/market";
+export * from "./market/interest";
 export * from "./market/negotiation";
 export * from "./market/counter-bounds";
 export * from "./market/counterparty";
