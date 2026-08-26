@@ -292,6 +292,21 @@ export function tacticAxisScaleText(axis: TacticAxis): string {
 }
 
 /**
+ * 모델에게 갈래를 설명하는 한 조각 — `전환(counter 역습 · regroup 재정비 · null 지시 없음)`.
+ *
+ * 눈금이 없으므로 고를 수 있는 값을 그대로 세우고 **중립을 맨 뒤에** 둔다 — 지시하지
+ * 않은 자리가 곧 중립이라, 그것이 마지막에 서야 앞의 것들이 "지시한 갈래"로 읽힌다.
+ * 평시 도구 설명과 경기 해석 프롬프트가 이 하나를 함께 쓴다 (docs/llm/prompts.md §5-2).
+ */
+export function tacticToggleChoiceText(toggle: TacticToggle): string {
+  const choices = [
+    ...Object.entries(toggle.words).map(([value, word]) => `${value} ${word}`),
+    `${toggle.neutralValue ?? "null"} ${toggle.neutralWord}`,
+  ];
+  return `${toggle.label}(${choices.join(" · ")})`;
+}
+
+/**
  * 한 팀의 판을 한 줄로 — `4-2-3-1 · 멘탈 균형 · 라인 낮게 · …` (짧은 이름 `brief`).
  *
  * 읽는 곳이 둘이라(경기 전 상대 분석의 조회 도구와 GM 스냅샷) 각자 이으면 같은
