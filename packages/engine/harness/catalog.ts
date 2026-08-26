@@ -390,6 +390,7 @@ export const APPROACH_RATE = defineHarness({
     { metric: "구단주 채널", role: "measure", unit: "count", why: "순위가 기대 아래에 머문 구간 — 보드 요청" },
     { metric: "출전 기회(minutes)", role: "measure", unit: "count", why: "지위 대비 출전으로 결정적으로 서는 불만이 몇 번 감독실 문을 두드리는가 (people.md §5) — 주사위를 걷은 뒤 이 줄이 위 합계를 밀어 올리는지가 재는 것이다" },
     { metric: "어긴 약속(promise)", role: "measure", unit: "count", why: "아무 약속도 하지 않는 감독에게는 0이어야 한다 — 0이 아니면 약속을 하지 않은 자리에서 장부가 약속을 세운 것이다" },
+    { metric: "등번호(number)", role: "measure", unit: "count", why: "번호를 한 번도 옮기지 않는 감독에게는 0이어야 한다 (people.md §5) — 0이 아니면 감독이 손대지 않은 자리에서 장부가 번호를 옮긴 것이다. 원형별 무게 자체는 여기서 재지 않는다: 문턱이 결정적이라 분포가 없고, 경계는 `numberGrievanceStands` 단위 테스트가 지킨다" },
     { metric: "계약 만료(contract)", role: "measure", unit: "count", why: "재계약을 한 번도 열지 않은 감독에게 에이전트가 몇 번 오는가" },
     { metric: "타 구단 관심(interest)", role: "measure", unit: "count", why: "오퍼를 그냥 흘려보낸 뒤 대리인이 오는 빈도 — 창 14일 안에 임계를 넘어야 선다" },
     { metric: "언론 유출(계단 4)", role: "guard", max: 8, unit: "count", why: "방치만 하는 감독의 상한. 자리가 아니라 사건이라 답할 곳이 없고 값은 다음 회견이 치른다 — 그보다 잦으면 회견이 유출 카드로만 채워진다" },

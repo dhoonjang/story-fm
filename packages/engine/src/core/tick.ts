@@ -1306,7 +1306,7 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
           const line = playerStats[p.id];
           const minutes = minutesIn(side, p.id);
           // 얹는 문은 **구간 시뮬과 같은 하나다**(match.md §6). 카드는 `recordCard`가 센다
-          addToSeasonStat(ensureSeasonStat(state, p.id, teamId), {
+          addToSeasonStat(ensureSeasonStat(state, p.id, teamId, p), {
             apps: 1,
             goals,
             assists,
@@ -1541,7 +1541,7 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
       p.state.sharpness = clampSharpness(
         sharpnessAfterMinutes(sharpnessOf(p.state), RESERVE_MATCH_MINUTES),
       );
-      const stat = ensureSeasonStat(state, p.id, teamId);
+      const stat = ensureSeasonStat(state, p.id, teamId, p);
       stat.reserveApps = (stat.reserveApps ?? 0) + 1;
       if (goals > 0) stat.reserveGoals = (stat.reserveGoals ?? 0) + goals;
       if (assists > 0) stat.reserveAssists = (stat.reserveAssists ?? 0) + assists;
