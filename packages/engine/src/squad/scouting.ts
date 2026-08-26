@@ -1,4 +1,10 @@
-import type { AttributeAxis, DeferredScout, GamePlayer, ScoutReport } from "@story-fm/domain";
+import type {
+  AttributeAxis,
+  DeferredScout,
+  GamePlayer,
+  ScoutMission,
+  ScoutReport,
+} from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
@@ -12,11 +18,13 @@ import {
   ratingTier,
   RATING_MAX,
   RATING_TIERS,
+  formatMoney,
   SCOUT_CONCURRENT_LIMIT,
   SCOUT_DEFER_DAYS,
   type RatingTier,
 } from "@story-fm/domain";
 import { GAP_CONDITION } from "@story-fm/sim";
+import { competitionName } from "../data/cup-catalog";
 import { isSettling, settlingNote, settlingOf } from "./settling";
 import { diffDays } from "../competition/calendar";
 import { hashChannel } from "../core/rng";
@@ -190,6 +198,16 @@ export function hasSeenPlay(state: GameState, playerId: string): boolean {
   return false;
 }
 
+/**
+ * **임무가 골라 온 후보인가** — `hasSeenPlay` 옆의 같은 파생이다.
+ *
+ * 저장하는 것은 임무가 적은 후보 목록뿐이고 지식 수준은 거기서 나온다 (player.md §9.4).
+ * 출전 명단이 `seen`을 만드는 것과 같은 자리라, 임무 표를 지우면 눈금도 함께 사라진다.
+ */
+export function pickedByMission(state: GameState, playerId: string): boolean {
+  return (state.scoutMissions ?? []).some((m) => m.candidates?.includes(playerId) === true);
+}
+
 export function knowledgeOf(state: GameState, playerId: string): Knowledge {
   const player = playerById(state, playerId);
   if (!player) return "rumoured";
@@ -203,7 +221,8 @@ export function knowledgeOf(state: GameState, playerId: string): Knowledge {
     return isSettling(state, playerId) ? "adapting" : "own";
   }
   if (isScouted(state, playerId)) return "scouted";
-  if (hasSeenPlay(state, playerId)) return "seen";
+  // 임무가 골라 온 후보도 스카우트가 **가서 본** 선수다 (player.md §9.4)
+  if (hasSeenPlay(state, playerId) || pickedByMission(state, playerId)) return "seen";
   return "rumoured";
 }
 
@@ -486,9 +505,69 @@ export function pruneDeferredScouts(state: GameState): void {
   state.deferredScouts = deferredScouts(state);
 }
 
-/** 지금 비어 있는 파견 자리 */
+// ── 임무 (조건으로 나가는 파견) ─────────────────────────
+/**
+ * 지금 나가 있는 임무 — `dueOn`이 섰고 아직 안 돌아온 것.
+ *
+ * 대기(`dueOn === null`)와 완료(`completedOn`)가 한 표에 함께 앉으므로, 자리를
+ * 세는 쪽은 반드시 이 자를 쓴다 (player.md §9.4).
+ */
+export function activeMissions(state: GameState): ScoutMission[] {
+  return (state.scoutMissions ?? []).filter((m) => m.dueOn !== null && m.completedOn === null);
+}
+
+/** 아직 살아 있는 대기 임무 — 요청 뒤 `SCOUT_DEFER_DAYS`까지 */
+export function waitingMissions(state: GameState): ScoutMission[] {
+  return (state.scoutMissions ?? []).filter(
+    (m) => m.dueOn === null && diffDays(m.requestedOn, state.date) <= SCOUT_DEFER_DAYS,
+  );
+}
+
+/** 만료된 대기 임무를 지운다 — tick이 하루에 한 번 부른다 (지목의 `pruneDeferredScouts`와 같은 자리) */
+export function pruneWaitingMissions(state: GameState): void {
+  if (!state.scoutMissions?.length) return;
+  const alive = new Set(waitingMissions(state).map((m) => m.id));
+  state.scoutMissions = state.scoutMissions.filter((m) => m.dueOn !== null || alive.has(m.id));
+}
+
+/** 임무가 뒤지는 곳 — 대회 이름, 대회를 안 주면 검색과 같은 전체 풀 */
+export function missionScope(mission: ScoutMission): string {
+  return mission.competitionId ? competitionName(mission.competitionId) : "5대 리그 1·2부 전체";
+}
+
+/** 나이 조건 한 마디 — 없으면 빈 문자열 */
+function missionAgeText(mission: ScoutMission): string {
+  const { minAge, maxAge } = mission;
+  if (minAge !== undefined && maxAge !== undefined) return `${minAge}~${maxAge}세`;
+  if (maxAge !== undefined) return `${maxAge}세 이하`;
+  if (minAge !== undefined) return `${minAge}세 이상`;
+  return "";
+}
+
+/**
+ * **임무의 이름표** — 조건 한 줄.
+ *
+ * 지목은 선수 이름으로 불리지만 임무에는 이름이 없다. 반려 문구·요약 줄·카드가
+ * 이 한 줄을 함께 쓴다 — 자리마다 조건을 다시 엮으면 같은 임무가 세 가지로 불린다.
+ */
+export function missionBrief(mission: ScoutMission): string {
+  return [
+    missionScope(mission),
+    mission.position,
+    missionAgeText(mission),
+    mission.maxValue === undefined ? "" : `${formatMoney(mission.maxValue)} 이하`,
+  ]
+    .filter((part): part is string => part !== undefined && part !== "")
+    .join(" · ");
+}
+
+/**
+ * 지금 비어 있는 파견 자리 — **지목과 임무가 함께 센다** (player.md §9.4).
+ * 한쪽만 세면 임무 셋이 나가 있는 날에도 지목이 넷째로 나간다.
+ */
 export function freeScoutSlots(state: GameState): number {
-  const inFlight = state.scoutReports.filter((r) => r.completedOn === null).length;
+  const inFlight =
+    state.scoutReports.filter((r) => r.completedOn === null).length + activeMissions(state).length;
   return Math.max(0, SCOUT_CONCURRENT_LIMIT - inFlight);
 }
 
@@ -506,18 +585,26 @@ export function scoutingSummary(state: GameState): string[] {
       if (!p) return `스카우트 파견 중 (보고 ${r.dueOn})`;
       return `${p.name} (${teamNameIn(state, p.teamId)}) 스카우트 파견 중 — 보고 ${r.dueOn}`;
     });
-  const waiting = deferredScouts(state);
+  // 임무는 이름이 없다 — 조건 한 줄이 그 자리에 선다 (player.md §9.4)
+  for (const m of activeMissions(state)) {
+    lines.push(`스카우트 임무 파견 중 — ${missionBrief(m)} · 보고 ${m.dueOn}`);
+  }
+  /**
+   * **못 나간 것은 갈래를 가리지 않고 한 줄에 선다.** 지목과 임무가 각자 줄을
+   * 세우면 같은 「동시 한도 · 빈 자리」가 두 번 서서 어느 쪽 자리인지가 흐려진다.
+   */
+  const waiting: string[] = [
+    ...deferredScouts(state).map((d) => {
+      const p = playerById(state, d.gamePlayerId);
+      return p ? `${p.name} (${teamNameIn(state, p.teamId)})` : d.gamePlayerId;
+    }),
+    ...waitingMissions(state).map((m) => `임무: ${missionBrief(m)}`),
+  ];
   if (waiting.length > 0) {
-    const names = waiting
-      .slice(0, SCOUT_SUMMARY_NAMES)
-      .map((d) => {
-        const p = playerById(state, d.gamePlayerId);
-        return p ? `${p.name} (${teamNameIn(state, p.teamId)})` : d.gamePlayerId;
-      })
-      .join(", ");
+    const names = waiting.slice(0, SCOUT_SUMMARY_NAMES).join(", ");
     const free = freeScoutSlots(state);
     lines.push(
-      `스카우트 미파견 ${waiting.length}명 (${names}${waiting.length > SCOUT_SUMMARY_NAMES ? " …" : ""}) — ` +
+      `스카우트 미파견 ${waiting.length}건 (${names}${waiting.length > SCOUT_SUMMARY_NAMES ? " …" : ""}) — ` +
         `동시 한도 ${SCOUT_CONCURRENT_LIMIT}에 막혀 아직 안 나갔다 · ` +
         (free > 0 ? `지금 자리 ${free}` : "빈 자리 없음"),
     );

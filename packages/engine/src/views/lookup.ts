@@ -71,7 +71,6 @@ import {
   type MatchReportView,
 } from "./views";
 import { addDays, dayOfWeek, diffDays, squadReturnOf } from "../competition/calendar";
-import { entrantsOf } from "../competition/europe";
 import { careerOf, careerTotalsOf, type CareerTotals } from "../squad/career";
 import { leaderGroupOf } from "../squad/hierarchy";
 import { formLabel } from "../squad/form";
@@ -87,24 +86,26 @@ import {
   squadRegistrationOf,
 } from "../squad/registration";
 import {
-  cupCatalog,
   competitionLabel,
   competitionName,
   competitionShortName,
   isCup,
   stageLabel,
 } from "../data/cup-catalog";
+import { DOMESTIC_STAGES, domesticStageLabel, isDomesticCup } from "../data/domestic-cup-catalog";
 import {
-  domesticCupCatalog,
-  DOMESTIC_STAGES,
-  domesticStageLabel,
-  isDomesticCup,
-} from "../data/domestic-cup-catalog";
-import { marketLeagues, topLeagues } from "../data/league-catalog";
-import { domesticCupEntrants, domesticStageMatches } from "../competition/domestic-cup";
+  competitionHint,
+  inPlayerPool,
+  norm,
+  playerPoolOf,
+  resolveCompetition,
+  resolveCompetitionId,
+  type PlayerPool,
+} from "../world/player-pool";
+import { domesticStageMatches } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { isClubTeam, teamCatalog } from "../data/team-catalog";
-import { leagueOfTeamIn, teamsOfLeagueIn } from "../competition/promotion";
+import { leagueOfTeamIn } from "../competition/promotion";
 import { tierOfTeamIn } from "../core/club-tier";
 import {
   achievementLine,
@@ -195,9 +196,6 @@ const MAX_LIMIT = 15;
 // 입구에 두면 모델이 id를 외우거나 추측하지 않아도 되고, 못 찾았을 때 후보를
 // 돌려줄 수 있다 (조용히 빈 결과를 주면 모델이 지어내기 시작한다).
 
-/** 표기 흔들림 흡수 — 공백·중점·하이픈 제거 + 소문자 */
-const norm = (q: string) => q.replace(/[\s·・\-_.]/g, "").toLowerCase();
-
 /** 부분 일치로 닿지 않는 약칭만 둔다 ("맨유"는 "맨체스터 유나이티드"의 부분 문자열이 아니다) */
 const TEAM_ALIASES: Record<string, string> = {
   맨유: "manutd",
@@ -243,65 +241,6 @@ function resolveTeam(state: GameState, team?: string): Resolved {
   }
   return { ok: false, message: `"${q}"라는 팀을 찾지 못했습니다` };
 }
-
-const COMPETITION_ALIASES: Record<string, string> = {
-  챔스: "ucl",
-  챔피언스: "ucl",
-  유로파: "uel",
-  컨퍼런스: "uecl",
-  프리미어: "epl",
-  epl: "epl",
-  // 국내 컵 — 감독이 실제로 부르는 이름들
-  fa컵: "facup",
-  fa: "facup",
-  에미레이츠컵: "facup",
-  리그컵: "eflcup",
-  카라바오: "eflcup",
-  카라바오컵: "eflcup",
-  efl컵: "eflcup",
-  국왕컵: "copadelrey",
-  코파: "copadelrey",
-  포칼: "dfbpokal",
-  dfb: "dfbpokal",
-  쿠프: "coupedefrance",
-};
-
-/**
- * 대회 이름·약어·id → 대회 id. 못 찾으면 null.
- * 나라 이름은 그 나라 **1부 리그**로 해석한다 (2부는 리그전이 없어 물어볼 게 없다).
- */
-function resolveCompetitionId(competition: string): string | null {
-  const key = norm(competition);
-  if (key === "") return null;
-  const alias = COMPETITION_ALIASES[key];
-  if (alias) return alias;
-  const pool = [
-    ...topLeagues().map((l) => ({ id: l.id, name: l.name, short: l.name, country: l.country })),
-    // 이적 시장 전용 리그 — 경기는 없지만 **선수를 찾을 수는 있어야 한다**.
-    // 여기 없으면 "사우디에 누가 있지?"에 모델이 답할 방법이 없어 지어낸다
-    ...marketLeagues().map((l) => ({ id: l.id, name: l.name, short: l.name, country: l.country })),
-    ...cupCatalog().map((c) => ({ id: c.id, name: c.name, short: c.short, country: "" })),
-    ...domesticCupCatalog().map((c) => ({ id: c.id, name: c.name, short: c.short, country: "" })),
-  ];
-  const exact = pool.find(
-    (c) => c.id === key || norm(c.short) === key || norm(c.name) === key || norm(c.country) === key,
-  );
-  if (exact) return exact.id;
-  const partial = pool.filter((c) => norm(c.name).includes(key));
-  return partial.length === 1 ? partial[0]!.id : null;
-}
-
-/** 대회 id 힌트 — 카탈로그가 편집될 수 있으므로 부를 때 만든다 */
-const competitionHint = () =>
-  `리그(${topLeagues()
-    .map((l) => l.id)
-    .join("·")}) · 이적 시장 전용(${marketLeagues()
-    .map((l) => l.id)
-    .join("·")}) · 대항전(${cupCatalog()
-    .map((c) => c.id)
-    .join("·")}) · 국내 컵(${domesticCupCatalog()
-    .map((c) => c.id)
-    .join("·")})`;
 
 /** 이름 뒤의 완장 — 서열은 조회가 아니라 `get_squad`의 리더 줄이 말한다 */
 function armband(p: GamePlayer): string {
@@ -596,26 +535,17 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
     teamId = team.teamId;
   }
 
-  let competitionId: string | null = null;
-  let inCompetition: Set<string> | null = null;
-  if (input.competition) {
-    competitionId = resolveCompetitionId(input.competition);
-    if (!competitionId) {
-      return {
-        ok: false,
-        message: `"${input.competition}"라는 대회를 찾지 못했습니다 — ${competitionHint()}`,
-      };
-    }
-    inCompetition = new Set(
-      isDomesticCup(competitionId)
-        ? domesticCupEntrants(competitionId)
-        : isCup(competitionId)
-          ? entrantsOf(state.euroEntrants, competitionId)
-          : teamsOfLeagueIn(state, competitionId),
-    );
-  }
+  const competition = resolveCompetition(input.competition);
+  if (!competition.ok) return competition;
+  const competitionId = competition.competitionId;
+  // 대회·자리·나이는 스카우트 임무와 **같은 자로** 거른다 (world/player-pool.ts)
+  const poolFilter: PlayerPool = playerPoolOf(state, {
+    competitionId,
+    ...(input.position === undefined ? {} : { position: input.position }),
+    ...(input.minAge === undefined ? {} : { minAge: input.minAge }),
+    ...(input.maxAge === undefined ? {} : { maxAge: input.maxAge }),
+  });
 
-  const position = input.position?.toUpperCase();
   // 원장·목록을 읽는 조건은 색인을 한 번 세워 둔다 — 선수마다 훑으면 5,700번이다
   const contracts =
     input.contractEndsWithinDays !== undefined || input.maxWage !== undefined
@@ -636,7 +566,7 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
   const ourPool = teamId !== null && teamId === state.userTeamId;
   const pool0 = teamId ? (ourPool ? ourPlayers(state) : playersOf(state, teamId)) : state.players;
   const narrowed = pool0.filter((p) => {
-    if (inCompetition && !inCompetition.has(p.teamId)) return false;
+    if (!inPlayerPool(state, p, poolFilter)) return false;
     /**
      * 1군·2군은 **우리 명단의 층**을 묻는 조건이다. 임대 나간 선수가 달고 있는 층은
      * 빌린 구단의 것이라 우리 기준으로는 뜻이 없어, 우리 풀을 층으로 좁힐 때는 빠진다.
@@ -646,10 +576,6 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
       if (ourPool && onLoanFromUs(state, p)) return false;
       if (squadLevelOf(p) !== input.squadLevel) return false;
     }
-    if (position && !p.positions.some((x) => x.position === position)) return false;
-    const age = ageOf(p.birthdate, state.date);
-    if (input.minAge !== undefined && age < input.minAge) return false;
-    if (input.maxAge !== undefined && age > input.maxAge) return false;
     if (input.foot !== undefined && strongFootOf(p.foot) !== input.foot) return false;
     // 홈그로운은 **우리 협회** 기준이다 — 지금 소속이 아니라 우리가 등록할 때의 자격
     if (input.homegrown !== undefined && isHomegrownFor(p, state.userTeamId) !== input.homegrown) {
