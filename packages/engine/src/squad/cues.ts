@@ -1,5 +1,6 @@
-import type { GamePlayer } from "@story-fm/domain";
+import type { CallUp, GamePlayer } from "@story-fm/domain";
 import {
+  capsOf,
   INTEREST_STAGE_KO,
   isReserveMatch,
   naturalPositionOf,
@@ -14,6 +15,7 @@ import { openSymbolicNumbers, type NumberLineage } from "./numbers";
 // 심경(mood)과 같은 문을 지난다 — 두 벌이면 같은 사이가 자리마다 다른 말로 선다
 import { mentoringReadOf } from "./mentoring";
 import { diffDays } from "../competition/calendar";
+import { daysUntilReturn, internationalBreaksOf, openCallUp } from "../competition/international";
 import { playerArchetypeOf } from "../world/player-persona";
 import {
   announcedInterestsOn,
@@ -53,6 +55,8 @@ const SLUMP = -0.4;
 const BENCHED_RUN = 3;
 /** 복귀가 눈앞인 부상 — 재활 막바지의 이야기 */
 const RETURN_SOON = 14;
+/** 대표팀에서 돌아온 뒤 그 사실이 그의 이야기인 기간 — 「돌아온 주」다 (people.md §7) */
+const BACK_FROM_DUTY = 7;
 /** 회전의 기준점 — 날짜를 수로 바꾸기만 하는 자리라 값 자체에 뜻은 없다 */
 const EPOCH = "2000-01-01";
 
@@ -147,6 +151,55 @@ function openNumberFor(
   return open.find((lineage) => lineage.number === first) ?? null;
 }
 
+/** 그가 가장 최근에 돌아온 소집 — 아직 정산되지 않은 행은 소집 중이라 여기 오지 않는다 */
+function lastCallUpReturn(state: GameState, playerId: string): CallUp | null {
+  let latest: { row: CallUp; on: string } | null = null;
+  for (const row of state.callUps ?? []) {
+    if (row.gamePlayerId !== playerId || row.returnedOn === null) continue;
+    if (latest === null || row.returnedOn > latest.on) latest = { row, on: row.returnedOn };
+  }
+  return latest?.row ?? null;
+}
+
+/**
+ * **대표팀 소집·복귀** (competition.md §5-1) — 소집 중이면 클럽에 아예 없고, 돌아온
+ * 주에는 그 창의 출전·골과 몸이 그의 이야기다.
+ *
+ * 문장은 `pressFactText`가 만든다 — 회견·다가옴과 같은 카드라, 두 벌을 두면 같은
+ * 소집이 근황에서와 회견에서 다른 말로 선다 (people.md §7).
+ */
+function callUpFactOf(state: GameState, player: GamePlayer): string | null {
+  const away = openCallUp(state, player.id);
+  if (away) {
+    const breakWindow = internationalBreaksOf(state.season).find((w) => w.key === away.breakKey);
+    return pressFactText({
+      kind: "call-up",
+      data: {
+        tags: ["named", away.country],
+        values: {
+          caps: capsOf(player.state),
+          ...(breakWindow ? { days: daysUntilReturn(state, breakWindow) } : {}),
+        },
+      },
+      about: player.id,
+      sharp: false,
+    });
+  }
+  const back = lastCallUpReturn(state, player.id);
+  const returnedOn = back?.returnedOn ?? null;
+  if (back === null || returnedOn === null) return null;
+  if (diffDays(returnedOn, state.date) > BACK_FROM_DUTY) return null;
+  return pressFactText({
+    kind: "call-up",
+    data: {
+      tags: ["returned", back.country, ...(back.returnState ? [back.returnState] : [])],
+      values: { apps: back.apps, goals: back.goals },
+    },
+    about: player.id,
+    sharp: false,
+  });
+}
+
 /** 이 선수에게 지금 있는 일 — 없으면 null */
 function factOf(
   state: GameState,
@@ -167,6 +220,12 @@ function factOf(
       ? `복귀 임박 (${injury.bodyPart}~${injury.expectedReturn})`
       : null; // 재활 초입은 이미 주의 줄의 부상 항목이 말한다
   }
+  /**
+   * **대표팀은 뛸 수 없는 것 다음이고 나가겠다는 말보다 앞이다** (people.md §7).
+   * 소집 중인 선수는 이번 주 클럽에 없다 — 그 사실 위에서 폼도 명단도 읽힌다.
+   */
+  const duty = callUpFactOf(state, player);
+  if (duty) return duty;
   /**
    * **나가겠다고 말한 것은 폼보다 큰 사실이다** (transfer.md §1-1) — 뛸 수 없는 것
    * 다음이고 나머지보다는 앞이다. 수락한 요청은 서지 않는다: 그 사실은 이적
@@ -205,7 +264,7 @@ function factOf(
       : `${mentoring.other.name}에게 붙어 있다 (멘티 · ${mentoring.days}일째)`;
   }
   /**
-   * **사실 아홉 중 마지막이다** — 뛰지 못하는 것도 나가겠다는 말도 폼도 지금
+   * **사실 열 중 마지막이다** — 뛰지 못하는 것도 나가겠다는 말도 폼도 지금
    * 벌어지는 일이고, 비어 있는 번호는 그 밑에 깔린 사정이다.
    *
    * 문장은 `pressFactText`가 만든다 — 회견·다가옴과 **같은 카드**라, 두 벌을 두면

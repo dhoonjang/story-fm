@@ -62,6 +62,7 @@ export * from "./competition/euro-prize";
 export * from "./competition/shootout";
 export * from "./competition/extra-time";
 export * from "./competition/promotion";
+export * from "./competition/international";
 export * from "./competition/club-tier-recompute";
 export * from "./competition/domestic-cup";
 export * from "./competition/super-cup";

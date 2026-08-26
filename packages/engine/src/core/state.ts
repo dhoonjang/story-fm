@@ -52,6 +52,7 @@ import type {
   Relation,
   RetiredPlayer,
   YouthCandidate,
+  CallUp,
   MissionReportCard,
   ScoutMission,
   ScoutReport,
@@ -147,6 +148,7 @@ import { advanceDomesticCups } from "../competition/domestic-cup";
 import { buildEuroEntrants, type EuroEntry } from "../competition/europe";
 import { buildSeasonFixtures, isUserFixture } from "../competition/fixtures";
 import { seedInjuryHistory } from "../squad/injury";
+import { isAwayFromClub, seedInternationalCaps } from "../competition/international";
 import {
   generateHeadCoach,
   generateOwner,
@@ -954,6 +956,16 @@ export interface GameState {
    * 옛 세이브엔 없다 (빈 배열 — SAVE_VERSION 유지).
    */
   youthCandidates?: YouthCandidate[];
+  /**
+   * **A매치 소집** — 한 선수의 한 휴식기 (→ docs/data/competition.md §5-1).
+   *
+   * `returnedOn === null`인 행이 지금 클럽을 떠나 있는 선수다 — 휴식기 동안에는
+   * 세계 전체의 행이 열려 있고(그래야 누가 자리를 비웠는지 코어가 안다), 복귀
+   * 정산이 끝나면 **감독 팀 행만 최근 두 시즌** 남는다. 남의 선수의 캡·골은 그때
+   * 이미 `PlayerState.caps`로 접혀 들어갔다.
+   * 옛 세이브엔 없다 (빈 배열 — SAVE_VERSION 유지).
+   */
+  callUps?: CallUp[];
 
   // ── 서사 ──
   /**
@@ -1558,8 +1570,32 @@ export function isSuspended(state: GameState, playerId: string): boolean {
 }
 
 /** 경기에 나설 수 있는가 — 부상·정지 없음 */
-export function isAvailable(state: GameState, playerId: string): boolean {
-  return !isInjured(state, playerId) && !isSuspended(state, playerId);
+/**
+ * **지금 우리를 위해 뛸 수 있는가** — 다치지 않았고, 정지가 아니고, 클럽에 있는가.
+ *
+ * 셋째 문이 A매치 소집과 여름 대회의 늦은 합류다
+ * (→ [docs/data/competition.md](../../../../docs/data/competition.md) §5-1). 훈련
+ * 결산·2군 경기·경기 명단이 저마다 판단하면 소집된 선수가 어느 하나에는 그대로
+ * 서므로, 세 사실이 한 문을 지난다 (season.md §8 불변식).
+ */
+export function isAvailable(state: GameState, player: GamePlayer): boolean {
+  return (
+    !isInjured(state, player.id) && !isSuspended(state, player.id) && !isAwayFromClub(state, player)
+  );
+}
+
+/**
+ * 같은 판정을 **id로** 묻는 자리 — 선수를 손에 들지 않은 호출부만 쓴다.
+ *
+ * ⚠️ 사람을 이미 들고 있으면 `isAvailable`을 불러라. 여기는 5,700명을 훑어 그를
+ * 찾는다(`playerById`) — 간이 시뮬의 스쿼드 구성처럼 경기마다 수백 번 지나는
+ * 자리에서 그 스캔은 한 시즌을 분 단위로 늘린다.
+ */
+export function isAvailableById(state: GameState, playerId: string): boolean {
+  const player = playerById(state, playerId);
+  return player === null
+    ? !isInjured(state, playerId) && !isSuspended(state, playerId)
+    : isAvailable(state, player);
 }
 
 export function activeContract(state: GameState, playerId: string): Contract | null {
@@ -3118,6 +3154,8 @@ export function createGame(input: CreateGameInput): GameState {
    * 조사된 선수만 채워지고, 복귀일이 아직 안 온 선수는 다친 채로 인계된다.
    */
   seedInjuryHistory(state);
+  // 통산 캡·골 — 없으면 서른 살 주전이 첫 소집에서 데뷔한다 (competition.md §5-1)
+  seedInternationalCaps(state);
   /**
    * **부임 회견** — 오늘이 부임 첫날이다 (people.md §4 · career.md §5.1). 이직과 같은
    * 문을 지난다: 감독이 처음 마주하는 것이 수석코치 한 사람일 이유가 없다.

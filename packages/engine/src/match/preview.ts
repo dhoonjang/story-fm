@@ -8,17 +8,22 @@ import type {
   StrengthPacket,
   TacticsSpec,
 } from "@story-fm/domain";
-import { isReserveMatch, naturalPositionOf, packetTagContext } from "@story-fm/domain";
+import {
+  associationName,
+  isReserveMatch,
+  naturalPositionOf,
+  packetTagContext,
+} from "@story-fm/domain";
 import { buildStrengthPacket, type LineupSlot } from "@story-fm/sim";
 import { competitionLabel } from "../data/cup-catalog";
 import { derbyForMatch } from "../club/derby";
 import { DEFAULT_KICKOFF, diffDays, nextMatchFor } from "../competition/calendar";
+import { internationalBreaksOf, openCallUp } from "../competition/international";
 import {
   activeSuspension,
   assignmentsOf,
   firstTeamPlayers,
-  isInjured,
-  isSuspended,
+  isAvailable,
   openInjury,
   tacticsOf,
   teamNameIn,
@@ -55,18 +60,25 @@ export interface ProjectedPlayer {
  * 결장 사유의 이름 — 조회 도구와 GM 스냅샷이 **같은 낱말**을 쓴다.
  * 갈래가 이 파일의 것이므로 이름도 여기 산다.
  */
-export const ABSENT_REASON_KO: Record<"injury" | "suspension", string> = {
+export const ABSENT_REASON_KO: Record<AbsentReason, string> = {
   injury: "부상",
   suspension: "정지",
+  "call-up": "대표팀 소집",
 };
 
-/** 못 나오는 선수 — 부상·정지는 공개 기록이라 흐리지 않는다 (player.md §10) */
+/**
+ * 못 나오는 이유 — **`isAvailable`이 닫는 문과 같은 셋이다** (season.md §8 불변식).
+ * 하나를 빠뜨리면 상대 분석이 「그 선수가 나온다」고 말하고 시뮬은 안 세운다.
+ */
+export type AbsentReason = "injury" | "suspension" | "call-up";
+
+/** 못 나오는 선수 — 부상·정지·소집은 공개 기록이라 흐리지 않는다 (player.md §10) */
 export interface AbsentPlayer {
   id: string;
   name: string;
   position: string;
-  reason: "injury" | "suspension";
-  /** 부상은 복귀 예정일, 정지는 남은 경기 수 */
+  reason: AbsentReason;
+  /** 부상은 복귀 예정일, 정지는 남은 경기 수, 소집은 협회와 복귀일 */
   note: string;
 }
 
@@ -142,7 +154,7 @@ function lastPlayedBefore(
  * `simSquadOf`를 부르지 않는 것이 이 함수의 전부다. 그쪽은 로테이션·임대 빚까지
  * 반영해 **내일 실제로 설 열한 명**을 돌려주므로, 경기 전에 보여 주는 순간 감독은
  * 상대 벤치의 결정을 미리 읽는다. 여기서 쓰는 것은 감독이 실제로 관측할 수 있는
- * 것뿐이다 — 이미 벌어진 경기의 선발, 그리고 공개 기록인 부상·정지.
+ * 것뿐이다 — 이미 벌어진 경기의 선발, 그리고 공개 기록인 부상·정지·대표팀 소집.
  */
 function projectXI(
   state: GameState,
@@ -151,7 +163,7 @@ function projectXI(
 ): { xi: GamePlayer[]; carried: Set<string> } {
   const squad = firstTeamPlayers(state, teamId);
   const byId = new Map(squad.map((p) => [p.id, p] as const));
-  const available = (p: GamePlayer) => !isInjured(state, p.id) && !isSuspended(state, p.id);
+  const available = (p: GamePlayer) => isAvailable(state, p);
 
   const started =
     basis === null
@@ -179,7 +191,10 @@ function projectXI(
   return { xi, carried };
 }
 
-/** 상대의 결장자 — 부상이 먼저, 그다음 정지. 같은 갈래 안에서는 이름 순 */
+/** 갈래의 순서 — 오래 못 나오는 쪽이 앞이다 */
+const ABSENT_RANK: Record<AbsentReason, number> = { injury: 0, suspension: 1, "call-up": 2 };
+
+/** 상대의 결장자 — 부상이 먼저, 그다음 정지·소집. 같은 갈래 안에서는 id 순 */
 function absentOf(state: GameState, teamId: string): AbsentPlayer[] {
   const rows: AbsentPlayer[] = [];
   for (const p of firstTeamPlayers(state, teamId)) {
@@ -195,18 +210,34 @@ function absentOf(state: GameState, teamId: string): AbsentPlayer[] {
       continue;
     }
     const suspension = activeSuspension(state, p.id);
-    if (!suspension) continue;
+    if (suspension) {
+      rows.push({
+        id: p.id,
+        name: p.name,
+        position: naturalPositionOf(p).position,
+        reason: "suspension",
+        note: `${suspension.lengthMatches - suspension.served}경기`,
+      });
+      continue;
+    }
+    /**
+     * 소집도 공개 기록이다 (competition.md §5-1) — 명단은 세계가 발표하는 것이라
+     * 상대 구단의 것도 감독이 관측할 수 있다. `projectXI`가 이미 이 선수를 빼므로,
+     * 여기 없으면 결장자 줄만 그를 잃고 화면은 이유 없이 빈자리를 보여 준다.
+     */
+    const callUp = openCallUp(state, p.id);
+    if (!callUp) continue;
+    const window = internationalBreaksOf(state.season).find((w) => w.key === callUp.breakKey);
     rows.push({
       id: p.id,
       name: p.name,
       position: naturalPositionOf(p).position,
-      reason: "suspension",
-      note: `${suspension.lengthMatches - suspension.served}경기`,
+      reason: "call-up",
+      note: `${associationName(callUp.country)}${window === undefined ? "" : ` ~${window.to}`}`,
     });
   }
   return rows.sort(
-    (a, b) =>
-      (a.reason === b.reason ? 0 : a.reason === "injury" ? -1 : 1) || (a.id < b.id ? -1 : 1),
+    (a, b) => ABSENT_RANK[a.reason] - ABSENT_RANK[b.reason] || (a.id < b.id ? -1 : 1),
   );
 }
 

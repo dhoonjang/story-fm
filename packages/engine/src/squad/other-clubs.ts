@@ -20,6 +20,7 @@ import { managedTeamId, openInjuryIds, type GameState } from "../core/state";
 import { addDays } from "../core/dates";
 import { isClubTeam } from "../data/team-catalog";
 import { matchesOn } from "../competition/calendar";
+import { awayFromClubIds } from "../competition/international";
 import { decayedForm } from "./form";
 
 /**
@@ -77,6 +78,14 @@ export function tickOtherClubs(state: GameState): void {
   // 감독이 잘려 무직이면 옛 구단도 여기서 돈다 — `managedTeamId`가 null이다
   const managed = managedTeamId(state);
   const injured = openInjuryIds(state);
+  /**
+   * **대표팀에 가 있는 선수는 그 구단의 하루를 살지 않는다**
+   * (→ ../../../../docs/data/competition.md §5-1). A매치 휴식기엔 그 구단에 경기가
+   * 열흘간 없어 `recoveryKindOf`가 「본훈련」을 내는데, 소집된 선수는 그 훈련장에
+   * 없다 — 갈라 두지 않으면 남의 팀 국가대표만 휴식기 내내 감각 55를 향해 서고
+   * 감독 팀 국가대표는 25를 향해 선다.
+   */
+  const offSite = awayFromClubIds(state);
   for (const player of state.players) {
     if (player.teamId === managed) continue;
     if (!isClubTeam(player.teamId)) continue; // 무소속·시장 전용 리그는 경기가 없다
@@ -85,6 +94,7 @@ export function tickOtherClubs(state: GameState): void {
       kind = recoveryKindOf(state, player.teamId);
       kinds.set(player.teamId, kind);
     }
+    if (offSite.has(player.id)) kind = "idle";
     player.state.condition = clampCondition(player.state.condition + dailyRecovery(player, kind));
     player.state.form = decayedForm(player.state.form);
     /**
@@ -101,9 +111,11 @@ export function tickOtherClubs(state: GameState): void {
      * (`tick.ts`) — 감독의 경기와 같은 함수를 지나는 그 자리다.
      *
      * 다친 선수는 팀 훈련에서 떨어져 있어 **휴식과 같은 속도로** 빠진다 — 감독 팀의
-     * 쉬는 선수와 같은 규칙이다.
+     * 쉬는 선수와 같은 규칙이고, 대표팀에 가 있는 선수도 그 훈련장에 없다는 점에서
+     * 같다 (competition.md §5-1). 그 창의 A매치 분은 복귀 정산이 따로 얹는다
+     * (`settleCallUps`) — 감독의 경기와 같은 함수(`fatigueFromMinutes`)를 지난다.
      */
-    const away = injured.has(player.id);
+    const away = injured.has(player.id) || offSite.has(player.id);
     player.state.fatigue = clampFatigue(
       fatigueAfterDay(
         fatigueOf(player.state) +

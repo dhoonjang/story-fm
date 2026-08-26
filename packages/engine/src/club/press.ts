@@ -1,6 +1,7 @@
 import type {
   ApproachTopic,
   BoardExpectationCode,
+  CallUp,
   GamePlayer,
   ManagerContract,
   MatchRecord,
@@ -15,6 +16,7 @@ import type {
 } from "@story-fm/domain";
 import {
   ageOf,
+  capsOf,
   interestStageRank,
   isNaturalAt,
   isReserveMatch,
@@ -46,6 +48,13 @@ import { managerCareerTotals } from "../competition/records";
 import { numberLineageOf } from "../squad/numbers";
 import { recentOutcomes } from "../squad/slump";
 import { isFriendly } from "../competition/friendly";
+import {
+  callUpsOfBreak,
+  droppedFrom,
+  internationalBreaksOf,
+  previousBreakKey,
+  type InternationalBreak,
+} from "../competition/international";
 import { boardExpectation, computeStandings, retirementJudgeDate } from "../competition/season";
 import { leagueOfTeamIn } from "../competition/promotion";
 import { derbyNameOf, derbyOf } from "../data/derbies";
@@ -1080,6 +1089,138 @@ function loadRumours(state: GameState, conference: PressConference): void {
   conference.weight = Math.max(conference.weight, 2);
 }
 
+// ── 대표팀 소집 (competition.md §5-1) ──────────────────────────
+
+/**
+ * 복귀 정산 뒤 이 사실이 아직 뉴스인 날 수.
+ *
+ * ⚠️ **휴식기 한 번이 회견 창 하나다** — 소집일부터 복귀 정산 + 이만큼까지. 소집일
+ * 쪽과 복귀일 쪽을 따로 열면 **소집·데뷔·낙마는 영영 회견에 서지 못한다**: 그 창의
+ * 주말은 리그가 비운 자리라(§2 `isBlankWeekend`) 회견이 열릴 경기가 없고, 자리가
+ * 처음 서는 것은 돌아온 뒤 첫 경기다. 한 창으로 두면 그날의 회견이 데뷔부터 복귀까지
+ * 한 장을 고른다.
+ */
+const CALL_UP_PRESS_DAYS = 4;
+
+/** 오늘이 읽는 휴식기 — 창이 겹치지 않으므로 많아야 하나다 */
+function callUpPressWindow(state: GameState): InternationalBreak | null {
+  return (
+    internationalBreaksOf(state.season).find(
+      (w) => w.from <= state.date && diffDays(w.to, state.date) <= CALL_UP_PRESS_DAYS,
+    ) ?? null
+  );
+}
+
+/** 그 창에서 우리 선수의 소집 행 — 소집 중에는 세계 전체의 행이 열려 있다 */
+function ourCallUps(state: GameState, breakKey: string, squad: ReadonlySet<string>): CallUp[] {
+  return callUpsOfBreak(state, breakKey).filter((row) => squad.has(row.gamePlayerId));
+}
+
+/**
+ * 이 갈래를 대표하는 한 사람 — **통산이 가장 긴 선수**, 같으면 id가 가른다.
+ * 배열 순서로 고르면 같은 세이브가 같은 날에 다른 이름을 낸다.
+ */
+function longestServing(state: GameState, rows: readonly CallUp[]): CallUp | null {
+  let best: { row: CallUp; caps: number } | null = null;
+  for (const row of rows) {
+    const player = playerById(state, row.gamePlayerId);
+    if (!player) continue;
+    const caps = capsOf(player.state);
+    const better =
+      best === null ||
+      caps > best.caps ||
+      (caps === best.caps && row.gamePlayerId < best.row.gamePlayerId);
+    if (better) best = { row, caps };
+  }
+  return best?.row ?? null;
+}
+
+/** 한 사람이 주어인 소집 카드 — 낙마만 날 서 있다 */
+function callUpCard(
+  state: GameState,
+  sub: "named" | "debut" | "dropped",
+  row: CallUp,
+  count: number,
+): PressFact | null {
+  const player = playerById(state, row.gamePlayerId);
+  if (!player) return null;
+  return {
+    kind: "call-up",
+    data: {
+      name: player.name,
+      tags: [sub, row.country],
+      // 데뷔의 통산은 정의상 0이다 — 없는 수를 줄에 세우지 않는다
+      values: { count, ...(sub === "debut" ? {} : { caps: capsOf(player.state) }) },
+    },
+    about: player.id,
+    sharp: sub === "dropped",
+  };
+}
+
+/**
+ * 이 자리에 설 대표팀 사실 **하나** — 드문 순서로 고른다: 데뷔 > 낙마 > 복귀 > 소집.
+ *
+ * 마일스톤과 같은 규약이다 (people.md §4) — 네 갈래를 다 실으면 그 회견이 소집
+ * 명단 낭독이 된다.
+ */
+function callUpFact(state: GameState): PressFact | null {
+  const window = callUpPressWindow(state);
+  if (!window) return null;
+  const squad = new Set(userPlayers(state).map((p) => p.id));
+  const rows = ourCallUps(state, window.key, squad);
+  if (rows.length === 0) return null;
+
+  const first = longestServing(
+    state,
+    rows.filter((row) => row.debut === true),
+  );
+  if (first) return callUpCard(state, "debut", first, rows.length);
+
+  const previous = previousBreakKey(window.key);
+  const out = new Set(droppedFrom(state, previous, window.key));
+  const left = longestServing(
+    state,
+    callUpsOfBreak(state, previous).filter((row) => out.has(row.gamePlayerId)),
+  );
+  if (left) return callUpCard(state, "dropped", left, rows.length);
+
+  // 정산이 끝난 뒤에야 몸을 말할 수 있다 — 창 안이어도 소집 중이면 아직 사실이 아니다
+  const back = rows.filter((row) => row.returnedOn !== null);
+  if (back.length > 0) {
+    const tired = back.filter((row) => row.returnState !== undefined && row.returnState !== "fit");
+    return {
+      kind: "call-up",
+      data: {
+        tags: ["returned"],
+        values: {
+          count: back.length,
+          apps: back.reduce((sum, row) => sum + row.apps, 0),
+          goals: back.reduce((sum, row) => sum + row.goals, 0),
+          tired: tired.length,
+        },
+      },
+      about: null,
+      // 지쳐·다쳐 돌아온 자리는 날 서 있다 — 주말 경기가 사흘 뒤다
+      sharp: tired.length > 0,
+    };
+  }
+
+  const top = longestServing(state, rows);
+  return top ? callUpCard(state, "named", top, rows.length) : null;
+}
+
+/**
+ * 휴식기가 남긴 사실이 회견에 선다 — **유출·루머와 같은 문을 지난다** (people.md §4).
+ *
+ * 자리를 따로 열지 않는 이유도 같다: 소집일과 복귀일 사이에 회견은 이미 열린다.
+ */
+function loadCallUps(state: GameState, conference: PressConference): void {
+  const fact = callUpFact(state);
+  if (!fact) return;
+  conference.facts.push(fact);
+  if (fact.sharp) conference.weight = Math.max(conference.weight, 2);
+}
+
 // ── 전야 회견 ──────────────────────────────────────────────────
 
 /** 전야에 실리는 최근 폼의 창 — 경기 뒤 회견의 무승 창과 같은 자 */
@@ -1481,6 +1622,7 @@ export function openPress(state: GameState, conference: PressConference, digest?
   loadLeaks(state, conference);
   loadTransferRequests(state, conference);
   loadRumours(state, conference);
+  loadCallUps(state, conference);
   loadSackings(state, conference);
   loadManagerContract(state, conference);
   loadManagerFund(state, conference);
