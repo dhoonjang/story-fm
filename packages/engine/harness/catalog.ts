@@ -294,8 +294,8 @@ export const INCOMING_OFFERS = defineHarness({
 
 export const MANAGER_MARKET = defineHarness({
   id: "manager-market",
-  what: "한 시즌에 감독을 바꾸는 1부 구단 수 · 그 자리를 무직 감독 풀이 채운 비중",
-  doc: "docs/simulation/transfer.md §7",
+  what: "한 시즌에 감독을 바꾸는 1부 구단 수 · 그 자리를 무직 감독 풀이 채운 비중 · 재직 감독에게 온 접근",
+  doc: "docs/simulation/transfer.md §7 · career.md §5.1",
   cost: "전체 세계 한 시즌 · 수 분",
   // prettier-ignore
   bands: [
@@ -304,6 +304,8 @@ export const MANAGER_MARKET = defineHarness({
     { metric: "풀 인원", role: "guard", max: 40, unit: "count", why: "`MANAGER_POOL_MAX` — 상한이 실제로 지켜지는가 (세이브가 무한히 자라지 않는다)" },
     { metric: "풀에서 다시 선 감독 수", role: "measure", unit: "count", why: "아는 얼굴이 한 시즌에 몇 벤치에 서는가 — 비중이 감추는 절대량" },
     { metric: "풀 재선임 비중", role: "guard", min: 0.15, max: 0.85, unit: "ratio", why: "0이면 감독 시장이 없는 것과 같고, 1이면 세계에 새 사람이 나지 않는다" },
+    { metric: "재직 감독에게 온 접근", role: "guard", max: 2, unit: "count", why: "career.md §5.1 — 한 시즌에 여러 번 오면 자리를 옮기는 일이 사건이 아니라 일상이 된다" },
+    { metric: "시즌말 감독 평판", role: "measure", unit: "score", why: "접근 건수를 읽을 자 — `(보드+미디어)/2`가 등급 문턱(tier 3은 50)을 넘는가가 그 문을 연다" },
   ],
 });
 

@@ -85,7 +85,14 @@ function OfferCard({ offer: o }: { offer: OfferRow }) {
     <div className="offer">
       <div className="offer-head">
         <b>{o.teamName}</b>
-        <span className="tier">{o.via === "renewal" ? "재계약" : `${o.tier}티어`}</span>
+        {/* 재직 중에 서는 자리는 갈래가 곧 사실이다 — 재계약인가, 손을 뻗은 것인가 */}
+        <span className="tier">
+          {o.via === "renewal"
+            ? "재계약"
+            : o.via === "poach"
+              ? `접근 · ${o.tier}티어`
+              : `${o.tier}티어`}
+        </span>
         <span className="until">{o.expiresOn}까지</span>
       </div>
       <div className="offer-why">
@@ -99,25 +106,59 @@ function OfferCard({ offer: o }: { offer: OfferRow }) {
           {o.counteredOn === null ? "" : " · 흥정 완료"}
         </div>
       )}
+      {/* 보상금은 감독의 돈이 아니다 — 구단이 구단에 무는 돈이다 (career.md §5.1) */}
+      {o.compensation !== null && (
+        <div className="offer-why">보상금 {formatMoney(o.compensation)} — 지금 구단이 받는다</div>
+      )}
+    </div>
+  );
+}
+
+type VacancyRow = CareerView["vacancies"][number];
+
+/**
+ * **공석 명부 — 제안이 아니라 문이다** (career.md §5.1). 제안 카드의 강조 테두리를
+ * 물려받으면 답을 기다리는 것처럼 읽히므로 가라앉은 테두리로 가른다. 지원은 감독이
+ * 말로 한다 — 화면은 어느 문이 열려 있는지만 세운다.
+ */
+function Vacancies({ vacancies }: { vacancies: readonly VacancyRow[] }) {
+  if (vacancies.length === 0) return null;
+  return (
+    <div className="offer-list" data-testid="manager-vacancies">
+      {vacancies.map((v, i) => (
+        <div className="offer vacant" key={i}>
+          <div className="offer-head">
+            <b>{v.teamName}</b>
+            <span className="tier">{v.tier}티어</span>
+            <span className="until">{v.on} 공석</span>
+          </div>
+          {v.position !== null && <div className="offer-why">현재 {v.position}위</div>}
+        </div>
+      ))}
     </div>
   );
 }
 
 /**
- * **재직 중에 서는 제안은 재계약 하나다** (career.md §5.4) — 보드가 만료 90일 전에
- * 건 다음 임기다. 경질 카드가 서 있는 동안에는 이 자리가 무직 카드로 대체된다.
+ * **재직 중에도 거취는 서 있다** — 보드의 재계약(career.md §5.4)과 다른 구단의 이직
+ * 제안, 그리고 지금 열려 있는 공석(§5.1 「재직 중 접근·노크」).
+ *
+ * 경질 카드가 서 있는 동안에는 이 자리가 무직 카드로 대체된다. 어느 쪽이든 **읽는
+ * 값이다** — 수락도 지원도 감독이 말로 한다.
  */
-function Renewal({ career }: { career: CareerView }) {
+function InPost({ career }: { career: CareerView }) {
   if (career.dismissal) return null;
-  const offers = career.offers.filter((o) => o.via === "renewal");
-  if (offers.length === 0) return null;
+  if (career.offers.length === 0 && career.vacancies.length === 0) return null;
   return (
     <div className="mgr-outofwork">
-      <div className="offer-list" data-testid="renewal-offers">
-        {offers.map((o) => (
-          <OfferCard offer={o} key={o.id} />
-        ))}
-      </div>
+      {career.offers.length > 0 && (
+        <div className="offer-list" data-testid="in-post-offers">
+          {career.offers.map((o) => (
+            <OfferCard offer={o} key={o.id} />
+          ))}
+        </div>
+      )}
+      <Vacancies vacancies={career.vacancies} />
     </div>
   );
 }
@@ -133,7 +174,12 @@ function Renewal({ career }: { career: CareerView }) {
 const SPENDING_SHOWN = 3;
 
 /** 자리를 잃은 갈래의 이름 — 코드가 사실이고 문장은 화면이 만든다 (career.md §5.4) */
-const LEAVE_KO = { expired: "계약 만료", resigned: "사임", sacked: "경질" } as const;
+const LEAVE_KO = {
+  expired: "계약 만료",
+  resigned: "사임",
+  sacked: "경질",
+  moved: "이적",
+} as const;
 
 function OutOfWork({ career }: { career: CareerView }) {
   const d = career.dismissal;
@@ -151,8 +197,8 @@ function OutOfWork({ career }: { career: CareerView }) {
         {d.severance !== null && (
           <div className="dismissed-why">
             위약금 {formatMoney(d.severance)}
-            {/* 누가 물었는지는 갈래가 안다 — 사임만 감독이 지갑에서 문다 (career.md §5.4) */}
-            {d.kind === "resigned" ? " (감독 부담)" : ""}
+            {/* 누가 물었는지는 갈래가 안다 (career.md §5.4 · §5.1) */}
+            {d.kind === "resigned" ? " (감독 부담)" : d.kind === "moved" ? " (새 구단 부담)" : ""}
           </div>
         )}
       </div>
@@ -163,25 +209,7 @@ function OutOfWork({ career }: { career: CareerView }) {
           career.offers.map((o) => <OfferCard offer={o} key={o.id} />)
         )}
       </div>
-      {/**
-       * 공석 명부 — **제안이 아니라 문이다** (career.md §5.1). 제안 카드의 강조
-       * 테두리를 물려받으면 답을 기다리는 것처럼 읽히므로 가라앉은 테두리로 가른다.
-       * 지원은 감독이 말로 한다 — 화면은 어느 문이 열려 있는지만 세운다.
-       */}
-      {career.vacancies.length > 0 && (
-        <div className="offer-list" data-testid="manager-vacancies">
-          {career.vacancies.map((v, i) => (
-            <div className="offer vacant" key={i}>
-              <div className="offer-head">
-                <b>{v.teamName}</b>
-                <span className="tier">{v.tier}티어</span>
-                <span className="until">{v.on} 공석</span>
-              </div>
-              {v.position !== null && <div className="offer-why">현재 {v.position}위</div>}
-            </div>
-          ))}
-        </div>
-      )}
+      <Vacancies vacancies={career.vacancies} />
     </div>
   );
 }
@@ -524,7 +552,7 @@ export function CareerView({
         />
       </div>
 
-      <Renewal career={career} />
+      <InPost career={career} />
       <OutOfWork career={career} />
 
       <div className="section-title">트로피 보관함</div>
@@ -611,7 +639,7 @@ export function CareerView({
                   <td>{r.d.season}</td>
                   <td>{r.d.teamName}</td>
                   <td>—</td>
-                  <td className="career-sacked">
+                  <td className={`career-sacked${r.d.kind === "moved" ? " career-moved" : ""}`}>
                     {r.d.on} {LEAVE_KO[r.d.kind]}
                   </td>
                   <td className="career-verdict">{dismissalLineOf(r.d)}</td>

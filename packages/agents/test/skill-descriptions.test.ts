@@ -115,6 +115,35 @@ describe("규칙이 사는 자리", () => {
   });
 
   /**
+   * **설명이 이름으로 부르는 인자는 스키마에 있어야 한다.** 인자가 빠지거나 이름이
+   * 바뀌어도 설명은 그대로 남고, 모델은 없는 자리를 채우다 반려당한다 — 화면에는
+   * 도구가 답하지 않은 것으로만 보인다. 한 도구가 다른 도구의 인자를 부르는 자리가
+   * 있어(`set_squad_level` → `set_lineup`의 `squadLevels`) 대조는 도구 집합 전체로 한다.
+   */
+  it("설명이 이름으로 부르는 인자가 스키마에 있다", () => {
+    /**
+     * 낙타등 낱말만 인자로 읽는다 — 스탠스·갈래 토큰은 한 낱말이라 열거값과 갈리지
+     * 않고, `xG` 같은 약어는 대문자 뒤에 소문자가 붙지 않는다.
+     */
+    const ARG = /\b[a-z]+[A-Z][a-z][A-Za-z]*\b/g;
+    const names = (node: unknown, into: Set<string>): Set<string> => {
+      if (node === null || typeof node !== "object") return into;
+      const n = node as { properties?: Record<string, unknown>; items?: unknown };
+      for (const [key, child] of Object.entries(n.properties ?? {})) {
+        into.add(key);
+        names(child, into);
+      }
+      return names(n.items, into);
+    };
+    const known = TOOLS.reduce((set, tool) => names(tool.inputSchema, set), new Set<string>());
+    for (const tool of TOOLS) {
+      for (const word of tool.description.match(ARG) ?? []) {
+        expect(known.has(word), `${tool.name}: ${word}`).toBe(true);
+      }
+    }
+  });
+
+  /**
    * 나이로 먼저 꺾이는 축과 그 나이는 코어의 노화 곡선이 갖는다 — 프롬프트가 손으로
    * 적으면 곡선을 조율해도 옛 나이를 계속 말하고, 두 결산이 서로 다른 나이를 믿는다.
    * 화면에 드러나지 않는 어긋남이라 여기서 잰다 (prompts.md §5).

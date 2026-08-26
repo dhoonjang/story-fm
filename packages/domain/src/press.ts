@@ -159,6 +159,12 @@ export const PressFactKindSchema = z.enum([
    */
   "manager-fund",
   /**
+   * **감독의 거취가 밖으로 향했다** — 재직 중인 감독이 공석을 두드렸거나
+   * (`tags[0]`이 `knock`), 다른 구단이 그를 부른 제안이 열려 있다(`approach`)
+   * (career.md §5.1 「재직 중 접근·노크」). `name`이 그 구단이다.
+   */
+  "job-link",
+  /**
    * **벤치가 비었다** — 전임이 어떻게 물러났나(부임 회견), 또는 라이벌 구단의 경질.
    * `tags[0]`이 그 둘을 가른다.
    */
@@ -946,6 +952,14 @@ export function pressFactText(fact: PressFact): string {
             ? " · 보드가 재계약하지 않기로 했다"
             : " · 보드는 아직 말이 없다")
       );
+    case "job-link":
+      /**
+       * **어느 구단인가와 어느 방향인가, 그 둘뿐이다** (career.md §5.1). 감독이 무슨
+       * 생각으로 두드렸는지는 카드가 아는 사실이 아니고, 조건은 제안이 든다.
+       */
+      return sub === "knock"
+        ? `${name} 감독직에 지원했다`
+        : `${name}가 감독직을 제안했다 — 재직 중이다`;
     case "manager-fund":
       /**
        * 등급은 `tags[0]`이 들지만 줄에는 서지 않는다 — 백분율이 이미 그 사실이고,

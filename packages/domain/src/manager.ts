@@ -314,11 +314,13 @@ export const DismissalSchema = z.object({
   season: z.number().int(),
   /**
    * 자리를 잃은 갈래 — 경질(`sacked`) · 계약 만료(`expired`) · 감독이 스스로 물고
-   * 나간 사임(`resigned`) (career.md §5.4). 무직은 **상태지 사유가 아니라서** 카드
-   * 하나가 셋을 다 든다. 옛 세이브엔 없다 (없으면 경질 — 만료 판정이 생기기 전의
-   * 카드는 전부 경질이다).
+   * 나간 사임(`resigned`) · **다른 구단이 보상금을 물고 데려간 이적**(`moved` —
+   * career.md §5.1) (career.md §5.4). 무직은 **상태지 사유가 아니라서** 카드 하나가
+   * 넷을 다 든다. ⚠️ `moved`만 그 뒤가 무직이 아니다 — 같은 날 새 벤치에 서므로
+   * 이 카드는 `dismissal`에 서지 않고 곧장 이력에 적힌다. 옛 세이브엔 없다 (없으면
+   * 경질 — 만료 판정이 생기기 전의 카드는 전부 경질이다).
    */
-  kind: z.enum(["sacked", "expired", "resigned"]).optional(),
+  kind: z.enum(["sacked", "expired", "resigned", "moved"]).optional(),
   /** 어느 구단에서 잘렸나 */
   teamId: z.string().min(1),
   /** 그 구단의 등급 — 같은 순위가 어디서는 성공이고 어디서는 해고인 이유 */
@@ -335,7 +337,8 @@ export const DismissalSchema = z.object({
   reason: z.string().optional(),
   /**
    * 위약금 (£) — **누가 물었는지는 `kind`가 안다** (career.md §5.4). 경질이면 구단이
-   * 물어 지갑에 들어온 돈이고, 사임이면 감독이 지갑에서 물어 옛 구단에 들어간 돈이다.
+   * 물어 지갑에 들어온 돈이고, 사임이면 감독이 지갑에서 물어 옛 구단에 들어간 돈이며,
+   * 이적이면 **새 구단이 옛 구단에 문 보상금**이라 지갑을 지나지 않는다 (§5.1).
    * 만료는 끝까지 간 계약이라 물 것이 없고, 계약이 없던 옛 세이브의 경질도 0이라
    * 적지 않는다.
    */
@@ -374,9 +377,19 @@ export const ManagerOfferSchema = z.object({
   budgetPledge: z.number().int().min(0).optional(),
   /**
    * 어떻게 섰나 — 공석이 불렀나(`vacancy`), 감독이 두드렸나(`knock`), 지금 구단이
-   * 재계약을 걸었나(`renewal` — career.md §5.4). 재계약 제안만 **재직 중에** 선다.
+   * 재계약을 걸었나(`renewal` — career.md §5.4), 아니면 다른 구단이 **재직 중인**
+   * 감독에게 손을 뻗었나(`poach` — career.md §5.1 「재직 중 접근·노크」).
+   *
+   * 재직 중에 설 수 있는 것은 셋이다 — `renewal`·`poach`, 그리고 재직 중에 두드려
+   * 얻은 `knock`. `vacancy`는 무직에게만 붙는다.
    */
-  via: z.enum(["vacancy", "knock", "renewal"]).optional(),
+  via: z.enum(["vacancy", "knock", "renewal", "poach"]).optional(),
+  /**
+   * **이 자리가 옛 구단에 물 보상금** (£) — 재직 중인 감독을 부르는 제안에만 실린다
+   * (career.md §5.1). 금액은 경질 위약금과 같은 식(`managerSeveranceOf`)으로 **부를
+   * 때** 재고, 수락일에 다시 재지 않는다 — 그 구단이 물기로 한 값이 곧 이 값이다.
+   */
+  compensation: z.number().int().min(0).optional(),
   /** 조정이 오간 날 — 서 있으면 흥정은 끝났다 (한 차례뿐이다) */
   counteredOn: DateString.optional(),
   status: z.enum(["open", "accepted", "expired"]),

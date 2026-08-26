@@ -1717,9 +1717,12 @@ export interface OfficeViews {
     dismissal: {
       on: string;
       season: number;
-      /** 경질·만료·사임 — 무직은 상태지 사유가 아니다 (career.md §5.4) */
-      kind: "sacked" | "expired" | "resigned";
-      /** 위약금 — 경질이면 구단이 문 돈, 사임이면 감독이 문 돈 (career.md §5.4) */
+      /** 경질·만료·사임·이적 — 무직은 상태지 사유가 아니다 (career.md §5.4) */
+      kind: "sacked" | "expired" | "resigned" | "moved";
+      /**
+       * 위약금 — 경질이면 구단이 문 돈, 사임이면 감독이 문 돈, 이적이면 새 구단이
+       * 옛 구단에 문 보상금이다 (career.md §5.4 · §5.1)
+       */
       severance: number | null;
       teamName: string;
       tier: number | null;
@@ -1735,8 +1738,8 @@ export interface OfficeViews {
     dismissals: Array<{
       on: string;
       season: number;
-      /** 경질·만료·사임 — 옛 이력엔 없어 경질로 읽는다 (career.md §5.4) */
-      kind: "sacked" | "expired" | "resigned";
+      /** 경질·만료·사임·이적 — 옛 이력엔 없어 경질로 읽는다 (career.md §5.4) */
+      kind: "sacked" | "expired" | "resigned" | "moved";
       teamName: string;
       position: number | null;
       target: number | null;
@@ -1748,8 +1751,11 @@ export interface OfficeViews {
      */
     offers: Array<{
       id: string;
-      /** 어떻게 선 제안인가 — 재계약(`renewal`)만 재직 중에 선다 (career.md §5.4) */
-      via: "vacancy" | "knock" | "renewal";
+      /**
+       * 어떻게 선 제안인가 — `vacancy`만 무직에게 붙는다. 재계약(`renewal`)과 이직
+       * 제안(`poach` · 재직 중의 `knock`)은 재직 중에 선다 (career.md §5.1 · §5.4)
+       */
+      via: "vacancy" | "knock" | "renewal" | "poach";
       teamName: string;
       tier: number;
       expiresOn: string;
@@ -1762,9 +1768,15 @@ export interface OfficeViews {
       budgetPledge: number | null;
       /** 서 있으면 흥정은 끝났다 — 한 차례뿐이다 */
       counteredOn: string | null;
+      /**
+       * 새 구단이 지금 구단에 물 **이적 보상금** — 재직 중에 온 제안에만 있다
+       * (career.md §5.1)
+       */
+      compensation: number | null;
     }>;
     /**
-     * **공석 명부** — 무직 감독이 먼저 지원할 수 있는 자리 (career.md §5.1).
+     * **공석 명부** — 감독이 먼저 지원할 수 있는 자리 (career.md §5.1). 재직 중에도
+     * 쌓인다 — 계약을 남기고 떠나는 길이 열려 있다.
      * 지원은 채팅으로 한다(`apply_manager_job`) — 화면은 어느 문이 열려 있는지만 세운다.
      */
     vacancies: Array<{ teamName: string; tier: number; on: string; position: number | null }>;
@@ -3732,7 +3744,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       })),
       offers: openManagerOffers(state).map((o) => ({
         id: o.id,
-        /** 어떻게 선 제안인가 — 재계약(`renewal`)만 재직 중에 선다 (career.md §5.4) */
+        /** 어떻게 선 제안인가 — 옛 세이브의 제안엔 없어 공석이 부른 것으로 읽는다 */
         via: o.via ?? ("vacancy" as const),
         teamName: teamNameIn(state, o.teamId),
         tier: o.tier,
@@ -3744,16 +3756,15 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         years: o.years ?? null,
         budgetPledge: o.budgetPledge ?? null,
         counteredOn: o.counteredOn ?? null,
+        compensation: o.compensation ?? null,
       })),
-      // 무직일 때만 문이다 — 재직 중의 명부는 어차피 비어 있다 (career.md §5.1)
-      vacancies: state.dismissal
-        ? (state.managerVacancies ?? []).map((v) => ({
-            teamName: teamNameIn(state, v.teamId),
-            tier: tierOfTeamIn(state, v.teamId),
-            on: v.on,
-            position: v.position ?? null,
-          }))
-        : [],
+      // 재직 중에도 문이다 — 명부는 14일이 지나면 코어가 내린다 (career.md §5.1)
+      vacancies: (state.managerVacancies ?? []).map((v) => ({
+        teamName: teamNameIn(state, v.teamId),
+        tier: tierOfTeamIn(state, v.teamId),
+        on: v.on,
+        position: v.position ?? null,
+      })),
       /**
        * 계약 — **수치와 기간만** 내려간다 (career.md §5.4 · overview.md §1 철칙 4).
        * `renewal`은 보드가 만료 90일 전에 내린 판정이고, 문장은 화면과 GM이 쓴다.
