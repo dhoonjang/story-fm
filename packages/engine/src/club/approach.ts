@@ -24,6 +24,7 @@ import {
 import type { GameState } from "../core/state";
 import {
   activeContract,
+  openFinanceDemand,
   playerById,
   pushNarrative,
   seasonStatOf,
@@ -44,15 +45,18 @@ import { recentOutcomes } from "../squad/slump";
 import { agentForPlayer, ownerOf } from "../world/persona";
 import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import {
+  biggerSuitorsOf,
   CAREER_AGE_MOVE,
   isSeriousOffer,
   loanLockOf,
   renewalExpectation,
+  stageScaleOf,
   SUITORS_MANY,
   suitorsOf,
   windowOpenForTeam,
+  type StageScale,
 } from "../market/market";
-import { squadDepthOf, squadRating, type SquadDepth } from "../squad/depth";
+import { squadDepthOf, type SquadDepth } from "../squad/depth";
 import { boardDemandFact } from "./board-demand";
 import {
   applyStanceOutcome,
@@ -735,7 +739,65 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
   }
 
   const place = leaguePlace(state);
+  const demand = boardDemandFact(state);
+
+  /**
+   * **재정 요청이 아직 감독에게 닿지 않았으면 그 요청이 자리를 세운다**
+   * (career.md §5.2 「재정 갈래」). 순위표를 전제로 삼지 않는 유일한 구단주 자리다 —
+   * 여름 창은 8경기를 치르기 전이라 `leaguePlace`가 아직 `null`이고, 동결이 선 그
+   * 여름에 구단주가 말을 못 하면 요청은 감독이 조회로나 보는 줄이 된다.
+   */
+  const finance = openFinanceDemand(state);
+  if (finance && demand && !carriedDemand(row, finance)) {
+    return {
+      channel: "owner",
+      speakerId: ownerOf(state).characterId,
+      about: finance.playerId ?? null,
+      contextCard: {
+        code: "board-demand",
+        ...(finance.baseline === undefined ? {} : { value: finance.baseline }),
+      },
+      // 순위는 있으면 얹는다 — 요청을 하러 온 자리라 맨 앞은 요청이다
+      facts: [demand, ...standingFacts(state, place, false)],
+    };
+  }
+
   if (!place) return null;
+  const facts = standingFacts(state, place, sharp);
+  /**
+   * 열린 보드 요청은 구단주가 아는 사실이다 (career.md §5.2) — 순위 이야기를 하러
+   * 온 자리라도 자기가 건 조건을 빼놓고 말하지 않는다.
+   */
+  if (demand) facts.push(demand);
+  return {
+    channel: "owner",
+    speakerId: ownerOf(state).characterId,
+    about: null,
+    contextCard: {
+      code: "standing",
+      value: place.position,
+      limit: boardExpectation(state, state.userTeamId).target,
+    },
+    facts,
+  };
+}
+
+/**
+ * 이 압력 줄이 그 요청을 이미 실어 갔는가 — **요청이 선 날 이후에 한 번 열렸는가**로
+ * 잰다 (people.md §8). 새 상태를 두지 않는 이유다: 자리가 열린 날은 `openedOn`에
+ * 이미 남고, 요청은 발행일을 든다.
+ */
+function carriedDemand(row: ApproachPressure, demand: { issuedOn: string }): boolean {
+  return row.openedOn !== undefined && row.openedOn >= demand.issuedOn;
+}
+
+/** 구단주가 아는 순위 — 지금 자리·보드가 건 자리·쌓인 경고. 순위가 없으면 빈 줄이다 */
+function standingFacts(
+  state: GameState,
+  place: { position: number; played: number } | null,
+  sharp: boolean,
+): PressFact[] {
+  if (!place) return [];
   const expectation = boardExpectation(state, state.userTeamId);
   const facts: PressFact[] = [
     {
@@ -760,19 +822,7 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
       sharp: true,
     });
   }
-  /**
-   * 열린 보드 요청은 구단주가 아는 사실이다 (career.md §5.2) — 순위 이야기를 하러
-   * 온 자리라도 자기가 건 조건을 빼놓고 말하지 않는다.
-   */
-  const demand = boardDemandFact(state);
-  if (demand) facts.push(demand);
-  return {
-    channel: "owner",
-    speakerId: ownerOf(state).characterId,
-    about: null,
-    contextCard: { code: "standing", value: place.position, limit: expectation.target },
-    facts,
-  };
+  return facts;
 }
 
 // ── 하루 ───────────────────────────────────────────────────────
@@ -908,23 +958,17 @@ function standBiggerClubRequests(state: GameState, digest: string[]): void {
    * 색인 값이 된다. 세운 뒤에는 그날 안에서 다시 세우지 않는다.
    */
   let depth: SquadDepth | null = null;
-  const ratings = new Map<string, number>();
-  const ratingOf = (teamId: string): number => {
-    const cached = ratings.get(teamId);
-    if (cached !== undefined) return cached;
-    const value = squadRating(state, teamId);
-    ratings.set(teamId, value);
-    return value;
-  };
+  let scale: StageScale | null = null;
 
   for (const player of candidates) {
     if (rng() >= BIGGER_CLUB_CHANCE) continue;
     depth ??= squadDepthOf(state);
+    scale ??= stageScaleOf(state);
     const suitors = suitorsOf(state, player, depth);
     if (suitors.length < SUITORS_MANY) continue;
-    // 갈 곳이 많은 것만으로는 이유가 되지 않는다 — 그중 하나는 우리보다 커야 한다
-    const ours = ratingOf(state.userTeamId);
-    if (!suitors.some((id) => ratingOf(id) > ours)) continue;
+    // 갈 곳이 많은 것만으로는 이유가 되지 않는다 — 그중 하나는 우리보다 큰 무대여야
+    // 한다. 「우리보다 크다」의 자는 하나다 (`biggerSuitorsOf` — transfer.md §1-3)
+    if (biggerSuitorsOf(state, suitors, scale).length === 0) continue;
     if (!standTransferRequest(state, player.id, "bigger-club")) continue;
     const agent = agentForPlayer(state, player.id);
     digest.push(
@@ -953,6 +997,27 @@ function driftPressure(state: GameState): void {
     if (isPlayerSubject(row.topic) && !ours.has(row.subject)) return false;
     return row.value > 0 || row.step > 0;
   });
+  standFinanceDemand(state);
+}
+
+/**
+ * **재정 요청은 자기 발로 온다** (career.md §5.2 「재정 갈래」) — 동결·강등이 세운
+ * 매각 요구는 순위 압력이 차기를 기다리지 않는다. 구단주 줄을 임계까지 채워 두면
+ * 자리의 문 넷(열린 자리 하나 · 살아 있는 회견 · 하루 한 건 · 화자 쿨다운)은 그대로
+ * 지나므로 소음이 되지 않는다.
+ *
+ * **한 번뿐이다** — 요청이 선 날 이후에 그 줄이 한 번 열렸으면 더 채우지 않는다.
+ * 그다음부터 구단주는 다시 순위 이야기를 하러 오고, 요청 줄은 거기 얹혀 온다.
+ *
+ * ⚠️ **매일 다시 채운다.** 한 번만 채우면 그날 문이 막힌(회견이 열려 있는·이미 한
+ * 건이 열린) 요청은 하루 12씩 식어 영영 오지 않는다.
+ */
+function standFinanceDemand(state: GameState): void {
+  const demand = openFinanceDemand(state);
+  if (!demand) return;
+  const row = rowOf(state, BOARD_SUBJECT, "results");
+  if (carriedDemand(row, demand)) return;
+  row.value = Math.max(row.value, approachThreshold(row.step));
 }
 
 /**
@@ -1202,13 +1267,15 @@ export function respondToApproach(
   /**
    * ── 약속은 **답을 닫은 뒤에** 장부에 선다 ── (people.md §5-2)
    *
-   * 자리의 `about`이 그 선수인 곳에서만 열린다 — 대리로 온 에이전트의 자리도
-   * 당사자를 가리키므로 받지만, 주장(`about: null`)·구단주 자리에는 약속을 걸
-   * 사람이 없다. 갈래가 대상에 맞는지는 `openPromise`가 다시 본다.
+   * **채널이 가른다** — 선수 본인의 자리와 대리로 온 에이전트의 자리에서만 열린다.
+   * 주장·구단주 자리에는 약속을 걸 사람이 없다: 구단주가 지목한 선수(`sell-player`)는
+   * 그 자리의 `about`이지만 감독실에 있지는 않다 (career.md §5.2). 갈래가 대상에
+   * 맞는지는 `openPromise`가 다시 본다.
    */
+  const inTheRoom = approach.channel === "player" || approach.channel === "agent";
   const promised = input.promise
     ? promisePiece(
-        approach.about
+        inTheRoom && approach.about
           ? openPromise(
               state,
               approach.about,

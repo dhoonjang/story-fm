@@ -77,6 +77,7 @@ import {
   MATCHDAY_SQUAD,
   ageOf,
   bestOverall,
+  isFinanceDemand,
   interestStageRank,
   canRegister,
   isReserveMatch,
@@ -1327,6 +1328,23 @@ export function transferRequestOf(state: GameState, playerId: string): TransferR
 /** 아직 감독이 답하지 않은 요청들 — 책상 위에 놓인 것 */
 export function openTransferRequests(state: GameState): TransferRequest[] {
   return (state.transferRequests ?? []).filter((r) => r.answeredOn === undefined);
+}
+
+/**
+ * 열린 보드 요청 — 창마다 최대 하나라 언제나 하나뿐이다 (career.md §5.2).
+ *
+ * ⚠️ **요청을 세우는 `club/board-demand.ts`가 아니라 여기 산다.** 시장(`market.ts`)이
+ * 이 줄을 읽어야 하는데 저쪽은 창(`windowOpenForTeam`)을 읽으러 시장을 부르므로,
+ * 규칙을 둘 다 이미 딛고 선 자리로 **내린 것**이다 (AGENTS.md §5).
+ */
+export function openBoardDemand(state: GameState): BoardDemand | null {
+  return (state.boardDemands ?? []).find((d) => d.status === "open") ?? null;
+}
+
+/** 열린 **재정 요청** — 동결·강등이 세운 갈래만. 평소 조건이면 `null`이다 */
+export function openFinanceDemand(state: GameState): BoardDemand | null {
+  const demand = openBoardDemand(state);
+  return demand && isFinanceDemand(demand.kind) ? demand : null;
 }
 
 /**

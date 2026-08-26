@@ -254,6 +254,22 @@ export const AI_MARKET = defineHarness({
   ],
 });
 
+export const INCOMING_OFFERS = defineHarness({
+  id: "incoming-offers",
+  what: "한 시즌 우리 선수에게 온 매각 오퍼 — 수 · 마감 주 비중 · 큰 무대 비중 · 시장가 대비 값",
+  doc: "docs/simulation/transfer.md §1-3",
+  cost: "전체 세계 한 시즌 · 수 분",
+  // prettier-ignore
+  bands: [
+    { metric: "우리에게 온 오퍼", role: "guard", min: 10, max: 45, unit: "count", why: "실제 1부 중위권은 여름 창 하나에 진지한 오퍼가 서너 건~열몇 건, 겨울까지 합쳐 그 두 배다. 하한은 「시장이 죽었다」, 상한은 「감독실이 오퍼로 덮인다」" },
+    { metric: "마감 주 비중", role: "guard", min: 0.15, unit: "ratio", why: "창은 한 시즌 95일 안팎이고 마감 주는 그중 14일이라 균등이면 15% — `DEADLINE_RUSH`가 걸린 자리는 그보다 위여야 한다 (§1-3)" },
+    { metric: "큰 무대 비중", role: "guard", min: 0.08, unit: "ratio", why: "우리보다 큰 무대(`gapTo > 0`)에서 오는 몫. 0에 가까우면 무대 무게(`suitorWeightOf`)가 죽어 2부 상위와 맨시티가 같은 확률로 부르는 자리로 돌아간 것이다" },
+    { metric: "값/시장가 · 중앙값", role: "measure", why: "첫 호가는 흥정 여지를 남겨 시장가의 75~100%로 들어오고(§1-2), 요청 갈래는 그 아래다 — 아래 마감 주 값과 견줘 읽는다" },
+    { metric: "마감 주 값/시장가 · 중앙값", role: "guard", min: 0.95, why: "마감 주에는 부르는 값과 사는 쪽 상한이 함께 `DEADLINE_PREMIUM`을 탄다 (§1-3). 배수가 값에 닿지 않으면 이 값은 위 「값/시장가」(0.75 언저리)로 내려앉으므로 그 사이에 문턱을 둔다 — 1.0에 붙이면 표본이 예닐곱뿐인 중앙값이 한 건에 흔들려 주간 워크플로가 매주 시끄럽다" },
+    { metric: "주전 오퍼의 큰 무대 비중", role: "measure", unit: "ratio", why: "주전에게 붙는 끌림(`STAGE_PULL_STARTER`)이 실제로 위를 향하는가 — 위 「큰 무대 비중」보다 높아야 잉여와 갈린 것이다" },
+  ],
+});
+
 export const MANAGER_MARKET = defineHarness({
   id: "manager-market",
   what: "한 시즌에 감독을 바꾸는 1부 구단 수",
@@ -268,9 +284,9 @@ export const MANAGER_MARKET = defineHarness({
 
 export const SQUAD_LONGEVITY = defineHarness({
   id: "squad-longevity",
-  what: "15시즌을 넘긴 뒤에도 구단이 선발 XI·계약을 세우는가",
-  doc: "docs/simulation/season.md §6",
-  cost: "세계 하나 · 전환 15번 · 약 1분 40초",
+  what: "15시즌을 넘긴 뒤에도 구단이 선발 XI·계약을 세우는가 · 리그 체급의 드리프트",
+  doc: "docs/simulation/season.md §6·§9",
+  cost: "세계 하나 · 월간 성장 180번 + 전환 15번 · 약 30초",
   // prettier-ignore
   bands: [
     { metric: "클럽 수", role: "guard", min: 100, unit: "count", why: "표본이 없으면 아래 네 줄이 공허하게 통과한다 — 시드 세계의 클럽 수보다 넉넉히 아래" },
@@ -282,6 +298,12 @@ export const SQUAD_LONGEVITY = defineHarness({
     { metric: "가장 얕은 스쿼드 인원", role: "measure", unit: "count", why: "평균은 한 구단의 고갈을 감춘다" },
     { metric: "가장 얕은 GK 보유", role: "measure", unit: "count", why: "1이면 버틴 것이고 2면 숫자가 살아 있다" },
     { metric: "스쿼드 평균 나이", role: "measure", why: "은퇴와 콜업의 균형 — 해마다 오르면 언젠가 선발 XI가 깨진다" },
+    { metric: "리그 1군 상위 15 종합 — 시작", role: "measure", unit: "score", why: "체급의 출발선 — 아래 두 줄을 읽을 자 (`overall-scale`이 이 분포의 원본을 잰다)" },
+    { metric: "리그 1군 상위 15 종합 — 15시즌 뒤", role: "measure", unit: "score", why: "같은 자로 잰 도착선" },
+    { metric: "시즌당 종합 드리프트", role: "measure", unit: "score", why: "성장과 노화의 수지 — 한 시즌에 리그 체급이 얼마나 움직이는가" },
+    { metric: "리그 1군 상위 15 잠재력 — 시작", role: "measure", unit: "score", why: "체급의 천장 — 종합과 함께 읽어야 드리프트의 원인이 갈린다" },
+    { metric: "리그 1군 상위 15 잠재력 — 15시즌 뒤", role: "measure", unit: "score", why: "같은 자로 잰 도착선" },
+    { metric: "시즌당 잠재력 드리프트", role: "measure", unit: "score", why: "천장 자체가 움직였는가 — 종합만 내려가면 성장이 못 닿은 것이고, 함께 내려가면 여름마다 세계가 건네는 사람이 얇아진 것이다" },
   ],
 });
 
@@ -581,6 +603,7 @@ export const HARNESSES: readonly Harness[] = [
   AI_FITNESS,
   AI_BENCH,
   AI_MARKET,
+  INCOMING_OFFERS,
   MANAGER_MARKET,
   NEGOTIATION,
   SQUAD_LONGEVITY,

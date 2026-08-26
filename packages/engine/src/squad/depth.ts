@@ -70,15 +70,37 @@ export function squadDepthOf(state: GameState): SquadDepth {
   };
 }
 
+/** 상위 열한 명의 평균 — **규칙은 한 벌이고 진입점만 둘이다** (한 팀 · 전 팀) */
+function topElevenMean(overalls: number[]): number {
+  if (overalls.length === 0) return 0;
+  const top = [...overalls].sort((a, b) => b - a).slice(0, STARTING_XI);
+  return top.reduce((sum, v) => sum + v, 0) / top.length;
+}
+
 /**
  * 스쿼드 상위 열한 명의 평균 OVR — 팀 하나를 한 숫자로 줄이는 잣대.
  * 승강(2부 클럽 줄 세우기)과 체급 재산정의 전력 축이 같은 자를 쓴다.
  */
 export function squadRating(state: GameState, teamId: string): number {
-  const squad = playersOf(state, teamId);
-  if (squad.length === 0) return 0;
-  const top = [...squad]
-    .sort((a, b) => b.attributes.overall - a.attributes.overall)
-    .slice(0, STARTING_XI);
-  return top.reduce((sum, p) => sum + p.attributes.overall, 0) / top.length;
+  return topElevenMean(playersOf(state, teamId).map((p) => p.attributes.overall));
+}
+
+/**
+ * 전 팀의 등급을 **한 번의 순회로** — 무대 자(`stageScaleOf` — transfer.md §1-3)처럼
+ * 세계의 모든 구단을 줄 세우는 자리가 쓴다. 팀마다 `squadRating`을 부르면 그 자리
+ * 하나가 「팀 수 × 선수 수」가 된다.
+ *
+ * `squadDepthOf`와 같은 결의 **읽기 전용 파생**이다 — 세운 뒤에 선수가 옮겨 가면
+ * 낡은다. 한 번의 순회 안에서 세우고 버린다.
+ */
+export function squadRatingsOf(state: GameState): Map<string, number> {
+  const bySquad = new Map<string, number[]>();
+  for (const p of state.players) {
+    const list = bySquad.get(p.teamId);
+    if (list) list.push(p.attributes.overall);
+    else bySquad.set(p.teamId, [p.attributes.overall]);
+  }
+  const ratings = new Map<string, number>();
+  for (const [teamId, overalls] of bySquad) ratings.set(teamId, topElevenMean(overalls));
+  return ratings;
 }
