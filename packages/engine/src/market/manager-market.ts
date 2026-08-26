@@ -17,6 +17,7 @@ import { boardExpectation, computeStandings, type StandingRow } from "../competi
 import { syncDefaultTraining } from "../squad/training-plan";
 import { expirePendingPress, openAppointmentPress } from "../club/press";
 import { derbyOf } from "../data/derbies";
+import { isWorldFigureName } from "../data/world-figures";
 import { clearClubVision, standClubVision } from "../club/vision";
 import {
   annualRevenueEstimate,
@@ -46,6 +47,7 @@ import {
   type GameTeam,
   type ManagerContract,
   type ManagerOffer,
+  type ManagerPoolEntry,
   type ManagerVacancy,
   type PressFact,
   type PressStance,
@@ -129,6 +131,25 @@ const SACKINGS_PER_DAY = 2;
 const SACK_CHANCE = 0.09;
 /** 새 감독 효과 — 실제로 관측되는 반등(잠깐이지만 분명하다) */
 const NEW_MANAGER_BOUNCE = 6;
+
+/**
+ * **무직 감독 풀의 상한** — 시즌 30건 안팎의 경질이 나므로 한 시즌 반쯤이다
+ * (transfer.md §7 「감독 풀」). 넘으면 자리를 잃은 지 오래된 순으로 민다: 두
+ * 시즌째 부르는 데 없는 사람은 세계가 잊은 사람이다.
+ */
+export const MANAGER_POOL_MAX = 40;
+/**
+ * 공석이 **풀에서** 사람을 찾을 확률. 풀이 빈 첫 시즌은 이 값과 무관하게 예전처럼
+ * 굴러가고(후보가 없으면 지어낸다), 시즌이 쌓일수록 아는 얼굴이 돌아온다.
+ */
+const POOL_HIRE_CHANCE = 0.6;
+/** 그 벤치의 눈높이와 후보 역량치의 허용 차 — 이 폭이 곧 등급 문이다 */
+const POOL_RATING_BAND = 8;
+/**
+ * 자리를 잃고 이만큼은 지나야 후보가 된다. 오늘 잘린 사람이 내일 옆 구단에 서면
+ * 그건 이동이 아니라 자리 바꾸기다.
+ */
+const POOL_HIRE_COOLDOWN_DAYS = 21;
 
 /**
  * **무직 감독을 부르는 평판 문턱** — `(보드 + 미디어) / 2` (career.md §5.1).
@@ -283,19 +304,125 @@ function daysInCharge(state: GameState, team: { managerSince?: string } | undefi
 }
 
 /**
+ * **벤치에서 내려온 사람을 무직 감독 풀에 앉힌다** (transfer.md §7 「감독 풀」).
+ *
+ * 경질도, 유저가 그 자리에 부임하는 것도 그 사람에게는 같은 하루다 — 자리를
+ * 잃었다. 그래서 두 자리가 이 함수 하나를 부른다.
+ *
+ * 벤치에 이름이 없으면(유저 팀·옛 세이브) 앉힐 사람이 없다.
+ */
+function poolSacked(state: GameState, team: GameTeam): void {
+  const name = team.managerName;
+  if (name === undefined) return;
+  const pool = state.managerPool ?? [];
+  // 이름이 곧 `characterId`(전역 유일)라 같은 이름이 두 줄에 앉을 수 없다 (people.md §1)
+  if (pool.some((e) => e.name === name)) return;
+
+  const spell = {
+    teamId: team.id,
+    from: team.managerSince ?? state.calendar.preseasonStart,
+    to: state.date,
+  };
+  const entry: ManagerPoolEntry = {
+    name,
+    ...(isWorldFigureName(name) ? { real: true } : {}),
+    rating: team.aiManagerTacticsRating ?? AI_MANAGER_RATING_FALLBACK,
+    lastTeamId: team.id,
+    sackedOn: state.date,
+    ...(team.managerPersonaSeat === undefined ? {} : { personaSeat: team.managerPersonaSeat }),
+    spells: [...(team.managerSpells ?? []), spell],
+  };
+
+  /**
+   * 상한을 넘으면 **자리를 잃은 지 오래된 순으로 민다** — 같은 날이면 먼저 앉은
+   * 사람이 먼저 밀린다. 정렬이 안정적이어야 같은 시드가 같은 세계를 돌린다.
+   */
+  const next = [...pool, entry];
+  state.managerPool =
+    next.length <= MANAGER_POOL_MAX
+      ? next
+      : next
+          .map((e, index) => ({ e, index }))
+          .sort((a, b) => b.e.sackedOn.localeCompare(a.e.sackedOn) || b.index - a.index)
+          .slice(0, MANAGER_POOL_MAX)
+          .sort((a, b) => a.index - b.index)
+          .map(({ e }) => e);
+}
+
+/**
+ * 이 벤치의 눈높이에 맞는 무직 감독 — 없으면 `null` (transfer.md §7 「감독 풀」).
+ *
+ * 등급 문턱을 따로 적지 않는 이유: **체급은 이미 역량치 안에 있다.** 톱클럽에서
+ * 잘린 사람의 역량치는 그대로라 하위 구단의 눈높이와 `POOL_RATING_BAND`를 넘게
+ * 벌어진다.
+ */
+function hireFromPool(
+  state: GameState,
+  teamId: string,
+  target: number,
+  rng: () => number,
+): ManagerPoolEntry | null {
+  const candidates = (state.managerPool ?? []).filter(
+    (e) =>
+      // 자기가 방금 자른 사람을 다시 부르지는 않는다 — 그건 선임이 아니라 번복이다.
+      // 그 앞의 구단은 막지 않는다: 몇 해 뒤의 복귀는 이야기가 되는 자리다
+      e.lastTeamId !== teamId &&
+      diffDays(e.sackedOn, state.date) >= POOL_HIRE_COOLDOWN_DAYS &&
+      Math.abs(e.rating - target) <= POOL_RATING_BAND,
+  );
+  // 확률을 후보 유무와 무관하게 먼저 굴린다 — 순서가 흔들리면 같은 시드가 다른 세계를 돈다
+  const drawn = rng() < POOL_HIRE_CHANCE;
+  if (!drawn || candidates.length === 0) return null;
+  const picked = candidates[randInt(rng, 0, candidates.length - 1)]!;
+  state.managerPool = (state.managerPool ?? []).filter((e) => e.name !== picked.name);
+  return picked;
+}
+
+/**
  * 새 감독을 앉힌다 — 이름·전술 역량치·부임일, 그리고 선수단의 짧은 반등.
  *
- * 유저가 잘린 구단도 이 길로 후임을 세운다. 감독이 없는 구단은 세계에 없다.
+ * **풀에서 먼저 찾고, 없으면 지어낸다** (transfer.md §7 「감독 풀」). 풀에서 온
+ * 사람은 이름·사람됨·역량치·이력을 그대로 들고 오므로, 그 벤치는 아는 얼굴을
+ * 맞는다. 유저가 잘린 구단도 이 길로 후임을 세운다 — 감독이 없는 구단은 세계에 없다.
+ *
+ * @returns 풀에서 온 사람이면 그 줄, 지어냈으면 `null`
  */
-function installNewManager(state: GameState, team: GameTeam, rng: () => number): void {
+function installNewManager(
+  state: GameState,
+  team: GameTeam,
+  rng: () => number,
+): ManagerPoolEntry | null {
   // 순위표가 없는 팀은 부르는 쪽에서 걸러지므로 무소속은 여기 닿지 않는다 —
   // 폴백은 값 없는 팀(무소속·옛 세이브)을 위한 것이다 (평균 AI 감독)
   const before = team.aiManagerTacticsRating ?? AI_MANAGER_RATING_FALLBACK;
-  team.aiManagerTacticsRating = Math.min(92, Math.max(50, before + randInt(rng, -4, 10)));
-  // 이미 선 사람들의 이름은 피한다 — 전임도 그 집합에 있으므로 후임은 반드시
-  // 다른 이름, 곧 다른 사람이다 (원형 채널에 이름이 들어간다 — people.md §2)
-  team.managerName = inventPersonName(rng, team.id, occupiedPersonNames(state));
+  /** 구단이 원하는 사람 — 직전보다 조금 나은 쪽으로 기운다 */
+  const target = Math.min(92, Math.max(50, before + randInt(rng, -4, 10)));
+
+  /**
+   * **전임을 풀에 넣기 전에 고른다** — 오늘 잘린 사람이 오늘 자기 자리에 다시
+   * 앉는 일이 없어야 한다. 식은 기간이 이미 막지만, 순서로도 막는다.
+   */
+  const hired = hireFromPool(state, team.id, target, rng);
+  const outgoing = { ...team };
+
+  if (hired !== null) {
+    team.managerName = hired.name;
+    // 역량치는 사람이 들고 다닌다 — 그래서 아는 얼굴이 아는 축구를 데려온다
+    team.aiManagerTacticsRating = hired.rating;
+    team.managerSpells = hired.spells;
+    if (hired.personaSeat === undefined) delete team.managerPersonaSeat;
+    else team.managerPersonaSeat = hired.personaSeat;
+  } else {
+    team.aiManagerTacticsRating = target;
+    // 이미 선 사람들의 이름은 피한다 — 전임도 그 집합에 있으므로 후임은 반드시
+    // 다른 이름, 곧 다른 사람이다 (사람됨 채널이 이름이다 — people.md §2)
+    team.managerName = inventPersonName(rng, team.id, occupiedPersonNames(state));
+    // 전임의 이력·자리 표식이 남으면 지어낸 사람이 남의 과거를 갖는다
+    delete team.managerSpells;
+    delete team.managerPersonaSeat;
+  }
   team.managerSince = state.date;
+  poolSacked(state, outgoing);
 
   /**
    * **새 감독 효과** — 실제로 관측되는 짧은 반등이다. 선수단이 다시 뛴다:
@@ -305,6 +432,7 @@ function installNewManager(state: GameState, team: GameTeam, rng: () => number):
     player.state.condition = clampCondition(player.state.condition + NEW_MANAGER_BOUNCE);
     player.state.form = Math.min(1, player.state.form + 0.1);
   }
+  return hired;
 }
 
 /** 지금 열려 있는 제안 — 만료일 순 (가장 먼저 사라질 것이 앞) */
@@ -474,7 +602,7 @@ export function runManagerMarket(state: GameState, digest: string[]): boolean {
         { teamId: team.id, date: state.date, position: standing.position },
       ];
     }
-    installNewManager(state, team, rng);
+    const hired = installNewManager(state, team, rng);
     sacked += 1;
 
     // 공석 명부 — 무직 감독이 먼저 두드릴 수 있는 문이다. 무직인 동안만 쌓는다:
@@ -488,7 +616,11 @@ export function runManagerMarket(state: GameState, digest: string[]): boolean {
 
     // 우리 리그의 일만 브리핑한다 — 5대 리그 전체를 올리면 소음이다
     if (leagueOfTeamIn(state, team.id) === ourLeague) {
-      digest.push(`📰 ${teamShortName(team.id)}가 감독을 경질했다 — 후임은 ${team.managerName}`);
+      digest.push(
+        `📰 ${teamShortName(team.id)}가 감독을 경질했다 — 후임은 ${team.managerName}` +
+          // 풀에서 온 사람이면 어디서 왔는지가 곧 그 선임의 뜻이다 (transfer.md §7)
+          (hired === null ? "" : ` (전 ${teamShortNameIn(state, hired.lastTeamId)} 감독)`),
+      );
       pushNarrative(state, `${teamName(team.id)} 감독 경질`, 3);
     }
 
@@ -939,8 +1071,16 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
   const fromLeague = leagueOfTeamIn(state, state.userTeamId);
   state.userTeamId = offer.teamId;
   if (team) {
+    /**
+     * **그 벤치에 서 있던 사람도 자리를 잃는다** (transfer.md §7 「감독 풀」) —
+     * 경질과 다르지 않다. 이름을 덮기 전에 풀에 앉혀야 그가 세계에 남는다.
+     */
+    poolSacked(state, team);
     team.managerName = state.manager.name;
     team.managerSince = state.date;
+    // 전임의 이력·자리 표식은 그를 따라 풀로 갔다 — 감독의 커리어는 `dismissals`가 든다
+    delete team.managerSpells;
+    delete team.managerPersonaSeat;
   }
   /**
    * **감독 계약이 선다** — 제안의 조건으로 (career.md §5.1). 옛 세이브의 제안엔
