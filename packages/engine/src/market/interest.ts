@@ -12,7 +12,7 @@ import {
   playerById,
   playersOf,
   pushNarrative,
-  teamName,
+  teamNameIn,
   type GameState,
 } from "../core/state";
 import { loanLockOf, marketValueOf, suitorsOf, windowOpenForTeam, SUITORS_MANY } from "./market";
@@ -140,7 +140,7 @@ function climbInterests(state: GameState, digest: string[]): void {
 
 /** 칸이 오른 사실 한 줄 — 우리 선수인가 우리가 노리는 선수인가로 결이 갈린다 */
 function announce(state: GameState, row: Interest, player: GamePlayer, digest: string[]): void {
-  const club = teamName(row.teamId);
+  const club = teamNameIn(state, row.teamId);
   const ours = player.teamId === state.userTeamId;
   const line = ours
     ? row.stage === "enquired"
@@ -257,14 +257,14 @@ export function tickInterests(state: GameState, digest: string[]): void {
  * 관심 한 줄의 표기 — **화면·스냅샷·조회·협상 서류가 같은 함수를 부른다.**
  * 「구단 (칸)」뿐이다. 문장은 읽는 쪽이 만든다.
  */
-export function interestLabel(interest: Interest): string {
-  return `${teamName(interest.teamId)} (${INTEREST_STAGE_KO[interest.stage]})`;
+export function interestLabel(state: GameState, interest: Interest): string {
+  return `${teamNameIn(state, interest.teamId)} (${INTEREST_STAGE_KO[interest.stage]})`;
 }
 
 /** 이 선수에게 서 있는 관심을 한 줄로 — 없으면 `null` */
 export function interestLine(state: GameState, playerId: string): string | null {
   const rows = interestsOn(state, playerId);
-  return rows.length === 0 ? null : rows.map(interestLabel).join(" · ");
+  return rows.length === 0 ? null : rows.map((row) => interestLabel(state, row)).join(" · ");
 }
 
 /**

@@ -32,6 +32,7 @@ import {
   activeContract,
   contractYearsLeft,
   financeOf,
+  interestsOn,
   playerById,
   squadShortfall,
   teamName,
@@ -85,6 +86,17 @@ const MEETS_ASKING_SCORE_SOLO = 0.94;
 
 /** 관심이 많다고 보는 기준 — 곧바로 주전으로 쓸 구단이 이만큼이면 갈 곳이 있다 */
 export const SUITORS_MANY = 3;
+
+/**
+ * 장부에 선 경쟁 관심이 영입 확률에서 깎는 값 — **잠재의 자보다 무겁다**
+ * (`suitorCountOf`의 −0.5). 「그를 쓸 수 있는 구단이 셋」은 언제나 참인 사실이지만
+ * 「그 구단이 지금 움직이고 있다」는 오늘의 사실이라, 선수가 우리 답을 기다릴 이유가
+ * 그만큼 준다 (→ docs/simulation/transfer.md §1-2).
+ */
+export const RIVAL_INTEREST_SCORE = -0.6;
+
+/** 그중 값을 부를 참인 구단 하나가 더 깎는 값 — 두 곳이면 −0.6에서 −1.0이 된다 */
+export const RIVAL_BIDDING_SCORE = 0.2;
 /** 이 나이부터는 다음 자리를 장담할 수 없어 지금 자리를 지키려 한다 */
 export const CAREER_AGE_HOLD = 32;
 /** 이 나이까지는 커리어가 길어 다음 무대를 본다 */
@@ -693,8 +705,32 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
    * 영입에서 재는 애착은 **지금 구단**에 대한 것이라, 애착이 큰 선수일수록 오지 않는다.
    */
   const loyalty = archetypeTraitsOf(state.seed, player).loyalty;
+  /**
+   * **장부에 선 관심이 먼저 말한다** (→ docs/simulation/transfer.md §1-2).
+   *
+   * `suitorCountOf`는 「그를 주전으로 쓸 수 있는 구단 수」라 잠재의 자다 — 아무도
+   * 움직이지 않아도 언제나 같은 값이다. 우리가 협상을 연 뒤 실제로 붙은 경쟁
+   * 구단은 그것과 다른 사실이라, 그 줄이 있으면 그 줄이 이 항을 쓴다. 「지금
+   * 지르지 않으면 뺏긴다」가 성립하는 자리가 여기다.
+   *
+   * 두 자를 한 항으로 합치는 이유: 라벨이 둘이면 근거 목록에 「다른 구단의 관심」이
+   * 두 줄 서고, 감독이 읽는 확률 근거가 같은 말을 두 번 한다.
+   */
+  const rivals = interestsOn(state, player.id);
   const suitors = suitorCountOf(state, player);
-  if (suitors >= SUITORS_MANY) {
+  if (rivals.length > 0) {
+    const bidding = rivals.filter((i) => i.stage === "bidding").length;
+    contributions.push({
+      gate: "player",
+      // 값을 부를 참인 구단은 보고만 있는 구단보다 무겁다 — 그만큼 우리 차례가 급하다
+      score: byLoyalty(RIVAL_INTEREST_SCORE - RIVAL_BIDDING_SCORE * bidding, loyalty, "stay"),
+      label: "다른 구단의 관심",
+      why:
+        `${teamName(rivals[0]!.teamId)}가 그를 두고 움직이고 있다` +
+        (rivals.length > 1 ? ` (외 ${rivals.length - 1}곳)` : "") +
+        (bidding > 0 ? " — 값을 부를 참이다" : " — 우리만 보고 있는 것이 아니다"),
+    });
+  } else if (suitors >= SUITORS_MANY) {
     contributions.push({
       gate: "player",
       score: byLoyalty(-0.5, loyalty, "stay"),
