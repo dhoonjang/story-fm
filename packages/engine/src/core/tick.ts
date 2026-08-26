@@ -1253,7 +1253,7 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
    * 간이 시뮬도 리그 전체에 카드를 만들고 A매치 휴식기에 컵 결승이 걸리므로,
    * 부상만 거르면 AI 팀이 정지 선수나 소집된 선수를 그대로 내보낸다.
    */
-  const available = (p: GamePlayer) => isAvailable(state, p.id);
+  const available = (p: GamePlayer) => isAvailable(state, p);
   const startingAssignments = assignmentsOf(state, teamId, "starting");
   const starters = startingAssignments
     .map((a) => byId.get(a.playerId))
@@ -1665,7 +1665,7 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
  * 가용 1군으로 채운다. 상대가 2부 클럽이면 2군이 없다(전원 1군 — team.md §5).
  */
 function reserveXI(state: GameState, teamId: string): GamePlayer[] {
-  const available = (p: GamePlayer) => isAvailable(state, p.id);
+  const available = (p: GamePlayer) => isAvailable(state, p);
   const xi = reservePlayers(state, teamId)
     .filter(available)
     .sort((a, b) => b.attributes.overall - a.attributes.overall)

@@ -844,7 +844,7 @@ function internationalFacts(state: GameState): string | null {
    */
   const firstTeam = players.filter((p) => squadLevelOf(p) === "first");
   sections.push(
-    `지금 부릴 수 있는 1군 ${firstTeam.filter((p) => isAvailable(state, p.id)).length}/${firstTeam.length}명`,
+    `지금 부릴 수 있는 1군 ${firstTeam.filter((p) => isAvailable(state, p)).length}/${firstTeam.length}명`,
   );
   return sections.join("\n");
 }

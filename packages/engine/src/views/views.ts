@@ -3217,7 +3217,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
          * 한 자리에서 판정한다 (`isAvailable` → season.md §8 불변식). 여기서
          * 조건을 다시 세면 소집된 주전이 화면에서만 선발 가능한 얼굴로 선다.
          */
-        available: isAvailable(state, p.id),
+        available: isAvailable(state, p),
       } satisfies SquadViewRow;
     })
     .sort((a, b) =>

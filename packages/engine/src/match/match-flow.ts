@@ -85,7 +85,7 @@ import {
   seatOnShape,
   ensureSeasonStat,
   firstTeamPlayers,
-  isAvailable,
+  isAvailableById,
   isInjured,
   isSuspended,
   groupOf,
@@ -435,7 +435,7 @@ export function assembleUserLineup(state: GameState): {
   const reserves = reservePlayers(state, state.userTeamId);
   const byId = new Map(roster.map((p) => [p.id, p] as const));
   /** 못 나오는 이유는 한 문이 쥔다 — 부상·정지, 그리고 대표팀 소집 (season.md §8) */
-  const unavailable = (id: string) => !isAvailable(state, id);
+  const unavailable = (id: string) => !isAvailableById(state, id);
 
   const starters = tactics.assignments.filter((a) => a.role === "starting");
   const onPitch: string[] = [];

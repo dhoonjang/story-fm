@@ -1564,10 +1564,24 @@ export function isSuspended(state: GameState, playerId: string): boolean {
  * 결산·2군 경기·경기 명단이 저마다 판단하면 소집된 선수가 어느 하나에는 그대로
  * 서므로, 세 사실이 한 문을 지난다 (season.md §8 불변식).
  */
-export function isAvailable(state: GameState, playerId: string): boolean {
-  if (isInjured(state, playerId) || isSuspended(state, playerId)) return false;
+export function isAvailable(state: GameState, player: GamePlayer): boolean {
+  return (
+    !isInjured(state, player.id) && !isSuspended(state, player.id) && !isAwayFromClub(state, player)
+  );
+}
+
+/**
+ * 같은 판정을 **id로** 묻는 자리 — 선수를 손에 들지 않은 호출부만 쓴다.
+ *
+ * ⚠️ 사람을 이미 들고 있으면 `isAvailable`을 불러라. 여기는 5,700명을 훑어 그를
+ * 찾는다(`playerById`) — 간이 시뮬의 스쿼드 구성처럼 경기마다 수백 번 지나는
+ * 자리에서 그 스캔은 한 시즌을 분 단위로 늘린다.
+ */
+export function isAvailableById(state: GameState, playerId: string): boolean {
   const player = playerById(state, playerId);
-  return player === null || !isAwayFromClub(state, player);
+  return player === null
+    ? !isInjured(state, playerId) && !isSuspended(state, playerId)
+    : isAvailable(state, player);
 }
 
 export function activeContract(state: GameState, playerId: string): Contract | null {

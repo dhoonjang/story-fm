@@ -163,7 +163,7 @@ function projectXI(
 ): { xi: GamePlayer[]; carried: Set<string> } {
   const squad = firstTeamPlayers(state, teamId);
   const byId = new Map(squad.map((p) => [p.id, p] as const));
-  const available = (p: GamePlayer) => isAvailable(state, p.id);
+  const available = (p: GamePlayer) => isAvailable(state, p);
 
   const started =
     basis === null

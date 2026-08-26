@@ -591,7 +591,7 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
       return false;
     }
     if (listed && listed.has(p.id) !== input.listed) return false;
-    if (input.availableOnly && !isAvailable(state, p.id)) return false;
+    if (input.availableOnly && !isAvailable(state, p)) return false;
     if (contracts) {
       const contract = contracts.get(p.id);
       if (
