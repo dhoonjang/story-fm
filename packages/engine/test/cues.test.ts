@@ -86,6 +86,12 @@ const plains = (state: GameState, n: number) => {
 /** 근황이 하나도 없는 판 — 폼을 전부 평소로 눕힌다 */
 function quiet(state: GameState) {
   for (const p of userPlayers(state)) p.state.form = 0;
+  /**
+   * 조용한 세계에는 **열린 자리도 없다.** 새 게임은 부임 회견 하나를 열고 시작하는데
+   * (people.md §4), 갓 열린 회견은 그날의 다가옴을 막는 문이라(§8 소음의 문 5) 그대로
+   * 두면 이 파일의 다가옴 케이스가 그 문에 걸린다.
+   */
+  state.pressConferences = [];
   return state;
 }
 

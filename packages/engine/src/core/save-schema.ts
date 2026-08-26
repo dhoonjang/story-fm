@@ -32,6 +32,7 @@ import {
   BoardRequestSchema,
   PressConferenceSchema,
   PressLeakSchema,
+  PressSackingSchema,
   ReserveTrainingPolicySchema,
   RetiredPlayerSchema,
   YouthCandidateSchema,
@@ -126,6 +127,7 @@ export const SaveSchema = z
     dismissals: z.array(DismissalSchema).optional(),
     managerOffers: z.array(ManagerOfferSchema).optional(),
     managerVacancies: z.array(ManagerVacancySchema).optional(),
+    pressSackings: z.array(PressSackingSchema).optional(),
     /** 클럽 비전 — 구단주 원형이 건 다년 계획 (career.md §5). 옛 세이브엔 없다 */
     clubVision: ClubVisionSchema.optional(),
     boardDemands: z.array(BoardDemandSchema).optional(),

@@ -147,6 +147,8 @@ describe("방출의 여파 — 회견과 남은 선수단", () => {
 
   it("백업 정리는 회견도 사기도 움직이지 않는다 — 회견이 흔해지면 무게를 잃는다", () => {
     const state = createTestGame(11);
+    // 새 게임이 열어 둔 부임 회견을 치운다 — 여기서 재는 것은 방출이 자리를 여는가다
+    state.pressConferences = [];
     const target = spare(state);
     const before = formsById(state);
 

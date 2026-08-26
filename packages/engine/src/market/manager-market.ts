@@ -7,13 +7,15 @@ import { makeRng, randInt } from "../core/rng";
 import { addDays, contractUntil, diffDays } from "../core/dates";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { syncDefaultTraining } from "../squad/training-plan";
-import { expirePendingPress } from "../club/press";
+import { expirePendingPress, openAppointmentPress } from "../club/press";
+import { derbyOf } from "../data/derbies";
 import { clearClubVision, standClubVision } from "../club/vision";
 import { payManagerSeverance, recordFinance } from "../club/finance";
 import { spendFromWallet, walletOf } from "../club/manager-wallet";
 import {
   AI_MANAGER_RATING_FALLBACK,
   MANAGER_TERMS_BY_TIER,
+  RENEWAL_NOTICE_DAYS,
   USER_WARNINGS_BEFORE_SACK,
   boardExpectationText,
   clampCondition,
@@ -123,10 +125,10 @@ export const VACANCY_KNOCK_DAYS = 14;
 /** 지원해서 선 제안의 연봉 배율 — 아쉬운 쪽이 깎인다 (career.md §5.1) */
 export const KNOCK_SALARY_RATE = 0.85;
 /**
- * 보드가 재계약 여부를 판정하는 시점 — **만료 이 날 수 앞에서 한 번**
- * (career.md §5.4). 매일 다시 보면 평판이 오르내릴 때마다 통보가 번복된다.
+ * 보드가 재계약 여부를 판정하는 시점 — 값은 도메인이 갖는다. 판정을 내리는 이
+ * 파일과 그 뒤 회견마다 거취를 사실로 세우는 `club/press.ts`가 같은 값을 읽는다.
  */
-export const RENEWAL_NOTICE_DAYS = 90;
+export { RENEWAL_NOTICE_DAYS };
 /** 재계약 제안이 서는 보드 평판 문턱 — 아래면 비갱신 통보다 */
 export const RENEWAL_BOARD_GATE = 40;
 /**
@@ -415,6 +417,16 @@ export function runManagerMarket(state: GameState, digest: string[]): boolean {
      */
     if (rng() > SACK_CHANCE) continue;
 
+    /**
+     * 라이벌의 경질은 **다음 회견이 싣는다** (people.md §4). 후임이 앉으면 그 구단의
+     * 자리가 달라지므로, 그날의 순위는 그날 적어 둔다 — `installNewManager` 앞이다.
+     */
+    if (derbyOf(state.userTeamId, team.id)) {
+      state.pressSackings = [
+        ...(state.pressSackings ?? []),
+        { teamId: team.id, date: state.date, position: standing.position },
+      ];
+    }
     installNewManager(state, team, rng);
     sacked += 1;
 
@@ -935,6 +947,20 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
    */
   clearClubVision(state);
   standClubVision(state);
+  /**
+   * **부임 회견이 열린다** (career.md §5.1 · people.md §4). 앞 구단의 회견은 위에서
+   * 이미 `expired`로 닫혔으므로 이 자리가 그것을 거절로 읽지 않는다 — 순서가
+   * 뒤집히면 이직 하나로 언론 평판이 깎인다.
+   *
+   * ⚠️ **구단에 묶인 것이 다 선 뒤여야 한다** — `reporterFor`가 `reportersOf(state)`를
+   * 읽는데, 리그를 건너는 이직이면 그 앞에서는 아직 앞 리그의 기자단이다.
+   * 전임의 사실은 제안이 들고 온 것이다: 그 벤치가 비어 있었던 이유가 그것이다.
+   */
+  openAppointmentPress(state, {
+    ...(offer.position === undefined ? {} : { position: offer.position }),
+    target: offer.target,
+    expectationCode: offer.expectationCode ?? "mid",
+  });
 
   const name = teamNameIn(state, offer.teamId);
   pushNarrative(state, `${name} 부임`, 5);

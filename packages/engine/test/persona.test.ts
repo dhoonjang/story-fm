@@ -657,6 +657,8 @@ describe("가상 감독 — 명부 밖 벤치의 사람 (people.md §2)", () => 
 
   it("화자 사전과 캐릭터북이 상대 벤치를 안다 — 감독 라벨, 이름으로 걸리는 카드", () => {
     const state = createTestGame();
+    // 새 게임이 열어 둔 부임 회견의 기자가 한 턴 상한을 함께 다툰다 (people.md §4·§6)
+    state.pressConferences = [];
     const bench = state.teams.find(
       (t) =>
         t.id !== state.userTeamId &&

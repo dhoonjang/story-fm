@@ -299,6 +299,7 @@ row, 지난 일 = 그대로 이력.**
 | `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리 (people.md §8)                                                 | `domain/press.ts`      |
 | `approachPressure` `ApproachPressure` | 압력 눈금 — 주제별 누적과 계단. 파생할 수 없는 유일한 값                                                  | `domain/press.ts`      |
 | `pressLeaks` `PressLeak`              | 언론 유출 — 다음 회견이 실어 갈 때까지만 남는다 (§8 계단 4)                                               | `domain/press.ts`      |
+| `pressSackings` `PressSacking`        | 라이벌 구단의 경질 — 다음 회견이 실어 갈 때까지만 남는다                                                  | `domain/press.ts`      |
 | `clubVision` `ClubVision`             | **클럽 비전** — 구단주 원형이 건 다년 계획. 코드·목표·가중치·기한만 남고 진행도는 파생이다 (career.md §5) | `domain/records.ts`    |
 | `youthCandidates` `YouthCandidate`    | 여름의 유스 후보 — 소집일까지 감독의 답을 기다린다 (season.md §6)                                         | `domain/records.ts`    |
 | `aiDeals` `AiDeal`                    | 이번 주에 정해진, 날짜가 흩어진 AI 이적                                                                   | `market/ai-market.ts`  |

@@ -58,7 +58,12 @@ import {
   settleDuePayments,
 } from "../club/finance";
 // 핵심 자원의 경계는 회견이 쥔다 — 같은 자를 두 곳에 적으면 한쪽만 움직인다
-import { betterThanInSquad, openEvePress, SQUAD_CORE_SIZE } from "../club/press";
+import {
+  betterThanInSquad,
+  declinePendingPress,
+  openEvePress,
+  SQUAD_CORE_SIZE,
+} from "../club/press";
 import { demotionPatienceDaysOf, listedPatienceDaysOf } from "../squad/demotion";
 // 출전 불만과 약속 판정은 **같은 자**를 쓴다 (people.md §5·§5-2)
 import { minutesShortfalls, shortfallText, tickPromises } from "../squad/promises";
@@ -1637,6 +1642,13 @@ export function advanceTime(
     if (allMatchesDone(state)) {
       // 남은 만료 문턱은 여기서 낸다 — 이 뒤로 그 계약에 닿는 tick이 없다
       warnExpiringContracts(state, digest, true);
+      /**
+       * **시즌 최종전의 회견은 시즌 안에서 닫힌다** (people.md §4). 넘기면 다음 시즌
+       * 개막 전야 회견이 그 자리를 방치로 읽어, 새 시즌 첫날에 지난 시즌의 대가가
+       * 청구된다. 대가는 거절과 같다 — 답하지 않은 것은 감독이다.
+       * 무직으로 맞은 시즌 끝에는 답할 자리가 애초에 없다 (career.md §5.1).
+       */
+      if (managedTeamId(state)) declinePendingPress(state, digest);
       digest.push(...endSeason(state));
       return { ok: true, digest, stopped: "season_end", trained };
     }

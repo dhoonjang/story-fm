@@ -6,6 +6,7 @@ import type {
   ClubVision,
   BoardRequest,
   PressLeak,
+  PressSacking,
   AxisValues,
   Booking,
   CharacterInjection,
@@ -152,6 +153,7 @@ import {
 import { makeRng, randInt } from "./rng";
 // domestic-cup과 같은 이유로 안전하다 — training-plan은 state를 **타입으로만** 읽는다
 import { installDefaultTraining } from "../squad/training-plan";
+import { openAppointmentPress } from "../club/press";
 
 /** 감독이 화면에서 직접 바꾼 것 한 줄 — GM이 읽고 나면 사라진다 */
 export interface PendingEdit {
@@ -829,6 +831,12 @@ export interface GameState {
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   pressLeaks?: PressLeak[];
+  /**
+   * 라이벌 구단의 경질 — 유출과 같은 결의 대기열이다 (people.md §4). **다음 회견이
+   * 실어 갈 때까지만** 남는다: `openPress`가 소비해 사실 카드로 옮긴다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  pressSackings?: PressSacking[];
   /**
    * 보드 요청 — 구단주 원형이 이적창마다 거는 조건 (career.md §5.2). 발행 시점과
    * 판정 시점이 갈리고 발행 순간의 기준값(주급 총액·기준 이적료)을 들므로 세이브가
@@ -2963,6 +2971,7 @@ export function createGame(input: CreateGameInput): GameState {
     approaches: [],
     approachPressure: [],
     pressLeaks: [],
+    pressSackings: [],
     boardDemands: [],
     boardRequests: [],
 
@@ -3020,6 +3029,14 @@ export function createGame(input: CreateGameInput): GameState {
    * 조사된 선수만 채워지고, 복귀일이 아직 안 온 선수는 다친 채로 인계된다.
    */
   seedInjuryHistory(state);
+  /**
+   * **부임 회견** — 오늘이 부임 첫날이다 (people.md §4 · career.md §5.1). 이직과 같은
+   * 문을 지난다: 감독이 처음 마주하는 것이 수석코치 한 사람일 이유가 없다.
+   *
+   * 전임의 사실은 없다 — 새 게임의 구단에는 앞서 잘린 감독이 세계에 없다.
+   * 세계·계약·훈련이 다 선 **뒤**여야 카드가 그 사실들을 읽는다.
+   */
+  openAppointmentPress(state);
   return state;
 }
 

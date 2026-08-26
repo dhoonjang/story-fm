@@ -179,6 +179,15 @@ export const ManagerContractSchema = z.object({
 export type ManagerContract = z.infer<typeof ManagerContractSchema>;
 
 /**
+ * **보드가 재계약 여부를 판정하는 시점** — 만료 며칠 전인가 (career.md §5.4).
+ *
+ * 판정을 내리는 자리(`market/manager-market.ts`)와 그 뒤 회견마다 감독의 거취를
+ * 사실로 세우는 자리(`club/press.ts`)가 같은 값을 읽어야 한다 — 두 벌을 두면
+ * 통보가 선 다음 날부터 기자가 묻지 않는 창이 생긴다.
+ */
+export const RENEWAL_NOTICE_DAYS = 90;
+
+/**
  * **감독직 조건의 등급 표** — 제안의 기본 연봉·계약 연수·이적 예산 약속
  * (career.md §5.1). 흥정의 천장도 이 값에서 출발한다.
  */
