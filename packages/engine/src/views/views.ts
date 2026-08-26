@@ -28,8 +28,8 @@ import type {
 } from "@story-fm/domain";
 import {
   BOARD_CONDITION_LABEL,
-  SET_PIECE_ROLES,
   BOARD_REQUEST_LABEL,
+  SET_PIECE_ROLES,
   VISION_CODE_KO,
   boardConditionAmountText,
   boardExpectationText,
@@ -2989,15 +2989,6 @@ function youthIntakeView(state: GameState): YouthIntakeView | null {
 }
 
 /**
- * 클럽을 떠나 있는 한 칸 (`SquadViewRow.away`) — **소집이 먼저다.** 여름 대회의
- * 늦은 합류는 A매치 창과 겹치지 않지만, 겹치는 날이 온다면 지금 그를 데려간 쪽이
- * 소집이다.
- *
- * 복귀일은 창에서 나온다 — 소집 행은 키만 들고 있고 날짜는 시즌에서 파생한다
- * (`internationalBreaksOf` · competition.md §5-1). `available`은 이 칸이 아니라
- * 코어의 `isAvailable`을 읽으므로, 창을 못 찾은 행이 여기서 빠져도 명단 판정은 갈리지 않는다.
- */
-/**
  * 죽은 공 키커 셋 — **지정과 지금 실제로 설 사람** (`SetPieceTakerView`).
  *
  * 기본값을 내는 것은 코어의 함수 하나다(`setPieceTakersOf` — 패킷이 부르는 바로
@@ -3032,6 +3023,15 @@ function setPieceTakerViews(
   ) as Record<SetPieceRole, SetPieceTakerView>;
 }
 
+/**
+ * 클럽을 떠나 있는 한 칸 (`SquadViewRow.away`) — **소집이 먼저다.** 여름 대회의
+ * 늦은 합류는 A매치 창과 겹치지 않지만, 겹치는 날이 온다면 지금 그를 데려간 쪽이
+ * 소집이다.
+ *
+ * 복귀일은 창에서 나온다 — 소집 행은 키만 들고 있고 날짜는 시즌에서 파생한다
+ * (`internationalBreaksOf` · competition.md §5-1). `available`은 이 칸이 아니라
+ * 코어의 `isAvailable`을 읽으므로, 창을 못 찾은 행이 여기서 빠져도 명단 판정은 갈리지 않는다.
+ */
 function awayViewOf(state: GameState, player: GamePlayer): SquadViewRow["away"] {
   const callUp = openCallUp(state, player.id);
   if (callUp !== null) {
