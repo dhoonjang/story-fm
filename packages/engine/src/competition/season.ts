@@ -42,7 +42,7 @@ import {
   seasonEndDate,
   seasonYear,
 } from "./calendar";
-import { toFreeAgency } from "../market/departures";
+import { clearDepartedState, toFreeAgency } from "../market/departures";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import {
   TOP_EURO_CUP_ID,
@@ -98,6 +98,7 @@ import { generateYouthPlayer } from "../world/generate";
 import { assignSquadNumber } from "../squad/numbers";
 import { successorCaptainOf } from "../squad/hierarchy";
 import {
+  activeContract,
   buildAssignments,
   clampReputation,
   groupOf,
@@ -106,7 +107,9 @@ import {
   pushNarrative,
   tacticsOf,
   teamName,
+  teamNameIn,
   teamShortName,
+  voidPendingContract,
   inTransaction,
   FAMILIARITY_BASELINE,
   type GameState,
@@ -1182,6 +1185,14 @@ export function declareRetirements(state: GameState, digest: string[]): void {
     });
     if (reason === null) continue;
     player.state.retiringAfterSeason = { on: state.date, reason };
+    /**
+     * 예약은 예고와 함께 걷힌다 (transfer.md §1-4 「무산되는 자리」) — 다음 시즌에
+     * 뛸 사람이 아니므로, 두면 발효가 그를 새 구단으로 옮긴 그 자리에서 은퇴시킨다.
+     */
+    const voided = voidPendingContract(state, player.id);
+    if (voided && voided.teamId === managed) {
+      digest.push(`사전 계약 무산: ${player.name}이 이번 시즌 뒤 은퇴를 예고했다`);
+    }
     if (managed !== null && player.teamId === managed) ours.push(player);
   }
 
@@ -1226,6 +1237,81 @@ function retiredRowOf(
   };
 }
 
+/**
+ * **사전 계약의 발효** — 계약은 반년 전에 섰고, 사람은 오늘 온다 (transfer.md §1-4).
+ *
+ * ⚠️ **팀 루프보다 앞에 선다** (season.md §8). 뒤로 밀면 예약된 선수가 옛 구단에서
+ * 만료로 나가거나 AI의 자동 갱신에 붙들려, 한 선수에게 활성 계약이 둘 남는다.
+ * 옮긴 뒤에 도는 팀 루프에게 그는 이미 새 구단의 선수이고, 옛 구단의 빈자리는
+ * 그 구단의 유스 유입이 그대로 메운다.
+ *
+ * **셋이 한 자리에서 끝난다** (§11) — 옛 계약을 `ended`로, `pending`을 `active`로,
+ * 선수를 새 구단으로. 갈라 두면 「활성 계약 없는 선수」나 「계약 둘인 선수」가
+ * 그 틈에 선다.
+ */
+function settlePrecontracts(state: GameState, on: string, digest: string[]): void {
+  const managed = managedTeamId(state);
+  const nextSeason = state.season + 1;
+  // 발효가 계약의 status를 갈아 끼우므로 도는 동안 목록이 흔들리지 않게 먼저 뜬다
+  const due = state.contracts.filter((c) => c.status === "pending" && c.since <= on);
+
+  for (const pending of due) {
+    const player = state.players.find((p) => p.id === pending.gamePlayerId);
+    // 은퇴·삭제로 명단에 없는 사람은 조용히 접는다 — 알릴 자리도 옮길 사람도 없다
+    if (!player) {
+      pending.status = "ended";
+      continue;
+    }
+    // 이미 그 구단 소속이면 예약이 뜻을 잃었다
+    if (player.teamId === pending.teamId) {
+      pending.status = "ended";
+      continue;
+    }
+    const current = activeContract(state, player.id);
+    /**
+     * **발효일 뒤까지 가는 활성 계약이 예약을 걷는다** (§1-4 「무산되는 자리」) —
+     * 그 사이에 재계약했거나 다른 구단이 데려갔다는 뜻이다. 계약이 겹치는 채로
+     * 발효시키면 다음 시즌을 두 계약이 덮는다.
+     */
+    if (current && current.until > on) {
+      pending.status = "ended";
+      if (pending.teamId === managed) {
+        digest.push(
+          `사전 계약 무산: ${player.name} — 발효 전에 ${teamNameIn(state, current.teamId)}과 새 계약이 섰다`,
+        );
+      }
+      continue;
+    }
+
+    const from = player.teamId;
+    if (current) current.status = "ended";
+    pending.status = "active";
+    // 떠나는 자리의 정리는 나가는 문 전부가 지나는 그 문이다 (transfer.md §11)
+    clearDepartedState(state, player, from);
+    player.teamId = pending.teamId;
+    player.squadNumber = undefined;
+    assignSquadNumber(state.players, player);
+    player.squadLevel = "first";
+    player.loan = undefined;
+    state.transfers.push({
+      id: `tr-pre-${player.id}-${nextSeason}`,
+      gamePlayerId: player.id,
+      windowId: null,
+      fromTeamId: from,
+      toTeamId: pending.teamId,
+      date: on,
+      type: "free",
+      fee: 0,
+      reason: "precontract",
+    });
+    if (pending.teamId === managed) {
+      digest.push(`${player.name} 합류 — ${teamNameIn(state, from)}에서 사전 계약`);
+    } else if (from === managed) {
+      digest.push(`${player.name} 떠남 — ${teamNameIn(state, pending.teamId)}과 사전 계약`);
+    }
+  }
+}
+
 function applyTransition(state: GameState): string[] {
   const digest: string[] = [];
   const rng = makeRng(state.seed, `transition:${state.season}`);
@@ -1251,13 +1337,20 @@ function applyTransition(state: GameState): string[] {
    * 그래서 **그 팀에 아직 활성 계약이 있는 선수의 이력만** 남긴다. 떠난 선수·은퇴
    * 선수의 끝난 계약은 아무도 읽지 않으므로 그대로 지운다 — 남는 줄은 시즌 수가
    * 아니라 스쿼드 크기 × 재계약 횟수로 묶인다.
+   *
+   * ⚠️ **발효 대기 계약(`pending`)도 남긴다** (transfer.md §11) — 「활성이 아니면
+   * 버린다」로 재면 반년 전에 맺은 사전 계약이 바로 아래에서 발효하기도 전에
+   * 사라진다.
    */
   const bookedPlayers = new Set<string>();
   for (const c of state.contracts) {
     if (c.status === "active") bookedPlayers.add(`${c.teamId}:${c.gamePlayerId}`);
   }
   state.contracts = state.contracts.filter(
-    (c) => c.status === "active" || bookedPlayers.has(`${c.teamId}:${c.gamePlayerId}`),
+    (c) =>
+      c.status === "active" ||
+      c.status === "pending" ||
+      bookedPlayers.has(`${c.teamId}:${c.gamePlayerId}`),
   );
 
   /**
@@ -1276,7 +1369,11 @@ function applyTransition(state: GameState): string[] {
     ...state.players.map((p) => p.id),
     ...state.transfers.map((t) => t.gamePlayerId),
   ]);
-  /** 팀별 활성 계약 — 팀마다 전체 계약을 훑지 않는다 */
+
+  // 사전 계약이 먼저 발효한다 — 계약 만료·유스 콜업·자동 갱신보다 앞이다 (season.md §6)
+  settlePrecontracts(state, nextCalendar.preseasonStart, digest);
+
+  /** 팀별 활성 계약 — 팀마다 전체 계약을 훑지 않는다. **발효 뒤**에 세운다 */
   const contractsByTeam = new Map<string, typeof state.contracts>();
   for (const c of state.contracts) {
     if (c.status !== "active") continue;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isTopFlight } from "@story-fm/engine";
+import { isPrecontractTarget, isTopFlight } from "@story-fm/engine";
 import { createTestGame } from "../test/helpers";
 import { AI_MARKET } from "./catalog";
 import { playSeason } from "./season";
@@ -36,6 +36,15 @@ describe("한 시즌의 시장 규모", () => {
      * 칸이 내려가므로, 시즌 끝의 장부는 아무것도 말하지 않는다.
      */
     const stood = new Map<string, { pair: string; stage: string }>();
+    /**
+     * **AI가 우리 선수에게 건 예약**도 같은 이유로 지나가는 동안 센다 (§1-4) —
+     * 시즌 전환에서 발효하며 `pending`이 사라지므로 시즌 끝의 장부는 아무것도
+     * 말하지 않는다.
+     */
+    const reserved = new Set<string>();
+    /** 창 안의 타 구단 선수 — 한 날의 사진이라 1월 1일에 한 번만 찍는다 */
+    let inWindow = 0;
+    let snapped = false;
     playSeason(state, undefined, (s) => {
       for (const row of s.interests ?? []) {
         const key = interestKey(row.teamId, row.gamePlayerId, row.since);
@@ -43,6 +52,17 @@ describe("한 시즌의 시장 규모", () => {
         // 가장 높이 오른 칸만 남긴다 — 창이 닫혀 내려간 칸이 오른 사실을 지우지는 않는다
         if (seen === "bidding" || (seen === "enquired" && row.stage === "watching")) continue;
         stood.set(key, { pair: pairKey(row.teamId, row.gamePlayerId), stage: row.stage });
+      }
+      for (const contract of s.contracts) {
+        if (contract.status !== "pending") continue;
+        const player = s.players.find((p) => p.id === contract.gamePlayerId);
+        if (player?.teamId !== s.userTeamId) continue;
+        reserved.add(contract.id);
+      }
+      // 계약은 6월 30일에 끝나므로 1월 1일이면 창은 언제나 열려 있다 (§1-4)
+      if (!snapped && s.date.endsWith("-01-01")) {
+        snapped = true;
+        inWindow = s.players.filter((p) => isPrecontractTarget(s, p)).length;
       }
     });
 
@@ -77,6 +97,8 @@ describe("한 시즌의 시장 규모", () => {
       "문의까지 오른 비중": announced.length / Math.max(1, interests.length),
       "오퍼가 된 비중": converted / Math.max(1, interests.length),
       "우리에게 온 오퍼": incoming.length,
+      "AI 사전 계약": reserved.size,
+      "사전 계약 창 선수": inWindow,
     };
     console.log(reportOf(AI_MARKET, readings, `시드 7 · 1부 ${clubs}개 구단`));
     expect(outOfBand(AI_MARKET, readings)).toEqual([]);

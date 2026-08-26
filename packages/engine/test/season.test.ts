@@ -217,6 +217,61 @@ describe("시즌 전환 (season.md §6)", () => {
     }
   });
 
+  /**
+   * 사전 계약의 발효 (transfer.md §1-4 · season.md §8) — 셋이 한 자리에서 끝나야
+   * 한다: 옛 계약 `ended` · 예약 `active` · 선수가 새 구단으로. 발효가 팀 루프보다
+   * 앞이라는 것이 요점이라, 옛 구단이 그를 자동 갱신하지 않은 것까지 함께 잰다.
+   */
+  it("사전 계약이 전환에서 발효한다 — 옛 계약은 끝나고 활성 계약은 하나로 남는다", () => {
+    const state = createTestGame(5);
+    const club = state.teams.find((t) => isClubTeam(t.id) && t.id !== state.userTeamId)!;
+    const target = playersOf(state, club.id).find(
+      (p) => ageOf(p.birthdate, state.date) < 28 && p.loan === undefined,
+    )!;
+    // 만료일이 발효일 뒤로 가면 예약이 걷힌다 — 이 계약은 이번 시즌으로 끝난다
+    activeContract(state, target.id)!.until = "2027-06-30";
+    state.contracts.push({
+      id: "c-pre-test",
+      gamePlayerId: target.id,
+      teamId: state.userTeamId,
+      weeklyWage: 50_000,
+      since: "2027-07-01",
+      until: "2030-06-30",
+      status: "pending",
+    });
+
+    const digest = transitionSeason(state);
+
+    const joined = userPlayers(state).find((p) => p.id === target.id);
+    expect(joined).toBeTruthy();
+    expect(joined!.squadLevel).toBe("first");
+    expect(joined!.squadNumber).toBeDefined();
+    // 한 선수에게 활성 계약은 하나다 — 그리고 그것이 예약이던 그 줄이다
+    const active = state.contracts.filter(
+      (c) => c.gamePlayerId === target.id && c.status === "active",
+    );
+    expect(active).toHaveLength(1);
+    expect(active[0]!.id).toBe("c-pre-test");
+    expect(
+      state.contracts.some((c) => c.gamePlayerId === target.id && c.status === "pending"),
+    ).toBe(false);
+    // 옛 구단은 그를 만료로 내보내지도 자동 갱신하지도 않았다 — 발효가 앞에 섰다
+    expect(
+      state.contracts.filter(
+        (c) => c.gamePlayerId === target.id && c.teamId === club.id && c.status === "active",
+      ),
+    ).toHaveLength(0);
+    const ledger = state.transfers.find(
+      (t) => t.gamePlayerId === target.id && t.reason === "precontract",
+    );
+    expect(ledger?.fromTeamId).toBe(club.id);
+    expect(ledger?.toTeamId).toBe(state.userTeamId);
+    expect(ledger?.fee).toBe(0);
+    expect(ledger?.type).toBe("free");
+    expect(ledger?.date).toBe("2027-07-01");
+    expect(digest.some((d) => d.includes(`${target.name} 합류`))).toBe(true);
+  });
+
   it("유스 콜업이 TRANSFER + CONTRACT와 함께 들어온다", () => {
     const state = createTestGame(5);
     transitionSeason(state);

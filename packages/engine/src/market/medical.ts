@@ -50,9 +50,12 @@ const OVERRIDE_SEVERITY = "moderate" as const;
 /**
  * 팀을 옮기는 딜만 검진한다 — 재계약은 병원에 갈 일이 없고, 해지는 데려갈 구단이
  * 아직 없다 (`isPlayerDeal`).
+ *
+ * **사전 계약도 지난다** (transfer.md §1-4) — 확정하는 날 옮기는 것은 계약뿐이고
+ * 몸을 보는 것은 반년 뒤 합류하는 날의 일이다. 지금의 소견은 그날의 몸이 아니다.
  */
 export function needsMedical(negotiation: Negotiation): boolean {
-  return !isPlayerDeal(negotiation.kind);
+  return !isPlayerDeal(negotiation.kind) && negotiation.precontract !== true;
 }
 
 /** 이 딜에서 선수를 데려가는 쪽 (소견을 받고 결정하는 주체) */

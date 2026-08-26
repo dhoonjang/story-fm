@@ -4,13 +4,17 @@ import {
   MARKET_VALUE_AT_PEAK,
   PATIENCE_DECAY,
   activeContract,
+  addDays,
   askingPriceFor,
   baseValueOf,
   betterAtPosition,
   dealOdds,
+  isClubTeam,
   knowledgeOf,
   marketValueOf,
   playersOf,
+  precontractDaysLeft,
+  precontractStartOf,
   renewalExpectation,
   responseDelayDays,
   sameTermsRepeats,
@@ -18,7 +22,7 @@ import {
   wageExpectationOf,
   derivedSquadStatus,
 } from "@story-fm/engine";
-import { SQUAD_STATUSES, squadStatusRank } from "@story-fm/domain";
+import { PRECONTRACT_DAYS, SQUAD_STATUSES, squadStatusRank } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -577,5 +581,80 @@ describe("계약 지위가 관문에 선다", () => {
     if (down !== actual) {
       expect(factorOf(renewAs(blocked, down), "계약 지위")!.delta).toBeLessThan(0);
     }
+  });
+});
+
+/**
+ * 사전 계약 — 창이 아니라 **계약의 만료일**이 여는 시장 (transfer.md §1-4).
+ * 재는 것은 그 창의 경계와, 창 안에서 관문이 하나로 줄었다는 사실이다.
+ */
+describe("사전 계약 — 반년 앞의 시장", () => {
+  const state = createTestGame(42);
+  // 이 갈래가 창과 무관하다는 것이 재는 대상이므로 픽스처의 창은 전부 닫아 둔다
+  for (const w of state.windows) w.opensOn = "2099-01-01";
+  const target = state.players.find(
+    (p) => p.teamId !== state.userTeamId && isClubTeam(p.teamId) && activeContract(state, p.id),
+  )!;
+  const contract = activeContract(state, target.id)!;
+  const leaving = (days: number) => {
+    contract.until = addDays(state.date, days);
+  };
+  const offer = (fee: number) =>
+    dealOdds(state, { kind: "buy", playerId: target.id, fee, weeklyWage: 1, years: 3 });
+  const factorOf = (odds: ReturnType<typeof dealOdds>, label: string) =>
+    odds.factors.find((f) => f.label === label);
+
+  it("창의 경계는 잔여 PRECONTRACT_DAYS다 — 하루 더면 밖이다", () => {
+    leaving(PRECONTRACT_DAYS);
+    expect(precontractDaysLeft(state, target.id)).toBe(PRECONTRACT_DAYS);
+    leaving(PRECONTRACT_DAYS + 1);
+    expect(precontractDaysLeft(state, target.id)).toBeNull();
+    // 만료 당일은 아직 남의 선수라 창 안이고, 하루 지나면 무소속 영입이다
+    leaving(0);
+    expect(precontractDaysLeft(state, target.id)).toBe(0);
+    leaving(-1);
+    expect(precontractDaysLeft(state, target.id)).toBeNull();
+  });
+
+  it("창 안의 이적료 0은 창도 이적 예산도 묻지 않는다", () => {
+    leaving(PRECONTRACT_DAYS);
+    const blockers = offer(0).blockers.join();
+    expect(blockers).not.toContain("이적시장이 닫혀 있습니다");
+    expect(blockers).not.toContain("이적 예산을 넘습니다");
+  });
+
+  it("관문이 하나다 — 파는 구단이 근거에 서지 않는다", () => {
+    leaving(PRECONTRACT_DAYS);
+    const odds = offer(0);
+    expect(factorOf(odds, "제시 이적료")).toBeUndefined();
+    expect(factorOf(odds, "상대 사정")).toBeUndefined();
+    // 이 판이 무엇인지 말하는 줄은 선다 — 확률을 움직이는 항이 아니라 delta는 0이다
+    const line = factorOf(odds, "사전 계약");
+    expect(line?.delta).toBe(0);
+    expect(line?.why).toContain(precontractStartOf(state));
+  });
+
+  it("창 밖의 이적료 0은 그냥 헐값 오퍼다 — 창 관문이 그대로 선다", () => {
+    leaving(PRECONTRACT_DAYS + 1);
+    expect(offer(0).blockers.join()).toContain("이적시장이 닫혀 있습니다");
+    expect(offer(0).factors.find((f) => f.label === "제시 이적료")).toBeDefined();
+  });
+
+  it("이미 다른 구단과 예약한 선수는 막힌다", () => {
+    leaving(PRECONTRACT_DAYS);
+    const rivalTeamId = state.players.find(
+      (p) => p.teamId !== state.userTeamId && p.teamId !== target.teamId && isClubTeam(p.teamId),
+    )!.teamId;
+    const startsOn = precontractStartOf(state);
+    state.contracts.push({
+      id: "contract-precontract-test",
+      gamePlayerId: target.id,
+      teamId: rivalTeamId,
+      weeklyWage: 10_000,
+      since: startsOn,
+      until: addDays(startsOn, 364),
+      status: "pending",
+    });
+    expect(offer(0).blockers.join()).toContain("사전 계약을 맺었습니다");
   });
 });

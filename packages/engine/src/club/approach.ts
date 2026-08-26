@@ -25,6 +25,7 @@ import type { GameState } from "../core/state";
 import {
   activeContract,
   openFinanceDemand,
+  pendingContractOf,
   playerById,
   pushNarrative,
   seasonStatOf,
@@ -320,6 +321,13 @@ function causesToday(state: GameState): Cause[] {
      * 손잡이가 공짜가 된다.
      */
     if (topic === "contract" && renewalOpenFor(state, issue.gamePlayerId)) continue;
+    /**
+     * **다른 구단과 사전 계약을 맺은 선수에게는 서지 않는다** (people.md §8 ·
+     * transfer.md §1-4). 그는 이미 갈 곳을 정했으므로 요구할 것이 없다 — 에이전트가
+     * 이미 남과 합의한 선수의 주급을 부르러 오면 감독이 답할 수 있는 것이 없는
+     * 자리가 열린다. 쌓인 압력은 원인이 사라진 줄과 같이 하루 12씩 식는다.
+     */
+    if (topic === "contract" && pendingContractOf(state, issue.gamePlayerId)) continue;
     const relieved = topic === "minutes" && startedRecently(state, issue.gamePlayerId);
     /**
      * **리더의 불만은 더 빨리 쌓인다** (people.md §5-1) — 주장의 출전 기회 불만은
