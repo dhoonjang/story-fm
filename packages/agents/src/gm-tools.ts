@@ -57,6 +57,7 @@ import {
   respondToMedia,
   respondTransferRequest,
   scheduleView,
+  scoutMission,
   scoutPlayer,
   searchPlayers,
   sendOffer,
@@ -104,10 +105,13 @@ import {
   PLAYER_DIRECTIVE_KINDS,
   PRESS_STANCES,
   PROMISE_KINDS,
+  SEARCH_MAX_AGE,
+  SEARCH_MIN_AGE,
   SQUAD_NUMBER_MAX,
   RESERVE_TRAINING_POLICIES,
   SQUAD_STATUSES,
   TACKLING_LEVELS,
+  TEAM_TALK_OCCASIONS,
   TRANSITION_MODES,
 } from "@story-fm/domain";
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
@@ -125,6 +129,8 @@ import { recordCall, type GmToolCall, type SkillReturn } from "./gm-types";
  */
 const playerRef = z.string().min(1);
 const dateArg = DateString;
+/** 나이 조건이 설 수 있는 폭 — 검색과 임무가 같은 자를 쓴다 (records.ts) */
+const ageArg = z.number().int().min(SEARCH_MIN_AGE).max(SEARCH_MAX_AGE);
 /** 이적료·호가의 상한 — 한 건이 이보다 크면 협상이 아니라 오타다 */
 const MONEY_MAX = 500_000_000;
 /** 주급의 상한 */
@@ -577,7 +583,7 @@ export function buildGmTools(
       "team_talk",
       descriptions.team_talk,
       z.object({
-        occasion: z.enum(["pre", "half", "post", "daily"]),
+        occasion: z.enum(TEAM_TALK_OCCASIONS),
         outcome: z.enum(TEAM_TALK_OUTCOMES),
         intensity: z.union([z.literal(1), z.literal(2), z.literal(3)]),
         settling: settlingArg("team_talk"),
@@ -751,8 +757,8 @@ export function buildGmTools(
           position: z.string().min(1),
           name: z.string().min(1),
           competition: z.string().min(1),
-          minAge: z.number().int().min(15).max(45),
-          maxAge: z.number().int().min(15).max(45),
+          minAge: ageArg,
+          maxAge: ageArg,
           squadLevel: z.enum(["first", "reserve"]),
           availableOnly: z.boolean(),
           contractEndsWithinDays: z
@@ -927,6 +933,26 @@ export function buildGmTools(
     ),
     wrap("scout_player", descriptions.scout_player, z.object({ playerId: playerRef }), (input) =>
       scoutPlayer(state, input.playerId),
+    ),
+    wrap(
+      "scout_mission",
+      descriptions.scout_mission,
+      z.object({
+        competition: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("뒤질 대회 — 감독이 부른 이름·약어·id. 생략하면 5대 리그 1·2부 전체"),
+        position: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("찾는 자리의 포지션 코드 (GK·CB·LB·RB·DM·CM·AM·LW·RW·ST …)"),
+        minAge: ageArg.optional().describe("나이 하한 (세)"),
+        maxAge: ageArg.optional().describe("나이 상한 (세)"),
+        maxValue: money(MONEY_MAX).optional().describe("관측 시장가 상한 (£)"),
+      }),
+      (input) => scoutMission(state, input),
     ),
 
     // ── 이적 협상 — 확률은 코어가, 판정은 GM이 (docs/simulation/transfer.md) ──

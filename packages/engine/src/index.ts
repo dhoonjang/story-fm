@@ -47,6 +47,7 @@ export * from "./world/admin-team";
 export * from "./world/admin-competition";
 export * from "./world/catalog-invariants";
 export * from "./world/scope";
+export * from "./world/player-pool";
 
 // competition — 시즌 달력·리그·컵·유럽 대항전
 export * from "./competition/calendar";
@@ -90,6 +91,7 @@ export * from "./squad/registration";
 export * from "./squad/demotion";
 export * from "./squad/promises";
 export * from "./squad/scouting";
+export * from "./squad/scout-mission";
 export * from "./squad/training-plan";
 export * from "./squad/training-report";
 export * from "./squad/numbers";

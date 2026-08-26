@@ -2453,3 +2453,41 @@ export interface ScoutReportCard {
   /** 무엇까지 알아냈나 — 안개의 수준을 문장으로 */
   note: string;
 }
+
+/**
+ * **임무가 데려온 후보 한 명** — 보고서 카드의 축약판이 아니라 *같은 규약의 다른
+ * 깊이*다. 후보는 `seen` 눈금이라 종합에 ±가 크게 붙고 **시장가도 흐리다**
+ * (→ docs/data/player.md §10). 더 알고 싶으면 그 이름으로 지목을 보내면 된다.
+ */
+export interface MissionCandidateView {
+  playerId: string;
+  name: string;
+  team: string;
+  age: number;
+  position: string;
+  /** 관측 종합과 그 오차폭 — 줄을 세운 값과 **같은 값**이다 (player.md §10) */
+  overall: ScoutGrade & { margin: number };
+  /** 관측 잠재력 구간 — 짐작할 근거조차 없으면 null */
+  potential: { low: number; high: number } | null;
+  /** **흐린** 시장가 — `deal_odds`가 부르는 것과 같은 값 */
+  marketValue: number;
+  contractUntil: string | null;
+}
+
+/**
+ * **스카우트 임무 보고** — 조건 한 벌과 그 조건을 지나는 후보 다섯.
+ *
+ * 카드가 답하는 물음은 "누가 있나"이지 "이 선수가 어떤가"가 아니다 — 그래서 16축이
+ * 없고 다섯 줄이 나란히 선다. 왜 이 다섯인가는 **GM이 쓰는 문장**이고, 여기 실리는
+ * 것은 사실뿐이다.
+ */
+export interface MissionReportCard {
+  missionId: string;
+  /** 무엇을 찾아오라고 했나 — 조건 한 줄 (코어가 조건에서 만든다) */
+  brief: string;
+  /** 어디를 뒤졌나 — 대회 이름, 조건이 없었으면 검색과 같은 전체 풀 */
+  scope: string;
+  requestedOn: string;
+  completedOn: string;
+  candidates: MissionCandidateView[];
+}

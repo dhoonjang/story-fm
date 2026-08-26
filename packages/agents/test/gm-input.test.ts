@@ -13,6 +13,7 @@ import {
   leagueOfTeamIn,
   HISTORY_CHAR_LIMIT,
   HISTORY_STEP,
+  missionReportCard,
   openPress,
   ownerOf,
   pendingPress,
@@ -435,6 +436,35 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
     expect(note).toContain(formatMoney(card.wageExpectation));
     // 실리지 않은 턴에는 한 줄도 쓰지 않는다 — 매 턴 정가로 읽히는 블록이다
     expect(buildGmStateNote(state)).not.toContain("<scout_reports>");
+  });
+
+  /**
+   * **임무도 같은 블록을 지난다.** 지목만 싣던 자리라 임무 쪽은 조용히 빈손이 된다 —
+   * 그러면 모델은 카드 옆에서 후보와 금액을 지어내고, 카드의 다섯과 대사의 다섯이
+   * 다른 선수가 된다 (agents.md §6).
+   */
+  it("같은 블록이 임무 보고의 후보 값도 싣는다", () => {
+    const state = game();
+    const candidates = playersOf(state, "chelsea").slice(0, 5);
+    state.scoutMissions = [
+      {
+        id: "mission-lb",
+        position: "LB",
+        maxAge: 23,
+        requestedOn: state.date,
+        dueOn: state.date,
+        completedOn: state.date,
+        candidates: candidates.map((p) => p.id),
+      },
+    ];
+
+    const card = missionReportCard(state, "mission-lb")!;
+    // 지목은 하나도 없는 턴이다 — 임무만으로도 블록이 서야 한다
+    const note = buildGmStateNote(state, null, [], [card]);
+    expect(note).toContain("<scout_reports>");
+    expect(note).toContain(card.brief);
+    for (const c of card.candidates) expect(note).toContain(c.name);
+    expect(note).toContain(formatMoney(card.candidates[0]!.marketValue));
   });
 
   /**
@@ -1548,5 +1578,58 @@ describe("filterSceneStream — 화면에도 같은 위생", () => {
     // 첫 조각만 줄 앞머리 판정에 쓰이고, 그 뒤는 조각 단위로 그대로 나간다
     expect(out.join("")).toBe("@손흥민: 감독님.");
     expect(out.length).toBe(3);
+  });
+});
+
+/**
+ * 도착 줄(`pendingReportCards`)에는 지목의 선수 id와 임무 id가 **섞여** 온다.
+ * 갈래마다 줄을 따로 꺼내면 앞의 호출이 줄을 비워 뒤는 언제나 빈손이고, 그 턴의
+ * 카드 한 갈래가 통째로 사라진다 — 화면에도 로그에도 아무 말이 남지 않는다.
+ */
+describe("도착한 카드 — 한 줄에서 지목과 임무를 가른다", () => {
+  it("같은 턴에 도착한 보고서와 임무가 둘 다 선다", async () => {
+    const state = game();
+    const target = playersOf(state, "chelsea")[0]!;
+    scoutPlayer(state, target.id);
+    advanceTime(state, { days: SCOUT_DAYS });
+    // 임무 하나가 같은 날 돌아왔다 — 줄에는 선수 id 뒤에 임무 id가 선다
+    const candidates = playersOf(state, "chelsea")
+      .slice(1, 6)
+      .map((p) => p.id);
+    state.scoutMissions = [
+      {
+        id: "mission-lb",
+        position: "LB",
+        maxAge: 23,
+        requestedOn: state.date,
+        dueOn: state.date,
+        completedOn: state.date,
+        candidates,
+      },
+    ];
+    state.pendingReportCards = [...(state.pendingReportCards ?? []), "mission-lb"];
+    state.chat.push({ role: "user", text: "보고 왔나?", toolCalls: [], at: state.date });
+
+    stubRunTurn.mockImplementation(async (): Promise<TurnResult> => ({
+      text: `[${state.date} AM 10:00]\n@스티브 홀랜드: 보고서 올려두었습니다.`,
+      history: { version: 1, provider: "google", model: "test", messages: [] },
+      historyBase: 0,
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      toolCallCount: 0,
+      stopReason: "completed",
+    }));
+    const previousMode = process.env.LLM_MODE;
+    process.env.LLM_MODE = "real";
+    try {
+      const turn = await runGmTurn(state, "보고 왔나?");
+      expect(turn.reports?.map((r) => r.playerId)).toEqual([target.id]);
+      expect(turn.missions?.map((m) => m.missionId)).toEqual(["mission-lb"]);
+      expect(turn.missions?.[0]?.candidates).toHaveLength(candidates.length);
+    } finally {
+      if (previousMode === undefined) delete process.env.LLM_MODE;
+      else process.env.LLM_MODE = previousMode;
+    }
+    // 줄은 비었다 — 다음 턴이 같은 카드를 다시 세우지 않는다
+    expect(state.pendingReportCards ?? []).toEqual([]);
   });
 });
