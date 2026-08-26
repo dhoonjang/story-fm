@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { TACTIC_AXES, tacticWord } from "@story-fm/domain";
+import { TACTIC_AXES, awardTitle, tacticWord } from "@story-fm/domain";
 import type { OfficeViews } from "@story-fm/engine";
 import { IconChevron } from "../icons";
 
@@ -13,6 +13,10 @@ type NextMatch = NonNullable<OfficeViews["competitions"]["nextMatch"]>;
 type RecentResult = OfficeViews["competitions"]["recentResults"][number];
 /** 경기 전 상대 분석 — 다음 경기 카드에 접혀 붙는다 (docs/simulation/match.md §1.8) */
 type MatchPreview = NonNullable<OfficeViews["competitions"]["preview"]>;
+/** 지나간 시즌 한 줄 — 우승·준우승·우리 순위 + 그 시즌의 최종 순위표와 시상 */
+type PastSeason = Competition["pastSeasons"][number];
+/** 그 시즌 그 리그의 시상 — 코어는 코드와 수치만 내고 이름·문장은 여기서 만든다 */
+type SeasonAwardRow = PastSeason["awards"][number];
 
 const venueLabel = (venue: NextMatch["venue"]) =>
   venue === "home" ? "홈" : venue === "away" ? "원정" : "중립";
@@ -319,6 +323,177 @@ function RecentResultLine({ r }: { r: RecentResult }) {
   );
 }
 
+/**
+ * 시상의 근거 한 줄 — **수치는 코어가 내고 문장은 여기서 잇는다** (overview.md §5).
+ * 어느 칸이 그 상의 근거인가는 코드가 정한다 (docs/simulation/season.md §6).
+ */
+function awardFigure(a: SeasonAwardRow): string {
+  const apps = `${a.apps}경기`;
+  const rating = a.rating === undefined ? null : `평점 ${a.rating.toFixed(2)}`;
+  switch (a.code) {
+    case "top-scorer":
+      return `${a.goals}골 · ${apps}`;
+    case "top-assister":
+      return `${a.assists}도움 · ${apps}`;
+    case "young-player":
+      return [a.age === undefined ? null : `${a.age}세`, rating, apps].filter(Boolean).join(" · ");
+    default:
+      return [rating, apps].filter(Boolean).join(" · ");
+  }
+}
+
+/**
+ * 그 시즌의 최종 순위표 — **읽는 값이다.** 누를 수 있는 것은 위의 시즌 칩뿐이라
+ * 표는 호버도 커서도 갖지 않는다.
+ *
+ * ⚠️ **이관된 행은 순서와 팀만 안다** (docs/data/game-state.md §3.3). 승점 칸에 0을
+ * 채우면 없는 사실이 생기므로, 한 행도 성적을 모르면 숫자 칸 자체를 세우지 않고
+ * 섞여 있으면 그 행만 비운다.
+ */
+function SeasonTable({ table }: { table: PastSeason["table"] }) {
+  // 승점·득실을 아는 행이 하나라도 있어야 숫자 칸이 뜻을 갖는다
+  const detailed = table.some((r) => r.record !== null);
+  return (
+    <table data-testid="season-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>팀</th>
+          {detailed && (
+            <>
+              <th>경기</th>
+              <th>승</th>
+              <th>무</th>
+              <th>패</th>
+              <th>득실</th>
+              <th>승점</th>
+            </>
+          )}
+        </tr>
+      </thead>
+      <tbody>
+        {table.map((row) => (
+          <tr key={row.teamId} className={row.ours ? "me" : ""}>
+            <td>{row.position}</td>
+            <td className="team-cell">{row.name}</td>
+            {detailed && row.record && (
+              <>
+                <td>{row.record.played}</td>
+                <td>{row.record.wins}</td>
+                <td>{row.record.draws}</td>
+                <td>{row.record.losses}</td>
+                <td>{row.record.goalDiff > 0 ? `+${row.record.goalDiff}` : row.record.goalDiff}</td>
+                <td>
+                  <b>{row.record.points}</b>
+                </td>
+              </>
+            )}
+            {detailed && !row.record && <td className="season-unknown" colSpan={6} />}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/**
+ * 역대 — **시즌을 고르면 그 시즌이 선다** (docs/overview.md §5 · season.md §6).
+ *
+ * 우승 횟수는 카탈로그 시드와 게임 안의 우승을 더한 것이고, 시드가 없는 구단은
+ * 조각 자체가 없다 — **없는 것은 0회가 아니라 모르는 것이다** (docs/data/team.md §1).
+ */
+function HistorySection({ competition }: { competition: Competition }) {
+  const seasons = competition.pastSeasons;
+  const honours = competition.honours;
+  const [picked, setPicked] = useState<number | null>(null);
+  // 대회를 바꾸면 선택을 놓아 그 대회의 가장 최근 시즌으로 돌아간다
+  const [ownerId, setOwnerId] = useState(competition.id);
+  if (ownerId !== competition.id) {
+    setOwnerId(competition.id);
+    setPicked(null);
+  }
+  // 지나간 시즌도 역대 우승도 없으면 절이 설 이유가 없다
+  if (seasons.length === 0 && honours === null) return null;
+  const index = Math.min(picked ?? 0, Math.max(0, seasons.length - 1));
+  const season = seasons[index];
+
+  return (
+    <>
+      <div className="section-title">역대</div>
+      {honours && (
+        <div className="honours-line" data-testid="competition-honours">
+          <b>우승 {honours.count}회</b>
+          {honours.won.length > 0 ? (
+            <span className="honours-won">
+              {honours.won.map((w) => (
+                <i key={w.season}>{w.label}</i>
+              ))}
+            </span>
+          ) : (
+            honours.lastYear !== null && (
+              <span className="honours-last">마지막 {honours.lastYear}</span>
+            )
+          )}
+        </div>
+      )}
+      {seasons.length > 0 && (
+        <div className="season-tabs" data-testid="season-tabs">
+          {seasons.map((s, i) => (
+            <button
+              key={s.season}
+              type="button"
+              className={i === index ? "active" : ""}
+              aria-pressed={i === index}
+              onClick={() => setPicked(i)}
+              data-testid={`season-tab-${s.season}`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {season && (
+        <div data-testid="season-history">
+          <div className="season-head">
+            {season.champion && (
+              <span className={`season-slot${season.champion.ours ? " ours" : ""}`}>
+                <i>우승</i>
+                <b>{season.champion.name}</b>
+              </span>
+            )}
+            {season.runnerUp && (
+              <span className={`season-slot${season.runnerUp.ours ? " ours" : ""}`}>
+                <i>준우승</i>
+                <b>{season.runnerUp.name}</b>
+              </span>
+            )}
+            {/* 우승·준우승 칸이 이미 우리를 말했으면 같은 사실을 두 번 세우지 않는다 */}
+            {season.ourPosition !== null && !season.champion?.ours && !season.runnerUp?.ours && (
+              <span className="season-slot ours">
+                <i>우리</i>
+                <b>{season.ourPosition}위</b>
+              </span>
+            )}
+          </div>
+          {season.table.length > 0 && <SeasonTable table={season.table} />}
+          {season.awards.length > 0 && (
+            <div className="season-awards" data-testid="season-awards">
+              {season.awards.map((a) => (
+                <div className="season-award" key={a.code}>
+                  <i>{awardTitle(a.code)}</i>
+                  <b>{a.playerName}</b>
+                  <span>{a.teamShort}</span>
+                  <em>{awardFigure(a)}</em>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 export function CompetitionsView({
   competitions,
   inMatch = false,
@@ -412,6 +587,9 @@ export function CompetitionsView({
               </div>
             </>
           )}
+
+          {/* 역대는 지나간 시즌의 자리다 — 이번 시즌을 다 읽은 뒤에 선다 */}
+          <HistorySection competition={active} />
         </>
       )}
 

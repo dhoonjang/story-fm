@@ -429,8 +429,11 @@ describe("한 시즌 완주 (mock 경기)", () => {
     expect(state.matches.filter((m) => m.season === 1)).toHaveLength(0);
 
     // 우리 팀이 우승했다면 트로피가, 아니면 최소한 리그 기록이 남는다.
-    // 트로피는 **대회 id**로 남는다 — 이름을 고쳐도 같은 대회로 선다 (career.md §6)
-    const cupTrophies = state.trophies.filter((t) => isEuroCup(t.competitionId ?? null));
+    // 트로피는 **대회 id**로 남는다 — 이름을 고쳐도 같은 대회로 선다 (career.md §6).
+    // 원장은 전 구단의 우승을 들므로 **우리 것만** 골라 센다
+    const cupTrophies = state.trophies.filter(
+      (t) => isEuroCup(t.competitionId ?? null) && t.teamId === state.userTeamId,
+    );
     const wonUcl = digest.some((d) => d.includes("🏆 UEFA 챔피언스리그 우승"));
     expect(cupTrophies.length).toBe(wonUcl ? 1 : 0);
     expect(state.seasonRecords).toHaveLength(1);

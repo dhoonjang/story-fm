@@ -19,7 +19,8 @@ import {
   playersOf,
   quickSimulate,
   declareRetirements,
-  recordLeagueHistory,
+  managerTrophiesOf,
+  recordSeasonHistory,
   retirementDeclarationDate,
   retirementJudgeDate,
   retirementVerdict,
@@ -658,24 +659,89 @@ describe("18팀 리그의 시즌 리뷰", () => {
       `prize:competition:dfbpokal:runner-up:S${state.season}`,
     );
 
-    // 감독에게는 아무것도 남지 않는다
-    expect(state.trophies).toEqual([]);
+    // 감독에게는 아무것도 남지 않는다 — 우승은 세계의 사실이라 원장엔 서지만
+    // 그 시즌 그 팀에 있던 감독이 없으므로 보관함은 비어 있다 (career.md §6)
+    expect(state.trophies.some((t) => t.competitionId === "dfbpokal" && t.teamId === us)).toBe(
+      true,
+    );
+    expect(managerTrophiesOf(state)).toEqual([]);
     expect(state.seasonRecords).toEqual([]);
     expect(state.manager.reputation.media).toBe(media);
     expect(state.manager.reputation.board).toBe(board);
   });
 
-  it("시즌 순위표가 통째로 남는다 — 체급 재산정의 성적 축이 읽는 표다", () => {
+  it("시즌 결산 스냅샷이 그 시즌 순위표와 같고, 두 번 결산해도 행은 하나다", () => {
     const state = createTestGame(7, "paderborn");
-    fabricateLeague(state, "bundesliga", (home) => (home === state.userTeamId ? [1, 0] : [1, 1]));
+    const us = state.userTeamId;
+    fabricateLeague(state, "bundesliga", (home) => (home === us ? [1, 0] : [1, 1]));
 
-    recordLeagueHistory(state);
+    recordSeasonHistory(state);
 
-    const table = state.leagueHistory?.find((t) => t.leagueId === "bundesliga");
-    expect(table?.season).toBe(state.season);
-    expect(table?.order).toEqual(computeStandings(state, "bundesliga").map((r) => r.teamId));
+    const row = state.history?.find((h) => h.season === state.season);
+    expect(row?.teamId).toBe(us);
+    const table = row?.leagues.find((l) => l.leagueId === "bundesliga");
+    const standings = computeStandings(state, "bundesliga");
+    expect(table?.rows.map((r) => r.teamId)).toEqual(standings.map((r) => r.teamId));
+    // 행 전체가 남는다 — 순서만이 아니다 (game-state.md §3.3)
+    expect(table?.rows[0]?.record).toEqual({
+      played: standings[0]!.played,
+      wins: standings[0]!.wins,
+      draws: standings[0]!.draws,
+      losses: standings[0]!.losses,
+      goalsFor: standings[0]!.goalsFor,
+      goalsAgainst: standings[0]!.goalsAgainst,
+      points: standings[0]!.points,
+    });
     // 경기를 하지 않은 리그는 줄을 세우지 않는다 — 0경기짜리 표는 순위가 아니다
-    expect(state.leagueHistory?.some((t) => t.leagueId === "laliga")).toBe(false);
+    expect(row?.leagues.some((l) => l.leagueId === "laliga")).toBe(false);
+
+    // 우리 경기만, 결과가 있는 것만, 날짜 오름차순으로
+    const ours = row?.matches ?? [];
+    expect(ours.length).toBe(
+      state.matches.filter(
+        (m) =>
+          m.result &&
+          m.season === state.season &&
+          (m.homeTeamId === us || m.awayTeamId === us) &&
+          m.competitionId !== null,
+      ).length,
+    );
+    expect(ours.map((m) => m.date)).toEqual([...ours.map((m) => m.date)].sort());
+    expect(ours.every((m) => m.opponentTeamId !== us)).toBe(true);
+
+    recordSeasonHistory(state);
+    expect(state.history?.filter((h) => h.season === state.season)).toHaveLength(1);
+  });
+
+  it("AI 구단의 우승도 원장에 서고, 그것이 감독의 평판을 움직이지는 않는다", () => {
+    const state = createTestGame(7, "paderborn");
+    const us = state.userTeamId;
+    const rest = teamsOfLeagueIn(state, "bundesliga").filter((id) => id !== us);
+    const champion = rest[0]!;
+    const runnerUp = rest[1]!;
+    // 우리는 전패, 챔피언은 전승 — 우승은 남의 것이다
+    fabricateLeague(state, "bundesliga", (home, away) =>
+      home === champion ? [2, 0] : away === champion ? [0, 2] : [1, 1],
+    );
+    fabricateFinal(state, "dfbpokal", champion, runnerUp);
+    const media = state.manager.reputation.media;
+
+    reviewSeason(state);
+
+    const league = state.trophies.find((t) => t.competitionId === "bundesliga");
+    expect(league?.teamId).toBe(champion);
+    // 리그엔 결승이 없다 — 2위는 순위표가 답한다 (records.ts `TrophySchema`)
+    expect(league?.runnerUpTeamId).toBeUndefined();
+    const cup = state.trophies.find((t) => t.competitionId === "dfbpokal");
+    expect(cup).toMatchObject({ teamId: champion, runnerUpTeamId: runnerUp });
+    // 남의 우승이라 감독의 보관함에도 평판에도 닿지 않는다
+    expect(managerTrophiesOf(state)).toEqual([]);
+    expect(state.manager.reputation.media).toBe(media);
+
+    // 두 번 결산해도 한 줄이다
+    reviewSeason(state);
+    expect(state.trophies.filter((t) => t.competitionId === "bundesliga")).toHaveLength(1);
+    expect(state.trophies.filter((t) => t.competitionId === "dfbpokal")).toHaveLength(1);
   });
 });
 

@@ -17,6 +17,7 @@ import {
   tacticalStyles,
   teamCatalog,
   teamCatalogById,
+  type ClubHonour,
   type TacticalStyle,
   type TeamCatalogEntry,
 } from "../data/team-catalog";
@@ -70,6 +71,8 @@ export interface AdminTeamInput {
   stadium?: string;
   capacity?: number;
   commercialTier?: 1 | 2 | 3 | 4;
+  /** 게임 시작 전의 우승 — 대회 id별 횟수 (team.md §1). 빈 배열이면 표를 지운다 */
+  honours?: readonly ClubHonour[];
 }
 
 export type AdminTeamPatch = Partial<Omit<AdminTeamInput, "id">>;
@@ -177,6 +180,15 @@ export function adminUpdateTeam(teamId: string, patch: AdminTeamPatch): AdminRes
     team.tier = patch.tier;
   }
   if (patch.leagueId !== undefined) team.leagueId = patch.leagueId;
+  if (patch.honours !== undefined) {
+    const bad = patch.honours.find(
+      (h) => h.competitionId.trim().length === 0 || !Number.isInteger(h.count) || h.count < 1,
+    );
+    if (bad) return { ok: false, message: "역대 우승은 대회 id와 1 이상의 횟수가 필요합니다" };
+    // 빈 배열은 "모른다"로 되돌리는 것이다 — 0회를 적는 자리가 아니다 (team.md §1)
+    if (patch.honours.length === 0) delete team.honours;
+    else team.honours = patch.honours.map((h) => ({ ...h }));
+  }
   if (patch.formation !== undefined) {
     if (!(FORMATIONS as readonly string[]).includes(patch.formation)) {
       return { ok: false, message: `알 수 없는 포메이션: ${patch.formation}` };

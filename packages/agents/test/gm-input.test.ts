@@ -4,6 +4,7 @@ import {
   advanceTime,
   applyScenePoint,
   characterEntry,
+  clubHonoursLine,
   createGame,
   clockOf,
   formatMoney,
@@ -98,7 +99,12 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
     const state = game();
     const ref = buildGmReference(state);
     expect(ref).not.toContain("<reference>");
-    expect(describeClub(state)).toBe(`<club name="아스날" />`);
+    // 역대 한 줄이 본문에 선다 — 이 구단은 카탈로그 시드가 있다 (team.md §1)
+    expect(describeClub(state)).toBe(
+      [`<club name="아스날">`, `역대: ${clubHonoursLine(state, state.userTeamId)}`, `</club>`].join(
+        "\n",
+      ),
+    );
     expect(describeManager(state.manager)).toBe(
       [
         `<manager name="김감독" tag="@김감독:">`,
@@ -122,6 +128,17 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
     };
     expect(describeClub(state)).toBeNull();
     expect(buildGmReference(state)).toBe(describeManager(state.manager));
+  });
+
+  /**
+   * **없는 것은 0회가 아니라 모르는 것이다** (team.md §1) — 시드가 없고 게임 안의
+   * 우승도 없는 구단에는 역대 줄이 서지 않는다. 「0회」를 세우면 GM이 그것을 사실로
+   * 읽고 "한 번도 든 적 없는 구단"을 이야기한다.
+   */
+  it("우승을 모르는 구단에는 역대 줄이 서지 않는다", () => {
+    const state = game();
+    state.userTeamId = "chelsea";
+    expect(describeClub(state)).toBe(`<club name="첼시" />`);
   });
 
   it("선수의 id도 이름도 담지 않는다 — 명단 한 줄이 바뀌면 뒤의 이력까지 무효가 된다", () => {
