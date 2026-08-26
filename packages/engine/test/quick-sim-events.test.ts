@@ -575,7 +575,7 @@ describe("같은 날 경기는 킥오프 순서대로 굴러간다", () => {
     // 우리 경기가 끝나면 나머지가 이어서 굴러간다
     playMockMatch(state!);
     for (const m of later) expect(m.result, `${m.id} 우리 경기 뒤에도 안 굴렀다`).not.toBeNull();
-  }, 60_000);
+  });
 });
 
 describe("교체", () => {

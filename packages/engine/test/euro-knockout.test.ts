@@ -438,8 +438,9 @@ describe("한 시즌 완주 (mock 경기)", () => {
     const wonUcl = digest.some((d) => d.includes("🏆 UEFA 챔피언스리그 우승"));
     expect(cupTrophies.length).toBe(wonUcl ? 1 : 0);
     expect(state.seasonRecords).toHaveLength(1);
-    // 시즌 340일을 하루씩 도는 통합 테스트 — 병렬 실행 부하까지 감안해 여유를 준다
-  }, 120_000);
+    // 시즌 340일을 하루씩 도는 통합 테스트다. 재는 것은 **완주**이지 속도가 아니므로
+    // 상한을 따로 걸지 않는다 — 전역 하나가 쥔다 (vitest.config.ts)
+  });
 });
 
 /** 이 단계가 본선에서 몇 번째인가 — 대진 수 기대값 계산용 */

@@ -65,7 +65,7 @@ describe("타 팀도 매일 회복한다", () => {
     advanceTime(state, { days: 2 });
     const now = state.players.find((p) => p.id === worn!.id)!.state.condition;
     expect(now, "이틀이 지나도 회복이 없다").toBeGreaterThan(worn!.after);
-  }, 60_000);
+  });
 });
 
 describe("타 팀은 로테이션으로 다리를 안배한다", () => {
