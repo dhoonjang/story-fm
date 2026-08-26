@@ -162,7 +162,7 @@ import {
   assignmentFor,
   familiarityOf,
   groupOf,
-  isAvailable,
+  isAvailableFor,
   isOurPlayer,
   managedTeamId,
   onLoanFromUs,
@@ -284,7 +284,7 @@ type DisciplineFixture = { competitionId: string; round: number; stage: MatchSta
  * 남은 대회 경기가 없으면(프리시즌 앞·시즌 끝) 그 팀의 리그를 1라운드로 가정한다.
  * 감독이 읽는 눈금은 결국 리그의 것이고, 화면이 아무 말도 하지 않는 것보다 낫다.
  */
-function disciplineFixtureOf(state: GameState, teamId: string): DisciplineFixture {
+function disciplineFixtureOf(state: GameState, teamId: string): DisciplineFixture | null {
   let next: MatchRecord | null = null;
   for (const m of state.matches) {
     if (m.result || m.date < state.date) continue;
@@ -292,9 +292,15 @@ function disciplineFixtureOf(state: GameState, teamId: string): DisciplineFixtur
     if (disciplineOf(m.competitionId) === null) continue;
     if (next === null || m.date < next.date || (m.date === next.date && m.id < next.id)) next = m;
   }
-  return next === null
-    ? { competitionId: leagueOfTeamIn(state, teamId), round: 1, stage: "league" }
-    : { competitionId: next.competitionId!, round: next.round, stage: next.stage ?? "league" };
+  if (next !== null && next.competitionId !== null) {
+    return { competitionId: next.competitionId, round: next.round, stage: next.stage ?? "league" };
+  }
+  /**
+   * 폴백은 **던지지 않는다** — 무소속(`freeagents`)도 카탈로그가 모르는 id도 이 함수를
+   * 지난다. 뷰가 매 턴 부르는 자리라 예외 하나가 오피스 화면 전체를 떨군다.
+   */
+  const league = state.leagueOf?.[teamId] ?? state.teams.find((t) => t.id === teamId)?.leagueId;
+  return league === undefined ? null : { competitionId: league, round: 1, stage: "league" };
 }
 
 /**
@@ -311,8 +317,8 @@ const BAN_WARNING_RANGE = 5;
  */
 function banWarningFor(state: GameState, p: GamePlayer): string {
   const at = disciplineFixtureOf(state, p.teamId);
-  const rule = disciplineOf(at.competitionId);
-  if (!rule) return "";
+  const rule = at === null ? null : disciplineOf(at.competitionId);
+  if (at === null || rule === null) return "";
   const held = seasonYellowsOf(state, p.id, state.season, at.competitionId);
   for (let more = 1; more <= BAN_WARNING_RANGE; more++) {
     if (yellowBanMatches(rule, held + more, at) === null) continue;
@@ -623,6 +629,19 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
    * (transfer.md §2). 남의 팀 풀은 그대로 소속(`playersOf`)이다: 그 구단이 빌려 간
    * 우리 선수는 그 구단 명단에 **실제로 있으므로** 거기서 빠지면 안 된다.
    */
+  /**
+   * 「지금 뛸 수 있나」는 **그 선수 팀의 다음 대회 경기**로 답한다 (match.md §6) —
+   * 컵 정지 선수는 리그 명단에 그대로 선다. 팀마다 한 번만 찾아 둔다: 선수마다
+   * 일정을 훑으면 5,700번이다.
+   */
+  const nextCompetitionCache = new Map<string, string | null>();
+  const nextCompetitionFor = (ownerId: string): string | null => {
+    const cached = nextCompetitionCache.get(ownerId);
+    if (cached !== undefined) return cached;
+    const found = disciplineFixtureOf(state, ownerId)?.competitionId ?? null;
+    nextCompetitionCache.set(ownerId, found);
+    return found;
+  };
   const ourPool = teamId !== null && teamId === state.userTeamId;
   const pool0 = teamId ? (ourPool ? ourPlayers(state) : playersOf(state, teamId)) : state.players;
   const narrowed = pool0.filter((p) => {
@@ -642,7 +661,9 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
       return false;
     }
     if (listed && listed.has(p.id) !== input.listed) return false;
-    if (input.availableOnly && !isAvailable(state, p)) return false;
+    if (input.availableOnly && !isAvailableFor(state, p, nextCompetitionFor(p.teamId))) {
+      return false;
+    }
     if (contracts) {
       const contract = contracts.get(p.id);
       if (
@@ -1249,16 +1270,18 @@ function assignedRow(
   p: GamePlayer,
   position: string,
   familiarity: number,
-  next: DisciplineFixture,
+  next: DisciplineFixture | null,
   roleId?: string,
 ): string {
   /**
    * **다음 대회 경기로 잰다** (match.md §6) — 눈금도 정지도 대회의 것이라,
    * 대회 없이 센 경고 수는 이 라인업 화면에서 잘못된 경고를 띄운다.
    */
-  const yellows = seasonYellowsOf(state, p.id, state.season, next.competitionId);
-  const rule = disciplineOf(next.competitionId);
-  const banNext = rule !== null && yellowBanMatches(rule, yellows + 1, next) !== null;
+  const yellows =
+    next === null ? 0 : seasonYellowsOf(state, p.id, state.season, next.competitionId);
+  const rule = next === null ? null : disciplineOf(next.competitionId);
+  const banNext =
+    next !== null && rule !== null && yellowBanMatches(rule, yellows + 1, next) !== null;
   const injury = openInjury(state, p.id);
   const suspension = activeSuspension(state, p.id);
   const stat = seasonStatOf(state, p.id);
@@ -1270,7 +1293,9 @@ function assignedRow(
     suspension
       ? `정지 ${suspension.lengthMatches - suspension.served}경기(${suspensionScopeName(suspension)})`
       : null,
-    banNext ? `${competitionShortName(next.competitionId)} 경고 ${yellows}장(정지 임박)` : null,
+    banNext && next !== null
+      ? `${competitionShortName(next.competitionId)} 경고 ${yellows}장(정지 임박)`
+      : null,
     // 사유 없는 옛 불만은 사유 없이 낸다
     grievance ? (reason ? `불만(${reason})` : "불만") : null,
     /**

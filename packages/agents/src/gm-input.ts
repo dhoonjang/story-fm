@@ -34,7 +34,8 @@ import {
   historyStart,
   injuryRiskFor,
   internationalBreaksOf,
-  isAvailable,
+  isAvailableFor,
+  nextMatchFor,
   isInjured,
   activeSuspension,
   suspensionScopeName,
@@ -859,11 +860,14 @@ function internationalFacts(state: GameState): string | null {
   if (sections.length === 0) return null;
   /**
    * **지금 부릴 수 있는 1군이 몇인가** — 감독이 그 주에 실제로 겪는 사실이다.
-   * 코어의 문을 그대로 읽는다(`isAvailable`): 부상·정지·소집이 한 자리에서 갈린다.
+   * 코어의 문을 그대로 읽는다(`isAvailableFor`): 부상·정지·소집이 한 자리에서
+   * 갈리고, **정지는 다음 경기의 대회로 묻는다** (match.md §6).
    */
+  const nextCompetition =
+    nextMatchFor(state.matches, state.userTeamId, state.date)?.competitionId ?? null;
   const firstTeam = players.filter((p) => squadLevelOf(p) === "first");
   sections.push(
-    `지금 부릴 수 있는 1군 ${firstTeam.filter((p) => isAvailable(state, p)).length}/${firstTeam.length}명`,
+    `지금 부릴 수 있는 1군 ${firstTeam.filter((p) => isAvailableFor(state, p, nextCompetition)).length}/${firstTeam.length}명`,
   );
   return sections.join("\n");
 }
