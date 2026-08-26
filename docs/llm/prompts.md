@@ -89,7 +89,7 @@
 
 ## 2. 스킬 표면 — 한 판단은 한 도구
 
-도구는 **51개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
+도구는 **52개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
 지시 해석이 JSON 하나를 내고 코어가 같은 스킬 함수를 부른다
 ([agents.md](./agents.md) §3). 같은 순간에 함께 정해지는 것들이
 갈려 있으면 GM이 하나를 빠뜨린다 — 라인업은 1·2군 이동까지 한 요청(`set_lineup`의
@@ -107,7 +107,7 @@
 | 경기      | 1   | `substitute`                                                                                                                                                                                                                                       |
 | 이적      | 13  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `respond_transfer_request` · `withdraw_offer` · `release_player` · `recall_loan` · `exercise_buyback` |
 | 재정      | 6   | `apply_finance_event` · `adjust_transfer_budget` · `request_board` · `set_ticket_price` · `fund_transfer_budget` · `pay_player_bonus`                                                                                                              |
-| 조회      | 9   | `search_players` · `get_squad` · `get_team` · `get_league` · `get_match_report` · `get_opponent_report` · `get_career` · `get_finance` · `scout_player`                                                                                            |
+| 조회      | 10  | `search_players` · `get_squad` · `get_team` · `get_league` · `get_match_report` · `get_opponent_report` · `get_career` · `get_history` · `get_finance` · `scout_player`                                                                            |
 
 ### 계약은 넷으로 갈린다
 
@@ -118,7 +118,7 @@
 | 판정형 | LLM이 `{outcome, intensity}`·`stance`를 판정, **변화량은 코어 공식**                            |
 | 거래형 | 상대 판정은 LLM, 확률 앵커·한도는 코어 ([../simulation/transfer.md](../simulation/transfer.md)) |
 
-- **읽기 전용 여덟**(조회 6 + `deal_odds` + `list_negotiations`)은 호출 기록을 남기지
+- **읽기 전용 열하나**(조회 9 + `deal_odds` + `list_negotiations`)는 호출 기록을 남기지
   않는다 — 조회 로그가 스킬 칩을 덮는다. `scout_player`는 상태를 바꾸므로 조회 그룹이지만
   읽기 전용이 아니다.
 - **도구 설명도 프롬프트다.** `SKILL_CATALOG`이 원본이고 표시 이름(label)·그룹까지 함께
