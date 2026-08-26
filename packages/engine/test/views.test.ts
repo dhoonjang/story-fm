@@ -98,6 +98,34 @@ describe("오피스 뷰 — 스쿼드", () => {
     const row = buildOfficeViews(state).squad.players.find((p) => p.id === player.id)!;
     expect(row.available).toBe(false);
   });
+
+  /**
+   * 소집도 부상·정지와 같은 문을 지난다 (competition.md §5-1 · season.md §8 불변식).
+   * 행이 스스로 조건을 다시 세면 소집된 주전이 화면에서만 선발 가능한 얼굴로 선다.
+   */
+  it("소집된 선수는 away 칸이 서고 가용에서 빠진다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[4]!;
+    state.callUps = [
+      {
+        gamePlayerId: player.id,
+        country: "ENG",
+        breakKey: `${state.season}:0901`,
+        apps: 2,
+        goals: 1,
+        returnedOn: null,
+      },
+    ];
+    const row = buildOfficeViews(state).squad.players.find((p) => p.id === player.id)!;
+    expect(row.available).toBe(false);
+    expect(row.away).not.toBeNull();
+    expect(row.away!.reason).toBe("call-up");
+    expect(row.away!.country).toBe("ENG");
+    // 표기는 뷰가 붙이되 **코드와 다른 칸이다** — 붙인 문장을 화면이 다시 가르지 않는다
+    expect(row.away!.countryName).not.toBe("ENG");
+    expect(row.away!.returnsOn).toMatch(/^\d{4}-09-10$/);
+    expect(row.away!.apps).toBe(2);
+  });
 });
 
 /**

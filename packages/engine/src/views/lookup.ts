@@ -1,4 +1,5 @@
 import type {
+  CallUp,
   Contract,
   GamePlayer,
   MatchEventType,
@@ -33,6 +34,8 @@ import {
   ageOf,
   anchorOf,
   associationName,
+  capsOf,
+  internationalGoalsOf,
   boardExpectationLine,
   boardExpectationText,
   conditionLabel,
@@ -71,6 +74,12 @@ import {
   type MatchReportView,
 } from "./views";
 import { addDays, dayOfWeek, diffDays, squadReturnOf } from "../competition/calendar";
+import {
+  daysUntilReturn,
+  internationalBreaksOf,
+  openCallUp,
+  type InternationalBreak,
+} from "../competition/international";
 import { entrantsOf } from "../competition/europe";
 import { careerOf, careerTotalsOf, type CareerTotals } from "../squad/career";
 import { leaderGroupOf } from "../squad/hierarchy";
@@ -968,6 +977,72 @@ function nationalityText(p: Pick<GamePlayer, "nationality" | "secondNationality"
   return `국적 ${one(p.nationality)}${p.secondNationality === undefined ? "" : ` · 둘째 국적 ${one(p.secondNationality)}`}`;
 }
 
+/** 그 소집이 선 창 — 키가 시즌을 들고 있어 날짜는 거기서 파생한다 */
+function breakOfKey(breakKey: string): InternationalBreak | null {
+  const season = Number(breakKey.split(":")[0]);
+  if (!Number.isFinite(season)) return null;
+  return internationalBreaksOf(season).find((w) => w.key === breakKey) ?? null;
+}
+
+/**
+ * 정산이 끝난 가장 최근 소집 — 소집 표는 감독 팀 행만 남기므로 남의 선수에게는
+ * 늘 없다 (competition.md §5-1). 행은 창 순서로 쌓이므로 뒤에서 찾는다.
+ */
+function lastReturnedCallUp(state: GameState, playerId: string): CallUp | null {
+  const rows = (state.callUps ?? []).filter(
+    (c) => c.gamePlayerId === playerId && c.returnedOn !== null,
+  );
+  return rows[rows.length - 1] ?? null;
+}
+
+/**
+ * **통산 A매치 한 줄** (competition.md §5-1) — 통산 커리어와 같은 결로 선다.
+ *
+ * 캡이 0이면 줄을 세우지 않는다: 세계의 대다수가 그렇고, 카드의 규약이 「0인 칸은
+ * 적지 않는다」다. 어느 협회인지는 머리글의 국적 줄이 이미 말하므로 두 번 적지
+ * 않는다. 최근 소집이 남긴 출전·골은 어느 창의 것인지와 함께 조각으로 붙는다 —
+ * 창 이름이 없으면 모델이 그 수를 통산 옆의 다른 통산으로 읽는다.
+ *
+ * **안개 밖의 사실이다** — 흐리는 것은 능력치이지 공개된 기록이 아니라 남의 팀
+ * 선수도 통산 그대로 낸다 (`careerLines`와 같은 기준).
+ */
+function internationalLine(state: GameState, p: GamePlayer): string | null {
+  const caps = capsOf(p.state);
+  if (caps === 0) return null;
+  const goals = internationalGoalsOf(p.state);
+  const last = lastReturnedCallUp(state, p.id);
+  const window = last === null ? null : breakOfKey(last.breakKey);
+  // 첫 소집이어도 그 창에서 못 뛰었으면 데뷔가 아니다 — `debut`은 소집 시점의 캡이 0이었다는 표식이다
+  const debut = last !== null && last.debut === true && last.apps > 0;
+  return (
+    `A매치: 통산 ${caps}경기${goals > 0 ? ` ${goals}골` : ""}` +
+    (last !== null && window !== null
+      ? ` · ${window.label} ${last.apps}경기${last.goals > 0 ? ` ${last.goals}골` : ""}${debut ? " (대표팀 데뷔)" : ""}`
+      : "")
+  );
+}
+
+/**
+ * **지금 클럽을 떠나 있다** — 부상·정지와 같은 갈래의 사실이라 같은 자리에 선다
+ * (competition.md §5-1 · season.md §8 불변식). 소집이든 여름 대회든 감독이 이번
+ * 주에 그를 쓸 수 없다는 뜻은 하나다.
+ */
+function awayFromClubLine(state: GameState, p: GamePlayer): string | null {
+  const callUp = openCallUp(state, p.id);
+  if (callUp !== null) {
+    const window = breakOfKey(callUp.breakKey);
+    return (
+      `대표팀 소집 중: ${associationName(callUp.country)}(${callUp.country})` +
+      (window === null ? "" : ` — ${window.to} 복귀 (${daysUntilReturn(state, window)}일 남음)`)
+    );
+  }
+  const summer = p.state.summerReturn;
+  if (summer !== undefined && state.date < summer) {
+    return `여름 대회 참가 중: ${summer} 합류 예정`;
+  }
+  return null;
+}
+
 export function playerCard(state: GameState, playerId: string): LookupResult {
   // id가 정확하지 않으면 이름으로 푼다 — 모델은 감독이 부른 이름을 그대로 넣는다
   const { player: p, candidates } = resolvePlayerRef(state.players, playerId);
@@ -1109,11 +1184,13 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
     stat?.yellows ? `경고 ${stat.yellows}` : null,
     stat?.reds ? `퇴장 ${stat.reds}` : null,
   ].filter((x): x is string => x !== null);
+  const international = internationalLine(state, p);
   lines.push(
     `시즌 기록: ${stat?.apps ?? 0}경기 ${stat?.goals ?? 0}골 ${stat?.assists ?? 0}도움` +
       (seasonRating(stat) === null ? "" : ` · 평점 ${seasonRating(stat)!.toFixed(2)}`) +
       (seasonMore.length > 0 ? ` · ${seasonMore.join(" · ")}` : ""),
     ...careerLines(state, p),
+    ...(international === null ? [] : [international]),
     [
       contract
         ? `계약: 주급 ${formatMoney(contract.weeklyWage)} · 만료 ${contract.until}`
@@ -1139,6 +1216,8 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
   if (suspension) {
     lines.push(`징계: 출장 정지 ${suspension.lengthMatches - suspension.served}경기 남음`);
   }
+  const away = awayFromClubLine(state, p);
+  if (away !== null) lines.push(away);
   lines.push(...historyLines(state, p));
   return { ok: true, message: lines.join("\n") };
 }

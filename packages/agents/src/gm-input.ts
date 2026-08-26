@@ -7,6 +7,7 @@ import {
   ABSENT_REASON_KO,
   boardExpectation,
   buildOpponentReport,
+  callUpsOfBreak,
   careerTotalsOf,
   characterEntry,
   characterEntryOf,
@@ -32,6 +33,8 @@ import {
   headCoachOf,
   historyStart,
   injuryRiskFor,
+  internationalBreaksOf,
+  isAvailable,
   isInjured,
   isSuspended,
   leagueOfTeamIn,
@@ -39,6 +42,7 @@ import {
   managedTeamId,
   MAX_EXPLOITS,
   onSummerBreak,
+  openCallUp,
   openInjury,
   openManagerOffers,
   openPromises,
@@ -74,7 +78,10 @@ import {
 } from "@story-fm/engine";
 import {
   ageOf,
+  associationName,
   boardExpectationLine,
+  capsOf,
+  internationalGoalsOf,
   naturalPositionOf,
   describeManagerSkills,
   describeReputation,
@@ -94,6 +101,8 @@ import {
   tacticsBrief,
   TRANSFER_REQUEST_REASON_KO,
   visionItemText,
+  type CallUpReturnState,
+  type GamePlayer,
   type CharacterEntry,
   type CharacterInjection,
   type ScoutReportCard,
@@ -702,6 +711,122 @@ function offseasonFacts(state: GameState): string | null {
     .join("\n")}`;
 }
 
+/**
+ * 복귀 뒤 이 블록이 「방금 돌아왔다」로 치는 기간 (일) — 경기 다이제스트와 같은 결이다.
+ * 그 며칠이 지나면 몸은 클럽의 사정이고, 남는 것은 선수 카드의 통산 줄이다.
+ */
+const CALL_UP_RETURN_DAYS = 3;
+
+/**
+ * 돌아온 몸 — 코드가 아니라 낱말로 (`CallUpReturnState`). 「지쳐서 돌아왔다」를
+ * 어떻게 말할지는 GM이 쓴다.
+ */
+const CALL_UP_RETURN_KO: Record<CallUpReturnState, string> = {
+  fit: "몸 이상 없음",
+  tired: "피로 누적",
+  injured: "부상",
+};
+
+/** 통산 A매치 조각 — 캡이 0이면 적지 않는다 (세계의 대다수가 그렇다) */
+function capsPart(player: GamePlayer): string {
+  const caps = capsOf(player.state);
+  if (caps === 0) return "";
+  const goals = internationalGoalsOf(player.state);
+  return ` · 통산 ${caps}캡${goals > 0 ? ` ${goals}골` : ""}`;
+}
+
+/** 협회 한 칸 — 코드와 표기를 함께. 코드만 실으면 모델이 `KVX`를 읽고 말을 지어낸다 */
+const associationPart = (code: string): string => `${associationName(code)}(${code})`;
+
+/**
+ * **A매치 휴식기 블록** — 우리 선수가 클럽을 떠나 있거나 방금 돌아온 동안만 선다
+ * (→ docs/data/competition.md §5-1).
+ *
+ * 이 덩어리가 있는 이유는 하나다: **없으면 모델이 대표팀을 지어낸다.** 데뷔도
+ * 캡 수도 프롬프트에 없으면 「드디어 첫 대표팀 데뷔」가 서른 살 주전에게 붙는다
+ * (agents.md §6 · `scout_reports`와 같은 이유).
+ *
+ * ⚠️ 물음표도 권고도 없는 장부 줄이다 — 「로테이션을 고려하시죠」는 이 자리의 것이
+ * 아니다. 근거가 되는 사실을 짚고 그 사실로 무슨 말을 할지는 GM이 쓴다
+ * (overview.md §1 철칙 4 · `loanDigestLine`과 같은 계약).
+ */
+function internationalFacts(state: GameState): string | null {
+  const players = userPlayers(state);
+  const sections: string[] = [];
+
+  // ── 지금 소집 중 — 그 열흘이 감독의 이번 주다
+  const out = players.flatMap((player) => {
+    const callUp = openCallUp(state, player.id);
+    return callUp === null ? [] : [{ player, callUp }];
+  });
+  const openBreak = out[0]?.callUp.breakKey;
+  if (openBreak !== undefined) {
+    const window = internationalBreaksOf(state.season).find((w) => w.key === openBreak);
+    const head =
+      window === undefined
+        ? "대표팀 소집 중"
+        : `${window.label} — ${window.to} 복귀 (${Math.max(0, diffDays(state.date, window.to))}일 남음)`;
+    sections.push(
+      [
+        head,
+        ...out.map(
+          ({ player, callUp }) =>
+            `- ${player.name} ${associationPart(callUp.country)} 소집${callUp.debut === true ? " · 첫 소집" : ""}${capsPart(player)}`,
+        ),
+      ].join("\n"),
+    );
+  }
+
+  // ── 여름 대회를 뛰고 아직 안 온 선수 — 프리시즌의 훈련장이 비어 있는 이유다
+  const late = players.filter((p) => {
+    const summer = p.state.summerReturn;
+    return summer !== undefined && state.date < summer && openCallUp(state, p.id) === null;
+  });
+  if (late.length > 0) {
+    sections.push(
+      late
+        .map(
+          (p) =>
+            `- ${p.name} 여름 대회로 아직 합류 전 — ${p.state.summerReturn} 합류${capsPart(p)}`,
+        )
+        .join("\n"),
+    );
+  }
+
+  // ── 방금 돌아온 창 — 무엇을 하고 어떤 몸으로 왔나
+  const closed = internationalBreaksOf(state.season).find(
+    (w) => w.to <= state.date && diffDays(w.to, state.date) <= CALL_UP_RETURN_DAYS,
+  );
+  if (closed !== undefined) {
+    const byId = new Map(players.map((p) => [p.id, p] as const));
+    const back = callUpsOfBreak(state, closed.key).flatMap((c) => {
+      const player = c.returnedOn === null ? undefined : byId.get(c.gamePlayerId);
+      if (player === undefined) return [];
+      // 첫 소집이어도 그 창에서 못 뛰었으면 데뷔가 아니다 — `debut`은 소집 시점의 캡이 0이었다는 표식이다
+      const debut = c.debut === true && c.apps > 0 ? " · 대표팀 데뷔" : "";
+      const played = c.apps > 0 ? `${c.apps}경기 ${c.goals}골` : "출전 없음";
+      const body = c.returnState === undefined ? "" : ` · ${CALL_UP_RETURN_KO[c.returnState]}`;
+      return [
+        `- ${player.name} ${associationPart(c.country)} ${played}${debut}${body}${capsPart(player)}`,
+      ];
+    });
+    if (back.length > 0) {
+      sections.push([`${closed.label} 복귀 (${closed.to})`, ...back].join("\n"));
+    }
+  }
+
+  if (sections.length === 0) return null;
+  /**
+   * **지금 부릴 수 있는 1군이 몇인가** — 감독이 그 주에 실제로 겪는 사실이다.
+   * 코어의 문을 그대로 읽는다(`isAvailable`): 부상·정지·소집이 한 자리에서 갈린다.
+   */
+  const firstTeam = players.filter((p) => squadLevelOf(p) === "first");
+  sections.push(
+    `지금 부릴 수 있는 1군 ${firstTeam.filter((p) => isAvailable(state, p.id)).length}/${firstTeam.length}명`,
+  );
+  return sections.join("\n");
+}
+
 export function buildGmStateNote(
   state: GameState,
   passed?: TimePassed | null,
@@ -846,6 +971,7 @@ export function buildGmStateNote(
   const cues = speakerCues(state);
   const coach = coachCues(state);
   const offseason = offseasonFacts(state);
+  const international = internationalFacts(state);
   const negotiations = describeNegotiations(state);
   const recent = recentNarrativeLines(state);
   const edits = state.pendingEdits ?? [];
@@ -972,6 +1098,9 @@ export function buildGmStateNote(
     block("last_match", matchDigest(state)),
     // 오프시즌 — 은퇴와 시상. 소집 전에만 서고, 없으면 한 줄도 쓰지 않는다
     block("offseason", offseason),
+    // A매치 휴식기 — 누가 클럽을 떠나 있고 무엇을 하고 돌아왔나. 오프시즌 옆인 이유가
+    // 같은 결이어서다: 둘 다 「시즌의 이 시기가 무엇인가」를 말한다
+    block("international", international),
     // 그 사이 벌어진 일 — 손잡이로 시간을 넘긴 턴에만. 없으면 모델이 넘긴 구간의
     // 일(부상·오퍼)을 모른 채 장면을 쓴다
     block("time_passed", timePassedLine(state, passed)),

@@ -3,6 +3,7 @@ import type {
   AxisValues,
   BoardPoint,
   EdgeSize,
+  GamePlayer,
   LedgerEntry,
   MatchEventType,
   MatchRecord,
@@ -52,6 +53,9 @@ import {
   TRAINING_MARK_KO,
   ageOf,
   anchorOf,
+  associationName,
+  capsOf,
+  internationalGoalsOf,
   clampCondition,
   conditionLabel,
   sharpnessBand,
@@ -72,6 +76,7 @@ import {
   slotOfTime,
 } from "@story-fm/domain";
 import { DEFAULT_KICKOFF, diffDays, nextMatchFor, seasonEndDate } from "../competition/calendar";
+import { internationalBreaksOf, openCallUp } from "../competition/international";
 import {
   categoryOf,
   currentMonthSummary,
@@ -169,6 +174,7 @@ import {
   assignmentsOf,
   financeOf,
   groupOf,
+  isAvailable,
   openInjury,
   playerName,
   playersOf,
@@ -549,6 +555,13 @@ interface SquadViewRowMeta {
   nationality: string | null;
   /** 둘째 국적 — 없으면 null */
   secondNationality: string | null;
+  /**
+   * **통산 A매치 출전·골** (→ docs/data/competition.md §5-1) — 국적 바로 옆이다:
+   * 같은 사실의 앞뒤라(어느 나라 사람인가 · 그 나라로 몇 번 뛰었나) 떨어져 서면
+   * 화면이 둘을 다른 축으로 다룬다. 없으면 0이고, 0을 어떻게 보일지는 화면이 정한다.
+   */
+  caps: number;
+  internationalGoals: number;
   /** 두 발 숙련도 (각 1~5) — 좌우 분화 자리의 적응도를 가른다 */
   foot: Foot;
   /** 키(cm) · 체중(kg) — 묘사용 (전력 계산에는 안 들어간다) */
@@ -593,6 +606,34 @@ interface SquadViewRowMeta {
     benchRun: number;
     /** 임대 이후 오른 능력치 칸 수 */
     growth: number;
+  } | null;
+  /**
+   * **지금 클럽을 떠나 있는가** — A매치 소집이거나 여름 대회에서 아직 안 돌아왔다
+   * (→ docs/data/competition.md §5-1 · season.md §8 불변식). 아니면 null.
+   *
+   * 임대와 다른 갈래다: 임대는 계약이 남의 훈련장에 가 있는 것이고 이건 열흘 뒤
+   * 돌아온다. 부상·정지와 **같은** 갈래라 `available`이 셋을 함께 닫는다 —
+   * 화면이 이 칸을 안 보면 소집된 주전이 선발 가능한 얼굴로 명단에 선다.
+   *
+   * ⚠️ **문장이 아니라 사실이다.** 「잉글랜드 소집 중 (2경기 1골)」을 여기서 이으면
+   * 화면이 그 문자열을 다시 갈라야 한다 (competition.md §7 불변식). 나라 **표기**만
+   * 뷰가 붙인다 — 화면은 카탈로그를 못 읽는다 (`loan.team`이 약칭인 것과 같은 이유).
+   */
+  away: {
+    /** A매치 소집인가, 여름 메이저 대회의 늦은 합류인가 */
+    reason: "call-up" | "tournament";
+    /** 그를 데려간 협회 — FIFA 3자 코드. 국적을 모르는 선수는 null */
+    country: string | null;
+    /** 그 협회의 한글 표기 — 코드가 없으면 null */
+    countryName: string | null;
+    /** 클럽으로 돌아오는 날 */
+    returnsOn: string;
+    /**
+     * 이 창의 A매치 출전·골 — **여름 대회는 null이다.** 대회는 굴리지 않으므로
+     * (competition.md §5-1) 0을 적으면 「0경기 뛰었다」는 없는 사실이 된다.
+     */
+    apps: number | null;
+    goals: number | null;
   } | null;
   form: number;
   /** 폼의 말 — "절정"·"상승세"·"평소"·"침체"·"바닥" (form.ts와 같은 경계) */
@@ -2796,6 +2837,45 @@ function youthIntakeView(state: GameState): YouthIntakeView | null {
   };
 }
 
+/**
+ * 클럽을 떠나 있는 한 칸 (`SquadViewRow.away`) — **소집이 먼저다.** 여름 대회의
+ * 늦은 합류는 A매치 창과 겹치지 않지만, 겹치는 날이 온다면 지금 그를 데려간 쪽이
+ * 소집이다.
+ *
+ * 복귀일은 창에서 나온다 — 소집 행은 키만 들고 있고 날짜는 시즌에서 파생한다
+ * (`internationalBreaksOf` · competition.md §5-1). `available`은 이 칸이 아니라
+ * 코어의 `isAvailable`을 읽으므로, 창을 못 찾은 행이 여기서 빠져도 명단 판정은 갈리지 않는다.
+ */
+function awayViewOf(state: GameState, player: GamePlayer): SquadViewRow["away"] {
+  const callUp = openCallUp(state, player.id);
+  if (callUp !== null) {
+    const season = Number(callUp.breakKey.split(":")[0]);
+    const window = Number.isFinite(season)
+      ? internationalBreaksOf(season).find((w) => w.key === callUp.breakKey)
+      : undefined;
+    return window === undefined
+      ? null
+      : {
+          reason: "call-up",
+          country: callUp.country,
+          countryName: associationName(callUp.country),
+          returnsOn: window.to,
+          apps: callUp.apps,
+          goals: callUp.goals,
+        };
+  }
+  const summer = player.state.summerReturn;
+  if (summer === undefined || state.date >= summer) return null;
+  return {
+    reason: "tournament",
+    country: player.nationality ?? null,
+    countryName: player.nationality === undefined ? null : associationName(player.nationality),
+    returnsOn: summer,
+    apps: null,
+    goals: null,
+  };
+}
+
 export function buildOfficeViews(state: GameState): OfficeViews {
   const userTeamId = state.userTeamId;
   /** 감독의 것을 가르는 자 — 보관함과 시상 줄이 같은 판정을 쓴다 (career.md §6) */
@@ -2995,6 +3075,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         homegrown: isHomegrownFor(p, userTeamId),
         nationality: p.nationality ?? null,
         secondNationality: p.secondNationality ?? null,
+        caps: capsOf(p.state),
+        internationalGoals: internationalGoalsOf(p.state),
         foot: p.foot ?? { left: 3, right: 3 },
         height: p.height ?? null,
         weight: p.weight ?? null,
@@ -3017,6 +3099,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
               }
             : null;
         })(),
+        away: awayViewOf(state, p),
         form: Math.round(p.state.form * 100) / 100,
         formLabel: formLabel(p.state.form),
         formAngle: formAngle(p.state.form),
@@ -3107,7 +3190,12 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             }
           : null,
         suspended: suspension ? suspension.lengthMatches - suspension.served : 0,
-        available: !injury && !suspension,
+        /**
+         * **코어의 문을 그대로 읽는다** — 부상·정지에 더해 소집·여름 대회까지
+         * 한 자리에서 판정한다 (`isAvailable` → season.md §8 불변식). 여기서
+         * 조건을 다시 세면 소집된 주전이 화면에서만 선발 가능한 얼굴로 선다.
+         */
+        available: isAvailable(state, p.id),
       } satisfies SquadViewRow;
     })
     .sort((a, b) =>
