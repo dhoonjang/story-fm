@@ -1,11 +1,13 @@
 import {
   FAMILIARITY_MAX,
   MATCHDAY_BENCH,
+  SET_PIECE_ROLES,
   positionAtPoint,
   roleAtSlot as inheritedRoleAt,
   roleChangeCost,
   rolesFor,
   type BoardPoint,
+  type SetPieceRole,
 } from "@story-fm/domain";
 import type { OfficeViews } from "@story-fm/engine";
 
@@ -49,6 +51,11 @@ export interface BoardState {
    */
   roles: Record<string, string>;
   tactics: TacticsView;
+  /**
+   * 감독이 지정한 죽은 공 키커 (자리 → playerId, 없으면 `null`) — 역할과 같은 규약이다.
+   * 서버 값에서 씨를 받아 로컬에서 고르고, **서버와 달라진 자리만** 저장에 실린다.
+   */
+  setPieces: Record<SetPieceRole, string | null>;
 }
 
 /**
@@ -66,6 +73,8 @@ export function lineupBody(
   b: BoardState,
   serverReserve: ReadonlySet<string>,
   rows: ReadonlyMap<string, Pick<SquadRow, "roleId" | "roleMemory">>,
+  /** 서버가 아는 지정 — "무엇이 달라졌는지"의 기준점 (`squad.setPieces`) */
+  serverTakers: Partial<Record<SetPieceRole, { designated: string | null }>> = {},
 ) {
   const { formation: _formation, ...axes } = b.tactics;
   void _formation;
@@ -88,6 +97,16 @@ export function lineupBody(
     if (!row || position === undefined) return false;
     return roleAtSlot(row, position) === role;
   };
+  /**
+   * 죽은 공 키커 — **서버와 달라진 자리만.** 같은 지정을 자동 저장마다 다시 보내면
+   * 코어(`setSetPieceTakers`)는 그것을 「바뀌었다」로 읽어, 감독이 시킨 적 없는 편집
+   * 노트가 3초마다 GM에 남는다 (→ docs/data/team.md §6).
+   */
+  const setPieceTakers = Object.fromEntries(
+    SET_PIECE_ROLES.filter(
+      (role) => b.setPieces[role] !== (serverTakers[role]?.designated ?? null),
+    ).map((role) => [role, b.setPieces[role]]),
+  );
   return {
     // v6: 선발은 {playerId, point}로 보낸다 — 서버가 좌표에서 포지션 코드를 다시 정한다
     starting: b.occupants.map((id, i) => ({
@@ -112,6 +131,8 @@ export function lineupBody(
     // 포메이션(프리셋)은 보내지 않는다 — 전술판은 좌표만 바꾸고, 프리셋 교체는
     // 채팅의 set_tactics가 맡는다. 여기서 함께 보내면 매 저장이 전술 변경으로 읽힌다.
     tactics: axes,
+    // 바뀐 자리가 없으면 항목 자체를 싣지 않는다 — 빈 객체도 라우트에서 한 번 더 걸린다
+    ...(Object.keys(setPieceTakers).length > 0 ? { setPieceTakers } : {}),
   };
 }
 

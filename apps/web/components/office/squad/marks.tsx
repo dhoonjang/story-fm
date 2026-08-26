@@ -1,9 +1,15 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { formatMoney, positionProficiency } from "@story-fm/domain";
+import {
+  SET_PIECE_ROLES,
+  SET_PIECE_ROLE_KO,
+  SET_PIECE_ROLE_MARK,
+  formatMoney,
+  positionProficiency,
+} from "@story-fm/domain";
 
-import type { SquadRow } from "./types";
+import type { SetPieceTakersView, SquadRow } from "./types";
 
 /**
  * ── 표식들 — 명단·상세·전술판 칩이 **같은 것을 같은 모양으로** 말한다 ──────────
@@ -89,6 +95,49 @@ export function Armband({ row }: { row: SquadRow }) {
     <i className="armband" title={`${seat.label} · 라커룸 서열 ${row.leaderRank ?? "-"}위`}>
       {seat.mark}
     </i>
+  );
+}
+
+/**
+ * 죽은 공 표식 — **완장과 같은 자리, 같은 크기의 한 글자** (코 · 프 · 페).
+ *
+ * 표식이 두 톤인 것은 **지정과 실제로 차는 사람이 갈릴 수 있기 때문**이다
+ * (docs/simulation/match.md §1.4). 감독이 채운 자리는 진하고, 코어가 세운 자리는
+ * 옅다 — 완장 옆의 Ⓛ이 옅은 것과 같은 규약이다. 옅은 표식이 없으면 「지정 없음」이
+ * 명단에서 빈칸이 되어, 누가 코너를 차는지가 화면 어디에도 없다.
+ *
+ * 세 번째 경우 — 지정은 걸렸는데 그 선수가 선발 밖이라 차지 못하는 자리 — 는 색을
+ * 하나 더 만들지 않고 **테두리만 남긴다**: 이름은 남았고 공은 못 찬다는 뜻이 그
+ * 모양이다. 정확히 어느 경우인지는 툴팁이 사실로 적는다.
+ */
+export function SetPieceMarks({ id, takers }: { id: string; takers: SetPieceTakersView }) {
+  const held = SET_PIECE_ROLES.flatMap((role) => {
+    const { designated, taker } = takers[role];
+    const mine = designated === id;
+    const kicks = taker === id;
+    if (!mine && !kicks) return [];
+    const ko = SET_PIECE_ROLE_KO[role];
+    return [
+      {
+        role,
+        tone: mine ? (kicks ? "on" : "idle") : "core",
+        title: mine
+          ? kicks
+            ? `${ko} 키커 — 감독 지정`
+            : `${ko} 키커로 지정돼 있지만 지금 선발에 없어 다른 선수가 찹니다`
+          : `${ko} 키커 — 지정이 없거나 지정한 선수가 선발에 없어 이 선수가 찹니다`,
+      },
+    ];
+  });
+  if (held.length === 0) return null;
+  return (
+    <>
+      {held.map((mark) => (
+        <i className={`spmark ${mark.tone}`} key={mark.role} title={mark.title}>
+          {SET_PIECE_ROLE_MARK[mark.role]}
+        </i>
+      ))}
+    </>
   );
 }
 

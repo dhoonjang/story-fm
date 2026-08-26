@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MATCHDAY_BENCH,
+  SET_PIECE_ROLES,
   TACTIC_AXES,
   adaptationOf,
   anchorOf,
@@ -17,6 +18,7 @@ import {
   shapeOf,
   snapToBoard,
   type BoardPoint,
+  type SetPieceRole,
 } from "@story-fm/domain";
 import type { GamePayload, GameSlice } from "@/lib/store";
 import type { MatchBoardOrder } from "@/lib/match-orders";
@@ -36,8 +38,15 @@ import { useBoardDrag } from "./board-drag";
 import { Margin, fitAt } from "./marks";
 import { PlayerDetail } from "./player-detail";
 import { SquadTable, type SortKey } from "./squad-table";
-import { TacticsPanel } from "./tactics-panel";
-import type { BoardSlot, Selection, SquadRow, TacticsView, Tier } from "./types";
+import { SetPiecePanel, TacticsPanel } from "./tactics-panel";
+import type {
+  BoardSlot,
+  Selection,
+  SetPieceTakersView,
+  SquadRow,
+  TacticsView,
+  Tier,
+} from "./types";
 
 /**
  * 신원이 고정된 콜백 — 항상 **최신 클로저**를 부른다.
@@ -132,8 +141,12 @@ export function SquadView({
         players.filter((p) => p.roleId !== null).map((p) => [p.id, p.roleId!]),
       ),
       tactics: squad.tactics,
+      // 지정만 씨로 받는다 — 지정이 없을 때 설 사람은 코어가 내는 값이라 판이 쥐지 않는다
+      setPieces: Object.fromEntries(
+        SET_PIECE_ROLES.map((role) => [role, squad.setPieces[role].designated]),
+      ) as Record<SetPieceRole, string | null>,
     };
-  }, [players, squad.tactics]);
+  }, [players, squad.tactics, squad.setPieces]);
 
   const [board, setBoard] = useState<BoardState>(serverBoard);
   const [selection, setSelection] = useState<Selection>(null);
@@ -156,6 +169,9 @@ export function SquadView({
   /** 서버가 아는 2군 명단 — 저장할 때 "무엇이 달라졌는지"의 기준점 */
   const serverReserveRef = useRef<Set<string>>(new Set(serverBoard.reserve));
   serverReserveRef.current = new Set(serverBoard.reserve);
+  /** 서버가 아는 키커 지정 — 같은 기준점. 같은 값을 다시 보내면 편집 노트가 남는다 */
+  const serverTakersRef = useRef<SetPieceTakersView>(squad.setPieces);
+  serverTakersRef.current = squad.setPieces;
   /**
    * 서버가 준 행 — 저장 본문이 "이 역할을 코어가 스스로 낼 수 있는가"를 재는 기준점.
    * 기억이 들어 있어 되찾기 3단을 여기서 다시 밟을 수 있다 (player.md §3.2).
@@ -168,7 +184,9 @@ export function SquadView({
       fetch(`/api/games/${game.id}/lineup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(lineupBody(snapshot, serverReserveRef.current, rowsRef.current)),
+        body: JSON.stringify(
+          lineupBody(snapshot, serverReserveRef.current, rowsRef.current, serverTakersRef.current),
+        ),
       }),
     [game.id],
   );
@@ -267,6 +285,45 @@ export function SquadView({
   );
   const benchSet = new Set(board.bench.filter((id) => !onPitch.has(id)));
   const benchDesignated = benchPlayers.filter((p) => benchSet.has(p.id));
+  /**
+   * 화면의 죽은 공 키커 — **지정은 아직 저장되지 않은 선택까지, 서는 사람은 서버 값.**
+   *
+   * 기본값 규칙(그라운드 위 킥력 최고)은 코어 한 자리에만 산다(match.md §2 키커 지정) —
+   * 화면이 그것을 다시 재면 명단이 예고한 키커와 90분이 세우는 키커가 갈린다. 다만
+   * **지정한 사람이 판 위에 있으면 그가 찬다**는 것은 규칙이 아니라 지정의 뜻이라,
+   * 그 한 줄만 여기서 즉시 답한다 — 방금 고른 이름이 3초 뒤에야 서는 것처럼 보이지
+   * 않게. 지정을 **푼** 직후의 한 박자만 서버가 옛 지정자를 들고 있고, 다음 자동 저장
+   * 응답이 제 값으로 맞춘다.
+   */
+  const takers = Object.fromEntries(
+    SET_PIECE_ROLES.map((role) => {
+      const designated = board.setPieces[role];
+      return [
+        role,
+        {
+          designated,
+          taker:
+            designated !== null && onPitch.has(designated)
+              ? designated
+              : squad.setPieces[role].taker,
+        },
+      ];
+    }),
+  ) as SetPieceTakersView;
+  /**
+   * 키커 후보 — **선발이 먼저**다. 지금 찰 수 있는 사람이 그들이고, 벤치·예비는 다음
+   * 경기의 선발일 수 있어 지정만 받는다(그 경기엔 기본값이 선다). 임대·2군은 부를 수
+   * 있는 인원이 아니라 목록에 세우지 않는다 — 이미 걸린 지정은 셀렉트가 따로 세운다.
+   */
+  const takerStarting = board.occupants.flatMap((id) => {
+    const p = byId.get(id);
+    return p ? [{ id, name: p.name }] : [];
+  });
+  const takerOthers = benchPlayers.map((p) => ({ id: p.id, name: p.name }));
+  const nameOf = (id: string) => byId.get(id)?.name ?? "—";
+  const setPieceKey = SET_PIECE_ROLES.map(
+    (role) => `${takers[role].designated ?? ""}>${takers[role].taker ?? ""}`,
+  ).join(",");
   // Set·배열은 매 렌더 새 객체라 메모 의존성으로 못 쓴다 — 내용으로 만든 키를 쓴다
   const localReserveKey = board.reserve.join(",");
   const benchKey = [...benchSet].join(",");
@@ -621,6 +678,23 @@ export function SquadView({
   }
 
   /**
+   * 죽은 공 키커 지정 — **역할과 같은 문을 지난다.** 평시엔 자동 저장에 실리고,
+   * 경기 중엔 오퍼레이터 지시가 되어 다음 진행 턴에 실린다 (match.md §8). 평시와
+   * 경기 중이 같은 스킬 하나에 닿는다는 규약을 화면도 그대로 따른다.
+   */
+  function chooseTaker(role: SetPieceRole, playerId: string | null) {
+    const next = { ...board, setPieces: { ...board.setPieces, [role]: playerId } };
+    if (advisory) {
+      setBoard(next);
+      setAdvisoryPending(true);
+      return onOrder?.({ kind: "setPiece", role, playerId });
+    }
+    if (!live) return;
+    // 상세를 열어 둔 채 고른다 — 판 아래 줄에서 고르는 값이라 명단이 접힐 이유가 없다
+    commit(next, { keepSelection: true });
+  }
+
+  /**
    * 칩의 클래스 — **자리의 색과 상태의 테두리는 다른 채널이다.**
    *
    * 색(배경)은 "이 자리가 무슨 자리인가"를 말한다: 최전방 붉게 · 중원 초록 ·
@@ -664,6 +738,7 @@ export function SquadView({
         swapPair={swapPair}
         tierOf={tierById}
         tierKey={`${onPitchKey}|${benchKey}|${localReserveKey}`}
+        setPieces={takers}
         onSwapIn={onSwapInRow}
         renderDetail={(p) => (
           <PlayerDetail
@@ -735,6 +810,7 @@ export function SquadView({
       selectedSlotCode,
       benchKey,
       onPitchKey,
+      setPieceKey,
       live,
       dismissed,
       saving,
@@ -1034,6 +1110,16 @@ export function SquadView({
             </PitchGround>
 
             <TacticsPanel tactics={board.tactics} editing={usable} onChange={changeTactics} />
+            {/* 죽은 공은 접히지 않는다 — 절반이 읽는 값이고, 접어 두면 지정한 적 없는
+                자리를 감독이 영영 보지 않는다 (match.md §1.4) */}
+            <SetPiecePanel
+              takers={takers}
+              nameOf={nameOf}
+              starting={takerStarting}
+              others={takerOthers}
+              editing={usable}
+              onPick={chooseTaker}
+            />
           </div>
         </div>
 
