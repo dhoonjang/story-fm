@@ -124,3 +124,4 @@ export * from "./skills";
 // views — 오피스 뷰·읽기 전용 조회
 export * from "./views/views";
 export * from "./views/lookup";
+export * from "./views/finance-outlook";

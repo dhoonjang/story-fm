@@ -87,6 +87,12 @@ import {
   type WageRatioTone,
 } from "../club/finance";
 import { openBoardRequest } from "../club/board-request";
+import {
+  financeOutlook,
+  type DebtView,
+  type ExpiringContractView,
+  type FinanceOutlook,
+} from "./finance-outlook";
 import { MANAGER_WALLET, walletOf } from "../club/manager-wallet";
 import {
   cupCatalog,
@@ -1548,6 +1554,22 @@ export interface OfficeViews {
     /** 시즌 누계 비중이 선 구간 — 경계는 `finance.ts` */
     wageTone: WageRatioTone;
     psr: { rolling3Season: number; headroom: number } | null;
+    /**
+     * **영입 관문 넷의 첫째** — 주급 총액 위에 이번 창에 더 얹을 수 있는 돈이다.
+     * 음수면 이미 천장을 넘었다.
+     *
+     * 넷(`wageRoom`·`debt`·`payments`·`expiringContracts`)은 전부 장부의 파생값이고
+     * `get_finance`가 읽는 것과 **같은 함수**(`financeOutlook`)에서 나온다
+     * (finance.md §8.3). 여력과 부채는 한 수로 접히고 회분·만료는 사람과 날짜가
+     * 붙는다 — 화면에서 앞의 둘이 지표 줄, 뒤의 둘이 목록으로 서는 이유다.
+     */
+    wageRoom: number;
+    /** 빚 — 없으면 null (PSR이 첫 시즌에 서지 않는 것과 같은 규약) */
+    debt: DebtView | null;
+    /** 미지급 분할 회분 — 나갈 것과 들어올 것 */
+    payments: FinanceOutlook["payments"];
+    /** 1년 안에 끝나는 우리 계약 — 전원, 만료일 순 */
+    expiringContracts: ExpiringContractView[];
     /** 진행 중인 이번 달 잠정 집계 */
     current: FinanceMonthView;
     /** 마감된 월간 보고서 — 최신 순 */
@@ -3345,6 +3367,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
   };
   // 실시간 활동 피드 — 접은 뒤 최근 30줄 (§8.1). 자르고 접으면 접기 전과 같아진다
   const feed = foldFinanceFeed(finance.ledger);
+  // 영입 관문 넷 — `get_finance`와 같은 자를 읽는다 (§8.3)
+  const outlook = financeOutlook(state);
   const stadium = clubProfileIn(state, userTeamId);
 
   const recentResults = state.matches
@@ -3463,6 +3487,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       wageRatio: seasonWageRatio(state),
       wageTone: wageRatioTone(seasonWageRatio(state)),
       psr: reports.length > 0 ? psrStatus(state) : null,
+      ...outlook,
       current,
       reports,
       feed,

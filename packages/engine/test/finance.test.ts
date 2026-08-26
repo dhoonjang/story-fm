@@ -43,6 +43,7 @@ import {
   currentMonthSummary,
   financeLookup,
   financeOf,
+  financeOutlook,
   ensureMonthlyPosted,
   paySeasonBonuses,
   isTelevised,
@@ -1990,6 +1991,51 @@ describe("지급 일정 — 분할은 표를 타고 나간다", () => {
     expect(paid.amount).toBe(Math.floor(severance / 2));
     expect(f.balance).toBe(before.balance - Math.floor(severance / 2));
     expect(f.transferBudget).toBe(before.budget); // 이적 예산은 그대로
+  });
+
+  /**
+   * 재정 화면과 `get_finance`가 함께 읽는 미지급 잔액 (finance.md §8.3) — 회분을 물
+   * 때마다 **정확히 그만큼** 준다. 지급된 회분이 목록에 남으면 감독은 이미 나간 돈을
+   * 두 번 세고, 방향이 섞이면 나갈 돈이 들어올 돈으로 선다.
+   */
+  it("미지급 잔액 합은 일정 총액에서 지급분을 뺀 값이고, 방향이 섞이지 않는다", () => {
+    const state = createMiniGame();
+    const payee = otherClub(state);
+    const schedule = pushSchedule(state, "transfer", TOTAL, 4, payee);
+
+    // 우리가 받는 쪽인 일정 하나 — 방향이 갈리는지 함께 본다
+    const incomingTotal = 8_000_000;
+    const theirPlayer = state.players.find((p) => p.teamId !== state.userTeamId)!;
+    state.paymentSchedules = [
+      ...(state.paymentSchedules ?? []),
+      {
+        id: "ps-incoming",
+        transferId: "tr-incoming",
+        gamePlayerId: theirPlayer.id,
+        payerTeamId: payee,
+        payeeTeamId: state.userTeamId,
+        kind: "transfer",
+        installments: buildPaymentInstallments(incomingTotal, 2, state.date),
+      },
+    ];
+
+    const payments = () => financeOutlook(state).payments;
+    expect(payments().outgoing.total).toBe(TOTAL);
+    expect(payments().outgoing.rows).toHaveLength(4);
+    expect(payments().incoming.total).toBe(incomingTotal);
+
+    let paid = 0;
+    for (const installment of schedule.installments) {
+      state.date = installment.dueOn;
+      settleDuePayments(state);
+      paid += installment.amount;
+      expect(payments().outgoing.total).toBe(TOTAL - paid);
+      // 남은 줄은 전부 앞으로의 기일이다
+      expect(payments().outgoing.rows.every((r) => r.dueOn > state.date)).toBe(true);
+    }
+    expect(payments().outgoing.rows).toHaveLength(0);
+    // 받는 쪽 일정도 같은 문을 지났다 — 2회분이 4년 안에 다 왔다
+    expect(payments().incoming.rows).toHaveLength(0);
   });
 });
 

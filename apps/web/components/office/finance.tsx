@@ -26,6 +26,9 @@ const NONCASH_CATEGORIES = new Set(["amortisation", "depreciation"]);
 
 type FinanceFeedRow = OfficeViews["finance"]["feed"][number];
 type FinanceBoard = OfficeViews["finance"]["board"];
+type FinancePayments = OfficeViews["finance"]["payments"];
+type PaymentSide = FinancePayments["outgoing"];
+type ExpiringContract = OfficeViews["finance"]["expiringContracts"][number];
 type BoardVision = NonNullable<OfficeViews["finance"]["boardExpectation"]["vision"]>;
 
 /**
@@ -211,6 +214,93 @@ function FinanceMonthCard({ month }: { month: FinanceMonth }) {
   );
 }
 
+/**
+ * 「지급 일정」 — **이미 확정돼 앞으로 오갈 분할 회분**이다 (finance.md §6.4 · §8.3).
+ *
+ * 나갈 것과 들어올 것이 나란히 선다: 내년 여름의 £20M이 화면 어디에도 없으면 감독은
+ * 지금의 잔고만 보고 이번 창을 계산한다. 지급된 회분은 이미 활동 피드가 들었으므로
+ * 여기 서는 것은 **미지급분뿐**이고, 그래서 머리의 합이 앞으로 움직일 돈 그대로다.
+ */
+function PaymentsBlock({ payments }: { payments: FinancePayments }) {
+  const { outgoing, incoming } = payments;
+  if (outgoing.rows.length === 0 && incoming.rows.length === 0) return null;
+  return (
+    <>
+      <div className="section-title">지급 일정</div>
+      <div className="fin-month" data-testid="fin-payments">
+        <div className="fin-cols">
+          <PaymentColumn side={outgoing} title="나갈 돈" tone="expense" />
+          <PaymentColumn side={incoming} title="들어올 돈" tone="income" />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function PaymentColumn({
+  side,
+  title,
+  tone,
+}: {
+  side: PaymentSide;
+  title: string;
+  tone: "income" | "expense";
+}) {
+  return (
+    <div className="fin-col">
+      <div className={`fin-col-title ${tone}`}>
+        {title} {formatMoney(side.total)}
+      </div>
+      {side.rows.length === 0 && <div className="fin-line muted">없음</div>}
+      {side.rows.map((row) => (
+        <div className="fin-line" key={`${row.scheduleId}-${row.index}`}>
+          <span>
+            {row.dueOn} {row.playerName}
+            {/* 상대가 없는 회분은 해지 정산 — 받는 쪽이 선수 본인이다 */}
+            {row.teamName && ` · ${row.teamName}`}
+            <span className="fin-tag">
+              {row.kindLabel}
+              {row.count > 1 && ` ${row.index}/${row.count}`}
+            </span>
+          </span>
+          <span>{formatMoney(row.amount)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 「계약 만료 예정」 — 1년 안에 끝나는 우리 계약 **전원**이다 (finance.md §8.3).
+ *
+ * 자르지 않는 것이 이 목록의 전부다: 스냅샷은 이름 셋까지만 싣고 나머지를 `…` 뒤에
+ * 감춘다. 꼬리표 둘은 코어가 판정한 것을 그대로 세운다 — 이미 남과 사전 계약을 맺은
+ * 선수는 재계약을 열 수 있는 사람이 아니라서 같은 줄에 섞이면 안 된다.
+ */
+function ExpiringBlock({ rows }: { rows: ExpiringContract[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <>
+      <div className="section-title">계약 만료 예정</div>
+      <div className="fin-month" data-testid="fin-expiring">
+        {rows.map((row) => (
+          <div className="fin-line" key={row.playerId}>
+            <span>
+              {row.name} {row.age}세 · ~{row.until}
+              {row.leavingTo ? (
+                <span className="fin-tag danger">{row.leavingTo}로 떠남</span>
+              ) : (
+                row.openToPrecontract && <span className="fin-tag">타 구단 예약 가능</span>
+              )}
+            </span>
+            <span>{formatMoney(row.weeklyWage)}/주</span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
   return (
     <div data-testid="view-finance">
@@ -238,6 +328,27 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
           <div className="label">주간 주급</div>
           <div className="value">{formatMoney(finance.weeklyWages)}</div>
         </div>
+        {/* 영입 관문의 첫째 — 음수면 이미 천장을 넘었다 (finance.md §8.3) */}
+        <div className="fin-stat" data-testid="fin-wage-room">
+          <div className="label">주급 여력</div>
+          <div className={finance.wageRoom < 0 ? "value danger" : "value"}>
+            {finance.wageRoom < 0 ? signed(finance.wageRoom) : formatMoney(finance.wageRoom)}
+          </div>
+          <div className="sub">주당</div>
+        </div>
+        {finance.debt && (
+          <div className="fin-stat" data-testid="fin-debt">
+            <div className="label">부채</div>
+            {/* 동결선을 넘었는지는 코어가 판정한다 — 화면은 색만 고른다 */}
+            <div className={finance.debt.overLimit ? "value danger" : "value"}>
+              {formatMoney(finance.debt.amount)}
+            </div>
+            <div className="sub">
+              동결선 {formatMoney(finance.debt.limit)} · 연 이자{" "}
+              {formatMoney(finance.debt.annualInterest)}
+            </div>
+          </div>
+        )}
         <div className="fin-stat">
           <div className="label">시즌 급여 비중</div>
           <div className={`value ${WAGE_TONE_CLASS[finance.wageTone]}`}>
@@ -277,6 +388,10 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
           <div className="sub">기준가 £{Math.round(finance.ticket.base)}</div>
         </div>
       </div>
+
+      {/* 앞으로 움직일 돈과 사람이 먼저다 — 지나간 활동은 그 뒤에 선다 */}
+      <PaymentsBlock payments={finance.payments} />
+      <ExpiringBlock rows={finance.expiringContracts} />
 
       <div className="section-title">재정 활동</div>
       {finance.feed.length === 0 && <div className="empty">아직 기록이 없습니다</div>}

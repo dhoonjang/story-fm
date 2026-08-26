@@ -280,3 +280,10 @@
   margin-top: 4px;
   font-variant-numeric: tabular-nums;
 }
+
+/* 지급 일정·계약 만료 — 월간 보고서 카드와 같은 껍데기(`.fin-month`)에 담고 줄은
+   `.fin-line`을 그대로 쓴다. 돈이 왼쪽 이름과 오른쪽 금액으로 서는 모양은 이미
+   보고서가 정해 둔 것이라, 새 모양을 만들면 같은 화면에 두 문법이 산다 */
+.fin-line.muted {
+  color: var(--muted);
+}
