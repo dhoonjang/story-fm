@@ -59,6 +59,10 @@ import {
   teamName,
   topNarrative,
   userPlayers,
+  visionOf,
+  visionReadings,
+  visionSpanOf,
+  visionYearOf,
   weeklyWagesOf,
   type ChatTurn,
   type CoachCue,
@@ -85,6 +89,7 @@ import {
   tacticToggleWord,
   tacticsBrief,
   TRANSFER_REQUEST_REASON_KO,
+  visionItemText,
   type CharacterEntry,
   type CharacterInjection,
   type ScoutReportCard,
@@ -830,6 +835,21 @@ export function buildGmStateNote(
         // 배치와 함께 낸다. 모양과 적응도는 코치의 말에 그대로 실린다
         `전술: ${tac.formation} · 선발 평균 적응 ${familiarityLabel(squadFamiliarity(state, state.userTeamId))}`,
         `재정: 잔고 ${formatMoney(finance.balance)} · 주급 ${formatMoney(weeklyWagesOf(state, state.userTeamId))}/주 · 이적예산 ${formatMoney(finance.transferBudget)}`,
+        /**
+         * **구단주가 건 다년 계획** (career.md §5) — 시즌 끝에 묻는 것이 순위 한 칸이
+         * 아니라는 사실이 여기 실려야 국부펀드형과 지역 유지형이 다르게 말한다.
+         * 시즌에 한 번 바뀌는 값이라 이 층에서도 안정적이다.
+         */
+        (() => {
+          const vision = visionOf(state);
+          // 0경기 순위는 팀 id 정렬일 뿐이다 — 아직 자리가 없으면 코어에 0을 넘긴다
+          const seat = { position: played > 0 ? rank : 0, leagueSize: standings.length };
+          const items = visionReadings(state, seat).map(visionItemText);
+          return (
+            `구단 비전 ${visionYearOf(vision, state.season)}년차/${visionSpanOf(vision)}년 계획: ` +
+            items.join(" · ")
+          );
+        })(),
         /**
          * 선수단 — **이름 명단이다. 이름뿐이다.** "누가 우리 팀인가"는 매 장면의 전제라
          * 입력에 없으면 GM이 없는 선수를 세우고, 명단은 영입·승격마다 바뀌어 캐시 층에

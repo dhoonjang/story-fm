@@ -8,6 +8,7 @@ import { addDays, contractUntil, diffDays } from "../core/dates";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { syncDefaultTraining } from "../squad/training-plan";
 import { expirePendingPress } from "../club/press";
+import { clearClubVision, standClubVision } from "../club/vision";
 import { payManagerSeverance, recordFinance } from "../club/finance";
 import { spendFromWallet, walletOf } from "../club/manager-wallet";
 import {
@@ -923,6 +924,17 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
   reseatClubPersonas(state, offer.teamId, {
     crossedLeague: fromLeague !== leagueOfTeamIn(state, offer.teamId),
   });
+  /**
+   * 앞 구단의 다년 계획은 지고 가지 않고, 새 구단의 계획이 **부임하는 그 자리에서**
+   * 선다 (career.md §5.1). 다음 전환까지 미루면 그 시즌 내내 화면과 GM이 순수
+   * 폴백을 읽는데, 그 `since`는 읽는 시점의 시즌이라 계획이 한 번 다시 시작한 것처럼
+   * 보인다 — 「1년차」가 두 시즌 연속 뜬다.
+   *
+   * ⚠️ **`reseatClubPersonas` 뒤여야 한다.** `standClubVision`은 `ownerOf(state)`로
+   * 원형 표를 고르는데, 그 앞에서는 구단주 페르소나가 아직 **앞 구단 사람**이다.
+   */
+  clearClubVision(state);
+  standClubVision(state);
 
   const name = teamNameIn(state, offer.teamId);
   pushNarrative(state, `${name} 부임`, 5);

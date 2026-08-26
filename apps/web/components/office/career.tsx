@@ -201,6 +201,30 @@ function boardVerdictOf(s: SeasonRow): string {
   return s.boardVerdict ?? "—";
 }
 
+type VisionItem = NonNullable<SeasonRow["board"]>["items"][number];
+
+/**
+ * **구단주가 걸었던 것** — 보드 한 줄 아래 항목별 달성률이 선다 (career.md §5).
+ *
+ * 같은 "달성"이 어느 시즌에는 평판 +8이고 어느 시즌에는 +2인 이유가 여기 있다:
+ * 순위를 맞춰도 유스가 0%면 가중합이 그만큼 내려간다. **읽는 값이라** 테두리도
+ * 배경도 없이 글자로만 선다 — 만질 것이 아니다.
+ */
+function VisionItems({ items }: { items: readonly VisionItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="vision-items">
+      {items.map((i) => (
+        <div className="vision-item" key={i.code}>
+          <span className="name">{i.label}</span>
+          <span className="target">{i.target}</span>
+          <span className="rate">{Math.round(i.progress * 100)}%</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
  * 감독 능력치 5축 — **오각형**.
  *
@@ -575,7 +599,11 @@ export function CareerView({
                   {/* 순위와 전적이 말하지 않는 것 — 같은 4위가 어느 구단에서는 성공이고
                       어느 구단에서는 실패다. 코어는 등급과 기대 순위만 넘기고 문장은
                       여기서 쓴다 (docs/overview.md §1 철칙 4) */}
-                  <td className="career-verdict">{boardVerdictOf(r.s)}</td>
+                  <td className="career-verdict">
+                    {boardVerdictOf(r.s)}
+                    {/* 순위 한 칸이 말하지 못하는 것 — 구단주가 걸었던 항목들 (career.md §5) */}
+                    <VisionItems items={r.s.board?.items ?? []} />
+                  </td>
                 </tr>
               ) : (
                 <tr key={`dismissal-${r.d.on}`} data-testid="career-dismissal">

@@ -32,6 +32,10 @@ import {
   presetOf,
   retiresAtSeasonEnd,
   seasonRating,
+  visionItemText,
+  visionScore,
+  visionTargetText,
+  VISION_CODE_KO,
 } from "@story-fm/domain";
 import {
   buildScheduleEntries,
@@ -79,6 +83,7 @@ import {
   topUpTransferBudget,
 } from "../club/finance";
 import { derbyMatchesOf, derbyRecordFrom } from "../club/derby";
+import { standClubVision, visionReadings } from "../club/vision";
 import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import type { SuperCupSource } from "./super-cup";
@@ -739,6 +744,11 @@ const EURO_RUNNER_UP_MEDIA = 4;
  */
 const BOARD_SEASON_SWING = 8;
 
+/** 평판 폭 한 조각 — 0도 방향이 없다는 뜻으로 보여야 한다 (digest 한 줄의 꼬리) */
+function signedSwing(swing: number): string {
+  return swing > 0 ? `+${swing}` : swing < 0 ? `−${-swing}` : "±0";
+}
+
 /**
  * 시즌 더비 **쓸이**가 보드 평판에 남기는 폭 — 전승 +, 전패 − (career.md §5.1).
  *
@@ -832,11 +842,22 @@ export function reviewSeason(state: GameState): string[] {
     return digest;
   }
 
+  /**
+   * **계획 없이 평가받는 시즌은 없다** (career.md §5) — 옛 세이브와 새 게임의 첫
+   * 시즌은 전환을 아직 한 번도 지나지 않았으므로 여기서 세운다. 기한이 남은 계획은
+   * 그대로 다시 앉으므로 두 번 불려도 같다.
+   */
+  standClubVision(state);
   const expectation = boardExpectation(state, state.userTeamId);
   const met = position <= expectation.target;
-  state.manager.reputation.board = clampReputation(
-    state.manager.reputation.board + (met ? BOARD_SEASON_SWING : -BOARD_SEASON_SWING),
-  );
+  /**
+   * **보드 평판 폭은 비전 항목의 가중합이다** (career.md §5). `visionScore`가 −1~+1로
+   * 정규화하므로 가중치를 어떻게 잡아도 `BOARD_SEASON_SWING`을 넘지 못한다.
+   * 리그 크기는 방금 세운 그 표의 행 수다 — 순위 항목이 경사를 그리는 밑변이다.
+   */
+  const readings = visionReadings(state, { position, leagueSize: standings.length });
+  const boardSwing = Math.round(BOARD_SEASON_SWING * visionScore(readings));
+  state.manager.reputation.board = clampReputation(state.manager.reputation.board + boardSwing);
 
   /**
    * **더비 전적은 순위와 따로 남는다** (career.md §5.1). 전적 줄은 한 경기라도
@@ -903,17 +924,22 @@ export function reviewSeason(state: GameState): string[] {
     goalsFor: row.goalsFor,
     goalsAgainst: row.goalsAgainst,
     board: {
+      // 등급은 여전히 `최종 순위 ≤ 기대 순위`다 — 경사는 평판의 것이고 등급은
+      // 커리어 표의 것이다 (career.md §5)
       grade: met ? "met" : "missed",
       position,
       target: expectation.target,
       expectationCode: expectation.code,
+      items: readings,
     },
     leagueId: leagueOfTeamIn(state, state.userTeamId),
   });
 
   digest.push(
     `시즌 ${state.season} 종료 — 최종 ${position}위 (${row.wins}승 ${row.draws}무 ${row.losses}패, 득실 ${row.goalDiff > 0 ? "+" : ""}${row.goalDiff})`,
-    `보드 평가: 기대 ${boardExpectationText(expectation.code, expectation.target)} · 최종 ${position}위 — ${met ? "달성" : "미달"}`,
+    `보드 평가: 기대 ${boardExpectationText(expectation.code, expectation.target)} · 최종 ${position}위 — ${met ? "달성" : "미달"}, 보드 평판 ${signedSwing(boardSwing)}`,
+    // 항목 줄의 문장은 도메인이 만든다 — 화면·사실 카드·여기가 같은 자를 쓴다
+    ...readings.map((reading) => `· ${visionItemText(reading)}`),
   );
   for (const a of state.achievements.filter((x) => x.season === state.season)) {
     digest.push(`업적 달성: ${achievementLine(a)}`);
@@ -1746,6 +1772,26 @@ function applyTransition(state: GameState): string[] {
     // 예산이 자유계약 선수단에 매 시즌 쌓였다.
     if (!isClubTeam(finance.teamId)) continue;
     topUpTransferBudget(state, finance.teamId, seasonBudgetBaseOf(state, finance.teamId), digest);
+  }
+
+  /**
+   * **클럽 비전** — 기한이 지난 계획이 그때의 체급으로 새로 서는 자리다 (career.md §5).
+   * 체급 재산정과 `season++`가 모두 끝난 뒤라야 새 계획이 **올해의** 표를 읽는다.
+   * 기한이 남았으면 같은 계획이 그대로 다시 앉아 아무것도 달라지지 않는다.
+   *
+   * 무직이면 세우지 않는다 — 걸 구단주가 없는 해다 (§5.1).
+   */
+  if (managedTeamId(state) !== null) {
+    const stoodSince = state.clubVision?.since;
+    const vision = standClubVision(state);
+    if (vision.since !== stoodSince) {
+      digest.push(
+        `구단주가 새 계획을 걸었다 (시즌 ${vision.since}~${vision.horizonSeason}) — ` +
+          vision.items
+            .map((item) => `${VISION_CODE_KO[item.code]} ${visionTargetText(item)}`)
+            .join(" · "),
+      );
+    }
   }
 
   digest.push(
