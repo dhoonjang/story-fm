@@ -609,9 +609,9 @@ export const HISTORY_WINDOW = defineHarness({
 
 export const PROMPT_REGRESSION = defineHarness({
   id: "prompt-regression",
-  what: "프롬프트 층의 글자·프리픽스 안정성 · 모의 세션의 장면 문법과 스킬 적중률",
+  what: "프롬프트 층의 글자·프리픽스 안정성 · 모의 세션의 장면 문법과 스킬 적중률 · 중계 위생",
   doc: PROMPTS,
-  cost: "세계 둘 + 모의 GM 세션 — 수 초",
+  cost: "세계 셋 + 모의 GM 세션 + 모의 경기 한 판 — 수 초",
   // prettier-ignore
   bands: [
     { metric: "고정층 글자", role: "guard", max: 30500, unit: "count", why: "매 턴 캐시 프리픽스로 나가는 하한 — 프롬프트는 지우는 방향으로 고친다 (prompts.md §5). 여백은 거의 없다: 문구가 늘면 잡히고, 도구가 늘어 넘겼으면 그때만 다시 자른다" },
@@ -626,6 +626,9 @@ export const PROMPT_REGRESSION = defineHarness({
     { metric: "레퍼런스층 프리픽스 안정성", role: "guard", min: 1, max: 1, unit: "ratio", why: "같은 세이브라면 날짜가 흘러도 같아야 한다 — 여기가 바뀌면 이 층과 그 뒤 이력이 통째로 무효가 된다" },
     { metric: "장면 문법 준수율", role: "guard", min: 1, unit: "ratio", why: "시점 헤더 한 줄 + `@` 줄로 여는 본문 — 그 뒤의 태그 없는 줄은 이어쓰기다 (prompts.md §1)" },
     { metric: "위생이 걷어낸 줄 비율", role: "guard", max: 0, unit: "ratio", why: "모의 장면은 이미 문법 안이다 — 위생이 무엇이든 걷었다면 문법이나 위생 한쪽이 움직인 것이다" },
+    { metric: "중계 턴", role: "measure", unit: "count", why: "모의 경기 한 판이 낸 중계 턴 — 아래 두 비율의 분모다" },
+    { metric: "중계 위생이 걷어낸 줄 비율", role: "guard", max: 0, unit: "ratio", why: "중계에 거는 것은 꺾쇠 규칙 하나뿐이다 — 모의 중계에서 무언가 걷혔다면 그 체가 장면까지 물고 있는 것이다 (prompts.md §1)" },
+    { metric: "중계 시각 헤더 보존율", role: "guard", min: 1, unit: "ratio", why: "위생 전후로 첫 줄 헤더가 같아야 한다 — 구간마다 새로 찍는 시각 줄은 중계에서 소음이 아니고, 걷히면 화면의 시계가 멎는다" },
     { metric: "시점 헤더 파싱 성공률", role: "guard", min: 1, unit: "ratio", why: "헤더를 못 읽으면 그 턴의 시계가 멎는다 (prompts.md §1)" },
     { metric: "평균 장면 글자", role: "measure", unit: "count", why: "모의 GM의 장면 길이 — 실모드의 400~800 예산과는 다른 눈금이다" },
     { metric: "스킬 적중률", role: "guard", min: 1, unit: "ratio", why: "코퍼스가 겨냥한 스킬을 실제로 불렀는가 — 떨어지면 스킬 표면이나 모의 GM이 갈린 것이다 (agents.md §8)" },
