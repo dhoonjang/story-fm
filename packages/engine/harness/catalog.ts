@@ -254,6 +254,22 @@ export const AI_MARKET = defineHarness({
   ],
 });
 
+export const INCOMING_OFFERS = defineHarness({
+  id: "incoming-offers",
+  what: "한 시즌 우리 선수에게 온 매각 오퍼 — 수 · 마감 주 비중 · 큰 무대 비중 · 시장가 대비 값",
+  doc: "docs/simulation/transfer.md §1-3",
+  cost: "전체 세계 한 시즌 · 수 분",
+  // prettier-ignore
+  bands: [
+    { metric: "우리에게 온 오퍼", role: "guard", min: 10, max: 45, unit: "count", why: "실제 1부 중위권은 여름 창 하나에 진지한 오퍼가 서너 건~열몇 건, 겨울까지 합쳐 그 두 배다. 하한은 「시장이 죽었다」, 상한은 「감독실이 오퍼로 덮인다」" },
+    { metric: "마감 주 비중", role: "guard", min: 0.15, unit: "ratio", why: "창은 한 시즌 95일 안팎이고 마감 주는 그중 14일이라 균등이면 15% — `DEADLINE_RUSH`가 걸린 자리는 그보다 위여야 한다 (§1-3)" },
+    { metric: "큰 무대 비중", role: "guard", min: 0.08, unit: "ratio", why: "우리보다 큰 무대(`gapTo > 0`)에서 오는 몫. 0에 가까우면 무대 무게(`suitorWeightOf`)가 죽어 2부 상위와 맨시티가 같은 확률로 부르는 자리로 돌아간 것이다" },
+    { metric: "값/시장가 · 중앙값", role: "measure", why: "첫 호가는 흥정 여지를 남겨 시장가의 75~100%로 들어오고(§1-2), 요청 갈래는 그 아래다 — 아래 마감 주 값과 견줘 읽는다" },
+    { metric: "마감 주 값/시장가 · 중앙값", role: "guard", min: 0.95, why: "마감 주에는 부르는 값과 사는 쪽 상한이 함께 `DEADLINE_PREMIUM`을 탄다 (§1-3). 배수가 값에 닿지 않으면 이 값은 위 「값/시장가」(0.75 언저리)로 내려앉으므로 그 사이에 문턱을 둔다 — 1.0에 붙이면 표본이 예닐곱뿐인 중앙값이 한 건에 흔들려 주간 워크플로가 매주 시끄럽다" },
+    { metric: "주전 오퍼의 큰 무대 비중", role: "measure", unit: "ratio", why: "주전에게 붙는 끌림(`STAGE_PULL_STARTER`)이 실제로 위를 향하는가 — 위 「큰 무대 비중」보다 높아야 잉여와 갈린 것이다" },
+  ],
+});
+
 export const MANAGER_MARKET = defineHarness({
   id: "manager-market",
   what: "한 시즌에 감독을 바꾸는 1부 구단 수",
@@ -581,6 +597,7 @@ export const HARNESSES: readonly Harness[] = [
   AI_FITNESS,
   AI_BENCH,
   AI_MARKET,
+  INCOMING_OFFERS,
   MANAGER_MARKET,
   NEGOTIATION,
   SQUAD_LONGEVITY,
