@@ -11,8 +11,16 @@ import {
 import type { FatigueBand, InjuryRiskGrade } from "@story-fm/domain";
 import { ConditionBar } from "@/components/condition-bar";
 import { moodSentence } from "@/lib/mood";
-import { Armband, FitGauge, FormArrow, Margin, StatusBadges, ovrTitle } from "./marks";
-import { TIER_SLUG, type SquadRow, type Tier } from "./types";
+import {
+  Armband,
+  FitGauge,
+  FormArrow,
+  Margin,
+  SetPieceMarks,
+  StatusBadges,
+  ovrTitle,
+} from "./marks";
+import { TIER_SLUG, type SetPieceTakersView, type SquadRow, type Tier } from "./types";
 
 /**
  * 정렬 기준 — `role`이 **기본이자 돌아오는 자리**다 (칸 → 라인 → OVR).
@@ -64,6 +72,7 @@ export function SquadTable({
   swapPair,
   tierOf,
   tierKey,
+  setPieces,
   onSwapIn,
 }: {
   players: SquadRow[];
@@ -78,6 +87,8 @@ export function SquadTable({
    * 행 클릭은 상세 보기뿐이고, 라인업 변경은 이 버튼으로만 일어난다.
    */
   swapPair?: { id: string; name: string; tier: Tier; slotCode: string | null } | null;
+  /** 죽은 공 키커 셋 — 이름 옆의 표식이 여기서 나온다 (완장과 같은 자리) */
+  setPieces: SetPieceTakersView;
   /** 이 선수가 지금 속한 칸 (로컬 편집 반영 — role·squadLevel은 저장 전까지 옛 값이다) */
   tierOf?: (id: string) => Tier;
   /**
@@ -297,6 +308,9 @@ export function SquadTable({
                     </i>
                   )}
                   <Armband row={p} />
+                  {/* 죽은 공 표식 — 완장 바로 옆이다. 둘 다 "이 선수가 맡은 자리"라
+                      한 계열로 읽혀야 하고, 이름 뒤로 밀면 국적·자격 배지에 묻힌다 */}
+                  <SetPieceMarks id={p.id} takers={setPieces} />
                   {p.name}
                 </span>
                 {/* 국적 — **표식이 아니라 사실**이라 알약이 아니다. 등록 표식(HG·U21)과

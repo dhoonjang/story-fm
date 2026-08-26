@@ -39,6 +39,7 @@ import {
   POSITION_CODES,
   RATING_MAX,
   SET_PIECE_ROLES,
+  SET_PIECE_ROLE_KO,
   reserveTrainingTitle,
   MISSION_CANDIDATES,
   MISSION_DAYS,
@@ -2247,13 +2248,6 @@ export function setPlayerPosition(
     message: `${player.name} 주 포지션 → ${code} (OVR ${player.attributes.overall})`,
   };
 }
-
-/** 죽은 공 자리의 이름 — 감독에게 되돌아가는 말이 여기 한 벌 산다 */
-const SET_PIECE_ROLE_KO: Record<SetPieceRole, string> = {
-  corner: "코너",
-  freeKick: "프리킥",
-  penalty: "페널티",
-};
 
 /**
  * **죽은 공 키커 지정** — "코너는 사카가 차", "페널티는 네 거야" (match.md §1.4).

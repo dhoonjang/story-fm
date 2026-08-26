@@ -1,4 +1,4 @@
-import type { BoardPoint } from "@story-fm/domain";
+import type { BoardPoint, SetPieceRole } from "@story-fm/domain";
 
 export type MatchBoardOrder =
   | { kind: "position"; playerId: string; position: string; point: BoardPoint }
@@ -8,7 +8,12 @@ export type MatchBoardOrder =
       kind: "tactic";
       axis: "mentality" | "defensiveLine" | "pressing" | "tempo" | "width" | "passStyle";
       value: number;
-    };
+    }
+  /**
+   * 죽은 공 키커 지정 — 평시와 경기 중이 **같은 스킬 하나**를 지난다
+   * (docs/simulation/match.md §2 키커 지정). `playerId`가 `null`이면 지정 해제다.
+   */
+  | { kind: "setPiece"; role: SetPieceRole; playerId: string | null };
 
 function orderKey(order: MatchBoardOrder): string {
   switch (order.kind) {
@@ -19,6 +24,8 @@ function orderKey(order: MatchBoardOrder): string {
       return `tactic:${order.axis}`;
     case "substitution":
       return `substitution:${order.out}`;
+    case "setPiece":
+      return `setPiece:${order.role}`;
   }
 }
 

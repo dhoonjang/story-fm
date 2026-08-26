@@ -376,6 +376,98 @@
   background: var(--accent-2);
 }
 
+/**
+ * ── 죽은 공 줄 — 전술 줄 바로 아래의 **한 줄** ────────────────────────────
+ *
+ * 접히지 않는다: 절반이 읽는 값이고(누가 차는가) 그것이 득점의 4분의 1을 정한다
+ * (docs/simulation/match.md §1.4). 전술 여섯 축과 같은 덩어리 안에 서므로 제 테두리를
+ * 내려놓고 위쪽 선 하나만 갖는다 — 판·전술·죽은 공이 세 장이 아니라 한 장이다.
+ */
+.setpiece-panel {
+  /**
+   * 세 열짜리 격자 — **자리 이름 · 지정 · 실제로 차는 사람.** 흐름(flex)으로 두면
+   * 이름 길이에 따라 셀렉트가 줄마다 다른 자리에서 시작해, 세 자리를 세로로 훑을 수
+   * 없다. 열을 고정하면 「지정이 없는 자리가 어디인가」가 표를 읽지 않아도 보인다.
+   */
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 8px 14px;
+  font-size: var(--fs-sm);
+}
+/* 머리는 제 줄을 갖는다 — 첫 줄에 끼우면 코너의 셀렉트만 오른쪽으로 밀린다 */
+.setpiece-head {
+  grid-column: 1 / -1;
+}
+/* 한 자리가 곧 한 줄이다 — 세 칸이 부모 격자의 열에 그대로 앉는다 */
+.sp-slot {
+  display: contents;
+}
+.board-stack .setpiece-panel {
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+.setpiece-head {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+/**
+ * 자리 이름은 값을 이고 있는 꼬리표다 — 전술 줄의 축 이름과 같은 눈금.
+ *
+ * **첫 칸에 못을 박는다.** 실제로 차는 사람은 지정과 갈릴 때만 서므로 줄마다 칸 수가
+ * 둘이거나 셋이고, 자동 배치에 맡기면 다음 자리 이름이 앞 줄의 빈 칸으로 올라간다.
+ */
+.sp-role {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+/**
+ * 지정은 **눌리는 물건**이다 — 옆의 이름(코어가 세운 사람)과 생김새가 갈려야
+ * 어느 쪽이 감독의 손잡이인지 보인다. 폭은 내용을 따르되 상한을 둔다: 긴 이름
+ * 하나가 줄을 밀어내면 세 자리가 두 줄로 접힌다.
+ */
+.sp-pick {
+  max-width: 150px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 1px 4px;
+  color: var(--text);
+  font-size: var(--fs-xs);
+}
+.sp-pick:hover {
+  border-color: var(--muted);
+}
+/* 무직 — 손잡이가 없는 자리는 글자로만 선다 (잠긴 버튼을 두지 않는다) */
+.sp-read {
+  color: var(--text);
+  font-size: var(--fs-xs);
+}
+/**
+ * 실제로 차는 사람 — **읽는 값이라 테두리가 없다.** 지정과 갈릴 때만 서므로,
+ * 이 이름이 보이는 것 자체가 「지정한 선수가 지금 차지 않는다」는 사실이다.
+ * 앞의 화살표가 그 방향을 말한다 — 문장을 적지 않아도 읽힌다.
+ */
+.sp-stand {
+  color: var(--gold-soft);
+  font-size: var(--fs-xs);
+  font-style: normal;
+}
+.sp-stand::before {
+  content: "→";
+  margin-right: 3px;
+  color: var(--muted);
+}
+
 /* 명단 행의 유일한 라인업 변경 수단 — 고른 자리로 보내는 화살표 */
 /* 화살표 자리 — 늘 같은 폭. 비어 있어도 칸을 지킨다 */
 /** 교체 화살표 자리 — 상세 카드의 왼쪽 여백도 이 값에서 나온다 */
@@ -1260,6 +1352,37 @@
   font-style: normal;
 }
 .armband[title^="라커룸 리더"] {
+  color: var(--muted);
+}
+/**
+ * 죽은 공 표식 — 완장 옆의 한 글자(코·프·페). 크기·자리는 완장과 같고 **톤만
+ * 갈린다**: 감독이 채운 자리(`on`)는 금색으로 차 있고, 코어가 세운 자리(`core`)는
+ * 흐리다 — Ⓒ와 Ⓛ이 갈리는 것과 같은 규약이다.
+ *
+ * `idle`은 세 번째 경우다: 지정은 걸렸는데 그 선수가 선발에 없어 차지 못한다.
+ * 색을 하나 더 만들지 않고 **테두리만 남긴다** — 이름은 남았고 공은 못 찬다.
+ */
+.spmark {
+  display: inline-block;
+  margin-right: 0.18em;
+  padding: 0 0.24em;
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  font-size: 0.68em;
+  font-style: normal;
+  line-height: 1.45;
+  vertical-align: 0.08em;
+}
+.spmark.on {
+  background: var(--gold);
+  color: var(--bg);
+}
+.spmark.idle {
+  border-color: var(--gold-soft);
+  color: var(--gold-soft);
+}
+.spmark.core {
+  border-color: var(--border);
   color: var(--muted);
 }
 .shirt-no {

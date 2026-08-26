@@ -141,8 +141,13 @@ function mean(xs: number[]): number {
   return xs.length === 0 ? 0 : xs.reduce((s, x) => s + x, 0) / xs.length;
 }
 
-/** 배치 포지션 → 존 그룹. 선수의 주 포지션이 아니라 "맡은 자리"가 기준이다 */
-function slotGroup(slot: LineupSlot): PositionGroup {
+/**
+ * 배치 포지션 → 존 그룹. 선수의 주 포지션이 아니라 "맡은 자리"가 기준이다.
+ *
+ * 받는 것은 `LineupSlot`의 **두 칸뿐**이다 — 키커를 고르는 자리(`setPieceTakersOf`)를
+ * 화면 쪽 뷰도 부르는데, 거기에는 적응도·피로 같은 경기용 칸이 없다.
+ */
+function slotGroup(slot: TakerSlot): PositionGroup {
   return positionGroupOf(slot.position) ?? positionGroupOfPlayer(slot.player);
 }
 
@@ -1199,17 +1204,28 @@ function topMean(values: number[], take: number): number {
   return sorted.reduce((sum, v) => sum + v, 0) / sorted.length;
 }
 
+/** 키커를 고르는 데 필요한 것 — 선수와 그가 선 자리 (`LineupSlot`의 부분집합) */
+export type TakerSlot = Pick<LineupSlot, "player" | "position">;
+
 /**
  * 죽은 공을 차는 사람 — **지정이 먼저, 없으면 그라운드 위 최고**.
  *
  * 지정한 선수가 선발에 없으면(교체·퇴장·로테이션) 그 자리는 곧바로 기본값으로
  * 돌아간다. 지정 자체는 전술에 남는다 — 한 경기의 명단이 감독의 지시를 지우지 않는다.
+ *
+ * **스쿼드 뷰도 이 함수를 부른다** (`engine/views/views.ts` → match.md §2 키커 지정).
+ * 화면이 「킥력 최고」를 스스로 다시 재면 명단이 예고한 키커와 90분이 세우는 키커가
+ * 갈리고, 그때 감독이 믿는 것은 화면이지 판정이 아니다.
+ *
+ * 골키퍼는 **기본값의 후보가 아니다** — 자기 골문을 비우고 코너를 올리는 일은 감독이
+ * 지정으로만 시킨다. 그래서 지정은 `slots` 전원과 견주고 기본값은 필드 플레이어에서만
+ * 고른다.
  */
-function resolveTakers(
-  slots: readonly LineupSlot[],
+export function setPieceTakersOf(
+  slots: readonly TakerSlot[],
   designated?: SetPieceTakers,
 ): SetPieceProfile["takers"] {
-  const onPitch = new Map(slots.map((slot) => [slot.player.id, slot] as const));
+  const onPitch = new Set(slots.map((slot) => slot.player.id));
   const field = slots.filter((slot) => slotGroup(slot) !== "GK");
   const best = (read: (p: Player) => number): string | null => {
     if (field.length === 0) return null;
@@ -1265,7 +1281,7 @@ function buildSetPiece(
   intensity: number,
   designated?: SetPieceTakers,
 ): SetPieceBuild {
-  const takers = resolveTakers(slots, designated);
+  const takers = setPieceTakersOf(slots, designated);
   const byId = new Map(slots.map((slot) => [slot.player.id, slot.player] as const));
   const field = slots.filter((slot) => slotGroup(slot) !== "GK");
 
