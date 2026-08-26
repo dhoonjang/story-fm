@@ -1,7 +1,13 @@
 import type { GamePlayer, ScoutMission } from "@story-fm/domain";
 import { MISSION_CANDIDATES, observedOverall } from "@story-fm/domain";
-import { observationOf, potentialBand } from "./scouting";
-import { observedMarketValue } from "../market/market";
+import {
+  knowledgeOf,
+  observationAt,
+  potentialBand,
+  KNOWLEDGE_RANK,
+  type Knowledge,
+} from "./scouting";
+import { observedMarketValueAt } from "../market/market";
 import { inPlayerPool, playerPoolOf } from "../world/player-pool";
 import { isOurPlayer, type GameState } from "../core/state";
 
@@ -37,14 +43,33 @@ interface CandidateKey {
   value: number;
 }
 
+/**
+ * 임무가 후보를 재는 **눈금** — 지금 아는 수준이 아니라 **다녀온 뒤의 수준**이다.
+ *
+ * 스카우트는 가서 보고 온다. 고를 때 아직 안 본 눈금(`rumoured`)으로 재고 카드는
+ * 보고 온 눈금(`seen`)으로 그리면, 두 값이 달라 「£10M 이하로 찾아 와」의 답에
+ * £20M짜리가 서고 목록의 순서가 눈에 보이는 종합과 어긋난다.
+ *
+ * 이미 그보다 잘 아는 선수(스카우팅을 마쳤다)는 그 수준 그대로다 — 다녀왔다고
+ * 알던 것을 잊지는 않는다.
+ */
+function missionKnowledgeOf(state: GameState, playerId: string): Knowledge {
+  const now = knowledgeOf(state, playerId);
+  return KNOWLEDGE_RANK[now] >= KNOWLEDGE_RANK.seen ? now : "seen";
+}
+
 function candidateKeyOf(state: GameState, player: GamePlayer): CandidateKey {
-  const overall = observedOverall(player.attributes.overall, observationOf(state, player.id));
-  const band = potentialBand(state, player);
+  const knowledge = missionKnowledgeOf(state, player.id);
+  const overall = observedOverall(
+    player.attributes.overall,
+    observationAt(state, player.id, knowledge),
+  );
+  const band = potentialBand(state, player, knowledge);
   return {
     id: player.id,
     overall,
     centre: band ? (band.low + band.high) / 2 : overall,
-    value: observedMarketValue(state, player),
+    value: observedMarketValueAt(state, player, knowledge),
   };
 }
 
