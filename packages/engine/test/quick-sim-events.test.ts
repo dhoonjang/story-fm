@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { PHASE_END, YELLOWS_PER_SUSPENSION, positionGroupOfPlayer } from "@story-fm/domain";
 import {
+  PHASE_END,
+  YELLOWS_PER_SUSPENSION,
+  positionGroupOfPlayer,
+  yellowBanMatches,
+  type MatchRecord,
+} from "@story-fm/domain";
+import {
+  leagueOfTeamIn,
   advanceTime,
   allMatchesDone,
   createGame,
   interpretBackgroundHeuristic,
-  isSuspended,
+  disciplineOf,
+  isSuspendedFor,
   playersOf,
   quickMinuteOf,
   quickSimulate,
@@ -84,7 +92,10 @@ describe("골의 분", () => {
   it("득점자와 같은 길이로, 시간 순으로 남는다", () => {
     const state = createTestGame(3);
     // 스쿼드는 한 번만 세운다 — 루프 안에서 다시 세우면 그게 이 케이스의 값이 된다
-    const squads = { home: simSquadOf(state, "mancity"), away: simSquadOf(state, "hull") };
+    const squads = {
+      home: simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity")),
+      away: simSquadOf(state, "hull", leagueOfTeamIn(state, "hull")),
+    };
     for (let i = 0; i < 60; i++) {
       const r = quickSimulate(squads.home, squads.away, 900 + i, `min:${i}`);
       expect(r.goalMinutes).toHaveLength(r.scorers.length);
@@ -134,7 +145,10 @@ describe("골의 분", () => {
     // 정규가 추가시간까지 뽑히면 93′ 골 뒤에 연장 91′ 골이 붙어 `goalMinutes`가
     // 역행한다 — 두 시뮬이 같은 시계 위에 서야 한다 (match.md §7)
     const state = createTestGame(5);
-    const squads = { home: simSquadOf(state, "mancity"), away: simSquadOf(state, "hull") };
+    const squads = {
+      home: simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity")),
+      away: simSquadOf(state, "hull", leagueOfTeamIn(state, "hull")),
+    };
     for (let i = 0; i < 40; i++) {
       const regular = quickSimulate(squads.home, squads.away, 1200 + i, `aet:${i}`);
       const extra = simulateExtraTime(squads.home, squads.away, 1200 + i, `aet:${i}`);
@@ -175,7 +189,10 @@ describe("선수별 기록", () => {
    */
   it("선수별 슛·xG의 합이 팀 합계와 같다", () => {
     const state = createTestGame(5);
-    const squads = { home: simSquadOf(state, "mancity"), away: simSquadOf(state, "hull") };
+    const squads = {
+      home: simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity")),
+      away: simSquadOf(state, "hull", leagueOfTeamIn(state, "hull")),
+    };
     let sampled = 0;
     for (let i = 0; i < 20; i++) {
       const r = quickSimulate(squads.home, squads.away, 3100 + i, `stat:${i}`);
@@ -195,7 +212,10 @@ describe("선수별 기록", () => {
 
   it("선방은 그 분에 골문에 선 사람에게만 적힌다", () => {
     const state = createTestGame(5);
-    const squads = { home: simSquadOf(state, "mancity"), away: simSquadOf(state, "hull") };
+    const squads = {
+      home: simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity")),
+      away: simSquadOf(state, "hull", leagueOfTeamIn(state, "hull")),
+    };
     const keepers = new Set(
       [...squads.home.starters, ...squads.away.starters, ...(squads.home.bench ?? [])]
         .filter((p) => positionGroupOfPlayer(p) === "GK")
@@ -229,8 +249,8 @@ describe("부상", () => {
       ),
     });
     const squads = {
-      home: alwaysHurt(simSquadOf(state, "mancity")),
-      away: alwaysHurt(simSquadOf(state, "hull")),
+      home: alwaysHurt(simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity"))),
+      away: alwaysHurt(simSquadOf(state, "hull", leagueOfTeamIn(state, "hull"))),
     };
     let reds = 0;
     let hurt = 0;
@@ -259,8 +279,8 @@ describe("간이 시뮬 전력 로그", () => {
 describe("카드·퇴장", () => {
   it("두 번째 경고는 경고 한 장 + 퇴장으로 남는다 (실제 기록과 같다)", () => {
     const state = createTestGame(3);
-    const home = simSquadOf(state, "mancity");
-    const away = simSquadOf(state, "hull");
+    const home = simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity"));
+    const away = simSquadOf(state, "hull", leagueOfTeamIn(state, "hull"));
     let secondYellows = 0;
     for (let i = 0; i < 400; i++) {
       const r = quickSimulate(home, away, 4000 + i, `card:${i}`);
@@ -289,33 +309,45 @@ describe("카드·퇴장", () => {
     const state = createTestGame(3);
     const player = playersOf(state, state.userTeamId)[0]!;
     expect(seasonYellowsOf(state, player.id, state.season)).toBe(0);
+    /** 리그 경기 한 장 — EPL의 첫 눈금(5장)은 19라운드까지라 1라운드로 센다 */
+    const leagueMatch = (id: string, round: number): MatchRecord => ({
+      id,
+      season: state.season,
+      competitionId: "epl",
+      stage: "league",
+      round,
+      date: state.date,
+      homeTeamId: state.userTeamId,
+      awayTeamId: "hull",
+      result: null,
+    });
     // 눈금 바로 앞까지 쌓아 둔다 — 다음 한 장이 누적 정지에 닿는다
     for (let i = 0; i < YELLOWS_PER_SUSPENSION - 1; i++) {
       recordCard(state, {
         playerId: player.id,
-        matchId: `m-past-${i}`,
+        match: leagueMatch(`m-past-${i}`, i + 1),
         card: "yellow",
         minute: 30,
       });
     }
-    const dismissal = "m-off";
+    const dismissal = leagueMatch("m-off", YELLOWS_PER_SUSPENSION);
     const first = recordCard(state, {
       playerId: player.id,
-      matchId: dismissal,
+      match: dismissal,
       card: "yellow",
       minute: 20,
     });
     expect(first.issued).toBeTruthy(); // 5장째 — 누적 정지가 걸렸다
     const second = recordCard(state, {
       playerId: player.id,
-      matchId: dismissal,
+      match: dismissal,
       card: "yellow",
       minute: 70,
     });
     expect(second.revoked).toBe(first.issued); // 두 번째 경고가 그 정지를 물린다
     const off = recordCard(state, {
       playerId: player.id,
-      matchId: dismissal,
+      match: dismissal,
       card: "red",
       minute: 70,
     });
@@ -327,7 +359,7 @@ describe("카드·퇴장", () => {
     expect(bans[0]!.lengthMatches).toBe(1);
     // 누적에서는 빠지고, 장부의 세 줄은 그대로 남는다 (경기 기록은 실제로 그랬다)
     expect(seasonYellowsOf(state, player.id, state.season)).toBe(YELLOWS_PER_SUSPENSION - 1);
-    expect(state.bookings.filter((b) => b.matchId === dismissal)).toHaveLength(3);
+    expect(state.bookings.filter((b) => b.matchId === dismissal.id)).toHaveLength(3);
   });
 
   it("한 경기가 같은 선수에게 정지를 두 번 걸지 않는다 — 리그 전체에서", () => {
@@ -375,31 +407,60 @@ describe("카드·퇴장", () => {
     expect(theirSuspensions.some((s) => s.cause === "red")).toBe(true);
   });
 
-  it("경고 다섯 장마다 정지가 하나 — 눈금이 유저 경기와 같다", () => {
+  /**
+   * **누적은 대회 안에서만 쌓인다** (match.md §6) — 눈금이 대회마다 다르므로
+   * 세계 전체를 한 자로 재면 리그 4장 + 컵 1장이 리그 정지로 읽힌다.
+   */
+  it("누적 정지는 그 대회의 경고로만 걸린다 — 대회를 섞지 않는다", () => {
     const state = seasonOf(7);
-    const bannedFor = new Map<string, number>();
+    const bannedIn = new Map<string, number>();
     for (const s of state.suspensions.filter((x) => x.cause === "yellows")) {
-      bannedFor.set(s.gamePlayerId, (bannedFor.get(s.gamePlayerId) ?? 0) + 1);
+      // 누적 정지는 어느 협회에서도 그 대회뿐이다
+      expect(s.scope, s.id).toBe("competition");
+      expect(s.competitionId, s.id).toBeTruthy();
+      const key = `${s.gamePlayerId}|${s.competitionId}`;
+      bannedIn.set(key, (bannedIn.get(key) ?? 0) + 1);
     }
-    expect(bannedFor.size).toBeGreaterThan(0);
-    // 시즌 경고 12장이면 정지 두 번(5·10장에서) — 넘긴 눈금 수와 정확히 같다
-    for (const [playerId, bans] of bannedFor) {
-      const yellows = seasonYellowsOf(state, playerId, state.season);
-      expect(bans, playerId).toBe(Math.floor(yellows / YELLOWS_PER_SUSPENSION));
+    expect(bannedIn.size).toBeGreaterThan(0);
+    for (const [key, bans] of bannedIn) {
+      const [playerId, competitionId] = key.split("|") as [string, string];
+      const rule = disciplineOf(competitionId)!;
+      expect(rule, competitionId).toBeTruthy();
+      const yellows = seasonYellowsOf(state, playerId, state.season, competitionId);
+      /**
+       * 문턱(EPL의 매치위크)과 사면(컵의 8강)은 **언제 받았나**에 달렸으므로 상한만
+       * 잰다: 라운드 1·리그 단계로 재면 어느 눈금도 놓치지 않는 최대 횟수다.
+       */
+      let ceiling = 0;
+      for (let n = 1; n <= yellows; n++) {
+        if (yellowBanMatches(rule, n, { round: 1, stage: "league" }) !== null) ceiling++;
+      }
+      expect(bans, key).toBeGreaterThan(0);
+      expect(bans, key).toBeLessThanOrEqual(ceiling);
+      // 그 대회의 경고만으로 첫 눈금을 넘겼다 — 다른 대회의 장을 빌리지 않았다
+      expect(yellows, key).toBeGreaterThanOrEqual(rule.steps[0]!.at);
     }
   });
 
-  it("정지된 선수는 라인업에서 빠진다 — AI 팀도", () => {
+  it("정지된 선수는 그 대회 라인업에서 빠진다 — AI 팀도", () => {
     const state = seasonOf(7);
-    const banned = state.suspensions.find(
-      (s) =>
+    // 리그 정지를 하나 고른다 — 컵 정지는 리그 명단을 막지 않는다 (match.md §6)
+    const banned = state.suspensions.find((s) => {
+      const owner = state.players.find((p) => p.id === s.gamePlayerId);
+      return (
         s.status === "active" &&
-        state.players.some((p) => p.id === s.gamePlayerId && p.teamId !== state.userTeamId),
-    );
+        owner !== undefined &&
+        owner.teamId !== state.userTeamId &&
+        s.competitionId === leagueOfTeamIn(state, owner.teamId)
+      );
+    });
     expect(banned).toBeTruthy();
     const player = state.players.find((p) => p.id === banned!.gamePlayerId)!;
-    expect(isSuspended(state, player.id)).toBe(true);
-    expect(simSquadOf(state, player.teamId).starters.map((p) => p.id)).not.toContain(player.id);
+    const league = leagueOfTeamIn(state, player.teamId);
+    expect(isSuspendedFor(state, player.id, league)).toBe(true);
+    expect(simSquadOf(state, player.teamId, league).starters.map((p) => p.id)).not.toContain(
+      player.id,
+    );
   });
 
   it("시즌마다 퇴장이 실제로 나온다 — 장부의 red가 경기와 이어진다", () => {
@@ -438,8 +499,8 @@ describe("카드·퇴장", () => {
     ];
     const totals = { eleven: { conceded: 0, scored: 0 }, ten: { conceded: 0, scored: 0 } };
     for (const [homeId, awayId] of pairs) {
-      const away = simSquadOf(state, awayId);
-      const eleven = simSquadOf(state, homeId);
+      const away = simSquadOf(state, awayId, leagueOfTeamIn(state, awayId));
+      const eleven = simSquadOf(state, homeId, leagueOfTeamIn(state, homeId));
       // 필드 플레이어 하나가 빠진 판 — 벤치는 그대로다(교체는 수를 메우지 않는다)
       const gone = eleven.starters.find((p) => positionGroupOfPlayer(p) === "MF")!;
       const ten = { ...eleven, starters: eleven.starters.filter((p) => p.id !== gone.id) };
@@ -520,8 +581,8 @@ describe("같은 날 경기는 킥오프 순서대로 굴러간다", () => {
 describe("교체", () => {
   it("양 팀이 모두 교체한다 — 한도는 장부와 같다 (5인/3창, 하프타임 미소모)", () => {
     const state = createTestGame(3);
-    const home = simSquadOf(state, "mancity");
-    const away = simSquadOf(state, "hull");
+    const home = simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity"));
+    const away = simSquadOf(state, "hull", leagueOfTeamIn(state, "hull"));
     let homeSubs = 0;
     let awaySubs = 0;
     for (let i = 0; i < 60; i++) {

@@ -9,7 +9,7 @@ import {
   type MatchLedgerState,
   type SideInput,
 } from "@story-fm/sim";
-import { makeRng, simSquadOf, type SimSquad } from "@story-fm/engine";
+import { leagueOfTeamIn, makeRng, simSquadOf, type SimSquad } from "@story-fm/engine";
 import { createTestGame } from "../test/helpers";
 import { SEGMENT_SHOTS } from "./catalog";
 import { outOfBand, reportOf, type Readings } from "./harness";
@@ -101,8 +101,8 @@ function playMatch(
 describe("구간 시뮬 — 슈팅 총량의 원본은 패킷이다", () => {
   it("끊는 횟수가 총량을 바꾸지 않는다", () => {
     const state = createTestGame(11);
-    const home = simSquadOf(state, "chelsea");
-    const away = simSquadOf(state, "liverpool");
+    const home = simSquadOf(state, "chelsea", leagueOfTeamIn(state, "chelsea"));
+    const away = simSquadOf(state, "liverpool", leagueOfTeamIn(state, "liverpool"));
     const packet = buildStrengthPacket(sideOf(home, "Chelsea"), sideOf(away, "Liverpool"));
     const expected =
       (packet.guide.expectedShots?.home ?? 0) + (packet.guide.expectedShots?.away ?? 0);

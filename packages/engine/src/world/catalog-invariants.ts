@@ -10,6 +10,7 @@ import {
   type LeagueCatalogEntry,
 } from "../data/league-catalog";
 import { cupCatalog, knockoutBracketSize, type CupCatalogEntry } from "../data/cup-catalog";
+import { disciplineOf } from "../data/discipline-catalog";
 import {
   DOMESTIC_CUP_SIZE,
   DOMESTIC_STAGES,
@@ -393,6 +394,30 @@ export function checkPlayerNationality(
   return problems;
 }
 
+/**
+ * **경기를 여는 대회는 징계 규정을 가져야 한다**
+ * (→ ../../../../docs/simulation/match.md §6).
+ *
+ * 규정이 없으면 그 대회의 카드는 장부에 남지도 정지를 부르지도 않는다
+ * (`recordCard`가 조용히 돌아선다). 크래시가 아니라 **없는 규칙**이라, 새 대회를
+ * 더한 사람이 알아채는 자리는 여기뿐이다.
+ */
+export function checkDisciplineCoverage(
+  leagues: readonly LeagueCatalogEntry[],
+  euroCups: readonly CupCatalogEntry[],
+  domesticCups: readonly DomesticCupEntry[],
+): string[] {
+  const playing = [
+    // 2부도 센다 — 감독이 강등되면 그 리그가 일정을 돌고 클럽은 국내 컵에 나온다
+    ...leagues.filter((l) => l.kind === "playable" || l.kind === "cup-only").map((l) => l.id),
+    ...euroCups.map((c) => c.id),
+    ...domesticCups.map((c) => c.id),
+  ];
+  return playing
+    .filter((id) => disciplineOf(id) === null)
+    .map((id) => `${id}: 징계 규정 없음 (data/discipline-catalog.ts)`);
+}
+
 /** 네 층을 한 번에 — 팀·리그가 함께 바뀌는 편집(팀 이동·리그 삭제)의 관문 */
 export function checkCatalogInvariants(input: CatalogCandidate): string[] {
   return [
@@ -400,6 +425,7 @@ export function checkCatalogInvariants(input: CatalogCandidate): string[] {
     ...checkEuroCupInvariants(input.euroCups, input.leagues),
     ...checkDomesticCupInvariants(input.domesticCups),
     ...checkSeedInvariants(input.leagues),
+    ...checkDisciplineCoverage(input.leagues, input.euroCups, input.domesticCups),
   ];
 }
 

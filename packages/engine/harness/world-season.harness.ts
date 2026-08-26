@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  leagueOfTeamIn,
   EXHAUSTED_CONDITION,
   ROTATION_FATIGUE,
   ROTATION_FRESHER,
@@ -244,7 +245,9 @@ function sampleRotation(state: GameState, tally: RotationTally): void {
     if (row.teamId === state.userTeamId) continue;
     const squad = firstTeamPlayers(state, row.teamId);
     const byId = new Map(squad.map((p) => [p.id, p]));
-    const onPitch = new Set(simSquadOf(state, row.teamId).starters.map((p) => p.id));
+    const onPitch = new Set(
+      simSquadOf(state, row.teamId, leagueOfTeamIn(state, row.teamId)).starters.map((p) => p.id),
+    );
     tally.samples += 1;
     for (const p of squad) {
       tally.bandTotal += 1;

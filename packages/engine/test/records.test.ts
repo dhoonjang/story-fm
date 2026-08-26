@@ -3,6 +3,9 @@ import {
   activeContract,
   activeSuspension,
   assignmentsOf,
+  disciplineOf,
+  isSuspendedFor,
+  serveSuspensions,
   buildOfficeViews,
   clubRecordsOf,
   foldCareer,
@@ -21,8 +24,12 @@ import {
   addToSeasonStat,
   keptCleanSheet,
   milestoneTitle,
+  yellowBanMatches,
+  type MatchRecord,
+  type MatchStage,
 } from "@story-fm/domain";
 import type { SeasonStat } from "@story-fm/domain";
+import { recordCard } from "../src/match/discipline";
 import { advanceToMatchday, createTestGame, playMockMatch, playPreseason } from "./helpers";
 
 /**
@@ -125,6 +132,183 @@ describe("징계 — BOOKING + SUSPENSION", () => {
     expect(isSuspended(state, player.id)).toBe(false);
     // 이력은 남는다
     expect(state.suspensions.find((s) => s.id === "sus-1")?.status).toBe("done");
+  });
+
+  /**
+   * 눈금은 **대회의 것이다** (match.md §6). 다섯 리그가 저마다 다른 사다리를 쓰고,
+   * 잉글랜드에만 매치위크 문턱이, 대항전과 잉글랜드 두 컵에만 8강 사면이 있다.
+   * 수식이라 세계를 세우지 않고 곧장 잰다.
+   */
+  it("경고 눈금은 대회 규정을 그대로 센다 — 사다리·문턱·사면", () => {
+    const league = { round: 1, stage: "league" as const };
+    const epl = disciplineOf("epl")!;
+    expect(yellowBanMatches(epl, 4, league)).toBeNull();
+    expect(yellowBanMatches(epl, 5, league)).toBe(1);
+    expect(yellowBanMatches(epl, 10, league)).toBe(2);
+    expect(yellowBanMatches(epl, 15, league)).toBe(3);
+    expect(yellowBanMatches(epl, 20, league)).toBe(4);
+    // 되풀이 주기가 없다 — 20장이 끝이다
+    expect(yellowBanMatches(epl, 25, league)).toBeNull();
+    // 매치위크 문턱 — 첫 19경기 안에 닿아야 5장이 정지다
+    expect(yellowBanMatches(epl, 5, { round: 20, stage: "league" })).toBeNull();
+    expect(yellowBanMatches(epl, 5, { round: 19, stage: "league" })).toBe(1);
+
+    // 라리가·분데스·리그 1은 5장마다, 문턱 없이 시즌 내내
+    const laliga = disciplineOf("laliga")!;
+    expect(yellowBanMatches(laliga, 5, { round: 37, stage: "league" })).toBe(1);
+    expect(yellowBanMatches(laliga, 10, league)).toBe(1);
+    expect(yellowBanMatches(laliga, 12, league)).toBeNull();
+
+    // 세리에 A는 사이가 좁아지고(5·9·13·16·18) 19장부터 매 장
+    const seriea = disciplineOf("seriea")!;
+    expect(yellowBanMatches(seriea, 9, league)).toBe(1);
+    expect(yellowBanMatches(seriea, 10, league)).toBeNull();
+    expect(yellowBanMatches(seriea, 19, league)).toBe(1);
+    expect(yellowBanMatches(seriea, 20, league)).toBe(1);
+
+    // 대항전은 3장, 그 뒤로 홀수 장마다. 8강이 끝나면 지워진다
+    const ucl = disciplineOf("ucl")!;
+    expect(yellowBanMatches(ucl, 3, { round: 1, stage: "r16" })).toBe(1);
+    expect(yellowBanMatches(ucl, 5, { round: 1, stage: "qf" })).toBe(1);
+    expect(yellowBanMatches(ucl, 4, { round: 1, stage: "qf" })).toBeNull();
+    expect(yellowBanMatches(ucl, 3, { round: 1, stage: "sf" })).toBeNull();
+    expect(yellowBanMatches(ucl, 3, { round: 1, stage: "final" })).toBeNull();
+  });
+
+  /**
+   * **컵 경고는 리그 누적에 세이지 않는다** — 이 규칙이 없으면 경고 4장 주전을
+   * 컵에 내보낸 감독이 다음 리그 경기에서 그를 잃는다 (match.md §6).
+   */
+  it("컵 경고는 리그 누적에 세이지 않고 리그 정지를 부르지 않는다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[3]!;
+    const fixture = (id: string, competitionId: string, stage: MatchStage): MatchRecord => ({
+      id,
+      season: state.season,
+      competitionId,
+      stage,
+      round: 1,
+      date: state.date,
+      homeTeamId: state.userTeamId,
+      awayTeamId: "hull",
+      result: null,
+    });
+    // 리그에서 넉 장 — 눈금(5장) 바로 앞
+    for (let i = 0; i < 4; i++) {
+      recordCard(state, {
+        playerId: player.id,
+        match: fixture(`m-epl-${i}`, "epl", "league"),
+        card: "yellow",
+        minute: 30,
+      });
+    }
+    // FA컵에서 한 장 — 리그 누적은 그대로 4장이고 정지도 걸리지 않는다
+    const cup = recordCard(state, {
+      playerId: player.id,
+      match: fixture("m-facup-1", "facup", "r32"),
+      card: "yellow",
+      minute: 30,
+    });
+    expect(cup.issued).toBeNull();
+    expect(seasonYellowsOf(state, player.id, state.season, "epl")).toBe(4);
+    expect(seasonYellowsOf(state, player.id, state.season, "facup")).toBe(1);
+    expect(isSuspendedFor(state, player.id, "epl")).toBe(false);
+
+    // FA컵 두 장째가 컵 정지를 건다 — 리그 경기는 그대로 나온다
+    const second = recordCard(state, {
+      playerId: player.id,
+      match: fixture("m-facup-2", "facup", "r16"),
+      card: "yellow",
+      minute: 30,
+    });
+    expect(second.issued).toBeTruthy();
+    expect(isSuspendedFor(state, player.id, "facup")).toBe(true);
+    expect(isSuspendedFor(state, player.id, "epl")).toBe(false);
+  });
+
+  /**
+   * **소화도 대회의 것이다** — 대항전 정지를 리그 경기로 갚으면 감독은 UCL 경기에
+   * 그를 그대로 세운다 (match.md §6).
+   */
+  it("대항전 정지는 리그 경기로 소화되지 않는다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[2]!;
+    state.suspensions.push({
+      id: "sus-ucl",
+      gamePlayerId: player.id,
+      cause: "red",
+      competitionId: "ucl",
+      scope: "jurisdiction",
+      issuedOn: state.date,
+      lengthMatches: 1,
+      served: 0,
+      status: "active",
+    });
+    serveSuspensions(state, [player.id], "epl");
+    expect(state.suspensions.find((s) => s.id === "sus-ucl")?.served).toBe(0);
+    // 같은 관할의 다른 대항전이면 소화된다 — UEFA의 정지는 셋을 가리지 않는다
+    serveSuspensions(state, [player.id], "uel");
+    expect(state.suspensions.find((s) => s.id === "sus-ucl")?.status).toBe("done");
+  });
+
+  /**
+   * **잉글랜드의 퇴장만 관할 전체다** — FA컵 퇴장이 다음 리그 경기를 막는다.
+   * 나머지 네 나라는 그 대회뿐이다 (match.md §6).
+   */
+  it("퇴장 정지의 범위는 협회 규정을 따른다", () => {
+    const state = createTestGame();
+    const [english, spanish] = [userPlayers(state)[5]!, userPlayers(state)[6]!];
+    const fixture = (id: string, competitionId: string): MatchRecord => ({
+      id,
+      season: state.season,
+      competitionId,
+      stage: "r32",
+      round: 1,
+      date: state.date,
+      homeTeamId: state.userTeamId,
+      awayTeamId: "hull",
+      result: null,
+    });
+    recordCard(state, {
+      playerId: english.id,
+      match: fixture("m-facup-red", "facup"),
+      card: "red",
+      minute: 60,
+    });
+    expect(isSuspendedFor(state, english.id, "epl")).toBe(true);
+    expect(isSuspendedFor(state, english.id, "ucl")).toBe(false);
+
+    recordCard(state, {
+      playerId: spanish.id,
+      match: fixture("m-copa-red", "copadelrey"),
+      card: "red",
+      minute: 60,
+    });
+    expect(isSuspendedFor(state, spanish.id, "copadelrey")).toBe(true);
+    expect(isSuspendedFor(state, spanish.id, "laliga")).toBe(false);
+  });
+
+  /**
+   * **옛 세이브의 정지는 전 대회다** — 대회를 적기 전에 걸린 줄이라 어느 경기든
+   * 막고 어느 경기로든 소화된다 (SAVE_VERSION 6 유지).
+   */
+  it("대회 없는 옛 정지는 어느 대회에도 걸리고 어느 대회로도 소화된다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[7]!;
+    state.suspensions.push({
+      id: "sus-legacy",
+      gamePlayerId: player.id,
+      cause: "yellows",
+      issuedOn: state.date,
+      lengthMatches: 1,
+      served: 0,
+      status: "active",
+    });
+    for (const competitionId of ["epl", "facup", "ucl", null]) {
+      expect(isSuspendedFor(state, player.id, competitionId)).toBe(true);
+    }
+    serveSuspensions(state, [player.id], "facup");
+    expect(state.suspensions.find((s) => s.id === "sus-legacy")?.status).toBe("done");
   });
 
   it("정지 선수는 라인업 배치에서 자동 대체된다", () => {

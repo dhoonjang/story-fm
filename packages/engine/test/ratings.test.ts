@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { seasonRating } from "@story-fm/domain";
 import {
+  leagueOfTeamIn,
   RATING_BAND,
   RATING_BASE,
   RATING_MAX,
@@ -194,8 +195,8 @@ describe("경기가 기록으로 남는다", () => {
     );
     const [a, b] = teams;
     if (!a || !b) throw new Error("상대 팀 부족");
-    const home = simSquadOf(state, a);
-    const away = simSquadOf(state, b);
+    const home = simSquadOf(state, a, leagueOfTeamIn(state, a));
+    const away = simSquadOf(state, b, leagueOfTeamIn(state, b));
 
     let goals = 0;
     let assists = 0;

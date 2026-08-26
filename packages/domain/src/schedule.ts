@@ -254,8 +254,14 @@ export function pairOfMatchId(matchId: string): string {
  * `r32`는 국내 컵(FA컵·DFB-포칼 등)의 1라운드다 — 그 나라 1·2부 32팀이 한 번에
  * 들어오므로 대항전에는 없는 단계다.
  */
-export const MatchStageSchema = z.enum(["league", "playoff", "r32", "r16", "qf", "sf", "final"]);
+export const MATCH_STAGES = ["league", "playoff", "r32", "r16", "qf", "sf", "final"] as const;
+export const MatchStageSchema = z.enum(MATCH_STAGES);
 export type MatchStage = z.infer<typeof MatchStageSchema>;
+
+/** 얼마나 깊이 왔나 — 열거 순서가 곧 깊이다. 두 단계의 앞뒤를 묻는 자리가 쓴다 */
+export function stageDepth(stage: MatchStage): number {
+  return MATCH_STAGES.indexOf(stage);
+}
 
 export const MatchRecordSchema = z.object({
   id: z.string().min(1),

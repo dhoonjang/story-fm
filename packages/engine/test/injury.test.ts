@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  leagueOfTeamIn,
   AVG_PRONENESS_RISE,
   FALL_PER_APPEARANCE,
   INJURY_CHANCE_PER_APPEARANCE,
@@ -282,8 +283,8 @@ describe("간이 시뮬 — 성향은 뛴 선수 전원에게 걸린다", () => 
   const state = createTestGame(11);
 
   it("부상 추첨도 교체 투입 선수를 후보로 센다", () => {
-    const home = simSquadOf(state, "chelsea");
-    const away = simSquadOf(state, "liverpool");
+    const home = simSquadOf(state, "chelsea", leagueOfTeamIn(state, "chelsea"));
+    const away = simSquadOf(state, "liverpool", leagueOfTeamIn(state, "liverpool"));
     const starters = new Set([...home.starters, ...away.starters].map((p) => p.id));
 
     let onSubs = 0;
@@ -300,7 +301,7 @@ describe("간이 시뮬 — 성향은 뛴 선수 전원에게 걸린다", () => 
   });
 
   it("교체로 들어온 선수도 성향이 내려간다 — 벤치에 앉아만 있으면 그대로다", () => {
-    const squad = simSquadOf(state, "liverpool");
+    const squad = simSquadOf(state, "liverpool", leagueOfTeamIn(state, "liverpool"));
     const starters = new Set(squad.starters.map((p) => p.id));
     // 유저와 무관한 두 팀의 경기 하나 — 간이 시뮬이 소화하는 경로다
     state.matches.push({

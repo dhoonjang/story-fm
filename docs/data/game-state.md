@@ -237,8 +237,8 @@ row, 지난 일 = 그대로 이력.**
 | 엔티티                             | 무엇 · "현재"의 표현                                                                                             | 정의                |
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- |
 | `injuries` `Injury`                | 부위·심각도·원인 — `returnedOn === null`이 현재 부상                                                             | `domain/records.ts` |
-| `bookings` `Booking`               | 경고·퇴장 (경기·분)                                                                                              | `domain/records.ts` |
-| `suspensions` `Suspension`         | 정지 — `status === "active"`, 잔여는 `length − served`                                                           | `domain/records.ts` |
+| `bookings` `Booking`               | 경고·퇴장 (경기·대회·분) — 누적은 대회 안에서만 쌓인다                                                           | `domain/records.ts` |
+| `suspensions` `Suspension`         | 정지 — `status === "active"`, 잔여는 `length − served`. `competitionId`·`scope`가 걸리는 경기를 정한다           | `domain/records.ts` |
 | `transfers` `Transfer`             | **팀 변경 원장** — 이적·임대·자유·유스·은퇴                                                                      | `domain/records.ts` |
 | `growthLog` `GrowthEntry`          | 성장 한 칸 — 대상은 축·`pos:CODE`·`tactical`, 출처는 `origin` 코드. **감독 팀 선수만** (아래 ⚠️)                 | `domain/records.ts` |
 | `trainingReports` `TrainingReport` | 훈련 결산 카드 — 한 구간(`from`~`to`)이 남긴 것: 세션 수 · `moved` · `marks`(갈래 코드와 근거 한 줄). 40장 링    | `domain/records.ts` |

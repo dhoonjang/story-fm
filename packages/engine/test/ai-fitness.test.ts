@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GamePlayer } from "@story-fm/domain";
 import {
+  leagueOfTeamIn,
   FAMILIARITY_DRIFT_CAP,
   FAMILIARITY_DRIFT_PER_DAY,
   advanceTime,
@@ -72,27 +73,35 @@ describe("타 팀은 로테이션으로 다리를 안배한다", () => {
     const state = createTestGame(7);
     // 스쿼드에 지친 선수를 심고 그 자리가 바뀌는지 본다 — 로테이션은 그 순간의
     // 체력만 읽으므로(`simSquadOf`) 시즌을 굴려 피로를 쌓을 필요가 없다
-    const xi = simSquadOf(state, "mancity").starters;
+    const xi = simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity")).starters;
     const victim = xi.find((p) => p.attributes.overall < 88) ?? xi[5]!;
     victim.state.condition = 40;
-    const after = simSquadOf(state, "mancity").starters.map((p) => p.id);
+    const after = simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity")).starters.map(
+      (p) => p.id,
+    );
     expect(after, `${victim.name}이 지쳤는데도 선발`).not.toContain(victim.id);
   });
 
   it("다리가 멎으면 대체 자원의 기량과 무관하게 뺀다", () => {
     const state = createTestGame(7);
-    const xi = simSquadOf(state, "mancity").starters;
+    const xi = simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity")).starters;
     // 팀에서 가장 뛰어난 선수 — 8점 안쪽의 대체 자원이 없을 만한 자리
     const star = [...xi].sort((a, b) => b.attributes.overall - a.attributes.overall)[0]!;
     star.state.condition = 20;
-    const after = simSquadOf(state, "mancity").starters.map((p) => p.id);
+    const after = simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity")).starters.map(
+      (p) => p.id,
+    );
     expect(after, `체력 20인 ${star.name}이 선발`).not.toContain(star.id);
   });
 
   it("멀쩡한 선수는 그대로 선다 — 로테이션이 라인업을 흔들지 않는다", () => {
     const state = createTestGame(7);
-    const before = simSquadOf(state, "mancity").starters.map((p) => p.id);
-    const after = simSquadOf(state, "mancity").starters.map((p) => p.id);
+    const before = simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity")).starters.map(
+      (p) => p.id,
+    );
+    const after = simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity")).starters.map(
+      (p) => p.id,
+    );
     expect(after).toEqual(before);
   });
 });
@@ -116,13 +125,13 @@ describe("로테이션으로 뺀 선수는 그 경기에서 빠진다", () => {
   const rotated = () => {
     if (!fixture) {
       const state = createTestGame(7);
-      const before = simSquadOf(state, "mancity");
+      const before = simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity"));
       const victim = before.starters.find((p) => p.attributes.overall < 88) ?? before.starters[5]!;
       victim.state.condition = 40;
       fixture = {
         state,
         before,
-        after: simSquadOf(state, "mancity"),
+        after: simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity")),
         victim,
         index: before.starters.findIndex((p) => p.id === victim.id),
       };
@@ -158,7 +167,7 @@ describe("로테이션으로 뺀 선수는 그 경기에서 빠진다", () => {
     const assignment = assignmentFor(state, incoming.id);
     expect(assignment, `${incoming.name}에게 전술 배치가 없다`).not.toBeNull();
     assignment!.familiarity = 42;
-    const again = simSquadOf(state, "mancity");
+    const again = simSquadOf(state, "mancity", leagueOfTeamIn(state, "mancity"));
     expect(again.slots![index]!.player.id).toBe(incoming.id);
     expect(again.slots![index]!.familiarity).toBe(42);
   });

@@ -180,11 +180,11 @@ import { tierOfTeamIn } from "../core/club-tier";
 import { isCupOnlyLeague, leagueName } from "../data/league-catalog";
 import {
   activeContract,
-  activeSuspension,
+  activeSuspensionFor,
+  isAvailableFor,
   assignmentsOf,
   financeOf,
   groupOf,
-  isAvailable,
   openInjury,
   playerName,
   playersOf,
@@ -3027,12 +3027,18 @@ export function buildOfficeViews(state: GameState): OfficeViews {
   const pointOf = new Map(starters.map((a, i) => [a.playerId, starterPoints[i]!] as const));
 
   const roleRank: Record<SquadViewRow["role"], number> = { 선발: 0, 벤치: 1, 스쿼드: 2 };
+  /**
+   * **명단 화면이 답하는 것은 「다음 경기」다** — 정지는 대회의 것이라(match.md §6)
+   * 컵 정지 선수가 리그 명단에서 빨갛게 서면 감독이 쓸 수 있는 선수를 잃는다.
+   */
+  const nextCompetition =
+    nextMatchFor(state.matches, userTeamId, state.date)?.competitionId ?? null;
   const players: SquadViewRow[] = squad
     .map((p) => {
       const assignment = assignments.get(p.id);
       const liveSlot = liveSlots.get(p.id);
       const injury = openInjury(state, p.id);
-      const suspension = activeSuspension(state, p.id);
+      const suspension = activeSuspensionFor(state, p.id, nextCompetition);
       const contract = activeContract(state, p.id);
       const stat = seasonStatOf(state, p.id);
       const natural = naturalPositionOf(p);
@@ -3214,10 +3220,10 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         suspended: suspension ? suspension.lengthMatches - suspension.served : 0,
         /**
          * **코어의 문을 그대로 읽는다** — 부상·정지에 더해 소집·여름 대회까지
-         * 한 자리에서 판정한다 (`isAvailable` → season.md §8 불변식). 여기서
+         * 한 자리에서 판정한다 (`isAvailableFor` → season.md §8 불변식). 여기서
          * 조건을 다시 세면 소집된 주전이 화면에서만 선발 가능한 얼굴로 선다.
          */
-        available: isAvailable(state, p),
+        available: isAvailableFor(state, p, nextCompetition),
       } satisfies SquadViewRow;
     })
     .sort((a, b) =>
