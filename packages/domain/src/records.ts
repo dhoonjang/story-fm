@@ -1353,6 +1353,28 @@ export const TeamFinanceSchema = z.object({
    */
   wageLift: z.object({ amount: z.number().min(0), until: DateString }).optional(),
   /**
+   * **건별 영입 승인분** — 보드가 `request_board`의 `signing`으로 내준 몫
+   * (finance.md §9.6).
+   *
+   * `transferBudget`에 얹지 **않는** 것이 이 축의 정체다: 승인은 이름 하나에 대한
+   * 것이라 그 선수의 딜에만 쓰이고, 딜이 확정되는 날 오늘 나갈 만큼이 예산으로
+   * 옮겨 앉으며 남은 몫은 그 자리에서 사라진다. 만료가 없으면 그것은 허가가 아니라
+   * 예산이다. 감독의 구단에만 선다.
+   * 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+   */
+  earmarked: z
+    .array(
+      z.object({
+        /** 이 몫을 세운 요청 (`BOARD_REQUEST.id`) — 되짚을 자리가 여기뿐이다 */
+        requestId: z.string().min(1),
+        gamePlayerId: z.string().min(1),
+        amount: z.number().min(0),
+        /** 허가의 기한 — 지나면 tick이 줄을 지운다 */
+        until: DateString,
+      }),
+    )
+    .optional(),
+  /**
    * **파라슈트 페이먼트** — 강등 클럽이 떠나온 리그에서 받는 낙하산.
    *
    * 강등 시즌 전환에서 세워지고 해마다 줄다가 사라진다. 승격하면 그 자리에서

@@ -84,7 +84,7 @@ import {
   numberBlockText,
   numberLineageOf,
 } from "../squad/numbers";
-import { userWageRoom } from "../club/board-request";
+import { consumeEarmark, signingBudgetOf, userWageRoom } from "../club/board-request";
 import {
   marketBiasOf,
   squadShortfallText,
@@ -2636,7 +2636,17 @@ function moveTransferBudget(
  */
 function affordabilityGate(
   state: GameState,
-  deal: { fee: number; weeklyWage: number; what: "영입" | "임대"; skipWindow?: boolean },
+  deal: {
+    fee: number;
+    weeklyWage: number;
+    what: "영입" | "임대";
+    skipWindow?: boolean;
+    /**
+     * **보드가 그 선수 앞으로 승인한 몫을 예산에 얹어 읽는다** (finance.md §9.6).
+     * 영입만 이 값을 준다 — 보드가 승인한 것은 영입이지 임대가 아니다.
+     */
+    gamePlayerId?: string;
+  },
 ): SkillResult | null {
   if (deal.skipWindow !== true && !windowOpenOn(state.windows, state.date)) {
     return { ok: false, message: `이적시장이 닫혀 있어 ${deal.what}을 확정할 수 없습니다` };
@@ -2650,10 +2660,15 @@ function affordabilityGate(
       message: `보드가 이적 예산을 동결했습니다${budgetFreezeLabel(state, state.userTeamId)} — 매각으로 예산을 만들어야 합니다`,
     };
   }
-  if (deal.fee > finance.transferBudget) {
+  // 오퍼 때 `dealOdds`가 잰 자와 같아야 한다 (transfer.md §11)
+  const budget =
+    deal.gamePlayerId === undefined
+      ? finance.transferBudget
+      : signingBudgetOf(state, deal.gamePlayerId);
+  if (deal.fee > budget) {
     return {
       ok: false,
-      message: `이적 예산이 부족합니다 — 필요 ${formatMoney(deal.fee)} / 가용 ${formatMoney(finance.transferBudget)}`,
+      message: `이적 예산이 부족합니다 — 필요 ${formatMoney(deal.fee)} / 가용 ${formatMoney(budget)}`,
     };
   }
   const room = userWageRoom(state);
@@ -2749,6 +2764,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
     what: "영입",
     // 창은 위에서 무소속까지 감안해 이미 봤다
     skipWindow: true,
+    gamePlayerId: player.id,
   });
   if (gate) return gate;
   // 무소속은 클럽이 아니라 클럽이 없는 상태다 — 지킬 스쿼드가 없다
@@ -2802,6 +2818,18 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
     status: "active",
     squadStatus,
   });
+
+  /**
+   * **돈이 나가기 직전에 승인분을 예산으로 옮긴다** (finance.md §9.6).
+   *
+   * 관문이 잰 것은 예산 + 승인분이었으므로 그만큼을 예산에 얹어야 아래의
+   * `moveTransferBudget`·`settleDuePayments`가 지난 뒤에도 이적 예산이 음수로
+   * 내려가지 않는다 — 검사한 값과 빠지는 값이 같다 (transfer.md §11).
+   *
+   * 이적료가 0이어도 부른다: 허가는 그 영입에 대한 것이었고 영입은 일어났다.
+   * 줄이 남으면 다음 `signing` 요청의 여력이 이미 쓴 돈만큼 깎인다.
+   */
+  consumeEarmark(state, player.id, dueNow);
 
   // 재정 — 우리 지출·상대 수입. 예산에서도 빠진다.
   // 이적료는 현금에서 즉시 빠지고, 장부에는 계약기간 상각으로 잡힌다

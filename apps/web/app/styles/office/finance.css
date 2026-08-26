@@ -89,6 +89,45 @@
   color: var(--danger);
   border-color: var(--danger);
 }
+/* 보드에 걸린 것 — 큰 카드와 지표 줄 사이. 지표 줄과 같은 결(배경 없는 읽는 값)이되
+   금액 옆에 이름과 기한이 붙어 한 줄이 아니라 두 줄이다 */
+.fin-board {
+  padding: 12px 2px 0;
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.fin-board-title {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.fin-board-line {
+  margin-top: 4px;
+}
+.fin-board-line .head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--fs-md);
+}
+.fin-board-line .what {
+  font-weight: 600;
+}
+/* 금액은 세로로 비교된다 — 요청과 승인분이 같은 자릿수로 서게 */
+.fin-board-line .amt {
+  margin-left: auto;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.fin-board-line .fin-tag {
+  margin-left: 0;
+}
+.fin-board-line .sub {
+  margin-top: 1px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 부수 지표 — 큰 카드 아래 한 줄. **배경도 테두리도 없다**: 잔고·이적 예산이
    화면의 주어이고, 나머지는 그 아래 딸린 사실이다. 박스를 겹겹이 두르면 어느
    것이 중요한지가 사라진다 */

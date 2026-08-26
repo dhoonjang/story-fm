@@ -1,14 +1,22 @@
-import type { BoardRequest, BoardRequestKind } from "@story-fm/domain";
-import { BOARD_REQUEST_LABEL, BOARD_REQUEST_UNIT } from "@story-fm/domain";
+import type {
+  BoardCondition,
+  BoardConditionKind,
+  BoardRequest,
+  BoardRequestKind,
+} from "@story-fm/domain";
+import { BOARD_REQUEST_LABEL, boardRequestAmountText } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import {
   clubProfileIn,
   financeOf,
   managedTeamId,
+  playerById,
   pushNarrative,
   weeklyWagesOf,
 } from "../core/state";
 import { addDays, diffDays, seasonYear } from "../core/dates";
+import { pickAnyPlayer } from "../core/player-ref";
+import { ownerOf } from "../world/persona";
 import { USER_WAGE_HEADROOM, clubWageBudget, wageRoomOf } from "../world/wages";
 import { formatMoney, recordCapitalAsset, seasonWageRatio, STADIUM_ASSET_MONTHS } from "./finance";
 import { item } from "../skills/brief";
@@ -29,6 +37,8 @@ export const BOARD_REQUEST = {
   /** 답이 오는 데 걸리는 날 — 예산 한 줄은 재무이사가 답하고 구장은 이사회 안건이다 */
   RESPOND_DAYS: {
     "transfer-budget": 3,
+    // 노리는 선수는 사흘을 기다려 주지 않는다 — 이사회 안건이 아니라 전화 한 통이다
+    signing: 2,
     "wage-room": 5,
     stadium: 10,
   } as Record<BoardRequestKind, number>,
@@ -45,6 +55,21 @@ export const BOARD_REQUEST = {
   WAGE_RATIO_DANGER: 0.75,
   /** 이적 예산 여력 = 잔고 × 이것 */
   BUDGET_OF_BALANCE: 0.25,
+  /**
+   * 건별 영입 여력 = 잔고 × 이것 − 걸려 있는 승인분.
+   *
+   * 총액 증액(0.25)보다 큰 것이 이 종류가 있는 이유다 — 백지수표와 이름 붙은 선수
+   * 하나는 보드에게 다른 일이다. 대신 그 선수 밖으로는 한 푼도 못 나간다.
+   */
+  SIGNING_OF_BALANCE: 0.4,
+  /** 승인분이 그 선수 앞에 걸려 있는 기간 — 만료가 없으면 허가가 아니라 예산이다 */
+  EARMARK_DAYS: 60,
+  /** 되걸기가 서는 문턱 — 한도가 부른 값의 이만큼을 넘으면 조건 없이 그만큼 내준다 */
+  CONDITION_GAP: 0.9,
+  /** 되건 조건의 기한 — 같은 안건의 쿨다운(60)보다 짧아야 두 길이 겹치지 않는다 */
+  CONDITION_DAYS: 30,
+  /** `wage-cut` 조건이 요구하는 주급 총액 감축 폭 — 주전급 한 명이거나 백업 둘이다 */
+  WAGE_CUT_RATIO: 0.05,
   /** 주급 한도 여력 = 구단 주간 임금 예산 × 이것 (시즌 누계 상한이기도 하다) */
   WAGE_LIFT_OF_BUDGET: 0.1,
   /** 구장 증설 여력 = 지금 수용인원 × 이것 */
@@ -59,9 +84,36 @@ export const BOARD_REQUEST = {
   KEPT: 20,
 } as const;
 
-/** 답을 기다리는 요청 — 한 번에 하나라 언제나 하나뿐이다 */
+/**
+ * 원형 → 되걸기의 갈래 (people.md §2의 구단주 6종). **여섯 원형 밖의 카드는 되걸지
+ * 않는다** — `DEMAND_OF_ARCHETYPE`과 같은 규약이다.
+ *
+ * 여기 없는 셋(축구광형·국부펀드형·흥행가형)은 부분 승인으로 답한다: 감정의 사람과
+ * 자원이 넉넉한 사람과 즉흥적인 사람은 조건을 붙이고 기다리지 않는다.
+ */
+export const CONDITION_OF_ARCHETYPE: Record<string, BoardConditionKind> = {
+  투자자형: "raise",
+  "지역 유지형": "raise",
+  산업가형: "wage-cut",
+};
+
+/**
+ * **되걸 수 있는 종류** — 조건은 돈을 만들어 오라는 말이라 답도 돈이어야 한다.
+ * 매각 대금은 주급 천장을 올리지도 벽돌을 쌓지도 않는다 (finance.md §9.6).
+ */
+const COUNTERABLE: ReadonlySet<BoardRequestKind> = new Set(["transfer-budget", "signing"]);
+
+/**
+ * **답이 끝나지 않은 요청** — 한 번에 하나라 언제나 하나뿐이다.
+ *
+ * 조건부 승인도 여기 든다: 되건 조건이 테이블에 있는데 다른 안건을 꺼내는 것은
+ * 흥정이 아니라 화제를 바꾸는 것이다 (finance.md §9.6).
+ */
 export function openBoardRequest(state: GameState): BoardRequest | null {
-  return (state.boardRequests ?? []).find((r) => r.status === "pending") ?? null;
+  return (
+    (state.boardRequests ?? []).find((r) => r.status === "pending" || r.status === "conditional") ??
+    null
+  );
 }
 
 /** 아직 좌석이 서지 않은 승인된 공사 — 있으면 구장을 다시 걸 수 없다 */
@@ -105,6 +157,12 @@ function headroomOf(state: GameState, kind: BoardRequestKind): number {
   switch (kind) {
     case "transfer-budget":
       return balance * BOARD_REQUEST.BUDGET_OF_BALANCE;
+    case "signing":
+      /**
+       * 이미 걸려 있는 승인분을 뺀다 — `wage-room`이 이번 시즌 누계를 빼는 것과 같은
+       * 자다. 없으면 승인 하나마다 잔고의 40%가 새로 서서 허가 셋이 잔고를 넘는다.
+       */
+      return Math.max(0, balance * BOARD_REQUEST.SIGNING_OF_BALANCE - earmarkedTotal(state));
     case "wage-room":
       return Math.max(
         0,
@@ -123,7 +181,7 @@ function headroomOf(state: GameState, kind: BoardRequestKind): number {
 /**
  * **보드가 이번에 내줄 수 있는 최대치** — 굴리지 않는다 (overview.md §1 철칙 2).
  *
- * `여력 × 신뢰 계수 × 살림 계수`. 이적 예산이 동결이면(PSR·부채 — §9.2·§9.4) 세
+ * `여력 × 신뢰 계수 × 살림 계수`. 이적 예산이 동결이면(PSR·부채 — §9.2·§9.4) 네
  * 종류 다 0이다: 돈의 문제가 아니라 규정의 문제라 물어서 풀리지 않는다.
  */
 export function boardRequestCeiling(state: GameState, kind: BoardRequestKind): number {
@@ -138,6 +196,8 @@ export function boardRequestCeiling(state: GameState, kind: BoardRequestKind): n
 export interface RequestBoardInput {
   kind: BoardRequestKind;
   amount: number;
+  /** `signing`만 — 감독이 부른 선수의 이름이나 id (다른 종류에는 실리지 않는다) */
+  playerId?: string;
 }
 
 /**
@@ -184,6 +244,24 @@ export function requestBoard(state: GameState, input: RequestBoardInput): SkillR
     }
   }
 
+  /**
+   * **`signing`은 이름 하나를 지목한다.** 감독이 부른 이름을 여기서 id로 옮긴다 —
+   * 갈리면 후보를 돌려 GM이 되묻는다 (`core/player-ref.ts`). 우리 선수를 두고
+   * 영입 승인을 물을 자리는 없다.
+   */
+  let playerId: string | undefined;
+  if (input.kind === "signing") {
+    if (!input.playerId) {
+      return { ok: false, message: "영입 승인은 어느 선수인지 함께 말해야 합니다" };
+    }
+    const picked = pickAnyPlayer(state, input.playerId);
+    if (!picked.ok) return { ok: false, message: picked.message };
+    if (picked.player.teamId === state.userTeamId) {
+      return { ok: false, message: `${picked.player.name}은(는) 이미 우리 선수입니다` };
+    }
+    playerId = picked.player.id;
+  }
+
   const requests = (state.boardRequests ??= []);
   const respondOn = addDays(state.date, BOARD_REQUEST.RESPOND_DAYS[input.kind]);
   const request: BoardRequest = {
@@ -192,11 +270,12 @@ export function requestBoard(state: GameState, input: RequestBoardInput): SkillR
     askedOn: state.date,
     respondOn,
     amount,
+    ...(playerId !== undefined ? { playerId } : {}),
     status: "pending",
   };
   requests.push(request);
 
-  const line = `보드 요청 — ${describeAsk(request)} · 답 ${respondOn}`;
+  const line = `보드 요청 — ${describeAsk(state, request)} · 답 ${respondOn}`;
   pushNarrative(state, line, 3);
   return {
     ok: true,
@@ -204,7 +283,7 @@ export function requestBoard(state: GameState, input: RequestBoardInput): SkillR
     brief: {
       head: "보드 요청",
       items: [
-        item({ label: BOARD_REQUEST_LABEL[input.kind], text: amountText(request.kind, amount) }),
+        item({ label: BOARD_REQUEST_LABEL[input.kind], text: askText(state, request) }),
         item({ label: "답", text: respondOn }),
       ],
     },
@@ -223,8 +302,11 @@ export function requestBoard(state: GameState, input: RequestBoardInput): SkillR
 export function tickBoardRequests(state: GameState, digest: string[]): void {
   const requests = (state.boardRequests ??= []);
   for (const request of requests) deliverStadium(state, request, digest);
-  const pending = requests.find((r) => r.status === "pending");
-  if (pending && state.date >= pending.respondOn) judgeRequest(state, pending, digest);
+  // 기한이 지난 영입 승인을 먼저 지운다 — 오늘 비는 몫이 오늘 거는 요청의 여력이다
+  expireEarmarks(state, digest);
+  const open = requests.find((r) => r.status === "pending" || r.status === "conditional");
+  if (open?.status === "conditional") judgeCondition(state, open, digest);
+  else if (open && state.date >= open.respondOn) judgeRequest(state, open, digest);
   if (requests.length > BOARD_REQUEST.KEPT) {
     state.boardRequests = requests.slice(-BOARD_REQUEST.KEPT);
   }
@@ -234,27 +316,128 @@ export function tickBoardRequests(state: GameState, digest: string[]): void {
 function judgeRequest(state: GameState, request: BoardRequest, digest: string[]): void {
   const ceiling = boardRequestCeiling(state, request.kind);
   const granted = Math.min(request.amount, ceiling);
-  request.resolvedOn = state.date;
 
   if (granted <= 0) {
-    request.status = "rejected";
-    request.granted = 0;
-    const line = `보드 요청 거절 — ${describeAsk(request)}`;
+    reject(state, request, digest);
+    return;
+  }
+
+  /**
+   * **되걸기가 부분 승인 앞에 선다** (finance.md §9.6). 되거는 원형에게 절반을 내주는
+   * 것은 그 사람의 답이 아니다 — 조건을 붙여 다 주거나, 조건을 못 채우면 아무것도.
+   * `resolvedOn`은 아직 서지 않는다: 답이 끝나지 않은 요청이다.
+   */
+  const condition = counterCondition(state, request, ceiling);
+  if (condition) {
+    request.status = "conditional";
+    request.condition = condition;
+    const line = `보드 조건부 승인 — ${describeAsk(state, request)} · ${conditionText(condition)} · 기한 ${condition.until}`;
     digest.push(line);
     pushNarrative(state, line, 4);
     return;
   }
 
+  approve(state, request, granted, digest);
+}
+
+/**
+ * 되걸 조건 하나 — 없으면 `null`이고 그러면 부분 승인이다.
+ *
+ * 세 문이 다 열려야 선다: 되걸 수 있는 종류인가 · 한도가 부른 값에 한참 못 미치는가 ·
+ * 이 구단주가 되거는 사람인가. 한도가 0인 자리는 여기 오지도 않는다 — 아무것도 못
+ * 내주는 보드의 "판다면 준다"는 흥정이 아니라 빈말이다.
+ */
+function counterCondition(
+  state: GameState,
+  request: BoardRequest,
+  ceiling: number,
+): BoardCondition | null {
+  if (!COUNTERABLE.has(request.kind)) return null;
+  if (ceiling >= request.amount * BOARD_REQUEST.CONDITION_GAP) return null;
+  const kind = CONDITION_OF_ARCHETYPE[ownerOf(state).archetype];
+  if (!kind) return null;
+  const amount =
+    kind === "raise"
+      ? // 모자란 만큼을 매각으로 만들어 오라는 말이다 — 굴리지 않는다
+        Math.floor(request.amount - ceiling)
+      : Math.floor(weeklyWagesOf(state, state.userTeamId) * (1 - BOARD_REQUEST.WAGE_CUT_RATIO));
+  // 요구할 것이 없는 조건은 조건이 아니다 (주급이 0인 판·반올림에 사라지는 폭)
+  if (amount <= 0) return null;
+  return {
+    kind,
+    amount,
+    since: state.date,
+    until: addDays(state.date, BOARD_REQUEST.CONDITION_DAYS),
+  };
+}
+
+/**
+ * 되건 조건을 매일 본다 — 충족되면 **부른 값 그대로** 승인, 기한을 넘기면 거절.
+ *
+ * 충족된 날 한도를 다시 재지 않는다: 되건 것은 약속이다. 단 그날 예산이 동결이면
+ * 거절이다 — PSR도 부채도 규정의 문제라 약속으로 풀리지 않는다 (finance.md §9.2).
+ */
+function judgeCondition(state: GameState, request: BoardRequest, digest: string[]): void {
+  const condition = request.condition;
+  if (!condition) return;
+  if (conditionMet(state, condition)) {
+    if (financeOf(state, state.userTeamId).budgetFrozen === true) reject(state, request, digest);
+    else approve(state, request, request.amount, digest);
+    return;
+  }
+  if (state.date > condition.until) reject(state, request, digest);
+}
+
+/** 조건이 장부에서 충족됐는가 — 문장을 읽는 자리가 없다 */
+function conditionMet(state: GameState, condition: BoardCondition): boolean {
+  switch (condition.kind) {
+    case "raise":
+      return raisedSince(state, condition.since) >= condition.amount;
+    case "wage-cut":
+      return weeklyWagesOf(state, state.userTeamId) <= condition.amount;
+  }
+}
+
+/**
+ * 되건 날부터 우리가 매각으로 만든 돈 — 이적 원장의 합이다.
+ *
+ * 임대료도 든다: 나가는 선수로 만든 현금이라는 점에서 매각과 같은 돈이고,
+ * `net-profit` 구단주 요청이 세는 것과 같은 줄이다 (`windowTransfers`).
+ */
+function raisedSince(state: GameState, since: string): number {
+  return state.transfers
+    .filter(
+      (t) =>
+        t.fromTeamId === state.userTeamId &&
+        t.date >= since &&
+        (t.type === "transfer" || t.type === "loan"),
+    )
+    .reduce((sum, t) => sum + t.fee, 0);
+}
+
+/** 답이 끝났다 — 나온 값이 그 자리에서 장부에 앉는다 */
+function approve(state: GameState, request: BoardRequest, granted: number, digest: string[]): void {
   request.status = "approved";
   request.granted = granted;
+  request.resolvedOn = state.date;
   apply(state, request, granted);
 
   const partial = granted < request.amount;
   const line = partial
-    ? `보드 요청 부분 승인 — ${describeAsk(request)} 중 ${amountText(request.kind, granted)}`
-    : `보드 요청 승인 — ${describeAsk(request)}`;
+    ? `보드 요청 부분 승인 — ${describeAsk(state, request)} 중 ${boardRequestAmountText(request.kind, granted)}`
+    : `보드 요청 승인 — ${describeAsk(state, request)}`;
   digest.push(line);
   pushNarrative(state, line, partial ? 3 : 4);
+}
+
+/** 답이 끝났다 — 아무것도 나오지 않았다 */
+function reject(state: GameState, request: BoardRequest, digest: string[]): void {
+  request.status = "rejected";
+  request.granted = 0;
+  request.resolvedOn = state.date;
+  const line = `보드 요청 거절 — ${describeAsk(state, request)}`;
+  digest.push(line);
+  pushNarrative(state, line, 4);
 }
 
 /** 승인분이 실제로 앉는 자리 — 종류마다 하나씩이고 전부 이미 있던 축이다 */
@@ -269,6 +452,21 @@ function apply(state: GameState, request: BoardRequest, granted: number): void {
        */
       finance.transferBudget += granted;
       return;
+    case "signing": {
+      /**
+       * **이적 예산에 얹지 않는다** — 승인은 이름 하나에 대한 것이라 그 선수의 딜에만
+       * 쓰인다 (finance.md §9.6). 얹는 순간 다른 영입이 그 돈을 쓸 수 있고, 그러면
+       * 이 종류는 답이 빠른 총액 증액일 뿐이다.
+       */
+      if (!request.playerId) return;
+      (finance.earmarked ??= []).push({
+        requestId: request.id,
+        gamePlayerId: request.playerId,
+        amount: granted,
+        until: addDays(state.date, BOARD_REQUEST.EARMARK_DAYS),
+      });
+      return;
+    }
     case "wage-room":
       // 만료일을 스스로 든다 — 지우러 오는 tick이 없다 (finance.md §9.6)
       finance.wageLift = {
@@ -291,6 +489,73 @@ function apply(state: GameState, request: BoardRequest, granted: number): void {
       request.deliversOn = addDays(state.date, BOARD_REQUEST.BUILD_DAYS);
       return;
     }
+  }
+}
+
+// ── 건별 영입 승인분 (`earmarked`) ─────────────────────────────
+
+/** 오늘 살아 있는 승인분 — 기한이 지난 줄은 tick이 지우기 전에도 세지 않는다 */
+function liveEarmarks(state: GameState) {
+  return (financeOf(state, state.userTeamId).earmarked ?? []).filter((e) => state.date <= e.until);
+}
+
+/** 지금 걸려 있는 승인분의 합 — `signing` 여력이 이것을 뺀다 */
+function earmarkedTotal(state: GameState): number {
+  return liveEarmarks(state).reduce((sum, e) => sum + e.amount, 0);
+}
+
+/** 그 선수 앞으로 걸려 있는 승인분 — 없으면 0 */
+export function earmarkedFor(state: GameState, gamePlayerId: string): number {
+  return liveEarmarks(state)
+    .filter((e) => e.gamePlayerId === gamePlayerId)
+    .reduce((sum, e) => sum + e.amount, 0);
+}
+
+/**
+ * **그 선수를 살 수 있는 돈** — 관문 둘의 유일한 자다 (transfer.md §11).
+ *
+ * 딜 확률의 예산 항(`market.ts`)과 계약 확정의 관문(`negotiation.ts`)이 같은 값을
+ * 봐야 한다: 갈리면 "가능하다"고 말한 오퍼가 도장 앞에서 막힌다. 주급 쪽에서
+ * `userWageRoom`이 하는 일을 이적료 쪽에서 하는 자다.
+ */
+export function signingBudgetOf(state: GameState, gamePlayerId: string): number {
+  return financeOf(state, state.userTeamId).transferBudget + earmarkedFor(state, gamePlayerId);
+}
+
+/**
+ * 딜이 확정되는 날 — 오늘 나갈 만큼을 예산으로 옮기고 **줄을 지운다.**
+ *
+ * 남은 몫이 예산으로 남으면 다음 영입이 그 돈을 쓴다. 허가는 그 영입에 대한 것이었고
+ * 영입은 일어났다 (finance.md §9.6). 분할의 남은 회분은 다른 이적과 똑같이 예산에서
+ * 나간다.
+ *
+ * @returns 이적 예산에 얹힌 금액 — 검사한 값과 빠지는 값을 맞추는 자다
+ */
+export function consumeEarmark(state: GameState, gamePlayerId: string, dueNow: number): number {
+  const finance = financeOf(state, state.userTeamId);
+  const rows = finance.earmarked;
+  if (!rows || rows.length === 0) return 0;
+  const mine = rows.filter((e) => e.gamePlayerId === gamePlayerId);
+  if (mine.length === 0) return 0;
+  finance.earmarked = rows.filter((e) => e.gamePlayerId !== gamePlayerId);
+  const live = mine.filter((e) => state.date <= e.until).reduce((sum, e) => sum + e.amount, 0);
+  const used = Math.max(0, Math.min(dueNow, live));
+  finance.transferBudget += used;
+  return used;
+}
+
+/** 기한이 지난 승인분을 지운다 — 만료가 없으면 허가가 아니라 예산이다 */
+function expireEarmarks(state: GameState, digest: string[]): void {
+  const finance = financeOf(state, state.userTeamId);
+  const rows = finance.earmarked;
+  if (!rows || rows.length === 0) return;
+  const gone = rows.filter((e) => state.date > e.until);
+  if (gone.length === 0) return;
+  finance.earmarked = rows.filter((e) => state.date <= e.until);
+  for (const row of gone) {
+    const line = `보드 영입 승인 만료 — ${playerName(state, row.gamePlayerId)} ${formatMoney(row.amount)}`;
+    digest.push(line);
+    pushNarrative(state, line, 3);
   }
 }
 
@@ -319,21 +584,41 @@ function deliverStadium(state: GameState, request: BoardRequest, digest: string[
 
 // ── 사실 카드 ──────────────────────────────────────────────────
 
-/** 값 한 덩이 — 단위가 금액인지 좌석인지는 종류가 안다 */
-function amountText(kind: BoardRequestKind, value: number): string {
-  switch (BOARD_REQUEST_UNIT[kind]) {
-    case "money":
-      return formatMoney(value);
-    case "weekly":
-      return `${formatMoney(value)}/주`;
-    case "seats":
-      return `${value.toLocaleString("en-US")}석`;
-  }
+/** 이름이 사라진 선수도 있다 — 카드가 빈칸을 내지 않게 id를 폴백으로 든다 */
+function playerName(state: GameState, gamePlayerId: string): string {
+  return playerById(state, gamePlayerId)?.name ?? gamePlayerId;
+}
+
+/** 부른 값 한 덩이 — `signing`만 선수 이름이 앞에 붙는다 */
+function askText(state: GameState, request: BoardRequest): string {
+  const amount = boardRequestAmountText(request.kind, request.amount);
+  if (request.kind !== "signing" || !request.playerId) return amount;
+  return `${playerName(state, request.playerId)} ${amount}`;
 }
 
 /** 요청 한 줄 — 라벨에 부른 값을 붙인다. 문장은 읽는 쪽이 쓴다 */
-function describeAsk(request: BoardRequest): string {
-  return `${BOARD_REQUEST_LABEL[request.kind]} ${amountText(request.kind, request.amount)}`;
+function describeAsk(state: GameState, request: BoardRequest): string {
+  return `${BOARD_REQUEST_LABEL[request.kind]} ${askText(state, request)}`;
+}
+
+/** 되건 조건 한 줄 — 갈래와 금액뿐이다. "판다면 준다"는 GM이 쓴다 */
+function conditionText(condition: BoardCondition): string {
+  switch (condition.kind) {
+    case "raise":
+      return `매각으로 ${formatMoney(condition.amount)}를 만들면 승인`;
+    case "wage-cut":
+      return `주급 총액을 ${formatMoney(condition.amount)}/주 아래로 내리면 승인`;
+  }
+}
+
+/** 조건이 지금 어디까지 찼는가 — 사실이지 평가가 아니다 */
+function conditionProgress(state: GameState, condition: BoardCondition): string {
+  switch (condition.kind) {
+    case "raise":
+      return `지금까지 매각 ${formatMoney(raisedSince(state, condition.since))}`;
+    case "wage-cut":
+      return `지금 주급 총액 ${formatMoney(weeklyWagesOf(state, state.userTeamId))}/주`;
+  }
 }
 
 /**
@@ -346,10 +631,22 @@ function describeAsk(request: BoardRequest): string {
 export function describeBoardRequests(state: GameState): string | null {
   const lines: string[] = [];
   const request = openBoardRequest(state);
-  if (request) {
+  if (request?.status === "pending") {
     lines.push(
-      `- 답 대기: ${describeAsk(request)} · ${request.askedOn} 접수 · ${request.respondOn}에 답이 온다 ` +
+      `- 답 대기: ${describeAsk(state, request)} · ${request.askedOn} 접수 · ${request.respondOn}에 답이 온다 ` +
         `(아직 답은 없다 — 결과를 앞질러 쓰지 마라)`,
+    );
+  }
+  if (request?.status === "conditional" && request.condition) {
+    lines.push(
+      `- 조건부 승인: ${describeAsk(state, request)} — ${conditionText(request.condition)} · ` +
+        `기한 ${request.condition.until} · ${conditionProgress(state, request.condition)}`,
+    );
+  }
+  for (const row of liveEarmarks(state)) {
+    lines.push(
+      `- 영입 승인분: ${playerName(state, row.gamePlayerId)} ${formatMoney(row.amount)} ` +
+        `(${row.until}까지 · 그 선수 영입에만 쓴다)`,
     );
   }
   const building = buildingStadium(state);

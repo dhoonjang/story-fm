@@ -25,7 +25,11 @@ import type {
   BoardExpectationCode,
 } from "@story-fm/domain";
 import {
+  BOARD_CONDITION_LABEL,
+  BOARD_REQUEST_LABEL,
+  boardConditionAmountText,
   boardExpectationText,
+  boardRequestAmountText,
   isReserveMatch,
   matchMinutesOf,
   normalizeCauses,
@@ -78,6 +82,7 @@ import {
   wageRatioTone,
   type WageRatioTone,
 } from "../club/finance";
+import { openBoardRequest } from "../club/board-request";
 import { MANAGER_WALLET, walletOf } from "../club/manager-wallet";
 import {
   cupCatalog,
@@ -1287,6 +1292,38 @@ export interface OfficeViews {
     transferBudget: number;
     budgetFrozen: boolean;
     /**
+     * **감독이 보드에 건 것** (finance.md §9.6) — 답이 끝나지 않은 요청 하나와,
+     * 이름 하나 앞에 걸려 있는 영입 승인분.
+     *
+     * 값과 라벨만 낸다. 보드가 무슨 말로 그렇게 답했는지는 GM이 쓴다.
+     */
+    board: {
+      /** 답을 기다리거나(`pending`) 조건이 걸린(`conditional`) 요청 — 한 번에 하나다 */
+      request: {
+        /** 종류 이름 — `BOARD_REQUEST_LABEL` */
+        label: string;
+        /** 감독이 부른 값 — 단위(금액·주급·좌석)는 종류가 안다 */
+        amount: string;
+        /** 영입 승인만 — 보드에 물은 선수. 나머지 셋은 총액이라 null이다 */
+        playerName: string | null;
+        status: "pending" | "conditional";
+        askedOn: string;
+        /** 답이 오는 날 */
+        respondOn: string;
+        /** 조건부 승인만 — 보드가 되건 조건 */
+        condition: {
+          /** 조건의 갈래 이름 */
+          label: string;
+          /** 요구하는 값 — 단위는 갈래가 안다 */
+          amount: string;
+          /** 이 날까지 못 채우면 거절이다 */
+          until: string;
+        } | null;
+      } | null;
+      /** 걸려 있는 영입 승인분 — 그 선수 영입에만 쓰이고 기한이 지나면 지워진다 */
+      earmarked: Array<{ playerName: string; amount: number; until: string }>;
+    };
+    /**
      * **보드가 지금 이 구단에 지고 있는 기대** — 체급이 정한다 (`boardExpectation`).
      * 지난 시즌의 **평가**가 아니다: 그 둘을 한 칸에 겹쳐 두면 첫 시즌의 감독이
      * 아무도 매기지 않은 평가를 읽는다.
@@ -2361,6 +2398,44 @@ function careerTotalsView(t: CareerTotals): CareerTotalsView {
   };
 }
 
+/**
+ * **보드에 걸려 있는 것** — 열린 요청 하나와 영입 승인분.
+ *
+ * 기한이 지난 승인분은 세지 않는다. tick이 그날 지우므로 화면에 남을 자리는 없지만,
+ * 만료를 읽는 자가 두 곳이면 하루 어긋난 날 유령 한 줄이 선다.
+ */
+function boardView(state: GameState): OfficeViews["finance"]["board"] {
+  const open = openBoardRequest(state);
+  const earmarked = (financeOf(state, state.userTeamId).earmarked ?? []).filter(
+    (row) => state.date <= row.until,
+  );
+  return {
+    request:
+      open && (open.status === "pending" || open.status === "conditional")
+        ? {
+            label: BOARD_REQUEST_LABEL[open.kind],
+            amount: boardRequestAmountText(open.kind, open.amount),
+            playerName: open.playerId ? playerName(state, open.playerId) : null,
+            status: open.status,
+            askedOn: open.askedOn,
+            respondOn: open.respondOn,
+            condition: open.condition
+              ? {
+                  label: BOARD_CONDITION_LABEL[open.condition.kind],
+                  amount: boardConditionAmountText(open.condition),
+                  until: open.condition.until,
+                }
+              : null,
+          }
+        : null,
+    earmarked: earmarked.map((row) => ({
+      playerName: playerName(state, row.gamePlayerId),
+      amount: row.amount,
+      until: row.until,
+    })),
+  };
+}
+
 export function buildOfficeViews(state: GameState): OfficeViews {
   const userTeamId = state.userTeamId;
   /**
@@ -3011,6 +3086,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       weeklyWages: weeklyWagesOf(state, userTeamId),
       transferBudget: finance.transferBudget,
       budgetFrozen: finance.budgetFrozen === true,
+      board: boardView(state),
       boardExpectation: (() => {
         const be = boardExpectation(state, userTeamId);
         return { target: be.target, label: boardExpectationText(be.code, be.target) };

@@ -900,6 +900,12 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
   state.boardDemands = [];
   // 감독이 앞 구단 보드에 건 요청도 같다 (career.md §5.3) — 답할 보드가 없어졌다
   state.boardRequests = [];
+  /**
+   * 앞 구단 보드가 내준 건별 영입 승인분도 지운다 (finance.md §9.6) — 그 허가는 그
+   * 감독의 그 자리에 대한 것이라, 남겨 두면 60일 안에 돌아온 감독이 남의 임기에
+   * 받은 승인으로 선수를 산다.
+   */
+  for (const finance of state.finances) delete finance.earmarked;
   // 라커룸 불만도 앞 구단의 것이다 (people.md §5) — 지고 오면 주의 줄이 옛 이름을 나열한다
   state.issues = [];
   // 앞 구단 선수에게 한 약속도 같다 (people.md §5-2) — 지킬 수 없는 약속이 기한마다 판정된다

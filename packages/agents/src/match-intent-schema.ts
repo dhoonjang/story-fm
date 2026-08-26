@@ -58,16 +58,11 @@ const TacticsSchema = z
     tempo: axis,
     width: axis,
     passStyle: axis,
-    transition: z
-      .enum(TRANSITION_MODES)
-      .nullable()
-      .describe("전환 — counter 역습 · regroup 재정비 · null 지시 해제"),
-    offsideTrap: z.boolean().describe("오프사이드 트랩을 거는가"),
-    tackling: z.enum(TACKLING_LEVELS).describe("태클 강도 — soft · normal(중립) · hard"),
-    keeperDistribution: z
-      .enum(KEEPER_DISTRIBUTIONS)
-      .nullable()
-      .describe("골키퍼 배급 — short 짧게 · long 길게 · null 지시 해제"),
+    // 낱말은 `MATCH_INTENT_SYSTEM`이 `TACTIC_TOGGLES`에서 만들어 싣는다 (prompts.md §5-2)
+    transition: z.enum(TRANSITION_MODES).nullable(),
+    offsideTrap: z.boolean(),
+    tackling: z.enum(TACKLING_LEVELS),
+    keeperDistribution: z.enum(KEEPER_DISTRIBUTIONS).nullable(),
   })
   .partial();
 
