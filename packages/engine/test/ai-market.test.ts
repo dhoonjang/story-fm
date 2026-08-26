@@ -123,7 +123,7 @@ describe("이적창이 열리면 남의 팀끼리도 움직인다", () => {
       moved = { from: seller, to: deal.toTeamId ?? "", fee: deal.fee };
     }
     expect(moved, "여름 창에 유료 이적이 한 건도 없었다").toBeTruthy();
-  }, 60_000);
+  });
 
   /**
    * **에이전트 수수료는 사는 쪽이 누구든 붙는다** (finance.md §6). 유저에게만 물리던

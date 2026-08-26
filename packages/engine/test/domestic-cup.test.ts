@@ -364,7 +364,7 @@ describe("추첨 전에도 라운드 날짜는 달력에 있다 — 단, 확보�
     expect(domesticStageMatches(state, "eflcup", "r32").length).toBeGreaterThan(0);
     // 대진이 있으니 예정 자리는 제 몫을 다했고, 16강은 아직 우리 자리가 아니다
     expect(pendingFor(state, "eflcup")).toHaveLength(0);
-  }, 60_000);
+  });
 
   /**
    * ⚠️ **"다음 자리가 열렸다"는 우리가 1라운드를 이겼을 때만 볼 수 있다** — 시드 하나에
@@ -386,7 +386,7 @@ describe("추첨 전에도 라운드 날짜는 달력에 있다 — 단, 확보�
       SEEDS.some((seed) => watchOf(seed).sawSecond),
       "어느 시드에서도 1라운드를 이기고 다음 자리가 열리지 않았다",
     ).toBe(true);
-  }, 180_000);
+  });
 });
 
 describe("실제 대회 규정을 따른다", () => {
@@ -403,7 +403,7 @@ describe("실제 대회 규정을 따른다", () => {
     expect(refs.filter((r) => r.startsWith("coppaitalia:"))).toEqual(["coppaitalia:r32"]);
     // 라운드별 추첨 대회는 라운드마다 추첨이 남는다
     expect(refs.filter((r) => r.startsWith("eflcup:")).length).toBeGreaterThan(1);
-  }, 30_000);
+  });
 
   it("홈 배정이 대회 규정을 따른다 — 포칼은 하부 클럽, 코파 이탈리아는 시드", () => {
     const state = seasonOf(7);
@@ -419,7 +419,7 @@ describe("실제 대회 규정을 따른다", () => {
     const coppa = mixed("coppaitalia");
     expect(coppa.length).toBeGreaterThan(0);
     for (const m of coppa) expect(isTopFlight(m.homeTeamId)).toBe(true);
-  }, 30_000);
+  });
 
   it("결승 요일도 대회 규정이다 — 넷은 주말, 코파 이탈리아만 수요일 밤", () => {
     const state = seasonOf(7);
@@ -429,7 +429,7 @@ describe("실제 대회 규정을 따른다", () => {
       const dow = new Date(`${final.date}T00:00:00Z`).getUTCDay();
       expect(cup.finalMidweek ? [2, 3] : [0, 6], `${cup.id} 결승 ${final.date}`).toContain(dow);
     }
-  }, 30_000);
+  });
 
   it("32강은 하루에 몰지 않고 이틀에 흩는다 (실제 컵의 화·수 / 토·일)", () => {
     const state = seasonOf(7);
@@ -443,7 +443,7 @@ describe("실제 대회 규정을 따른다", () => {
         86_400_000;
       expect(span, `${cup.id} 1라운드가 ${span}일에 걸침`).toBeLessThanOrEqual(14);
     }
-  }, 30_000);
+  });
 
   it("첫 라운드 추첨일이 실제 대회 날짜다 — FA컵 12/8, 리그컵 8월 말", () => {
     const state = seasonOf(7);
@@ -452,7 +452,7 @@ describe("실제 대회 규정을 따른다", () => {
     expect(dateOf("facup")).toBe("2026-12-08");
     expect(dateOf("eflcup")).toBe("2026-08-27");
     expect(dateOf("copadelrey")).toBe("2026-12-09");
-  }, 30_000);
+  });
 });
 
 /**
@@ -507,7 +507,7 @@ describe("컵은 1부가 들어오는 라운드에서 시작한다", () => {
         (m.homeTeamId === "arsenal" || m.awayTeamId === "arsenal"),
     );
     expect(ours.every((m) => m.date >= first.date)).toBe(true);
-  }, 30_000);
+  });
 
   it("첫 라운드가 부전승 없이 꽉 찬다 — 시드 진입 대회만 정원이 절반이다", () => {
     const state = seasonOf(7);
@@ -522,7 +522,7 @@ describe("컵은 1부가 들어오는 라운드에서 시작한다", () => {
         : DOMESTIC_CUP_SIZE;
       expect(teams.size, `${cup.id} 첫 라운드 참가`).toBe(expected);
     }
-  }, 30_000);
+  });
 
   /**
    * **불변식 — 시드는 자기 진입 라운드 전에 대진표에 등장하지 않는다** (#351).
@@ -560,7 +560,7 @@ describe("컵은 1부가 들어오는 라운드에서 시작한다", () => {
       expect(seeded, `${m.id} 시드 수`).toHaveLength(1);
       expect(opening.has(seeded[0] === m.homeTeamId ? m.awayTeamId : m.homeTeamId)).toBe(true);
     }
-  }, 30_000);
+  });
 });
 
 describe("기존 세이브 — 2부 클럽 채워 넣기", () => {
@@ -788,7 +788,7 @@ describe("여러 시드로 한 시즌 완주 — 편성이 게임을 멈추지 �
           expect(eve, `${cup.id} 결승 전날(${eve?.date}) 경기`).toBeUndefined();
         }
       }
-    }, 60_000);
+    });
   }
 });
 
@@ -810,7 +810,7 @@ describe("컵 우승 → 트로피와 유럽 티켓", () => {
         expect(inEurope, `${leagueId} 컵 우승 ${teamId}가 유럽에 없다`).toBe(true);
       }
     }
-  }, 30_000);
+  });
 
   it("티켓을 끼워 넣어도 대회 정원은 그대로 — 자리의 주인만 바뀐다", () => {
     const tables = { epl: eplOrder() };

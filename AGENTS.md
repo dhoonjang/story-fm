@@ -165,6 +165,13 @@ in exactly one place. `pnpm balance --list` shows every harness and what it
 measures, `pnpm balance` runs them
 (→ [docs/simulation/balance-harness.md](./docs/simulation/balance-harness.md)).
 
+**A test timeout breaks what has stopped; it does not measure speed.**
+`vitest.config.ts` owns the one number and the reasoning behind it. Never repeat
+that number on a case — restating the global is not headroom, and a tighter one
+is a hidden speed assertion that goes red before the assertion does. Give a case
+its own limit only to make it **more** generous
+(→ [balance-harness.md](./docs/simulation/balance-harness.md) §6).
+
 **Fixtures cost more than the logic they carry.** `createTestGame()` builds a
 whole world — a second per call. Call the pure function directly when the world
 is not what is being tested, and where it genuinely is, build one fixture per

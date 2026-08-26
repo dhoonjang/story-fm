@@ -1029,7 +1029,7 @@ describe("풀 시즌 통합 — 리그 완주 후 커리어 기록·전환", () 
       expect(trophy?.competition, "장부에 표시 이름을 적었다").toBeUndefined();
       expect(trophy?.teamId).toBe("arsenal");
     }
-  }, 30_000);
+  });
 });
 
 /**
