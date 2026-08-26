@@ -1101,9 +1101,10 @@ export function addToSeasonStat(stat: SeasonStat, delta: Partial<SeasonStatDelta
  * (→ docs/data/game-state.md §5 파생). 행이 없으면 null: 0으로 채운 행과 "기록
  * 없음"은 다르다.
  *
- * ⚠️ **낸 행은 읽기 전용이다.** 쌓는 자리는 언제나 `ensureSeasonStat` 하나이므로,
- * 여기서 낸 행에 값을 얹으면 다음 파생에서 사라진다. 그래서 `competitionId`도
- * 붙이지 않는다 — 축이 없는 것이 곧 "합계"다.
+ * ⚠️ **낸 행은 읽기 전용이고 `competitionId`는 뜻이 없다.** 쌓는 자리는 언제나
+ * `ensureSeasonStat` 하나이므로 여기서 낸 행에 값을 얹으면 다음 파생에서 사라지고,
+ * 행이 하나뿐이면 **그 행을 그대로 낸다**(합계를 새로 짓지 않는다) — 그때는 그 한
+ * 대회의 축이 그대로 실려 온다. 합계에서 대회를 묻지 말 것.
  *
  * 등번호·이름은 **마지막으로 적힌 행의 것**이다. 시즌 중에 바뀌면 마지막 값이 그
  * 시즌의 값이라는 `ensureSeasonStat`의 규약을 대회 행 여럿에서도 그대로 잇는다.

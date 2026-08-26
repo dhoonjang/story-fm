@@ -1115,13 +1115,33 @@ describe("시즌 시상 (season.md §6)", () => {
       season: 1,
       competitionId: CUP,
       stage: "final",
-      round: 1,
+      round: 2,
       date: SEASON_END,
       homeTeamId: TEAM_IDS[0]!,
       awayTeamId: TEAM_IDS[1]!,
-      result: { homeGoals: 1, awayGoals: 0, scorers, assists: [], ratings },
+      result: {
+        homeGoals: 1,
+        awayGoals: 0,
+        scorers,
+        assists: [],
+        ratings,
+        homeLineup: Object.keys(ratings),
+      },
     };
   }
+
+  /** 결승 앞의 한 경기 — 대회가 한 경기뿐이면 득점왕이 서지 않는다(§6) */
+  const cupSemi = {
+    id: "m-semi",
+    season: 1,
+    competitionId: CUP,
+    stage: "sf",
+    round: 1,
+    date: "2027-05-01",
+    homeTeamId: TEAM_IDS[0]!,
+    awayTeamId: TEAM_IDS[2]!,
+    result: { homeGoals: 2, awayGoals: 0, scorers: [], assists: [] },
+  };
 
   const winnerOf = (state: GameState, code: string) =>
     seasonAwards(state).find((a) => a.code === code);
@@ -1220,7 +1240,7 @@ describe("시즌 시상 (season.md §6)", () => {
           { id: "p-cup", competitionId: LEAGUE, apps: 20, goals: 8, ratingSum: 140 },
           { id: "p-cup", competitionId: CUP, apps: 6, goals: 6, assists: 2, ratingSum: 48 },
         ],
-        [cupFinal({ "p-cup": 8.4, "p-league": 7.9 }, ["home:p-cup"])],
+        [cupSemi, cupFinal({ "p-cup": 8.4, "p-league": 7.9 }, ["home:p-cup"])],
       );
 
     it("리그 득점왕은 리그 골만 센다 — 컵에서 넣은 골은 그 표에 서지 않는다", () => {
@@ -1252,6 +1272,17 @@ describe("시즌 시상 (season.md §6)", () => {
       expect(codes.sort()).toEqual(["final-motm", "top-scorer"]);
     });
 
+    it("한 경기가 대회의 전부면 득점왕은 서지 않는다 — 슈퍼컵의 한 골은 순위가 아니다", () => {
+      const state = awardState(
+        [{ id: "p-cup", competitionId: CUP, apps: 1, goals: 1, ratingSum: 8 }],
+        [cupFinal({ "p-cup": 8 }, ["home:p-cup"])],
+      );
+      const codes = seasonAwards(state)
+        .filter((a) => a.competitionId === CUP)
+        .map((a) => a.code);
+      expect(codes).toEqual(["final-motm"]);
+    });
+
     /**
      * 세이브 호환 — 옛 행은 `competitionId`가 없고 그 한 행이 **그 시즌 전 대회의
      * 합계**다. 대회를 묻는 쪽은 그것을 그 팀이 속한 리그의 행으로 읽고(옛 규칙
@@ -1260,7 +1291,7 @@ describe("시즌 시상 (season.md §6)", () => {
     it("옛 세이브의 축 없는 행은 리그의 것으로 읽히고 컵의 상은 서지 않는다", () => {
       const state = awardState(
         [{ id: "p-old", apps: 30, goals: 18, ratingSum: 210 }],
-        [cupFinal({})],
+        [cupSemi, cupFinal({})],
       );
       const awards = seasonAwards(state);
       expect(awards.find((a) => a.code === "top-scorer" && a.competitionId === LEAGUE)?.goals).toBe(

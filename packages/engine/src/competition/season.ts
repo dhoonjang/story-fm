@@ -688,14 +688,23 @@ export function seasonAwards(state: GameState): SeasonAward[] {
    * 서지 않는다: 대부분의 팀이 한두 경기라 평균 평점의 상은 뽑기가 된다.
    */
   for (const [competitionId, decider] of finalsPlayedIn(state)) {
-    add(
-      competitionId,
-      "top-scorer",
-      pickWinner(
-        talliesOf(state, competitionId, endDate).filter((t) => t.goals >= MIN_LEADER_TALLY),
-        TOP_SCORER_ORDER,
-      ),
-    );
+    /**
+     * **한 경기가 대회의 전부면 득점왕은 서지 않는다** — 슈퍼컵이 그렇다. 한 골로
+     * 「득점왕」을 세우면 결승 MOM이 이미 말한 사실이 다른 이름으로 한 번 더 선다.
+     */
+    const played = state.matches.filter(
+      (m) => m.season === state.season && m.competitionId === competitionId && m.result,
+    ).length;
+    if (played > 1) {
+      add(
+        competitionId,
+        "top-scorer",
+        pickWinner(
+          talliesOf(state, competitionId, endDate).filter((t) => t.goals >= MIN_LEADER_TALLY),
+          TOP_SCORER_ORDER,
+        ),
+      );
+    }
     const motm = finalMotmOf(state, decider);
     if (motm) awards.push({ ...motm, season: state.season, competitionId, code: "final-motm" });
   }
@@ -731,6 +740,9 @@ function finalsPlayedIn(state: GameState): Map<string, MatchRecord> {
  * 사슬은 경기 리포트의 MOTM과 **같은 하나다**(`compareMotm` — domain/records.ts).
  * 출전 분은 경기 결과에 남지 않으므로 전원 0으로 두고 앞 세 칸과 id로 끊는다.
  * 근거 수치도 그 경기의 것이라 `apps`는 언제나 1이다.
+ *
+ * 평점이 없는 결승은 상이 서지 않는다 — 간이 시뮬이 결승만 평점을 남기기 시작하기
+ * 전(옛 세이브)의 결승이 그렇다 (match.md §6).
  */
 function finalMotmOf(
   state: GameState,
@@ -752,10 +764,16 @@ function finalMotmOf(
   if (!best) return null;
   const player = playerById(state, best.id);
   if (!player) return null;
+  /**
+   * 팀은 **그날 어느 쪽에 섰는가**다 — 지금 소속으로 적으면 결승 뒤 이적한 선수의
+   * 상이 새 셔츠로 남는다. 명단이 없는 옛 경기만 지금 소속으로 떨어진다.
+   */
+  const home = decider.result?.homeLineup?.includes(best.id) ?? false;
+  const away = decider.result?.awayLineup?.includes(best.id) ?? false;
   return {
     gamePlayerId: best.id,
     playerName: player.name,
-    teamId: player.teamId,
+    teamId: home ? decider.homeTeamId : away ? decider.awayTeamId : player.teamId,
     apps: 1,
     goals: best.goals,
     assists: best.assists,
