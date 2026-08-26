@@ -32,7 +32,7 @@ import { loanLockOf, marketValueOf, suitorsOf, windowOpenForTeam, SUITORS_MANY }
  * 만지면 사다리의 규칙이 두 벌이 된다.
  */
 
-/** 하루에 우리 선수 하나에게 새 관심이 설 확률 — 시즌 내내 굴러 스무 건 남짓 */
+/** 하루에 우리 선수 하나에게 새 관심이 설 확률 — 한 시즌에 스물 몇 건 (`pnpm balance ai-market`) */
 export const INTEREST_CHANCE = 0.1;
 
 /** 우리 선수단에 동시에 설 수 있는 관심 줄 수 — 넘으면 스냅샷이 관심 목록이 된다 */
