@@ -8,6 +8,7 @@ import type {
   AxisValues,
   Booking,
   CharacterInjection,
+  Mentoring,
   CharacterMemory,
   Contract,
   DeferredScout,
@@ -633,6 +634,15 @@ export interface GameState {
    * 승격·이적으로 떠나면 걷어낸다. 구 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   developmentFocus?: string[];
+  /**
+   * **멘토링 쌍** — 감독이 고참에게 맡긴 유망주 (→ docs/data/people.md §5-3).
+   *
+   * 멘티의 정신 6축 성장·정착 크레딧에 배율로 얹히고, 두 사람의 인물지에 관계 한
+   * 줄로 선다. 끝난 사이는 지우지 않고 `until`로 닫는다 — 멘토가 떠난 사실이
+   * 멘티의 심경에 서려면 그 줄이 며칠은 남아 있어야 한다.
+   * 옛 세이브엔 없다 (로드 시 빈 배열 — 세이브 버전을 올리지 않는다).
+   */
+  mentoring?: Mentoring[];
   /**
    * 2군 훈련 방침 — 감독이 고른 축 갈래(`set_reserve_training`). 우리 2군의 월간
    * 성장에서 **어느 축이 뽑히는지**에 배율로 얹힌다
