@@ -88,6 +88,7 @@ import {
   ageOf,
   bestOverall,
   isFinanceDemand,
+  opensOwnerSeat,
   interestStageRank,
   canRegister,
   isReserveMatch,
@@ -1455,6 +1456,15 @@ export function openBoardDemand(state: GameState): BoardDemand | null {
 export function openFinanceDemand(state: GameState): BoardDemand | null {
   const demand = openBoardDemand(state);
   return demand && isFinanceDemand(demand.kind) ? demand : null;
+}
+
+/**
+ * 열린 **스스로 자리를 여는 요청** — 재정 갈래와 시즌 갈래 (career.md §5.2).
+ * 감독이 장부가 아니라 결정으로 답해야 하는 것들이라 순위 압력을 기다리지 않는다.
+ */
+export function openSeatDemand(state: GameState): BoardDemand | null {
+  const demand = openBoardDemand(state);
+  return demand && opensOwnerSeat(demand.kind) ? demand : null;
 }
 
 /**

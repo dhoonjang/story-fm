@@ -169,12 +169,20 @@ describe("한 시즌의 다가옴", () => {
     const byReason = (reason: TransferRequestReason) =>
       [...requests].filter((key) => key.split(":")[1] === reason).length;
 
+    /**
+     * 구단주가 이 시즌에 건 조건 — **발행일로 가른다** (career.md §5.2). 창 갈래는
+     * 창마다 하나, 시즌 갈래는 시즌마다 하나이므로 합계가 시즌의 상한을 말한다.
+     */
+    const demands = (state.boardDemands ?? []).filter((d) => d.issuedOn >= start);
+
     const readings: Readings<typeof APPROACH_RATE> = {
       "시즌 다가옴 건수": opened.length,
       "선수 채널": byChannel("player"),
       "에이전트 채널": byChannel("agent"),
       "주장 채널": byChannel("captain"),
       "구단주 채널": byChannel("owner"),
+      "보드 요청(발행)": demands.length,
+      "보드 요청 시즌 갈래": demands.filter((d) => d.kind === "field-player").length,
       "시즌 리뷰 자리": byTopic("season-review"),
       "출전 기회(minutes)": byTopic("minutes"),
       "어긴 약속(promise)": byTopic("promise"),

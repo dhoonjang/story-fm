@@ -436,6 +436,13 @@ export const ApproachContextSchema = z.object({
      */
     "board-demand",
     /**
+     * 창 밖에서 선 경기 단위 구단주 요청 — 지목한 선수를 세우라는 것이다
+     * (career.md §5.2 「시즌 갈래」). 자리의 주인이 그 선수이고 `value`가 세워야 할
+     * 선발 횟수다. 매각 요구(`board-demand`)와 코드가 갈린 것은 배경 한 줄이 「매각」과
+     * 「기용」을 가려 읽어야 하기 때문이다.
+     */
+    "demand-starts",
+    /**
      * 시즌 리뷰 면담 — `value`가 지난 시즌 최종 순위, `limit`이 그 시즌의 기대 순위다
      * (career.md §5). 시즌 번호는 사실 카드가 든다.
      */
@@ -763,8 +770,9 @@ export function pressFactText(fact: PressFact): string {
             : "")
       );
     case "board-demand":
+      // 종류가 든 숫자는 하나다 — 채워야 할 목표(`target`)이거나 발행 시점의 기준값
       return (
-        `보드 요청 — ${boardDemandText(sub, name, v.baseline)}` +
+        `보드 요청 — ${boardDemandText(sub, name, v.target ?? v.baseline)}` +
         causeTail(d.tags?.[1]) +
         (d.date ? ` · 기한 ${d.date}` : "")
       );
@@ -1009,6 +1017,8 @@ export function approachContextText(
       return who
         ? `구단주 요청 · ${who} 매각`
         : `구단주 요청 · 매각 ${formatMoney(context.value ?? 0)}`;
+    case "demand-starts":
+      return `구단주 요청 · ${who ?? "지목 선수"} 선발 ${context.value ?? 0}회`;
     case "season-review":
       return `시즌 결산 · 최종 ${context.value ?? 0}위 · 기대 ${context.limit ?? 0}위`;
     case "interview":
