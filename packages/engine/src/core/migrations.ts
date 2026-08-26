@@ -62,7 +62,8 @@ const ARRAY_FIELDS = [
   "approachPressure",
   "pressLeaks",
   "aiDeals",
-  "leagueHistory",
+  // 시즌 결산 스냅샷 — 옛 세이브엔 없다 (game-state.md §3.3)
+  "history",
   "milestones",
   // 은퇴 명부 — 옛 세이브엔 없다 (season.md §6)
   "retired",
@@ -77,6 +78,40 @@ const ARRAY_FIELDS = [
 /** 스키마 진화 — 나중에 붙은 테이블은 없으면 빈 배열이다 (세이브 호환 원칙) */
 export function fillEmptyTables(save: Record<string, unknown>): void {
   for (const key of ARRAY_FIELDS) save[key] ??= [];
+}
+
+/**
+ * 옛 `leagueHistory` → `state.history` (game-state.md §3.3 폐기 필드).
+ *
+ * 옛 표가 남긴 것은 리그별 **팀 id 순서**뿐이라, 옮겨진 행은 승점도 득실도 모른다
+ * (`SeasonTableRow.record`가 없다) — 없는 수를 0으로 지어내면 그 시즌이 구단 최다
+ * 승점 기록의 비교 대상으로 서고, 0승 0패의 시즌이 역대 표에 선다.
+ *
+ * 순서만으로 충분한 자리가 하나 있다: 체급 재산정의 성적 축은 리그 안 순위만 본다
+ * (team.md §2.1). 옛 세이브의 세 시즌이 그대로 그 축을 먹인다.
+ */
+export function migrateLeagueHistory(save: Record<string, unknown>): void {
+  const old = save.leagueHistory;
+  delete save.leagueHistory;
+  if (!Array.isArray(old) || old.length === 0) return;
+  const history = save.history;
+  if (!Array.isArray(history) || history.length > 0) return;
+  const bySeason = new Map<number, { season: number; leagues: unknown[]; matches: never[] }>();
+  for (const raw of old) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const table = raw as { season?: unknown; leagueId?: unknown; order?: unknown };
+    if (typeof table.season !== "number" || typeof table.leagueId !== "string") continue;
+    if (!Array.isArray(table.order)) continue;
+    const row = bySeason.get(table.season) ?? { season: table.season, leagues: [], matches: [] };
+    row.leagues.push({
+      leagueId: table.leagueId,
+      rows: table.order
+        .filter((id): id is string => typeof id === "string")
+        .map((teamId) => ({ teamId })),
+    });
+    bySeason.set(table.season, row);
+  }
+  history.push(...[...bySeason.values()].sort((a, b) => a.season - b.season));
 }
 
 interface ManagerAxesSave {

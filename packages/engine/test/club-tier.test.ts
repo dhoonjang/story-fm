@@ -197,13 +197,18 @@ describe("최근 성적 축은 전 클럽이 같은 표를 읽는다", () => {
     const club = "wolves";
     const rest = epl.filter((id) => id !== club);
     const threeSeasons = (order: string[]) =>
-      [1, 2, 3].map((season) => ({ season, leagueId: "epl", order }));
+      [1, 2, 3].map((season) => ({
+        season,
+        leagues: [{ leagueId: "epl", rows: order.map((teamId) => ({ teamId })) }],
+        matches: [],
+      }));
 
-    state.leagueHistory = threeSeasons([club, ...rest]);
+    state.season = 3;
+    state.history = threeSeasons([club, ...rest]);
     recomputeClubTiers(state);
     const asChampion = tierOfTeamIn(state, club);
 
-    state.leagueHistory = threeSeasons([...rest, club]);
+    state.history = threeSeasons([...rest, club]);
     recomputeClubTiers(state);
     const asBottom = tierOfTeamIn(state, club);
 
@@ -216,7 +221,9 @@ describe("최근 성적 축은 전 클럽이 같은 표를 읽는다", () => {
     const before = state.teams.map((t) => `${t.id}:${t.tier}`);
 
     // 우리 리그가 아닌 표만 있으면 EPL 클럽은 어디에도 없다 — 중립 그대로다
-    state.leagueHistory = [{ season: 1, leagueId: "laliga", order: [] }];
+    state.history = [
+      { season: state.season, leagues: [{ leagueId: "laliga", rows: [] }], matches: [] },
+    ];
     recomputeClubTiers(state);
 
     expect(state.teams.map((t) => `${t.id}:${t.tier}`)).toEqual(before);

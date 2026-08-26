@@ -11,6 +11,7 @@ import {
   characterEntry,
   characterEntryOf,
   clockOf,
+  clubHonoursLine,
   coachCues,
   describeActiveArcs,
   computeStandings,
@@ -44,6 +45,8 @@ import {
   openTransferRequests,
   pendingVerdicts,
   playerName,
+  recordBreakLine,
+  recordBreaksOf,
   scoutingSummary,
   scoutReportLine,
   speakerCues,
@@ -161,10 +164,19 @@ export function describeCharacters(entries: readonly CharacterEntry[]): string |
  * 맡은 구단 — 이름은 여는 태그의 속성이다 (`<character name>`과 같은 표기, prompts.md §5).
  * 무직이면 서지 않는다 — 옛 구단을 세우면 모델은 아직 그 구단의 감독인 것처럼 쓴다
  * (career.md §5.1). 경질·부임에 한 번 바뀌고 그 사이엔 바이트가 같다.
+ *
+ * **역대 한 줄이 본문에 선다** (team.md §1) — 이 구단이 무엇을 든 구단인가는 세계가
+ * 아는 사실이라, 없으면 GM이 지어낸다. 우승이 없거나 시드가 없는 구단은 줄이 서지
+ * 않는다: 없는 것은 0회가 아니라 모르는 것이다. **시즌에 한 번**(우승이 하나 늘 때)만
+ * 바뀌므로 캐시 프리픽스는 시즌 롤오버에만 깨진다.
  */
 export function describeClub(state: GameState): string | null {
   const teamId = managedTeamId(state);
-  return teamId === null ? null : `<club name="${teamName(teamId)}" />`;
+  if (teamId === null) return null;
+  const honours = clubHonoursLine(state, teamId);
+  return honours === null
+    ? `<club name="${teamName(teamId)}" />`
+    : [`<club name="${teamName(teamId)}">`, `역대: ${honours}`, `</club>`].join("\n");
 }
 
 /**
@@ -587,6 +599,36 @@ function awardFacts(state: GameState): string[] {
 }
 
 /**
+ * 방금 끝난 시즌이 세운 **구단 기록** — 시즌 리뷰가 다이제스트에 낸 그 카드다
+ * (season.md §6 기록 경신). 다이제스트는 시즌이 넘어간 그 한 턴에만 서므로, 오프시즌
+ * 내내 읽히는 이 자리에도 같은 사실이 서야 한다 — 시상과 같은 결이다.
+ *
+ * ⚠️ **판정도 줄도 코어의 것을 그대로 쓴다**(`recordBreaksOf`·`recordBreakLine`).
+ * 견주는 대상은 **그 시즌 앞의 시즌들**인데 결산 스냅샷은 이미 남은 뒤라, 그 시즌을
+ * 뺀 장부를 건넨다 — 그러지 않으면 자기 자신과 견줘 아무것도 경신이 아니게 된다.
+ */
+function recordFacts(state: GameState): string[] {
+  const teamId = managedTeamId(state);
+  if (teamId === null) return [];
+  const last = state.season - 1;
+  const snapshot = (state.history ?? []).find((h) => h.season === last && h.teamId === teamId);
+  const league = snapshot?.leagues.find((l) => l.rows.some((r) => r.teamId === teamId));
+  if (!league) return [];
+  const index = league.rows.findIndex((r) => r.teamId === teamId);
+  const record = league.rows[index]?.record;
+  // 이관된 행은 승점도 득점도 모른다 — 없는 수로는 무엇도 경신할 수 없다
+  if (record === undefined) return [];
+  const before = { ...state, history: (state.history ?? []).filter((h) => h.season < last) };
+  return recordBreaksOf(before, teamId, {
+    season: last,
+    leagueId: league.leagueId,
+    points: record.points,
+    goalsFor: record.goalsFor,
+    position: index + 1,
+  }).map(recordBreakLine);
+}
+
+/**
  * 오프시즌 사실 블록 — **선수단 소집 전에만** 선다 (season.md §6 오프시즌).
  * 소집일이 지나면 사라진다: 오프시즌의 자리는 오프시즌에 있다.
  *
@@ -599,7 +641,7 @@ function awardFacts(state: GameState): string[] {
  */
 function offseasonFacts(state: GameState): string | null {
   if (!onSummerBreak(state.calendar, state.date)) return null;
-  const facts = [...retirementFacts(state), ...awardFacts(state)];
+  const facts = [...recordFacts(state), ...retirementFacts(state), ...awardFacts(state)];
   if (facts.length === 0) return null;
   return `지난 시즌이 닫히며 남은 것 — 자리를 어떻게 열지, 누가 무슨 말을 하는지는 네가 정한다:\n${facts
     .map((f) => `- ${f}`)

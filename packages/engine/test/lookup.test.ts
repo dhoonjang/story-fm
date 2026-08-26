@@ -6,6 +6,7 @@ import {
   careerView,
   assignmentsOf,
   ensureSeasonStat,
+  historyView,
   leagueView,
   marketValueOf,
   observedMarketValue,
@@ -21,6 +22,7 @@ import {
   squadView,
   teamProfile,
   userPlayers,
+  type GameState,
 } from "@story-fm/engine";
 import { SCOUT_DAYS, isReserveMatch } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
@@ -600,6 +602,287 @@ describe("get_career", () => {
       .message.split("\n")
       .find((l) => l.startsWith("평판:"))!;
     expect(line).not.toMatch(/\d/);
+  });
+
+  /**
+   * `TROPHY`는 **전 구단**의 우승을 드는 세계의 원장이다 (career.md §6) — 그대로
+   * 세우면 AI 구단이 든 컵이 감독의 보관함에 선다. 재임은 (시즌, 팀)이 가른다.
+   */
+  it("보관함은 감독이 그 시즌 그 팀에 있던 우승만 든다", () => {
+    const state = createTestGame(21);
+    state.trophies.push(
+      { season: state.season, competitionId: "facup", teamId: state.userTeamId },
+      { season: state.season, competitionId: "epl", teamId: "mancity" },
+    );
+    const line = careerView(state)
+      .message.split("\n")
+      .find((l) => l.startsWith("트로피"))!;
+    expect(line).toContain("트로피 1개");
+    expect(line).not.toContain("프리미어리그");
+  });
+
+  /** 시상도 같은 자로 갈린다 — 남의 리그 득점왕은 감독의 이력이 아니다 (career.md §6) */
+  it("시상 줄은 감독이 맡은 시즌·팀의 것만 세운다", () => {
+    const state = createTestGame(21);
+    const ours = userPlayers(state)[0]!;
+    state.awards = [
+      {
+        code: "top-scorer",
+        season: state.season,
+        leagueId: "epl",
+        gamePlayerId: ours.id,
+        playerName: ours.name,
+        teamId: state.userTeamId,
+        apps: 38,
+        goals: 25,
+        assists: 4,
+      },
+      {
+        code: "top-scorer",
+        season: state.season,
+        leagueId: "laliga",
+        gamePlayerId: "realmadrid-9",
+        playerName: "남의 리그 득점왕",
+        teamId: "realmadrid",
+        apps: 38,
+        goals: 30,
+        assists: 2,
+      },
+    ];
+    const message = careerView(state).message;
+    expect(message).toContain("우리 선수의 리그 시상 1건");
+    expect(message).toContain(ours.name);
+    expect(message).not.toContain("남의 리그 득점왕");
+  });
+});
+
+/**
+ * **역대** — 시즌이 넘어가면 경기는 사라지고 표가 남는다 (game-state.md §3.3).
+ * 재는 것은 조회가 무엇을 답하고 **무엇을 없다고 말하는가**다: 답할 표가 없는데
+ * 조용히 빈 답을 주면 그 자리에서 모델이 지어낸다.
+ */
+describe("get_history", () => {
+  /** 시즌 1의 표(전체 행)와 시즌 2의 **이관된 행**(순서만 안다) */
+  function withHistory(): GameState {
+    const state = createTestGame(21);
+    state.season = 3;
+    state.history = [
+      {
+        season: 1,
+        teamId: state.userTeamId,
+        leagues: [
+          {
+            leagueId: "epl",
+            rows: [
+              {
+                teamId: "mancity",
+                record: {
+                  played: 38,
+                  wins: 28,
+                  draws: 6,
+                  losses: 4,
+                  goalsFor: 90,
+                  goalsAgainst: 30,
+                  points: 90,
+                },
+              },
+              {
+                teamId: state.userTeamId,
+                record: {
+                  played: 38,
+                  wins: 26,
+                  draws: 6,
+                  losses: 6,
+                  goalsFor: 80,
+                  goalsAgainst: 35,
+                  points: 84,
+                },
+              },
+            ],
+          },
+        ],
+        matches: [
+          {
+            date: "2027-01-05",
+            competitionId: "epl",
+            opponentTeamId: "tottenham",
+            venue: "home",
+            goalsFor: 3,
+            goalsAgainst: 1,
+          },
+          {
+            date: "2027-04-10",
+            competitionId: "facup",
+            stage: "final",
+            opponentTeamId: "tottenham",
+            venue: "neutral",
+            goalsFor: 1,
+            goalsAgainst: 1,
+            penalties: { for: 4, against: 3 },
+          },
+        ],
+      },
+      {
+        season: 2,
+        leagues: [{ leagueId: "epl", rows: [{ teamId: "liverpool" }, { teamId: "arsenal" }] }],
+        matches: [],
+      },
+    ];
+    return state;
+  }
+
+  it("지나간 시즌이 없으면 없다고 말한다", () => {
+    const res = historyView(createTestGame(21));
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("지나간 시즌이 없습니다");
+  });
+
+  it("아직 지나가지 않은 시즌은 결산이 없다고 말한다", () => {
+    const state = withHistory();
+    expect(historyView(state, { season: state.season }).message).toContain(
+      "아직 지나가지 않았습니다",
+    );
+  });
+
+  /**
+   * 옛 세이브에서 이관된 행은 팀 id 순서뿐이다 (game-state.md §3.3) — 없는 수를
+   * 0으로 세우면 그 시즌이 그 구단의 최저 승점·최소 득점이 된다.
+   */
+  it("이관된 행은 순위와 이름만 세운다 — 0승 0패를 짓지 않는다", () => {
+    const state = withHistory();
+    for (const message of [
+      historyView(state, { season: 2, competition: "epl" }).message,
+      leagueView(state, { view: "standings", season: 2 }).message,
+    ]) {
+      const row = message.split("\n").find((l) => /^\s*2\s/.test(l))!;
+      expect(row).toContain("아스날");
+      expect(row).not.toContain("경기");
+      expect(row).not.toContain("0승");
+    }
+  });
+
+  it("지나간 시즌의 순위표는 그때의 표에서 온다 — 지금 경기가 아니다", () => {
+    const res = leagueView(withHistory(), { view: "standings", season: 1 });
+    expect(res.message).toContain("최종 순위");
+    expect(res.message).toContain("90점");
+    expect(res.message).toContain("84점");
+  });
+
+  /** 통산은 `SEASON_STAT` 전 행을 접은 것이다 — 합계를 따로 세지 않는다 (§5) */
+  it("선수 통산은 시즌·팀으로 갈린 행을 접은 값이다", () => {
+    const state = withHistory();
+    const player = userPlayers(state)[0]!;
+    state.seasonStats.push(
+      { gamePlayerId: player.id, season: 1, teamId: "chelsea", apps: 30, goals: 10 },
+      { gamePlayerId: player.id, season: 2, teamId: state.userTeamId, apps: 20, goals: 5 },
+    );
+    expect(historyView(state, { player: player.id }).message).toContain("통산: 50경기 15골");
+  });
+
+  /** 우승자는 따로 적히지 않는다 — 리그는 표의 1위, 녹아웃은 트로피다 (§3.3) */
+  it("녹아웃 대회는 트로피가 우승·준우승을 답한다", () => {
+    const state = withHistory();
+    state.trophies.push({
+      season: 1,
+      competitionId: "facup",
+      teamId: state.userTeamId,
+      runnerUpTeamId: "tottenham",
+    });
+    const res = historyView(state, { season: 1, competition: "facup" });
+    expect(res.message).toContain("우승 아스날");
+    expect(res.message).toContain("준우승");
+  });
+
+  it("장부에 표도 우승도 없는 대회는 없다고 말한다", () => {
+    const res = historyView(withHistory(), { season: 1, competition: "ucl" });
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("장부에 없습니다");
+  });
+});
+
+/**
+ * 맞대결 요약 — **지난 시즌도 남는다, 다만 감독 팀의 경기만이다** (§3.3).
+ * 조회가 스스로 "지난 시즌은 남지 않는다"고 말하던 자리다.
+ */
+describe("get_league fixtures — 지난 시즌 맞대결", () => {
+  it("감독 팀의 지난 시즌 경기는 전적에 선다 (승부차기 포함)", () => {
+    const state = createTestGame(21);
+    state.season = 2;
+    state.history = [
+      {
+        season: 1,
+        teamId: state.userTeamId,
+        leagues: [],
+        matches: [
+          {
+            date: "2027-01-05",
+            competitionId: "epl",
+            opponentTeamId: "tottenham",
+            venue: "home",
+            goalsFor: 3,
+            goalsAgainst: 1,
+          },
+          {
+            date: "2027-04-10",
+            competitionId: "facup",
+            stage: "final",
+            opponentTeamId: "tottenham",
+            venue: "neutral",
+            goalsFor: 1,
+            goalsAgainst: 1,
+            penalties: { for: 4, against: 3 },
+          },
+        ],
+      },
+    ];
+    const line = leagueView(state, { view: "fixtures", opponent: "토트넘" })
+      .message.split("\n")
+      .find((l) => l.startsWith("지난 시즌 맞대결"))!;
+    expect(line).toContain("2경기 — 2승 0무 0패");
+    expect(line).toContain("(득 4 · 실 2)");
+    expect(line).toContain("승부차기 4-3");
+  });
+
+  /**
+   * `season`을 준 일정이 조용히 **이번 시즌**의 경기를 내면 모델은 그것을 지난
+   * 시즌의 일로 옮겨 적는다 — 장부에 있는 것만 내고 나머지는 없다고 말한다.
+   */
+  it("지나간 시즌의 일정은 감독 팀의 경기만 답한다", () => {
+    const state = createTestGame(21);
+    state.season = 2;
+    state.history = [
+      {
+        season: 1,
+        teamId: state.userTeamId,
+        leagues: [],
+        matches: [
+          {
+            date: "2027-01-05",
+            competitionId: "epl",
+            opponentTeamId: "tottenham",
+            venue: "home",
+            goalsFor: 3,
+            goalsAgainst: 1,
+          },
+        ],
+      },
+    ];
+    const ours = leagueView(state, { view: "fixtures", season: 1 }).message;
+    expect(ours).toContain("3-1");
+    // 라운드도 차수도 스냅샷에 없다 — "R1"을 지어내지 않는다
+    expect(ours).not.toContain("R1");
+    const theirs = leagueView(state, { view: "fixtures", season: 1, team: "첼시" }).message;
+    expect(theirs).toContain("장부에 없습니다");
+    expect(theirs).not.toContain("3-1");
+  });
+
+  it("남의 팀끼리의 지난 시즌 맞대결은 없다고 말한다", () => {
+    const state = createTestGame(21);
+    const line = leagueView(state, { view: "fixtures", team: "첼시", opponent: "토트넘" })
+      .message.split("\n")
+      .find((l) => l.startsWith("지난 시즌 맞대결"))!;
+    expect(line).toContain("장부에 없다");
+    expect(line).toContain("감독 팀의 경기뿐");
   });
 });
 

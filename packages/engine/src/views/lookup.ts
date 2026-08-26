@@ -3,17 +3,23 @@ import type {
   GamePlayer,
   MatchEventType,
   MatchRecord,
+  MatchStage,
   ScheduleEntry,
+  SeasonHistory,
+  SeasonMatchRow,
   SeasonRecord,
   SeasonStat,
+  SeasonTableRow,
   ShootoutOutcome,
   ShotOrigin,
   StrongFoot,
+  Trophy,
 } from "@story-fm/domain";
 import {
   DERBY_HEAT_KO,
   injuryRiskText,
   isReserveMatch,
+  MatchStageSchema,
   packetTagText,
   PROMISE_KIND_KO,
   SQUAD_STATUS_KO,
@@ -58,7 +64,7 @@ import {
   type MatchReportPlayerView,
   type MatchReportView,
 } from "./views";
-import { addDays, dayOfWeek, diffDays, seasonYear, squadReturnOf } from "../competition/calendar";
+import { addDays, dayOfWeek, diffDays, squadReturnOf } from "../competition/calendar";
 import { entrantsOf } from "../competition/europe";
 import { careerOf, careerTotalsOf, type CareerTotals } from "../squad/career";
 import { leaderGroupOf } from "../squad/hierarchy";
@@ -80,6 +86,7 @@ import {
   competitionName,
   competitionShortName,
   isCup,
+  stageLabel,
 } from "../data/cup-catalog";
 import {
   domesticCupCatalog,
@@ -93,7 +100,22 @@ import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { isClubTeam, teamCatalog } from "../data/team-catalog";
 import { leagueOfTeamIn, teamsOfLeagueIn } from "../competition/promotion";
 import { tierOfTeamIn } from "../core/club-tier";
-import { achievementLine, boardExpectation, computeStandings } from "../competition/season";
+import {
+  achievementLine,
+  awardLine,
+  boardExpectation,
+  computeStandings,
+} from "../competition/season";
+import {
+  clubHonoursLine,
+  clubRecordsOf,
+  leagueTableOf,
+  managerTenureOf,
+  managerTrophiesOf,
+  pastSeasonsOf,
+  seasonHistoryOf,
+  seasonLabelOf,
+} from "../competition/records";
 import { openManagerOffers, USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import { observedMarketValue } from "../market/market";
 import { interestLine } from "../market/interest";
@@ -1377,6 +1399,7 @@ export function teamProfile(state: GameState, team: string): LookupResult {
     .slice(0, 6);
 
   const managerName = state.teams.find((t) => t.id === teamId)?.managerName;
+  const honours = clubHonoursLine(state, teamId);
 
   const lines = [
     `[팀 프로필] ${teamNameIn(state, teamId)} — ${competitionName(leagueOfTeamIn(state, teamId))} ` +
@@ -1388,6 +1411,12 @@ export function teamProfile(state: GameState, team: string): LookupResult {
     // (people.md §2-1). 이름을 모르는 구단은 줄이 서지 않는다
     ...(managerName !== undefined ? [`감독: ${managerName}`] : []),
     `스쿼드: ${squad.length}명 · 평균 ${avgAge.toFixed(1)}세 · 구단 등급 ${tierOfTeamIn(state, teamId)}`,
+    /**
+     * **역대 한 줄** (team.md §1) — 카탈로그 시드와 게임 안의 우승을 더한 것이다.
+     * 시드가 없고 게임 안의 우승도 없으면 줄이 서지 않는다: 없는 것은 0회가 아니라
+     * 모르는 것이라 `null`이 온다.
+     */
+    ...(honours === null ? [] : [`역대: ${honours}`]),
     recent.length > 0 ? `최근 5경기: ${recent.join(" / ")}` : "최근 경기 없음",
   ];
   if (teamId !== state.userTeamId) {
@@ -1442,6 +1471,12 @@ export interface LeagueViewInput {
   opponent?: string;
   /** 대회 이름·약어·id — 생략하면 모든 대회 (team이 "all"이면 우리 리그) */
   competition?: string;
+  /**
+   * 지나간 시즌 — 생략하면 지금 시즌이다. 순위표는 그 시즌의 **최종 표**를, 일정은
+   * 결산 스냅샷에 남은 **감독 팀의 경기**를 낸다 (game-state.md §3.3: 지난 시즌은
+   * 경기가 아니라 표로 남고, 경기는 감독 팀의 것만 남는다).
+   */
+  season?: number;
   /** 지난 경기만 / 예정만 / 둘 다 (기본 both) */
   when?: "past" | "upcoming" | "both";
   /** 날짜 범위 (YYYY-MM-DD, 포함) */
@@ -1459,10 +1494,12 @@ function dateLabel(date: string): string {
   return `${date}(${WEEKDAY[dayOfWeek(date)]})`;
 }
 
-/** "2026-27 시즌 (시즌 1)" — 날짜를 묻는 답에 시즌 번호만 주면 연도를 지어내게 된다 */
-function seasonLabel(state: GameState): string {
-  const year = seasonYear(state.season);
-  return `${year}-${String((year + 1) % 100).padStart(2, "0")} 시즌 (시즌 ${state.season})`;
+/**
+ * "2026-27 시즌 (시즌 1)" — 날짜를 묻는 답에 시즌 번호만 주면 연도를 지어내게 된다.
+ * 연도 표기는 `seasonLabelOf`가 갖는다 (역대 표와 같은 눈금).
+ */
+function seasonLabel(season: number): string {
+  return `${seasonLabelOf(season)} 시즌 (시즌 ${season})`;
 }
 
 /** 대회·단계 태그 — "EPL R7", "UCL 8강 1차전", "친선" */
@@ -1584,14 +1621,90 @@ function cupBracketView(state: GameState, cupId: string): LookupResult {
   return {
     ok: true,
     message: [
-      `[${competitionName(cupId)} 대진] ${seasonLabel(state)} · ${state.date}`,
+      `[${competitionName(cupId)} 대진] ${seasonLabel(state.season)} · ${state.date}`,
       ...lines,
     ].join("\n"),
   };
 }
 
+/** 그 시즌 그 팀이 뛴 리그 — 결산 스냅샷의 표가 답한다. 모르면 null */
+function leagueOfTeamInSeason(state: GameState, season: number, teamId: string): string | null {
+  const snapshot = seasonHistoryOf(state, season);
+  return snapshot?.leagues.find((l) => l.rows.some((r) => r.teamId === teamId))?.leagueId ?? null;
+}
+
+/**
+ * 지나간 시즌의 순위표 한 행 — **이관된 행은 순위와 이름만 안다** (game-state.md §3.3).
+ * 없는 수를 0으로 세우면 그 시즌이 그 구단의 최저 승점으로 읽힌다.
+ */
+function historyTableRow(
+  state: GameState,
+  row: SeasonTableRow,
+  rank: number,
+  mineTeamId?: string,
+): string {
+  const mark = row.teamId === mineTeamId ? " ←우리" : "";
+  const head = `${String(rank).padStart(2)} ${teamNameIn(state, row.teamId)}`;
+  const r = row.record;
+  if (!r) return `${head}${mark}`;
+  const diff = r.goalsFor - r.goalsAgainst;
+  return (
+    `${head} ${r.played}경기 ${r.wins}승 ${r.draws}무 ${r.losses}패 ` +
+    `${r.points}점 (${diff >= 0 ? "+" : ""}${diff})${mark}`
+  );
+}
+
+/** 그 시즌 그 대회의 트로피 — 표가 없는 녹아웃 대회는 이 원장이 답한다 (§3.3) */
+function trophyOf(state: GameState, season: number, competitionId: string): Trophy | null {
+  return (
+    state.trophies.find((t) => t.season === season && t.competitionId === competitionId) ?? null
+  );
+}
+
+/** 우승 팀과 준우승 팀 — 준우승은 그 우승이 누구를 꺾은 것인가라는 사실이다 */
+function championText(state: GameState, trophy: Trophy): string {
+  return (
+    teamNameIn(state, trophy.teamId) +
+    (trophy.runnerUpTeamId ? ` (준우승 ${teamNameIn(state, trophy.runnerUpTeamId)})` : "")
+  );
+}
+
+/**
+ * 지나간 시즌 그 대회의 결과 — 리그면 최종 순위표, 녹아웃이면 우승·준우승 한 줄.
+ * **둘 다 없으면 없다고 말한다**: 장부에 남는 것은 표와 감독 팀의 경기뿐이다.
+ */
+function pastCompetitionView(
+  state: GameState,
+  season: number,
+  competitionId: string,
+): LookupResult {
+  const head = `[역대] ${seasonLabel(season)} · ${competitionName(competitionId)}`;
+  const table = leagueTableOf(state, season, competitionId);
+  if (table) {
+    const mine = seasonHistoryOf(state, season)?.teamId;
+    return {
+      ok: true,
+      message: [
+        `${head} 최종 순위`,
+        ...table.map((row, i) => historyTableRow(state, row, i + 1, mine)),
+      ].join("\n"),
+    };
+  }
+  const trophy = trophyOf(state, season, competitionId);
+  if (trophy) {
+    return { ok: true, message: [head, `우승 ${championText(state, trophy)}`].join("\n") };
+  }
+  return {
+    ok: true,
+    message: `${head} — 장부에 없습니다 (그 시즌 그 대회의 순위표도 우승 기록도 남지 않았습니다)`,
+  };
+}
+
 function standingsView(state: GameState, input: LeagueViewInput): LookupResult {
-  let competitionId = leagueOfTeamIn(state, state.userTeamId);
+  const past = input.season !== undefined && input.season !== state.season ? input.season : null;
+  let competitionId =
+    (past === null ? null : leagueOfTeamInSeason(state, past, state.userTeamId)) ??
+    leagueOfTeamIn(state, state.userTeamId);
   if (input.competition) {
     const resolved = resolveCompetitionId(input.competition);
     if (!resolved) {
@@ -1602,11 +1715,16 @@ function standingsView(state: GameState, input: LeagueViewInput): LookupResult {
     }
     competitionId = resolved;
   } else if (input.team && !EVERY_TEAM.has(norm(input.team))) {
-    // 팀을 주면 그 팀이 속한 리그의 순위표를 본다
+    // 팀을 주면 그 팀이 속한 리그의 순위표를 본다 — 지나간 시즌은 **그때의** 소속이다
     const team = resolveTeam(state, input.team);
     if (!team.ok) return team;
-    competitionId = leagueOfTeamIn(state, team.teamId);
+    competitionId =
+      (past === null ? null : leagueOfTeamInSeason(state, past, team.teamId)) ??
+      leagueOfTeamIn(state, team.teamId);
   }
+
+  // 지나간 시즌은 결산 스냅샷이 답한다 — 지금 경기로 세우는 표가 아니다 (§3.3)
+  if (past !== null) return pastCompetitionView(state, past, competitionId);
 
   // 국내 컵은 순수 녹아웃이라 순위표가 없다 — 대신 대진표를 돌려준다
   if (isDomesticCup(competitionId)) return cupBracketView(state, competitionId);
@@ -1631,7 +1749,161 @@ function standingsView(state: GameState, input: LeagueViewInput): LookupResult {
     : `[리그 순위] ${competitionName(competitionId)}`;
   return {
     ok: true,
-    message: [`${title} ${seasonLabel(state)} · ${state.date}`, ...rows].join("\n"),
+    message: [`${title} ${seasonLabel(state.season)} · ${state.date}`, ...rows].join("\n"),
+  };
+}
+
+/** 지난 시즌 맞대결 줄의 상한 — 한 상대와 한 시즌에 넷까지 붙으므로 셋이면 흐름이 보인다 */
+const PAST_H2H_SHOWN = 4;
+
+/** 결산 스냅샷의 경기 한 줄이 남긴 승패·스코어 요약 */
+interface PastHeadToHead {
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  scored: number;
+  conceded: number;
+  /** 최근 것부터 — "시즌 3 FA컵 결승 2-1" */
+  lines: string[];
+}
+
+/**
+ * 지난 시즌들의 맞대결 — **장부에 남는 것은 감독 팀의 경기뿐이다**
+ * (game-state.md §3.3). 그 시즌 감독이 그 팀에 있었을 때의 줄만 세므로, 남의 팀끼리의
+ * 지난 시즌 스코어는 여기서도 나오지 않는다 — 그 물음에는 없다는 것이 답이다.
+ */
+function pastHeadToHead(state: GameState, teamId: string, opponentId: string): PastHeadToHead {
+  const tally: PastHeadToHead = {
+    played: 0,
+    wins: 0,
+    draws: 0,
+    losses: 0,
+    scored: 0,
+    conceded: 0,
+    lines: [],
+  };
+  for (const snapshot of pastSeasonsOf(state)) {
+    if (snapshot.teamId !== teamId) continue;
+    for (const row of [...snapshot.matches].reverse()) {
+      if (row.opponentTeamId !== opponentId) continue;
+      // 승패는 지금 시즌의 경기와 **같은 자**를 지난다 — 연장·승부차기의 규칙이 하나다
+      const outcome = outcomeFor(asMatchRecord(snapshot.season, row, teamId), teamId);
+      tally.played += 1;
+      tally.scored += row.goalsFor;
+      tally.conceded += row.goalsAgainst;
+      if (outcome === "W") tally.wins += 1;
+      else if (outcome === "L") tally.losses += 1;
+      else tally.draws += 1;
+      tally.lines.push(
+        `시즌 ${snapshot.season} ${pastMatchLabel(row)} ` +
+          `${row.goalsFor}-${row.goalsAgainst}` +
+          (row.penalties ? ` (승부차기 ${row.penalties.for}-${row.penalties.against})` : ""),
+      );
+    }
+  }
+  return tally;
+}
+
+/** 스냅샷이 든 단계 문자열을 대회 라벨이 아는 갈래로 — 모르는 값은 리그 경기다 */
+function stageOf(stage: string | undefined): MatchStage {
+  const parsed = MatchStageSchema.safeParse(stage);
+  return parsed.success ? parsed.data : "league";
+}
+
+/**
+ * 스냅샷의 경기가 서는 대회 표기 — **라운드도 차수도 남지 않는다** (§3.3).
+ * 없는 것을 `R1`·`1차전`으로 지어내지 않으므로 단계 이름까지만 붙인다.
+ */
+function pastMatchLabel(row: SeasonMatchRow): string {
+  const stage = stageOf(row.stage);
+  const name = competitionShortName(row.competitionId);
+  if (stage === "league") return name;
+  const label = isDomesticCup(row.competitionId)
+    ? domesticStageLabel(row.competitionId, stage)
+    : stageLabel(stage, 1, false);
+  return label ? `${name} ${label}` : name;
+}
+
+/**
+ * 결산 스냅샷의 경기 한 줄을 **경기 레코드의 모양으로** — 승패 판정이 지금 시즌의
+ * 경기와 같은 함수를 지나게 하는 자리다. 스냅샷은 감독 팀 시점으로 적히므로 그 팀을
+ * 홈에 세운다 (실제 홈·원정은 `venue`가 따로 답한다 — 승패는 그것을 보지 않는다).
+ */
+function asMatchRecord(season: number, row: SeasonMatchRow, teamId: string): MatchRecord {
+  return {
+    id: `${season}:${row.date}:${row.opponentTeamId}`,
+    season,
+    competitionId: row.competitionId,
+    round: 1,
+    date: row.date,
+    homeTeamId: teamId,
+    awayTeamId: row.opponentTeamId,
+    result: {
+      homeGoals: row.goalsFor,
+      awayGoals: row.goalsAgainst,
+      scorers: [],
+      ...(row.penalties
+        ? { penalties: { home: row.penalties.for, away: row.penalties.against } }
+        : {}),
+    },
+  };
+}
+
+/**
+ * 지나간 시즌의 경기 — `state.matches`는 새 시즌 일정으로 갈아 끼워지므로 여기 답할
+ * 것은 결산 스냅샷에 남은 **감독 팀의 경기**뿐이다 (game-state.md §3.3).
+ *
+ * 그 밖의 물음(남의 팀의 지난 시즌 일정, 대회 전체)에는 **없다고 말한다** — 이 자리가
+ * 조용히 이번 시즌의 경기를 내면 모델은 그것을 지난 시즌의 일로 옮겨 적는다.
+ */
+function pastFixturesView(
+  state: GameState,
+  season: number,
+  query: { teamId: string | null; opponentId: string | null; competitionId: string | null },
+): LookupResult {
+  const head = `[일정] ${seasonLabel(season)} — 지나간 시즌`;
+  const snapshot = seasonHistoryOf(state, season);
+  const mine = snapshot?.teamId;
+  if (snapshot === null || mine === undefined) {
+    return {
+      ok: true,
+      message: `${head}\n장부에 그 시즌의 경기가 없습니다 — 남는 것은 감독 팀의 경기뿐입니다`,
+    };
+  }
+  if (query.teamId !== mine) {
+    const asked = query.teamId === null ? "대회 전체" : teamNameIn(state, query.teamId);
+    return {
+      ok: true,
+      message:
+        `${head}\n${asked}의 그 시즌 경기는 장부에 없습니다 —` +
+        ` 남는 것은 그때 감독이 맡은 ${teamNameIn(state, mine)}의 경기뿐입니다`,
+    };
+  }
+  const rows = snapshot.matches.filter(
+    (row) =>
+      (query.opponentId === null || row.opponentTeamId === query.opponentId) &&
+      (query.competitionId === null || row.competitionId === query.competitionId),
+  );
+  if (rows.length === 0) {
+    return { ok: true, message: `${head}\n조건에 맞는 경기가 없습니다` };
+  }
+  return {
+    ok: true,
+    message: [
+      `${head} · ${teamNameIn(state, mine)} ${rows.length}경기`,
+      ...rows.map((row) => {
+        const pens = row.penalties
+          ? ` (승부차기 ${row.penalties.for}-${row.penalties.against})`
+          : "";
+        const outcome = outcomeFor(asMatchRecord(season, row, mine), mine);
+        return (
+          `  ${dateLabel(row.date)} ${pastMatchLabel(row)} ` +
+          `${VENUE_KO[row.venue]} ${row.goalsFor}-${row.goalsAgainst}${pens} ` +
+          `vs ${teamNameIn(state, row.opponentTeamId)} ${outcomeLabel(outcome)}`
+        );
+      }),
+    ].join("\n"),
   };
 }
 
@@ -1677,6 +1949,11 @@ function fixturesView(state: GameState, input: LeagueViewInput): LookupResult {
     competitionId = leagueOfTeamIn(state, state.userTeamId);
   }
 
+  // 지나간 시즌은 일정 장부에 없다 — 결산 스냅샷이 답한다 (§3.3)
+  if (input.season !== undefined && input.season !== state.season) {
+    return pastFixturesView(state, input.season, { teamId, opponentId, competitionId });
+  }
+
   const pool = state.matches
     .filter((m) => {
       // 2군 경기는 일정 조회에 서지 않는다 — 달력과 같은 답이어야 한다 (season.md §2)
@@ -1714,13 +1991,13 @@ function fixturesView(state: GameState, input: LeagueViewInput): LookupResult {
   ].filter((x): x is string => x !== null);
   const head =
     `[일정] ${scopeName}${filters.length > 0 ? ` · ${filters.join(" · ")}` : ""}` +
-    ` — 오늘 ${dateLabel(state.date)} · ${seasonLabel(state)}`;
+    ` — 오늘 ${dateLabel(state.date)} · ${seasonLabel(state.season)}`;
 
   const lines: string[] = [head];
 
   if (opponentId && teamId) {
     if (played.length === 0) {
-      lines.push(`이번 시즌 맞대결 기록 없음 (지난 시즌 결과는 장부에 남지 않는다)`);
+      lines.push(`이번 시즌 맞대결 기록 없음`);
     } else {
       let w = 0;
       let d = 0;
@@ -1737,8 +2014,30 @@ function fixturesView(state: GameState, input: LeagueViewInput): LookupResult {
         conceded += home ? m.result!.awayGoals : m.result!.homeGoals;
       }
       lines.push(
-        `이번 시즌 맞대결 ${played.length}경기 — ${w}승 ${d}무 ${l}패 (득 ${scored} · 실 ${conceded})` +
-          ` ※ 지난 시즌 결과는 장부에 남지 않는다`,
+        `이번 시즌 맞대결 ${played.length}경기 — ${w}승 ${d}무 ${l}패 (득 ${scored} · 실 ${conceded})`,
+      );
+    }
+    /**
+     * **지난 시즌도 남는다 — 다만 감독 팀의 경기만이다** (game-state.md §3.3).
+     * 남의 팀끼리의 지난 시즌 스코어는 시즌이 넘어가며 사라졌고, 그 물음에는 없다는
+     * 것이 답이다. 두 답을 가르는 것은 장부에 그 팀의 시즌이 남았는가다.
+     */
+    const past = pastHeadToHead(state, teamId, opponentId);
+    const kept = pastSeasonsOf(state).some((h) => h.teamId === teamId);
+    if (past.played > 0) {
+      const shown = past.lines.slice(0, PAST_H2H_SHOWN);
+      lines.push(
+        `지난 시즌 맞대결 ${past.played}경기 — ${past.wins}승 ${past.draws}무 ${past.losses}패` +
+          ` (득 ${past.scored} · 실 ${past.conceded}) — ${shown.join(" / ")}` +
+          (past.lines.length > shown.length
+            ? ` …그 외 ${past.lines.length - shown.length}경기`
+            : ""),
+      );
+    } else {
+      lines.push(
+        kept
+          ? `지난 시즌 맞대결 없음 — 장부에 남은 지난 시즌 경기에 이 상대가 없다`
+          : `지난 시즌 맞대결은 장부에 없다 — 남는 것은 감독 팀의 경기뿐이다`,
       );
     }
   }
@@ -1954,7 +2253,10 @@ export function scheduleView(state: GameState, input: ScheduleViewInput = {}): L
   return { ok: true, message: lines.join("\n") };
 }
 
-// ── 감독 커리어 (지난 시즌·트로피·업적) ─────────────────
+// ── 감독 커리어 (지난 시즌·트로피·업적·시상) ────────────
+
+/** 커리어 카드에 세우는 시상 줄의 수 — 스무 시즌이면 상만 여든 줄이다 */
+const AWARDS_SHOWN = 6;
 
 /**
  * 감독 커리어 — 지난 시즌 성적·트로피·업적. 멀티시즌 게임인데 과거를 읽을 자리가
@@ -1981,7 +2283,7 @@ export function careerView(state: GameState): LookupResult {
     ? [
         `[커리어] ${m.name} — 무직 (${card.on} ${teamNameIn(state, card.teamId)}에서 ${
           card.kind === "expired" ? "계약 만료" : "경질"
-        }) · ${seasonLabel(state)}`,
+        }) · ${seasonLabel(state.season)}`,
         `평판: ${describeReputation(m.reputation)}`,
         card.expectation && card.position
           ? `자리를 잃은 자리: 기대 ${card.expectation}(${card.target}위) · 당시 ${card.position}위`
@@ -2015,7 +2317,7 @@ export function careerView(state: GameState): LookupResult {
           : []),
       ]
     : [
-        `[커리어] ${m.name} — ${teamNameIn(state, state.userTeamId)} 재임 · ${seasonLabel(state)}`,
+        `[커리어] ${m.name} — ${teamNameIn(state, state.userTeamId)} 재임 · ${seasonLabel(state.season)}`,
         // 경고 수와 진행 순위가 겨루는 상대다 — 기대를 모르면 아래 두 줄은 숫자일 뿐이다
         (() => {
           const e = boardExpectation(state, state.userTeamId);
@@ -2060,10 +2362,6 @@ export function careerView(state: GameState): LookupResult {
           : `이번 시즌 진행: 아직 리그 경기 없음`,
       ];
 
-  const yearOf = (season: number) => {
-    const year = seasonYear(season);
-    return `${year}-${String((year + 1) % 100).padStart(2, "0")}`;
-  };
   /**
    * 시즌 기록과 경질 이력을 한 표로 잇는다 (career.md §6) — 잘린 시즌은
    * `SEASON_RECORD`가 없으므로 경질 줄이 그 해를 채운다. 최신 시즌이 앞이고,
@@ -2076,7 +2374,7 @@ export function careerView(state: GameState): LookupResult {
       atEnd: 1,
       on: "",
       text:
-        `  시즌 ${r.season} (${yearOf(r.season)}) ${teamNameIn(state, r.teamId)} ` +
+        `  시즌 ${r.season} (${seasonLabelOf(r.season)}) ${teamNameIn(state, r.teamId)} ` +
         `${r.position}위 · ${r.wins}승 ${r.draws}무 ${r.losses}패 · 득 ${r.goalsFor} 실 ${r.goalsAgainst}` +
         boardLine(r),
     })),
@@ -2085,7 +2383,7 @@ export function careerView(state: GameState): LookupResult {
       atEnd: 0,
       on: d.on,
       text:
-        `  시즌 ${d.season} (${yearOf(d.season)}) ${teamNameIn(state, d.teamId)} — ${d.on} ` +
+        `  시즌 ${d.season} (${seasonLabelOf(d.season)}) ${teamNameIn(state, d.teamId)} — ${d.on} ` +
         `${d.kind === "expired" ? "계약 만료" : "경질"}` +
         (d.expectation && d.position
           ? ` (기대 ${d.expectation} ${d.target}위 · 당시 ${d.position}위)`
@@ -2103,10 +2401,16 @@ export function careerView(state: GameState): LookupResult {
     if (rows.length > 10) lines.push(`  …그 외 ${rows.length - 10}줄`);
   }
 
+  /**
+   * **보관함은 원장이 아니다** (career.md §6). `TROPHY`는 전 구단의 우승을 드는
+   * 세계의 원장이라, 그대로 세우면 AI 구단이 든 컵이 감독의 보관함에 선다 —
+   * 재임 여부는 `managerTrophiesOf`가 `SEASON_RECORD`의 (시즌, 팀)으로 가른다.
+   */
+  const trophies = managerTrophiesOf(state);
   lines.push(
-    state.trophies.length > 0
+    trophies.length > 0
       ? // TROPHY는 대회 id로 남는다 — 이름은 여기서 카탈로그가 만든다 (career.md §6)
-        `트로피 ${state.trophies.length}개: ${state.trophies
+        `트로피 ${trophies.length}개: ${trophies
           .map(
             (t) =>
               `${t.competitionId ? competitionName(t.competitionId) : (t.competition ?? "")} ` +
@@ -2115,6 +2419,24 @@ export function careerView(state: GameState): LookupResult {
           .join(" / ")}`
       : "트로피: 없음",
   );
+  /**
+   * **시상은 선수의 것이지만 어느 해에 우리 선수가 리그의 상을 들었는가는 감독의
+   * 이력이다** (career.md §6). 그래서 세우는 것은 감독이 그 시즌 맡고 있던 팀의
+   * 상뿐이고, 남의 리그 득점왕은 여기 서지 않는다 — 트로피와 같은 자로 가른다.
+   */
+  // 감독이 그 시즌 그 팀에 있었나 — 트로피 보관함과 **같은 자**로 잰다 (career.md §6)
+  const managedThen = managerTenureOf(state);
+  const awards = (state.awards ?? [])
+    .filter((a) => managedThen(a.season, a.teamId))
+    .sort((a, b) => b.season - a.season || a.code.localeCompare(b.code));
+  if (awards.length > 0) {
+    const shown = awards.slice(0, AWARDS_SHOWN);
+    lines.push(
+      `우리 선수의 리그 시상 ${awards.length}건:`,
+      ...shown.map((a) => `  시즌 ${a.season} ${awardLine(a)}`),
+    );
+    if (awards.length > shown.length) lines.push(`  …그 외 ${awards.length - shown.length}건`);
+  }
   if (state.achievements.length > 0) {
     lines.push(
       `업적 ${state.achievements.length}개: ${state.achievements
@@ -2146,6 +2468,328 @@ export function careerView(state: GameState): LookupResult {
 
 /** 커리어 카드에 세우는 은퇴 이름의 수 — 스무 시즌이면 명부가 카드를 통째로 덮는다 */
 const RETIRED_SHOWN = 8;
+
+// ── 역대 (지나간 시즌 · 구단 역사 · 선수 통산) ──────────
+
+/**
+ * 세계의 기억을 읽는 자리 — **장부에 남은 것만** 답한다 (game-state.md §3.3).
+ *
+ * 시즌이 넘어가면 경기는 사라지고 표가 남는다: 리그별 최종 순위표(`state.history`),
+ * 전 구단의 우승(`TROPHY` + 카탈로그 `honours`), 그리고 **감독 팀의 경기**뿐이다.
+ * 남의 팀끼리의 지난 시즌 스코어는 없고, 그 물음에는 없다고 말한다 — 답할 도구가
+ * 조용히 빈 답을 주면 모델이 지어낸다.
+ */
+export interface HistoryViewInput {
+  /** 시즌 번호 — 주면 그 시즌 하나를 본다 */
+  season?: number;
+  /** 대회 이름·약어·id — `season`과 함께면 그 시즌 그 대회의 결과다 */
+  competition?: string;
+  /** 구단 이름·약칭·id — `season` 없이 주면 그 구단의 역대 기록이다 */
+  team?: string;
+  /** 선수 이름 또는 id — 은퇴한 선수도 찾는다 */
+  player?: string;
+  /** 목록의 최대 행 수 (기본 8) — 순위표는 자르지 않는다 */
+  count?: number;
+}
+
+/** 그 시즌 감독 팀의 성적 한 줄 — 스냅샷이 어느 팀의 것인지 모르면 서지 않는다 */
+function ourSeasonLine(state: GameState, snapshot: SeasonHistory): string | null {
+  const teamId = snapshot.teamId;
+  if (teamId === undefined) return null;
+  for (const league of snapshot.leagues) {
+    const index = league.rows.findIndex((r) => r.teamId === teamId);
+    if (index < 0) continue;
+    const record = league.rows[index]!.record;
+    return (
+      `우리: ${teamNameIn(state, teamId)} ${competitionShortName(league.leagueId)} ${index + 1}위` +
+      (record
+        ? ` · ${record.played}경기 ${record.wins}승 ${record.draws}무 ${record.losses}패` +
+          ` · 승점 ${record.points} (득 ${record.goalsFor} 실 ${record.goalsAgainst})`
+        : "") +
+      (snapshot.matches.length > 0 ? ` · 장부에 남은 경기 ${snapshot.matches.length}건` : "")
+    );
+  }
+  return null;
+}
+
+/**
+ * 그 시즌의 우승자 전부 — **리그는 표의 1위, 녹아웃은 트로피**다 (§3.3).
+ * 리그 우승도 트로피 원장에 한 줄이 있으므로 표가 이미 답한 대회는 다시 세우지 않는다.
+ */
+function championLines(state: GameState, snapshot: SeasonHistory): string[] {
+  const fromTable = snapshot.leagues
+    .map((league) => {
+      const champion = league.rows[0];
+      return champion === undefined
+        ? null
+        : `  ${competitionName(league.leagueId)} — ${teamNameIn(state, champion.teamId)}`;
+    })
+    .filter((line): line is string => line !== null);
+  const covered = new Set(snapshot.leagues.map((l) => l.leagueId));
+  const fromTrophies = state.trophies
+    .filter(
+      (t) =>
+        t.season === snapshot.season &&
+        t.competitionId !== undefined &&
+        !covered.has(t.competitionId),
+    )
+    .map((t) => `  ${competitionName(t.competitionId ?? null)} — ${championText(state, t)}`)
+    .sort();
+  return [...fromTable, ...fromTrophies];
+}
+
+/** 지나간 시즌 한 줄 — 시즌·우리 순위·리그 챔피언 */
+function pastSeasonLine(state: GameState, snapshot: SeasonHistory): string {
+  const ourLeague =
+    snapshot.teamId === undefined
+      ? null
+      : (snapshot.leagues.find((l) => l.rows.some((r) => r.teamId === snapshot.teamId)) ?? null);
+  const ours =
+    ourLeague === null || snapshot.teamId === undefined
+      ? ""
+      : ` ${teamShortNameIn(state, snapshot.teamId)} ${competitionShortName(ourLeague.leagueId)} ` +
+        `${ourLeague.rows.findIndex((r) => r.teamId === snapshot.teamId) + 1}위`;
+  // 감독의 리그를 모르는 행(이관된 행)도 표의 1위는 안다 — 그 표의 챔피언을 세운다
+  const league = ourLeague ?? snapshot.leagues[0];
+  const champion = league?.rows[0];
+  const crown =
+    league === undefined || champion === undefined
+      ? ""
+      : ` · ${competitionShortName(league.leagueId)} 챔피언 ${teamNameIn(state, champion.teamId)}`;
+  return `  시즌 ${snapshot.season} (${seasonLabelOf(snapshot.season)})${ours}${crown}`;
+}
+
+/**
+ * 그 구단의 역대 — 전부 `clubRecordsOf` 하나에서 나온다 (career.md §6).
+ * 우승 줄은 시드가 없고 게임 안의 우승도 없으면 서지 않는다: **없는 것은 0회가
+ * 아니라 모르는 것이다** (team.md §1).
+ */
+function clubHistoryView(state: GameState, teamId: string, limit: number): LookupResult {
+  const records = clubRecordsOf(state, teamId);
+  const honours = clubHonoursLine(state, teamId);
+  const at = (best: { season: number; leagueId: string }) =>
+    `(시즌 ${best.season} · ${competitionShortName(best.leagueId)})`;
+  const lines = [
+    `[역대] ${teamNameIn(state, teamId)} — 장부가 아는 ${records.seasons}시즌 · 오늘 ${state.date}`,
+    ...(honours === null ? [] : [`우승: ${honours}`]),
+    ...(records.bestPoints === null
+      ? []
+      : [`한 시즌 최다 승점: ${records.bestPoints.value}점 ${at(records.bestPoints)}`]),
+    ...(records.mostGoals === null
+      ? []
+      : [`한 시즌 최다 득점: ${records.mostGoals.value}골 ${at(records.mostGoals)}`]),
+    ...(records.bestPosition === null
+      ? []
+      : [`역대 최고 순위: ${records.bestPosition.value}위 ${at(records.bestPosition)}`]),
+  ];
+  if (records.awards.length > 0) {
+    const shown = records.awards.slice(0, limit);
+    lines.push(
+      `이 구단 소속의 리그 시상 ${records.awards.length}건:`,
+      ...shown.map((a) => `  시즌 ${a.season} ${awardLine(a)}`),
+    );
+    if (records.awards.length > shown.length) {
+      lines.push(`  …그 외 ${records.awards.length - shown.length}건`);
+    }
+  }
+  if (lines.length === 1) {
+    lines.push(`장부에 남은 기록이 없습니다 — 지나간 시즌도 우승도 아직 없습니다`);
+  }
+  return { ok: true, message: lines.join("\n") };
+}
+
+/** 역대를 물을 수 있는 사람 — 현역과 **은퇴한 사람**이 한 명부에 선다 */
+interface HistoryPerson {
+  id: string;
+  name: string;
+  note: string;
+}
+
+/**
+ * 이름으로 사람을 찾는다 — 은퇴하면 `state.players`에서 빠지므로 명부(`state.retired`)도
+ * 함께 뒤진다. 역대 득점왕을 물었는데 그 사람이 그만뒀다는 이유로 못 찾으면 안 된다.
+ */
+function resolveHistoryPerson(state: GameState, ref: string): readonly HistoryPerson[] {
+  const pool: HistoryPerson[] = [
+    ...state.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      note: `${naturalPositionOf(p).position} · ${teamShortNameIn(state, p.teamId)}`,
+    })),
+    ...(state.retired ?? []).map((r) => ({
+      id: r.gamePlayerId,
+      name: r.name,
+      note: `${r.position} · ${r.on} 은퇴`,
+    })),
+  ];
+  const key = ref.trim();
+  const exact = pool.find((p) => p.id === key);
+  if (exact) return [exact];
+  return rankByName(key, pool).matches;
+}
+
+/** 그 선수의 통산과 받은 상 — 통산은 `careerOf` 하나에서 나온다 (game-state.md §5) */
+function playerHistoryView(state: GameState, person: HistoryPerson): LookupResult {
+  const career = careerOf(state, person.id);
+  const awards = (state.awards ?? [])
+    .filter((a) => a.gamePlayerId === person.id)
+    .sort((a, b) => b.season - a.season || a.code.localeCompare(b.code));
+  const played = (t: CareerTotals) => t.apps > 0 || t.reserveApps > 0;
+  const lines = [`[역대] ${person.name} (${person.note})`];
+  lines.push(
+    played(career.totals)
+      ? `통산: ${careerStatText(career.totals)}`
+      : `통산: 장부에 출전 기록이 없습니다 (게임이 시작되기 전의 커리어는 장부에 없습니다)`,
+  );
+  const teams = career.teams.filter(played);
+  if (teams.length > 0) {
+    lines.push(
+      `팀별: ${teams
+        .map((t) => `${teamShortNameIn(state, t.teamId)}(${t.from}~${t.to}) ${careerStatText(t)}`)
+        .join(" / ")}`,
+    );
+  }
+  const seasons = career.seasons.filter(played);
+  if (seasons.length > 1) {
+    lines.push(
+      `시즌별: ${seasons
+        .map((s) => `${s.season} ${teamShortNameIn(state, s.teamId)} ${careerStatText(s)}`)
+        .join(" / ")}`,
+    );
+  }
+  if (awards.length > 0) {
+    lines.push(
+      `받은 상 ${awards.length}건:`,
+      ...awards.map(
+        (a) => `  시즌 ${a.season} ${competitionShortName(a.leagueId)} ${awardLine(a)}`,
+      ),
+    );
+  }
+  return { ok: true, message: lines.join("\n") };
+}
+
+/**
+ * 역대 조회 — 시즌·대회·팀·선수로 좁혀 답한다.
+ *
+ * 좁힌 것이 없으면 지나간 시즌의 목록이 최근 것부터 온다. 절단은 언제나 남은 수를
+ * 함께 알린다 (이 파일의 다른 뷰와 같은 규약) — 순위표만은 자르지 않는다: 표는
+ * 잘리면 표가 아니다.
+ */
+export function historyView(state: GameState, input: HistoryViewInput = {}): LookupResult {
+  const limit = Math.min(Math.max(input.count ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
+
+  if (input.player !== undefined) {
+    const matches = resolveHistoryPerson(state, input.player);
+    if (matches.length === 0) {
+      return { ok: false, message: `"${input.player}"라는 선수를 찾지 못했습니다` };
+    }
+    if (matches.length > 1) {
+      const names = matches
+        .slice(0, 6)
+        .map((p) => `${p.name}(${p.id})`)
+        .join(" / ");
+      return { ok: false, message: `"${input.player}"는 여러 선수와 맞습니다 — ${names}` };
+    }
+    return playerHistoryView(state, matches[0]!);
+  }
+
+  let teamId: string | null = null;
+  if (input.team !== undefined) {
+    const resolved = resolveTeam(state, input.team);
+    if (!resolved.ok) return resolved;
+    teamId = resolved.teamId;
+  }
+
+  let competitionId: string | null = null;
+  if (input.competition !== undefined) {
+    competitionId = resolveCompetitionId(input.competition);
+    if (competitionId === null) {
+      return {
+        ok: false,
+        message: `"${input.competition}"라는 대회를 찾지 못했습니다 — ${competitionHint()}`,
+      };
+    }
+  }
+
+  if (input.season !== undefined) {
+    const season = input.season;
+    if (season >= state.season) {
+      return {
+        ok: true,
+        message:
+          `시즌 ${season}은 아직 지나가지 않았습니다 — 결산 스냅샷은 시즌이 넘어갈 때 남습니다.` +
+          ` 진행 중인 시즌은 순위표와 일정이 답합니다`,
+      };
+    }
+    // 대회를 주면 그 대회 하나, 팀을 주면 **그때** 그 팀이 뛴 리그의 표
+    const narrowed =
+      competitionId ?? (teamId === null ? null : leagueOfTeamInSeason(state, season, teamId));
+    if (narrowed !== null) return pastCompetitionView(state, season, narrowed);
+
+    const snapshot = seasonHistoryOf(state, season);
+    if (snapshot === null) {
+      return { ok: true, message: `시즌 ${season}의 결산이 장부에 없습니다` };
+    }
+    const champions = championLines(state, snapshot);
+    const ours = ourSeasonLine(state, snapshot);
+    return {
+      ok: true,
+      message: [
+        `[역대] ${seasonLabel(season)} 결산`,
+        ...(champions.length > 0 ? [`우승:`, ...champions] : [`우승: 장부에 남은 것이 없습니다`]),
+        ...(ours === null ? [] : [ours]),
+      ].join("\n"),
+    };
+  }
+
+  if (teamId !== null) return clubHistoryView(state, teamId, limit);
+
+  // 대회만 주면 그 대회의 역대 우승 — 시즌마다 한 줄이다
+  if (competitionId !== null) {
+    const cup = competitionId;
+    const rows = pastSeasonsOf(state)
+      .map((snapshot) => {
+        const at = `  시즌 ${snapshot.season} (${seasonLabelOf(snapshot.season)})`;
+        const champion = snapshot.leagues.find((l) => l.leagueId === cup)?.rows[0];
+        if (champion) return `${at} ${teamNameIn(state, champion.teamId)}`;
+        const trophy = trophyOf(state, snapshot.season, cup);
+        return trophy === null ? null : `${at} ${championText(state, trophy)}`;
+      })
+      .filter((line): line is string => line !== null);
+    if (rows.length === 0) {
+      return {
+        ok: true,
+        message: `[역대] ${competitionName(cup)} — 장부에 지나간 시즌의 우승이 없습니다`,
+      };
+    }
+    const shown = rows.slice(0, limit);
+    return {
+      ok: true,
+      message: [
+        `[역대] ${competitionName(cup)} 우승 ${rows.length}시즌 (최근부터)`,
+        ...shown,
+        ...(rows.length > shown.length ? [`  …그 외 ${rows.length - shown.length}시즌`] : []),
+      ].join("\n"),
+    };
+  }
+
+  const seasons = pastSeasonsOf(state);
+  if (seasons.length === 0) {
+    return {
+      ok: true,
+      message: `[역대] 장부에 지나간 시즌이 없습니다 — ${seasonLabel(state.season)}이 첫 시즌입니다`,
+    };
+  }
+  const shown = seasons.slice(0, limit);
+  return {
+    ok: true,
+    message: [
+      `[역대] 지나간 ${seasons.length}시즌 (최근부터) · 오늘 ${state.date}`,
+      ...shown.map((snapshot) => pastSeasonLine(state, snapshot)),
+      ...(seasons.length > shown.length ? [`  …그 외 ${seasons.length - shown.length}시즌`] : []),
+    ].join("\n"),
+  };
+}
 
 // ── 끝난 경기 리포트 (match.md §8) ──────────────────────
 
