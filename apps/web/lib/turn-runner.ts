@@ -333,6 +333,7 @@ export function runTurnLocked(
           ...(turn.goals && turn.goals.length > 0 ? { goals: turn.goals } : {}),
           ...(turn.cards && turn.cards.length > 0 ? { cards: turn.cards } : {}),
           ...(turn.reports && turn.reports.length > 0 ? { reports: turn.reports } : {}),
+          ...(turn.missions && turn.missions.length > 0 ? { missions: turn.missions } : {}),
           // 유저 턴과 같은 표식 — 한 턴의 두 줄이 서로 다른 이력으로 갈리면 안 된다
           ...mark,
         });

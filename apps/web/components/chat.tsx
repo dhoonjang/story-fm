@@ -9,7 +9,7 @@ import { groupPieces, splitStaging, weaveTurn } from "../lib/turn-pieces";
 import type { Utterance } from "../lib/turn-pieces";
 import { BROADCAST_SPEAKER, formatMoney, normalizeSpeaker } from "@story-fm/domain";
 import type { ScoutReportCard } from "@story-fm/domain";
-import { MarketCardView } from "@/components/market-card";
+import { MarketCardView, MissionReportCardView } from "@/components/market-card";
 import { splitMarketCalls } from "@/lib/market-calls";
 import { ratingTone, scoutMargin, scoutValue } from "@/lib/scout-report-display";
 import { SKILL_LABEL } from "@/lib/skill-label";
@@ -615,6 +615,10 @@ export function ChatTurnView({
       {/* 보고서는 대화 뒤 — 서류는 "이런 게 왔습니다" 다음에 놓인다 */}
       {turn.reports?.map((report) => (
         <ScoutReport report={report} key={report.playerId} />
+      ))}
+      {/* 임무 보고도 서류다 — 지목 보고와 같은 자리에 선다 */}
+      {turn.missions?.map((card) => (
+        <MissionReportCardView card={card} key={card.missionId} />
       ))}
     </div>
   );
