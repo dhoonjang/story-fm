@@ -73,6 +73,9 @@ import {
   personaRoleLabel,
   PROMISE_KIND_KO,
   slotOfTime,
+  TACTIC_TOGGLES,
+  tacticToggleValue,
+  tacticToggleWord,
   tacticsBrief,
   TRANSFER_REQUEST_REASON_KO,
   type CharacterEntry,
@@ -945,11 +948,21 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
   const assignments = tacticsOf(state, state.userTeamId).assignments.filter(
     (a) => a.role === "starting" && (a.directive || a.instruction || a.roleId),
   );
+  /**
+   * 걸어 둔 갈래 — **중립인 것은 세우지 않는다** (`tacticsBrief`와 같은 규칙).
+   * 낱말은 `TACTIC_TOGGLES` 하나에서 온다 — 손으로 적으면 해석 프롬프트가 가르치는
+   * 낱말과 이 줄이 갈린다 (prompts.md §5-2).
+   */
+  const ourToggles = TACTIC_TOGGLES.flatMap((toggle) => {
+    const value = tacticToggleValue(ourTactics, toggle.key);
+    return value === null ? [] : [`${toggle.brief} ${tacticToggleWord(toggle.key, value)}`];
+  });
   const standingLines = [
     ``,
     `<standing>`,
     `전술 ${ourTactics.formation} · 멘탈${ourTactics.mentality} 라인${ourTactics.defensiveLine} ` +
-      `압박${ourTactics.pressing} 템포${ourTactics.tempo} 폭${ourTactics.width} 패스${ourTactics.passStyle}`,
+      `압박${ourTactics.pressing} 템포${ourTactics.tempo} 폭${ourTactics.width} 패스${ourTactics.passStyle}` +
+      (ourToggles.length > 0 ? ` · ${ourToggles.join(" · ")}` : ``),
     pending.regionalPlans && pending.regionalPlans.length > 0
       ? `지역 전술: ${pending.regionalPlans
           .map((r) => `${r.band}/${r.lane} ${r.intent} "${r.note}"`)
