@@ -67,6 +67,7 @@ import {
   teamName,
   topNarrative,
   userPlayers,
+  VACANCY_KNOCK_DAYS,
   visionOf,
   visionReadings,
   visionSpanOf,
@@ -525,29 +526,83 @@ function timePassedLine(state: GameState, passed?: TimePassed | null): string | 
  * **감독 자신의 계약 한 줄** — 연봉과 만료일, 그리고 보드가 만료 90일 전에 내린
  * 판정 (career.md §5.4).
  *
- * 재계약 제안은 10일 뒤 사라지는 답할 자리라 스냅샷에 서야 한다 — 화면에만 있으면
- * 모델은 감독이 무엇을 두고 답하는지 모른 채 장면을 쓴다.
- *
- * 잔여일은 만료일에서 나오는 파생값이라 싣지 않는다.
+ * 잔여일은 만료일에서 나오는 파생값이라 싣지 않는다. 열린 제안은 아래
+ * `managerSeatLines`가 갈래마다 한 줄로 세운다.
  */
 function managerContractLine(state: GameState): string | null {
   const contract = state.manager.contract;
   if (!contract) return null;
   const base = `감독 계약: 연봉 ${formatMoney(contract.salary)} · ${contract.until}까지`;
-  const renewal = openManagerOffers(state).find((o) => o.via === "renewal");
-  if (renewal) {
-    return (
-      `${base}\n보드의 재계약 제안 (accept_manager_offer로 수락한다 — 감독이 받겠다고 할 때만.` +
-      ` 수락 전 counter_manager_offer로 한 차례 조건을 되부를 수 있다):` +
-      ` ${renewal.id} · 연봉 ${formatMoney(renewal.salary ?? 0)}·${renewal.years ?? "-"}년` +
-      `·이적 예산 약속 ${formatMoney(renewal.budgetPledge ?? 0)}` +
-      `${renewal.counteredOn ? " · 흥정은 끝났다 — 수락 여부만 남았다" : ""} · ${renewal.expiresOn}까지`
-    );
-  }
-  if (contract.renewalOffered === false) {
-    return `${base} · 보드는 재계약하지 않기로 했다 — 만료일에 자리를 잃는다`;
-  }
-  return base;
+  return contract.renewalOffered === false
+    ? `${base} · 보드는 재계약하지 않기로 했다 — 만료일에 자리를 잃는다`
+    : base;
+}
+
+/**
+ * 제안이 부른 자리 — 어느 구단이 어떤 자리로 부르는가 (career.md §5.1).
+ * 무직의 목록과 재직 중의 줄이 같은 함수를 읽는다.
+ */
+function offerSeat(offer: ManagerOffer): string {
+  return [
+    `${teamName(offer.teamId)} (${offer.tier}티어)`,
+    `기대 ${offerExpectation(offer)}`,
+    offer.position ? `현재 ${offer.position}위` : null,
+  ]
+    .filter((x): x is string => x !== null)
+    .join(" · ");
+}
+
+/** 제안이 들고 온 조건과 기한 — 자리와 마찬가지로 두 스냅샷이 같은 것을 읽는다 */
+function offerTerms(offer: ManagerOffer): string {
+  return [
+    offer.salary
+      ? `연봉 ${formatMoney(offer.salary)}·${offer.years ?? "-"}년·이적 예산 약속 ${formatMoney(offer.budgetPledge ?? 0)}`
+      : null,
+    // 보상금은 감독의 지갑을 지나지 않는다 — 새 구단이 지금 구단에 무는 돈이다
+    offer.compensation ? `지금 구단에 보상금 ${formatMoney(offer.compensation)}` : null,
+    offer.counteredOn ? `흥정은 끝났다 — 수락 여부만 남았다` : null,
+    `${offer.expiresOn}까지`,
+  ]
+    .filter((x): x is string => x !== null)
+    .join(" · ");
+}
+
+/** 제안이 선 갈래 — 재직 중에는 갈래가 곧 사실이다 (career.md §5.1) */
+const OFFER_VIA_KO: Record<NonNullable<ManagerOffer["via"]>, string> = {
+  renewal: "보드의 재계약 제안",
+  poach: "다른 구단의 접근",
+  knock: "두드린 자리의 제안",
+  vacancy: "감독직 제안",
+};
+
+/** 두드릴 수 있는 공석 한 줄씩 — 무직의 명부와 재직 중의 줄이 같은 것을 읽는다 */
+function vacancyRows(state: GameState): string[] {
+  return (state.managerVacancies ?? []).map(
+    (v) => `- ${teamName(v.teamId)}${v.position ? ` · 현재 ${v.position}위` : ""} · ${v.on} 공석`,
+  );
+}
+
+/**
+ * **재직 중인 감독의 거취** — 열린 감독직 제안과 두드릴 수 있는 공석
+ * (career.md §5.1 「재직 중 접근·노크」 · §5.4).
+ *
+ * 열흘이면 사라지는 답할 자리라 스냅샷에 서야 한다 — 화면에만 있으면 모델은 감독이
+ * 무엇을 두고 답하는지 모른 채 장면을 쓴다. 갈래는 셋이다: 보드의 재계약, 다른
+ * 구단의 접근, 감독이 두드려 얻은 자리.
+ *
+ * 재계약은 구단도 자리도 그대로라 구단·기대를 다시 적지 않는다 — 바로 위의 보드
+ * 기대 줄이 그것이다.
+ */
+function managerSeatLines(state: GameState): string[] {
+  const offers = openManagerOffers(state).map((o) =>
+    o.via === "renewal"
+      ? `${OFFER_VIA_KO.renewal}: ${o.id} · ${offerTerms(o)}`
+      : `${OFFER_VIA_KO[o.via ?? "vacancy"]}: ${o.id} · ${offerSeat(o)} · ${offerTerms(o)}`,
+  );
+  const vacancies = vacancyRows(state);
+  return vacancies.length > 0
+    ? [...offers, `공석 (경질 뒤 ${VACANCY_KNOCK_DAYS}일 안):`, ...vacancies]
+    : offers;
 }
 
 /**
@@ -602,28 +657,13 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
     block(
       "job_offers",
       offers.length > 0
-        ? offers
-            .map(
-              (o) =>
-                `- ${o.id} · ${teamName(o.teamId)} (${o.tier}티어) · 기대 ${offerExpectation(o)}${
-                  o.position ? ` · 현재 ${o.position}위` : ""
-                }${o.salary ? ` · 연봉 ${formatMoney(o.salary)}·${o.years ?? "-"}년·이적 예산 약속 ${formatMoney(o.budgetPledge ?? 0)}` : ""}${
-                  o.counteredOn ? " · 흥정은 끝났다 — 수락 여부만 남았다" : ""
-                } · ${o.expiresOn}까지`,
-            )
-            .join("\n")
+        ? offers.map((o) => `- ${o.id} · ${offerSeat(o)} · ${offerTerms(o)}`).join("\n")
         : `받은 제안 없음.`,
     ),
     block(
       "vacancies",
       vacancies.length > 0
-        ? lines(
-            `경질 뒤 14일 안:`,
-            ...vacancies.map(
-              (v) =>
-                `- ${teamName(v.teamId)}${v.position ? ` · 현재 ${v.position}위` : ""} · ${v.on} 공석`,
-            ),
-          )
+        ? lines(`경질 뒤 ${VACANCY_KNOCK_DAYS}일 안:`, ...vacancyRows(state))
         : null,
     ),
     block("time_passed", timePassedLine(state, passed)),
@@ -1152,8 +1192,14 @@ export function buildGmStateNote(
           const be = boardExpectation(state, state.userTeamId);
           return boardExpectationLine(be.code, be.target);
         })(),
-        // 감독 자신의 계약 — 재계약 제안은 **답할 자리**라 스냅샷에 서야 한다 (career.md §5.4)
+        // 감독 자신의 계약 — 연봉·만료일과 보드의 재계약 판정 (career.md §5.4)
         managerContractLine(state),
+        /**
+         * 그 아래가 감독의 거취다 — 열린 제안(재계약·접근·노크)과 두드릴 수 있는
+         * 공석 (career.md §5.1). 계약 줄과 **같은 자리**인 것은 셋 다 감독 자신의
+         * 일이기 때문이다.
+         */
+        ...managerSeatLines(state),
       ),
     ),
     // 한 줄에 하나 — 이어 붙이면 일곱 항목이 가운뎃점 사이에 묻힌다

@@ -23,6 +23,7 @@ import {
   scoutPlayer,
   scoutReportCard,
   squadReturnOf,
+  teamName,
   playersOf,
   userPlayers,
   type GameState,
@@ -337,6 +338,50 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
       teamId: state.userTeamId,
     };
     expect(buildGmStateNote(state)).not.toContain("보드 기대");
+  });
+
+  /**
+   * **재직 중인 감독의 거취가 스냅샷에 선다** (career.md §5.1 「재직 중 접근·노크」).
+   *
+   * 화면에만 서면 GM은 열린 이직 제안을 모른 채 장면을 쓰고, 감독이 「받겠다」고 해도
+   * 그 자리가 성립하지 않는다 — 조용히 어긋나는 자리라 케이스가 있어야 한다.
+   *
+   * 함께 재는 것이 **도구 이름이 새지 않는가**다 (prompts.md §5-3). 데이터 블록에
+   * 사용법을 적으면 같은 규칙이 스킬 설명과 두 자리에 산다.
+   */
+  it("재직 중의 이직 제안과 공석이 <manager>에 선다 — 도구 이름은 빼고", () => {
+    const state = game();
+    state.managerOffers = [
+      {
+        id: "mgr-poach-chelsea-x",
+        teamId: "chelsea",
+        madeOn: state.date,
+        expiresOn: addDays(state.date, 10),
+        tier: 1,
+        target: 4,
+        expectationCode: "europe",
+        salary: 6_000_000,
+        years: 3,
+        budgetPledge: 30_000_000,
+        compensation: 4_200_000,
+        via: "poach",
+        status: "open",
+      },
+    ];
+    state.managerVacancies = [{ teamId: "everton", on: state.date, position: 18 }];
+
+    const note = buildGmStateNote(state);
+    expect(note).toContain("다른 구단의 접근: mgr-poach-chelsea-x");
+    expect(note).toContain(teamName("chelsea"));
+    // 보상금은 감독의 지갑이 아니라 구단의 돈이다 — 그 사실이 줄에 실린다
+    expect(note).toContain(`지금 구단에 보상금 ${formatMoney(4_200_000)}`);
+    expect(note).toContain(addDays(state.date, 10));
+    expect(note).toContain(`${state.date} 공석`);
+    expect(note).toContain(teamName("everton"));
+
+    // 스냅샷은 사실만 싣는다 — 수락도 흥정도 그 도구의 설명이 원본이다
+    expect(note).not.toContain("accept_manager_offer");
+    expect(note).not.toContain("counter_manager_offer");
   });
 
   /**

@@ -1,4 +1,5 @@
 import type {
+  ManagerOffer,
   MatchEvent,
   Negotiation,
   NegotiationVerdict,
@@ -104,6 +105,37 @@ import type { CardMark, GoalMark } from "@story-fm/engine";
 const MOCK_COUNTER_FEE_RATE = 1.25;
 /** mock 감독직 흥정 — 제시 조건의 1.2배를 되부른다 (천장은 코어가 자른다) */
 const MOCK_MANAGER_COUNTER_RATE = 1.2;
+
+/**
+ * 면접에서 감독이 취한 결 — **무직이든 재직 중이든 같은 표다** (career.md §5.1).
+ * `bold`가 여기에만 있는 것은 그 자리가 흥정을 미리 당겨 쓰는 자리이기 때문이다.
+ */
+function interviewStance(msg: string): "criticise" | "bold" | "deflect" | "defend" | "own" {
+  return /비판|문제|형편없|실망/u.test(msg)
+    ? "criticise"
+    : /요구|조건|더 받|올려|자신/u.test(msg)
+      ? "bold"
+      : /말을 아끼|노코멘트|글쎄/u.test(msg)
+        ? "deflect"
+        : /감싸|선수단|이 선수/u.test(msg)
+          ? "defend"
+          : "own";
+}
+
+/** 무엇을 되부를지는 감독의 말이 정한다 — 예산 이야기가 아니면 연봉이다 */
+function counterAsk(
+  msg: string,
+  offer: ManagerOffer,
+): { salary: number } | { transferBudget: number } {
+  const base = MANAGER_TERMS_BY_TIER[offer.tier as 1 | 2 | 3 | 4];
+  return /예산|보강|영입 자금/u.test(msg)
+    ? {
+        transferBudget: Math.round(
+          (offer.budgetPledge ?? base.budgetPledge) * MOCK_MANAGER_COUNTER_RATE,
+        ),
+      }
+    : { salary: Math.round((offer.salary ?? base.salary) * MOCK_MANAGER_COUNTER_RATE) };
+}
 
 /**
  * 우리 오퍼에 상대가 답한다 — **mock은 코어 앵커를 그대로 읽는다** (agents.md §4-1).
@@ -642,16 +674,7 @@ function computeMockGmTurn(
      */
     const interview = pendingInterview(state);
     if (interview) {
-      const stance = /비판|문제|형편없|실망/u.test(msg)
-        ? ("criticise" as const)
-        : /요구|조건|더 받|올려|자신/u.test(msg)
-          ? ("bold" as const)
-          : /말을 아끼|노코멘트|글쎄/u.test(msg)
-            ? ("deflect" as const)
-            : /감싸|선수단|이 선수/u.test(msg)
-              ? ("defend" as const)
-              : ("own" as const);
-      const input = { stance } as const;
+      const input = { stance: interviewStance(msg) } as const;
       const result = respondToApproach(state, input);
       recordCall(calls, "respond_to_approach", result, { input, line: 2 });
       return {
@@ -668,15 +691,7 @@ function computeMockGmTurn(
     const haggling = /흥정|되불|더 받|올려|깎|조건을 더|연봉|예산/u.test(msg);
     if (haggling && (named ?? offers[0])) {
       const offer = named ?? offers[0]!;
-      const base = MANAGER_TERMS_BY_TIER[offer.tier as 1 | 2 | 3 | 4];
-      // 무엇을 되부를지는 감독의 말이 정한다 — 예산 이야기가 아니면 연봉이다
-      const ask = /예산|보강|영입 자금/u.test(msg)
-        ? {
-            transferBudget: Math.round(
-              (offer.budgetPledge ?? base.budgetPledge) * MOCK_MANAGER_COUNTER_RATE,
-            ),
-          }
-        : { salary: Math.round((offer.salary ?? base.salary) * MOCK_MANAGER_COUNTER_RATE) };
+      const ask = counterAsk(msg, offer);
       const result = counterManagerOffer(state, offer.id, ask);
       recordCall(calls, "counter_manager_offer", result, { input: { offer: offer.id, ...ask } });
       return {
@@ -708,6 +723,71 @@ function computeMockGmTurn(
               .join(" · ")}`
           : `부르는 곳도, 비어 있는 자리도 아직 없다`;
     return { text: `@: *${waiting}*`, toolCalls: calls };
+  }
+
+  /**
+   * ── 재직 중의 거취 — 보드의 재계약·다른 구단의 접근·두드려 얻은 자리 ───
+   *
+   * 셋 다 재직 중에 열리는 제안이고 도구도 무직과 같다 (career.md §5.1 「재직 중
+   * 접근·노크」 · §5.4).
+   *
+   * 무직 분기와 갈리는 것은 **문**이다: 재직 중의 턴에는 훈련도 이적도 지나가므로,
+   * 열려 있다는 이유만으로 가로채면 「수락」·「계약」이 든 다른 지시가 전부 이 자리로
+   * 떨어진다. 그래서 감독의 말이 자기 거취를 가리킬 때만 잡는다 — 거취를 가리키는 말이
+   * 있거나, 부른 구단의 이름에 **감독이 그 벤치로 간다는 말**이 붙었거나. 「더 받아내자」
+   * 같은 흥정의 말은 그 문을 열지 못한다: 같은 말을 이적 협상도 쓴다.
+   *
+   * 화자는 사임과 같이 없다 — 감독 자신의 일이라 수석코치가 옆에 설 자리가 아니다.
+   */
+  const seatOffers = openManagerOffers(state);
+  if (seatOffers.length > 0) {
+    // 재계약의 상대는 지금 구단이라 이름으로 고르지 않는다 — 매 턴 오르내리는 이름이다
+    const namedSeat = seatOffers.find(
+      (o) => msg.includes(o.id) || (o.via !== "renewal" && msg.includes(teamName(o.teamId))),
+    );
+    const haggling = /흥정|되불|더 받|올려|깎|조건/u.test(msg);
+    const taking = /수락|받겠|가겠|맡겠|부임|사인|서명|연장하겠/u.test(msg);
+    if (/감독직|이직|거취|내 계약|제 계약|재계약 제안/u.test(msg) || (namedSeat && taking)) {
+      const offer = namedSeat ?? seatOffers[0]!;
+      if (haggling) {
+        const ask = counterAsk(msg, offer);
+        const result = counterManagerOffer(state, offer.id, ask);
+        recordCall(calls, "counter_manager_offer", result, { input: { offer: offer.id, ...ask } });
+        return {
+          text: `@: *${teamName(offer.teamId)}와의 전화가 길어진다*\n@: *${result.message}*`,
+          toolCalls: calls,
+        };
+      }
+      if (taking) {
+        const result = acceptManagerOffer(state, offer.id);
+        recordCall(calls, "accept_manager_offer", result);
+        return {
+          text: `@: *책상 위에 계약서가 놓인다*\n@: *${result.message}*`,
+          toolCalls: calls,
+        };
+      }
+      return {
+        text: `@: *열려 있는 자리 — ${seatOffers
+          .map((o) => `${teamName(o.teamId)} (${o.expiresOn}까지)`)
+          .join(" · ")}*`,
+        toolCalls: calls,
+      };
+    }
+  }
+
+  /**
+   * 재직 중의 노크 — 공석을 먼저 두드린다 (career.md §5.1). 자리가 서면 보드 평판이
+   * 깎이는 대가가 붙으므로, 감독이 그 뜻을 분명히 말한 턴에만 잡는다.
+   */
+  const openVacancies = state.managerVacancies ?? [];
+  if (openVacancies.length > 0 && /노크|두드|이력서|감독직에? ?지원|공석에? ?지원/u.test(msg)) {
+    const wanted = openVacancies.find((v) => msg.includes(teamName(v.teamId))) ?? openVacancies[0]!;
+    const result = applyForManagerJob(state, wanted.teamId);
+    recordCall(calls, "apply_manager_job", result, { input: { team: wanted.teamId } });
+    return {
+      text: `@: *${teamName(wanted.teamId)} 사무국에 이력서가 닿는다*\n@: *${result.message}*`,
+      toolCalls: calls,
+    };
   }
 
   /**
@@ -986,25 +1066,38 @@ function computeMockGmTurn(
    *
    * 회견처럼 **잡아 두지는 않는다**: 다가옴은 감독이 부르지 않아도 사흘 뒤 코어가
    * 닫으므로, 열려 있다는 이유만으로 mock의 모든 턴을 가로채면 다른 지시가 막힌다.
+   *
+   * **재직 중에도 감독직 면접이 이 자리에 선다** — 노크가 연 자리다 (career.md §5.1).
+   * 마주 앉은 사람도 결의 표도 다르므로 갈래로 가른다: 감독실이 아니라 그 구단의
+   * 회의실이고, 조건을 걸고 오는 `bold`은 면접에만 있다.
    */
   const approach = pendingApproach(state);
-  if (approach && /면담|찾아|만나|불만|들어보|얘기|이야기/u.test(msg)) {
+  if (approach && /면담|면접|찾아|만나|불만|들어보|얘기|이야기/u.test(msg)) {
+    const seat = approach.topic === "interview";
     const decline = /거절|돌려보|나중|안 만나|안만나|바쁘/u.test(msg);
     const input = decline
       ? ({ decline: true } as const)
       : ({
-          stance: /비판|질책|문제/u.test(msg)
-            ? ("criticise" as const)
-            : /내 탓|내 책임|제 책임/u.test(msg)
-              ? ("own" as const)
-              : /말을 아끼|노코멘트/u.test(msg)
-                ? ("deflect" as const)
-                : ("defend" as const),
+          stance: seat
+            ? interviewStance(msg)
+            : /비판|질책|문제/u.test(msg)
+              ? ("criticise" as const)
+              : /내 탓|내 책임|제 책임/u.test(msg)
+                ? ("own" as const)
+                : /말을 아끼|노코멘트/u.test(msg)
+                  ? ("deflect" as const)
+                  : ("defend" as const),
         } as const);
     const result = respondToApproach(state, input);
     recordCall(calls, "respond_to_approach", result, { input, line: 2 });
     return {
-      text: `@: *감독실 문이 열린다*\n@${approach.speakerId}: ${pressFactText(approach.facts[0]!)}\n${coach(state)} ${result.message}`,
+      text: [
+        seat
+          ? `@: *${teamName(approach.teamId ?? "")} 회의실, 구단주가 서류를 덮는다*`
+          : `@: *감독실 문이 열린다*`,
+        `@${approach.speakerId}: ${pressFactText(approach.facts[0]!)}`,
+        seat ? `@: *${result.message}*` : `${coach(state)} ${result.message}`,
+      ].join("\n"),
       toolCalls: calls,
     };
   }
