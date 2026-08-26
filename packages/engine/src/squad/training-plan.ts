@@ -6,7 +6,7 @@ import type {
   TrainAttr,
   TrainingSession,
 } from "@story-fm/domain";
-import { ATTRIBUTE_AXES, SLOT_TIME, isReserveMatch } from "@story-fm/domain";
+import { ATTRIBUTE_AXES, SLOT_TIME, attributeAxisOf, isReserveMatch } from "@story-fm/domain";
 import { addDays, dayOfWeek, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
 import type { GameState } from "../core/state";
 
@@ -466,4 +466,47 @@ export function reserveTrainingMultiplier(
   if (aimed.includes(axis)) return RESERVE_TRAINING_AIM;
   const rest = FIELD_AXIS_COUNT - aimed.length;
   return (FIELD_AXIS_COUNT - aimed.length * RESERVE_TRAINING_AIM) / rest;
+}
+
+/**
+ * 개인 훈련이 겨냥한 축의 배율 — 방침보다 날카롭다. 방침은 갈래 하나(4~6축)를
+ * 겨냥하지만 개인 훈련은 **한 축**을 겨냥하므로, 같은 폭으로 얹으면 손잡이 둘의
+ * 값이 같아진다. 걷는 몫도 그만큼 크다(방침 없이 겨냥하면 나머지 14축 ×13/14).
+ */
+export const PERSONAL_TRAINING_AIM = 2;
+
+/** 이 선수에게 걸린 개인 훈련의 축 — 없거나 이름을 모르면 null */
+export function personalTrainingAxis(state: GameState, playerId: string): AttributeAxis | null {
+  return attributeAxisOf(state.playerTraining.find((t) => t.gamePlayerId === playerId)?.axis);
+}
+
+/**
+ * 월간 성장이 이 축에 곱하는 배율 — **2군 훈련 방침과 개인 훈련을 합성한다**
+ * (season.md §2). 둘이 같은 축을 두고 겹치는 자리가 여기 하나다.
+ *
+ * 규약은 방침의 것을 그대로 쓴다: **총량을 옮길 뿐 늘리지 않는다.** 개인 훈련이
+ * 겨냥한 축이 오른 만큼을 나머지 필드 축에서 **비례로**(방침이 이미 얹은 배율에
+ * 비례해) 걷으므로, 합성해도 필드 15축의 배율 합은 15로 남는다.
+ *
+ * 개인 축이 `goalkeeping`이면 제 갈래에 걷을 자리가 없어 필드 15축에서 걷는다 —
+ * 그때는 필드 합이 `16 − PERSONAL_TRAINING_AIM`으로 내려가고 **16축 합이 16**이다.
+ * 골키퍼 유망주가 겨냥할 축을 잃지 않으면서 규약도 지키는 쪽 (season.md §8 불변식).
+ */
+export function monthlyGrowthMultiplier(
+  axis: AttributeAxis,
+  aim: { policy?: ReserveTrainingPolicy | undefined; personal?: AttributeAxis | null },
+): number {
+  const byPolicy = (a: AttributeAxis): number =>
+    aim.policy ? reserveTrainingMultiplier(aim.policy, a) : 1;
+  const base = byPolicy(axis);
+  const personal = aim.personal;
+  if (!personal) return base;
+  if (axis === personal) return base * PERSONAL_TRAINING_AIM;
+  // 걷는 자리는 필드 축뿐이다 — 개인 축이 필드 축이면 `goalkeeping`은 그대로 둔다
+  if (axis === UNTOUCHED_AXIS) return base;
+  const aimed = byPolicy(personal);
+  // 방침이 필드 15축 합을 15로 지키므로 걷을 몫의 분모가 여기서 파생된다
+  const pool = FIELD_AXIS_COUNT - (personal === UNTOUCHED_AXIS ? 0 : aimed);
+  const moved = aimed * (PERSONAL_TRAINING_AIM - 1);
+  return (base * (pool - moved)) / pool;
 }

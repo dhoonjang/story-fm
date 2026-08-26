@@ -2,13 +2,24 @@ import type {
   AttributeAxis,
   AxisValues,
   GamePlayer,
+  MatchRecord,
   ReserveTrainingPolicy,
 } from "@story-fm/domain";
 import { ATTRIBUTE_AXES, ageOf, isReserveMatch, RATING_MAX } from "@story-fm/domain";
 import { ageGrowthFactor, agingDelta, axisClockFactor } from "../world/attributes";
+import { archetypeTraitsOf } from "../world/player-persona";
 import { makeRng } from "../core/rng";
-import { reserveTrainingMultiplier } from "./training-plan";
-import { recomputeOverall, recordGrowth, squadLevelOf, type GameState } from "../core/state";
+import { isTopLeague, leagueCatalogById } from "../data/league-catalog";
+import { leagueOfTeamIn } from "../competition/promotion";
+import { monthlyGrowthMultiplier, personalTrainingAxis } from "./training-plan";
+import {
+  onLoanFromUs,
+  recomputeOverall,
+  recordGrowth,
+  squadLevelOf,
+  teamShortNameIn,
+  type GameState,
+} from "../core/state";
 
 /**
  * 월간 성장·쇠퇴 — **결산 판정을 받지 않는 선수 전부**의 능력치를 조금씩 움직인다.
@@ -63,9 +74,14 @@ const ATTRIBUTE_FLOOR = 1;
 export const AXIS_GROWTH_PER_SEASON = 2.6;
 
 // ── 감독의 육성 손잡이 (season.md §2 2군 리그) ──────────────────────
-// 배율은 **성장 쪽에만** 붙는다 — 노화 하락은 출전과 무관하다. 상한을 다 곱해도
-// (1.3 × 1.25 ≈ 1.6 → 열여덟의 시즌 기대 +4.8칸) 결산 판정을 부지런히 받는 1군
-// 유망주와 같은 자릿수다 — 2군은 자라는 곳이고, 뛰는 곳은 1군이다.
+// 배율은 **성장 쪽에만** 붙는다 — 노화 하락은 출전과 무관하다. 감독이 다 걸어도
+// 1.3 × 1.25 ≈ 1.63이고, 그 위에 사람됨(원형 `professionalism` 0.85~1.25 —
+// people.md §6)이 한 항으로 더 붙어 꼭대기가 2.0이 된다. 그 자리에 서려면 셋이 다
+// 맞아야 한다: 격주 2군 일정을 만근하고, 집중 육성 셋 안에 들고, 표 꼭대기의
+// 직업의식을 타고났을 것. 그래도 결산 판정을 부지런히 받는 1군 유망주와 같은
+// 자릿수다 — 2군은 자라는 곳이고, 뛰는 곳은 1군이다. 축을 겨냥하는 손잡이(방침 ·
+// 개인 훈련)는 얼마나 빨리가 아니라 어느 쪽으로를 정하므로 총량 이동이고,
+// 원본은 `training-plan.ts`다.
 
 /** 지난달 2군 출전 한 경기가 성장 확률에 얹는 배율 증분 */
 export const RESERVE_APP_BOOST = 0.15;
@@ -101,26 +117,106 @@ export function pruneDevelopmentFocus(state: GameState): string[] {
 }
 
 /**
- * 지난 한 달 2군 리그 출전 수 — **장부의 라인업에서 센다**(별도 저장이 없다).
- * 창은 [지난달 1일, 오늘) — 월간 성장이 매월 1일에 돌기 때문이다. 시즌 전환이
+ * 지난달 1일 — 출전을 세는 창의 시작. 월간 성장이 매월 1일에 돌기 때문에 창은
+ * [이 날, 오늘)이고, 2군 출전과 임대 출전이 **같은 창을 읽는다**. 시즌 전환이
  * 장부를 통째로 갈아도(7월 1일) 빈 창이 될 뿐 깨지지 않는다.
  */
-export function reserveAppsByPlayer(state: GameState): Map<string, number> {
-  const [year, month] = state.date.split("-").map(Number) as [number, number];
-  const from =
-    month === 1 ? `${year - 1}-12-01` : `${year}-${String(month - 1).padStart(2, "0")}-01`;
-  const counts = new Map<string, number>();
-  for (const match of state.matches) {
-    if (!isReserveMatch(match) || !match.result) continue;
-    if (match.date < from || match.date >= state.date) continue;
-    for (const id of [...(match.result.homeLineup ?? []), ...(match.result.awayLineup ?? [])]) {
-      counts.set(id, (counts.get(id) ?? 0) + 1);
-    }
-  }
-  return counts;
+function lastMonthStart(date: string): string {
+  const [year, month] = date.split("-").map(Number) as [number, number];
+  return month === 1 ? `${year - 1}-12-01` : `${year}-${String(month - 1).padStart(2, "0")}-01`;
 }
 
-/** 이 선수가 코어 로직으로 자라는가 — 감독 팀 1군만 결산 판정을 받는다 */
+/**
+ * 지난달 창 안의 출전 수 — **장부의 라인업에서 센다**(별도 저장이 없다).
+ * 어느 경기를 세는지(`counts`)와 누구를 세는지(`keep`)만 부르는 쪽이 정한다.
+ */
+function appsInLastMonth(
+  state: GameState,
+  counts: (match: MatchRecord) => boolean,
+  keep?: (playerId: string) => boolean,
+): Map<string, number> {
+  const from = lastMonthStart(state.date);
+  const tally = new Map<string, number>();
+  for (const match of state.matches) {
+    if (!match.result) continue;
+    if (match.date < from || match.date >= state.date) continue;
+    if (!counts(match)) continue;
+    for (const id of [...(match.result.homeLineup ?? []), ...(match.result.awayLineup ?? [])]) {
+      if (keep && !keep(id)) continue;
+      tally.set(id, (tally.get(id) ?? 0) + 1);
+    }
+  }
+  return tally;
+}
+
+/** 지난 한 달 2군 리그 출전 수 */
+export function reserveAppsByPlayer(state: GameState): Map<string, number> {
+  return appsInLastMonth(state, isReserveMatch);
+}
+
+/**
+ * 우리가 임대 보낸 선수의 지난 한 달 **그 구단 1군 출전 수** (season.md §2 임대).
+ *
+ * ⚠️ **2군 경기는 세지 않는다.** 2군 리그는 감독 팀만 편성되지만 상대 클럽의 2군
+ * 선수가 그 명단에 서므로, 거르지 않으면 임대 보낸 선수가 우리 2군 리그에서 뛴
+ * 경기로 자란다.
+ */
+export function loanAppsByPlayer(state: GameState): Map<string, number> {
+  const loaned = new Set(state.players.filter((p) => onLoanFromUs(state, p)).map((p) => p.id));
+  if (loaned.size === 0) return new Map();
+  return appsInLastMonth(
+    state,
+    (match) => !isReserveMatch(match),
+    (id) => loaned.has(id),
+  );
+}
+
+// ── 임대 배율 (season.md §2 임대 — 2군과 1군 사이의 길) ──────────────
+// 눈금은 2군과 **같은 자** 위에 있다: 출전 한 경기가 `RESERVE_APP_BOOST`와 같은
+// 값이고 상한만 다르다. 2군은 격주 일정이라 월 2경기가 만근이고 1군 일정은 월
+// 4~5경기라, 같은 리그에서 매주 뛰면 우리 2군의 출전×집중 육성 꼭대기에 닿는다.
+// ⚠️ 두 상수는 2군 쪽을 따라간다 — 2군의 눈금만 옮기면 임대가 더 빠른 길이 된다.
+
+/** 지난달 임대처 1군 출전 한 경기가 성장 확률에 얹는 배율 증분 (= `RESERVE_APP_BOOST`) */
+export const LOAN_APP_BOOST = RESERVE_APP_BOOST;
+/** 임대 출전 배율 상한 — 우리 2군의 출전 만근 × 집중 육성과 같은 꼭대기 */
+export const LOAN_APP_BOOST_MAX = RESERVE_APP_BOOST_MAX * FOCUS_BOOST;
+/** 리그 계수(UEFA 어림 순위) 한 칸이 임대처 수준 계수에 얹는 몫 */
+export const LOAN_LEAGUE_STEP = 0.05;
+/** 2부 임대의 배율 — 리그전을 돌지 않는 컵 전용 리그 (`isTopLeague`가 false) */
+export const LOAN_SECOND_TIER = 0.85;
+/** 임대처 수준 계수의 구간 */
+export const LOAN_LEVEL_MIN = 0.6;
+export const LOAN_LEVEL_MAX = 1.25;
+
+/**
+ * 임대처 수준 계수 — **어디서 뛰었는가**. 리그 계수(1이 가장 강하다)의 차이 한
+ * 칸이 ±`LOAN_LEAGUE_STEP`이고, 2부면 ×`LOAN_SECOND_TIER`다.
+ *
+ * ⚠️ **돈(`leagueEconomyLevel`)을 쓰지 않는다** — 그 축은 살림의 크기지 경기의
+ * 수준이 아니다. 카탈로그가 계수를 모르는 리그는 우리 리그와 같다고 보되 2부
+ * 판정만 적용한다 — 지어내지 않는다.
+ */
+export function loanLevelFactor(state: GameState, teamId: string): number {
+  const theirLeague = leagueOfTeamIn(state, teamId);
+  const ours = leagueCatalogById(leagueOfTeamIn(state, state.userTeamId))?.coefficient;
+  const theirs = leagueCatalogById(theirLeague)?.coefficient;
+  const steps = ours === undefined || theirs === undefined ? 0 : ours - theirs;
+  const tier = isTopLeague(theirLeague) ? 1 : LOAN_SECOND_TIER;
+  return Math.max(LOAN_LEVEL_MIN, Math.min(LOAN_LEVEL_MAX, (1 + LOAN_LEAGUE_STEP * steps) * tier));
+}
+
+/** 지난달 임대처 출전 수 × 임대처 수준 → 성장 확률 배율 */
+export function loanAppsBoost(apps: number, levelFactor: number): number {
+  return Math.min(LOAN_APP_BOOST_MAX, 1 + LOAN_APP_BOOST * apps * levelFactor);
+}
+
+/**
+ * 이 선수가 코어 로직으로 자라는가 — 감독 팀 1군만 결산 판정을 받는다.
+ *
+ * **우리가 임대 보낸 선수도 이 문을 지난다** — `teamId`가 빌린 구단이라 첫 줄에서
+ * true다. 배율과 성장 로그는 `applyMonthlyDevelopment`가 따로 가른다.
+ */
 export function developsByCore(state: GameState, player: GamePlayer): boolean {
   if (player.teamId !== state.userTeamId) return true;
   return squadLevelOf(player) === "reserve";
@@ -131,6 +227,10 @@ export function developsByCore(state: GameState, player: GamePlayer): boolean {
  * 세기를 열두 달로 나눈 푸아송 분할(`monthlyChance`)이다. 잠재력 여유에 포화 지수로
  * 붙고 어릴수록 높다. 나이 배율은 결산 경로와 같은 한 열에서 온다(`ageGrowthFactor` —
  * player.md §6.3). 노화 곡선이 이미 꺾인 축(음수)은 여기 들어오지 않는다.
+ *
+ * ⚠️ **사람됨은 여기 곱하지 않는다.** 직업의식은 감독의 손잡이와 같은 자리, 즉
+ * 여유·나이가 정한 대역 **밖**에서 곱한다 (`rollAxis`) — 그래야 원형이 자라는
+ * 나이에서도 안 자라는 나이에서도 같은 비로 가른다.
  */
 export function growChance(room: number, age: number): number {
   if (room <= 0) return 0;
@@ -165,8 +265,16 @@ export function rollMonthlyAxes(
     potential: number;
     /** 감독의 육성 손잡이 — 2군 출전 × 집중 육성. 성장 쪽에만 곱한다 (기본 1) */
     boost?: number;
+    /**
+     * 사람됨 — 원형의 `professionalism` (기본 1). 감독의 손잡이와 같은 자리에서
+     * 곱하되 **항은 따로 둔다**: 하나는 감독이 고른 것이고 하나는 타고난 것이라,
+     * 한 값으로 접으면 육성 배율을 조율할 때 사람됨까지 함께 움직인다 (people.md §6).
+     */
+    professionalism?: number;
     /** 2군 훈련 방침 — 축마다 다른 배율을 얹는다. 없으면 어느 축도 흔들리지 않는다 */
     policy?: ReserveTrainingPolicy;
+    /** 이 선수에게 걸린 개인 훈련의 축 — 방침 위에 한 축을 더 겨냥한다 (season.md §2) */
+    personal?: AttributeAxis;
   },
   axes: readonly AttributeAxis[] = ATTRIBUTE_AXES,
 ): { axis: AttributeAxis; step: number }[] {
@@ -175,10 +283,21 @@ export function rollMonthlyAxes(
       const rng = makeRng(input.seed, `development:${input.date}:${input.playerId}:${axis}`);
       // 뽑히는 순서도 난수다 — 축 이름으로 세우면 편향이 자리만 옮긴다
       const priority = rng();
-      // 배율이 1이면 곱하지 않는다 — 방침 없는 세이브가 부동소수로 흔들리지 않게
-      const aim = input.policy ? reserveTrainingMultiplier(input.policy, axis) : 1;
+      // 배율이 1이면 곱하지 않는다 — 겨냥 없는 세이브가 부동소수로 흔들리지 않게
+      const aim =
+        input.policy || input.personal
+          ? monthlyGrowthMultiplier(axis, { policy: input.policy, personal: input.personal })
+          : 1;
       const boost = aim === 1 ? input.boost : (input.boost ?? 1) * aim;
-      const step = rollAxis(axis, input.age, input.values[axis], input.potential, rng, boost);
+      const step = rollAxis(
+        axis,
+        input.age,
+        input.values[axis],
+        input.potential,
+        rng,
+        boost,
+        input.professionalism,
+      );
       return { axis, step, priority };
     })
     .filter((rolled) => rolled.step !== 0)
@@ -193,13 +312,17 @@ export function rollMonthlyAxes(
  * 난수 채널이 (시드, 날짜, 선수, 축)이라 **같은 세이브는 같은 달에 같은 결과**이고,
  * 선수 목록 순서에도 의존하지 않는다.
  *
- * ⚠️ **능력치는 대상 전원이 움직이지만 `growthLog`에는 감독 팀만 남긴다.** 리그
+ * ⚠️ **능력치는 대상 전원이 움직이지만 `growthLog`에는 우리 선수만 남긴다.** 리그
  * 전체를 적으면 매월 ≈2,000행이 들어와 4,000행 상한이 두 달 만에 감독의 훈련·경기
  * 기록을 밀어낸다. 로그를 읽는 곳(성장 일지 · 선수 카드 "최근 성장" · 달력 요약)은
  * 전부 우리 선수만 거르므로 타 팀 행은 아무도 읽지 않는다
  * (→ docs/data/game-state.md §3.4).
  *
- * @returns 감독에게 알릴 우리 팀(2군) 변화 요약
+ * 갈래는 셋이다 — **우리 2군 · 우리가 임대 보낸 선수 · 타 팀** (season.md §2 임대).
+ * 임대는 그 구단 1군 출전 × 임대처 수준으로 자라고 감독의 손잡이(집중 육성 · 2군
+ * 방침 · 개인 훈련)는 닿지 않지만, 계약이 우리 것이므로 로그와 요약에는 선다.
+ *
+ * @returns 감독에게 알릴 우리 선수(2군 · 임대) 변화 요약
  */
 export function applyMonthlyDevelopment(state: GameState): string[] {
   const lines: string[] = [];
@@ -209,12 +332,18 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
   // 감독의 육성 손잡이 — 우리 2군에만 붙는다. 타 팀은 배율 없이 지금 그대로다
   const focus = new Set(pruneDevelopmentFocus(state));
   const reserveApps = reserveAppsByPlayer(state);
+  const loanApps = loanAppsByPlayer(state);
 
   for (const player of targets) {
     const ours = player.teamId === state.userTeamId;
+    const loaned = !ours && onLoanFromUs(state, player);
     const boost = ours
       ? reserveAppsBoost(reserveApps.get(player.id) ?? 0) * (focus.has(player.id) ? FOCUS_BOOST : 1)
-      : 1;
+      : loaned
+        ? loanAppsBoost(loanApps.get(player.id) ?? 0, loanLevelFactor(state, player.teamId))
+        : 1;
+    // 개인 훈련은 우리 2군에만 걸린다 — 임대처 훈련장은 그쪽 코치진의 것이다
+    const personal = ours ? personalTrainingAxis(state, player.id) : null;
     const steps = rollMonthlyAxes({
       seed: state.seed,
       date: state.date,
@@ -223,7 +352,10 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
       values: player.attributes,
       potential: player.attributes.potential,
       boost,
+      // 사람됨은 소속을 가리지 않는다 — 타 팀 선수도 임대 나간 선수도 같은 표를 읽는다
+      professionalism: archetypeTraitsOf(state.seed, player).professionalism,
       ...(ours && state.reserveTraining ? { policy: state.reserveTraining } : {}),
+      ...(personal ? { personal } : {}),
     });
     if (steps.length === 0) continue;
 
@@ -232,10 +364,17 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
         ATTRIBUTE_FLOOR,
         Math.min(RATING_MAX, player.attributes[axis] + step),
       );
-      if (ours) recordGrowth(state, player.id, null, "development", axis, step, "monthly");
+      if (ours || loaned) {
+        recordGrowth(state, player.id, null, "development", axis, step, "monthly");
+      }
     }
     recomputeOverall(player);
     if (ours) lines.push(`${player.name} (2군) ${player.attributes.overall}`);
+    else if (loaned) {
+      lines.push(
+        `${player.name} (임대·${teamShortNameIn(state, player.teamId)}) ${player.attributes.overall}`,
+      );
+    }
   }
   return lines;
 }
@@ -249,6 +388,8 @@ export function rollAxis(
   rng: () => number,
   /** 육성 배율 — 성장 확률에만 곱한다. 노화 하락은 출전과 무관하다 */
   boost = 1,
+  /** 직업의식 — 감독의 배율과 같은 자리. 노화 하락에는 붙지 않는다 (people.md §6) */
+  professionalism = 1,
 ): number {
   const bias = agingDelta(axis, age);
 
@@ -261,6 +402,6 @@ export function rollAxis(
   // 자라는 축 — 잠재력이 천장이다. 늦게까지 크는 축은 결산과 같은 시계로 조금 더 자란다
   const room = potential - value;
   if (room <= 0) return 0;
-  const rate = growChance(room, age) * axisClockFactor(axis, age) * boost;
+  const rate = growChance(room, age) * axisClockFactor(axis, age) * boost * professionalism;
   return rng() < monthlyChance(rate) ? 1 : 0;
 }

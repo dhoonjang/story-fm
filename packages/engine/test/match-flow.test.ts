@@ -4,6 +4,7 @@ import {
   applyMatchEvents,
   assignmentsOf,
   buildOfficeViews,
+  buildOpponentReport,
   buildRatingBrief,
   digestLines,
   firstTeamPlayers,
@@ -12,10 +13,12 @@ import {
   groupOf,
   loadGame,
   MATCH_PROFICIENCY_GAIN,
+  OUT_OF_POSITION_RUN,
   MATCHDAY_BENCH,
   tacticalXpFor,
   TACTICAL_XP_CAP,
   TACTICAL_XP_PER_GOAL,
+  playerById,
   playersOf,
   proficiencyAt,
   refreshPacket,
@@ -40,7 +43,16 @@ import {
   playMockMatch,
   playPreseason,
 } from "./helpers";
-import { tacticsSignature, weightSlotOf } from "@story-fm/domain";
+import {
+  EXTRA_TIME_FULL_MINUTES,
+  FULL_TIME_MINUTES,
+  normalizeCauses,
+  positionGroupOf,
+  positionGroupOfPlayer,
+  tacticsSignature,
+  weightSlotOf,
+} from "@story-fm/domain";
+import type { MatchEvent, PacketTag } from "@story-fm/domain";
 import { zoneGrid } from "@story-fm/sim";
 
 /**
@@ -109,6 +121,103 @@ describe("경기 흐름 (overview §4)", () => {
     ).toBeLessThan(95);
     // 자리마다 갈린다 (골키퍼는 덜, 중원·측면은 많이) — 하나로 뭉개지지 않는다
     expect(Math.max(...conditions) - Math.min(...conditions)).toBeGreaterThan(15);
+  });
+
+  /**
+   * **종료 휘슬이 장부를 걷어 가지 않는다** (match.md §4).
+   *
+   * `pendingMatch`가 지워질 때 사건·선수별 기록도 함께 사라지던 자리다. 몇 줄만
+   * 골라 남기면 그 기준이 두 번째 원본이 되므로 **수가 같아야** 한다 — 세우는 것을
+   * 고르는 일은 읽는 쪽(리포트 뷰)의 몫이다.
+   */
+  it("마감은 장부의 사건을 자르지 않는다 — 저장된 사건 수가 원장 사건 수와 같다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    const fixture = state.matches.find(
+      (m) =>
+        m.date === state.date &&
+        !m.result &&
+        (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    );
+    if (!fixture) throw new Error("오늘 경기를 찾지 못했습니다");
+
+    // 결산 **직전**의 원장을 잡아 둔다 — 마감이 지나면 볼 수 없다
+    let ledgerEvents = -1;
+    let ledgerStatIds: string[] = [];
+    playMockMatch(state, (s) => {
+      const ledger = s.pendingMatch?.ledger;
+      if (!ledger) throw new Error("종료 시각에 장부가 없습니다");
+      ledgerEvents = ledger.events.length;
+      ledgerStatIds = Object.keys(ledger.stats ?? {}).sort();
+    });
+    // 국면 표식(하프타임·종료)만 해도 여럿이라 빈 장부로는 시험이 되지 않는다
+    expect(ledgerEvents).toBeGreaterThan(2);
+    expect(ledgerStatIds.length).toBeGreaterThanOrEqual(22);
+
+    const result = state.matches.find((m) => m.id === fixture.id)?.result;
+    if (!result) throw new Error("결과가 남지 않았습니다");
+    expect(result.events?.length).toBe(ledgerEvents);
+    expect(Object.keys(result.playerStats ?? {}).sort()).toEqual(ledgerStatIds);
+
+    // 점유도 함께 건너온다 — 두 몫의 합은 1이다
+    const possession = result.possession;
+    if (!possession) throw new Error("점유가 결과에 남지 않았습니다");
+    expect(possession.home + possession.away).toBeCloseTo(1, 6);
+  });
+
+  /**
+   * **시즌 기록은 그 경기가 낸 수 그대로 쌓인다** (match.md §6).
+   *
+   * 마감이 선수별 기록을 팀 합계로만 접고 버리던 자리다. 리더보드(#556)가 읽는
+   * 것이 이 합이므로, 여기서 한 칸이라도 새면 "슛 대비 골"이 조용히 틀린다.
+   * 양 팀 모두 본다 — 우리 것만 적으면 리그가 우리 팀만의 규칙으로 돈다.
+   */
+  it("마감이 시즌에 얹은 슛·선방이 그 경기의 팀 합계와 같다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    const fixture = state.matches.find(
+      (m) =>
+        m.date === state.date &&
+        !m.result &&
+        (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    );
+    if (!fixture) throw new Error("오늘 경기를 찾지 못했습니다");
+    // 마감이 얹은 몫만 본다 — 이 경기 앞의 행은 그대로 두고 차이를 잰다
+    const before = new Map(
+      state.seasonStats.map((s) => [`${s.gamePlayerId}\u0000${s.teamId}`, { ...s }] as const),
+    );
+    playMockMatch(state);
+
+    const result = state.matches.find((m) => m.id === fixture.id)?.result;
+    if (!result) throw new Error("결과가 남지 않았습니다");
+    const added = (playerId: string, teamId: string, key: "shots" | "saves" | "minutes") => {
+      const row = state.seasonStats.find(
+        (s) => s.gamePlayerId === playerId && s.teamId === teamId && s.season === state.season,
+      );
+      return (row?.[key] ?? 0) - (before.get(`${playerId}\u0000${teamId}`)?.[key] ?? 0);
+    };
+    const sumOver = (
+      lineup: readonly string[],
+      teamId: string,
+      key: "shots" | "saves" | "minutes",
+    ) => lineup.reduce((total, id) => total + added(id, teamId, key), 0);
+
+    const home = result.homeLineup ?? [];
+    const away = result.awayLineup ?? [];
+    expect(home.length).toBeGreaterThanOrEqual(11);
+    expect(sumOver(home, fixture.homeTeamId, "shots")).toBe(result.homeShots ?? 0);
+    expect(sumOver(away, fixture.awayTeamId, "shots")).toBe(result.awayShots ?? 0);
+    // 선방은 골키퍼의 칸이다 — 상대의 유효슈팅이 그 수의 상한이다
+    expect(sumOver(home, fixture.homeTeamId, "saves")).toBeLessThanOrEqual(result.awayShots ?? 0);
+    /**
+     * 출전 분의 합은 **셔츠 열한 장 × 경기 길이**에서 퇴장이 비운 시간을 뺀 값이다 —
+     * 교체는 짝으로 시간을 이어받고, 퇴장은 그 자리를 끝까지 비운다.
+     */
+    const fullMinutes = result.aet ? EXTRA_TIME_FULL_MINUTES : FULL_TIME_MINUTES;
+    const emptied = (which: "home" | "away") =>
+      (result.events ?? [])
+        .filter((e) => e.type === "red_card" && e.team === which)
+        .reduce((sum, e) => sum + Math.max(0, fullMinutes - e.minute), 0);
+    expect(sumOver(home, fixture.homeTeamId, "minutes")).toBe(11 * fullMinutes - emptied("home"));
+    expect(sumOver(away, fixture.awayTeamId, "minutes")).toBe(11 * fullMinutes - emptied("away"));
   });
 
   it("경기 중 전술 변경은 패킷을 재계산한다", () => {
@@ -549,6 +658,59 @@ describe("회귀: 장기 시즌 안정성", () => {
  * 경기 중 조정은 그 경기에서 끝난다 — 하프타임에 올린 라인이 다음 주 훈련까지
  * 따라가면, 감독은 자기가 바꾼 적 없는 전술로 다음 경기에 들어간다.
  */
+/**
+ * 자리 밖 기용 — **선발로 센다** (→ docs/data/people.md §5). 원장은 누가 뛰었는지만
+ * 알고 어느 자리에 섰는지는 모르므로, 연속을 세는 눈금은 `PlayerState`가 든다.
+ */
+describe("자리 밖 기용의 눈금 (people.md §5)", () => {
+  it("주 포지션 묶음 밖 선발이 이어지면 네 경기째에 불만이 선다", () => {
+    const state = atMatchday(5);
+    const starters = assignmentsOf(state, state.userTeamId, "starting");
+    const back = starters.find((a) => positionGroupOf(a.position) === "DF")!;
+    const front = starters.find((a) => positionGroupOf(a.position) === "FW")!;
+    // 자리를 맞바꾼다 — 판의 모양은 그대로이고 두 사람만 묶음 밖에 선다
+    const backSlot = back.position;
+    back.position = front.position;
+    front.position = backSlot;
+
+    const misplaced = playerById(state, back.playerId)!;
+    expect(positionGroupOfPlayer(misplaced)).not.toBe(positionGroupOf(back.position));
+    const inPlace = starters.find((a) => {
+      const p = playerById(state, a.playerId);
+      return (
+        a !== back && a !== front && p && positionGroupOfPlayer(p) === positionGroupOf(a.position)
+      );
+    })!;
+
+    // 문턱 직전까지 이미 서 있던 선수 — 이 경기가 네 번째다
+    misplaced.state.outOfPositionRun = OUT_OF_POSITION_RUN - 1;
+    playMockMatch(state);
+
+    expect(misplaced.state.outOfPositionRun).toBe(OUT_OF_POSITION_RUN);
+    expect(
+      state.issues.some((i) => i.gamePlayerId === misplaced.id && i.reason === "out-of-position"),
+    ).toBe(true);
+    // 제자리에 선 선수에게는 눈금이 서지 않는다
+    expect(playerById(state, inPlace.playerId)!.state.outOfPositionRun).toBeUndefined();
+  });
+
+  it("제자리에 선발로 서면 눈금이 지워진다", () => {
+    const state = atMatchday(5);
+    const starters = assignmentsOf(state, state.userTeamId, "starting");
+    const inPlace = starters.find((a) => {
+      const p = playerById(state, a.playerId);
+      return p && positionGroupOfPlayer(p) === positionGroupOf(a.position);
+    })!;
+    const player = playerById(state, inPlace.playerId)!;
+    player.state.outOfPositionRun = OUT_OF_POSITION_RUN - 1;
+
+    playMockMatch(state);
+
+    expect(player.state.outOfPositionRun).toBeUndefined();
+    expect(state.issues.some((i) => i.reason === "out-of-position")).toBe(false);
+  });
+});
+
 describe("경기 후 전술 복원", () => {
   it("경기 중 바꾼 전술·개인 지시가 킥오프 전으로 돌아온다", () => {
     const state = atMatchday(5);
@@ -864,6 +1026,49 @@ describe("상대 벤치의 모양 변경 (match.md §2)", () => {
     expect(last.type).toBe("full_time");
     for (const sub of subs) expect(sub.minute).toBeLessThanOrEqual(last.minute);
   });
+
+  /**
+   * **판을 갈아 낀 줄은 한 경기에 하나다** (match.md §2·§4). 모양 전환은 경기당 한
+   * 번인데 사건이 정지점마다 서면 중계는 상대가 판을 계속 갈아엎는 것으로 읽고, 화면의
+   * 전환 표식은 마지막 정지점만 가리킨다 — 어느 쪽도 장부가 아는 사실이 아니다.
+   * 축만 옮긴 줄은 여러 번 설 수 있다: 상한(`AI_SHIFT_BOUND`)에 닿을 때까지가 판단이다.
+   */
+  it("모양을 갈아 낀 전환 사건은 한 경기에 한 줄뿐이다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    expect(startMatch(state).ok).toBe(true);
+    const aiSide = userSide(state) === "home" ? "away" : "home";
+    // 장부는 `finalizeMatch`가 걷어 가므로 종료 사건까지만 굴리고 그 자리에서 읽는다
+    let guard = 60;
+    while (state.phase === "match" && guard-- > 0) {
+      const step = advanceSegment(state);
+      expect(step.ok, step.message).toBe(true);
+      if (step.plan?.stop === "full_time") break;
+    }
+    const pending = state.pendingMatch!;
+    const shifts = pending.ledger.events.filter((e) => e.type === "tactical_shift");
+    const tagOf = (e: MatchEvent): PacketTag | undefined => normalizeCauses(e.causes)[0];
+
+    expect(shifts.length, "상대 벤치가 이 경기에서 한 번도 판을 옮기지 않았다").toBeGreaterThan(0);
+    for (const shift of shifts) {
+      // 전환은 상대 벤치의 것뿐이다 — 감독의 전술 변경은 스킬이지 사건이 아니다
+      expect(shift.team).toBe(aiSide);
+      // 근거 태그 하나가 갈래를 싣는다 — 문장은 읽는 쪽이 만든다
+      expect(tagOf(shift)?.source).toBe("ai-shift");
+      expect(["chase", "hold"]).toContain(tagOf(shift)?.code);
+    }
+    /**
+     * 모양을 갈아 낀 줄은 **상태와 같은 수**여야 한다 — `aiShape`가 섰으면 한 줄,
+     * 안 섰으면 없다. 사건이 상태보다 많으면 중계는 상대가 판을 계속 갈아엎는 것으로
+     * 읽고, 적으면 감독이 본 판의 모양이 어디서 왔는지 장부가 답하지 못한다.
+     */
+    const reshaped = shifts.filter((e) =>
+      (tagOf(e)?.flags ?? []).some((f) => f.startsWith("formation:")),
+    );
+    // 이 시드의 상대는 실제로 판을 갈아 낀다 — 아니면 아래 불변식이 0을 세고 만다
+    expect(pending.aiShape, "상대가 이 경기에서 한 번도 판을 갈아 깔지 않았다").toBeDefined();
+    expect(reshaped).toHaveLength(1);
+    expect(tagOf(reshaped[0]!)?.flags).toContain(`formation:${pending.aiShape!.formation}`);
+  });
 });
 
 /**
@@ -978,6 +1183,73 @@ describe("감독 경기 마감의 대칭 (match.md §6)", () => {
 
     // 남의 팀 정지·무드는 브리핑하지 않는다 — 조회 도구가 알려 준다
     expect(digest.ours.some((d) => d.includes(sentOffName))).toBe(false);
+  });
+
+  /**
+   * 마일스톤은 **문턱을 넘는 그 경기의 것**이고 **감독 팀 선수의 것**이다
+   * (match.md §6 · game-state.md §3.4). 둘 다 조용히 어긋나는 종류라 고정한다 —
+   * 상대 쪽에도 행이 쌓이면 시즌마다 수백 행이 우리 기록을 묻고, 문턱을 나중에
+   * 훑어 세면 "언제 넘었나"가 사라진다.
+   */
+  it("문턱을 넘는 경기에만, 그리고 우리 선수에게만 마일스톤이 선다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    expect(startMatch(state).ok).toBe(true);
+    const mySide = userSide(state);
+    const oppSide = mySide === "home" ? "away" : "home";
+    const mine = state.pendingMatch!.ledger[mySide].onPitch;
+    const theirs = state.pendingMatch!.ledger[oppSide].onPitch;
+    const matchId = state.pendingMatch!.matchId;
+    const [ours, theirScorer] = [mine[10]!, theirs[10]!];
+    const oppTeamId = playerById(state, theirScorer)!.teamId;
+
+    /**
+     * 두 선수를 각자 팀에서 99경기에 세운다 — 지난 시즌 행을 하나 얹는다.
+     * 이 경기 하나로 정확히 100이 되므로 경계가 이 경기에 걸린다.
+     */
+    const standAt99 = (playerId: string, teamId: string) => {
+      const already = state.seasonStats
+        .filter((x) => x.gamePlayerId === playerId && x.teamId === teamId)
+        .reduce((sum, x) => sum + x.apps, 0);
+      state.seasonStats.push({
+        gamePlayerId: playerId,
+        season: state.season - 1,
+        teamId,
+        apps: 99 - already,
+        goals: 0,
+      });
+    };
+    standAt99(ours, state.userTeamId);
+    standAt99(theirScorer, oppTeamId);
+
+    /** 양쪽에 세 골씩, 전반 안에 — 해트트릭도 같은 자리에서 갈린다 */
+    const goal = (minute: number, team: "home" | "away", scorer: string) => ({
+      minute,
+      type: "goal" as const,
+      team,
+      actors: [scorer],
+      causes: [],
+    });
+    const goals = [10, 20, 30].flatMap((minute) => [
+      goal(minute, mySide, ours),
+      goal(minute + 2, oppSide, theirScorer),
+    ]);
+    expect(applyMatchEvents(state, goals).ok).toBe(true);
+
+    const digest = closeMatch(state);
+
+    const rows = state.milestones ?? [];
+    const mineRows = rows.filter((m) => m.gamePlayerId === ours && m.matchId === matchId);
+    // 100번째 경기이자 그 구단에서의 첫 골이다 — 데뷔는 서지 않는다(이미 99경기다)
+    expect(mineRows.map((m) => `${m.code}:${m.value}`).sort()).toEqual([
+      "apps:100",
+      "first-goal:1",
+      "hat-trick:3",
+    ]);
+    expect(mineRows.every((m) => m.teamId === state.userTeamId)).toBe(true);
+    // 상대는 같은 경기에서 같은 문턱을 넘었지만 장부에는 남지 않는다
+    expect(rows.filter((m) => m.gamePlayerId === theirScorer)).toHaveLength(0);
+    // 그 경기의 말풍선이 한 줄로 그것을 말한다 — 선수마다 나누지 않는다
+    expect(digest.ours.filter((d) => d.startsWith("기록: "))).toHaveLength(1);
   });
 
   /**
@@ -1259,5 +1531,80 @@ describe("전술 XP는 천장이 있다", () => {
   it("천장을 넘어서면 더 넣어도 같다", () => {
     expect(tacticalXpFor(3)).toBe(TACTICAL_XP_CAP);
     expect(tacticalXpFor(9)).toBe(TACTICAL_XP_CAP);
+  });
+});
+
+/**
+ * 경기 전 상대 분석 (match.md §1.8) — **정답을 흘리지 않는가**와
+ * **경기 전에 읽은 지점이 킥오프에 그대로 있는가**, 둘뿐이다.
+ * 카드에 무엇이 서는가는 화면이 깨지는 순간 보이는 것이라 여기서 재지 않는다.
+ */
+describe("경기 전 상대 분석 (match.md §1.8)", () => {
+  it("예상 XI에 부상·정지 선수는 서지 않고 결장 명단으로 간다", () => {
+    const state = atMatchday();
+    const first = buildOpponentReport(state);
+    if (!first) throw new Error("상대 분석을 세우지 못했다");
+    expect(first.expectedXI).toHaveLength(11);
+
+    const [hurt, banned] = first.expectedXI;
+    if (!hurt || !banned) throw new Error("예상 XI가 모자란다");
+    state.injuries.push({
+      id: "inj-preview",
+      gamePlayerId: hurt.id,
+      bodyPart: "발목",
+      severity: "minor",
+      cause: "match",
+      occurredOn: state.date,
+      expectedReturn: "2026-12-31",
+      returnedOn: null,
+    });
+    state.suspensions.push({
+      id: "susp-preview",
+      gamePlayerId: banned.id,
+      cause: "red",
+      lengthMatches: 1,
+      served: 0,
+      status: "active",
+      issuedOn: state.date,
+    });
+
+    const after = buildOpponentReport(state);
+    if (!after) throw new Error("상대 분석을 세우지 못했다");
+    const ids = after.expectedXI.map((p) => p.id);
+    expect(ids).not.toContain(hurt.id);
+    expect(ids).not.toContain(banned.id);
+    // 빈자리는 메워진다 — 열 명으로 나오는 팀은 없다
+    expect(after.expectedXI).toHaveLength(11);
+    expect(after.absent.find((a) => a.id === hurt.id)?.reason).toBe("injury");
+    expect(after.absent.find((a) => a.id === banned.id)?.reason).toBe("suspension");
+  });
+
+  /**
+   * **경기 전에 노린 지점을 경기 중에 그대로 부를 수 있어야 한다** — 표적 id가
+   * `축:선수id`라(§1.6) 이 등식이 곧 그 뜻이다. 라인업이 갈리면 성립할 이유가
+   * 없으므로 XI가 같은지를 먼저 세운다.
+   */
+  it("라인업이 그대로면 리포트의 표적 id가 킥오프 패킷의 표적 id다", () => {
+    const state = atMatchday();
+    const report = buildOpponentReport(state);
+    if (!report) throw new Error("상대 분석을 세우지 못했다");
+
+    expect(startMatch(state).ok).toBe(true);
+    const pending = state.pendingMatch!;
+    const side = userSide(state);
+    const startingXI = pending.startingXI!;
+    const theirXI = side === "home" ? startingXI.away : startingXI.home;
+    // 전제 — 상대가 예상대로 나왔다 (로테이션이 없으면 매치데이 1은 늘 이 자리다)
+    expect([...theirXI].sort()).toEqual(report.expectedXI.map((p) => p.id).sort());
+
+    const idsOf = (targets: readonly { id: string }[]) => targets.map((t) => t.id).sort();
+    expect(idsOf(report.targets)).toEqual(idsOf(pending.packet.targets));
+  });
+
+  it("경기 중에는 다음 상대의 분석을 세우지 않는다", () => {
+    const state = atMatchday();
+    expect(startMatch(state).ok).toBe(true);
+    expect(buildOpponentReport(state)).toBeNull();
+    expect(buildOfficeViews(state).competitions.preview).toBeNull();
   });
 });

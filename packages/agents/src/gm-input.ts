@@ -4,13 +4,19 @@
  */
 import {
   awardLine,
+  ABSENT_REASON_KO,
+  boardExpectation,
+  buildOpponentReport,
+  careerTotalsOf,
   characterEntry,
   characterEntryOf,
   clockOf,
+  coachCues,
   describeActiveArcs,
   computeStandings,
   dayOfWeek,
   describeBuyBackRights,
+  describeInterests,
   describeNegotiations,
   describeNextFixture,
   describeBoardRequests,
@@ -26,13 +32,15 @@ import {
   historyStart,
   isSuspended,
   leagueOfTeamIn,
+  loanedOut,
   managedTeamId,
   MAX_EXPLOITS,
   onSummerBreak,
   openInjury,
   openManagerOffers,
+  openPromises,
+  openTransferRequests,
   pendingVerdicts,
-  playerById,
   playerName,
   scoutingSummary,
   scoutReportLine,
@@ -47,13 +55,16 @@ import {
   userPlayers,
   weeklyWagesOf,
   type ChatTurn,
+  type CoachCue,
   type GameState,
   type ScenePoint,
 } from "@story-fm/engine";
 import {
   ageOf,
+  boardExpectationLine,
   describeManagerSkills,
   describeReputation,
+  diffDays,
   familiarityLabel,
   formatMoney,
   matchupText,
@@ -61,7 +72,10 @@ import {
   packetTagContext,
   packetTagText,
   personaRoleLabel,
+  PROMISE_KIND_KO,
   slotOfTime,
+  tacticsBrief,
+  TRANSFER_REQUEST_REASON_KO,
   type CharacterEntry,
   type CharacterInjection,
   type ScoutReportCard,
@@ -73,6 +87,16 @@ const MATCH_BRIEF_TURNS = 3;
 const MATCH_DIGEST_DAYS = 3;
 /** 계약 만료 임박 경고 창 (일) */
 const EXPIRING_ALERT_DAYS = 180;
+
+/**
+ * 약속 기한 임박 경고 창 (일) — **계약보다 훨씬 짧다.**
+ *
+ * 계약 만료는 반년 전부터 손을 쓸 수 있는 일이지만 약속은 기한 그 주에 감독이
+ * 할 수 있는 일(선발로 세운다·리스트에 올린다·재계약을 연다·완장을 채운다)이
+ * 남아 있는 동안만 경고가 뜻을 갖는다. 한 달 전부터 매 턴 뜨면 그 줄은 배경음이
+ * 되고, 정작 기한 전날의 줄이 묻힌다 (→ docs/data/people.md §5-2).
+ */
+const PROMISE_ALERT_DAYS = 7;
 
 /**
  * 인물 카드 — 인물지를 모델이 읽는 형태로 (people.md §6).
@@ -306,6 +330,8 @@ export interface TimePassed {
 const TOP_RATED_SHOWN = 2;
 const TRAINING_SHOWN = 3;
 const EXPIRING_SHOWN = 3;
+const PROMISE_SHOWN = 3;
+const TRANSFER_REQUEST_SHOWN = 3;
 const RECENT_NARRATIVE = 4;
 
 /**
@@ -331,6 +357,71 @@ function block(tag: string, body: string | null, attrs = ""): string | null {
 /** 여러 줄을 한 덩어리로 — null과 빈 줄은 걷는다 */
 function lines(...items: (string | null)[]): string {
   return items.filter((x): x is string => x !== null && x !== "").join("\n");
+}
+
+/**
+ * 수석코치가 먼저 짚는 사실 — **이름이 태그의 속성으로 선다.** 안쪽 줄에 `이름:`을
+ * 적으면 모델의 발화 문법(`@이름:`)과 한 글자 차이라, 코어가 낸 사실 줄이 코치가
+ * 이미 한 말처럼 읽힌다 (prompts.md §5-1과 같은 이유로 회견·다가옴도 속성을 쓴다).
+ */
+function coachBlock(state: GameState, cues: readonly CoachCue[]): string | null {
+  if (cues.length === 0) return null;
+  return block(
+    "coach",
+    cues.map((c) => `- ${c.fact}`).join("\n"),
+    ` name="${headCoachOf(state).name}"`,
+  );
+}
+
+/**
+ * 경기 전 상대 분석이 스냅샷에 서는 창 (일) — **전날과 당일뿐이다.**
+ *
+ * 감독이 라인업과 6축을 정하는 자리라 그날만 값이 있다. 사흘 전부터 매 턴 실으면
+ * 캐시 밖 층을 상대 명단이 통째로 먹는다 (→ docs/llm/agents.md §6).
+ */
+const OPPONENT_BRIEF_DAYS = 1;
+
+/**
+ * 경기 전날·당일의 상대 분석 — **코어의 리포트를 그대로 옮긴다**
+ * (→ docs/simulation/match.md §1.8). 지점의 수를 여기서 다시 자르지 않는다:
+ * 몇 개가 보이는지는 감독의 **분석**이 이미 정한 값이고, 블록이 또 자르면
+ * 손잡이가 둘이 된다.
+ *
+ * ⚠️ 데이터 블록이라 사실만 싣는다 — 지시문도 도구 이름도 없다 (prompts.md §5-3).
+ */
+function opponentBlock(state: GameState): string | null {
+  const report = buildOpponentReport(state, { withinDays: OPPONENT_BRIEF_DAYS });
+  if (!report) return null;
+  const venue = report.venue === "home" ? "홈" : report.venue === "away" ? "원정" : "중립";
+  const guessed = report.expectedXI.filter((p) => !p.carried).length;
+  return block(
+    "opponent",
+    lines(
+      `${report.date} ${report.time} ${report.label} · ${venue} vs ${report.opponent.name}` +
+        `${report.inDays === 0 ? " (오늘)" : " (내일)"}`,
+      `예상 XI: ${report.expectedXI.map((p) => `${p.name}(${p.position})`).join(" · ")}`,
+      report.basis === null
+        ? "예상의 근거: 상대의 직전 경기가 없다 — 배치에서 세운 추정이다"
+        : `예상의 근거: 상대의 직전 경기(${report.basis.date} ${report.basis.label}) 선발` +
+            `${guessed > 0 ? ` · ${guessed}명은 추정으로 메웠다` : ""}`,
+      report.absent.length === 0
+        ? "상대 결장: 없다"
+        : `상대 결장: ${report.absent
+            .map((a) => `${a.name} ${ABSENT_REASON_KO[a.reason]}(${a.note})`)
+            .join(" · ")}`,
+      `상대 전술: ${tacticsBrief(report.shape)}`,
+      report.notes.length === 0
+        ? "읽어 낸 지점: 없다"
+        : lines(
+            "읽어 낸 지점:",
+            ...report.notes.map(
+              (tag) =>
+                `- [${tag.favours === report.ourSide ? "우리" : tag.favours === null ? "중립" : "상대"}] ` +
+                packetTagText(tag, report.tagContext),
+            ),
+          ),
+    ),
+  );
 }
 
 /**
@@ -457,32 +548,22 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
 }
 
 /**
- * 우리 팀 은퇴 — **이번 오프시즌의 원장 줄**만이다. 전환이 은퇴를 다음 시즌
- * 프리시즌 시작일로 남기므로 날짜가 그 하루와 같은 줄이 방금 끝난 시즌의 은퇴다.
+ * 우리 팀 은퇴 — **이번 오프시즌의 명부 줄**만이다 (season.md §6). 전환이 은퇴를 다음
+ * 시즌 프리시즌 시작일로 남기므로 날짜가 그 하루와 같은 줄이 방금 끝난 시즌의 은퇴다.
  *
- * ⚠️ 은퇴하면 선수는 `state.players`에서 빠진다 — 이름이 없으면 그 줄을 세우지
- * 않는다. id를 이름 자리에 흘리면 GM이 그것을 사람 이름으로 읽고 장면에 적는다.
+ * ⚠️ **원장(`TRANSFER`)이 아니라 명부(`state.retired`)를 읽는다.** 은퇴하면 선수는
+ * `state.players`에서 빠져 원장 줄의 id로는 이름도 나이도 되찾지 못한다 — 명부가
+ * 서기 전에는 이 블록이 아무 줄도 내지 못했다.
  */
 function retirementFacts(state: GameState): string[] {
-  return state.transfers
-    .filter(
-      (t) =>
-        t.type === "retire" &&
-        t.fromTeamId === state.userTeamId &&
-        t.date === state.calendar.preseasonStart,
-    )
-    .map((t) => {
-      const player = playerById(state, t.gamePlayerId);
-      if (!player) return null;
-      // 우리 팀에서의 기록 — 시즌 기록은 팀별로 갈려 있어 우리 팀 행만 합산한다
-      const ours = state.seasonStats.filter(
-        (s) => s.gamePlayerId === t.gamePlayerId && s.teamId === state.userTeamId,
-      );
-      const apps = ours.reduce((sum, s) => sum + s.apps, 0);
-      const goals = ours.reduce((sum, s) => sum + s.goals, 0);
-      return `은퇴: ${player.name} ${ageOf(player.birthdate, t.date)}세 · 우리 팀에서 ${apps}경기 ${goals}골`;
-    })
-    .filter((x): x is string => x !== null);
+  return (state.retired ?? [])
+    .filter((r) => r.teamId === state.userTeamId && r.on === state.calendar.preseasonStart)
+    .map((r) => {
+      // 우리 팀에서의 기록 — 통산 접기는 한 곳이다(`careerTotalsOf`). 여기서 다시
+      // 합하면 화면·선수 카드가 내는 수와 은퇴 줄의 수가 언젠가 갈린다
+      const ours = careerTotalsOf(state, r.gamePlayerId, state.userTeamId);
+      return `은퇴: ${r.name} ${ageOf(r.birthdate, r.on)}세 · 우리 팀에서 ${ours.apps}경기 ${ours.goals}골`;
+    });
 }
 
 /**
@@ -566,6 +647,23 @@ export function buildGmStateNote(
     ...counterpartyReplies.map((line) => `📨 ${line}`),
     // 판정 대기 협상이 그다음 — 답은 다음 턴 입력에 실리므로 여기서 세우지 않으면 잊힌다
     ...pendingVerdicts(state).map((v) => `❗ ${v.label} (${v.negotiation.id})`),
+    /**
+     * 감독이 아직 답하지 않은 이적 요청 — 기한이 없어 저절로 사라지지 않는다
+     * (transfer.md §1-1). 우리 선수의 것만 센다 — 떠난 선수의 줄이 섞이면 남의
+     * 선수가 감독이 답해야 할 일로 주의 줄에 유령처럼 선다.
+     */
+    (() => {
+      const ours = new Set(players.map((p) => p.id));
+      const requests = openTransferRequests(state).filter((r) => ours.has(r.gamePlayerId));
+      return requests.length > 0
+        ? `❗ 이적 요청 ${requests.length} (${requests
+            .slice(0, TRANSFER_REQUEST_SHOWN)
+            .map(
+              (r) => `${playerName(state, r.gamePlayerId)} ${TRANSFER_REQUEST_REASON_KO[r.reason]}`,
+            )
+            .join(", ")}${requests.length > TRANSFER_REQUEST_SHOWN ? " …" : ""})`
+        : null;
+    })(),
     injured.length > 0 ? `부상 ${injured.length} (${injured.join(", ")})` : null,
     suspended.length > 0 ? `정지 ${suspended.length} (${suspended.join(", ")})` : null,
     unhappy.length > 0 ? `불만 ${unhappy.length} (${unhappy.join(", ")})` : null,
@@ -580,9 +678,28 @@ export function buildGmStateNote(
             .join(", ")}${expiring.length > EXPIRING_SHOWN ? " …" : ""})`
         : null;
     })(),
+    /**
+     * 기한이 다가온 약속 — **감독이 아직 지킬 수 있는 동안만** 선다 (people.md §5-2).
+     * 판정은 기한 하루뿐이라, 이 줄이 없으면 감독이 자기가 한 말을 잊은 채 그날을
+     * 지나치고 사기 −8과 불만 하나를 받는다.
+     */
+    (() => {
+      const due = openPromises(state)
+        .filter((p) => diffDays(state.date, p.dueOn) <= PROMISE_ALERT_DAYS)
+        .sort((a, b) => (a.dueOn < b.dueOn ? -1 : a.dueOn > b.dueOn ? 1 : 0));
+      return due.length > 0
+        ? `약속 기한 임박 ${due.length} (${due
+            .slice(0, PROMISE_SHOWN)
+            .map(
+              (p) => `${playerName(state, p.gamePlayerId)} ${PROMISE_KIND_KO[p.kind]}~${p.dueOn}`,
+            )
+            .join(", ")}${due.length > PROMISE_SHOWN ? " …" : ""})`
+        : null;
+    })(),
   ].filter((x): x is string => x !== null);
 
   const cues = speakerCues(state);
+  const coach = coachCues(state);
   const offseason = offseasonFacts(state);
   const negotiations = describeNegotiations(state);
   const recent = recentNarrativeLines(state);
@@ -628,13 +745,27 @@ export function buildGmStateNote(
           const named = (level: "first" | "reserve") =>
             players
               .filter((p) => squadLevelOf(p) === level)
-              .map((p) => `${p.name}${p.isCaptain ? "(주장)" : ""}`);
+              .map(
+                (p) =>
+                  `${p.name}${p.isCaptain ? "(주장)" : p.isViceCaptain === true ? "(부주장)" : ""}`,
+              );
           const first = named("first");
           const reserve = named("reserve");
+          /**
+           * 임대 보낸 선수는 **합계에 들지 않고 따로 선다.** 1군 + 2군이 곧 오늘
+           * 부릴 수 있는 인원이라, 합계에 넣으면 GM이 남의 경기장에 있는 사람을
+           * 오늘의 선택지로 센다. 계약은 우리 것이므로 명단에서 지우지도 않는다
+           * (transfer.md §2 · season.md §2 임대).
+           *
+           * ⚠️ 여기도 **이름뿐이다** — 어느 구단에 가 있는지도, 그 구단에서의
+           * 기록도 싣지 않는다. 그건 코치 카드와 조회의 몫이다.
+           */
+          const loaned = loanedOut(state).map((p) => p.name);
           return lines(
             `선수단 ${players.length}명`,
             first.length > 0 ? `- 1군 ${first.length}: ${first.join(" · ")}` : null,
             reserve.length > 0 ? `- 2군 ${reserve.length}: ${reserve.join(" · ")}` : null,
+            loaned.length > 0 ? `- 임대 ${loaned.length}: ${loaned.join(" · ")}` : null,
           );
         })(),
       ),
@@ -646,6 +777,17 @@ export function buildGmStateNote(
         // 레퍼런스(감독 프로필)엔 이름·배경만 남는다
         `${state.manager.name}: ${describeManagerSkills(state.manager.attributes)}`,
         `평판: ${describeReputation(state.manager.reputation)}`,
+        /**
+         * 보드가 이번 시즌 이 구단에 건 기대 (career.md §5). 시즌에 한 번 바뀌는 값이지만
+         * 캐시 층에 두면 롤오버 한 번에 레퍼런스와 그 뒤 이력이 통째로 무효가 된다.
+         *
+         * 경고 수(`boardWarnings`)는 따라오지 않는다 — 압박을 세는 눈금은 `get_career`의
+         * 몫이고, 여기 필요한 것은 그 눈금이 무엇을 재는지다.
+         */
+        (() => {
+          const be = boardExpectation(state, state.userTeamId);
+          return boardExpectationLine(be.code, be.target);
+        })(),
         // 감독 자신의 계약 — 재계약 제안은 **답할 자리**라 스냅샷에 서야 한다 (career.md §5.4)
         managerContractLine(state),
       ),
@@ -655,6 +797,18 @@ export function buildGmStateNote(
     // 선수 근황 — 선수단 중 **사실이 붙는** 셋이다.
     // 코어는 사실만 낸다(speakerCues) — 누가 말할지, 무슨 말을 할지는 GM의 몫
     block("cues", cues.map((c) => `- ${c.name} ${c.fact}`).join("\n")),
+    /**
+     * 수석코치가 먼저 짚는 사실 — **원형이 고른다** (people.md §7-1). 근황과 같은
+     * 결이되 고르는 눈이 다르다: 분석가는 상대의 표를, 조련사는 다리를 먼저 본다.
+     * 여기도 사실뿐이고(`coachCues`) 그 사실로 무슨 말을 할지는 GM이 쓴다.
+     * 무직이면 코어가 빈손을 내므로 이 덩어리는 서지 않는다.
+     */
+    coachBlock(state, coach),
+    /**
+     * 경기 전날·당일의 상대 분석 — 감독이 라인업과 6축을 정하는 자리다.
+     * 조회 도구·다음 경기 카드와 **같은 리포트**를 읽는다 (match.md §1.8).
+     */
+    opponentBlock(state),
     block("last_match", matchDigest(state)),
     // 오프시즌 — 은퇴와 시상. 소집 전에만 서고, 없으면 한 줄도 쓰지 않는다
     block("offseason", offseason),
@@ -691,6 +845,16 @@ export function buildGmStateNote(
      * (finance.md §9.6). 답이 도착한 날은 `<time_passed>`가 나른다.
      */
     block("board", describeBoardRequests(state)),
+    /**
+     * 오퍼 앞에 서 있는 관심 — 우리 선수를 보는 구단과, 우리가 노리는 선수에게
+     * 붙은 경쟁 구단 (transfer.md §1-2).
+     *
+     * 협상 블록보다 앞에 서는 이유가 시간 순서다: 이 사실이 없으면 모델은 오퍼가
+     * 열린 날에야 그 구단의 이름을 처음 듣는다. 그러면 회견의 질문도, 라커룸의
+     * 수군거림도, 재계약 테이블의 압박도 설 자리가 없다 — 소문은 오퍼 앞에서만
+     * 장면이 된다. 관심이 없으면 덩어리도 서지 않는다.
+     */
+    block("interest", describeInterests(state).join("\n")),
     // 협상은 있을 때만 — 매 턴 정가로 읽히는 블록이다
     block("negotiations", negotiations.startsWith("진행 중인 협상 없음") ? null : negotiations),
     // 쓸 수 있는 되사기 권리 — 이 덩어리가 없으면 모델은 그 자리가 있는 줄도 모른다

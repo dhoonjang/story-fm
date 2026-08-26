@@ -7,11 +7,19 @@ import {
   TRAINING_ATTR_CAP,
   POSITION_TRAIN_MAX,
   applyTrainingOutcomes,
+  recordEmptyTrainingReport,
   trainingSettled,
   type GameState,
   type TrainingBrief,
 } from "@story-fm/engine";
-import { ATTRIBUTE_AXES, AXIS_KO, DateString } from "@story-fm/domain";
+import {
+  ATTRIBUTE_AXES,
+  AXIS_KO,
+  DateString,
+  TRAINING_MARKS,
+  TrainingMarkSchema,
+  type TrainingReport,
+} from "@story-fm/domain";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
 import { agingDeclineLine } from "./aging-line";
 import { retryOnce, requireToolCall, anchorStands } from "./retry";
@@ -87,6 +95,14 @@ const OutcomeSchema = z.object({
     "이 변화가 나온 훈련 날짜 (YYYY-MM-DD, 위 훈련 목록 중 하나)",
   ),
   note: z.string().max(NOTE_MAX).optional().describe("한 문장 근거 (30자 안팎)"),
+  /**
+   * 훈련장에서 눈에 띈 갈래 — **수치가 안 움직인 선수도 이 자리는 가질 수 있다.**
+   * 갈래가 없으면 태만도 지쳐 흐트러진 것도 사실로 남지 않는다. 표 밖의 값은
+   * 코어가 잘라 낸다 (`applyTrainingOutcomes`).
+   */
+  mark: TrainingMarkSchema.nullish().describe(
+    `훈련 태도 — ${TRAINING_MARKS.join("·")} 중 하나 (해당 없으면 비운다)`,
+  ),
 });
 const ReportInputSchema = z.object({ results: z.array(OutcomeSchema).max(MAX_TRAINED_PLAYERS) });
 
@@ -139,7 +155,7 @@ export function buildTrainingPrompt(brief: TrainingBrief): string {
 function makeReportTool(
   state: GameState,
   brief: TrainingBrief,
-  onApplied: (lines: string[]) => void,
+  onApplied: (report: TrainingReport | null) => void,
 ): GameToolSpec {
   return {
     name: REPORT_TRAINING_TOOL,
@@ -160,7 +176,7 @@ function makeReportTool(
       }
       const parsed = ReportInputSchema.safeParse(input);
       if (!parsed.success) return inputError(parsed.error);
-      const lines = applyTrainingOutcomes(
+      const report = applyTrainingOutcomes(
         state,
         brief,
         parsed.data.results.map((r) => ({
@@ -170,10 +186,11 @@ function makeReportTool(
           attribute: r.attribute ?? null,
           attributeStep: r.attributeStep ?? 1,
           note: r.note ?? "",
+          mark: r.mark ?? null,
           ...(r.date ? { date: r.date } : {}),
         })),
       );
-      onApplied(lines);
+      onApplied(report);
       return { ok: true, message: `훈련 결산 반영 (${parsed.data.results.length}건 검토)` };
     },
   };
@@ -183,14 +200,18 @@ function makeReportTool(
  * 지나간 훈련을 결산한다 — `advanceTime` **뒤에** 부른다.
  * 한 번 다시 시도하되 **실패는 삼킨다** — 그 구간의 훈련 성과는 없던 일이 된다
  * (코어가 미리 올려 두지 않으므로).
+ *
+ * ⚠️ **판정이 돌지 않은 구간에도 카드는 남긴다** (빈 결산). "장부가 움직이지
+ * 않았다"가 사실이고, 카드가 없으면 다음 턴의 GM은 훈련장의 일을 지어낸다
+ * (docs/simulation/season.md §4).
  */
 export async function reportTraining(
   state: GameState,
   brief: TrainingBrief,
   llm?: GameLLM,
-): Promise<{ lines: string[] }> {
-  if (brief.sessions.length === 0 || brief.subjects.length === 0) return { lines: [] };
-  let lines: string[] = [];
+): Promise<{ report: TrainingReport | null }> {
+  if (brief.sessions.length === 0 || brief.subjects.length === 0) return { report: null };
+  let report: TrainingReport | null = null;
   let client = llm;
   await retryOnce(
     "rater:training",
@@ -201,13 +222,17 @@ export async function reportTraining(
           system: TRAINING_RATER_SYSTEM,
           history: [],
           user: buildTrainingPrompt(brief),
-          tools: [makeReportTool(state, brief, (l) => (lines = l))],
+          tools: [makeReportTool(state, brief, (r) => (report = r))],
           toolChoice: { name: REPORT_TRAINING_TOOL },
         });
       }),
-    // 이미 반영됐으면 다시 부르지 않는다 — 요약 줄이 비어도(소수로만 움직인 구간)
+    // 이미 반영됐으면 다시 부르지 않는다 — 카드가 비어도(소수로만 움직인 구간)
     // 장부는 이미 움직였으므로 반환값이 아니라 상태의 표식을 본다
     () => trainingSettled(state, brief),
   ).catch(anchorStands("rater:training"));
-  return { lines };
+  // 판정이 한 번도 닿지 않은 구간 — 빈 카드가 그 사실이다
+  if (report === null && !trainingSettled(state, brief)) {
+    report = recordEmptyTrainingReport(state, brief);
+  }
+  return { report };
 }

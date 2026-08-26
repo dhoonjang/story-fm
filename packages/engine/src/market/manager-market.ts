@@ -13,6 +13,7 @@ import { spendFromWallet, walletOf } from "../club/manager-wallet";
 import {
   AI_MANAGER_RATING_FALLBACK,
   MANAGER_TERMS_BY_TIER,
+  USER_WARNINGS_BEFORE_SACK,
   boardExpectationText,
   clampCondition,
   formatMoney,
@@ -171,8 +172,11 @@ export function counterHeadroom(reputation: number, tier: 1 | 2 | 3 | 4): number
   );
 }
 
-/** 감독 팀의 경고 단계 — 이 횟수를 넘기면 경질된다 */
-export const USER_WARNINGS_BEFORE_SACK = 3;
+/**
+ * 경고 단계의 눈금은 **도메인이 갖는다** — 보드 대치 아크가 같은 자를 읽는다
+ * (people.md §9). 여기서 부르던 자리가 옮기지 않게 다시 내보낸다.
+ */
+export { USER_WARNINGS_BEFORE_SACK };
 /** 같은 말을 매일 반복하지 않는 간격 — 경고는 한 달에 한 번까지다 */
 const WARNING_COOLDOWN_DAYS = 30;
 /** 경고 한 번이 깎는 보드 평판 — 경고가 마지막이 아니어도 압박은 남는다 */
@@ -898,6 +902,8 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
   state.boardRequests = [];
   // 라커룸 불만도 앞 구단의 것이다 (people.md §5) — 지고 오면 주의 줄이 옛 이름을 나열한다
   state.issues = [];
+  // 앞 구단 선수에게 한 약속도 같다 (people.md §5-2) — 지킬 수 없는 약속이 기한마다 판정된다
+  state.promises = [];
   /**
    * 답을 기다리던 회견도 앞 구단의 자리다 (people.md §4) — 그대로 두면 새 구단의
    * 첫 회견이 그것을 방치로 읽어 이유 없이 언론 평판을 깎는다. 감독이 무시한 것이

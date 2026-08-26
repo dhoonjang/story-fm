@@ -29,6 +29,8 @@ import {
   leagueView,
   LOAN_FEE_RATE,
   marketValueOf,
+  matchReport,
+  opponentReport,
   NARRATIVE_EXPENSE_CATEGORIES,
   NARRATIVE_FINANCE_MAX_AMOUNT,
   NARRATIVE_FINANCE_MIN_AMOUNT,
@@ -37,6 +39,8 @@ import {
   openNegotiationFor,
   openRelease,
   openRenewal,
+  PROMISE_DAYS_MAX,
+  PROMISE_DAYS_MIN,
   pickAnyPlayer,
   playerCard,
   playerName,
@@ -50,6 +54,7 @@ import {
   setTicketPrice,
   respondToApproach,
   respondToMedia,
+  respondTransferRequest,
   scheduleView,
   scoutPlayer,
   searchPlayers,
@@ -63,6 +68,7 @@ import {
   setPlayerTactic,
   setPlayerTraining,
   setSquadLevels,
+  setSetPieceTakers,
   setTactics,
   setTraining,
   setTransferList,
@@ -86,15 +92,21 @@ import {
   BOARD_REQUEST_KINDS,
   DateString,
   DIRECTIVE_INTENSITIES,
+  KEEPER_DISTRIBUTIONS,
   type MatchEvent,
   MAX_PAYMENT_YEARS,
   MAX_PITCH_CLAIMS,
   PitchClaimSchema,
   PLAYER_DIRECTIVE_KINDS,
   PRESS_STANCES,
+  PROMISE_KINDS,
   RESERVE_TRAINING_POLICIES,
+  SQUAD_STATUSES,
+  TACKLING_LEVELS,
+  TRANSITION_MODES,
 } from "@story-fm/domain";
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
+
 import { skillDescriptions } from "./skill-descriptions";
 import { inputError, toToolSchema } from "./tool-schema";
 import { recordCall, type GmToolCall, type SkillReturn } from "./gm-types";
@@ -129,6 +141,39 @@ const settlingArg = (kind: "talk" | "team_talk") =>
       "새로 영입해 아직 적응 중인 선수에게 이 말이 남긴 무게. 생략하면 코어가 outcome·강도로 정한다. " +
         "적응을 겨냥한 이야기(자리·역할 약속, 라커룸 소개, 사는 문제)면 크게, 지나가는 말이면 작게.",
     );
+
+/**
+ * 감독이 그 자리에서 한 **약속** — 면담과 다가옴의 응대가 같은 인자를 쓴다
+ * (→ docs/data/people.md §5-2). 갈래·기한만 받는다: 무슨 말로 약속했는지는
+ * 장면의 것이고 코어는 그것을 들지 않는다. 대상에 맞지 않는 약속은 코어가 반려한다.
+ */
+const promiseArg = z
+  .object({
+    kind: z
+      .enum(PROMISE_KINDS)
+      .describe(
+        "minutes=선발로 쓰겠다 · transfer=내보내 주겠다 · renewal=재계약을 열겠다 · captain=주장을 맡기겠다",
+      ),
+    days: z
+      .number()
+      .int()
+      .min(PROMISE_DAYS_MIN)
+      .max(PROMISE_DAYS_MAX)
+      .optional()
+      .describe("감독이 못 박은 기한(일). 생략하면 갈래의 기본 기한"),
+  })
+  .optional()
+  .describe(
+    "감독이 실제로 한 약속만. 감독이 말하지 않은 약속을 지어내지 마라 — 기한이 되면 코어가 장부로 판정한다",
+  );
+
+/** 계약에 적히는 **스쿼드 지위** — 오퍼·재계약 제안이 함께 싣는다 (transfer.md §1) */
+const squadStatusArg = z
+  .enum(SQUAD_STATUSES)
+  .optional()
+  .describe(
+    "key=핵심 · starter=주전 · rotation=로테이션 · backup=백업 · prospect=유망주. 감독이 자리를 약속했을 때만 싣는다",
+  );
 
 // 훈련 세션 스키마 (set_training) — 자유 label + focus 대상
 const TRAIN_FOCUS = [...ATTRIBUTE_AXES, "tactical", "recovery"] as const;
@@ -304,8 +349,14 @@ export function buildGmTools(
       }),
       (input) => setSquadLevels(state, input),
     ),
-    wrap("set_captain", descriptions.set_captain, z.object({ playerId: playerRef }), (input) =>
-      setCaptain(state, input.playerId),
+    wrap(
+      "set_captain",
+      descriptions.set_captain,
+      z.object({
+        playerId: playerRef.optional().describe("주장으로 세울 선수 — 생략하면 주장은 그대로"),
+        vice: playerRef.nullable().optional().describe("부주장으로 세울 선수 — null이면 지정 해제"),
+      }),
+      (input) => setCaptain(state, input),
     ),
     wrap(
       "set_development_focus",
@@ -340,6 +391,17 @@ export function buildGmTools(
           tempo: z.number().int().min(1).max(5),
           width: z.number().int().min(1).max(5),
           passStyle: z.number().int().min(1).max(5),
+          // 축이 아니라 갈래 넷 — 눈금이 없고, 지시하지 않은 것이 중립이다 (match.md §1.2)
+          transition: z
+            .enum(TRANSITION_MODES)
+            .nullable()
+            .describe("전환 — counter 역습 · regroup 재정비 · null 지시 해제"),
+          offsideTrap: z.boolean().describe("오프사이드 트랩을 거는가"),
+          tackling: z.enum(TACKLING_LEVELS).describe("태클 강도 — soft · normal(중립) · hard"),
+          keeperDistribution: z
+            .enum(KEEPER_DISTRIBUTIONS)
+            .nullable()
+            .describe("골키퍼 배급 — short 짧게 · long 길게 · null 지시 해제"),
         })
         .partial(),
       (input) => setTactics(state, input),
@@ -380,6 +442,16 @@ export function buildGmTools(
           .optional(),
       }),
       (input) => setPlayerTactic(state, input),
+    ),
+    wrap(
+      "set_set_piece_takers",
+      descriptions.set_set_piece_takers,
+      z.object({
+        corner: playerRef.nullable().optional().describe("코너 키커 — null이면 지정 해제"),
+        freeKick: playerRef.nullable().optional().describe("프리킥 키커 — null이면 지정 해제"),
+        penalty: playerRef.nullable().optional().describe("페널티 키커 — null이면 지정 해제"),
+      }),
+      (input) => setSetPieceTakers(state, input),
     ),
     wrap(
       "exploit_point",
@@ -470,6 +542,7 @@ export function buildGmTools(
           .max(160)
           .optional()
           .describe("settling을 그렇게 매긴 근거 한 줄"),
+        promise: promiseArg,
       }),
       (input) => applyTalkToPlayer(state, input),
     ),
@@ -503,6 +576,7 @@ export function buildGmTools(
       z.object({
         stance: z.enum(PRESS_STANCES).optional(),
         decline: z.boolean().optional().describe("감독이 자리를 주지 않고 돌려보냈으면 true"),
+        promise: promiseArg,
       }),
       (input) => respondToApproach(state, input),
     ),
@@ -622,7 +696,35 @@ export function buildGmTools(
           maxAge: z.number().int().min(15).max(45),
           squadLevel: z.enum(["first", "reserve"]),
           availableOnly: z.boolean(),
-          sortBy: z.enum(["rating", "age", "fatigue", "goals", "apps", "wage"]),
+          contractEndsWithinDays: z
+            .number()
+            .int()
+            .min(0)
+            .describe("계약이 이 일수 안에 끝나는 선수 — 무계약은 0일이라 언제나 걸린다"),
+          maxValue: z.number().min(0).describe("시장가 상한 (£)"),
+          maxWage: z.number().min(0).describe("주급 상한 (£/주)"),
+          listed: z.boolean().describe("우리가 이적 리스트에 올린 선수인가"),
+          homegrown: z
+            .boolean()
+            .describe("우리 협회 기준 홈그로운인가 — 등록 명단 8명 규칙의 자격"),
+          minPotential: z.number().int().min(1).max(99).describe("잠재력 추정 구간의 하한"),
+          knowledge: z
+            .enum(["own", "adapting", "scouted", "seen", "rumoured"])
+            .describe("최소 지식 수준 — scouted면 스카우팅을 마쳤거나 그보다 잘 아는 선수만"),
+          foot: z.enum(["left", "right", "both"]).describe("주발"),
+          sortBy: z.enum([
+            "rating",
+            "age",
+            "fatigue",
+            "goals",
+            "apps",
+            "wage",
+            "value",
+            "contract",
+            "assists",
+            "seasonRating",
+            "potential",
+          ]),
           limit: z.number().int().min(1).max(15),
           playerId: playerRef.describe(
             "이 id를 주면 그 선수 한 명의 상세 카드를 돌려준다 (검색 조건 무시)",
@@ -716,6 +818,32 @@ export function buildGmTools(
               ...(rest.count === undefined ? {} : { limit: rest.count }),
             })
           : leagueView(state, { view, ...rest }),
+    ),
+    read(
+      "get_match_report",
+      descriptions.get_match_report,
+      z
+        .object({
+          matchId: z.string().min(1),
+          opponent: z.string().min(1),
+          competition: z.string().min(1),
+          date: dateArg,
+        })
+        .partial(),
+      (input) => matchReport(state, input),
+    ),
+    read(
+      "get_opponent_report",
+      descriptions.get_opponent_report,
+      z
+        .object({
+          matchId: z.string().min(1),
+          opponent: z.string().min(1),
+          competition: z.string().min(1),
+          date: dateArg,
+        })
+        .partial(),
+      (input) => opponentReport(state, input),
     ),
     wrap("scout_player", descriptions.scout_player, z.object({ playerId: playerRef }), (input) =>
       scoutPlayer(state, input.playerId),
@@ -838,6 +966,7 @@ export function buildGmTools(
           .describe(
             "감독이 실제로 든 설득 논거. 감독이 말하지 않은 논거를 지어내지 마라 — 코어가 사실 대조해 거짓이면 확률이 떨어진다",
           ),
+        squadStatus: squadStatusArg,
       }),
       (input) => {
         // 내보내는 방향(매각·임대)은 입구가 다르다 — 우리가 값을 부르고 상대가 판정한다
@@ -863,6 +992,7 @@ export function buildGmTools(
           ...(input.kind === "loan" ? { kind: "loan" as const } : {}),
           ...(input.paymentYears === undefined ? {} : { paymentYears: input.paymentYears }),
           ...(input.pitch ? { pitch: input.pitch } : {}),
+          ...(input.squadStatus === undefined ? {} : { squadStatus: input.squadStatus }),
         });
       },
     ),
@@ -920,6 +1050,7 @@ export function buildGmTools(
         playerId: playerRef,
         weeklyWage: money(WAGE_MAX),
         years: z.number().int().min(1).max(6),
+        squadStatus: squadStatusArg,
       }),
       (input) => openRenewal(state, input),
     ),
@@ -953,6 +1084,21 @@ export function buildGmTools(
         note: z.string().min(1).max(160).optional().describe("감독이 밝힌 매각 사유 한 줄"),
       }),
       (input) => setTransferList(state, input),
+    ),
+    wrap(
+      "respond_transfer_request",
+      descriptions.respond_transfer_request,
+      z.object({
+        playerId: playerRef,
+        answer: z
+          .enum(["accept", "refuse"])
+          .describe("accept=요청을 받아들여 이적 리스트에 올린다, refuse=붙잡는다"),
+        askingPrice: money(MONEY_MAX)
+          .optional()
+          .describe("수락할 때의 호가 — 생략하면 코어가 정한다. 요청 할인선 위로는 서지 못한다"),
+        note: z.string().min(1).max(160).optional().describe("감독이 밝힌 한 줄"),
+      }),
+      (input) => respondTransferRequest(state, input),
     ),
     wrap(
       "release_player",

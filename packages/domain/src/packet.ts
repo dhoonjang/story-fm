@@ -10,9 +10,15 @@
  * 하나(`packetTagText`)가 만든다** — 화면·중계·CLI·테스트가 같은 함수를 부른다.
  */
 
-import { legacyTag, otherSide, type MatchSide, type SubCause } from "./match";
+import { legacyTag, otherSide, type MatchSide, type PacketTagSource, type SubCause } from "./match";
 import { AXIS_KO } from "./player";
-import { DIRECTIVE_INTENSITY_KO, PLAYER_DIRECTIVE_KO, type BoardPoint } from "./tactics";
+import {
+  DIRECTIVE_INTENSITY_KO,
+  PLAYER_DIRECTIVE_KO,
+  TACTIC_AXES,
+  tacticWord,
+  type BoardPoint,
+} from "./tactics";
 
 export interface ZoneStrength {
   attack: number;
@@ -49,19 +55,8 @@ export interface Matchup {
  * 문장으로 옮기는 것은 그것을 읽는 쪽(화면·중계·CLI)이 같은 렌더러 하나로 한다.
  */
 export interface PacketTag {
-  /** 어느 갈래에서 나왔나 */
-  source:
-    | "counter"
-    | "gap"
-    | "mismatch"
-    | "zone-plan"
-    | "directive"
-    | "directive-dropped"
-    | "exploit"
-    | "exploit-dropped"
-    | "tactical"
-    /** 진행 중인 옛 세이브가 들고 있던 문장 — `text`만 갖는다 */
-    | "legacy";
+  /** 어느 갈래에서 나왔나 — 목록은 `PACKET_TAG_SOURCES`(match.ts) 한 벌이다 */
+  source: PacketTagSource;
   /** 축·상성·지시의 코드 — 판정과 집계의 열쇠 ("space_behind" · "backline-pace") */
   code: string;
   /** 이 사실이 **이로운 편** — 약점을 가진 쪽이 아니다. 편이 없는 사실이면 null */
@@ -85,7 +80,10 @@ export interface PacketTag {
   values: Record<string, number>;
   /** 문장 안에 숨어 있던 조건부 축 — "sweeper" · "trap-unfamiliar" */
   flags: string[];
-  /** 구조로 못 옮기는 자유 문장 — 지역 플랜의 모델 원문, 옛 세이브의 줄 */
+  /**
+   * 구조로 못 옮기는 자유 문장 — 지역 플랜의 모델 원문, 옛 세이브의 줄, 그리고
+   * 카탈로그가 가진 고유 명사(컨텍스트 태그의 더비 이름).
+   */
   text?: string;
 }
 
@@ -181,6 +179,32 @@ export interface PlayerShotProfile {
   expectedGoals: number;
 }
 
+/**
+ * 팀의 **죽은 공 프로필** — 코너·프리킥·페널티 (match.md §1.4).
+ *
+ * ⚠️ 팀 기대 슈팅 **위에 더하는 것이 아니라 안에서 옮긴 몫**이다. 선수×경로
+ * 프로필(`shotProfiles`)은 이 몫을 뺀 **열린 플레이만** 싣고, 세 채널의 합이
+ * `guide.expectedShots`다 — 그래야 "실측 슈팅 = 패킷 기대 슈팅" 계약이 산다.
+ */
+export interface SetPieceProfile {
+  /** 90분 기대 죽은 공 슛 — 코너 + 프리킥 */
+  expectedShots: number;
+  /** 그 슛 하나의 평균 기회 xG — 키커의 킥력과 박스 안 제공권이 정한다 */
+  meanXg: number;
+  /** 90분 기대 페널티 — 그것도 슛 하나로 센다 */
+  penalties: number;
+  /** 90분 기대 코너 — 사건이 아니라 굴리지 않고 나누는 양이다 (§4) */
+  corners: number;
+  /** 90분 기대 파울 — 같은 자리 */
+  fouls: number;
+  /**
+   * 죽은 공을 차는 사람 — 감독의 지정(`TeamTactics.setPieceTakers`)이 있으면 그 사람,
+   * 없으면 그라운드 위 최고(코너·프리킥은 `kicking`, 페널티는 `penaltySkill`).
+   * 명단이 비면 null이다.
+   */
+  takers: { corner: string | null; freeKick: string | null; penalty: string | null };
+}
+
 export interface SidePacket {
   teamId: string;
   teamName: string;
@@ -266,8 +290,16 @@ export interface StrengthPacket {
     expectedShots?: { home: number; away: number };
     /** 결정력을 넣기 전 기회 xG의 합. */
     chanceXg?: { home: number; away: number };
-    /** 선수별·공격 경로별 슈팅 분포 — 구간/간이 시뮬의 공통 원본. */
+    /**
+     * 선수별·공격 경로별 슈팅 분포 — 구간/간이 시뮬의 공통 원본.
+     * **열린 플레이만** 싣는다: 죽은 공 몫은 아래 `setPieces`가 갖는다 (match.md §1.4).
+     */
     shotProfiles?: { home: PlayerShotProfile[]; away: PlayerShotProfile[] };
+    /**
+     * 팀 단위 죽은 공 프로필 — 두 시뮬의 공통 원본. 진행 중인 옛 세이브에는 없고,
+     * 없으면 그 경기의 남은 구간에 죽은 공 채널이 서지 않는다(열린 플레이만 굴린다).
+     */
+    setPieces?: { home: SetPieceProfile; away: SetPieceProfile };
     /**
      * 공을 쥐는 비율 (0.35~0.65) — **중원 우위가 정한다.**
      * 기대 득점에 실리고, 공 없는 팀의 체력 소모를 키운다.
@@ -277,6 +309,13 @@ export interface StrengthPacket {
     intensity: { home: number; away: number };
   };
 }
+
+/** 죽은 공의 갈래 이름 — 태그의 `code`가 곧 `ShotOrigin`이다 (match.md §1.4) */
+const SET_PIECE_KO: Record<string, string> = {
+  corner: "코너",
+  free_kick: "프리킥",
+  penalty: "페널티",
+};
 
 // ── 태그 → 문장 ───────────────────────────────────────
 /**
@@ -375,6 +414,7 @@ const DIRECTIVE_KO: Record<string, (by: string, target: string) => string> = {
   focus_play: (n) => `${n}에게 공격을 몰아준다, 다른 길이 줄어든다`,
   stay_back: (n) => `${n}은(는) 뒤에 남는다, 앞의 인원이 준다`,
   join_attack: (n) => `${n}이(가) 적극적으로 올라간다, 뒷공간을 내준다`,
+  careful: (n) => `${n}이(가) 발을 뺀다, 그 자리의 압박이 준다`,
 };
 
 /** 공략이 그라운드에서 무엇으로 보이는가 — 축 하나가 한 낱말이다 */
@@ -393,6 +433,15 @@ const EXPLOIT_KO: Record<string, string> = {
   creator: "중원 배급을 끊는다",
   finisher: "최전방을 가둔다",
   stamina: "속도를 올려 체력을 갉는다",
+};
+
+/**
+ * 벤치가 판을 옮긴 **갈래** — 축이 어느 쪽으로 갔는지는 이 낱말이 이미 말한다
+ * (`chase`는 전부 위로, `hold`는 전부 아래로 — match.md §2).
+ */
+const AI_SHIFT_KO: Record<string, string> = {
+  chase: "벤치가 판을 앞으로 밀었다",
+  hold: "벤치가 내려서서 잠갔다",
 };
 
 /** `축:값` 꼴 flag의 값 — 세기·축처럼 낱말 하나가 실리는 자리 */
@@ -431,7 +480,9 @@ const COUNTER_KO: Record<
     text: (r) =>
       `${r.subject}의 높은 라인 뒤가 열린다 — ${r.rival} 전방 스피드 ${Math.round(r.v("fwPace"))} vs 수비 ${Math.round(r.v("cbPace"))}` +
       (r.has("sweeper") ? " (골키퍼가 커버 범위를 넓혀 버틴다)" : "") +
-      (r.has("trap-unfamiliar") ? " · 오프사이드 트랩이 아직 손에 안 익었다" : ""),
+      // 트랩은 **감독이 켰을 때만** 문장에 선다 — 내린 적 없는 지시의 대가를 말하지 않는다
+      (r.has("trap-unfamiliar") ? " · 오프사이드 트랩이 아직 손에 안 익었다" : "") +
+      (r.has("trap-drilled") ? " · 오프사이드 트랩이 손에 익어 타이밍으로 덮는다" : ""),
   },
   press_trap: {
     text: (r) =>
@@ -472,7 +523,10 @@ const COUNTER_KO: Record<
   },
   counter_attack: {
     text: (r) =>
-      `${r.subject}이(가) 내려서서 역습을 노린다 — ${r.rival}이(가) 올라온 뒤가 넓다 (전방 스피드 ${Math.round(r.v("fwPace"))})`,
+      (r.has("ordered")
+        ? `${r.subject}이(가) 역습을 지시했다`
+        : `${r.subject}이(가) 내려서서 역습을 노린다`) +
+      ` — ${r.rival}이(가) 올라온 뒤가 넓다 (전방 스피드 ${Math.round(r.v("fwPace"))})`,
   },
   stretched_shape: {
     blames: true,
@@ -603,6 +657,37 @@ const TACTICAL_KO: Record<string, (r: Render) => string> = {
     r.v("step") > 0
       ? `롱볼 지향: 제공권 ${r.v("aerial") >= 1 ? "우위" : "열세"}, 중원 점유 포기`
       : `짧은 패스: 점유로 중원 장악 (연결 ${r.v("passing") >= 1 ? "안정" : "불안"}), 전진은 느리다`,
+  // ── 갈래 넷 — 켠 쪽만 줄을 갖는다 (match.md §1.2) ──
+  transition: (r) =>
+    r.has("counter")
+      ? `역습 전환: 뺏으면 곧장 앞으로 (최전방 스피드 ${r.v("trait") >= 1 ? "우수" : "평범"}), 중원은 비운다`
+      : "재정비: 뺏으면 자리부터 잡는다, 되받을 기회는 접는다",
+  "offside-trap": () => "오프사이드 트랩: 상대를 라인 앞에 가두되 타이밍이 어긋나면 그대로 열린다",
+  tackling: (r) =>
+    r.has("hard")
+      ? `강한 태클: 경합을 이긴다 (태클·적극성 ${r.v("trait") >= 1 ? "충분" : "부족"}), 파울·카드·부상이 함께 오른다`
+      : "약한 태클: 카드와 부상을 줄이는 대신 전진을 허용한다",
+  "keeper-distribution": (r) =>
+    r.has("long")
+      ? `긴 배급: 한 번에 넘긴다 (제공권 ${r.v("trait") >= 1 ? "우위" : "열세"}), 2차 볼을 내준다`
+      : `짧은 배급: 뒤에서부터 숫자를 만든다 (후방 연결 ${r.v("trait") >= 1 ? "안정" : "불안"}), 우리 문 앞에서 잃을 위험`,
+};
+
+/**
+ * 이 경기가 무슨 경기인가 (`source: "context"`) — 전력이 아니라 **대진이 가진 사실**.
+ * 편이 없으므로 주어를 세우지 않는다.
+ */
+export const DERBY_HEAT_KO: Record<number, string> = {
+  1: "이웃 사이의 자존심이 걸린 경기",
+  2: "오랜 앙숙이 만나는 경기",
+  3: "도시를 반으로 가르는 경기",
+};
+
+const CONTEXT_KO: Record<string, (tag: PacketTag) => string> = {
+  derby: (tag) => {
+    const heat = DERBY_HEAT_KO[Math.round(tag.values.heat ?? 1)] ?? DERBY_HEAT_KO[1]!;
+    return `${tag.text ?? "더비"} — ${heat}`;
+  },
 };
 
 /**
@@ -658,6 +743,8 @@ export function packetTagText(tag: PacketTag, ctx?: PacketTagContext): string {
   switch (tag.source) {
     case "legacy":
       return tag.text ?? "";
+    case "context":
+      return CONTEXT_KO[tag.code]?.(tag) ?? tag.text ?? "";
     case "zone-plan":
       return `${tag.favours ? nameOf(tag.favours) : ""} 지역 플랜: ${tag.text ?? ""}`.trim();
     case "gap": {
@@ -684,6 +771,21 @@ export function packetTagText(tag: PacketTag, ctx?: PacketTagContext): string {
     }
     case "tactical":
       return TACTICAL_KO[tag.code]?.(r) ?? tag.text ?? "";
+    case "set-piece": {
+      const head = SET_PIECE_KO[tag.code] ?? "죽은 공";
+      // 키커가 직접 찬 죽은 공(직접 프리킥·페널티)은 마무리가 곧 키커라 한 사람만 선다
+      const taker = r.who(0);
+      const finisher = r.who(1);
+      const kicking = tag.values.kicking;
+      const aerial = tag.values.aerial;
+      if (!finisher || finisher === taker) {
+        const skill = tag.sharp && kicking !== undefined ? ` (킥력 ${Math.round(kicking)})` : "";
+        return `${head} — ${taker}${skill}가 직접 마무리했다`;
+      }
+      const kick = tag.sharp && kicking !== undefined ? `(킥력 ${Math.round(kicking)})` : "";
+      const head_ = tag.sharp && aerial !== undefined ? `(공중볼 ${Math.round(aerial)})` : "";
+      return `${head} — ${taker}${kick}가 올리고 ${finisher}${head_}가 마무리했다`;
+    }
     case "directive": {
       const line = DIRECTIVE_KO[tag.code]?.(r.who(0), r.who(1));
       if (line === undefined) return tag.text ?? "";
@@ -694,6 +796,16 @@ export function packetTagText(tag: PacketTag, ctx?: PacketTagContext): string {
       const intensity = flagValue(tag, "intensity");
       const ko = intensity === undefined ? undefined : DIRECTIVE_INTENSITY_KO_BY_CODE[intensity];
       return `${line} — ${read}${ko ? ` (${ko})` : ""}`;
+    }
+    case "ai-shift": {
+      const head = AI_SHIFT_KO[tag.code] ?? "벤치가 판을 다시 깔았다";
+      // 옮긴 축만 낱말로 — 눈금 숫자는 화면의 점이 이미 그린다
+      const moved = TACTIC_AXES.filter((axis) => tag.values[axis.key] !== undefined).map(
+        (axis) => `${axis.brief} ${tacticWord(axis.key, tag.values[axis.key]!)}`,
+      );
+      const shape = flagValue(tag, "formation");
+      const parts = [...moved, ...(shape ? [`${shape} 모양으로 갈아 꼈다`] : [])];
+      return parts.length > 0 ? `${head} — ${parts.join(" · ")}` : head;
     }
     case "directive-dropped":
       return DROPPED_KO[tag.code]?.(r) ?? tag.text ?? "";

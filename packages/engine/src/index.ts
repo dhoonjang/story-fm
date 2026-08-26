@@ -68,27 +68,34 @@ export * from "./competition/reschedule";
 
 // match — 경기 진행·간이 시뮬·평점·징계
 export * from "./match/match-flow";
+export * from "./match/preview";
 export * from "./match/quick-sim";
 export * from "./match/ratings";
 
 // squad — 선수단 상태(폼·심경·부상·정착)와 성장·훈련·스카우팅
 export * from "./squad/depth";
+export * from "./squad/hierarchy";
 export * from "./squad/form";
 export * from "./squad/slump";
 export * from "./squad/other-clubs";
 export * from "./squad/mood";
 export * from "./squad/cues";
+export * from "./squad/coach-cues";
 export * from "./squad/settling";
 export * from "./squad/injury";
 export * from "./squad/development";
 export * from "./squad/registration";
+export * from "./squad/demotion";
+export * from "./squad/promises";
 export * from "./squad/scouting";
 export * from "./squad/training-plan";
 export * from "./squad/training-report";
 export * from "./squad/numbers";
+export * from "./squad/career";
 
 // market — 이적 시장·협상·메디컬·감독 시장
 export * from "./market/market";
+export * from "./market/interest";
 export * from "./market/negotiation";
 export * from "./market/counter-bounds";
 export * from "./market/counterparty";

@@ -1,10 +1,11 @@
-import type { GamePlayer, TransferReason } from "@story-fm/domain";
-import { ageOf, buildPaymentInstallments } from "@story-fm/domain";
+import type { GamePlayer, Injury, TransferReason } from "@story-fm/domain";
+import { ageOf, buildPaymentInstallments, seasonRating } from "@story-fm/domain";
 import { contractUntil, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { formatMoney, recordFinance, settleDuePayments } from "../club/finance";
 import { buildDeparturePress, openPress } from "../club/press";
 import { clampForm, moraleToForm } from "../squad/form";
+import { leaderWeightOf } from "../squad/hierarchy";
 import {
   firstInstallmentOf,
   loanLockOf,
@@ -17,20 +18,27 @@ import {
 import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { makeRng } from "../core/rng";
 import { assignSquadNumber } from "../squad/numbers";
-import { arrivingSquadLevel } from "../squad/registration";
+import { admitOnLoan, arrivingSquadLevel } from "../squad/registration";
 import type { SkillResult } from "../skills";
 import { forgetRoles } from "../skills/role-memory";
 import { item, signed } from "../skills/brief";
 import { pickAnyPlayer } from "../core/player-ref";
 import {
   activeContract,
+  benchRunOf,
+  clearInterests,
   firstTeamPlayers,
   groupOf,
+  onLoanFromUs,
+  openInjury,
+  playerById,
   playersOf,
   pushNarrative,
   releaseFromTactics,
+  seasonStatOf,
   squadShortfall,
   teamName,
+  withdrawTransferRequest,
   type GameState,
 } from "../core/state";
 
@@ -48,9 +56,20 @@ import {
 
 /**
  * 핵심 자원이 떠났을 때 남은 1군이 잃는 사기 — 폼으로는 닷새치 회귀에 해당한다.
- * 흔적이지 처벌이 아니다 (transfer.md §2).
+ * 흔적이지 처벌이 아니다 (transfer.md §2). **리더 배수가 곱해진 값이 실제 폭이다.**
  */
 export const DEPARTURE_SQUAD_MORALE = -3;
+
+/**
+ * 그 사람이 나갔을 때 라커룸이 잃는 사기 — 주장 −6 · 부주장 −5 · 리더 그룹 −4 ·
+ * 나머지 −3 (people.md §5-1). 라커룸을 이끌던 사람이 나가는 것과 백업이 나가는
+ * 것이 같은 값이면, 누구를 정리할지가 장부에서 갈리지 않는다.
+ *
+ * ⚠️ **선수가 무소속이 되기 전에 읽어야 한다** — 완장은 떠나는 문에서 벗겨진다.
+ */
+export function departureSquadMorale(state: GameState, player: GamePlayer): number {
+  return -Math.round(-DEPARTURE_SQUAD_MORALE * leaderWeightOf(state, player));
+}
 
 /** 무소속 — 클럽이 아니라 클럽이 없는 상태 (team-catalog `freeagents`) */
 export const FREE_AGENT_TEAM = "freeagents";
@@ -78,9 +97,15 @@ export function clearDepartedState(state: GameState, player: GamePlayer, from: s
   state.transferList = state.transferList.filter((l) => l.gamePlayerId !== player.id);
   state.playerTraining = state.playerTraining.filter((t) => t.gamePlayerId !== player.id);
   state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
-  player.state.transferRequestedOn = undefined;
+  // 떠난 사람에게 한 약속은 지킬 자리가 없다 (people.md §5-2 — 불만과 같은 결)
+  state.promises = (state.promises ?? []).filter((pr) => pr.gamePlayerId !== player.id);
+  // 요청 장부도 같은 문을 지난다 — 떠난 선수의 요청에 감독이 답할 자리가 없다
+  withdrawTransferRequest(state, player.id);
+  // 관심도 같다 — 우리 라커룸에 없는 사람을 두고 나는 소문은 물을 자리가 없다 (§1-2)
+  clearInterests(state, (i) => i.gamePlayerId === player.id);
   forgetRoles(state, player.id);
   player.isCaptain = false;
+  player.isViceCaptain = undefined;
 }
 
 /**
@@ -167,6 +192,8 @@ export function releasePlayer(
   }
 
   const wasCaptain = player.isCaptain;
+  // 완장을 벗기기 전에 읽는다 — 떠나는 문이 곧 그 사람의 자리를 지운다
+  const squadMorale = departureSquadMorale(state, player);
   const transferId = toFreeAgency(state, player, agreed ? "release-agreed" : "release-unilateral");
   if (severance > 0) {
     if (paymentYears !== undefined) {
@@ -202,7 +229,7 @@ export function releasePlayer(
     openPress(state, press);
     // 남은 1군만 — 떠난 당사자는 이미 무소속이라 자연히 빠진다
     for (const mate of firstTeamPlayers(state, state.userTeamId)) {
-      mate.state.form = clampForm(mate.state.form + moraleToForm(DEPARTURE_SQUAD_MORALE));
+      mate.state.form = clampForm(mate.state.form + moraleToForm(squadMorale));
     }
   }
 
@@ -225,8 +252,8 @@ export function releasePlayer(
           ? [
               item({
                 label: "1군 사기",
-                text: signed(DEPARTURE_SQUAD_MORALE),
-                delta: DEPARTURE_SQUAD_MORALE,
+                text: signed(squadMorale),
+                delta: squadMorale,
               }),
             ]
           : []),
@@ -239,7 +266,7 @@ export function releasePlayer(
         : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)}).`) +
       " 무소속이 됐습니다 — 다른 구단이 데려갈 수 있습니다." +
       (wasCaptain ? " 주장이 떠났습니다 — 새 주장을 지명하세요." : "") +
-      (press ? ` 기자회견이 열렸습니다. 남은 1군 사기 ${DEPARTURE_SQUAD_MORALE}.` : ""),
+      (press ? ` 기자회견이 열렸습니다. 남은 1군 사기 ${squadMorale}.` : ""),
   };
 }
 
@@ -300,7 +327,13 @@ export function loanPlayer(
   player.teamId = destination.id;
   player.squadNumber = undefined;
   assignSquadNumber(state.players, player);
-  player.squadLevel = arrivingSquadLevel(state, player, destination.id);
+  /**
+   * **임대는 언제나 그쪽 1군이다** — 명단이 차 있으면 빌린 구단이 자리를 낸다
+   * (→ docs/simulation/season.md §2 임대). 2군에 들어가면 그쪽 2군 리그가 편성되지
+   * 않아 한 경기도 못 뛴다 — 나가면 뛰던 경기까지 잃는 임대는 임대가 아니다.
+   */
+  admitOnLoan(state, player, destination.id);
+  player.squadLevel = "first";
   player.loan = { fromTeamId: state.userTeamId, until, wageShare };
   state.transfers.push({
     id: `tr-loan-${player.id}-${state.date}`,
@@ -405,7 +438,104 @@ export function returnDueLoans(state: GameState, digest: string[]): void {
 
 /** 우리가 임대 보낸 선수들 — 조회·서사용 */
 export function loanedOut(state: GameState): GamePlayer[] {
-  return state.players.filter((p) => p.loan?.fromTeamId === state.userTeamId);
+  return state.players.filter((p) => onLoanFromUs(state, p));
+}
+
+// ── 임대 리포트 — 남의 경기장에서 무슨 일이 있었나 ──────
+
+/**
+ * 리콜을 고민할 근거 — **코드다.** "출전 기회를 못 얻고 있습니다"라는 문장은 GM이
+ * 쓴다 (→ docs/overview.md §1 철칙 4).
+ */
+export type LoanConcern = "no-minutes" | "injury";
+
+/**
+ * 그 구단 최근 경기에서 이만큼 연속으로 명단 밖이면 사실로 짚는다.
+ *
+ * 넷은 한 달치 일정이다 — 둘이면 로테이션 한 번에 경보가 울리고, 여덟이면 리포트가
+ * 두 달 늦게 온다. 리콜 창(이적 창)이 열려 있는 동안 감독이 판단할 시간이 남는 폭이다.
+ */
+export const LOAN_BENCH_RUN_ALERT = 4;
+
+/** 임대 한 건의 결산 — 저장하지 않는다. 장부에서 파생한다 */
+export interface LoanReport {
+  playerId: string;
+  name: string;
+  /** 빌린 구단 */
+  teamId: string;
+  /** 복귀일 */
+  until: string;
+  /** 그 구단에서의 이번 시즌 1군 기록 (`SEASON_STAT`의 그 팀 행) */
+  apps: number;
+  goals: number;
+  assists: number;
+  /** 평균 평점 — 출전이 없으면 null (0.00과 "기록 없음"은 다르다) */
+  rating: number | null;
+  /** 그 구단 2군 리그 출전 — 1군 기록과 섞지 않는다 (season.md §2) */
+  reserveApps: number;
+  /** 그 구단 최근 경기의 **연속 미출전 수** — 명단에 든 경기가 나오면 멈춘다 */
+  benchRun: number;
+  /** 임대를 나간 뒤 오른 능력치 칸 수 (`growthLog`의 합) */
+  growth: number;
+  injury: Injury | null;
+  concerns: LoanConcern[];
+}
+
+/**
+ * 이 임대가 언제 시작됐나 — 원장의 임대 이적 줄에서 파생한다. 줄이 없는 옛 세이브는
+ * 시즌 시작으로 본다(성장 칸 수가 과하게 잡히는 쪽이지, 빠지는 쪽이 아니다).
+ */
+function loanStartOf(state: GameState, player: GamePlayer): string {
+  const rows = state.transfers.filter(
+    (t) => t.gamePlayerId === player.id && t.type === "loan" && t.toTeamId === player.teamId,
+  );
+  return rows.length > 0
+    ? rows.reduce((latest, t) => (t.date > latest ? t.date : latest), rows[0]!.date)
+    : state.calendar.preseasonStart;
+}
+
+/**
+ * 임대 한 건의 결산 — 우리가 임대 보낸 선수가 아니면 null.
+ *
+ * ⚠️ **사실만 낸다.** 출전·평점·연속 미출전·성장 칸 수와 근거 **코드**뿐이고,
+ * "불러들이시죠"는 이 자리의 것이 아니다.
+ */
+export function loanReportOf(state: GameState, playerId: string): LoanReport | null {
+  const player = playerById(state, playerId);
+  if (!player?.loan || !onLoanFromUs(state, player)) return null;
+  const stat = seasonStatOf(state, player.id);
+  const since = loanStartOf(state, player);
+  const growth = state.growthLog
+    .filter((g) => g.gamePlayerId === player.id && g.date >= since && g.delta > 0)
+    .reduce((sum, g) => sum + g.delta, 0);
+  const injury = openInjury(state, player.id);
+  const benchRun = benchRunOf(state, player);
+  return {
+    playerId: player.id,
+    name: player.name,
+    teamId: player.teamId,
+    until: player.loan.until,
+    apps: stat?.apps ?? 0,
+    goals: stat?.goals ?? 0,
+    assists: stat?.assists ?? 0,
+    rating: seasonRating(stat),
+    reserveApps: stat?.reserveApps ?? 0,
+    benchRun,
+    growth,
+    injury,
+    concerns: [
+      ...(benchRun >= LOAN_BENCH_RUN_ALERT ? (["no-minutes"] as const) : []),
+      ...(injury ? (["injury"] as const) : []),
+    ],
+  };
+}
+
+/** 우리가 내보낸 임대 전부의 결산 — 이름 순서가 아니라 id 순서다(결정적) */
+export function loanReports(state: GameState): LoanReport[] {
+  return loanedOut(state)
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((p) => loanReportOf(state, p.id))
+    .filter((r): r is LoanReport => r !== null);
 }
 
 // ── 무소속 시장 — 남의 팀이 데려간다 ────────────────────

@@ -51,6 +51,10 @@ const ARRAY_FIELDS = [
   "scoutReports",
   "settlingEvents",
   "transferList",
+  // 이적 요청 장부 — 옛 세이브엔 없다 (transfer.md §1-1)
+  "transferRequests",
+  // 관심 장부 — 옛 세이브엔 없다 (transfer.md §1-2)
+  "interests",
   "playerTraining",
   "roleMemory",
   "pressConferences",
@@ -59,6 +63,12 @@ const ARRAY_FIELDS = [
   "pressLeaks",
   "aiDeals",
   "leagueHistory",
+  "milestones",
+  // 은퇴 명부 — 옛 세이브엔 없다 (season.md §6)
+  "retired",
+  "trainingReports",
+  // 약속 장부 — 옛 세이브엔 없다 (people.md §5-2)
+  "promises",
   // 재정 보고서는 다음 달 1일부터 쌓인다. 옛 원장 엔트리는 category가 없어
   // 집계에서 "기타"로 읽힌다 (finance.ts categoryOf)
   "financeReports",
@@ -361,4 +371,39 @@ export function migrateMirrorProficiency(save: MirrorProficiencySave): void {
   if (save.mirrorProficiencyStripped) return;
   for (const player of save.players) stripStoredFootAdjust(player.positions);
   save.mirrorProficiencyStripped = true;
+}
+
+interface NationalitySave {
+  players: Array<{
+    catalogId: string | null;
+    teamId: string;
+    nationality?: string;
+    secondNationality?: string;
+  }>;
+}
+
+/**
+ * 국적 보정 — 국적보다 먼저 저장된 세이브의 선수에게 국적을 세운다.
+ *
+ * 빈칸으로 둘 수 없는 축이다: 등록 규정도 대표팀도 "국적이 없는 선수"를 다룰 자리가
+ * 없어서, 하나라도 비면 그 규칙이 통째로 서지 못한다. 그래서 **결정적으로 채운다**
+ * (game-state.md §6 — 생성이 결정적이면 로드 때 조용히 채운다).
+ *
+ * 값의 출처는 부르는 쪽이 정한다 — 카탈로그에 그 선수가 있으면 시드가 조사한 국적,
+ * 없으면 그 클럽 협회다. 이미 값이 있으면 손대지 않으므로 멱등이다.
+ */
+export function migrateNationalities(
+  save: NationalitySave,
+  lookup: (player: { catalogId: string | null; teamId: string }) => {
+    nationality?: string;
+    secondNationality?: string;
+  },
+): void {
+  for (const player of save.players) {
+    if (player.nationality !== undefined) continue;
+    const found = lookup(player);
+    if (found.nationality === undefined) continue;
+    player.nationality = found.nationality;
+    if (found.secondNationality !== undefined) player.secondNationality = found.secondNationality;
+  }
 }

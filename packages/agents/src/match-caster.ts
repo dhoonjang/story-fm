@@ -1,4 +1,4 @@
-import type { MatchEvent, ShootoutKick, ShootoutOutcome } from "@story-fm/domain";
+import type { MatchEvent, ShootoutKick, ShootoutOutcome, ShotOrigin } from "@story-fm/domain";
 import { packetTagText, subCauseText } from "@story-fm/domain";
 
 /**
@@ -63,10 +63,23 @@ const EVENT_KO: Record<MatchEvent["type"], string> = {
   red_card: "퇴장",
   substitution: "교체",
   injury: "부상",
+  /** 벤치가 판을 옮겼다 — 팀 이름은 줄 머리가 이미 붙인다 (match.md §2) */
+  tactical_shift: "전술 전환",
   half_time: "하프타임",
   extra_time_start: "연장 돌입",
   extra_half_time: "연장 하프타임",
   full_time: "경기 종료",
+};
+
+/**
+ * 슛이 **어디서 나왔나** — 죽은 공은 사건 타입이 아니라 슛의 성질이다
+ * (match.md §1.4). 이 한 마디가 없으면 캐스터는 90분 내내 죽은 공을 볼 수 없다.
+ */
+const SHOT_ORIGIN_KO: Record<ShotOrigin, string> = {
+  open: "",
+  corner: "코너에서",
+  free_kick: "프리킥에서",
+  penalty: "페널티킥",
 };
 
 const STOP_KO: Record<string, string> = {
@@ -98,6 +111,7 @@ const SHOOTOUT_OUTCOME_KO: Record<ShootoutOutcome, string> = {
 function actorsNote(ev: MatchEvent, nameOf: (id: string) => string): string {
   const [first, second] = ev.actors.map(nameOf);
   if (!first) return "";
+  // 죽은 공 골의 도움은 그 공을 올린 키커다 — 추첨이 아니라 사실이다 (match.md §1.4)
   if (ev.type === "goal") return second ? `득점 ${first} · 도움 ${second}` : `득점 ${first}`;
   if (ev.type === "substitution") return second ? `OUT ${first} · IN ${second}` : `OUT ${first}`;
   return ev.actors.map(nameOf).join(" → ");
@@ -120,7 +134,9 @@ export function buildSegmentMessage(
     ];
     const cause = reasons.length > 0 ? ` · 근거: ${reasons.join(" / ")}` : "";
     const detail = ev.detail ? ` · ${ev.detail}` : "";
-    return `- ${ev.minute}′ ${team}${EVENT_KO[ev.type]}${who ? `: ${who}` : ""}${cause}${detail}`;
+    const origin = ev.shotOrigin ? SHOT_ORIGIN_KO[ev.shotOrigin] : "";
+    const from = origin ? `${origin} ` : "";
+    return `- ${ev.minute}′ ${team}${from}${EVENT_KO[ev.type]}${who ? `: ${who}` : ""}${cause}${detail}`;
   });
   return [
     "<segment>",

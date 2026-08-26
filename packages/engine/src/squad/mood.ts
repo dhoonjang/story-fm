@@ -1,8 +1,36 @@
-import { ageOf, isRelease, issueReasonKo, MOOD_NOTE_MAX } from "@story-fm/domain";
-import type { GamePlayer, MatchRecord, PlayerIssueReason } from "@story-fm/domain";
+import {
+  ageOf,
+  isRelease,
+  issueReasonKo,
+  LEADER_ROLE_LABEL,
+  milestonePhrase,
+  MOOD_NOTE_MAX,
+  PLAYER_ARCHETYPE_LABEL,
+  sharpnessBand,
+  sharpnessBandLabel,
+  sharpnessOf,
+  SQUAD_STATUS_KO,
+} from "@story-fm/domain";
+import type {
+  GamePlayer,
+  LeaderRole,
+  MatchRecord,
+  MilestoneCode,
+  PlayerArchetypeKey,
+  PlayerIssueReason,
+  RetirementReason,
+  SharpnessBand,
+  SquadStatus,
+} from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
+import { milestonesOf } from "./career";
 import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
 import { settlingOf } from "./settling";
+import { playerArchetypeOf } from "../world/player-persona";
+import { leaderRoleOf } from "./hierarchy";
+import { demotionPatienceDaysOf } from "./demotion";
+// 출전 불만이 어느 기대에 못 미친 것인가 — 약속 판정과 같은 자다 (people.md §5-2)
+import { squadStatusOf, startsInWindow } from "./promises";
 import {
   activeContract,
   activeSuspension,
@@ -65,6 +93,11 @@ export type MoodFact =
   /** `daysToReturn === 0`이면 복귀 예정일에 닿았다는 뜻이다 */
   | { cause: "injury"; bodyPart: string; daysToReturn: number }
   | { cause: "suspension"; matchesLeft: number }
+  /**
+   * 이번 시즌 뒤 은퇴 — `days`는 예고한 날부터 며칠째인가 (season.md §6).
+   * 불만보다 앞에 서는 이유는 그것이 **남은 모든 것을 물들이는 사실**이어서다.
+   */
+  | { cause: "retiring"; days: number; reason: RetirementReason }
   /** `note`는 옛 세이브가 들고 있는 사유 문장 — `reason`이 없을 때만 있다 */
   | {
       cause: "grievance";
@@ -72,9 +105,33 @@ export type MoodFact =
       note: string | null;
       days: number;
       count: number | null;
+      /**
+       * 이 불만이 **그 사람의 것**임을 남긴다 — 계수가 읽힌 자리의 코드다
+       * (people.md §6). 인물 카드의 `원형:` 줄과 같은 표의 같은 행이라 모델이 둘을
+       * 잇는다. ⚠️ 문장이 아니라 코드다 — 라벨은 화면·GM이 붙인다.
+       */
+      archetype: PlayerArchetypeKey;
+      /**
+       * **`minutes` 불만에만 실린다** — 그 불만을 세운 계약 지위와, 그것을 재는
+       * 창의 실제 수치다 (people.md §5·§5-2). 이 셋이 없으면 "출전 기회 불만"이
+       * 어느 기대에 대해 모자란 것인지가 어디에도 서지 않아, 백업의 침묵과
+       * 핵심의 불만이 같은 줄로 읽힌다.
+       *
+       * ⚠️ 다른 사유는 채우지 않는다 — 약속 파기는 사유 코드만으로 충분하고,
+       * 없는 수치를 0으로 채우면 읽는 쪽이 그것을 사실로 읽는다.
+       */
+      status?: SquadStatus;
+      starts?: number;
+      played?: number;
     }
   /** 감독이 2군으로 내린 선수만 — 시드가 2군에 세워 둔 선수에겐 서지 않는다 */
-  | { cause: "demotion"; days: number }
+  | {
+      cause: "demotion";
+      days: number;
+      archetype: PlayerArchetypeKey;
+      /** **그 사람의 문턱** — 이 날을 넘기면 불만이 선다 (`demotionPatienceDaysOf`) */
+      patienceDays: number;
+    }
   | { cause: "settling"; percent: number; matches: number }
   | {
       cause: "afterglow";
@@ -83,14 +140,30 @@ export type MoodFact =
       rating: number | null;
       /** 그 경기에서 **자기 몫**을 했는가 — 팀 결과와 따로 논다 */
       own: "good" | "par" | "poor";
+      /**
+       * 그 경기가 세운 기록 — **새 카드가 아니라 여운의 일부다** (people.md §5).
+       * 데뷔전도 100경기도 별개의 마음이 아니라 그 경기의 여운이라, 카드를 하나 더
+       * 세우면 두 장 한도(`MOOD_FACT_LIMIT`) 안에서 불만이나 폼을 밀어낸다.
+       */
+      milestone?: { code: MilestoneCode; value: number };
     }
   | { cause: "no-minutes"; place: "bench" | "out" }
   | { cause: "form"; label: FormLabel }
   | { cause: "condition"; level: "heavy" | "light" }
+  /**
+   * **경기 감각**이 무뎌졌다 (player.md §5.4) — 몸의 예산(`condition`)과 다른 사실이다.
+   * 잘 쉬었지만 몇 주째 못 뛴 선수가 여기서 갈린다. 등급만 낸다: 감독이 관측하는
+   * 것은 출전 기록이지 숫자가 아니고, 말은 화면·GM이 붙인다.
+   */
+  | { cause: "sharpness"; band: SharpnessBand }
   /** 최근 우리 구단에서 계약이 해지된 선수 — 남은 선수단 전원이 같은 카드를 든다 */
   | { cause: "departure"; name: string; days: number }
   | { cause: "contract-ending"; daysLeft: number }
-  | { cause: "captain" }
+  /**
+   * 라커룸에서 선 자리 — 완장 둘과 리더 그룹 (people.md §5-1). 주장만 세우면 서열이
+   * 감독에게 보이지 않고, 리더의 불만이 왜 더 빨리 쌓이는지도 어디에도 서지 않는다.
+   */
+  | { cause: "leader"; role: LeaderRole }
   | { cause: "young"; age: number }
   | { cause: "steady" };
 
@@ -102,6 +175,11 @@ export interface MoodRead {
 }
 
 interface LastMatch {
+  /**
+   * 어느 경기인가 — **그 경기가 세운 기록을 찾는 열쇠다.** 여기에 실어 나르므로
+   * 여운 문장과 기록이 같은 경기를 가리키는 것이 코드에서 보인다 (people.md §5).
+   */
+  matchId: string;
   outcome: "win" | "draw" | "loss";
   /** 그 경기에서 받은 평점 (없으면 기록이 안 남은 경기) */
   rating: number | null;
@@ -157,6 +235,7 @@ function lastMatchOf(state: GameState, playerId: string, index?: LastMatchIndex)
   const ours = home ? match.result.homeGoals : match.result.awayGoals;
   const theirs = home ? match.result.awayGoals : match.result.homeGoals;
   return {
+    matchId: match.id,
     outcome: ours > theirs ? "win" : ours === theirs ? "draw" : "loss",
     rating: match.result.ratings?.[playerId] ?? null,
     days: diffDays(match.date, state.date),
@@ -167,8 +246,12 @@ function lastMatchOf(state: GameState, playerId: string, index?: LastMatchIndex)
  * 경기의 여운 — **팀의 결과와 자기 경기가 따로 논다.**
  * 이긴 경기에서 부진한 선수와 진 경기에서 제 몫을 한 선수는 마음이 다르다.
  * 평점이 없으면 팀 결과만 사실이므로 자기 몫은 중립(`par`)이다.
+ *
+ * 그 경기가 기록을 세웠으면 여운 카드가 **그 코드를 함께 든다** — 여럿이면 가장
+ * 드문 것 하나만이다(목록이 이미 드문 순이다). 여운은 `AFTERGLOW_DAYS`(3) 안에서만
+ * 서므로 기록도 사흘이고, 그 뒤에 남는 것은 장부와 선수 상세다 (people.md §5).
  */
-function afterglow(last: LastMatch): MoodFact {
+function afterglow(state: GameState, playerId: string, last: LastMatch): MoodFact {
   const own =
     last.rating === null
       ? "par"
@@ -177,19 +260,40 @@ function afterglow(last: LastMatch): MoodFact {
         : last.rating <= RATING_BASELINE - AFTERGLOW_RATING_BAND
           ? "poor"
           : "par";
-  return { cause: "afterglow", days: last.days, outcome: last.outcome, rating: last.rating, own };
+  const milestone = milestonesOf(state, playerId, last.matchId)[0];
+  return {
+    cause: "afterglow",
+    days: last.days,
+    outcome: last.outcome,
+    rating: last.rating,
+    own,
+    ...(milestone ? { milestone: { code: milestone.code, value: milestone.value } } : {}),
+  };
 }
 
 /** 라커룸 불만의 사유 코드 — 옛 세이브는 문장을 들고 있어 그것이 폴백이다 */
-function grievanceOf(state: GameState, playerId: string): MoodFact | null {
-  const issue = state.issues.find((i) => i.gamePlayerId === playerId);
+function grievanceOf(
+  state: GameState,
+  player: GamePlayer,
+): Extract<MoodFact, { cause: "grievance" }> | null {
+  const issue = state.issues.find((i) => i.gamePlayerId === player.id);
   if (!issue) return null;
+  /**
+   * 출전 불만만 지위와 창의 수치를 든다 — 그 불만을 세운 자가 그것이기 때문이다
+   * (people.md §5). 다른 사유는 자기 수치를 이미 `count`나 다른 카드가 든다.
+   */
+  const read =
+    issue.reason === "minutes"
+      ? { status: squadStatusOf(state, player), ...startsInWindow(state, player) }
+      : null;
   return {
     cause: "grievance",
     reason: issue.reason ?? null,
     note: issue.note ?? null,
     days: Math.max(0, diffDays(issue.since, state.date)),
     count: issue.count ?? null,
+    archetype: playerArchetypeOf(state.seed, player),
+    ...(read ? { status: read.status, starts: read.starts, played: read.played } : {}),
   };
 }
 
@@ -245,13 +349,14 @@ export function moodFactsOf(
 
   const injury = openInjury(state, player.id);
   const suspension = activeSuspension(state, player.id);
-  const grievance = grievanceOf(state, player.id);
+  const grievance = grievanceOf(state, player);
   const assignment = assignmentFor(state, player.id);
   const stat = seasonStatOf(state, player.id);
   const contract = activeContract(state, player.id);
   const settling = settlingOf(state, player.id);
   const demotionDays = demotionDaysOf(state, player);
   const { form, condition } = player.state;
+  const retiring = player.state.retiringAfterSeason;
 
   // ── 못 뛰는 사유가 있으면 그게 전부다 ──
   if (injury) {
@@ -262,6 +367,18 @@ export function moodFactsOf(
     });
   } else if (suspension) {
     facts.push({ cause: "suspension", matchesLeft: suspension.lengthMatches - suspension.served });
+  } else if (retiring) {
+    /**
+     * ── 이 시즌이 마지막이다 ── 못 뛰는 사유 다음이다 (people.md §5).
+     * 곁들임 한 장은 아래 자리들이 그대로 채운다 — 마지막 시즌의 불만도, 마지막
+     * 시즌의 완장도 그 사실 위에 얹혀야 읽힌다.
+     */
+    facts.push({
+      cause: "retiring",
+      days: diffDays(retiring.on, state.date),
+      reason: retiring.reason,
+    });
+    if (grievance) facts.push(grievance);
   } else {
     /**
      * ── 직전 경기의 여운 ──
@@ -276,7 +393,12 @@ export function moodFactsOf(
       facts.push(grievance);
     } else if (demotionDays !== null) {
       // 출전 기회(`no-minutes`)보다 앞에 선다 — 강등이 곧 못 뛰는 이유다
-      facts.push({ cause: "demotion", days: demotionDays });
+      facts.push({
+        cause: "demotion",
+        days: demotionDays,
+        archetype: playerArchetypeOf(state.seed, player),
+        patienceDays: demotionPatienceDaysOf(state, player),
+      });
     } else if (settling && !settling.done) {
       // 남은 날짜를 내지 않는다 — 얼마나 걸릴지는 감독이 앞으로 뭘 하느냐에 달렸다
       facts.push({
@@ -285,7 +407,7 @@ export function moodFactsOf(
         matches: settling.matches,
       });
     } else if (fresh && last) {
-      facts.push(afterglow(last));
+      facts.push(afterglow(state, player.id, last));
     }
 
     /**
@@ -306,6 +428,23 @@ export function moodFactsOf(
     if (facts.length === 0) {
       const label = formLabel(form);
       if (label !== "평소") facts.push({ cause: "form", label });
+    }
+
+    /**
+     * ── 경기 감각 ── **몸의 예산과 다른 사실이다.** 잘 쉬어서 체력은 가득한데
+     * 두 달째 90분을 못 뛴 선수가 있다 — 그 사실을 말하는 카드가 여기다.
+     * "굳음"은 언제나 내고(감독이 손을 써야 하는 자리다), "무딤"은 달리 할 말이
+     * 없을 때만 낸다 — 시즌 중 스쿼드 절반이 그 등급이라 늘 내면 소음이 된다.
+     *
+     * ⚠️ **개막 전에는 내지 않는다** — `no-minutes`와 같은 이유이자 같은 문이다.
+     * 시즌이 열릴 때 선수단 전원이 프리시즌 값에서 출발하므로(player.md §5.4),
+     * 7월의 라커룸은 스물다섯 명이 통째로 "몸이 굳었다"가 된다. 남들과 다를 때만
+     * 그 선수의 사실이다.
+     */
+    if (state.date >= state.calendar.start) {
+      const band = sharpnessBand(sharpnessOf(player.state));
+      if (band === "blunt") facts.push({ cause: "sharpness", band });
+      else if (band === "rusty" && facts.length === 0) facts.push({ cause: "sharpness", band });
     }
 
     /**
@@ -332,13 +471,20 @@ export function moodFactsOf(
     const departure = recentDeparture(state);
     if (departure) facts.push(departure);
   }
-  if (!injury && contract) {
+  /**
+   * ⚠️ **`contract` 불만이 걸린 선수에겐 서지 않는다** (people.md §5) — 같은 사실을
+   * 불만 카드가 이미 말하고 있어, 두 장 한도 안에서 폼이나 몸을 밀어낼 뿐이다.
+   */
+  if (!injury && contract && grievance?.reason !== "contract") {
     const left = diffDays(state.date, contract.until);
     if (left >= 0 && left <= CONTRACT_ENDING_DAYS) {
       facts.push({ cause: "contract-ending", daysLeft: left });
     }
   }
-  if (player.isCaptain && facts.length < MOOD_FACT_LIMIT) facts.push({ cause: "captain" });
+  if (facts.length < MOOD_FACT_LIMIT) {
+    const seat = leaderRoleOf(state, player);
+    if (seat) facts.push({ cause: "leader", role: seat });
+  }
   const age = ageOf(player.birthdate, state.date);
   if (!injury && !suspension && age <= YOUNG_AGE && facts.length < MOOD_FACT_LIMIT) {
     facts.push({ cause: "young", age });
@@ -388,6 +534,13 @@ export function issueReasonText(issue: {
   return issueReasonKo(issue.reason, issue.count) ?? issue.note ?? null;
 }
 
+/** 사유 코드의 한 낱말 — 코드는 장부의 것이고 이 표는 읽는 자리의 것이다 (season.md §6) */
+const RETIREMENT_REASON_KO: Record<RetirementReason, string> = {
+  age: "나이",
+  decline: "기량",
+  idle: "출전",
+};
+
 /** 며칠 전 경기인가 — 날짜를 셈으로만 옮긴다 */
 const dayWord = (days: number) => (days === 0 ? "오늘" : days === 1 ? "어제" : `${days}일 전`);
 
@@ -403,16 +556,33 @@ function factLine(fact: MoodFact): string {
       );
     case "suspension":
       return `출장 정지 ${fact.matchesLeft}경기`;
+    case "retiring":
+      // 사유 코드는 라벨로 옮기지 않는다 — 서른다섯의 은퇴와 뛰지 못한 은퇴가 다른 사실이다
+      return `이번 시즌 뒤 은퇴 (${RETIREMENT_REASON_KO[fact.reason]}) · 예고 ${fact.days}일째`;
     case "grievance":
-      return `불만 ${issueReasonText(fact) ?? "사유 없음"} · ${fact.days}일째`;
+      return (
+        `불만 ${issueReasonText(fact) ?? "사유 없음"} · ${fact.days}일째` +
+        ` · ${PLAYER_ARCHETYPE_LABEL[fact.archetype]}` +
+        // 지위와 창의 수치는 있을 때만 — 출전 불만에만 실린다 (people.md §5)
+        (fact.status === undefined
+          ? ""
+          : ` · ${SQUAD_STATUS_KO[fact.status]} 지위 · 최근 ${fact.played ?? 0}경기 선발 ${fact.starts ?? 0}회`)
+      );
     case "demotion":
-      return `2군 ${fact.days}일째`;
+      return (
+        `2군 ${fact.days}일째 (문턱 ${fact.patienceDays}일)` +
+        ` · ${PLAYER_ARCHETYPE_LABEL[fact.archetype]}`
+      );
     case "settling":
       return `새 팀 정착 ${fact.percent}% · 출전 ${fact.matches}경기`;
     case "afterglow":
       return (
         `${dayWord(fact.days)} ${OUTCOME_WORD[fact.outcome]}` +
-        (fact.rating === null ? "" : ` · 평점 ${fact.rating.toFixed(1)}`)
+        (fact.rating === null ? "" : ` · 평점 ${fact.rating.toFixed(1)}`) +
+        // 평가어는 없다 — 눈금과 라벨뿐이다 (말은 도메인의 `milestonePhrase`)
+        (fact.milestone === undefined
+          ? ""
+          : ` · ${milestonePhrase(fact.milestone.code, fact.milestone.value)}`)
       );
     case "no-minutes":
       return `출전 0 · ${fact.place === "bench" ? "벤치" : "명단 밖"}`;
@@ -422,12 +592,14 @@ function factLine(fact: MoodFact): string {
       return fact.level === "heavy"
         ? `체력 ${CONDITION_HEAVY} 이하`
         : `체력 ${CONDITION_LIGHT} 이상`;
+    case "sharpness":
+      return `경기 감각 ${sharpnessBandLabel(fact.band)}`;
     case "departure":
       return `${fact.name} 계약 해지 · ${dayWord(fact.days)}`;
     case "contract-ending":
       return `계약 만료 ${fact.daysLeft}일`;
-    case "captain":
-      return "주장";
+    case "leader":
+      return LEADER_ROLE_LABEL[fact.role];
     case "young":
       return `${fact.age}세`;
     case "steady":
@@ -522,10 +694,24 @@ export function buildMoodBrief(state: GameState, from: string, to: string): Mood
       facts.push(`폼 ${label}`);
       weight += 2;
     }
+    /**
+     * 굳은 몸은 그 자체로 할 말이 있는 사실이다 — 장기 부상에서 막 돌아왔거나
+     * 몇 주째 명단 밖이라는 뜻이고, 둘 다 선수가 먼저 꺼낼 이야기다 (player.md §5.4).
+     * **개막 전에는 세지 않는다** — 위 `moodFactsOf`와 같은 문이다: 7월엔 선수단
+     * 전원이 프리시즌 값이라 이 무게가 라커룸 전체를 결산 대상으로 만든다.
+     */
+    if (
+      state.date >= state.calendar.start &&
+      sharpnessBand(sharpnessOf(player.state)) === "blunt"
+    ) {
+      facts.push("경기 감각 굳음");
+      weight += 2;
+    }
     if (facts.length === 0) continue;
 
     facts.push(`체력 ${Math.round(condition)}`);
-    if (player.isCaptain) facts.push("주장");
+    const seat = leaderRoleOf(state, player);
+    if (seat) facts.push(LEADER_ROLE_LABEL[seat]);
     targets.push({
       playerId: player.id,
       name: player.name,

@@ -1,16 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   activeContract,
+  addDays,
   advanceTime,
   careerView,
   assignmentsOf,
   ensureSeasonStat,
   leagueView,
+  marketValueOf,
+  observedMarketValue,
   playerById,
   playerCard,
   playersOf,
   scheduleView,
   scoutPlayer,
+  loanPlayer,
   searchPlayers,
   seasonStatOf,
   setTraining,
@@ -49,7 +53,9 @@ function leaksTrueRatings(
     .replace(/\d+세/g, "")
     .replace(/출전\d+/g, "")
     .replace(/득점\d+/g, "")
-    .replace(/~\d{4}-\d{2}-\d{2}/g, "");
+    .replace(/~\d{4}-\d{2}-\d{2}/g, "")
+    .replace(/계약 \d{4}-\d{2}-\d{2}/g, "")
+    .replace(/£[\d.]+[kM]/g, "");
   const keys = ["pace", "finishing", "passing", "dribbling", "tackling", "strength"] as const;
   return keys.some((k) => new RegExp(`\\b${attrs[k]}\\b`).test(scrubbed));
 }
@@ -159,6 +165,94 @@ describe("search_players", () => {
     expect(shown("wage")).toEqual(byLedger((p) => activeContract(state, p.id)?.weeklyWage ?? 0));
     expect(shown("goals")).toEqual(byLedger((p) => seasonStatOf(state, p.id)?.goals ?? 0));
     expect(shown("apps")).toEqual(byLedger((p) => seasonStatOf(state, p.id)?.apps ?? 0));
+  });
+
+  /**
+   * 잔여 일수를 세는 자가 필터와 정렬에서 갈리면 "1년 남은 선수"의 답이 조용히
+   * 하루씩 어긋난다. 경계는 **정확히 N일까지 걸린다**이고, 무계약은 0일이다.
+   */
+  it("계약 잔여 필터는 정확히 N일까지 걸고, 무계약은 잔여 0일이다", () => {
+    const state = createTestGame(21);
+    const ours = playersOf(state, state.userTeamId);
+    // 경계에 선 셋만 남기고 나머지는 지평 밖으로 민다
+    ours.forEach((p) => {
+      const c = activeContract(state, p.id);
+      if (c) c.until = addDays(state.date, 400);
+    });
+    const [onDay, dayAfter, free] = [ours[0]!, ours[1]!, ours[2]!];
+    activeContract(state, onDay.id)!.until = addDays(state.date, 100);
+    activeContract(state, dayAfter.id)!.until = addDays(state.date, 101);
+    activeContract(state, free.id)!.status = "ended";
+
+    const shown = rowIds(
+      searchPlayers(state, { team: "mine", contractEndsWithinDays: 100, limit: 15 }).message,
+      ours,
+    );
+    expect(shown).toContain(onDay.id);
+    expect(shown).not.toContain(dayAfter.id);
+    expect(shown).toContain(free.id);
+    // 세우는 자도 같다 — 잔여가 짧은 쪽이 앞이고, 무계약이 맨 앞이다
+    const order = rowIds(
+      searchPlayers(state, { team: "mine", sortBy: "contract", limit: 15 }).message,
+      ours,
+    );
+    expect(order[0]).toBe(free.id);
+    expect(order.indexOf(onDay.id)).toBeLessThan(order.indexOf(dayAfter.id));
+  });
+
+  /**
+   * 값도 노출이다 (player.md §10) — 참값으로 세우거나 거르면 행을 흐린 것이
+   * 무의미해진다. 세우는 자·거르는 자·`deal_odds`가 부르는 값이 한 벌이어야 한다.
+   */
+  it("값은 참값이 아니라 흐린 시장가로 세우고 거른다", () => {
+    const state = createTestGame(21);
+    const pool = playersOf(state, "chelsea");
+    const top = (key: (p: (typeof pool)[number]) => number): string[] =>
+      [...pool]
+        .sort((a, b) => key(b) - key(a))
+        .slice(0, 15)
+        .map((p) => p.id);
+    const shown = rowIds(
+      searchPlayers(state, { team: "chelsea", sortBy: "value", limit: 15 }).message,
+      pool,
+    );
+    expect(shown).toEqual(top((p) => observedMarketValue(state, p)));
+    expect(shown).not.toEqual(top((p) => marketValueOf(state, p)));
+
+    // 참값은 선 위인데 흐린 값이 선 아래인 선수 — 거르는 자가 무엇인지 여기서 갈린다
+    const under = pool.find((p) => observedMarketValue(state, p) < marketValueOf(state, p))!;
+    const line = observedMarketValue(state, under);
+    const inside = searchPlayers(state, { team: "chelsea", maxValue: line, limit: 15 });
+    expect(rowIds(inside.message, pool)).toContain(under.id);
+    const outside = searchPlayers(state, { team: "chelsea", maxValue: line - 1, limit: 15 });
+    expect(rowIds(outside.message, pool)).not.toContain(under.id);
+    // 행도 같은 값을 찍는다 — 계약 만료일과 함께
+    expect(inside.message).toContain(`계약 ${activeContract(state, under.id)!.until}`);
+  });
+
+  /**
+   * 홈그로운은 **등록하는 쪽의 협회**가 정한다 (team.md §5) — 선수의 현 소속이
+   * 아니라. 나라가 같으면 1부든 2부든 같은 협회다.
+   */
+  it("홈그로운은 우리 협회 기준이다 — 소속 리그가 아니라", () => {
+    const state = createTestGame(21); // 아스날 — 잉글랜드
+    const abroad = playersOf(state, "realmadrid");
+    const [english, spanish] = [abroad[0]!, abroad[1]!];
+    english.homegrownCountry = "잉글랜드";
+    spanish.homegrownCountry = "스페인";
+    const shown = rowIds(
+      searchPlayers(state, { team: "realmadrid", homegrown: true, limit: 15 }).message,
+      abroad,
+    );
+    // 스페인 클럽 소속이어도 잉글랜드에서 자랐으면 우리에겐 홈그로운이다
+    expect(shown).toContain(english.id);
+    expect(shown).not.toContain(spanish.id);
+
+    // 같은 나라 다른 리그(잉글랜드 2부)도 같은 협회다
+    const second = playersOf(state, "leicester");
+    second.forEach((p) => (p.homegrownCountry = "잉글랜드"));
+    const inSecond = searchPlayers(state, { team: "leicester", homegrown: true, limit: 15 });
+    expect(rowIds(inSecond.message, second)).toHaveLength(Math.min(15, second.length));
   });
 
   it("팀 이름 표기가 흔들려도 해석하고, 없는 팀만 반려한다", () => {
@@ -443,6 +537,61 @@ describe("get_squad", () => {
   });
 });
 
+/**
+ * **임대 보낸 선수는 세계에서 사라지지 않는다** (transfer.md §2) — 계약이 우리
+ * 것이라 조회가 소속이 아니라 계약을 읽는다. 세계는 한 번만 세우고(임대 한 건을
+ * 태워 둔다) 갈라지는 자리 넷을 함께 본다.
+ */
+describe("조회 — 임대 보낸 우리 선수", () => {
+  const state = createTestGame(21);
+  // 2군의 여벌 하나를 보낸다 — 선발을 보내면 전술판이 함께 흔들려 다른 것을 재게 된다
+  const target = userPlayers(state)
+    .filter((p) => p.squadLevel === "reserve" && p.positions[0]?.position !== "GK")
+    .sort((a, b) => a.attributes.overall - b.attributes.overall)[0]!;
+  const loaned = loanPlayer(state, { playerId: target.id, teamId: "chelsea" });
+
+  it("보낸 뒤에도 우리 팀 조회에 선다 — 대상 줄이 그 사실을 말한다", () => {
+    expect(loaned.ok, loaned.message).toBe(true);
+    const res = searchPlayers(state, { team: "mine", name: target.name });
+    expect(res.message).toContain(target.id);
+    // 역할 칸이 소속을 말한다 — `[1군]`으로 서면 부릴 수 있는 인원으로 읽힌다
+    expect(res.message).toMatch(/\[임대:\S+ ~\d{4}-\d{2}-\d{2}\]/);
+    expect(res.message).toContain("임대 1명 포함");
+  });
+
+  it("빌린 구단을 물으면 그 구단 명단에도 선다 — 거기 실제로 있다", () => {
+    const res = searchPlayers(state, { team: "chelsea", name: target.name });
+    expect(res.message).toContain(target.id);
+  });
+
+  it("1군·2군으로 좁히면 빠진다 — 그 층은 빌린 구단의 값이다", () => {
+    for (const level of ["first", "reserve"] as const) {
+      expect(searchPlayers(state, { team: "mine", squadLevel: level }).message).not.toContain(
+        target.id,
+      );
+    }
+  });
+
+  it("get_squad level=loaned는 임대만, 배치 버킷에는 서지 않는다", () => {
+    const res = squadView(state, { level: "loaned" });
+    const rows = res.message.split("\n").filter((l) => l.startsWith("  "));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain(target.id);
+    expect(res.message).toContain("── 임대 1명 ──");
+    // 층 조회에는 섞이지 않는다 — 선발·벤치·예비는 전술판의 칸이다
+    for (const level of ["first", "reserve"] as const) {
+      expect(squadView(state, { level }).message).not.toContain(target.id);
+    }
+  });
+
+  it("선수 카드의 전술 칸이 임대를 말한다 — 예비 스쿼드가 아니다", () => {
+    const card = playerCard(state, target.id);
+    expect(card.message).toContain("전술: 임대 중");
+    expect(card.message).not.toContain("배치 없음");
+    expect(card.message).toContain("임대 리포트:");
+  });
+});
+
 describe("get_career", () => {
   // 평판 3축도 판정이 코어에만 있는 눈금이다 — 재임 분기의 평판 줄에 숫자가 서면 안 된다
   it("평판 줄은 날수치를 싣지 않는다", () => {
@@ -501,6 +650,24 @@ describe("scheduleView — 감독의 달력", () => {
     });
     const training = scheduleView(state, { type: "training", days: 14 });
     for (const line of training.message.split("\n").slice(1)) expect(line).toContain("훈련");
+  });
+
+  /**
+   * 지나간 창은 일정만으로 답이 되지 않는다 — 손잡이로 며칠을 넘긴 사이 벌어진 일은
+   * 다이제스트로만 흘러가고, 되짚을 원본은 서사 표뿐이다 (people.md §9).
+   */
+  it("지나간 범위를 물으면 그 사이 벌어진 일을 일지로 함께 낸다", () => {
+    const state = createTestGame(21);
+    const start = state.date;
+    state.narrative.push({ date: start, text: "리버풀에서 오퍼 답 도착", salience: 3 });
+    advanceTime(state, { days: 5 });
+
+    const past = scheduleView(state, { from: start, to: state.date });
+    expect(past.message).toContain("[일지]");
+    expect(past.message).toContain("소식 리버풀에서 오퍼 답 도착");
+
+    // 앞날만 묻는 창에는 일지가 붙지 않는다 — 아직 벌어진 일이 없다
+    expect(scheduleView(state, { days: 14 }).message).not.toContain("[일지]");
   });
 
   it("우리 팀 경기만 달력에 올린다 (리그 타 팀 경기는 get_league의 몫)", () => {

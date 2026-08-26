@@ -1,5 +1,19 @@
-import type { GamePlayer, NegotiationKind, PitchClaim, PitchClaimKind } from "@story-fm/domain";
-import { MAX_PAYMENT_YEARS, ageOf, effectiveFeeOf, naturalPositionOf } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  NegotiationKind,
+  PitchClaim,
+  PitchClaimKind,
+  SquadStatus,
+} from "@story-fm/domain";
+import {
+  MAX_PAYMENT_YEARS,
+  SQUAD_STATUS_KO,
+  ageOf,
+  byLoyalty,
+  effectiveFeeOf,
+  naturalPositionOf,
+  squadStatusRank,
+} from "@story-fm/domain";
 import { diffDays, windowOpenOn } from "../competition/calendar";
 import { claimLabel, evaluatePitch } from "./persuasion";
 import { isMarketOnlyLeague, leagueCatalogById } from "../data/league-catalog";
@@ -8,7 +22,9 @@ import { isClubTeam, leagueOfTeam, teamCatalogById } from "../data/team-catalog"
 import { leagueOfTeamIn } from "../competition/promotion";
 import { euroCompetitionOf } from "../competition/europe";
 import { hashChannel } from "../core/rng";
-import { betterAtPosition, squadDepthOf } from "../squad/depth";
+import { betterAtPosition, squadDepthOf, type SquadDepth } from "../squad/depth";
+import { derivedSquadStatus } from "../squad/promises";
+import { archetypeTraitsOf } from "../world/player-persona";
 import { knowledgeOf, KNOWLEDGE_KO, type Knowledge } from "../squad/scouting";
 import { userWageRoom } from "../club/board-request";
 import { budgetFreezeLabel, formatMoney } from "../club/finance";
@@ -16,6 +32,7 @@ import {
   activeContract,
   contractYearsLeft,
   financeOf,
+  interestsOn,
   playerById,
   squadShortfall,
   teamName,
@@ -69,6 +86,17 @@ const MEETS_ASKING_SCORE_SOLO = 0.94;
 
 /** 관심이 많다고 보는 기준 — 곧바로 주전으로 쓸 구단이 이만큼이면 갈 곳이 있다 */
 export const SUITORS_MANY = 3;
+
+/**
+ * 장부에 선 경쟁 관심이 영입 확률에서 깎는 값 — **잠재의 자보다 무겁다**
+ * (`suitorCountOf`의 −0.5). 「그를 쓸 수 있는 구단이 셋」은 언제나 참인 사실이지만
+ * 「그 구단이 지금 움직이고 있다」는 오늘의 사실이라, 선수가 우리 답을 기다릴 이유가
+ * 그만큼 준다 (→ docs/simulation/transfer.md §1-2).
+ */
+export const RIVAL_INTEREST_SCORE = -0.6;
+
+/** 그중 값을 부를 참인 구단 하나가 더 깎는 값 — 두 곳이면 −0.6에서 −1.0이 된다 */
+export const RIVAL_BIDDING_SCORE = 0.2;
 /** 이 나이부터는 다음 자리를 장담할 수 없어 지금 자리를 지키려 한다 */
 export const CAREER_AGE_HOLD = 32;
 /** 이 나이까지는 커리어가 길어 다음 무대를 본다 */
@@ -79,6 +107,24 @@ const PAY_CUT_SCORE_FLOOR = -0.9;
 /** 현 계약보다 이만큼 오르면 그 자체가 남을·옮길 이유가 된다 */
 const RAISE_NOTABLE = 0.25;
 const RAISE_SCORE = 0.3;
+/**
+ * **지위 한 칸의 무게** — 제시 지위가 실제 자리에서 한 칸 위면 +, 한 칸 아래면 −다.
+ * ⚠️ 밸런스 값 (transfer.md §3 「계약 지위」).
+ *
+ * 두 자와 맞춰 골랐다. 하나는 같은 관문의 「출전 기회」(영입 +0.35/−0.45 · 재계약
+ * +0.5/−0.6)다 — 자리를 뭐라고 부르는가가 그 자리가 실제로 비었는가와 비슷한
+ * 무게여야 둘 중 하나만 손잡이가 되지 않는다. 다른 하나는 주급 항이다: 관문의
+ * 주급 항이 `(비율−1) × 6`이므로 두 칸(`SQUAD_STATUS_STEP_CAP`)이 기대 주급의
+ * 15%와 같은 크기가 된다. **「로테이션이지만 두 배」와 「주전 보장」이 같은 판에
+ * 서는 값**이 여기다.
+ */
+export const SQUAD_STATUS_SCORE_PER_STEP = 0.45;
+/**
+ * 지위 차이를 세는 폭 — 이 칸을 넘으면 더 세지 않는다.
+ * 백업에게 핵심을 약속하는 것이 주전을 약속하는 것보다 두 배 잘 통하면, 흥정이
+ * 아니라 사다리 꼭대기를 부르는 한 수만 남는다.
+ */
+const SQUAD_STATUS_STEP_CAP = 2;
 
 function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
@@ -166,9 +212,36 @@ export function marketValueOf(state: GameState, player: GamePlayer): number {
  */
 const WAGE_BASE_RATING = 38.5;
 
-/** 등급 → 기대 주급 (£/주) — 이적·재계약이 같은 곡선을 읽는다 */
-function wageByRating(overall: number): number {
+/**
+ * 등급 → 기대 주급 (£/주) — 이적·재계약이 같은 곡선을 읽는다.
+ *
+ * "주급 서열대로 받고 있는가"를 묻는 자리(`core/tick.ts`의 계약 만료 문턱)도 이
+ * 곡선을 읽는다 — 서열을 다른 자로 재면 화면이 "밀려 있다"고 적어 놓고 불만은
+ * 반년 뒤에 선다.
+ */
+export function wageByRating(overall: number): number {
   return Math.pow(Math.max(WAGE_BASE_RATING, overall) / WAGE_BASE_RATING, 4.2) * 6_000;
+}
+
+/**
+ * **시장가 언저리**의 두 끝 — 호가가 어디에 섰는지도(`set_transfer_list`), 들어온
+ * 오퍼가 값이 붙은 것인지도(`blocked-move`·`interest`) 같은 자로 잰다
+ * (→ docs/simulation/transfer.md §1 · docs/data/people.md §5).
+ *
+ * 자를 두 곳에 적으면 화면은 "시장가 언저리"라고 적어 놓고 라커룸은 헐값으로 읽는다.
+ */
+export const MARKET_NEAR_LOW = 0.85;
+export const MARKET_NEAR_HIGH = 1.2;
+
+/**
+ * **값이 붙은 오퍼인가** — 시장가 언저리의 아래 끝 이상.
+ *
+ * 시장가 자체를 문턱으로 쓸 수 없다: AI의 첫 호가는 흥정의 여지를 남기려고 시장가의
+ * 75~100%로 들어온다(`generateIncomingOffers`). 그 자를 쓰면 값이 붙은 오퍼를 막은
+ * 일이 라커룸에 영영 닿지 않는다.
+ */
+export function isSeriousOffer(state: GameState, player: GamePlayer, fee: number): boolean {
+  return fee >= marketValueOf(state, player) * MARKET_NEAR_LOW;
 }
 
 /** 이 선수가 원하는 주급 (£/주) — 현 주급과 시장가에서 파생 */
@@ -303,6 +376,12 @@ export interface DealTerms {
    * 확률은 유효가(`effectiveFeeOf`)로 재고 관문은 첫 회분만 본다.
    */
   paymentYears?: number;
+  /**
+   * 감독이 제시하는 **스쿼드 지위** — 합의되면 계약에 적히는 약속이다
+   * (people.md §5-2). 없으면 선수 관문의 지위 항이 서지 않는다: 말하지 않은 것은
+   * 약속이 아니다.
+   */
+  squadStatus?: SquadStatus;
 }
 
 /**
@@ -377,6 +456,25 @@ function fuzz(seed: number, key: string, value: number, margin: number): number 
   const h = hashChannel(`${seed}:${key}`);
   const offset = (h % (margin * 2 + 1)) - margin;
   return value + offset;
+}
+
+/**
+ * 금액에 걸리는 흐림 — **폭이 그 금액에 비례한다**(눈금 1%p당 0.4%). 확률과 달리
+ * 금액은 자릿수가 제각각이라, ±20으로 흔들면 £200M은 하나도 흐려지지 않고
+ * £500k는 통째로 뒤집힌다.
+ */
+function fuzzMoney(state: GameState, key: string, value: number, margin: number): number {
+  return Math.max(0, Math.round(fuzz(state.seed, key, value, margin * value * 0.004)));
+}
+
+/**
+ * **관측 시장가** — 지식 수준만큼 흐린 값. `dealOdds`가 내는 `marketValue`와 같은
+ * 값이다: 선수 검색이 값으로 거르고 줄 세운 결과와 확률 조회가 부르는 숫자가
+ * 갈리면, 어느 한쪽이 안개를 뚫는다 (docs/data/player.md §10).
+ */
+export function observedMarketValue(state: GameState, player: GamePlayer): number {
+  const margin = ODDS_MARGIN[knowledgeOf(state, player.id)];
+  return fuzzMoney(state, `mv:${player.id}`, marketValueOf(state, player), margin);
 }
 
 /**
@@ -602,18 +700,47 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   }
 
   // 상대 사정에 대응하는 선수 사정 — 갈 곳 · 나이 · 지금 계약 (transfer.md §3)
+  /**
+   * 밖의 관심이 얼마나 무겁게 실리는가는 **사람마다 다르다** (transfer.md §3).
+   * 영입에서 재는 애착은 **지금 구단**에 대한 것이라, 애착이 큰 선수일수록 오지 않는다.
+   */
+  const loyalty = archetypeTraitsOf(state.seed, player).loyalty;
+  /**
+   * **장부에 선 관심이 먼저 말한다** (→ docs/simulation/transfer.md §1-2).
+   *
+   * `suitorCountOf`는 「그를 주전으로 쓸 수 있는 구단 수」라 잠재의 자다 — 아무도
+   * 움직이지 않아도 언제나 같은 값이다. 우리가 협상을 연 뒤 실제로 붙은 경쟁
+   * 구단은 그것과 다른 사실이라, 그 줄이 있으면 그 줄이 이 항을 쓴다. 「지금
+   * 지르지 않으면 뺏긴다」가 성립하는 자리가 여기다.
+   *
+   * 두 자를 한 항으로 합치는 이유: 라벨이 둘이면 근거 목록에 「다른 구단의 관심」이
+   * 두 줄 서고, 감독이 읽는 확률 근거가 같은 말을 두 번 한다.
+   */
+  const rivals = interestsOn(state, player.id);
   const suitors = suitorCountOf(state, player);
-  if (suitors >= SUITORS_MANY) {
+  if (rivals.length > 0) {
+    const bidding = rivals.filter((i) => i.stage === "bidding").length;
     contributions.push({
       gate: "player",
-      score: -0.5,
+      // 값을 부를 참인 구단은 보고만 있는 구단보다 무겁다 — 그만큼 우리 차례가 급하다
+      score: byLoyalty(RIVAL_INTEREST_SCORE - RIVAL_BIDDING_SCORE * bidding, loyalty, "stay"),
+      label: "다른 구단의 관심",
+      why:
+        `${teamName(rivals[0]!.teamId)}가 그를 두고 움직이고 있다` +
+        (rivals.length > 1 ? ` (외 ${rivals.length - 1}곳)` : "") +
+        (bidding > 0 ? " — 값을 부를 참이다" : " — 우리만 보고 있는 것이 아니다"),
+    });
+  } else if (suitors >= SUITORS_MANY) {
+    contributions.push({
+      gate: "player",
+      score: byLoyalty(-0.5, loyalty, "stay"),
       label: "다른 구단의 관심",
       why: `우리 말고도 그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 급하지 않다`,
     });
   } else if (suitors === 0) {
     contributions.push({
       gate: "player",
-      score: 0.5,
+      score: byLoyalty(0.5, loyalty, "leave"),
       label: "다른 구단의 관심",
       why: "지금 그를 주전으로 쓸 구단은 우리뿐이다",
     });
@@ -655,6 +782,9 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
       why: "곧바로 주전으로 뛸 자리가 있다",
     });
   }
+
+  const offeredStatus = squadStatusContribution(state, player, terms.squadStatus, state.userTeamId);
+  if (offeredStatus) contributions.push({ gate: "player", ...offeredStatus });
 
   const reputation = (state.manager.reputation.media + state.manager.reputation.board) / 2;
   if (Math.abs(reputation - 50) >= 10) {
@@ -737,14 +867,8 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   return {
     latitude: pitch?.latitude ?? 0,
     probability: shown,
-    marketValue: Math.max(
-      0,
-      Math.round(fuzz(state.seed, `mv:${player.id}`, marketValue, margin * marketValue * 0.004)),
-    ),
-    askingPrice: Math.max(
-      0,
-      Math.round(fuzz(state.seed, `ap:${player.id}`, askingPrice, margin * askingPrice * 0.004)),
-    ),
+    marketValue: fuzzMoney(state, `mv:${player.id}`, marketValue, margin),
+    askingPrice: fuzzMoney(state, `ap:${player.id}`, askingPrice, margin),
     wageExpectation,
     knowledge,
     fuzzy: margin > 0,
@@ -938,7 +1062,8 @@ function sellOdds(
   if (hasIssue(state, player.id)) {
     contributions.push({
       gate: "player",
-      score: 0.5,
+      // 같은 불만도 구단 애착형은 남는 쪽으로 접힌다 (transfer.md §3)
+      score: byLoyalty(0.5, archetypeTraitsOf(state.seed, player).loyalty, "leave"),
       label: "선수의 마음",
       why: `라커룸에 불만이 쌓여 있다 — 팀에 남을 마음이 옅다`,
     });
@@ -1053,18 +1178,29 @@ export function unilateralSeveranceOf(state: GameState, playerId: string): numbe
  *
  * **선수가 없는 팀은 세지 않는다** — 그 자리에 아무도 없어 "더 나은 선수 0명"이
  * 되지만, 스쿼드가 빈 팀은 데려갈 구단이 아니라 데이터의 빈자리다.
+ *
+ * `suitorsOf`는 **구단 id를 돌려준다** — 「몇 곳인가」만이 아니라 「그중 우리보다 큰
+ * 곳이 있는가」를 묻는 자리가 있어서다(「더 큰 무대」 이적 요청 — transfer.md §1-1).
+ * 색인(`depth`)을 밖에서 넘기면 하루에 여러 선수를 재도 세계를 한 번만 훑는다.
  */
-function suitorCountOf(state: GameState, player: GamePlayer): number {
-  const depth = squadDepthOf(state);
+export function suitorsOf(
+  state: GameState,
+  player: GamePlayer,
+  depth: SquadDepth = squadDepthOf(state),
+): string[] {
   const squadSize = new Map<string, number>();
   for (const p of state.players) squadSize.set(p.teamId, (squadSize.get(p.teamId) ?? 0) + 1);
-  let count = 0;
+  const suitors: string[] = [];
   for (const team of state.teams) {
     if (team.id === state.userTeamId || !isClubTeam(team.id)) continue;
     if ((squadSize.get(team.id) ?? 0) === 0) continue;
-    if (depth.betterThan(team.id, player) === 0) count += 1;
+    if (depth.betterThan(team.id, player) === 0) suitors.push(team.id);
   }
-  return count;
+  return suitors;
+}
+
+function suitorCountOf(state: GameState, player: GamePlayer): number {
+  return suitorsOf(state, player).length;
 }
 
 /**
@@ -1102,6 +1238,40 @@ function wageStepContribution(
     };
   }
   return null;
+}
+
+/**
+ * "계약 지위" 축 — **제시한 자리와 실제 자리의 거리**다 (transfer.md §3).
+ *
+ * 「출전 기회」는 사실을 잰다(그 자리가 지금 막혀 있는가). 여기는 **약속**을 잰다 —
+ * 감독이 그 자리를 뭐라고 부르며 제시했는가. 둘을 한 축으로 묶으면 "백업이지만
+ * 주전으로 쓰겠다"와 "백업이고 백업으로 쓰겠다"가 같은 값이 되어, 주급 말고는
+ * 흥정의 손잡이가 없던 자리가 그대로 남는다.
+ *
+ * ⚠️ **제시가 없으면 항이 서지 않는다** — 말하지 않은 것은 약속이 아니다. 제시가
+ * 실제 자리와 같을 때도 서지 않는다: 이 축이 재는 것은 거리이고, 거리가 없다.
+ *
+ * @param teamId 실제 자리를 재는 스쿼드 — 영입도 재계약도 **우리 팀**이다.
+ *   영입 대상은 아직 파는 구단 소속이라, 그쪽에서의 서열로 재면 우리가 약속한
+ *   자리와 대조되는 것이 남의 라커룸이 된다.
+ */
+function squadStatusContribution(
+  state: GameState,
+  player: GamePlayer,
+  offered: SquadStatus | undefined,
+  teamId: string,
+): { score: number; label: "계약 지위"; why: string } | null {
+  if (offered === undefined) return null;
+  const actual = derivedSquadStatus(state, player, teamId);
+  const gap = squadStatusRank(offered) - squadStatusRank(actual);
+  const steps = Math.max(-SQUAD_STATUS_STEP_CAP, Math.min(SQUAD_STATUS_STEP_CAP, gap));
+  if (steps === 0) return null;
+  return {
+    score: steps * SQUAD_STATUS_SCORE_PER_STEP,
+    label: "계약 지위",
+    // 지위 이름 뒤에 조사를 붙이지 않는다 — 「유망주으로」가 나오는 자리다
+    why: `${SQUAD_STATUS_KO[offered]} 지위로 제시했다 — 우리 스쿼드에서 그 자리는 ${SQUAD_STATUS_KO[actual]}이다`,
+  };
 }
 
 /**
@@ -1159,16 +1329,18 @@ function renewOdds(
     });
   }
 
+  // 남을 이유는 곱하고 떠날 이유는 나눈다 (transfer.md §3 · people.md §6)
+  const loyalty = archetypeTraitsOf(state.seed, player).loyalty;
   const suitors = suitorCountOf(state, player);
   if (suitors >= SUITORS_MANY) {
     contributions.push({
-      score: -0.6,
+      score: byLoyalty(-0.6, loyalty, "leave"),
       label: "다른 구단의 관심",
       why: `그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 남을 이유가 그만큼 약하다`,
     });
   } else if (suitors === 0) {
     contributions.push({
-      score: 0.6,
+      score: byLoyalty(0.6, loyalty, "stay"),
       label: "다른 구단의 관심",
       why: "지금 그를 주전으로 쓸 구단이 없다 — 남는 것이 최선이다",
     });
@@ -1201,19 +1373,22 @@ function renewOdds(
       why: `같은 자리에 더 나은 선수가 ${blockedBy}명 있다 — 출전을 걱정한다`,
     });
   }
+
+  const offeredStatus = squadStatusContribution(state, player, terms.squadStatus, state.userTeamId);
+  if (offeredStatus) contributions.push(offeredStatus);
   /**
    * 재계약도 마찬가지다 — **불만과 경기력**이 마음을 말한다.
    * 체력을 쓰던 때는 경기 다음 날 재계약 확률이 통째로 내려앉았다.
    */
   if (hasIssue(state, player.id)) {
     contributions.push({
-      score: -0.7,
+      score: byLoyalty(-0.7, loyalty, "leave"),
       label: "선수의 마음",
       why: `라커룸에 불만이 쌓여 있다 — 팀에 남을 마음이 옅다`,
     });
   } else if (player.state.form > -0.33) {
     contributions.push({
-      score: 0.4,
+      score: byLoyalty(0.4, loyalty, "stay"),
       label: "선수의 마음",
       why: `불만 없이 제 경기를 하고 있다 — 팀 분위기에 만족한다`,
     });
@@ -1327,16 +1502,18 @@ function releaseOdds(
     });
   }
 
+  // 해지는 나가는 쪽이 성사다 — 부호만 재계약과 반대이고 계수가 걸리는 결은 같다
+  const loyalty = archetypeTraitsOf(state.seed, player).loyalty;
   const suitors = suitorCountOf(state, player);
   if (suitors >= SUITORS_MANY) {
     contributions.push({
-      score: 0.6,
+      score: byLoyalty(0.6, loyalty, "leave"),
       label: "다른 구단의 관심",
       why: `그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 나가도 갈 곳이 있다`,
     });
   } else if (suitors === 0) {
     contributions.push({
-      score: -0.6,
+      score: byLoyalty(-0.6, loyalty, "stay"),
       label: "다른 구단의 관심",
       why: "지금 그를 주전으로 쓸 구단이 없다 — 나가면 갈 곳이 없다",
     });
@@ -1360,7 +1537,7 @@ function releaseOdds(
 
   if (hasIssue(state, player.id)) {
     contributions.push({
-      score: 0.5,
+      score: byLoyalty(0.5, loyalty, "leave"),
       label: "선수의 마음",
       why: "라커룸에 불만이 쌓여 있다 — 정리하고 나가는 쪽으로 기운다",
     });
@@ -1540,6 +1717,25 @@ export { teamName, teamCatalogById };
 export function windowOpenForTeam(state: GameState, teamId: string, date = state.date) {
   const leagueId = leagueOfTeamIn(state, teamId);
   return windowOpenOn(state.windows, date, isMarketOnlyLeague(leagueId) ? leagueId : undefined);
+}
+
+/**
+ * **지금 세는 창의 시작일** — 두 사건이 같은 창의 것인지 재는 자
+ * (막힌 이적의 두 번째 거절 — transfer.md §1-1).
+ *
+ * 창이 닫혀 있어도 **마지막으로 열렸던 창**의 시작일을 돌려준다: 우리 창이 닫힌
+ * 9월에도 사우디·MLS는 우리 선수를 사 갈 수 있어(§1) 그 오퍼를 막은 일이 어느 창의
+ * 것인지 물을 자리가 있다. 아직 어떤 창도 열린 적이 없으면 `null`이다.
+ */
+export function windowStartFor(state: GameState, teamId: string, date = state.date): string | null {
+  const leagueId = leagueOfTeamIn(state, teamId);
+  const key = isMarketOnlyLeague(leagueId) ? leagueId : undefined;
+  let latest: string | null = null;
+  for (const w of state.windows) {
+    if (w.leagueId !== key || w.opensOn > date) continue;
+    if (latest === null || w.opensOn > latest) latest = w.opensOn;
+  }
+  return latest;
 }
 
 /**

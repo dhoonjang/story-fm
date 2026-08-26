@@ -1,6 +1,12 @@
-import { applyFamiliarityGain, clampCondition, isReserveMatch } from "@story-fm/domain";
-import { dailyRecovery, type RecoveryKind } from "@story-fm/sim";
-import { managedTeamId, type GameState } from "../core/state";
+import {
+  applyFamiliarityGain,
+  clampCondition,
+  clampSharpness,
+  isReserveMatch,
+  sharpnessOf,
+} from "@story-fm/domain";
+import { dailyRecovery, sharpnessAfterDay, sharpnessDayOf, type RecoveryKind } from "@story-fm/sim";
+import { managedTeamId, openInjuryIds, type GameState } from "../core/state";
 import { addDays } from "../core/dates";
 import { isClubTeam } from "../data/team-catalog";
 import { matchesOn } from "../competition/calendar";
@@ -44,11 +50,12 @@ function recoveryKindOf(state: GameState, teamId: string): RecoveryKind {
   return "training";
 }
 
-/** AI 구단의 하루 — 회복과 폼 회귀 (감독 팀은 `dailyTick`이 같은 눈금으로 처리한다) */
+/** AI 구단의 하루 — 회복·폼 회귀·경기 감각 (감독 팀은 `dailyTick`이 같은 눈금으로 처리한다) */
 export function tickOtherClubs(state: GameState): void {
   const kinds = new Map<string, RecoveryKind>();
   // 감독이 잘려 무직이면 옛 구단도 여기서 돈다 — `managedTeamId`가 null이다
   const managed = managedTeamId(state);
+  const injured = openInjuryIds(state);
   for (const player of state.players) {
     if (player.teamId === managed) continue;
     if (!isClubTeam(player.teamId)) continue; // 무소속·시장 전용 리그는 경기가 없다
@@ -59,6 +66,13 @@ export function tickOtherClubs(state: GameState): void {
     }
     player.state.condition = clampCondition(player.state.condition + dailyRecovery(player, kind));
     player.state.form = decayedForm(player.state.form);
+    /**
+     * 경기 감각도 리그 전체가 같은 규칙으로 무뎌진다 (player.md §5.4) — 감독 팀에만
+     * 걸면 상대는 프리시즌 없이도 늘 실전 상태라 개막부터 전력 우위가 붙는다.
+     */
+    player.state.sharpness = clampSharpness(
+      sharpnessAfterDay(sharpnessOf(player.state), sharpnessDayOf(kind, injured.has(player.id))),
+    );
   }
 }
 

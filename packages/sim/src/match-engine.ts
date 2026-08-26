@@ -8,12 +8,15 @@ import type {
   PlayPhase,
   Player,
   PositionGroup,
+  SetPieceProfile,
+  ShotOrigin,
   StrengthPacket,
   SubCause,
   TacticsSpec,
 } from "@story-fm/domain";
 import {
   matchupTag,
+  otherSide,
   PHASE_END,
   PHASE_START,
   positionGroupOfPlayer,
@@ -21,10 +24,16 @@ import {
   TACTIC_SCALE_MIN,
   TACTIC_SCALE_NEUTRAL,
 } from "@story-fm/domain";
-import { directiveDrain, type DirectiveInput } from "./directives";
-import { subLimitsOf, type MatchLedgerState } from "./match-ledger";
+import {
+  directiveBookingScale,
+  directiveDrain,
+  takenDirectives,
+  type DirectiveInput,
+} from "./directives";
+import { emptyStatLine, subLimitsOf, type MatchLedgerState } from "./match-ledger";
 import { conditionDrain, drainVariance } from "./stamina";
-import { sampleShot } from "./shot-model";
+import { penaltyRate, penaltySkill, sampleShot, savedShare } from "./shot-model";
+import { CORNER_SHOT_SHARE, DIRECT_FREE_KICK_SHARE } from "./strength-packet";
 
 /**
  * 구간 시뮬레이터 — **경기 결과를 정하는 곳**.
@@ -95,11 +104,12 @@ export interface SegmentInput {
   /** 양팀 전술 — 체력 소모가 지시에 따라 갈린다 (stamina.ts) */
   tactics: { home: TacticsSpec; away: TacticsSpec };
   /**
-   * 개인 지시 — **체력 소모가 지시를 탄다** (`directiveDrain`).
+   * 개인 지시 — **존 전력 밖에서 지시가 닿는 두 곳**이 여기서 계산된다.
    *
-   * 존 전력은 패킷이 이미 반영했지만(`applyDirectives`) 다리는 따로 계산된다:
-   * 상대 시작점을 전담 압박한 선수는 20% 더 마르고, 뒤에 남으라는 지시를 받은
-   * 풀백은 10% 덜 마른다. 안 주면 전원 배수 1이라 **아무것도 바뀌지 않는다.**
+   * 존 전력은 패킷이 이미 반영했지만(`applyDirectives`) 다리(`directiveDrain`)와
+   * 카드(`directiveBookingScale`)는 따로다: 상대 시작점을 전담 압박한 선수는 20% 더
+   * 마르고, 발을 빼라는 지시를 받은 선수는 카드·파울·곧장 퇴장이 절반이 된다.
+   * 안 주면 전원 배수 1이라 **아무것도 바뀌지 않는다.**
    */
   directives?: { home?: readonly DirectiveInput[]; away?: readonly DirectiveInput[] };
   /**
@@ -154,7 +164,8 @@ export interface SegmentInput {
 export const MAX_SEGMENT_MINUTES = 25;
 /**
  * 한 구간에 담을 이벤트 상한 — 장부의 배치 한도(`LEDGER_LIMITS.maxEventsPerBatch` 20)
- * 아래로 둔다. 정지 이벤트와 AI 교체가 뒤에 붙을 자리를 남겨야 한다.
+ * 아래로 둔다. 정지 이벤트와 AI 교체(한 창 `SUB_WINDOW_MAX`장), 전술 전환 한 줄이
+ * 뒤에 붙을 자리를 남겨야 한다 — 15 + 3 + 1 = 19.
  * 기대 득점이 큰 경기(3점대)는 25분에 슛·선방이 스무 개를 넘길 수 있다.
  */
 const MAX_SEGMENT_EVENTS = 15;
@@ -208,39 +219,54 @@ export function teamInjuryRate(intensity: number, avgProneness = 1): number {
   return (INJURY_PER_MATCH / TEAMS_PER_MATCH) * intensity * avgProneness;
 }
 
-interface Rates {
-  shot: { home: number; away: number };
-  card: { home: number; away: number };
-  injury: { home: number; away: number };
-}
+/**
+ * 사건 종류 — **죽은 공과 페널티가 슛과 나란히 선다** (match.md §1.4).
+ *
+ * 셋이 한 표에 있는 이유는 총량 때문이다: 죽은 공은 열린 플레이 슛 위에 얹히는
+ * 것이 아니라 **같은 팀 기대 슈팅 안에서 몫을 가져간 것**이라, 세 발생률의 합이
+ * 예전의 슛 발생률 하나와 같다.
+ */
+type EventKind = "shot" | "set_piece" | "penalty" | "card" | "injury";
+
+type SideRate = { home: number; away: number };
+type Rates = Record<EventKind, SideRate>;
+
+/** 발생률 표의 순서 — 추첨과 합계가 같은 목록을 읽어야 한 줄이 빠지지 않는다 */
+const EVENT_KINDS: readonly EventKind[] = ["shot", "set_piece", "penalty", "card", "injury"];
 
 function ratesOf(packet: StrengthPacket): Rates {
-  const shots = packet.guide.expectedShots ?? {
-    home: packet.guide.shotProfiles?.home.reduce((sum, p) => sum + p.expectedShots, 0) ?? 0,
-    away: packet.guide.shotProfiles?.away.reduce((sum, p) => sum + p.expectedShots, 0) ?? 0,
-  };
+  /**
+   * **열린 플레이의 발생률은 선수×경로 프로필의 합이다.** `guide.expectedShots`는
+   * 세 채널의 합(= 예전의 총량)이라 여기에 쓰면 죽은 공이 두 번 세어진다.
+   * 프로필이 없는 옛 세이브만 총량으로 폴백한다 — 그 경기엔 죽은 공 채널도 없다.
+   */
+  const profiles = packet.guide.shotProfiles;
+  const openOf = (side: MatchSide) =>
+    profiles?.[side].reduce((sum, p) => sum + p.expectedShots, 0) ??
+    packet.guide.expectedShots?.[side] ??
+    0;
+  const sp = packet.guide.setPieces;
   const it = packet.guide.intensity;
   const per = (v: number) => v / 90;
   return {
-    shot: { home: per(shots.home), away: per(shots.away) },
+    shot: { home: per(openOf("home")), away: per(openOf("away")) },
+    set_piece: {
+      home: per(sp?.home.expectedShots ?? 0),
+      away: per(sp?.away.expectedShots ?? 0),
+    },
+    penalty: { home: per(sp?.home.penalties ?? 0), away: per(sp?.away.penalties ?? 0) },
     // 카드·부상의 눈금은 간이 시뮬과 **같은 함수**가 쥔다 (성향은 아래에서 곱한다)
     card: { home: per(teamCardRate(it.home)), away: per(teamCardRate(it.away)) },
     injury: { home: per(teamInjuryRate(it.home)), away: per(teamInjuryRate(it.away)) },
   };
 }
 
-type EventKind = "shot" | "card" | "injury";
-
 /** 가중 추첨 — 사건 종류와 팀을 한 번에 고른다 */
 function pickEvent(rng: () => number, rates: Rates): { kind: EventKind; side: MatchSide } {
-  const table: Array<{ kind: EventKind; side: MatchSide; weight: number }> = [
-    { kind: "shot", side: "home", weight: rates.shot.home },
-    { kind: "shot", side: "away", weight: rates.shot.away },
-    { kind: "card", side: "home", weight: rates.card.home },
-    { kind: "card", side: "away", weight: rates.card.away },
-    { kind: "injury", side: "home", weight: rates.injury.home },
-    { kind: "injury", side: "away", weight: rates.injury.away },
-  ];
+  const table: Array<{ kind: EventKind; side: MatchSide; weight: number }> = EVENT_KINDS.flatMap(
+    (kind) =>
+      (["home", "away"] as const).map((side) => ({ kind, side, weight: rates[kind][side] })),
+  );
   const total = table.reduce((s, r) => s + r.weight, 0);
   let roll = rng() * total;
   for (const row of table) {
@@ -252,14 +278,38 @@ function pickEvent(rng: () => number, rates: Rates): { kind: EventKind; side: Ma
 }
 
 function totalRate(rates: Rates): number {
-  return (
-    rates.shot.home +
-    rates.shot.away +
-    rates.card.home +
-    rates.card.away +
-    rates.injury.home +
-    rates.injury.away
-  );
+  return EVENT_KINDS.reduce((sum, kind) => sum + rates[kind].home + rates[kind].away, 0);
+}
+
+/**
+ * 여럿에게 정수를 **최대잔여법**으로 나눈다 — 코너·파울처럼 굴리지 않고 나누는 양.
+ *
+ * 사람마다 반올림하면 합계가 새어(파울은 한 사람당 한 개꼴이라 30%까지) 팀 합계가
+ * 손잡이와 다른 값이 된다. 난수를 쓰지 않으므로 두 시뮬이 같은 답을 낸다
+ * (간이 시뮬도 이 함수를 부른다 — match.md §7).
+ */
+export function spreadCount<T>(
+  total: number,
+  items: readonly T[],
+  weight: (item: T) => number,
+): number[] {
+  const zeros = items.map(() => 0);
+  if (total <= 0 || items.length === 0) return zeros;
+  const weights = items.map((item) => Math.max(0, weight(item)));
+  const sum = weights.reduce((a, b) => a + b, 0);
+  if (sum <= 0) return zeros;
+  const exact = weights.map((w) => (total * w) / sum);
+  const counts = exact.map((v) => Math.floor(v));
+  let left = total - counts.reduce((a, b) => a + b, 0);
+  const order = exact
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (const row of order) {
+    if (left <= 0) break;
+    counts[row.i] = (counts[row.i] ?? 0) + 1;
+    left -= 1;
+  }
+  return counts;
 }
 
 /** 가중 추첨 — 후보가 없으면 null */
@@ -358,11 +408,6 @@ function daring(p: Player): number {
   );
 }
 
-/** 빈 기록 한 줄 */
-function emptyLine(): MatchStatLine {
-  return { passes: 0, progressive: 0, shots: 0, xg: 0, scoringExpectation: 0, saves: 0 };
-}
-
 function pickAssister(
   rng: () => number,
   squad: SegmentSquad,
@@ -398,10 +443,18 @@ export const BOOKED_AGAIN_WEIGHT = 0.22;
 /**
  * 카드를 받을 상대 가중 — 적극성이 높고 태클이 약한 선수가 자주 받는다.
  * 간이 시뮬도 이 식을 함께 쓴다 (`engine/quick-sim.ts`).
+ *
+ * `directiveScale`은 개인 지시가 거는 배수다(`directiveBookingScale`) — `careful`을
+ * 받은 선수만 1이 아니다. **상대 가중이라 팀 카드 총량은 움직이지 않는다**: 한 명을
+ * 낮추면 같은 장수가 팀 동료에게 가고, 주는 것은 그 선수의 두 번째 경고다.
  */
-export function bookingWeight(player: Player, alreadyBooked: boolean): number {
+export function bookingWeight(player: Player, alreadyBooked: boolean, directiveScale = 1): number {
   const a = player.attributes;
-  return (a.aggression * 1.5 + (99 - a.tackling) * 0.5) * (alreadyBooked ? BOOKED_AGAIN_WEIGHT : 1);
+  return (
+    (a.aggression * 1.5 + (99 - a.tackling) * 0.5) *
+    (alreadyBooked ? BOOKED_AGAIN_WEIGHT : 1) *
+    directiveScale
+  );
 }
 
 /** 이번 카드를 받는 사람 — 온필드에서 `bookingWeight`로 뽑는다 */
@@ -410,9 +463,11 @@ function pickBooked(
   squad: SegmentSquad,
   gone?: ReadonlySet<string>,
   booked?: Readonly<Record<string, number>>,
+  /** 선수 id → 개인 지시가 거는 카드 배수. 없으면 전원 1 */
+  directiveScale?: ReadonlyMap<string, number>,
 ): Player | null {
   return weightedPick(rng, outfield(squad, gone), (p) =>
-    bookingWeight(p, (booked?.[p.id] ?? 0) > 0),
+    bookingWeight(p, (booked?.[p.id] ?? 0) > 0, directiveScale?.get(p.id) ?? 1),
   );
 }
 
@@ -470,6 +525,56 @@ function causesFor(packet: StrengthPacket, side: MatchSide): PacketTag[] {
 }
 
 /**
+ * 죽은 공을 차는 사람 — **패킷의 지목이 먼저, 그가 그라운드에 없으면 기본값**.
+ *
+ * 패킷은 킥오프·교체·구간마다 다시 서므로 대개 이미 온필드 기준이지만, 같은
+ * 구간 안에서 퇴장이 나면 패킷보다 장부가 앞선다. 그래서 고르는 자리에서 한 번 더
+ * 대조한다 — 나간 사람이 코너를 차는 장부는 §5의 반려다.
+ *
+ * **간이 시뮬도 이 함수를 부른다** (match.md §7) — 키커를 고르는 규칙이 갈리면
+ * 리그의 95%에서만 지정이 무시된다.
+ */
+export function setPieceTaker(
+  packet: StrengthPacket,
+  side: MatchSide,
+  role: keyof SetPieceProfile["takers"],
+  candidates: readonly Player[],
+): Player | null {
+  if (candidates.length === 0) return null;
+  const named = packet.guide.setPieces?.[side].takers[role] ?? null;
+  const onPitch = named === null ? undefined : candidates.find((p) => p.id === named);
+  if (onPitch) return onPitch;
+  const read = role === "penalty" ? penaltySkill : (p: Player) => p.attributes.kicking;
+  return candidates.reduce((a, b) => (read(b) > read(a) ? b : a));
+}
+
+/**
+ * 죽은 공 골의 근거 — **누가 올렸고 누가 마무리했나**. 문장은 렌더러가 만든다
+ * (`packetTagText`의 `set-piece` 갈래).
+ */
+function setPieceCause(
+  side: MatchSide,
+  origin: ShotOrigin,
+  taker: Player | null,
+  shooter: Player,
+): PacketTag {
+  const solo = taker === null || taker.id === shooter.id;
+  return {
+    source: "set-piece",
+    code: origin,
+    favours: side,
+    holder: side,
+    sharp: true,
+    playerIds: solo ? [shooter.id] : [taker.id, shooter.id],
+    values: {
+      ...(taker ? { kicking: taker.attributes.kicking } : {}),
+      aerial: shooter.attributes.aerial,
+    },
+    flags: [],
+  };
+}
+
+/**
  * 연장 30분의 기대 득점 — **정규 90분 대비 배율.** 시간 비율(1/3)보다 낮다:
  * 지친 다리로 뛰는 시간이고 승부차기가 보이는 자리라 양 팀 다 잃지 않는 쪽으로 기운다.
  *
@@ -511,13 +616,34 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
     directives,
   } = input;
   /**
+   * **실제로 걸린 지시만** — 판정은 `foldDirectives` 한 곳이다 (match.md §2).
+   * 넷째 지시는 존 전력에도 안 실리므로 다리와 카드에도 실리면 안 된다: 노트가
+   * "안 걸렸다"고 말한 지시가 판 밖에서 조용히 값을 하는 거짓 성공이 된다.
+   */
+  const onPitchOf = (side: MatchSide) => (id: string) =>
+    (side === "home" ? squads.home : squads.away).onPitch.some((p) => p.id === id);
+  const taken = (["home", "away"] as const).flatMap((side) =>
+    takenDirectives(
+      directives?.[side],
+      onPitchOf(side),
+      onPitchOf(side === "home" ? "away" : "home"),
+    ),
+  );
+  /**
    * 선수 id → 지시가 얹는 소모 배수. 지시를 안 받은 선수는 여기 없고 1로 읽힌다.
    */
   const drainOf = new Map<string, number>(
-    [...(directives?.home ?? []), ...(directives?.away ?? [])].map(
-      // 세기도 다리에 걸린다 — 세게 걸수록 얻는 것만 크는 것이 아니다
-      (d) => [d.by, directiveDrain(d.kind, d.intensity)] as const,
-    ),
+    // 세기도 다리에 걸린다 — 세게 걸수록 얻는 것만 크는 것이 아니다
+    taken.map((d) => [d.by, directiveDrain(d.kind, d.intensity)] as const),
+  );
+  /**
+   * 선수 id → 지시가 카드 가중에 거는 배수 (`careful`, match.md §2). 1인 지시는 담지
+   * 않아 다른 갈래를 받은 선수도 예전과 같은 수를 낸다.
+   */
+  const bookingScaleOf = new Map<string, number>(
+    taken
+      .map((d) => [d.by, directiveBookingScale(d.kind, d.intensity)] as const)
+      .filter(([, scale]) => scale !== 1),
   );
   const events: MatchEvent[] = [];
   const fatigue: Record<string, number> = {};
@@ -649,8 +775,8 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       });
     }
     addFatigue(minute);
-    // 흐름의 양 — 이 구간에 실제로 흐른 시간만큼 패스를 나눈다
-    spreadPasses(Math.max(0, minute - from));
+    // 흐름의 양 — 이 구간에 실제로 흐른 시간만큼 패스·코너·파울을 나눈다
+    spreadFlow(Math.max(0, minute - from));
     return {
       events,
       stop,
@@ -663,9 +789,22 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
     };
   };
 
-  /** 이 구간의 누적 기록 — 슛·선방은 사건이 날 때, 패스는 마지막에 한 번에 */
+  /** 이 구간의 누적 기록 — 슛·선방은 사건이 날 때, 패스·코너·파울은 마지막에 한 번에 */
   const stats: Record<string, MatchStatLine> = {};
-  const lineOf = (id: string): MatchStatLine => (stats[id] ??= emptyLine());
+  const lineOf = (id: string): MatchStatLine => (stats[id] ??= emptyStatLine());
+
+  /** 그 팀의 골문에 선 골키퍼 — 퇴장한 사람은 막지 않는다 */
+  const keeperOf = (side: MatchSide): Player | null =>
+    squadOf(side).onPitch.find((p) => positionGroupOfPlayer(p) === "GK" && !gone.has(p.id)) ?? null;
+
+  /** 골이 못 된 유효슈팅 — 막아선 골키퍼가 한 줄을 받는다 (열린 플레이·죽은 공 공통) */
+  const pushSave = (shooting: MatchSide, minute: number) => {
+    const against = otherSide(shooting);
+    const keeper = keeperOf(against);
+    if (!keeper) return;
+    events.push({ minute, type: "save", team: against, actors: [keeper.id], causes: [] });
+    lineOf(keeper.id).saves += 1;
+  };
 
   /**
    * **패스는 굴리지 않고 나눈다.**
@@ -676,7 +815,7 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
    *
    * 전진 패스 비율은 **전술이 정한다** — 짧게 돌리는 팀은 낮고 직선적인 팀은 높다.
    */
-  const spreadPasses = (minutes: number) => {
+  const spreadFlow = (minutes: number) => {
     if (minutes <= 0) return;
     for (const side of ["home", "away"] as const) {
       const squad = squadOf(side);
@@ -708,6 +847,31 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
         // 비율은 1을 넘을 수 없다 — 전진 패스가 총 패스보다 많을 수는 없다
         line.progressive += Math.round(passes * Math.min(1, forward * daring(p)));
       }
+
+      /**
+       * **코너와 파울도 같은 자리에서 나눈다** (match.md §4). 코너는 전부 그 팀의
+       * 코너 키커에게 — 얻는 것은 팀이지만 차는 것은 한 사람이다. 파울은 카드와
+       * 같은 가중으로 흩어진다. 반올림이 합계에서 새지 않도록 최대잔여법을 쓴다.
+       */
+      const sp = packet.guide.setPieces?.[side];
+      if (!sp) continue;
+      const elapsedShare = minutes / PHASE_END.second_half;
+      const corners = Math.round(sp.corners * elapsedShare);
+      const cornerTaker = setPieceTaker(
+        packet,
+        side,
+        "corner",
+        players.filter((p) => positionGroupOfPlayer(p) !== "GK"),
+      );
+      if (corners > 0 && cornerTaker) lineOf(cornerTaker.id).corners += corners;
+      const fouls = spreadCount(Math.round(sp.fouls * elapsedShare), players, (p) =>
+        // 발을 뺀 선수는 파울도 덜 한다 — 카드와 같은 가중이므로 여기서 함께 준다
+        bookingWeight(p, false, bookingScaleOf.get(p.id) ?? 1),
+      );
+      players.forEach((p, i) => {
+        const n = fouls[i] ?? 0;
+        if (n > 0) lineOf(p.id).fouls += n;
+      });
     }
   };
 
@@ -822,6 +986,7 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
         xg: sampled.xg,
         goalProbability: sampled.goalProbability,
         shotOutcome: sampled.outcome,
+        shotOrigin: "open",
       });
       const line = lineOf(shooter.id);
       line.shots += 1;
@@ -830,29 +995,103 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       if (isGoal) {
         return finish("goal", minute, t);
       }
-      if (sampled.outcome === "saved") {
-        const keeper = squadOf(side === "home" ? "away" : "home").onPitch.find(
-          (p) => positionGroupOfPlayer(p) === "GK" && !gone.has(p.id),
-        );
-        if (keeper) {
-          events.push({
-            minute,
-            type: "save",
-            team: side === "home" ? "away" : "home",
-            actors: [keeper.id],
-            causes: [],
-          });
-          lineOf(keeper.id).saves += 1;
-        }
+      if (sampled.outcome === "saved") pushSave(side, minute);
+      continue; // 정지점이 아니다
+    }
+
+    if (kind === "set_piece") {
+      const sp = packet.guide.setPieces?.[side];
+      const candidates = outfield(squad, gone);
+      if (!sp || candidates.length === 0) continue;
+      // 코너인가 프리킥인가 — 죽은 공 슛의 출처 분해다 (match.md §1.4)
+      const corner = rng() < CORNER_SHOT_SHARE;
+      const origin: ShotOrigin = corner ? "corner" : "free_kick";
+      const taker = setPieceTaker(packet, side, corner ? "corner" : "freeKick", candidates);
+      /**
+       * **직접 프리킥은 키커가 그대로 찬다** — 그때는 도움이 없다. 코너는 언제나
+       * 올리고, 마무리는 공중볼 가중 추첨이다(박스에 올라가는 사람들).
+       */
+      const direct = !corner && taker !== null && rng() < DIRECT_FREE_KICK_SHARE;
+      const shooter = direct ? taker : weightedPick(rng, candidates, (p) => p.attributes.aerial);
+      if (!shooter) continue;
+      const sampled = sampleShot(rng, { meanXg: sp.meanXg }, shooter.attributes.finishing);
+      const isGoal = sampled.outcome === "goal";
+      /**
+       * **죽은 공의 도움은 굴리지 않는다** — 올린 사람이 곧 도움이다(`ASSIST_RATE`를
+       * 지나지 않는다). 그래야 키커 지정이 기록에도 남는다.
+       */
+      const assister = taker && taker.id !== shooter.id ? taker : null;
+      events.push({
+        minute,
+        type: isGoal ? "goal" : "shot",
+        team: side,
+        actors: isGoal && assister ? [shooter.id, assister.id] : [shooter.id],
+        causes: isGoal ? [setPieceCause(side, origin, taker, shooter)] : [],
+        xg: sampled.xg,
+        goalProbability: sampled.goalProbability,
+        shotOutcome: sampled.outcome,
+        shotOrigin: origin,
+      });
+      const spLine = lineOf(shooter.id);
+      spLine.shots += 1;
+      spLine.xg += sampled.xg;
+      spLine.scoringExpectation += sampled.goalProbability;
+      if (isGoal) return finish("goal", minute, t);
+      if (sampled.outcome === "saved") pushSave(side, minute);
+      continue; // 정지점이 아니다
+    }
+
+    if (kind === "penalty") {
+      const candidates = outfield(squad, gone);
+      const taker = setPieceTaker(packet, side, "penalty", candidates);
+      if (!taker) continue;
+      const against = otherSide(side);
+      const keeper = keeperOf(against);
+      /**
+       * **내준 반칙은 사람에게 붙는다** — 경기당 0.25줄이라 값이 싸고, 이것이
+       * 없으면 "왜 줬나"가 장부에 없다. 뽑는 가중은 카드와 같다 (match.md §1.4).
+       */
+      const fouler = pickBooked(rng, squadOf(against), gone, yellows[against], bookingScaleOf);
+      // 파울의 **수**는 흐름과 함께 나누는 양이 갖는다(`spreadFlow`) — 여기서 한 장
+      // 더 세면 팀 합계가 손잡이(`FOULS_PER_MATCH`) 위로 조용히 올라간다
+      if (fouler) {
+        events.push({ minute, type: "foul", team: against, actors: [fouler.id], causes: [] });
       }
+      /** 성공률이 곧 이 슛의 xG다 — 승부차기와 같은 식이다 (`penaltyRate`) */
+      const rate = penaltyRate(taker, keeper);
+      const isGoal = rng() < rate;
+      // 막히거나 벗어나거나 — 블록은 없다. 페널티는 수비 몸에 맞지 않는다
+      const outcome = isGoal ? "goal" : rng() < savedShare(rate) ? "saved" : "off_target";
+      events.push({
+        minute,
+        type: isGoal ? "goal" : "shot",
+        team: side,
+        actors: [taker.id],
+        causes: isGoal ? [setPieceCause(side, "penalty", taker, taker)] : [],
+        xg: rate,
+        goalProbability: rate,
+        shotOutcome: outcome,
+        shotOrigin: "penalty",
+      });
+      const pkLine = lineOf(taker.id);
+      pkLine.shots += 1;
+      pkLine.xg += rate;
+      pkLine.scoringExpectation += rate;
+      if (isGoal) return finish("goal", minute, t);
+      if (outcome === "saved") pushSave(side, minute);
       continue; // 정지점이 아니다
     }
 
     if (kind === "card") {
-      const booked = pickBooked(rng, squad, gone, yellows[side]);
+      const booked = pickBooked(rng, squad, gone, yellows[side], bookingScaleOf);
       if (!booked) continue;
       const already = (yellows[side][booked.id] ?? 0) > 0;
-      const straightRed = rng() < STRAIGHT_RED_CHANCE;
+      /**
+       * **곧장 퇴장만 절대량이 준다.** 누가 카드를 받는지는 상대 가중이라 총량이
+       * 보존되지만, 이 굴림은 뽑힌 사람 하나의 확률이라 `careful`이 그대로 깎는다 —
+       * 발을 뺀 선수가 걷어차서 나가는 일은 실제로 줄어든다.
+       */
+      const straightRed = rng() < STRAIGHT_RED_CHANCE * (bookingScaleOf.get(booked.id) ?? 1);
       const card = (type: "yellow_card" | "red_card") => {
         events.push({ minute, type, team: side, actors: [booked.id], causes: [] });
       };
@@ -1235,7 +1474,7 @@ function settleShift(
   wanted: Partial<Record<AiShiftAxis, number>>,
   current: TacticsSpec,
   kickoff: TacticsSpec,
-): Partial<TacticsSpec> | null {
+): Partial<Record<AiShiftAxis, number>> | null {
   const shift: Partial<Record<AiShiftAxis, number>> = {};
   for (const axis of AI_SHIFT_AXES) {
     const want = wanted[axis];
@@ -1276,6 +1515,13 @@ export interface AiBenchShift {
   axes?: Partial<TacticsSpec>;
   /** 판의 모양을 어느 쪽으로 — 프리셋 고르기는 호출부의 몫 */
   shape?: AiShapeIntent;
+  /**
+   * 이 판단의 **사실 태그** — `tactical_shift` 사건의 근거가 된다 (match.md §2·§4).
+   *
+   * 모양 **이름**은 여기 없다: 프리셋을 고르는 것은 스쿼드를 아는 호출부이므로
+   * `formation:` flag도 거기서 얹는다. 여기 실리는 것은 갈래와 옮긴 뒤의 축 값뿐이다.
+   */
+  note: PacketTag;
 }
 
 /**
@@ -1314,12 +1560,28 @@ export function planAiTacticalShift(
     !shapeMoved && minute >= from ? shape : undefined;
 
   const settled = (
+    /** 이 판단의 갈래 — 태그의 코드이자 축이 움직인 방향이다 */
+    intent: AiShapeIntent,
     wanted: Partial<Record<AiShiftAxis, number>>,
     shape: AiShapeIntent | undefined,
   ): AiBenchShift | null => {
     const axes = settleShift(wanted, current, kickoff);
     if (!axes && !shape) return null;
-    return { ...(axes ? { axes } : {}), ...(shape ? { shape } : {}) };
+    return {
+      ...(axes ? { axes } : {}),
+      ...(shape ? { shape } : {}),
+      note: {
+        source: "ai-shift",
+        code: intent,
+        // 전환은 어느 편에 이로운 사실이 아니다 — 사건의 `team`이 누구인지를 말한다
+        favours: null,
+        // 전술은 안개를 지나지 않는다 — 90분 동안 눈앞에 보이는 사실이다 (§8)
+        sharp: true,
+        playerIds: [],
+        values: { ...axes },
+        flags: [],
+      },
+    };
   };
 
   if (diff < 0) {
@@ -1334,11 +1596,12 @@ export function planAiTacticalShift(
     if (halftime) {
       push.pressing = current.pressing + 1;
     }
-    return settled(push, shaped("chase", AI_SHAPE_CHASE_MINUTE));
+    return settled("chase", push, shaped("chase", AI_SHAPE_CHASE_MINUTE));
   }
   if (diff > 0 && urgent) {
     // 이기고 있고 시간이 얼마 없다 — 내려서서 지킨다
     return settled(
+      "hold",
       {
         mentality: current.mentality - 1,
         defensiveLine: current.defensiveLine - 1,

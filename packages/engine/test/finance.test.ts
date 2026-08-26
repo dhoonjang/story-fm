@@ -145,6 +145,23 @@ describe("매치데이", () => {
     expect(first.opex).toBeLessThan(first.income);
   });
 
+  /**
+   * 더비 항은 **상대 매력도와 따로 선다** — 같은 체급 상대와 갈리는 것이 그 항
+   * 하나뿐이라, 차이가 곧 `OCCUPANCY_DERBY_BONUS × heat`다 (finance.md §5.2).
+   */
+  it("더비는 같은 체급의 다른 상대보다 관중을 더 부른다 — 결정적으로", () => {
+    const state = createTestGame(7, "everton");
+    const home = state.matches.find(
+      (m) => m.homeTeamId === state.userTeamId && m.competitionId !== null && !m.neutral,
+    )!;
+    // 리버풀(머지사이드 더비 heat 3)과 첼시 — 둘 다 tier 1이고 표에는 하나만 있다
+    const rival = matchdayRevenue(state, { ...home, awayTeamId: "liverpool" });
+    const plain = matchdayRevenue(state, { ...home, awayTeamId: "chelsea" });
+    expect(rival.occupancy, "만석에 잘려 더비 항이 사라졌다").toBeLessThan(1);
+    expect(rival.occupancy - plain.occupancy).toBeCloseTo(0.09, 10);
+    expect(matchdayRevenue(state, { ...home, awayTeamId: "liverpool" })).toEqual(rival);
+  });
+
   it("구장이 작은 구단은 매치데이 수입도 작다", () => {
     const big = createTestGame(7, "manutd"); // 올드 트래퍼드 74,310
     const small = createTestGame(7, "bournemouth"); // 바이탈리티 11,307

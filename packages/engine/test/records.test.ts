@@ -4,12 +4,22 @@ import {
   activeSuspension,
   assignmentsOf,
   buildOfficeViews,
+  foldCareer,
   isSuspended,
+  milestonesReached,
   seasonYellowsOf,
   userPlayers,
   weeklyWagesOf,
 } from "@story-fm/engine";
-import { BookingSchema, MATCH_MINUTE_MAX } from "@story-fm/domain";
+import {
+  BookingSchema,
+  CLEAN_SHEET_MINUTES,
+  MATCH_MINUTE_MAX,
+  addToSeasonStat,
+  keptCleanSheet,
+  milestoneTitle,
+} from "@story-fm/domain";
+import type { SeasonStat } from "@story-fm/domain";
 import { advanceToMatchday, createTestGame, playMockMatch, playPreseason } from "./helpers";
 
 /**
@@ -180,5 +190,149 @@ describe("경기 성장·기록", () => {
     expect(match.result).not.toBeNull();
     const entry = state.schedule.find((e) => e.type === "match" && e.refId === match.id);
     expect(entry?.status).toBe("done");
+  });
+});
+
+/**
+ * 시즌 기록의 눈금 — **세계를 세우지 않는다.** 얹는 규칙도 클린시트 문턱도 `state`를
+ * 보지 않는 순수 함수라 경계를 그대로 고정할 수 있다 (→ docs/simulation/match.md §6).
+ */
+describe("시즌 기록 적재", () => {
+  const empty = (): SeasonStat => ({
+    gamePlayerId: "p1",
+    season: 2025,
+    teamId: "t1",
+    apps: 0,
+    goals: 0,
+  });
+
+  it("0인 칸은 적지 않는다 — 옛 세이브의 행이 0으로 채워지지 않는다", () => {
+    const row = empty();
+    addToSeasonStat(row, { apps: 1, ratingSum: 6.4, minutes: 90 });
+    expect(row.apps).toBe(1);
+    expect(row.minutes).toBe(90);
+    // 손대지 않은 칸은 **없는 채로** 남는다 (0과 "기록 없음"은 다르다)
+    expect(row.shots).toBeUndefined();
+    expect(row.cleanSheets).toBeUndefined();
+    expect(row.yellows).toBeUndefined();
+  });
+
+  it("연장은 같은 경기에 얹는 몫이다 — 출전은 다시 서지 않는다", () => {
+    const row = empty();
+    addToSeasonStat(row, { apps: 1, minutes: 90, shots: 3, xg: 0.5 });
+    addToSeasonStat(row, { goals: 1, minutes: 30, shots: 1, xg: 0.4 });
+    expect(row.apps).toBe(1);
+    expect(row.goals).toBe(1);
+    expect(row.minutes).toBe(120);
+    expect(row.shots).toBe(4);
+    expect(row.xg).toBeCloseTo(0.9, 6);
+  });
+
+  it("클린시트는 골키퍼가 문턱만큼 뛴 무실점 경기다", () => {
+    const kept = (over: { group?: "GK" | "DF"; conceded?: number; minutes?: number }) =>
+      keptCleanSheet({ group: "GK", conceded: 0, minutes: 90, ...over });
+    expect(kept({})).toBe(true);
+    // 문턱 바로 위·아래 — 85′에 들어온 골키퍼는 그 무실점을 지킨 사람이 아니다
+    expect(kept({ minutes: CLEAN_SHEET_MINUTES })).toBe(true);
+    expect(kept({ minutes: CLEAN_SHEET_MINUTES - 1 })).toBe(false);
+    // 한 골이라도 먹으면 없다. 수비수의 무실점은 평점이 이미 센다
+    expect(kept({ conceded: 1 })).toBe(false);
+    expect(kept({ group: "DF" })).toBe(false);
+  });
+});
+
+/**
+ * 통산 파생과 마일스톤 — **세계를 세우지 않는다.** 접기도 문턱 판정도 `state`를 보지
+ * 않는 순수 함수라, 경계(99→100)를 `createTestGame()` 없이 그대로 고정할 수 있다
+ * (→ docs/simulation/match.md §6).
+ */
+describe("통산 기록 · 마일스톤", () => {
+  const stat = (over: Partial<SeasonStat> & Pick<SeasonStat, "season" | "teamId">): SeasonStat => ({
+    gamePlayerId: "p1",
+    apps: 0,
+    goals: 0,
+    ...over,
+  });
+
+  it("시즌 × 팀 행을 접으면 통산이고, 평점은 합계 ÷ 출전이다", () => {
+    const totals = foldCareer([
+      stat({ season: 1, teamId: "t1", apps: 30, goals: 5, assists: 3, ratingSum: 210 }),
+      stat({ season: 2, teamId: "t2", apps: 10, goals: 2, ratingSum: 60 }),
+    ]);
+    expect(totals.apps).toBe(40);
+    expect(totals.goals).toBe(7);
+    // 도움이 없는 옛 행은 0으로 읽는다 — 없는 것과 0은 합에서 같다
+    expect(totals.assists).toBe(3);
+    expect(totals.rating).toBe(6.75); // 270 ÷ 40
+  });
+
+  it("출전이 없으면 통산 평점은 0.00이 아니라 null이다", () => {
+    expect(foldCareer([]).rating).toBeNull();
+    expect(foldCareer([stat({ season: 1, teamId: "t1" })]).rating).toBeNull();
+  });
+
+  it("2군 기록은 1군과 섞이지 않는다", () => {
+    const totals = foldCareer([
+      stat({
+        season: 1,
+        teamId: "t1",
+        apps: 4,
+        goals: 1,
+        ratingSum: 24,
+        reserveApps: 12,
+        reserveGoals: 9,
+        reserveRatingSum: 84,
+      }),
+    ]);
+    expect(totals.apps).toBe(4);
+    expect(totals.goals).toBe(1);
+    expect(totals.reserveApps).toBe(12);
+    expect(totals.reserveGoals).toBe(9);
+    expect(totals.reserveRating).toBe(7);
+  });
+
+  it("문턱은 넘는 그 경기에만 선다 — 99경기는 아무것도, 100경기째가 마일스톤", () => {
+    expect(milestonesReached({ apps: 98, goals: 0 }, { apps: 99, goals: 0 }, 0)).toEqual([]);
+    expect(milestonesReached({ apps: 99, goals: 0 }, { apps: 100, goals: 0 }, 0)).toEqual([
+      { code: "apps", value: 100 },
+    ]);
+    // 넘긴 뒤에는 다시 서지 않는다
+    expect(milestonesReached({ apps: 100, goals: 0 }, { apps: 101, goals: 0 }, 0)).toEqual([]);
+  });
+
+  it("데뷔와 첫 골은 0에서 올라선 그 경기의 것이다", () => {
+    expect(milestonesReached({ apps: 0, goals: 0 }, { apps: 1, goals: 1 }, 1)).toEqual([
+      { code: "first-goal", value: 1 },
+      { code: "debut", value: 1 },
+    ]);
+    expect(milestonesReached({ apps: 1, goals: 1 }, { apps: 2, goals: 2 }, 1)).toEqual([]);
+  });
+
+  it("한 경기 3골이 해트트릭이고, 그 위는 골 수를 그대로 든다", () => {
+    expect(milestonesReached({ apps: 5, goals: 4 }, { apps: 6, goals: 6 }, 2)).toEqual([]);
+    expect(milestonesReached({ apps: 5, goals: 4 }, { apps: 6, goals: 7 }, 3)).toEqual([
+      { code: "hat-trick", value: 3 },
+    ]);
+    expect(milestonesReached({ apps: 5, goals: 4 }, { apps: 6, goals: 8 }, 4)).toEqual([
+      { code: "hat-trick", value: 4 },
+    ]);
+  });
+
+  it("한 경기가 여럿을 세우면 드문 것부터 온다 — 회견에 오르는 것은 그 첫 줄이다", () => {
+    // 23골에서 해트트릭 → 26골: 득점 문턱(25)과 해트트릭이 함께 선다
+    expect(milestonesReached({ apps: 99, goals: 23 }, { apps: 100, goals: 26 }, 3)).toEqual([
+      { code: "goals", value: 25 },
+      { code: "apps", value: 100 },
+      { code: "hat-trick", value: 3 },
+    ]);
+  });
+
+  it("마일스톤 라벨은 코드와 눈금에서 나온다", () => {
+    expect(milestoneTitle("debut", 1)).toBe("데뷔전");
+    expect(milestoneTitle("first-goal", 1)).toBe("첫 골");
+    expect(milestoneTitle("apps", 200)).toBe("200경기");
+    expect(milestoneTitle("goals", 50)).toBe("50골");
+    expect(milestoneTitle("hat-trick", 3)).toBe("해트트릭");
+    expect(milestoneTitle("hat-trick", 4)).toBe("한 경기 4골");
   });
 });

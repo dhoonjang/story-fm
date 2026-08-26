@@ -1951,9 +1951,10 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 0;
-  width: min(400px, 100%);
-  /* 득점이 많으면 한 줄이 길어진다 — 폭을 묶어 두 줄로 접히게 한다 */
-  max-height: min(640px, calc(100dvh - 48px));
+  /* 리포트 한 장(팀 스탯 대조 + 열넷짜리 선수 표)이 들어간다 — 400px면 표가
+     통째로 가로 스크롤이 되어 평점 열이 화면 밖에 선다 (match.md §8) */
+  width: min(680px, 100%);
+  max-height: min(720px, calc(100dvh - 48px));
   overflow-y: auto;
   padding: var(--sp-6);
   background: var(--panel);
@@ -1961,11 +1962,12 @@ textarea {
   border-radius: var(--r-md);
   box-shadow: 0 24px 64px rgb(0 0 0 / 0.42);
 }
+/* 스코어와 상대는 리포트의 머리가 갖는다 — 여기 남는 것은 "경기 종료" 하나다 */
 .fulltime-header {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: var(--sp-2) var(--sp-2) var(--sp-6);
+  padding: var(--sp-1) var(--sp-2) var(--sp-4);
   text-align: center;
 }
 .fulltime-tag {
@@ -1973,50 +1975,6 @@ textarea {
   font-weight: 700;
   letter-spacing: 0.12em;
   color: var(--accent);
-}
-.fulltime-score {
-  margin-top: var(--sp-2);
-  font-size: var(--fs-2xl);
-  line-height: 1.15;
-  font-variant-numeric: tabular-nums;
-}
-.fulltime-title {
-  margin-top: var(--sp-2);
-  color: var(--muted);
-}
-.fulltime-section {
-  padding: var(--sp-4) 0;
-  border-top: 1px solid var(--border-soft);
-}
-.fulltime-section h3 {
-  margin: 0 0 var(--sp-3);
-  color: var(--dim);
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-}
-.fulltime-goals,
-.fulltime-best {
-  display: grid;
-  gap: var(--sp-2);
-  font-size: var(--fs-sm);
-}
-.fulltime-goals span,
-.fulltime-best span {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--sp-3);
-}
-.fulltime-goals span {
-  color: var(--text);
-}
-.fulltime-best span {
-  color: var(--muted);
-}
-.fulltime-best b {
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
 }
 .fulltime .primary-btn {
   width: 100%;

@@ -1,8 +1,15 @@
-import type { GamePlayer, MatchRecord } from "@story-fm/domain";
-import { clampCondition, naturalPositionOf } from "@story-fm/domain";
+import type { GamePlayer, MatchRecord, ShotOrigin } from "@story-fm/domain";
+import {
+  FULL_TIME_MINUTES,
+  addToSeasonStat,
+  clampCondition,
+  naturalPositionOf,
+  positionGroupOfPlayer,
+} from "@story-fm/domain";
 import { conditionDrain, drainVariance } from "@story-fm/sim";
 import { EXTRA_TIME_MINUTES, simulateExtraTime } from "../match/quick-sim";
 import { recordCard } from "../match/discipline";
+import { derbyForMatch } from "../club/derby";
 import { openInjuryFor } from "../squad/injury";
 import { makeRng } from "../core/rng";
 import { simSquadFor } from "../core/tick";
@@ -188,14 +195,21 @@ export function finishingXi(
 /** 골 목록에 연장 골을 이어 붙인다 — 세 배열의 길이는 언제나 같다 */
 function appendGoals(
   result: NonNullable<MatchRecord["result"]>,
-  added: { scorers: string[]; assists: string[]; goalMinutes: number[] },
+  added: {
+    scorers: string[];
+    assists: string[];
+    goalMinutes: number[];
+    goalOrigins: ShotOrigin[];
+  },
 ): void {
   const count = result.scorers.length;
   const assists = result.assists ?? new Array<string>(count).fill("");
   const minutes = result.goalMinutes ?? new Array<number>(count).fill(0);
+  const origins = result.goalOrigins ?? new Array<ShotOrigin>(count).fill("open");
   result.scorers = [...result.scorers, ...added.scorers];
   result.assists = [...assists, ...added.assists];
   result.goalMinutes = [...minutes, ...added.goalMinutes];
+  result.goalOrigins = [...origins, ...added.goalOrigins];
 }
 
 /**
@@ -223,6 +237,7 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
    * 선수 목록만 넘기면 패킷이 자연 포지션·기본 전술·적응도 60·감독 65로 서서
    * 연장에서만 약팀이 살아나거나 죽는다 (match.md §7).
    */
+  const extraDerby = derbyForMatch(decider);
   const extra = simulateExtraTime(
     simSquadFor(state, decider.homeTeamId, xi.home),
     simSquadFor(state, decider.awayTeamId, xi.away),
@@ -230,6 +245,8 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
     channel,
     {
       neutral: decider.neutral === true,
+      // 연장도 같은 경기다 — 더비의 강도가 90분에서만 걸리면 장부가 두 말을 한다
+      ...(extraDerby ? { derby: { name: extraDerby.name, heat: extraDerby.heat } } : {}),
       /**
        * 90분의 경고가 연장으로 이어진다 — 이 목록이 없으면 90분에 경고를 받은
        * 선수의 연장 경고가 첫 장으로 세어져 두 번째 경고 퇴장이 성립하지 않는다.
@@ -240,6 +257,8 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
     },
   );
 
+  /** 90분의 스코어 — 아래 클린시트 판정이 마감이 세던 그 수를 다시 본다 */
+  const goals90 = { home: result.homeGoals, away: result.awayGoals };
   result.aet = true;
   result.homeGoals += extra.homeGoals;
   result.awayGoals += extra.awayGoals;
@@ -251,20 +270,50 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
   result.awayExpectedGoals = (result.awayExpectedGoals ?? 0) + extra.awayExpectedGoals;
   appendGoals(result, extra);
 
-  // 연장 골도 시즌 기록이다 — 출전(apps)은 90분에 이미 쌓였으므로 골·도움만 얹는다
+  /**
+   * 연장이 시즌 기록에 얹는 몫 — **출전은 90분에 이미 섰다**(`apps: 0`). 분·슛·xG·
+   * 선방·골·도움만 더하고, 얹는 문은 90분과 **같은 하나**다 (match.md §6).
+   * 카드는 아래 `recordCard`가 지나며 함께 센다.
+   */
   for (const side of ["home", "away"] as const) {
     const teamId = side === "home" ? decider.homeTeamId : decider.awayTeamId;
     const idOf = (tag: string) => (tag.startsWith(`${side}:`) ? tag.slice(side.length + 1) : null);
-    for (const tag of extra.scorers) {
-      const id = idOf(tag);
-      if (id) ensureSeasonStat(state, id, teamId).goals += 1;
+    const countIn = (tags: readonly string[], playerId: string) =>
+      tags.filter((tag) => idOf(tag) === playerId).length;
+    for (const player of xi[side]) {
+      const line = extra.playerStats[player.id];
+      // 연장의 퇴장은 그 분에서 시간을 끊는다 — 90분의 규칙 그대로다
+      const red = extra.cards.find((c) => c.playerId === player.id && c.card === "red");
+      addToSeasonStat(ensureSeasonStat(state, player.id, teamId), {
+        goals: countIn(extra.scorers, player.id),
+        assists: countIn(extra.assists, player.id),
+        minutes: red ? Math.max(0, red.minute - FULL_TIME_MINUTES) : EXTRA_TIME_MINUTES,
+        shots: line?.shots ?? 0,
+        xg: line?.xg ?? 0,
+        saves: line?.saves ?? 0,
+      });
     }
-    for (const tag of extra.assists) {
-      const id = idOf(tag);
-      if (!id) continue;
-      const stat = ensureSeasonStat(state, id, teamId);
-      stat.assists = (stat.assists ?? 0) + 1;
-    }
+  }
+
+  /**
+   * 연장의 실점은 90분에 적힌 클린시트를 **무른다** — 마감이 90분 스코어로 세고
+   * 연장은 그 뒤에 붙기 때문이다 (match.md §6). 구간 시뮬은 120분을 한 장부로
+   * 마감하므로 애초에 이 자리가 없다.
+   *
+   * 무르는 대상은 **선발로 나와 90분을 지킨 골키퍼**뿐이다 — 그 사람만 문턱
+   * (`CLEAN_SHEET_MINUTES`)을 넘은 것이 확실하다. 중간에 바뀐 골키퍼는 90분에
+   * 받았는지 알 수 없어, 깎으면 다른 경기의 기록을 깎는다.
+   */
+  for (const side of ["home", "away"] as const) {
+    const concededIn90 = side === "home" ? goals90.away : goals90.home;
+    const concededInEt = side === "home" ? extra.awayGoals : extra.homeGoals;
+    if (concededIn90 > 0 || concededInEt === 0) continue;
+    const started = new Set((side === "home" ? result.homeStarters : result.awayStarters) ?? []);
+    const keeper = xi[side].find((p) => positionGroupOfPlayer(p) === "GK" && started.has(p.id));
+    if (!keeper) continue;
+    const teamId = side === "home" ? decider.homeTeamId : decider.awayTeamId;
+    const stat = ensureSeasonStat(state, keeper.id, teamId);
+    if (stat.cleanSheets) stat.cleanSheets -= 1;
   }
 
   /**

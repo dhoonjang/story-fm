@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { TACTIC_AXES, tacticWord } from "@story-fm/domain";
 import type { OfficeViews } from "@story-fm/engine";
+import { IconChevron } from "../icons";
 
 // ── 대회 — 대회별 탭 · 순위표 · 라운드별 일정 ──────────────
 type Competition = OfficeViews["competitions"]["list"][number];
@@ -9,6 +11,8 @@ type Competition = OfficeViews["competitions"]["list"][number];
 type NextMatch = NonNullable<OfficeViews["competitions"]["nextMatch"]>;
 /** 최근 결과 한 경기 — 코어가 조각으로 내고 문장은 이 화면이 잇는다 */
 type RecentResult = OfficeViews["competitions"]["recentResults"][number];
+/** 경기 전 상대 분석 — 다음 경기 카드에 접혀 붙는다 (docs/simulation/match.md §1.8) */
+type MatchPreview = NonNullable<OfficeViews["competitions"]["preview"]>;
 
 const venueLabel = (venue: NextMatch["venue"]) =>
   venue === "home" ? "홈" : venue === "away" ? "원정" : "중립";
@@ -189,6 +193,105 @@ function NextFixture({ next }: { next: NextMatch }) {
 }
 
 /**
+ * 경기 전 상대 분석 — **다음 경기 카드 아래에 접혀 있다** (match.md §1.8 · §8).
+ *
+ * 접혀 있는 이유는 이 화면에 온 이유가 순위표이기 때문이고, 그래도 **결장 수와
+ * 지점 수는 접힌 줄에 선다** — 펼칠 이유가 카드 밖에 있으면 감독은 펼치지 않는다.
+ *
+ * 문장은 전부 코어가 만든 것을 그대로 세운다. 지점의 유불리는 뷰가 이미 우리 편
+ * 기준으로 접어(`ours`) 오므로 화면이 편을 다시 따지지 않는다.
+ */
+function MatchPreviewPanel({ preview }: { preview: MatchPreview }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mp-wrap">
+      <button
+        className={`mp-btn${open ? " open" : ""}`}
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        data-testid="match-preview-toggle"
+      >
+        <span>상대 분석</span>
+        {preview.absent.length > 0 && <i className="mp-chip">결장 {preview.absent.length}</i>}
+        {preview.keyPoints.length > 0 && <i className="mp-chip">지점 {preview.keyPoints.length}</i>}
+        <IconChevron size={12} />
+      </button>
+      {open && (
+        <div className="mp-body" data-testid="match-preview">
+          <div className="mp-section">
+            <div className="mp-title">
+              예상 XI
+              <i className="mp-basis">
+                {preview.basis === null
+                  ? "직전 경기 없음 — 배치에서 세운 추정"
+                  : `직전 ${preview.basis.date.slice(5)} ${preview.basis.label} 선발`}
+                {preview.guessed > 0 && ` · 추정 ${preview.guessed}자리`}
+              </i>
+            </div>
+            <div className="mp-xi">
+              {preview.expectedXI.map((p) => (
+                <span
+                  className={`mp-p${preview.guessed > 0 && !p.carried ? " guessed" : ""}`}
+                  key={p.id}
+                >
+                  <b>{p.name}</b>
+                  <i>{p.position}</i>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {preview.absent.length > 0 && (
+            <div className="mp-section">
+              <div className="mp-title">결장</div>
+              <div className="mp-out">
+                {preview.absent.map((a, i) => (
+                  <span className={`mp-p out-${a.reason}`} key={i}>
+                    <b>{a.name}</b>
+                    <i>{a.note}</i>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mp-section">
+            <div className="mp-title">
+              상대 전술<i className="mp-basis">{preview.shape.formation}</i>
+            </div>
+            <div className="mp-axes">
+              {TACTIC_AXES.map((axis) => (
+                <span className="mp-axis" key={axis.key}>
+                  <i>{axis.brief}</i>
+                  <b>{tacticWord(axis.key, preview.shape[axis.key])}</b>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {preview.keyPoints.length > 0 && (
+            <div className="mp-section">
+              <div className="mp-title">읽어 낸 지점</div>
+              <div className="mp-points">
+                {preview.keyPoints.map((k, i) => (
+                  <div
+                    className={`mp-point${k.ours === null ? "" : k.ours ? " ours" : " theirs"}`}
+                    key={i}
+                  >
+                    {k.text}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * 최근 결과 한 줄 — 뷰가 주는 조각(대회·양 팀·스코어·승부차기·우리 편·승패)을
  * 화면이 잇는다. 스코어는 가운데 한 칸에 세워 줄끼리 세로로 맞고, 우리 편 이름만
  * 진하며, 이겼는지는 **색**이 말한다. 승부차기는 스코어를 바꾸지 않고 한 톤 낮춰
@@ -318,6 +421,10 @@ export function CompetitionsView({
         <>
           <div className="section-title">다음 경기</div>
           <NextFixture next={nextMatch} />
+          {/* 상대 분석은 그 경기의 것이다 — 경기 중에는 코어가 빈손을 낸다 */}
+          {competitions.preview && competitions.preview.matchId === nextMatch.matchId && (
+            <MatchPreviewPanel preview={competitions.preview} />
+          )}
         </>
       )}
     </div>

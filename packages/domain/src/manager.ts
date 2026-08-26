@@ -228,6 +228,15 @@ export const ManagerSpendSchema = z.object({
 });
 export type ManagerSpend = z.infer<typeof ManagerSpendSchema>;
 
+/**
+ * 감독 팀의 경고 단계 — **이 횟수를 넘기면 경질된다** (career.md §5).
+ *
+ * 자리를 지우는 것은 `market/manager-market.ts`지만 눈금은 여기 산다: 보드 대치
+ * 아크의 고조·절정도 같은 자를 읽고(people.md §9), 화면과 다이제스트가 `n/3`으로
+ * 적는 분모도 이것이다. 두 벌로 두면 문턱을 옮긴 날 이야기와 판정이 갈린다.
+ */
+export const USER_WARNINGS_BEFORE_SACK = 3;
+
 export const ManagerSchema = z.object({
   name: z.string().min(1),
   /** 온보딩에서 유저가 직접 입력한 배경 서술 (career.md §1) */

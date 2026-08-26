@@ -4,9 +4,12 @@ import { Fragment } from "react";
 import type { OfficeViews } from "@story-fm/engine";
 import {
   TACTIC_AXES,
+  TACTIC_TOGGLES,
   anchorOf,
   positionGroupOf,
   separateBoardPoints,
+  tacticToggleValue,
+  tacticToggleWord,
   tacticWord,
 } from "@story-fm/domain";
 import { pitchPointOf, spreadMarkers, type PitchPoint } from "@/lib/pitch-layout";
@@ -450,6 +453,15 @@ function SideTactics({ tactics }: { tactics: Match["tactics"]["home"] }) {
           <i>{tactics.formation}</i> · 소화 {Math.round(tactics.uptake * 100)}%
         </span>
       </div>
+      {/* 상대 벤치가 판을 옮긴 정지점의 표식 — 없으면 감독은 여섯 축의 점 눈금을
+          정지점마다 외워 견줘야 승부수를 안다. 분과 문장 모두 장부의 사건에서
+          파생한 값이다 (match.md §4·§8) */}
+      {tactics.shift && (
+        <div className="mv-tac-shift" data-testid="opp-tactic-shift">
+          <b>{tactics.shift.minute}′ 전환</b>
+          <span>{tactics.shift.note}</span>
+        </div>
+      )}
       {TACTIC_AXES.map((axis) => {
         const v = tactics[axis.key];
         return (
@@ -457,6 +469,19 @@ function SideTactics({ tactics }: { tactics: Match["tactics"]["home"] }) {
             <span className="mv-tac-axis">{axis.label}</span>
             <Dots value={v} align="left" title={`${axis.label} ${v}`} />
             <span className="mv-tac-word">{tacticWord(axis.key, v)}</span>
+          </div>
+        );
+      })}
+      {/* 갈래 넷 — 눈금이 없으므로 점도 없다. 중립인 갈래는 줄이 서지 않는다:
+          지시하지 않은 것까지 세우면 넷이 늘 붙어 있어 무엇을 건 판인지 읽히지
+          않는다 (match.md §1.2) */}
+      {TACTIC_TOGGLES.map((toggle) => {
+        const value = tacticToggleValue(tactics, toggle.key);
+        if (value === null) return null;
+        return (
+          <div className="mv-tac-row one toggle" key={toggle.key}>
+            <span className="mv-tac-axis">{toggle.label}</span>
+            <span className="mv-tac-word">{tacticToggleWord(toggle.key, value)}</span>
           </div>
         );
       })}
@@ -627,6 +652,8 @@ function statLine(t: MatchPlayer["tally"]): string {
     t.xg > 0 ? `xG ${t.xg.toFixed(2)}` : null,
     t.scoringExpectation > 0 ? `기대득점 ${t.scoringExpectation.toFixed(2)}` : null,
     t.saves > 0 ? `선방 ${t.saves}` : null,
+    t.corners > 0 ? `코너 ${t.corners}` : null,
+    t.fouls > 0 ? `파울 ${t.fouls}` : null,
     `패스 ${t.passes}`,
     `전진 ${t.progressive}`,
   ]
@@ -663,6 +690,12 @@ function TeamTotals({ totals }: { totals: MatchTotals }) {
       </span>
       <span>
         선방 <b>{totals.saves}</b>
+      </span>
+      <span title="죽은 공에서 나온 기회 — 코너는 지정한 키커가 찬다">
+        코너 <b>{totals.corners}</b>
+      </span>
+      <span>
+        파울 <b>{totals.fouls}</b>
       </span>
     </div>
   );

@@ -1,12 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { ageOf } from "@story-fm/domain";
 import {
+  ageOf,
+  sharpnessBand,
+  sharpnessOf,
+  SHARPNESS_BAND_FLOOR,
+  SHARPNESS_MAX,
+} from "@story-fm/domain";
+import {
+  sharpnessAfterDay,
+  sharpnessAfterMinutes,
+  sharpnessDayOf,
+  SHARPNESS_PRESEASON,
+  SHARPNESS_TARGET,
+  stateModifier,
+} from "@story-fm/sim";
+import type { GamePlayer, PlayerState, PositionGroup } from "@story-fm/domain";
+import type { GameState } from "@story-fm/engine";
+import {
+  addDays,
   advanceTime,
+  contractGrievanceDue,
   diffDays,
+  endSeason,
   dueExpiryStage,
+  listedGrievanceDue,
+  listedPatienceDaysOf,
+  wageByRating,
   seasonYear,
   assignmentsOf,
   financeOf,
+  groupOf,
+  simSquadOf,
+  LOAN_REST_LIMIT,
+  LOAN_ROTATION_OVR_DROP,
+  ROTATION_FATIGUE,
   openInjury,
   pendingApproach,
   pendingVerdicts,
@@ -386,6 +413,129 @@ describe("시간은 웬만하면 지나간다", () => {
   });
 });
 
+/**
+ * 등재·계약의 불만 문턱 — **결정적이다** (→ docs/data/people.md §5).
+ *
+ * 추첨이 없어 감독이 날짜를 셀 수 있는 자리라, 경계가 하루·한 명 어긋나면 화면이
+ * "180일 남았다"고 적어 놓고 불만은 서지 않는다.
+ */
+describe("불만의 문턱 — 등재와 계약 만료", () => {
+  /** 스쿼드에 서로 다른 종합을 매긴다 — 동점이 있으면 상위 14명 경계를 잴 수 없다 */
+  function rankedSquad(state: GameState) {
+    const squad = [...userPlayers(state)].sort(
+      (a, b) => b.attributes.overall - a.attributes.overall,
+    );
+    squad.forEach((p, i) => {
+      p.attributes.overall = 90 - i;
+    });
+    return squad;
+  }
+
+  /** 그 선수의 활성 계약을 오늘로부터 `days` 뒤에 끝나게 하고, 주급을 서열 대비로 놓는다 */
+  function contractOf(state: GameState, player: GamePlayer, days: number, paid: boolean) {
+    const contract = state.contracts.find(
+      (c) => c.gamePlayerId === player.id && c.status === "active",
+    )!;
+    contract.until = addDays(state.date, days);
+    const rate = wageByRating(player.attributes.overall);
+    contract.weeklyWage = Math.round(paid ? rate * 1.1 : rate * 0.5);
+    return contract;
+  }
+
+  it("계약 만료 — 서열 대비 밀려 있으면 181일엔 서지 않고 180일에 선다", () => {
+    const state = createMiniGame();
+    const target = rankedSquad(state)[0]!;
+
+    contractOf(state, target, 181, false);
+    expect(contractGrievanceDue(state, target)).toBe(false);
+    contractOf(state, target, 180, false);
+    expect(contractGrievanceDue(state, target)).toBe(true);
+  });
+
+  it("계약 만료 — 서열대로 받고 있으면 문턱이 절반이다 (91/90일)", () => {
+    const state = createMiniGame();
+    const target = rankedSquad(state)[0]!;
+
+    contractOf(state, target, 180, true);
+    expect(contractGrievanceDue(state, target)).toBe(false);
+    contractOf(state, target, 91, true);
+    expect(contractGrievanceDue(state, target)).toBe(false);
+    contractOf(state, target, 90, true);
+    expect(contractGrievanceDue(state, target)).toBe(true);
+  });
+
+  it("계약 만료 — 이미 만료된 계약에는 서지 않고, 열린 재계약이 있으면 멈춘다", () => {
+    const state = createMiniGame();
+    const target = rankedSquad(state)[0]!;
+
+    contractOf(state, target, -1, false);
+    expect(contractGrievanceDue(state, target)).toBe(false);
+
+    contractOf(state, target, 100, false);
+    expect(contractGrievanceDue(state, target)).toBe(true);
+    state.negotiations.push({
+      id: `neg-renew-${target.id}`,
+      gamePlayerId: target.id,
+      kind: "renew",
+      counterpartTeamId: null,
+      windowId: null,
+      openedOn: state.date,
+      expiresOn: addDays(state.date, 14),
+      status: "open",
+      rounds: [],
+    });
+    expect(contractGrievanceDue(state, target)).toBe(false);
+  });
+
+  it("자격은 상위 14명이다 — 열넷째는 서고 열다섯째는 서지 않는다", () => {
+    const state = createMiniGame();
+    const squad = rankedSquad(state);
+    const core = squad[13]!; // 그보다 나은 선수 13명 — 안
+    const fringe = squad[14]!; // 14명 — 밖
+
+    contractOf(state, core, 180, false);
+    contractOf(state, fringe, 180, false);
+    expect(contractGrievanceDue(state, core)).toBe(true);
+    expect(contractGrievanceDue(state, fringe)).toBe(false);
+  });
+
+  it("등재 — 문턱은 그 사람의 것이고, 하루 전에는 서지 않는다", () => {
+    const state = createMiniGame();
+    const target = rankedSquad(state)[0]!;
+    const threshold = listedPatienceDaysOf(state, target);
+    expect(threshold).toBeGreaterThan(0);
+
+    state.transferList.push({
+      gamePlayerId: target.id,
+      askingPrice: 1_000_000,
+      listedOn: addDays(state.date, -(threshold - 1)),
+    });
+    expect(listedGrievanceDue(state, target)).toBe(false);
+
+    state.transferList[state.transferList.length - 1]!.listedOn = addDays(state.date, -threshold);
+    expect(listedGrievanceDue(state, target)).toBe(true);
+  });
+
+  it("등재 — 이미 불만이 있는 선수에게 사유를 하나 더 얹지 않는다", () => {
+    const state = createMiniGame();
+    const target = rankedSquad(state)[0]!;
+    state.transferList.push({
+      gamePlayerId: target.id,
+      askingPrice: 1_000_000,
+      listedOn: addDays(state.date, -60),
+    });
+    expect(listedGrievanceDue(state, target)).toBe(true);
+
+    state.issues.push({
+      gamePlayerId: target.id,
+      kind: "unhappy",
+      reason: "minutes",
+      since: state.date,
+    });
+    expect(listedGrievanceDue(state, target)).toBe(false);
+  });
+});
+
 describe("계약 만료 예고 — 문턱마다 한 번 (season.md §5)", () => {
   it("넘어선 문턱 중 가장 낮은 것만, 이미 낸 단계는 다시 내지 않는다", () => {
     expect(dueExpiryStage(181, undefined)).toBeNull();
@@ -431,5 +581,254 @@ describe("계약 만료 예고 — 문턱마다 한 번 (season.md §5)", () => 
       "90",
       String(diffDays(lastTicked, expiresOn)),
     ]);
+  });
+});
+
+/**
+ * 빌린 구단이 임대 자원에게 치르는 값 — `simSquadOf`의 문 둘
+ * (→ docs/simulation/season.md §2 임대).
+ *
+ * 재는 것은 **경계**다: 주전이 멀쩡할 때 서지 않고, 연속 미출전이 상한에 닿으면
+ * 서고, 기량 창 밖이면 상한에 닿아도 서지 않는다. 화면이 드러내는 값이 아니라
+ * AI 전 구단의 선발을 정하는 규칙이라 조용히 어긋난다.
+ */
+describe("임대 자원이 서는 자리 (season.md §2 임대)", () => {
+  /** 감독 팀이 아닌 클럽 하나 — AI 라인업은 이쪽에서만 짜인다 */
+  function hostOf(state: GameState): string {
+    return state.teams.find((t) => t.id !== state.userTeamId)!.id;
+  }
+
+  /**
+   * 그 구단 1군에 임대로 들어온 선수 하나를 만든다 — 다른 클럽의 2군에서 데려와
+   * 종합만 원하는 값으로 맞춘다. 포지션군은 원본 선수의 것을 그대로 쓴다.
+   */
+  function lendInto(
+    state: GameState,
+    hostId: string,
+    pick: (p: GamePlayer) => boolean,
+    overall: number,
+  ): GamePlayer {
+    const lender = state.teams.find((t) => t.id !== hostId && t.id !== state.userTeamId)!.id;
+    const player = playersOf(state, lender).find(pick)!;
+    player.teamId = hostId;
+    player.squadLevel = "first";
+    player.attributes.overall = overall;
+    player.state.condition = 100;
+    player.loan = { fromTeamId: lender, until: "2027-06-30", wageShare: 0.5 };
+    return player;
+  }
+
+  /** 그 구단이 치른 경기 `count`개를 장부에 얹는다 — 명단에는 아무도 넣지 않는다 */
+  function pastMatches(state: GameState, hostId: string, count: number): void {
+    for (let i = 0; i < count; i++) {
+      state.matches.push({
+        id: `past-${hostId}-${i}`,
+        season: state.season,
+        competitionId: "test-league",
+        round: i + 1,
+        date: addDays("2026-08-01", i),
+        homeTeamId: hostId,
+        awayTeamId: state.userTeamId,
+        result: { homeGoals: 0, awayGoals: 0, scorers: [], homeLineup: [], awayLineup: [] },
+      });
+    }
+  }
+
+  /** 그 포지션군에서 가장 약한 선발 */
+  function weakestStarter(state: GameState, hostId: string, group: PositionGroup): GamePlayer {
+    return assignmentsOf(state, hostId, "starting")
+      .map((a) => playersOf(state, hostId).find((p) => p.id === a.playerId)!)
+      .filter((p) => groupOf(p) === group)
+      .sort((a, b) => a.attributes.overall - b.attributes.overall)[0]!;
+  }
+
+  it("주전이 멀쩡하고 앉은 경기가 상한 아래면 임대 자원은 서지 않는다", () => {
+    const state = createMiniGame(42);
+    const host = hostOf(state);
+    const seat = weakestStarter(state, host, "MF");
+    const loanee = lendInto(state, host, (p) => groupOf(p) === "MF", seat.attributes.overall);
+    pastMatches(state, host, LOAN_REST_LIMIT - 1);
+
+    expect(simSquadOf(state, host).starters.map((p) => p.id)).not.toContain(loanee.id);
+  });
+
+  it("연속 미출전이 상한에 닿으면 같은 포지션군의 가장 약한 선발과 자리를 바꾼다", () => {
+    const state = createMiniGame(42);
+    const host = hostOf(state);
+    const seat = weakestStarter(state, host, "MF");
+    const loanee = lendInto(state, host, (p) => groupOf(p) === "MF", seat.attributes.overall);
+    pastMatches(state, host, LOAN_REST_LIMIT);
+
+    const squad = simSquadOf(state, host);
+    const ids = squad.starters.map((p) => p.id);
+    expect(ids).toContain(loanee.id);
+    expect(ids).not.toContain(seat.id);
+    expect(squad.starters).toHaveLength(11);
+    // 자리는 판의 것이다 — 좌표는 그대로고 숙련도만 들어온 선수의 것으로 다시 선다
+    const slot = (squad.slots ?? []).find((s) => s.player.id === loanee.id)!;
+    expect(slot.position).toBe(
+      assignmentsOf(state, host, "starting")[ids.indexOf(loanee.id)]!.position,
+    );
+  });
+
+  it("기량 창 밖이면 상한에 닿아도 서지 않는다 — 임대처 선택이 판단인 자리", () => {
+    const state = createMiniGame(42);
+    const host = hostOf(state);
+    const seat = weakestStarter(state, host, "MF");
+    const loanee = lendInto(
+      state,
+      host,
+      (p) => groupOf(p) === "MF",
+      seat.attributes.overall - LOAN_ROTATION_OVR_DROP - 1,
+    );
+    pastMatches(state, host, LOAN_REST_LIMIT + 5);
+
+    expect(simSquadOf(state, host).starters.map((p) => p.id)).not.toContain(loanee.id);
+    // 창의 경계 — 딱 그만큼 낮으면 선다
+    loanee.attributes.overall = seat.attributes.overall - LOAN_ROTATION_OVR_DROP;
+    expect(simSquadOf(state, host).starters.map((p) => p.id)).toContain(loanee.id);
+  });
+
+  it("임대 자원끼리는 자리를 뺏지 않는다 — 자리가 하나뿐이면 하나만 선다", () => {
+    const state = createMiniGame(42);
+    const host = hostOf(state);
+    // 골문은 선발 자리가 하나뿐이라, 서로의 자리를 뺏는지가 여기서만 드러난다
+    const seat = weakestStarter(state, host, "GK");
+    const first = lendInto(state, host, (p) => groupOf(p) === "GK", seat.attributes.overall);
+    const second = lendInto(
+      state,
+      host,
+      (p) => p.id !== first.id && groupOf(p) === "GK",
+      seat.attributes.overall,
+    );
+    pastMatches(state, host, LOAN_REST_LIMIT);
+
+    const ids = simSquadOf(state, host).starters.map((p) => p.id);
+    // 앞사람이 자리를 얻은 뒤 뒷사람이 그 자리를 다시 가져가지는 않는다
+    expect(ids.filter((id) => id === first.id || id === second.id)).toHaveLength(1);
+    expect(ids).not.toContain(seat.id);
+  });
+
+  it("로테이션 자리는 기량이 더 나은 스쿼드 자원보다 임대 자원이 먼저 받는다", () => {
+    const state = createMiniGame(42);
+    const host = hostOf(state);
+    const tired = weakestStarter(state, host, "MF");
+    tired.state.condition = 100 - ROTATION_FATIGUE - 5;
+    // 임대 자원은 그 자리를 놓고 겨루는 스쿼드 자원보다 약하다 — 그래도 먼저 선다
+    const loanee = lendInto(state, host, (p) => groupOf(p) === "MF", tired.attributes.overall - 5);
+    const rival = playersOf(state, host).find(
+      (p) =>
+        p.id !== loanee.id &&
+        groupOf(p) === "MF" &&
+        !assignmentsOf(state, host, "starting").some((a) => a.playerId === p.id),
+    )!;
+    rival.attributes.overall = tired.attributes.overall;
+    rival.state.condition = 100;
+    // 앉은 경기는 상한 아래다 — 서는 문은 로테이션 하나뿐이다
+    pastMatches(state, host, LOAN_REST_LIMIT - 1);
+
+    const ids = simSquadOf(state, host).starters.map((p) => p.id);
+    expect(ids).toContain(loanee.id);
+    expect(ids).not.toContain(rival.id);
+  });
+});
+
+/**
+ * 경기 감각 — **저장되는 셋째 축** (player.md §5.4).
+ *
+ * 곡선 자체는 순수 함수라 세계를 세우지 않고 직접 부른다. 세계가 필요한 것은
+ * "리그 전체가 같은 규칙으로 도는가"와 "시즌 전환이 되돌리는가" 둘뿐이다.
+ */
+describe("경기 감각 (player.md §5.4)", () => {
+  it("값이 없으면 기준점으로 읽는다 — 옛 세이브의 셈이 한 칸도 달라지지 않는다", () => {
+    const old: PlayerState = { form: 0, condition: 75 };
+    expect(sharpnessOf(old)).toBe(SHARPNESS_MAX);
+    expect(stateModifier(old)).toBe(1);
+    // 실전 등급(80) 위로는 얻을 것도 잃을 것도 없다 — 아래로만 깎인다
+    expect(stateModifier({ ...old, sharpness: SHARPNESS_MAX })).toBe(1);
+    expect(stateModifier({ ...old, sharpness: SHARPNESS_BAND_FLOOR.sharp })).toBe(1);
+    expect(stateModifier({ ...old, sharpness: 50 })).toBeCloseTo(0.955, 10);
+    expect(stateModifier({ ...old, sharpness: 0 })).toBeCloseTo(0.88, 10);
+    // 문턱 아래에서만 갈린다 — "실전"이라고 적힌 선수는 대가를 물지 않는다
+    expect(sharpnessBand(SHARPNESS_BAND_FLOOR.sharp)).toBe("sharp");
+  });
+
+  it("적립은 남은 폭을 지수로 채운다 — 구간을 나눠 뛰어도 총합이 같다", () => {
+    expect(sharpnessAfterMinutes(30, 0)).toBe(30);
+    // 같은 90분이 낮은 데서 더 크게 남는다 (훈련 적응의 꼴)
+    expect(sharpnessAfterMinutes(30, 90) - 30).toBeGreaterThan(sharpnessAfterMinutes(80, 90) - 80);
+    // 45분 두 번은 90분 한 번과 같다 — 교체로 나눠 뛴 선수가 손해 보지 않는다
+    expect(sharpnessAfterMinutes(sharpnessAfterMinutes(30, 45), 45)).toBeCloseTo(
+      sharpnessAfterMinutes(30, 90),
+      10,
+    );
+    // 상한을 넘지 않는다 (연장까지 뛰어도)
+    expect(sharpnessAfterMinutes(SHARPNESS_MAX, 120)).toBeLessThanOrEqual(SHARPNESS_MAX);
+  });
+
+  it("하루는 그날의 자리로 끌린다 — 자리 위면 내려오고 아래면 올라온다", () => {
+    expect(sharpnessAfterDay(90, "training")).toBeLessThan(90);
+    expect(sharpnessAfterDay(20, "training")).toBeGreaterThan(20);
+    expect(sharpnessAfterDay(SHARPNESS_TARGET.idle, "idle")).toBeCloseTo(SHARPNESS_TARGET.idle, 10);
+    // 재활이 가장 빨리, 본훈련이 가장 늦게 무뎌진다
+    expect(sharpnessAfterDay(90, "rehab")).toBeLessThan(sharpnessAfterDay(90, "idle"));
+    expect(sharpnessAfterDay(90, "idle")).toBeLessThan(sharpnessAfterDay(90, "training"));
+  });
+
+  it("하루의 성격은 회복 눈금과 같은 하루를 읽고, 재활만 따로 본다", () => {
+    expect(sharpnessDayOf("training", false)).toBe("training");
+    // 회복 세션은 가벼운 러닝이다 — 몸은 되찾아도 경기 감각은 채우지 않는다
+    expect(sharpnessDayOf("recovery", false)).toBe("idle");
+    expect(sharpnessDayOf("idle", false)).toBe("idle");
+    expect(sharpnessDayOf("training", true)).toBe("rehab");
+  });
+
+  it("90일 재활이면 굳고, 그 뒤 훈련만으로는 훈련장의 천장을 못 넘는다", () => {
+    let hurt = 86;
+    for (let d = 0; d < 90; d++) hurt = sharpnessAfterDay(hurt, "rehab");
+    expect(sharpnessBand(hurt)).toBe("blunt");
+    // 복귀 뒤 석 달을 본훈련만 해도 55 아래다 — 그 위는 출전 분만 채운다
+    let trained = hurt;
+    for (let d = 0; d < 90; d++) trained = sharpnessAfterDay(trained, "training");
+    expect(trained).toBeLessThan(SHARPNESS_TARGET.training);
+    // 한 경기로 실전 등급에 서지도 못한다 — "몇 경기 동안 온전한 전력이 아니다"
+    expect(sharpnessBand(sharpnessAfterMinutes(trained, 90))).not.toBe("sharp");
+  });
+
+  it("리그 전체가 같은 규칙으로 무뎌진다 — 감독 팀에만 걸리지 않는다", () => {
+    const state = createTestGame(7);
+    const mine = userPlayers(state)[0]!;
+    const theirs = playersOf(state, "mancity")[0]!;
+    mine.state.sharpness = 90;
+    theirs.state.sharpness = 90;
+    advanceDays(state, 7);
+    expect(mine.state.sharpness!).toBeLessThan(90);
+    expect(theirs.state.sharpness!).toBeLessThan(90);
+    // 재활 중인 선수가 더 빨리 굳는다 — 재활실은 훈련장이 아니다
+    const hurt = userPlayers(state)[1]!;
+    hurt.state.sharpness = 90;
+    const fit = userPlayers(state)[2]!;
+    fit.state.sharpness = 90;
+    state.injuries.push({
+      id: `inj-test-${hurt.id}`,
+      gamePlayerId: hurt.id,
+      bodyPart: "햄스트링",
+      severity: "major",
+      cause: "training",
+      occurredOn: state.date,
+      expectedReturn: addDays(state.date, 90),
+      returnedOn: null,
+    });
+    advanceDays(state, 7);
+    expect(hurt.state.sharpness!).toBeLessThan(fit.state.sharpness!);
+  });
+
+  it("시즌 전환이 전원을 프리시즌 값으로 되돌린다 — 몸은 쉬어도 감각은 무뎌진다", () => {
+    const state = createTestGame(42, "arsenal");
+    state.date = "2027-06-01";
+    for (const p of state.players) p.state.sharpness = 95;
+    endSeason(state);
+    expect(state.players.length).toBeGreaterThan(0);
+    for (const p of state.players) expect(p.state.sharpness).toBe(SHARPNESS_PRESEASON);
   });
 });

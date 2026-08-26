@@ -55,7 +55,7 @@ import {
   runOnboardingTurn,
   type GmToolCall,
 } from "@story-fm/agents";
-import { awardTitle, normalizeSpeaker, SCOUT_DAYS } from "@story-fm/domain";
+import { awardTitle, boardExpectationLine, normalizeSpeaker, SCOUT_DAYS } from "@story-fm/domain";
 import type { GameLLM, StopReason, TurnRequest, TurnResult } from "@story-fm/llm";
 
 /** 실모드 평시 턴이 부르는 모델 — `llm`을 따로 받지 않는 `runGmTurn`의 길이다 */
@@ -291,6 +291,27 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
     const before = buildGmReference(state);
     state.manager.reputation.media += 5;
     expect(buildGmReference(state)).toBe(before);
+  });
+
+  /**
+   * 보드 기대는 「경고 2/3」이라는 숫자가 무엇을 재는지다 — 이 줄이 없으면 구단주도
+   * 수석코치도 순위를 두고 하는 말에 근거가 없다 (career.md §5).
+   *
+   * 세는 것은 둘이다: 재직 중에 **서는가**, 그리고 무직에는 **서지 않는가**. 무직의
+   * 스냅샷이 옛 구단의 기대를 실으면 모델은 아직 그 구단의 감독처럼 쓴다.
+   */
+  it("보드 기대는 재직 중 스냅샷에만 선다 — 이름과 목표 순위를 함께", () => {
+    const state = game();
+    // 아스날은 tier 1·20팀 리그다 — 「우승 경쟁」에도 순위가 붙어야 문턱이 읽힌다
+    expect(buildGmStateNote(state)).toContain(boardExpectationLine("title", 2));
+
+    state.dismissal = {
+      kind: "sacked",
+      on: state.date,
+      season: state.season,
+      teamId: state.userTeamId,
+    };
+    expect(buildGmStateNote(state)).not.toContain("보드 기대");
   });
 
   /**

@@ -4,21 +4,35 @@ import type {
   BoardPoint,
   EdgeSize,
   LedgerEntry,
+  MatchEventType,
   MatchRecord,
+  MatchSide,
+  MilestoneCode,
   PacketPlayer,
   Foot,
+  PromiseKind,
   ScheduleType,
+  SeasonStat,
   ShootoutOutcome,
+  ShotOrigin,
   SquadRegistration,
+  SquadStatus,
   TacticalRead,
+  TransitionMode,
+  TacklingLevel,
+  KeeperDistribution,
+  TrainingReport,
   BoardExpectationCode,
 } from "@story-fm/domain";
 import {
   boardExpectationText,
   isReserveMatch,
+  matchMinutesOf,
+  normalizeCauses,
   normalizePacket,
   packetTagContext,
   packetTagText,
+  subCauseText,
 } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
@@ -27,13 +41,20 @@ import {
   FINANCE_CATEGORY_KO,
   MANAGER_SPEND_KIND_KO,
   TRAIN_ATTR_KO,
+  TRAINING_MARK_KO,
   ageOf,
   anchorOf,
   clampCondition,
   conditionLabel,
+  sharpnessBand,
+  sharpnessLabel,
+  sharpnessOf,
+  type SharpnessBand,
   defaultRoleOf,
   growthLabel,
   naturalPositionOf,
+  outcomeFor,
+  outcomeLabel,
   pairOfMatchId,
   parseScorerEntry,
   rolesFor,
@@ -75,10 +96,14 @@ import { DOMESTIC_STAGES, domesticCupById } from "../data/domestic-cup-catalog";
 import { domesticCupsOf, userStillIn } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { euroCompetitionOf } from "../competition/europe";
+import { foldCareer, type CareerTotals } from "../squad/career";
 import { formAngle, formLabel, formTone } from "../squad/form";
+import { leaderGroupOf } from "../squad/hierarchy";
 import { ratingTone, type RatingTone } from "../match/ratings";
+import { buildOpponentReport } from "../match/preview";
 import { GAP_CONDITION, edgeOf, subLimitsOf, zoneGrid } from "@story-fm/sim";
 import { moodOf, type MoodRead } from "../squad/mood";
+import { openPromises, squadStatusOf } from "../squad/promises";
 import { isHomegrownFor, occupiesSquadList, squadRegistrationOf } from "../squad/registration";
 import {
   observationOf,
@@ -122,6 +147,7 @@ import {
   playerById,
   proficiencyAt,
   adaptationOf,
+  ourPlayers,
   FAMILIARITY_BASELINE,
   tacticsOf,
   clubProfileIn,
@@ -130,6 +156,7 @@ import {
   weeklyWagesOf,
   type GameState,
 } from "../core/state";
+import { loanReports } from "../market/departures";
 
 /**
  * 그날 훈련이 남긴 것 — **집계 한 줄**.
@@ -296,6 +323,13 @@ function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
   });
 }
 
+/** 경기 화면의 전술 카드가 6축 위에 더 싣는 것 — 소화율·노트·전환 표식 */
+interface MatchTacticsExtra {
+  uptake: number;
+  notes: string[];
+  shift: { minute: number; note: string } | null;
+}
+
 /** 팀 전술 (TACTICS) — 스쿼드 탭에서 보고 편집한다 */
 export interface TacticsView {
   formation: string;
@@ -308,6 +342,15 @@ export interface TacticsView {
   width: number;
   /** 1(짧게) ~ 5(길게) */
   passStyle: number;
+  /**
+   * ── 갈래 넷 — 눈금이 아니라 둘 중 하나다 (→ docs/simulation/match.md §1.2).
+   * **옛 세이브이거나 감독이 그 갈래에 서지 않았으면 없다** — 중립인지는 화면이
+   * 다시 재지 않고 `tacticToggleValue`가 답한다.
+   */
+  transition?: TransitionMode | null;
+  offsideTrap?: boolean;
+  tackling?: TacklingLevel;
+  keeperDistribution?: KeeperDistribution | null;
 }
 
 export interface SquadPositionView {
@@ -327,6 +370,57 @@ export interface SquadPositionView {
 export interface RecentRatingView {
   value: number;
   tone: RatingTone;
+}
+
+/**
+ * 커리어 한 묶음 — 시즌 행과 통산 행이 **같은 모양**이다. 표의 마지막 줄이
+ * 위의 행들과 같은 열을 쓰므로, 화면이 통산만 따로 그리지 않아도 된다.
+ *
+ * 저장하지 않는다 — `SEASON_STAT` 전 행을 `foldCareer`로 접은 값이다
+ * (→ docs/data/game-state.md §5). 평점은 **합계가 아니라 평균**을 싣는다:
+ * 화면이 나눗셈을 다시 하면 코어와 다른 자리에서 반올림한다.
+ */
+export interface CareerTotalsView {
+  apps: number;
+  goals: number;
+  assists: number;
+  /** 평균 평점 — 출전이 없으면 null (0.00과 "기록 없음"은 다르다) */
+  rating: number | null;
+  /**
+   * 2군 리그 — 1군과 **섞지 않는다** (season.md §2). 섞으면 표의 "출전 38"이
+   * 1·2군 혼합값이 되고, 마일스톤이 세는 수와도 갈린다.
+   */
+  reserveApps: number;
+  reserveGoals: number;
+}
+
+/** 시즌 한 줄 — 시즌 안에 팀을 옮겼으면 **행도 팀별로 갈린다** (player.md §10) */
+export interface CareerSeasonView extends CareerTotalsView {
+  season: number;
+  teamId: string;
+  /** 팀 약칭 — 화면은 카탈로그를 못 읽는다 (엔진을 타입으로만 import한다) */
+  team: string;
+}
+
+/**
+ * 상세에 세울 마일스톤 수 — 표 옆의 **곁줄**이라 한 줄을 크게 넘기면 그 자체가
+ * 또 하나의 목록이 된다. 문턱(50·100경기)은 드물지만 해트트릭은 시즌마다 쌓인다.
+ */
+const SQUAD_MILESTONES_SHOWN = 6;
+
+/**
+ * 그 선수가 세운 기록 한 건 — **코드와 수치뿐이다.** 문장은 화면이
+ * `milestoneTitle`로 만든다 (match.md §6 · overview.md §1 철칙 4).
+ *
+ * `season`은 싣지 않는다 — `date`가 이미 그것을 말하고, 화면이 세우는 것은
+ * 날짜 옆의 라벨 한 줄이다.
+ */
+export interface MilestoneView {
+  code: MilestoneCode;
+  value: number;
+  date: string;
+  /** 어느 셔츠로 세웠나 — 문턱은 클럽 안에서만 센다 */
+  teamId: string;
 }
 
 /** 스쿼드 행 = 메타 + 16축 (오피스 뷰는 우리 선수라 숫자를 그대로 준다) */
@@ -367,6 +461,13 @@ interface SquadViewRowMeta {
   slotOverall: number | null;
   /** 이 팀 기준 홈그로운인가 — 등록 명단의 8명 조건을 채우는 선수 */
   homegrown: boolean;
+  /**
+   * 국적 — 협회 코드 (`domain/nationality.ts`). 홈그로운과 다른 축이다: 홈그로운은
+   * 어디서 자랐는가이고 이것은 누구인가라, 같은 줄에 나란히 선다.
+   */
+  nationality: string | null;
+  /** 둘째 국적 — 없으면 null */
+  secondNationality: string | null;
   /** 두 발 숙련도 (각 1~5) — 좌우 분화 자리의 적응도를 가른다 */
   foot: Foot;
   /** 키(cm) · 체중(kg) — 묘사용 (전력 계산에는 안 들어간다) */
@@ -387,6 +488,31 @@ interface SquadViewRowMeta {
    */
   potential: { low: number; high: number; margin: number; confidence: string } | null;
   squadLevel: "first" | "reserve";
+  /**
+   * **우리가 임대 보낸 선수인가** — 아니면 null (`market/departures.ts`의 리포트).
+   *
+   * 계약이 우리 것이라 명단에 서지만 `squadLevel`은 **빌린 구단의 값**이고 우리
+   * 전술판에는 자리가 없다. 그래서 층(1군·2군)으로 가르는 자리는 전부 이 칸을
+   * 먼저 봐야 한다 — 안 그러면 임대 선수가 엉뚱한 탭에 서고 승격·강등 diff에 실린다.
+   *
+   * `team`은 **약칭**이다 — 화면은 카탈로그를 못 읽는다 (`CareerSeasonView.team`과
+   * 같은 이유).
+   */
+  loan: {
+    teamId: string;
+    team: string;
+    /** 복귀일 */
+    until: string;
+    /** 그 구단에서의 이번 시즌 1군 기록 */
+    apps: number;
+    goals: number;
+    /** 평균 평점 — 출전이 없으면 null (0.00과 "기록 없음"은 다르다) */
+    rating: number | null;
+    /** 그 구단 최근 경기의 연속 미출전 수 */
+    benchRun: number;
+    /** 임대 이후 오른 능력치 칸 수 */
+    growth: number;
+  } | null;
   form: number;
   /** 폼의 말 — "절정"·"상승세"·"평소"·"침체"·"바닥" (form.ts와 같은 경계) */
   formLabel: string;
@@ -412,6 +538,17 @@ interface SquadViewRowMeta {
    * 쓰면 감독이 두 탭을 견주는 것만으로 안개가 걷힌다.
    */
   condition: ConditionRead;
+  /**
+   * **경기 감각 0~100** — 최근에 뛰었는가 (player.md §5.4). 체력과 다른 축이다:
+   * 하루 쉬어서 돌아오는 것이 아니라 출전 분이 올리고 결장이 깎는다.
+   *
+   * 안개를 지나지 않는다 — 원본이 출전 기록과 부상이고 둘 다 공개 사실이다.
+   */
+  sharpness: number;
+  /** 경기 감각의 말 — "실전"·"올라옴"·"무딤"·"굳음" (player.ts와 같은 경계) */
+  sharpnessLabel: string;
+  /** 등급 자체 — 화면이 색과 정렬을 이 경계로 맞춘다 */
+  sharpnessBand: SharpnessBand;
   /**
    * 지금 심경 — **코어가 고른 사실 카드**와, 결산(LLM)이 다시 쓴 한 줄(`moodOf`).
    * 문장은 화면이 쓴다 (`apps/web/lib/mood.ts` · overview.md §1 철칙 4).
@@ -477,15 +614,62 @@ interface SquadViewRowMeta {
   adaptation: number;
   instruction: string | null;
   isCaptain: boolean;
+  isViceCaptain: boolean;
+  /**
+   * 라커룸 서열 — 리더 그룹 안의 순위(1부터), 그룹 밖이면 `null`
+   * (→ docs/data/people.md §5-1). 화면과 조회 도구가 **같은 값**을 읽어야 해서
+   * 여기 하나에서만 파생한다.
+   */
+  leaderRank: number | null;
   seasonGoals: number;
   seasonApps: number;
   seasonAssists: number;
   /** 시즌 평균 평점 — 출전이 없으면 null (0.0과 "기록 없음"은 다르다) */
   seasonRating: number | null;
+  /**
+   * 경기가 남긴 나머지 — 출전 분·슛·xG·선방·클린시트·카드 (match.md §6).
+   * 위 넷과 같은 "이번 시즌 이 팀" 한 행이고, 두 시뮬이 같은 눈금으로 얹은 값이라
+   * 리그의 어느 선수든 같은 자로 읽힌다. 골키퍼가 아니면 선방·클린시트는 0이다.
+   */
+  seasonMinutes: number;
+  seasonShots: number;
+  seasonXg: number;
+  seasonSaves: number;
+  seasonCleanSheets: number;
+  seasonYellows: number;
+  seasonReds: number;
+  /**
+   * **시즌별과 통산** — 위 `season*` 칸들은 "이번 시즌 이 팀" 한 행이라, 3년 함께한
+   * 주장이 우리 팀에서 몇 경기를 뛰었는지가 화면 어디에도 없었다.
+   *
+   * 시즌 행은 **자르지 않는다** — 카드(GM)는 상한을 두지만 상세는 스크롤이 되는
+   * 자리고, 표는 전체 이력이 서라고 있는 물건이다. 출전이 0인 행은 애초에 빼므로
+   * 개막 전에는 빈 배열이고, 화면은 그때 표를 세우지 않는다.
+   *
+   * 시즌 오름차순, 같은 시즌 안에서는 팀 id 순 (`careerOf`와 같은 순서).
+   */
+  career: { seasons: CareerSeasonView[]; totals: CareerTotalsView };
+  /**
+   * 마일스톤 — **최근 것 몇 건**만 (`SQUAD_MILESTONES_SHOWN`). 장부는 감독 팀
+   * 선수만 담으므로 스쿼드 행에는 늘 온전히 있다 (game-state.md §3.4).
+   * 오래된 것부터 적는다 — 표의 시즌 행과 같은 방향이다.
+   */
+  milestones: MilestoneView[];
   hasIssue: boolean;
   /** 주급 (£/주) */
   weeklyWage: number;
   contractUntil: string | null;
+  /**
+   * **어떤 자리로 왔는가** — 계약에 적힌 지위, 없으면 지금 서열에서 파생
+   * (`squadStatusOf` → docs/data/people.md §5-2). 그 지위가 부르는 선발 비율이
+   * 출전 불만과 약속 이행을 함께 재므로, 화면과 GM이 **같은 값**을 읽어야 한다.
+   */
+  squadStatus: SquadStatus;
+  /**
+   * 아직 기한 전인 **감독의 약속** — 갈래와 기한뿐이다 (people.md §5-2).
+   * 무슨 말로 약속했는지는 장면의 것이라 여기 오지 않는다.
+   */
+  promises: Array<{ kind: PromiseKind; dueOn: string }>;
   /** 현재 부상 (없으면 null) */
   injury: { bodyPart: string; severity: string; expectedReturn: string } | null;
   /** 출장 정지 잔여 경기 (0이면 정지 아님) */
@@ -513,7 +697,15 @@ export interface CalendarEventView {
     | "transfer"
     | "window"
     /** 큰 비정기 수입·지출 — 정액 항목은 서지 않는다 (docs/simulation/finance.md §8.2) */
-    | "money";
+    | "money"
+    /**
+     * 소식 — **서사 표(`state.narrative`)가 그대로 선 줄** (people.md §9).
+     *
+     * 시간을 넘긴 턴에 코어가 굴린 일은 다이제스트로만 가고 화면에는 서지 않는다.
+     * 그 사건의 원본은 이미 서사 표에 있으니 여기서 날짜에 세운다 — 코어가 새 문장을
+     * 쓰는 것이 아니다.
+     */
+    | "news";
   text: string;
   /**
    * 접어 둔 상세 — 있으면 UI가 눌러서 펼친다. 성장처럼 **한 날에 스무 줄이 나오는**
@@ -539,6 +731,13 @@ export interface CalendarEntryView {
    * 여기서 조각을 주면 UI가 `title`을 정규식으로 도려내지 않아도 된다.
    */
   match: {
+    /**
+     * 어느 경기인가 (`MATCH.id`) — 달력 행이 **경기 리포트를 열 열쇠**다 (match.md §8).
+     *
+     * 엔트리 id로 대신할 수 없다: 그러면 리포트를 부르는 자리가 종료 카드(경기 id)와
+     * 달력(엔트리 id) 둘로 갈리고, 한 라우트가 두 가지 id를 받게 된다.
+     */
+    matchId: string;
     /** 대회 약칭 — 리그는 null (기본값이라 칸에 적지 않는다) */
     competition: string | null;
     /** 단계 표기 — 리그는 라운드(`R7`), 컵은 `16강 1차전` */
@@ -601,6 +800,12 @@ export interface CompetitionRoundView {
  * 며칠에 걸리는 지금(match.md §3), "사흘 뒤"인지 "엿새 뒤"인지가 곧 로테이션 판단이다.
  */
 export interface NextMatchView {
+  /**
+   * 어느 경기인가 (`MATCH.id`) — 카드가 **그 경기의 상대 분석**을 집을 열쇠다
+   * (match.md §1.8). 대회 탭이 세우는 경기와 팀의 다음 경기가 갈릴 수 있으므로
+   * 이름·날짜로 맞춰 보게 두면 같은 날 두 경기가 있는 주에 엉뚱한 판이 붙는다.
+   */
+  matchId: string;
   date: string;
   /** 킥오프 시각 `20:00` */
   time: string;
@@ -611,6 +816,42 @@ export interface NextMatchView {
   venue: "home" | "away" | "neutral";
   /** 오늘로부터 며칠 뒤인가 — 0이면 오늘이다 */
   inDays: number;
+}
+
+/**
+ * 경기 전 상대 분석 — **다음 경기 카드에 접혀 붙는다** (match.md §1.8 · §8).
+ *
+ * 조립은 코어 한 곳(`buildOpponentReport`)이고 여기서 하는 일은 문장으로 옮기는
+ * 것뿐이다: 태그는 `packetTagText`가, 6축의 낱말은 화면이 `TACTIC_AXES`로 만든다.
+ * 조회 도구(`get_opponent_report`)와 GM 입력의 브리핑도 같은 리포트를 읽는다 —
+ * 셋이 각자 세우면 같은 상대가 세 가지로 읽힌다.
+ */
+export interface MatchPreviewView {
+  matchId: string;
+  /**
+   * 상대 예상 XI — **직전 경기 선발에서 투영**한 것이라 예상이다 (match.md §1.8).
+   * `carried`가 `false`인 줄은 코어가 메운 자리다.
+   */
+  expectedXI: {
+    id: string;
+    name: string;
+    position: string;
+    squadNumber: number | null;
+    carried: boolean;
+  }[];
+  /** 투영의 근거가 된 상대의 직전 경기 — 없으면 개막전이다 */
+  basis: { date: string; label: string } | null;
+  /** 직전 경기 선발에서 이어지지 못해 코어가 메운 인원 — 예상의 흐릿한 정도다 */
+  guessed: number;
+  /** 부상·정지로 못 나오는 상대 선수 */
+  absent: { name: string; position: string; reason: "injury" | "suspension"; note: string }[];
+  /** 상대가 세워 둔 모양과 6축 — 전술판과 같은 조각이라 화면이 같은 낱말을 쓴다 */
+  shape: TacticsView;
+  /**
+   * 상성·키포인트 — `ours`는 **우리 편에 이로운 줄인가**다.
+   * 판세 화면의 `keyPoints`와 같은 계약이라 화면이 같은 색 규칙을 쓴다.
+   */
+  keyPoints: { text: string; ours: boolean | null }[];
 }
 
 /**
@@ -754,6 +995,10 @@ export interface MatchTally {
   xg: number;
   /** 실제 슈터의 결정력을 반영한 골 확률 합. */
   scoringExpectation: number;
+  /** 그 선수가 찬 코너 — 죽은 공을 누가 올리는지가 여기 남는다 (match.md §4) */
+  corners: number;
+  /** 그 선수가 범한 파울 */
+  fouls: number;
 }
 
 /** 경기 중 한 선수 — 지금 내는 전력과 남은 다리 */
@@ -815,6 +1060,8 @@ function tallyTotal(players: readonly MatchPlayerView[]): MatchTally {
       progressive: acc.progressive + p.tally.progressive,
       xg: acc.xg + p.tally.xg,
       scoringExpectation: acc.scoringExpectation + p.tally.scoringExpectation,
+      corners: acc.corners + p.tally.corners,
+      fouls: acc.fouls + p.tally.fouls,
     }),
     {
       goals: 0,
@@ -827,6 +1074,8 @@ function tallyTotal(players: readonly MatchPlayerView[]): MatchTally {
       progressive: 0,
       xg: 0,
       scoringExpectation: 0,
+      corners: 0,
+      fouls: 0,
     },
   );
 }
@@ -933,10 +1182,13 @@ export interface MatchView {
    * 감독이 지시한 것이 판에 반영되고 있다는 유일한 증거다.
    */
   exploiting: string[];
-  /** 양팀 전술 6축 + 소화율 */
+  /**
+   * 양팀 전술 6축 + 소화율. `shift`는 그 팀 벤치가 **이 경기에서 마지막으로 판을
+   * 옮긴 정지점** — 장부의 `tactical_shift` 사건에서 파생한다 (match.md §4·§8).
+   */
   tactics: {
-    home: TacticsView & { uptake: number; notes: string[] };
-    away: TacticsView & { uptake: number; notes: string[] };
+    home: TacticsView & MatchTacticsExtra;
+    away: TacticsView & MatchTacticsExtra;
   };
   onPitch: { home: MatchPlayerView[]; away: MatchPlayerView[] };
   bench: { home: MatchPlayerView[]; away: MatchPlayerView[] };
@@ -1066,6 +1318,12 @@ export interface OfficeViews {
      * 언제 누구인가지 그 대회의 다음 라운드가 아니다.
      */
     nextMatch: NextMatchView | null;
+    /**
+     * 그 경기의 **상대 분석** — 위 `nextMatch`와 같은 경기다 (match.md §1.8).
+     * 경기 중에는 `null`이다: 90분 안에 다음 상대를 분석하는 자리는 없고, 지금
+     * 판은 판세 탭이 이미 들고 있다.
+     */
+    preview: MatchPreviewView | null;
     /** 최근 다섯 경기 — **사실만**. 문장은 화면이 잇는다 (competition.md §7) */
     recentResults: RecentResultView[];
     /** 탭 순서: 우리 리그 → 우리 대항전 */
@@ -1371,36 +1629,11 @@ function scoreOf(match: MatchRecord): string | null {
 }
 
 /**
- * 이 팀의 승패 — **승패를 판정하는 유일한 자리다.**
- *
- * 승부차기가 있으면 그것이 결론이다: 승부차기로 갈린 컵 경기를 "무"로 칠하면 안
- * 된다 — 그 날 이 팀은 이겼거나 떨어졌다. 결과가 없거나 이 팀의 경기가 아니면
- * `null`이고, 한글 라벨은 `outcomeLabel`이 붙인다(조회 응답·달력 일지).
- *
- * (폼의 연속 기록은 승부차기를 보지 않는다 — `recentOutcomes`, slump.ts.)
+ * 이 팀의 승패와 그 한글 표기는 **도메인의 것**이다 — 경기 기록 하나만 보면 답이
+ * 나오는 규칙이라 화면·조회·코치의 눈이 같은 판정을 쓴다 (AGENTS.md §5 「한 규칙,
+ * 한 정의」). 여기서 다시 내보내므로 코어 쪽 호출자는 자리를 옮기지 않는다.
  */
-export function outcomeFor(match: MatchRecord, teamId: string): "W" | "D" | "L" | null {
-  const home = match.homeTeamId === teamId;
-  if (!match.result || (!home && match.awayTeamId !== teamId)) return null;
-  const { homeGoals, awayGoals, penalties } = match.result;
-  const mine = home ? homeGoals : awayGoals;
-  const theirs = home ? awayGoals : homeGoals;
-  if (mine !== theirs) return mine > theirs ? "W" : "L";
-  if (penalties) {
-    const myPens = home ? penalties.home : penalties.away;
-    const theirPens = home ? penalties.away : penalties.home;
-    if (myPens !== theirPens) return myPens > theirPens ? "W" : "L";
-  }
-  return "D";
-}
-
-const OUTCOME_KO = { W: "승", D: "무", L: "패" } as const;
-
-/** 승패의 한글 표기 — 판정은 `outcomeFor`가 하고 여기서는 라벨만 붙인다 */
-export function outcomeLabel(outcome: "W" | "D" | "L" | null): "승" | "무" | "패" {
-  return OUTCOME_KO[outcome ?? "D"];
-}
-
+export { outcomeFor, outcomeLabel };
 /**
  * 최근 경기 평점 — 폼의 시간 축.
  *
@@ -1485,21 +1718,25 @@ function buildMatchView(state: GameState): MatchView | null {
    * `ledger.events`이기 때문이다: 두 벌로 두면 조용히 갈린다.
    */
   const tallies = new Map<string, MatchTally>();
+  /** 아무것도 하지 않은 선수의 한 줄 — 빈 값을 세우는 자리가 하나여야 칸이 늘 때 갈리지 않는다 */
+  const emptyTally = (): MatchTally => ({
+    goals: 0,
+    assists: 0,
+    shots: 0,
+    saves: 0,
+    yellows: 0,
+    red: false,
+    passes: 0,
+    progressive: 0,
+    xg: 0,
+    scoringExpectation: 0,
+    corners: 0,
+    fouls: 0,
+  });
   const tallyOf = (id: string): MatchTally => {
     const found = tallies.get(id);
     if (found) return found;
-    const fresh: MatchTally = {
-      goals: 0,
-      assists: 0,
-      shots: 0,
-      saves: 0,
-      yellows: 0,
-      red: false,
-      passes: 0,
-      progressive: 0,
-      xg: 0,
-      scoringExpectation: 0,
-    };
+    const fresh = emptyTally();
     tallies.set(id, fresh);
     return fresh;
   };
@@ -1515,6 +1752,9 @@ function buildMatchView(state: GameState): MatchView | null {
     t.progressive = line.progressive;
     t.xg = line.xg;
     t.scoringExpectation = line.scoringExpectation ?? 0;
+    // 옛 세이브의 줄에는 없는 칸이다 (SAVE_VERSION 유지)
+    t.corners = line.corners ?? 0;
+    t.fouls = line.fouls ?? 0;
   }
   for (const event of ledger.events) {
     const [first, second] = event.actors;
@@ -1573,18 +1813,7 @@ function buildMatchView(state: GameState): MatchView | null {
       // 읽은 값으로 판정해도 참값과 갈리지 않는다 — 구간이 문턱을 넘지 않는다
       gassed: condition.value <= GAP_CONDITION,
       ours: teamId === state.userTeamId,
-      tally: tallies.get(entry.id) ?? {
-        goals: 0,
-        assists: 0,
-        shots: 0,
-        saves: 0,
-        yellows: 0,
-        red: false,
-        passes: 0,
-        progressive: 0,
-        xg: 0,
-        scoringExpectation: 0,
-      },
+      tally: tallies.get(entry.id) ?? emptyTally(),
     };
   };
   const rowsOf = (
@@ -1606,12 +1835,27 @@ function buildMatchView(state: GameState): MatchView | null {
 
   const subLimits = subLimitsOf(ledger.phase);
 
+  /**
+   * **판을 옮긴 정지점의 표식** — 장부의 마지막 `tactical_shift`에서 파생한다
+   * (match.md §4·§8). 화면이 따로 기억하는 상태가 아니라 사건이 원본이므로, 표식과
+   * 중계가 같은 한 줄에서 나온다. 표식이 없으면 감독은 정지점마다 여섯 축의 점
+   * 눈금을 외워 견줘야 상대의 승부수를 안다.
+   */
+  const shiftOfSide = (side: MatchSide) => {
+    const found = [...ledger.events]
+      .reverse()
+      .find((e) => e.type === "tactical_shift" && e.team === side);
+    const tag = found ? normalizeCauses(found.causes)[0] : undefined;
+    return found && tag ? { minute: found.minute, note: packetTagText(tag, tagCtx) } : null;
+  };
+
   const tacticsOfSide = (teamId: string, tactical: TacticalRead) => ({
     ...(teamId !== state.userTeamId && pending.aiTactics
       ? pending.aiTactics
       : tacticsOf(state, teamId).spec),
     uptake: tactical.uptake,
     notes: tactical.notes.map((tag) => packetTagText(tag, tagCtx)),
+    shift: shiftOfSide(teamId === match.homeTeamId ? "home" : "away"),
   });
 
   return {
@@ -1754,9 +1998,41 @@ function buildMatchView(state: GameState): MatchView | null {
  * 갈리는 것은 **무엇을 골랐는가**와 표기(`label`)뿐이라, 같은 경기를 두 자리에서
  * 다르게 적을 길이 없다.
  */
+/**
+ * 경기 전 상대 분석 한 장 — 코어의 리포트를 화면 조각으로 옮긴다 (match.md §1.8).
+ * 태그를 문장으로 바꾸는 자리는 여기 하나다(`packetTagText`) — 판세 화면의
+ * 키포인트와 같은 렌더러이므로 같은 지점이 두 화면에서 두 문장이 되지 않는다.
+ */
+function matchPreviewView(state: GameState, matchId: string): MatchPreviewView | null {
+  const report = buildOpponentReport(state, { matchId });
+  if (!report) return null;
+  return {
+    matchId: report.matchId,
+    expectedXI: report.expectedXI.map((p) => ({ ...p })),
+    basis: report.basis ? { date: report.basis.date, label: report.basis.label } : null,
+    /**
+     * 근거가 없으면 **열한 명이 다 추정이라** 세는 뜻이 없다 — 그때 0이다.
+     * 표시는 관측과 추정이 섞였을 때만 값을 하고, 화면은 이 수로 그것을 가른다.
+     */
+    guessed: report.basis === null ? 0 : report.expectedXI.filter((p) => !p.carried).length,
+    absent: report.absent.map((a) => ({
+      name: a.name,
+      position: a.position,
+      reason: a.reason,
+      note: a.note,
+    })),
+    shape: { ...report.shape },
+    keyPoints: report.notes.map((tag) => ({
+      text: packetTagText(tag, report.tagContext),
+      ours: tag.favours === null ? null : tag.favours === report.ourSide,
+    })),
+  };
+}
+
 function nextMatchView(state: GameState, m: MatchRecord, label: string): NextMatchView {
   const userTeamId = state.userTeamId;
   return {
+    matchId: m.id,
     date: m.date,
     time: m.time ?? DEFAULT_KICKOFF,
     label,
@@ -1879,9 +2155,221 @@ function expectationTextOf(card: {
   return card.expectation ?? null;
 }
 
+/** 결산 카드의 머리줄 — 구간·세션 수와 건수 */
+function trainingReportSummary(report: TrainingReport): string {
+  const window = report.from === report.to ? report.to : `${report.from}~${report.to}`;
+  const grew = new Set(report.moved.map((m) => m.gamePlayerId)).size;
+  const tail = grew > 0 ? `${grew}명 성장` : "장부에 남은 변화 없음";
+  return `훈련 결산 ${window} · ${report.sessions}회 — ${tail}`;
+}
+
+/**
+ * 카드가 펼쳐지는 줄 — 한 선수당 하나. 움직인 눈금 · 갈래 · 근거 한 줄 순이다.
+ *
+ * 판정을 받은 선수 전원이 아니라 **무언가 남은 선수만** 선다 (카드가 이미 그렇게
+ * 걸러져 있다 — `applyTrainingOutcomes`).
+ */
+function trainingReportLines(state: GameState, report: TrainingReport): string[] {
+  const order: string[] = [];
+  const seen = new Set<string>();
+  for (const id of [
+    ...report.moved.map((m) => m.gamePlayerId),
+    ...report.marks.map((m) => m.gamePlayerId),
+  ]) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      order.push(id);
+    }
+  }
+  return order.map((id) => {
+    const parts = report.moved
+      .filter((m) => m.gamePlayerId === id)
+      .map((m) => `${growthLabel(m.target)} ${m.delta > 0 ? "+" : ""}${m.delta}`);
+    const mark = report.marks.find((m) => m.gamePlayerId === id);
+    if (mark?.code) parts.push(TRAINING_MARK_KO[mark.code]);
+    const head = `${playerName(state, id)} ${parts.join(" · ")}`.trim();
+    return mark && mark.note.length > 0 ? `${head} — ${mark.note}` : head;
+  });
+}
+
+/**
+ * 기록 테이블 몫의 달력 일지 — 성장·부상·카드·이적·돈, 그리고 서사 표의 **소식**.
+ *
+ * 일정 축(경기·훈련·이적창)은 부르는 쪽이 **먼저** 얹는다: 소식은 그 위에 겹치지
+ * 않으므로(같은 날 같은 문장은 한 번만) 순서가 규약이다.
+ *
+ * 화면(`buildOfficeViews`)과 조회(`scheduleView`)가 같은 표를 읽는다 — 두 벌로 두면
+ * 감독이 달력에서 본 줄과 GM이 답한 줄이 조용히 갈린다.
+ */
+export function pushRecordJournal(
+  state: GameState,
+  events: Record<string, CalendarEventView[]>,
+): void {
+  const push = (date: string, event: CalendarEventView) => {
+    (events[date] ??= []).push(event);
+  };
+  // 일지는 **우리 스쿼드**의 일이다 — 임대 나가 있는 동안 남의 경기장에서 난 일은
+  // 달력이 아니라 매월 리포트로 온다 (transfer.md §2)
+  const ourPlayerIds = new Set(playersOf(state, state.userTeamId).map((p) => p.id));
+  const userTeamId = state.userTeamId;
+  // 카드는 경기 id만 갖는다 — 날짜는 그 경기가 안다
+  const matchById = new Map(state.matches.map((m) => [m.id, m] as const));
+  /**
+   * 성장은 **날짜별로 묶는다** — 전술 훈련 한 번에 스무 줄이 나온다. 일지에 그대로
+   * 펼치면 그날 있었던 다른 일(부상·경고·이적)이 스크롤 밖으로 밀린다.
+   * 요약 한 줄만 세우고 명단은 접어 둔다.
+   */
+  const growthByDate = new Map<string, { counts: Map<string, number>; lines: string[] }>();
+  for (const g of state.growthLog) {
+    if (!ourPlayerIds.has(g.gamePlayerId)) continue;
+    const label = growthLabel(g.target);
+    const sign = g.delta > 0 ? "+" : "";
+    const day = growthByDate.get(g.date) ?? {
+      counts: new Map<string, number>(),
+      lines: [] as string[],
+    };
+    day.counts.set(
+      `${label} ${sign}${g.delta}`,
+      (day.counts.get(`${label} ${sign}${g.delta}`) ?? 0) + 1,
+    );
+    day.lines.push(`${playerName(state, g.gamePlayerId)} ${label} ${sign}${g.delta}`);
+    growthByDate.set(g.date, day);
+  }
+  for (const [date, day] of growthByDate) {
+    const summary = [...day.counts]
+      .sort((a, b) => b[1] - a[1])
+      .map(([key, n]) => `${key} ${n}명`)
+      .join(" · ");
+    push(date, { kind: "growth", text: summary, details: day.lines });
+  }
+  /**
+   * 훈련 결산 카드 — **카드를 문장으로 옮긴다** (season.md §4).
+   *
+   * 성장 줄(위)은 "그날 장부의 어느 눈금이 움직였나"를 날짜에 세우고, 이 줄은
+   * "그 구간의 훈련이 무엇을 남겼나"를 **근거와 함께** 세운다. 성장 줄만으로는
+   * 감독이 왜 늘었는지 읽을 자리가 없다 — 판정의 근거 한 줄은 카드에만 있다.
+   */
+  for (const report of state.trainingReports ?? []) {
+    push(report.to, {
+      kind: "training",
+      text: trainingReportSummary(report),
+      details: trainingReportLines(state, report),
+    });
+  }
+  for (const inj of state.injuries) {
+    if (!ourPlayerIds.has(inj.gamePlayerId)) continue;
+    push(inj.occurredOn, {
+      kind: "injury",
+      text: `${playerName(state, inj.gamePlayerId)} ${inj.bodyPart} 부상 — 복귀 예상 ${inj.expectedReturn}`,
+    });
+    if (inj.returnedOn) {
+      push(inj.returnedOn, {
+        kind: "return",
+        text: `${playerName(state, inj.gamePlayerId)} 부상 복귀`,
+      });
+    }
+  }
+  for (const b of state.bookings) {
+    if (!ourPlayerIds.has(b.gamePlayerId)) continue;
+    const m = matchById.get(b.matchId);
+    if (m) {
+      push(m.date, {
+        kind: b.card === "yellow" ? "yellow" : "red",
+        text: `${playerName(state, b.gamePlayerId)} ${b.minute}′`,
+      });
+    }
+  }
+  for (const t of state.transfers) {
+    if (t.fromTeamId !== userTeamId && t.toTeamId !== userTeamId) continue;
+    const name = playerName(state, t.gamePlayerId);
+    const label =
+      t.type === "retire"
+        ? `${name} 은퇴`
+        : t.type === "youth"
+          ? `${name} 유스 승격`
+          : t.toTeamId === userTeamId
+            ? `${name} 영입`
+            : `${name} 이적`;
+    // 이적료는 이 줄이 말한다 — 돈 줄을 따로 세우면 한 거래가 세 줄이 된다 (§8.2).
+    // 자유계약·유스·은퇴는 fee가 0이라 붙지 않는다.
+    push(t.date, {
+      kind: "transfer",
+      text: t.fee > 0 ? `${label} · ${formatMoney(t.fee)}` : label,
+    });
+  }
+
+  const finance = financeOf(state, userTeamId);
+
+  /**
+   * ⚠️ **정액 항목은 달력에 올리지 않는다.** 주급·중계권처럼 매달 같은 자리에 같은
+   * 줄이 서면 그날 실제로 벌어진 일(부상·경고·이적)을 덮는다. 서는 것은 문턱을 넘는
+   * **비정기** 항목뿐이고, 그 판정은 코어가 한다 — `isJournalMoney`.
+   *
+   * 파생 원본이 둘이다: 원장은 3개월 뒤 잘리므로 **진행 중인 달만** 원장에서 읽고,
+   * 마감된 달은 보고서의 `highlights`(절단 전에 옮겨 적은 것)에서 읽는다. 마감은
+   * 지난달까지만 하므로 두 원본은 겹치지 않는다 (docs/simulation/finance.md §8.2).
+   */
+  const moneyText = (m: { kind: "income" | "expense"; label: string; amount: number }) =>
+    `${m.label} ${m.kind === "income" ? "+" : "−"}${formatMoney(m.amount)}`;
+  const openMonth = monthOf(state.date);
+  for (const e of finance.ledger) {
+    if (e.date > state.date) continue;
+    if (monthOf(e.date) !== openMonth) continue;
+    if (!isJournalMoney(e, finance.balance)) continue;
+    push(e.date, { kind: "money", text: moneyText(e) });
+  }
+  for (const r of userReports(state)) {
+    // highlights는 마감 때 이미 걸러진 것이라 문턱을 다시 재지 않는다
+    for (const h of r.highlights ?? []) {
+      if (h.date > state.date) continue;
+      push(h.date, { kind: "money", text: moneyText(h) });
+    }
+  }
+
+  /**
+   * 소식 — **서사 표가 원본이다** (people.md §9). 저장된 줄을 날짜에 세우는 것이라
+   * 코어가 새 문장을 쓰지 않는다.
+   *
+   * `match` 갈래는 빼놓는다 — 그날의 경기 줄은 일정 축이 이미 세운다. 갈래가 없는
+   * 옛 세이브의 줄은 `other`로 본다(무엇인지 모르는 줄이지 경기 줄이 아니다).
+   * 한 날에 여럿이면 무게 내림차순, 같으면 적힌 순서다 — 전역 정렬이라 날짜 안의
+   * 순서도 그대로 따라온다.
+   */
+  const news = state.narrative
+    .map((note, index) => ({ note, index }))
+    .filter(({ note }) => (note.kind ?? "other") !== "match")
+    .sort((a, b) => b.note.salience - a.note.salience || a.index - b.index);
+  for (const { note } of news) {
+    // 기록에서 이미 파생된 줄(이적창 개폐 같은)을 서사 표가 다시 세우지 않는다
+    if ((events[note.date] ?? []).some((e) => e.text === note.text)) continue;
+    push(note.date, { kind: "news", text: note.text });
+  }
+}
+
+/**
+ * 접힌 합계에서 **표가 쓰는 것만** — 평점은 합계가 아니라 평균을 싣는다.
+ * `ratingSum`을 보내고 화면이 나누면 코어와 다른 자리에서 반올림한다.
+ */
+function careerTotalsView(t: CareerTotals): CareerTotalsView {
+  return {
+    apps: t.apps,
+    goals: t.goals,
+    assists: t.assists,
+    rating: t.rating,
+    reserveApps: t.reserveApps,
+    reserveGoals: t.reserveGoals,
+  };
+}
+
 export function buildOfficeViews(state: GameState): OfficeViews {
   const userTeamId = state.userTeamId;
-  const squad = playersOf(state, userTeamId);
+  /**
+   * 명단 표는 **우리 계약**을 센다 — 임대 보낸 선수도 우리 선수다 (transfer.md §2).
+   * 넓히는 것은 이 표 하나뿐이다: 재정·등록 명단·전술은 **부릴 수 있는 인원**을
+   * 세는 자리라 소속(`playersOf`) 그대로다.
+   */
+  const squad = ourPlayers(state);
+  const loanById = new Map(loanReports(state).map((r) => [r.playerId, r] as const));
   const tactics = tacticsOf(state, userTeamId);
   const assignments = new Map(tactics.assignments.map((a) => [a.playerId, a] as const));
   /**
@@ -1933,6 +2421,66 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     byPosition[memory.position] = memory.roleId;
     roleMemoryOf.set(memory.gamePlayerId, byPosition);
   }
+
+  /**
+   * 커리어 · 마일스톤 — **원장을 한 번씩만 훑는다.**
+   *
+   * 선수마다 `careerOf`를 부르면 마흔 몇 명 × 원장 전체 훑기가 된다 — 비교자
+   * 안의 `seasonStatOf`가 그랬던 것과 같은 함정을(위 정렬 주석) 행 만들기에서
+   * 다시 밟는 셈이다. 선수 → 행으로 한 번에 갈라 두고 접는 것은 `foldCareer`에
+   * 맡긴다: 카드(GM)와 **같은 함수**라 채팅에서 듣는 합과 표의 합이 갈리지 않는다.
+   *
+   * 스쿼드 선수로 좁혀 담는다 — 원장에는 리그 전체의 행이 있고 여기서 쓰는 것은
+   * 우리 명단뿐이다.
+   */
+  /**
+   * 라커룸 서열 — **한 번만 파생한다** (people.md §5-1). 행마다 부르면 마흔 몇 명이
+   * 각자 원장을 훑는다.
+   */
+  const leaderRank = new Map<string, number>();
+  leaderGroupOf(state, state.userTeamId).forEach((row, index) => {
+    leaderRank.set(row.playerId, index + 1);
+  });
+
+  const squadIds = new Set(squad.map((p) => p.id));
+  const statsOfPlayer = new Map<string, SeasonStat[]>();
+  for (const stat of state.seasonStats) {
+    if (!squadIds.has(stat.gamePlayerId)) continue;
+    const rows = statsOfPlayer.get(stat.gamePlayerId);
+    if (rows) rows.push(stat);
+    else statsOfPlayer.set(stat.gamePlayerId, [stat]);
+  }
+  const milestonesOfPlayer = new Map<string, MilestoneView[]>();
+  for (const milestone of state.milestones ?? []) {
+    if (!squadIds.has(milestone.gamePlayerId)) continue;
+    const rows = milestonesOfPlayer.get(milestone.gamePlayerId) ?? [];
+    rows.push({
+      code: milestone.code,
+      value: milestone.value,
+      date: milestone.date,
+      teamId: milestone.teamId,
+    });
+    milestonesOfPlayer.set(milestone.gamePlayerId, rows);
+  }
+  /**
+   * 시즌 행 + 통산 — **출전이 0인 시즌은 행을 세우지 않는다.** 원장은 명단에 든
+   * 것만으로도 행을 갖고 있어, 걸러 내지 않으면 한 경기도 못 뛴 시즌이 표에
+   * 0으로 늘어선다. 통산은 그래도 **전 행**을 접는다 (더해 봐야 같은 값이다).
+   */
+  const careerViewOf = (playerId: string): SquadViewRow["career"] => {
+    const rows = statsOfPlayer.get(playerId) ?? [];
+    const seasons = [...rows]
+      .sort((a, b) => a.season - b.season || a.teamId.localeCompare(b.teamId))
+      .map((stat) => ({ stat, totals: careerTotalsView(foldCareer([stat])) }))
+      .filter(({ totals }) => totals.apps > 0 || totals.reserveApps > 0)
+      .map(({ stat, totals }) => ({
+        season: stat.season,
+        teamId: stat.teamId,
+        team: teamShortNameIn(state, stat.teamId),
+        ...totals,
+      }));
+    return { seasons, totals: careerTotalsView(foldCareer(rows)) };
+  };
 
   // 선발의 전술판 좌표 — 좌표 없는 배치(구 세이브·채팅 지시)는 코드 기본 좌표로 그리는데,
   // 같은 코드가 둘이면 정확히 같은 점이 되므로 겹침을 풀어 준다. 저장하면 이 좌표가
@@ -2008,6 +2556,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         ...observed,
         potential: potentialBand(state, p),
         homegrown: isHomegrownFor(p, userTeamId),
+        nationality: p.nationality ?? null,
+        secondNationality: p.secondNationality ?? null,
         foot: p.foot ?? { left: 3, right: 3 },
         height: p.height ?? null,
         weight: p.weight ?? null,
@@ -2015,6 +2565,21 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         settling: settlingPercent(state, p.id),
         transferListed: listingOf(state, p.id)?.askingPrice ?? null,
         squadLevel: squadLevelOf(p),
+        loan: (() => {
+          const report = loanById.get(p.id);
+          return report
+            ? {
+                teamId: report.teamId,
+                team: teamShortNameIn(state, report.teamId),
+                until: report.until,
+                apps: report.apps,
+                goals: report.goals,
+                rating: report.rating,
+                benchRun: report.benchRun,
+                growth: report.growth,
+              }
+            : null;
+        })(),
         form: Math.round(p.state.form * 100) / 100,
         formLabel: formLabel(p.state.form),
         formAngle: formAngle(p.state.form),
@@ -2026,6 +2591,9 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           p.state.condition,
           liveSlot && liveMatchId ? { drain: worn[p.id] ?? 0, matchId: liveMatchId } : null,
         ),
+        sharpness: Math.round(sharpnessOf(p.state)),
+        sharpnessLabel: sharpnessLabel(sharpnessOf(p.state)),
+        sharpnessBand: sharpnessBand(sharpnessOf(p.state)),
         mood: moodOf(state, p),
         role: (livePacket
           ? liveSlot
@@ -2073,13 +2641,26 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         ),
         instruction: assignment?.instruction ?? null,
         isCaptain: p.isCaptain,
+        isViceCaptain: p.isViceCaptain === true,
+        leaderRank: leaderRank.get(p.id) ?? null,
         seasonGoals: stat?.goals ?? 0,
         seasonApps: stat?.apps ?? 0,
         seasonAssists: stat?.assists ?? 0,
         seasonRating: seasonRating(stat),
+        seasonMinutes: stat?.minutes ?? 0,
+        seasonShots: stat?.shots ?? 0,
+        seasonXg: stat?.xg ?? 0,
+        seasonSaves: stat?.saves ?? 0,
+        seasonCleanSheets: stat?.cleanSheets ?? 0,
+        seasonYellows: stat?.yellows ?? 0,
+        seasonReds: stat?.reds ?? 0,
+        career: careerViewOf(p.id),
+        milestones: (milestonesOfPlayer.get(p.id) ?? []).slice(-SQUAD_MILESTONES_SHOWN),
         hasIssue: issues.has(p.id),
         weeklyWage: contract?.weeklyWage ?? 0,
         contractUntil: contract?.until ?? null,
+        squadStatus: squadStatusOf(state, p),
+        promises: openPromises(state, p.id).map((pr) => ({ kind: pr.kind, dueOn: pr.dueOn })),
         injury: injury
           ? {
               bodyPart: injury.bodyPart,
@@ -2245,6 +2826,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           win,
           isNext: next !== null && m.id === next.id,
           match: {
+            matchId: m.id,
             // 리그 경기는 이름을 생략한다(감독은 자기 리그를 안다). 컵과 친선은
             // 어느 경기인지가 곧 정보다
             competition: cup || isFriendly(m) ? competitionShortName(m.competitionId) : null,
@@ -2285,7 +2867,6 @@ export function buildOfficeViews(state: GameState): OfficeViews {
   const push = (date: string, event: CalendarEventView) => {
     (events[date] ??= []).push(event);
   };
-  const ourPlayers = new Set(squad.map((p) => p.id));
   for (const e of entries) {
     // 일지는 "지나간 일"만 — 미래 일정은 달력 엔트리로 따로 보인다
     if (e.date > state.date) continue;
@@ -2304,102 +2885,12 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     }
   }
   /**
-   * 성장은 **날짜별로 묶는다** — 전술 훈련 한 번에 스무 줄이 나온다. 일지에 그대로
-   * 펼치면 그날 있었던 다른 일(부상·경고·이적)이 스크롤 밖으로 밀린다.
-   * 요약 한 줄만 세우고 명단은 접어 둔다.
+   * 나머지 갈래(성장·부상·카드·이적·돈·소식)는 일정 축을 타지 않는다 — 조회
+   * (`scheduleView`)도 같은 함수를 읽는다.
    */
-  const growthByDate = new Map<string, { counts: Map<string, number>; lines: string[] }>();
-  for (const g of state.growthLog) {
-    if (!ourPlayers.has(g.gamePlayerId)) continue;
-    const label = growthLabel(g.target);
-    const sign = g.delta > 0 ? "+" : "";
-    const day = growthByDate.get(g.date) ?? {
-      counts: new Map<string, number>(),
-      lines: [] as string[],
-    };
-    day.counts.set(
-      `${label} ${sign}${g.delta}`,
-      (day.counts.get(`${label} ${sign}${g.delta}`) ?? 0) + 1,
-    );
-    day.lines.push(`${playerName(state, g.gamePlayerId)} ${label} ${sign}${g.delta}`);
-    growthByDate.set(g.date, day);
-  }
-  for (const [date, day] of growthByDate) {
-    const summary = [...day.counts]
-      .sort((a, b) => b[1] - a[1])
-      .map(([key, n]) => `${key} ${n}명`)
-      .join(" · ");
-    push(date, { kind: "growth", text: summary, details: day.lines });
-  }
-  for (const inj of state.injuries) {
-    if (!ourPlayers.has(inj.gamePlayerId)) continue;
-    push(inj.occurredOn, {
-      kind: "injury",
-      text: `${playerName(state, inj.gamePlayerId)} ${inj.bodyPart} 부상 — 복귀 예상 ${inj.expectedReturn}`,
-    });
-    if (inj.returnedOn) {
-      push(inj.returnedOn, {
-        kind: "return",
-        text: `${playerName(state, inj.gamePlayerId)} 부상 복귀`,
-      });
-    }
-  }
-  for (const b of state.bookings) {
-    if (!ourPlayers.has(b.gamePlayerId)) continue;
-    const m = matchById.get(b.matchId);
-    if (m) {
-      push(m.date, {
-        kind: b.card === "yellow" ? "yellow" : "red",
-        text: `${playerName(state, b.gamePlayerId)} ${b.minute}′`,
-      });
-    }
-  }
-  for (const t of state.transfers) {
-    if (t.fromTeamId !== userTeamId && t.toTeamId !== userTeamId) continue;
-    const name = playerName(state, t.gamePlayerId);
-    const label =
-      t.type === "retire"
-        ? `${name} 은퇴`
-        : t.type === "youth"
-          ? `${name} 유스 승격`
-          : t.toTeamId === userTeamId
-            ? `${name} 영입`
-            : `${name} 이적`;
-    // 이적료는 이 줄이 말한다 — 돈 줄을 따로 세우면 한 거래가 세 줄이 된다 (§8.2).
-    // 자유계약·유스·은퇴는 fee가 0이라 붙지 않는다.
-    push(t.date, {
-      kind: "transfer",
-      text: t.fee > 0 ? `${label} · ${formatMoney(t.fee)}` : label,
-    });
-  }
+  pushRecordJournal(state, events);
 
   const finance = financeOf(state, userTeamId);
-
-  /**
-   * ⚠️ **정액 항목은 달력에 올리지 않는다.** 주급·중계권처럼 매달 같은 자리에 같은
-   * 줄이 서면 그날 실제로 벌어진 일(부상·경고·이적)을 덮는다. 서는 것은 문턱을 넘는
-   * **비정기** 항목뿐이고, 그 판정은 코어가 한다 — `isJournalMoney`.
-   *
-   * 파생 원본이 둘이다: 원장은 3개월 뒤 잘리므로 **진행 중인 달만** 원장에서 읽고,
-   * 마감된 달은 보고서의 `highlights`(절단 전에 옮겨 적은 것)에서 읽는다. 마감은
-   * 지난달까지만 하므로 두 원본은 겹치지 않는다 (docs/simulation/finance.md §8.2).
-   */
-  const moneyText = (m: { kind: "income" | "expense"; label: string; amount: number }) =>
-    `${m.label} ${m.kind === "income" ? "+" : "−"}${formatMoney(m.amount)}`;
-  const openMonth = monthOf(state.date);
-  for (const e of finance.ledger) {
-    if (e.date > state.date) continue;
-    if (monthOf(e.date) !== openMonth) continue;
-    if (!isJournalMoney(e, finance.balance)) continue;
-    push(e.date, { kind: "money", text: moneyText(e) });
-  }
-  for (const r of userReports(state)) {
-    // highlights는 마감 때 이미 걸러진 것이라 문턱을 다시 재지 않는다
-    for (const h of r.highlights ?? []) {
-      if (h.date > state.date) continue;
-      push(h.date, { kind: "money", text: moneyText(h) });
-    }
-  }
 
   // ── 재정 (유저 팀) ──
   const line = (l: { category: string; amount: number }) => ({
@@ -2495,8 +2986,10 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       familiarity: Math.round(squadFamiliarity(state, userTeamId)),
       // 경기 중과 무직에 꺼진다 — 무직의 판은 옛 구단의 것이라 읽기 전용이다 (career.md §5.1)
       editable: state.phase !== "match" && !state.dismissal,
-      firstTeamCount: players.filter((p) => p.squadLevel === "first").length,
-      reserveCount: players.filter((p) => p.squadLevel === "reserve").length,
+      // 인원은 **부릴 수 있는 사람**을 센다 — 임대 나간 선수가 달고 있는 층은
+      // 빌린 구단의 값이라 우리 1군·2군 수에 들면 안 된다
+      firstTeamCount: players.filter((p) => p.loan === null && p.squadLevel === "first").length,
+      reserveCount: players.filter((p) => p.loan === null && p.squadLevel === "reserve").length,
       registration: squadRegistrationOf(state, userTeamId),
     },
     calendar: {
@@ -2545,6 +3038,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             competitionLabel(next.competitionId, next.stage ?? "league", next.round),
           )
         : null,
+      // 같은 경기의 상대 분석 — 코어가 경기 중에는 빈손을 낸다 (`buildOpponentReport`)
+      preview: next ? matchPreviewView(state, next.id) : null,
       recentResults,
       list: competitionList,
     },
@@ -2775,4 +3270,387 @@ export function scoutReportLine(state: GameState, playerId: string): string | nu
     `기대 주급 ${formatMoney(card.wageExpectation)}`,
     ...(card.contractUntil ? [`계약 ${card.contractUntil}까지`] : []),
   ].join(" · ");
+}
+
+// ── 경기 리포트 — 끝난 경기 하나를 통째로 (match.md §8) ─────────────
+
+/**
+ * **큰 기회의 문턱** — 이 xG 이상인 슛만 타임라인에 선다.
+ *
+ * 슛 하나의 기본 xG가 `BASE_SHOT_XG`(0.10)이므로 그 세 배다. 문턱이 없으면 슛
+ * 스무 개가 한 줄씩 서서 골이 그 안에 묻히고, 문턱을 두지 않고 슛을 통째로 버리면
+ * "0.6짜리를 놓친 경기"가 사라진다. 슛의 **총량**은 이미 팀 스탯의 숫자다.
+ */
+export const BIG_CHANCE_XG = 0.3;
+
+/**
+ * 리포트의 소수는 **여기서 자른다** — 읽는 곳이 셋이라(화면 둘 · 조회 하나) 각자
+ * 반올림하면 같은 경기의 xG가 세 숫자로 보인다. xG는 두 자리, 점유는 세 자리다.
+ */
+const roundTo = (value: number, digits: number): number => {
+  const unit = 10 ** digits;
+  return Math.round(value * unit) / unit;
+};
+
+/** 타임라인에 서는 사건 — 저장은 전부 하고(match.md §4) 세우는 것만 고른다 */
+const TIMELINE_TYPES: ReadonlySet<MatchEventType> = new Set([
+  "goal",
+  "yellow_card",
+  "red_card",
+  "substitution",
+  "injury",
+  "tactical_shift",
+  "half_time",
+  "extra_time_start",
+  "extra_half_time",
+  "full_time",
+]);
+
+/** 타임라인 한 줄 — 사건 하나를 이름과 문장으로 옮긴 것 */
+export interface MatchReportEventView {
+  minute: number;
+  /** 무엇이 일어났나 — 화면이 아이콘을, 조회가 말을 고른다 */
+  type: MatchEventType;
+  /** 어느 편의 사건인가 — 국면 표식은 편이 없다 */
+  side: "home" | "away" | null;
+  /** 우리 편의 사건인가 — 우리 경기가 아니면 null */
+  ours: boolean | null;
+  /** 주체의 이름 — goal은 [득점자, (도움)], substitution은 [아웃, 인] */
+  actors: string[];
+  /** 골·큰 기회가 어디서 나왔나 (열린 플레이·코너·프리킥·페널티) */
+  origin: ShotOrigin | null;
+  /** 그 슛의 질 — 골과 큰 기회에만 */
+  xg: number | null;
+  /**
+   * **왜 그 골이 났나** — 패킷 태그를 문장으로 (match.md §4).
+   * 감독의 전술 XP가 이 태그에 걸리는데 다시 볼 자리가 없었다.
+   */
+  causes: string[];
+  /** 교체의 갈래 한 마디 — 승부수인가 굳히기인가 */
+  subCause: string | null;
+}
+
+/** 한 팀의 경기 스탯 — 선수별 기록과 사건의 합, 두 벌로 두지 않는다 */
+export interface MatchReportTeamView {
+  name: string;
+  short: string;
+  ours: boolean;
+  goals: number;
+  shots: number;
+  /** 기회 xG의 합 */
+  xg: number;
+  /** 결정력을 반영한 기대 득점 */
+  expectedGoals: number;
+  /** 공을 쥔 몫 0~1 — 옛 경기엔 없다 */
+  possession: number | null;
+  passes: number;
+  progressive: number;
+  corners: number;
+  fouls: number;
+  yellows: number;
+  reds: number;
+}
+
+/** 선수 한 명의 경기 기록 — 평점과 그 근거까지 */
+export interface MatchReportPlayerView {
+  id: string;
+  name: string;
+  side: "home" | "away";
+  ours: boolean;
+  /** 등번호 — 지금 달고 있는 번호다 */
+  squadNumber: number | null;
+  /** 뛴 시간 — 사건 목록이 원본이다 (`matchMinutesOf`) */
+  minutes: number;
+  /** 선발이었나 — 교체로 들어온 선수가 아니면 선발이다 */
+  started: boolean;
+  goals: number;
+  assists: number;
+  shots: number;
+  xg: number;
+  saves: number;
+  passes: number;
+  progressive: number;
+  corners: number;
+  fouls: number;
+  yellows: number;
+  red: boolean;
+  /** 평점 — 감독 팀 경기의 우리 선수만 갖는다 (match.md §6) */
+  rating: number | null;
+  /** 평점의 색 — 문턱은 코어가 갖는다 (`ratingTone`) */
+  tone: RatingTone | null;
+  /** 평점 한 줄 근거 — 결산 LLM이 남긴 경우에만 */
+  note: string | null;
+}
+
+/**
+ * 끝난 경기 한 장 — **읽는 곳이 셋이라 만드는 곳은 하나다** (match.md §8).
+ *
+ * 달력 상세의 접이식 · 종료 카드 · GM 조회(`get_match_report`)가 이 한 벌을 읽는다.
+ * 셋이 각자 접으면 같은 경기가 세 가지로 보인다.
+ */
+export interface MatchReportView {
+  matchId: string;
+  date: string;
+  /** 어느 경기인가 — `프리미어리그 R7` · `FA컵 8강 1차전` */
+  label: string;
+  /** 대회 약칭 */
+  competition: string;
+  stage: string;
+  home: MatchReportTeamView;
+  away: MatchReportTeamView;
+  /** 우리가 어느 쪽이었나 — 우리 경기가 아니면 null */
+  venue: "home" | "away" | "neutral" | null;
+  /** 우리 시점의 결과 — 우리 경기가 아니면 null */
+  outcome: "W" | "D" | "L" | null;
+  /** 연장을 치렀다 */
+  aet: boolean;
+  /** 승부차기 — 갈린 경기만. 킥이 원본이라 합계도 거기서 센다 */
+  penalties: {
+    home: number;
+    away: number;
+    kicks: MatchShootoutKickView[];
+  } | null;
+  timeline: MatchReportEventView[];
+  players: MatchReportPlayerView[];
+  /** 최우수 선수 — 평점에서 파생한다 (`motmOf`) */
+  motm: { id: string; name: string; rating: number } | null;
+  /**
+   * **사건이 남아 있는 경기인가.** 타 팀 간이 시뮬과 옛 세이브에는 사건이 없어
+   * 타임라인이 득점 줄뿐이다 — 읽는 쪽이 그것을 "조용했던 경기"로 읽지 않게 한다.
+   */
+  hasDetail: boolean;
+}
+
+/**
+ * **최우수 선수 — 평점이 원본이다** (game-state.md §5 파생).
+ *
+ * 저장하지 않는 이유는 평점이 두 번 정해지기 때문이다: 코어가 앵커를 박고 결산
+ * 판정이 그 위에서 다듬는다(match.md §6). 저장하면 다듬어진 뒤에도 MOTM만 옛
+ * 값으로 남는다.
+ *
+ * 동점은 **골 → 도움 → 출전 시간 → 선수 id** 순으로 갈린다. 마지막 칸은 뜻이
+ * 아니라 결정성을 위한 것이다 — 세 칸까지 같은 두 선수가 화면을 열 때마다 번갈아
+ * 뽑히면 그건 판정이 아니다.
+ */
+export function motmOf(players: readonly MatchReportPlayerView[]): MatchReportPlayerView | null {
+  let best: MatchReportPlayerView | null = null;
+  for (const p of players) {
+    if (p.rating === null) continue;
+    if (!best || compareMotm(p, best) < 0) best = p;
+  }
+  return best;
+}
+
+/** 앞선 쪽이 음수 — `motmOf`의 동점 규칙 하나 */
+function compareMotm(a: MatchReportPlayerView, b: MatchReportPlayerView): number {
+  return (
+    (b.rating ?? 0) - (a.rating ?? 0) ||
+    b.goals - a.goals ||
+    b.assists - a.assists ||
+    b.minutes - a.minutes ||
+    a.id.localeCompare(b.id)
+  );
+}
+
+/** 사건이 없는 옛 경기·간이 시뮬의 타임라인 — 결과에 남은 득점 줄만 세운다 */
+function goalTimelineOf(
+  state: GameState,
+  result: NonNullable<MatchRecord["result"]>,
+  ourSide: "home" | "away" | null,
+): MatchReportEventView[] {
+  const assists = result.assists ?? [];
+  const minutes = result.goalMinutes ?? [];
+  const origins = result.goalOrigins ?? [];
+  return result.scorers.map((entry, i) => {
+    const goal = parseScorerEntry(entry);
+    const assist = parseScorerEntry(assists[i] ?? "");
+    return {
+      minute: minutes[i] ?? 0,
+      type: "goal" as const,
+      side: goal.side,
+      ours: ourSide === null || goal.side === null ? null : goal.side === ourSide,
+      actors: [
+        playerName(state, goal.playerId),
+        ...(assist.playerId ? [playerName(state, assist.playerId)] : []),
+      ],
+      origin: origins[i] ?? null,
+      xg: null,
+      causes: [],
+      subCause: null,
+    };
+  });
+}
+
+/**
+ * 끝난 경기 한 장을 세운다 — 결과가 없으면 null.
+ *
+ * 진행 중인 경기는 여기서 만들지 않는다: 90분 동안 감독이 보는 것은 판세 화면
+ * (`buildMatchView`)이고, 그 화면은 장부를 직접 읽는다.
+ */
+export function buildMatchReport(state: GameState, matchId: string): MatchReportView | null {
+  const match = state.matches.find((m) => m.id === matchId);
+  const result = match?.result;
+  if (!match || !result) return null;
+
+  const ourSide: "home" | "away" | null =
+    match.homeTeamId === state.userTeamId
+      ? "home"
+      : match.awayTeamId === state.userTeamId
+        ? "away"
+        : null;
+  const events = result.events ?? [];
+  const stats = result.playerStats ?? {};
+  const lineups = { home: result.homeLineup ?? [], away: result.awayLineup ?? [] } as const;
+  /**
+   * **선발은 장부가 든다** — 킥오프에 뜬 명단이다 (`homeStarters` — people.md §5-2).
+   * 사건 목록에서 「교체로 들어오지 않은 사람」으로 되짚는 것은 사건이 온전한 경기에만
+   * 참이라, 사건을 남기지 않는 간이 시뮬의 경기는 벤치까지 선발로 읽힌다. 지위 대비
+   * 출전을 재는 자와 리포트가 **같은 값**을 읽어야 감독이 본 선발과 라커룸이 센 선발이
+   * 갈리지 않는다. 옛 장부에는 칸이 없어 그때만 사건으로 되짚는다.
+   */
+  const starters = { home: result.homeStarters, away: result.awayStarters } as const;
+  const teamIdOf = { home: match.homeTeamId, away: match.awayTeamId } as const;
+  const sideOfPlayer = new Map<string, "home" | "away">();
+  for (const side of ["home", "away"] as const) {
+    for (const id of lineups[side]) sideOfPlayer.set(id, side);
+  }
+
+  /**
+   * 원인 태그를 문장으로 — 패킷은 이미 사라졌으므로 이름표를 상태에서 다시 세운다.
+   * `packetTagContext`가 패킷에서 만드는 것과 같은 모양이다.
+   */
+  const tagCtx = {
+    home: teamNameIn(state, match.homeTeamId),
+    away: teamNameIn(state, match.awayTeamId),
+    player: (id: string) => {
+      const p = playerById(state, id);
+      return p ? { name: p.name, position: naturalPositionOf(p).position } : undefined;
+    },
+  };
+
+  const minutesOf = matchMinutesOf(events, result.aet === true);
+  const countOf = (id: string, type: MatchEventType, slot = 0) =>
+    events.filter((e) => e.type === type && e.actors[slot] === id).length;
+  const cameOn = new Set(
+    events.filter((e) => e.type === "substitution").map((e) => e.actors[1] ?? ""),
+  );
+
+  const players: MatchReportPlayerView[] = [];
+  for (const side of ["home", "away"] as const) {
+    for (const id of lineups[side]) {
+      const p = playerById(state, id);
+      const line = stats[id];
+      const rating = result.ratings?.[id] ?? null;
+      players.push({
+        id,
+        name: playerName(state, id),
+        side,
+        ours: teamIdOf[side] === state.userTeamId,
+        squadNumber: p?.squadNumber ?? null,
+        minutes: minutesOf(id),
+        started: starters[side]?.includes(id) ?? !cameOn.has(id),
+        goals: countOf(id, "goal"),
+        assists: countOf(id, "goal", 1),
+        shots: line?.shots ?? 0,
+        xg: roundTo(line?.xg ?? 0, 2),
+        saves: line?.saves ?? 0,
+        passes: line?.passes ?? 0,
+        progressive: line?.progressive ?? 0,
+        corners: line?.corners ?? 0,
+        fouls: line?.fouls ?? 0,
+        yellows: countOf(id, "yellow_card"),
+        red: countOf(id, "red_card") > 0,
+        rating,
+        tone: rating === null ? null : ratingTone(rating),
+        note: result.ratingNotes?.[id] ?? null,
+      });
+    }
+  }
+  /** 선발이 먼저, 그다음 오래 뛴 순 — 리포트를 위에서부터 읽으면 그게 그 경기의 열한 명이다 */
+  players.sort(
+    (a, b) =>
+      (a.side === b.side ? 0 : a.side === "home" ? -1 : 1) ||
+      Number(b.started) - Number(a.started) ||
+      b.minutes - a.minutes ||
+      a.id.localeCompare(b.id),
+  );
+
+  const sumOf = (side: "home" | "away", read: (p: MatchReportPlayerView) => number) =>
+    players.reduce((sum, p) => (p.side === side ? sum + read(p) : sum), 0);
+  const teamOf = (side: "home" | "away"): MatchReportTeamView => ({
+    name: teamNameIn(state, teamIdOf[side]),
+    short: teamShortNameIn(state, teamIdOf[side]),
+    ours: teamIdOf[side] === state.userTeamId,
+    goals: side === "home" ? result.homeGoals : result.awayGoals,
+    // 팀 합계는 마감이 이미 적어 두었다 — 옛 경기만 선수별 기록에서 다시 센다
+    shots: (side === "home" ? result.homeShots : result.awayShots) ?? sumOf(side, (p) => p.shots),
+    xg: roundTo((side === "home" ? result.homeXg : result.awayXg) ?? sumOf(side, (p) => p.xg), 2),
+    expectedGoals: roundTo(
+      (side === "home" ? result.homeExpectedGoals : result.awayExpectedGoals) ?? 0,
+      2,
+    ),
+    possession: result.possession === undefined ? null : roundTo(result.possession[side], 3),
+    passes: sumOf(side, (p) => p.passes),
+    progressive: sumOf(side, (p) => p.progressive),
+    corners: sumOf(side, (p) => p.corners),
+    fouls: sumOf(side, (p) => p.fouls),
+    yellows: sumOf(side, (p) => p.yellows),
+    reds: sumOf(side, (p) => (p.red ? 1 : 0)),
+  });
+
+  const timeline: MatchReportEventView[] =
+    events.length === 0
+      ? goalTimelineOf(state, result, ourSide)
+      : events
+          .filter(
+            (e) =>
+              TIMELINE_TYPES.has(e.type) || (e.type === "shot" && (e.xg ?? 0) >= BIG_CHANCE_XG),
+          )
+          .map((e) => ({
+            minute: e.minute,
+            type: e.type,
+            side: e.team ?? null,
+            ours: ourSide === null || !e.team ? null : e.team === ourSide,
+            actors: e.actors.map((id) => playerName(state, id)),
+            origin: e.shotOrigin ?? null,
+            xg: e.xg === undefined ? null : roundTo(e.xg, 2),
+            causes: normalizeCauses(e.causes).map((tag) => packetTagText(tag, tagCtx)),
+            subCause: e.subCause ? subCauseText(e.subCause) : null,
+          }));
+
+  const kicks = result.penalties?.kicks ?? [];
+  const motm = motmOf(players);
+  return {
+    matchId: match.id,
+    date: match.date,
+    label: competitionLabel(match.competitionId, match.stage ?? "league", match.round),
+    competition: competitionShortName(match.competitionId),
+    stage: competitionStageLabel(match.competitionId, match.stage ?? "league", match.round),
+    home: teamOf("home"),
+    away: teamOf("away"),
+    venue: ourSide === null ? null : match.neutral ? "neutral" : ourSide,
+    outcome: ourSide === null ? null : outcomeFor(match, state.userTeamId),
+    aet: result.aet === true,
+    penalties: result.penalties
+      ? {
+          // 킥이 원본이라 합계도 거기서 센다 — 킥 없는 옛 승부차기만 저장된 합계를 쓴다
+          ...(kicks.length > 0
+            ? shootoutTally(kicks)
+            : { home: result.penalties.home, away: result.penalties.away }),
+          kicks: kicks.map((k) => ({
+            round: k.round,
+            side: k.team,
+            team: teamShortNameIn(state, teamIdOf[k.team]),
+            taker: playerName(state, k.taker),
+            keeper: k.keeper ? playerName(state, k.keeper) : null,
+            outcome: k.outcome,
+            ours: teamIdOf[k.team] === state.userTeamId,
+          })),
+        }
+      : null,
+    timeline,
+    players,
+    motm: motm ? { id: motm.id, name: motm.name, rating: motm.rating ?? 0 } : null,
+    hasDetail: events.length > 0,
+  };
 }

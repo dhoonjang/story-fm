@@ -340,6 +340,38 @@ describe("기자회견 — 질문은 장부에서 나온다", () => {
     expect(buildMatchPress(state, upcoming!.id)).toBeNull();
   });
 
+  /**
+   * 전적의 경계 — **이번 경기는 세지 않는다.** 넣으면 첫 더비가 이미 1승 0패로
+   * 시작하고, 기자가 방금 본 경기를 전적으로 되묻는다 (people.md §4).
+   */
+  it("더비를 치르면 그 전까지의 전적이 카드로 선다 — 첫 더비는 0승 0무 0패", () => {
+    const state = createTestGame();
+    const derbies = state.matches
+      .filter(
+        (m) =>
+          m.competitionId !== null &&
+          ((m.homeTeamId === state.userTeamId && m.awayTeamId === "tottenham") ||
+            (m.awayTeamId === state.userTeamId && m.homeTeamId === "tottenham")),
+      )
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+    expect(derbies.length, "북런던 더비가 두 번 편성되지 않았다").toBeGreaterThanOrEqual(2);
+
+    settle(state, derbies[0]!, { us: 0, them: 2 });
+    const first = buildMatchPress(state, derbies[0]!.id)!;
+    const firstCard = first.facts.find((f) => f.data?.tags?.[0] === "derby");
+    expect(firstCard, "더비 카드가 서지 않았다").toBeDefined();
+    expect(firstCard!.data!.tags?.[1]).toBe("북런던 더비");
+    expect(firstCard!.data!.values).toMatchObject({ won: 0, drawn: 0, lost: 0 });
+    // 날 선 카드라 이기든 지든 무게 2다
+    expect(first.weight).toBe(2);
+
+    settle(state, derbies[1]!, { us: 3, them: 0 });
+    const second = buildMatchPress(state, derbies[1]!.id)!;
+    const secondCard = second.facts.find((f) => f.data?.tags?.[0] === "derby")!;
+    // 이번 경기(3-0 승)는 빠지고 첫 더비의 패배만 선다
+    expect(secondCard.data!.values).toMatchObject({ won: 0, drawn: 0, lost: 1 });
+  });
+
   it("친선을 치러도 회견은 열리지 않는다 — 프리시즌은 시즌 장부 밖이다", () => {
     const state = createTestGame();
     const friendly = nextUserMatch(state, "friendly");
@@ -513,6 +545,42 @@ describe("기자회견 — 전야", () => {
   it("친선 전날에는 아무 자리도 서지 않는다", () => {
     const state = createTestGame();
     eveOf(state, nextUserMatch(state, "friendly"));
+    openEvePress(state);
+    expect(pendingPress(state)).toBeNull();
+  });
+
+  /**
+   * 작별의 자리는 **그 시즌 마지막 홈 리그 경기** 하루뿐이라(season.md §6), 그 하루를
+   * 잘못 짚으면 자리가 영영 서지 않거나 시즌 내내 선다 — 어느 쪽도 화면에는 표시가
+   * 나지 않는다.
+   */
+  it("마지막 홈 리그 경기 전야에만 작별 회견이 선다", () => {
+    const state = createTestGame();
+    const home = leagueMatches(state).filter((m) => m.homeTeamId === state.userTeamId);
+    const last = home[home.length - 1]!;
+    const leaving = userPlayers(state)[0]!;
+    leaving.state.retiringAfterSeason = { on: state.date, reason: "age" };
+
+    // 마지막이 아닌 홈경기 전야에는 서지 않는다
+    eveOf(state, home[home.length - 2]!);
+    openEvePress(state);
+    expect(pendingPress(state)).toBeNull();
+
+    eveOf(state, last);
+    openEvePress(state);
+
+    const press = pendingPress(state)!;
+    expect(press.trigger).toBe("farewell");
+    expect(press.weight).toBe(2);
+    const fact = press.facts.find((f) => f.kind === "farewell")!;
+    expect(fact.about).toBe(leaving.id);
+    expect(fact.data?.date).toBe(last.date);
+  });
+
+  it("예고가 선 선수가 없으면 마지막 홈경기에도 자리가 없다", () => {
+    const state = createTestGame();
+    const home = leagueMatches(state).filter((m) => m.homeTeamId === state.userTeamId);
+    eveOf(state, home[home.length - 1]!);
     openEvePress(state);
     expect(pendingPress(state)).toBeNull();
   });

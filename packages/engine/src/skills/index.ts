@@ -1,4 +1,4 @@
-import { MANAGER_ATTRIBUTE_KO, registrationBlockText } from "@story-fm/domain";
+import { MANAGER_ATTRIBUTE_KO, PROMISE_KIND_KO, registrationBlockText } from "@story-fm/domain";
 import type {
   BoardPoint,
   GamePlayer,
@@ -6,17 +6,21 @@ import type {
   DrilledTactics,
   MarketCard,
   Player,
+  PromiseKind,
   ReserveTrainingPolicy,
   ScheduleEntry,
   Slot,
   TacticAssignment,
   TacticsSpec,
+  SetPieceRole,
+  SetPieceTakers,
   TeamTactics,
   TeamTalkOccasion,
   TrainAttr,
 } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
+  attributeAxisOf,
   AXIS_KO,
   clampCondition,
   tacticalUptake as uptakeOf,
@@ -27,6 +31,7 @@ import {
   MATCHDAY_SQUAD,
   POSITION_CODES,
   RATING_MAX,
+  SET_PIECE_ROLES,
   reserveTrainingTitle,
   SCOUT_CONCURRENT_LIMIT,
   SCOUT_DAYS,
@@ -50,6 +55,9 @@ import {
   tacticsSignature,
   tacticsAffinityShift,
   tacticsDistance,
+  TACTIC_TOGGLES,
+  tacticToggleValue,
+  tacticToggleWord,
   withCurrentDrilled,
 } from "@story-fm/domain";
 import { DIRECTIVE_TUNING } from "@story-fm/sim";
@@ -73,6 +81,9 @@ import {
   dropDeferredScout,
 } from "../squad/scouting";
 import { creditSettling, settlingAnchor, settlingOf } from "../squad/settling";
+// 면담에서 한 약속은 장부에 선다 (people.md §5-2 · career.md §2)
+import { openPromise, type PromiseOpened } from "../squad/promises";
+import { dressingRoomFactor, dressingRoomVoice, leaderGroupOf } from "../squad/hierarchy";
 import {
   groupOf,
   isInjured,
@@ -207,6 +218,23 @@ export function setSquadLevel(
  * 먼저 올리면 명단이 차 있고, 먼저 내리면 하한을 뚫는다. 그래서 잰 뒤에 옮기는 이
  * 두 걸음을 갈라 둔다.
  */
+/**
+ * **자리 훈련은 1군의 것이다** (→ docs/simulation/season.md §2). 자리를 올리는 문은
+ * 훈련 결산 하나뿐인데 2군은 결산을 받지 않으므로, 내려간 선수의 자리 프로그램은
+ * 여기서 거둔다 — 남겨 두면 감독이 걸어 둔 전향이 조용히 멈춘 채 서 있다.
+ * 겨냥한 축은 남는다: 월간 성장이 그 축을 이어 받는다.
+ *
+ * @returns 감독에게 덧붙일 한 조각 (거둘 것이 없으면 빈 문자열)
+ */
+function dropPositionTraining(state: GameState, player: GamePlayer): string {
+  const program = state.playerTraining.find((t) => t.gamePlayerId === player.id);
+  if (!program?.position) return "";
+  const position = program.position;
+  if (program.axis) delete program.position;
+  else state.playerTraining = state.playerTraining.filter((t) => t.gamePlayerId !== player.id);
+  return ` · ${position} 전향 훈련은 거뒀습니다 (2군엔 훈련 결산이 없습니다)`;
+}
+
 function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | "reserve"): string {
   if (level === "first") {
     player.squadLevel = "first";
@@ -245,7 +273,9 @@ function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | 
   const dropped = tactics.assignments.find((a) => a.playerId === player.id);
   if (dropped) shelveFamiliarity(tactics, dropped, state.date);
   tactics.assignments = tactics.assignments.filter((a) => a.playerId !== player.id);
+  // 2군에는 완장이 없다 — 라커룸 서열의 후보도 1군뿐이다 (people.md §5-1)
   if (player.isCaptain) player.isCaptain = false;
+  if (player.isViceCaptain === true) player.isViceCaptain = undefined;
   pushNarrative(state, `${player.name} 2군 이동`, 2);
   /**
    * **배치에서 빠지는 것까지 결과로 말한다** (→ docs/data/team.md §6). 2군은 배치를
@@ -259,7 +289,7 @@ function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | 
       : dropped?.role === "bench"
         ? " — 매치데이 벤치에서 함께 빠집니다"
         : "";
-  return `${player.name}을(를) 2군으로 이동했습니다${note}`;
+  return `${player.name}을(를) 2군으로 이동했습니다${note}${dropPositionTraining(state, player)}`;
 }
 
 /**
@@ -586,6 +616,22 @@ function leadershipFactor(state: GameState): number {
   );
 }
 
+/**
+ * **그 말이 울리는 방** — 팀토크의 계수는 둘이다 (career.md §2 · people.md §5-1).
+ * 감독의 리더십이 말을 하는 사람이라면 이쪽은 라커룸이고, 완장과 리더 그룹의
+ * 리더십이 정한다.
+ *
+ * 경기 중에는 **그 경기의 명단**이 방이다 — 주장이 결장한 경기의 하프타임은
+ * 부주장의 리더십이 계수를 정한다.
+ */
+function matchSquadIds(state: GameState): ReadonlySet<string> | undefined {
+  const pending = state.pendingMatch;
+  if (!pending) return undefined;
+  const side =
+    pending.packet.home.teamId === state.userTeamId ? pending.ledger.home : pending.ledger.away;
+  return new Set([...side.onPitch, ...side.bench]);
+}
+
 /** 팀토크를 꺼낸 자리 — 이미 했다는 말이 어느 자리를 가리키는지 밝힌다 */
 const OCCASION_KO: Record<TeamTalkOccasion, string> = {
   pre: "경기 전",
@@ -624,8 +670,16 @@ export function applyTeamTalk(
   state.manager.teamTalkedOn = { ...talkedOn, [input.occasion]: state.date };
 
   const base = TEAM_TALK_BASE[input.outcome];
+  const present = matchSquadIds(state);
+  const room = dressingRoomFactor(state, state.userTeamId, present);
+  const voice = dressingRoomVoice(state, state.userTeamId, present);
+  // 그 방에 선 완장 — 주장이 없는 자리에서는 부주장이 그 이름이다
+  const wearing = userPlayers(state).filter((p) => present === undefined || present.has(p.id));
+  const captainName = (
+    wearing.find((p) => p.isCaptain) ?? wearing.find((p) => p.isViceCaptain === true)
+  )?.name;
   const delta = Math.round(
-    base * (input.intensity / TALK_INTENSITY_PIVOT) * leadershipFactor(state),
+    base * (input.intensity / TALK_INTENSITY_PIVOT) * leadershipFactor(state) * room,
   );
   const bounded = Math.max(-TEAM_TALK_MORALE_BOUND, Math.min(TEAM_TALK_MORALE_BOUND, delta));
   for (const p of userPlayers(state)) {
@@ -664,10 +718,58 @@ export function applyTeamTalk(
       head: `${OCCASION_KO[input.occasion]} 팀토크`,
       items: [
         item({ label: "팀 사기", text: signed(bounded), delta: bounded }),
+        /**
+         * **폭이 왜 그만큼이었는지가 그 자리에 남는다** — 라커룸 계수는 감독이
+         * 완장을 어디에 채웠는지의 결과라, 숫자만 돌려주면 주장 지명이 다시
+         * 서사에서만 뜻을 갖는 값이 된다 (people.md §5-1).
+         */
+        ...(voice === null
+          ? []
+          : [
+              item({
+                label: "라커룸",
+                text: `×${room.toFixed(2)}`,
+                note: `${captainName ?? "완장 공석"} · 리더십 ${Math.round(voice)}`,
+              }),
+            ]),
         ...(settled > 0 ? [item({ label: "적응", text: `${settled}명` })] : []),
       ],
     },
   };
+}
+
+/** 감독이 그 자리에서 한 약속 — 갈래와, 감독이 좁힌 기한 */
+export interface PromiseInput {
+  kind: PromiseKind;
+  /** 기한(일) — 생략하면 갈래의 기본 기한 (`transfer`는 다음 창 마감) */
+  days?: number;
+}
+
+/** 장부에 선 약속 한 조각 — 감독이 읽는 줄과 말풍선 항목 */
+interface PromisePiece {
+  text: string;
+  item: SkillBriefItem;
+}
+
+/**
+ * 면담·응대가 연 약속을 **한 조각으로** 옮긴다 (people.md §5-2).
+ *
+ * ⚠️ **반려도 조각이 된다.** 감독은 자기가 한 말이 장부에 섰는지를 알아야 하고,
+ * 반려는 그 대화를 무르지 않는다 — 사기·정착·압력은 이미 셈이 끝난 뒤다.
+ * 두 자리가 같은 함수를 부르는 것은 같은 말이 자리마다 다른 줄로 서지 않게 하기
+ * 위해서다.
+ */
+export function promisePiece(opened: PromiseOpened): PromisePiece {
+  const promise = opened.promise;
+  if (opened.ok && promise) {
+    const label = PROMISE_KIND_KO[promise.kind];
+    return {
+      text: ` · ${label} 약속 (${promise.dueOn}까지)`,
+      item: item({ label: "약속", text: label, note: `${promise.dueOn}까지` }),
+    };
+  }
+  const why = opened.message ?? "약속을 세울 수 없습니다";
+  return { text: ` · 약속 반려 — ${why}`, item: item({ label: "약속", text: "반려", note: why }) };
 }
 
 export function applyTalkToPlayer(
@@ -683,6 +785,11 @@ export function applyTalkToPlayer(
     settling?: number;
     /** 무게의 근거 한 줄 — 정착 원장에 남는다 */
     settlingNote?: string;
+    /**
+     * 감독이 이 면담에서 한 약속 — **장부에 선다** (career.md §2 · people.md §5-2).
+     * 반려돼도 면담 자체는 그대로 성립한다.
+     */
+    promise?: PromiseInput;
   },
 ): SkillResult {
   const pick = pickOurPlayer(state, input.playerId);
@@ -739,6 +846,17 @@ export function applyTalkToPlayer(
         });
   const settling = settlingCredit !== 0 ? settlingOf(state, player.id) : null;
 
+  /**
+   * ── 약속은 **판정이 끝난 뒤에** 장부에 선다 ── (career.md §2 · people.md §5-2)
+   *
+   * ⚠️ 순서가 뒤집히면 방금 연 약속이 면담의 불만 해소에 쓸려 나갈 여지가 생긴다.
+   * 지금 지우는 것은 `state.issues`뿐이라 실제로는 닿지 않지만, 그 안전이 지워지는
+   * 자리와 열리는 자리의 **간격**에 기대고 있으므로 순서를 명시적으로 둔다.
+   */
+  const promised = input.promise
+    ? promisePiece(openPromise(state, player.id, input.promise.kind, input.promise.days))
+    : null;
+
   const xpMsg =
     base > 0
       ? grantManagerXP(state, "leadership", TALK_XP_PER_INTENSITY * input.intensity)
@@ -755,6 +873,7 @@ export function applyTalkToPlayer(
       `${player.name} 사기 ${bounded >= 0 ? "+" : ""}${bounded}` +
       (hadIssue ? " · 불만 해소" : "") +
       (settling ? ` · 적응 ${Math.round(settling.progress * 100)}%` : "") +
+      (promised ? promised.text : "") +
       (xpMsg ? ` · ${xpMsg}` : ""),
     brief: {
       head: `${player.name} 면담`,
@@ -764,6 +883,7 @@ export function applyTalkToPlayer(
         ...(settling
           ? [item({ label: "적응", text: `${Math.round(settling.progress * 100)}%` })]
           : []),
+        ...(promised ? [promised.item] : []),
       ],
     },
   };
@@ -1506,6 +1626,10 @@ export function movePlayerSlot(
  * 축(`axis`)도 자리(`position`)도 훈련 결산(LLM)의 입력이고, 자리는 결산 한 번에
  * `POSITION_TRAIN_MAX`까지만 오른다 — **실전보다 느리게**(경기 1회 = +1).
  * "자리는 커리어가 만든다"를 지키되 전향이라는 판단이 가능해진다.
+ *
+ * ⚠️ **층마다 닿는 것이 다르다** (season.md §2). 2군은 결산을 받지 않으므로 축은
+ * 월간 성장의 겨냥으로 넘어가고, **자리는 갈 곳이 없어 반려한다** — 걸어 두고
+ * 기다리게 하는 것이 거짓 성공이다.
  */
 export function setPlayerTraining(
   state: GameState,
@@ -1526,13 +1650,20 @@ export function setPlayerTraining(
     };
   }
 
-  const axis = input.axis?.trim();
-  if (axis && !ATTRIBUTE_AXES.includes(axis as (typeof ATTRIBUTE_AXES)[number])) {
-    return { ok: false, message: `알 수 없는 능력치 축: ${axis}` };
+  const axis = attributeAxisOf(input.axis?.trim());
+  if (input.axis?.trim() && !axis) {
+    return { ok: false, message: `알 수 없는 능력치 축: ${input.axis.trim()}` };
   }
   const position = input.position?.toUpperCase();
   if (position && !positionGroupOf(position)) {
     return { ok: false, message: `알 수 없는 포지션: ${input.position}` };
+  }
+  // 반려는 요청 전체에 걸린다 — 자리만 떼고 축만 걸면 감독이 시킨 적 없는 훈련이 선다
+  if (position && squadLevelOf(player) === "reserve") {
+    return {
+      ok: false,
+      message: `${player.name}은(는) 2군이라 자리를 배울 수 없습니다 — 자리는 훈련 결산이 올리고 2군은 결산을 받지 않습니다. 1군으로 올린 뒤에 거세요`,
+    };
   }
 
   const program = {
@@ -1547,7 +1678,7 @@ export function setPlayerTraining(
   const parts: string[] = [];
   const items: SkillBriefItem[] = [];
   if (axis) {
-    const ko = AXIS_KO[axis as (typeof ATTRIBUTE_AXES)[number]];
+    const ko = AXIS_KO[axis];
     parts.push(ko);
     items.push(item({ label: "능력치", text: ko }));
   }
@@ -1556,9 +1687,11 @@ export function setPlayerTraining(
     parts.push(`${position} 전향 (지금 적응도 ${fit})`);
     items.push(item({ label: "전향", text: position, note: `적응도 ${fit}` }));
   }
+  // 어디에 닿는지까지 답한다 — 층에 따라 경로가 갈린다 (season.md §2)
+  const where = squadLevelOf(player) === "reserve" ? " (2군 — 월간 성장의 축 배율)" : "";
   return {
     ok: true,
-    message: `${player.name} 개인 훈련 — ${parts.join(" · ")}`,
+    message: `${player.name} 개인 훈련 — ${parts.join(" · ")}${where}`,
     brief: { head: `${player.name} 개인 훈련`, items },
   };
 }
@@ -1685,42 +1818,149 @@ export function setPlayerPosition(
   };
 }
 
+/** 죽은 공 자리의 이름 — 감독에게 되돌아가는 말이 여기 한 벌 산다 */
+const SET_PIECE_ROLE_KO: Record<SetPieceRole, string> = {
+  corner: "코너",
+  freeKick: "프리킥",
+  penalty: "페널티",
+};
+
+/**
+ * **죽은 공 키커 지정** — "코너는 사카가 차", "페널티는 네 거야" (match.md §1.4).
+ *
+ * 셋 중 말한 자리만 바뀐다. `null`을 주면 지정이 풀려 코어의 기본값(그라운드 위
+ * 킥력 최고 · `penaltySkill` 최고)으로 돌아간다 — 감독이 손을 떼는 길이 있어야
+ * 한 번 지정한 사람이 팔린 뒤에도 그 이름이 남지 않는다.
+ *
+ * 평시와 경기 중이 같은 스킬을 지난다. 지정은 팀 전술에 남으므로 그라운드에 없는
+ * 선수를 지목해도 반려하지 않는다 — 다음 경기의 선발일 수 있다. 그 경기에서만
+ * 기본값이 설 뿐이다.
+ */
+export function setSetPieceTakers(
+  state: GameState,
+  input: Partial<Record<SetPieceRole, string | null>>,
+): SkillResult {
+  const tactics = userTactics(state);
+  const next: SetPieceTakers = { ...(tactics.setPieceTakers ?? {}) };
+  const notes: string[] = [];
+  const items: SkillBriefItem[] = [];
+  let changed = false;
+  for (const role of SET_PIECE_ROLES) {
+    const ref = input[role];
+    if (ref === undefined) continue;
+    if (ref === null) {
+      if (next[role] === undefined) continue;
+      delete next[role];
+      changed = true;
+      notes.push(`${SET_PIECE_ROLE_KO[role]} 키커 지정 해제`);
+      items.push(item({ label: SET_PIECE_ROLE_KO[role], text: "지정 해제" }));
+      continue;
+    }
+    const pick = pickOurPlayer(state, ref);
+    if (!pick.ok) return pick;
+    next[role] = pick.player.id;
+    changed = true;
+    notes.push(`${SET_PIECE_ROLE_KO[role]} — ${pick.player.name}`);
+    items.push(item({ label: SET_PIECE_ROLE_KO[role], text: pick.player.name }));
+  }
+  if (!changed) {
+    return { ok: true, message: "바뀐 키커가 없습니다", unchanged: true };
+  }
+  tactics.setPieceTakers = next;
+  return {
+    ok: true,
+    message: `죽은 공 키커 — ${notes.join(" · ")}`,
+    brief: { head: "세트피스 키커", items },
+  };
+}
+
 /** 완장을 **처음** 채운 날의 체력 — 라커룸 한가운데 서는 일이다 (career.md §2) */
 const CAPTAIN_FIRST_LIFT = 4;
 
-export function setCaptain(state: GameState, playerId: string): SkillResult {
-  const pick = pickOurPlayer(state, playerId);
-  if (!pick.ok) return pick;
-  const player = pick.player;
-  // 팀당 1명 — 기존 주장 해제
-  for (const p of userPlayers(state)) p.isCaptain = false;
-  player.isCaptain = true;
-  /**
-   * **체력 보너스는 선수당 첫 지명에만** (career.md §2). 완장은 몇 번이고 오가지만
-   * 처음 채워지는 순간의 무게는 한 번뿐이다 — 문이 없으면 두 선수를 번갈아 지명하는
-   * 것만으로 둘 다 체력이 100이 된다.
-   */
-  if (player.state.captainedOn === undefined) {
-    player.state.captainedOn = state.date;
-    player.state.condition = clampCondition(player.state.condition + CAPTAIN_FIRST_LIFT);
+/** 완장을 채운 사람의 근거 한 줄 — 리더십과 재적이 결과 항목에 그대로 선다 */
+function armbandNote(state: GameState, player: GamePlayer): string {
+  const row = leaderGroupOf(state, player.teamId).find((r) => r.playerId === player.id);
+  const tenure = row && row.seasons > 0 ? ` · ${row.seasons}시즌 ${row.apps}경기` : "";
+  return `리더십 ${player.attributes.leadership}${tenure}`;
+}
+
+/**
+ * **완장은 둘이다** — 주장과 부주장 (→ docs/data/people.md §5-1).
+ *
+ * 서열은 저장하지 않고 파생하지만 이 둘만은 저장한다: 장부 어디에서도 파생되지 않는
+ * **감독의 결정**이기 때문이다. 한 요청이 둘 다 옮길 수 있고, 말한 자리만 바뀐다 —
+ * `vice: null`은 부주장 지정을 푼다.
+ */
+export function setCaptain(
+  state: GameState,
+  input: { playerId?: string | null; vice?: string | null },
+): SkillResult {
+  const items: SkillBriefItem[] = [];
+  const notes: string[] = [];
+
+  if (input.playerId !== undefined && input.playerId !== null) {
+    const pick = pickOurPlayer(state, input.playerId);
+    if (!pick.ok) return pick;
+    const player = pick.player;
+    // 팀당 1명 — 기존 주장 해제. 부주장이 완장을 올려 받으면 그 자리는 빈다
+    for (const p of userPlayers(state)) p.isCaptain = false;
+    player.isCaptain = true;
+    if (player.isViceCaptain === true) player.isViceCaptain = undefined;
+    /**
+     * **체력 보너스는 선수당 첫 지명에만** (career.md §2). 완장은 몇 번이고 오가지만
+     * 처음 채워지는 순간의 무게는 한 번뿐이다 — 문이 없으면 두 선수를 번갈아 지명하는
+     * 것만으로 둘 다 체력이 100이 된다.
+     */
+    if (player.state.captainedOn === undefined) {
+      player.state.captainedOn = state.date;
+      player.state.condition = clampCondition(player.state.condition + CAPTAIN_FIRST_LIFT);
+    }
+    // 새 영입에게 완장을 채우는 건 라커룸 한가운데 세우는 일이다 (settling.ts)
+    const settled = creditSettling(state, player.id, "captain") > 0;
+    const settling = settled ? settlingOf(state, player.id) : null;
+    notes.push(`${player.name}을(를) 주장으로 지명했습니다`);
+    items.push(item({ label: "주장", text: player.name, note: armbandNote(state, player) }));
+    if (settling) {
+      const percent = Math.round(settling.progress * 100);
+      notes.push(`적응 ${percent}%`);
+      items.push(item({ label: "적응", text: `${percent}%` }));
+    }
   }
-  // 새 영입에게 완장을 채우는 건 라커룸 한가운데 세우는 일이다 (settling.ts)
-  const settled = creditSettling(state, player.id, "captain") > 0;
-  const settling = settled ? settlingOf(state, player.id) : null;
+
+  if (input.vice !== undefined) {
+    if (input.vice === null) {
+      const before = userPlayers(state).find((p) => p.isViceCaptain === true);
+      if (before) {
+        before.isViceCaptain = undefined;
+        notes.push("부주장 지정을 해제했습니다");
+        items.push(item({ label: "부주장", text: "지정 해제" }));
+      }
+    } else {
+      const pick = pickOurPlayer(state, input.vice);
+      if (!pick.ok) return pick;
+      const vice = pick.player;
+      if (vice.isCaptain) {
+        return {
+          ok: false,
+          message: `${vice.name}은(는) 이미 주장입니다 — 완장은 한 사람에 하나입니다`,
+        };
+      }
+      for (const p of userPlayers(state)) p.isViceCaptain = undefined;
+      vice.isViceCaptain = true;
+      /**
+       * **부주장에는 체력도 정착 크레딧도 붙지 않는다** (career.md §2) — 완장 둘에
+       * 같은 값을 매기면 감독이 두 번 받으려고 두 자리를 채운다.
+       */
+      notes.push(`${vice.name}을(를) 부주장으로 지명했습니다`);
+      items.push(item({ label: "부주장", text: vice.name, note: armbandNote(state, vice) }));
+    }
+  }
+
+  if (items.length === 0) return { ok: true, message: "바뀐 완장이 없습니다", unchanged: true };
   return {
     ok: true,
-    message:
-      `${player.name}을(를) 주장으로 지명했습니다` +
-      (settling ? ` · 적응 ${Math.round(settling.progress * 100)}%` : ""),
-    brief: {
-      head: "주장 지정",
-      items: [
-        item({ label: "주장", text: player.name }),
-        ...(settling
-          ? [item({ label: "적응", text: `${Math.round(settling.progress * 100)}%` })]
-          : []),
-      ],
-    },
+    message: notes.join(" · "),
+    brief: { head: "완장", items },
   };
 }
 
@@ -1933,6 +2173,14 @@ function retuneFamiliarity(
   }
 }
 
+/**
+ * 팀 전술 — **여섯 축과 갈래 넷을 한 자리에서 받는다.**
+ *
+ * 축(멘탈리티·라인·압박·템포·폭·패스)뿐 아니라 `TacticsSpec`의 optional 토글
+ * 넷(전환·오프사이드 트랩·태클 강도·GK 배급)도 같은 스프레드로 지나가고 같은
+ * 스키마가 검증한다 (→ docs/simulation/match.md §1.2). 주지 않은 필드는 지금 값을
+ * 그대로 잇고, `null`은 그 갈래의 지시를 푸는 자리다.
+ */
 export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillResult {
   const tactics = userTactics(state);
   /**
@@ -2002,14 +2250,27 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillR
       : delta > 0
         ? ` · 전술 적응도 ${now} (+${delta}, 익혀 둔 전술)`
         : ` · 전술 적응도 ${now} (그대로)`;
+  /**
+   * 감독이 실제로 세운 갈래만 — **중립인 갈래는 세우지 않는다.**
+   *
+   * "역습으로 가자"가 결과에 없으면 감독은 걸린 줄 모른다. 반대로 넷이 늘 붙어
+   * 있으면 무엇을 지시했는지가 묻히므로, 중립은 빼고 선 것만 낸다 (`tacticsBrief`와
+   * 같은 규칙). 중립인지는 `tacticToggleValue` 하나가 답한다.
+   */
+  const toggles = TACTIC_TOGGLES.flatMap((toggle) => {
+    const value = tacticToggleValue(parsed.data, toggle.key);
+    return value === null ? [] : [{ toggle, word: tacticToggleWord(toggle.key, value) }];
+  });
+  const toggleNote = toggles.map(({ toggle, word }) => ` · ${toggle.brief} ${word}`).join("");
   return {
     ok: true,
-    message: `전술 변경 — ${parsed.data.formation}, 멘탈리티 ${parsed.data.mentality}${note}`,
+    message: `전술 변경 — ${parsed.data.formation}, 멘탈리티 ${parsed.data.mentality}${toggleNote}${note}`,
     brief: {
       head: "전술 변경",
       items: [
         item({ label: "포메이션", text: parsed.data.formation }),
         item({ label: "멘탈리티", text: `${parsed.data.mentality}` }),
+        ...toggles.map(({ toggle, word }) => item({ label: toggle.label, text: word })),
         /**
          * 적응도는 **도달한 값이 값이고 움직인 폭이 부호다** — `delta`가 0이어도
          * 싣는다. "그대로다"는 이 항목이 말하는 사실이지 증감을 말하지 않는 것이 아니다.

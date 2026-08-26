@@ -1,6 +1,14 @@
 import type { MarketSkillResult } from "../skills";
-import type { GamePlayer, Negotiation, NegotiationVerdict } from "@story-fm/domain";
-import { MAX_PAYMENT_YEARS, PITCH_CLAIM_KO, ageOf, naturalPositionOf } from "@story-fm/domain";
+import type { GamePlayer, Negotiation, NegotiationVerdict, SquadStatus } from "@story-fm/domain";
+import {
+  MAX_PAYMENT_YEARS,
+  PITCH_CLAIM_KO,
+  SQUAD_STATUS_KO,
+  ageOf,
+  naturalPositionOf,
+  squadStatusRank,
+  statusAtRank,
+} from "@story-fm/domain";
 import {
   askingPriceFor,
   dealOdds,
@@ -16,8 +24,10 @@ import {
   type CounterBand,
   type CounterBounds,
 } from "./counter-bounds";
+import { squadStatusOf } from "../squad/promises";
 import { KIND_KO, counterpartOf, pendingOffer, respondOffer, splitLabel } from "./negotiation";
 import { agentForPlayer } from "../world/persona";
+import { interestLine } from "./interest";
 import { contractYearsLeft, hasIssue, playerById, teamName, type GameState } from "../core/state";
 import { formatMoney } from "../club/finance";
 
@@ -44,6 +54,11 @@ export const COUNTERPARTY_COUNTER_AT = 25;
 export const COUNTERPARTY_TERMS_BAND = 0.15;
 /** 재계약의 계약 연수가 앵커에서 움직일 수 있는 폭 — ±1년 */
 export const COUNTERPARTY_YEARS_BAND = 1;
+/**
+ * 계약 지위가 앵커에서 움직일 수 있는 폭 — **±한 칸**.
+ * 연수와 같은 결이다: 지위는 비율 폭이 아니라 정수 사다리라 %로 자를 것이 없다.
+ */
+export const COUNTERPARTY_STATUS_BAND = 1;
 
 /** 판정의 사다리 — 상대는 앵커에서 **한 칸**까지 움직인다 */
 const LADDER: readonly NegotiationVerdict[] = ["reject", "counter", "accept"];
@@ -74,6 +89,14 @@ export function yearsRoomOf(anchor: number, band: CounterBand): TermsRoom {
   };
 }
 
+/** 지위의 폭 — 서열 앵커 ±한 칸을 코어의 구간으로 자른 것 (연수와 같은 결) */
+export function statusRoomOf(anchor: number, band: CounterBand): TermsRoom {
+  return {
+    min: clampToBand(band, anchor - COUNTERPARTY_STATUS_BAND) ?? anchor,
+    max: clampToBand(band, anchor + COUNTERPARTY_STATUS_BAND) ?? anchor,
+  };
+}
+
 export interface CounterpartyAnchor {
   negotiationId: string;
   /** 코어가 잰 성사 확률 */
@@ -96,6 +119,10 @@ export interface CounterpartyAnchor {
   contractYears?: number;
   /** 그 연수가 움직일 수 있는 폭 */
   yearsRoom?: TermsRoom;
+  /** 조정일 때 선수가 부르는 계약 지위 — 재계약·영입에서만 (people.md §5-2) */
+  squadStatus?: SquadStatus;
+  /** 그 지위가 움직일 수 있는 폭 — 서열의 구간이다 */
+  statusRoom?: TermsRoom;
   /** 분할 연수를 되부를 수 있는 갈래인가 */
   splittable: boolean;
   bounds: CounterBounds;
@@ -107,6 +134,7 @@ export interface CounterpartyRulingInput {
   fee?: number;
   weeklyWage?: number;
   contractYears?: number;
+  squadStatus?: SquadStatus;
   paymentYears?: number;
   note?: string;
 }
@@ -118,6 +146,7 @@ export interface CounterpartyRuling {
   fee?: number;
   weeklyWage?: number;
   contractYears?: number;
+  squadStatus?: SquadStatus;
   paymentYears?: number;
   note?: string;
 }
@@ -176,6 +205,11 @@ export function counterpartyAnchor(
   const fee = bounds.fee ? clampToBand(bounds.fee, bounds.fee.expectation) : null;
   const wage = bounds.wage ? clampToBand(bounds.wage, bounds.wage.expectation) : null;
   const years = bounds.years ? clampToBand(bounds.years, bounds.years.expectation) : null;
+  /**
+   * 지위는 **다른 축을 막지 않는다** — 감독이 이미 한 칸 위를 부른 판에서는 이 축만
+   * 닫히고 주급·연수의 흥정은 그대로 남는다. 그래서 `canCounter`에 들지 않는다.
+   */
+  const status = bounds.status ? clampToBand(bounds.status, bounds.status.expectation) : null;
   return {
     negotiationId: negotiation.id,
     probability,
@@ -189,6 +223,12 @@ export function counterpartyAnchor(
     ...(years === null || !bounds.years
       ? {}
       : { contractYears: years, yearsRoom: yearsRoomOf(years, bounds.years) }),
+    ...(status === null || !bounds.status
+      ? {}
+      : {
+          squadStatus: statusAtRank(status),
+          statusRoom: statusRoomOf(status, bounds.status),
+        }),
     splittable: bounds.splittable,
     bounds,
   };
@@ -233,6 +273,13 @@ export function clampCounterpartyRuling(
     anchor.bounds.years && anchor.contractYears !== undefined && anchor.yearsRoom
       ? clampInto(anchor.yearsRoom, ruling?.contractYears ?? anchor.contractYears)
       : undefined;
+  // 지위도 정수 사다리라 연수와 같은 자리를 지난다 — 서열로 자르고 다시 지위로 낸다
+  const squadStatus =
+    anchor.squadStatus !== undefined && anchor.statusRoom
+      ? statusAtRank(
+          clampInto(anchor.statusRoom, squadStatusRank(ruling?.squadStatus ?? anchor.squadStatus)),
+        )
+      : undefined;
   const years = ruling?.paymentYears;
   const paymentYears =
     anchor.splittable && years !== undefined && years >= 1 && years <= MAX_PAYMENT_YEARS
@@ -244,6 +291,7 @@ export function clampCounterpartyRuling(
     ...(fee === undefined ? {} : { fee }),
     ...(weeklyWage === undefined ? {} : { weeklyWage }),
     ...(contractYears === undefined ? {} : { contractYears }),
+    ...(squadStatus === undefined ? {} : { squadStatus }),
     ...(paymentYears === undefined ? {} : { paymentYears }),
     ...(note ? { note } : {}),
   };
@@ -299,6 +347,7 @@ function dossierOf(state: GameState, negotiation: Negotiation, player: GamePlaye
   const us = teamName(state.userTeamId);
   const them = counterpartOf(negotiation, player);
   const money = negotiation.kind === "release" ? "정산금" : "이적료";
+  const rivals = interestLine(state, player.id);
   return [
     `[오퍼 이력] 기한 ${negotiation.expiresOn}`,
     ...negotiation.rounds.map(
@@ -318,11 +367,21 @@ function dossierOf(state: GameState, negotiation: Negotiation, player: GamePlaye
       askingPriceFor(state, player),
     )} · 선수 주급 기대 ${formatMoney(wageExpectationOf(state, player))}` +
       (negotiation.kind === "renew"
-        ? ` · 재계약 기대 주급 ${formatMoney(renewalExpectation(state, player))} · 기대 연수 ${renewalYearsExpectation(state, player)}년`
+        ? ` · 재계약 기대 주급 ${formatMoney(renewalExpectation(state, player))} · 기대 연수 ${renewalYearsExpectation(state, player)}년` +
+          ` · 지금 계약 지위 ${SQUAD_STATUS_KO[squadStatusOf(state, player)]}`
         : ""),
     ...((negotiation.pitched?.length ?? 0) > 0
       ? [`[사실로 확인된 이야기] ${negotiation.pitched!.map((k) => PITCH_CLAIM_KO[k]).join(" · ")}`]
       : []),
+    /**
+     * **경쟁 관심** — 이 테이블 밖에서 같은 선수를 두고 움직이는 구단
+     * (→ docs/simulation/transfer.md §1-2). 없으면 줄이 서지 않는다.
+     *
+     * 판정하는 쪽이 알아야 할 사실이라 서류에 든다: 갈 곳이 여럿인 선수는 우리
+     * 오퍼를 기다릴 이유가 그만큼 적다. 그 값은 코어가 이미 확률에 넣었고
+     * (`dealOdds`의 「다른 구단의 관심」), 여기 실리는 것은 그 근거다.
+     */
+    ...(rivals === null ? [] : [`[경쟁 관심] ${rivals}`]),
   ];
 }
 

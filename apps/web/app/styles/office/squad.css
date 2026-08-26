@@ -717,6 +717,114 @@
   font-size: var(--fs-xs);
   line-height: 1.5;
 }
+/* 커리어 — 시즌 × 팀의 표와 그 옆의 마일스톤. 능력치 격자 아래에 제 블록으로 선다 */
+.pd-career {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 22px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--pd-rule);
+}
+/**
+ * 표는 **제 폭만 쓴다.** 상세는 명단 표의 한 칸(`colSpan`) 안에 있어서, 여기서
+ * 늘어나면 그 폭이 바깥 표의 열 계산에 얹혀 행을 펼칠 때마다 명단이 흔들린다.
+ * 열은 전부 숫자 폭이라 좁고, `tabular-nums`가 세로줄을 맞춰 준다.
+ */
+.pd-career-table {
+  border-collapse: collapse;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.pd-career-table th,
+.pd-career-table td {
+  padding: 1px 0 1px 10px;
+  text-align: right;
+  white-space: nowrap;
+  line-height: 1.7;
+}
+/**
+ * 시즌·팀은 **읽는 이름**이라 왼쪽에서 시작한다 — 오른쪽 정렬은 숫자 열의 것이다.
+ *
+ * ⚠️ 칸 번호는 줄마다 다르다. 통산 줄의 첫 칸은 두 열을 먹는 `colSpan`이라
+ * 거기서 `nth-child(2)`는 「팀」이 아니라 **「출전」**이다 — 줄 종류를 함께
+ * 적지 않으면 통산의 출전만 왼쪽으로 밀려 위 숫자들과 세로줄이 어긋난다.
+ */
+.pd-career-table thead th:first-child,
+.pd-career-table thead th:nth-child(2),
+.pd-career-table tbody td:first-child,
+.pd-career-table tbody td:nth-child(2),
+.pd-career-table tfoot th {
+  padding-left: 0;
+  text-align: left;
+}
+/* 열 이름은 **분류**지 값이 아니다 — 능력치 묶음 이름과 같은 결로 가라앉힌다 */
+.pd-career-table thead th {
+  border-bottom: 1px solid var(--pd-rule);
+  color: var(--muted);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+.pd-career-table tbody td {
+  color: var(--text);
+}
+/* 통산 행 — 위 행들과 같은 열을 쓰되 선 하나로 갈리고 굵어진다 */
+.pd-career-table tfoot th,
+.pd-career-table tfoot td {
+  border-top: 1px solid var(--pd-rule);
+  color: var(--text);
+  font-weight: 700;
+}
+.pd-career-table tfoot th {
+  color: var(--muted);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.04em;
+}
+/* 2군은 1군 숫자에 **곁들인 표시**다 — 같은 칸에 있되 크기와 색으로 갈린다 */
+.pd-career-table i {
+  margin-left: 2px;
+  color: var(--muted);
+  font-size: var(--fs-2xs);
+  font-style: normal;
+  font-weight: 400;
+}
+/* 마일스톤 — 표 옆의 짧은 목록. 라벨이 굵고 날짜가 그 뒤에 흐리게 붙는다 */
+.pd-milestones {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.pd-milestones .pd-axis-group-name {
+  flex: 0 0 auto;
+  text-align: left;
+  line-height: 1.7;
+}
+.pd-milestones ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-xs);
+}
+.pd-milestones li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  line-height: 1.7;
+}
+.pd-milestones b {
+  color: var(--text);
+  font-weight: 700;
+}
+.pd-milestones i {
+  color: var(--muted);
+  font-size: var(--fs-2xs);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
 /**
  * 적응도 게이지 — **채워진 원**. 숫자로 두면 OVR·나이·평점 같은 두 자리 수와
  * 뒤섞여 세로 비교가 안 됐다. 정확한 값은 툴팁이 갖는다 (office.tsx `FitGauge`).
@@ -1142,6 +1250,18 @@
   font-weight: 400;
   color: var(--gold);
 }
+/* 완장·서열 표식 — 이름 앞의 원문자 하나 (주장 Ⓒ · 부주장 Ⓥ · 리더 Ⓛ).
+   셋이 같은 크기·같은 자리에 서야 한 계열로 읽힌다. 완장은 금색이고 리더 그룹은
+   눈금이라 옅다 — 감독이 채운 자리와 코어가 낸 자리를 색이 가른다 */
+.armband {
+  margin-right: 0.2em;
+  color: var(--gold);
+  font-size: 0.82em;
+  font-style: normal;
+}
+.armband[title^="라커룸 리더"] {
+  color: var(--muted);
+}
 .shirt-no {
   display: inline-block;
   min-width: 1.35em;
@@ -1500,6 +1620,11 @@
 .squad-table tbody tr.t-reserve td:first-child {
   border-left-color: rgba(148, 163, 184, 0.18);
 }
+/* 임대 — 우리 계약이지만 **여기 없는 사람**이라 판의 색(선발·벤치)과 다른 계열이다.
+   승격·강등으로 오갈 수 있는 2군의 회색과도 갈려야 한다: 이 행에는 손잡이가 없다 */
+.squad-table tbody tr.t-loan td:first-child {
+  border-left-color: rgba(251, 191, 36, 0.45);
+}
 /* 이름 칸 — 교체 화살표 자리와 상태 배지를 함께 안는다 */
 /**
  * 이름 칸 — **td에 `display: flex`를 주지 않는다.** 주면 표가 셀을 익명 래퍼로
@@ -1517,4 +1642,28 @@
 .squad-table th:first-child,
 .squad-table td:first-child {
   width: 34%;
+}
+
+/**
+ * 경기 감각 — **체력 옆의 한 낱말**. 숫자를 세우지 않는 이유는 감독이 읽는 사실이
+ * "최근에 뛰었나"이지 73이 아니기 때문이다 (player.md §5.4).
+ *
+ * 색은 체력 막대와 같은 방향으로 읽힌다: 좋은 쪽이 초록, 굳은 쪽이 붉다.
+ * 가운데 두 등급은 색을 쓰지 않는다 — 스쿼드의 절반이 늘 그 자리라, 칠하면
+ * 표 전체가 색으로 덮여 정작 손을 써야 하는 "굳음"이 묻힌다.
+ */
+.squad-table .sharpness {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.squad-table .sharpness.sharp {
+  color: var(--accent);
+}
+.squad-table .sharpness.rising {
+  color: var(--text);
+}
+.squad-table .sharpness.blunt {
+  color: var(--danger);
 }

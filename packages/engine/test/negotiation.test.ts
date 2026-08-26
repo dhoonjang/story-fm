@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GameState } from "@story-fm/engine";
+import type { Interest } from "@story-fm/domain";
 import {
   acceptDeal,
   activeContract,
@@ -24,7 +25,10 @@ import {
   generateIncomingOffers,
   incomingOffer,
   incomingOffers,
+  INTEREST_STEP_DAYS,
   isClubTeam,
+  listingOf,
+  MARKET_NEAR_LOW,
   marketValueOf,
   loanPlayer,
   LOAN_FEE_RATE,
@@ -40,12 +44,15 @@ import {
   pendingVerdicts,
   playerById,
   playersOf,
+  REQUEST_BLOCKS,
+  REQUESTED_DISCOUNT,
   recallLoan,
   releasePlayer,
   renewalExpectation,
   renewalYearsExpectation,
   RENEWAL_YEARS_MAX,
   respondOffer,
+  respondTransferRequest,
   responseDelayDays,
   resolveMedical,
   sendOffer,
@@ -53,11 +60,14 @@ import {
   setTransferList,
   suggestTerms,
   teamName,
+  tickInterests,
+  transferRequestOf,
   unilateralSeveranceOf,
   USER_WAGE_HEADROOM,
   wageExpectationOf,
   wageRoomOf,
   weeklyWagesOf,
+  windowStartFor,
   withdrawOffer,
 } from "@story-fm/engine";
 import {
@@ -129,12 +139,22 @@ function targetWaiting(state: GameState) {
 }
 
 /** 오퍼가 들어올 때까지 날짜를 넘긴다 (확률적이지만 시드로 결정적) */
-function waitForIncoming(state: GameState, days = 60) {
+/**
+ * 하루를 민다 — **tick과 같은 순서**로 관심을 먼저 굴리고 오퍼를 굴린다.
+ *
+ * 등재·이적 요청 밖의 오퍼는 `bidding`까지 오른 관심에서만 나오므로
+ * (transfer.md §1-2), `generateIncomingOffers`만 부르면 사다리가 서지 않아
+ * 오퍼가 영영 오지 않는다.
+ */
+function marketDay(state: GameState, digest: string[]): void {
+  state.date = addDays(state.date, 1);
+  tickInterests(state, digest);
+  generateIncomingOffers(state, digest);
+}
+
+function waitForIncoming(state: GameState, days = 90) {
   const digest: string[] = [];
-  for (let i = 0; i < days && incomingOffers(state).length === 0; i++) {
-    state.date = addDays(state.date, 1);
-    generateIncomingOffers(state, digest);
-  }
+  for (let i = 0; i < days && incomingOffers(state).length === 0; i++) marketDay(state, digest);
   return { negotiation: incomingOffers(state)[0], digest };
 }
 
@@ -885,6 +905,135 @@ describe("매각 — 들어오는 오퍼", () => {
   });
 });
 
+/**
+ * 이적 요청 — **선수가 시작하는 매각** (transfer.md §1-1).
+ *
+ * 여기서 재는 것은 셋이다: 값이 붙은 오퍼를 가르는 **경계**, 같은 창의 두 번째
+ * 거절이 요청을 세우는 **전이**, 수락한 호가가 요청 할인선을 넘지 못하는 **불변식**.
+ */
+describe("이적 요청 — 막힌 이적이 세우고 감독이 답한다", () => {
+  const shared = createTestGame(42);
+
+  /** 우리 선수 하나 — 케이스마다 다른 사람을 쓴다 (한 픽스처를 나눠 쓴다) */
+  function ours(state: GameState, index: number) {
+    return playersOf(state, state.userTeamId)[index]!;
+  }
+
+  /**
+   * 우리 선수에게 들어온 매각 오퍼 하나를 손으로 세운다 — 여기서 재는 것은 오퍼가
+   * 오는 확률이 아니라 **거절이 남기는 것**이라, 값을 정확히 겨눠야 한다.
+   */
+  function incomingSell(state: GameState, playerId: string, fee: number, id: string): Negotiation {
+    const buyer = state.teams.find((t) => t.id !== state.userTeamId && isClubTeam(t.id))!;
+    const negotiation: Negotiation = {
+      id,
+      gamePlayerId: playerId,
+      kind: "sell",
+      counterpartTeamId: buyer.id,
+      windowId: null,
+      openedOn: state.date,
+      expiresOn: addDays(state.date, 10),
+      status: "open",
+      rounds: [
+        {
+          date: state.date,
+          by: "them",
+          fee,
+          weeklyWage: 40_000,
+          contractYears: 4,
+          respondsOn: null,
+          probability: 60,
+          verdict: null,
+        },
+      ],
+    };
+    state.negotiations.push(negotiation);
+    return negotiation;
+  }
+
+  /** 그 선수에게 선 막힌 이적 불만 */
+  const blocked = (state: GameState, playerId: string) =>
+    state.issues.find((i) => i.gamePlayerId === playerId && i.reason === "blocked-move") ?? null;
+
+  it("헐값을 물린 것은 라커룸에 닿지 않는다 — 경계는 시장가 언저리의 아래 끝이다", () => {
+    const state = shared;
+    const player = ours(state, 0);
+    state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
+    const near = Math.ceil(marketValueOf(state, player) * MARKET_NEAR_LOW);
+
+    const cheap = incomingSell(state, player.id, near - 1, "neg-cheap");
+    answerIncomingOffer(state, { negotiationId: cheap.id, verdict: "reject" });
+    expect(blocked(state, player.id), "바로 아래는 헐값이다").toBeNull();
+
+    const serious = incomingSell(state, player.id, near, "neg-serious");
+    answerIncomingOffer(state, { negotiationId: serious.id, verdict: "reject" });
+    expect(blocked(state, player.id)?.count).toBe(1);
+    expect(transferRequestOf(state, player.id), "한 번은 감독의 결정이다").toBeNull();
+  });
+
+  it("같은 창의 두 번째 거절이 요청을 세우고, 창이 바뀌면 1부터 다시 센다", () => {
+    const state = shared;
+    const player = ours(state, 1);
+    state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
+    const near = Math.ceil(marketValueOf(state, player) * MARKET_NEAR_LOW);
+
+    const first = incomingSell(state, player.id, near, "neg-block-1");
+    answerIncomingOffer(state, { negotiationId: first.id, verdict: "reject" });
+    expect(blocked(state, player.id)?.count).toBe(1);
+
+    // ── 지난 창에서 막은 일은 이번 창의 두 번째가 되지 않는다
+    const windowStart = windowStartFor(state, state.userTeamId)!;
+    blocked(state, player.id)!.since = addDays(windowStart, -30);
+    const stale = incomingSell(state, player.id, near, "neg-block-stale");
+    answerIncomingOffer(state, { negotiationId: stale.id, verdict: "reject" });
+    expect(blocked(state, player.id)?.count, "창이 바뀌면 1부터다").toBe(1);
+    expect(transferRequestOf(state, player.id)).toBeNull();
+
+    // ── 같은 창의 두 번째는 불만이 아니라 요청이다
+    const second = incomingSell(state, player.id, near, "neg-block-2");
+    const answered = answerIncomingOffer(state, { negotiationId: second.id, verdict: "reject" });
+    expect(blocked(state, player.id)?.count).toBe(REQUEST_BLOCKS);
+    const request = transferRequestOf(state, player.id);
+    expect(request?.reason).toBe("blocked-move");
+    expect(request?.answeredOn, "요청은 답을 기다린다").toBeUndefined();
+    expect(answered.message).toContain("이적을 요청");
+    // 장부가 원본이고 옛 필드도 같은 값을 든다
+    expect(state.transferRequests?.some((r) => r.gamePlayerId === player.id)).toBe(true);
+    expect(playerById(state, player.id)!.state.transferRequestedOn).toBe(state.date);
+  });
+
+  it("수락한 호가는 요청 할인선 위로 서지 못한다", () => {
+    const state = shared;
+    const player = ours(state, 2);
+    state.transferRequests = (state.transferRequests ?? []).filter(
+      (r) => r.gamePlayerId !== player.id,
+    );
+    state.transferRequests.push({
+      gamePlayerId: player.id,
+      since: state.date,
+      reason: "grievance",
+      pressedOn: state.date,
+    });
+
+    const ceiling = Math.round(marketValueOf(state, player) * (1 - REQUESTED_DISCOUNT));
+    const accepted = respondTransferRequest(state, {
+      playerId: player.id,
+      answer: "accept",
+      askingPrice: 999_000_000,
+    });
+    expect(accepted.ok, accepted.message).toBe(true);
+    expect(listingOf(state, player.id)!.askingPrice).toBeLessThanOrEqual(ceiling);
+
+    const request = transferRequestOf(state, player.id)!;
+    expect(request.answer).toBe("accept");
+    expect(request.answeredOn).toBe(state.date);
+    // 답한 사실은 다음 회견이 다시 싣는다 — 실려 간 자리는 비워진다
+    expect(request.pressedOn).toBeUndefined();
+    // 감독은 한 번만 답한다
+    expect(respondTransferRequest(state, { playerId: player.id, answer: "refuse" }).ok).toBe(false);
+  });
+});
+
 describe("재계약 — 상대가 선수 본인이다", () => {
   /** 계약이 곧 끝나는 우리 선수 하나를 만든다 */
   function expiringPlayer(state: GameState) {
@@ -1208,8 +1357,7 @@ describe("시장의 문 — 한쪽에만 걸려 있던 관문들", () => {
   function waitForIncoming(state: GameState, days = 120) {
     const digest: string[] = [];
     for (let i = 0; i < days && incomingOffers(state).length === 0; i++) {
-      state.date = addDays(state.date, 1);
-      generateIncomingOffers(state, digest);
+      marketDay(state, digest);
     }
     return incomingOffers(state)[0];
   }
@@ -2375,6 +2523,7 @@ describe("협상 상대의 앵커와 한도", () => {
       fee: { expectation: 1000, min: 500, max: 2000 },
       wage: null,
       years: null,
+      status: null,
       splittable: true,
     },
     ...over,
@@ -2461,5 +2610,109 @@ describe("협상 상대의 앵커와 한도", () => {
     });
     expect(settled.result.ok, settled.result.message).toBe(true);
     expect(anchor.allowed).toContain(settled.input.verdict);
+  });
+});
+
+/**
+ * **관심 — 오퍼 앞에 서는 사다리** (→ docs/simulation/transfer.md §1-2).
+ *
+ * 재는 것은 사다리의 규칙이지 그날의 주사위가 아니다: 칸이 순서대로만 오르는가,
+ * 한 구단 × 한 선수에 한 줄인가, 그리고 **관심 없이 오는 오퍼가 없는가**.
+ */
+describe("관심이 오퍼 앞에 선다", () => {
+  /** 관심이 붙을 만한 선수 — 우리 1군에서 값이 가장 나가는 쪽 */
+  const watched = (state: GameState) =>
+    [...playersOf(state, state.userTeamId)].sort(
+      (a, b) => marketValueOf(state, b) - marketValueOf(state, a),
+    )[0]!;
+
+  /** 손으로 세운 관심 한 줄 — 사다리의 규칙을 재는 자리라 주사위를 기다리지 않는다 */
+  function standInterest(
+    state: GameState,
+    playerId: string,
+    teamId: string,
+    stage: Interest["stage"],
+  ): Interest {
+    const row: Interest = {
+      teamId,
+      gamePlayerId: playerId,
+      since: state.date,
+      stage,
+      lastMovedOn: state.date,
+    };
+    (state.interests ??= []).push(row);
+    return row;
+  }
+
+  it("칸은 순서대로만 오르고, 머문 날이 차기 전에는 움직이지 않는다", () => {
+    const state = createTestGame(11);
+    const player = watched(state);
+    const row = standInterest(state, player.id, "chelsea", "watching");
+    const digest: string[] = [];
+
+    // 최소 체류 안에는 몇 번을 굴려도 그대로다
+    for (let i = 0; i < INTEREST_STEP_DAYS - 1; i++) {
+      state.date = addDays(state.date, 1);
+      tickInterests(state, digest);
+    }
+    expect(state.interests![0]!.stage, "체류일 전에는 오르지 않는다").toBe("watching");
+
+    const seen: string[] = ["watching"];
+    for (let i = 0; i < 90 && row.stage !== "bidding" && state.interests?.[0] === row; i++) {
+      state.date = addDays(state.date, 1);
+      tickInterests(state, digest);
+      if (seen[seen.length - 1] !== row.stage) seen.push(row.stage);
+    }
+    // 건너뛰는 칸이 없다 — `watching`에서 곧바로 `bidding`이 되지 않는다
+    expect(seen).toEqual(["watching", "enquired", "bidding"]);
+  });
+
+  it("한 구단 × 한 선수에 한 줄뿐이다", () => {
+    const state = createTestGame(11);
+    const digest: string[] = [];
+    for (let i = 0; i < 120; i++) {
+      marketDay(state, digest);
+      const keys = (state.interests ?? []).map((r) => `${r.teamId} ${r.gamePlayerId}`);
+      expect(new Set(keys).size, `중복된 관심 줄 — ${state.date}`).toBe(keys.length);
+    }
+  });
+
+  it("등재도 이적 요청도 아닌 오퍼는 관심에서만 온다", () => {
+    const state = createTestGame(11);
+    const digest: string[] = [];
+    // 관심을 매일 걷어 낸다 — 사다리가 서지 못하면 그 갈래의 오퍼도 없어야 한다
+    for (let i = 0; i < 120; i++) {
+      state.date = addDays(state.date, 1);
+      tickInterests(state, digest);
+      state.interests = [];
+      generateIncomingOffers(state, digest);
+    }
+    expect(state.transferList, "이 케이스는 등재를 세우지 않는다").toHaveLength(0);
+    expect(incomingOffers(state), "관심 없이 붙은 오퍼가 있다").toHaveLength(0);
+  });
+
+  it("`bidding`까지 오른 관심이 그 구단의 오퍼가 되고, 그 줄은 걷힌다", () => {
+    const state = createTestGame(11);
+    const player = watched(state);
+    standInterest(state, player.id, "chelsea", "bidding");
+    const digest: string[] = [];
+    for (let i = 0; i < 60 && incomingOffers(state).length === 0; i++) {
+      state.date = addDays(state.date, 1);
+      generateIncomingOffers(state, digest);
+    }
+    const offer = incomingOffers(state)[0];
+    expect(offer, "`bidding` 관심에 60일 동안 값이 안 붙었다").toBeDefined();
+    expect(offer!.gamePlayerId).toBe(player.id);
+    expect(offer!.counterpartTeamId, "사는 구단은 관심의 주인이다").toBe("chelsea");
+    expect(state.interests, "오퍼가 된 관심은 걷힌다").toHaveLength(0);
+  });
+
+  it("떠난 선수의 관심은 남지 않는다", () => {
+    const state = createTestGame(11);
+    const player = watched(state);
+    standInterest(state, player.id, "chelsea", "enquired");
+    player.teamId = "chelsea";
+    tickInterests(state, []);
+    expect(state.interests).toHaveLength(0);
   });
 });

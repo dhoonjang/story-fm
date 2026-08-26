@@ -1,5 +1,6 @@
 import type { GamePlayer, MatchRecord, MatchSide, ShootoutKick } from "@story-fm/domain";
 import { nextShootoutKick, shootoutSettled, shootoutTally } from "@story-fm/domain";
+import { keeperSkill, penaltyRate, penaltySkill } from "@story-fm/sim";
 import { makeRng } from "../core/rng";
 import { finishingXi } from "./extra-time";
 import { groupOf, type GameState } from "../core/state";
@@ -16,24 +17,13 @@ import { groupOf, type GameState } from "../core/state";
  * `nextShootoutKick` 하나가 갖고 코어와 화면이 같은 함수를 읽는다.
  */
 
-/** 성공률의 바닥 — 아무리 약한 키커도 이 아래로 내려가지 않는다 */
-const PENALTY_FLOOR = 0.62;
-/** 성공률의 천장 — 아무리 강한 키커도 이 위로 올라가지 않는다 */
-const PENALTY_CEILING = 0.8;
-/** 키커와 골키퍼의 기량이 같을 때의 성공률 — 대역의 가운데 */
-const PENALTY_BASE = 0.71;
-/** 기량 차 1당 오르내리는 폭 — 26점 차가 대역의 끝에 닿는다 */
-const PENALTY_EDGE = 0.0035;
-
-/** 키커의 승부차기 기량 — 결정력·침착성·킥력의 가중 평균 */
-const PENALTY_WEIGHTS = { finishing: 0.5, composure: 0.3, kicking: 0.2 } as const;
-/** 골키퍼의 승부차기 기량 — 골키핑·침착성의 가중 평균 */
-const KEEPER_WEIGHTS = { goalkeeping: 0.7, composure: 0.3 } as const;
 /**
- * 골키퍼가 없을 때 서는 기량 — 명단에 GK가 없는 옛 세이브에서만 쓰인다.
- * `PENALTY_BASE`가 그대로 서도록 평균적인 키커와 같은 자리에 둔다.
+ * **성공률의 식은 `packages/sim`이 갖는다** — 경기 중 페널티도 같은 문을 지나기
+ * 때문이다 (match.md §1.4·§7). 여기서 다시 적으면 승부차기와 경기 중 페널티가
+ * 서로 다른 눈금으로 굴러간다. 대역(0.62~0.80)의 사상은
+ * [../../../../docs/data/competition.md](competition.md) §6이 쥔다.
  */
-const KEEPER_FALLBACK_SKILL = 60;
+export { keeperSkill, penaltyRate, penaltySkill } from "@story-fm/sim";
 
 /** 실패한 킥이 **선방**일 비율 — 나머지는 골문을 벗어난다 */
 const SAVED_SHARE_BASE = 0.5;
@@ -46,34 +36,6 @@ const SAVED_SHARE_CEILING = 0.75;
 
 function clamp(value: number, low: number, high: number): number {
   return Math.max(low, Math.min(high, value));
-}
-
-/** 키커의 승부차기 기량 — 결정력 0.5 · 침착성 0.3 · 킥력 0.2 */
-export function penaltySkill(p: GamePlayer): number {
-  const a = p.attributes;
-  return (
-    a.finishing * PENALTY_WEIGHTS.finishing +
-    a.composure * PENALTY_WEIGHTS.composure +
-    a.kicking * PENALTY_WEIGHTS.kicking
-  );
-}
-
-/** 막아서는 골키퍼의 기량 — 골키핑 0.7 · 침착성 0.3. 골키퍼가 없으면 대체값 */
-export function keeperSkill(p: GamePlayer | null): number {
-  if (!p) return KEEPER_FALLBACK_SKILL;
-  const a = p.attributes;
-  return a.goalkeeping * KEEPER_WEIGHTS.goalkeeping + a.composure * KEEPER_WEIGHTS.composure;
-}
-
-/**
- * 이 킥의 성공 확률 — 키커와 골키퍼의 기량 차가 정한다.
- *
- * ⚠️ **양쪽 다 막는다.** 대역(0.62~0.80)은 문서가 쥔 값이고, 승부차기가 실력이 덜
- * 갈리는 무대라는 설계가 거기 들어 있다 (→ docs/data/competition.md §6).
- */
-export function penaltyRate(taker: GamePlayer, keeper: GamePlayer | null): number {
-  const edge = (penaltySkill(taker) - keeperSkill(keeper)) * PENALTY_EDGE;
-  return clamp(PENALTY_BASE + edge, PENALTY_FLOOR, PENALTY_CEILING);
 }
 
 /** 실패한 킥이 선방으로 남을 비율 — 골키퍼가 좋을수록 `saved`, 나쁠수록 `missed` */

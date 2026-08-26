@@ -7,6 +7,9 @@ import {
   type BracketStageView,
   financeOf,
   humanizePlayerIds,
+  loanPlayer,
+  motmOf,
+  type MatchReportPlayerView,
   setTraining,
   startMatch,
   userPlayers,
@@ -15,6 +18,7 @@ import {
   addDays,
   diffDays,
   playerById,
+  pushNarrative,
   type GameState,
 } from "@story-fm/engine";
 import { edgeOf } from "@story-fm/sim";
@@ -92,6 +96,41 @@ describe("오피스 뷰 — 스쿼드", () => {
     });
     const row = buildOfficeViews(state).squad.players.find((p) => p.id === player.id)!;
     expect(row.available).toBe(false);
+  });
+});
+
+/**
+ * **임대 보낸 선수는 명단에 선다** — 계약이 우리 것이라 표가 소속이 아니라 계약을
+ * 읽는다 (transfer.md §2). 다만 부릴 수 있는 인원은 아니라, 인원을 세는 자리에
+ * 섞이면 감독이 없는 선수로 판을 짠다.
+ */
+describe("오피스 뷰 — 임대 보낸 선수", () => {
+  const state = createTestGame();
+  const target = userPlayers(state)
+    .filter((p) => p.squadLevel === "reserve" && p.positions[0]?.position !== "GK")
+    .sort((a, b) => a.attributes.overall - b.attributes.overall)[0]!;
+  const loaned = loanPlayer(state, { playerId: target.id, teamId: "chelsea" });
+  const views = buildOfficeViews(state);
+
+  it("명단에 임대 행이 서고 loan 칸이 채워진다", () => {
+    expect(loaned.ok, loaned.message).toBe(true);
+    const row = views.squad.players.find((p) => p.id === target.id);
+    expect(row).toBeDefined();
+    expect(row!.loan).not.toBeNull();
+    expect(row!.loan!.teamId).toBe("chelsea");
+    // 약칭이다 — 화면은 카탈로그를 못 읽는다
+    expect(row!.loan!.team).not.toBe("chelsea");
+    expect(row!.loan!.until).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("선발·벤치와 1·2군 인원에는 섞이지 않는다", () => {
+    const row = views.squad.players.find((p) => p.id === target.id)!;
+    expect(row.role).toBe("스쿼드");
+    expect(views.squad.players.filter((p) => p.role === "선발")).toHaveLength(11);
+    // 층으로 센 둘의 합이 임대 하나만큼 명단보다 적다
+    expect(views.squad.firstTeamCount + views.squad.reserveCount).toBe(
+      views.squad.players.length - 1,
+    );
   });
 });
 
@@ -194,6 +233,39 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
         e.label,
       ).toBe(false);
     }
+  });
+
+  /**
+   * 소식 — 시간을 넘긴 턴의 사건은 다이제스트로만 흘러가고 화면에 서지 않는다.
+   * 원본은 서사 표 하나이므로 일지가 그 표를 날짜에 세운다 (people.md §9).
+   */
+  it("서사 표가 날짜별 소식 줄로 파생된다 — 무게순·갈래·중복·상한", () => {
+    const state = createTestGame(13);
+    const day = state.date;
+    state.narrative.push(
+      // 갈래를 모르는 옛 세이브의 줄 — other로 본다
+      { date: day, text: "옛 세이브의 줄", salience: 1 },
+      { date: day, text: "리버풀에서 오퍼 답 도착", salience: 3 },
+      // 같은 날 같은 문장은 한 번만 선다
+      { date: day, text: "리버풀에서 오퍼 답 도착", salience: 2 },
+      { date: day, text: "구단주 요청 — 8강 진출", salience: 5, kind: "other" },
+      // 경기 줄은 일정 축이 이미 세운다 — 소식으로 두 번 서지 않는다
+      { date: day, text: "프리미어리그 R1 vs 리버풀 2:1 승리", salience: 4, kind: "match" },
+    );
+
+    const news = (buildOfficeViews(state).calendar.events[day] ?? []).filter(
+      (l) => l.kind === "news",
+    );
+    expect(news.map((l) => l.text)).toEqual([
+      "구단주 요청 — 8강 진출",
+      "리버풀에서 오퍼 답 도착",
+      "옛 세이브의 줄",
+    ]);
+
+    // 일지가 되찾는 창은 서사 표의 상한(200)까지다 — 밀려난 줄은 일지에도 없다
+    for (let i = 0; i < 210; i++) pushNarrative(state, `채움 ${i}`, 1);
+    const after = buildOfficeViews(state).calendar.events[day] ?? [];
+    expect(after.some((l) => l.text === "구단주 요청 — 8강 진출")).toBe(false);
   });
 });
 
@@ -639,6 +711,93 @@ describe("경기 화면 뷰", () => {
     advanceToMatchday(state);
     playMockMatch(state);
     expect(buildOfficeViews(state).match).toBeNull();
+  });
+});
+
+/**
+ * **최우수 선수는 평점에서 파생한다** (match.md §8 · game-state.md §5 파생).
+ *
+ * 저장하지 않는 값이라 규칙이 어긋나도 장부는 조용하다 — 동점이 갈리는 순서가
+ * 바뀌면 같은 경기의 MOTM만 다른 사람이 되고, 마지막 칸(선수 id)이 빠지면 같은
+ * 화면을 두 번 열 때 답이 번갈아 나온다.
+ */
+describe("경기 리포트 — 최우수 선수 (motmOf)", () => {
+  /** 리포트 한 줄 — 동점 규칙이 읽는 칸만 채우고 나머지는 0이다 */
+  function row(over: Partial<MatchReportPlayerView> & { id: string }): MatchReportPlayerView {
+    return {
+      // `id`는 `over`가 갖는다 — 이름은 그 id를 그대로 쓴다
+      name: over.id,
+      side: "home",
+      ours: true,
+      squadNumber: null,
+      minutes: 90,
+      started: true,
+      goals: 0,
+      assists: 0,
+      shots: 0,
+      xg: 0,
+      saves: 0,
+      passes: 0,
+      progressive: 0,
+      corners: 0,
+      fouls: 0,
+      yellows: 0,
+      red: false,
+      rating: 7,
+      tone: null,
+      note: null,
+      ...over,
+    };
+  }
+
+  it("평점이 가장 높은 선수가 뽑힌다", () => {
+    const motm = motmOf([
+      row({ id: "a", rating: 7.4, goals: 2 }),
+      row({ id: "b", rating: 8.1 }),
+      row({ id: "c", rating: 6.9 }),
+    ]);
+    expect(motm?.id).toBe("b");
+  });
+
+  // 아래 네 케이스는 **뒤 칸을 반대로 놓는다** — 앞 칸이 실제로 먼저 읽히는지 본다
+  it("평점이 같으면 골이 갈린다", () => {
+    const motm = motmOf([
+      row({ id: "a", goals: 0, assists: 2, minutes: 90 }),
+      row({ id: "b", goals: 1, assists: 0, minutes: 20 }),
+    ]);
+    expect(motm?.id).toBe("b");
+  });
+
+  it("평점·골이 같으면 도움이 갈린다", () => {
+    const motm = motmOf([
+      row({ id: "a", goals: 1, assists: 0, minutes: 90 }),
+      row({ id: "b", goals: 1, assists: 1, minutes: 20 }),
+    ]);
+    expect(motm?.id).toBe("b");
+  });
+
+  it("평점·골·도움이 같으면 오래 뛴 쪽이다", () => {
+    const motm = motmOf([row({ id: "zulu", minutes: 90 }), row({ id: "alpha", minutes: 62 })]);
+    expect(motm?.id).toBe("zulu");
+  });
+
+  it("네 칸이 모두 같으면 선수 id로 갈린다 — 목록 순서가 답을 바꾸지 않는다", () => {
+    const players = [row({ id: "zulu" }), row({ id: "alpha" })];
+    expect(motmOf(players)?.id).toBe("alpha");
+    expect(motmOf([...players].reverse())?.id).toBe("alpha");
+  });
+
+  it("평점이 없는 선수는 후보가 아니다 — 상대 팀·타 팀 경기 (match.md §6)", () => {
+    const motm = motmOf([
+      row({ id: "opponent", side: "away", ours: false, rating: null, goals: 3, assists: 2 }),
+      row({ id: "ours", rating: 6.2 }),
+    ]);
+    expect(motm?.id).toBe("ours");
+  });
+
+  it("후보가 없으면 null이다", () => {
+    expect(motmOf([])).toBeNull();
+    expect(motmOf([row({ id: "a", rating: null }), row({ id: "b", rating: null })])).toBeNull();
   });
 });
 
