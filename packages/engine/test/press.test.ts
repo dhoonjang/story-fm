@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  RIVAL_BAND,
   acceptManagerOffer,
   addDays,
   applyPressOutcome,
@@ -13,13 +14,22 @@ import {
   openEvePress,
   openPress,
   pendingPress,
+  firstTeamPlayers,
+  moraleToForm,
   reportersOf,
   respondToMedia,
+  rivalVoiceOf,
   tierOfTeamIn,
   userPlayers,
   type GameState,
 } from "@story-fm/engine";
-import { MANAGER_TERMS_BY_TIER, PressConferenceSchema, pressFactText } from "@story-fm/domain";
+import {
+  MANAGER_TERMS_BY_TIER,
+  PRESS_STANCES,
+  PressConferenceSchema,
+  RIVAL_VOICES,
+  pressFactText,
+} from "@story-fm/domain";
 import type {
   GamePlayer,
   ManagerOffer,
@@ -461,6 +471,152 @@ describe("기자회견 — 질문은 장부에서 나온다", () => {
   });
 });
 
+/**
+ * 상대 감독의 말 (people.md §4) — 코어가 정하는 것은 **누가 무슨 결로 말했는가**
+ * 하나이고, 그 결이 감독의 답을 어디로 보내는지가 여기서 갈린다.
+ */
+describe("기자회견 — 상대 감독의 말", () => {
+  const world = createTestGame();
+
+  /** 상대 감독의 말이 한 장 선 회견 — 손으로 세운다 (그 카드가 서는 날은 추첨이 정한다) */
+  function quoted(state: GameState, teamId: string, code: string): PressConference {
+    const voice = rivalVoiceOf(state, teamId)!;
+    return fakeConference({
+      id: `press-rival-${teamId}-${code}`,
+      facts: [
+        {
+          kind: "rival-quote",
+          data: { refId: teamId, name: voice.name, tags: [code] },
+          about: null,
+          sharp: code === "provoke",
+        },
+      ],
+    });
+  }
+
+  /** 그 팀 1군의 평균 폼 — 말 한마디가 남의 라커룸을 어디로 옮겼는지 */
+  function rivalForm(state: GameState, teamId: string): number {
+    const squad = firstTeamPlayers(state, teamId);
+    return squad.reduce((sum, p) => sum + p.state.form, 0) / squad.length;
+  }
+
+  it("벤치에 앉은 사람은 명부든 가상이든 빠짐없이 결 코드를 갖는다", () => {
+    const benches = world.teams.filter(
+      (t) => t.id !== world.userTeamId && t.managerName !== undefined,
+    );
+    expect(benches.length).toBeGreaterThan(100);
+    for (const team of benches) {
+      const voice = rivalVoiceOf(world, team.id);
+      expect(voice, `${team.id} (${team.managerName})`).not.toBeNull();
+      expect(RIVAL_VOICES).toContain(voice!.code);
+      expect(voice!.chance).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * 명부는 원형을 추첨하지 않고 사람마다 직접 적으므로 수석코치 쪽 라벨이 섞여 있다
+   * (people.md §2) — 되짚는 표가 갈리면 그 감독이 조용히 입을 다문다.
+   */
+  it("명부 감독의 원형 라벨이 결 코드를 정한다", () => {
+    const table: Record<string, string> = {
+      mancity: "analysis", // 구조 설계자형
+      realmadrid: "provoke", // 승부사형
+      barcelona: "provoke", // 야전 조련사형 → 열혈 지휘관형
+      bayern: "respect", // 인간관계형 → 실용주의형
+      chelsea: "analysis", // 노장 전술가형 → 구조 설계자형
+      manutd: "patience", // 구단 토박이형 → 육성 신봉형
+      inter: "patience", // 유스 육성형 → 육성 신봉형
+    };
+    for (const [teamId, code] of Object.entries(table)) {
+      expect(rivalVoiceOf(world, teamId)?.code, teamId).toBe(code);
+    }
+  });
+
+  /**
+   * **폭의 상한** — 스탠스 다섯 × 결 다섯 전수. 어느 칸도 `RIVAL_BAND`를 넘지
+   * 않아야 한다: 넘는 순간 말 한마디가 상대 스쿼드를 통째로 다른 팀으로 만든다.
+   */
+  it("상대 라커룸이 한 번에 움직이는 폭은 RIVAL_BAND를 넘지 않는다", () => {
+    const rival = "mancity";
+    for (const stance of PRESS_STANCES) {
+      for (const code of RIVAL_VOICES) {
+        const state = structuredClone(world);
+        for (const p of firstTeamPlayers(state, rival)) p.state.form = 0;
+        const effect = applyPressOutcome(state, quoted(state, rival, code), stance, null, {
+          teamId: rival,
+          code,
+        });
+        expect(Math.abs(effect.rival ?? 0), `${stance}/${code}`).toBeLessThanOrEqual(RIVAL_BAND);
+        expect(rivalForm(state, rival)).toBeCloseTo(moraleToForm(effect.rival ?? 0), 5);
+      }
+    }
+  });
+
+  /**
+   * **결이 부호를 뒤집는다** — 같은 공개 비판도 되받아치는 사람에게는 연료가 된다.
+   * 이 뒤집힘이 사라지면 설전이 판단이 아니라 공짜 손잡이가 된다.
+   */
+  it("찌르는 사람은 되받아치고, 흔들리지 않는 사람은 그대로다", () => {
+    const rival = "mancity";
+    const moved = (code: string) => {
+      const state = structuredClone(world);
+      for (const p of firstTeamPlayers(state, rival)) p.state.form = 0;
+      applyPressOutcome(state, quoted(state, rival, code), "criticise", null, {
+        teamId: rival,
+        code: code as (typeof RIVAL_VOICES)[number],
+      });
+      return rivalForm(state, rival);
+    };
+    expect(moved("respect")).toBeLessThan(0);
+    expect(moved("provoke")).toBeGreaterThan(0);
+    expect(moved("analysis")).toBe(0);
+  });
+
+  it("남의 벤치를 겨눈 공개 비판은 우리 라커룸을 식히지 않는다", () => {
+    const rival = "mancity";
+    const state = structuredClone(world);
+    const ours = applyPressOutcome(state, quoted(state, rival, "respect"), "criticise", null, {
+      teamId: rival,
+      code: "respect",
+    });
+    // 표의 선수단·지목 열은 죽고 팀 사기만 오른다 — 우리 선수를 향한 말이 아니다
+    expect(ours.squad).toBe(0);
+    expect(ours.target).toBe(0);
+    expect(ours.team).toBeGreaterThan(0);
+    // 보드·언론은 표 그대로다
+    expect(ours.media).toBeGreaterThan(0);
+  });
+
+  it("카드에 서지 않은 감독은 겨눌 수 없다 — 회견도 남의 폼도 그대로다", () => {
+    const state = structuredClone(world);
+    const rival = "mancity";
+    openPress(state, quoted(state, rival, "respect"));
+    for (const p of firstTeamPlayers(state, rival)) p.state.form = 0;
+
+    const result = respondToMedia(state, { stance: "criticise", targetManager: "위르겐 클롭" });
+
+    expect(result.ok).toBe(false);
+    expect(pendingPress(state)).not.toBeNull();
+    expect(rivalForm(state, rival)).toBe(0);
+  });
+
+  it("카드에 선 감독은 성만 불러도 닿는다", () => {
+    const state = structuredClone(world);
+    const rival = "mancity";
+    openPress(state, quoted(state, rival, "respect"));
+    for (const p of firstTeamPlayers(state, rival)) p.state.form = 0;
+    const surname = state.teams
+      .find((t) => t.id === rival)!
+      .managerName!.split(" ")
+      .pop()!;
+
+    const result = respondToMedia(state, { stance: "criticise", targetManager: surname });
+
+    expect(result.ok).toBe(true);
+    expect(rivalForm(state, rival)).toBeLessThan(0);
+  });
+});
+
 describe("기자회견 — 누가 묻는가", () => {
   /** 스쿼드에서 가장 나은 선수 — 이적 회견은 핵심 자원에만 열린다 */
   function bestPlayer(state: GameState): GamePlayer {
@@ -605,7 +761,8 @@ describe("기자회견 — 전야", () => {
 
     const opened = (state.pressConferences ?? []).filter((c) => c.trigger === "opening");
     expect(opened).toHaveLength(1);
-    expect(opened[0]!.weight).toBe(1);
+    // 개막의 자리는 무게 1에서 시작한다 — 날 선 카드(상대 감독의 도발·유출)가 서면 2다
+    expect(opened[0]!.weight).toBe(opened[0]!.facts.some((f) => f.sharp) ? 2 : 1);
     expect(opened[0]!.status).toBe("pending");
     for (const f of opened[0]!.facts) expect(f.text).toBeUndefined();
     expect(opened[0]!.facts.some((f) => f.kind === "fixture")).toBe(true);

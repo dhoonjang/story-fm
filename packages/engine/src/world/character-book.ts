@@ -474,8 +474,19 @@ function pointedIds(
   byCaller: readonly string[] | undefined,
 ): ReadonlySet<string> {
   const ids = new Set<string>(byCaller ?? []);
-  const reporterId = pendingPress(state)?.reporterId;
+  const conference = pendingPress(state);
+  const reporterId = conference?.reporterId;
   if (reporterId !== undefined) ids.add(reporterId);
+  /**
+   * **회견 카드에 오른 상대 감독** — 기자와 같은 자리다 (people.md §4). 그 사람의
+   * 말을 인용하라고 카드가 요구해 놓고 인물지를 싣지 않으면, GM이 그 이름으로
+   * 즉흥의 말투를 지어낸다 — 캐릭터북이 풀었던 그 문제다.
+   */
+  for (const fact of conference?.facts ?? []) {
+    if (fact.kind !== "rival-quote") continue;
+    const name = fact.data?.name;
+    if (name !== undefined) ids.add(name);
+  }
   // 감독실 문 앞에 서 있는 사람 — 감독이 이름을 부르기를 기다리지 않는다 (people.md §8)
   const speakerId = pendingApproach(state)?.speakerId;
   if (speakerId !== undefined) ids.add(speakerId);

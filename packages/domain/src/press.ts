@@ -181,6 +181,15 @@ export const PressFactKindSchema = z.enum([
    * 등급인가(`wage-share` · `transfer-budget`), `tags[1]`이 그 등급 코드다.
    */
   "finance-grade",
+  /**
+   * **상대 감독의 말** — 이번 대진의 반대편 벤치가 마이크 앞에서 무슨 결로 말했나
+   * (people.md §4). `tags[0]`이 결 코드(`RIVAL_VOICES`), `name`이 그 감독이자
+   * 캐릭터북의 `characterId`, `refId`가 상대 구단이다.
+   *
+   * 카드가 드는 것은 **이름과 결 하나뿐이다** — 대사를 코어에 박으면 그 사람이
+   * 시즌 내내 같은 말을 한다 (overview.md §1 철칙 4).
+   */
+  "rival-quote",
 ]);
 /**
  * 회견의 재료 — **사실 한 줄.** 질문이 아니다.
@@ -513,8 +522,32 @@ export const PressSackingSchema = z.object({
 });
 export type PressSacking = z.infer<typeof PressSackingSchema>;
 
-/** 스탠스가 옮기는 축 — 평판 3축과 사기 둘 (`club/press.ts`의 표가 채운다) */
-export type PressAxis = "board" | "media" | "squad" | "target" | "team";
+/**
+ * 상대 감독이 마이크 앞에서 내는 **결** — 원형이 정하고(people.md §2 표) 카드의
+ * `tags[0]`에 실린다. 문장이 아니라 코드다: 인용은 그 사람의 말투로 GM이 쓴다.
+ */
+export const RIVAL_VOICES = ["provoke", "respect", "analysis", "patience", "defensive"] as const;
+export type RivalVoice = (typeof RIVAL_VOICES)[number];
+
+/**
+ * 그 결의 **한국어 이름** — 카드 한 줄이 되는 자리가 여기 하나다 (people.md §4).
+ * 평가어도 물음표도 없다: 그가 무엇을 말했는가라는 사실이다.
+ */
+export const RIVAL_VOICE_KO: Record<RivalVoice, string> = {
+  provoke: "우리를 찌르는 말을 했다",
+  respect: "우리를 높이는 말을 했다",
+  analysis: "경기를 뜯어 말했다",
+  patience: "자기 팀의 긴 시야를 말했다",
+  defensive: "지키는 축구를 말했다",
+};
+
+/**
+ * 스탠스가 옮기는 축 — 평판 3축과 사기 셋 (`club/press.ts`의 표가 채운다).
+ *
+ * `rival`만 **우리 밖**이다: 상대 감독을 겨눈 답이 그 라커룸에 닿는 자리이고,
+ * 그 자리에서만 산다 (people.md §4).
+ */
+export type PressAxis = "board" | "media" | "squad" | "target" | "team" | "rival";
 
 /**
  * 채널이 닿는 축 — **그 자리에 있던 사람에게만 닿는다** (people.md §8).
@@ -844,6 +877,9 @@ export function pressFactText(fact: PressFact): string {
         `1군 핵심 ${name}${sub ? ` (${sub})` : ""} · 만 ${v.age ?? 0}세` +
         (v.contractDays === undefined ? "" : ` · 계약 만료 D-${v.contractDays}`)
       );
+    case "rival-quote":
+      // 이름과 결 하나 — 카드가 아는 것이 그 둘뿐이다 (people.md §4)
+      return `상대 감독 ${name} — ${RIVAL_VOICE_KO[(sub ?? "") as RivalVoice] ?? "마이크 앞에 섰다"}`;
     case "vacancy":
       /**
        * 전임의 순위는 **있을 때만** 선다 (career.md §5.1) — 순위표가 없는 구단(컵만

@@ -265,7 +265,7 @@ const topStepOf = approachTopStep;
  *
  * ⚠️ **명시적 거절과 사흘의 방치가 같은 값이다** — 답하지 않은 것은 답하지 않은 것이다.
  */
-const IGNORED = { board: -0.5, media: 0, squad: -0.6, target: -1, team: -0.3 };
+const IGNORED = { board: -0.5, media: 0, squad: -0.6, target: -1, team: -0.3, rival: 0 };
 
 /** 이 계단에서 자리가 열리려면 채워야 하는 압력 — 한 번 말한 주제는 더 오래 참는다 */
 export function approachThreshold(step: number): number {

@@ -621,6 +621,10 @@ export function buildGmTools(
       z.object({
         stance: z.enum(PRESS_STANCES).optional(),
         targetPlayerId: playerRef.optional().describe("감독이 이름을 들어 말한 선수"),
+        targetManager: z
+          .string()
+          .optional()
+          .describe("감독이 이름을 들어 말한 상대 감독 — 사실 카드에 선 사람만"),
         decline: z.boolean().optional().describe("회견을 거절했다면 true"),
       }),
       (input) => {
@@ -636,6 +640,7 @@ export function buildGmTools(
         return respondToMedia(state, {
           stance: input.stance,
           targetPlayerId: input.targetPlayerId ?? null,
+          targetManager: input.targetManager ?? null,
         });
       },
     ),

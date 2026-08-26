@@ -1206,8 +1206,8 @@ const REQUEST_BAND = 9;
  * 언론 축은 죽인다: 이 결정이 신문에 실리는 자리는 회견의 사실 카드이지 이 답이 아니다.
  */
 const REQUEST_ANSWER: Record<"accept" | "refuse", Record<PressAxis, number>> = {
-  accept: { board: -0.4, media: 0, squad: 0.5, target: 1, team: 0 },
-  refuse: { board: 0.4, media: 0, squad: -0.6, target: -1, team: -0.3 },
+  accept: { board: -0.4, media: 0, squad: 0.5, target: 1, team: 0, rival: 0 },
+  refuse: { board: 0.4, media: 0, squad: -0.6, target: -1, team: -0.3, rival: 0 },
 };
 
 /** 사석의 대화라 언론 축은 닿지 않는다 (다가옴과 같은 벌) */

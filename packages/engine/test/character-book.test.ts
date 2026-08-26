@@ -185,6 +185,36 @@ describe("캐릭터북 — 이번 턴에 실을 인물지", () => {
     expect(picked[0]).toBe(reporter.characterId);
   });
 
+  /**
+   * 카드가 그 사람의 말을 인용하라고 요구해 놓고 인물지를 싣지 않으면, GM이 그
+   * 이름으로 즉흥의 말투를 지어낸다 — 캐릭터북이 풀었던 그 문제다 (people.md §4).
+   */
+  it("회견 카드에 오른 상대 감독은 이름이 불리지 않아도 자리를 받는다", () => {
+    const state = structuredClone(base);
+    const rival = state.teams.find((t) => t.id === "mancity")!;
+    const quoted: PressConference = {
+      id: "press-rival",
+      date: state.date,
+      trigger: "derby",
+      context: "전야",
+      facts: [
+        {
+          kind: "rival-quote",
+          data: { refId: rival.id, name: rival.managerName!, tags: ["provoke"] },
+          about: null,
+          sharp: true,
+        },
+      ],
+      status: "pending",
+      weight: 2,
+    };
+    state.pressConferences = [quoted];
+
+    const called = squad.slice(0, CHARACTER_INJECTION_LIMIT + 1);
+    const picked = names(state, called.map((p) => p.name).join(", "));
+    expect(picked).toContain(rival.managerName);
+  });
+
   it("깊이가 인물지에서 덜어내는 것 — 동기·예시 대사·말투 순으로 사라진다", () => {
     const coach = headCoachOf(base);
     const full = characterEntry(coach, "full");
