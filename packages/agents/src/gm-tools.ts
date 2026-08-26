@@ -107,6 +107,7 @@ import {
   RESERVE_TRAINING_POLICIES,
   SQUAD_STATUSES,
   TACKLING_LEVELS,
+  TEAM_TALK_OCCASIONS,
   TRANSITION_MODES,
 } from "@story-fm/domain";
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
@@ -558,7 +559,7 @@ export function buildGmTools(
       "team_talk",
       descriptions.team_talk,
       z.object({
-        occasion: z.enum(["pre", "half", "post", "daily"]),
+        occasion: z.enum(TEAM_TALK_OCCASIONS),
         outcome: z.enum(TEAM_TALK_OUTCOMES),
         intensity: z.union([z.literal(1), z.literal(2), z.literal(3)]),
         settling: settlingArg("team_talk"),

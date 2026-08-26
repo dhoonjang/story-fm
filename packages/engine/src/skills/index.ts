@@ -762,8 +762,27 @@ const TALK_INTENSITY_PIVOT = 2;
 const TEAM_TALK_MORALE_BOUND = 6;
 /** 면담이 한 선수의 사기를 움직일 수 있는 폭 — 대상이 하나라 팀토크보다 넓다 */
 const TALK_MORALE_BOUND = 8;
+/**
+ * 정지점의 외침이 사기를 움직일 수 있는 폭 — **라커룸의 한마디보다 좁다**
+ * (career.md §2). 같은 무게로 두면 하루 한 번의 팀토크가 뜻을 잃는다.
+ */
+const SHOUT_MORALE_BOUND = 2;
+/**
+ * 외침이 결과 표에서 줄어드는 배수.
+ *
+ * 한도만 좁히면 강도도 결과 라벨도 전부 그 한도에 붙어 감독이 **무슨 말을 했는지**가
+ * 폭에서 사라진다. 표를 통째로 줄이고 한도는 꼬리만 자르게 둔다.
+ */
+const SHOUT_SCALE = 1 / 3;
+/**
+ * 한 경기가 셈하는 외침의 수 (`PendingMatch.shouts`) — 정지점마다 외칠 수는 없다.
+ * 셋을 다 써야 라커룸 한마디 한 번의 폭에 닿는다 (career.md §2).
+ */
+const SHOUT_PER_MATCH = 3;
 /** 잘 풀린 팀토크가 강도 한 칸당 주는 리더십 XP */
 const TEAM_TALK_XP_PER_INTENSITY = 8;
+/** 잘 풀린 외침이 강도 한 칸당 주는 리더십 XP — 셋을 다 써도 라커룸 한마디보다 적다 */
+const SHOUT_XP_PER_INTENSITY = 2;
 /** 잘 풀린 면담이 강도 한 칸당 주는 리더십 XP */
 const TALK_XP_PER_INTENSITY = 6;
 /** 어긋난 말에도 남는 리더십 XP — 실패도 겪은 것이다 */
@@ -804,7 +823,18 @@ const OCCASION_KO: Record<TeamTalkOccasion, string> = {
   half: "하프타임",
   post: "경기 후",
   daily: "평시",
+  shout: "정지점",
 };
+
+/**
+ * 0에서 멀어지는 쪽으로 반올림.
+ *
+ * `Math.round`는 절반을 위로 올려 `-0.5`를 0으로 만든다 — 같은 크기의 질책만 한 칸씩
+ * 무뎌진다는 뜻이고, 폭이 ±2뿐인 외침에서는 그 비대칭이 라벨을 통째로 죽인다.
+ */
+function roundAwayFromZero(value: number): number {
+  return Math.sign(value) * Math.round(Math.abs(value));
+}
 
 export function applyTeamTalk(
   state: GameState,
@@ -817,23 +847,45 @@ export function applyTeamTalk(
     settling?: number;
   },
 ): SkillResult {
+  const shout = input.occasion === "shout";
   /**
-   * **자리마다 하루 한 번** (career.md §2) — 사기도 정착도 XP도 서사도 그 자리의 첫
-   * 팀토크만 셈한다. 경기 중에는 정지점마다 `team_talk`이 의도로 옮겨질 수 있어
-   * (`match-intent-apply.ts`), 문이 없으면 같은 말을 반복하는 것이 폼을 올리는 최적
-   * 전략이 된다.
-   *
-   * 하루 한 번으로 묶지 않고 자리로 가른 것은 경기 전의 한마디와 하프타임의 한마디가
-   * 서로 다른 순간이기 때문이다 — 묶으면 연타를 막는 대신 장면 하나가 사라진다.
+   * **외침을 세는 것은 하루가 아니라 경기다** (career.md §2). 라커룸 밖의 말이라
+   * `teamTalkedOn`에 얹으면 벤치의 한마디가 그날 남은 자리를 먹고, 게이트가 없으면
+   * 정지점마다 외치는 것이 폼을 올리는 최적 전략이 된다.
    */
-  const talkedOn = state.manager.teamTalkedOn ?? {};
-  if (talkedOn[input.occasion] === state.date) {
-    return {
-      ok: true,
-      message: `${OCCASION_KO[input.occasion]} 팀토크는 오늘 이미 했습니다 — 같은 말이 두 번 남지는 않습니다`,
-    };
+  if (input.occasion === "shout") {
+    const pending = state.pendingMatch;
+    // 벤치가 없으면 외칠 자리도 없다 — 라커룸의 한마디는 pre·half·post·daily다
+    if (!pending) {
+      return { ok: false, message: "외침은 경기 중 정지점에서만 나옵니다" };
+    }
+    const used = pending.shouts ?? 0;
+    if (used >= SHOUT_PER_MATCH) {
+      return {
+        ok: true,
+        message: `이번 경기의 외침 ${SHOUT_PER_MATCH}번을 다 썼습니다 — 남은 말은 라커룸의 몫입니다`,
+      };
+    }
+    pending.shouts = used + 1;
+  } else {
+    /**
+     * **자리마다 하루 한 번** (career.md §2) — 사기도 정착도 XP도 서사도 그 자리의 첫
+     * 팀토크만 셈한다. 경기 중에는 정지점마다 `team_talk`이 의도로 옮겨질 수 있어
+     * (`match-intent-apply.ts`), 문이 없으면 같은 말을 반복하는 것이 폼을 올리는 최적
+     * 전략이 된다.
+     *
+     * 하루 한 번으로 묶지 않고 자리로 가른 것은 경기 전의 한마디와 하프타임의 한마디가
+     * 서로 다른 순간이기 때문이다 — 묶으면 연타를 막는 대신 장면 하나가 사라진다.
+     */
+    const talkedOn = state.manager.teamTalkedOn ?? {};
+    if (talkedOn[input.occasion] === state.date) {
+      return {
+        ok: true,
+        message: `${OCCASION_KO[input.occasion]} 팀토크는 오늘 이미 했습니다 — 같은 말이 두 번 남지는 않습니다`,
+      };
+    }
+    state.manager.teamTalkedOn = { ...talkedOn, [input.occasion]: state.date };
   }
-  state.manager.teamTalkedOn = { ...talkedOn, [input.occasion]: state.date };
 
   const base = TEAM_TALK_BASE[input.outcome];
   const present = matchSquadIds(state);
@@ -844,17 +896,32 @@ export function applyTeamTalk(
   const captainName = (
     wearing.find((p) => p.isCaptain) ?? wearing.find((p) => p.isViceCaptain === true)
   )?.name;
-  const delta = Math.round(
-    base * (input.intensity / TALK_INTENSITY_PIVOT) * leadershipFactor(state) * room,
+  const delta = roundAwayFromZero(
+    base *
+      (input.intensity / TALK_INTENSITY_PIVOT) *
+      leadershipFactor(state) *
+      room *
+      (shout ? SHOUT_SCALE : 1),
   );
-  const bounded = Math.max(-TEAM_TALK_MORALE_BOUND, Math.min(TEAM_TALK_MORALE_BOUND, delta));
-  for (const p of userPlayers(state)) {
+  const bound = shout ? SHOUT_MORALE_BOUND : TEAM_TALK_MORALE_BOUND;
+  const bounded = Math.max(-bound, Math.min(bound, delta));
+  /**
+   * **외침은 그 경기의 명단에만 닿는다** — 벤치에서 그라운드로 가는 말이라 집에 있는
+   * 선수단까지 울릴 수 없다. 라커룸의 팀토크는 선수단 전체의 것이다 (career.md §2).
+   */
+  const heard =
+    shout && present ? userPlayers(state).filter((p) => present.has(p.id)) : userPlayers(state);
+  for (const p of heard) {
     p.state.form = clampForm(p.state.form + moraleToForm(bounded));
   }
   // 라커룸 앞에서 한 말은 **아직 겉도는 새 영입**에게 특히 크게 남는다 (settling.ts)
   const settlingAnchorValue = settlingAnchor("team_talk", { intensity: input.intensity });
+  /**
+   * **외침에는 정착 크레딧이 없다** — 겉도는 새 영입을 라커룸으로 끌어들이는 것은
+   * 마주 앉아 한 말의 몫이지 90분 사이에 던진 한마디가 아니다 (player.md §9.3).
+   */
   const settled =
-    base > 0
+    base > 0 && !shout
       ? userPlayers(state).filter(
           (p) =>
             creditSettling(state, p.id, "team_talk", {
@@ -863,17 +930,25 @@ export function applyTeamTalk(
             }) > 0,
         ).length
       : 0;
+  const xpPerIntensity = shout ? SHOUT_XP_PER_INTENSITY : TEAM_TALK_XP_PER_INTENSITY;
   const xpMsg =
     base > 0
-      ? grantManagerXP(state, "leadership", TEAM_TALK_XP_PER_INTENSITY * input.intensity)
+      ? grantManagerXP(state, "leadership", xpPerIntensity * input.intensity)
       : grantManagerXP(state, "leadership", TALK_XP_ON_FAILURE);
-  pushNarrative(state, `팀토크(${input.outcome}) — 사기 ${bounded >= 0 ? "+" : ""}${bounded}`, 2);
+  const used = state.pendingMatch?.shouts ?? 0;
+  pushNarrative(
+    state,
+    `${shout ? "외침" : "팀토크"}(${input.outcome}) — 사기 ${bounded >= 0 ? "+" : ""}${bounded}`,
+    // 하루 한 번의 라커룸 장면과 90분 사이의 한마디가 같은 무게로 남지는 않는다
+    shout ? 1 : 2,
+  );
   return {
     ok: true,
     // 펼치지 않아도 잘 풀렸는지는 알아야 한다 — 숫자는 펼쳤을 때만
     tone: bounded >= 0 ? ("good" as const) : ("bad" as const),
     message:
-      `팀 전체 사기 ${bounded >= 0 ? "+" : ""}${bounded}` +
+      `${shout ? "명단" : "팀"} 전체 사기 ${bounded >= 0 ? "+" : ""}${bounded}` +
+      (shout ? ` · 이번 경기 외침 ${used}/${SHOUT_PER_MATCH}` : "") +
       (settled > 0 ? ` · 적응 중인 ${settled}명이 한 걸음 가까워졌습니다` : "") +
       (xpMsg ? ` · ${xpMsg}` : ""),
     /**
@@ -881,9 +956,11 @@ export function applyTeamTalk(
      * 감독이 무슨 말을 어떻게 했는지는 장면의 것이지 알림의 것이 아니다.
      */
     brief: {
-      head: `${OCCASION_KO[input.occasion]} 팀토크`,
+      head: shout ? "정지점 외침" : `${OCCASION_KO[input.occasion]} 팀토크`,
       items: [
-        item({ label: "팀 사기", text: signed(bounded), delta: bounded }),
+        item({ label: shout ? "명단 사기" : "팀 사기", text: signed(bounded), delta: bounded }),
+        // 몇 번 남았는지는 감독이 아껴 쓸지 정하는 값이다 — 안내 문구가 아니라 눈금
+        ...(shout ? [item({ label: "외침", text: `${used}/${SHOUT_PER_MATCH}` })] : []),
         /**
          * **폭이 왜 그만큼이었는지가 그 자리에 남는다** — 라커룸 계수는 감독이
          * 완장을 어디에 채웠는지의 결과라, 숫자만 돌려주면 주장 지명이 다시

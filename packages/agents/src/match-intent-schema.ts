@@ -4,6 +4,7 @@ import {
   KEEPER_DISTRIBUTIONS,
   PLAYER_DIRECTIVE_KINDS,
   TACKLING_LEVELS,
+  TEAM_TALK_OCCASIONS,
   TRANSITION_MODES,
 } from "@story-fm/domain";
 import { TALK_OUTCOMES, TEAM_TALK_OUTCOMES } from "@story-fm/engine";
@@ -36,9 +37,14 @@ const PlayerTalkSchema = z.object({
   intensity: z.union([z.literal(1), z.literal(2), z.literal(3)]),
 });
 
-/** 팀 전체를 향한 말 — 라커룸·정지점 */
+/**
+ * 팀 전체를 향한 말 — 라커룸의 네 자리와 정지점의 `shout`.
+ *
+ * 자리가 곧 게이트다: 넷은 하루 한 번을 세고 `shout`은 경기당 셋을 센다. 정지점의
+ * 외침을 `half`나 `daily`로 접으면 라커룸 몫이 먼저 사라진다 (career.md §2).
+ */
 const TeamTalkSchema = z.object({
-  occasion: z.enum(["pre", "half", "post", "daily"]),
+  occasion: z.enum(TEAM_TALK_OCCASIONS),
   outcome: z.enum(TEAM_TALK_OUTCOMES),
   intensity: z.union([z.literal(1), z.literal(2), z.literal(3)]),
 });

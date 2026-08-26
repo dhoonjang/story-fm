@@ -542,11 +542,23 @@ function computeMockGmTurn(
       };
     }
     if (/팀토크|한마디|외쳐/u.test(msg)) {
-      const input = { occasion: "half", outcome: "encouraged", intensity: 2 } as const;
+      /**
+       * **자리는 지금 멈춰 선 곳이 정한다** — 라커룸에 들어간 정지점(하프타임·연장
+       * 개시)이면 팀토크고, 굴러가던 중이면 정지점의 외침이다. 진행 중의 한마디를
+       * `half`로 적으면 감독이 쓰지도 않은 하프타임 몫이 사라진다 (career.md §2).
+       */
+      const stop = state.pendingMatch?.lastSegment?.stop;
+      const inDressingRoom =
+        stop === "half_time" || stop === "extra_half_time" || stop === "extra_time_start";
+      const input = {
+        occasion: inDressingRoom ? "half" : "shout",
+        outcome: "encouraged",
+        intensity: 2,
+      } as const;
       const result = applyTeamTalk(state, input);
       recordCall(calls, "team_talk", result, { input, line: 1 });
       return {
-        text: `@: *감독의 목소리가 라커룸을 울린다*\n${coach(state)} ${result.message}`,
+        text: `@: *감독의 목소리가 ${inDressingRoom ? "라커룸을" : "터치라인을"} 울린다*\n${coach(state)} ${result.message}`,
         toolCalls: calls,
       };
     }

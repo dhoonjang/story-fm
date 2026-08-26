@@ -151,8 +151,18 @@ export const TeamTalkLogSchema = z
   .partial();
 export type TeamTalkLog = z.infer<typeof TeamTalkLogSchema>;
 
-/** 팀토크를 꺼낸 **자리** — 하루 한 번을 세는 단위이기도 하다 (career.md §2) */
-export type TeamTalkOccasion = keyof TeamTalkLog;
+/** 라커룸의 네 자리 — 하루 한 번을 세는 단위이자 `TeamTalkLog`의 키다 (career.md §2) */
+export type DailyTeamTalkOccasion = keyof TeamTalkLog;
+
+/**
+ * 팀토크를 꺼낸 **자리**.
+ *
+ * 넷은 라커룸이고 하루 한 번을 센다(`TeamTalkLog`). 다섯째 `shout`은 진행 중 정지점에서
+ * 팀 전체에 던지는 짧은 말이라 **하루가 아니라 경기가 센다** — 장부는 `teamTalkedOn`이
+ * 아니라 `PendingMatch.shouts`이고, 폭도 라커룸의 한마디보다 좁다 (career.md §2).
+ */
+export const TEAM_TALK_OCCASIONS = ["pre", "half", "post", "daily", "shout"] as const;
+export type TeamTalkOccasion = (typeof TEAM_TALK_OCCASIONS)[number];
 
 /**
  * **감독 계약** — 연봉·체결일·만료일 (career.md §5.1 · §5.4).

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { GamePlayer } from "@story-fm/domain";
 import {
   bestOverall,
@@ -68,8 +68,9 @@ import {
   type GameState,
   squadReturnOf,
   addDays,
+  startMatch,
 } from "@story-fm/engine";
-import { createTestGame } from "./helpers";
+import { advanceToMatchday, createTestGame } from "./helpers";
 
 /**
  * **역할이 값을 실제로 움직이는** 선발 센터백. `roleFit`은 정수로 접히므로 두 역할이
@@ -295,6 +296,99 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
     expect(
       applyTalkToPlayer(state, { playerId: "ghost", outcome: "neutral", intensity: 1 }).ok,
     ).toBe(false);
+  });
+});
+
+/**
+ * 정지점의 외침 — 팀토크와 **같은 스킬**을 지나되 세는 자가 다르다 (career.md §2).
+ * 하루가 세면 벤치의 한마디가 라커룸 몫을 먹고, 게이트가 없으면 정지점마다 외치는
+ * 것이 폼을 올리는 최적 전략이 된다.
+ */
+describe("정지점의 외침 — 하루가 아니라 경기가 센다 (career.md §2)", () => {
+  /** 경기 하나를 열어 두고 케이스마다 복제한다 — 세계를 다시 세우는 것이 가장 비싸다 */
+  let base: GameState;
+  beforeAll(() => {
+    base = createTestGame();
+    base.manager.attributes.leadership = 99; // 계수가 가장 큰 자리 — 한도를 미는 쪽
+    advanceToMatchday(base);
+    const started = startMatch(base);
+    if (!started.ok) throw new Error(started.message);
+  });
+
+  /** 그 경기의 명단에 선 우리 선수 하나 — 외침이 닿는 것은 여기까지다 */
+  function onSquad(state: GameState): GamePlayer {
+    const pending = state.pendingMatch!;
+    const side =
+      pending.packet.home.teamId === state.userTeamId ? pending.ledger.home : pending.ledger.away;
+    const ids = new Set([...side.onPitch, ...side.bench]);
+    return userPlayers(state).find((p) => ids.has(p.id))!;
+  }
+
+  it("폭은 ±2에서 잘린다 — 라커룸의 한마디와 같은 무게가 아니다", () => {
+    const state = structuredClone(base);
+    const player = onSquad(state);
+
+    player.state.form = 0;
+    expect(applyTeamTalk(state, { occasion: "shout", outcome: "inspired", intensity: 3 }).ok).toBe(
+      true,
+    );
+    expect(player.state.form).toBeCloseTo(moraleToForm(2), 10);
+
+    // 같은 폭이 아래로도 열려 있다
+    player.state.form = 0;
+    expect(applyTeamTalk(state, { occasion: "shout", outcome: "backfired", intensity: 3 }).ok).toBe(
+      true,
+    );
+    expect(player.state.form).toBeCloseTo(moraleToForm(-2), 10);
+  });
+
+  it("경기당 셋이다 — 넷째 외침은 사기도 XP도 서사도 움직이지 않는다", () => {
+    const state = structuredClone(base);
+    const player = onSquad(state);
+    player.state.form = 0;
+    const shout = { occasion: "shout", outcome: "encouraged", intensity: 2 } as const;
+
+    for (let i = 1; i <= 3; i++) {
+      expect(applyTeamTalk(state, shout).ok).toBe(true);
+      expect(state.pendingMatch?.shouts).toBe(i);
+    }
+    const form = player.state.form;
+    const xp = state.managerXP.leadership;
+    const narrated = state.narrative.length;
+    expect(form).toBeGreaterThan(0);
+
+    // 넷째부터는 반려가 아니라 무효다 — 팀토크의 하루 한 번과 같은 결
+    expect(applyTeamTalk(state, shout).ok).toBe(true);
+    expect(player.state.form).toBe(form);
+    expect(state.managerXP.leadership).toBe(xp);
+    expect(state.narrative.length).toBe(narrated);
+    expect(state.pendingMatch?.shouts).toBe(3);
+  });
+
+  it("외침 셋을 다 써도 하프타임 팀토크는 그대로 남는다 (#569)", () => {
+    const state = structuredClone(base);
+    const player = onSquad(state);
+    for (let i = 0; i < 3; i++) {
+      applyTeamTalk(state, { occasion: "shout", outcome: "encouraged", intensity: 2 });
+    }
+    // 외침은 하루의 장부에 적히지 않는다 — 네 자리가 모두 열려 있어야 한다
+    expect(state.manager.teamTalkedOn).toBeUndefined();
+
+    player.state.form = 0;
+    expect(applyTeamTalk(state, { occasion: "half", outcome: "inspired", intensity: 3 }).ok).toBe(
+      true,
+    );
+    expect(state.manager.teamTalkedOn?.half).toBe(state.date);
+    // 라커룸의 한마디는 외침보다 넓다 — 같은 한도에 걸리면 자리를 가른 뜻이 없다
+    expect(player.state.form).toBeGreaterThan(moraleToForm(2));
+  });
+
+  it("경기 밖에서는 반려된다 — 벤치가 없으면 외칠 자리도 없다", () => {
+    const state = structuredClone(base);
+    state.pendingMatch = null;
+    expect(applyTeamTalk(state, { occasion: "shout", outcome: "inspired", intensity: 2 }).ok).toBe(
+      false,
+    );
   });
 });
 
