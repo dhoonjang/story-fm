@@ -653,7 +653,7 @@ describe("get_career", () => {
       },
     ];
     const message = careerView(state).message;
-    expect(message).toContain("우리 선수의 리그 시상 1건");
+    expect(message).toContain("우리 선수의 시상 1건");
     expect(message).toContain(ours.name);
     expect(message).not.toContain("남의 리그 득점왕");
   });

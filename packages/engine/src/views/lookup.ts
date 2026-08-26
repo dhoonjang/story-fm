@@ -2800,9 +2800,10 @@ export function careerView(state: GameState): LookupResult {
       : "트로피: 없음",
   );
   /**
-   * **시상은 선수의 것이지만 어느 해에 우리 선수가 리그의 상을 들었는가는 감독의
-   * 이력이다** (career.md §6). 그래서 세우는 것은 감독이 그 시즌 맡고 있던 팀의
-   * 상뿐이고, 남의 리그 득점왕은 여기 서지 않는다 — 트로피와 같은 자로 가른다.
+   * **시상은 선수의 것이지만 어느 해에 우리 선수가 상을 들었는가는 감독의 이력이다**
+   * (career.md §6). 그래서 세우는 것은 감독이 그 시즌 맡고 있던 팀의 상뿐이고, 남의
+   * 리그 득점왕은 여기 서지 않는다 — 트로피와 같은 자로 가른다. 대회는 리그만이
+   * 아니다: 컵·대항전의 득점왕과 결승 MOM도 같은 자로 걸린다 (season.md §6).
    */
   // 감독이 그 시즌 그 팀에 있었나 — 트로피 보관함과 **같은 자**로 잰다 (career.md §6)
   const managedThen = managerTenureOf(state);
@@ -2812,7 +2813,7 @@ export function careerView(state: GameState): LookupResult {
   if (awards.length > 0) {
     const shown = awards.slice(0, AWARDS_SHOWN);
     lines.push(
-      `우리 선수의 리그 시상 ${awards.length}건:`,
+      `우리 선수의 시상 ${awards.length}건:`,
       ...shown.map((a) => `  시즌 ${a.season} ${awardLine(a)}`),
     );
     if (awards.length > shown.length) lines.push(`  …그 외 ${awards.length - shown.length}건`);
@@ -2965,7 +2966,7 @@ function clubHistoryView(state: GameState, teamId: string, limit: number): Looku
   if (records.awards.length > 0) {
     const shown = records.awards.slice(0, limit);
     lines.push(
-      `이 구단 소속의 리그 시상 ${records.awards.length}건:`,
+      `이 구단 소속의 시상 ${records.awards.length}건:`,
       ...shown.map((a) => `  시즌 ${a.season} ${awardLine(a)}`),
     );
     if (records.awards.length > shown.length) {

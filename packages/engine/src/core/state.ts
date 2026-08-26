@@ -925,7 +925,7 @@ export interface GameState {
   trophies: Trophy[];
   achievements: Achievement[];
   /**
-   * 리그 시상 — **세계 전체**의 상이다(모든 리그·모든 클럽). 감독의 기록이 아니라
+   * 시상 — **세계 전체**의 상이다(모든 대회·모든 클럽). 감독의 기록이 아니라
    * 리그가 주는 상이므로 여기 통째로 쌓이고, 커리어 표는 그중 감독이 그 시즌 맡고
    * 있던 팀의 것만 골라 세운다 (season.md §6 · career.md §6).
    * 코드와 근거 수치뿐이다 — 이름도 문장도 없다 (overview.md §1 철칙 4).

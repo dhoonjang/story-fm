@@ -146,7 +146,7 @@ export interface ClubRecords {
   bestPoints: ClubSeasonBest | null;
   mostGoals: ClubSeasonBest | null;
   bestPosition: ClubSeasonBest | null;
-  /** 그 구단 소속으로 받은 리그 시상 — 최근 시즌이 앞 */
+  /** 그 구단 소속으로 받은 시상 — 리그·컵·대항전, 최근 시즌이 앞 */
   awards: SeasonAward[];
   /** 장부가 아는 시즌 수 — 0이면 아직 지나간 시즌이 없다 */
   seasons: number;

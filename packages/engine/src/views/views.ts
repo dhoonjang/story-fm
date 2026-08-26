@@ -1806,14 +1806,16 @@ export interface OfficeViews {
      * 시상 — 업적과 같은 규약이다: **코드와 근거 수치**만 내려가고 상의 이름은
      * 화면이 코드로 만든다(`awardTitle` — career.md §6). 세계 전체에 쌓이는 상
      * 중에서 **감독이 그 시즌 맡고 있던 팀의 것**만 선다 — 남의 리그 득점왕은
-     * 감독의 이력이 아니다. id를 표시명으로 푸는 것까지가 여기 몫이다.
+     * 감독의 이력이 아니다. 대회는 리그만이 아니다: 컵·대항전의 득점왕과 결승
+     * MOM도 같은 자로 걸린다. id를 표시명으로 푸는 것까지가 여기 몫이다.
      */
     awards: Array<{
       code: string;
       season: number;
       playerName: string;
       teamName: string;
-      leagueName: string;
+      /** 어느 대회의 상인가 — 리그도 컵·대항전도 온다 (season.md §6) */
+      competitionName: string;
       apps: number;
       goals: number;
       assists: number;
@@ -3808,7 +3810,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           season: a.season,
           playerName: a.playerName,
           teamName: teamNameIn(state, a.teamId),
-          leagueName: competitionName(a.competitionId),
+          competitionName: competitionName(a.competitionId),
           apps: a.apps,
           goals: a.goals,
           assists: a.assists,
