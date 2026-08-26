@@ -29,6 +29,7 @@ import {
   assignmentsOf,
   DEMAND_OF_ARCHETYPE,
   financeOf,
+  internationalBreaksOf,
   openBoardDemand,
   OWNER_ARCHETYPE_LABELS,
   pendingApproach,
@@ -129,6 +130,58 @@ describe("근황은 사실에서 온다", () => {
     const cues = speakerCues(state, 10);
     expect(cues.find((c) => c.playerId === soon!.id)?.fact).toContain("복귀 임박");
     expect(cues.some((c) => c.playerId === far!.id)).toBe(false);
+  });
+
+  /**
+   * **대표팀은 폼보다 앞이다** (people.md §7 · competition.md §5-1). 순서가 곧
+   * 크기라, 소집이 폼 뒤로 밀리면 이번 주 클럽에 없는 선수가 「폼 절정」으로만
+   * 세계에 선다 — 화면에는 아무 소리도 나지 않는 종류다.
+   */
+  it("소집 중이면 그것이 그의 이야기다 — 폼보다 앞이다", () => {
+    const state = quiet(createTestGame(11));
+    const window = internationalBreaksOf(state.season)[0]!;
+    state.date = window.from;
+    const player = firsts(state, 1)[0]!;
+    player.state.form = 0.9;
+    player.state.caps = 34;
+    state.callUps = [
+      {
+        gamePlayerId: player.id,
+        country: "ENG",
+        breakKey: window.key,
+        apps: 0,
+        goals: 0,
+        returnedOn: null,
+      },
+    ];
+
+    const fact = speakerCues(state, 10).find((c) => c.playerId === player.id)?.fact;
+    expect(fact).toContain("소집");
+    expect(fact).not.toContain("절정");
+  });
+
+  it("돌아온 주까지가 그의 이야기다 — 그 뒤는 아니다", () => {
+    const state = quiet(createTestGame(11));
+    const window = internationalBreaksOf(state.season)[0]!;
+    const player = firsts(state, 1)[0]!;
+    state.callUps = [
+      {
+        gamePlayerId: player.id,
+        country: "ENG",
+        breakKey: window.key,
+        apps: 2,
+        goals: 1,
+        returnedOn: window.to,
+        returnState: "tired",
+      },
+    ];
+
+    state.date = addDays(window.to, 7);
+    expect(speakerCues(state, 10).find((c) => c.playerId === player.id)?.fact).toContain("복귀");
+    state.date = addDays(window.to, 8);
+    expect(speakerCues(state, 10).find((c) => c.playerId === player.id)?.fact ?? "").not.toContain(
+      "복귀",
+    );
   });
 
   it("2군은 세지 않는다 — 감독의 일상에 닿지 않는다", () => {
