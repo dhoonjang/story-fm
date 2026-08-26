@@ -10,6 +10,7 @@ import type {
   Transfer,
 } from "@story-fm/domain";
 import {
+  BOARD_DEMAND_CAUSE_LABEL,
   FINANCE_CATEGORY_KO,
   FINANCE_EXPENSE_CATEGORIES,
   FINANCE_INCOME_CATEGORIES,
@@ -1612,6 +1613,25 @@ export function startParachute(state: GameState, teamId: string, fromLeagueId: s
   };
 }
 
+/**
+ * **파라슈트가 메우지 못한 중계권 감소분** — 강등이 여는 구멍의 본체다 (§9-1).
+ *
+ * 절벽 자체가 아니라 **남는 몫**이다: EPL → 챔피언십이면 균등 배분이 £110M × 0.9만큼
+ * 빠지고 1년차 파라슈트가 그 절반쯤을 메우므로, 감독이 매각으로 만들 몫은 그 나머지다.
+ * 상업 감소는 첫 해에 −10%뿐인 **지연** 효과라 이 식에 넣지 않는다 — 절벽이 서는
+ * 시점과 상업이 깎이는 시점이 다르다.
+ *
+ * 강등이 없었거나 파라슈트가 끝난 뒤면 0이다.
+ */
+export function relegationGapOf(state: GameState, teamId: string): number {
+  const drop = state.finances.find((f) => f.teamId === teamId)?.parachute;
+  if (!drop) return 0;
+  // 폴백은 `parachuteSeasonAmount`와 같은 1이어야 한다 — 다르면 메운 몫과 빠진 몫이 어긋난다
+  const fromPool = leagueCatalogById(drop.fromLeagueId)?.broadcastPool ?? 1;
+  const fall = BROADCAST_EQUAL_SEASON * (fromPool - poolOf(state, teamId));
+  return Math.max(0, fall - parachuteSeasonAmount(state, teamId));
+}
+
 /** 승격하면 낙하산은 그 자리에서 끝난다 — 1부 배분과 겹쳐 받을 수 없다 */
 export function stopParachute(state: GameState, teamId: string): void {
   const finance = state.finances.find((f) => f.teamId === teamId);
@@ -2298,7 +2318,7 @@ function monthlyInterestOf(state: GameState, teamId: string): number {
  * 읽으므로 AI에게도 그대로 걸리고, `ai-market`이 이미 `budgetFrozen`을 보고 있어
  * 빚더미 구단이 영입을 멈춘다.
  */
-function budgetFreezeReason(state: GameState, teamId: string): "psr" | "debt" | null {
+export function budgetFreezeReason(state: GameState, teamId: string): "psr" | "debt" | null {
   if (teamId === state.userTeamId && psrStatus(state).headroom < 0) return "psr";
   if (debtOf(state, teamId) > debtLimitOf(state, teamId)) return "debt";
   return null;
@@ -2313,7 +2333,8 @@ function budgetFreezeReason(state: GameState, teamId: string): "psr" | "debt" | 
  */
 export function budgetFreezeLabel(state: GameState, teamId: string): string {
   const reason = budgetFreezeReason(state, teamId);
-  return reason === "psr" ? " (PSR 한도 초과)" : reason === "debt" ? " (부채 한도 초과)" : "";
+  // 이름은 도메인의 표가 갖는다 — 구단주 요청의 사유와 같은 사실이다 (career.md §5.2)
+  return reason === null ? "" : ` (${BOARD_DEMAND_CAUSE_LABEL[reason]})`;
 }
 
 /** 예산 동결 판정 — 매달 다시 본다. 갚으면 그 자리에서 풀린다 (§9.4) */

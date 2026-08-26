@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
-import { BOARD_DEMAND_LABEL, type BoardDemandKind } from "./board-demand";
+import { BOARD_DEMAND_CAUSE_LABEL, boardDemandText, type BoardDemandCause } from "./board-demand";
 import { formatMoney } from "./money";
 import {
   ApproachChannelSchema,
@@ -314,6 +314,12 @@ export const ApproachContextSchema = z.object({
     "contract-demand",
     /** 타 구단의 관심 — `value`가 최근 창의 오퍼 건수 */
     "interest",
+    /**
+     * 재정이 부른 구단주 요청 — 동결·강등이 그 창의 조건을 매각 요구로 갈았다
+     * (career.md §5.2 「재정 갈래」). 사람을 지목한 요청이면 자리의 주인이 그
+     * 선수이고, 금액 요청이면 `value`가 목표액이다.
+     */
+    "board-demand",
   ]),
   /** 불만의 사유 코드 (`PLAYER_ISSUE_REASONS`) — 있는 갈래에만 */
   reason: z.enum(PLAYER_ISSUE_REASONS).optional(),
@@ -537,7 +543,11 @@ export function pressFactText(fact: PressFact): string {
             : "")
       );
     case "board-demand":
-      return `보드 요청 — ${demandText(sub, name, v.baseline)}${d.date ? ` · 기한 ${d.date}` : ""}`;
+      return (
+        `보드 요청 — ${boardDemandText(sub, name, v.baseline)}` +
+        causeTail(d.tags?.[1]) +
+        (d.date ? ` · 기한 ${d.date}` : "")
+      );
     case "milestone":
       return `${name} ${milestonePhrase((sub ?? "apps") as MilestoneCode, v.value ?? 1)}`;
     case "contract-demand":
@@ -585,13 +595,13 @@ function reasonOf(tag: string | undefined): string {
   return issueReasonKo((tag ?? null) as PlayerIssueReason | null) ?? "사유 불명";
 }
 
-/** 보드 요청 한 조각 — 이름은 표가 갖고, 기준값은 발행 순간의 사실이다 */
-function demandText(kind: string | undefined, name: string, baseline: number | undefined): string {
-  const label = BOARD_DEMAND_LABEL[(kind ?? "") as BoardDemandKind] ?? kind ?? "요청";
-  if (kind === "keep-player") return name ? `${label} (${name})` : label;
-  if (kind === "sign-star") return `${label} (기준 ${formatMoney(baseline ?? 0)})`;
-  if (kind === "wage-freeze") return `${label} (기준 ${formatMoney(baseline ?? 0)}/주)`;
-  return label;
+/**
+ * 재정 요청의 사유 꼬리 — `tags[1]`이 그 코드다 (career.md §5.2). 사유가 없는
+ * 평소 조건에는 붙지 않는다.
+ */
+function causeTail(tag: string | undefined): string {
+  const label = BOARD_DEMAND_CAUSE_LABEL[(tag ?? "") as BoardDemandCause];
+  return label ? ` · ${label}` : "";
 }
 
 /**
@@ -622,5 +632,10 @@ export function approachContextText(
       return `${who} 계약 만료 D-${context.value ?? 0}`;
     case "interest":
       return `${who} 타 구단 오퍼 ${context.value ?? 0}건`;
+    case "board-demand":
+      // 지목한 요청은 그 이름이, 금액 요청은 그 값이 배경이다 (career.md §5.2)
+      return who
+        ? `구단주 요청 · ${who} 매각`
+        : `구단주 요청 · 매각 ${formatMoney(context.value ?? 0)}`;
   }
 }
