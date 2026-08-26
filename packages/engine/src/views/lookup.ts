@@ -94,6 +94,7 @@ import { tierOfTeamIn } from "../core/club-tier";
 import { achievementLine, boardExpectation, computeStandings } from "../competition/season";
 import { openManagerOffers, USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import { observedMarketValue } from "../market/market";
+import { interestLine } from "../market/interest";
 import {
   attributeLine,
   KNOWLEDGE_RANK,
@@ -1003,9 +1004,23 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
           ),
         ]
       : [];
+  /**
+   * 시즌 기록의 나머지 — **0인 칸은 적지 않는다** (match.md §6). 스트라이커의 카드에
+   * "선방 0"이, 골키퍼의 카드에 "슛 0"이 서면 모델이 그 0을 사실로 옮겨 적는다.
+   */
+  const seasonMore = [
+    stat?.minutes ? `${stat.minutes}분` : null,
+    stat?.shots ? `슛 ${stat.shots}` : null,
+    stat?.xg ? `xG ${stat.xg.toFixed(2)}` : null,
+    stat?.saves ? `선방 ${stat.saves}` : null,
+    stat?.cleanSheets ? `클린시트 ${stat.cleanSheets}` : null,
+    stat?.yellows ? `경고 ${stat.yellows}` : null,
+    stat?.reds ? `퇴장 ${stat.reds}` : null,
+  ].filter((x): x is string => x !== null);
   lines.push(
     `시즌 기록: ${stat?.apps ?? 0}경기 ${stat?.goals ?? 0}골 ${stat?.assists ?? 0}도움` +
-      (seasonRating(stat) === null ? "" : ` · 평점 ${seasonRating(stat)!.toFixed(2)}`),
+      (seasonRating(stat) === null ? "" : ` · 평점 ${seasonRating(stat)!.toFixed(2)}`) +
+      (seasonMore.length > 0 ? ` · ${seasonMore.join(" · ")}` : ""),
     ...careerLines(state, p),
     [
       contract
@@ -1014,6 +1029,16 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
       ...ledger,
     ].join(" · "),
   );
+  /**
+   * 오퍼 앞에 서 있는 관심 — 구단과 사다리의 칸뿐이다 (transfer.md §1-2).
+   *
+   * ⚠️ **안개를 견주지 않고 그대로 싣는다.** 장부에 관심 줄이 서는 선수는 둘뿐이라
+   * (우리 선수와 우리가 협상을 열어 둔 남의 선수 — `tickInterests`) 어느 쪽이든
+   * 감독이 알 자격이 있는 사실이다. 관심이 그 밖으로 번지는 날 가장 먼저 새는
+   * 자리가 여기다 — 그때는 `knowledge`로 걸러야 한다.
+   */
+  const interest = interestLine(state, p.id);
+  if (interest !== null) lines.push(`관심: ${interest}`);
   if (injury) {
     lines.push(
       `부상: ${injury.bodyPart} (${INJURY_SEVERITY_KO[injury.severity]}) — 복귀 예상 ${injury.expectedReturn}`,

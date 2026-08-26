@@ -627,7 +627,19 @@ interface SquadViewRowMeta {
   /** 시즌 평균 평점 — 출전이 없으면 null (0.0과 "기록 없음"은 다르다) */
   seasonRating: number | null;
   /**
-   * **시즌별과 통산** — 위 `season*` 넷은 "이번 시즌 이 팀" 한 행이라, 3년 함께한
+   * 경기가 남긴 나머지 — 출전 분·슛·xG·선방·클린시트·카드 (match.md §6).
+   * 위 넷과 같은 "이번 시즌 이 팀" 한 행이고, 두 시뮬이 같은 눈금으로 얹은 값이라
+   * 리그의 어느 선수든 같은 자로 읽힌다. 골키퍼가 아니면 선방·클린시트는 0이다.
+   */
+  seasonMinutes: number;
+  seasonShots: number;
+  seasonXg: number;
+  seasonSaves: number;
+  seasonCleanSheets: number;
+  seasonYellows: number;
+  seasonReds: number;
+  /**
+   * **시즌별과 통산** — 위 `season*` 칸들은 "이번 시즌 이 팀" 한 행이라, 3년 함께한
    * 주장이 우리 팀에서 몇 경기를 뛰었는지가 화면 어디에도 없었다.
    *
    * 시즌 행은 **자르지 않는다** — 카드(GM)는 상한을 두지만 상세는 스크롤이 되는
@@ -2635,6 +2647,13 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         seasonApps: stat?.apps ?? 0,
         seasonAssists: stat?.assists ?? 0,
         seasonRating: seasonRating(stat),
+        seasonMinutes: stat?.minutes ?? 0,
+        seasonShots: stat?.shots ?? 0,
+        seasonXg: stat?.xg ?? 0,
+        seasonSaves: stat?.saves ?? 0,
+        seasonCleanSheets: stat?.cleanSheets ?? 0,
+        seasonYellows: stat?.yellows ?? 0,
+        seasonReds: stat?.reds ?? 0,
         career: careerViewOf(p.id),
         milestones: (milestonesOfPlayer.get(p.id) ?? []).slice(-SQUAD_MILESTONES_SHOWN),
         hasIssue: issues.has(p.id),

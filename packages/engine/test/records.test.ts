@@ -11,7 +11,14 @@ import {
   userPlayers,
   weeklyWagesOf,
 } from "@story-fm/engine";
-import { BookingSchema, MATCH_MINUTE_MAX, milestoneTitle } from "@story-fm/domain";
+import {
+  BookingSchema,
+  CLEAN_SHEET_MINUTES,
+  MATCH_MINUTE_MAX,
+  addToSeasonStat,
+  keptCleanSheet,
+  milestoneTitle,
+} from "@story-fm/domain";
 import type { SeasonStat } from "@story-fm/domain";
 import { advanceToMatchday, createTestGame, playMockMatch, playPreseason } from "./helpers";
 
@@ -183,6 +190,54 @@ describe("경기 성장·기록", () => {
     expect(match.result).not.toBeNull();
     const entry = state.schedule.find((e) => e.type === "match" && e.refId === match.id);
     expect(entry?.status).toBe("done");
+  });
+});
+
+/**
+ * 시즌 기록의 눈금 — **세계를 세우지 않는다.** 얹는 규칙도 클린시트 문턱도 `state`를
+ * 보지 않는 순수 함수라 경계를 그대로 고정할 수 있다 (→ docs/simulation/match.md §6).
+ */
+describe("시즌 기록 적재", () => {
+  const empty = (): SeasonStat => ({
+    gamePlayerId: "p1",
+    season: 2025,
+    teamId: "t1",
+    apps: 0,
+    goals: 0,
+  });
+
+  it("0인 칸은 적지 않는다 — 옛 세이브의 행이 0으로 채워지지 않는다", () => {
+    const row = empty();
+    addToSeasonStat(row, { apps: 1, ratingSum: 6.4, minutes: 90 });
+    expect(row.apps).toBe(1);
+    expect(row.minutes).toBe(90);
+    // 손대지 않은 칸은 **없는 채로** 남는다 (0과 "기록 없음"은 다르다)
+    expect(row.shots).toBeUndefined();
+    expect(row.cleanSheets).toBeUndefined();
+    expect(row.yellows).toBeUndefined();
+  });
+
+  it("연장은 같은 경기에 얹는 몫이다 — 출전은 다시 서지 않는다", () => {
+    const row = empty();
+    addToSeasonStat(row, { apps: 1, minutes: 90, shots: 3, xg: 0.5 });
+    addToSeasonStat(row, { goals: 1, minutes: 30, shots: 1, xg: 0.4 });
+    expect(row.apps).toBe(1);
+    expect(row.goals).toBe(1);
+    expect(row.minutes).toBe(120);
+    expect(row.shots).toBe(4);
+    expect(row.xg).toBeCloseTo(0.9, 6);
+  });
+
+  it("클린시트는 골키퍼가 문턱만큼 뛴 무실점 경기다", () => {
+    const kept = (over: { group?: "GK" | "DF"; conceded?: number; minutes?: number }) =>
+      keptCleanSheet({ group: "GK", conceded: 0, minutes: 90, ...over });
+    expect(kept({})).toBe(true);
+    // 문턱 바로 위·아래 — 85′에 들어온 골키퍼는 그 무실점을 지킨 사람이 아니다
+    expect(kept({ minutes: CLEAN_SHEET_MINUTES })).toBe(true);
+    expect(kept({ minutes: CLEAN_SHEET_MINUTES - 1 })).toBe(false);
+    // 한 골이라도 먹으면 없다. 수비수의 무실점은 평점이 이미 센다
+    expect(kept({ conceded: 1 })).toBe(false);
+    expect(kept({ group: "DF" })).toBe(false);
   });
 });
 
