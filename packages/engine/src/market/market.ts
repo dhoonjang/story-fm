@@ -8,11 +8,14 @@ import type {
 import {
   MAX_PAYMENT_YEARS,
   SQUAD_STATUS_KO,
+  SYMBOLIC_NUMBERS,
   ageOf,
   byLoyalty,
   effectiveFeeOf,
   naturalPositionOf,
+  numberWishOf,
   squadStatusRank,
+  type NumberWish,
 } from "@story-fm/domain";
 import { diffDays, windowOpenOn } from "../competition/calendar";
 import { claimLabel, evaluatePitch } from "./persuasion";
@@ -24,7 +27,8 @@ import { euroCompetitionOf } from "../competition/europe";
 import { hashChannel } from "../core/rng";
 import { betterAtPosition, squadDepthOf, type SquadDepth } from "../squad/depth";
 import { derivedSquadStatus } from "../squad/promises";
-import { archetypeTraitsOf } from "../world/player-persona";
+import { numberLineageOf } from "../squad/numbers";
+import { archetypeTraitsOf, playerArchetypeOf } from "../world/player-persona";
 import { knowledgeOf, KNOWLEDGE_KO, type Knowledge } from "../squad/scouting";
 import { signingBudgetOf, userWageRoom } from "../club/board-request";
 import { budgetFreezeLabel, formatMoney } from "../club/finance";
@@ -126,6 +130,16 @@ export const SQUAD_STATUS_SCORE_PER_STEP = 0.45;
  * 아니라 사다리 꼭대기를 부르는 한 수만 남는다.
  */
 const SQUAD_STATUS_STEP_CAP = 2;
+/**
+ * **원하는 등번호가 비어 있는가** — 첫 지망이 비면 +, 남이 달고 있으면 −다.
+ * ⚠️ 밸런스 값 (transfer.md §3 「등번호」).
+ *
+ * 관문의 항 중 **가장 작다** — 지위 한 칸(`SQUAD_STATUS_SCORE_PER_STEP` 0.45)의
+ * 절반 아래이고, 출전 기회(+0.35/−0.45)보다도 작다. 번호 하나로 이적이 성사되거나
+ * 무산되면 안 되기 때문이다. 그렇다고 0으로 둘 수도 없다: 원하는 번호가 비어 있다는
+ * 사실이 아무 데도 닿지 않으면 그것은 세계에 없는 것과 같다.
+ */
+export const SQUAD_NUMBER_SCORE = 0.2;
 
 function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
@@ -831,6 +845,9 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   const offeredStatus = squadStatusContribution(state, player, terms.squadStatus, state.userTeamId);
   if (offeredStatus) contributions.push({ gate: "player", ...offeredStatus });
 
+  const wantedNumber = squadNumberContribution(state, player);
+  if (wantedNumber) contributions.push({ gate: "player", ...wantedNumber });
+
   const reputation = (state.manager.reputation.media + state.manager.reputation.board) / 2;
   if (Math.abs(reputation - 50) >= 10) {
     contributions.push({
@@ -1316,6 +1333,52 @@ function squadStatusContribution(
     label: "계약 지위",
     // 지위 이름 뒤에 조사를 붙이지 않는다 — 「유망주으로」가 나오는 자리다
     why: `${SQUAD_STATUS_KO[offered]} 지위로 제시했다 — 우리 스쿼드에서 그 자리는 ${SQUAD_STATUS_KO[actual]}이다`,
+  };
+}
+
+/**
+ * 이 선수가 **우리 팀에서** 두는 번호의 뜻 — 원형이 정한다 (people.md §6).
+ *
+ * 계보를 우리 팀에서 뽑는 것은 `idol`(불안한 유망주) 때문이다: 물려받는 셔츠는
+ * 그가 **오는** 구단의 것이지 떠나는 구단의 것이 아니다. 다섯 상징 번호의 계보를
+ * 한 벌로 넘기고 어느 번호가 우상의 것인지는 도메인의 규칙이 고른다.
+ *
+ * 뜻이 없으면 `null`이다 — 다섯 원형에는 언제나 그렇다.
+ */
+export function numberWishHere(state: GameState, player: GamePlayer): NumberWish | null {
+  const lineage = SYMBOLIC_NUMBERS.flatMap(
+    (number) => numberLineageOf(state, state.userTeamId, number).past,
+  );
+  return numberWishOf(
+    playerArchetypeOf(state.seed, player),
+    {
+      position: naturalPositionOf(player).position,
+      squadNumber: player.squadNumber,
+    },
+    lineage,
+  );
+}
+
+/**
+ * "등번호" 축 — **첫 지망이 우리 팀에서 비어 있는가** (transfer.md §3).
+ *
+ * ⚠️ **영입의 선수 관문에만 선다.** 재계약·해지는 이미 그 셔츠를 입고 있는 사람의
+ * 자리라 번호가 새로 정해질 일이 없다. 뜻을 두지 않는 원형에는 항 자체가 없다 —
+ * 근거 목록에도 줄이 서지 않는다.
+ */
+function squadNumberContribution(
+  state: GameState,
+  player: GamePlayer,
+): { score: number; label: "등번호"; why: string } | null {
+  const wanted = numberWishHere(state, player)?.numbers[0];
+  if (wanted === undefined) return null;
+  const holder = numberLineageOf(state, state.userTeamId, wanted).holder;
+  return {
+    score: holder ? -SQUAD_NUMBER_SCORE : SQUAD_NUMBER_SCORE,
+    label: "등번호",
+    why: holder
+      ? `그가 원하는 ${wanted}번은 ${holder.name}이(가) 달고 있다`
+      : `그가 원하는 ${wanted}번이 우리 팀에서 비어 있다`,
   };
 }
 

@@ -65,6 +65,7 @@ import { formLabel } from "../squad/form";
 import { INJURY_SEVERITY_KO } from "../squad/injury";
 import { ABSENT_REASON_KO, buildOpponentReport } from "../match/preview";
 import { issueReasonText, moodAnchor, moodOf } from "../squad/mood";
+import { numberLineageOf } from "../squad/numbers";
 import { openPromises, squadStatusOf } from "../squad/promises";
 import {
   isHomegrownFor,
@@ -318,8 +319,13 @@ function ourRow(state: GameState, p: GamePlayer): string {
   const reason = grievance ? issueReasonText(grievance) : null;
   // 사유 없는 옛 불만은 사유 없이 낸다
   const issue = grievance ? (reason ? ` ⚠불만(${reason})` : " ⚠불만") : "";
+  /**
+   * **등번호는 이 줄에 선다** — 화면의 명단 행은 이미 번호를 세우는데 GM 조회 줄에만
+   * 없어서, 모델이 번호를 물으면 있지도 않은 번호를 지어냈다 (player.md §1.1).
+   */
+  const number = p.squadNumber === undefined ? "" : `${p.squadNumber}번 `;
   return (
-    `${p.id} ${p.name} ${ageOf(p.birthdate, state.date)}세 ${naturalPositionOf(p).position} ` +
+    `${p.id} ${number}${p.name} ${ageOf(p.birthdate, state.date)}세 ${naturalPositionOf(p).position} ` +
     `${physiqueLabel(p.height, p.weight)}(${footLabel(p.foot)}) ` +
     `OVR${p.attributes.overall} 폼 ${formLabel(p.state.form)} ` +
     `체력${p.state.condition} ${adaptation}` +
@@ -365,6 +371,10 @@ function contractLabel(contract: Contract | null): string {
 /**
  * 타 팀 선수 한 줄 — 능력치는 안개, **값과 계약은 시장의 공개 정보**다.
  * 시장가는 `deal_odds`가 부르는 것과 같은 흐린 값이고, 계약 만료일은 흐리지 않는다.
+ *
+ * 등번호는 싣지 않는다 — 셔츠에 적힌 공개 사실이지만 이 줄이 답하는 물음은 값·계약·
+ * 기량이고, 남의 구단 번호로 감독이 할 일은 없다. 우리 번호를 GM이 지어내던 것이
+ * 이 이슈이지 남의 번호를 알려 주는 것이 아니다.
  */
 function theirRow(state: GameState, p: GamePlayer): string {
   const stat = seasonStatOf(state, p.id);
@@ -1004,6 +1014,28 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
           ),
         ]
       : [];
+  /**
+   * 등번호와 그 번호의 **계보** — 지위·약속과 같은 결의 장부 줄이다 (player.md §1.1).
+   *
+   * ⚠️ 문장이 아니라 사실이다: 지금 번호와, 앞서 그것을 달던 사람·시즌 수·몇 시즌
+   * 만인가뿐이다. 계보는 시즌 기록에서 파생하므로 우리 선수 카드에서만 세운다 —
+   * 남의 구단 번호의 계보는 감독이 조사한 적 없는 사실이다.
+   */
+  if (knowledge === "own" && p.squadNumber !== undefined) {
+    const past = numberLineageOf(state, p.teamId, p.squadNumber).past;
+    lines.push(
+      `등번호: ${p.squadNumber}번` +
+        (past.length === 0
+          ? ""
+          : ` — 앞서 ${past
+              .map((entry, i) =>
+                i === 0
+                  ? `${entry.name} ${entry.seasons}시즌 · ${state.season - entry.lastSeason}시즌 만에`
+                  : `${entry.name} ${entry.seasons}시즌`,
+              )
+              .join(" / ")}`),
+    );
+  }
   /**
    * 시즌 기록의 나머지 — **0인 칸은 적지 않는다** (match.md §6). 스트라이커의 카드에
    * "선방 0"이, 골키퍼의 카드에 "슛 0"이 서면 모델이 그 0을 사실로 옮겨 적는다.

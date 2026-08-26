@@ -1,4 +1,9 @@
-import { MANAGER_ATTRIBUTE_KO, PROMISE_KIND_KO, registrationBlockText } from "@story-fm/domain";
+import {
+  MANAGER_ATTRIBUTE_KO,
+  PROMISE_KIND_KO,
+  numberGrievanceStands,
+  registrationBlockText,
+} from "@story-fm/domain";
 import type {
   BoardPoint,
   GamePlayer,
@@ -83,6 +88,9 @@ import {
 import { creditSettling, settlingAnchor, settlingOf } from "../squad/settling";
 // 면담에서 한 약속은 장부에 선다 (people.md §5-2 · career.md §2)
 import { openPromise, type PromiseOpened } from "../squad/promises";
+// 감독이 지목한 번호는 코어가 배정하고, 사실만 돌려준다 (player.md §1.1)
+import { assignRequestedNumber, numberBlockText } from "../squad/numbers";
+import { archetypeTraitsOf } from "../world/player-persona";
 import { dressingRoomFactor, dressingRoomVoice, leaderGroupOf } from "../squad/hierarchy";
 import {
   groupOf,
@@ -741,8 +749,16 @@ export function applyTeamTalk(
 /** 감독이 그 자리에서 한 약속 — 갈래와, 감독이 좁힌 기한 */
 export interface PromiseInput {
   kind: PromiseKind;
-  /** 기한(일) — 생략하면 갈래의 기본 기한 (`transfer`는 다음 창 마감) */
+  /**
+   * 기한(일) — 생략하면 갈래의 기본 기한이다. 날수가 아닌 갈래가 둘이다:
+   * `transfer`는 다음 창 마감, `number`는 다음 시즌 개막일 (people.md §5-2).
+   */
   days?: number;
+  /**
+   * 약속한 등번호 — **`number` 갈래에만 뜻이 있고, 그 갈래에는 없으면 반려된다.**
+   * 번호가 곧 약속의 내용이라 그것 없이는 이행을 판정할 자가 없다.
+   */
+  number?: number;
 }
 
 /** 장부에 선 약속 한 조각 — 감독이 읽는 줄과 말풍선 항목 */
@@ -762,7 +778,9 @@ interface PromisePiece {
 export function promisePiece(opened: PromiseOpened): PromisePiece {
   const promise = opened.promise;
   if (opened.ok && promise) {
-    const label = PROMISE_KIND_KO[promise.kind];
+    // `number` 약속만 숫자를 든다 — 갈래 이름만 세우면 어느 번호였는지가 사라진다
+    const label =
+      PROMISE_KIND_KO[promise.kind] + (promise.number === undefined ? "" : ` ${promise.number}번`);
     return {
       text: ` · ${label} 약속 (${promise.dueOn}까지)`,
       item: item({ label: "약속", text: label, note: `${promise.dueOn}까지` }),
@@ -854,7 +872,9 @@ export function applyTalkToPlayer(
    * 자리와 열리는 자리의 **간격**에 기대고 있으므로 순서를 명시적으로 둔다.
    */
   const promised = input.promise
-    ? promisePiece(openPromise(state, player.id, input.promise.kind, input.promise.days))
+    ? promisePiece(
+        openPromise(state, player.id, input.promise.kind, input.promise.days, input.promise.number),
+      )
     : null;
 
   const xpMsg =
@@ -1962,6 +1982,117 @@ export function setCaptain(
     message: notes.join(" · "),
     brief: { head: "완장", items },
   };
+}
+
+// ── 등번호 — 감독이 주고, 선수가 뜻을 둔다 (docs/data/player.md §1.1) ──
+
+/**
+ * 번호를 잃은 선수의 사기 — **곁들임이라 폭이 작다** (people.md §5).
+ *
+ * 그 일이 라커룸에 남는가는 불만이 정하고(`numberGrievanceStands`), 이 값은 불만이
+ * 서든 안 서든 얹힌다 — 셔츠가 바뀐 날은 애착 없는 사람에게도 있다. 어긴 약속(−8)과
+ * 같은 폭을 주면 번호 하나를 옮기는 것이 감독이 한 말을 뒤집는 것과 같은 무게가 된다.
+ */
+const NUMBER_LOST_MORALE = -3;
+
+/**
+ * 번호를 물려받은 선수의 사기 — **앞사람이 있을 때만 선다** (player.md §1.1).
+ * 빈 번호를 받는 것은 사건이 아니라 배정이고, 계보에는 실제로 그 셔츠를 입고 뛴
+ * 사람만 서기 때문이다.
+ */
+const NUMBER_INHERIT_MORALE = 4;
+
+/**
+ * **감독이 지목한 등번호** (`set_squad_number` — player.md §1.1).
+ *
+ * 배정과 반려는 코어가 하고(`assignRequestedNumber`), 여기서 하는 일은 그 사실을
+ * 라커룸에 옮기는 것뿐이다: 번호를 잃은 선수의 불만과 사기, 계보를 물려받은
+ * 선수의 사기. 중복은 기본이 반려라 `take` 없이 동료의 번호를 조용히 가져가지
+ * 않는다 — 감독이 모르는 사이에 라커룸이 움직이지 않게.
+ */
+export function setSquadNumber(
+  state: GameState,
+  input: { playerId: string; number: number; take?: boolean },
+): SkillResult {
+  const pick = pickOurPlayer(state, input.playerId);
+  if (!pick.ok) return pick;
+  const player = pick.player;
+
+  const assigned = assignRequestedNumber(state, player, input.number, { take: input.take });
+  if (!assigned.ok) return { ok: false, message: numberBlockText(assigned.block) };
+  const { number, from, displaced, after } = assigned.assignment;
+
+  if (from === number && displaced === null) {
+    // 바뀐 것이 없다는 사실은 **반환값이** 말한다 — 부르는 쪽이 문구를 뒤지지 않게
+    return { ok: true, unchanged: true, message: `${player.name}은(는) 이미 ${number}번입니다` };
+  }
+
+  const notes: string[] = [
+    from === null ? `${player.name} ${number}번` : `${player.name} ${from}번 → ${number}번`,
+  ];
+  const items: SkillBriefItem[] = [
+    item({
+      label: "등번호",
+      text: `${number}번`,
+      ...(from === null ? {} : { note: `${from}번 → ${number}번` }),
+    }),
+  ];
+
+  if (after) {
+    /**
+     * 물려받음은 **계보가 있을 때만 사건이다.** 지난 시즌 그 셔츠를 입고 뛴 사람이
+     * 있다는 것이 이 번호에 무게가 실려 있다는 뜻이고, 그것을 감독이 지목했다.
+     */
+    player.state.form = clampForm(player.state.form + moraleToForm(NUMBER_INHERIT_MORALE));
+    const gap = state.season - after.lastSeason;
+    notes.push(`${after.name}의 번호를 잇는다`);
+    items.push(
+      item({
+        label: "계보",
+        text: `${after.name} 뒤`,
+        note: `${after.seasons}시즌 · ${gap > 0 ? `${gap}시즌 만에` : "이번 시즌"}`,
+      }),
+    );
+  }
+
+  if (displaced) {
+    const other = displaced.player;
+    /**
+     * **불만이 서는가는 원형이 정한다** (people.md §5) — 애착 없는 사람에게 10번은
+     * 그냥 옷이고, 애착 있는 사람에게도 어제 받은 34번은 아무것도 아니다. 굴림은
+     * 없다: 감독이 무엇을 건드렸는지 셀 수 있어야 손잡이가 된다.
+     */
+    const stands = numberGrievanceStands(
+      archetypeTraitsOf(state.seed, other).number,
+      displaced.lost,
+      displaced.seasons,
+    );
+    // 한 선수의 불만 줄은 하나다 — 약속 판정이 세울 때와 같은 문 (squad/promises.ts)
+    if (stands && !state.issues.some((i) => i.gamePlayerId === other.id)) {
+      state.issues.push({
+        gamePlayerId: other.id,
+        kind: "unhappy",
+        reason: "number",
+        count: displaced.lost,
+        since: state.date,
+      });
+    }
+    other.state.form = clampForm(other.state.form + moraleToForm(NUMBER_LOST_MORALE));
+    notes.push(`${other.name} ${displaced.lost}번 → ${displaced.gained}번`);
+    items.push(
+      item({
+        label: "내준 선수",
+        text: `${other.name} ${displaced.lost}번 → ${displaced.gained}번`,
+      }),
+    );
+    pushNarrative(
+      state,
+      `${other.name}의 ${displaced.lost}번을 ${player.name}에게 — ${other.name}은(는) ${displaced.gained}번`,
+      3,
+    );
+  }
+
+  return { ok: true, message: notes.join(" · "), brief: { head: "등번호", items } };
 }
 
 // ── 전술 적응도 (docs/data/player.md) ──────

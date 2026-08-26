@@ -3,6 +3,7 @@ import type { GamePlayer, Negotiation, NegotiationVerdict, SquadStatus } from "@
 import {
   MAX_PAYMENT_YEARS,
   PITCH_CLAIM_KO,
+  PLAYER_ARCHETYPE_LABEL,
   SQUAD_STATUS_KO,
   ageOf,
   naturalPositionOf,
@@ -13,6 +14,7 @@ import {
   askingPriceFor,
   dealOdds,
   marketValueOf,
+  numberWishHere,
   renewalExpectation,
   wageExpectationOf,
 } from "./market";
@@ -27,6 +29,8 @@ import {
 import { squadStatusOf } from "../squad/promises";
 import { KIND_KO, counterpartOf, pendingOffer, respondOffer, splitLabel } from "./negotiation";
 import { agentForPlayer } from "../world/persona";
+import { playerArchetypeOf } from "../world/player-persona";
+import { numberLineageOf } from "../squad/numbers";
 import { interestLine } from "./interest";
 import { contractYearsLeft, hasIssue, playerById, teamName, type GameState } from "../core/state";
 import { formatMoney } from "../club/finance";
@@ -348,6 +352,7 @@ function dossierOf(state: GameState, negotiation: Negotiation, player: GamePlaye
   const them = counterpartOf(negotiation, player);
   const money = negotiation.kind === "release" ? "정산금" : "이적료";
   const rivals = interestLine(state, player.id);
+  const numberLine = numberLineOf(state, negotiation, player);
   return [
     `[오퍼 이력] 기한 ${negotiation.expiresOn}`,
     ...negotiation.rounds.map(
@@ -382,7 +387,35 @@ function dossierOf(state: GameState, negotiation: Negotiation, player: GamePlaye
      * (`dealOdds`의 「다른 구단의 관심」), 여기 실리는 것은 그 근거다.
      */
     ...(rivals === null ? [] : [`[경쟁 관심] ${rivals}`]),
+    ...(numberLine === null ? [] : [`[등번호] ${numberLine}`]),
   ];
+}
+
+/**
+ * **선수가 두는 번호의 뜻** — 원하는 번호 · 우리 팀의 그 번호가 지금 누구 것인지 ·
+ * 앞서 누가 몇 시즌 달았는지 (→ docs/simulation/transfer.md §3).
+ *
+ * 판정하는 쪽이 아는 사실이라 서류에 든다: 원하는 셔츠가 비어 있는지 아닌지는 그가
+ * 우리에게 올 이유의 한 조각이고, 코어가 이미 확률에 넣었다(`dealOdds`의 「등번호」).
+ * 여기 실리는 것은 그 근거다. **영입 갈래에서만, 뜻을 두는 원형에만** 선다 —
+ * 나머지에는 줄이 서지 않는다(`[경쟁 관심]`과 같은 결).
+ */
+function numberLineOf(
+  state: GameState,
+  negotiation: Negotiation,
+  player: GamePlayer,
+): string | null {
+  if (negotiation.kind !== "buy") return null;
+  const wanted = numberWishHere(state, player)?.numbers[0];
+  if (wanted === undefined) return null;
+  const lineage = numberLineageOf(state, state.userTeamId, wanted);
+  const archetype = PLAYER_ARCHETYPE_LABEL[playerArchetypeOf(state.seed, player)];
+  const past = lineage.past[0];
+  return (
+    `${wanted}번을 원한다 (${archetype})` +
+    ` · 우리 ${wanted}번 — ${lineage.holder ? lineage.holder.name : "비어 있다"}` +
+    (past ? ` · 앞서 ${past.name} ${past.seasons}시즌` : "")
+  );
 }
 
 export function buildCounterpartyBrief(

@@ -321,9 +321,9 @@ export const PLAYER_ARCHETYPE_LABEL: Record<PlayerArchetypeKey, string> = {
 };
 
 /**
- * 원형이 **상태 전이에 거는 계수 넷** (people.md §6 · 요구사항 3).
+ * 원형이 **상태 전이에 거는 계수 다섯** (people.md §6 · 요구사항 3).
  *
- * 페르소나는 시뮬 숫자에 직접 손대지 않는다 — 여기 있는 넷이 닿는 곳은 불만이 서는
+ * 페르소나는 시뮬 숫자에 직접 손대지 않는다 — 여기 있는 다섯이 닿는 곳은 불만이 서는
  * 날 · 정착 목표 · 성장 확률 · 선수 관문의 점수까지이고, **전력 패킷과 xG는 원형을
  * 읽지 않는다.** 경기 결과가 사람됨을 읽기 시작하면 같은 스쿼드가 같은 전술로 다른
  * 점수를 내고, 그 차이를 감독이 되짚을 자리가 없다.
@@ -349,27 +349,36 @@ export interface PlayerArchetypeTraits {
   professionalism: number;
   /** 정착 목표 배수 — 크면 새 라커룸에 녹아드는 데 더 걸린다 (player.md §9.3) */
   settling: number;
+  /**
+   * 등번호 애착 — **계수가 아니라 문턱을 만드는 값이다** (people.md §5).
+   *
+   * 나머지 넷은 눈금에 곱해지지만 이것은 번호의 무게·재적 시즌과 함께 점수를 만들어
+   * 「번호를 뺏겼을 때 불만이 서는가 서지 않는가」를 그 자리에서 가른다 — 굴림이
+   * 없어 감독이 그 결정의 대가를 미리 셀 수 있다. 자를 쥔 것은
+   * `numberGrievanceStands` (squad-rules.ts) 하나다.
+   */
+  number: number;
 }
 
 /**
  * 원형 → 계수. **밴드 숫자가 적히는 자리는 여기 하나다.**
  *
- * 네 열 모두 평균이 1 근처(1.05 · 1.04 · 1.06 · 0.98)다 — 계수는 세계의 눈금을
- * 옮기는 것이 아니라 같은 눈금 위에서 사람을 가른다. 평균이 밀리면 원형을 붙인 값이
- * 아니라 문턱을 통째로 조정한 값이 된다.
+ * 다섯 열 모두 평균이 1 근처(1.05 · 1.04 · 1.06 · 0.98 · 1.02)다 — 계수는 세계의
+ * 눈금을 옮기는 것이 아니라 같은 눈금 위에서 사람을 가른다. 평균이 밀리면 원형을 붙인
+ * 값이 아니라 문턱을 통째로 조정한 값이 된다.
  */
 // prettier-ignore
 export const PLAYER_ARCHETYPE_TRAITS: Record<PlayerArchetypeKey, PlayerArchetypeTraits> = {
-  ambitious:            { patience: 0.70, loyalty: 0.75, professionalism: 1.05, settling: 1.00 },
-  team_first:           { patience: 1.45, loyalty: 1.25, professionalism: 1.10, settling: 0.85 },
-  quiet_craftsman:      { patience: 1.15, loyalty: 1.10, professionalism: 1.25, settling: 1.15 },
-  fierce_competitor:    { patience: 0.75, loyalty: 0.95, professionalism: 0.90, settling: 1.05 },
-  anxious_prospect:     { patience: 1.20, loyalty: 1.10, professionalism: 0.95, settling: 1.25 },
-  dressing_room_leader: { patience: 1.25, loyalty: 1.20, professionalism: 1.05, settling: 0.80 },
-  professional:         { patience: 1.10, loyalty: 1.00, professionalism: 1.25, settling: 0.85 },
-  weighing_star:        { patience: 0.60, loyalty: 0.60, professionalism: 0.85, settling: 1.10 },
-  homegrown_heart:      { patience: 1.30, loyalty: 1.45, professionalism: 1.00, settling: 0.80 },
-  film_reader:          { patience: 1.00, loyalty: 1.00, professionalism: 1.15, settling: 0.95 },
+  ambitious:            { patience: 0.70, loyalty: 0.75, professionalism: 1.05, settling: 1.00, number: 1.10 },
+  team_first:           { patience: 1.45, loyalty: 1.25, professionalism: 1.10, settling: 0.85, number: 1.30 },
+  quiet_craftsman:      { patience: 1.15, loyalty: 1.10, professionalism: 1.25, settling: 1.15, number: 0.65 },
+  fierce_competitor:    { patience: 0.75, loyalty: 0.95, professionalism: 0.90, settling: 1.05, number: 0.90 },
+  anxious_prospect:     { patience: 1.20, loyalty: 1.10, professionalism: 0.95, settling: 1.25, number: 1.00 },
+  dressing_room_leader: { patience: 1.25, loyalty: 1.20, professionalism: 1.05, settling: 0.80, number: 1.15 },
+  professional:         { patience: 1.10, loyalty: 1.00, professionalism: 1.25, settling: 0.85, number: 0.60 },
+  weighing_star:        { patience: 0.60, loyalty: 0.60, professionalism: 0.85, settling: 1.10, number: 1.20 },
+  homegrown_heart:      { patience: 1.30, loyalty: 1.45, professionalism: 1.00, settling: 0.80, number: 1.45 },
+  film_reader:          { patience: 1.00, loyalty: 1.00, professionalism: 1.15, settling: 0.95, number: 0.80 },
 };
 
 /**

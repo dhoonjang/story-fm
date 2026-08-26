@@ -1548,8 +1548,19 @@ export function seasonStatOf(
   );
 }
 
-/** 시즌·팀 단위 스탯 확보 (없으면 생성) — 시즌 중 이적하면 팀별로 분리된다 */
-export function ensureSeasonStat(state: GameState, playerId: string, teamId: string): SeasonStat {
+/**
+ * 시즌·팀 단위 스탯 확보 (없으면 생성) — 시즌 중 이적하면 팀별로 분리된다.
+ *
+ * `player`를 넘기면 그 자리에서 등번호를 읽는다. 부르는 자리는 대부분 이미 그 선수를
+ * 손에 들고 있고, 여기서 다시 명부를 훑으면 **경기마다 선수 수만큼** 4,000명 배열을
+ * 지나간다 — 원장 훑기가 이미 하나 있는 함수라 그 위에 하나를 더 얹지 않는다.
+ */
+export function ensureSeasonStat(
+  state: GameState,
+  playerId: string,
+  teamId: string,
+  player?: Pick<GamePlayer, "squadNumber">,
+): SeasonStat {
   let stat = state.seasonStats.find(
     (s) => s.gamePlayerId === playerId && s.season === state.season && s.teamId === teamId,
   );
@@ -1557,6 +1568,12 @@ export function ensureSeasonStat(state: GameState, playerId: string, teamId: str
     stat = { gamePlayerId: playerId, season: state.season, teamId, apps: 0, goals: 0 };
     state.seasonStats.push(stat);
   }
+  /**
+   * **그 시즌 그 셔츠의 등번호** — 번호 계보가 읽는 유일한 원본이다 (player.md §1.1).
+   * 부를 때마다 덮어쓴다: 시즌 중에 번호가 바뀌면 마지막 번호가 그 시즌의 번호다.
+   */
+  const number = (player ?? playerById(state, playerId))?.squadNumber;
+  if (number !== undefined) stat.squadNumber = number;
   return stat;
 }
 
