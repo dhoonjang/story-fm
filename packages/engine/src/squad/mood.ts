@@ -18,6 +18,7 @@ import type {
   MilestoneCode,
   PlayerArchetypeKey,
   PlayerIssueReason,
+  RetirementReason,
   SharpnessBand,
   SquadStatus,
 } from "@story-fm/domain";
@@ -92,6 +93,11 @@ export type MoodFact =
   /** `daysToReturn === 0`이면 복귀 예정일에 닿았다는 뜻이다 */
   | { cause: "injury"; bodyPart: string; daysToReturn: number }
   | { cause: "suspension"; matchesLeft: number }
+  /**
+   * 이번 시즌 뒤 은퇴 — `days`는 예고한 날부터 며칠째인가 (season.md §6).
+   * 불만보다 앞에 서는 이유는 그것이 **남은 모든 것을 물들이는 사실**이어서다.
+   */
+  | { cause: "retiring"; days: number; reason: RetirementReason }
   /** `note`는 옛 세이브가 들고 있는 사유 문장 — `reason`이 없을 때만 있다 */
   | {
       cause: "grievance";
@@ -350,6 +356,7 @@ export function moodFactsOf(
   const settling = settlingOf(state, player.id);
   const demotionDays = demotionDaysOf(state, player);
   const { form, condition } = player.state;
+  const retiring = player.state.retiringAfterSeason;
 
   // ── 못 뛰는 사유가 있으면 그게 전부다 ──
   if (injury) {
@@ -360,6 +367,18 @@ export function moodFactsOf(
     });
   } else if (suspension) {
     facts.push({ cause: "suspension", matchesLeft: suspension.lengthMatches - suspension.served });
+  } else if (retiring) {
+    /**
+     * ── 이 시즌이 마지막이다 ── 못 뛰는 사유 다음이다 (people.md §5).
+     * 곁들임 한 장은 아래 자리들이 그대로 채운다 — 마지막 시즌의 불만도, 마지막
+     * 시즌의 완장도 그 사실 위에 얹혀야 읽힌다.
+     */
+    facts.push({
+      cause: "retiring",
+      days: diffDays(retiring.on, state.date),
+      reason: retiring.reason,
+    });
+    if (grievance) facts.push(grievance);
   } else {
     /**
      * ── 직전 경기의 여운 ──
@@ -515,6 +534,13 @@ export function issueReasonText(issue: {
   return issueReasonKo(issue.reason, issue.count) ?? issue.note ?? null;
 }
 
+/** 사유 코드의 한 낱말 — 코드는 장부의 것이고 이 표는 읽는 자리의 것이다 (season.md §6) */
+const RETIREMENT_REASON_KO: Record<RetirementReason, string> = {
+  age: "나이",
+  decline: "기량",
+  idle: "출전",
+};
+
 /** 며칠 전 경기인가 — 날짜를 셈으로만 옮긴다 */
 const dayWord = (days: number) => (days === 0 ? "오늘" : days === 1 ? "어제" : `${days}일 전`);
 
@@ -530,6 +556,9 @@ function factLine(fact: MoodFact): string {
       );
     case "suspension":
       return `출장 정지 ${fact.matchesLeft}경기`;
+    case "retiring":
+      // 사유 코드는 라벨로 옮기지 않는다 — 서른다섯의 은퇴와 뛰지 못한 은퇴가 다른 사실이다
+      return `이번 시즌 뒤 은퇴 (${RETIREMENT_REASON_KO[fact.reason]}) · 예고 ${fact.days}일째`;
     case "grievance":
       return (
         `불만 ${issueReasonText(fact) ?? "사유 없음"} · ${fact.days}일째` +

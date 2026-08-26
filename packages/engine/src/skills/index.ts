@@ -55,6 +55,9 @@ import {
   tacticsSignature,
   tacticsAffinityShift,
   tacticsDistance,
+  TACTIC_TOGGLES,
+  tacticToggleValue,
+  tacticToggleWord,
   withCurrentDrilled,
 } from "@story-fm/domain";
 import { DIRECTIVE_TUNING } from "@story-fm/sim";
@@ -2170,6 +2173,14 @@ function retuneFamiliarity(
   }
 }
 
+/**
+ * 팀 전술 — **여섯 축과 갈래 넷을 한 자리에서 받는다.**
+ *
+ * 축(멘탈리티·라인·압박·템포·폭·패스)뿐 아니라 `TacticsSpec`의 optional 토글
+ * 넷(전환·오프사이드 트랩·태클 강도·GK 배급)도 같은 스프레드로 지나가고 같은
+ * 스키마가 검증한다 (→ docs/simulation/match.md §1.2). 주지 않은 필드는 지금 값을
+ * 그대로 잇고, `null`은 그 갈래의 지시를 푸는 자리다.
+ */
 export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillResult {
   const tactics = userTactics(state);
   /**
@@ -2239,14 +2250,27 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillR
       : delta > 0
         ? ` · 전술 적응도 ${now} (+${delta}, 익혀 둔 전술)`
         : ` · 전술 적응도 ${now} (그대로)`;
+  /**
+   * 감독이 실제로 세운 갈래만 — **중립인 갈래는 세우지 않는다.**
+   *
+   * "역습으로 가자"가 결과에 없으면 감독은 걸린 줄 모른다. 반대로 넷이 늘 붙어
+   * 있으면 무엇을 지시했는지가 묻히므로, 중립은 빼고 선 것만 낸다 (`tacticsBrief`와
+   * 같은 규칙). 중립인지는 `tacticToggleValue` 하나가 답한다.
+   */
+  const toggles = TACTIC_TOGGLES.flatMap((toggle) => {
+    const value = tacticToggleValue(parsed.data, toggle.key);
+    return value === null ? [] : [{ toggle, word: tacticToggleWord(toggle.key, value) }];
+  });
+  const toggleNote = toggles.map(({ toggle, word }) => ` · ${toggle.brief} ${word}`).join("");
   return {
     ok: true,
-    message: `전술 변경 — ${parsed.data.formation}, 멘탈리티 ${parsed.data.mentality}${note}`,
+    message: `전술 변경 — ${parsed.data.formation}, 멘탈리티 ${parsed.data.mentality}${toggleNote}${note}`,
     brief: {
       head: "전술 변경",
       items: [
         item({ label: "포메이션", text: parsed.data.formation }),
         item({ label: "멘탈리티", text: `${parsed.data.mentality}` }),
+        ...toggles.map(({ toggle, word }) => item({ label: toggle.label, text: word })),
         /**
          * 적응도는 **도달한 값이 값이고 움직인 폭이 부호다** — `delta`가 0이어도
          * 싣는다. "그대로다"는 이 항목이 말하는 사실이지 증감을 말하지 않는 것이 아니다.

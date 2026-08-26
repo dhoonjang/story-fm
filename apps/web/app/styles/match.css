@@ -537,6 +537,24 @@
   color: var(--text);
   font-size: var(--fs-xs);
 }
+/**
+ * 갈래 넷 — 점 눈금이 없는 줄이라 축과 생김새가 갈린다.
+ * 낱말이 점의 자리에서 시작하고, 축 줄과의 사이에 선이 하나 선다.
+ */
+.mv-tac-row.one.toggle {
+  grid-template-columns: auto 1fr;
+}
+.mv-tac-row.one.toggle .mv-tac-axis {
+  white-space: nowrap;
+}
+.mv-tac-row.one.toggle .mv-tac-word {
+  color: var(--accent-2);
+}
+.mv-tac-row.one:not(.toggle) + .mv-tac-row.one.toggle {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
 .mv-tactics.one .mv-tac-head {
   grid-template-columns: 1fr auto;
 }

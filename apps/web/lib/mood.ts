@@ -145,6 +145,16 @@ function sentenceOf(fact: MoodFact): string {
         : `${fact.bodyPart} 부상에서 막 복귀했다`;
     case "suspension":
       return `출장 정지 ${fact.matchesLeft}경기가 남아 몸이 근질거린다`;
+    case "retiring":
+      /**
+       * 사유마다 다른 마음이다 — 나이로 그만두는 것과 뛰지 못해 그만두는 것은
+       * 라커룸에서 같은 말이 아니다 (season.md §6).
+       */
+      return fact.reason === "idle"
+        ? "이번 시즌 뒤 그만둔다 — 마지막 해에 그라운드를 밟지 못했다"
+        : fact.reason === "decline"
+          ? "이번 시즌 뒤 그만둔다 — 몸이 예전 같지 않다는 걸 스스로 안다"
+          : "이번 시즌이 마지막이다 — 은퇴를 밝혔다";
     case "grievance": {
       // 누구의 불만인가를 함께 말한다 — 같은 사유라도 사람이 다르면 감독이 할 일이 다르다
       const who = PLAYER_ARCHETYPE_LABEL[fact.archetype];

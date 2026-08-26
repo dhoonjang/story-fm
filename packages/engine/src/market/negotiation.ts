@@ -1,5 +1,6 @@
 import type {
   GamePlayer,
+  Interest,
   MarketCard,
   MarketDirection,
   MarketTerms,
@@ -31,6 +32,7 @@ import {
   seasonYear,
   windowOpenOn,
 } from "../competition/calendar";
+import { withdrawRetirement } from "../competition/season";
 import {
   AGENT_FEE_RATE,
   budgetFreezeLabel,
@@ -59,7 +61,7 @@ import {
   wageExpectationOf,
   type DealTerms,
 } from "./market";
-import { betterAtPosition, squadDepthOf } from "../squad/depth";
+import { squadDepthOf } from "../squad/depth";
 import { clearDepartedState, isFreeAgent, loanPlayer, releasePlayer } from "./departures";
 import {
   describeMedical,
@@ -95,6 +97,7 @@ import { applyStanceOutcome, buildTransferPress, openPress, signed } from "../cl
 import { pickAnyPlayer } from "../core/player-ref";
 import {
   activeContract,
+  clearInterests,
   releaseFromTactics,
   squadShortfall,
   playerById,
@@ -949,10 +952,17 @@ export function respondOffer(
 //
 // 세 갈래다. ① 감독이 **이적 리스트에 올린다** — 값을 부르면 시장이 반응한다.
 // ② 감독이 **특정 구단에 직접 오퍼**를 넣는다 (영입의 거울상).
-// ③ AI 구단이 먼저 우리 선수를 노린다.
+// ③ 장부에 선 관심이 `bidding`까지 올라 오퍼가 된다 (transfer.md §1-2).
 
-/** 하루에 오퍼가 들어올 확률 (이적창 열린 날) */
-const INCOMING_OFFER_CHANCE = 0.08;
+/**
+ * `bidding` 관심 하나가 하루에 값을 부를 확률 (사는 쪽 창이 열린 날).
+ *
+ * 8%였던 자리다 — 그때는 이 확률 하나가 「누구에게 오퍼가 오는가」를 통째로 골랐다.
+ * 지금은 그 고르는 일을 관심 사다리가 이미 마쳤고(값·자리·불만으로 후보를 좁히고,
+ * 최소 열흘을 두 칸 올라온 뒤다) 여기 남은 것은 「그래서 오늘 부르나」뿐이라, 그
+ * 문턱을 낮춰야 사다리 끝이 막히지 않는다.
+ */
+const INCOMING_OFFER_CHANCE = 0.2;
 /** 이적 리스트에 오른 선수에게 오퍼가 올 확률 — 등재는 시장에 알리는 행위다 */
 const LISTED_OFFER_CHANCE = 0.34;
 /** 사는 쪽이 호가에서 깎고 들어오는 폭 */
@@ -1460,75 +1470,41 @@ export function generateIncomingOffers(state: GameState, digest: string[]): void
     }
   }
 
+  /**
+   * **그 밖의 오퍼는 관심에서만 나온다** (→ docs/simulation/transfer.md §1-2).
+   *
+   * 사는 구단을 여기서 다시 고르지 않는다 — `bidding`까지 올라온 줄의 주인이 곧
+   * 값을 부르는 구단이다. 관심 없이 도착하는 오퍼는 감독에게 사건이 아니라
+   * 사고다: 그 앞에 아무 소리도 없었으므로 준비할 자리도, 회견에서 물을 것도,
+   * 재계약 테이블에서 쓸 카드도 없다.
+   */
   if (rng() > INCOMING_OFFER_CHANCE) return;
+  const bidding = (state.interests ?? [])
+    .map((interest) => ({ interest, player: playerById(state, interest.gamePlayerId) }))
+    .filter(
+      (x): x is { interest: Interest; player: GamePlayer } =>
+        x.interest.stage === "bidding" &&
+        x.player !== null &&
+        x.player.teamId === state.userTeamId &&
+        free(x.player),
+    );
+  if (bidding.length === 0) return;
 
-  const squad = playersOf(state, state.userTeamId);
-  const candidates = squad
-    .filter((p) => {
-      if (!free(p)) return false;
-      return marketValueOf(state, p) > 1_000_000;
-    })
-    // 자리가 막힌 선수·사기가 낮은 선수가 먼저 눈에 띈다
-    .map((p) => ({
-      player: p,
-      appeal:
-        marketValueOf(state, p) / 1_000_000 +
-        // 마음은 **불만**이 말한다 — 체력으로 읽으면 90분을 뛴 다음 날 선발
-        // 전원이 매물처럼 보인다 (`hasIssue` 주석 참고)
-        (hasIssue(state, p.id) ? 12 : 0) +
-        betterAtPositionInSquad(state, p) * 8,
-    }))
-    .sort((a, b) => b.appeal - a.appeal);
-  if (candidates.length === 0) return;
-
-  // 상위 후보 중에서 시드로 하나 — 늘 같은 선수만 노려지지 않게 한다
-  const pool = candidates.slice(0, 8);
-  const chosen = pool[Math.floor(rng() * pool.length)]!.player;
-  const buyer = pickBuyer(state, chosen, rng);
-  if (!buyer) return;
-  const window = windowOpenForTeam(state, buyer);
-  if (!window) return;
-
-  const marketValue = marketValueOf(state, chosen);
-  // 리그 성향 — 사우디는 시장가 위로 지르고 주급을 폭발시킨다, MLS는 아낀다
-  const bias = marketBiasOf(state, buyer);
-  // 처음엔 시장가보다 낮게 부른다 (75~100%) — 흥정의 여지를 남긴다
-  const fee = Math.round((marketValue * (0.75 + rng() * 0.25) * bias.fee) / 100_000) * 100_000;
-  const wage = Math.round(wageExpectationOf(state, chosen) * (1.05 + rng() * 0.2) * bias.wage);
-  const negotiation: Negotiation = {
-    id: `neg-in-${chosen.id}-${state.date}`,
-    gamePlayerId: chosen.id,
-    kind: "sell",
-    counterpartTeamId: buyer,
-    windowId: window.id,
-    openedOn: state.date,
-    expiresOn: minDate(addDays(state.date, NEGOTIATION_DAYS), window.closesOn),
-    status: "open",
-    rounds: [
-      {
-        date: state.date,
-        by: "them",
-        fee,
-        weeklyWage: wage,
-        contractYears: 4,
-        respondsOn: null,
-        probability: dealOdds(state, {
-          playerId: chosen.id,
-          fee,
-          weeklyWage: wage,
-          years: 4,
-          kind: "sell",
-          counterpartTeamId: buyer,
-        }).probability,
-        verdict: null,
-      },
-    ],
-  };
-  state.negotiations.push(negotiation);
-  digest.push(
-    `📩 ${teamName(buyer)}가 ${chosen.name} 영입 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${negotiation.expiresOn})`,
+  const bid = bidding[Math.floor(rng() * bidding.length)]!;
+  const marketValue = marketValueOf(state, bid.player);
+  const opened = openIncomingSellOffer(
+    state,
+    bid.player,
+    rng,
+    digest,
+    // 처음엔 시장가보다 낮게 부른다 (75~100%) — 흥정의 여지를 남긴다
+    (feeBias) => Math.round((marketValue * (0.75 + rng() * 0.25) * feeBias) / 100_000) * 100_000,
+    ({ buyerName, fee, expiresOn }) =>
+      `📩 ${buyerName}가 ${bid.player.name} 영입 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
+    bid.interest.teamId,
   );
-  pushNarrative(state, `${teamName(buyer)}의 ${chosen.name} 오퍼 (${formatMoney(fee)})`, 3);
+  // 사다리의 끝 — 그 사실은 이제 협상이 든다. 창이 닫혀 못 열렸으면 줄은 남는다
+  if (opened) clearInterests(state, (i) => i === bid.interest);
 }
 
 /**
@@ -1542,11 +1518,13 @@ function openIncomingSellOffer(
   digest: string[],
   quote: (feeBias: number) => number,
   line: (ctx: { buyerName: string; fee: number; expiresOn: Negotiation["expiresOn"] }) => string,
-): void {
-  const buyer = pickBuyer(state, player, rng);
-  if (!buyer) return;
+  /** 이미 정해진 구단 — 관심 갈래는 장부의 줄이 주인을 갖고 온다 (§1-2) */
+  from?: string,
+): boolean {
+  const buyer = from ?? pickBuyer(state, player, rng);
+  if (!buyer) return false;
   const window = windowOpenForTeam(state, buyer);
-  if (!window) return;
+  if (!window) return false;
 
   const bias = marketBiasOf(state, buyer);
   const fee = quote(bias.fee);
@@ -1583,6 +1561,7 @@ function openIncomingSellOffer(
   state.negotiations.push(negotiation);
   digest.push(line({ buyerName: teamName(buyer), fee, expiresOn: negotiation.expiresOn }));
   pushNarrative(state, `${teamName(buyer)}의 ${player.name} 오퍼 (${formatMoney(fee)})`, 3);
+  return true;
 }
 
 /**
@@ -1629,12 +1608,6 @@ function openRequestedOffer(
     ({ buyerName, fee, expiresOn }) =>
       `📩 ${buyerName}가 이적을 요청한 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
   );
-}
-
-/** 우리 스쿼드에서 그 자리를 더 잘 보는 선수 수 — 오퍼가 올 만한 선수 판별 */
-function betterAtPositionInSquad(state: GameState, player: { id: string }): number {
-  const target = playerById(state, player.id);
-  return target ? betterAtPosition(state, state.userTeamId, target) : 0;
 }
 
 /** 오퍼를 넣을 구단 — 그 자리가 우리보다 약하고 예산이 되는 곳 */
@@ -2355,6 +2328,13 @@ function executeRenewal(
    * 갈아 끼워진 이 자리에서만 풀린다.
    */
   const freed = clearIssueReason(state, player.id, "contract");
+  /**
+   * **재계약이 예고를 거둔다 — 나이 상한 안에서** (season.md §6). 감독이 한 시즌을 더
+   * 설득한 것이 장부에 남지 않으면 1월의 예고가 7월에 그대로 집행돼, 방금 도장을 찍은
+   * 선수가 그 계약을 한 경기도 쓰지 않고 그만둔다. 판정일에 이미 `RETIRE_AGE`면 거둘 수
+   * 없다 — 서른다섯의 몸을 계약서가 되돌리지는 못한다.
+   */
+  const stays = withdrawRetirement(state, player);
   pushNarrative(
     state,
     `${player.name} 재계약 — 주급 ${formatMoney(agreed.weeklyWage)} ${agreed.contractYears}년`,
@@ -2366,7 +2346,8 @@ function executeRenewal(
       `${player.name} 재계약 완료 — 주급 ${formatMoney(agreed.weeklyWage)}, ` +
       `${contractUntil(state.date, agreed.contractYears)}까지${statusLabel(squadStatus)}. ` +
       "주급 총액이 늘어납니다" +
-      (freed ? " · 계약 불만이 풀렸습니다" : ""),
+      (freed ? " · 계약 불만이 풀렸습니다" : "") +
+      (stays ? " · 은퇴 예고를 거뒀습니다" : ""),
     brief: {
       head: "재계약",
       items: [
@@ -3527,6 +3508,8 @@ export function runAiRenewals(state: GameState, digest: string[]): void {
        * (`squadStatusOf`) 언제나 지금의 서열이다.
        */
     });
+    // 남의 구단의 재계약도 예고를 거둔다 — 규칙이 하나여야 세계가 같은 세계다 (season.md §6)
+    withdrawRetirement(state, player);
 
     /**
      * **우리가 노리던 선수라면 그 자리에서 끝난다.** 재계약은 협상 조건이

@@ -88,6 +88,7 @@ import {
 } from "../market/negotiation";
 // 서열대로 받고 있는가를 묻는 곡선 — 재계약·이적이 읽는 것과 같은 자다
 import { wageByRating } from "../market/market";
+import { tickInterests } from "../market/interest";
 import { playedIn, quickSimulate, type SimSquad } from "../match/quick-sim";
 import { managerTacticsOf } from "../match/manager-tactics";
 import { recordCard } from "../match/discipline";
@@ -97,7 +98,12 @@ import { matchRating } from "../match/ratings";
 import { scoutReportLine } from "../views/views";
 import { pruneDeferredScouts } from "../squad/scouting";
 import { grantManagerXP, settleTactics } from "../skills";
-import { allMatchesDone, endSeason } from "../competition/season";
+import {
+  allMatchesDone,
+  declareRetirements,
+  endSeason,
+  retirementDeclarationDate,
+} from "../competition/season";
 import { cancelTrainingOn, syncDefaultTraining } from "../squad/training-plan";
 import {
   groupOf,
@@ -467,6 +473,14 @@ function dailyTick(
     }
   }
 
+  /**
+   * **은퇴 예고** — 1월 1일, 세계 전체가 같은 규칙으로 (season.md §6).
+   *
+   * 무직이어도 돈다: 판정은 세계의 일이고, 감독이 없다고 서른다섯이 한 시즌을 더
+   * 뛰지는 않는다. 우리 팀 이름만 다이제스트에 선다.
+   */
+  if (state.date === retirementDeclarationDate(state.season)) declareRetirements(state, digest);
+
   // 월초 정산 — 지난달 마감(재정 보고서) + 이번 달 정액 항목 (finance.ts).
   // 게임/시즌이 시작하는 7월 1일엔 tick이 돌지 않으므로 첫 tick에서 보정한다
   if (state.date.endsWith("-01")) {
@@ -667,6 +681,11 @@ function dailyTick(
   // 무직이면 그 자리 중 하나가 감독의 것이 될 수도 있다 (career.md §5.1)
   const offered = runManagerMarket(state, digest);
   if (managed) {
+    /**
+     * 관심 — **오퍼보다 먼저 부른다** (transfer.md §1-2). 오퍼는 `bidding`까지 오른
+     * 관심에서만 나오므로, 사다리가 먼저 서야 그날의 오퍼가 그 줄을 읽을 수 있다.
+     */
+    tickInterests(state, digest);
     generateIncomingOffers(state, digest);
     for (const negotiation of arrivedResponses(state)) {
       const player = playerById(state, negotiation.gamePlayerId);

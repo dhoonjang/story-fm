@@ -251,16 +251,15 @@
 - 보드 요청은 이적창 단위 조건 하나뿐이다 — 특정 선수 기용 같은 경기 단위 요청도,
   영입 건별 승인도, 요청을 두고 흥정하는 자리도 없다
   ([simulation/career.md](simulation/career.md))
-- 협상 중의 이적 루머 — 회견은 확정된 영입·매각에만 열린다
-  ([simulation/transfer.md](simulation/transfer.md))
 - 관계 점수 — 인물 사이의 초기 관계는 원형이 채우지만 사건이 그것을 움직이지 않는다.
   서사 아크의 갈래도 장부 한 줄로 열리는 다섯까지다
   ([data/people.md](data/people.md) §10)
 - 스태프와 구장 — 스태프 급여가 선수 급여의 파생일 뿐 고용이라는 실체가 없고,
   수용 인원은 시드 고정값이라 구단 투자 결정이 없다
   ([simulation/finance.md](simulation/finance.md))
-- 오프시즌 연출 — 은퇴가 원장 한 줄로만 남고 시상식이 없다
-  ([simulation/season.md](simulation/season.md))
+- 오프시즌 연출 — 은퇴는 1월 예고·마지막 홈경기·명부로 서지만 시상식의 자리가 없고,
+  은퇴한 사람이 코치로 돌아오는 길도 없다(스태프가 실체가 없다)
+  ([simulation/season.md](simulation/season.md) §6)
 - 자체 능력치 산정 — 실선수의 축은 전부 시드에서 파생하고, 실명·능력치의 라이선스
   부채가 그대로 남아 있다 ([data/sources.md](data/sources.md) §7)
 

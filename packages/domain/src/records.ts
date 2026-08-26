@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
 import { MATCH_MINUTE_MAX } from "./match";
-import { AXIS_KO, type AttributeAxis, type PositionGroup } from "./player";
+import {
+  AXIS_KO,
+  RetirementReasonSchema,
+  type AttributeAxis,
+  type PositionGroup,
+} from "./player";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 import { SQUAD_STATUSES } from "./squad-rules";
 
@@ -289,6 +294,43 @@ export const TransferSchema = z.object({
   clauses: TransferClausesSchema.optional(),
 });
 export type Transfer = z.infer<typeof TransferSchema>;
+
+// ── 은퇴 명부 ─────────────────────────────────────────
+/**
+ * 은퇴 명부 (RETIRED_PLAYER) — **그만둔 사람이 남기는 한 줄** (season.md §6).
+ *
+ * 은퇴하면 `state.players`에서 빠지므로 id로는 이름도 나이도 되찾지 못한다. 원장의
+ * `TRANSFER.type = "retire"` 줄은 **누가**를 id로만 아는 줄이라, 그 줄만으로는
+ * 오프시즌 블록도 캐릭터북도 시상 기록도 그 사람을 부를 수 없다.
+ *
+ * ⚠️ **통산은 여기 적지 않는다.** `seasonStats`의 행은 은퇴로 지워지지 않아
+ * `careerTotalsOf`가 같은 수를 그대로 낸다 — 한 값을 두 곳에 적으면 언젠가 갈린다
+ * (game-state.md §3.4).
+ *
+ * ⚠️ **감독 팀에서 은퇴한 선수만 담는다** — `growthLog`·`milestones`와 같은 규약이다.
+ * 세계 전체는 시즌마다 수백 명이 그만두고, 그 이름을 읽는 자리는 전부 우리 사람의
+ * 자리다. 은퇴 자체는 소속과 무관하게 일어난다.
+ */
+export const RetiredPlayerSchema = z.object({
+  /** 현역 시절 `GAME_PLAYER.id` 그대로 — 새 유스에게 다시 주지 않는 id다 */
+  gamePlayerId: z.string().min(1),
+  name: z.string().min(1),
+  /**
+   * 생일과 주 포지션 — **페르소나를 현역 때와 같은 채널에서 되짚는 열쇠다**
+   * (people.md §6). 원형 뽑기가 (시드, 선수 id, 자리, 나이대)를 타므로, 이 둘이
+   * 없으면 은퇴한 사람이 다른 목소리로 돌아온다.
+   */
+  birthdate: DateString,
+  position: z.string().min(1),
+  /** 마지막 셔츠 */
+  teamId: z.string().min(1),
+  /** 그만둔 날 — 전환이 집행하는 날(다음 시즌 프리시즌 첫날) */
+  on: DateString,
+  /** 마지막으로 뛴 시즌 */
+  season: z.number().int().min(1),
+  reason: RetirementReasonSchema,
+});
+export type RetiredPlayer = z.infer<typeof RetiredPlayerSchema>;
 
 // ── 지급 일정 ─────────────────────────────────────────
 /**
@@ -1072,6 +1114,56 @@ export const TransferRequestSchema = z.object({
   pressedOn: DateString.optional(),
 });
 export type TransferRequest = z.infer<typeof TransferRequestSchema>;
+
+/**
+ * **관심의 단계** — 오퍼 앞에 서는 사다리 세 칸
+ * (→ docs/simulation/transfer.md §1-2).
+ *
+ * 보는 것에는 창이 필요 없지만 묻는 것과 부르는 것에는 필요하다 — `watching`은
+ * 아무 날에나 서고, 위 두 칸은 그 구단 협회의 창이 열린 동안에만 오른다.
+ */
+export const INTEREST_STAGES = ["watching", "enquired", "bidding"] as const;
+export type InterestStage = (typeof INTEREST_STAGES)[number];
+
+export const INTEREST_STAGE_KO: Record<InterestStage, string> = {
+  watching: "주시",
+  enquired: "문의",
+  bidding: "입찰 임박",
+};
+
+/** 사다리에서 이 칸이 몇 번째인가 — 견주는 자리가 여럿이라 눈금을 한 벌로 둔다 */
+export function interestStageRank(stage: InterestStage): number {
+  return INTEREST_STAGES.indexOf(stage);
+}
+
+/**
+ * **타 구단의 관심 한 줄** — 오퍼가 오기 전에 세계가 내는 소리
+ * (→ docs/simulation/transfer.md §1-2).
+ *
+ * 코어가 드는 것은 구단·선수·날짜·단계뿐이다. "레알이 그를 보고 있다"는 문장은
+ * GM과 기자의 것이고, 이 줄은 그 문장이 딛는 사실이다.
+ *
+ * **한 구단 × 한 선수에 한 줄이다** — 두 줄이 서면 회견도 근황도 같은 사실을 두 번
+ * 말하고, 딜 확률의 「다른 구단의 관심」 항이 한 구단을 둘로 센다
+ * (→ docs/simulation/transfer.md §11).
+ */
+export const InterestSchema = z.object({
+  /** 보고 있는 구단 (`TEAM.id`) */
+  teamId: z.string().min(1),
+  gamePlayerId: z.string().min(1),
+  /** 이 관심이 처음 선 날 */
+  since: DateString,
+  stage: z.enum(INTEREST_STAGES),
+  /** 마지막으로 칸이 움직인 날 — 여기서 다음 칸까지의 최소 체류와 노화를 센다 */
+  lastMovedOn: DateString,
+  /**
+   * 회견이 이 관심을 실어 간 날 — 같은 사실을 두 번 묻지 않게 하는 자다
+   * (`transferRequests`와 같은 규약). **칸이 오르면 비워진다** — 「보고 있다」와
+   * 「값을 부를 참이다」는 다른 사실이라 회견이 둘 다 싣는다.
+   */
+  pressedOn: DateString.optional(),
+});
+export type Interest = z.infer<typeof InterestSchema>;
 
 /**
  * 개인 훈련 프로그램 — **팀 훈련 위에 한 선수만 겨냥해 얹는 것.**

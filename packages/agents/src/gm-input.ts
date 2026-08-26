@@ -16,6 +16,7 @@ import {
   computeStandings,
   dayOfWeek,
   describeBuyBackRights,
+  describeInterests,
   describeNegotiations,
   describeNextFixture,
   describeBoardRequests,
@@ -40,7 +41,6 @@ import {
   openPromises,
   openTransferRequests,
   pendingVerdicts,
-  playerById,
   playerName,
   scoutingSummary,
   scoutReportLine,
@@ -548,29 +548,22 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
 }
 
 /**
- * 우리 팀 은퇴 — **이번 오프시즌의 원장 줄**만이다. 전환이 은퇴를 다음 시즌
- * 프리시즌 시작일로 남기므로 날짜가 그 하루와 같은 줄이 방금 끝난 시즌의 은퇴다.
+ * 우리 팀 은퇴 — **이번 오프시즌의 명부 줄**만이다 (season.md §6). 전환이 은퇴를 다음
+ * 시즌 프리시즌 시작일로 남기므로 날짜가 그 하루와 같은 줄이 방금 끝난 시즌의 은퇴다.
  *
- * ⚠️ 은퇴하면 선수는 `state.players`에서 빠진다 — 이름이 없으면 그 줄을 세우지
- * 않는다. id를 이름 자리에 흘리면 GM이 그것을 사람 이름으로 읽고 장면에 적는다.
+ * ⚠️ **원장(`TRANSFER`)이 아니라 명부(`state.retired`)를 읽는다.** 은퇴하면 선수는
+ * `state.players`에서 빠져 원장 줄의 id로는 이름도 나이도 되찾지 못한다 — 명부가
+ * 서기 전에는 이 블록이 아무 줄도 내지 못했다.
  */
 function retirementFacts(state: GameState): string[] {
-  return state.transfers
-    .filter(
-      (t) =>
-        t.type === "retire" &&
-        t.fromTeamId === state.userTeamId &&
-        t.date === state.calendar.preseasonStart,
-    )
-    .map((t) => {
-      const player = playerById(state, t.gamePlayerId);
-      if (!player) return null;
+  return (state.retired ?? [])
+    .filter((r) => r.teamId === state.userTeamId && r.on === state.calendar.preseasonStart)
+    .map((r) => {
       // 우리 팀에서의 기록 — 통산 접기는 한 곳이다(`careerTotalsOf`). 여기서 다시
       // 합하면 화면·선수 카드가 내는 수와 은퇴 줄의 수가 언젠가 갈린다
-      const ours = careerTotalsOf(state, t.gamePlayerId, state.userTeamId);
-      return `은퇴: ${player.name} ${ageOf(player.birthdate, t.date)}세 · 우리 팀에서 ${ours.apps}경기 ${ours.goals}골`;
-    })
-    .filter((x): x is string => x !== null);
+      const ours = careerTotalsOf(state, r.gamePlayerId, state.userTeamId);
+      return `은퇴: ${r.name} ${ageOf(r.birthdate, r.on)}세 · 우리 팀에서 ${ours.apps}경기 ${ours.goals}골`;
+    });
 }
 
 /**
@@ -852,6 +845,16 @@ export function buildGmStateNote(
      * (finance.md §9.6). 답이 도착한 날은 `<time_passed>`가 나른다.
      */
     block("board", describeBoardRequests(state)),
+    /**
+     * 오퍼 앞에 서 있는 관심 — 우리 선수를 보는 구단과, 우리가 노리는 선수에게
+     * 붙은 경쟁 구단 (transfer.md §1-2).
+     *
+     * 협상 블록보다 앞에 서는 이유가 시간 순서다: 이 사실이 없으면 모델은 오퍼가
+     * 열린 날에야 그 구단의 이름을 처음 듣는다. 그러면 회견의 질문도, 라커룸의
+     * 수군거림도, 재계약 테이블의 압박도 설 자리가 없다 — 소문은 오퍼 앞에서만
+     * 장면이 된다. 관심이 없으면 덩어리도 서지 않는다.
+     */
+    block("interest", describeInterests(state).join("\n")),
     // 협상은 있을 때만 — 매 턴 정가로 읽히는 블록이다
     block("negotiations", negotiations.startsWith("진행 중인 협상 없음") ? null : negotiations),
     // 쓸 수 있는 되사기 권리 — 이 덩어리가 없으면 모델은 그 자리가 있는 줄도 모른다

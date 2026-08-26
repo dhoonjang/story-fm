@@ -168,25 +168,25 @@
 
 ### 3.2 팀 · 선수
 
-| 엔티티                           | 무엇                                                                                               | 정의                |
-| -------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------- |
-| `teams` `GameTeam`               | AI 전술 역량치 · 현 감독 이름/부임일 + 카탈로그에서 복사한 정체성(이름·약칭·소속·체급·구장·브랜드) | `domain/team.ts`    |
-| `players` `GamePlayer`           | 16축·상태·포지션 목록·주장·부주장·임대·성장 캐리 + 국적(협회 코드)·홈그로운 협회                   | `domain/player.ts`  |
-| ↳ `PlayerAttributes`             | 16축 + `overall`(파생 캐시) + `potential`                                                          | `domain/player.ts`  |
-| ↳ `PlayerState`                  | 폼(−1\~1) · 체력(0\~100) · 부상 성향 · 심경 한 줄                                                  | `domain/player.ts`  |
-| ↳ `PlayerPosition`               | 가능 포지션 + 적응도 + `isNatural`(하나 이상)                                                      | `domain/player.ts`  |
-| `tactics` `TeamTactics`          | 팀당 1개 — `spec` + `assignments` + `shelved` + `setPieceTakers` + 팀 기억                         | `domain/tactics.ts` |
-| ↳ `TacticsSpec`                  | 모양 이름(파생 — 프리셋 밖도 담는다) + 전술 6축(각 1\~5)                                           | `domain/tactics.ts` |
-| ↳ `TacticAssignment`             | **라인업의 원본** — 자리·좌표·역할·적응도·개인 지시·개인 기억                                      | `domain/tactics.ts` |
-| ↳ `PlayerDirective`              | 결과에 닿는 개인 지시 5종 (`instruction`은 사람이 읽는 말)                                         | `domain/tactics.ts` |
-| ↳ `DrilledTactics`               | 전술 지문 → 그때 도달한 적응도 (선수별)                                                            | `domain/tactics.ts` |
-| ↳ `ShelvedFamiliarity`           | **배치가 없는 동안 적응도·기억이 머무는 자리** (2군·예비)                                          | `domain/tactics.ts` |
-| ↳ `SetPieceTakers`               | 죽은 공을 차는 사람 — `corner`·`freeKick`·`penalty` 각각 선수 id(옛 세이브엔 없다)                 | `domain/tactics.ts` |
-| `contracts` `Contract`           | **주급의 원본** — 선수당 `active` 정확히 1건                                                       | `domain/records.ts` |
-| `finances` `TeamFinance`         | 팀당 1개 — 잔고·이적 예산·원장·낙하산                                                              | `domain/records.ts` |
-| ↳ `LedgerEntry`                  | 원장 한 줄 — 유저 팀만 상세, 최근 3개월 롤링                                                       | `domain/records.ts` |
-| `financeReports` `FinanceReport` | 월간 보고서 — 영구 보존, 매월 1일 발행                                                             | `domain/records.ts` |
-| ↳ `highlights`                   | 그달의 큰 비정기 항목 — 원장이 잘려도 남는 날짜·금액                                               | `domain/records.ts` |
+| 엔티티                           | 무엇                                                                                                         | 정의                |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------- |
+| `teams` `GameTeam`               | AI 전술 역량치 · 현 감독 이름/부임일 + 카탈로그에서 복사한 정체성(이름·약칭·소속·체급·구장·브랜드)           | `domain/team.ts`    |
+| `players` `GamePlayer`           | 16축·상태·포지션 목록·주장·부주장·임대·성장 캐리 + 국적(협회 코드)·홈그로운 협회                             | `domain/player.ts`  |
+| ↳ `PlayerAttributes`             | 16축 + `overall`(파생 캐시) + `potential`                                                                    | `domain/player.ts`  |
+| ↳ `PlayerState`                  | 폼(−1\~1) · 체력(0\~100) · 부상 성향 · 심경 한 줄                                                            | `domain/player.ts`  |
+| ↳ `PlayerPosition`               | 가능 포지션 + 적응도 + `isNatural`(하나 이상)                                                                | `domain/player.ts`  |
+| `tactics` `TeamTactics`          | 팀당 1개 — `spec` + `assignments` + `shelved` + `setPieceTakers` + 팀 기억                                   | `domain/tactics.ts` |
+| ↳ `TacticsSpec`                  | 모양 이름(파생 — 프리셋 밖도 담는다) + 전술 6축(각 1\~5) + 토글 넷(전환·트랩·태클·GK 배급, 옛 세이브엔 없다) | `domain/tactics.ts` |
+| ↳ `TacticAssignment`             | **라인업의 원본** — 자리·좌표·역할·적응도·개인 지시·개인 기억                                                | `domain/tactics.ts` |
+| ↳ `PlayerDirective`              | 결과에 닿는 개인 지시 5종 (`instruction`은 사람이 읽는 말)                                                   | `domain/tactics.ts` |
+| ↳ `DrilledTactics`               | 전술 지문 → 그때 도달한 적응도 (선수별)                                                                      | `domain/tactics.ts` |
+| ↳ `ShelvedFamiliarity`           | **배치가 없는 동안 적응도·기억이 머무는 자리** (2군·예비)                                                    | `domain/tactics.ts` |
+| ↳ `SetPieceTakers`               | 죽은 공을 차는 사람 — `corner`·`freeKick`·`penalty` 각각 선수 id(옛 세이브엔 없다)                           | `domain/tactics.ts` |
+| `contracts` `Contract`           | **주급의 원본** — 선수당 `active` 정확히 1건                                                                 | `domain/records.ts` |
+| `finances` `TeamFinance`         | 팀당 1개 — 잔고·이적 예산·원장·낙하산                                                                        | `domain/records.ts` |
+| ↳ `LedgerEntry`                  | 원장 한 줄 — 유저 팀만 상세, 최근 3개월 롤링                                                                 | `domain/records.ts` |
+| `financeReports` `FinanceReport` | 월간 보고서 — 영구 보존, 매월 1일 발행                                                                       | `domain/records.ts` |
+| ↳ `highlights`                   | 그달의 큰 비정기 항목 — 원장이 잘려도 남는 날짜·금액                                                         | `domain/records.ts` |
 
 ### 3.3 일정 · 대회
 
@@ -234,6 +234,7 @@ row, 지난 일 = 그대로 이력.**
 | `scoutReports` `ScoutReport`       | 스카우트 파견 — `completedOn === null`이 파견 중                                                              | `domain/records.ts` |
 | `deferredScouts` `DeferredScout`   | 동시 한도에 막혀 못 나간 파견 요청 — 다음 턴 입력에 사실로 남는다 ([player.md](player.md) §9.4)               | `domain/records.ts` |
 | `milestones` `Milestone`           | 마일스톤 — 데뷔·첫 골·구단 통산 문턱·해트트릭. **감독 팀 선수만** (아래 ⚠️)                                   | `domain/records.ts` |
+| `retired` `RetiredPlayer`          | **은퇴 명부** — 그만둔 사람의 id·이름·생일·주 포지션·마지막 팀·날짜·시즌·사유. **감독 팀에서 은퇴한 선수만**  | `domain/records.ts` |
 
 ⚠️ **`growthLog`는 감독 팀 선수 것만 담는다.** 4,000행에서 오래된 쪽부터 잘리는
 로그인데, 코어 월간 성장(`developsByCore` — 우리 2군 + 모든 타 팀)을 전부 남기면
@@ -248,6 +249,12 @@ row, 지난 일 = 그대로 이력.**
 소속과 무관하게 그대로 쌓인다** — `seasonStats`는 모든 팀의 것이라 남의 선수 통산도
 `careerOf`가 그대로 낸다(§5 파생). 남는 것이 우리 것뿐인 것이지, 남의 선수가 100경기를
 못 채우는 것이 아니다.
+
+⚠️ **은퇴 명부는 이름을 잃지 않기 위한 표다.** 은퇴한 선수는 `state.players`에서
+빠지므로 id로는 아무것도 되찾지 못한다 — 시상 기록·회견·캐릭터북이 그 이름을 부르려면
+그 사람이 어디엔가 남아 있어야 한다. **통산은 적지 않는다**: `seasonStats` 행은
+그대로 남아 `careerTotalsOf`가 같은 수를 낸다
+([../simulation/season.md](../simulation/season.md) §6).
 
 ⚠️ **마일스톤은 클럽 단위다** — "우리 팀에서 100경기"이지 "통산 100경기"가 아니다.
 원장은 게임 시작 뒤의 출전만 알고 **부임 전 커리어는 시드에 없으므로**, 서른 살에

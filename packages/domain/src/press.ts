@@ -10,11 +10,13 @@ import {
 } from "./persona";
 import {
   boardExpectationText,
+  INTEREST_STAGE_KO,
   milestonePhrase,
   PLAYER_ISSUE_REASONS,
   PROMISE_KIND_KO,
   TRANSFER_REQUEST_REASON_KO,
   type BoardExpectationCode,
+  type InterestStage,
   type MilestoneCode,
   type PlayerIssueReason,
   type PromiseKind,
@@ -48,6 +50,8 @@ export const PressTriggerSchema = z.enum([
   "opening",
   /** 더비 전야 — 더비 표의 대진 전날 */
   "derby",
+  /** 마지막 홈경기 전야 — 은퇴 예고가 선 선수가 있을 때 (season.md §6) */
+  "farewell",
 ]);
 export type PressTrigger = z.infer<typeof PressTriggerSchema>;
 
@@ -87,8 +91,18 @@ export const PressFactKindSchema = z.enum([
   "contract-demand",
   /** 타 구단의 관심 — 최근 창에서 거절·만료된 오퍼 (다가옴 · people.md §8) */
   "interest",
+  /**
+   * **이적 루머** — 타 구단의 관심이 문의 이상으로 올랐다 (transfer.md §1-2).
+   * `interest`와 재는 것이 다르다: 그쪽은 **끝난 오퍼**를 세고 이쪽은 **아직 오퍼가
+   * 아닌 관심**을 센다.
+   */
+  "rumour",
   /** 방금 끝난 경기가 세운 기록 — 데뷔·첫 골·구단 통산 문턱·해트트릭 (match.md §6) */
   "milestone",
+  /** 이번 시즌 뒤 은퇴 — 1월에 선 예고 (season.md §6) */
+  "retirement",
+  /** 그 시즌 마지막 홈경기 — 전야는 대진, 경기 뒤는 그가 뛰었는가 (season.md §6) */
+  "farewell",
 ]);
 /**
  * 회견의 재료 — **사실 한 줄.** 질문이 아니다.
@@ -537,6 +551,28 @@ export function pressFactText(fact: PressFact): string {
         ` · 최고 ${formatMoney(v.fee ?? 0)}${name ? ` (${name})` : ""}` +
         ` · 시즌 출전 ${v.apps ?? 0}경기`
       );
+    case "rumour":
+      // `tags[0]`이 사다리의 칸, `name`이 그 구단, `days`가 관심이 선 뒤 흐른 날
+      return (
+        `${name || "타 구단"} 관심 ${INTEREST_STAGE_KO[(sub ?? "watching") as InterestStage] ?? sub}` +
+        ` · ${v.days ?? 0}일째`
+      );
+    case "retirement":
+      return (
+        `${name} 이번 시즌 뒤 은퇴 — 만 ${v.age ?? 0}세` +
+        ` · 우리 팀에서 ${v.apps ?? 0}경기 ${v.goals ?? 0}골` +
+        (d.date ? ` · ${d.date} 예고` : "")
+      );
+    case "farewell":
+      /**
+       * 전야에는 날짜만, 경기 뒤에는 **그가 뛰었는가**가 선다 (people.md §4). 대진은
+       * 회견의 국면 줄이 이미 말하므로 카드가 다시 들지 않는다. 세우고 안 세우고는
+       * 감독의 결정이라, 코어가 적는 것은 그 결정의 결과뿐이다.
+       */
+      if (sub === "played" || sub === "unused") {
+        return `${name} 마지막 홈경기 — ${sub === "played" ? "출전" : "출전 없음"}`;
+      }
+      return `${name} 마지막 홈경기${d.date ? ` — ${d.date}` : ""}`;
   }
 }
 

@@ -238,8 +238,8 @@ export const AI_BENCH = defineHarness({
 
 export const AI_MARKET = defineHarness({
   id: "ai-market",
-  what: "한 시즌의 AI↔AI 시장 규모 — 팀당 이적·임대와 여름 비중",
-  doc: "docs/simulation/transfer.md §6",
+  what: "한 시즌의 AI↔AI 시장 규모, 그리고 우리 선수에게 선 관심이 오퍼가 되는 비율",
+  doc: "docs/simulation/transfer.md §6 · §1-2",
   cost: "전체 세계 한 시즌 · 수 분",
   // prettier-ignore
   bands: [
@@ -247,6 +247,10 @@ export const AI_MARKET = defineHarness({
     { metric: "1부 팀당 이적", role: "guard", min: 1, max: 6, why: "실제 시장과 같은 자릿수" },
     { metric: "1부 팀당 임대", role: "guard", min: 0.5, max: 4, why: "실제 시장과 같은 자릿수" },
     { metric: "여름 비중", role: "guard", min: 0.5, unit: "ratio", why: "실제 시장의 여름:겨울은 7:3" },
+    { metric: "우리 선수 관심", role: "guard", min: 5, max: 45, unit: "count", why: "한 시즌 우리 스쿼드에 선 관심 줄 수 — 라커룸이 매주 흔들리지 않으면서 창마다 이야기가 있는 폭 (transfer.md §1-2)" },
+    { metric: "문의까지 오른 비중", role: "guard", min: 0.15, unit: "ratio", why: "밖에 나지 않는 관심만 쌓이면 사다리가 장식이다" },
+    { metric: "오퍼가 된 비중", role: "guard", min: 0.05, max: 0.6, unit: "ratio", why: "관심이 전부 오퍼가 되면 사다리가 지연일 뿐이고, 하나도 안 되면 오퍼가 마른다" },
+    { metric: "우리에게 온 오퍼", role: "measure", unit: "count", why: "우리에게 도착한 매각 오퍼 전부 — 관심 갈래와 이적 요청 갈래(§1-1)가 함께 든다" },
   ],
 });
 

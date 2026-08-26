@@ -26,6 +26,7 @@ import { pickAnyPlayer } from "../core/player-ref";
 import {
   activeContract,
   benchRunOf,
+  clearInterests,
   firstTeamPlayers,
   groupOf,
   onLoanFromUs,
@@ -100,6 +101,8 @@ export function clearDepartedState(state: GameState, player: GamePlayer, from: s
   state.promises = (state.promises ?? []).filter((pr) => pr.gamePlayerId !== player.id);
   // 요청 장부도 같은 문을 지난다 — 떠난 선수의 요청에 감독이 답할 자리가 없다
   withdrawTransferRequest(state, player.id);
+  // 관심도 같다 — 우리 라커룸에 없는 사람을 두고 나는 소문은 물을 자리가 없다 (§1-2)
+  clearInterests(state, (i) => i.gamePlayerId === player.id);
   forgetRoles(state, player.id);
   player.isCaptain = false;
   player.isViceCaptain = undefined;
