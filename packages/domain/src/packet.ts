@@ -480,7 +480,9 @@ const COUNTER_KO: Record<
     text: (r) =>
       `${r.subject}의 높은 라인 뒤가 열린다 — ${r.rival} 전방 스피드 ${Math.round(r.v("fwPace"))} vs 수비 ${Math.round(r.v("cbPace"))}` +
       (r.has("sweeper") ? " (골키퍼가 커버 범위를 넓혀 버틴다)" : "") +
-      (r.has("trap-unfamiliar") ? " · 오프사이드 트랩이 아직 손에 안 익었다" : ""),
+      // 트랩은 **감독이 켰을 때만** 문장에 선다 — 내린 적 없는 지시의 대가를 말하지 않는다
+      (r.has("trap-unfamiliar") ? " · 오프사이드 트랩이 아직 손에 안 익었다" : "") +
+      (r.has("trap-drilled") ? " · 오프사이드 트랩이 손에 익어 타이밍으로 덮는다" : ""),
   },
   press_trap: {
     text: (r) =>
@@ -521,7 +523,10 @@ const COUNTER_KO: Record<
   },
   counter_attack: {
     text: (r) =>
-      `${r.subject}이(가) 내려서서 역습을 노린다 — ${r.rival}이(가) 올라온 뒤가 넓다 (전방 스피드 ${Math.round(r.v("fwPace"))})`,
+      (r.has("ordered")
+        ? `${r.subject}이(가) 역습을 지시했다`
+        : `${r.subject}이(가) 내려서서 역습을 노린다`) +
+      ` — ${r.rival}이(가) 올라온 뒤가 넓다 (전방 스피드 ${Math.round(r.v("fwPace"))})`,
   },
   stretched_shape: {
     blames: true,
@@ -652,6 +657,20 @@ const TACTICAL_KO: Record<string, (r: Render) => string> = {
     r.v("step") > 0
       ? `롱볼 지향: 제공권 ${r.v("aerial") >= 1 ? "우위" : "열세"}, 중원 점유 포기`
       : `짧은 패스: 점유로 중원 장악 (연결 ${r.v("passing") >= 1 ? "안정" : "불안"}), 전진은 느리다`,
+  // ── 갈래 넷 — 켠 쪽만 줄을 갖는다 (match.md §1.2) ──
+  transition: (r) =>
+    r.has("counter")
+      ? `역습 전환: 뺏으면 곧장 앞으로 (최전방 스피드 ${r.v("trait") >= 1 ? "우수" : "평범"}), 중원은 비운다`
+      : "재정비: 뺏으면 자리부터 잡는다, 되받을 기회는 접는다",
+  "offside-trap": () => "오프사이드 트랩: 상대를 라인 앞에 가두되 타이밍이 어긋나면 그대로 열린다",
+  tackling: (r) =>
+    r.has("hard")
+      ? `강한 태클: 경합을 이긴다 (태클·적극성 ${r.v("trait") >= 1 ? "충분" : "부족"}), 파울·카드·부상이 함께 오른다`
+      : "약한 태클: 카드와 부상을 줄이는 대신 전진을 허용한다",
+  "keeper-distribution": (r) =>
+    r.has("long")
+      ? `긴 배급: 한 번에 넘긴다 (제공권 ${r.v("trait") >= 1 ? "우위" : "열세"}), 2차 볼을 내준다`
+      : `짧은 배급: 뒤에서부터 숫자를 만든다 (후방 연결 ${r.v("trait") >= 1 ? "안정" : "불안"}), 우리 문 앞에서 잃을 위험`,
 };
 
 /**

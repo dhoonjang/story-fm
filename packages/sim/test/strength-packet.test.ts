@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ATTRIBUTE_AXES, matchupText, packetTagContext, packetTagText } from "@story-fm/domain";
+import {
+  ATTRIBUTE_AXES,
+  matchupText,
+  packetTagContext,
+  packetTagText,
+  type TacticsSpec,
+} from "@story-fm/domain";
 import {
   addFocused,
   buildStrengthPacket,
@@ -13,6 +19,7 @@ import {
   profFactor,
   readKeyPoints,
   stateModifier,
+  TACKLING_INTENSITY_STEP,
   tacticalFit,
   zeroCells,
   zoneMeanOf,
@@ -347,6 +354,60 @@ describe("buildStrengthPacket", () => {
       expect(moved, `${axis}가 어떤 존도 움직이지 않았다`).toBe(true);
       // 지시는 공짜가 아니다 — 이득과 대가가 함께 적힌다
       expect(pushed.home.tactical.notes.length).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * **갈래는 켠 쪽만 값을 움직인다** (match.md §1.2). 중립이 델타를 남기면 갈래를
+   * 모르는 옛 세이브와 프리셋이 통째로 기울고, 리그 평균이 갈래 도입 전과 갈린다.
+   */
+  it("갈래 넷이 전부 중립이면 존도 노트도 갈래 도입 전과 같다", () => {
+    const bare = buildStrengthPacket(makeSide("str", 80), makeSide("wk", 78));
+    const neutral = buildStrengthPacket(
+      makeSide("str", 80, {
+        tactics: {
+          transition: null,
+          offsideTrap: false,
+          tackling: "normal",
+          keeperDistribution: null,
+        },
+      }),
+      makeSide("wk", 78),
+    );
+    expect(neutral.home.zones).toEqual(bare.home.zones);
+    expect(neutral.home.tactical.notes.map((n) => n.code)).toEqual(
+      bare.home.tactical.notes.map((n) => n.code),
+    );
+    // 켜면 그때 비로소 줄이 선다
+    const on = buildStrengthPacket(
+      makeSide("str", 80, { tactics: { offsideTrap: true } }),
+      makeSide("wk", 78),
+    );
+    expect(on.home.tactical.notes.some((n) => n.code === "offside-trap")).toBe(true);
+  });
+
+  /** 갈래도 축과 같은 층이다 — 켠 것은 수치를 움직이고 이득과 대가를 함께 낸다 */
+  it("갈래 넷 전부가 수치를 움직인다 — 말했는데 수치엔 없는 갈래가 없다", () => {
+    const base = buildStrengthPacket(makeSide("str", 80), makeSide("wk", 78));
+    const branches: Array<[string, Partial<TacticsSpec>]> = [
+      ["transition:counter", { transition: "counter" }],
+      ["transition:regroup", { transition: "regroup" }],
+      ["offsideTrap", { offsideTrap: true }],
+      ["tackling:hard", { tackling: "hard" }],
+      ["tackling:soft", { tackling: "soft" }],
+      ["keeper:short", { keeperDistribution: "short" }],
+      ["keeper:long", { keeperDistribution: "long" }],
+    ];
+    for (const [label, spec] of branches) {
+      const pushed = buildStrengthPacket(
+        makeSide("str", 80, { tactics: spec }),
+        makeSide("wk", 78),
+      );
+      const moved =
+        pushed.home.zones.attack !== base.home.zones.attack ||
+        pushed.home.zones.midfield !== base.home.zones.midfield ||
+        pushed.home.zones.defense !== base.home.zones.defense;
+      expect(moved, `${label}이(가) 어떤 존도 움직이지 않았다`).toBe(true);
     }
   });
 
@@ -728,28 +789,50 @@ describe("전력차와 총 기대 득점", () => {
 /**
  * 눈금과 클램프 — **지시가 그라운드에 닿기 전에 지나는 문들**.
  *
- * 값 하나하나가 아니라 문의 위치를 고정한다. 계수는 밸런스라 움직이겠지만, 문이
- * 열려 있어야 할 곳에서 닫히거나 (하한이 실제로 물린다) 닫혀 있어야 할 곳에서
- * 열리면 (상한이 눈금 안에서 닿는다) 설계가 바뀐 것이다.
+ * 값 하나하나가 아니라 문의 위치를 고정한다. 계수는 밸런스라 움직이겠지만, 세 항의
+ * 합이 clamp를 넘어가 잘리는 구간이 생기면 (감독이 태클을 올렸는데 강도가 그대로다)
+ * 설계가 바뀐 것이다.
  */
 describe("경기 강도 (matchIntensity)", () => {
-  it("기본 전술은 1이고, 압박이 템포보다 무겁다", () => {
+  it("기본 전술은 1이고, 압박이 태클보다, 태클이 템포보다 무겁다", () => {
     expect(matchIntensity(tactics())).toBe(1);
     expect(matchIntensity(tactics({ pressing: 5 }))).toBe(1.14);
+    expect(matchIntensity(tactics({ tackling: "hard" }))).toBe(1.08);
     expect(matchIntensity(tactics({ tempo: 5 }))).toBe(1.08);
   });
 
-  it("하한 0.8은 물리고 상한 1.3은 눈금 안에서 닿지 않는다", () => {
-    // 1~5 스물다섯 조합 전부가 밴드 안이고, 그중 최소는 하한에 **잘려서** 0.8이다
+  /**
+   * 태클 갈래는 **강도 축 자체다** (match.md §1.2) — 존이 아니라 여기로 나간다.
+   * `normal`과 값이 없는 옛 세이브는 같은 자리에 선다.
+   */
+  it("태클 강도는 정확히 ±0.08이고 중립은 아무 일도 하지 않는다", () => {
+    expect(matchIntensity(tactics({ tackling: "hard" })) - matchIntensity(tactics())).toBeCloseTo(
+      TACKLING_INTENSITY_STEP,
+      6,
+    );
+    expect(matchIntensity(tactics()) - matchIntensity(tactics({ tackling: "soft" }))).toBeCloseTo(
+      TACKLING_INTENSITY_STEP,
+      6,
+    );
+    expect(matchIntensity(tactics({ tackling: "normal" }))).toBe(matchIntensity(tactics()));
+  });
+
+  it("세 항의 합이 clamp와 같아 양 끝에서 잘리지 않는다", () => {
+    // 압박 ±0.14 · 템포 ±0.08 · 태클 ±0.08 = ±0.30 — 밴드가 정확히 0.7~1.3이다
     const all: number[] = [];
     for (let pressing = 1; pressing <= 5; pressing++) {
-      for (let tempo = 1; tempo <= 5; tempo++)
-        all.push(matchIntensity(tactics({ pressing, tempo })));
+      for (let tempo = 1; tempo <= 5; tempo++) {
+        for (const tackling of ["soft", "normal", "hard"] as const)
+          all.push(matchIntensity(tactics({ pressing, tempo, tackling })));
+      }
     }
-    expect(Math.min(...all)).toBe(0.8);
-    expect(matchIntensity(tactics({ pressing: 1, tempo: 1 })), "하한이 안 물렸다").toBe(0.8);
-    // 상한은 방어선일 뿐 — 가장 격렬한 전술도 1.22에서 멈춘다
-    expect(Math.max(...all)).toBe(1.22);
+    expect(Math.min(...all)).toBe(0.7);
+    expect(Math.max(...all)).toBe(1.3);
+    // 양 끝 바로 안쪽에서도 한 칸이 살아 있다 — 잘렸으면 이웃과 같은 값이 된다
+    expect(matchIntensity(tactics({ pressing: 1, tempo: 1, tackling: "soft" }))).toBe(0.7);
+    expect(matchIntensity(tactics({ pressing: 1, tempo: 2, tackling: "soft" }))).toBe(0.74);
+    expect(matchIntensity(tactics({ pressing: 5, tempo: 5, tackling: "hard" }))).toBe(1.3);
+    expect(matchIntensity(tactics({ pressing: 5, tempo: 4, tackling: "hard" }))).toBe(1.26);
   });
 
   /**
@@ -762,9 +845,9 @@ describe("경기 강도 (matchIntensity)", () => {
     expect(matchIntensity(tactics(), 1)).toBe(1.06);
     expect(matchIntensity(tactics(), 3)).toBe(1.18);
     // 가장 격렬한 전술 + 가장 뜨거운 더비 — 여기가 강도의 실제 위끝이다
-    expect(matchIntensity(tactics({ pressing: 5, tempo: 5 }), 3)).toBe(1.44);
+    expect(matchIntensity(tactics({ pressing: 5, tempo: 5, tackling: "hard" }), 3)).toBe(1.53);
     // 하한도 함께 오른다: 더비는 소극적인 팀에도 걸린다
-    expect(matchIntensity(tactics({ pressing: 1, tempo: 1 }), 3)).toBe(0.94);
+    expect(matchIntensity(tactics({ pressing: 1, tempo: 1, tackling: "soft" }), 3)).toBe(0.83);
   });
 });
 
@@ -879,6 +962,11 @@ describe("사실 태그는 전부 문장이 된다", () => {
         width: 5,
         passStyle: 5,
         mentality: 5,
+        // 갈래 넷도 한 쪽씩 — 반대쪽 갈래는 상대가 선다
+        transition: "counter",
+        offsideTrap: true,
+        tackling: "hard",
+        keeperDistribution: "short",
       }),
     });
     us.managerAnalysis = 99;
@@ -897,7 +985,16 @@ describe("사실 태그는 전부 문장이 된다", () => {
     const packet = buildStrengthPacket(
       us,
       makeSide("them", 74, {
-        tactics: tactics({ passStyle: 1, width: 1, mentality: 1, defensiveLine: 1, pressing: 1 }),
+        tactics: tactics({
+          passStyle: 1,
+          width: 1,
+          mentality: 1,
+          defensiveLine: 1,
+          pressing: 1,
+          transition: "regroup",
+          tackling: "soft",
+          keeperDistribution: "long",
+        }),
       }),
     );
 

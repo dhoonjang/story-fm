@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   CHIP_SIZE,
   DEFAULT_TACTICS,
+  TACTIC_TOGGLE_KEYS,
   TacticsSpecSchema,
   migratePassStyle,
   migrateSignature,
+  tacticToggleValue,
   tacticsDistance,
   tacticsSignature,
   FORMATION_LAYOUTS,
@@ -459,6 +461,81 @@ describe("패스 스타일은 1~5 축이다", () => {
 
   it("지문에 숫자로 들어간다", () => {
     expect(tacticsSignature({ ...DEFAULT_TACTICS, passStyle: 5 })).toBe("4-3-3|3|3|3|3|3|5");
+  });
+});
+
+describe("전술 갈래 넷 — 축이 아니라 토글이다", () => {
+  /**
+   * **중립인 갈래는 지문에 붙지 않는다.** 늘 붙이면 갈래가 생기는 날 리그의 모든
+   * 적응도 기억이 한 번에 "처음 보는 전술"이 되고 `drilled`가 두 벌로 불어난다.
+   */
+  it("아무 갈래에도 서지 않은 전술의 지문은 갈래가 생기기 전과 같다", () => {
+    expect(tacticsSignature(DEFAULT_TACTICS)).toBe("4-3-3|3|3|3|3|3|3");
+    // 중립을 명시해도 마찬가지다 — false·"normal"·null이 전부 "지시하지 않음"이다
+    expect(
+      tacticsSignature({
+        ...DEFAULT_TACTICS,
+        transition: null,
+        offsideTrap: false,
+        tackling: "normal",
+        keeperDistribution: null,
+      }),
+    ).toBe("4-3-3|3|3|3|3|3|3");
+  });
+
+  it("켠 갈래만 `키=값`으로 붙고, 순서는 낱말표의 순서다", () => {
+    expect(tacticsSignature({ ...DEFAULT_TACTICS, tackling: "hard", transition: "counter" })).toBe(
+      "4-3-3|3|3|3|3|3|3|transition=counter|tackling=hard",
+    );
+    expect(tacticsSignature({ ...DEFAULT_TACTICS, offsideTrap: true })).toBe(
+      "4-3-3|3|3|3|3|3|3|offsideTrap=true",
+    );
+  });
+
+  /**
+   * **왕복은 정확히 제자리여야 한다** — 오가며 적응도를 불릴 수 없다(player.md §7.2).
+   * 갈래는 부호가 없어 방향 항(`AXIS_AFFINITY`)에 들어가지 않고, 거리만 대칭이다.
+   */
+  it("거리는 갈래 하나당 4이고 방향이 없다 — 왕복이 닫힌다", () => {
+    const off = DEFAULT_TACTICS;
+    const on = { ...DEFAULT_TACTICS, transition: "counter" } as const;
+    expect(tacticsDistance(off, on)).toBe(4);
+    expect(tacticsDistance(on, off)).toBe(4);
+    // 칸 수를 세지 않는다 — 갈래는 눈금이 아니다
+    expect(
+      tacticsDistance(
+        { ...DEFAULT_TACTICS, tackling: "soft" },
+        { ...DEFAULT_TACTICS, tackling: "hard" },
+      ),
+    ).toBe(4);
+    // 넷을 한 번에 켜면 넷을 센다
+    expect(
+      tacticsDistance(off, {
+        ...DEFAULT_TACTICS,
+        transition: "counter",
+        offsideTrap: true,
+        tackling: "hard",
+        keeperDistribution: "short",
+      }),
+    ).toBe(4 * TACTIC_TOGGLE_KEYS.length);
+  });
+
+  it("중립으로 되돌리는 것도 갈래 하나만큼 멀다 — 지시 해제는 공짜가 아니다", () => {
+    const on = { ...DEFAULT_TACTICS, keeperDistribution: "long" } as const;
+    expect(tacticsDistance(on, { ...on, keeperDistribution: null })).toBe(4);
+    expect(tacticsDistance(on, { ...on, keeperDistribution: undefined })).toBe(4);
+  });
+
+  /** 옛 세이브의 지문(갈래 없음)은 중립 spec으로 되돌아와야 거리가 0이 된다 */
+  it("중립을 적는 네 가지가 전부 한 값으로 접힌다", () => {
+    for (const spec of [
+      DEFAULT_TACTICS,
+      { ...DEFAULT_TACTICS, transition: null },
+      { ...DEFAULT_TACTICS, offsideTrap: false },
+      { ...DEFAULT_TACTICS, tackling: "normal" as const },
+    ]) {
+      for (const key of TACTIC_TOGGLE_KEYS) expect(tacticToggleValue(spec, key)).toBeNull();
+    }
   });
 });
 

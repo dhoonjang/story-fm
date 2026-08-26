@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { DIRECTIVE_INTENSITIES, PLAYER_DIRECTIVE_KINDS } from "@story-fm/domain";
+import {
+  DIRECTIVE_INTENSITIES,
+  KEEPER_DISTRIBUTIONS,
+  PLAYER_DIRECTIVE_KINDS,
+  TACKLING_LEVELS,
+  TRANSITION_MODES,
+} from "@story-fm/domain";
 import { TALK_OUTCOMES, TEAM_TALK_OUTCOMES } from "@story-fm/engine";
 
 /**
@@ -39,7 +45,10 @@ const TeamTalkSchema = z.object({
 
 const SubstitutionSchema = z.object({ out: playerId, in: playerId });
 
-/** 전술 6축 — 감독이 말한 축만. 말하지 않은 축은 지금 값을 그대로 둔다 */
+/**
+ * 전술 6축과 갈래 넷 — 감독이 말한 것만. 말하지 않은 축·갈래는 지금 값을 그대로 둔다.
+ * 갈래에는 눈금이 없고 `null`은 지시 해제다 (match.md §1.2).
+ */
 const axis = z.number().int().min(1).max(5);
 const TacticsSchema = z
   .object({
@@ -49,6 +58,16 @@ const TacticsSchema = z
     tempo: axis,
     width: axis,
     passStyle: axis,
+    transition: z
+      .enum(TRANSITION_MODES)
+      .nullable()
+      .describe("전환 — counter 역습 · regroup 재정비 · null 지시 해제"),
+    offsideTrap: z.boolean().describe("오프사이드 트랩을 거는가"),
+    tackling: z.enum(TACKLING_LEVELS).describe("태클 강도 — soft · normal(중립) · hard"),
+    keeperDistribution: z
+      .enum(KEEPER_DISTRIBUTIONS)
+      .nullable()
+      .describe("골키퍼 배급 — short 짧게 · long 길게 · null 지시 해제"),
   })
   .partial();
 
@@ -101,7 +120,7 @@ export const MatchIntentSchema = z.object({
   talk: z.array(PlayerTalkSchema).max(4).optional().describe("선수·코치와의 대화"),
   teamTalk: TeamTalkSchema.optional().describe("팀 전체를 향한 말"),
   substitutions: z.array(SubstitutionSchema).max(5).optional(),
-  tactics: TacticsSchema.optional().describe("감독이 말한 축만"),
+  tactics: TacticsSchema.optional().describe("감독이 말한 축·갈래만"),
   playerTactics: z.array(PlayerTacticSchema).max(11).optional(),
   plans: z.array(MatchPlanSchema).max(2).optional(),
   /** 노릴 표적의 id — 코어가 실재를 대조한다 (`exploits.ts`) */
