@@ -1,6 +1,7 @@
 import type { ArcKind, ArcStage, Negotiation, NarrativeArc, PlayerIssue } from "@story-fm/domain";
 import {
   ARC_STAGE_KO,
+  MANAGER_EXIT_KO,
   ARC_STAGE_RANK,
   ARC_TITLE_MAX,
   RETIRE_AGE_MARGINAL,
@@ -10,6 +11,7 @@ import {
   seasonRating,
 } from "@story-fm/domain";
 import { lastJudgedDemand } from "../club/board-demand";
+import { managerReturnOf, nextManagerReturn, upcomingFixtures } from "../club/former-club";
 import { diffDays } from "../core/dates";
 import {
   activeContract,
@@ -109,6 +111,13 @@ const CAPTAIN_CLIMAX_DAYS = 60;
 /** 완장이 비어 보이는 결장 — 한 달이면 라커룸이 그 자리를 다른 사람으로 채운다 */
 const CAPTAIN_ABSENCE_DAYS = 30;
 
+/**
+ * 복귀전이 절정에 서는 날 — **전야다** (people.md §9). 열리는 창은
+ * `RETURN_FIXTURE_DAYS`가 갖고, 이 이야기는 날짜 하나를 향해 가므로 `rising`이 없다.
+ * 경기 당일 tick은 아직 결과가 없어 같은 절정에 선다.
+ */
+const RETURN_CLIMAX_DAYS = 1;
+
 /** 마지막 경고 직전 — 경질 문턱을 옮기면 대치의 고조도 따라 옮겨진다 (career.md §5) */
 const STANDOFF_RISING_WARNINGS = USER_WARNINGS_BEFORE_SACK - 1;
 
@@ -124,6 +133,7 @@ const ARC_KIND_ORDER: readonly ArcKind[] = [
   "grievance",
   "captain-succession",
   "injury-comeback",
+  "return-fixture",
   "veteran-twilight",
   "transfer-saga",
   "prospect-rise",
@@ -145,6 +155,11 @@ const ARC_KIND_ORDER: readonly ArcKind[] = [
 const ARC_KIND_ACTIVE_LIMIT: Partial<Record<ArcKind, number>> = {
   "prospect-rise": 1,
   "veteran-twilight": 1,
+  /**
+   * 복귀전은 **가장 가까운 대진 하나**다 (`nextManagerReturn`) — 옛 구단이 둘인
+   * 감독의 두 대진이 한 창에 겹쳐도 그 주의 이야기는 하나다.
+   */
+  "return-fixture": 1,
 };
 
 /** 아직 닫히지 않은 단계 — 사실은 아크를 열고 올릴 뿐, 닫는 것은 사실의 부재다 */
@@ -375,6 +390,26 @@ function candidatesToday(state: GameState, teamId: string): Map<string, ArcCandi
   }
 
   /**
+   * 복귀전 — **감독의 옛 구단과의 대진**이 창 안에 들어오면 열리고 전야가 절정이다
+   * (people.md §4·§9). 주인은 그 상대 구단이라, 옛 구단이 둘인 감독의 두 복귀전이
+   * 한 아크로 겹치지 않는다.
+   *
+   * 선수의 친정 대결은 아크가 되지 않는다 — 스쿼드 스물다섯 명의 옛 구단이 전부
+   * 아크가 되면 여섯 자리 중 하나가 시즌 내내 그 갈래에 묶인다. 그쪽은 회견 카드와
+   * 심경 카드가 이미 든다.
+   *
+   * 경기를 치르면 그 대진이 후보에서 사라져 닫힌다 — 사실의 부재가 닫는다는 규약 그대로다.
+   */
+  const returning = nextManagerReturn(state);
+  if (returning) {
+    put({
+      kind: "return-fixture",
+      subjectId: returning.teamId,
+      stage: returning.days <= RETURN_CLIMAX_DAYS ? "climax" : "open",
+    });
+  }
+
+  /**
    * 보드와의 대치 — 경고 한 장이 곧 대치의 시작이다 (career.md §5). 성적이 기대 위로
    * 올라서면 경고가 지워지고 그것으로 닫힌다.
    *
@@ -469,6 +504,17 @@ export function arcFactLine(state: GameState, arc: NarrativeArc): string {
       const deputy = playersOf(state, arc.subjectId).some((p) => p.isViceCaptain === true);
       const age = ageOf(captain.birthdate, state.date);
       return `주장 ${captain.name} ${age}세${until}${deputy ? "" : " · 부주장 공석"}`;
+    }
+    case "return-fixture": {
+      const name = teamShortNameIn(state, arc.subjectId);
+      const back = managerReturnOf(state, arc.subjectId);
+      if (!back) return `${name} 복귀전`;
+      const fixture = upcomingFixtures(state).find((row) => row.teamId === arc.subjectId);
+      return (
+        `${name} 복귀전 · ${MANAGER_EXIT_KO[back.kind] ?? "떠남"} 뒤 ${back.days}일` +
+        (back.seasons > 0 ? ` · ${back.seasons}시즌 재임` : "") +
+        (fixture === undefined ? "" : ` · D-${fixture.days}`)
+      );
     }
     case "board-standoff": {
       const warnings = state.manager.boardWarnings ?? 0;

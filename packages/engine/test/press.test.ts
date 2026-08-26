@@ -38,6 +38,8 @@ import type {
   PressConference,
 } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
+import { derbyNameOf } from "../src/data/derbies";
+import { FORMER_CLUB_YEARS } from "../src/club/former-club";
 
 /**
  * 세계는 하나면 된다 — 이 파일의 어느 케이스도 **시드가 갈리는 것이 요점이 아니다.**
@@ -825,6 +827,86 @@ describe("기자회견 — 전야", () => {
     eveOf(state, home[home.length - 1]!);
     openEvePress(state);
     expect(pendingPress(state)).toBeNull();
+  });
+
+  // ── 옛 구단 (people.md §4) ──────────────────────────
+
+  /** 이 경기의 상대 */
+  const them = (state: GameState, match: MatchRecord): string =>
+    match.homeTeamId === state.userTeamId ? match.awayTeamId : match.homeTeamId;
+
+  /** 개막도 더비도 아닌 리그 경기 — 복귀전이 자리를 열 수 있는 평범한 하루 */
+  function plainLeagueMatch(state: GameState): MatchRecord {
+    const match = leagueMatches(state)
+      .slice(1)
+      .find((m) => derbyNameOf(state.userTeamId, them(state, m)) === null);
+    if (!match) throw new Error("더비도 개막도 아닌 리그 경기를 찾지 못했습니다");
+    return match;
+  }
+
+  /** 그 구단이 감독을 자른 날을 장부에 세운다 — 경질장 한 장이 복귀전을 만든다 */
+  function sacked(state: GameState, teamId: string, daysAgo: number): void {
+    state.dismissals = [
+      { on: addDays(state.date, -daysAgo), season: state.season, kind: "sacked", teamId },
+    ];
+  }
+
+  it("감독을 자른 구단과의 전야에 복귀전 회견이 열린다", () => {
+    const state = newGame();
+    const match = plainLeagueMatch(state);
+    eveOf(state, match);
+    sacked(state, them(state, match), 200);
+
+    openEvePress(state);
+
+    const press = pendingPress(state)!;
+    expect(press.trigger).toBe("former-club");
+    expect(press.weight).toBe(2);
+    const card = press.facts.find((f) => f.kind === "former-club")!;
+    expect(card.data?.tags).toEqual(["manager", "sacked"]);
+    expect(card.data?.refId).toBe(them(state, match));
+    expect(card.data?.values?.days).toBe(200);
+    // 잘린 자리는 감독이 답해야 하는 자리다 — 계약 만료만 물어봐 줄 일이다
+    expect(card.sharp).toBe(true);
+  });
+
+  /**
+   * 전야의 자리는 하나다 — 더비가 그날을 이미 잡았으면 복귀전은 자리를 빼앗지 않는다.
+   * 자리가 둘로 갈리면 하나가 답 없이 방치로 닫혀 이유 없이 대가를 치른다.
+   */
+  it("더비 전야와 겹치면 복귀전은 카드만 얹힌다", () => {
+    const state = newGame();
+    const derby = leagueMatches(state).find(
+      (m) => m.homeTeamId === "tottenham" || m.awayTeamId === "tottenham",
+    )!;
+    eveOf(state, derby);
+    sacked(state, "tottenham", 100);
+
+    openEvePress(state);
+
+    const press = pendingPress(state)!;
+    expect(press.trigger).toBe("derby");
+    expect(press.facts.some((f) => f.kind === "former-club")).toBe(true);
+    expect((state.pressConferences ?? []).filter((c) => c.status === "pending")).toHaveLength(1);
+  });
+
+  /** 창의 마지막 날과 그 하루 뒤 — 눈금이 미끄러지면 화면에는 아무 표시가 나지 않는다 */
+  it("`FORMER_CLUB_YEARS` 밖의 경질은 대진에 서지 않는다", () => {
+    const state = newGame();
+    const match = plainLeagueMatch(state);
+    eveOf(state, match);
+    const opponentId = them(state, match);
+    const window = FORMER_CLUB_YEARS * 365;
+
+    const openAfter = (daysAgo: number): PressConference | null => {
+      state.pressConferences = [];
+      sacked(state, opponentId, daysAgo);
+      openEvePress(state);
+      return pendingPress(state);
+    };
+
+    expect(openAfter(window)?.trigger).toBe("former-club");
+    expect(openAfter(window + 1)).toBeNull();
   });
 });
 

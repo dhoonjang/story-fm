@@ -50,6 +50,7 @@ import { boardExpectation, computeStandings, retirementJudgeDate } from "../comp
 import { leagueOfTeamIn } from "../competition/promotion";
 import { derbyNameOf, derbyOf } from "../data/derbies";
 import { derbyRecordOf } from "./derby";
+import { formerClubFactsOf, isFirstMeeting, managerReturnOf } from "./former-club";
 import { reportersOf, rivalVoiceOf } from "../world/persona";
 import { MANAGER_SUBJECT, moveRelation, stanceRelationEvent } from "../world/relations";
 import type { SkillResult } from "../skills";
@@ -234,6 +235,8 @@ function weightOf(trigger: PressTrigger, sharp: boolean, stage?: MatchStage): 1 
   if (trigger === "transfer" || trigger === "appointment") return 2;
   // 작별은 결과와 무관하게 구단의 자리다 — 더비 전야가 무게 2인 것과 같은 이유
   if (trigger === "farewell") return 2;
+  // 복귀전도 같다 — 결과와 무관하게 그 사람의 자리다
+  if (trigger === "former-club") return 2;
   if (stage !== undefined && KNOCKOUT_STAGES.includes(stage)) return 2;
   return sharp ? 2 : 1;
 }
@@ -255,6 +258,8 @@ const REPORTER_AT: Record<PressTrigger, number> = {
   // 전야 회견은 팬을 대신해 묻는 자리다 — 개막의 기대도 더비의 정서도 지역지의 것
   opening: 0,
   derby: 0,
+  // 복귀전도 전야의 자리다 — 감독의 지난 자리를 묻는 것은 팬을 대신하는 지역지의 몫
+  "former-club": 0,
   // 한 사람의 마지막 홈경기는 구단과 팬의 자리다 — 전술도 뒷이야기도 아니다
   farewell: 0,
   // 부임도 시즌 최종전도 구단의 내일을 묻는 자리다 — 팬을 대신하는 지역지의 몫
@@ -388,6 +393,12 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
       sharp: true,
     });
   }
+  /**
+   * **옛 구단은 경기 뒤에도 자리를 남긴다** (people.md §4) — 전야의 자리가 섰든
+   * 안 섰든 이 카드는 붙는다. 리그 전야 회견이 서지 않는 컵·대항전의 복귀전은
+   * 이 자리가 유일하게 그 사실을 싣는 곳이다.
+   */
+  facts.push(...formerClubFactsOf(state, match, "post"));
   /**
    * **상대 벤치도 그날 마이크 앞에 섰다** (people.md §4) — 자리를 열지 않고 이미
    * 열리는 자리에 얹힌다. 결과 카드 바로 뒤인 것은 그 말이 이 경기에 대한 것이라서다.
@@ -1208,6 +1219,45 @@ function buildOpeningPress(
 }
 
 /**
+ * 복귀전 전야 — **감독이 떠난 구단과 다시 만나는 날** (people.md §4).
+ *
+ * 무게 2인 것은 더비 전야와 같은 이유다: 결과와 무관하게 그 사람의 자리다.
+ * 자리를 여는 것은 **감독의 복귀전뿐이고**, 선수의 친정 대결은 카드로만 얹힌다 —
+ * 스쿼드 스물다섯 명의 옛 구단을 전부 자리로 열면 리그의 절반쯤 되는 전야에 회견이
+ * 열려 회견 하나하나가 무게를 잃는다.
+ */
+function buildFormerClubPress(
+  state: GameState,
+  match: MatchRecord,
+  input: { opponentId: string; opponent: string; facts: PressFact[] },
+): PressConference {
+  const facts: PressFact[] = [...input.facts];
+  // 시즌 첫 경기면 아직 센 경기가 없다 — 없는 폼을 "최근 0경기"로 쓰지 않는다
+  const recent = recentOutcomes(state, state.userTeamId, FORM_WINDOW);
+  if (recent.length > 0) {
+    facts.push({
+      kind: "result",
+      data: { values: { matches: recent.length }, tags: ["recent", ...recent] },
+      about: null,
+      sharp: false,
+    });
+  }
+  const place = placeFact(state, input.opponentId, input.opponent);
+  if (place) facts.push(place);
+
+  return {
+    id: `press-former-${match.id}`,
+    date: state.date,
+    trigger: "former-club",
+    reporterId: reporterFor(state, "former-club"),
+    context: `복귀전 전야 · ${input.opponent}전`,
+    facts,
+    status: "pending",
+    weight: weightOf("former-club", false),
+  };
+}
+
+/**
  * 이번 여름 감독이 **새로 물려준 상징 번호** — 없으면 카드도 없다 (player.md §1.1).
  *
  * 프리시즌 이후 번호가 움직인 사람만 본다(`squadNumberOn`) — 시즌 내내 같은 셔츠를
@@ -1268,19 +1318,34 @@ export function openEvePress(state: GameState, digest?: string[]): void {
   const derby = derbyNameOf(state.userTeamId, opponentId);
 
   /**
-   * **전야의 자리는 하나다** (people.md §4). 더비·개막이 그날을 이미 잡았으면 작별은
-   * 자리를 빼앗지 않고 카드만 얹힌다 — 같은 날 회견 둘을 열면 하나가 방치로 닫힌다.
+   * **전야의 자리는 하나다** (people.md §4). 우선순위는 더비 > 개막 > 복귀전 > 작별이고,
+   * 앞의 것이 그날을 이미 잡았으면 뒤의 것은 자리를 빼앗지 않고 카드만 얹힌다 —
+   * 같은 날 회견 둘을 열면 하나가 방치로 닫힌다.
    */
   const farewell = farewellFacts(state, match);
+  const former = formerClubFactsOf(state, match, "eve");
+  /**
+   * 복귀전이 자리를 여는 조건은 둘이다: **감독의** 옛 구단이고(선수의 친정 대결은
+   * 카드로만 선다), 그 구단과 **이번 시즌 처음** 만나는 날이다.
+   */
+  const returning =
+    managerReturnOf(state, opponentId) !== null && isFirstMeeting(state, match, opponentId);
   const conference = derby
     ? buildDerbyPress(state, match, { derby, opponentId, opponent, home })
     : isSeasonOpener(state, match, leagueId)
       ? buildOpeningPress(state, { opponent, home })
-      : farewell.length > 0
-        ? buildFarewellPress(state, { opponent, facts: farewell })
-        : null;
+      : returning
+        ? buildFormerClubPress(state, match, { opponentId, opponent, facts: former })
+        : farewell.length > 0
+          ? buildFarewellPress(state, { opponent, facts: farewell })
+          : null;
   if (!conference) return;
   if (conference.trigger !== "farewell") conference.facts.push(...farewell);
+  if (conference.trigger !== "former-club") {
+    conference.facts.push(...former);
+    // 날 선 옛 구단 카드는 그 자리의 무게를 최소 2로 — 유출·루머·도발과 같은 규약
+    if (former.some((f) => f.sharp)) conference.weight = Math.max(conference.weight, 2);
+  }
   /**
    * 전야의 상대 감독 — 경기 뒤와 **다른 채널로 뽑는다** (people.md §4). 찌르는 말은
    * 유출·루머와 같은 규약으로 자리를 키운다.
