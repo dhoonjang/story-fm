@@ -155,10 +155,11 @@ export const SuspensionSchema = z.object({
 export type Suspension = z.infer<typeof SuspensionSchema>;
 
 /**
- * **규정을 모르는 대회의 눈금** — 5장마다 1경기 (match.md §6).
+ * **유럽 대부분의 눈금** — 5장마다 1경기 (match.md §6).
  *
- * 다섯 나라의 리그·컵과 대항전은 전부 `discipline-catalog.ts`에 자기 표를 갖는다.
- * 이 값이 서는 자리는 표에 없는 대회 하나뿐이고, 5는 유럽 어느 협회에서나 기본값이다.
+ * 대회마다의 표는 `discipline-catalog.ts`가 갖고, 그중 5장짜리 규정들(라리가·
+ * 분데스리가·리그 1과 네 나라 국내 컵)이 이 한 값을 나눠 쓴다. 표에 없는 대회는
+ * 기본값을 갖지 않는다 — 규정이 없으면 카드가 정지를 부르지 않는다(`disciplineOf`).
  */
 export const YELLOWS_PER_SUSPENSION = 5;
 
