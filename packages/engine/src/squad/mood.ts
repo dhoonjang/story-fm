@@ -55,8 +55,11 @@ import {
   playerById,
   playersOf,
   seasonStatOf,
+  teamNameIn,
   type GameState,
 } from "../core/state";
+// 옛 소속 구단과의 대진 — 회견 카드와 같은 파생을 읽는다 (people.md §4)
+import { playerReturnFixture } from "../club/former-club";
 
 /**
  * 선수의 **지금 심경** — 무엇에 마음이 가 있는지를 **사실 카드로** 낸다.
@@ -199,6 +202,12 @@ export type MoodFact =
   | { cause: "fatigue"; band: Extract<FatigueBand, "heavy" | "overloaded"> }
   /** 최근 우리 구단에서 계약이 해지된 선수 — 남은 선수단 전원이 같은 카드를 든다 */
   | { cause: "departure"; name: string; days: number }
+  /**
+   * **옛 소속 구단과의 대진이 다가온다** (people.md §4·§5) — `RETURN_FIXTURE_DAYS`
+   * 안의 우리 경기. 새 상태가 아니라 이적 원장의 파생이라, 어느 셔츠를 입고 있든
+   * 그가 그 구단에서 왔다는 사실은 장부에 이미 있다.
+   */
+  | { cause: "former-club"; club: string; days: number }
   | { cause: "contract-ending"; daysLeft: number }
   /**
    * 라커룸에서 선 자리 — 완장 둘과 리더 그룹 (people.md §5-1). 주장만 세우면 서열이
@@ -664,6 +673,22 @@ export function moodFactsOf(
     if (departure) facts.push(departure);
   }
   /**
+   * **옛 소속 구단과 곧 만난다** (people.md §4·§5) — 계약 해지 뒤, 계약 만료 앞이다:
+   * 열나흘 안에 닫히는 창이라 반년짜리 계약 시계 위에 선다. 우리 선수에게만 서는
+   * 것도 해지 카드와 같은 이유다(`playerReturnFixture`).
+   */
+  if (facts.length < MOOD_FACT_LIMIT) {
+    const back = playerReturnFixture(state, player);
+    if (back) {
+      facts.push({
+        cause: "former-club",
+        // 약칭이 아니라 이름이다 — 화면이 이 값으로 문장을 쓰고 결산도 그 줄을 읽는다
+        club: teamNameIn(state, back.teamId),
+        days: back.days,
+      });
+    }
+  }
+  /**
    * ⚠️ **`contract` 불만이 걸린 선수에겐 서지 않는다** (people.md §5) — 같은 사실을
    * 불만 카드가 이미 말하고 있어, 두 장 한도 안에서 폼이나 몸을 밀어낼 뿐이다.
    */
@@ -813,6 +838,9 @@ function factLine(fact: MoodFact): string {
       return `부상 위험 ${injuryRiskText(fact.grade, fact.causes)}`;
     case "departure":
       return `${fact.name} 계약 해지 · ${dayWord(fact.days)}`;
+    // 어떻게 떠났는지는 회견 카드의 것이다 — 심경이 드는 것은 어느 구단과 언제인가다
+    case "former-club":
+      return `옛 소속 ${fact.club}전 D-${fact.days}`;
     case "contract-ending":
       return `계약 만료 ${fact.daysLeft}일`;
     case "leader":

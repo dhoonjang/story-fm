@@ -2398,6 +2398,12 @@ export const ARC_KINDS = [
   "captain-succession",
   /** 보드 경고 1회부터 — 감독 자신의 자리가 걸린 이야기. 주인은 팀 id */
   "board-standoff",
+  /**
+   * **감독의 옛 구단과의 대진** — 14일 안에 들어오면 열리고 전야가 절정이다
+   * (people.md §4·§9). 주인은 **그 상대 구단 id**다: 우리 팀 id로 잡으면 옛 구단이
+   * 둘인 감독의 두 복귀전이 한 아크로 겹친다.
+   */
+  "return-fixture",
 ] as const;
 export const ArcKindSchema = z.enum(ARC_KINDS);
 export type ArcKind = z.infer<typeof ArcKindSchema>;

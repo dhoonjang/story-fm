@@ -141,11 +141,7 @@ const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
  * 옛 세이브의 유스 항목이 통째로 0으로 굳는다 (game-state.md §3.4).
  */
 function youthShareOf(state: GameState, teamId: string): number {
-  const academy = new Set(
-    state.transfers
-      .filter((t) => t.type === "youth" && t.toTeamId === teamId)
-      .map((t) => t.gamePlayerId),
-  );
+  const academy = academyPlayerIdsOf(state, teamId);
   let total = 0;
   let ours = 0;
   for (const stat of state.seasonStats) {
@@ -155,6 +151,21 @@ function youthShareOf(state: GameState, teamId: string): number {
     if (academy.has(stat.gamePlayerId)) ours += minutes;
   }
   return total > 0 ? ours / total : 0;
+}
+
+/**
+ * **우리 아카데미에서 올라온 사람들** — 유스 콜업 원장이 「유스 출신」을 정한다.
+ * 남의 아카데미에서 자란 선수를 사 온 것은 여기 들지 않는다.
+ *
+ * 비전의 유스 항목과 구단주의 시즌 갈래 요청(career.md §5.2)이 같은 명단을 읽는다 —
+ * 두 벌이면 「우리가 키운 아이」가 자리마다 다른 사람이 된다.
+ */
+export function academyPlayerIdsOf(state: GameState, teamId: string): ReadonlySet<string> {
+  return new Set(
+    state.transfers
+      .filter((t) => t.type === "youth" && t.toTeamId === teamId)
+      .map((t) => t.gamePlayerId),
+  );
 }
 
 /** 출전 분이 없는 옛 세이브의 폴백 — 한 경기를 온전히 뛴 것으로 읽는다 */

@@ -2,6 +2,7 @@ import type {
   Approach,
   ApproachChannel,
   ApproachContext,
+  BoardDemand,
   ApproachPressure,
   ApproachTopic,
   BoardExpectationCode,
@@ -29,7 +30,7 @@ import {
   activeContract,
   financeOf,
   managedTeamId,
-  openFinanceDemand,
+  openSeatDemand,
   pendingApproach,
   pendingContractOf,
   playerById,
@@ -68,7 +69,7 @@ import {
   type StageScale,
 } from "../market/market";
 import { squadDepthOf, type SquadDepth } from "../squad/depth";
-import { boardDemandFact } from "./board-demand";
+import { boardDemandFact, counterDemand, type DemandCounter } from "./board-demand";
 import {
   applyStanceOutcome,
   betterThanInSquad,
@@ -81,7 +82,7 @@ import {
 import type { PromiseInput, SkillResult } from "../skills";
 // 면담과 **같은 조각**을 쓴다 — 같은 말이 자리마다 다른 줄로 서지 않게 (people.md §5-2)
 import { promisePiece } from "../skills";
-import { deltaItems } from "../skills/brief";
+import { deltaItems, item } from "../skills/brief";
 import { openPromise, squadStatusOf, startsInWindow } from "../squad/promises";
 
 /**
@@ -789,21 +790,19 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
   const demand = boardDemandFact(state);
 
   /**
-   * **재정 요청이 아직 감독에게 닿지 않았으면 그 요청이 자리를 세운다**
-   * (career.md §5.2 「재정 갈래」). 순위표를 전제로 삼지 않는 유일한 구단주 자리다 —
-   * 여름 창은 8경기를 치르기 전이라 `leaguePlace`가 아직 `null`이고, 동결이 선 그
-   * 여름에 구단주가 말을 못 하면 요청은 감독이 조회로나 보는 줄이 된다.
+   * **감독이 결정으로 답해야 하는 요청이 아직 닿지 않았으면 그 요청이 자리를 세운다**
+   * (career.md §5.2) — 매각 요구(재정 갈래)와 기용 요구(시즌 갈래)다. 순위표를 전제로
+   * 삼지 않는 유일한 구단주 자리다: 여름 창은 8경기를 치르기 전이라 `leaguePlace`가
+   * 아직 `null`이고, 동결이 선 그 여름에 구단주가 말을 못 하면 요청은 감독이 조회로나
+   * 보는 줄이 된다.
    */
-  const finance = openFinanceDemand(state);
-  if (finance && demand && !carriedDemand(row, finance)) {
+  const seat = openSeatDemand(state);
+  if (seat && demand && !carriedDemand(row, seat)) {
     return {
       channel: "owner",
       speakerId: ownerOf(state).characterId,
-      about: finance.playerId ?? null,
-      contextCard: {
-        code: "board-demand",
-        ...(finance.baseline === undefined ? {} : { value: finance.baseline }),
-      },
+      about: seat.playerId ?? null,
+      contextCard: seatContextOf(seat),
       // 순위는 있으면 얹는다 — 요청을 하러 온 자리라 맨 앞은 요청이다
       facts: [demand, ...standingFacts(state, place, false)],
     };
@@ -833,6 +832,20 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
       limit: boardExpectation(state, state.userTeamId).target,
     },
     facts,
+  };
+}
+
+/**
+ * 그 요청이 여는 자리의 배경 한 줄 — **매각과 기용을 가려 읽는다** (people.md §8).
+ * 코드가 갈린 것은 한 줄이 「무엇을 하러 왔는가」를 말해야 하기 때문이다.
+ */
+function seatContextOf(demand: BoardDemand): ApproachContext {
+  if (demand.kind === "field-player") {
+    return { code: "demand-starts", value: demand.target ?? 0 };
+  }
+  return {
+    code: "board-demand",
+    ...(demand.baseline === undefined ? {} : { value: demand.baseline }),
   };
 }
 
@@ -1072,14 +1085,14 @@ function driftPressure(state: GameState): void {
     if (isPlayerSubject(row.topic) && !ours.has(row.subject)) return false;
     return row.value > 0 || row.step > 0;
   });
-  standFinanceDemand(state);
+  standSeatDemand(state);
 }
 
 /**
- * **재정 요청은 자기 발로 온다** (career.md §5.2 「재정 갈래」) — 동결·강등이 세운
- * 매각 요구는 순위 압력이 차기를 기다리지 않는다. 구단주 줄을 임계까지 채워 두면
- * 자리의 문 넷(열린 자리 하나 · 살아 있는 회견 · 하루 한 건 · 화자 쿨다운)은 그대로
- * 지나므로 소음이 되지 않는다.
+ * **감독의 결정을 묻는 요청은 자기 발로 온다** (career.md §5.2) — 동결·강등이 세운
+ * 매각 요구도, 창 밖에서 선 기용 요구도 순위 압력이 차기를 기다리지 않는다. 구단주
+ * 줄을 임계까지 채워 두면 자리의 문 넷(열린 자리 하나 · 살아 있는 회견 · 하루 한 건 ·
+ * 화자 쿨다운)은 그대로 지나므로 소음이 되지 않는다.
  *
  * **한 번뿐이다** — 요청이 선 날 이후에 그 줄이 한 번 열렸으면 더 채우지 않는다.
  * 그다음부터 구단주는 다시 순위 이야기를 하러 오고, 요청 줄은 거기 얹혀 온다.
@@ -1087,8 +1100,8 @@ function driftPressure(state: GameState): void {
  * ⚠️ **매일 다시 채운다.** 한 번만 채우면 그날 문이 막힌(회견이 열려 있는·이미 한
  * 건이 열린) 요청은 하루 12씩 식어 영영 오지 않는다.
  */
-function standFinanceDemand(state: GameState): void {
-  const demand = openFinanceDemand(state);
+function standSeatDemand(state: GameState): void {
+  const demand = openSeatDemand(state);
   if (!demand) return;
   const row = rowOf(state, BOARD_SUBJECT, "results");
   if (carriedDemand(row, demand)) return;
@@ -1566,6 +1579,11 @@ export function respondToApproach(
      * 주장·구단주가 온 자리에는 약속을 걸 사람이 없다.
      */
     promise?: PromiseInput;
+    /**
+     * 감독이 선 요청을 두고 되묻는 것 — **구단주 자리에서 한 차례다**
+     * (career.md §5.2 「흥정」).
+     */
+    counter?: DemandCounter;
   },
 ): SkillResult {
   const approach = pendingApproach(state);
@@ -1611,6 +1629,19 @@ export function respondToApproach(
       )
     : null;
 
+  /**
+   * ── 흥정도 **답을 닫은 뒤에** 장부에 선다 ── (career.md §5.2 「흥정」)
+   *
+   * **채널이 가른다** — 조건을 건 사람이 앉아 있는 자리에서만 되물을 수 있다. 되물어
+   * 봐야 소용없는 물음(이미 한 차례 썼다 · 그 종류에 없는 지렛대)은 스탠스를 무르지
+   * 않고 줄 하나로만 남는다: 감독이 이미 한 말을 코어의 거절이 지우지는 않는다.
+   */
+  const countered = input.counter
+    ? approach.channel === "owner"
+      ? counterDemand(state, input.counter)
+      : { ok: false, message: "조건을 되물을 자리가 아닙니다" }
+    : null;
+
   const label = stance === null ? "돌려보냄" : STANCE_KO[stance];
   pushNarrative(
     state,
@@ -1621,7 +1652,9 @@ export function respondToApproach(
   return {
     ok: true,
     tone: net >= 0 ? ("good" as const) : ("bad" as const),
-    message: `${approach.speakerId} 응대(${label})${effectSuffix(effect)}${promised ? promised.text : ""}`,
+    message:
+      `${approach.speakerId} 응대(${label})${effectSuffix(effect)}${promised ? promised.text : ""}` +
+      (countered ? ` · ${countered.message}` : ""),
     brief: {
       head: `${approach.speakerId} 응대(${label})`,
       items: [
@@ -1632,6 +1665,7 @@ export function respondToApproach(
           ["팀 사기", effect.team],
         ]),
         ...(promised ? [promised.item] : []),
+        ...(countered ? [item({ label: "흥정", text: countered.message })] : []),
       ],
     },
   };

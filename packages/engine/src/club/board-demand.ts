@@ -2,44 +2,62 @@ import type {
   BoardDemand,
   BoardDemandCause,
   BoardDemandKind,
+  GamePlayer,
   PressFact,
   TransferWindow,
 } from "@story-fm/domain";
-import { boardDemandText } from "@story-fm/domain";
+import { BOARD_DEMAND_LABEL, boardDemandText, DEMAND_LEVERS } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import {
+  activeContract,
   financeOf,
   openBoardDemand,
+  openInjury,
   playerById,
   pushNarrative,
   squadLevelOf,
   userPlayers,
   weeklyWagesOf,
 } from "../core/state";
+import { addDays } from "../core/dates";
+import { academyPlayerIdsOf } from "./vision";
 import { windowOpenForTeam } from "../market/market";
 import { ownerOf } from "../world/persona";
 import { MANAGER_SUBJECT, moveRelation } from "../world/relations";
+import {
+  PROMISE_MIN_MATCHES,
+  PROMISE_WINDOW_MATCHES,
+  matchWindowOf,
+  startsInWindow,
+} from "../squad/promises";
 import {
   bookValueOf,
   budgetFreezeReason,
   debtLimitOf,
   debtOf,
+  formatMoney,
   psrStatus,
   relegationGapOf,
 } from "./finance";
 import { clampRep, signed } from "./press";
 
 /**
- * 보드 요청 — **구단주 원형이 이적창마다 거는 조건 하나** (career.md §5.2).
+ * 보드 요청 — **구단주 원형이 거는 조건 하나** (career.md §5.2).
  *
  * 순위 기대(§5)는 등급 표가 주는 구단의 자리이고, 이것은 **그 구단주라는 사람**이
- * 이 창에 거는 조건이다. 원형이 종류를 정하고 재정 상태가 발생과 판정에 걸리며,
- * 판정은 전부 코어 장부의 사실이다 — 이적 원장·잔고·주급 총액·선수 소속.
- * LLM은 관여하지 않는다.
+ * 거는 조건이다. 원형이 종류를 정하고 재정 상태가 발생과 판정에 걸리며, 판정은 전부
+ * 코어 장부의 사실이다 — 이적 원장·잔고·주급 총액·선수 소속·출전 명단. LLM은
+ * 관여하지 않는다.
  *
- * **재정이 급한 창에는 그 조건이 매각 요구로 갈린다** (§5.2 「재정 갈래」) — 동결이
- * 서 있거나 강등 첫 시즌이면 원형의 평소 조건 대신 `raise-funds`·`sell-player`가
- * 그 창에 선다. 창마다 최대 하나는 그대로다.
+ * **갈래가 셋이고 열린 요청은 하나다.**
+ *
+ *   - **창 갈래** — 창이 열린 날의 이적 시장 조건 (`DEMAND_OF_ARCHETYPE.window`).
+ *   - **재정 갈래** — 동결·강등이 서 있으면 그 창의 조건이 매각 요구로 갈린다.
+ *   - **시즌 갈래** — 창이 닫힌 동안 서는 경기 단위 요청(`field-player`). 시즌의 8할이
+ *     창 밖이라, 그 기간에 구단주가 순위 말고 아무 말도 하지 않으면 그는 분기마다 한
+ *     번 나타나는 사람이 된다. 시즌마다 최대 하나다.
+ *
+ * **선 요청은 감독이 한 차례 되물을 수 있다** (`counterDemand` — §5.2 「흥정」).
  */
 export const BOARD_DEMAND = {
   /** 이행 → 보드 평판. 불이행의 절반 폭 — 구단주는 이행을 당연으로 여긴다 */
@@ -61,24 +79,78 @@ export const BOARD_DEMAND = {
   FUNDS_MIN_WAGE_WEEKS: 4,
   /** 목표액이 앉는 눈금 — 호가(`askingPriceFor`)와 같은 10만 단위다 */
   FUNDS_ROUNDING: 100_000,
+  /** 시즌 갈래의 판정 창 — 발행일부터 우리 공식 경기 다섯 (career.md §5.2 「시즌 갈래」) */
+  FIELD_MATCHES: 5,
+  /** 그 다섯 중 세워야 하는 선발 횟수 — 절반을 넘는 한 번이다 */
+  FIELD_STARTS: 3,
+  /** 시즌 갈래의 기한 — 다섯 경기를 담는 날 수 */
+  FIELD_DAYS: 30,
+  /**
+   * 지목 후보의 문턱 — 최근 여덟 경기 선발 비율이 이보다 낮아야 「안 뛴다」다.
+   * 자(`startsInWindow`)는 출전 약속과 나눠 쓴다 (people.md §5-2).
+   */
+  FIELD_UNDERUSED_SHARE: 0.5,
+  /** 흥정이 늘릴 수 있는 기한 — 원형 여유 1.0 기준의 상한 (§5.2 「흥정」) */
+  COUNTER_EXTEND_DAYS: 30,
+  /** 흥정이 숫자를 물러서게 하는 폭 — 원형 여유 1.0 기준의 상한 */
+  COUNTER_RELAX: 0.3,
   /** 상태에 남기는 지난 요청 수 — 다가옴·회견과 같은 규약 */
   KEPT: 20,
 } as const;
 
 /**
+ * 원형 → **흥정의 여유** (career.md §5.2 「흥정」). 계약의 길이(§5.4)와 다년 계획의
+ * 길이(§5)를 정하는 그 인내가 여기서도 폭을 정한다 — 큰 그림의 사람은 기다려 주고,
+ * 분기로 셈하는 사람은 기다려 주지 않는다.
+ *
+ * 표 밖의 카드는 아무것도 내주지 않는다 — 조건부 요청을 걸지 않는 것과 같은 규약이다.
+ */
+export const OWNER_SLACK: Readonly<Record<string, number>> = {
+  국부펀드형: 1,
+  "지역 유지형": 0.8,
+  축구광형: 0.6,
+  흥행가형: 0.6,
+  투자자형: 0.4,
+  산업가형: 0.2,
+};
+
+/**
+ * 원형이 **누구를 지목하는가** — 시즌 갈래의 렌즈 (career.md §5.2 「시즌 갈래」).
+ *
+ * 종류가 하나(`field-player`)인 자리에서 원형이 가르는 것은 「무엇을 요구하는가」가
+ * 아니라 **누가 안 뛰는 것을 못 견디는가**다. 여섯이 같은 스쿼드를 보고 다른 사람을
+ * 지목한다.
+ */
+export type SeasonDemandLens =
+  /** 우리 아카데미 출신 중 종합 최고 — 축구광형·지역 유지형 */
+  | "academy"
+  /** 1군 종합 최고 — 흥행가형 */
+  | "top-overall"
+  /** 가장 비싸게 데려온 영입 — 국부펀드형 */
+  | "top-fee"
+  /** 장부 잔존가가 가장 큰 선수 — 투자자형 */
+  | "top-book"
+  /** 주급이 가장 높은 선수 — 산업가형 */
+  | "top-wage";
+
+/**
  * 원형 → 요청의 결 (people.md §2의 구단주 6종). **여섯 원형 밖의 카드는 조건부
  * 요청을 걸지 않는다** — 옛 세이브의 커스텀 구단주에게 없는 성격을 지어내지 않는다.
  *
+ * `window`는 창이 열린 날의 조건이고 `season`은 창 밖에서 그가 지목하는 사람이다.
  * 국부펀드형만 여름 창에 한정하는 것은 인내의 표현이다 — 큰 그림의 사람은 겨울
  * 땜질을 조르지 않는다.
  */
-export const DEMAND_OF_ARCHETYPE: Record<string, { kind: BoardDemandKind; summerOnly?: true }> = {
-  산업가형: { kind: "wage-freeze" },
-  투자자형: { kind: "net-profit" },
-  축구광형: { kind: "keep-player" },
-  국부펀드형: { kind: "sign-star", summerOnly: true },
-  "지역 유지형": { kind: "stay-solvent" },
-  흥행가형: { kind: "sign-star" },
+export const DEMAND_OF_ARCHETYPE: Record<
+  string,
+  { window: BoardDemandKind; summerOnly?: true; season: SeasonDemandLens }
+> = {
+  산업가형: { window: "wage-freeze", season: "top-wage" },
+  투자자형: { window: "net-profit", season: "top-book" },
+  축구광형: { window: "keep-player", season: "academy" },
+  국부펀드형: { window: "sign-star", summerOnly: true, season: "top-fee" },
+  "지역 유지형": { window: "stay-solvent", season: "academy" },
+  흥행가형: { window: "sign-star", season: "top-overall" },
 };
 
 /**
@@ -130,23 +202,122 @@ export function tickBoardDemands(state: GameState, digest: string[]): void {
 // ── 발생 ───────────────────────────────────────────────────────
 
 /**
- * 이 창에 설 요청 하나 — 원형이 없거나 전제가 안 서면 아무 일도 없다.
+ * 오늘 설 요청 하나 — 원형이 없거나 전제가 안 서면 아무 일도 없다.
  *
- * **재정 갈래가 먼저 묻는다** (career.md §5.2): 동결·강등이 서 있고 목표액이 문턱을
- * 넘으면 그 창의 조건은 매각 요구다. 문턱 아래면 평소 조건이 그대로 선다.
+ * **창이 열려 있는지가 갈래를 가른다** (career.md §5.2): 열려 있으면 이적 시장의
+ * 조건이(재정 갈래가 먼저 묻는다), 닫혀 있으면 창 밖의 기용 요청이 선다.
  */
 function issueDemand(state: GameState, demands: BoardDemand[], digest: string[]): void {
   const window = windowOpenForTeam(state, state.userTeamId);
-  if (!window) return;
-  // 창마다 최대 하나 — 일찍 닫힌 요청이 같은 창에 다시 서지 않는다
-  if (demands.some((d) => d.windowId === window.id)) return;
-  const archetype = ownerOf(state).archetype;
-  const demand =
-    financeDemand(state, window, archetype) ?? archetypeDemand(state, window, archetype);
+  const demand = window ? windowDemand(state, demands, window) : seasonDemand(state, demands);
   if (!demand) return;
   demands.push(demand);
   digest.push(`구단주 요청 — ${describeDemand(state, demand)} · 기한 ${demand.deadline}`);
   pushNarrative(state, `구단주 요청 — ${describeDemand(state, demand)}`, 4);
+}
+
+/**
+ * 이 창에 설 요청 — **재정 갈래가 먼저 묻는다**: 동결·강등이 서 있고 목표액이 문턱을
+ * 넘으면 그 창의 조건은 매각 요구다. 문턱 아래면 평소 조건이 그대로 선다.
+ */
+function windowDemand(
+  state: GameState,
+  demands: BoardDemand[],
+  window: TransferWindow,
+): BoardDemand | null {
+  // 창마다 최대 하나 — 일찍 닫힌 요청이 같은 창에 다시 서지 않는다
+  if (demands.some((d) => d.windowId === window.id)) return null;
+  const archetype = ownerOf(state).archetype;
+  return financeDemand(state, window, archetype) ?? archetypeDemand(state, window, archetype);
+}
+
+/**
+ * 창이 닫힌 동안 설 요청 — **덜 쓰이는 사람이 없으면 서지 않는다** (career.md §5.2
+ * 「시즌 갈래」). 구단주가 굴리는 주사위가 아니라 감독이 만든 사실이 이 요청을 부른다.
+ *
+ * **시즌마다 최대 하나다** — 다섯 경기짜리 요청이 판정되는 대로 다시 서면 구단주가
+ * 매달 라인업을 지시하는 사람이 된다. 자리를 재는 칸은 창 갈래와 같다(`windowId`).
+ */
+function seasonDemand(state: GameState, demands: BoardDemand[]): BoardDemand | null {
+  const slot = seasonSlotOf(state);
+  if (demands.some((d) => d.windowId === slot.id)) return null;
+  const rule = DEMAND_OF_ARCHETYPE[ownerOf(state).archetype];
+  if (!rule) return null;
+  const named = underusedBy(state, rule.season);
+  if (!named) return null;
+  return {
+    ...baseDemand(state, slot, "field-player"),
+    playerId: named,
+    target: BOARD_DEMAND.FIELD_STARTS,
+  };
+}
+
+/** 이번 시즌의 자리 — 시즌 갈래가 차지하는 칸 하나와 그 기한 */
+function seasonSlotOf(state: GameState): DemandSlot {
+  return {
+    id: `season-${state.season}`,
+    deadline: addDays(state.date, BOARD_DEMAND.FIELD_DAYS),
+  };
+}
+
+/**
+ * 그 원형의 눈이 고른 **덜 쓰이는 한 명** — 아무도 걸리지 않으면 `null`이다.
+ *
+ * 「덜 쓰인다」의 자는 출전 약속과 같은 것 하나다 (`startsInWindow` — people.md §5-2):
+ * 최근 여덟 경기에서 **설 수 있었던 경기가 셋 이상이고** 선발 비율이 절반 미만이어야
+ * 한다. 지금 부상이면 후보가 아니다 — 다음 다섯 경기에 세울 수 없는 사람을 세우라고
+ * 하는 것은 요청이 아니라 함정이다.
+ */
+function underusedBy(state: GameState, lens: SeasonDemandLens): string | null {
+  const pool = matchWindowOf(state);
+  // 셀 경기가 셋에 못 미치면 누구도 「덜 쓰인다」가 아니다 — 스쿼드를 훑을 것도 없다
+  if (pool.length < PROMISE_MIN_MATCHES) return null;
+  const academy = lens === "academy" ? academyPlayerIdsOf(state, state.userTeamId) : null;
+  let best: { id: string; rank: number } | null = null;
+  for (const player of userPlayers(state)) {
+    if (openInjury(state, player.id)) continue;
+    const rank = lensRankOf(state, lens, player, academy);
+    if (rank === null || rank <= 0) continue;
+    const read = startsInWindow(state, player, { matches: PROMISE_WINDOW_MATCHES, pool });
+    if (read.played < PROMISE_MIN_MATCHES) continue;
+    if (read.share >= BOARD_DEMAND.FIELD_UNDERUSED_SHARE) continue;
+    if (!best || rank > best.rank || (rank === best.rank && player.id < best.id)) {
+      best = { id: player.id, rank };
+    }
+  }
+  return best?.id ?? null;
+}
+
+/** 그 렌즈로 본 눈금 — 클수록 구단주가 먼저 이름을 부르는 사람이다. 밖이면 `null` */
+function lensRankOf(
+  state: GameState,
+  lens: SeasonDemandLens,
+  player: GamePlayer,
+  academy: ReadonlySet<string> | null,
+): number | null {
+  switch (lens) {
+    case "academy":
+      return academy?.has(player.id) === true ? player.attributes.overall : null;
+    case "top-overall":
+      return squadLevelOf(player) === "first" ? player.attributes.overall : null;
+    case "top-fee":
+      return feePaidFor(state, player.id);
+    case "top-book":
+      return bookValueOf(state, state.userTeamId, player.id);
+    case "top-wage":
+      return activeContract(state, player.id)?.weeklyWage ?? null;
+  }
+}
+
+/** 우리가 그를 데려오며 낸 이적료 — 가장 최근의 영입 한 건이다. 없으면 0 */
+function feePaidFor(state: GameState, playerId: string): number {
+  let fee = 0;
+  for (const t of state.transfers) {
+    if (t.gamePlayerId !== playerId || t.toTeamId !== state.userTeamId) continue;
+    if (t.type !== "transfer") continue;
+    fee = t.fee;
+  }
+  return fee;
 }
 
 /** 원형의 평소 조건 — 국부펀드형의 여름 한정이 여기 걸린다 */
@@ -158,7 +329,7 @@ function archetypeDemand(
   const rule = DEMAND_OF_ARCHETYPE[archetype];
   if (!rule) return null;
   if (rule.summerOnly && window.kind !== "summer") return null;
-  return buildDemand(state, window, rule.kind);
+  return buildDemand(state, window, rule.window);
 }
 
 /**
@@ -180,7 +351,7 @@ function financeDemand(
   const floor = weeklyWagesOf(state, state.userTeamId) * BOARD_DEMAND.FUNDS_MIN_WAGE_WEEKS;
   if (target < floor) return null;
 
-  const base = { ...baseDemand(state, window, kind), cause };
+  const base = { ...baseDemand(state, windowSlotOf(window), kind), cause };
   if (kind === "sell-player") {
     const named = priciestAsset(state);
     // 장부에 값이 남은 선수가 하나도 없으면 지목할 것이 없다 — 금액 요청으로 떨어진다
@@ -235,14 +406,28 @@ function priciestAsset(state: GameState): string | null {
   return best?.id ?? null;
 }
 
-/** 종류가 무엇이든 같은 껍데기 — id·창·기한은 창이 정한다 */
-function baseDemand(state: GameState, window: TransferWindow, kind: BoardDemandKind): BoardDemand {
+/**
+ * 요청이 차지하는 **자리** — 칸 하나와 기한. 창 갈래는 창이 정하고 시즌 갈래는
+ * 발행일이 정한다 (career.md §5.2).
+ */
+interface DemandSlot {
+  id: string;
+  deadline: string;
+}
+
+/** 그 창의 자리 — 기한은 창이 닫히는 날이다 */
+function windowSlotOf(window: TransferWindow): DemandSlot {
+  return { id: window.id, deadline: window.closesOn };
+}
+
+/** 종류가 무엇이든 같은 껍데기 — id·칸·기한은 자리가 정한다 */
+function baseDemand(state: GameState, slot: DemandSlot, kind: BoardDemandKind): BoardDemand {
   return {
-    id: `board-demand-${window.id}`,
+    id: `board-demand-${slot.id}`,
     kind,
-    windowId: window.id,
+    windowId: slot.id,
     issuedOn: state.date,
-    deadline: window.closesOn,
+    deadline: slot.deadline,
     status: "open",
   };
 }
@@ -253,7 +438,7 @@ function buildDemand(
   window: TransferWindow,
   kind: BoardDemandKind,
 ): BoardDemand | null {
-  const base = baseDemand(state, window, kind);
+  const base = baseDemand(state, windowSlotOf(window), kind);
   switch (kind) {
     case "wage-freeze":
       return { ...base, baseline: weeklyWagesOf(state, state.userTeamId) };
@@ -342,6 +527,22 @@ function judgeDemand(state: GameState, demand: BoardDemand, digest: string[]): v
       }
       case "stay-solvent":
         return expired ? financeOf(state, state.userTeamId).balance >= 0 : null;
+      case "field-player": {
+        const player = demand.playerId ? playerById(state, demand.playerId) : null;
+        // 쓰라고 한 사람을 판 것도 답이다 — `keep-player`와 같은 결로 그 순간 갈린다
+        if (!player || player.teamId !== state.userTeamId) return false;
+        const read = startsInWindow(state, player, {
+          from: demand.issuedOn,
+          matches: BOARD_DEMAND.FIELD_MATCHES,
+        });
+        if (read.starts >= (demand.target ?? BOARD_DEMAND.FIELD_STARTS)) return true;
+        if (!expired) return null;
+        /**
+         * **부상으로 세울 자리가 없었던 것은 감독의 결정이 아니다** — 출전 약속의
+         * 판정과 같은 규약이다 (people.md §5-2). 분모는 그가 설 수 있었던 경기다.
+         */
+        return read.played < PROMISE_MIN_MATCHES;
+      }
     }
   })();
   if (verdict === null) return;
@@ -376,6 +577,133 @@ function windowTransfers(state: GameState, windowId: string) {
   );
 }
 
+// ── 흥정 ───────────────────────────────────────────────────────
+
+/** 감독이 되묻는 것 — 기한이거나 조건이거나, 둘 다일 수도 있다 */
+export interface DemandCounter {
+  /** 기한을 며칠 늘려 달라 — 원형의 여유가 실제로 내주는 날 수의 상한을 정한다 */
+  extendDays?: number;
+  /** 조건을 낮춰 달라 — 요청이 든 숫자가 원형의 여유만큼 물러선다 */
+  relax?: boolean;
+}
+
+/**
+ * **감독이 선 요청에 한 차례 되묻는다** (career.md §5.2 「흥정」).
+ *
+ * 코어가 원형의 여유(`OWNER_SLACK`)를 앵커로 조건을 옮긴다 — 감독이 부른 값은
+ * 상한을 넘지 못한다. **평판은 움직이지 않는다**: 되묻는 것에 값을 매기면 감독이
+ * 되묻지 않게 되고, 그러면 이 길이 없는 것과 같다 (§5.3과 같은 이유).
+ *
+ * ⚠️ **깎아 주지 않은 것도 답이다** — 여유가 한 칸을 만들지 못해 조건이 그대로 서도
+ * 되물은 차례는 쓴 것이다. 안 그러면 산업가형 앞에서 감독이 매일 같은 말을 반복한다.
+ */
+export function counterDemand(
+  state: GameState,
+  ask: DemandCounter,
+): { ok: boolean; message: string } {
+  const demand = openBoardDemand(state);
+  if (!demand) return { ok: false, message: "지금 되물을 구단주 요청이 없습니다" };
+  if (demand.counteredOn) return { ok: false, message: "이미 한 차례 되물었습니다" };
+  const slack = OWNER_SLACK[ownerOf(state).archetype];
+  if (slack === undefined) {
+    return { ok: false, message: "이 구단주는 조건을 두고 흥정하지 않습니다" };
+  }
+  const label = BOARD_DEMAND_LABEL[demand.kind];
+  const levers = DEMAND_LEVERS[demand.kind];
+  const wantsExtend = (ask.extendDays ?? 0) > 0;
+  const wantsRelax = ask.relax === true;
+  if (!wantsExtend && !wantsRelax) {
+    return { ok: false, message: "기한(extendDays)이나 조건(relax) 중 하나는 물어야 합니다" };
+  }
+  if (wantsExtend && !levers.extend) {
+    return { ok: false, message: `${label}의 기한은 늘려 봐야 장부가 달라지지 않습니다` };
+  }
+  if (wantsRelax && !levers.relax) {
+    return { ok: false, message: `${label}에는 낮출 숫자가 없습니다` };
+  }
+
+  demand.counteredOn = state.date;
+  const moved: string[] = [];
+  if (wantsExtend) {
+    const granted = Math.min(
+      ask.extendDays ?? 0,
+      Math.round(BOARD_DEMAND.COUNTER_EXTEND_DAYS * slack),
+    );
+    if (granted > 0) {
+      demand.deadline = addDays(demand.deadline, granted);
+      moved.push(`기한 +${granted}일 → ${demand.deadline}`);
+    }
+  }
+  if (wantsRelax) {
+    const line = relaxDemand(state, demand, BOARD_DEMAND.COUNTER_RELAX * slack);
+    if (line) moved.push(line);
+  }
+  return {
+    ok: true,
+    message:
+      moved.length > 0
+        ? `구단주가 물러섰다 — ${moved.join(" · ")}`
+        : "구단주가 조건을 그대로 두었다",
+  };
+}
+
+/**
+ * 요청이 든 숫자를 `ratio`만큼 물러서게 한다 — 움직인 것이 없으면 `null`.
+ *
+ * 방향이 종류마다 다르다: 채워야 할 목표는 **내려가고**, 넘지 말아야 할 선은
+ * **올라간다**. `sell-player`만 숫자가 아니라 요청 자체를 갈아탄다.
+ */
+function relaxDemand(state: GameState, demand: BoardDemand, ratio: number): string | null {
+  switch (demand.kind) {
+    case "field-player": {
+      const before = demand.target ?? BOARD_DEMAND.FIELD_STARTS;
+      const after = Math.max(1, Math.round(before * (1 - ratio)));
+      if (after >= before) return null;
+      demand.target = after;
+      return `선발 ${before}회 → ${after}회`;
+    }
+    case "wage-freeze": {
+      const before = demand.baseline ?? 0;
+      const after = Math.round(before * (1 + ratio));
+      if (after <= before) return null;
+      demand.baseline = after;
+      return `허용 주급 총액 ${formatMoney(before)} → ${formatMoney(after)}`;
+    }
+    case "sign-star":
+    case "raise-funds": {
+      const before = demand.baseline ?? 0;
+      const after = roundedFunds(before * (1 - ratio));
+      if (after >= before) return null;
+      demand.baseline = after;
+      return `기준 ${formatMoney(before)} → ${formatMoney(after)}`;
+    }
+    case "sell-player": {
+      /**
+       * **「그 사람 대신 그 값을」** — 지목이 풀리고 금액 요청이 선다 (§5.2 「흥정」).
+       * 지목이 풀리는 것이 곧 완화라서 이쪽만 요청 자체가 갈린다. 값은 그 선수의 장부
+       * 잔존가에서 물러선 액수다 — 구단주가 그를 팔라고 한 것은 그만큼의 구멍 때문이다.
+       */
+      const named = demand.playerId ? playerById(state, demand.playerId) : null;
+      const after = roundedFunds(
+        (demand.playerId ? bookValueOf(state, state.userTeamId, demand.playerId) : 0) * (1 - ratio),
+      );
+      if (after <= 0) return null;
+      demand.kind = "raise-funds";
+      demand.baseline = after;
+      delete demand.playerId;
+      return `${named?.name ?? "지목"} 매각 → 매각 자금 ${formatMoney(after)}`;
+    }
+    default:
+      return null;
+  }
+}
+
+/** 금액이 앉는 눈금 — 목표액과 같은 10만 단위이고, 한 눈금 아래로는 내려가지 않는다 */
+function roundedFunds(value: number): number {
+  const step = BOARD_DEMAND.FUNDS_ROUNDING;
+  return Math.max(step, Math.round(value / step) * step);
+}
+
 // ── 사실 카드 ──────────────────────────────────────────────────
 
 /**
@@ -386,12 +714,21 @@ function windowTransfers(state: GameState, windowId: string) {
  */
 function describeDemand(state: GameState, demand: BoardDemand): string {
   const player = demand.playerId ? playerById(state, demand.playerId) : null;
-  return boardDemandText(demand.kind, player?.name ?? "", demand.baseline);
+  // 종류가 든 숫자는 하나다 — 채워야 할 목표이거나 발행 시점의 기준값
+  return boardDemandText(demand.kind, player?.name ?? "", demand.target ?? demand.baseline);
+}
+
+/** 요청이 든 숫자 — 목표(`field-player`)이거나 기준값이고, 없는 종류는 빈손이다 */
+function demandValues(demand: BoardDemand): { values?: Record<string, number> } {
+  if (demand.target !== undefined) return { values: { target: demand.target } };
+  if (demand.baseline !== undefined) return { values: { baseline: demand.baseline } };
+  return {};
 }
 
 /**
- * 구단주가 찾아온 자리에 싣는 요청 줄 (people.md §8) — **요청이 서는 것 자체는
- * 자리를 열지 않는다.** 자리는 순위 압력이 열고, 열린 자리가 조건을 함께 나른다.
+ * 구단주가 찾아온 자리에 싣는 요청 줄 (people.md §8) — **창 갈래의 평소 조건이 서는
+ * 것 자체는 자리를 열지 않는다.** 자리는 순위 압력이 열고, 열린 자리가 조건을 함께
+ * 나른다. 스스로 자리를 여는 둘(재정 갈래·시즌 갈래)은 `approach.ts`가 따로 세운다.
  */
 export function boardDemandFact(state: GameState): PressFact | null {
   const demand = openBoardDemand(state);
@@ -404,7 +741,7 @@ export function boardDemandFact(state: GameState): PressFact | null {
       tags: demand.cause ? [demand.kind, demand.cause] : [demand.kind],
       date: demand.deadline,
       ...(player ? { name: player.name } : {}),
-      ...(demand.baseline === undefined ? {} : { values: { baseline: demand.baseline } }),
+      ...demandValues(demand),
     },
     about: demand.playerId ?? null,
     sharp: true,
