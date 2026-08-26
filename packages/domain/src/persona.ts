@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DateString } from "./date-string";
 import type { CharacterMemory } from "./records";
 
 /**
@@ -171,23 +172,90 @@ export const CharacterInjectionSchema = z.object({
 export type CharacterInjection = z.infer<typeof CharacterInjectionSchema>;
 
 /**
- * 인물지 — 캐릭터북이 조립하는 **구조**다. 문장으로 옮기는 것은 프롬프트의 몫이고
- * (`describePersona`), 코어는 사실만 낸다 (overview.md §1 철칙 4).
+ * **관계 점수** — 무순서 쌍 하나에 한 줄 (people.md §6 「관계 점수」).
  *
- * ⚠️ **변하는 값은 여기 없다** — 폼·컨디션·부상·심경·계약·관측 능력치는 주입한 카드가
- * 이력에 굳는 순간 낡은 사실이 된다. 그것들은 발화 직전의 조회가 낸다 (people.md §6).
+ * 세이브가 든다. 감독이 무엇을 했는지의 누적이라 장부에서 파생할 수 없는 값이고,
+ * 압력 눈금(§8)이 세이브를 드는 이유와 같다. 줄은 **사건이 처음 움직일 때** 생긴다 —
+ * 안 움직인 쌍의 값은 첫인상이 결정적으로 답하므로 적어 둘 이유가 없다.
  */
+export const RelationSchema = z.object({
+  /** 쌍의 앞 열쇠 — `a < b`(코드포인트)로 정규화한다. 로케일에 기대면 세이브가 갈린다 */
+  a: z.string().min(1),
+  b: z.string().min(1),
+  /** −100~100, 0이 중립 */
+  score: z.number().int().min(-100).max(100),
+  updatedOn: DateString,
+});
+export type Relation = z.infer<typeof RelationSchema>;
+
 /**
- * 페르소나 사이의 관계 초기값 — 원형 조합에서 결정적으로 나온다 (people.md §6).
+ * 카드가 읽는 눈금 — **점수가 아니라 등급이 카드에 선다** (people.md §6).
  *
- * 세이브에 저장하지 않는다: 원형이 세이브당 불변이므로 관계도 파생이다. 중립은
- * 만들지 않는다 — 카드에 서는 것은 결이 통하거나 부딪히는 사이뿐이다. 사건이
- * 관계를 움직이는 점수는 아직 없다 (§10) — 이 값은 첫인상이다.
+ * 순서가 곧 크기다(틀어짐 → 믿음). 숫자를 싣지 않는 것은 카드가 이력에 굳기
+ * 때문이다: 매 턴 달라지는 값을 실으면 지난 턴들의 바이트가 함께 바뀌어 캐시
+ * 프리픽스가 통째로 깨진다. 다섯 칸이라 경계를 넘는 날에만 그 줄이 바뀐다.
+ */
+export const RELATION_TIERS = ["hostile", "strained", "neutral", "close", "trusted"] as const;
+export type RelationTier = (typeof RELATION_TIERS)[number];
+
+/** 등급의 경계 — 음수 쪽은 대칭이다. 경계 하나가 두 방향을 함께 정한다 */
+export const RELATION_TIER_BOUNDS = { close: 20, trusted: 55 } as const;
+
+/** 등급의 순위 — 중립이 0이다. 계수와 비교는 전부 이 눈금을 탄다 */
+export const RELATION_TIER_RANK: Record<RelationTier, number> = {
+  hostile: -2,
+  strained: -1,
+  neutral: 0,
+  close: 1,
+  trusted: 2,
+};
+
+/** 카드에 서는 말 — 코어는 사실만 내고 문장은 GM이 쓴다 (people.md §6) */
+export const RELATION_TIER_KO: Record<RelationTier, string> = {
+  hostile: "틀어진 사이",
+  strained: "껄끄러운 사이",
+  neutral: "그저 그런 사이",
+  close: "가까운 사이",
+  trusted: "믿는 사이",
+};
+
+/** 점수 → 등급. 표는 여기 하나뿐이다 */
+export function relationTier(score: number): RelationTier {
+  if (score >= RELATION_TIER_BOUNDS.trusted) return "trusted";
+  if (score >= RELATION_TIER_BOUNDS.close) return "close";
+  if (score <= -RELATION_TIER_BOUNDS.trusted) return "hostile";
+  if (score <= -RELATION_TIER_BOUNDS.close) return "strained";
+  return "neutral";
+}
+
+/**
+ * 등급 → 카드의 결. **중립은 결이 없다** — 카드에 서는 것은 통하거나 부딪히는
+ * 사이뿐이라는 규칙이 여기 한 줄로 서 있다.
+ */
+export function stanceOfTier(tier: RelationTier): PersonaRelation["stance"] | null {
+  if (tier === "close" || tier === "trusted") return "aligned";
+  if (tier === "strained" || tier === "hostile") return "tense";
+  return null;
+}
+
+/**
+ * 인물지에 서는 관계 한 줄 — **지금의 등급**이다 (people.md §6).
+ *
+ * 원형이 깐 첫인상 위로 사건이 오르내린 결과이고, 중립은 줄이 되지 않는다.
  */
 export interface PersonaRelation {
   characterId: string;
   name: string;
+  /** 등급에서 파생한다 (`stanceOfTier`) — 두 벌이면 카드와 눈금이 갈린다 */
   stance: "aligned" | "tense";
+  /**
+   * 지금의 등급 — 카드가 읽는 것은 이쪽이고 `stance`는 그 요약이다.
+   *
+   * **중립이면 없다.** 점수에서 나온 줄은 중립이면 아예 서지 않으므로 언제나 있고,
+   * `bond`가 세운 줄(멘토링 — §5-3)에는 그 쌍이 중립일 때 없다: 그 줄의 근거는
+   * 등급이 아니라 감독이 그렇게 정했다는 사실이다.
+   */
+  tier?: RelationTier;
   /**
    * 내가 먼저 보는 것 · 상대가 먼저 보는 것 — 문장은 프롬프트가 쓴다.
    * **원형에서 뽑힌 첫인상에만 있다** — `bond`가 선 줄에는 없다.
@@ -204,6 +272,13 @@ export interface PersonaRelation {
   bond?: "mentor" | "mentee";
 }
 
+/**
+ * 인물지 — 캐릭터북이 조립하는 **구조**다. 문장으로 옮기는 것은 프롬프트의 몫이고
+ * (`describePersona`), 코어는 사실만 낸다 (overview.md §1 철칙 4).
+ *
+ * ⚠️ **변하는 값은 여기 없다** — 폼·컨디션·부상·심경·계약·관측 능력치는 주입한 카드가
+ * 이력에 굳는 순간 낡은 사실이 된다. 그것들은 발화 직전의 조회가 낸다 (people.md §6).
+ */
 export interface CharacterEntry {
   characterId: string;
   name: string;
@@ -224,8 +299,8 @@ export interface CharacterEntry {
    */
   memories?: CharacterMemory[];
   /**
-   * 다른 페르소나와의 관계 초기값 — 원형에서 파생하므로 세이브당 불변이라 카드에
-   * 실려도 낡지 않는다. `full` 깊이에만 있다 — 사이의 결은 매일 보는 사람이나 안다.
+   * 지금 이 사람이 누구와 어떤 사이인가 — **등급**이다 (people.md §6 「관계 점수」).
+   * `full` 깊이에만 있다 — 사이의 결은 매일 보는 사람이나 안다.
    */
   relations?: PersonaRelation[];
 }

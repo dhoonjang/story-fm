@@ -92,10 +92,12 @@ import {
   tacticToggleValue,
   tacticToggleWord,
   tacticsBrief,
+  RELATION_TIER_KO,
   TRANSFER_REQUEST_REASON_KO,
   visionItemText,
   type CharacterEntry,
   type CharacterInjection,
+  type PersonaRelation,
   type ScoutReportCard,
 } from "@story-fm/domain";
 
@@ -130,6 +132,24 @@ const PROMISE_ALERT_DAYS = 7;
  *
  * 블록은 영어 태그로 싼다 (prompts.md §5) — 읽는 것(꺾쇠)과 쓰는 것(@ 줄)이 갈린다.
  */
+/**
+ * 관계 한 줄 — 근거가 있으면 함께 적는다.
+ *
+ * **감독이 붙여 준 사이**(멘토링 — people.md §5-3)에는 원형 축이 없다: 그 자리에
+ * 섰다는 사실 하나가 근거다. **원형에서 시작한 사이**는 먼저 보는 것을 함께 든다.
+ * 어느 쪽이든 앞에 서는 것은 지금의 등급이고, 등급이 없는 줄은 감독이 세웠다는
+ * 사실만으로 서 있는 중립의 사이다.
+ */
+function relationLine(r: PersonaRelation): string {
+  const grade = r.tier ? RELATION_TIER_KO[r.tier] : null;
+  if (r.bond) {
+    const seat = r.bond === "mentor" ? "멘토" : "멘티";
+    return `관계: ${r.name} — 감독이 붙여 준 사이 (내가 ${seat})${grade ? ` · ${grade}` : ""}`;
+  }
+  const axes = r.ours && r.theirs ? ` (먼저 보는 것: 나 ${r.ours} · 상대 ${r.theirs})` : "";
+  return `관계: ${r.name} — ${grade ?? (r.stance === "aligned" ? "결이 맞는다" : "결이 부딪힌다")}${axes}`;
+}
+
 export function describePersona(entry: CharacterEntry): string {
   const label = personaRoleLabel(entry.role);
   return [
@@ -139,13 +159,9 @@ export function describePersona(entry: CharacterEntry): string {
     ...(entry.motivation ? [`동기: ${entry.motivation}`] : []),
     ...(entry.speechStyle ? [`말투: ${entry.speechStyle.note}`] : []),
     ...(entry.speechStyle?.samples ?? []).map((s) => `  예) ${s}`),
-    // 관계 — 원형에서 파생한 첫인상(people.md §6)과 감독이 세운 사이(§5-3). 그 뒤의 일은 기억이 갖는다
-    ...(entry.relations ?? []).map((r) =>
-      // 감독이 붙여 준 사이에는 원형 축이 없다 — 그 자리에 섰다는 사실 하나가 근거다
-      r.bond
-        ? `관계: ${r.name} — 감독이 붙여 준 사이 (내가 ${r.bond === "mentor" ? "멘토" : "멘티"})`
-        : `관계: ${r.name} — ${r.stance === "aligned" ? "결이 맞는다" : "결이 부딪힌다"} (먼저 보는 것: 나 ${r.ours} · 상대 ${r.theirs})`,
-    ),
+    // 관계 — **지금의 등급**이다 (people.md §6 「관계 점수」). 숫자는 싣지 않는다:
+    // 카드는 이력에 굳으므로 매 턴 달라지는 값을 실으면 지난 턴들의 바이트가 함께 바뀐다
+    ...(entry.relations ?? []).map((r) => relationLine(r)),
     // 감독이 아는 만큼만 그린다 — 소문으로만 아는 사람에게 속내를 주면 만난 적 없는
     // 사람의 목소리가 난다. 사실로 적는다: 카드의 지시문은 모델이 그 문장대로 쓴다
     ...(entry.depth === "rumour" ? [`감독과의 거리: 평판으로만 안다 — 말투도 속내도 모른다`] : []),

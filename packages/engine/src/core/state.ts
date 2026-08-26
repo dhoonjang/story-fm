@@ -48,6 +48,7 @@ import type {
   ScheduleEntry,
   Negotiation,
   PressConference,
+  Relation,
   RetiredPlayer,
   YouthCandidate,
   ScoutReport,
@@ -835,6 +836,15 @@ export interface GameState {
    * 없다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   approachPressure?: ApproachPressure[];
+  /**
+   * **관계 점수** — 무순서 쌍 하나에 한 줄 (people.md §6 「관계 점수」).
+   *
+   * 압력 눈금과 같은 이유로 세이브가 든다: 감독이 무엇을 했는지의 누적이라 장부에서
+   * 파생할 수 없다. **움직인 쌍만 앉는다** — 안 움직인 쌍은 첫인상이 결정적으로
+   * 답하므로(`world/relations.ts`) 줄이 없는 것과 0인 것은 다른 뜻이 아니다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  relations?: Relation[];
   /**
    * 언론 유출 — 사다리 계단 4의 사건 (people.md §8). **다음 회견이 실어 갈 때까지만**
    * 남는다: `openPress`가 소비해 사실 카드로 옮긴다.

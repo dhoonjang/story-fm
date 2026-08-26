@@ -5,6 +5,7 @@ import type {
   CharacterMemory,
   Negotiation,
   Persona,
+  PersonaRelation,
 } from "@story-fm/domain";
 import { isDeeperThan } from "@story-fm/domain";
 import type { GameState } from "../core/state";
@@ -21,7 +22,12 @@ import {
   worldFigures,
 } from "./persona";
 import { generatePlayerPersona, retiredPersona } from "./player-persona";
-import { mentoringRelations, personaRelations } from "./relations";
+import {
+  mentoringRelations,
+  personaRelations,
+  RELATION_CARD_LIMIT,
+  scoreRelations,
+} from "./relations";
 
 /**
  * 캐릭터북 — **「이 인물이 지금 필요하다」를 판정해 그 턴에만 싣는다** (people.md §6).
@@ -171,16 +177,22 @@ export function characterEntryOf(
  * 나오기 때문이다 — 순수 함수인 그쪽은 상대가 누구인지 모른다. 비면 필드 자체를
  * 두지 않는다: 중립뿐인 사이는 카드에 서지 않는다.
  *
- * 두 벌이 이어 붙는다. **원형에서 뽑힌 첫인상**은 저장 페르소나(코치·구단주·기자단)
- * 사이에만 서고, **감독이 세운 사이**(멘토링)는 선수에게 선다 — 근거가 다르므로
- * 표도 함수도 따로다.
+ * 세 벌이 이어 붙되 **한 상대에 한 줄이고, 먼저 온 줄이 자리를 지킨다.** 근거가
+ * 풍부한 순서다: 원형 축을 든 저장 페르소나끼리 → 감독이 세운 멘토링 → 점수만 든
+ * 나머지(감독과의 사이 · 우리 선수). 같은 쌍이 두 벌에 걸리면 축이나 `bond`를 든
+ * 앞줄이 남고, 등급은 어느 줄이든 같은 점수에서 나오므로 갈리지 않는다.
  */
 function withRelations(state: GameState, entry: CharacterEntry): CharacterEntry {
   if (entry.depth !== "full") return entry;
-  const relations = [
+  const rows = new Map<string, PersonaRelation>();
+  for (const relation of [
     ...personaRelations(state, entry.characterId),
     ...mentoringRelations(state, entry.characterId),
-  ];
+    ...scoreRelations(state, entry.characterId),
+  ]) {
+    if (!rows.has(relation.characterId)) rows.set(relation.characterId, relation);
+  }
+  const relations = [...rows.values()].slice(0, RELATION_CARD_LIMIT);
   return relations.length > 0 ? { ...entry, relations } : entry;
 }
 
