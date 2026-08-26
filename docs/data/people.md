@@ -583,7 +583,7 @@ CB에서 ST로 올린 것이 다른 일이기 때문이다.
 `blocked-move`·`promise`와 같은 축이다.
 
 ```
-애착 = NUMBER_ATTACHMENT[원형] × (상징 번호면 1.0, 아니면 NUMBER_PLAIN 0.6)
+애착 = 원형의 `number` 계수(§6) × (상징 번호면 1.0, 아니면 NUMBER_PLAIN 0.6)
                               × (1 + NUMBER_TENURE_STEP 0.15 × min(그 번호로 뛴 시즌, NUMBER_TENURE_CAP 4))
 불만은 애착 ≥ NUMBER_GRIEVANCE_AT (1.0) 일 때만 선다
 ```
@@ -982,7 +982,7 @@ CB에서 ST로 올린 것이 다른 일이기 때문이다.
 | `loyalty`         | 선수 관문의 「다른 구단의 관심」·「선수의 마음」 (transfer.md §3)                                | 남을 이유가 커지고 떠날 이유가 준다 |
 | `professionalism` | 월간 성장 확률(`rollAxis` — 감독 배율과 같은 자리) · 결산 판정의 상승 흡수(`applyAttributeStep`) | 같은 훈련에서 더 자란다             |
 | `settling`        | 정착 목표 배수 (player.md §9.3)                                                                  | 녹아드는 데 더 걸린다               |
-| `number`          | 등번호를 잃었을 때의 애착 (`NUMBER_ATTACHMENT` — §5)                                             | 번호를 뺏기면 불만이 선다           |
+| `number`          | 등번호를 잃었을 때의 애착 — §5의 애착 점수를 만든다                                              | 번호를 뺏기면 불만이 선다           |
 
 | 원형            | `patience` | `loyalty` | `professionalism` | `settling` | `number` |
 | --------------- | ---------: | --------: | ----------------: | ---------: | -------: |

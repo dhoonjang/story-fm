@@ -1539,6 +1539,12 @@ export function ensureSeasonStat(state: GameState, playerId: string, teamId: str
     stat = { gamePlayerId: playerId, season: state.season, teamId, apps: 0, goals: 0 };
     state.seasonStats.push(stat);
   }
+  /**
+   * **그 시즌 그 셔츠의 등번호** — 번호 계보가 읽는 유일한 원본이다 (player.md §1.1).
+   * 부를 때마다 덮어쓴다: 시즌 중에 번호가 바뀌면 마지막 번호가 그 시즌의 번호다.
+   */
+  const number = playerById(state, playerId)?.squadNumber;
+  if (number !== undefined) stat.squadNumber = number;
   return stat;
 }
 
