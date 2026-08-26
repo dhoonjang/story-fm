@@ -558,7 +558,7 @@ export function possessionShare(midfield: number, oppMidfield: number): number {
  * 슛 하나의 질은 `BASE_SHOT_XG`가 따로 정한다. 둘을 반대 방향으로 움직이면
  * 득점을 유지한 채 슈팅 수만 옮길 수 있다.
  */
-export const PLAYER_SHOT_BASE = 0.99;
+export const PLAYER_SHOT_BASE = 1.08;
 /** 실제 전술판의 전진 깊이가 슈팅량에 닿는 세기. */
 export const SHOT_DEPTH_LOG_WEIGHT = 2.3;
 /** 역할의 결정력 요구가 슈팅 책임으로 번역되는 세기. */
@@ -594,13 +594,39 @@ export const CREATION_SKILL_LOG_WEIGHT = 0.75;
  * 대등한 경로에서 슈팅 하나의 평균 기회 xG.
  * 실제 1부 리그의 슛당 xG는 0.11 언저리다(2.8골 ÷ 25슛).
  */
-export const BASE_SHOT_XG = 0.0993;
+export const BASE_SHOT_XG = 0.0905;
 /** 최종 공격 지역 우위가 슈팅 질에 닿는 세기. */
 export const ROUTE_XG_LOGIT_WEIGHT = 0.7;
 /** 선수의 전진 위치가 슈팅 질에 닿는 세기. */
 export const SHOT_DEPTH_XG_LOGIT_WEIGHT = 0.65;
 /** 위치선정·돌파·공중볼이 슈팅 질에 닿는 세기. */
 export const CHANCE_SKILL_XG_LOGIT_WEIGHT = 0.45;
+
+/**
+ * 능력 → 전력 곡선 — **평점의 지수** (match.md §1.1). ⚠️ 밸런스 값.
+ *
+ * 축구 득점의 표준 통계 모델(Maher 1982 · Dixon–Coles 1997)은 `log λ`가 공격·수비
+ * 평점의 **차**에 선형이다 — 전력은 평점의 지수이고, 같은 5점 차는 60 대 65에서도
+ * 80 대 85에서도 같은 승률 차다(Elo와 같은 꼴). 그런데 종합의 눈금은 위가 눌려 있어
+ * 81과 76이 비율로는 1.07뿐이고, 그 비를 그대로 맞세우면 격차가 xG 1.25:1로만 번역돼
+ * 우승 승점이 70점대에 주저앉는다(실제 1부 84~93).
+ *
+ * 그래서 XI 가중 평균 x를 리그 평균(`ABILITY_PIVOT`)을 축으로 `exp(기울기 × (x − 축))`에
+ * 올린다 — 두 팀의 전력 비는 `exp(기울기 × 평점 차)`이고 축의 위치와 무관하다.
+ *
+ * ⚠️ **곡선은 능력 항에만 건다.** 전술·상성·공략·개인 지시는 존이 완성되는 자리에서
+ * **곱**으로 얹히므로(`tacticShift`) 이 곡선 밖에 남는다 — 그 폭은 §1.2·§1.3이 이미
+ * 자기 눈금(2.5~15%)으로 정해 둔 값이라, 함께 부풀리면 지시 한 칸이 능력 차만큼 무거워지고
+ * 개인 지시가 공짜 이득을 낸다.
+ */
+export const ABILITY_LOG_SLOPE = 0.019;
+export const ABILITY_PIVOT = 72;
+
+/** 존의 XI 가중 평균(평점) → 전력. 축에서는 그대로다 */
+export function abilityCurve(strength: number): number {
+  if (strength <= 0) return 0;
+  return ABILITY_PIVOT * Math.exp(ABILITY_LOG_SLOPE * (strength - ABILITY_PIVOT));
+}
 
 const ZONE_CONTRIBUTION: Record<
   "attack" | "midfield" | "defense",
@@ -687,6 +713,13 @@ function buildZones(
   delta: ZoneDelta,
   counter: { attack: number; midfield: number; defense: number },
   readEffective: (slot: LineupSlot) => number = effectiveOf,
+  /**
+   * 능력 곡선(`abilityCurve`)을 태울 것인가 — **점유를 재는 자리만 끈다.**
+   * 곡선은 능력 차를 **득점**으로 옮기는 눈금이고(§1.1), 점유는 그보다 훨씬 평평하다
+   * (최상위도 한 시즌 평균 65%). 켠 값을 점유에 그대로 물리면 같은 격차를 두 번 세고,
+   * 중원을 지운 개인 지시가 슈팅 총량을 되레 올린다.
+   */
+  curved = true,
 ): ZoneStrength {
   const of = (g: PositionGroup) => slots.filter((s) => slotGroup(s) === g);
 
@@ -745,23 +778,26 @@ function buildZones(
    * 같은 값이 되어 "더 공격적으로"가 아무 일도 안 하게 된다.
    */
   const tacticShift = (raw: number) => 1 + TACTIC_SWING * Math.tanh(raw / TACTIC_SWING);
+  /** 능력 항 — 곡선은 여기까지다. 전술·상성·지시는 아래에서 곱으로 얹힌다 */
+  const zoneStrength = (kind: keyof typeof ZONE_CONTRIBUTION) =>
+    curved ? abilityCurve(zoneOf(kind)) : zoneOf(kind);
 
   const attack =
-    zoneOf("attack") *
+    zoneStrength("attack") *
     ZONE_BASELINE.attack *
     tacticShift(delta.attack + counter.attack) *
     fit *
     gapPenalty("FW") *
     shorthanded;
   const midfield =
-    zoneOf("midfield") *
+    zoneStrength("midfield") *
     ZONE_BASELINE.midfield *
     tacticShift(delta.midfield + counter.midfield) *
     fit *
     gapPenalty("MF") *
     shorthanded;
   const defense =
-    zoneOf("defense") *
+    zoneStrength("defense") *
     ZONE_BASELINE.defense *
     tacticShift(delta.defense + counter.defense) *
     fit *
@@ -868,6 +904,11 @@ export interface PacketOptions {
    */
   inMatch?: boolean;
   /**
+   * 지금 스코어 — 홈 득점 − 원정 득점. 골 차가 슈팅 노출을 옮긴다(`gameStateExposure`).
+   * 킥오프·시험은 비워 둔다.
+   */
+  lead?: number;
+  /**
    * 이 대진이 더비인가 — **표가 정하는 사실**이라 엔진이 넘긴다 (team.md §3.2).
    * `keyPoints` 첫 줄의 컨텍스트 태그와 양 팀 강도 배수가 여기서 선다.
    */
@@ -888,6 +929,29 @@ const CHANCE_SKILL_SCALE = 34;
 const SHOT_DEPTH_PIVOT = 0.5;
 const HOME_SHOT_EXPOSURE = 1.06;
 const AWAY_SHOT_EXPOSURE = 0.96;
+
+/**
+ * 경기 상황 노출 — **앞선 팀은 내려서고 뒤진 팀은 밀어붙인다** (match.md §1.4). ⚠️ 밸런스 값.
+ *
+ * 슈팅 발생률의 로그에 골 차가 선형으로 실린다 — 푸아송 회귀가 경기 상황을 다루는
+ * 꼴 그대로다(`ln λ += −앞선 비율 × 리드 + 뒤진 비율 × 열세`). 실측(xG의 경기 상황
+ * 분해)은 한 골 앞서면 0.85~0.9, 두 골이면 0.7~0.75, 한 골 뒤지면 1.1, 두 골이면
+ * 1.2 언저리라 골마다 같은 배가 곱해지는 지수 꼴이 그 계단을 그대로 지난다. 전력차만으로
+ * 굴리면 3-0 뒤에도 앞선 팀이 같은 밀도로 문 앞에 서서 대량 득점의 꼬리가 실제(팀
+ * 4골+ 5~6%)보다 두껍다. 두 시뮬이 같은 문을 지난다: 구간 시뮬은 구간마다 패킷을 다시
+ * 세우고, 간이 시뮬은 골 정지점마다 다시 세운다.
+ */
+export const LEAD_SHOT_LOG_RATE = 0.1;
+export const TRAIL_SHOT_LOG_RATE = 0.05;
+
+/** 이 쪽이 지금 스코어에서 받는 노출 — `lead`는 홈 득점 − 원정 득점 */
+export function gameStateExposure(side: MatchSide, lead: number | undefined): number {
+  if (lead === undefined || lead === 0) return 1;
+  const mine = side === "home" ? lead : -lead;
+  return Math.exp(
+    -LEAD_SHOT_LOG_RATE * Math.max(0, mine) + TRAIL_SHOT_LOG_RATE * Math.max(0, -mine),
+  );
+}
 
 const sigmoid = (z: number): number => 1 / (1 + Math.exp(-z));
 const logit = (p: number): number => Math.log(p / (1 - p));
@@ -1474,22 +1538,30 @@ export function buildStrengthPacket(
     return { zone, edge, size, homeValue: round2(hv), awayValue: round2(av) };
   });
 
-  /** 점유 — 중원 우위가 선수별 공격 노출과 체력 소모에 함께 들어간다. */
+  /**
+   * 점유 — 중원 우위가 선수별 공격 노출과 체력 소모에 함께 들어간다.
+   *
+   * ⚠️ **곡선을 태우지 않은 중원을 읽는다** (§1.1). 곡선은 능력 차를 득점으로 옮기는
+   * 눈금이라 점유에 그대로 물리면 같은 격차를 두 번 센다 — 전술·상성·지시는 그대로
+   * 실린다(같은 `buildZones`가 낸 값이다).
+   */
+  const rawMidfield = {
+    home: buildZones(homeXI, homeFit, homeDelta, counters.home, creationEffectiveOf, false)
+      .midfield,
+    away: buildZones(awayXI, awayFit, awayDelta, counters.away, creationEffectiveOf, false)
+      .midfield,
+  };
   const possession = {
-    home: possessionShare(
-      home.creationZones?.midfield ?? home.zones.midfield,
-      away.creationZones?.midfield ?? away.zones.midfield,
-    ),
-    away: possessionShare(
-      away.creationZones?.midfield ?? away.zones.midfield,
-      home.creationZones?.midfield ?? home.zones.midfield,
-    ),
+    home: possessionShare(rawMidfield.home, rawMidfield.away),
+    away: possessionShare(rawMidfield.away, rawMidfield.home),
   };
   const neutral = options.neutral === true;
   /**
    * **선수×경로 프로필이 먼저다** — 그 합이 팀 기대 슈팅이고, 죽은 공 채널은 그
    * 총량 **안에서** 몫을 가져간다 (match.md §1.4). 그래서 여기서 한 번 통째로
    * 세우고, 죽은 공을 떼어 낸 뒤 남은 비율로 프로필을 다시 깎는다.
+   *
+   * 경기장 노출 × 경기 상황 노출은 여기서 슈팅량에만 곱한다 (match.md §1.4).
    */
   const rawProfiles = {
     home: buildPlayerShotProfiles(
@@ -1497,14 +1569,14 @@ export function buildStrengthPacket(
       "home",
       homeXI,
       possession.home,
-      neutral ? 1 : HOME_SHOT_EXPOSURE,
+      (neutral ? 1 : HOME_SHOT_EXPOSURE) * gameStateExposure("home", options.lead),
     ),
     away: buildPlayerShotProfiles(
       { home, away },
       "away",
       awayXI,
       possession.away,
-      neutral ? 1 : AWAY_SHOT_EXPOSURE,
+      (neutral ? 1 : AWAY_SHOT_EXPOSURE) * gameStateExposure("away", options.lead),
     ),
   };
   const sumOf = (list: readonly PlayerShotProfile[], read: (p: PlayerShotProfile) => number) =>
