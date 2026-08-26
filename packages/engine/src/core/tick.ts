@@ -2,9 +2,11 @@ import type { GamePlayer, MatchRecord, ScheduleEntry, TrainingSession } from "@s
 import {
   FAMILIARITY_BASELINE,
   clampCondition,
+  clampSharpness,
   isReserveMatch,
   naturalPositionOf,
   positionGroupOfPlayer,
+  sharpnessOf,
   slotOfTime,
 } from "@story-fm/domain";
 import {
@@ -12,6 +14,9 @@ import {
   dailyRecovery,
   drainVariance,
   injuryWeight,
+  sharpnessAfterDay,
+  sharpnessAfterMinutes,
+  sharpnessDayOf,
   type RecoveryKind,
 } from "@story-fm/sim";
 import {
@@ -110,6 +115,7 @@ import {
   isSuspended,
   managedTeamId,
   MATCHDAY_BENCH,
+  openInjuryIds,
   playerById,
   proficiencyAt,
   pushNarrative,
@@ -332,6 +338,8 @@ function dailyTick(
       : "training";
 
   resolveInjuries(state, digest);
+  // 오늘 재활 중인 선수 — 경기 감각의 자리를 가르는 유일한 사실 (아래 루프)
+  const injuredPlayers = openInjuryIds(state);
 
   for (const player of players) {
     /**
@@ -349,6 +357,21 @@ function dailyTick(
      * 순간부터 식고, 오래 쉬면 무디어진다 — 폼에 시간 축이 생긴다.
      */
     player.state.form = decayedForm(player.state.form);
+    /**
+     * **경기 감각은 그날이 무엇이었나로 끌린다** (player.md §5.4) — 본훈련이면 55,
+     * 훈련이 없으면 25, 재활 중이면 10 쪽이다. 회복 눈금(`recoveryKind`)과 **같은
+     * 하루**를 읽으므로 두 축이 서로 다른 날을 살지 않는다.
+     *
+     * ⚠️ 부상자를 갈라 보는 것은 이 축뿐이다. 체력은 위에서 부상 중에도 회복하지만
+     * (그게 복귀일에 몸이 준비돼 있는 이유다), 재활실은 훈련장이 아니라서 감각은
+     * 그동안 굳는다 — 장기 부상 복귀 선수가 곧장 온전한 전력이 아닌 이유다.
+     */
+    player.state.sharpness = clampSharpness(
+      sharpnessAfterDay(
+        sharpnessOf(player.state),
+        sharpnessDayOf(recoveryKind, injuredPlayers.has(player.id)),
+      ),
+    );
     if (issuePlayers.has(player.id)) {
       player.state.condition = clampCondition(player.state.condition - 1);
     }
@@ -1307,6 +1330,12 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
           p.state.condition -
             conditionDrain(p, position, spec, minutes, today, 1, possession[side]),
         );
+        /**
+         * 뛴 만큼 경기 감각이 오른다 — **친선도 그대로 올린다** (season.md §2).
+         * 몸에 남는 것은 친선도 겪는 자리이고, 프리시즌이 몸을 만든다는 말이
+         * 장부에 서는 곳이 여기다.
+         */
+        p.state.sharpness = clampSharpness(sharpnessAfterMinutes(sharpnessOf(p.state), minutes));
       }
     }
     /**
@@ -1405,6 +1434,9 @@ function reserveXI(state: GameState, teamId: string): GamePlayer[] {
  * 벤치 없이 열한 명으로 90분을 굴린다(`simSquadFor`) — 교체가 없으니 출전자가 곧
  * 선발이고, 라인업이 그대로 출전 기록의 원본이다.
  */
+/** 2군 경기의 출전 분 — 교체가 없으므로 선발 열한 명이 정규 시간을 다 뛴다 */
+const RESERVE_MATCH_MINUTES = 90;
+
 export function simulateReserveMatch(state: GameState, match: MatchRecord, digest: string[]): void {
   const squads = {
     home: simSquadFor(state, match.homeTeamId, reserveXI(state, match.homeTeamId)),
@@ -1463,6 +1495,18 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
         conceded,
         outcome,
       });
+      /**
+       * **2군 경기가 1군 몸에 닿는 유일한 자리** (season.md §2 · player.md §5.4).
+       *
+       * 나머지(폼·체력·부상·카드)를 닫아 둔 이유는 감독에게 그 일정을 조정할
+       * 손잡이가 없어서인데, 경기 감각만은 반대다: 2군에서 90분을 뛴 유망주가
+       * 1군에 올라왔을 때 감각이 그대로면 감독이 그를 내려보낸 일이 아무것도
+       * 아니었던 것이 된다. 장기 부상 복귀 선수를 끌어올리는 길도 이 한 칸이 연다.
+       * 벤치 없이 열한 명이 90분을 굴리므로 출전 분은 전원 정규 시간이다.
+       */
+      p.state.sharpness = clampSharpness(
+        sharpnessAfterMinutes(sharpnessOf(p.state), RESERVE_MATCH_MINUTES),
+      );
       const stat = ensureSeasonStat(state, p.id, teamId);
       stat.reserveApps = (stat.reserveApps ?? 0) + 1;
       if (goals > 0) stat.reserveGoals = (stat.reserveGoals ?? 0) + goals;

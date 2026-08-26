@@ -3,6 +3,7 @@ import {
   CONDITION_MAX,
   PHASE_END,
   RATING_MAX,
+  SHARPNESS_MAX,
   TACTIC_SCALE_NEUTRAL,
   weightSlotOf,
 } from "@story-fm/domain";
@@ -317,3 +318,91 @@ export const GAP_CONDITION = CONDITION_MAX - GAP_THRESHOLD;
 
 /** 구멍 하나가 그 라인에 내는 손해 */
 export const GAP_PENALTY = 0.07;
+
+/**
+ * **경기 감각 — 몸이 준비된 것과 경기에 준비된 것은 다른 사실이다** (player.md §5.4).
+ *
+ * 체력은 하루 쉬면 돌아온다. 경기 감각은 그렇지 않다 — 두 달을 재활실에서 보낸
+ * 선수는 다리가 다 나은 날에도 90분의 리듬을 잃은 채로 돌아오고, 그 리듬은 훈련장이
+ * 아니라 경기가 돌려준다. 이 축이 없던 동안 프리시즌은 몸에 관해 아무것도 결정하지
+ * 않았고, 장기 부상 복귀 선수를 개막전에 그대로 세우는 데에도 대가가 없었다.
+ *
+ * ⚠️ **누적 피로가 아니다.** 이 축은 "얼마나 뛰었나"가 아니라 "최근에 뛰었나"를
+ * 재고, 뛸수록 **오른다**. 뛸수록 내려가는 축은 체력이다.
+ */
+
+/**
+ * 하루가 경기 감각을 끌고 가는 자리 — **그날 몸이 한 일이 정한다.**
+ *
+ * 훈련장은 55까지만 되찾아 준다. 그 위는 경기만 채우고, 그래서 "프리시즌 훈련만
+ * 열심히 하면 개막에 준비가 끝난다"가 성립하지 않는다 — 실제로도 캠프의 마지막
+ * 3분의 1은 친선경기다. 재활은 팀 훈련에서 떨어져 있는 시간이라 가장 아래다.
+ */
+export const SHARPNESS_TARGET = {
+  /** 본훈련을 소화한 날 */
+  training: 55,
+  /** 훈련이 없는 날 · 회복 세션 · 여름 휴가 */
+  idle: 25,
+  /** 재활 중 */
+  rehab: 10,
+} as const;
+export type SharpnessDay = keyof typeof SHARPNESS_TARGET;
+
+/**
+ * 그 자리로 내려앉는 속도의 시간상수(일) — 지수 감쇠라 **남은 거리에 비례해** 준다.
+ *
+ * ⚠️ 선형으로 깎으면 평형이 없다. 한 칸씩 고정으로 빼면 격주로 뛰는 선수가 바닥에
+ * 눕고, 그 폭을 줄이면 반 시즌을 못 뛴 선수가 여전히 실전 등급에 선다. 지수는 그
+ * 둘을 한 눈금으로 잇는다 — 위에 있을수록 많이, 자리에 가까울수록 조금.
+ */
+const SHARPNESS_DRIFT_DAYS: Record<SharpnessDay, number> = {
+  training: 45,
+  idle: 60,
+  /** 재활이 가장 빠르다 — 팀 훈련이 잡아 주는 것이 없다 */
+  rehab: 30,
+};
+
+/**
+ * 출전 분이 **남은 폭**을 채우는 눈금 — 90분이 41%, 60분이 30%, 20분이 11%다.
+ *
+ * 지수인 이유는 훈련 적응이 그 꼴이기 때문이다: 같은 자극이 낮은 데서는 크게, 천장
+ * 가까이에서는 작게 남는다. 이 모양이 평형을 **출전 시간의 함수**로 만든다 —
+ * 주 1회 90분 ≈ 86 · 주 2회 ≈ 91 · 격주 ≈ 78 · 주 1회 20분 교체 ≈ 69 · 한 경기도
+ * 못 뛰는 1군 선수 ≈ 44. 선형으로 얹으면 주 2경기가 곧장 상한에 박히고 격주는
+ * 바닥까지 내려가, 두 값 사이의 결이 통째로 사라진다.
+ */
+const SHARPNESS_MATCH_SCALE = 170;
+
+/**
+ * 새 시즌이 열릴 때의 경기 감각 — **휴가로 무뎌진 몸.**
+ *
+ * 여기서 시작해 프리시즌이 채운다. 친선 넷을 60분씩 뛴 선수는 개막에 ≈ 75, 한
+ * 경기도 안 뛴 선수는 ≈ 44로 서므로 개막전의 전력 차가 ≈ 3.7%p다.
+ */
+export const SHARPNESS_PRESEASON = 30;
+
+/** `minutes`분을 뛴 뒤의 경기 감각 */
+export function sharpnessAfterMinutes(sharpness: number, minutes: number): number {
+  if (minutes <= 0) return sharpness;
+  const room = SHARPNESS_MAX - sharpness;
+  return sharpness + room * (1 - Math.exp(-minutes / SHARPNESS_MATCH_SCALE));
+}
+
+/**
+ * 오늘 하루가 경기 감각을 끄는 자리 — **회복 눈금(`RecoveryKind`)과 같은 하루를 읽는다.**
+ *
+ * 두 축이 하루의 성격을 따로 분류하면 "감독 팀은 본훈련인데 감각은 쉰 날"처럼
+ * 설명할 수 없는 조합이 생긴다. 재활만은 회복 눈금이 모르는 사실이라 따로 받는다 —
+ * 부상자도 같은 루프에서 회복하지만 그가 있는 곳은 훈련장이 아니다.
+ */
+export function sharpnessDayOf(kind: RecoveryKind, injured: boolean): SharpnessDay {
+  if (injured) return "rehab";
+  // 회복 세션은 가벼운 러닝이다 — 몸은 되찾아도 경기 감각을 채우지는 않는다
+  return kind === "training" ? "training" : "idle";
+}
+
+/** 그런 하루를 보낸 뒤의 경기 감각 — 자리 쪽으로 하루치만큼 끌린다 */
+export function sharpnessAfterDay(sharpness: number, day: SharpnessDay): number {
+  const target = SHARPNESS_TARGET[day];
+  return target + (sharpness - target) * Math.exp(-1 / SHARPNESS_DRIFT_DAYS[day]);
+}

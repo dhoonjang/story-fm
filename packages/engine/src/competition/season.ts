@@ -10,6 +10,7 @@ import type {
   SeasonAwardCode,
 } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
+import { SHARPNESS_PRESEASON } from "@story-fm/sim";
 import {
   CONDITION_BASE,
   DEFAULT_FORMATION,
@@ -1170,6 +1171,12 @@ function applyTransition(state: GameState): string[] {
       player.state.form = 0;
       // 새 시즌 — 쉬고 돌아왔다
       player.state.condition = CONDITION_BASE;
+      /**
+       * **몸은 쉬어서 돌아오지만 경기 감각은 무뎌져서 돌아온다** (player.md §5.4).
+       * 프리시즌이 그것을 채우는 자리이고, 채우는 것은 훈련이 아니라 친선의 출전
+       * 분이다 — 이 한 줄이 없으면 7월의 5주가 몸에 관해 아무것도 결정하지 않는다.
+       */
+      player.state.sharpness = SHARPNESS_PRESEASON;
     }
 
     if (retirees.length > 0) {

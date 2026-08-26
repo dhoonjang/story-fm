@@ -1,5 +1,6 @@
 import type { GamePlayer, PositionGroup } from "@story-fm/domain";
 import { bestOverall } from "@story-fm/domain";
+import { SHARPNESS_PRESEASON } from "@story-fm/sim";
 import { claimSyntheticName, syntheticNamePoolOf } from "../data/names";
 import { countryOfTeam, TIER_BASE } from "../data/team-catalog";
 import { deriveAxes } from "./attributes";
@@ -39,6 +40,14 @@ const YOUTH_UPSIDE = { min: 10, max: 26 } as const;
 
 /** 합류 시점의 체력 */
 const JOINING_CONDITION = { min: 70, max: 84 } as const;
+
+/**
+ * 합류 시점의 경기 감각 — **어디서 왔든 최근에 뛰지 않은 자원이다** (player.md §5.4).
+ * 유스는 1군 경기를 뛴 적이 없고 승격 보강은 이적 창을 건너온 참이라, 둘 다
+ * 시즌이 열릴 때의 자리(`SHARPNESS_PRESEASON`)에서 출발한다 — 경기 감각을 채우는
+ * 것은 나이도 능력치도 아니고 출전 분뿐이다.
+ */
+const JOINING_SHARPNESS = SHARPNESS_PRESEASON;
 
 /** 그룹별 대표 포지션 — 게임 중 태어나는 선수(유스·승격 보강)의 주 포지션 */
 const GROUP_POSITION: Record<PositionGroup, string[]> = {
@@ -184,7 +193,11 @@ export function generateYouthPlayer(
       // 잠재력 폭을 넓혀, 드물게 진짜 물건이 섞이게 둔다
       potential: clamp99(overall + randInt(rng, YOUTH_UPSIDE.min, YOUTH_UPSIDE.max)),
     },
-    state: { form: 0, condition: randInt(rng, JOINING_CONDITION.min, JOINING_CONDITION.max) },
+    state: {
+      form: 0,
+      condition: randInt(rng, JOINING_CONDITION.min, JOINING_CONDITION.max),
+      sharpness: JOINING_SHARPNESS,
+    },
     isCaptain: false,
   };
 }
@@ -258,7 +271,11 @@ export function generatePromotionSigning(
     },
     ...(homegrownCountry === undefined ? {} : { homegrownCountry }),
     ...(nationality === undefined ? {} : { nationality }),
-    state: { form: 0, condition: randInt(rng, JOINING_CONDITION.min, JOINING_CONDITION.max) },
+    state: {
+      form: 0,
+      condition: randInt(rng, JOINING_CONDITION.min, JOINING_CONDITION.max),
+      sharpness: JOINING_SHARPNESS,
+    },
     isCaptain: false,
   };
 }

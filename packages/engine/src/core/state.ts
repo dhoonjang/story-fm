@@ -89,7 +89,7 @@ import {
   roleFit,
   standingScore,
 } from "@story-fm/domain";
-import { profFactor, type MatchLedgerState } from "@story-fm/sim";
+import { profFactor, SHARPNESS_PRESEASON, type MatchLedgerState } from "@story-fm/sim";
 import type { AiDeal } from "../market/ai-market";
 import {
   buildScheduleEntries,
@@ -1271,6 +1271,20 @@ export function openInjury(state: GameState, playerId: string): Injury | null {
 }
 
 /**
+ * 지금 부상 중인 선수 id 전부 — **세계 전체를 하루에 한 번 훑는 자리**를 위한 것이다.
+ *
+ * `isInjured`를 선수마다 부르면 장부를 선수 수만큼 다시 훑는다. 한 번 만들어 두고
+ * 묻는 쪽이 재사용한다. 열린 부상의 정의(`returnedOn === null`)는 위와 같은 자다.
+ */
+export function openInjuryIds(state: GameState): Set<string> {
+  const ids = new Set<string>();
+  for (const injury of state.injuries) {
+    if (injury.returnedOn === null) ids.add(injury.gamePlayerId);
+  }
+  return ids;
+}
+
+/**
  * **마음이 떠 있는가** — 라커룸 불만(`state.issues`)이 걸린 선수.
  *
  * ⚠️ 이 질문에 `condition`으로 답하지 마라. 그 축은 경기 한 판에 30~50이 빠지는
@@ -1712,6 +1726,12 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
         form: randInt(rng, -1, 1) * 0.15,
         // 프리시즌 시작 — 잘 쉬고 돌아왔다
         condition: randInt(rng, 70, 86),
+        /**
+         * 몸은 쉬고 왔지만 **경기 감각은 무뎌진 채로 온다** (player.md §5.4).
+         * 시즌 전환이 세우는 값과 같은 자리에서 출발해야 첫 시즌의 프리시즌도
+         * 두 번째 시즌의 프리시즌과 같은 판이 된다.
+         */
+        sharpness: SHARPNESS_PRESEASON,
       },
       isCaptain: false,
     };
