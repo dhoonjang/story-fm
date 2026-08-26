@@ -36,7 +36,7 @@ const OUTFIELD_GK = { from: 15, span: 20 } as const;
 const YOUTH_AGE = { min: 17, max: 19 } as const;
 
 /** 지금 실력 위에 얹는 성장 여지 — 드물게 진짜 물건이 섞이는 폭이다 */
-const YOUTH_UPSIDE = { min: 10, max: 26 } as const;
+export const YOUTH_UPSIDE = { min: 10, max: 26 } as const;
 
 /** 합류 시점의 체력 */
 const JOINING_CONDITION = { min: 70, max: 84 } as const;
@@ -131,6 +131,12 @@ export function generateYouthPlayer(
    * 콜업된 유스가 1군 선수와 동명이인으로 설 수 있다 (people.md §2).
    */
   takenNames: Set<string> = new Set(),
+  /**
+   * 잠재력 여지의 **위끝**에 얹는 폭 — 아카데미 활용도가 인테이크의 질을 움직이는
+   * 유일한 자리다 (season.md §6). 기준선(`TIER_BASE`)은 체급의 것이고 여기가 여지의
+   * 것이다. 뽑는 난수의 **수와 순서는 그대로**라, 0이면 예전과 같은 사람이 나온다.
+   */
+  upsideBonus = 0,
 ): GamePlayer {
   const rng = makeRng(seed, `youth:${teamId}:${season}:${index}`);
   const groups: PositionGroup[] = ["GK", "DF", "DF", "MF", "MF", "FW", "FW"];
@@ -191,7 +197,7 @@ export function generateYouthPlayer(
       overall,
       // 유스의 매력은 지금 실력이 아니라 **성장 여지**다 — 기준선을 낮춘 만큼
       // 잠재력 폭을 넓혀, 드물게 진짜 물건이 섞이게 둔다
-      potential: clamp99(overall + randInt(rng, YOUTH_UPSIDE.min, YOUTH_UPSIDE.max)),
+      potential: clamp99(overall + randInt(rng, YOUTH_UPSIDE.min, YOUTH_UPSIDE.max + upsideBonus)),
     },
     state: {
       form: 0,

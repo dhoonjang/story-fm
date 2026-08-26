@@ -37,6 +37,7 @@ export const PANEL_OF: Record<string, PanelKey> = {
   set_development_focus: "스쿼드",
   set_mentor: "스쿼드",
   set_reserve_training: "스쿼드",
+  sign_youth: "스쿼드",
   substitute: "스쿼드",
   set_transfer_list: "스쿼드",
   respond_transfer_request: "스쿼드",

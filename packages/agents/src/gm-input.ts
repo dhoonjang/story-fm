@@ -45,6 +45,7 @@ import {
   openTransferRequests,
   pendingContractOf,
   pendingVerdicts,
+  ourYouthCandidates,
   playerName,
   recordBreakLine,
   recordBreaksOf,
@@ -64,6 +65,8 @@ import {
   visionSpanOf,
   visionYearOf,
   weeklyWagesOf,
+  youthCandidateFog,
+  youthIntakeDeadline,
   type ChatTurn,
   type CoachCue,
   type GameState,
@@ -72,6 +75,7 @@ import {
 import {
   ageOf,
   boardExpectationLine,
+  naturalPositionOf,
   describeManagerSkills,
   describeReputation,
   diffDays,
@@ -599,6 +603,37 @@ function retirementFacts(state: GameState): string[] {
 }
 
 /**
+ * **아직 답하지 않은 유스 후보** — 이번 여름의 인테이크 (season.md §6).
+ *
+ * 물음표도 평가어도 없는 장부 줄이다. 인테이크 데이를 어떤 자리로 열지, 누구를 아깝다고
+ * 말할지는 GM이 정한다.
+ *
+ * ⚠️ **후보에게는 안개가 낀다 — `adapting` 눈금이다** (player.md §9). 계약서에 사인하기
+ * 전이라 훈련장에서 본 것이 전부이고, 그래서 종합도 잠재력도 참값이 아니라 관측값으로
+ * 선다. 코어는 참값으로 계산하고 여기 서는 것은 감독이 그렇게 알고 있는 값이다.
+ */
+function youthCandidateFacts(state: GameState): string[] {
+  const rows = ourYouthCandidates(state);
+  if (rows.length === 0) return [];
+  const lines = rows.map((row) => {
+    const { overall, potential } = youthCandidateFog(state.seed, row.player);
+    const age = ageOf(row.player.birthdate, state.date);
+    return (
+      `유스 후보: ${row.player.name} ${age}세 · ${naturalPositionOf(row.player).position} · ` +
+      `종합 ~${overall} · 잠재력 ${potential.low}~${potential.high}(${potential.confidence}) · ` +
+      `주급 ${formatMoney(row.weeklyWage)}/주 · ${row.years}년` +
+      (row.autoSign ? " · 답이 없으면 구단이 계약한다" : "")
+    );
+  });
+  const auto = rows.filter((row) => row.autoSign).length;
+  lines.push(
+    `유스 인테이크 기한: ${youthIntakeDeadline(state)} (선수단 소집일) — ` +
+      `그때까지 답이 없으면 위 ${auto}명이 계약하고 나머지는 돌아간다`,
+  );
+  return lines;
+}
+
+/**
  * 방금 끝난 시즌의 시상 중 **우리 리그**의 것 — 우리 선수든 남의 선수든 함께
  * 싣고, 어느 쪽인가는 팀 이름이 말한다.
  *
@@ -655,7 +690,12 @@ function recordFacts(state: GameState): string[] {
  */
 function offseasonFacts(state: GameState): string | null {
   if (!onSummerBreak(state.calendar, state.date)) return null;
-  const facts = [...recordFacts(state), ...retirementFacts(state), ...awardFacts(state)];
+  const facts = [
+    ...recordFacts(state),
+    ...retirementFacts(state),
+    ...awardFacts(state),
+    ...youthCandidateFacts(state),
+  ];
   if (facts.length === 0) return null;
   return `지난 시즌이 닫히며 남은 것 — 자리를 어떻게 열지, 누가 무슨 말을 하는지는 네가 정한다:\n${facts
     .map((f) => `- ${f}`)

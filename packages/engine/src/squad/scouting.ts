@@ -331,6 +331,43 @@ export function potentialConfidence(margin: number): string {
   return "대강 짐작";
 }
 
+/**
+ * **유스 후보의 안개** — 아직 우리 선수가 아니다 (season.md §6 · player.md §9).
+ *
+ * 계약서에 사인하기 전이라 훈련장에서 본 것이 전부인데, 그것은 갓 영입한 선수의
+ * 처지와 같다 — 그래서 `adapting` 눈금을 그대로 읽는다. 다만 좁혀 줄 정착 진행도가
+ * 없으므로 폭은 **출발 폭 그대로** 선다(`observationMargin`이 정착 row를 못 찾으면
+ * 0을 내므로 그 문을 지나지 않는다).
+ *
+ * `state`가 아니라 시드만 받는 것은 후보가 `state.players`에 없기 때문이다 —
+ * `knowledgeOf`도 `settlingOf`도 그를 찾지 못한다. 오차는 `(seed, 선수 id)` 해시라
+ * 같은 후보를 몇 번을 물어도 같은 구간이 나온다.
+ */
+export function youthCandidateFog(
+  seed: number,
+  player: GamePlayer,
+): { overall: number; potential: PotentialBand } {
+  const knowledge: Knowledge = "adapting";
+  const overallMargin = marginFor("overall", knowledge);
+  const overall = observedOverall(player.attributes.overall, {
+    overallOffset: offsetFor(seed, player.id, "overall", overallMargin),
+  });
+  // `adapting`은 표에서 결코 `null`이 아니다 — 폭을 짐작조차 못 하는 것은 `rumoured`뿐이다
+  const margin = POTENTIAL_MARGIN[knowledge] ?? POTENTIAL_FLOOR;
+  const truth = player.attributes.potential;
+  const center = truth + offsetFor(seed, player.id, "potential", Math.floor(margin / 2));
+  return {
+    overall,
+    potential: {
+      // 하한은 관측 종합 아래로 내려가지 않는다 — 이미 가진 것을 못 가질 수는 없다
+      low: Math.max(Math.min(truth, overall), center - margin),
+      high: Math.min(99, Math.max(truth, center + margin)),
+      margin,
+      confidence: potentialConfidence(margin),
+    },
+  };
+}
+
 export function potentialView(state: GameState, player: GamePlayer): string {
   const band = potentialBand(state, player);
   if (!band) return "미지 (성장 여력을 짐작할 근거가 없다)";

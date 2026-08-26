@@ -48,6 +48,7 @@ import type {
   Negotiation,
   PressConference,
   RetiredPlayer,
+  YouthCandidate,
   ScoutReport,
   ScoutReportCard,
   SeasonAward,
@@ -892,6 +893,15 @@ export interface GameState {
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   retired?: RetiredPlayer[];
+  /**
+   * **여름의 유스 후보** — 아직 답하지 않은 인테이크 (season.md §6).
+   *
+   * 전환이 프리시즌 첫날에 세우고 선수단 소집일에 정리한다. 감독 팀의 것만 담는다 —
+   * AI 구단은 전환이 그 자리에서 결정하므로 기다릴 답이 없다. 계약 전이라 후보의
+   * 사람이 여기 통째로 들어 있고, 계약이 서면 그대로 `players`로 옮겨 앉는다.
+   * 옛 세이브엔 없다 (빈 배열 — SAVE_VERSION 유지).
+   */
+  youthCandidates?: YouthCandidate[];
 
   // ── 서사 ──
   /**
