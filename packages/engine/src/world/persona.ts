@@ -15,7 +15,7 @@ import {
 } from "@story-fm/domain";
 import { realCoachNameOf } from "../data/coach-seeds";
 import { realOwnerNameOf } from "../data/owner-seeds";
-import { WORLD_FIGURE_SEEDS, type WorldFigureSeed } from "../data/world-figures";
+import { WORLD_FIGURE_SEEDS, isWorldFigureName, type WorldFigureSeed } from "../data/world-figures";
 import { MARKET_LEAGUE_SQUADS } from "../data/market-leagues";
 import { claimPersonaName, personaNamePoolOf } from "../data/names";
 import { countryOfTeam } from "../data/team-catalog";
@@ -227,18 +227,25 @@ export function inventPersonName(rng: () => number, teamId: string, taken?: Set<
 /**
  * 이미 서 있는 사람들의 이름 — 가상 감독 이름을 뽑을 때 피해야 할 집합이다.
  *
- * 벤치의 감독 전원과 세이브의 페르소나, 감독(유저) 본인까지 담는다. 선수 이름은
- * 담지 않는다 — 선수 풀과 인물 풀은 성을 나눠 가져 조합이 겹칠 수 없다 (people.md §2).
+ * 벤치의 감독 전원과 세이브의 페르소나, 감독(유저) 본인, 그리고 **무직 감독 풀에
+ * 앉은 사람들**까지 담는다. 선수 이름은 담지 않는다 — 선수 풀과 인물 풀은 성을
+ * 나눠 가져 조합이 겹칠 수 없다 (people.md §2).
+ *
+ * ⚠️ **풀을 빼면 안 된다.** 무직인 사람은 벤치에 없어서 눈에 띄지 않지만 세계에
+ * 있고, 이름이 곧 `characterId`(전역 유일)다. 지어낸 후임이 그 이름을 받으면 두
+ * 사람이 한 사람으로 읽히고, 그가 다시 부임하는 날 같은 이름이 벤치 둘에 앉는다.
  */
 export function occupiedPersonNames(state: {
   teams: Array<{ managerName?: string }>;
   personas?: Persona[];
   manager?: { name: string };
+  managerPool?: ReadonlyArray<{ name: string }>;
 }): Set<string> {
   return new Set([
     ...state.teams.map((t) => t.managerName).filter((n): n is string => n !== undefined),
     ...(state.personas ?? []).map((p) => p.name),
     ...(state.manager !== undefined ? [state.manager.name] : []),
+    ...(state.managerPool ?? []).map((e) => e.name),
   ]);
 }
 
@@ -588,32 +595,46 @@ export function rivalVoiceOf(
   state: {
     seed: number;
     userTeamId: string;
-    teams: readonly { id: string; managerName?: string }[];
+    teams: readonly { id: string; managerName?: string; managerPersonaSeat?: string }[];
+    managerPool?: readonly { name: string }[];
   },
   teamId: string,
 ): RivalVoiceCard | null {
   if (teamId === state.userTeamId) return null;
-  const name = state.teams.find((t) => t.id === teamId)?.managerName;
+  const bench = state.teams.find((t) => t.id === teamId);
+  const name = bench?.managerName;
   if (name === undefined || name === "") return null;
   const persona =
-    worldFigureByName(state, name) ?? generateVirtualManager(state.seed, teamId, name);
+    worldFigureByName(state, name) ??
+    generateVirtualManager(state.seed, name, bench?.managerPersonaSeat);
   const key = MANAGER_ARCHETYPE_OF_LABEL[persona.archetype];
   const archetype = MANAGER_ARCHETYPES.find((a) => a.key === key);
   return archetype ? { name, code: archetype.voice.code, chance: archetype.voice.chance } : null;
 }
 
 /**
- * 가상 감독을 만든다 — **저장하지 않고 (시드, 팀, 이름)에서 파생한다** (people.md §2).
+ * 가상 감독을 만든다 — **저장하지 않고 (시드, 이름)에서 파생한다** (people.md §2).
  *
  * 선수 페르소나와 같은 규약이다: 리그 95개 벤치분 카드를 세이브에 넣을 이유가 없고,
- * 생성이 결정적이라 파생으로 충분하다. **이름이 채널에 들어가는 것이 핵심이다** —
- * 경질로 `managerName`이 갈리면 후임은 전임과 독립인 추첨을 받는다.
+ * 생성이 결정적이라 파생으로 충분하다. **채널에 팀이 없는 것이 핵심이다** — 감독은
+ * 자리가 아니라 사람이라 잘렸다가 다른 벤치에 다시 서도 같은 원형·같은 말투다
+ * (→ ../../../../docs/simulation/transfer.md §7 「감독 풀」). 이름이 채널의 전부이므로
+ * 경질 후임은 전임과 독립인 추첨을 받는다.
  *
  * 키워드는 명부 인물의 규칙을 따른다(전체 이름 + 성) — 이름 조각을 전부 담으면
  * 흔한 이름 조각이 남의 문장에 걸려 한 턴 상한 3장을 남의 이름이 먹는다.
+ *
+ * @param personaSeat 옛 채널의 팀 — 채널이 `(시드, 팀, 이름)`이던 시절의 세이브만
+ *                    든다 (`GameTeam.managerPersonaSeat`). 그 표식이 있으면 그때
+ *                    서 있던 사람을 그대로 돌려준다.
  */
-export function generateVirtualManager(seed: number, teamId: string, name: string): Persona {
-  const rng = makeRng(seed, `persona:manager:${teamId}:${name}`);
+export function generateVirtualManager(seed: number, name: string, personaSeat?: string): Persona {
+  const rng = makeRng(
+    seed,
+    personaSeat === undefined
+      ? `persona:manager:${name}`
+      : `persona:manager:${personaSeat}:${name}`,
+  );
   const archetype = pick(rng, MANAGER_ARCHETYPES);
   const parts = name.split(/\s+/u);
   const surname = parts[parts.length - 1] ?? "";
@@ -692,6 +713,8 @@ interface SpeakerSource {
   negotiations?: Array<{ gamePlayerId: string; status: string }>;
   /** 가상 감독 판정용 — 없으면(축약 픽스처) 타 팀 벤치가 사전에 서지 않는다 */
   teams?: Array<{ id: string; managerName?: string }>;
+  /** 명부 감독이 지금 세계에 서 있는지 — 잘려서 풀에 앉은 사람도 이름을 갖는다 */
+  managerPool?: ReadonlyArray<{ name: string }>;
 }
 
 /**
@@ -997,16 +1020,48 @@ function worldFigurePersonaOf(seed: WorldFigureSeed): Persona {
 }
 
 /**
+ * 명부가 사는 세계 — **어디에 서 있는가를 묻는 쪽의 타입** (people.md §2-1).
+ *
+ * `teams`가 optional인 이유: 에이전트 한 사람을 뽑는 자리(`agentForPlayer`)처럼
+ * 벤치를 들고 있지 않은 호출부가 있고, 그 자리가 묻는 시드에는 벤치가 애초에 없다.
+ */
+interface WorldFigureScope {
+  userTeamId: string;
+  teams?: readonly { id: string; managerName?: string }[];
+  managerPool?: readonly { name: string }[];
+}
+
+/**
+ * 이 명부 인물이 **지금 세계에 서 있는가** (people.md §2-1).
+ *
+ * 감독만 자리를 묻는다 — 어느 벤치의 `managerName`이거나 무직 감독 풀에 있으면
+ * 세계의 사람이고, 둘 다 아니면 없는 사람이다. 세계 생성 때 유저가 맡은 팀의 명부
+ * 감독이 그 자리다: 그 벤치를 감독(유저)이 받았으므로 어디에도 서지 못했다.
+ * 에이전트·해설은 구단의 자리가 아니라 언제나 세계에 있다.
+ *
+ * 벤치를 모르는 호출부는 **시드가 적은 팀**으로 떨어진다 — 감독이 옮겨 다니기
+ * 전까지는 같은 답이고, 그런 호출부는 감독 시드를 묻지 않는다.
+ */
+function figureStands(state: WorldFigureScope, seed: WorldFigureSeed): boolean {
+  if (seed.role !== "manager") return true;
+  if (state.teams === undefined) return seed.teamId !== state.userTeamId;
+  return (
+    state.teams.some((t) => t.id !== state.userTeamId && t.managerName === seed.name) ||
+    (state.managerPool ?? []).some((e) => e.name === seed.name)
+  );
+}
+
+/**
  * 이 세이브가 사는 세계의 명부 (people.md §2-1).
  *
  * **세이브에 넣지 않는다** — 불변 초기치라 읽는 자리에서 파생하고, 표를 비우면 그
  * 인물은 세계에서 사라진다. 코치·구단주 시드와 같은 청산 구조다.
  *
- * 한 사람만 빠진다: **유저가 맡은 팀의 감독**이다. 그 자리를 감독(유저)이 받았으므로
- * 이 세계에 부임한 적이 없는 사람이다.
+ * 감독은 **지금 어디 있는가**로 걸러진다(`figureStands`) — 잘려도 풀에 남아 있는
+ * 한 세계의 사람이고, 어디에도 서지 못한 사람만 빠진다.
  */
-export function worldFigures(state: { userTeamId: string }): Persona[] {
-  return WORLD_FIGURE_SEEDS.filter((f) => f.teamId !== state.userTeamId).map(worldFigurePersonaOf);
+export function worldFigures(state: WorldFigureScope): Persona[] {
+  return WORLD_FIGURE_SEEDS.filter((f) => figureStands(state, f)).map(worldFigurePersonaOf);
 }
 
 /**
@@ -1020,7 +1075,7 @@ export function worldFigures(state: { userTeamId: string }): Persona[] {
  * 명부에 에이전트가 한 사람도 없으면 `null`이다 — 코어는 화자를 지어내지 않는다.
  */
 export function agentForPlayer(
-  state: { userTeamId: string; seed: number },
+  state: WorldFigureScope & { seed: number },
   playerId: string,
 ): Persona | null {
   const agents = worldFigures(state).filter((f) => f.role === "agent");
@@ -1029,9 +1084,9 @@ export function agentForPlayer(
 }
 
 /** 명부에서 이 이름을 찾는다 — 이력을 다시 그릴 때의 입구 (`characterEntryOf`) */
-export function worldFigureByName(state: { userTeamId: string }, name: string): Persona | null {
-  const seed = WORLD_FIGURE_SEEDS.find((f) => f.name === name && f.teamId !== state.userTeamId);
-  return seed ? worldFigurePersonaOf(seed) : null;
+export function worldFigureByName(state: WorldFigureScope, name: string): Persona | null {
+  const seed = WORLD_FIGURE_SEEDS.find((f) => f.name === name);
+  return seed && figureStands(state, seed) ? worldFigurePersonaOf(seed) : null;
 }
 
 /**
@@ -1062,6 +1117,36 @@ export function reseatClubPersonas(
     generateOwner(state.seed, teamId),
     ...(options.crossedLeague ? generateReporters(state.seed, teamId) : []),
   ];
+}
+
+/**
+ * 로드 보정 — **옛 사람됨 채널을 쓰던 세이브의 벤치에 자리 표식을 심는다**
+ * (people.md §2 · transfer.md §7 「감독 풀」).
+ *
+ * 가상 감독의 사람됨 채널이 `(시드, 팀, 이름)`에서 `(시드, 이름)`으로 바뀌었다.
+ * 그대로 두면 진행 중인 세이브의 AI 감독 전원이 하루아침에 다른 원형을 갖는다 —
+ * 이름은 그대로인데 사람이 갈리는 것이라, 감독이 시즌 내내 상대한 벤치가 통째로
+ * 낯설어진다.
+ *
+ * **가르는 표식은 `managerPool`의 유무 하나다.** 새 게임은 빈 배열로 서고, 이
+ * 보정이 지나간 세이브도 빈 배열이 되므로, `undefined`인 세이브는 풀이 생기기
+ * 전에 저장된 것 — 곧 옛 채널의 세계다. 멱등이라 두 번 돌아도 같다.
+ *
+ * 명부 감독의 벤치는 건너뛴다 — 그들의 사람됨은 추첨이 아니라 표가 적으므로
+ * 채널이 바뀌어도 갈릴 것이 없다 (people.md §2-1).
+ */
+export function ensureManagerPool(state: {
+  userTeamId: string;
+  managerPool?: unknown[];
+  teams: Array<{ id: string; managerName?: string; managerPersonaSeat?: string }>;
+}): void {
+  if (state.managerPool !== undefined) return;
+  for (const team of state.teams) {
+    if (team.id === state.userTeamId || team.managerName === undefined) continue;
+    if (isWorldFigureName(team.managerName)) continue;
+    team.managerPersonaSeat ??= team.id;
+  }
+  state.managerPool = [];
 }
 
 /**

@@ -31,7 +31,7 @@ import {
 import { SaveSchema } from "./save-schema";
 import { saveLockPath } from "./save-lock";
 import type { GamePhase, GameState } from "./state";
-import { ensurePersonas } from "../world/persona";
+import { ensureManagerPool, ensurePersonas } from "../world/persona";
 import { ensureSquadNumbers } from "../squad/numbers";
 import { deriveNationality, playerCatalog } from "../world/catalog";
 import { addMissingClubs, ensureSeededManagers, recomputeOverall, teamNameIn } from "./state";
@@ -423,6 +423,12 @@ function migrate(save: Record<string, unknown>, state: GameState): void {
   // 페르소나 도입 — 수석코치가 없던 세이브를 채운다. 생성이 시드로 결정적이라
   // 그 세이브의 코치는 늘 같은 사람이고, 그래서 버전을 올리지 않아도 된다.
   ensurePersonas(state);
+  /**
+   * 감독 풀 도입 — 사람됨 채널이 `(시드, 팀, 이름)`이던 시절의 벤치에 자리 표식을
+   * 심는다 (people.md §2). **`ensureSeededManagers` 앞이어야 한다**: 그 보정이 새로
+   * 채우는 빈 벤치는 사람됨이 없던 자리라 표식을 받으면 안 된다.
+   */
+  ensureManagerPool(state);
   // 세계 인물 명부 도입 — 이름 없이 서 있던 AI 구단 벤치에 명부의 감독을 채운다.
   // 명부가 결정적이라 채워도 그 세이브의 사람은 같다 (people.md §2-1).
   ensureSeededManagers(state);
