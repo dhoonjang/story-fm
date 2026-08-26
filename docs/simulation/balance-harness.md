@@ -57,7 +57,7 @@ pnpm balance --report out  # 전부 돌리고 측정값을 out/에 남긴다 (�
 | `finance-multi-season` | 세 시즌을 굴려도 가라앉는 리그가 없다                                  | [finance](finance.md) §10.3     |
 | `ai-fitness`           | 한 시즌 뒤 AI 스쿼드 체력 · 출전 분산                                  | [match](match.md) §7            |
 | `ai-bench`             | 감독의 경기에서 상대 벤치가 쓰는 교체 수·시점·갈래                     | [match](match.md) §2            |
-| `ai-market`            | 한 시즌 팀당 이적·임대 건수 · 여름 비중 · 우리 선수에게 선 관심과 전환 | [transfer](transfer.md) §6·§1-2 |
+| `ai-market`            | 한 시즌 팀당 이적·임대 건수 · 여름 비중 · 관심과 전환 · AI의 사전 계약 | [transfer](transfer.md) §6·§1-2 |
 | `incoming-offers`      | 한 시즌 우리 선수에게 온 오퍼 — 수 · 마감 주 비중 · 큰 무대 비중 · 값  | [transfer](transfer.md) §1-3    |
 | `manager-market`       | 한 시즌 감독 경질 구단 수                                              | [transfer](transfer.md) §7      |
 | `negotiation`          | 재계약·해지·영입의 성사 확률 분포 — 기대치를 맞춘 제안이 자동 통과인가 | [transfer](transfer.md) §3      |
