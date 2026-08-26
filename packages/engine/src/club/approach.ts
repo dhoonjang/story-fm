@@ -4,12 +4,14 @@ import type {
   ApproachContext,
   ApproachPressure,
   ApproachTopic,
+  BoardExpectationCode,
   GamePlayer,
   ManagerPromise,
   Negotiation,
   PlayerIssue,
   PressFact,
   PressStance,
+  SeasonRecord,
 } from "@story-fm/domain";
 import { ageOf, isReserveMatch } from "@story-fm/domain";
 import {
@@ -24,6 +26,8 @@ import {
 import type { GameState } from "../core/state";
 import {
   activeContract,
+  financeOf,
+  managedTeamId,
   openFinanceDemand,
   pendingContractOf,
   playerById,
@@ -37,7 +41,7 @@ import {
   withdrawTransferRequest,
 } from "../core/state";
 import { makeRng } from "../core/rng";
-import { diffDays } from "../competition/calendar";
+import { buildSeasonCalendar, diffDays } from "../competition/calendar";
 import { boardExpectation, computeStandings } from "../competition/season";
 import { formLabel } from "../squad/form";
 import { issueReasonText } from "../squad/mood";
@@ -167,6 +171,18 @@ const BAND_STEP_CAP = 3;
 
 /** 상태에 남기는 지난 다가옴 수 — 그 뒤는 서사에만 남는다 (회견과 같은 규약) */
 const KEPT_APPROACHES = 20;
+
+/**
+ * 시즌 리뷰 면담이 설 수 있는 창 — **프리시즌 시작일부터 이 날 수 안의 첫 하루**
+ * (career.md §5). 창 안에 소음의 문이 한 번도 열리지 않으면 그 시즌 면담은 없다.
+ */
+const REVIEW_WINDOW_DAYS = 7;
+
+/**
+ * 시즌 리뷰의 계단 — **고정이다.** 사다리를 타지 않는 자리라 이 값이 하는 일은 폭
+ * 하나다: `APPROACH_BAND(3) × 2` = 6 (career.md §5 「시즌 리뷰 면담」).
+ */
+const SEASON_REVIEW_STEP = 2;
 
 /** 라커룸이 식었다고 보는 1군 평균 폼 */
 const MORALE_COLD = -0.2;
@@ -862,7 +878,14 @@ export function tickApproaches(state: GameState, digest: string[]): boolean {
    * **감독이 지나친 날에는 다음 사람이 오지 않는다.** 하루 한 건의 문과 같은 뜻이다 —
    * 한 대화가 답 없이 닫힌 그날 다른 대화가 열리면, 방치의 결과가 소음으로 읽힌다.
    */
-  return gaveUp ? false : openApproach(state, digest);
+  if (gaveUp) return false;
+  /**
+   * 시즌 리뷰 면담 — **달력이 여는 자리라 압력보다 앞에 선다** (career.md §5).
+   * 프리시즌 첫 주에 다른 자리와 겹치면 시즌에 한 번뿐인 쪽이 먼저다: 압력이 여는
+   * 자리는 내일도 열리지만 이 자리는 창이 지나면 그 시즌엔 없다.
+   */
+  if (openSeasonReview(state, digest)) return true;
+  return openApproach(state, digest);
 }
 
 /**
@@ -1181,6 +1204,189 @@ function openApproach(state: GameState, digest: string[]): boolean {
   return false;
 }
 
+// ── 시즌 리뷰 면담 ─────────────────────────────────────────────
+
+/**
+ * 지난 시즌의 보드 평가 — **그 줄이 든 카드가 원본이다** (career.md §6).
+ *
+ * 카드가 없는 옛 줄에서만 지금의 체급 표로 읽는다: 그 시즌의 기대가 어디에도 남아
+ * 있지 않아 최종 순위 하나로는 달성/미달을 가를 수 없다.
+ */
+function seasonVerdictOf(
+  state: GameState,
+  record: SeasonRecord,
+): { rank: number; target: number; grade: "met" | "missed"; code?: BoardExpectationCode } {
+  const board = record.board;
+  if (board) {
+    return {
+      rank: board.position,
+      target: board.target,
+      grade: board.grade,
+      ...(board.expectationCode ? { code: board.expectationCode } : {}),
+    };
+  }
+  const expectation = boardExpectation(state, record.teamId);
+  return {
+    rank: record.position,
+    target: expectation.target,
+    grade: record.position <= expectation.target ? "met" : "missed",
+    code: expectation.code,
+  };
+}
+
+/**
+ * 지난 시즌 구단주 요청의 이행·불이행 (career.md §5.2) — **발행일로 가른다.**
+ *
+ * 이적창은 시즌 안에서 열고 닫히므로 「지난 시즌의 프리시즌 시작일부터 이번 시즌의
+ * 그날 전까지」가 곧 그 시즌이다. 한 건도 없으면 카드가 서지 않는다 — 구단주가
+ * 걸지 않은 조건을 0건으로 세는 것은 사실이 아니라 빈 줄이다.
+ */
+function demandsKeptFact(state: GameState): PressFact | null {
+  const from = buildSeasonCalendar(state.season - 1).preseasonStart;
+  const until = state.calendar.preseasonStart;
+  const rows = (state.boardDemands ?? []).filter((d) => d.issuedOn >= from && d.issuedOn < until);
+  if (rows.length === 0) return null;
+  return {
+    kind: "demands-kept",
+    data: {
+      values: {
+        total: rows.length,
+        met: rows.filter((d) => d.status === "met").length,
+        failed: rows.filter((d) => d.status === "failed").length,
+      },
+    },
+    about: null,
+    sharp: false,
+  };
+}
+
+/**
+ * **시즌이 끝나면 구단주가 마주 앉는다** (career.md §5 「시즌 리뷰 면담」).
+ *
+ * 다가옴에서 **압력이 아니라 달력이 여는 유일한 자리**다 — 눈금이 없으므로 계단도
+ * 압력 줄도 서지 않고, 시즌당 한 번 프리시즌 첫 주에 선다. 그래도 **소음의 문 넷은
+ * 그대로 지난다**: 문에 막힌 날은 열리지 않고 창 안에서 다음 날 다시 온다.
+ */
+function openSeasonReview(state: GameState, digest: string[]): boolean {
+  // 무직에게는 마주 앉을 구단주가 없다 — 보드도 이제 남의 것이다 (career.md §5.1)
+  if (managedTeamId(state) === null) return false;
+  const since = diffDays(state.calendar.preseasonStart, state.date);
+  if (since < 0 || since >= REVIEW_WINDOW_DAYS) return false;
+  /**
+   * **무직으로 맞은 시즌엔 열리지 않는다** — 그 시즌은 `SEASON_RECORD`를 남기지
+   * 않으므로, 마지막 줄이 지난 시즌 우리 것인가 하나가 그 조건을 함께 지킨다.
+   */
+  const record = state.seasonRecords[state.seasonRecords.length - 1];
+  if (!record || record.season !== state.season - 1 || record.teamId !== state.userTeamId) {
+    return false;
+  }
+  const opened = state.approaches ?? [];
+  // 시즌당 한 번 — 창이 이레라 답한 뒤에도 같은 시즌에 다시 서지 않는다
+  const id = `approach-season-review-${state.season}`;
+  if (opened.some((a) => a.id === id)) return false;
+
+  // ── 소음의 문 넷 — `openApproach`의 것과 같은 자다 (people.md §8) ──
+  if (pendingApproach(state)) return false;
+  const press = pendingPress(state);
+  if (press && diffDays(press.date, state.date) < APPROACH_PATIENCE_DAYS) return false;
+  if (opened.some((a) => a.date === state.date)) return false;
+  const owner = ownerOf(state);
+  const spokeRecently = opened.some(
+    (a) =>
+      a.speakerId === owner.characterId && diffDays(a.date, state.date) < SPEAKER_COOLDOWN_DAYS,
+  );
+  if (spokeRecently) return false;
+
+  const verdict = seasonVerdictOf(state, record);
+  const facts: PressFact[] = [
+    {
+      kind: "season-verdict",
+      data: {
+        values: { season: record.season, rank: verdict.rank, target: verdict.target },
+        tags: verdict.code ? [verdict.grade, verdict.code] : [verdict.grade],
+      },
+      about: null,
+      sharp: true,
+    },
+  ];
+  /**
+   * 항목별 진행도 — **시즌 리뷰가 굳혀 둔 줄을 읽는다** (career.md §5). 여기서 다시
+   * 매기지 않는 이유는 장부가 이미 새 시즌의 것이기 때문이다: 순위표도 출전 분도
+   * 전환이 갈아 끼웠다. 비전이 서기 전의 옛 줄에는 없다(optional).
+   */
+  for (const item of record.board?.items ?? []) {
+    facts.push({
+      kind: "vision",
+      data: {
+        values: { target: item.target, weight: item.weight, progress: item.progress },
+        tags: item.axis ? [item.code, item.axis] : [item.code],
+      },
+      about: null,
+      sharp: false,
+    });
+  }
+  const demands = demandsKeptFact(state);
+  if (demands) facts.push(demands);
+  const warnings = state.manager.boardWarnings ?? 0;
+  if (warnings > 0) {
+    facts.push({
+      kind: "standing",
+      data: { values: { count: warnings, limit: USER_WARNINGS_BEFORE_SACK }, tags: ["warnings"] },
+      about: null,
+      sharp: true,
+    });
+  }
+  /**
+   * **다음 시즌 기대** — 갈래가 바뀌었으면 옛 갈래와 옛 순위가 함께 선다
+   * (career.md §5). 승강이 체급을 옮긴 것을 모르면 구단주가 그 변화를 말할 근거가
+   * 없다 — 같은 6위가 어느 해엔 달성이고 어느 해엔 미달인 이유가 그 줄이다.
+   */
+  const next = boardExpectation(state, state.userTeamId);
+  const before = verdict.code !== undefined && verdict.code !== next.code ? verdict.code : null;
+  facts.push({
+    kind: "standing",
+    data: {
+      values: { rank: next.target, ...(before ? { previous: verdict.target } : {}) },
+      tags: ["board-target", next.code, ...(before ? [before] : [])],
+    },
+    about: null,
+    sharp: true,
+  });
+  facts.push({
+    kind: "budget",
+    data: { values: { budget: financeOf(state, state.userTeamId).transferBudget } },
+    about: null,
+    sharp: false,
+  });
+
+  const contextCard: ApproachContext = {
+    code: "season-review",
+    value: verdict.rank,
+    limit: verdict.target,
+  };
+  const approach: Approach = {
+    id,
+    date: state.date,
+    channel: "owner",
+    topic: "season-review",
+    speakerId: owner.characterId,
+    about: null,
+    contextCard,
+    facts,
+    // 압력 줄을 세우지 않으므로 계단은 오르지 않는다 — 폭만 정하는 고정값이다
+    step: SEASON_REVIEW_STEP,
+    status: "pending",
+  };
+  state.approaches = [...opened, approach].slice(-KEPT_APPROACHES);
+  const line = approachContextText(contextCard);
+  digest.push(
+    `${owner.characterId}(${APPROACH_CHANNEL_LABEL.owner})이(가) 감독을 찾아왔다 — ${line}`,
+  );
+  // 계단 2 — 다른 자리가 같은 계단에서 남기는 눈금과 같다
+  pushNarrative(state, `${owner.characterId} 면담 요청 (${line})`, 3);
+  return true;
+}
+
 // ── 응답 ───────────────────────────────────────────────────────
 
 interface ApproachEffect {
@@ -1210,6 +1416,13 @@ function closeApproach(
     targetPlayerId: approach.about,
     axes: APPROACH_AXES[approach.channel],
   });
+
+  /**
+   * **시즌 리뷰는 압력 줄을 세우지 않는다** (career.md §5) — 달력이 연 자리라 되돌릴
+   * 눈금도 오를 계단도 없고, 옮기는 것은 위에서 치른 보드 평판뿐이다. 줄을 찾지
+   * 못해 지나가는 것과 결과는 같지만, 없는 줄을 찾는 코드는 언젠가 그 줄을 만든다.
+   */
+  if (approach.topic === "season-review") return effect;
 
   const row = pressures(state).find(
     (r) => r.topic === approach.topic && r.subject === subjectOf(approach),
@@ -1340,9 +1553,17 @@ export function describePendingApproach(state: GameState): string | null {
   const a = pendingApproach(state);
   if (!a) return null;
   const waited = diffDays(a.date, state.date);
+  /**
+   * **사다리를 타지 않는 자리에는 계단을 싣지 않는다** (career.md §5) — 시즌 리뷰의
+   * 2는 폭을 정하는 고정값이라, 「2/3」이라 쓰면 모델은 오르지 않을 칸을 읽는다.
+   */
+  const ladder =
+    a.topic === "season-review"
+      ? ""
+      : ` · 계단 ${a.step}/${topStepOf(a.topic)}${a.step >= 3 ? " · 큰 자리다" : ""}`;
   return [
     `${a.speakerId}(${APPROACH_CHANNEL_LABEL[a.channel]}) · ${contextTextOf(state, a)}` +
-      ` · 계단 ${a.step}/${topStepOf(a.topic)}${a.step >= 3 ? " · 큰 자리다" : ""}` +
+      ladder +
       (waited > 0 ? ` · ${waited}일째 기다린다` : ""),
     `그가 아는 사실 (이 밖은 말하지 못한다):`,
     ...a.facts.map(
