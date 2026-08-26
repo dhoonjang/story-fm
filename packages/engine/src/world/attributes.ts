@@ -368,11 +368,17 @@ export function attributeGainScale(
 
   const byRoom = normalizedLogCurve(room / ROOM_FULL, ROOM_LOG_SCALE);
   const byLevel = normalizedLogCurve((100 - value) / (100 - LEVEL_FLOOR), LEVEL_LOG_SCALE);
-  // 축의 시계 — 이미 꺾이는 축은 훈련해도 덜 붙고, 늦게까지 크는 축은 조금 더 붙는다
-  const aging = agingDelta(axis, age);
-  const byAxis = aging < 0 ? 0.6 : aging > 0 ? 1.15 : 1;
+  return byRoom * byLevel * ageGrowthFactor(age) * axisClockFactor(axis, age);
+}
 
-  return byRoom * byLevel * ageGrowthFactor(age) * byAxis;
+/**
+ * 축의 시계 — 이미 꺾이는 축은 훈련해도 덜 붙고(×0.6), 늦게까지 크는 축은 조금 더
+ * 붙는다(×1.15). 결산 판정과 월간 성장이 **같은 표**를 읽는다 (player.md §6.2·§6.3) —
+ * 한쪽만 다른 배율을 들면 우리 1군과 나머지 세계가 다른 시계로 자란다.
+ */
+export function axisClockFactor(axis: AttributeAxis, age: number): number {
+  const aging = agingDelta(axis, age);
+  return aging < 0 ? 0.6 : aging > 0 ? 1.15 : 1;
 }
 
 /**

@@ -572,6 +572,8 @@ function runTimeline(input: TimelineInput): {
     if (next > t) {
       packet ??= buildStrengthPacket(sideInput("home"), sideInput("away"), {
         neutral: input.neutral,
+        // 골 정지점마다 다시 세운다 — 골 차의 노출은 구간 시뮬과 같은 문을 지난다
+        lead: score.home - score.away,
       });
       const density = input.densityOf(next);
       const rolled: QuickShot[] = [];
@@ -610,7 +612,11 @@ function runTimeline(input: TimelineInput): {
       weighted.away += packet.guide.possession.away * (cut - t);
       totalMinutes += cut - t;
       t = cut;
-      if (goalAt !== undefined) stop = "goal";
+      if (goalAt !== undefined) {
+        stop = "goal";
+        // 스코어가 움직였다 — 경기 상황 노출(`gameStateExposure`)이 다음 패킷에 실린다
+        packet = null;
+      }
     }
 
     // 이 분에 예정된 카드 — 수신자는 지금 그라운드에 선 사람 중에서

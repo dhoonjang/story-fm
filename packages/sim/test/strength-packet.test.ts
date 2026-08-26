@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { ATTRIBUTE_AXES, matchupText, packetTagContext, packetTagText } from "@story-fm/domain";
 import {
+  ABILITY_LOG_SLOPE,
+  ABILITY_PIVOT,
+  LEAD_SHOT_LOG_RATE,
+  TRAIL_SHOT_LOG_RATE,
+  abilityCurve,
   addFocused,
   buildStrengthPacket,
+  gameStateExposure,
   edgeOf,
   famFactor,
   instructionUptake,
@@ -654,13 +660,63 @@ describe("전력차와 총 기대 득점", () => {
     // 국내 컵의 1부 대 2부
     expect(sumOf(84, 67).total).toBeLessThan(4.8);
     // 존재하지 않는 격차 — 그래도 선형 언저리를 넘지 않는다
-    expect(sumOf(90, 60).total).toBeLessThan(6.6);
+    expect(sumOf(90, 60).total).toBeLessThan(7);
   });
 
   it("총량은 눌러도 승부의 기울기는 남는다", () => {
     expect(sumOf(78, 72).ratio).toBeGreaterThan(1.5);
     expect(sumOf(82, 68).ratio).toBeGreaterThan(sumOf(78, 72).ratio);
     expect(sumOf(86, 64).ratio).toBeGreaterThan(sumOf(82, 68).ratio);
+  });
+
+  /**
+   * **전력 곡선은 평점의 지수다** (match.md §1.1 — Maher·Dixon–Coles의 로그선형 득점
+   * 모델). 축에서는 그대로이고, 두 팀의 전력 비는 평점 **차**의 지수라 같은 5점 차는
+   * 60 대 65에서도 80 대 85에서도 같다 — 축의 위치는 비율에 닿지 않는다.
+   */
+  it("전력 곡선 — 축에서는 그대로, 전력 비는 평점 차의 지수다", () => {
+    expect(abilityCurve(ABILITY_PIVOT)).toBeCloseTo(ABILITY_PIVOT);
+    expect(abilityCurve(0)).toBe(0);
+    const ratio = abilityCurve(80) / abilityCurve(72);
+    expect(ratio).toBeCloseTo(Math.exp(ABILITY_LOG_SLOPE * 8));
+    // 같은 점 차면 눈금의 어디에서든 같은 폭이다 — 비율의 거듭제곱은 아래를 더 크게 셌다
+    expect(abilityCurve(60) / abilityCurve(52)).toBeCloseTo(ratio);
+    expect(abilityCurve(90) / abilityCurve(82)).toBeCloseTo(ratio);
+    // 리그 안 최대 격차(81 대 69)가 xG 비 3~5:1 — 실제 우승 후보 대 강등권의 눈금이다
+    expect(sumOf(81, 69).ratio).toBeGreaterThan(3);
+    expect(sumOf(81, 69).ratio).toBeLessThan(5);
+  });
+});
+
+/**
+ * **경기 상황 노출** (match.md §1.4) — 앞선 팀은 내려서고 뒤진 팀은 밀어붙인다. 슈팅량의
+ * 로그에 골 차가 선형으로 실리므로 골마다 같은 배가 곱해진다. 슈팅 질에는 닿지 않는다.
+ */
+describe("경기 상황 노출", () => {
+  it("동점과 킥오프는 1, 골마다 같은 배 — 앞선 쪽은 줄고 뒤진 쪽은 는다", () => {
+    expect(gameStateExposure("home", undefined)).toBe(1);
+    expect(gameStateExposure("home", 0)).toBe(1);
+    expect(gameStateExposure("home", 1)).toBeCloseTo(Math.exp(-LEAD_SHOT_LOG_RATE));
+    expect(gameStateExposure("home", 2)).toBeCloseTo(Math.exp(-2 * LEAD_SHOT_LOG_RATE));
+    expect(gameStateExposure("away", 2)).toBeCloseTo(Math.exp(2 * TRAIL_SHOT_LOG_RATE));
+    expect(gameStateExposure("home", -3)).toBeCloseTo(Math.exp(3 * TRAIL_SHOT_LOG_RATE));
+    expect(gameStateExposure("away", -3)).toBeCloseTo(Math.exp(-3 * LEAD_SHOT_LOG_RATE));
+    // 내려서는 폭이 밀어붙이는 폭보다 크다 — 골 차가 벌어지면 경기의 총량이 준다
+    expect(gameStateExposure("home", 2) * gameStateExposure("away", 2)).toBeLessThan(1);
+  });
+
+  it("앞선 팀의 기대 슈팅은 줄고 뒤진 팀은 늘되, 슈팅 질은 그대로다", () => {
+    const level = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75));
+    const ahead = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75), { lead: 2 });
+    const shotsOf = (packet: typeof level) => packet.guide.expectedShots!;
+    const xgOf = (packet: typeof level) => packet.guide.chanceXg!;
+    expect(shotsOf(ahead).home).toBeCloseTo(shotsOf(level).home * gameStateExposure("home", 2), 1);
+    expect(shotsOf(ahead).away).toBeCloseTo(shotsOf(level).away * gameStateExposure("away", 2), 1);
+    // 슈팅 하나의 질은 스코어를 모른다
+    const meanXg = (packet: typeof level, side: "home" | "away") =>
+      xgOf(packet)[side] / shotsOf(packet)[side];
+    expect(meanXg(ahead, "home")).toBeCloseTo(meanXg(level, "home"), 3);
+    expect(meanXg(ahead, "away")).toBeCloseTo(meanXg(level, "away"), 3);
   });
 });
 

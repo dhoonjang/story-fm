@@ -375,7 +375,12 @@ function buildPacketFor(
   return buildStrengthPacket(
     build(match.homeTeamId, pending.ledger.home),
     build(match.awayTeamId, pending.ledger.away),
-    { neutral: match.neutral === true, inMatch },
+    {
+      neutral: match.neutral === true,
+      inMatch,
+      // 구간마다 다시 세우므로 지금 스코어가 곧 다음 구간의 노출이다 (match.md §1.4)
+      lead: pending.ledger.score.home - pending.ledger.score.away,
+    },
   );
 }
 
