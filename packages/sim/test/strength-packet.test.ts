@@ -834,11 +834,17 @@ describe("경기 상황 노출", () => {
     const xgOf = (packet: typeof level) => packet.guide.chanceXg!;
     expect(shotsOf(ahead).home).toBeCloseTo(shotsOf(level).home * gameStateExposure("home", 2), 1);
     expect(shotsOf(ahead).away).toBeCloseTo(shotsOf(level).away * gameStateExposure("away", 2), 1);
-    // 슈팅 하나의 질은 스코어를 모른다
+    /**
+     * 슈팅 하나의 질은 스코어를 모른다 — 노출은 슈팅**량**에만 곱해진다.
+     * 소수 둘째 자리까지만 보는 이유: 페널티는 경기당 총량(`PENALTY_PER_MATCH`)으로
+     * 정규화되어 슈팅 수에 비례하지 않으므로, 내려선 팀은 줄어든 슛 위에 같은 수의
+     * 페널티를 얹어 평균 질이 0.5%쯤 올라간다. 그것은 옳은 동작이다 — 내려섰다고
+     * 상대가 박스에서 덜 넘어뜨리지는 않는다.
+     */
     const meanXg = (packet: typeof level, side: "home" | "away") =>
       xgOf(packet)[side] / shotsOf(packet)[side];
-    expect(meanXg(ahead, "home")).toBeCloseTo(meanXg(level, "home"), 3);
-    expect(meanXg(ahead, "away")).toBeCloseTo(meanXg(level, "away"), 3);
+    expect(meanXg(ahead, "home")).toBeCloseTo(meanXg(level, "home"), 2);
+    expect(meanXg(ahead, "away")).toBeCloseTo(meanXg(level, "away"), 2);
   });
 });
 

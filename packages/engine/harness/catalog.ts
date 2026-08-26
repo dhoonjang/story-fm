@@ -268,9 +268,9 @@ export const MANAGER_MARKET = defineHarness({
 
 export const SQUAD_LONGEVITY = defineHarness({
   id: "squad-longevity",
-  what: "15시즌을 넘긴 뒤에도 구단이 선발 XI·계약을 세우는가",
-  doc: "docs/simulation/season.md §6",
-  cost: "세계 하나 · 전환 15번 · 약 1분 40초",
+  what: "15시즌을 넘긴 뒤에도 구단이 선발 XI·계약을 세우는가 · 리그 체급의 드리프트",
+  doc: "docs/simulation/season.md §6·§9",
+  cost: "세계 하나 · 월간 성장 180번 + 전환 15번 · 약 30초",
   // prettier-ignore
   bands: [
     { metric: "클럽 수", role: "guard", min: 100, unit: "count", why: "표본이 없으면 아래 네 줄이 공허하게 통과한다 — 시드 세계의 클럽 수보다 넉넉히 아래" },
@@ -282,6 +282,12 @@ export const SQUAD_LONGEVITY = defineHarness({
     { metric: "가장 얕은 스쿼드 인원", role: "measure", unit: "count", why: "평균은 한 구단의 고갈을 감춘다" },
     { metric: "가장 얕은 GK 보유", role: "measure", unit: "count", why: "1이면 버틴 것이고 2면 숫자가 살아 있다" },
     { metric: "스쿼드 평균 나이", role: "measure", why: "은퇴와 콜업의 균형 — 해마다 오르면 언젠가 선발 XI가 깨진다" },
+    { metric: "리그 1군 상위 15 종합 — 시작", role: "measure", unit: "score", why: "체급의 출발선 — 아래 두 줄을 읽을 자 (`overall-scale`이 이 분포의 원본을 잰다)" },
+    { metric: "리그 1군 상위 15 종합 — 15시즌 뒤", role: "measure", unit: "score", why: "같은 자로 잰 도착선" },
+    { metric: "시즌당 종합 드리프트", role: "measure", unit: "score", why: "성장과 노화의 수지 — 한 시즌에 리그 체급이 얼마나 움직이는가" },
+    { metric: "리그 1군 상위 15 잠재력 — 시작", role: "measure", unit: "score", why: "체급의 천장 — 종합과 함께 읽어야 드리프트의 원인이 갈린다" },
+    { metric: "리그 1군 상위 15 잠재력 — 15시즌 뒤", role: "measure", unit: "score", why: "같은 자로 잰 도착선" },
+    { metric: "시즌당 잠재력 드리프트", role: "measure", unit: "score", why: "천장 자체가 움직였는가 — 종합만 내려가면 성장이 못 닿은 것이고, 함께 내려가면 여름마다 세계가 건네는 사람이 얇아진 것이다" },
   ],
 });
 
