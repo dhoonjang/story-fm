@@ -1,12 +1,7 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
 import { MATCH_MINUTE_MAX } from "./match";
-import {
-  AXIS_KO,
-  RetirementReasonSchema,
-  type AttributeAxis,
-  type PositionGroup,
-} from "./player";
+import { AXIS_KO, RetirementReasonSchema, type AttributeAxis, type PositionGroup } from "./player";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 import { SQUAD_STATUSES } from "./squad-rules";
 
