@@ -44,31 +44,31 @@ pnpm balance --report out  # 전부 돌리고 측정값을 out/에 남긴다 (�
 목록의 원본은 `pnpm balance --list`다. 여기 적는 것은 어느 문서가 그 밴드의 근거를
 쥐고 있는지뿐이다.
 
-| 하네스                 | 무엇을 재는가                                                                 | 근거                            |
-| ---------------------- | ----------------------------------------------------------------------------- | ------------------------------- |
-| `world-season`         | 한 시즌 득점·슈팅 분포 · 승점 곡선 · 카드                                     | [match](match.md) §7            |
-| `ai-rotation`          | AI 스쿼드 체력 분포 · 로테이션 문턱 발동률                                    | [match](match.md) §7            |
-| `assist-rate`          | 골에 도움이 붙는 비율                                                         | [match](match.md) §7            |
-| `segment-shots`        | 구간 시뮬의 경기당 슈팅이 패킷 기대 슈팅과 같은가                             | [match](match.md) §1.4          |
-| `injury-rate`          | 두 시뮬의 경기당 부상·카드가 같은 눈금인가 · 성향 · 누적 피로                 | [match](match.md) §7            |
-| `finance-tier1`        | tier1 한 시즌 장부 손익 · 현금 · 급여 비중 · 수입                             | [finance](finance.md) §10.1     |
-| `finance-leagues`      | 리그별 잔고 — 어느 리그도 구조적 적자가 아니다                                | [finance](finance.md) §10.3     |
-| `finance-second-tier`  | 리그전을 굴리지 않는 2부의 한 시즌 수지                                       | [finance](finance.md) §9.5      |
-| `finance-multi-season` | 세 시즌을 굴려도 가라앉는 리그가 없다                                         | [finance](finance.md) §10.3     |
-| `ai-fitness`           | 한 시즌 뒤 AI 스쿼드 체력 · 출전 분산 · 감각 · 누적 피로                      | [match](match.md) §7            |
-| `ai-bench`             | 감독의 경기에서 상대 벤치가 쓰는 교체 수·시점·갈래                            | [match](match.md) §2            |
-| `ai-market`            | 한 시즌 팀당 이적·임대 건수 · 여름 비중 · 관심과 전환 · AI의 사전 계약        | [transfer](transfer.md) §6·§1-2 |
-| `incoming-offers`      | 한 시즌 우리 선수에게 온 오퍼 — 수 · 마감 주 비중 · 큰 무대 비중 · 값         | [transfer](transfer.md) §1-3    |
-| `manager-market`       | 한 시즌 감독 경질 구단 수 · 풀에서 다시 선 감독의 비중                        | [transfer](transfer.md) §7      |
-| `negotiation`          | 재계약·해지·영입의 성사 확률 분포 — 기대치를 맞춘 제안이 자동 통과인가        | [transfer](transfer.md) §3      |
-| `squad-longevity`      | 15시즌 뒤의 선발 XI·계약 · 리그 체급과 그 천장의 드리프트                     | [season](season.md) §6·§9       |
-| `youth-development`    | 2군 경기 수 · 출전·집중 육성·멘토링이 가르는 성장 격차 · 다음 여름의 인테이크 | [season](season.md) §2·§6       |
-| `attribute-model`      | 자체 산정 모델이 낸 분포와 지금 시드 분포의 간격                              | [player](../data/player.md) §13 |
-| `demotion-grievance`   | 한 시즌 2군 강등이 낳는 불만 건수 — 로테이션과 방치                           | [people](../data/people.md) §5  |
-| `approach-rate`        | 한 시즌 다가옴 건수 · 채널 분포 · 소음 문이 서는가                            | [people](../data/people.md) §8  |
-| `overall-scale`        | 종합을 읽는 눈금 — 리그별·연령별 분포                                         | [match](match.md) §7            |
-| `history-window`       | 평시 이력의 창 — 몇 턴이 남는가 · 압축 주기 · 렌더 배율                       | [agents](../llm/agents.md) §5-1 |
-| `prompt-regression`    | 프롬프트 층의 글자·프리픽스 안정성 · 장면 문법·스킬                           | [prompts](../llm/prompts.md) §7 |
+| 하네스                 | 무엇을 재는가                                                                  | 근거                                                  |
+| ---------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| `world-season`         | 한 시즌 득점·슈팅 분포 · 승점 곡선 · 카드                                      | [match](match.md) §7                                  |
+| `ai-rotation`          | AI 스쿼드 체력 분포 · 로테이션 문턱 발동률                                     | [match](match.md) §7                                  |
+| `assist-rate`          | 골에 도움이 붙는 비율                                                          | [match](match.md) §7                                  |
+| `segment-shots`        | 구간 시뮬의 경기당 슈팅이 패킷 기대 슈팅과 같은가                              | [match](match.md) §1.4                                |
+| `injury-rate`          | 두 시뮬의 경기당 부상·카드가 같은 눈금인가 · 성향 · 누적 피로                  | [match](match.md) §7                                  |
+| `finance-tier1`        | tier1 한 시즌 장부 손익 · 현금 · 급여 비중 · 수입                              | [finance](finance.md) §10.1                           |
+| `finance-leagues`      | 리그별 잔고 — 어느 리그도 구조적 적자가 아니다                                 | [finance](finance.md) §10.3                           |
+| `finance-second-tier`  | 리그전을 굴리지 않는 2부의 한 시즌 수지                                        | [finance](finance.md) §9.5                            |
+| `finance-multi-season` | 세 시즌을 굴려도 가라앉는 리그가 없다                                          | [finance](finance.md) §10.3                           |
+| `ai-fitness`           | 한 시즌 뒤 AI 스쿼드 체력 · 출전 분산 · 감각 · 누적 피로                       | [match](match.md) §7                                  |
+| `ai-bench`             | 감독의 경기에서 상대 벤치가 쓰는 교체 수·시점·갈래                             | [match](match.md) §2                                  |
+| `ai-market`            | 한 시즌 팀당 이적·임대 건수 · 여름 비중 · 관심과 전환 · AI의 사전 계약         | [transfer](transfer.md) §6·§1-2                       |
+| `incoming-offers`      | 한 시즌 우리 선수에게 온 오퍼 — 수 · 마감 주 비중 · 큰 무대 비중 · 값          | [transfer](transfer.md) §1-3                          |
+| `manager-market`       | 한 시즌 감독 경질 구단 수 · 풀에서 다시 선 감독의 비중 · 재직 감독에게 온 접근 | [transfer](transfer.md) §7 · [career](career.md) §5.1 |
+| `negotiation`          | 재계약·해지·영입의 성사 확률 분포 — 기대치를 맞춘 제안이 자동 통과인가         | [transfer](transfer.md) §3                            |
+| `squad-longevity`      | 15시즌 뒤의 선발 XI·계약 · 리그 체급과 그 천장의 드리프트                      | [season](season.md) §6·§9                             |
+| `youth-development`    | 2군 경기 수 · 출전·집중 육성·멘토링이 가르는 성장 격차 · 다음 여름의 인테이크  | [season](season.md) §2·§6                             |
+| `attribute-model`      | 자체 산정 모델이 낸 분포와 지금 시드 분포의 간격                               | [player](../data/player.md) §13                       |
+| `demotion-grievance`   | 한 시즌 2군 강등이 낳는 불만 건수 — 로테이션과 방치                            | [people](../data/people.md) §5                        |
+| `approach-rate`        | 한 시즌 다가옴 건수 · 채널 분포 · 소음 문이 서는가                             | [people](../data/people.md) §8                        |
+| `overall-scale`        | 종합을 읽는 눈금 — 리그별·연령별 분포                                          | [match](match.md) §7                                  |
+| `history-window`       | 평시 이력의 창 — 몇 턴이 남는가 · 압축 주기 · 렌더 배율                        | [agents](../llm/agents.md) §5-1                       |
+| `prompt-regression`    | 프롬프트 층의 글자·프리픽스 안정성 · 장면 문법·스킬                            | [prompts](../llm/prompts.md) §7                       |
 
 ## 4. ⚠️ 불변식
 
