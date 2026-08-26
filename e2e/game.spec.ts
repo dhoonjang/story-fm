@@ -356,7 +356,7 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   const myRow = page.getByTestId("standings").locator("tr.me");
   await expect(myRow).toContainText("아스날"); // 팀명은 한글로
   // 치른 경기는 친선이라 순위표는 그대로다 — 대회를 세는 자리는 친선을 건너뛴다
-  await expect(myRow.locator("td").nth(2)).toHaveText("0");
+  await expect(myRow.getByTestId("standing-played")).toHaveText("0");
   // 라운드별 일정 — 우리 경기가 표시되고 라운드를 오갈 수 있다
   const fixtures = page.getByTestId("round-fixtures");
   await expect(fixtures.locator(".fixture.ours")).toHaveCount(1);

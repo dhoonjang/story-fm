@@ -156,7 +156,8 @@ function StandingsTable({ competition }: { competition: Competition }) {
                 <td title={zone?.label}>{i + 1}</td>
                 <td className="team-cell">{row.name}</td>
                 {predicted ? <td className="dim-cell">{row.predicted ?? "—"}</td> : null}
-                <td>{box.played}</td>
+                {/* 열 하나가 늘면 자리로 짚던 것이 다 밀린다 — 세는 칸은 이름으로 짚는다 */}
+                <td data-testid="standing-played">{box.played}</td>
                 <td>{box.wins}</td>
                 <td>{box.draws}</td>
                 <td>{box.losses}</td>

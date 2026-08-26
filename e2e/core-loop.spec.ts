@@ -22,7 +22,7 @@ test("시즌 마지막 경기 뒤 하루를 넘기면 새 시즌이 선다", asy
 
   // 지난 시즌은 38라운드를 다 치렀다 — 넘길 것이 남아 있지 않다
   await page.getByTestId("tab-대회").click();
-  const played = page.getByTestId("standings").locator("tr.me td").nth(2);
+  const played = page.getByTestId("standings").locator("tr.me").getByTestId("standing-played");
   await expect(played).toHaveText("38");
   const fixtures = page.getByTestId("round-fixtures").locator(".fixture");
   await page.getByTestId("round-select").selectOption({ index: 0 });
