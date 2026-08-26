@@ -284,7 +284,7 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
       const line = extra.playerStats[player.id];
       // 연장의 퇴장은 그 분에서 시간을 끊는다 — 90분의 규칙 그대로다
       const red = extra.cards.find((c) => c.playerId === player.id && c.card === "red");
-      addToSeasonStat(ensureSeasonStat(state, player.id, teamId), {
+      addToSeasonStat(ensureSeasonStat(state, player.id, teamId, player), {
         goals: countIn(extra.scorers, player.id),
         assists: countIn(extra.assists, player.id),
         minutes: red ? Math.max(0, red.minute - FULL_TIME_MINUTES) : EXTRA_TIME_MINUTES,
@@ -312,7 +312,7 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
     const keeper = xi[side].find((p) => positionGroupOfPlayer(p) === "GK" && started.has(p.id));
     if (!keeper) continue;
     const teamId = side === "home" ? decider.homeTeamId : decider.awayTeamId;
-    const stat = ensureSeasonStat(state, keeper.id, teamId);
+    const stat = ensureSeasonStat(state, keeper.id, teamId, keeper);
     if (stat.cleanSheets) stat.cleanSheets -= 1;
   }
 

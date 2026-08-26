@@ -108,10 +108,12 @@ const DAILY_GAIN: Record<ApproachTopic, number> = {
   contract: 5,
   "out-of-position": 6,
   /**
-   * 어긴 약속 — `blocked-move`와 같은 눈금이다 (people.md §8). 둘 다 **감독의 한 번의
-   * 결정**이 세운 불만이라 기다렸다 잊히는 일이 아니고, 그래서 가장 빠른 축에 선다.
+   * 어긴 약속과 넘긴 등번호 — `blocked-move`와 같은 눈금이다 (people.md §8). 셋 다
+   * **감독의 한 번의 결정**이 세운 불만이라 기다렸다 잊히는 일이 아니고, 그래서
+   * 가장 빠른 축에 선다.
    */
   promise: 9,
+  number: 9,
   interest: 8,
   morale: 8,
   results: 4,
@@ -194,6 +196,7 @@ const CHANNEL_OF: Record<ApproachTopic, ApproachChannel> = {
   "blocked-move": "player",
   "out-of-position": "player",
   promise: "player",
+  number: "player",
   contract: "agent",
   interest: "agent",
   morale: "captain",
@@ -958,19 +961,23 @@ function driftPressure(state: GameState): void {
  * 순서가 하나 있어야** 하기 때문이다.
  */
 const APPROACH_TOPIC_ORDER: Record<ApproachTopic, number> = {
-  /** 감독 자신이 세운 원인이 맨 앞이다 — 어긴 약속은 그가 답할 것이 가장 분명하다 */
+  /**
+   * 감독 자신이 세운 원인이 맨 앞이다 — 어긴 약속도 넘긴 번호도 그가 답할 것이
+   * 가장 분명하다 (people.md §8 — 눈금이 같은 이유와 같다).
+   */
   promise: 0,
-  minutes: 1,
-  demotion: 2,
-  "out-of-position": 3,
-  "losing-run": 4,
-  "early-return": 5,
-  "blocked-move": 6,
-  listed: 7,
-  contract: 8,
-  interest: 9,
-  morale: 10,
-  results: 11,
+  number: 1,
+  minutes: 2,
+  demotion: 3,
+  "out-of-position": 4,
+  "losing-run": 5,
+  "early-return": 6,
+  "blocked-move": 7,
+  listed: 8,
+  contract: 9,
+  interest: 10,
+  morale: 11,
+  results: 12,
 };
 
 /**
@@ -1202,7 +1209,13 @@ export function respondToApproach(
   const promised = input.promise
     ? promisePiece(
         approach.about
-          ? openPromise(state, approach.about, input.promise.kind, input.promise.days)
+          ? openPromise(
+              state,
+              approach.about,
+              input.promise.kind,
+              input.promise.days,
+              input.promise.number,
+            )
           : { ok: false, message: "약속은 당사자에게만 할 수 있습니다" },
       )
     : null;

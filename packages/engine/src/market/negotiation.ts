@@ -55,6 +55,7 @@ import {
   MARKET_NEAR_HIGH,
   MARKET_NEAR_LOW,
   marketValueOf,
+  numberWishHere,
   oddsText,
   responseDelayDays,
   unilateralSeveranceOf,
@@ -77,7 +78,12 @@ import {
 } from "./medical";
 import { isClubTeam } from "../data/team-catalog";
 import { arrivingSquadLevel, canRegisterFor } from "../squad/registration";
-import { assignSquadNumber } from "../squad/numbers";
+import {
+  assignRequestedNumber,
+  assignSquadNumber,
+  numberBlockText,
+  numberLineageOf,
+} from "../squad/numbers";
 import { consumeEarmark, signingBudgetOf, userWageRoom } from "../club/board-request";
 import {
   marketBiasOf,
@@ -149,6 +155,14 @@ export function splitLabel(paymentYears?: number): string {
  */
 export function statusLabel(status?: SquadStatus): string {
   return status === undefined ? "" : ` · ${SQUAD_STATUS_KO[status]} 지위`;
+}
+
+/**
+ * 조건 줄에 붙는 **등번호 요구** 표기 — 분할·지위와 같은 이유로 한 함수다.
+ * 요구가 없으면 빈 문자열: 번호에 뜻을 두지 않는 선수는 이 칸을 비운 채 협상한다.
+ */
+export function numberLabel(squadNumber?: number): string {
+  return squadNumber === undefined ? "" : ` · ${squadNumber}번 요구`;
 }
 
 /**
@@ -747,6 +761,16 @@ export function respondOffer(
     countering && bandOpen(statusBand)
       ? (input.squadStatus ?? statusAtRank(statusBand.expectation))
       : undefined;
+  /**
+   * **번호는 요구지 흥정의 축이 아니다** (transfer.md §3). 상대가 되부를 값이 아니라
+   * 구간도 앵커도 없다 — 원형이 뜻을 두는 선수만(`numberWishOf`) 자기 라운드에 싣고,
+   * 나머지는 칸을 비운 채 협상한다.
+   *
+   * 부르는 번호는 **우리 팀에서 잡을 수 있는 첫 번호**다. 전부 남이 달고 있으면 첫
+   * 지망을 그대로 부른다 — 요구는 요구이고, 그것을 어떻게 만들어 줄지는 감독의
+   * 일이며 도착하는 날의 반려 코드가 그 자리에서 답한다.
+   */
+  const numberAsked = negotiation.kind === "buy" ? demandedSquadNumber(state, player) : undefined;
   const counterSeverance = releasing ? feeAsked : 0;
   const counterFee = renewing || releasing ? 0 : feeAsked;
   const counterWageDemand = renewing ? wageAsked : 0;
@@ -932,6 +956,7 @@ export function respondOffer(
     note: input.note,
     ...(counterYears === undefined ? {} : { paymentYears: counterYears }),
     ...(statusAsked === undefined ? {} : { squadStatus: statusAsked }),
+    ...(numberAsked === undefined ? {} : { squadNumber: numberAsked }),
   });
   return {
     ok: true,
@@ -944,7 +969,7 @@ export function respondOffer(
     }),
     message:
       `${counterpart}의 조정 — 이적료 ${formatMoney(counterFee)}${splitLabel(counterYears)} · 주급 ${formatMoney(counterWage)}` +
-      `${statusLabel(statusAsked)}. 받아들이려면 그 조건으로 오퍼를 다시 넣으세요`,
+      `${statusLabel(statusAsked)}${numberLabel(numberAsked)}. 받아들이려면 그 조건으로 오퍼를 다시 넣으세요`,
   };
 }
 
@@ -2236,7 +2261,13 @@ function executeLoanIn(
   });
   player.teamId = state.userTeamId;
   player.squadNumber = undefined;
-  assignSquadNumber(state.players, player);
+  /**
+   * 임대에는 합의된 번호가 없다 — 번호 요구는 영입 협상의 축이라(transfer.md §3)
+   * 여기서는 자리 관례가 고른다. 그래도 **배정된 번호는 확정 브리프에 선다**:
+   * 도착한 턴에 그 사실이 없으면 GM이 번호를 지어낸다.
+   */
+  const squadNumber = assignSquadNumber(state.players, player);
+  const numberAfter = numberLineageOf(state, state.userTeamId, squadNumber).past[0];
   player.loan = { fromTeamId: from, until, wageShare };
   /**
    * 등록 명단은 **임대에도 걸린다.** 계약의 종류가 아니라 명단의 자리 문제라,
@@ -2252,6 +2283,7 @@ function executeLoanIn(
     message:
       `${player.name}을(를) ${teamName(from)}에서 임대로 데려왔습니다 — ${until}까지 · ` +
       `임대료 ${formatMoney(agreed.fee)} · 주급 ${Math.round(wageShare * 100)}% 부담` +
+      ` · 등번호 ${squadNumber}번` +
       (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
     brief: {
       head: "임대 영입",
@@ -2259,6 +2291,11 @@ function executeLoanIn(
         item({ label: "영입", text: player.name, note: `${teamName(from)} · ${until}까지` }),
         item({ label: "임대료", text: formatMoney(agreed.fee) }),
         item({ label: "주급 부담", text: `${Math.round(wageShare * 100)}%` }),
+        item({
+          label: "등번호",
+          text: `${squadNumber}번`,
+          ...(numberAfter ? { note: `${numberAfter.name} 뒤 · ${numberAfter.seasons}시즌` } : {}),
+        }),
         ...(slot.ok
           ? []
           : [item({ label: "등록", text: "2군", note: registrationBlockText(slot.block) })]),
@@ -2289,6 +2326,33 @@ function agreedSquadStatus(
   if (agreed.squadStatus) return agreed.squadStatus;
   if (negotiation.pitched?.includes("starting_role")) return "starter";
   return derivedSquadStatus(state, player, state.userTeamId);
+}
+
+/**
+ * 선수가 **부르는 등번호** — 원형이 뜻을 두는 선수만 (people.md §6 · transfer.md §3).
+ *
+ * 우리 팀에서 잡을 수 있는 첫 번호이고, 지망이 전부 남의 것이면 첫 지망을 그대로
+ * 부른다. 뜻이 없으면 `undefined`이고 라운드의 칸이 비어 있다.
+ */
+function demandedSquadNumber(state: GameState, player: GamePlayer): number | undefined {
+  const wish = numberWishHere(state, player);
+  if (!wish) return undefined;
+  const open = wish.numbers.find(
+    (number) => numberLineageOf(state, state.userTeamId, number).holder === null,
+  );
+  return open ?? wish.numbers[0];
+}
+
+/**
+ * 합의된 **등번호** — 도착하는 날 이 번호가 자리 관례보다 앞선다 (transfer.md §3).
+ *
+ * 지위(`agreedSquadStatus`)와 달리 감독이 제시하는 축이 아니라 **선수 쪽에서만**
+ * 실리는 요구라, 합의 라운드가 아니라 **번호를 부른 마지막 라운드**를 읽는다:
+ * 합의로 끝나는 협상의 마지막 라운드는 우리 오퍼이고 거기엔 번호 칸이 없다.
+ * 아무도 부르지 않았으면 `undefined` — 그 자리는 자리 관례가 채운다.
+ */
+function agreedSquadNumber(negotiation: Negotiation): number | undefined {
+  return [...negotiation.rounds].reverse().find((r) => r.squadNumber !== undefined)?.squadNumber;
 }
 
 function executeRenewal(
@@ -2822,7 +2886,21 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
   // 돌아가고 계약은 우리 것으로 남는다 (위 관문이 이미 걸렀어도 값은 여기서 끝난다)
   player.loan = undefined;
   player.squadNumber = undefined;
-  assignSquadNumber(state.players, player);
+  /**
+   * **합의된 번호가 자리 관례보다 앞선다** (transfer.md §3). `take` 없이 시도한다 —
+   * 동료의 셔츠를 벗기는 것은 감독의 결정이어야 한다(`set_squad_number`). 막히면
+   * 관례로 떨어지되 **막혔다는 사실이 확정 브리프에 선다**: 조용히 다른 번호를 주면
+   * 감독은 자기가 합의한 것이 지켜졌는지 알 길이 없다.
+   */
+  const wantedNumber = agreedSquadNumber(negotiation);
+  const claim =
+    wantedNumber === undefined ? null : assignRequestedNumber(state, player, wantedNumber);
+  const numberBlock = claim && !claim.ok ? claim.block : null;
+  const squadNumber = claim?.ok
+    ? claim.assignment.number
+    : assignSquadNumber(state.players, player);
+  // 계보의 앞사람 — 물려받은 셔츠인지 아직 아무의 것도 아닌 번호인지가 여기서 갈린다
+  const numberAfter = numberLineageOf(state, state.userTeamId, squadNumber).past[0];
   player.isCaptain = false;
   player.isViceCaptain = undefined;
   /**
@@ -2853,8 +2931,11 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
       (paymentYears === undefined
         ? ""
         : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)})`) +
-      `, 주급 ${formatMoney(agreed.weeklyWage)} ${agreed.contractYears}년${statusLabel(squadStatus)}. ` +
-      `남은 이적 예산 ${formatMoney(ourFinance.transferBudget)}` +
+      `, 주급 ${formatMoney(agreed.weeklyWage)} ${agreed.contractYears}년${statusLabel(squadStatus)}` +
+      ` · 등번호 ${squadNumber}번` +
+      // 합의한 번호를 못 준 사실은 여기서 한 번 더 선다 — 모델이 읽는 줄이다
+      (numberBlock ? ` (요구는 ${numberBlockText(numberBlock)})` : "") +
+      `. 남은 이적 예산 ${formatMoney(ourFinance.transferBudget)}` +
       (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
     brief: {
       head: "영입 완료",
@@ -2873,6 +2954,14 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
           note: `${agreed.contractYears}년`,
         }),
         item({ label: "계약 지위", text: SQUAD_STATUS_KO[squadStatus] }),
+        item({
+          label: "등번호",
+          text: `${squadNumber}번`,
+          ...(numberAfter ? { note: `${numberAfter.name} 뒤 · ${numberAfter.seasons}시즌` } : {}),
+        }),
+        ...(numberBlock
+          ? [item({ label: "요구한 번호", text: numberBlockText(numberBlock) })]
+          : []),
         item({ label: "남은 이적 예산", text: formatMoney(ourFinance.transferBudget) }),
         ...(slot.ok
           ? []

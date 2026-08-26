@@ -103,6 +103,17 @@ export const PressFactKindSchema = z.enum([
   "retirement",
   /** 그 시즌 마지막 홈경기 — 전야는 대진, 경기 뒤는 그가 뛰었는가 (season.md §6) */
   "farewell",
+  /**
+   * **상징 번호가 비었다** — 은퇴·이적으로 1·7·9·10·11 중 하나가 주인을 잃었고,
+   * 원형이 그것을 원하는 선수가 있다 (player.md §1.1 · people.md §6·§7).
+   * `about`이 원하는 선수, `name`이 앞서 그 번호를 달던 사람이다.
+   */
+  "number-open",
+  /**
+   * **번호를 물려받았다** — 계보가 있는 번호를 감독이 누군가에게 줬다.
+   * `about`이 받은 선수, `name`이 앞서 달던 사람, `since`가 몇 시즌 만인가다.
+   */
+  "number-inherited",
 ]);
 /**
  * 회견의 재료 — **사실 한 줄.** 질문이 아니다.
@@ -407,9 +418,10 @@ export const ISSUE_REASON_KO: Record<PlayerIssueReason, string> = {
   contract: "계약 만료",
   "out-of-position": "자리 밖 기용",
   promise: "어긴 약속",
+  number: "등번호",
 };
 
-/** 사유 이름 — 수치를 앞에 다는 것은 연패와 자리 밖 기용뿐이다. 코드가 없으면 `null` */
+/** 사유 이름 — 수치가 이름을 대신하는 것은 셋뿐이다. 코드가 없으면 `null` */
 export function issueReasonKo(
   reason: PlayerIssueReason | null | undefined,
   count?: number | null,
@@ -418,6 +430,8 @@ export function issueReasonKo(
   if (count != null) {
     if (reason === "losing-run") return `${count}연패`;
     if (reason === "out-of-position") return `${count}경기 자리 밖`;
+    // 등번호 불만은 **어느 번호를 잃었나**가 곧 사유다 — "등번호 불만"으로는 그 자리가 서지 않는다
+    if (reason === "number") return `${count}번을 잃었다`;
   }
   return ISSUE_REASON_KO[reason];
 }
@@ -573,7 +587,27 @@ export function pressFactText(fact: PressFact): string {
         return `${name} 마지막 홈경기 — ${sub === "played" ? "출전" : "출전 없음"}`;
       }
       return `${name} 마지막 홈경기${d.date ? ` — ${d.date}` : ""}`;
+    case "number-open":
+      /**
+       * 계보가 없는 공석은 **번호만** 말한다 (player.md §1.1) — 앞서 아무도 달지
+       * 않은 번호에 "앞서 아무도"를 적으면 읽는 쪽이 그 없음을 사실로 옮겨 적는다.
+       */
+      return `${v.number ?? 0}번 공석` + lineageTail(name, v.seasons, v.since);
+    case "number-inherited":
+      return `${v.number ?? 0}번을 물려받았다` + lineageTail(name, v.seasons, v.since);
   }
+}
+
+/**
+ * 계보 꼬리 — **누가 몇 시즌, 몇 시즌 만인가.** 공석과 물려받음이 같은 표를 읽는다:
+ * 두 벌을 두면 같은 계보가 근황에서와 회견에서 다른 말로 선다.
+ */
+function lineageTail(name: string, seasons: number | undefined, since: number | undefined): string {
+  if (!name) return "";
+  return (
+    ` — 앞서 ${name}${seasons === undefined ? "" : `이(가) ${seasons}시즌`}` +
+    (since === undefined ? "" : ` · ${since}시즌 만에`)
+  );
 }
 
 function outcomeWord(tag: string | undefined): string {
