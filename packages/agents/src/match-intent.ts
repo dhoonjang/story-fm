@@ -48,7 +48,7 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 - talk.outcome — reassured(다독임) · motivated(자극) · neutral · disappointed(실망을 드러냄) · angered(질책)
 - teamTalk.outcome — inspired · encouraged · neutral · flat · backfired · feared
 - intensity 1~3 — 말의 세기.
-- teamTalk.occasion — 킥오프 전 pre · 하프타임 half · 종료 후 post · 그 밖 daily.
+- teamTalk.occasion — 킥오프 전 pre · 하프타임 half · 종료 후 post · 그 밖 daily · 굴러가던 중 정지점에서 팀 전체에 던진 짧은 말 shout("정신 차려", "머리 들어", "진정해").
 
 # 판을 바꾸는 것
 - substitutions — 교체. out/in은 <ledger>의 id.
