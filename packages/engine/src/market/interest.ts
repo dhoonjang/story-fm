@@ -4,7 +4,9 @@ import { diffDays } from "../competition/calendar";
 import { makeRng, pickWeighted } from "../core/rng";
 import { squadDepthOf, betterAtPosition, type SquadDepth } from "../squad/depth";
 import {
+  clearCompetingBids,
   clearInterests,
+  competingBidsOn,
   hasIssue,
   interestOf,
   interestsOn,
@@ -16,6 +18,9 @@ import {
   type GameState,
 } from "../core/state";
 import {
+  COMPETING_BID_LIFT,
+  COUNTER_CEILING,
+  competingBidLiftOf,
   deadlineRushOf,
   loanLockOf,
   marketValueOf,
@@ -25,6 +30,7 @@ import {
   windowOpenForTeam,
   SUITORS_MANY,
 } from "./market";
+import { agentProfileOf } from "./agent-profile";
 
 /**
  * **관심 — 오퍼 앞에 서는 사다리** (→ docs/simulation/transfer.md §1-2).
@@ -259,8 +265,62 @@ function standOnTarget(
 }
 
 /**
+ * 협상이 끝난 선수의 경쟁 입찰을 걷는다 — **값은 이 테이블의 압박**이지 선수에게
+ * 붙는 낙인이 아니다 (transfer.md §1-2). 관심의 걷힘과 같은 자를 쓴다.
+ */
+function pruneCompetingBids(state: GameState): void {
+  if ((state.competingBids ?? []).length === 0) return;
+  const targets = new Set(ourTargets(state).map((p) => p.id));
+  clearCompetingBids(state, (bid) => !targets.has(bid.gamePlayerId));
+}
+
+/**
+ * **경쟁 입찰 — 관심이 값을 부른다** (→ docs/simulation/transfer.md §1-2).
+ *
+ * 사다리의 두 번째 걸음이다. 우리가 협상을 열어 둔 선수에게 **밖에 난 관심**
+ * (`enquired` 이상)이 서 있고 그를 곧바로 주전으로 쓸 구단이 `SUITORS_MANY` 이상이면,
+ * 그 선수 대리인의 `competingBidRate`로 하루 한 번 값이 붙는다.
+ *
+ * ⚠️ **구단은 그 관심 줄의 주인이다.** 아무도 모르는 구단이 값을 부를 수는 없다 —
+ * 상대가 그 이름을 말하려면 그 이름이 이미 장부에 서 있어야 한다.
+ *
+ * ⚠️ **주사위가 선 뒤에 세계를 훑는다.** `suitorsOf`는 세계 전체를 재는 자라
+ * (`squadDepthOf`), 확률을 지난 협상에만 물어야 하루가 색인 값이 되지 않는다.
+ */
+export function tickCompetingBids(
+  state: GameState,
+  digest: string[],
+  depthOf: () => SquadDepth = () => squadDepthOf(state),
+): void {
+  pruneCompetingBids(state);
+  const rng = makeRng(state.seed, `competing-bid:${state.date}`);
+  for (const player of ourTargets(state)) {
+    // 밖에 난 관심만 — `watching`은 그 구단이 아직 아무 말도 하지 않은 것이다
+    const rivals = interestsOn(state, player.id).filter((i) => i.stage !== "watching");
+    // 아직 부르지 않은 구단이 먼저 부른다 — 새 이름이 붙는 것이 같은 구단의 재호가보다 큰 사실이다
+    const stood = competingBidsOn(state, player.id);
+    const rival = rivals.find((r) => !stood.some((b) => b.teamId === r.teamId)) ?? rivals[0];
+    if (!rival) continue;
+    if (rng() >= agentProfileOf(state, player.id).competingBidRate) continue;
+    if (suitorsOf(state, player, depthOf()).length < SUITORS_MANY) continue;
+    // 상한에 닿은 판에는 새 줄을 세우지 않는다 — 오르지 않는 사실은 사실이 아니다
+    if (competingBidLiftOf(state, player.id) >= COUNTER_CEILING) continue;
+    (state.competingBids ??= []).push({
+      gamePlayerId: player.id,
+      teamId: rival.teamId,
+      date: state.date,
+      lift: COMPETING_BID_LIFT,
+    });
+    const club = teamNameIn(state, rival.teamId);
+    digest.push(`📰 ${club}가 ${player.name}에게 값을 불렀습니다 — 호가가 올랐습니다`);
+    // 오늘 움직일 일이다 — 오퍼 도착과 같은 눈금 (people.md §9)
+    pushNarrative(state, `${club} — ${player.name} 경쟁 입찰`, 3);
+  }
+}
+
+/**
  * 하루치 관심 — tick이 `generateIncomingOffers` **앞에서** 부른다.
- * 걷고, 올리고, 세운다. 오늘 선 줄은 오늘 오르지 않는다(`INTEREST_STEP_DAYS`).
+ * 걷고, 올리고, 세우고, 부른다. 오늘 선 줄은 오늘 오르지 않는다(`INTEREST_STEP_DAYS`).
  */
 export function tickInterests(state: GameState, digest: string[]): void {
   pruneInterests(state);
@@ -271,6 +331,8 @@ export function tickInterests(state: GameState, digest: string[]): void {
   const depthOf = (): SquadDepth => (depth ??= squadDepthOf(state));
   if (rng() < INTEREST_CHANCE) standOnOurs(state, rng, depthOf);
   if (rng() < RIVAL_INTEREST_CHANCE) standOnTarget(state, rng, depthOf, digest);
+  // 관심이 값을 부르는 자리 — 오늘 선 관심을 그대로 읽는다. 색인은 한 벌을 나눠 쓴다
+  tickCompetingBids(state, digest, depthOf);
 }
 
 /**
@@ -288,6 +350,20 @@ export function interestLine(state: GameState, playerId: string): string | null 
 }
 
 /**
+ * 이 선수에게 선 **경쟁 입찰**을 한 줄로 — 없으면 `null` (`interestLine`과 같은 결).
+ * 구단·날짜와 지금까지 오른 폭뿐이다. 문장은 읽는 쪽이 만든다.
+ */
+export function competingBidLine(state: GameState, playerId: string): string | null {
+  const bids = competingBidsOn(state, playerId);
+  if (bids.length === 0) return null;
+  const lift = Math.round((competingBidLiftOf(state, playerId) - 1) * 100);
+  return (
+    bids.map((bid) => `${teamNameIn(state, bid.teamId)} (${bid.date})`).join(" · ") +
+    ` — 호가가 ${lift}% 올랐다`
+  );
+}
+
+/**
  * 상태 스냅샷의 `<interest>` 블록 — 우리 선수와 우리가 노리는 선수, 두 결이다
  * (→ docs/llm/agents.md §6). 없으면 빈 배열이라 덩어리가 서지 않는다.
  */
@@ -302,7 +378,12 @@ export function describeInterests(state: GameState): string[] {
     const label = interestLine(state, player.id);
     if (label === null) continue;
     const ours = player.teamId === state.userTeamId;
-    lines.push(`- ${player.name}${ours ? "" : " (영입 대상)"} ← ${label}`);
+    // 값을 부른 사실은 보고 있는 사실과 다르다 — 같은 줄에 이어 붙인다 (§1-2)
+    const bids = competingBidLine(state, player.id);
+    lines.push(
+      `- ${player.name}${ours ? "" : " (영입 대상)"} ← ${label}` +
+        (bids === null ? "" : ` · 입찰 ${bids}`),
+    );
   }
   return lines;
 }

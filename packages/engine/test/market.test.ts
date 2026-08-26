@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { GamePlayer } from "@story-fm/domain";
 import {
+  AGENT_PROFILE,
+  COMPETING_BID_LIFT,
+  COUNTER_CEILING,
   MARKET_VALUE_AT_PEAK,
+  NO_AGENT_PROFILE,
   PATIENCE_DECAY,
   activeContract,
   addDays,
+  agentOfPlayer,
+  agentProfileOf,
   askingPriceFor,
   baseValueOf,
   betterAtPosition,
@@ -19,6 +25,8 @@ import {
   responseDelayDays,
   sameTermsRepeats,
   squadDepthOf,
+  competingBidLiftOf,
+  wageByRating,
   wageExpectationOf,
   derivedSquadStatus,
 } from "@story-fm/engine";
@@ -29,6 +37,17 @@ import { createTestGame } from "./helpers";
  * 이적 시장 코어 — 시장가·요구액·딜 확률. 전부 결정적 순수 함수다.
  * LLM은 이 숫자를 앵커로 판정하므로, 숫자 자체가 흔들리면 판정도 흔들린다.
  */
+
+/** 안개를 걷는다 — 완료된 보고서가 있으면 `knowledgeOf`가 `scouted`를 돌려준다 */
+function scouted(state: ReturnType<typeof createTestGame>, player: GamePlayer): void {
+  state.scoutReports.push({
+    id: `scout-${player.id}`,
+    gamePlayerId: player.id,
+    requestedOn: state.date,
+    dueOn: state.date,
+    completedOn: state.date,
+  });
+}
 
 function pick(state: ReturnType<typeof createTestGame>, overall: number): GamePlayer {
   const found = state.players.find(
@@ -154,20 +173,22 @@ describe("딜 확률", () => {
   it("근거 분해가 확률과 어긋나지 않는다 (합이 확률 근처)", () => {
     const state = createTestGame(42);
     const target = pick(state, 80);
+    // 안개를 걷어 순수 곡선을 본다 — 흐린 표시 확률과 근거의 합을 견주면
+    // 재는 것이 분해의 정확도가 아니라 안개의 폭이 된다
+    scouted(state, target);
     const odds = dealOdds(state, {
       playerId: target.id,
       fee: Math.round(askingPriceFor(state, target) * 0.8),
       weeklyWage: wageExpectationOf(state, target),
       years: 4,
     });
+    expect(odds.fuzzy).toBe(false);
     const sum = odds.factors.reduce((s, f) => s + f.delta, 0);
     // 곱셈 구조라 정확히 같지는 않지만, 한계 기여의 합은 확률 근처에 있어야 한다
-    // (안개가 낀 선수는 표시 확률이 흐려지므로 여유를 둔다)
-    const margin = odds.fuzzy ? 25 : 12;
     expect(
       Math.abs(sum - odds.probability),
       `합 ${sum} vs 확률 ${odds.probability}`,
-    ).toBeLessThanOrEqual(margin);
+    ).toBeLessThanOrEqual(12);
   });
 
   it("같은 조건을 반복하면 확률이 떨어진다 (인내심)", () => {
@@ -175,13 +196,7 @@ describe("딜 확률", () => {
     const target = pick(state, 74);
     // 안개를 걷어 순수 곡선을 본다 — 안개는 표시 확률에 ±%p로 더해지므로
     // 흐린 값끼리 비교하면 감쇠 배수가 정확히 맞지 않는다
-    state.scoutReports.push({
-      id: `scout-${target.id}`,
-      gamePlayerId: target.id,
-      requestedOn: state.date,
-      dueOn: state.date,
-      completedOn: state.date,
-    });
+    scouted(state, target);
     const terms = {
       playerId: target.id,
       fee: askingPriceFor(state, target),
@@ -216,7 +231,11 @@ describe("딜 확률", () => {
     expect(repeated.probability).toBeLessThan(first);
     // 확률은 정수 %로 반올림돼 나오므로 한 칸(±1)까지는 감쇠 배수가 맞는 것으로 본다
     // (`toBeCloseTo(_, 0)`의 허용 오차 0.5로는 반올림 오차를 담지 못한다)
-    expect(Math.abs(repeated.probability - first * PATIENCE_DECAY ** 2)).toBeLessThanOrEqual(1);
+    // 감쇠의 지수는 대리인의 인내심으로 나뉜다 (transfer.md §3)
+    const patience = agentProfileOf(state, target.id).patience;
+    expect(
+      Math.abs(repeated.probability - first * PATIENCE_DECAY ** (2 / patience)),
+    ).toBeLessThanOrEqual(1);
     expect(repeated.factors.some((f) => f.label === "상대의 인내심")).toBe(true);
 
     // 조건을 유의미하게 올리면 감쇠가 초기화된다
@@ -516,13 +535,24 @@ describe("응답 지연 — 상황에서 나온다", () => {
   it("창 마감이 임박하면 절반으로 줄어든다", () => {
     const state = createTestGame(42);
     const target = pick(state, 78);
-    const terms = { playerId: target.id, fee: 20_000_000, weeklyWage: 90_000, years: 4 };
-    const normal = responseDelayDays(state, terms, 45);
-    const window = state.windows[0]!;
-    state.date = window.closesOn;
-    const rushed = responseDelayDays(state, terms, 45);
-    expect(rushed).toBeLessThanOrEqual(Math.max(1, Math.floor(normal / 2)) + 1);
-    expect(rushed).toBeGreaterThanOrEqual(0);
+    const terms = (i: number) => ({
+      playerId: target.id,
+      fee: 20_000_000 + i * 250_000,
+      weeklyWage: 90_000,
+      years: 4,
+    });
+    /**
+     * **한 건씩 견줄 수 없다** — 날짜가 해시에 들어가므로 마감일의 한 건은 평시의
+     * 그 건과 다른 뽑기다. 절반은 분포의 성질이라 분포로 잰다.
+     */
+    const sample = 200;
+    const normal = Array.from({ length: sample }, (_, i) => responseDelayDays(state, terms(i), 45));
+    state.date = state.windows[0]!.closesOn;
+    const rushed = Array.from({ length: sample }, (_, i) => responseDelayDays(state, terms(i), 45));
+    const mean = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    // 버림이 걸려 실제로는 절반보다 조금 적다 — 반올림 한 칸만 여유를 둔다
+    expect(mean(rushed)).toBeLessThanOrEqual(mean(normal) / 2 + 0.5);
+    expect(Math.min(...rushed)).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -581,6 +611,122 @@ describe("계약 지위가 관문에 선다", () => {
     if (down !== actual) {
       expect(factorOf(renewAs(blocked, down), "계약 지위")!.delta).toBeLessThan(0);
     }
+  });
+});
+
+/**
+ * **에이전트 원형 → 시장 프로필** (→ docs/simulation/transfer.md §3).
+ *
+ * 재는 것은 표의 성질과 배선이다: 세 열의 평균이 1인가(밀리면 원형이 아니라 세계의
+ * 눈금을 옮긴 것이다), 대리인이 없는 자리가 정확히 중립인가, 그리고 `askingLift`가
+ * 선수마다 **그 원형의 배수 그대로** 값에 걸리는가.
+ */
+describe("에이전트 원형이 시장의 숫자에 걸린다", () => {
+  const profiles = Object.values(AGENT_PROFILE);
+  const mean = (pick: (p: (typeof profiles)[number]) => number) =>
+    profiles.reduce((acc, p) => acc + pick(p), 0) / profiles.length;
+
+  it("곱해지는 세 열의 평균이 1이다 — 원형은 눈금을 옮기지 않는다", () => {
+    // 대리인은 시드로 균등하게 뽑히므로(`agentForPlayer`) 평균이 곧 세계의 눈금이다
+    expect(mean((p) => p.askingLift)).toBeCloseTo(1, 2);
+    expect(mean((p) => p.patience)).toBeCloseTo(1, 2);
+    expect(mean((p) => p.delayDays)).toBeCloseTo(1, 2);
+  });
+
+  it("대리인이 없으면 전부 중립이다 — 명부를 비운 세이브는 지금과 같은 숫자다", () => {
+    expect(NO_AGENT_PROFILE).toEqual({
+      askingLift: 1,
+      patience: 1,
+      delayDays: 1,
+      ultimatumDays: 0,
+      competingBidRate: 0,
+    });
+  });
+
+  it("선수 쪽 주급 기대가 그 원형의 배수만큼 갈린다", () => {
+    const state = createTestGame(42);
+    const seen = new Set<string>();
+    for (const player of playersOf(state, state.userTeamId)) {
+      const agent = agentOfPlayer(state, player.id);
+      if (!agent) continue;
+      seen.add(agent.archetype);
+      const lift = agentProfileOf(state, player.id).askingLift;
+      expect(lift).toBe(AGENT_PROFILE[agent.archetype].askingLift);
+      // 원형을 걷어 낸 값 — `wageExpectationOf`가 그 위에 배수만 얹는다
+      const neutral = Math.max(
+        (activeContract(state, player.id)?.weeklyWage ?? 0) * 1.15,
+        wageByRating(player.attributes.overall),
+      );
+      const want = wageExpectationOf(state, player);
+      expect(want).toBe(Math.round((neutral * lift) / 1_000) * 1_000);
+      // 배수가 크면 더 부르고 작으면 덜 부른다 — 단조성
+      const plain = Math.round(neutral / 1_000) * 1_000;
+      if (lift > 1) expect(want).toBeGreaterThanOrEqual(plain);
+      if (lift < 1) expect(want).toBeLessThanOrEqual(plain);
+    }
+    // 스쿼드 하나면 세 원형이 다 나온다 — 하나만 나오면 추첨이 죽은 것이다
+    expect(seen.size).toBeGreaterThan(1);
+  });
+
+  it("응답 지연이 원형의 배수만큼 갈린다 — 표본의 합으로", () => {
+    const state = createTestGame(42);
+    const total = new Map<string, { sum: number; n: number }>();
+    for (const player of state.players.slice(0, 600)) {
+      const agent = agentOfPlayer(state, player.id);
+      if (!agent) continue;
+      const days = responseDelayDays(
+        state,
+        { playerId: player.id, fee: 20_000_000, weeklyWage: 90_000, years: 4 },
+        45,
+      );
+      const row = total.get(agent.archetype) ?? { sum: 0, n: 0 };
+      total.set(agent.archetype, { sum: row.sum + days, n: row.n + 1 });
+    }
+    const avg = (key: keyof typeof AGENT_PROFILE) => {
+      const row = total.get(key)!;
+      return row.sum / row.n;
+    };
+    // 원형이 지연에 곱해지므로 표본 평균의 순서가 표의 순서를 따른다
+    expect(avg("empire")).toBeLessThan(avg("lawyer"));
+    expect(avg("lawyer")).toBeLessThan(avg("hardballer"));
+  });
+});
+
+/**
+ * **경쟁 입찰이 호가를 올린다 — 그러나 조정 구간 밖으로는 못 민다**
+ * (→ docs/simulation/transfer.md §1-2).
+ *
+ * 상한이 `COUNTER_CEILING`인 것이 규칙이다: 그 위로 밀면 상대가 부를 수 있는 값이
+ * 자기 호가보다 낮아진다.
+ */
+describe("경쟁 입찰과 호가", () => {
+  it("한 줄마다 오르고, 누적은 COUNTER_CEILING에서 멈춘다", () => {
+    const state = createTestGame(42);
+    const target = pick(state, 78);
+    const base = askingPriceFor(state, target);
+    const rivals = state.teams.filter((t) => t.id !== state.userTeamId).slice(0, 6);
+    let previous = base;
+    for (const [i, rival] of rivals.entries()) {
+      (state.competingBids ??= []).push({
+        gamePlayerId: target.id,
+        teamId: rival.id,
+        date: state.date,
+        lift: COMPETING_BID_LIFT,
+      });
+      const now = askingPriceFor(state, target);
+      expect(now, `${i + 1}번째 입찰`).toBeGreaterThanOrEqual(previous);
+      if (i === 0) expect(now).toBeGreaterThan(base);
+      previous = now;
+      expect(competingBidLiftOf(state, target.id)).toBeLessThanOrEqual(COUNTER_CEILING);
+    }
+    // 여섯 줄이 서도 호가는 상한 안이다 (10만 단위 반올림 한 칸까지)
+    expect(previous).toBeLessThanOrEqual(Math.round(base * COUNTER_CEILING) + 100_000);
+  });
+
+  it("입찰이 없으면 호가는 그대로다", () => {
+    const state = createTestGame(42);
+    const target = pick(state, 78);
+    expect(competingBidLiftOf(state, target.id)).toBe(1);
   });
 });
 

@@ -279,6 +279,41 @@ export function normalizeSpeaker(name: string): string {
   return name.replace(/\s+/gu, "");
 }
 
+// ── 에이전트 원형 — 협상 테이블 건너편의 세 사람 ────────────────
+
+/**
+ * 에이전트 원형의 코드 — **협상에서 무엇을 무기로 쓰는가**로 갈린다
+ * (people.md §2-1).
+ *
+ * 명부(`engine/data/world-figures.ts`)는 사람의 이름과 라벨을 적고, 그 라벨이 무엇을
+ * 뜻하는지는 이 키가 정한다. 키를 도메인에 두는 이유는 선수 원형과 같다 — 라벨을 두
+ * 곳에 적으면 갈리고, 갈리는 순간 시장 프로필(`engine/market/agent-profile.ts`)이
+ * 사람을 못 찾아 조용히 중립으로 떨어진다.
+ *
+ * ⚠️ **계수는 여기 없다.** 시장 프로필은 세계의 눈금이라 엔진의 것이다.
+ */
+export const AGENT_ARCHETYPE_KEYS = ["empire", "lawyer", "hardballer"] as const;
+export const AgentArchetypeSchema = z.enum(AGENT_ARCHETYPE_KEYS);
+export type AgentArchetype = z.infer<typeof AgentArchetypeSchema>;
+
+/** 코드 → 명부와 인물 카드에 서는 이름. 페르소나의 `archetype`이 드는 값이다 */
+export const AGENT_ARCHETYPE_LABEL: Record<AgentArchetype, string> = {
+  empire: "제국형",
+  lawyer: "법률가형",
+  hardballer: "승부사형",
+};
+
+/**
+ * 라벨 → 코드. 페르소나가 드는 것은 라벨이라(`Persona.archetype`은 열린 문자열이다)
+ * 시장 프로필이 그 사람을 찾을 때 지나는 문이 여기다.
+ *
+ * **표에 없는 라벨은 `null`이다** — 명부를 비웠거나 다른 원형이 선 자리이고, 그런
+ * 대리인은 숫자에 아무것도 얹지 않는다.
+ */
+export function agentArchetypeOf(archetype: string): AgentArchetype | null {
+  return AGENT_ARCHETYPE_KEYS.find((key) => AGENT_ARCHETYPE_LABEL[key] === archetype) ?? null;
+}
+
 // ── 선수 원형 — 라벨과 계수는 여기 한 표에 있다 ────────────────
 
 /**

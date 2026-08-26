@@ -2,6 +2,7 @@ import type { GamePlayer, Negotiation, SquadStatus } from "@story-fm/domain";
 import { SQUAD_STATUSES, ageOf, squadStatusRank } from "@story-fm/domain";
 import {
   CAREER_AGE_MOVE,
+  COUNTER_CEILING,
   LOAN_FEE_RATE,
   askingPriceFor,
   marketValueOf,
@@ -25,8 +26,6 @@ import { playerById, type GameState } from "../core/state";
 
 /** 이 확률 아래로는 상대가 수락할 수 없다 — "그 값에 팔 구단은 없다" */
 export const MIN_ACCEPT_PROBABILITY = 5;
-/** 조정 상한 — 요구액의 이 배수를 넘게 부를 수 없다 */
-export const COUNTER_CEILING = 1.15;
 /** 조정 요구 주급 상한 — 기대치의 이 배수 (상대도 무리한 요구는 하지 않는다) */
 export const COUNTER_WAGE_CEILING = 1.4;
 /** 사는 쪽이 깎아 부를 수 있는 하한 — 기대치의 이 비율 아래로는 못 부른다 */

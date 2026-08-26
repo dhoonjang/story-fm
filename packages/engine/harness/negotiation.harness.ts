@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGENT_PROFILE,
   COUNTERPARTY_ACCEPT_AT,
   COUNTERPARTY_COUNTER_AT,
   activeContract,
+  agentOfPlayer,
   askingPriceFor,
   dealOdds,
   isClubTeam,
@@ -11,6 +13,7 @@ import {
   userPlayers,
   wageExpectationOf,
 } from "@story-fm/engine";
+import type { AgentArchetype } from "@story-fm/domain";
 import { createTestGame } from "../test/helpers";
 import { NEGOTIATION } from "./catalog";
 import { outOfBand, reportOf, type Readings } from "./harness";
@@ -145,6 +148,39 @@ describe("선수 개인 협상의 성사 확률 분포", () => {
       return odds.probability;
     });
 
+    /**
+     * ── 원형이 확률에 실제로 걸리는가 ──
+     *
+     * 대리인의 `askingLift`는 **호가와 주급 기대 자체**를 움직인다. 그래서 위처럼
+     * 「그 선수의 기대치를 그대로 맞춘」 오퍼로 재면 비율이 언제나 1이라 원형이
+     * 보이지 않는다 — 그 폭은 **중립 오퍼**를 같은 값으로 놓고 재야 드러난다.
+     * 여기서는 `askingLift`를 걷어 낸 값을 부르고, 원형별로 중앙값을 나눈다.
+     */
+    const byArchetype = new Map<AgentArchetype, number[]>();
+    for (const target of targets) {
+      const agent = agentOfPlayer(state, target.id);
+      if (!agent) continue;
+      const lift = AGENT_PROFILE[agent.archetype].askingLift;
+      const odds = dealOdds(state, {
+        playerId: target.id,
+        fee: Math.round(askingPriceFor(state, target) / lift),
+        weeklyWage: Math.round(wageExpectationOf(state, target) / lift),
+        years: 4,
+        kind: "buy",
+      });
+      const row = byArchetype.get(agent.archetype) ?? [];
+      row.push(odds.probability);
+      byArchetype.set(agent.archetype, row);
+    }
+    const archetypeMedians = [...byArchetype.entries()].map(
+      ([key, values]) => [key, median(sorted(values))] as const,
+    );
+    const medianOf = (key: AgentArchetype) =>
+      archetypeMedians.find(([k]) => k === key)?.[1] ?? Number.NaN;
+    const spanOfArchetypes =
+      Math.max(...archetypeMedians.map(([, v]) => v)) -
+      Math.min(...archetypeMedians.map(([, v]) => v));
+
     const renew = sorted(renewAtExpectation);
     const lowball = sorted(renewLowball);
     const release = sorted(releaseAtExpectation);
@@ -166,6 +202,10 @@ describe("선수 개인 협상의 성사 확률 분포", () => {
       "영입 기대치 · 중앙값": median(buy),
       "영입 기대치 · p90−p10": spread(buy),
       "영입 기대치 · 90% 이상 비율": shareOf(buy, (v) => v >= RUBBER_STAMP_AT),
+      "영입 · 원형별 중앙값 폭": spanOfArchetypes,
+      "영입 · 승부사형 중앙값": medianOf("hardballer"),
+      "영입 · 제국형 중앙값": medianOf("empire"),
+      "영입 · 법률가형 중앙값": medianOf("lawyer"),
     };
     console.log(reportOf(NEGOTIATION, readings, `시드 42 · 아스날 · ${state.date}`));
     expect(outOfBand(NEGOTIATION, readings)).toEqual([]);
