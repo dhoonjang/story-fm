@@ -515,6 +515,24 @@ export function isAwayFromClub(state: GameState, player: GamePlayer): boolean {
   return summer !== undefined && state.date < summer;
 }
 
+/**
+ * 지금 클럽을 떠나 있는 선수 id 전부 — **한 번만 모은다.**
+ *
+ * 선수 전원을 도는 루프(`tickOtherClubs`)가 사람마다 `isAwayFromClub`을 부르면 그
+ * 안에서 소집 표를 5,700번 다시 훑는다. 판정은 같고 자릿수만 다르다.
+ */
+export function awayFromClubIds(state: GameState): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const row of state.callUps ?? []) {
+    if (row.returnedOn === null) out.add(row.gamePlayerId);
+  }
+  for (const player of state.players) {
+    const summer = player.state.summerReturn;
+    if (summer !== undefined && state.date < summer) out.add(player.id);
+  }
+  return out;
+}
+
 /** 그 선수가 다치지 않고 소집 중인가 — 진단 줄이 부상과 소집을 가르는 자리 */
 export function callUpNoteOf(state: GameState, playerId: string): CallUp | null {
   return openInjury(state, playerId) === null ? openCallUp(state, playerId) : null;
