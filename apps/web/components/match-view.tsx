@@ -4,9 +4,12 @@ import { Fragment } from "react";
 import type { OfficeViews } from "@story-fm/engine";
 import {
   TACTIC_AXES,
+  TACTIC_TOGGLES,
   anchorOf,
   positionGroupOf,
   separateBoardPoints,
+  tacticToggleValue,
+  tacticToggleWord,
   tacticWord,
 } from "@story-fm/domain";
 import { pitchPointOf, spreadMarkers, type PitchPoint } from "@/lib/pitch-layout";
@@ -466,6 +469,19 @@ function SideTactics({ tactics }: { tactics: Match["tactics"]["home"] }) {
             <span className="mv-tac-axis">{axis.label}</span>
             <Dots value={v} align="left" title={`${axis.label} ${v}`} />
             <span className="mv-tac-word">{tacticWord(axis.key, v)}</span>
+          </div>
+        );
+      })}
+      {/* 갈래 넷 — 눈금이 없으므로 점도 없다. 중립인 갈래는 줄이 서지 않는다:
+          지시하지 않은 것까지 세우면 넷이 늘 붙어 있어 무엇을 건 판인지 읽히지
+          않는다 (match.md §1.2) */}
+      {TACTIC_TOGGLES.map((toggle) => {
+        const value = tacticToggleValue(tactics, toggle.key);
+        if (value === null) return null;
+        return (
+          <div className="mv-tac-row one toggle" key={toggle.key}>
+            <span className="mv-tac-axis">{toggle.label}</span>
+            <span className="mv-tac-word">{tacticToggleWord(toggle.key, value)}</span>
           </div>
         );
       })}

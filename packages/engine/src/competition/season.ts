@@ -4,14 +4,20 @@ import type {
   BoardExpectationCode,
   GamePlayer,
   PositionGroup,
+  RetiredPlayer,
+  RetirementReason,
   SeasonAward,
   SeasonAwardCode,
 } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
+import { SHARPNESS_PRESEASON } from "@story-fm/sim";
 import {
   CONDITION_BASE,
   DEFAULT_FORMATION,
   MATCHDAY_SQUAD,
+  RETIRE_AGE,
+  RETIRE_AGE_MARGINAL,
+  RETIRE_IDLE_APPS,
   YOUNG_PLAYER_MAX_AGE,
   achievementTitle,
   ageOf,
@@ -28,6 +34,7 @@ import {
   buildSeasonCalendar,
   buildTransferWindows,
   contractUntil,
+  seasonDate,
   seasonEndDate,
   seasonYear,
 } from "./calendar";
@@ -931,6 +938,155 @@ function championsOf(
   return out;
 }
 
+// ── 은퇴 — 1월의 예고, 7월의 집행 (season.md §6) ──────────
+
+/** 예고가 서는 날 — 겨울 창이 열려 있어 감독이 손쓸 자리가 있는 날이다 */
+const DECLARATION_DAY: [number, number] = [1, 1];
+
+/** 이 시즌의 예고일 — 시즌은 7월에 시작하므로 1월 1일은 이듬해다 */
+export function retirementDeclarationDate(season: number): string {
+  return seasonDate(season, DECLARATION_DAY);
+}
+
+/**
+ * 은퇴 판정일 — **다음 시즌 개막일이다.**
+ *
+ * 1월의 예고와 7월의 집행이 같은 날로 나이를 재야 "예고한 명단과 은퇴한 명단이 같다"가
+ * 성립한다 (season.md §6 불변식). 그 사이에 생일이 끼는 선수가 예고 뒤에 조용히 한 살을
+ * 더 먹으면 감독이 들은 명단과 장부가 갈린다.
+ */
+export function retirementJudgeDate(season: number): string {
+  return buildSeasonCalendar(season + 1).start;
+}
+
+/** 판정이 세계에서 읽어 오는 두 사실 — 순수 함수가 상태를 보지 않게 하는 문 */
+export interface RetirementRead {
+  /** 이번 시즌 1군 공식전 출전 (`SeasonStat.apps`) */
+  apps: number;
+  /** 계약이 이번 시즌 끝에 만료되는가 */
+  expiring: boolean;
+}
+
+/**
+ * 이 선수가 이번 시즌 뒤에 그만두는가 — **세계를 보지 않는 순수 함수** (season.md §6).
+ *
+ * 나이·종합의 문턱 자체는 도메인이 갖는다(`retiresAtSeasonEnd`) — 베테랑 황혼 아크가
+ * 절정을 판정할 때 읽는 그 자다. 여기서 더 보는 것은 `idle` 한 갈래뿐이다: 나가는 문이
+ * 자유이적 하나뿐이면 뛰지 않는 서른넷이 계약 만료로 무소속에 나가 떠돈다.
+ */
+export function retirementVerdict(
+  player: GamePlayer,
+  judgeDate: string,
+  read: RetirementRead,
+): RetirementReason | null {
+  const age = ageOf(player.birthdate, judgeDate);
+  if (age >= RETIRE_AGE) return "age";
+  if (retiresAtSeasonEnd(age, player.attributes.overall)) return "decline";
+  if (age < RETIRE_AGE_MARGINAL) return null;
+  return read.expiring && read.apps < RETIRE_IDLE_APPS ? "idle" : null;
+}
+
+/** 이번 시즌에 예고가 선 선수인가 — 지난 시즌의 표식은 집행이 이미 걷어 갔다 */
+function declaredThisSeason(state: GameState, player: GamePlayer): boolean {
+  const declared = player.state.retiringAfterSeason;
+  return declared !== undefined && declared.on >= state.calendar.preseasonStart;
+}
+
+/**
+ * 오늘 이 선수가 은퇴하는가 — **전환이 묻는 자리** (season.md §6).
+ *
+ * 예고가 선 명단이 원본이고, 나이만 그 밖에서 선다: 1월 뒤에 세계에 들어온 선수와
+ * 1월을 지나온 적이 없는 옛 세이브가 그 자리다. `decline`·`idle`은 예고 없이 서지
+ * 않는다 — 예고 없는 은퇴를 만들지 않는 것이 이 절의 요구다.
+ */
+function retiresNow(state: GameState, player: GamePlayer, judgeDate: string): boolean {
+  return declaredThisSeason(state, player) || ageOf(player.birthdate, judgeDate) >= RETIRE_AGE;
+}
+
+/** 은퇴 명부에 남길 사유 — 예고가 든 것이 원본이고, 예고 없는 은퇴는 나이뿐이다 */
+function retirementReasonOf(state: GameState, player: GamePlayer): RetirementReason {
+  return declaredThisSeason(state, player)
+    ? (player.state.retiringAfterSeason?.reason ?? "age")
+    : "age";
+}
+
+/**
+ * **1월 1일 — 예고** (season.md §6). 세계 전체의 선수를 같은 함수로 판정하고, 서는
+ * 사람에게 표식을 적는다. 뽑기는 없다 — 감독이 나이와 종합과 출전을 보고 예측할 수
+ * 있어야 한다 (overview.md §1 철칙 2).
+ *
+ * ⚠️ **색인을 먼저 짓는다.** 선수가 5,800명이고 시즌 기록이 그만큼 있어서, 선수마다
+ * 원장을 훑으면 예고 하루가 수천만 번 비교가 된다 (전환 루프가 같은 이유로 색인을 쓴다).
+ */
+export function declareRetirements(state: GameState, digest: string[]): void {
+  const judgeDate = retirementJudgeDate(state.season);
+  /** 계약 만료의 경계 — 다음 시즌이 시작하기 전에 끝나는 계약이 「이번 시즌 끝」이다 */
+  const expiryCutoff = buildSeasonCalendar(state.season + 1).preseasonStart;
+
+  const apps = new Map<string, number>();
+  for (const stat of state.seasonStats) {
+    if (stat.season !== state.season) continue;
+    apps.set(`${stat.gamePlayerId}:${stat.teamId}`, stat.apps);
+  }
+  const expiring = new Set<string>();
+  for (const contract of state.contracts) {
+    if (contract.status !== "active") continue;
+    if (contract.until <= expiryCutoff) expiring.add(contract.gamePlayerId);
+  }
+
+  const managed = managedTeamId(state);
+  const ours: GamePlayer[] = [];
+  for (const player of state.players) {
+    const reason = retirementVerdict(player, judgeDate, {
+      apps: apps.get(`${player.id}:${player.teamId}`) ?? 0,
+      expiring: expiring.has(player.id),
+    });
+    if (reason === null) continue;
+    player.state.retiringAfterSeason = { on: state.date, reason };
+    if (managed !== null && player.teamId === managed) ours.push(player);
+  }
+
+  if (ours.length === 0) return;
+  const line = `이번 시즌 뒤 은퇴: ${ours
+    .map((p) => `${p.name} (만 ${ageOf(p.birthdate, judgeDate)}세)`)
+    .join(", ")}`;
+  digest.push(line);
+  // 무게 4 — 계약 만료 30일과 같은 자리다: 감독이 이번 시즌 안에 답해야 하는 사실
+  pushNarrative(state, line, 4);
+}
+
+/**
+ * 예고를 거둔다 — **나이 상한 안에서만** (season.md §6). 판정일에 이미 `RETIRE_AGE`인
+ * 선수는 거둘 수 없다: 서른다섯의 몸을 계약서가 되돌리지는 못한다.
+ *
+ * 거둬진 선수는 다음 1월에 다시 판정을 받으므로 되돌림은 한 시즌씩만 이어진다.
+ */
+export function withdrawRetirement(state: GameState, player: GamePlayer): boolean {
+  if (player.state.retiringAfterSeason === undefined) return false;
+  if (ageOf(player.birthdate, retirementJudgeDate(state.season)) >= RETIRE_AGE) return false;
+  player.state.retiringAfterSeason = undefined;
+  return true;
+}
+
+/** 은퇴 명부 한 줄 — 통산은 적지 않는다(`seasonStats`가 그대로 남는다 — season.md §6) */
+function retiredRowOf(
+  state: GameState,
+  player: GamePlayer,
+  teamId: string,
+  on: string,
+): RetiredPlayer {
+  return {
+    gamePlayerId: player.id,
+    name: player.name,
+    birthdate: player.birthdate,
+    position: naturalPositionOf(player).position,
+    teamId,
+    on,
+    season: state.season,
+    reason: retirementReasonOf(state, player),
+  };
+}
+
 function applyTransition(state: GameState): string[] {
   const digest: string[] = [];
   const rng = makeRng(state.seed, `transition:${state.season}`);
@@ -1001,30 +1157,42 @@ function applyTransition(state: GameState): string[] {
     let squad = playersOf(state, team.id);
 
     for (const player of squad) {
-      const age = ageOf(player.birthdate, judgeDate);
       /**
        * ⚠️ **노화 곡선은 여기서 굴리지 않는다.** 시즌 경계에 한 번 몰아서 적용하면
        * 5월 마지막 날과 7월 첫날 사이에 스물아홉 살 윙어의 스피드가 두세 칸 꺼져 있다 —
        * 감독이 겪은 것 없이 숫자만 달라진다. 이제 **매달 조금씩** 움직인다
-       * (`development.ts`). 시즌 전환이 하는 건 은퇴 판정과 명단 정리뿐이다.
+       * (`development.ts`). 시즌 전환이 하는 건 은퇴 집행과 명단 정리뿐이다.
+       *
+       * **집행이지 판정이 아니다** — 명단은 1월의 예고가 이미 정했다 (season.md §6).
+       * 나이만 예고 밖에서 선다: 1월 뒤에 들어온 선수와 옛 세이브의 자리다.
        */
-      // 문턱은 도메인이 갖는다 — 베테랑 황혼 아크가 같은 자를 읽는다 (people.md §9)
-      if (retiresAtSeasonEnd(age, player.attributes.overall)) retirees.push(player.id);
+      if (retiresNow(state, player, judgeDate)) retirees.push(player.id);
       // 새 시즌 리셋
       player.state.form = 0;
       // 새 시즌 — 쉬고 돌아왔다
       player.state.condition = CONDITION_BASE;
+      /**
+       * **몸은 쉬어서 돌아오지만 경기 감각은 무뎌져서 돌아온다** (player.md §5.4).
+       * 프리시즌이 그것을 채우는 자리이고, 채우는 것은 훈련이 아니라 친선의 출전
+       * 분이다 — 이 한 줄이 없으면 7월의 5주가 몸에 관해 아무것도 결정하지 않는다.
+       */
+      player.state.sharpness = SHARPNESS_PRESEASON;
     }
 
     if (retirees.length > 0) {
       const retSet = new Set(retirees);
       if (team.id === managed) {
-        digest.push(
-          `은퇴: ${squad
-            .filter((p) => retSet.has(p.id))
-            .map((p) => p.name)
-            .join(", ")}`,
-        );
+        const ours = squad.filter((p) => retSet.has(p.id));
+        digest.push(`은퇴: ${ours.map((p) => p.name).join(", ")}`);
+        /**
+         * **명부로 옮긴다** (season.md §6). 명단에서 빠지면 id로는 이름도 나이도
+         * 되찾지 못해 오프시즌 블록·캐릭터북·시상 기록이 그 사람을 부를 수 없다.
+         * 감독 팀에서 은퇴한 선수만 담는 것은 `milestones`와 같은 규약이다.
+         */
+        state.retired = [
+          ...(state.retired ?? []),
+          ...ours.map((p) => retiredRowOf(state, p, team.id, nextCalendar.preseasonStart)),
+        ];
       }
       // 은퇴도 팀 변경 원장에 남는다 (toTeamId = null)
       for (const id of retirees) {

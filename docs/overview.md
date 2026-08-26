@@ -257,8 +257,9 @@
 - 스태프와 구장 — 스태프 급여가 선수 급여의 파생일 뿐 고용이라는 실체가 없고,
   수용 인원은 시드 고정값이라 구단 투자 결정이 없다
   ([simulation/finance.md](simulation/finance.md))
-- 오프시즌 연출 — 은퇴가 원장 한 줄로만 남고 시상식이 없다
-  ([simulation/season.md](simulation/season.md))
+- 오프시즌 연출 — 은퇴는 1월 예고·마지막 홈경기·명부로 서지만 시상식의 자리가 없고,
+  은퇴한 사람이 코치로 돌아오는 길도 없다(스태프가 실체가 없다)
+  ([simulation/season.md](simulation/season.md) §6)
 - 자체 능력치 산정 — 실선수의 축은 전부 시드에서 파생하고, 실명·능력치의 라이선스
   부채가 그대로 남아 있다 ([data/sources.md](data/sources.md) §7)
 

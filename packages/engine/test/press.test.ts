@@ -548,4 +548,40 @@ describe("기자회견 — 전야", () => {
     openEvePress(state);
     expect(pendingPress(state)).toBeNull();
   });
+
+  /**
+   * 작별의 자리는 **그 시즌 마지막 홈 리그 경기** 하루뿐이라(season.md §6), 그 하루를
+   * 잘못 짚으면 자리가 영영 서지 않거나 시즌 내내 선다 — 어느 쪽도 화면에는 표시가
+   * 나지 않는다.
+   */
+  it("마지막 홈 리그 경기 전야에만 작별 회견이 선다", () => {
+    const state = createTestGame();
+    const home = leagueMatches(state).filter((m) => m.homeTeamId === state.userTeamId);
+    const last = home[home.length - 1]!;
+    const leaving = userPlayers(state)[0]!;
+    leaving.state.retiringAfterSeason = { on: state.date, reason: "age" };
+
+    // 마지막이 아닌 홈경기 전야에는 서지 않는다
+    eveOf(state, home[home.length - 2]!);
+    openEvePress(state);
+    expect(pendingPress(state)).toBeNull();
+
+    eveOf(state, last);
+    openEvePress(state);
+
+    const press = pendingPress(state)!;
+    expect(press.trigger).toBe("farewell");
+    expect(press.weight).toBe(2);
+    const fact = press.facts.find((f) => f.kind === "farewell")!;
+    expect(fact.about).toBe(leaving.id);
+    expect(fact.data?.date).toBe(last.date);
+  });
+
+  it("예고가 선 선수가 없으면 마지막 홈경기에도 자리가 없다", () => {
+    const state = createTestGame();
+    const home = leagueMatches(state).filter((m) => m.homeTeamId === state.userTeamId);
+    eveOf(state, home[home.length - 1]!);
+    openEvePress(state);
+    expect(pendingPress(state)).toBeNull();
+  });
 });

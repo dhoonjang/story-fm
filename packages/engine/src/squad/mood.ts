@@ -6,6 +6,9 @@ import {
   milestonePhrase,
   MOOD_NOTE_MAX,
   PLAYER_ARCHETYPE_LABEL,
+  sharpnessBand,
+  sharpnessBandLabel,
+  sharpnessOf,
   SQUAD_STATUS_KO,
 } from "@story-fm/domain";
 import type {
@@ -15,6 +18,8 @@ import type {
   MilestoneCode,
   PlayerArchetypeKey,
   PlayerIssueReason,
+  RetirementReason,
+  SharpnessBand,
   SquadStatus,
 } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
@@ -88,6 +93,11 @@ export type MoodFact =
   /** `daysToReturn === 0`이면 복귀 예정일에 닿았다는 뜻이다 */
   | { cause: "injury"; bodyPart: string; daysToReturn: number }
   | { cause: "suspension"; matchesLeft: number }
+  /**
+   * 이번 시즌 뒤 은퇴 — `days`는 예고한 날부터 며칠째인가 (season.md §6).
+   * 불만보다 앞에 서는 이유는 그것이 **남은 모든 것을 물들이는 사실**이어서다.
+   */
+  | { cause: "retiring"; days: number; reason: RetirementReason }
   /** `note`는 옛 세이브가 들고 있는 사유 문장 — `reason`이 없을 때만 있다 */
   | {
       cause: "grievance";
@@ -140,6 +150,12 @@ export type MoodFact =
   | { cause: "no-minutes"; place: "bench" | "out" }
   | { cause: "form"; label: FormLabel }
   | { cause: "condition"; level: "heavy" | "light" }
+  /**
+   * **경기 감각**이 무뎌졌다 (player.md §5.4) — 몸의 예산(`condition`)과 다른 사실이다.
+   * 잘 쉬었지만 몇 주째 못 뛴 선수가 여기서 갈린다. 등급만 낸다: 감독이 관측하는
+   * 것은 출전 기록이지 숫자가 아니고, 말은 화면·GM이 붙인다.
+   */
+  | { cause: "sharpness"; band: SharpnessBand }
   /** 최근 우리 구단에서 계약이 해지된 선수 — 남은 선수단 전원이 같은 카드를 든다 */
   | { cause: "departure"; name: string; days: number }
   | { cause: "contract-ending"; daysLeft: number }
@@ -340,6 +356,7 @@ export function moodFactsOf(
   const settling = settlingOf(state, player.id);
   const demotionDays = demotionDaysOf(state, player);
   const { form, condition } = player.state;
+  const retiring = player.state.retiringAfterSeason;
 
   // ── 못 뛰는 사유가 있으면 그게 전부다 ──
   if (injury) {
@@ -350,6 +367,18 @@ export function moodFactsOf(
     });
   } else if (suspension) {
     facts.push({ cause: "suspension", matchesLeft: suspension.lengthMatches - suspension.served });
+  } else if (retiring) {
+    /**
+     * ── 이 시즌이 마지막이다 ── 못 뛰는 사유 다음이다 (people.md §5).
+     * 곁들임 한 장은 아래 자리들이 그대로 채운다 — 마지막 시즌의 불만도, 마지막
+     * 시즌의 완장도 그 사실 위에 얹혀야 읽힌다.
+     */
+    facts.push({
+      cause: "retiring",
+      days: diffDays(retiring.on, state.date),
+      reason: retiring.reason,
+    });
+    if (grievance) facts.push(grievance);
   } else {
     /**
      * ── 직전 경기의 여운 ──
@@ -399,6 +428,23 @@ export function moodFactsOf(
     if (facts.length === 0) {
       const label = formLabel(form);
       if (label !== "평소") facts.push({ cause: "form", label });
+    }
+
+    /**
+     * ── 경기 감각 ── **몸의 예산과 다른 사실이다.** 잘 쉬어서 체력은 가득한데
+     * 두 달째 90분을 못 뛴 선수가 있다 — 그 사실을 말하는 카드가 여기다.
+     * "굳음"은 언제나 내고(감독이 손을 써야 하는 자리다), "무딤"은 달리 할 말이
+     * 없을 때만 낸다 — 시즌 중 스쿼드 절반이 그 등급이라 늘 내면 소음이 된다.
+     *
+     * ⚠️ **개막 전에는 내지 않는다** — `no-minutes`와 같은 이유이자 같은 문이다.
+     * 시즌이 열릴 때 선수단 전원이 프리시즌 값에서 출발하므로(player.md §5.4),
+     * 7월의 라커룸은 스물다섯 명이 통째로 "몸이 굳었다"가 된다. 남들과 다를 때만
+     * 그 선수의 사실이다.
+     */
+    if (state.date >= state.calendar.start) {
+      const band = sharpnessBand(sharpnessOf(player.state));
+      if (band === "blunt") facts.push({ cause: "sharpness", band });
+      else if (band === "rusty" && facts.length === 0) facts.push({ cause: "sharpness", band });
     }
 
     /**
@@ -488,6 +534,13 @@ export function issueReasonText(issue: {
   return issueReasonKo(issue.reason, issue.count) ?? issue.note ?? null;
 }
 
+/** 사유 코드의 한 낱말 — 코드는 장부의 것이고 이 표는 읽는 자리의 것이다 (season.md §6) */
+const RETIREMENT_REASON_KO: Record<RetirementReason, string> = {
+  age: "나이",
+  decline: "기량",
+  idle: "출전",
+};
+
 /** 며칠 전 경기인가 — 날짜를 셈으로만 옮긴다 */
 const dayWord = (days: number) => (days === 0 ? "오늘" : days === 1 ? "어제" : `${days}일 전`);
 
@@ -503,6 +556,9 @@ function factLine(fact: MoodFact): string {
       );
     case "suspension":
       return `출장 정지 ${fact.matchesLeft}경기`;
+    case "retiring":
+      // 사유 코드는 라벨로 옮기지 않는다 — 서른다섯의 은퇴와 뛰지 못한 은퇴가 다른 사실이다
+      return `이번 시즌 뒤 은퇴 (${RETIREMENT_REASON_KO[fact.reason]}) · 예고 ${fact.days}일째`;
     case "grievance":
       return (
         `불만 ${issueReasonText(fact) ?? "사유 없음"} · ${fact.days}일째` +
@@ -536,6 +592,8 @@ function factLine(fact: MoodFact): string {
       return fact.level === "heavy"
         ? `체력 ${CONDITION_HEAVY} 이하`
         : `체력 ${CONDITION_LIGHT} 이상`;
+    case "sharpness":
+      return `경기 감각 ${sharpnessBandLabel(fact.band)}`;
     case "departure":
       return `${fact.name} 계약 해지 · ${dayWord(fact.days)}`;
     case "contract-ending":
@@ -634,6 +692,19 @@ export function buildMoodBrief(state: GameState, from: string, to: string): Mood
     const label = formLabel(form);
     if (label === "절정" || label === "바닥") {
       facts.push(`폼 ${label}`);
+      weight += 2;
+    }
+    /**
+     * 굳은 몸은 그 자체로 할 말이 있는 사실이다 — 장기 부상에서 막 돌아왔거나
+     * 몇 주째 명단 밖이라는 뜻이고, 둘 다 선수가 먼저 꺼낼 이야기다 (player.md §5.4).
+     * **개막 전에는 세지 않는다** — 위 `moodFactsOf`와 같은 문이다: 7월엔 선수단
+     * 전원이 프리시즌 값이라 이 무게가 라커룸 전체를 결산 대상으로 만든다.
+     */
+    if (
+      state.date >= state.calendar.start &&
+      sharpnessBand(sharpnessOf(player.state)) === "blunt"
+    ) {
+      facts.push("경기 감각 굳음");
       weight += 2;
     }
     if (facts.length === 0) continue;

@@ -67,6 +67,92 @@ describe("전술 상성 — 두 전술이 서로를 만난다", () => {
     expect(fired(b.keyPoints, "space_behind", "sweeper")).toBe(true);
   });
 
+  /**
+   * **내린 적 없는 지시의 대가를 물지 않는다** (match.md §1.2). 예전엔 트랩 항이
+   * 팀 적응도의 파생이라, 트랩을 명령한 적 없는 감독이 "오프사이드 트랩이 아직 손에
+   * 안 익었다"는 문장을 받았다.
+   */
+  it("뒷공간: 트랩 플래그는 감독이 트랩을 켰을 때만 선다", () => {
+    const fastFront = () => tweak(makeSide("them", 78), isFW, { pace: 95 });
+    const highLine = (over: Partial<TacticsSpec>, familiarity: number) =>
+      makeSide("us", 80, { tactics: T({ defensiveLine: 5, ...over }), familiarity });
+
+    const off = buildStrengthPacket(highLine({}, 30), fastFront());
+    expect(fired(off.keyPoints, "space_behind")).toBe(true);
+    expect(fired(off.keyPoints, "space_behind", "trap-unfamiliar")).toBe(false);
+    expect(fired(off.keyPoints, "space_behind", "trap-drilled")).toBe(false);
+
+    // 켠 팀만 적응도로 갈린다 — 손에 안 익으면 대가가 불고, 익으면 되레 덮는다
+    const raw = buildStrengthPacket(highLine({ offsideTrap: true }, 30), fastFront());
+    expect(fired(raw.keyPoints, "space_behind", "trap-unfamiliar")).toBe(true);
+    const drilled = buildStrengthPacket(highLine({ offsideTrap: true }, 99), fastFront());
+    expect(fired(drilled.keyPoints, "space_behind", "trap-drilled")).toBe(true);
+  });
+
+  /**
+   * 갈래는 **문을 열고 닫을 뿐 폭을 키우지 않는다** (match.md §1.2·§1.3) — 감독의
+   * 말이 상성에 닿는 유일한 길이다.
+   */
+  it("갈래가 상성의 문을 연다 — 역습 지시와 GK 배급", () => {
+    const committed = makeSide("them", 80, { tactics: T({ defensiveLine: 5, mentality: 4 }) });
+    // 6축은 역습 조합이 아니다 — 지시가 없으면 문이 닫혀 있다
+    const front = (over: Partial<TacticsSpec>) =>
+      tweak(makeSide("us", 76, { tactics: T({ mentality: 4, tempo: 2, ...over }) }), isFW, {
+        pace: 92,
+      });
+    expect(fired(buildStrengthPacket(front({}), committed).keyPoints, "counter_attack")).toBe(
+      false,
+    );
+    const ordered = buildStrengthPacket(front({ transition: "counter" }), committed);
+    expect(fired(ordered.keyPoints, "counter_attack", "ordered")).toBe(true);
+    // 자리부터 잡으라 했으면 6축을 갖춰도 역습은 없다
+    const regroup = makeSide("us", 76, {
+      tactics: T({ mentality: 2, tempo: 5, transition: "regroup" }),
+    });
+    expect(
+      fired(
+        buildStrengthPacket(tweak(regroup, isFW, { pace: 92 }), committed).keyPoints,
+        "counter_attack",
+      ),
+    ).toBe(false);
+
+    // 뒤에서 짧게 푸는 것은 GK가 하는 일이라, 배급이 패스 축을 덮는다
+    const shaky = (over: Partial<TacticsSpec>) => {
+      const s = makeSide("them", 78, { tactics: T(over) });
+      tweak(s, isDF, { passing: 55, composure: 55 });
+      tweak(s, (p) => !isDF(p) && !isFW(p), { composure: 55, dribbling: 55, passing: 55 });
+      return s;
+    };
+    const press = () => makeSide("us", 80, { tactics: T({ pressing: 5 }) });
+    const longPassShortKeeper = shaky({ passStyle: 5, keeperDistribution: "short" });
+    expect(fired(buildStrengthPacket(press(), longPassShortKeeper).keyPoints, "press_trap")).toBe(
+      true,
+    );
+    const shortPassLongKeeper = shaky({ passStyle: 1, keeperDistribution: "long" });
+    expect(fired(buildStrengthPacket(press(), shortPassLongKeeper).keyPoints, "press_trap")).toBe(
+      false,
+    );
+
+    // 우리 쪽 배급도 같은 문을 연다 — 빌드업 붕괴
+    const presser = makeSide("them", 78, { tactics: T({ pressing: 5 }) });
+    const backline = (over: Partial<TacticsSpec>) =>
+      tweak(makeSide("us", 80, { tactics: T(over) }), isDF, { passing: 50, composure: 50 });
+    expect(
+      fired(
+        buildStrengthPacket(backline({ passStyle: 5, keeperDistribution: "short" }), presser)
+          .keyPoints,
+        "buildup_collapse",
+      ),
+    ).toBe(true);
+    expect(
+      fired(
+        buildStrengthPacket(backline({ passStyle: 1, keeperDistribution: "long" }), presser)
+          .keyPoints,
+        "buildup_collapse",
+      ),
+    ).toBe(false);
+  });
+
   it("압박: 짧게 푸는 상대는 걸리고, 롱볼로 넘기는 상대에겐 헛돈다", () => {
     const press = () => makeSide("us", 80, { tactics: T({ pressing: 5 }) });
     const shortShaky = makeSide("them", 78, { tactics: T({ passStyle: 1 }) });

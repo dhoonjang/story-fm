@@ -10,6 +10,15 @@ export const RATING_MAX = 99;
 /** 체력 눈금의 위끝 — 0~100, 높을수록 좋다 */
 export const CONDITION_MAX = 100;
 
+/**
+ * **경기 감각 눈금의 위끝 — 그리고 기준점이다** (player.md §5.4).
+ *
+ * 전력 계수는 여기서 0이고 아래로만 깎이므로, 값이 없는 선수(옛 세이브)를 이 값으로
+ * 읽으면 셈이 한 칸도 달라지지 않는다. "보존한다"가 스키마가 열린다는 뜻이 아니라
+ * **숫자가 그대로다**라는 뜻이 되는 자리다.
+ */
+export const SHARPNESS_MAX = 100;
+
 /** 0~99 능력치 스케일 — 선수·감독 공통 (player.md §1) */
 export const RatingSchema = z.number().int().min(0).max(RATING_MAX);
 
@@ -1703,6 +1712,55 @@ export function bestOverall(axes: AxisValues, positions: readonly { position: st
  */
 export const MOOD_NOTE_MAX = 120;
 
+// ── 은퇴 (season.md §6) ─────────────────────────────
+
+/**
+ * 서른셋을 넘겨 이 아래면 은퇴한다 — **종합의 눈금을 탄다** (season.md §6).
+ *
+ * 옛 72와 같은 인원 비율(상위 37%)에 서는 값이다 (player.md §4). 72를 그대로 두면
+ * 새 눈금에서 그 선이 전체의 63%를 덮어 서른서넛이 한 시즌에 통째로 은퇴한다.
+ */
+export const RETIRE_OVERALL = 68;
+/** 종합과 무관하게 은퇴하는 나이 */
+export const RETIRE_AGE = 35;
+/** 이 나이부터는 `RETIRE_OVERALL` 아래면 은퇴한다 */
+export const RETIRE_AGE_MARGINAL = 33;
+/**
+ * 이만큼도 못 뛴 시즌이면 계약 만료가 곧 은퇴다 — **`RETIRE_AGE_MARGINAL` 위에서만**
+ * (season.md §6).
+ *
+ * 나가는 문이 자유이적 하나뿐이면 서른넷의 백업이 매년 무소속 명단에 쌓인다. 눈금이
+ * 다섯인 것은 컵 한 라운드와 리그 몇 경기를 합친 수라 "명단에 있었다"와 "뛰지 않았다"를
+ * 가르기 때문이다 — 1군 공식전 누계 하나로 센다(`SeasonStat.apps`).
+ */
+export const RETIRE_IDLE_APPS = 5;
+
+/**
+ * 왜 그만두는가 — **코드다** (season.md §6). 판정한 사유는 은퇴 뒤에 되돌릴 수 없어
+ * (종합도 계약도 그 사람과 함께 사라진다) 명부가 이 값을 그대로 든다.
+ */
+export const RETIREMENT_REASONS = [
+  /** 판정일에 `RETIRE_AGE` 이상 — 종합도 계약도 출전도 보지 않는다 */
+  "age",
+  /** `RETIRE_AGE_MARGINAL` 이상이고 종합이 `RETIRE_OVERALL` 아래 */
+  "decline",
+  /** `RETIRE_AGE_MARGINAL` 이상 · 계약이 시즌 끝에 만료 · 출전이 `RETIRE_IDLE_APPS` 미만 */
+  "idle",
+] as const;
+export const RetirementReasonSchema = z.enum(RETIREMENT_REASONS);
+export type RetirementReason = z.infer<typeof RetirementReasonSchema>;
+
+/**
+ * 이 나이·종합이면 시즌이 끝날 때 은퇴한다 — 세계를 보지 않는 순수 규칙.
+ *
+ * 시즌 전환(`transitionSeason`)만의 자가 아니다: 베테랑 황혼 아크의 절정도 같은 자를
+ * 읽는다(people.md §9). 두 벌로 두면 한쪽만 튜닝한 날 이야기와 판정이 갈린다
+ * (AGENTS.md §5 "한 규칙, 한 정의").
+ */
+export function retiresAtSeasonEnd(age: number, overall: number): boolean {
+  return age >= RETIRE_AGE || (age >= RETIRE_AGE_MARGINAL && overall < RETIRE_OVERALL);
+}
+
 /** 빠르게 변하는 컨디션 — 부상은 별도 INJURY 테이블 (player.md §5) */
 export const PlayerStateSchema = z.object({
   /**
@@ -1809,8 +1867,50 @@ export const PlayerStateSchema = z.object({
    * 옛 세이브엔 없다 — 없으면 0으로 읽고 버전을 올리지 않는다.
    */
   outOfPositionRun: z.number().int().min(0).optional(),
+  /**
+   * **이번 시즌 뒤 은퇴한다는 예고** — 있다는 것 자체가 그 사실이다 (season.md §6).
+   *
+   * 1월 1일 tick이 나이·종합·출전·계약으로 결정적으로 판정해 적고(`declareRetirements`),
+   * 시즌 전환이 이 표식을 보고 집행한다. 파생하지 않고 저장하는 이유는 **예고와 실행
+   * 사이에 반년이 있기 때문**이다 — 그 사이 종합이 한 칸 내려가거나 출전이 늘면
+   * 7월에 다시 판정한 명단이 1월에 감독이 들은 명단과 달라진다. 사유도 함께 드는 것은
+   * 같은 이유다: 판정한 순간의 사실이라 나중에 다시 세울 수 없다.
+   *
+   * 감독의 재계약 성사가 거둘 수 있다 — 나이 상한 안에서만(`withdrawRetirement`).
+   * `on`이 예고한 날이다 — 회견·근황·심경이 "예고한 지 며칠째"를 여기서 센다.
+   *
+   * 옛 세이브엔 없다 — 없으면 예고가 선 적 없는 것으로 읽고 버전을 올리지 않는다.
+   */
+  retiringAfterSeason: z.object({ on: DateString, reason: RetirementReasonSchema }).optional(),
+  /**
+   * **경기 감각 0~100** — 지금 이 선수가 90분의 리듬 안에 있는가 (player.md §5.4).
+   *
+   * 체력과 다른 축이다. 몸의 준비 상태는 하루 쉬면 돌아오지만 경기 감각은 그렇지
+   * 않다 — 두 달을 재활실에서 보낸 선수는 다리가 다 나은 날에도 리듬을 잃은 채로
+   * 돌아온다. **출전 분이 올리고 결장이 깎으며**, 시즌 전환이 낮은 값으로 리셋해
+   * 프리시즌이 그것을 채운다.
+   *
+   * ⚠️ **정수가 아니다.** 하루치 감쇠는 평형 근처에서 0.2 남짓이라, 정수로 반올림해
+   * 저장하면 그 구간에서 값이 통째로 멈춘다 — 폼과 같은 이유로 실수로 둔다.
+   *
+   * 옛 세이브엔 없다 — 없으면 `SHARPNESS_MAX`(기준점)로 읽고 버전을 올리지 않는다.
+   */
+  sharpness: z.number().min(0).max(SHARPNESS_MAX).optional(),
 });
 export type PlayerState = z.infer<typeof PlayerStateSchema>;
+
+/**
+ * 저장된 경기 감각을 읽는 **유일한 문** — 없으면 기준점이다.
+ * 읽는 자리가 저마다 `?? 100`을 적으면 기본값이 코드베이스에 흩어진다.
+ */
+export function sharpnessOf(state: Pick<PlayerState, "sharpness">): number {
+  return state.sharpness ?? SHARPNESS_MAX;
+}
+
+/** 경기 감각을 0~100 안으로 — 모든 변화가 이 문을 지난다 */
+export function clampSharpness(value: number): number {
+  return Math.max(0, Math.min(SHARPNESS_MAX, value));
+}
 
 /** 체력을 0~100 안으로 — 모든 변화가 이 문을 지난다 */
 export function clampCondition(value: number): number {
@@ -1855,6 +1955,45 @@ const CONDITION_BAND_KO: Record<ConditionBand, string> = {
 /** 체력 구간 라벨 — 숫자만 보면 "70이 좋은 건가?"가 된다 */
 export function conditionLabel(condition: number): string {
   return CONDITION_BAND_KO[conditionBand(condition)];
+}
+
+/**
+ * 경기 감각 구간 — **화면·조회·심경이 같은 경계를 쓴다** (player.md §5.4).
+ *
+ * 이 축은 숫자로 내보내지 않고 등급으로만 선다. 감독이 관측할 수 있는 것은 출전
+ * 기록과 부상이지 "감각 73"이 아니고, 등급이면 그 두 사실에서 읽어 낼 수 있다.
+ */
+export type SharpnessBand = "sharp" | "rising" | "rusty" | "blunt";
+
+/** 각 구간이 시작되는 값 — 이 아래는 다음(더 무딘) 구간이다 */
+export const SHARPNESS_BAND_FLOOR = {
+  sharp: 80,
+  rising: 60,
+  rusty: 40,
+} as const;
+
+export function sharpnessBand(sharpness: number): SharpnessBand {
+  if (sharpness >= SHARPNESS_BAND_FLOOR.sharp) return "sharp";
+  if (sharpness >= SHARPNESS_BAND_FLOOR.rising) return "rising";
+  if (sharpness >= SHARPNESS_BAND_FLOOR.rusty) return "rusty";
+  return "blunt";
+}
+
+const SHARPNESS_BAND_KO: Record<SharpnessBand, string> = {
+  sharp: "실전",
+  rising: "올라옴",
+  rusty: "무딤",
+  blunt: "굳음",
+};
+
+/** 등급의 말 — 등급을 이미 손에 쥔 자리(심경 카드)가 부른다 */
+export function sharpnessBandLabel(band: SharpnessBand): string {
+  return SHARPNESS_BAND_KO[band];
+}
+
+/** 경기 감각 등급 라벨 — 명단·조회·심경이 같은 낱말을 쓴다 */
+export function sharpnessLabel(sharpness: number): string {
+  return sharpnessBandLabel(sharpnessBand(sharpness));
 }
 
 /** 가능 포지션 + 포지션 적응도 — 선수당 여러 개, isNatural은 **하나 이상** */
@@ -2087,29 +2226,6 @@ export function ageOf(birthdate: string, onDate: string): number {
   const m = d.getUTCMonth() - b.getUTCMonth();
   if (m < 0 || (m === 0 && d.getUTCDate() < b.getUTCDate())) age -= 1;
   return age;
-}
-
-/**
- * 서른셋을 넘겨 이 아래면 은퇴한다 — **종합의 눈금을 탄다** (season.md §6).
- *
- * 옛 72와 같은 인원 비율(상위 37%)에 서는 값이다 (player.md §4). 72를 그대로 두면
- * 새 눈금에서 그 선이 전체의 63%를 덮어 서른서넛이 한 시즌에 통째로 은퇴한다.
- */
-export const RETIRE_OVERALL = 68;
-/** 종합과 무관하게 은퇴하는 나이 */
-export const RETIRE_AGE = 35;
-/** 이 나이부터는 `RETIRE_OVERALL` 아래면 은퇴한다 */
-export const RETIRE_AGE_MARGINAL = 33;
-
-/**
- * 이 나이·종합이면 시즌이 끝날 때 은퇴한다 — 세계를 보지 않는 순수 규칙.
- *
- * 시즌 전환(`transitionSeason`)만의 자가 아니다: 베테랑 황혼 아크의 절정도 같은 자를
- * 읽는다(people.md §9). 두 벌로 두면 한쪽만 튜닝한 날 이야기와 판정이 갈린다
- * (AGENTS.md §5 "한 규칙, 한 정의").
- */
-export function retiresAtSeasonEnd(age: number, overall: number): boolean {
-  return age >= RETIRE_AGE || (age >= RETIRE_AGE_MARGINAL && overall < RETIRE_OVERALL);
 }
 
 // ── 라커룸 서열 점수 (people.md §5-1) ───────────────

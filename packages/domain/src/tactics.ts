@@ -69,6 +69,21 @@ export const TACTIC_SCALE_NEUTRAL = 3;
 
 const Scale5 = z.number().int().min(TACTIC_SCALE_MIN).max(TACTIC_SCALE_MAX);
 
+/**
+ * 전환 국면의 갈래 — **공을 뺏은 뒤 무엇을 하나.**
+ * 곧장 앞으로(`counter`)냐 자리부터(`regroup`)냐는 1~5 사이 어딘가가 아니라 둘 중 하나다.
+ */
+export const TRANSITION_MODES = ["counter", "regroup"] as const;
+export type TransitionMode = (typeof TRANSITION_MODES)[number];
+
+/** 태클 강도 — `normal`이 중립이라 델타가 0인 자리다 */
+export const TACKLING_LEVELS = ["soft", "normal", "hard"] as const;
+export type TacklingLevel = (typeof TACKLING_LEVELS)[number];
+
+/** 골키퍼 배급 — 뒤에서 풀어 나가나(`short`) 넘겨 버리나(`long`) */
+export const KEEPER_DISTRIBUTIONS = ["short", "long"] as const;
+export type KeeperDistribution = (typeof KEEPER_DISTRIBUTIONS)[number];
+
 /** 전술 본체 (TACTICS) — 개인 지시는 배치(TacticAssignment)로 이동 */
 export const TacticsSpecSchema = z.object({
   /** 지금 판의 모양 — 배치 좌표의 파생값이다 (`shapeOf`) */
@@ -82,11 +97,25 @@ export const TacticsSpecSchema = z.object({
   width: Scale5,
   /** 1(짧게) ~ 5(길게) */
   passStyle: Scale5,
+  /**
+   * ── 토글 넷 — **축이 아니라 갈래다** (→ docs/simulation/match.md §1.2).
+   *
+   * 여섯 축은 늘리지 않는다(대칭·프리셋 리그 평균 3·`TACTIC_SWING` 예산이 전부 다시
+   * 서야 한다). 넷 모두 optional이고 **없으면 중립**이라 옛 세이브는 셈이 한 칸도
+   * 달라지지 않는다 — SAVE_VERSION 유지. `null`은 감독이 지시를 푼 자리다.
+   */
+  transition: z.enum(TRANSITION_MODES).nullable().optional(),
+  offsideTrap: z.boolean().optional(),
+  tackling: z.enum(TACKLING_LEVELS).optional(),
+  keeperDistribution: z.enum(KEEPER_DISTRIBUTIONS).nullable().optional(),
 });
 export type TacticsSpec = z.infer<typeof TacticsSpecSchema>;
 
+/** 갈래로 서는 넷 — 눈금이 없으므로 `TacticAxisKey`와 자리가 다르다 */
+export type TacticToggleKey = "transition" | "offsideTrap" | "tackling" | "keeperDistribution";
+
 /** 슬라이더가 아닌 축 — 모양은 좌표에서 읽는 이름이라 눈금이 없다 */
-export type TacticAxisKey = Exclude<keyof TacticsSpec, "formation">;
+export type TacticAxisKey = Exclude<keyof TacticsSpec, "formation" | TacticToggleKey>;
 
 export interface TacticAxis {
   key: TacticAxisKey;
@@ -144,6 +173,102 @@ export const TACTIC_AXES: readonly TacticAxis[] = [
   },
 ];
 
+/**
+ * 갈래 하나 — 눈금이 없어 `TacticAxis`와 그릇이 다르다.
+ *
+ * 값이 `string`·`boolean`·`null`로 갈리므로 낱말표의 키는 **값을 문자열로 적은 것**
+ * 하나로 모은다(`true`·`false`도 그렇다). 두 벌로 두면 같은 값이 판과 카드에서 다른
+ * 낱말로 선다 — `TACTIC_AXES`가 하나여야 하는 이유와 같다.
+ */
+export interface TacticToggle {
+  key: TacticToggleKey;
+  /** 갈래의 이름 — 전술판·상대 전술 카드가 세우는 그것 */
+  label: string;
+  /** 값과 **함께** 한 줄에 설 때의 짧은 이름 */
+  brief: string;
+  /** 값(문자열) → 낱말 */
+  words: Readonly<Record<string, string>>;
+  /**
+   * 중립으로 읽는 값 — 이 값이면 **지시하지 않은 것과 같다**(델타 0, 지문에 안 붙는다).
+   * 값이 없는 옛 세이브도 여기로 접힌다.
+   */
+  neutralValue: string | null;
+  /** 중립일 때의 낱말 */
+  neutralWord: string;
+}
+
+/**
+ * **갈래 넷의 낱말표는 여기 하나다** (→ docs/simulation/match.md §1.2).
+ *
+ * 축은 3이 중립이고 위아래가 대칭이어야 하지만, 갈래는 **아무 데도 서지 않은 상태가
+ * 중립**이고 켠 쪽만 이득과 대가를 함께 낸다. 그래서 지시하지 않는 것이 손해가 아니다.
+ */
+export const TACTIC_TOGGLES: readonly TacticToggle[] = [
+  {
+    key: "transition",
+    label: "전환",
+    brief: "전환",
+    words: { counter: "역습", regroup: "재정비" },
+    neutralValue: null,
+    neutralWord: "지시 없음",
+  },
+  {
+    key: "offsideTrap",
+    label: "오프사이드 트랩",
+    brief: "트랩",
+    words: { true: "건다" },
+    neutralValue: "false",
+    neutralWord: "걸지 않는다",
+  },
+  {
+    key: "tackling",
+    label: "태클",
+    brief: "태클",
+    words: { soft: "약하게", hard: "강하게" },
+    neutralValue: "normal",
+    neutralWord: "보통",
+  },
+  {
+    key: "keeperDistribution",
+    label: "GK 배급",
+    brief: "배급",
+    words: { short: "짧게", long: "길게" },
+    neutralValue: null,
+    neutralWord: "지시 없음",
+  },
+];
+
+/** 갈래의 키만 — 지문·거리·화면이 훑는 순서다 */
+export const TACTIC_TOGGLE_KEYS: readonly TacticToggleKey[] = TACTIC_TOGGLES.map((t) => t.key);
+
+const TACTIC_TOGGLE_BY_KEY: ReadonlyMap<TacticToggleKey, TacticToggle> = new Map(
+  TACTIC_TOGGLES.map((toggle) => [toggle.key, toggle]),
+);
+
+export function tacticToggleOf(key: TacticToggleKey): TacticToggle {
+  return TACTIC_TOGGLE_BY_KEY.get(key)!;
+}
+
+/**
+ * 지금 이 갈래에 서 있는 값 — **중립이면 `null`**.
+ *
+ * 델타·지문·거리·화면이 전부 이 함수 하나로 "감독이 이 갈래를 지시했나"를 묻는다.
+ * 각자 `=== undefined || === null || === false || === "normal"`을 적으면 어느 하나가
+ * 빠지는 날 같은 전술이 두 지문을 갖는다.
+ */
+export function tacticToggleValue(spec: TacticsSpec, key: TacticToggleKey): string | null {
+  const raw = spec[key];
+  if (raw === undefined || raw === null) return null;
+  const value = String(raw);
+  return value === tacticToggleOf(key).neutralValue ? null : value;
+}
+
+/** 갈래 하나의 낱말 — `null`(중립)도 낱말을 갖는다 */
+export function tacticToggleWord(key: TacticToggleKey, value: string | null): string {
+  const toggle = tacticToggleOf(key);
+  return value === null ? toggle.neutralWord : (toggle.words[value] ?? toggle.neutralWord);
+}
+
 const TACTIC_AXIS_BY_KEY: ReadonlyMap<TacticAxisKey, TacticAxis> = new Map(
   TACTIC_AXES.map((axis) => [axis.key, axis]),
 );
@@ -176,6 +301,11 @@ export function tacticsBrief(spec: TacticsSpec): string {
   return [
     spec.formation,
     ...TACTIC_AXES.map((axis) => `${axis.brief} ${tacticWord(axis.key, spec[axis.key])}`),
+    // 중립인 갈래는 서지 않는다 — 지시하지 않은 것을 줄로 세우면 넷이 늘 붙어 있다
+    ...TACTIC_TOGGLES.flatMap((toggle) => {
+      const value = tacticToggleValue(spec, toggle.key);
+      return value === null ? [] : [`${toggle.brief} ${tacticToggleWord(toggle.key, value)}`];
+    }),
   ].join(" · ");
 }
 
@@ -219,9 +349,11 @@ export function migratePassStyle(value: unknown): number {
  */
 export function migrateSignature(signature: string): string {
   const parts = signature.split("|");
-  const last = parts[parts.length - 1];
-  if (last === undefined || !Number.isNaN(Number(last))) return signature;
-  parts[parts.length - 1] = String(migratePassStyle(last));
+  // 마지막 칸이 아니라 **여섯째 축의 자리**다 — 뒤에 켜 둔 갈래가 붙을 수 있다
+  const at = TACTIC_AXES.length;
+  const passStyle = parts[at];
+  if (passStyle === undefined || !Number.isNaN(Number(passStyle))) return signature;
+  parts[at] = String(migratePassStyle(passStyle));
   return parts.join("|");
 }
 
@@ -307,7 +439,16 @@ export function tacticsAffinityShift(
  * 되찾을 수 있다 (`drilled` 기억의 키).
  */
 export function tacticsSignature(spec: TacticsSpec): string {
-  return [spec.formation, ...TACTIC_AXIS_KEYS.map((a) => spec[a])].join("|");
+  /**
+   * **중립이 아닌 갈래만 뒤에 붙인다.** 아무 데도 서지 않은 전술의 지문은 갈래가
+   * 생기기 전과 바이트까지 같아, 옛 세이브의 기억이 그대로 이어진다 — 늘 붙이면
+   * 모든 기억이 한 번에 "처음 보는 전술"이 되고 `drilled`가 두 벌로 불어난다.
+   */
+  const toggles = TACTIC_TOGGLE_KEYS.flatMap((key) => {
+    const value = tacticToggleValue(spec, key);
+    return value === null ? [] : [`${key}=${value}`];
+  });
+  return [spec.formation, ...TACTIC_AXIS_KEYS.map((a) => spec[a]), ...toggles].join("|");
 }
 
 /**
@@ -319,9 +460,20 @@ export function tacticsSignature(spec: TacticsSpec): string {
 /** 포메이션을 갈아엎는 값 — 슬라이더 한 축을 끝까지 미는 것보다 크다 */
 export const FORMATION_CHANGE_COST = 25;
 
+/**
+ * 갈래 하나를 새로 익히는 값 — **라인·압박 한 칸과 같은 4**.
+ *
+ * 칸 수를 세지 않는다(`hard`↔`soft`도 4). 갈래는 눈금이 아니라 약속이라 "몇 칸
+ * 떨어졌나"를 물을 자리가 없고, 드는 품은 열한 명이 손발을 다시 맞추는 그것이다.
+ */
+const TOGGLE_COST = 4;
+
 export function tacticsDistance(a: TacticsSpec, b: TacticsSpec): number {
   let d = a.formation !== b.formation ? FORMATION_CHANGE_COST : 0;
   for (const axis of TACTIC_AXIS_KEYS) d += Math.abs(a[axis] - b[axis]) * AXIS_COST[axis];
+  for (const key of TACTIC_TOGGLE_KEYS) {
+    if (tacticToggleValue(a, key) !== tacticToggleValue(b, key)) d += TOGGLE_COST;
+  }
   return d;
 }
 
@@ -1387,8 +1539,19 @@ function daysBetween(from: string, to: string): number {
 
 /** 지문 → 설정 (기억에서 거리를 재려면 되돌려야 한다). 형식이 깨졌으면 null */
 function specOfSignature(signature: string): TacticsSpec | null {
-  const [formation, mentality, defensiveLine, pressing, tempo, width, passStyle] =
-    signature.split("|");
+  const parts = signature.split("|");
+  const [formation, mentality, defensiveLine, pressing, tempo, width, passStyle] = parts;
+  /**
+   * 축 뒤에 붙은 `키=값` — 중립이 아닌 갈래만 붙으므로 없는 키는 곧 중립이다.
+   * `offsideTrap=true`만 불리언이라 문자열 그대로 두면 스키마가 반려한다.
+   */
+  const toggles: Record<string, unknown> = {};
+  for (const part of parts.slice(TACTIC_AXIS_KEYS.length + 1)) {
+    const at = part.indexOf("=");
+    if (at < 0) continue;
+    const value = part.slice(at + 1);
+    toggles[part.slice(0, at)] = value === "true" ? true : value === "false" ? false : value;
+  }
   const parsed = TacticsSpecSchema.safeParse({
     formation,
     mentality: Number(mentality),
@@ -1396,8 +1559,9 @@ function specOfSignature(signature: string): TacticsSpec | null {
     pressing: Number(pressing),
     tempo: Number(tempo),
     width: Number(width),
-    // 옛 지문은 마지막 칸이 `mixed` 같은 문자열이다
+    // 옛 지문은 여섯째 칸이 `mixed` 같은 문자열이다
     passStyle: migratePassStyle(Number.isNaN(Number(passStyle)) ? passStyle : Number(passStyle)),
+    ...toggles,
   });
   return parsed.success ? parsed.data : null;
 }

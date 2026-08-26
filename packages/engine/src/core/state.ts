@@ -44,6 +44,7 @@ import type {
   ScheduleEntry,
   Negotiation,
   PressConference,
+  RetiredPlayer,
   ScoutReport,
   ScoutReportCard,
   SeasonAward,
@@ -90,7 +91,7 @@ import {
   roleFit,
   standingScore,
 } from "@story-fm/domain";
-import { profFactor, type MatchLedgerState } from "@story-fm/sim";
+import { profFactor, SHARPNESS_PRESEASON, type MatchLedgerState } from "@story-fm/sim";
 import type { AiDeal } from "../market/ai-market";
 import {
   buildScheduleEntries,
@@ -842,6 +843,16 @@ export interface GameState {
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   milestones?: Milestone[];
+  /**
+   * **은퇴 명부** — 그만둔 사람이 남기는 한 줄 (season.md §6).
+   *
+   * 은퇴하면 `state.players`에서 빠지므로 id로는 이름도 나이도 되찾지 못한다 — 원장의
+   * `retire` 줄만으로는 오프시즌 블록도 캐릭터북도 그 사람을 부를 수 없다. 통산은 여기
+   * 적지 않는다: `seasonStats`가 그대로 남아 `careerTotalsOf`가 같은 수를 낸다.
+   * **감독 팀에서 은퇴한 선수만** 담는다 — `milestones`와 같은 규약이다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  retired?: RetiredPlayer[];
 
   // ── 서사 ──
   /**
@@ -1269,6 +1280,20 @@ export function proficiencyAt(player: GamePlayer, position: string): number {
 
 export function openInjury(state: GameState, playerId: string): Injury | null {
   return state.injuries.find((i) => i.gamePlayerId === playerId && i.returnedOn === null) ?? null;
+}
+
+/**
+ * 지금 부상 중인 선수 id 전부 — **세계 전체를 하루에 한 번 훑는 자리**를 위한 것이다.
+ *
+ * `isInjured`를 선수마다 부르면 장부를 선수 수만큼 다시 훑는다. 한 번 만들어 두고
+ * 묻는 쪽이 재사용한다. 열린 부상의 정의(`returnedOn === null`)는 위와 같은 자다.
+ */
+export function openInjuryIds(state: GameState): Set<string> {
+  const ids = new Set<string>();
+  for (const injury of state.injuries) {
+    if (injury.returnedOn === null) ids.add(injury.gamePlayerId);
+  }
+  return ids;
 }
 
 /**
@@ -1758,6 +1783,12 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
         form: randInt(rng, -1, 1) * 0.15,
         // 프리시즌 시작 — 잘 쉬고 돌아왔다
         condition: randInt(rng, 70, 86),
+        /**
+         * 몸은 쉬고 왔지만 **경기 감각은 무뎌진 채로 온다** (player.md §5.4).
+         * 시즌 전환이 세우는 값과 같은 자리에서 출발해야 첫 시즌의 프리시즌도
+         * 두 번째 시즌의 프리시즌과 같은 판이 된다.
+         */
+        sharpness: SHARPNESS_PRESEASON,
       },
       isCaptain: false,
     };
@@ -2248,13 +2279,23 @@ function memoFit(preferred?: ReadonlySet<string>): (p: GamePlayer, slot: string)
  * 그래서 각 스타일은 **올린 축만큼 내린 축을 갖는다** — 점유는 라인과 폭을 올리는
  * 대신 템포와 패스 길이를 내리고, 역습·롱볼은 라인과 압박을 내린다. 프리셋을
  * 고칠 때는 리그 평균을 다시 재라(`docs/simulation/match.md` §1.2).
+ *
+ * ⚠️ **갈래 넷(`TACTIC_TOGGLES`)도 같은 규칙을 탄다.** 갈래는 중립이 "아무 데도 서지
+ * 않은 것"이라 평균이 아니라 **리그 합**으로 잰다. 그리고 그 합은 **스타일별 팀 수로
+ * 가중해야** 한다 — `TACTICAL_STYLE_SEED`의 96팀은 스타일마다 수가 다르므로(high-press
+ * 26 · possession 24 · direct 15 · transition 13 · low-block 10 · balanced 8) 여섯을
+ * 같은 무게로 놓고 맞춘 표는 실제 리그에서 기운다. 지금 표의 96팀 가중 합은
+ * 공격 +0.29% · 중원 +0.11% · 수비 −0.02% · 강도 +1.0%다. **빈칸은 필드를 쓰지 않는다**
+ * — 프리셋은 자기 스타일이 실제로 말하는 갈래에만 선다. 갈래를 더하거나 옮길 때는 그
+ * 가중 합을 다시 재라(`docs/data/team.md` §6).
  */
 function initialTactics(
   teamId: string,
   formation: Formation,
 ): import("@story-fm/domain").TacticsSpec {
   switch (tacticalStyleOf(teamId)) {
-    // 라인을 올려 압축하되 천천히 넓게 짧은 패스로 돌린다
+    // 라인을 올려 압축하되 천천히 넓게 짧은 패스로 돌린다 — 공을 잃으면 자리부터
+    // 잡고, 올린 라인은 트랩으로 지키며, 뒤에서 짧게 풀어 나간다
     case "possession":
       return {
         formation,
@@ -2264,8 +2305,15 @@ function initialTactics(
         tempo: 2,
         width: 4,
         passStyle: 2,
+        transition: "regroup",
+        offsideTrap: true,
+        tackling: "soft",
+        keeperDistribution: "short",
       };
-    // 앞으로 무게를 싣고 라인을 올려 빠르게 — 대신 좁게 압축한다
+    // 앞으로 무게를 싣고 라인을 올려 빠르게 — 대신 좁게 압축한다. 높은 곳에서 뺏어
+    // 곧장 나가고, 올린 라인을 트랩으로 지키며, 거칠게 문다.
+    // ⚠️ GK 배급은 비운다 — 압박으로 이미 공을 상대 진영에서 얻는다. 배급까지 짧게
+    // 묶으면 "앞에서 시작한다"는 **같은 사실을 두 번 싣는다**.
     case "high-press":
       return {
         formation,
@@ -2275,8 +2323,13 @@ function initialTactics(
         tempo: 4,
         width: 2,
         passStyle: 3,
+        transition: "counter",
+        offsideTrap: true,
+        tackling: "hard",
       };
-    // 내려서서 기다리다 빠르고 넓게 나간다
+    // 내려서서 기다리다 빠르고 넓게 나간다 — 뺏으면 곧장 앞으로, GK도 넘겨서 그
+    // 출발을 앞당긴다. 트랩은 라인 2 앞에 걸 자리가 없고, 태클은 기다리는 쪽이라
+    // 어느 끝에도 서지 않는다
     case "transition":
       return {
         formation,
@@ -2286,8 +2339,13 @@ function initialTactics(
         tempo: 4,
         width: 4,
         passStyle: 4,
+        transition: "counter",
+        keeperDistribution: "long",
       };
-    // 내려서서 길게 찬다 — 폭보다 타깃이 먼저다
+    // 내려서서 길게 찬다 — 폭보다 타깃이 먼저다. 라인 2로 내려서서 자리부터 잡으므로
+    // 전환은 `regroup`이다.
+    // ⚠️ GK 배급은 비운다 — 롱볼은 이미 `passStyle` 5가 말하고 있어 배급까지 길게 두면
+    // **같은 사실을 두 번 싣는다**(team.md §6). 태클도 어느 끝에도 서지 않는다.
     case "direct":
       return {
         formation,
@@ -2297,8 +2355,11 @@ function initialTactics(
         tempo: 4,
         width: 3,
         passStyle: 5,
+        transition: "regroup",
       };
-    // 전부 내린다
+    // 전부 내린다 — 뺏어도 자리부터 잡고(`counter`가 아니다: 역습으로 사는 팀은
+    // `transition` 프리셋이 맡는다), 낮은 블록 앞에서 거칠게 물고, GK는 넘겨 버린다.
+    // 라인이 낮아 트랩은 걸 자리가 없다
     case "low-block":
       return {
         formation,
@@ -2308,6 +2369,9 @@ function initialTactics(
         tempo: 2,
         width: 2,
         passStyle: 4,
+        transition: "regroup",
+        tackling: "hard",
+        keeperDistribution: "long",
       };
     case "balanced":
       break;

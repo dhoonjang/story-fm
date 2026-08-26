@@ -35,6 +35,7 @@ import {
   roleFit,
   roleWeights,
   tacticalSensitivityOf,
+  tacticToggleValue,
 } from "@story-fm/domain";
 import { applyDirectives, type DirectiveInput } from "./directives";
 import { applyExploits, autoExploits, exploitTargets } from "./exploits";
@@ -277,11 +278,25 @@ interface ZoneDelta {
   notes: PacketTag[];
 }
 
+/** 전환 갈래가 존 하나를 움직이는 폭 — 축 한 칸(2~3.5%)·상성 이득(2.5~8%)과 같은 자리 */
+const TRANSITION_SWING = 0.03;
+/** 태클 갈래가 수비 존을 움직이는 폭 — 대가는 존이 아니라 `matchIntensity`로 나간다 */
+const TACKLING_SWING = 0.03;
+/** 오프사이드 트랩이 중원·수비를 움직이는 폭 */
+const TRAP_SWING = 0.025;
+/** GK 배급이 존을 움직이는 폭 */
+const KEEPER_SWING = 0.025;
+
 /**
- * 전술 5축 + 패스 스타일이 존 전력에 남기는 **이득과 대가**.
+ * 전술 여섯 축 + **갈래 넷**이 존 전력에 남기는 **이득과 대가**.
  *
- * 여섯 축 전부가 이득과 대가를 함께 낸다 — 수치를 안 움직이는 축이 있으면 그
- * 지시는 대화에만 남고 결과에 닿지 않는다.
+ * 열 전부가 이득과 대가를 함께 낸다 — 수치를 안 움직이는 지시가 있으면 그 말은
+ * 대화에만 남고 결과에 닿지 않는다. 태클만 짝의 한쪽이 존이 아니라 강도로 나간다
+ * (`matchIntensity`).
+ *
+ * 축은 3이 중립이라 위아래가 대칭이지만, 갈래는 **아무 데도 서지 않은 상태가
+ * 중립**이라 켠 쪽만 값을 움직인다 (match.md §1.2) — 지시하지 않는 것이 손해가
+ * 아니고, 갈래가 전부 중립인 전술은 갈래 도입 전과 델타가 같다.
  *
  * @param uptake 지시 적용률 — 이득에는 온전히, 대가에는 절반만 곱한다 (`cost`)
  * @param opponentPace 상대 최전방 스피드 평균 — 라인을 올릴 때 치르는 대가의 크기
@@ -294,10 +309,11 @@ function tacticalDeltas(
 ): ZoneDelta {
   const d: ZoneDelta = { attack: 0, midfield: 0, defense: 0, notes: [] };
   /**
-   * 축 하나가 남기는 사실 태그 — 코드는 축 이름, 눈금(`step`)과 팀 성향이 값이다.
+   * 축·갈래 하나가 남기는 사실 태그 — 코드는 그 이름, 눈금(`step`)과 팀 성향이
+   * 값이고, 눈금이 없는 갈래는 어느 쪽에 섰는지를 `flags`가 든다.
    * 편은 없다: 이 노트는 그 팀의 `tactical.notes`에 실려 자리로 이미 편을 갖는다.
    */
-  const note = (code: string, values: Record<string, number>) =>
+  const note = (code: string, values: Record<string, number>, flags: string[] = []) =>
     d.notes.push({
       source: "tactical",
       code,
@@ -305,7 +321,7 @@ function tacticalDeltas(
       sharp: true,
       playerIds: [],
       values,
-      flags: [],
+      flags,
     });
   const gain = (v: number) => v * uptake;
   /**
@@ -406,6 +422,52 @@ function tacticalDeltas(
     note("pass-style", { step: ps, passing });
   }
 
+  // ⑦ 전환 — 뺏은 공을 곧장 앞으로 보낼지 자리부터 잡을지. 중립이면 아무 일도 없다
+  const transition = tacticToggleValue(spec, "transition");
+  if (transition === "counter") {
+    const pace = squadTrait(slots, (p) => p.attributes.pace);
+    d.attack += gain(TRANSITION_SWING * pace);
+    d.midfield -= cost(TRANSITION_SWING); // 전환에 인원을 앞으로 던지면 2차 볼을 내준다
+    note("transition", { trait: pace }, ["counter"]);
+  } else if (transition === "regroup") {
+    const shape = squadTrait(slots, (p) => p.attributes.positioning);
+    d.defense += gain(TRANSITION_SWING * shape);
+    d.attack -= cost(TRANSITION_SWING); // 되받을 기회를 스스로 접는다
+    note("transition", { trait: shape }, ["regroup"]);
+  }
+
+  // ⑧ 오프사이드 트랩 — 상대를 라인 앞에 가둔다. 타이밍이 어긋나면 그대로 열린다
+  if (tacticToggleValue(spec, "offsideTrap") !== null) {
+    d.midfield += gain(TRAP_SWING);
+    d.defense -= cost(TRAP_SWING);
+    note("offside-trap", {});
+  }
+
+  // ⑨ 태클 강도 — 존 쪽만 여기다. 파울·카드·부상은 `matchIntensity`가 쥔다
+  const tackling = tacticToggleValue(spec, "tackling");
+  if (tackling === "hard") {
+    const bite = squadTrait(slots, (p) => (p.attributes.tackling + p.attributes.aggression) / 2);
+    d.defense += gain(TACKLING_SWING * bite);
+    note("tackling", { trait: bite }, ["hard"]);
+  } else if (tackling === "soft") {
+    d.defense -= cost(TACKLING_SWING);
+    note("tackling", {}, ["soft"]);
+  }
+
+  // ⑩ GK 배급 — 뒤에서 풀어 나가나 넘겨 버리나
+  const keeper = tacticToggleValue(spec, "keeperDistribution");
+  if (keeper === "short") {
+    const link = squadTrait(slots, (p) => (p.attributes.passing + p.attributes.composure) / 2);
+    d.midfield += gain(KEEPER_SWING * link);
+    d.defense -= cost(KEEPER_SWING); // 우리 문 앞에서 잃을 위험
+    note("keeper-distribution", { trait: link }, ["short"]);
+  } else if (keeper === "long") {
+    const aerial = squadTrait(slots, (p) => p.attributes.aerial);
+    d.attack += gain(KEEPER_SWING * aerial);
+    d.midfield -= cost(KEEPER_SWING); // 2차 볼을 내준다
+    note("keeper-distribution", { trait: aerial }, ["long"]);
+  }
+
   return d;
 }
 
@@ -424,16 +486,35 @@ export function derbyIntensityFactor(heat = 0): number {
 }
 
 /**
- * 경기 강도 — 압박·템포가 만들고 더비가 곱한다. 파울·카드·부상률을 함께 끌어올린다.
+ * 태클 강도 한 갈래가 강도에 더하는 몫 — 압박(0.07)·템포(0.04)보다 크다:
+ * 태클은 이 축 **자체**다 (match.md §1.2).
+ */
+export const TACKLING_INTENSITY_STEP = 0.08;
+
+/**
+ * 세 항의 합이 clamp와 정확히 같다 — 압박 ±0.14 · 템포 ±0.08 · 태클 ±0.08 = ±0.30.
+ * 잘리는 구간이 없어야 감독이 "왜 안 올라가지"를 겪지 않는다.
+ */
+const INTENSITY_MIN = 0.7;
+const INTENSITY_MAX = 1.3;
+
+/**
+ * 경기 강도 — 압박·템포·태클 강도가 만들고 더비가 곱한다. 파울·카드·부상률을 함께
+ * 끌어올린다.
  *
  * ⚠️ **두 시뮬이 같은 문을 지나야 한다** (match.md §7). 구간 시뮬은 패킷의
  * `guide.intensity`를 읽지만 간이 시뮬은 카드·부상을 뽑기 전에 이 함수를 직접
  * 부르므로, 더비 배수를 한쪽에만 걸면 리그의 95%에서 더비가 카드에 닿지 않는다.
  */
 export function matchIntensity(spec: TacticsSpec, derbyHeat = 0): number {
+  const tackling = tacticToggleValue(spec, "tackling");
+  const bite = tackling === "hard" ? 1 : tackling === "soft" ? -1 : 0;
   const tactical = Math.max(
-    0.8,
-    Math.min(1.3, 1 + (spec.pressing - 3) * 0.07 + (spec.tempo - 3) * 0.04),
+    INTENSITY_MIN,
+    Math.min(
+      INTENSITY_MAX,
+      1 + (spec.pressing - 3) * 0.07 + (spec.tempo - 3) * 0.04 + bite * TACKLING_INTENSITY_STEP,
+    ),
   );
   return round2(tactical * derbyIntensityFactor(derbyHeat));
 }

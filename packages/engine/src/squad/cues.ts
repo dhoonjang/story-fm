@@ -115,6 +115,13 @@ export function recentSpeakers(state: GameState, turns: number): ReadonlySet<str
 
 /** 이 선수에게 지금 있는 일 — 없으면 null */
 function factOf(state: GameState, player: GamePlayer, benched: number): string | null {
+  /**
+   * **이번 시즌 뒤 은퇴** — 맨 앞이다 (people.md §7 · season.md §6). 폼도 명단 제외도
+   * 그 사실 위에서 읽히므로, 뒤로 밀면 마지막 시즌을 보내는 선수가 「3경기 명단 제외」로만
+   * 세계에 선다.
+   */
+  const retiring = player.state.retiringAfterSeason;
+  if (retiring) return `이번 시즌 뒤 은퇴 (${retiring.on} 예고)`;
   const injury = openInjury(state, player.id);
   if (injury) {
     return diffDays(state.date, injury.expectedReturn) <= RETURN_SOON

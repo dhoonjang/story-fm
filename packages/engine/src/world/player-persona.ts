@@ -8,6 +8,7 @@ import {
   type Persona,
   type PlayerArchetypeKey,
   type PlayerArchetypeTraits,
+  type RetiredPlayer,
   type WeightSlot,
 } from "@story-fm/domain";
 import { buildSeasonCalendar, FIRST_SEASON } from "../competition/calendar";
@@ -227,6 +228,30 @@ function archetypeWeight(archetype: PlayerArchetype, slot: WeightSlot, band: Age
 }
 
 /**
+ * 원형 뽑기가 읽는 전부 — **명단에 없는 사람도 이 넷이면 같은 사람이 된다.**
+ *
+ * 은퇴 명부의 한 줄이 이 모양이라(`RetiredPlayer` — season.md §6), 그만둔 선수를
+ * 캐릭터북이 부를 때 현역 때와 같은 채널을 지나 같은 목소리가 선다 (people.md §6).
+ */
+export interface PersonaSubject {
+  id: string;
+  name: string;
+  birthdate: string;
+  /** 주 포지션 코드 — `naturalPositionOf`가 답하는 그 값 */
+  position: string;
+}
+
+/** 선수 한 명을 그 넷으로 — 뽑기가 보는 것은 언제나 이만큼이다 */
+function personaSubjectOf(player: GamePlayer): PersonaSubject {
+  return {
+    id: player.id,
+    name: player.name,
+    birthdate: player.birthdate,
+    position: naturalPositionOf(player).position,
+  };
+}
+
+/**
  * 선수의 페르소나 — 저장하지 않고 (시드, 선수 id)에서 결정적으로 파생한다.
  *
  * 시드 채널에 **선수 id**를 넣는 이유: 이름은 동명이인이 있고 이적으로 팀이 바뀌어도
@@ -234,26 +259,45 @@ function archetypeWeight(archetype: PlayerArchetype, slot: WeightSlot, band: Age
  * 그 출처를 들고 있지 않다.
  */
 export function generatePlayerPersona(seed: number, player: GamePlayer): Persona {
-  const archetype = archetypeOf(seed, player);
+  return personaFrom(seed, personaSubjectOf(player));
+}
+
+/**
+ * 은퇴한 사람의 페르소나 — **현역 때와 같은 목소리다** (people.md §6 · season.md §6).
+ *
+ * 명부가 id·이름·생일·주 포지션을 들고 있어 같은 뽑기 채널을 그대로 지난다. 카드를
+ * 짓는 자리를 갈라 두면 같은 사람이 은퇴한 이튿날 다른 원형으로 말한다.
+ */
+export function retiredPersona(seed: number, retired: RetiredPlayer): Persona {
+  return personaFrom(seed, {
+    id: retired.gamePlayerId,
+    name: retired.name,
+    birthdate: retired.birthdate,
+    position: retired.position,
+  });
+}
+
+function personaFrom(seed: number, subject: PersonaSubject): Persona {
+  const archetype = archetypeOf(seed, subject);
   return {
     // 화자 태그는 직책이 아니라 이름이다 — 코치와 같은 규약
-    characterId: player.name,
-    name: player.name,
+    characterId: subject.name,
+    name: subject.name,
     role: "player",
     archetype: PLAYER_ARCHETYPE_LABEL[archetype.key],
     traits: [...archetype.traits],
     motivation: archetype.motivation,
     speechStyle: { note: archetype.speech.note, samples: [...archetype.speech.samples] },
-    keywords: personaKeywords({ name: player.name, role: "player" }),
+    keywords: personaKeywords({ name: subject.name, role: "player" }),
     seed,
   };
 }
 
 /** 추첨 한 번 — 카드를 짓는 쪽과 계수를 읽는 쪽이 같은 뽑기를 지난다 */
-function archetypeOf(seed: number, player: GamePlayer): PlayerArchetype {
-  const rng = makeRng(seed, `persona:player:${player.id}`);
-  const slot = weightSlotOf(naturalPositionOf(player).position);
-  const band = ageBandOf(ageOf(player.birthdate, PERSONA_AGE_REF));
+function archetypeOf(seed: number, subject: PersonaSubject): PlayerArchetype {
+  const rng = makeRng(seed, `persona:player:${subject.id}`);
+  const slot = weightSlotOf(subject.position);
+  const band = ageBandOf(ageOf(subject.birthdate, PERSONA_AGE_REF));
   return pickWeighted(rng, PLAYER_ARCHETYPES, (a) => archetypeWeight(a, slot, band));
 }
 
@@ -265,7 +309,7 @@ function archetypeOf(seed: number, player: GamePlayer): PlayerArchetype {
  * 같은 원형을 낸다.
  */
 export function playerArchetypeOf(seed: number, player: GamePlayer): PlayerArchetypeKey {
-  return archetypeOf(seed, player).key;
+  return archetypeOf(seed, personaSubjectOf(player)).key;
 }
 
 /**
