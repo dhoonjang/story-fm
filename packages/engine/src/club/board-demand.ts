@@ -1,8 +1,15 @@
-import type { BoardDemand, BoardDemandKind, PressFact, TransferWindow } from "@story-fm/domain";
-import { BOARD_DEMAND_LABEL } from "@story-fm/domain";
+import type {
+  BoardDemand,
+  BoardDemandCause,
+  BoardDemandKind,
+  PressFact,
+  TransferWindow,
+} from "@story-fm/domain";
+import { boardDemandText } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import {
   financeOf,
+  openBoardDemand,
   playerById,
   pushNarrative,
   squadLevelOf,
@@ -11,7 +18,14 @@ import {
 } from "../core/state";
 import { windowOpenForTeam } from "../market/market";
 import { ownerOf } from "../world/persona";
-import { formatMoney } from "./finance";
+import {
+  bookValueOf,
+  budgetFreezeReason,
+  debtLimitOf,
+  debtOf,
+  psrStatus,
+  relegationGapOf,
+} from "./finance";
 import { clampRep, signed } from "./press";
 
 /**
@@ -21,6 +35,10 @@ import { clampRep, signed } from "./press";
  * 이 창에 거는 조건이다. 원형이 종류를 정하고 재정 상태가 발생과 판정에 걸리며,
  * 판정은 전부 코어 장부의 사실이다 — 이적 원장·잔고·주급 총액·선수 소속.
  * LLM은 관여하지 않는다.
+ *
+ * **재정이 급한 창에는 그 조건이 매각 요구로 갈린다** (§5.2 「재정 갈래」) — 동결이
+ * 서 있거나 강등 첫 시즌이면 원형의 평소 조건 대신 `raise-funds`·`sell-player`가
+ * 그 창에 선다. 창마다 최대 하나는 그대로다.
  */
 export const BOARD_DEMAND = {
   /** 이행 → 보드 평판. 불이행의 절반 폭 — 구단주는 이행을 당연으로 여긴다 */
@@ -33,6 +51,15 @@ export const BOARD_DEMAND = {
   STAR_FEE_OF_BUDGET: 0.4,
   /** `sign-star`가 서려면 필요한 이적 예산 하한 — 없는 돈으로 스타를 조르지 않는다 */
   SIGN_STAR_MIN_BUDGET: 20_000_000,
+  /**
+   * 재정 갈래가 서려면 목표액이 넘어야 하는 문턱 — **한 달치 인건비**다
+   * (career.md §5.2). PSR 여유가 £10만 모자란 창에 £10만을 조르는 것은 요청이
+   * 아니라 소음이다. 자를 주급 총액에서 뽑는 것은 동결선(20주)과 같은 이유다 —
+   * 금액이 아니라 주수라 구단 규모를 저절로 탄다.
+   */
+  FUNDS_MIN_WAGE_WEEKS: 4,
+  /** 목표액이 앉는 눈금 — 호가(`askingPriceFor`)와 같은 10만 단위다 */
+  FUNDS_ROUNDING: 100_000,
   /** 상태에 남기는 지난 요청 수 — 다가옴·회견과 같은 규약 */
   KEPT: 20,
 } as const;
@@ -53,10 +80,25 @@ export const DEMAND_OF_ARCHETYPE: Record<string, { kind: BoardDemandKind; summer
   흥행가형: { kind: "sign-star" },
 };
 
-/** 열린 보드 요청 — 창마다 최대 하나라 언제나 하나뿐이다 */
-export function openBoardDemand(state: GameState): BoardDemand | null {
-  return (state.boardDemands ?? []).find((d) => d.status === "open") ?? null;
-}
+/**
+ * 원형 → **재정 갈래**의 요청 (career.md §5.2 「재정 갈래」). 위 표를 덮는 것이 아니라
+ * 재정이 급한 창에만 대신 선다.
+ *
+ * **사람을 지목하는 것은 선수를 자산·비용으로 읽는 둘뿐이다** (people.md §2) —
+ * 투자자형은 회수를, 산업가형은 구조를 본다. 나머지 넷은 금액만 부른다: 화제성을 파는
+ * 사람도 위상을 지키는 사람도 연고의 사람도 경기 내용을 보는 사람도 "그 선수를
+ * 팔아라"라고는 말하지 않는다.
+ *
+ * 여섯 원형 밖의 카드는 여기서도 아무 요청을 걸지 않는다 — 위 표와 같은 규약이다.
+ */
+export const FINANCE_DEMAND_OF_ARCHETYPE: Record<string, BoardDemandKind> = {
+  산업가형: "sell-player",
+  투자자형: "sell-player",
+  축구광형: "raise-funds",
+  국부펀드형: "raise-funds",
+  "지역 유지형": "raise-funds",
+  흥행가형: "raise-funds",
+};
 
 /**
  * **마지막으로 판정이 끝난 요청** — 이행이든 불이행이든. 요청은 창 순서대로 쌓이므로
@@ -86,20 +128,122 @@ export function tickBoardDemands(state: GameState, digest: string[]): void {
 
 // ── 발생 ───────────────────────────────────────────────────────
 
-/** 이 창에 설 요청 하나 — 원형이 없거나 전제가 안 서면 아무 일도 없다 */
+/**
+ * 이 창에 설 요청 하나 — 원형이 없거나 전제가 안 서면 아무 일도 없다.
+ *
+ * **재정 갈래가 먼저 묻는다** (career.md §5.2): 동결·강등이 서 있고 목표액이 문턱을
+ * 넘으면 그 창의 조건은 매각 요구다. 문턱 아래면 평소 조건이 그대로 선다.
+ */
 function issueDemand(state: GameState, demands: BoardDemand[], digest: string[]): void {
   const window = windowOpenForTeam(state, state.userTeamId);
   if (!window) return;
   // 창마다 최대 하나 — 일찍 닫힌 요청이 같은 창에 다시 서지 않는다
   if (demands.some((d) => d.windowId === window.id)) return;
-  const rule = DEMAND_OF_ARCHETYPE[ownerOf(state).archetype];
-  if (!rule) return;
-  if (rule.summerOnly && window.kind !== "summer") return;
-  const demand = buildDemand(state, window, rule.kind);
+  const archetype = ownerOf(state).archetype;
+  const demand =
+    financeDemand(state, window, archetype) ?? archetypeDemand(state, window, archetype);
   if (!demand) return;
   demands.push(demand);
   digest.push(`구단주 요청 — ${describeDemand(state, demand)} · 기한 ${demand.deadline}`);
   pushNarrative(state, `구단주 요청 — ${describeDemand(state, demand)}`, 4);
+}
+
+/** 원형의 평소 조건 — 국부펀드형의 여름 한정이 여기 걸린다 */
+function archetypeDemand(
+  state: GameState,
+  window: TransferWindow,
+  archetype: string,
+): BoardDemand | null {
+  const rule = DEMAND_OF_ARCHETYPE[archetype];
+  if (!rule) return null;
+  if (rule.summerOnly && window.kind !== "summer") return null;
+  return buildDemand(state, window, rule.kind);
+}
+
+/**
+ * 재정이 세우는 요청 — 사유가 없거나 목표액이 문턱 아래면 `null`이다 (평소 조건이 선다).
+ *
+ * **여름 한정은 여기서 풀린다** — 곤란은 겨울을 기다려 주지 않는다. 큰 그림의 사람이
+ * 겨울 땜질을 조르지 않는 것과, 지갑이 닫힌 겨울에 아무 말도 하지 않는 것은 다르다.
+ */
+function financeDemand(
+  state: GameState,
+  window: TransferWindow,
+  archetype: string,
+): BoardDemand | null {
+  const kind = FINANCE_DEMAND_OF_ARCHETYPE[archetype];
+  if (!kind) return null;
+  const cause = demandCause(state);
+  if (!cause) return null;
+  const target = fundsTargetOf(state);
+  const floor = weeklyWagesOf(state, state.userTeamId) * BOARD_DEMAND.FUNDS_MIN_WAGE_WEEKS;
+  if (target < floor) return null;
+
+  const base = { ...baseDemand(state, window, kind), cause };
+  if (kind === "sell-player") {
+    const named = priciestAsset(state);
+    // 장부에 값이 남은 선수가 하나도 없으면 지목할 것이 없다 — 금액 요청으로 떨어진다
+    if (named) return { ...base, playerId: named };
+    return { ...base, kind: "raise-funds", baseline: target };
+  }
+  return { ...base, baseline: target };
+}
+
+/**
+ * 요청을 부른 재정 사유 — **동결 사유가 먼저다.** 지갑이 이미 닫혔다는 것이 절벽이
+ * 서 있다는 것보다 앞선 사실이고, 둘 다 참인 창에서 감독이 들어야 하는 것도 그쪽이다.
+ */
+function demandCause(state: GameState): BoardDemandCause | null {
+  const frozen = budgetFreezeReason(state, state.userTeamId);
+  if (frozen) return frozen;
+  const parachute = financeOf(state, state.userTeamId).parachute;
+  return parachute?.startSeason === state.season ? "relegation" : null;
+}
+
+/**
+ * 매각 목표액 — **세 구멍 중 가장 큰 것** (career.md §5.2). 어느 하나만 메워도
+ * 나머지가 남으므로 최대이고, 호가와 같은 10만 단위로 올린다.
+ */
+export function fundsTargetOf(state: GameState): number {
+  const teamId = state.userTeamId;
+  const target = Math.max(
+    0,
+    debtOf(state, teamId) - debtLimitOf(state, teamId),
+    -psrStatus(state).headroom,
+    relegationGapOf(state, teamId),
+  );
+  const step = BOARD_DEMAND.FUNDS_ROUNDING;
+  return Math.ceil(target / step) * step;
+}
+
+/**
+ * 장부 잔존가가 가장 큰 우리 선수 — 같으면 id 사전순. 값이 남은 선수가 없으면 `null`.
+ *
+ * 시장가가 아니라 잔존가인 이유는 구단주가 보는 것이 **처분 이익**이기 때문이다
+ * (finance.md §6.1) — 장부의 구멍을 메우는 것은 잔존가가 큰 선수의 매각이다.
+ */
+function priciestAsset(state: GameState): string | null {
+  let best: { id: string; value: number } | null = null;
+  for (const player of userPlayers(state)) {
+    const value = bookValueOf(state, state.userTeamId, player.id);
+    if (value <= 0) continue;
+    if (!best || value > best.value || (value === best.value && player.id < best.id)) {
+      best = { id: player.id, value };
+    }
+  }
+  return best?.id ?? null;
+}
+
+/** 종류가 무엇이든 같은 껍데기 — id·창·기한은 창이 정한다 */
+function baseDemand(state: GameState, window: TransferWindow, kind: BoardDemandKind): BoardDemand {
+  return {
+    id: `board-demand-${window.id}`,
+    kind,
+    windowId: window.id,
+    issuedOn: state.date,
+    deadline: window.closesOn,
+    status: "open",
+  };
 }
 
 /** 종류별 전제와 기준값 — 세울 수 없으면 `null`. 기준값은 발행 순간의 사실이다 */
@@ -108,14 +252,7 @@ function buildDemand(
   window: TransferWindow,
   kind: BoardDemandKind,
 ): BoardDemand | null {
-  const base: BoardDemand = {
-    id: `board-demand-${window.id}`,
-    kind,
-    windowId: window.id,
-    issuedOn: state.date,
-    deadline: window.closesOn,
-    status: "open",
-  };
+  const base = baseDemand(state, window, kind);
   switch (kind) {
     case "wage-freeze":
       return { ...base, baseline: weeklyWagesOf(state, state.userTeamId) };
@@ -150,10 +287,10 @@ function starPlayer(state: GameState): string | null {
 /**
  * 열린 요청 하나를 오늘의 사실로 판정한다.
  *
- * `sign-star`는 닿는 순간 이행으로, `keep-player`는 선수가 떠나는 순간 불이행으로
- * **일찍 닫힌다** — 창이 닫힌 뒤에는 어차피 되돌릴 수 없는 사실이라서다. 나머지는
- * 기한이 지난 첫날 판정한다: 창이 닫히기 전의 순지출은 마지막 날의 매각 한 건으로
- * 뒤집힐 수 있다.
+ * **닿는 순간 닫히는 것이 넷이다** — `sign-star`·`raise-funds`는 이행으로,
+ * `keep-player`는 불이행으로, 그 거울인 `sell-player`는 선수가 떠나는 순간 이행으로.
+ * 창이 닫힌 뒤에는 어차피 되돌릴 수 없는 사실이라서다. 나머지는 기한이 지난 첫날
+ * 판정한다: 창이 닫히기 전의 순지출은 마지막 날의 매각 한 건으로 뒤집힐 수 있다.
  */
 function judgeDemand(state: GameState, demand: BoardDemand, digest: string[]): void {
   const expired = state.date > demand.deadline;
@@ -169,6 +306,24 @@ function judgeDemand(state: GameState, demand: BoardDemand, digest: string[]): v
           (t) => t.toTeamId === state.userTeamId && t.fee >= (demand.baseline ?? 0),
         );
         return landed ? true : expired ? false : null;
+      }
+      case "raise-funds": {
+        let raised = 0;
+        for (const t of windowTransfers(state, demand.windowId)) {
+          if (t.fromTeamId === state.userTeamId) raised += t.fee;
+        }
+        return raised >= (demand.baseline ?? 0) ? true : expired ? false : null;
+      }
+      case "sell-player": {
+        /**
+         * **소속 하나로 갈린다** — `keep-player`의 정확한 거울이다 (career.md §5.2).
+         * 값이 오간 이동만 세지 않는 것은 그 자를 `raise-funds`가 이미 쥐고 있어서다:
+         * 하나는 돈을, 하나는 그 사람이 남았는가를 본다. 세계에서 사라진 선수(은퇴)도
+         * 구단주가 원한 자리가 빈 것은 같다.
+         */
+        const player = demand.playerId ? playerById(state, demand.playerId) : null;
+        if (!player || player.teamId !== state.userTeamId) return true;
+        return expired ? false : null;
       }
       case "net-profit": {
         if (!expired) return null;
@@ -215,21 +370,15 @@ function windowTransfers(state: GameState, windowId: string) {
 
 // ── 사실 카드 ──────────────────────────────────────────────────
 
-/** 요청 한 줄 — 라벨에 발행 시점의 기준을 붙인다. 문장은 읽는 쪽이 쓴다 */
+/**
+ * 요청 한 줄 — 라벨에 발행 시점의 기준을 붙인다. 문장은 읽는 쪽이 쓴다.
+ *
+ * 자는 도메인이 갖는다(`boardDemandText`) — 사실 카드가 같은 것을 부르므로, 두 벌이면
+ * 같은 요청이 감독의 브리핑과 구단주의 입에서 다른 값으로 선다.
+ */
 function describeDemand(state: GameState, demand: BoardDemand): string {
-  const label = BOARD_DEMAND_LABEL[demand.kind];
-  switch (demand.kind) {
-    case "keep-player": {
-      const player = demand.playerId ? playerById(state, demand.playerId) : null;
-      return player ? `${label} (${player.name})` : label;
-    }
-    case "sign-star":
-      return `${label} (기준 ${formatMoney(demand.baseline ?? 0)})`;
-    case "wage-freeze":
-      return `${label} (기준 ${formatMoney(demand.baseline ?? 0)}/주)`;
-    default:
-      return label;
-  }
+  const player = demand.playerId ? playerById(state, demand.playerId) : null;
+  return boardDemandText(demand.kind, player?.name ?? "", demand.baseline);
 }
 
 /**
@@ -243,7 +392,8 @@ export function boardDemandFact(state: GameState): PressFact | null {
   return {
     kind: "board-demand",
     data: {
-      tags: [demand.kind],
+      // 사유는 재정 갈래에만 있다 — `tags[1]`이 그 자리다 (career.md §5.2)
+      tags: demand.cause ? [demand.kind, demand.cause] : [demand.kind],
       date: demand.deadline,
       ...(player ? { name: player.name } : {}),
       ...(demand.baseline === undefined ? {} : { values: { baseline: demand.baseline } }),

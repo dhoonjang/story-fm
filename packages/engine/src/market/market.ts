@@ -38,6 +38,7 @@ import {
   contractYearsLeft,
   financeOf,
   interestsOn,
+  openFinanceDemand,
   playerById,
   squadShortfall,
   teamName,
@@ -340,7 +341,12 @@ export type SellerReasonKind =
   /** 계약이 1년도 남지 않았다 */
   | "contract-short"
   /** 상대 구단의 잔고가 빠듯하다 */
-  | "cash-tight";
+  | "cash-tight"
+  /**
+   * **보드가 이 창에 매각을 요구했다** — 우리가 파는 쪽일 때만 선다
+   * (career.md §5.2 「재정 갈래」). 감독의 매각이 급해진 것은 상대도 아는 사실이다.
+   */
+  | "board-sale";
 
 /** 갈래마다의 확률 기여 — 부호가 뜻이고, 크기가 그 사정의 무게다 */
 const SELLER_REASON_SCORE: Record<SellerReasonKind, number> = {
@@ -348,6 +354,14 @@ const SELLER_REASON_SCORE: Record<SellerReasonKind, number> = {
   surplus: 0.75,
   "contract-short": 0.75,
   "cash-tight": 0.75,
+  /**
+   * 현금난과 같은 무게 — 둘 다 「파는 쪽이 돈에 몰렸다」는 한 가지 사실이다.
+   *
+   * ⚠️ **우리 매각의 확률에는 닿지 않는다.** 이 표를 읽는 것은 우리가 **사는** 쪽의
+   * 관문뿐이고(`dealOdds`), 우리가 파는 쪽은 부른 값과 사는 쪽 상한의 비로만 잰다
+   * (`sellOdds`) — 내려간 호가가 이미 그 비를 움직인다 (transfer.md §3).
+   */
+  "board-sale": 0.75,
 };
 
 /** 파는 쪽 사정 한 장 — 코드가 판정을, 한 줄이 감독에게 보이는 표시를 맡는다 */
@@ -382,7 +396,29 @@ function sellerStance(
     multiple -= 0.15;
     reasons.push({ kind: "cash-tight", why: "상대 구단의 재정이 빠듯하다" });
   }
+  const demanded = boardDemandsSale(state, player);
+  if (demanded) {
+    multiple -= 0.15;
+    reasons.push({ kind: "board-sale", why: demanded });
+  }
   return { multiple: Math.max(0.7, multiple), reasons };
+}
+
+/**
+ * **보드가 이 선수의 매각을 요구했는가** — 우리 선수에게만 서는 파는 쪽 사정
+ * (career.md §5.2 「재정 갈래」). 사정 한 줄을 돌려주고, 아니면 `null`이다.
+ *
+ * 갈래가 대상을 가른다: 금액 요청(`raise-funds`)은 매각이 어디서 나오든 상관없어
+ * **우리 선수 전부**에, 지목 요청(`sell-player`)은 **그 선수에게만** 붙는다.
+ */
+function boardDemandsSale(state: GameState, player: GamePlayer): string | null {
+  if (player.teamId !== state.userTeamId) return null;
+  const demand = openFinanceDemand(state);
+  if (!demand) return null;
+  if (demand.kind === "sell-player") {
+    return demand.playerId === player.id ? "보드가 이 선수의 매각을 요구했다" : null;
+  }
+  return "보드가 이 창에 매각으로 자금을 만들라고 요구했다";
 }
 
 /** 상대가 기대하는 이적료 */

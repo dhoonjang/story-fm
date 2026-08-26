@@ -7,7 +7,12 @@ import {
   approachThreshold,
   BOARD_DEMAND,
   BOARD_REQUEST,
+  askingPriceFor,
   boardDemandFact,
+  bookValueOf,
+  debtLimitOf,
+  fundsTargetOf,
+  weeklyWagesOf,
   boardRequestCeiling,
   boardThriftFactor,
   boardTrustFactor,
@@ -944,6 +949,136 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
     investor.date = addDays(netProfit.deadline, 1);
     tickBoardDemands(investor, []);
     expect(netProfit.status).toBe("failed");
+  });
+
+  /**
+   * 재정 갈래 — **동결·강등이 그 창의 조건을 매각 요구로 간다** (career.md §5.2).
+   * 발생이 원형이 아니라 장부에서 나므로, 값이 도는 자리는 전부 경계다: 동결선,
+   * 문턱, 지목의 자(잔존가), 그리고 요청이 자리를 여는 전이.
+   */
+  describe("재정 갈래 — 동결이 매각을 지시한다", () => {
+    /** 빚으로 지갑을 닫는다 — 동결선을 `over`만큼 넘긴 음수 잔고 하나가 전부다 */
+    function indebted(state: GameState, over: number): GameState {
+      financeOf(state, state.userTeamId).balance = -(debtLimitOf(state, state.userTeamId) + over);
+      return state;
+    }
+
+    /** 문턱을 넉넉히 넘는 초과분 — 주급 4주치가 문턱이다 */
+    const overFloor = (state: GameState) => weeklyWagesOf(state, state.userTeamId) * 10;
+
+    it("빚이 동결선을 넘으면 평소 조건 대신 매각 요구가 선다 — 목표액은 넘은 몫이다", () => {
+      const state = ownedBy(createTestGame(11), "축구광형");
+      const over = overFloor(state);
+      indebted(state, over);
+      tickBoardDemands(state, []);
+
+      const demand = openBoardDemand(state)!;
+      // 축구광형은 사람을 지목하지 않는다 — 평소 조건(`keep-player`)도 서지 않는다
+      expect(demand.kind).toBe("raise-funds");
+      expect(demand.cause).toBe("debt");
+      expect(demand.baseline).toBe(fundsTargetOf(state));
+      expect(demand.baseline).toBe(Math.ceil(over / 100_000) * 100_000);
+    });
+
+    it("부채가 동결선과 같으면 재정 갈래가 서지 않는다 — 그 창엔 평소 조건이 선다", () => {
+      const state = ownedBy(createTestGame(11), "축구광형");
+      indebted(state, 0);
+      tickBoardDemands(state, []);
+      expect(openBoardDemand(state)!.kind).toBe("keep-player");
+    });
+
+    it("동결이 섰어도 목표액이 한 달치 인건비 아래면 요청이 아니라 소음이다", () => {
+      const state = ownedBy(createTestGame(11), "축구광형");
+      const wages = weeklyWagesOf(state, state.userTeamId);
+      // 문턱은 주급 4주치 — 3주치를 넘긴 빚은 그 아래다
+      indebted(state, wages * 3);
+      tickBoardDemands(state, []);
+      expect(openBoardDemand(state)!.kind).toBe("keep-player");
+    });
+
+    it("투자자형은 장부 잔존가가 가장 큰 선수를 지목하고, 떠나는 순간 이행이다", () => {
+      const state = ownedBy(createTestGame(11), "투자자형");
+      indebted(state, overFloor(state));
+      tickBoardDemands(state, []);
+
+      const demand = openBoardDemand(state)!;
+      expect(demand.kind).toBe("sell-player");
+      const priciest = userPlayers(state)
+        .map((p) => ({ id: p.id, value: bookValueOf(state, state.userTeamId, p.id) }))
+        .filter((row) => row.value > 0)
+        .sort((a, b) => b.value - a.value || (a.id < b.id ? -1 : 1))[0]!;
+      expect(demand.playerId).toBe(priciest.id);
+      // 목표액을 들지 않는다 — 판정하는 것이 돈이 아니라 소속이다
+      expect(demand.baseline).toBeUndefined();
+
+      const before = state.manager.reputation.board;
+      playerById(state, demand.playerId!)!.teamId = "chelsea";
+      state.date = addDays(state.date, 1);
+      tickBoardDemands(state, []);
+      // 기한 전인데도 닫힌다 — `keep-player`의 정확한 거울이다
+      expect(demand.status).toBe("met");
+      expect(state.manager.reputation.board).toBe(before + BOARD_DEMAND.MET_BOARD);
+    });
+
+    it("매각 수입이 목표에 닿는 순간 이행이고, 모자란 채 기한이 지나면 불이행이다", () => {
+      for (const [share, status] of [
+        [1, "met"],
+        [0.99, "failed"],
+      ] as const) {
+        const state = ownedBy(createTestGame(11), "축구광형");
+        indebted(state, overFloor(state));
+        tickBoardDemands(state, []);
+        const demand = openBoardDemand(state)!;
+        const target = demand.baseline!;
+
+        moved(state, demand.windowId, "out", Math.floor(target * share), "t-sale");
+        state.date = addDays(state.date, 1);
+        tickBoardDemands(state, []);
+        // 목표에 닿았으면 창이 열려 있어도 그 자리에서 닫힌다
+        expect(demand.status, `목표의 ${share}`).toBe(share === 1 ? "met" : "open");
+
+        const before = state.manager.reputation.board;
+        state.date = addDays(demand.deadline, 1);
+        tickBoardDemands(state, []);
+        expect(demand.status, `목표의 ${share}`).toBe(status);
+        if (status === "failed") {
+          expect(state.manager.reputation.board).toBe(before + BOARD_DEMAND.FAILED_BOARD);
+        }
+      }
+    });
+
+    it("요청이 순위 압력 없이 구단주 자리를 한 번 연다 — 답한 뒤엔 다시 열지 않는다", () => {
+      const state = ownedBy(quiet(createTestGame(11)), "축구광형");
+      indebted(state, overFloor(state));
+      tickBoardDemands(state, []);
+      // 8경기를 치르기 전이라 순위 압력은 한 톨도 없다
+      expect((state.approachPressure ?? []).filter((r) => r.topic === "results")).toEqual([]);
+
+      pressDays(state, 1);
+      const seat = pendingApproach(state)!;
+      expect(seat.channel).toBe("owner");
+      expect(seat.contextCard?.code).toBe("board-demand");
+      // 순위가 아니라 요청이 맨 앞에 sharp로 선다
+      expect(seat.facts[0]?.kind).toBe("board-demand");
+      expect(seat.facts[0]?.sharp).toBe(true);
+
+      respondToApproach(state, { stance: "own" });
+      // 요청은 그대로 열려 있지만 자리는 다시 열리지 않는다
+      pressDays(state, 20);
+      expect(openBoardDemand(state)!.status).toBe("open");
+      expect(pendingApproach(state)).toBeNull();
+    });
+
+    it("열린 매각 요구를 시장이 읽는다 — 우리 선수의 호가가 내려간다", () => {
+      const state = ownedBy(createTestGame(11), "축구광형");
+      const target = userPlayers(state)[0]!;
+      const before = askingPriceFor(state, target);
+
+      indebted(state, overFloor(state));
+      tickBoardDemands(state, []);
+      expect(openBoardDemand(state)!.kind).toBe("raise-funds");
+      expect(askingPriceFor(state, target)).toBeLessThan(before);
+    });
   });
 
   it("산업가형 — 임금 동결의 허용 폭은 2%다: 이내면 이행, 넘으면 불이행", () => {
