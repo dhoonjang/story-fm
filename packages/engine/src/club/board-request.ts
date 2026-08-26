@@ -181,7 +181,7 @@ function headroomOf(state: GameState, kind: BoardRequestKind): number {
 /**
  * **보드가 이번에 내줄 수 있는 최대치** — 굴리지 않는다 (overview.md §1 철칙 2).
  *
- * `여력 × 신뢰 계수 × 살림 계수`. 이적 예산이 동결이면(PSR·부채 — §9.2·§9.4) 세
+ * `여력 × 신뢰 계수 × 살림 계수`. 이적 예산이 동결이면(PSR·부채 — §9.2·§9.4) 네
  * 종류 다 0이다: 돈의 문제가 아니라 규정의 문제라 물어서 풀리지 않는다.
  */
 export function boardRequestCeiling(state: GameState, kind: BoardRequestKind): number {
