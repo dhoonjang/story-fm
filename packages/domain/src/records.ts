@@ -44,6 +44,50 @@ export const InjurySchema = z.object({
 });
 export type Injury = z.infer<typeof InjurySchema>;
 
+/**
+ * **부상 위험 등급과 그 원인** — 세이브에 남지 않는 파생의 낱말 (player.md §5.3).
+ *
+ * 값을 만드는 것은 시뮬의 저울 하나뿐이다(`injuryRiskOf` — `packages/sim`이 경기의
+ * `injuryWeight`에서 곧장 파생한다). 여기 있는 것은 **화면·조회·GM이 같은 말을
+ * 쓰게 하는 표**다 — 등급의 라벨이 두 벌이면 같은 선수가 명단에서는 「높음」,
+ * 대사에서는 「위험」이 된다 (`INJURY_SEVERITY_KO`와 같은 규칙).
+ */
+export type InjuryRiskGrade = "low" | "elevated" | "high";
+
+/** 저울을 들어 올린 항 — 세 코드가 곧 `injuryWeight`의 세 항이다 */
+export type InjuryRiskCause = "fatigue" | "proneness" | "strength";
+
+export const INJURY_RISK_GRADE_KO: Record<InjuryRiskGrade, string> = {
+  low: "낮음",
+  elevated: "보통",
+  high: "높음",
+};
+
+/**
+ * 원인의 한 낱말 — **성향은 배수가 아니라 「부상 이력」으로 읽힌다.**
+ * 감독에게 1.8이라는 수는 리그 평균이 1.0이라는 사실을 함께 쥐어야 뜻이 서고,
+ * 그 분포를 볼 자리는 어디에도 없다 (player.md §10).
+ */
+export const INJURY_RISK_CAUSE_KO: Record<InjuryRiskCause, string> = {
+  fatigue: "피로",
+  proneness: "부상 이력",
+  strength: "몸싸움",
+};
+
+/**
+ * 등급과 원인 한 덩어리 — `높음(피로·부상 이력)`.
+ *
+ * 조회 카드·명단 줄·스냅샷 주의 줄·수석코치 카드·심경 앵커가 **같은 모양**을 쓴다.
+ * 자리마다 따로 이으면 같은 사실이 「높음 — 피로, 이력」과 「위험(피로·성향)」으로
+ * 갈리고, 감독은 그게 같은 값인지 알 수 없다.
+ *
+ * 원인이 비면(`low`) 등급만 낸다 — 빈 괄호는 사실이 아니라 자국이다.
+ */
+export function injuryRiskText(grade: InjuryRiskGrade, causes: readonly InjuryRiskCause[]): string {
+  const why = causes.map((c) => INJURY_RISK_CAUSE_KO[c]).join("·");
+  return why.length === 0 ? INJURY_RISK_GRADE_KO[grade] : `${INJURY_RISK_GRADE_KO[grade]}(${why})`;
+}
+
 // ── 징계 ──────────────────────────────────────────────
 export const BookingSchema = z.object({
   gamePlayerId: z.string().min(1),
