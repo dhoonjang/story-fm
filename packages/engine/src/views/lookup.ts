@@ -260,29 +260,15 @@ function armband(p: GamePlayer): string {
   return p.isCaptain ? " (주장)" : p.isViceCaptain === true ? " (부주장)" : "";
 }
 
-/**
- * 우리 팀 선수 한 줄 — 정확 수치 (오피스 뷰가 이미 보여주는 정보).
- *
- * **임대 보낸 선수도 여기 선다** — 계약이 우리 것이라 지식 눈금이 `own`이다
- * (transfer.md §2). 다만 두 칸의 뜻이 갈린다:
- * - 역할 칸은 우리 배치가 아니라 **어디에 가 있는가**다. 임대 중에는 우리 전술판에
- *   그 선수의 자리가 없으므로(`assignmentFor`는 송출과 함께 지워졌다) `[1군]`으로
- *   서면 부릴 수 있는 인원으로 읽힌다.
- * - **전술 적응도는 빼고 그 구단의 연속 미출전을 적는다.** 우리 전술을 얼마나
- *   익혔는가는 남의 훈련장에 가 있는 동안 재는 값이 아니고, 그 자리에서 감독이
- *   알아야 하는 사실은 "뛰고 있는가"다 (`no-minutes`의 근거 수치).
- *
- * 시즌 기록(`statLine`)은 `seasonStatOf`가 **지금 소속의 행**을 읽으므로 빌린
- * 구단의 기록이 그대로 선다 — 갈아 끼울 것이 없다.
- */
 /** 징계를 재는 기준 경기 — 어느 대회의 몇 라운드·어느 단계에서 묻는가 */
 type DisciplineFixture = { competitionId: string; round: number; stage: MatchStage };
 
 /**
  * **경고 눈금을 재는 다음 경기** — 친선·2군은 규정이 없어 건너뛴다 (match.md §6).
  *
- * 남은 대회 경기가 없으면(프리시즌 앞·시즌 끝) 그 팀의 리그를 1라운드로 가정한다.
+ * 남은 대회 경기가 없으면(프리시즌 앞·시즌 끝) 그 팀의 리그를 1라운드로 가정한다 —
  * 감독이 읽는 눈금은 결국 리그의 것이고, 화면이 아무 말도 하지 않는 것보다 낫다.
+ * 리그조차 없으면(무소속) 널이다: 그에게는 다음 대회 경기가 없다.
  */
 function disciplineFixtureOf(state: GameState, teamId: string): DisciplineFixture | null {
   let next: MatchRecord | null = null;
@@ -328,6 +314,21 @@ function banWarningFor(state: GameState, p: GamePlayer): string {
   return "";
 }
 
+/**
+ * 우리 팀 선수 한 줄 — 정확 수치 (오피스 뷰가 이미 보여주는 정보).
+ *
+ * **임대 보낸 선수도 여기 선다** — 계약이 우리 것이라 지식 눈금이 `own`이다
+ * (transfer.md §2). 다만 두 칸의 뜻이 갈린다:
+ * - 역할 칸은 우리 배치가 아니라 **어디에 가 있는가**다. 임대 중에는 우리 전술판에
+ *   그 선수의 자리가 없으므로(`assignmentFor`는 송출과 함께 지워졌다) `[1군]`으로
+ *   서면 부릴 수 있는 인원으로 읽힌다.
+ * - **전술 적응도는 빼고 그 구단의 연속 미출전을 적는다.** 우리 전술을 얼마나
+ *   익혔는가는 남의 훈련장에 가 있는 동안 재는 값이 아니고, 그 자리에서 감독이
+ *   알아야 하는 사실은 "뛰고 있는가"다 (`no-minutes`의 근거 수치).
+ *
+ * 시즌 기록(`statLine`)은 `seasonStatOf`가 **지금 소속의 행**을 읽으므로 빌린
+ * 구단의 기록이 그대로 선다 — 갈아 끼울 것이 없다.
+ */
 function ourRow(state: GameState, p: GamePlayer): string {
   const loan = onLoanFromUs(state, p) ? loanReportOf(state, p.id) : null;
   const assignment = assignmentFor(state, p.id);
@@ -625,11 +626,6 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
    * 시장가)은 선수마다 기록을 훑으므로, 앞의 조건이 좁혀 준 만큼만 계산한다.
    */
   /**
-   * 우리 팀을 물으면 풀은 **우리 계약**이다 — 임대 보낸 선수도 들어온다
-   * (transfer.md §2). 남의 팀 풀은 그대로 소속(`playersOf`)이다: 그 구단이 빌려 간
-   * 우리 선수는 그 구단 명단에 **실제로 있으므로** 거기서 빠지면 안 된다.
-   */
-  /**
    * 「지금 뛸 수 있나」는 **그 선수 팀의 다음 대회 경기**로 답한다 (match.md §6) —
    * 컵 정지 선수는 리그 명단에 그대로 선다. 팀마다 한 번만 찾아 둔다: 선수마다
    * 일정을 훑으면 5,700번이다.
@@ -642,6 +638,11 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
     nextCompetitionCache.set(ownerId, found);
     return found;
   };
+  /**
+   * 우리 팀을 물으면 풀은 **우리 계약**이다 — 임대 보낸 선수도 들어온다
+   * (transfer.md §2). 남의 팀 풀은 그대로 소속(`playersOf`)이다: 그 구단이 빌려 간
+   * 우리 선수는 그 구단 명단에 **실제로 있으므로** 거기서 빠지면 안 된다.
+   */
   const ourPool = teamId !== null && teamId === state.userTeamId;
   const pool0 = teamId ? (ourPool ? ourPlayers(state) : playersOf(state, teamId)) : state.players;
   const narrowed = pool0.filter((p) => {

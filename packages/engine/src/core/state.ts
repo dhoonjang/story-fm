@@ -1759,18 +1759,24 @@ export function weeklyWagesOf(state: GameState, teamId: string): number {
 }
 
 /**
- * 시즌 누적 경고 — BOOKING에서 파생.
+ * 이 카드가 **어느 대회의 것인가** — 누적을 세는 자리가 묻는다 (match.md §6).
  *
- * **한 경기에서 두 장을 받은 경기의 경고는 세지 않는다** — 경고 2회 퇴장은 그 자리에서
- * 퇴장 정지 한 건으로 값을 치렀고, 그 두 장까지 누적에 넣으면 한 사건에 정지가 두 번
- * 걸린다 (match.md §5). 장부의 두 줄은 그대로 둔다 — 경기 기록은 실제로 그랬다.
+ * 새 줄은 자기가 들고 있다. 대회를 안 적던 옛 줄만 경기 원장에서 찾으므로, 새
+ * 세이브에서는 이 스캔이 한 번도 돌지 않는다.
  */
 export function bookingCompetitionOf(state: GameState, booking: Booking): string | null {
   if (booking.competitionId !== undefined) return booking.competitionId;
-  // 대회를 안 적던 옛 줄 — 경기 원장에서 찾는다. 새 세이브에는 이 경로가 없다
   return state.matches.find((m) => m.id === booking.matchId)?.competitionId ?? null;
 }
 
+/**
+ * 시즌 누적 경고 — BOOKING에서 파생. **대회를 주면 그 대회의 것만 센다**
+ * (match.md §6) — 누적은 대회 안에서만 쌓인다.
+ *
+ * **한 경기에서 두 장을 받은 경기의 경고는 세지 않는다** — 경고 2회 퇴장은 그 자리에서
+ * 퇴장 정지 한 건으로 값을 치렀고, 그 두 장까지 누적에 넣으면 한 사건에 정지가 두 번
+ * 걸린다 (match.md §6). 장부의 두 줄은 그대로 둔다 — 경기 기록은 실제로 그랬다.
+ */
 export function seasonYellowsOf(
   state: GameState,
   playerId: string,
