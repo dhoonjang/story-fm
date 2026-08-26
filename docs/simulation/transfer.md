@@ -84,6 +84,10 @@ GM은 감독이 방금 내린 결정의 반대를 장면으로 확정한다.
   영입 기준의 표기라 매각에서는 우리 선수가 사려는 구단 소속처럼 읽힌다 —
   내보내는 갈래는 `선수 → 상대팀`으로 적는다.
 - `pendingVerdicts`의 `❗` 라벨도 같다.
+- **사전 계약은 방향의 낱말을 바꾼다** — 「영입」이 아니라 `사전 계약`이다(§1-4). 방향은
+  여전히 `in`이지만 감독이 읽어야 하는 사실은 「지금 오는 게 아니라 여름에 온다」라,
+  그것이 배지와 요약 줄에 서지 않으면 평범한 영입과 같아 보인다. 낱말은 한 자리에서
+  나온다 — 요약 줄·주의 줄·카드가 같은 함수를 부른다.
 - **시장 카드는 방향을 값으로 쥔다**(`MarketCard.direction` — `in`/`out`).
   `loan`만으로는 빌려옴과 빌려줌이 갈리지 않는다. 배지가 그 방향을 말하므로
   카드만 봐도 사는 건지 파는 건지 알 수 있다. 재계약 카드에는 방향이 없다.
@@ -1119,6 +1123,8 @@ tick이 매일 시장을 굴린다 — 1부 클럽당 시즌 이적 3.4건 · �
 | `FREE_AGENT_OLD_AGE` · `FREE_AGENT_VETERAN_AGE`                       | 34 · 31                | 나이가 이름값에 곱하는 몫이 꺾이는 두 경계 (0.35 · 0.7배)                                                                                                                              |
 | `NOTABLE_FEE` · `NOTABLE_OVERALL` · `NOTABLE_PER_DAY`                 | £25M · 78 · 2          | 감독의 브리핑에 올라가는 이적의 문턱과 하루 줄 수                                                                                                                                      |
 | `AI_RENEWAL_WINDOW_DAYS` · `AI_RENEWAL_CHANCE`                        | 240 · 2%               | AI가 재계약을 검토하기 시작하는 잔여 기간과 검토한 날 성사될 확률                                                                                                                      |
+| `PRECONTRACT_MONTHS` · `PRECONTRACT_DAYS`                             | 6개월 · 183일          | 사전 계약이 열리는 잔여 계약 기간 — 계약이 모두 6월 30일에 끝나므로 실제로는 12월 말에 열린다 (§1-4)                                                                                   |
+| `AI_PRECONTRACT_CHANCE`                                               | 0.4%                   | AI가 우리 만료 주전을 예약하는 하루 확률 — 시장(`suitorsOf`)과 나이가 곱해진다 (§6)                                                                                                    |
 | `FREE_AGENT_SIGN_CHANCE` · `FREE_AGENT_SIGNINGS_PER_DAY`              | 6% · 2                 | 무소속 선수가 하루에 팀을 찾을 확률과 하루 성사 상한                                                                                                                                   |
 | `SACK_CHANCE` · `SACKINGS_PER_DAY` · `GRACE_DAYS`                     | 9% · 2 · 75일          | AI 감독이 문턱 아래에서 잘릴 하루 확률 · 하루 상한 · 부임 유예                                                                                                                         |
 | `USER_WARNINGS_BEFORE_SACK` · `USER_BOARD_FLOOR`                      | 3 · 25                 | 감독이 잘리기까지의 경고 수와 보드 신뢰 — 순위 문턱은 career.md §5                                                                                                                     |

@@ -70,7 +70,14 @@ function demandLabelOf(card: MarketCard, loan: boolean): string {
  * 방향이 없는 카드(재계약, 이 축이 생기기 전의 옛 카드)에서는 국면만 선다.
  */
 function badgeOf(card: MarketCard): string {
-  const way = card.direction && marketDirectionKo(card.direction, card.loan === true);
+  /**
+   * **사전 계약은 방향의 낱말을 바꾼다** — 「영입」이 아니라 「사전 계약」이다
+   * (transfer.md §1-4). 감독이 읽어야 하는 사실은 지금 오는 게 아니라 여름에
+   * 온다는 것이라, 그것이 배지에 서지 않으면 카드가 평범한 영입과 같아 보인다.
+   */
+  const way = card.precontract
+    ? "사전 계약"
+    : card.direction && marketDirectionKo(card.direction, card.loan === true);
   switch (card.kind) {
     case "offer":
       if (way) return `${way} 오퍼`;
