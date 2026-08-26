@@ -122,6 +122,12 @@ const DAILY_GAIN: Record<ApproachTopic, number> = {
   interest: 8,
   morale: 8,
   results: 4,
+  /**
+   * **압력이 아니라 달력이 여는 자리다** (career.md §5 「시즌 리뷰 면담」) — 시즌
+   * 리뷰가 끝난 다음 tick에 `openSeasonReview`가 직접 연다. 0이라 압력 줄이 서지도
+   * 자라지도 않는다.
+   */
+  "season-review": 0,
 };
 
 /** 원인이 사라진 뒤 하루에 식는 양 — 쌓는 것보다 빠르다. 풀린 일은 곧 지나간 일이다 */
@@ -206,6 +212,7 @@ const CHANNEL_OF: Record<ApproachTopic, ApproachChannel> = {
   interest: "agent",
   morale: "captain",
   results: "owner",
+  "season-review": "owner",
 };
 
 /** 이 주제의 압력이 사람에게 걸리는가 — 선수·에이전트 채널의 `subject`는 선수 id다 */
@@ -1051,6 +1058,8 @@ const APPROACH_TOPIC_ORDER: Record<ApproachTopic, number> = {
   interest: 10,
   morale: 11,
   results: 12,
+  // 압력 줄이 없어 이 표를 지나지 않는다 — 자리는 `openSeasonReview`가 직접 연다
+  "season-review": 13,
 };
 
 /**

@@ -114,6 +114,7 @@ export * from "./club/approach";
 export * from "./club/board-demand";
 export * from "./club/board-request";
 export * from "./club/manager-wallet";
+export * from "./club/vision";
 
 // skills — 감독 지시(GM 도구)의 실행부
 export * from "./skills";

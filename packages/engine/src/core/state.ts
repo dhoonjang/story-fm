@@ -3,6 +3,7 @@ import type {
   Approach,
   ApproachPressure,
   BoardDemand,
+  ClubVision,
   BoardRequest,
   PressLeak,
   AxisValues,
@@ -812,6 +813,11 @@ export interface GameState {
    * 판정 시점이 갈리고 발행 순간의 기준값(주급 총액·기준 이적료)을 들므로 세이브가
    * 든다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
+  /**
+   * **클럽 비전** — 구단주 원형이 건 다년 계획 (career.md §5). 코드·목표·가중치·기한만
+   * 남고 진행도는 파생이다. 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+   */
+  clubVision?: ClubVision;
   boardDemands?: BoardDemand[];
   /**
    * 감독이 보드에 건 요청 — 예산·주급 한도·구장 (finance.md §9.6). 구단주 요청과
