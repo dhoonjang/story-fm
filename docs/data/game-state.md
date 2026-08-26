@@ -163,6 +163,7 @@
 | `leagueOf?`                  | 승강 결과 — 팀 → 지금 속한 리그                                                                               | `competition/promotion.ts` |
 | `dismissal?`                 | 경질 사실 카드 — 있으면 감독은 무직이다 (career.md §5.1)                                                      | `domain/manager.ts`        |
 | `managerOffers?`             | 감독직 제안 — 공석 구단이 무직 감독을 부른 기록                                                               | `domain/manager.ts`        |
+| `managerPool?`               | 무직 감독 풀 — 잘린 사람의 이름·역량·재임 이력 (transfer.md §7)                                               | `domain/manager.ts`        |
 | `formUnitScale?`             | 폼 눈금 마이그레이션 마커 (§6)                                                                                | `core/state.ts`            |
 | `mirrorProficiencyStripped?` | 미러 자리 주발 보정 벗기기 마커 (§6)                                                                          | `core/state.ts`            |
 
@@ -170,7 +171,7 @@
 
 | 엔티티                           | 무엇                                                                                                         | 정의                |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------- |
-| `teams` `GameTeam`               | AI 전술 역량치 · 현 감독 이름/부임일 + 카탈로그에서 복사한 정체성(이름·약칭·소속·체급·구장·브랜드)           | `domain/team.ts`    |
+| `teams` `GameTeam`               | AI 전술 역량치 · 현 감독 이름/부임일/지난 재임 + 카탈로그에서 복사한 정체성(이름·약칭·소속·체급·구장·브랜드) | `domain/team.ts`    |
 | `players` `GamePlayer`           | 16축·상태·포지션 목록·주장·부주장·임대·성장 캐리 + 국적(협회 코드)·홈그로운 협회                             | `domain/player.ts`  |
 | ↳ `PlayerAttributes`             | 16축 + `overall`(파생 캐시) + `potential`                                                                    | `domain/player.ts`  |
 | ↳ `PlayerState`                  | 폼(−1\~1) · 체력(0\~100) · 부상 성향 · 심경 한 줄                                                            | `domain/player.ts`  |

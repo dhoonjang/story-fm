@@ -294,13 +294,16 @@ export const INCOMING_OFFERS = defineHarness({
 
 export const MANAGER_MARKET = defineHarness({
   id: "manager-market",
-  what: "한 시즌에 감독을 바꾸는 1부 구단 수",
+  what: "한 시즌에 감독을 바꾸는 1부 구단 수 · 그 자리를 무직 감독 풀이 채운 비중",
   doc: "docs/simulation/transfer.md §7",
   cost: "전체 세계 한 시즌 · 수 분",
   // prettier-ignore
   bands: [
     { metric: "경질 구단 수", role: "guard", min: 5, unit: "count", why: "`SACK_CHANCE`와 문턱이 만든 빈도가 사람 사는 범위인가" },
     { metric: "경질 구단 비중", role: "guard", max: 0.5, unit: "ratio", why: "리그가 통째로 뒤집히지는 않는다" },
+    { metric: "풀 인원", role: "guard", max: 40, unit: "count", why: "`MANAGER_POOL_MAX` — 상한이 실제로 지켜지는가 (세이브가 무한히 자라지 않는다)" },
+    { metric: "풀에서 다시 선 감독 수", role: "measure", unit: "count", why: "아는 얼굴이 한 시즌에 몇 벤치에 서는가 — 비중이 감추는 절대량" },
+    { metric: "풀 재선임 비중", role: "guard", min: 0.15, max: 0.85, unit: "ratio", why: "0이면 감독 시장이 없는 것과 같고, 1이면 세계에 새 사람이 나지 않는다" },
   ],
 });
 

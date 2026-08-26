@@ -140,7 +140,14 @@ function speakerOf(role: HistoryFoldBrief["turns"][number]["role"]): string {
 
 /** 브리프를 프롬프트 본문으로 — 이전 요약 + 이미 선 사람 + 이름 없는 아크 + 접히는 원문 */
 export function buildCompactionPrompt(
-  state: { personas?: Persona[]; userTeamId: string },
+  // 명부의 감독은 **지금 어디 서 있는가**로 걸러지므로 벤치와 무직 풀이 함께 와야
+  // 한다 (people.md §2-1) — 없으면 잘린 뒤 다른 벤치에 선 사람이 목록에서 빠진다
+  state: {
+    personas?: Persona[];
+    userTeamId: string;
+    teams?: readonly { id: string; managerName?: string }[];
+    managerPool?: readonly { name: string }[];
+  },
   brief: HistoryFoldBrief,
   arcs: readonly { id: string; line: string }[] = [],
 ): string {

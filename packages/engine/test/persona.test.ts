@@ -623,9 +623,9 @@ describe("선수 페르소나 — 파생되는 카드", () => {
 });
 
 describe("가상 감독 — 명부 밖 벤치의 사람 (people.md §2)", () => {
-  it("같은 (시드, 팀, 이름)이면 같은 사람이다 — 저장하지 않아도 복원된다", () => {
-    const manager = generateVirtualManager(42, "dortmund", "옌스 바그너");
-    expect(manager).toEqual(generateVirtualManager(42, "dortmund", "옌스 바그너"));
+  it("같은 (시드, 이름)이면 같은 사람이다 — 저장하지 않아도 복원된다", () => {
+    const manager = generateVirtualManager(42, "옌스 바그너");
+    expect(manager).toEqual(generateVirtualManager(42, "옌스 바그너"));
     expect(() => PersonaSchema.parse(manager)).not.toThrow();
     expect(manager.role).toBe("manager");
     expect(manager.characterId).toBe("옌스 바그너");
@@ -636,11 +636,22 @@ describe("가상 감독 — 명부 밖 벤치의 사람 (people.md §2)", () => 
     expect(manager.keywords).toEqual(["옌스 바그너", "바그너"]);
   });
 
-  it("이름이 시드 채널에 들어간다 — 경질로 이름이 갈리면 새 추첨이다", () => {
+  it("이름이 시드 채널의 전부다 — 경질로 이름이 갈리면 새 추첨이다", () => {
     const names = ["가브리엘 로시", "마르코 벨리", "루카 페라리", "엔조 콘티", "다비드 리치"];
-    const labels = new Set(names.map((n) => generateVirtualManager(42, "lecce", n).archetype));
-    // 같은 (시드, 팀)이라도 이름이 다르면 독립 추첨 — 후임이 전임의 사람됨을 물려받지 않는다
+    const labels = new Set(names.map((n) => generateVirtualManager(42, n).archetype));
+    // 이름이 다르면 독립 추첨 — 후임이 전임의 사람됨을 물려받지 않는다
     expect(labels.size).toBeGreaterThan(1);
+  });
+
+  it("사람됨은 벤치를 따라가지 않는다 — 팀을 옮겨도 같은 사람이다", () => {
+    // 감독은 자리가 아니라 사람이다 (transfer.md §7 「감독 풀」) — 채널에 팀이 없다
+    expect(generateVirtualManager(42, "옌스 바그너")).toEqual(
+      generateVirtualManager(42, "옌스 바그너"),
+    );
+    // 옛 세이브의 자리 표식이 있으면 그때 서 있던 사람 그대로다 (people.md §2)
+    const seated = generateVirtualManager(42, "옌스 바그너", "dortmund");
+    expect(seated).toEqual(generateVirtualManager(42, "옌스 바그너", "dortmund"));
+    expect(seated.characterId).toBe("옌스 바그너");
   });
 
   it("모든 클럽 벤치에 감독이 선다 — 명부가 먼저, 이름은 겹치지 않고, 유저 팀만 빈다", () => {
