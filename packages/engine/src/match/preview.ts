@@ -20,10 +20,10 @@ import { derbyForMatch } from "../club/derby";
 import { DEFAULT_KICKOFF, diffDays, nextMatchFor } from "../competition/calendar";
 import { internationalBreaksOf, openCallUp } from "../competition/international";
 import {
-  activeSuspension,
+  activeSuspensionFor,
   assignmentsOf,
   firstTeamPlayers,
-  isAvailable,
+  isAvailableFor,
   openInjury,
   tacticsOf,
   teamNameIn,
@@ -67,7 +67,7 @@ export const ABSENT_REASON_KO: Record<AbsentReason, string> = {
 };
 
 /**
- * 못 나오는 이유 — **`isAvailable`이 닫는 문과 같은 셋이다** (season.md §8 불변식).
+ * 못 나오는 이유 — **`isAvailableFor`가 닫는 문과 같은 셋이다** (season.md §8 불변식).
  * 하나를 빠뜨리면 상대 분석이 「그 선수가 나온다」고 말하고 시뮬은 안 세운다.
  */
 export type AbsentReason = "injury" | "suspension" | "call-up";
@@ -160,10 +160,11 @@ function projectXI(
   state: GameState,
   teamId: string,
   basis: MatchRecord | null,
+  competitionId: string | null,
 ): { xi: GamePlayer[]; carried: Set<string> } {
   const squad = firstTeamPlayers(state, teamId);
   const byId = new Map(squad.map((p) => [p.id, p] as const));
-  const available = (p: GamePlayer) => isAvailable(state, p);
+  const available = (p: GamePlayer) => isAvailableFor(state, p, competitionId);
 
   const started =
     basis === null
@@ -194,8 +195,11 @@ function projectXI(
 /** 갈래의 순서 — 오래 못 나오는 쪽이 앞이다 */
 const ABSENT_RANK: Record<AbsentReason, number> = { injury: 0, suspension: 1, "call-up": 2 };
 
-/** 상대의 결장자 — 부상이 먼저, 그다음 정지·소집. 같은 갈래 안에서는 id 순 */
-function absentOf(state: GameState, teamId: string): AbsentPlayer[] {
+/**
+ * 상대의 결장자 — 부상이 먼저, 그다음 정지·소집. 같은 갈래 안에서는 id 순.
+ * **정지는 이 경기의 대회로 잰다** (match.md §6) — 리그 정지 선수는 컵에 선다.
+ */
+function absentOf(state: GameState, teamId: string, competitionId: string | null): AbsentPlayer[] {
   const rows: AbsentPlayer[] = [];
   for (const p of firstTeamPlayers(state, teamId)) {
     const injury = openInjury(state, p.id);
@@ -209,7 +213,7 @@ function absentOf(state: GameState, teamId: string): AbsentPlayer[] {
       });
       continue;
     }
-    const suspension = activeSuspension(state, p.id);
+    const suspension = activeSuspensionFor(state, p.id, competitionId);
     if (suspension) {
       rows.push({
         id: p.id,
@@ -242,8 +246,8 @@ function absentOf(state: GameState, teamId: string): AbsentPlayer[] {
 }
 
 /** 우리 쪽은 킥오프에 설 그 열한 명이다 — 자동 대체까지 지난 뒤라야 판이 같다 */
-function ourSlots(state: GameState): LineupSlot[] | null {
-  const lineup = assembleUserLineup(state);
+function ourSlots(state: GameState, competitionId: string | null): LineupSlot[] | null {
+  const lineup = assembleUserLineup(state, competitionId);
   if (lineup.error) return null;
   return slotsFor(state, state.userTeamId, lineup.onPitch);
 }
@@ -290,7 +294,7 @@ export function buildOpponentReport(
   const opponentId = userIsHome ? match.awayTeamId : match.homeTeamId;
   const ourSide: MatchSide = userIsHome ? "home" : "away";
 
-  const us = ourSlots(state);
+  const us = ourSlots(state, match.competitionId);
   if (!us) return null;
 
   /**
@@ -301,7 +305,7 @@ export function buildOpponentReport(
   if (!theirTactics) return null;
 
   const basis = lastPlayedBefore(state, opponentId, match);
-  const { xi, carried } = projectXI(state, opponentId, basis);
+  const { xi, carried } = projectXI(state, opponentId, basis, match.competitionId);
   if (xi.length === 0) return null;
   /**
    * 자리를 앉히는 것도 **킥오프와 같은 함수**다 (`slotsFor`). 여기서 자연 포지션으로
@@ -388,7 +392,7 @@ export function buildOpponentReport(
           label: competitionLabel(basis.competitionId, basis.stage ?? "league", basis.round),
         }
       : null,
-    absent: absentOf(state, opponentId),
+    absent: absentOf(state, opponentId, match.competitionId),
     shape: { ...theirTactics.spec },
     notes: packet.keyPoints.filter((tag) => REPORT_SOURCES.has(tag.source)),
     targets: packet.targets,

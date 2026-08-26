@@ -87,7 +87,7 @@ import {
   firstTeamPlayers,
   isAvailableById,
   isInjured,
-  isSuspended,
+  isSuspendedFor,
   groupOf,
   playerById,
   playersOf,
@@ -420,7 +420,10 @@ function buildPacketFor(
  * 킥오프 라인업 조립 — 배치(starting)에서 가용 선수를 뽑고, 부상·정지로 빈 자리는
  * 같은 그룹 우선으로 자동 대체한다. GK 자리는 반드시 GK 그룹으로 채운다.
  */
-export function assembleUserLineup(state: GameState): {
+export function assembleUserLineup(
+  state: GameState,
+  competitionId: string | null,
+): {
   onPitch: string[];
   bench: string[];
   replaced: string[];
@@ -434,8 +437,12 @@ export function assembleUserLineup(state: GameState): {
   const roster = firstTeamPlayers(state, state.userTeamId);
   const reserves = reservePlayers(state, state.userTeamId);
   const byId = new Map(roster.map((p) => [p.id, p] as const));
-  /** 못 나오는 이유는 한 문이 쥔다 — 부상·정지, 그리고 대표팀 소집 (season.md §8) */
-  const unavailable = (id: string) => !isAvailableById(state, id);
+  /**
+   * 못 나오는 이유는 한 문이 쥔다 — 부상·정지, 그리고 대표팀 소집 (season.md §8).
+   * **정지는 이 경기의 대회로 묻는다** (match.md §6) — 컵 경고로 걸린 정지는
+   * 리그 명단을 막지 않는다.
+   */
+  const unavailable = (id: string) => !isAvailableById(state, id, competitionId);
 
   const starters = tactics.assignments.filter((a) => a.role === "starting");
   const onPitch: string[] = [];
@@ -599,12 +606,12 @@ export function startMatch(state: GameState): FlowResult {
   );
   if (!match) return { ok: false, message: "오늘 예정된 경기를 찾지 못했습니다" };
 
-  const lineup = assembleUserLineup(state);
+  const lineup = assembleUserLineup(state, match.competitionId);
   if (lineup.error) return { ok: false, message: lineup.error };
 
-  // 이번 경기에 정지를 소화하는 선수 (경기 단위 차감)
+  // 이번 경기에 정지를 소화하는 선수 — **이 대회에 걸리는 정지만** (match.md §6)
   const serving = userPlayers(state)
-    .filter((p) => isSuspended(state, p.id))
+    .filter((p) => isSuspendedFor(state, p.id, match.competitionId))
     .map((p) => p.id);
 
   const userIsHome = match.homeTeamId === state.userTeamId;
@@ -614,7 +621,7 @@ export function startMatch(state: GameState): FlowResult {
    * 로테이션으로 쉬게 한 선수를 거르는 자리는 `simSquadOf` 한 곳이다. 벤치를 여기서
    * 다시 짜면 그 필터가 감독의 경기에서만 새고, "한 곳"이 두 곳이 된다.
    */
-  const aiSquad = simSquadOf(state, opponentId);
+  const aiSquad = simSquadOf(state, opponentId, match.competitionId);
   const aiIds = aiSquad.starters.map((p) => p.id);
   const aiBench = (aiSquad.bench ?? []).map((p) => p.id);
 
@@ -1079,8 +1086,10 @@ export function substitutePlayer(state: GameState, input: { out: string; in: str
   if (isInjured(state, incoming.id)) {
     return { ok: false, message: `${incoming.name}은(는) 부상 중이라 투입할 수 없습니다` };
   }
-  if (isSuspended(state, incoming.id)) {
-    return { ok: false, message: `${incoming.name}은(는) 출장 정지 중입니다` };
+  // 정지는 **이 경기의 대회**로 묻는다 (match.md §6) — 장부의 경기가 그 사실을 쥔다
+  const fixture = state.matches.find((m) => m.id === match.matchId) ?? null;
+  if (isSuspendedFor(state, incoming.id, fixture?.competitionId ?? null)) {
+    return { ok: false, message: `${incoming.name}은(는) 이 경기 출장 정지 중입니다` };
   }
   const result = applyMatchEvents(state, [
     {
@@ -1890,8 +1899,9 @@ export function finalizeMatch(state: GameState): MatchDigest {
         ours
           ? (pending.servingSuspension ?? [])
           : firstTeamPlayers(state, teamId)
-              .filter((p) => isSuspended(state, p.id))
+              .filter((p) => isSuspendedFor(state, p.id, match.competitionId))
               .map((p) => p.id),
+        match.competitionId,
       );
     }
 
@@ -1910,7 +1920,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
       // 카드 → BOOKING·SUSPENSION은 **간이 시뮬과 같은 문**을 지난다 (discipline.ts)
       const ruling = recordCard(state, {
         playerId: target,
-        matchId: match.id,
+        match,
         card: e.type === "yellow_card" ? "yellow" : "red",
         minute: e.minute,
       });

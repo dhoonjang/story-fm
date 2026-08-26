@@ -73,7 +73,13 @@ import { DIRECTIVE_TUNING } from "@story-fm/sim";
 import { settleRoleCost, shelveFamiliarity, unshelveFamiliarity } from "./familiarity-memory";
 import { recallRole, rememberRole } from "./role-memory";
 import { diffLineup, type LineupSide, type LineupSlotRef } from "./lineup-diff";
-import { addDays, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
+import {
+  addDays,
+  diffDays,
+  nextMatchFor,
+  sortEntries,
+  squadReturnOf,
+} from "../competition/calendar";
 import {
   ourYouthCandidates,
   signYouthCandidates,
@@ -128,7 +134,7 @@ import { dressingRoomFactor, dressingRoomVoice, leaderGroupOf } from "../squad/h
 import {
   groupOf,
   isInjured,
-  isSuspended,
+  isSuspendedFor,
   playerById,
   playerName,
   pushNarrative,
@@ -1536,7 +1542,13 @@ export function setLineup(
       message: `부상 선수는 선발 불가: ${injured.map((s) => playerName(state, s.playerId)).join(", ")}`,
     };
   }
-  const suspended = starting.filter((s) => isSuspended(state, s.playerId));
+  /**
+   * **정지는 다음 경기의 대회로 묻는다** (match.md §6) — 컵 경고로 걸린 정지가
+   * 리그 라인업을 반려하면 감독은 실제로 쓸 수 있는 선수를 못 세운다.
+   */
+  const nextCompetition =
+    nextMatchFor(state.matches, state.userTeamId, state.date)?.competitionId ?? null;
+  const suspended = starting.filter((s) => isSuspendedFor(state, s.playerId, nextCompetition));
   if (suspended.length > 0) {
     return {
       ok: false,

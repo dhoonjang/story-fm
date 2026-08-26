@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  leagueOfTeamIn,
   advanceSegment,
   assignmentsOf,
   finalizeMatch,
@@ -473,7 +474,7 @@ function tallyFixtures(state: GameState, count: number) {
   const sideOf = (teamId: string) => {
     let squad = squads.get(teamId);
     if (!squad) {
-      squad = simSquadOf(state, teamId);
+      squad = simSquadOf(state, teamId, leagueOfTeamIn(state, teamId));
       squads.set(teamId, squad);
     }
     return {

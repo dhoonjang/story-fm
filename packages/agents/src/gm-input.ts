@@ -34,9 +34,11 @@ import {
   historyStart,
   injuryRiskFor,
   internationalBreaksOf,
-  isAvailable,
+  isAvailableFor,
+  nextMatchFor,
   isInjured,
-  isSuspended,
+  activeSuspension,
+  suspensionScopeName,
   leagueOfTeamIn,
   loanedOut,
   managedTeamId,
@@ -858,11 +860,14 @@ function internationalFacts(state: GameState): string | null {
   if (sections.length === 0) return null;
   /**
    * **지금 부릴 수 있는 1군이 몇인가** — 감독이 그 주에 실제로 겪는 사실이다.
-   * 코어의 문을 그대로 읽는다(`isAvailable`): 부상·정지·소집이 한 자리에서 갈린다.
+   * 코어의 문을 그대로 읽는다(`isAvailableFor`): 부상·정지·소집이 한 자리에서
+   * 갈리고, **정지는 다음 경기의 대회로 묻는다** (match.md §6).
    */
+  const nextCompetition =
+    nextMatchFor(state.matches, state.userTeamId, state.date)?.competitionId ?? null;
   const firstTeam = players.filter((p) => squadLevelOf(p) === "first");
   sections.push(
-    `지금 부릴 수 있는 1군 ${firstTeam.filter((p) => isAvailable(state, p)).length}/${firstTeam.length}명`,
+    `지금 부릴 수 있는 1군 ${firstTeam.filter((p) => isAvailableFor(state, p, nextCompetition)).length}/${firstTeam.length}명`,
   );
   return sections.join("\n");
 }
@@ -897,7 +902,18 @@ export function buildGmStateNote(
       return inj ? `${p.name} ${inj.bodyPart}~${inj.expectedReturn}` : null;
     })
     .filter((x): x is string => x !== null);
-  const suspended = players.filter((p) => isSuspended(state, p.id)).map((p) => p.name);
+  /**
+   * **정지는 어느 대회의 것인지까지 싣는다** (match.md §6) — 컵 정지 선수는 다음
+   * 리그 경기에 서므로, 대회 없는 이름은 GM에게 잘못된 결장자를 준다.
+   */
+  const suspended = players
+    .map((p) => {
+      const ban = activeSuspension(state, p.id);
+      return ban === null
+        ? null
+        : `${p.name} ${suspensionScopeName(ban)} ${ban.lengthMatches - ban.served}경기`;
+    })
+    .filter((x): x is string => x !== null);
   /**
    * **다치기 전에 서는 줄** (player.md §5.3) — 부상 줄은 이미 쓰러진 뒤의 사실이라,
    * 이것이 없으면 수석코치가 "쉬게 하시죠"라고 말할 근거가 어디에도 없다.

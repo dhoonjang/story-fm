@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CupCatalogEntry, GameState } from "@story-fm/engine";
 import {
+  leagueOfTeamIn,
   cupCatalog,
   advanceEuroKnockouts,
   computeStandings,
@@ -603,12 +604,12 @@ describe("주중 경기 부담 (로테이션)", () => {
     // 우리 팀이 아닌 대항전 참가 팀을 하나 고른다 (간이 시뮬 대상)
     const rival = entrantsOf(state.euroEntrants, cup).find((id) => id !== state.userTeamId)!;
 
-    const before = simSquadOf(state, rival).starters.map((p) => p.id);
+    const before = simSquadOf(state, rival, leagueOfTeamIn(state, rival)).starters.map((p) => p.id);
     expect(before).toHaveLength(11);
     // 선발 전원을 로테이션 기준 위로 지치게 만든다
     for (const id of before) playerById(state, id)!.state.condition = 20;
 
-    const after = simSquadOf(state, rival).starters;
+    const after = simSquadOf(state, rival, leagueOfTeamIn(state, rival)).starters;
     expect(after).toHaveLength(11);
     const changed = after.filter((p) => !before.includes(p.id));
     expect(changed.length, "지친 선발 일부가 교체된다").toBeGreaterThan(0);

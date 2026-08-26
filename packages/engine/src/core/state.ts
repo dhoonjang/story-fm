@@ -121,6 +121,7 @@ import { defaultXiIds, playerCatalog } from "../world/catalog";
 import { assertCatalogValid } from "../world/catalog-invariants";
 import { estimateSquadWages, wageSubjectOf } from "../world/wages";
 import { clubEconomyLevel } from "../data/league-economy";
+import { suspensionApplies } from "../data/discipline-catalog";
 import { worldFigureManagerOf } from "../data/world-figures";
 import { generateYouthPlayer } from "../world/generate";
 import { ensureSquadNumbers } from "../squad/numbers";
@@ -1569,14 +1570,46 @@ export function isInjured(state: GameState, playerId: string): boolean {
   return openInjury(state, playerId) !== null;
 }
 
+/**
+ * 지금 걸려 있는 정지 — **대회를 묻지 않는다.** 「이 선수에게 정지가 있는가」를
+ * 묻는 자리(카드·이력·서사)만 쓴다. 경기에 세울 수 있는지는 대회가 정하므로
+ * `activeSuspensionFor`를 불러라 (match.md §6).
+ */
 export function activeSuspension(state: GameState, playerId: string): Suspension | null {
   return (
     state.suspensions.find((s) => s.gamePlayerId === playerId && s.status === "active") ?? null
   );
 }
 
+/**
+ * **이 대회 경기에 걸리는 정지** — 소화도 결장도 이 문을 지난다 (match.md §6).
+ *
+ * 정지가 둘일 수 있다(리그 누적 + 대항전 퇴장). 그중 이 경기에 걸리는 첫 줄만
+ * 답한다 — 한 경기는 정지 하나를 갚는다.
+ */
+export function activeSuspensionFor(
+  state: GameState,
+  playerId: string,
+  competitionId: string | null,
+): Suspension | null {
+  return (
+    state.suspensions.find(
+      (s) =>
+        s.gamePlayerId === playerId && s.status === "active" && suspensionApplies(s, competitionId),
+    ) ?? null
+  );
+}
+
 export function isSuspended(state: GameState, playerId: string): boolean {
   return activeSuspension(state, playerId) !== null;
+}
+
+export function isSuspendedFor(
+  state: GameState,
+  playerId: string,
+  competitionId: string | null,
+): boolean {
+  return activeSuspensionFor(state, playerId, competitionId) !== null;
 }
 
 /** 경기에 나설 수 있는가 — 부상·정지 없음 */
@@ -1595,17 +1628,40 @@ export function isAvailable(state: GameState, player: GamePlayer): boolean {
 }
 
 /**
+ * **이 경기에 세울 수 있는가** — 같은 셋을 묻되 정지는 그 경기의 대회로 잰다
+ * (match.md §6). 컵 경고로 걸린 정지는 리그 명단을 막지 않는다.
+ *
+ * 라인업을 세우는 자리는 전부 이 문이다: 감독의 자동 대체도, 간이 시뮬의
+ * `simSquadOf`도, 경기 전 예상 XI도 같은 답을 내야 한다 (§2·§7).
+ */
+export function isAvailableFor(
+  state: GameState,
+  player: GamePlayer,
+  competitionId: string | null,
+): boolean {
+  return (
+    !isInjured(state, player.id) &&
+    !isSuspendedFor(state, player.id, competitionId) &&
+    !isAwayFromClub(state, player)
+  );
+}
+
+/**
  * 같은 판정을 **id로** 묻는 자리 — 선수를 손에 들지 않은 호출부만 쓴다.
  *
  * ⚠️ 사람을 이미 들고 있으면 `isAvailable`을 불러라. 여기는 5,700명을 훑어 그를
  * 찾는다(`playerById`) — 간이 시뮬의 스쿼드 구성처럼 경기마다 수백 번 지나는
  * 자리에서 그 스캔은 한 시즌을 분 단위로 늘린다.
  */
-export function isAvailableById(state: GameState, playerId: string): boolean {
+export function isAvailableById(
+  state: GameState,
+  playerId: string,
+  competitionId: string | null,
+): boolean {
   const player = playerById(state, playerId);
   return player === null
-    ? !isInjured(state, playerId) && !isSuspended(state, playerId)
-    : isAvailable(state, player);
+    ? !isInjured(state, playerId) && !isSuspendedFor(state, playerId, competitionId)
+    : isAvailableFor(state, player, competitionId);
 }
 
 export function activeContract(state: GameState, playerId: string): Contract | null {
@@ -1703,16 +1759,34 @@ export function weeklyWagesOf(state: GameState, teamId: string): number {
 }
 
 /**
- * 시즌 누적 경고 — BOOKING에서 파생.
+ * 이 카드가 **어느 대회의 것인가** — 누적을 세는 자리가 묻는다 (match.md §6).
+ *
+ * 새 줄은 자기가 들고 있다. 대회를 안 적던 옛 줄만 경기 원장에서 찾으므로, 새
+ * 세이브에서는 이 스캔이 한 번도 돌지 않는다.
+ */
+export function bookingCompetitionOf(state: GameState, booking: Booking): string | null {
+  if (booking.competitionId !== undefined) return booking.competitionId;
+  return state.matches.find((m) => m.id === booking.matchId)?.competitionId ?? null;
+}
+
+/**
+ * 시즌 누적 경고 — BOOKING에서 파생. **대회를 주면 그 대회의 것만 센다**
+ * (match.md §6) — 누적은 대회 안에서만 쌓인다.
  *
  * **한 경기에서 두 장을 받은 경기의 경고는 세지 않는다** — 경고 2회 퇴장은 그 자리에서
  * 퇴장 정지 한 건으로 값을 치렀고, 그 두 장까지 누적에 넣으면 한 사건에 정지가 두 번
- * 걸린다 (match.md §5). 장부의 두 줄은 그대로 둔다 — 경기 기록은 실제로 그랬다.
+ * 걸린다 (match.md §6). 장부의 두 줄은 그대로 둔다 — 경기 기록은 실제로 그랬다.
  */
-export function seasonYellowsOf(state: GameState, playerId: string, season: number): number {
+export function seasonYellowsOf(
+  state: GameState,
+  playerId: string,
+  season: number,
+  competitionId?: string | null,
+): number {
   const perMatch = new Map<string, number>();
   for (const b of state.bookings) {
     if (b.gamePlayerId !== playerId || b.season !== season || b.card !== "yellow") continue;
+    if (competitionId !== undefined && bookingCompetitionOf(state, b) !== competitionId) continue;
     perMatch.set(b.matchId, (perMatch.get(b.matchId) ?? 0) + 1);
   }
   let counted = 0;

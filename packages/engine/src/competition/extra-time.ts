@@ -325,7 +325,7 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
   for (const card of extra.cards) {
     recordCard(state, {
       playerId: card.playerId,
-      matchId: decider.id,
+      match: decider,
       card: card.card,
       minute: card.minute,
     });

@@ -1,5 +1,12 @@
-import { addToSeasonStat, YELLOWS_PER_SUSPENSION } from "@story-fm/domain";
+import {
+  addToSeasonStat,
+  yellowBanMatches,
+  type DisciplineRule,
+  type MatchRecord,
+} from "@story-fm/domain";
 import { ensureSeasonStat, playerById, seasonYellowsOf, type GameState } from "../core/state";
+import { competitionShortName } from "../data/cup-catalog";
+import { disciplineOf, JURISDICTION_KO } from "../data/discipline-catalog";
 
 /** 한 장의 카드가 장부에 남긴 것 — 발부한 정지, 물린 정지, 감독에게 갈 한 줄 */
 export type CardRuling = {
@@ -7,7 +14,7 @@ export type CardRuling = {
   note: string | null;
   /** 이 카드가 발부한 정지 id */
   issued: string | null;
-  /** 이 카드가 물린 정지 id — 두 번째 경고가 앞선 누적 정지를 지울 때 (match.md §5) */
+  /** 이 카드가 물린 정지 id — 두 번째 경고가 앞선 누적 정지를 지울 때 (match.md §6) */
   revoked: string | null;
 };
 
@@ -22,31 +29,59 @@ const matchYellowsOf = (state: GameState, playerId: string, matchId: string) =>
   ).length;
 
 /**
+ * 정지가 **어느 경기를 막는가** — 감독이 읽을 이름.
+ *
+ * 범위가 관할이면 대회 이름이 아니라 관할의 이름이 선다: 잉글랜드의 퇴장은
+ * FA컵에서 받았어도 다음 리그 경기를 막는다 (match.md §6).
+ */
+function banTargetName(rule: DisciplineRule, competitionId: string | null): string {
+  return rule.redScope === "jurisdiction"
+    ? (JURISDICTION_KO[rule.jurisdiction] ?? competitionShortName(competitionId))
+    : competitionShortName(competitionId);
+}
+
+const banText = (target: string, matches: number) =>
+  matches === 1 ? `다음 ${target} 경기 출장 정지` : `다음 ${target} ${matches}경기 출장 정지`;
+
+/**
  * 카드 → 장부 — **두 시뮬레이터가 같은 문을 쓴다.**
  *
  * 유저 경기와 간이 시뮬(타 팀 경기)이 이 한 곳을 지난다 — 리그 전체가 같은
  * 규칙 아래 있어야 "다음 경기 경고 조심"이 상대에게도 성립한다.
  *
+ * **규칙은 그 경기의 대회가 갖는다**(`disciplineOf` — match.md §6). 누적은 그
+ * 대회 안에서만 세고, 걸린 정지도 그 대회(또는 그 관할)에서만 소화된다.
+ *
  * 두 번째 경고는 `yellow_card` 한 줄 + `red_card` 한 줄로 들어온다. **한 사건에
  * 정지는 하나** — 그 경기의 경고 두 장은 누적에서 빠지고(`seasonYellowsOf`), 첫 장이
- * 이미 걸어 둔 누적 정지가 있으면 그것을 물린다 (match.md §5).
+ * 이미 걸어 둔 누적 정지가 있으면 그것을 물린다 (match.md §6).
  */
 export function recordCard(
   state: GameState,
   input: {
     playerId: string;
-    matchId: string;
+    match: MatchRecord;
     card: "yellow" | "red";
     minute: number;
   },
 ): CardRuling {
   const player = playerById(state, input.playerId);
   if (!player) return NOTHING;
-  const yellowsBefore = matchYellowsOf(state, input.playerId, input.matchId);
+  const match = input.match;
+  const competitionId = match.competitionId;
+  /**
+   * 대회가 아닌 경기(친선·2군)의 카드는 장부에 남지 않는다 — 호출부가 이미
+   * 친선을 걸러 오지만, 규칙이 없는 곳에서 정지를 만들지 않는 것은 이 문의 몫이다.
+   */
+  const rule = disciplineOf(competitionId);
+  if (rule === null || competitionId === null) return NOTHING;
+
+  const yellowsBefore = matchYellowsOf(state, input.playerId, match.id);
   state.bookings.push({
     gamePlayerId: input.playerId,
-    matchId: input.matchId,
+    matchId: match.id,
     season: state.season,
+    competitionId,
     card: input.card,
     minute: input.minute,
   });
@@ -64,37 +99,48 @@ export function recordCard(
   if (input.card === "yellow") {
     // 두 번째 경고 — 곧 올 `red_card` 한 건이 이 사건의 정지다. 누적은 세지 않는다
     if (yellowsBefore > 0) {
-      const revoked = yellowsSuspensionId(input.playerId, input.matchId);
+      const revoked = yellowsSuspensionId(input.playerId, match.id);
       const at = state.suspensions.findIndex((s) => s.id === revoked);
       if (at < 0) return NOTHING;
       state.suspensions.splice(at, 1);
       return { note: null, issued: null, revoked };
     }
-    // 방금 넣은 장까지 세고 나서 눈금을 본다 (5·10·15장에서 걸린다)
-    const total = seasonYellowsOf(state, input.playerId, state.season);
-    if (total === 0 || total % YELLOWS_PER_SUSPENSION !== 0) return NOTHING;
-    const issued = yellowsSuspensionId(input.playerId, input.matchId);
+    // 방금 넣은 장까지 세고 나서 그 대회의 눈금을 본다
+    const total = seasonYellowsOf(state, input.playerId, state.season, competitionId);
+    const length = yellowBanMatches(rule, total, {
+      round: match.round,
+      stage: match.stage ?? "league",
+    });
+    if (length === null) return NOTHING;
+    const issued = yellowsSuspensionId(input.playerId, match.id);
     state.suspensions.push({
       id: issued,
       gamePlayerId: input.playerId,
       cause: "yellows",
+      competitionId,
+      // 누적 정지는 어느 협회에서도 그 대회뿐이다 — 관할로 번지는 것은 퇴장이다
+      scope: "competition",
       issuedOn: state.date,
-      lengthMatches: 1,
+      lengthMatches: length,
       served: 0,
       status: "active",
     });
     return {
-      note: `${player.name} 경고 누적 ${total}회 — 다음 경기 출장 정지`,
+      note:
+        `${player.name} 경고 누적 ${total}회 — ` +
+        banText(competitionShortName(competitionId), length),
       issued,
       revoked: null,
     };
   }
 
-  const issued = `sus-${input.playerId}-${input.matchId}-red`;
+  const issued = `sus-${input.playerId}-${match.id}-red`;
   state.suspensions.push({
     id: issued,
     gamePlayerId: input.playerId,
     cause: "red",
+    competitionId,
+    scope: rule.redScope,
     issuedOn: state.date,
     lengthMatches: 1,
     served: 0,
@@ -102,5 +148,9 @@ export function recordCard(
   });
   // 경고 두 장을 받고 나가는 퇴장인지 장부가 안다 — 감독은 왜 한 경기인지 읽을 수 있어야 한다
   const how = yellowsBefore >= 2 ? "경고 2회 퇴장" : "퇴장";
-  return { note: `${player.name} ${how} — 다음 경기 출장 정지`, issued, revoked: null };
+  return {
+    note: `${player.name} ${how} — ${banText(banTargetName(rule, competitionId), 1)}`,
+    issued,
+    revoked: null,
+  };
 }

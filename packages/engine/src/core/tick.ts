@@ -136,16 +136,17 @@ import { cancelTrainingOn, syncDefaultTraining } from "../squad/training-plan";
 import {
   groupOf,
   activeContract,
-  activeSuspension,
   assignmentFor,
   assignmentsOf,
   benchRunOf,
   ensureSeasonStat,
   firstTeamPlayers,
+  activeSuspensionFor,
   isAvailable,
+  isAvailableFor,
   isInjured,
   isLoanedIn,
-  isSuspended,
+  isSuspendedFor,
   managedTeamId,
   MATCHDAY_BENCH,
   openInjuryIds,
@@ -1245,7 +1246,11 @@ function seatOverdueLoanees(
  * 실제로 지고, 그 대가는 약해진 라인업이다 (유저 팀은 감독이 직접 라인업을 짜므로
  * 이 함수를 쓰지 않는다 — 우리가 빌려 온 선수를 세울지는 라인업 화면의 결정이다).
  */
-export function simSquadOf(state: GameState, teamId: string): SimSquad {
+export function simSquadOf(
+  state: GameState,
+  teamId: string,
+  competitionId: string | null,
+): SimSquad {
   const squad = firstTeamPlayers(state, teamId);
   const byId = new Map(squad.map((p) => [p.id, p]));
   /**
@@ -1253,7 +1258,7 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
    * 간이 시뮬도 리그 전체에 카드를 만들고 A매치 휴식기에 컵 결승이 걸리므로,
    * 부상만 거르면 AI 팀이 정지 선수나 소집된 선수를 그대로 내보낸다.
    */
-  const available = (p: GamePlayer) => isAvailable(state, p);
+  const available = (p: GamePlayer) => isAvailableFor(state, p, competitionId);
   const startingAssignments = assignmentsOf(state, teamId, "starting");
   const starters = startingAssignments
     .map((a) => byId.get(a.playerId))
@@ -1419,8 +1424,8 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
     }
     if (match.homeTeamId === managed || match.awayTeamId === managed) continue;
     const squads = {
-      home: simSquadOf(state, match.homeTeamId),
-      away: simSquadOf(state, match.awayTeamId),
+      home: simSquadOf(state, match.homeTeamId, match.competitionId),
+      away: simSquadOf(state, match.awayTeamId, match.competitionId),
     };
     const derby = derbyForMatch(match);
     const result = quickSimulate(
@@ -1609,9 +1614,10 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
         state,
         [match.homeTeamId, match.awayTeamId].flatMap((teamId) =>
           firstTeamPlayers(state, teamId)
-            .filter((p) => isSuspended(state, p.id))
+            .filter((p) => isSuspendedFor(state, p.id, match.competitionId))
             .map((p) => p.id),
         ),
+        match.competitionId,
       );
     }
     /**
@@ -1623,7 +1629,7 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
     for (const card of friendly ? [] : cards) {
       recordCard(state, {
         playerId: card.playerId,
-        matchId: match.id,
+        match,
         card: card.card,
         minute: card.minute,
       });
@@ -1941,10 +1947,20 @@ export function describeNextFixture(state: GameState): string {
   return `다음 경기: ${competitionLabel(next.competitionId, next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : home ? "홈" : "원정"} vs ${teamNameIn(state, home ? next.awayTeamId : next.homeTeamId)}`;
 }
 
-/** 정지 소화 — 경기가 끝날 때 호출 (경기 단위로 차감). 유저 경기·타 팀 간이 시뮬 둘 다 */
-export function serveSuspensions(state: GameState, playerIds: string[]): void {
+/**
+ * 정지 소화 — 경기가 끝날 때 호출 (경기 단위로 차감). 유저 경기·타 팀 간이 시뮬 둘 다.
+ *
+ * **그 경기의 대회에 걸리는 정지만 줄어든다** (match.md §6) — UCL 퇴장은 UCL
+ * 경기로 갚고 리그 경기로는 갚지 못한다. 정지가 둘이면 이 경기에 걸리는 하나만
+ * 소화된다: 한 경기는 정지 하나를 갚는다.
+ */
+export function serveSuspensions(
+  state: GameState,
+  playerIds: string[],
+  competitionId: string | null,
+): void {
   for (const id of playerIds) {
-    const s = activeSuspension(state, id);
+    const s = activeSuspensionFor(state, id, competitionId);
     if (!s) continue;
     s.served += 1;
     if (s.served >= s.lengthMatches) s.status = "done";

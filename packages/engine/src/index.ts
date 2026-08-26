@@ -21,6 +21,7 @@ export * from "./data/coach-seeds";
 export * from "./data/owner-seeds";
 export * from "./data/league-catalog";
 export * from "./data/cup-catalog";
+export * from "./data/discipline-catalog";
 export * from "./data/domestic-cup-catalog";
 export * from "./data/super-cup-catalog";
 export * from "./data/club-profile";

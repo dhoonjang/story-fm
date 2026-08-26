@@ -504,6 +504,8 @@ describe("get_squad", () => {
         gamePlayerId: starter.id,
         matchId: `m${i}`,
         season: state.season,
+        // 누적은 대회 안에서만 쌓인다 — 리그 카드라야 리그 눈금에 닿는다 (match.md §6)
+        competitionId: "epl",
         card: "yellow",
         minute: 20,
       });
@@ -986,6 +988,7 @@ describe("이력·폼", () => {
         gamePlayerId: p.id,
         matchId: `m${i}`,
         season: state.season,
+        competitionId: "epl",
         card: "yellow",
         minute: 20,
       });
@@ -994,7 +997,7 @@ describe("이력·폼", () => {
     expect(res.message).toContain("부상 이력: 총 1회");
     expect(res.message).toContain("누적 결장 26일"); // 03-02 → 03-28
     expect(res.message).toContain("경고 4장");
-    expect(res.message).toContain("경고 1장 더 받으면 출장 정지");
+    expect(res.message).toContain("프리미어리그 경고 4장, 1장 더 받으면 출장 정지");
   });
 
   it("순위표에 최근 5경기 폼이 붙는다", () => {

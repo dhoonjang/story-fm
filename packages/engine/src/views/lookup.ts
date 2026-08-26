@@ -25,6 +25,7 @@ import {
   leaderboardTitle,
   VISION_CODE_KO,
   injuryRiskText,
+  yellowBanMatches,
   isReserveMatch,
   MatchStageSchema,
   packetTagText,
@@ -33,7 +34,6 @@ import {
   tacticsBrief,
 } from "@story-fm/domain";
 import {
-  YELLOWS_PER_SUSPENSION,
   ageOf,
   anchorOf,
   associationName,
@@ -77,6 +77,7 @@ import {
   type MatchReportView,
 } from "./views";
 import { addDays, dayOfWeek, diffDays, squadReturnOf } from "../competition/calendar";
+import { disciplineOf, suspensionScopeName } from "../data/discipline-catalog";
 import {
   daysUntilReturn,
   internationalBreaksOf,
@@ -167,10 +168,12 @@ import {
 import {
   activeContract,
   activeSuspension,
+  bookingCompetitionOf,
+  seasonYellowsOf,
   assignmentFor,
   familiarityOf,
   groupOf,
-  isAvailable,
+  isAvailableFor,
   isOurPlayer,
   managedTeamId,
   onLoanFromUs,
@@ -268,6 +271,60 @@ function armband(p: GamePlayer): string {
   return p.isCaptain ? " (주장)" : p.isViceCaptain === true ? " (부주장)" : "";
 }
 
+/** 징계를 재는 기준 경기 — 어느 대회의 몇 라운드·어느 단계에서 묻는가 */
+type DisciplineFixture = { competitionId: string; round: number; stage: MatchStage };
+
+/**
+ * **경고 눈금을 재는 다음 경기** — 친선·2군은 규정이 없어 건너뛴다 (match.md §6).
+ *
+ * 남은 대회 경기가 없으면(프리시즌 앞·시즌 끝) 그 팀의 리그를 1라운드로 가정한다 —
+ * 감독이 읽는 눈금은 결국 리그의 것이고, 화면이 아무 말도 하지 않는 것보다 낫다.
+ * 리그조차 없으면(무소속) 널이다: 그에게는 다음 대회 경기가 없다.
+ */
+function disciplineFixtureOf(state: GameState, teamId: string): DisciplineFixture | null {
+  let next: MatchRecord | null = null;
+  for (const m of state.matches) {
+    if (m.result || m.date < state.date) continue;
+    if (m.homeTeamId !== teamId && m.awayTeamId !== teamId) continue;
+    if (disciplineOf(m.competitionId) === null) continue;
+    if (next === null || m.date < next.date || (m.date === next.date && m.id < next.id)) next = m;
+  }
+  if (next !== null && next.competitionId !== null) {
+    return { competitionId: next.competitionId, round: next.round, stage: next.stage ?? "league" };
+  }
+  /**
+   * 폴백은 **던지지 않는다** — 무소속(`freeagents`)도 카탈로그가 모르는 id도 이 함수를
+   * 지난다. 뷰가 매 턴 부르는 자리라 예외 하나가 오피스 화면 전체를 떨군다.
+   */
+  const league = state.leagueOf?.[teamId] ?? state.teams.find((t) => t.id === teamId)?.leagueId;
+  return league === undefined ? null : { competitionId: league, round: 1, stage: "league" };
+}
+
+/**
+ * 정지가 얼마나 가까운지 말해 주는 창(장) — 이보다 멀면 아무 말도 하지 않는다.
+ * 5는 유럽 대부분의 눈금 폭이라, 그 대회의 카드가 0장이어도 거리를 낸다.
+ */
+const BAN_WARNING_RANGE = 5;
+
+/**
+ * 정지까지 **몇 장 남았나** — 그 팀의 **다음 경기 대회**로 잰다 (match.md §6).
+ *
+ * 대회마다 눈금이 다르므로("EPL 5장 / FA컵 2장 / UCL 3장") 대회 없이 낸 수는
+ * 감독을 잘못된 다음 경기로 데려간다. 눈금이 멀면 아무 말도 하지 않는다.
+ */
+function banWarningFor(state: GameState, p: GamePlayer): string {
+  const at = disciplineFixtureOf(state, p.teamId);
+  const rule = at === null ? null : disciplineOf(at.competitionId);
+  if (at === null || rule === null) return "";
+  const held = seasonYellowsOf(state, p.id, state.season, at.competitionId);
+  for (let more = 1; more <= BAN_WARNING_RANGE; more++) {
+    if (yellowBanMatches(rule, held + more, at) === null) continue;
+    const name = competitionShortName(at.competitionId);
+    return ` — ${name} 경고 ${held}장, ${more}장 더 받으면 출장 정지`;
+  }
+  return "";
+}
+
 /**
  * 우리 팀 선수 한 줄 — 정확 수치 (오피스 뷰가 이미 보여주는 정보).
  *
@@ -304,7 +361,7 @@ function ourRow(state: GameState, p: GamePlayer): string {
   const status = injury
     ? ` 부상(${injury.bodyPart}, ~${injury.expectedReturn})`
     : suspension
-      ? ` 정지(${suspension.lengthMatches - suspension.served}경기)`
+      ? ` 정지(${suspensionScopeName(suspension)} ${suspension.lengthMatches - suspension.served}경기)`
       : "";
   // 무엇에 대한 불만인지까지 낸다 — 사유가 여덟이라 "불만" 한 마디로는 할 일이 안 보인다
   const grievance = state.issues.find((i) => i.gamePlayerId === p.id);
@@ -580,6 +637,19 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
    * 시장가)은 선수마다 기록을 훑으므로, 앞의 조건이 좁혀 준 만큼만 계산한다.
    */
   /**
+   * 「지금 뛸 수 있나」는 **그 선수 팀의 다음 대회 경기**로 답한다 (match.md §6) —
+   * 컵 정지 선수는 리그 명단에 그대로 선다. 팀마다 한 번만 찾아 둔다: 선수마다
+   * 일정을 훑으면 5,700번이다.
+   */
+  const nextCompetitionCache = new Map<string, string | null>();
+  const nextCompetitionFor = (ownerId: string): string | null => {
+    const cached = nextCompetitionCache.get(ownerId);
+    if (cached !== undefined) return cached;
+    const found = disciplineFixtureOf(state, ownerId)?.competitionId ?? null;
+    nextCompetitionCache.set(ownerId, found);
+    return found;
+  };
+  /**
    * 우리 팀을 물으면 풀은 **우리 계약**이다 — 임대 보낸 선수도 들어온다
    * (transfer.md §2). 남의 팀 풀은 그대로 소속(`playersOf`)이다: 그 구단이 빌려 간
    * 우리 선수는 그 구단 명단에 **실제로 있으므로** 거기서 빠지면 안 된다.
@@ -603,7 +673,9 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
       return false;
     }
     if (listed && listed.has(p.id) !== input.listed) return false;
-    if (input.availableOnly && !isAvailable(state, p)) return false;
+    if (input.availableOnly && !isAvailableFor(state, p, nextCompetitionFor(p.teamId))) {
+      return false;
+    }
     if (contracts) {
       const contract = contracts.get(p.id);
       if (
@@ -823,10 +895,24 @@ function historyLines(state: GameState, p: GamePlayer): string[] {
   const yellows = bookings.filter((b) => b.card === "yellow").length;
   const reds = bookings.filter((b) => b.card === "red").length;
   if (yellows > 0 || reds > 0) {
-    const toBan = YELLOWS_PER_SUSPENSION - (yellows % YELLOWS_PER_SUSPENSION);
+    /**
+     * **대회별로 나눠 낸다** — 누적은 대회 안에서만 쌓이므로(match.md §6) 한 줄로
+     * 합치면 컵에서 받은 두 장이 리그 정지를 부르는 것처럼 읽힌다.
+     */
+    const perCompetition = new Map<string | null, number>();
+    for (const b of bookings) {
+      if (b.card !== "yellow") continue;
+      const c = bookingCompetitionOf(state, b);
+      perCompetition.set(c, (perCompetition.get(c) ?? 0) + 1);
+    }
+    const split = [...perCompetition.entries()]
+      .map(([c, n]) => ({ name: competitionShortName(c), n }))
+      .sort((a, z) => z.n - a.n || (a.name < z.name ? -1 : 1))
+      .map((r) => `${r.name} ${r.n}장`)
+      .join(" · ");
     lines.push(
-      `징계 이력 (이번 시즌): 경고 ${yellows}장 · 퇴장 ${reds}회` +
-        (yellows > 0 ? ` — 경고 ${toBan}장 더 받으면 출장 정지` : ""),
+      `징계 이력 (이번 시즌): 경고 ${yellows}장${split ? ` (${split})` : ""} · 퇴장 ${reds}회` +
+        (yellows > 0 ? banWarningFor(state, p) : ""),
     );
   }
 
@@ -1152,7 +1238,9 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
     );
   }
   if (suspension) {
-    lines.push(`징계: 출장 정지 ${suspension.lengthMatches - suspension.served}경기 남음`);
+    lines.push(
+      `징계: ${suspensionScopeName(suspension)} 출장 정지 ${suspension.lengthMatches - suspension.served}경기 남음`,
+    );
   }
   const away = awayFromClubLine(state, p);
   if (away !== null) lines.push(away);
@@ -1194,11 +1282,18 @@ function assignedRow(
   p: GamePlayer,
   position: string,
   familiarity: number,
+  next: DisciplineFixture | null,
   roleId?: string,
 ): string {
-  const yellows = state.bookings.filter(
-    (b) => b.gamePlayerId === p.id && b.season === state.season && b.card === "yellow",
-  ).length;
+  /**
+   * **다음 대회 경기로 잰다** (match.md §6) — 눈금도 정지도 대회의 것이라,
+   * 대회 없이 센 경고 수는 이 라인업 화면에서 잘못된 경고를 띄운다.
+   */
+  const yellows =
+    next === null ? 0 : seasonYellowsOf(state, p.id, state.season, next.competitionId);
+  const rule = next === null ? null : disciplineOf(next.competitionId);
+  const banNext =
+    next !== null && rule !== null && yellowBanMatches(rule, yellows + 1, next) !== null;
   const injury = openInjury(state, p.id);
   const suspension = activeSuspension(state, p.id);
   const stat = seasonStatOf(state, p.id);
@@ -1207,8 +1302,12 @@ function assignedRow(
   const reason = grievance ? issueReasonText(grievance) : null;
   const flags = [
     injury ? `부상(${injury.bodyPart}, ~${injury.expectedReturn})` : null,
-    suspension ? `정지 ${suspension.lengthMatches - suspension.served}경기` : null,
-    yellows >= YELLOWS_PER_SUSPENSION - 1 ? `경고 ${yellows}장(정지 임박)` : null,
+    suspension
+      ? `정지 ${suspension.lengthMatches - suspension.served}경기(${suspensionScopeName(suspension)})`
+      : null,
+    banNext && next !== null
+      ? `${competitionShortName(next.competitionId)} 경고 ${yellows}장(정지 임박)`
+      : null,
     // 사유 없는 옛 불만은 사유 없이 낸다
     grievance ? (reason ? `불만(${reason})` : "불만") : null,
     /**
@@ -1293,6 +1392,8 @@ export function squadView(state: GameState, input: SquadViewInput = {}): LookupR
     );
     return lineA !== lineB ? lineA - lineB : xA - xB;
   };
+  // 경고 임박은 **다음 대회 경기**로 잰다 — 한 번 찾아 모든 줄이 나눠 쓴다
+  const nextFixture = disciplineFixtureOf(state, teamId);
   const rowsFor = (bucket: "starting" | "bench" | "unassigned") =>
     inLevel
       .filter((p) => bucketOf(p) === bucket)
@@ -1304,6 +1405,7 @@ export function squadView(state: GameState, input: SquadViewInput = {}): LookupR
           p,
           a?.position ?? naturalPositionOf(p).position,
           a?.familiarity ?? familiarityOf(state, p.id),
+          nextFixture,
           a?.roleId,
         );
       });

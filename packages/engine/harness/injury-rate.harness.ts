@@ -13,6 +13,7 @@ import {
   type SideInput,
 } from "@story-fm/sim";
 import {
+  leagueOfTeamIn,
   injuryRiskFor,
   makeRng,
   playersOf,
@@ -199,7 +200,7 @@ const LOAD_ARM_STRENGTH = 70;
 
 function loadArm(runs: number): { fresh: number; loaded: number; injuries: [number, number] } {
   const state = createTestGame(11);
-  const home = flat({ ...simSquadOf(state, HOME), bench: [] });
+  const home = flat({ ...simSquadOf(state, HOME, leagueOfTeamIn(state, HOME)), bench: [] });
   /**
    * ⚠️ **스쿼드를 세운 뒤에 심는다** — `simSquadOf`가 잔고로도 로테이션하므로
    * (`ROTATION_LOAD`), 세우기 전에 심으면 재려던 선수가 그 경기에 서지 않는다.
@@ -215,7 +216,7 @@ function loadArm(runs: number): { fresh: number; loaded: number; injuries: [numb
     p.state.fatigue = LOADED;
     loadedIds.add(p.id);
   });
-  const away = flat({ ...simSquadOf(state, AWAY), bench: [] });
+  const away = flat({ ...simSquadOf(state, AWAY, leagueOfTeamIn(state, AWAY)), bench: [] });
   const injuries: [number, number] = [0, 0];
   for (let i = 0; i < runs; i++) {
     for (const tag of quickSimulate(home, away, 7000 + i, `load:${i}`).injuries) {
@@ -246,15 +247,15 @@ interface GradeTally {
  */
 function gradeArm(runs: number): GradeTally {
   const state = createTestGame(11);
-  const probe = simSquadOf(state, HOME);
+  const probe = simSquadOf(state, HOME, leagueOfTeamIn(state, HOME));
   probe.starters.forEach((p, i) => {
     p.state.injuryProneness = riskSpread(i).proneness;
   });
-  const home = { ...simSquadOf(state, HOME), bench: [] };
+  const home = { ...simSquadOf(state, HOME, leagueOfTeamIn(state, HOME)), bench: [] };
   home.starters.forEach((p, i) => {
     p.state.condition = riskSpread(i).condition;
   });
-  const away = { ...simSquadOf(state, AWAY), bench: [] };
+  const away = { ...simSquadOf(state, AWAY, leagueOfTeamIn(state, AWAY)), bench: [] };
 
   const gradeOf = new Map(home.starters.map((p) => [p.id, injuryRiskFor(p).grade]));
   const zero = (): Record<InjuryRiskGrade, number> => ({ low: 0, elevated: 0, high: 0 });
@@ -277,8 +278,8 @@ function gradeArm(runs: number): GradeTally {
 describe("간이 시뮬과 구간 시뮬은 같은 눈금으로 카드와 부상을 낸다", () => {
   it("경기당 건수 · 두 시뮬의 비 · 성향이 닿는 폭", () => {
     const state = createTestGame(11);
-    const home = simSquadOf(state, HOME);
-    const away = simSquadOf(state, AWAY);
+    const home = simSquadOf(state, HOME, leagueOfTeamIn(state, HOME));
+    const away = simSquadOf(state, AWAY, leagueOfTeamIn(state, AWAY));
     const intensity = {
       home: matchIntensity(home.tactics ?? DEFAULT_TACTICS),
       away: matchIntensity(away.tactics ?? DEFAULT_TACTICS),
@@ -300,17 +301,17 @@ describe("간이 시뮬과 구간 시뮬은 같은 눈금으로 카드와 부상
     const fragileState = createTestGame(11);
     for (const p of playersOf(fragileState, HOME)) p.state.injuryProneness = GLASS;
     const fragile = quickArm(
-      simSquadOf(fragileState, HOME),
-      simSquadOf(fragileState, AWAY),
+      simSquadOf(fragileState, HOME, leagueOfTeamIn(fragileState, HOME)),
+      simSquadOf(fragileState, AWAY, leagueOfTeamIn(fragileState, AWAY)),
       MATCHES,
       "healthy",
     );
 
     const shareState = createTestGame(11);
-    const glass = simSquadOf(shareState, HOME).starters[3]!;
+    const glass = simSquadOf(shareState, HOME, leagueOfTeamIn(shareState, HOME)).starters[3]!;
     glass.state.injuryProneness = GLASS;
-    const shareHome = simSquadOf(shareState, HOME);
-    const shareAway = simSquadOf(shareState, AWAY);
+    const shareHome = simSquadOf(shareState, HOME, leagueOfTeamIn(shareState, HOME));
+    const shareAway = simSquadOf(shareState, AWAY, leagueOfTeamIn(shareState, AWAY));
     let hisShare = 0;
     let homeInjuries = 0;
     for (let i = 0; i < MATCHES; i++) {
