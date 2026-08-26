@@ -392,6 +392,16 @@ export interface PendingMatch {
    * 옛 세이브엔 없다 — optional이라 세이브 버전을 올리지 않는다.
    */
   exploits?: string[];
+  /**
+   * **이 경기에서 쓴 외침의 수** — 정지점에서 팀 전체에 던진 짧은 말
+   * (`occasion: "shout"`, → docs/simulation/career.md §2).
+   *
+   * 팀토크의 네 자리는 하루가 세지만(`Manager.teamTalkedOn`) 외침은 **경기**가 센다 —
+   * 라커룸 밖의 말이라 하루 한 번 게이트에 얹으면 한 경기의 벤치가 그날의 다른 자리를
+   * 먹는다. `pendingMatch`와 함께 사라지므로 되돌릴 자리도 없다.
+   * 옛 세이브엔 없다 — 없으면 아직 한 번도 외치지 않은 것으로 읽는다 (optional).
+   */
+  shouts?: number;
   /** 자연어로 지정한 경기 전용 지역 플랜 — 같은 지역은 마지막 지시가 이긴다. */
   regionalPlans?: Array<{
     band: import("@story-fm/domain").RegionalBand;
