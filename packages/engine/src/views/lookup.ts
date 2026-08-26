@@ -1,6 +1,7 @@
 import type {
   Contract,
   GamePlayer,
+  GameTeam,
   MatchEventType,
   MatchRecord,
   MatchStage,
@@ -1316,6 +1317,32 @@ function youthCandidateRow(state: GameState, row: YouthCandidate): string {
   );
 }
 
+/** 이력에 싣는 전 구단의 수 — 다 적으면 감독 줄 하나가 커리어 표가 된다 */
+const MANAGER_SPELLS_SHOWN = 2;
+
+/**
+ * **벤치에 선 사람 한 줄** — 이름 · 재임 일수 · 전 구단
+ * (→ ../../../../docs/simulation/transfer.md §7 「감독 풀」).
+ *
+ * 감독은 자리가 아니라 사람이라, 상대 벤치를 읽을 때 **얼마나 오래 저기 있었고
+ * 어디서 왔는가**가 이름 다음의 사실이다. 부임일이 없는 옛 세이브는 일수를 적지
+ * 않는다 — 시즌 시작으로 치면 없는 사실을 지어내는 것이다. 오늘 앉은 사람도 같다:
+ * 0인 칸은 적지 않는다.
+ */
+function managerLine(state: GameState, bench: GameTeam): string {
+  const since = bench.managerSince;
+  const days = since === undefined ? 0 : diffDays(since, state.date);
+  const past = [...(bench.managerSpells ?? [])]
+    .reverse()
+    .slice(0, MANAGER_SPELLS_SHOWN)
+    .map((spell) => teamShortNameIn(state, spell.teamId));
+  return (
+    `감독: ${bench.managerName}` +
+    (days <= 0 ? "" : ` — 부임 ${days}일째`) +
+    (past.length === 0 ? "" : ` · 전 구단 ${past.join("·")}`)
+  );
+}
+
 // ── 팀 프로필 (상대 스카우팅 리포트) ───────────────────
 
 export function teamProfile(state: GameState, team: string): LookupResult {
@@ -1390,7 +1417,7 @@ export function teamProfile(state: GameState, team: string): LookupResult {
     .sort((a, b) => sortRating(state, b) - sortRating(state, a))
     .slice(0, 6);
 
-  const managerName = state.teams.find((t) => t.id === teamId)?.managerName;
+  const bench = state.teams.find((t) => t.id === teamId);
   const honours = clubHonoursLine(state, teamId);
 
   const lines = [
@@ -1401,7 +1428,7 @@ export function teamProfile(state: GameState, team: string): LookupResult {
     `전술: ${tactics.spec.formation} · 멘탈리티${tactics.spec.mentality} 압박${tactics.spec.pressing} 템포${tactics.spec.tempo} 패스${tactics.spec.passStyle}`,
     // 상대 벤치에 서는 사람 — 이름이 여기 나와야 캐릭터북이 그 인물지를 세운다
     // (people.md §2-1). 이름을 모르는 구단은 줄이 서지 않는다
-    ...(managerName !== undefined ? [`감독: ${managerName}`] : []),
+    ...(bench?.managerName === undefined ? [] : [managerLine(state, bench)]),
     `스쿼드: ${squad.length}명 · 평균 ${avgAge.toFixed(1)}세 · 구단 등급 ${tierOfTeamIn(state, teamId)}`,
     /**
      * **역대 한 줄** (team.md §1) — 카탈로그 시드와 게임 안의 우승을 더한 것이다.
