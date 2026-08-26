@@ -1666,6 +1666,38 @@ export function financeOf(state: GameState, teamId: string): TeamFinance {
   return f;
 }
 
+// ── 다가옴의 장부 ──────────────────────────────────────────────
+//
+// 자리를 **여는 규칙**은 두 곳에 있다 — 압력이 여는 자리는 `club/approach.ts`,
+// 감독이 두드려 여는 면접은 `market/manager-market.ts`(career.md §5.1). 둘이 함께 쓰는
+// 것은 규칙이 아니라 **장부의 세 동작**뿐이라, 그것만 두 파일이 다 기대는 이 자리로
+// 내려와 있다 (AGENTS.md §5 — 한 규칙은 한 벌).
+
+/** 상태에 남기는 지난 다가옴 수 — 그 뒤는 서사에만 남는다 (회견과 같은 규약) */
+export const KEPT_APPROACHES = 20;
+
+/** 답을 기다리는 다가옴 — 언제나 하나뿐이다 */
+export function pendingApproach(state: GameState): Approach | null {
+  return (state.approaches ?? []).find((a) => a.status === "pending") ?? null;
+}
+
+/** 자리를 장부에 앉힌다 — 오래된 것부터 밀려난다 */
+export function pushApproach(state: GameState, approach: Approach): void {
+  state.approaches = [...(state.approaches ?? []), approach].slice(-KEPT_APPROACHES);
+}
+
+/**
+ * 열린 자리를 **대가 없이** 닫는다 — 감독이 그 구단을 떠났을 때다 (career.md §5.1).
+ *
+ * 회견의 `expirePendingPress`와 같은 계약이다: 감독이 무시한 것이 아니라 물을 구단이
+ * 없어진 것이라 값을 치르지 않는다. 그대로 두면 무직인 감독의 감독실에 앞 구단 선수가
+ * 사흘째 서 있고, 부임 뒤에는 새 구단의 첫 자리가 그것을 방치로 읽는다.
+ */
+export function expirePendingApproach(state: GameState): void {
+  const open = pendingApproach(state);
+  if (open) open.status = "expired";
+}
+
 export function seasonStatOf(
   state: GameState,
   playerId: string,

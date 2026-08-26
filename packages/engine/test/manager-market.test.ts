@@ -40,6 +40,9 @@ import {
   offerDrySpell,
   offerVacancy,
   openManagerOffers,
+  ownerOf,
+  pendingInterview,
+  respondToApproach,
   openNegotiationFor,
   pendingOffer,
   playerById,
@@ -62,6 +65,7 @@ import {
   type TrainingBrief,
 } from "@story-fm/engine";
 import {
+  APPROACH_PATIENCE_DAYS,
   MANAGER_ATTRIBUTES,
   MANAGER_TERMS_BY_TIER,
   SCOUT_DAYS,
@@ -832,8 +836,9 @@ describe("감독 계약과 흥정 — 조건이 실리고 한 차례 되부른�
     expect(second.ok, "흥정이 두 차례 열렸다").toBe(false);
   });
 
-  it("노크 — 평판 문턱 아래면 거절, 넘으면 깎인 연봉의 제안이 선다", () => {
+  it("노크 — 평판 문턱 아래면 즉시 거절, 넘으면 제안이 아니라 면접이 선다", () => {
     state.managerOffers = []; // 답할 자리를 비운다
+    state.approaches = [];
     const vacancyTeam = state.teams.find(
       (t) => t.id !== state.userTeamId && tierOfTeamIn(state, t.id) === 3,
     )!;
@@ -845,18 +850,110 @@ describe("감독 계약과 흥정 — 조건이 실리고 한 차례 되부른�
     expect(refused.ok).toBe(true);
     expect(refused.tone).toBe("bad");
     expect(openManagerOffers(state), "문턱 아래인데 제안이 섰다").toHaveLength(0);
+    expect(pendingInterview(state), "문턱 아래인데 면접이 열렸다").toBeNull();
 
     state.manager.reputation.board = 30; // 40 — 문턱에 턱걸이
     const applied = applyForManagerJob(state, vacancyTeam.id);
     expect(applied.ok, applied.message).toBe(true);
-    const offer = openManagerOffers(state)[0]!;
-    expect(offer.teamId).toBe(vacancyTeam.id);
-    expect(offer.via).toBe("knock");
-    expect(offer.salary, "지원한 쪽인데 연봉이 깎이지 않았다").toBe(
-      Math.round(MANAGER_TERMS_BY_TIER[3].salary * KNOCK_SALARY_RATE),
-    );
-    // 열린 제안이 있는 동안에는 어느 공석도 두드릴 수 없다
+    expect(openManagerOffers(state), "면접 전에 제안이 섰다").toHaveLength(0);
+    const seat = pendingInterview(state)!;
+    expect(seat.teamId).toBe(vacancyTeam.id);
+    expect(seat.channel).toBe("owner");
+    // 화자는 우리 구단주가 아니라 마주 앉은 쪽의 사람이다
+    expect(seat.speakerId).toBe(generateOwner(state.seed, vacancyTeam.id).characterId);
+    expect(seat.speakerId).not.toBe(ownerOf(state).characterId);
+    const kinds = seat.facts.map((f) => f.kind);
+    expect(kinds).toContain("standing");
+    expect(kinds).toContain("vacancy");
+    expect(kinds).toContain("finance-grade");
+    // 면접 중에는 어느 공석도 두드릴 수 없고 공석이 부르지도 않는다
     expect(applyForManagerJob(state, vacancyTeam.id).ok).toBe(false);
+    expect(offerVacancy(state, vacancyTeam.id, 12, []), "면접 중에 제안이 붙었다").toBe(false);
+  });
+
+  it("면접의 답이 조건을 정한다 — 표 그대로", () => {
+    const vacancyTeam = state.teams.find(
+      (t) => t.id !== state.userTeamId && tierOfTeamIn(state, t.id) === 3,
+    )!;
+    const base = MANAGER_TERMS_BY_TIER[3];
+    const knock = Math.round(base.salary * KNOCK_SALARY_RATE);
+
+    /** 그 구단의 면접 자리를 다시 세운다 — 한 무직 기간에 한 번뿐인 문을 비운다 */
+    const sitAgain = (): void => {
+      state.managerOffers = [];
+      state.approaches = [];
+      state.managerVacancies = [{ teamId: vacancyTeam.id, on: state.date, position: 12 }];
+      expect(applyForManagerJob(state, vacancyTeam.id).ok).toBe(true);
+    };
+
+    // 구단의 처지를 받는 답 — 기본 조건, 흥정은 그대로 남는다
+    sitAgain();
+    const boardBefore = state.manager.reputation.board;
+    expect(respondToApproach(state, { stance: "own" }).ok).toBe(true);
+    const plain = openManagerOffers(state)[0]!;
+    expect(plain.via).toBe("knock");
+    expect(plain.salary, "지원한 쪽인데 연봉이 깎이지 않았다").toBe(knock);
+    expect(plain.budgetPledge).toBe(base.budgetPledge);
+    expect(plain.counteredOn, "기본 조건인데 흥정이 소진됐다").toBeUndefined();
+    // 아직 그 구단의 사람이 아니라 보드 평판은 움직이지 않는다
+    expect(state.manager.reputation.board).toBe(boardBefore);
+
+    // 조건을 걸고 오는 답 — 흥정의 천장까지, 되부를 기회는 남지 않는다
+    sitAgain();
+    expect(respondToApproach(state, { stance: "bold" }).ok).toBe(true);
+    const raised = openManagerOffers(state)[0]!;
+    const lift =
+      1 + counterHeadroom((state.manager.reputation.board + state.manager.reputation.media) / 2, 3);
+    expect(raised.salary).toBe(Math.round(base.salary * KNOCK_SALARY_RATE * lift));
+    expect(raised.budgetPledge).toBe(Math.round(base.budgetPledge * lift));
+    expect(raised.counteredOn, "미리 당겨 쓴 흥정이 남아 있다").toBe(state.date);
+
+    // 보드 앞에서 구단을 깎은 답 · 말을 아낀 답 · 돌려보낸 답 — 문이 닫힌다
+    for (const input of [
+      { stance: "criticise" as const },
+      { stance: "deflect" as const },
+      { decline: true },
+    ]) {
+      sitAgain();
+      expect(respondToApproach(state, input).ok).toBe(true);
+      expect(openManagerOffers(state), `${JSON.stringify(input)}에 제안이 섰다`).toHaveLength(0);
+    }
+    // 이번 무직 기간에 이미 마주 앉은 구단의 문은 다시 열리지 않는다
+    state.managerOffers = [];
+    state.managerVacancies = [{ teamId: vacancyTeam.id, on: state.date, position: 12 }];
+    expect(applyForManagerJob(state, vacancyTeam.id).ok, "같은 문을 두 번 두드렸다").toBe(false);
+
+    // 다음 테스트가 읽을 제안 하나를 남긴다
+    sitAgain();
+    expect(respondToApproach(state, { stance: "defend" }).ok).toBe(true);
+  });
+
+  it("사흘 동안 답하지 않은 면접은 제안 없이 닫힌다", () => {
+    const vacancyTeam = state.teams.find(
+      (t) => t.id !== state.userTeamId && tierOfTeamIn(state, t.id) === 3,
+    )!;
+    state.managerOffers = [];
+    state.approaches = [];
+    state.managerVacancies = [{ teamId: vacancyTeam.id, on: state.date, position: 12 }];
+    expect(applyForManagerJob(state, vacancyTeam.id).ok).toBe(true);
+
+    const opened = state.date;
+    // 사흘째 전날까지는 자리가 서 있고, 시계는 그 앞에서 멈춘다
+    state.date = addDays(opened, APPROACH_PATIENCE_DAYS - 1);
+    expect(runManagerMarket(state, []), "답을 기다리는데 시계가 지나갔다").toBe(true);
+    expect(pendingInterview(state)).not.toBeNull();
+
+    state.date = addDays(opened, APPROACH_PATIENCE_DAYS);
+    expect(runManagerMarket(state, [])).toBe(true);
+    expect(pendingInterview(state), "사흘이 지났는데 자리가 남았다").toBeNull();
+    expect(openManagerOffers(state), "답하지 않았는데 제안이 섰다").toHaveLength(0);
+
+    // 다음 테스트가 읽을 제안 하나를 남긴다 — 마주 앉고 받는 것이 유일한 길이다
+    state.date = opened;
+    state.approaches = [];
+    state.managerVacancies = [{ teamId: vacancyTeam.id, on: state.date, position: 12 }];
+    expect(applyForManagerJob(state, vacancyTeam.id).ok).toBe(true);
+    expect(respondToApproach(state, { stance: "defend" }).ok).toBe(true);
   });
 
   it("수락하면 제안의 조건이 계약이 되고, 예산 약속은 그날 이행된다", () => {
