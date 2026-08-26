@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  KNOCK_BOARD_HIT,
   RENEWAL_YEARS_MAX,
   activeContract,
   addDays,
@@ -18,6 +19,8 @@ import {
   renewalExpectation,
   suggestTerms,
   tacticsOf,
+  teamName,
+  tierOfTeamIn,
   type GameState,
   userPlayers,
 } from "@story-fm/engine";
@@ -422,5 +425,76 @@ describe("mock GM — 무직", () => {
 
     const knocked = runMockGmTurn(state, "그 자리에 지원해보자");
     expect(knocked.toolCalls.map((c) => c.name)).toContain("apply_manager_job");
+  });
+});
+
+/**
+ * **재직 중에도 거취는 열려 있다** (career.md §5.1 「재직 중 접근·노크」). 코어가 연
+ * 자리에 mock이 말로 닿지 못하면 그 길은 e2e를 통과하지 못한다.
+ */
+describe("mock GM — 재직 중의 거취", () => {
+  /** 다른 구단이 재직 중인 감독에게 손을 뻗었다 — 보상금까지 실린 접근 제안 하나 */
+  function poached(): { state: GameState; teamId: string } {
+    const state = newGame();
+    const target = state.teams.find((t) => t.id !== state.userTeamId)!;
+    state.managerOffers = [
+      {
+        id: "mgr-poach-test",
+        teamId: target.id,
+        madeOn: state.date,
+        expiresOn: addDays(state.date, 10),
+        tier: 2,
+        target: 10,
+        expectationCode: "mid",
+        salary: 3_000_000,
+        years: 3,
+        budgetPledge: 20_000_000,
+        compensation: 1_000_000,
+        via: "poach",
+        status: "open",
+      },
+    ];
+    return { state, teamId: target.id };
+  }
+
+  it("이직 제안을 흥정하고 수락하면 그날로 그 벤치에 선다", () => {
+    const { state, teamId } = poached();
+
+    const haggled = runMockGmTurn(state, "이직 제안 말인데, 연봉을 더 받아내자");
+    expect(haggled.toolCalls.map((c) => c.name)).toContain("counter_manager_offer");
+    expect(state.managerOffers![0]!.counteredOn).toBe(state.date);
+
+    const taken = runMockGmTurn(state, `${teamName(teamId)}로 가겠다`);
+    expect(taken.toolCalls.map((c) => c.name)).toContain("accept_manager_offer");
+    expect(state.userTeamId).toBe(teamId);
+  });
+
+  /**
+   * **문이 좁아야 한다** — 열린 제안이 있다는 이유로 가로채면 재직 중의 평범한 턴이
+   * 전부 이 자리로 떨어진다. 흥정의 말은 이적 협상도 쓰는 말이다.
+   */
+  it("열린 제안이 일상 지시와 이적의 말을 가로채지 않는다", () => {
+    const { state, teamId } = poached();
+    expect(
+      runMockGmTurn(state, "내일 오전 빌드업 훈련하자").toolCalls.map((c) => c.name),
+    ).toContain("set_training");
+    // 「더 받아내자」는 이적 협상의 말이기도 하다 — 구단 이름이 붙어도 거취가 아니다
+    const haggle = runMockGmTurn(state, `${teamName(teamId)} 오퍼는 더 받아내자`);
+    expect(haggle.toolCalls.map((c) => c.name)).not.toContain("counter_manager_offer");
+    expect(state.managerOffers![0]!.counteredOn).toBeUndefined();
+  });
+
+  it("재직 중에도 공석을 두드린다 — 자리가 서는 날 보드가 그것을 안다", () => {
+    const state = newGame();
+    // 문턱이 없는 등급을 고른다 — 두드림이 반드시 자리로 이어져야 대가를 잴 수 있다
+    const vacant = state.teams.find(
+      (t) => t.id !== state.userTeamId && tierOfTeamIn(state, t.id) === 4,
+    )!;
+    state.managerVacancies = [{ teamId: vacant.id, on: state.date }];
+    const board = state.manager.reputation.board;
+
+    const knocked = runMockGmTurn(state, `${teamName(vacant.id)} 감독직에 지원하자`);
+    expect(knocked.toolCalls.map((c) => c.name)).toContain("apply_manager_job");
+    expect(state.manager.reputation.board).toBe(board - KNOCK_BOARD_HIT);
   });
 });
