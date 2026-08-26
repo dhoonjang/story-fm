@@ -1,4 +1,9 @@
-import { TACTIC_AXES, tacticAxisScaleText } from "@story-fm/domain";
+import {
+  TACTIC_AXES,
+  TACTIC_TOGGLES,
+  tacticAxisScaleText,
+  tacticToggleChoiceText,
+} from "@story-fm/domain";
 
 export type SkillGroup = "진행" | "전술·훈련" | "대화·서사" | "조회" | "경기" | "이적" | "재정";
 
@@ -84,9 +89,11 @@ export const SKILL_CATALOG = [
     group: "전술·훈련",
     readOnly: false,
     description:
-      "팀 전술 6축을 변경한다. 축은 모두 1~5이며 3이 보통이다 — " +
+      "팀 전술 6축과 갈래 넷을 변경한다. 축은 모두 1~5이며 3이 보통이다 — " +
       `${TACTIC_AXES.map(tacticAxisScaleText).join(" · ")}. ` +
-      "현재 값과 다른 축 중 감독이 변경을 명시한 축만 보내라. 언급하지 않은 축을 균형값이나 추천값으로 보정하지 않는다. 포메이션과 선수 배치는 이 도구로 바꾸지 않는다.",
+      "갈래는 눈금이 없다 — " +
+      `${TACTIC_TOGGLES.map(tacticToggleChoiceText).join(" · ")}. ` +
+      "현재 값과 다른 것 중 감독이 변경을 명시한 축·갈래만 보내라. 언급하지 않은 축을 균형값이나 추천값으로 보정하지 않는다. 포메이션과 선수 배치는 이 도구로 바꾸지 않는다.",
   },
   {
     name: "set_player_tactic",

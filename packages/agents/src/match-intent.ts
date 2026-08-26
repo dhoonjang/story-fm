@@ -1,6 +1,11 @@
 import type { GameState } from "@story-fm/engine";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
-import { DIRECTIVE_INTENSITIES, PLAYER_DIRECTIVE_KINDS } from "@story-fm/domain";
+import {
+  DIRECTIVE_INTENSITIES,
+  PLAYER_DIRECTIVE_KINDS,
+  TACTIC_TOGGLES,
+  tacticToggleChoiceText,
+} from "@story-fm/domain";
 import { buildLedgerNote } from "./gm-input";
 import { MatchIntentSchema, type MatchIntent } from "./match-intent-schema";
 import { ModelOutputError, retryOnce, requireToolCall } from "./retry";
@@ -30,7 +35,7 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 <ledger>(명단·시각·교체 횟수) · <standing>(걸려 있는 전술과 개인 지시) · <targets>(공략 목록) 뒤에 감독의 말이 @감독: 으로 온다.
 
 # 무엇을 고르나
-감독이 명시한 것만 싣는다. 말하지 않은 축·자리·역할은 보내지 않는다. 프리셋을 적용하거나 전원을 재배치하지 않는다.
+감독이 명시한 것만 싣는다. 말하지 않은 축·갈래·자리·역할은 보내지 않는다. 프리셋을 적용하거나 전원을 재배치하지 않는다.
 
 # advance — 시계를 미는가
 - 감독이 진행하라고 했을 때만 "segment"다. "계속", "봅시다", "돌려", 교체·전술을 지시하며 이어서 보자는 말이 그것이다.
@@ -47,7 +52,7 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 
 # 판을 바꾸는 것
 - substitutions — 교체. out/in은 <ledger>의 id.
-- tactics — 6축(1~5) 중 감독이 말한 축만.
+- tactics — 6축(1~5)과 갈래 넷 중 감독이 말한 것만. 갈래는 눈금이 없다 — ${TACTIC_TOGGLES.map(tacticToggleChoiceText).join(" · ")}.
 - playerTactics — 한 선수의 자리·역할·개인 지시.
   - 자리는 move로만 옮긴다: lane(left·center·right) × band(defense=우리 진영, midfield, attack=상대 진영). 지정하지 않은 축은 그대로 둔다. 좌표를 지어내지 않는다.
   - instruction.note는 감독의 말 그대로.
@@ -108,7 +113,7 @@ export async function runMatchIntent(
           return client.runTurn({
             system: MATCH_INTENT_SYSTEM,
             history: [],
-            // 명단·현재 6축·걸린 지시·공략 표적만 — 분류에 쓰이지 않는 판세는 빠진다
+            // 명단·현재 6축과 갈래·걸린 지시·공략 표적만 — 분류에 쓰이지 않는 판세는 빠진다
             // 분류기에는 감독의 이름이 없다 — 자리 태그 하나로 감독의 말을 세운다
             user: [buildLedgerNote(state), ``, `@감독: ${message}`].join("\n"),
             tools: [makeReportTool((value) => (intent = value))],
