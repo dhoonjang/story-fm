@@ -21,7 +21,7 @@ import {
   worldFigures,
 } from "./persona";
 import { generatePlayerPersona, retiredPersona } from "./player-persona";
-import { personaRelations } from "./relations";
+import { mentoringRelations, personaRelations } from "./relations";
 
 /**
  * 캐릭터북 — **「이 인물이 지금 필요하다」를 판정해 그 턴에만 싣는다** (people.md §6).
@@ -165,15 +165,22 @@ export function characterEntryOf(
 }
 
 /**
- * 인물지에 관계 초기값을 붙인다 — **`full` 깊이의 저장 페르소나에만** (people.md §6).
+ * 인물지에 관계를 붙인다 — **`full` 깊이에만** (people.md §6 · §5-3).
  *
- * `characterEntry`가 아니라 여기서 붙이는 이유는 관계가 세이브의 다른 페르소나를
- * 봐야 나오기 때문이다 — 순수 함수인 그쪽은 상대가 누구인지 모른다. 비면 필드 자체를
+ * `characterEntry`가 아니라 여기서 붙이는 이유는 관계가 세이브의 다른 사람을 봐야
+ * 나오기 때문이다 — 순수 함수인 그쪽은 상대가 누구인지 모른다. 비면 필드 자체를
  * 두지 않는다: 중립뿐인 사이는 카드에 서지 않는다.
+ *
+ * 두 벌이 이어 붙는다. **원형에서 뽑힌 첫인상**은 저장 페르소나(코치·구단주·기자단)
+ * 사이에만 서고, **감독이 세운 사이**(멘토링)는 선수에게 선다 — 근거가 다르므로
+ * 표도 함수도 따로다.
  */
 function withRelations(state: GameState, entry: CharacterEntry): CharacterEntry {
   if (entry.depth !== "full") return entry;
-  const relations = personaRelations(state, entry.characterId);
+  const relations = [
+    ...personaRelations(state, entry.characterId),
+    ...mentoringRelations(state, entry.characterId),
+  ];
   return relations.length > 0 ? { ...entry, relations } : entry;
 }
 

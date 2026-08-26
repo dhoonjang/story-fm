@@ -6,6 +6,7 @@ import { formatMoney, recordFinance, settleDuePayments } from "../club/finance";
 import { buildDeparturePress, openPress } from "../club/press";
 import { clampForm, moraleToForm } from "../squad/form";
 import { leaderWeightOf } from "../squad/hierarchy";
+import { closeMentoringsFor } from "../squad/mentoring";
 import {
   firstInstallmentOf,
   loanLockOf,
@@ -107,6 +108,11 @@ export function clearDepartedState(state: GameState, player: GamePlayer, from: s
   forgetRoles(state, player.id);
   player.isCaptain = false;
   player.isViceCaptain = undefined;
+  /**
+   * **떠나면 사이도 끝난다** (people.md §5-3) — 멘토로 든 것도 멘티로 든 것도 함께.
+   * 지우지 않고 닫으므로 놓인 쪽의 심경이 며칠 그 줄을 읽는다.
+   */
+  closeMentoringsFor(state, player.id, "departure");
 }
 
 /**

@@ -11,6 +11,7 @@ import { diffDays } from "../competition/calendar";
 import { countryOfTeam } from "../data/team-catalog";
 import { archetypeTraitsOf, playerArchetypeOf } from "../world/player-persona";
 import { leaderSettlingRelief } from "./hierarchy";
+import { MENTOR_SETTLING, mentorPairOf } from "./mentoring";
 import { playerById, playersOf, teamNameIn, type GameState } from "../core/state";
 
 /**
@@ -91,11 +92,11 @@ export const EVENT_BAND: Record<SettlingEvent["kind"], number> = {
  * 문장은 `settlingFactorText`가 만든다 (overview.md §1 철칙 4).
  */
 export interface SettlingFactor {
-  code: "abroad" | "compatriot" | "young" | "veteran" | "archetype" | "leaders";
+  code: "abroad" | "compatriot" | "mentor" | "young" | "veteran" | "archetype" | "leaders";
   multiplier: number;
   /** `abroad` — 건너온 나라 */
   from?: string;
-  /** `compatriot` — 라커룸에 있는 같은 협회 출신 */
+  /** `compatriot` — 라커룸에 있는 같은 협회 출신 · `mentor` — 붙여 준 고참 */
   playerId?: string;
   /** `young`·`veteran` — 그때의 나이 */
   age?: number;
@@ -259,6 +260,14 @@ function loadFactors(state: GameState, player: GamePlayer, from: string | null):
   const mate = compatriotIn(state, player);
   if (mate) factors.push({ code: "compatriot", multiplier: 0.85, playerId: mate.id });
 
+  /**
+   * **감독이 데리고 다니라고 붙여 준 고참은 같은 협회 출신과 같은 무게다**
+   * (people.md §5-3). 사이가 닫히면 그 자리에서 빠진다 — 배수는 저장하지 않고
+   * 장부에서 다시 매기므로, 멘토가 떠난 다음 날의 목표는 이미 다른 값이다.
+   */
+  const pair = mentorPairOf(state, player.id);
+  if (pair) factors.push({ code: "mentor", multiplier: MENTOR_SETTLING, playerId: pair.mentorId });
+
   const age = ageOf(player.birthdate, state.date);
   if (age <= 21) factors.push({ code: "young", multiplier: 1.2, age });
   else if (age >= 30) factors.push({ code: "veteran", multiplier: 0.9, age });
@@ -299,6 +308,10 @@ export function settlingFactorText(state: GameState, factor: SettlingFactor): st
     case "compatriot": {
       const mate = factor.playerId ? playerById(state, factor.playerId) : null;
       return mate ? `라커룸에 ${mate.name}이(가) 있다` : null;
+    }
+    case "mentor": {
+      const mentor = factor.playerId ? playerById(state, factor.playerId) : null;
+      return mentor ? `${mentor.name}이(가) 멘토로 붙어 있다` : null;
     }
     case "young":
       return factor.age === undefined ? null : `${factor.age}세 — 처음 겪는 무대다`;

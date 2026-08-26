@@ -14,10 +14,12 @@ import {
   isSettling,
   knowledgeOf,
   loanPlayer,
+  MENTOR_SETTLING,
   observedRating,
   playerArchetypeOf,
   playerById,
   playersOf,
+  pruneMentoring,
   recallLoan,
   returnDueLoans,
   settlingFactorText,
@@ -429,6 +431,41 @@ describe("무게는 GM이 정하고 경계는 코어가 쥔다", () => {
     expect(state.settlingEvents[0]!.credit).toBe(
       settlingAnchor("team_talk", { intensity: 2 }) + EVENT_BAND.team_talk,
     );
+  });
+});
+
+/**
+ * 멘토 항 — **감독이 데리고 다니라고 붙여 준 고참은 같은 협회 출신과 같은 무게다**
+ * (people.md §5-3 · player.md §9.3).
+ *
+ * 배수를 저장하지 않고 장부에서 다시 매기므로, 여기서 지키는 것은 전이 하나다:
+ * 사이가 닫히는 순간 그 줄이 배수에서 빠진다.
+ */
+describe("붙여 준 멘토가 정착을 앞당긴다", () => {
+  it("멘토가 팀을 떠나면 사이가 닫히고 배수에서 그 줄이 사라진다", () => {
+    const state = createTestGame(11);
+    const target = opponentsOf(state)[0]!;
+    sign(state, target.id);
+    // 같은 협회 출신 항이 함께 흔들리지 않게 — 재는 것은 멘토 항 하나다
+    const mentor = playersOf(state, state.userTeamId).find(
+      (p) => p.id !== target.id && p.homegrownCountry !== target.homegrownCountry,
+    )!;
+
+    const before = settlingOf(state, target.id)!;
+    state.mentoring = [{ mentorId: mentor.id, menteeId: target.id, since: state.date }];
+    const withMentor = settlingOf(state, target.id)!;
+    const row = withMentor.factors.find((f) => f.code === "mentor")!;
+    expect(row.multiplier).toBe(MENTOR_SETTLING);
+    expect(row.playerId).toBe(mentor.id);
+    expect(withMentor.target).toBeCloseTo(before.target * MENTOR_SETTLING, 6);
+    expect(settlingFactorText(state, row)).toContain(mentor.name);
+
+    // 멘토가 우리 구단에서 빠진다 — 줄은 지워지지 않고 닫히지만 배수는 그 자리에서 빠진다
+    mentor.teamId = "chelsea";
+    pruneMentoring(state);
+    const after = settlingOf(state, target.id)!;
+    expect(after.factors.some((f) => f.code === "mentor")).toBe(false);
+    expect(after.target).toBeGreaterThan(withMentor.target);
   });
 });
 

@@ -1,15 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { ageOf, isReserveMatch, PLAYER_ARCHETYPE_TRAITS } from "@story-fm/domain";
+import { ageOf, AXIS_GROUPS, isReserveMatch, PLAYER_ARCHETYPE_TRAITS } from "@story-fm/domain";
+import type { GamePlayer } from "@story-fm/domain";
 import {
   academyUseOf,
   LOAN_BENCH_RUN_ALERT,
+  MENTEES_PER_MENTOR,
   leagueOfTeamIn,
   loanPlayer,
+  mentorBlock,
+  mentorPairOf,
   onLoanFromUs,
   playerArchetypeOf,
   reservePlayers,
   seasonStatOf,
   setDevelopmentFocus,
+  setMentor,
   squadLevelOf,
   teamShortNameIn,
   transitionSeason,
@@ -26,10 +31,15 @@ import { outOfBand, reportOf, type Readings } from "./harness";
  *
  *   pnpm balance youth-development
  *
- * 네 팔을 나란히 놓는다 — 집중 육성 / 무지정 우리 2군 / **같은 리그로 보낸 임대** /
- * 배율 없는 타 팀 기준선. 집중 육성 격차가 0이면 육성이 게임플레이가 아니라 배경
- * 시뮬로 되돌아간 것이고, 임대 격차가 0 아래면 유망주를 내보내는 결정이 손해가 된
- * 것이다 (season.md §2 임대).
+ * 다섯 팔을 나란히 놓는다 — 집중 육성 / **멘토링** / 무지정 우리 2군 /
+ * **같은 리그로 보낸 임대** / 배율 없는 타 팀 기준선. 집중 육성 격차가 0이면 육성이
+ * 게임플레이가 아니라 배경 시뮬로 되돌아간 것이고, 임대 격차가 0 아래면 유망주를
+ * 내보내는 결정이 손해가 된 것이다 (season.md §2 임대).
+ *
+ * ⚠️ **멘토링 팔은 종합이 아니라 정신 6축 합으로 읽는다** — 멘토 항이 닿는 자리가
+ * 그 여섯뿐이라(people.md §5-3) 종합으로 읽으면 자리별 가중치가 그 몫을 반으로 접는다.
+ * 그래도 표본이 셋이라 격차 자체는 눈금 아래이고, 항이 세계에 닿았는가는 성장 로그의
+ * `origin`이 결정적으로 답한다.
  */
 
 /** 임대 팔의 크기 — 평균을 낼 만큼은 되되, 우리 2군 팔을 비우지 않을 만큼 */
@@ -110,14 +120,52 @@ describe("한 시즌의 유스 육성", () => {
       }
     }
 
+    /**
+     * **멘토링 팔** — 우리 1군에서 자격을 통과하는 고참 중 리더십 최상위 하나에게,
+     * 남은 2군 U21을 `MENTEES_PER_MENTOR`까지 맡긴다 (people.md §5-3).
+     *
+     * 무지정 팔과 **같은 잠재력 분포**를 갖게 여유 순으로 세운 뒤 홀수 자리를 뽑는다 —
+     * 임대 팔이 짝수 자리를 걸러 뽑는 것과 같은 이유다.
+     */
+    const mentor = state.players
+      .filter((p) => p.teamId === state.userTeamId && mentorBlock(state, p) === null)
+      .sort((a, b) => b.attributes.leadership - a.attributes.leadership)[0];
+    const restU21 = reservePlayers(state, state.userTeamId)
+      .filter((p) => u21(state, p.birthdate) && !focusIds.includes(p.id))
+      .sort(
+        (a, b) =>
+          b.attributes.potential -
+          b.attributes.overall -
+          (a.attributes.potential - a.attributes.overall),
+      );
+    const menteeIds = restU21
+      .filter((_, index) => index % 2 === 1)
+      .slice(0, MENTEES_PER_MENTOR)
+      .map((p) => p.id);
+    if (mentor && menteeIds.length > 0) {
+      const assigned = setMentor(state, { mentorId: mentor.id, menteeIds });
+      expect(assigned.ok).toBe(true);
+      console.log(
+        `멘토 ${mentor.name}(${ageOf(mentor.birthdate, state.date)}세 · 리더십 ` +
+          `${mentor.attributes.leadership}) → ${menteeIds.length}명`,
+      );
+    } else {
+      console.log("멘토 자격자가 없다 — 멘토링 팔이 비었다");
+    }
+
     const before = new Map(state.players.map((p) => [p.id, p.attributes.overall]));
+    /** 정신 6축 합 — 멘토 항이 닿는 자리가 그 여섯뿐이라 종합 대신 이 자를 쓴다 */
+    const mentalSum = (p: GamePlayer) =>
+      AXIS_GROUPS.mental.reduce((sum, axis) => sum + p.attributes[axis], 0);
+    const mentalBefore = new Map(state.players.map((p) => [p.id, mentalSum(p)]));
     const ourReserveU21 = state.players
       .filter(
         (p) =>
           p.teamId === state.userTeamId &&
           squadLevelOf(p) === "reserve" &&
           u21(state, p.birthdate) &&
-          !focusIds.includes(p.id),
+          !focusIds.includes(p.id) &&
+          !menteeIds.includes(p.id),
       )
       .map((p) => p.id);
     const baselineU21 = state.players
@@ -148,6 +196,23 @@ describe("한 시즌의 유스 육성", () => {
 
     const focusGrowth = growthOf(focusIds);
     const baselineGrowth = growthOf(baselineU21);
+    /**
+     * 멘토링 표본은 **시즌이 끝난 시점에도 사이가 서 있는 선수**만 센다 — 멘토가
+     * 이적·승격으로 빠져 사이가 닫힌 아이의 성장은 이 팔의 몫이 아니다.
+     */
+    const stillMentored = menteeIds.filter((id) => mentorPairOf(state, id) !== null);
+    const mentalGrowthOf = (ids: string[]) =>
+      mean(
+        ids
+          .map((id) => {
+            const player = state.players.find((p) => p.id === id);
+            return player === undefined ? null : mentalSum(player) - mentalBefore.get(id)!;
+          })
+          .filter((d): d is number => d !== null),
+      );
+    const mentoredMental = mentalGrowthOf(stillMentored);
+    const plainMental = mentalGrowthOf(ourReserveU21);
+    const mentoringRows = state.growthLog.filter((g) => g.origin === "mentoring").length;
     /**
      * 임대 표본은 **시즌이 끝난 시점에도 여전히 우리 임대인 선수**만 센다 — 중도
      * 복귀·이적으로 길이 갈린 선수의 성장은 임대의 몫이 아니다.
@@ -214,11 +279,18 @@ describe("한 시즌의 유스 육성", () => {
     const LAZY_AT = 0.95;
     const diligent = baselineU21.filter((id) => (professionalismOf(id) ?? 0) >= DILIGENT_AT);
     const lazy = baselineU21.filter((id) => (professionalismOf(id) ?? 1) <= LAZY_AT);
+    /** 멘토 자격자 — **전환 전의 명단**으로 센다 (아래 전환이 나이와 명단을 바꾼다) */
+    const mentorEligible = state.players.filter(
+      (p) => p.teamId === state.userTeamId && mentorBlock(state, p) === null,
+    ).length;
     /**
      * **다음 여름의 인테이크** — 이 시즌 2군에 누구를 세웠는가가 한 해 뒤 후보의
      * 수와 여지로 돌아온다 (season.md §6 유스 인테이크). 전환 한 번을 더 굴리는 것은
      * 그 되돌아옴이 이 하네스가 이미 만든 2군 시즌 위에서만 보이기 때문이다 —
      * 활용도는 그 시즌 2군 출전 장부에서 나온다.
+     *
+     * ⚠️ **맨 마지막에 굴린다.** 위의 성장·표본은 전부 방금 끝난 시즌의 것이라, 전환이
+     * 명단과 나이를 바꾼 뒤에 세면 다른 시즌을 재게 된다.
      */
     const academyUse = academyUseOf(state, state.userTeamId, state.season);
     transitionSeason(state);
@@ -233,6 +305,12 @@ describe("한 시즌의 유스 육성", () => {
       "무지정 우리 2군 U21 성장": growthOf(ourReserveU21),
       "타 팀 2군 U21 성장": baselineGrowth,
       "집중 육성 격차": focusGrowth - baselineGrowth,
+      "멘토 자격자": mentorEligible,
+      "멘토링 표본": stillMentored.length,
+      "멘토링 성장 로그": mentoringRows,
+      "멘토링 정신축 성장": mentoredMental,
+      "무지정 정신축 성장": plainMental,
+      "멘토링 격차": mentoredMental - plainMental,
       "임대 표본": stillOnLoan.length,
       "임대 U21 성장": loanGrowth,
       "임대처 평균 출전": mean(loanApps),

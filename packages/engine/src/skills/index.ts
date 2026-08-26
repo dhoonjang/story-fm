@@ -24,6 +24,7 @@ import type {
   TrainAttr,
 } from "@story-fm/domain";
 import {
+  ageOf,
   ATTRIBUTE_AXES,
   attributeAxisOf,
   AXIS_KO,
@@ -78,6 +79,17 @@ import {
 import { clampForm, moraleToForm } from "../squad/form";
 import { injuryRiskFor } from "../squad/injury";
 import { DEVELOPMENT_FOCUS_LIMIT, pruneDevelopmentFocus } from "../squad/development";
+import {
+  closeMentorings,
+  MENTEES_PER_MENTOR,
+  mentorBlock,
+  mentorBoost,
+  menteeBlock,
+  menteePairsOf,
+  mentorPairOf,
+  mentorStrength,
+  pruneMentoring,
+} from "../squad/mentoring";
 import { reserveTrainingAxes } from "../squad/training-plan";
 import {
   canRegisterAllFor,
@@ -290,6 +302,12 @@ function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | 
   // 2군에는 완장이 없다 — 라커룸 서열의 후보도 1군뿐이다 (people.md §5-1)
   if (player.isCaptain) player.isCaptain = false;
   if (player.isViceCaptain === true) player.isViceCaptain = undefined;
+  /**
+   * **완장이 빠지듯 멘토도 빠진다** (people.md §5-3) — 라커룸의 아침이 갈렸으므로
+   * 그가 맡던 아이들은 여기서 놓인다. ⚠️ 멘티로서 든 사이는 닫지 않는다: 멘티는 두
+   * 층 어디에도 설 수 있다.
+   */
+  const released = closeMentorings(state, (pair) => pair.mentorId === player.id, "squad");
   pushNarrative(state, `${player.name} 2군 이동`, 2);
   /**
    * **배치에서 빠지는 것까지 결과로 말한다** (→ docs/data/team.md §6). 2군은 배치를
@@ -303,7 +321,12 @@ function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | 
       : dropped?.role === "bench"
         ? " — 매치데이 벤치에서 함께 빠집니다"
         : "";
-  return `${player.name}을(를) 2군으로 이동했습니다${note}${dropPositionTraining(state, player)}`;
+  /** 조용히 빼면 감독이 모른다 — 놓인 아이의 이름까지 결과가 말한다 */
+  const releasedNote =
+    released.length > 0
+      ? ` · 멘토링이 풀렸습니다 (${released.map((pair) => playerName(state, pair.menteeId)).join(", ")})`
+      : "";
+  return `${player.name}을(를) 2군으로 이동했습니다${note}${releasedNote}${dropPositionTraining(state, player)}`;
 }
 
 /**
@@ -469,6 +492,140 @@ export function setDevelopmentFocus(
       head: "집중 육성",
       items: [item({ label: "지정", text: briefNames(players.map((p) => p.name)) })],
     },
+  };
+}
+
+/** 멘토를 고른 근거 한 줄 — 나이와 리더십이 결과 항목에 그대로 선다 (`armbandNote`와 같은 결) */
+function mentorNote(state: GameState, mentor: GamePlayer): string {
+  return `${ageOf(mentor.birthdate, state.date)}세 · 리더십 ${mentor.attributes.leadership}`;
+}
+
+/** 이 짝의 멘토 항 한 조각 — 저장하지 않고 그때그때 다시 매긴다 (people.md §5-3) */
+function menteeNote(state: GameState, mentor: GamePlayer, mentee: GamePlayer): string {
+  return `정신 6축 ×${mentorBoost(mentorStrength(mentor, mentee, state.date)).toFixed(2)}`;
+}
+
+/**
+ * 멘토링 — 감독이 고참에게 유망주를 맡긴다 (→ docs/data/people.md §5-3).
+ *
+ * **목록 교체다** — 집중 육성과 같은 규약(`set_development_focus`). 부를 때마다 그
+ * 멘토의 멘티 전체를 다시 적고, 목록을 비우면 그 멘토의 사이가 다 닫힌다. 더하기·
+ * 빼기를 따로 받으면 감독이 지금 명단을 모른 채 상한에 걸린다.
+ *
+ * 자격은 `mentorBlock`·`menteeBlock` 한 벌이 갖는다 — 반려 문구를 여기서 다시 지으면
+ * 같은 규칙이 자리마다 다른 말로 선다.
+ */
+export function setMentor(
+  state: GameState,
+  input: { mentorId: string; menteeIds?: string[] },
+): SkillResult {
+  /**
+   * **장부를 먼저 추린다** — 스킬과 월간 성장이 같은 문을 지나야 어느 쪽이 먼저 와도
+   * 명단이 같다 (`pruneDevelopmentFocus`가 그런 것과 같은 이유). 나이를 넘긴 멘티가
+   * 남아 있으면 감독이 상한에 걸리지 않을 자리에서 걸린다.
+   */
+  pruneMentoring(state);
+
+  const picked = pickOurPlayer(state, input.mentorId);
+  if (!picked.ok) return picked;
+  const mentor = picked.player;
+  const blocked = mentorBlock(state, mentor);
+  if (blocked) return { ok: false, message: blocked };
+
+  const mentees: GamePlayer[] = [];
+  for (const ref of input.menteeIds ?? []) {
+    const pick = pickOurPlayer(state, ref);
+    if (!pick.ok) return pick;
+    const mentee = pick.player;
+    if (mentee.id === mentor.id) {
+      return { ok: false, message: `${mentor.name}을(를) 자기 자신에게 맡길 수 없습니다` };
+    }
+    const block = menteeBlock(state, mentee);
+    if (block) return { ok: false, message: block };
+    /**
+     * **한 선수는 한 멘토다.** 누구에게 가 있는지를 말해야 감독이 다음 수를 둔다 —
+     * 이름 없이 반려하면 그 아이를 데려오려고 장부를 뒤져야 한다.
+     */
+    const held = mentorPairOf(state, mentee.id);
+    if (held && held.mentorId !== mentor.id) {
+      return {
+        ok: false,
+        message:
+          `${mentee.name}은(는) 이미 ${playerName(state, held.mentorId)}에게 맡겨져 있습니다 — ` +
+          `한 선수는 한 멘토입니다`,
+      };
+    }
+    if (!mentees.some((p) => p.id === mentee.id)) mentees.push(mentee);
+  }
+  if (mentees.length > MENTEES_PER_MENTOR) {
+    return {
+      ok: false,
+      message: `한 멘토는 ${MENTEES_PER_MENTOR}명까지입니다 — 고참 하나의 눈은 거기까지 닿습니다`,
+    };
+  }
+
+  const before = menteePairsOf(state, mentor.id).map((pair) => pair.menteeId);
+  const after = mentees.map((p) => p.id);
+  if (before.length === after.length && before.every((id) => after.includes(id))) {
+    return {
+      ok: true,
+      unchanged: true,
+      message:
+        mentees.length === 0
+          ? `${mentor.name}이(가) 맡은 유망주가 없습니다`
+          : `이미 그 명단입니다 — ${mentor.name}: ${briefNames(mentees.map((p) => p.name))}`,
+    };
+  }
+
+  /**
+   * **그 멘토의 빠진 짝만 닫는다** — `closeMentoringsFor`는 그가 멘티로 든 사이까지
+   * 함께 닫는다. 그리고 닫는 것이지 지우는 것이 아니다: 놓인 아이의 심경이 며칠
+   * 그 줄을 읽는다 (people.md §5-3).
+   */
+  const released = closeMentorings(
+    state,
+    (pair) => pair.mentorId === mentor.id && !after.includes(pair.menteeId),
+    "manager",
+  );
+  state.mentoring ??= [];
+  for (const mentee of mentees) {
+    if (before.includes(mentee.id)) continue;
+    state.mentoring.push({ mentorId: mentor.id, menteeId: mentee.id, since: state.date });
+  }
+
+  const releasedNames = released.map((pair) => playerName(state, pair.menteeId));
+  if (mentees.length === 0) {
+    pushNarrative(state, `멘토링 해제 — ${mentor.name}`, 1);
+    return {
+      ok: true,
+      message: `${mentor.name}이(가) 맡고 있던 유망주를 모두 풀었습니다 — ${releasedNames.join(", ")}`,
+      brief: {
+        head: "멘토링",
+        items: [
+          item({ label: "멘토", text: mentor.name, note: mentorNote(state, mentor) }),
+          item({ label: "해제", text: briefNames(releasedNames) }),
+        ],
+      },
+    };
+  }
+
+  const items: SkillBriefItem[] = [
+    item({ label: "멘토", text: mentor.name, note: mentorNote(state, mentor) }),
+    ...mentees.map((mentee) =>
+      item({ label: "멘티", text: mentee.name, note: menteeNote(state, mentor, mentee) }),
+    ),
+  ];
+  if (releasedNames.length > 0) {
+    items.push(item({ label: "해제", text: briefNames(releasedNames) }));
+  }
+  const names = mentees.map((p) => p.name).join(", ");
+  pushNarrative(state, `멘토링 — ${mentor.name}에게 ${names}`, 1);
+  return {
+    ok: true,
+    message:
+      `${mentor.name}에게 ${names}을(를) 맡겼습니다 — 멘티의 정신 6축 성장이 빨라집니다` +
+      (releasedNames.length > 0 ? ` · ${releasedNames.join(", ")}은(는) 풀렸습니다` : ""),
+    brief: { head: "멘토링", items },
   };
 }
 

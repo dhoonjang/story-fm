@@ -326,7 +326,7 @@ export const SQUAD_LONGEVITY = defineHarness({
  */
 export const YOUTH_DEVELOPMENT = defineHarness({
   id: "youth-development",
-  what: "2군 경기 수 · 출전·집중 육성·임대가 가르는 성장 격차",
+  what: "2군 경기 수 · 출전·집중 육성·멘토링·임대가 가르는 성장 격차",
   doc: "docs/simulation/season.md §2",
   cost: "세계 하나 · 한 시즌 완주 · 수 분",
   // prettier-ignore
@@ -343,6 +343,12 @@ export const YOUTH_DEVELOPMENT = defineHarness({
     { metric: "임대처 평균 출전", role: "guard", min: 2, max: 25, unit: "count", why: "그 구단 1군 경기를 실제로 몇 번 뛰었나 — **성장 배율에 곱할 분(分)이 있는가.** 빌린 구단이 임대 자원에게 치르는 값(로테이션 우선권 · 연속 미출전 상한 `LOAN_REST_LIMIT`)이 닫히면 이 줄이 0 언저리로 내려간다(문이 없던 시절 0.20이었다). 표본이 다섯이고 그중 기량 창 밖으로 나간 아이는 0이라, 하한은 '문이 닫혔다'와 '한둘이 자리를 못 얻었다'를 가르는 자리에 둔다. 상한 25는 그 반대편 — 아카데미 유망주가 1부 클럽의 주전이 되면 그건 임대가 아니라 이적이고 AI 순위표가 임대로 흔들린다" },
     { metric: "경보 전에 뛴 임대", role: "guard", min: 0.4, unit: "ratio", why: "그 구단 경기에서 **가장 긴 연속 미출전**이 `LOAN_BENCH_RUN_ALERT`(4) 미만인 임대의 몫 — 리콜 근거 `no-minutes`가 배경음인지 사건인지를 가른다. 연속 미출전 상한(`LOAN_REST_LIMIT` 3)이 경보 문턱보다 한 칸 앞이므로, 자리를 얻은 임대는 경보가 켜지기 전에 뛴다. **1.0을 요구하지 않는다**: 기량 창(`LOAN_ROTATION_OVR_DROP`) 밖으로 보낸 유망주는 한 경기도 못 뛰어야 하고, 그때 켜지는 경보가 곧 리콜 판단이다 — 다섯 중 둘이 하한이다" },
     { metric: "임대 격차", role: "reference", unit: "score", why: "임대 − 타 팀 기준선. ⚠️ **밴드를 두지 않는다 — 눈금 아래의 값이다.** 한 시즌 U21의 종합 상승이 0.2인데 임대 배율이 1.2~1.3이라 격차의 참값은 0.05 안쪽이고, 종합은 정수라 한 사람의 잡음이 0.45다(표본 다섯이면 부호가 동전이다). 배율 자체가 사는지는 `growth-curve` 단위 테스트가 같은 시드·같은 난수열에서 지키고, **세계가 그 배율에 곱할 분을 주는가**는 위의 `임대처 평균 출전`이 지킨다" },
+    { metric: "멘토 자격자", role: "guard", min: 1, unit: "count", why: "우리 1군에서 `mentorBlock`을 통과하는 사람 수 — 서른 넘고 리더십 `MENTOR_LEADERSHIP_MIN` 이상. **0이면 손잡이가 세계에 존재하지 않는다**: 리더십 축은 꼭대기가 70대 중반이라(people.md §5-3) 하한을 몇 칸만 올려도 자격자가 사라진다. 이 줄이 그 선을 지킨다" },
+    { metric: "멘토링 표본", role: "guard", min: 2, unit: "count", why: "시즌 끝까지 사이가 서 있던 우리 2군 U21 — 자격자 하나가 `MENTEES_PER_MENTOR`(3)까지 데리므로 상한이 셋이다. 둘 아래면 아래 두 줄이 격차가 아니라 한 사람의 잡음이다" },
+    { metric: "멘토링 성장 로그", role: "guard", min: 1, unit: "count", why: "`origin === \"mentoring\"`인 성장 줄 수 — **배율이 실제로 곱해졌다는 결정적 증거다.** 격차가 잡음에 묻히는 표본에서도 이 줄은 0이거나 0이 아니다: 정리(`pruneMentoring`)가 사이를 조용히 닫아 버렸거나 축 가르기가 어긋나면 여기가 먼저 0이 된다" },
+    { metric: "멘토링 정신축 성장", role: "measure", unit: "score", why: "멘토가 붙은 우리 2군 U21의 **정신 6축 합** 상승. 종합이 아니라 축 합인 것은 멘토 항이 닿는 자리가 그 여섯뿐이어서다(season.md §2 멘토링) — 종합으로 읽으면 자리별 가중치가 그 몫을 반으로 접는다" },
+    { metric: "무지정 정신축 성장", role: "measure", unit: "score", why: "같은 층·같은 나이의 배율 없는 우리 2군 U21의 같은 값 — 위 줄의 짝이다" },
+    { metric: "멘토링 격차", role: "measure", unit: "score", why: "멘토링 − 무지정(정신축 합). ⚠️ **밴드를 두지 않는다 — 눈금 아래의 값이다.** 항이 1.05~1.25고 한 시즌 정신 6축 합의 상승이 열 몇 칸이라 참값은 두 칸 안쪽인데, 축마다 정수라 표본 셋의 표준오차가 그만큼이다(부호가 동전이다). 항이 사는지는 `growth-curve` 단위 테스트가 같은 시드·같은 난수열에서 지키고, **세계가 그 항을 실제로 곱하는가**는 위의 `멘토링 성장 로그`가 지킨다 — `임대 격차`와 같은 규약이다" },
     { metric: "성실한 U21 표본", role: "guard", min: 20, unit: "count", why: "아래 줄의 분모 — 배율 없는 타 팀 2군 U21 중 `professionalism` ≥ 1.1. 표본이 줄면 격차가 아니라 잡음이다" },
     { metric: "게으른 U21 표본", role: "guard", min: 20, unit: "count", why: "같은 줄의 반대쪽 — `professionalism` ≤ 0.95" },
     { metric: "직업의식 격차", role: "reference", min: 0, unit: "score", why: "성실 − 게으름. 배율이 없는 표본이라 남는 차이는 원형뿐이다 — 0 이하면 계수가 세계에 닿지 않았다 (people.md §6)" },

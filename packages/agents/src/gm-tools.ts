@@ -62,6 +62,7 @@ import {
   sendOffer,
   setCaptain,
   setDevelopmentFocus,
+  setMentor,
   signYouth,
   setReserveTraining,
   setExploits,
@@ -410,6 +411,19 @@ export function buildGmTools(
           .describe("첫 프로 계약을 줄 유스 후보 — 생략하면 전원 방출. 한 번의 확정이다"),
       }),
       (input) => signYouth(state, input),
+    ),
+    wrap(
+      "set_mentor",
+      descriptions.set_mentor,
+      z.object({
+        mentorId: playerRef.describe("유망주를 맡을 고참 — 1군 30세 이상 · 리더십 55 이상"),
+        menteeIds: z
+          .array(playerRef)
+          .min(1)
+          .optional()
+          .describe("그 멘토가 맡을 23세 이하 선수 — 지정 전체를 다시 적는다. 생략하면 다 푼다"),
+      }),
+      (input) => setMentor(state, input),
     ),
     wrap(
       "set_reserve_training",
