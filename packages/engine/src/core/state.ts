@@ -1543,7 +1543,7 @@ export function ensureSeasonStat(
   state: GameState,
   playerId: string,
   teamId: string,
-  player?: Pick<GamePlayer, "squadNumber">,
+  player?: Pick<GamePlayer, "squadNumber" | "name">,
 ): SeasonStat {
   let stat = state.seasonStats.find(
     (s) => s.gamePlayerId === playerId && s.season === state.season && s.teamId === teamId,
@@ -1556,8 +1556,14 @@ export function ensureSeasonStat(
    * **그 시즌 그 셔츠의 등번호** — 번호 계보가 읽는 유일한 원본이다 (player.md §1.1).
    * 부를 때마다 덮어쓴다: 시즌 중에 번호가 바뀌면 마지막 번호가 그 시즌의 번호다.
    */
-  const number = (player ?? playerById(state, playerId))?.squadNumber;
-  if (number !== undefined) stat.squadNumber = number;
+  const known = player ?? playerById(state, playerId);
+  if (known?.squadNumber !== undefined) stat.squadNumber = known.squadNumber;
+  /**
+   * **그때의 이름** — 은퇴하면 선수가 `state.players`에서 빠져 id로는 더 못 찾는다
+   * (records.ts `SeasonStat.playerName`). 역대 득점왕과 통산 표가 사라진 이름을
+   * 되찾는 유일한 자리라, 등번호와 같은 자리에서 같은 규약으로 덮어쓴다.
+   */
+  if (known?.name !== undefined) stat.playerName = known.name;
   return stat;
 }
 
