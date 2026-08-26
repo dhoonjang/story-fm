@@ -3808,7 +3808,8 @@ export function missionReportCard(state: GameState, missionId: string): MissionR
 export function missionReportLine(state: GameState, missionId: string): string | null {
   const card = missionReportCard(state, missionId);
   if (!card) return null;
-  if (card.candidates.length === 0) return `${card.brief} → 조건에 맞는 선수를 찾지 못했다`;
+  const label = `${card.scope} · ${card.brief}`;
+  if (card.candidates.length === 0) return `${label} → 조건에 맞는 선수를 찾지 못했다`;
   const rows = card.candidates.map((c) =>
     [
       `${c.name} (${c.team}) ${c.age}세 ${c.position}`,
@@ -3819,7 +3820,7 @@ export function missionReportLine(state: GameState, missionId: string): string |
       ...(c.contractUntil ? [`계약 ${c.contractUntil}까지`] : []),
     ].join(" "),
   );
-  return `${card.brief} → 후보 ${card.candidates.length}명: ${rows.join(" / ")}`;
+  return `${label} → 후보 ${card.candidates.length}명: ${rows.join(" / ")}`;
 }
 
 // ── 경기 리포트 — 끝난 경기 하나를 통째로 (match.md §8) ─────────────
