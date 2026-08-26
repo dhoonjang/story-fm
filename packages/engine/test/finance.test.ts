@@ -995,6 +995,47 @@ describe("성적이 돈이 되는 자리", () => {
     expect(two).toBe(cup);
   });
 
+  /**
+   * **우승은 전 구단의 것으로 쌓이므로 AI 구단도 같은 조항을 받는다** (finance.md §5.3).
+   * 유저 팀만 트로피를 적던 시절엔 이 조항이 감독 구단에만 붙어, 우승한 AI 구단이
+   * 다음 시즌 살림에서 아무것도 얻지 못했다.
+   *
+   * AI 구단은 원장을 남기지 않으므로(`recordFinance`) 잰 자리는 **잔고의 변화**다.
+   * 절대액 대신 **UCL 조항과의 비**를 보는 것은 상업 정액이 브랜드 등급에서 나와
+   * 이 테스트가 그 눈금을 다시 적지 않게 하기 위해서다 — 두 조항의 밑이 같다.
+   */
+  it("트로피 조항은 AI 구단에도 붙는다 — 원장이 없을 뿐 조항은 같다", () => {
+    const state = createTestGame(42, "arsenal");
+    const ai = state.teams.find(
+      (t) => t.id !== state.userTeamId && leagueOfTeam(t.id) === "epl",
+    )!.id;
+
+    /** 그달 AI 구단 잔고의 변화 — 월초 정액 항목은 그달에 한 번만 붙는다 */
+    const monthly = (month: string, set: () => void): number => {
+      set();
+      state.date = `${month}-01`;
+      const before = financeOf(state, ai).balance;
+      ensureMonthlyPosted(state);
+      return financeOf(state, ai).balance - before;
+    };
+
+    const bare = monthly("2026-08", () => {
+      state.euroEntrants = [];
+      state.trophies = [];
+    });
+    const ucl = monthly("2026-09", () => {
+      state.euroEntrants = [{ cupId: "ucl", teams: [ai] }];
+    });
+    const trophy = monthly("2026-10", () => {
+      state.euroEntrants = [];
+      state.trophies = [{ season: state.season - 1, competitionId: "epl", teamId: ai }];
+    });
+
+    expect(ucl).toBeGreaterThan(bare);
+    // 트로피 +0.20 대 UCL +0.15 — 같은 상업 정액에 붙는 두 조항의 비다
+    expect((trophy - bare) / (ucl - bare)).toBeCloseTo(0.2 / 0.15, 3);
+  });
+
   it("시즌 성과 보너스는 순위 계단마다 주급 총액의 배수다", () => {
     const state = createTestGame(42, "arsenal");
     const wages = weeklyWagesOf(state, state.userTeamId);
