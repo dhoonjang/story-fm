@@ -94,7 +94,12 @@ import { matchRating } from "../match/ratings";
 import { scoutReportLine } from "../views/views";
 import { pruneDeferredScouts } from "../squad/scouting";
 import { grantManagerXP, settleTactics } from "../skills";
-import { allMatchesDone, endSeason } from "../competition/season";
+import {
+  allMatchesDone,
+  declareRetirements,
+  endSeason,
+  retirementDeclarationDate,
+} from "../competition/season";
 import { cancelTrainingOn, syncDefaultTraining } from "../squad/training-plan";
 import {
   groupOf,
@@ -463,6 +468,14 @@ function dailyTick(
       for (const p of candidates) easeProneness(p, exposure);
     }
   }
+
+  /**
+   * **은퇴 예고** — 1월 1일, 세계 전체가 같은 규칙으로 (season.md §6).
+   *
+   * 무직이어도 돈다: 판정은 세계의 일이고, 감독이 없다고 서른다섯이 한 시즌을 더
+   * 뛰지는 않는다. 우리 팀 이름만 다이제스트에 선다.
+   */
+  if (state.date === retirementDeclarationDate(state.season)) declareRetirements(state, digest);
 
   // 월초 정산 — 지난달 마감(재정 보고서) + 이번 달 정액 항목 (finance.ts).
   // 게임/시즌이 시작하는 7월 1일엔 tick이 돌지 않으므로 첫 tick에서 보정한다

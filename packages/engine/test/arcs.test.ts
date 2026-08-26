@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GamePlayer, Injury, MatchRecord, NarrativeArc, Negotiation } from "@story-fm/domain";
-import { ARC_TITLE_MAX } from "@story-fm/domain";
+import { ARC_TITLE_MAX, CONDITION_BASE } from "@story-fm/domain";
 import {
   MAX_ACTIVE_ARCS,
   activeArcs,
@@ -46,6 +46,8 @@ const player = (id: string, patch: Partial<GamePlayer> = {}): GamePlayer =>
     teamId: TEAM,
     birthdate: bornAt(26),
     attributes: { overall: 75 },
+    // 상태 칸은 비워 두지 않는다 — 판정이 읽는 자리라 없으면 그 줄에서 터진다
+    state: { form: 0, condition: CONDITION_BASE },
     ...patch,
   }) as unknown as GamePlayer;
 

@@ -31,6 +31,7 @@ import {
   seasonYear,
   windowOpenOn,
 } from "../competition/calendar";
+import { withdrawRetirement } from "../competition/season";
 import {
   AGENT_FEE_RATE,
   budgetFreezeLabel,
@@ -2355,6 +2356,13 @@ function executeRenewal(
    * 갈아 끼워진 이 자리에서만 풀린다.
    */
   const freed = clearIssueReason(state, player.id, "contract");
+  /**
+   * **재계약이 예고를 거둔다 — 나이 상한 안에서** (season.md §6). 감독이 한 시즌을 더
+   * 설득한 것이 장부에 남지 않으면 1월의 예고가 7월에 그대로 집행돼, 방금 도장을 찍은
+   * 선수가 그 계약을 한 경기도 쓰지 않고 그만둔다. 판정일에 이미 `RETIRE_AGE`면 거둘 수
+   * 없다 — 서른다섯의 몸을 계약서가 되돌리지는 못한다.
+   */
+  const stays = withdrawRetirement(state, player);
   pushNarrative(
     state,
     `${player.name} 재계약 — 주급 ${formatMoney(agreed.weeklyWage)} ${agreed.contractYears}년`,
@@ -2366,7 +2374,8 @@ function executeRenewal(
       `${player.name} 재계약 완료 — 주급 ${formatMoney(agreed.weeklyWage)}, ` +
       `${contractUntil(state.date, agreed.contractYears)}까지${statusLabel(squadStatus)}. ` +
       "주급 총액이 늘어납니다" +
-      (freed ? " · 계약 불만이 풀렸습니다" : ""),
+      (freed ? " · 계약 불만이 풀렸습니다" : "") +
+      (stays ? " · 은퇴 예고를 거뒀습니다" : ""),
     brief: {
       head: "재계약",
       items: [
@@ -3527,6 +3536,8 @@ export function runAiRenewals(state: GameState, digest: string[]): void {
        * (`squadStatusOf`) 언제나 지금의 서열이다.
        */
     });
+    // 남의 구단의 재계약도 예고를 거둔다 — 규칙이 하나여야 세계가 같은 세계다 (season.md §6)
+    withdrawRetirement(state, player);
 
     /**
      * **우리가 노리던 선수라면 그 자리에서 끝난다.** 재계약은 협상 조건이
