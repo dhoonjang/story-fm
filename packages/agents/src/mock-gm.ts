@@ -22,6 +22,7 @@ import {
   applyTeamTalk,
   applyTalkToPlayer,
   pendingApproach,
+  pendingInterview,
   pendingPress,
   respondToApproach,
   respondToMedia,
@@ -635,7 +636,35 @@ function computeMockGmTurn(
       };
     }
 
-    // ② 흥정 — 수락보다 먼저 본다. "아스날 조건 더 받아내자"의 구단 이름은 수락이 아니다
+    /**
+     * ② 면접 — 마주 앉아 있으면 그 자리가 먼저다 (career.md §5.1). 답이 제안 조건을
+     * 정하므로 다른 분기가 이 자리를 넘어가면 감독은 문만 잃는다.
+     */
+    const interview = pendingInterview(state);
+    if (interview) {
+      const stance = /비판|문제|형편없|실망/u.test(msg)
+        ? ("criticise" as const)
+        : /요구|조건|더 받|올려|자신/u.test(msg)
+          ? ("bold" as const)
+          : /말을 아끼|노코멘트|글쎄/u.test(msg)
+            ? ("deflect" as const)
+            : /감싸|선수단|이 선수/u.test(msg)
+              ? ("defend" as const)
+              : ("own" as const);
+      const input = { stance } as const;
+      const result = respondToApproach(state, input);
+      recordCall(calls, "respond_to_approach", result, { input, line: 2 });
+      return {
+        text: [
+          `@: *${teamName(interview.teamId ?? "")} 회의실, 구단주가 서류를 덮는다*`,
+          `@${interview.speakerId}: ${pressFactText(interview.facts[0]!)}`,
+          `@: *${result.message}*`,
+        ].join("\n"),
+        toolCalls: calls,
+      };
+    }
+
+    // ③ 흥정 — 수락보다 먼저 본다. "아스날 조건 더 받아내자"의 구단 이름은 수락이 아니다
     const haggling = /흥정|되불|더 받|올려|깎|조건을 더|연봉|예산/u.test(msg);
     if (haggling && (named ?? offers[0])) {
       const offer = named ?? offers[0]!;
@@ -656,7 +685,7 @@ function computeMockGmTurn(
       };
     }
 
-    // ③ 수락 — 감독이 받겠다고 했거나 구단을 지목했을 때만
+    // ④ 수락 — 감독이 받겠다고 했거나 구단을 지목했을 때만
     const taking = /수락|받겠|받아|가겠|맡겠|부임|간다|하겠/u.test(msg);
     const target = named ?? (taking ? offers[0] : undefined);
     if (target) {

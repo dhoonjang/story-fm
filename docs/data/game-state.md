@@ -296,7 +296,7 @@ row, 지난 일 = 그대로 이력.**
 | ↳ `PitchClaim`                        | 설득 논거 10종 — 코어가 사실 대조한다                                                                     | `domain/persuasion.ts` |
 | `pressConferences` `PressConference`  | 기자회견 — 열린 시점과 답한 시점이 갈린다                                                                 | `domain/press.ts`      |
 | ↳ `PressFact`                         | **사실 카드** (질문 문장이 아니다) — 기자는 이 밖을 못 묻는다                                             | `domain/press.ts`      |
-| `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리 (people.md §8)                                                 | `domain/press.ts`      |
+| `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리, 그리고 감독이 두드려 연 면접 (people.md §8)                   | `domain/press.ts`      |
 | `approachPressure` `ApproachPressure` | 압력 눈금 — 주제별 누적과 계단. 파생할 수 없는 유일한 값                                                  | `domain/press.ts`      |
 | `pressLeaks` `PressLeak`              | 언론 유출 — 다음 회견이 실어 갈 때까지만 남는다 (§8 계단 4)                                               | `domain/press.ts`      |
 | `pressSackings` `PressSacking`        | 라이벌 구단의 경질 — 다음 회견이 실어 갈 때까지만 남는다                                                  | `domain/press.ts`      |

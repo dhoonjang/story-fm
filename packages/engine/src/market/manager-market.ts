@@ -3,6 +3,7 @@ import { leagueOfTeamIn, leagueSizeIn } from "../competition/promotion";
 import { tierOfTeamIn } from "../core/club-tier";
 import { positionAt, relegationLine } from "../core/league-shape";
 import {
+  generateOwner,
   inventPersonName,
   occupiedPersonNames,
   ownerOf,
@@ -17,31 +18,54 @@ import { syncDefaultTraining } from "../squad/training-plan";
 import { expirePendingPress, openAppointmentPress } from "../club/press";
 import { derbyOf } from "../data/derbies";
 import { clearClubVision, standClubVision } from "../club/vision";
-import { payManagerSeverance, recordFinance } from "../club/finance";
+import {
+  annualRevenueEstimate,
+  payManagerSeverance,
+  recordFinance,
+  wageRatioTone,
+} from "../club/finance";
 import { spendFromWallet, walletOf } from "../club/manager-wallet";
 import {
   AI_MANAGER_RATING_FALLBACK,
+  APPROACH_CHANNEL_LABEL,
+  APPROACH_PATIENCE_DAYS,
   MANAGER_TERMS_BY_TIER,
   RENEWAL_NOTICE_DAYS,
   USER_WARNINGS_BEFORE_SACK,
+  ageOf,
+  approachContextText,
   boardExpectationText,
   clampCondition,
   formatMoney,
+  naturalPositionOf,
+  pressFactText,
+  type Approach,
+  type ApproachContext,
   type Dismissal,
+  type GamePlayer,
   type GameTeam,
   type ManagerContract,
   type ManagerOffer,
+  type ManagerVacancy,
+  type PressFact,
+  type PressStance,
 } from "@story-fm/domain";
 import {
+  activeContract,
   clampReputation,
+  expirePendingApproach,
   financeOf,
+  firstTeamPlayers,
   managedTeamId,
+  pendingApproach,
   playersOf,
+  pushApproach,
   pushNarrative,
   teamName,
   teamNameIn,
   teamShortName,
   teamShortNameIn,
+  weeklyWagesOf,
   type GameState,
   type SkillBriefItem,
 } from "../core/state";
@@ -290,6 +314,16 @@ export function openManagerOffers(state: GameState): ManagerOffer[] {
     .sort((a, b) => a.expiresOn.localeCompare(b.expiresOn) || a.id.localeCompare(b.id));
 }
 
+/**
+ * 제안에 걸린 기대 한 줄 — **코드가 원본이고 문장은 폴백이다** (career.md §5.1).
+ * 새 제안은 갈래 코드만 적으므로, 옛 세이브의 문장을 먼저 읽으면 새 제안이 빈칸으로 선다.
+ */
+function offerExpectation(offer: ManagerOffer): string {
+  return offer.expectationCode
+    ? boardExpectationText(offer.expectationCode, offer.target)
+    : `${offer.expectation ?? "-"}(${offer.target}위)`;
+}
+
 /** 기한이 지난 제안은 사라진다 — 답하지 않은 것도 답이다 */
 function expireStaleOffers(state: GameState, digest: string[]): void {
   for (const offer of state.managerOffers ?? []) {
@@ -343,8 +377,8 @@ export function offerVacancy(
 ): boolean {
   const dismissal = state.dismissal;
   if (!dismissal) return false;
-  // 감독이 답할 자리는 한 번에 하나다
-  if (openManagerOffers(state).length > 0) return false;
+  // 감독이 답할 자리는 한 번에 하나다 — 열린 제안도, 답을 기다리는 면접도 그 하나다
+  if (openManagerOffers(state).length > 0 || pendingInterview(state)) return false;
   const offers = state.managerOffers ?? [];
   /**
    * 한 번 부른 구단은 다시 부르지 않는다 — 단 **이번 무직 기간** 안에서다.
@@ -410,6 +444,12 @@ export function runManagerMarket(state: GameState, digest: string[]): boolean {
 
   expireStaleOffers(state, digest);
   pruneVacancies(state);
+  /**
+   * **면접도 사흘이면 닫힌다** (career.md §5.1). 무직인 동안에는 `tickApproaches`가
+   * 돌지 않으므로 다가옴의 만료가 이 자리를 대신 본다 — 안 그러면 감독이 답하지 않은
+   * 자리가 세이브에 영영 남아 다음 노크를 막는다.
+   */
+  const closed = expireInterview(state, digest);
 
   for (const team of state.teams) {
     if (sacked >= SACKINGS_PER_DAY) break;
@@ -455,7 +495,12 @@ export function runManagerMarket(state: GameState, digest: string[]): boolean {
     // 그 자리가 무직 감독의 것이 될 수도 있다
     if (!offered) offered = offerVacancy(state, team.id, standing.position, digest);
   }
-  return offered;
+  /**
+   * **마주 앉은 사람 앞에서는 시계가 선다** (people.md §8 · career.md §5.1) — 자리가
+   * 사흘이면 사라지므로, 시간이 그 위를 지나가면 감독은 답할 기회 없이 문만 잃는다.
+   * 닫힌 날도 하루 세운다: 그 사실을 감독이 모르는 채 지나가면 안 된다.
+   */
+  return offered || closed || pendingInterview(state) !== null;
 }
 
 /**
@@ -518,6 +563,12 @@ function leaveClub(state: GameState, card: Dismissal, channel: string): void {
   for (const offer of state.managerOffers ?? []) {
     if (offer.status === "open") offer.status = "expired";
   }
+  /**
+   * **감독실 앞에 서 있던 사람도 돌아간다** (people.md §8 · career.md §5.1) — 감독이
+   * 무시한 것이 아니라 물을 구단이 없어진 것이라 대가가 없다. 그대로 두면 무직인
+   * 감독의 문 앞에 앞 구단 선수가 사흘째 서 있고, 그 자리가 면접이 설 문을 막는다.
+   */
+  expirePendingApproach(state);
 }
 
 /**
@@ -982,7 +1033,7 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
   return {
     ok: true,
     message:
-      `${name} 감독으로 부임했습니다 (${state.date}) — 보드의 기대는 ${offer.expectation},` +
+      `${name} 감독으로 부임했습니다 (${state.date}) — 보드의 기대는 ${offerExpectation(offer)},` +
       ` 지금 순위는 ${offer.position ?? "-"}위입니다.` +
       ` 계약은 연봉 ${formatMoney(salary)}에 ${contract.until}까지` +
       (pledge > 0 ? `, 이적 예산 ${formatMoney(pledge)}이 약속대로 더해졌습니다` : `입니다`),
@@ -990,7 +1041,7 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
     brief: {
       head: "부임",
       items: [
-        item({ label: "구단", text: name, note: `기대 ${offer.expectation}` }),
+        item({ label: "구단", text: name, note: `기대 ${offerExpectation(offer)}` }),
         item({ label: "연봉", text: formatMoney(salary), note: `${contract.until}까지` }),
         ...(pledge > 0
           ? [item({ label: "이적 예산", text: formatMoney(pledge), delta: pledge })]
@@ -1087,12 +1138,307 @@ export function counterManagerOffer(
   };
 }
 
+// ── 감독직 면접 ────────────────────────────────────────────────
+//
+// **노크가 문턱을 넘으면 제안이 아니라 자리가 선다** (career.md §5.1). 구단주가 마주
+// 앉아 그 구단의 사실을 내놓고, 감독의 답(스탠스)을 아래 표가 읽어 조건을 정한다 —
+// 판정형이다: 코어가 앵커(기대·공석·재정 등급)를 박고 LLM은 스탠스 하나만 정하며
+// 코어가 흥정의 천장으로 자른다 (prompts.md §2).
+//
+// 자리를 여는 것도 닫는 것도 여기 있는 이유는 하나다 — **이 자리가 만드는 것이
+// `ManagerOffer`**라서다. 다가옴의 장부 셋(`pendingApproach`·`pushApproach`·
+// `expirePendingApproach`)만 `core/state`에서 가져다 쓴다 (AGENTS.md §5).
+
+/**
+ * 면접의 계단 — **고정이다.** 압력도 사다리도 없는 자리라 이 값이 하는 일은 서사
+ * 눈금 하나뿐이고, 폭은 쓰이지 않는다: 면접은 어떤 축도 옮기지 않는다.
+ */
+const INTERVIEW_STEP = 3;
+
+/** 이적 예산 등급을 가르는 리그 안 삼분위 — 위 1/3 · 가운데 · 아래 1/3 */
+const BUDGET_TERTILE = 1 / 3;
+
+/** 주급을 연 수입과 견주는 자 — 비전의 재정 항목과 같은 결이다 (career.md §5) */
+const WEEKS_PER_YEAR = 52;
+
+/** 답이 여는 문 — 조건을 올려 받는가, 기본인가, 닫히는가 (career.md §5.1) */
+type InterviewTerms = "raised" | "base" | "closed";
+
+/**
+ * **스탠스 → 조건.** 구단의 처지를 받는 답은 기본 조건으로, 조건을 걸고 오는 답은
+ * 흥정의 천장까지, 보드 앞에서 구단을 깎거나 말을 아낀 답은 문이 닫힌다.
+ *
+ * `bold`가 여기서 얻는 것은 `counterHeadroom`의 천장과 같은 값이다 — 흥정을 미리
+ * 당겨 쓴 것이라 `counteredOn`이 그날로 서고 되부를 기회는 남지 않는다.
+ */
+const INTERVIEW_TERMS: Record<PressStance, InterviewTerms> = {
+  own: "base",
+  defend: "base",
+  bold: "raised",
+  criticise: "closed",
+  deflect: "closed",
+};
+
+/** 면접 카드가 화면에서 서는 이름 — 다섯 줄이 전부 「보드」이면 무엇을 읽는지가 사라진다 */
+const INTERVIEW_FACT_KO: Partial<Record<PressFact["kind"], string>> = {
+  standing: "자리",
+  vacancy: "전임",
+  "key-player": "선수단",
+  "finance-grade": "재정",
+};
+
+/** 답을 기다리는 면접 — 무직인 동안 열릴 수 있는 유일한 자리다 */
+export function pendingInterview(state: GameState): Approach | null {
+  const open = pendingApproach(state);
+  return open?.topic === "interview" ? open : null;
+}
+
+/** 이번 무직 기간에 이미 마주 앉은 구단인가 — 같은 문을 두 번 두드릴 수는 없다 */
+function interviewedSince(state: GameState, teamId: string, since: string): boolean {
+  return (state.approaches ?? []).some(
+    (a) => a.topic === "interview" && a.teamId === teamId && a.date >= since,
+  );
+}
+
+/**
+ * 그 선수단의 중심 — **1군 최고 종합 자원.** 부임 회견이 짚는 것과 같은 카드다
+ * (people.md §4). 감독이 그 이름을 부를 수 있어야 면접이 「이 선수단을 어떻게
+ * 쓰겠는가」의 자리가 된다.
+ *
+ * ⚠️ `about`을 걸지 않는다 — 아직 남의 구단 선수라 감독의 답이 그의 사기에 닿지
+ * 않는다. 이름은 카드의 `name`이 든다.
+ */
+function keyPlayerOf(state: GameState, teamId: string): PressFact | null {
+  const best = firstTeamPlayers(state, teamId).reduce<GamePlayer | null>(
+    (top, p) => (top === null || p.attributes.overall > top.attributes.overall ? p : top),
+    null,
+  );
+  if (!best) return null;
+  const contract = activeContract(state, best.id);
+  return {
+    kind: "key-player",
+    data: {
+      name: best.name,
+      tags: [naturalPositionOf(best).position],
+      values: {
+        age: ageOf(best.birthdate, state.date),
+        ...(contract ? { contractDays: Math.max(0, diffDays(state.date, contract.until)) } : {}),
+      },
+    },
+    about: null,
+    sharp: false,
+  };
+}
+
+/**
+ * 재정 두 줄 — **등급이지 숫자가 아니다** (career.md §5.1). 아직 그 구단의 사람이
+ * 아니라 장부를 열어 보여 주지 않는다.
+ *
+ * 급여 비중은 재정 보고서와 **같은 구간표**(`wageRatioTone`)를 읽고, 이적 예산은 그
+ * 리그 안에서 선 자리를 삼분위로 가른다 — 절대액은 리그마다 자릿수가 달라 등급이
+ * 되지 못한다.
+ */
+function financeGradeFacts(state: GameState, teamId: string): PressFact[] {
+  const facts: PressFact[] = [];
+  const revenue = annualRevenueEstimate(state, teamId);
+  if (revenue > 0) {
+    const ratio = (weeklyWagesOf(state, teamId) * WEEKS_PER_YEAR) / revenue;
+    facts.push({
+      kind: "finance-grade",
+      data: { tags: ["wage-share", wageRatioTone(ratio)] },
+      about: null,
+      // 급여가 수입을 잡아먹는 구단은 감독이 첫날 알아야 하는 사실이다
+      sharp: wageRatioTone(ratio) !== "ok",
+    });
+  }
+  const league = leagueOfTeamIn(state, teamId);
+  const budgets = state.finances
+    .filter((f) => leagueOfTeamIn(state, f.teamId) === league)
+    .map((f) => f.transferBudget)
+    .sort((a, b) => a - b);
+  const mine = state.finances.find((f) => f.teamId === teamId);
+  if (mine && budgets.length >= 3) {
+    const rank = budgets.filter((b) => b < mine.transferBudget).length / budgets.length;
+    const grade = rank >= 1 - BUDGET_TERTILE ? "rich" : rank < BUDGET_TERTILE ? "tight" : "mid";
+    facts.push({
+      kind: "finance-grade",
+      data: { tags: ["transfer-budget", grade] },
+      about: null,
+      sharp: false,
+    });
+  }
+  return facts;
+}
+
+/**
+ * **면접 자리를 연다** — 노크가 문턱을 넘은 그 자리에서 (career.md §5.1).
+ *
+ * 다가옴에서 **세계가 아니라 감독이 여는 유일한 자리**라 소음의 문 넷을 지나지
+ * 않는다: 감독 자신이 두드린 문이고, 무직인 동안에는 압력이 여는 자리도 회견도
+ * 서지 않는다. 문은 `applyForManagerJob`이 이미 본 둘뿐이다 — 열린 제안, 열린 면접.
+ */
+function openInterview(state: GameState, vacancy: ManagerVacancy): Approach {
+  const teamId = vacancy.teamId;
+  const expectation = boardExpectation(state, teamId);
+  const facts: PressFact[] = [
+    {
+      kind: "standing",
+      data: { values: { rank: expectation.target }, tags: ["board-target", expectation.code] },
+      about: null,
+      sharp: true,
+    },
+    {
+      kind: "vacancy",
+      data: {
+        values: {
+          days: Math.max(0, diffDays(vacancy.on, state.date)),
+          ...(vacancy.position === undefined ? {} : { position: vacancy.position }),
+        },
+      },
+      about: null,
+      sharp: true,
+    },
+  ];
+  const key = keyPlayerOf(state, teamId);
+  if (key) facts.push(key);
+  facts.push(...financeGradeFacts(state, teamId));
+
+  const contextCard: ApproachContext = {
+    code: "interview",
+    ...(vacancy.position === undefined ? {} : { value: vacancy.position }),
+    limit: expectation.target,
+  };
+  const approach: Approach = {
+    id: `approach-interview-${teamId}-${state.date}`,
+    date: state.date,
+    channel: "owner",
+    topic: "interview",
+    // 우리 구단주가 아니라 **마주 앉은 쪽**의 사람이다 (people.md §8)
+    speakerId: generateOwner(state.seed, teamId).characterId,
+    about: null,
+    teamId,
+    contextCard,
+    facts,
+    step: INTERVIEW_STEP,
+    status: "pending",
+  };
+  pushApproach(state, approach);
+  pushNarrative(state, `${teamNameIn(state, teamId)} 감독직 면접`, 5);
+  return approach;
+}
+
+/**
+ * 사흘이 지난 면접은 닫힌다 — **대가 없이** (career.md §5.1). 평판도 사이도 옮기지
+ * 않는 자리라 남는 것은 그 구단의 문이 이번 무직 기간에 다시 열리지 않는다는 사실뿐이다.
+ *
+ * @returns 오늘 닫았으면 true — tick이 그 하루를 세워 감독에게 알린다
+ */
+function expireInterview(state: GameState, digest: string[]): boolean {
+  const open = pendingInterview(state);
+  if (!open || diffDays(open.date, state.date) < APPROACH_PATIENCE_DAYS) return false;
+  open.status = "expired";
+  const name = teamNameIn(state, open.teamId ?? "");
+  digest.push(`💼 ${name}와의 면접이 답 없이 지나갔다 — 그 자리는 닫혔다`);
+  pushNarrative(state, `${name} 감독직 면접 무응답`, 4);
+  return true;
+}
+
+/**
+ * **면접의 답이 조건이 된다** (career.md §5.1) — `respondToApproach`가 자리를 닫은
+ * 뒤에 부른다. 표가 문을 닫으면 제안이 서지 않고, 열면 노크의 조건이 선다.
+ */
+export function settleInterview(
+  state: GameState,
+  approach: Approach,
+  stance: PressStance | null,
+): SkillResult {
+  const teamId = approach.teamId ?? "";
+  const name = teamNameIn(state, teamId);
+  const terms = stance === null ? "closed" : INTERVIEW_TERMS[stance];
+  if (terms === "closed") {
+    pushNarrative(state, `${name} 감독직 면접 결렬`, 4);
+    return {
+      ok: true,
+      tone: "bad",
+      message: `${name}는 제안 없이 자리를 닫았습니다 — 보드는 확신을 얻지 못했습니다`,
+      brief: { head: "감독직 면접", items: [item({ label: name, text: "제안 없음" })] },
+    };
+  }
+
+  const tier = tierOfTeamIn(state, teamId);
+  const base = MANAGER_TERMS_BY_TIER[tier];
+  const expectation = boardExpectation(state, teamId);
+  /**
+   * 지원한 쪽이라 연봉은 기본의 0.85배다 (`KNOCK_SALARY_RATE`) — 그 위에서만
+   * `bold`가 흥정의 천장까지 올린다. 두 손잡이가 곱해지는 것이 아니라 순서대로 선다.
+   */
+  const reputation = (state.manager.reputation.board + state.manager.reputation.media) / 2;
+  const lift = terms === "raised" ? 1 + counterHeadroom(reputation, tier) : 1;
+  const salary = Math.round(base.salary * KNOCK_SALARY_RATE * lift);
+  const budgetPledge = Math.round(base.budgetPledge * lift);
+  const position = approach.contextCard?.value;
+
+  state.managerOffers = [
+    ...(state.managerOffers ?? []),
+    {
+      id: `mgr-offer-${teamId}-${state.date}`,
+      teamId,
+      madeOn: state.date,
+      expiresOn: addDays(state.date, OFFER_DAYS),
+      tier,
+      ...(position === undefined ? {} : { position }),
+      target: expectation.target,
+      expectationCode: expectation.code,
+      salary,
+      years: base.years,
+      budgetPledge,
+      via: "knock",
+      // 미리 당겨 쓴 흥정은 되부를 기회를 남기지 않는다
+      ...(terms === "raised" ? { counteredOn: state.date } : {}),
+      status: "open",
+    },
+  ];
+  pushNarrative(state, `${name} 감독직 제안 (면접)`, 5);
+  return {
+    ok: true,
+    tone: "good",
+    message:
+      `${name}가 제안으로 답했습니다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)},` +
+      ` 연봉 ${formatMoney(salary)}·${base.years}년·이적 예산 약속 ${formatMoney(budgetPledge)}.` +
+      (terms === "raised"
+        ? ` 자리에서 조건을 불렀으므로 흥정은 여기까지입니다 — 남은 것은 수락 여부입니다.`
+        : ` 흥정은 한 차례 남아 있습니다.`) +
+      ` ${OFFER_DAYS}일 안에 답해야 합니다`,
+    brief: {
+      head: "감독직 면접",
+      items: [
+        item({
+          label: name,
+          text: "제안",
+          note: boardExpectationText(expectation.code, expectation.target),
+        }),
+        item({
+          label: "연봉",
+          text: formatMoney(salary),
+          note: terms === "raised" ? `${base.years}년 · 천장까지` : `${base.years}년`,
+        }),
+        item({ label: "이적 예산 약속", text: formatMoney(budgetPledge) }),
+        item({ label: "흥정", text: terms === "raised" ? "소진" : "한 차례 남음" }),
+      ],
+    },
+  };
+}
+
 /**
  * **노크 — 무직 감독이 공석에 먼저 지원한다** (career.md §5.1).
  *
  * 공석 명부(`state.managerVacancies`)에 있는 구단만 두드릴 수 있고, 평판 문턱은
  * 제안과 같은 표(`OFFER_REPUTATION_GATE`)다. 확률이 없다 — 문은 열리거나 안
- * 열리거나다. 성사된 제안은 연봉이 기본의 0.85배다: 아쉬운 쪽이 깎인다.
+ * 열리거나다.
+ *
+ * ⚠️ **문턱을 넘어도 제안이 서지는 않는다.** 그 자리에 서는 것은 **면접**이고,
+ * 조건은 감독이 구단주의 물음에 어떻게 답하느냐가 정한다 (`settleInterview`).
+ * 공석이 먼저 부르는 길(`offerVacancy`)만 그대로 제안이다 — 부른 쪽이 아쉽다.
  *
  * @param teamRef 구단 id 또는 이름·약칭
  */
@@ -1105,6 +1451,13 @@ export function applyForManagerJob(state: GameState, teamRef: string): SkillResu
     return {
       ok: false,
       message: "열린 제안이 있는 동안에는 지원할 수 없습니다 — 답할 자리는 한 번에 하나입니다",
+    };
+  }
+  const sitting = pendingInterview(state);
+  if (sitting) {
+    return {
+      ok: false,
+      message: `${teamNameIn(state, sitting.teamId ?? "")}와의 면접이 아직 열려 있습니다 — 답할 자리는 한 번에 하나입니다`,
     };
   }
   pruneVacancies(state);
@@ -1126,7 +1479,10 @@ export function applyForManagerJob(state: GameState, teamRef: string): SkillResu
     };
   }
   if (
-    (state.managerOffers ?? []).some((o) => o.madeOn >= dismissal.on && o.teamId === vacancy.teamId)
+    (state.managerOffers ?? []).some(
+      (o) => o.madeOn >= dismissal.on && o.teamId === vacancy.teamId,
+    ) ||
+    interviewedSince(state, vacancy.teamId, dismissal.on)
   ) {
     return {
       ok: false,
@@ -1160,45 +1516,30 @@ export function applyForManagerJob(state: GameState, teamRef: string): SkillResu
     };
   }
 
-  const expectation = boardExpectation(state, vacancy.teamId);
-  const terms = MANAGER_TERMS_BY_TIER[tier];
-  const salary = Math.round(terms.salary * KNOCK_SALARY_RATE);
-  state.managerOffers = [
-    ...(state.managerOffers ?? []),
-    {
-      id: `mgr-offer-${vacancy.teamId}-${state.date}`,
-      teamId: vacancy.teamId,
-      madeOn: state.date,
-      expiresOn: addDays(state.date, OFFER_DAYS),
-      tier,
-      ...(vacancy.position !== undefined ? { position: vacancy.position } : {}),
-      target: expectation.target,
-      expectationCode: expectation.code,
-      salary,
-      years: terms.years,
-      budgetPledge: terms.budgetPledge,
-      via: "knock",
-      status: "open",
-    },
-  ];
-  pushNarrative(state, `${teamNameIn(state, vacancy.teamId)} 감독직 제안 (지원)`, 5);
+  /**
+   * 문이 열렸다 — **구단주가 마주 앉는다.** 제안이 아니라 자리다 (career.md §5.1).
+   * 사실 카드를 결과에 실어 보내는 것은 이 턴에 GM이 그 장면을 쓸 수 있어야 하기
+   * 때문이다: 스냅샷의 `<approach>`는 다음 턴에야 선다.
+   */
+  const approach = openInterview(state, vacancy);
+  const owner = generateOwner(state.seed, vacancy.teamId);
+  const line = approachContextText(approach.contextCard!, {
+    subject: teamNameIn(state, vacancy.teamId),
+  });
   return {
     ok: true,
     tone: "good",
     message:
-      `${teamNameIn(state, vacancy.teamId)}가 제안으로 답했습니다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)},` +
-      ` 연봉 ${formatMoney(salary)}·${terms.years}년·이적 예산 약속 ${formatMoney(terms.budgetPledge)}.` +
-      ` 지원한 쪽이라 연봉은 기본보다 짭니다. ${OFFER_DAYS}일 안에 답해야 합니다`,
+      `${teamNameIn(state, vacancy.teamId)}가 면접 자리를 열었습니다 —` +
+      ` ${owner.name}(${APPROACH_CHANNEL_LABEL.owner})이(가) 마주 앉습니다 (${line}).` +
+      ` 감독의 답이 제안 조건을 정하고, ${APPROACH_PATIENCE_DAYS}일 안에 답하지 않으면 자리는 닫힙니다`,
     brief: {
-      head: "감독직 지원",
+      head: "감독직 면접",
       items: [
-        item({
-          label: teamNameIn(state, vacancy.teamId),
-          text: "제안",
-          note: boardExpectationText(expectation.code, expectation.target),
-        }),
-        item({ label: "연봉", text: formatMoney(salary), note: `${terms.years}년` }),
-        item({ label: "이적 예산 약속", text: formatMoney(terms.budgetPledge) }),
+        item({ label: teamNameIn(state, vacancy.teamId), text: owner.name, note: line }),
+        ...approach.facts.map((f) =>
+          item({ label: INTERVIEW_FACT_KO[f.kind] ?? "보드", text: pressFactText(f) }),
+        ),
       ],
     },
   };

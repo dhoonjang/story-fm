@@ -288,7 +288,7 @@ export function buildGmTools(
       ...(context ? { line: writtenLines(context.text) } : {}),
     });
   /**
-   * **무직인 감독이 부를 수 있는 조작 도구는 셋뿐이다** (career.md §5.1).
+   * **무직인 감독이 부를 수 있는 조작 도구는 넷뿐이다** (career.md §5.1).
    *
    * 경질돼도 `userTeamId`는 옛 구단을 가리키므로(그 구단의 장부는 계속 돌아야
    * 한다) 막지 않으면 모델은 남의 구단의 라인업을 짜고 남의 선수를 팔 수 있다.
@@ -296,11 +296,16 @@ export function buildGmTools(
    *
    * 기자회견도 여기서 막힌다: 미디어 평판이 곧 다음 자리의 문턱이라
    * (`OFFER_REPUTATION_GATE`) 무직 중에 회견을 반복하는 것이 승진 경로가 된다.
+   *
+   * ⚠️ **찾아온 사람에게 답하는 것은 열려 있다** — 무직에게 열릴 수 있는 다가옴은
+   * 감독직 면접 하나뿐이고(경질이 앞 구단의 자리를 그날 만료로 닫는다), 그 답이 곧
+   * 제안 조건이라 막으면 면접이 답할 수 없는 자리가 된다.
    */
   const OUT_OF_WORK_TOOLS = new Set([
     "accept_manager_offer",
     "counter_manager_offer",
     "apply_manager_job",
+    "respond_to_approach",
   ]);
   const wrap = <T>(
     name: string,
