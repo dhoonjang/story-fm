@@ -1,7 +1,7 @@
 import type { GamePlayer, InjurySeverity } from "@story-fm/domain";
 // 성향의 바닥·천장은 세이브 스키마와 같은 상수를 읽는다 (player.md §5.3)
 import { INJURY_PRONENESS_MAX, INJURY_PRONENESS_MIN } from "@story-fm/domain";
-import { INJURY_PER_MATCH } from "@story-fm/sim";
+import { INJURY_PER_MATCH, injuryRiskOf, type InjuryRisk } from "@story-fm/sim";
 import { addDays, diffDays } from "../competition/calendar";
 import { playerCatalog } from "../world/catalog";
 import { INJURY_HISTORY } from "../data/injury-history";
@@ -216,6 +216,18 @@ export function pronenessOf(state: GameState, playerIds: Iterable<string>): Reco
 export function injuryProneness(state: GameState, playerId: string): number {
   const player = playerById(state, playerId);
   return player ? pronenessValue(player) : PRONENESS_BASE;
+}
+
+/**
+ * **지금 이 선수의 부상 위험 등급** — 저울은 시뮬의 것이고 장부는 성향만 댄다
+ * (player.md §5.3).
+ *
+ * 명단·심경·조회·스냅샷·브리프가 전부 이 한 줄을 지난다. 각자 `injuryRiskOf`에
+ * 성향을 직접 물리면, 성향을 어디서 읽는지가 자리마다 갈리는 날 같은 선수가
+ * 화면과 대사에서 다른 등급으로 선다.
+ */
+export function injuryRiskFor(player: GamePlayer): InjuryRisk {
+  return injuryRiskOf(player, pronenessValue(player));
 }
 
 // ── 부임 전 이력 심기 ───────────────────────────────────

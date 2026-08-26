@@ -12,7 +12,15 @@ import {
   type MatchLedgerState,
   type SideInput,
 } from "@story-fm/sim";
-import { makeRng, playersOf, quickSimulate, simSquadOf, type SimSquad } from "@story-fm/engine";
+import {
+  injuryRiskFor,
+  makeRng,
+  playersOf,
+  quickSimulate,
+  simSquadOf,
+  type SimSquad,
+} from "@story-fm/engine";
+import type { InjuryRiskGrade } from "@story-fm/domain";
 import { createTestGame } from "../test/helpers";
 import { INJURY_RATE } from "./catalog";
 import { outOfBand, reportOf, type Readings } from "./harness";
@@ -163,6 +171,63 @@ function segmentArm(home: SimSquad, away: SimSquad, runs: number): Tally {
   return tally;
 }
 
+/**
+ * 위험 등급을 **갈라 세운 선발 열한 명** — 넷은 신선, 넷은 지친 몸, 셋은 지친 유리몸.
+ *
+ * ⚠️ **체력은 스쿼드를 세운 뒤에 누른다.** `simSquadOf`는 지친 선발을 스스로 빼므로
+ * (`ROTATION_FATIGUE`), 세우기 전에 내리면 재려던 선수가 그 경기에 서지 않는다.
+ * 성향은 반대다 — 스쿼드가 만드는 지도에 실려 나가므로 세우기 **전**에 심는다.
+ */
+function riskSpread(index: number): { condition: number; proneness: number } {
+  if (index < 4) return { condition: 100, proneness: 1 };
+  if (index < 8) return { condition: 62, proneness: 1 };
+  return { condition: 45, proneness: 1.7 };
+}
+
+/** 등급별 노출(선수 × 경기)과 실제 부상 건수 */
+interface GradeTally {
+  exposure: Record<InjuryRiskGrade, number>;
+  injuries: Record<InjuryRiskGrade, number>;
+  players: Record<InjuryRiskGrade, number>;
+}
+
+/**
+ * **등급이 실제 부상률과 같은 순서로 서는가** (player.md §5.3).
+ *
+ * 등급은 굴림에 닿지 않고 `injuryWeight`를 낱말로 옮기기만 하므로, 이 비가 무너졌다면
+ * 경계가 분포에서 떨어져 나갔거나 저울의 항이 움직인 것이다. 벤치를 비우는 이유는
+ * 추첨 후보가 **뛴 선수 전원**이어서다 — 교체가 들어가면 노출의 분모가 흐려진다.
+ */
+function gradeArm(runs: number): GradeTally {
+  const state = createTestGame(11);
+  const probe = simSquadOf(state, HOME);
+  probe.starters.forEach((p, i) => {
+    p.state.injuryProneness = riskSpread(i).proneness;
+  });
+  const home = { ...simSquadOf(state, HOME), bench: [] };
+  home.starters.forEach((p, i) => {
+    p.state.condition = riskSpread(i).condition;
+  });
+  const away = { ...simSquadOf(state, AWAY), bench: [] };
+
+  const gradeOf = new Map(home.starters.map((p) => [p.id, injuryRiskFor(p).grade]));
+  const zero = (): Record<InjuryRiskGrade, number> => ({ low: 0, elevated: 0, high: 0 });
+  const tally: GradeTally = { exposure: zero(), injuries: zero(), players: zero() };
+  for (const grade of gradeOf.values()) {
+    tally.players[grade] += 1;
+    tally.exposure[grade] += runs;
+  }
+  for (let i = 0; i < runs; i++) {
+    const one = quickSimulate(home, away, 9000 + i, `grade:${i}`);
+    for (const tag of one.injuries) {
+      if (!tag.startsWith("home:")) continue;
+      const grade = gradeOf.get(tag.slice("home:".length));
+      if (grade !== undefined) tally.injuries[grade] += 1;
+    }
+  }
+  return tally;
+}
+
 describe("간이 시뮬과 구간 시뮬은 같은 눈금으로 카드와 부상을 낸다", () => {
   it("경기당 건수 · 두 시뮬의 비 · 성향이 닿는 폭", () => {
     const state = createTestGame(11);
@@ -211,6 +276,10 @@ describe("간이 시뮬과 구간 시뮬은 같은 눈금으로 카드와 부상
       }
     }
 
+    const grades = gradeArm(MATCHES);
+    const gradeRate = (grade: InjuryRiskGrade) =>
+      grades.injuries[grade] / Math.max(1, grades.exposure[grade]);
+
     const per = (n: number) => n / MATCHES;
     const readings: Readings<typeof INJURY_RATE> = {
       "경기 강도 (양 팀 평균)": (intensity.home + intensity.away) / 2,
@@ -226,12 +295,20 @@ describe("간이 시뮬과 구간 시뮬은 같은 눈금으로 카드와 부상
       "카드 — 간이/구간": quick.cards / Math.max(1, segment.cards),
       "유리몸 팀 배율": fragile.injuries / Math.max(1, healthy.injuries),
       "유리몸 한 명의 부상 점유율": hisShare / Math.max(1, homeInjuries),
+      "위험 낮음 인원": grades.players.low,
+      "위험 보통 인원": grades.players.elevated,
+      "위험 높음 인원": grades.players.high,
+      "1인당 부상률 — 위험 낮음": gradeRate("low"),
+      "1인당 부상률 — 위험 보통": gradeRate("elevated"),
+      "1인당 부상률 — 위험 높음": gradeRate("high"),
+      "부상률 — 보통/낮음": gradeRate("elevated") / Math.max(1e-9, gradeRate("low")),
+      "부상률 — 높음/낮음": gradeRate("high") / Math.max(1e-9, gradeRate("low")),
     };
     console.log(
       reportOf(
         INJURY_RATE,
         readings,
-        `${HOME} vs ${AWAY} · 간이 ${(MATCHES * 4).toLocaleString()}판 · 구간 ${MATCHES.toLocaleString()}판 · 기대 부상 ${expected.injuries.toFixed(3)}건 · 기대 카드 ${expected.cards.toFixed(2)}장 (개인 확률 ${(expected.injuries / ON_PITCH).toFixed(4)})`,
+        `${HOME} vs ${AWAY} · 간이 ${(MATCHES * 5).toLocaleString()}판 · 구간 ${MATCHES.toLocaleString()}판 · 기대 부상 ${expected.injuries.toFixed(3)}건 · 기대 카드 ${expected.cards.toFixed(2)}장 (개인 확률 ${(expected.injuries / ON_PITCH).toFixed(4)})`,
       ),
     );
     expect(outOfBand(INJURY_RATE, readings)).toEqual([]);
