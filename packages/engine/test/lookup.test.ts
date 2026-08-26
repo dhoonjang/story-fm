@@ -305,6 +305,23 @@ describe("playerCard — 선수 상세", () => {
     expect(res.message).toMatch(/잠재력: \d+~\d+ \(대강 짐작/);
   });
 
+  /**
+   * 이슈 #647 — 채팅 카드는 한 번 지나가면 끝이라, 도착한 보고서를 **다시 읽는
+   * 자리**가 여기다 (player.md §9.4-1). 파견 중에는 아직 설 것이 없다.
+   */
+  it("도착한 보고서는 선수 카드에서 다시 읽힌다 — 파견 중에는 안 선다", () => {
+    const state = createTestGame(21);
+    const other = playersOf(state, "chelsea")[0]!;
+    scoutPlayer(state, other.id);
+    expect(playerCard(state, other.id).message).not.toContain("스카우트 보고서:");
+
+    advanceTime(state, { days: SCOUT_DAYS });
+    const arrived = playerCard(state, other.id).message;
+    expect(arrived).toContain(`스카우트 보고서: ${state.scoutReports[0]!.completedOn} 도착`);
+    expect(arrived).toContain("요구액");
+    expect(arrived).toContain("기대 주급");
+  });
+
   it("없는 id는 반려한다", () => {
     const state = createTestGame(21);
     expect(playerCard(state, "nope").ok).toBe(false);

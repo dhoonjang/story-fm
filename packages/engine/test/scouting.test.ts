@@ -40,12 +40,15 @@ import {
   playerById,
   buildOfficeViews,
   formatMoney,
+  peekReportCards,
+  consumeReportCards,
+  pruneReportCards,
   pushReportCards,
+  PENDING_REPORT_CARD_LIMIT,
   ratingLabel,
   ratingTier,
   scoutReportCard,
   scoutReportLine,
-  takeReportCards,
 } from "@story-fm/engine";
 import {
   ageOf,
@@ -881,16 +884,70 @@ describe("보고서 한 장", () => {
     advanceTime(state, { days: 3 });
     expect(state.pendingReportCards).toEqual([p.id]);
 
-    expect(takeReportCards(state, 3)).toEqual([p.id]);
-    expect(takeReportCards(state, 3)).toEqual([]);
+    expect(peekReportCards(state, 3)).toEqual([p.id]);
+    // 보는 것만으로는 안 빠진다 — 카드가 선 것만 소비한다 (player.md §9.4-1)
+    expect(state.pendingReportCards).toEqual([p.id]);
+    consumeReportCards(state, [p.id]);
+    expect(peekReportCards(state, 3)).toEqual([]);
   });
 
   /** 상한을 넘긴 만큼은 **버리지 않고 남긴다** — 며칠을 기다려 산 카드다 */
   it("한 턴 상한을 넘으면 남은 것은 다음 턴 몫으로 남는다", () => {
     const state = createTestGame(11);
     pushReportCards(state, ["a", "b", "c", "d"]);
-    expect(takeReportCards(state, 3)).toEqual(["a", "b", "c"]);
-    expect(takeReportCards(state, 3)).toEqual(["d"]);
+    const first = peekReportCards(state, 3);
+    expect(first).toEqual(["a", "b", "c"]);
+    consumeReportCards(state, first);
+    expect(peekReportCards(state, 3)).toEqual(["d"]);
+  });
+
+  /**
+   * 조립에 실패한 id는 **줄에 남는다** — 꺼내면서 지우면 그 보고서는 화면에 한 번도
+   * 안 서고, 사무실에 스카우팅 화면이 없어 되찾을 자리도 없다 (player.md §9.4-1).
+   */
+  it("카드가 선 것만 줄에서 빠진다 — 실패한 id는 남는다", () => {
+    const state = createTestGame(11);
+    pushReportCards(state, ["ghost", "b", "c"]);
+    // "ghost"는 조립이 안 된다(선수가 없다) — 나머지 둘만 소비한다
+    consumeReportCards(state, ["b", "c"]);
+    expect(state.pendingReportCards).toEqual(["ghost"]);
+    // 같은 턴에 줄을 다시 봐도 실패한 것을 또 집지 않는다
+    expect(peekReportCards(state, 3, new Set(["ghost"]))).toEqual([]);
+  });
+
+  /**
+   * 자를 거면 **새 것부터**다. 앞에서 자르면 가장 오래 기다린 보고서가 카드 한 번
+   * 없이 사라진다 — 그것이 카드에 가장 가까운 한 장이다 (player.md §9.4-1).
+   */
+  it("줄이 넘치면 오래 기다린 것이 아니라 새로 온 것이 잘린다", () => {
+    const state = createTestGame(11);
+    const ids = Array.from({ length: PENDING_REPORT_CARD_LIMIT }, (_, i) => `old-${i}`);
+    expect(pushReportCards(state, ids)).toEqual([]);
+    expect(pushReportCards(state, ["fresh"])).toEqual(["fresh"]);
+    expect(state.pendingReportCards).toEqual(ids);
+  });
+
+  /**
+   * 되돌려도 영영 안 서는 것은 tick이 닫는다 — **줄에서 조용히 지우는 자는 여기
+   * 하나뿐이고**, 닫은 id를 돌려주므로 부르는 쪽이 사실로 남긴다.
+   */
+  it("영영 못 세울 id만 닫힌다 — 완료된 임무와 살아 있는 선수는 남는다", () => {
+    const state = createTestGame(11);
+    const p = target(state);
+    state.scoutMissions = [
+      {
+        id: "mission-live",
+        requestedOn: state.date,
+        dueOn: state.date,
+        completedOn: state.date,
+        candidates: [p.id],
+      },
+    ];
+    pushReportCards(state, [p.id, "mission-live", "ghost"]);
+    expect(pruneReportCards(state)).toEqual(["ghost"]);
+    expect(state.pendingReportCards).toEqual([p.id, "mission-live"]);
+    // 닫을 것이 없으면 아무 일도 하지 않는다
+    expect(pruneReportCards(state)).toEqual([]);
   });
 
   it("없는 선수는 null — 화면이 빈 카드를 그리지 않는다", () => {

@@ -5,7 +5,7 @@ import {
   SQUAD_NUMBER_MIN,
   SYMBOLIC_NUMBERS,
 } from "@story-fm/domain";
-import type { GameState } from "../core/state";
+import { playerName, type GameState } from "../core/state";
 
 const ALL_NUMBERS = Array.from({ length: 99 }, (_, index) => index + 1);
 
@@ -127,13 +127,6 @@ export interface NumberLineage {
   past: NumberLineageEntry[];
 }
 
-/** 이름 하나 — 세계를 떠난 사람은 은퇴 명부가 답한다 */
-function nameOf(state: GameState, playerId: string): string {
-  const player = state.players.find((p) => p.id === playerId);
-  if (player) return player.name;
-  return (state.retired ?? []).find((r) => r.gamePlayerId === playerId)?.name ?? playerId;
-}
-
 /**
  * 그 팀 그 번호의 계보 — **시즌 기록에서 파생한다** (player.md §1.1).
  *
@@ -162,7 +155,7 @@ export function numberLineageOf(state: GameState, teamId: string, number: number
     .map(([playerId, seasons]): NumberLineageEntry => ({
       number,
       playerId,
-      name: nameOf(state, playerId),
+      name: playerName(state, playerId),
       seasons: seasons.size,
       lastSeason: Math.max(...seasons),
     }))

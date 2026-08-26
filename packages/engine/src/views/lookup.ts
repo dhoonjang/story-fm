@@ -150,7 +150,7 @@ import {
   seasonLabelOf,
 } from "../competition/records";
 import { openManagerOffers, USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
-import { observedMarketValue } from "../market/market";
+import { askingPriceFor, observedMarketValue, wageExpectationOf } from "../market/market";
 import { interestLine } from "../market/interest";
 import {
   attributeLine,
@@ -1134,6 +1134,30 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
     `능력치: ${attributeLine(state, p)}`,
     `종합: ${overallView(state, p)} · 잠재력: ${potentialView(state, p)}`,
   ];
+  /**
+   * 끝난 스카우팅 — **도착한 보고서를 다시 읽는 자리다.**
+   *
+   * 사무실에 스카우팅 화면이 없어 채팅 카드 한 장이 유일한 자리였고, 그 한 장을
+   * 놓치면 며칠을 기다려 산 정보를 게임 안에서 되찾을 길이 없었다
+   * (player.md §9.4-1). 새 도구를 세우지 않는 것은 감독이 묻는 것이 「그 선수
+   * 어땠지」이고 그 물음의 자리가 이미 여기 하나이기 때문이다.
+   *
+   * ⚠️ 금액은 카드(`scoutReportCard`)와 **같은 자에서** 낸다 — 값이 갈리면 한 화면이
+   * 두 말을 한다. 우리 선수에게는 세우지 않는다: 데려온 뒤의 요구액·기대 주급은
+   * 그 선수에 대한 사실이 아니다.
+   */
+  const arrivedReport = state.scoutReports.filter(
+    (r) => r.gamePlayerId === p.id && r.completedOn !== null,
+  );
+  const lastReport = arrivedReport[arrivedReport.length - 1];
+  if (knowledge !== "own" && lastReport?.completedOn) {
+    lines.push(
+      `스카우트 보고서: ${lastReport.completedOn} 도착 · ` +
+        `시장가 ${formatMoney(observedMarketValue(state, p))} · ` +
+        `요구액 ${formatMoney(askingPriceFor(state, p))} · ` +
+        `기대 주급 ${formatMoney(wageExpectationOf(state, p))}`,
+    );
+  }
 
   if (knowledge === "own") {
     const risk = injuryRiskFor(p);
