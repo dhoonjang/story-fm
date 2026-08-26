@@ -57,6 +57,7 @@ import {
   parseSceneHeader,
   recordCharacterInjection,
   runGmTurn,
+  runMockGmTurn,
   runOnboardingTurn,
   type GmToolCall,
 } from "@story-fm/agents";
@@ -1753,6 +1754,64 @@ describe("도착한 카드 — 한 줄에서 지목과 임무를 가른다", () 
       else process.env.LLM_MODE = previousMode;
     }
     // 줄은 비었다 — 다음 턴이 같은 카드를 다시 세우지 않는다
+    expect(state.pendingReportCards ?? []).toEqual([]);
+  });
+
+  /**
+   * 이슈 #647 — **꺼낸 것과 선 것이 갈리면 보고서가 없어진다.** 조립이 `null`이면
+   * (그 사이 은퇴해 `state.players`에서 빠진 선수) 그 id는 줄에 남아야 하고, 그 뒤에
+   * 서 있던 보고서는 같은 턴에 카드로 서야 한다 (player.md §9.4-1).
+   */
+  it("조립에 실패한 id는 줄에 남고, 뒤에 선 보고서는 그 턴에 선다", async () => {
+    const state = game();
+    const target = playersOf(state, "chelsea")[0]!;
+    scoutPlayer(state, target.id);
+    advanceTime(state, { days: SCOUT_DAYS });
+    // 줄 맨 앞에 카드를 세울 수 없는 id를 끼운다 — 세계에 없는 선수다
+    state.pendingReportCards = ["ghost", ...(state.pendingReportCards ?? [])];
+    state.chat.push({ role: "user", text: "보고 왔나?", toolCalls: [], at: state.date });
+
+    stubRunTurn.mockImplementation(async (): Promise<TurnResult> => ({
+      text: `[${state.date} AM 10:00]\n@스티브 홀랜드: 보고서 올려두었습니다.`,
+      history: { version: 1, provider: "google", model: "test", messages: [] },
+      historyBase: 0,
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      toolCallCount: 0,
+      stopReason: "completed",
+    }));
+    const previousMode = process.env.LLM_MODE;
+    process.env.LLM_MODE = "real";
+    try {
+      const turn = await runGmTurn(state, "보고 왔나?");
+      expect(turn.reports?.map((r) => r.playerId)).toEqual([target.id]);
+    } finally {
+      if (previousMode === undefined) delete process.env.LLM_MODE;
+      else process.env.LLM_MODE = previousMode;
+    }
+    // 선 것만 빠졌다 — 못 선 id는 그대로 남아 tick의 닫는 자를 기다린다
+    expect(state.pendingReportCards ?? []).toEqual(["ghost"]);
+  });
+
+  /**
+   * 이슈 #647 — 경기 중 턴은 줄을 꺼내지 않는다(중계의 스냅샷은 장부라 이 블록이
+   * 없다). 여러 턴이 걸리는 경기 뒤 **첫 평시 턴**에 밀린 카드가 서야 한다.
+   */
+  it("경기 중에는 안 서고 경기 뒤 첫 평시 턴에 선다", async () => {
+    const state = game();
+    const target = playersOf(state, "chelsea")[0]!;
+    scoutPlayer(state, target.id);
+    advanceTime(state, { days: SCOUT_DAYS });
+    expect(state.pendingReportCards).toEqual([target.id]);
+
+    // 경기 중 — mock 캐스터가 도는 자리다. 줄은 그대로 있어야 한다
+    state.phase = "match";
+    runMockGmTurn(state, "진행");
+    expect(state.pendingReportCards).toEqual([target.id]);
+
+    // 경기가 끝난 첫 평시 턴 — mock도 실모드와 같은 자리에서 꺼낸다
+    state.phase = "idle";
+    const peace = runMockGmTurn(state, "수고했다");
+    expect(peace.reports?.map((r) => r.playerId)).toEqual([target.id]);
     expect(state.pendingReportCards ?? []).toEqual([]);
   });
 });

@@ -50,6 +50,7 @@ import {
   incomingOffers,
   pendingOffer,
   playerById,
+  playerName,
   sendOffer,
   suggestTerms,
   setCaptain,
@@ -94,6 +95,7 @@ import {
   type TurnOperation,
 } from "./gm-types";
 import type { CardMark, GoalMark } from "@story-fm/engine";
+import { MAX_REPORT_CARDS, takeArrivedReports } from "./report-cards";
 
 /**
  * mock GM — LLM 없이 도는 결정적 오케스트레이터. e2e·오프라인 개발용이며,
@@ -170,10 +172,6 @@ function coach(state: GameState): string {
 /** 회견장에 앉은 기자 — 회견마다 결정적으로 같은 사람이 묻는다 */
 function reporter(state: GameState, press: PressConference): string {
   return `@${pick(makeRng(state.seed, `press-${press.id}`), reportersOf(state)).characterId}:`;
-}
-
-function playerName(state: GameState, id: string): string {
-  return playerById(state, id)?.name ?? id;
 }
 
 function scoreLine(state: GameState): string {
@@ -432,7 +430,17 @@ export function runMockGmTurn(
    */
   operation?: TurnOperation | null,
 ): GmTurnResult {
+  // 턴을 여는 시점의 국면 — 실모드(gm.ts)와 같은 자를 쓴다. 이 턴에 경기가 열려도
+  // 화자는 아직 평시 GM이라 이 턴은 평시다
+  const inMatch = state.phase === "match";
   const computed = computeMockGmTurn(state, message, operation);
+  /**
+   * 도착한 보고서를 카드로 세운다 — **실모드와 같은 자리다** (`takeArrivedReports`).
+   * mock이 꺼내지 않던 동안 줄은 차오르기만 하고 카드는 한 번도 서지 않았다
+   * (player.md §9.4-1). mock은 시계를 스스로 옮기므로(`mockAdvance`) 이 턴에 도착한
+   * 것까지 같은 턴에 선다 — 실모드의 손잡이 경로와 같은 결이다.
+   */
+  const arrived = inMatch ? null : takeArrivedReports(state, MAX_REPORT_CARDS);
   // 실모드와 같은 모양으로 첫 줄에 시점을 세운다 — mock은 시계를 직접 옮기므로
   // (advanceTime) 헤더는 파싱 대상이 아니라 표시일 뿐이다
   const stamp =
@@ -441,6 +449,8 @@ export function runMockGmTurn(
       : `[${state.date} ${formatClock(clockOf(state))}]`;
   const result: GmTurnResult = {
     ...computed,
+    ...(arrived && arrived.reports.length > 0 ? { reports: arrived.reports } : {}),
+    ...(arrived && arrived.missions.length > 0 ? { missions: arrived.missions } : {}),
     text: computed.text ? `${stamp}\n${computed.text}` : computed.text,
     // ⚠️ 스킬 자리(line)는 본문 기준이다 — 여기서 헤더가 붙으므로 한 줄씩 밀어야
     // 실모드(헤더 포함 셈)와 눈금이 같다
