@@ -188,9 +188,20 @@ export interface PersonaRelation {
   characterId: string;
   name: string;
   stance: "aligned" | "tense";
-  /** 내가 먼저 보는 것 · 상대가 먼저 보는 것 — 문장은 프롬프트가 쓴다 */
-  ours: string;
-  theirs: string;
+  /**
+   * 내가 먼저 보는 것 · 상대가 먼저 보는 것 — 문장은 프롬프트가 쓴다.
+   * **원형에서 뽑힌 첫인상에만 있다** — `bond`가 선 줄에는 없다.
+   */
+  ours?: string;
+  theirs?: string;
+  /**
+   * **감독이 세운 사이** — 멘토링에서 내가 선 자리 (people.md §5-3).
+   *
+   * 원형 축을 들지 않는 것은 이 줄의 근거가 세계의 뽑기가 아니라 감독의 결정이기
+   * 때문이다. ⚠️ 날짜도 수치도 싣지 않는다 — 카드는 이력에 굳으므로(people.md §6)
+   * 변하는 값이 들어가면 3주 전 카드가 오늘의 사실인 척한다.
+   */
+  bond?: "mentor" | "mentee";
 }
 
 export interface CharacterEntry {

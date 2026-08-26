@@ -11,6 +11,8 @@ import {
 import { formLabel } from "./form";
 import { isSettling } from "./settling";
 import { openSymbolicNumbers, type NumberLineage } from "./numbers";
+// 심경(mood)과 같은 문을 지난다 — 두 벌이면 같은 사이가 자리마다 다른 말로 선다
+import { mentoringReadOf } from "./mentoring";
 import { diffDays } from "../competition/calendar";
 import { pendingApproach } from "../club/approach";
 import { playerArchetypeOf } from "../world/player-persona";
@@ -191,7 +193,19 @@ function factOf(
   if (form <= SLUMP) return `폼 ${formLabel(form)}`;
   if (benched >= BENCHED_RUN) return `${benched}경기 연속 명단 제외`;
   /**
-   * **사실 여덟 중 마지막이다** — 뛰지 못하는 것도 나가겠다는 말도 폼도 지금
+   * **멘토링** — 번호와 함께 맨 뒤다 (people.md §7). 지금 벌어지는 일이 아니라 그 밑에
+   * 깔린 **서 있는 사이**라, 끝난 사이는 여기 오지 않는다: 그것은 심경의 자리이고
+   * (§5) 근황은 「지금 세계에 무슨 이야기가 있는가」다.
+   */
+  const mentoring = mentoringReadOf(state, player.id);
+  if (mentoring && mentoring.pair.until === undefined && mentoring.other) {
+    return mentoring.side === "mentor"
+      ? `${mentoring.other.name}을(를) 데리고 있다 (멘토 · ${mentoring.days}일째` +
+          `${mentoring.count > 1 ? ` · ${mentoring.count}명` : ""})`
+      : `${mentoring.other.name}에게 붙어 있다 (멘티 · ${mentoring.days}일째)`;
+  }
+  /**
+   * **사실 아홉 중 마지막이다** — 뛰지 못하는 것도 나가겠다는 말도 폼도 지금
    * 벌어지는 일이고, 비어 있는 번호는 그 밑에 깔린 사정이다.
    *
    * 문장은 `pressFactText`가 만든다 — 회견·다가옴과 **같은 카드**라, 두 벌을 두면

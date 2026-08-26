@@ -18,6 +18,7 @@ import type {
   InjuryRiskGrade,
   LeaderRole,
   MatchRecord,
+  MentoringEnd,
   MilestoneCode,
   PlayerArchetypeKey,
   PlayerIssueReason,
@@ -33,6 +34,8 @@ import { settlingOf } from "./settling";
 import { playerArchetypeOf } from "../world/player-persona";
 import { leaderRoleOf } from "./hierarchy";
 import { numberLineageOf } from "./numbers";
+// 장부를 읽는 문은 하나다 — 심경과 근황이 갈리면 같은 사이가 자리마다 다른 말로 선다
+import { mentoringReadOf } from "./mentoring";
 import { demotionPatienceDaysOf } from "./demotion";
 // 출전 불만이 어느 기대에 못 미친 것인가 — 약속 판정과 같은 자다 (people.md §5-2)
 import { squadStatusOf, startsInWindow } from "./promises";
@@ -200,6 +203,25 @@ export type MoodFact =
       days: number;
       /** 앞서 그 번호를 달던 사람 — `since`는 몇 시즌 만인가다 (물려받았을 때만) */
       after?: { name: string; seasons: number; since: number };
+    }
+  /**
+   * **감독이 붙여 준 사이** — 멘토링 (people.md §5-3). 심경과 근황이 같은 카드를 든다.
+   *
+   * 끝난 사이가 `MENTORING_ECHO_DAYS` 안에서만 서는 것은 장부가 그만큼만 그 줄을
+   * 들고 있기 때문이다 — 창은 `mentoringReadOf`가 갖는다.
+   */
+  | {
+      cause: "mentoring";
+      /** 이 사람이 선 자리 */
+      side: "mentor" | "mentee";
+      /** 상대의 이름 — 이미 세계에서 사라졌으면 카드가 서지 않는다 */
+      name: string;
+      /** 며칠째 — 서 있는 사이는 맺은 날부터, 닫힌 사이는 닫힌 날부터 */
+      days: number;
+      /** 멘토가 지금 데리고 있는 수 (멘토 쪽만) */
+      count?: number;
+      /** 끝난 사이면 그 사유 — 없으면 서 있는 사이다 */
+      ended?: MentoringEnd;
     }
   | { cause: "young"; age: number }
   | { cause: "steady" };
@@ -412,6 +434,34 @@ function numberEchoOf(state: GameState, player: GamePlayer): MoodFact | null {
 }
 
 /**
+ * 감독이 붙여 준 사이 한 장 — 없으면 null (people.md §5-3).
+ *
+ * 장부를 고르는 것은 `mentoringReadOf`다: 서 있는 사이가 먼저고, 없으면 `MENTORING_ECHO_DAYS`
+ * 안에 닫힌 사이다. 근황(`cues.ts`)이 같은 문을 지나므로 창이 두 벌로 갈리지 않는다.
+ *
+ * ⚠️ **상대를 못 찾으면 세우지 않는다.** 방출·은퇴로 명단에서 걷힌 사람의 이름은
+ * 장부에 없어, 이름 없는 관계는 감독이 읽을 사실이 못 된다.
+ */
+function mentoringFactOf(
+  state: GameState,
+  player: GamePlayer,
+): Extract<MoodFact, { cause: "mentoring" }> | null {
+  const read = mentoringReadOf(state, player.id);
+  if (!read || read.other === null) return null;
+  const ended = read.pair.endedBy;
+  // 닫는 자리가 `until`과 `endedBy`를 함께 적는다(`closeMentorings`) — 한쪽만 있는 줄은 세지 않는다
+  if ((read.pair.until === undefined) !== (ended === undefined)) return null;
+  return {
+    cause: "mentoring",
+    side: read.side,
+    name: read.other.name,
+    days: read.days,
+    ...(read.side === "mentor" ? { count: read.count } : {}),
+    ...(ended === undefined ? {} : { ended }),
+  };
+}
+
+/**
  * **코어가 고른 심경의 사실** — 우선순위 순 최대 2장.
  *
  * 화면·조회 도구는 `moodOf`를 부른다. 이 함수를 직접 부르는 곳은 앵커를 세우는
@@ -553,6 +603,15 @@ export function moodFactsOf(
   }
 
   // ── 곁들임: 지금 조치하지 않으면 놓칠 사정 ──
+  const mentoring = mentoringFactOf(state, player);
+  /**
+   * **끝난 멘토링이 곁들임의 맨 앞이다** (people.md §5) — 데리고 다니던 고참이
+   * 사라진 것은 옆자리 동료가 방출된 것보다 그 아이에게 큰 일이다. 서 있는 사이는
+   * 며칠씩 그대로라 아래(번호의 여운 다음)에 선다.
+   */
+  if (mentoring !== null && mentoring.ended !== undefined && facts.length < MOOD_FACT_LIMIT) {
+    facts.push(mentoring);
+  }
   /**
    * 방금 누가 팀을 떠났다 — 라커룸 전체가 같은 사실을 든다. 누가 그와 가까웠는지를
    * 가를 관계 점수가 아직 없어 카드도 하나뿐이다 (people.md §5).
@@ -577,6 +636,10 @@ export function moodFactsOf(
   if (facts.length < MOOD_FACT_LIMIT) {
     const number = numberEchoOf(state, player);
     if (number) facts.push(number);
+  }
+  // 서 있는 사이 — 번호의 여운 다음이고 라커룸 자리 앞이다 (people.md §5)
+  if (mentoring !== null && mentoring.ended === undefined && facts.length < MOOD_FACT_LIMIT) {
+    facts.push(mentoring);
   }
   if (facts.length < MOOD_FACT_LIMIT) {
     const seat = leaderRoleOf(state, player);
@@ -636,6 +699,17 @@ const RETIREMENT_REASON_KO: Record<RetirementReason, string> = {
   age: "나이",
   decline: "기량",
   idle: "출전",
+};
+
+/**
+ * 사이가 닫힌 사유의 한 낱말 (people.md §5-3) — `RETIREMENT_REASON_KO`와 같은 자리의 표다.
+ * 화면은 이 낱말이 아니라 사유마다 다른 문장을 쓴다 (`apps/web/lib/mood.ts`).
+ */
+const MENTORING_END_KO: Record<MentoringEnd, string> = {
+  manager: "감독 해제",
+  departure: "떠남",
+  squad: "2군",
+  age: "나이",
 };
 
 /** 며칠 전 경기인가 — 날짜를 셈으로만 옮긴다 */
@@ -709,6 +783,16 @@ function factLine(fact: MoodFact): string {
           : ` (앞서 ${fact.after.name} ${fact.after.seasons}시즌 · ${fact.after.since}시즌 만에)`) +
         ` · ${fact.days}일째`
       );
+    case "mentoring": {
+      // 자리와 이름과 셈뿐이다 — 사유는 코드의 낱말로만 옮긴다
+      const seat =
+        fact.side === "mentor"
+          ? `멘토${fact.count === undefined || fact.count === 0 ? "" : `(${fact.count}명)`}`
+          : "멘티";
+      return fact.ended === undefined
+        ? `${seat} · ${fact.name} · ${fact.days}일째`
+        : `${seat} 종료 (${MENTORING_END_KO[fact.ended]}) · ${fact.name} · ${dayWord(fact.days)}`;
+    }
     case "young":
       return `${fact.age}세`;
     case "steady":
