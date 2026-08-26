@@ -1382,7 +1382,8 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
   const targetLines =
     targets.length > 0
       ? [
-          // max — 동시에 노릴 수 있는 수. 읽는 법은 중계·해석 프롬프트의 「입력」이 갖는다
+          // max — 동시에 노릴 수 있는 수. 고르는 쪽은 스키마의 maxItems로 읽고(prompts.md §2),
+          // 넘겨 와도 코어가 자른다 (`setExploits`)
           `<targets max="${MAX_EXPLOITS}">`,
           ...targets.map((t) => `  ${t.id} — ${packetTagText(t.tag, tagCtx)}`),
           pending.exploits && pending.exploits.length > 0
