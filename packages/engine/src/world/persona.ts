@@ -398,6 +398,20 @@ export function generateOwner(seed: number, teamId: string): Persona {
 /** 원형 목록 — 테스트·어드민이 전수를 훑을 때 쓴다 */
 export const OWNER_ARCHETYPE_LABELS = OWNER_ARCHETYPES.map((a) => a.label);
 
+/**
+ * 저장된 구단주 원형 **라벨 → 키** — `coachArchetypeKeyOf`와 같은 규약이다.
+ *
+ * 세이브에 남는 것은 `"지역 유지형"` 같은 라벨인데(페르소나는 사람이 읽는 데이터라
+ * `generateOwner`가 키를 버린다), 클럽 비전의 항목표(career.md §5)와 보드 요청표
+ * (§5.2)는 **키**로 갈린다. 그 사이를 되짚는 자리가 여기 하나다.
+ *
+ * 표에 없는 라벨은 `null`이다 — 옛 세이브의 커스텀 구단주는 조용히 빈손이 되고,
+ * 다른 원형의 결이 대신 서지는 않는다.
+ */
+export function ownerArchetypeKeyOf(persona: Pick<Persona, "archetype">): string | null {
+  return OWNER_ARCHETYPES.find((a) => a.label === persona.archetype)?.key ?? null;
+}
+
 /** 원형 목록 — 테스트·어드민이 전수를 훑을 때 쓴다 */
 export const HEAD_COACH_ARCHETYPES = COACH_ARCHETYPES.map((a) => a.label);
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clampCondition,
   ATTRIBUTE_AXES,
+  INJURY_PRONENESS_MIN,
   PlayerStateSchema,
   RELEASE_NOTE,
   type GamePlayer,
@@ -12,6 +13,7 @@ import {
   HEAVY_DEFEAT_PENALTY,
   DEMOTION_PATIENCE_DAYS,
   demotionPatienceDaysOf,
+  MENTORING_ECHO_DAYS,
   MOOD_BATCH,
   MOOD_NOTE_DAYS,
   RUN_MAX,
@@ -27,6 +29,7 @@ import {
   buildMoodBrief,
   dealOdds,
   generateIncomingOffers,
+  injuryRiskFor,
   tickInterests,
   lastMatchIndexOf,
   marketValueOf,
@@ -211,6 +214,71 @@ describe("심경 사실 카드 — 코어는 사실만 낸다", () => {
     });
     // 앵커는 사실 줄이다 — 평가어도 연출어도 없다
     expect(moodAnchor(moodFactsOf(state, coded))).toContain("불만 4연패 · 14일째");
+  });
+
+  /**
+   * **끝난 멘토링이 곁들임의 맨 앞이다** (people.md §5 · §5-3) — 데리고 다니던 고참이
+   * 사라진 것은 옆자리 동료가 방출된 것보다 그 아이에게 큰 일이다. 그리고 장부가 닫힌
+   * 줄을 들고 있는 창(`MENTORING_ECHO_DAYS`)이 곧 카드가 서는 창이다 — 창이 두 벌로
+   * 갈리면 장부에 남은 줄이 화면에서 사라지거나 그 반대가 된다.
+   */
+  it("끝난 멘토링이 계약 해지보다 앞에 서고, 창을 넘기면 서지 않는다", () => {
+    const state = createTestGame();
+    /**
+     * **몸이 조용한 선수를 고른다** — 부상 위험 `high`는 곁들임보다 앞자리라(§5)
+     * 그 선수를 쓰면 재는 것이 곁들임의 순서가 아니라 저울의 눈금이 된다.
+     */
+    const quiet = userPlayers(state).filter((p) => injuryRiskFor(p).grade === "low");
+    const [mentee, mentor] = [quiet[0]!, quiet[1]!];
+    const leaver = userPlayers(state).find((p) => p.id !== mentee.id && p.id !== mentor.id)!;
+    // 같은 날 계약이 해지된 동료 — 라커룸 전원이 그 카드를 든다
+    leaver.teamId = FREE_AGENT_TEAM;
+    state.transfers.push({
+      id: "tr-mentoring",
+      gamePlayerId: leaver.id,
+      windowId: null,
+      fromTeamId: state.userTeamId,
+      toTeamId: FREE_AGENT_TEAM,
+      date: state.date,
+      type: "free",
+      fee: 0,
+      reason: "release-agreed",
+    });
+    // 마음도 몸도 할 말이 없어야 곁들임 두 자리가 보인다 — 곁들임의 순서가 이 케이스다
+    mentee.state.form = 0;
+    mentee.state.condition = 84;
+    mentee.state.injuryProneness = INJURY_PRONENESS_MIN;
+
+    const closedOn = (until: string) => {
+      state.mentoring = [
+        {
+          mentorId: mentor.id,
+          menteeId: mentee.id,
+          since: addDays(until, -60),
+          until,
+          endedBy: "departure",
+        },
+      ];
+      return moodFactsOf(state, mentee);
+    };
+
+    const fresh = closedOn(state.date);
+    expect(fresh[0], "끝난 멘토링이 계약 해지에 밀렸다").toEqual({
+      cause: "mentoring",
+      side: "mentee",
+      name: mentor.name,
+      days: 0,
+      ended: "departure",
+    });
+    expect(fresh[1]?.cause).toBe("departure");
+
+    // 창을 넘긴 줄은 장부가 걷는 대상이고, 카드도 함께 사라진다
+    const stale = closedOn(addDays(state.date, -(MENTORING_ECHO_DAYS + 1)));
+    expect(
+      stale.some((f) => f.cause === "mentoring"),
+      "창을 넘긴 사이가 아직 서 있다",
+    ).toBe(false);
+    expect(stale[0]?.cause).toBe("departure");
   });
 });
 

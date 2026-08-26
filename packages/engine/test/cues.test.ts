@@ -13,6 +13,7 @@ import {
   debtLimitOf,
   fundsTargetOf,
   weeklyWagesOf,
+  boardExpectation,
   boardRequestCeiling,
   boardThriftFactor,
   boardTrustFactor,
@@ -21,6 +22,7 @@ import {
   earmarkedFor,
   signingBudgetOf,
   coachArchetypeKeyOf,
+  describePendingApproach,
   coachCues,
   COACH_ARCHETYPE_LABELS,
   COACH_EYE_KEYS,
@@ -47,8 +49,13 @@ import {
   categoryOf,
   STADIUM_ASSET_MONTHS,
 } from "@story-fm/engine";
-import type { BoardRequestKind, PlayerIssueReason, Transfer } from "@story-fm/domain";
-import { BOARD_REQUEST_KINDS } from "@story-fm/domain";
+import type {
+  BoardExpectationCode,
+  BoardRequestKind,
+  PlayerIssueReason,
+  Transfer,
+} from "@story-fm/domain";
+import { BOARD_REQUEST_KINDS, pressFactText } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -756,6 +763,84 @@ describe("계약과 관심 — 에이전트가 계단 1부터 온다", () => {
     // 그래도 열린 자리는 하나다 — 먼저 임계를 넘은 쪽(하루 9)이 선다
     expect((state.approaches ?? []).filter((a) => a.status === "pending")).toHaveLength(1);
     expect(pendingApproach(state)?.topic).toBe("blocked-move");
+  });
+});
+
+/**
+ * 시즌 리뷰 면담 — **압력이 아니라 달력이 여는 유일한 자리** (career.md §5 ·
+ * people.md §8). 세계를 굴리는 대신 지난 시즌의 줄과 날짜를 손으로 세운다:
+ * 재는 것이 시즌을 어떻게 치렀는가가 아니라 그 줄을 읽는 문이기 때문이다.
+ */
+describe("시즌이 끝나면 구단주가 마주 앉는다", () => {
+  /** 지난 시즌 줄 하나 — 기대의 갈래와 목표만 케이스가 정한다 */
+  function recordSeason(
+    state: GameState,
+    season: number,
+    board: { position: number; target: number; code: BoardExpectationCode },
+  ) {
+    state.seasonRecords.push({
+      season,
+      teamId: state.userTeamId,
+      position: board.position,
+      wins: 12,
+      draws: 8,
+      losses: 18,
+      goalsFor: 40,
+      goalsAgainst: 55,
+      board: {
+        grade: board.position <= board.target ? "met" : "missed",
+        position: board.position,
+        target: board.target,
+        expectationCode: board.code,
+      },
+    });
+  }
+
+  /** 프리시즌 첫날에 세운다 — `pressDays(1)`이 곧 전환 다음 tick이다 */
+  function preseason(state: GameState): GameState {
+    state.date = state.calendar.preseasonStart;
+    return state;
+  }
+
+  it("무직으로 맞은 시즌엔 열리지 않는다 — 그 시즌은 줄을 남기지 않는다", () => {
+    const state = preseason(quiet(createTestGame(11)));
+    // 지난 시즌은 무직이었다 — 마지막 줄이 두 시즌 전의 것이다
+    recordSeason(state, state.season - 2, { position: 9, target: 6, code: "europe" });
+    pressDays(state, 1);
+    expect(pendingApproach(state)).toBeNull();
+
+    // 무직 그 자체도 문이다 — 줄이 지난 시즌의 것이어도 마주 앉을 구단주가 없다
+    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    recordSeason(state, state.season - 1, { position: 9, target: 6, code: "europe" });
+    pressDays(state, 1);
+    expect(pendingApproach(state)).toBeNull();
+
+    delete state.dismissal;
+    pressDays(state, 1);
+    expect(pendingApproach(state)?.topic).toBe("season-review");
+  });
+
+  it("기대의 갈래가 바뀌면 옛 기대가 함께 선다 — 승강이 체급을 옮긴 해다", () => {
+    const state = preseason(quiet(createTestGame(11)));
+    // 지난 시즌의 갈래는 잔류였고 올해는 그것이 아니다 (tier 1의 우승 경쟁)
+    recordSeason(state, state.season - 1, { position: 15, target: 17, code: "survival" });
+    pressDays(state, 1);
+
+    const open = pendingApproach(state)!;
+    expect(open.topic).toBe("season-review");
+    // 계단 2 고정 — 압력 줄을 세우지 않으므로 되돌릴 눈금도 없다
+    expect(open.step).toBe(2);
+    expect(state.approachPressure?.some((r) => r.topic === "season-review")).toBeFalsy();
+    expect(describePendingApproach(state)).not.toContain("계단");
+
+    const target = open.facts.find((f) => f.data?.tags?.[0] === "board-target")!;
+    const now = boardExpectation(state, state.userTeamId);
+    expect(now.code).not.toBe("survival");
+    expect(target.data?.tags?.[1]).toBe(now.code);
+    expect(target.data?.tags?.[2]).toBe("survival");
+    expect(target.data?.values?.previous).toBe(17);
+    // 그 옛 갈래가 문장에도 담긴다 — 카드가 들고만 있으면 구단주는 말하지 못한다
+    expect(pressFactText(target)).toContain("지난 시즌 잔류(17위 이내)");
   });
 });
 

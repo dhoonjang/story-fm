@@ -35,6 +35,15 @@ const TRANSFER_REQUEST_STEP = 5;
 /** 시즌 하나를 못 끝내면 측정이 아니다 */
 const ADVANCE_LIMIT = 480;
 
+/**
+ * 시즌 전환 뒤에 더 도는 날 — **시즌 리뷰 면담은 달력이 여는 자리다** (career.md §5).
+ *
+ * `season_end`에서 곧바로 멈추면 프리시즌 첫 주에 서는 그 자리를 한 번도 보지 못한다.
+ * 창(`REVIEW_WINDOW_DAYS` 7일)만큼만 더 도므로 다른 측정값은 거의 움직이지 않는다 —
+ * 불만도 순위도 새 시즌에서 다시 세는 자리라 프리시즌 초반에는 원인이 없다.
+ */
+const REVIEW_TAIL_DAYS = 7;
+
 describe("한 시즌의 다가옴", () => {
   it("시드 42 · 축소 세계 · 아무것도 하지 않는 감독", () => {
     const state = createMiniGame(42);
@@ -89,7 +98,19 @@ describe("한 시즌의 다가옴", () => {
         playMockMatch(state);
         sample();
       }
-      if (advanced.stopped === "season_end") break;
+      if (advanced.stopped === "season_end") {
+        // 프리시즌 며칠 — 시즌 리뷰 면담이 서는 창이 여기다
+        for (let d = 0; d < REVIEW_TAIL_DAYS; d++) {
+          const day = advanceTime(state, { days: 1 });
+          if (!day.ok) break;
+          sample();
+          if (day.stopped === "matchday") {
+            playMockMatch(state);
+            sample();
+          }
+        }
+        break;
+      }
       if (advanced.stopped === "blocked") {
         // 안 치른 경기가 시계를 막으면 그 경기까지 간다 (demotion-grievance와 같은 손잡이)
         const jumped = advanceTime(state, "next_match");
@@ -127,6 +148,7 @@ describe("한 시즌의 다가옴", () => {
       "에이전트 채널": byChannel("agent"),
       "주장 채널": byChannel("captain"),
       "구단주 채널": byChannel("owner"),
+      "시즌 리뷰 자리": byTopic("season-review"),
       "출전 기회(minutes)": byTopic("minutes"),
       "어긴 약속(promise)": byTopic("promise"),
       "등번호(number)": byTopic("number"),

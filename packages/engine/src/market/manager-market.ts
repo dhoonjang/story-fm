@@ -9,6 +9,7 @@ import { boardExpectation, computeStandings, type StandingRow } from "../competi
 import { syncDefaultTraining } from "../squad/training-plan";
 import { expirePendingPress, openAppointmentPress } from "../club/press";
 import { derbyOf } from "../data/derbies";
+import { clearClubVision, standClubVision } from "../club/vision";
 import { payManagerSeverance, recordFinance } from "../club/finance";
 import { spendFromWallet, walletOf } from "../club/manager-wallet";
 import {
@@ -936,11 +937,22 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
     crossedLeague: fromLeague !== leagueOfTeamIn(state, offer.teamId),
   });
   /**
+   * 앞 구단의 다년 계획은 지고 가지 않고, 새 구단의 계획이 **부임하는 그 자리에서**
+   * 선다 (career.md §5.1). 다음 전환까지 미루면 그 시즌 내내 화면과 GM이 순수
+   * 폴백을 읽는데, 그 `since`는 읽는 시점의 시즌이라 계획이 한 번 다시 시작한 것처럼
+   * 보인다 — 「1년차」가 두 시즌 연속 뜬다.
+   *
+   * ⚠️ **`reseatClubPersonas` 뒤여야 한다.** `standClubVision`은 `ownerOf(state)`로
+   * 원형 표를 고르는데, 그 앞에서는 구단주 페르소나가 아직 **앞 구단 사람**이다.
+   */
+  clearClubVision(state);
+  standClubVision(state);
+  /**
    * **부임 회견이 열린다** (career.md §5.1 · people.md §4). 앞 구단의 회견은 위에서
    * 이미 `expired`로 닫혔으므로 이 자리가 그것을 거절로 읽지 않는다 — 순서가
    * 뒤집히면 이직 하나로 언론 평판이 깎인다.
    *
-   * ⚠️ **기자단이 다시 선 뒤여야 한다** — `reporterFor`가 `reportersOf(state)`를
+   * ⚠️ **구단에 묶인 것이 다 선 뒤여야 한다** — `reporterFor`가 `reportersOf(state)`를
    * 읽는데, 리그를 건너는 이직이면 그 앞에서는 아직 앞 리그의 기자단이다.
    * 전임의 사실은 제안이 들고 온 것이다: 그 벤치가 비어 있었던 이유가 그것이다.
    */

@@ -59,6 +59,10 @@ import {
   teamName,
   topNarrative,
   userPlayers,
+  visionOf,
+  visionReadings,
+  visionSpanOf,
+  visionYearOf,
   weeklyWagesOf,
   type ChatTurn,
   type CoachCue,
@@ -85,6 +89,7 @@ import {
   tacticToggleWord,
   tacticsBrief,
   TRANSFER_REQUEST_REASON_KO,
+  visionItemText,
   type CharacterEntry,
   type CharacterInjection,
   type ScoutReportCard,
@@ -130,10 +135,12 @@ export function describePersona(entry: CharacterEntry): string {
     ...(entry.motivation ? [`동기: ${entry.motivation}`] : []),
     ...(entry.speechStyle ? [`말투: ${entry.speechStyle.note}`] : []),
     ...(entry.speechStyle?.samples ?? []).map((s) => `  예) ${s}`),
-    // 관계 초기값 — 원형에서 파생한 첫인상이다 (people.md §6). 그 뒤의 일은 기억이 갖는다
-    ...(entry.relations ?? []).map(
-      (r) =>
-        `관계: ${r.name} — ${r.stance === "aligned" ? "결이 맞는다" : "결이 부딪힌다"} (먼저 보는 것: 나 ${r.ours} · 상대 ${r.theirs})`,
+    // 관계 — 원형에서 파생한 첫인상(people.md §6)과 감독이 세운 사이(§5-3). 그 뒤의 일은 기억이 갖는다
+    ...(entry.relations ?? []).map((r) =>
+      // 감독이 붙여 준 사이에는 원형 축이 없다 — 그 자리에 섰다는 사실 하나가 근거다
+      r.bond
+        ? `관계: ${r.name} — 감독이 붙여 준 사이 (내가 ${r.bond === "mentor" ? "멘토" : "멘티"})`
+        : `관계: ${r.name} — ${r.stance === "aligned" ? "결이 맞는다" : "결이 부딪힌다"} (먼저 보는 것: 나 ${r.ours} · 상대 ${r.theirs})`,
     ),
     // 감독이 아는 만큼만 그린다 — 소문으로만 아는 사람에게 속내를 주면 만난 적 없는
     // 사람의 목소리가 난다. 사실로 적는다: 카드의 지시문은 모델이 그 문장대로 쓴다
@@ -828,6 +835,21 @@ export function buildGmStateNote(
         // 배치와 함께 낸다. 모양과 적응도는 코치의 말에 그대로 실린다
         `전술: ${tac.formation} · 선발 평균 적응 ${familiarityLabel(squadFamiliarity(state, state.userTeamId))}`,
         `재정: 잔고 ${formatMoney(finance.balance)} · 주급 ${formatMoney(weeklyWagesOf(state, state.userTeamId))}/주 · 이적예산 ${formatMoney(finance.transferBudget)}`,
+        /**
+         * **구단주가 건 다년 계획** (career.md §5) — 시즌 끝에 묻는 것이 순위 한 칸이
+         * 아니라는 사실이 여기 실려야 국부펀드형과 지역 유지형이 다르게 말한다.
+         * 시즌에 한 번 바뀌는 값이라 이 층에서도 안정적이다.
+         */
+        (() => {
+          const vision = visionOf(state);
+          // 0경기 순위는 팀 id 정렬일 뿐이다 — 아직 자리가 없으면 코어에 0을 넘긴다
+          const seat = { position: played > 0 ? rank : 0, leagueSize: standings.length };
+          const items = visionReadings(state, seat).map(visionItemText);
+          return (
+            `구단 비전 ${visionYearOf(vision, state.season)}년차/${visionSpanOf(vision)}년 계획: ` +
+            items.join(" · ")
+          );
+        })(),
         /**
          * 선수단 — **이름 명단이다. 이름뿐이다.** "누가 우리 팀인가"는 매 장면의 전제라
          * 입력에 없으면 GM이 없는 선수를 세우고, 명단은 영입·승격마다 바뀌어 캐시 층에

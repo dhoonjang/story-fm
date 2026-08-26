@@ -70,6 +70,8 @@ const ARRAY_FIELDS = [
   "trainingReports",
   // 약속 장부 — 옛 세이브엔 없다 (people.md §5-2)
   "promises",
+  // 멘토링 쌍 — 옛 세이브엔 없다 (people.md §5-3)
+  "mentoring",
   // 재정 보고서는 다음 달 1일부터 쌓인다. 옛 원장 엔트리는 category가 없어
   // 집계에서 "기타"로 읽힌다 (finance.ts categoryOf)
   "financeReports",

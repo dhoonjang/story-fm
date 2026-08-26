@@ -392,7 +392,17 @@ const AXIS_COST: Record<TacticAxisKey, number> = {
 };
 
 /** 여섯 축의 키만 — 지문·거리 계산이 훑는 순서다. `TACTIC_AXES`가 그 순서를 갖는다 */
-const TACTIC_AXIS_KEYS: readonly TacticAxisKey[] = TACTIC_AXES.map((axis) => axis.key);
+export const TACTIC_AXIS_KEYS: readonly TacticAxisKey[] = TACTIC_AXES.map((axis) => axis.key);
+
+/**
+ * 축의 키를 **스키마가 드는 자리** — 클럽 비전의 `style` 항목이 겨누는 축이다
+ * (docs/simulation/career.md §5). 낱말표(`TACTIC_AXES`)가 원본이라 여기서 키를
+ * 다시 적지 않는다 — 두 벌이면 축이 하나 늘 때 한쪽만 늘어난다.
+ */
+export const TacticAxisKeySchema = z.enum([TACTIC_AXIS_KEYS[0]!, ...TACTIC_AXIS_KEYS.slice(1)] as [
+  TacticAxisKey,
+  ...TacticAxisKey[],
+]);
 
 /**
  * 축의 **양 끝이 요구하는 능력**.

@@ -11,6 +11,8 @@ import {
 import {
   boardExpectationText,
   INTEREST_STAGE_KO,
+  visionItemText,
+  VISION_CODES,
   milestonePhrase,
   PLAYER_ISSUE_REASONS,
   PROMISE_KIND_KO,
@@ -21,8 +23,10 @@ import {
   type PlayerIssueReason,
   type PromiseKind,
   type TransferRequestReason,
+  type VisionCode,
 } from "./records";
 import { SQUAD_STATUS_KO, type SquadStatus } from "./squad-rules";
+import { TACTIC_AXIS_KEYS, type TacticAxisKey } from "./tactics";
 
 /**
  * 기자회견 (PRESS_CONFERENCE) — 세계가 감독에게 **대답을 요구하는 자리**.
@@ -145,6 +149,20 @@ export const PressFactKindSchema = z.enum([
    * 감독이 처음 이름을 부를 수 있는 자리라 `about`이 걸린다.
    */
   "key-player",
+  /**
+   * **지난 시즌의 보드 평가** — 최종 순위·그 시즌의 기대와 갈래·달성 여부
+   * (시즌 리뷰 면담 — career.md §5). `tags[0]`이 등급, `tags[1]`이 기대의 갈래다.
+   */
+  "season-verdict",
+  /**
+   * **클럽 비전 한 항목의 진행도** — 코드·목표·달성률·가중치 (career.md §5).
+   * `tags[0]`이 항목 코드, `tags[1]`은 `style`일 때만 그 축이다.
+   */
+  "vision",
+  /** 그 시즌 구단주 요청(§5.2)의 이행·불이행 건수 */
+  "demands-kept",
+  /** 새 시즌 이적 예산 — 구단주가 자리에서 밝히는 숫자다 */
+  "budget",
 ]);
 /**
  * 회견의 재료 — **사실 한 줄.** 질문이 아니다.
@@ -280,6 +298,12 @@ export const APPROACH_TOPICS = [
   "morale",
   /** 성적이 보드 기대 아래다 — 구단주가 온다 (보드 요청, career.md §5) */
   "results",
+  /**
+   * **시즌이 끝났다** — 구단주가 지난 시즌의 평가를 들고 마주 앉는다 (career.md §5
+   * 「시즌 리뷰 면담」). 압력이 아니라 **달력이 여는** 유일한 주제라 눈금도 계단도
+   * 타지 않는다 (people.md §8).
+   */
+  "season-review",
 ] as const;
 export const ApproachTopicSchema = z.enum(APPROACH_TOPICS);
 export type ApproachTopic = z.infer<typeof ApproachTopicSchema>;
@@ -362,6 +386,11 @@ export const ApproachContextSchema = z.object({
      * 선수이고, 금액 요청이면 `value`가 목표액이다.
      */
     "board-demand",
+    /**
+     * 시즌 리뷰 면담 — `value`가 지난 시즌 최종 순위, `limit`이 그 시즌의 기대 순위다
+     * (career.md §5). 시즌 번호는 사실 카드가 든다.
+     */
+    "season-review",
   ]),
   /** 불만의 사유 코드 (`PLAYER_ISSUE_REASONS`) — 있는 갈래에만 */
   reason: z.enum(PLAYER_ISSUE_REASONS).optional(),
@@ -580,7 +609,19 @@ export function pressFactText(fact: PressFact): string {
       return `1군 평균 폼 ${sub ?? ""}` + (tags[1] ? ` · 리더 그룹 ${tags[1]}` : "");
     case "standing":
       if (sub === "board-target") {
-        return `보드 기대 ${v.rank ?? 0}위 (${boardExpectationText((tags[1] ?? "mid") as BoardExpectationCode)})`;
+        /**
+         * 갈래가 바뀐 시즌에는 **옛 기대가 함께 선다** (career.md §5 「시즌 리뷰 면담」) —
+         * 승격·강등으로 체급이 옮겨 간 것을 모르면 구단주가 그 변화를 말할 근거가 없다.
+         * 안 바뀐 시즌의 카드에는 `tags[2]`도 `previous`도 없다.
+         */
+        const before =
+          tags[2] === undefined
+            ? ""
+            : ` (지난 시즌 ${boardExpectationText(tags[2] as BoardExpectationCode, v.previous)})`;
+        return (
+          `보드 기대 ${v.rank ?? 0}위 (${boardExpectationText((tags[1] ?? "mid") as BoardExpectationCode)})` +
+          before
+        );
       }
       if (sub === "warnings") return `보드 경고 ${v.count ?? 0}/${v.limit ?? 3}`;
       if (sub === "versus") return `리그 ${v.rank ?? 0}위 · ${name} ${v.opponentRank ?? 0}위`;
@@ -612,6 +653,33 @@ export function pressFactText(fact: PressFact): string {
         causeTail(d.tags?.[1]) +
         (d.date ? ` · 기한 ${d.date}` : "")
       );
+    case "season-verdict":
+      return (
+        `시즌 ${v.season ?? 0} 최종 ${v.rank ?? 0}위` +
+        ` · 기대 ${boardExpectationText((tags[1] ?? "mid") as BoardExpectationCode, v.target)}` +
+        ` — ${sub === "met" ? "달성" : "미달"}`
+      );
+    case "vision":
+      /**
+       * 항목 줄은 **비전의 표가 쓴다** (`visionItemText` — career.md §5). 카드가 문장을
+       * 따로 만들면 같은 항목이 화면과 구단주의 입에서 다른 이름으로 선다.
+       * 코드가 표 밖이면(옛 세이브) 그릴 것이 없어 이름만 남긴다.
+       */
+      if (!(VISION_CODES as readonly string[]).includes(sub ?? ""))
+        return `구단 비전 — ${sub ?? ""}`;
+      return `구단 비전 — ${visionItemText({
+        code: sub as VisionCode,
+        target: v.target ?? 0,
+        weight: v.weight ?? 0,
+        progress: v.progress ?? 0,
+        ...((TACTIC_AXIS_KEYS as readonly string[]).includes(tags[1] ?? "")
+          ? { axis: tags[1] as TacticAxisKey }
+          : {}),
+      })}`;
+    case "demands-kept":
+      return `구단주 요청 ${v.total ?? 0}건 — 이행 ${v.met ?? 0} · 불이행 ${v.failed ?? 0}`;
+    case "budget":
+      return `새 시즌 이적 예산 ${formatMoney(v.budget ?? 0)}`;
     case "milestone":
       return `${name} ${milestonePhrase((sub ?? "apps") as MilestoneCode, v.value ?? 1)}`;
     case "contract-demand":
@@ -766,5 +834,7 @@ export function approachContextText(
       return who
         ? `구단주 요청 · ${who} 매각`
         : `구단주 요청 · 매각 ${formatMoney(context.value ?? 0)}`;
+    case "season-review":
+      return `시즌 결산 · 최종 ${context.value ?? 0}위 · 기대 ${context.limit ?? 0}위`;
   }
 }

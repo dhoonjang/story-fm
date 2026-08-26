@@ -233,24 +233,25 @@
 전부 `gamePlayerId`로 선수를 참조한다. 공통 패턴: **현재 상태 = 아직 닫히지 않은
 row, 지난 일 = 그대로 이력.**
 
-| 엔티티                             | 무엇 · "현재"의 표현                                                                                          | 정의                |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------- |
-| `injuries` `Injury`                | 부위·심각도·원인 — `returnedOn === null`이 현재 부상                                                          | `domain/records.ts` |
-| `bookings` `Booking`               | 경고·퇴장 (경기·분)                                                                                           | `domain/records.ts` |
-| `suspensions` `Suspension`         | 정지 — `status === "active"`, 잔여는 `length − served`                                                        | `domain/records.ts` |
-| `transfers` `Transfer`             | **팀 변경 원장** — 이적·임대·자유·유스·은퇴                                                                   | `domain/records.ts` |
-| `growthLog` `GrowthEntry`          | 성장 한 칸 — 대상은 축·`pos:CODE`·`tactical`, 출처는 `origin` 코드. **감독 팀 선수만** (아래 ⚠️)              | `domain/records.ts` |
-| `trainingReports` `TrainingReport` | 훈련 결산 카드 — 한 구간(`from`~`to`)이 남긴 것: 세션 수 · `moved` · `marks`(갈래 코드와 근거 한 줄). 40장 링 | `domain/records.ts` |
-| `seasonStats` `SeasonStat`         | 시즌 × 팀 — 출전·출전 분·득점·도움·`ratingSum`·슛·xG·선방·클린시트·카드 (2군은 `reserve*`로 갈린다)           | `domain/records.ts` |
-| `issues` `PlayerIssue`             | 라커룸 불만 (`unhappy`)                                                                                       | `domain/records.ts` |
-| `settlingEvents` `SettlingEvent`   | 면담·팀토크·주장 지명이 새 영입에게 남긴 크레딧                                                               | `domain/records.ts` |
-| `transferList` `TransferListing`   | 이적 리스트 등재 — 호가와 함께                                                                                | `domain/records.ts` |
-| `playerTraining` `PlayerTraining`  | 개인 훈련 — 겨냥한 축(1·2군) · 배우는 자리(1군만)                                                             | `domain/records.ts` |
-| `roleMemory` `RoleMemory`          | 역할 기억 — 선수 × 자리 → 마지막에 맡긴 역할                                                                  | `domain/tactics.ts` |
-| `scoutReports` `ScoutReport`       | 스카우트 파견 — `completedOn === null`이 파견 중                                                              | `domain/records.ts` |
-| `deferredScouts` `DeferredScout`   | 동시 한도에 막혀 못 나간 파견 요청 — 다음 턴 입력에 사실로 남는다 ([player.md](player.md) §9.4)               | `domain/records.ts` |
-| `milestones` `Milestone`           | 마일스톤 — 데뷔·첫 골·구단 통산 문턱·해트트릭. **감독 팀 선수만** (아래 ⚠️)                                   | `domain/records.ts` |
-| `retired` `RetiredPlayer`          | **은퇴 명부** — 그만둔 사람의 id·이름·생일·주 포지션·마지막 팀·날짜·시즌·사유. **감독 팀에서 은퇴한 선수만**  | `domain/records.ts` |
+| 엔티티                             | 무엇 · "현재"의 표현                                                                                             | 정의                |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------- |
+| `injuries` `Injury`                | 부위·심각도·원인 — `returnedOn === null`이 현재 부상                                                             | `domain/records.ts` |
+| `bookings` `Booking`               | 경고·퇴장 (경기·분)                                                                                              | `domain/records.ts` |
+| `suspensions` `Suspension`         | 정지 — `status === "active"`, 잔여는 `length − served`                                                           | `domain/records.ts` |
+| `transfers` `Transfer`             | **팀 변경 원장** — 이적·임대·자유·유스·은퇴                                                                      | `domain/records.ts` |
+| `growthLog` `GrowthEntry`          | 성장 한 칸 — 대상은 축·`pos:CODE`·`tactical`, 출처는 `origin` 코드. **감독 팀 선수만** (아래 ⚠️)                 | `domain/records.ts` |
+| `trainingReports` `TrainingReport` | 훈련 결산 카드 — 한 구간(`from`~`to`)이 남긴 것: 세션 수 · `moved` · `marks`(갈래 코드와 근거 한 줄). 40장 링    | `domain/records.ts` |
+| `seasonStats` `SeasonStat`         | 시즌 × 팀 — 출전·출전 분·득점·도움·`ratingSum`·슛·xG·선방·클린시트·카드 (2군은 `reserve*`로 갈린다)              | `domain/records.ts` |
+| `issues` `PlayerIssue`             | 라커룸 불만 (`unhappy`)                                                                                          | `domain/records.ts` |
+| `settlingEvents` `SettlingEvent`   | 면담·팀토크·주장 지명이 새 영입에게 남긴 크레딧                                                                  | `domain/records.ts` |
+| `mentoring` `Mentoring`            | **멘토링 쌍** — 감독이 붙여 준 고참과 유망주. `until === undefined`가 서 있는 사이 ([people.md](people.md) §5-3) | `domain/records.ts` |
+| `transferList` `TransferListing`   | 이적 리스트 등재 — 호가와 함께                                                                                   | `domain/records.ts` |
+| `playerTraining` `PlayerTraining`  | 개인 훈련 — 겨냥한 축(1·2군) · 배우는 자리(1군만)                                                                | `domain/records.ts` |
+| `roleMemory` `RoleMemory`          | 역할 기억 — 선수 × 자리 → 마지막에 맡긴 역할                                                                     | `domain/tactics.ts` |
+| `scoutReports` `ScoutReport`       | 스카우트 파견 — `completedOn === null`이 파견 중                                                                 | `domain/records.ts` |
+| `deferredScouts` `DeferredScout`   | 동시 한도에 막혀 못 나간 파견 요청 — 다음 턴 입력에 사실로 남는다 ([player.md](player.md) §9.4)                  | `domain/records.ts` |
+| `milestones` `Milestone`           | 마일스톤 — 데뷔·첫 골·구단 통산 문턱·해트트릭. **감독 팀 선수만** (아래 ⚠️)                                      | `domain/records.ts` |
+| `retired` `RetiredPlayer`          | **은퇴 명부** — 그만둔 사람의 id·이름·생일·주 포지션·마지막 팀·날짜·시즌·사유. **감독 팀에서 은퇴한 선수만**     | `domain/records.ts` |
 
 ⚠️ **`growthLog`는 감독 팀 선수 것만 담는다.** 4,000행에서 오래된 쪽부터 잘리는
 로그인데, 코어 월간 성장(`developsByCore` — 우리 2군 + 모든 타 팀)을 전부 남기면
@@ -287,19 +288,20 @@ row, 지난 일 = 그대로 이력.**
 
 ### 3.5 진행 중인 흥정 · 세계의 부름
 
-| 엔티티                                | 무엇                                                          | 정의                   |
-| ------------------------------------- | ------------------------------------------------------------- | ---------------------- |
-| `negotiations` `Negotiation`          | 진행 중 협상 — 영입·매각·재계약·임대(양방향)                  | `domain/records.ts`    |
-| ↳ `NegotiationRound`                  | 오퍼 한 번 — 조건·응답 예정일·코어 확률·판정·`pitch`          | `domain/records.ts`    |
-| ↳ `Medical`                           | 합의와 계약 사이의 검진 — `scheduled`/`passed`/`flagged`      | `domain/records.ts`    |
-| ↳ `PitchClaim`                        | 설득 논거 10종 — 코어가 사실 대조한다                         | `domain/persuasion.ts` |
-| `pressConferences` `PressConference`  | 기자회견 — 열린 시점과 답한 시점이 갈린다                     | `domain/press.ts`      |
-| ↳ `PressFact`                         | **사실 카드** (질문 문장이 아니다) — 기자는 이 밖을 못 묻는다 | `domain/press.ts`      |
-| `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리 (people.md §8)     | `domain/press.ts`      |
-| `approachPressure` `ApproachPressure` | 압력 눈금 — 주제별 누적과 계단. 파생할 수 없는 유일한 값      | `domain/press.ts`      |
-| `pressLeaks` `PressLeak`              | 언론 유출 — 다음 회견이 실어 갈 때까지만 남는다 (§8 계단 4)   | `domain/press.ts`      |
-| `pressSackings` `PressSacking`        | 라이벌 구단의 경질 — 다음 회견이 실어 갈 때까지만 남는다      | `domain/press.ts`      |
-| `aiDeals` `AiDeal`                    | 이번 주에 정해진, 날짜가 흩어진 AI 이적                       | `market/ai-market.ts`  |
+| 엔티티                                | 무엇                                                                                                      | 정의                   |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `negotiations` `Negotiation`          | 진행 중 협상 — 영입·매각·재계약·임대(양방향)                                                              | `domain/records.ts`    |
+| ↳ `NegotiationRound`                  | 오퍼 한 번 — 조건·응답 예정일·코어 확률·판정·`pitch`                                                      | `domain/records.ts`    |
+| ↳ `Medical`                           | 합의와 계약 사이의 검진 — `scheduled`/`passed`/`flagged`                                                  | `domain/records.ts`    |
+| ↳ `PitchClaim`                        | 설득 논거 10종 — 코어가 사실 대조한다                                                                     | `domain/persuasion.ts` |
+| `pressConferences` `PressConference`  | 기자회견 — 열린 시점과 답한 시점이 갈린다                                                                 | `domain/press.ts`      |
+| ↳ `PressFact`                         | **사실 카드** (질문 문장이 아니다) — 기자는 이 밖을 못 묻는다                                             | `domain/press.ts`      |
+| `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리 (people.md §8)                                                 | `domain/press.ts`      |
+| `approachPressure` `ApproachPressure` | 압력 눈금 — 주제별 누적과 계단. 파생할 수 없는 유일한 값                                                  | `domain/press.ts`      |
+| `pressLeaks` `PressLeak`              | 언론 유출 — 다음 회견이 실어 갈 때까지만 남는다 (§8 계단 4)                                               | `domain/press.ts`      |
+| `pressSackings` `PressSacking`        | 라이벌 구단의 경질 — 다음 회견이 실어 갈 때까지만 남는다                                                  | `domain/press.ts`      |
+| `clubVision` `ClubVision`             | **클럽 비전** — 구단주 원형이 건 다년 계획. 코드·목표·가중치·기한만 남고 진행도는 파생이다 (career.md §5) | `domain/records.ts`    |
+| `aiDeals` `AiDeal`                    | 이번 주에 정해진, 날짜가 흩어진 AI 이적                                                                   | `market/ai-market.ts`  |
 
 이것들이 세이브에 남는 이유는 같다 — **두 시점 사이에 걸쳐 있어** 파생으로 되돌릴
 수 없다. 협상은 며칠에 걸쳐 오퍼가 오가고, 회견과 다가옴은 열린 뒤 감독이 다음 날
