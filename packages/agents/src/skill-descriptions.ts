@@ -338,13 +338,11 @@ export const SKILL_CATALOG = [
     group: "조회",
     readOnly: true,
     description:
-      'view="standings"는 순위표(competition으로 다른 리그·대항전도 가능), view="fixtures"는 일정 검색이다. ' +
-      '국내 컵은 view="standings"가 대진표를 돌려준다. ' +
-      '일정은 조건으로 찾는다 — team(기준 팀, 생략하면 우리 팀, "all"이면 대회 전체), opponent(상대 팀 — 맞대결만 보고 전적 요약이 붙는다), competition(epl·ucl·facup 등), when(past·upcoming·both), from·to(YYYY-MM-DD 범위), round, count. ' +
-      '순위표에는 최근 5경기 폼이 함께 나온다. split="home"·"away"를 주면 홈 소계·원정 소계로 다시 세운 표가 온다 — "우리 원정 성적"을 물으면 합계표 말고 이것이다. ' +
-      'view="leaders"는 그 리그의 개인 순위(득점·도움·평점·클린시트·징계 상위 10)와 팀 열(득점·실점·무실점·슛·xG)이다 — 득점왕 경쟁도 "리그 도움 1위"도 여기서 답한다. key로 한 축만 볼 수 있다. 대항전은 시즌 기록이 대회별로 갈리지 않아 개인 순위가 서지 않고 팀 열만 온다. ' +
+      'view="standings" 순위표(competition으로 다른 리그·대항전도) — 행마다 최근 5경기 폼이 붙고, split="home"·"away"면 홈·원정 소계로 다시 세운 표다. 국내 컵은 대진표가 온다. ' +
+      'view="leaders" 그 리그의 개인 순위(득점·도움·평점·클린시트·징계 상위 10 · key로 한 축만)와 팀 열(득점·실점·무실점·슛·xG). 대항전은 개인 순위가 없다. ' +
+      'view="fixtures" 일정 검색 — team(기준 팀, 생략하면 우리 팀, "all"이면 대회 전체), opponent(맞대결만 · 전적 요약), competition, when(past·upcoming·both), from·to, round, count. ' +
       "season을 주면 지나간 시즌 — 순위표는 그때의 최종 표, 일정은 결산에 남은 감독 팀의 경기뿐이다. " +
-      'view="calendar"는 감독의 달력 — 경기·훈련·이적창 개폐를 한 축에서 날짜순으로 본다. 기본은 오늘부터 14일이고 from·to·days로 범위를, type="training"으로 훈련만 볼 수 있다. 훈련 계획을 묻거나 새 훈련을 잡기 전에 이걸로 확인하라. from이 지난 날이면 그 사이 벌어진 일이 일지로 함께 온다.',
+      'view="calendar" 감독의 달력 — 경기·훈련·이적창을 날짜순으로. 기본 오늘부터 14일이고 from·to·days로 범위를, type="training"으로 훈련만 본다. 새 훈련을 잡기 전에 이걸로 확인하라. from이 지난 날이면 그 사이 벌어진 일이 일지로 함께 온다.',
   },
   {
     name: "get_match_report",
