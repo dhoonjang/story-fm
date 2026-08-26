@@ -12,6 +12,7 @@ import {
   cupCatalogById,
   domesticCupById,
   financeOf,
+  groupOf,
   leaderGroupOf,
   isFriendly,
   leagueOfTeamIn,
@@ -19,6 +20,12 @@ import {
   playersOf,
   quickSimulate,
   declareRetirements,
+  settleYouthIntake,
+  signYouth,
+  youthIntakeOf,
+  youthIntakeDeadline,
+  academyUseOf,
+  youthCandidateFog,
   managerTrophiesOf,
   recordSeasonHistory,
   retirementDeclarationDate,
@@ -272,9 +279,21 @@ describe("시즌 전환 (season.md §6)", () => {
     expect(digest.some((d) => d.includes(`${target.name} 합류`))).toBe(true);
   });
 
+  /**
+   * **우리 팀은 전환이 계약시키지 않는다 — 후보로 세운다** (season.md §6). 계약이
+   * 서는 것은 감독이 고른 자리이거나 소집일이고, 어느 쪽이든 원장 줄과 계약이
+   * 한 자리에서 함께 선다.
+   */
   it("유스 콜업이 TRANSFER + CONTRACT와 함께 들어온다", () => {
     const state = createTestGame(5);
     transitionSeason(state);
+    // 전환 직후엔 후보만 서 있고 계약도 원장 줄도 없다
+    expect((state.youthCandidates ?? []).length).toBeGreaterThan(0);
+    expect(
+      state.transfers.filter((t) => t.type === "youth" && t.toTeamId === state.userTeamId),
+    ).toHaveLength(0);
+
+    settleYouthIntake(state, []);
     // 콜업은 원장에서 찾는다 — id 모양으로는 유스를 알 수 없다 (id에 출신이 없다)
     const calledUp = state.transfers.filter(
       (t) => t.type === "youth" && t.toTeamId === state.userTeamId,
@@ -997,5 +1016,139 @@ describe("시즌 시상 (season.md §6)", () => {
     expect(awardLine(award)).toContain("득점왕");
     expect(awardLine(award)).toContain("선수 p1");
     expect(awardLine(award)).toContain("25골");
+  });
+});
+
+/**
+ * 유스 인테이크 — **후보가 서고 감독이 첫 프로 계약을 쓴다** (season.md §6).
+ *
+ * 재는 것은 셋이다: 계약이 서는 자리가 전환에서 결정으로 옮겨졌는가, 답이 없을 때
+ * 코어가 옛 규칙 그대로 채우는가, 그리고 감독의 결정이 골문을 비울 수는 없는가.
+ * 어느 것도 화면에 드러나지 않는다 — 여름 한 번뿐인 사건이라 다음 여름에야 보인다.
+ */
+describe("유스 인테이크 (season.md §6)", () => {
+  /** 후보를 읽기만 하는 케이스가 함께 쓰는 세계 — 전환 한 번은 몇 초다 */
+  const READ = (() => {
+    const state = createTestGame(5);
+    transitionSeason(state);
+    return state;
+  })();
+
+  it("후보는 우리 팀에만 서고, AI 구단은 전환이 그 자리에서 계약한다", () => {
+    const rows = READ.youthCandidates ?? [];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row.teamId).toBe(READ.userTeamId);
+    // 후보는 아직 세계에 없다 — 명단에도 계약에도 없어야 한다
+    for (const row of rows) {
+      expect(READ.players.some((p) => p.id === row.player.id)).toBe(false);
+      expect(activeContract(READ, row.player.id)).toBeNull();
+    }
+    // AI 구단은 그대로 계약까지 마쳤다
+    const others = READ.transfers.filter(
+      (t) => t.type === "youth" && t.toTeamId !== READ.userTeamId,
+    );
+    expect(others.length).toBeGreaterThan(0);
+  });
+
+  it("기한은 선수단 소집일이고, 코어가 채울 자리가 앞에 선다", () => {
+    const rows = READ.youthCandidates ?? [];
+    expect(youthIntakeDeadline(READ)).toBe(READ.calendar.squadReturn);
+    for (const row of rows) expect(row.deadline).toBe(youthIntakeDeadline(READ));
+    // `autoSign`은 앞에서부터 연속이다 — 뒤섞이면 "앞에서부터 채운다"가 거짓이 된다
+    const flags = rows.map((row) => row.autoSign);
+    expect(flags).toEqual([...flags].sort((a, b) => Number(b) - Number(a)));
+    expect(flags.filter(Boolean).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * **안개는 흐릴 뿐 거짓말하지 않는다** (player.md §9.1 불변식 1). 후보는 아직 우리
+   * 선수가 아니라 `state`가 그를 못 찾는데, 그때 폭이 0이 되면 계약 전에 참값이
+   * 노출된다 — 그 자리를 지키는 케이스다.
+   */
+  it("후보의 잠재력 구간 안에 참값이 있고, 몇 번을 물어도 같다", () => {
+    for (const row of READ.youthCandidates ?? []) {
+      const fog = youthCandidateFog(READ.seed, row.player);
+      expect(fog.potential.margin).toBeGreaterThan(0);
+      expect(fog.potential.low).toBeLessThanOrEqual(row.player.attributes.potential);
+      expect(fog.potential.high).toBeGreaterThanOrEqual(row.player.attributes.potential);
+      expect(youthCandidateFog(READ.seed, row.player)).toEqual(fog);
+    }
+  });
+
+  it("답하지 않으면 코어가 앞에서부터 정해진 수만큼 계약한다", () => {
+    const state = createTestGame(5);
+    transitionSeason(state);
+    const rows = state.youthCandidates ?? [];
+    const auto = rows.filter((row) => row.autoSign).map((row) => row.player.id);
+    const digest: string[] = [];
+    settleYouthIntake(state, digest);
+
+    expect(state.youthCandidates).toHaveLength(0);
+    for (const id of auto) {
+      expect(
+        userPlayers(state).some((p) => p.id === id),
+        id,
+      ).toBe(true);
+      expect(activeContract(state, id), id).not.toBeNull();
+    }
+    // 나머지는 사라진다 — 명단에도 원장에도 남지 않는다
+    for (const row of rows) {
+      if (auto.includes(row.player.id)) continue;
+      expect(
+        state.players.some((p) => p.id === row.player.id),
+        row.player.id,
+      ).toBe(false);
+    }
+    expect(digest.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * **소프트락 방지는 감독의 결정 밖이다.** 골키퍼를 전부 은퇴로 잃은 여름에 감독이
+   * 필드 플레이어만 고르면, 코어가 남은 후보에서 골문을 채운다.
+   */
+  it("감독이 고른 이름만 계약하되, 포지션군이 무너지면 구단이 채운다", () => {
+    const state = createTestGame(5);
+    // 우리 골키퍼를 전부 은퇴 나이로 — 전환이 그들을 내보내고 후보 앞에 GK가 선다
+    for (const p of userPlayers(state).filter((p) => groupOf(p) === "GK")) {
+      p.birthdate = "1988-01-01";
+    }
+    transitionSeason(state);
+    expect(userPlayers(state).filter((p) => groupOf(p) === "GK")).toHaveLength(0);
+
+    const rows = state.youthCandidates ?? [];
+    const outfield = rows.find((row) => groupOf(row.player) !== "GK");
+    expect(outfield).toBeTruthy();
+    const result = signYouth(state, { playerIds: [outfield!.player.id] });
+    expect(result.ok).toBe(true);
+
+    expect(state.youthCandidates).toHaveLength(0);
+    // 감독이 고른 한 명 + 구단이 채운 골키퍼
+    expect(userPlayers(state).some((p) => p.id === outfield!.player.id)).toBe(true);
+    expect(userPlayers(state).filter((p) => groupOf(p) === "GK").length).toBeGreaterThan(0);
+    // 고르지도 채워지지도 않은 후보는 사라진다
+    expect(userPlayers(state).filter((p) => rows.some((r) => r.player.id === p.id)).length).toBe(
+      1 + userPlayers(state).filter((p) => groupOf(p) === "GK").length,
+    );
+  });
+
+  it("후보 수와 잠재력 여지는 체급과 아카데미 활용도의 결정적 함수다", () => {
+    // 활용도 0과 1이 후보 수와 여지를 함께 움직인다
+    expect(youthIntakeOf(2, 1, 0)).toEqual({ candidates: 6, fills: 2, upsideBonus: 0 });
+    expect(youthIntakeOf(2, 1, 1)).toEqual({ candidates: 8, fills: 2, upsideBonus: 6 });
+    // 체급이 낮으면 고를 여지가 좁다
+    expect(youthIntakeOf(2, 4, 0).candidates).toBe(4);
+    /**
+     * **후보는 언제나 코어가 채울 수를 담는다** — 여유에만 상한이 있고 총량에는 없다.
+     * 총량을 자르면 빈자리가 그 상한을 넘는 여름에 방치의 대가가 옛 규칙보다 커진다.
+     */
+    const many = youthIntakeOf(20, 1, 1);
+    expect(many.candidates).toBeGreaterThanOrEqual(many.fills);
+    expect(many.candidates - many.fills).toBe(6);
+  });
+
+  it("아카데미 활용도는 표본이 얕으면 중립값을 낸다", () => {
+    const state = createTestGame(5);
+    // 2군 출전 기록이 없는 첫 시즌 — 0으로 굳으면 첫 인테이크가 이유 없이 마른다
+    expect(academyUseOf(state, state.userTeamId, state.season)).toBe(0.5);
   });
 });

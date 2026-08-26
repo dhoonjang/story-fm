@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ageOf, isReserveMatch, PLAYER_ARCHETYPE_TRAITS } from "@story-fm/domain";
 import {
+  academyUseOf,
   LOAN_BENCH_RUN_ALERT,
   leagueOfTeamIn,
   loanPlayer,
@@ -11,6 +12,7 @@ import {
   setDevelopmentFocus,
   squadLevelOf,
   teamShortNameIn,
+  transitionSeason,
   type GameState,
 } from "@story-fm/engine";
 import { createTestGame } from "../test/helpers";
@@ -212,6 +214,17 @@ describe("한 시즌의 유스 육성", () => {
     const LAZY_AT = 0.95;
     const diligent = baselineU21.filter((id) => (professionalismOf(id) ?? 0) >= DILIGENT_AT);
     const lazy = baselineU21.filter((id) => (professionalismOf(id) ?? 1) <= LAZY_AT);
+    /**
+     * **다음 여름의 인테이크** — 이 시즌 2군에 누구를 세웠는가가 한 해 뒤 후보의
+     * 수와 여지로 돌아온다 (season.md §6 유스 인테이크). 전환 한 번을 더 굴리는 것은
+     * 그 되돌아옴이 이 하네스가 이미 만든 2군 시즌 위에서만 보이기 때문이다 —
+     * 활용도는 그 시즌 2군 출전 장부에서 나온다.
+     */
+    const academyUse = academyUseOf(state, state.userTeamId, state.season);
+    transitionSeason(state);
+    const intake = (state.youthCandidates ?? []).map((row) => row.player);
+    const intakeUpside = intake.map((p) => p.attributes.potential - p.attributes.overall);
+
     const readings: Readings<typeof YOUTH_DEVELOPMENT> = {
       "2군 경기 수": reserveMatches.length,
       "결과 없는 2군 경기": unplayed,
@@ -230,6 +243,10 @@ describe("한 시즌의 유스 육성", () => {
       "성실한 U21 표본": diligent.length,
       "게으른 U21 표본": lazy.length,
       "직업의식 격차": growthOf(diligent) - growthOf(lazy),
+      "아카데미 활용도": academyUse,
+      "다음 여름 유스 후보": intake.length,
+      "유스 후보 잠재력 여지 — 평균": mean(intakeUpside),
+      "유스 후보 잠재력 여지 — 최대": Math.max(...intakeUpside),
     };
     console.log(reportOf(YOUTH_DEVELOPMENT, readings, `시드 42 · ${state.date}`));
     expect(outOfBand(YOUTH_DEVELOPMENT, readings)).toEqual([]);

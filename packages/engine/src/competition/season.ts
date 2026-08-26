@@ -12,6 +12,7 @@ import type {
   SeasonMatchRow,
   SeasonTableRow,
   Trophy,
+  YouthCandidate,
 } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import { SHARPNESS_PRESEASON } from "@story-fm/sim";
@@ -38,6 +39,7 @@ import {
   buildSeasonCalendar,
   buildTransferWindows,
   contractUntil,
+  squadReturnOf,
   seasonDate,
   seasonEndDate,
   seasonYear,
@@ -1237,6 +1239,240 @@ function retiredRowOf(
   };
 }
 
+// ── 유스 인테이크 — 후보·결정·기본값 (season.md §6) ────────
+
+/**
+ * 포지션군 최소 인원 — **소프트락 방지선이다.** 감독이 후보를 전부 돌려보내도 코어가
+ * 이 아래는 채운다: 골문은 대체할 자리가 없다.
+ */
+const MIN_GROUP: Record<PositionGroup, number> = { GK: 2, DF: 5, MF: 4, FW: 4 };
+
+/**
+ * 체급이 얹는 후보 여유 — **감독이 고를 여지**다. 코어가 채울 수 **위에** 이만큼이
+ * 더 서므로, 방치해도 옛 규칙 그대로이고 고르면 그만큼 더 고를 수 있다.
+ *
+ * ⚠️ 여유에만 상한이 있고 **후보 줄 전체에는 없다.** 총량을 자르면 빈자리가 그 상한을
+ * 넘는 여름에 코어가 채워야 할 수를 채우지 못해, 감독이 답하지 않은 것만으로 스쿼드가
+ * 마른다 — 방치의 대가는 옛 규칙 그대로여야 한다.
+ */
+const YOUTH_POOL_BY_TIER: Record<1 | 2 | 3 | 4, number> = { 1: 4, 2: 3, 3: 3, 4: 2 };
+
+/** 아카데미 활용도(0~1)가 더하는 후보 수 */
+const YOUTH_POOL_ACADEMY = 2;
+
+/** 아카데미 활용도가 잠재력 여지의 위끝에 얹는 폭 (`YOUTH_UPSIDE.max` 위) */
+const YOUTH_ACADEMY_UPSIDE = 6;
+
+/**
+ * 아카데미가 자리를 내주는 나이 — 실제 U21 리그의 자격과 같은 자다. 밴드가 아니라
+ * 문턱인 것은 "2군에 그 아이의 자리가 있었는가"만 묻기 때문이다.
+ */
+const ACADEMY_AGE_MAX = 21;
+
+/**
+ * 활용도를 잴 수 있는 최소 표본 — 우리 2군 리그 출전 총합. 이 아래면 잴 것이 없는
+ * 해다(첫 시즌 · 옛 세이브 · 2군 일정이 짧았던 해).
+ */
+const ACADEMY_USE_MIN_APPS = 20;
+
+/** 잴 것이 없는 해의 활용도 — 0으로 굳히면 첫 인테이크가 이유 없이 마른다 */
+const ACADEMY_USE_NEUTRAL = 0.5;
+
+/**
+ * **아카데미 활용도** — 지난 시즌 우리 2군 리그 출전 중 만 `ACADEMY_AGE_MAX`세 이하가
+ * 차지한 몫 (season.md §6).
+ *
+ * 2군을 늙은 백업으로 채우면 아카데미에 자리가 없고, 그해 인테이크가 얇고 낮아진다 —
+ * 감독이 1·2군 이동과 임대로 내린 결정이 한 해 뒤 이 값으로 돌아온다.
+ *
+ * ⚠️ **지금 명단에 있는 사람의 출전만 센다.** 시즌 중에 떠난 선수는 나이를 되찾을
+ * 자리가 없어 분모에도 분자에도 들지 않는다 — 한쪽에만 들면 몫이 거짓이 된다.
+ */
+export function academyUseOf(state: GameState, teamId: string, season: number): number {
+  const apps = new Map<string, number>();
+  for (const stat of state.seasonStats) {
+    if (stat.season !== season || stat.teamId !== teamId) continue;
+    apps.set(stat.gamePlayerId, (apps.get(stat.gamePlayerId) ?? 0) + (stat.reserveApps ?? 0));
+  }
+  let total = 0;
+  let young = 0;
+  for (const player of playersOf(state, teamId)) {
+    const played = apps.get(player.id) ?? 0;
+    if (played === 0) continue;
+    total += played;
+    if (ageOf(player.birthdate, state.date) <= ACADEMY_AGE_MAX) young += played;
+  }
+  return total < ACADEMY_USE_MIN_APPS ? ACADEMY_USE_NEUTRAL : young / total;
+}
+
+/** 이번 여름 이 구단의 인테이크가 몇이고 얼마나 여지가 있는가 (season.md §6) */
+export interface YouthIntake {
+  /** 후보로 세울 수 — 감독 팀만 이만큼 서고, AI 구단은 `fills`만큼 곧바로 계약한다 */
+  candidates: number;
+  /** 답이 없을 때 코어가 채우는 수 — 옛 규칙 그대로 */
+  fills: number;
+  /** 잠재력 여지의 위끝에 얹는 폭 */
+  upsideBonus: number;
+}
+
+/**
+ * 이번 여름의 인테이크 — **체급과 아카데미 활용도의 결정적 함수** (season.md §6).
+ * 뽑기가 없으므로 감독이 2군에 자리를 준 만큼 다음 여름을 예측할 수 있다.
+ */
+export function youthIntakeOf(fills: number, tier: 1 | 2 | 3 | 4, academyUse: number): YouthIntake {
+  const extra = YOUTH_POOL_BY_TIER[tier] + Math.round(academyUse * YOUTH_POOL_ACADEMY);
+  return {
+    candidates: fills + extra,
+    fills,
+    upsideBonus: Math.round(academyUse * YOUTH_ACADEMY_UPSIDE),
+  };
+}
+
+/** 포지션군이 비어 코어가 반드시 채워야 하는 자리 — 후보 목록의 **앞**에 선다 */
+function forcedGroupsOf(squad: readonly GamePlayer[]): PositionGroup[] {
+  const forced: PositionGroup[] = [];
+  for (const group of Object.keys(MIN_GROUP) as PositionGroup[]) {
+    const have = squad.filter((p) => groupOf(p) === group).length;
+    for (let k = have; k < MIN_GROUP[group]; k++) forced.push(group);
+  }
+  return forced;
+}
+
+/** 유스가 명단에 서는 한 자리 — 계약·원장·등번호가 함께 선다 (한 곳에서만 일어난다) */
+function admitYouth(
+  state: GameState,
+  player: GamePlayer,
+  teamId: string,
+  on: string,
+  weeklyWage: number,
+  years: number,
+): void {
+  player.teamId = teamId;
+  state.players.push(player);
+  assignSquadNumber(state.players, player);
+  // 유스 콜업도 원장에 (fromTeamId = null)
+  state.transfers.push({
+    id: `tr-youth-${player.id}`,
+    gamePlayerId: player.id,
+    windowId: null,
+    fromTeamId: null,
+    toTeamId: teamId,
+    date: on,
+    type: "youth",
+    fee: 0,
+    reason: "youth-callup",
+  });
+  state.contracts.push({
+    id: `c-${player.id}`,
+    gamePlayerId: player.id,
+    teamId,
+    weeklyWage,
+    since: on,
+    until: contractUntil(on, years),
+    status: "active",
+  });
+}
+
+/**
+ * **1군이 매치데이 명단을 못 채우면 2군 상위 자원이 올라온다** (season.md §6).
+ * 그 외의 승강은 감독의 결정으로 남긴다 — 문턱을 따로 적지 않고 도메인의 매치데이
+ * 명단(`MATCHDAY_SQUAD`)을 그대로 읽는 것은 같은 규칙의 정의를 둘로 만들지 않기 위해서다.
+ *
+ * 전환과 인테이크 정리가 같은 함수를 부른다: 신인이 소집일에 들어와도 1군의 하한이
+ * 그날 다시 서야, 그 사이에 명단이 얕은 채로 프리시즌이 열리지 않는다.
+ */
+function promoteToMatchdaySquad(squad: GamePlayer[]): void {
+  const firstCount = () => squad.filter((p) => p.squadLevel !== "reserve").length;
+  for (const player of [...squad]
+    .filter((p) => p.squadLevel === "reserve")
+    .sort((a, b) => b.attributes.overall - a.attributes.overall)) {
+    if (firstCount() >= MATCHDAY_SQUAD) break;
+    player.squadLevel = "first";
+  }
+}
+
+/** 첫 프로 계약의 길이 — 유스는 3년으로 들어온다 */
+const YOUTH_CONTRACT_YEARS = 3;
+
+/**
+ * 감독의 답을 기다리는 마지막 날 — **선수단 소집일이다** (season.md §6).
+ * 조기 소집하면 기한도 함께 당겨진다: 훈련장이 열리는 날이 신인이 명단에 서는 날이다.
+ */
+export function youthIntakeDeadline(state: GameState): string {
+  return squadReturnOf(state.calendar);
+}
+
+/**
+ * **지금 우리 구단의 후보만** — 감독이 여름 사이에 구단을 옮기면 옛 구단의 줄이 남는다
+ * (career.md §5.1). 그 줄은 세계의 일이라 소집일에 그 구단이 채우지만, 새 구단의 감독이
+ * 읽거나 고를 것은 아니다. 화면·조회·스냅샷이 모두 이 문을 지난다.
+ */
+export function ourYouthCandidates(state: GameState): YouthCandidate[] {
+  const managed = managedTeamId(state);
+  if (managed === null) return [];
+  return (state.youthCandidates ?? []).filter((row) => row.teamId === managed);
+}
+
+/**
+ * 후보를 계약시킨다 — **한 번의 확정** (season.md §6).
+ *
+ * 고른 이름이 계약을 받고 **나머지 후보는 사라진다.** 다만 고른 뒤에도 포지션군이
+ * 최소 인원 아래면 코어가 남은 후보에서 그 자리를 채운다 — 소프트락 방지는 감독의
+ * 결정 밖이다.
+ *
+ * ⚠️ 후보에 없는 id는 조용히 무시하지 않는다 — 부르는 쪽(`signYouth`)이 먼저 거른다.
+ */
+export function signYouthCandidates(
+  state: GameState,
+  chosenIds: readonly string[],
+): { signed: GamePlayer[]; filled: GamePlayer[] } {
+  const rows = state.youthCandidates ?? [];
+  if (rows.length === 0) return { signed: [], filled: [] };
+  const teamId = rows[0]!.teamId;
+  const chosen = new Set(chosenIds);
+  const signed: GamePlayer[] = [];
+  const filled: GamePlayer[] = [];
+  const rest = rows.filter((row) => !chosen.has(row.player.id));
+
+  const take = (row: YouthCandidate, into: GamePlayer[]) => {
+    admitYouth(state, row.player, teamId, state.date, row.weeklyWage, row.years);
+    into.push(row.player);
+  };
+  for (const row of rows) if (chosen.has(row.player.id)) take(row, signed);
+
+  /**
+   * 남은 자리를 메운다 — 감독이 고른 **뒤**의 명단으로 다시 센다. 앞서 세면 감독이
+   * 방금 계약한 골키퍼가 세어지지 않아 코어가 한 명을 더 데려온다.
+   */
+  const pool = [...rest];
+  for (const group of forcedGroupsOf(playersOf(state, teamId))) {
+    const at = pool.findIndex((row) => groupOf(row.player) === group);
+    if (at < 0) continue;
+    take(pool[at]!, filled);
+    pool.splice(at, 1);
+  }
+
+  state.youthCandidates = [];
+  if (signed.length > 0 || filled.length > 0) promoteToMatchdaySquad(playersOf(state, teamId));
+  return { signed, filled };
+}
+
+/**
+ * **소집일 — 미결 후보를 코어가 정리한다** (season.md §6). 방치는 시간의 결과다:
+ * 답이 없으면 옛 규칙의 수만큼(`autoSign`) 앞에서부터 계약하고 나머지는 돌려보낸다.
+ */
+export function settleYouthIntake(state: GameState, digest: string[]): void {
+  const rows = state.youthCandidates ?? [];
+  if (rows.length === 0) return;
+  const auto = rows.filter((row) => row.autoSign).map((row) => row.player.id);
+  const { signed, filled } = signYouthCandidates(state, auto);
+  const all = [...signed, ...filled];
+  if (all.length === 0) return;
+  const line = `유스 계약: ${all.map((p) => p.name).join(", ")} — 감독이 답하지 않아 구단이 채웠다`;
+  digest.push(line);
+  pushNarrative(state, line, 3);
+}
+
 /**
  * **사전 계약의 발효** — 계약은 반년 전에 섰고, 사람은 오늘 온다 (transfer.md §1-4).
  *
@@ -1370,6 +1606,12 @@ function applyTransition(state: GameState): string[] {
     ...state.transfers.map((t) => t.gamePlayerId),
   ]);
 
+  /**
+   * 후보 줄은 **전환마다 새로 선다** — 지난 여름의 미결이 남아 있을 자리는 없다
+   * (소집일이 이미 정리했다). 무직으로 넘긴 시즌이면 아무도 서지 않는다.
+   */
+  state.youthCandidates = [];
+
   // 사전 계약이 먼저 발효한다 — 계약 만료·유스 콜업·자동 갱신보다 앞이다 (season.md §6)
   settlePrecontracts(state, nextCalendar.preseasonStart, digest);
 
@@ -1486,17 +1728,27 @@ function applyTransition(state: GameState): string[] {
 
     if (isFreePool) continue;
 
-    // 유망주 유입 — 은퇴·계약 만료 수 보충 + 포지션 그룹 최소 인원 확보 (소프트락 방지)
-    const MIN_GROUP: Record<PositionGroup, number> = { GK: 2, DF: 5, MF: 4, FW: 4 };
-    const forced: PositionGroup[] = [];
-    for (const group of Object.keys(MIN_GROUP) as PositionGroup[]) {
-      const have = squad.filter((p) => groupOf(p) === group).length;
-      for (let k = have; k < MIN_GROUP[group]; k++) forced.push(group);
-    }
-    const totalIntake = Math.max(Math.max(1, retirees.length + leavers.length), forced.length);
+    /**
+     * **유스 인테이크** — 은퇴·계약 만료 수 보충 + 포지션군 최소 인원 확보(소프트락
+     * 방지) 위에 감독이 고를 여지가 얹힌다 (season.md §6).
+     *
+     * ⚠️ **우리 팀은 여기서 계약이 서지 않는다** — 후보로 세우고 소집일까지 감독의
+     * 답을 기다린다. AI 구단은 그 자리에서 결정한다: 남의 아카데미의 고민을 읽는
+     * 자리가 없고, 세계 전체가 후보 줄을 들면 세이브가 여름마다 수천 줄 불어난다.
+     */
+    const forced = forcedGroupsOf(squad);
+    const fills = Math.max(Math.max(1, retirees.length + leavers.length), forced.length);
+    const ours = team.id === managed;
+    const intake = youthIntakeOf(
+      fills,
+      tier,
+      ours ? academyUseOf(state, team.id, state.season) : 0,
+    );
+    const born = ours ? intake.candidates : intake.fills;
     // 이름도 팀 안에서 유일해야 한다 — 남은 명단을 쥐고 뽑는다 (people.md §2)
     const takenNames = new Set(squad.map((p) => p.name));
-    for (let i = 0; i < totalIntake; i++) {
+    const candidates: YouthCandidate[] = [];
+    for (let i = 0; i < born; i++) {
       const youth = generateYouthPlayer(
         state.seed + YOUTH_INTAKE_SEED_OFFSET,
         team.id,
@@ -1507,51 +1759,52 @@ function applyTransition(state: GameState): string[] {
         forced[i],
         seasonYear(nextSeason),
         takenNames,
+        intake.upsideBonus,
       );
-      state.players.push(youth);
-      assignSquadNumber(state.players, youth);
-      playerIndex.set(youth.id, youth);
-      squad.push(youth);
-      // 유스 콜업도 원장에 (fromTeamId = null)
-      state.transfers.push({
-        id: `tr-youth-${youth.id}`,
-        gamePlayerId: youth.id,
-        windowId: null,
-        fromTeamId: null,
-        toTeamId: team.id,
-        date: nextCalendar.preseasonStart,
-        type: "youth",
-        fee: 0,
-        reason: "youth-callup",
-      });
-      state.contracts.push({
-        id: `c-${youth.id}`,
-        gamePlayerId: youth.id,
-        teamId: team.id,
-        weeklyWage: estimateWeeklyWage(
+      if (ours) {
+        candidates.push({
+          player: youth,
+          teamId: team.id,
+          on: nextCalendar.preseasonStart,
+          deadline: squadReturnOf(nextCalendar),
+          weeklyWage: estimateWeeklyWage(
+            team.id,
+            wageSubjectOf(youth, nextCalendar.preseasonStart),
+            squad.map((p) => wageSubjectOf(p, nextCalendar.preseasonStart)),
+            state,
+          ),
+          years: YOUTH_CONTRACT_YEARS,
+          // 앞에서부터 코어가 채운다 — 포지션군이 비는 자리가 앞에 서 있다
+          autoSign: i < intake.fills,
+        });
+        continue;
+      }
+      admitYouth(
+        state,
+        youth,
+        team.id,
+        nextCalendar.preseasonStart,
+        estimateWeeklyWage(
           team.id,
           wageSubjectOf(youth, nextCalendar.preseasonStart),
           playersOf(state, team.id).map((p) => wageSubjectOf(p, nextCalendar.preseasonStart)),
           state,
         ),
-        since: nextCalendar.preseasonStart,
-        until: contractUntil(nextCalendar.preseasonStart, 3),
-        status: "active",
-      });
+        YOUTH_CONTRACT_YEARS,
+      );
+      playerIndex.set(youth.id, youth);
+      squad.push(youth);
     }
-    if (team.id === managed && totalIntake > 0) {
-      digest.push(`유스 합류: 신인 ${totalIntake}명이 2군 개발 스쿼드에 합류했다`);
+    if (ours) {
+      state.youthCandidates = candidates;
+      const line =
+        `유스 후보 ${candidates.length}명 — ${squadReturnOf(nextCalendar)}까지 첫 프로 계약을 정한다` +
+        ` (답이 없으면 앞의 ${intake.fills}명이 계약한다)`;
+      digest.push(line);
+      pushNarrative(state, line, 3);
     }
 
-    // 1군이 매치데이 명단(선발 11 + 벤치 9)을 못 채울 때만 2군 상위 자원을
-    // 자동 승격한다. 그 외 승강은 감독의 결정으로 남긴다.
-    const firstCount = () => squad.filter((p) => p.squadLevel !== "reserve").length;
-    for (const player of [...squad]
-      .filter((p) => p.squadLevel === "reserve")
-      .sort((a, b) => b.attributes.overall - a.attributes.overall)) {
-      if (firstCount() >= MATCHDAY_SQUAD) break;
-      player.squadLevel = "first";
-    }
+    promoteToMatchdaySquad(squad);
 
     // 만료 계약 자동 갱신 — **AI 팀만.** 우리 팀은 위에서 이미 내보냈다
     for (const contract of contractsByTeam.get(team.id) ?? []) {

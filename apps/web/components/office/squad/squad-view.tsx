@@ -7,6 +7,7 @@ import {
   adaptationOf,
   anchorOf,
   defaultRoleOf,
+  formatMoney,
   isUnfamiliarPosition,
   positionAtPoint,
   positionGroupOf,
@@ -896,6 +897,40 @@ export function SquadView({
             <div>⚠ 낯선 자리: {misfits.map((x) => `${x.p!.name}(${x.code})`).join(", ")}</div>
           )}
           {saveError && <div data-testid="lineup-error">{saveError}</div>}
+        </div>
+      )}
+
+      {/**
+       * **여름의 유스 후보** — 아직 계약하지 않은 사람들이라 명단 탭이 아니라 제 구획에
+       * 선다 (season.md §6). 소집일이 지나면 뷰가 null이라 이 판 자체가 사라진다.
+       *
+       * 읽는 값만 있다 — 고르는 일은 감독의 말로 일어나고, 여기 선 것은 그 결정의
+       * 근거다. 종합·잠재력이 구간과 물결표를 달고 있는 것은 **안개**다: 아직 우리
+       * 선수가 아니라 참값을 볼 수 없다 (player.md §9).
+       */}
+      {squad.youthIntake && (
+        <div className="youth-intake" data-testid="youth-intake">
+          <div className="youth-intake-head">
+            <b>유스 후보 {squad.youthIntake.candidates.length}명</b>
+            <span className="muted">소집일 {squad.youthIntake.deadline}</span>
+          </div>
+          <ul className="youth-intake-list">
+            {squad.youthIntake.candidates.map((c) => (
+              <li key={c.id} className={c.autoSign ? "auto" : undefined}>
+                <span className="yc-pos">{c.position}</span>
+                <span className="yc-name">{c.name}</span>
+                <span className="muted">{c.age}세</span>
+                <span className="yc-ovr">~{c.overall}</span>
+                <span className="yc-pot" title={c.potential.confidence}>
+                  {c.potential.low}~{c.potential.high}
+                </span>
+                <span className="muted">
+                  {formatMoney(c.weeklyWage)}/주 · {c.years}년
+                </span>
+                {c.autoSign && <span className="reg-chip">구단 계약 예정</span>}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

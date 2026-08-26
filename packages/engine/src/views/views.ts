@@ -131,6 +131,7 @@ import {
   ratingTier,
   readCondition,
   scoutedAttributes,
+  youthCandidateFog,
   type ConditionRead,
   type Observation,
 } from "../squad/scouting";
@@ -141,7 +142,13 @@ import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../skills";
 import { askingPriceFor, marketValueOf, wageExpectationOf } from "../market/market";
 import { settlingPercent } from "../squad/settling";
 import { INJURY_SEVERITY_KO, injuryRiskFor } from "../squad/injury";
-import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
+import {
+  boardExpectation,
+  computeStandings,
+  ourYouthCandidates,
+  youthIntakeDeadline,
+  type StandingRow,
+} from "../competition/season";
 import { hasRelegation, leagueOfTeamIn } from "../competition/promotion";
 import { RELEGATION_SLOTS } from "../core/league-shape";
 import { tierOfTeamIn } from "../core/club-tier";
@@ -438,6 +445,33 @@ export interface MilestoneView {
 }
 
 /** 스쿼드 행 = 메타 + 16축 (오피스 뷰는 우리 선수라 숫자를 그대로 준다) */
+/**
+ * **여름의 유스 후보 한 줄** — 아직 계약하지 않은 사람이라 `SquadViewRow`가 아니다
+ * (season.md §6). 층도 배치도 등번호도 없고, 대신 첫 프로 계약의 조건이 붙는다.
+ */
+export interface YouthCandidateView {
+  /** 후보의 선수 id — `sign_youth`가 받는 그 값이다 */
+  id: string;
+  name: string;
+  age: number;
+  position: string;
+  /** **관측** 종합 — 참값이 아니다 (player.md §9) */
+  overall: number;
+  /** 잠재력 추정 구간 — 후보는 언제나 구간이 선다 (`adapting` 눈금) */
+  potential: { low: number; high: number; confidence: string };
+  weeklyWage: number;
+  years: number;
+  /** 답이 없으면 구단이 데려가는 자리인가 */
+  autoSign: boolean;
+}
+
+/** 이번 여름의 인테이크 — 후보가 없으면 이 구획 자체가 서지 않는다 */
+export interface YouthIntakeView {
+  /** 감독의 답을 기다리는 마지막 날 = 선수단 소집일 */
+  deadline: string;
+  candidates: YouthCandidateView[];
+}
+
 export type SquadViewRow = SquadViewRowMeta & AxisValues;
 interface SquadViewRowMeta {
   id: string;
@@ -1405,6 +1439,14 @@ export interface OfficeViews {
     reserveCount: number;
     /** 등록 명단 현황 — 1군에서 파생 (저장하지 않는다) */
     registration: SquadRegistration;
+    /**
+     * **여름의 유스 후보** — 아직 계약하지 않은 사람들이라 명단 행이 아니라 제 구획을
+     * 갖는다 (season.md §6). 소집일이 지나면 null이다.
+     *
+     * ⚠️ 종합도 잠재력도 **관측값**이다 (`youthCandidateFog` — player.md §9). 화면이
+     * 참값을 그리면 안개가 뚫린다.
+     */
+    youthIntake: YouthIntakeView | null;
   };
   calendar: {
     today: string;
@@ -2661,6 +2703,32 @@ function boardView(state: GameState): OfficeViews["finance"]["board"] {
   };
 }
 
+/**
+ * 유스 후보 구획 — **안개는 조회·GM 스냅샷과 같은 함수를 지난다**
+ * (`youthCandidateFog`). 화면이 참값을 그리면 같은 후보가 두 숫자로 갈린다.
+ */
+function youthIntakeView(state: GameState): YouthIntakeView | null {
+  const rows = ourYouthCandidates(state);
+  if (rows.length === 0) return null;
+  return {
+    deadline: youthIntakeDeadline(state),
+    candidates: rows.map((row) => {
+      const { overall, potential } = youthCandidateFog(state.seed, row.player);
+      return {
+        id: row.player.id,
+        name: row.player.name,
+        age: ageOf(row.player.birthdate, state.date),
+        position: naturalPositionOf(row.player).position,
+        overall,
+        potential: { low: potential.low, high: potential.high, confidence: potential.confidence },
+        weeklyWage: row.weeklyWage,
+        years: row.years,
+        autoSign: row.autoSign,
+      };
+    }),
+  };
+}
+
 export function buildOfficeViews(state: GameState): OfficeViews {
   const userTeamId = state.userTeamId;
   /** 감독의 것을 가르는 자 — 보관함과 시상 줄이 같은 판정을 쓴다 (career.md §6) */
@@ -3294,6 +3362,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       firstTeamCount: players.filter((p) => p.loan === null && p.squadLevel === "first").length,
       reserveCount: players.filter((p) => p.loan === null && p.squadLevel === "reserve").length,
       registration: squadRegistrationOf(state, userTeamId),
+      youthIntake: youthIntakeView(state),
     },
     calendar: {
       today: state.date,

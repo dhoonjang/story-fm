@@ -62,6 +62,7 @@ import {
   sendOffer,
   setCaptain,
   setDevelopmentFocus,
+  signYouth,
   setReserveTraining,
   setExploits,
   setLineup,
@@ -397,6 +398,18 @@ export function buildGmTools(
           .describe("집중 육성할 2군 유망주 — 지정 전체를 다시 적는다. 생략하면 해제"),
       }),
       (input) => setDevelopmentFocus(state, input),
+    ),
+    wrap(
+      "sign_youth",
+      descriptions.sign_youth,
+      z.object({
+        playerIds: z
+          .array(playerRef)
+          .min(1)
+          .optional()
+          .describe("첫 프로 계약을 줄 유스 후보 — 생략하면 전원 방출. 한 번의 확정이다"),
+      }),
+      (input) => signYouth(state, input),
     ),
     wrap(
       "set_reserve_training",

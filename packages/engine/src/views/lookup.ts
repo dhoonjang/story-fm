@@ -14,6 +14,7 @@ import type {
   ShotOrigin,
   StrongFoot,
   Trophy,
+  YouthCandidate,
 } from "@story-fm/domain";
 import {
   DERBY_HEAT_KO,
@@ -51,6 +52,7 @@ import {
 } from "@story-fm/domain";
 import { rankByName } from "../core/name-match";
 import { formatMoney } from "../club/finance";
+import { youthCandidateFog } from "../squad/scouting";
 import { derbyRecordOf } from "../club/derby";
 import { derbyOf } from "../data/derbies";
 import { spendLine, transferFundRoom } from "../club/manager-wallet";
@@ -105,6 +107,8 @@ import {
   awardLine,
   boardExpectation,
   computeStandings,
+  ourYouthCandidates,
+  youthIntakeDeadline,
 } from "../competition/season";
 import {
   clubHonoursLine,
@@ -1313,6 +1317,18 @@ export function squadView(state: GameState, input: SquadViewInput = {}): LookupR
   if (shown === 0) {
     lines.push("조건에 맞는 선수가 없습니다 (level·role을 확인하라)");
   }
+  /**
+   * **유스 후보도 자기 구획이다** — 아직 계약하지 않아 층도 배치도 없는 사람들이라
+   * 명단에 섞으면 부릴 수 있는 인원으로 읽힌다 (season.md §6). 소집일이 지나면
+   * 후보 줄 자체가 사라지므로 이 구획도 여름에만 선다.
+   */
+  const candidates = teamId === state.userTeamId ? ourYouthCandidates(state) : [];
+  if (candidates.length > 0 && !input.role) {
+    lines.push(
+      `── 유스 후보 ${candidates.length}명 (${youthIntakeDeadline(state)}까지 sign_youth) ──`,
+      ...candidates.map((row) => youthCandidateRow(state, row)),
+    );
+  }
   const personal = tactics.assignments.filter((a) => a.instruction);
   if (personal.length > 0 && !input.role) {
     lines.push(
@@ -1322,6 +1338,22 @@ export function squadView(state: GameState, input: SquadViewInput = {}): LookupR
     );
   }
   return { ok: true, message: lines.join("\n") };
+}
+
+/**
+ * 유스 후보 한 줄 — **안개가 낀 사실이다** (season.md §6 · player.md §9). 아직 우리
+ * 선수가 아니라 종합도 잠재력도 참값이 아니고, GM 스냅샷의 오프시즌 블록·스쿼드 화면과
+ * 같은 함수(`youthCandidateFog`)를 읽어 같은 숫자를 낸다.
+ */
+function youthCandidateRow(state: GameState, row: YouthCandidate): string {
+  const { overall, potential } = youthCandidateFog(state.seed, row.player);
+  const age = ageOf(row.player.birthdate, state.date);
+  return (
+    `${row.player.name} (${naturalPositionOf(row.player).position}) ${age}세 · ` +
+    `종합 ~${overall} · 잠재력 ${potential.low}~${potential.high} ${potential.confidence} · ` +
+    `주급 ${formatMoney(row.weeklyWage)}/주 ${row.years}년` +
+    (row.autoSign ? " · 답이 없으면 구단이 계약" : "")
+  );
 }
 
 // ── 팀 프로필 (상대 스카우팅 리포트) ───────────────────
