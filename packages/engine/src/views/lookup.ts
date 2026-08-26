@@ -389,11 +389,12 @@ function statLine(
 }
 
 /**
- * 계약 만료 꼬리 — `~YYYY-MM-DD`, 계약이 없으면 빈 문자열. **안개를 걸지 않는다**:
+ * 계약 만료 꼬리 — ` ~YYYY-MM-DD`, 계약이 없으면 빈 문자열. **안개를 걸지 않는다**:
  * 계약 만료일은 부상·징계·이적과 같은 공개 기록 계열이다 (player.md §10).
  */
 function contractLabel(contract: Contract | null): string {
-  return contract ? `~${contract.until}` : "";
+  // 주급 바로 뒤에 서므로 사이를 띄운다 — 붙이면 `£150k~2028-06-30`이 금액 구간으로 읽힌다
+  return contract ? ` ~${contract.until}` : "";
 }
 
 /**
@@ -1180,6 +1181,7 @@ function assignedRow(
   const injury = openInjury(state, p.id);
   const suspension = activeSuspension(state, p.id);
   const stat = seasonStatOf(state, p.id);
+  const contract = activeContract(state, p.id);
   const grievance = state.issues.find((i) => i.gamePlayerId === p.id);
   const reason = grievance ? issueReasonText(grievance) : null;
   const flags = [
@@ -1200,6 +1202,9 @@ function assignedRow(
     `  ${position.padEnd(4)} ${p.name}${armband(p)} (${p.id}) ${ageOf(p.birthdate, state.date)}세 · ` +
     `${roleLabel(position, roleId)} · OVR${p.attributes.overall} 자리적합${roleFit(p.attributes, position, roleId)} 포지션적응${proficiencyAt(p, position)} ` +
     `전술적응${familiarity} · 폼 ${formLabel(p.state.form)} 체력${p.state.condition} 감각 ${sharpnessLabel(sharpnessOf(p.state))}` +
+    // **라인업을 세우는 자리가 재계약을 판단하는 자리이기도 하다** (finance.md §8.3) —
+    // 만료일이 없으면 감독은 여름에 사라질 주전을 붙박이로 세운다
+    (contract ? ` · 계약${contractLabel(contract)}` : "") +
     ` · ${statLine(stat)}` +
     (flags.length > 0 ? ` · ⚠${flags.join(" · ")}` : "")
   );

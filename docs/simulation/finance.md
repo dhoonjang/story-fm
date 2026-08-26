@@ -1440,6 +1440,7 @@ mock 진행(경질·계약 만료 없이 `keepSeat` — 보드가 인내하고, 
 | 6   | 에이전트 수수료 · 예산 동결 검증                                   | `market/negotiation.ts` · `ai-market.ts` · `market.ts`                       |
 | 7   | 리그 상금 · 성과 보너스 · 예산 보충 연동                           | `competition/season.ts`                                                      |
 | 8   | 재정 뷰(피드·보고서·PSR·관문 넷 §8.3) · 일지 연동                  | `views/views.ts` · `apps/web/components/office/finance.tsx`                  |
+| 8a  | **영입 관문 넷** 파생 · `get_finance` 본문 (§8.3)                  | `views/finance-outlook.ts`                                                   |
 | 9   | GM 도구 `get_finance` · `apply_finance_event` · `set_ticket_price` | `agents/skill-descriptions.ts` · `agents/gm-tools.ts`                        |
 | 10  | 보드 요청 접수·판정·반영 (§9.6)                                    | `club/board-request.ts` (+ `packages/domain/src/board-request.ts`)           |
 | 10a | 감독 지갑 입출금·사재 지출 (§9.7)                                  | `club/manager-wallet.ts` (+ `packages/domain/src/manager.ts`)                |

@@ -342,7 +342,7 @@ const PSR_SEASONS = 3;
  * 빌리는 구단이 이미 곤란한 구단이기 때문이고, **무이자면 음수 잔고가 공짜**여서
  * 재정이 게임에 물리지 않는다. 금액이 아니라 비율이라 구단 규모를 저절로 탄다.
  */
-const DEBT_INTEREST_ANNUAL = 0.08;
+export const DEBT_INTEREST_ANNUAL = 0.08;
 
 /**
  * 예산 동결선 — **주급 총액 × 20.** 새 자를 만들지 않고 `market.ts`가 매각 압박에
@@ -1104,7 +1104,7 @@ export function skippedWageWeeks(from: string, until: string): number {
 // ── 지급 일정 ───────────────────────────────────────────
 
 /** 회분이 원장에 적히는 이름 — 갈래가 라벨로만 갈린다 */
-const PAYMENT_KIND_KO: Record<PaymentSchedule["kind"], string> = {
+export const PAYMENT_KIND_KO: Record<PaymentSchedule["kind"], string> = {
   transfer: "이적료",
   severance: "계약 해지 정산금",
   sell_on: "셀온 정산금",
@@ -2785,59 +2785,4 @@ export function currentMonthSummary(state: GameState) {
   const finance = financeOf(state, state.userTeamId);
   const month = monthOf(state.date);
   return { month, ...summarise(finance.ledger.filter((e) => monthOf(e.date) === month)) };
-}
-
-/**
- * 재정 조회 (GM `get_finance`) — 월간 보고서 또는 이번 달 잠정 집계.
- * 컨텍스트에 상시 넣지 않고 물어볼 때만 읽는다 (agents.md §7).
- */
-export function financeLookup(state: GameState, month?: string): { ok: boolean; message: string } {
-  const finance = financeOf(state, state.userTeamId);
-  const lines: string[] = [];
-  const reports = userReports(state);
-  const report = month ? reports.find((r) => r.month === month) : [...reports].reverse()[0];
-
-  const debt = debtOf(state, state.userTeamId);
-  lines.push(
-    `잔고 ${money(finance.balance)} · 이적 예산 ${money(finance.transferBudget)}${finance.budgetFrozen ? " (동결)" : ""} · 주급 총액 ${money(weeklyWagesOf(state, state.userTeamId))}/주`,
-  );
-  lines.push(ticketPriceLine(state));
-  if (debt > 0) {
-    lines.push(
-      `부채 ${money(debt)} · 연 이자 ${money(debt * DEBT_INTEREST_ANNUAL)} · 동결선 ${money(debtLimitOf(state, state.userTeamId))}`,
-    );
-  }
-
-  if (month && !report) {
-    lines.push(
-      `${month} 보고서가 없습니다 — 발행된 달: ${reports.map((r) => r.month).join(", ") || "없음"}`,
-    );
-  }
-
-  if (report) {
-    lines.push(
-      "",
-      `[${report.month} 월간 보고서]`,
-      `수입 ${money(report.incomeTotal)} / 지출 ${money(report.expenseTotal)}`,
-      `현금 순증 ${money(report.cashNet)} · 장부 손익 ${money(report.pnlNet)} · 급여 비중 ${Math.round(report.wageRatio * 100)}%`,
-      ...report.income.map((l) => `  + ${FINANCE_CATEGORY_KO[l.category]} ${money(l.amount)}`),
-      ...report.expense.map((l) => `  − ${FINANCE_CATEGORY_KO[l.category]} ${money(l.amount)}`),
-    );
-    if (report.psr) {
-      lines.push(
-        `PSR: 3시즌 누적 ${money(report.psr.rolling3Season)} · 여유 ${money(report.psr.headroom)}`,
-      );
-    }
-    lines.push(...financeNoteTexts(report).map((n) => `※ ${n}`));
-  }
-
-  if (!month) {
-    const now = currentMonthSummary(state);
-    lines.push(
-      "",
-      `[${now.month} 진행 중]`,
-      `수입 ${money(now.incomeTotal)} / 지출 ${money(now.expenseTotal)} / 순 ${money(now.cashNet)}`,
-    );
-  }
-  return { ok: true, message: lines.join("\n") };
 }
