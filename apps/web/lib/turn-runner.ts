@@ -4,6 +4,7 @@ import {
   refreshPacket,
   saveGame,
   setPlayerTactic,
+  setSetPieceTakers,
   setTactics,
   substitutePlayer,
   takeEdits,
@@ -41,6 +42,8 @@ function applyMatchBoardOrder(state: GameState, order: MatchBoardOrder) {
       return setPlayerTactic(state, { playerId: order.playerId, role: order.role });
     case "substitution":
       return substitutePlayer(state, { out: order.out, in: order.in });
+    case "setPiece":
+      return setSetPieceTakers(state, { [order.role]: order.playerId });
     case "tactic":
       switch (order.axis) {
         case "mentality":

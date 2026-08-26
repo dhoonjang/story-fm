@@ -8,6 +8,12 @@ export type BoardSlot = { playerId: string; point: BoardPoint } | null;
 
 export type SquadRow = OfficeViews["squad"]["players"][number];
 export type TacticsView = OfficeViews["squad"]["tactics"];
+/**
+ * 죽은 공 키커 셋 — 자리마다 **지정**과 **지금 실제로 설 사람** (match.md §1.4).
+ * 둘이 갈리는 것이 곧 "이름은 남았는데 차지는 않는다"는 사실이라, 화면은 두 칸을
+ * 함께 그린다.
+ */
+export type SetPieceTakersView = OfficeViews["squad"]["setPieces"];
 export type Selection = { kind: "slot"; index: number } | { kind: "bench"; id: string } | null;
 
 /**

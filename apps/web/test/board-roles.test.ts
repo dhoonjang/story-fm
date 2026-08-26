@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  SET_PIECE_ROLES,
   anchorOf,
   defaultRoleOf,
   positionAtPoint,
@@ -58,6 +59,9 @@ function boardOf(views: OfficeViews): BoardState {
       rows.filter((p) => p.roleId !== null).map((p) => [p.id, p.roleId!] as const),
     ),
     tactics: views.squad.tactics,
+    setPieces: Object.fromEntries(
+      SET_PIECE_ROLES.map((role) => [role, views.squad.setPieces[role].designated] as const),
+    ) as BoardState["setPieces"],
   };
 }
 

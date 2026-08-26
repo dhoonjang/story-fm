@@ -1,9 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { TACTIC_AXES, tacticWord } from "@story-fm/domain";
+import {
+  SET_PIECE_ROLES,
+  SET_PIECE_ROLE_KO,
+  TACTIC_AXES,
+  tacticWord,
+  type SetPieceRole,
+} from "@story-fm/domain";
 import { IconChevron } from "@/components/icons";
-import type { TacticsView } from "./types";
+import type { SetPieceTakersView, TacticsView } from "./types";
 
 /**
  * 전술 패널 — **접히면 지금 값, 펼치면 눈금.**
@@ -99,6 +105,106 @@ export function TacticsPanel({
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+/** 죽은 공 줄에 세우는 후보 — 이름만 있으면 된다 */
+export type TakerCandidate = { id: string; name: string };
+
+/**
+ * 죽은 공 — **전술판 아래 한 줄.** 코너·프리킥·페널티가 나란히 선다.
+ *
+ * 접히지 않는다. 전술 여섯 축은 고칠 때만 쓰는 눈금이라 접어 두지만, 이 줄은
+ * 「누가 차는가」라는 **읽는 값**이 절반이고 그것이 경기 득점의 4분의 1을 정한다
+ * (docs/simulation/match.md §1.4). 접어 두면 감독은 지정한 적 없는 자리를 영영 보지
+ * 않는다.
+ *
+ * **고르는 자리와 읽는 값의 생김새가 다르다.** 지정은 눌리는 물건(`select`)이고,
+ * 그 옆의 이름은 테두리 없는 글자다 — 그것은 코어가 세운 사람이지 감독이 만지는
+ * 값이 아니다. 두 이름이 나란히 서는 것 자체가 「지정은 남았는데 차지는 않는다」는
+ * 사실이라, 그 자리에 문장을 적지 않는다.
+ */
+export function SetPiecePanel({
+  takers,
+  nameOf,
+  starting,
+  others,
+  editing,
+  onPick,
+}: {
+  takers: SetPieceTakersView;
+  nameOf: (id: string) => string;
+  /** 선발 열한 명 — 지금 실제로 찰 수 있는 사람들이라 먼저 선다 */
+  starting: TakerCandidate[];
+  /** 벤치·예비 — 다음 경기의 선발일 수 있어 지정은 받는다 (그 경기엔 기본값이 선다) */
+  others: TakerCandidate[];
+  /** 무직이면 꺼진다 — 경기 중에는 켜진 채로 지시가 된다 */
+  editing: boolean;
+  onPick: (role: SetPieceRole, playerId: string | null) => void;
+}) {
+  const listed = new Set([...starting, ...others].map((c) => c.id));
+  return (
+    <div className="setpiece-panel" data-testid="setpiece-panel">
+      <b className="setpiece-head">죽은 공</b>
+      {SET_PIECE_ROLES.map((role) => {
+        const { designated, taker } = takers[role];
+        /** 지정과 갈릴 때만 선다 — 같으면 같은 이름을 두 번 적는 셈이다 */
+        const stand = taker !== null && taker !== designated ? taker : null;
+        return (
+          <span className="sp-slot" key={role}>
+            <i className="sp-role">{SET_PIECE_ROLE_KO[role]}</i>
+            {editing ? (
+              <select
+                className="sp-pick"
+                value={designated ?? ""}
+                aria-label={`${SET_PIECE_ROLE_KO[role]} 키커`}
+                data-testid={`setpiece-${role}`}
+                onChange={(e) => onPick(role, e.target.value === "" ? null : e.target.value)}
+              >
+                <option value="">지정 없음</option>
+                {/* 지정한 선수가 2군·임대로 내려가 목록 밖이면 값이 그릴 자리를 잃는다 —
+                    그 한 명만 따로 세워 셀렉트가 빈칸으로 서지 않게 한다 */}
+                {designated !== null && !listed.has(designated) && (
+                  <option value={designated}>{nameOf(designated)}</option>
+                )}
+                <optgroup label="선발">
+                  {starting.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+                {others.length > 0 && (
+                  <optgroup label="그 외">
+                    {others.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            ) : (
+              <span className="sp-read">
+                {designated === null ? "지정 없음" : nameOf(designated)}
+              </span>
+            )}
+            {stand !== null && (
+              <em
+                className="sp-stand"
+                title={
+                  designated === null
+                    ? "지정이 없어 이 선수가 찹니다"
+                    : "지정한 선수가 선발에 없어 이 선수가 찹니다"
+                }
+              >
+                {nameOf(stand)}
+              </em>
+            )}
+          </span>
+        );
+      })}
     </div>
   );
 }

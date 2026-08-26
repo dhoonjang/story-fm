@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { MATCHDAY_BENCH } from "@story-fm/domain";
+import { MATCHDAY_BENCH, SET_PIECE_ROLES, type SetPieceRole } from "@story-fm/domain";
 import {
   lineupChangeNote,
   lineupSignature,
@@ -10,6 +10,7 @@ import {
   saveGame,
   setLineup,
   setPlayerRole,
+  setSetPieceTakers,
   setTactics,
   shapeOfTactics,
   startingIdsOf,
@@ -37,6 +38,25 @@ const TacticsSchema = z
     passStyle: z.number().int().min(1).max(5),
   })
   .partial();
+/** 죽은 공 자리 하나의 값 — 선수 id, `null`이면 지정 해제 */
+const TakerRef = z.string().min(1).nullable();
+/**
+ * 죽은 공 키커 — 역할과 같은 규약이다: **서버와 달라진 자리만** 오고 없는 자리는
+ * "그대로"다. 자리 목록은 도메인이 갖는다(`SET_PIECE_ROLES`) — 여기 셋을 적어 두면
+ * 네 번째 자리가 생긴 날 화면은 보내고 라우트만 조용히 버린다.
+ *
+ * ⚠️ **여기서 선수를 검증하지 않는다.** 우리 선수인지 보는 문은 스킬 하나뿐이고
+ * (`set_set_piece_takers` → `pickOurPlayer`), 같은 규칙을 라우트에 한 벌 더 두면
+ * 채팅으로 지정할 때와 화면으로 지정할 때가 조용히 갈린다 (match.md §2 키커 지정).
+ */
+const SetPieceTakersSchema = z
+  .object(
+    Object.fromEntries(SET_PIECE_ROLES.map((role) => [role, TakerRef])) as Record<
+      SetPieceRole,
+      typeof TakerRef
+    >,
+  )
+  .partial();
 /**
  * ⚠️ **포메이션 이름은 받지 않는다.** 모양은 선발 11명의 좌표에서 읽는 파생값이라
  * (team.md §6 · game-state.md §5) 이름을 입력으로 두면 판과 장부가 갈라진다.
@@ -63,6 +83,7 @@ const LineupSchema = z.object({
     .array(z.object({ playerId: z.string().min(1), role: z.string().min(1) }))
     .max(30)
     .optional(),
+  setPieceTakers: SetPieceTakersSchema.optional(),
 });
 
 /**
@@ -149,6 +170,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     // 사유는 코어가 쓴 문장 그대로다. 고정 키라 열 번 저장해도 마지막 것만 남는다
     if (rejectedRoles.length > 0) recordEdit(state, "role:rejected", rejectedRoles.join(" · "));
+
+    /**
+     * 죽은 공 키커 — **역할과 같은 자리, 같은 규약.** 반려가 배치를 되돌리지 않는다:
+     * 지정은 배치 뒤에 정해지는 값이라 400으로 빠져나오면 옳게 바꾼 판까지 함께 날아간다.
+     *
+     * 화면이 달라진 자리만 보내므로(`lineupBody`) 여기 온 것은 감독이 방금 고른
+     * 것이다 — 그래도 `unchanged`를 한 번 더 본다: 채팅이 같은 값을 먼저 넣은 턴에
+     * 감독이 만지지 않은 편집 노트가 남지 않게.
+     */
+    const takers = body.data.setPieceTakers;
+    if (takers && Object.keys(takers).length > 0) {
+      const applied = setSetPieceTakers(state, takers);
+      if (!applied.ok) recordEdit(state, "setpiece:rejected", applied.message);
+      else if (applied.unchanged !== true) recordEdit(state, "setpiece", applied.message);
+    }
 
     /**
      * 전술판 저장은 채팅 턴을 만들지 않는다 — 판을 짜는 동안 열 번을 만지는데

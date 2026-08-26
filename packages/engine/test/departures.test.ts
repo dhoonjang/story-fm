@@ -15,6 +15,7 @@ import {
   recallLoan,
   releasePlayer,
   returnDueLoans,
+  setSetPieceTakers,
   severanceOf,
   squadFloorShortfall,
   unilateralSeveranceOf,
@@ -96,6 +97,26 @@ describe("일방 해지 — 전액을 물고 자리를 비운다", () => {
     expect(playersOf(state, state.userTeamId).some((p) => p.id === target.id)).toBe(false);
     expect(state.players.find((p) => p.id === target.id)!.teamId).not.toBe(state.userTeamId);
     expect(userTactics(state).assignments.some((a) => a.playerId === target.id)).toBe(false);
+  });
+
+  /**
+   * **죽은 공 지정은 완장과 같은 문을 지난다** (match.md §2 키커 지정) — 배치가
+   * 걷히는 자리(`releaseFromTactics`)에서 함께 걷힌다. 이탈 경로가 여럿이라
+   * (매각·방출·계약 만료·임대 복귀) 그 문 하나가 새면 떠난 선수가 우리 코너를 차는
+   * 장부가 남고, 그 경기의 패킷만 조용히 기본값으로 되돌린다.
+   */
+  it("떠난 선수의 죽은 공 지정이 걷힌다 — 남은 사람의 자리는 그대로다", () => {
+    const state = createTestGame(11);
+    const target = spare(state);
+    const stays = userPlayers(state).find((p) => p.id !== target.id)!;
+    const set = setSetPieceTakers(state, { corner: target.id, penalty: stays.id });
+    expect(set.ok, set.message).toBe(true);
+
+    releasePlayer(state, { playerId: target.id });
+
+    const takers = userTactics(state).setPieceTakers ?? {};
+    expect(takers.corner).toBeUndefined();
+    expect(takers.penalty).toBe(stays.id);
   });
 
   it("타 팀 선수는 방출할 수 없다", () => {

@@ -29,6 +29,7 @@ import type {
 import {
   BOARD_CONDITION_LABEL,
   BOARD_REQUEST_LABEL,
+  SET_PIECE_ROLES,
   VISION_CODE_KO,
   boardConditionAmountText,
   boardExpectationText,
@@ -135,7 +136,15 @@ import { formAngle, formLabel, formTone } from "../squad/form";
 import { leaderGroupOf } from "../squad/hierarchy";
 import { ratingTone, type RatingTone } from "../match/ratings";
 import { buildOpponentReport, type AbsentReason } from "../match/preview";
-import { GAP_CONDITION, edgeOf, subLimitsOf, zoneGrid, type InjuryRisk } from "@story-fm/sim";
+import {
+  GAP_CONDITION,
+  edgeOf,
+  setPieceTakersOf,
+  subLimitsOf,
+  zoneGrid,
+  type InjuryRisk,
+  type TakerSlot,
+} from "@story-fm/sim";
 import { moodOf, type MoodRead } from "../squad/mood";
 import { openPromises, squadStatusOf } from "../squad/promises";
 import { isHomegrownFor, occupiesSquadList, squadRegistrationOf } from "../squad/registration";
@@ -157,7 +166,16 @@ import {
   type ConditionRead,
   type Observation,
 } from "../squad/scouting";
-import type { GamePlayer, MissionReportCard, ScoutGrade, ScoutReportCard } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  MissionReportCard,
+  ScoutGrade,
+  ScoutReportCard,
+  SetPieceProfile,
+  SetPieceRole,
+  SetPieceTakers,
+  TacticAssignment,
+} from "@story-fm/domain";
 import { listingOf } from "../market/negotiation";
 import { openManagerOffers, USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../skills";
@@ -430,6 +448,37 @@ export interface TacticsView {
   offsideTrap?: boolean;
   tackling?: TacklingLevel;
   keeperDistribution?: KeeperDistribution | null;
+}
+
+/**
+ * 죽은 공 키커 한 자리 — **감독의 지정과 지금 실제로 설 사람이 나란히 선다**
+ * (→ docs/simulation/match.md §1.4 · §2 키커 지정).
+ *
+ * 둘을 함께 싣는 이유는 둘이 **갈릴 수 있기 때문**이다. 지정은 전술에 남고 한 경기의
+ * 명단이 그것을 지우지 않으므로, 지정한 선수를 2군으로 내리거나 선발에서 빼면 이름은
+ * 남은 채 그 경기에는 기본값이 선다. 한 칸만 실으면 감독은 그 갈림을 볼 자리가 없다.
+ *
+ * 이름이 아니라 id다 — 명단 행이 이미 이름을 들고 있어, 뷰가 한 벌 더 적으면 같은
+ * 선수의 표기가 두 곳에서 갈린다.
+ */
+export interface SetPieceTakerView {
+  /**
+   * 감독이 지정한 선수 — 없으면 `null`.
+   *
+   * **우리 명단에 없는 id는 싣지 않는다.** 지정이 걷히는 문(`releaseFromTactics`)이
+   * 생기기 전의 세이브에는 이미 떠난 선수의 id가 남아 있을 수 있는데, 그것을 그대로
+   * 내면 화면이 이름을 찾지 못해 빈칸이 선다.
+   */
+  designated: string | null;
+  /**
+   * 지금 선발로 치면 **실제로 차는 사람** — 지정이 없거나 그가 선발 밖이면 코어의
+   * 기본값(코너·프리킥은 킥력 최고, 페널티는 `penaltySkill` 최고)이다. 선발이 비면
+   * `null`.
+   *
+   * 경기 중에는 **그 경기의 패킷이 정한 값**이다(`guide.setPieces`) — 교체로 나간
+   * 키커 대신 누가 서 있는지를 뷰가 명단에서 다시 고르면 화면과 90분이 갈린다.
+   */
+  taker: string | null;
 }
 
 export interface SquadPositionView {
@@ -1584,6 +1633,12 @@ export interface OfficeViews {
     reserveCount: number;
     /** 등록 명단 현황 — 1군에서 파생 (저장하지 않는다) */
     registration: SquadRegistration;
+    /**
+     * **죽은 공 키커** — 자리 셋 각각의 지정과 지금 실제로 설 사람 (`SetPieceTakerView`).
+     * 승부의 4분의 1이 세트피스에서 나오는데(match.md §1.4) 감독이 화면에서 만질 수
+     * 있는 유일한 자리다.
+     */
+    setPieces: Record<SetPieceRole, SetPieceTakerView>;
     /**
      * **여름의 유스 후보** — 아직 계약하지 않은 사람들이라 명단 행이 아니라 제 구획을
      * 갖는다 (season.md §6). 소집일이 지나면 null이다.
@@ -2934,6 +2989,41 @@ function youthIntakeView(state: GameState): YouthIntakeView | null {
 }
 
 /**
+ * 죽은 공 키커 셋 — **지정과 지금 실제로 설 사람** (`SetPieceTakerView`).
+ *
+ * 기본값을 내는 것은 코어의 함수 하나다(`setPieceTakersOf` — 패킷이 부르는 바로
+ * 그것). 여기서 「킥력 최고」를 다시 재면 명단이 예고한 키커와 90분이 세우는 키커가
+ * 갈리고, 그때 감독이 믿는 것은 화면이지 판정이 아니다.
+ *
+ * 경기 중이면 `live`가 그 경기의 패킷이 이미 고른 값이라 그것이 이긴다 (match.md §8).
+ */
+function setPieceTakerViews(
+  squad: readonly GamePlayer[],
+  designated: SetPieceTakers | undefined,
+  starters: readonly TacticAssignment[],
+  live: SetPieceProfile["takers"] | null,
+): Record<SetPieceRole, SetPieceTakerView> {
+  const byId = new Map(squad.map((p) => [p.id, p] as const));
+  /** 우리 명단에 없는 id는 싣지 않는다 — 화면이 이름을 찾지 못해 빈칸이 선다 */
+  const ours = (id: string | null | undefined): string | null =>
+    id !== null && id !== undefined && byId.has(id) ? id : null;
+  const slots: TakerSlot[] = starters.flatMap((a) => {
+    const player = byId.get(a.playerId);
+    return player ? [{ player, position: a.position }] : [];
+  });
+  const standing = live ?? setPieceTakersOf(slots, designated);
+  return Object.fromEntries(
+    SET_PIECE_ROLES.map((role) => [
+      role,
+      {
+        designated: ours(designated?.[role]),
+        taker: ours(standing[role]),
+      } satisfies SetPieceTakerView,
+    ]),
+  ) as Record<SetPieceRole, SetPieceTakerView>;
+}
+
+/**
  * 클럽을 떠나 있는 한 칸 (`SquadViewRow.away`) — **소집이 먼저다.** 여름 대회의
  * 늦은 합류는 A매치 창과 겹치지 않지만, 겹치는 날이 온다면 지금 그를 데려간 쪽이
  * 소집이다.
@@ -2999,6 +3089,18 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       ? state.pendingMatch.packet.home.teamId === userTeamId
         ? state.pendingMatch.packet.home
         : state.pendingMatch.packet.away
+      : null;
+  /**
+   * 경기 중 실제로 차는 사람 — **이 경기의 패킷이 이미 고른 값**이다 (match.md §8).
+   * 패킷의 선수 칸(`PacketPlayer`)에는 능력치가 없어 뷰가 다시 고를 수도 없지만,
+   * 다시 골라서도 안 된다: 교체로 나간 키커 대신 누가 서 있는지는 90분이 아는 사실이다.
+   * 옛 세이브의 패킷에는 `setPieces`가 없다 — 그때는 저장된 선발에서 낸다.
+   */
+  const livePacketTakers =
+    state.phase === "match" && state.pendingMatch
+      ? (state.pendingMatch.packet.guide.setPieces?.[
+          state.pendingMatch.packet.home.teamId === userTeamId ? "home" : "away"
+        ]?.takers ?? null)
       : null;
   const liveSlots = new Map<string, { entry: PacketPlayer; role: "starting" | "bench" }>(
     livePacket
@@ -3641,6 +3743,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       firstTeamCount: players.filter((p) => p.loan === null && p.squadLevel === "first").length,
       reserveCount: players.filter((p) => p.loan === null && p.squadLevel === "reserve").length,
       registration: squadRegistrationOf(state, userTeamId),
+      setPieces: setPieceTakerViews(squad, tactics.setPieceTakers, starters, livePacketTakers),
       youthIntake: youthIntakeView(state),
     },
     calendar: {
