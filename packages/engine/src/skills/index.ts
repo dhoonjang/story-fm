@@ -10,6 +10,7 @@ import type {
   ManagerAttributes,
   DrilledTactics,
   MarketCard,
+  ScoutMission,
   Player,
   PromiseKind,
   ReserveTrainingPolicy,
@@ -39,6 +40,8 @@ import {
   RATING_MAX,
   SET_PIECE_ROLES,
   reserveTrainingTitle,
+  MISSION_CANDIDATES,
+  MISSION_DAYS,
   SCOUT_CONCURRENT_LIMIT,
   SCOUT_DAYS,
   SLOT_TIME,
@@ -99,16 +102,28 @@ import {
 } from "../squad/registration";
 import {
   SCOUT_REPEAT_LIMIT,
+  activeMissions,
   completedScoutReports,
   deferScout,
   dropDeferredScout,
+  earliestScoutReturn,
+  freeScoutSlots,
+  inFlightScoutLabels,
+  missionBrief,
+  missionLabel,
+  missionScope,
+  sameMissionConditions,
+  waitingMissions,
 } from "../squad/scouting";
+import { resolveCompetition } from "../world/player-pool";
 import { creditSettling, settlingAnchor, settlingOf } from "../squad/settling";
 // 면담에서 한 약속은 장부에 선다 (people.md §5-2 · career.md §2)
 import { openPromise, type PromiseOpened } from "../squad/promises";
 // 감독이 지목한 번호는 코어가 배정하고, 사실만 돌려준다 (player.md §1.1)
 import { assignRequestedNumber, numberBlockText } from "../squad/numbers";
 import { archetypeTraitsOf } from "../world/player-persona";
+// 면담과 완장은 사이를 옮긴다 (people.md §6 「관계 점수」)
+import { MANAGER_SUBJECT, moveRelation, relationFactor } from "../world/relations";
 import { dressingRoomFactor, dressingRoomVoice, leaderGroupOf } from "../squad/hierarchy";
 import {
   groupOf,
@@ -1139,11 +1154,23 @@ export function applyTalkToPlayer(
   player.state.talkedOn = state.date;
 
   const base = TALK_BASE[input.outcome];
+  /**
+   * **계수가 둘이다** (career.md §2) — 감독의 리더십이 말을 하는 사람이라면 관계는
+   * 그 말을 듣는 사람이다. 부호를 가리지 않는 것은 리더십·라커룸 계수와 같은 규약이라,
+   * 믿는 선수는 칭찬도 질책도 크게 듣는다.
+   *
+   * ⚠️ **계수를 읽는 것이 관계를 옮기는 것보다 먼저다** — 오늘의 말은 어제까지의
+   * 사이로 울린다.
+   */
   const delta = Math.round(
-    base * (input.intensity / TALK_INTENSITY_PIVOT) * leadershipFactor(state),
+    base *
+      (input.intensity / TALK_INTENSITY_PIVOT) *
+      leadershipFactor(state) *
+      relationFactor(state, MANAGER_SUBJECT, player.id),
   );
   const bounded = Math.max(-TALK_MORALE_BOUND, Math.min(TALK_MORALE_BOUND, delta));
   player.state.form = clampForm(player.state.form + moraleToForm(bounded));
+  moveRelation(state, MANAGER_SUBJECT, player.id, `talk-${input.outcome}`);
 
   /**
    * 면담은 방치 이슈를 해소한다 — **잘 풀렸을 때만** (career.md §2). 결과와 무관하게
@@ -1963,11 +1990,25 @@ export function movePlayerSlot(
 }
 
 /**
+ * **한 선수를 기간을 정해 훈련에서 뺄 수 있는 최장 길이** (→ docs/simulation/season.md §4).
+ *
+ * 한 달을 넘기는 것은 훈련 조정이 아니라 스쿼드에서 빼는 결정이고, 그 손잡이는
+ * 2군(`set_squad_level`)이다. 상한이 없으면 "당분간 쉬게 해"가 시즌 끝까지 걸린
+ * 프로그램이 되어 감독이 잊은 채 반년이 지난다.
+ */
+export const PLAYER_REST_MAX_DAYS = 28;
+
+/**
  * 개인 훈련 — **팀 훈련 위에 한 선수만 겨냥해 얹는다.**
  *
  * 축(`axis`)도 자리(`position`)도 훈련 결산(LLM)의 입력이고, 자리는 결산 한 번에
  * `POSITION_TRAIN_MAX`까지만 오른다 — **실전보다 느리게**(경기 1회 = +1).
  * "자리는 커리어가 만든다"를 지키되 전향이라는 판단이 가능해진다.
+ *
+ * **휴식(`rest`)은 그 위의 셋째 갈래다** — 감독이 기간을 정해 이 선수를 훈련에서
+ * 뺀다 (season.md §4 · player.md §5.5). 축·자리와 서로를 지우지 않는다: 쉬는 것과
+ * 무엇을 배우는지는 다른 지시이고, 한쪽만 보낸 요청이 다른 쪽을 조용히 거두면
+ * 감독이 걸어 둔 전향이 "이번 주 쉬게 해" 한마디에 사라진다.
  *
  * ⚠️ **층마다 닿는 것이 다르다** (season.md §2). 2군은 결산을 받지 않으므로 축은
  * 월간 성장의 겨냥으로 넘어가고, **자리는 갈 곳이 없어 반려한다** — 걸어 두고
@@ -1975,14 +2016,20 @@ export function movePlayerSlot(
  */
 export function setPlayerTraining(
   state: GameState,
-  input: { playerId: string; axis?: string; position?: string; clear?: boolean },
+  input: {
+    playerId: string;
+    axis?: string;
+    position?: string;
+    rest?: { until: string };
+    clear?: boolean;
+  },
 ): SkillResult {
   const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
   const index = state.playerTraining.findIndex((t) => t.gamePlayerId === player.id);
 
-  if (input.clear || (!input.axis && !input.position)) {
+  if (input.clear || (!input.axis && !input.position && !input.rest)) {
     if (index < 0) return { ok: false, message: `${player.name}에게 걸린 개인 훈련이 없습니다` };
     state.playerTraining.splice(index, 1);
     return {
@@ -1992,6 +2039,7 @@ export function setPlayerTraining(
     };
   }
 
+  // ── 검증 ── 여기서는 아무것도 바꾸지 않는다 (season.md §4 — `setTraining`과 같은 규약)
   const axis = attributeAxisOf(input.axis?.trim());
   if (input.axis?.trim() && !axis) {
     return { ok: false, message: `알 수 없는 능력치 축: ${input.axis.trim()}` };
@@ -2007,11 +2055,34 @@ export function setPlayerTraining(
       message: `${player.name}은(는) 2군이라 자리를 배울 수 없습니다 — 자리는 훈련 결산이 올리고 2군은 결산을 받지 않습니다. 1군으로 올린 뒤에 거세요`,
     };
   }
+  const restUntil = input.rest?.until;
+  if (restUntil !== undefined) {
+    if (!DATE_RE.test(restUntil)) {
+      return { ok: false, message: `날짜 형식이 잘못됨: ${restUntil}` };
+    }
+    if (restUntil < state.date) {
+      return {
+        ok: false,
+        message: `${restUntil}은 이미 지난 날입니다 — 휴식은 오늘(${state.date})까지로만 끊을 수 있습니다`,
+      };
+    }
+    const days = diffDays(state.date, restUntil) + 1;
+    if (days > PLAYER_REST_MAX_DAYS) {
+      return {
+        ok: false,
+        message: `${days}일은 너무 깁니다 — 개인 휴식은 ${PLAYER_REST_MAX_DAYS}일까지입니다. 그보다 오래 빼려면 2군으로 내리세요`,
+      };
+    }
+  }
 
+  // ── 적용 ──
+  const before = index >= 0 ? state.playerTraining[index] : undefined;
   const program = {
     gamePlayerId: player.id,
-    ...(axis ? { axis } : {}),
-    ...(position ? { position } : {}),
+    // 주지 않은 갈래는 지금 값을 그대로 잇는다 — 서로를 지우지 않는다
+    ...(axis ? { axis } : before?.axis ? { axis: before.axis } : {}),
+    ...(position ? { position } : before?.position ? { position: before.position } : {}),
+    ...(restUntil ? { rest: { until: restUntil } } : before?.rest ? { rest: before.rest } : {}),
     since: state.date,
   };
   if (index >= 0) state.playerTraining[index] = program;
@@ -2028,6 +2099,11 @@ export function setPlayerTraining(
     const fit = player.positions.find((p) => p.position === position)?.proficiency ?? 0;
     parts.push(`${position} 전향 (지금 적응도 ${fit})`);
     items.push(item({ label: "전향", text: position, note: `적응도 ${fit}` }));
+  }
+  if (restUntil) {
+    const days = diffDays(state.date, restUntil) + 1;
+    parts.push(`${restUntil}까지 훈련 제외 (${days}일)`);
+    items.push(item({ label: "휴식", text: `~${briefDate(restUntil)}`, note: `${days}일` }));
   }
   // 어디에 닿는지까지 답한다 — 층에 따라 경로가 갈린다 (season.md §2)
   const where = squadLevelOf(player) === "reserve" ? " (2군 — 월간 성장의 축 배율)" : "";
@@ -2257,6 +2333,8 @@ export function setCaptain(
       player.state.captainedOn = state.date;
       player.state.condition = clampCondition(player.state.condition + CAPTAIN_FIRST_LIFT);
     }
+    // 완장은 감독이 그를 어떻게 보는지의 선언이다 — 사이가 그만큼 움직인다 (people.md §6)
+    moveRelation(state, MANAGER_SUBJECT, player.id, "captain-named");
     // 새 영입에게 완장을 채우는 건 라커룸 한가운데 세우는 일이다 (settling.ts)
     const settled = creditSettling(state, player.id, "captain") > 0;
     const settling = settled ? settlingOf(state, player.id) : null;
@@ -3456,8 +3534,11 @@ export function scoutPlayer(state: GameState, ref: string): MarketSkillResult {
       message: `${player.name}은(는) ${done}번 살펴봤습니다 — 더 보내도 새로 알 게 없습니다`,
     };
   }
-  const inFlight = state.scoutReports.filter((r) => r.completedOn === null);
-  if (inFlight.length >= SCOUT_CONCURRENT_LIMIT) {
+  /**
+   * 자리는 **임무와 함께 센다** — 조건으로 나간 스카우트도 같은 스카우트진이다
+   * (player.md §9.4).
+   */
+  if (freeScoutSlots(state) <= 0) {
     /**
      * **무엇이 나갔고 무엇이 안 나갔는지 이름으로 말한다.** 한도만 알려 주면
      * 감독은 지목한 넷 중 누가 빠졌는지 알 수 없다.
@@ -3467,19 +3548,12 @@ export function scoutPlayer(state: GameState, ref: string): MarketSkillResult {
      * (→ [docs/data/player.md](../../../../docs/data/player.md) §9.4).
      */
     deferScout(state, playerId);
-    const busy = inFlight
-      .map((r) => `${playerName(state, r.gamePlayerId)} 보고 ${r.dueOn}`)
-      .join(", ");
-    const earliest = inFlight.reduce(
-      (min, r) => (r.dueOn < min ? r.dueOn : min),
-      inFlight[0]!.dueOn,
-    );
     return {
       ok: false,
       message:
         `${player.name}(${teamName(player.teamId)})은(는) 보내지 못했습니다 — 동시 파견 한도 ` +
-        `${SCOUT_CONCURRENT_LIMIT}명이 차 있습니다 (파견 중: ${busy}). ` +
-        `${earliest} 보고가 들어오면 자리가 납니다. ` +
+        `${SCOUT_CONCURRENT_LIMIT}이 차 있습니다 (파견 중: ${inFlightScoutLabels(state).join(", ")}). ` +
+        `${earliestScoutReturn(state)} 보고가 들어오면 자리가 납니다. ` +
         `${player.name} 요청은 대기로 남습니다 — 자리가 난 뒤 다시 불러야 나갑니다`,
     };
   }
@@ -3514,6 +3588,120 @@ export function scoutPlayer(state: GameState, ref: string): MarketSkillResult {
     message:
       `${player.name}(${teamName(player.teamId)}) 스카우트 파견 — 보고 예정 ${dueOn}` +
       (done > 0 ? ` (${done + 1}번째 파견)` : ""),
+  };
+}
+
+/**
+ * 감독이 조건으로 부르는 파견 — 이름이 없다 (→ docs/data/player.md §9.4).
+ * 대회는 감독이 부르는 이름 그대로 받는다("프리미어", "챔스", "라리가").
+ */
+export interface ScoutMissionInput {
+  competition?: string;
+  position?: string;
+  minAge?: number;
+  maxAge?: number;
+  /** 관측 시장가 상한 (£) — 참값이 아니라 흐린 값으로 거른다 (player.md §10) */
+  maxValue?: number;
+}
+
+/**
+ * **스카우트 임무 파견** — 조건 한 벌을 주고 후보 `MISSION_CANDIDATES`명을 받는다.
+ *
+ * 지목(`scoutPlayer`)과 **같은 자리를 나눠 쓴다** — 자리를 세는 자는 `freeScoutSlots`
+ * 하나뿐이라, 임무 셋이 나가 있는 날에는 지목도 나가지 못한다.
+ *
+ * 후보를 여기서 고르지 않는다 — 조건만 적고 `MISSION_DAYS` 뒤 tick이 그날의 상태로
+ * 줄을 세운다. 지금 고르면 두 주 동안 값도 나이도 움직인 뒤에 도착한 목록이 두 주
+ * 전의 세계를 말한다.
+ */
+export function scoutMission(state: GameState, input: ScoutMissionInput): MarketSkillResult {
+  const competition = resolveCompetition(input.competition);
+  if (!competition.ok) return competition;
+
+  const position = input.position?.trim().toUpperCase();
+  if (position !== undefined && !POSITION_CODES.includes(position)) {
+    return {
+      ok: false,
+      message: `"${input.position}"라는 자리는 없습니다 — ${POSITION_CODES.join("·")}`,
+    };
+  }
+  /**
+   * 뒤집힌 나이 조건은 **아무도 지나지 못한다.** 그대로 받으면 두 주 뒤에야 "후보
+   * 없음"이 답으로 오고, 감독은 그 리그에 스물셋 이하가 없다고 읽는다.
+   */
+  if (input.minAge !== undefined && input.maxAge !== undefined && input.minAge > input.maxAge) {
+    return {
+      ok: false,
+      message: `나이 조건이 뒤집혔습니다 — ${input.minAge}세 이상 ${input.maxAge}세 이하를 함께 지나는 선수는 없습니다`,
+    };
+  }
+
+  const draft: ScoutMission = {
+    id: `mission-${state.date}-${(state.scoutMissions ?? []).length}`,
+    ...(competition.competitionId === null ? {} : { competitionId: competition.competitionId }),
+    ...(position === undefined ? {} : { position }),
+    ...(input.minAge === undefined ? {} : { minAge: input.minAge }),
+    ...(input.maxAge === undefined ? {} : { maxAge: input.maxAge }),
+    ...(input.maxValue === undefined ? {} : { maxValue: input.maxValue }),
+    requestedOn: state.date,
+    dueOn: null,
+    completedOn: null,
+  };
+
+  const twin = [...activeMissions(state), ...waitingMissions(state)].find((m) =>
+    sameMissionConditions(m, draft),
+  );
+  if (twin) {
+    return {
+      ok: false,
+      message:
+        twin.dueOn === null
+          ? `같은 조건의 임무가 이미 대기 중입니다 (${missionLabel(twin)}) — 자리가 나면 나갑니다`
+          : `같은 조건으로 이미 나가 있습니다 (${missionLabel(twin)}) — 보고 예정 ${twin.dueOn}`,
+    };
+  }
+
+  const missions = (state.scoutMissions ??= []);
+  if (freeScoutSlots(state) <= 0) {
+    /**
+     * 못 나갔다는 사실을 **표에 남긴다** — 반려 문구는 이 턴에만 살아 있어, 남기지
+     * 않으면 다음 턴의 모델에는 이 임무를 읽을 자리가 없다 (player.md §9.4).
+     * 자리가 나도 코어가 대신 보내지 않는다: 상태 전이는 스킬 한 경로뿐이다.
+     */
+    missions.push(draft);
+    return {
+      ok: false,
+      message:
+        `${missionLabel(draft)} 임무는 보내지 못했습니다 — 동시 파견 한도 ` +
+        `${SCOUT_CONCURRENT_LIMIT}이 차 있습니다 (파견 중: ${inFlightScoutLabels(state).join(", ")}). ` +
+        `${earliestScoutReturn(state)} 보고가 들어오면 자리가 납니다. ` +
+        `이 임무는 대기로 남습니다 — 자리가 난 뒤 다시 불러야 나갑니다`,
+    };
+  }
+
+  const dueOn = addDays(state.date, MISSION_DAYS);
+  const mission: ScoutMission = { ...draft, dueOn };
+  // 대기하던 같은 조건은 위에서 걸러졌다 — 이 임무는 지금 처음 나간다
+  missions.push(mission);
+  /**
+   * 파견은 아직 아무 장부도 바꾸지 않았다 — 지목과 같은 갈래(`kind: "scout"`)의
+   * 카드로 선다. 이름 자리에는 조건이, 상대 자리에는 뒤지는 곳이 온다.
+   */
+  const card: MarketCard = {
+    kind: "scout",
+    playerId: mission.id,
+    playerName: missionBrief(mission),
+    counterpart: missionScope(mission),
+    direction: "in",
+    dueOn,
+    note: `후보 ${MISSION_CANDIDATES}명`,
+  };
+  return {
+    ok: true,
+    payload: card,
+    message:
+      `스카우트 임무 파견 — ${missionLabel(mission)} · ` +
+      `보고 예정 ${dueOn} (후보 ${MISSION_CANDIDATES}명)`,
   };
 }
 

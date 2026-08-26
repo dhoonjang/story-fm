@@ -3,12 +3,14 @@ import {
   ageOf,
   capsOf,
   clampCondition,
+  clampFatigue,
   clampSharpness,
+  fatigueOf,
   internationalGoalsOf,
   isAssociation,
   sharpnessOf,
 } from "@story-fm/domain";
-import { sharpnessAfterMinutes } from "@story-fm/sim";
+import { fatigueFromMinutes, sharpnessAfterMinutes } from "@story-fm/sim";
 import { addDays, diffDays, INTERNATIONAL_BREAKS, seasonYear } from "./calendar";
 import { makeRng } from "../core/rng";
 import { groupOf, isInjured, openInjury, type GameState } from "../core/state";
@@ -337,6 +339,16 @@ export function settleCallUps(
     if (row.goals > 0) {
       player.state.internationalGoals = internationalGoalsOf(player.state) + row.goals;
     }
+    /**
+     * **시즌의 잔고는 킥오프 체력으로 잰다** (player.md §5.5) — 클럽 경기 마감과
+     * 같은 순서다(`finalizeMatch`): 체력을 깎기 **전**의 값으로 재야 「덜 회복된
+     * 몸으로 뛴 90분이 더 남는다」는 연전 간격 항이 성립한다. 대표팀 출전만 이
+     * 장부를 비켜 가면 9·10·11·3월의 A매치 여덟 경기가 시즌에 아무것도 쌓지 않는다.
+     */
+    player.state.fatigue = clampFatigue(
+      fatigueOf(player.state) +
+        fatigueFromMinutes(row.apps * MINUTES_PER_APP, player.state.condition),
+    );
     player.state.condition = clampCondition(
       player.state.condition - CALL_UP_TRAVEL_FATIGUE - CALL_UP_FATIGUE_PER_APP * row.apps,
     );

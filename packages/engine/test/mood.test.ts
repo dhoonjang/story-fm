@@ -60,10 +60,24 @@ import {
   minutesShortfalls,
   openPromise,
   openPromises,
+  moveRelation,
+  relationTierOf,
   squadStatusOf,
   tickPromises,
 } from "@story-fm/engine";
 import { createMiniGame, createTestGame, advanceAndPlay, advanceDays } from "./helpers";
+
+/**
+ * 두 사람을 `close` 위로 올린다 — 계약 해지 카드가 서는 조건이다 (people.md §6).
+ *
+ * 사건 표를 통해 올리는 것이 요점이다: 줄을 손으로 적으면 이 시험은 `moveRelation`이
+ * 실제로 무엇을 하는지와 무관해진다.
+ */
+function beFriends(state: GameState, a: GamePlayer, b: GamePlayer): void {
+  while (!["close", "trusted"].includes(relationTierOf(state, a.id, b.id))) {
+    moveRelation(state, a.id, b.id, "captain-named");
+  }
+}
 
 describe("체력 — 몸과 마음이 한 축이다", () => {
   it("0~100 안에 머문다", () => {
@@ -80,6 +94,12 @@ describe("라커룸이 계약 해지를 알아보는 표식", () => {
    */
   function departed(state: GameState, row: Partial<Transfer>): void {
     const leaver = userPlayers(state)[1]!;
+    /**
+     * **카드는 가까웠던 사람에게만 선다**(people.md §6) — 이 시험이 보려는 것은 표식이지
+     * 사이가 아니므로, 읽는 사람과의 관계를 여기서 열어 둔다. 시드가 어느 나라 사람을
+     * 몇 명 담았는지에 이 시험이 기대면 표식이 멀쩡한 날에도 빨강이 뜬다.
+     */
+    beFriends(state, leaver, userPlayers(state)[0]!);
     leaver.teamId = FREE_AGENT_TEAM;
     state.transfers.push({
       id: `tr-test-${state.transfers.length}`,
@@ -105,6 +125,27 @@ describe("라커룸이 계약 해지를 알아보는 표식", () => {
     const expired = createTestGame();
     departed(expired, { reason: "contract-expiry" });
     expect(sawDeparture(expired), "계약 만료가 해지로 읽혔다").toBe(false);
+  });
+
+  it("가까웠던 사람에게만 선다 — 라커룸 전원이 같은 무게로 들지 않는다", () => {
+    const state = createTestGame();
+    const leaver = userPlayers(state)[1]!;
+    const near = userPlayers(state)[0]!;
+    /** 사이를 명시적으로 갈라 둔다 — 시드의 국적 분포가 이 시험의 답이면 안 된다 */
+    state.relations = [];
+    beFriends(state, leaver, near);
+    const far = userPlayers(state).find(
+      (p) =>
+        p.id !== leaver.id &&
+        p.id !== near.id &&
+        relationTierOf(state, leaver.id, p.id) === "neutral",
+    )!;
+    departed(state, { reason: "release-agreed" });
+
+    const sawIt = (p: (typeof state.players)[number]) =>
+      moodFactsOf(state, p).some((f) => f.cause === "departure");
+    expect(sawIt(near), "가까웠던 동료가 해지를 못 들었다").toBe(true);
+    expect(sawIt(far), "남이나 다름없던 동료에게도 카드가 걸렸다").toBe(false);
   });
 
   it("옛 세이브는 문장으로 갈린다 — 여기만 남은 폴백이다", () => {
@@ -231,7 +272,8 @@ describe("심경 사실 카드 — 코어는 사실만 낸다", () => {
     const quiet = userPlayers(state).filter((p) => injuryRiskFor(p).grade === "low");
     const [mentee, mentor] = [quiet[0]!, quiet[1]!];
     const leaver = userPlayers(state).find((p) => p.id !== mentee.id && p.id !== mentor.id)!;
-    // 같은 날 계약이 해지된 동료 — 라커룸 전원이 그 카드를 든다
+    // 같은 날 계약이 해지된 **가까운** 동료 — 그 카드가 서는 조건이다 (people.md §6)
+    beFriends(state, leaver, mentee);
     leaver.teamId = FREE_AGENT_TEAM;
     state.transfers.push({
       id: "tr-mentoring",

@@ -56,6 +56,7 @@ import { leagueOfTeamIn } from "../competition/promotion";
 import { derbyNameOf, derbyOf } from "../data/derbies";
 import { derbyRecordOf } from "./derby";
 import { reportersOf } from "../world/persona";
+import { MANAGER_SUBJECT, moveRelation, stanceRelationEvent } from "../world/relations";
 import type { SkillResult } from "../skills";
 import { deltaItems } from "../skills/brief";
 
@@ -1541,6 +1542,7 @@ export function applyPressOutcome(
     row: stanceRow(stance),
     band: PRESS_BAND * conference.weight,
     targetPlayerId: askedAbout,
+    stance,
   });
 }
 
@@ -1569,6 +1571,16 @@ export function applyStanceOutcome(
     band: number;
     targetPlayerId?: string | null;
     axes?: readonly PressAxis[];
+    /**
+     * 감독이 취한 태도 — **관계를 옮기는 것은 이 값이다** (people.md §6 「관계 점수」).
+     * `null`은 답하지 않은 자리이고, 생략하면 관계가 움직이지 않는다.
+     */
+    stance?: PressStance | null;
+    /**
+     * 이 자리에서 감독의 맞은편에 있던 사람 — 생략하면 지목된 선수다.
+     * 다가옴의 주장·구단주 자리처럼 선수가 아닌 상대가 있을 때 채운다.
+     */
+    relationWith?: string;
   },
 ): PressEffect {
   const live = new Set(input.axes ?? ALL_AXES);
@@ -1596,6 +1608,19 @@ export function applyStanceOutcome(
   const target = targetPlayer ? Math.round(on("target") * band * lead) : 0;
   if (targetPlayer && target !== 0) {
     targetPlayer.state.form = clampForm(targetPlayer.state.form + moraleToForm(target));
+  }
+
+  /**
+   * **사이도 함께 움직인다** (people.md §6). 회견의 지목과 다가옴의 응대가 같은 표를
+   * 타는 자리가 여기이므로 관계도 여기 한 곳에서 움직인다 — 두 자리가 표를 따로 들면
+   * 「감싸기가 사이를 얼마나 올리는가」가 두 값이 된다.
+   *
+   * 답하지 않은 자리도 값을 치른다: 이름이 불렸는데 감독이 아무 말도 하지 않은 것
+   * 역시 그 사람이 겪은 일이다.
+   */
+  const counterpart = input.relationWith ?? targetPlayer?.id ?? null;
+  if (input.stance !== undefined && counterpart !== null) {
+    moveRelation(state, MANAGER_SUBJECT, counterpart, stanceRelationEvent(input.stance));
   }
 
   return { board, media, squad, target, targetName: targetPlayer?.name ?? null, team };

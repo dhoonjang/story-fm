@@ -48,9 +48,12 @@ import type {
   ScheduleEntry,
   Negotiation,
   PressConference,
+  Relation,
   RetiredPlayer,
   YouthCandidate,
   CallUp,
+  MissionReportCard,
+  ScoutMission,
   ScoutReport,
   ScoutReportCard,
   SeasonAward,
@@ -292,6 +295,14 @@ export interface ChatTurn {
    * 다시 해야 한다.
    */
   reports?: ScoutReportCard[];
+  /**
+   * 이 턴에 도착한 **스카우트 임무 보고** — 조건으로 나간 파견이 데려온 후보 목록.
+   *
+   * 보고서(`reports`)와 같은 이유로 턴에 남는다(tick의 사건이라 스킬 칩이 없다).
+   * 카드의 모양이 아예 달라 같은 배열에 섞지 않는다 — 한쪽은 선수 하나의 16축이고
+   * 다른 쪽은 다섯 줄의 목록이다. 옛 세이브엔 없다 (optional).
+   */
+  missions?: MissionReportCard[];
   /**
    * 이 턴에 실린 **인물지** — 카드 텍스트가 아니라 **기록**이다 (people.md §6).
    *
@@ -816,6 +827,16 @@ export interface GameState {
    * (optional — SAVE_VERSION 유지).
    */
   deferredScouts?: DeferredScout[];
+  /**
+   * **스카우트 임무** — 이름이 아니라 조건 한 벌로 나간 파견
+   * (→ [docs/data/player.md](../../../../docs/data/player.md) §9.4).
+   *
+   * 지목(`scoutReports`)과 같은 동시 한도를 나눠 쓰고, 대기·파견 중·완료가 한 표에
+   * 함께 앉는다(`dueOn`·`completedOn`). 후보를 적어 두는 이유는 그 다섯의 지식
+   * 수준이 이 표에서 파생하기 때문이다(`pickedByMission`) — 출전 명단이 `seen`을
+   * 만드는 것과 같은 자리다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  scoutMissions?: ScoutMission[];
   /** 진행 중 협상 — 며칠에 걸쳐 오퍼가 오가므로 파생으로 되돌릴 수 없다 */
   negotiations: Negotiation[];
   /**
@@ -837,6 +858,15 @@ export interface GameState {
    * 없다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   approachPressure?: ApproachPressure[];
+  /**
+   * **관계 점수** — 무순서 쌍 하나에 한 줄 (people.md §6 「관계 점수」).
+   *
+   * 압력 눈금과 같은 이유로 세이브가 든다: 감독이 무엇을 했는지의 누적이라 장부에서
+   * 파생할 수 없다. **움직인 쌍만 앉는다** — 안 움직인 쌍은 첫인상이 결정적으로
+   * 답하므로(`world/relations.ts`) 줄이 없는 것과 0인 것은 다른 뜻이 아니다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  relations?: Relation[];
   /**
    * 언론 유출 — 사다리 계단 4의 사건 (people.md §8). **다음 회견이 실어 갈 때까지만**
    * 남는다: `openPress`가 소비해 사실 카드로 옮긴다.

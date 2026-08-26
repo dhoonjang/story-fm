@@ -63,8 +63,13 @@ export type Injury = z.infer<typeof InjurySchema>;
  */
 export type InjuryRiskGrade = "low" | "elevated" | "high";
 
-/** 저울을 들어 올린 항 — 세 코드가 곧 `injuryWeight`의 세 항이다 */
-export type InjuryRiskCause = "fatigue" | "proneness" | "strength";
+/**
+ * 저울을 들어 올린 항 — 네 코드가 곧 `injuryWeight`의 네 항이다.
+ *
+ * ⚠️ **`condition`은 오늘의 몸이고 `load`는 시즌의 몸이다** (player.md §5.3·§5.5).
+ * 한 낱말로 접으면 감독이 "하루 쉬면 되는가"와 "몇 주를 빼야 하는가"를 가르지 못한다.
+ */
+export type InjuryRiskCause = "condition" | "load" | "proneness" | "strength";
 
 export const INJURY_RISK_GRADE_KO: Record<InjuryRiskGrade, string> = {
   low: "낮음",
@@ -78,7 +83,8 @@ export const INJURY_RISK_GRADE_KO: Record<InjuryRiskGrade, string> = {
  * 그 분포를 볼 자리는 어디에도 없다 (player.md §10).
  */
 export const INJURY_RISK_CAUSE_KO: Record<InjuryRiskCause, string> = {
-  fatigue: "피로",
+  condition: "체력",
+  load: "누적 피로",
   proneness: "부상 이력",
   strength: "몸싸움",
 };
@@ -1125,10 +1131,66 @@ export const DeferredScoutSchema = z.object({
 export type DeferredScout = z.infer<typeof DeferredScoutSchema>;
 
 /**
- * 못 나간 요청을 붙들고 있는 기간. 자리는 늦어도 `SCOUT_DAYS` 안에 나므로,
- * 그 안에 안 나갔으면 감독의 뜻이 지나간 것이다.
+ * 나이 조건이 설 수 있는 범위 — 검색·임무가 같은 자를 쓴다. 프로 등록이 열리는
+ * 나이와 현역이 끝나는 나이의 바깥에서는 조건이 뜻을 잃는다.
  */
-export const SCOUT_DEFER_DAYS = SCOUT_DAYS;
+export const SEARCH_MIN_AGE = 15;
+export const SEARCH_MAX_AGE = 45;
+
+/**
+ * **스카우트 임무** — 이름이 아니라 **조건 한 벌**을 주고 내보내는 파견
+ * (→ docs/data/player.md §9.4).
+ *
+ * 지목(`ScoutReport`)과 같은 자리를 나눠 쓰지만 가져오는 것이 다르다: 지목은 그
+ * 선수 하나의 안개를 `scouted`까지 걷고, 임무는 조건을 지나는 후보
+ * `MISSION_CANDIDATES`명을 골라 와 그 다섯을 `seen`으로 올린다.
+ *
+ * **세 상태가 두 칸에 있다** — `dueOn === null`이면 한도에 막혀 아직 안 나간 대기,
+ * `dueOn`이 서고 `completedOn === null`이면 파견 중, 둘 다 서면 완료다. 대기를
+ * 따로 두지 않는 이유는 대기와 파견이 **같은 조건 한 벌**이기 때문이다: 표를
+ * 가르면 나가는 순간 한쪽에서 지우고 다른 쪽에 그대로 다시 적어야 한다
+ * (지목의 대기 `DeferredScout`는 이름 하나뿐이라 그럴 일이 없다).
+ */
+export const ScoutMissionSchema = z.object({
+  id: z.string().min(1),
+  /** 대회 id — 없으면 풀은 검색과 같은 5대 리그 1·2부 전체 */
+  competitionId: z.string().min(1).optional(),
+  /** 포지션 코드 (주 포지션 또는 소화 가능 포지션) */
+  position: z.string().min(1).optional(),
+  minAge: z.number().int().min(SEARCH_MIN_AGE).max(SEARCH_MAX_AGE).optional(),
+  maxAge: z.number().int().min(SEARCH_MIN_AGE).max(SEARCH_MAX_AGE).optional(),
+  /** 관측 시장가 상한 (£) — 참값이 아니라 흐린 값으로 거른다 (player.md §10) */
+  maxValue: z.number().min(0).optional(),
+  requestedOn: DateString,
+  /** null = 한도에 막혀 아직 안 나갔다 (대기) */
+  dueOn: DateString.nullable(),
+  /** null = 파견 중 */
+  completedOn: DateString.nullable(),
+  /**
+   * 코어가 `dueOn`에 적는 후보 — **한 번 적고 다시 세우지 않는다.** 후보가 되는
+   * 순간 그들의 지식 수준이 `seen`으로 오르므로, 나중에 다시 줄을 세우면 그
+   * 다섯의 관측값이 달라져 카드와 어긋난다.
+   */
+  candidates: z.array(z.string().min(1)).optional(),
+});
+export type ScoutMission = z.infer<typeof ScoutMissionSchema>;
+
+/**
+ * 임무 소요 일수 — **지목의 두 배.** 한 사람을 보러 가는 길과 리그를 훑어 다섯을
+ * 골라내는 일이 같은 날짜일 수는 없다. 조건의 개수로 흔들지 않는다: 눈금이 하나여야
+ * 감독이 언제 답이 오는지 셀 수 있다.
+ */
+export const MISSION_DAYS = SCOUT_DAYS * 2;
+/** 임무 하나가 적어 오는 후보 수 — 견줄 수 있을 만큼, 카드가 화면을 덮지 않을 만큼 */
+export const MISSION_CANDIDATES = 5;
+
+/**
+ * 못 나간 요청을 붙들고 있는 기간 — **자리를 가장 늦게 비우는 파견의 날짜**다.
+ * 그 안에 자리는 반드시 나므로, 넘겨도 안 나갔으면 감독의 뜻이 지나간 것이다.
+ * 임무가 생기기 전에는 `SCOUT_DAYS`였다: 임무 셋이 나가 있으면 이레로는 자리가
+ * 나기 전에 대기가 먼저 사라진다.
+ */
+export const SCOUT_DEFER_DAYS = MISSION_DAYS;
 
 /**
  * 라커룸 불만의 **사유 코드** — 문장이 아니다 (people.md §5).
@@ -1157,6 +1219,11 @@ export const PLAYER_ISSUE_REASONS = [
    * (`blocked-move`와 같은 축). `count`가 그가 잃은 번호다 (people.md §5).
    */
   "number",
+  /**
+   * 누적 피로가 「과부하」에 머문 날이 그 사람의 문턱을 넘었다 — 기간은
+   * `PlayerState.overloadedOn`이 갖는다 (people.md §5 · player.md §5.5).
+   */
+  "overload",
 ] as const;
 export type PlayerIssueReason = (typeof PLAYER_ISSUE_REASONS)[number];
 
@@ -1166,8 +1233,8 @@ export const PlayerIssueSchema = z.object({
   reason: z.enum(PLAYER_ISSUE_REASONS).optional(),
   /**
    * 사유에 딸린 수치 — `losing-run`이면 연패 수, `out-of-position`이면 연속 경기 수,
-   * `minutes`면 그 지위에 **모자란 선발 수**, `number`면 **그가 잃은 번호**다
-   * (people.md §5).
+   * `minutes`면 그 지위에 **모자란 선발 수**, `number`면 **그가 잃은 번호**,
+   * `overload`면 **과부하 며칠째**다 (people.md §5).
    */
   count: z.number().int().min(1).optional(),
   /** 옛 세이브가 들고 있는 사유 문장 — 더는 쓰지 않는다 (`reason`의 폴백) */
@@ -1383,6 +1450,17 @@ export const PlayerTrainingSchema = z.object({
   axis: z.string().min(1).optional(),
   /** 배우는 자리 — 훈련 결산이 적응도를 조금씩 올린다 */
   position: z.string().min(1).optional(),
+  /**
+   * **감독이 이 선수를 훈련에서 뺀 기간** — 누적 피로의 유일한 손잡이
+   * (→ docs/simulation/season.md §4 · docs/data/player.md §5.5).
+   *
+   * `until`은 **그날까지 포함**이다. 축·자리와 한 행에 사는 이유는 대상이 같아서고,
+   * 서로를 지우지 않는다 — 쉬는 것과 무엇을 배우는지는 다른 지시다. 기간이 지나면
+   * 저절로 지나가므로 거둘 일이 대개 없다.
+   *
+   * 옛 세이브엔 없다(optional — 세이브 버전을 올리지 않는다).
+   */
+  rest: z.object({ until: DateString }).optional(),
   since: DateString,
 });
 export type PlayerTraining = z.infer<typeof PlayerTrainingSchema>;

@@ -1,4 +1,4 @@
-import type { ScoutReportCard } from "@story-fm/domain";
+import type { MissionReportCard, ScoutReportCard } from "@story-fm/domain";
 import type { CardMark, GoalMark, SkillBrief } from "@story-fm/engine";
 
 /** GM 턴 결과 — mock/실모드 공통 계약 */
@@ -75,6 +75,8 @@ export interface GmTurnResult {
   cards?: CardMark[];
   /** 이번 턴에 도착한 스카우팅 보고서 — 채팅이 카드로 편다 */
   reports?: ScoutReportCard[];
+  /** 이번 턴에 도착한 스카우트 임무 보고 — 채팅이 후보 목록 카드로 편다 */
+  missions?: MissionReportCard[];
   /**
    * **시계가 멎은 채로 이어진 평시 턴 수** — 첫 줄 헤더를 연달아 못 읽었다
    * (`STALLED_CLOCK_TURNS` 이상일 때만 실린다).

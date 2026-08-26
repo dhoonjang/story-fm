@@ -1,4 +1,10 @@
-import type { AttributeAxis, DeferredScout, GamePlayer, ScoutReport } from "@story-fm/domain";
+import type {
+  AttributeAxis,
+  DeferredScout,
+  GamePlayer,
+  ScoutMission,
+  ScoutReport,
+} from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
@@ -12,11 +18,13 @@ import {
   ratingTier,
   RATING_MAX,
   RATING_TIERS,
+  formatMoney,
   SCOUT_CONCURRENT_LIMIT,
   SCOUT_DEFER_DAYS,
   type RatingTier,
 } from "@story-fm/domain";
 import { GAP_CONDITION } from "@story-fm/sim";
+import { competitionName } from "../data/cup-catalog";
 import { isSettling, settlingNote, settlingOf } from "./settling";
 import { diffDays } from "../competition/calendar";
 import { hashChannel } from "../core/rng";
@@ -190,6 +198,16 @@ export function hasSeenPlay(state: GameState, playerId: string): boolean {
   return false;
 }
 
+/**
+ * **임무가 골라 온 후보인가** — `hasSeenPlay` 옆의 같은 파생이다.
+ *
+ * 저장하는 것은 임무가 적은 후보 목록뿐이고 지식 수준은 거기서 나온다 (player.md §9.4).
+ * 출전 명단이 `seen`을 만드는 것과 같은 자리라, 임무 표를 지우면 눈금도 함께 사라진다.
+ */
+export function pickedByMission(state: GameState, playerId: string): boolean {
+  return (state.scoutMissions ?? []).some((m) => m.candidates?.includes(playerId) === true);
+}
+
 export function knowledgeOf(state: GameState, playerId: string): Knowledge {
   const player = playerById(state, playerId);
   if (!player) return "rumoured";
@@ -203,7 +221,8 @@ export function knowledgeOf(state: GameState, playerId: string): Knowledge {
     return isSettling(state, playerId) ? "adapting" : "own";
   }
   if (isScouted(state, playerId)) return "scouted";
-  if (hasSeenPlay(state, playerId)) return "seen";
+  // 임무가 골라 온 후보도 스카우트가 **가서 본** 선수다 (player.md §9.4)
+  if (hasSeenPlay(state, playerId) || pickedByMission(state, playerId)) return "seen";
   return "rumoured";
 }
 
@@ -261,7 +280,22 @@ export interface Observation {
 }
 
 export function observationOf(state: GameState, playerId: string): Observation {
-  const knowledge = knowledgeOf(state, playerId);
+  return observationAt(state, playerId, knowledgeOf(state, playerId));
+}
+
+/**
+ * **지식 수준을 지정한** 관측 오프셋 — 「그 눈금이면 이 선수가 어떻게 보이는가」.
+ *
+ * 스카우트 임무가 이것을 쓴다: 후보를 고르는 눈은 **다녀온 뒤의 눈금**이어야 하고,
+ * 그 눈금은 아직 지금 아는 수준이 아니다 (player.md §9.4). 오프셋은 폭에서 나오므로
+ * 눈금이 달라지면 값도 달라진다 — 고를 때와 보일 때의 눈금이 갈리면 「£10M 이하로
+ * 찾아 와」에 £20M짜리가 서게 된다.
+ */
+export function observationAt(
+  state: GameState,
+  playerId: string,
+  knowledge: Knowledge,
+): Observation {
   const margin = observationMargin(state, playerId, "overall", knowledge);
   return {
     knowledge,
@@ -486,9 +520,117 @@ export function pruneDeferredScouts(state: GameState): void {
   state.deferredScouts = deferredScouts(state);
 }
 
-/** 지금 비어 있는 파견 자리 */
+// ── 임무 (조건으로 나가는 파견) ─────────────────────────
+/**
+ * 지금 나가 있는 임무 — `dueOn`이 섰고 아직 안 돌아온 것.
+ *
+ * 대기(`dueOn === null`)와 완료(`completedOn`)가 한 표에 함께 앉으므로, 자리를
+ * 세는 쪽은 반드시 이 자를 쓴다 (player.md §9.4).
+ */
+export function activeMissions(state: GameState): ScoutMission[] {
+  return (state.scoutMissions ?? []).filter((m) => m.dueOn !== null && m.completedOn === null);
+}
+
+/** 아직 살아 있는 대기 임무 — 요청 뒤 `SCOUT_DEFER_DAYS`까지 */
+export function waitingMissions(state: GameState): ScoutMission[] {
+  return (state.scoutMissions ?? []).filter(
+    (m) => m.dueOn === null && diffDays(m.requestedOn, state.date) <= SCOUT_DEFER_DAYS,
+  );
+}
+
+/** 만료된 대기 임무를 지운다 — tick이 하루에 한 번 부른다 (지목의 `pruneDeferredScouts`와 같은 자리) */
+export function pruneWaitingMissions(state: GameState): void {
+  if (!state.scoutMissions?.length) return;
+  const alive = new Set(waitingMissions(state).map((m) => m.id));
+  state.scoutMissions = state.scoutMissions.filter((m) => m.dueOn !== null || alive.has(m.id));
+}
+
+/** 임무가 뒤지는 곳 — 대회 이름, 대회를 안 주면 검색과 같은 전체 풀 */
+export function missionScope(mission: ScoutMission): string {
+  return mission.competitionId ? competitionName(mission.competitionId) : "5대 리그 1·2부 전체";
+}
+
+/** 나이 조건 한 마디 — 없으면 빈 문자열 */
+function missionAgeText(mission: ScoutMission): string {
+  const { minAge, maxAge } = mission;
+  if (minAge !== undefined && maxAge !== undefined) return `${minAge}~${maxAge}세`;
+  if (maxAge !== undefined) return `${maxAge}세 이하`;
+  if (minAge !== undefined) return `${minAge}세 이상`;
+  return "";
+}
+
+/**
+ * **임무가 무엇을 찾는가** — 뒤지는 곳(`missionScope`)을 뺀 조건들.
+ *
+ * 곳과 조건을 가르는 이유는 카드가 둘을 다른 자리에 세우기 때문이다 — 한 줄로만
+ * 두면 「대상: 프리미어리그」 옆에 「프리미어리그 · LB · 23세 이하」가 다시 선다.
+ */
+export function missionBrief(mission: ScoutMission): string {
+  const parts = [
+    mission.position,
+    missionAgeText(mission),
+    mission.maxValue === undefined ? "" : `${formatMoney(mission.maxValue)} 이하`,
+  ].filter((part): part is string => part !== undefined && part !== "");
+  return parts.length > 0 ? parts.join(" · ") : "조건 없음";
+}
+
+/**
+ * **임무의 이름표** — 곳과 조건을 붙인 한 줄.
+ *
+ * 지목은 선수 이름으로 불리지만 임무에는 이름이 없다. 반려 문구와 요약 줄이 이
+ * 한 줄을 함께 쓴다 — 자리마다 조건을 다시 엮으면 같은 임무가 두 가지로 불린다.
+ */
+export function missionLabel(mission: ScoutMission): string {
+  return `${missionScope(mission)} · ${missionBrief(mission)}`;
+}
+
+/**
+ * **두 임무가 같은 조건인가** — 나가 있거나 대기 중인 임무를 또 부르는 것을 막는 자.
+ *
+ * 완료된 임무와 같은 조건은 다시 나갈 수 있다: 그 사이 값도 나이도 움직였고,
+ * 후보 다섯이 `seen`이 되어 관측값 자체가 달라졌다 (player.md §9.4).
+ */
+export function sameMissionConditions(a: ScoutMission, b: ScoutMission): boolean {
+  return (
+    a.competitionId === b.competitionId &&
+    a.position === b.position &&
+    a.minAge === b.minAge &&
+    a.maxAge === b.maxAge &&
+    a.maxValue === b.maxValue
+  );
+}
+
+/**
+ * **지금 나가 있는 파견을 한 줄씩** — 반려 문구가 「무엇이 나갔는가」를 말하는 자.
+ *
+ * 지목은 선수 이름으로, 임무는 조건으로 불린다. 두 스킬이 각자 엮으면 같은 파견이
+ * 반려 문구에 따라 다르게 불린다.
+ */
+export function inFlightScoutLabels(state: GameState): string[] {
+  return [
+    ...state.scoutReports
+      .filter((r) => r.completedOn === null)
+      .map((r) => `${playerById(state, r.gamePlayerId)?.name ?? r.gamePlayerId} 보고 ${r.dueOn}`),
+    ...activeMissions(state).map((m) => `임무 ${missionLabel(m)} 보고 ${m.dueOn}`),
+  ];
+}
+
+/** 자리가 나는 가장 이른 날 — 나가 있는 게 없으면 null */
+export function earliestScoutReturn(state: GameState): string | null {
+  const dates = [
+    ...state.scoutReports.filter((r) => r.completedOn === null).map((r) => r.dueOn),
+    ...activeMissions(state).map((m) => m.dueOn ?? ""),
+  ].filter((d) => d !== "");
+  return dates.length === 0 ? null : dates.sort()[0]!;
+}
+
+/**
+ * 지금 비어 있는 파견 자리 — **지목과 임무가 함께 센다** (player.md §9.4).
+ * 한쪽만 세면 임무 셋이 나가 있는 날에도 지목이 넷째로 나간다.
+ */
 export function freeScoutSlots(state: GameState): number {
-  const inFlight = state.scoutReports.filter((r) => r.completedOn === null).length;
+  const inFlight =
+    state.scoutReports.filter((r) => r.completedOn === null).length + activeMissions(state).length;
   return Math.max(0, SCOUT_CONCURRENT_LIMIT - inFlight);
 }
 
@@ -506,18 +648,26 @@ export function scoutingSummary(state: GameState): string[] {
       if (!p) return `스카우트 파견 중 (보고 ${r.dueOn})`;
       return `${p.name} (${teamNameIn(state, p.teamId)}) 스카우트 파견 중 — 보고 ${r.dueOn}`;
     });
-  const waiting = deferredScouts(state);
+  // 임무는 이름이 없다 — 조건 한 줄이 그 자리에 선다 (player.md §9.4)
+  for (const m of activeMissions(state)) {
+    lines.push(`스카우트 임무 파견 중 — ${missionLabel(m)} · 보고 ${m.dueOn}`);
+  }
+  /**
+   * **못 나간 것은 갈래를 가리지 않고 한 줄에 선다.** 지목과 임무가 각자 줄을
+   * 세우면 같은 「동시 한도 · 빈 자리」가 두 번 서서 어느 쪽 자리인지가 흐려진다.
+   */
+  const waiting: string[] = [
+    ...deferredScouts(state).map((d) => {
+      const p = playerById(state, d.gamePlayerId);
+      return p ? `${p.name} (${teamNameIn(state, p.teamId)})` : d.gamePlayerId;
+    }),
+    ...waitingMissions(state).map((m) => `임무: ${missionLabel(m)}`),
+  ];
   if (waiting.length > 0) {
-    const names = waiting
-      .slice(0, SCOUT_SUMMARY_NAMES)
-      .map((d) => {
-        const p = playerById(state, d.gamePlayerId);
-        return p ? `${p.name} (${teamNameIn(state, p.teamId)})` : d.gamePlayerId;
-      })
-      .join(", ");
+    const names = waiting.slice(0, SCOUT_SUMMARY_NAMES).join(", ");
     const free = freeScoutSlots(state);
     lines.push(
-      `스카우트 미파견 ${waiting.length}명 (${names}${waiting.length > SCOUT_SUMMARY_NAMES ? " …" : ""}) — ` +
+      `스카우트 미파견 ${waiting.length}건 (${names}${waiting.length > SCOUT_SUMMARY_NAMES ? " …" : ""}) — ` +
         `동시 한도 ${SCOUT_CONCURRENT_LIMIT}에 막혀 아직 안 나갔다 · ` +
         (free > 0 ? `지금 자리 ${free}` : "빈 자리 없음"),
     );
@@ -613,15 +763,18 @@ export interface PotentialBand {
  * 둘이 부딪히면 1이 이긴다 — 그래서 `floor`가 참값에서 잘린다. 안개가 종합을 참
  * 잠재력 위로 부풀린 선수(잠재력 = 종합인데 관측이 후한 경우)가 여기에 걸린다.
  */
-export function potentialBand(state: GameState, player: GamePlayer): PotentialBand | null {
-  const knowledge = knowledgeOf(state, player.id);
+export function potentialBand(
+  state: GameState,
+  player: GamePlayer,
+  knowledge = knowledgeOf(state, player.id),
+): PotentialBand | null {
   const margin = potentialMargin(state, player.id, knowledge);
   if (margin === null) return null;
   const truth = player.attributes.potential;
   const center = truth + offsetFor(state.seed, player.id, "potential", Math.floor(margin / 2));
   const floor = Math.min(
     truth,
-    observedOverall(player.attributes.overall, observationOf(state, player.id)),
+    observedOverall(player.attributes.overall, observationAt(state, player.id, knowledge)),
   );
   return {
     low: Math.max(floor, center - margin),

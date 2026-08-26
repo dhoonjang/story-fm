@@ -1,4 +1,6 @@
 import {
+  MISSION_CANDIDATES,
+  MISSION_DAYS,
   TACTIC_AXES,
   TACTIC_TOGGLES,
   tacticAxisScaleText,
@@ -431,6 +433,18 @@ export const SKILL_CATALOG = [
     readOnly: false,
     description:
       "타 팀 선수에게 스카우트를 파견한다. 며칠 뒤 보고서가 오면 실행 계열 능력치는 거의 정확해지고 판단 계열에는 오차가 남으며, 잠재력은 구간으로 잡힌다 — 같은 선수에게 다시 보낼수록 구간이 좁아진다. 진지한 영입 검토나 상대 핵심 분석에 사용하며 동시 파견 한도가 있다.",
+  },
+  {
+    name: "scout_mission",
+    label: "스카우트 임무",
+    group: "조회",
+    readOnly: false,
+    description:
+      "이름 대신 조건으로 스카우트를 내보낸다 — 대회(competition)·자리(position)·나이 상하한(minAge·maxAge)·관측 시장가 상한(maxValue) 중 감독이 말한 것만 싣는다. 대회를 비우면 5대 리그 1·2부 전체가 풀이다. " +
+      `${MISSION_DAYS}일 뒤 후보 ${MISSION_CANDIDATES}명이 카드로 온다. ` +
+      "감독이 이름을 대지 않고 조건으로 선수를 찾아오라고 하면 search_players가 아니라 이것을 부른다. " +
+      "돌아온 후보는 직접 상대해 본 선수만큼만 보인다 — 능력치와 값에 오차가 남고 잠재력은 넓은 구간이다. 그 중 하나를 더 알아야 하면 그 이름으로 scout_player를 보낸다. " +
+      "동시 파견 한도를 scout_player와 나눠 쓴다 — 자리가 없으면 나가지 못하고 대기로 남는다. 자리가 난 뒤 다시 불러야 나간다.",
   },
   {
     name: "deal_odds",

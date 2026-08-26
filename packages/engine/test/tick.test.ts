@@ -1,13 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
   ageOf,
+  clampFatigue,
   CONDITION_MAX,
+  fatigueOf,
   sharpnessBand,
   sharpnessOf,
+  FATIGUE_BASE,
+  FATIGUE_BAND_FLOOR,
+  FATIGUE_MAX,
   SHARPNESS_BAND_FLOOR,
   SHARPNESS_MAX,
 } from "@story-fm/domain";
 import {
+  fatigueAfterDay,
+  fatigueDayOf,
+  fatigueFromMinutes,
+  fatigueFromSessions,
+  recoveryFactor,
   sharpnessAfterDay,
   sharpnessAfterMinutes,
   sharpnessDayOf,
@@ -36,7 +46,6 @@ import {
   internationalBreaksOf,
   openCallUp,
   simSquadOf,
-  trainsWithFirstTeam,
   LOAN_REST_LIMIT,
   LOAN_ROTATION_OVR_DROP,
   ROTATION_FATIGUE,
@@ -44,7 +53,11 @@ import {
   pendingApproach,
   pendingVerdicts,
   playersOf,
+  PLAYER_REST_MAX_DAYS,
+  restingOn,
+  setPlayerTraining,
   setTraining,
+  trainsWithFirstTeam,
   clockOf,
   userPlayers,
   weeklyWagesOf,
@@ -836,6 +849,167 @@ describe("경기 감각 (player.md §5.4)", () => {
     endSeason(state);
     expect(state.players.length).toBeGreaterThan(0);
     for (const p of state.players) expect(p.state.sharpness).toBe(SHARPNESS_PRESEASON);
+  });
+});
+
+/**
+ * **누적 피로 — 시즌이 몸에 쌓는 잔고** (player.md §5.5).
+ *
+ * 화면에 보이는 등급·문장은 여기서 재지 않는다. 재는 것은 눈에 안 띄게 어긋나는
+ * 것들이다: 적립·해소 곡선의 경계, 전력에 닿지 않는다는 계약, 리그 전체가 같은
+ * 눈금으로 도는가, 시즌 전환이 통을 비우는가, 그리고 개인 휴식이라는 상태 전이.
+ */
+describe("누적 피로 (player.md §5.5)", () => {
+  it("값이 없으면 빈 통이고, 전력에는 한 칸도 닿지 않는다", () => {
+    const old: PlayerState = { form: 0, condition: 75 };
+    expect(fatigueOf(old)).toBe(FATIGUE_BASE);
+    // ⚠️ 이 축의 계약 — 유효 능력치의 항은 폼·체력·감각 셋뿐이다
+    expect(stateModifier({ ...old, fatigue: FATIGUE_MAX })).toBe(stateModifier(old));
+    expect(clampFatigue(-5)).toBe(0);
+    expect(clampFatigue(FATIGUE_MAX + 5)).toBe(FATIGUE_MAX);
+  });
+
+  it("적립은 분에 비례하고, 덜 회복된 몸으로 나설수록 더 남는다", () => {
+    expect(fatigueFromMinutes(0, 100)).toBe(0);
+    // 45분 두 번은 90분 한 번과 같다 — 교체로 나눠 뛴 선수가 손해 보지 않는다
+    expect(fatigueFromMinutes(45, 100) * 2).toBeCloseTo(fatigueFromMinutes(90, 100), 10);
+    // **연전 간격 항** — 같은 90분이 지친 몸에 더 남는다 (킥오프 체력이 곧 간격이다)
+    expect(fatigueFromMinutes(90, 60)).toBeGreaterThan(fatigueFromMinutes(90, 100));
+    expect(fatigueFromMinutes(90, 20)).toBeGreaterThan(fatigueFromMinutes(90, 60));
+    // 체력이 0이어도 배수는 유한하다 — 한 경기가 통을 채우지는 않는다
+    expect(fatigueFromMinutes(90, 0)).toBeLessThan(FATIGUE_BAND_FLOOR.building);
+    // 세션은 수에 비례한다 — 프리시즌 이중 세션이 그대로 두 배다
+    expect(fatigueFromSessions(2)).toBeCloseTo(fatigueFromSessions(1) * 2, 10);
+    expect(fatigueFromSessions(0)).toBe(0);
+  });
+
+  it("해소는 남은 양에 비례하고, 훈련장을 떠난 날이 가장 빠르다", () => {
+    expect(fatigueAfterDay(0, "training")).toBe(0);
+    // 위에 있을수록 많이 빠진다 — 고정폭이면 격주로 뛰는 선수가 0에 눕는다
+    expect(80 - fatigueAfterDay(80, "idle")).toBeGreaterThan(20 - fatigueAfterDay(20, "idle"));
+    // 본훈련 < 훈련 없는 날 < 회복 세션 < 휴식 순으로 빨라진다
+    expect(fatigueAfterDay(80, "training")).toBeGreaterThan(fatigueAfterDay(80, "idle"));
+    expect(fatigueAfterDay(80, "idle")).toBeGreaterThan(fatigueAfterDay(80, "recovery"));
+    expect(fatigueAfterDay(80, "recovery")).toBeGreaterThan(fatigueAfterDay(80, "rest"));
+    // 0 아래로 내려가지 않는다 — 지수라 닿지도 않는다
+    let left = 80;
+    for (let d = 0; d < 400; d++) left = fatigueAfterDay(left, "rest");
+    expect(left).toBeGreaterThan(0);
+    expect(left).toBeLessThan(0.001);
+  });
+
+  it("하루의 성격은 회복 눈금과 같고, 훈련장 밖만 따로 본다", () => {
+    expect(fatigueDayOf("training", false)).toBe("training");
+    expect(fatigueDayOf("recovery", false)).toBe("recovery");
+    expect(fatigueDayOf("idle", false)).toBe("idle");
+    expect(fatigueDayOf("training", true)).toBe("rest");
+  });
+
+  it("잔고는 회복 배율에만 곱해진다 — 소모에는 걸리지 않는다", () => {
+    const state = createTestGame(7);
+    const player = userPlayers(state)[0]!;
+    const fresh = recoveryFactor(player);
+    player.state.fatigue = FATIGUE_MAX;
+    expect(recoveryFactor(player)).toBeLessThan(fresh);
+    // 잔고 0이면 옛 세이브와 값이 같다 — 셈이 한 칸도 달라지지 않는다
+    player.state.fatigue = 0;
+    expect(recoveryFactor(player)).toBe(fresh);
+  });
+
+  it("남의 팀 잔고도 하루마다 움직인다 — 감독 팀에만 걸리지 않는다", () => {
+    const state = createTestGame(7);
+    const mine = userPlayers(state)[0]!;
+    const theirs = playersOf(state, "mancity")[0]!;
+    mine.state.fatigue = 60;
+    theirs.state.fatigue = 60;
+    advanceDays(state, 5);
+    /**
+     * 남의 팀이 멈춰 있으면 12월에 우리만 회복이 늦고 우리만 부상 저울이 올라
+     * 순위표가 규칙이 아니라 규칙의 비대칭으로 기운다.
+     *
+     * ⚠️ **두 값이 같기를 요구하지는 않는다** — 하루의 성격이 다르면 속도도 다르고
+     * (여기 프리시즌은 우리가 휴가, 남의 팀은 본훈련이다) 그건 규칙이 같다는 것과
+     * 다른 말이다. 우리와 리그의 격차가 밴드 안인지는 `pnpm balance ai-fitness`가
+     * 한 시즌을 돌려 잰다 (AGENTS.md §5 — 밸런스는 하네스의 일이다).
+     */
+    expect(fatigueOf(mine.state)).toBeLessThan(60);
+    expect(fatigueOf(theirs.state)).toBeLessThan(60);
+  });
+
+  it("시즌 전환이 통을 비우고 과부하 시계도 지운다", () => {
+    const state = createTestGame(42, "arsenal");
+    state.date = "2027-06-01";
+    for (const p of state.players) {
+      p.state.fatigue = 90;
+      p.state.overloadedOn = "2027-03-01";
+    }
+    endSeason(state);
+    expect(state.players.length).toBeGreaterThan(0);
+    for (const p of state.players) {
+      expect(fatigueOf(p.state)).toBe(FATIGUE_BASE);
+      expect(p.state.overloadedOn).toBeUndefined();
+    }
+  });
+
+  it("과부하 시계는 문턱을 넘는 날 서고 내려가면 지워진다", () => {
+    const state = createTestGame(7);
+    const player = userPlayers(state)[0]!;
+    // 하루치 해소를 지나고도 문턱 위에 남는 값에서 시작한다
+    player.state.fatigue = 90;
+    advanceDays(state, 1);
+    expect(player.state.overloadedOn).toBe(state.date);
+    // 감독이 손을 써서 내려가면 시계가 끝난다 — 이어지는 것이 아니라 다시 센다
+    player.state.fatigue = 10;
+    advanceDays(state, 1);
+    expect(player.state.overloadedOn).toBeUndefined();
+  });
+
+  it("개인 휴식 — 걸린 동안만 훈련장에서 빠지고, 기간이 끝나면 돌아온다", () => {
+    const state = createTestGame(7);
+    const player = userPlayers(state).find((p) => trainsWithFirstTeam(state, p))!;
+    const until = addDays(state.date, 3);
+    expect(setPlayerTraining(state, { playerId: player.id, rest: { until } }).ok).toBe(true);
+
+    expect(restingOn(state, player.id)).toBe(true);
+    // 결산 브리프도 훈련 부상 후보도 이 문 하나를 지난다 (season.md §8 불변식)
+    expect(trainsWithFirstTeam(state, player)).toBe(false);
+    // 기한 마지막 날까지는 그대로 쉬고, 그 이튿날 훈련장으로 돌아온다
+    expect(restingOn(state, player.id, until)).toBe(true);
+    expect(restingOn(state, player.id, addDays(until, 1))).toBe(false);
+    advanceDays(state, 4);
+    expect(restingOn(state, player.id)).toBe(false);
+    expect(trainsWithFirstTeam(state, player)).toBe(true);
+  });
+
+  it("개인 휴식은 걸어 둔 축을 지우지 않고, 지난 날짜와 한 달 넘는 기간은 반려한다", () => {
+    const state = createTestGame(7);
+    const player = userPlayers(state)[0]!;
+    expect(setPlayerTraining(state, { playerId: player.id, axis: "passing" }).ok).toBe(true);
+    expect(
+      setPlayerTraining(state, { playerId: player.id, rest: { until: addDays(state.date, 5) } }).ok,
+    ).toBe(true);
+    // 쉬는 것과 무엇을 배우는지는 다른 지시다 — 한쪽이 다른 쪽을 조용히 거두지 않는다
+    const program = state.playerTraining.find((t) => t.gamePlayerId === player.id)!;
+    expect(program.axis).toBe("passing");
+    expect(program.rest?.until).toBe(addDays(state.date, 5));
+
+    expect(
+      setPlayerTraining(state, { playerId: player.id, rest: { until: addDays(state.date, -1) } })
+        .ok,
+    ).toBe(false);
+    expect(
+      setPlayerTraining(state, {
+        playerId: player.id,
+        rest: { until: addDays(state.date, PLAYER_REST_MAX_DAYS) },
+      }).ok,
+    ).toBe(false);
+    // 반려는 아무것도 바꾸지 않는다 — 걸려 있던 휴식이 그대로다
+    expect(state.playerTraining.find((t) => t.gamePlayerId === player.id)?.rest?.until).toBe(
+      addDays(state.date, 5),
+    );
+    // 거두는 문은 하나 — 축·자리·휴식이 함께 간다
+    expect(setPlayerTraining(state, { playerId: player.id, clear: true }).ok).toBe(true);
+    expect(state.playerTraining.some((t) => t.gamePlayerId === player.id)).toBe(false);
   });
 });
 

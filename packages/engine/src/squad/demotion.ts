@@ -43,3 +43,18 @@ export function demotionPatienceDaysOf(state: GameState, player: GamePlayer): nu
 export function listedPatienceDaysOf(state: GameState, player: GamePlayer): number {
   return patienceDaysOf(state, player, LISTED_PATIENCE_DAYS);
 }
+
+/**
+ * **누적 피로가 「과부하」에 머물러도 참는 기간** — 강등·등재보다 짧다
+ * (→ docs/data/player.md §5.5 · docs/data/people.md §5).
+ *
+ * 몸의 일이라 저 둘과 시간의 결이 다르다: 2군행은 되돌릴 여지를 두고 지켜볼 결정이고
+ * 과부하는 **지금 뛰고 있는데 몸이 비어 간다**는 사실이다. 열흘은 연전 한 구간을
+ * 갓 넘긴 길이라, 한 번의 일정 폭주는 넘기고 그것이 리듬이 되면 걸린다.
+ */
+export const OVERLOAD_PATIENCE_DAYS = 10;
+
+/** 과부하의 문턱 — 이 날을 넘기면 불만이 선다 */
+export function overloadPatienceDaysOf(state: GameState, player: GamePlayer): number {
+  return patienceDaysOf(state, player, OVERLOAD_PATIENCE_DAYS);
+}

@@ -3,7 +3,6 @@ import type {
   AxisValues,
   BoardPoint,
   EdgeSize,
-  GamePlayer,
   LedgerEntry,
   MatchEventType,
   MatchRecord,
@@ -58,9 +57,13 @@ import {
   internationalGoalsOf,
   clampCondition,
   conditionLabel,
+  fatigueBand,
+  fatigueLabel,
+  fatigueOf,
   sharpnessBand,
   sharpnessLabel,
   sharpnessOf,
+  type FatigueBand,
   type SharpnessBand,
   defaultRoleOf,
   growthLabel,
@@ -140,6 +143,8 @@ import {
   observedOverall,
   observedRating,
   knowledgeNote,
+  missionBrief,
+  missionScope,
   observationMargin,
   potentialBand,
   ratingLabel,
@@ -150,11 +155,16 @@ import {
   type ConditionRead,
   type Observation,
 } from "../squad/scouting";
-import type { ScoutGrade, ScoutReportCard } from "@story-fm/domain";
+import type { GamePlayer, MissionReportCard, ScoutGrade, ScoutReportCard } from "@story-fm/domain";
 import { listingOf } from "../market/negotiation";
 import { openManagerOffers, USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../skills";
-import { askingPriceFor, marketValueOf, wageExpectationOf } from "../market/market";
+import {
+  askingPriceFor,
+  marketValueOf,
+  observedMarketValue,
+  wageExpectationOf,
+} from "../market/market";
 import { settlingPercent } from "../squad/settling";
 import { INJURY_SEVERITY_KO, injuryRiskFor } from "../squad/injury";
 import {
@@ -671,6 +681,16 @@ interface SquadViewRowMeta {
   sharpnessLabel: string;
   /** 등급 자체 — 화면이 색과 정렬을 이 경계로 맞춘다 */
   sharpnessBand: SharpnessBand;
+  /**
+   * **누적 피로의 말** — "가뿐"·"쌓임"·"지침"·"과부하" (player.md §5.5).
+   *
+   * 체력 막대와 다른 축이다: 저건 오늘 아침의 예산이고 이건 시즌이 쌓아 둔 잔고라,
+   * 경기 다음 날 바닥인 선수와 12월까지 쉬지 못한 선수가 여기서 갈린다. **숫자는
+   * 싣지 않는다** — 감독이 관측하는 것은 출전 기록과 일정이다.
+   */
+  fatigueLabel: string;
+  /** 등급 자체 — 화면이 색과 정렬을 이 경계로 맞춘다 */
+  fatigueBand: FatigueBand;
   /**
    * **부상 위험 등급과 그 원인** (player.md §5.3) — 경기가 누가 다칠지 고를 때 쓰는
    * 저울(`injuryWeight`)을 그대로 읽은 값이다. 체력 막대와 다른 축이다: 잘 쉰
@@ -3114,6 +3134,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         sharpness: Math.round(sharpnessOf(p.state)),
         sharpnessLabel: sharpnessLabel(sharpnessOf(p.state)),
         sharpnessBand: sharpnessBand(sharpnessOf(p.state)),
+        fatigueLabel: fatigueLabel(fatigueOf(p.state)),
+        fatigueBand: fatigueBand(fatigueOf(p.state)),
         injuryRisk: injuryRiskFor(p),
         mood: moodOf(state, p),
         role: (livePacket
@@ -3826,6 +3848,82 @@ export function scoutReportLine(state: GameState, playerId: string): string | nu
     `기대 주급 ${formatMoney(card.wageExpectation)}`,
     ...(card.contractUntil ? [`계약 ${card.contractUntil}까지`] : []),
   ].join(" · ");
+}
+
+// ── 스카우트 임무 보고 — 조건 한 벌이 데려온 후보 (player.md §9.4) ──
+
+/**
+ * 임무가 데려온 **후보 다섯 장**을 조립한다.
+ *
+ * 보고서 카드(`scoutReportCard`)와 다른 물음에 답한다 — 저쪽은 「이 선수가 어떤가」라
+ * 16축을 펴고, 이쪽은 「누가 있나」라 다섯 줄이 나란히 선다.
+ *
+ * ⚠️ **금액도 흐린 값이다.** 후보는 `seen` 눈금이라 시장가의 흐림 폭이 0이 아니다
+ * (player.md §10). 보고서 카드가 참값을 쓰는 것은 카드라서가 아니라 스카우팅을
+ * 마친 선수의 폭이 0이기 때문이고, 임무의 후보는 아직 그 자리가 아니다.
+ *
+ * ⚠️ **줄을 세운 값과 같은 값을 찍는다** — 종합은 `observedOverall`, 곧
+ * `rankMissionCandidates`가 읽은 그 숫자다.
+ */
+export function missionReportCard(state: GameState, missionId: string): MissionReportCard | null {
+  const mission = (state.scoutMissions ?? []).find((m) => m.id === missionId);
+  if (!mission || mission.completedOn === null) return null;
+  const candidates = (mission.candidates ?? [])
+    .map((id) => playerById(state, id))
+    .filter((p): p is GamePlayer => p !== null)
+    .map((p) => {
+      const value = observedOverall(p.attributes.overall, observationOf(state, p.id));
+      const band = potentialBand(state, p);
+      return {
+        playerId: p.id,
+        name: p.name,
+        team: teamNameIn(state, p.teamId),
+        age: ageOf(p.birthdate, state.date),
+        position: naturalPositionOf(p).position,
+        overall: {
+          label: ratingLabel(value),
+          tier: ratingTier(value),
+          value,
+          margin: observationMargin(state, p.id, "overall"),
+        },
+        potential: band ? { low: band.low, high: band.high } : null,
+        marketValue: observedMarketValue(state, p),
+        contractUntil: activeContract(state, p.id)?.until ?? null,
+      };
+    });
+  return {
+    missionId: mission.id,
+    brief: missionBrief(mission),
+    scope: missionScope(mission),
+    requestedOn: mission.requestedOn,
+    completedOn: mission.completedOn,
+    candidates,
+  };
+}
+
+/**
+ * 임무 보고를 **사실 한 줄로** — 도착 다이제스트가 모델에 넘기는 통로.
+ *
+ * ⚠️ **카드에서 파생한다** (`scoutReportLine`과 같은 규약). 카드는 프롬프트에 가지
+ * 않으므로, 이 줄이 없으면 도착한 턴의 모델은 후보의 값을 어디서도 읽지 못하고
+ * 지어낸다 — 그러면 카드의 다섯과 대사의 다섯이 다른 선수가 된다.
+ */
+export function missionReportLine(state: GameState, missionId: string): string | null {
+  const card = missionReportCard(state, missionId);
+  if (!card) return null;
+  const label = `${card.scope} · ${card.brief}`;
+  if (card.candidates.length === 0) return `${label} → 조건에 맞는 선수를 찾지 못했다`;
+  const rows = card.candidates.map((c) =>
+    [
+      `${c.name} (${c.team}) ${c.age}세 ${c.position}`,
+      `종합 ${c.overall.value}${c.overall.margin > 0 ? `±${c.overall.margin}` : ""}`,
+      // 잠재력은 끝까지 폭으로만 안다 — 한 숫자로 적으면 모델이 그걸 단정한다
+      c.potential ? `잠재력 ${c.potential.low}~${c.potential.high}` : "잠재력 미지",
+      `시장가 ${formatMoney(c.marketValue)}`,
+      ...(c.contractUntil ? [`계약 ${c.contractUntil}까지`] : []),
+    ].join(" "),
+  );
+  return `${label} → 후보 ${card.candidates.length}명: ${rows.join(" / ")}`;
 }
 
 // ── 경기 리포트 — 끝난 경기 하나를 통째로 (match.md §8) ─────────────

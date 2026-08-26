@@ -18,8 +18,17 @@ import {
   POTENTIAL_SCOUT_FLOOR,
   SCOUT_REPEAT_LIMIT,
   potentialBand,
+  scoutMission,
   scoutPlayer,
   scoutedAttributes,
+  activeMissions,
+  waitingMissions,
+  freeScoutSlots,
+  missionReportCard,
+  missionReportLine,
+  observationMargin,
+  observedMarketValue,
+  teamsInCompetition,
   userPlayers,
   AXIS_OBSERVABILITY,
   OBSERVATION_MARGIN,
@@ -38,7 +47,14 @@ import {
   scoutReportLine,
   takeReportCards,
 } from "@story-fm/engine";
-import { SCOUT_CONCURRENT_LIMIT, SCOUT_DAYS, SCOUT_DEFER_DAYS } from "@story-fm/domain";
+import {
+  ageOf,
+  MISSION_CANDIDATES,
+  MISSION_DAYS,
+  SCOUT_CONCURRENT_LIMIT,
+  SCOUT_DAYS,
+  SCOUT_DEFER_DAYS,
+} from "@story-fm/domain";
 import { GAP_CONDITION } from "@story-fm/sim";
 import { advanceAndPlay, createTestGame, playMockMatch, settleFully } from "./helpers";
 
@@ -297,7 +313,7 @@ describe("스카우트 파견 규칙", () => {
     // 한도만 알려 주면 감독은 지목한 넷 중 누가 빠졌는지 알 수 없다
     expect(result.message).toContain(fourth.name);
     expect(result.message).toContain(pool[0]!.name);
-    expect(result.message).toContain(`${SCOUT_CONCURRENT_LIMIT}명`);
+    expect(result.message).toContain(`한도 ${SCOUT_CONCURRENT_LIMIT}`);
   });
 
   it("못 나간 요청은 대기로 남아 다음 턴 스카우팅 줄에 실린다", () => {
@@ -325,7 +341,7 @@ describe("스카우트 파견 규칙", () => {
     expect(state.deferredScouts).toHaveLength(0);
   });
 
-  it("일주일을 넘긴 대기는 지운다 — 그 안에 자리는 반드시 난다", () => {
+  it("대기 기간을 넘긴 요청은 지운다 — 그 안에 자리는 반드시 난다", () => {
     const state = createTestGame(11);
     const requestedOn = state.date;
     fillAndOverflow(state);
@@ -349,6 +365,122 @@ describe("스카우트 파견 규칙", () => {
   it("없는 선수는 반려한다", () => {
     const state = createTestGame(11);
     expect(scoutPlayer(state, "ghost-player").ok).toBe(false);
+  });
+});
+
+describe("스카우트 임무 — 조건으로 나가는 파견", () => {
+  /** 「EPL 센터백 30세 이하」 — 한 파일이 쓰는 조건 한 벌 */
+  const BRIEF = { competition: "epl", position: "CB", maxAge: 30 } as const;
+
+  function dispatchAndReport(state: GameState) {
+    expect(scoutMission(state, { ...BRIEF }).ok).toBe(true);
+    advanceTime(state, { days: MISSION_DAYS });
+    const mission = (state.scoutMissions ?? [])[0]!;
+    return mission;
+  }
+
+  it("같은 상태·같은 조건이면 같은 다섯이 온다 — 추첨이 아니다", () => {
+    const a = dispatchAndReport(createTestGame(11));
+    const b = dispatchAndReport(createTestGame(11));
+    expect(a.candidates?.length).toBeGreaterThan(0);
+    expect(a.candidates).toEqual(b.candidates);
+  });
+
+  it("후보는 조건을 지난 남의 선수뿐이고 관측 종합 순으로 선다", () => {
+    const state = createTestGame(11);
+    const mission = dispatchAndReport(state);
+    const ids = mission.candidates ?? [];
+    expect(ids.length).toBeLessThanOrEqual(MISSION_CANDIDATES);
+    const ours = new Set(userPlayers(state).map((p) => p.id));
+    const eplTeams = new Set(teamsInCompetition(state, "epl"));
+    let previous = Number.POSITIVE_INFINITY;
+    for (const id of ids) {
+      const p = playerById(state, id)!;
+      expect(ours.has(id)).toBe(false);
+      expect(eplTeams.has(p.teamId)).toBe(true);
+      expect(p.positions.some((x) => x.position === "CB")).toBe(true);
+      expect(ageOf(p.birthdate, state.date)).toBeLessThanOrEqual(30);
+      // **줄을 세운 값이 카드가 찍는 값이다** (player.md §10)
+      const shown = observedOverall(p.attributes.overall, observationOf(state, p.id));
+      expect(shown).toBeLessThanOrEqual(previous);
+      previous = shown;
+    }
+  });
+
+  it("예산 조건은 참값이 아니라 흐린 시장가로 거른다", () => {
+    const state = createTestGame(11);
+    const cap = 20_000_000;
+    expect(scoutMission(state, { competition: "epl", maxValue: cap }).ok).toBe(true);
+    advanceTime(state, { days: MISSION_DAYS });
+    const ids = (state.scoutMissions ?? [])[0]!.candidates ?? [];
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) {
+      expect(observedMarketValue(state, playerById(state, id)!)).toBeLessThanOrEqual(cap);
+    }
+  });
+
+  it("후보 다섯은 seen으로 오르고 안개 폭이 그 수준이 된다", () => {
+    const state = createTestGame(11);
+    const before = playersOf(state, "chelsea")[0]!;
+    expect(knowledgeOf(state, before.id)).toBe("rumoured");
+    const mission = dispatchAndReport(state);
+    for (const id of mission.candidates ?? []) {
+      expect(knowledgeOf(state, id)).toBe("seen");
+      expect(observationMargin(state, id, "overall")).toBe(OBSERVATION_MARGIN.analytical.seen);
+      expect(observationMargin(state, id, "pace")).toBe(OBSERVATION_MARGIN.observable.seen);
+      // 잠재력은 짐작이 서되 지목만큼 좁지 않다
+      expect(potentialMargin(state, id)).toBe(POTENTIAL_MARGIN.seen);
+    }
+  });
+
+  it("카드와 모델에 가는 줄이 같은 값을 낸다 — 줄이 카드에서 파생한다", () => {
+    const state = createTestGame(11);
+    const mission = dispatchAndReport(state);
+    const card = missionReportCard(state, mission.id)!;
+    const line = missionReportLine(state, mission.id)!;
+    expect(card.candidates.length).toBe((mission.candidates ?? []).length);
+    for (const c of card.candidates) {
+      expect(line).toContain(c.name);
+      expect(line).toContain(formatMoney(c.marketValue));
+    }
+  });
+
+  it("자리는 지목과 나눠 쓴다 — 임무 하나에 지목 둘이면 넷째는 못 나간다", () => {
+    const state = createTestGame(11);
+    const pool = playersOf(state, "chelsea");
+    expect(scoutMission(state, { ...BRIEF }).ok).toBe(true);
+    for (let i = 0; i < SCOUT_CONCURRENT_LIMIT - 1; i++) {
+      expect(scoutPlayer(state, pool[i]!.id).ok).toBe(true);
+    }
+    expect(freeScoutSlots(state)).toBe(0);
+    const overflow = scoutPlayer(state, pool[SCOUT_CONCURRENT_LIMIT]!.id);
+    expect(overflow.ok).toBe(false);
+    // 반려 문구가 임무를 이름 대신 조건으로 말한다
+    expect(overflow.message).toContain("임무");
+  });
+
+  it("한도가 차면 임무도 대기로 남아 다음 턴 요약에 실린다", () => {
+    const state = createTestGame(11);
+    const pool = playersOf(state, "chelsea");
+    for (let i = 0; i < SCOUT_CONCURRENT_LIMIT; i++) {
+      expect(scoutPlayer(state, pool[i]!.id).ok).toBe(true);
+    }
+    const blocked = scoutMission(state, { ...BRIEF });
+    expect(blocked.ok).toBe(false);
+    expect(waitingMissions(state)).toHaveLength(1);
+    expect(activeMissions(state)).toHaveLength(0);
+    expect(scoutingSummary(state).join("\n")).toContain("임무:");
+    // 같은 조건을 다시 불러도 대기는 하나다
+    expect(scoutMission(state, { ...BRIEF }).ok).toBe(false);
+    expect(waitingMissions(state)).toHaveLength(1);
+  });
+
+  it("조건이 뒤집혔거나 없는 자리면 두 주를 기다리기 전에 반려한다", () => {
+    const state = createTestGame(11);
+    expect(scoutMission(state, { minAge: 25, maxAge: 20 }).ok).toBe(false);
+    expect(scoutMission(state, { position: "왼쪽풀백" }).ok).toBe(false);
+    expect(scoutMission(state, { competition: "없는리그" }).ok).toBe(false);
+    expect(state.scoutMissions ?? []).toHaveLength(0);
   });
 });
 

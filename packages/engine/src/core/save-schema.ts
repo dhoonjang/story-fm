@@ -5,6 +5,7 @@ import {
   CharacterMemorySchema,
   ContractSchema,
   DeferredScoutSchema,
+  ScoutMissionSchema,
   DismissalSchema,
   FinanceReportSchema,
   GamePlayerSchema,
@@ -33,6 +34,7 @@ import {
   PressConferenceSchema,
   PressLeakSchema,
   PressSackingSchema,
+  RelationSchema,
   ReserveTrainingPolicySchema,
   RetiredPlayerSchema,
   YouthCandidateSchema,
@@ -124,6 +126,7 @@ export const SaveSchema = z
     // 없을 수 있는 것 — 로드가 채우지 않는다(없는 것이 곧 뜻이다)
     personas: z.array(PersonaSchema).optional(),
     deferredScouts: z.array(DeferredScoutSchema).optional(),
+    scoutMissions: z.array(ScoutMissionSchema).optional(),
     dismissal: DismissalSchema.optional(),
     dismissals: z.array(DismissalSchema).optional(),
     managerOffers: z.array(ManagerOfferSchema).optional(),
@@ -136,6 +139,8 @@ export const SaveSchema = z
     boardRequests: z.array(BoardRequestSchema).optional(),
     historyDigest: HistoryDigestSchema.optional(),
     characterMemories: z.array(CharacterMemorySchema).optional(),
+    /** 관계 점수 — 움직인 쌍만 앉는다 (people.md §6). 옛 세이브엔 없다 */
+    relations: z.array(RelationSchema).optional(),
     arcs: z.array(NarrativeArcSchema).optional(),
     paymentSchedules: z.array(PaymentScheduleSchema).optional(),
     developmentFocus: z.array(z.string()).optional(),

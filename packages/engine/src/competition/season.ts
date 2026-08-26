@@ -19,6 +19,7 @@ import { SHARPNESS_PRESEASON } from "@story-fm/sim";
 import {
   CONDITION_BASE,
   DEFAULT_FORMATION,
+  FATIGUE_BASE,
   MATCHDAY_SQUAD,
   RETIRE_AGE,
   RETIRE_AGE_MARGINAL,
@@ -1682,6 +1683,13 @@ function applyTransition(state: GameState): string[] {
        * 분이다 — 이 한 줄이 없으면 7월의 5주가 몸에 관해 아무것도 결정하지 않는다.
        */
       player.state.sharpness = SHARPNESS_PRESEASON;
+      /**
+       * **여름이 통을 비운다** (player.md §5.5) — 6주의 휴가는 잔고를 사실상 0까지
+       * 빼므로 명시적으로 0에서 다시 시작한다. 시계도 함께 지운다: 6월에 과부하였던
+       * 선수가 8월에 「12주째 과부하」로 서면 그건 지난 시즌의 사실이다.
+       */
+      player.state.fatigue = FATIGUE_BASE;
+      delete player.state.overloadedOn;
     }
 
     if (retirees.length > 0) {

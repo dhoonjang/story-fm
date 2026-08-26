@@ -41,6 +41,7 @@ import {
   loanedOut,
   managedTeamId,
   MAX_EXPLOITS,
+  missionReportLine,
   onSummerBreak,
   openCallUp,
   openInjury,
@@ -87,6 +88,8 @@ import {
   describeReputation,
   diffDays,
   familiarityLabel,
+  fatigueBand,
+  fatigueOf,
   formatMoney,
   matchupText,
   normalizePacket,
@@ -99,12 +102,15 @@ import {
   tacticToggleValue,
   tacticToggleWord,
   tacticsBrief,
+  RELATION_TIER_KO,
   TRANSFER_REQUEST_REASON_KO,
   visionItemText,
   type CallUpReturnState,
   type GamePlayer,
   type CharacterEntry,
   type CharacterInjection,
+  type MissionReportCard,
+  type PersonaRelation,
   type ScoutReportCard,
 } from "@story-fm/domain";
 
@@ -139,6 +145,24 @@ const PROMISE_ALERT_DAYS = 7;
  *
  * 블록은 영어 태그로 싼다 (prompts.md §5) — 읽는 것(꺾쇠)과 쓰는 것(@ 줄)이 갈린다.
  */
+/**
+ * 관계 한 줄 — 근거가 있으면 함께 적는다.
+ *
+ * **감독이 붙여 준 사이**(멘토링 — people.md §5-3)에는 원형 축이 없다: 그 자리에
+ * 섰다는 사실 하나가 근거다. **원형에서 시작한 사이**는 먼저 보는 것을 함께 든다.
+ * 어느 쪽이든 앞에 서는 것은 지금의 등급이고, 등급이 없는 줄은 감독이 세웠다는
+ * 사실만으로 서 있는 중립의 사이다.
+ */
+function relationLine(r: PersonaRelation): string {
+  const grade = r.tier ? RELATION_TIER_KO[r.tier] : null;
+  if (r.bond) {
+    const seat = r.bond === "mentor" ? "멘토" : "멘티";
+    return `관계: ${r.name} — 감독이 붙여 준 사이 (내가 ${seat})${grade ? ` · ${grade}` : ""}`;
+  }
+  const axes = r.ours && r.theirs ? ` (먼저 보는 것: 나 ${r.ours} · 상대 ${r.theirs})` : "";
+  return `관계: ${r.name} — ${grade ?? (r.stance === "aligned" ? "결이 맞는다" : "결이 부딪힌다")}${axes}`;
+}
+
 export function describePersona(entry: CharacterEntry): string {
   const label = personaRoleLabel(entry.role);
   return [
@@ -148,13 +172,9 @@ export function describePersona(entry: CharacterEntry): string {
     ...(entry.motivation ? [`동기: ${entry.motivation}`] : []),
     ...(entry.speechStyle ? [`말투: ${entry.speechStyle.note}`] : []),
     ...(entry.speechStyle?.samples ?? []).map((s) => `  예) ${s}`),
-    // 관계 — 원형에서 파생한 첫인상(people.md §6)과 감독이 세운 사이(§5-3). 그 뒤의 일은 기억이 갖는다
-    ...(entry.relations ?? []).map((r) =>
-      // 감독이 붙여 준 사이에는 원형 축이 없다 — 그 자리에 섰다는 사실 하나가 근거다
-      r.bond
-        ? `관계: ${r.name} — 감독이 붙여 준 사이 (내가 ${r.bond === "mentor" ? "멘토" : "멘티"})`
-        : `관계: ${r.name} — ${r.stance === "aligned" ? "결이 맞는다" : "결이 부딪힌다"} (먼저 보는 것: 나 ${r.ours} · 상대 ${r.theirs})`,
-    ),
+    // 관계 — **지금의 등급**이다 (people.md §6 「관계 점수」). 숫자는 싣지 않는다:
+    // 카드는 이력에 굳으므로 매 턴 달라지는 값을 실으면 지난 턴들의 바이트가 함께 바뀐다
+    ...(entry.relations ?? []).map((r) => relationLine(r)),
     // 감독이 아는 만큼만 그린다 — 소문으로만 아는 사람에게 속내를 주면 만난 적 없는
     // 사람의 목소리가 난다. 사실로 적는다: 카드의 지시문은 모델이 그 문장대로 쓴다
     ...(entry.depth === "rumour" ? [`감독과의 거리: 평판으로만 안다 — 말투도 속내도 모른다`] : []),
@@ -377,6 +397,8 @@ const PRECONTRACTED_SHOWN = 2;
 const PROMISE_SHOWN = 3;
 const TRANSFER_REQUEST_SHOWN = 3;
 const AT_RISK_SHOWN = 3;
+/** 과부하로 이름을 적는 인원 — 위험 줄과 같은 폭 */
+const OVERLOADED_SHOWN = 3;
 const RECENT_NARRATIVE = 4;
 
 /**
@@ -832,6 +854,8 @@ export function buildGmStateNote(
   passed?: TimePassed | null,
   /** 이번 턴에 카드로 서는 보고서 — 카드가 프롬프트에 못 가므로 값은 여기로 온다 */
   arrivedReports: readonly ScoutReportCard[] = [],
+  /** 같은 자리의 임무 보고 — 지목과 한 블록을 나눠 쓴다 */
+  arrivedMissions: readonly MissionReportCard[] = [],
   /**
    * 장면보다 먼저 교섭 상대가 낸 답 (agents.md §4-1) — GM은 판정하지 않고 **전한다**.
    * 판정이 이미 끝났으므로 아래 `pendingVerdicts`에는 그 협상이 서지 않는다.
@@ -866,6 +890,20 @@ export function buildGmStateNote(
     .filter(
       (p) =>
         squadLevelOf(p) === "first" && !isInjured(state, p.id) && injuryRiskFor(p).grade === "high",
+    )
+    .map((p) => p.name);
+  /**
+   * **시즌이 몸에 쌓아 둔 것** (player.md §5.5) — 위험 줄과 **다른 줄인 이유는 감독이
+   * 쥐는 손잡이가 다르기 때문이다.** 위험은 이번 경기의 라인업으로 답하고 과부하는
+   * 몇 주의 로테이션·개인 휴식으로 답한다. 한 줄로 접으면 GM이 "오늘 빼시죠"만
+   * 말하게 되고, 잔고는 그것으로 빠지지 않는다.
+   */
+  const overloaded = players
+    .filter(
+      (p) =>
+        squadLevelOf(p) === "first" &&
+        !isInjured(state, p.id) &&
+        fatigueBand(fatigueOf(p.state)) === "overloaded",
     )
     .map((p) => p.name);
   const unhappy = state.issues.map((i) => playerName(state, i.gamePlayerId));
@@ -907,6 +945,11 @@ export function buildGmStateNote(
     atRisk.length > 0
       ? `부상 위험 높음 ${atRisk.length} (${atRisk.slice(0, AT_RISK_SHOWN).join(", ")}${
           atRisk.length > AT_RISK_SHOWN ? " …" : ""
+        })`
+      : null,
+    overloaded.length > 0
+      ? `과부하 ${overloaded.length} (${overloaded.slice(0, OVERLOADED_SHOWN).join(", ")}${
+          overloaded.length > OVERLOADED_SHOWN ? " …" : ""
         })`
       : null,
     suspended.length > 0 ? `정지 ${suspended.length} (${suspended.join(", ")})` : null,
@@ -1110,10 +1153,17 @@ export function buildGmStateNote(
      * 카드는 모델이 장면을 쓴 뒤에 붙어 프롬프트에 가지 않는다. 그래서 값이 여기
      * 없으면 모델은 카드 옆에서 금액을 지어내고, 한 화면이 두 말을 한다
      * (agents.md §6). 줄은 카드와 같은 함수에서 나온다 — `scoutReportLine`.
+     *
+     * **임무 보고도 여기 선다** — 지목의 줄 다음에 후보 다섯이 잇는다
+     * (`missionReportLine`). 이 블록이 답하는 물음은 「이번 턴에 카드로 서는 것의
+     * 값」이고 두 갈래가 같은 물음이다.
      */
     block(
       "scout_reports",
-      arrivedReports.map((c) => `- ${scoutReportLine(state, c.playerId) ?? c.name}`).join("\n"),
+      [
+        ...arrivedReports.map((c) => `- ${scoutReportLine(state, c.playerId) ?? c.name}`),
+        ...arrivedMissions.map((m) => `- ${missionReportLine(state, m.missionId) ?? m.brief}`),
+      ].join("\n"),
     ),
     /**
      * 경기 뒤 들어온 소식 — 재정과 같은 라운드의 다른 경기·대진.

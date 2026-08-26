@@ -511,9 +511,10 @@ export const ISSUE_REASON_KO: Record<PlayerIssueReason, string> = {
   "out-of-position": "자리 밖 기용",
   promise: "어긴 약속",
   number: "등번호",
+  overload: "과부하",
 };
 
-/** 사유 이름 — 수치가 이름을 대신하는 것은 셋뿐이다. 코드가 없으면 `null` */
+/** 사유 이름 — 수치가 이름을 대신하는 것은 넷뿐이다. 코드가 없으면 `null` */
 export function issueReasonKo(
   reason: PlayerIssueReason | null | undefined,
   count?: number | null,
@@ -524,6 +525,8 @@ export function issueReasonKo(
     if (reason === "out-of-position") return `${count}경기 자리 밖`;
     // 등번호 불만은 **어느 번호를 잃었나**가 곧 사유다 — "등번호 불만"으로는 그 자리가 서지 않는다
     if (reason === "number") return `${count}번을 잃었다`;
+    // 과부하는 **며칠째인가**가 사유의 무게다 (player.md §5.5)
+    if (reason === "overload") return `${count}일째 과부하`;
   }
   return ISSUE_REASON_KO[reason];
 }

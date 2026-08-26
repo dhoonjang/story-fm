@@ -48,6 +48,7 @@ import { issueReasonText } from "../squad/mood";
 import { leaderGroupOf, leaderRoleOf, leaderWeightOf } from "../squad/hierarchy";
 import { recentOutcomes } from "../squad/slump";
 import { agentForPlayer, ownerOf } from "../world/persona";
+import { relationPressureWeight } from "../world/relations";
 import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import {
   biggerSuitorsOf,
@@ -123,6 +124,12 @@ const DAILY_GAIN: Record<ApproachTopic, number> = {
    */
   promise: 9,
   number: 9,
+  /**
+   * 과부하 — 2군 방치(`demotion`)와 같은 눈금이다 (people.md §8). 불만이 서기까지
+   * 이미 열흘 넘게 걸린 데다(그 사람의 문턱 × 원형) 감독이 손을 쓰면 며칠 만에
+   * 잔고가 빠지므로, 그 위에 빠른 축을 얹으면 한 번의 연전이 곧장 감독실 문을 연다.
+   */
+  overload: 5,
   interest: 8,
   morale: 8,
   results: 4,
@@ -224,6 +231,7 @@ const CHANNEL_OF: Record<ApproachTopic, ApproachChannel> = {
   "out-of-position": "player",
   promise: "player",
   number: "player",
+  overload: "player",
   contract: "agent",
   interest: "agent",
   morale: "captain",
@@ -360,8 +368,14 @@ function causesToday(state: GameState): Cause[] {
      * 세우는 것보다 더 큰 해명일 이유는 없다 — 배수를 양쪽에 걸면 리더의 불만은
      * 빨리 쌓이는 만큼 빨리 풀려 결국 아무것도 달라지지 않는다.
      */
+    /**
+     * **사이가 나쁜 선수의 불만이 더 빨리 쌓인다** (people.md §6) — 리더 배수와 같은
+     * 자리에 함께 곱해지고 같은 규약을 지킨다: 식는 쪽에는 걸리지 않는다.
+     */
     const owner = playerById(state, issue.gamePlayerId);
-    const weight = owner ? leaderWeightOf(state, owner) : 1;
+    const weight = owner
+      ? leaderWeightOf(state, owner) * relationPressureWeight(state, owner.id)
+      : 1;
     causes.push({
       subject: issue.gamePlayerId,
       topic,
@@ -1073,16 +1087,18 @@ const APPROACH_TOPIC_ORDER: Record<ApproachTopic, number> = {
   minutes: 2,
   demotion: 3,
   "out-of-position": 4,
-  "losing-run": 5,
-  "early-return": 6,
-  "blocked-move": 7,
-  listed: 8,
-  contract: 9,
-  interest: 10,
-  morale: 11,
-  results: 12,
+  // 몸의 일은 자리 다툼보다 뒤지만 결과·분위기보다는 앞이다 — 감독이 손쓸 대상이 분명하다
+  overload: 5,
+  "losing-run": 6,
+  "early-return": 7,
+  "blocked-move": 8,
+  listed: 9,
+  contract: 10,
+  interest: 11,
+  morale: 12,
+  results: 13,
   // 압력 줄이 없어 이 표를 지나지 않는다 — 자리는 `openSeasonReview`가 직접 연다
-  "season-review": 13,
+  "season-review": 14,
 };
 
 /**
@@ -1410,11 +1426,14 @@ function closeApproach(
   approach: Approach,
   stance: PressStance | null,
 ): ApproachEffect {
+  const counterpart = relationCounterpartOf(state, approach);
   const effect = applyStanceOutcome(state, {
     row: stance === null ? IGNORED : stanceRow(stance),
     band: APPROACH_BAND * Math.min(approach.step, BAND_STEP_CAP),
     targetPlayerId: approach.about,
     axes: APPROACH_AXES[approach.channel],
+    stance,
+    ...(counterpart === null ? {} : { relationWith: counterpart }),
   });
 
   /**
@@ -1442,6 +1461,19 @@ function closeApproach(
     row.step = approach.step;
   }
   return effect;
+}
+
+/**
+ * 감독의 맞은편에 있던 사람 — **관계가 움직이는 상대다** (people.md §6).
+ *
+ * 압력 열쇠(`subjectOf`)와 갈라져 있는 것은 라커룸과 보드가 **자리**이지 사람이
+ * 아니기 때문이다: 압력은 주장이 바뀌어도 이어지지만 사이는 그날 문을 두드린 사람의
+ * 것이다. 주장이 비어 있으면 옮길 사이가 없다.
+ */
+function relationCounterpartOf(state: GameState, approach: Approach): string | null {
+  if (approach.channel === "player" || approach.channel === "agent") return approach.about ?? null;
+  if (approach.channel === "owner") return ownerOf(state).characterId;
+  return userPlayers(state).find((p) => p.isCaptain)?.id ?? null;
 }
 
 /** 그 자리의 압력 열쇠 — 선수 채널만 사람을 가리킨다 */

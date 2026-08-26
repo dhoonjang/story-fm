@@ -1047,17 +1047,32 @@ describe("카드·부상·연장의 눈금", () => {
     const sound = makePlayer("sound", "home", "CB", "DF", 70, { strength: 99 }, { condition: 100 });
     expect(injuryRiskOf(sound)).toEqual({ grade: "low", causes: [] });
 
-    // 축 하나만 밀면 그 축만 이름을 댄다 — 나머지 둘은 몫이 0이다
+    // 축 하나만 밀면 그 축만 이름을 댄다 — 나머지 셋은 몫이 0이다
     const tired = makePlayer("tired", "home", "CB", "DF", 70, { strength: 99 }, { condition: 30 });
-    expect(injuryRiskOf(tired).causes).toEqual(["fatigue"]);
+    expect(injuryRiskOf(tired).causes).toEqual(["condition"]);
     const glass = makePlayer("glass", "home", "CB", "DF", 70, { strength: 99 }, { condition: 100 });
     expect(injuryRiskOf(glass, 2.2).causes).toEqual(["proneness"]);
     const soft = makePlayer("soft", "home", "CB", "DF", 70, { strength: 20 }, { condition: 100 });
     expect(injuryRiskOf(soft).causes).toEqual(["strength"]);
+    /**
+     * **오늘의 몸과 시즌의 몸은 다른 이름으로 선다** (player.md §5.5) — 체력이 가득한데
+     * 잔고만 무거운 선수가 여기서 갈린다. 이 갈래가 없으면 「지금 하루 쉬면 되는가」와
+     * 「몇 주를 빼야 하는가」가 감독에게 같은 낱말로 보인다.
+     */
+    const loaded = makePlayer(
+      "loaded",
+      "home",
+      "CB",
+      "DF",
+      70,
+      { strength: 99 },
+      { condition: 100, fatigue: 90 },
+    );
+    expect(injuryRiskOf(loaded).causes).toEqual(["load"]);
 
     /**
      * 둘이 함께 밀면 **더 크게 들어 올린 쪽이 앞**이다. 지친 정도가 성향보다
-     * 크면 「피로 · 부상 이력」, 그 반대면 순서가 뒤집힌다 — 코어가 정하는 것은
+     * 크면 「체력 · 부상 이력」, 그 반대면 순서가 뒤집힌다 — 코어가 정하는 것은
      * 이 순서이고 문장은 화면과 GM이 쓴다.
      */
     const drained = makePlayer(
@@ -1069,20 +1084,22 @@ describe("카드·부상·연장의 눈금", () => {
       { strength: 99 },
       { condition: 40 },
     );
-    expect(injuryRiskOf(drained, 1.5).causes).toEqual(["fatigue", "proneness"]);
+    expect(injuryRiskOf(drained, 1.5).causes).toEqual(["condition", "proneness"]);
     const worn = makePlayer("worn", "home", "CB", "DF", 70, { strength: 99 }, { condition: 70 });
-    expect(injuryRiskOf(worn, 1.8).causes).toEqual(["proneness", "fatigue"]);
+    expect(injuryRiskOf(worn, 1.8).causes).toEqual(["proneness", "condition"]);
   });
 
   it("등급이 오른 선수에게는 원인이 반드시 하나 이상 선다", () => {
-    // 세 몫의 합이 곧 들림이라 최대 몫은 언제나 문턱(1/4)을 넘는다
+    // 네 몫의 합이 곧 들림이라 최대 몫은 언제나 문턱(1/4)을 넘는다
     for (const condition of [100, 80, 60, 40, 20, 0]) {
-      for (const strength of [20, 50, 70, 99]) {
-        for (const proneness of [0.55, 1, 1.4, 2.2]) {
-          const p = makePlayer("p", "home", "CB", "DF", 70, { strength }, { condition });
-          const risk = injuryRiskOf(p, proneness);
-          if (risk.grade === "low") expect(risk.causes).toEqual([]);
-          else expect(risk.causes.length).toBeGreaterThan(0);
+      for (const fatigue of [0, 35, 70, 100]) {
+        for (const strength of [20, 50, 70, 99]) {
+          for (const proneness of [0.55, 1, 1.4, 2.2]) {
+            const p = makePlayer("p", "home", "CB", "DF", 70, { strength }, { condition, fatigue });
+            const risk = injuryRiskOf(p, proneness);
+            if (risk.grade === "low") expect(risk.causes).toEqual([]);
+            else expect(risk.causes.length).toBeGreaterThan(0);
+          }
         }
       }
     }
