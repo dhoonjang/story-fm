@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
 import { MATCH_MINUTE_MAX } from "./match";
-import { AXIS_KO, RetirementReasonSchema, type AttributeAxis } from "./player";
+import { AXIS_KO, RetirementReasonSchema, type AttributeAxis, type PositionGroup } from "./player";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 import { SQUAD_STATUSES } from "./squad-rules";
 
@@ -734,8 +734,88 @@ export const SeasonStatSchema = z.object({
   reserveGoals: z.number().int().min(0).optional(),
   reserveAssists: z.number().int().min(0).optional(),
   reserveRatingSum: z.number().min(0).optional(),
+  /**
+   * 출전 시간(분) 합계. 아래 여섯 칸과 함께 **1군 대회 경기만** 센다
+   * (→ docs/simulation/match.md §6) — 얹는 자리는 `addToSeasonStat` 하나이고,
+   * 구 세이브엔 없어 전부 optional이다 (SAVE_VERSION 유지).
+   */
+  minutes: z.number().int().min(0).optional(),
+  shots: z.number().int().min(0).optional(),
+  /** 그 선수가 만든 기회의 질 합 — 결정력 반영 전의 값이다 (match.md §1.4) */
+  xg: z.number().min(0).optional(),
+  /** 선방 — 골키퍼의 칸이다 */
+  saves: z.number().int().min(0).optional(),
+  /** 무실점 경기 — 골키퍼의 칸이다 (`keptCleanSheet`) */
+  cleanSheets: z.number().int().min(0).optional(),
+  /** 경고·퇴장 — `BOOKING`이 원본이고 합계는 `recordCard`가 함께 적는다 */
+  yellows: z.number().int().min(0).optional(),
+  reds: z.number().int().min(0).optional(),
 });
 export type SeasonStat = z.infer<typeof SeasonStatSchema>;
+
+/**
+ * 클린시트로 세는 최소 출전 분 — 90분의 3분의 2.
+ *
+ * 0으로 두면 85′에 들어와 0-0으로 끝난 교체 골키퍼가 남의 클린시트를 가져가고,
+ * 90분으로 두면 부상 교체 한 번이 그때까지 지켜 낸 기록을 지운다.
+ */
+export const CLEAN_SHEET_MINUTES = 60;
+
+/**
+ * 이 경기가 그 선수의 클린시트인가 — **골키퍼의 기록이다.**
+ *
+ * 수비수의 무실점 기여는 평점의 무실점 가산(`matchRating`)이 이미 세고, "클린시트
+ * 몇 번"이 묻는 것은 골문에 선 사람의 수다. 두 시뮬이 이 한 함수를 지난다.
+ */
+export function keptCleanSheet(input: {
+  group: PositionGroup;
+  conceded: number;
+  minutes: number;
+}): boolean {
+  return input.group === "GK" && input.conceded === 0 && input.minutes >= CLEAN_SHEET_MINUTES;
+}
+
+/**
+ * 한 경기가 시즌 행에 얹는 몫 — 빠진 칸은 0이다.
+ *
+ * `apps`가 값인 이유는 **연장** 때문이다: 출전은 90분에 이미 섰으므로 연장이 얹는
+ * 몫은 `apps: 0`이고 분·슛·골만 더해진다 (match.md §6).
+ */
+export interface SeasonStatDelta {
+  apps: number;
+  goals: number;
+  assists: number;
+  ratingSum: number;
+  minutes: number;
+  shots: number;
+  xg: number;
+  saves: number;
+  cleanSheets: number;
+  yellows: number;
+  reds: number;
+}
+
+/**
+ * 한 경기 몫을 시즌 행에 얹는다 — **구간 시뮬과 간이 시뮬이 같은 문을 쓴다**
+ * (→ docs/simulation/match.md §6·§7). 두 벌로 두면 리그 리더보드가 감독의 경기만
+ * 세는 표가 된다.
+ *
+ * **0인 칸은 적지 않는다** — 도움·2군 칸이 이미 쓰던 규칙이고, 옛 세이브의 행이
+ * 마감 한 번에 0으로만 채워진 칸을 갖지 않게 한다.
+ */
+export function addToSeasonStat(stat: SeasonStat, delta: Partial<SeasonStatDelta>): void {
+  stat.apps += delta.apps ?? 0;
+  stat.goals += delta.goals ?? 0;
+  if (delta.assists) stat.assists = (stat.assists ?? 0) + delta.assists;
+  if (delta.ratingSum) stat.ratingSum = (stat.ratingSum ?? 0) + delta.ratingSum;
+  if (delta.minutes) stat.minutes = (stat.minutes ?? 0) + delta.minutes;
+  if (delta.shots) stat.shots = (stat.shots ?? 0) + delta.shots;
+  if (delta.xg) stat.xg = (stat.xg ?? 0) + delta.xg;
+  if (delta.saves) stat.saves = (stat.saves ?? 0) + delta.saves;
+  if (delta.cleanSheets) stat.cleanSheets = (stat.cleanSheets ?? 0) + delta.cleanSheets;
+  if (delta.yellows) stat.yellows = (stat.yellows ?? 0) + delta.yellows;
+  if (delta.reds) stat.reds = (stat.reds ?? 0) + delta.reds;
+}
 
 /**
  * 시즌 평균 평점 — 출전이 없으면 null(0.0과 "기록 없음"은 다르다).

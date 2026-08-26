@@ -1004,9 +1004,23 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
           ),
         ]
       : [];
+  /**
+   * 시즌 기록의 나머지 — **0인 칸은 적지 않는다** (match.md §6). 스트라이커의 카드에
+   * "선방 0"이, 골키퍼의 카드에 "슛 0"이 서면 모델이 그 0을 사실로 옮겨 적는다.
+   */
+  const seasonMore = [
+    stat?.minutes ? `${stat.minutes}분` : null,
+    stat?.shots ? `슛 ${stat.shots}` : null,
+    stat?.xg ? `xG ${stat.xg.toFixed(2)}` : null,
+    stat?.saves ? `선방 ${stat.saves}` : null,
+    stat?.cleanSheets ? `클린시트 ${stat.cleanSheets}` : null,
+    stat?.yellows ? `경고 ${stat.yellows}` : null,
+    stat?.reds ? `퇴장 ${stat.reds}` : null,
+  ].filter((x): x is string => x !== null);
   lines.push(
     `시즌 기록: ${stat?.apps ?? 0}경기 ${stat?.goals ?? 0}골 ${stat?.assists ?? 0}도움` +
-      (seasonRating(stat) === null ? "" : ` · 평점 ${seasonRating(stat)!.toFixed(2)}`),
+      (seasonRating(stat) === null ? "" : ` · 평점 ${seasonRating(stat)!.toFixed(2)}`) +
+      (seasonMore.length > 0 ? ` · ${seasonMore.join(" · ")}` : ""),
     ...careerLines(state, p),
     [
       contract

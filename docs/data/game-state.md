@@ -225,7 +225,7 @@ row, 지난 일 = 그대로 이력.**
 | `transfers` `Transfer`             | **팀 변경 원장** — 이적·임대·자유·유스·은퇴                                                                   | `domain/records.ts` |
 | `growthLog` `GrowthEntry`          | 성장 한 칸 — 대상은 축·`pos:CODE`·`tactical`, 출처는 `origin` 코드. **감독 팀 선수만** (아래 ⚠️)              | `domain/records.ts` |
 | `trainingReports` `TrainingReport` | 훈련 결산 카드 — 한 구간(`from`~`to`)이 남긴 것: 세션 수 · `moved` · `marks`(갈래 코드와 근거 한 줄). 40장 링 | `domain/records.ts` |
-| `seasonStats` `SeasonStat`         | 시즌 × 팀 — 출전·득점·도움·`ratingSum`                                                                        | `domain/records.ts` |
+| `seasonStats` `SeasonStat`         | 시즌 × 팀 — 출전·출전 분·득점·도움·`ratingSum`·슛·xG·선방·클린시트·카드 (2군은 `reserve*`로 갈린다)           | `domain/records.ts` |
 | `issues` `PlayerIssue`             | 라커룸 불만 (`unhappy`)                                                                                       | `domain/records.ts` |
 | `settlingEvents` `SettlingEvent`   | 면담·팀토크·주장 지명이 새 영입에게 남긴 크레딧                                                               | `domain/records.ts` |
 | `transferList` `TransferListing`   | 이적 리스트 등재 — 호가와 함께                                                                                | `domain/records.ts` |
@@ -261,6 +261,13 @@ row, 지난 일 = 그대로 이력.**
 들어온 선수에게 통산 문턱을 세우면 코어가 사실이 아닌 것을 사실로 낸다. 클럽 안의 수는
 전부 원장 안에 있어 정직하다. 시즌·팀별 표와 통산 합계는 그와 별개로 `careerOf`가
 `seasonStats`에서 파생한다.
+
+**`seasonStats`의 칸은 두 시뮬이 같은 문으로 얹는다** (`addToSeasonStat` →
+[match.md](../simulation/match.md) §6). 출전 분·슛·xG·선방·클린시트·카드는 옛 세이브에
+없어 전부 optional이고, 세는 것은 **1군 대회 경기**뿐이다 — 친선은 장부에 닿지 않고
+([season.md](../simulation/season.md) §2) 2군 리그는 `reserve*` 칸으로 갈린다. 카드는
+`BOOKING`이 원본이라 시즌 합계도 그 문(`match/discipline.ts`)이 함께 적는다: 세는 자리를
+마감 쪽에 따로 두면 연장의 카드가 한쪽에만 남는다.
 
 ### 3.5 진행 중인 흥정 · 세계의 부름
 

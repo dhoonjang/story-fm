@@ -167,6 +167,53 @@ describe("골의 분", () => {
   });
 });
 
+describe("선수별 기록", () => {
+  /**
+   * **두 시뮬이 같은 눈금으로 적어야 한다** (match.md §7). 간이 시뮬이 팀 슛만 내던
+   * 동안 리그의 95%는 선수 단위 슛·xG가 없었고, 리더보드는 감독의 경기만 세는 표가
+   * 된다. 팀 합계와 선수별 합이 같은 슛 목록에서 나오는지가 그 문지기다.
+   */
+  it("선수별 슛·xG의 합이 팀 합계와 같다", () => {
+    const state = createTestGame(5);
+    const squads = { home: simSquadOf(state, "mancity"), away: simSquadOf(state, "hull") };
+    let sampled = 0;
+    for (let i = 0; i < 20; i++) {
+      const r = quickSimulate(squads.home, squads.away, 3100 + i, `stat:${i}`);
+      const lines = Object.values(r.playerStats);
+      const shots = lines.reduce((sum, line) => sum + line.shots, 0);
+      const xg = lines.reduce((sum, line) => sum + line.xg, 0);
+      expect(shots).toBe(r.homeShots + r.awayShots);
+      expect(xg).toBeCloseTo(r.homeXg + r.awayXg, 6);
+      // 선방은 상대의 슛을 넘지 못한다 — 막을 것이 없으면 막을 수도 없다
+      const saves = lines.reduce((sum, line) => sum + line.saves, 0);
+      expect(saves).toBeLessThanOrEqual(shots);
+      sampled += shots;
+    }
+    // 슛이 한 발도 안 나온 표본으로는 시험이 되지 않는다
+    expect(sampled).toBeGreaterThan(100);
+  });
+
+  it("선방은 그 분에 골문에 선 사람에게만 적힌다", () => {
+    const state = createTestGame(5);
+    const squads = { home: simSquadOf(state, "mancity"), away: simSquadOf(state, "hull") };
+    const keepers = new Set(
+      [...squads.home.starters, ...squads.away.starters, ...(squads.home.bench ?? [])]
+        .filter((p) => positionGroupOfPlayer(p) === "GK")
+        .map((p) => p.id),
+    );
+    let saves = 0;
+    for (let i = 0; i < 20; i++) {
+      const r = quickSimulate(squads.home, squads.away, 3300 + i, `save:${i}`);
+      for (const [id, line] of Object.entries(r.playerStats)) {
+        if (line.saves === 0) continue;
+        expect(keepers.has(id), id).toBe(true);
+        saves += line.saves;
+      }
+    }
+    expect(saves).toBeGreaterThan(0);
+  });
+});
+
 describe("부상", () => {
   it("퇴장자는 추첨 후보에서 빠진다 — 그라운드를 떠난 발은 다치지 않는다", () => {
     const state = createTestGame(5);
