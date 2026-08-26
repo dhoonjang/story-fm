@@ -35,6 +35,7 @@ export const PANEL_OF: Record<string, PanelKey> = {
   // 번호는 명단의 사실이다 — 감독이 확인하러 갈 화면은 그 줄이 선 스쿼드다
   set_squad_number: "스쿼드",
   set_development_focus: "스쿼드",
+  set_mentor: "스쿼드",
   set_reserve_training: "스쿼드",
   substitute: "스쿼드",
   set_transfer_list: "스쿼드",
