@@ -19,6 +19,7 @@ import {
   diffDays,
   playerById,
   pushNarrative,
+  seasonLabelOf,
   type GameState,
 } from "@story-fm/engine";
 import { edgeOf } from "@story-fm/sim";
@@ -826,5 +827,125 @@ describe("커리어 뷰 — 감독 XP", () => {
     state.managerXP.training = 87.5;
 
     expect(buildOfficeViews(state).squad.manager.xp.training).toBe(88);
+  });
+});
+
+/**
+ * 역대 절 — **뷰가 파생하는 규칙에만 케이스를 둔다** (AGENTS.md §5).
+ *
+ * 화면에 바로 드러나는 것(칩이 서는가, 표가 그려지는가)은 여기서 재지 않는다.
+ * 조용히 틀릴 자리는 셋이다: 이관된 행에 없는 승점을 지어내는가, 표도 트로피도
+ * 없는 시즌에 빈 줄을 세우는가, 우승·준우승을 표와 트로피 중 맞는 쪽에서 집는가.
+ *
+ * 시즌을 실제로 넘기면 케이스 하나에 분이 드니 결산 스냅샷을 손으로 심는다 —
+ * 재는 것은 전환이 아니라 뷰다.
+ */
+describe("대회 뷰 — 역대", () => {
+  const state = createTestGame(31);
+  const league = buildOfficeViews(state).competitions.list[0]!;
+  const leagueId = league.id;
+  const others = league.standings.map((r) => r.teamId).filter((id) => id !== state.userTeamId);
+  const seeded = league.honours?.count ?? 0;
+  // 우승한 시즌(승점을 안다)과 중위권 시즌(순서만 아는 이관 행)의 순서는 서로 다르다
+  const champOrder = [state.userTeamId, ...others];
+  const midOrder = [...others.slice(0, 3), state.userTeamId, ...others.slice(3)];
+  state.history = [
+    // 이 대회를 모르는 시즌 — 다른 리그에 있었다. 역대 절에 빈 줄로 서면 안 된다
+    {
+      season: state.season - 3,
+      leagues: [{ leagueId: "other-league", rows: [{ teamId: others[0]! }] }],
+      matches: [],
+    },
+    {
+      season: state.season - 2,
+      leagues: [{ leagueId, rows: midOrder.map((teamId) => ({ teamId })) }],
+      matches: [],
+    },
+    {
+      season: state.season - 1,
+      leagues: [
+        {
+          leagueId,
+          rows: champOrder.map((teamId, i) => ({
+            teamId,
+            record: {
+              played: 38,
+              wins: 30 - i,
+              draws: 4,
+              losses: 4 + i,
+              goalsFor: 90 - i,
+              goalsAgainst: 30 + i,
+              points: 94 - 3 * i,
+            },
+          })),
+        },
+      ],
+      matches: [],
+    },
+  ];
+  state.trophies = [
+    { season: state.season - 1, competitionId: leagueId, teamId: state.userTeamId },
+    // AI 구단의 컵 우승 — 원장은 **전 구단**의 것이다 (career.md §6)
+    {
+      season: state.season - 1,
+      competitionId: "fa-cup",
+      teamId: others[0]!,
+      runnerUpTeamId: others[1]!,
+    },
+  ];
+  // 감독이 그 시즌 그 팀에 있었다는 표 — 보관함은 이걸 보고 자기 것을 고른다
+  state.seasonRecords = [
+    {
+      season: state.season - 1,
+      teamId: state.userTeamId,
+      position: 1,
+      wins: 30,
+      draws: 4,
+      losses: 4,
+      goalsFor: 90,
+      goalsAgainst: 30,
+    },
+  ];
+  const view = () => buildOfficeViews(state).competitions.list[0]!;
+
+  it("최근 시즌이 앞에 서고, 이 대회를 모르는 시즌은 줄이 서지 않는다", () => {
+    const seasons = view().pastSeasons;
+    expect(seasons.map((s) => s.season)).toEqual([state.season - 1, state.season - 2]);
+    expect(seasons[0]!.label).toBe(seasonLabelOf(state.season - 1));
+  });
+
+  it("리그의 우승·준우승은 표의 1위·2위이고 우리 순위도 그 표에서 나온다", () => {
+    const season = view().pastSeasons[0]!;
+    expect(season.champion).toMatchObject({ teamId: state.userTeamId, ours: true });
+    expect(season.runnerUp).toMatchObject({ teamId: champOrder[1]!, ours: false });
+    expect(season.ourPosition).toBe(1);
+    // 득실은 두 수의 차다 — 스냅샷에 적지 않고 뷰가 접는다
+    expect(season.table[0]!.record).toMatchObject({ points: 94, goalDiff: 60 });
+    expect(season.table[0]!.name).not.toBe("");
+  });
+
+  it("이관된 행은 순위와 팀만 안다 — 승점 칸에 0을 채우지 않는다", () => {
+    const migrated = view().pastSeasons[1]!;
+    expect(migrated.table).toHaveLength(midOrder.length);
+    expect(migrated.table.every((r) => r.record === null)).toBe(true);
+    // 순위만은 그 행도 안다
+    expect(migrated.ourPosition).toBe(4);
+    expect(migrated.table.find((r) => r.ours)!.position).toBe(4);
+    expect(migrated.champion!.teamId).toBe(midOrder[0]);
+  });
+
+  it("역대 우승은 카탈로그 시드에 게임 안의 우승을 더한 것이다", () => {
+    const honours = view().honours!;
+    expect(honours.seeded).toBe(seeded);
+    expect(honours.count).toBe(seeded + 1);
+    expect(honours.won).toEqual([
+      { season: state.season - 1, label: seasonLabelOf(state.season - 1) },
+    ]);
+  });
+
+  it("감독의 보관함엔 AI 구단의 우승이 서지 않는다", () => {
+    const trophies = buildOfficeViews(state).career.trophies;
+    expect(trophies).toHaveLength(1);
+    expect(trophies[0]!.teamName).toBe(state.teams.find((t) => t.id === state.userTeamId)!.name);
   });
 });
