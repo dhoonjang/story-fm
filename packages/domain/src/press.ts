@@ -2,6 +2,7 @@ import { z } from "zod";
 import { DateString } from "./date-string";
 import { BOARD_DEMAND_CAUSE_LABEL, boardDemandText, type BoardDemandCause } from "./board-demand";
 import { formatMoney } from "./money";
+import { associationName } from "./nationality";
 import {
   ApproachChannelSchema,
   LEADER_ROLE_LABEL,
@@ -116,6 +117,12 @@ export const PressFactKindSchema = z.enum([
   "milestone",
   /** 이번 시즌 뒤 은퇴 — 1월에 선 예고 (season.md §6) */
   "retirement",
+  /**
+   * **대표팀 소집** — 휴식기가 남긴 사실 (competition.md §5-1). `tags[0]`이 갈래를
+   * 가른다: 소집(`named`) · A매치 데뷔(`debut`) · 낙마(`dropped`) · 복귀(`returned`).
+   * `tags[1]`이 협회 코드, `returned`의 `tags[2]`가 돌아온 몸의 코드다.
+   */
+  "call-up",
   /** 그 시즌 마지막 홈경기 — 전야는 대진, 경기 뒤는 그가 뛰었는가 (season.md §6) */
   "farewell",
   /**
@@ -622,6 +629,16 @@ const FINANCE_GRADE_KO: Record<string, string> = {
   tight: "리그 아래쪽",
 };
 
+/**
+ * 돌아온 몸 — `CallUpReturnState`의 한국어 이름 (competition.md §5-1). 장부가 드는
+ * 것은 코드뿐이고, 「지쳐서 돌아왔다」는 이 표 하나에서만 문장이 된다.
+ */
+const CALL_UP_RETURN_KO: Record<string, string> = {
+  fit: "몸에 이상 없다",
+  tired: "지쳐서 돌아왔다",
+  injured: "다쳐서 돌아왔다",
+};
+
 /** 이적료·위약금 한 조각 — 0이면 "없음"이라고 말한다 (없는 것도 사실이다) */
 function feeSuffix(label: string, amount: number | undefined): string {
   return amount !== undefined && amount > 0
@@ -803,6 +820,37 @@ export function pressFactText(fact: PressFact): string {
         ` · 우리 팀에서 ${v.apps ?? 0}경기 ${v.goals ?? 0}골` +
         (d.date ? ` · ${d.date} 예고` : "")
       );
+    case "call-up": {
+      /**
+       * 코어가 아는 것은 **협회 코드와 그 창의 두 수, 돌아온 몸의 코드**뿐이다
+       * (competition.md §5-1) — A매치를 굴리지 않으므로 장면도 상대도 없다.
+       *
+       * 이름은 **있을 때만** 앞에 선다: 근황 줄(people.md §7)은 선수 이름을 이미
+       * 옆에 세우고 있어, 카드가 다시 부르면 같은 이름이 한 줄에 두 번 선다.
+       */
+      const who = name ? `${name} ` : "";
+      const assoc = associationName(tags[1] ?? "");
+      const caps = v.caps === undefined ? "" : ` — 통산 ${v.caps}캡`;
+      const ours = v.count === undefined ? "" : ` · 이번 휴식기 우리 선수 ${v.count}명`;
+      if (sub === "debut") return `${who}${assoc} A매치 데뷔${ours}`;
+      if (sub === "dropped") return `${who}${assoc} 소집 제외${caps}${ours}`;
+      if (sub === "returned") {
+        // 팀의 줄은 인원이 주어이고(`count`), 한 사람의 줄은 그의 협회와 몸이 주어다
+        if (v.count !== undefined) {
+          return (
+            `대표팀 복귀 ${v.count}명 — ${v.apps ?? 0}경기 ${v.goals ?? 0}골` +
+            ` · 지쳐·다쳐 돌아온 선수 ${v.tired ?? 0}명`
+          );
+        }
+        return (
+          `${who}${assoc} 복귀 — ${v.apps ?? 0}경기 ${v.goals ?? 0}골` +
+          ` · ${CALL_UP_RETURN_KO[tags[2] ?? "fit"] ?? ""}`
+        );
+      }
+      return (
+        `${who}${assoc} 소집${caps}` + (v.days === undefined ? "" : ` · 복귀 D-${v.days}`) + ours
+      );
+    }
     case "farewell":
       /**
        * 전야에는 날짜만, 경기 뒤에는 **그가 뛰었는가**가 선다 (people.md §4). 대진은
