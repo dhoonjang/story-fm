@@ -63,8 +63,13 @@ export type Injury = z.infer<typeof InjurySchema>;
  */
 export type InjuryRiskGrade = "low" | "elevated" | "high";
 
-/** 저울을 들어 올린 항 — 세 코드가 곧 `injuryWeight`의 세 항이다 */
-export type InjuryRiskCause = "fatigue" | "proneness" | "strength";
+/**
+ * 저울을 들어 올린 항 — 네 코드가 곧 `injuryWeight`의 네 항이다.
+ *
+ * ⚠️ **`condition`은 오늘의 몸이고 `load`는 시즌의 몸이다** (player.md §5.3·§5.5).
+ * 한 낱말로 접으면 감독이 "하루 쉬면 되는가"와 "몇 주를 빼야 하는가"를 가르지 못한다.
+ */
+export type InjuryRiskCause = "condition" | "load" | "proneness" | "strength";
 
 export const INJURY_RISK_GRADE_KO: Record<InjuryRiskGrade, string> = {
   low: "낮음",
@@ -78,7 +83,8 @@ export const INJURY_RISK_GRADE_KO: Record<InjuryRiskGrade, string> = {
  * 그 분포를 볼 자리는 어디에도 없다 (player.md §10).
  */
 export const INJURY_RISK_CAUSE_KO: Record<InjuryRiskCause, string> = {
-  fatigue: "피로",
+  condition: "체력",
+  load: "누적 피로",
   proneness: "부상 이력",
   strength: "몸싸움",
 };
@@ -1213,6 +1219,11 @@ export const PLAYER_ISSUE_REASONS = [
    * (`blocked-move`와 같은 축). `count`가 그가 잃은 번호다 (people.md §5).
    */
   "number",
+  /**
+   * 누적 피로가 「과부하」에 머문 날이 그 사람의 문턱을 넘었다 — 기간은
+   * `PlayerState.overloadedOn`이 갖는다 (people.md §5 · player.md §5.5).
+   */
+  "overload",
 ] as const;
 export type PlayerIssueReason = (typeof PLAYER_ISSUE_REASONS)[number];
 
@@ -1222,8 +1233,8 @@ export const PlayerIssueSchema = z.object({
   reason: z.enum(PLAYER_ISSUE_REASONS).optional(),
   /**
    * 사유에 딸린 수치 — `losing-run`이면 연패 수, `out-of-position`이면 연속 경기 수,
-   * `minutes`면 그 지위에 **모자란 선발 수**, `number`면 **그가 잃은 번호**다
-   * (people.md §5).
+   * `minutes`면 그 지위에 **모자란 선발 수**, `number`면 **그가 잃은 번호**,
+   * `overload`면 **과부하 며칠째**다 (people.md §5).
    */
   count: z.number().int().min(1).optional(),
   /** 옛 세이브가 들고 있는 사유 문장 — 더는 쓰지 않는다 (`reason`의 폴백) */
@@ -1439,6 +1450,17 @@ export const PlayerTrainingSchema = z.object({
   axis: z.string().min(1).optional(),
   /** 배우는 자리 — 훈련 결산이 적응도를 조금씩 올린다 */
   position: z.string().min(1).optional(),
+  /**
+   * **감독이 이 선수를 훈련에서 뺀 기간** — 누적 피로의 유일한 손잡이
+   * (→ docs/simulation/season.md §4 · docs/data/player.md §5.5).
+   *
+   * `until`은 **그날까지 포함**이다. 축·자리와 한 행에 사는 이유는 대상이 같아서고,
+   * 서로를 지우지 않는다 — 쉬는 것과 무엇을 배우는지는 다른 지시다. 기간이 지나면
+   * 저절로 지나가므로 거둘 일이 대개 없다.
+   *
+   * 옛 세이브엔 없다(optional — 세이브 버전을 올리지 않는다).
+   */
+  rest: z.object({ until: DateString }).optional(),
   since: DateString,
 });
 export type PlayerTraining = z.infer<typeof PlayerTrainingSchema>;

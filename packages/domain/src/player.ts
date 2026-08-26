@@ -19,6 +19,14 @@ export const CONDITION_MAX = 100;
  */
 export const SHARPNESS_MAX = 100;
 
+/**
+ * **누적 피로 눈금의 위끝 — 기준점은 0이다** (player.md §5.5).
+ *
+ * 경기 감각과 방향이 반대다: 저쪽은 천장이 기준이라 값이 없으면 100으로 읽지만,
+ * 이 축은 **잔고**라 값이 없으면 0이다 — 옛 세이브의 셈이 한 칸도 달라지지 않는다.
+ */
+export const FATIGUE_MAX = 100;
+
 /** 0~99 능력치 스케일 — 선수·감독 공통 (player.md §1) */
 export const RatingSchema = z.number().int().min(0).max(RATING_MAX);
 
@@ -1914,6 +1922,35 @@ export const PlayerStateSchema = z.object({
    * 옛 세이브엔 없다 — 없으면 `SHARPNESS_MAX`(기준점)로 읽고 버전을 올리지 않는다.
    */
   sharpness: z.number().min(0).max(SHARPNESS_MAX).optional(),
+  /**
+   * **누적 피로 0~100** — 시즌이 이 몸에 쌓아 둔 부하의 잔고 (player.md §5.5).
+   *
+   * 체력과 다른 축이다. 체력은 하루 단위의 예산이라 이레면 차지만 이 잔고는 시즌
+   * 단위로 쌓여 12월의 다리를 8월과 다르게 만든다. **출전 분·연전 간격·본훈련
+   * 세션이 쌓고** 휴식·경기 없는 주·개인 휴식이 지수로 뺀다.
+   *
+   * ⚠️ **전력에 닿지 않는다.** 닿는 자리는 회복 배율(`recoveryFactor`)과 부상 저울
+   * (`injuryWeight`) 둘뿐이고, 지친 몸이 약하다는 사실은 체력이 이미 말한다 —
+   * 계수를 하나 더 얹으면 같은 사실이 두 번 값을 치른다.
+   *
+   * ⚠️ **정수가 아니다** — 경기 감각과 같은 이유로 실수로 둔다. 하루치 감쇠가 평형
+   * 근처에서 1 아래라, 반올림해 저장하면 그 구간에서 값이 통째로 멈춘다.
+   *
+   * 옛 세이브엔 없다 — 없으면 0(`FATIGUE_BASE`)으로 읽고 버전을 올리지 않는다.
+   */
+  fatigue: z.number().min(0).max(FATIGUE_MAX).optional(),
+  /**
+   * **누적 피로가 「과부하」를 넘어선 날** — "며칠째 과부하인가"를 답하는 유일한 자리
+   * (people.md §5).
+   *
+   * 잔고(`fatigue`)는 지금의 상태일 뿐 언제부터 그 위였는지를 모른다. 강등의
+   * `demotedOn`과 같은 이유로 시작점을 저장한다 — 과부하의 대가도 시간의 결과라
+   * 시작점 없이는 기간을 파생할 표가 어디에도 없다.
+   *
+   * 문턱 아래로 내려가면 지워진다 — 다시 넘으면 그날부터 새로 센다.
+   * 옛 세이브엔 없다 — 없으면 넘은 적 없는 것으로 읽고 버전을 올리지 않는다.
+   */
+  overloadedOn: DateString.optional(),
 });
 export type PlayerState = z.infer<typeof PlayerStateSchema>;
 
@@ -1928,6 +1965,22 @@ export function sharpnessOf(state: Pick<PlayerState, "sharpness">): number {
 /** 경기 감각을 0~100 안으로 — 모든 변화가 이 문을 지난다 */
 export function clampSharpness(value: number): number {
   return Math.max(0, Math.min(SHARPNESS_MAX, value));
+}
+
+/** 새 선수·새 시즌이 출발하는 누적 피로 — 여름이 통을 비웠다 (player.md §5.5) */
+export const FATIGUE_BASE = 0;
+
+/**
+ * 저장된 누적 피로를 읽는 **유일한 문** — 없으면 빈 통이다.
+ * 읽는 자리가 저마다 `?? 0`을 적으면 기본값이 코드베이스에 흩어진다.
+ */
+export function fatigueOf(state: Pick<PlayerState, "fatigue">): number {
+  return state.fatigue ?? FATIGUE_BASE;
+}
+
+/** 누적 피로를 0~100 안으로 — 모든 변화가 이 문을 지난다 */
+export function clampFatigue(value: number): number {
+  return Math.max(0, Math.min(FATIGUE_MAX, value));
 }
 
 /** 체력을 0~100 안으로 — 모든 변화가 이 문을 지난다 */
@@ -2012,6 +2065,49 @@ export function sharpnessBandLabel(band: SharpnessBand): string {
 /** 경기 감각 등급 라벨 — 명단·조회·심경이 같은 낱말을 쓴다 */
 export function sharpnessLabel(sharpness: number): string {
   return sharpnessBandLabel(sharpnessBand(sharpness));
+}
+
+/**
+ * 누적 피로 구간 — **화면·조회·심경·AI 로테이션이 같은 경계를 쓴다** (player.md §5.5).
+ *
+ * 경기 감각처럼 등급으로만 선다. 감독이 관측할 수 있는 것은 출전 기록과 일정이지
+ * "피로 63"이 아니고, 등급이면 그 두 사실에서 읽어 낼 수 있다.
+ */
+export type FatigueBand = "clear" | "building" | "heavy" | "overloaded";
+
+/** 각 구간이 시작되는 값 — 이 위는 앞(더 무거운) 구간이다. 낮을수록 좋은 축이다 */
+export const FATIGUE_BAND_FLOOR = {
+  overloaded: 75,
+  heavy: 50,
+  building: 28,
+} as const;
+
+export function fatigueBand(fatigue: number): FatigueBand {
+  if (fatigue >= FATIGUE_BAND_FLOOR.overloaded) return "overloaded";
+  if (fatigue >= FATIGUE_BAND_FLOOR.heavy) return "heavy";
+  if (fatigue >= FATIGUE_BAND_FLOOR.building) return "building";
+  return "clear";
+}
+
+/**
+ * 등급의 말 — 체력 등급(최상·좋음·보통·처짐·바닥)과 **한 낱말도 겹치지 않는다.**
+ * 같은 줄에 나란히 서는 두 축이라, 겹치면 감독이 어느 축을 읽는지 알 수 없다.
+ */
+const FATIGUE_BAND_KO: Record<FatigueBand, string> = {
+  clear: "가뿐",
+  building: "쌓임",
+  heavy: "지침",
+  overloaded: "과부하",
+};
+
+/** 등급의 말 — 등급을 이미 손에 쥔 자리(심경 카드)가 부른다 */
+export function fatigueBandLabel(band: FatigueBand): string {
+  return FATIGUE_BAND_KO[band];
+}
+
+/** 누적 피로 등급 라벨 — 명단·조회·심경이 같은 낱말을 쓴다 */
+export function fatigueLabel(fatigue: number): string {
+  return fatigueBandLabel(fatigueBand(fatigue));
 }
 
 /** 가능 포지션 + 포지션 적응도 — 선수당 여러 개, isNatural은 **하나 이상** */

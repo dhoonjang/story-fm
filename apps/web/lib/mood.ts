@@ -235,6 +235,15 @@ function sentenceOf(fact: MoodFact): string {
       return fact.band === "blunt"
         ? "오래 못 뛰어 경기 감각이 굳었다"
         : "경기 감각이 아직 덜 올라왔다";
+    case "fatigue":
+      /**
+       * 오늘 다리가 무거운 것과 다른 사실이다 — **시즌이 몸에 쌓아 둔 것**이라
+       * 하루 쉬어서 돌아오지 않는다 (player.md §5.5). 그래서 문장도 오늘이 아니라
+       * 기간을 말한다.
+       */
+      return fact.band === "overloaded"
+        ? "몇 주째 쉬지 못해 몸이 비어 간다"
+        : "시즌의 피로가 다리에 남아 있다";
     case "risk": {
       /**
        * 몸의 두 축과 또 다른 사실이다 — 오늘 다리가 무거운 것도, 감각이 굳은 것도

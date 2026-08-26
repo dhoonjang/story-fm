@@ -19,6 +19,7 @@ import {
   ageOf,
   FORMATION_CHANGE_COST,
   clampCondition,
+  clampFatigue,
   clampSharpness,
   compareMilestones,
   keptCleanSheet,
@@ -33,6 +34,7 @@ import {
   positionGroupOfPlayer,
   positionGrowthTarget,
   PROFICIENCY_MAX,
+  fatigueOf,
   sharpnessOf,
   shootoutSettled,
   shootoutTally,
@@ -48,6 +50,7 @@ import {
   applyEvents,
   buildStrengthPacket,
   createLedger,
+  fatigueFromMinutes,
   GAP_THRESHOLD,
   insertBeforeStop,
   mergeSubstitutions,
@@ -1831,6 +1834,16 @@ export function finalizeMatch(state: GameState): MatchDigest {
           }
         }
       }
+      /**
+       * **시즌의 잔고는 킥오프 체력으로 잰다** (player.md §5.5) — 바로 아래에서
+       * 체력을 깎기 전이어야 한다. 덜 회복된 몸으로 나선 90분이 더 남는다는 것이
+       * 이 축의 연전 간격 항이고, 그 「덜 회복된」은 경기 앞의 값이다. 경기 중에는
+       * `pendingMatch.matchFatigue`만 쌓이므로 여기 `state.condition`이 아직
+       * 킥오프의 그 값이다.
+       */
+      player.state.fatigue = clampFatigue(
+        fatigueOf(player.state) + fatigueFromMinutes(minutes, player.state.condition),
+      );
       // 체력은 몸의 소모만 정산한다. 승패의 심리 효과는 formDeltaFromMatch가 맡는다.
       // 폼에 골을 따로 더하지 않는 이유도 같다 — 골은 이미 평점에 크게 들어가 있고,
       // 또 올리면 이중 계산이라 "골 넣은 선수만 즉시 최고 폼"이 된다.

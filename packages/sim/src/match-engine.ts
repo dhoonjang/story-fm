@@ -17,6 +17,7 @@ import type {
   TacticsSpec,
 } from "@story-fm/domain";
 import {
+  fatigueOf,
   matchupTag,
   otherSide,
   PHASE_END,
@@ -485,22 +486,41 @@ function pickBooked(
  */
 export function injuryWeight(player: Player, extraFatigue = 0, proneness = 1): number {
   return (
-    (INJURY_WEIGHT_FLOOR + fatigueLift(player, extraFatigue) + strengthLift(player)) * proneness
+    (INJURY_WEIGHT_FLOOR +
+      conditionLift(player, extraFatigue) +
+      loadLift(player) +
+      strengthLift(player)) *
+    proneness
   );
 }
 
 /**
- * 저울의 세 항 — **여기 적힌 수를 읽는 곳은 `injuryWeight`와 `injuryRiskOf` 둘이다.**
+ * 저울의 네 항 — **여기 적힌 수를 읽는 곳은 `injuryWeight`와 `injuryRiskOf` 둘이다.**
  * 흩어 두면 저울을 손본 날 등급만 옛 눈금에 남아, 화면이 「낮음」이라 적은 선수가
  * 코어의 굴림에서는 맨 앞에 선다.
  */
 const INJURY_WEIGHT_FLOOR = 40;
-const INJURY_FATIGUE_WEIGHT = 0.8;
+const INJURY_CONDITION_WEIGHT = 0.8;
+/**
+ * **시즌이 쌓아 둔 잔고가 얹는 몫** (player.md §5.5) — 체력 항과 다른 사실이다.
+ * 저쪽은 오늘 다리가 무겁다는 말이고 이쪽은 여름부터 쉬지 못했다는 말이라, 잘 쉰
+ * 12월의 주전이 여기서 갈린다. 잔고 70이면 바닥(40) 위로 21이 얹힌다.
+ *
+ * ⚠️ **건수는 바뀌지 않는다** — 굴림 횟수는 `INJURY_PER_MATCH`가 정하고 저울은 그중
+ * 누가 걸리는지만 가른다. 리그가 통째로 지쳐도 부상은 한 건도 늘지 않고, 시즌 내내
+ * 뛴 열한 명 쪽으로 기울 뿐이다.
+ */
+const INJURY_LOAD_WEIGHT = 0.3;
 const INJURY_STRENGTH_WEIGHT = 0.3;
 
-/** 지친 만큼 얹히는 몫 — 체력 100이면 0 */
-function fatigueLift(player: Player, extraFatigue: number): number {
-  return (100 - player.state.condition + extraFatigue) * INJURY_FATIGUE_WEIGHT;
+/** 오늘 지친 만큼 얹히는 몫 — 체력 100이면 0 */
+function conditionLift(player: Player, extraFatigue: number): number {
+  return (100 - player.state.condition + extraFatigue) * INJURY_CONDITION_WEIGHT;
+}
+
+/** 시즌이 쌓아 둔 만큼 얹히는 몫 — 잔고 0이면 0 */
+function loadLift(player: Player): number {
+  return fatigueOf(player.state) * INJURY_LOAD_WEIGHT;
 }
 
 /** 몸싸움이 약한 만큼 얹히는 몫 — 축의 천장(99)이면 0 */
@@ -528,7 +548,12 @@ export const INJURY_RISK_FLOOR = { high: 88, elevated: 62 } as const;
 const INJURY_CAUSE_SHARE = 0.25;
 
 /** 원인이 같은 몫일 때의 순서 — 날마다 흔들리지 않게 표의 순서를 따른다 */
-const INJURY_CAUSE_ORDER: readonly InjuryRiskCause[] = ["fatigue", "proneness", "strength"];
+const INJURY_CAUSE_ORDER: readonly InjuryRiskCause[] = [
+  "condition",
+  "load",
+  "proneness",
+  "strength",
+];
 
 export interface InjuryRisk {
   grade: InjuryRiskGrade;
@@ -548,11 +573,15 @@ export interface InjuryRisk {
  *
  * ⚠️ **`low`에는 원인이 없다** — 짚을 것이 없어서 낮음이다. 완전한 몸에서 겨우
  * 들린 축을 이름 대면 스물다섯 명의 명단이 통째로 「몸싸움」을 달고 선다.
+ *
+ * ⚠️ **원인이 넷이어도 문턱은 그대로 4분의 1이다** — 넷 중 가장 큰 몫은 언제나 합의
+ * 4분의 1 이상이라, 등급이 오른 선수에게 이름이 하나도 안 서는 일은 여전히 없다.
  */
 export function injuryRiskOf(player: Player, proneness = 1): InjuryRisk {
-  const fatigue = fatigueLift(player, 0);
+  const condition = conditionLift(player, 0);
+  const load = loadLift(player);
   const strength = strengthLift(player);
-  const weight = (INJURY_WEIGHT_FLOOR + fatigue + strength) * proneness;
+  const weight = (INJURY_WEIGHT_FLOOR + condition + load + strength) * proneness;
   const grade: InjuryRiskGrade =
     weight >= INJURY_RISK_FLOOR.high
       ? "high"
@@ -561,16 +590,17 @@ export function injuryRiskOf(player: Player, proneness = 1): InjuryRisk {
         : "low";
   if (grade === "low") return { grade, causes: [] };
   /**
-   * 항마다의 **들림** — 셋의 합이 정확히 `weight − 바닥`이다.
+   * 항마다의 **들림** — 넷의 합이 정확히 `weight − 바닥`이다.
    *
    * 성향은 곱이라 자기 항이 없어 보이지만, **나머지를 부풀린 만큼**이 그 몫이다:
-   * 체력·몸싸움은 성향 1일 때의 값으로 세고, 배수가 얹은 전부를 성향에 준다.
-   * 곱을 양쪽에 나눠 걸면 합이 들림과 어긋나 몫의 비가 뜻을 잃는다.
+   * 체력·누적 피로·몸싸움은 성향 1일 때의 값으로 세고, 배수가 얹은 전부를 성향에
+   * 준다. 곱을 양쪽에 나눠 걸면 합이 들림과 어긋나 몫의 비가 뜻을 잃는다.
    */
   const lift: Record<InjuryRiskCause, number> = {
-    fatigue,
+    condition,
+    load,
     strength,
-    proneness: (INJURY_WEIGHT_FLOOR + fatigue + strength) * (proneness - 1),
+    proneness: (INJURY_WEIGHT_FLOOR + condition + load + strength) * (proneness - 1),
   };
   const excess = weight - INJURY_WEIGHT_FLOOR;
   return {

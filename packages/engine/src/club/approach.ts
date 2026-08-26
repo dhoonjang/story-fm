@@ -123,6 +123,12 @@ const DAILY_GAIN: Record<ApproachTopic, number> = {
    */
   promise: 9,
   number: 9,
+  /**
+   * 과부하 — 2군 방치(`demotion`)와 같은 눈금이다 (people.md §8). 불만이 서기까지
+   * 이미 열흘 넘게 걸린 데다(그 사람의 문턱 × 원형) 감독이 손을 쓰면 며칠 만에
+   * 잔고가 빠지므로, 그 위에 빠른 축을 얹으면 한 번의 연전이 곧장 감독실 문을 연다.
+   */
+  overload: 5,
   interest: 8,
   morale: 8,
   results: 4,
@@ -224,6 +230,7 @@ const CHANNEL_OF: Record<ApproachTopic, ApproachChannel> = {
   "out-of-position": "player",
   promise: "player",
   number: "player",
+  overload: "player",
   contract: "agent",
   interest: "agent",
   morale: "captain",
@@ -1073,16 +1080,18 @@ const APPROACH_TOPIC_ORDER: Record<ApproachTopic, number> = {
   minutes: 2,
   demotion: 3,
   "out-of-position": 4,
-  "losing-run": 5,
-  "early-return": 6,
-  "blocked-move": 7,
-  listed: 8,
-  contract: 9,
-  interest: 10,
-  morale: 11,
-  results: 12,
+  // 몸의 일은 자리 다툼보다 뒤지만 결과·분위기보다는 앞이다 — 감독이 손쓸 대상이 분명하다
+  overload: 5,
+  "losing-run": 6,
+  "early-return": 7,
+  "blocked-move": 8,
+  listed: 9,
+  contract: 10,
+  interest: 11,
+  morale: 12,
+  results: 13,
   // 압력 줄이 없어 이 표를 지나지 않는다 — 자리는 `openSeasonReview`가 직접 연다
-  "season-review": 13,
+  "season-review": 14,
 };
 
 /**
