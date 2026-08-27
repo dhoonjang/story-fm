@@ -70,8 +70,9 @@ export interface SimSquad {
   proneness?: Record<string, number>;
   /**
    * 감독이 지정한 죽은 공 키커 — AI 팀에는 대개 없고, 그때는 패킷이 기본값을
-   * 세운다 (match.md §1.4). 감독 팀이 간이 시뮬을 지나는 자리(연장 추정 등)에서도
-   * 같은 사람이 차야 한다.
+   * 세운다 (match.md §1.4). 싣는 곳은 라인업을 짜는 두 함수(`core/tick.ts`의
+   * `simSquadOf` · `simSquadFor`)이고, 감독 팀이 이 시뮬로 오는 자리는 **2군 리그**와
+   * 자리를 잃은 뒤의 옛 구단이다 — 거기서도 90분과 같은 사람이 차야 한다.
    */
   setPieceTakers?: SetPieceTakers;
   /**
