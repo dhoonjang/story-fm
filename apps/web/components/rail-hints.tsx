@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChatTurn, ToolCallRecord } from "@story-fm/engine";
-import { hintsOfCall, panelHintsOf } from "@/lib/panel-hints";
+import { hintsOfChip, panelHintsOf } from "@/lib/panel-hints";
 import type { HintLine, PanelHint, PanelKey } from "@/lib/panel-hints";
 import {
   IconBoard,
@@ -131,8 +131,14 @@ export function useRailHints({
    * 칩으로 남아 있어서 눌러 다시 부를 수 있다(`pinned`).
    */
   const [closed, setClosed] = useState(false);
-  /** 채팅 칩이 다시 불러낸 말풍선 — 자동 알림과 같은 자리에 선다 */
-  const [pinned, setPinned] = useState<{ call: ToolCallRecord; hints: PanelHint[] } | null>(null);
+  /**
+   * 채팅 칩이 다시 불러낸 말풍선 — 자동 알림과 같은 자리에 선다.
+   *
+   * 칩 하나가 호출 여럿을 질 수 있어(연달아 불린 같은 스킬 — `groupChips`) 세우는
+   * 것은 묶음 전체다. 어느 칩이 눌렸는지는 **묶음의 첫 호출**로 안다: 묶음 배열은
+   * 그릴 때마다 새로 만들어지지만 그 안의 기록은 턴에 그대로 있어 신원이 된다.
+   */
+  const [pinned, setPinned] = useState<{ head: ToolCallRecord; hints: PanelHint[] } | null>(null);
 
   /**
    * 마지막 턴이 바꾼 장부 — 아이콘 줄에 말풍선으로 선다.
@@ -187,9 +193,11 @@ export function useRailHints({
   }, []);
 
   /** 칩을 눌렀다 — 같은 칩을 다시 누르면 닫는다 (칩이 곧 손잡이다) */
-  const reveal = useCallback((call: ToolCallRecord) => {
+  const reveal = useCallback((calls: readonly ToolCallRecord[]) => {
+    const head = calls[0];
+    if (head === undefined) return;
     setClosed(true);
-    setPinned((prev) => (prev?.call === call ? null : { call, hints: hintsOfCall(call) }));
+    setPinned((prev) => (prev?.head === head ? null : { head, hints: hintsOfChip(calls) }));
   }, []);
   /** 그 장부를 열었다 — 이번 턴 동안은 그 알림을 다시 세우지 않는다 */
   const markSeen = useCallback((key: string) => {
@@ -203,8 +211,8 @@ export function useRailHints({
     shown: pinned ? pinned.hints : closed ? [] : hints,
     /** 되부른 말풍선인가 — 좁은 화면에서도 선다 */
     pinned: pinned !== null,
-    /** 지금 펼쳐 둔 칩 — 그 칩이 눌린 채로 남는다 */
-    revealedCall: pinned?.call ?? null,
+    /** 지금 펼쳐 둔 칩 — 묶음의 첫 호출이 그 칩의 신원이다 */
+    revealedCall: pinned?.head ?? null,
     reveal,
     markSeen,
   };

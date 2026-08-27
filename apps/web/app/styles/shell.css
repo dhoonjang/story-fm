@@ -2719,6 +2719,21 @@ textarea {
   border-color: var(--border-strong, var(--border));
 }
 /**
+ * 묶인 횟수 — **수 하나.** 연달아 불린 같은 스킬은 칩 하나라(`groupChips`) 몇 번을
+ * 불렀는지는 이 자리에서만 드러난다. `3회`처럼 단위를 붙이면 이름과 같은 굵기의
+ * 글자가 늘어 정작 스킬 이름이 밀린다 — 이름 뒤에 한 톤 낮춘 숫자만 선다.
+ */
+.tool-chip-count {
+  margin-left: 5px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+.tool-chip:hover .tool-chip-count,
+.tool-chip.open .tool-chip-count {
+  color: var(--muted);
+}
+/**
  * 대화형 스킬의 **결** — 면담·팀토크·기자회견은 펼치지 않아도 잘 풀렸는지 보인다.
  * 색은 왼쪽 점 하나로만 준다: 칩 전체를 물들이면 그 줄이 다른 칩보다 소리쳐서
  * "눈에 띌 필요는 없다"는 조건을 깬다.
@@ -3398,6 +3413,13 @@ textarea {
   padding: 8px 10px;
   font-size: var(--fs-sm);
   max-width: 100%;
+}
+/* 묶인 칩의 속 — 호출마다 한 칸이고, 둘째부터 선으로 가른다. 한 덩이로 이으면
+   어디까지가 한 교체인지 흐려진다 */
+.tool-detail-call + .tool-detail-call {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
 }
 .tool-detail-summary {
   color: var(--text);

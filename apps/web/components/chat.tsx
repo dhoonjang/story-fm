@@ -5,7 +5,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { CardMark, ChatTurn, GoalMark, ToolCallRecord } from "@story-fm/engine";
 import { cutStamps } from "../lib/scene-stamp";
 import { hasRailHint } from "../lib/panel-hints";
-import { groupPieces, splitStaging, weaveTurn } from "../lib/turn-pieces";
+import { groupChips, groupPieces, splitStaging, weaveTurn } from "../lib/turn-pieces";
 import type { Utterance } from "../lib/turn-pieces";
 import { BROADCAST_SPEAKER, formatMoney, normalizeSpeaker } from "@story-fm/domain";
 import type { ScoutReportCard } from "@story-fm/domain";
@@ -138,40 +138,51 @@ function GoalCard({ goal }: { goal: GoalMark }) {
  * `tone`이 있는 칩(면담·팀토크·기자회견)은 **펼치지 않아도 결이 보인다** — 잘
  * 풀렸는지는 알아야 하지만 사기 ±N을 늘 세우면 대화가 숫자로 읽힌다.
  *
+ * **칩 하나가 호출 여럿을 진다** — 연달아 불린 같은 스킬은 한 칩이다(`groupChips`).
+ * 몇 번인지는 이름 옆의 **수 하나**로 서고, 펼치면 묶인 호출의 상세가 차례로 선다.
+ *
  * **상세가 열리는 자리는 갈 화면이 있는지가 정한다.** 장부를 바꾼 스킬은 레일
  * 말풍선을 다시 세운다(`onReveal`) — 같은 사실을 칩 아래에 또 펼치면 두 곳에 난다.
  * 레일이 없는 동안(경기 중)에는 그 칩도 제자리에서 펼친다: 부를 말풍선이 없다.
  */
 function ToolChip({
-  call,
+  calls,
   onReveal,
   revealed = false,
 }: {
-  call: ToolCallRecord;
-  onReveal?: (call: ToolCallRecord) => void;
+  /** 이 칩이 진 호출들 — 첫 호출이 이름과 결을 정한다 (묶음은 그 둘이 같아야 선다) */
+  calls: readonly ToolCallRecord[];
+  onReveal?: (calls: readonly ToolCallRecord[]) => void;
   revealed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const label = SKILL_LABEL[call.name] ?? call.name;
-  const tone = call.tone ? ` ${call.tone}` : "";
-  const toRail = onReveal !== undefined && hasRailHint(call.name);
+  const head = calls[0]!;
+  const label = SKILL_LABEL[head.name] ?? head.name;
+  const tone = head.tone ? ` ${head.tone}` : "";
+  const toRail = onReveal !== undefined && hasRailHint(head.name);
   const shown = toRail ? revealed : open;
   return (
     <span className="tool-chip-wrap">
       <button
         className={`tool-chip${shown ? " open" : ""}${tone}`}
-        onClick={() => (toRail ? onReveal(call) : setOpen((o) => !o))}
-        data-testid={`tool-${call.name}`}
+        onClick={() => (toRail ? onReveal(calls) : setOpen((o) => !o))}
+        data-testid={`tool-${head.name}`}
         aria-expanded={shown}
         title={label}
         /* 이 클릭은 말풍선을 닫는 "다른 쪽"이 아니다 — game-screen의 바깥 클릭 감시가 읽는다 */
         data-hint-keep={toRail ? "" : undefined}
       >
         {label}
+        {calls.length > 1 && <i className="tool-chip-count">{calls.length}</i>}
       </button>
       {!toRail && open && (
-        <div className="tool-detail" data-testid={`tool-detail-${call.name}`}>
-          <ToolDetail call={call} />
+        <div className="tool-detail" data-testid={`tool-detail-${head.name}`}>
+          {calls.map((call, i) => (
+            // 묶인 호출은 저마다 한 칸 — 셋을 한 덩이로 이으면 어디까지가 한 교체인지 흐려진다
+            <div className="tool-detail-call" key={i}>
+              <ToolDetail call={call} />
+            </div>
+          ))}
         </div>
       )}
     </span>
@@ -481,8 +492,8 @@ export function ChatTurnView({
   /** 바로 앞 모델 턴의 시각 — 같으면 다시 적지 않는다 */
   prevStamp?: string | null;
   /** 장부 칩을 눌렀다 — 레일 말풍선을 다시 세운다 (레일이 서 있을 때만 온다) */
-  onRevealHint?: (call: ToolCallRecord) => void;
-  /** 지금 말풍선이 서 있는 호출 — 그 칩만 펼친 모양이 된다 */
+  onRevealHint?: (calls: readonly ToolCallRecord[]) => void;
+  /** 지금 말풍선이 서 있는 호출 — 그 칩만 펼친 모양이 된다 (묶음은 첫 호출이 신원이다) */
   revealedCall?: ToolCallRecord | null;
   /**
    * 이 턴을 길게 눌렀다 — 무엇이 열리는지는 이 컴포넌트가 알지 않는다.
@@ -596,12 +607,12 @@ export function ChatTurnView({
             {/* 같은 자리에서 연달아 불린 스킬은 한 줄에 나란히 — 칩마다 문단을 끊지 않는다 */}
             {chips.length > 0 && (
               <div className="tool-chips">
-                {chips.map((call, j) => (
+                {groupChips(chips).map((group, j) => (
                   <ToolChip
-                    call={call}
+                    calls={group}
                     key={j}
                     onReveal={onRevealHint}
-                    revealed={call === revealedCall}
+                    revealed={group[0] === revealedCall}
                   />
                 ))}
               </div>
