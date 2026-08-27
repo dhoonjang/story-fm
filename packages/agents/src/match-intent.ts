@@ -3,7 +3,10 @@ import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@st
 import {
   DIRECTIVE_INTENSITIES,
   PLAYER_DIRECTIVE_KINDS,
+  SET_PIECE_ROUTINE_AXES,
+  SET_PIECE_ROUTINE_NEUTRAL,
   TACTIC_TOGGLES,
+  setPieceRoutineChoiceText,
   tacticToggleChoiceText,
 } from "@story-fm/domain";
 import { buildLedgerNote } from "./gm-input";
@@ -61,7 +64,8 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
   - 갈래에 담기지 않는 말이면 지역 지시인지 보고 plans를 쓴다.
 - plans — 선수 한 명으로 환원되지 않는 지역 지시. band × lane × intent(overload·press·protect·transition)와 감독의 표현 한 줄.
 - exploits — <targets>의 id.
-- setPieceTakers — 죽은 공 키커. corner·freeKick·penalty 중 감독이 말한 자리만 싣고, 지정을 풀라는 말이면 그 자리에 null을 넣는다.
+- setPieceTakers — 세트피스 키커. corner·freeKick·penalty 중 감독이 말한 자리만 싣고, 지정을 풀라는 말이면 그 자리에 null을 넣는다.
+- setPieceRoutine — 세트피스에 몇 명이 서는가: ${SET_PIECE_ROUTINE_AXES.map(setPieceRoutineChoiceText).join(" · ")}. 감독이 말한 축만 싣고, 지시를 푸는 말이면 ${SET_PIECE_ROUTINE_NEUTRAL}을 넣는다.
 
 # unresolved
 어느 갈래에도 담기지 않은 말은 감독의 표현 그대로 unresolved에 남긴다.`;

@@ -73,6 +73,7 @@ import {
   setPlayerTraining,
   setSquadLevels,
   setSquadNumber,
+  setSetPieceRoutine,
   setSetPieceTakers,
   setTactics,
   setTraining,
@@ -108,6 +109,7 @@ import {
   PROMISE_KINDS,
   SEARCH_MAX_AGE,
   SEARCH_MIN_AGE,
+  SET_PIECE_ROUTINE_LEVELS,
   SQUAD_NUMBER_MAX,
   RESERVE_TRAINING_POLICIES,
   SQUAD_STATUSES,
@@ -528,6 +530,20 @@ export function buildGmTools(
         penalty: playerRef.nullable().optional().describe("페널티 키커 — null이면 지정 해제"),
       }),
       (input) => setSetPieceTakers(state, input),
+    ),
+    wrap(
+      "set_set_piece_routine",
+      descriptions.set_set_piece_routine,
+      z
+        .object({
+          // 낱말은 도구 설명이 `SET_PIECE_ROUTINE_AXES`에서 만들어 싣는다 (prompts.md §5-2).
+          // 지시를 푸는 값은 열거 안의 `normal`이다 — `.nullable()`은 없음을 `null`로 적는
+          // 모델을 함께 받는 관용이고, 모델에게 보이지 않는다 (prompts.md §2)
+          commit: z.enum(SET_PIECE_ROUTINE_LEVELS).nullable(),
+          guard: z.enum(SET_PIECE_ROUTINE_LEVELS).nullable(),
+        })
+        .partial(),
+      (input) => setSetPieceRoutine(state, input),
     ),
     wrap(
       "exploit_point",

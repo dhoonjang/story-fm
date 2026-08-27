@@ -3,6 +3,7 @@ import {
   DIRECTIVE_INTENSITIES,
   KEEPER_DISTRIBUTIONS,
   PLAYER_DIRECTIVE_KINDS,
+  SET_PIECE_ROUTINE_LEVELS,
   TACKLING_LEVELS,
   TEAM_TALK_OCCASIONS,
   TRANSITION_MODES,
@@ -129,7 +130,7 @@ export const MatchIntentSchema = z.object({
   /** 노릴 표적의 id — 코어가 실재를 대조한다 (`exploits.ts`) */
   exploits: z.array(z.string().min(1)).max(2).optional(),
   /**
-   * **죽은 공 키커** — 감독이 말한 자리만. `null`은 지정 해제다 (match.md §1.4).
+   * **세트피스 키커** — 감독이 말한 자리만. `null`은 지정 해제다 (match.md §1.4).
    *
    * "코너는 사카가 차"·"페널티는 네 거야"는 감독이 가장 흔하게 하는 지시 둘이고,
    * 그 말이 어느 갈래에도 없으면 `unresolved`로 되돌아간다.
@@ -141,7 +142,22 @@ export const MatchIntentSchema = z.object({
       penalty: playerId.nullable().optional(),
     })
     .optional()
-    .describe("죽은 공 키커 — 감독이 말한 자리만"),
+    .describe("세트피스 키커 — 감독이 말한 자리만"),
+  /**
+   * **세트피스 인원** — 가담·수비 두 축 중 감독이 말한 것만 (match.md §1.4).
+   *
+   * 0-1로 지고 있을 때의 "이제부터 다 올려"가 그 자리다. 지시를 푸는 값은 열거 안의
+   * `normal`이고, 낱말은 `MATCH_INTENT_SYSTEM`이 `SET_PIECE_ROUTINE_AXES`에서 만들어
+   * 싣는다 (prompts.md §5-2).
+   */
+  setPieceRoutine: z
+    .object({
+      commit: z.enum(SET_PIECE_ROUTINE_LEVELS).nullable(),
+      guard: z.enum(SET_PIECE_ROUTINE_LEVELS).nullable(),
+    })
+    .partial()
+    .optional()
+    .describe("세트피스 인원 — 감독이 말한 축만"),
   /**
    * 승부차기 키커 순서 — 감독이 이름을 든 사람만. 나머지는 코어의 기본 순서가 잇는다.
    *
@@ -174,6 +190,7 @@ export function touchesPitch(intent: MatchIntent): boolean {
     (intent.exploits?.length ?? 0) > 0 ||
     (intent.shootoutOrder?.length ?? 0) > 0 ||
     intent.setPieceTakers !== undefined ||
+    intent.setPieceRoutine !== undefined ||
     intent.tactics !== undefined ||
     intent.advance !== "none"
   );
