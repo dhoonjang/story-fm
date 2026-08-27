@@ -17,7 +17,7 @@ export const WORLD_SEASON = defineHarness({
   id: "world-season",
   what: "전체 세계 EPL 한 시즌 — 득점·슈팅 분포 · 승점 곡선 · 카드",
   doc: MATCH,
-  cost: "시드당 수십 초 × 3시드",
+  cost: "시드당 40초쯤 × 6시드",
   // prettier-ignore
   bands: [
     { metric: "리그 평균 슈팅/경기", role: "reference", min: 24, max: 26, why: "실제 1부의 양 팀 합" },
@@ -49,11 +49,12 @@ export const WORLD_SEASON = defineHarness({
     { metric: "페널티 득점/경기", role: "reference", min: 0.13, max: 0.24, why: "경기당 페널티 `PENALTY_PER_MATCH`(0.25) × 성공률(0.62~0.80) = 0.16~0.2. 시즌 380경기라 잡음이 15%다" },
     { metric: "팀당 슈팅/경기", role: "measure", why: "위 양 팀 합의 절반 — 분산과 함께 읽는다" },
     { metric: "팀당 슈팅 분산", role: "measure", why: "슈팅이 몇몇 경기에 몰리는지" },
-    { metric: "승점 1위", role: "reference", min: 80, max: 100, unit: "score", why: "실제 1부 우승 승점은 보통 84~93이고 역대 최고가 100(2017-18) — 전력 곡선(`ABILITY_LOG_SLOPE`)이 여기를 세운다" },
-    { metric: "승점 4위", role: "reference", min: 66, max: 75, unit: "score", why: "실제 1부 최근 다섯 시즌 66~75" },
-    { metric: "승점 10위", role: "reference", min: 46, max: 58, unit: "score", why: "실제 1부 최근 다섯 시즌 48~63 — 중위권이 두터워 시즌마다 크게 흔들린다" },
-    { metric: "승점 17위", role: "reference", min: 32, max: 40, unit: "score", why: "실제 1부 최근 다섯 시즌 32~38" },
-    { metric: "승점 최하위", role: "reference", min: 10, max: 28, unit: "score", why: "실제 1부 최근 다섯 시즌 12~25, 역대 최저 11" },
+    { metric: "승점 1위", role: "measure", unit: "score", why: "**판정은 `league-spread`가 한다** — 한 리그 한 시즌의 순위별 승점은 시드마다 ±10점이 흔들려 밴드로 걸면 같은 빌드가 빨갛거나 초록이다. 여기서는 그 시즌의 모양을 읽기만 한다" },
+    { metric: "승점 4위", role: "measure", unit: "score", why: "같은 이유" },
+    { metric: "승점 10위", role: "measure", unit: "score", why: "같은 이유" },
+    { metric: "승점 17위", role: "measure", unit: "score", why: "같은 이유" },
+    { metric: "승점 최하위", role: "measure", unit: "score", why: "같은 이유" },
+    { metric: "리그 승점 표준편차", role: "measure", why: "스무 팀을 다 읽는 눈금 — 두 팀만 읽는 위 다섯보다 훨씬 조용하다. 판정은 `league-spread`" },
     { metric: "옐로/경기", role: "reference", min: 3.7, max: 4.5, why: "실제 1부 — 2023년 판정 지침 뒤 4.1~4.2 (2022-23은 3.6)" },
     { metric: "레드/경기", role: "reference", min: 0.12, max: 0.25, why: "실제 1부 시즌 45~60장" },
     { metric: "옐로/경기 (감독 경기 · 구간 시뮬)", role: "measure", why: "리그 38경기 · 카드 130장이라 상대 잡음 9% — 아래 비와 함께 읽는다" },
@@ -85,6 +86,37 @@ export const AI_ROTATION = defineHarness({
     { metric: "피로 문턱↑ 가용 선발 (팀·경기일당)", role: "measure", why: "로테이션이 판단할 기회가 생긴 횟수 — 부상·정지는 뺀다" },
     { metric: "그중 로테이션된 비율", role: "measure", unit: "ratio", why: "문턱 셋이 동시에 걸려야 해서 깊이가 얕은 팀은 통째로 불발한다" },
     { metric: "로테이션 중 탈진 문턱 위 비율", role: "measure", unit: "ratio", why: "문턱 셋 갈래가 확실히 걸린 몫 — 아래는 두 갈래를 밖에서 가를 수 없다" },
+  ],
+});
+
+/**
+ * **승점 곡선을 재는 자리** — `world-season`이 한 시즌을 굴려 세우는 순위별 승점은
+ * 시드마다 ±10점씩 흔들려, 세 시즌으로는 잡음이 신호보다 크다. 그래서 판정을 여기로
+ * 옮긴다: 같은 시즌들에서 **20팀 38경기 상위 리그 셋**의 순위표를 모아 평균과
+ * 표준편차로 읽는다 (`injury-rate`가 카드 판정을 넘겨받은 것과 같은 규칙).
+ *
+ * 리그를 셋으로 늘리는 데 시즌을 더 돌지 않는다 — 한 세계가 이미 다섯 리그를 굴리고
+ * 있고, 그중 20팀 38경기인 셋은 승점이 같은 눈금 위에 선다.
+ */
+export const LEAGUE_SPREAD = defineHarness({
+  id: "league-spread",
+  what: "20팀 38경기 상위 리그 셋의 승점 곡선 — 시드 × 리그를 모아 평균과 표준편차로",
+  doc: MATCH,
+  cost: "world-season과 같은 시즌을 나눠 쓴다",
+  // prettier-ignore
+  bands: [
+    { metric: "표본 (시드 × 리그)", role: "guard", min: 12, unit: "count", why: "**아래로는 판정이 잡음에 묻힌다.** 우승 승점의 리그-시즌 표준편차가 8점쯤이라 표본 12에서 평균의 표준오차가 2.3이고, 아래 밴드의 폭(±5)이 그제야 신호가 된다. 하네스가 도는 시드 수가 아니라 **읽을 수 있는 최소 표본**이다" },
+    { metric: "리그당 경기 수 (최소)", role: "guard", min: 380, unit: "count", why: "20팀 더블 라운드로빈 = 380. 한 리그라도 덜 끝났으면 그 순위표는 승점 곡선이 아니다" },
+    { metric: "리그 승점 표준편차 (평균)", role: "reference", min: 16, max: 21, why: "**리그가 얼마나 벌어져 있는가 — 이 하네스의 본론.** 스무 팀 승점의 표준편차이고, 실제 1부가 19~20이다(2023-24 EPL 20.1 · 2022-23 19.0). 1위와 10위 둘만 읽는 눈금보다 표본이 열 배라 훨씬 조용하다" },
+    { metric: "리그 승점 표준편차 (리그-시즌 σ)", role: "measure", why: "위 평균이 얼마나 흔들리는가 — 실제는 시즌마다 1~2점이다" },
+    { metric: "승점 1위 평균", role: "reference", min: 84, max: 94, unit: "score", why: "실제 상위 1부 최근 열 시즌의 우승 승점 평균이 89(EPL 91 · 라리가 89 · 세리에 A 89)다. 한 시즌 값은 81~100까지 흔들리므로 밴드는 **평균에** 건다" },
+    { metric: "승점 1위 리그-시즌 σ", role: "measure", unit: "score", why: "실제가 6~7 — 이 값이 더 크면 우승 승점이 리그의 모양이 아니라 굴림에 걸려 있다" },
+    { metric: "승점 4위 평균", role: "reference", min: 66, max: 76, unit: "score", why: "실제 최근 다섯 시즌 66~75" },
+    { metric: "승점 10위 평균", role: "reference", min: 46, max: 56, unit: "score", why: "실제 최근 다섯 시즌 47~55 — 중위권이 두터워 한 시즌은 크게 흔들린다" },
+    { metric: "승점 17위 평균", role: "reference", min: 32, max: 42, unit: "score", why: "실제 최근 다섯 시즌 32~40" },
+    { metric: "승점 최하위 평균", role: "reference", min: 14, max: 28, unit: "score", why: "실제 최근 다섯 시즌 16~26, 역대 최저 11" },
+    { metric: "승점 최하위 리그-시즌 σ", role: "measure", unit: "score", why: "꼬리가 시즌마다 얼마나 흔들리는가" },
+    { metric: "승점 1위 − 10위 평균", role: "measure", unit: "score", why: "이슈가 읽던 폭 — 두 팀만 읽으므로 **위 표준편차와 함께** 읽는다" },
   ],
 });
 
@@ -646,6 +678,7 @@ export const PROMPT_REGRESSION = defineHarness({
 export const HARNESSES: readonly Harness[] = [
   WORLD_SEASON,
   AI_ROTATION,
+  LEAGUE_SPREAD,
   ASSIST_RATE,
   SEGMENT_SHOTS,
   INJURY_RATE,

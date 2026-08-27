@@ -17,7 +17,7 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { createTestGame, drillUserTactics, playMockMatch } from "../test/helpers";
-import { AI_ROTATION, WORLD_SEASON } from "./catalog";
+import { AI_ROTATION, LEAGUE_SPREAD, WORLD_SEASON } from "./catalog";
 import { outOfBand, reportOf, type Readings } from "./harness";
 
 /**
@@ -69,6 +69,87 @@ function rotate(state: GameState): void {
 }
 
 const LEAGUE = "epl";
+
+/**
+ * 시즌을 굴리는 시드 — 승점 곡선이 잡음 위로 올라오는 데 필요한 표본이 정한다.
+ * 시드 하나가 40초쯤이고, 아래 `CURVE_LEAGUES`가 시드마다 셋씩 표본을 준다.
+ */
+const SEEDS = [42, 7, 99, 3, 21, 64];
+
+/**
+ * **승점 곡선을 읽는 리그** — 20팀 더블 라운드로빈(38경기)인 셋만이다.
+ *
+ * 한 세계는 다섯 리그를 굴리는데 분데스리가·리그 1은 18팀 34경기라 승점이 다른 눈금에
+ * 선다(우승 승점이 구조적으로 낮다). 나머지 셋은 실제로도 같은 형식·같은 대역이라
+ * 시즌을 더 돌지 않고 표본을 셋으로 만든다.
+ */
+const CURVE_LEAGUES = ["epl", "laliga", "seriea"];
+
+/** 모집단 표준편차 — 리그 스무 팀은 표본이 아니라 전부다 */
+function stdev(xs: readonly number[]): number {
+  if (xs.length === 0) return Number.NaN;
+  const m = xs.reduce((a, b) => a + b, 0) / xs.length;
+  return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length);
+}
+
+function average(xs: readonly number[]): number {
+  return xs.length === 0 ? Number.NaN : xs.reduce((a, b) => a + b, 0) / xs.length;
+}
+
+/** 한 리그-시즌의 순위표 — 승점만, 1위부터 */
+interface LeagueCurve {
+  points: number[];
+  played: number;
+}
+
+/**
+ * 끝난 시즌의 최종 순위표 — **원장(`state.history`)에서 읽는다.**
+ *
+ * `computeStandings`로는 읽을 수 없다. 시즌 종료는 `advanceTime` 한 번 안에서
+ * 남은 경기를 다 굴리고 `endSeason`까지 마치므로, 하네스가 볼 수 있는 마지막
+ * 순간에는 이미 `state.season`이 올라가 있고 승강이 리그 소속까지 바꾼 뒤다.
+ * 지나간 시즌의 순위표가 남는 유일한 자리가 원장이다 (season.md §6).
+ */
+function curveOf(state: GameState, season: number, leagueId: string): LeagueCurve {
+  const rows = (
+    state.history?.find((h) => h.season === season)?.leagues.find((l) => l.leagueId === leagueId)
+      ?.rows ?? []
+  )
+    // `record`가 없는 행은 옛 세이브에서 이관된 순서뿐인 줄이다 — 하네스의 세계에는 없다
+    .flatMap((r) => (r.record ? [r.record] : []));
+  return {
+    points: rows.map((r) => r.points),
+    // 팀-경기 합의 절반이 경기 수다 — 한 경기가 두 줄에 적힌다
+    played: rows.reduce((a, r) => a + r.played, 0) / 2,
+  };
+}
+
+/**
+ * 승점 곡선 — **평균과 표준편차를 함께 읽는다.** 한 리그-시즌의 순위별 승점은 ±10점씩
+ * 흔들리므로 평균만으로는 대역 안팎을 말할 수 없고, 표준편차 없이는 그 평균이 얼마나
+ * 미더운지도 말할 수 없다.
+ */
+function spreadReadings(curves: readonly LeagueCurve[]): Readings<typeof LEAGUE_SPREAD> {
+  const at = (i: number) => curves.map((c) => c.points[i < 0 ? c.points.length + i : i] ?? 0);
+  const spreads = curves.map((c) => stdev(c.points));
+  const champions = at(0);
+  const bottom = at(-1);
+  const tenth = at(9);
+  return {
+    "표본 (시드 × 리그)": curves.length,
+    "리그당 경기 수 (최소)": Math.min(...curves.map((c) => c.played)),
+    "리그 승점 표준편차 (평균)": average(spreads),
+    "리그 승점 표준편차 (리그-시즌 σ)": stdev(spreads),
+    "승점 1위 평균": average(champions),
+    "승점 1위 리그-시즌 σ": stdev(champions),
+    "승점 4위 평균": average(at(3)),
+    "승점 10위 평균": average(tenth),
+    "승점 17위 평균": average(at(16)),
+    "승점 최하위 평균": average(bottom),
+    "승점 최하위 리그-시즌 σ": stdev(bottom),
+    "승점 1위 − 10위 평균": average(champions.map((p, i) => p - (tenth[i] ?? 0))),
+  };
+}
 
 function ratio(n: number, total: number): number {
   return n / Math.max(1, total);
@@ -178,6 +259,7 @@ function seasonReadings(state: GameState): Readings<typeof WORLD_SEASON> {
     "승점 10위": at(9),
     "승점 17위": at(16),
     "승점 최하위": at(table.length - 1),
+    "리그 승점 표준편차": stdev(table.map((r) => r.points)),
     "옐로/경기": ratio(bookings.filter((b) => b.card === "yellow").length, n),
     "레드/경기": ratio(bookings.filter((b) => b.card === "red").length, n),
     "옐로/경기 (감독 경기 · 구간 시뮬)": ourYellows,
@@ -287,7 +369,13 @@ function rotationReadings(tally: RotationTally): Readings<typeof AI_ROTATION> {
 }
 
 describe("전체 세계 한 시즌", () => {
-  for (const seed of [42, 7, 99]) {
+  /**
+   * 시드마다 `CURVE_LEAGUES` 셋의 순위표가 여기 쌓이고, 마지막 케이스가 그것을 모아
+   * 승점 곡선을 판정한다 — 케이스는 선언 순서대로 도므로 마지막 것이 전부를 본다.
+   */
+  const curves: LeagueCurve[] = [];
+
+  for (const seed of SEEDS) {
     it(`시드 ${seed}`, () => {
       const state = createTestGame(seed);
       const tally = newTally();
@@ -310,6 +398,7 @@ describe("전체 세계 한 시즌", () => {
         }
       }
       expect(season, `시즌 1의 리그 경기가 하나도 없다${note}`).not.toBeNull();
+      curves.push(...CURVE_LEAGUES.map((league) => curveOf(state, 1, league)));
       const label = `시드 ${seed}${note}`;
       console.log(
         [
@@ -320,4 +409,11 @@ describe("전체 세계 한 시즌", () => {
       expect(outOfBand(WORLD_SEASON, season!)).toEqual([]);
     });
   }
+
+  it(`승점 곡선 — 시드 ${SEEDS.length} × 리그 ${CURVE_LEAGUES.length}`, () => {
+    const readings = spreadReadings(curves);
+    const label = `시드 ${SEEDS.join("·")} × ${CURVE_LEAGUES.join("·")}`;
+    console.log(reportOf(LEAGUE_SPREAD, readings, label));
+    expect(outOfBand(LEAGUE_SPREAD, readings)).toEqual([]);
+  });
 });
