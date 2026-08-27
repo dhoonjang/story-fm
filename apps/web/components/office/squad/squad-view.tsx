@@ -19,6 +19,8 @@ import {
   snapToBoard,
   type BoardPoint,
   type SetPieceRole,
+  type SetPieceRoutineKey,
+  type SetPieceRoutineLevel,
 } from "@story-fm/domain";
 import type { GamePayload, GameSlice } from "@/lib/store";
 import type { MatchBoardOrder } from "@/lib/match-orders";
@@ -42,6 +44,7 @@ import { SetPiecePanel, TacticsPanel } from "./tactics-panel";
 import type {
   BoardSlot,
   Selection,
+  SetPieceRoutineView,
   SetPieceTakersView,
   SquadRow,
   TacticsView,
@@ -145,8 +148,10 @@ export function SquadView({
       setPieces: Object.fromEntries(
         SET_PIECE_ROLES.map((role) => [role, squad.setPieces[role].designated]),
       ) as Record<SetPieceRole, string | null>,
+      // 두 축은 뷰가 이미 중립까지 펴서 준다 — 그대로 씨로 받는다
+      setPieceRoutine: squad.setPieceRoutine,
     };
-  }, [players, squad.tactics, squad.setPieces]);
+  }, [players, squad.tactics, squad.setPieces, squad.setPieceRoutine]);
 
   const [board, setBoard] = useState<BoardState>(serverBoard);
   const [selection, setSelection] = useState<Selection>(null);
@@ -172,6 +177,9 @@ export function SquadView({
   /** 서버가 아는 키커 지정 — 같은 기준점. 같은 값을 다시 보내면 편집 노트가 남는다 */
   const serverTakersRef = useRef<SetPieceTakersView>(squad.setPieces);
   serverTakersRef.current = squad.setPieces;
+  /** 서버가 아는 죽은 공 지시 — 키커와 같은 기준점 */
+  const serverRoutineRef = useRef<SetPieceRoutineView>(squad.setPieceRoutine);
+  serverRoutineRef.current = squad.setPieceRoutine;
   /**
    * 서버가 준 행 — 저장 본문이 "이 역할을 코어가 스스로 낼 수 있는가"를 재는 기준점.
    * 기억이 들어 있어 되찾기 3단을 여기서 다시 밟을 수 있다 (player.md §3.2).
@@ -185,7 +193,13 @@ export function SquadView({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          lineupBody(snapshot, serverReserveRef.current, rowsRef.current, serverTakersRef.current),
+          lineupBody(
+            snapshot,
+            serverReserveRef.current,
+            rowsRef.current,
+            serverTakersRef.current,
+            serverRoutineRef.current,
+          ),
         ),
       }),
     [game.id],
@@ -321,6 +335,12 @@ export function SquadView({
   });
   const takerOthers = benchPlayers.map((p) => ({ id: p.id, name: p.name }));
   const nameOf = (id: string) => byId.get(id)?.name ?? "—";
+  /**
+   * 화면의 죽은 공 지시 — **아직 저장되지 않은 선택까지.** 작업 사본이 그 칸을 갖지
+   * 않는 것은 「지시 없음」이고, 그 값은 뷰가 이미 중립으로 펴 둔 서버 값과 같다 —
+   * 화면이 「보통」을 스스로 세우지 않는다.
+   */
+  const routine = board.setPieceRoutine ?? squad.setPieceRoutine;
   const setPieceKey = SET_PIECE_ROLES.map(
     (role) => `${takers[role].designated ?? ""}>${takers[role].taker ?? ""}`,
   ).join(",");
@@ -692,6 +712,18 @@ export function SquadView({
     if (!live) return;
     // 상세를 열어 둔 채 고른다 — 판 아래 줄에서 고르는 값이라 명단이 접힐 이유가 없다
     commit(next, { keepSelection: true });
+  }
+
+  /**
+   * 죽은 공 지시 — 가담·수비 두 축 (match.md §1.4). **키커와 같은 자동 저장, 같은
+   * 요청**이라 여기서도 요청을 따로 보내지 않는다.
+   *
+   * 경기 중에는 서지 않는다 — 이 축을 다음 진행 턴으로 나르는 지시가 아직 없어
+   * (`MatchBoardOrder`) 줄은 읽는 낱말로 선다.
+   */
+  function chooseRoutine(key: SetPieceRoutineKey, level: SetPieceRoutineLevel) {
+    if (!live) return;
+    commit({ ...board, setPieceRoutine: { ...routine, [key]: level } }, { keepSelection: true });
   }
 
   /**
@@ -1119,6 +1151,9 @@ export function SquadView({
               others={takerOthers}
               editing={usable}
               onPick={chooseTaker}
+              routine={routine}
+              routineEditing={live}
+              onRoutine={chooseRoutine}
             />
           </div>
         </div>
