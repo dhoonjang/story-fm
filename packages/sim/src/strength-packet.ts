@@ -10,6 +10,8 @@ import type {
   Player,
   PositionGroup,
   SetPieceProfile,
+  SetPieceRoutine,
+  SetPieceRoutineLevel,
   SetPieceTakers,
   RegionalBand,
   RegionalInstruction,
@@ -34,6 +36,8 @@ import {
   RATING_MAX,
   roleFit,
   roleWeights,
+  setPieceRoutineLevel,
+  setPieceRoutineStep,
   tacticalSensitivityOf,
   tacticToggleValue,
 } from "@story-fm/domain";
@@ -120,6 +124,11 @@ export interface SideInput {
    * 선발에 없으면 코어의 기본값이 선다 (match.md §1.4).
    */
   setPieceTakers?: SetPieceTakers;
+  /**
+   * 세트피스 지시 (`TeamTactics.setPieceRoutine`) — 박스에 몇 명을 세우나.
+   * 없으면 둘 다 중립이라 축이 서기 전과 같은 수가 나온다 (match.md §1.4).
+   */
+  setPieceRoutine?: SetPieceRoutine;
 }
 
 /**
@@ -291,6 +300,13 @@ const TACKLING_SWING = 0.03;
 const TRAP_SWING = 0.025;
 /** GK 배급이 존을 움직이는 폭 */
 const KEEPER_SWING = 0.025;
+/**
+ * 세트피스 지시 한 칸이 존 하나에서 빼는 폭 — ⚠️ 밸런스 값.
+ *
+ * **갈래 넷(2.5~3%)보다 작다.** 죽은 공은 90분 중 스물 몇 장면이지 90분 전체가
+ * 아니라, 같은 폭을 주면 코너 뒤의 역습이 90분 내내 서 있는 라인만큼 무거워진다.
+ */
+export const SET_PIECE_ROUTINE_SWING = 0.02;
 
 /**
  * 전술 여섯 축 + **갈래 넷**이 존 전력에 남기는 **이득과 대가**.
@@ -311,6 +327,7 @@ function tacticalDeltas(
   spec: TacticsSpec,
   uptake: number,
   opponentPace: number,
+  routine?: SetPieceRoutine,
 ): ZoneDelta {
   const d: ZoneDelta = { attack: 0, midfield: 0, defense: 0, notes: [] };
   /**
@@ -471,6 +488,23 @@ function tacticalDeltas(
     d.attack += gain(KEEPER_SWING * aerial);
     d.midfield -= cost(KEEPER_SWING); // 2차 볼을 내준다
     note("keeper-distribution", { trait: aerial }, ["long"]);
+  }
+
+  /**
+   * ⑪ 세트피스 두 축 — **이득은 존이 아니라 죽은 공 질에 있다**(`buildSetPiece`).
+   * 존에 남는 것은 대가뿐이라 두 줄 모두 `cost`를 지난다: 여섯을 올리면 걷어낸 공
+   * 뒤가 열리고(수비 존), 일곱을 남기면 되받아 나갈 사람이 없다(공격 존). 중립이면
+   * 걸음이 0이라 축이 서기 전과 델타가 같다 (match.md §1.4).
+   */
+  const commit = setPieceRoutineStep(setPieceRoutineLevel(routine, "commit"));
+  if (commit !== 0) {
+    d.defense -= cost(SET_PIECE_ROUTINE_SWING * commit);
+    note("set-piece-commit", { step: commit });
+  }
+  const guard = setPieceRoutineStep(setPieceRoutineLevel(routine, "guard"));
+  if (guard !== 0) {
+    d.attack -= cost(SET_PIECE_ROUTINE_SWING * guard);
+    note("set-piece-guard", { step: guard });
   }
 
   return d;
@@ -650,7 +684,7 @@ const ZONE_CONTRIBUTION: Record<
  * 얹히는 두 층이 **구조적으로 공격 쪽으로만 실린다**:
  *
  * - **공략**(exploits.ts) — 키포인트가 드러내는 약점은 대개 상대 수비 쪽이라
- *   14축 중 9축의 이득이 공격 존으로 들어온다. 이득을 "상대 수비를 깎는다"로
+ *   13축 중 8축의 이득이 공격 존으로 들어온다. 이득을 "상대 수비를 깎는다"로
  *   옮겨도 `공격/상대 수비` 비율은 똑같이 오르므로 **재분배로는 닫히지 않는다.**
  * - **전술 6축**(`tacticalDeltas`) — 프리셋을 3에 맞추고 갈래를 대칭으로 만든
  *   뒤에도 리그 평균이 공격 ×1.037로 남는다.
@@ -659,7 +693,7 @@ const ZONE_CONTRIBUTION: Record<
  * 세 존이 1.001·1.002·1.001로 이미 같은 눈금에 선다. 그래서 보정은 가중치가
  * 아니라 **여기, 존이 완성된 자리**에 둔다.
  *
- * 값은 공격과 수비에 절반씩 나눠 건다(0.957 × 1.045 ≈ 1) — 한쪽에만 걸면 화면의
+ * 값은 공격과 수비에 절반씩 나눠 건다(0.966 × 1.035 ≈ 1) — 한쪽에만 걸면 화면의
  * 막대 길이가 그쪽으로만 눌린다.
  *
  * **다시 재는 법**: 편성 400경기의 `home.attack / away.defense` 평균이 1에서
@@ -667,9 +701,9 @@ const ZONE_CONTRIBUTION: Record<
  * 크기·역할 가중치를 만졌으면 반드시 다시 잰다.
  */
 const ZONE_BASELINE: Record<"attack" | "midfield" | "defense", number> = {
-  attack: 0.957,
+  attack: 0.966,
   midfield: 1,
-  defense: 1.045,
+  defense: 1.035,
 };
 
 /** 실제 전후 좌표를 기존 네 라인의 기여도로 연속 변환한다. */
@@ -1167,6 +1201,20 @@ export const CORNER_XG_BASE = 0.08;
 export const SET_PIECE_KICK_XG_LOGIT_WEIGHT = 0.45;
 /** 박스 안 제공권 우열이 죽은 공 질에 닿는 세기 */
 export const SET_PIECE_AERIAL_XG_LOGIT_WEIGHT = 0.5;
+/**
+ * 박스 안 **인원 우열**이 죽은 공 질에 닿는 세기 — ⚠️ 밸런스 값.
+ *
+ * 인원은 절대 수가 아니라 **로그비**로 들어간다(올린 인원 / 4 ÷ 지킨 인원 / 5의 로그).
+ * 박스 안의 다툼은 몇 명이 서 있느냐가 아니라 몇 대 몇이냐고, 넷일 때 한 명을 더
+ * 올리는 값어치가 여섯일 때보다 크기 때문이다 — 로그가 그 체감을 그대로 낸다.
+ * 기준이 중립의 4와 5라 **지시하지 않은 판에서 이 항은 0**이다 (match.md §1.4).
+ *
+ * 0.8은 소화율 0.86(전술 60·적응도 99)에서 「많이」(6명)를 죽은 공 질 +29%,
+ * 「적게」(3명)를 −17%에 세운다 — 제공권 우열(`SET_PIECE_AERIAL_XG_LOGIT_WEIGHT`)의
+ * 한 수 위지 그것을 덮는 크기는 아니다. **위가 얇은 스쿼드는 덜 얻는다**: 창이 함께
+ * 넓어져 제공권 평균이 내려가고 그만큼이 이득에서 빠진다.
+ */
+export const SET_PIECE_BOX_XG_LOGIT_WEIGHT = 0.8;
 /** 죽은 공 슛 중 코너에서 나온 몫 — 나머지가 프리킥 */
 export const CORNER_SHOT_SHARE = 0.58;
 /** 프리킥 슛 중 키커가 **직접** 차는 몫 (직접 프리킥 — 도움이 없다) */
@@ -1189,10 +1237,16 @@ export function teamFoulRate(intensity: number): number {
  * ⚠️ **두 팀 사이의 비로만 뜻을 갖는다** — 정규화되므로 중립점은 결과에 닿지 않는다.
  */
 const PENALTY_ROUGH_SCALE = 40;
-/** 죽은 공에 올라가는 사람 수 — 우리 제공권을 재는 창 */
-const SET_PIECE_TARGETS = 4;
-/** 박스를 지키는 사람 수 — 골키퍼를 포함한다(공중볼은 그의 영역이다) */
-const SET_PIECE_DEFENDERS = 5;
+/**
+ * 죽은 공에 올라가는 사람 수 — 우리 제공권을 재는 창. 감독의 가담 지시가 정한다.
+ * `normal`이 축이 서기 전의 값이라 지시하지 않은 팀은 셈이 달라지지 않는다.
+ */
+const SET_PIECE_TARGETS: Record<SetPieceRoutineLevel, number> = { few: 3, normal: 4, many: 6 };
+/**
+ * 박스를 지키는 사람 수 — 골키퍼를 포함한다(공중볼은 그의 영역이다). 상대의 수비
+ * 지시가 정한다: 우리 죽은 공의 질은 **상대가 박스에 몇을 남겼는가**로도 갈린다.
+ */
+const SET_PIECE_DEFENDERS: Record<SetPieceRoutineLevel, number> = { few: 4, normal: 5, many: 7 };
 /** 킥력·제공권을 로그오즈로 옮기는 기준점과 눈금 — 슈팅 질의 그것과 같은 축 */
 const SET_PIECE_SKILL_PIVOT = 65;
 const SET_PIECE_SKILL_SCALE = 34;
@@ -1269,18 +1323,41 @@ function penaltyWeight(attackShots: number, defenders: readonly LineupSlot[]): n
   return attackShots * Math.exp(rough / PENALTY_ROUGH_SCALE);
 }
 
+/** 한 팀의 죽은 공을 세우는 데 필요한 것 — 우리 쪽과 상대 쪽이 함께 든다 */
+interface SetPieceInput {
+  slots: readonly LineupSlot[];
+  oppSlots: readonly LineupSlot[];
+  teamShots: number;
+  penalties: number;
+  intensity: number;
+  /** 우리 지시 적용률 — 인원 우열의 **이득**에 온전히 곱한다 (match.md §1.2) */
+  uptake: number;
+  /** 상대 지시 적용률 — 상대가 박스에 남긴 인원이 값을 하는 만큼 */
+  oppUptake: number;
+  designated?: SetPieceTakers;
+  /** 우리 세트피스 지시 — 올리는 인원을 정한다 */
+  routine?: SetPieceRoutine;
+  /** 상대의 세트피스 지시 — 지키는 인원을 정한다 */
+  oppRoutine?: SetPieceRoutine;
+}
+
 /**
  * 팀 하나의 죽은 공 프로필 — 발생률은 팀 기대 슈팅에서 떼어 내고, 질은 **키커의
- * 킥력과 박스 안 제공권**이 정한다 (match.md §1.4).
+ * 킥력과 박스 안 제공권, 그리고 박스에 선 사람 수**가 정한다 (match.md §1.4).
  */
-function buildSetPiece(
-  slots: readonly LineupSlot[],
-  oppSlots: readonly LineupSlot[],
-  teamShots: number,
-  penalties: number,
-  intensity: number,
-  designated?: SetPieceTakers,
-): SetPieceBuild {
+function buildSetPiece(input: SetPieceInput): SetPieceBuild {
+  const {
+    slots,
+    oppSlots,
+    teamShots,
+    penalties,
+    intensity,
+    uptake,
+    oppUptake,
+    designated,
+    routine,
+    oppRoutine,
+  } = input;
   const takers = setPieceTakersOf(slots, designated);
   const byId = new Map(slots.map((slot) => [slot.player.id, slot.player] as const));
   const field = slots.filter((slot) => slotGroup(slot) !== "GK");
@@ -1290,15 +1367,27 @@ function buildSetPiece(
   const openShare =
     teamShots > 0 ? Math.max(0, (teamShots - deadBall - usedPenalties) / teamShots) : 1;
 
-  /** 죽은 공에 올라가는 사람들 vs 박스를 지키는 사람들 — 골키퍼는 지키는 쪽에 든다 */
+  /**
+   * 죽은 공에 올라가는 사람들 vs 박스를 지키는 사람들 — 골키퍼는 지키는 쪽에 든다.
+   *
+   * **인원이 창의 크기를 함께 정한다**: 여섯을 올리면 다섯째·여섯째로 좋은 헤더가
+   * 함께 서므로 평균이 내려가고, 인원의 이득에서 그만큼이 도로 빠진다. 이 몫만은
+   * 소화율을 타지 않는다 — 어설프게 올려 보낸 여섯은 사람만 흩어 놓는다.
+   */
+  const targets = SET_PIECE_TARGETS[setPieceRoutineLevel(routine, "commit")];
+  const defenders = SET_PIECE_DEFENDERS[setPieceRoutineLevel(oppRoutine, "guard")];
   const ourAerial = topMean(
     field.map((slot) => slot.player.attributes.aerial),
-    SET_PIECE_TARGETS,
+    targets,
   );
   const theirAerial = topMean(
     oppSlots.map((slot) => slot.player.attributes.aerial),
-    SET_PIECE_DEFENDERS,
+    defenders,
   );
+  /** 인원 우열 — 중립(4 대 5)에서 정확히 0이라 지시 없는 판은 예전 수를 그대로 낸다 */
+  const boxEdge =
+    uptake * Math.log(targets / SET_PIECE_TARGETS.normal) -
+    oppUptake * Math.log(defenders / SET_PIECE_DEFENDERS.normal);
   const kickingOf = (id: string | null) =>
     (id !== null ? byId.get(id)?.attributes.kicking : undefined) ?? SET_PIECE_SKILL_PIVOT;
   // 코너와 프리킥을 다른 사람이 차면 둘의 평균이 그 팀의 배급 수준이다
@@ -1307,7 +1396,8 @@ function buildSetPiece(
     logit(CORNER_XG_BASE) +
       SET_PIECE_KICK_XG_LOGIT_WEIGHT *
         ((delivery - SET_PIECE_SKILL_PIVOT) / SET_PIECE_SKILL_SCALE) +
-      SET_PIECE_AERIAL_XG_LOGIT_WEIGHT * ((ourAerial - theirAerial) / SET_PIECE_SKILL_SCALE),
+      SET_PIECE_AERIAL_XG_LOGIT_WEIGHT * ((ourAerial - theirAerial) / SET_PIECE_SKILL_SCALE) +
+      SET_PIECE_BOX_XG_LOGIT_WEIGHT * boxEdge,
   );
 
   /**
@@ -1407,8 +1497,20 @@ export function buildStrengthPacket(
     instructionUptake(awayIn.managerTactics, squadFam(awayXI)),
     live,
   );
-  const homeDelta = tacticalDeltas(homeXI, homeIn.tactics, homeUptake, frontlinePace(awayXI));
-  const awayDelta = tacticalDeltas(awayXI, awayIn.tactics, awayUptake, frontlinePace(homeXI));
+  const homeDelta = tacticalDeltas(
+    homeXI,
+    homeIn.tactics,
+    homeUptake,
+    frontlinePace(awayXI),
+    homeIn.setPieceRoutine,
+  );
+  const awayDelta = tacticalDeltas(
+    awayXI,
+    awayIn.tactics,
+    awayUptake,
+    frontlinePace(homeXI),
+    awayIn.setPieceRoutine,
+  );
 
   /**
    * 개인 지시·공략이 쌓이는 **아홉 칸** — 두 갈래로 접혀 존과 격자에 나뉘어 실린다
@@ -1619,22 +1721,30 @@ export function buildStrengthPacket(
   const penaltiesOf = (side: MatchSide) =>
     weightSum > 0 ? (PENALTY_PER_MATCH * penaltyWeights[side]) / weightSum : 0;
   const setPieceBuilds = {
-    home: buildSetPiece(
-      homeXI,
-      awayXI,
-      teamShots.home,
-      penaltiesOf("home"),
-      intensity.home,
-      homeIn.setPieceTakers,
-    ),
-    away: buildSetPiece(
-      awayXI,
-      homeXI,
-      teamShots.away,
-      penaltiesOf("away"),
-      intensity.away,
-      awayIn.setPieceTakers,
-    ),
+    home: buildSetPiece({
+      slots: homeXI,
+      oppSlots: awayXI,
+      teamShots: teamShots.home,
+      penalties: penaltiesOf("home"),
+      intensity: intensity.home,
+      uptake: homeUptake,
+      oppUptake: awayUptake,
+      designated: homeIn.setPieceTakers,
+      routine: homeIn.setPieceRoutine,
+      oppRoutine: awayIn.setPieceRoutine,
+    }),
+    away: buildSetPiece({
+      slots: awayXI,
+      oppSlots: homeXI,
+      teamShots: teamShots.away,
+      penalties: penaltiesOf("away"),
+      intensity: intensity.away,
+      uptake: awayUptake,
+      oppUptake: homeUptake,
+      designated: awayIn.setPieceTakers,
+      routine: awayIn.setPieceRoutine,
+      oppRoutine: homeIn.setPieceRoutine,
+    }),
   };
   const setPieces = {
     home: setPieceBuilds.home.profile,

@@ -1,6 +1,7 @@
 import type {
   GamePlayer,
   Player,
+  SetPieceRoutine,
   SetPieceTakers,
   ShotOrigin,
   SubCause,
@@ -73,6 +74,12 @@ export interface SimSquad {
    * 같은 사람이 차야 한다.
    */
   setPieceTakers?: SetPieceTakers;
+  /**
+   * 세트피스 지시 — 가담·수비 두 축 (match.md §1.4). 없으면 패킷이 둘 다 중립으로
+   * 읽는다. **AI 팀도 싣는다** — 리그의 나머지 경기가 이 축 없이 굴러가면 죽은 공
+   * 규칙이 감독의 경기에만 있는 규칙이 된다.
+   */
+  setPieceRoutine?: SetPieceRoutine;
 }
 
 /**
@@ -535,6 +542,7 @@ function runTimeline(input: TimelineInput): {
     managerTactics: squads[side].managerTactics ?? AI_MANAGER_RATING_FALLBACK,
     // 지정 키커는 감독의 팀에만 있다 — 없으면 패킷이 기본값을 세운다
     ...(squads[side].setPieceTakers ? { setPieceTakers: squads[side].setPieceTakers } : {}),
+    ...(squads[side].setPieceRoutine ? { setPieceRoutine: squads[side].setPieceRoutine } : {}),
   });
 
   /** 그 분까지 뛴 시간 — 교체 투입은 들어온 분부터 센다 */

@@ -678,6 +678,15 @@ const TACTICAL_KO: Record<string, (r: Render) => string> = {
     r.has("long")
       ? `긴 배급: 한 번에 넘긴다 (제공권 ${r.v("trait") >= 1 ? "우위" : "열세"}), 2차 볼을 내준다`
       : `짧은 배급: 뒤에서부터 숫자를 만든다 (후방 연결 ${r.v("trait") >= 1 ? "안정" : "불안"}), 우리 문 앞에서 잃을 위험`,
+  // ── 세트피스 두 축 — 이득은 죽은 공 질에 있고 여기 서는 것은 대가다 (match.md §1.4) ──
+  "set-piece-commit": (r) =>
+    r.v("step") > 0
+      ? `${SET_PIECE_KO} 가담 많이: 박스에 사람을 채우되 걷어낸 공 뒤가 열린다`
+      : `${SET_PIECE_KO} 가담 적게: 죽은 공을 포기하고 뒤를 지킨다`,
+  "set-piece-guard": (r) =>
+    r.v("step") > 0
+      ? `${SET_PIECE_KO} 수비 많이: 상대 박스 공격을 지우되 되받아 나갈 사람이 없다`
+      : `${SET_PIECE_KO} 수비 적게: 되받을 사람을 남기고 상대 죽은 공을 감수한다`,
 };
 
 /**

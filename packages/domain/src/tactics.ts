@@ -1740,6 +1740,99 @@ export const SET_PIECE_ROLE_MARK: Record<SetPieceRole, string> = {
   penalty: "페",
 };
 
+/**
+ * **세트피스 지시** — 키커 말고 감독이 정하는 두 축 (match.md §1.4).
+ *
+ * ⚠️ **`TacticsSpec`에 넣지 않는다.** 여섯 축은 대칭·프리셋 리그 평균 3·`TACTIC_SWING`
+ * 예산이 함께 서 있는 자리이고, 전술 기억(`DrilledTactics`)의 지문이기도 하다 —
+ * 루틴을 그 지문에 넣으면 코너에 한 명 더 올리라고 말한 팀이 전술 적응도를 처음부터
+ * 다시 쌓는다. 세트피스는 판의 모양과 따로 훈련하는 것이라 자리도 따로다.
+ *
+ * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지). `.nullable()`은 **관용**이다 —
+ * 지시를 푸는 값이 `normal`이지만, `null`이 적힌 세이브도 중립으로 읽는다.
+ */
+export const SET_PIECE_ROUTINE_LEVELS = ["few", "normal", "many"] as const;
+export type SetPieceRoutineLevel = (typeof SET_PIECE_ROUTINE_LEVELS)[number];
+
+export const SetPieceRoutineSchema = z.object({
+  /** 우리 세트피스에 박스로 올라가는 사람 — 적게 3 · 보통 4 · 많이 6 */
+  commit: z.enum(SET_PIECE_ROUTINE_LEVELS).nullable().optional(),
+  /** 상대 세트피스에 박스에 남는 사람 — 적게 4 · 보통 5 · 많이 7 (골키퍼 포함) */
+  guard: z.enum(SET_PIECE_ROUTINE_LEVELS).nullable().optional(),
+});
+export type SetPieceRoutine = z.infer<typeof SetPieceRoutineSchema>;
+
+/** 지시할 수 있는 세트피스 축 — 스킬·라우트·화면이 훑는 순서다 */
+export const SET_PIECE_ROUTINE_KEYS = ["commit", "guard"] as const;
+export type SetPieceRoutineKey = (typeof SET_PIECE_ROUTINE_KEYS)[number];
+
+/**
+ * 축 하나의 낱말표 — **화면과 스킬이 되돌리는 말이 한 벌이다.** 전술 갈래
+ * (`TACTIC_TOGGLES`)와 같은 규약이고, 다른 것은 중립이 열거 한가운데에 있다는 것뿐이다:
+ * 갈래는 아무 데도 서지 않은 상태가 중립이지만 이 축은 **보통이 곧 오늘의 값**이다.
+ */
+export interface SetPieceRoutineAxis {
+  key: SetPieceRoutineKey;
+  /** 축의 이름 — 세트피스 줄이 세우는 그것 */
+  label: string;
+  /** 감독이 정하는 것 한 줄 — 화면의 툴팁이자 스킬 설명 */
+  hint: string;
+  /** 값 → 낱말 */
+  words: Readonly<Record<SetPieceRoutineLevel, string>>;
+}
+
+/**
+ * **세트피스 두 축의 낱말표는 여기 하나다** (→ docs/simulation/match.md §1.4).
+ *
+ * 이름은 묶음 이름(`SET_PIECE_KO`) 아래에 서므로 「세트피스」를 다시 적지 않는다 —
+ * 「세트피스 가담」이 아니라 「가담」이다.
+ */
+export const SET_PIECE_ROUTINE_AXES: readonly SetPieceRoutineAxis[] = [
+  {
+    key: "commit",
+    label: "가담",
+    hint: "우리 세트피스에 박스로 올라가는 사람",
+    words: { few: "적게", normal: "보통", many: "많이" },
+  },
+  {
+    key: "guard",
+    label: "수비",
+    hint: "상대 세트피스에 박스에 남는 사람",
+    words: { few: "적게", normal: "보통", many: "많이" },
+  },
+];
+
+const SET_PIECE_ROUTINE_BY_KEY: ReadonlyMap<SetPieceRoutineKey, SetPieceRoutineAxis> = new Map(
+  SET_PIECE_ROUTINE_AXES.map((axis) => [axis.key, axis]),
+);
+
+export function setPieceRoutineAxisOf(key: SetPieceRoutineKey): SetPieceRoutineAxis {
+  return SET_PIECE_ROUTINE_BY_KEY.get(key)!;
+}
+
+/** 지금 이 축에 선 값 — 없거나 `null`이면 중립(`normal`) */
+export function setPieceRoutineLevel(
+  routine: SetPieceRoutine | undefined,
+  key: SetPieceRoutineKey,
+): SetPieceRoutineLevel {
+  return routine?.[key] ?? "normal";
+}
+
+/** 값 하나의 낱말 */
+export function setPieceRoutineWord(key: SetPieceRoutineKey, level: SetPieceRoutineLevel): string {
+  return setPieceRoutineAxisOf(key).words[level];
+}
+
+/**
+ * 중립에서 몇 칸 — `few` −1 · `normal` 0 · `many` +1.
+ *
+ * **패킷도 화면도 이 함수를 부른다** (AGENTS.md §5). 눈금을 각자 적으면 화면이
+ * 「많이」로 세운 칸과 코어가 세는 칸이 갈리는 날이 온다.
+ */
+export function setPieceRoutineStep(level: SetPieceRoutineLevel): number {
+  return level === "many" ? 1 : level === "few" ? -1 : 0;
+}
+
 /** 팀의 현재 전술 + 배치 — GAME_TEAM당 1개 (프리셋 확장 여지) */
 export const TeamTacticsSchema = z.object({
   teamId: z.string().min(1),
@@ -1766,5 +1859,10 @@ export const TeamTacticsSchema = z.object({
    * 없거나 그 선수가 그라운드에 없으면 코어의 기본값이 선다 (match.md §1.4).
    */
   setPieceTakers: SetPieceTakersSchema.optional(),
+  /**
+   * **세트피스 지시** — 가담·수비 두 축. 옛 세이브엔 없다 (SAVE_VERSION 유지).
+   * 없으면 둘 다 `normal`이라 축이 서기 전과 셈이 같다 (match.md §1.4).
+   */
+  setPieceRoutine: SetPieceRoutineSchema.optional(),
 });
 export type TeamTactics = z.infer<typeof TeamTacticsSchema>;

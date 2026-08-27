@@ -14,6 +14,12 @@ export type TacticsView = OfficeViews["squad"]["tactics"];
  * 함께 그린다.
  */
 export type SetPieceTakersView = OfficeViews["squad"]["setPieces"];
+/**
+ * 죽은 공 지시 두 축 — 가담·수비 (match.md §1.4). 키커가 "누가 차는가"라면 이쪽은
+ * "몇 명이 서는가"다. 지시하지 않은 축도 **뷰가 중립을 펴서** 주므로 화면은 늘
+ * 두 축의 값을 손에 쥐고 있다.
+ */
+export type SetPieceRoutineView = OfficeViews["squad"]["setPieceRoutine"];
 export type Selection = { kind: "slot"; index: number } | { kind: "bench"; id: string } | null;
 
 /**

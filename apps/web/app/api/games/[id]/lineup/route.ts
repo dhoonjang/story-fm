@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { MATCHDAY_BENCH, SET_PIECE_ROLES, type SetPieceRole } from "@story-fm/domain";
+import {
+  MATCHDAY_BENCH,
+  SET_PIECE_ROLES,
+  SetPieceRoutineSchema,
+  type SetPieceRole,
+} from "@story-fm/domain";
 import {
   lineupChangeNote,
   lineupSignature,
@@ -10,6 +15,7 @@ import {
   saveGame,
   setLineup,
   setPlayerRole,
+  setSetPieceRoutine,
   setSetPieceTakers,
   setTactics,
   shapeOfTactics,
@@ -84,6 +90,12 @@ const LineupSchema = z.object({
     .max(30)
     .optional(),
   setPieceTakers: SetPieceTakersSchema.optional(),
+  /**
+   * 죽은 공 지시 — 가담·수비 두 축. 키커와 같은 규약이다: **서버와 달라진 축만**
+   * 오고 없는 축은 "그대로"다. 낱말표도 값의 열거도 도메인이 갖는다
+   * (`SetPieceRoutineSchema` — match.md §1.4).
+   */
+  setPieceRoutine: SetPieceRoutineSchema.optional(),
 });
 
 /**
@@ -184,6 +196,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const applied = setSetPieceTakers(state, takers);
       if (!applied.ok) recordEdit(state, "setpiece:rejected", applied.message);
       else if (applied.unchanged !== true) recordEdit(state, "setpiece", applied.message);
+    }
+
+    /** 죽은 공 지시 — 키커 바로 옆, **같은 규약.** 라우트는 값을 옮기기만 한다 */
+    const routine = body.data.setPieceRoutine;
+    if (routine && Object.keys(routine).length > 0) {
+      const applied = setSetPieceRoutine(state, routine);
+      if (!applied.ok) recordEdit(state, "setpiece-routine:rejected", applied.message);
+      else if (applied.unchanged !== true) recordEdit(state, "setpiece-routine", applied.message);
     }
 
     /**

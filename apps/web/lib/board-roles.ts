@@ -2,12 +2,17 @@ import {
   FAMILIARITY_MAX,
   MATCHDAY_BENCH,
   SET_PIECE_ROLES,
+  SET_PIECE_ROUTINE_KEYS,
   positionAtPoint,
   roleAtSlot as inheritedRoleAt,
   roleChangeCost,
   rolesFor,
+  setPieceRoutineLevel,
   type BoardPoint,
   type SetPieceRole,
+  type SetPieceRoutine,
+  type SetPieceRoutineKey,
+  type SetPieceRoutineLevel,
 } from "@story-fm/domain";
 import type { OfficeViews } from "@story-fm/engine";
 
@@ -56,6 +61,14 @@ export interface BoardState {
    * 서버 값에서 씨를 받아 로컬에서 고르고, **서버와 달라진 자리만** 저장에 실린다.
    */
   setPieces: Record<SetPieceRole, string | null>;
+  /**
+   * 감독이 정한 죽은 공 지시 — 가담·수비 두 축 (match.md §1.4). 키커와 같은 규약이라
+   * 같은 자동 저장, 같은 요청에 **달라진 축만** 실린다.
+   *
+   * 칸 자체가 없어도 뜻은 온전하다 — **지시하지 않은 것과 중립이 같은 값**이라
+   * (`setPieceRoutineLevel`) 옛 세이브도 이 축을 모르는 사본도 같은 곳을 가리킨다.
+   */
+  setPieceRoutine?: Record<SetPieceRoutineKey, SetPieceRoutineLevel>;
 }
 
 /**
@@ -75,6 +88,8 @@ export function lineupBody(
   rows: ReadonlyMap<string, Pick<SquadRow, "roleId" | "roleMemory">>,
   /** 서버가 아는 지정 — "무엇이 달라졌는지"의 기준점 (`squad.setPieces`) */
   serverTakers: Partial<Record<SetPieceRole, { designated: string | null }>> = {},
+  /** 서버가 아는 죽은 공 지시 — 같은 기준점 (`squad.setPieceRoutine`) */
+  serverRoutine: SetPieceRoutine = {},
 ) {
   const { formation: _formation, ...axes } = b.tactics;
   void _formation;
@@ -107,6 +122,17 @@ export function lineupBody(
       (role) => b.setPieces[role] !== (serverTakers[role]?.designated ?? null),
     ).map((role) => [role, b.setPieces[role]]),
   );
+  /**
+   * 죽은 공 지시 — **키커와 같은 이유로 달라진 축만.** 두 값을 견주는 것은 도메인
+   * 함수 하나다(`setPieceRoutineLevel`) — 「없음」과 「보통」이 같은 값이라, 여기서
+   * 그 규칙을 다시 적으면 지시를 푼 판이 매 저장마다 차이로 잡힌다.
+   */
+  const setPieceRoutine = Object.fromEntries(
+    SET_PIECE_ROUTINE_KEYS.filter(
+      (key) =>
+        setPieceRoutineLevel(b.setPieceRoutine, key) !== setPieceRoutineLevel(serverRoutine, key),
+    ).map((key) => [key, setPieceRoutineLevel(b.setPieceRoutine, key)]),
+  );
   return {
     // v6: 선발은 {playerId, point}로 보낸다 — 서버가 좌표에서 포지션 코드를 다시 정한다
     starting: b.occupants.map((id, i) => ({
@@ -133,6 +159,7 @@ export function lineupBody(
     tactics: axes,
     // 바뀐 자리가 없으면 항목 자체를 싣지 않는다 — 빈 객체도 라우트에서 한 번 더 걸린다
     ...(Object.keys(setPieceTakers).length > 0 ? { setPieceTakers } : {}),
+    ...(Object.keys(setPieceRoutine).length > 0 ? { setPieceRoutine } : {}),
   };
 }
 

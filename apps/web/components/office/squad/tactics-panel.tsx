@@ -5,12 +5,17 @@ import {
   SET_PIECE_KO,
   SET_PIECE_ROLES,
   SET_PIECE_ROLE_KO,
+  SET_PIECE_ROUTINE_AXES,
+  SET_PIECE_ROUTINE_LEVELS,
   TACTIC_AXES,
+  setPieceRoutineWord,
   tacticWord,
   type SetPieceRole,
+  type SetPieceRoutineKey,
+  type SetPieceRoutineLevel,
 } from "@story-fm/domain";
 import { IconChevron } from "@/components/icons";
-import type { SetPieceTakersView, TacticsView } from "./types";
+import type { SetPieceRoutineView, SetPieceTakersView, TacticsView } from "./types";
 
 /**
  * 전술 패널 — **접히면 지금 값, 펼치면 눈금.**
@@ -125,6 +130,9 @@ export type TakerCandidate = { id: string; name: string };
  * 그 옆의 이름은 테두리 없는 글자다 — 그것은 코어가 세운 사람이지 감독이 만지는
  * 값이 아니다. 두 이름이 나란히 서는 것 자체가 「지정은 남았는데 차지는 않는다」는
  * 사실이라, 그 자리에 문장을 적지 않는다.
+ *
+ * **같은 줄에 가담·수비 두 축이 함께 선다** (match.md §1.4). 키커가 「누가 차는가」면
+ * 이 둘은 「몇 명이 서는가」라, 한 줄에서 함께 정해야 감독이 한 벌의 결정으로 읽는다.
  */
 export function SetPiecePanel({
   takers,
@@ -133,6 +141,9 @@ export function SetPiecePanel({
   others,
   editing,
   onPick,
+  routine,
+  routineEditing,
+  onRoutine,
 }: {
   takers: SetPieceTakersView;
   nameOf: (id: string) => string;
@@ -143,6 +154,15 @@ export function SetPiecePanel({
   /** 무직이면 꺼진다 — 경기 중에는 켜진 채로 지시가 된다 */
   editing: boolean;
   onPick: (role: SetPieceRole, playerId: string | null) => void;
+  /** 두 축의 지금 값 — 지시하지 않은 축은 뷰가 중립으로 펴서 준다 */
+  routine: SetPieceRoutineView;
+  /**
+   * 지시를 만질 수 있는가 — **키커와 갈린다.** 키커는 경기 중에도 오퍼레이터 지시로
+   * 나가는 길이 있지만(`MatchBoardOrder`) 이 두 축에는 아직 그 길이 없다. 눌리는데
+   * 아무 데도 닿지 않는 손잡이 대신 읽는 낱말로 선다.
+   */
+  routineEditing: boolean;
+  onRoutine: (key: SetPieceRoutineKey, level: SetPieceRoutineLevel) => void;
 }) {
   const listed = new Set([...starting, ...others].map((c) => c.id));
   return (
@@ -202,6 +222,42 @@ export function SetPiecePanel({
               >
                 {nameOf(stand)}
               </em>
+            )}
+          </span>
+        );
+      })}
+      {SET_PIECE_ROUTINE_AXES.map((axis) => {
+        const level = routine[axis.key];
+        return (
+          <span className="sp-slot" key={axis.key}>
+            <i className="sp-role" title={axis.hint}>
+              {axis.label}
+            </i>
+            {routineEditing ? (
+              /* 세 칸 중 **하나만** 서는 눈금이라 전술 여섯 축과 같은 라디오 묶음이다.
+                 선택이 색(`on`)으로만 서면 색약에게도 스크린리더에게도 닿지 않으므로
+                 `aria-checked`가 같은 사실을 따로 말한다 */
+              <span className="sp-steps" role="radiogroup" aria-label={axis.label}>
+                {SET_PIECE_ROUTINE_LEVELS.map((step) => {
+                  const word = setPieceRoutineWord(axis.key, step);
+                  return (
+                    <button
+                      key={step}
+                      type="button"
+                      role="radio"
+                      aria-checked={level === step}
+                      aria-label={word}
+                      className={`tactic-step wide${level === step ? " on" : ""}`}
+                      onClick={() => onRoutine(axis.key, step)}
+                      data-testid={`setpiece-routine-${axis.key}-${step}`}
+                    >
+                      {word}
+                    </button>
+                  );
+                })}
+              </span>
+            ) : (
+              <span className="sp-read">{setPieceRoutineWord(axis.key, level)}</span>
             )}
           </span>
         );
