@@ -1754,6 +1754,13 @@ export const SET_PIECE_ROLE_MARK: Record<SetPieceRole, string> = {
 export const SET_PIECE_ROUTINE_LEVELS = ["few", "normal", "many"] as const;
 export type SetPieceRoutineLevel = (typeof SET_PIECE_ROUTINE_LEVELS)[number];
 
+/**
+ * 지시를 푸는 값 — 갈래 넷의 `neutralValue`와 같은 자리다. **열거 안에 있어야 한다**:
+ * 감독의 "그만해"를 옮길 토큰이 이것 하나라, 열거 밖의 값이면 모델은 해제를 낼 수 없고
+ * 시킨 대로 하려다 반대쪽 값을 건다 (docs/llm/prompts.md §2).
+ */
+export const SET_PIECE_ROUTINE_NEUTRAL: SetPieceRoutineLevel = "normal";
+
 export const SetPieceRoutineSchema = z.object({
   /** 우리 세트피스에 박스로 올라가는 사람 — 적게 3 · 보통 4 · 많이 6 */
   commit: z.enum(SET_PIECE_ROUTINE_LEVELS).nullable().optional(),
@@ -1815,12 +1822,27 @@ export function setPieceRoutineLevel(
   routine: SetPieceRoutine | undefined,
   key: SetPieceRoutineKey,
 ): SetPieceRoutineLevel {
-  return routine?.[key] ?? "normal";
+  return routine?.[key] ?? SET_PIECE_ROUTINE_NEUTRAL;
 }
 
 /** 값 하나의 낱말 */
 export function setPieceRoutineWord(key: SetPieceRoutineKey, level: SetPieceRoutineLevel): string {
   return setPieceRoutineAxisOf(key).words[level];
+}
+
+/**
+ * 모델에게 축을 설명하는 한 조각 —
+ * `commit 가담 — 우리 세트피스에 박스로 올라가는 사람(few 적게 · normal 보통 · many 많이)`.
+ *
+ * 갈래(`tacticToggleChoiceText`)와 같은 규약이고 다른 것은 둘이다. **키가 먼저 선다** —
+ * 두 축의 낱말이 같아 이름만으로는 어느 자리에 적을지 갈리지 않는다. **중립을 뒤로 빼지
+ * 않는다** — 적게·보통·많이는 차례가 곧 뜻이다.
+ *
+ * 평시 도구 설명과 경기 해석 프롬프트가 이 하나를 함께 쓴다 (docs/llm/prompts.md §5-2).
+ */
+export function setPieceRoutineChoiceText(axis: SetPieceRoutineAxis): string {
+  const choices = SET_PIECE_ROUTINE_LEVELS.map((level) => `${level} ${axis.words[level]}`);
+  return `${axis.key} ${axis.label} — ${axis.hint}(${choices.join(" · ")})`;
 }
 
 /**
