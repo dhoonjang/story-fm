@@ -118,7 +118,7 @@
 
 ## 2. 스킬 표면 — 한 판단은 한 도구
 
-도구는 **55개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
+도구는 **56개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
 지시 해석이 JSON 하나를 내고 코어가 같은 스킬 함수를 부른다
 ([agents.md](./agents.md) §3). 같은 순간에 함께 정해지는 것들이
 갈려 있으면 GM이 하나를 빠뜨린다 — 라인업은 1·2군 이동까지 한 요청(`set_lineup`의
@@ -128,15 +128,15 @@
 층만 옮기는 1·2군 이동은 `set_squad_level`이 따로 받는다. `set_lineup`으로 보내면 선발
 열한 자리를 다시 적게 해, 감독이 말하지 않은 배치까지 이 한마디에 딸려 바뀐다.
 
-| 그룹      | 수  | 도구                                                                                                                                                                                                                                                                        |
-| --------- | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 진행      | 5   | `start_match` · `accept_manager_offer` · `counter_manager_offer` · `apply_manager_job` · `resign`                                                                                                                                                                           |
-| 전술·훈련 | 14  | `set_lineup` · `set_squad_level` · `set_captain` · `set_squad_number` · `set_tactics` · `set_player_tactic` · `set_set_piece_takers` · `exploit_point` · `set_match_plan` · `set_training` · `set_development_focus` · `set_mentor` · `set_reserve_training` · `sign_youth` |
-| 대화·서사 | 5   | `team_talk` · `talk_to_player` · `respond_to_media` · `respond_to_approach` · `apply_narrative_event`                                                                                                                                                                       |
-| 경기      | 1   | `substitute`                                                                                                                                                                                                                                                                |
-| 이적      | 13  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `respond_transfer_request` · `withdraw_offer` · `release_player` · `recall_loan` · `exercise_buyback`                          |
-| 재정      | 6   | `apply_finance_event` · `adjust_transfer_budget` · `request_board` · `set_ticket_price` · `fund_transfer_budget` · `pay_player_bonus`                                                                                                                                       |
-| 조회      | 11  | `search_players` · `get_squad` · `get_team` · `get_league` · `get_match_report` · `get_opponent_report` · `get_career` · `get_history` · `get_finance` · `scout_player` · `scout_mission`                                                                                   |
+| 그룹      | 수  | 도구                                                                                                                                                                                                                                                                                                  |
+| --------- | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 진행      | 5   | `start_match` · `accept_manager_offer` · `counter_manager_offer` · `apply_manager_job` · `resign`                                                                                                                                                                                                     |
+| 전술·훈련 | 15  | `set_lineup` · `set_squad_level` · `set_captain` · `set_squad_number` · `set_tactics` · `set_player_tactic` · `set_set_piece_takers` · `set_set_piece_routine` · `exploit_point` · `set_match_plan` · `set_training` · `set_development_focus` · `set_mentor` · `set_reserve_training` · `sign_youth` |
+| 대화·서사 | 5   | `team_talk` · `talk_to_player` · `respond_to_media` · `respond_to_approach` · `apply_narrative_event`                                                                                                                                                                                                 |
+| 경기      | 1   | `substitute`                                                                                                                                                                                                                                                                                          |
+| 이적      | 13  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `respond_transfer_request` · `withdraw_offer` · `release_player` · `recall_loan` · `exercise_buyback`                                                    |
+| 재정      | 6   | `apply_finance_event` · `adjust_transfer_budget` · `request_board` · `set_ticket_price` · `fund_transfer_budget` · `pay_player_bonus`                                                                                                                                                                 |
+| 조회      | 11  | `search_players` · `get_squad` · `get_team` · `get_league` · `get_match_report` · `get_opponent_report` · `get_career` · `get_history` · `get_finance` · `scout_player` · `scout_mission`                                                                                                             |
 
 ### 계약은 넷으로 갈린다
 
@@ -385,16 +385,16 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
 
 **한 규칙은 한 자리에만 산다.** 자리는 그 규칙이 **무엇에 걸려 있는가**로 정해진다.
 
-| 자리                                    | 무엇이 사는가                                                                                                       |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| 시스템 프롬프트 (`GM_SYSTEM`)           | 도구와 무관하게 매 턴 서는 것 — 입력의 지도 · 권한 경계와 인물 · 장면의 속도 · 지시를 받았을 때 · 출력 문법 · 말    |
-| 도구 설명 (`SKILL_CATALOG`)             | 그 도구를 **언제 부르고, 인자를 어떻게 채우고, 결과를 장면에 어떻게 옮기는가** — 인자의 낱말은 코어 표에서 만든다   |
-| 중계 프롬프트 (`MATCH_CASTER_SYSTEM`)   | 입력의 지도 · 사건을 옮기는 법 · 한 턴 · 출력 문법 · 말                                                             |
-| 해석 프롬프트 (`MATCH_INTENT_SYSTEM`)   | 경기 중 필요한 판정·해석 근거 전부 — 전술 6축과 갈래 넷의 낱말까지. 도구 표면이 0이라(§2) 도구 설명이 실리지 않는다 |
-| 교섭 프롬프트 (`NEGOTIATOR_SYSTEM`)     | 협상 테이블 건너편의 화자 · 서류를 읽는 법 · 판정 사다리 · 움직일 수 있는 폭 — 게임 도구가 없다                     |
-| 결산 셋 · 압축                          | 무엇을 보는가 · 규칙. 폭과 인원은 코어 상수에서 읽는다 (agents.md §4)                                               |
-| 데이터 블록 (카드 · 구단·감독 · 스냅샷) | 사실, 범례 한 줄, 그 턴만의 오퍼레이터 지시 (원칙 7)                                                                |
-| 첫 장면 지시 (`ONBOARDING_INSTRUCTION`) | 누가 여는가 한 줄                                                                                                   |
+| 자리                                    | 무엇이 사는가                                                                                                                       |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 시스템 프롬프트 (`GM_SYSTEM`)           | 도구와 무관하게 매 턴 서는 것 — 입력의 지도 · 권한 경계와 인물 · 장면의 속도 · 지시를 받았을 때 · 출력 문법 · 말                    |
+| 도구 설명 (`SKILL_CATALOG`)             | 그 도구를 **언제 부르고, 인자를 어떻게 채우고, 결과를 장면에 어떻게 옮기는가** — 인자의 낱말은 코어 표에서 만든다                   |
+| 중계 프롬프트 (`MATCH_CASTER_SYSTEM`)   | 입력의 지도 · 사건을 옮기는 법 · 한 턴 · 출력 문법 · 말                                                                             |
+| 해석 프롬프트 (`MATCH_INTENT_SYSTEM`)   | 경기 중 필요한 판정·해석 근거 전부 — 전술 6축과 갈래 넷, 세트피스 두 축의 낱말까지. 도구 표면이 0이라(§2) 도구 설명이 실리지 않는다 |
+| 교섭 프롬프트 (`NEGOTIATOR_SYSTEM`)     | 협상 테이블 건너편의 화자 · 서류를 읽는 법 · 판정 사다리 · 움직일 수 있는 폭 — 게임 도구가 없다                                     |
+| 결산 셋 · 압축                          | 무엇을 보는가 · 규칙. 폭과 인원은 코어 상수에서 읽는다 (agents.md §4)                                                               |
+| 데이터 블록 (카드 · 구단·감독 · 스냅샷) | 사실, 범례 한 줄, 그 턴만의 오퍼레이터 지시 (원칙 7)                                                                                |
+| 첫 장면 지시 (`ONBOARDING_INSTRUCTION`) | 누가 여는가 한 줄                                                                                                                   |
 
 - **한 도구의 사용법을 시스템 프롬프트가 다시 적지 않는다.** 원본이 둘이면 갈린다.
 - **읽을 자리는 그 자리를 가진 도구의 설명이 가리킨다.** 지나간 카드의 사실을 다시 읽는
@@ -515,15 +515,21 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
 | 25\~44 | 서투름    | —                                       |
 | \~24   | 생소      | —                                       |
 
-**전술의 낱말도 프롬프트가 손으로 적지 않는다.** 6축의 눈금(`TACTIC_AXES`)과 갈래 넷
-(`TACTIC_TOGGLES`)은 코어의 표 하나에서 문장으로 만들어 싣는다 — `tacticAxisScaleText`와
-`tacticToggleChoiceText`를 평시 도구 설명과 경기 해석 프롬프트가 함께 쓴다. 표가 둘이면
-전술판이 「역습」이라 부르는 값을 모델은 다른 말로 배운다. 갈래는 눈금이 없어 고를 수 있는
+**전술의 낱말도 프롬프트가 손으로 적지 않는다.** 6축의 눈금(`TACTIC_AXES`) · 갈래 넷
+(`TACTIC_TOGGLES`) · 세트피스 두 축(`SET_PIECE_ROUTINE_AXES`)은 코어의 표 하나에서 문장으로
+만들어 싣는다 — `tacticAxisScaleText` · `tacticToggleChoiceText` · `setPieceRoutineChoiceText`를
+평시 도구 설명과 경기 해석 프롬프트가 함께 쓴다. 표가 둘이면 전술판이 「역습」이라 부르는
+값을 모델은 다른 말로 배운다. 갈래는 눈금이 없어 고를 수 있는
 값을 그대로 세우고 **중립을 맨 뒤에** 둔다 — 지시하지 않은 자리가 곧 중립이라, 그것이
 마지막에 서야 앞의 것들이 「지시한 갈래」로 읽힌다
 ([../simulation/match.md](../simulation/match.md) §1.2). **거기 서는 중립은 스키마가 실제로
 받는 토큰이어야 한다** — 낱말표가 「지시 없음」을 가르쳐도 열거에 그 값이 없으면 모델은
 해제를 낼 수 없고, 시킨 대로 하려다 반대쪽 값을 건다(§2).
+
+**세트피스 두 축만 중립이 한가운데다.** 적게·보통·많이는 순서가 곧 뜻이라 중립을 뒤로 빼면
+차례가 깨진다 — 대신 그 자리에서 지시를 푸는 값이 `normal`이라는 것을 조각이 함께 가르친다.
+두 축은 낱말이 같아 **키가 먼저 선다**(`commit 가담` · `guard 수비`) — 이름만으로는 어느
+자리에 적을지 갈리지 않는다.
 
 **어휘로 덮지 않는 숫자는 도구가 판정용으로 주는 것들이다** — 선수 비교용 종합·역할
 적합도·체력, 그리고 선수 **개인**의 적응도. GM이 둘을 견주어 고르는 데 쓰는 값이라
@@ -536,9 +542,9 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
 
 **`MATCH_INTENT_SYSTEM`.** 분류기다. 역할 한 줄과 입력의 지도 뒤에 산출의 갈래마다 한 절 —
 무엇을 고르나 · advance · 대화 · 판을 바꾸는 것 · unresolved. 평시 도구 설명이 갖는 판정
-기준(맥락 적합성·설득 근거·수용성), "부름은 면담이 아니다", 전술 6축과 갈래 넷의 낱말을
-여기도 갖는다 — 경기에는 도구 설명이 실리지 않는다. 지금 걸려 있는 갈래는 `<standing>`이
-낸다(중립인 것은 서지 않는다).
+기준(맥락 적합성·설득 근거·수용성), "부름은 면담이 아니다", 전술 6축과 갈래 넷과 세트피스
+두 축의 낱말을 여기도 갖는다 — 경기에는 도구 설명이 실리지 않는다. 지금 걸려 있는 갈래와
+세트피스 지시는 `<standing>`이 낸다(중립인 것은 서지 않는다).
 
 **`NEGOTIATOR_SYSTEM`.** 협상 테이블 건너편의 사람이다 — 감독의 편이 아니다. 역할, 무엇을
 하는가, 서류를 읽는 법(`<negotiation>`·`<player>`·`<dossier>`·`<characters>`·`<anchor>`),
