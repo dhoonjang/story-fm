@@ -102,6 +102,11 @@ import {
   packetTagText,
   personaRoleLabel,
   PROMISE_KIND_KO,
+  SET_PIECE_KO,
+  SET_PIECE_ROUTINE_AXES,
+  SET_PIECE_ROUTINE_NEUTRAL,
+  setPieceRoutineLevel,
+  setPieceRoutineWord,
   slotOfTime,
   TACTIC_TOGGLES,
   tacticToggleValue,
@@ -1396,8 +1401,9 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
    * **지금 내가 무엇을 걸어 뒀는가** — 경기 중에는 평시 스냅샷(6축이 적힌 줄)이
    * 실리지 않아 여기가 유일한 자리다. 없으면 "압박 올려"에 지금 값이 지어내진다.
    */
-  const ourTactics = tacticsOf(state, state.userTeamId).spec;
-  const assignments = tacticsOf(state, state.userTeamId).assignments.filter(
+  const ourTeamTactics = tacticsOf(state, state.userTeamId);
+  const ourTactics = ourTeamTactics.spec;
+  const assignments = ourTeamTactics.assignments.filter(
     (a) => a.role === "starting" && (a.directive || a.instruction || a.roleId),
   );
   /**
@@ -1409,12 +1415,24 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
     const value = tacticToggleValue(ourTactics, toggle.key);
     return value === null ? [] : [`${toggle.brief} ${tacticToggleWord(toggle.key, value)}`];
   });
+  /**
+   * 걸어 둔 세트피스 지시 — 갈래와 **같은 규칙으로 중립은 서지 않는다.** 이 줄이
+   * 없으면 걸어 둔 축이 「지금 걸어 둔 것」 목록에서 빠져, 인원을 올려 둔 판을 두고
+   * 모델이 세트피스는 손대지 않았다고 답한다 (match.md §2).
+   */
+  const ourRoutine = SET_PIECE_ROUTINE_AXES.flatMap((axis) => {
+    const level = setPieceRoutineLevel(ourTeamTactics.setPieceRoutine, axis.key);
+    return level === SET_PIECE_ROUTINE_NEUTRAL
+      ? []
+      : [`${axis.label} ${setPieceRoutineWord(axis.key, level)}`];
+  });
   const standingLines = [
     ``,
     `<standing>`,
     `전술 ${ourTactics.formation} · 멘탈${ourTactics.mentality} 라인${ourTactics.defensiveLine} ` +
       `압박${ourTactics.pressing} 템포${ourTactics.tempo} 폭${ourTactics.width} 패스${ourTactics.passStyle}` +
-      (ourToggles.length > 0 ? ` · ${ourToggles.join(" · ")}` : ``),
+      (ourToggles.length > 0 ? ` · ${ourToggles.join(" · ")}` : ``) +
+      (ourRoutine.length > 0 ? ` · ${SET_PIECE_KO} ${ourRoutine.join(" · ")}` : ``),
     pending.regionalPlans && pending.regionalPlans.length > 0
       ? `지역 전술: ${pending.regionalPlans
           .map((r) => `${r.band}/${r.lane} ${r.intent} "${r.note}"`)
