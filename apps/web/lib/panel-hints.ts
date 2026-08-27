@@ -130,7 +130,7 @@ export interface HintLine {
 
 export interface PanelHint {
   panel: PanelKey;
-  /** 그 화면에서 바뀐 것들 — 최근 순, 최대 `HINT_LINES`줄 */
+  /** 그 화면에서 바뀐 것들 — 최근 순, 최대 `HINT_LINES`줄 (되부른 것은 접지 않는다) */
   lines: HintLine[];
   /** 줄로 세우지 못하고 접은 나머지 */
   more: number;
@@ -168,13 +168,18 @@ export function panelHintsOf(chat: readonly ChatTurn[]): PanelHint[] {
 }
 
 /**
- * 스킬 하나가 세우는 말풍선 — **채팅 칩을 눌러 다시 불러낼 때** 쓴다.
+ * 칩 하나가 세우는 말풍선 — **채팅 칩을 눌러 다시 불러낼 때** 쓴다.
  *
- * 자동 알림은 턴 전체를 모으지만 칩은 그 호출 하나를 가리킨다 — 감독이 누른 것만
- * 세워야 어느 지시의 결과인지가 분명하다.
+ * 자동 알림은 턴 전체를 모으지만 칩은 그 칩이 진 호출만 가리킨다 — 감독이 누른
+ * 것만 세워야 어느 지시의 결과인지가 분명하다. 연달아 불린 같은 스킬은 칩 하나라
+ * (`groupChips`) 인자는 **묶음**이고, 하나만 세우면 교체 셋 중 하나만 보인다.
+ *
+ * **되부른 말풍선은 접지 않는다.** 세 줄 상한은 지나가는 알림의 몫이다 — 그건
+ * 턴 전체가 여러 장부에 걸쳐 흘러들어 오는 자리라 길이를 눌러야 하지만, 이건
+ * 감독이 그 묶음을 보자고 누른 것이라 접으면 누른 이유가 사라진다.
  */
-export function hintsOfCall(call: ToolCallRecord): PanelHint[] {
-  return hintsOfCalls([call]);
+export function hintsOfChip(calls: readonly ToolCallRecord[]): PanelHint[] {
+  return hintsOfCalls(calls, Infinity);
 }
 
 /**
@@ -210,7 +215,7 @@ function signatureOf(name: string, lines: readonly HintLine[]): string {
   return [name, ...lines.map((l) => `${l.label ?? ""}${l.text}`)].join(" ");
 }
 
-function hintsOfCalls(calls: readonly ToolCallRecord[]): PanelHint[] {
+function hintsOfCalls(calls: readonly ToolCallRecord[], limit = HINT_LINES): PanelHint[] {
   const byPanel = new Map<PanelKey, HintLine[]>();
   const signatures = new Set<string>();
   for (const call of calls) {
@@ -234,7 +239,7 @@ function hintsOfCalls(calls: readonly ToolCallRecord[]): PanelHint[] {
   }
   return [...byPanel].map(([panel, all]) => ({
     panel,
-    lines: all.slice(0, HINT_LINES),
-    more: Math.max(0, all.length - HINT_LINES),
+    lines: all.slice(0, limit),
+    more: Math.max(0, all.length - limit),
   }));
 }

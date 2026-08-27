@@ -69,6 +69,32 @@ function groupCalls(calls: readonly ToolCallRecord[]): Placed[] {
 }
 
 /**
+ * **한 칩이 지는 호출들** — 연달아 불린 같은 스킬은 칩 하나다.
+ *
+ * 한 번에 셋을 바꾼 것은 **한 번의 결정**인데, 호출마다 칩을 세우면 같은 이름·같은
+ * 결의 칩이 나란히 서서 감독이 세 번 결정한 것처럼 읽힌다. 다른 것은 펼친 속뿐이라
+ * 줄만 길어지고 읽을 것은 늘지 않는다 — 경기 중 채팅은 폭이 좁아 그만큼 다른
+ * 사실이 밀려난다.
+ *
+ * **연달은 것만 접는다.** 교체 · 다른 지시 · 교체는 그 순서가 곧 감독이 한 일이라
+ * 하나로 접으면 순서가 사라진다. 결(`tone`)도 같아야 접는다 — 결은 펼치지 않아도
+ * 보이는 것이라, 잘 풀린 면담과 틀어진 면담을 한 칩에 담으면 한쪽이 사라진다.
+ */
+export function groupChips(calls: readonly ToolCallRecord[]): ToolCallRecord[][] {
+  const chips: ToolCallRecord[][] = [];
+  for (const call of calls) {
+    const last = chips[chips.length - 1];
+    const head = last?.[0];
+    if (last && head?.name === call.name && head.tone === call.tone) {
+      last.push(call);
+      continue;
+    }
+    chips.push([call]);
+  }
+  return chips;
+}
+
+/**
  * 줄 목록과 표시들을 하나의 조각 목록으로 엮는다.
  *
  * 자리를 못 찾은 표시(중계가 시간을 안 적은 골, 본문보다 뒤에 적힌 줄 수)는 맨

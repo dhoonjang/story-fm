@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatTurn } from "@story-fm/engine";
-import { hintsOfCall, panelHintsOf } from "../lib/panel-hints";
+import { hintsOfChip, panelHintsOf } from "../lib/panel-hints";
 
 /**
  * 장부 변경은 **그 화면 쪽에서** 알린다 — 채팅은 서사의 자리다.
@@ -180,12 +180,46 @@ describe("말풍선의 내용", () => {
 
 /**
  * 알림은 다음 클릭에 닫힌다 — 되부르는 손잡이는 **채팅에 남은 칩**이다.
- * 그때 서는 것은 누른 그 호출뿐이라야 어느 지시의 결과인지가 분명하다.
+ * 그때 서는 것은 그 칩이 진 호출뿐이라야 어느 지시의 결과인지가 분명하다.
  */
 describe("칩으로 되부르는 말풍선", () => {
   it("누른 호출 하나만 세운다", () => {
-    const hints = hintsOfCall(call("set_training", "월요일 오전 세트피스"));
+    const hints = hintsOfChip([call("set_training", "월요일 오전 세트피스")]);
     expect(hints.map((h) => h.panel)).toEqual(["달력"]);
     expect(hints[0]!.lines.map((l) => l.text)).toEqual(["월요일 오전 세트피스"]);
+  });
+
+  /**
+   * 연달아 불린 같은 스킬은 칩 하나다 — 한 번에 넣은 교체 셋이 그렇다. 그 칩이
+   * 호출 하나만 세우면 감독은 자기가 한 교체 중 하나만 보고, 세 줄에서 접으면
+   * 마지막 교체가 "외 N건"에 묻힌다. 되부른 말풍선은 묶음을 통째로 세운다.
+   */
+  it("묶인 칩은 그 안의 호출을 모두 세운다 — 세 줄에서 접지 않는다", () => {
+    const sub = (out: string, into: string): ChatTurn["toolCalls"][number] => ({
+      name: "substitute",
+      summary: `교체 완료 — ${out} OUT, ${into} IN`,
+      brief: {
+        head: "교체",
+        items: [
+          { label: "OUT", text: out },
+          { label: "IN", text: into },
+        ],
+      },
+    });
+    const hints = hintsOfChip([
+      sub("김민재", "이강인"),
+      sub("손흥민", "황희찬"),
+      sub("황인범", "정우영"),
+    ]);
+    expect(hints.map((h) => h.panel)).toEqual(["스쿼드"]);
+    expect(hints[0]!.lines.map((l) => l.text)).toEqual([
+      "김민재",
+      "이강인",
+      "손흥민",
+      "황희찬",
+      "황인범",
+      "정우영",
+    ]);
+    expect(hints[0]!.more).toBe(0);
   });
 });
