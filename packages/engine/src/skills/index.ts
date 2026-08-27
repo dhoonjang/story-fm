@@ -19,6 +19,9 @@ import type {
   TacticAssignment,
   TacticsSpec,
   SetPieceRole,
+  SetPieceRoutine,
+  SetPieceRoutineKey,
+  SetPieceRoutineLevel,
   SetPieceTakers,
   TeamTactics,
   TeamTalkOccasion,
@@ -41,6 +44,10 @@ import {
   SET_PIECE_KO,
   SET_PIECE_ROLES,
   SET_PIECE_ROLE_KO,
+  SET_PIECE_ROUTINE_KEYS,
+  setPieceRoutineAxisOf,
+  setPieceRoutineLevel,
+  setPieceRoutineWord,
   reserveTrainingTitle,
   MISSION_CANDIDATES,
   MISSION_DAYS,
@@ -2296,6 +2303,51 @@ export function setSetPieceTakers(
     ok: true,
     message: `${SET_PIECE_KO} 키커 — ${notes.join(" · ")}`,
     brief: { head: `${SET_PIECE_KO} 키커`, items },
+  };
+}
+
+/**
+ * **세트피스 지시** — 키커 말고 감독이 정하는 두 축 (match.md §1.4).
+ *
+ * 「코너에 사람 더 올려」·「저 팀 세트피스는 다 막아라」. 키커 지정과 같은 규약이다:
+ * 말한 축만 바뀌고, `null`을 주면 그 축이 중립(`normal`)으로 돌아간다 — 감독이 손을
+ * 떼는 길이 있어야 한 번 올린 인원이 영영 서 있지 않는다.
+ *
+ * 중립은 **저장하지 않는다.** 옛 세이브가 이 칸을 갖지 않는 것과 지시를 푼 판이 같은
+ * 모양이어야, 「지시하지 않음」이 장부에 두 가지로 적히지 않는다.
+ */
+export function setSetPieceRoutine(
+  state: GameState,
+  input: Partial<Record<SetPieceRoutineKey, SetPieceRoutineLevel | null>>,
+): SkillResult {
+  const tactics = userTactics(state);
+  const next: SetPieceRoutine = { ...(tactics.setPieceRoutine ?? {}) };
+  const notes: string[] = [];
+  const items: SkillBriefItem[] = [];
+  let changed = false;
+  for (const key of SET_PIECE_ROUTINE_KEYS) {
+    const want = input[key];
+    if (want === undefined) continue;
+    const axis = setPieceRoutineAxisOf(key);
+    const level: SetPieceRoutineLevel = want ?? "normal";
+    if (setPieceRoutineLevel(tactics.setPieceRoutine, key) === level) continue;
+    // 중립은 칸을 비운다 — 「지시 없음」이 두 모양으로 적히지 않는다
+    if (level === "normal") delete next[key];
+    else next[key] = level;
+    changed = true;
+    notes.push(`${axis.label} ${setPieceRoutineWord(key, level)}`);
+    items.push(item({ label: axis.label, text: setPieceRoutineWord(key, level) }));
+  }
+  if (!changed) {
+    return { ok: true, message: "바뀐 지시가 없습니다", unchanged: true };
+  }
+  // 두 축이 다 중립으로 돌아가면 칸 자체를 걷는다 — 옛 세이브와 같은 모양이 된다
+  if (Object.keys(next).length === 0) delete tactics.setPieceRoutine;
+  else tactics.setPieceRoutine = next;
+  return {
+    ok: true,
+    message: `${SET_PIECE_KO} — ${notes.join(" · ")}`,
+    brief: { head: SET_PIECE_KO, items },
   };
 }
 

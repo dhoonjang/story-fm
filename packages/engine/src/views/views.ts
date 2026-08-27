@@ -30,6 +30,7 @@ import {
   BOARD_CONDITION_LABEL,
   BOARD_REQUEST_LABEL,
   SET_PIECE_ROLES,
+  SET_PIECE_ROUTINE_KEYS,
   VISION_CODE_KO,
   boardConditionAmountText,
   boardExpectationText,
@@ -41,6 +42,7 @@ import {
   normalizePacket,
   packetTagContext,
   packetTagText,
+  setPieceRoutineLevel,
   subCauseText,
 } from "@story-fm/domain";
 import {
@@ -173,6 +175,8 @@ import type {
   ScoutReportCard,
   SetPieceProfile,
   SetPieceRole,
+  SetPieceRoutineKey,
+  SetPieceRoutineLevel,
   SetPieceTakers,
   TacticAssignment,
 } from "@story-fm/domain";
@@ -1639,6 +1643,15 @@ export interface OfficeViews {
      * 있는 유일한 자리다.
      */
     setPieces: Record<SetPieceRole, SetPieceTakerView>;
+    /**
+     * **세트피스 지시** — 가담·수비 두 축 (match.md §1.4). 키커가 「누가 차는가」라면
+     * 이쪽은 「몇 명이 서는가」다.
+     *
+     * 지시하지 않은 축은 **뷰가 중립으로 펴서** 낸다 — 화면이 `undefined`를 보고
+     * 「보통」을 스스로 세우면, 코어가 중립으로 읽는 값과 화면이 그리는 낱말이 갈리는
+     * 날이 온다 (키커의 기본값을 뷰가 코어 함수로 내는 것과 같은 규약).
+     */
+    setPieceRoutine: Record<SetPieceRoutineKey, SetPieceRoutineLevel>;
     /**
      * **여름의 유스 후보** — 아직 계약하지 않은 사람들이라 명단 행이 아니라 제 구획을
      * 갖는다 (season.md §6). 소집일이 지나면 null이다.
@@ -3744,6 +3757,12 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       reserveCount: players.filter((p) => p.loan === null && p.squadLevel === "reserve").length,
       registration: squadRegistrationOf(state, userTeamId),
       setPieces: setPieceTakerViews(squad, tactics.setPieceTakers, starters, livePacketTakers),
+      setPieceRoutine: Object.fromEntries(
+        SET_PIECE_ROUTINE_KEYS.map((key) => [
+          key,
+          setPieceRoutineLevel(tactics.setPieceRoutine, key),
+        ]),
+      ) as Record<SetPieceRoutineKey, SetPieceRoutineLevel>,
       youthIntake: youthIntakeView(state),
     },
     calendar: {
