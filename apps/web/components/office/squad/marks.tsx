@@ -7,6 +7,7 @@ import {
   SET_PIECE_ROLE_MARK,
   formatMoney,
   positionProficiency,
+  type SetPieceRole,
 } from "@story-fm/domain";
 
 import type { SetPieceTakersView, SquadRow } from "./types";
@@ -98,46 +99,52 @@ export function Armband({ row }: { row: SquadRow }) {
   );
 }
 
+/** 표식 한 칸의 뜻 — 툴팁이 적는 사실도 이 셋뿐이다 */
+const TAKER_TONE_KO = {
+  on: "감독 지정",
+  core: "지정 없음 — 코어가 세운다",
+  idle: "지정됐지만 선발에 없어 다른 선수가 찬다",
+} as const;
+type TakerTone = keyof typeof TAKER_TONE_KO;
+
 /**
- * 죽은 공 표식 — **완장과 같은 자리, 같은 크기의 한 글자** (코 · 프 · 페).
+ * 세트피스 표식 — **이름 앞의 한 자리, 세 칸.**
  *
- * 표식이 두 톤인 것은 **지정과 실제로 차는 사람이 갈릴 수 있기 때문**이다
- * (docs/simulation/match.md §1.4). 감독이 채운 자리는 진하고, 코어가 세운 자리는
- * 옅다 — 완장 옆의 Ⓛ이 옅은 것과 같은 규약이다. 옅은 표식이 없으면 「지정 없음」이
- * 명단에서 빈칸이 되어, 누가 코너를 차는지가 화면 어디에도 없다.
+ * 자리마다 표식을 하나씩 세우면 셋을 다 차는 선수의 행에서 등번호·완장 뒤로
+ * 표식 셋이 줄줄이 서고, 236px짜리 이름 칸의 4분의 1이 표식 몫이 된다. 그래서
+ * **표식은 하나**이고 코너·프리킥·페널티가 그 안에 늘 같은 순서로 선다 — 맡지
+ * 않은 자리는 글자를 감춰 칸만 남기므로, 하나를 차든 셋을 다 차든 이름이
+ * 시작하는 자리가 움직이지 않는다.
  *
- * 세 번째 경우 — 지정은 걸렸는데 그 선수가 선발 밖이라 차지 못하는 자리 — 는 색을
- * 하나 더 만들지 않고 **테두리만 남긴다**: 이름은 남았고 공은 못 찬다는 뜻이 그
- * 모양이다. 정확히 어느 경우인지는 툴팁이 사실로 적는다.
+ * **세 갈래는 색이 아니라 글자의 모양이 가른다** (docs/data/team.md §6):
+ * 감독이 지정하고 지금 차는 자리는 진하고, 지정이 없어 코어가 세운 자리는 옅고,
+ * 지정은 걸렸는데 선발에 없어 못 차는 자리는 **취소선**이다 — 이름은 남았고 공은
+ * 못 찬다는 뜻이 그 모양이다. 툴팁은 같은 사실을 자리마다 한 줄씩 적을 뿐이라,
+ * 열지 않아도 뜻이 선다.
  */
 export function SetPieceMarks({ id, takers }: { id: string; takers: SetPieceTakersView }) {
-  const held = SET_PIECE_ROLES.flatMap((role) => {
+  const slots = SET_PIECE_ROLES.map((role) => {
     const { designated, taker } = takers[role];
     const mine = designated === id;
     const kicks = taker === id;
-    if (!mine && !kicks) return [];
-    const ko = SET_PIECE_ROLE_KO[role];
-    return [
-      {
-        role,
-        tone: mine ? (kicks ? "on" : "idle") : "core",
-        title: mine
-          ? kicks
-            ? `${ko} 키커 — 감독 지정`
-            : `${ko} 키커로 지정돼 있지만 지금 선발에 없어 다른 선수가 찹니다`
-          : `${ko} 키커 — 지정이 없거나 지정한 선수가 선발에 없어 이 선수가 찹니다`,
-      },
-    ];
+    const tone: TakerTone | null = mine ? (kicks ? "on" : "idle") : kicks ? "core" : null;
+    return { role, tone };
   });
+  const held = slots.filter((s): s is { role: SetPieceRole; tone: TakerTone } => s.tone !== null);
   if (held.length === 0) return null;
+  /** 자리마다 한 줄 — 사실만 적는다. 글자 셋은 소리로 읽으면 뜻이 없어 이 줄이 대신 선다 */
+  const facts = held
+    .map((s) => `${SET_PIECE_ROLE_KO[s.role]} 키커 — ${TAKER_TONE_KO[s.tone]}`)
+    .join("\n");
   return (
-    <>
-      {held.map((mark) => (
-        <i className={`spmark ${mark.tone}`} key={mark.role} title={mark.title}>
-          {SET_PIECE_ROLE_MARK[mark.role]}
-        </i>
+    <i className="spmark" title={facts} role="img" aria-label={facts}>
+      {slots.map(({ role, tone }) => (
+        // 맡지 않은 자리도 글자를 그린다 — 감춰진 채로 폭을 지키는 것이 그 칸의 일이다
+        <b className={`spm ${tone ?? "off"}`} key={role} aria-hidden="true">
+          {SET_PIECE_ROLE_MARK[role]}
+        </b>
       ))}
-    </>
+    </i>
   );
 }
 

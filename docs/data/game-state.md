@@ -182,7 +182,7 @@
 | ↳ `PlayerDirective`              | 결과에 닿는 개인 지시 5종 (`instruction`은 사람이 읽는 말)                                                   | `domain/tactics.ts` |
 | ↳ `DrilledTactics`               | 전술 지문 → 그때 도달한 적응도 (선수별)                                                                      | `domain/tactics.ts` |
 | ↳ `ShelvedFamiliarity`           | **배치가 없는 동안 적응도·기억이 머무는 자리** (2군·예비)                                                    | `domain/tactics.ts` |
-| ↳ `SetPieceTakers`               | 죽은 공을 차는 사람 — `corner`·`freeKick`·`penalty` 각각 선수 id(옛 세이브엔 없다)                           | `domain/tactics.ts` |
+| ↳ `SetPieceTakers`               | 세트피스를 차는 사람 — `corner`·`freeKick`·`penalty` 각각 선수 id(옛 세이브엔 없다)                          | `domain/tactics.ts` |
 | `contracts` `Contract`           | **주급의 원본** — 선수당 `active` 정확히 1건                                                                 | `domain/records.ts` |
 | `finances` `TeamFinance`         | 팀당 1개 — 잔고·이적 예산·원장·낙하산                                                                        | `domain/records.ts` |
 | ↳ `LedgerEntry`                  | 원장 한 줄 — 유저 팀만 상세, 최근 3개월 롤링                                                                 | `domain/records.ts` |

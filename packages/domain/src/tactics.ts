@@ -1686,7 +1686,7 @@ export function familiarityForSetup(
 }
 
 /**
- * **죽은 공을 차는 사람** — 코너·프리킥·페널티 각각 (match.md §1.4).
+ * **세트피스를 차는 사람** — 코너·프리킥·페널티 각각 (match.md §1.4).
  *
  * 셋을 따로 두는 이유는 실제 축구가 그렇게 나누기 때문이다: 코너를 올리는 발과
  * 페널티를 넣는 배짱은 다른 능력이고(`kicking` vs `penaltySkill`) 한 사람이 셋을
@@ -1702,12 +1702,23 @@ export const SetPieceTakersSchema = z.object({
 });
 export type SetPieceTakers = z.infer<typeof SetPieceTakersSchema>;
 
-/** 지정할 수 있는 죽은 공의 갈래 — 스킬·해석·화면이 나눠 쓰는 한 낱말 */
+/** 지정할 수 있는 세트피스의 갈래 — 스킬·해석·화면이 나눠 쓰는 한 낱말 */
 export const SET_PIECE_ROLES = ["corner", "freeKick", "penalty"] as const;
 export type SetPieceRole = (typeof SET_PIECE_ROLES)[number];
 
 /**
- * 죽은 공 자리의 이름 — **스킬이 감독에게 되돌리는 말과 화면의 라벨이 한 벌이다.**
+ * **감독 눈에 닿는 묶음 이름 하나** — 화면·패킷 문장·스킬이 되돌리는 말이 모두
+ * 이것을 읽는다. 자리 이름이 한 벌인 것과 같은 이유로 묶음 이름도 한 벌이다:
+ * 채팅이 "세트피스 키커"라 답하는데 전술판이 다른 낱말을 쓰면 감독은 같은 줄을
+ * 두 이름으로 배우고, 채팅에서 배운 말로는 그 줄을 찾지 못한다.
+ *
+ * 시뮬 안쪽의 채널 이름(「죽은 공 채널」)은 감독에게 보이지 않으므로 그대로다
+ * (match.md §1.4).
+ */
+export const SET_PIECE_KO = "세트피스";
+
+/**
+ * 세트피스 자리의 이름 — **스킬이 감독에게 되돌리는 말과 화면의 라벨이 한 벌이다.**
  * 채팅이 "코너 키커 지정 해제"라 답하고 전술판이 다른 낱말을 쓰면, 감독은 같은
  * 자리를 두 이름으로 배운다.
  */
@@ -1719,7 +1730,9 @@ export const SET_PIECE_ROLE_KO: Record<SetPieceRole, string> = {
 
 /**
  * 명단 표식의 한 글자 — 완장(Ⓒ·Ⓥ·Ⓛ)과 같은 자리에 서므로 이름을 다 적을 폭이 없다.
- * 세 자리를 한 글자로 가르는 낱말은 위 이름의 첫 글자다.
+ * 세 자리를 한 글자로 가르는 낱말은 위 이름의 첫 글자다. 셋이 **한 표식의 세 칸**에
+ * 늘 같은 순서로 서므로, 맡지 않은 자리는 빈 칸이 되고 폭은 움직이지 않는다
+ * (team.md §6).
  */
 export const SET_PIECE_ROLE_MARK: Record<SetPieceRole, string> = {
   corner: "코",
@@ -1749,7 +1762,7 @@ export const TeamTacticsSchema = z.object({
    */
   drilled: z.array(DrilledTacticsSchema).optional(),
   /**
-   * **죽은 공 키커** — 코너·프리킥·페널티. 옛 세이브엔 없다 (SAVE_VERSION 유지).
+   * **세트피스 키커** — 코너·프리킥·페널티. 옛 세이브엔 없다 (SAVE_VERSION 유지).
    * 없거나 그 선수가 그라운드에 없으면 코어의 기본값이 선다 (match.md §1.4).
    */
   setPieceTakers: SetPieceTakersSchema.optional(),
