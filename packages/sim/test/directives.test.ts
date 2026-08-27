@@ -353,14 +353,20 @@ describe("개인 지시 — 이득과 대가", () => {
     );
     expect(after.home.zones.attack).toBeLessThan(before.home.zones.attack);
     /**
-     * **재는 자리는 존을 읽는 채널이다** — 열린 플레이 xg. 팀 기대 득점에는 죽은 공이
-     * 섞여 있는데(match.md §1.4) 그 채널은 존이 아니라 제공권·킥력을 읽으므로, 마크가
-     * 점유를 끌어와 슈팅 총량이 늘면 대가와 무관하게 함께 오른다 — 그건 이 지시가
-     * 공짜라는 뜻이 아니라 코너를 더 얻었다는 뜻이다.
+     * **재는 자리는 존을 읽는 채널이다** — 열린 플레이 슛 하나의 질. 팀 기대 득점에는
+     * 죽은 공이 섞여 있는데(match.md §1.4) 그 채널은 존이 아니라 제공권·킥력을 읽는다.
+     *
+     * ⚠️ **총량으로는 못 읽는다.** 마크는 상대 중원만이 아니라 상대 공격도 얇게 하고,
+     * 그 몫은 우리 수비 진영의 경로 우위로 들어와(`ROUTE_PATH_WEIGHTS.defense`) 우리
+     * 슈팅 **수**를 오히려 조금 늘린다 — 공은 우리가 더 쥔다. 대가는 슛 하나가 서는
+     * 자리에 남는다: 우리 공격 존이 깎인 만큼 기회의 질이 내려간다.
      */
-    const openGoals = (packet: typeof before) =>
-      (packet.guide.shotProfiles?.home ?? []).reduce((sum, p) => sum + p.expectedGoals, 0);
-    expect(openGoals(after)).toBeLessThanOrEqual(openGoals(before));
+    const openOf = (packet: typeof before) => {
+      const profiles = packet.guide.shotProfiles?.home ?? [];
+      const shots = profiles.reduce((sum, p) => sum + p.expectedShots, 0);
+      return profiles.reduce((sum, p) => sum + p.expectedGoals, 0) / shots;
+    };
+    expect(openOf(after)).toBeLessThan(openOf(before));
   });
 
   it("수비 위치 유지는 뒤를 두껍게 하고 앞의 인원을 던다", () => {

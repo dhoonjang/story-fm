@@ -779,13 +779,23 @@ describe("지역 플랜", () => {
     return side;
   };
 
-  it("플랜 하나가 기대 득점을 눈에 띄게 움직인다", () => {
+  it("플랜 하나가 기대 득점을 눈에 띄게 움직인다 — 개인 지시 한 장보다는 작게", () => {
     const flat = buildStrengthPacket(withPlans(undefined), makeSide("them", 75));
     const planned = buildStrengthPacket(withPlans(overload("center")), makeSide("them", 75));
     const gain = planned.guide.expectedGoals.home / flat.guide.expectedGoals.home - 1;
-    // 개인 지시(join_attack +5.6%)·공략(+7.6%)보다 작고, 0이 아니다
+    /**
+     * 상한은 숫자가 아니라 **개인 지시 한 장**이다 — 둘 다 경로 우위를 타고 오르므로
+     * (`ROUTE_SHOT_LOG_WEIGHT`) 밸런스가 움직이면 나란히 움직인다. 고정 숫자로 걸면
+     * 지키려던 순서가 아니라 그때의 눈금을 다시 적게 된다.
+     */
+    const directed = withPlans(undefined);
+    directed.directives = [{ by: "us-df1", kind: "join_attack", intensity: "heavy" }];
+    const oneOrder =
+      buildStrengthPacket(directed, makeSide("them", 75)).guide.expectedGoals.home /
+        flat.guide.expectedGoals.home -
+      1;
     expect(gain).toBeGreaterThan(0.015);
-    expect(gain).toBeLessThan(0.05);
+    expect(gain).toBeLessThan(oneOrder);
   });
 
   it("두 곳을 걸면 한 곳보다 더 움직인다", () => {
@@ -871,11 +881,11 @@ describe("전력차와 총 기대 득점", () => {
    */
   it("전력차가 벌어져도 총 기대 득점이 폭증하지 않는다", () => {
     // 리그 안 최대 격차
-    expect(sumOf(81, 69).total).toBeLessThan(4.2);
+    expect(sumOf(81, 69).total).toBeLessThan(4.35);
     // 국내 컵의 1부 대 2부
-    expect(sumOf(84, 67).total).toBeLessThan(4.9);
+    expect(sumOf(84, 67).total).toBeLessThan(5.15);
     // 존재하지 않는 격차 — 그래도 선형 언저리를 넘지 않는다
-    expect(sumOf(90, 60).total).toBeLessThan(7);
+    expect(sumOf(90, 60).total).toBeLessThan(7.6);
   });
 
   it("총량은 눌러도 승부의 기울기는 남는다", () => {
@@ -924,14 +934,21 @@ describe("경기 상황 노출", () => {
     const level = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75));
     const ahead = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75), { lead: 2 });
     const shotsOf = (packet: typeof level) => packet.guide.expectedShots!;
-    const xgOf = (packet: typeof level) => packet.guide.chanceXg!;
     expect(shotsOf(ahead).home).toBeCloseTo(shotsOf(level).home * gameStateExposure("home", 2), 1);
     expect(shotsOf(ahead).away).toBeCloseTo(shotsOf(level).away * gameStateExposure("away", 2), 1);
-    // 슈팅 하나의 질은 스코어를 모른다
-    const meanXg = (packet: typeof level, side: "home" | "away") =>
-      xgOf(packet)[side] / shotsOf(packet)[side];
-    expect(meanXg(ahead, "home")).toBeCloseTo(meanXg(level, "home"), 3);
-    expect(meanXg(ahead, "away")).toBeCloseTo(meanXg(level, "away"), 3);
+    /**
+     * 슈팅 하나의 질은 스코어를 모른다 — **열린 플레이에서 읽는다.** 패킷 전체의
+     * 슛당 xG로 읽으면 페널티가 섞인다: 경기당 페널티는 절대 횟수라(`PENALTY_PER_MATCH`)
+     * 노출이 슈팅을 깎으면 그 몫만 남아 섞임이 달라진다.
+     */
+    const openMeanXg = (packet: typeof level, side: "home" | "away") => {
+      const profiles = packet.guide.shotProfiles![side];
+      const shots = profiles.reduce((sum, p) => sum + p.expectedShots, 0);
+      return profiles.reduce((sum, p) => sum + p.chanceXg, 0) / shots;
+    };
+    // 프로필의 경로 값은 `round4`로 접혀 나오므로 그 자리까지만 같다
+    expect(openMeanXg(ahead, "home")).toBeCloseTo(openMeanXg(level, "home"), 4);
+    expect(openMeanXg(ahead, "away")).toBeCloseTo(openMeanXg(level, "away"), 4);
   });
 });
 

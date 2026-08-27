@@ -596,21 +596,40 @@ export function possessionShare(midfield: number, oppMidfield: number): number {
  * 실제 1부 리그의 양팀 합 24~26슛에 맞춘 값이다 — 이 손잡이가 슈팅 **양**을 정하고
  * 슛 하나의 질은 `BASE_SHOT_XG`가 따로 정한다. 둘을 반대 방향으로 움직이면
  * 득점을 유지한 채 슈팅 수만 옮길 수 있다.
+ *
+ * ⚠️ `ROUTE_SHOT_LOG_WEIGHT`를 세우면 이득 쪽이 손해 쪽보다 크게 자라(볼록성) 리그
+ * 총 슈팅이 함께 오른다. 그 몫을 여기서 되돌린다 — 기울기는 남고 총량만 제자리다.
  */
-export const PLAYER_SHOT_BASE = 1.08;
+export const PLAYER_SHOT_BASE = 1.07;
 /** 실제 전술판의 전진 깊이가 슈팅량에 닿는 세기. */
 export const SHOT_DEPTH_LOG_WEIGHT = 2.3;
 /** 역할의 결정력 요구가 슈팅 책임으로 번역되는 세기. */
 export const ROLE_SHOT_LOG_WEIGHT = 0.45;
 /** 점유가 공격 노출에 닿는 세기 — `possessionShotShift`. */
 export const POSSESSION_SHOT_LOG_WEIGHT = 0.32;
-/** 후방→중원→공격 경로 우위의 슈팅량 영향. */
-export const ROUTE_SHOT_LOG_WEIGHT = 0.75;
 /**
- * 경로 우위가 **슈팅량**에 실릴 때 이득 쪽이 포화하는 폭 — 넓게 둬서 거의 선형이다.
- * 이 축이 승패와 승점 분포를 만든다 (`saturateEdge`).
+ * 후방→중원→공격 경로 우위의 슈팅량 영향 — ⚠️ **리그의 폭을 쥔 손잡이다.**
+ *
+ * 이 항은 두 팀의 **격자 비**라 부호만 반대로 양쪽에 실린다. 그래서 지키는 팀의
+ * 질이 상대 슈팅에 닿는 자리는 여기(와 슈팅 질의 같은 항)뿐이다 — 치는 팀은
+ * `CREATION_SKILL_LOG_WEIGHT`·`CHANCE_SKILL_XG_LOGIT_WEIGHT`로 제 능력을 한 번 더
+ * 싣는데 지키는 팀에는 그런 항이 없다. 그 비대칭 때문에 이 가중치를 낮추면
+ * **팀별 기대 실점만 평평해지고** 그것이 그대로 리그 승점의 폭으로 나온다
+ * (match.md §1.4 · `league-spread` 하네스).
+ *
+ * ⚠️ 옮기면 총량이 함께 움직인다 — `PLAYER_SHOT_BASE`·`BASE_SHOT_XG`가 되잡는 짝이다.
  */
-export const ROUTE_SHOT_SATURATION = 0.75;
+export const ROUTE_SHOT_LOG_WEIGHT = 1.4;
+/**
+ * 경로 우위가 **슈팅량**에 실릴 때 이득 쪽이 포화하는 폭 (`saturateEdge`).
+ *
+ * **기울기와 천장은 따로 정한다** — 기울기는 위 가중치이고 천장이 여기다. 이득
+ * 쪽 슈팅량은 아무리 벌어져도 `e^(가중치 × 폭)` = 1.75배를 넘지 않는다. 리그 안에서
+ * 만나는 경로 우위는 0.2 언저리라 이 폭에서도 선형의 90%가 남아 기울기는 그대로
+ * 살고, 컵의 1부 대 2부처럼 우위가 0.5를 넘는 판에서만 천장이 걸린다. 손해 쪽은
+ * 포화시키지 않으므로(`ROUTE_SHOT_DEFICIT`) 이 폭은 강팀의 위끝만 잡는다.
+ */
+export const ROUTE_SHOT_SATURATION = 0.4;
 /**
  * 경로 우위가 **슈팅 질**에 실릴 때 포화하는 폭 — 좁게 둬서 총 득점을 잡는다.
  * 밀어붙이는 팀은 슛을 더 많이 치되 그 슛이 점점 어려운 자리에서 나온다.
@@ -632,8 +651,11 @@ export const CREATION_SKILL_LOG_WEIGHT = 0.75;
 /**
  * 대등한 경로에서 슈팅 하나의 평균 기회 xG.
  * 실제 1부 리그의 슛당 xG는 0.11 언저리다(2.8골 ÷ 25슛).
+ *
+ * ⚠️ 슈팅 **양**의 손잡이(`PLAYER_SHOT_BASE`·`ROUTE_SHOT_LOG_WEIGHT`)를 옮기면
+ * 여기를 반대로 잡아 리그 평균 득점을 제자리에 둔다 (match.md §1.4).
  */
-export const BASE_SHOT_XG = 0.0905;
+export const BASE_SHOT_XG = 0.0898;
 /** 최종 공격 지역 우위가 슈팅 질에 닿는 세기. */
 export const ROUTE_XG_LOGIT_WEIGHT = 0.7;
 /** 선수의 전진 위치가 슈팅 질에 닿는 세기. */
