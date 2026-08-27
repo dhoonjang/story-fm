@@ -21,7 +21,13 @@ import {
   buildGmTools,
   toToolSchema,
 } from "@story-fm/agents";
-import { ATTRIBUTE_AXES, AXIS_KO, TACTIC_TOGGLES } from "@story-fm/domain";
+import {
+  ATTRIBUTE_AXES,
+  AXIS_KO,
+  SET_PIECE_ROUTINE_AXES,
+  SET_PIECE_ROUTINE_NEUTRAL,
+  TACTIC_TOGGLES,
+} from "@story-fm/domain";
 import { AXIS_AGING, agingDelta, createGame, interpretBackgroundHeuristic } from "@story-fm/engine";
 
 /** 세계는 한 번만 세운다 — 여기서는 아무도 상태를 고치지 않는다 (`createGame`은 판당 수 초) */
@@ -69,14 +75,14 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
     for (const skill of SKILL_CATALOG) perGroup[skill.group] = (perGroup[skill.group] ?? 0) + 1;
     expect(perGroup).toEqual({
       진행: 5,
-      "전술·훈련": 14,
+      "전술·훈련": 15,
       "대화·서사": 5,
       경기: 1,
       이적: 13,
       재정: 6,
       조회: 11,
     });
-    expect(SKILL_CATALOG.length).toBe(55);
+    expect(SKILL_CATALOG.length).toBe(56);
     expect(SKILL_CATALOG.filter((s) => s.readOnly).length).toBe(11);
   });
 });
@@ -103,7 +109,7 @@ describe("규칙이 사는 자리", () => {
 
   /**
    * 설명은 고정층에 매 턴 실린다 — 길이 예산이 없으면 규칙 하나를 지울 때마다 설명
-   * 두 줄이 붙어도 아무 데서도 드러나지 않는다. 상한은 지금 총량(≈12,620자)에 한 도구
+   * 두 줄이 붙어도 아무 데서도 드러나지 않는다. 상한은 지금 총량(≈13,330자)에 한 도구
    * 몫의 여유를 얹은 값이다 — **도구가 늘 때만** 그만큼 올린다.
    */
   it("설명은 길이 예산 안에 있다", () => {
@@ -111,7 +117,7 @@ describe("규칙이 사는 자리", () => {
     for (const skill of SKILL_CATALOG) {
       expect(skill.description.length, skill.name).toBeLessThanOrEqual(600);
     }
-    expect(total).toBeLessThanOrEqual(13_060);
+    expect(total).toBeLessThanOrEqual(13_780);
   });
 
   /**
@@ -271,6 +277,35 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
         );
       }
     }
+  });
+
+  /**
+   * **세트피스 두 축도 같은 자리다** (match.md §1.4). 도구 설명과 해석 프롬프트가
+   * 「지시를 푸는 값」으로 가르치는 토큰이 열거에 없으면, 감독의 "이제 그만 올려"에
+   * 모델은 반대쪽 값을 건다 — 갈래 넷과 같은 실패고, 화면에는 드러나지 않는다.
+   */
+  it("세트피스 두 축의 중립 토큰이 모델이 보는 열거 안에 있다", () => {
+    const enumOf = (node: unknown): string[] => {
+      const n = node as { enum?: unknown[] };
+      return Array.isArray(n.enum) ? n.enum.map(String) : [];
+    };
+    const routine = TOOLS.find((t) => t.name === "set_set_piece_routine")!;
+    const intentRoutine = toToolSchema(MatchIntentSchema).properties?.setPieceRoutine as {
+      properties?: Record<string, unknown>;
+    };
+    for (const axis of SET_PIECE_ROUTINE_AXES) {
+      for (const [where, props] of [
+        ["set_set_piece_routine", routine.inputSchema.properties],
+        ["match-intent", intentRoutine.properties],
+      ] as const) {
+        expect(enumOf(props?.[axis.key]), `${where}.${axis.key}`).toContain(
+          SET_PIECE_ROUTINE_NEUTRAL,
+        );
+      }
+    }
+    // 설명이 가르치는 토큰도 같은 것 하나다 — 손으로 적으면 낱말표를 고쳐도 남는다
+    expect(routine.description).toContain(SET_PIECE_ROUTINE_NEUTRAL);
+    expect(MATCH_INTENT_SYSTEM).toContain(SET_PIECE_ROUTINE_NEUTRAL);
   });
 
   /** 중첩된 객체·배열도 같은 규칙을 지난다 — 안쪽에서 제약이 사라지면 아무도 못 본다 */

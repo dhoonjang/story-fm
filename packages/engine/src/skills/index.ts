@@ -45,6 +45,7 @@ import {
   SET_PIECE_ROLES,
   SET_PIECE_ROLE_KO,
   SET_PIECE_ROUTINE_KEYS,
+  SET_PIECE_ROUTINE_NEUTRAL,
   setPieceRoutineAxisOf,
   setPieceRoutineLevel,
   setPieceRoutineWord,
@@ -2329,10 +2330,10 @@ export function setSetPieceRoutine(
     const want = input[key];
     if (want === undefined) continue;
     const axis = setPieceRoutineAxisOf(key);
-    const level: SetPieceRoutineLevel = want ?? "normal";
+    const level: SetPieceRoutineLevel = want ?? SET_PIECE_ROUTINE_NEUTRAL;
     if (setPieceRoutineLevel(tactics.setPieceRoutine, key) === level) continue;
     // 중립은 칸을 비운다 — 「지시 없음」이 두 모양으로 적히지 않는다
-    if (level === "normal") delete next[key];
+    if (level === SET_PIECE_ROUTINE_NEUTRAL) delete next[key];
     else next[key] = level;
     changed = true;
     notes.push(`${axis.label} ${setPieceRoutineWord(key, level)}`);
@@ -2346,8 +2347,8 @@ export function setSetPieceRoutine(
   else tactics.setPieceRoutine = next;
   return {
     ok: true,
-    message: `${SET_PIECE_KO} — ${notes.join(" · ")}`,
-    brief: { head: SET_PIECE_KO, items },
+    message: `${SET_PIECE_KO} 인원 — ${notes.join(" · ")}`,
+    brief: { head: `${SET_PIECE_KO} 인원`, items },
   };
 }
 

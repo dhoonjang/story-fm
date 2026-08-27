@@ -1,8 +1,12 @@
 import {
   MISSION_CANDIDATES,
   MISSION_DAYS,
+  SET_PIECE_KO,
+  SET_PIECE_ROUTINE_AXES,
+  SET_PIECE_ROUTINE_NEUTRAL,
   TACTIC_AXES,
   TACTIC_TOGGLES,
+  setPieceRoutineChoiceText,
   tacticAxisScaleText,
   tacticToggleChoiceText,
 } from "@story-fm/domain";
@@ -139,11 +143,21 @@ export const SKILL_CATALOG = [
   },
   {
     name: "set_set_piece_takers",
-    label: "세트피스 키커",
+    label: `${SET_PIECE_KO} 키커`,
+    group: "전술·훈련",
+    readOnly: false,
+    description: `${SET_PIECE_KO}를 차는 사람을 지정한다 — corner(코너)·freeKick(프리킥)·penalty(페널티) 셋을 따로 둔다. 감독이 말한 자리만 보내고 나머지는 생략한다. 지정을 풀라는 지시에는 그 자리에 null을 보낸다 — 그러면 그라운드 위 킥력 최고(페널티는 결정력·침착성·킥력이 섞인 기량 최고)가 다시 찬다. 지정은 팀 전술에 남아 다음 경기에도 이어지고, 경기 중에도 같은 도구로 바꾼다. 승부차기 순서와 몇 명이 올라가고 남는지는 이 도구가 아니다 — 순서는 경기 중 승부차기 정지점에서 정한다.`,
+  },
+  {
+    name: "set_set_piece_routine",
+    label: `${SET_PIECE_KO} 인원`,
     group: "전술·훈련",
     readOnly: false,
     description:
-      "죽은 공을 차는 사람을 지정한다 — corner(코너)·freeKick(프리킥)·penalty(페널티) 셋을 따로 둔다. 감독이 말한 자리만 보내고 나머지는 생략한다. 지정을 풀라는 지시에는 그 자리에 null을 보낸다 — 그러면 그라운드 위 킥력 최고(페널티는 결정력·침착성·킥력이 섞인 기량 최고)가 다시 찬다. 지정은 팀 전술에 남아 다음 경기에도 이어지고, 경기 중에도 같은 도구로 바꾼다. 승부차기 순서는 이것이 아니라 경기 중 승부차기 정지점에서 정한다.",
+      `${SET_PIECE_KO}에 몇 명이 서는지 정한다 — 축 둘을 따로 둔다: ` +
+      `${SET_PIECE_ROUTINE_AXES.map(setPieceRoutineChoiceText).join(" · ")}. ` +
+      `감독이 말한 축만 보내고 나머지는 생략한다. 지시를 푸는 말에는 ${SET_PIECE_ROUTINE_NEUTRAL}을 보낸다. ` +
+      "지시는 팀 전술에 남아 다음 경기에도 이어지고, 경기 중에도 같은 도구로 바꾼다.",
   },
   {
     name: "exploit_point",

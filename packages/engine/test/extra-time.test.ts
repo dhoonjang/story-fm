@@ -26,6 +26,7 @@ import {
   shootoutFirst,
   shootoutKeeper,
   shootoutOrder,
+  simSquadFor,
   simulateExtraTime,
   simulateOtherMatches,
   startMatch,
@@ -52,6 +53,7 @@ import {
   shootoutTally,
 } from "@story-fm/domain";
 import { groupOf } from "@story-fm/engine";
+import { setPieceTakersOf } from "@story-fm/sim";
 import { createTestGame, simSquad } from "./helpers";
 
 /**
@@ -897,6 +899,60 @@ describe("연장·승부차기의 입력 (match.md §7)", () => {
     }
     expect(boardXg).toBeGreaterThan(0);
     expect(boardXg).not.toBe(bareXg);
+  });
+
+  /**
+   * 지정 키커는 `SimSquad`에 선언만 있고 라인업을 짜는 쪽이 안 실으면 아무 데도
+   * 닿지 않는다 — 화면에는 지정이 그대로 보이므로 갈려도 아무도 모른다.
+   */
+  it("간이 시뮬의 라인업이 감독의 지정 키커를 싣는다 — 페널티도 그가 찬다", () => {
+    const state = createTestGame(11);
+    const eleven = simSquad(state, "arsenal").starters;
+    const field = eleven.filter((p) => groupOf(p) !== "GK");
+    // 기본값(`penaltySkill` 최고)과 확실히 갈리는 사람 — 지정이 실렸는지 결과에서 읽힌다
+    const chosen = field.reduce((a, b) => (penaltySkill(b) < penaltySkill(a) ? b : a));
+    tacticsOf(state, "arsenal").setPieceTakers = {
+      corner: chosen.id,
+      freeKick: chosen.id,
+      penalty: chosen.id,
+    };
+
+    // 패킷이 부르는 바로 그 함수(`setPieceTakersOf`)가 지정을 세운다
+    const squad = simSquadFor(state, "arsenal", eleven);
+    expect(setPieceTakersOf(squad.slots!, squad.setPieceTakers)).toEqual({
+      corner: chosen.id,
+      freeKick: chosen.id,
+      penalty: chosen.id,
+    });
+
+    // 페널티는 지정한 사람이 차고, 그래서 득점자로 남는다 (match.md §1.4)
+    const away = simSquad(state, "chelsea");
+    let penalties = 0;
+    for (let i = 0; i < 80; i++) {
+      const rolled = quickSimulate(squad, away, 1300 + i, `takers:${i}`);
+      // 퇴장한 뒤에는 그라운드에 없으므로 기본값이 선다 — 그것도 같은 규칙이다
+      const sentOff = rolled.cards.find(
+        (card) => card.side === "home" && card.playerId === chosen.id && card.card === "red",
+      );
+      rolled.goalOrigins.forEach((origin, k) => {
+        const scorer = rolled.scorers[k]!;
+        if (origin !== "penalty" || !scorer.startsWith("home:")) return;
+        if (sentOff && rolled.goalMinutes[k]! >= sentOff.minute) return;
+        penalties++;
+        expect(scorer).toBe(`home:${chosen.id}`);
+      });
+    }
+    // 한 번도 안 나오면 위 단언이 아무것도 재지 않은 것이다
+    expect(penalties).toBeGreaterThan(0);
+
+    // 그 명단에 없으면 그 경기에만 기본값이 선다 — 지정 자체는 전술에 남는다 (2군 리그)
+    const without = simSquadFor(
+      state,
+      "arsenal",
+      eleven.filter((p) => p.id !== chosen.id),
+    );
+    expect(setPieceTakersOf(without.slots!, without.setPieceTakers).penalty).not.toBe(chosen.id);
+    expect(tacticsOf(state, "arsenal").setPieceTakers?.penalty).toBe(chosen.id);
   });
 
   it("중립 경기장은 홈 노출을 지운다 — 결승의 명목상 홈에 공짜 우위가 없다", () => {
