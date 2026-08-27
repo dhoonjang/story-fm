@@ -114,6 +114,99 @@ describe("buildStrengthPacket", () => {
     );
   });
 
+  /**
+   * **중립값은 축이 서기 전과 같은 수를 낸다** (match.md §1.4). 인원 항의 기준이
+   * 오늘의 4와 5라 로그비가 0이 되는 것이 그 근거인데, 기준을 옮기면 조용히 깨진다 —
+   * 옛 세이브 전부와 지시하지 않은 감독의 경기가 한꺼번에 달라진다.
+   */
+  it("세트피스 지시가 중립이면 축이 서기 전과 같은 패킷이 나온다", () => {
+    const plain = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75), { neutral: true });
+    const neutral = buildStrengthPacket(
+      { ...makeSide("a", 75), setPieceRoutine: { commit: "normal", guard: "normal" } },
+      // 옛 세이브에 적힌 `null`도 같은 중립으로 읽힌다
+      { ...makeSide("b", 75), setPieceRoutine: { commit: null, guard: null } },
+      { neutral: true },
+    );
+    expect(neutral.guide.setPieces).toEqual(plain.guide.setPieces);
+    expect(neutral.guide.expectedGoals).toEqual(plain.guide.expectedGoals);
+    expect(neutral.home.zones).toEqual(plain.home.zones);
+    expect(neutral.away.zones).toEqual(plain.away.zones);
+  });
+
+  it("가담을 올리면 우리 죽은 공 질이 오르고, 적게 올리면 내린다", () => {
+    const plain = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75), { neutral: true });
+    const routine = (routine: SideInput["setPieceRoutine"]) =>
+      buildStrengthPacket({ ...makeSide("a", 75), setPieceRoutine: routine }, makeSide("b", 75), {
+        neutral: true,
+      }).guide.setPieces!;
+    expect(routine({ commit: "many" }).home.meanXg).toBeGreaterThan(
+      plain.guide.setPieces!.home.meanXg,
+    );
+    expect(routine({ commit: "few" }).home.meanXg).toBeLessThan(plain.guide.setPieces!.home.meanXg);
+    // 우리가 올린 인원은 **우리** 죽은 공에만 닿는다 — 상대의 질은 그대로다
+    expect(routine({ commit: "many" }).away.meanXg).toBe(plain.guide.setPieces!.away.meanXg);
+  });
+
+  it("상대가 수비를 올리면 우리 죽은 공 질이 내려간다", () => {
+    const plain = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75), { neutral: true });
+    const guarded = buildStrengthPacket(
+      makeSide("a", 75),
+      { ...makeSide("b", 75), setPieceRoutine: { guard: "many" } },
+      { neutral: true },
+    );
+    expect(guarded.guide.setPieces!.home.meanXg).toBeLessThan(plain.guide.setPieces!.home.meanXg);
+  });
+
+  /**
+   * **대가 없는 축은 두지 않는다** (match.md §1.4). 이득은 죽은 공 질에 있고 존에
+   * 남는 것은 대가뿐이라, 두 줄이 사라지면 「다 올려라」가 최적 전략이 된다.
+   */
+  it("두 축 모두 존으로 대가를 낸다 — 가담은 수비 존, 수비는 공격 존", () => {
+    const plain = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75), { neutral: true });
+    const zones = (routine: SideInput["setPieceRoutine"]) =>
+      buildStrengthPacket({ ...makeSide("a", 75), setPieceRoutine: routine }, makeSide("b", 75), {
+        neutral: true,
+      }).home.zones;
+    expect(zones({ commit: "many" }).defense).toBeLessThan(plain.home.zones.defense);
+    expect(zones({ guard: "many" }).attack).toBeLessThan(plain.home.zones.attack);
+    // 반대쪽도 거래다 — 적게 올리면 죽은 공을 내주고 뒤를 받는다
+    expect(zones({ commit: "few" }).defense).toBeGreaterThan(plain.home.zones.defense);
+    expect(zones({ guard: "few" }).attack).toBeGreaterThan(plain.home.zones.attack);
+  });
+
+  /**
+   * **인원은 제공권을 재는 창을 함께 넓힌다** — 여섯을 올리면 다섯째·여섯째로 좋은
+   * 헤더가 함께 서므로 평균이 내려가고 인원의 이득에서 그만큼이 빠진다. 창을 고정한
+   * 채 인원만 세면 「많이」가 스쿼드와 무관한 공짜 배수가 된다.
+   */
+  it("올린 인원만큼 제공권 평균을 다시 재므로, 위가 얇은 팀은 덜 얻는다", () => {
+    const gainOf = (aerials: number[]) => {
+      const side = () => {
+        const built = makeSide("a", 75);
+        // 골키퍼를 뺀 필드 열 명 — 앞에서부터 준 값으로 덮는다
+        built.starters
+          .filter((slot) => slot.position !== "GK")
+          .forEach((slot, i) => {
+            slot.player.attributes.aerial = aerials[i] ?? aerials[aerials.length - 1]!;
+          });
+        return built;
+      };
+      const flat = buildStrengthPacket(side(), makeSide("b", 75), { neutral: true });
+      const many = buildStrengthPacket(
+        { ...side(), setPieceRoutine: { commit: "many" } },
+        makeSide("b", 75),
+        { neutral: true },
+      );
+      return many.guide.setPieces!.home.meanXg - flat.guide.setPieces!.home.meanXg;
+    };
+    // 열 명이 고르게 좋은 팀은 창이 넓어져도 평균이 그대로라 인원만큼 온전히 얻는다
+    const even = gainOf([80]);
+    // 상위 넷만 좋은 팀은 다섯째·여섯째가 평균을 끌어내려 덜 얻는다
+    const topHeavy = gainOf([80, 80, 80, 80, 50, 50, 50, 50, 50, 50]);
+    expect(even).toBeGreaterThan(0);
+    expect(topHeavy).toBeLessThan(even);
+  });
+
   it("죽은 공의 질은 키커의 킥력과 박스 안 제공권이 정한다", () => {
     const plain = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75), { neutral: true });
     const withKicker = makeSide("a", 75);

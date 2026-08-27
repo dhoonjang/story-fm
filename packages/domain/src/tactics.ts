@@ -1819,10 +1819,7 @@ export function setPieceRoutineLevel(
 }
 
 /** 값 하나의 낱말 */
-export function setPieceRoutineWord(
-  key: SetPieceRoutineKey,
-  level: SetPieceRoutineLevel,
-): string {
+export function setPieceRoutineWord(key: SetPieceRoutineKey, level: SetPieceRoutineLevel): string {
   return setPieceRoutineAxisOf(key).words[level];
 }
 

@@ -47,6 +47,7 @@ import {
   startingIdsOf,
   takeEdits,
   setCaptain,
+  setSetPieceRoutine,
   leaderGroupOf,
   LEADER_GROUP_SIZE,
   setLineup,
@@ -773,6 +774,33 @@ describe("포지션 스킬 (멀티 포지션)", () => {
 });
 
 describe("주장·전술·개인 지시", () => {
+  /**
+   * **중립은 칸을 비운다** (match.md §1.4). 「지시 없음」이 옛 세이브의 `undefined`와
+   * 지시를 푼 판의 `normal` 두 모양으로 적히면, 같은 판이 두 지문을 갖고 저장 경로가
+   * 「달라진 축만」을 가리는 규칙도 함께 흔들린다. 화면에는 둘 다 「보통」이라 이
+   * 갈림은 장부에서만 보인다.
+   */
+  it("세트피스 지시는 말한 축만 바꾸고, 중립으로 돌리면 칸을 걷는다", () => {
+    const state = createTestGame();
+    expect(userTactics(state).setPieceRoutine).toBeUndefined();
+
+    expect(setSetPieceRoutine(state, { commit: "many" }).ok).toBe(true);
+    expect(userTactics(state).setPieceRoutine).toEqual({ commit: "many" });
+
+    // 말하지 않은 축은 그대로다
+    expect(setSetPieceRoutine(state, { guard: "few" }).ok).toBe(true);
+    expect(userTactics(state).setPieceRoutine).toEqual({ commit: "many", guard: "few" });
+
+    // 같은 값을 다시 넣으면 편집 노트가 남지 않는다
+    expect(setSetPieceRoutine(state, { commit: "many" }).unchanged).toBe(true);
+
+    // `null`도 `normal`도 같은 중립이고, 둘 다 풀면 칸 자체가 걷힌다
+    expect(setSetPieceRoutine(state, { commit: null }).ok).toBe(true);
+    expect(userTactics(state).setPieceRoutine).toEqual({ guard: "few" });
+    expect(setSetPieceRoutine(state, { guard: "normal" }).ok).toBe(true);
+    expect(userTactics(state).setPieceRoutine).toBeUndefined();
+  });
+
   it("주장은 팀당 1명 — 새로 지명하면 이전 주장은 해제된다", () => {
     const state = createTestGame();
     const before = userPlayers(state).find((p) => p.isCaptain)!;
