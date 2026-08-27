@@ -1217,7 +1217,15 @@ export function simSquadFor(
     ),
     tactics: tacticsOf(state, teamId).spec,
     managerTactics: managerTacticsOf(state, teamId),
-    // 세트피스 지시도 90분(simSquadOf)과 같은 눈금 — 연장에서 죽은 공 수가 바뀌지 않는다
+    /**
+     * 죽은 공 지정과 지시 — **90분(`simSquadOf`)과 같은 눈금이다.** 감독 팀이 이
+     * 길로 오는 자리는 2군 리그(그 대진은 감독 팀만 편성된다 — season.md §2)라,
+     * 빠뜨리면 감독이 정한 키커가 그 경기에서만 조용히 사라진다. 지정한 선수가 이
+     * 열한 명에 없으면 패킷이 알아서 기본값을 세운다 (match.md §1.4).
+     */
+    ...(tacticsOf(state, teamId).setPieceTakers
+      ? { setPieceTakers: tacticsOf(state, teamId).setPieceTakers }
+      : {}),
     ...(tacticsOf(state, teamId).setPieceRoutine
       ? { setPieceRoutine: tacticsOf(state, teamId).setPieceRoutine }
       : {}),
@@ -1443,10 +1451,15 @@ export function simSquadOf(
     tactics: tacticsOf(state, teamId).spec,
     managerTactics: managerTacticsOf(state, teamId),
     /**
-     * 세트피스 지시 — **AI 팀도 지난다.** 여기가 리그의 나머지 2,000여 경기가
+     * 죽은 공 지정과 지시 — **AI 팀도 지난다.** 여기가 리그의 나머지 2,000여 경기가
      * 죽은 공을 세우는 자리라, 빠뜨리면 가담·수비 축이 감독의 경기에만 서고
      * 리그의 세트피스 득점 비율(`pnpm balance world-season`)이 그 축을 못 읽는다.
+     * 지정도 같은 자리에서 실린다 — 자리를 잃은 감독의 옛 구단이 이 길로 오고,
+     * 두 함수 중 하나만 실으면 같은 팀이 대회마다 다른 사람을 세운다.
      */
+    ...(tacticsOf(state, teamId).setPieceTakers
+      ? { setPieceTakers: tacticsOf(state, teamId).setPieceTakers }
+      : {}),
     ...(tacticsOf(state, teamId).setPieceRoutine
       ? { setPieceRoutine: tacticsOf(state, teamId).setPieceRoutine }
       : {}),
