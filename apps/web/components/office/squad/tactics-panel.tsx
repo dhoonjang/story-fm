@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  SET_PIECE_KO,
   SET_PIECE_ROLES,
   SET_PIECE_ROLE_KO,
   TACTIC_AXES,
@@ -109,11 +110,11 @@ export function TacticsPanel({
   );
 }
 
-/** 죽은 공 줄에 세우는 후보 — 이름만 있으면 된다 */
+/** 세트피스 줄에 세우는 후보 — 이름만 있으면 된다 */
 export type TakerCandidate = { id: string; name: string };
 
 /**
- * 죽은 공 — **전술판 아래 한 줄.** 코너·프리킥·페널티가 나란히 선다.
+ * 세트피스 — **전술판 아래 한 줄.** 코너·프리킥·페널티가 나란히 선다.
  *
  * 접히지 않는다. 전술 여섯 축은 고칠 때만 쓰는 눈금이라 접어 두지만, 이 줄은
  * 「누가 차는가」라는 **읽는 값**이 절반이고 그것이 경기 득점의 4분의 1을 정한다
@@ -146,7 +147,7 @@ export function SetPiecePanel({
   const listed = new Set([...starting, ...others].map((c) => c.id));
   return (
     <div className="setpiece-panel" data-testid="setpiece-panel">
-      <b className="setpiece-head">죽은 공</b>
+      <b className="setpiece-head">{SET_PIECE_KO}</b>
       {SET_PIECE_ROLES.map((role) => {
         const { designated, taker } = takers[role];
         /** 지정과 갈릴 때만 선다 — 같으면 같은 이름을 두 번 적는 셈이다 */

@@ -15,9 +15,12 @@ import { AXIS_KO } from "./player";
 import {
   DIRECTIVE_INTENSITY_KO,
   PLAYER_DIRECTIVE_KO,
+  SET_PIECE_KO,
+  SET_PIECE_ROLE_KO,
   TACTIC_AXES,
   tacticWord,
   type BoardPoint,
+  type SetPieceRole,
 } from "./tactics";
 
 export interface ZoneStrength {
@@ -180,7 +183,7 @@ export interface PlayerShotProfile {
 }
 
 /**
- * 팀의 **죽은 공 프로필** — 코너·프리킥·페널티 (match.md §1.4).
+ * 팀의 **세트피스 프로필** — 코너·프리킥·페널티 (match.md §1.4).
  *
  * ⚠️ 팀 기대 슈팅 **위에 더하는 것이 아니라 안에서 옮긴 몫**이다. 선수×경로
  * 프로필(`shotProfiles`)은 이 몫을 뺀 **열린 플레이만** 싣고, 세 채널의 합이
@@ -310,11 +313,15 @@ export interface StrengthPacket {
   };
 }
 
-/** 죽은 공의 갈래 이름 — 태그의 `code`가 곧 `ShotOrigin`이다 (match.md §1.4) */
-const SET_PIECE_KO: Record<string, string> = {
-  corner: "코너",
-  free_kick: "프리킥",
-  penalty: "페널티",
+/**
+ * 태그의 `code`(=`ShotOrigin`)가 가리키는 자리 — **이름은 여기 적지 않는다.**
+ * 자리 이름 한 벌은 `SET_PIECE_ROLE_KO`가 갖고 있고, 같은 세 낱말을 여기 한 번 더
+ * 적어 두면 화면과 문장이 조용히 갈린다.
+ */
+const SET_PIECE_ROLE_BY_ORIGIN: Record<string, SetPieceRole> = {
+  corner: "corner",
+  free_kick: "freeKick",
+  penalty: "penalty",
 };
 
 // ── 태그 → 문장 ───────────────────────────────────────
@@ -622,7 +629,7 @@ const MISMATCH_KO: Record<string, { sharp: (r: Render) => string; vague: (r: Ren
     },
     "set-piece": {
       sharp: (r) => `${r.subject} 세트피스 키커: ${r.who(0)}(${AXIS_KO.kicking} ${r.v("kicking")})`,
-      vague: (r) => `${r.subject}는 죽은 공이 위협적이다`,
+      vague: (r) => `${r.subject}는 ${SET_PIECE_KO}가 위협적이다`,
     },
     discipline: {
       sharp: (r) =>
@@ -772,8 +779,9 @@ export function packetTagText(tag: PacketTag, ctx?: PacketTagContext): string {
     case "tactical":
       return TACTICAL_KO[tag.code]?.(r) ?? tag.text ?? "";
     case "set-piece": {
-      const head = SET_PIECE_KO[tag.code] ?? "죽은 공";
-      // 키커가 직접 찬 죽은 공(직접 프리킥·페널티)은 마무리가 곧 키커라 한 사람만 선다
+      const role = SET_PIECE_ROLE_BY_ORIGIN[tag.code];
+      const head = role === undefined ? SET_PIECE_KO : SET_PIECE_ROLE_KO[role];
+      // 키커가 직접 찬 세트피스(직접 프리킥·페널티)는 마무리가 곧 키커라 한 사람만 선다
       const taker = r.who(0);
       const finisher = r.who(1);
       const kicking = tag.values.kicking;

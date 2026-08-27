@@ -38,6 +38,7 @@ import {
   MATCHDAY_SQUAD,
   POSITION_CODES,
   RATING_MAX,
+  SET_PIECE_KO,
   SET_PIECE_ROLES,
   SET_PIECE_ROLE_KO,
   reserveTrainingTitle,
@@ -2250,7 +2251,7 @@ export function setPlayerPosition(
 }
 
 /**
- * **죽은 공 키커 지정** — "코너는 사카가 차", "페널티는 네 거야" (match.md §1.4).
+ * **세트피스 키커 지정** — "코너는 사카가 차", "페널티는 네 거야" (match.md §1.4).
  *
  * 셋 중 말한 자리만 바뀐다. `null`을 주면 지정이 풀려 코어의 기본값(그라운드 위
  * 킥력 최고 · `penaltySkill` 최고)으로 돌아간다 — 감독이 손을 떼는 길이 있어야
@@ -2293,8 +2294,8 @@ export function setSetPieceTakers(
   tactics.setPieceTakers = next;
   return {
     ok: true,
-    message: `죽은 공 키커 — ${notes.join(" · ")}`,
-    brief: { head: "세트피스 키커", items },
+    message: `${SET_PIECE_KO} 키커 — ${notes.join(" · ")}`,
+    brief: { head: `${SET_PIECE_KO} 키커`, items },
   };
 }
 

@@ -3,6 +3,7 @@
 import { Fragment } from "react";
 import type { OfficeViews } from "@story-fm/engine";
 import {
+  SET_PIECE_KO,
   TACTIC_AXES,
   TACTIC_TOGGLES,
   anchorOf,
@@ -691,7 +692,7 @@ function TeamTotals({ totals }: { totals: MatchTotals }) {
       <span>
         선방 <b>{totals.saves}</b>
       </span>
-      <span title="죽은 공에서 나온 기회 — 코너는 지정한 키커가 찬다">
+      <span title={`${SET_PIECE_KO}에서 나온 기회 — 코너는 지정한 키커가 찬다`}>
         코너 <b>{totals.corners}</b>
       </span>
       <span>
