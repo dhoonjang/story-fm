@@ -1217,6 +1217,10 @@ export function simSquadFor(
     ),
     tactics: tacticsOf(state, teamId).spec,
     managerTactics: managerTacticsOf(state, teamId),
+    // 세트피스 지시도 90분(simSquadOf)과 같은 눈금 — 연장에서 죽은 공 수가 바뀌지 않는다
+    ...(tacticsOf(state, teamId).setPieceRoutine
+      ? { setPieceRoutine: tacticsOf(state, teamId).setPieceRoutine }
+      : {}),
     // 연장의 부상 추첨도 성향을 탄다 — 90분(simSquadOf)과 같은 눈금 (match.md §7)
     proneness: pronenessOf(
       state,
@@ -1438,6 +1442,14 @@ export function simSquadOf(
     ),
     tactics: tacticsOf(state, teamId).spec,
     managerTactics: managerTacticsOf(state, teamId),
+    /**
+     * 세트피스 지시 — **AI 팀도 지난다.** 여기가 리그의 나머지 2,000여 경기가
+     * 죽은 공을 세우는 자리라, 빠뜨리면 가담·수비 축이 감독의 경기에만 서고
+     * 리그의 세트피스 득점 비율(`pnpm balance world-season`)이 그 축을 못 읽는다.
+     */
+    ...(tacticsOf(state, teamId).setPieceRoutine
+      ? { setPieceRoutine: tacticsOf(state, teamId).setPieceRoutine }
+      : {}),
     bench,
     proneness: pronenessOf(
       state,

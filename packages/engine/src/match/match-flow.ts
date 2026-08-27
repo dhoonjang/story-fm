@@ -384,6 +384,13 @@ function buildPacketFor(
         ? { setPieceTakers: tacticsOf(state, teamId).setPieceTakers }
         : {}),
       /**
+       * 세트피스 지시 — 가담·수비 두 축(§1.4). 키커와 같은 자리에 살고 같은 문으로
+       * 들어간다. 없으면 패킷이 둘 다 중립으로 읽어 축이 서기 전과 셈이 같다.
+       */
+      ...(tacticsOf(state, teamId).setPieceRoutine
+        ? { setPieceRoutine: tacticsOf(state, teamId).setPieceRoutine }
+        : {}),
+      /**
        * 감독의 **분석 능력** — 키포인트를 몇 개나 발견하는가 (key-points.ts).
        * 우리 팀에만 준다: 이 패킷은 감독이 보는 화면이고, 상대 벤치의 눈은 여기 없다.
        */

@@ -336,6 +336,8 @@ export function buildOpponentReport(
       tactics: tactics.spec,
       managerTactics: managerTacticsOf(state, teamId),
       ...(tactics.setPieceTakers ? { setPieceTakers: tactics.setPieceTakers } : {}),
+      // 세트피스 지시도 함께 — 리포트가 읽는 죽은 공 수가 킥오프 패킷과 갈리지 않는다
+      ...(tactics.setPieceRoutine ? { setPieceRoutine: tactics.setPieceRoutine } : {}),
       // 감독의 눈은 우리 쪽에만 — 킥오프 패킷과 같은 규약 (match-flow의 `buildPacketFor`)
       ...(ours ? { managerAnalysis: state.manager.attributes.analysis } : {}),
       directives: directivesOnPitch(
