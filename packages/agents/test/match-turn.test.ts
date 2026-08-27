@@ -134,6 +134,22 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
     for (const event of rolled) expect(event.minute).toBeGreaterThanOrEqual(subEvent.minute);
   });
 
+  /**
+   * **경기 중에도 세트피스 인원이 장부에 닿는다** (match.md §2). 의도의 갈래 하나가
+   * 평시와 같은 스킬을 지나는 자리라, 이름이 어긋나면 `applyMatchIntent`의 `call`이
+   * 조용히 아무것도 하지 않는다 — 감독에게는 지시가 걸린 것처럼 보이는 거짓 성공이다.
+   */
+  it("세트피스 인원 지시가 그 턴에 팀 전술로 들어간다", () => {
+    const state = matchState();
+    const { applied } = turn(state, { advance: "none", setPieceRoutine: { commit: "many" } });
+    expect(applied.touched).toBe(true);
+    expect(userTactics(state).setPieceRoutine?.commit).toBe("many");
+
+    // 중립은 지시를 푼다 — 칸이 비어야 「지시하지 않음」이 한 모양으로 적힌다
+    turn(state, { advance: "none", setPieceRoutine: { commit: "normal" } });
+    expect(userTactics(state).setPieceRoutine?.commit).toBeUndefined();
+  });
+
   it("포메이션을 바꾼 턴은 전술판 검토를 위해 진행하지 않는다", () => {
     const state = matchState();
     const minute = state.pendingMatch!.ledger.minute;
