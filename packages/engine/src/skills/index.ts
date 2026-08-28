@@ -1,4 +1,5 @@
 import {
+  INCIDENT_KIND_KO,
   MANAGER_ATTRIBUTE_KO,
   PROMISE_KIND_KO,
   numberGrievanceStands,
@@ -7,6 +8,7 @@ import {
 import type {
   BoardPoint,
   GamePlayer,
+  IncidentKind,
   ManagerAttributes,
   DrilledTactics,
   MarketCard,
@@ -139,7 +141,30 @@ import { openPromise, type PromiseOpened } from "../squad/promises";
 import { assignRequestedNumber, numberBlockText } from "../squad/numbers";
 import { archetypeTraitsOf } from "../world/player-persona";
 // 면담과 완장은 사이를 옮긴다 (people.md §6 「관계 점수」)
-import { MANAGER_SUBJECT, moveRelation, relationFactor } from "../world/relations";
+import {
+  MANAGER_SUBJECT,
+  RELATION_EVENTS,
+  incidentRelationEvent,
+  moveRelation,
+  relationFactor,
+} from "../world/relations";
+// 잔향 — 그 대화를 쥔 스킬이 심경 한 문장을 남긴다 (people.md §5)
+import {
+  applyMoodNotes,
+  TEAM_TALK_MOODS,
+  type MoodLine,
+  type MoodNoteSubmission,
+} from "../squad/mood";
+// 판정은 수용성 앵커 ± 한 단계 안에서만 선다 (career.md §2)
+import {
+  RECEPTIVITY_ANCHOR,
+  RECEPTIVITY_KO,
+  receptivityLine,
+  receptivityOf,
+  receptivityTierOf,
+  type Receptivity,
+} from "../squad/receptivity";
+import { applyCharacterMemories } from "../world/persona";
 import { dressingRoomFactor, dressingRoomVoice, leaderGroupOf } from "../squad/hierarchy";
 import {
   groupOf,
@@ -943,6 +968,78 @@ function roundAwayFromZero(value: number): number {
   return Math.sign(value) * Math.round(Math.abs(value));
 }
 
+/**
+ * 판정 사다리 — 가운데가 `neutral`이고 수용성 앵커가 그 자리를 옮긴다 (career.md §2).
+ * `feared`는 사다리 밖이라 그대로 선다.
+ */
+const TALK_LADDER: readonly TalkOutcome[] = [
+  "angered",
+  "disappointed",
+  "neutral",
+  "reassured",
+  "motivated",
+];
+const TEAM_TALK_LADDER: readonly TeamTalkOutcome[] = [
+  "backfired",
+  "flat",
+  "neutral",
+  "encouraged",
+  "inspired",
+];
+/** 앵커에서 outcome이 벗어날 수 있는 칸 수 */
+const OUTCOME_BAND = 1;
+
+/**
+ * 모델의 outcome을 앵커 ± 한 단계로 자른다 — 감독이 무슨 말을 했는지는 그대로이고,
+ * 그 말이 어디까지 닿았는지를 코어가 정한다. 사다리 밖의 값은 건드리지 않는다.
+ */
+function clampOutcome<T extends string>(ladder: readonly T[], outcome: T, tier: Receptivity): T {
+  const at = ladder.indexOf(outcome);
+  if (at < 0) return outcome;
+  const centre = Math.floor(ladder.length / 2) + RECEPTIVITY_ANCHOR[tier];
+  const idx = Math.max(centre - OUTCOME_BAND, Math.min(centre + OUTCOME_BAND, at));
+  return ladder[idx] ?? outcome;
+}
+
+/** 잘린 판정이 도구 결과에 남기는 조각 — 잘리지 않았으면 없다 */
+function receptivityPiece(
+  tier: Receptivity,
+  asked: string,
+  stood: string,
+): { text: string; item: SkillBriefItem } | null {
+  if (asked === stood) return null;
+  return {
+    text: ` (수용성 ${RECEPTIVITY_KO[tier]} — ${asked}은 ${stood}으로)`,
+    item: item({ label: "수용성", text: RECEPTIVITY_KO[tier] }),
+  };
+}
+
+/**
+ * 감독이 부른 이름들을 id로 편다 — 심경 문장의 `playerId`가 이름일 수 있어서다
+ * (agents.md §7). 풀리지 않는 이름의 줄은 버린다: `applyMoodNotes`가 닿지 않은
+ * 선수를 버리는 것과 같은 결이다.
+ */
+function resolveMoods(
+  state: GameState,
+  moods: readonly MoodNoteSubmission[],
+): MoodNoteSubmission[] {
+  const out: MoodNoteSubmission[] = [];
+  for (const mood of moods) {
+    const pick = pickOurPlayer(state, mood.playerId);
+    if (pick.ok) out.push({ ...mood, playerId: pick.player.id });
+  }
+  return out;
+}
+
+/** 팀토크의 앵커 — 그 말을 들은 명단의 수용성 점수 **중앙값**의 등급 (career.md §2) */
+function roomReceptivity(state: GameState, heard: readonly GamePlayer[]): Receptivity {
+  if (heard.length === 0) return "wary";
+  const scores = heard.map((p) => receptivityOf(state, p.id).score).sort((a, b) => a - b);
+  const mid = Math.floor(scores.length / 2);
+  const median = scores.length % 2 === 1 ? scores[mid]! : (scores[mid - 1]! + scores[mid]!) / 2;
+  return receptivityTierOf(median);
+}
+
 export function applyTeamTalk(
   state: GameState,
   input: {
@@ -952,6 +1049,8 @@ export function applyTeamTalk(
     intensity: 1 | 2 | 3;
     /** 이 말이 새 영입들의 적응에 남긴 무게 — 코어 앵커에서 EVENT_BAND만큼만 */
     settling?: number;
+    /** 잔향 — 그 말을 들은 선수에게 남는 심경 한 문장, 최대 `TEAM_TALK_MOODS` (people.md §5) */
+    moods?: MoodNoteSubmission[];
   },
 ): SkillResult {
   const shout = input.occasion === "shout";
@@ -994,8 +1093,18 @@ export function applyTeamTalk(
     state.manager.teamTalkedOn = { ...talkedOn, [input.occasion]: state.date };
   }
 
-  const base = TEAM_TALK_BASE[input.outcome];
   const present = matchSquadIds(state);
+  /**
+   * **외침은 그 경기의 명단에만 닿는다** — 벤치에서 그라운드로 가는 말이라 집에 있는
+   * 선수단까지 울릴 수 없다. 라커룸의 팀토크는 선수단 전체의 것이다 (career.md §2).
+   */
+  const heard =
+    shout && present ? userPlayers(state).filter((p) => present.has(p.id)) : userPlayers(state);
+  // 방의 수용성이 앵커다 — 판정은 그 앵커 ± 한 단계 안에서만 선다 (career.md §2)
+  const tier = roomReceptivity(state, heard);
+  const outcome = clampOutcome(TEAM_TALK_LADDER, input.outcome, tier);
+  const clipped = receptivityPiece(tier, input.outcome, outcome);
+  const base = TEAM_TALK_BASE[outcome];
   const room = dressingRoomFactor(state, state.userTeamId, present);
   const voice = dressingRoomVoice(state, state.userTeamId, present);
   // 그 방에 선 완장 — 주장이 없는 자리에서는 부주장이 그 이름이다
@@ -1012,15 +1121,15 @@ export function applyTeamTalk(
   );
   const bound = shout ? SHOUT_MORALE_BOUND : TEAM_TALK_MORALE_BOUND;
   const bounded = Math.max(-bound, Math.min(bound, delta));
-  /**
-   * **외침은 그 경기의 명단에만 닿는다** — 벤치에서 그라운드로 가는 말이라 집에 있는
-   * 선수단까지 울릴 수 없다. 라커룸의 팀토크는 선수단 전체의 것이다 (career.md §2).
-   */
-  const heard =
-    shout && present ? userPlayers(state).filter((p) => present.has(p.id)) : userPlayers(state);
   for (const p of heard) {
     p.state.form = clampForm(p.state.form + moraleToForm(bounded));
   }
+  // 잔향은 그 말을 들은 선수에게만, 셋까지 — 넘치면 앞의 셋이다
+  applyMoodNotes(
+    state,
+    resolveMoods(state, (input.moods ?? []).slice(0, TEAM_TALK_MOODS)),
+    new Set(heard.map((p) => p.id)),
+  );
   // 라커룸 앞에서 한 말은 **아직 겉도는 새 영입**에게 특히 크게 남는다 (settling.ts)
   const settlingAnchorValue = settlingAnchor("team_talk", { intensity: input.intensity });
   /**
@@ -1045,7 +1154,7 @@ export function applyTeamTalk(
   const used = state.pendingMatch?.shouts ?? 0;
   pushNarrative(
     state,
-    `${shout ? "외침" : "팀토크"}(${input.outcome}) — 사기 ${bounded >= 0 ? "+" : ""}${bounded}`,
+    `${shout ? "외침" : "팀토크"}(${outcome}) — 사기 ${bounded >= 0 ? "+" : ""}${bounded}`,
     // 하루 한 번의 라커룸 장면과 90분 사이의 한마디가 같은 무게로 남지는 않는다
     shout ? 1 : 2,
   );
@@ -1055,6 +1164,7 @@ export function applyTeamTalk(
     tone: bounded >= 0 ? ("good" as const) : ("bad" as const),
     message:
       `${shout ? "명단" : "팀"} 전체 사기 ${bounded >= 0 ? "+" : ""}${bounded}` +
+      (clipped ? clipped.text : "") +
       (shout ? ` · 이번 경기 외침 ${used}/${SHOUT_PER_MATCH}` : "") +
       (settled > 0 ? ` · 적응 중인 ${settled}명이 한 걸음 가까워졌습니다` : "") +
       (xpMsg ? ` · ${xpMsg}` : ""),
@@ -1066,6 +1176,7 @@ export function applyTeamTalk(
       head: shout ? "정지점 외침" : `${OCCASION_KO[input.occasion]} 팀토크`,
       items: [
         item({ label: shout ? "명단 사기" : "팀 사기", text: signed(bounded), delta: bounded }),
+        ...(clipped ? [clipped.item] : []),
         // 몇 번 남았는지는 감독이 아껴 쓸지 정하는 값이다 — 안내 문구가 아니라 눈금
         ...(shout ? [item({ label: "외침", text: `${used}/${SHOUT_PER_MATCH}` })] : []),
         /**
@@ -1150,6 +1261,8 @@ export function applyTalkToPlayer(
      * 반려돼도 면담 자체는 그대로 성립한다.
      */
     promise?: PromiseInput;
+    /** 잔향 — 이 면담이 그 선수에게 남긴 심경 한 문장 (people.md §5) */
+    mood?: MoodLine;
   },
 ): SkillResult {
   const pick = pickOurPlayer(state, input.playerId);
@@ -1169,7 +1282,14 @@ export function applyTalkToPlayer(
   }
   player.state.talkedOn = state.date;
 
-  const base = TALK_BASE[input.outcome];
+  /**
+   * **앵커를 읽는 것이 먼저다** — 오늘의 말은 어제까지의 사이와 지금의 마음으로 울린다.
+   * 잘린 outcome이 사기·관계·XP·불만 해소 전부의 근거다 (career.md §2).
+   */
+  const read = receptivityOf(state, player.id);
+  const outcome = clampOutcome(TALK_LADDER, input.outcome, read.tier);
+  const clipped = receptivityPiece(read.tier, input.outcome, outcome);
+  const base = TALK_BASE[outcome];
   /**
    * **계수가 둘이다** (career.md §2) — 감독의 리더십이 말을 하는 사람이라면 관계는
    * 그 말을 듣는 사람이다. 부호를 가리지 않는 것은 리더십·라커룸 계수와 같은 규약이라,
@@ -1186,7 +1306,7 @@ export function applyTalkToPlayer(
   );
   const bounded = Math.max(-TALK_MORALE_BOUND, Math.min(TALK_MORALE_BOUND, delta));
   player.state.form = clampForm(player.state.form + moraleToForm(bounded));
-  moveRelation(state, MANAGER_SUBJECT, player.id, `talk-${input.outcome}`);
+  moveRelation(state, MANAGER_SUBJECT, player.id, `talk-${outcome}`);
 
   /**
    * 면담은 방치 이슈를 해소한다 — **잘 풀렸을 때만** (career.md §2). 결과와 무관하게
@@ -1196,6 +1316,13 @@ export function applyTalkToPlayer(
   const resolvesIssue = base > 0;
   const hadIssue = resolvesIssue && state.issues.some((i) => i.gamePlayerId === player.id);
   if (resolvesIssue) state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
+  /**
+   * 잔향은 **불만이 풀린 뒤에** 선다 — 앞에 두면 방금 푼 불만을 안으라고 요구해
+   * 잘 풀린 면담의 문장이 버려진다 (`applyMoodNotes`의 세 번째 문).
+   */
+  if (input.mood) {
+    applyMoodNotes(state, [{ ...input.mood, playerId: player.id }], new Set([player.id]));
+  }
 
   /**
    * 새 영입에게 면담은 **적응의 계기**다 — 아직 못 쓰는 선수에게도 감독이 할 수
@@ -1237,7 +1364,7 @@ export function applyTalkToPlayer(
       : grantManagerXP(state, "leadership", TALK_XP_ON_FAILURE);
   pushNarrative(
     state,
-    `${player.name} 면담(${input.outcome}) — 사기 ${bounded >= 0 ? "+" : ""}${bounded}`,
+    `${player.name} 면담(${outcome}) — 사기 ${bounded >= 0 ? "+" : ""}${bounded}`,
     2,
   );
   return {
@@ -1245,14 +1372,17 @@ export function applyTalkToPlayer(
     tone: bounded >= 0 ? ("good" as const) : ("bad" as const),
     message:
       `${player.name} 사기 ${bounded >= 0 ? "+" : ""}${bounded}` +
+      (clipped ? clipped.text : "") +
       (hadIssue ? " · 불만 해소" : "") +
       (settling ? ` · 적응 ${Math.round(settling.progress * 100)}%` : "") +
       (promised ? promised.text : "") +
-      (xpMsg ? ` · ${xpMsg}` : ""),
+      (xpMsg ? ` · ${xpMsg}` : "") +
+      ` · ${receptivityLine(read)}`,
     brief: {
       head: `${player.name} 면담`,
       items: [
         item({ label: "사기", text: signed(bounded), delta: bounded }),
+        ...(clipped ? [clipped.item] : []),
         ...(hadIssue ? [item({ text: "불만 해소" })] : []),
         ...(settling
           ? [item({ label: "적응", text: `${Math.round(settling.progress * 100)}%` })]
@@ -3471,89 +3601,168 @@ export function clearTraining(state: GameState, input: ClearTrainingInput): Skil
   };
 }
 
-// ---- 창발 보조: 서사 이벤트 (GM 전용, 능력치 접근 불가 — overview §7) ----
+// ---- 사건 기록: 감독이 말로 만든 사건이 장부에 서는 자리 (people.md §6) ----
 
-const MAX_NARRATIVE_EVENTS_PER_DAY = 3;
+/** 하루에 세울 수 있는 사건 수 — 서사 줄의 갈래(`incident`)로 센다 */
+export const MAX_INCIDENTS_PER_DAY = 3;
+/** 한 사건이 당사자의 사기를 움직일 수 있는 폭 — 면담 한 번(±8)보다 좁다 */
+export const INCIDENT_MORALE_BOUND = 6;
+/** 요약의 상한 — `IncidentSchema.summary`와 같은 수 */
+const INCIDENT_SUMMARY_MAX = 200;
+/** 인물 기억 한 줄의 상한 — `CharacterMemorySchema.text`와 같은 수. 요약이 길면 여기서 접는다 */
+const INCIDENT_MEMORY_MAX = 120;
+
 /**
- * 서사 이벤트 한 번이 컨디션을 움직일 수 있는 폭 — GM이 쓴 장면 하나가
- * 경기 한 판(±10 안팎)을 덮어쓰지 않게 하는 문 (overview §7의 앵커±폭).
+ * 갈래 → 효과의 모양 (people.md §6 「사건 기록」) — 당사자 사기는 세기 2의 값이고,
+ * 팀 사기는 세기와 무관하다. 관계는 `RELATION_EVENTS`의 `incident-*` 줄이 갖는다.
  */
-const NARRATIVE_CONDITION_BOUND = 5;
-/** 모델이 말할 수 있는 폼 **단계**의 폭 — −1/0/+1 이며 코어가 폼 축으로 옮긴다 */
-const NARRATIVE_FORM_STEP_BOUND = 1;
+const INCIDENT_EFFECTS: Record<IncidentKind, { morale: number; team: number }> = {
+  discipline: { morale: -4, team: 1 },
+  reward: { morale: 4, team: 1 },
+  care: { morale: 3, team: 0 },
+  "public-praise": { morale: 3, team: 1 },
+  "public-criticism": { morale: -4, team: -1 },
+  apology: { morale: 2, team: 0 },
+  mediation: { morale: 1, team: 0 },
+  rule: { morale: -1, team: 0 },
+  outing: { morale: 2, team: 2 },
+  other: { morale: 0, team: 0 },
+};
 
-export function applyNarrativeEvent(
+/** 당사자 ↔ 당사자를 움직이는 갈래 — 이 둘만이 선수 사이를 움직이는 사건이다 */
+const INCIDENT_PAIR_EVENT: Partial<Record<IncidentKind, "mediated" | "outing-together">> = {
+  mediation: "mediated",
+  outing: "outing-together",
+};
+
+/** 정착 크레딧이 붙는 갈래 — 겉도는 새 영입에게 감독이 손을 뻗은 일 */
+const INCIDENT_SETTLING_KINDS: ReadonlySet<IncidentKind> = new Set(["care", "reward"]);
+
+/** 세기 → 서사·기억의 무게 (1→2 · 2→3 · 3→4) */
+const incidentSalience = (intensity: 1 | 2 | 3): number => intensity + 1;
+
+/**
+ * `record_incident` — 벌금·포상·병문안·공개 칭찬과 질책·사과·중재·규칙·회식.
+ * 코어가 만들지도 읽지도 못하는 사건을 GM이 그 턴에 세운다. 코어는 갈래·당사자·
+ * 세기만 들고, 무슨 일이었는지는 `summary`와 장면의 것이다.
+ *
+ * 검증이 전부 앞에 선다 — 없는 이름이 하나라도 있으면 아무것도 움직이지 않는다.
+ */
+export function recordIncident(
   state: GameState,
-  input: { playerIds: string[]; conditionDelta?: number; formDelta?: number; note: string },
+  input: {
+    kind: IncidentKind;
+    /** 당사자 — 감독이 부른 이름 그대로 올 수 있다 (`pickOurPlayer`) */
+    playerIds: string[];
+    intensity: 1 | 2 | 3;
+    /** 무슨 일이었나 — 한 줄 */
+    summary: string;
+    /** 잔향 — 당사자에게 남는 심경 문장. `playerId`는 이름일 수 있다 */
+    moods?: MoodNoteSubmission[];
+  },
 ): SkillResult {
-  /**
-   * 하루 한도는 **갈래로 센다.** 접두 문장(`"[서사]"`)으로 가르면 그 문구를 고치는
-   * 순간 한도가 사라진다 (records.ts `NarrativeKind`, overview.md §1 철칙 4).
-   * 갈래가 없는 옛 세이브의 줄은 세지 않는다 — 한도는 그날 쌓인 줄만 본다.
-   */
   const todayCount = state.narrative.filter(
-    (n) => n.date === state.date && n.kind === "gm-event",
+    (n) => n.date === state.date && n.kind === "incident",
   ).length;
-  if (todayCount >= MAX_NARRATIVE_EVENTS_PER_DAY) {
-    return {
-      ok: false,
-      message: `오늘의 서사 이벤트 한도(${MAX_NARRATIVE_EVENTS_PER_DAY}회)를 초과했습니다`,
-    };
+  if (todayCount >= MAX_INCIDENTS_PER_DAY) {
+    return { ok: false, message: `오늘의 사건 한도(${MAX_INCIDENTS_PER_DAY}건)를 넘었습니다` };
   }
-
-  const condition = Math.max(
-    -NARRATIVE_CONDITION_BOUND,
-    Math.min(NARRATIVE_CONDITION_BOUND, Math.round(input.conditionDelta ?? 0)),
-  );
-  /**
-   * 서사 이벤트의 폼 변화 — 모델은 −1/0/+1의 **단계**로 말하고, 코어가 폼 축의
-   * 폭으로 옮긴다. 폼은 −1~1이라 ±1을 그대로 더하면 한 장면이 선수를 곧바로
-   * 절정·바닥에 꽂는다 (경기 한 판의 변화가 0.3 안팎이다).
-   */
-  const NARRATIVE_FORM_STEP = 0.12;
-  const formStep = Math.max(
-    -NARRATIVE_FORM_STEP_BOUND,
-    Math.min(NARRATIVE_FORM_STEP_BOUND, Math.round(input.formDelta ?? 0)),
-  );
-  const form = formStep * NARRATIVE_FORM_STEP;
-  // 검증 먼저, 적용은 전원 유효할 때만 — 원자성 (장부 applyEvents와 동일 패턴)
+  const summary = input.summary.trim();
+  if (summary.length === 0 || summary.length > INCIDENT_SUMMARY_MAX) {
+    return { ok: false, message: `요약은 1~${INCIDENT_SUMMARY_MAX}자여야 합니다` };
+  }
   const resolved = input.playerIds.map((ref) => pickOurPlayer(state, ref));
   const missing = resolved.filter((r) => !r.ok);
   if (missing.length > 0) {
     return { ok: false, message: missing.map((r) => (r.ok ? "" : r.message)).join(" · ") };
   }
-  const touched: string[] = [];
+  const parties: GamePlayer[] = [];
   for (const r of resolved) {
-    if (!r.ok) continue;
-    const player = r.player;
-    player.state.condition = clampCondition(player.state.condition + condition);
-    player.state.form = clampForm(player.state.form + form);
-    touched.push(player.name);
+    if (r.ok && !parties.some((p) => p.id === r.player.id)) parties.push(r.player);
   }
-  pushNarrative(state, input.note, 3, "gm-event");
-  /**
-   * 항목은 **대상과 수치까지만.** `note`는 LLM이 쓴 자유 문장이라 상한이 없고,
-   * 이미 서사 로그와 장면에 남아 있다 — 알림이 그것을 다시 옮겨 적을 자리가 아니다.
-   * 폼은 모델이 말한 단계(−1/0/+1)로 적는다 — 화면에 0.12는 뜻이 없다.
-   *
-   * 축은 **한 줄에 하나씩** 선다 — 항목 하나가 한 줄이고 `delta` 하나가 그 줄의
-   * 부호라, 컨디션과 폼을 한 `note`에 묶으면 부호가 둘인 줄이 된다.
-   */
-  const moved = deltaItems([
-    ["컨디션", condition],
-    ["폼", formStep],
-  ]);
+  if (parties.length === 0) return { ok: false, message: "당사자가 없습니다" };
+
+  const effect = INCIDENT_EFFECTS[input.kind];
+  // 면담과 같은 세기 배수 — 리더십·관계 계수는 곱하지 않는다 (people.md §6)
+  const morale = Math.max(
+    -INCIDENT_MORALE_BOUND,
+    Math.min(
+      INCIDENT_MORALE_BOUND,
+      Math.round(effect.morale * (input.intensity / TALK_INTENSITY_PIVOT)),
+    ),
+  );
+  for (const p of parties) p.state.form = clampForm(p.state.form + moraleToForm(morale));
+  if (effect.team !== 0) {
+    for (const p of userPlayers(state)) {
+      p.state.form = clampForm(p.state.form + moraleToForm(effect.team));
+    }
+  }
+
+  const event = incidentRelationEvent(input.kind);
+  for (const p of parties) moveRelation(state, MANAGER_SUBJECT, p.id, event);
+  const pairEvent = INCIDENT_PAIR_EVENT[input.kind];
+  if (pairEvent) {
+    for (let i = 0; i < parties.length; i += 1) {
+      for (let j = i + 1; j < parties.length; j += 1) {
+        moveRelation(state, parties[i]!.id, parties[j]!.id, pairEvent);
+      }
+    }
+  }
+
+  const settled = INCIDENT_SETTLING_KINDS.has(input.kind)
+    ? parties.filter(
+        (p) =>
+          creditSettling(state, p.id, "incident", {
+            anchor: settlingAnchor("incident", { intensity: input.intensity }),
+          }) > 0,
+      ).length
+    : 0;
+
+  const salience = incidentSalience(input.intensity);
+  // 인물 기억이 즉시 선다 — 선수의 characterId는 이름이다 (people.md §6 · §9-1)
+  applyCharacterMemories(
+    state,
+    parties.map((p) => ({
+      characterId: p.name,
+      text: summary.slice(0, INCIDENT_MEMORY_MAX),
+      salience,
+    })),
+  );
+  pushNarrative(state, summary, salience, "incident");
+  (state.incidents ??= []).push({
+    date: state.date,
+    kind: input.kind,
+    playerIds: parties.map((p) => p.id),
+    intensity: input.intensity,
+    summary,
+  });
+  applyMoodNotes(state, resolveMoods(state, input.moods ?? []), new Set(parties.map((p) => p.id)));
+
+  const names = parties.map((p) => p.name);
+  const relation = RELATION_EVENTS[event];
+  const head = INCIDENT_KIND_KO[input.kind];
   return {
     ok: true,
-    message: `서사 이벤트 반영(${touched.join(", ")}) — ${input.note}`,
+    tone: morale >= 0 ? ("good" as const) : ("bad" as const),
+    message:
+      `${head} — ${names.join(", ")}` +
+      ` · 사기 ${signed(morale)}` +
+      (effect.team === 0 ? "" : ` · 팀 사기 ${signed(effect.team)}`) +
+      (relation === 0 ? "" : ` · 관계 ${signed(relation)}`) +
+      (pairEvent && parties.length > 1
+        ? ` · 당사자 사이 ${signed(RELATION_EVENTS[pairEvent])}`
+        : "") +
+      (settled > 0 ? ` · 적응 중인 ${settled}명이 한 걸음 가까워졌습니다` : ""),
     brief: {
-      head: "서사 이벤트",
+      head,
       items: [
-        item({
-          text: briefNames(touched),
-          ...(moved.length === 0 ? { note: "수치 변화 없음" } : {}),
-        }),
-        ...moved,
+        item({ text: briefNames(names) }),
+        ...deltaItems([
+          ["사기", morale],
+          ["팀 사기", effect.team],
+          ["관계", relation],
+        ]),
+        ...(settled > 0 ? [item({ label: "적응", text: `${settled}명` })] : []),
       ],
     },
   };

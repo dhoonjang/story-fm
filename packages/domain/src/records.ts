@@ -1558,7 +1558,7 @@ export type ManagerPromise = z.infer<typeof ManagerPromiseSchema>;
 export const SettlingEventSchema = z.object({
   gamePlayerId: z.string().min(1),
   date: DateString,
-  kind: z.enum(["talk", "team_talk", "captain"]),
+  kind: z.enum(["talk", "team_talk", "captain", "incident"]),
   /** 쌓인(또는 깎인) 크레딧 */
   credit: z.number(),
   note: z.string().optional(),

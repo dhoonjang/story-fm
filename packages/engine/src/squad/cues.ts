@@ -17,6 +17,8 @@ import { mentoringReadOf } from "./mentoring";
 import { diffDays } from "../competition/calendar";
 import { daysUntilReturn, internationalBreaksOf, openCallUp } from "../competition/international";
 import { playerArchetypeOf } from "../world/player-persona";
+// 근황 줄 끝에 수용성 사실이 선다 — 판정 근거 (c)를 읽을 자리다 (career.md §2)
+import { receptivityLine, receptivityOf } from "./receptivity";
 import {
   announcedInterestsOn,
   openInjury,
@@ -328,7 +330,7 @@ export function speakerCues(state: GameState, limit = 3): SpeakerCue[] {
     cues.push({
       playerId: player.id,
       name: player.name,
-      fact,
+      fact: `${fact} · ${receptivityLine(receptivityOf(state, player.id))}`,
       // 최근에 말한 사람은 뒤로 — 그 안에서는 날짜로 회전한다
       rank: spoke.has(normalizeSpeaker(player.name)) ? 1 : 0,
     });

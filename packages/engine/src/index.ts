@@ -88,6 +88,7 @@ export * from "./squad/slump";
 export * from "./squad/other-clubs";
 export * from "./squad/mood";
 export * from "./squad/cues";
+export * from "./squad/receptivity";
 export * from "./squad/coach-cues";
 export * from "./squad/settling";
 export * from "./squad/injury";

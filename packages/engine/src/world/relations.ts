@@ -1,5 +1,6 @@
 import type {
   GamePlayer,
+  IncidentKind,
   Persona,
   PersonaRelation,
   PressStance,
@@ -247,8 +248,30 @@ export const RELATION_EVENTS = {
   "board-eased": 6,
   "demand-met": 8,
   "demand-failed": -10,
+  // 감독이 말로 만든 사건 — 감독 ↔ 당사자 (people.md §6 「사건 기록」). 세기와 무관하다
+  "incident-discipline": -6,
+  "incident-reward": 5,
+  "incident-care": 6,
+  "incident-public-praise": 3,
+  "incident-public-criticism": -6,
+  "incident-apology": 5,
+  "incident-mediation": 2,
+  "incident-rule": 0,
+  "incident-outing": 2,
+  "incident-other": 0,
+  /** 당사자 ↔ 당사자 — 선수 사이를 움직이는 사건은 감독이 세운 이 둘뿐이다 */
+  mediated: 6,
+  "outing-together": 3,
 } as const satisfies Record<string, number>;
 export type RelationEvent = keyof typeof RELATION_EVENTS;
+
+/**
+ * 사건의 갈래가 감독 ↔ 당사자의 관계 사건이 된다 — `stanceRelationEvent`와 같은
+ * 완결성 검사다: 갈래가 하나 늘면 표에 줄이 없어 컴파일이 멈춘다.
+ */
+export function incidentRelationEvent(kind: IncidentKind): RelationEvent {
+  return `incident-${kind}`;
+}
 
 /**
  * 스탠스 한 줄이 관계 사건이 된다 — `null`은 답하지 않은 자리다.

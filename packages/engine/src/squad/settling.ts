@@ -68,6 +68,8 @@ export const EVENT_CREDIT: Record<SettlingEvent["kind"], number> = {
    * 지명은 되돌려도 다시 쌓이지 않는다(같은 날 한 번 · 같은 종류 한 번).
    */
   captain: 15,
+  /** 감독이 말로 만든 사건(`care`·`reward`) — 마주 앉은 면담보다 작다 (people.md §6) */
+  incident: 3,
 };
 
 /**
@@ -82,6 +84,7 @@ export const EVENT_BAND: Record<SettlingEvent["kind"], number> = {
   talk: 4,
   team_talk: 1.5,
   captain: 5,
+  incident: 2,
 };
 
 /**
