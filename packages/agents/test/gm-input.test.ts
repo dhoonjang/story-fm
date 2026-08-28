@@ -460,6 +460,52 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
     expect(note).toContain(target.name);
   });
 
+  /**
+   * 경기 → 평시 다리 — 팀토크가 backfired 했는지, 누가 퇴장·교체로 나갔는지는 서사
+   * 줄로는 `<recent>`에 거의 들지 못했다. 코어가 장부(스킬 기록·사건 목록)에서 뽑아
+   * 직전 경기 블록에 세운다 (agents.md §5).
+   */
+  it("직전 경기 블록에 라커룸 결과와 그라운드를 떠난 사람이 선다", () => {
+    const state = game();
+    const match = state.matches.find(
+      (m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
+    )!;
+    const side = match.homeTeamId === state.userTeamId ? "home" : "away";
+    const [sentOff, out, sub] = userPlayers(state).filter((p) => p.squadLevel === "first");
+    match.date = state.date;
+    match.result = {
+      homeGoals: 1,
+      awayGoals: 2,
+      scorers: [],
+      ratings: {},
+      events: [
+        { minute: 63, type: "red_card", team: side, actors: [sentOff!.id], causes: [] },
+        { minute: 70, type: "substitution", team: side, actors: [out!.id, sub!.id], causes: [] },
+      ],
+    };
+    state.chat.push({
+      role: "model",
+      text: "@중계: 라커룸이 무겁습니다.",
+      toolCalls: [
+        {
+          name: "team_talk",
+          summary: "팀토크",
+          input: { occasion: "half", outcome: "backfired", intensity: 3 },
+        },
+      ],
+      at: state.date,
+      inMatch: true,
+      matchId: match.id,
+    });
+
+    const note = buildGmStateNote(state);
+    const block = note.slice(note.indexOf("<last_match>"), note.indexOf("</last_match>"));
+    expect(block).toContain("- 라커룸: 하프타임 팀토크 backfired");
+    expect(block).toContain(`퇴장 ${sentOff!.name}(63′)`);
+    expect(block).toContain(`교체 아웃 ${out!.name}(70′)`);
+    expect(block).not.toContain(sub!.name);
+  });
+
   it("스카우트 파견을 주의 신호로 알린다", () => {
     const state = game();
     const target = playersOf(state, "chelsea")[0]!;

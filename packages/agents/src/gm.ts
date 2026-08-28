@@ -7,7 +7,6 @@ import {
   advanceTime,
   applyScenePoint,
   awaitingShootout,
-  buildMoodBrief,
   buildRatingBrief,
   buildTrainingBrief,
   clockOf,
@@ -17,6 +16,7 @@ import {
   headCoachOf,
   humanizePlayerIds,
   markEntered,
+  matchRated,
   minutesOfClock,
   arrivedResponses,
   pendingVerdicts,
@@ -24,18 +24,24 @@ import {
   selectCharacters,
   takeMedia,
   takeNews,
+  toolCallFactLine,
   type AdvanceOutcome,
   type CardMark,
   type GameState,
   type GoalMark,
+  type MatchRatingBrief,
   type TrainingBrief,
 } from "@story-fm/engine";
 import { agentConfig, createGameLLM, hasKey, type GameLLM } from "@story-fm/llm";
 import { MAX_REPORT_CARDS, NO_CARDS, takeArrivedReports } from "./report-cards";
-import { rateMatchPerformances } from "./match-rater";
-import { reportMood } from "./mood-rater";
 import { reportTraining } from "./training-rater";
-import { buildNoSegmentMessage, MATCH_CASTER_SYSTEM } from "./match-caster";
+import {
+  buildNoSegmentMessage,
+  buildSettlementMessage,
+  makeSettleTool,
+  MATCH_CASTER_SYSTEM,
+  SETTLE_MATCH_TOOL,
+} from "./match-caster";
 import { buildOnboardingTurn, runMockGmTurn } from "./mock-gm";
 import { runNegotiator } from "./negotiator";
 import { retryOnce, ModelOutputError } from "./retry";
@@ -119,28 +125,7 @@ function hasSceneLine(text: string): boolean {
  */
 function sceneFromToolCalls(calls: readonly GmToolCall[]): string | null {
   const lines = calls
-    .map((call) => {
-      const brief = call.brief;
-      const body = brief
-        ? [
-            brief.head,
-            brief.items
-              .map((item) =>
-                [item.label, item.text, item.note ? `(${item.note})` : ""]
-                  .filter((part) => part && part.length > 0)
-                  .join(" "),
-              )
-              .join(" · "),
-          ]
-            .filter((part) => part.length > 0)
-            .join(" — ")
-        : call.summary
-            .split("\n")
-            .map((line) => line.trim())
-            .filter((line) => line.length > 0)
-            .join(" · ");
-      return body.trim();
-    })
+    .map(toolCallFactLine)
     .filter((line) => line.length > 0)
     .map((line) => `@: *${line}*`);
   return lines.length > 0 ? lines.join("\n") : null;
@@ -244,10 +229,6 @@ export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promis
 }
 
 /**
- * 심경 결산 (mood-rater) — 다른 결산과 같은 계약: 대상이 없으면 부르지 않고,
- * 실패하면 앵커가 남는다. 감독이 부른 적 없는 내부 판정이라 칩으로 세우지 않는다.
- */
-/**
  * 오늘 답이 도착한 협상을 **상대가 판정한다** — GM 턴이 시작하기 전이다 (agents.md §4-1).
  *
  * 협상 하나에 호출 하나이고, 실패해도 코어 앵커가 반영되므로 여기서 턴이 막히지
@@ -264,11 +245,6 @@ async function answerCounterparties(state: GameState, calls: GmToolCall[]): Prom
     if (answered.result.ok) lines.push(answered.result.message);
   }
   return lines;
-}
-
-async function rateMood(state: GameState, from: string): Promise<void> {
-  const brief = buildMoodBrief(state, from, state.date);
-  if (brief) await reportMood(state, brief);
 }
 
 /** 실모드 — 일상은 GM, 경기 장면은 매치 캐스터 설정으로 라우팅 */
@@ -388,13 +364,33 @@ async function runRealGmTurn(
     if (!parsed.ok) throw new GmTurnFailure(parsed.message);
     applied = applyMatchIntent(state, parsed.intent, calls, goals, cards);
   }
+  /**
+   * **종료 턴** — 구간이 `finished`로 굴러갔고 승부차기도 남지 않았다 (agents.md §3
+   * 「종료 턴」). 장부가 `finished`여도 승부차기가 남았으면 승부는 아직 갈리지 않았다
+   * (match.md §2) — 여기서 마감하면 킥을 한 발도 차지 않은 경기가 결과로 굳는다.
+   *
+   * 브리프는 장부가 살아 있을 때만 만들 수 있다 — 아래 `finalizeMatch`가 지우기 전에.
+   */
+  const settling =
+    inMatch &&
+    !kickoff &&
+    state.pendingMatch?.ledger.phase === "finished" &&
+    !awaitingShootout(state);
+  const brief: MatchRatingBrief | null = settling ? buildRatingBrief(state) : null;
+  /** 결산 도구가 반영한 인원 — 0이면 앵커가 그대로 남은 것이다 */
+  let settled = 0;
 
   /**
    * 경기 중에는 도구 표면이 **0**이다 — 해석은 이미 끝났고 중계는 문장만 쓴다.
    * 도구 정의는 고정층이라 캐시 프리픽스를 부풀리는데, 경기 중에 그 값을 치를
-   * 이유가 사라졌다 (agents.md §5).
+   * 이유가 사라졌다 (agents.md §5). 예외는 종료 턴의 결산 도구 하나다 — 중계를 쓴
+   * 머리가 그 경기의 평점을 매긴다.
    */
-  const tools = inMatch ? [] : buildGmTools(state, calls, { deferNegotiationIds });
+  const tools = inMatch
+    ? brief
+      ? [makeSettleTool(state, brief, (n) => (settled = n))]
+      : []
+    : buildGmTools(state, calls, { deferNegotiationIds });
 
   // 입력은 안정성 순 3층 — ① 고정 프롬프트 ② 레퍼런스 ③ 발화+상태 스냅샷.
   // 앞 두 층만 캐시 프리픽스(0.1×)다 (docs/llm/agents.md §5)
@@ -483,6 +479,25 @@ async function runRealGmTurn(
    */
   const matchMinute = inMatch ? (state.pendingMatch?.ledger.minute ?? null) : null;
   /**
+   * 종료 턴의 마감은 **캐스터 호출보다 앞이다** — 기준 평점(앵커)이
+   * `MATCH.result.ratings`에 박혀 있어야 결산 도구가 그 위에 매길 수 있다. 장부
+   * 노트·중계 이력·장부의 분은 위에서 이미 잡아 두었다 (agents.md §3 「종료 턴」).
+   */
+  if (settling) {
+    const digest = finalizeMatch(state);
+    /**
+     * 말풍선에는 **우리 경기만** 선다 — 재정과 같은 라운드 다른 경기는 감독이
+     * 확인하러 갈 화면(재정·대회)이 이미 갖고 있다. 대신 모델은 다음 평시 턴에
+     * 셋을 다 읽는다 (`pendingNews` → `buildGmStateNote`).
+     */
+    calls.push({
+      name: "finalize_match",
+      summary: digest.ours.join(" · "),
+      brief: { head: "경기 종료", items: digest.ours.map((text) => ({ text })) },
+    });
+    pushNews(state, [...digest.finance, ...digest.others]);
+  }
+  /**
    * 경기의 첫 줄은 코어가 쓴다 — 모델이 적은 시각은 화면에 닿기 전에 걷힌다.
    * 위생은 두 국면에 다 걸린다 — 걸러질 줄이 화면에 잠깐 떴다 사라지면 그것대로
    * 눈에 띄므로 저장과 화면에 같은 것이 선다 (agents.md §2). 중계가 읽는 것은
@@ -513,17 +528,24 @@ async function runRealGmTurn(
           ...(applied && applied.notes.length > 0
             ? [``, `<core_replies>`, ...applied.notes.map((n) => `- ${n}`), `</core_replies>`]
             : []),
+          // 종료 턴의 결산 표 — 이번 턴 층이다 (agents.md §3 「종료 턴」)
+          ...(brief ? [``, buildSettlementMessage(brief)] : []),
         ].join("\n"),
         stateNote,
         tools,
+        // 종료 턴의 첫 왕복은 결산이다 — 그 뒤에 마무리 중계를 쓴다
+        ...(brief ? { toolChoice: { name: SETTLE_MATCH_TOOL } } : {}),
         onText: streamText,
       }),
     /**
-     * 자국은 **이 호출이 남긴 것만** 센다. 캐스터는 도구가 없어 판을 바꾸지 못하고,
-     * 판을 바꾼 것은 앞 걸음의 코어다 — 그 기록을 자국으로 세면 구간을 굴린 모든
-     * 경기 턴이 첫 실패에 그대로 무너진다 (agents.md §3 ④·§8).
+     * 자국은 **이 호출이 남긴 것만** 센다. 캐스터는 판을 바꿀 도구가 없고, 판을
+     * 바꾼 것은 앞 걸음의 코어다 — 그 기록을 자국으로 세면 구간을 굴린 모든 경기
+     * 턴이 첫 실패에 그대로 무너진다 (agents.md §3 ④·§8). 종료 턴은 결산 표식이
+     * 하나 더 자국이다.
      */
-    inMatch ? () => streamed : () => streamed || calls.some((c) => c.name !== TIME_PASSED),
+    inMatch
+      ? () => streamed || (brief !== null && matchRated(state, brief.matchId))
+      : () => streamed || calls.some((c) => c.name !== TIME_PASSED),
   );
 
   // 도구 앞에 흘린 작업 서술과 값이 같은 반복 헤더를 걷어낸다 — 중계에는 헤더 규칙을
@@ -607,49 +629,17 @@ async function runRealGmTurn(
     await reportTraining(state, brief);
   }
 
+  // 종료 턴은 마감이 이미 장부를 지웠다 — 이 경기의 중계 이력은 더 쓰이지 않는다
   if (inMatch && state.pendingMatch) {
     state.pendingMatch.casterHistory = result.history;
     // 첫 휘슬을 불었다 — 이 뒤로는 패킷과 도구를 쥔 보통의 진행 턴이다
     if (kickoff) markEntered(state);
-    /**
-     * 승부차기가 남았으면 마감하지 않는다 — 장부는 `finished`지만 승부는 아직
-     * 갈리지 않았다 (match.md §2). 여기서 마감하면 킥을 한 발도 차지 않은 경기가
-     * 결과로 굳는다.
-     */
-    if (state.pendingMatch.ledger.phase === "finished" && !awaitingShootout(state)) {
-      // 브리프는 장부가 살아 있을 때만 만들 수 있다 — finalizeMatch가 지우기 전에
-      const brief = buildRatingBrief(state);
-      const digest = finalizeMatch(state);
-      /**
-       * 말풍선에는 **우리 경기만** 선다 — 재정과 같은 라운드 다른 경기는 감독이
-       * 확인하러 갈 화면(재정·대회)이 이미 갖고 있다. 대신 모델은 다음 평시 턴에
-       * 셋을 다 읽는다 (`pendingNews` → `buildGmStateNote`).
-       */
-      calls.push({
-        name: "finalize_match",
-        summary: digest.ours.join(" · "),
-        brief: { head: "경기 종료", items: digest.ours.map((text) => ({ text })) },
-      });
-      pushNews(state, [...digest.finance, ...digest.others]);
-      // 평점 — 코어 앵커 위에 LLM이 입체를 더한다. 실패해도 앵커가 남는다
-      if (brief) {
-        const rated = await rateMatchPerformances(state, brief);
-        if (rated.applied > 0) {
-          // 결산은 감독이 부른 적 없는 내부 판정이라 칩으로 세우지 않는다 (agents.md §4).
-          // 평점은 명단과 종료 화면이 이미 갖고 있다
-          calls.push({
-            name: "rate_players",
-            summary: `경기 평점 ${rated.applied}명`,
-            silent: true,
-          });
-        }
-      }
-      // 심경 — **평점이 매겨진 뒤에** 읽어야 "잘하고도 졌다"가 문장에 담긴다
-      await rateMood(state, turnFrom);
-    }
   }
-  // 시간이 흐른 턴의 심경 — 그 구간에 실제로 무슨 일이 있었던 선수만 다시 쓴다
-  if (!inMatch && state.date !== turnFrom) await rateMood(state, turnFrom);
+  if (settled > 0) {
+    // 결산은 감독이 부른 적 없는 내부 판정이라 칩으로 세우지 않는다 (agents.md §4).
+    // 평점은 명단과 종료 화면이 이미 갖고 있다
+    calls.push({ name: SETTLE_MATCH_TOOL, summary: `경기 결산 ${settled}명`, silent: true });
+  }
   // 출력 상한에 잘린 턴은 이미 스트리밍으로 나가 되돌릴 수 없다 — 원인만 로그에 남긴다
   if (result.stopReason === "truncated") {
     console.error(

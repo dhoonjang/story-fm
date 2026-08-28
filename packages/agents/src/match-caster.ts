@@ -1,11 +1,33 @@
+import { z } from "zod";
 import type { MatchEvent, ShootoutKick, ShootoutOutcome, ShotOrigin } from "@story-fm/domain";
-import { packetTagText, subCauseText } from "@story-fm/domain";
+import { ATTRIBUTE_AXES, packetTagText, subCauseText } from "@story-fm/domain";
+import {
+  ATTR_STEP_MAX,
+  ATTR_STEP_MIN,
+  MATCH_ATTR_CAP,
+  MATCH_FAMILIARITY_MAX,
+  MATCH_FAMILIARITY_MIN,
+  MOOD_BATCH,
+  MOOD_NOTE_MAX,
+  RATING_BAND,
+  RATING_MAX,
+  RATING_MIN,
+  applyMoodNotes,
+  settleMatchRating,
+  type GameState,
+  type MatchRatingBrief,
+} from "@story-fm/engine";
+import type { GameToolSpec } from "@story-fm/llm";
+import { agingDeclineLine } from "./aging-line";
+import { inputError, toToolSchema } from "./tool-schema";
 
 /**
  * 매치 캐스터 — 경기 장면의 GM. 사건은 코어가 xg로 이미 확정하고
  * 캐스터는 그것을 중계·연출·대화로 옮긴다 — **결과를 바꿀 도구가 없다** (match.md).
  * 감독의 말은 앞 호출(지시 해석)이 이미 옮겼고 구간도 코어가 굴려 두었으므로,
  * 이 호출이 받는 것은 확정된 사건과 **그 턴에 갱신된 패킷**이다 (agents.md §3).
+ * 경기가 끝난 턴에는 결산 도구 하나(`settle_match`)가 더 실린다 — 중계를 쓴 머리가
+ * 그 경기의 평점을 매긴다 (agents.md §3 「종료 턴」).
  * 프롬프트는 코드처럼 버전 관리한다 (AGENTS.md 6-5).
  */
 export const MATCH_CASTER_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 경기 중계자다. 코어가 굴린 경기를 중계하고 벤치의 대화를 연출한다. 경기의 결과를 바꿀 도구는 없다.
@@ -18,6 +40,7 @@ export const MATCH_CASTER_SYSTEM = `당신은 스토리 기반 풋볼 매니저�
 - <segment> — 코어가 확정한 사건 목록. <stop> — 구간이 멈춘 이유. <segment>가 오지 않은 턴이 킥오프 턴이다.
 - <core_replies> — 이번 턴의 지시가 판에 걸렸는지.
 - <ledger> — 구간이 굴러간 뒤의 스코어·시각·국면·온필드와 벤치·교체 횟수. <standing> — 우리 전술과 개인 지시. <packet> — 기대 득점과 상성의 근거. <targets> — 노릴 수 있는 곳. 장부가 유일한 진실이다 — 스코어는 계산하지 않고 읽는다.
+- <settlement> — 경기가 끝난 턴에만 온다. 출전 선수의 기준 평점 표 — 결산 도구의 입력이다.
 
 # 사건
 일어난 일은 이미 정해져 있다. 사건 목록을 빠뜨리지 않고, 더하지 않고 생생한 중계로 옮긴다. 사건 사이의 흐름·분위기·관중·벤치의 반응은 당신의 재량이고, 그 여백이 이야기다.
@@ -27,7 +50,7 @@ export const MATCH_CASTER_SYSTEM = `당신은 스토리 기반 풋볼 매니저�
 - 킥오프 턴은 경기장·대진·선발을 훑고 첫 휘슬까지만 쓴다. 이력에 경기 전 대화가 있으면 그 목소리에서 이어 연다.
 
 # 한 턴
-- 한 턴은 구간 하나, 한 호흡이다. 구간이 골·퇴장·부상으로 끝났으면 그 장면이 정점이고 거기서 끝낸다. 하프타임은 라커룸 장면 하나, 경기 종료는 마무리 중계다.
+- 한 턴은 구간 하나, 한 호흡이다. 구간이 골·퇴장·부상으로 끝났으면 그 장면이 정점이고 거기서 끝낸다. 하프타임은 라커룸 장면 하나, 경기 종료는 결산 도구를 부른 뒤 쓰는 마무리 중계다.
 - 정지점은 감독의 차례다. 감독의 대사·판단·지시는 유저가 쓴다. 수석코치의 짧은 관찰이나 벤치의 반응으로 장면을 닫고 감독에게 넘긴다.
 - 감독이 선수를 부르기만 했으면 그 선수를 데려오는 데까지가 당신 몫이고, 선수의 대답까지만 쓴다. 팀 토크와 면담의 말과 강도는 감독이 고른다.
 - 감독은 수석코치·벤치 선수와 대화한다. 그라운드 위 선수에게 한 말은 연출로만 닿는다.
@@ -195,4 +218,156 @@ export function buildNoSegmentMessage(minute: number): string {
     "</segment>",
     "<stop>시간이 흐르지 않았다</stop>",
   ].join("\n");
+}
+
+/**
+ * 경기 결산 — **종료 턴의 캐스터가 첫 왕복에 부르는 도구** (agents.md §3 「종료 턴」).
+ *
+ * 코어가 `finalizeMatch`로 앵커를 박아 둔 뒤이고, 캐스터는 중계 본문·하프타임
+ * 팀토크·외침을 이미 컨텍스트에 쥔 채 앵커 ±RATING_BAND 안에서 다시 매긴다. 실패하면
+ * 앵커가 그대로 남으므로 경기는 언제나 완결된다. 무엇을 매기고 어디까지 벗어날 수
+ * 있는지는 도구 설명이 갖는다 — 폭·인원·노화 문장은 전부 코어 상수에서 읽는다
+ * (prompts.md §5-2).
+ */
+export const SETTLE_MATCH_TOOL = "settle_match";
+
+export const SETTLE_MATCH_DESCRIPTION = `출전한 선수 전원의 경기 결산을 한 번에 제출한다 — 평점과 한 줄 근거, 전술 적응도, 능력치, 심경.
+- 기록(골·도움·슛·선방·카드)은 이미 기준 평점에 반영돼 있다. 더할 것은 기록에 안 남는 것이다 — 지배력, 위기 관리, 실점 장면에서의 책임, 교체 투입 후의 영향, 짧게 뛰고도 흐름을 바꾼 순간.
+- 출전 시간을 감안한다. 15분 뛴 교체 선수를 90분 뛴 선수와 같은 잣대로 재지 않는다. 자리를 감안한다. 수비수의 무실점과 공격수의 무득점은 같은 무게가 아니다. 팀 결과에 휩쓸리지 않는다.
+- rating — ${RATING_MIN}~${RATING_MAX}, 기준 평점에서 ±${RATING_BAND}를 넘지 않는다. note는 한 문장 40자 안팎 — "무난했다" 같은 빈 말 대신 그 경기의 사실을 적는다.
+- drill — 이 경기로 전술 적응도가 얼마나 올랐는가, ${MATCH_FAMILIARITY_MIN}~${MATCH_FAMILIARITY_MAX}. 빠뜨린 선수는 변화가 없는 것으로 본다.
+- attribute · attributeStep — 이 경기로 한 축이 움직인 선수만, 0~${MATCH_ATTR_CAP}명, 각 한 축 +${ATTR_STEP_MAX} 또는 −${-ATTR_STEP_MIN}. ${agingDeclineLine()}
+- moods — 그 경기가 남긴 심경 한 문장(60자 안팎), ${MOOD_BATCH}명까지. 불만이 걸린 선수는 그 사실을 문장에 담고 acknowledgesIssue를 true로 적는다. 수치(평점·체력·퍼센트)는 문장에 적지 않는다.
+- 선수 id는 표의 것을 그대로 돌려준다. 두 번째 제출은 반영되지 않는다.`;
+
+/**
+ * 스키마가 받아들이는 폭 — 코어 밴드(`RATING_MIN`~`RATING_MAX`,
+ * `MATCH_FAMILIARITY_MIN`~`MATCH_FAMILIARITY_MAX`)보다 넓게 열어 둔다.
+ * 벗어난 값은 파싱을 깨뜨리는 대신 코어가 자르므로(`settleMatchRating`),
+ * 한 선수의 과한 숫자 하나로 경기 결산 전체가 버려지지 않는다.
+ */
+const ACCEPTED_RATING_MAX = 20;
+const ACCEPTED_DRILL_BOUND = 20;
+
+/** 한 번에 매기는 인원 상한 — 한 경기 명단(선발 + 벤치)보다 넉넉하다 */
+const MAX_RATED_PLAYERS = 30;
+
+/** 근거 한 줄의 길이 상한 — 설명은 40자 안팎을 요구하고, 여기는 그 여유다 */
+const NOTE_MAX = 200;
+
+const RatingEntrySchema = z.object({
+  playerId: z.string().min(1).describe("<settlement> 표의 id 그대로"),
+  rating: z
+    .number()
+    .min(0)
+    .max(ACCEPTED_RATING_MAX)
+    .describe(`${RATING_MIN}~${RATING_MAX}, 소수 첫째 자리. 기준 평점 ±${RATING_BAND} 안`),
+  drill: z
+    .number()
+    .min(-ACCEPTED_DRILL_BOUND)
+    .max(ACCEPTED_DRILL_BOUND)
+    .optional()
+    .describe(`전술 적응도 변화 — ${MATCH_FAMILIARITY_MIN}~${MATCH_FAMILIARITY_MAX}`),
+  attribute: z
+    .enum(ATTRIBUTE_AXES)
+    .nullish()
+    .describe(`움직일 능력치 축 (${MATCH_ATTR_CAP}명까지)`),
+  attributeStep: z
+    .number()
+    .min(ATTR_STEP_MIN)
+    .max(ATTR_STEP_MAX)
+    .nullish()
+    .describe(`그 축의 방향 — ${ATTR_STEP_MAX} 또는 ${ATTR_STEP_MIN}`),
+  note: z.string().max(NOTE_MAX).optional().describe("한 문장 근거 (40자 안팎)"),
+});
+const MoodEntrySchema = z.object({
+  playerId: z.string().min(1).describe("<settlement> 표의 id 그대로"),
+  text: z.string().min(1).max(MOOD_NOTE_MAX).describe("그 선수의 심경 한 문장 (60자 안팎)"),
+  /** 그 문장이 불만을 담았는가 — 코어는 낱말을 세지 않는다 (people.md §5) */
+  acknowledgesIssue: z.boolean().optional().describe("그 문장이 이 선수의 불만을 담았는가"),
+});
+const SettleInputSchema = z.object({
+  ratings: z.array(RatingEntrySchema).min(1).max(MAX_RATED_PLAYERS),
+  moods: z.array(MoodEntrySchema).max(MOOD_BATCH).optional(),
+});
+
+/** 모델이 보는 입력 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
+export const SETTLE_MATCH_INPUT = toToolSchema(SettleInputSchema);
+
+/**
+ * 결산 표 — 종료 턴의 이번 턴 층에 선다. 사건 목록은 싣지 않는다: 캐스터가 이미
+ * 그 사건들을 중계했고, 그 중계가 이력에 있다.
+ */
+export function buildSettlementMessage(brief: MatchRatingBrief): string {
+  const outcome = { win: "승", draw: "무", loss: "패" }[brief.outcome];
+  const rows = brief.players.map((p) => {
+    const line = [
+      `${p.playerId} | ${p.name} | ${p.position}`,
+      p.started ? "선발" : "교체",
+      `${p.minutes}분`,
+      `기준 평점 ${p.anchor.toFixed(1)}`,
+      `${p.age ?? "?"}세 · 성장 여지 ${p.room ?? 0} · 전술적응 ${p.familiarity ?? 0}`,
+    ];
+    const did: string[] = [];
+    if (p.goals > 0) did.push(`${p.goals}골`);
+    if (p.assists > 0) did.push(`${p.assists}도움`);
+    if (p.shots > 0) did.push(`슛${p.shots}`);
+    if (p.saves > 0) did.push(`선방${p.saves}`);
+    if (p.yellows > 0) did.push(`경고${p.yellows}`);
+    if (p.reds > 0) did.push("퇴장");
+    line.push(did.length > 0 ? did.join(" ") : "기록 없음");
+    return `- ${line.join(" | ")}`;
+  });
+  return [
+    "<settlement>",
+    `최종 스코어: ${brief.scoreline} (우리 팀 ${outcome})`,
+    "채점 대상 (id | 이름 | 자리 | 선발/교체 | 출전시간 | 기준 평점 | 나이·성장 여지·전술적응 | 기록)",
+    ...rows,
+    "</settlement>",
+  ].join("\n");
+}
+
+/**
+ * 결산 도구 — 평점·적응도·능력치는 `settleMatchRating`이 한 표식 아래 한 번만 받고,
+ * 심경은 출전 선수로 좁혀 `applyMoodNotes`가 검사한다 (agents.md §4-3).
+ */
+export function makeSettleTool(
+  state: GameState,
+  brief: MatchRatingBrief,
+  onApplied: (applied: number) => void,
+): GameToolSpec {
+  const allowed = new Set(brief.players.map((p) => p.playerId));
+  return {
+    name: SETTLE_MATCH_TOOL,
+    description: SETTLE_MATCH_DESCRIPTION,
+    inputSchema: SETTLE_MATCH_INPUT,
+    handle(input: unknown) {
+      const parsed = SettleInputSchema.safeParse(input);
+      if (!parsed.success) return inputError(parsed.error);
+      const { applied, skipped, already } = settleMatchRating(
+        state,
+        brief.matchId,
+        parsed.data.ratings,
+      );
+      if (already) {
+        // ok: false로 답하면 모델이 도구 루프를 한 바퀴 더 돈다
+        return { ok: true, message: "이 경기의 결산은 이미 반영됐습니다 — 다시 제출하지 마세요" };
+      }
+      if (applied === 0) {
+        return {
+          ok: false,
+          message: "반영된 평점이 없습니다 — <settlement> 표의 id를 그대로 쓰세요",
+        };
+      }
+      const moods = applyMoodNotes(state, parsed.data.moods ?? [], allowed);
+      onApplied(applied);
+      return {
+        ok: true,
+        message: [
+          `평점 ${applied}명 반영${skipped > 0 ? ` (${skipped}명은 대상이 아니라 무시)` : ""}`,
+          ...(moods > 0 ? [`심경 ${moods}명`] : []),
+        ].join(" · "),
+      };
+    },
+  };
 }

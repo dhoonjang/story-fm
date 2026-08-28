@@ -117,6 +117,8 @@ import {
   visionItemText,
   type CallUpReturnState,
   type GamePlayer,
+  type MatchRecord,
+  type TeamTalkOccasion,
   type CharacterEntry,
   type CharacterInjection,
   type ManagerOffer,
@@ -336,9 +338,96 @@ export function buildMatchBrief(state: GameState): string {
 
 const DOW_KO = ["일", "월", "화", "수", "목", "금", "토"];
 
+/** 팀토크 자리 — 다이제스트 줄에 한글로 선다. 판정(outcome)은 코드 그대로다 */
+const TEAM_TALK_OCCASION_KO: Record<TeamTalkOccasion, string> = {
+  pre: "경기 전",
+  half: "하프타임",
+  post: "경기 후",
+  daily: "훈련장",
+  shout: "외침",
+};
+
+/** 그 경기의 채팅 턴 — 표식이 있으면 경기 id로, 없으면(옛 세이브) 날짜로 가른다 */
+function turnsOfMatch(state: GameState, match: MatchRecord): ChatTurn[] {
+  return state.chat.filter(
+    (t) =>
+      t.inMatch === true &&
+      (t.matchId !== undefined ? t.matchId === match.id : t.at === match.date),
+  );
+}
+
 /**
- * 경기 → 평시 다리 — 직전 경기의 결과·득점·최고 평점을 코어가 장부에서 뽑는다
- * (평시 GM은 중계 이력을 보지 않는다). 직전 한 경기만 — 그 이상은 get_league의 몫.
+ * 라커룸의 결과 — 그 경기의 팀토크 자리와 판정. 스킬 기록의 입력(`team_talk`)에서
+ * 읽는다: 코어가 적은 사실이지 중계 문장이 아니다.
+ */
+function lockerRoomLine(turns: readonly ChatTurn[]): string | null {
+  const talks: string[] = [];
+  for (const call of turns.flatMap((t) => t.toolCalls)) {
+    if (call.name !== "team_talk") continue;
+    const input = call.input as { occasion?: unknown; outcome?: unknown } | undefined;
+    if (typeof input?.occasion !== "string" || typeof input.outcome !== "string") continue;
+    const occasion = (TEAM_TALK_OCCASION_KO as Record<string, string>)[input.occasion];
+    talks.push(`${occasion ?? input.occasion} 팀토크 ${input.outcome}`);
+  }
+  return talks.length > 0 ? `- 라커룸: ${talks.join(" · ")}` : null;
+}
+
+/**
+ * 그라운드를 떠난 우리 선수 — 퇴장·부상·교체. 장부의 사건 목록(`result.events`)이
+ * 원본이고, 사건이 남지 않은 옛 세이브는 그 턴의 카드·부상 기록·교체 스킬 입력으로
+ * 떨어진다. 없으면 줄을 세우지 않는다.
+ */
+function departedLine(
+  state: GameState,
+  match: MatchRecord,
+  turns: readonly ChatTurn[],
+  ours: "home" | "away",
+  nameOf: (id: string) => string,
+): string | null {
+  const isOurs = (id: string) =>
+    state.players.find((p) => p.id === id)?.teamId === state.userTeamId;
+  const mark = (label: string, id: string, minute?: number) =>
+    `${label} ${nameOf(id)}${minute !== undefined ? `(${minute}′)` : ""}`;
+  const parts: string[] = [];
+  const events = match.result?.events;
+  if (events) {
+    for (const e of events) {
+      if (e.team !== ours) continue;
+      const who = e.actors[0];
+      if (!who) continue;
+      if (e.type === "red_card") parts.push(mark("퇴장", who, e.minute));
+      else if (e.type === "injury") parts.push(mark("부상", who, e.minute));
+      else if (e.type === "substitution") parts.push(mark("교체 아웃", who, e.minute));
+    }
+  } else {
+    for (const t of turns) {
+      for (const card of t.cards ?? []) {
+        if (card.ours && card.kind !== "yellow") parts.push(mark("퇴장", card.player, card.minute));
+      }
+      for (const call of t.toolCalls) {
+        const input = call.input as { out?: unknown } | undefined;
+        if (call.name === "substitute" && typeof input?.out === "string") {
+          parts.push(mark("교체 아웃", input.out));
+        }
+      }
+    }
+    for (const injury of state.injuries) {
+      if (
+        injury.cause === "match" &&
+        injury.occurredOn === match.date &&
+        isOurs(injury.gamePlayerId)
+      ) {
+        parts.push(mark("부상", injury.gamePlayerId));
+      }
+    }
+  }
+  return parts.length > 0 ? `- 나간 사람: ${parts.join(" · ")}` : null;
+}
+
+/**
+ * 경기 → 평시 다리 — 직전 경기의 결과·득점·최고 평점에 라커룸의 결과와 그라운드를
+ * 떠난 사람을 코어가 장부에서 뽑는다 (평시 GM은 중계 이력을 보지 않는다 — agents.md §5).
+ * 직전 한 경기만 — 그 이상은 get_league의 몫.
  */
 function matchDigest(state: GameState): string | null {
   const played = state.matches
@@ -369,10 +458,13 @@ function matchDigest(state: GameState): string | null {
     .slice(0, TOP_RATED_SHOWN)
     .map(([pid, r]) => `${nameOf(pid)} ${r.toFixed(1)}`)
     .join(", ");
+  const turns = turnsOfMatch(state, played);
   return [
     `${played.date} ${ours ? "홈" : "원정"} vs ${opponent} ${us}-${them} ${verdict}`,
     scorers ? `- 득점: ${scorers}` : null,
     best ? `- 최고 평점: ${best}` : null,
+    lockerRoomLine(turns),
+    departedLine(state, played, turns, ours ? "home" : "away", nameOf),
   ]
     .filter(Boolean)
     .join("\n");

@@ -9,7 +9,7 @@ import {
   setPieceRoutineChoiceText,
   tacticToggleChoiceText,
 } from "@story-fm/domain";
-import { buildLedgerNote } from "./gm-input";
+import { buildLedgerNote, buildOperatorMessage } from "./gm-input";
 import { MatchIntentSchema, type MatchIntent } from "./match-intent-schema";
 import { ModelOutputError, retryOnce, requireToolCall } from "./retry";
 import { toToolSchema } from "./tool-schema";
@@ -24,7 +24,7 @@ import { toToolSchema } from "./tool-schema";
  * ## 스킬을 부르지 않는다
  *
  * 산출은 `report_intent` 하나로만 나온다. 그것은 **구조화 출력을 강제하는 그릇**이지
- * 스킬이 아니다(`mood-rater`의 `report_mood`와 같은 자리). 상태를 바꾸는 것은 이
+ * 스킬이 아니다(캐스터 종료 턴의 `settle_match`와 같은 자리). 상태를 바꾸는 것은 이
  * 객체를 받은 코어이고, 실재 확인(없는 선수·떠난 표적·우리 쪽 지점)도 거기서 한다.
  * 그래서 프롬프트는 코어가 이미 막는 것을 다시 지시하지 않는다.
  *
@@ -35,7 +35,7 @@ import { toToolSchema } from "./tool-schema";
 export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조화된 의도 하나로 옮기는 해석기다. 중계도 대사도 쓰지 않는다.
 
 # 입력
-<ledger>(명단·시각·교체 횟수) · <standing>(걸려 있는 전술과 개인 지시) · <targets>(공략 목록) 뒤에 감독의 말이 @감독: 으로 온다.
+<ledger>(명단·시각·교체 횟수) · <standing>(걸려 있는 전술과 개인 지시) · <targets>(공략 목록) · <last_turns>(이 경기의 직전 턴들) 뒤에 감독의 말이 @감독: 으로 온다.
 
 # 무엇을 고르나
 감독이 명시한 것만 싣는다. 말하지 않은 축·갈래·자리·역할은 보내지 않는다. 프리셋을 적용하거나 전원을 재배치하지 않는다.
@@ -47,6 +47,7 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 # 대화 (talk · teamTalk)
 감독이 그 사람에게 건넨 말이 있을 때만 싣고, 그 말이 어떻게 닿았는지를 라벨로 고른다.
 - 이름을 부르기만 한 말("브루노 일루와봐", "잠깐 와봐")은 부름이지 면담이 아니다 — talk을 비운다.
+- 이름 없이 가리키면 <last_turns>의 직전 대상이다.
 - outcome은 감독 발화의 (a) 맥락 적합성 (b) 설득 근거 (c) 대상 수용성으로 판정한다.
 - talk.outcome — reassured(다독임) · motivated(자극) · neutral · disappointed(실망을 드러냄) · angered(질책)
 - teamTalk.outcome — inspired · encouraged · neutral · flat · backfired · feared
@@ -72,6 +73,34 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 
 /** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
 const REPORT_INTENT_TOOL = "report_intent";
+
+/**
+ * 해석기가 읽는 직전 턴 수 — 평시 GM의 「이름 없이 가리키면 직전 대화의 대상이다」에
+ * 대응하는 자리다 (agents.md §3 ②). 이력 전체를 실으면 분류기가 중계 스무 턴을
+ * 정가로 읽는다.
+ */
+export const MATCH_INTENT_CONTEXT_TURNS = 2;
+
+/** 중계 턴 본문 하나의 상한 — 가리키는 대상을 찾는 데는 앞머리면 족하다 */
+const MATCH_INTENT_TURN_CHARS = 1200;
+
+/**
+ * `<last_turns>` — 이 경기의 마지막 턴들. 모델 턴은 본문 그대로(잘라서), 감독 턴은
+ * `@감독:` 봉투, 손잡이 턴은 오퍼레이터 봉투다. 없으면 빈 문자열.
+ */
+function buildLastTurnsBlock(state: GameState): string {
+  const matchId = state.pendingMatch?.matchId;
+  const turns = state.chat
+    .filter((t) => t.inMatch === true && (t.matchId === undefined || t.matchId === matchId))
+    .slice(-MATCH_INTENT_CONTEXT_TURNS);
+  if (turns.length === 0) return "";
+  const lines = turns.map((t) => {
+    if (t.role === "user") return `@감독: ${t.text}`;
+    if (t.role === "operator") return buildOperatorMessage(t.text);
+    return t.text.slice(0, MATCH_INTENT_TURN_CHARS);
+  });
+  return ["<last_turns>", ...lines, "</last_turns>"].join("\n");
+}
 
 function makeReportTool(onIntent: (intent: MatchIntent) => void): GameToolSpec {
   return {
@@ -108,6 +137,7 @@ export async function runMatchIntent(
 ): Promise<{ ok: true; intent: MatchIntent } | { ok: false; message: string }> {
   let intent: MatchIntent | null = null;
   let client = llm;
+  const lastTurns = buildLastTurnsBlock(state);
   try {
     await retryOnce(
       "match:intent",
@@ -119,7 +149,12 @@ export async function runMatchIntent(
             history: [],
             // 명단·현재 6축과 갈래·걸린 지시·공략 표적만 — 분류에 쓰이지 않는 판세는 빠진다
             // 분류기에는 감독의 이름이 없다 — 자리 태그 하나로 감독의 말을 세운다
-            user: [buildLedgerNote(state), ``, `@감독: ${message}`].join("\n"),
+            user: [
+              buildLedgerNote(state),
+              ...(lastTurns.length > 0 ? [lastTurns] : []),
+              ``,
+              `@감독: ${message}`,
+            ].join("\n"),
             tools: [makeReportTool((value) => (intent = value))],
             toolChoice: { name: REPORT_INTENT_TOOL },
           });

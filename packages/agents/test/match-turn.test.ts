@@ -5,6 +5,7 @@ import {
   createGame,
   interpretBackgroundHeuristic,
   markEntered,
+  RATING_BAND,
   startMatch,
   userSide,
   userTactics,
@@ -25,7 +26,7 @@ import {
   type GmToolCall,
   type MatchIntent,
 } from "@story-fm/agents";
-import { LlmTimeoutError, type GameToolSpec } from "@story-fm/llm";
+import { LlmTimeoutError, type GameToolSpec, type TurnRequest } from "@story-fm/llm";
 import { ModelOutputError } from "../src/retry";
 
 /** 실모드 경기 턴이 부르는 모델 — 해석도 중계도 이 하나를 거친다 */
@@ -304,6 +305,108 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
     // 시한을 넘긴 호출은 다시 부르지 않는다 — 잠금 안의 대기가 두 배가 된다
     expect(runTurn).toHaveBeenCalledTimes(1);
     expect(state.pendingMatch!.ledger.minute).toBe(minute);
+  });
+});
+
+/**
+ * **종료 턴 — 경기를 중계한 사람이 결산한다** (docs/llm/agents.md §3 「종료 턴」).
+ *
+ * 마감(`finalizeMatch`)이 캐스터 호출보다 **앞**이라 앵커가 먼저 박히고, 첫 왕복은
+ * `settle_match`가 강제된다. 순서가 뒤집히면 도구가 매길 앵커가 없어 결산이 통째로
+ * 버려지고, 도구가 강제되지 않으면 캐스터는 마무리 중계만 쓰고 지나간다.
+ */
+describe("종료 턴 — 결산은 캐스터의 첫 왕복이다", () => {
+  const previousMode = process.env.LLM_MODE;
+  beforeEach(() => {
+    process.env.LLM_MODE = "real";
+    runTurn.mockReset();
+  });
+  afterEach(() => {
+    if (previousMode === undefined) delete process.env.LLM_MODE;
+    else process.env.LLM_MODE = previousMode;
+  });
+
+  const casted = (text: string) => ({
+    text,
+    history: { version: 1 as const, provider: "anthropic" as const, model: "test", messages: [] },
+    historyBase: 0,
+    usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    toolCallCount: 1,
+    stopReason: "completed" as const,
+  });
+
+  /** `<settlement>` 표의 행에서 id를 읽는다 — 모델이 돌려줘야 할 그 id다 */
+  const idsOfSettlement = (user: string): string[] => {
+    const block = user.slice(user.indexOf("<settlement>"), user.indexOf("</settlement>"));
+    return [...block.matchAll(/^- (\S+) \| /gmu)].map((m) => m[1]!);
+  };
+
+  it("마감이 캐스터보다 앞이고, 결산 도구가 앵커 위에 평점·심경을 남긴다", async () => {
+    const state = matchState();
+    markEntered(state);
+    const matchId = state.pendingMatch!.matchId;
+    // 종료 직전까지 코어로 굴려 둔다 — 마지막 구간만 실모드 턴으로 간다
+    for (let guard = 0; guard < 60 && state.pendingMatch!.ledger.minute < 60; guard++) {
+      turn(state, GO);
+    }
+    expect(state.pendingMatch!.ledger.phase).not.toBe("finished");
+
+    const requests: TurnRequest[] = [];
+    /** 결산 호출 시점의 앵커 — 도구가 불리기 **전에** 장부에 박혀 있어야 한다 */
+    let anchors: Record<string, number> = {};
+    let moodOf: string | null = null;
+    runTurn.mockImplementation(async (req: TurnRequest) => {
+      requests.push(req);
+      const tool = req.tools?.[0];
+      if (!tool) return casted("[85']\n@중계: 경기가 이어집니다.");
+      expect(tool.name).toBe("settle_match");
+      anchors = { ...(state.matches.find((m) => m.id === matchId)?.result?.ratings ?? {}) };
+      const ids = idsOfSettlement(req.user);
+      expect(ids.length).toBeGreaterThan(0);
+      moodOf = ids[0]!;
+      const answer = tool.handle({
+        ratings: ids.map((playerId) => ({
+          playerId,
+          rating: (anchors[playerId] ?? 6) + 0.5,
+          note: "흐름을 쥐었다",
+        })),
+        moods: [{ playerId: moodOf, text: "오늘은 발이 가벼웠다", acknowledgesIssue: true }],
+      });
+      expect(answer.ok).toBe(true);
+      return casted("[90']\n@중계: 경기 종료 휘슬이 울립니다.");
+    });
+
+    let last = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
+    for (let guard = 0; guard < 20 && state.pendingMatch; guard++) {
+      last = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
+    }
+    expect(state.pendingMatch).toBeFalsy();
+
+    // 진행 턴에는 도구도 강제도 없다 — 종료 턴 하나만 결산 도구를 쥔다
+    const settling = requests[requests.length - 1]!;
+    for (const req of requests.slice(0, -1)) {
+      expect(req.tools ?? []).toHaveLength(0);
+      expect(req.toolChoice).toBeUndefined();
+      expect(req.user).not.toContain("<settlement>");
+    }
+    expect(settling.toolChoice).toEqual({ name: "settle_match" });
+    expect(settling.user).toContain("<settlement>");
+
+    // 앵커가 먼저 박혔고, 도구는 그 위에 ±RATING_BAND 안으로 매겼다
+    const result = state.matches.find((m) => m.id === matchId)!.result!;
+    expect(Object.keys(anchors).length).toBeGreaterThan(0);
+    expect(result.rated).toBe(true);
+    for (const [id, anchor] of Object.entries(anchors)) {
+      expect(Math.abs(result.ratings![id]! - anchor)).toBeLessThanOrEqual(RATING_BAND);
+    }
+    expect(state.players.find((p) => p.id === moodOf)!.state.moodNote?.text).toContain(
+      "발이 가벼웠다",
+    );
+    // 마감 기록과 결산 기록이 함께 서고, 결산은 칩이 아니다
+    const names = last.toolCalls.map((c) => c.name);
+    expect(names).toContain("finalize_match");
+    expect(last.toolCalls.find((c) => c.name === "settle_match")?.silent).toBe(true);
+    expect(last.text).toContain("경기 종료 휘슬");
   });
 });
 
