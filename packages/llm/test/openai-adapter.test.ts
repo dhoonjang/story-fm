@@ -10,7 +10,7 @@ import {
 } from "@story-fm/llm";
 
 const testConfig = {
-  agent: "mood-rater" as const,
+  agent: "training-rater" as const,
   provider: "openai" as const,
   model: "gpt-test",
   maxTokens: 1024,
@@ -124,11 +124,11 @@ const inputOf = (sent: Record<string, unknown> | undefined) => (sent?.input ?? [
 describe("OpenAI 어댑터", () => {
   it("강제 도구는 첫 요청에만 실린다 — 계속 걸면 턴이 끝나지 않는다", async () => {
     const { client, sent } = makeStubClient([
-      response([functionCall("c1", "report_mood", "{}")]),
+      response([functionCall("c1", "report_training", "{}")]),
       response([message("끝.")]),
     ]);
     const tool: GameToolSpec = {
-      name: "report_mood",
+      name: "report_training",
       description: "테스트 도구",
       inputSchema: { type: "object" as const, properties: {} },
       handle: () => ({ ok: true, message: "반영" }),
@@ -140,12 +140,12 @@ describe("OpenAI 어댑터", () => {
       history: [],
       user: "결산",
       tools: [tool],
-      toolChoice: { name: "report_mood" },
+      toolChoice: { name: "report_training" },
     });
 
     expect(sent).toHaveLength(2);
     // Responses의 강제는 내부 태깅이다 — `function: { name }` 중첩이 아니다
-    expect(sent[0]!.tool_choice).toEqual({ type: "function", name: "report_mood" });
+    expect(sent[0]!.tool_choice).toEqual({ type: "function", name: "report_training" });
     /**
      * 도구 결과를 돌려준 뒤에도 강제가 남아 있으면 모델이 턴을 끝낼 길이 없어
      * 왕복 상한까지 같은 도구를 다시 부른다 — 그 회귀를 이 줄이 잡는다.
@@ -200,7 +200,7 @@ describe("OpenAI 어댑터", () => {
       user: "안녕",
     });
     expect(sent[0]?.store).toBe(false);
-    expect(sent[0]?.prompt_cache_key).toBe("mood-rater");
+    expect(sent[0]?.prompt_cache_key).toBe("training-rater");
     expect(sent[0]).not.toHaveProperty("previous_response_id");
   });
 
@@ -239,7 +239,7 @@ describe("OpenAI 어댑터", () => {
   it("도구 명세를 내부 태깅으로 펼치고 strict를 명시로 끈다", async () => {
     const { client, sent } = makeStubClient([response([message("")])]);
     const tool: GameToolSpec = {
-      name: "report_mood",
+      name: "report_training",
       description: "심경",
       inputSchema: {
         type: "object",
@@ -257,7 +257,7 @@ describe("OpenAI 어댑터", () => {
     const defs = sent[0]?.tools as Array<Record<string, unknown>>;
     expect(defs[0]).toEqual({
       type: "function",
-      name: "report_mood",
+      name: "report_training",
       description: "심경",
       parameters: tool.inputSchema,
       strict: false,
@@ -266,7 +266,7 @@ describe("OpenAI 어댑터", () => {
 
   it("도구를 실행하고 결과를 call_id로 짝지어 돌려준 뒤 이어 답한다", async () => {
     const { client, sent } = makeStubClient([
-      response([functionCall("call_1", "report_mood", '{"notes":[]}')]),
+      response([functionCall("call_1", "report_training", '{"notes":[]}')]),
       response([message("끝")]),
     ]);
     const handle = vi.fn(() => ({ ok: true, message: "심경 3명 반영" }));
@@ -275,7 +275,7 @@ describe("OpenAI 어댑터", () => {
       history: [],
       user: "결산",
       tools: [
-        { name: "report_mood", description: "심경", inputSchema: { type: "object" }, handle },
+        { name: "report_training", description: "심경", inputSchema: { type: "object" }, handle },
       ],
     });
     expect(handle).toHaveBeenCalledWith({ notes: [] }, { text: "" });
@@ -597,7 +597,7 @@ describe("OpenAI 어댑터 — 스트리밍", () => {
 
   /** 완성된 아이템이 통째로 온다 — 조각을 `index`로 이어 붙일 일이 없다 */
   it("스트림의 도구 호출을 실행하고 결과를 짝지어 돌려준다", async () => {
-    const call = functionCall("call_1", "report_mood", '{"notes":[]}');
+    const call = functionCall("call_1", "report_training", '{"notes":[]}');
     const { client, sent } = makeStreamClient([
       [itemDone(call), completed([call])],
       [textDelta("끝"), completed([message("끝")])],
@@ -608,7 +608,7 @@ describe("OpenAI 어댑터 — 스트리밍", () => {
       history: [],
       user: "결산",
       tools: [
-        { name: "report_mood", description: "심경", inputSchema: { type: "object" }, handle },
+        { name: "report_training", description: "심경", inputSchema: { type: "object" }, handle },
       ],
       onText: () => {},
     });

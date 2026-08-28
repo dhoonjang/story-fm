@@ -882,123 +882,17 @@ export function moodAnchor(facts: MoodFact[]): string {
   return facts.map(factLine).join(" · ");
 }
 
-// ── 결산 — 맥락을 읽고 다시 쓰는 자리 ────────────────────
+// ── 잔향 — 그 선수와 있었던 일을 쓴 스킬이 한 문장을 남기는 자리 ────────────────────
 
 /**
- * 한 번에 다시 쓰는 인원의 상한 — **싼 티어라도 43명을 매번 태우지는 않는다.**
- * 그 구간에 실제로 무슨 일이 있었던 선수만 고르므로 대개 이 수를 채우지 않는다.
+ * 한 호출이 한 번에 남길 수 있는 심경 문장의 상한 — 경기 결산(`settle_match`)이
+ * 출전 선수에게 쓰는 수다. 열한 명이 뛰어도 그 경기에 할 말이 있는 사람은 그보다 적다
+ * (people.md §5).
  */
 export const MOOD_BATCH = 8;
 
-export interface MoodTarget {
-  playerId: string;
-  name: string;
-  /** 코어가 낸 사실 줄 — 모델은 이걸 문장으로 푼다 */
-  anchor: string;
-  /** 왜 이 선수가 대상인가 — 모델이 읽는 맥락 */
-  facts: string[];
-  /** 불만이 걸려 있는가 — 코어가 문장을 검사할 때 쓴다 */
-  hasIssue: boolean;
-}
-
-export interface MoodBrief {
-  from: string;
-  to: string;
-  targets: MoodTarget[];
-}
-
-/**
- * **그 구간에 무슨 일이 있었던 선수**를 골라 브리프를 만든다.
- *
- * 못 뛰는 선수(부상·정지)는 넣지 않는다 — 사실이 이미 정확하고, 그것은 다른
- * 무엇보다 먼저 말해야 해서 다시 쓸 여지가 없다. 나머지는 경기에 뛰었거나,
- * 불만이 있거나, 정착 중이거나, 폼이 양 끝에 가 있는 선수다.
- *
- * @returns 대상이 없으면 null — 그럼 결산을 부르지 않는다
- */
-export function buildMoodBrief(state: GameState, from: string, to: string): MoodBrief | null {
-  const targets: Array<MoodTarget & { weight: number }> = [];
-  // 명단 전원이 같은 원장을 본다 — 한 번 세워서 앵커까지 함께 쓴다
-  const lastMatches = lastMatchIndexOf(state);
-  for (const player of playersOf(state, state.userTeamId)) {
-    if (openInjury(state, player.id) || activeSuspension(state, player.id)) continue;
-    const facts: string[] = [];
-    let weight = 0;
-
-    const last = lastMatchOf(state, player.id, lastMatches);
-    if (last && last.days <= AFTERGLOW_DAYS) {
-      facts.push(
-        `${last.days === 0 ? "오늘" : `${last.days}일 전`} 경기 ${OUTCOME_WORD[last.outcome]}` +
-          (last.rating === null ? "" : ` · 평점 ${last.rating.toFixed(1)}`),
-      );
-      weight += 3;
-    }
-    const issue = state.issues.find((i) => i.gamePlayerId === player.id);
-    if (issue) {
-      facts.push(`불만: ${issueReasonText(issue) ?? "팀 상황"} (${issue.since}부터)`);
-      weight += 4;
-    }
-    /**
-     * ⚠️ **2군은 경기를 뛰지 않는다** — 여기서 세지 않으면 내린 다음 날부터
-     * 결산에서 조용히 사라진다. 무게는 경기 출전과 같다 (people.md §5).
-     */
-    const demotionDays = demotionDaysOf(state, player);
-    if (demotionDays !== null) {
-      facts.push(`2군 ${demotionDays}일째`);
-      weight += 3;
-    }
-    const settling = settlingOf(state, player.id);
-    if (settling && !settling.done) {
-      facts.push(`새 팀 정착 ${Math.round(settling.progress * 100)}%`);
-      weight += 2;
-    }
-    const { form, condition } = player.state;
-    const label = formLabel(form);
-    if (label === "절정" || label === "바닥") {
-      facts.push(`폼 ${label}`);
-      weight += 2;
-    }
-    /**
-     * 굳은 몸은 그 자체로 할 말이 있는 사실이다 — 장기 부상에서 막 돌아왔거나
-     * 몇 주째 명단 밖이라는 뜻이고, 둘 다 선수가 먼저 꺼낼 이야기다 (player.md §5.4).
-     * **개막 전에는 세지 않는다** — 위 `moodFactsOf`와 같은 문이다: 7월엔 선수단
-     * 전원이 프리시즌 값이라 이 무게가 라커룸 전체를 결산 대상으로 만든다.
-     */
-    if (
-      state.date >= state.calendar.start &&
-      sharpnessBand(sharpnessOf(player.state)) === "blunt"
-    ) {
-      facts.push("경기 감각 굳음");
-      weight += 2;
-    }
-    if (facts.length === 0) continue;
-
-    facts.push(`체력 ${Math.round(condition)}`);
-    const seat = leaderRoleOf(state, player);
-    if (seat) facts.push(LEADER_ROLE_LABEL[seat]);
-    targets.push({
-      playerId: player.id,
-      name: player.name,
-      anchor: moodAnchor(moodFactsOf(state, player, lastMatches)),
-      facts,
-      hasIssue: issue !== undefined,
-      weight,
-    });
-  }
-  if (targets.length === 0) return null;
-  targets.sort((a, b) => b.weight - a.weight);
-  return {
-    from,
-    to,
-    targets: targets.slice(0, MOOD_BATCH).map((t) => ({
-      playerId: t.playerId,
-      name: t.name,
-      anchor: t.anchor,
-      facts: t.facts,
-      hasIssue: t.hasIssue,
-    })),
-  };
-}
+/** 팀토크 한 번이 남길 수 있는 심경 문장의 상한 — 라커룸 전체에 한 말이라 셋에서 접는다 */
+export const TEAM_TALK_MOODS = 3;
 
 /**
  * 저장할 문장의 상한 — 정의는 스키마를 가진 `packages/domain`에 있다. 여기서
@@ -1010,40 +904,45 @@ export { MOOD_NOTE_MAX };
 const SENTENCE_END = /[.!?]$/u;
 
 /**
- * 결산이 제출하는 한 줄 — **문장과 그 문장에 대한 사실 하나.**
+ * 스킬이 제출하는 한 줄 — **문장과 그 문장에 대한 사실 하나.**
  *
  * `acknowledgesIssue`는 문장을 쓴 쪽만 답할 수 있는 것이다. 코어가 `"불만"`이라는
  * 낱말이 들어 있는지 세던 자리라, 같은 뜻의 다른 말("서운하다", "받아들이지
  * 못한다")은 전부 버려지고 낱말만 박아 넣은 문장은 통과했다 — 문구를 판정에 쓰면
- * 언제나 그렇게 갈린다 (overview.md §1 철칙 4).
+ * 언제나 그렇게 갈린다 (overview.md §1 철칙 4). 생략하면 안지 않은 것이다.
  */
 export interface MoodNoteSubmission {
   playerId: string;
   text: string;
   /** 이 문장이 그 선수에게 걸린 불만을 안고 있는가 — 쓴 쪽이 말한다 */
-  acknowledgesIssue: boolean;
+  acknowledgesIssue?: boolean;
 }
 
 /**
- * 결산 결과를 장부에 적는다 — **사실은 코어가 잡고 결만 받는다.**
+ * 스킬이 남긴 심경 문장을 장부에 적는다 — **사실은 코어가 잡고 결만 받는다**
+ * (people.md §5 「잔향」 · agents.md §4-3).
+ *
+ * `allowed`는 **그 스킬이 실제로 닿은 선수**다 — 면담이면 그 한 명, 팀토크면 그 말을
+ * 들은 명단, 경기 결산이면 출전 선수. 밖의 이름은 버린다: 면담의 문장이 다른 선수에게
+ * 서면 대화가 없던 사람의 심경이 대화로 움직인다.
  *
  * 버려지는 문장은 사실 카드를 남긴다(빈 자리가 되지 않는다). 거르는 조건은 셋이다:
- * ① 대상이 아닌 선수 ② 한 문장이 아니거나 너무 긴 문장 — **저장할 문장의 형태
- * 검사다** ③ **불만이 걸린 선수인데 그 사실을 안지 않은 문장** — 감독이 손을 써야
- * 하는 일이 결에 묻히면 안 된다.
+ * ① 닿지 않은 선수 ② 한 문장이 아니거나 너무 긴 문장 — **저장할 문장의 형태 검사다**
+ * ③ **불만이 걸린 선수인데 그 사실을 안지 않은 문장** — 감독이 손을 써야 하는 일이
+ * 결에 묻히면 안 된다. 같은 선수가 두 줄로 오면 첫 줄만 받는다.
  *
  * @returns 실제로 반영된 수
  */
 export function applyMoodNotes(
   state: GameState,
-  brief: MoodBrief,
-  notes: MoodNoteSubmission[],
+  notes: readonly MoodNoteSubmission[],
+  allowed: ReadonlySet<string>,
 ): number {
-  const byId = new Map(brief.targets.map((t) => [t.playerId, t] as const));
   let applied = 0;
+  const seen = new Set<string>();
   for (const note of notes) {
-    const target = byId.get(note.playerId);
-    if (!target) continue;
+    if (!allowed.has(note.playerId) || seen.has(note.playerId)) continue;
+    seen.add(note.playerId);
     const text = note.text.trim();
     if (text.length === 0) continue;
     // 한 문장 — 마침표가 문장 중간에 여러 번 나오면 여러 문장이다
@@ -1051,9 +950,10 @@ export function applyMoodNotes(
     // 재는 것은 **저장할 문장**이다 — 마침표를 붙인 뒤 재지 않으면 121자가 세이브로 나간다
     const sentence = SENTENCE_END.test(text) ? text : `${text}.`;
     if (sentence.length > MOOD_NOTE_MAX) continue;
-    if (target.hasIssue && !note.acknowledgesIssue) continue;
+    const hasIssue = state.issues.some((i) => i.gamePlayerId === note.playerId);
+    if (hasIssue && note.acknowledgesIssue !== true) continue;
     const player = playerById(state, note.playerId);
-    if (!player) continue;
+    if (!player || !isOurPlayer(state, player)) continue;
     player.state.moodNote = { text: sentence, on: state.date };
     applied += 1;
   }

@@ -278,8 +278,14 @@ export function buildGmReference(state: GameState): string {
 export function buildGmDigest(state: GameState): string | null {
   const digest = state.historyDigest;
   if (!digest) return null;
-  // 무엇의 요약인지는 시스템 프롬프트의 「입력」이 말한다 — 블록은 날짜와 본문뿐이다
-  return [`<summary at="${digest.at}">`, digest.text, `</summary>`].join("\n");
+  // 무엇의 요약인지는 시스템 프롬프트의 「입력」이 말한다 — 블록은 날짜와 두 칸뿐이다.
+  // 옛 세이브의 요약은 열린 일이 없다 — 그때는 지난 일 한 칸이다
+  return [
+    `<summary at="${digest.at}">`,
+    `지난 일: ${digest.text}`,
+    ...(digest.open ? [`열린 일: ${digest.open}`] : []),
+    `</summary>`,
+  ].join("\n");
 }
 
 /** 유저의 자연어를 모델이 읽는 감독 화자 형식으로 감싼다. */

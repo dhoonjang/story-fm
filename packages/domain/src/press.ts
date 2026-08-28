@@ -11,6 +11,7 @@ import {
 } from "./persona";
 import {
   boardExpectationText,
+  INCIDENT_KIND_KO,
   INTEREST_STAGE_KO,
   visionItemText,
   VISION_CODES,
@@ -19,6 +20,7 @@ import {
   PROMISE_KIND_KO,
   TRANSFER_REQUEST_REASON_KO,
   type BoardExpectationCode,
+  type IncidentKind,
   type InterestStage,
   type MilestoneCode,
   type PlayerIssueReason,
@@ -169,6 +171,12 @@ export const PressFactKindSchema = z.enum([
    * `tags[0]`이 그 둘을 가른다.
    */
   "sacking",
+  /**
+   * **감독이 말로 만든 공개된 사건** — 징계·공개 칭찬·공개 질책 (people.md §6
+   * 「사건 기록」). `tags[0]`이 갈래(`IncidentKind`), `about`이 당사자, `values.intensity`가
+   * 세기, `values.days`가 며칠 전인가다.
+   */
+  "incident",
   /**
    * **이 선수단의 중심** — 부임 회견이 짚는 1군 최고 자원 (people.md §4).
    * 감독이 처음 이름을 부를 수 있는 자리라 `about`이 걸린다.
@@ -737,6 +745,12 @@ export function pressFactText(fact: PressFact): string {
       return `최근 ${v.matches ?? 0}경기 무승 (${tags.map((t) => OUTCOME_KO[t] ?? t).join("")})`;
     case "slump":
       return name ? `${name} 폼 ${sub ?? ""}` : `폼 ${sub ?? ""}`;
+    case "incident":
+      return (
+        `${name ? `${name} ` : ""}${INCIDENT_KIND_KO[sub as IncidentKind] ?? sub ?? "사건"}` +
+        ` · 세기 ${v.intensity ?? 2}` +
+        (v.days === undefined ? "" : v.days === 0 ? " · 오늘" : ` · ${v.days}일 전`)
+      );
     case "unhappy":
       if (sub === "count") return `라커룸 불만 ${v.count ?? 0}건`;
       if (sub === "grievance") {

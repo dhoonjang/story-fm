@@ -50,6 +50,7 @@ function ratingOf(state: GameState, playerId: string): number | null {
   return stat ? seasonRating(stat) : null;
 }
 import type { GameState } from "../core/state";
+import { turnFactLines } from "../core/turn-facts";
 
 /**
  * 훈련 결산 — **코어가 앵커를 박고, LLM이 한 구간을 읽어 다듬는다.**
@@ -198,8 +199,12 @@ export interface TrainingBrief {
   to: string;
   sessions: TrainedSession[];
   subjects: TrainingSubject[];
-  /** 이 기간 감독과 나눈 대화 (최근 것부터 잘라 넣는다) */
-  chat: Array<{ at: string; role: "user" | "model"; text: string }>;
+  /**
+   * 이 기간의 대화 (최근 것부터 잘라 넣는다) — 모델 턴은 **장면**이지 코치의 말이
+   * 아니고, `facts`가 그 턴의 장부 골격(`turnFactLines`)이다: 감독이 실제로 무엇을
+   * 걸었는지는 대사가 아니라 이 줄이 말한다 (agents.md §4).
+   */
+  chat: Array<{ at: string; role: "user" | "model"; text: string; facts: string[] }>;
   /**
    * 이 구간에 훈련한 능력치 축 — 팀 세션의 축 + 대상들에게 걸린 개인 훈련 축.
    *
@@ -370,6 +375,7 @@ export function buildTrainingBrief(
         at: t.at,
         role: t.role as "user" | "model",
         text: t.text.slice(0, CHAT_LINE_MAX),
+        facts: turnFactLines(t),
       })),
     trainedAxes: [...axes],
   };

@@ -10,7 +10,7 @@ import {
 
 const yamlWith = (agents: string): string => `version: 1\nagents:\n${agents}`;
 
-/** 에이전트 아홉이 같은 한 벌을 쓰는 최소 표 — 파일 머리(`max_retries`)를 재는 자리용 */
+/** 에이전트 일곱이 같은 한 벌을 쓰는 최소 표 — 파일 머리(`max_retries`)를 재는 자리용 */
 const AGENT_YAML = `  gm: &agent
     provider: google
     model: gemini-test
@@ -18,9 +18,7 @@ const AGENT_YAML = `  gm: &agent
     timeout_ms: 1000
   match-intent: *agent
   match-caster: *agent
-  match-rater: *agent
   training-rater: *agent
-  mood-rater: *agent
   negotiator: *agent
   history-compactor: *agent
   onboarding-judge: *agent
@@ -53,7 +51,7 @@ describe("에이전트별 LLM 설정", () => {
     }
     // 도구 루프가 도는 서사 자리는 결산 한 줄보다 길게 준다
     expect(LLM_CONFIG.agents.gm.timeoutMs).toBeGreaterThan(
-      LLM_CONFIG.agents["mood-rater"].timeoutMs,
+      LLM_CONFIG.agents["training-rater"].timeoutMs,
     );
   });
 
@@ -74,22 +72,12 @@ describe("에이전트별 LLM 설정", () => {
     model: gpt-custom
     max_tokens: 200
     timeout_ms: 2000
-  match-rater:
-    provider: google
-    model: gemini-rater
-    max_tokens: 300
-    timeout_ms: 3000
-    thinking_level: low
   training-rater:
     provider: anthropic
     model: claude-training
     max_tokens: 400
     timeout_ms: 4000
-  mood-rater:
-    provider: openai
-    model: gpt-mood
-    max_tokens: 500
-    timeout_ms: 5000
+    thinking_level: low
   negotiator:
     provider: google
     model: gemini-negotiator
@@ -113,14 +101,14 @@ describe("에이전트별 LLM 설정", () => {
       provider: "openai",
       model: "gpt-custom",
     });
-    expect(config.agents["match-rater"]).toMatchObject({
-      provider: "google",
-      model: "gemini-rater",
+    expect(config.agents["training-rater"]).toMatchObject({
+      provider: "anthropic",
+      model: "claude-training",
       thinkingLevel: "low",
     });
     expect(config.agents["training-rater"].agent).toBe("training-rater");
-    expect(config.agents["mood-rater"].maxTokens).toBe(500);
-    expect(config.agents["mood-rater"].timeoutMs).toBe(5000);
+    expect(config.agents["training-rater"].maxTokens).toBe(400);
+    expect(config.agents["training-rater"].timeoutMs).toBe(4000);
     expect(config.agents.gm.timeoutMs).toBe(1000);
   });
 
@@ -133,9 +121,7 @@ describe("에이전트별 LLM 설정", () => {
     timeout_ms: 1000
   match-intent: *google
   match-caster: *google
-  match-rater: *google
   training-rater: *google
-  mood-rater: *google
   negotiator: *google
   history-compactor: *google
   onboarding-judge: *google
@@ -152,9 +138,7 @@ describe("에이전트별 LLM 설정", () => {
     timeout_ms: 1000${extra}
   match-intent: *agent
   match-caster: *agent
-  match-rater: *agent
   training-rater: *agent
-  mood-rater: *agent
   negotiator: *agent
   history-compactor: *agent
   onboarding-judge: *agent

@@ -21,6 +21,7 @@ import type {
   GameTeam,
   GrowthEntry,
   HistoryDigest,
+  Incident,
   Injury,
   CompetingBid,
   Interest,
@@ -1033,6 +1034,12 @@ export interface GameState {
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   characterMemories?: CharacterMemory[];
+  /**
+   * 감독이 말로 만든 사건 — `record_incident`가 남긴다
+   * (→ [docs/data/people.md](../../../../docs/data/people.md) §6 「사건 기록」).
+   * 회견 카드와 하루 한도가 읽는다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  incidents?: Incident[];
   /**
    * 서사 아크 — 기억을 이야기로 엮는 골격 (people.md §9). 개폐는 장부에서
    * 결정적으로 판정한다(`world/arcs.ts`). 옛 세이브엔 없다

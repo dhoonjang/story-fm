@@ -7,6 +7,7 @@ export * from "./core/dates";
 export * from "./core/name-match";
 export * from "./core/state";
 export * from "./core/history-window";
+export * from "./core/turn-facts";
 export * from "./core/player-ref";
 export * from "./core/league-shape";
 export * from "./core/club-tier";

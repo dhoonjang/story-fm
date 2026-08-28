@@ -3,6 +3,7 @@ import {
   HISTORY_CHAR_KEEP,
   HISTORY_CHAR_LIMIT,
   HISTORY_DIGEST_CHARS,
+  HISTORY_OPEN_CHARS,
   HISTORY_STEP,
   applyHistoryDigest,
   historyEnd,
@@ -47,11 +48,14 @@ describe("이력 압축 판정", () => {
     const state = sourceOf(38, 1_000);
     const brief = planHistoryFold(state);
     expect(brief).not.toBeNull();
-    expect(applyHistoryDigest(state, brief!, "지난 구간의 요약")).toBe(true);
+    expect(
+      applyHistoryDigest(state, brief!, { past: "지난 구간의 요약", open: "재계약 답을 기다린다" }),
+    ).toBe(true);
     expect(charsLeft(state)).toBeLessThanOrEqual(HISTORY_CHAR_KEEP);
     expect(state.historyDigest).toEqual({
       foldedTurns: brief!.through,
       text: "지난 구간의 요약",
+      open: "재계약 답을 기다린다",
       at: "2026-07-01",
       rounds: 1,
     });
@@ -61,8 +65,26 @@ describe("이력 압축 판정", () => {
     const state = sourceOf(38, 1_000);
     const before = state.chat.length;
     const brief = planHistoryFold(state);
-    applyHistoryDigest(state, brief!, "요약");
+    applyHistoryDigest(state, brief!, { past: "요약" });
     expect(state.chat.length).toBe(before);
+  });
+
+  it("브리프의 턴마다 장부 골격이 붙는다 — 스킬 요약과 코어 기록이 [장부] 줄로", () => {
+    const state = sourceOf(38, 1_000);
+    state.chat[1]!.toolCalls = [
+      {
+        name: "talk_to_player",
+        summary: "김선수 사기 +4",
+        brief: { head: "김선수 면담", items: [{ label: "사기", text: "+4", delta: 4 }] },
+      },
+      { name: "시간 경과", summary: "2026-07-01 → 2026-07-03\n훈련 2회", silent: true },
+    ];
+    const brief = planHistoryFold(state)!;
+    expect(brief.turns[1]!.facts).toEqual([
+      "[장부] 김선수 면담 — 사기 +4",
+      "[장부] 2026-07-01 → 2026-07-03 · 훈련 2회",
+    ]);
+    expect(brief.turns[0]!.facts).toEqual([]);
   });
 
   it("같은 상태를 두 번 판정하면 같은 지점을 접는다", () => {
@@ -83,7 +105,7 @@ describe("이력 압축 판정", () => {
     const state = sourceOf(12, HISTORY_CHAR_KEEP + 1_000);
     const brief = planHistoryFold(state);
     expect(brief?.through).toBe(HISTORY_STEP);
-    expect(applyHistoryDigest(state, brief!, "요약")).toBe(true);
+    expect(applyHistoryDigest(state, brief!, { past: "요약" })).toBe(true);
     // 잔량을 넘더라도 이번 턴은 맥락을 갖고 선다
     expect(historyEnd(peaceTurns(state.chat)) - historyStart(state)).toBe(HISTORY_STEP);
   });
@@ -91,8 +113,14 @@ describe("이력 압축 판정", () => {
   it("요약이 길이 상한을 넘으면 거절하고 세이브가 그대로다", () => {
     const state = sourceOf(38, 1_000);
     const brief = planHistoryFold(state)!;
-    expect(applyHistoryDigest(state, brief, "가".repeat(HISTORY_DIGEST_CHARS + 1))).toBe(false);
-    expect(applyHistoryDigest(state, brief, "   ")).toBe(false);
+    expect(applyHistoryDigest(state, brief, { past: "가".repeat(HISTORY_DIGEST_CHARS + 1) })).toBe(
+      false,
+    );
+    expect(applyHistoryDigest(state, brief, { past: "   " })).toBe(false);
+    // 열린 일도 같은 문이다 — 한 칸이 넘치면 두 칸 다 접지 않는다
+    expect(
+      applyHistoryDigest(state, brief, { past: "요약", open: "가".repeat(HISTORY_OPEN_CHARS + 1) }),
+    ).toBe(false);
     expect(state.historyDigest).toBeUndefined();
     // 거절당했으니 다음 기회에 같은 지점을 다시 접는다
     expect(planHistoryFold(state)?.through).toBe(brief.through);
@@ -101,7 +129,7 @@ describe("이력 압축 판정", () => {
   it("낡은 브리프는 거절한다", () => {
     const state = sourceOf(38, 1_000);
     const brief = planHistoryFold(state)!;
-    expect(applyHistoryDigest(state, brief, "요약")).toBe(true);
-    expect(applyHistoryDigest(state, brief, "다시 요약")).toBe(false);
+    expect(applyHistoryDigest(state, brief, { past: "요약" })).toBe(true);
+    expect(applyHistoryDigest(state, brief, { past: "다시 요약" })).toBe(false);
   });
 });

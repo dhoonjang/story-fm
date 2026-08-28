@@ -1,5 +1,6 @@
 import type { HistoryDigest } from "@story-fm/domain";
 import type { ChatTurn } from "./state";
+import { turnFactLines } from "./turn-facts";
 
 /**
  * **평시 이력 창의 판정** — 어디까지 싣고 어디를 접는가
@@ -32,6 +33,11 @@ export const HISTORY_STEP = 6;
  * 상한이 없으면 요약이 무한정 자란다. 넘으면 자르지 않고 **거절한다**(§5-1).
  */
 export const HISTORY_DIGEST_CHARS = 1_500;
+/**
+ * **열린 일** 칸의 글자 상한 — 끝나지 않은 대화와 의도는 지난 일보다 짧다. 스냅샷이
+ * 이미 드는 협상·약속·아크는 여기 오지 않으므로(§5-1) 이만큼이면 남는 것이 다 든다.
+ */
+export const HISTORY_OPEN_CHARS = 600;
 
 /** 이 판정에 필요한 축만 — 테스트가 세계를 세우지 않아도 되게 */
 export interface HistorySource {
@@ -51,8 +57,18 @@ export interface HistoryFoldBrief {
   previous: string | null;
   /** 몇 겹째인가 (첫 압축이 1) */
   rounds: number;
-  /** 접히는 구간의 원문 — 요약 에이전트가 읽는다 */
-  turns: ReadonlyArray<{ role: ChatTurn["role"]; text: string; at: string }>;
+  /**
+   * 접히는 구간의 원문 — 요약 에이전트가 읽는다. `facts`는 그 턴의 **장부 골격**
+   * (`turnFactLines` — 스킬 호출 요약과 코어 기록)이다: 이적 확정·약속·회견 답·시간
+   * 경과가 대사에서만 읽히던 자리라, 요약이 장부가 아는 일을 다시 짓지 않는다 (§5-1).
+   */
+  turns: ReadonlyArray<{ role: ChatTurn["role"]; text: string; at: string; facts: string[] }>;
+}
+
+/** 요약 두 칸 — 지난 일은 짧게, 열린 일은 끝나지 않은 대화와 의도 (§5-1) */
+export interface HistoryDigestDraft {
+  past: string;
+  open?: string;
 }
 
 /**
@@ -150,30 +166,35 @@ export function planHistoryFold(state: HistorySource): HistoryFoldBrief | null {
     through,
     previous: state.historyDigest?.text ?? null,
     rounds: (state.historyDigest?.rounds ?? 0) + 1,
-    turns: turns.slice(folded, through).map((t) => ({ role: t.role, text: t.text, at: t.at })),
+    turns: turns
+      .slice(folded, through)
+      .map((t) => ({ role: t.role, text: t.text, at: t.at, facts: turnFactLines(t) })),
   };
 }
 
 /**
  * 요약을 검사해 세이브에 적용한다 — 걸리면 `false`, **그때는 접지 않는다.**
  *
- * 빈 문장도 상한을 넘는 문장도 거절한다. 자르지 않는 것이 요점이다: 잘라 붙이면
- * 문장 한복판에서 끊긴 기억이 세이브에 굳는다. 길이 상한을 코어가 강제하는 것이
- * "요약이 무한정 자라지 않는다"의 보장이다.
+ * 빈 문장도 상한을 넘는 문장도 거절한다 — 두 칸 중 하나라도. 자르지 않는 것이
+ * 요점이다: 잘라 붙이면 문장 한복판에서 끊긴 기억이 세이브에 굳는다. 길이 상한을
+ * 코어가 강제하는 것이 "요약이 무한정 자라지 않는다"의 보장이다.
  *
  * 낡은 브리프도 거절한다 — 그 사이에 다른 압축이 더 앞까지 접었다면 되감는 셈이다.
  */
 export function applyHistoryDigest(
   state: HistorySource,
   brief: HistoryFoldBrief,
-  text: string,
+  draft: HistoryDigestDraft,
 ): boolean {
-  const trimmed = text.trim();
-  if (!trimmed || trimmed.length > HISTORY_DIGEST_CHARS) return false;
+  const past = draft.past.trim();
+  if (!past || past.length > HISTORY_DIGEST_CHARS) return false;
+  const open = draft.open?.trim() ?? "";
+  if (open.length > HISTORY_OPEN_CHARS) return false;
   if (brief.through <= foldedOf(state)) return false;
   state.historyDigest = {
     foldedTurns: brief.through,
-    text: trimmed,
+    text: past,
+    ...(open.length > 0 ? { open } : {}),
     at: state.date,
     rounds: brief.rounds,
   };

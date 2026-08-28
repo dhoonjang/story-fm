@@ -59,7 +59,7 @@ afterEach(() => {
 describe("tapLlm — 개발 모드에서만 원문을 남긴다", () => {
   it("한 턴에 오간 호출을 그 턴 인덱스 아래 순서대로 쌓는다", async () => {
     const gm = tapLlm(stubLlm(usageOf({ inputTokens: 100, outputTokens: 20 })), "gm", dev);
-    const rater = tapLlm(stubLlm(usageOf({ inputTokens: 30 })), "match-rater", dev);
+    const rater = tapLlm(stubLlm(usageOf({ inputTokens: 30 })), "training-rater", dev);
 
     await traceTurn(async () => {
       await gm.runTurn({ system: ["고정", "레퍼런스"], history: [], user: "전방 압박" });
@@ -68,7 +68,7 @@ describe("tapLlm — 개발 모드에서만 원문을 남긴다", () => {
     }, dev);
 
     const calls = turnTrace("g1", 7);
-    expect(calls.map((c) => c.agent)).toEqual(["gm", "match-rater"]);
+    expect(calls.map((c) => c.agent)).toEqual(["gm", "training-rater"]);
     const first = calls[0]!;
     expect(first.request.system).toEqual(["고정", "레퍼런스"]);
     expect(first.request.user).toBe("전방 압박");
