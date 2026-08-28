@@ -918,6 +918,9 @@ export interface MoodNoteSubmission {
   acknowledgesIssue?: boolean;
 }
 
+/** 대상이 하나로 정해진 자리(면담·회견·응대)의 심경 인자 — 선수는 스킬이 안다 */
+export type MoodLine = Omit<MoodNoteSubmission, "playerId">;
+
 /**
  * 스킬이 남긴 심경 문장을 장부에 적는다 — **사실은 코어가 잡고 결만 받는다**
  * (people.md §5 「잔향」 · agents.md §4-3).
