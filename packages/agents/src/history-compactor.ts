@@ -8,6 +8,7 @@ import {
 } from "@story-fm/domain";
 import {
   HISTORY_DIGEST_CHARS,
+  HISTORY_OPEN_CHARS,
   REGISTERABLE_ROLES,
   activeArcs,
   applyArcTitles,
@@ -41,15 +42,18 @@ export const HISTORY_COMPACTOR_SYSTEM = `당신은 구단의 기록 담당이다
 사람을 명부에 세운다.
 
 ## 요약
-- 이전 요약이 함께 주어지면 새 구간과 합쳐 한 벌로 다시 쓴다. 이어 붙이지 않는다.
-- ${HISTORY_DIGEST_CHARS}자 이내.
-- 남길 것 — 감독이 내린 결정과 그 이유, 사람들 사이에 생긴 일, 아직 끝나지 않은 일
-  (진행 중인 협상·약속·갈등).
+- 요약은 두 칸이다. 지난 일(past)은 ${HISTORY_DIGEST_CHARS}자 이내, 열린 일(open)은 ${HISTORY_OPEN_CHARS}자 이내.
+- 지난 일 — 감독이 내린 결정과 그 이유, 사람들 사이에 생긴 일. 짧게, 시간순으로.
+- 열린 일 — 끝나지 않은 대화와 의도: 감독이 하겠다고 했는데 아직 하지 않은 것, 누군가 답을 기다리는 말.
+  진행 중인 협상·약속·이야기는 뺀다 — 스냅샷이 든다. 없으면 비운다.
+- 이전 요약이 함께 주어지면 새 구간과 합쳐 두 칸을 다시 쓴다. 이어 붙이지 않는다. 끝난 열린 일은 지난 일로 옮기거나 지운다.
+- [장부] 줄이 있는 일은 그 줄대로 적는다 — 대사에서 다시 짓지 않는다.
 - 버릴 것 — 장부가 이미 아는 수치(순위·이적료·평점·일정), 인사말, 되풀이된 말.
-- 시간순으로 적는다. 원문에 없는 사실을 지어내지 마라.
+- 원문에 없는 사실을 지어내지 마라.
 
 ## 인물별 기억
 - 감독과 실제로 무언가 오간 사람만 적는다. 아무 일도 없던 사람은 적지 않는다.
+- 한 사람에게 일이 둘이면 둘 다 — 일마다 한 줄.
 
 ## 새 인물
 - 그 구간에서 처음 이름을 갖고 말한 사람만 세운다.
@@ -69,6 +73,12 @@ export const HISTORY_COMPACTOR_SYSTEM = `당신은 구단의 기록 담당이다
  * (agents.md §5). 상한이 없으면 모델이 쓴 한 문장이 문단이 되어 그 층을 밀어낸다.
  */
 const CARD_TEXT_MAX = 200;
+
+/**
+ * 한 압축이 낼 수 있는 기억 줄의 상한 — 오타를 막는 자리다. 인물당 여러 줄이라 인물
+ * 수보다 넉넉하고, 보관 수는 코어가 인물마다 따로 자른다(`CHARACTER_MEMORY_KEEP`).
+ */
+const MEMORIES_MAX = 60;
 
 /** 길이와 무게는 세이브의 계약이 정한다 — 여기 다시 적으면 그 자리가 갈린다 */
 const MemorySchema = z.object({
@@ -109,15 +119,27 @@ const ReportInputSchema = z.object({
    * 상한은 코어도 잰다(`applyHistoryDigest` — 자르지 않고 거절한다). 같은 상수를
    * 두 곳이 읽되 모델에게 닿는 것은 이 한 벌이고, 반려 문구도 여기 것이 나간다.
    */
-  summary: z
+  past: z
     .string()
     .min(1)
-    .max(HISTORY_DIGEST_CHARS, `요약은 ${HISTORY_DIGEST_CHARS}자 이내여야 합니다`)
-    .describe(`이전 요약과 이번 구간을 합친 한 벌 (${HISTORY_DIGEST_CHARS}자 이내)`),
+    .max(HISTORY_DIGEST_CHARS, `지난 일은 ${HISTORY_DIGEST_CHARS}자 이내여야 합니다`)
+    .describe(
+      `지난 일 — 감독이 내린 결정과 그 이유, 사람들 사이에 생긴 일. 짧게 (${HISTORY_DIGEST_CHARS}자 이내)`,
+    ),
+  open: z
+    .string()
+    .max(HISTORY_OPEN_CHARS, `열린 일은 ${HISTORY_OPEN_CHARS}자 이내여야 합니다`)
+    .optional()
+    .describe(
+      `열린 일 — 끝나지 않은 대화와 의도. 협상·약속·이야기는 뺀다(스냅샷이 든다) (${HISTORY_OPEN_CHARS}자 이내)`,
+    ),
   memories: z
     .array(MemorySchema)
+    .max(MEMORIES_MAX)
     .optional()
-    .describe("그 구간에 사람들에게 있었던 일 — 없으면 비운다"),
+    .describe(
+      "그 구간에 사람들에게 있었던 일 — 한 사람에게 여러 줄 가능, 일마다 한 줄. 없으면 비운다",
+    ),
   characters: z
     .array(CharacterSchema)
     .optional()
@@ -147,13 +169,17 @@ export function buildCompactionPrompt(
     userTeamId: string;
     teams?: readonly { id: string; managerName?: string }[];
     managerPool?: readonly { name: string }[];
+    historyDigest?: { open?: string };
   },
   brief: HistoryFoldBrief,
   arcs: readonly { id: string; line: string }[] = [],
 ): string {
   const blocks: string[] = [];
   if (brief.previous !== null) {
-    blocks.push(`## 이전 요약 (${brief.rounds - 1}겹째까지)`, brief.previous, "");
+    blocks.push(`## 이전 요약 — 지난 일 (${brief.rounds - 1}겹째까지)`, brief.previous, "");
+    // 열린 일은 브리프가 들지 않는다 — 세이브의 두 번째 칸을 여기서 함께 읽는다 (§5-1)
+    const open = state.historyDigest?.open;
+    if (open !== undefined && open.length > 0) blocks.push("## 이전 요약 — 열린 일", open, "");
   }
   // 세계 인물 명부도 이미 선 사람이다 — 목록에 없으면 모델이 상대 감독·에이전트를
   // 새로 세우려 하고, 그 등록은 코어가 어차피 거절한다 (people.md §9-1)
@@ -173,7 +199,8 @@ export function buildCompactionPrompt(
   }
   blocks.push(`## 접히는 구간 (${brief.turns.length}턴)`);
   for (const turn of brief.turns) {
-    blocks.push(`### ${turn.at} · ${speakerOf(turn.role)}`, turn.text);
+    // 장부 골격은 본문 뒤에 한 줄씩 — 이적 확정·약속·회견 답·시간 경과는 이 줄이 원본이다
+    blocks.push(`### ${turn.at} · ${speakerOf(turn.role)}`, turn.text, ...turn.facts);
   }
   return blocks.join("\n");
 }
@@ -214,7 +241,7 @@ function makeReportTool(
   return {
     name: REPORT_DIGEST_TOOL,
     description:
-      "접히는 구간의 요약 한 벌과 캐릭터북 갱신을 함께 제출한다. 검사에 걸린 항목은 코어가 버린다.",
+      "접히는 구간의 요약 두 칸(지난 일·열린 일)과 캐릭터북 갱신을 함께 제출한다. 검사에 걸린 항목은 코어가 버린다.",
     inputSchema: REPORT_DIGEST_INPUT,
     handle: (input: unknown) => {
       const parsed = ReportInputSchema.safeParse(input);
@@ -223,10 +250,14 @@ function makeReportTool(
        * 요약이 먼저다 — 거절당하면 이 턴은 접지 않으므로 캐릭터북도 건드리지 않는다.
        * 길이는 위 스키마가 먼저 거르므로 여기 남는 것은 빈 문장과 낡은 브리프다.
        */
-      if (!applyHistoryDigest(state, brief, parsed.data.summary)) {
+      const draft = {
+        past: parsed.data.past,
+        ...(parsed.data.open ? { open: parsed.data.open } : {}),
+      };
+      if (!applyHistoryDigest(state, brief, draft)) {
         return {
           ok: false,
-          message: "요약을 반영하지 못했습니다 — 빈 문장이거나 이미 접힌 구간입니다",
+          message: "요약을 반영하지 못했습니다 — 지난 일이 비었거나 이미 접힌 구간입니다",
         };
       }
       // 등록이 기억보다 먼저다 — 새로 선 사람은 등록된 뒤에야 이 세계의 화자가 된다

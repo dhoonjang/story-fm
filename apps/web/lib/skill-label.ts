@@ -34,7 +34,7 @@ export const SKILL_LABEL: Record<string, string> = {
   respond_to_media: "기자회견 대응",
   respond_to_approach: "찾아온 사람 응대",
   substitute: "선수 교체",
-  apply_narrative_event: "서사 상태 반영",
+  record_incident: "사건 기록",
   apply_finance_event: "재정 이벤트",
   adjust_transfer_budget: "이적 예산 조정",
   request_board: "보드에 요청",

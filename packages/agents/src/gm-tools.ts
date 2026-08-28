@@ -13,7 +13,6 @@ import {
   answerOffer,
   arrivedResponses,
   applyFinanceEvent,
-  applyNarrativeEvent,
   applyTalkToPlayer,
   applyTeamTalk,
   careerView,
@@ -31,6 +30,8 @@ import {
   LOAN_FEE_RATE,
   marketValueOf,
   matchReport,
+  MOOD_BATCH,
+  MOOD_NOTE_MAX,
   opponentReport,
   NARRATIVE_EXPENSE_CATEGORIES,
   NARRATIVE_FINANCE_MAX_AMOUNT,
@@ -46,6 +47,7 @@ import {
   playerCard,
   playerName,
   recallLoan,
+  recordIncident,
   exerciseBuyBack,
   releasePlayer,
   requestBoard,
@@ -84,6 +86,7 @@ import {
   substitutePlayer,
   suggestTerms,
   TALK_OUTCOMES,
+  TEAM_TALK_MOODS,
   TEAM_TALK_OUTCOMES,
   teamName,
   teamProfile,
@@ -98,6 +101,7 @@ import {
   BOARD_REQUEST_KINDS,
   DateString,
   DIRECTIVE_INTENSITIES,
+  INCIDENT_KINDS,
   KEEPER_DISTRIBUTIONS,
   LEADERBOARD_KEYS,
   type MatchEvent,
@@ -163,6 +167,42 @@ const settlingArg = (kind: "talk" | "team_talk") =>
       "새로 영입해 아직 적응 중인 선수에게 이 말이 남긴 무게. 생략하면 코어가 outcome·강도로 정한다. " +
         "적응을 겨냥한 이야기(자리·역할 약속, 라커룸 소개, 사는 문제)면 크게, 지나가는 말이면 작게.",
     );
+
+/**
+ * 심경 잔향 — 그 선수와 있었던 일을 쓴 스킬이 한 문장을 함께 남긴다 (agents.md §4-3).
+ * 검사는 코어의 것이다(`applyMoodNotes`): 대상 밖의 선수는 버리고, 불만이 걸린 선수의
+ * 문장은 `acknowledgesIssue`로 그 사실을 안아야 남는다 — 낱말을 세지 않는다.
+ */
+const MOOD_LINE_HINT =
+  "이 일 뒤 그 선수의 심경 한 문장 (60자 안팎). 불만이 걸린 선수면 그 사실을 안았는지 acknowledgesIssue로";
+const moodLineArg = z
+  .object({
+    text: z.string().min(1).max(MOOD_NOTE_MAX),
+    acknowledgesIssue: z.boolean().optional(),
+  })
+  .optional()
+  .describe(MOOD_LINE_HINT);
+/** 대상이 여럿인 자리(팀토크·사건)의 심경 — 선수마다 한 줄, 상한은 그 자리가 정한다 */
+const moodNotesArg = (max: number) =>
+  z
+    .array(
+      z.object({
+        playerId: playerRef,
+        text: z.string().min(1).max(MOOD_NOTE_MAX),
+        acknowledgesIssue: z.boolean().optional(),
+      }),
+    )
+    .max(max)
+    .optional()
+    .describe(`${MOOD_LINE_HINT} — 이 일을 겪은 선수마다 한 줄, ${max}명까지`);
+
+/**
+ * 한 사건의 당사자 상한 — 선발 열한 명이 한꺼번에 걸리는 일(단체 벌금·회식)까지다.
+ * 그보다 많으면 선수단 전체의 일이고, 그것은 팀토크의 자리다.
+ */
+const INCIDENT_PLAYERS_MAX = 11;
+/** 사건 요약 한 줄의 상한 — 장부(`IncidentSchema.summary`)와 같은 폭 */
+const INCIDENT_SUMMARY_MAX = 200;
 
 /**
  * 감독이 그 자리에서 한 **약속** — 면담과 다가옴의 응대가 같은 인자를 쓴다
@@ -617,6 +657,7 @@ export function buildGmTools(
         outcome: z.enum(TEAM_TALK_OUTCOMES),
         intensity: z.union([z.literal(1), z.literal(2), z.literal(3)]),
         settling: settlingArg("team_talk"),
+        moods: moodNotesArg(TEAM_TALK_MOODS),
       }),
       (input) => applyTeamTalk(state, input),
     ),
@@ -635,6 +676,7 @@ export function buildGmTools(
           .optional()
           .describe("settling을 그렇게 매긴 근거 한 줄"),
         promise: promiseArg,
+        mood: moodLineArg,
       }),
       (input) => applyTalkToPlayer(state, input),
     ),
@@ -649,6 +691,7 @@ export function buildGmTools(
           .optional()
           .describe("감독이 이름을 들어 말한 상대 감독 — 사실 카드에 선 사람만"),
         decline: z.boolean().optional().describe("회견을 거절했다면 true"),
+        mood: moodLineArg,
       }),
       (input) => {
         /**
@@ -664,6 +707,7 @@ export function buildGmTools(
           stance: input.stance,
           targetPlayerId: input.targetPlayerId ?? null,
           targetManager: input.targetManager ?? null,
+          ...(input.mood ? { mood: input.mood } : {}),
         });
       },
     ),
@@ -687,6 +731,7 @@ export function buildGmTools(
           })
           .optional()
           .describe("구단주 자리에서 감독이 선 요청의 조건을 되물었으면 — 한 차례뿐이다"),
+        mood: moodLineArg,
       }),
       (input) => respondToApproach(state, input),
     ),
@@ -697,17 +742,18 @@ export function buildGmTools(
       (input) => substitutePlayer(state, input),
     ),
     wrap(
-      "apply_narrative_event",
-      descriptions.apply_narrative_event,
+      "record_incident",
+      descriptions.record_incident,
       z.object({
-        // 빈 목록은 아무에게도 닿지 않고 하루 한도만 쓴다 — 대상 없는 사건은 사건이 아니다
-        playerIds: z.array(playerRef).min(1),
-        conditionDelta: z.number().int().min(-5).max(5).optional(),
-        formDelta: z.number().int().min(-1).max(1).optional(),
-        // 이 줄은 서사 로그에 그대로 남는다 — 장면을 여기 옮겨 적을 자리가 아니다
-        note: z.string().min(1).max(200).describe("무슨 일이 있었나 — 한 줄로 (200자까지)"),
+        kind: z.enum(INCIDENT_KINDS),
+        // 빈 목록은 아무에게도 닿지 않고 하루 한도만 쓴다 — 당사자 없는 사건은 사건이 아니다
+        playerIds: z.array(playerRef).min(1).max(INCIDENT_PLAYERS_MAX),
+        intensity: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+        // 이 줄은 장부와 당사자의 기억에 그대로 남는다 — 장면을 여기 옮겨 적을 자리가 아니다
+        summary: z.string().min(1).max(INCIDENT_SUMMARY_MAX).describe("무슨 일이 있었나 — 한 줄"),
+        moods: moodNotesArg(MOOD_BATCH),
       }),
-      (input) => applyNarrativeEvent(state, input),
+      (input) => recordIncident(state, input),
     ),
     wrap(
       "apply_finance_event",

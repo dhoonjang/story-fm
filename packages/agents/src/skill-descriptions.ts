@@ -1,4 +1,7 @@
+import { MAX_INCIDENTS_PER_DAY } from "@story-fm/engine";
 import {
+  INCIDENT_KIND_KO,
+  INCIDENT_KINDS,
   MISSION_CANDIDATES,
   MISSION_DAYS,
   SET_PIECE_KO,
@@ -190,7 +193,8 @@ export const SKILL_CATALOG = [
     readOnly: false,
     description:
       "감독이 선수단 전체에 한 발화의 결과를 기록한다. outcome은 맥락 적합성·설득 근거·선수단 수용성을 보고 판정하고, intensity는 발화 강도에 맞춘다(1 담담히 ~ 3 격하게). " +
-      "결과는 전원의 상태를 움직이고, 아직 겉도는 새 영입에게 특히 크게 남는다.",
+      "결과는 전원의 상태를 움직이고, 아직 겉도는 새 영입에게 특히 크게 남는다. " +
+      "들은 선수 중 할 말이 생긴 이의 심경은 moods에.",
   },
   {
     name: "talk_to_player",
@@ -199,8 +203,9 @@ export const SKILL_CATALOG = [
     readOnly: false,
     description:
       "감독과 선수 개인의 면담 결과를 기록한다. 감독이 그 선수에게 건넨 말이 있을 때만 쓴다 — 이름을 부르기만 한 말은 부름이지 면담이 아니다. " +
-      "outcome은 맥락 적합성·설득 근거·대상 수용성을 보고 판정한다. 그 선수에게 불만 이슈가 있으면 어떤 결과로든 해소된다. " +
-      "새로 영입해 아직 적응 중인 선수는 면담으로 적응이 앞당겨진다(나쁜 결과면 늦춰진다) — 그 무게는 settling에 적는다.",
+      "outcome은 맥락 적합성·설득 근거·대상 수용성을 보고 판정한다. 불만은 사기가 오른 결과에만 풀린다. " +
+      "새로 영입해 아직 적응 중인 선수는 면담으로 적응이 앞당겨진다(나쁜 결과면 늦춰진다) — 그 무게는 settling에 적는다. " +
+      "면담 뒤 그 선수의 심경은 mood에.",
   },
   {
     name: "respond_to_media",
@@ -212,7 +217,7 @@ export const SKILL_CATALOG = [
       "그 자리를 장면으로 열고, 질문은 사실 카드를 기자의 말로 옮겨 써라 — 그대로 읽지 않는다. 감독이 아직 답하지 않은 턴에는 묻기만 하고 이 도구를 부르지 않는다. " +
       "상대 감독 카드가 서면 기자가 그 말을 인용해 묻고, 감독이 그를 겨누면 targetManager에 이름을 적는다. " +
       "감독의 발화를 stance 하나로 옮긴다: defend(감싼다) · own(책임을 진다) · criticise(날을 세운다) · bold(도발) · deflect(말을 아낀다). " +
-      "회견을 거절하거나 자리를 피했으면 decline: true.",
+      "회견을 거절하거나 자리를 피했으면 decline: true. 이름이 불린 선수의 심경은 mood에.",
   },
   {
     name: "respond_to_approach",
@@ -222,7 +227,7 @@ export const SKILL_CATALOG = [
     description:
       "먼저 열린 자리에 감독이 답한 결과를 기록한다(스냅샷의 <approach>에 화자와 사실이 실려 있다 — 없으면 쓰지 마라). " +
       "자리가 열려 있으면 지목된 화자로 장면을 열되 사실을 그대로 읽지 말고 그 사람의 말로 옮겨라. 감독이 아직 답하지 않은 턴에는 그 사람의 말까지만 쓰고 부르지 않는다. " +
-      "감독의 발화를 stance 하나로 옮긴다: defend(감싼다) · own(책임을 진다) · criticise(날을 세운다) · bold(도발) · deflect(말을 아낀다). 자리를 주지 않고 돌려보냈으면 decline: true. " +
+      "감독의 발화를 stance 하나로 옮긴다 — respond_to_media와 같은 다섯이다. 자리를 주지 않고 돌려보냈으면 decline: true. 찾아온 선수의 심경은 mood에. " +
       "구단주가 건 조건을 두고 감독이 되물었으면 counter에 싣는다 — 기한을 늘려 달라면 extendDays, 조건을 낮춰 달라면 relax: true. 한 차례뿐이고 얼마나 물러서는지는 구단주가 정한다. " +
       "압력이 연 자리는 압력만 되돌린다 — 불만은 talk_to_player·승격·선발로만 풀린다. " +
       "감독직 면접 자리에서는 답이 제안 조건을 정한다 — own·defend는 기본 조건, bold는 연봉·이적 예산 약속을 흥정 천장까지 올리고 흥정 기회를 태우며, criticise·deflect·decline은 제안 없이 문을 닫는다.",
@@ -236,12 +241,15 @@ export const SKILL_CATALOG = [
       "경기 정지점에서 우리 팀 선수를 교체한다. out에는 나가는 선수, in에는 들어오는 벤치 선수를 이름으로 적는다.",
   },
   {
-    name: "apply_narrative_event",
-    label: "서사 상태 반영",
+    name: "record_incident",
+    label: "사건 기록",
     group: "대화·서사",
     readOnly: false,
     description:
-      "서사에서 실제로 일어난 사건의 체력·폼 변화를 허용 범위 안에서 기록한다. 능력치나 다른 장부 값은 바꿀 수 없다.",
+      "벌금·포상·휴가·병문안·공개 칭찬과 질책·사과·중재·라커룸 규칙·회식처럼 다른 도구가 없는 행동을 감독이 했을 때 세운다. " +
+      `kind는 효과의 모양이다: ${INCIDENT_KINDS.map((k) => `${k}(${INCIDENT_KIND_KO[k]})`).join(" · ")}. ` +
+      "playerIds는 당사자의 이름, intensity는 세기 1~3, summary는 무슨 일이었나 한 줄. " +
+      `사기와 관계만 움직이고 능력치·컨디션은 그대로다. 하루 ${MAX_INCIDENTS_PER_DAY}건까지. 당사자의 심경은 moods에.`,
   },
   {
     name: "apply_finance_event",

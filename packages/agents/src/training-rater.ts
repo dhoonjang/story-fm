@@ -40,7 +40,7 @@ export const TRAINING_RATER_SYSTEM = `당신은 축구 구단의 훈련장을 �
 지난 며칠의 훈련이 선수 각자에게 얼마나 스몄는지를 매긴다.
 
 ## 무엇을 보는가
-훈련 내용, 선수의 자리·나이·컨디션, 감독이 그 기간에 한 말, 걸려 있는 개인 지시.
+훈련 내용, 선수의 자리·나이·컨디션, 그 기간의 대화와 [장부] 줄, 걸려 있는 개인 지시.
 
 ## 규칙
 - 전술 적응도는 ${TACTIC_GAIN_MIN} ~ ${TACTIC_GAIN_MAX} 중 하나다. 대부분은 0~1이고, ${TACTIC_GAIN_MIN}은
@@ -49,6 +49,7 @@ export const TRAINING_RATER_SYSTEM = `당신은 축구 구단의 훈련장을 �
   아무에게도 변화가 없는 구간이 정상이다. ${agingDeclineLine()}
 - 개인 훈련으로 자리를 배우는 선수(대상 표에 "전향 …"으로 표시)에게는
   positionGain을 0~${POSITION_TRAIN_MAX}으로 적는다. 전향이 걸리지 않은 선수에게는 적지 않는다.
+- 대화에서는 감독이 무엇을 주문했는지와 그 근거만 읽는다. 장면의 말은 여러 사람의 것이고, 실제로 걸린 것은 [장부] 줄이 말한다.
 - 대상 전원을 빠뜨리지 마라.
 - date에 그 변화가 나온 훈련 날짜를 적는다. 위 훈련 목록의 날짜 중 하나여야 한다.
 - 근거는 한 문장, 30자 안팎. 그 기간에 실제로 있었던 일만 적는다.
@@ -120,7 +121,12 @@ export function buildTrainingPrompt(brief: TrainingBrief): string {
       s.ordered ? " | 감독 지시" : ""
     }`;
   });
-  const chat = brief.chat.map((t) => `- ${t.at} ${t.role === "user" ? "감독" : "코치"}: ${t.text}`);
+  // 모델 턴은 「장면」이다 — 구단주·선수·기자의 말이 함께 있어 「코치」로 붙이면 남의 말이
+  // 코치의 지시로 읽힌다. 실제로 걸린 것은 그 턴의 장부 골격(`facts`)이 말한다 (agents.md §4).
+  const chat = brief.chat.flatMap((t) => [
+    `- ${t.at} ${t.role === "user" ? "감독" : "장면"}: ${t.text}`,
+    ...t.facts.map((f) => `  ${f}`),
+  ]);
   const rows = brief.subjects.map((p) => {
     const parts = [
       `${p.playerId} | ${p.name} | ${p.position} | ${p.age}세`,

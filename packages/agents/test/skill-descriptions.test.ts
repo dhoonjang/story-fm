@@ -4,16 +4,14 @@ import {
   DEFAULT_SKILL_DESCRIPTIONS,
   GM_SYSTEM,
   MATCH_INTENT_SYSTEM,
-  RATE_PLAYERS_INPUT,
-  RATE_PLAYERS_TOOL,
   REPORT_DIGEST_INPUT,
   REPORT_DIGEST_TOOL,
-  REPORT_MOOD_INPUT,
-  REPORT_MOOD_TOOL,
   REPORT_TRAINING_INPUT,
   REPORT_TRAINING_TOOL,
-  MATCH_RATER_SYSTEM,
   MatchIntentSchema,
+  SETTLE_MATCH_DESCRIPTION,
+  SETTLE_MATCH_INPUT,
+  SETTLE_MATCH_TOOL,
   SKILL_CATALOG,
   SKILL_NAMES,
   TRAINING_RATER_SYSTEM,
@@ -24,6 +22,8 @@ import {
 import {
   ATTRIBUTE_AXES,
   AXIS_KO,
+  INCIDENT_KIND_KO,
+  INCIDENT_KINDS,
   SET_PIECE_ROUTINE_AXES,
   SET_PIECE_ROUTINE_NEUTRAL,
   TACTIC_TOGGLES,
@@ -164,8 +164,23 @@ describe("규칙이 사는 자리", () => {
     expect(early.every((axis) => agingDelta(axis, age) < 0)).toBe(true);
     expect(early.every((axis) => agingDelta(axis, age - 1) < 0)).toBe(false);
 
-    expect(MATCH_RATER_SYSTEM).toContain(line);
+    expect(SETTLE_MATCH_DESCRIPTION).toContain(line);
     expect(TRAINING_RATER_SYSTEM).toContain(line);
+  });
+
+  /**
+   * 사건의 갈래는 효과의 모양이고 그 낱말표는 코어의 것이다 (people.md §6). 설명이
+   * 손으로 적으면 갈래가 늘어도 모델은 옛 표를 믿고, 표에 없는 갈래는 부를 길이 없다 —
+   * 세트피스 낱말표와 같은 결이다.
+   */
+  it("사건 기록의 설명은 코어 갈래표의 낱말을 전부 싣는다", () => {
+    const incident = TOOLS.find((t) => t.name === "record_incident")!;
+    const kinds = (incident.inputSchema.properties?.kind as { enum?: string[] }).enum ?? [];
+    expect([...kinds].sort()).toEqual([...INCIDENT_KINDS].sort());
+    for (const kind of INCIDENT_KINDS) {
+      expect(incident.description, kind).toContain(kind);
+      expect(incident.description, kind).toContain(INCIDENT_KIND_KO[kind]);
+    }
   });
 });
 
@@ -353,13 +368,12 @@ function walk(node: unknown, name = ""): Array<[string, Record<string, unknown>]
 }
 
 /**
- * 결산 넷은 GM 도구가 아니라 저마다의 호출이 강제하는 도구 하나다 — 카탈로그에도
+ * 산출 도구 셋은 GM 도구가 아니라 저마다의 호출이 강제하는 도구 하나다 — 카탈로그에도
  * `buildGmTools`에도 서지 않는다. 그래도 모델이 받는 입력이라 계약은 같다.
  */
 const RATER_TOOLS = [
-  { name: RATE_PLAYERS_TOOL, inputSchema: RATE_PLAYERS_INPUT },
+  { name: SETTLE_MATCH_TOOL, inputSchema: SETTLE_MATCH_INPUT },
   { name: REPORT_TRAINING_TOOL, inputSchema: REPORT_TRAINING_INPUT },
-  { name: REPORT_MOOD_TOOL, inputSchema: REPORT_MOOD_INPUT },
   { name: REPORT_DIGEST_TOOL, inputSchema: REPORT_DIGEST_INPUT },
 ];
 

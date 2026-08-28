@@ -61,7 +61,7 @@ const SKILL_ICON: Record<string, IconComponent> = {
   exercise_buyback: IconPerson,
   // 계약 확정은 재정 장부에도 서므로 사람 쪽으로 — 그 칸의 머리 아이콘이 이미 돈이다
   accept_deal: IconPerson,
-  apply_narrative_event: IconInsight,
+  record_incident: IconInsight,
   set_training: IconDay,
   start_match: IconMatch,
   finalize_match: IconTrophy,
