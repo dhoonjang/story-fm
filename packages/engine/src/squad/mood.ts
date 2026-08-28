@@ -53,7 +53,6 @@ import {
   isOurPlayer,
   openInjury,
   playerById,
-  playersOf,
   seasonStatOf,
   teamNameIn,
   type GameState,

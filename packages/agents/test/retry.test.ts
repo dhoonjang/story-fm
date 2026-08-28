@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   HISTORY_DIGEST_CHARS,
+  HISTORY_OPEN_CHARS,
   MOOD_BATCH,
   MOOD_NOTE_MAX,
   RATING_MAX,
@@ -354,7 +355,8 @@ describe("결산 스키마의 수용 폭", () => {
    * 코어만 조여지고 모델은 옛 상한을 계속 믿는다 (agents.md §4).
    */
   it("압축 산출의 상한은 코어 상수를 그대로 쓰고, 카드의 자유 문구는 전부 물려 있다", () => {
-    expect(schemaAt(REPORT_DIGEST_INPUT, "summary").maxLength).toBe(HISTORY_DIGEST_CHARS);
+    expect(schemaAt(REPORT_DIGEST_INPUT, "past").maxLength).toBe(HISTORY_DIGEST_CHARS);
+    expect(schemaAt(REPORT_DIGEST_INPUT, "open").maxLength).toBe(HISTORY_OPEN_CHARS);
     expect(schemaAt(REPORT_DIGEST_INPUT, "memories.[].text").maxLength).toBe(
       CharacterMemorySchema.shape.text.maxLength,
     );

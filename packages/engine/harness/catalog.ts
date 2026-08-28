@@ -636,6 +636,8 @@ export const HISTORY_WINDOW = defineHarness({
     { metric: "창이 미끄러진 턴 비율", role: "guard", max: 0.2, unit: "ratio", why: "6턴 스텝이라 정상은 1/6 — 매 턴 미끄러지면 이력 캐시가 한 번도 적중하지 않는다" },
     { metric: "렌더 배율", role: "reference", min: 1, max: 1.3, unit: "ratio", why: "코어가 세는 turn.text와 프롬프트에 실리는 형태의 비 — 이보다 벌어지면 글자 상한이 뜻을 잃는다" },
     { metric: "잔량의 최소 캐시 프리픽스 배수", role: "guard", min: 1, unit: "ratio", why: "그 아래면 압축 직후 이력 캐시가 아예 안 걸린다 (models.md §1)" },
+    { metric: "요약 두 칸 상한 글자", role: "measure", unit: "count", why: "지난 일 + 열린 일의 상한 — 압축된 세이브가 이력 앞에 매 턴 싣는 최대치 (agents.md §5-1)" },
+    { metric: "요약 두 칸의 잔량 대비 비율", role: "reference", max: 0.25, unit: "ratio", why: "요약이 잔량의 1/4을 넘으면 접은 뒤에도 프롬프트가 별로 줄지 않는다" },
   ],
 });
 
@@ -651,6 +653,8 @@ export const PROMPT_REGRESSION = defineHarness({
     { metric: "도구 스펙 글자", role: "measure", unit: "count", why: "설명 + Zod에서 파생된 JSON 스키마 — 고정층의 대부분이다" },
     { metric: "도구 설명 총 글자", role: "measure", unit: "count", why: "상한은 skill-descriptions.test.ts가 쥔다 — 여기서는 그 안 어디쯤인지만 읽는다" },
     { metric: "가장 긴 도구 설명 글자", role: "measure", unit: "count", why: "한 도구가 설명 예산을 혼자 먹고 있는가" },
+    { metric: "종료 턴 고정층 글자", role: "measure", unit: "count", why: "경기 결산 도구 하나(설명 + 스키마) — 종료 턴 한 번만 캐스터 고정층에 얹힌다 (agents.md §3)" },
+    { metric: "훈련 브리프 글자", role: "measure", unit: "count", why: "한 주를 넘긴 구간의 훈련 결산 입력 — 대화·[장부] 줄·대상 표가 함께 간다 (agents.md §4)" },
     { metric: "레퍼런스층 글자", role: "reference", max: 600, unit: "count", why: "구단 이름과 감독 프로필뿐이다(<club>·<manager>) — 선수 이름·수치가 들어오면 캐시가 그것과 함께 깨진다" },
     { metric: "매 턴 층 글자", role: "reference", max: 3000, unit: "count", why: "캐시가 걸리지 않는 유일한 층 — 매 턴 정가로 나간다" },
     { metric: "고정층 비중", role: "measure", unit: "ratio", why: "고정 ÷ (고정 + 레퍼런스 + 매 턴) — 캐시가 덮는 몫" },

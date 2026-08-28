@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   GM_SYSTEM,
+  SETTLE_MATCH_DESCRIPTION,
+  SETTLE_MATCH_INPUT,
   SKILL_CATALOG,
   buildGmReference,
   buildGmStateNote,
   buildGmTools,
+  buildTrainingPrompt,
   parseSceneHeader,
   runMockGmTurn,
   sanitizeCasterText,
@@ -12,6 +15,7 @@ import {
 } from "@story-fm/agents";
 import {
   advanceTime,
+  buildTrainingBrief,
   createGame,
   interpretBackgroundHeuristic,
   userPlayers,
@@ -66,6 +70,27 @@ function fixedLayer(state: GameState): string {
     inputSchema: tool.inputSchema,
   }));
   return `${GM_SYSTEM}\n${JSON.stringify(tools)}`;
+}
+
+/**
+ * 종료 턴의 고정층 — 캐스터가 그 턴 한 번만 받는 결산 도구 하나(설명 + 스키마).
+ * 중계 프롬프트에 매 턴 실리지 않으므로 고정층 예산과는 다른 눈금이다 (agents.md §3).
+ */
+function settlementLayer(): number {
+  return SETTLE_MATCH_DESCRIPTION.length + JSON.stringify(SETTLE_MATCH_INPUT).length;
+}
+
+/** 한 주를 넘긴 구간의 훈련 브리프 — 결산 호출의 입력 그대로 */
+const TRAINING_WINDOW_DAYS = 7;
+
+function trainingBriefChars(seed: number): number {
+  const state = build(seed, "최감독", BACKGROUND);
+  // 소집 뒤라야 훈련이 돈다 — 첫 이동이 소집일을 지나도록 한 달을 민다
+  advanceTime(state, { days: 31 });
+  const from = state.date;
+  const moved = advanceTime(state, { days: TRAINING_WINDOW_DAYS });
+  const brief = buildTrainingBrief(state, moved.trained?.sessions ?? [], { from, to: state.date });
+  return brief ? buildTrainingPrompt(brief).length : 0;
 }
 
 /** 프리픽스 안정성 — 바이트까지 같으면 1, 아니면 0. 중간값이 없는 질문이다 */
@@ -188,6 +213,8 @@ describe("프롬프트 회귀", () => {
       "도구 스펙 글자": fixed.length - GM_SYSTEM.length,
       "도구 설명 총 글자": SKILL_CATALOG.reduce((sum, skill) => sum + skill.description.length, 0),
       "가장 긴 도구 설명 글자": Math.max(...SKILL_CATALOG.map((s) => s.description.length)),
+      "종료 턴 고정층 글자": settlementLayer(),
+      "훈련 브리프 글자": trainingBriefChars(13),
       "레퍼런스층 글자": reference.length,
       "매 턴 층 글자": stateNote.length,
       "고정층 비중": fixed.length / layers,
