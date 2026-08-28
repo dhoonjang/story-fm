@@ -344,7 +344,8 @@ row, 지난 일 = 그대로 이력.**
 | `trophies` `Trophy` · `achievements` `Achievement` | 우승 · 업적                                                                                                                 | `domain/records.ts` |
 | `awards` `SeasonAward`                             | 시상 — 코드·**대회**·수상자·근거 수치. 리그도 컵·대항전도, **세계 전체**에 쌓인다 ([season.md](../simulation/season.md) §6) | `domain/records.ts` |
 | `personas` `Persona`                               | 인물 — 수석코치·구단주·기자. 성격·동기·말투+예시 대사                                                                       | `domain/persona.ts` |
-| `narrative` `NarrativeNote`                        | GM 기억 — 날짜·문장·중요도(1\~5)                                                                                            | `domain/records.ts` |
+| `narrative` `NarrativeNote`                        | GM 기억 — 날짜·문장·중요도(1\~5)·갈래                                                                                       | `domain/records.ts` |
+| `incidents` `Incident`                             | 감독이 말로 만든 사건 — 날짜·갈래(효과의 모양)·당사자·세기·요약 (people.md §6). 옛 세이브엔 없다                            | `domain/records.ts` |
 | `arcs` `NarrativeArc`                              | 서사 아크 — 갈래·주인·단계·제목. 개폐는 장부에서 결정적 (people.md §9)                                                      | `domain/records.ts` |
 | `chat` `ChatTurn`                                  | 대화 이력 — `user`/`model`/`operator`                                                                                       | `core/state.ts`     |
 | ↳ `ToolCallRecord`                                 | 스킬 호출 — 요약·항목(`brief`)·카드 payload·톤·`silent`·장면 안 줄 위치                                                     | `core/state.ts`     |
@@ -354,6 +355,8 @@ row, 지난 일 = 그대로 이력.**
 | `pendingEdits` `PendingEdit`                       | 아직 GM이 읽지 않은 화면 조작 — 같은 키는 마지막 것만                                                                       | `core/state.ts`     |
 | `pendingNews`                                      | 아직 GM이 읽지 않은 경기 밖 소식 — 결산이 함께 굴린 재정·다른 경기                                                          | `core/state.ts`     |
 | `pendingReportCards`                               | 아직 카드로 세우지 않은 스카우트 보고서 — 모델이 그 줄을 읽은 턴에 비워진다                                                 | `core/state.ts`     |
+| `historyDigest` `HistoryDigest`                    | 접힌 평시 이력의 요약 — 접은 지점 · **지난 일**(`text`) · **열린 일**(`open`) · 겹 수 (llm/agents.md §5-1)                  | `domain/records.ts` |
+| `characterMemories` `CharacterMemory`              | 인물이 소유하는 기억 — 압축이 주 저자, 사건 기록이 즉시 적기도 한다 (people.md §9-1)                                        | `domain/records.ts` |
 
 ⚠️ **말풍선 항목의 증감은 숫자로 온다** — `delta`가 있으면 그 항목은 오르내린 값을
 말하는 것이고 화면은 **부호로 색을 준다**. 문자열의 `+`·`−`를 찾아 색을 칠하면 포메이션
