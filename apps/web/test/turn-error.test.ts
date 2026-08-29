@@ -39,6 +39,7 @@ type TurnEvent = {
   text?: string;
   payload?: GamePayload;
   error?: string;
+  retry?: boolean;
   detail?: string;
 };
 
@@ -90,6 +91,7 @@ describe("LLM 응답 실패", () => {
     expect(failure?.error).not.toContain("@");
     // 문구를 고른 것은 `kind`다 — 원문에서 낱말을 찾지 않는다 (models.md §1-1)
     expect(failure?.error).toBe("모델 서버가 혼잡합니다");
+    expect(failure?.retry).toBe(true); // 붐빔은 다시 보내면 통한다 — 배너에 버튼이 선다
     expect(failure?.detail).toContain("529"); // 원인은 detail로만 (개발 모드 툴팁·로그용)
 
     // 저장된 채팅이 그대로다 — 실패한 턴은 흔적을 남기지 않는다
@@ -112,6 +114,23 @@ describe("LLM 응답 실패", () => {
     expect(events.find((e) => e.type === "error")?.error).toBe(notice);
 
     expect((await reloaded(game.id)).chat).toHaveLength(before);
+  });
+
+  /**
+   * **다시 불러도 같은 실패는 화면이 다르게 말해야 한다** (models.md §1-1). 400은
+   * 설정이나 스키마가 틀렸다는 뜻이라, "응답을 받지 못했다"로 묶이면 모델 서버가
+   * 붐빈 것과 구분되지 않아 감독은 「다시 시도」만 누른다. 그 버튼이 서는지는
+   * 서버가 적어 보내는 `retry` 하나가 정한다 — 화면이 문구를 읽어 짐작하지 않는다.
+   */
+  it("다시 불러도 같은 실패는 다른 문구로 서고 `다시 시도`를 세우지 않는다", async () => {
+    const game = await newGame();
+    reject.mockRejectedValueOnce(
+      new LlmCallError("invalid_request", "Thinking level MINIMAL is not supported for this model"),
+    );
+
+    const failure = (await turnEvents(game.id, "훈련 잡아줘")).find((e) => e.type === "error");
+    expect(failure?.error).toBe("요청이나 설정이 잘못됐습니다 — 서버 로그를 확인하세요");
+    expect(failure?.retry).toBe(false);
   });
 
   it("실패한 턴의 도구 효과는 저장되지 않는다 (부분 커밋 없음)", async () => {
