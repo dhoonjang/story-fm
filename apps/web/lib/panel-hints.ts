@@ -29,6 +29,8 @@ export const PANEL_OF: Record<string, PanelKey> = {
   set_squad_level: "스쿼드",
   set_tactics: "스쿼드",
   apply_orders: "스쿼드",
+  // 이적·재정 지시 자체는 기록되지 않는다 — 뒤의 스킬들이 카드와 말풍선을 세운다
+  market_orders: "재정",
   set_player_tactic: "스쿼드",
   // 세트피스는 판의 사실이다 — 키커도 인원도 확인하러 갈 화면은 전술판이 선 스쿼드다
   set_set_piece_takers: "스쿼드",

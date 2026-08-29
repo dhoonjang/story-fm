@@ -1116,7 +1116,7 @@ describe("도구 구성", () => {
     const state = game();
     const calls: GmToolCall[] = [];
     const negotiationId = "neg-just-arrived";
-    const tools = buildGmTools(state, calls, {
+    const tools = buildSkillTools(state, calls, {
       deferNegotiationIds: new Set([negotiationId]),
     });
     const respond = tools.find((t) => t.name === "respond_offer")!;

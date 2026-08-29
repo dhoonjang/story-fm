@@ -699,7 +699,7 @@ function vacancyRows(state: GameState): string[] {
  * 재계약은 구단도 자리도 그대로라 구단·기대를 다시 적지 않는다 — 바로 위의 보드
  * 기대 줄이 그것이다.
  */
-function managerSeatLines(state: GameState): string[] {
+export function managerSeatLines(state: GameState): string[] {
   const offers = openManagerOffers(state).map((o) =>
     o.via === "renewal"
       ? `${OFFER_VIA_KO.renewal}: ${o.id} · ${offerTerms(o)}`
@@ -1409,6 +1409,23 @@ export function buildGmStateNote(
     `</snapshot>`,
   ]
     .filter((x): x is string => x !== null)
+    .join("\n");
+}
+
+/** 해석기가 읽는 지난 턴 수 — 이름 없는 지목이 가리키는 대상은 직전 대화에 있다 */
+export const RECENT_TURNS = 5;
+/** 지난 턴 본문 하나의 상한 — 해석에 필요한 것은 누가 무슨 말을 했는가지 장면 전부가 아니다 */
+const RECENT_TURN_CHARS = 1200;
+
+/** `<recent_turns>`의 본문 — 평시의 지난 턴들. 감독 턴은 `@감독:`, 손잡이 턴은 오퍼레이터 봉투 */
+export function buildRecentTurnsBlock(state: GameState, count = RECENT_TURNS): string {
+  const turns = state.chat.filter((t) => t.inMatch !== true).slice(-count);
+  return turns
+    .map((t) => {
+      if (t.role === "user") return `@감독: ${t.text}`;
+      if (t.role === "operator") return buildOperatorMessage(t.text);
+      return t.text.slice(0, RECENT_TURN_CHARS);
+    })
     .join("\n");
 }
 

@@ -1,4 +1,4 @@
-import { squadView, type GameState } from "@story-fm/engine";
+import { playerName, squadView, type GameState } from "@story-fm/engine";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
 import {
   DIRECTIVE_INTENSITIES,
@@ -9,7 +9,14 @@ import {
   setPieceRoutineChoiceText,
   tacticToggleChoiceText,
 } from "@story-fm/domain";
-import { buildLedgerNote, buildOperatorMessage, buildStandingBlock } from "./gm-input";
+import {
+  buildLedgerNote,
+  buildOperatorMessage,
+  buildRecentTurnsBlock,
+  buildStandingBlock,
+} from "./gm-input";
+import { buildSkillTools } from "./gm-tools";
+import { buildOpsSchema, parseOps } from "./orders-ops";
 import { OrdersSchema, type Orders } from "./orders-schema";
 import { ModelOutputError, retryOnce, requireToolCall } from "./retry";
 import { toToolSchema } from "./tool-schema";
@@ -35,7 +42,7 @@ import { toToolSchema } from "./tool-schema";
 export const APPLY_ORDERS_SYSTEM = `당신은 경기 중 감독의 말을 구조화된 의도 하나로 옮기는 해석기다. 중계도 대사도 쓰지 않는다.
 
 # 입력
-경기 중에는 <ledger>(명단·시각·교체 횟수) · <standing>(걸려 있는 전술과 개인 지시) · <targets>(공략 목록) · <match_log>(이 경기의 지난 턴 전부 — 중계와 감독의 말), 평시에는 <standing>(지금 걸려 있는 것 전부 — 6축·갈래·세트피스 인원·지역 전술·개인 지시와 역할·완장·세트피스 키커) · <squad>(선발·벤치·예비와 자리) · <recent_turns>(지난 다섯 턴) 뒤에 이번 턴 감독의 말이 @감독: 으로 온다. 바꾸라는 말은 <standing>의 지금 값에서 움직인다.
+경기 중에는 <ledger>(명단·시각·교체 횟수) · <standing>(걸려 있는 전술과 개인 지시) · <targets>(공략 목록) · <match_log>(이 경기의 지난 턴 전부 — 중계와 감독의 말), 평시에는 <standing>(지금 걸려 있는 것 전부 — 6축·갈래·세트피스 인원·지역 전술·개인 지시와 역할·완장·세트피스 키커) · <squad>(선발·벤치·예비와 자리) · <squad_ops>(멘토링·집중 육성·2군 방침·유스 후보) · <recent_turns>(지난 다섯 턴) 뒤에 이번 턴 감독의 말이 @감독: 으로 온다. 바꾸라는 말은 <standing>의 지금 값에서 움직인다.
 
 # 무엇을 고르나
 감독이 명시한 것만 싣는다. 말하지 않은 축·갈래·자리·역할은 보내지 않는다. 프리셋을 적용하거나 전원을 재배치하지 않는다.
@@ -67,6 +74,15 @@ export const APPLY_ORDERS_SYSTEM = `당신은 경기 중 감독의 말을 구조
 - setPieceTakers — 세트피스 키커. corner·freeKick·penalty 중 감독이 말한 자리만 싣고, 지정을 풀라는 말이면 그 자리에 null을 넣는다.
 - setPieceRoutine — 세트피스에 몇 명이 서는가: ${SET_PIECE_ROUTINE_AXES.map(setPieceRoutineChoiceText).join(" · ")}. 감독이 말한 축만 싣고, 지시를 푸는 말이면 ${SET_PIECE_ROUTINE_NEUTRAL}을 넣는다.
 
+# 선수단 운영 (ops — 평시에만)
+스킬 이름 아래 그 인자를 배열로. 감독이 정한 것만.
+- set_training — 훈련의 단일 입구. 감독이 말한 훈련만 등록하고 빈 세션을 채우지 않는다. 날짜 sessions 또는 요일 repeatWeekly에 am·pm, label, focus(능력치 축·tactical·recovery). 없애는 지시는 clear(rest=true면 쉬는 날로 못 박고, false면 특별 훈련만 걷는다). 한 선수의 개인 훈련은 player(axis 또는 position, clear=true면 거둔다). 휴가 중엔 감독이 접겠다고 했을 때만 recallSquad.
+- set_development_focus — 2군 유망주 집중 육성(최대 3). 목록 교체다 — <squad_ops>의 지금 목록에 더하거나 빼서 전체를 다시 적는다. 생략하면 해제.
+- set_mentor — 고참(1군 30세 이상·리더십 55 이상)에게 23세 이하를 맡긴다(멘토당 3). 그 멘토의 멘티 전체를 다시 적는다. menteeIds 생략은 다 푸는 것.
+- set_reserve_training — 2군 방침 physical·technical·mental·balanced(해제).
+- set_squad_number — 등번호 1~99. 동료가 달고 있으면 반려된다 — 감독이 넘겨받으라고 분명히 했을 때만 take=true.
+- sign_youth — 유스 후보 중 계약할 이름. 한 번의 확정이다 — 감독이 정했을 때만. 생략은 전원 방출.
+
 # unresolved
 어느 갈래에도 담기지 않은 말은 감독의 표현 그대로 unresolved에 남긴다.`;
 
@@ -87,31 +103,60 @@ const ORDERS_TURN_CHARS = 1200;
  * 없으면 빈 문자열.
  */
 /**
- * 평시의 지난 턴 수 — 이름 없는 지목("걔", "아까 그 자리")이 가리키는 대상은 직전
- * 대화에 있고, 판을 세우는 지시는 며칠에 걸친 대화의 끝에 온다.
+ * 해석기가 채우는 **선수단 운영 스킬** — 훈련·집중 육성·멘토·2군 방침·등번호·유스 계약.
+ * 평시에만 뜻이 있고, 인자는 그 도구의 스키마 그대로다 (orders-ops.ts).
  */
-const PEACE_RECENT_TURNS = 5;
+export const SQUAD_OPS: readonly string[] = [
+  "set_training",
+  "set_development_focus",
+  "set_mentor",
+  "set_reserve_training",
+  "set_squad_number",
+  "sign_youth",
+];
+
+/** `<squad_ops>` — 운영 스킬이 목록 교체라서 지금 목록을 알아야 하는 것들 */
+function buildSquadOpsBlock(state: GameState): string[] {
+  const name = (id: string): string => playerName(state, id);
+  const mentoring = (state.mentoring ?? []).filter((m) => m.until === undefined);
+  const byMentor = new Map<string, string[]>();
+  for (const m of mentoring)
+    byMentor.set(m.mentorId, [...(byMentor.get(m.mentorId) ?? []), m.menteeId]);
+  const focus = state.developmentFocus ?? [];
+  const youth = (state.youthCandidates ?? []).filter((c) => c.teamId === state.userTeamId);
+  return [
+    `<squad_ops>`,
+    `멘토링: ${
+      byMentor.size > 0
+        ? [...byMentor].map(([m, ids]) => `${name(m)} → ${ids.map(name).join("·")}`).join(" / ")
+        : "없음"
+    }`,
+    `집중 육성: ${focus.length > 0 ? focus.map(name).join("·") : "없음"}`,
+    `2군 훈련 방침: ${state.reserveTraining ?? "balanced"}`,
+    ...(youth.length > 0
+      ? [
+          `유스 후보 (${youth[0]!.deadline}까지): ${youth.map((c) => `${c.player.id} ${c.player.name}`).join(" · ")}`,
+        ]
+      : []),
+    `</squad_ops>`,
+  ];
+}
 
 /**
- * 평시의 판 — `<tactics>`(지금 걸려 있는 것 전부: 6축·갈래·개인 지시·역할·지역 전술·
+ * 평시의 판 — `<standing>`(지금 걸려 있는 것 전부: 6축·갈래·개인 지시·역할·지역 전술·
  * 완장·세트피스 키커 — 경기 장부 노트와 같은 블록) · `<squad>`(선발·벤치·예비와
- * 자리) · `<recent_turns>`(지난 다섯 턴).
+ * 자리) · `<squad_ops>`(멘토링·집중 육성·2군 방침·유스 후보) · `<recent_turns>`(지난 다섯 턴).
  */
 function buildPeaceContext(state: GameState): string[] {
   const squad = squadView(state, {});
-  const standing = buildStandingBlock(state);
-  const turns = state.chat.filter((t) => t.inMatch !== true).slice(-PEACE_RECENT_TURNS);
-  const lines = turns.map((t) => {
-    if (t.role === "user") return `@감독: ${t.text}`;
-    if (t.role === "operator") return buildOperatorMessage(t.text);
-    return t.text.slice(0, ORDERS_TURN_CHARS);
-  });
+  const recent = buildRecentTurnsBlock(state);
   return [
-    ...standing,
+    ...buildStandingBlock(state),
     `<squad>`,
     squad.message,
     `</squad>`,
-    ...(lines.length > 0 ? [`<recent_turns>`, ...lines, `</recent_turns>`] : []),
+    ...buildSquadOpsBlock(state),
+    ...(recent.length > 0 ? [`<recent_turns>`, recent, `</recent_turns>`] : []),
   ];
 }
 
@@ -129,18 +174,37 @@ export function buildMatchLogBlock(state: GameState): string {
   return ["<match_log>", ...lines, "</match_log>"].join("\n");
 }
 
-function makeReportTool(onIntent: (intent: Orders) => void): GameToolSpec {
+function makeReportTool(
+  specs: ReadonlyMap<string, GameToolSpec> | null,
+  onIntent: (intent: Orders) => void,
+): GameToolSpec {
+  const base = toToolSchema(OrdersSchema);
+  // 운영 스킬은 평시에만 — 경기 중에는 그 자리가 스키마에 서지 않는다
+  const inputSchema = specs
+    ? {
+        ...base,
+        properties: {
+          ...base.properties,
+          ops: buildOpsSchema(
+            specs,
+            SQUAD_OPS,
+            "선수단 운영 — 훈련·집중 육성·멘토·2군 방침·등번호·유스 계약. 감독이 정한 것만",
+          ),
+        },
+      }
+    : base;
   return {
     name: REPORT_INTENT_TOOL,
     description: "감독의 말을 구조화된 의도로 제출한다. 이 도구로만 답한다.",
-    inputSchema: toToolSchema(OrdersSchema),
+    inputSchema,
     handle: (input: unknown) => {
       const parsed = OrdersSchema.safeParse(input);
       if (!parsed.success) {
         // 무엇이 틀렸는지 돌려줘야 모델이 같은 실수를 반복하지 않는다
         return { ok: false, message: `형식이 맞지 않습니다 — ${parsed.error.issues[0]?.message}` };
       }
-      onIntent(parsed.data);
+      const ops = specs ? parseOps((input as { ops?: unknown }).ops, SQUAD_OPS) : {};
+      onIntent({ ...parsed.data, ...(Object.keys(ops).length > 0 ? { ops } : {}) });
       return { ok: true, message: "의도를 받았습니다" };
     },
   };
@@ -165,6 +229,9 @@ export async function runOrders(
   let intent: Orders | null = null;
   let client = llm;
   const matchLog = buildMatchLogBlock(state);
+  const specs = state.pendingMatch
+    ? null
+    : new Map(buildSkillTools(state, []).map((tool) => [tool.name, tool] as const));
   try {
     await retryOnce(
       "orders:apply",
@@ -183,7 +250,7 @@ export async function runOrders(
               ``,
               `@감독: ${message}`,
             ].join("\n"),
-            tools: [makeReportTool((value) => (intent = value))],
+            tools: [makeReportTool(specs, (value) => (intent = value))],
             toolChoice: { name: REPORT_INTENT_TOOL },
           });
         }),

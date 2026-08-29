@@ -197,7 +197,8 @@ export const OrdersSchema = z.object({
   unresolved: z.string().min(1).max(200).optional().describe("어느 갈래에도 담기지 않은 말"),
 });
 
-export type Orders = z.infer<typeof OrdersSchema>;
+/** 해석의 산출 — 평시에는 운영 스킬의 인자(`ops`)가 함께 온다 (orders-ops.ts) */
+export type Orders = z.infer<typeof OrdersSchema> & { ops?: Record<string, unknown[]> };
 
 /**
  * 판을 건드리는 의도가 하나라도 있는가 — 없으면 **대화 턴**이다.

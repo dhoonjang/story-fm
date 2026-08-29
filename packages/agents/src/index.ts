@@ -7,6 +7,8 @@ export * from "./apply-orders";
 export * from "./orders-apply";
 export * from "./counterparty-brief";
 export * from "./negotiation-table";
+export * from "./market-orders";
+export * from "./orders-ops";
 export * from "./table-situation";
 export * from "./ruling-schema";
 export * from "./history-compactor";

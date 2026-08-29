@@ -771,25 +771,32 @@ describe("평시 GM 턴 — 상한을 도구로 채운 턴", () => {
     stopReason: "tool_use" as const,
   });
 
-  it("장면이 비어도 코어 기록이 model 턴에 남는다 — 바뀐 등번호와 함께", async () => {
+  it("장면이 비어도 코어 기록이 model 턴에 남는다 — 바뀐 장부와 함께", async () => {
     const state = structuredClone(IDLE);
-    const taken = new Set(
-      state.players.filter((p) => p.teamId === state.userTeamId).map((p) => p.squadNumber),
-    );
-    const number = [...Array(99).keys()].map((i) => i + 1).find((n) => !taken.has(n))!;
-    const skipper = state.players.find((p) => p.teamId === state.userTeamId && !p.isCaptain)!;
+    const before = state.finances.find((f) => f.teamId === state.userTeamId)!.ledger.length;
     runTurn.mockImplementationOnce(async (req: { tools?: GameToolSpec[] }) => {
-      const tool = req.tools?.find((spec) => spec.name === "set_squad_number");
-      expect((await tool?.handle({ playerId: skipper.name, number }))?.ok).toBe(true);
+      const tool = req.tools?.find((spec) => spec.name === "apply_finance_event");
+      expect(
+        (
+          await tool?.handle({
+            kind: "income",
+            category: "commercial",
+            amount: 50_000,
+            note: "스폰서 보너스",
+          })
+        )?.ok,
+      ).toBe(true);
       // 상한을 채운 턴의 증상 — 작업 서술 한 줄만 남고 장면이 없다
-      return capped("등번호를 옮기겠습니다.");
+      return capped("장부에 적겠습니다.");
     });
 
-    const turn = await runGmTurn(state, `${skipper.name} 등번호 ${number}번으로`);
+    const turn = await runGmTurn(state, "스폰서가 5만 파운드를 얹었다고 적어 줘");
 
     // 상태는 바뀐 채로 남는다 — 되돌리면 감독의 지시가 함께 사라진다
-    expect(state.players.find((p) => p.id === skipper.id)!.squadNumber).toBe(number);
-    expect(turn.toolCalls.map((call) => call.name)).toContain("set_squad_number");
+    expect(state.finances.find((f) => f.teamId === state.userTeamId)!.ledger.length).toBe(
+      before + 1,
+    );
+    expect(turn.toolCalls.map((call) => call.name)).toContain("apply_finance_event");
     // 장면 자리에는 코어의 기록이 선다 — 시점 헤더와 `@:` 내레이션
     expect(turn.text.startsWith("[")).toBe(true);
     expect(turn.text.split("\n").some((line) => line.startsWith("@:"))).toBe(true);

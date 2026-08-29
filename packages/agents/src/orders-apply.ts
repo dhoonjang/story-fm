@@ -14,6 +14,8 @@ import type { GameToolSpec } from "@story-fm/llm";
 import { buildSkillTools, collectMatchMarks, sideTeamName } from "./gm-tools";
 import { buildSegmentMessage, buildShootoutMessage } from "./match-script";
 import { touchesPitch, type Orders } from "./orders-schema";
+import { SQUAD_OPS } from "./apply-orders";
+import { applyOps } from "./orders-ops";
 import { MATCH_ADVANCED, type GmToolCall } from "./gm-types";
 
 /**
@@ -79,6 +81,8 @@ export function applyOrders(
     call("set_squad_level", { moves: intent.squadLevels });
   }
   if (intent.captain) call("set_captain", intent.captain);
+  // 선수단 운영 — 평시의 받아쓰기 스킬 (orders-ops.ts)
+  if (intent.ops) applyOps(specs, intent.ops, SQUAD_OPS, notes);
   // 교체가 먼저다 — 뒤이은 지시가 방금 들어온 선수를 겨냥할 수 있다
   for (const sub of intent.substitutions ?? []) call("substitute", sub);
   if (intent.tactics && Object.keys(intent.tactics).length > 0) call("set_tactics", intent.tactics);

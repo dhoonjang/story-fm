@@ -118,27 +118,27 @@
 
 ## 2. 스킬 표면 — 한 판단은 한 도구
 
-도구는 **48개**이고 **전부 평시 GM의 것**이다. 판을 세우는 아홉(라인업·1·2군·6축·개인
-지시·세트피스 둘·지역 플랜·공략)은 GM에게 `apply_orders` 하나로 보이고, 코어 스킬은
-그 도구 뒤의 해석이 부른다(agents.md §1). 경기 중에는 매치 GM이 **경기 도구 셋**
-(`apply_orders` · `advance_match` · `finalize_match`)만 쥔다 — 지시는 그 도구 뒤의
-해석이 JSON 하나로 옮기고 코어가 같은 스킬 함수를 부른다 ([agents.md](./agents.md) §3).
-경기 도구 셋은 이 카탈로그에 없다(`MATCH_TOOLS` — `match-gm.ts`). 같은 순간에 함께 정해지는 것들이
-갈려 있으면 GM이 하나를 빠뜨린다 — 라인업은 1·2군 이동까지 한 요청(`set_lineup`의
-`squadLevels`), 한 선수의 자리·역할·개인 지시는 `set_player_tactic` 하나, 오퍼는 방향을
-인자로(`send_offer` kind=buy/sell/loan/loan_out), 오퍼 판정은 누가 답할 차례인지 협상이
-알아서 처리한다(`respond_offer`). 거꾸로 **함께 정해지지 않는 것은 가르는 것이 맞다** —
-층만 옮기는 1·2군 이동은 `set_squad_level`이 따로 받는다. `set_lineup`으로 보내면 선발
-열한 자리를 다시 적게 해, 감독이 말하지 않은 배치까지 이 한마디에 딸려 바뀐다.
+도구는 **24개**이고 **전부 평시 GM의 것**이다. 받아쓰기 스킬 35개(판 10 · 운영 6 ·
+이적·재정·감독직 19)는 GM에게 보이지 않는다 — `apply_orders`·`market_orders` 뒤의
+해석기가 감독의 말 원문을 받아 그 스킬의 인자를 채운다(agents.md §1). 경기 중에는 매치
+GM이 **경기 도구 셋**(`apply_orders` · `advance_match` · `finalize_match`)만 쥔다 — 지시는
+그 도구 뒤의 해석이 JSON 하나로 옮기고 코어가 같은 스킬 함수를 부른다
+([agents.md](./agents.md) §3). 경기 도구 셋은 이 카탈로그에 없다(`MATCH_TOOLS` —
+`match-gm.ts`). 같은 순간에 함께 정해지는 것들이 갈려 있으면 해석기가 하나를 빠뜨린다 —
+라인업은 1·2군 이동까지 한 요청(`set_lineup`의 `squadLevels`), 한 선수의 자리·역할·개인
+지시는 `set_player_tactic` 하나, 오퍼는 방향을 인자로(`send_offer` kind=buy/sell/loan/loan_out),
+오퍼 판정은 누가 답할 차례인지 협상이 알아서 처리한다(`respond_offer`). 거꾸로 **함께
+정해지지 않는 것은 가르는 것이 맞다** — 층만 옮기는 1·2군 이동은 `set_squad_level`이
+따로 받는다.
 
-| 그룹      | 수  | 도구                                                                                                                                                                                                                                                                                                                               |
-| --------- | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 진행      | 5   | `start_match` · `accept_manager_offer` · `counter_manager_offer` · `apply_manager_job` · `resign`                                                                                                                                                                                                                                  |
-| 전술·훈련 | 7   | `apply_orders`(→ 해석이 `set_lineup` · `set_squad_level` · `set_tactics` · `set_player_tactic` · `set_set_piece_takers` · `set_set_piece_routine` · `set_match_plan` · `exploit_point` · `set_captain`으로) · `set_squad_number` · `set_training` · `set_development_focus` · `set_mentor` · `set_reserve_training` · `sign_youth` |
-| 대화·서사 | 5   | `team_talk` · `talk_to_player` · `respond_to_media` · `respond_to_approach` · `record_incident`                                                                                                                                                                                                                                    |
-| 이적      | 14  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `speak_at_table` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `respond_transfer_request` · `withdraw_offer` · `release_player` · `recall_loan` · `exercise_buyback`                                                              |
-| 재정      | 6   | `apply_finance_event` · `adjust_transfer_budget` · `request_board` · `set_ticket_price` · `fund_transfer_budget` · `pay_player_bonus`                                                                                                                                                                                              |
-| 조회      | 11  | `search_players` · `get_squad` · `get_team` · `get_league` · `get_match_report` · `get_opponent_report` · `get_career` · `get_history` · `get_finance` · `scout_player` · `scout_mission`                                                                                                                                          |
+| 그룹      | 수  | 도구                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 진행      | 2   | `start_match` · `resign`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 전술·훈련 | 1   | `apply_orders`(→ 해석이 `set_lineup` · `set_squad_level` · `set_tactics` · `set_player_tactic` · `set_set_piece_takers` · `set_set_piece_routine` · `set_match_plan` · `exploit_point` · `set_captain` · `set_training` · `set_development_focus` · `set_mentor` · `set_reserve_training` · `set_squad_number` · `sign_youth`로)                                                                                                                                                           |
+| 대화·서사 | 5   | `team_talk` · `talk_to_player` · `respond_to_media` · `respond_to_approach` · `record_incident`                                                                                                                                                                                                                                                                                                                                                                                            |
+| 이적      | 4   | `deal_odds` · `list_negotiations` · `speak_at_table` · `market_orders`(→ 해석이 `send_offer` · `respond_offer` · `accept_deal` · `withdraw_offer` · `open_renewal` · `open_release` · `release_player` · `set_transfer_list` · `respond_transfer_request` · `exercise_buyback` · `recall_loan` · `adjust_transfer_budget` · `request_board` · `fund_transfer_budget` · `pay_player_bonus` · `set_ticket_price` · `accept_manager_offer` · `counter_manager_offer` · `apply_manager_job`로) |
+| 재정      | 1   | `apply_finance_event`                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 조회      | 11  | `search_players` · `get_squad` · `get_team` · `get_league` · `get_match_report` · `get_opponent_report` · `get_career` · `get_history` · `get_finance` · `scout_player` · `scout_mission`                                                                                                                                                                                                                                                                                                  |
 
 ### 계약은 넷으로 갈린다
 
