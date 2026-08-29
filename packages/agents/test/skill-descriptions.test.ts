@@ -23,8 +23,10 @@ import {
   SETTLE_MATCH_DESCRIPTION,
   SETTLE_MATCH_INPUT,
   SETTLE_MATCH_TOOL,
+  ONBOARDING_JUDGE_SYSTEM,
   SKILL_CATALOG,
   SKILL_NAMES,
+  TableReplySchema,
   TRAINING_RATER_SYSTEM,
   agingDeclineLine,
   buildGmTools,
@@ -39,6 +41,11 @@ import {
   AXIS_KO,
   INCIDENT_KIND_KO,
   INCIDENT_KINDS,
+  OPENING_KIND_KO,
+  OPENING_KINDS,
+  PITCH_CLAIM_KINDS,
+  PITCH_CLAIM_KO,
+  PITCH_CLAIM_MEANING,
   SET_PIECE_ROUTINE_AXES,
   SET_PIECE_ROUTINE_NEUTRAL,
   TACTIC_TOGGLES,
@@ -195,17 +202,56 @@ describe("규칙이 사는 자리", () => {
   });
 
   /**
-   * 사건의 갈래는 효과의 모양이고 그 낱말표는 코어의 것이다 (people.md §6). 설명이
-   * 손으로 적으면 갈래가 늘어도 모델은 옛 표를 믿고, 표에 없는 갈래는 부를 길이 없다 —
-   * 세트피스 낱말표와 같은 결이다.
+   * **코어가 갈래표를 들면 그 표가 모델에게 닿아야 한다** (prompts.md §2).
+   *
+   * 열거가 내는 것은 토큰뿐이고 `toToolSchema`는 JSDoc을 싣지 않는다 — 뜻이 주석에만
+   * 있으면 모델은 **뜻 없는 낱말 열**을 받고, 잘못 고른 갈래를 코어가 사실 대조해 조용히
+   * 벌한다. 설득 논거가 그 자리였다: 감독이 자기 오퍼를 두고 한 "정말 마지막입니다"가
+   * 그 **선수**의 사정을 뜻하는 `last_chance`로 옮겨져 거짓이 되고 인내가 깎였다.
+   *
+   * 뜻이 서는 자리는 셋 중 하나다 — 그 도구의 설명 · 그 인자의 `description` · 그 호출의
+   * 시스템 프롬프트. 어디에 서든 **낱말은 코어의 표에서 와야 한다**: 손으로 적으면 갈래가
+   * 늘어도 모델은 옛 표를 믿고, 표에 없는 갈래는 부를 길이 없다.
    */
-  it("사건 기록의 설명은 코어 갈래표의 낱말을 전부 싣는다", () => {
-    const incident = TOOLS.find((t) => t.name === "record_incident")!;
-    const kinds = (incident.inputSchema.properties?.kind as { enum?: string[] }).enum ?? [];
-    expect([...kinds].sort()).toEqual([...INCIDENT_KINDS].sort());
-    for (const kind of INCIDENT_KINDS) {
-      expect(incident.description, kind).toContain(kind);
-      expect(incident.description, kind).toContain(INCIDENT_KIND_KO[kind]);
+  it("코어가 갈래표를 든 열거는 그 표가 모델에게 닿는다", () => {
+    const reply = { name: "reply_at_table", inputSchema: toToolSchema(TableReplySchema) };
+    const rows = [
+      {
+        where: "record_incident.kind",
+        node: enumArg(TOOLS, "record_incident", "kind"),
+        kinds: INCIDENT_KINDS as readonly string[],
+        tables: [INCIDENT_KIND_KO as Record<string, string>],
+        reads: TOOLS.find((t) => t.name === "record_incident")!.description,
+      },
+      {
+        where: "report_onboarding.openings[].kind",
+        node: enumArg(RATER_TOOLS, REPORT_ONBOARDING_TOOL, "kind"),
+        kinds: OPENING_KINDS as readonly string[],
+        tables: [OPENING_KIND_KO as Record<string, string>],
+        reads: ONBOARDING_JUDGE_SYSTEM,
+      },
+      {
+        where: "reply_at_table.heard.claims[].kind",
+        node: enumArg([reply], reply.name, "kind"),
+        kinds: PITCH_CLAIM_KINDS as readonly string[],
+        /**
+         * 여기만 표가 둘이다. 낱말은 장부 줄이 쓰는 것과 같아야 하고(다음 답을 쓰는
+         * 모델이 `<table_log>`에서 그 낱말을 다시 읽는다), **뜻**은 갈래를 가르는
+         * 문장이라 낱말만으로는 「마지막 기회」가 누구의 것인지 서지 않는다.
+         */
+        tables: [PITCH_CLAIM_KO, PITCH_CLAIM_MEANING] as Array<Record<string, string>>,
+        reads: "",
+      },
+    ];
+    for (const row of rows) {
+      expect([...(row.node.enum ?? [])].sort(), row.where).toEqual([...row.kinds].sort());
+      const read = `${row.reads}\n${row.node.description ?? ""}`;
+      for (const kind of row.kinds) {
+        expect(read, `${row.where}: ${kind}`).toContain(kind);
+        for (const table of row.tables) {
+          expect(read, `${row.where}: ${kind}`).toContain(table[kind]);
+        }
+      }
     }
   });
 });
@@ -445,6 +491,17 @@ function walk(node: unknown, name = ""): Array<[string, Record<string, unknown>]
   // 배열 항목은 이름을 물려받지 않는다 — `targetIds[]`는 문자열이지 목록이 아니다
   if (self.items !== undefined) found.push(...walk(self.items, `${name}[]`));
   return found;
+}
+
+/** 모델이 받는 열거 노드 하나 — `walk`가 붙인 이름으로 찾는다 (배열 안쪽의 `kind`도 `kind`다) */
+function enumArg(
+  tools: ReadonlyArray<{ name: string; inputSchema: unknown }>,
+  tool: string,
+  arg: string,
+): { enum?: unknown[]; description?: string } {
+  const found = tools.find((t) => t.name === tool)!;
+  const [, node] = walk(found.inputSchema).find(([name]) => name === arg)!;
+  return node as { enum?: unknown[]; description?: string };
 }
 
 /**
