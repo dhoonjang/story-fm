@@ -9,6 +9,7 @@ export * from "./core/state";
 export * from "./core/history-window";
 export * from "./core/turn-facts";
 export * from "./core/player-ref";
+export * from "./core/team-ref";
 export * from "./core/league-shape";
 export * from "./core/club-tier";
 export * from "./core/persistence";

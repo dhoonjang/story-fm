@@ -6,6 +6,7 @@ import type {
   MarketTerms,
   MedicalConcern,
   Negotiation,
+  NegotiationKind,
   NegotiationVerdict,
   PlayerIssueReason,
   PressAxis,
@@ -63,6 +64,7 @@ import {
   precontractStartOf,
   renewalExpectation,
   responseDelayDays,
+  severanceOf,
   SUITORS_MANY,
   suitorsOf,
   unilateralSeveranceOf,
@@ -112,6 +114,7 @@ import { grantManagerXP } from "../commands";
 import { deltaItems, item } from "../commands/brief";
 import { applyStanceOutcome, buildTransferPress, openPress, signed } from "../club/press";
 import { pickAnyPlayer } from "../core/player-ref";
+import { pickTeam } from "../core/team-ref";
 import {
   activeContract,
   clearInterests,
@@ -1373,7 +1376,10 @@ export function offerPlayerOut(
   if (player.teamId !== state.userTeamId) {
     return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
   }
-  const buyer = state.teams.find((t) => t.id === input.teamId);
+  // 감독이 부른 구단 이름이 그대로 실려 온다 — 여기서 id로 굳힌다 (core/team-ref.ts)
+  const picked = pickTeam(state, input.teamId);
+  if (!picked.ok) return { ok: false, message: picked.message };
+  const buyer = state.teams.find((t) => t.id === picked.teamId);
   if (!buyer) return { ok: false, message: `"${input.teamId}"라는 구단을 찾지 못했습니다` };
   if (buyer.id === state.userTeamId) {
     return { ok: false, message: "우리 구단에 팔 수는 없습니다" };
@@ -3801,6 +3807,27 @@ export function describeNegotiation(state: GameState, negotiationId: string): st
 
 function minDate(a: string, b: string): string {
   return a <= b ? a : b;
+}
+
+/**
+ * **그 갈래에서 코어가 부르는 값** — 감독이 액수를 말하지 않았을 때 되묻는 문장이
+ * 싣는 숫자이자, 확률을 미리 볼 때(`deal_odds`)의 기본 이적료다 (transfer.md §1).
+ *
+ * 갈래마다 자가 다르다 — 재계약에는 이적료가 없고, 해지의 값은 정산금이며, 임대의
+ * 자는 임대료(`LOAN_FEE_RATE`)다. 요구가를 그대로 두면 임대 확률이 열 배 부풀려 나온다.
+ */
+export function quotedFee(state: GameState, player: GamePlayer, kind?: NegotiationKind): number {
+  switch (kind) {
+    case "renew":
+      return 0;
+    case "release":
+      return severanceOf(state, player.id);
+    case "loan":
+    case "loan_out":
+      return Math.round(marketValueOf(state, player) * LOAN_FEE_RATE);
+    default:
+      return askingPriceFor(state, player);
+  }
 }
 
 /** 오퍼 조건 제안 — 감독이 금액을 말하지 않았을 때 GM이 쓸 기본값 */

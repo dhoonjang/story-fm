@@ -25,10 +25,10 @@ import {
   EVENT_BAND,
   EVENT_CREDIT,
   financeLookup,
+  formatMoney,
   historyView,
+  KIND_KO,
   leagueView,
-  LOAN_FEE_RATE,
-  marketValueOf,
   matchReport,
   MOOD_BATCH,
   MOOD_NOTE_MAX,
@@ -44,8 +44,10 @@ import {
   PROMISE_DAYS_MAX,
   PROMISE_DAYS_MIN,
   pickAnyPlayer,
+  pickTeam,
   playerCard,
   playerName,
+  quotedFee,
   recallLoan,
   recordIncident,
   exerciseBuyBack,
@@ -80,7 +82,6 @@ import {
   setTactics,
   setTraining,
   setTransferList,
-  severanceOf,
   squadView,
   startMatch,
   substitutePlayer,
@@ -90,6 +91,7 @@ import {
   TEAM_TALK_OUTCOMES,
   teamName,
   teamProfile,
+  wageExpectationOf,
   userSide,
   withdrawOffer,
   type CardMark,
@@ -104,6 +106,7 @@ import {
   BOARD_REQUEST_KINDS,
   DateString,
   DIRECTIVE_INTENSITIES,
+  type GamePlayer,
   INCIDENT_KINDS,
   KEEPER_DISTRIBUTIONS,
   LEADERBOARD_KEYS,
@@ -287,6 +290,27 @@ const moodNotesArg = (max: number) =>
     .max(max)
     .optional()
     .describe(`${MOOD_LINE_HINT} — 이 일을 겪은 선수마다 한 줄, ${max}명까지`);
+
+/**
+ * **감독이 이적료를 부르지 않은 오퍼가 되돌아오는 한 줄** (transfer.md §1).
+ *
+ * 코어가 아는 사실만 싣는다 — 무엇이 비었는지와 그 갈래의 자(`quotedFee`). 되묻는
+ * 문장은 GM이 쓴다 (agents.md §0). 자를 함께 싣지 않으면 감독은 값을 부르기 위해
+ * 확률 조회를 한 번 더 거쳐야 한다.
+ */
+function missingFeeNote(
+  state: GameState,
+  player: GamePlayer,
+  kind: "buy" | "sell" | "loan" | "loan_out" | undefined,
+): string {
+  const loan = kind === "loan" || kind === "loan_out";
+  const quoted = formatMoney(quotedFee(state, player, kind));
+  const scale = loan ? "기준 임대료" : kind === "sell" ? "이 선수의 호가" : "요구가";
+  return (
+    `${player.name} ${KIND_KO[kind ?? "buy"]} 오퍼에 실을 ${loan ? "임대료" : "이적료"}를 ` +
+    `감독이 부르지 않았습니다 — ${scale}는 ${quoted}입니다`
+  );
+}
 
 /**
  * 한 사건의 당사자 상한 — 선발 열한 명이 한꺼번에 걸리는 일(단체 벌금·회식)까지다.
@@ -1218,24 +1242,15 @@ export function buildToolSpecs(
         const picked = pickAnyPlayer(state, input.playerId);
         if (!picked.ok) return { ok: false, message: picked.message };
         const player = picked.player;
-        // 금액을 말하지 않았으면 기본값(요구액·주급 기대치)으로 본다
+        // 금액을 말하지 않았으면 기본값(갈래의 자·주급 기대치)으로 본다
         const suggested = suggestTerms(state, player.id);
         if (!suggested) {
           return { ok: false, message: `"${input.playerId}" 선수를 찾지 못했습니다` };
         }
-        /**
-         * 갈래마다 기본 이적료가 다르다 — 재계약은 이적료가 없고, 임대의 기준은
-         * 임대료(시장가의 `LOAN_FEE_RATE`)다. 요구액을 그대로 두면 임대 확률이
-         * 열 배 부풀려 나온다.
-         */
-        const fee =
-          input.kind === "renew"
-            ? 0
-            : input.kind === "release"
-              ? severanceOf(state, player.id)
-              : input.kind === "loan" || input.kind === "loan_out"
-                ? Math.round(marketValueOf(state, player) * LOAN_FEE_RATE)
-                : suggested.fee;
+        const fee = quotedFee(state, player, input.kind);
+        // 감독이 부른 구단 이름이 그대로 실려 온다 (core/team-ref.ts)
+        const counterpart = input.teamId ? pickTeam(state, input.teamId) : null;
+        if (counterpart && !counterpart.ok) return { ok: false, message: counterpart.message };
         const odds = dealOdds(state, {
           ...suggested,
           fee,
@@ -1244,7 +1259,7 @@ export function buildToolSpecs(
           ...(input.years !== undefined ? { years: input.years } : {}),
           ...(input.kind ? { kind: input.kind } : {}),
           ...(input.paymentYears === undefined ? {} : { paymentYears: input.paymentYears }),
-          ...(input.teamId ? { counterpartTeamId: input.teamId } : {}),
+          ...(counterpart?.ok ? { counterpartTeamId: counterpart.teamId } : {}),
           ...(input.pitch ? { pitch: input.pitch } : {}),
           pitched: openNegotiationFor(state, player.id)?.pitched ?? [],
         });
@@ -1273,9 +1288,21 @@ export function buildToolSpecs(
           .describe(
             "buy=영입(기본) · sell=우리 선수를 판다 · loan=임대 영입 · loan_out=우리 선수를 임대로 보낸다",
           ),
-        teamId: z.string().min(1).optional().describe("sell·loan_out의 상대 구단 id"),
-        fee: money(MONEY_MAX),
-        weeklyWage: money(WAGE_MAX),
+        teamId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("sell·loan_out의 상대 구단 — 감독이 부른 이름 그대로 (id도 받는다)"),
+        fee: money(MONEY_MAX)
+          .optional()
+          .describe(
+            "감독이 부른 이적료 (임대는 임대료, £). **감독이 액수를 말하지 않았으면 비운다** — 지어낸 값이 그대로 장부에 오른다",
+          ),
+        weeklyWage: money(WAGE_MAX)
+          .optional()
+          .describe(
+            "감독이 부른 주급 (£/주) — 말하지 않았으면 비운다. 코어가 선수의 기대치를 싣는다",
+          ),
         years: z.number().int().min(1).max(6).optional(),
         paymentYears: z
           .number()
@@ -1296,25 +1323,39 @@ export function buildToolSpecs(
         squadStatus: squadStatusArg,
       }),
       (input) => {
+        const picked = pickAnyPlayer(state, input.playerId);
+        if (!picked.ok) return { ok: false, message: picked.message };
+        const player = picked.player;
+        /**
+         * **감독이 부르지 않은 이적료는 오퍼가 되지 않는다** (transfer.md §1).
+         * 지어낼 기본값이 없는 자리다 — 0은 £0 매각이고, 시장가를 대신 넣는 것은
+         * 감독이 하지 않은 결정을 장부에 올리는 것이다. 대신 코어가 그 갈래의 자를
+         * 함께 돌려줘, 감독이 한 마디로 답하면 다음 턴에 오퍼가 나간다.
+         */
+        if (input.fee === undefined) {
+          return { ok: false, message: missingFeeNote(state, player, input.kind) };
+        }
         // 내보내는 방향(매각·임대)은 입구가 다르다 — 우리가 값을 부르고 상대가 판정한다
         if (input.kind === "sell" || input.kind === "loan_out") {
           if (!input.teamId) {
             return { ok: false, message: "상대 구단(teamId)이 필요합니다" };
           }
           return offerPlayerOut(state, {
-            playerId: input.playerId,
+            playerId: player.id,
             teamId: input.teamId,
             fee: input.fee,
-            weeklyWage: input.weeklyWage,
+            // 파는 쪽 주급은 사는 구단이 낼 몫이라 코어가 기대치를 안다 (transfer.md §1)
+            ...(input.weeklyWage === undefined ? {} : { weeklyWage: input.weeklyWage }),
             ...(input.kind === "loan_out" ? { loan: true } : {}),
             ...(input.years === undefined ? {} : { years: input.years }),
             ...(input.paymentYears === undefined ? {} : { paymentYears: input.paymentYears }),
           });
         }
         return sendOffer(state, {
-          playerId: input.playerId,
+          playerId: player.id,
           fee: input.fee,
-          weeklyWage: input.weeklyWage,
+          // 주급은 선수가 부르는 값이다 — 감독이 말하지 않으면 기대치가 실리고 오퍼 줄에 선다
+          weeklyWage: input.weeklyWage ?? wageExpectationOf(state, player),
           years: input.years ?? 4,
           ...(input.kind === "loan" ? { kind: "loan" as const } : {}),
           ...(input.paymentYears === undefined ? {} : { paymentYears: input.paymentYears }),
