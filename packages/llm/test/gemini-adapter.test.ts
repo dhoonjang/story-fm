@@ -129,6 +129,58 @@ describe("GeminiGameLLM", () => {
     expect(stub.sentConfigs[1]).toBeUndefined();
   });
 
+  /**
+   * 강제 모드에서 Gemini는 스키마를 **펼쳐** 디코딩 문법을 만든다 — `maxItems: n`은 항목
+   * 스키마를 n벌 복제한 문법이 되어, 항목이 조금만 복잡해도 요청 전체가 400으로 떨어진다
+   * (models.md §3-2). `auto`로는 지나던 스키마가 강제에서만 걸리고 오류 본문은 어느 칸이
+   * 문제인지 말하지 않으므로, 걷어 냈다는 사실을 재는 자리는 여기뿐이다.
+   */
+  it("강제 도구의 스키마에서는 maxItems를 걷는다 — 중첩된 것까지", async () => {
+    const stub = makeStubClient([
+      response({
+        role: "model",
+        parts: [{ functionCall: { id: "call-1", name: "report_mood", args: {} } }],
+      }),
+      response({ role: "model", parts: [{ text: "끝." }] }),
+    ]);
+    const tool: GameToolSpec = {
+      name: "report_mood",
+      description: "테스트 도구",
+      inputSchema: {
+        type: "object",
+        properties: {
+          rows: {
+            type: "array",
+            maxItems: 30,
+            items: {
+              type: "object",
+              properties: { tags: { type: "array", maxItems: 4, items: { type: "string" } } },
+            },
+          },
+        },
+      },
+      handle: () => ({ ok: true, message: "반영" }),
+    };
+    const llm = new GeminiGameLLM(testConfig, stub.client as never);
+    await llm.runTurn({
+      system: "고정 프롬프트",
+      history: [],
+      user: "결산",
+      tools: [tool],
+      toolChoice: { name: "report_mood" },
+    });
+
+    const sentSchemas = JSON.stringify(
+      (stub.create.mock.calls[0]![0] as { config: { tools?: unknown } }).config.tools,
+    );
+    expect(sentSchemas).not.toContain("maxItems");
+    // 걷는 것은 그 한 낱말뿐이다 — 나머지 스키마는 그대로 간다
+    expect(sentSchemas).toContain("tags");
+    expect(JSON.stringify(stub.sentConfigs[0])).not.toContain("maxItems");
+    // 부르는 쪽의 스키마는 건드리지 않는다 — Zod가 지키는 상한이 여기서 사라지면 안 된다
+    expect(JSON.stringify(tool.inputSchema)).toContain("maxItems");
+  });
+
   it("toolChoice가 없으면 per-request config 없이 chat 설정의 AUTO로 간다", async () => {
     const stub = makeStubClient([response({ role: "model", parts: [{ text: "네." }] })]);
     const tool: GameToolSpec = {

@@ -85,6 +85,29 @@ async function sendWithRetry<T>(maxRetries: number, send: () => Promise<T>): Pro
   }
 }
 
+/**
+ * 강제 도구(`mode: ANY`)로 보낼 스키마에서 **`maxItems`를 걷는다** (models.md §3-2).
+ *
+ * Gemini는 그 모드에서 스키마를 **펼쳐** 디코딩 문법을 만들어, `maxItems: n`은 항목
+ * 스키마를 n벌 복제한 문법이 된다. 항목이 조금만 복잡해도 그 문법이 한도를 넘어 요청
+ * 전체가 400 `INVALID_ARGUMENT`으로 떨어지는데, 본문은 `Request contains an invalid
+ * argument.` 한 줄뿐이라 어느 칸이 문제인지 말하지 않는다 — `auto`로는 지나던 같은
+ * 스키마가 강제에서만 걸리므로 부르는 쪽에서는 원인이 보이지 않는다.
+ *
+ * 걷어도 잃는 것이 없다: 개수 상한은 **Zod가 지키고**(도구 핸들러), 모델이 알아야 하는
+ * 수는 그 인자의 설명 문장에 있다. 제공자 하나의 스키마 부분집합을 흡수하는 자리는
+ * 어댑터다 (AGENTS.md §6-1) — 도구를 세우는 쪽이 제공자를 알면 안 된다.
+ */
+function withoutMaxItems<T>(schema: T): T {
+  if (Array.isArray(schema)) return schema.map((item) => withoutMaxItems(item)) as T;
+  if (schema === null || typeof schema !== "object") return schema;
+  return Object.fromEntries(
+    Object.entries(schema as Record<string, unknown>)
+      .filter(([key]) => key !== "maxItems")
+      .map(([key, value]) => [key, withoutMaxItems(value)]),
+  ) as T;
+}
+
 /** 제공자가 내용을 막은 사유 — 텍스트 생성에서 올 수 있는 것만 센다 */
 const BLOCKED: ReadonlySet<FinishReason> = new Set([
   FinishReason.SAFETY,
@@ -229,6 +252,12 @@ export class GeminiGameLLM implements GameLLM {
     const systemInstruction = (Array.isArray(req.system) ? req.system : [req.system])
       .filter((block) => block.trim().length > 0)
       .join("\n\n");
+    /**
+     * 이 턴이 강제로 열리는가 — 그러면 스키마에서 `maxItems`를 걷는다
+     * (`withoutMaxItems`). 첫 요청만이 아니라 **턴 전체**에서 걷는 이유는 뒤의 왕복이
+     * 같은 도구를 다른 모양으로 보게 두지 않기 위해서다.
+     */
+    const forced = typeof req.toolChoice === "object";
 
     const generationConfig: GenerateContentConfig = {
       systemInstruction,
@@ -251,7 +280,9 @@ export class GeminiGameLLM implements GameLLM {
                 functionDeclarations: tools.map((tool) => ({
                   name: tool.name,
                   description: tool.description,
-                  parametersJsonSchema: tool.inputSchema,
+                  parametersJsonSchema: forced
+                    ? withoutMaxItems(tool.inputSchema)
+                    : tool.inputSchema,
                 })),
               },
             ],
