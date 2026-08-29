@@ -807,8 +807,8 @@ export type Medical = z.infer<typeof MedicalSchema>;
  * **시작 사건** — 부임 첫 주의 진행을 이끄는 열린 실마리 (career.md §1 · agents.md §4-2).
  *
  * 온보딩 판정이 배경과 구단의 사실에서 제안하고 코어가 검증해 앉힌다. 아크(`NarrativeArc`)와
- * 다른 것은 **장부의 사실에서 열리지 않는다**는 점이다 — 아크는 불만·부상·연승이 열고
- * 닫지만, 시작 사건은 배경이 열고 기한이 닫는다. 그래서 따로 산다.
+ * 다른 것은 **장부의 사실에서 열리지 않는다**는 점 하나다 — 아크는 불만·부상·연승이 열고
+ * 시작 사건은 배경이 연다. 닫는 자는 둘 다 장부의 사실이다 (career.md §1).
  */
 export const OPENING_KINDS = [
   /** 구단주·보드의 시선 — 무엇을 지켜보는가 */
@@ -828,6 +828,15 @@ export const OPENING_KIND_KO: Record<OpeningKind, string> = {
   press: "언론",
   personal: "개인사",
 };
+/**
+ * 실마리가 닫힌 사유 — **지나간 것과 해결된 것은 다른 사실이다** (career.md §1).
+ * `handled`는 감독이 그 실마리에 걸린 일을 했다는 뜻이고, `expired`는 기한이 지났다는
+ * 뜻이다.
+ */
+export const OPENING_CLOSES = ["handled", "expired"] as const;
+export const OpeningCloseSchema = z.enum(OPENING_CLOSES);
+export type OpeningClose = z.infer<typeof OpeningCloseSchema>;
+
 export const OPENING_TITLE_MAX = 40;
 export const OPENING_LINE_MAX = 160;
 
@@ -845,6 +854,8 @@ export const OpeningSchema = z.object({
   dueOn: DateString,
   /** null = 아직 열려 있다 */
   resolvedOn: DateString.nullable(),
+  /** 왜 닫혔는가 — 옛 세이브엔 없다(optional). 열려 있으면 서지 않는다 */
+  resolvedBy: OpeningCloseSchema.optional(),
 });
 export type Opening = z.infer<typeof OpeningSchema>;
 
