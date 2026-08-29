@@ -56,6 +56,13 @@ export interface TurnTraceTool {
   name: string;
   description: string;
   inputSchema: JsonObjectSchema;
+  /**
+   * 읽기 전용 조회 도구인가 (`GameToolSpec.readOnly`).
+   *
+   * 팝업이 도구 흐름에서 조회와 스킬을 가르는 자리다 — 화면이 이름으로 다시
+   * 가르면 `search_players`처럼 접두사가 다른 조회가 스킬로 선다 (models.md §5).
+   */
+  readOnly?: boolean;
 }
 
 /** 이 호출이 모델에 보낸 것 — `TurnRequest`를 직렬화 가능한 모양으로만 옮긴다 */
@@ -132,6 +139,7 @@ function traceRequest(req: TurnRequest): TurnTraceRequest {
       name: tool.name,
       description: tool.description,
       inputSchema: tool.inputSchema,
+      ...(tool.readOnly === undefined ? {} : { readOnly: tool.readOnly }),
     })),
     ...(req.maxTokens === undefined ? {} : { maxTokens: req.maxTokens }),
     streaming: req.onText !== undefined,

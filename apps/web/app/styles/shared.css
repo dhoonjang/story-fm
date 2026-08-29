@@ -99,7 +99,8 @@
   border-radius: var(--r-md);
   box-shadow: var(--shadow-pop);
   width: 100%;
-  max-width: 980px;
+  /* 원문을 읽는 창이라 넓다 — JSON 한 줄이 접히지 않고 지나갈 만큼은 준다 */
+  max-width: 1180px;
   max-height: calc(100vh - 2 * var(--sp-4));
   display: flex;
   flex-direction: column;
@@ -153,8 +154,12 @@
 .tt-copy {
   margin-left: var(--sp-2);
 }
+/**
+ * 본문 — **위 여백을 두지 않는다.** 그 자리는 따라 붙는 호출 머리의 것이고,
+ * 여백을 남기면 스크롤한 원문이 머리 위쪽 빈 칸으로 지나가 머리가 떠 보인다.
+ */
 .tt-body {
-  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  padding: 0 var(--sp-4) var(--sp-4);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -169,30 +174,37 @@
   padding: var(--sp-3) 0;
 }
 
-/* 호출 하나 — 한 턴에 여럿이 순서대로 선다(gm + rater, intent + caster) */
+/**
+ * 호출 하나 — **테두리를 두르지 않는다.** 탭이 이미 어느 호출인지 말하고 창이 이미
+ * 액자다. 상자를 하나 더 두르면 원문이 액자 안의 액자 안에 갇혀, 정작 읽어야 할
+ * 글의 폭만 줄어든다.
+ */
 .tt-call {
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--bg);
-  padding: var(--sp-2) var(--sp-3);
   min-width: 0;
 }
 /**
  * 호출 머리는 **따라 붙는다** — 시스템 프롬프트 하나가 수만 자라 한 호출을 지나는
  * 데도 스크롤이 한참이다. 지금 읽는 원문이 누구의 것인지가 화면에서 사라지면
  * gm과 rater의 프롬프트를 구별할 수 없다.
+ *
+ * ⚠️ **본문의 좌우 여백 밖까지 배경을 편다**(음수 마진). 여백 안에만 칠하면 그
+ * 양옆 12px으로 아래 원문이 그대로 지나가, 붙어 있는 머리가 **떠 보인다** — 스티키
+ * 줄은 스크롤 통로를 가로로 완전히 막아야 붙어 있는 것으로 읽힌다.
  */
 .tt-call-head {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--bg);
+  background: var(--panel);
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--sp-2);
-  padding: var(--sp-2) 0;
-  border-bottom: 1px solid var(--border-soft);
+  margin: 0 calc(-1 * var(--sp-4));
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  /* 아래로 지나가는 원문과의 경계 — 선 하나로는 글자가 선에 닿아 붙어 보인다 */
+  box-shadow: 0 6px 10px -8px rgba(0, 0, 0, 0.6);
 }
 .tt-agent {
   font-size: var(--fs-base);
@@ -265,14 +277,6 @@
   font-size: var(--fs-2xs);
   font-variant-numeric: tabular-nums;
 }
-/* 그 방향이 무엇을 담는지 한 줄 — 경계를 색으로만 두면 무엇이 다른지는 여전히 모른다 */
-.tt-side-hint {
-  margin: 2px 0 var(--sp-1);
-  color: var(--dim);
-  font-size: var(--fs-2xs);
-  line-height: 1.5;
-}
-
 /* 블록 — 접힌 채로 이름과 크기만, 펼치면 원문 그대로 */
 .tt-block > summary {
   cursor: pointer;
@@ -282,6 +286,36 @@
   gap: var(--sp-2);
   font-size: var(--fs-sm);
   list-style-position: outside;
+}
+.tt-block > summary:hover {
+  color: var(--text);
+}
+/**
+ * 블록 하나만 복사 — 프롬프트를 편집기에서 diff 뜨는 것이 이 창을 여는 이유의
+ * 절반이고, 그때 필요한 것은 턴 전체가 아니라 그 한 덩어리다.
+ *
+ * 접기와 같은 자리에 서므로 **누르면 접히지 않아야 한다**(핸들러가 막는다).
+ * 평소에는 흐리게 두어 이름과 크기를 읽는 눈을 방해하지 않는다.
+ */
+.tt-block-copy {
+  margin-left: auto;
+  flex: none;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+  padding: 0 6px;
+  cursor: pointer;
+  opacity: 0;
+}
+.tt-block > summary:hover .tt-block-copy,
+.tt-block-copy:focus-visible {
+  opacity: 1;
+  border-color: var(--border);
+}
+.tt-block-copy:hover {
+  color: var(--text);
 }
 .tt-block-label {
   font-weight: 700;
@@ -303,6 +337,80 @@
   font-size: var(--fs-2xs);
   font-variant-numeric: tabular-nums;
 }
+/**
+ * 이력 대화록 — **줄마다 한 줄.**
+ *
+ * 예순 개 메시지를 JSON으로 두면 6만 자짜리 들여쓰기가 된다. 여기서는 차례·화자·
+ * 크기·첫 마디가 한 줄에 서고, 누른 줄만 전문으로 펴진다. 화자의 색은 꼬리와 같은
+ * 규약이다 — 모델이 쓴 것만 초록이다.
+ */
+.tt-hist {
+  list-style: none;
+  margin: var(--sp-1) 0 var(--sp-2);
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-xs);
+  background: var(--panel-2);
+}
+.tt-hist-row + .tt-hist-row {
+  border-top: 1px solid var(--border-soft);
+}
+.tt-hist-row > details > summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  cursor: pointer;
+  padding: 3px var(--sp-2);
+  font-size: var(--fs-xs);
+  min-width: 0;
+}
+.tt-hist-row > details > summary:hover {
+  background: var(--panel);
+}
+/* 차례 — 이력의 몇 번째인가. 오른쪽 정렬이라 자릿수가 늘어도 줄이 흔들리지 않는다 */
+.tt-hist-no {
+  flex: none;
+  width: 2.2em;
+  text-align: right;
+  font-style: normal;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.tt-hist-role {
+  flex: none;
+  width: 5.5em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-2xs);
+  color: var(--muted);
+}
+.tt-hist-role.in {
+  color: var(--accent-2);
+}
+.tt-hist-role.out {
+  color: var(--accent);
+}
+.tt-hist-size {
+  flex: none;
+  width: 4.5em;
+  text-align: right;
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+}
+/* 첫 마디는 남는 폭을 다 쓰고 한 줄에서 끝난다 — 두 줄이 되면 목록이 아니게 된다 */
+.tt-hist-peek {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tt-hist-row .tt-pre {
+  margin: 0 var(--sp-2) var(--sp-2);
+}
+
 /**
  * 원문 — **전문이 그대로 선다.**
  *
@@ -334,6 +442,166 @@
   white-space: pre;
   overflow-wrap: normal;
   overflow-x: auto;
+}
+
+/**
+ * 호출 탭 — **돈 순서 그대로.**
+ *
+ * 한 턴에 에이전트가 셋까지 돌고 그중 하나의 프롬프트가 수만 자다. 세로로 이으면
+ * 뒤의 rater까지 스크롤로만 닿아, 정작 비교하려던 두 호출을 나란히 못 본다.
+ * 탭은 본문 밖에 서서 스크롤을 따라가지 않는다 — 지금 어느 호출인지가 어디서든
+ * 화면에 남는다.
+ */
+.tt-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-4) 0;
+  border-bottom: 1px solid var(--border);
+}
+.tt-tab {
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--r-xs) var(--r-xs) 0 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  padding: 4px 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  /* 탭 줄의 아래 선을 덮어 고른 탭이 본문과 이어져 보이게 한다 */
+  margin-bottom: -1px;
+}
+.tt-tab:hover {
+  color: var(--text);
+}
+.tt-tab.on {
+  color: var(--text);
+  background: var(--panel);
+  border-color: var(--border);
+  /* 아래 선을 본문 바탕으로 덮어 고른 탭이 본문과 한 칸으로 이어진다 */
+  border-bottom: 1px solid var(--panel);
+}
+/* 호출 순서 — 무엇이 먼저 돌았는지가 곧 그 턴의 경로다 (`.tt-agent > i`와 같은 결) */
+.tt-tab > i {
+  font-style: normal;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
+/* 이 호출에서 도구가 돌았다 — 탭에서 고를 이유가 되는 사실 하나 */
+.tt-tab-facts {
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+/* 실패한 호출은 열어 봐야 아는 것이 아니라 탭에서 보인다 */
+.tt-tab-bad {
+  font-style: normal;
+  font-size: var(--fs-2xs);
+  color: var(--danger);
+}
+
+/**
+ * 도구 흐름 — **이 호출이 무엇을 부르고 무엇이 돌아왔나.**
+ *
+ * 꼬리의 JSON 스무 덩어리에 흩어져 있던 것을 한 줄씩 편다. 원문보다 위에 서는
+ * 이유는 이것이 이 창에서 가장 자주 찾는 것이어서다 — 특히 반려된 호출은 붉게
+ * 서서, 모델이 같은 스킬을 두 번 부르며 인자를 고쳐 잡은 흐름이 한눈에 읽힌다.
+ */
+.tt-flow {
+  margin-top: var(--sp-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-xs);
+  background: var(--panel-2);
+  padding: var(--sp-2);
+}
+.tt-flow-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+}
+.tt-flow-facts {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+}
+.tt-flow-list {
+  list-style: none;
+  margin: var(--sp-1) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tt-step > details > summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  cursor: pointer;
+  padding: 3px 4px;
+  border-radius: var(--r-xs);
+  font-size: var(--fs-xs);
+  min-width: 0;
+}
+.tt-step > details > summary:hover {
+  background: var(--panel);
+}
+.tt-step-no {
+  font-style: normal;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+/**
+ * 조회와 스킬 — **장부를 바꿨는가**가 이 두 낱말의 차이다. 도구 스펙의
+ * `readOnly`가 가르고 화면은 그것을 읽기만 한다.
+ */
+.tt-kind {
+  flex: none;
+  font-size: var(--fs-2xs);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  padding: 0 5px;
+  color: var(--muted);
+}
+.tt-kind.skill {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+}
+.tt-tool {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-2xs);
+}
+.tt-args {
+  flex: none;
+  max-width: 34%;
+  color: var(--dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 결과는 남는 폭을 다 쓴다 — 반려 사유가 이 줄의 용건이다 */
+.tt-outcome {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tt-step.bad > details > summary {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.tt-step.bad .tt-outcome {
+  color: var(--danger);
 }
 
 /**

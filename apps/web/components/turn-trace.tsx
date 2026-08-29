@@ -3,6 +3,15 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { TurnTraceCall, TurnUsage } from "@story-fm/llm";
 
+import {
+  alreadyShown,
+  compactJson,
+  groupTraceMessages,
+  previewLine,
+  traceToolFlow,
+  type TraceToolStep,
+} from "../lib/turn-trace-view";
+
 /**
  * 턴 원문 뷰어 — **개발 도구다.** 게임의 화자가 아니라 우리가 읽는 창이라
  * 문구도 픽션 밖의 말투를 쓴다.
@@ -54,16 +63,43 @@ function TraceBlock({
   open?: boolean;
   json?: boolean;
   tone?: "in" | "out";
-  children: ReactNode;
+  children: string;
 }) {
   return (
     <details className={tone === undefined ? "tt-block" : `tt-block ${tone}`} open={open}>
       <summary>
         <span className="tt-block-label">{label}</span>
         {meta !== undefined && <span className="tt-block-meta">{meta}</span>}
+        <BlockCopy value={children} />
       </summary>
       <pre className={json ? "tt-pre json" : "tt-pre"}>{children}</pre>
     </details>
+  );
+}
+
+/**
+ * 이 블록만 복사 — 접기와 **같은 줄에 서므로 누르면 접히지 않아야 한다.**
+ * `<summary>` 안의 클릭은 기본으로 열림을 뒤집으므로 여기서 막는다.
+ */
+function BlockCopy({ value }: { value: string }) {
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (!done) return;
+    const timer = setTimeout(() => setDone(false), 1200);
+    return () => clearTimeout(timer);
+  }, [done]);
+  return (
+    <button
+      className="tt-block-copy"
+      title="이 블록만 복사"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void navigator.clipboard.writeText(value).then(() => setDone(true));
+      }}
+    >
+      {done ? "복사됨" : "복사"}
+    </button>
   );
 }
 
@@ -75,19 +111,6 @@ function duration(ms: number): string {
 }
 
 const num = (value: number) => value.toLocaleString("ko-KR");
-
-/**
- * 이력 메시지의 `role` — 제공자 원형 기록이라 모양을 단정할 수 없다.
- *
- * 이 한 낱말이 **응답 꼬리 안에서 input과 output을 가르는 경계**다: 어댑터는
- * 이번 턴의 우리 발화도 같은 이력에 적기 때문에(Anthropic은 `role:"user"`,
- * Gemini는 `role:"user"` content) 꼬리의 첫 조각은 모델이 쓴 것이 아니다.
- */
-function roleOf(message: unknown): string {
-  if (message === null || typeof message !== "object") return "?";
-  const role = (message as { role?: unknown }).role;
-  return typeof role === "string" ? role : "?";
-}
 
 /**
  * 그 조각을 누가 썼는가 — **모델이 쓴 것만 output이다.**
@@ -150,12 +173,10 @@ function cacheFact(usage: TurnUsage, minCacheable: number | undefined): string {
 function TraceSide({
   dir,
   facts,
-  hint,
   children,
 }: {
   dir: "in" | "out";
   facts: string;
-  hint: string;
   children: ReactNode;
 }) {
   return (
@@ -167,8 +188,125 @@ function TraceSide({
         <b>{dir === "in" ? "보낸 것 (input)" : "받은 것 (output)"}</b>
         <span className="tt-side-facts">{facts}</span>
       </div>
-      <p className="tt-side-hint">{hint}</p>
       {children}
+    </section>
+  );
+}
+
+/**
+ * 이력을 **대화록으로** 편다 (→ docs/llm/models.md §5).
+ *
+ * 이력은 제공자 원형 메시지 예순 개다. JSON 한 덩어리로 두면 6만 자짜리 들여쓰기가
+ * 되어 무엇이 실려 나갔는지 창 안에서 세지 못한다. 이력이 실제로 담고 있는 것은
+ * **대화**이므로 — 장면 하나, 감독의 말 하나가 번갈아 선다 — 줄마다 차례·화자·크기와
+ * 첫 마디를 세우고 누르면 전문이 열린다.
+ *
+ * 본문이 없는 줄(도구 호출·결과)은 크기 대신 그 도구의 이름이 선다. 화자의 색은
+ * 꼬리와 같은 규약이다 — 모델이 쓴 것만 초록이다.
+ */
+function TraceTranscript({
+  messages,
+  expandAll,
+}: {
+  messages: readonly unknown[];
+  expandAll: boolean;
+}) {
+  const groups = groupTraceMessages(messages);
+  const chars = groups.reduce((sum, g) => sum + (g.text?.length ?? 0), 0);
+  return (
+    <details className="tt-block" open={expandAll}>
+      <summary>
+        <span className="tt-block-label">history</span>
+        <span className="tt-block-meta">{`${messages.length}개 · 본문 ${num(chars)}자`}</span>
+        <BlockCopy value={pretty(messages)} />
+      </summary>
+      <ol className="tt-hist">
+        {groups.map((group) => {
+          const wrote = wroteIt(group.role);
+          const tool =
+            group.calls.length > 0
+              ? `도구 ${group.calls.map((c) => c.name).join(" · ")}`
+              : group.results.length > 0
+                ? `결과 ${group.results.map((r) => r.name ?? "—").join(" · ")}`
+                : null;
+          return (
+            <li className="tt-hist-row" key={group.from}>
+              <details>
+                <summary>
+                  <i className="tt-hist-no">{group.from}</i>
+                  <span className={wrote === "unknown" ? "tt-hist-role" : `tt-hist-role ${wrote}`}>
+                    {group.role}
+                  </span>
+                  <span className="tt-hist-size">
+                    {group.text === null ? "—" : `${num(group.text.length)}자`}
+                  </span>
+                  <span className="tt-hist-peek">
+                    {tool ?? (group.text === null ? "" : previewLine(group.text))}
+                  </span>
+                </summary>
+                <pre className={group.text === null ? "tt-pre json" : "tt-pre"}>
+                  {group.text ?? pretty(group.raw.length === 1 ? group.raw[0] : group.raw)}
+                </pre>
+              </details>
+            </li>
+          );
+        })}
+      </ol>
+    </details>
+  );
+}
+
+/**
+ * 이 호출이 부른 도구를 **순서대로** 세운 줄 (→ docs/llm/models.md §5).
+ *
+ * 꼬리의 JSON 스무 덩어리 안에 흩어져 있던 것을 한 줄로 편다 — 무엇을 부르고 무엇이
+ * 돌아왔는지가 이 창에서 가장 자주 찾는 것이고, 특히 **반려된 호출**이 그렇다:
+ * 모델이 같은 스킬을 두 번 부르며 인자를 고쳐 잡은 흐름은 여기서만 보인다.
+ *
+ * 조회와 스킬은 도구 스펙이 가른다(`readOnly`) — 화면이 이름으로 다시 가르면
+ * `search_players`처럼 접두사가 다른 조회가 스킬로 선다.
+ */
+function TraceFlow({ steps, readOnly }: { steps: TraceToolStep[]; readOnly: Set<string> }) {
+  if (steps.length === 0) return null;
+  const reads = steps.filter((s) => readOnly.has(s.name)).length;
+  const failed = steps.filter((s) => s.failed || s.unanswered).length;
+  const facts = [
+    `${steps.length}회`,
+    `조회 ${reads} · 스킬 ${steps.length - reads}`,
+    ...(failed > 0 ? [`반려·미응답 ${failed}`] : []),
+  ].join(" · ");
+  return (
+    <section className="tt-flow">
+      <div className="tt-flow-head">
+        <b>도구 흐름</b>
+        <span className="tt-flow-facts">{facts}</span>
+      </div>
+      <ol className="tt-flow-list">
+        {steps.map((step) => {
+          const read = readOnly.has(step.name);
+          return (
+            <li
+              className={step.failed || step.unanswered ? "tt-step bad" : "tt-step"}
+              key={step.order}
+            >
+              <details>
+                <summary>
+                  <i className="tt-step-no">{step.order}</i>
+                  <span className={read ? "tt-kind read" : "tt-kind skill"}>
+                    {read ? "조회" : "스킬"}
+                  </span>
+                  <b className="tt-tool">{step.name}</b>
+                  <span className="tt-args">{compactJson(step.input, 60)}</span>
+                  <span className="tt-outcome">{step.summary}</span>
+                </summary>
+                <pre className="tt-pre json">
+                  {pretty({ input: step.input, output: step.output })}
+                </pre>
+              </details>
+            </li>
+          );
+        })}
+      </ol>
     </section>
   );
 }
@@ -193,11 +331,34 @@ function TraceCallView({
     `tools ${request.tools.length}개`,
     ...(usage ? [cacheFact(usage, call.minCacheableInput)] : []),
   ].join(" · ");
+  /**
+   * 창 위쪽에서 이미 선 글 — 꼬리에서 접을 판정의 기준이다 (models.md §5).
+   *
+   * 발화와 스냅샷은 어댑터마다 꼬리에 적히는 모양이 갈린다: 그대로 적는 곳도,
+   * 둘을 이어 붙이는 곳도 있어(§3-3) 이어 붙인 꼴까지 함께 대 본다.
+   */
+  const shownAbove = [
+    request.user,
+    ...(request.stateNote === undefined
+      ? []
+      : [request.stateNote, `${request.user}\n\n${request.stateNote}`]),
+    response?.text ?? "",
+  ];
+  const groups = groupTraceMessages(response?.messages ?? [])
+    /**
+     * 본문이 빈 덩어리는 서지 않는다 — `TraceBlock`의 규약 그대로다. Gemini는 도구
+     * 왕복 사이에 `{ parts: [{ text: "" }] }`를 한 줄씩 적어, 그대로 세우면 빈 줄이
+     * 호출과 결과 사이를 갈라 놓는다.
+     */
+    .filter((group) => group.text !== "");
+  const fresh = groups.filter((group) => !alreadyShown(group.text, shownAbove));
+  const folded = groups.length - fresh.length;
   const outFacts = response
     ? [
         `${num(response.text.length)}자`,
         `메시지 ${response.messages.length}개`,
         `tool_use ${response.toolCallCount}`,
+        ...(folded > 0 ? [`위에 선 것 ${folded}덩어리 접음`] : []),
         ...(usage ? [`out ${num(usage.outputTokens)}토큰`] : []),
         response.stopReason ?? "종료 사유 미보고",
       ].join(" · ")
@@ -218,32 +379,35 @@ function TraceCallView({
         <CopyButton value={pretty(call)} />
       </header>
 
+      {/* 이 호출이 부른 도구 — 원문보다 앞이다. 무엇이 오갔는지가 먼저 읽혀야 한다 */}
+      <TraceFlow
+        steps={traceToolFlow(response?.messages ?? [])}
+        readOnly={new Set(request.tools.filter((t) => t.readOnly === true).map((t) => t.name))}
+      />
+
       {/**
        * 요청 안의 순서는 **모델이 읽는 순서**다 — 시스템 프롬프트가 맨 앞이고 발화가
        * 끝이다. 사람이 궁금한 것만 앞으로 끌어오면 무엇이 어느 자리에 실려 나갔는지가
        * 사라진다.
        *
-       * 요청 쪽 산문은 **모두 펼친 채로 선다** — 이 창의 용건이 그 원문이다.
+       * ⚠️ **매 턴 달라지는 것만 펼쳐 둔다** — 발화와 스냅샷이다. 고정 프롬프트는
+       * 턴마다 같은 글이 화면의 첫 세 뼘을 먹어, 정작 이 턴에 무엇이 달랐는지를
+       * 스크롤 아래로 민다. 크기는 접힌 머리가 이미 적고, 창 머리의 손잡이가 한 번에
+       * 전부 편다.
        */}
-      <TraceSide
-        dir="in"
-        facts={inFacts}
-        hint="모델이 이 순서로 읽는다 — 앞이 캐시 프리픽스(system·history), 그다음이 이번 턴의 발화, 끝이 이력에 남지 않는 스냅샷이다."
-      >
+      <TraceSide dir="in" facts={inFacts}>
         {request.system.map((block, i) => (
           <TraceBlock
             key={i}
             label={`system #${i + 1}`}
             meta={`${num(block.length)}자${i === 0 ? " · 캐시 프리픽스 머리" : ""}`}
-            open
+            open={expandAll}
           >
             {block}
           </TraceBlock>
         ))}
         {request.history.length > 0 && (
-          <TraceBlock label="history" meta={`${request.history.length}개`} open={expandAll} json>
-            {pretty(request.history)}
-          </TraceBlock>
+          <TraceTranscript messages={request.history} expandAll={expandAll} />
         )}
         <TraceBlock label="user" meta={`${num(request.user.length)}자`} open>
           {request.user}
@@ -261,11 +425,7 @@ function TraceCallView({
         )}
       </TraceSide>
 
-      <TraceSide
-        dir="out"
-        facts={outFacts}
-        hint="이 호출이 이력에 새로 붙인 것만 — 앞의 이력은 위 history에 있다. 어댑터는 이번 턴의 우리 발화도 같은 이력에 적으므로, 꼬리 안에서는 `role`이 경계다(파란 것은 우리가 보낸 것)."
-      >
+      <TraceSide dir="out" facts={outFacts}>
         {call.error !== null && <div className="tt-error">{call.error}</div>}
         {response && (
           <TraceBlock label="응답 텍스트" meta={`${num(response.text.length)}자`} open>
@@ -273,26 +433,54 @@ function TraceCallView({
           </TraceBlock>
         )}
         {/**
-         * 꼬리를 **메시지마다 따로** 세운다. 한 덩어리 JSON으로 두면 우리 발화와
-         * 모델의 tool_use·thinking이 같은 들여쓰기 안에서 뒤섞여, 무엇이 모델이 쓴
-         * 것인지 눈으로 가릴 수 없다.
+         * 꼬리에서 **새로 온 것만** 세운다 — 도구 왕복과 thinking이 그것이다.
+         *
+         * 첫 메시지는 이번 턴의 우리 발화이고 합쳐진 model 덩어리는 응답 본문이라,
+         * 둘 다 위에 제 이름을 달고 이미 서 있다(`alreadyShown`). 그대로 두면 창을
+         * 한 번 내려 읽는 동안 같은 원문을 세 번 지나고, 그 사이에서 정작 새로 온
+         * 도구 왕복이 묻힌다.
+         *
+         * ⚠️ **스트리밍 조각은 합쳐 센다.** Gemini SDK는 chunk마다 model content를
+         * 따로 적어(models.md §5) 한 장면이 스무 줄이 넘는 목록이 된다.
          */}
-        {response?.messages.map((message, i) => {
-          const role = roleOf(message);
-          const wrote = wroteIt(role);
+        {fresh.map((group) => {
+          const wrote = wroteIt(group.role);
+          const count = group.to - group.from + 1;
+          const span =
+            count === 1 ? `messages[${group.from}]` : `messages[${group.from}–${group.to}]`;
+          const meta = [
+            ...(count === 1 ? [] : [`${count}조각 합침`]),
+            ...(group.text === null ? [] : [`${num(group.text.length)}자`]),
+            WROTE_IT_KO[wrote],
+          ].join(" · ");
           return (
             <TraceBlock
-              key={i}
-              label={`messages[${i}] · ${role}`}
-              meta={WROTE_IT_KO[wrote]}
+              key={group.from}
+              label={`${span} · ${group.role}`}
+              meta={meta}
               tone={wrote === "unknown" ? undefined : wrote}
               open={expandAll}
-              json
+              json={group.text === null}
             >
-              {pretty(message)}
+              {group.text ?? pretty(count === 1 ? group.raw[0] : group.raw)}
             </TraceBlock>
           );
         })}
+        {/**
+         * 접은 턴에만 서는 꼬리 원형 — **화면에서 닿지 못하는 기록은 남기지 않는다.**
+         * 접은 판정이 빗나갔더라도 이 덩어리에 그대로 있고, 어댑터가 이력에 무엇을
+         * 적었는지를 제공자 모양 그대로 봐야 할 때도 여기다.
+         */}
+        {folded > 0 && response && (
+          <TraceBlock
+            label="messages 원형"
+            meta={`${response.messages.length}개 · 이력에 붙는 그대로`}
+            open={expandAll}
+            json
+          >
+            {pretty(response.messages)}
+          </TraceBlock>
+        )}
       </TraceSide>
     </section>
   );
@@ -346,13 +534,25 @@ export function TurnTracePopup({
   const [trace, setTrace] = useState<TurnTracePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   /**
-   * JSON 덩어리(history · tools · 응답 messages)까지 펼쳐 둘 것인가.
+   * 접힌 것(고정 프롬프트 · 이력 · 도구 스펙 · 응답 꼬리)까지 전부 펼칠 것인가.
    *
    * 손으로 접었다 편 것은 `<details>`가 쥐고 있으므로, 이 손잡이는 목록을 다시
    * 세워(`key`) 기본 상태를 바꾼다 — 블록마다 열림 상태를 리액트로 끌어오면 창
    * 하나가 스무 개의 상태를 들고 있어야 한다.
    */
   const [expandAll, setExpandAll] = useState(false);
+  /**
+   * 지금 읽는 호출 — 한 턴은 에이전트 여럿이 돈다(models.md §5).
+   *
+   * 셋을 세로로 이으면 `gm`의 프롬프트 하나가 수만 자라 뒤의 rater까지 스크롤로만
+   * 닿는다. 다른 턴을 열면 첫 호출로 돌아간다 — 남아 있던 자리가 그 턴에는 없을 수
+   * 있고, 있어도 다른 에이전트다.
+   */
+  const [active, setActive] = useState(0);
+
+  useEffect(() => {
+    setActive(0);
+  }, [gameId, index]);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -406,6 +606,10 @@ export function TurnTracePopup({
     }
   }
 
+  // 탭이 가리키는 자리가 없을 수 있다 — 기록이 아직 안 왔거나 호출이 그보다 적다
+  const activeIndex = trace === null ? 0 : Math.min(active, Math.max(0, trace.calls.length - 1));
+  const activeCall = trace?.calls[activeIndex] ?? null;
+
   return (
     <div
       className="tt-backdrop"
@@ -442,7 +646,7 @@ export function TurnTracePopup({
                 onClick={() => setExpandAll((on) => !on)}
                 aria-pressed={expandAll}
               >
-                {expandAll ? "JSON 접기" : "JSON까지 펼치기"}
+                {expandAll ? "모두 접기" : "모두 펼치기"}
               </button>
             )}
             <button className="tt-close" onClick={onClose} aria-label="닫기">
@@ -450,13 +654,45 @@ export function TurnTracePopup({
             </button>
           </div>
         </header>
-        {/* 손잡이가 바뀌면 목록을 다시 세운다 — `<details>`의 기본 열림을 그렇게 바꾼다 */}
-        <div className="tt-body" key={expandAll ? "all" : "prose"}>
+        {/**
+         * 호출 탭 — **돈 순서 그대로**다. 그 순서가 곧 이 턴의 경로이므로
+         * (gm → rater, intent → caster → rater) 이름으로 다시 정렬하지 않는다.
+         * 하나뿐이면 탭 줄이 서지 않는다 — 고를 것이 없는 줄이 자리만 먹는다.
+         */}
+        {trace && trace.calls.length > 1 && (
+          <div className="tt-tabs" role="tablist" aria-label="이 턴의 호출">
+            {trace.calls.map((call, i) => (
+              <button
+                className={i === active ? "tt-tab on" : "tt-tab"}
+                role="tab"
+                aria-selected={i === active}
+                key={i}
+                onClick={() => setActive(i)}
+              >
+                <i>{i + 1}</i>
+                {call.agent}
+                {/**
+                 * 탭은 **누구이고 무슨 일이 있었나**까지다 — 걸린 시간·모델·토큰은
+                 * 바로 아래 머리가 적는다. 같은 값을 두 줄에 겹쳐 적으면 고르는
+                 * 눈이 어느 쪽을 읽어야 할지 모른다.
+                 */}
+                {(call.response?.toolCallCount ?? 0) > 0 && (
+                  <span className="tt-tab-facts">도구 {call.response?.toolCallCount}</span>
+                )}
+                {/* 실패한 호출은 탭에서 보인다 — 열어 봐야 아는 것이면 못 찾는다 */}
+                {call.error !== null && <em className="tt-tab-bad">실패</em>}
+              </button>
+            ))}
+          </div>
+        )}
+        {/**
+         * 손잡이가 바뀌거나 탭을 옮기면 목록을 다시 세운다 — `<details>`의 기본
+         * 열림을 그렇게 바꾼다.
+         */}
+        <div className="tt-body" key={`${active}-${expandAll ? "all" : "prose"}`}>
           {error !== null && <p className="tt-note">기록을 불러오지 못했다 — {error}</p>}
           {trace && trace.calls.length === 0 && <p className="tt-note">{emptyNote(trace.mode)}</p>}
-          {trace?.calls.map((call, i) => (
-            <TraceCallView call={call} at={i} expandAll={expandAll} key={i} />
-          ))}
+          {activeCall && <TraceCallView call={activeCall} at={activeIndex} expandAll={expandAll} />}
         </div>
       </div>
     </div>

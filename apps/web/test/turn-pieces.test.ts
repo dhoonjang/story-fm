@@ -10,6 +10,12 @@ import {
 import { mergeSlice } from "../lib/game-slice";
 import { chatForActiveMatch } from "../lib/match-chat";
 import { buildTraceIndex } from "../lib/turn-trace-index";
+import {
+  alreadyShown,
+  groupTraceMessages,
+  previewLine,
+  traceToolFlow,
+} from "../lib/turn-trace-view";
 import type { GamePayload, GameSlice } from "../lib/store";
 
 /**
@@ -479,5 +485,182 @@ describe("groupPieces", () => {
       ["손흥민|*포효한다*/이 골은 팬들께 바칩니다.", "중계|44′ 경고입니다."],
       [],
     ]);
+  });
+});
+
+/**
+ * 원문 팝업이 읽는 제공자 원형 꼬리 (turn-trace-view.ts · models.md §5).
+ *
+ * 세 제공자가 모양이 다르고, 그 셋을 화면이 각자 알지 않게 하는 것이 이 함수들의
+ * 일이다 — 모양 하나가 어긋나면 창이 원문을 감춘다.
+ */
+describe("groupTraceMessages", () => {
+  const chunk = (text: string) => ({ role: "model", parts: [{ text }] });
+
+  it("스트리밍 조각은 하나로 합치고 원문은 남긴다", () => {
+    const groups = groupTraceMessages([
+      { role: "user", parts: [{ text: "감독의 말" }] },
+      chunk("[2026-07-13 "),
+      chunk("AM 9:30]\n@레오: "),
+      { role: "model", parts: [{ text: "왼쪽이 문제입니다.", thoughtSignature: "sig" }] },
+    ]);
+    expect(groups).toHaveLength(2);
+    expect(groups[1]).toMatchObject({ role: "model", from: 1, to: 3 });
+    expect(groups[1]?.text).toBe("[2026-07-13 AM 9:30]\n@레오: 왼쪽이 문제입니다.");
+    // 합친 것은 읽기 위한 모양이고 기록이 아니다 — 조각 셋이 그대로 남는다
+    expect(groups[1]?.raw).toHaveLength(3);
+  });
+
+  it("역할이 갈리면 잇지 않는다", () => {
+    const groups = groupTraceMessages([chunk("가"), { role: "user", parts: [{ text: "나" }] }]);
+    expect(groups.map((g) => g.role)).toEqual(["model", "user"]);
+  });
+
+  it("도구가 실린 메시지는 텍스트로 합치지 않는다 — JSON으로 선다", () => {
+    const groups = groupTraceMessages([
+      chunk("앞"),
+      { role: "model", parts: [{ functionCall: { name: "get_squad", args: {} } }] },
+      chunk("뒤"),
+    ]);
+    expect(groups.map((g) => g.text)).toEqual(["앞", null, "뒤"]);
+  });
+
+  it("모르는 모양도 버리지 않는다 — 덩어리 하나로 선다", () => {
+    const groups = groupTraceMessages([{ role: "model", parts: [{ 미래의칸: 1 }] }]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.text).toBeNull();
+  });
+});
+
+describe("traceToolFlow", () => {
+  it("Gemini — 호출에 id가 없어도 이름으로 짝짓는다", () => {
+    const steps = traceToolFlow([
+      {
+        role: "model",
+        parts: [{ functionCall: { name: "respond_to_media", args: { stance: "bold" } } }],
+      },
+      {
+        role: "user",
+        parts: [
+          {
+            functionResponse: {
+              id: "call_1",
+              name: "respond_to_media",
+              response: { error: "지금 답할 기자회견이 없습니다" },
+            },
+          },
+        ],
+      },
+    ]);
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({
+      order: 1,
+      name: "respond_to_media",
+      failed: true,
+      unanswered: false,
+      summary: "지금 답할 기자회견이 없습니다",
+    });
+  });
+
+  it("같은 스킬을 두 번 부르면 결과도 순서대로 붙는다", () => {
+    const call = (id: string) => ({
+      role: "model",
+      parts: [{ functionCall: { name: "set_lineup", args: { at: id } } }],
+    });
+    const back = (text: string) => ({
+      role: "user",
+      parts: [{ functionResponse: { name: "set_lineup", response: { output: text } } }],
+    });
+    const steps = traceToolFlow([call("a"), back("첫째"), call("b"), back("둘째")]);
+    expect(steps.map((s) => s.summary)).toEqual(["첫째", "둘째"]);
+  });
+
+  it("Anthropic — id로 짝짓고 결과 문자열을 그대로 읽는다", () => {
+    const steps = traceToolFlow([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "확인하겠습니다" },
+          { type: "tool_use", id: "toolu_1", name: "get_squad", input: { squad: "first" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "선수 25명" }],
+      },
+    ]);
+    expect(steps).toEqual([
+      {
+        order: 1,
+        name: "get_squad",
+        input: { squad: "first" },
+        output: "선수 25명",
+        unanswered: false,
+        failed: false,
+        summary: "선수 25명",
+      },
+    ]);
+  });
+
+  it("OpenAI — 인자는 JSON 문자열로 오므로 풀어서 싣는다", () => {
+    const steps = traceToolFlow([
+      {
+        type: "function_call",
+        call_id: "c1",
+        name: "set_captain",
+        arguments: '{"playerId":"bruno"}',
+      },
+      { type: "function_call_output", call_id: "c1", output: "완장 지정" },
+    ]);
+    expect(steps[0]?.input).toEqual({ playerId: "bruno" });
+    expect(steps[0]?.summary).toBe("완장 지정");
+  });
+
+  it("짝 없는 호출은 미응답으로 선다 — 잘린 응답이 그렇다", () => {
+    const steps = traceToolFlow([
+      { role: "model", parts: [{ functionCall: { name: "set_tactics", args: {} } }] },
+    ]);
+    expect(steps[0]).toMatchObject({ unanswered: true, output: null, summary: "결과 없음" });
+  });
+});
+
+describe("alreadyShown", () => {
+  const scene = "[2026-07-19 AM 9:00]\n@레오: 왼쪽이 문제입니다. 오늘 오후에 그 자리만 돌릴까요?";
+
+  it("같은 글이면 접는다 — 합쳐진 꼬리가 응답 본문과 같은 자리다", () => {
+    expect(alreadyShown(scene, [scene])).toBe(true);
+  });
+
+  it("발화에 스냅샷을 이어 붙여 적는 어댑터도 접힌다", () => {
+    const user = "@장동훈: 내일 보자";
+    const note = "<snapshot>\n<now>2026-07-18 PM 5:35</now>\n</snapshot>";
+    expect(alreadyShown(`${user}\n\n${note}`, [user, note, `${user}\n\n${note}`])).toBe(true);
+  });
+
+  it("짧은 인용 하나로는 접지 않는다 — 품은 쪽의 절반은 넘어야 같은 글이다", () => {
+    expect(alreadyShown(scene, ["네"])).toBe(false);
+  });
+
+  it("빈 기준은 무엇도 접지 않는다 — 응답이 비어 온 호출이 그렇다", () => {
+    expect(alreadyShown(scene, ["", "   "])).toBe(false);
+  });
+
+  it("JSON으로 서는 덩어리는 판정하지 않는다", () => {
+    expect(alreadyShown(null, [scene])).toBe(false);
+  });
+});
+
+describe("previewLine", () => {
+  it("시점 헤더만 있는 장면은 다음 줄까지 잇는다 — 헤더뿐이면 예순 줄이 다 날짜다", () => {
+    const scene = "[2026-07-01 AM 9:00]\n@: *캐링턴 훈련장 감독실.*\n@스티브 홀랜드: 감독님.";
+    expect(previewLine(scene)).toBe("[2026-07-01 AM 9:00]  @: *캐링턴 훈련장 감독실.*");
+  });
+
+  it("빈 줄은 세지 않는다", () => {
+    expect(previewLine("\n\n  \n첫 마디\n둘째 마디")).toBe("첫 마디  둘째 마디");
+  });
+
+  it("길면 자른다 — 줄 하나로 서는 자리다", () => {
+    expect(previewLine("가".repeat(200), 10)).toBe(`${"가".repeat(10)}…`);
   });
 });
