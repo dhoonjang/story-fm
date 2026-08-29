@@ -84,7 +84,7 @@ describe("retryOnce — 폴백 대신 한 번의 재시도", () => {
  * 것은 프롬프트가 아니라 실패와 산출이 만나는 자리다.
  */
 describe("runMatchIntent — 의도를 받은 뒤의 실패", () => {
-  /** 이 경기의 직전 중계 턴 하나 — 해석기가 `<last_turns>`로 읽는다 (agents.md §3 ②) */
+  /** 이 경기의 지난 중계 턴 하나 — 해석기가 `<match_log>`로 읽는다 (agents.md §3) */
   const emptyState = {
     pendingMatch: undefined,
     chat: [
@@ -147,10 +147,10 @@ describe("runMatchIntent — 의도를 받은 뒤의 실패", () => {
     expect(spy).toHaveBeenCalledTimes(2);
     // 요청에 강제 도구가 실렸는지 — 프롬프트 문장만으로는 이 자리가 비어 있었다
     expect(spy.mock.calls[0]![0].toolChoice).toEqual({ name: "report_intent" });
-    // 직전 중계 턴이 장부 뒤·감독 발화 앞에 선다 — "걔 빼"가 가리킬 대상이 여기 있다
+    // 이 경기의 지난 턴이 장부 뒤·감독 발화 앞에 선다 — "걔 빼"가 가리킬 대상이 여기 있다
     const user = spy.mock.calls[0]![0].user;
-    expect(user).toContain("<last_turns>\n@중계: 브루노가 절뚝이며");
-    expect(user.indexOf("</last_turns>")).toBeLessThan(user.indexOf("@감독: 왼쪽을 두껍게"));
+    expect(user).toContain("<match_log>\n@중계: 브루노가 절뚝이며");
+    expect(user.indexOf("</match_log>")).toBeLessThan(user.indexOf("@감독: 왼쪽을 두껍게"));
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });

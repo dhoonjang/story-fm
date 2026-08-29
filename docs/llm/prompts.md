@@ -375,7 +375,7 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
 
 | 에이전트 | 고정                                     | 레퍼런스                                                                      | 이력              | 이번 턴                                                                                                                                  |
 | -------- | ---------------------------------------- | ----------------------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| 해석     | `MATCH_INTENT_SYSTEM`                    | —                                                                             | —                 | `<ledger>` `<standing>` `<targets>` → `@감독:` (판세는 빠진다 — 분류에 쓰이지 않는다)                                                    |
+| 해석     | `MATCH_INTENT_SYSTEM`                    | —                                                                             | —                 | `<ledger>` `<standing>` `<targets>` → `<match_log>`(이 경기의 턴 전부) → `@감독:` (판세는 빠진다 — 분류에 쓰이지 않는다)                 |
 | 매치 GM  | `MATCH_GM_SYSTEM` + 경기 도구 셋         | `<club name>` `<manager name tag>` + `<characters>`(수석코치) + `<pre_match>` | 이 경기의 중계 턴 | `@감독:` → `<ledger>` `<standing>` `<targets max>` (구간 대본·`<packet>`은 `advance_match`의 도구 결과로 · 손잡이 턴은 대본이 여기 선다) |
 | 마감     | `FINALIZE_MATCH_SYSTEM` + `settle_match` | —                                                                             | —                 | `<commentary>` → `<settlement>`                                                                                                          |
 | 교섭     | `NEGOTIATOR_SYSTEM`                      | `<club name>` `<manager name tag>`(테이블 건너편 — 감독과 그 구단)            | —                 | `<negotiation>` → `<player>` → `<dossier>` → `<characters>` → `<anchor>`                                                                 |
@@ -390,7 +390,7 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
   따른다.
 - 매치 GM은 시스템 프롬프트 + 레퍼런스 + 이 경기의 이력 + 감독 발화 + 장부 노트다.
   구간 대본과 새 패킷은 `advance_match`의 **도구 결과**로 온다 (agents.md §3).
-- 해석기는 장부 뒤에 `<last_turns>`(직전 중계 턴)가 선다. 마감은 `<commentary>`(이
+- 해석기는 장부 뒤에 `<match_log>`(이 경기의 지난 턴 전부)가 선다. 마감은 `<commentary>`(이
   경기의 중계 전부)와 `<settlement>`(기준 평점 표)를 읽는다.
 
 ### 5-2. 무엇이 어디에 사는가
