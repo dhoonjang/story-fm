@@ -7,7 +7,6 @@ import {
 import {
   buildCounterpartyBrief,
   characterEntryOf,
-  counterpartyAnchor,
   formatMoney,
   type CounterpartyAnchor,
   type GameState,
@@ -15,12 +14,11 @@ import {
 import { describeCharacters } from "./gm-input";
 
 /**
- * 교섭 서류 — **우리가 넣은 오퍼에 온 답을 GM이 상대가 되어 판정하는 자리**의 입력
+ * 교섭 서류 — **협상 상대 호출(`negotiation-table.ts`)의 입력**
  * (docs/llm/agents.md §4-1 · docs/simulation/transfer.md §12-1).
  *
- * 코어가 서류와 앵커를 내고, GM이 `rule_offer_response`로 답하며, 코어가 앵커 ± 한도로
- * 자른다. 감독 편으로 기우는 것을 막는 것은 별도 호출이 아니라 그 한도다. 여기 있는
- * 것은 사실을 문장으로 옮기는 것뿐이다 — 지시문은 도구 설명이 갖는다 (prompts.md §5-2).
+ * 코어가 서류와 앵커를 내고, 그 호출이 답하며, 코어가 앵커 ± 한도로 자른다. 여기 있는
+ * 것은 사실을 문장으로 옮기는 것뿐이다 — 지시문은 시스템 프롬프트가 갖는다 (prompts.md §5-2).
  */
 
 const moneyRange = (label: string, anchor: number, room: { min: number; max: number }): string =>
@@ -77,18 +75,10 @@ export function describeAnchor(anchor: CounterpartyAnchor): string {
 }
 
 /**
- * `<counterparty>` 블록 — 답이 도착한 협상 하나의 서류. 이번 턴 층에 선다 (agents.md §5).
- * 답할 자리가 아니면(앵커가 없으면) `null`.
+ * `<counterparty>` 블록 — 협상 하나의 서류. 앵커는 싣지 않는다 — 그것은 대화 뒤에 따로
+ * 선다(`negotiation-table.ts`). 열린 협상이 아니면 `null`.
  */
-export function buildCounterpartyBlock(
-  state: GameState,
-  negotiation: Negotiation,
-  /** 앵커를 함께 실을지 — 테이블은 앵커를 대화 뒤에 따로 세운다 (negotiation-table.ts) */
-  options: { withAnchor?: boolean } = {},
-): string | null {
-  const withAnchor = options.withAnchor ?? true;
-  const anchor = counterpartyAnchor(state, negotiation);
-  if (withAnchor && !anchor) return null;
+export function buildCounterpartyBlock(state: GameState, negotiation: Negotiation): string | null {
   const brief = buildCounterpartyBrief(state, negotiation);
   if (!brief) return null;
   // 데이터 블록은 영어 태그로 싼다 (prompts.md §5) — 서류의 줄 안 레이블은 그대로다
@@ -107,7 +97,6 @@ export function buildCounterpartyBlock(
     ...brief.dossier,
     `</dossier>`,
     ...(cards !== null ? [cards] : []),
-    ...(withAnchor && brief.anchor ? [describeAnchor(brief.anchor)] : []),
     `</counterparty>`,
   ].join("\n");
 }

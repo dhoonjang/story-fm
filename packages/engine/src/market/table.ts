@@ -111,6 +111,34 @@ export function sitAtTable(
   };
 }
 
+/**
+ * 편지 — **마주 앉지 않고 온 답**. 감독이 보낸 오퍼에 답할 날이 됐을 때(`arrivedResponses`)
+ * 코어가 여는 자리다. 감독의 말이 없으므로 `us` 줄 대신 장부 줄이 서고, 답은 같은
+ * 상대(`negotiation-table`)가 같은 서류로 낸다 — 편지와 테이블이 다른 머리로 답하면
+ * 같은 대리인이 자리마다 다른 것을 아는 사람이 된다.
+ */
+export function openLetter(
+  state: GameState,
+  negotiationId: string,
+): { ok: false; message: string } | { ok: true; seat: TableSeat } {
+  const negotiation = state.negotiations.find((n) => n.id === negotiationId);
+  if (!negotiation) return { ok: false, message: `협상 "${negotiationId}"을 찾지 못했습니다` };
+  if (negotiation.status !== "open") {
+    return { ok: false, message: `이미 끝난 협상입니다 (${negotiation.status})` };
+  }
+  const offer = pendingOffer(negotiation);
+  if (!offer || offer.respondsOn === null || offer.respondsOn > state.date) {
+    return { ok: false, message: "답할 날이 된 오퍼가 없습니다" };
+  }
+  const patience = tablePatienceOf(state, negotiation.gamePlayerId);
+  negotiation.table ??= { openedOn: state.date, patience, patienceMax: patience, lines: [] };
+  negotiation.table.lines.push(ledgerLine(state, "감독의 오퍼가 서면으로 왔다 — 마주 앉지 않았다"));
+  return {
+    ok: true,
+    seat: { negotiation, table: negotiation.table, anchor: counterpartyAnchor(state, negotiation) },
+  };
+}
+
 function ledgerLine(state: GameState, text: string): TableLine {
   return { date: state.date, by: "ledger", text };
 }

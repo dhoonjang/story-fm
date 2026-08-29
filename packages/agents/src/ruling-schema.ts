@@ -3,10 +3,9 @@ import { MAX_PAYMENT_YEARS, SQUAD_STATUSES } from "@story-fm/domain";
 import { RENEWAL_YEARS_MAX } from "@story-fm/engine";
 
 /**
- * 교섭 상대의 판정 스키마 — **두 자리가 같은 그릇을 쓴다** (agents.md §4-1).
- * 평시 GM의 `rule_offer_response`와 테이블의 답(`negotiation-table.ts`)이 같은 필드로
- * 판정하므로 여기 한 벌이다. 코어가 앵커 ± 한도로 자르는 것도 같은 함수다
- * (`clampCounterpartyRuling`).
+ * 교섭 상대의 판정 스키마 (agents.md §4-1) — 편지든 테이블이든 같은 호출이 같은 필드로
+ * 판정한다(`negotiation-table.ts`). 코어가 앵커 ± 한도로 자르는 것도 한 함수다
+ * (`clampCounterpartyRuling`). 금액 상한은 도구 인자들이 함께 쓴다 (gm-tools.ts).
  */
 
 /** 이적료·호가의 상한 — 한 건이 이보다 크면 협상이 아니라 오타다 */
@@ -14,9 +13,6 @@ export const MONEY_MAX = 500_000_000;
 /** 주급의 상한 */
 export const WAGE_MAX = 2_000_000;
 export const money = (max: number) => z.number().int().min(0).max(max);
-
-/** 상대가 감독에게 남기는 한 줄의 상한 — 장부와 카드에 그대로 남는다 */
-const COUNTERPARTY_NOTE_MAX = 200;
 
 /**
  * 판정의 필드 — **여기에 이번 협상의 숫자를 적지 않는다.** 도구 정의는 고정층이라
@@ -53,15 +49,3 @@ export const CounterpartyRulingFieldsSchema = z.object({
     .optional()
     .describe("서류에 기한이 적힌 조정에서, 그 기한을 걸 것인가. 비우면 건다"),
 });
-
-/** 평시 GM의 판정 — 서류가 선 협상의 id를 함께 든다 */
-export const CounterpartyRulingSchema = CounterpartyRulingFieldsSchema.extend({
-  negotiationId: z.string().min(1).describe("<counterparty id>의 id 그대로"),
-  note: z
-    .string()
-    .min(1)
-    .max(COUNTERPARTY_NOTE_MAX)
-    .optional()
-    .describe("상대가 감독에게 전하는 한 줄"),
-});
-export type CounterpartyRulingArgs = z.infer<typeof CounterpartyRulingSchema>;

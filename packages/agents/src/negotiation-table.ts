@@ -30,7 +30,7 @@ import { toToolSchema } from "./tool-schema";
 export const NEGOTIATION_TABLE_SYSTEM = `당신은 협상 테이블 건너편의 사람이다 — 감독의 편이 아니다. <counterparty>의 <characters>에 선 인물 중 이 자리에 앉은 사람의 목소리로 말한다: 구단이 답하는 갈래면 그 구단을 대리하는 대리인, 선수가 답하는 갈래면 선수 본인(대리인이 있으면 그가 먼저 말한다).
 
 # 입력
-<counterparty>(이 협상의 서류 — 갈래·양쪽·선수의 사실·오퍼 이력·값의 자·확인된 논거·인물지) · <situation>(주변 상황 — 시계·답하는 구단의 처지·선수의 지금·감독의 구단이 밖에서 보이는 모습·기사) · <table_log>(이 테이블에서 지금까지 오간 말 전부 — 감독의 말, 당신의 답, 장부가 적은 사실) · <anchor>(코어가 박은 자리 — 남은 인내와, 오퍼가 올라 있으면 고를 수 있는 판정과 구간) 뒤에 이번 감독의 말이 @감독: 으로 온다.
+<counterparty>(이 협상의 서류 — 갈래·양쪽·선수의 사실·오퍼 이력·값의 자·확인된 논거·인물지) · <situation>(주변 상황 — 시계·답하는 구단의 처지·선수의 지금·감독의 구단이 밖에서 보이는 모습·기사) · <table_log>(이 테이블에서 지금까지 오간 말 전부 — 감독의 말, 당신의 답, 장부가 적은 사실) · <anchor>(코어가 박은 자리 — 남은 인내와, 오퍼가 올라 있으면 고를 수 있는 판정과 구간) 뒤에 이번 감독의 말이 @감독: 으로 온다. 감독이 마주 앉지 않고 오퍼만 보냈으면 그 자리에 <letter>가 온다 — 서류의 마지막 오퍼에 답한다.
 
 # 어떻게 답하나
 - 서류와 상황에 있는 사실만 근거로 든다. 없는 구단·없는 오퍼·없는 관심을 말하지 않는다 — [경쟁 입찰] 줄이 없으면 다른 구단은 없다.
@@ -71,11 +71,12 @@ function speakerOf(by: "us" | "them" | "ledger", counterpart: string): string {
 }
 
 /**
- * `<table_log>` — 이 테이블의 대화 전부. 마지막 줄은 이번 감독의 말이라 뺀다 —
- * 그것은 `@감독:`으로 따로 선다.
+ * `<table_log>` — 이 테이블의 대화 전부. 마지막 줄이 이번 감독의 말이면 뺀다 —
+ * 그것은 `@감독:`으로 따로 선다. 편지의 마지막 줄은 장부 줄이라 그대로 싣는다.
  */
 export function buildTableLogBlock(seat: TableSeat, counterpart: string): string {
-  const lines = seat.table.lines.slice(0, -1);
+  const all = seat.table.lines;
+  const lines = all[all.length - 1]?.by === "us" ? all.slice(0, -1) : all;
   if (lines.length === 0) return "";
   return [
     `<table_log>`,
@@ -100,9 +101,10 @@ export function buildTableInput(
   state: GameState,
   seat: TableSeat,
   counterpart: string,
-  line: string,
+  /** 감독의 말 — 편지(마주 앉지 않은 오퍼)면 `null` */
+  line: string | null,
 ): string | null {
-  const dossier = buildCounterpartyBlock(state, seat.negotiation, { withAnchor: false });
+  const dossier = buildCounterpartyBlock(state, seat.negotiation);
   if (!dossier) return null;
   const situation = buildSituationBlock(state, seat.negotiation);
   const log = buildTableLogBlock(seat, counterpart);
@@ -112,7 +114,9 @@ export function buildTableInput(
     ...(log.length > 0 ? [log] : []),
     buildTableAnchorBlock(seat),
     ``,
-    `@감독: ${line}`,
+    line === null
+      ? `<letter>감독은 마주 앉지 않았다 — 서류의 마지막 오퍼에 답한다</letter>`
+      : `@감독: ${line}`,
   ].join("\n");
 }
 
@@ -145,7 +149,7 @@ function counterpartNameOf(state: GameState, seat: TableSeat): string {
 export async function runTableReply(
   state: GameState,
   seat: TableSeat,
-  line: string,
+  line: string | null,
   llm?: GameLLM,
 ): Promise<TableReply | null> {
   const counterpart = counterpartNameOf(state, seat);

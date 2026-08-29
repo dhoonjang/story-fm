@@ -30,9 +30,8 @@
 | 온보딩 판정 (`onboarding-judge.ts`) | `onboarding-judge`  | 새 게임의 배경 → **시작 지갑** 한 값                               | 삼키고 **코어 앵커가 남는다** (§4-2)                   |
 
 설정 이름이 곧 `config/llm.yml`의 키이자 계측 장부의 키다 ([models.md](./models.md)).
-`llm.yml`의 항목은 이 여덟과 같다 — 첫 장면은 `gm`의 키를 쓴다. 편지로 온 오퍼의 답은
-별도 키가 아니다 — GM이 서류와 앵커를 읽고 상대가 되어 답하고 코어가 자른다. 마주
-앉은 테이블의 답만 별도 키다 — 상대가 메인 채팅을 읽으면 안 되기 때문이다(§4-1).
+`llm.yml`의 항목은 이 여덟과 같다 — 첫 장면은 `gm`의 키를 쓴다. 협상 상대는 편지든
+테이블이든 `negotiation-table` 하나다 — 상대가 메인 채팅을 읽으면 안 되기 때문이다(§4-1).
 
 라우팅은 `state.phase` 하나다 — `match`면 매치 GM, 아니면 GM이고, 둘 다 호출 하나다.
 `phase`는 **라우팅 전용**이라 모델 입력에는 넣지 않는다.
@@ -60,8 +59,8 @@
 - **전술은 해석기가 옮긴다** — `apply_tactics(orders)`의 핸들러 뒤에서 지시 해석이
   돌고, 걸린 것과 반려된 것이 도구 결과로 온다(§1). 경기 중의 `apply_orders`와 같은
   에이전트·같은 스키마다 — 평시에는 `<match_log>` 대신 스쿼드 뷰와 지난 두 턴이 간다.
-- **우리 오퍼에 온 답은 이 턴에 GM이 상대가 되어 판정한다** — `<counterparty>` 서류와
-  앵커를 읽고 `rule_offer_response`로. 답하지 않으면 코어가 앵커로 마감한다 (§4-1).
+- **우리 오퍼에 온 답은 GM이 판정하지 않는다** — 턴이 열리기 전에 협상 상대 호출이
+  답하고, 그 말이 `<letters>`로 온다. GM은 그것을 장면으로 옮긴다 (§4-1).
 
 - **시계를 옮기는 것은 시점 헤더다** — 코어가 그 선언을 받아
   `applyScenePoint`로 따라가되 경기일·시즌 종료·기한 당일 협상 앞에서 멈춰 세우고, 멈춘
@@ -305,29 +304,27 @@ GM이 도구를 부르지 않은 턴은 구간이 굴러가지 않는다. 대화
 - 심경 인자는 선택이다 — 빠져도 스킬은 성립한다. 사기·관계·정착의 셈은 심경 문장과
   무관하게 코어 표가 끝낸다.
 
-## 4-1. 교섭 — GM이 테이블 건너편이 되어 답하되, 자르는 것은 코어다
+## 4-1. 교섭 — 상대는 한 호출이 연기하고, 자르는 것은 코어다
 
-우리가 넣은 오퍼에 상대가 답하는 자리는 **GM 턴 안**이다. 답이 도착한 협상마다 코어가
-**서류**(`buildCounterpartyBrief` — 갈래·양쪽·선수의 사실·오퍼 이력·확인된 설득 논거·
-인물지)와 **앵커**(`counterpartyAnchor` — 성사 확률·기준 판정·고를 수 있는 판정·부를 수
-있는 구간·기한)를 `<counterparty>` 블록으로 이번 턴 층에 싣고, GM은 `rule_offer_response`
-도구로 **상대가 되어** 답한다. 그 판정은 코어가 잘라 `respondOffer`로 반영한다.
-
-한 모델이 감독의 요구와 상대의 답을 같은 턴에 쓰면 협상이 감독 편으로 기울 수 있다 —
-그 위험을 별도 호출이 아니라 **코어의 한도**가 막는다: 판정은 사다리에서 한 칸, 금액은
-앵커 ±15%, 연수는 ±1년이다. 한 칸 안에서 감독 편으로 기우는 것은 그 자리의 인물이
-사람처럼 구는 폭이고, 그 밖은 서류가 정한 것이다. **들어온 오퍼에 감독이 답하는 자리**는
-그대로 GM이다 — 그 답은 감독의 뜻이지 세계의 판단이 아니다
+우리가 넣은 오퍼에 상대가 답하는 자리는 **GM이 아니다.** 편지든 마주 앉은 테이블이든
+답하는 것은 `negotiation-table` 하나다 — GM은 감독이 한 말을 **전부** 읽는 머리라,
+상대가 되면 감독이 이사회에 한 말까지 아는 사람이 값을 부른다. 코어가 **서류**
+(`buildCounterpartyBrief` — 갈래·양쪽·선수의 사실·오퍼 이력·확인된 설득 논거·인물지)와
+**앵커**(`counterpartyAnchor` — 성사 확률·기준 판정·고를 수 있는 판정·부를 수 있는
+구간·기한)를 내고, 그 호출이 판정하며, 코어가 잘라 `respondOffer`로 반영한다. 한 칸
+안에서 사람처럼 구는 것은 그 인물의 폭이고, 그 밖은 서류가 정한 것이다. **들어온 오퍼에
+감독이 답하는 자리**는 그대로 GM이다 — 그 답은 감독의 뜻이지 세계의 판단이 아니다
 (→ [../simulation/transfer.md](../simulation/transfer.md) §12-1).
 
 ### 언제 답하는가
 
-평시 턴에서, 그날 답이 도착한 협상(`arrivedResponses`)마다 `<counterparty>` 블록이
-선다. GM은 그 턴에 도구로 답하고 장면으로 전한다 — 상대의 말은 서류의 인물지로 쓴다.
-**GM이 답하지 않은 채 턴이 끝나면 코어가 앵커를 그대로 반영한다** — 답이 도착한 자리를
-비워 두면 감독은 다음 턴에도 같은 화면을 보고 기한만 줄어든다. 그 기록은 어느 쪽이든
-`respond_offer`로 남는다(장부가 움직였기 때문이다). 경기 중에는 서지 않는다 — 협상의
-시계는 평시의 것이다.
+- **편지** — 답할 날이 된 협상(`arrivedResponses`)마다 평시 턴이 **열리기 전에**
+  코어가 편지를 열고(`openLetter`) 같은 호출이 답한다. 감독의 말 대신 `<letter>`가 서고,
+  판정은 장부에 반영되며(`respond_offer`로 기록), 상대의 말은 `<letters>`로 이번 턴
+  층에 실려 GM이 장면으로 옮긴다. **호출이 실패하면 코어가 앵커를 그대로 반영한다** —
+  답이 도착한 자리를 비워 두면 감독은 다음 턴에도 같은 화면을 보고 기한만 줄어든다.
+- **테이블** — 감독이 마주 앉아 말을 건네면(`speak_at_table`) 그 자리에서 답한다
+  (아래). 경기 중에는 둘 다 서지 않는다 — 협상의 시계는 평시의 것이다.
 
 ### 앵커 — 코어가 박는 판정
 
@@ -368,26 +365,25 @@ GM이 도구를 부르지 않은 턴은 구간이 굴러가지 않는다. 대화
   기한이 지나면 그 협상은 결렬이다
   (→ [../simulation/transfer.md](../simulation/transfer.md) §12-1).
 
-### 서류 — 이번 턴 층
+### 서류
 
 `<counterparty id>` 안에 `<negotiation>`(갈래·양쪽) · `<player>`(선수의 사실) ·
 `<dossier>`(오퍼 이력·값의 자·확인된 설득 논거·경쟁 입찰) · `<characters>`(그 자리의
-사람들 — 선수 본인과 대리인) · `<anchor>`(확률·기준 판정·고를 수 있는 판정·구간·기한)가
-선다. ⚠️ **고정층에 이번 협상의 숫자를 넣지 않는다** — 도구 정의는 고정층이라 구간도
-앵커도 서류가 싣는다(§5). 감독의 자리에서 쓰인 협상 요약(`describeNegotiation` — `우리`·
-`상대`)을 그대로 넘기지 않는다 — 서류는 양쪽을 이름으로 부른다.
+사람들 — 선수 본인과 대리인)가 서고, `<anchor>`(인내 · 확률·기준 판정·고를 수 있는
+판정·구간·기한)는 대화 뒤에 따로 선다. ⚠️ **고정층에 이번 협상의 숫자를 넣지 않는다**
+— 산출 그릇의 정의는 고정층이라 구간도 앵커도 서류가 싣는다(§5). 감독의 자리에서 쓰인
+협상 요약(`describeNegotiation` — `우리`·`상대`)을 그대로 넘기지 않는다 — 서류는 양쪽을
+이름으로 부른다.
 
-### 테이블 — 마주 앉은 상대는 메인 채팅을 읽지 않는다 (`negotiation-table.ts`)
+### 상대의 입력 — 메인 채팅은 없다 (`negotiation-table.ts`)
 
-편지의 답은 GM이 쓴다. 그런데 GM은 감독이 한 말을 **전부** 읽는다 — 이사회에 "예산은
-넉넉하다"고 한 말까지. 그것을 아는 채로 값을 부르면 흥정이 아니라 감독의 속을 다 본
-사람과의 거래다. 그래서 **마주 앉은 자리**(`speak_at_table` —
-[../simulation/transfer.md](../simulation/transfer.md) §12-2)의 답은 GM의 도구 뒤에서
-**따로 부른다**. 그 호출이 읽는 것은 넷이고 메인 채팅은 없다:
+편지(턴 앞)와 테이블(`speak_at_table` —
+[../simulation/transfer.md](../simulation/transfer.md) §12-2)은 같은 호출이고 같은 입력이다.
+그 호출이 읽는 것은 넷이고 메인 채팅은 없다:
 
 | 블록             | 무엇                                                                                                                                                                                                                   | 바뀌는 때    |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| `<counterparty>` | 이 협상의 서류 — 갈래·양쪽·선수의 사실·오퍼 이력·값의 자·확인된 논거·인물지 (편지의 서류와 같은 함수, 앵커만 뺀다)                                                                                                     | 라운드마다   |
+| `<counterparty>` | 이 협상의 서류 — 갈래·양쪽·선수의 사실·오퍼 이력·값의 자·확인된 논거·인물지                                                                                                                                            | 라운드마다   |
 | `<situation>`    | 주변 상황 — 시계(이적창·기한) · 답하는 구단의 처지(순위·유럽·그 자리의 깊이·재정·무대) · 선수의 지금(시즌 기록·폼·지위·심경·약속·감독과의 관계) · 우리 구단이 밖에서 보이는 모습(순위·유럽·감독 평판·지난 거래) · 기사 | 날마다       |
 | `<table_log>`    | 이 테이블에서 오간 말 전부 — 감독의 말 · 상대의 답 · **장부가 적은 사실**(논거의 참·거짓 · 굳은 판정 · 인내)                                                                                                           | 말 한 줄마다 |
 | `<anchor>`       | 남은 인내와, 오퍼가 올라 있으면 편지와 같은 앵커(판정·구간·기한)                                                                                                                                                       | 오퍼마다     |
@@ -883,11 +879,11 @@ mock에서만 서던 **실패 칩**이 여기서 사라진다: e2e가 실모드�
 
 - **결산의 실패는 게임을 막지 않는다.** 평점 하나 때문에 경기 결과가 되감기거나 시간
   진행이 막히는 편이 더 나쁘다.
-- **협상의 두 자리는 다른 도구다.** 우리 오퍼에 온 답은 GM이 상대가 되어 앵커 ±
-  한도 안에서 판정하고(`rule_offer_response`), 들어온 오퍼에 답하는 것은 감독의 뜻이다
-  (`respond_offer`) (§4-1).
-- **테이블 건너편은 메인 채팅을 읽지 않는다.** 마주 앉은 상대의 입력은 서류·상황·
-  테이블의 대화·앵커뿐이다 — 감독이 다른 데서 한 말이 거기 실리면 협상이 아니다 (§4-1).
+- **GM은 협상 상대가 되지 않는다.** 우리 오퍼에 온 답은 편지든 테이블이든
+  `negotiation-table`이 앵커 ± 한도 안에서 판정하고, 들어온 오퍼에 답하는 것은 감독의
+  뜻이다(`respond_offer`) (§4-1).
+- **협상 상대는 메인 채팅을 읽지 않는다.** 그 입력은 서류·상황·테이블의 대화·앵커뿐이다
+  — 감독이 다른 데서 한 말이 거기 실리면 협상이 아니다 (§4-1).
 - **평시 이력과 경기 이력을 한 배열로 합치지 않는다.** 두 다리(brief·digest)가 유일한
   연결이다.
 - **상태 스냅샷은 저장 이력에 남지 않는다** — 누적되면 지난 날짜·지난 스코어가 이력에
@@ -907,25 +903,25 @@ mock에서만 서던 **실패 칩**이 여기서 사라진다: e2e가 실모드�
 
 ## 코드 위치
 
-| 무엇                                                | 어디                                                                      |
-| --------------------------------------------------- | ------------------------------------------------------------------------- |
-| GM 턴 실행·라우팅·첫 장면                           | `packages/agents/src/gm.ts`                                               |
-| 입력 빌더 (레퍼런스·스냅샷·이력·헤더)               | `packages/agents/src/gm-input.ts`                                         |
-| 이력 압축 판정 (코어 순수 함수)                     | `packages/engine/src/core/history-window.ts`                              |
-| 이력 요약 (LLM)                                     | `packages/agents/src/history-compactor.ts`                                |
-| 서사 아크 판정·제목 검증 (코어)                     | `packages/engine/src/world/arcs.ts`                                       |
-| 매치 GM 프롬프트·경기 도구 셋·구간 대본             | `packages/agents/src/match-gm.ts`                                         |
-| 경기 마감 (결산 도구·마무리 중계)                   | `packages/agents/src/finalize-match.ts`                                   |
-| 훈련 결산                                           | `packages/agents/src/training-rater.ts`                                   |
-| 장부 골격 (`turnFactLines`)                         | `packages/engine/src/core/turn-facts.ts`                                  |
-| 수용성 (코어)                                       | `packages/engine/src/squad/receptivity.ts`                                |
-| 사건 기록 (코어 효과표)                             | `packages/engine/src/skills/index.ts` (`recordIncident`)                  |
-| 교섭 서류·앵커 블록 (GM 도구 `rule_offer_response`) | `packages/agents/src/counterparty-brief.ts` · `gm-tools.ts`               |
-| 온보딩 판정 프롬프트·호출                           | `packages/agents/src/onboarding-judge.ts`                                 |
-| 시작 지갑 앵커·한도 (코어)                          | `packages/engine/src/world/onboarding.ts`                                 |
-| 교섭 앵커·한도 (코어)                               | `packages/engine/src/market/counterparty.ts` · `market/counter-bounds.ts` |
-| 결산 한도·검사 (코어)                               | `packages/engine/src/squad/training-report.ts` · `match/ratings.ts`       |
-| 심경 잔향 검사 (코어)                               | `packages/engine/src/squad/mood.ts` (`applyMoodNotes`)                    |
-| 재시도·앵커 폴백                                    | `packages/agents/src/retry.ts`                                            |
-| mock GM                                             | `packages/agents/src/mock-gm.ts`                                          |
-| 조회 도구 구현                                      | `packages/engine/src/views/lookup.ts`                                     |
+| 무엇                                    | 어디                                                                                        |
+| --------------------------------------- | ------------------------------------------------------------------------------------------- |
+| GM 턴 실행·라우팅·첫 장면               | `packages/agents/src/gm.ts`                                                                 |
+| 입력 빌더 (레퍼런스·스냅샷·이력·헤더)   | `packages/agents/src/gm-input.ts`                                                           |
+| 이력 압축 판정 (코어 순수 함수)         | `packages/engine/src/core/history-window.ts`                                                |
+| 이력 요약 (LLM)                         | `packages/agents/src/history-compactor.ts`                                                  |
+| 서사 아크 판정·제목 검증 (코어)         | `packages/engine/src/world/arcs.ts`                                                         |
+| 매치 GM 프롬프트·경기 도구 셋·구간 대본 | `packages/agents/src/match-gm.ts`                                                           |
+| 경기 마감 (결산 도구·마무리 중계)       | `packages/agents/src/finalize-match.ts`                                                     |
+| 훈련 결산                               | `packages/agents/src/training-rater.ts`                                                     |
+| 장부 골격 (`turnFactLines`)             | `packages/engine/src/core/turn-facts.ts`                                                    |
+| 수용성 (코어)                           | `packages/engine/src/squad/receptivity.ts`                                                  |
+| 사건 기록 (코어 효과표)                 | `packages/engine/src/skills/index.ts` (`recordIncident`)                                    |
+| 교섭 서류·상황·상대의 답 (편지·테이블)  | `packages/agents/src/counterparty-brief.ts` · `table-situation.ts` · `negotiation-table.ts` |
+| 온보딩 판정 프롬프트·호출               | `packages/agents/src/onboarding-judge.ts`                                                   |
+| 시작 지갑 앵커·한도 (코어)              | `packages/engine/src/world/onboarding.ts`                                                   |
+| 교섭 앵커·한도 (코어)                   | `packages/engine/src/market/counterparty.ts` · `market/counter-bounds.ts`                   |
+| 결산 한도·검사 (코어)                   | `packages/engine/src/squad/training-report.ts` · `match/ratings.ts`                         |
+| 심경 잔향 검사 (코어)                   | `packages/engine/src/squad/mood.ts` (`applyMoodNotes`)                                      |
+| 재시도·앵커 폴백                        | `packages/agents/src/retry.ts`                                                              |
+| mock GM                                 | `packages/agents/src/mock-gm.ts`                                                            |
+| 조회 도구 구현                          | `packages/engine/src/views/lookup.ts`                                                       |

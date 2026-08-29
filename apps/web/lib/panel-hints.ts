@@ -91,7 +91,6 @@ export const PANEL_OF: Record<string, PanelKey> = {
 export const CARD_SKILLS: ReadonlySet<string> = new Set([
   "send_offer",
   "respond_offer",
-  "rule_offer_response",
   // 테이블의 답이 오퍼를 판정하면 그 카드가 선다 — 말만 오간 턴은 카드 없이 지나간다
   "speak_at_table",
   "open_renewal",

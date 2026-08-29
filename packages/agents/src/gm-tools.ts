@@ -12,8 +12,6 @@ import {
   applyForManagerJob,
   answerOffer,
   arrivedResponses,
-  counterpartyAnchor,
-  settleCounterparty,
   applyFinanceEvent,
   applyTalkToPlayer,
   applyTeamTalk,
@@ -131,7 +129,7 @@ import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
 import { skillDescriptions } from "./skill-descriptions";
 import { runMatchIntent } from "./match-intent";
 import { runTableReply } from "./negotiation-table";
-import { CounterpartyRulingSchema, MONEY_MAX, WAGE_MAX, money } from "./ruling-schema";
+import { MONEY_MAX, WAGE_MAX, money } from "./ruling-schema";
 import { applyMatchIntent } from "./match-intent-apply";
 import { inputError, toToolSchema } from "./tool-schema";
 import { recordCall, type GmToolCall, type SkillReturn } from "./gm-types";
@@ -1276,29 +1274,6 @@ export function buildSkillTools(
           };
         }
         return answerOffer(state, input);
-      },
-    ),
-    wrap(
-      "rule_offer_response",
-      descriptions.rule_offer_response,
-      CounterpartyRulingSchema,
-      (input) => {
-        /**
-         * 답이 도착한 협상만이다 — 서류(`<counterparty>`)가 선 자리. 코어가 앵커를 박고
-         * 판정을 앵커 ± 한도로 잘라 반영한다 (agents.md §4-1).
-         */
-        const negotiation = arrivedResponses(state).find((n) => n.id === input.negotiationId);
-        if (!negotiation) {
-          return {
-            ok: false,
-            message: "답이 도착한 협상이 아닙니다 — <counterparty> 서류가 선 협상만 답합니다",
-          };
-        }
-        const anchor = counterpartyAnchor(state, negotiation);
-        if (!anchor) return { ok: false, message: "이 협상에는 답할 자리가 없습니다" };
-        const ruling = { ...input };
-        delete (ruling as { negotiationId?: string }).negotiationId;
-        return settleCounterparty(state, anchor, ruling).result;
       },
     ),
     wrap(

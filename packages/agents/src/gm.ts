@@ -32,8 +32,8 @@ import { MAX_REPORT_CARDS, NO_CARDS, takeArrivedReports } from "./report-cards";
 import { reportTraining } from "./training-rater";
 import { buildMatchTools, KICKOFF_BLOCK, MATCH_GM_SYSTEM, type MatchToolContext } from "./match-gm";
 import { finalizeMatchTurn } from "./finalize-match";
-import { buildCounterpartyBlock } from "./counterparty-brief";
-import { counterpartyAnchor, settleCounterparty } from "@story-fm/engine";
+import { runTableReply } from "./negotiation-table";
+import { counterpartOf, openLetter, playerById, settleTableReply } from "@story-fm/engine";
 import { buildOnboardingTurn, runMockGmTurn } from "./mock-gm";
 import { retryOnce, ModelOutputError } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
@@ -219,17 +219,27 @@ export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promis
 }
 
 /**
- * **GM이 답하지 않은 협상은 코어가 앵커로 마감한다** (agents.md §4-1). 답이 도착한
- * 자리를 비워 두면 감독은 다음 턴에도 같은 화면을 보고 기한만 줄어든다. 기록은
- * `respond_offer`로 남는다 — 장부가 움직였기 때문이다.
+ * **편지의 답 — 답할 날이 된 오퍼는 턴이 열리기 전에 상대가 답한다** (agents.md §4-1).
+ * 답하는 것은 테이블과 같은 호출(`negotiation-table`)이고 GM이 아니다 — GM은 감독의
+ * 말을 전부 읽으므로 상대가 되면 감독의 속을 다 본 사람이 된다. 호출이 실패해도 앵커가
+ * 판정이라 답이 도착한 자리가 비지 않는다. 기록은 `respond_offer`로 남고(장부가
+ * 움직였다), 상대의 말은 `<letters>`로 이번 턴 층에 실려 GM이 장면으로 옮긴다.
  */
-function settleUnanswered(state: GameState, calls: GmToolCall[]): void {
+async function answerLetters(state: GameState, calls: GmToolCall[]): Promise<string[]> {
+  const letters: string[] = [];
   for (const negotiation of [...arrivedResponses(state)]) {
-    const anchor = counterpartyAnchor(state, negotiation);
-    if (!anchor) continue;
-    const settled = settleCounterparty(state, anchor);
-    recordCall(calls, "respond_offer", settled.result, { input: settled.input });
+    const opened = openLetter(state, negotiation.id);
+    if (!opened.ok) continue;
+    const player = playerById(state, negotiation.gamePlayerId);
+    const counterpart = player ? counterpartOf(negotiation, player) : "상대";
+    const reply = await runTableReply(state, opened.seat, null);
+    const outcome = settleTableReply(state, opened.seat, reply ?? undefined);
+    recordCall(calls, "respond_offer", outcome, { input: { negotiationId: negotiation.id } });
+    letters.push(
+      `<letter negotiation="${negotiation.id}" from="${counterpart}">\n${outcome.message}\n</letter>`,
+    );
   }
+  return letters;
 }
 
 /** 실모드 — 일상은 GM, 경기 장면은 매치 캐스터 설정으로 라우팅 */
@@ -315,15 +325,8 @@ async function runRealGmTurn(
           .filter((id) => !pendingBeforeSkip.has(id))
       : [],
   );
-  /**
-   * **우리 오퍼에 온 답은 GM이 상대가 되어 판정한다** (agents.md §4-1). 서류와 앵커가
-   * 이번 턴 층에 서고, 도구가 앵커 ± 한도로 자른다. 답하지 않으면 턴 끝에 코어가 마감한다.
-   */
-  const counterpartyBlocks = inMatch
-    ? []
-    : arrivedResponses(state)
-        .map((n) => buildCounterpartyBlock(state, n))
-        .filter((block): block is string => block !== null);
+  // 답할 날이 된 편지는 상대가 먼저 답한다 — 이번 턴의 장면은 그 답 뒤에 선다 (agents.md §4-1)
+  const letters = inMatch ? [] : await answerLetters(state, calls);
   /**
    * **경기 턴** — 매치 GM이 이 경기의 이력을 쥔 채 도구로 판을 움직인다
    * (docs/llm/agents.md §3). 감독의 말은 GM이 읽고, 진행하라는 말에만 `advance_match`를
@@ -383,7 +386,7 @@ async function runRealGmTurn(
           : null,
         carriedCards.reports,
         carriedCards.missions,
-      ) + (counterpartyBlocks.length > 0 ? `\n\n${counterpartyBlocks.join("\n\n")}` : "");
+      ) + (letters.length > 0 ? `\n\n<letters>\n${letters.join("\n")}\n</letters>` : "");
   /**
    * 이번 장면에 설 인물 — **평시만이다.** 경기 중에는 벤치의 코치 한 사람이
    * 레퍼런스에 상주하고(`buildMatchReference`), 중계가 읽을 것은 판이지 인물지가 아니다.
@@ -592,8 +595,6 @@ async function runRealGmTurn(
   for (const brief of pendingTraining) {
     await reportTraining(state, brief);
   }
-  // 답이 도착한 협상에 GM이 답하지 않았으면 코어가 앵커로 마감한다 (agents.md §4-1)
-  if (!inMatch) settleUnanswered(state, calls);
 
   // 마감된 경기는 장부가 지워졌다 — 이 경기의 중계 이력은 더 쓰이지 않는다
   if (inMatch && state.pendingMatch) {
