@@ -16,6 +16,7 @@ type TurnStreamEvent = {
   text?: string;
   payload?: GamePayload;
   error?: string;
+  retry?: boolean;
   detail?: string;
 };
 
@@ -38,8 +39,18 @@ export type TurnStreamBody = {
  * 돌아 저장하므로(turn/stream 라우트), 화면이 기다리기를 멈춘 것과 서버가 실패한 것은
  * 서로 다른 사건이다. 참이면 그 턴은 없었던 일이고, 거짓이면 지시가 이미 반영됐을 수
  * 있어 화면이 서버 상태를 다시 받아야 한다 (models.md §1-1).
+ *
+ * `retry`는 **그대로 다시 보내면 통할 수 있는가**다 — 배너가 「다시 시도」를 세울지
+ * 정한다. 서버가 실패의 종류를 알므로 그쪽이 적어 보내고, 적혀 오지 않은 길(연결이
+ * 끊겼거나 우리가 기다리기를 멈춘 길)은 **참으로 둔다**: 모를 때 버튼을 지우면 통할
+ * 턴을 막는다 (models.md §1-1).
  */
-export type TurnStreamFailure = { reason: string; detail?: string; settled: boolean };
+export type TurnStreamFailure = {
+  reason: string;
+  detail?: string;
+  settled: boolean;
+  retry: boolean;
+};
 
 export type TurnStreamHandlers = {
   /** 글자가 왔다 — 화면의 공개 펌프가 받는다 */
@@ -103,12 +114,17 @@ export async function streamTurn(
       signal: abort.signal,
     });
     if (!res.ok || !res.body) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        retry?: boolean;
+        detail?: string;
+      };
       // 라우트가 턴을 돌리기 전에 반려했다 — 저장된 것이 없다
       return {
         reason: data.error ?? "턴을 처리하지 못했습니다",
         detail: data.detail,
         settled: true,
+        retry: data.retry !== false,
       };
     }
     const reader = res.body.getReader();
@@ -149,6 +165,7 @@ export async function streamTurn(
             reason: evt.error ?? "턴을 처리하지 못했습니다",
             detail: evt.detail,
             settled: true,
+            retry: evt.retry !== false,
           };
           closed = true;
           stopWatch();
@@ -164,6 +181,7 @@ export async function streamTurn(
         reason: TURN_TIMEOUT_MESSAGE,
         detail: "스트림이 done 없이 끊겼습니다",
         settled: false,
+        retry: true,
       };
     return failure;
   } catch (e) {
@@ -175,6 +193,7 @@ export async function streamTurn(
       reason: abort.signal.aborted ? TURN_TIMEOUT_MESSAGE : "서버에 연결하지 못했습니다",
       detail: e instanceof Error ? e.message : String(e),
       settled: false,
+      retry: true,
     };
   } finally {
     stopWatch();

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TurnOperationSchema } from "@story-fm/agents";
 import { llmErrorKind } from "@story-fm/llm";
-import { errorDetail, runTurnLocked, turnErrorMessage } from "@/lib/turn-runner";
+import { errorDetail, runTurnLocked, turnErrorMessage, turnErrorRetry } from "@/lib/turn-runner";
 import { invalidGameId } from "@/app/api/games/game-id";
 
 const TurnSchema = z
@@ -73,7 +73,8 @@ const HEARTBEAT_MS = 10_000;
  *   {"type":"delta","text":"..."}  서사 텍스트 조각
  *   {"type":"ping"}                아직 살아 있다 — 도구만 도는 구간의 침묵을 메운다
  *   {"type":"done","payload":{...}} 최종 게임 페이로드
- *   {"type":"error","error":"...","detail":"..."} 실패 — 채팅에 아무것도 남지 않는다
+ *   {"type":"error","error":"...","retry":false,"detail":"..."} 실패 — 채팅에 남지 않는다
+ * `retry`는 이 턴을 그대로 다시 보내면 통할 수 있는가다 — 배너의 「다시 시도」가 읽는다.
  * 잠금·원자성은 runTurnLocked가 담당.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -138,14 +139,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           send({
             type: "error",
             error: outcome.error,
+            retry: outcome.retry,
             ...(outcome.detail ? { detail: outcome.detail } : {}),
           });
       } catch (error) {
         // 내부 예외 원문은 화면으로 가지 않는다 — 종류가 고른 한 줄만 간다
         console.error(`[turn] 스트림이 실패했습니다 (game=${id}):`, error);
+        const kind = llmErrorKind(error);
         send({
           type: "error",
-          error: turnErrorMessage(llmErrorKind(error)),
+          error: turnErrorMessage(kind),
+          retry: turnErrorRetry(kind),
           ...errorDetail(error),
         });
       } finally {

@@ -12,8 +12,12 @@
 import type { StopReason } from "./game-llm";
 
 /**
- * `unknown`은 실패가 아니라 **분류하지 못했다**는 뜻이다 — 400·404·연결 오류가 여기
- * 온다. 새 종류를 세우는 것은 화면이 그 종류에 다른 말을 해야 할 때뿐이다.
+ * `unknown`은 실패가 아니라 **분류하지 못했다**는 뜻이다 — 연결 오류와 표에 없는
+ * 상태가 여기 온다. 새 종류를 세우는 것은 화면이 그 종류에 다른 말을 해야 할 때뿐이다.
+ *
+ * `invalid_request`가 그 자리였다: 400·404는 다시 불러도 같은 답이라 화면이 할 말이
+ * "잠시 뒤 다시"가 아니라 "요청이나 설정이 틀렸다"이고, 배너에 「다시 시도」를 세우면
+ * 없는 길을 가리킨다 (models.md §1-1).
  */
 export const LLM_ERROR_KINDS = [
   "overloaded",
@@ -22,6 +26,7 @@ export const LLM_ERROR_KINDS = [
   "auth",
   "filtered",
   "budget",
+  "invalid_request",
   "unknown",
 ] as const;
 
@@ -52,11 +57,17 @@ export function llmErrorKind(error: unknown): LlmErrorKind {
 /**
  * HTTP 상태 하나가 종류 하나로 — **제공자 셋이 이 표를 함께 쓴다**.
  *
- * 코드 배정은 셋이 같다(현행 레퍼런스 기준): 401·403 인증/권한, 429 한도, 503 혼잡,
- * 408·504 시한. Anthropic만 혼잡에 529를 따로 쓴다.
+ * 코드 배정은 셋이 같다(현행 레퍼런스 기준): 400·404 잘못된 요청, 401·403 인증/권한,
+ * 429 한도, 503 혼잡, 408·504 시한. Anthropic만 혼잡에 529를 따로 쓴다.
+ *
+ * ⚠️ **5xx는 이름을 받은 둘(503·529·504)뿐이고 나머지는 `unknown`이다.** 500을
+ * `invalid_request`로 보내면 다시 부를 만한 실패에 "요청이 틀렸다"가 붙는다.
  */
 export function kindOfStatus(status: number | undefined): LlmErrorKind {
   switch (status) {
+    case 400:
+    case 404:
+      return "invalid_request";
     case 401:
     case 403:
       return "auth";
@@ -80,9 +91,9 @@ export function kindOfStatus(status: number | undefined): LlmErrorKind {
  * 충돌, 429 한도, 그리고 5xx 전부. 그 둘은 SDK가 알아서 하므로 이 함수를 부르는 것은
  * 재시도를 손으로 도는 Gemini 어댑터뿐이다.
  *
- * ⚠️ **`LlmErrorKind`로 판정하지 않는다.** 종류는 화면이 문구를 고르는 눈금이라
- * 400·404·연결 오류가 다 `unknown`으로 모이는데, 재시도는 그 안에서 갈라야 한다 —
- * 5xx는 다시 부를 만하고 404는 몇 번을 불러도 404다.
+ * ⚠️ **`LlmErrorKind`로 판정하지 않는다.** 종류는 화면이 무엇을 말할지 재는 눈금이라
+ * 다시 부를 만한 500과 연결 오류가 함께 `unknown`으로 모이는데, 재시도는 그 안에서
+ * 갈라야 한다 — 5xx는 다시 부를 만하고 연결 오류도 그렇다.
  */
 export function isRetryableStatus(status: number | undefined): boolean {
   if (status === undefined) return false;
