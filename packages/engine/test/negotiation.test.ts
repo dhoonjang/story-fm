@@ -13,6 +13,7 @@ import {
   arrivedResponses,
   COUNTERPARTY_ACCEPT_AT,
   COUNTERPARTY_COUNTER_AT,
+  COUNTERPARTY_HOPELESS_AT,
   clampCounterpartyRuling,
   counterpartyAnchor,
   settleCounterparty,
@@ -2576,6 +2577,69 @@ describe("협상 상대의 앵커와 한도", () => {
     expect(clampCounterpartyRuling(rejected, { verdict: "accept" }).verdict).toBe("reject");
     // 한 칸 안이면 그대로 선다
     expect(clampCounterpartyRuling(rejected, { verdict: "counter" }).verdict).toBe("counter");
+  });
+
+  /**
+   * 확률이 이 구간에 드는 오퍼 하나 — **부른 값이 아니라 확률로 고른다.**
+   *
+   * 같은 로볼도 판마다 다른 확률을 낸다(상대 사정·대리인의 원형). 호가의 몇 %를
+   * 못 박으면 시드가 움직이는 날 재려던 구간이 아닌 곳을 재게 되고, 앵커가 확률
+   * 하나에서 나온다는 규약도 케이스에서만 깨진다 (transfer.md §12-1).
+   */
+  function arrivedWithin(state: GameState, within: (probability: number) => boolean): Negotiation {
+    const player = target(state);
+    const found = Array.from({ length: 24 }, (_, i) =>
+      offerFor(state, player.id, (i + 1) / 20),
+    ).find((offer) => within(dealOdds(state, offer).probability));
+    if (!found) throw new Error("그 확률 구간에 드는 오퍼를 찾지 못했습니다");
+    const sent = sendOffer(state, found);
+    expect(sent.ok, sent.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    pendingOffer(negotiation)!.respondsOn = state.date;
+    return negotiation;
+  }
+
+  /**
+   * **협상이 닫히는 길은 인내 하나가 아니다** (transfer.md §12-1 「사다리의 바닥」).
+   *
+   * 사다리가 ±한 칸이라 결렬의 이웃은 조정뿐이고, 테이블 호출은 언제나 그 이웃으로
+   * 내려왔다 — 코어의 결렬이 실제 판정으로 설 길이 없었다. 여기서 못 박는 것은 모델이
+   * 무엇을 답하든 **바닥 아래에서는 코어의 판정이 선다**는 것이다.
+   */
+  it("가망 없는 로볼에는 되부를 칸이 없다 — 감독의 말투와 무관하게 닫힌다", () => {
+    const state = createTestGame();
+    state.date = "2026-08-01";
+    const n = arrivedWithin(state, (p) => p < COUNTERPARTY_HOPELESS_AT);
+    const anchor = counterpartyAnchor(state, n)!;
+    expect(anchor.verdict).toBe("reject");
+    expect(anchor.allowed).toEqual(["reject"]);
+    // 고를 수 없는 판정의 값·폭·기한은 서류에 실리지 않는다
+    expect(anchor.fee).toBeUndefined();
+    expect(anchor.feeRoom).toBeUndefined();
+    expect(anchor.ultimatumOn).toBeUndefined();
+    expect(anchor.splittable).toBe(false);
+    // 모델이 되불러도 앵커가 선다
+    const settled = settleCounterparty(state, anchor, { verdict: "counter", fee: 10 ** 9 });
+    expect(settled.result.ok, settled.result.message).toBe(true);
+    expect(settled.input.verdict).toBe("reject");
+    expect(n.status).toBe("rejected");
+  });
+
+  it("바닥과 조정 문턱 사이는 열려 있다 — 아슬아슬한 오퍼 하나로 문이 닫히지 않는다", () => {
+    const state = createTestGame();
+    state.date = "2026-08-01";
+    const n = arrivedWithin(
+      state,
+      (p) => p >= COUNTERPARTY_HOPELESS_AT && p < COUNTERPARTY_COUNTER_AT,
+    );
+    const anchor = counterpartyAnchor(state, n)!;
+    // 앵커는 결렬이지만 한 칸이 열려 있다 — 상대가 정가를 되부를 수 있다
+    expect(anchor.verdict).toBe("reject");
+    expect(anchor.allowed).toContain("counter");
+    const settled = settleCounterparty(state, anchor, { verdict: "counter" });
+    expect(settled.result.ok, settled.result.message).toBe(true);
+    expect(settled.input.verdict).toBe("counter");
+    expect(n.status).toBe("open");
   });
 
   it("금액은 앵커 ±15% 안으로 잘리고, 인자가 없으면 앵커가 선다", () => {
