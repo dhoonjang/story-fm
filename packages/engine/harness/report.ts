@@ -49,14 +49,15 @@ const MARK: Record<Band["role"], [string, string]> = {
 };
 
 function tableOf(line: ReadingLine): string {
+  const head = [`### \`${line.id}\` — ${line.what}`, "", `${line.label}  ·  근거: ${line.doc}`];
+  // 건너뛴 하네스는 측정값이 없다 — 빈 표 대신 왜 건너뛰었는지 한 줄이 선다 (§5)
+  if (line.skipped) return [...head, "", "⏭️ 건너뜀 — 측정값이 없다"].join("\n");
   const rows = (line.bands as readonly ReportedBand[]).map((band) => {
     const range = band.min === undefined && band.max === undefined ? "—" : rangeOf(band);
     return `| ${band.metric} | ${measuredOf(band)} | ${range} | ${band.role} | ${MARK[band.role][band.outside ? 1 : 0]} |`;
   });
   return [
-    `### \`${line.id}\` — ${line.what}`,
-    "",
-    `${line.label}  ·  근거: ${line.doc}`,
+    ...head,
     "",
     "| 지표 | 측정 | 구간 | 역할 | |",
     "| --- | --- | --- | --- | --- |",
@@ -86,6 +87,7 @@ export function breachesOf(lines: readonly ReadingLine[], expectAll: boolean): B
     }
   }
   if (!expectAll) return breaches;
+  // 건너뛴 줄도 보고한 줄이다 — 돌 조건이 없어 재지 못한 것은 터진 것이 아니다 (§5)
   const reported = new Set(lines.map((line) => line.id));
   for (const harness of HARNESSES) {
     if (reported.has(harness.id)) continue;
@@ -103,7 +105,11 @@ export function breachesOf(lines: readonly ReadingLine[], expectAll: boolean): B
 }
 
 export function summaryOf(lines: readonly ReadingLine[], breaches: readonly Breach[]): string {
-  const counted = `하네스 ${lines.length}/${HARNESSES.length}개가 보고했다`;
+  // 건너뛴 것은 보고한 것이다 — 분자에는 들되 「몇 개가 실제로 쟀는가」는 갈라 적는다 (§5)
+  const skipped = lines.filter((line) => line.skipped).length;
+  const counted =
+    `하네스 ${lines.length}/${HARNESSES.length}개가 보고했다` +
+    (skipped > 0 ? ` (건너뜀 ${skipped})` : "");
   const head =
     breaches.length === 0
       ? `✅ 밴드 이탈 없음 — ${counted}.`

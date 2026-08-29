@@ -71,7 +71,8 @@ export const MARKET_OPS: readonly string[] = [
   "apply_manager_job",
 ];
 
-const SPEC: OpsAgentSpec = {
+/** 이 해석기의 한 벌 — 강제 선언 목록(`forcedTools`)도 이것을 읽는다 */
+export const MARKET_ORDERS_SPEC: OpsAgentSpec = {
   agent: "market-orders",
   tool: "report_market_orders",
   system: MARKET_ORDERS_SYSTEM,
@@ -117,5 +118,5 @@ export async function runMarketOrders(
   llm?: GameLLM,
 ): Promise<{ ok: true; orders: MarketOrders } | { ok: false; message: string }> {
   const user = [...buildMarketContext(state), ``, `@감독: ${message}`].join("\n");
-  return runOpsOrders(SPEC, specs, user, llm);
+  return runOpsOrders(MARKET_ORDERS_SPEC, specs, user, llm);
 }

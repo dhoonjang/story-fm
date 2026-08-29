@@ -13,7 +13,14 @@ import { playerById, playersOf, pushNarrative, type GameState } from "../core/st
 
 /** 한 게임이 갖는 시작 사건의 상한 — 셋이면 첫 주가 붐비고 넷이면 흩어진다 */
 export const MAX_OPENINGS = 3;
-/** 시작 사건이 살아 있는 날수 — 프리시즌과 개막 몇 경기 */
+/**
+ * 아무도 손대지 않은 시작 사건이 만료되는 날수 — **프리시즌 한 구간이다.**
+ *
+ * 부임은 언제나 7월 1일이고(`buildSeasonCalendar`) 개막 라운드는 8월 중순에 서므로,
+ * 45일이 닫는 자리는 개막 언저리다 — 창 안에 드는 것은 친선 넷이고 리그 경기는 팀에
+ * 따라 들어오지 않거나 많아야 하나다. 실마리는 공이 구르기 전의 몇 주를 이끌고, 시즌이
+ * 열리면 그 뒤는 장부의 아크가 잇는다.
+ */
 export const OPENING_DAYS = 45;
 
 export interface OpeningDraft {

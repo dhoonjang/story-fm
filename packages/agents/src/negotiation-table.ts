@@ -47,7 +47,9 @@ export const NEGOTIATION_TABLE_SYSTEM = `당신은 협상 테이블 건너편의
 - line — 상대의 말. 그 인물의 말투로, 2~5문장. ruling에 적은 수치와 어긋나지 않게. 지문은 *별표*로.`;
 
 /** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 */
-const REPLY_TOOL = "reply_at_table";
+export const REPLY_TOOL = "reply_at_table";
+
+export const REPLY_DESCRIPTION = "상대의 답을 제출한다. 이 도구로만 답한다.";
 
 export const TableReplySchema = z.object({
   heard: z.object({
@@ -64,6 +66,8 @@ export const TableReplySchema = z.object({
   line: z.string().min(1).max(TABLE_LINE_MAX).describe("상대의 말 — 그 사람의 목소리로"),
 });
 export type TableReplyArgs = z.infer<typeof TableReplySchema>;
+
+export const REPLY_INPUT = toToolSchema(TableReplySchema);
 
 /** 테이블 한 줄의 화자 — 감독·상대·장부 */
 function speakerOf(by: "us" | "them" | "ledger", counterpart: string): string {
@@ -123,8 +127,8 @@ export function buildTableInput(
 function makeReplyTool(onReply: (reply: TableReplyArgs) => void): GameToolSpec {
   return {
     name: REPLY_TOOL,
-    description: "상대의 답을 제출한다. 이 도구로만 답한다.",
-    inputSchema: toToolSchema(TableReplySchema),
+    description: REPLY_DESCRIPTION,
+    inputSchema: REPLY_INPUT,
     handle: (input: unknown) => {
       const parsed = TableReplySchema.safeParse(input);
       if (!parsed.success) {

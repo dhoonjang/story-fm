@@ -110,6 +110,9 @@ type ReportInput = z.infer<typeof ReportInputSchema>;
 /** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
 export const REPORT_ONBOARDING_TOOL = "report_onboarding";
 
+export const REPORT_ONBOARDING_DESCRIPTION =
+  "이 감독의 시작 자산·능력치의 결·시작 사건을 제출한다. 폭을 벗어난 값은 코어가 잘라낸다.";
+
 /** 모델이 보는 입력 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
 export const REPORT_ONBOARDING_INPUT = toToolSchema(ReportInputSchema);
 
@@ -176,8 +179,7 @@ export function buildOnboardingJudgePrompt(
 function makeReportTool(onReport: (report: ReportInput) => void): GameToolSpec {
   return {
     name: REPORT_ONBOARDING_TOOL,
-    description:
-      "이 감독의 시작 자산·능력치의 결·시작 사건을 제출한다. 폭을 벗어난 값은 코어가 잘라낸다.",
+    description: REPORT_ONBOARDING_DESCRIPTION,
     inputSchema: REPORT_ONBOARDING_INPUT,
     handle: (input: unknown) => {
       const parsed = ReportInputSchema.safeParse(input);

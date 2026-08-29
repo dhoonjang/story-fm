@@ -46,7 +46,8 @@ export const TRAINING_OPS: readonly string[] = [
   "set_training",
 ];
 
-const SPEC: OpsAgentSpec = {
+/** 이 해석기의 한 벌 — 강제 선언 목록(`forcedTools`)도 이것을 읽는다 */
+export const TRAINING_ORDERS_SPEC: OpsAgentSpec = {
   agent: "training-orders",
   tool: "report_training_orders",
   system: TRAINING_ORDERS_SYSTEM,
@@ -110,5 +111,5 @@ export async function runTrainingOrders(
   llm?: GameLLM,
 ): Promise<{ ok: true; orders: TrainingOrders } | { ok: false; message: string }> {
   const user = [...buildTrainingContext(state, schedule), ``, `@감독: ${message}`].join("\n");
-  return runOpsOrders(SPEC, specs, user, llm);
+  return runOpsOrders(TRAINING_ORDERS_SPEC, specs, user, llm);
 }
