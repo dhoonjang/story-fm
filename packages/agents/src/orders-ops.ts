@@ -46,7 +46,20 @@ export type OpsInput = Record<string, unknown[]>;
  */
 export type OpsCaps = Readonly<Record<string, number>>;
 
-/** `ops`의 JSON 스키마 — 호출 이름마다 그 도구의 입력 스키마를 배열로 */
+/**
+ * `ops`의 JSON 스키마 — 호출 이름마다 그 도구의 입력 스키마를 배열로.
+ *
+ * ⚠️ **상한은 `maxItems`가 아니라 설명 문장으로 간다** (models.md §3-2). 해석기는
+ * 강제 도구로 부르는데(`toolChoice`), Gemini는 그 모드에서 스키마를 **펼쳐** 디코딩
+ * 문법을 만든다 — `maxItems: n`은 항목 스키마를 n벌 복제한 문법이 되어, 명령 열셋에
+ * 4를 걸면 문법이 한도를 넘어 요청 전체가 400 `INVALID_ARGUMENT`으로 떨어진다.
+ * 오류 본문은 `Request contains an invalid argument.` 한 줄뿐이라 어느 칸이 문제인지
+ * 말하지 않고, §1-1의 표에서 `unknown`이라 화면에는 "응답을 받지 못해"만 선다.
+ *
+ * 상한 자체는 `caps`(`TACTIC_CAPS`)가 여전히 한 벌로 쥐고, 지키는 것은 `parseOps`다 —
+ * 모델은 문장으로 알고 코어가 잘라 낸다. 스키마에 못 적는 제약은 이 자리가 처음이
+ * 아니다(`.nullable()`·`.default()` — tool-schema.ts).
+ */
 export function buildOpsSchema(
   specs: ReadonlyMap<string, GameToolSpec>,
   names: readonly string[],
@@ -60,8 +73,7 @@ export function buildOpsSchema(
     properties[name] = {
       type: "array",
       items: spec.inputSchema,
-      maxItems: caps[name] ?? OPS_PER_COMMAND,
-      description: spec.description,
+      description: `${spec.description} 최대 ${caps[name] ?? OPS_PER_COMMAND}건.`,
     };
   }
   return { type: "object", properties, description };

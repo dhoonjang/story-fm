@@ -9,6 +9,7 @@ import {
   TACTIC_OPS,
   TRAINING_OPS,
   buildOpsSchema,
+  parseOps,
   TACTIC_ORDERS_SYSTEM,
   REPORT_DIGEST_INPUT,
   REPORT_DIGEST_TOOL,
@@ -338,19 +339,30 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
     ] as const) {
       const ops = buildOpsSchema(specs, list, "인자", caps).properties as Record<
         string,
-        { items?: unknown; maxItems?: number }
+        { items?: unknown; maxItems?: number; description?: string }
       >;
       for (const name of list) {
         // 이름이 어긋나면 그 자리가 스키마에서 조용히 사라져 모델이 부를 길을 잃는다
         expect(specs.has(name), `${label}: ${name}`).toBe(true);
         expect(ops[name]?.items, `${label}: ${name}`).toBe(specs.get(name)!.inputSchema);
+        /**
+         * ⚠️ **상한은 `maxItems`로 가지 않는다** (models.md §3-2). 해석기는 강제 도구로
+         * 부르는데 Gemini는 그 모드에서 `maxItems: n`을 항목 스키마 n벌로 펼쳐 디코딩
+         * 문법을 만들고, 명령 열셋이면 그 문법이 한도를 넘어 요청이 통째로 400이 된다.
+         */
+        expect(ops[name]?.maxItems, `${label}: ${name}`).toBeUndefined();
       }
     }
+    // 상한은 한 벌(`TACTIC_CAPS`)이고, 모델에는 문장으로 가고 코어(`parseOps`)가 자른다
     const tactic = buildOpsSchema(specs, TACTIC_OPS, "판", TACTIC_CAPS).properties as Record<
       string,
-      { maxItems?: number }
+      { description?: string }
     >;
-    expect(tactic.substitute?.maxItems).toBe(TACTIC_CAPS.substitute);
+    expect(tactic.substitute?.description).toContain(`최대 ${TACTIC_CAPS.substitute}건`);
+    const over = Array.from({ length: TACTIC_CAPS.substitute! + 2 }, () => ({}));
+    expect(parseOps({ substitute: over }, TACTIC_OPS, TACTIC_CAPS).substitute).toHaveLength(
+      TACTIC_CAPS.substitute!,
+    );
   });
 
   /**
