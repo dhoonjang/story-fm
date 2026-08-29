@@ -77,6 +77,7 @@ import {
   setTransferList,
   suggestTerms,
   teamName,
+  teamNameIn,
   tickInterests,
   transferRequestOf,
   unilateralSeveranceOf,
@@ -283,6 +284,35 @@ describe("오퍼", () => {
 
     const ours = playersOf(state, state.userTeamId)[0]!;
     expect(sendOffer(state, offerFor(state, ours.id)).ok).toBe(false);
+  });
+});
+
+/**
+ * **감독은 카탈로그 id를 모른다** (transfer.md §1). 해석기에 실리는 상대 구단은
+ * 「첼시」이고, 그것을 조회만 풀면 같은 말이 조회에서는 닿고 명령에서는 말없이
+ * 반려된다 — 감독은 자기 매각이 왜 안 나갔는지 읽을 데가 없다.
+ */
+describe("상대 구단은 이름으로 닿는다", () => {
+  it("팀 이름으로 부른 매각 오퍼가 그 구단에 선다", () => {
+    const state = createTestGame(42);
+    const ours = [...playersOf(state, state.userTeamId)].sort(
+      (a, b) => a.attributes.overall - b.attributes.overall,
+    )[0]!;
+    const buyerId = state.players.find((p) => p.teamId !== state.userTeamId)!.teamId;
+    const fee = Math.round(marketValueOf(state, ours));
+
+    const missing = offerPlayerOut(state, { playerId: ours.id, teamId: "없는구단", fee });
+    expect(missing.ok).toBe(false);
+    expect(missing.message).toContain("찾지 못했습니다");
+    expect(openNegotiationFor(state, ours.id)).toBeNull();
+
+    const byName = offerPlayerOut(state, {
+      playerId: ours.id,
+      teamId: teamNameIn(state, buyerId),
+      fee,
+    });
+    expect(byName.ok, byName.message).toBe(true);
+    expect(openNegotiationFor(state, ours.id)!.counterpartTeamId).toBe(buyerId);
   });
 });
 

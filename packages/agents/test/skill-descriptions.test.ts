@@ -23,8 +23,10 @@ import {
   SETTLE_MATCH_DESCRIPTION,
   SETTLE_MATCH_INPUT,
   SETTLE_MATCH_TOOL,
+  ONBOARDING_JUDGE_SYSTEM,
   SKILL_CATALOG,
   SKILL_NAMES,
+  TableReplySchema,
   TRAINING_RATER_SYSTEM,
   agingDeclineLine,
   buildGmTools,
@@ -39,6 +41,11 @@ import {
   AXIS_KO,
   INCIDENT_KIND_KO,
   INCIDENT_KINDS,
+  OPENING_KIND_KO,
+  OPENING_KINDS,
+  PITCH_CLAIM_KINDS,
+  PITCH_CLAIM_KO,
+  PITCH_CLAIM_MEANING,
   SET_PIECE_ROUTINE_AXES,
   SET_PIECE_ROUTINE_NEUTRAL,
   TACTIC_TOGGLES,
@@ -195,17 +202,56 @@ describe("규칙이 사는 자리", () => {
   });
 
   /**
-   * 사건의 갈래는 효과의 모양이고 그 낱말표는 코어의 것이다 (people.md §6). 설명이
-   * 손으로 적으면 갈래가 늘어도 모델은 옛 표를 믿고, 표에 없는 갈래는 부를 길이 없다 —
-   * 세트피스 낱말표와 같은 결이다.
+   * **코어가 갈래표를 들면 그 표가 모델에게 닿아야 한다** (prompts.md §2).
+   *
+   * 열거가 내는 것은 토큰뿐이고 `toToolSchema`는 JSDoc을 싣지 않는다 — 뜻이 주석에만
+   * 있으면 모델은 **뜻 없는 낱말 열**을 받고, 잘못 고른 갈래를 코어가 사실 대조해 조용히
+   * 벌한다. 설득 논거가 그 자리였다: 감독이 자기 오퍼를 두고 한 "정말 마지막입니다"가
+   * 그 **선수**의 사정을 뜻하는 `last_chance`로 옮겨져 거짓이 되고 인내가 깎였다.
+   *
+   * 뜻이 서는 자리는 셋 중 하나다 — 그 도구의 설명 · 그 인자의 `description` · 그 호출의
+   * 시스템 프롬프트. 어디에 서든 **낱말은 코어의 표에서 와야 한다**: 손으로 적으면 갈래가
+   * 늘어도 모델은 옛 표를 믿고, 표에 없는 갈래는 부를 길이 없다.
    */
-  it("사건 기록의 설명은 코어 갈래표의 낱말을 전부 싣는다", () => {
-    const incident = TOOLS.find((t) => t.name === "record_incident")!;
-    const kinds = (incident.inputSchema.properties?.kind as { enum?: string[] }).enum ?? [];
-    expect([...kinds].sort()).toEqual([...INCIDENT_KINDS].sort());
-    for (const kind of INCIDENT_KINDS) {
-      expect(incident.description, kind).toContain(kind);
-      expect(incident.description, kind).toContain(INCIDENT_KIND_KO[kind]);
+  it("코어가 갈래표를 든 열거는 그 표가 모델에게 닿는다", () => {
+    const reply = { name: "reply_at_table", inputSchema: toToolSchema(TableReplySchema) };
+    const rows = [
+      {
+        where: "record_incident.kind",
+        node: enumArg(TOOLS, "record_incident", "kind"),
+        kinds: INCIDENT_KINDS as readonly string[],
+        tables: [INCIDENT_KIND_KO as Record<string, string>],
+        reads: TOOLS.find((t) => t.name === "record_incident")!.description,
+      },
+      {
+        where: "report_onboarding.openings[].kind",
+        node: enumArg(RATER_TOOLS, REPORT_ONBOARDING_TOOL, "kind"),
+        kinds: OPENING_KINDS as readonly string[],
+        tables: [OPENING_KIND_KO as Record<string, string>],
+        reads: ONBOARDING_JUDGE_SYSTEM,
+      },
+      {
+        where: "reply_at_table.heard.claims[].kind",
+        node: enumArg([reply], reply.name, "kind"),
+        kinds: PITCH_CLAIM_KINDS as readonly string[],
+        /**
+         * 여기만 표가 둘이다. 낱말은 장부 줄이 쓰는 것과 같아야 하고(다음 답을 쓰는
+         * 모델이 `<table_log>`에서 그 낱말을 다시 읽는다), **뜻**은 갈래를 가르는
+         * 문장이라 낱말만으로는 「마지막 기회」가 누구의 것인지 서지 않는다.
+         */
+        tables: [PITCH_CLAIM_KO, PITCH_CLAIM_MEANING] as Array<Record<string, string>>,
+        reads: "",
+      },
+    ];
+    for (const row of rows) {
+      expect([...(row.node.enum ?? [])].sort(), row.where).toEqual([...row.kinds].sort());
+      const read = `${row.reads}\n${row.node.description ?? ""}`;
+      for (const kind of row.kinds) {
+        expect(read, `${row.where}: ${kind}`).toContain(kind);
+        for (const table of row.tables) {
+          expect(read, `${row.where}: ${kind}`).toContain(table[kind]);
+        }
+      }
     }
   });
 });
@@ -447,6 +493,17 @@ function walk(node: unknown, name = ""): Array<[string, Record<string, unknown>]
   return found;
 }
 
+/** 모델이 받는 열거 노드 하나 — `walk`가 붙인 이름으로 찾는다 (배열 안쪽의 `kind`도 `kind`다) */
+function enumArg(
+  tools: ReadonlyArray<{ name: string; inputSchema: unknown }>,
+  tool: string,
+  arg: string,
+): { enum?: unknown[]; description?: string } {
+  const found = tools.find((t) => t.name === tool)!;
+  const [, node] = walk(found.inputSchema).find(([name]) => name === arg)!;
+  return node as { enum?: unknown[]; description?: string };
+}
+
 /**
  * 출력 스키마 넷은 GM 도구가 아니라 저마다의 호출이 강제하는 도구 하나다 — 카탈로그에도
  * `buildGmTools`에도 서지 않는다. 그래도 모델이 받는 입력이라 계약은 같다.
@@ -503,6 +560,56 @@ describe("같은 종류의 인자는 같은 검증을 지난다", () => {
         }
       }
     }
+  });
+});
+
+/**
+ * **감독이 부르지 않은 액수는 코어에 닿지 않는다** (docs/simulation/transfer.md §1).
+ *
+ * `send_offer`의 `fee`가 스키마에서 필수이던 자리다 — 해석기는 명령을 부르는 순간
+ * 숫자를 만들어야 했고, 지어낸 0이 **£0 매각 오퍼**가 되어 코어를 지났다. 프롬프트가
+ * 지어내지 말라고 적어도 규칙이 두 곳에서 반대로 서면 모델은 스키마를 따른다.
+ */
+describe("액수는 감독이 부른 것만 실린다", () => {
+  /** 받아쓰기가 코어를 부르는 그 문 — `applyOps`와 같은 자리다 (동기 명령만) */
+  function call(name: string, input: unknown): { ok: boolean; message: string } {
+    const spec = SKILL_TOOLS.find((t) => t.name === name);
+    if (!spec) throw new Error(`${name} 명령이 없다`);
+    const result = spec.handle(input);
+    if (result instanceof Promise) throw new Error(`${name}: 동기 명령이 아니다`);
+    return result;
+  }
+
+  const ours = STATE.players.find((p) => p.teamId === STATE.userTeamId)!;
+  const theirs = STATE.players.find((p) => p.teamId !== STATE.userTeamId)!;
+  const buyer = STATE.teams.find((t) => t.id !== STATE.userTeamId)!.id;
+
+  it("이적료가 빠지면 협상이 열리지 않고, 코어의 자가 한 줄로 돌아온다", () => {
+    const before = STATE.negotiations.length;
+    for (const input of [
+      { playerId: theirs.name },
+      { playerId: ours.name, kind: "sell", teamId: buyer },
+      { playerId: ours.name, kind: "loan_out", teamId: buyer },
+    ]) {
+      const result = call("send_offer", input);
+      expect(result.ok, JSON.stringify(input)).toBe(false);
+      // 스키마 반려가 아니라 코어의 답이다 — 무엇이 비었는지와 그 갈래의 자를 든다
+      expect(result.message).toContain("부르지 않았습니다");
+      expect(result.message).toMatch(/£/);
+    }
+    expect(STATE.negotiations, "액수 없는 오퍼는 협상을 남기지 않는다").toHaveLength(before);
+  });
+
+  /**
+   * 반려는 **코어의 판단**이어야 한다 — 스키마가 필수로 걸면 해석기는 액수를 비운
+   * 채로는 명령을 부를 수조차 없어, 「감독이 말하지 않았다」가 어디에도 남지 않는다.
+   */
+  it("액수 자리를 스키마가 필수로 걸지 않는다", () => {
+    const spec = SKILL_TOOLS.find((t) => t.name === "send_offer")!;
+    const required = ((spec.inputSchema as Record<string, unknown>).required ?? []) as string[];
+    expect(required).toContain("playerId");
+    expect(required).not.toContain("fee");
+    expect(required).not.toContain("weeklyWage");
   });
 });
 

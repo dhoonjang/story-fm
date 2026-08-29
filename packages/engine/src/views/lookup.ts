@@ -62,6 +62,7 @@ import {
   visionItemText,
 } from "@story-fm/domain";
 import { rankByName } from "../core/name-match";
+import { pickTeam } from "../core/team-ref";
 import { formatMoney } from "../club/finance";
 import { youthCandidateFog } from "../squad/scouting";
 import { derbyRecordOf } from "../club/derby";
@@ -118,7 +119,7 @@ import {
 } from "../world/player-pool";
 import { domesticStageMatches } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
-import { isClubTeam, teamCatalog } from "../data/team-catalog";
+import { isClubTeam } from "../data/team-catalog";
 import { leagueOfTeamIn } from "../competition/promotion";
 import { tierOfTeamIn } from "../core/club-tier";
 import {
@@ -222,21 +223,6 @@ const MAX_LIMIT = 15;
 // 입구에 두면 모델이 id를 외우거나 추측하지 않아도 되고, 못 찾았을 때 후보를
 // 돌려줄 수 있다 (조용히 빈 결과를 주면 모델이 지어내기 시작한다).
 
-/** 부분 일치로 닿지 않는 약칭만 둔다 ("맨유"는 "맨체스터 유나이티드"의 부분 문자열이 아니다) */
-const TEAM_ALIASES: Record<string, string> = {
-  맨유: "manutd",
-  맨시티: "mancity",
-  스퍼스: "tottenham",
-  아스널: "arsenal",
-  레알: "realmadrid",
-  바르샤: "barcelona",
-  앳마: "atletico",
-  뮌헨: "bayern",
-  바이언: "bayern",
-  유베: "juventus",
-  파리: "psg",
-};
-
 /** 우리 팀을 가리키는 말 */
 const MINE = new Set(["mine", "우리", "우리팀", "our", "us"]);
 /** 팀을 좁히지 말라는 말 — 대회 전체 일정 */
@@ -244,28 +230,14 @@ const EVERY_TEAM = new Set(["all", "전체", "리그", "리그전체", "모두",
 
 type Resolved = { ok: true; teamId: string } | { ok: false; message: string };
 
+/**
+ * 조회의 팀 자리 — **이름 해석 자체는 `pickTeam`의 것이다** (core/team-ref.ts).
+ * 여기 남는 것은 조회에만 있는 말뿐이다: 빈 값과 「우리」는 우리 팀이다.
+ */
 function resolveTeam(state: GameState, team?: string): Resolved {
-  const q = (team ?? "").trim();
-  const key = norm(q);
-  if (key === "" || MINE.has(key)) return { ok: true, teamId: state.userTeamId };
-
-  const alias = TEAM_ALIASES[key];
-  if (alias) return { ok: true, teamId: alias };
-  const exact = teamCatalog().find(
-    (t) => t.id === key || norm(t.shortName) === key || norm(t.name) === key,
-  );
-  if (exact) return { ok: true, teamId: exact.id };
-
-  const partial = teamCatalog().filter((t) => norm(t.name).includes(key) || t.id.includes(key));
-  if (partial.length === 1) return { ok: true, teamId: partial[0]!.id };
-  if (partial.length > 1) {
-    const names = partial
-      .slice(0, 6)
-      .map((t) => `${t.name}(${t.id})`)
-      .join(" / ");
-    return { ok: false, message: `"${q}"는 여러 팀과 맞습니다 — ${names}` };
-  }
-  return { ok: false, message: `"${q}"라는 팀을 찾지 못했습니다` };
+  const said = (team ?? "").trim();
+  if (said === "" || MINE.has(norm(said))) return { ok: true, teamId: state.userTeamId };
+  return pickTeam(state, said);
 }
 
 /** 이름 뒤의 완장 — 서열은 조회가 아니라 `get_squad`의 리더 줄이 말한다 */
