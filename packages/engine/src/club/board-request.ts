@@ -19,8 +19,8 @@ import { pickAnyPlayer } from "../core/player-ref";
 import { ownerOf } from "../world/persona";
 import { USER_WAGE_HEADROOM, clubWageBudget, wageRoomOf } from "../world/wages";
 import { formatMoney, recordCapitalAsset, seasonWageRatio, STADIUM_ASSET_MONTHS } from "./finance";
-import { item } from "../skills/brief";
-import type { SkillResult } from "../skills";
+import { item } from "../commands/brief";
+import type { CommandResult } from "../commands";
 
 /**
  * 감독이 보드에 거는 요청 — **`board-demand.ts`와 방향이 반대인 별개 상태다**
@@ -191,7 +191,7 @@ export function boardRequestCeiling(state: GameState, kind: BoardRequestKind): n
   return Math.floor(headroomOf(state, kind) * factor);
 }
 
-// ── 접수 (스킬) ────────────────────────────────────────────────
+// ── 접수 (명령) ────────────────────────────────────────────────
 
 export interface RequestBoardInput {
   kind: BoardRequestKind;
@@ -206,7 +206,7 @@ export interface RequestBoardInput {
  * 물은 자리에서 답이 나오면 보드가 사람이 아니라 자판기가 된다. 판정은 답이
  * 도착하는 날의 tick이 그날의 장부로 한다 (`tickBoardRequests`).
  */
-export function requestBoard(state: GameState, input: RequestBoardInput): SkillResult {
+export function requestBoard(state: GameState, input: RequestBoardInput): CommandResult {
   if (managedTeamId(state) === null) {
     return { ok: false, message: "무직입니다 — 요청을 걸 보드가 없습니다" };
   }

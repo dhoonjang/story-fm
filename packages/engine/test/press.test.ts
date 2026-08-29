@@ -12,6 +12,7 @@ import {
   leagueOfTeamIn,
   fundTransferBudget,
   MANAGER_WALLET,
+  INCIDENT_PRESS_DAYS,
   openEvePress,
   openPress,
   pendingPress,
@@ -703,6 +704,65 @@ describe("기자회견 — 언론 유출은 다음 자리가 싣는다", () => {
     expect(conference.weight).toBe(1);
     // 버린 것도 비운다 — 우리 라커룸 밖의 불만이 장부에 눌러앉지 않는다
     expect(state.pressLeaks).toEqual([]);
+  });
+});
+
+/**
+ * 감독이 말로 만든 사건 가운데 **공개된 것**은 다음 회견이 묻는다 (people.md §6
+ * 「사건 기록」) — 카드는 갈래 코드·당사자·세기이고, 한 사건은 한 회견에만 선다.
+ */
+describe("기자회견 — 공개된 사건은 다음 자리가 싣는다", () => {
+  it("7일 안의 discipline은 incident 카드로 서고, 다음 회견에는 다시 서지 않는다", () => {
+    const state = newGame();
+    const player = userPlayers(state)[0]!;
+    state.incidents = [
+      {
+        date: state.date,
+        kind: "discipline",
+        playerIds: [player.id],
+        intensity: 2,
+        summary: "벌금",
+      },
+      // 라커룸 안의 일은 카드가 아니다
+      { date: state.date, kind: "care", playerIds: [player.id], intensity: 2, summary: "병문안" },
+    ];
+
+    const first = fakeConference({ id: "a", date: state.date });
+    openPress(state, first);
+    const card = first.facts.filter((f) => f.kind === "incident");
+    expect(card).toHaveLength(1);
+    expect(card[0]!.about).toBe(player.id);
+    expect(card[0]!.sharp).toBe(true);
+    expect(card[0]!.data?.tags?.[0]).toBe("discipline");
+    expect(card[0]!.data?.name).toBe(player.name);
+    expect(card[0]!.data?.values?.intensity).toBe(2);
+    expect(card[0]!.data?.values?.days).toBe(0);
+
+    const second = fakeConference({ id: "b", date: state.date });
+    openPress(state, second);
+    expect(
+      second.facts.some((f) => f.kind === "incident"),
+      "같은 사건이 두 회견에 섰다",
+    ).toBe(false);
+  });
+
+  it("8일이 지난 사건은 서지 않는다", () => {
+    const state = newGame();
+    const player = userPlayers(state)[0]!;
+    state.incidents = [
+      {
+        date: state.date,
+        kind: "public-criticism",
+        playerIds: [player.id],
+        intensity: 1,
+        summary: "질책",
+      },
+    ];
+    const later = addDays(state.date, INCIDENT_PRESS_DAYS + 1);
+    state.date = later;
+    const conference = fakeConference({ date: later });
+    openPress(state, conference);
+    expect(conference.facts.some((f) => f.kind === "incident")).toBe(false);
   });
 });
 

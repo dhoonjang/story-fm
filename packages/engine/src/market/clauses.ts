@@ -27,8 +27,8 @@ import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { assignSquadNumber } from "../squad/numbers";
 import { arrivingSquadLevel } from "../squad/registration";
 import { clearDepartedState } from "./departures";
-import type { SkillResult } from "../skills";
-import { item } from "../skills/brief";
+import type { CommandResult } from "../commands";
+import { item } from "../commands/brief";
 
 /**
  * 조건부 조항 — **되사기와 셀온** (transfer.md §5-3).
@@ -296,7 +296,7 @@ export function describeBuyBackRights(state: GameState): string {
  * 감독의 되사기 행사 (`exercise_buyback`) — 권리를 그 자리에서 쓴다.
  * 예산은 일반 영입과 같은 자로 재고, 못 내면 서지 않는다.
  */
-export function exerciseBuyBack(state: GameState, input: { playerId: string }): SkillResult {
+export function exerciseBuyBack(state: GameState, input: { playerId: string }): CommandResult {
   const right = ourBuyBackRights(state).find((r) => r.player.id === input.playerId);
   if (!right) {
     const player = playerById(state, input.playerId);

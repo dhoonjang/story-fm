@@ -1,4 +1,4 @@
-import type { MarketSkillResult } from "../skills";
+import type { MarketCommandResult } from "../commands";
 import type { GamePlayer, Negotiation, NegotiationVerdict, SquadStatus } from "@story-fm/domain";
 import {
   MAX_PAYMENT_YEARS,
@@ -352,7 +352,7 @@ export function settleCounterparty(
   state: GameState,
   anchor: CounterpartyAnchor,
   ruling?: CounterpartyRulingInput,
-): { input: CounterpartyRuling; result: MarketSkillResult } {
+): { input: CounterpartyRuling; result: MarketCommandResult } {
   const input = clampCounterpartyRuling(anchor, ruling);
   return { input, result: respondOffer(state, input) };
 }
@@ -377,7 +377,8 @@ export interface CounterpartyBrief {
   dossier: string[];
   /** 이 자리에 설 사람들 — 선수와 그의 에이전트. 카드는 부르는 쪽이 그린다 */
   characterIds: string[];
-  anchor: CounterpartyAnchor;
+  /** 답할 오퍼가 올라 있으면 그 앵커 — 테이블에서 말만 오가는 자리에는 없다 (table.ts) */
+  anchor: CounterpartyAnchor | null;
 }
 
 /**
@@ -473,8 +474,7 @@ export function buildCounterpartyBrief(
 ): CounterpartyBrief | null {
   const anchor = counterpartyAnchor(state, negotiation);
   const player = playerById(state, negotiation.gamePlayerId);
-  const offer = pendingOffer(negotiation);
-  if (!anchor || !player || !offer) return null;
+  if (!player || negotiation.status !== "open") return null;
   const agent = agentForPlayer(state, player.id);
   const years = contractYearsLeft(state, player.id);
   return {

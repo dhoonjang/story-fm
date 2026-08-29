@@ -30,7 +30,7 @@
 | 감독 성장·보드를 만진다        | [simulation/career.md](simulation/career.md)                    |
 | 대사·화자·인물을 만진다        | [data/people.md](data/people.md)                                |
 | LLM 호출을 추가·변경한다       | [llm/models.md](llm/models.md) · [llm/agents.md](llm/agents.md) |
-| 프롬프트·스킬 표면을 만진다    | [llm/prompts.md](llm/prompts.md)                                |
+| 프롬프트·도구 표면을 만진다    | [llm/prompts.md](llm/prompts.md)                                |
 | 엔티티·세이브 구조를 만진다    | [data/game-state.md](data/game-state.md)                        |
 | 선수/팀 데이터를 갈아 끼운다   | [data/sources.md](data/sources.md)                              |
 

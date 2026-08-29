@@ -25,9 +25,19 @@ import {
   settlingFactorText,
   settlingOf,
   settlingPercent,
+  MANAGER_SUBJECT,
+  moveRelation,
+  relationTierOf,
   type GameState,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
+
+/** 질책이 잘리지 않게 사이를 틀어 둔다 — 수용성 앵커가 outcome을 자른다 (career.md §2) */
+function closeOff(state: GameState, playerId: string): void {
+  while (relationTierOf(state, MANAGER_SUBJECT, playerId) !== "hostile") {
+    moveRelation(state, MANAGER_SUBJECT, playerId, "promise-broken");
+  }
+}
 
 /**
  * 정착 — **날짜가 아니라 겪은 양이다** (settling.ts).
@@ -327,6 +337,7 @@ describe("감독의 말도 정착을 움직인다 (SETTLING_EVENT)", () => {
     sign(state, target.id);
     play(state, target.id, 4); // 바닥에서 깎이는 걸 보려면 쌓아 둔 게 있어야 한다
     const before = settlingOf(state, target.id)!.progress;
+    closeOff(state, target.id);
     applyTalkToPlayer(state, { playerId: target.id, outcome: "angered", intensity: 3 });
     expect(settlingOf(state, target.id)!.progress).toBeLessThan(before);
   });
@@ -366,7 +377,7 @@ describe("감독의 말도 정착을 움직인다 (SETTLING_EVENT)", () => {
 describe("무게는 GM이 정하고 경계는 코어가 쥔다", () => {
   const talkAnchor = settlingAnchor("talk", { intensity: 2 });
 
-  it("스킬 인자로 준 무게가 그대로 실린다", () => {
+  it("명령 인자로 준 무게가 그대로 실린다", () => {
     const state = createTestGame(11);
     const target = opponentsOf(state)[0]!;
     sign(state, target.id);
@@ -407,6 +418,7 @@ describe("무게는 GM이 정하고 경계는 코어가 쥔다", () => {
     const state = createTestGame(11);
     const target = opponentsOf(state)[0]!;
     sign(state, target.id);
+    closeOff(state, target.id);
     applyTalkToPlayer(state, {
       playerId: target.id,
       outcome: "angered",
@@ -470,7 +482,7 @@ describe("붙여 준 멘토가 정착을 앞당긴다", () => {
 });
 
 /**
- * 앵커와 대역의 **눈금 자체** — 스킬을 거치지 않고 두 함수만 본다.
+ * 앵커와 대역의 **눈금 자체** — 명령을 거치지 않고 두 함수만 본다.
  *
  * 위 describe가 보는 건 "GM이 준 무게가 어떻게 실리는가"이고, 여기서 고정하는 건
  * 그 무게가 서는 자리다: 종류마다 기본 무게가 다르고(면담 > 팀토크, 주장 지명이

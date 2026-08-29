@@ -1590,7 +1590,7 @@ describe("재정 구조 (t=0)", () => {
  * 서사가 재정에 닿는 통로 — 매출·비용은 원장으로, 구단주 출자는 예산으로.
  * 두 축을 나누는 이유가 여기서 검증된다: 구단주 돈으로 PSR을 풀 수 없어야 한다.
  */
-describe("재정 이벤트 스킬", () => {
+describe("재정 이벤트 명령", () => {
   it("£10k 미만의 일상 비용은 원장과 잔고에서 무시한다", () => {
     const state = createTestGame(7, "tottenham");
     const finance = financeOf(state, state.userTeamId);

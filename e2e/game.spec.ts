@@ -140,7 +140,7 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.locator(".app")).toHaveAttribute("data-phase", "idle");
   await expect(page.getByTestId("team-name")).toHaveText("아스날");
 
-  // ── 훈련 지시 (자유서술 → set_training) ──
+  // ── 훈련 지시 (자유서술 → set_training 명령) ──
   const input = page.getByTestId("chat-input");
   await input.fill("평일 오전은 세트피스 반복 훈련 잡아줘");
   await page.getByTestId("chat-send").click();
@@ -336,7 +336,7 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
    * **시즌 첫 경기는 프리시즌 친선이다** — 몸(폼·체력)에는 남고 시즌 기록에는
    * 안 남는다(season.md §2). 그래서 여기서 도움·평점을 물으면 빈칸이 맞다.
    * 시즌 기록이 서는 것은 개막 이후이고, 그 규칙은 단위 테스트가 지킨다
-   * (`friendly-ledger.test.ts` · `ratings.test.ts`).
+   * (`ratings.test.ts`).
    */
   await page.locator(".squad-table tbody tr.row-tier.t-start:not(.detail-row)").first().click();
   const detail = page.getByTestId("player-detail");
@@ -558,7 +558,7 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   await page.getByTestId("start-game").click();
   await expect(page.getByTestId("chat-scroll")).toContainText("정테스트", { timeout: COLD_MS });
 
-  // 채팅에서 자연어 훈련 지시 → set_training 스킬
+  // 채팅에서 자연어 훈련 지시 → set_training 명령
   const chat = page.getByTestId("chat-input");
   await chat.fill("월요일 오전은 세트피스 반복 훈련 잡아줘");
   await page.getByTestId("chat-send").click();

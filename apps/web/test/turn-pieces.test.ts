@@ -46,7 +46,7 @@ const call = (name: string, line?: number): ToolCallRecord => ({
   ...(line === undefined ? {} : { line }),
 });
 
-/** 조각을 읽기 쉬운 꼴로 — 말 묶음은 첫 줄로, 표시는 스킬 이름이나 키로 */
+/** 조각을 읽기 쉬운 꼴로 — 말 묶음은 첫 줄로, 표시는 호출 이름이나 키로 */
 const shape = (lines: string[], parts: Parameters<typeof weaveTurn>[1]) =>
   weaveTurn(lines, parts).map((piece) => {
     if (!piece.mark) return piece.lines[0] ?? "";
@@ -156,14 +156,14 @@ describe("골·경고는 그 분이 지나간 줄 뒤에 선다", () => {
   });
 });
 
-describe("스킬 칩은 불린 자리에 선다", () => {
+describe("호출 칩은 불린 자리에 선다", () => {
   const lines = [
     "@: *감독실 문이 닫힌다*",
     "@손흥민: 믿어주셔서 감사합니다.",
     "@스티브 홀랜드: 사기가 올랐습니다.",
   ];
 
-  it("장면을 쓴 뒤에 불린 스킬은 그 대사 뒤에 붙는다", () => {
+  it("장면을 쓴 뒤에 불린 호출은 그 대사 뒤에 붙는다", () => {
     expect(shape(lines, { calls: [call("talk_to_player", 2)] })).toEqual([
       "@: *감독실 문이 닫힌다*",
       "talk_to_player",
@@ -171,14 +171,14 @@ describe("스킬 칩은 불린 자리에 선다", () => {
     ]);
   });
 
-  it("아무것도 쓰기 전에 불린 스킬은 맨 앞이다", () => {
+  it("아무것도 쓰기 전에 불린 호출은 맨 앞이다", () => {
     expect(shape(lines, { calls: [call("get_squad", 0)] })).toEqual([
       "get_squad",
       "@: *감독실 문이 닫힌다*",
     ]);
   });
 
-  it("같은 자리의 스킬은 한 줄에 나란히 — 칩마다 문단을 끊지 않는다", () => {
+  it("같은 자리의 호출은 한 줄에 나란히 — 칩마다 문단을 끊지 않는다", () => {
     expect(shape(lines, { calls: [call("team_talk", 1), call("set_captain", 1)] })).toEqual([
       "@: *감독실 문이 닫힌다*",
       "team_talk+set_captain",
@@ -234,7 +234,7 @@ describe("시각 표시는 헤더가 서 있던 자리에 선다", () => {
     ]);
   });
 
-  it("같은 자리의 스킬보다 앞선다 — 장면이 열리고 그 안에서 일이 벌어진다", () => {
+  it("같은 자리의 호출보다 앞선다 — 장면이 열리고 그 안에서 일이 벌어진다", () => {
     expect(
       shape(lines, {
         stamps: [{ after: 1, stamp: "2026-07-15 오전" }],

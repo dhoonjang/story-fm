@@ -4,7 +4,6 @@ import {
   RENEWAL_YEARS_MAX,
   activeContract,
   addDays,
-  counterpartyAnchor,
   createGame,
   financeOf,
   generateIncomingOffers,
@@ -23,14 +22,11 @@ import {
   tierOfTeamIn,
   type GameState,
   userPlayers,
+  sitAtTable,
+  settleTableReply,
+  openLetter,
 } from "@story-fm/engine";
-import {
-  REPORT_VERDICT_TOOL,
-  TIME_PASSED,
-  buildOnboardingTurn,
-  runMockGmTurn,
-  runNegotiator,
-} from "@story-fm/agents";
+import { TIME_PASSED, buildOnboardingTurn, runMockGmTurn, buildTableInput } from "@story-fm/agents";
 
 function build(seed: number): GameState {
   const background = "프리미어리그에서 뛰었던 주장 출신 수비수";
@@ -107,7 +103,7 @@ describe("mock GM — 유저 여정 시나리오", () => {
     expect(turn.text).not.toContain(call.summary);
   });
 
-  it("훈련 지시 → set_training 스킬이 세션을 등록한다", () => {
+  it("훈련 지시 → set_training 명령이 세션을 등록한다", () => {
     const state = newGame();
     const turn = runMockGmTurn(state, "월요일 오전은 세트피스 반복 훈련 잡아줘");
     expectGmGrammar(turn.text);
@@ -156,7 +152,7 @@ describe("mock GM — 유저 여정 시나리오", () => {
     // 경기일에 닿을 때까지 다시 진행시킨다 (감독이 실제로 하는 일과 같다)
     const advanced = runMockGmTurn(state, "다음 경기로 가자");
     expectGmGrammar(advanced.text);
-    // 시계 이동은 스킬이 아니라 코어의 처리 결과라 사람이 읽는 이름으로 남는다
+    // 시계 이동은 도구 호출이 아니라 코어의 처리 결과라 사람이 읽는 이름으로 남는다
     expect(advanced.toolCalls.map((c) => c.name)).toContain(TIME_PASSED);
     let toMatchday = 30;
     while (state.phase !== "matchday" && toMatchday-- > 0) {
@@ -293,25 +289,15 @@ describe("mock GM — 재계약", () => {
 });
 
 /**
- * **실모드의 교섭 상대** — mock은 앵커를 그대로 반영하지만(위), 실모드는 모델의 판정이
- * `report_verdict`의 스키마를 지나 코어의 폭으로 잘린다 (agents.md §4-1).
+ * **실모드의 교섭** — mock은 앵커를 그대로 반영하지만(위), 실모드는 협상 상대 호출이
+ * 낸 판정이 `reply_at_table`의 스키마를 지나 코어의 폭으로 잘린다 (agents.md §4-1).
  *
  * 재계약의 연수는 **스키마에 칸이 없으면 파싱에서 조용히 버려진다** — 코어가 폭을
  * 만들어 둬도 언제나 앵커 연수가 서고, 화면에는 정상으로 보인다. 서류에 폭이 적히지
  * 않는 것도 마찬가지로 드러나지 않는다. 두 자리를 여기서 함께 잰다.
  */
-describe("교섭 상대 — 모델이 되부르는 연수", () => {
-  /** 도구를 부른 응답 — `requireToolCall`이 재시도로 돌리지 않게 한 번 불렀다고 답한다 */
-  const answered = {
-    text: "",
-    history: { version: 1 as const, provider: "anthropic" as const, model: "test", messages: [] },
-    historyBase: 0,
-    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
-    toolCallCount: 1,
-    stopReason: "completed" as const,
-  };
-
-  it("폭 밖의 연수도 반려되지 않고 폭 끝으로 잘려 라운드에 남는다", async () => {
+describe("편지 — 답할 날이 된 오퍼는 테이블과 같은 상대가 답한다 (agents.md §4-1)", () => {
+  it("폭 밖의 연수도 반려되지 않고 폭 끝으로 잘려 라운드에 남는다", () => {
     const state = newGame();
     const player = playersOf(state, state.userTeamId)[0]!;
     activeContract(state, player.id)!.until = addDays(state.date, 120);
@@ -323,28 +309,32 @@ describe("교섭 상대 — 모델이 되부르는 연수", () => {
     });
     expect(opened.ok, opened.message).toBe(true);
     const renewal = state.negotiations.find((n) => n.kind === "renew")!;
+    // 답할 날이 되기 전에는 편지를 열 수 없다
+    expect(openLetter(state, renewal.id).ok).toBe(false);
     state.date = pendingOffer(renewal)!.respondsOn!;
-    const anchor = counterpartyAnchor(state, renewal)!;
+    const letter = openLetter(state, renewal.id);
+    if (!letter.ok) throw new Error(letter.message);
+    const anchor = letter.seat.anchor!;
     expect(anchor.allowed).toContain("counter");
     // 스키마가 열어 둔 폭(계약 상한)은 코어의 폭(앵커 ±1년)보다 넓다 — 그래서 자를 것이 있다
     expect(anchor.yearsRoom!.max).toBeLessThan(RENEWAL_YEARS_MAX);
 
-    let asked: string | undefined;
-    const settled = await runNegotiator(state, renewal, {
-      runTurn: (req) => {
-        asked = req.user;
-        req.tools
-          ?.find((tool) => tool.name === REPORT_VERDICT_TOOL)
-          ?.handle({ verdict: "counter", contractYears: RENEWAL_YEARS_MAX });
-        return Promise.resolve(answered);
-      },
-    });
+    // 편지의 입력 — 감독의 말 대신 <letter>가 서고, 서류에 폭이 적힌다
+    const input = buildTableInput(state, letter.seat, player.name, null)!;
+    expect(input).toContain(`<letter>`);
+    expect(input).not.toContain("@감독:");
+    expect(input).toContain(`조정 연수: 기준 ${anchor.contractYears}년`);
 
-    // 서류에 폭이 없으면 모델은 연수를 판정의 재료로 읽지도 못한다
-    expect(asked).toContain(`조정 연수: 기준 ${anchor.contractYears}년`);
-    expect(settled?.result.ok, settled?.result.message).toBe(true);
-    expect(settled?.input.contractYears).toBe(anchor.yearsRoom!.max);
+    const outcome = settleTableReply(state, letter.seat, {
+      line: "한 해는 더 봐야겠습니다.",
+      stance: "steady",
+      heard: { tone: "civil", claims: [] },
+      ruling: { verdict: "counter", contractYears: RENEWAL_YEARS_MAX },
+    });
+    expect(outcome.ok).toBe(true);
     expect(renewal.rounds[renewal.rounds.length - 1]!.contractYears).toBe(anchor.yearsRoom!.max);
+    // 답이 선 협상에는 답할 오퍼가 남지 않는다 — 두 번 답하지 않는다
+    expect(openLetter(state, renewal.id).ok).toBe(false);
   });
 });
 
@@ -496,5 +486,80 @@ describe("mock GM — 재직 중의 거취", () => {
     const knocked = runMockGmTurn(state, `${teamName(vacant.id)} 감독직에 지원하자`);
     expect(knocked.toolCalls.map((c) => c.name)).toContain("apply_manager_job");
     expect(state.manager.reputation.board).toBe(board - KNOCK_BOARD_HIT);
+  });
+});
+
+describe("테이블 — 건너편은 메인 채팅을 읽지 않는다 (agents.md §4-1)", () => {
+  it("입력은 서류·상황·대화·앵커 순이고, 감독이 다른 데서 한 말은 없다", () => {
+    const state = newGame();
+    const player = playersOf(state, state.userTeamId)[0]!;
+    activeContract(state, player.id)!.until = addDays(state.date, 120);
+    const opened = openRenewal(state, {
+      playerId: player.id,
+      weeklyWage: Math.round(renewalExpectation(state, player) * 0.8),
+      years: 3,
+    });
+    expect(opened.ok, opened.message).toBe(true);
+    const renewal = state.negotiations.find((n) => n.kind === "renew")!;
+    // 오퍼 없이 말만 오가는 자리 — 판정이 협상을 닫지 않는다
+    renewal.rounds.pop();
+    // 감독이 이사회에 한 말 — 테이블 건너편이 알아서는 안 되는 문장
+    const secret = "사실 예산은 두 배까지 열려 있습니다";
+    state.chat.push({ role: "user", text: secret, toolCalls: [], at: state.date });
+
+    const first = sitAtTable(state, renewal.id, "남아 주면 좋겠습니다");
+    if (!first.ok) throw new Error(first.message);
+    settleTableReply(state, first.seat, {
+      line: "조건을 들어 보고요.",
+      stance: "steady",
+      // 장부 줄이 서는 답 — 말투가 인내를 깎은 사실이 대화 사이에 남는다
+      heard: { tone: "hostile", claims: [] },
+    });
+    const second = sitAtTable(state, renewal.id, "주급은 그대로, 연수는 4년");
+    if (!second.ok) throw new Error(second.message);
+    const input = buildTableInput(state, second.seat, player.name, "주급은 그대로, 연수는 4년")!;
+    const order = [
+      "<counterparty",
+      "<situation",
+      "<table_log>",
+      "<anchor>",
+      "@감독: 주급은 그대로",
+    ];
+    const positions = order.map((tag) => input.indexOf(tag));
+    expect(
+      positions.every((p) => p >= 0),
+      input,
+    ).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    expect(input).not.toContain(secret);
+    // 지난 답과 장부 줄은 대화에 서고, 이번 말은 대화에 없다
+    expect(input).toContain("조건을 들어 보고요.");
+    expect(input).toContain("[장부]");
+    expect(input).toContain("남은 인내");
+    expect(input.indexOf("주급은 그대로, 연수는 4년")).toBe(
+      input.lastIndexOf("주급은 그대로, 연수는 4년"),
+    );
+  });
+});
+
+describe("mock — 테이블에 앉으면 칩이 선다", () => {
+  it("마주 앉겠다는 말에 speak_at_table이 기록되고 상대가 서류대로 답한다", async () => {
+    const state = newGame();
+    const player = playersOf(state, state.userTeamId)[0]!;
+    activeContract(state, player.id)!.until = addDays(state.date, 120);
+    const opened = openRenewal(state, {
+      playerId: player.id,
+      weeklyWage: Math.round(renewalExpectation(state, player) * 0.8),
+      years: 3,
+    });
+    expect(opened.ok, opened.message).toBe(true);
+
+    const turn = await runMockGmTurn(state, `${player.name}랑 마주 앉아서 얘기하자`);
+
+    expect(turn.toolCalls.map((c) => c.name)).toContain("speak_at_table");
+    const renewal = state.negotiations.find((n) => n.kind === "renew")!;
+    // 감독의 말이 테이블에 남고, 답 없는 자리는 코어가 앵커로 마감한다
+    expect(renewal.table!.lines[0]).toMatchObject({ by: "us" });
+    expect(renewal.table!.lines.some((l) => l.by === "ledger")).toBe(true);
   });
 });

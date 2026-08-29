@@ -7,8 +7,8 @@ import { diffDays } from "../core/dates";
 import { pickOurPlayer } from "../core/player-ref";
 import { ownerOf } from "../world/persona";
 import { clampForm, moraleToForm } from "../squad/form";
-import { item } from "../skills/brief";
-import type { SkillResult } from "../skills";
+import { item } from "../commands/brief";
+import type { CommandResult } from "../commands";
 
 /**
  * **감독의 지갑** — 구단 장부와 다른 돈이다 (career.md §5.4 · §7 ·
@@ -330,7 +330,7 @@ export function transferFundRoom(state: GameState): number {
  * 원장에 넣으면 PSR이 "돈을 부으면 규정이 풀린다"가 되고 잔고까지 올리면 구단이
  * 그 현금으로 주급을 무는 길이 열린다 (finance.md §9.2 · §9.7).
  */
-export function fundTransferBudget(state: GameState, input: { amount: number }): SkillResult {
+export function fundTransferBudget(state: GameState, input: { amount: number }): CommandResult {
   const teamId = managedTeamId(state);
   if (teamId === null) return { ok: false, message: "무직입니다 — 예산을 넣을 구단이 없습니다" };
 
@@ -410,7 +410,7 @@ function weeklyWageOf(state: GameState, gamePlayerId: string): number {
 export function payPlayerBonus(
   state: GameState,
   input: { playerId: string; amount: number },
-): SkillResult {
+): CommandResult {
   if (managedTeamId(state) === null) {
     return { ok: false, message: "무직입니다 — 보너스를 줄 선수가 없습니다" };
   }

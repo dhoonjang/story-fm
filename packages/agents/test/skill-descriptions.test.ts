@@ -3,27 +3,35 @@ import { z } from "zod";
 import {
   DEFAULT_SKILL_DESCRIPTIONS,
   GM_SYSTEM,
-  MATCH_INTENT_SYSTEM,
-  RATE_PLAYERS_INPUT,
-  RATE_PLAYERS_TOOL,
+  CORE_COMMANDS,
+  MARKET_OPS,
+  TACTIC_CAPS,
+  TACTIC_OPS,
+  TRAINING_OPS,
+  buildOpsSchema,
+  TACTIC_ORDERS_SYSTEM,
   REPORT_DIGEST_INPUT,
   REPORT_DIGEST_TOOL,
-  REPORT_MOOD_INPUT,
-  REPORT_MOOD_TOOL,
   REPORT_TRAINING_INPUT,
+  REPORT_ONBOARDING_INPUT,
+  REPORT_ONBOARDING_TOOL,
   REPORT_TRAINING_TOOL,
-  MATCH_RATER_SYSTEM,
-  MatchIntentSchema,
+  SETTLE_MATCH_DESCRIPTION,
+  SETTLE_MATCH_INPUT,
+  SETTLE_MATCH_TOOL,
   SKILL_CATALOG,
   SKILL_NAMES,
   TRAINING_RATER_SYSTEM,
   agingDeclineLine,
   buildGmTools,
+  buildToolSpecs,
   toToolSchema,
 } from "@story-fm/agents";
 import {
   ATTRIBUTE_AXES,
   AXIS_KO,
+  INCIDENT_KIND_KO,
+  INCIDENT_KINDS,
   SET_PIECE_ROUTINE_AXES,
   SET_PIECE_ROUTINE_NEUTRAL,
   TACTIC_TOGGLES,
@@ -43,6 +51,8 @@ const STATE = (() => {
 })();
 
 const TOOLS = buildGmTools(STATE, []);
+/** 코어 명령 전부 — 판을 세우는 것들은 GM에게 보이지 않고 해석이 부른다 (agents.md §1) */
+const SKILL_TOOLS = buildToolSpecs(STATE, []);
 
 describe("스킬 설명 — 코드가 유일한 원본이다", () => {
   /**
@@ -74,15 +84,14 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
     const perGroup: Record<string, number> = {};
     for (const skill of SKILL_CATALOG) perGroup[skill.group] = (perGroup[skill.group] ?? 0) + 1;
     expect(perGroup).toEqual({
-      진행: 5,
-      "전술·훈련": 15,
+      진행: 2,
+      "전술·훈련": 2,
       "대화·서사": 5,
-      경기: 1,
-      이적: 13,
-      재정: 6,
+      이적: 4,
+      재정: 1,
       조회: 11,
     });
-    expect(SKILL_CATALOG.length).toBe(56);
+    expect(SKILL_CATALOG.length).toBe(25);
     expect(SKILL_CATALOG.filter((s) => s.readOnly).length).toBe(11);
   });
 });
@@ -100,10 +109,19 @@ describe("규칙이 사는 자리", () => {
   /** `substitutions`가 `substitute`로 잡히지 않게 — 이름 전체가 서야 중복이다 */
   const mentions = (prompt: string, name: string) => new RegExp(`\\b${name}\\b`).test(prompt);
 
-  it("어느 프롬프트 층도 도구 이름을 적지 않는다", () => {
+  it("어느 프롬프트 층도 부를 수 없는 도구의 이름을 적지 않는다", () => {
+    /**
+     * GM의 프롬프트에는 도구 이름이 한 번도 서지 않는다 — 언제 부르고 인자를 어떻게
+     * 채우는지는 그 도구의 `description`이 갖는다 (prompts.md §5).
+     *
+     * 해석기는 다르다: **자기가 채울 명령의 이름은 적어야 한다**(`ops`의 열쇠다).
+     * 그래서 여기서 막는 것은 «그 해석기가 부를 수 없는 이름»뿐이다 — 적혀 있으면
+     * 모델은 낼 수 없는 자리를 배운다.
+     */
     for (const name of SKILL_NAMES) {
       expect(mentions(GM_SYSTEM, name), `GM_SYSTEM: ${name}`).toBe(false);
-      expect(mentions(MATCH_INTENT_SYSTEM, name), `MATCH_INTENT_SYSTEM: ${name}`).toBe(false);
+      if (TACTIC_OPS.includes(name)) continue;
+      expect(mentions(TACTIC_ORDERS_SYSTEM, name), `TACTIC_ORDERS_SYSTEM: ${name}`).toBe(false);
     }
   });
 
@@ -164,8 +182,23 @@ describe("규칙이 사는 자리", () => {
     expect(early.every((axis) => agingDelta(axis, age) < 0)).toBe(true);
     expect(early.every((axis) => agingDelta(axis, age - 1) < 0)).toBe(false);
 
-    expect(MATCH_RATER_SYSTEM).toContain(line);
+    expect(SETTLE_MATCH_DESCRIPTION).toContain(line);
     expect(TRAINING_RATER_SYSTEM).toContain(line);
+  });
+
+  /**
+   * 사건의 갈래는 효과의 모양이고 그 낱말표는 코어의 것이다 (people.md §6). 설명이
+   * 손으로 적으면 갈래가 늘어도 모델은 옛 표를 믿고, 표에 없는 갈래는 부를 길이 없다 —
+   * 세트피스 낱말표와 같은 결이다.
+   */
+  it("사건 기록의 설명은 코어 갈래표의 낱말을 전부 싣는다", () => {
+    const incident = TOOLS.find((t) => t.name === "record_incident")!;
+    const kinds = (incident.inputSchema.properties?.kind as { enum?: string[] }).enum ?? [];
+    expect([...kinds].sort()).toEqual([...INCIDENT_KINDS].sort());
+    for (const kind of INCIDENT_KINDS) {
+      expect(incident.description, kind).toContain(kind);
+      expect(incident.description, kind).toContain(INCIDENT_KIND_KO[kind]);
+    }
   });
 });
 
@@ -263,19 +296,11 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
       if (Array.isArray(n.enum)) return n.enum.map(String);
       return n.type === "boolean" ? ["true", "false"] : [];
     };
-    const setTactics = TOOLS.find((t) => t.name === "set_tactics")!.inputSchema.properties;
-    const intent = toToolSchema(MatchIntentSchema).properties?.tactics as {
-      properties?: Record<string, unknown>;
-    };
+    const setTactics = SKILL_TOOLS.find((t) => t.name === "set_tactics")!.inputSchema.properties;
     for (const toggle of TACTIC_TOGGLES) {
-      for (const [where, props] of [
-        ["set_tactics", setTactics],
-        ["match-intent", intent.properties],
-      ] as const) {
-        expect(choices(props?.[toggle.key]), `${where}.${toggle.key}`).toContain(
-          toggle.neutralValue,
-        );
-      }
+      expect(choices(setTactics?.[toggle.key]), `set_tactics.${toggle.key}`).toContain(
+        toggle.neutralValue,
+      );
     }
   });
 
@@ -289,23 +314,73 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
       const n = node as { enum?: unknown[] };
       return Array.isArray(n.enum) ? n.enum.map(String) : [];
     };
-    const routine = TOOLS.find((t) => t.name === "set_set_piece_routine")!;
-    const intentRoutine = toToolSchema(MatchIntentSchema).properties?.setPieceRoutine as {
-      properties?: Record<string, unknown>;
-    };
+    const routine = SKILL_TOOLS.find((t) => t.name === "set_set_piece_routine")!;
     for (const axis of SET_PIECE_ROUTINE_AXES) {
-      for (const [where, props] of [
-        ["set_set_piece_routine", routine.inputSchema.properties],
-        ["match-intent", intentRoutine.properties],
-      ] as const) {
-        expect(enumOf(props?.[axis.key]), `${where}.${axis.key}`).toContain(
-          SET_PIECE_ROUTINE_NEUTRAL,
-        );
+      expect(enumOf(routine.inputSchema.properties?.[axis.key]), axis.key).toContain(
+        SET_PIECE_ROUTINE_NEUTRAL,
+      );
+    }
+    // 낱말을 가르치는 것은 해석 프롬프트 하나다 — 손으로 적으면 낱말표를 고쳐도 남는다
+    expect(TACTIC_ORDERS_SYSTEM).toContain(SET_PIECE_ROUTINE_NEUTRAL);
+  });
+
+  /**
+   * **인자 스키마는 한 벌이다** (agents.md §1). 해석기가 모델에게 보이는 `ops`의 항목은
+   * 그 명령의 도구 정의 그대로다 — 손으로 한 벌 더 적던 시절에 공략 상한이 2와 4로
+   * 갈려 감독이 부른 지점이 말없이 잘렸다.
+   */
+  it("해석기의 ops 항목은 그 명령의 입력 스키마 그대로다", () => {
+    const specs = new Map(SKILL_TOOLS.map((t) => [t.name, t] as const));
+    for (const [label, list, caps] of [
+      ["tactic", TACTIC_OPS, TACTIC_CAPS],
+      ["training", TRAINING_OPS, {}],
+      ["market", MARKET_OPS, {}],
+    ] as const) {
+      const ops = buildOpsSchema(specs, list, "인자", caps).properties as Record<
+        string,
+        { items?: unknown; maxItems?: number }
+      >;
+      for (const name of list) {
+        // 이름이 어긋나면 그 자리가 스키마에서 조용히 사라져 모델이 부를 길을 잃는다
+        expect(specs.has(name), `${label}: ${name}`).toBe(true);
+        expect(ops[name]?.items, `${label}: ${name}`).toBe(specs.get(name)!.inputSchema);
       }
     }
-    // 설명이 가르치는 토큰도 같은 것 하나다 — 손으로 적으면 낱말표를 고쳐도 남는다
-    expect(routine.description).toContain(SET_PIECE_ROUTINE_NEUTRAL);
-    expect(MATCH_INTENT_SYSTEM).toContain(SET_PIECE_ROUTINE_NEUTRAL);
+    const tactic = buildOpsSchema(specs, TACTIC_OPS, "판", TACTIC_CAPS).properties as Record<
+      string,
+      { maxItems?: number }
+    >;
+    expect(tactic.substitute?.maxItems).toBe(TACTIC_CAPS.substitute);
+  });
+
+  /**
+   * **받아쓰기는 동기 명령만 지난다** (`applyOps`). 해석기의 JSON은 한 번에 여럿을
+   * 부르므로 프로미스를 돌려주는 손잡이(`tactic_orders`·`market_orders`…)가 목록에 들면
+   * 적용이 그 자리에서 터진다 — 이름 한 줄로 벌어지는 일이라 여기서 막는다.
+   */
+  it("ops 목록의 명령은 전부 동기다 — 손잡이는 목록에 들지 않는다", () => {
+    const specs = new Map(SKILL_TOOLS.map((t) => [t.name, t] as const));
+    for (const name of [...TACTIC_OPS, ...TRAINING_OPS, ...MARKET_OPS]) {
+      expect(specs.get(name)!.handle.constructor.name, name).not.toBe("AsyncFunction");
+    }
+  });
+
+  /**
+   * **부를 길이 없는 코어 명령은 없다.** GM에게 보이지 않는 명령(`CORE_COMMANDS`)은
+   * 해석기의 목록에 정확히 한 번 서야 한다 — 빠지면 아무도 못 부르고, 둘에 서면 같은
+   * 명령이 두 해석기에서 다른 문맥으로 채워진다.
+   */
+  it("코어 명령은 어느 해석기 목록에 정확히 한 번 선다", () => {
+    const lists = [...TACTIC_OPS, ...TRAINING_OPS, ...MARKET_OPS];
+    for (const name of CORE_COMMANDS) {
+      expect(
+        lists.filter((n) => n === name),
+        name,
+      ).toHaveLength(1);
+    }
+    // 거꾸로, 목록에 있는데 코어 명령도 카탈로그 스킬도 아닌 이름은 없다
+    const known = new Set([...CORE_COMMANDS, ...SKILL_CATALOG.map((s) => s.name)]);
+    for (const name of lists) expect(known.has(name), name).toBe(true);
   });
 
   /** 중첩된 객체·배열도 같은 규칙을 지난다 — 안쪽에서 제약이 사라지면 아무도 못 본다 */
@@ -353,13 +428,13 @@ function walk(node: unknown, name = ""): Array<[string, Record<string, unknown>]
 }
 
 /**
- * 결산 넷은 GM 도구가 아니라 저마다의 호출이 강제하는 도구 하나다 — 카탈로그에도
+ * 출력 스키마 넷은 GM 도구가 아니라 저마다의 호출이 강제하는 도구 하나다 — 카탈로그에도
  * `buildGmTools`에도 서지 않는다. 그래도 모델이 받는 입력이라 계약은 같다.
  */
 const RATER_TOOLS = [
-  { name: RATE_PLAYERS_TOOL, inputSchema: RATE_PLAYERS_INPUT },
+  { name: SETTLE_MATCH_TOOL, inputSchema: SETTLE_MATCH_INPUT },
+  { name: REPORT_ONBOARDING_TOOL, inputSchema: REPORT_ONBOARDING_INPUT },
   { name: REPORT_TRAINING_TOOL, inputSchema: REPORT_TRAINING_INPUT },
-  { name: REPORT_MOOD_TOOL, inputSchema: REPORT_MOOD_INPUT },
   { name: REPORT_DIGEST_TOOL, inputSchema: REPORT_DIGEST_INPUT },
 ];
 

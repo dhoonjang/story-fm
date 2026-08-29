@@ -16,18 +16,22 @@ import type { ChatTurn, ToolCallRecord } from "@story-fm/engine";
 export type PanelKey = "스쿼드" | "달력" | "재정" | "대회" | "커리어";
 
 /**
- * 스킬이 바꾼 장부 — **스킬 하나에 화면 하나.**
+ * 호출이 바꾼 장부 — **호출 하나에 화면 하나.**
  *
- * 여러 장부를 건드리는 스킬도 있지만(계약 확정은 선수도 옮기고 돈도 쓴다) 알림은
+ * 여러 장부를 건드리는 호출도 있지만(계약 확정은 선수도 옮기고 돈도 쓴다) 알림은
  * **감독이 확인하러 갈 화면**을 가리키는 것이지 바뀐 곳을 다 세는 장부가 아니다.
  * 둘에 걸치면 같은 문장이 두 칸에 서서, 한 번 벌어진 일이 두 번 일어난 것처럼 읽힌다.
- * 걸치는 스킬은 **감독이 먼저 볼 쪽**으로 보낸다 — 영입은 누가 왔는지가 먼저다.
+ * 걸치는 호출은 **감독이 먼저 볼 쪽**으로 보낸다 — 영입은 누가 왔는지가 먼저다.
  */
 export const PANEL_OF: Record<string, PanelKey> = {
   // ── 스쿼드 — 선수단과 판이 바뀐 것 ──
   set_lineup: "스쿼드",
   set_squad_level: "스쿼드",
   set_tactics: "스쿼드",
+  // 손잡이 셋은 기록되지 않는다 — 뒤의 명령들이 칩·말풍선·카드를 세운다
+  tactic_orders: "스쿼드",
+  training_orders: "달력",
+  market_orders: "재정",
   set_player_tactic: "스쿼드",
   // 세트피스는 판의 사실이다 — 키커도 인원도 확인하러 갈 화면은 전술판이 선 스쿼드다
   set_set_piece_takers: "스쿼드",
@@ -46,7 +50,7 @@ export const PANEL_OF: Record<string, PanelKey> = {
   recall_loan: "스쿼드",
   exercise_buyback: "스쿼드",
   accept_deal: "스쿼드",
-  apply_narrative_event: "스쿼드",
+  record_incident: "스쿼드",
   // 대화형 — 바뀌는 것은 사기·심경이고 그건 명단이 보여준다
   team_talk: "스쿼드",
   talk_to_player: "스쿼드",
@@ -79,17 +83,19 @@ export const PANEL_OF: Record<string, PanelKey> = {
 };
 
 /**
- * **카드로 서는 스킬** — 갈 장부가 없어서 채팅에 카드를 남긴다 (`MarketCard`).
+ * **카드로 서는 호출** — 갈 장부가 없어서 채팅에 카드를 남긴다 (`MarketCard`).
  *
  * 진행 중인 흥정은 어느 장부에도 실리지 않고, 파견한 스카우트는 아직 아무것도
  * 바꾸지 않았다. 대신 금액·확률·기한이 다음 판단의 입력이라 카드로 정리해 세운다.
  *
- * 이 목록에도 `PANEL_OF`에도 없는 조작형 스킬은 **화면에 서는 길이 없다** —
- * 그런 스킬이 생기면 `skill-surface.test.ts`가 실패해 결정을 요구한다.
+ * 이 목록에도 `PANEL_OF`에도 없는 조작형 호출은 **화면에 서는 길이 없다** —
+ * 그런 호출이 생기면 `skill-surface.test.ts`가 실패해 결정을 요구한다.
  */
-export const CARD_SKILLS: ReadonlySet<string> = new Set([
+export const CARD_CALLS: ReadonlySet<string> = new Set([
   "send_offer",
   "respond_offer",
+  // 테이블의 답이 오퍼를 판정하면 그 카드가 선다 — 말만 오간 턴은 카드 없이 지나간다
+  "speak_at_table",
   "open_renewal",
   "open_release",
   "withdraw_offer",
@@ -102,14 +108,14 @@ export const CARD_SKILLS: ReadonlySet<string> = new Set([
  *
  * `label`(무엇에 대한 것) · `text`(바뀐 값) · `note`(그 값의 갈래). 셋을 한 문자열로
  * 붙여 세우면 값도 갈래도 같은 굵기로 눌려 정작 무엇이 달라졌는지가 안 읽힌다 —
- * 그래서 코어가 나눠 내고(`SkillBriefItem`) 화면은 자리마다 톤을 달리 준다.
+ * 그래서 코어가 나눠 내고(`CommandBriefItem`) 화면은 자리마다 톤을 달리 준다.
  *
  * 갈래(`skill`)는 아이콘이 세우고, 여러 항목 중 **첫 줄에만** 머리줄(`head`)이 붙는다.
  */
 export interface HintLine {
-  /** 어느 스킬이 남긴 줄인가 — 화면이 이걸로 아이콘을 고른다 */
+  /** 어느 호출이 남긴 줄인가 — 화면이 이걸로 아이콘을 고른다 */
   skill: string;
-  /** 무엇을 한 스킬인가 — 항목 여럿의 **첫 줄에만** 붙는 머리줄 */
+  /** 무엇을 한 호출인가 — 항목 여럿의 **첫 줄에만** 붙는 머리줄 */
   head?: string;
   /** 무엇에 대한 것인가 — 값 앞에 한 톤 낮춰 선다 (`선발 투입`) */
   label?: string;
@@ -125,7 +131,7 @@ export interface HintLine {
    * `0`은 "안 움직였다"는 사실이라 색이 없을 뿐 없는 것과 다르다.
    */
   delta?: number;
-  /** 같은 스킬의 이어지는 항목 — 아이콘을 다시 세우지 않는다 */
+  /** 같은 호출의 이어지는 항목 — 아이콘을 다시 세우지 않는다 */
   cont?: boolean;
 }
 
@@ -141,9 +147,9 @@ export interface PanelHint {
 const HINT_LINES = 3;
 
 /**
- * **레일 말풍선을 갖는 스킬인가** — 채팅 칩을 눌러 그 말풍선을 다시 부를 수 있다.
+ * **레일 말풍선을 갖는 호출인가** — 채팅 칩을 눌러 그 말풍선을 다시 부를 수 있다.
  *
- * 스킬 결과가 화면에 서는 길은 둘뿐이다: 갈 장부가 있으면 **칩 + 그 탭의 말풍선**,
+ * 호출 결과가 화면에 서는 길은 둘뿐이다: 갈 장부가 있으면 **칩 + 그 탭의 말풍선**,
  * 없으면 **채팅 카드**(협상·스카우트 — `MarketCard`). 어느 쪽도 아닌 것은 아예
  * 노출하지 않는다(조회 도구는 기록조차 남기지 않고, 코어가 한 일은 `silent`).
  */
@@ -172,7 +178,7 @@ export function panelHintsOf(chat: readonly ChatTurn[]): PanelHint[] {
  * 칩 하나가 세우는 말풍선 — **채팅 칩을 눌러 다시 불러낼 때** 쓴다.
  *
  * 자동 알림은 턴 전체를 모으지만 칩은 그 칩이 진 호출만 가리킨다 — 감독이 누른
- * 것만 세워야 어느 지시의 결과인지가 분명하다. 연달아 불린 같은 스킬은 칩 하나라
+ * 것만 세워야 어느 지시의 결과인지가 분명하다. 연달아 불린 같은 호출은 칩 하나라
  * (`groupChips`) 인자는 **묶음**이고, 하나만 세우면 교체 셋 중 하나만 보인다.
  *
  * **되부른 말풍선은 접지 않는다.** 세 줄 상한은 지나가는 알림의 몫이다 — 그건
@@ -188,7 +194,7 @@ export function hintsOfChip(calls: readonly ToolCallRecord[]): PanelHint[] {
  *
  * ⚠️ **`brief`가 없는 기록은 서지 않는다.** 요약 문자열(`summary`)은 모델에게
  * 돌려주는 줄이지 화면의 항목이 아니라서, 화면이 그 줄을 갈라 세우면 코어가 쓴
- * 문장의 첫 줄이 곧 UI가 된다. 말풍선을 갖는 스킬(`PANEL_OF`)은 모두 `brief`를
+ * 문장의 첫 줄이 곧 UI가 된다. 말풍선을 갖는 호출(`PANEL_OF`)은 모두 `brief`를
  * 내므로 여기 걸리는 것은 그 규약보다 오래된 세이브의 기록뿐이고, 그 지시는
  * 채팅의 칩으로 남아 있다 (→ docs/data/game-state.md §3.6).
  */
@@ -211,7 +217,7 @@ function linesOfCall(call: ToolCallRecord): HintLine[] {
   }));
 }
 
-/** 기록 하나의 지문 — 스킬 이름과 세운 줄들. 같은 지문은 두 번 세지 않는다 */
+/** 기록 하나의 지문 — 호출 이름과 세운 줄들. 같은 지문은 두 번 세지 않는다 */
 function signatureOf(name: string, lines: readonly HintLine[]): string {
   return [name, ...lines.map((l) => `${l.label ?? ""}${l.text}`)].join(" ");
 }
@@ -225,7 +231,7 @@ function hintsOfCalls(calls: readonly ToolCallRecord[], limit = HINT_LINES): Pan
     if (panel === undefined) continue;
     const lines = byPanel.get(panel) ?? [];
     /**
-     * 같은 결과가 두 번 오면(같은 스킬 반복) 한 번만 센다 — **기록 단위로** 거른다.
+     * 같은 결과가 두 번 오면(같은 호출 반복) 한 번만 센다 — **기록 단위로** 거른다.
      * 줄 단위로 거르면 머리줄만 중복으로 걸리고 이어지는 `cont` 줄은 남아, 머리도
      * 아이콘도 없는 줄이 홀로 선다.
      */

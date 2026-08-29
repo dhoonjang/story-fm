@@ -1238,21 +1238,21 @@ id·이름·생일·주 포지션·마지막 팀·날짜·시즌·사유. 통산
 
 ## 코드 위치
 
-| 무엇                                | 어디                                                                                                                   |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| 시즌 달력·리그 편성                 | `packages/engine/src/competition/calendar.ts` · `fixtures.ts`                                                          |
-| 2군 리그 편성·간이 시뮬             | `packages/engine/src/competition/reserve.ts`                                                                           |
-| 국내 컵 · 연장·승부차기 · 리그 연기 | `competition/domestic-cup.ts` · `extra-time.ts` · `shootout.ts` · `reschedule.ts`                                      |
-| 유럽 대항전                         | `competition/europe.ts` · `euro-knockout.ts` · `euro-prize.ts`                                                         |
-| 추첨 일정                           | `competition/draw-schedule.ts`                                                                                         |
-| 시즌 리뷰·전환·승강                 | `competition/season.ts` · `competition/promotion.ts`                                                                   |
-| 시상 선정·동점 처리                 | `competition/season.ts` (`seasonAwards`) · 집계·사슬은 `competition/leaderboard.ts`                                    |
-| 은퇴 판정·예고·명부                 | `competition/season.ts` (`retirementVerdict`·`declareRetirements`·`withdrawRetirement`)                                |
-| 유스 인테이크 — 후보·결정·기본값    | `competition/season.ts` (`youthIntakeOf`·`standYouthCandidates`·`settleYouthIntake`) · `skills/index.ts` (`signYouth`) |
-| 마지막 홈경기 회견                  | `packages/engine/src/club/press.ts` (`farewell`)                                                                       |
-| 오프시즌 사실 블록(은퇴·시상·유스)  | `packages/agents/src/gm-input.ts`                                                                                      |
-| 2군 훈련 방침                       | `domain/records.ts` (코드) · `squad/training-plan.ts` (축 묶음·배율) · `squad/development.ts` (적용)                   |
-| tick·시간 진행                      | `packages/engine/src/core/tick.ts` · `core/dates.ts`                                                                   |
-| 훈련 계획·결산                      | `packages/engine/src/squad/training-plan.ts` · `training-report.ts`                                                    |
-| 온보딩                              | `packages/engine/src/world/onboarding.ts`                                                                              |
-| 온보딩 화면(리그→팀→감독 단계)      | `apps/web/app/new/page.tsx`                                                                                            |
+| 무엇                                | 어디                                                                                                                     |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 시즌 달력·리그 편성                 | `packages/engine/src/competition/calendar.ts` · `fixtures.ts`                                                            |
+| 2군 리그 편성·간이 시뮬             | `packages/engine/src/competition/reserve.ts`                                                                             |
+| 국내 컵 · 연장·승부차기 · 리그 연기 | `competition/domestic-cup.ts` · `extra-time.ts` · `shootout.ts` · `reschedule.ts`                                        |
+| 유럽 대항전                         | `competition/europe.ts` · `euro-knockout.ts` · `euro-prize.ts`                                                           |
+| 추첨 일정                           | `competition/draw-schedule.ts`                                                                                           |
+| 시즌 리뷰·전환·승강                 | `competition/season.ts` · `competition/promotion.ts`                                                                     |
+| 시상 선정·동점 처리                 | `competition/season.ts` (`seasonAwards`) · 집계·사슬은 `competition/leaderboard.ts`                                      |
+| 은퇴 판정·예고·명부                 | `competition/season.ts` (`retirementVerdict`·`declareRetirements`·`withdrawRetirement`)                                  |
+| 유스 인테이크 — 후보·결정·기본값    | `competition/season.ts` (`youthIntakeOf`·`standYouthCandidates`·`settleYouthIntake`) · `commands/index.ts` (`signYouth`) |
+| 마지막 홈경기 회견                  | `packages/engine/src/club/press.ts` (`farewell`)                                                                         |
+| 오프시즌 사실 블록(은퇴·시상·유스)  | `packages/agents/src/gm-input.ts`                                                                                        |
+| 2군 훈련 방침                       | `domain/records.ts` (코드) · `squad/training-plan.ts` (축 묶음·배율) · `squad/development.ts` (적용)                     |
+| tick·시간 진행                      | `packages/engine/src/core/tick.ts` · `core/dates.ts`                                                                     |
+| 훈련 계획·결산                      | `packages/engine/src/squad/training-plan.ts` · `training-report.ts`                                                      |
+| 온보딩                              | `packages/engine/src/world/onboarding.ts`                                                                                |
+| 온보딩 화면(리그→팀→감독 단계)      | `apps/web/app/new/page.tsx`                                                                                              |

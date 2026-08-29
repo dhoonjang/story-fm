@@ -34,8 +34,8 @@
 | 임대   | `send_offer` kind=loan(빌려옴) / loan_out(빌려줌)                                                                     | **양쪽 다 흥정** — 같은 협상 테이블                                                                                                                                                                                                                                                                                                                 |
 
 - 오퍼 판정은 누가 답할 차례인지 협상이 안다(`respond_offer`). **차례에 따라 판정하는
-  모델도 갈린다** — 우리 오퍼에 답하는 것은 별도 에이전트(`negotiator`), 들어온 오퍼에
-  답하는 것은 감독의 뜻을 읽는 GM이다 (§12-1).
+  답하는 머리도 갈린다** — 우리 오퍼에 온 답은 메인 채팅을 읽지 않는 협상 상대 호출이 앵커 안에서 판정하고,
+  들어온 오퍼에 답하는 것은 감독의 뜻을 읽는 GM이다 (§12-1).
 - **내보내는 딜의 조정은 깎아 부르는 것**(우리 호가 미만 · 기대치의 55% 이상).
   기대치는 갈래의 눈금을 쓴다 — 매각은 시장가, 임대 송출은 임대료
   (`LOAN_FEE_RATE`)다. 임대를 시장가로 재면 하한이 임대료의 일곱 배라 사는 쪽이
@@ -120,7 +120,7 @@ GM은 감독이 방금 내린 결정의 반대를 장면으로 확정한다.
 
 ## 1-1. 이적 요청 — 선수가 시작하는 매각
 
-**요청은 사건이고 감독의 답은 스킬이다.** 선수가 나가겠다고 말하는 순간 코어가
+**요청은 사건이고 감독의 답은 명령이다.** 선수가 나가겠다고 말하는 순간 코어가
 장부에 한 줄(`state.transferRequests` — `TransferRequest { gamePlayerId, since,
 reason, answeredOn?, answer? }`)을 세우고, 감독은
 `respond_transfer_request(playerId, accept | refuse)`로 답한다. **답할 기한은
@@ -1320,15 +1320,17 @@ tick이 매일 시장을 굴린다 — 1부 클럽당 시즌 이적 3.4건 · �
 - **조항이 살아 있는지는 파생으로 읽는다** (§5-3). 그 선수의 계약이 아직 무는
   쪽에 있는가로 재므로, 죽음을 따로 적었다가 어긋날 자리가 없다.
 
-## 12-1. 협상의 상대는 GM이 아니다 (`market/counterparty.ts`)
+## 12-1. 협상의 상대는 별도 호출이 연기하되, 폭은 코어가 정한다 (`market/counterparty.ts`)
 
-**한 모델이 감독의 요구와 상대의 답을 같은 턴에 쓰면 협상이 감독 편으로 기운다.**
-그래서 *우리가 넣은 오퍼에 상대가 답하는 자리*만 GM 턴 밖의 별도 호출로 뺐다
-(→ [../llm/agents.md](../llm/agents.md) §4-1). 나머지는 그대로다 — 들어온 오퍼에
-답하는 것은 세계의 판단이 아니라 **감독의 뜻**이라 GM이 계속 읽는다.
+**우리가 넣은 오퍼에 상대가 답하는 자리**는 GM이 아니다 — 코어가 서류와 앵커를 내고,
+테이블과 같은 호출(`negotiation-table` → [../llm/agents.md](../llm/agents.md) §4-1)이
+상대가 되어 답하며, 코어가 앵커 ± 한도로 잘라 반영한다. GM은 감독이 한 말을 전부 읽는
+머리라 상대가 되면 감독의 속을 다 본 사람이 된다. 들어온 오퍼에 답하는 것은 세계의
+판단이 아니라 **감독의 뜻**이라 GM이 계속 읽는다(`respond_offer`).
 
-- **호출은 평시 턴이 시작할 때, 장면보다 먼저**다. 그날 답이 도착한 협상마다 한 번씩
-  돌고 코어가 그 자리에서 반영하므로, GM은 판정하지 않고 **전한다**.
+- **답하는 때는 답할 날이 된 그 평시 턴이 열리기 전**이다(`openLetter`). 편지는
+  테이블의 장부 줄로 남고, 호출이 실패하면 코어가 앵커를 그대로 반영한다 — 답이 도착한
+  자리를 비워 두지 않는다. 상대의 말은 `<letters>`로 GM에게 가고 GM은 장면으로 옮긴다.
 - **앵커는 `dealOdds`의 확률 하나에서 나온다.** 50% 이상이면 수락, 25% 이상이면 조정,
   그 아래는 결렬(`COUNTERPARTY_ACCEPT_AT`·`COUNTERPARTY_COUNTER_AT`). 두 문턱은 설득이
   연 여유(§4)만큼 함께 내려간다.
@@ -1340,7 +1342,7 @@ tick이 매일 시장을 굴린다 — 1부 클럽당 시즌 이적 3.4건 · �
   **±1년**(`COUNTERPARTY_YEARS_BAND`)이고 그 위에 §1의 갈래별 범위가 다시 걸린다.
 - ⚠️ **범위는 한 벌이다** (`counterBoundsOf`). `respondOffer`의 검증과 클램프가 같은
   함수를 읽는다 — 클램프가 자기 범위를 따로 적으면 검증이 거절할 값을 클램프가 만든다.
-- **모델이 죽어도 협상은 굴러간다.** 두 번 실패하면 앵커가 그대로 반영된다. 답이 도착한
+- **모델이 답하지 않아도 협상은 굴러간다.** 앵커가 그대로 판정이다. 답이 도착한
   자리를 비워 두면 감독은 다음 턴에도 같은 화면을 보고, 기한(`expiresOn`)은 그동안
   줄어든다.
 - **협상 서류에는 사람이 실린다** — 선수 본인과 **그를 대리하는 에이전트**의 인물지가
@@ -1366,19 +1368,49 @@ tick이 매일 시장을 굴린다 — 1부 클럽당 시즌 이적 3.4건 · �
 - 서류에는 **경쟁 입찰**(§1-2)도 실린다. 「다른 구단이 있다」는 상대의 말은 그 줄이
   섰을 때만 사실이다.
 
+## 12-2. 테이블 — 마주 앉으면 그 자리에서 답한다 (`market/table.ts`)
+
+편지로 보낸 오퍼는 며칠 뒤에 답이 온다(§12-1). **테이블**은 그 협상 위에 마주 앉는
+자리다 — 감독이 상대에게 직접 말을 건네면(`speak_at_table`) 상대가 그 자리에서 답하고,
+그 답을 쓰는 것은 GM이 아니라 **메인 채팅을 읽지 않는 별도 호출**이다
+(→ [../llm/agents.md](../llm/agents.md) §4-1). 상대는 감독이 이사회나 라커룸에 한 말을
+모른다. 그래서 감독이 캐낼 것과 숨길 것이 생긴다.
+
+- **테이블은 협상 위에 선다.** 협상이 없으면 앉을 수 없다 — 먼저 오퍼나 재계약을 연다.
+  첫 말에 세워지고(`sitAtTable`), 협상이 사는 동안 하나다. 오퍼와 답은 그대로 협상의
+  라운드이고, 테이블이 더하는 것은 그 사이의 **말**(`lines` — 감독·상대·장부)과 **인내**다.
+- **답을 기다리던 오퍼는 오늘로 당겨진다.** 마주 앉은 자리에서 "답은 나흘 뒤"는 없다 —
+  앉는 순간 `respondsOn`이 오늘이 되고, 이어지는 답이 같은 턴에 판정한다. 판정은 §12-1의
+  앵커 ± 한도 그대로다(`settleCounterparty`). 조건 없는 말만 건네면 판정 없이 말만 오간다.
+- **인내는 되돌아오지 않는 자원이다.** 앉을 때 `TABLE_PATIENCE_BASE`(4)에 대리인 원형의
+  `patience`(§3)를 곱한 값(법률가형 5 · 제국형 4 · 승부사형 3, 하한 2)으로 시작해,
+  모욕·협박(`hostile`)에 한 칸, 사실과 다른 논거에 한 칸 깎이고, **새로 확인된 논거**에 한
+  칸 돌아온다(상한은 시작값). 0이면 상대가 일어나 협상은 **결렬**(`rejected`)이다 —
+  기한을 건 쪽이 문을 닫은 것과 같은 결이라 이번 창에서 다시 열 수 없다.
+- **논거는 다음 답부터 문을 연다.** 상대는 논거를 듣기 전의 앵커를 보고 말했으므로, 이번
+  답의 판정은 그 앵커로 자르고 확인된 논거는 협상의 `pitched`에 쌓여 다음 답의 문턱을
+  내린다(§4). 사실 대조는 오퍼에 실린 논거와 같은 함수다(`evaluatePitch`).
+- **태도는 서사의 눈금이다.** 상대의 `stance`(누그러진다·그대로·굳는다·일어서려 한다)는
+  줄에 남지만 장부를 움직이지 않는다 — 일어나는 것은 인내가 정하고, 인내가 남아 있는데
+  모델이 `leaving`을 내면 `cooling`으로 내려간다.
+- **호출이 실패해도 협상은 멈추지 않는다.** 상대는 말없이 서류대로 움직인다 — 앵커가
+  그대로 판정이고, 그 사실이 장부 줄로 남는다.
+- **mock 모드의 GM은 테이블에 앉지 않는다** — 그 자리에는 편지(§12-1)만 있다.
+
 ## 코드 위치
 
-| 무엇                         | 어디                                                                      |
-| ---------------------------- | ------------------------------------------------------------------------- |
-| 시장가·딜 확률·근거          | `packages/engine/src/market/market.ts`                                    |
-| 협상·오퍼·재계약·메디컬 실행 | `market/negotiation.ts` · `market/medical.ts`                             |
-| 조정 범위 (검증·클램프 공용) | `market/counter-bounds.ts`                                                |
-| 교섭 상대 앵커·한도          | `market/counterparty.ts` (+ `agents/src/negotiator.ts`)                   |
-| 조건부 조항(셀온·되사기)     | `market/clauses.ts` (+ `domain/records.ts`의 눈금)                        |
-| 설득                         | `market/persuasion.ts` (+ `domain/persuasion.ts`)                         |
-| 관심 사다리                  | `market/interest.ts` (읽는 자는 `core/state.ts`)                          |
-| 에이전트 원형 → 시장 프로필  | `market/agent-profile.ts` (원형 키는 `domain/persona.ts`)                 |
-| AI 시장·무소속·계약 해지     | `market/ai-market.ts` · `market/departures.ts`                            |
-| 감독 시장·유저 경질          | `market/manager-market.ts`                                                |
-| 주급                         | `packages/engine/src/world/wages.ts`                                      |
-| 등록 명단                    | `packages/domain/src/squad-rules.ts` · `engine/src/squad/registration.ts` |
+| 무엇                         | 어디                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------ |
+| 시장가·딜 확률·근거          | `packages/engine/src/market/market.ts`                                         |
+| 협상·오퍼·재계약·메디컬 실행 | `market/negotiation.ts` · `market/medical.ts`                                  |
+| 조정 범위 (검증·클램프 공용) | `market/counter-bounds.ts`                                                     |
+| 교섭 상대 앵커·한도          | `market/counterparty.ts` (+ `agents/src/counterparty-brief.ts`)                |
+| 테이블 — 인내·줄·판정 반영   | `market/table.ts` (+ `agents/src/negotiation-table.ts` · `table-situation.ts`) |
+| 조건부 조항(셀온·되사기)     | `market/clauses.ts` (+ `domain/records.ts`의 눈금)                             |
+| 설득                         | `market/persuasion.ts` (+ `domain/persuasion.ts`)                              |
+| 관심 사다리                  | `market/interest.ts` (읽는 자는 `core/state.ts`)                               |
+| 에이전트 원형 → 시장 프로필  | `market/agent-profile.ts` (원형 키는 `domain/persona.ts`)                      |
+| AI 시장·무소속·계약 해지     | `market/ai-market.ts` · `market/departures.ts`                                 |
+| 감독 시장·유저 경질          | `market/manager-market.ts`                                                     |
+| 주급                         | `packages/engine/src/world/wages.ts`                                           |
+| 등록 명단                    | `packages/domain/src/squad-rules.ts` · `engine/src/squad/registration.ts`      |

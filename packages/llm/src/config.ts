@@ -7,12 +7,13 @@ import type { LlmProvider } from "./game-llm";
 /** 실제로 LLM을 호출하는 단위 — 설정과 사용량 계측이 이 이름을 공유한다. */
 export const AGENT_NAMES = [
   "gm",
-  "match-intent",
-  "match-caster",
-  "match-rater",
+  "match-gm",
+  "tactic-orders",
+  "training-orders",
+  "market-orders",
+  "finalize-match",
+  "negotiation-table",
   "training-rater",
-  "mood-rater",
-  "negotiator",
   "history-compactor",
   "onboarding-judge",
 ] as const;
@@ -157,12 +158,13 @@ const LlmConfigFileSchema = z
     agents: z
       .object({
         gm: RawAgentConfigSchema,
-        "match-intent": RawAgentConfigSchema,
-        "match-caster": RawAgentConfigSchema,
-        "match-rater": RawAgentConfigSchema,
+        "match-gm": RawAgentConfigSchema,
+        "tactic-orders": RawAgentConfigSchema,
+        "training-orders": RawAgentConfigSchema,
+        "market-orders": RawAgentConfigSchema,
+        "finalize-match": RawAgentConfigSchema,
+        "negotiation-table": RawAgentConfigSchema,
         "training-rater": RawAgentConfigSchema,
-        "mood-rater": RawAgentConfigSchema,
-        negotiator: RawAgentConfigSchema,
         "history-compactor": RawAgentConfigSchema,
         "onboarding-judge": RawAgentConfigSchema,
       })

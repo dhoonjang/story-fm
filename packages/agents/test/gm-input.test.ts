@@ -49,6 +49,7 @@ import {
   buildGmReference,
   buildGmStateNote,
   buildGmTools,
+  buildToolSpecs,
   buildMatchReference,
   describeCharacters,
   describeClub,
@@ -458,6 +459,52 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
     const note = buildGmStateNote(state);
     expect(note).toContain("<cues>");
     expect(note).toContain(target.name);
+  });
+
+  /**
+   * 경기 → 평시 다리 — 팀토크가 backfired 했는지, 누가 퇴장·교체로 나갔는지는 서사
+   * 줄로는 `<recent>`에 거의 들지 못했다. 코어가 장부(호출 기록·사건 목록)에서 뽑아
+   * 직전 경기 블록에 세운다 (agents.md §5).
+   */
+  it("직전 경기 블록에 라커룸 결과와 그라운드를 떠난 사람이 선다", () => {
+    const state = game();
+    const match = state.matches.find(
+      (m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
+    )!;
+    const side = match.homeTeamId === state.userTeamId ? "home" : "away";
+    const [sentOff, out, sub] = userPlayers(state).filter((p) => p.squadLevel === "first");
+    match.date = state.date;
+    match.result = {
+      homeGoals: 1,
+      awayGoals: 2,
+      scorers: [],
+      ratings: {},
+      events: [
+        { minute: 63, type: "red_card", team: side, actors: [sentOff!.id], causes: [] },
+        { minute: 70, type: "substitution", team: side, actors: [out!.id, sub!.id], causes: [] },
+      ],
+    };
+    state.chat.push({
+      role: "model",
+      text: "@중계: 라커룸이 무겁습니다.",
+      toolCalls: [
+        {
+          name: "team_talk",
+          summary: "팀토크",
+          input: { occasion: "half", outcome: "backfired", intensity: 3 },
+        },
+      ],
+      at: state.date,
+      inMatch: true,
+      matchId: match.id,
+    });
+
+    const note = buildGmStateNote(state);
+    const block = note.slice(note.indexOf("<last_match>"), note.indexOf("</last_match>"));
+    expect(block).toContain("- 라커룸: 하프타임 팀토크 backfired");
+    expect(block).toContain(`퇴장 ${sentOff!.name}(63′)`);
+    expect(block).toContain(`교체 아웃 ${out!.name}(70′)`);
+    expect(block).not.toContain(sub!.name);
   });
 
   it("스카우트 파견을 주의 신호로 알린다", () => {
@@ -1023,13 +1070,13 @@ describe("도구 구성", () => {
   it("시간을 흘리는 도구는 없다 — 시계는 장면 헤더가 움직인다", () => {
     const state = game();
     const names = buildGmTools(state, []).map((t) => t.name);
-    // 시간 진행은 스킬이 아니다 — 모델이 첫 줄 헤더로 선언하고 코어가 받는다
+    // 시간 진행은 도구가 아니다 — 모델이 첫 줄 헤더로 선언하고 코어가 받는다
     expect(names).not.toContain("advance_time");
     expect(names).not.toContain(TIME_PASSED);
     expect(names).not.toContain(MATCH_ADVANCED);
   });
 
-  it("get_league는 상대·방향·개수로 특정 경기를 찾아준다", () => {
+  it("get_league는 상대·방향·개수로 특정 경기를 찾아준다", async () => {
     const state = game();
     const tools = buildGmTools(state, []);
     const getLeague = tools.find((t) => t.name === "get_league")!;
@@ -1037,7 +1084,7 @@ describe("도구 구성", () => {
     for (const key of ["opponent", "competition", "when", "from", "to", "round"]) {
       expect(Object.keys(getLeague.inputSchema.properties ?? {})).toContain(key);
     }
-    const res = getLeague.handle({
+    const res = await getLeague.handle({
       view: "fixtures",
       opponent: "맨유",
       when: "upcoming",
@@ -1047,54 +1094,54 @@ describe("도구 구성", () => {
     expect(res.message).toContain("맨체스터 유나이티드");
   });
 
-  it("get_squad는 현재 선발 11명을 그대로 읽어준다", () => {
+  it("get_squad는 현재 선발 11명을 그대로 읽어준다", async () => {
     const state = game();
     const tools = buildGmTools(state, []);
-    const res = tools.find((t) => t.name === "get_squad")!.handle({ role: "starting" });
+    const res = await tools.find((t) => t.name === "get_squad")!.handle({ role: "starting" });
     expect(res.ok).toBe(true);
     expect(res.message.split("\n").filter((l) => l.startsWith("  "))).toHaveLength(11);
   });
 
-  it("조회 도구는 호출해도 기록을 남기지 않는다", () => {
+  it("조회 도구는 호출해도 기록을 남기지 않는다", async () => {
     const state = game();
     const calls: GmToolCall[] = [];
     const tools = buildGmTools(state, calls);
     const search = tools.find((t) => t.name === "search_players")!;
-    const res = search.handle({ team: "mine", limit: 3 });
+    const res = await search.handle({ team: "mine", limit: 3 });
     expect(res.ok).toBe(true);
     expect(calls).toHaveLength(0);
   });
 
-  it("시간 이동 중 방금 도착한 오퍼는 같은 턴에 판정하지 못한다", () => {
+  it("시간 이동 중 방금 도착한 오퍼는 같은 턴에 판정하지 못한다", async () => {
     const state = game();
     const calls: GmToolCall[] = [];
     const negotiationId = "neg-just-arrived";
-    const tools = buildGmTools(state, calls, {
+    const tools = buildToolSpecs(state, calls, {
       deferNegotiationIds: new Set([negotiationId]),
     });
     const respond = tools.find((t) => t.name === "respond_offer")!;
 
-    const res = respond.handle({ negotiationId, verdict: "accept" });
+    const res = await respond.handle({ negotiationId, verdict: "accept" });
 
     expect(res.ok).toBe(false);
     expect(res.message).toContain("감독에게 조건을 먼저 보고");
     expect(calls).toHaveLength(0);
   });
 
-  it("스킬이 불린 자리를 남긴다 — 화면이 장면 중간에 칩을 세운다", () => {
+  it("호출이 불린 자리를 남긴다 — 화면이 장면 중간에 칩을 세운다", async () => {
     const state = game();
     const calls: GmToolCall[] = [];
-    const tools = buildGmTools(state, calls);
+    const tools = buildToolSpecs(state, calls);
     const captain = tools.find((t) => t.name === "set_captain")!;
     const target = userPlayers(state)[0]!;
     // 헤더 한 줄 + 지문 + 대사까지 쓴 뒤에 불렸다 (빈 줄은 세지 않는다)
     const written = "[2026-08-15 AM 9:00]\n@: *감독실*\n\n@손흥민: 알겠습니다.";
-    const res = captain.handle({ playerId: target.id }, { text: written });
+    const res = await captain.handle({ playerId: target.id }, { text: written });
     expect(res.ok, res.message).toBe(true);
     expect(calls[0]!.line).toBe(3);
   });
 
-  it("stance도 decline도 없으면 회견이 닫히지 않는다 — 감독이 하지 않은 거절이다", () => {
+  it("stance도 decline도 없으면 회견이 닫히지 않는다 — 감독이 하지 않은 거절이다", async () => {
     const state = game();
     const calls: GmToolCall[] = [];
     const respond = buildGmTools(state, calls).find((t) => t.name === "respond_to_media")!;
@@ -1109,21 +1156,21 @@ describe("도구 구성", () => {
     });
     const beforeMedia = state.manager.reputation.media;
 
-    const res = respond.handle({});
+    const res = await respond.handle({});
 
     expect(res.ok).toBe(false);
     expect(pendingPress(state)).not.toBeNull();
     expect(state.manager.reputation.media).toBe(beforeMedia);
     expect(calls).toHaveLength(0);
     // 거절은 감독이 거절했을 때만 — 명시하면 그때는 닫힌다
-    expect(respond.handle({ decline: true }).ok).toBe(true);
+    expect((await respond.handle({ decline: true })).ok).toBe(true);
     expect(pendingPress(state)).toBeNull();
   });
 
-  it("자리를 안 넘기면 남기지 않는다 — 옛 기록처럼 맨 앞에 선다", () => {
+  it("자리를 안 넘기면 남기지 않는다 — 옛 기록처럼 맨 앞에 선다", async () => {
     const state = game();
     const calls: GmToolCall[] = [];
-    const tools = buildGmTools(state, calls);
+    const tools = buildToolSpecs(state, calls);
     tools.find((t) => t.name === "set_captain")!.handle({ playerId: userPlayers(state)[0]!.id });
     expect(calls[0]!.line).toBeUndefined();
   });

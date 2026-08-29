@@ -41,6 +41,7 @@ import {
   standTransferRequest,
   teamNameIn,
   transferRequestOf,
+  userPlayerById,
   userPlayers,
   withdrawTransferRequest,
 } from "../core/state";
@@ -50,7 +51,8 @@ import { buildSeasonCalendar, diffDays } from "../competition/calendar";
 import { fundingFactOf } from "./manager-wallet";
 import { boardExpectation, computeStandings } from "../competition/season";
 import { formLabel } from "../squad/form";
-import { issueReasonText } from "../squad/mood";
+import { applyMoodNotes, issueReasonText, type MoodLine } from "../squad/mood";
+import { receptivityLine, receptivityOf } from "../squad/receptivity";
 import { leaderGroupOf, leaderRoleOf, leaderWeightOf } from "../squad/hierarchy";
 import { recentOutcomes } from "../squad/slump";
 import { agentForPlayer, ownerOf } from "../world/persona";
@@ -79,10 +81,10 @@ import {
   stanceRow,
   STANCE_KO,
 } from "./press";
-import type { PromiseInput, SkillResult } from "../skills";
+import type { PromiseInput, CommandResult } from "../commands";
 // 면담과 **같은 조각**을 쓴다 — 같은 말이 자리마다 다른 줄로 서지 않게 (people.md §5-2)
-import { promisePiece } from "../skills";
-import { deltaItems, item } from "../skills/brief";
+import { promisePiece } from "../commands";
+import { deltaItems, item } from "../commands/brief";
 import { openPromise, squadStatusOf, startsInWindow } from "../squad/promises";
 
 /**
@@ -1584,8 +1586,10 @@ export function respondToApproach(
      * (career.md §5.2 「흥정」).
      */
     counter?: DemandCounter;
+    /** 잔향 — 찾아온 당사자에게 남는 심경 한 문장. 면접·주장·구단주 자리에는 버린다 */
+    mood?: MoodLine;
   },
-): SkillResult {
+): CommandResult {
   const approach = pendingApproach(state);
   if (!approach) return { ok: false, message: "지금 답할 자리가 없습니다" };
   /**
@@ -1615,6 +1619,12 @@ export function respondToApproach(
    * 맞는지는 `openPromise`가 다시 본다.
    */
   const inTheRoom = approach.channel === "player" || approach.channel === "agent";
+  if (input.mood && inTheRoom && approach.about) {
+    applyMoodNotes(state, [{ ...input.mood, playerId: approach.about }], new Set([approach.about]));
+  }
+  // 다가옴의 스탠스는 판정이 아니라 자르지 않는다 — 그 자리에는 사실 줄만 선다 (career.md §2)
+  const subject = approach.about ? userPlayerById(state, approach.about) : null;
+  const receptivity = subject ? ` · ${receptivityLine(receptivityOf(state, subject.id))}` : "";
   const promised = input.promise
     ? promisePiece(
         inTheRoom && approach.about
@@ -1654,7 +1664,8 @@ export function respondToApproach(
     tone: net >= 0 ? ("good" as const) : ("bad" as const),
     message:
       `${approach.speakerId} 응대(${label})${effectSuffix(effect)}${promised ? promised.text : ""}` +
-      (countered ? ` · ${countered.message}` : ""),
+      (countered ? ` · ${countered.message}` : "") +
+      receptivity,
     brief: {
       head: `${approach.speakerId} 응대(${label})`,
       items: [

@@ -315,6 +315,45 @@ export function clampStartingWallet(raw: number | undefined, anchor: number): nu
   return Math.min(START_MAX_WALLET, Math.max(0, stepped(Math.min(high, Math.max(low, raw)))));
 }
 
+/** 판정이 한 축을 앵커에서 움직일 수 있는 폭 (career.md §1) */
+export const ATTRIBUTE_JUDGE_BAND = 8;
+/** 다섯 축의 합이 앵커의 합에서 움직일 수 있는 폭 — 결을 옮기되 총량은 못 늘린다 */
+export const ATTRIBUTE_SUM_BAND = 10;
+
+/**
+ * 판정 능력치를 **앵커 ± 한도** 안으로 — 판정이 없으면 앵커(휴리스틱)가 그대로 답이다.
+ *
+ * 축마다 `ATTRIBUTE_JUDGE_BAND`, 합은 `ATTRIBUTE_SUM_BAND`다. 합이 넘치면 넘친 쪽의
+ * 델타를 비례 축소한다 — 배경의 결(어느 축이 두꺼운가)은 살리고 총량은 앵커가 쥔다.
+ * 시작 범위(20~80)는 그 위에 다시 걸린다.
+ */
+export function clampJudgedAttributes(
+  raw: Partial<ManagerAttributes> | undefined,
+  anchor: ManagerAttributes,
+): ManagerAttributes {
+  if (!raw) return anchor;
+  const delta = Object.fromEntries(
+    MANAGER_AXES.map((a) => {
+      const value = raw[a];
+      if (value === undefined || !Number.isFinite(value)) return [a, 0];
+      return [
+        a,
+        Math.max(
+          -ATTRIBUTE_JUDGE_BAND,
+          Math.min(ATTRIBUTE_JUDGE_BAND, Math.round(value) - anchor[a]),
+        ),
+      ];
+    }),
+  ) as ManagerAttributes;
+  const sum = MANAGER_AXES.reduce((s, a) => s + delta[a], 0);
+  const scale = Math.abs(sum) > ATTRIBUTE_SUM_BAND ? ATTRIBUTE_SUM_BAND / Math.abs(sum) : 1;
+  return clampStartingAttributes(
+    Object.fromEntries(
+      MANAGER_AXES.map((a) => [a, anchor[a] + delta[a] * scale]),
+    ) as ManagerAttributes,
+  );
+}
+
 /**
  * 배경 → 시작 능력치.
  *

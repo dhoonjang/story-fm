@@ -17,7 +17,7 @@ import {
  * 문구도 픽션 밖의 말투를 쓴다.
  *
  * 한 채팅 턴은 LLM 호출 하나가 아니다 — 평시 턴은 `gm` + 결산 rater, 경기 턴은
- * `match-intent`·`match-caster` + `match-rater`가 함께 돈다. 그 왕복 전부가
+ * `tactic-orders`·`match-gm`가 함께 돈다(종료 턴은 캐스터가 결산 왕복을 더 갖는다). 그 왕복 전부가
  * 라우트가 준 **순서 그대로** 선다 (docs/llm/models.md §5).
  */
 
@@ -116,7 +116,7 @@ const num = (value: number) => value.toLocaleString("ko-KR");
  * 그 조각을 누가 썼는가 — **모델이 쓴 것만 output이다.**
  *
  * `assistant`(Anthropic·OpenAI)와 `model`(Gemini)만 모델의 몫이고, 나머지는 전부
- * 모델에 **들어간** 것이다: 우리 발화도, 스킬이 돌려준 `tool_result`도 이력에서는
+ * 모델에 **들어간** 것이다: 우리 발화도, 호출이 돌려준 `tool_result`도 이력에서는
  * user·tool 역할로 적힌다(Anthropic은 tool_result까지 `role:"user"`다).
  */
 function wroteIt(role: string): "in" | "out" | "unknown" {

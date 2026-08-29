@@ -255,7 +255,7 @@ describe("연속 명단 제외는 날짜순 직전 세 경기로 센다", () => 
     played(state, "m-cup-old", addDays(state.date, -21), [target.id]);
 
     const cue = speakerCues(state, 40).find((c) => c.playerId === target.id);
-    expect(cue?.fact).toBe("3경기 연속 명단 제외");
+    expect(cue?.fact).toMatch(/^3경기 연속 명단 제외/u);
   });
 
   it("직전 경기에 나섰으면 근황이 아니다 — 배열 끝이 옛 대진이어도", () => {

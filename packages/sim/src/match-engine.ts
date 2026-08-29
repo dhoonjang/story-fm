@@ -1622,6 +1622,15 @@ export const AI_SHAPE_HOLD_MINUTE = 80;
 const AI_SHIFT_EARLIEST_MINUTE = 55;
 /** 남은 시간이 없다고 보는 분 — 여기서부터 같은 스코어에도 판단이 과감해진다 */
 const AI_SHIFT_URGENT_MINUTE = 72;
+/**
+ * **상대 벤치가 우리 전술을 읽고 맞서는 확률** — 정지점마다 한 번 굴린다. ⚠️ 밸런스 값.
+ *
+ * 1이면 상대는 늘 정답을 두는 기계가 되고, 0이면 스코어만 보는 고정 표적이다. 셋 중
+ * 하나꼴이면 감독이 "저쪽이 반응했다"를 경기마다 한두 번 겪되 예측하지는 못한다.
+ */
+export const AI_COUNTER_CHANCE = 0.35;
+/** 스코어 판단에 곁들이는 축이 붙을 확률 — 같은 상황이 같은 손으로만 오지 않게 */
+export const AI_VARIANT_CHANCE = 0.5;
 
 /**
  * 벤치가 판을 다시 깔려는 **의도** — 어느 프리셋인지는 여기서 고르지 않는다.
@@ -1630,6 +1639,38 @@ const AI_SHIFT_URGENT_MINUTE = 72;
  * 구간 시뮬이 "3-5-2"를 직접 고르면 센터백 둘로 백3에 서는 팀이 나온다.
  */
 export type AiShapeIntent = "chase" | "hold";
+/** 판단의 갈래 — 스코어를 쫓거나 잠그거나, 상대의 전술에 맞서거나 (`tactical_shift`의 코드) */
+export type AiShiftKind = AiShapeIntent | "counter";
+
+/**
+ * 상대(감독)의 전술을 읽고 맞서는 손 — 후보 여럿 중 하나를 난수가 고른다.
+ *
+ * 값은 지금 걸린 축에서 한 눈금이고, 상한(`AI_SHIFT_BOUND`)은 호출부가 킥오프 값에
+ * 건다. 조건은 상성 표(`tactical-counters.ts`)와 같은 낱말로 읽는다 — 높은 압박에는
+ * 빠르게 넘기거나 라인을 내리고, 높은 라인에는 뒷공간을 노리고, 들이닥치는 상대에는
+ * 내려서서 받아치고, 내려앉은 상대는 두드린다.
+ */
+function counterCandidates(
+  current: TacticsSpec,
+  opponent: TacticsSpec,
+  diff: number,
+): Partial<Record<AiShiftAxis, number>>[] {
+  const out: Partial<Record<AiShiftAxis, number>>[] = [];
+  if (opponent.pressing >= 4) {
+    out.push({ tempo: current.tempo + 1 }, { defensiveLine: current.defensiveLine - 1 });
+  }
+  if (opponent.defensiveLine >= 4) {
+    out.push({ tempo: current.tempo + 1 }, { mentality: current.mentality + 1 });
+  }
+  if (opponent.mentality >= 4 && diff >= 0) {
+    out.push({ defensiveLine: current.defensiveLine - 1 }, { mentality: current.mentality - 1 });
+  }
+  if (opponent.mentality <= 2 && diff <= 0) {
+    out.push({ mentality: current.mentality + 1 }, { pressing: current.pressing + 1 });
+  }
+  if (opponent.pressing <= 2) out.push({ tempo: current.tempo - 1 });
+  return out;
+}
 
 /** 벤치가 이 정지점에 옮기려는 것 — 축과 모양 (둘 다 없으면 판단 자체가 null이다) */
 export interface AiBenchShift {
@@ -1669,10 +1710,17 @@ export function planAiTacticalShift(
   halftime = false,
   /** 이 경기에서 이미 모양을 바꿨는가 — 경기당 한 번이다 */
   shapeMoved = false,
+  /**
+   * 상대(감독 팀)의 지금 전술과 난수 — 둘 다 있어야 벤치가 상대를 읽는다. 없으면
+   * 스코어와 시간만 보는 결정적 판단이다 (테스트·간이 시뮬).
+   */
+  options: { opponent?: TacticsSpec; rng?: () => number } = {},
 ): AiBenchShift | null {
   const minute = ledger.minute;
   // 전반 중에는 웬만하면 그대로 간다 — 라커룸(`halftime`)은 이 문턱을 지나지 않는다
   if (!halftime && minute < AI_SHIFT_EARLIEST_MINUTE) return null;
+  const rng = options.rng;
+  const roll = (chance: number): boolean => rng !== undefined && rng() < chance;
   const mine = side === "home" ? ledger.score.home : ledger.score.away;
   const theirs = side === "home" ? ledger.score.away : ledger.score.home;
   const diff = mine - theirs;
@@ -1683,7 +1731,7 @@ export function planAiTacticalShift(
 
   const settled = (
     /** 이 판단의 갈래 — 태그의 코드이자 축이 움직인 방향이다 */
-    intent: AiShapeIntent,
+    intent: AiShiftKind,
     wanted: Partial<Record<AiShiftAxis, number>>,
     shape: AiShapeIntent | undefined,
   ): AiBenchShift | null => {
@@ -1715,7 +1763,8 @@ export function planAiTacticalShift(
     if ((urgent || halftime) && diff <= -2) {
       push.defensiveLine = current.defensiveLine + 1;
     }
-    if (halftime) {
+    // 라커룸에서는 압박까지 올리고, 그 밖에는 절반의 경기에서만 — 같은 상황이 같은 손으로만 오지 않게
+    if (halftime || roll(AI_VARIANT_CHANCE)) {
       push.pressing = current.pressing + 1;
     }
     return settled("chase", push, shaped("chase", AI_SHAPE_CHASE_MINUTE));
@@ -1728,9 +1777,21 @@ export function planAiTacticalShift(
         mentality: current.mentality - 1,
         defensiveLine: current.defensiveLine - 1,
         tempo: current.tempo - 1,
+        ...(roll(AI_VARIANT_CHANCE) ? { pressing: current.pressing - 1 } : {}),
       },
       shaped("hold", AI_SHAPE_HOLD_MINUTE),
     );
+  }
+  /**
+   * **스코어가 손을 부르지 않을 때 상대를 읽는다** — 비기고 있거나, 이기고 있어도 아직
+   * 시간이 남았을 때. 확률로 한 번, 후보 중 하나를 난수가 고른다. 결정적 판단 위에
+   * 얹는 약간의 무작위성이라 같은 경기를 다시 굴리면(같은 시드) 같은 손이다.
+   */
+  if (options.opponent && rng !== undefined && roll(AI_COUNTER_CHANCE)) {
+    const candidates = counterCandidates(current, options.opponent, diff);
+    if (candidates.length === 0) return null;
+    const pick = candidates[Math.min(candidates.length - 1, Math.floor(rng() * candidates.length))];
+    if (pick) return settled("counter", pick, undefined);
   }
   return null;
 }

@@ -488,7 +488,7 @@ describe("스카우트 임무 — 조건으로 나가는 파견", () => {
 });
 
 describe("영입 직후 — 안개는 날짜가 아니라 정착으로 걷힌다", () => {
-  /** 타 팀 선수를 우리 팀으로 옮기고 TRANSFER 원장에 남긴다 (협상 스킬의 결과만 모사) */
+  /** 타 팀 선수를 우리 팀으로 옮기고 TRANSFER 원장에 남긴다 (협상 명령의 결과만 모사) */
   function signPlayer(state: ReturnType<typeof createTestGame>, playerId: string) {
     const player = playerById(state, playerId)!;
     const fromTeamId = player.teamId;

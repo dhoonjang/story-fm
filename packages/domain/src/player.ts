@@ -73,7 +73,7 @@ export function positionGroupOf(position: string): PositionGroup | null {
 
 /**
  * 고를 수 있는 포지션 코드 — 매핑이 원본이라 축이 늘면 같이 늘어난다.
- * 스킬 입구의 거절 메시지와 어드민의 선택지가 같은 목록을 읽어야 한다.
+ * 명령 입구의 거절 메시지와 어드민의 선택지가 같은 목록을 읽어야 한다.
  */
 export const POSITION_CODES = Object.keys(POSITION_GROUPS);
 
@@ -295,7 +295,7 @@ export const ATTRIBUTE_AXES = [
 export type AttributeAxis = (typeof ATTRIBUTE_AXES)[number];
 
 /**
- * 이 이름이 16축 중 하나인가 — 세이브·판정·스킬 입력이 들고 온 문자열을 좁히는
+ * 이 이름이 16축 중 하나인가 — 세이브·판정·명령 입력이 들고 온 문자열을 좁히는
  * 유일한 문. 축 이름은 저장에 `string`으로 남으므로(`PlayerTraining.axis`) 읽는
  * 쪽마다 좁히면 한쪽만 조여진다.
  */

@@ -58,7 +58,7 @@ import {
   relationPressureWeight,
   relationTierOf,
 } from "../src/world/relations";
-import { applyTalkToPlayer } from "../src/skills";
+import { applyTalkToPlayer } from "../src/commands";
 import { playersOf } from "../src/core/state";
 import { selectCharacters } from "../src/world/character-book";
 import type { GameState } from "../src/core/state";
@@ -1054,6 +1054,10 @@ describe("관계 점수 — 사건이 사이를 움직인다 (people.md §6)", (
   it("면담 결과가 사이를 옮기고, 그 사이가 다음 면담의 폭을 정한다", () => {
     const state = fresh();
     const player = playersOf(state, state.userTeamId)[0]!;
+    // 질책이 그대로 서려면 닫힌 선수여야 한다 — 수용성 앵커가 outcome을 자른다 (career.md §2)
+    while (relationTierOf(state, MANAGER_SUBJECT, player.id) !== "hostile") {
+      moveRelation(state, MANAGER_SUBJECT, player.id, "promise-broken");
+    }
     const before = relationOf(state, MANAGER_SUBJECT, player.id);
 
     applyTalkToPlayer(state, { playerId: player.id, outcome: "angered", intensity: 2 });

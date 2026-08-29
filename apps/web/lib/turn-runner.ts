@@ -289,7 +289,7 @@ export function runTurnLocked(
       const inMatch = state.phase === "match";
       const matchId = state.pendingMatch?.matchId;
       const mark = inMatch ? { inMatch: true as const, ...(matchId ? { matchId } : {}) } : {};
-      // 판에서 쌓인 조작은 LLM이 다시 해석하지 않는다. 구조화된 ID·값을 코어 스킬로
+      // 판에서 쌓인 조작은 LLM이 다시 해석하지 않는다. 구조화된 ID·값을 코어 명령로
       // 먼저 적용하고, 모델에는 이미 반영된 사실만 넘긴다.
       const appliedOrders: string[] = [];
       if (orders !== undefined && orders.length > 0) {

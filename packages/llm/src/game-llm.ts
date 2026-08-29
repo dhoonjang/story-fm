@@ -74,8 +74,8 @@ export const UNRUN_CALL =
 /**
  * 도구가 불린 **자리** — 그때까지 모델이 쓴 본문.
  *
- * 스킬은 장면 한복판에서 불린다: 코치가 "라인업 조정하겠습니다"라고 답한 **뒤**에
- * `set_lineup`이 온다. 그 사실이 기록에 없으면 화면은 모든 스킬을 턴 맨 앞에
+ * 호출은 장면 한복판에서 불린다: 코치가 "라인업 조정하겠습니다"라고 답한 **뒤**에
+ * `set_lineup`이 온다. 그 사실이 기록에 없으면 화면은 모든 호출을 턴 맨 앞에
  * 몰아 세울 수밖에 없고, 감독은 결과를 먼저 보고 장면을 거꾸로 읽는다.
  *
  * 델타를 세는 것으로는 안 된다 — 어댑터는 반복마다의 텍스트를 `\n`으로 이어
@@ -102,14 +102,24 @@ export type ToolChoice = "auto" | { name: string };
  * 어댑터가 이를 tool_result(is_error)로 되돌려 LLM이 수정 재시도하게
  * 한다 (AGENTS.md 6-2 재시도 규약).
  */
+/** 도구 하나의 답 — 실패면 `message`가 모델에게 오류로 돌아간다 */
+export interface ToolOutcome {
+  ok: boolean;
+  message: string;
+}
+
 export interface GameToolSpec {
   name: string;
   description: string;
   /** 제공자 중립 JSON Schema — 각 어댑터가 자기 함수 선언 형식으로 변환한다. */
   inputSchema: JsonObjectSchema;
-  handle(input: unknown, context?: ToolCallContext): { ok: boolean; message: string };
   /**
-   * 읽기 전용 조회 도구 — 상태를 바꾸지 않는다. 호출 기록을 스킬 칩으로
+   * 도구의 답 — 동기여도 되고 프로미스여도 된다. 핸들러 안에서 다른 에이전트를
+   * 부르는 자리(경기의 해석·마감 — agents.md §3)가 있어 어댑터는 언제나 `await`한다.
+   */
+  handle(input: unknown, context?: ToolCallContext): ToolOutcome | Promise<ToolOutcome>;
+  /**
+   * 읽기 전용 조회 도구 — 상태를 바꾸지 않는다. 호출 기록을 호출 칩으로
    * 남기지 않아 채팅이 조회 로그로 덮이는 것을 막는다.
    */
   readOnly?: boolean;

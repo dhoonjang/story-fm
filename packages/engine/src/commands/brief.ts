@@ -1,7 +1,7 @@
-import type { SkillBriefItem } from "../core/state";
+import type { CommandBriefItem } from "../core/state";
 
 /**
- * **말풍선 항목을 짓는 한 벌** — 스킬이 어느 폴더에 있든 같은 모양으로 낸다.
+ * **말풍선 항목을 짓는 한 벌** — 명령이 어느 폴더에 있든 같은 모양으로 낸다.
  *
  * 항목은 `label`(무엇에 대한 것) · `text`(바뀐 값) · `note`(갈래) · `delta`(증감)로
  * 나뉜다. 화면이 그 자리마다 톤을 정하므로, 코어가 셋을 한 문자열로 붙여 내면
@@ -40,7 +40,7 @@ export const item = (parts: {
   text: string;
   note?: string;
   delta?: number;
-}): SkillBriefItem => ({
+}): CommandBriefItem => ({
   ...(parts.label ? { label: parts.label } : {}),
   text: parts.text,
   ...(parts.note ? { note: parts.note } : {}),
@@ -54,13 +54,13 @@ export const item = (parts: {
  * 움직이지 않은 축까지 세우면 말풍선이 0으로 채워져 정작 무엇이 움직였는지가 묻힌다
  * — 그 자리에서 부호가 곧 사실인 항목만 낸다.
  */
-export const deltaItem = (label: string, n: number): SkillBriefItem | null =>
+export const deltaItem = (label: string, n: number): CommandBriefItem | null =>
   n === 0 ? null : item({ label, text: signed(n), delta: n });
 
 /** 0인 축을 걸러 낸 증감 항목들 — `deltaItem`을 여럿 세우는 자리의 한 벌 */
 export const deltaItems = (
   axes: readonly (readonly [label: string, value: number] | null)[],
-): SkillBriefItem[] =>
+): CommandBriefItem[] =>
   axes
     .map((axis) => (axis === null ? null : deltaItem(axis[0], axis[1])))
-    .filter((it): it is SkillBriefItem => it !== null);
+    .filter((it): it is CommandBriefItem => it !== null);

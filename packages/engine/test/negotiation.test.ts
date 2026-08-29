@@ -4,6 +4,9 @@ import type { Interest } from "@story-fm/domain";
 import {
   acceptDeal,
   activeContract,
+  sitAtTable,
+  settleTableReply,
+  tablePatienceOf,
   addDays,
   advanceTime,
   answerIncomingOffer,
@@ -3083,5 +3086,83 @@ describe("사전 계약 — 계약이 먼저 서고 사람은 나중에 온다",
     expect(opened.ok).toBe(false);
     expect(opened.message).toContain("다른 구단");
     expect(openNegotiationFor(state, ours.id)).toBeNull();
+  });
+});
+
+describe("테이블 — 마주 앉으면 그 자리에서 답한다 (transfer.md §12-2)", () => {
+  function seated(state: GameState) {
+    state.date = "2026-08-01";
+    const player = target(state);
+    const sent = sendOffer(state, offerFor(state, player.id, 0.5));
+    expect(sent.ok, sent.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    return { player, negotiation };
+  }
+
+  it("앉으면 기다리던 오퍼가 오늘로 당겨지고, 답 없이도 앵커가 그대로 판정이다", () => {
+    const state = createTestGame();
+    const { negotiation } = seated(state);
+    expect(pendingOffer(negotiation)!.respondsOn! > state.date).toBe(true);
+    const seat = sitAtTable(state, negotiation.id, "오늘 끝내고 싶습니다");
+    expect(seat.ok).toBe(true);
+    if (!seat.ok) return;
+    expect(pendingOffer(negotiation)!.respondsOn).toBe(state.date);
+    expect(seat.seat.table.patience).toBe(tablePatienceOf(state, negotiation.gamePlayerId));
+    const anchorVerdict = seat.seat.anchor!.verdict;
+    const outcome = settleTableReply(state, seat.seat);
+    expect(outcome.message).toContain("서류대로");
+    // 판정은 앵커 그대로 우리 오퍼에 적힌다 — 더는 답을 기다리는 오퍼가 없다
+    expect(pendingOffer(negotiation)).toBeNull();
+    const ours = negotiation.rounds.filter((r) => r.by === "us");
+    expect(ours[ours.length - 1]!.verdict).toBe(anchorVerdict);
+    // 감독의 말 한 줄과 장부 줄이 남는다
+    expect(negotiation.table!.lines[0]).toMatchObject({ by: "us", text: "오늘 끝내고 싶습니다" });
+    expect(negotiation.table!.lines.some((l) => l.by === "ledger")).toBe(true);
+  });
+
+  it("말투와 거짓은 인내를 깎고, 새로 확인된 논거는 한 칸 돌려주며 다음 답의 문턱을 내린다", () => {
+    const state = createTestGame();
+    const { negotiation } = seated(state);
+    // 오퍼 없이 말만 — 판정 없이 인내만 움직인다
+    negotiation.rounds.pop();
+    // 감독의 이름값은 확인되지 않는 논거다 — 명성을 바닥에 둔다
+    state.manager.reputation = { board: 10, media: 10, squad: 10 };
+    const first = sitAtTable(state, negotiation.id, "당신네 구단 형편 뻔히 압니다");
+    if (!first.ok) throw new Error(first.message);
+    expect(first.seat.anchor).toBeNull();
+    const max = first.seat.table.patienceMax;
+    settleTableReply(state, first.seat, {
+      line: "그 말은 선을 넘었습니다.",
+      stance: "leaving",
+      heard: { tone: "hostile", claims: [{ kind: "manager_reputation" }] },
+    });
+    // 적대적 말투 한 칸, 확인되지 않는 논거(감독의 이름) 한 칸 — 그러나 일어날 만큼은 아니다
+    expect(negotiation.table!.patience).toBe(max - 2);
+    expect(negotiation.status).toBe("open");
+    // 인내가 남아 있으면 모델의 leaving은 cooling으로 내려간다
+    const them = negotiation.table!.lines.filter((l) => l.by === "them");
+    expect(them[them.length - 1]!.stance).toBe("cooling");
+    // 확인되지 않은 논거는 pitched에 쌓이지 않는다
+    expect(negotiation.pitched ?? []).not.toContain("manager_reputation");
+  });
+
+  it("인내가 바닥나면 상대가 일어나고 협상은 이번 창에서 결렬이다", () => {
+    const state = createTestGame();
+    const { negotiation } = seated(state);
+    negotiation.rounds.pop();
+    const seat = sitAtTable(state, negotiation.id, "됐고, 그냥 내놔");
+    if (!seat.ok) throw new Error(seat.message);
+    seat.seat.table.patience = 1;
+    const outcome = settleTableReply(state, seat.seat, {
+      line: "여기까지입니다.",
+      stance: "leaving",
+      heard: { tone: "hostile", claims: [] },
+    });
+    expect(outcome.closed).toBe(true);
+    expect(negotiation.status).toBe("rejected");
+    const them = negotiation.table!.lines.filter((l) => l.by === "them");
+    expect(them[them.length - 1]!.stance).toBe("leaving");
+    // 끝난 협상에는 다시 앉을 수 없다
+    expect(sitAtTable(state, negotiation.id, "잠깐만").ok).toBe(false);
   });
 });
