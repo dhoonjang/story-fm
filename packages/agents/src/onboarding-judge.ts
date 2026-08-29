@@ -40,7 +40,7 @@ import { inputError, toToolSchema } from "./tool-schema";
  * 답이 되고 시작 사건은 비어 있을 뿐, 게임은 만들어진다.
  *
  * 세 가지를 낸다 — 시작 지갑 · 능력치의 결(앵커에서 축당 ±8, 합 ±10) · 시작 사건(셋까지,
- * 구단의 실재하는 사람에게 걸어서). 능력치의 총량은 앵커가 쥔다 — 판정이 옮기는 것은
+ * 그 줄이 이름을 부르는 실재하는 사람에게만 걸어서). 능력치의 총량은 앵커가 쥔다 — 판정이 옮기는 것은
  * "이 사람은 어느 축이 두꺼운가"뿐이다.
  */
 export const ONBOARDING_JUDGE_SYSTEM = `당신은 새로 부임하는 축구 감독의 이력을 읽는 사람이다.
@@ -66,7 +66,7 @@ export const ONBOARDING_JUDGE_SYSTEM = `당신은 새로 부임하는 축구 감
 - 셋까지. 배경과 구단의 사실이 만나는 자리에서 고른다 — 낙하산 감독에게는 언론의 이름표가, 옛 선수 출신에게는 라커룸의 시선이, 빚을 진 감독에게는 개인사가 선다.
 - 갈래는 ${OPENING_KINDS.map((k) => `${k}(${OPENING_KIND_KO[k]})`).join(" · ")}.
 - title은 이름 하나, line은 사실의 꼴로 — 무엇이 걸려 있고 누가 지켜보는가. 결말을 적지 않는다. 문장은 GM이 쓴다.
-- subjectId는 <club>에 적힌 id만. 없는 사람을 세우지 않는다.
+- subjectId는 <club>에 적힌 id만, 그리고 그 사람의 이름을 title이나 line에 실제로 쓴 실마리에만 건다. 줄이 아무도 부르지 않으면 비운다 — 언론·보드는 사람 없이 서는 것이 자연스럽다.
 
 # 규칙
 - 앵커에 없는 사실을 지어내지 마라. 근거는 배경에서 실제로 읽은 것만, 40자 안팎.
@@ -99,7 +99,11 @@ const ReportInputSchema = z.object({
         kind: z.enum(OPENING_KINDS),
         title: z.string().min(1).max(OPENING_TITLE_MAX),
         line: z.string().min(1).max(OPENING_LINE_MAX).describe("사실의 꼴로 — 결말 없이"),
-        subjectId: z.string().min(1).optional().describe("<club>에 적힌 id만"),
+        subjectId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("<club>에 적힌 id만 — 그 이름이 title·line에 서지 않으면 코어가 뗀다"),
       }),
     )
     .max(MAX_OPENINGS)

@@ -1,14 +1,15 @@
 import type { Opening, OpeningClose, OpeningKind } from "@story-fm/domain";
 import { OPENING_KIND_KO, OPENING_LINE_MAX, OPENING_TITLE_MAX } from "@story-fm/domain";
 import { addDays } from "../competition/calendar";
-import { playerById, playersOf, pushNarrative, type GameState } from "../core/state";
+import { playerById, pushNarrative, type GameState } from "../core/state";
 
 /**
  * **시작 사건** — 부임 첫 몇 주의 진행을 이끄는 실마리 (career.md §1 · agents.md §4-2).
  *
  * 온보딩 판정이 배경과 구단의 사실에서 제안하고, 여기서 검증해 앉힌다. 코어가 여는
  * 이야기(아크)와 달리 장부의 사실에서 나오지 않으므로 검증이 곧 한도다 — 갈래는 목록
- * 안에서, 걸린 사람은 실재하는 사람만, 수는 셋까지, 기한은 코어가 박는다.
+ * 안에서, 걸린 사람은 실재하면서 **그 줄이 부르는** 사람만, 수는 셋까지, 기한은 코어가
+ * 박는다.
  */
 
 /** 한 게임이 갖는 시작 사건의 상한 — 셋이면 첫 주가 붐비고 넷이면 흩어진다 */
@@ -30,11 +31,32 @@ export interface OpeningDraft {
   subjectId?: string;
 }
 
-/** 걸린 사람이 실재하는가 — 우리 선수이거나 이 세이브의 인물 */
-function subjectExists(state: GameState, id: string): boolean {
+/** 걸린 사람의 이름 — 우리 선수이거나 이 세이브의 인물, 실재하지 않으면 undefined */
+function subjectNameOf(state: GameState, id: string): string | undefined {
   const player = playerById(state, id);
-  if (player && player.teamId === state.userTeamId) return true;
-  return (state.personas ?? []).some((p) => p.characterId === id);
+  if (player && player.teamId === state.userTeamId) return player.name;
+  return (state.personas ?? []).find((p) => p.characterId === id)?.name;
+}
+
+/**
+ * 이름의 마디가 이만큼은 되어야 줄이 그를 부른 것으로 본다 — 「이」·「박」 한 글자는
+ * 아무 문장에나 선다.
+ */
+const NAME_PART_MIN = 2;
+
+/**
+ * 줄이 이 사람을 부르는가 (career.md §1).
+ *
+ * 마디 하나로 맞힌다 — 줄이 성만 부르는 것("외데고르가 새 감독을 잰다")이 오히려
+ * 보통이라 전체 이름을 요구하면 멀쩡한 줄이 떨어진다. 같은 마디를 나눠 가진 두 사람은
+ * 가르지 못하지만, 여기서 막는 것은 줄이 **아무도** 부르지 않는 경우다.
+ */
+function lineNames(text: string, name: string): boolean {
+  if (text.includes(name)) return true;
+  return name
+    .split(/\s+/)
+    .filter((part) => part.length >= NAME_PART_MIN)
+    .some((part) => text.includes(part));
 }
 
 /**
@@ -49,9 +71,17 @@ export function seedOpenings(state: GameState, drafts: readonly OpeningDraft[]):
     const title = draft.title.trim().slice(0, OPENING_TITLE_MAX);
     const line = draft.line.trim().slice(0, OPENING_LINE_MAX);
     if (title.length === 0 || line.length === 0) continue;
-    if (draft.subjectId !== undefined && !subjectExists(state, draft.subjectId)) continue;
+    let subjectId = draft.subjectId;
+    if (subjectId !== undefined) {
+      const name = subjectNameOf(state, subjectId);
+      // 없는 사람은 줄까지 지어낸 것이라 실마리째 버리고, 있는데 줄이 부르지 않으면
+      // 이름표만 뗀다 — 줄 자체는 성립한다 (career.md §1). 자르고 난 뒤의 글자로 재는
+      // 것은 스냅샷에 서는 것이 그 글자이기 때문이다.
+      if (name === undefined) continue;
+      if (!lineNames(`${title} ${line}`, name)) subjectId = undefined;
+    }
     // 같은 갈래·같은 사람은 하나다 — 실마리가 둘이면 GM이 하나를 두 번 연다
-    const key = `${draft.kind}:${draft.subjectId ?? ""}`;
+    const key = `${draft.kind}:${subjectId ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
     openings.push({
@@ -59,7 +89,7 @@ export function seedOpenings(state: GameState, drafts: readonly OpeningDraft[]):
       kind: draft.kind,
       title,
       line,
-      ...(draft.subjectId === undefined ? {} : { subjectId: draft.subjectId }),
+      ...(subjectId === undefined ? {} : { subjectId }),
       openedOn: state.date,
       dueOn: addDays(state.date, OPENING_DAYS),
       resolvedOn: null,
@@ -133,23 +163,24 @@ export function tickOpenings(state: GameState, digest: string[]): void {
   }
 }
 
-/** 걸린 사람의 이름 — 선수든 인물이든 */
-function subjectName(state: GameState, id: string): string {
-  const player = playersOf(state, state.userTeamId).find((p) => p.id === id);
-  if (player) return player.name;
-  return (state.personas ?? []).find((p) => p.characterId === id)?.name ?? id;
-}
-
-/** 상태 스냅샷 블록 — 열린 것이 없으면 null */
+/**
+ * 상태 스냅샷 블록 — 열린 것이 없으면 null.
+ *
+ * 괄호에 서는 이름은 `seedOpenings`가 그 줄과 대조해 앉힌 사람뿐이다 (career.md §1).
+ * 앉은 뒤에 구단을 떠난 사람은 이름이 풀리지 않으므로 괄호째 비운다 — 사실 카드에
+ * id가 설 자리는 없다.
+ */
 export function describeOpenings(state: GameState): string | null {
   const open = activeOpenings(state);
   if (open.length === 0) return null;
   return open
-    .map(
-      (o) =>
+    .map((o) => {
+      const name = o.subjectId === undefined ? undefined : subjectNameOf(state, o.subjectId);
+      return (
         `- [${OPENING_KIND_KO[o.kind]}] ${o.title} — ${o.line}` +
-        (o.subjectId ? ` (${subjectName(state, o.subjectId)})` : "") +
-        ` · ${o.dueOn}까지`,
-    )
+        (name === undefined ? "" : ` (${name})`) +
+        ` · ${o.dueOn}까지`
+      );
+    })
     .join("\n");
 }
