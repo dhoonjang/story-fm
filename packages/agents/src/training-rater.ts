@@ -110,6 +110,9 @@ const ReportInputSchema = z.object({ results: z.array(OutcomeSchema).max(MAX_TRA
 /** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
 export const REPORT_TRAINING_TOOL = "report_training";
 
+export const REPORT_TRAINING_DESCRIPTION =
+  "이 기간 훈련의 결과를 제출한다. 기준에서 크게 벗어나거나 훈련하지 않은 축은 코어가 잘라 낸다.";
+
 /** 모델이 보는 입력 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
 export const REPORT_TRAINING_INPUT = toToolSchema(ReportInputSchema);
 
@@ -165,8 +168,7 @@ function makeReportTool(
 ): GameToolSpec {
   return {
     name: REPORT_TRAINING_TOOL,
-    description:
-      "이 기간 훈련의 결과를 제출한다. 기준에서 크게 벗어나거나 훈련하지 않은 축은 코어가 잘라 낸다.",
+    description: REPORT_TRAINING_DESCRIPTION,
     inputSchema: REPORT_TRAINING_INPUT,
     handle(input: unknown) {
       /**

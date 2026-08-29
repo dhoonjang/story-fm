@@ -176,9 +176,37 @@ GM이 **경기 도구 셋**(`tactic_orders` · `advance_match` · `finalize_matc
 방향마다 값이 다르다 — JSON이 느슨하면 모델이 통과할 줄 알고 보낸 입력을 코어가 반려하고,
 Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실패시킨다.
 
-**GM 도구만의 규칙이 아니다.** 산출 도구 셋(`report_training` · `report_digest` ·
-경기 마감의 `settle_match`)도 저마다 도구 하나를 강제하는 호출이라 같은 계약을
-진다 — **어떤 LLM 호출도 Zod와 다른 JSON 스키마를 갖지 않는다.**
+**GM 도구만의 규칙이 아니다.** 도구 하나를 **강제로 걸고** 부르는 산출 호출 여덟 —
+해석기 셋(`report_tactic_orders` · `report_training_orders` · `report_market_orders`) ·
+`settle_match` · `report_training` · `report_onboarding` · `report_digest` · 협상
+테이블의 `reply_at_table` — 도 같은 계약을 진다 — **어떤 LLM 호출도 Zod와 다른 JSON
+스키마를 갖지 않는다.** 그 여덟의 선언은 `forcedTools()` 한 자리에 모이고, 새로 생긴
+강제 호출이 그 목록에 서지 않으면 테스트가 잡는다 — 목록에 없는 선언은 아래 두 자가
+재지 못한다.
+
+**강제 모드에서는 받아 주는 스키마가 한 겹 더 좁다.** Gemini는 그 모드에서 스키마를
+펼쳐 디코딩 문법을 만들어 `maxItems: n`이 항목 스키마 n벌이 되고, 항목이 조금만
+복잡해도 요청 전체가 400으로 떨어진다 ([models.md](./models.md) §3-2). 그래서 **제공자에게
+가는 선언에는 `maxItems`가 없다** — 걷는 자리는 어댑터이고(`withoutMaxItems`), 도구를
+세우는 쪽은 제공자를 모른다 (AGENTS.md §6-1).
+
+⚠️ **선언 쪽에 `maxItems`가 있는 것은 잘못이 아니다.** 여덟 중 일곱이 Zod의 `.max()`에서
+온 그것을 들고 있고(`settle_match.ratings` · `reply_at_table.claims` …), 개수를 지키는
+것은 그 Zod다. 해석기 셋의 `ops`만 상한을 스키마에 싣지 않는다 — 명령 열셋이 걸려 처음
+터진 자리라 그렇고, 상한은 명령마다 다른 한 벌(`TACTIC_CAPS`)이 쥔 채 `parseOps`가
+자른다. **자를 대는 자리는 그래서 소스가 아니라 나가는 선언이다** — 소스에 대면 합법인
+일곱 자리를 금지하면서 정작 어댑터가 걷는지는 못 본다.
+
+| 재는 자                                           | 무엇을                                                                          | 키        |
+| ------------------------------------------------- | ------------------------------------------------------------------------------- | --------- |
+| `packages/agents/test/skill-descriptions.test.ts` | **어댑터를 지난 뒤의 선언**에 그 제공자가 못 받는 열쇠가 없다 · 목록이 빠짐없다 | 필요 없다 |
+| `live-schema` 하네스                              | 그 선언을 **실제로 한 번씩 걸어** 제공자가 받는지 본다                          | 있을 때만 |
+
+⚠️ **목 LLM은 자기 스키마를 언제나 받는다.** 제공자가 무엇을 거절하는지는 목으로 알 수
+없고, 손으로 외울 수 있는 것도 아니다 — `tool-schema.ts`가 `.nullable()`·`.default()`로
+이미 같은 벽을 만났다. 그래서 오프라인 자 하나로는 부족하고, 실호출 쪽은
+`pnpm balance live-schema`가 갖는다
+(→ [../simulation/balance-harness.md](../simulation/balance-harness.md) §3).
 
 - **받아들이는 폭과 매기라는 폭은 다른 질문이다.** 스키마는 **무엇이 반려되는가**만
   말하고, 겨냥할 밴드는 설명과 시스템 프롬프트가 말한다. 경기 평점의 스키마가
@@ -696,7 +724,9 @@ prompt-regression`, 밴드는 서술자가 쥔다
 ## 8. 미해결
 
 - 모델이 실제로 어떻게 답하는가는 여전히 재지 않는다 — 판정의 일관성, 반문 빈도,
-  분량 준수는 실호출 없이는 나오지 않고 그 값은 매번 다르다. 예시 장면(원칙 5)이
+  분량 준수는 실호출 없이는 나오지 않고 그 값은 매번 다르다. 실호출을 거는 자리가
+  하나 생겼지만(`live-schema` 하네스) 그것이 묻는 것은 **제공자가 요청을 받는가**
+  하나다 — 답의 내용은 보지 않는다. 예시 장면(원칙 5)이
   문법 위반을 얼마나 줄이는지도 같은 이유로 모른다 — 실모드 턴에서 위생이 걷는 줄의
   수를 세는 것이 그 첫 눈금이다.
 
@@ -719,3 +749,5 @@ prompt-regression`, 밴드는 서술자가 쥔다
 | 스냅샷 안의 범례 블록 (회견 · 찾아온 사람)                                   | `packages/engine/src/club/press.ts` · `approach.ts`      |
 | 명령 실행부                                                                  | `packages/engine/src/commands/index.ts`                  |
 | 회귀 하네스 (§7)                                                             | `packages/agents/harness/prompt-regression.harness.ts`   |
+| 강제 산출 선언 목록 (`forcedTools`)                                          | `packages/agents/src/forced-tools.ts`                    |
+| 실모드 스키마 스모크 하네스                                                  | `packages/agents/harness/live-schema.harness.ts`         |

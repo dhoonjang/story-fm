@@ -47,7 +47,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # LLM 키는 주지 않는다 — 하네스는 코어와 프롬프트 조립만 재고, 프롬프트 회귀
-      # 하네스는 `LLM_MODE=mock`으로 돈다 (AGENTS.md §5)
+      # 하네스는 `LLM_MODE=mock`으로 돈다 (AGENTS.md §5). 실호출이 필요한 하나
+      # (`live-schema`)는 키가 없으면 **건너뜀을 보고하고 초록으로 끝난다** — 아래
+      # 판정이 그것을 「보고 없음」으로 세지 않는다 (balance-harness.md §3·§5).
       #
       # `guard` 이탈이면 vitest가 빨갛게 끝난다. 그래도 판정은 아래 스텝이 파일로
       # 읽으므로 여기서 잡을 멈추지 않는다 — 멈추면 리포트도 이슈도 서지 않는다.

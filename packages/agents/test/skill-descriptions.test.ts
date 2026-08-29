@@ -1,5 +1,8 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import * as agents from "@story-fm/agents";
 import {
   DEFAULT_SKILL_DESCRIPTIONS,
   GM_SYSTEM,
@@ -26,8 +29,11 @@ import {
   agingDeclineLine,
   buildGmTools,
   buildToolSpecs,
+  forcedTools,
   toToolSchema,
+  type ForcedTool,
 } from "@story-fm/agents";
+import { GeminiGameLLM, agentConfig, type GameToolSpec, type LlmProvider } from "@story-fm/llm";
 import {
   ATTRIBUTE_AXES,
   AXIS_KO,
@@ -497,5 +503,226 @@ describe("같은 종류의 인자는 같은 검증을 지난다", () => {
         }
       }
     }
+  });
+});
+
+/**
+ * **강제 도구로 나가는 산출 스키마** — docs/llm/models.md §3-2.
+ *
+ * 강제 모드(`toolChoice: { name }`)에서 제공자가 받아 주는 스키마는 한 겹 더 좁다.
+ * Gemini는 그 모드에서 스키마를 **펼쳐** 디코딩 문법을 만들어 `maxItems: n`이 항목
+ * 스키마 n벌이 되고, 자유 모드로는 지나던 선언이 400 하나로 떨어진다 — 본문은 어느
+ * 칸이 문제인지 말하지 않아(§1-1의 표에서 `unknown`) 화면에는 턴 취소나 침묵으로만
+ * 선다. 스위트의 LLM은 전부 목이라 스키마가 제공자의 문을 지나는지 묻는 자리는
+ * 여기뿐이다.
+ *
+ * **자는 어댑터를 지난 뒤의 선언이다.** 제공자의 부분집합을 흡수하는 자리가 어댑터라
+ * (AGENTS.md §6-1) 도구를 세우는 쪽은 제공자를 몰라도 된다 — `reply_at_table`의 Zod는
+ * `.max()`를 들고 있어 **소스 선언에는 `maxItems`가 서 있다.** 소스에 자를 대면 합법인
+ * 것을 금지하면서 정작 나가는 것은 못 본다.
+ */
+describe("강제 산출 스키마는 제공자의 문을 지난다", () => {
+  const FORCED = forcedTools(new Map(SKILL_TOOLS.map((tool) => [tool.name, tool] as const)));
+
+  /**
+   * 제공자가 **강제 모드에서 받지 못하는 스키마 열쇠** — 한 줄이 한 제공자다.
+   *
+   * 비어 있다는 것은 "이 제공자에서 좁아지는 열쇠를 아직 만나지 않았다"이지 "무엇이든
+   * 받는다"가 아니다. 제공자가 하나 늘면 이 표가 컴파일에서 먼저 걸린다.
+   */
+  const FORBIDDEN: Record<LlmProvider, readonly string[]> = {
+    // 강제 모드가 스키마를 펼쳐 디코딩 문법을 만든다 — `maxItems: n`이 항목 스키마
+    // n벌이 되어 요청 전체가 400 `INVALID_ARGUMENT`으로 떨어진다 (models.md §3-2).
+    // 어댑터가 강제 턴 전체에서 걷어 낸다(`withoutMaxItems`).
+    google: ["maxItems"],
+    // 스키마는 `input_schema`로 그대로 가고, 강제(`tool_choice: { type:"tool" }`)가
+    // 검사를 좁힌다고 알려진 열쇠가 없다
+    anthropic: [],
+    // 도구가 `strict: false`로 나간다 — strict 모드의 좁은 부분집합을 지나지 않는다
+    openai: [],
+  };
+
+  /** 어댑터가 읽는 자리만 세운 Gemini 응답 — `@google/genai`는 여기서 부르지 않는다 */
+  function geminiReply(parts: unknown[]): unknown {
+    return {
+      candidates: [{ content: { role: "model", parts }, finishReason: "STOP" }],
+      usageMetadata: {},
+    };
+  }
+
+  /** SDK로 넘어간 payload 어디에 있든 함수 선언의 스키마를 전부 모은다 */
+  function declaredSchemas(node: unknown, into: unknown[] = []): unknown[] {
+    if (Array.isArray(node)) {
+      for (const item of node) declaredSchemas(item, into);
+      return into;
+    }
+    if (node === null || typeof node !== "object") return into;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "parametersJsonSchema") into.push(value);
+      else declaredSchemas(value, into);
+    }
+    return into;
+  }
+
+  /**
+   * 그 선언을 강제로 걸고 어댑터를 stub 클라이언트로 한 턴 돌린 뒤, **SDK에 실제로
+   * 넘어간 함수 선언**을 꺼낸다 — chat 설정과 첫 요청의 per-request config 둘 다 도구를
+   * 실으므로 둘 다 모은다.
+   */
+  async function geminiDeclarations(entry: ForcedTool): Promise<unknown[]> {
+    const config = agentConfig(entry.agent);
+    // 아래 표가 제공자로 골라 부르므로 걸릴 일이 없다 — 설정을 좁히는 자리다
+    if (config.provider !== "google") throw new Error(`${entry.agent}는 google이 아니다`);
+    const payloads: unknown[] = [];
+    const history: unknown[] = [];
+    let round = 0;
+    const chat = {
+      sendMessage: (params: { config?: unknown }) => {
+        payloads.push(params.config);
+        // 첫 왕복은 그 도구를 부르고, 결과를 받은 다음 왕복이 문장으로 턴을 닫는다
+        const parts =
+          round++ === 0
+            ? [{ functionCall: { id: "call-1", name: entry.name, args: {} } }]
+            : [{ text: "확인했습니다." }];
+        history.push({ role: "user", parts: [{ text: "감독의 말" }] }, { role: "model", parts });
+        return Promise.resolve(geminiReply(parts));
+      },
+      sendMessageStream: () => Promise.reject(new Error("이 자리는 스트리밍하지 않는다")),
+      getHistory: () => history,
+    };
+    const client = {
+      chats: {
+        create: (params: { config?: unknown }) => {
+          payloads.push(params.config);
+          return chat;
+        },
+      },
+    };
+    const tool: GameToolSpec = {
+      name: entry.name,
+      description: entry.description,
+      inputSchema: entry.inputSchema,
+      handle: () => ({ ok: true, message: "받았습니다" }),
+    };
+    await new GeminiGameLLM(config, client as never).runTurn({
+      system: entry.system,
+      history: [],
+      user: "감독의 말",
+      tools: [tool],
+      toolChoice: { name: entry.name },
+    });
+    return declaredSchemas(payloads);
+  }
+
+  /**
+   * 선언을 꺼내는 자 — **제공자마다 그 어댑터의 stub이 필요하다.** 여기 없는 제공자로
+   * 강제 호출이 옮겨 가면 재는 자가 없다는 뜻이고, 그 사실은 아래 케이스가 말한다.
+   */
+  const PROBES: Partial<Record<LlmProvider, (entry: ForcedTool) => Promise<unknown[]>>> = {
+    google: geminiDeclarations,
+  };
+
+  it("어댑터를 지나 나가는 선언에 그 제공자가 못 받는 열쇠가 없다", async () => {
+    const offenders: string[] = [];
+    for (const entry of FORCED) {
+      const { provider } = agentConfig(entry.agent);
+      const probe = PROBES[provider];
+      // 자가 없는 제공자는 아래 케이스가 잡는다 — 여기서 조용히 지나가지 않는다
+      if (!probe) continue;
+      const schemas = await probe(entry);
+      // 꺼낸 것이 없으면 아무것도 재지 않은 채 초록이 된다
+      expect(schemas.length, entry.name).toBeGreaterThan(0);
+      for (const schema of schemas) {
+        const nodes: Array<[string, Record<string, unknown>]> = [
+          ["(뿌리)", schema as Record<string, unknown>],
+          ...walk(schema),
+        ];
+        for (const [where, node] of nodes) {
+          for (const key of FORBIDDEN[provider]) {
+            if (key in node) offenders.push(`${entry.name}.${where}: ${key}`);
+          }
+        }
+      }
+    }
+    // 같은 스키마가 두 자리로 나가므로 이름을 접는다 — 세는 것이 아니라 있고 없고다
+    expect([...new Set(offenders)]).toEqual([]);
+  });
+
+  /**
+   * **자를 댈 수 없는 제공자로 옮기면 빨개진다.** 지금 강제 호출 여덟은 전부 google이라
+   * 위 케이스가 여덟을 다 재지만, `config/llm.yml`의 한 줄이 바뀌는 순간 그 선언은
+   * 아무도 재지 않는 채로 나간다 — 옮기는 사람이 여기에 그 제공자의 자를 세우게 한다.
+   */
+  it("강제 호출이 나가는 제공자마다 선언을 꺼낼 자가 서 있다", () => {
+    for (const entry of FORCED) {
+      const { provider } = agentConfig(entry.agent);
+      expect(PROBES[provider], `${entry.name}: ${entry.agent} → ${provider}`).toBeTypeOf(
+        "function",
+      );
+    }
+  });
+
+  /**
+   * **목록에 서지 않은 강제 호출은 위의 자가 재지 못한다.** 그래서 소스를 읽어 짝을 못
+   * 박는다(선례: `packages/engine/test/harness-catalog.test.ts`). 양방향이다 — 소스에만
+   * 있는 이름은 아무도 재지 않은 채 실호출로 나가고, 목록에만 있는 선언은 나가지 않는
+   * 것을 재게 한다.
+   */
+  const SRC = join(import.meta.dirname, "..", "src");
+  const FORCED_AT = /toolChoice:\s*\{\s*name:\s*([\w$.]+)\s*[,}]/g;
+  const EXPORTED = new Map<string, unknown>(Object.entries(agents));
+
+  /** 해석기 스펙 — 강제 이름을 파라미터로 받는 자리(`runOpsOrders`)가 도는 것들 */
+  function isOpsSpec(value: unknown): value is Record<string, unknown> {
+    if (typeof value !== "object" || value === null) return false;
+    const spec = value as { agent?: unknown; tool?: unknown; ops?: unknown };
+    return (
+      typeof spec.agent === "string" && typeof spec.tool === "string" && Array.isArray(spec.ops)
+    );
+  }
+
+  /**
+   * 소스에 적힌 이름 식이 실제로 거는 도구 이름들 — 읽지 못하면 `null`이다.
+   *
+   * 상수면 그 값 하나다. `spec.tool`처럼 파라미터를 타고 오는 자리는 **그 함수를 지나는
+   * 스펙 전부**로 편다 — 해석기 셋이 한 함수를 지나므로, 스펙이 하나 늘면 그 이름도
+   * 여기서 함께 늘어 목록과 대조된다.
+   */
+  function forcedNames(expression: string): string[] | null {
+    const constant = EXPORTED.get(expression);
+    if (typeof constant === "string") return [constant];
+    if (!expression.includes(".")) return null;
+    const property = expression.slice(expression.lastIndexOf(".") + 1);
+    const names = [...EXPORTED.values()]
+      .filter(isOpsSpec)
+      .map((spec) => spec[property])
+      .filter((name): name is string => typeof name === "string");
+    return names.length > 0 ? names : null;
+  }
+
+  it("소스가 강제로 거는 이름과 목록이 같다", () => {
+    const listed = new Set(FORCED.map((entry) => entry.name));
+    const seen = new Set<string>();
+    const unread: string[] = [];
+    const unlisted: string[] = [];
+    for (const file of readdirSync(SRC, { recursive: true, encoding: "utf8" })) {
+      if (!file.endsWith(".ts")) continue;
+      for (const match of readFileSync(join(SRC, file), "utf8").matchAll(FORCED_AT)) {
+        const expression = match[1];
+        const names = expression ? forcedNames(expression) : null;
+        // 못 읽은 자리는 목록에 있는지조차 말할 수 없다 — 재지 못한 자리다
+        if (!names) {
+          unread.push(`${basename(file)}: ${expression ?? match[0]}`);
+          continue;
+        }
+        for (const name of names) {
+          seen.add(name);
+          if (!listed.has(name)) unlisted.push(`${basename(file)}: ${name}`);
+        }
+      }
+    }
+    expect(unread).toEqual([]);
+    expect(unlisted).toEqual([]);
+    expect([...listed].filter((name) => !seen.has(name))).toEqual([]);
   });
 });
