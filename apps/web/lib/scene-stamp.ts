@@ -61,7 +61,7 @@ export interface StampCut {
 export interface CutScene {
   lines: string[];
   stamps: StampCut[];
-  /** 걷어낸 원문 줄의 인덱스 — 스킬 칩의 자리(`ToolCallRecord.line`)를 당길 때 쓴다 */
+  /** 걷어낸 원문 줄의 인덱스 — 호출 칩의 자리(`ToolCallRecord.line`)를 당길 때 쓴다 */
   cuts: number[];
 }
 

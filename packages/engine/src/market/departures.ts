@@ -22,9 +22,9 @@ import { clearRelationsOf, closeTo, MANAGER_SUBJECT, moveRelation } from "../wor
 import { makeRng } from "../core/rng";
 import { assignSquadNumber } from "../squad/numbers";
 import { admitOnLoan, arrivingSquadLevel } from "../squad/registration";
-import type { SkillResult } from "../skills";
-import { forgetRoles } from "../skills/role-memory";
-import { item, signed } from "../skills/brief";
+import type { CommandResult } from "../commands";
+import { forgetRoles } from "../commands/role-memory";
+import { item, signed } from "../commands/brief";
 import { pickAnyPlayer } from "../core/player-ref";
 import {
   activeContract,
@@ -174,7 +174,7 @@ export function toFreeAgency(
 export function releasePlayer(
   state: GameState,
   input: { playerId: string; severance?: number; paymentYears?: number },
-): SkillResult {
+): CommandResult {
   const pick = pickAnyPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
@@ -311,7 +311,7 @@ export const DEFAULT_LOAN_WAGE_SHARE = 0.5;
 export function loanPlayer(
   state: GameState,
   input: { playerId: string; teamId: string; until?: string; wageShare?: number },
-): SkillResult {
+): CommandResult {
   const pick = pickAnyPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
@@ -398,7 +398,7 @@ export function loanPlayer(
  * 임대 조기 종료 — 감독이 불러들인다(`recall_loan`).
  * 실제 임대에도 리콜 조항이 흔하다(부상 공백·성장 정체).
  */
-export function recallLoan(state: GameState, input: { playerId: string }): SkillResult {
+export function recallLoan(state: GameState, input: { playerId: string }): CommandResult {
   const pick = pickAnyPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;

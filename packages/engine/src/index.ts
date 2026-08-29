@@ -7,6 +7,7 @@ export * from "./core/dates";
 export * from "./core/name-match";
 export * from "./core/state";
 export * from "./core/history-window";
+export * from "./core/turn-facts";
 export * from "./core/player-ref";
 export * from "./core/league-shape";
 export * from "./core/club-tier";
@@ -87,6 +88,7 @@ export * from "./squad/slump";
 export * from "./squad/other-clubs";
 export * from "./squad/mood";
 export * from "./squad/cues";
+export * from "./squad/receptivity";
 export * from "./squad/coach-cues";
 export * from "./squad/settling";
 export * from "./squad/injury";
@@ -108,6 +110,8 @@ export * from "./market/interest";
 export * from "./market/negotiation";
 export * from "./market/counter-bounds";
 export * from "./market/counterparty";
+export * from "./market/table";
+export * from "./world/openings";
 export * from "./market/clauses";
 export * from "./market/ai-market";
 export * from "./market/medical";
@@ -125,8 +129,8 @@ export * from "./club/board-request";
 export * from "./club/manager-wallet";
 export * from "./club/vision";
 
-// skills — 감독 지시(GM 도구)의 실행부
-export * from "./skills";
+// commands — 감독 지시(도구·해석기)가 닿는 코어 명령의 실행부
+export * from "./commands";
 
 // views — 오피스 뷰·읽기 전용 조회
 export * from "./views/views";

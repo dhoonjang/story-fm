@@ -20,7 +20,7 @@ export const NON_HOMEGROWN_MAX = SQUAD_LIST_LIMIT - HOMEGROWN_MIN;
 const STARTING_XI = 11;
 /**
  * 매치데이 벤치 정원 — **이 숫자의 원본은 여기 하나뿐이다.**
- * 라인업 스킬(`setLineup`)·라인업 라우트·전술판이 전부 이것을 읽는다. 같은 값을 여러
+ * 라인업 명령(`setLineup`)·라인업 라우트·전술판이 전부 이것을 읽는다. 같은 값을 여러
  * 곳에 적어 두면 한 곳만 늘렸을 때 화면이 담을 수 있다고 말한 벤치를 서버가 반려한다.
  */
 export const MATCHDAY_BENCH = 9;
@@ -246,7 +246,7 @@ export function startShortfall(starts: number, played: number, status: SquadStat
 // ── 등번호 — 상징과 뜻 (→ docs/data/player.md §1.1 · people.md §5·§6) ──
 
 /**
- * 등번호의 아래끝 — 위끝은 `SQUAD_NUMBER_MAX`(player.ts)다. 스키마·스킬·화면이
+ * 등번호의 아래끝 — 위끝은 `SQUAD_NUMBER_MAX`(player.ts)다. 스키마·명령·화면이
  * 같은 두 값을 읽어야 한 곳만 넓혔을 때 다른 곳이 그 번호를 반려하지 않는다.
  */
 export const SQUAD_NUMBER_MIN = 1;

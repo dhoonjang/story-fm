@@ -69,7 +69,7 @@ pnpm balance --report out  # 전부 돌리고 측정값을 out/에 남긴다 (�
 | `approach-rate`        | 한 시즌 다가옴 건수 · 채널 분포 · 소음 문이 서는가                             | [people](../data/people.md) §8                        |
 | `overall-scale`        | 종합을 읽는 눈금 — 리그별·연령별 분포                                          | [match](match.md) §7                                  |
 | `history-window`       | 평시 이력의 창 — 몇 턴이 남는가 · 압축 주기 · 렌더 배율                        | [agents](../llm/agents.md) §5-1                       |
-| `prompt-regression`    | 프롬프트 층의 글자·프리픽스 안정성 · 장면 문법·스킬                            | [prompts](../llm/prompts.md) §7                       |
+| `prompt-regression`    | 프롬프트 층의 글자·프리픽스 안정성 · 장면 문법·도구                            | [prompts](../llm/prompts.md) §7                       |
 
 ## 4. ⚠️ 불변식
 

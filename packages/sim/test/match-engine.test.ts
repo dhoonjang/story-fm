@@ -623,6 +623,53 @@ describe("AI 전술 반응", () => {
     expect(shiftAt(spec, ledgerAt(60, 2, 1))).toBeNull();
   });
 
+  /**
+   * **상대를 읽는 손은 확률로 한 번, 후보 중 하나를 난수가 고른다** (match.md §2).
+   * 난수가 없으면 스코어만 보는 결정적 판단이라 옛 테스트가 그대로 선다.
+   */
+  it("비기고 있을 때 상대의 높은 압박을 읽고 맞선다 — 난수가 확률과 후보를 고른다", () => {
+    const pressing = { ...DEFAULT_TACTICS, pressing: 5 };
+    // 첫 난수가 확률 문을 열고, 둘째가 후보 둘 중 첫째(템포 +1)를 고른다
+    const draws = [0.1, 0.1];
+    const rng = () => draws.shift() ?? 0.99;
+    const shift = planAiTacticalShift("home", spec, spec, ledgerAt(60, 1, 1), false, false, {
+      opponent: pressing,
+      rng,
+    });
+    expect(shift?.note.code).toBe("counter");
+    expect(shift?.axes?.tempo).toBe(spec.tempo + 1);
+    expect(shift?.shape).toBeUndefined();
+
+    // 문이 닫히면 아무것도 하지 않는다 — 셋 중 둘의 정지점은 조용하다
+    const quiet = planAiTacticalShift("home", spec, spec, ledgerAt(60, 1, 1), false, false, {
+      opponent: pressing,
+      rng: () => 0.9,
+    });
+    expect(quiet).toBeNull();
+    // 읽을 것이 없는 균형 전술에는 손이 없다
+    const nothing = planAiTacticalShift("home", spec, spec, ledgerAt(60, 1, 1), false, false, {
+      opponent: spec,
+      rng: () => 0.1,
+    });
+    expect(nothing).toBeNull();
+  });
+
+  it("들이닥치는 상대에게는 이기고 있을 때만 내려서서 받아친다", () => {
+    const allOut = { ...DEFAULT_TACTICS, mentality: 5 };
+    const rng = () => 0.1;
+    const leading = planAiTacticalShift("home", spec, spec, ledgerAt(60, 2, 1), false, false, {
+      opponent: allOut,
+      rng,
+    });
+    expect(leading?.axes?.defensiveLine).toBe(spec.defensiveLine - 1);
+    // 지고 있으면 스코어가 먼저다 — 맞서는 손이 아니라 던지는 손
+    const trailing = planAiTacticalShift("home", spec, spec, ledgerAt(60, 0, 1), false, false, {
+      opponent: allOut,
+      rng,
+    });
+    expect(trailing?.note.code).toBe("chase");
+  });
+
   it("모양은 AI_SHAPE_CHASE_MINUTE부터 던진다 — 한 분 전에는 축만 옮긴다", () => {
     expect(shiftAt(spec, ledgerAt(AI_SHAPE_CHASE_MINUTE - 1, 0, 1))?.shape).toBeUndefined();
     expect(shiftAt(spec, ledgerAt(AI_SHAPE_CHASE_MINUTE, 0, 1))?.shape).toBe("chase");

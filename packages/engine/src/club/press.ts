@@ -3,6 +3,8 @@ import type {
   BoardExpectationCode,
   CallUp,
   GamePlayer,
+  Incident,
+  IncidentKind,
   ManagerContract,
   MatchRecord,
   MatchStage,
@@ -35,6 +37,7 @@ import {
   playersOf,
   pushNarrative,
   teamNameIn,
+  userPlayerById,
   userPlayers,
 } from "../core/state";
 import { pickPlayerAmong } from "../core/player-ref";
@@ -43,6 +46,8 @@ import { formatMoney } from "./finance";
 import { fundingPressFactOf } from "./manager-wallet";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
+import { applyMoodNotes, type MoodLine } from "../squad/mood";
+import { receptivityLine, receptivityOf } from "../squad/receptivity";
 import { careerTotalsOf, matchMilestones } from "../squad/career";
 import { managerCareerTotals } from "../competition/records";
 import { numberLineageOf } from "../squad/numbers";
@@ -63,8 +68,8 @@ import { derbyRecordOf } from "./derby";
 import { formerClubFactsOf, isFirstMeeting, managerReturnOf } from "./former-club";
 import { reportersOf, rivalVoiceOf } from "../world/persona";
 import { MANAGER_SUBJECT, moveRelation, stanceRelationEvent } from "../world/relations";
-import type { SkillResult } from "../skills";
-import { deltaItems } from "../skills/brief";
+import type { CommandResult } from "../commands";
+import { deltaItems } from "../commands/brief";
 
 /**
  * 기자회견 — **코어는 자리를 만들고 한도를 정하고, 판정은 LLM이 한다.**
@@ -218,7 +223,7 @@ const LEADERSHIP_FACTOR_MIN = 0.7;
 /** 리더십이 최고까지 더해 주는 몫 — 0.7~1.3 */
 const LEADERSHIP_FACTOR_SPAN = 0.6;
 
-/** 리더십 계수 — 같은 말도 리더십이 자라면 라커룸에 더 크게 울린다 (skills.ts와 같은 자) */
+/** 리더십 계수 — 같은 말도 리더십이 자라면 라커룸에 더 크게 울린다 (commands/index.ts와 같은 자) */
 function leadershipFactor(state: GameState): number {
   return (
     LEADERSHIP_FACTOR_MIN +
@@ -1082,6 +1087,65 @@ function loadLeaks(state: GameState, conference: PressConference): void {
   if (loaded) conference.weight = Math.max(conference.weight, 2);
 }
 
+// ── 감독이 말로 만든 사건 ─────────────────────────────────────
+
+/** 공개된 사건이 다음 회견의 카드에 서는 기간(일) — people.md §6 「사건 기록」 */
+export const INCIDENT_PRESS_DAYS = 7;
+/** 회견 카드에 서는 갈래 — 공개된 일만. 병문안·사과·회식은 라커룸 안의 일이다 */
+const PRESS_INCIDENT_KINDS: ReadonlySet<IncidentKind> = new Set([
+  "discipline",
+  "public-praise",
+  "public-criticism",
+]);
+
+/**
+ * 이 사건이 이미 어느 회견에 섰나 — **한 사건은 한 회견에만 선다.** 장부에 표식을
+ * 두지 않고 지나간 회견의 카드에서 읽는다: 같은 당사자·같은 갈래·같은 세기의 카드가
+ * 그 회견의 날에서 `days`를 거슬러 사건의 날에 닿으면 그 사건이다.
+ */
+function carriedIncident(state: GameState, incident: Incident, playerId: string): boolean {
+  return (state.pressConferences ?? []).some((c) =>
+    c.facts.some(
+      (f) =>
+        f.kind === "incident" &&
+        f.about === playerId &&
+        f.data?.tags?.[0] === incident.kind &&
+        f.data.values?.intensity === incident.intensity &&
+        f.data.values.days !== undefined &&
+        addDays(c.date, -f.data.values.days) === incident.date,
+    ),
+  );
+}
+
+/**
+ * 징계·공개 칭찬·공개 질책은 공개된 일이라 다음 회견이 묻는다 (people.md §6).
+ * `INCIDENT_PRESS_DAYS` 안의 것만, 당사자 한 사람에 카드 한 장이다.
+ */
+function loadIncidents(state: GameState, conference: PressConference): void {
+  for (const incident of state.incidents ?? []) {
+    if (!PRESS_INCIDENT_KINDS.has(incident.kind)) continue;
+    // 회견의 날로 잰다 — 카드의 `days`를 거슬러 사건의 날에 닿아야 `carriedIncident`가 읽는다
+    const days = diffDays(incident.date, conference.date);
+    if (days < 0 || days > INCIDENT_PRESS_DAYS) continue;
+    for (const playerId of incident.playerIds) {
+      const player = playerById(state, playerId);
+      // 떠난 선수의 일은 조용히 버린다 — 우리 라커룸에 없는 사람에게 물을 자리가 아니다
+      if (!player || player.teamId !== state.userTeamId) continue;
+      if (carriedIncident(state, incident, playerId)) continue;
+      conference.facts.push({
+        kind: "incident",
+        data: {
+          tags: [incident.kind],
+          name: player.name,
+          values: { intensity: incident.intensity, days },
+        },
+        about: playerId,
+        sharp: incident.kind !== "public-praise",
+      });
+    }
+  }
+}
+
 // ── 이적 요청 ──────────────────────────────────────────────────
 
 /**
@@ -1769,6 +1833,7 @@ export function openPress(state: GameState, conference: PressConference, digest?
   state.pressConferences ??= [];
   declinePendingPress(state, digest);
   loadLeaks(state, conference);
+  loadIncidents(state, conference);
   loadTransferRequests(state, conference);
   loadRumours(state, conference);
   loadCallUps(state, conference);
@@ -1821,18 +1886,21 @@ export function applyPressOutcome(
       rivalTeamId: targetManager.teamId,
     });
   }
-  /**
-   * 지목된 선수 — **팀 전체 위에 더 얹는다.** 공개적으로 감싸이거나 잘린 당사자는
-   * 같은 말을 남의 이야기로 듣지 않는다. 이름을 부른 질문이 없으면 없다.
-   */
-  const askedAbout =
-    targetPlayerId ?? conference.facts.find((f) => f.about !== null)?.about ?? null;
   return applyStanceOutcome(state, {
     row: stanceRow(stance),
     band: PRESS_BAND * conference.weight,
-    targetPlayerId: askedAbout,
+    targetPlayerId: askedAboutOf(conference, targetPlayerId),
     stance,
   });
+}
+
+/**
+ * 지목된 선수 — **팀 전체 위에 더 얹는다.** 공개적으로 감싸이거나 잘린 당사자는
+ * 같은 말을 남의 이야기로 듣지 않는다. 이름을 부른 질문이 없으면 없다.
+ * 잔향이 닿는 사람도 같은 사람이라 규칙을 한 벌로 둔다.
+ */
+function askedAboutOf(conference: PressConference, targetPlayerId?: string | null): string | null {
+  return targetPlayerId ?? conference.facts.find((f) => f.about !== null)?.about ?? null;
 }
 
 /**
@@ -1978,8 +2046,14 @@ export const signed = (label: string, v: number) =>
  */
 export function respondToMedia(
   state: GameState,
-  input: { stance: PressStance; targetPlayerId?: string | null; targetManager?: string | null },
-): SkillResult {
+  input: {
+    stance: PressStance;
+    targetPlayerId?: string | null;
+    targetManager?: string | null;
+    /** 잔향 — 이름이 불린 선수에게 남는 심경 한 문장. 그 선수가 없으면 버린다 */
+    mood?: MoodLine;
+  },
+): CommandResult {
   const conference = pendingPress(state);
   if (!conference) return { ok: false, message: "지금 답할 기자회견이 없습니다" };
 
@@ -2022,6 +2096,20 @@ export function respondToMedia(
 
   const effect = applyPressOutcome(state, conference, input.stance, target, targetManager);
   conference.status = "answered";
+  // 잔향은 **이름이 불린 그 사람**에게만 — 상대 감독을 겨눈 자리에는 그 사람이 없다
+  const spoken = targetManager ? null : askedAboutOf(conference, target);
+  const spokenPlayer = spoken ? userPlayerById(state, spoken) : null;
+  if (input.mood && spokenPlayer) {
+    applyMoodNotes(
+      state,
+      [{ ...input.mood, playerId: spokenPlayer.id }],
+      new Set([spokenPlayer.id]),
+    );
+  }
+  // 회견의 스탠스는 판정이 아니라 자르지 않는다 — 사실 줄만 선다 (career.md §2)
+  const receptivity = spokenPlayer
+    ? ` · ${receptivityLine(receptivityOf(state, spokenPlayer.id))}`
+    : "";
 
   const parts = [
     signed("보드", effect.board),
@@ -2048,7 +2136,8 @@ export function respondToMedia(
     tone: net >= 0 ? ("good" as const) : ("bad" as const),
     message:
       `기자회견 대응(${STANCE_KO[input.stance]})` +
-      (parts.length > 0 ? ` — ${parts.join(" · ")}` : ""),
+      (parts.length > 0 ? ` — ${parts.join(" · ")}` : "") +
+      receptivity,
     /**
      * 축마다 한 줄이다 — `delta` 하나가 그 줄의 부호라, 여럿을 한 항목에 묶으면
      * 화면이 다시 갈라야 한다. 감독이 무슨 말을 했는지는 장면의 것이다.
@@ -2083,7 +2172,7 @@ function sameManager(name: string, ref: string): boolean {
  * 회견 거절 — **하나의 답이다.** 감독이 마이크를 잡지 않는 것도 세계가 읽는다.
  * 실제로도 의무 회견 불참은 벌금과 비판을 부른다.
  */
-export function declinePress(state: GameState): SkillResult {
+export function declinePress(state: GameState): CommandResult {
   const conference = pendingPress(state);
   if (!conference) return { ok: false, message: "지금 열린 기자회견이 없습니다" };
   const effect = applyPressOutcome(state, conference, null);

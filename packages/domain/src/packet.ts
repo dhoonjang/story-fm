@@ -449,6 +449,7 @@ const EXPLOIT_KO: Record<string, string> = {
 const AI_SHIFT_KO: Record<string, string> = {
   chase: "벤치가 판을 앞으로 밀었다",
   hold: "벤치가 내려서서 잠갔다",
+  counter: "벤치가 우리 전술을 읽고 맞섰다",
 };
 
 /** `축:값` 꼴 flag의 값 — 세기·축처럼 낱말 하나가 실리는 자리 */

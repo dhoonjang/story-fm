@@ -72,7 +72,7 @@ import {
   playMockMatch,
 } from "./helpers";
 
-describe("advance_time — 시간은 스킬로만 흐른다 (season.md §5)", () => {
+describe("advance_time — 시간은 도구로만 흐른다 (season.md §5)", () => {
   it("프리시즌에서 다음 경기일까지 전진하면 개막전에서 멈춘다", () => {
     const state = createTestGame();
     expect(state.date).toBe("2026-07-01"); // 7/1 프리시즌 시작
@@ -175,7 +175,7 @@ describe("advance_time — 시간은 스킬로만 흐른다 (season.md §5)", ()
     )!;
     expect(young, "1군 유망주가 없다").toBeDefined();
     const before = { ...young.attributes };
-    // 평일 오전·오후 슈팅 훈련 등록 (기본 훈련 없음 → 스킬이 일정을 만든다)
+    // 평일 오전·오후 슈팅 훈련 등록 (기본 훈련 없음 → 명령이 일정을 만든다)
     setTraining(state, {
       repeatWeekly: [1, 2, 3, 4, 5].flatMap((dow) => [
         { dow, slot: "am" as const, label: "슈팅 마무리", focus: ["finishing" as const] },

@@ -16,7 +16,10 @@ import {
 import {
   MATCHDAY_BENCH,
   PENDING_EDIT_LIMIT,
-  applyNarrativeEvent,
+  INCIDENT_MORALE_BOUND,
+  MANAGER_SUBJECT,
+  MAX_INCIDENTS_PER_DAY,
+  RELATION_EVENTS,
   applyTalkToPlayer,
   applyTeamTalk,
   assignmentsOf,
@@ -29,8 +32,13 @@ import {
   lineupSignature,
   movePlayerSlot,
   moraleToForm,
+  moveRelation,
   playerById,
   pushNarrative,
+  receptivityOf,
+  recordIncident,
+  relationOf,
+  relationTierOf,
   recordEdit,
   occupiesSquadList,
   isHomegrownFor,
@@ -97,6 +105,47 @@ function currentLineup(state: ReturnType<typeof createTestGame>) {
     playerId: a.playerId,
     position: a.position,
   }));
+}
+
+/**
+ * 감독과의 사이를 등급 끝까지 민다 — 수용성 앵커를 열림·닫힘으로 세우는 가장 짧은 길.
+ * 원형이 ±1을 얹어도 `trusted`(+2)·`hostile`(−2)은 등급을 넘지 못한다.
+ */
+function openUp(state: GameState, player: GamePlayer): void {
+  while (relationTierOf(state, MANAGER_SUBJECT, player.id) !== "trusted") {
+    moveRelation(state, MANAGER_SUBJECT, player.id, "promise-kept");
+  }
+  expect(receptivityOf(state, player.id).tier).toBe("open");
+}
+function closeOff(state: GameState, player: GamePlayer): void {
+  while (relationTierOf(state, MANAGER_SUBJECT, player.id) !== "hostile") {
+    moveRelation(state, MANAGER_SUBJECT, player.id, "promise-broken");
+  }
+  expect(receptivityOf(state, player.id).tier).toBe("closed");
+}
+/** 앵커가 가운데인 선수 — 새 게임에서는 원형이 밀지 않은 대부분이 그렇다 */
+function waryOne(state: GameState, skip: ReadonlySet<string> = new Set()): GamePlayer {
+  const found = userPlayers(state).find(
+    (p) => !skip.has(p.id) && receptivityOf(state, p.id).tier === "wary",
+  );
+  if (!found) throw new Error("경계 등급의 선수가 없다");
+  return found;
+}
+/**
+ * 불만을 건 채로도 앵커가 가운데인 선수 — 열린 불만이 수용성을 한 칸 닫으므로
+ * (career.md §2) 사이를 `close`로 한 칸 열어 상쇄한다. 그저 그런 사이의 불만은 닫힌다.
+ */
+function waryWithIssue(state: GameState, skip: ReadonlySet<string> = new Set()): GamePlayer {
+  const player = waryOne(state, skip);
+  for (let i = 0; i < 3; i += 1) moveRelation(state, MANAGER_SUBJECT, player.id, "promise-kept");
+  state.issues.push({
+    gamePlayerId: player.id,
+    kind: "unhappy",
+    note: "출전 불만",
+    since: state.date,
+  });
+  expect(receptivityOf(state, player.id).tier).toBe("wary");
+  return player;
 }
 
 describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)", () => {
@@ -182,6 +231,9 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
       intensity: 1 | 2 | 3,
     ) => {
       const player = players[index]!;
+      // 사다리 끝의 말은 그쪽으로 열린 사람에게만 닿는다 — 앵커가 먼저 선다 (career.md §2)
+      if (outcome === "motivated") openUp(state, player);
+      if (outcome === "angered") closeOff(state, player);
       player.state.form = 0;
       expect(applyTalkToPlayer(state, { playerId: player.id, outcome, intensity }).ok).toBe(true);
       return player.state.form;
@@ -201,6 +253,8 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
     state.manager.attributes.leadership = 99;
     const player = userPlayers(state)[0]!;
 
+    // 방이 열려 있어야 `inspired`가 선다 — 앵커는 명단의 중앙값이다
+    for (const p of userPlayers(state)) openUp(state, p);
     player.state.form = 0;
     expect(applyTeamTalk(state, { occasion: "pre", outcome: "inspired", intensity: 3 }).ok).toBe(
       true,
@@ -208,6 +262,7 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
     expect(player.state.form).toBeCloseTo(moraleToForm(6), 10);
 
     // 같은 폭이 아래로도 열려 있다 (자리가 다르면 하루에 또 한 번이다)
+    for (const p of userPlayers(state)) closeOff(state, p);
     player.state.form = 0;
     expect(applyTeamTalk(state, { occasion: "half", outcome: "backfired", intensity: 3 }).ok).toBe(
       true,
@@ -217,16 +272,8 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
 
   it("면담이 불만 이슈를 푸는 것은 잘 풀렸을 때뿐이다 (career.md §2)", () => {
     const state = createTestGame();
-    const calmed = userPlayers(state)[5]!;
-    const shouted = userPlayers(state)[6]!;
-    for (const p of [calmed, shouted]) {
-      state.issues.push({
-        gamePlayerId: p.id,
-        kind: "unhappy",
-        note: "출전 불만",
-        since: state.date,
-      });
-    }
+    const calmed = waryWithIssue(state);
+    const shouted = waryWithIssue(state, new Set([calmed.id]));
     expect(
       applyTalkToPlayer(state, { playerId: calmed.id, outcome: "reassured", intensity: 2 }).ok,
     ).toBe(true);
@@ -301,7 +348,7 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
 });
 
 /**
- * 정지점의 외침 — 팀토크와 **같은 스킬**을 지나되 세는 자가 다르다 (career.md §2).
+ * 정지점의 외침 — 팀토크와 **같은 명령**을 지나되 세는 자가 다르다 (career.md §2).
  * 하루가 세면 벤치의 한마디가 라커룸 몫을 먹고, 게이트가 없으면 정지점마다 외치는
  * 것이 폼을 올리는 최적 전략이 된다.
  */
@@ -329,6 +376,8 @@ describe("정지점의 외침 — 하루가 아니라 경기가 센다 (career.m
     const state = structuredClone(base);
     const player = onSquad(state);
 
+    // 사다리 끝의 외침은 그쪽으로 열린 명단에만 닿는다 — 앵커가 먼저 선다
+    for (const p of userPlayers(state)) openUp(state, p);
     player.state.form = 0;
     expect(applyTeamTalk(state, { occasion: "shout", outcome: "inspired", intensity: 3 }).ok).toBe(
       true,
@@ -336,6 +385,7 @@ describe("정지점의 외침 — 하루가 아니라 경기가 센다 (career.m
     expect(player.state.form).toBeCloseTo(moraleToForm(2), 10);
 
     // 같은 폭이 아래로도 열려 있다
+    for (const p of userPlayers(state)) closeOff(state, p);
     player.state.form = 0;
     expect(applyTeamTalk(state, { occasion: "shout", outcome: "backfired", intensity: 3 }).ok).toBe(
       true,
@@ -590,7 +640,7 @@ describe("set_lineup은 조정해 둔 좌표를 건드리지 않는다", () => {
   });
 });
 
-describe("라인업 스킬은 검증 뒤에 적용한다 (team.md §6)", () => {
+describe("라인업 명령은 검증 뒤에 적용한다 (team.md §6)", () => {
   /**
    * 세계 하나를 이 describe가 함께 쓴다 (AGENTS.md §5 — `createTestGame`은 한 번에
    * 1초다). 반려 케이스는 **상태를 바꾸지 않는 것이 곧 검증 대상**이라 앞뒤 순서에
@@ -741,7 +791,7 @@ describe("라인업 스킬은 검증 뒤에 적용한다 (team.md §6)", () => {
   });
 });
 
-describe("포지션 스킬 (멀티 포지션)", () => {
+describe("포지션 명령 (멀티 포지션)", () => {
   it("주 포지션을 옮기면 isNatural이 이동하고 OVR이 재산정된다", () => {
     const state = createTestGame();
     const df = userPlayers(state).find((p) => groupOf(p) === "DF")!;
@@ -1366,7 +1416,7 @@ describe("주장·전술·개인 지시", () => {
   });
 });
 
-describe("훈련 스킬 = 일정 생성 (규칙 테이블 없음)", () => {
+describe("훈련 명령 = 일정 생성 (규칙 테이블 없음)", () => {
   it("특정 날짜 세션을 등록하면 일정 엔트리가 생긴다", () => {
     const state = createTestGame();
     // 휴가 기간엔 훈련을 걸 수 없다 — 소집일 이후로 잡는다
@@ -1475,74 +1525,228 @@ describe("훈련 스킬 = 일정 생성 (규칙 테이블 없음)", () => {
   });
 });
 
-describe("서사 이벤트 — 체력·폼만, 한도 내 (overview §7)", () => {
-  it("하루 세 번까지다 — 네 번째는 반려되고 장부를 건드리지 않는다", () => {
+describe("사건 기록 — 감독이 말로 만든 사건이 장부에 선다 (people.md §6)", () => {
+  const incident = (
+    state: GameState,
+    over: Partial<Parameters<typeof recordIncident>[1]> & { playerIds: string[] },
+  ) =>
+    recordIncident(state, {
+      kind: "other",
+      intensity: 1,
+      summary: "장면",
+      ...over,
+    });
+
+  it("하루 세 건까지다 — 네 번째는 반려되고 장부를 건드리지 않는다", () => {
     const state = createTestGame();
     const player = userPlayers(state)[0]!;
-    player.state.form = 0;
-    const fire = () =>
-      applyNarrativeEvent(state, { playerIds: [player.id], formDelta: 1, note: "장면" });
-    for (let n = 1; n <= 3; n++) expect(fire().ok, `${n}번째가 막혔다`).toBe(true);
+    const fire = () => incident(state, { playerIds: [player.id] });
+    for (let n = 1; n <= MAX_INCIDENTS_PER_DAY; n++)
+      expect(fire().ok, `${n}번째가 막혔다`).toBe(true);
 
-    const before = player.state.form;
+    const before = { form: player.state.form, rows: state.incidents?.length };
     expect(fire().ok, "네 번째가 통과했다").toBe(false);
-    expect(player.state.form, "반려된 이벤트가 폼을 움직였다").toBe(before);
+    expect(player.state.form).toBe(before.form);
+    expect(state.incidents?.length).toBe(before.rows);
 
-    // 날이 바뀌면 다시 세 번이 열린다 — 한도의 단위는 하루다
+    // 날이 바뀌면 다시 세 건이 열린다 — 한도의 단위는 하루다
     state.date = addDays(state.date, 1);
     expect(fire().ok).toBe(true);
   });
 
   /**
    * 한도를 세는 열쇠는 **갈래**다 (records.ts `NarrativeKind`). 접두 문장으로
-   * 가르던 자리라, 문구를 다듬는 것만으로 상한이 사라지던 판정이다
-   * (overview.md §1 철칙 4).
+   * 가르던 자리라, 문구를 다듬는 것만으로 상한이 사라지던 판정이다. 옛 세이브의
+   * `gm-event` 줄도 세지 않는다 — 그 갈래는 더 적히지 않는다.
    */
   it("한도는 문구가 아니라 갈래로 센다", () => {
     const state = createTestGame();
     const player = userPlayers(state)[0]!;
-    const fire = () => applyNarrativeEvent(state, { playerIds: [player.id], note: "장면" });
+    const fire = () => incident(state, { playerIds: [player.id] });
     expect(fire().ok).toBe(true);
 
     const line = state.narrative[state.narrative.length - 1]!;
-    expect(line.kind, "갈래 없이 적혔다").toBe("gm-event");
+    expect(line.kind, "갈래 없이 적혔다").toBe("incident");
     expect(line.text, "문구에 표식이 박혔다").toBe("장면");
 
-    // 같은 날의 다른 갈래는 한도에 안 든다 — 경기·이적 줄이 서사 이벤트를 막지 않는다
     pushNarrative(state, "리그 3연승", 3, "match");
+    pushNarrative(state, "옛 서사 이벤트", 3, "gm-event");
     pushNarrative(state, "갈래를 모르는 옛 줄", 3);
     expect(fire().ok).toBe(true);
     expect(fire().ok).toBe(true);
     expect(fire().ok, "네 번째가 통과했다").toBe(false);
   });
 
-  it("폼은 −1/0/+1 단계로만 말하고 코어가 0.12씩 옮긴다", () => {
+  it("효과표 한 줄 — discipline 세기 2는 당사자 사기 −4 · 팀 사기 +1 · 관계 −6", () => {
     const state = createTestGame();
-    const player = userPlayers(state)[0]!;
-    const step = (formDelta: number) => {
-      player.state.form = 0;
-      expect(
-        applyNarrativeEvent(state, { playerIds: [player.id], formDelta, note: "장면" }).ok,
-      ).toBe(true);
-      return player.state.form;
-    };
-    expect(step(1)).toBeCloseTo(0.12, 10);
-    expect(step(-1)).toBeCloseTo(-0.12, 10);
-    // 모델이 큰 수를 불러도 단계는 하나다 — 한 장면이 선수를 절정에 꽂지 못한다
-    expect(step(9)).toBeCloseTo(0.12, 10);
+    const [party, other] = userPlayers(state) as [GamePlayer, GamePlayer];
+    party.state.form = 0;
+    other.state.form = 0;
+    const before = relationOf(state, MANAGER_SUBJECT, party.id);
+
+    const result = incident(state, { kind: "discipline", intensity: 2, playerIds: [party.id] });
+    expect(result.ok).toBe(true);
+    // 당사자도 팀의 한 사람이다 — 자기 몫 −4 위에 팀 몫 +1이 얹힌다
+    expect(party.state.form).toBeCloseTo(moraleToForm(-4 + 1), 10);
+    expect(other.state.form).toBeCloseTo(moraleToForm(1), 10);
+    expect(relationOf(state, MANAGER_SUBJECT, party.id)).toBe(
+      before + RELATION_EVENTS["incident-discipline"],
+    );
+    expect(result.brief?.items.find((i) => i.label === "사기")?.delta).toBe(-4);
   });
 
-  it("한도를 넘는 값은 잘린다", () => {
+  it("세기가 사기를 늘이되 `INCIDENT_MORALE_BOUND` 밖으로는 못 나간다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[2]!;
+    // reward 세기 3 = round(4 × 1.5) = 6 — 폭의 끝에 딱 선다
+    const result = incident(state, { kind: "reward", intensity: 3, playerIds: [player.id] });
+    expect(result.brief?.items.find((i) => i.label === "사기")?.delta).toBe(INCIDENT_MORALE_BOUND);
+    const low = incident(state, { kind: "discipline", intensity: 3, playerIds: [player.id] });
+    expect(low.brief?.items.find((i) => i.label === "사기")?.delta).toBe(-INCIDENT_MORALE_BOUND);
+  });
+
+  it("mediation은 두 선수 사이를 +6, 감독과는 각각 +2 옮긴다", () => {
+    const state = createTestGame();
+    const [a, b] = userPlayers(state) as [GamePlayer, GamePlayer];
+    const pair = relationOf(state, a.id, b.id);
+    const withA = relationOf(state, MANAGER_SUBJECT, a.id);
+    expect(incident(state, { kind: "mediation", intensity: 2, playerIds: [a.id, b.id] }).ok).toBe(
+      true,
+    );
+    expect(relationOf(state, a.id, b.id)).toBe(pair + RELATION_EVENTS.mediated);
+    expect(relationOf(state, MANAGER_SUBJECT, a.id)).toBe(
+      withA + RELATION_EVENTS["incident-mediation"],
+    );
+  });
+
+  it("장부와 인물 기억에 즉시 선다 — 당사자는 이름으로 불러도 id로 적힌다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[3]!;
+    const summary = "훈련 지각으로 벌금";
+    expect(
+      incident(state, { kind: "discipline", intensity: 1, playerIds: [player.name], summary }).ok,
+    ).toBe(true);
+    const row = state.incidents?.[state.incidents.length - 1];
+    expect(row).toMatchObject({
+      date: state.date,
+      kind: "discipline",
+      playerIds: [player.id],
+      intensity: 1,
+      summary,
+    });
+    expect(
+      state.characterMemories?.some((m) => m.characterId === player.name && m.text === summary),
+      "인물 기억이 서지 않았다",
+    ).toBe(true);
+  });
+
+  it("없는 선수가 하나라도 있으면 반려하고 아무것도 움직이지 않는다 — 원자성", () => {
     const state = createTestGame();
     const player = userPlayers(state)[0]!;
-    const m0 = player.state.condition;
-    const result = applyNarrativeEvent(state, {
-      playerIds: [player.id],
-      conditionDelta: 50,
-      note: "테스트",
+    const snapshot = {
+      form: userPlayers(state).map((p) => p.state.form),
+      narrative: state.narrative.length,
+      relations: state.relations?.length ?? 0,
+    };
+    const result = incident(state, {
+      kind: "outing",
+      intensity: 2,
+      playerIds: [player.id, "ghost"],
+    });
+    expect(result.ok).toBe(false);
+    expect(userPlayers(state).map((p) => p.state.form)).toEqual(snapshot.form);
+    expect(state.narrative.length).toBe(snapshot.narrative);
+    expect(state.relations?.length ?? 0).toBe(snapshot.relations);
+    expect(state.incidents ?? []).toEqual([]);
+  });
+});
+
+/**
+ * 수용성 앵커 — outcome은 그 선수가 지금 감독의 말을 어떻게 듣는지의 ± 한 단계 안에서만
+ * 선다 (career.md §2). 사기·관계는 **잘린 outcome**으로 셈한다.
+ */
+describe("수용성 — 판정은 앵커 ± 한 단계 안에서만 선다 (career.md §2)", () => {
+  it("닫힌 선수에게 보낸 motivated는 neutral에서 멈춘다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[0]!;
+    closeOff(state, player);
+    player.state.form = 0;
+    const before = relationOf(state, MANAGER_SUBJECT, player.id);
+    const result = applyTalkToPlayer(state, {
+      playerId: player.id,
+      outcome: "motivated",
+      intensity: 3,
     });
     expect(result.ok).toBe(true);
-    expect(player.state.condition - m0).toBeLessThanOrEqual(5);
+    expect(player.state.form).toBe(0);
+    expect(relationOf(state, MANAGER_SUBJECT, player.id)).toBe(before);
+    expect(result.message).toContain("motivated은 neutral으로");
+    expect(result.brief?.items.find((i) => i.label === "수용성")?.text).toBe("닫힘");
+  });
+
+  it("열린 선수에게 보낸 angered도 neutral에서 멈춘다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[1]!;
+    openUp(state, player);
+    player.state.form = 0;
+    const before = relationOf(state, MANAGER_SUBJECT, player.id);
+    const result = applyTalkToPlayer(state, {
+      playerId: player.id,
+      outcome: "angered",
+      intensity: 3,
+    });
+    expect(player.state.form).toBe(0);
+    expect(relationOf(state, MANAGER_SUBJECT, player.id)).toBe(before);
+    expect(result.message).toContain("angered은 neutral으로");
+    // 잘리지 않은 판정에는 그 조각이 없다 — 사실 줄만 남는다
+    const plain = applyTalkToPlayer(state, {
+      playerId: userPlayers(state)[2]!.id,
+      outcome: "neutral",
+      intensity: 1,
+    });
+    expect(plain.message).not.toContain("으로)");
+    expect(plain.message).toContain("수용성");
+  });
+});
+
+describe("잔향 — 그 대화를 쥔 호출이 심경 한 문장을 남긴다 (people.md §5)", () => {
+  it("면담의 mood가 그 선수의 moodNote로 선다", () => {
+    const state = createTestGame();
+    const player = waryOne(state);
+    applyTalkToPlayer(state, {
+      playerId: player.id,
+      outcome: "reassured",
+      intensity: 2,
+      mood: { text: "자리를 약속받고 한결 가벼워졌다" },
+    });
+    expect(player.state.moodNote?.text).toBe("자리를 약속받고 한결 가벼워졌다.");
+    expect(player.state.moodNote?.on).toBe(state.date);
+  });
+
+  it("불만을 푼 면담의 문장은 acknowledgesIssue 없이도 선다 — 해소가 잔향보다 먼저다", () => {
+    const state = createTestGame();
+    const player = waryWithIssue(state);
+    applyTalkToPlayer(state, {
+      playerId: player.id,
+      outcome: "reassured",
+      intensity: 2,
+      mood: { text: "응어리가 풀렸다" },
+    });
+    expect(state.issues.some((i) => i.gamePlayerId === player.id)).toBe(false);
+    expect(player.state.moodNote?.text).toBe("응어리가 풀렸다.");
+  });
+
+  it("팀토크의 moods는 셋까지다 — 넷이 오면 앞의 셋만", () => {
+    const state = createTestGame();
+    const four = userPlayers(state).slice(0, 4);
+    applyTeamTalk(state, {
+      occasion: "daily",
+      outcome: "neutral",
+      intensity: 1,
+      moods: four.map((p, i) => ({ playerId: p.id, text: `한마디 ${i}` })),
+    });
+    expect(four.slice(0, 3).every((p) => p.state.moodNote !== undefined)).toBe(true);
+    expect(four[3]!.state.moodNote).toBeUndefined();
   });
 });
 
@@ -1863,7 +2067,7 @@ describe("적응도 왕복 — 2군 · 자리 · 천장 100", () => {
 });
 
 /**
- * 자리 이동·개인 훈련 — 감독이 도구 하나로 바로 거는 스킬이다 (`skills/index.ts`).
+ * 자리 이동·개인 훈련 — 감독이 도구 하나로 바로 거는 명령이다 (`commands/index.ts`).
  * 이적·방출과 한 파일에 있었지만 여기가 그 코드가 사는 자리다.
  */
 describe("자리 이동 — 교체 없이 선발 안에서만", () => {

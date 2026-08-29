@@ -16,6 +16,7 @@ import {
   clubHonoursLine,
   coachCues,
   describeActiveArcs,
+  describeOpenings,
   computeStandings,
   dayOfWeek,
   describeBuyBackRights,
@@ -64,6 +65,7 @@ import {
   squadReturnOf,
   subLimitsOf,
   tacticsOf,
+  playersOf,
   teamName,
   topNarrative,
   userPlayers,
@@ -117,6 +119,8 @@ import {
   visionItemText,
   type CallUpReturnState,
   type GamePlayer,
+  type MatchRecord,
+  type TeamTalkOccasion,
   type CharacterEntry,
   type CharacterInjection,
   type ManagerOffer,
@@ -278,8 +282,14 @@ export function buildGmReference(state: GameState): string {
 export function buildGmDigest(state: GameState): string | null {
   const digest = state.historyDigest;
   if (!digest) return null;
-  // 무엇의 요약인지는 시스템 프롬프트의 「입력」이 말한다 — 블록은 날짜와 본문뿐이다
-  return [`<summary at="${digest.at}">`, digest.text, `</summary>`].join("\n");
+  // 무엇의 요약인지는 시스템 프롬프트의 「입력」이 말한다 — 블록은 날짜와 두 칸뿐이다.
+  // 옛 세이브의 요약은 열린 일이 없다 — 그때는 지난 일 한 칸이다
+  return [
+    `<summary at="${digest.at}">`,
+    `지난 일: ${digest.text}`,
+    ...(digest.open ? [`열린 일: ${digest.open}`] : []),
+    `</summary>`,
+  ].join("\n");
 }
 
 /** 유저의 자연어를 모델이 읽는 감독 화자 형식으로 감싼다. */
@@ -330,9 +340,96 @@ export function buildMatchBrief(state: GameState): string {
 
 const DOW_KO = ["일", "월", "화", "수", "목", "금", "토"];
 
+/** 팀토크 자리 — 다이제스트 줄에 한글로 선다. 판정(outcome)은 코드 그대로다 */
+const TEAM_TALK_OCCASION_KO: Record<TeamTalkOccasion, string> = {
+  pre: "경기 전",
+  half: "하프타임",
+  post: "경기 후",
+  daily: "훈련장",
+  shout: "외침",
+};
+
+/** 그 경기의 채팅 턴 — 표식이 있으면 경기 id로, 없으면(옛 세이브) 날짜로 가른다 */
+function turnsOfMatch(state: GameState, match: MatchRecord): ChatTurn[] {
+  return state.chat.filter(
+    (t) =>
+      t.inMatch === true &&
+      (t.matchId !== undefined ? t.matchId === match.id : t.at === match.date),
+  );
+}
+
 /**
- * 경기 → 평시 다리 — 직전 경기의 결과·득점·최고 평점을 코어가 장부에서 뽑는다
- * (평시 GM은 중계 이력을 보지 않는다). 직전 한 경기만 — 그 이상은 get_league의 몫.
+ * 라커룸의 결과 — 그 경기의 팀토크 자리와 판정. 호출 기록의 입력(`team_talk`)에서
+ * 읽는다: 코어가 적은 사실이지 중계 문장이 아니다.
+ */
+function lockerRoomLine(turns: readonly ChatTurn[]): string | null {
+  const talks: string[] = [];
+  for (const call of turns.flatMap((t) => t.toolCalls)) {
+    if (call.name !== "team_talk") continue;
+    const input = call.input as { occasion?: unknown; outcome?: unknown } | undefined;
+    if (typeof input?.occasion !== "string" || typeof input.outcome !== "string") continue;
+    const occasion = (TEAM_TALK_OCCASION_KO as Record<string, string>)[input.occasion];
+    talks.push(`${occasion ?? input.occasion} 팀토크 ${input.outcome}`);
+  }
+  return talks.length > 0 ? `- 라커룸: ${talks.join(" · ")}` : null;
+}
+
+/**
+ * 그라운드를 떠난 우리 선수 — 퇴장·부상·교체. 장부의 사건 목록(`result.events`)이
+ * 원본이고, 사건이 남지 않은 옛 세이브는 그 턴의 카드·부상 기록·교체 명령 입력으로
+ * 떨어진다. 없으면 줄을 세우지 않는다.
+ */
+function departedLine(
+  state: GameState,
+  match: MatchRecord,
+  turns: readonly ChatTurn[],
+  ours: "home" | "away",
+  nameOf: (id: string) => string,
+): string | null {
+  const isOurs = (id: string) =>
+    state.players.find((p) => p.id === id)?.teamId === state.userTeamId;
+  const mark = (label: string, id: string, minute?: number) =>
+    `${label} ${nameOf(id)}${minute !== undefined ? `(${minute}′)` : ""}`;
+  const parts: string[] = [];
+  const events = match.result?.events;
+  if (events) {
+    for (const e of events) {
+      if (e.team !== ours) continue;
+      const who = e.actors[0];
+      if (!who) continue;
+      if (e.type === "red_card") parts.push(mark("퇴장", who, e.minute));
+      else if (e.type === "injury") parts.push(mark("부상", who, e.minute));
+      else if (e.type === "substitution") parts.push(mark("교체 아웃", who, e.minute));
+    }
+  } else {
+    for (const t of turns) {
+      for (const card of t.cards ?? []) {
+        if (card.ours && card.kind !== "yellow") parts.push(mark("퇴장", card.player, card.minute));
+      }
+      for (const call of t.toolCalls) {
+        const input = call.input as { out?: unknown } | undefined;
+        if (call.name === "substitute" && typeof input?.out === "string") {
+          parts.push(mark("교체 아웃", input.out));
+        }
+      }
+    }
+    for (const injury of state.injuries) {
+      if (
+        injury.cause === "match" &&
+        injury.occurredOn === match.date &&
+        isOurs(injury.gamePlayerId)
+      ) {
+        parts.push(mark("부상", injury.gamePlayerId));
+      }
+    }
+  }
+  return parts.length > 0 ? `- 나간 사람: ${parts.join(" · ")}` : null;
+}
+
+/**
+ * 경기 → 평시 다리 — 직전 경기의 결과·득점·최고 평점에 라커룸의 결과와 그라운드를
+ * 떠난 사람을 코어가 장부에서 뽑는다 (평시 GM은 중계 이력을 보지 않는다 — agents.md §5).
+ * 직전 한 경기만 — 그 이상은 get_league의 몫.
  */
 function matchDigest(state: GameState): string | null {
   const played = state.matches
@@ -363,10 +460,13 @@ function matchDigest(state: GameState): string | null {
     .slice(0, TOP_RATED_SHOWN)
     .map(([pid, r]) => `${nameOf(pid)} ${r.toFixed(1)}`)
     .join(", ");
+  const turns = turnsOfMatch(state, played);
   return [
     `${played.date} ${ours ? "홈" : "원정"} vs ${opponent} ${us}-${them} ${verdict}`,
     scorers ? `- 득점: ${scorers}` : null,
     best ? `- 최고 평점: ${best}` : null,
+    lockerRoomLine(turns),
+    departedLine(state, played, turns, ours ? "home" : "away", nameOf),
   ]
     .filter(Boolean)
     .join("\n");
@@ -398,6 +498,30 @@ export interface TimePassed {
  */
 const TOP_RATED_SHOWN = 2;
 const TRAINING_SHOWN = 3;
+
+/** 훈련 해석기가 읽는 예정 훈련 수 — 주간 일정을 통째로 보고 겹침을 판단한다 */
+const TRAINING_SCHEDULE_SHOWN = 20;
+
+/**
+ * 예정된 훈련 줄 — 스냅샷의 요약(`TRAINING_SHOWN`)과 훈련 해석기의 `<schedule>`이
+ * **같은 함수를 읽는다.** 두 벌이면 화면이 말하는 일정과 해석기가 읽는 일정이 갈린다.
+ */
+export function upcomingTrainingLines(state: GameState, limit = TRAINING_SHOWN): string[] {
+  return state.schedule
+    .filter((e) => e.type === "training" && e.status === "scheduled" && e.date >= state.date)
+    .slice(0, limit)
+    .map((e) => {
+      const s = state.trainingSessions.find((x) => x.id === e.refId);
+      return `${e.date.slice(5)} ${slotOfTime(e.time) === "am" ? "오전" : "오후"} ${s?.label ?? "훈련"}`;
+    });
+}
+
+/** 훈련 해석기의 `<schedule>` 본문 — 없으면 빈 문자열 */
+export function buildTrainingSchedule(state: GameState): string {
+  return upcomingTrainingLines(state, TRAINING_SCHEDULE_SHOWN)
+    .map((line) => `- ${line}`)
+    .join("\n");
+}
 const EXPIRING_SHOWN = 3;
 /**
  * 떠나기로 한 선수를 몇 명까지 이름으로 적나 — **만료 임박보다 짧다.** 그 자리는
@@ -504,7 +628,7 @@ function opponentBlock(state: GameState): string | null {
 
 /**
  * 회견·찾아온 사람 — **id가 태그의 속성으로 선다.** 답할 자리라 모델이 그 id를
- * 스킬 인자로 되돌려 주어야 하고, 여는 태그가 이름을 대므로 안쪽 첫 줄은 맥락부터
+ * 명령 인자로 되돌려 주어야 하고, 여는 태그가 이름을 대므로 안쪽 첫 줄은 맥락부터
  * 시작한다 (prompts.md §5-1).
  */
 function pressBlock(state: GameState): string | null {
@@ -599,7 +723,7 @@ function vacancyRows(state: GameState): string[] {
  * 재계약은 구단도 자리도 그대로라 구단·기대를 다시 적지 않는다 — 바로 위의 보드
  * 기대 줄이 그것이다.
  */
-function managerSeatLines(state: GameState): string[] {
+export function managerSeatLines(state: GameState): string[] {
   const offers = openManagerOffers(state).map((o) =>
     o.via === "renewal"
       ? `${OFFER_VIA_KO.renewal}: ${o.id} · ${offerTerms(o)}`
@@ -943,11 +1067,6 @@ export function buildGmStateNote(
   arrivedReports: readonly ScoutReportCard[] = [],
   /** 같은 자리의 임무 보고 — 지목과 한 블록을 나눠 쓴다 */
   arrivedMissions: readonly MissionReportCard[] = [],
-  /**
-   * 장면보다 먼저 교섭 상대가 낸 답 (agents.md §4-1) — GM은 판정하지 않고 **전한다**.
-   * 판정이 이미 끝났으므로 아래 `pendingVerdicts`에는 그 협상이 서지 않는다.
-   */
-  counterpartyReplies: readonly string[] = [],
 ): string {
   // 무직이면 실을 것이 다른 것들이다 (career.md §5.1)
   if (managedTeamId(state) === null) return buildUnemployedNote(state, passed);
@@ -1006,21 +1125,13 @@ export function buildGmStateNote(
     .map((p) => p.name);
   const unhappy = state.issues.map((i) => playerName(state, i.gamePlayerId));
 
-  const training = state.schedule
-    .filter((e) => e.type === "training" && e.status === "scheduled" && e.date >= state.date)
-    .slice(0, TRAINING_SHOWN)
-    .map((e) => {
-      const s = state.trainingSessions.find((x) => x.id === e.refId);
-      return `${e.date.slice(5)} ${slotOfTime(e.time) === "am" ? "오전" : "오후"} ${s?.label ?? "훈련"}`;
-    });
+  const training = upcomingTrainingLines(state);
   const trainingCount = state.schedule.filter(
     (e) => e.type === "training" && e.status === "scheduled" && e.date >= state.date,
   ).length;
 
   const alerts = [
-    // 상대가 방금 낸 답이 맨 앞 — 이 줄이 없으면 GM은 협상이 움직인 줄 모른다
-    ...counterpartyReplies.map((line) => `📨 ${line}`),
-    // 판정 대기 협상이 그다음 — 답은 다음 턴 입력에 실리므로 여기서 세우지 않으면 잊힌다
+    // 판정 대기 협상이 맨 앞 — 답은 다음 턴 입력에 실리므로 여기서 세우지 않으면 잊힌다
     ...pendingVerdicts(state).map((v) => `❗ ${v.label} (${v.negotiation.id})`),
     /**
      * 감독이 아직 답하지 않은 이적 요청 — 기한이 없어 저절로 사라지지 않는다
@@ -1310,11 +1421,107 @@ export function buildGmStateNote(
     // 활성 서사 아크 — 닫힐 때까지 매 턴 실려 GM이 시즌을 가로지르는 흐름을 잃지 않는다
     // (people.md §9). 개폐도 사실 줄도 코어의 것이다
     block("arcs", describeActiveArcs(state)),
+    // 시작 사건 — 부임 첫 몇 주의 실마리. 기한이 닫을 때까지 매 턴 선다 (career.md §1)
+    block("openings", describeOpenings(state)),
     block("recent", recent.map((r) => `- ${r}`).join("\n")),
     `</snapshot>`,
   ]
     .filter((x): x is string => x !== null)
     .join("\n");
+}
+
+/** 해석기가 읽는 지난 턴 수 — 이름 없는 지목이 가리키는 대상은 직전 대화에 있다 */
+export const RECENT_TURNS = 5;
+/** 지난 턴 본문 하나의 상한 — 해석에 필요한 것은 누가 무슨 말을 했는가지 장면 전부가 아니다 */
+const RECENT_TURN_CHARS = 1200;
+
+/**
+ * 턴 목록을 해석기가 읽는 줄로 — **평시의 `<recent_turns>`와 경기의 `<match_log>`가 같은
+ * 함수를 쓴다.** 감독 턴은 `@감독:` 봉투, 손잡이 턴은 오퍼레이터 봉투, 모델 턴은 본문을
+ * 잘라서. 두 벌이면 한쪽만 고쳐져 두 해석기가 다른 말을 읽는다.
+ */
+export function renderTurns(turns: readonly ChatTurn[]): string[] {
+  return turns.map((t) => {
+    if (t.role === "user") return `@감독: ${t.text}`;
+    if (t.role === "operator") return buildOperatorMessage(t.text);
+    return t.text.slice(0, RECENT_TURN_CHARS);
+  });
+}
+
+/** `<recent_turns>`의 본문 — 평시의 지난 턴들 */
+export function buildRecentTurnsBlock(state: GameState, count = RECENT_TURNS): string {
+  return renderTurns(state.chat.filter((t) => t.inMatch !== true).slice(-count)).join("\n");
+}
+
+/**
+ * `<standing>` — **지금 우리가 걸어 둔 것 전부**: 6축과 갈래·세트피스 인원·지역 전술·
+ * 개인 지시와 역할·완장·세트피스 키커. 경기 장부 노트와 평시의 지시 해석이 같은 블록을
+ * 읽는다 — 두 벌이면 "압박 올려"의 지금 값이 한쪽에서 지어내진다 (agents.md §1).
+ */
+export function buildStandingBlock(
+  state: GameState,
+  regionalPlans?: NonNullable<GameState["pendingMatch"]>["regionalPlans"],
+): string[] {
+  const squad = playersOf(state, state.userTeamId);
+  const captain = squad.find((p) => p.isCaptain);
+  const vice = squad.find((p) => p.isViceCaptain === true);
+  const takers = tacticsOf(state, state.userTeamId).setPieceTakers ?? {};
+  const takerName = (id: string | undefined): string => (id ? playerName(state, id) : "지정 없음");
+  /**
+   * **지금 내가 무엇을 걸어 뒀는가** — 경기 중에는 평시 스냅샷(6축이 적힌 줄)이
+   * 실리지 않아 여기가 유일한 자리다. 없으면 "압박 올려"에 지금 값이 지어내진다.
+   */
+  const ourTeamTactics = tacticsOf(state, state.userTeamId);
+  const ourTactics = ourTeamTactics.spec;
+  const assignments = ourTeamTactics.assignments.filter(
+    (a) => a.role === "starting" && (a.directive || a.instruction || a.roleId),
+  );
+  /**
+   * 걸어 둔 갈래 — **중립인 것은 세우지 않는다** (`tacticsBrief`와 같은 규칙).
+   * 낱말은 `TACTIC_TOGGLES` 하나에서 온다 — 손으로 적으면 해석 프롬프트가 가르치는
+   * 낱말과 이 줄이 갈린다 (prompts.md §5-2).
+   */
+  const ourToggles = TACTIC_TOGGLES.flatMap((toggle) => {
+    const value = tacticToggleValue(ourTactics, toggle.key);
+    return value === null ? [] : [`${toggle.brief} ${tacticToggleWord(toggle.key, value)}`];
+  });
+  /**
+   * 걸어 둔 세트피스 지시 — 갈래와 **같은 규칙으로 중립은 서지 않는다.** 이 줄이
+   * 없으면 걸어 둔 축이 「지금 걸어 둔 것」 목록에서 빠져, 인원을 올려 둔 판을 두고
+   * 모델이 세트피스는 손대지 않았다고 답한다 (match.md §2).
+   */
+  const ourRoutine = SET_PIECE_ROUTINE_AXES.flatMap((axis) => {
+    const level = setPieceRoutineLevel(ourTeamTactics.setPieceRoutine, axis.key);
+    return level === SET_PIECE_ROUTINE_NEUTRAL
+      ? []
+      : [`${axis.label} ${setPieceRoutineWord(axis.key, level)}`];
+  });
+  return [
+    `<standing>`,
+    `전술 ${ourTactics.formation} · 멘탈${ourTactics.mentality} 라인${ourTactics.defensiveLine} ` +
+      `압박${ourTactics.pressing} 템포${ourTactics.tempo} 폭${ourTactics.width} 패스${ourTactics.passStyle}` +
+      (ourToggles.length > 0 ? ` · ${ourToggles.join(" · ")}` : ``) +
+      (ourRoutine.length > 0 ? ` · ${SET_PIECE_KO} ${ourRoutine.join(" · ")}` : ``),
+    regionalPlans && regionalPlans.length > 0
+      ? `지역 전술: ${regionalPlans
+          .map((r) => `${r.band}/${r.lane} ${r.intent} "${r.note}"`)
+          .join(" · ")} (동시에 2곳까지 — 셋째를 걸면 가장 오래된 것이 밀린다)`
+      : `지역 전술: 없음`,
+    assignments.length > 0
+      ? `개인 지시·역할: ${assignments
+          .map(
+            (a) =>
+              `${playerName(state, a.playerId)}(${a.position}` +
+              `${a.roleId ? ` ${a.roleId}` : ""}` +
+              `${a.directive ? ` [${a.directive.kind}]` : ""}` +
+              `${a.instruction && !a.directive ? ` "말로만: ${a.instruction}"` : ""})`,
+          )
+          .join(", ")}`
+      : `개인 지시·역할: 없음`,
+    `주장: ${captain ? playerName(state, captain.id) : "없음"} · 부주장: ${vice ? playerName(state, vice.id) : "없음"}`,
+    `세트피스 키커: 코너 ${takerName(takers.corner)} · 프리킥 ${takerName(takers.freeKick)} · 페널티 ${takerName(takers.penalty)}`,
+    `</standing>`,
+  ];
 }
 
 /**
@@ -1397,60 +1604,7 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
           `</targets>`,
         ]
       : [];
-  /**
-   * **지금 내가 무엇을 걸어 뒀는가** — 경기 중에는 평시 스냅샷(6축이 적힌 줄)이
-   * 실리지 않아 여기가 유일한 자리다. 없으면 "압박 올려"에 지금 값이 지어내진다.
-   */
-  const ourTeamTactics = tacticsOf(state, state.userTeamId);
-  const ourTactics = ourTeamTactics.spec;
-  const assignments = ourTeamTactics.assignments.filter(
-    (a) => a.role === "starting" && (a.directive || a.instruction || a.roleId),
-  );
-  /**
-   * 걸어 둔 갈래 — **중립인 것은 세우지 않는다** (`tacticsBrief`와 같은 규칙).
-   * 낱말은 `TACTIC_TOGGLES` 하나에서 온다 — 손으로 적으면 해석 프롬프트가 가르치는
-   * 낱말과 이 줄이 갈린다 (prompts.md §5-2).
-   */
-  const ourToggles = TACTIC_TOGGLES.flatMap((toggle) => {
-    const value = tacticToggleValue(ourTactics, toggle.key);
-    return value === null ? [] : [`${toggle.brief} ${tacticToggleWord(toggle.key, value)}`];
-  });
-  /**
-   * 걸어 둔 세트피스 지시 — 갈래와 **같은 규칙으로 중립은 서지 않는다.** 이 줄이
-   * 없으면 걸어 둔 축이 「지금 걸어 둔 것」 목록에서 빠져, 인원을 올려 둔 판을 두고
-   * 모델이 세트피스는 손대지 않았다고 답한다 (match.md §2).
-   */
-  const ourRoutine = SET_PIECE_ROUTINE_AXES.flatMap((axis) => {
-    const level = setPieceRoutineLevel(ourTeamTactics.setPieceRoutine, axis.key);
-    return level === SET_PIECE_ROUTINE_NEUTRAL
-      ? []
-      : [`${axis.label} ${setPieceRoutineWord(axis.key, level)}`];
-  });
-  const standingLines = [
-    ``,
-    `<standing>`,
-    `전술 ${ourTactics.formation} · 멘탈${ourTactics.mentality} 라인${ourTactics.defensiveLine} ` +
-      `압박${ourTactics.pressing} 템포${ourTactics.tempo} 폭${ourTactics.width} 패스${ourTactics.passStyle}` +
-      (ourToggles.length > 0 ? ` · ${ourToggles.join(" · ")}` : ``) +
-      (ourRoutine.length > 0 ? ` · ${SET_PIECE_KO} ${ourRoutine.join(" · ")}` : ``),
-    pending.regionalPlans && pending.regionalPlans.length > 0
-      ? `지역 전술: ${pending.regionalPlans
-          .map((r) => `${r.band}/${r.lane} ${r.intent} "${r.note}"`)
-          .join(" · ")} (동시에 2곳까지 — 셋째를 걸면 가장 오래된 것이 밀린다)`
-      : `지역 전술: 없음`,
-    assignments.length > 0
-      ? `개인 지시·역할: ${assignments
-          .map(
-            (a) =>
-              `${playerName(state, a.playerId)}(${a.position}` +
-              `${a.roleId ? ` ${a.roleId}` : ""}` +
-              `${a.directive ? ` [${a.directive.kind}]` : ""}` +
-              `${a.instruction && !a.directive ? ` "말로만: ${a.instruction}"` : ""})`,
-          )
-          .join(", ")}`
-      : `개인 지시·역할: 없음`,
-    `</standing>`,
-  ];
+  const standingLines = ["", ...buildStandingBlock(state, pending.regionalPlans)];
   // 사건은 싣지 않는다 — 코어가 이미 굴린 구간은 <segment>로 따로
   // 실린다. 이 블록은 그 구간이 끝난 자리의 장부다 (agents.md §3)
   /**
@@ -1836,7 +1990,8 @@ export function stampMatchScene(text: string, minute: number): string {
  * 판정되는 순간(`[`로 열지 않았다) 그 자리에서 흘려보낸다.
  */
 export function stampMatchStream(
-  minute: number,
+  /** 장부의 분 — 함수면 **첫 델타가 나가는 순간**에 읽는다 (도구가 시계를 옮긴 뒤다) */
+  minute: number | (() => number),
   emit: (delta: string) => void,
 ): (delta: string) => void {
   let opened = false;
@@ -1848,7 +2003,7 @@ export function stampMatchStream(
   };
   return (delta: string) => {
     if (!opened) {
-      emit(`${matchHeader(minute)}\n`);
+      emit(`${matchHeader(typeof minute === "function" ? minute() : minute)}\n`);
       opened = true;
     }
     if (head === null) {

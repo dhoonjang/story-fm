@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   HISTORY_CHAR_KEEP,
   HISTORY_CHAR_LIMIT,
+  HISTORY_DIGEST_CHARS,
+  HISTORY_OPEN_CHARS,
   HISTORY_STEP,
   applyHistoryDigest,
   createGame,
@@ -142,7 +144,12 @@ describe("평시 이력의 창", () => {
         expect(planHistoryFold(state)?.through).toBe(brief.through);
 
         const chatBefore = state.chat.length;
-        expect(applyHistoryDigest(state, brief, `${folds + 1}번째 요약.`)).toBe(true);
+        expect(
+          applyHistoryDigest(state, brief, {
+            past: `${folds + 1}번째 요약.`,
+            open: `${folds + 1}번째 열린 일.`,
+          }),
+        ).toBe(true);
         expect(state.chat.length, "압축은 state.chat을 줄이지 않는다").toBe(chatBefore);
 
         folds += 1;
@@ -168,6 +175,10 @@ describe("평시 이력의 창", () => {
       "렌더 배율": ratios.reduce((a, b) => a + b, 0) / Math.max(1, ratios.length),
       "잔량의 최소 캐시 프리픽스 배수":
         HISTORY_CHAR_KEEP / CHARS_PER_TOKEN / agentMinCacheableInput("gm"),
+      // 요약 블록은 이력 앞에 서서 매 턴 읽힌다 — 두 칸이 차면 이만큼이 캐시 뒤에 붙는다
+      "요약 두 칸 상한 글자": HISTORY_DIGEST_CHARS + HISTORY_OPEN_CHARS,
+      "요약 두 칸의 잔량 대비 비율":
+        (HISTORY_DIGEST_CHARS + HISTORY_OPEN_CHARS) / HISTORY_CHAR_KEEP,
     };
 
     console.log(

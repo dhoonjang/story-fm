@@ -164,14 +164,14 @@ describe("카탈로그 — 실제 세계에서", () => {
     expect(res.ok).toBe(false);
   });
 
-  it("스킬도 이름으로 선수를 집는다 — 상태를 바꾸는 자리까지", () => {
+  it("명령도 이름으로 선수를 집는다 — 상태를 바꾸는 자리까지", () => {
     const mine = userPlayers(state).find((p) => p.name.includes(" "))!;
     const res = setCaptain(state, { playerId: mine.name.replace(/\s/g, "") });
     expect(res.ok, res.message).toBe(true);
     expect(state.players.find((p) => p.isCaptain)?.id).toBe(mine.id);
   });
 
-  it("스킬은 남의 팀 선수를 우리 선수로 만들지 않는다", () => {
+  it("명령은 남의 팀 선수를 우리 선수로 만들지 않는다", () => {
     const stranger = playersOf(state, "chelsea")[0]!;
     const res = setCaptain(state, { playerId: stranger.name });
     expect(res.ok).toBe(false);
@@ -179,7 +179,7 @@ describe("카탈로그 — 실제 세계에서", () => {
   });
 
   /**
-   * 시장·경기 스킬도 이름을 받는다. 다만 **상태에 남는 것은 언제나 id다** —
+   * 시장·경기 명령도 이름을 받는다. 다만 **상태에 남는 것은 언제나 id다** —
    * 협상 id·`gamePlayerId`·장부의 actors에 감독이 부른 이름이 박히면 세이브가
    * 그 선수를 다시 찾지 못한다.
    */

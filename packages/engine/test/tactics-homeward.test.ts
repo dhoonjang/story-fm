@@ -18,7 +18,7 @@ import {
 import { createTestGame } from "./helpers";
 
 /**
- * 전술을 바꿔도 **모두가 똑같이 헤매지는 않는다** (skills.ts `homewardShift`).
+ * 전술을 바꿔도 **모두가 똑같이 헤매지는 않는다** (commands/index.ts `familiarityShift`·`memoryRetention`).
  * 갓 영입된 선수는 자기가 하던 축구를 기준으로 흔들린다 — 우리가 그쪽으로
  * 움직이면 오히려 편해지고, 멀어지면 남들보다 더 헤맨다.
  */

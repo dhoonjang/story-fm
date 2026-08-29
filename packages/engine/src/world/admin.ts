@@ -25,7 +25,7 @@ import { isClubTeam, teamCatalog, teamCatalogById } from "../data/team-catalog";
  *
  * 여기서의 편집은 `player-catalog.json`에 저장되고 **이후 새로 시작하는 게임**의
  * 초기치가 된다. 진행 중인 세이브는 시작 시 카탈로그를 복사해 GAME_PLAYER로
- * 인스턴스화했으므로 영향을 받지 않는다 — 게임 중 선수 상태는 플레이(스킬)로만 바뀐다.
+ * 인스턴스화했으므로 영향을 받지 않는다 — 게임 중 선수 상태는 플레이(도구)로만 바뀐다.
  *
  * 카탈로그는 나이·overall을 저장하지 않는다: 나이는 birthdate에서, overall은
  * 주 포지션 공식에서 파생하므로 표시용으로만 계산해 내려준다.

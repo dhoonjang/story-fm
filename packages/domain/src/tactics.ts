@@ -1702,12 +1702,12 @@ export const SetPieceTakersSchema = z.object({
 });
 export type SetPieceTakers = z.infer<typeof SetPieceTakersSchema>;
 
-/** 지정할 수 있는 세트피스의 갈래 — 스킬·해석·화면이 나눠 쓰는 한 낱말 */
+/** 지정할 수 있는 세트피스의 갈래 — 명령·해석·화면이 나눠 쓰는 한 낱말 */
 export const SET_PIECE_ROLES = ["corner", "freeKick", "penalty"] as const;
 export type SetPieceRole = (typeof SET_PIECE_ROLES)[number];
 
 /**
- * **감독 눈에 닿는 묶음 이름 하나** — 화면·패킷 문장·스킬이 되돌리는 말이 모두
+ * **감독 눈에 닿는 묶음 이름 하나** — 화면·패킷 문장·명령이 되돌리는 말이 모두
  * 이것을 읽는다. 자리 이름이 한 벌인 것과 같은 이유로 묶음 이름도 한 벌이다:
  * 채팅이 "세트피스 키커"라 답하는데 전술판이 다른 낱말을 쓰면 감독은 같은 줄을
  * 두 이름으로 배우고, 채팅에서 배운 말로는 그 줄을 찾지 못한다.
@@ -1718,7 +1718,7 @@ export type SetPieceRole = (typeof SET_PIECE_ROLES)[number];
 export const SET_PIECE_KO = "세트피스";
 
 /**
- * 세트피스 자리의 이름 — **스킬이 감독에게 되돌리는 말과 화면의 라벨이 한 벌이다.**
+ * 세트피스 자리의 이름 — **명령이 감독에게 되돌리는 말과 화면의 라벨이 한 벌이다.**
  * 채팅이 "코너 키커 지정 해제"라 답하고 전술판이 다른 낱말을 쓰면, 감독은 같은
  * 자리를 두 이름으로 배운다.
  */
@@ -1769,12 +1769,12 @@ export const SetPieceRoutineSchema = z.object({
 });
 export type SetPieceRoutine = z.infer<typeof SetPieceRoutineSchema>;
 
-/** 지시할 수 있는 세트피스 축 — 스킬·라우트·화면이 훑는 순서다 */
+/** 지시할 수 있는 세트피스 축 — 명령·라우트·화면이 훑는 순서다 */
 export const SET_PIECE_ROUTINE_KEYS = ["commit", "guard"] as const;
 export type SetPieceRoutineKey = (typeof SET_PIECE_ROUTINE_KEYS)[number];
 
 /**
- * 축 하나의 낱말표 — **화면과 스킬이 되돌리는 말이 한 벌이다.** 전술 갈래
+ * 축 하나의 낱말표 — **화면과 명령이 되돌리는 말이 한 벌이다.** 전술 갈래
  * (`TACTIC_TOGGLES`)와 같은 규약이고, 다른 것은 중립이 열거 한가운데에 있다는 것뿐이다:
  * 갈래는 아무 데도 서지 않은 상태가 중립이지만 이 축은 **보통이 곧 오늘의 값**이다.
  */

@@ -3,14 +3,14 @@ import type { CardMark, GoalMark, ToolCallRecord } from "@story-fm/engine";
 /**
  * **표시는 그 일이 벌어진 자리에 선다.**
  *
- * 골 카드도 스킬 칩도 턴 맨 앞에 몰아 두면 감독은 결과를 먼저 보고 장면을 거꾸로
- * 읽는다 — 한 턴에 두 골이 들어가거나 스킬이 여럿 걸린 구간에서는 어느 문장이
+ * 골 카드도 호출 칩도 턴 맨 앞에 몰아 두면 감독은 결과를 먼저 보고 장면을 거꾸로
+ * 읽는다 — 한 턴에 두 골이 들어가거나 호출이 여럿 걸린 구간에서는 어느 문장이
  * 어느 사건이었는지도 흐려진다. 그래서 조각으로 쪼개 사이사이에 끼운다.
  *
  * 자리를 아는 방법은 둘이고, 둘 다 **기록에서 온다.**
  * - 골·경고는 **분**을 갖는다(`23′`) — 중계 줄의 분을 읽어 그 뒤에 세운다.
  *   중계는 사건을 굴린 **뒤에** 쓰이므로 호출 시점으로는 자리를 못 잡는다.
- * - 스킬은 **호출 시점의 줄 수**를 갖는다(`ToolCallRecord.line`) — 코치가
+ * - 호출은 **그 시점의 줄 수**를 갖는다(`ToolCallRecord.line`) — 코치가
  *   "조정하겠습니다"라고 답한 뒤에 `set_lineup`이 온다는 그 순서다.
  */
 
@@ -41,16 +41,16 @@ export function minuteOf(line: string): number | null {
 /** 자리를 정하는 중간 꼴 — 몇 번째 줄 뒤인가, 혹은 몇 분 뒤인가 */
 interface Placed {
   mark: TurnMark;
-  /** 이 줄 수만큼 지나간 뒤 — 스킬 칩 */
+  /** 이 줄 수만큼 지나간 뒤 — 호출 칩 */
   after?: number;
   /** 이 분이 지나간 뒤 — 골·경고 */
   minute?: number;
 }
 
 /**
- * 스킬 칩을 **호출 시점별로 묶는다.**
+ * 호출 칩을 **호출 시점별로 묶는다.**
  *
- * 같은 자리에서 연달아 불린 스킬은 한 줄에 나란히 선다 — 칩 하나마다 문단을
+ * 같은 자리에서 연달아 불린 호출은 한 줄에 나란히 선다 — 칩 하나마다 문단을
  * 끊으면 장면이 칩으로 토막 난다. 자리를 모르는 기록(`line`이 없는 옛 세이브,
  * 코어가 스스로 남긴 것)은 **0으로 모여** 지금까지처럼 맨 앞에 선다.
  */
@@ -69,7 +69,7 @@ function groupCalls(calls: readonly ToolCallRecord[]): Placed[] {
 }
 
 /**
- * **한 칩이 지는 호출들** — 연달아 불린 같은 스킬은 칩 하나다.
+ * **한 칩이 지는 호출들** — 연달아 불린 같은 호출은 칩 하나다.
  *
  * 한 번에 셋을 바꾼 것은 **한 번의 결정**인데, 호출마다 칩을 세우면 같은 이름·같은
  * 결의 칩이 나란히 서서 감독이 세 번 결정한 것처럼 읽힌다. 다른 것은 펼친 속뿐이라
@@ -112,7 +112,7 @@ export function weaveTurn(
     stamps?: readonly { after: number; stamp: string }[];
     /**
      * 어떤 줄들이 이미 떨어져 나갔나 — 화면은 장면 헤더를 시각 표시로 떼어
-     * 세우는데, 스킬의 줄 수는 그 헤더까지 세고 저장된다. 여기서 맞춰 준다.
+     * 세우는데, 호출의 줄 수는 그 헤더까지 세고 저장된다. 여기서 맞춰 준다.
      * 헤더는 본문 한복판에도 서므로 **몇 줄인지**가 아니라 **어느 줄인지**를 받는다.
      */
     cuts?: readonly number[];
@@ -142,7 +142,7 @@ export function weaveTurn(
   ];
   if (placed.length === 0) return [{ lines }];
 
-  // 줄 수를 아는 것이 먼저, 그다음이 분 — 스킬은 장면을 쓰기 전에 불린다
+  // 줄 수를 아는 것이 먼저, 그다음이 분 — 호출은 장면을 쓰기 전에 불린다
   const byLine = placed.filter((p) => p.after !== undefined).sort((a, b) => a.after! - b.after!);
   const byMinute = placed
     .filter((p) => p.minute !== undefined)
@@ -161,7 +161,7 @@ export function weaveTurn(
     flush();
     pieces.push({ mark });
   };
-  // 0번째 줄 뒤 — 아무것도 쓰기 전에 불린 스킬
+  // 0번째 줄 뒤 — 아무것도 쓰기 전에 불린 호출
   while (nextLine < byLine.length && byLine[nextLine]!.after! <= 0) put(byLine[nextLine++]!.mark);
 
   let count = 0;

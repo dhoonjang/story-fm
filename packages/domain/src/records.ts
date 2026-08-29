@@ -668,7 +668,7 @@ export function isRelease(transfer: { reason?: TransferReason; note?: string }):
 /**
  * 협상은 **원장이 아니다.** TRANSFER가 "일어난 이동"이라면 NEGOTIATION은 "합의되지
  * 않은 흥정"이고, 둘을 한 테이블에 섞으면 원장이 더러워진다. 합의(`agreed`) 뒤
- * 수락 스킬이 TRANSFER·CONTRACT·재정을 쓰고 그때 `completed`가 된다.
+ * 수락 명령이 TRANSFER·CONTRACT·재정을 쓰고 그때 `completed`가 된다.
  * (docs/simulation/transfer.md)
  */
 /**
@@ -802,6 +802,99 @@ export const MedicalSchema = z.object({
 });
 export type Medical = z.infer<typeof MedicalSchema>;
 
+// ── 시작 사건 ─────────────────────────────────────────
+/**
+ * **시작 사건** — 부임 첫 주의 진행을 이끄는 열린 실마리 (career.md §1 · agents.md §4-2).
+ *
+ * 온보딩 판정이 배경과 구단의 사실에서 제안하고 코어가 검증해 앉힌다. 아크(`NarrativeArc`)와
+ * 다른 것은 **장부의 사실에서 열리지 않는다**는 점이다 — 아크는 불만·부상·연승이 열고
+ * 닫지만, 시작 사건은 배경이 열고 기한이 닫는다. 그래서 따로 산다.
+ */
+export const OPENING_KINDS = [
+  /** 구단주·보드의 시선 — 무엇을 지켜보는가 */
+  "board",
+  /** 라커룸 — 누가 새 감독을 재는가 */
+  "dressing-room",
+  /** 언론 — 어떤 이름표가 붙었는가 */
+  "press",
+  /** 감독 개인사 — 배경이 남긴 것 */
+  "personal",
+] as const;
+export const OpeningKindSchema = z.enum(OPENING_KINDS);
+export type OpeningKind = z.infer<typeof OpeningKindSchema>;
+export const OPENING_KIND_KO: Record<OpeningKind, string> = {
+  board: "보드",
+  "dressing-room": "라커룸",
+  press: "언론",
+  personal: "개인사",
+};
+export const OPENING_TITLE_MAX = 40;
+export const OPENING_LINE_MAX = 160;
+
+export const OpeningSchema = z.object({
+  id: z.string().min(1),
+  kind: OpeningKindSchema,
+  /** 한 줄 이름 */
+  title: z.string().min(1).max(OPENING_TITLE_MAX),
+  /** 사실의 꼴로 적은 실마리 — 문장은 GM이 쓴다 */
+  line: z.string().min(1).max(OPENING_LINE_MAX),
+  /** 걸린 사람 — 우리 선수의 id 또는 인물의 characterId. 없을 수 있다 */
+  subjectId: z.string().min(1).optional(),
+  openedOn: DateString,
+  /** 이 날이 지나면 닫힌다 — 실마리는 첫 몇 주의 것이다 */
+  dueOn: DateString,
+  /** null = 아직 열려 있다 */
+  resolvedOn: DateString.nullable(),
+});
+export type Opening = z.infer<typeof OpeningSchema>;
+
+/** 테이블의 한 줄에 쓸 수 있는 글자 — 감독의 말도 상대의 답도 이 안이다 */
+export const TABLE_LINE_MAX = 600;
+/**
+ * 상대의 태도 — **서사의 눈금이지 장부가 아니다** (transfer.md §12-2). 일어나는 것은
+ * 인내가 바닥났을 때 코어가 정하고, 모델의 `leaving`은 그때만 선다.
+ */
+export const TABLE_STANCES = ["warming", "steady", "cooling", "leaving"] as const;
+export const TableStanceSchema = z.enum(TABLE_STANCES);
+export type TableStance = z.infer<typeof TableStanceSchema>;
+export const TABLE_STANCE_KO: Record<TableStance, string> = {
+  warming: "누그러진다",
+  steady: "그대로다",
+  cooling: "굳는다",
+  leaving: "일어서려 한다",
+};
+
+/**
+ * 테이블의 한 줄 — 감독의 말(`us`) · 상대의 답(`them`) · 코어가 적은 사실(`ledger`).
+ * 장부 줄이 대화 사이에 서는 이유: 논거가 사실이었는지, 판정이 무엇으로 굳었는지는
+ * 다음 답을 쓰는 쪽이 알아야 한다 — 대사에 묻히면 상대가 자기 답을 모른다.
+ */
+export const TableLineSchema = z.object({
+  date: DateString,
+  by: z.enum(["us", "them", "ledger"]),
+  text: z.string().min(1).max(TABLE_LINE_MAX),
+  /** 상대의 답에만 — 그 줄을 말한 태도 */
+  stance: TableStanceSchema.optional(),
+});
+export type TableLine = z.infer<typeof TableLineSchema>;
+
+/**
+ * **테이블** — 협상 위에 서는 마주 앉은 대화 (transfer.md §12-2).
+ *
+ * 오퍼와 답(`rounds`)은 그대로 협상의 것이고, 테이블은 그 사이의 말과 **인내**를 든다.
+ * 인내는 되돌아오지 않는다 — 협상이 사는 동안 한 자리에서 깎이고, 0이면 상대가
+ * 일어나 협상은 이번 창에서 결렬이다.
+ */
+export const NegotiationTableSchema = z.object({
+  openedOn: DateString,
+  /** 남은 인내 — 0이면 상대가 일어난다 */
+  patience: z.number().int().min(0),
+  /** 앉을 때의 인내 — 대리인 원형이 정한다 (`tablePatienceOf`) */
+  patienceMax: z.number().int().min(1),
+  lines: z.array(TableLineSchema),
+});
+export type NegotiationTable = z.infer<typeof NegotiationTableSchema>;
+
 export const NegotiationSchema = z.object({
   id: z.string().min(1),
   gamePlayerId: z.string().min(1),
@@ -834,6 +927,8 @@ export const NegotiationSchema = z.object({
    * 중간부터 다른 갈래가 된다. 구 세이브엔 없어 optional.
    */
   precontract: z.boolean().optional(),
+  /** 마주 앉은 대화 — 앉은 협상에만 선다 (transfer.md §12-2). 옛 세이브엔 없다 */
+  table: NegotiationTableSchema.optional(),
 });
 export type Negotiation = z.infer<typeof NegotiationSchema>;
 
@@ -1381,7 +1476,7 @@ export const SCOUT_CONCURRENT_LIMIT = 3;
 
 /**
  * **한도에 막혀 못 나간 파견 요청** — 감독이 지목했으나 동시 한도가 차서 나가지
- * 못한 이름. 반려는 스킬 결과 문구로 그 턴에 한 번 나가고 끝이라, 남겨 두지
+ * 못한 이름. 반려는 호출 결과 문구로 그 턴에 한 번 나가고 끝이라, 남겨 두지
  * 않으면 다음 턴의 모델에는 읽을 자리가 없다 (player.md §9.4).
  *
  * 파견이 아니므로 `ScoutReport`가 아니다 — 여기 있는 이름은 아직 아무 데도 안
@@ -1558,7 +1653,7 @@ export type ManagerPromise = z.infer<typeof ManagerPromiseSchema>;
 export const SettlingEventSchema = z.object({
   gamePlayerId: z.string().min(1),
   date: DateString,
-  kind: z.enum(["talk", "team_talk", "captain"]),
+  kind: z.enum(["talk", "team_talk", "captain", "incident"]),
   /** 쌓인(또는 깎인) 크레딧 */
   credit: z.number(),
   note: z.string().optional(),
@@ -2575,12 +2670,77 @@ export const NarrativeKindSchema = z.enum([
   "season",
   /** 이적·계약 */
   "transfer",
-  /** GM의 `apply_narrative_event` — 하루 한도가 걸리는 유일한 갈래 */
+  /** 옛 세이브의 `apply_narrative_event` 줄 — 새로 적히지 않는다 */
   "gm-event",
-  /** 그 밖의 스킬 결과·tick 사건 */
+  /** GM의 `record_incident` — 하루 한도가 걸리는 유일한 갈래 (people.md §6) */
+  "incident",
+  /** 그 밖의 호출 결과·tick 사건 */
   "other",
 ]);
 export type NarrativeKind = z.infer<typeof NarrativeKindSchema>;
+
+/**
+ * **감독이 말로 만든 사건의 갈래 — 사건의 이름이 아니라 효과의 모양이다**
+ * (→ docs/data/people.md §6 「사건 기록」).
+ *
+ * 벌금과 출전 정지는 둘 다 `discipline`이고 보너스와 휴가는 둘 다 `reward`다. 무슨
+ * 일이었는지는 `summary`와 장면이 갖고, 코어는 갈래·당사자·세기만 들어 효과표를 편다.
+ * 이름으로 가르면 갈래가 사건 수만큼 늘고, 표에 없는 사건은 장부에 설 길이 없다.
+ */
+export const INCIDENT_KINDS = [
+  /** 벌금 · 출전 정지 · 훈련 열외 */
+  "discipline",
+  /** 포상 · 휴가 · 특별 대우 */
+  "reward",
+  /** 병문안 · 가족 배려 · 개인 사정을 봐줌 */
+  "care",
+  /** 언론·라커룸 앞의 칭찬 */
+  "public-praise",
+  /** 언론·라커룸 앞의 질책 */
+  "public-criticism",
+  /** 감독의 사과 */
+  "apology",
+  /** 선수 둘 사이의 중재 */
+  "mediation",
+  /** 라커룸 규칙 · 통금 · 휴대폰 금지 */
+  "rule",
+  /** 회식 · 단합 · 견학 */
+  "outing",
+  /** 표에 없는 것 — 기록만 남는다 */
+  "other",
+] as const;
+export const IncidentKindSchema = z.enum(INCIDENT_KINDS);
+export type IncidentKind = z.infer<typeof IncidentKindSchema>;
+
+/** 갈래 → 사람이 읽는 말 — 회견 카드·말풍선이 같은 표를 읽는다 */
+export const INCIDENT_KIND_KO: Record<IncidentKind, string> = {
+  discipline: "징계",
+  reward: "포상",
+  care: "배려",
+  "public-praise": "공개 칭찬",
+  "public-criticism": "공개 질책",
+  apology: "사과",
+  mediation: "중재",
+  rule: "라커룸 규칙",
+  outing: "회식",
+  other: "사건",
+};
+
+/**
+ * 장부에 남는 사건 한 줄 (`state.incidents`) — 회견 카드와 하루 한도가 읽는다.
+ * 옛 세이브엔 없다(빈 배열로 로드 — SAVE_VERSION 유지).
+ */
+export const IncidentSchema = z.object({
+  date: DateString,
+  kind: IncidentKindSchema,
+  /** 당사자 (`GAME_PLAYER.id`) — 하나 이상 */
+  playerIds: z.array(z.string().min(1)).min(1),
+  /** 세기 1~3 — 면담의 강도와 같은 눈금 */
+  intensity: z.number().int().min(1).max(3),
+  /** 무슨 일이었나 — 한 줄. 장면의 것이지 판정의 것이 아니다 */
+  summary: z.string().min(1).max(200),
+});
+export type Incident = z.infer<typeof IncidentSchema>;
 
 /** GM 프롬프트에 주입되는 서사 기억 (일지는 기록 테이블에서 파생) */
 export const NarrativeNoteSchema = z.object({
@@ -2691,8 +2851,13 @@ export const HistoryDigestSchema = z.object({
    * 하고 경기 표식은 뒤늦게 바뀌지 않으므로 이 수는 한 번 정해지면 같은 곳을 가리킨다.
    */
   foldedTurns: z.number().int().min(0),
-  /** 접힌 구간의 요약 — 길이는 `HISTORY_DIGEST_CHARS`가 정한다 */
+  /** 접힌 구간의 요약 — **지난 일**. 길이는 `HISTORY_DIGEST_CHARS`가 정한다 */
   text: z.string().min(1),
+  /**
+   * **열린 일** — 끝나지 않은 대화와 의도 (agents.md §5-1). 길이는
+   * `HISTORY_OPEN_CHARS`가 정한다. 옛 세이브의 요약에는 없다(optional).
+   */
+  open: z.string().min(1).optional(),
   /** 마지막으로 접은 날 */
   at: DateString,
   /**

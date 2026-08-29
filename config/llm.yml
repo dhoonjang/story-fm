@@ -27,26 +27,58 @@ agents:
 
   # 감독의 말을 구조화된 의도 하나로 옮긴다 — 판단이 아니라 분류라 가벼운 모델로 둔다.
   # 경기 한 턴이 두 호출이 됐으므로(docs/llm/agents.md §3) 여기서 지연을 갚아야 한다.
-  # 한 턴에 교체·전술·지시가 함께 올 수 있어 결산 셋보다는 넉넉하다.
-  match-intent:
+  # 한 턴에 교체·전술·지시가 함께 올 수 있어 훈련 결산보다는 넉넉하다.
+  tactic-orders:
     provider: google
     model: gemini-3.5-flash-lite
     max_tokens: 16000
     timeout_ms: 60000
     thinking_level: minimal
 
-  match-caster:
+  # 감독의 훈련·육성 지시를 선수단 운영 명령의 인자로 옮긴다 — 전술 해석과 가른 이유는
+  # 읽는 것이 다르기 때문이다(주간 일정·지금 걸린 목록). 분류라 가벼운 모델로 둔다.
+  training-orders:
+    provider: google
+    model: gemini-3.5-flash-lite
+    max_tokens: 16000
+    timeout_ms: 60000
+    thinking_level: minimal
+
+  # 감독의 이적·재정 지시를 시장·장부 명령의 인자로 옮긴다 — 판 지시의 해석과 같은 자리
+  # (docs/llm/agents.md §1). 분류라 가벼운 모델로 둔다.
+  market-orders:
+    provider: google
+    model: gemini-3.5-flash-lite
+    max_tokens: 16000
+    timeout_ms: 60000
+    thinking_level: minimal
+
+  # 경기의 GM — 이 경기의 이력 전부를 쥐고 도구 셋으로 경기를 진행한다 (docs/llm/agents.md §3).
+  # 시한은 도구 뒤의 해석·마감 호출까지 덮는다.
+  match-gm:
     provider: google
     model: gemini-3.6-flash
     max_tokens: 64000
     timeout_ms: 180000
     thinking_level: minimal
 
-  match-rater:
+  # 끝난 경기의 결산과 마무리 중계 — 이 경기의 중계 전부를 읽으므로 싼 자리로 보내지
+  # 않는다. 경기당 한 번이고 매치 GM의 도구 뒤에서 돈다.
+  finalize-match:
     provider: google
-    model: gemini-3.5-flash-lite
+    model: gemini-3.6-flash
+    max_tokens: 16000
+    timeout_ms: 90000
+    thinking_level: minimal
+
+  # 협상 테이블 건너편 — GM의 도구 뒤에서 감독의 말 하나에 상대의 답 하나를 낸다
+  # (docs/llm/agents.md §4-1). 서류·주변 상황·테이블의 대화 전부를 읽고 인물로 말하므로
+  # 싼 자리로 보내지 않는다. 실패하면 앵커가 그대로 판정이라 시한은 짧다.
+  negotiation-table:
+    provider: google
+    model: gemini-3.6-flash
     max_tokens: 8000
-    timeout_ms: 30000
+    timeout_ms: 60000
     thinking_level: minimal
 
   training-rater:
@@ -56,26 +88,8 @@ agents:
     timeout_ms: 30000
     thinking_level: minimal
 
-  mood-rater:
-    provider: google
-    model: gemini-3.5-flash-lite
-    max_tokens: 8000
-    timeout_ms: 30000
-    thinking_level: minimal
-
-  # 우리가 넣은 오퍼에 **상대가 되어** 답한다 (docs/llm/agents.md §4-1). 결산 셋과 같은
-  # 앵커 ± 한도 계약이지만 싼 자리로 보내지 않는다 — 읽는 것이 인물지·오퍼 이력·설득
-  # 논거라, 무딘 모델은 앵커를 그대로 되읊어 별도 호출이 값을 못 한다. 출력은 판정
-  # 하나에 금액 둘이라 작고, 평시 턴 앞에 서므로 시한은 감독을 기다리게 하지 않는다.
-  negotiator:
-    provider: google
-    model: gemini-3.6-flash
-    max_tokens: 8000
-    timeout_ms: 45000
-    thinking_level: low
-
   # 새 게임의 배경 한 문단을 읽고 시작 지갑 하나를 판정한다 (docs/llm/agents.md §4-2).
-  # 결산 셋과 같은 앵커 ± 한도 계약이고 게임당 한 번뿐이다 — 읽는 것이 500자 배경과
+  # 결산과 같은 앵커 ± 한도 계약이고 게임당 한 번뿐이다 — 읽는 것이 500자 배경과
   # 앵커 둘뿐이라 싼 자리로 보낸다. 실패하면 앵커가 그대로 답이므로 시한도 짧다.
   onboarding-judge:
     provider: google
@@ -84,9 +98,9 @@ agents:
     timeout_ms: 30000
     thinking_level: minimal
 
-  # 접히는 평시 대화를 한 벌 요약으로 옮긴다 (docs/llm/agents.md §5-1). 결산 셋과 같은
+  # 접히는 평시 대화를 한 벌 요약으로 옮긴다 (docs/llm/agents.md §5-1). 결산과 같은
   # 계약이라 실패는 삼키지만 읽는 양이 다르다 — 한 번에 접히는 구간 전부를 읽고 거기
-  # 새로 선 인물까지 판정하므로 결산 셋의 싼 자리로 보내지 않는다. 압축은 이력이 상한을
+  # 새로 선 인물까지 판정하므로 훈련 결산의 싼 자리로 보내지 않는다. 압축은 이력이 상한을
   # 넘을 때만이라 드물게 돈다.
   history-compactor:
     provider: google

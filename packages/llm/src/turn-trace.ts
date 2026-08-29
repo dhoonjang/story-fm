@@ -15,8 +15,9 @@
  * 2. **production에서는 아무 파일도 쓰지 않는다.** 라우트도 화면도 같은 기준으로
  *    닫힌다.
  * 3. **키는 호출이 아니라 채팅 턴이다.** 한 채팅 턴은 LLM 호출 하나가 아니다 —
- *    평시 턴은 `gm` + 결산 raters, 경기 턴은 `match-intent`·`match-caster` +
- *    `match-rater`가 함께 돈다. 그 왕복 전부가 턴 하나 아래 순서대로 붙는다.
+ *    평시 턴은 `gm` + 훈련 결산, 경기 턴은 `match-gm`과 그 도구 뒤의
+ *    `tactic-orders`·`finalize-match`가 함께 돈다. 그 왕복
+ *    전부가 턴 하나 아래 순서대로 붙는다.
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";

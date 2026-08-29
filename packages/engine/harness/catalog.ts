@@ -129,7 +129,7 @@ export const ASSIST_RATE = defineHarness({
   bands: [
     { metric: "골", role: "measure", unit: "count", why: "골이 없으면 시험이 성립하지 않는다" },
     { metric: "도움", role: "measure", unit: "count", why: "빈 칸이 아닌 도움만 센다" },
-    { metric: "골 대비 도움 비율", role: "guard", min: 0.35, unit: "ratio", why: "설계값 68%(`ASSIST_RATE`)가 만드는 분포. 표본이 작아 하한만 넉넉히 잡는다 — 도움이 사라지는 회귀는 `assist-record.test.ts`가 0이 아님으로 못 박는다" },
+    { metric: "골 대비 도움 비율", role: "guard", min: 0.35, unit: "ratio", why: "설계값 68%(`ASSIST_RATE`)가 만드는 분포. 표본이 작아 하한만 넉넉히 잡는다 — 도움이 사라지는 회귀는 `ratings.test.ts`가 0이 아님으로 못 박는다" },
   ],
 });
 
@@ -636,12 +636,14 @@ export const HISTORY_WINDOW = defineHarness({
     { metric: "창이 미끄러진 턴 비율", role: "guard", max: 0.2, unit: "ratio", why: "6턴 스텝이라 정상은 1/6 — 매 턴 미끄러지면 이력 캐시가 한 번도 적중하지 않는다" },
     { metric: "렌더 배율", role: "reference", min: 1, max: 1.3, unit: "ratio", why: "코어가 세는 turn.text와 프롬프트에 실리는 형태의 비 — 이보다 벌어지면 글자 상한이 뜻을 잃는다" },
     { metric: "잔량의 최소 캐시 프리픽스 배수", role: "guard", min: 1, unit: "ratio", why: "그 아래면 압축 직후 이력 캐시가 아예 안 걸린다 (models.md §1)" },
+    { metric: "요약 두 칸 상한 글자", role: "measure", unit: "count", why: "지난 일 + 열린 일의 상한 — 압축된 세이브가 이력 앞에 매 턴 싣는 최대치 (agents.md §5-1)" },
+    { metric: "요약 두 칸의 잔량 대비 비율", role: "reference", max: 0.25, unit: "ratio", why: "요약이 잔량의 1/4을 넘으면 접은 뒤에도 프롬프트가 별로 줄지 않는다" },
   ],
 });
 
 export const PROMPT_REGRESSION = defineHarness({
   id: "prompt-regression",
-  what: "프롬프트 층의 글자·프리픽스 안정성 · 모의 세션의 장면 문법과 스킬 적중률 · 중계 위생",
+  what: "프롬프트 층의 글자·프리픽스 안정성 · 모의 세션의 장면 문법과 도구 적중률 · 중계 위생",
   doc: PROMPTS,
   cost: "세계 셋 + 모의 GM 세션 + 모의 경기 한 판 — 수 초",
   // prettier-ignore
@@ -651,6 +653,12 @@ export const PROMPT_REGRESSION = defineHarness({
     { metric: "도구 스펙 글자", role: "measure", unit: "count", why: "설명 + Zod에서 파생된 JSON 스키마 — 고정층의 대부분이다" },
     { metric: "도구 설명 총 글자", role: "measure", unit: "count", why: "상한은 skill-descriptions.test.ts가 쥔다 — 여기서는 그 안 어디쯤인지만 읽는다" },
     { metric: "가장 긴 도구 설명 글자", role: "measure", unit: "count", why: "한 도구가 설명 예산을 혼자 먹고 있는가" },
+    { metric: "경기 고정층 글자", role: "reference", max: 12000, unit: "count", why: "매치 GM 프롬프트 + 경기 도구 셋 — 평시 고정층과 다른 눈금이고, 셋을 넘어 늘면 경기 턴마다 그만큼 캐시 뒤에 붙는다 (agents.md §3)" },
+    { metric: "전술 해석 고정층 글자", role: "measure", unit: "count", why: "시스템 프롬프트 + ops 인자 스키마 — 명령의 설명이 길어지면 이 요청이 그만큼 길어진다 (agents.md §1)" },
+    { metric: "훈련 해석 고정층 글자", role: "measure", unit: "count", why: "같은 눈금 — 훈련·육성 명령 여섯" },
+    { metric: "시장 해석 고정층 글자", role: "measure", unit: "count", why: "같은 눈금 — 이적·재정·감독직 명령 열아홉" },
+    { metric: "경기 마감 고정층 글자", role: "measure", unit: "count", why: "경기 결산 도구 하나(설명 + 스키마) — 경기당 한 번 마감 에이전트에 실린다 (agents.md §3)" },
+    { metric: "훈련 브리프 글자", role: "measure", unit: "count", why: "한 주를 넘긴 구간의 훈련 결산 입력 — 대화·[장부] 줄·대상 표가 함께 간다 (agents.md §4)" },
     { metric: "레퍼런스층 글자", role: "reference", max: 600, unit: "count", why: "구단 이름과 감독 프로필뿐이다(<club>·<manager>) — 선수 이름·수치가 들어오면 캐시가 그것과 함께 깨진다" },
     { metric: "매 턴 층 글자", role: "reference", max: 3000, unit: "count", why: "캐시가 걸리지 않는 유일한 층 — 매 턴 정가로 나간다" },
     { metric: "고정층 비중", role: "measure", unit: "ratio", why: "고정 ÷ (고정 + 레퍼런스 + 매 턴) — 캐시가 덮는 몫" },
@@ -663,8 +671,8 @@ export const PROMPT_REGRESSION = defineHarness({
     { metric: "중계 시각 헤더 보존율", role: "guard", min: 1, unit: "ratio", why: "위생 전후로 첫 줄 헤더가 같아야 한다 — 구간마다 새로 찍는 시각 줄은 중계에서 소음이 아니고, 걷히면 화면의 시계가 멎는다" },
     { metric: "시점 헤더 파싱 성공률", role: "guard", min: 1, unit: "ratio", why: "헤더를 못 읽으면 그 턴의 시계가 멎는다 (prompts.md §1)" },
     { metric: "평균 장면 글자", role: "measure", unit: "count", why: "모의 GM의 장면 길이 — 실모드의 400~800 예산과는 다른 눈금이다" },
-    { metric: "스킬 적중률", role: "guard", min: 1, unit: "ratio", why: "코퍼스가 겨냥한 스킬을 실제로 불렀는가 — 떨어지면 스킬 표면이나 모의 GM이 갈린 것이다 (agents.md §8)" },
-    { metric: "불린 스킬 가짓수", role: "measure", unit: "count", why: "코퍼스가 훑는 표면의 폭" },
+    { metric: "도구 적중률", role: "guard", min: 1, unit: "ratio", why: "코퍼스가 겨냥한 도구를 실제로 불렀는가 — 떨어지면 도구 표면이나 모의 GM이 갈린 것이다 (agents.md §8)" },
+    { metric: "불린 도구 가짓수", role: "measure", unit: "count", why: "코퍼스가 훑는 표면의 폭" },
   ],
 });
 

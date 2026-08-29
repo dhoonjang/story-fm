@@ -152,7 +152,7 @@ function ourPlayer(state: GameState, player: GamePlayer): boolean {
 /**
  * 멘토가 될 수 있는가 — **막는 이유 한 문장**, 자격이 되면 null.
  *
- * 문장을 여기서 짓는 것은 스킬이 감독에게 그대로 답하기 때문이다(`setMentor`) —
+ * 문장을 여기서 짓는 것은 명령이 감독에게 그대로 답하기 때문이다(`setMentor`) —
  * 반려는 무엇이 모자란지를 말해야 감독이 다음 수를 둔다.
  */
 export function mentorBlock(state: GameState, player: GamePlayer, on = state.date): string | null {

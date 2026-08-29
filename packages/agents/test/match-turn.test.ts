@@ -5,6 +5,7 @@ import {
   createGame,
   interpretBackgroundHeuristic,
   markEntered,
+  RATING_BAND,
   startMatch,
   userSide,
   userTactics,
@@ -13,19 +14,22 @@ import {
   type GoalMark,
 } from "@story-fm/engine";
 import {
-  applyMatchIntent,
+  applyTacticOrders,
   buildLedgerNote,
   buildSegmentMessage,
   GmTurnFailure,
   MATCH_ADVANCED,
-  MatchIntentSchema,
+  TACTIC_CAPS,
+  TACTIC_OPS,
+  OPS_PER_COMMAND,
+  parseOps,
   runGmTurn,
   stampMatchScene,
   stampMatchStream,
   type GmToolCall,
-  type MatchIntent,
+  type TacticOrders,
 } from "@story-fm/agents";
-import { LlmTimeoutError, type GameToolSpec } from "@story-fm/llm";
+import { LlmTimeoutError, type GameToolSpec, type TurnRequest } from "@story-fm/llm";
 import { ModelOutputError } from "../src/retry";
 
 /** 실모드 경기 턴이 부르는 모델 — 해석도 중계도 이 하나를 거친다 */
@@ -39,7 +43,7 @@ vi.mock("@story-fm/llm", async (importOriginal) => {
  * 경기 턴의 **순서** — 감독의 지시가 그 구간에 닿는가.
  *
  * 예전엔 캐스터가 도구를 쥐고 해석·진행·중계를 한 호출에서 했고, "지시 먼저 그다음
- * 진행"은 프롬프트 한 줄이 지켰다. 이제 해석이 앞 호출로 나가고 코어가 스킬을 옮긴
+ * 진행"은 프롬프트 한 줄이 지켰다. 이제 해석이 앞 호출로 나가고 코어가 명령을 옮긴
  * 뒤 구간을 굴리므로 **순서가 구조다** (docs/llm/agents.md §3). 여기서 지키는 것은
  * 그 구조가 실제로 그 순서를 내는가다.
  */
@@ -71,21 +75,32 @@ const matchState = (): GameState => structuredClone(KICKOFF);
 /** 한 턴 — 해석이 냈을 의도를 그대로 코어에 넣는다 (LLM은 이 경로에 없다) */
 function turn(
   state: GameState,
-  intent: MatchIntent,
+  intent: TacticOrders,
   goals: GoalMark[] = [],
   cards: CardMark[] = [],
   calls: GmToolCall[] = [],
+  roll = false,
 ) {
-  return { applied: applyMatchIntent(state, intent, calls, goals, cards), calls, goals, cards };
+  return {
+    applied: applyTacticOrders(state, intent, calls, goals, cards, { roll }),
+    calls,
+    goals,
+    cards,
+  };
 }
 
-const GO: MatchIntent = { advance: "segment" };
+/** 진행하는 턴 — 굴릴지는 매치 GM이 부른 도구가 정한다 (agents.md §3) */
+const GO: TacticOrders = { ops: {} };
+
+/** 요청이 강제한 도구 — 어느 에이전트의 호출인지는 이것이 가른다 */
+const forced = (req: TurnRequest): string | undefined =>
+  typeof req.toolChoice === "object" ? req.toolChoice.name : undefined;
 
 describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
   it("진행 의도가 없으면 경기가 한 발도 나가지 않는다", () => {
     const state = matchState();
     const minute = state.pendingMatch!.ledger.minute;
-    const { applied } = turn(state, { advance: "none" });
+    const { applied } = turn(state, { ops: {} });
     expect(applied.segment).toBeNull();
     expect(state.pendingMatch!.ledger.minute).toBe(minute);
     expect(state.pendingMatch!.ledger.events).toHaveLength(0);
@@ -102,10 +117,8 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
     const minute = state.pendingMatch!.ledger.minute;
 
     const { applied } = turn(state, {
-      advance: "none",
-      talk: [{ playerId: who, outcome: "motivated", intensity: 2 }],
+      ops: { talk_to_player: [{ playerId: who, outcome: "motivated", intensity: 2 }] },
     });
-    expect(applied.touched).toBe(false);
     expect(applied.segment).toBeNull();
     expect(state.pendingMatch!.ledger.minute).toBe(minute);
   });
@@ -117,10 +130,14 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
     const out = ledger[side].onPitch[10]!;
     const incoming = ledger[side].bench[1]!;
 
-    const { applied } = turn(state, {
-      advance: "segment",
-      substitutions: [{ out, in: incoming }],
-    });
+    const { applied } = turn(
+      state,
+      { ops: { substitute: [{ out, in: incoming }] } },
+      [],
+      [],
+      [],
+      true,
+    );
     expect(applied.segment).not.toBeNull();
 
     const after = state.pendingMatch!.ledger;
@@ -136,17 +153,16 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
 
   /**
    * **경기 중에도 세트피스 인원이 장부에 닿는다** (match.md §2). 의도의 갈래 하나가
-   * 평시와 같은 스킬을 지나는 자리라, 이름이 어긋나면 `applyMatchIntent`의 `call`이
+   * 평시와 같은 명령을 지나는 자리라, 이름이 어긋나면 `applyTacticOrders`의 `call`이
    * 조용히 아무것도 하지 않는다 — 감독에게는 지시가 걸린 것처럼 보이는 거짓 성공이다.
    */
   it("세트피스 인원 지시가 그 턴에 팀 전술로 들어간다", () => {
     const state = matchState();
-    const { applied } = turn(state, { advance: "none", setPieceRoutine: { commit: "many" } });
-    expect(applied.touched).toBe(true);
+    turn(state, { ops: { set_set_piece_routine: [{ commit: "many" }] } });
     expect(userTactics(state).setPieceRoutine?.commit).toBe("many");
 
     // 중립은 지시를 푼다 — 칸이 비어야 「지시하지 않음」이 한 모양으로 적힌다
-    turn(state, { advance: "none", setPieceRoutine: { commit: "normal" } });
+    turn(state, { ops: { set_set_piece_routine: [{ commit: "normal" }] } });
     expect(userTactics(state).setPieceRoutine?.commit).toBeUndefined();
   });
 
@@ -156,16 +172,20 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
     const side = userSide(state);
     const mover = state.pendingMatch!.ledger[side].onPitch[10]!;
 
-    const { applied } = turn(state, {
-      advance: "segment",
-      playerTactics: [{ playerId: mover, position: "CB" }],
-    });
+    const { applied } = turn(
+      state,
+      { ops: { set_player_tactic: [{ playerId: mover, position: "CB" }] } },
+      [],
+      [],
+      [],
+      true,
+    );
     expect(applied.segment).toBeNull();
     expect(applied.notes.join(" ")).toContain("전술판");
     expect(state.pendingMatch!.ledger.minute).toBe(minute);
 
     // 검토 뒤 다음 턴에는 바뀐 포메이션으로 정상 진행한다.
-    expect(turn(state, GO).applied.segment).not.toBeNull();
+    expect(turn(state, GO, [], [], [], true).applied.segment).not.toBeNull();
     expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(minute);
   });
 
@@ -175,13 +195,13 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
    */
   it("해석하지 못한 말은 감독에게 되돌아간다", () => {
     const state = matchState();
-    const { applied } = turn(state, { advance: "none", unresolved: "골키퍼를 공격수로 올려" });
+    const { applied } = turn(state, { ops: {}, unresolved: "골키퍼를 공격수로 올려" });
     expect(applied.notes.join(" ")).toContain("골키퍼를 공격수로 올려");
   });
 
   it("장부 블록은 사건을 싣지 않는다 — 사건은 구간이 돌려준다", () => {
     const state = matchState();
-    const { applied } = turn(state, GO);
+    const { applied } = turn(state, GO, [], [], [], true);
     expect(applied.segment).toContain("<segment>");
     // 상태 스냅샷은 구간이 굴러간 **뒤**의 장부이고, 사건 목록은 따로 실린다
     expect(buildLedgerNote(state)).not.toContain("<segment>");
@@ -225,7 +245,7 @@ describe("경기 장면의 시각 — 장부가 붙인다", () => {
  * 따라 갈린다. 해석이 못 나오면 턴 전체가 없던 일이 되고, 중계만 흔들린 것은 코어가
  * 이미 굴린 구간을 되감을 이유가 없다.
  */
-describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
+describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
   const previousMode = process.env.LLM_MODE;
   beforeEach(() => {
     process.env.LLM_MODE = "real";
@@ -236,74 +256,331 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
     else process.env.LLM_MODE = previousMode;
   });
 
-  /** 캐스터의 응답 — 도구는 없고 문장만 온다 */
-  const casted = (text: string) => ({
+  /** 모델의 응답 — 문장과 도구 호출 수 */
+  const answered = (text: string, toolCallCount = 0) => ({
     text,
     history: { version: 1 as const, provider: "anthropic" as const, model: "test", messages: [] },
     historyBase: 0,
     usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
-    toolCallCount: 0,
+    toolCallCount,
     stopReason: "completed" as const,
   });
 
-  /** 첫 휘슬은 지나간 판 — 손잡이(`계속`)로 온 진행 턴이다 */
+  /** 첫 휘슬은 지나간 판 */
   function rolling(): GameState {
     const state = matchState();
     markEntered(state);
     return state;
   }
 
-  /**
-   * 캐스터는 도구가 없어 **다시 불러도 이중 반영이 없다.** 구간을 굴린 것은 앞
-   * 걸음의 코어이므로 그 기록을 자국으로 세면, 진행한 모든 경기 턴이 첫 실패에
-   * 그대로 무너지고 방금 굴린 구간까지 롤백된다 (agents.md §3 ④).
-   */
-  it("중계의 산출을 쓸 수 없으면 다시 부른다 — 구간은 한 번만 굴렀다", async () => {
-    const state = rolling();
-    runTurn.mockRejectedValueOnce(new ModelOutputError("중계가 출력 문법을 어겼습니다"));
-    runTurn.mockResolvedValueOnce(casted("[12']\n@중계: 다시 이어갑니다."));
+  /** 해석기 흉내 — 지시 하나를 낸다 (advance는 의도의 것이 아니다) */
+  const interpreter = async (req: TurnRequest, intent: TacticOrders = { ops: {} }) => {
+    const tool = req.tools?.find((t) => t.name === "report_tactic_orders");
+    if (tool) await tool.handle(intent);
+    return answered("", tool ? 1 : 0);
+  };
 
-    const turn = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
+  /**
+   * **지시 → 도구 → 구간 → 중계가 한 호출이다** (agents.md §3). GM이 `advance_match`를
+   * 부르면 핸들러 안에서 해석기가 돌고 코어가 굴린 대본이 도구 결과로 돌아온다 — 그
+   * 대본을 읽고 쓴 중계가 같은 턴의 장면이다.
+   */
+  it("GM이 advance_match를 부르면 해석 → 구간이 돌고, 대본이 도구 결과로 돌아온다", async () => {
+    const state = rolling();
+    const side = userSide(state);
+    const out = state.pendingMatch!.ledger[side].onPitch[10]!;
+    const incoming = state.pendingMatch!.ledger[side].bench[0]!;
+    runTurn.mockImplementation(async (req: TurnRequest) => {
+      if (forced(req) === "report_tactic_orders") {
+        return interpreter(req, { ops: { substitute: [{ out, in: incoming }] } });
+      }
+      const orders = req.tools?.find((t) => t.name === "tactic_orders");
+      const advance = req.tools?.find((t) => t.name === "advance_match");
+      expect(req.tools?.map((t) => t.name).sort()).toEqual([
+        "advance_match",
+        "finalize_match",
+        "tactic_orders",
+      ]);
+      // 지시는 판만 바꾸고 새 패킷을 돌려준다 — 구간은 아직이다
+      const ordered = await orders!.handle({ orders: `${incoming} 넣고 계속 가자` });
+      expect(ordered.ok).toBe(true);
+      expect(ordered.message).not.toContain("<segment>");
+      expect(ordered.message).toContain("<packet>");
+      expect(state.pendingMatch!.ledger.minute).toBe(0);
+      const reply = await advance!.handle({});
+      expect(reply.ok).toBe(true);
+      expect(reply.message).toContain("<segment>");
+      expect(reply.message).toContain("<packet>");
+      return answered("[12']\n@중계: 교체 뒤 첫 공격입니다.", 1);
+    });
+
+    const turn = await runGmTurn(state, `${incoming} 넣고 계속 가자`);
 
     expect(runTurn).toHaveBeenCalledTimes(2);
-    expect(turn.text).toContain("다시 이어갑니다");
-    // 구간은 해석 뒤 코어가 굴린 것 하나뿐 — 재시도가 판을 한 번 더 밀지 않는다
+    expect(turn.text).toContain("교체 뒤 첫 공격");
+    expect(turn.toolCalls.filter((c) => c.name === MATCH_ADVANCED)).toHaveLength(1);
+    expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(0);
+    expect(state.pendingMatch!.ledger[side].onPitch).toContain(incoming);
+  });
+
+  it("말만 건 턴은 도구 없이 장면만 — 시계가 서 있다", async () => {
+    const state = rolling();
+    const minute = state.pendingMatch!.ledger.minute;
+    runTurn.mockResolvedValue(answered("@레오 카스텔라노: 감독님, 부르셨습니까."));
+
+    const turn = await runGmTurn(state, "레오, 잠깐");
+
+    expect(runTurn).toHaveBeenCalledTimes(1);
+    expect(turn.toolCalls).toHaveLength(0);
+    expect(state.pendingMatch!.ledger.minute).toBe(minute);
+  });
+
+  /**
+   * **해석이 두 번 실패하면 도구가 반려로 답한다** — 턴은 이어지고 판은 그대로다
+   * (agents.md §3). 짐작해 적용하면 감독이 내리지 않은 지시가 판에 오른다.
+   */
+  it("해석이 두 번 실패하면 도구가 반려로 답하고 판은 그대로다", async () => {
+    const state = rolling();
+    const minute = state.pendingMatch!.ledger.minute;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    runTurn.mockImplementation(async (req: TurnRequest) => {
+      // 해석기가 도구 없이 본문만 낸다 — 두 번 다
+      if (forced(req) === "report_tactic_orders") return answered("해석해 보겠습니다.");
+      const orders = req.tools?.find((t) => t.name === "tactic_orders");
+      const reply = await orders!.handle({ orders: "압박 올려" });
+      expect(reply.ok).toBe(false);
+      return answered("@레오 카스텔라노: 무슨 말씀이신지 다시 한번 짚어 주시겠습니까.", 1);
+    });
+
+    const turn = await runGmTurn(state, "압박 올려");
+    expect(turn.text).toContain("다시 한번");
+    expect(state.pendingMatch!.ledger.minute).toBe(minute);
+    // GM 하나 + 해석기 둘
+    expect(runTurn).toHaveBeenCalledTimes(3);
+    warn.mockRestore();
+  });
+
+  /**
+   * **호출 실패는 안내로 둔갑하지 않는다** (models.md §1-1). 도구 뒤의 시한도 그대로
+   * 올라간다 — 화면은 종류를 보고 무슨 일인지 안내한다.
+   */
+  it("도구 뒤의 해석이 시한을 넘기면 그 오류가 종류를 든 채 올라간다", async () => {
+    const state = rolling();
+    const minute = state.pendingMatch!.ledger.minute;
+    const thrown = new LlmTimeoutError("tactic-orders", 60_000);
+    runTurn.mockImplementation(async (req: TurnRequest) => {
+      if (forced(req) === "report_tactic_orders") throw thrown;
+      const orders = req.tools?.find((t) => t.name === "tactic_orders");
+      await orders!.handle({ orders: "압박 올려" });
+      return answered("닿지 않는다", 1);
+    });
+
+    await expect(runGmTurn(state, "압박 올려")).rejects.toBe(thrown);
+    expect(runTurn).toHaveBeenCalledTimes(2);
+    expect(state.pendingMatch!.ledger.minute).toBe(minute);
+  });
+
+  /**
+   * 재시도의 자국 — 도구가 돌기 **전에** 깨진 응답은 한 번 더 부르고, 도구가 돈 뒤에
+   * 깨진 응답은 다시 부르지 않는다 (agents.md §8). 뒤쪽을 다시 부르면 구간이 두 번 구른다.
+   */
+  it("도구 전의 실패는 한 번 더 부르고, 도구 뒤의 실패는 다시 부르지 않는다", async () => {
+    const state = rolling();
+    runTurn.mockRejectedValueOnce(new ModelOutputError("중계가 출력 문법을 어겼습니다"));
+    runTurn.mockResolvedValueOnce(answered("@레오 카스텔라노: 준비됐습니다."));
+    await expect(runGmTurn(state, "레오")).resolves.toBeDefined();
+    expect(runTurn).toHaveBeenCalledTimes(2);
+
+    runTurn.mockReset();
+    const minute = state.pendingMatch!.ledger.minute;
+    runTurn.mockImplementation(async (req: TurnRequest) => {
+      if (forced(req) === "report_tactic_orders") return interpreter(req);
+      await req.tools!.find((t) => t.name === "advance_match")!.handle({});
+      throw new ModelOutputError("중계가 잘렸습니다");
+    });
+    await expect(runGmTurn(state, "계속")).rejects.toBeInstanceOf(ModelOutputError);
+    // GM 한 번뿐 — 구간은 한 번 굴렀고 다시 굴리지 않았다
+    expect(runTurn).toHaveBeenCalledTimes(1);
+    expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(minute);
+  });
+
+  /** 손잡이 턴은 코어가 먼저 굴린다 — GM은 대본을 받아 중계만 쓰고 마감 도구만 쥔다 */
+  it("손잡이 턴은 모델 없이 구간을 굴리고, GM은 대본을 이번 턴 층에서 읽는다", async () => {
+    const state = rolling();
+    runTurn.mockImplementation(async (req: TurnRequest) => {
+      expect(req.tools?.map((t) => t.name)).toEqual(["finalize_match"]);
+      expect(req.user).toContain("<segment>");
+      return answered("[8']\n@중계: 경기가 이어집니다.");
+    });
+    const turn = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
+    expect(runTurn).toHaveBeenCalledTimes(1);
     expect(turn.toolCalls.filter((c) => c.name === MATCH_ADVANCED)).toHaveLength(1);
     expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(0);
   });
+});
 
-  /**
-   * 반대쪽 — 해석이 실패한 턴은 **장면을 내지 않는다.** "다시 말씀해 주세요"가
-   * 정상 텍스트로 돌아가면 화자도 시점 헤더도 없는 줄이 채팅에 저장되고, 그 턴은
-   * 되돌릴 수도 없다 (agents.md §8).
-   */
-  it("지시 해석이 실패하면 장면 대신 오류가 올라간다", async () => {
-    const state = rolling();
-    const minute = state.pendingMatch!.ledger.minute;
-    // 도구를 부르지 않은 응답 — 두 번 불러도 의도가 비면 턴을 취소한다
-    runTurn.mockResolvedValue(casted("해석해 보겠습니다."));
-
-    await expect(runGmTurn(state, "압박 올려")).rejects.toBeInstanceOf(GmTurnFailure);
-    // 해석에서 끊겼으므로 중계는 불리지 않았고, 판도 그대로다
-    expect(runTurn).toHaveBeenCalledTimes(2);
-    expect(state.pendingMatch!.ledger.minute).toBe(minute);
+/**
+ * **경기 마감 — 도구 뒤의 에이전트가 결산과 마무리 중계를 쓴다** (agents.md §3 「경기 마감」).
+ *
+ * 마감 핸들러가 `finalizeMatch`로 앵커를 먼저 박고 마감 에이전트를 부른다 — 첫 왕복은
+ * `settle_match`가 강제된다. GM이 마감을 부르지 않은 턴은 코어가 대신 부른다.
+ */
+describe("경기 마감 — 결산은 도구 뒤의 에이전트가, 마무리는 장면의 끝에", () => {
+  const previousMode = process.env.LLM_MODE;
+  beforeEach(() => {
+    process.env.LLM_MODE = "real";
+    runTurn.mockReset();
+  });
+  afterEach(() => {
+    if (previousMode === undefined) delete process.env.LLM_MODE;
+    else process.env.LLM_MODE = previousMode;
   });
 
-  /**
-   * **호출 실패는 안내로 둔갑하지 않는다** (models.md §1-1). 시한·혼잡·인증을
-   * "다시 말씀해 주세요"로 바꾸면 감독은 자기 말이 잘못된 줄 알고 같은 말을 다시
-   * 쳐서 같은 시한을 한 번 더 기다린다 — 화면은 종류를 보고 무슨 일인지 안내한다.
-   */
-  it("해석 호출이 시한을 넘기면 그 오류가 종류를 든 채 올라간다", async () => {
-    const state = rolling();
-    const minute = state.pendingMatch!.ledger.minute;
-    const thrown = new LlmTimeoutError("match-intent", 60_000);
-    runTurn.mockRejectedValue(thrown);
+  const answered = (text: string, toolCallCount = 0) => ({
+    text,
+    history: { version: 1 as const, provider: "anthropic" as const, model: "test", messages: [] },
+    historyBase: 0,
+    usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    toolCallCount,
+    stopReason: "completed" as const,
+  });
 
-    await expect(runGmTurn(state, "압박 올려")).rejects.toBe(thrown);
-    // 시한을 넘긴 호출은 다시 부르지 않는다 — 잠금 안의 대기가 두 배가 된다
-    expect(runTurn).toHaveBeenCalledTimes(1);
-    expect(state.pendingMatch!.ledger.minute).toBe(minute);
+  /** `<settlement>` 표의 행에서 id를 읽는다 — 모델이 돌려줘야 할 그 id다 */
+  const idsOfSettlement = (user: string): string[] => {
+    const block = user.slice(user.indexOf("<settlement>"), user.indexOf("</settlement>"));
+    return [...block.matchAll(/^- (\S+) \| /gmu)].map((m) => m[1]!);
+  };
+
+  /** 종료 직전까지 코어로 굴려 둔다 — 마지막 구간들만 실모드 턴으로 간다 */
+  function nearlyDone(): GameState {
+    const state = matchState();
+    markEntered(state);
+    for (let guard = 0; guard < 60 && state.pendingMatch!.ledger.minute < 60; guard++) {
+      turn(state, GO, [], [], [], true);
+    }
+    expect(state.pendingMatch!.ledger.phase).not.toBe("finished");
+    return state;
+  }
+
+  /** 마감 에이전트 흉내 — 앵커 위에 +0.5, 첫 선수에게 심경 한 줄 */
+  function settler(
+    state: GameState,
+    matchId: string,
+    seen: { anchors: Record<string, number>; mood: string | null; commentary: string },
+  ) {
+    return async (req: TurnRequest) => {
+      const tool = req.tools?.find((t) => t.name === "settle_match");
+      expect(tool).toBeDefined();
+      expect(req.user).toContain("<commentary>");
+      seen.commentary = req.user;
+      seen.anchors = { ...(state.matches.find((m) => m.id === matchId)?.result?.ratings ?? {}) };
+      const ids = idsOfSettlement(req.user);
+      expect(ids.length).toBeGreaterThan(0);
+      seen.mood = ids[0]!;
+      const reply = await tool!.handle({
+        ratings: ids.map((playerId) => ({
+          playerId,
+          rating: (seen.anchors[playerId] ?? 6) + 0.5,
+          note: "흐름을 쥐었다",
+        })),
+        moods: [{ playerId: seen.mood, text: "오늘은 발이 가벼웠다", acknowledgesIssue: true }],
+      });
+      expect(reply.ok).toBe(true);
+      return answered("@중계: 마지막 휘슬. 홈 팬들이 일어섭니다.", 1);
+    };
+  }
+
+  it("GM이 finalize_match를 부르면 앵커 위에 결산이 서고 마무리 중계가 도구 결과로 온다", async () => {
+    const state = nearlyDone();
+    const matchId = state.pendingMatch!.matchId;
+    const seen = {
+      anchors: {} as Record<string, number>,
+      mood: null as string | null,
+      commentary: "",
+    };
+    const settle = settler(state, matchId, seen);
+    let finalizeReply = "";
+    runTurn.mockImplementation(async (req: TurnRequest) => {
+      if (forced(req) === "settle_match") return settle(req);
+      const finalize = req.tools!.find((t) => t.name === "finalize_match")!;
+      // 장부가 끝났으면 마감, 아니면 중계만
+      if (state.pendingMatch?.ledger.phase === "finished") {
+        const reply = await finalize.handle({});
+        expect(reply.ok).toBe(true);
+        finalizeReply = reply.message;
+        return answered(
+          "[90']\n@중계: 경기 종료 휘슬이 울립니다.\n@레오 카스텔라노: 수고하셨습니다.",
+          1,
+        );
+      }
+      expect((await finalize.handle({})).ok).toBe(false); // 아직 안 끝난 경기는 반려
+      return answered("[75']\n@중계: 경기가 이어집니다.");
+    });
+
+    /** 턴 러너처럼 장면을 채팅에 남긴다 — 마감 에이전트가 읽는 중계의 원본이다 */
+    const keep = (text: string) =>
+      state.chat.push({
+        role: "model",
+        text,
+        toolCalls: [],
+        at: state.date,
+        inMatch: true,
+        matchId,
+      });
+    // 이 경기의 지난 중계 — 마감 에이전트가 읽어야 할 것이 하나는 있어야 한다
+    keep("[55']\n@중계: 경기가 이어집니다.");
+    let last = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
+    keep(last.text);
+    for (let guard = 0; guard < 20 && state.pendingMatch; guard++) {
+      last = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
+      keep(last.text);
+    }
+    expect(state.pendingMatch).toBeFalsy();
+    expect(finalizeReply).toContain("<closing>");
+    expect(finalizeReply).toContain("마지막 휘슬");
+
+    // 앵커가 먼저 박혔고, 도구는 그 위에 ±RATING_BAND 안으로 매겼다
+    const result = state.matches.find((m) => m.id === matchId)!.result!;
+    expect(Object.keys(seen.anchors).length).toBeGreaterThan(0);
+    expect(result.rated).toBe(true);
+    for (const [id, anchor] of Object.entries(seen.anchors)) {
+      expect(Math.abs(result.ratings![id]! - anchor)).toBeLessThanOrEqual(RATING_BAND);
+    }
+    expect(state.players.find((p) => p.id === seen.mood)!.state.moodNote?.text).toContain(
+      "발이 가벼웠다",
+    );
+    // 마감 에이전트는 이 경기의 중계를 읽었다
+    expect(seen.commentary).toContain("경기가 이어집니다");
+    // 마감 기록과 결산 기록이 함께 서고, 결산은 칩이 아니다
+    expect(last.toolCalls.map((c) => c.name)).toContain("finalize_match");
+    expect(last.toolCalls.find((c) => c.name === "settle_match")?.silent).toBe(true);
+    expect(last.text).toContain("경기 종료 휘슬");
+  });
+
+  it("GM이 마감을 부르지 않으면 코어가 대신 마감하고 마무리 중계를 장면 끝에 붙인다", async () => {
+    const state = nearlyDone();
+    const matchId = state.pendingMatch!.matchId;
+    const seen = {
+      anchors: {} as Record<string, number>,
+      mood: null as string | null,
+      commentary: "",
+    };
+    const settle = settler(state, matchId, seen);
+    runTurn.mockImplementation(async (req: TurnRequest) => {
+      if (forced(req) === "settle_match") return settle(req);
+      return answered("[90']\n@중계: 휘슬이 울립니다.");
+    });
+
+    let last = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
+    for (let guard = 0; guard < 20 && state.pendingMatch; guard++) {
+      last = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
+    }
+    expect(state.pendingMatch).toBeFalsy();
+    expect(state.matches.find((m) => m.id === matchId)!.result!.rated).toBe(true);
+    expect(last.toolCalls.map((c) => c.name)).toContain("finalize_match");
+    // 마무리 중계가 GM의 장면 뒤에 선다
+    expect(last.text).toContain("휘슬이 울립니다");
+    expect(last.text).toContain("마지막 휘슬");
   });
 });
 
@@ -385,7 +662,7 @@ describe("골 표식", () => {
     // 턴마다 한 구간 — 실모드의 한 턴과 같다
     for (let t = 0; t < 60; t++) {
       if (state.pendingMatch?.ledger.phase === "finished") break;
-      turn(state, GO, goals);
+      turn(state, GO, goals, [], [], true);
     }
     const ledger = state.pendingMatch!.ledger;
     const ours = userSide(state);
@@ -509,20 +786,32 @@ describe("평시 GM 턴 — 상한을 도구로 채운 턴", () => {
     stopReason: "tool_use" as const,
   });
 
-  it("장면이 비어도 코어 기록이 model 턴에 남는다 — 바뀐 전술과 함께", async () => {
+  it("장면이 비어도 코어 기록이 model 턴에 남는다 — 바뀐 장부와 함께", async () => {
     const state = structuredClone(IDLE);
+    const before = state.finances.find((f) => f.teamId === state.userTeamId)!.ledger.length;
     runTurn.mockImplementationOnce(async (req: { tools?: GameToolSpec[] }) => {
-      const tool = req.tools?.find((spec) => spec.name === "set_tactics");
-      expect(tool?.handle({ pressing: 5 }).ok).toBe(true);
+      const tool = req.tools?.find((spec) => spec.name === "apply_finance_event");
+      expect(
+        (
+          await tool?.handle({
+            kind: "income",
+            category: "commercial",
+            amount: 50_000,
+            note: "스폰서 보너스",
+          })
+        )?.ok,
+      ).toBe(true);
       // 상한을 채운 턴의 증상 — 작업 서술 한 줄만 남고 장면이 없다
-      return capped("압박을 올리겠습니다.");
+      return capped("장부에 적겠습니다.");
     });
 
-    const turn = await runGmTurn(state, "압박 좀 올려줘");
+    const turn = await runGmTurn(state, "스폰서가 5만 파운드를 얹었다고 적어 줘");
 
     // 상태는 바뀐 채로 남는다 — 되돌리면 감독의 지시가 함께 사라진다
-    expect(userTactics(state).spec.pressing).toBe(5);
-    expect(turn.toolCalls.map((call) => call.name)).toContain("set_tactics");
+    expect(state.finances.find((f) => f.teamId === state.userTeamId)!.ledger.length).toBe(
+      before + 1,
+    );
+    expect(turn.toolCalls.map((call) => call.name)).toContain("apply_finance_event");
     // 장면 자리에는 코어의 기록이 선다 — 시점 헤더와 `@:` 내레이션
     expect(turn.text.startsWith("[")).toBe(true);
     expect(turn.text.split("\n").some((line) => line.startsWith("@:"))).toBe(true);
@@ -538,98 +827,33 @@ describe("평시 GM 턴 — 상한을 도구로 채운 턴", () => {
 });
 
 /**
- * 해석의 산출은 **이 객체 하나**이고 도구가 없다 (agents.md §3). 감독의 말이 판으로
- * 옮겨지는 폭을 지키는 것이 이 스키마뿐이라, 상한이 풀리면 한 턴에 열 명과 대화하고
- * 플랜을 다섯 개 건 판이 서는데 감독은 그런 말을 한 적이 없다.
+ * 해석의 산출은 **부를 명령과 그 인자**다 (agents.md §3). 인자의 스키마는 그 명령의
+ * 도구 정의에서 그대로 오므로 여기서 지킬 것은 둘뿐이다 — **목록에 없는 이름은 버린다**
+ * (모델이 낼 수 없는 명령을 지어내도 판이 움직이지 않는다), **명령마다 정해진 수까지만
+ * 싣는다**(교체 다섯·개인 지시 열한 자리·지역 플랜 둘 — 규칙이 정한 수다).
  */
-describe("경기 의도 스키마의 경계", () => {
-  const ids = (n: number) => Array.from({ length: n }, (_, i) => `p${i}`);
-  const parses = (intent: unknown) => MatchIntentSchema.safeParse(intent).success;
+describe("받아쓰기 산출의 경계", () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => ({ i }));
 
-  it("한 턴에 담기는 갈래마다 개수 상한이 있다", () => {
-    const talk = (n: number) =>
-      ids(n).map((playerId) => ({ playerId, outcome: "motivated", intensity: 2 }));
-    expect(parses({ advance: "none", talk: talk(4) })).toBe(true);
-    expect(parses({ advance: "none", talk: talk(5) })).toBe(false);
-
-    const plan = { band: "attack", lane: "left", intent: "overload", note: "왼쪽에 사람을 모은다" };
-    expect(parses({ advance: "none", plans: [plan, plan] })).toBe(true);
-    expect(parses({ advance: "none", plans: [plan, plan, plan] })).toBe(false);
-
-    const subs = (n: number) => ids(n).map((id) => ({ out: id, in: `${id}-in` }));
-    expect(parses({ advance: "none", substitutions: subs(5) })).toBe(true);
-    expect(parses({ advance: "none", substitutions: subs(6) })).toBe(false);
-
-    // 자리·역할·개인 지시는 그라운드에 선 열한 명까지다
-    const moves = (n: number) => ids(n).map((playerId) => ({ playerId }));
-    expect(parses({ advance: "none", playerTactics: moves(11) })).toBe(true);
-    expect(parses({ advance: "none", playerTactics: moves(12) })).toBe(false);
-
-    expect(parses({ advance: "none", exploits: ids(2) })).toBe(true);
-    expect(parses({ advance: "none", exploits: ids(3) })).toBe(false);
-
-    expect(parses({ advance: "none", shootoutOrder: ids(11) })).toBe(true);
-    expect(parses({ advance: "none", shootoutOrder: ids(12) })).toBe(false);
+  it("목록에 없는 명령은 버린다", () => {
+    const ops = parseOps({ set_tactics: [{ pressing: 4 }], drop_player: [{}] }, TACTIC_OPS);
+    expect(Object.keys(ops)).toEqual(["set_tactics"]);
   });
 
-  /**
-   * 숫자는 이 스키마에 없다 — 오는 것은 판정 라벨과 눈금뿐이고, 사기가 얼마나
-   * 움직이는지는 코어가 표와 리더십 계수로 정한다.
-   */
-  it("세기와 전술 축은 눈금 안의 값만 받는다 — 네 단계 세기도, 여섯 단계 축도 없다", () => {
-    const talk = (intensity: unknown) => ({
-      advance: "none",
-      talk: [{ playerId: "p", outcome: "angered", intensity }],
-    });
-    expect(parses(talk(1))).toBe(true);
-    expect(parses(talk(3))).toBe(true);
-    expect(parses(talk(0))).toBe(false);
-    expect(parses(talk(4))).toBe(false);
-    expect(parses(talk(2.5))).toBe(false);
-    // 없는 판정 라벨은 코어가 아니라 여기서 걸린다
-    expect(
-      parses({ advance: "none", talk: [{ playerId: "p", outcome: "기뻐함", intensity: 2 }] }),
-    ).toBe(false);
-
-    const teamTalk = (intensity: unknown) => ({
-      advance: "none",
-      teamTalk: { occasion: "half", outcome: "inspired", intensity },
-    });
-    expect(parses(teamTalk(3))).toBe(true);
-    expect(parses(teamTalk(4))).toBe(false);
-
-    // 말하지 않은 축은 지금 값을 그대로 둔다 — 여섯 축이 전부 선택이다
-    expect(parses({ advance: "none", tactics: {} })).toBe(true);
-    expect(parses({ advance: "none", tactics: { pressing: 5 } })).toBe(true);
-    expect(parses({ advance: "none", tactics: { pressing: 0 } })).toBe(false);
-    expect(parses({ advance: "none", tactics: { pressing: 6 } })).toBe(false);
-    expect(parses({ advance: "none", tactics: { pressing: 3.5 } })).toBe(false);
+  it("명령마다 정해진 수까지만 싣는다 — 나머지는 잘린다", () => {
+    const ops = parseOps(
+      { substitute: many(7), set_match_plan: many(4), set_tactics: many(9) },
+      TACTIC_OPS,
+      TACTIC_CAPS,
+    );
+    expect(ops.substitute).toHaveLength(TACTIC_CAPS.substitute!);
+    expect(ops.set_match_plan).toHaveLength(TACTIC_CAPS.set_match_plan!);
+    // 상한을 적지 않은 명령은 기본값이 선다
+    expect(ops.set_tactics).toHaveLength(OPS_PER_COMMAND);
   });
 
-  it("진행 의도는 빼놓을 수 없고, 감독에게 되돌아가는 말에는 길이가 물려 있다", () => {
-    // 시계를 미는가는 **언제나** 답해야 하는 자리다 — 빠지면 그 턴이 흘렀는지 아무도 모른다
-    expect(parses({})).toBe(false);
-    expect(parses({ advance: "segment" })).toBe(true);
-    expect(parses({ advance: "later" })).toBe(false);
-
-    const unresolved = (n: number) => ({ advance: "none", unresolved: "말".repeat(n) });
-    expect(parses(unresolved(200))).toBe(true);
-    expect(parses(unresolved(201))).toBe(false);
-    // 빈 줄은 되돌려 줄 말이 아니다 — 옮기지 못한 말이 없으면 자리를 비운다
-    expect(parses({ advance: "none", unresolved: "" })).toBe(false);
-
-    const note = (n: number) => ({
-      advance: "none",
-      playerTactics: [{ playerId: "p", instruction: { note: "말".repeat(n) } }],
-    });
-    expect(parses(note(160))).toBe(true);
-    expect(parses(note(161))).toBe(false);
-
-    const planNote = (n: number) => ({
-      advance: "none",
-      plans: [{ band: "midfield", lane: "center", intent: "press", note: "말".repeat(n) }],
-    });
-    expect(parses(planNote(120))).toBe(true);
-    expect(parses(planNote(121))).toBe(false);
+  it("빈 배열은 부르지 않은 것이다 — 자리를 만들지 않는다", () => {
+    expect(parseOps({ substitute: [] }, TACTIC_OPS)).toEqual({});
+    expect(parseOps(null, TACTIC_OPS)).toEqual({});
   });
 });

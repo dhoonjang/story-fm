@@ -12,7 +12,7 @@ import type { ScoutReportCard } from "@story-fm/domain";
 import { MarketCardView, MissionReportCardView } from "@/components/market-card";
 import { splitMarketCalls } from "@/lib/market-calls";
 import { ratingTone, scoutMargin, scoutValue } from "@/lib/scout-report-display";
-import { SKILL_LABEL } from "@/lib/skill-label";
+import { CALL_LABEL } from "@/lib/call-label";
 import type { SpeakerKind, SpeakerRole } from "@story-fm/engine";
 import {
   IconBroadcast,
@@ -130,7 +130,7 @@ function GoalCard({ goal }: { goal: GoalMark }) {
 }
 
 /**
- * 스킬 칩 — **접힌 채로는 이름과 결, 누르면 상세.**
+ * 호출 칩 — **접힌 채로는 이름과 결, 누르면 상세.**
  *
  * 이름을 그대로 쓰면(`set_player_tactic`) 감독은 자기가 아는 말이 아닌 것을 읽는다.
  * 사람이 읽는 이름은 스킬 카탈로그가 이미 갖고 있으므로 그걸 쓴다.
@@ -138,10 +138,10 @@ function GoalCard({ goal }: { goal: GoalMark }) {
  * `tone`이 있는 칩(면담·팀토크·기자회견)은 **펼치지 않아도 결이 보인다** — 잘
  * 풀렸는지는 알아야 하지만 사기 ±N을 늘 세우면 대화가 숫자로 읽힌다.
  *
- * **칩 하나가 호출 여럿을 진다** — 연달아 불린 같은 스킬은 한 칩이다(`groupChips`).
+ * **칩 하나가 호출 여럿을 진다** — 연달아 불린 같은 호출은 한 칩이다(`groupChips`).
  * 몇 번인지는 이름 옆의 **수 하나**로 서고, 펼치면 묶인 호출의 상세가 차례로 선다.
  *
- * **상세가 열리는 자리는 갈 화면이 있는지가 정한다.** 장부를 바꾼 스킬은 레일
+ * **상세가 열리는 자리는 갈 화면이 있는지가 정한다.** 장부를 바꾼 호출은 레일
  * 말풍선을 다시 세운다(`onReveal`) — 같은 사실을 칩 아래에 또 펼치면 두 곳에 난다.
  * 레일이 없는 동안(경기 중)에는 그 칩도 제자리에서 펼친다: 부를 말풍선이 없다.
  */
@@ -157,7 +157,7 @@ function ToolChip({
 }) {
   const [open, setOpen] = useState(false);
   const head = calls[0]!;
-  const label = SKILL_LABEL[head.name] ?? head.name;
+  const label = CALL_LABEL[head.name] ?? head.name;
   const tone = head.tone ? ` ${head.tone}` : "";
   const toRail = onReveal !== undefined && hasRailHint(head.name);
   const shown = toRail ? revealed : open;
@@ -412,7 +412,7 @@ const LONG_PRESS_SLOP = 10;
 /**
  * 롱프레스 — 주어졌을 때만 핸들러가 달린다.
  *
- * ⚠️ 채팅에는 이미 누를 것이 있다(스킬 칩·접힌 경기 머리). 그 위에서 시작한
+ * ⚠️ 채팅에는 이미 누를 것이 있다(호출 칩·접힌 경기 머리). 그 위에서 시작한
  * 눌림은 그 버튼의 몫이라 아예 시계를 걸지 않고, 롱프레스가 성립한 뒤에는
  * 뒤따르는 click과 컨텍스트 메뉴를 삼킨다 — 안 그러면 손을 떼는 순간 다른 것이
  * 함께 열린다.
@@ -543,13 +543,13 @@ export function ChatTurnView({
   /**
    * 채팅에 세울 칩 — **감독이 시킨 일은 다 여기 남는다.**
    *
-   * 장부를 바꾼 스킬도 칩으로 선다: 레일 말풍선은 다음 클릭에 닫히고, 그 뒤에
+   * 장부를 바꾼 호출도 칩으로 선다: 레일 말풍선은 다음 클릭에 닫히고, 그 뒤에
    * "방금 뭘 바꿨더라"를 되짚을 자리가 채팅뿐이다. 칩을 누르면 그 말풍선이 다시
    * 선다(`onRevealHint`) — 상세를 칩 아래에 또 펼치지는 않는다.
    *
-   * `silent`은 스킬이 아니라 코어가 한 일이다(시계 이동).
+   * `silent`은 도구 호출이 아니라 코어가 한 일이다(시계 이동).
    * ⚠️ 이름 비교가 함께 있는 건 **이미 저장된 턴** 때문이다. 표식이 없던 시절의
-   * 기록에는 이름밖에 없어서, 그것만으로는 진행 중인 세이브에서 유령 스킬이
+   * 기록에는 이름밖에 없어서, 그것만으로는 진행 중인 세이브에서 유령 호출이
    * 계속 보인다. 새 기록은 `silent`로 걸러지므로 이 목록은 자라지 않는다.
    */
   const shownCalls = turn.toolCalls.filter(
@@ -597,14 +597,14 @@ export function ChatTurnView({
         if (mark.kind === "goal") return <GoalCard goal={mark.goal} key={mark.key} />;
         if (mark.kind === "card") return <BookingCard card={mark.card} key={mark.key} />;
         /**
-         * 스킬 결과가 서는 길은 둘이다 — **갈 장부가 있으면 칩, 없으면 카드.**
+         * 호출 결과가 서는 길은 둘이다 — **갈 장부가 있으면 칩, 없으면 카드.**
          * 카드를 그리는 호출은 칩을 세우지 않는다: 같은 사실이 두 번 나면 카드가
          * 칩의 부연처럼 읽힌다.
          */
         const { cards, chips } = splitMarketCalls(mark.calls);
         return (
           <Fragment key={mark.key}>
-            {/* 같은 자리에서 연달아 불린 스킬은 한 줄에 나란히 — 칩마다 문단을 끊지 않는다 */}
+            {/* 같은 자리에서 연달아 불린 호출은 한 줄에 나란히 — 칩마다 문단을 끊지 않는다 */}
             {chips.length > 0 && (
               <div className="tool-chips">
                 {groupChips(chips).map((group, j) => (

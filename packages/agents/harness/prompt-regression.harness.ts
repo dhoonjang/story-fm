@@ -1,10 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
+  MARKET_OPS,
+  MARKET_ORDERS_SYSTEM,
+  TACTIC_CAPS,
+  TACTIC_OPS,
+  TACTIC_ORDERS_SYSTEM,
+  TRAINING_OPS,
+  TRAINING_ORDERS_SYSTEM,
+  buildOpsSchema,
+  buildToolSpecs,
+  type OpsCaps,
   GM_SYSTEM,
+  MATCH_GM_SYSTEM,
+  MATCH_TOOL_DEFINITIONS,
+  SETTLE_MATCH_DESCRIPTION,
+  SETTLE_MATCH_INPUT,
   SKILL_CATALOG,
   buildGmReference,
   buildGmStateNote,
   buildGmTools,
+  buildTrainingPrompt,
   parseSceneHeader,
   runMockGmTurn,
   sanitizeCasterText,
@@ -12,6 +27,7 @@ import {
 } from "@story-fm/agents";
 import {
   advanceTime,
+  buildTrainingBrief,
   createGame,
   interpretBackgroundHeuristic,
   userPlayers,
@@ -27,7 +43,7 @@ import { outOfBand, reportOf, type Readings } from "../../engine/harness/harness
  *   pnpm balance prompt-regression
  *
  * 재는 것은 둘이다: 프롬프트가 **실려 나가는 모양**(층의 글자·프리픽스 안정성)과,
- * 그 위에서 도는 **코어의 파서·위생**(장면 문법·스킬 선택). 둘 다 결정적이라 고정
+ * 그 위에서 도는 **코어의 파서·위생**(장면 문법·도구 선택). 둘 다 결정적이라 고정
  * 시드 하나면 재현된다.
  *
  * ⚠️ **모델을 부르지 않는다.** 세션은 모의 GM으로 돌므로 API 키가 필요 없고, 키가
@@ -68,15 +84,59 @@ function fixedLayer(state: GameState): string {
   return `${GM_SYSTEM}\n${JSON.stringify(tools)}`;
 }
 
+/**
+ * 경기 마감의 고정층 — 마감 에이전트가 받는 결산 도구 하나(설명 + 스키마).
+ * 경기당 한 번 실리므로 고정층 예산과는 다른 눈금이다 (agents.md §3).
+ */
+function settlementLayer(): number {
+  return SETTLE_MATCH_DESCRIPTION.length + JSON.stringify(SETTLE_MATCH_INPUT).length;
+}
+
+/**
+ * 해석기 하나가 매 호출에 싣는 고정층 — 시스템 프롬프트 + `ops`의 인자 스키마.
+ *
+ * 인자 스키마가 **명령의 도구 정의에서 그대로 오므로**(agents.md §1), 명령 하나의 설명이
+ * 길어지면 그 명령을 든 해석기의 요청이 그만큼 길어진다 — 평시 고정층과 달리 아무도
+ * 보지 않던 자리라 여기서 잰다.
+ */
+function interpreterLayer(ops: readonly string[], system: string, caps: OpsCaps = {}): number {
+  const state = build(7, "최감독", BACKGROUND);
+  const specs = new Map(buildToolSpecs(state, []).map((t) => [t.name, t] as const));
+  return system.length + JSON.stringify(buildOpsSchema(specs, ops, "인자", caps)).length;
+}
+
+/** 경기의 고정층 — 매치 GM 프롬프트 + 경기 도구 셋. 매 경기 턴의 캐시 프리픽스다 */
+function matchLayer(): number {
+  return MATCH_GM_SYSTEM.length + JSON.stringify(MATCH_TOOL_DEFINITIONS).length;
+}
+
+/** 새 게임 첫날부터 첫 경기일까지 — 소집 뒤 며칠의 훈련이 이 안에 든다 */
+const TRAINING_WINDOW_DAYS = 20;
+
+function trainingBriefChars(seed: number): number {
+  const state = build(seed, "최감독", BACKGROUND);
+  const from = state.date;
+  // 소집(7월 둘째 월요일)부터 첫 경기일 전까지가 훈련이 도는 첫 구간이다 — 하루씩 밀어
+  // 세션을 모으고, 경기일이 막아서면 거기서 끝난다
+  const sessions = [];
+  for (let day = 0; day < TRAINING_WINDOW_DAYS; day += 1) {
+    const moved = advanceTime(state, { days: 1 });
+    sessions.push(...(moved.trained?.sessions ?? []));
+    if (moved.stopped === "blocked" || moved.stopped === "matchday") break;
+  }
+  const brief = buildTrainingBrief(state, sessions, { from, to: state.date });
+  return brief ? buildTrainingPrompt(brief).length : 0;
+}
+
 /** 프리픽스 안정성 — 바이트까지 같으면 1, 아니면 0. 중간값이 없는 질문이다 */
 function identical(a: string, b: string): number {
   return a === b ? 1 : 0;
 }
 
 /**
- * 감독 발화 코퍼스 — 발화 하나와 **그 발화가 겨냥한 스킬** 하나.
+ * 감독 발화 코퍼스 — 발화 하나와 **그 발화가 겨냥한 도구** 하나.
  *
- * 조회 도구는 호출 기록을 남기지 않으므로(prompts.md §2) 상태를 바꾸는 스킬만 겨눈다.
+ * 조회 도구는 호출 기록을 남기지 않으므로(prompts.md §2) 상태를 바꾸는 도구만 겨눈다.
  * 선수 이름은 세계에서 꺼낸다 — 카탈로그가 바뀌어도 코퍼스가 따라온다.
  */
 function corpusOf(state: GameState): ReadonlyArray<readonly [string, string]> {
@@ -137,7 +197,7 @@ function casterArm(seed: number): CasterArm {
 }
 
 describe("프롬프트 회귀", () => {
-  it("층의 글자·프리픽스 안정성 · 모의 세션의 문법과 스킬 적중률 · 중계 위생", () => {
+  it("층의 글자·프리픽스 안정성 · 모의 세션의 문법과 도구 적중률 · 중계 위생", () => {
     const state = build(7, "김감독", BACKGROUND);
     const other = build(21, "박감독", OTHER_BACKGROUND);
 
@@ -188,6 +248,12 @@ describe("프롬프트 회귀", () => {
       "도구 스펙 글자": fixed.length - GM_SYSTEM.length,
       "도구 설명 총 글자": SKILL_CATALOG.reduce((sum, skill) => sum + skill.description.length, 0),
       "가장 긴 도구 설명 글자": Math.max(...SKILL_CATALOG.map((s) => s.description.length)),
+      "경기 고정층 글자": matchLayer(),
+      "경기 마감 고정층 글자": settlementLayer(),
+      "전술 해석 고정층 글자": interpreterLayer(TACTIC_OPS, TACTIC_ORDERS_SYSTEM, TACTIC_CAPS),
+      "훈련 해석 고정층 글자": interpreterLayer(TRAINING_OPS, TRAINING_ORDERS_SYSTEM),
+      "시장 해석 고정층 글자": interpreterLayer(MARKET_OPS, MARKET_ORDERS_SYSTEM),
+      "훈련 브리프 글자": trainingBriefChars(13),
       "레퍼런스층 글자": reference.length,
       "매 턴 층 글자": stateNote.length,
       "고정층 비중": fixed.length / layers,
@@ -201,8 +267,8 @@ describe("프롬프트 회귀", () => {
       "중계 시각 헤더 보존율": caster.headers / Math.max(1, caster.turns),
       "시점 헤더 파싱 성공률": headers / corpus.length,
       "평균 장면 글자": sceneChars / corpus.length,
-      "스킬 적중률": hits / corpus.length,
-      "불린 스킬 가짓수": called.size,
+      "도구 적중률": hits / corpus.length,
+      "불린 도구 가짓수": called.size,
     };
 
     console.log(

@@ -399,7 +399,7 @@ LAM/RAM · LF/RF · LST/RST.
   전원이 침울해지고 이적 판정·재계약·오퍼까지 오염된다. 마음의 근거는
   `hasIssue`(라커룸 불만)·폼·정착·출전 기회이고, 체력은 감정어 없이 사실로만
   쓴다. 심경 한 줄의 계약은 [people.md](people.md).
-- 왜 낮은지는 심경 한 줄(코어 사실 카드 `moodFactsOf` + mood-rater 재작성)이 말한다.
+- 왜 낮은지는 심경 한 줄(코어 사실 카드 `moodFactsOf` + 호출이 남긴 잔향)이 말한다.
 
 ### 5.3 부상 — 심각도·기간·성향 (`engine/squad/injury.ts`)
 
@@ -691,8 +691,7 @@ QID가 없는 선수는 이력을 가질 수 없다 — 조사되지 않은 선�
 
 - **못 뛰는 선수는 대상이 아니다** — 부상 중이거나 출장 정지인 선수는 브리프에
   실리지 않는다(`isAvailable`). 재활 3개월째 선수가 전술 적응도와 능력치를
-  가져가면 훈련은 아무 뜻도 없다. 심경 결산도 같은 선을 긋는다
-  ([people.md](people.md)). 반영 시점에 **팀을 떠난 선수**도 움직이지 않는다 —
+  가져가면 훈련은 아무 뜻도 없다. 반영 시점에 **팀을 떠난 선수**도 움직이지 않는다 —
   판정을 받는 사이 이적한 선수는 더 이상 우리 장부의 대상이 아니다.
 - **한 결산은 한 번만 반영된다** — 표식은 코어가 갖는다(경기는 `MATCH.result.rated`,
   훈련은 그 구간 훈련 세션 엔트리의 `settled`). 같은 판정에 같은 선수가 두 줄로 와도
@@ -839,11 +838,11 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 강등하면 걸려 있던 자리 프로그램이 그 자리에서 거둬진다(축은 남는다). 걸어 두고
 기다리게 하는 것이 거짓 성공이다 ([season.md](../simulation/season.md) §2).
 
-- 서사 이벤트는 능력치 접근 불가 — "각성" 없음. 능력치는 이 장의 경로가 전부다.
-  움직일 수 있는 것은 컨디션 ±`NARRATIVE_CONDITION_BOUND`(5)와 폼 **단계**
-  ±`NARRATIVE_FORM_STEP_BOUND`(1)뿐이고, 그 한 단계가 폼 축에서 갖는 폭은
-  `NARRATIVE_FORM_STEP`(0.12)이다 — 경기 한 판의 폼 변화가 0.3 안팎이라 장면 하나가
-  선수를 절정·바닥에 꽂지 않는다. 하루에 `MAX_NARRATIVE_EVENTS_PER_DAY`(3)건까지다.
+- 사건 기록(`record_incident`)은 능력치 접근 불가 — "각성" 없음. 능력치는 이 장의
+  경로가 전부다. 사건이 움직이는 것은 사기(→ 폼)·관계·회견 카드·인물 기억뿐이고, 갈래별
+  폭은 코어의 효과표가 갖는다 — 한 사건의 사기 폭은 `INCIDENT_MORALE_BOUND`(6) 안이라
+  면담 한 번(±8)을 넘지 않고, 하루에 `MAX_INCIDENTS_PER_DAY`(3)건까지다
+  ([people.md](people.md) §6).
 
 ### 6.5 잠재력은 축의 천장이고, 나이 대역 안에 있어야 한다
 
@@ -1223,7 +1222,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 아무것도 곱하지 않는 줄은 이유가 아니다.
 **주전으로 쓰면 한 달, 아무 데도 안 쓰면 반년.**
 
-- **대화의 무게는 GM이 정하고 경계는 코어가 쥔다** — 스킬이 `settling` 인자를
+- **대화의 무게는 GM이 정하고 경계는 코어가 쥔다** — 호출이 `settling` 인자를
   받고 코어는 앵커 ±`EVENT_BAND`로 자른다 (경기 평점과 같은 구조).
 - ⚠️ **면담은 하루에 한 번** — 크레딧뿐 아니라 **사기·리더십 XP까지** 그날 첫 면담만
   셈한다(`PlayerState.talkedOn`). 반복이 이득이면 면담 연타가 최적 전략이 된다
@@ -1291,8 +1290,8 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
   (`scoutingSummary`)이 파견 중인 것과 나란히 싣고, 자리가 비어 있으면 몇 자리인지도
   함께 낸다. 사실이 남지 않으면 모델은 기억으로 메우고 부르지 않은 파견을
   완료형으로 말한다 ([../llm/agents.md](../llm/agents.md) §6).
-- 자리가 나도 **코어가 대신 보내지 않는다** — 상태 전이는 스킬 한 경로뿐이다.
-  줄을 읽은 GM이 스킬을 다시 부르고, 그때 대기는 지워진다.
+- 자리가 나도 **코어가 대신 보내지 않는다** — 상태 전이는 명령 한 경로뿐이다.
+  줄을 읽은 GM이 도구를 다시 부르고, 그때 대기는 지워진다.
 - 대기는 요청 뒤 `SCOUT_DEFER_DAYS`(=`SCOUT_DAYS`)가 지나면 지운다 — 그 안에 자리는
   반드시 나므로, 일주일을 넘긴 요청은 감독의 뜻이 지나간 것이다. 지목의 대기는
   그 선수를 우리가 영입해도 지워진다.
@@ -1607,12 +1606,12 @@ offTheBall  = base − tilt × (1 − a)
 | 부상 저울과 위험 등급 (`injuryWeight`·`injuryRiskOf`·`INJURY_RISK_FLOOR`) — §5.3                                                | `packages/sim/src/match-engine.ts` (낱말은 `packages/domain/src/records.ts`)            |
 | 안개의 크기·잠재력·경기 중 체력 (`observationMargin`·`readCondition`)                                                           | `packages/engine/src/squad/scouting.ts`                                                 |
 | 안개를 얹는 규칙·등급표 (`observedFit`·`observedOverall`·`RATING_TIERS`) — 화면도 같이 부른다                                   | `packages/domain/src/player.ts` (엔진이 재수출)                                         |
-| 파견 한도·대기 (`scoutPlayer`·`deferScout`·`scoutingSummary`)                                                                   | `packages/engine/src/skills/index.ts` · `packages/engine/src/squad/scouting.ts`         |
+| 파견 한도·대기 (`scoutPlayer`·`deferScout`·`scoutingSummary`)                                                                   | `packages/engine/src/commands/index.ts` · `packages/engine/src/squad/scouting.ts`       |
 | 보고서 카드와 도착 줄 (`scoutReportCard`·`scoutReportLine`)                                                                     | `packages/engine/src/views/views.ts`                                                    |
 | 정착 (`settlingOf`·`SETTLING_EVENT`)                                                                                            | `packages/engine/src/squad/settling.ts`                                                 |
-| 역할 기억 (`recallRole`·`rememberRole`)                                                                                         | `packages/engine/src/skills/role-memory.ts`                                             |
+| 역할 기억 (`recallRole`·`rememberRole`)                                                                                         | `packages/engine/src/commands/role-memory.ts`                                           |
 | 되찾기 3단 (`inheritedRole`·`roleAtSlot`) — 코어와 전술판이 같이 부른다                                                         | `packages/domain/src/player.ts`                                                         |
-| 적응도 선반·역할 대가 정산 (`shelveFamiliarity`·`settleRoleCost`)                                                               | `packages/engine/src/skills/familiarity-memory.ts`                                      |
+| 적응도 선반·역할 대가 정산 (`shelveFamiliarity`·`settleRoleCost`)                                                               | `packages/engine/src/commands/familiarity-memory.ts`                                    |
 | 결산 반영 (`applyAttributeStep`·`positionGain`)                                                                                 | `packages/engine/src/squad/training-report.ts` · `packages/engine/src/match/ratings.ts` |
 | 심경 (`moodFactsOf`·`MOOD_BATCH`)                                                                                               | `packages/engine/src/squad/mood.ts` ([people.md](people.md))                            |
 | 적응도 영향 폭(`ADAPTATION_IMPACT`)·화면 합산(`adaptationOf`)                                                                   | `packages/domain/src/tactics.ts`                                                        |

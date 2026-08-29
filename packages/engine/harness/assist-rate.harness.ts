@@ -6,7 +6,7 @@ import { outOfBand, reportOf, type Readings } from "./harness";
 
 /**
  * 골의 몇 할에 도움이 붙는가 — `pickAssister`의 설계값이 정하는 **분포**다.
- * 도움이 아예 사라지는 회귀는 `packages/engine/test/assist-record.test.ts`가
+ * 도움이 아예 사라지는 회귀는 `packages/engine/test/ratings.test.ts`가
  * 0이 아님으로 못 박고, 여기서 보는 것은 그 값이 만드는 비율뿐이다.
  *
  *   pnpm balance assist-rate

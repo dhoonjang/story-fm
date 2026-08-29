@@ -603,7 +603,7 @@ export function sameMissionConditions(a: ScoutMission, b: ScoutMission): boolean
 /**
  * **지금 나가 있는 파견을 한 줄씩** — 반려 문구가 「무엇이 나갔는가」를 말하는 자.
  *
- * 지목은 선수 이름으로, 임무는 조건으로 불린다. 두 스킬이 각자 엮으면 같은 파견이
+ * 지목은 선수 이름으로, 임무는 조건으로 불린다. 두 명령이 각자 엮으면 같은 파견이
  * 반려 문구에 따라 다르게 불린다.
  */
 export function inFlightScoutLabels(state: GameState): string[] {

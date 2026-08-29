@@ -32,10 +32,10 @@ const PANEL_ICON: Record<PanelKey, IconComponent> = {
 const PANEL_ORDER: PanelKey[] = ["스쿼드", "달력", "재정", "대회", "커리어"];
 
 /**
- * 스킬 → 아이콘 — **줄이 무엇에 관한 것인지 먼저 보인다.**
+ * 호출 → 아이콘 — **줄이 무엇에 관한 것인지 먼저 보인다.**
  *
  * 문장을 읽기 전에 갈래가 눈에 들어야 세 줄이 글자 벽으로 안 보인다.
- * 없는 스킬은 그 장부의 아이콘이 대신 선다.
+ * 없는 호출은 그 장부의 아이콘이 대신 선다.
  */
 const SKILL_ICON: Record<string, IconComponent> = {
   // 판(팀 전술)과 사람(명단·개인)을 갈라 둔다 — 같은 그림이 반복되면 갈래가 안 읽힌다
@@ -61,7 +61,7 @@ const SKILL_ICON: Record<string, IconComponent> = {
   exercise_buyback: IconPerson,
   // 계약 확정은 재정 장부에도 서므로 사람 쪽으로 — 그 칸의 머리 아이콘이 이미 돈이다
   accept_deal: IconPerson,
-  apply_narrative_event: IconInsight,
+  record_incident: IconInsight,
   set_training: IconDay,
   start_match: IconMatch,
   finalize_match: IconTrophy,
@@ -70,7 +70,7 @@ const SKILL_ICON: Record<string, IconComponent> = {
 };
 
 /**
- * 오르내림의 색 — **부호는 코어가 숫자로 낸다** (`SkillBriefItem.delta`).
+ * 오르내림의 색 — **부호는 코어가 숫자로 낸다** (`CommandBriefItem.delta`).
  *
  * 값 문자열에서 `+`·`−`를 찾아 칠하던 자리다. 포메이션(`4-2-3-1`)이 같은 자를
  * 지나고, 코어가 문구를 바꾸는 날 색이 조용히 꺼졌다. `0`은 "안 움직였다"는
@@ -85,7 +85,7 @@ function Delta({ delta, text }: { delta: number | undefined; text: string }) {
  * 한 줄 — **이름은 흐리게, 값은 또렷하게, 갈래는 뒤에 한 톤 낮춰.**
  *
  * 셋을 같은 톤으로 이어 붙이면 `훈련 지정 — 매주 5회 × 6주 — 패스·시야`처럼 줄표만
- * 두 번 나오고 무엇이 값인지 안 읽힌다. 코어가 자리를 나눠 주므로(`SkillBriefItem`)
+ * 두 번 나오고 무엇이 값인지 안 읽힌다. 코어가 자리를 나눠 주므로(`CommandBriefItem`)
  * 화면은 자리마다 톤만 정하면 된다.
  *
  * **코어가 쓴 문자열은 다시 가르지 않는다** — 역할도 코어가 판과 같은 약칭(`CF`)으로
@@ -95,7 +95,7 @@ function HintRow({ line }: { line: HintLine }) {
   const Icon = SKILL_ICON[line.skill];
   return (
     <span className="rail-hint-line">
-      {/* 이어지는 항목은 같은 스킬의 계속이다 — 아이콘을 다시 세우면 건수가 부풀어 보인다 */}
+      {/* 이어지는 항목은 같은 호출의 계속이다 — 아이콘을 다시 세우면 건수가 부풀어 보인다 */}
       <span className="rail-hint-mark">{Icon && !line.cont ? <Icon /> : null}</span>
       <span className="rail-hint-what">
         {line.head !== undefined && <b className="rail-hint-lead">{line.head}</b>}
@@ -135,7 +135,7 @@ export function useRailHints({
   /**
    * 채팅 칩이 다시 불러낸 말풍선 — 자동 알림과 같은 자리에 선다.
    *
-   * 칩 하나가 호출 여럿을 질 수 있어(연달아 불린 같은 스킬 — `groupChips`) 세우는
+   * 칩 하나가 호출 여럿을 질 수 있어(연달아 불린 같은 호출 — `groupChips`) 세우는
    * 것은 묶음 전체다. 어느 칩이 눌렸는지는 **묶음의 첫 호출**로 안다: 묶음 배열은
    * 그릴 때마다 새로 만들어지지만 그 안의 기록은 턴에 그대로 있어 신원이 된다.
    */
@@ -222,7 +222,7 @@ export function useRailHints({
 /**
  * **바뀐 장부를 알리는 말풍선** — 아이콘 줄 아래 한 장.
  *
- * ⚠️ 아이콘마다 따로 띄우지 않는다. 한 스킬이 두 장부를 건드리는 일이 흔해서
+ * ⚠️ 아이콘마다 따로 띄우지 않는다. 한 호출이 두 장부를 건드리는 일이 흔해서
  * (계약 확정 = 선수 + 돈) 아이콘별로 세우면 말풍선끼리 겹친다. 대신 꼬리가
  * **첫 장부의 아이콘**을 가리켜 어디서 나온 말인지 잇는다.
  */

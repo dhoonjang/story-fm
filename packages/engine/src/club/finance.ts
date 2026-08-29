@@ -46,9 +46,9 @@ import {
   weeklyWageLinesOf,
   weeklyWagesOf,
   type GameState,
-  type SkillBrief,
+  type CommandBrief,
 } from "../core/state";
-import { item } from "../skills/brief";
+import { item } from "../commands/brief";
 import { makeRng } from "../core/rng";
 import { catalogTierOf, tierOfTeamIn } from "../core/club-tier";
 
@@ -689,7 +689,7 @@ export interface SetTicketPriceInput {
 export function setTicketPrice(
   state: GameState,
   input: SetTicketPriceInput,
-): { ok: boolean; message: string; brief?: SkillBrief } {
+): { ok: boolean; message: string; brief?: CommandBrief } {
   if (managedTeamId(state) === null) {
     return { ok: false, message: "무직입니다 — 값을 매길 구단이 없습니다" };
   }
@@ -2634,7 +2634,7 @@ export interface FinanceEventInput {
 export function applyFinanceEvent(
   state: GameState,
   input: FinanceEventInput,
-): { ok: boolean; message: string; brief?: SkillBrief } {
+): { ok: boolean; message: string; brief?: CommandBrief } {
   const allowed: readonly string[] =
     input.kind === "income" ? NARRATIVE_INCOME_CATEGORIES : NARRATIVE_EXPENSE_CATEGORIES;
   if (!allowed.includes(input.category)) {
@@ -2708,7 +2708,7 @@ export function applyFinanceEvent(
 export function adjustTransferBudget(
   state: GameState,
   input: { delta: number; note: string },
-): { ok: boolean; message: string; brief?: SkillBrief } {
+): { ok: boolean; message: string; brief?: CommandBrief } {
   const finance = financeOf(state, state.userTeamId);
   const delta = Math.round(input.delta);
   if (delta === 0) return { ok: false, message: "금액이 0입니다" };

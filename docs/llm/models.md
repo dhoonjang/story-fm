@@ -14,27 +14,29 @@ version: 1
 max_retries: 2 # 요청 하나를 다시 부르는 횟수 — 제공자 셋이 함께 쓴다 (§1-1)
 agents:
   gm:            { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000, thinking_level: minimal }
-  match-intent:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 16000, timeout_ms: 60000,  thinking_level: minimal }
-  match-caster:  { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000, thinking_level: minimal }
-  match-rater:   { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
+  tactic-orders:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 16000, timeout_ms: 60000,  thinking_level: minimal }
+  market-orders: { provider: google, model: gemini-3.5-flash-lite, max_tokens: 16000, timeout_ms: 60000,  thinking_level: minimal }
+  training-orders: { provider: google, model: gemini-3.5-flash-lite, max_tokens: 16000, timeout_ms: 60000, thinking_level: minimal }
+  match-gm:      { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000, thinking_level: minimal }
+  finalize-match:{ provider: google, model: gemini-3.6-flash,      max_tokens: 16000, timeout_ms: 90000,  thinking_level: minimal }
+  negotiation-table: { provider: google, model: gemini-3.6-flash,  max_tokens: 8000,  timeout_ms: 60000,  thinking_level: minimal }
   training-rater:{ provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
-  mood-rater:    { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
-  negotiator:    { provider: google, model: gemini-3.6-flash,      max_tokens: 8000,  timeout_ms: 45000,  thinking_level: low }
   history-compactor: { provider: google, model: gemini-3.6-flash,      max_tokens: 8000,  timeout_ms: 60000,  thinking_level: minimal }
   onboarding-judge:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 4000,  timeout_ms: 30000,  thinking_level: minimal }
 ```
 
-| 에이전트            | 담당                          | 출력 상한 | 시한  |
-| ------------------- | ----------------------------- | --------- | ----- |
-| `gm`                | 평시 서사 · 의도 해석 · 판정  | 64,000    | 180초 |
-| `match-intent`      | 경기 중 감독의 말 → 의도      | 16,000    | 60초  |
-| `match-caster`      | 경기 중계 · 벤치 대화         | 64,000    | 180초 |
-| `match-rater`       | 경기 평점 재채점              | 8,000     | 30초  |
-| `training-rater`    | 훈련 결산                     | 8,000     | 30초  |
-| `mood-rater`        | 심경 한 줄                    | 8,000     | 30초  |
-| `negotiator`        | 우리 오퍼에 대한 상대의 판정  | 8,000     | 45초  |
-| `history-compactor` | 밀려난 평시 이력 → 요약 한 벌 | 8,000     | 60초  |
-| `onboarding-judge`  | 새 게임의 배경 → 시작 지갑    | 4,000     | 30초  |
+| 에이전트            | 담당                                        | 출력 상한 | 시한  |
+| ------------------- | ------------------------------------------- | --------- | ----- |
+| `gm`                | 평시 서사 · 의도 해석 · 판정                | 64,000    | 180초 |
+| `tactic-orders`     | 감독의 판 지시 → 명령 인자 (경기·평시)      | 16,000    | 60초  |
+| `training-orders`   | 감독의 훈련·육성 지시 → 명령 인자           | 16,000    | 60초  |
+| `market-orders`     | 감독의 이적·재정 지시 → 명령 인자           | 16,000    | 60초  |
+| `match-gm`          | 경기 중계 · 벤치 대화 · 도구로 경기 진행    | 64,000    | 180초 |
+| `finalize-match`    | 끝난 경기의 결산 · 마무리 중계              | 16,000    | 90초  |
+| `negotiation-table` | 협상 테이블 건너편 — 감독의 말에 답 하나    | 8,000     | 60초  |
+| `training-rater`    | 훈련 결산                                   | 8,000     | 30초  |
+| `history-compactor` | 밀려난 평시 이력 → 요약 한 벌               | 8,000     | 60초  |
+| `onboarding-judge`  | 새 게임의 배경 → 지갑·능력치의 결·시작 사건 | 4,000     | 30초  |
 
 - **해석이 싼 자리로 가는 이유는 그 일이 판단이 아니라 분류이기 때문**이다 — 무엇을
   하라는 말인지 고르는 것이고, 그것이 사실인지와 얼마나 먹히는지는 코어가 정한다.
@@ -42,20 +44,19 @@ agents:
 - **중계가 가벼운 이유는 사건을 코어가 정하기 때문**이다 — 모델은 xg가 굴린 결과를
   문장으로 옮길 뿐인데 90분에 스무 번 도니 지연이 곧 게임 속도다
   ([../simulation/match.md](../simulation/match.md) §2).
-- **결산 셋이 싼 자리로 가는 이유는 값이 아니라 빈도**다. 출력이 코어 앵커 ± 한도
+- **훈련 결산이 싼 자리로 가는 이유는 값이 아니라 빈도**다. 출력이 코어 앵커 ± 한도
   안에서만 움직여서 모델이 무뎌도 장부가 흔들리지 않는다 (agents.md §4).
-- **결산 셋을 따로 적는다** — 셋을 하나로 묶으면 그중 하나만 다른 모델로 보낼 수
-  없다. 지금은 심경만 더 싼 곳으로 옮기는 것이 YAML 한 줄이다.
-- **교섭 상대만 사고 수준이 `low`다.** 출력은 판정 하나에 금액 둘이라 결산만큼 작지만,
-  읽는 것이 인물지·오퍼 이력·설득 논거라 결산의 싼 자리로 보내면 앵커를 그대로 되읊는다
-  (agents.md §4-1). 대신 평시 턴 앞에 서므로 시한은 감독을 기다리게 하지 않는 45초다 —
-  협상은 하루에 몇 건이지 90분에 스무 번이 아니다.
-- **교섭 상대도 Google로 간다.** 제공자를 하나 더 늘리면 키가 하나 더 필요해지고, 키가
-  없는 제공자로 간 자리는 조용히 mock으로 떨어진다(§2). 자리마다 제공자를 고를 수 있다는
-  것이 **자리마다 골라야 한다**는 뜻은 아니다.
-- **압축이 결산 셋의 싼 자리로 가지 않는 이유는 읽는 양**이다 — 접히는 구간 전부를
-  한 번에 읽고 거기 새로 선 인물까지 판정한다(agents.md §5-1). 대신 이력이 상한을
-  넘을 때만 도니 드물다.
+- **경기 마감이 싼 자리로 가지 않는 이유는 읽는 양**이다 — 이 경기의 중계 전부를
+  `<commentary>`로 읽고 결산과 마무리 중계를 함께 쓴다(agents.md §3). 경기당 한 번이라
+  드물다. 심경 한 줄에는 키가 없다 — 그 선수와 있었던 일을 쓴 호출의 인자로 선다(§4-3).
+- **해석은 매치 GM의 도구 뒤에서 돈다.** 시한 60초가 GM 호출(180초) 안에 든다 —
+  둘을 더한 값이 한 턴의 상한이 아니라, GM의 시한이 그 안의 도구 왕복까지 덮는다.
+- **교섭 상대에는 키가 없다.** 우리 오퍼에 온 답은 GM이 서류와 앵커를 읽고 상대가 되어
+  답하고 코어가 앵커 ± 한도로 자른다 (agents.md §4-1).
+
+- **압축이 훈련 결산의 싼 자리로 가지 않는 이유는 읽는 양**이다 — 접히는 구간 전부를
+  장부 골격과 함께 한 번에 읽고 거기 새로 선 인물까지 판정한다(agents.md §5-1). 기억의
+  주 저자이기도 하다. 대신 이력이 상한을 넘을 때만 도니 드물다.
 - 사고 수준(`thinking_level`)은 그 에이전트 항목이 함께 갖는다 — 제공자 중립 눈금이라
   셋 다 실을 수 있다 (§1-2).
 - **`max_retries`만은 에이전트 밖, 파일 맨 위에 있다** — 재시도는 요청 하나를 다시
@@ -114,7 +115,7 @@ OpenAI는 2회를 기본으로 돌고 `@google/genai`는 **옵션을 주지 않�
   볼 뿐이다. 셋 중 둘의 SDK 기본값과도 같아, 이 값을 적는 것이 동작을 바꾸는 자리는
   Gemini 하나다.
 - ⚠️ **다시 부르는 것은 요청 하나이지 턴이 아니다.** 도구가 이미 돈 턴을 다시 부르면
-  스킬이 두 번 돌아 장부가 두 번 움직인다 (agents.md §8). 그래서 재시도는 전송 계층
+  명령이 두 번 돌아 장부가 두 번 움직인다 (agents.md §8). 그래서 재시도는 전송 계층
   안쪽에만 있고, `runTurn`을 감싸는 자리(`withDeadline`·계측)에는 없다.
 - ⚠️ **재시도는 시한을 늘리지 않는다.** `timeout_ms`는 요청 하나마다 다시 걸리므로
   전송만 보면 최악이 `timeout_ms × (max_retries + 1)`이지만, 턴 전체는 `withDeadline`이
@@ -152,7 +153,7 @@ OpenAI는 2회를 기본으로 돌고 `@google/genai`는 **옵션을 주지 않�
 - ⚠️ **시한이 지나면 팩토리가 그 자리에서 실패를 만든다** — SDK가 신호를 무시해도
   `runTurn`의 프로미스는 반드시 끝난다. 이것이 없으면 시한은 있으나 마나다.
 - **넘긴 호출은 이미 있는 실패 경로로 간다.** 새 상태를 만들지 않는다 — GM·중계는
-  오류가 올라가 화면이 배너로 알리고, 결산 셋은 삼키고 **코어 앵커가 남는다**
+  오류가 올라가 화면이 배너로 알리고, 훈련 결산은 삼키고 **코어 앵커가 남는다**
   (agents.md §1·§4). 오류 문구는 `turnErrorMessage`의 "응답이 지연돼 턴을 취소했습니다".
 - ⚠️ **넘긴 호출을 다시 부르지 않는다.** 재시도는 모델이 답을 냈지만 그 산출을 쓸 수
   없을 때만이다(agents.md §8). 시한을 넘긴 호출을 한 번 더 부르면 같은 시한이 처음부터
@@ -226,9 +227,10 @@ OpenAI는 2회를 기본으로 돌고 `@google/genai`는 **옵션을 주지 않�
   락은 아무도 풀어 줄 사람이 없다.
 - **그 밖에는 나이만 본다** — 15분이 지난 락은 회수한다. pid 재사용, 다른 호스트, 멎은
   프로세스가 여기로 온다. **15분은 한 턴이 정당하게 쥘 수 있는 최대 시간의 두 배 남짓**이다:
-  경기 턴이 가장 길어 `match-intent`(60초) + `match-caster`(180초) + 결산 셋(30초×3) +
-  `history-compactor`(60초) ≈ 6분 30초이고, 그 합의 근거는 `config/llm.yml`의
-  `timeout_ms`다(위). 상한이 이 합보다 짧으면 **멀쩡히 돌고 있는 턴의 락을 빼앗는다.**
+  경기 턴이 가장 길어 `match-gm`(180초 — 도구 뒤의 해석·마감 호출도 이 안이다) +
+  `training-rater`(30초) + `history-compactor`(60초) ≈ 4분 30초이고, 그 합의
+  근거는 `config/llm.yml`의 `timeout_ms`다(위). 상한이 이 합보다 짧으면 **멀쩡히 돌고
+  있는 턴의 락을 빼앗는다.**
 - 회수는 `rename`으로 한다 — 두 프로세스가 같은 락을 동시에 회수해도 이름을 바꾸는 데
   성공하는 쪽은 하나뿐이다. 락을 놓을 때는 파일 안의 토큰이 제 것일 때만 지운다.
 
@@ -421,7 +423,8 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
 
 ## 3-2. `toolChoice` — 도구를 반드시 부르게 하기
 
-산출이 도구 하나뿐인 호출(지시 해석·결산 셋 — agents.md §3·§4)은 "이 도구로만 답한다"는
+산출이 도구 하나뿐인 호출(지시 해석·훈련 결산·압축 — agents.md §3·§4)과 경기 마감의
+첫 왕복(`settle_match` — agents.md §3)은 "이 도구로만 답한다"는
 **프롬프트 문장이 아니라 요청 파라미터로** 강제한다. 문장에만 기대면 모델이 본문으로
 답해도 호출은 정상으로 끝나고, 산출이 빈 채 해석은 턴 취소로 결산은 앵커로 떨어진다.
 
@@ -484,7 +487,7 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
 | ---------------------------- | --------------------------------------------------------------------------------------- |
 | 예산이 세는 것               | `inputTokens + outputTokens` (게임 누적)                                                |
 | 상한                         | `LLM_TOKEN_BUDGET` — 없거나 0 이하면 무제한                                             |
-| 상한 초과 시 끊기는 에이전트 | 결산 셋 + 교섭 + 압축 + 온보딩 판정 — GM·중계는 계속 돈다                               |
+| 상한 초과 시 끊기는 에이전트 | 훈련 결산 + 경기 마감 + 압축 + 온보딩 판정 — GM·매치 GM은 계속 돈다                     |
 | 캐시 히트율                  | `cacheReadTokens ÷ inputTokens`                                                         |
 | 히트율 경고 문턱             | 평균 입력이 **그 에이전트 제공자의 최소 캐시 프리픽스** 이상 × 3회 이상 호출 × 히트율 0 |
 | 장부의 키                    | **에이전트 이름** — 설정의 이름이 그대로 계측 키가 된다                                 |
@@ -512,7 +515,7 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   제공자에게 물어야 한다.
 - ⚠️ **상한은 게임을 멈추지 않는다.** 서사 자리에는 대신 세울 값이 없어 넘겨도 경고
   한 번만 남는다. 끊기는 자리는 실패해도 대신 설 것이 있는 곳뿐이라(`SKIPPABLE_AGENTS`)
-  결산 셋은 코어의 앵커가 그대로 서고, 압축은 접지 않은 채 다음 기회를 기다린다. 건너뛴
+  훈련 결산은 코어의 앵커가 그대로 서고, 압축은 접지 않은 채 다음 기회를 기다린다. 건너뛴
   횟수도 장부에 적는다 — 안 적으면 결산이 왜 비었는지 알 수 없다.
 - ⚠️ **상한을 넘겨 건너뛴 호출은 다시 부르지 않는다** (§1-1). 다시 불러도 같은 판정이
   나올 뿐인데 건너뛴 횟수만 두 번 적혀, 결산이 몇 번 비었는지가 실제의 두 배가 된다.
@@ -557,8 +560,8 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   남지 않는다.
 - **production에서는 아무 파일도 쓰지 않는다** — 켜지는 조건이 위의 하나뿐이고,
   `LLM_MODE=mock`처럼 기록할 호출이 없는 턴은 파일도 만들지 않는다.
-- **한 채팅 턴은 호출 하나가 아니다.** 평시 턴은 `gm` + 결산 raters, 경기 턴은
-  `match-intent` + `match-caster` + `match-rater`가 함께 돈다. 그래서 키가 호출이
+- **한 채팅 턴은 호출 하나가 아니다.** 평시 턴은 `gm` + 훈련 결산, 경기 턴은
+  `match-gm`과 그 도구 뒤의 `tactic-orders`·`finalize-match`가 함께 돈다. 그래서 키가 호출이
   아니라 턴이고, 한 턴을 열면 그 턴에 오간 왕복이 **순서대로 전부** 보인다.
 - **어느 호출이 이 턴의 것인가는 실행 문맥이 정한다**(`AsyncLocalStorage`). 시각이나
   전역 큐로 가르면 두 게임이 같은 프로세스에서 동시에 턴을 돌릴 때 남의 호출이
@@ -569,7 +572,7 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   있고, 프롬프트로 이미 적은 이력을 두 번 적지 않는다. 경계는 어댑터가 돌려준
   `historyBase`다(§3) — 보낸 이력의 길이로 세면 정규화가 더하거나 던 만큼 어긋나
   이번 턴의 왕복이 잘리거나 지난 턴이 딸려 들어온다.
-- ⚠️ **그 꼬리는 모델의 몫만이 아니다.** 어댑터는 이번 턴의 우리 발화와 스킬이
+- ⚠️ **그 꼬리는 모델의 몫만이 아니다.** 어댑터는 이번 턴의 우리 발화와 도구가
   돌려준 `tool_result`도 같은 이력에 적는다(Anthropic은 `tool_result`까지
   `role:"user"`다). 그래서 팝업은 보낸 것(파랑)과 받은 것(초록)을 갈라 세우고,
   꼬리 안에서는 **`role`이 경계다** — `assistant`·`model`만 모델이 쓴 것이다.
@@ -623,7 +626,7 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
 - **시한 없는 모델 호출을 만들지 않는다.** 제공자 기본값은 셋이 다르고 적혀 있지도
   않다 — 시한은 `config/llm.yml`에서만 온다. **재시도 횟수도 같다**(`max_retries`,
   §1-1): SDK 기본값은 2·2·0이라, 적지 않으면 같은 설정이 제공자마다 다르게 돈다.
-- **재시도는 요청 하나에만 건다.** 도구가 이미 돈 턴을 다시 부르면 스킬이 두 번 돈다
+- **재시도는 요청 하나에만 건다.** 도구가 이미 돈 턴을 다시 부르면 명령이 두 번 돈다
   (§1-1).
 - **제공자의 능력은 설정이 적는다 — 오류 문장을 보고 알아내지 않는다.** 사고를 실을 수
   있는지(§1-2), 오퍼레이터 롤을 받는지(§3-3) 둘 다 표에 있고, 못 하는 조합은 시작할 때

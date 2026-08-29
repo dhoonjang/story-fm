@@ -21,6 +21,7 @@ import type {
   GameTeam,
   GrowthEntry,
   HistoryDigest,
+  Incident,
   Injury,
   CompetingBid,
   Interest,
@@ -35,6 +36,7 @@ import type {
   MatchRecord,
   MatchSide,
   NarrativeArc,
+  Opening,
   NarrativeNote,
   PaymentSchedule,
   Persona,
@@ -184,7 +186,7 @@ export interface PendingEdit {
  * 값도 갈래도 같은 굵기로 눌려 무엇이 바뀌었는지가 안 읽힌다. 무엇을 강조할지는
  * 화면이 정하되 **어디까지가 값인지는 코어만 안다** — 그래서 코어가 나눠 낸다.
  */
-export interface SkillBriefItem {
+export interface CommandBriefItem {
   /** 무엇에 대한 것인가 — 한 톤 낮춰 **앞에** 선다 (`선발 투입`, `포메이션`) */
   label?: string;
   /** 바뀐 값 — 항목에서 가장 또렷한 자리 (`김민재 외 2명`, `4-4-2 → 4-3-3`) */
@@ -202,7 +204,7 @@ export interface SkillBriefItem {
 }
 
 /**
- * **스킬 결과의 구조화 요약** — 머리줄 하나와 항목 몇 개.
+ * **호출 결과의 구조화 요약** — 머리줄 하나와 항목 몇 개.
  *
  * 화면은 항목을 그대로 세우고 넘치면 접는다 (`PanelHint.more`) — 요약 문자열을
  * 되쪼개지 않는다. `summary`는 LLM에게 돌려주는 줄로 남는다.
@@ -210,11 +212,11 @@ export interface SkillBriefItem {
  * ⚠️ **항목 하나는 한 줄에 든다.** 건수와 갈래까지만 적고, LLM이 쓴 자유 문장은
  * 싣지 않는다 (그 문장은 장면과 서사 로그에 이미 있다).
  */
-export interface SkillBrief {
-  /** 무엇을 했나 — 스킬 이름값의 짧은 머리줄 (`라인업 확정`) */
+export interface CommandBrief {
+  /** 무엇을 했나 — 호출 이름값의 짧은 머리줄 (`라인업 확정`) */
   head: string;
   /** 무엇이 바뀌었나 — 각 항목이 말풍선 한 줄이다 */
-  items: SkillBriefItem[];
+  items: CommandBriefItem[];
 }
 
 export interface ToolCallRecord {
@@ -224,13 +226,13 @@ export interface ToolCallRecord {
    * 화면이 항목으로 세우는 요약 — 없으면 `summary` 문자열로 폴백한다
    * (옛 세이브의 기록에는 없다).
    */
-  brief?: SkillBrief;
+  brief?: CommandBrief;
   input?: unknown;
   /**
-   * 그 스킬이 남긴 **구조화된 결과** — 채팅이 카드로 그린다.
+   * 그 호출이 남긴 **구조화된 결과** — 채팅이 카드로 그린다.
    *
    * `summary`(줄글)만으로는 화면이 표를 못 그린다. 그렇다고 문자열을 파싱하면
-   * 문구가 바뀔 때마다 조용히 깨진다. 카드를 그리는 스킬만 채우고, 없으면 UI는
+   * 문구가 바뀔 때마다 조용히 깨진다. 카드를 그리는 호출만 채우고, 없으면 UI는
    * 지금처럼 칩 + 요약으로 폴백한다. 옛 세이브엔 없다(optional).
    */
   payload?: unknown;
@@ -243,10 +245,10 @@ export interface ToolCallRecord {
    */
   tone?: "good" | "bad";
   /**
-   * **화면에 칩으로 세우지 않는다** — 스킬 호출이 아니라 코어가 한 일의 기록.
+   * **화면에 칩으로 세우지 않는다** — 호출이 아니라 코어가 한 일의 기록.
    *
    * 시계 이동(장면 헤더가 민다)처럼 감독이 부른 적 없는 것이 칩으로 뜨면
-   * 어드민 스킬 목록에 없는 스킬이 호출된 것처럼 읽힌다. 기록 자체는 남긴다 —
+   * 어드민 도구 목록에 없는 이름이 호출된 것처럼 읽힌다. 기록 자체는 남긴다 —
    * 무슨 일이 있었는지의 감사 흔적이고 그 안에 다이제스트가 들어 있다.
    *
    * 이름으로 거르지 않는 이유는 문자열이 바뀌면 조용히 깨지기 때문이다.
@@ -255,9 +257,9 @@ export interface ToolCallRecord {
   /**
    * **장면의 어디에서 불렸나** — 이 호출 직전까지 쓰인 본문 줄 수(헤더 포함).
    *
-   * 스킬은 대화 한복판에서 불린다. 그 자리를 모르면 화면은 모든 칩을 턴 맨 앞에
+   * 호출은 대화 한복판에서 불린다. 그 자리를 모르면 화면은 모든 칩을 턴 맨 앞에
    * 몰아 세우고, 감독은 결과를 먼저 본 뒤 장면을 거꾸로 읽는다 — 한 턴에 여러
-   * 스킬이 걸린 장면에서는 어느 대사가 어느 지시였는지도 흐려진다.
+   * 호출이 걸린 장면에서는 어느 대사가 어느 지시였는지도 흐려진다.
    *
    * 줄 수로 세는 이유는 **본문이 저장 전에 손질되기 때문**이다(선수 id → 이름).
    * 글자 수는 그 손질에 밀리지만 줄은 그대로다. 코어가 스스로 밀어 넣은 기록
@@ -266,7 +268,7 @@ export interface ToolCallRecord {
    */
   line?: number;
 }
-/** 채팅 턴 — 도구 호출 기록 포함 (UI가 스킬 칩으로 렌더) */
+/** 채팅 턴 — 도구 호출 기록 포함 (UI가 호출 칩으로 렌더) */
 export interface ChatTurn {
   /**
    * 누가 한 말인가.
@@ -299,7 +301,7 @@ export interface ChatTurn {
   /**
    * 이 턴에 도착한 **스카우팅 보고서** — 채팅이 카드로 편다.
    *
-   * 스카우트 완료는 스킬 호출이 아니라 tick의 사건이라, 다이제스트 한 줄로만
+   * 스카우트 완료는 호출이 아니라 tick의 사건이라, 다이제스트 한 줄로만
    * 남기면 화면에 뜨지 않는다 — 며칠을 기다려 얻은 정보를 보러 선수 검색을
    * 다시 해야 한다.
    */
@@ -307,7 +309,7 @@ export interface ChatTurn {
   /**
    * 이 턴에 도착한 **스카우트 임무 보고** — 조건으로 나간 파견이 데려온 후보 목록.
    *
-   * 보고서(`reports`)와 같은 이유로 턴에 남는다(tick의 사건이라 스킬 칩이 없다).
+   * 보고서(`reports`)와 같은 이유로 턴에 남는다(tick의 사건이라 호출 칩이 없다).
    * 카드의 모양이 아예 달라 같은 배열에 섞지 않는다 — 한쪽은 선수 하나의 16축이고
    * 다른 쪽은 다섯 줄의 목록이다. 옛 세이브엔 없다 (optional).
    */
@@ -847,7 +849,7 @@ export interface GameState {
    * 완료형으로 말한다 — 그래서 사실로 남긴다
    * (→ [docs/data/player.md](../../../../docs/data/player.md) §9.4).
    *
-   * 코어는 자리가 나도 대신 보내지 않는다 — 상태 전이는 스킬 한 경로뿐이다.
+   * 코어는 자리가 나도 대신 보내지 않는다 — 상태 전이는 명령 한 경로뿐이다.
    * 지우는 것은 `scoutingSummary`를 읽는 쪽이 아니라 파견·만료다
    * (`dropDeferredScout`·`pruneDeferredScouts`). 옛 세이브엔 없다
    * (optional — SAVE_VERSION 유지).
@@ -1034,11 +1036,19 @@ export interface GameState {
    */
   characterMemories?: CharacterMemory[];
   /**
+   * 감독이 말로 만든 사건 — `record_incident`가 남긴다
+   * (→ [docs/data/people.md](../../../../docs/data/people.md) §6 「사건 기록」).
+   * 회견 카드와 하루 한도가 읽는다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  incidents?: Incident[];
+  /**
    * 서사 아크 — 기억을 이야기로 엮는 골격 (people.md §9). 개폐는 장부에서
    * 결정적으로 판정한다(`world/arcs.ts`). 옛 세이브엔 없다
    * (optional — SAVE_VERSION 유지).
    */
   arcs?: NarrativeArc[];
+  /** 시작 사건 — 온보딩 판정이 열고 기한이 닫는다 (career.md §1). 옛 세이브엔 없다 */
+  openings?: Opening[];
   /**
    * 지급 일정 표 — 분할로 합의된 이적료·해지 정산금의 미래 회분
    * (transfer.md §5-2). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).

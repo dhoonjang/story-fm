@@ -91,6 +91,7 @@ import { tickMedia } from "../club/media";
 import { tickBoardDemands } from "../club/board-demand";
 import { tickBoardRequests } from "../club/board-request";
 import { tickArcs } from "../world/arcs";
+import { tickOpenings } from "../world/openings";
 import {
   TRAINING_INJURY_PER_SESSION,
   easeProneness,
@@ -124,7 +125,7 @@ import { matchRating } from "../match/ratings";
 import { missionReportLine, scoutReportLine } from "../views/views";
 import { missionLabel, pruneDeferredScouts, pruneWaitingMissions } from "../squad/scouting";
 import { rankMissionCandidates } from "../squad/scout-mission";
-import { grantManagerXP, settleTactics } from "../skills";
+import { grantManagerXP, settleTactics } from "../commands";
 import {
   allMatchesDone,
   declareRetirements,
@@ -582,7 +583,7 @@ function dailyTick(
   driftFamiliarity(state);
 
   // 감독 팀은 기억(`drilled`)만 갱신한다 — **시간은 적응도를 올리지 않는다**
-  // (skills/index.ts의 계약). 상승 경로는 훈련·경기 결산 판정뿐이다.
+  // (commands/index.ts의 계약). 상승 경로는 훈련·경기 결산 판정뿐이다.
   if (managed) settleTactics(state, state.date);
 
   // 휴식은 소화할 것이 없다 — 지나갔다는 표시만 남긴다
@@ -992,6 +993,8 @@ function dailyTick(
    * 불만·부상·연속 기록·협상이 다 움직인 뒤라야 오늘의 장부로 판정한다.
    */
   tickArcs(state, digest);
+  // 시작 사건은 기한이 닫는다 — 첫 몇 주가 지나면 이야기는 아크가 잇는다 (career.md §1)
+  tickOpenings(state, digest);
 
   // 이적창 개장·폐장 안내
   for (const entry of todays) {

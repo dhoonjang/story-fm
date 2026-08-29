@@ -68,7 +68,7 @@ packages/
                    #   core/(state, save, tick, dates, rng) world/(catalog, generation, wages)
                    #   competition/(calendar, league, cup, europe) match/(match flow, quick sim)
                    #   squad/(form, morale, injury, training, scouting) market/(transfers, negotiation)
-                   #   club/(finance, press) skills/(manager instructions) views/(screens, queries)
+                   #   club/(finance, press) commands/(manager instructions) views/(screens, queries)
                    #   data/(catalog, seed)
   agents/          # GM orchestrator · commentary · summary writers · mock GM
   llm/             # provider-neutral GameLLM + Anthropic/Gemini/OpenAI adapters
@@ -113,6 +113,11 @@ e2e/               # Playwright specs — onboarding · game · admin · turn er
   folder that owns it. `packages/engine` re-exports what it moved down, so
   core-side callers do not move. Two copies of one formula do not diverge
   loudly; they diverge on the day someone tunes one of them.
+- **"Skill" names only what the LLM calls directly.** A tool in a GM's catalog is a
+  skill; the JSON shape an agent returns is its **output schema**; the deterministic
+  function the core invokes from that JSON is a **core command**
+  (`packages/engine/src/commands/`). Mixing the three makes the docs read as if an
+  interpreter agent held tools of its own (→ [docs/overview.md](./docs/overview.md) §0).
 - kebab-case files and directories, PascalCase types and components, camelCase
   values and functions.
 - Give numbers and formulas names — balance tuning should only need to read that
