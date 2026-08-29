@@ -36,6 +36,9 @@ import {
   clampJudgedAttributes,
   seedOpenings,
   tickOpenings,
+  touchOpenings,
+  activeOpenings,
+  describeOpenings,
   ATTRIBUTE_JUDGE_BAND,
   ATTRIBUTE_SUM_BAND,
   MAX_OPENINGS,
@@ -1007,8 +1010,16 @@ describe("온보딩 판정 — 능력치의 결과 시작 사건 (career.md §1)
     expect(new Set(Object.values(up)).size).toBe(1);
   });
 
+  /**
+   * 한 세계를 두 케이스가 나눠 쓴다 — 여는 것도 닫는 것도 세계가 아니라 목록의 일이라
+   * 케이스마다 `seedOpenings`가 목록을 새로 앉히고 날짜를 부임일로 되돌린다.
+   */
+  const openingsGame = createTestGame();
+  const openedOn = openingsGame.date;
+
   it("시작 사건은 셋까지, 실재하는 사람에게만, 기한은 코어가 박고 지나면 닫힌다", () => {
-    const state = createTestGame();
+    const state = openingsGame;
+    state.date = openedOn;
     const ours = state.players.find((p) => p.teamId === state.userTeamId)!;
     const seeded = seedOpenings(state, [
       { kind: "press", title: "낙하산", line: "지역지가 연줄을 물었다" },
@@ -1027,5 +1038,46 @@ describe("온보딩 판정 — 능력치의 결과 시작 사건 (career.md §1)
     tickOpenings(state, digest);
     expect(state.openings!.every((o) => o.resolvedOn !== null)).toBe(true);
     expect(digest).toHaveLength(MAX_OPENINGS);
+    expect(state.openings!.every((o) => o.resolvedBy === "expired")).toBe(true);
+  });
+
+  /**
+   * **닫는 것은 장부의 사실이다** (career.md §1). 재는 것은 상태 전이 넷이다: 사람이
+   * 가르는 자리, 갈래가 가르는 자리, 닫힌 실마리가 기한에 다시 서지 않는 것, 그리고
+   * 두 사유가 서로 다른 통으로 가는 것.
+   */
+  it("감독이 한 일이 닫는다 — 걸린 사람이 있으면 사람이, 없으면 갈래가 가른다", () => {
+    const state = openingsGame;
+    state.date = openedOn;
+    const ours = state.players.find((p) => p.teamId === state.userTeamId)!;
+    seedOpenings(state, [
+      { kind: "press", title: "낙하산", line: "지역지가 연줄을 물었다" },
+      { kind: "dressing-room", title: "주장의 시선", line: "새 감독을 잰다", subjectId: ours.id },
+      { kind: "personal", title: "빚", line: "부임 전의 빚" },
+    ]);
+
+    // 선수단 전체에 한 말은 그 선수에게 걸린 실마리를 닫지 못한다
+    expect(touchOpenings(state, { kinds: ["dressing-room"] })).toBe(0);
+    // 그 사람과 있었던 일이 닫는다 — 갈래가 무엇이든
+    expect(touchOpenings(state, { subjectIds: [ours.id] })).toBe(1);
+    const captain = state.openings!.find((o) => o.title === "주장의 시선")!;
+    expect(captain.resolvedOn).toBe(state.date);
+    expect(captain.resolvedBy).toBe("handled");
+    expect(describeOpenings(state)).not.toContain("주장의 시선");
+
+    // 걸린 사람이 없는 실마리는 갈래가 닫고, 다른 갈래는 그대로 선다
+    expect(touchOpenings(state, { kinds: ["press"] })).toBe(1);
+    expect(activeOpenings(state).map((o) => o.title)).toEqual(["빚"]);
+
+    // 해결로 닫힌 것은 기한이 지나도 다시 닫히지 않는다 — 일지에 서는 것은 손대지 않은 하나뿐
+    state.date = addDays(state.date, OPENING_DAYS + 1);
+    const digest: string[] = [];
+    tickOpenings(state, digest);
+    expect(digest).toHaveLength(1);
+    expect(state.openings!.map((o) => o.resolvedBy)).toEqual(["handled", "handled", "expired"]);
+
+    // 두 사유는 다른 통으로 간다 — 해결은 서사 기억으로, 만료는 그날의 다이제스트로
+    expect(state.narrative.filter((n) => n.text.startsWith("주장의 시선"))).toHaveLength(1);
+    expect(digest.every((d) => !d.startsWith("주장의 시선"))).toBe(true);
   });
 });
