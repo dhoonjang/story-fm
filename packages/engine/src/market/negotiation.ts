@@ -3705,7 +3705,9 @@ export function describeNegotiations(state: GameState): string {
       const bids = competingBidsOn(state, n.gamePlayerId).length;
       const marks =
         (deadline === null ? "" : ` · 상대가 건 기한 ${deadline}`) +
-        (bids === 0 ? "" : ` · 경쟁 입찰 ${bids}건`);
+        (bids === 0 ? "" : ` · 경쟁 입찰 ${bids}건`) +
+        // 앉은 협상은 인내가 판의 사실이다 (transfer.md §12-2)
+        (n.table ? ` · 테이블 인내 ${n.table.patience}/${n.table.patienceMax}` : "");
       if (n.status === "agreed") {
         const medical = describeMedical(state, n);
         return `${n.id} ${who} ${direction}${marks} — 합의됨, ${medical ?? "확정 대기"}`;

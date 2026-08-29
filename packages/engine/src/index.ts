@@ -110,6 +110,7 @@ export * from "./market/interest";
 export * from "./market/negotiation";
 export * from "./market/counter-bounds";
 export * from "./market/counterparty";
+export * from "./market/table";
 export * from "./market/clauses";
 export * from "./market/ai-market";
 export * from "./market/medical";

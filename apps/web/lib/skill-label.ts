@@ -16,6 +16,7 @@ export const SKILL_LABEL: Record<string, string> = {
   apply_manager_job: "감독직 지원",
   apply_tactics: "전술 지시",
   rule_offer_response: "상대의 답",
+  speak_at_table: "테이블",
   set_lineup: "라인업",
   set_squad_level: "1·2군 이동",
   set_captain: "완장 지정",

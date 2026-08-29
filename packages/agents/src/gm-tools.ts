@@ -12,7 +12,6 @@ import {
   applyForManagerJob,
   answerOffer,
   arrivedResponses,
-  RENEWAL_YEARS_MAX,
   counterpartyAnchor,
   settleCounterparty,
   applyFinanceEvent,
@@ -98,6 +97,8 @@ import {
   type CardMark,
   type GameState,
   type GoalMark,
+  sitAtTable,
+  settleTableReply,
 } from "@story-fm/engine";
 import {
   ATTRIBUTE_AXES,
@@ -123,11 +124,14 @@ import {
   TACKLING_LEVELS,
   TEAM_TALK_OCCASIONS,
   TRANSITION_MODES,
+  TABLE_LINE_MAX,
 } from "@story-fm/domain";
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
 
 import { skillDescriptions } from "./skill-descriptions";
 import { runMatchIntent } from "./match-intent";
+import { runTableReply } from "./negotiation-table";
+import { CounterpartyRulingSchema, MONEY_MAX, WAGE_MAX, money } from "./ruling-schema";
 import { applyMatchIntent } from "./match-intent-apply";
 import { inputError, toToolSchema } from "./tool-schema";
 import { recordCall, type GmToolCall, type SkillReturn } from "./gm-types";
@@ -172,13 +176,8 @@ const playerRef = z.string().min(1);
 const dateArg = DateString;
 /** 나이 조건이 설 수 있는 폭 — 검색과 임무가 같은 자를 쓴다 (records.ts) */
 const ageArg = z.number().int().min(SEARCH_MIN_AGE).max(SEARCH_MAX_AGE);
-/** 이적료·호가의 상한 — 한 건이 이보다 크면 협상이 아니라 오타다 */
-const MONEY_MAX = 500_000_000;
-/** 주급의 상한 */
-const WAGE_MAX = 2_000_000;
 /** 표 한 장 값의 상한 — 이보다 비싸면 값이 아니라 오타다 (실제 폭은 코어가 자른다) */
 const TICKET_PRICE_MAX = 1_000;
-const money = (max: number) => z.number().int().min(0).max(max);
 /** 장부 한 줄에 남는 자유 문구 */
 const LEDGER_NOTE = 120;
 /** 시즌 번호의 상한 — 한 세이브가 이보다 오래 가지 않는다. 오타를 막는 자리다 */
@@ -189,53 +188,6 @@ const SEASON_MAX = 200;
  * 실제로 내주는 날 수는 원형의 여유가 정한다 (career.md §5.2 「흥정」).
  */
 const COUNTER_DAYS_MAX = 120;
-
-/** 상대가 감독에게 남기는 한 줄의 상한 — 장부와 카드에 그대로 남는다 */
-const COUNTERPARTY_NOTE_MAX = 200;
-
-/**
- * GM이 내는 판정 — **여기에 이번 협상의 숫자를 적지 않는다.** 도구 정의는 고정층이라
- * 값이 들어가면 협상마다 캐시 프리픽스가 깨진다 — 구간도 앵커도 서류가 싣는다 (agents.md §5).
- */
-export const CounterpartyRulingSchema = z.object({
-  negotiationId: z.string().min(1).describe("<counterparty id>의 id 그대로"),
-  verdict: z.enum(["accept", "counter", "reject"]).describe("고를 수 있는 판정은 서류가 적는다"),
-  fee: money(MONEY_MAX)
-    .optional()
-    .describe("조정에서 상대가 부르는 이적료·임대료·정산금. 서류의 구간 안에서"),
-  weeklyWage: money(WAGE_MAX)
-    .optional()
-    .describe("조정에서 상대가 부르는 주급. 서류의 구간 안에서"),
-  contractYears: z
-    .number()
-    .int()
-    .min(1)
-    .max(RENEWAL_YEARS_MAX)
-    .optional()
-    .describe("재계약 조정에서 선수가 원하는 계약 연수. 서류의 구간 안에서"),
-  squadStatus: z
-    .enum(SQUAD_STATUSES)
-    .optional()
-    .describe("재계약·영입 조정에서 선수가 원하는 계약 지위. 서류의 구간 안에서"),
-  paymentYears: z
-    .number()
-    .int()
-    .min(1)
-    .max(MAX_PAYMENT_YEARS)
-    .optional()
-    .describe("같은 금액을 나눠 받겠다면 그 연수 — 나눌 수 있는 갈래에서만 뜻이 있다"),
-  ultimatum: z
-    .boolean()
-    .optional()
-    .describe("서류에 기한이 적힌 조정에서, 그 기한을 걸 것인가. 비우면 건다"),
-  note: z
-    .string()
-    .min(1)
-    .max(COUNTERPARTY_NOTE_MAX)
-    .optional()
-    .describe("상대가 감독에게 전하는 한 줄"),
-});
-export type CounterpartyRulingArgs = z.infer<typeof CounterpartyRulingSchema>;
 
 /** 정착 무게 인자 — 코어가 앵커 ±EVENT_BAND로 자른다 (settling.ts) */
 const settlingArg = (kind: "talk" | "team_talk") =>
@@ -1537,5 +1489,39 @@ export function buildGmTools(
       };
     },
   };
-  return [...visible, tactics];
+  /**
+   * **테이블** — 감독의 말 하나에 상대의 답 하나 (agents.md §4-1 · transfer.md §12-2).
+   * 도구 뒤에서 교섭 상대 호출이 돌고, 그 답은 코어가 앵커 ± 한도로 잘라 장부에 남긴다.
+   * 호출이 실패하면 상대는 말없이 서류대로 움직인다 — 협상은 멈추지 않는다.
+   */
+  const table: GameToolSpec = {
+    name: "speak_at_table",
+    description: descriptions.speak_at_table,
+    inputSchema: toToolSchema(TableLineArgsSchema),
+    async handle(input: unknown, context?: ToolCallContext) {
+      const parsed = TableLineArgsSchema.safeParse(input);
+      if (!parsed.success) return inputError(parsed.error);
+      if (state.dismissal) {
+        return {
+          ok: false,
+          message: `${state.manager.name} 감독은 지금 맡은 팀이 없습니다 — 부임한 뒤에 할 수 있는 일입니다`,
+        };
+      }
+      const seated = sitAtTable(state, parsed.data.negotiationId, parsed.data.line);
+      if (!seated.ok) return seated;
+      const reply = await runTableReply(state, seated.seat, parsed.data.line);
+      const outcome = settleTableReply(state, seated.seat, reply ?? undefined);
+      return recordCall(calls, "speak_at_table", outcome, {
+        input: parsed.data,
+        ...(context ? { line: writtenLines(context.text) } : {}),
+      });
+    },
+  };
+  return [...visible, tactics, table];
 }
+
+/** 테이블에 건네는 감독의 말 — 원문 그대로다 */
+const TableLineArgsSchema = z.object({
+  negotiationId: z.string().min(1).describe("list_negotiations의 id"),
+  line: z.string().min(1).max(TABLE_LINE_MAX).describe("감독의 말 원문"),
+});

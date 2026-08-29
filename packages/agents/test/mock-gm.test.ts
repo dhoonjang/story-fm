@@ -23,6 +23,8 @@ import {
   tierOfTeamIn,
   type GameState,
   userPlayers,
+  sitAtTable,
+  settleTableReply,
 } from "@story-fm/engine";
 import {
   TIME_PASSED,
@@ -30,6 +32,7 @@ import {
   buildGmTools,
   buildOnboardingTurn,
   runMockGmTurn,
+  buildTableInput,
 } from "@story-fm/agents";
 
 function build(seed: number): GameState {
@@ -485,5 +488,58 @@ describe("mock GM — 재직 중의 거취", () => {
     const knocked = runMockGmTurn(state, `${teamName(vacant.id)} 감독직에 지원하자`);
     expect(knocked.toolCalls.map((c) => c.name)).toContain("apply_manager_job");
     expect(state.manager.reputation.board).toBe(board - KNOCK_BOARD_HIT);
+  });
+});
+
+describe("테이블 — 건너편은 메인 채팅을 읽지 않는다 (agents.md §4-1)", () => {
+  it("입력은 서류·상황·대화·앵커 순이고, 감독이 다른 데서 한 말은 없다", () => {
+    const state = newGame();
+    const player = playersOf(state, state.userTeamId)[0]!;
+    activeContract(state, player.id)!.until = addDays(state.date, 120);
+    const opened = openRenewal(state, {
+      playerId: player.id,
+      weeklyWage: Math.round(renewalExpectation(state, player) * 0.8),
+      years: 3,
+    });
+    expect(opened.ok, opened.message).toBe(true);
+    const renewal = state.negotiations.find((n) => n.kind === "renew")!;
+    // 오퍼 없이 말만 오가는 자리 — 판정이 협상을 닫지 않는다
+    renewal.rounds.pop();
+    // 감독이 이사회에 한 말 — 테이블 건너편이 알아서는 안 되는 문장
+    const secret = "사실 예산은 두 배까지 열려 있습니다";
+    state.chat.push({ role: "user", text: secret, toolCalls: [], at: state.date });
+
+    const first = sitAtTable(state, renewal.id, "남아 주면 좋겠습니다");
+    if (!first.ok) throw new Error(first.message);
+    settleTableReply(state, first.seat, {
+      line: "조건을 들어 보고요.",
+      stance: "steady",
+      // 장부 줄이 서는 답 — 말투가 인내를 깎은 사실이 대화 사이에 남는다
+      heard: { tone: "hostile", claims: [] },
+    });
+    const second = sitAtTable(state, renewal.id, "주급은 그대로, 연수는 4년");
+    if (!second.ok) throw new Error(second.message);
+    const input = buildTableInput(state, second.seat, player.name, "주급은 그대로, 연수는 4년")!;
+    const order = [
+      "<counterparty",
+      "<situation",
+      "<table_log>",
+      "<anchor>",
+      "@감독: 주급은 그대로",
+    ];
+    const positions = order.map((tag) => input.indexOf(tag));
+    expect(
+      positions.every((p) => p >= 0),
+      input,
+    ).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    expect(input).not.toContain(secret);
+    // 지난 답과 장부 줄은 대화에 서고, 이번 말은 대화에 없다
+    expect(input).toContain("조건을 들어 보고요.");
+    expect(input).toContain("[장부]");
+    expect(input).toContain("남은 인내");
+    expect(input.indexOf("주급은 그대로, 연수는 4년")).toBe(
+      input.lastIndexOf("주급은 그대로, 연수는 4년"),
+    );
   });
 });

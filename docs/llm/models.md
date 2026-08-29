@@ -17,6 +17,7 @@ agents:
   match-intent:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 16000, timeout_ms: 60000,  thinking_level: minimal }
   match-gm:      { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000, thinking_level: minimal }
   finalize-match:{ provider: google, model: gemini-3.6-flash,      max_tokens: 16000, timeout_ms: 90000,  thinking_level: minimal }
+  negotiation-table: { provider: google, model: gemini-3.6-flash,  max_tokens: 8000,  timeout_ms: 60000,  thinking_level: minimal }
   training-rater:{ provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
   history-compactor: { provider: google, model: gemini-3.6-flash,      max_tokens: 8000,  timeout_ms: 60000,  thinking_level: minimal }
   onboarding-judge:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 4000,  timeout_ms: 30000,  thinking_level: minimal }
@@ -28,6 +29,7 @@ agents:
 | `match-intent`      | 경기 중 감독의 말 → 의도                 | 16,000    | 60초  |
 | `match-gm`          | 경기 중계 · 벤치 대화 · 도구로 경기 진행 | 64,000    | 180초 |
 | `finalize-match`    | 끝난 경기의 결산 · 마무리 중계           | 16,000    | 90초  |
+| `negotiation-table` | 협상 테이블 건너편 — 감독의 말에 답 하나 | 8,000     | 60초  |
 | `training-rater`    | 훈련 결산                                | 8,000     | 30초  |
 | `history-compactor` | 밀려난 평시 이력 → 요약 한 벌            | 8,000     | 60초  |
 | `onboarding-judge`  | 새 게임의 배경 → 시작 지갑               | 4,000     | 30초  |

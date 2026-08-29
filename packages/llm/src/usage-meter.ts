@@ -28,6 +28,8 @@ const SKIPPABLE_AGENTS: ReadonlySet<AgentName> = new Set<AgentName>([
   "training-rater",
   // 경기 마감도 같은 계약이다 — 건너뛰면 앵커가 평점이고 마무리는 매치 GM이 쓴다 (agents.md §3)
   "finalize-match",
+  // 테이블의 답도 같은 계약이다 — 건너뛰면 상대는 말없이 앵커대로 움직인다 (agents.md §4-1)
+  "negotiation-table",
   "history-compactor",
   // 온보딩 판정도 같은 계약이다 — 건너뛰면 앵커가 그대로 시작 지갑이 된다 (agents.md §4-2)
   "onboarding-judge",

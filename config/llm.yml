@@ -53,6 +53,16 @@ agents:
     timeout_ms: 90000
     thinking_level: minimal
 
+  # 협상 테이블 건너편 — GM의 도구 뒤에서 감독의 말 하나에 상대의 답 하나를 낸다
+  # (docs/llm/agents.md §4-1). 서류·주변 상황·테이블의 대화 전부를 읽고 인물로 말하므로
+  # 싼 자리로 보내지 않는다. 실패하면 앵커가 그대로 판정이라 시한은 짧다.
+  negotiation-table:
+    provider: google
+    model: gemini-3.6-flash
+    max_tokens: 8000
+    timeout_ms: 60000
+    thinking_level: minimal
+
   training-rater:
     provider: google
     model: gemini-3.5-flash-lite

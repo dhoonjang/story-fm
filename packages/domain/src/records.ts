@@ -802,6 +802,53 @@ export const MedicalSchema = z.object({
 });
 export type Medical = z.infer<typeof MedicalSchema>;
 
+/** 테이블의 한 줄에 쓸 수 있는 글자 — 감독의 말도 상대의 답도 이 안이다 */
+export const TABLE_LINE_MAX = 600;
+/**
+ * 상대의 태도 — **서사의 눈금이지 장부가 아니다** (transfer.md §12-2). 일어나는 것은
+ * 인내가 바닥났을 때 코어가 정하고, 모델의 `leaving`은 그때만 선다.
+ */
+export const TABLE_STANCES = ["warming", "steady", "cooling", "leaving"] as const;
+export const TableStanceSchema = z.enum(TABLE_STANCES);
+export type TableStance = z.infer<typeof TableStanceSchema>;
+export const TABLE_STANCE_KO: Record<TableStance, string> = {
+  warming: "누그러진다",
+  steady: "그대로다",
+  cooling: "굳는다",
+  leaving: "일어서려 한다",
+};
+
+/**
+ * 테이블의 한 줄 — 감독의 말(`us`) · 상대의 답(`them`) · 코어가 적은 사실(`ledger`).
+ * 장부 줄이 대화 사이에 서는 이유: 논거가 사실이었는지, 판정이 무엇으로 굳었는지는
+ * 다음 답을 쓰는 쪽이 알아야 한다 — 대사에 묻히면 상대가 자기 답을 모른다.
+ */
+export const TableLineSchema = z.object({
+  date: DateString,
+  by: z.enum(["us", "them", "ledger"]),
+  text: z.string().min(1).max(TABLE_LINE_MAX),
+  /** 상대의 답에만 — 그 줄을 말한 태도 */
+  stance: TableStanceSchema.optional(),
+});
+export type TableLine = z.infer<typeof TableLineSchema>;
+
+/**
+ * **테이블** — 협상 위에 서는 마주 앉은 대화 (transfer.md §12-2).
+ *
+ * 오퍼와 답(`rounds`)은 그대로 협상의 것이고, 테이블은 그 사이의 말과 **인내**를 든다.
+ * 인내는 되돌아오지 않는다 — 협상이 사는 동안 한 자리에서 깎이고, 0이면 상대가
+ * 일어나 협상은 이번 창에서 결렬이다.
+ */
+export const NegotiationTableSchema = z.object({
+  openedOn: DateString,
+  /** 남은 인내 — 0이면 상대가 일어난다 */
+  patience: z.number().int().min(0),
+  /** 앉을 때의 인내 — 대리인 원형이 정한다 (`tablePatienceOf`) */
+  patienceMax: z.number().int().min(1),
+  lines: z.array(TableLineSchema),
+});
+export type NegotiationTable = z.infer<typeof NegotiationTableSchema>;
+
 export const NegotiationSchema = z.object({
   id: z.string().min(1),
   gamePlayerId: z.string().min(1),
@@ -834,6 +881,8 @@ export const NegotiationSchema = z.object({
    * 중간부터 다른 갈래가 된다. 구 세이브엔 없어 optional.
    */
   precontract: z.boolean().optional(),
+  /** 마주 앉은 대화 — 앉은 협상에만 선다 (transfer.md §12-2). 옛 세이브엔 없다 */
+  table: NegotiationTableSchema.optional(),
 });
 export type Negotiation = z.infer<typeof NegotiationSchema>;
 

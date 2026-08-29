@@ -80,9 +80,15 @@ export function describeAnchor(anchor: CounterpartyAnchor): string {
  * `<counterparty>` 블록 — 답이 도착한 협상 하나의 서류. 이번 턴 층에 선다 (agents.md §5).
  * 답할 자리가 아니면(앵커가 없으면) `null`.
  */
-export function buildCounterpartyBlock(state: GameState, negotiation: Negotiation): string | null {
+export function buildCounterpartyBlock(
+  state: GameState,
+  negotiation: Negotiation,
+  /** 앵커를 함께 실을지 — 테이블은 앵커를 대화 뒤에 따로 세운다 (negotiation-table.ts) */
+  options: { withAnchor?: boolean } = {},
+): string | null {
+  const withAnchor = options.withAnchor ?? true;
   const anchor = counterpartyAnchor(state, negotiation);
-  if (!anchor) return null;
+  if (withAnchor && !anchor) return null;
   const brief = buildCounterpartyBrief(state, negotiation);
   if (!brief) return null;
   // 데이터 블록은 영어 태그로 싼다 (prompts.md §5) — 서류의 줄 안 레이블은 그대로다
@@ -101,7 +107,7 @@ export function buildCounterpartyBlock(state: GameState, negotiation: Negotiatio
     ...brief.dossier,
     `</dossier>`,
     ...(cards !== null ? [cards] : []),
-    describeAnchor(brief.anchor),
+    ...(withAnchor && brief.anchor ? [describeAnchor(brief.anchor)] : []),
     `</counterparty>`,
   ].join("\n");
 }

@@ -18,6 +18,7 @@ const AGENT_YAML = `  gm: &agent
     timeout_ms: 1000
   match-intent: *agent
   finalize-match: *agent
+  negotiation-table: *agent
   match-gm: *agent
   training-rater: *agent
   history-compactor: *agent
@@ -77,6 +78,11 @@ describe("에이전트별 LLM 설정", () => {
     model: gemini-final
     max_tokens: 250
     timeout_ms: 2500
+  negotiation-table:
+    provider: google
+    model: gemini-table
+    max_tokens: 250
+    timeout_ms: 2500
   training-rater:
     provider: anthropic
     model: claude-training
@@ -121,6 +127,7 @@ describe("에이전트별 LLM 설정", () => {
     timeout_ms: 1000
   match-intent: *google
   finalize-match: *google
+  negotiation-table: *google
   match-gm: *google
   training-rater: *google
   history-compactor: *google
@@ -138,6 +145,7 @@ describe("에이전트별 LLM 설정", () => {
     timeout_ms: 1000${extra}
   match-intent: *agent
   finalize-match: *agent
+  negotiation-table: *agent
   match-gm: *agent
   training-rater: *agent
   history-compactor: *agent

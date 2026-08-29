@@ -118,7 +118,7 @@
 
 ## 2. 스킬 표면 — 한 판단은 한 도구
 
-도구는 **49개**이고 **전부 평시 GM의 것**이다. 판을 세우는 여덟(라인업·1·2군·6축·개인
+도구는 **50개**이고 **전부 평시 GM의 것**이다. 판을 세우는 여덟(라인업·1·2군·6축·개인
 지시·세트피스 둘·지역 플랜·공략)은 GM에게 `apply_tactics` 하나로 보이고, 코어 스킬은
 그 도구 뒤의 해석이 부른다(agents.md §1). 경기 중에는 매치 GM이 **경기 도구 셋**
 (`apply_orders` · `advance_match` · `finalize_match`)만 쥔다 — 지시는 그 도구 뒤의
@@ -136,20 +136,20 @@
 | 진행      | 5   | `start_match` · `accept_manager_offer` · `counter_manager_offer` · `apply_manager_job` · `resign`                                                                                                                                                                                                                                 |
 | 전술·훈련 | 8   | `apply_tactics`(→ 해석이 `set_lineup` · `set_squad_level` · `set_tactics` · `set_player_tactic` · `set_set_piece_takers` · `set_set_piece_routine` · `set_match_plan` · `exploit_point`로) · `set_captain` · `set_squad_number` · `set_training` · `set_development_focus` · `set_mentor` · `set_reserve_training` · `sign_youth` |
 | 대화·서사 | 5   | `team_talk` · `talk_to_player` · `respond_to_media` · `respond_to_approach` · `record_incident`                                                                                                                                                                                                                                   |
-| 이적      | 14  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `rule_offer_response` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `respond_transfer_request` · `withdraw_offer` · `release_player` · `recall_loan` · `exercise_buyback`                                                        |
+| 이적      | 15  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `rule_offer_response` · `speak_at_table` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `respond_transfer_request` · `withdraw_offer` · `release_player` · `recall_loan` · `exercise_buyback`                                     |
 | 재정      | 6   | `apply_finance_event` · `adjust_transfer_budget` · `request_board` · `set_ticket_price` · `fund_transfer_budget` · `pay_player_bonus`                                                                                                                                                                                             |
 | 조회      | 11  | `search_players` · `get_squad` · `get_team` · `get_league` · `get_match_report` · `get_opponent_report` · `get_career` · `get_history` · `get_finance` · `scout_player` · `scout_mission`                                                                                                                                         |
 
 ### 계약은 넷으로 갈린다
 
-| 유형   | 계약                                                                                                                                                                                 |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 진행형 | 시계를 움직인다 — **경기 시계는 지시 해석의 진행 의도로 코어가 밀고**, 날짜는 장면 헤더다                                                                                            |
-| 설정형 | 검증 후 그대로 기록 — 라인업·전술·훈련·이적 리스트                                                                                                                                   |
-| 판정형 | LLM이 `{outcome, intensity}`·`stance`를 판정, **변화량은 코어 공식** — outcome은 코어의 수용성 앵커 ± 한 단계 안에서만 선다 ([../simulation/career.md](../simulation/career.md) §2)  |
-| 거래형 | 상대의 판정도 GM이 상대가 되어 내되(`rule_offer_response`), 확률 앵커·한도는 코어 ([../simulation/transfer.md](../simulation/transfer.md) §12-1)                                     |
-| 전술형 | `apply_tactics` — 감독의 말 원문을 넘기면 도구 뒤의 해석이 `MatchIntent`로 옮기고 코어가 스킬로 적용 (agents.md §1)                                                                  |
-| 사건형 | `record_incident` — 코어 밖의 사건(벌금·포상·병문안·공개 칭찬과 질책·사과·중재·규칙·회식)을 **효과의 모양**으로 받고, 효과표·한도는 코어 ([../data/people.md](../data/people.md) §6) |
+| 유형   | 계약                                                                                                                                                                                                            |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 진행형 | 시계를 움직인다 — **경기 시계는 지시 해석의 진행 의도로 코어가 밀고**, 날짜는 장면 헤더다                                                                                                                       |
+| 설정형 | 검증 후 그대로 기록 — 라인업·전술·훈련·이적 리스트                                                                                                                                                              |
+| 판정형 | LLM이 `{outcome, intensity}`·`stance`를 판정, **변화량은 코어 공식** — outcome은 코어의 수용성 앵커 ± 한 단계 안에서만 선다 ([../simulation/career.md](../simulation/career.md) §2)                             |
+| 거래형 | 상대의 판정도 GM이 상대가 되어 내되(`rule_offer_response`), 확률 앵커·한도는 코어 ([../simulation/transfer.md](../simulation/transfer.md) §12-1) · 마주 앉은 답은 도구 뒤의 별도 호출(`speak_at_table` — §12-2) |
+| 전술형 | `apply_tactics` — 감독의 말 원문을 넘기면 도구 뒤의 해석이 `MatchIntent`로 옮기고 코어가 스킬로 적용 (agents.md §1)                                                                                             |
+| 사건형 | `record_incident` — 코어 밖의 사건(벌금·포상·병문안·공개 칭찬과 질책·사과·중재·규칙·회식)을 **효과의 모양**으로 받고, 효과표·한도는 코어 ([../data/people.md](../data/people.md) §6)                            |
 
 - **심경 한 줄은 판정형·사건형이 함께 남긴다** — `talk_to_player.mood` · `team_talk.moods` ·
   `respond_to_media.mood` · `respond_to_approach.mood` · `record_incident.moods`. 그 대화를

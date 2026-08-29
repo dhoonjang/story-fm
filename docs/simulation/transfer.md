@@ -1368,19 +1368,49 @@ tick이 매일 시장을 굴린다 — 1부 클럽당 시즌 이적 3.4건 · �
 - 서류에는 **경쟁 입찰**(§1-2)도 실린다. 「다른 구단이 있다」는 상대의 말은 그 줄이
   섰을 때만 사실이다.
 
+## 12-2. 테이블 — 마주 앉으면 그 자리에서 답한다 (`market/table.ts`)
+
+편지로 보낸 오퍼는 며칠 뒤에 답이 온다(§12-1). **테이블**은 그 협상 위에 마주 앉는
+자리다 — 감독이 상대에게 직접 말을 건네면(`speak_at_table`) 상대가 그 자리에서 답하고,
+그 답을 쓰는 것은 GM이 아니라 **메인 채팅을 읽지 않는 별도 호출**이다
+(→ [../llm/agents.md](../llm/agents.md) §4-1). 상대는 감독이 이사회나 라커룸에 한 말을
+모른다. 그래서 감독이 캐낼 것과 숨길 것이 생긴다.
+
+- **테이블은 협상 위에 선다.** 협상이 없으면 앉을 수 없다 — 먼저 오퍼나 재계약을 연다.
+  첫 말에 세워지고(`sitAtTable`), 협상이 사는 동안 하나다. 오퍼와 답은 그대로 협상의
+  라운드이고, 테이블이 더하는 것은 그 사이의 **말**(`lines` — 감독·상대·장부)과 **인내**다.
+- **답을 기다리던 오퍼는 오늘로 당겨진다.** 마주 앉은 자리에서 "답은 나흘 뒤"는 없다 —
+  앉는 순간 `respondsOn`이 오늘이 되고, 이어지는 답이 같은 턴에 판정한다. 판정은 §12-1의
+  앵커 ± 한도 그대로다(`settleCounterparty`). 조건 없는 말만 건네면 판정 없이 말만 오간다.
+- **인내는 되돌아오지 않는 자원이다.** 앉을 때 `TABLE_PATIENCE_BASE`(4)에 대리인 원형의
+  `patience`(§3)를 곱한 값(법률가형 5 · 제국형 4 · 승부사형 3, 하한 2)으로 시작해,
+  모욕·협박(`hostile`)에 한 칸, 사실과 다른 논거에 한 칸 깎이고, **새로 확인된 논거**에 한
+  칸 돌아온다(상한은 시작값). 0이면 상대가 일어나 협상은 **결렬**(`rejected`)이다 —
+  기한을 건 쪽이 문을 닫은 것과 같은 결이라 이번 창에서 다시 열 수 없다.
+- **논거는 다음 답부터 문을 연다.** 상대는 논거를 듣기 전의 앵커를 보고 말했으므로, 이번
+  답의 판정은 그 앵커로 자르고 확인된 논거는 협상의 `pitched`에 쌓여 다음 답의 문턱을
+  내린다(§4). 사실 대조는 오퍼에 실린 논거와 같은 함수다(`evaluatePitch`).
+- **태도는 서사의 눈금이다.** 상대의 `stance`(누그러진다·그대로·굳는다·일어서려 한다)는
+  줄에 남지만 장부를 움직이지 않는다 — 일어나는 것은 인내가 정하고, 인내가 남아 있는데
+  모델이 `leaving`을 내면 `cooling`으로 내려간다.
+- **호출이 실패해도 협상은 멈추지 않는다.** 상대는 말없이 서류대로 움직인다 — 앵커가
+  그대로 판정이고, 그 사실이 장부 줄로 남는다.
+- **mock 모드의 GM은 테이블에 앉지 않는다** — 그 자리에는 편지(§12-1)만 있다.
+
 ## 코드 위치
 
-| 무엇                         | 어디                                                                      |
-| ---------------------------- | ------------------------------------------------------------------------- |
-| 시장가·딜 확률·근거          | `packages/engine/src/market/market.ts`                                    |
-| 협상·오퍼·재계약·메디컬 실행 | `market/negotiation.ts` · `market/medical.ts`                             |
-| 조정 범위 (검증·클램프 공용) | `market/counter-bounds.ts`                                                |
-| 교섭 상대 앵커·한도          | `market/counterparty.ts` (+ `agents/src/counterparty-brief.ts`)           |
-| 조건부 조항(셀온·되사기)     | `market/clauses.ts` (+ `domain/records.ts`의 눈금)                        |
-| 설득                         | `market/persuasion.ts` (+ `domain/persuasion.ts`)                         |
-| 관심 사다리                  | `market/interest.ts` (읽는 자는 `core/state.ts`)                          |
-| 에이전트 원형 → 시장 프로필  | `market/agent-profile.ts` (원형 키는 `domain/persona.ts`)                 |
-| AI 시장·무소속·계약 해지     | `market/ai-market.ts` · `market/departures.ts`                            |
-| 감독 시장·유저 경질          | `market/manager-market.ts`                                                |
-| 주급                         | `packages/engine/src/world/wages.ts`                                      |
-| 등록 명단                    | `packages/domain/src/squad-rules.ts` · `engine/src/squad/registration.ts` |
+| 무엇                         | 어디                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------ |
+| 시장가·딜 확률·근거          | `packages/engine/src/market/market.ts`                                         |
+| 협상·오퍼·재계약·메디컬 실행 | `market/negotiation.ts` · `market/medical.ts`                                  |
+| 조정 범위 (검증·클램프 공용) | `market/counter-bounds.ts`                                                     |
+| 교섭 상대 앵커·한도          | `market/counterparty.ts` (+ `agents/src/counterparty-brief.ts`)                |
+| 테이블 — 인내·줄·판정 반영   | `market/table.ts` (+ `agents/src/negotiation-table.ts` · `table-situation.ts`) |
+| 조건부 조항(셀온·되사기)     | `market/clauses.ts` (+ `domain/records.ts`의 눈금)                             |
+| 설득                         | `market/persuasion.ts` (+ `domain/persuasion.ts`)                              |
+| 관심 사다리                  | `market/interest.ts` (읽는 자는 `core/state.ts`)                               |
+| 에이전트 원형 → 시장 프로필  | `market/agent-profile.ts` (원형 키는 `domain/persona.ts`)                      |
+| AI 시장·무소속·계약 해지     | `market/ai-market.ts` · `market/departures.ts`                                 |
+| 감독 시장·유저 경질          | `market/manager-market.ts`                                                     |
+| 주급                         | `packages/engine/src/world/wages.ts`                                           |
+| 등록 명단                    | `packages/domain/src/squad-rules.ts` · `engine/src/squad/registration.ts`      |
