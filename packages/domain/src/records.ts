@@ -1631,6 +1631,26 @@ export const PROMISE_KIND_KO: Record<PromiseKind, string> = {
 };
 
 /**
+ * 갈래가 **무슨 약속인가** — 감독의 말을 갈래로 옮기는 모델이 읽는 표다
+ * (→ docs/data/people.md §5-2의 「감독이 한 말」 칸).
+ *
+ * 낱말표(`PROMISE_KIND_KO`)는 장부 줄과 화면이 쓰는 이름이라 짧고, 그것만으로는
+ * 갈래가 갈리지 않는다: 「출전」은 교체 출전까지 품지만 기한 날 장부가 재는 것은
+ * **선발 비율**이고(`verdictOf` — engine/squad/promises.ts), 「재계약」이 이행으로
+ * 서는 것은 협상이 **열렸을** 때다.
+ *
+ * 주석이 아니라 데이터인 이유는 설득 논거와 같다 — 도구 스키마는 JSDoc을 싣지
+ * 않으므로(`toToolSchema`) 주석에 적힌 뜻은 모델에게 닿지 않는다.
+ */
+export const PROMISE_KIND_MEANING: Record<PromiseKind, string> = {
+  minutes: "주전으로 세우겠다",
+  transfer: "내보내 주겠다",
+  renewal: "재계약 협상을 열겠다",
+  captain: "주장을 맡기겠다",
+  number: "그 등번호를 주겠다",
+};
+
+/**
  * 약속 한 줄 — **`Promise`가 아니라 `ManagerPromise`다.** 전역 `Promise`를 가리는
  * 타입 이름은 이 패키지를 import 하는 모든 파일에서 비동기 코드의 뜻을 바꾼다.
  */

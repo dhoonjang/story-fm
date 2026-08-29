@@ -3,6 +3,8 @@ import {
   MAX_PITCH_CLAIMS,
   PitchClaimSchema,
   TABLE_LINE_MAX,
+  TABLE_STANCES,
+  TABLE_STANCE_KO,
   TableStanceSchema,
 } from "@story-fm/domain";
 import {
@@ -18,6 +20,12 @@ import { retryOnce, requireToolCall } from "./retry";
 import { CounterpartyRulingFieldsSchema } from "./ruling-schema";
 import { buildSituationBlock } from "./table-situation";
 import { toToolSchema } from "./tool-schema";
+
+/**
+ * 태도 넷의 낱말 — **코어의 표에서 온다** (prompts.md §2). 손으로 적으면 표를 고쳐도
+ * 옛 낱말이 가고, 한 갈래만 빠지면 모델은 그 값을 「나머지」로 읽는다.
+ */
+const STANCE_LINE = TABLE_STANCES.map((s) => `${s}(${TABLE_STANCE_KO[s]})`).join(" · ");
 
 /**
  * 협상 테이블 건너편 — **감독의 말 하나에 상대의 답 하나** (agents.md §4-1 · transfer.md §12-2).
@@ -43,7 +51,7 @@ export const NEGOTIATION_TABLE_SYSTEM = `당신은 협상 테이블 건너편의
 - heard.tone — 감독의 말투. 모욕·협박·위협이면 hostile, 그 밖은 civil. 세게 밀어붙이는 것은 hostile이 아니다.
 - heard.claims — 감독이 이번 말에서 실제로 든 설득 논거만. 목록에 없는 이야기는 other. 말하지 않은 논거를 넣지 않는다.
 - ruling — <anchor>에 오퍼가 올라 있을 때만. 판정은 <anchor>가 적은 것 중에서, 금액·연수·지위는 구간 안에서. 오퍼가 없으면 비운다.
-- stance — 이 답을 말한 태도: warming(누그러진다) · steady · cooling(굳는다) · leaving(일어서려 한다).
+- stance — 이 답을 말한 태도: ${STANCE_LINE}.
 - line — 상대의 말. 그 인물의 말투로, 2~5문장. ruling에 적은 수치와 어긋나지 않게. 지문은 *별표*로.`;
 
 /** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 */
