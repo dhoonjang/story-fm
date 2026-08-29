@@ -66,6 +66,7 @@ import { leagueOfTeamIn } from "../competition/promotion";
 import { derbyNameOf, derbyOf } from "../data/derbies";
 import { derbyRecordOf } from "./derby";
 import { formerClubFactsOf, isFirstMeeting, managerReturnOf } from "./former-club";
+import { touchOpenings } from "../world/openings";
 import { reportersOf, rivalVoiceOf } from "../world/persona";
 import { MANAGER_SUBJECT, moveRelation, stanceRelationEvent } from "../world/relations";
 import type { CommandResult } from "../commands";
@@ -2127,6 +2128,11 @@ export function respondToMedia(
     `기자회견 — ${conference.context} (${STANCE_KO[input.stance]})`,
     conference.weight >= 3 ? 4 : 3,
   );
+  // 마이크 앞에 선 것이 언론 실마리를 닫는다 — 이름을 부른 선수의 것도 함께 (career.md §1)
+  touchOpenings(state, {
+    ...(target === null ? {} : { subjectIds: [target] }),
+    kinds: ["press"],
+  });
   // 여러 축이 갈리므로 **합**으로 결을 읽는다 — 보드는 올랐는데 라커룸이 상했으면
   // 좋은 회견이 아니다. 색 하나가 그 종합이고, 항목별 숫자는 펼쳤을 때 보인다
   const net =
@@ -2178,6 +2184,8 @@ export function declinePress(state: GameState): CommandResult {
   const effect = applyPressOutcome(state, conference, null);
   conference.status = "declined";
   pushNarrative(state, `기자회견 거절 (${conference.context})`, 3);
+  // 거절도 답이다 — 감독이 그 자리를 지났으므로 언론 실마리는 닫힌다 (career.md §1)
+  touchOpenings(state, { kinds: ["press"] });
   const parts = [
     signed("보드", effect.board),
     signed("언론", effect.media),

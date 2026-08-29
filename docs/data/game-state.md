@@ -347,7 +347,7 @@ row, 지난 일 = 그대로 이력.**
 | `narrative` `NarrativeNote`                        | GM 기억 — 날짜·문장·중요도(1\~5)·갈래                                                                                       | `domain/records.ts` |
 | `incidents` `Incident`                             | 감독이 말로 만든 사건 — 날짜·갈래(효과의 모양)·당사자·세기·요약 (people.md §6). 옛 세이브엔 없다                            | `domain/records.ts` |
 | `arcs` `NarrativeArc`                              | 서사 아크 — 갈래·주인·단계·제목. 개폐는 장부에서 결정적 (people.md §9)                                                      | `domain/records.ts` |
-| `openings` `Opening`                               | 시작 사건 — 온보딩 판정이 열고 기한이 닫는 첫 몇 주의 실마리 (career.md §1)                                                 | `domain/records.ts` |
+| `openings` `Opening`                               | 시작 사건 — 온보딩 판정이 열고 **감독이 한 일이** 닫는 첫 몇 주의 실마리. 손대지 않으면 기한이 닫는다 (career.md §1)        | `domain/records.ts` |
 | `chat` `ChatTurn`                                  | 대화 이력 — `user`/`model`/`operator`                                                                                       | `core/state.ts`     |
 | ↳ `ToolCallRecord`                                 | 도구·명령 호출 — 요약·항목(`brief`)·카드 payload·톤·`silent`·장면 안 줄 위치                                                | `core/state.ts`     |
 | ↳ `CommandBrief`                                   | 화면이 세우는 요약 — 머리줄 + 항목. 없는 기록은 말풍선에 서지 않는다                                                        | `core/state.ts`     |

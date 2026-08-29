@@ -16,6 +16,7 @@ import {
 } from "../core/state";
 import { addDays, diffDays, seasonYear } from "../core/dates";
 import { pickAnyPlayer } from "../core/player-ref";
+import { touchOpenings } from "../world/openings";
 import { ownerOf } from "../world/persona";
 import { USER_WAGE_HEADROOM, clubWageBudget, wageRoomOf } from "../world/wages";
 import { formatMoney, recordCapitalAsset, seasonWageRatio, STADIUM_ASSET_MONTHS } from "./finance";
@@ -277,6 +278,8 @@ export function requestBoard(state: GameState, input: RequestBoardInput): Comman
 
   const line = `보드 요청 — ${describeAsk(state, request)} · 답 ${respondOn}`;
   pushNarrative(state, line, 3);
+  // 보드에 요청을 건 것이 구단주에게 걸린 실마리를 닫는다 (career.md §1)
+  touchOpenings(state, { subjectIds: [ownerOf(state).characterId], kinds: ["board"] });
   return {
     ok: true,
     message: `${line}. 보드가 검토합니다 — 답은 ${respondOn}에 옵니다`,
