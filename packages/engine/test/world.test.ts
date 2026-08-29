@@ -1023,7 +1023,12 @@ describe("온보딩 판정 — 능력치의 결과 시작 사건 (career.md §1)
     const ours = state.players.find((p) => p.teamId === state.userTeamId)!;
     const seeded = seedOpenings(state, [
       { kind: "press", title: "낙하산", line: "지역지가 연줄을 물었다" },
-      { kind: "dressing-room", title: "주장의 시선", line: "새 감독을 잰다", subjectId: ours.id },
+      {
+        kind: "dressing-room",
+        title: "주장의 시선",
+        line: `${ours.name}이 새 감독을 잰다`,
+        subjectId: ours.id,
+      },
       { kind: "board", title: "없는 사람", line: "…", subjectId: "nobody" },
       { kind: "personal", title: "빚", line: "부임 전의 빚" },
       { kind: "personal", title: "넷째", line: "상한 밖" },
@@ -1052,7 +1057,12 @@ describe("온보딩 판정 — 능력치의 결과 시작 사건 (career.md §1)
     const ours = state.players.find((p) => p.teamId === state.userTeamId)!;
     seedOpenings(state, [
       { kind: "press", title: "낙하산", line: "지역지가 연줄을 물었다" },
-      { kind: "dressing-room", title: "주장의 시선", line: "새 감독을 잰다", subjectId: ours.id },
+      {
+        kind: "dressing-room",
+        title: "주장의 시선",
+        line: `${ours.name}이 새 감독을 잰다`,
+        subjectId: ours.id,
+      },
       { kind: "personal", title: "빚", line: "부임 전의 빚" },
     ]);
 
@@ -1079,5 +1089,43 @@ describe("온보딩 판정 — 능력치의 결과 시작 사건 (career.md §1)
     // 두 사유는 다른 통으로 간다 — 해결은 서사 기억으로, 만료는 그날의 다이제스트로
     expect(state.narrative.filter((n) => n.text.startsWith("주장의 시선"))).toHaveLength(1);
     expect(digest.every((d) => !d.startsWith("주장의 시선"))).toBe(true);
+  });
+
+  /**
+   * **줄이 걸린 사람을 정한다** (career.md §1). 판정이 채운 `subjectId`는 장부의 사실이
+   * 아니라 빈칸이라, 그 줄이 이름을 부르지 않으면 코어가 이름표를 뗀다 — 스냅샷은 사실
+   * 카드고, 서지 않은 이름이 괄호로 붙으면 GM이 없는 갈등 위에 다음 장면을 쌓는다.
+   */
+  it("줄이 부르지 않는 사람은 스냅샷에 서지 않는다 — 이름표만 떨어지고 줄은 남는다", () => {
+    const state = openingsGame;
+    state.date = openedOn;
+    // 이 줄이 아무도 부르지 않는다는 것이 케이스의 전제다 — 시드가 이름을 바꿔도 서게 두지 않는다
+    const blank = "이사회가 첫 몇 달을 지켜본다";
+    const names = (name: string): boolean =>
+      name.split(" ").some((part) => part.length > 1 && blank.includes(part));
+    const ours = state.players.find((p) => p.teamId === state.userTeamId && !names(p.name))!;
+    const family = ours.name.split(" ")[1]!;
+
+    seedOpenings(state, [
+      { kind: "board", title: "이사진의 시선", line: blank, subjectId: ours.id },
+      // 성만 부르는 줄이 오히려 보통이다 — 마디 하나로 맞힌다
+      {
+        kind: "dressing-room",
+        title: "라커룸",
+        line: `${family}가 새 감독을 잰다`,
+        subjectId: ours.id,
+      },
+    ]);
+    expect(state.openings!.map((o) => o.subjectId)).toEqual([undefined, ours.id]);
+
+    const lines = describeOpenings(state)!.split("\n");
+    expect(lines[0]).toContain("이사진의 시선");
+    expect(lines[0]).not.toContain("(");
+    expect(lines[1]).toContain(`(${ours.name})`);
+
+    // 이름표가 떨어진 실마리는 걸린 사람이 없는 실마리다 — 닫는 것도 갈래가 한다
+    expect(touchOpenings(state, { subjectIds: [ours.id] })).toBe(1);
+    expect(activeOpenings(state).map((o) => o.title)).toEqual(["이사진의 시선"]);
+    expect(touchOpenings(state, { kinds: ["board"] })).toBe(1);
   });
 });
