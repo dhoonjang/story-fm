@@ -79,6 +79,34 @@ export function buildOpsSchema(
   return { type: "object", properties, description };
 }
 
+/**
+ * 해석기 하나가 **강제로 거는 산출 도구의 선언** — 이름·설명·입력 스키마.
+ *
+ * `runOpsOrders`가 여기에 핸들러를 붙여 쓰고, 강제 선언 목록(`forcedTools`)이 같은
+ * 함수를 부른다. 선언을 두 벌로 적으면 재는 자가 실제로 나가는 것과 다른 것을 잰다.
+ */
+export function opsToolDeclaration(
+  spec: OpsAgentSpec,
+  specs: ReadonlyMap<string, GameToolSpec>,
+): Pick<GameToolSpec, "name" | "description" | "inputSchema"> {
+  return {
+    name: spec.tool,
+    description: "감독의 말을 명령의 인자로 제출한다. 이 도구로만 답한다.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ops: buildOpsSchema(specs, spec.ops, spec.opsHint, spec.caps),
+        unresolved: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+          description: spec.unresolvedHint,
+        },
+      },
+    },
+  };
+}
+
 /** 모델이 낸 `ops` — 목록에 있는 이름의 배열만 남긴다. 검증은 적용 때 도구가 한다 */
 export function parseOps(raw: unknown, names: readonly string[], caps: OpsCaps = {}): OpsInput {
   const ops: OpsInput = {};
@@ -174,20 +202,7 @@ export async function runOpsOrders(
   let orders: OpsOrders | null = null;
   let client = llm;
   const tool: GameToolSpec = {
-    name: spec.tool,
-    description: "감독의 말을 명령의 인자로 제출한다. 이 도구로만 답한다.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        ops: buildOpsSchema(specs, spec.ops, spec.opsHint, spec.caps),
-        unresolved: {
-          type: "string",
-          minLength: 1,
-          maxLength: 200,
-          description: spec.unresolvedHint,
-        },
-      },
-    },
+    ...opsToolDeclaration(spec, specs),
     handle: (input: unknown) => {
       const parsed = ReportSchema.safeParse(input);
       // 무엇이 틀렸는지 자리까지 돌려줘야 재시도가 같은 실수를 반복하지 않는다
