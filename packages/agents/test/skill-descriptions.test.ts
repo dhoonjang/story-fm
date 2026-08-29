@@ -134,15 +134,16 @@ describe("규칙이 사는 자리", () => {
 
   /**
    * 설명은 고정층에 매 턴 실린다 — 길이 예산이 없으면 규칙 하나를 지울 때마다 설명
-   * 두 줄이 붙어도 아무 데서도 드러나지 않는다. 상한은 지금 총량(≈13,330자)에 한 도구
-   * 몫의 여유를 얹은 값이다 — **도구가 늘 때만** 그만큼 올린다.
+   * 두 줄이 붙어도 아무 데서도 드러나지 않는다. 상한은 지금 총량(≈6,770자)에 한 도구
+   * 몫(600자)의 여유를 얹은 값이다 — **도구가 늘 때만** 그만큼 올린다. **도구가 줄면
+   * 함께 내린다**: 상한이 총량의 두 배로 남으면 설명이 한 벌씩 더 붙어도 걸리지 않는다.
    */
   it("설명은 길이 예산 안에 있다", () => {
     const total = SKILL_CATALOG.reduce((sum, skill) => sum + skill.description.length, 0);
     for (const skill of SKILL_CATALOG) {
       expect(skill.description.length, skill.name).toBeLessThanOrEqual(600);
     }
-    expect(total).toBeLessThanOrEqual(13_780);
+    expect(total).toBeLessThanOrEqual(7_400);
   });
 
   /**
@@ -366,9 +367,10 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
     >;
     expect(tactic.substitute?.description).toContain(`최대 ${TACTIC_CAPS.substitute}건`);
     const over = Array.from({ length: TACTIC_CAPS.substitute! + 2 }, () => ({}));
-    expect(parseOps({ substitute: over }, TACTIC_OPS, TACTIC_CAPS).substitute).toHaveLength(
-      TACTIC_CAPS.substitute!,
-    );
+    const parsed = parseOps({ substitute: over }, TACTIC_OPS, TACTIC_CAPS);
+    expect(parsed.ops.substitute).toHaveLength(TACTIC_CAPS.substitute!);
+    // 자른 것은 조용히 사라지지 않는다 — 잘린 수가 `applyOps`의 줄로 돌아간다 (§1)
+    expect(parsed.truncated.substitute).toBe(2);
   });
 
   /**

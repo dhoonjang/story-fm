@@ -277,6 +277,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const [error, setError] = useState<string | null>(null);
   /** 실패 원인(기술적) — 배너 툴팁으로만 보인다. 채팅·서사에는 절대 넣지 않는다 */
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  /**
+   * 그대로 다시 보내면 통할 실패인가 — **서버가 적어 보낸 사실이다**(`retry`,
+   * models.md §1-1). 거짓이면 배너에 「다시 시도」를 세우지 않는다: 설정이 틀려
+   * 몇 번을 불러도 같은 400이 오는 자리에서 그 버튼은 없는 길을 가리킨다.
+   */
+  const [errorRetry, setErrorRetry] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -345,6 +351,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       setBusy(true);
       setError(null);
       setErrorDetail(null);
+      setErrorRetry(true);
       /**
        * 미저장 전술판 편집을 **먼저 서버에 밀어 넣는다** — 턴은 그다음이다.
        *
@@ -412,6 +419,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
         }
         setError(failure.reason);
         setErrorDetail(failure.detail ?? null);
+        setErrorRetry(failure.retry);
       };
 
       /**
@@ -752,9 +760,11 @@ export function GameScreen({ gameId }: { gameId: string }) {
         <div className="turn-error" data-testid="turn-error" title={errorDetail ?? undefined}>
           <span>⚠️ {error}</span>
           <div className="turn-error-actions">
-            <button onClick={() => send()} disabled={busy || !input.trim()}>
-              다시 시도
-            </button>
+            {errorRetry && (
+              <button onClick={() => send()} disabled={busy || !input.trim()}>
+                다시 시도
+              </button>
+            )}
             <button
               className="ghost"
               onClick={() => {

@@ -107,17 +107,33 @@ export function opsToolDeclaration(
   };
 }
 
-/** 모델이 낸 `ops` — 목록에 있는 이름의 배열만 남긴다. 검증은 적용 때 도구가 한다 */
-export function parseOps(raw: unknown, names: readonly string[], caps: OpsCaps = {}): OpsInput {
+/** 남은 것과 잘린 수 — 자르는 자리가 곧 그 사실을 아는 유일한 자리다 */
+export interface ParsedOps {
+  ops: OpsInput;
+  /** 상한에 걸려 버린 수 — 명령 이름별. 자른 것이 없으면 빈 객체 */
+  truncated: Record<string, number>;
+}
+
+/**
+ * 모델이 낸 `ops` — 목록에 있는 이름의 배열만 남긴다. 검증은 적용 때 도구가 한다.
+ *
+ * **자른 수를 함께 낸다.** 상한은 스키마가 아니라 설명 문장으로 가므로(`buildOpsSchema`)
+ * 디코더가 막아 주지 않고, 넘겨 온 것을 자르는 것은 여기다. 그 사실이 여기서 끝나면
+ * 감독은 교체를 여섯 부르고 다섯만 걸린 판 위에 다음 판단을 쌓는다 — `applyOps`가 이
+ * 수를 한 줄로 되돌린다.
+ */
+export function parseOps(raw: unknown, names: readonly string[], caps: OpsCaps = {}): ParsedOps {
   const ops: OpsInput = {};
-  if (typeof raw !== "object" || raw === null) return ops;
+  const truncated: Record<string, number> = {};
+  if (typeof raw !== "object" || raw === null) return { ops, truncated };
   for (const name of names) {
     const value = (raw as Record<string, unknown>)[name];
-    if (Array.isArray(value) && value.length > 0) {
-      ops[name] = value.slice(0, caps[name] ?? OPS_PER_COMMAND);
-    }
+    if (!Array.isArray(value) || value.length === 0) continue;
+    const cap = caps[name] ?? OPS_PER_COMMAND;
+    ops[name] = value.slice(0, cap);
+    if (value.length > cap) truncated[name] = value.length - cap;
   }
-  return ops;
+  return { ops, truncated };
 }
 
 /**
@@ -140,6 +156,9 @@ export function applyOps(
       if (result instanceof Promise) throw new Error(`${name}: 받아쓰기 적용은 동기 도구만 부른다`);
       if (result.message) notes.push(result.message);
     }
+    // 자른 줄은 그 명령이 돌려준 답들 바로 뒤다 — 자리가 곧 무엇이 잘렸는지다
+    const dropped = orders.truncated?.[name];
+    if (dropped) notes.push(truncatedNote(inputs.length, dropped));
   }
   if (orders.unresolved) notes.push(unresolvedNote(orders.unresolved));
 }
@@ -154,6 +173,16 @@ export function unresolvedNote(text: string): string {
   return `옮기지 못한 지시: "${text}"`;
 }
 
+/**
+ * 상한에 잘린 지시가 감독에게 돌아가는 한 줄 — **문구는 여기 하나다.**
+ *
+ * 어느 명령인지는 이름으로 적지 않는다. 코어의 답은 명령 이름을 입에 담지 않고
+ * (agents.md §0), 이 줄은 그 명령이 돌려준 답들 바로 뒤에 서므로 자리가 곧 무엇인지다.
+ */
+export function truncatedNote(kept: number, dropped: number): string {
+  return `한 번에 ${kept}건까지 걸립니다 — 나머지 ${dropped}건은 걸지 못했습니다`;
+}
+
 /** 값이 있을 때만 서는 태그 블록 — 세 해석기의 입력이 같은 모양으로 조립된다 */
 export function tagged(tag: string, body: string): string[] {
   return body.trim().length > 0 ? [`<${tag}>`, body, `</${tag}>`] : [];
@@ -162,6 +191,8 @@ export function tagged(tag: string, body: string): string[] {
 /** 받아쓰기 해석기가 내는 것 — 부를 명령과 그 인자, 그리고 옮기지 못한 말 */
 export interface OpsOrders {
   ops: OpsInput;
+  /** 상한에 걸려 자른 수 — 명령 이름별. `applyOps`가 한 줄로 되돌린다 */
+  truncated?: Readonly<Record<string, number>>;
   unresolved?: string;
 }
 
@@ -207,8 +238,12 @@ export async function runOpsOrders(
       const parsed = ReportSchema.safeParse(input);
       // 무엇이 틀렸는지 자리까지 돌려줘야 재시도가 같은 실수를 반복하지 않는다
       if (!parsed.success) return inputError(parsed.error);
-      const ops = parseOps((input as { ops?: unknown }).ops, spec.ops, spec.caps);
-      orders = { ops, ...(parsed.data.unresolved ? { unresolved: parsed.data.unresolved } : {}) };
+      const { ops, truncated } = parseOps((input as { ops?: unknown }).ops, spec.ops, spec.caps);
+      orders = {
+        ops,
+        ...(Object.keys(truncated).length > 0 ? { truncated } : {}),
+        ...(parsed.data.unresolved ? { unresolved: parsed.data.unresolved } : {}),
+      };
       return { ok: true, message: "지시를 받았습니다" };
     },
   };
