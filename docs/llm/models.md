@@ -149,24 +149,32 @@ agents:
 - **종류는 어댑터가 붙인다.** SDK의 오류 클래스와 HTTP 코드를 읽어 `LlmCallError`로
   바꿔 던지고, 그 클래스와 종류 표는 `packages/llm/src/llm-error.ts` **한 자리**에만
   있다 — 어댑터 셋이 같은 표를 쓴다.
-- **화면은 `kind`만 본다.** `turnErrorMessage`(apps/web)가 종류 하나에 문구 하나를
-  걸어 두므로, 문구를 바꾸는 데 분류를 건드리지 않는다.
+- **화면은 `kind`만 본다.** 종류 하나가 배너의 **문구와 「다시 시도」 둘 다**를 고르고
+  (`turn-runner.ts`의 표 하나), 그 둘을 바꾸는 데 분류를 건드리지 않는다.
 - **내부 예외 원문은 프로덕션 응답에 실리지 않는다.** 원인은 서버 로그에 남고,
   응답의 `detail`은 개발 모드(`traceEnabled`, §5)에서만 붙는다.
 
-| 종류         | 무슨 일               | Anthropic                                           | Google (Gemini)                                        | OpenAI                                  |
-| ------------ | --------------------- | --------------------------------------------------- | ------------------------------------------------------ | --------------------------------------- |
-| `overloaded` | 제공자가 붐빈다       | 529 (`overloaded_error`)                            | 503                                                    | 503                                     |
-| `rate_limit` | 한도·쿼터를 넘겼다    | 429 (`rate_limit_error`)                            | 429                                                    | 429                                     |
-| `timeout`    | 시한을 넘겼다         | `APIConnectionTimeoutError` · 중단 신호 · 408 · 504 | 중단 신호 · 408 · 504                                  | `APIConnectionTimeoutError` · 408 · 504 |
-| `auth`       | 키가 없거나 안 먹는다 | 401 (`authentication_error`) · 403                  | 401 · 403                                              | 401 · 403                               |
-| `filtered`   | 안전 정책이 막았다    | `stop_reason: "refusal"`                            | `finishReason: SAFETY…` · `promptFeedback.blockReason` | `reason: "content_filter"` · `refusal`  |
-| `budget`     | 토큰 예산 상한 (§4)   | 우리 쪽 판정 — 부르기 전에 끊는다                   | ←                                                      | ←                                       |
-| `unknown`    | 나머지 전부           | 400·404·연결 오류 등                                | ←                                                      | ←                                       |
+| 종류              | 무슨 일                               | Anthropic                                           | Google (Gemini)                                        | OpenAI                                  |
+| ----------------- | ------------------------------------- | --------------------------------------------------- | ------------------------------------------------------ | --------------------------------------- |
+| `overloaded`      | 제공자가 붐빈다                       | 529 (`overloaded_error`)                            | 503                                                    | 503                                     |
+| `rate_limit`      | 한도·쿼터를 넘겼다                    | 429 (`rate_limit_error`)                            | 429                                                    | 429                                     |
+| `timeout`         | 시한을 넘겼다                         | `APIConnectionTimeoutError` · 중단 신호 · 408 · 504 | 중단 신호 · 408 · 504                                  | `APIConnectionTimeoutError` · 408 · 504 |
+| `auth`            | 키가 없거나 안 먹는다                 | 401 (`authentication_error`) · 403                  | 401 · 403                                              | 401 · 403                               |
+| `filtered`        | 안전 정책이 막았다                    | `stop_reason: "refusal"`                            | `finishReason: SAFETY…` · `promptFeedback.blockReason` | `reason: "content_filter"` · `refusal`  |
+| `budget`          | 토큰 예산 상한 (§4)                   | 우리 쪽 판정 — 부르기 전에 끊는다                   | ←                                                      | ←                                       |
+| `invalid_request` | 요청·설정이 틀렸다 — 다시 불러도 같다 | 400 (`invalid_request_error`) · 404                 | 400 · 404                                              | 400 · 404                               |
+| `unknown`         | 나머지 전부                           | 연결 오류 · 표에 없는 상태 등                       | ←                                                      | ←                                       |
 
 - **`filtered`는 아무것도 못 받은 턴에만 선다.** 한 글자라도 나왔거나 도구가 돈 뒤에
   막힌 턴은 그 산출이 남아 평소 경로로 간다 — 실패로 만들면 이미 화면에 흘러간 문장을
   없던 일로 만들 수 없다.
+- **`invalid_request`에는 「다시 시도」가 서지 않는다.** 몇 번을 불러도 같은 400이 오는
+  실패라 감독이 그 버튼으로 할 수 있는 일이 없다 — 세워 두면 없는 길을 가리키고, 정작
+  설정이 틀렸다는 사실은 어디에도 안 적힌다. **다시 보내면 통하는가는 서버가 응답에
+  적어 보낸다**(`retry`); 화면이 문구나 상태 코드를 읽어 짐작하지 않는다.
+- ⚠️ **`isRetryableStatus`와 같은 표가 아니다.** 그것은 어댑터가 **전송 하나**를 다시
+  부를지 재는 눈금이라 5xx가 전부 든다. 종류는 **화면이 무엇을 말할지** 재는 눈금이라
+  같은 500이 `unknown`("응답을 받지 못해")이다. 하나로 합치면 둘 중 하나가 진다.
 - **키가 없으면 부르기 전에 `auth`로 실패한다** — 팩토리가 어댑터를 세우는 자리다.
 - ⚠️ **문구로 분류하지 않는다.** 표의 오른쪽 세 칸은 전부 코드값(HTTP 상태·SDK 오류
   클래스·열거된 종료 사유)이다. 제공자가 사람이 읽는 문장을 바꿔도 분류는 그대로다.
@@ -342,8 +350,8 @@ OpenAI는 2회를 기본으로 돌고 `@google/genai`는 **옵션을 주지 않�
 - ⚠️ **눈금을 받는 것은 제공자가 아니라 모델이다.** `PROVIDER_TRAITS`가 참이어도 그
   모델이 그 값을 거절할 수 있다 — Gemini 3.7 flash는 `MINIMAL`에 400
   (`Thinking level MINIMAL is not supported for this model`)을 낸다. **모델을
-  올리면 이 칸을 함께 본다**: 400은 §1-1의 표에서 `unknown`이라 화면에는 "응답을
-  받지 못해"만 서고, 설정이 틀렸다는 사실이 어디에도 안 적힌다.
+  올리면 이 칸을 함께 본다**: 400은 §1-1의 표에서 `invalid_request`라 화면은 요청이나
+  설정이 틀렸다고 말하지만, **어느 칸이 틀렸는지는 서버 로그에만 있다**.
 
 ## 2. 설정을 읽는 규칙
 
@@ -522,7 +530,8 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   스키마를 **펼쳐** 디코딩 문법을 만들어, `maxItems: n`은 항목 스키마를 n벌 복제한 문법이
   된다. `auto`로는 통과하던 스키마가 `{ name }`에서만 400 `INVALID_ARGUMENT`으로
   떨어지고, 본문은 `Request contains an invalid argument.` 한 줄뿐이라 어느 칸이 문제인지
-  말하지 않는다(§1-1의 표에서 `unknown`이라 화면에는 "응답을 받지 못해"만 선다). 지시
+  말하지 않는다(§1-1의 표에서 `invalid_request` — 화면은 요청이 틀렸다고 말하고 「다시
+  시도」를 세우지 않는다). 지시
   해석의 `ops`가 그 자리다 — 명령 열셋에 4를 걸면 넘고, 셋이면 지난다. **개수 상한은
   코어가 쥐고 모델에는 설명 문장으로 간다**(`buildOpsSchema` · `parseOps`).
 
