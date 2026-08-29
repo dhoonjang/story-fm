@@ -279,14 +279,20 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
       if (forced(req) === "report_intent") {
         return interpreter(req, { substitutions: [{ out, in: incoming }] });
       }
+      const orders = req.tools?.find((t) => t.name === "apply_orders");
       const advance = req.tools?.find((t) => t.name === "advance_match");
-      expect(advance).toBeDefined();
       expect(req.tools?.map((t) => t.name).sort()).toEqual([
         "advance_match",
         "apply_orders",
         "finalize_match",
       ]);
-      const reply = await advance!.handle({ orders: `${incoming} 넣고 계속 가자` });
+      // 지시는 판만 바꾸고 새 패킷을 돌려준다 — 구간은 아직이다
+      const ordered = await orders!.handle({ orders: `${incoming} 넣고 계속 가자` });
+      expect(ordered.ok).toBe(true);
+      expect(ordered.message).not.toContain("<segment>");
+      expect(ordered.message).toContain("<packet>");
+      expect(state.pendingMatch!.ledger.minute).toBe(0);
+      const reply = await advance!.handle({});
       expect(reply.ok).toBe(true);
       expect(reply.message).toContain("<segment>");
       expect(reply.message).toContain("<packet>");
@@ -349,8 +355,8 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     const thrown = new LlmTimeoutError("match-intent", 60_000);
     runTurn.mockImplementation(async (req: TurnRequest) => {
       if (forced(req) === "report_intent") throw thrown;
-      const advance = req.tools?.find((t) => t.name === "advance_match");
-      await advance!.handle({ orders: "압박 올려" });
+      const orders = req.tools?.find((t) => t.name === "apply_orders");
+      await orders!.handle({ orders: "압박 올려" });
       return answered("닿지 않는다", 1);
     });
 

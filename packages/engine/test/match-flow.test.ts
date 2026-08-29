@@ -1065,7 +1065,7 @@ describe("상대 벤치의 모양 변경 (match.md §2)", () => {
       expect(shift.team).toBe(aiSide);
       // 근거 태그 하나가 갈래를 싣는다 — 문장은 읽는 쪽이 만든다
       expect(tagOf(shift)?.source).toBe("ai-shift");
-      expect(["chase", "hold"]).toContain(tagOf(shift)?.code);
+      expect(["chase", "hold", "counter"]).toContain(tagOf(shift)?.code);
     }
     /**
      * 모양을 갈아 낀 줄은 **상태와 같은 수**여야 한다 — `aiShape`가 섰으면 한 줄,

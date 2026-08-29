@@ -52,7 +52,6 @@ import {
   createLedger,
   fatigueFromMinutes,
   GAP_THRESHOLD,
-  insertBeforeStop,
   mergeSubstitutions,
   planAiSubstitution,
   planAiTacticalShift,
@@ -60,7 +59,6 @@ import {
   simulateSegment,
   subLimitsOf,
   type LineupSlot,
-  type MatchLedgerState,
   type SegmentPlan,
   type SegmentStop,
 } from "@story-fm/sim";
@@ -713,12 +711,14 @@ const CHASE_SHAPES: readonly Formation[] = ["4-3-3", "3-5-2"];
 const HOLD_SHAPES: readonly Formation[] = ["5-4-1"];
 
 /**
- * **상대 벤치도 판단한다** — 스코어와 남은 시간을 보고 무게를 옮긴다 (match.md §2).
+ * **상대 벤치도 판단한다** — 구간이 구르기 **전에**, 정지점에서 스코어·남은 시간과
+ * **감독의 지금 전술**을 보고 무게를 옮긴다 (match.md §2). 감독이 정지점에서 건
+ * 지시(`apply_orders`)가 이미 판에 올라 있으므로 상대는 그것을 읽고 맞설 수 있다.
  *
  * 옮긴 값은 `pendingMatch`에만 남아 그 경기에서만 쓰인다(저장된 팀 전술은 불변).
  * 그리고 **옮겼다는 사실은 사건으로 남는다** — 상태만 바꾸면 중계는 사건 목록에 없는
  * 것을 쓸 수 없어 "상대가 던졌다"를 말할 수 없고, 감독은 팀 탭의 점 눈금을 정지점마다
- * 외워 견줘야 그 승부수를 안다.
+ * 외워 견줘야 그 승부수를 안다. 사건의 분은 구간이 출발하는 지금 분이다.
  *
  * @returns 실제로 옮겨졌을 때만 `tactical_shift` 한 줄 — 아니면 null
  */
@@ -729,18 +729,15 @@ function planAiShift(
     aiSide: MatchSide;
     /** 상대의 킥오프 전술 — 축 이동의 상한이 여기서 선다 */
     aiKickoff: TacticsSpec;
-    /** 이 구간이 끝난 판 — 방금 들어간 골까지 반영된 장부다 */
-    ledger: MatchLedgerState;
-    plan: SegmentPlan;
+    /** 감독 팀의 지금 전술 — 벤치가 읽고 맞서는 것 */
+    opponent: TacticsSpec;
+    /** 지금 정지점이 라커룸(하프타임·연장 휴식)인가 */
+    atBreak: boolean;
+    rng: () => number;
   },
 ): MatchEvent | null {
-  const { aiSide, aiKickoff, ledger, plan } = ctx;
-  /**
-   * **종료 휘슬에는 판단하지 않는다.** 끝난 경기의 벤치 판단은 판에 닿지 않으므로
-   * 그 한 줄은 정보가 아니라 소음이다 (연장으로 가는 경기의 90분은 `full_time`이
-   * 아니라 `extra_time_start`이라 여기서 걸리지 않는다).
-   */
-  if (plan.stop === "full_time") return null;
+  const { aiSide, aiKickoff, opponent, atBreak, rng } = ctx;
+  const ledger = pending.ledger;
   const aiNow = pending.aiTactics ?? aiKickoff;
   // 라커룸에서 판을 다시 짜는 자리 — 하프타임과 연장의 두 휴식이 같다
   const shift = planAiTacticalShift(
@@ -748,8 +745,9 @@ function planAiShift(
     aiNow,
     aiKickoff,
     ledger,
-    isBreak(plan.stop),
+    atBreak,
     pending.aiShape !== undefined,
+    { opponent, rng },
   );
   if (!shift) return null;
   /**
@@ -787,7 +785,7 @@ function planAiShift(
    */
   if (!shift.axes && !reshaped) return null;
   return {
-    minute: plan.minute,
+    minute: ledger.minute,
     type: "tactical_shift",
     team: aiSide,
     // 선수의 사건이 아니라 팀의 판단이다 (match.md §4)
@@ -856,6 +854,22 @@ export function advanceSegment(state: GameState): {
   refreshPacket(state);
 
   const segment = pending.segment ?? 0;
+  /**
+   * **상대 벤치가 먼저 움직인다** — 감독의 지시가 판에 오른 뒤, 구간이 구르기 전.
+   * 벤치의 난수는 구간의 것과 채널을 가른다 — 같은 채널에서 먼저 뽑으면 벤치의
+   * 판단 하나가 그 구간의 슈팅 시각까지 통째로 바꾼다.
+   */
+  const userSideOf: "home" | "away" = aiSide === "home" ? "away" : "home";
+  const shiftEvent = planAiShift(state, pending, {
+    aiSide,
+    aiKickoff,
+    opponent: specOf(userSideOf),
+    atBreak: pending.lastSegment ? isBreak(pending.lastSegment.stop) : false,
+    rng: makeRng(state.seed, `ai-shift:${state.season}:${match.id}:${segment}`),
+  });
+  // 상대가 판을 옮겼으면 그 전술로 다시 계산한 판이 굴러야 한다
+  if (shiftEvent) refreshPacket(state);
+
   const channel = `segment:${state.season}:${match.id}:${segment}`;
   const rng = makeRng(state.seed, channel);
   const plan = simulateSegment({
@@ -909,23 +923,11 @@ export function advanceSegment(state: GameState): {
   const segmentEvents = mergeSubstitutions(plan.events, aiSubs);
 
   /**
-   * **벤치의 판단은 이 구간이 끝난 판을 본다** — 방금 들어간 골 다음의 스코어다.
-   * 그래서 장부에 적기 전에 한 번 굴려 보고(`applyEvents`는 순수 함수다) 그 판으로
-   * 전환을 정한 뒤, 전환 사건을 끼워 **한 번에** 적는다. 적고 나서 끼우면 그 줄이
-   * 정지 사건 뒤에 서고, 하프타임에 붙은 감독의 교체가 창을 문다 (match.md §5).
+   * 벤치의 전환은 구간 **앞**에 선다 — 이 구간이 그 판으로 굴렀다는 사실이 장부의
+   * 순서 그 자체다. 정지 사건 뒤에 서면 하프타임에 붙은 감독의 교체가 창을 문다
+   * (match.md §5).
    */
-  const rolled = segmentEvents.length > 0 ? applyEvents(pending.ledger, segmentEvents) : null;
-  if (rolled && !rolled.ok) {
-    return { ok: false, plan: null, message: rolled.errors.join("\n") };
-  }
-  const afterSegment = rolled?.state ?? pending.ledger;
-  const shiftEvent = planAiShift(state, pending, {
-    aiSide,
-    aiKickoff,
-    ledger: afterSegment,
-    plan,
-  });
-  const events = shiftEvent ? insertBeforeStop(segmentEvents, shiftEvent) : segmentEvents;
+  const events = shiftEvent ? [shiftEvent, ...segmentEvents] : segmentEvents;
 
   let message = `사건 없이 ${plan.minute}′까지 흘렀습니다`;
   if (events.length > 0) {
@@ -1057,7 +1059,7 @@ function openShootout(state: GameState, pending: PendingMatch): boolean {
 export type MatchStop = SegmentStop | "shootout_start" | "shootout_kick";
 
 /** 벤치가 판을 다시 짜는 정지점 — 하프타임 · 연장 개시 · 연장 하프타임 */
-function isBreak(stop: SegmentStop): boolean {
+function isBreak(stop: string): boolean {
   return stop === "half_time" || stop === "extra_time_start" || stop === "extra_half_time";
 }
 

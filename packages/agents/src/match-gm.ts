@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { awaitingShootout, type CardMark, type GameState, type GoalMark } from "@story-fm/engine";
+import {
+  awaitingShootout,
+  refreshPacket,
+  type CardMark,
+  type GameState,
+  type GoalMark,
+} from "@story-fm/engine";
 import type { GameLLM, GameToolSpec, JsonObjectSchema } from "@story-fm/llm";
 import { finalizeMatchTurn } from "./finalize-match";
 import { buildLedgerNote } from "./gm-input";
@@ -29,8 +35,9 @@ export const MATCH_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 �
 - 도구 결과 — <segment> 코어가 확정한 사건 목록, <stop> 구간이 멈춘 이유, <core_replies> 지시가 판에 걸렸는지, 그리고 구간 뒤의 <ledger>·<packet>.
 
 # 진행
-- 감독이 진행하라고 했을 때만 판을 굴린다 — "계속", "봅시다", 교체·전술을 지시하며 이어서 보자는 말. 감독의 말은 도구에 원문 그대로 넘긴다.
-- 지시만 있고 진행이 아니면 판만 바꾼다. 선수나 코치를 부르기만 했거나 말만 건 턴은 도구 없이 장면만 쓴다 — 시간은 한 순간도 흐르지 않았고 슛도 찬스도 없다.
+- 감독의 지시는 나올 때마다 판에 건다 — 감독의 말은 도구에 원문 그대로 넘긴다. 결과에 오는 판을 읽고 코치가 짚을 것이 있으면 짚는다.
+- 판을 굴리는 것은 지시가 마무리됐을 때다 — 감독이 진행하라고 했거나("계속", "봅시다"), 정지점에서 할 말이 끝나 경기가 이어질 자리일 때. 감독이 아직 묻고 답하는 중이면 굴리지 않는다.
+- 선수나 코치를 부르기만 했거나 말만 건 턴은 도구 없이 장면만 쓴다 — 시간은 한 순간도 흐르지 않았고 슛도 찬스도 없다.
 - 경기가 끝났으면 마감한다. 마감 결과에 실린 마무리 중계를 장면의 끝으로 옮기고 벤치 한 줄로 닫는다.
 
 # 사건
@@ -85,14 +92,6 @@ const OrdersSchema = z.object({
     .max(ORDERS_MAX)
     .describe("감독이 이번 턴에 한 말 — 요약하지 않고 원문 그대로"),
 });
-const AdvanceSchema = z.object({
-  orders: z
-    .string()
-    .min(1)
-    .max(ORDERS_MAX)
-    .optional()
-    .describe("진행 전에 걸 지시가 있으면 감독의 말 원문 그대로. 진행만 하면 비운다"),
-});
 const EmptySchema = z.object({});
 
 /**
@@ -107,14 +106,14 @@ export const MATCH_TOOL_DEFINITIONS: ReadonlyArray<{
   {
     name: APPLY_ORDERS_TOOL,
     description:
-      "감독의 지시를 판에 건다 — 교체·전술·개인 지시·지역 플랜·공략·세트피스·팀토크·면담. 시계는 그대로다. 감독이 지시만 하고 진행은 아직이라고 했을 때 쓴다. 결과로 무엇이 걸렸고 무엇이 반려됐는지가 온다.",
+      "감독의 지시를 판에 건다 — 교체·전술·개인 지시·지역 플랜·공략·세트피스·팀토크·면담. 시계는 그대로다. 지시가 나올 때마다 부른다. 결과로 무엇이 걸렸고 무엇이 반려됐는지와, 그 지시로 다시 계산한 판(패킷)이 온다 — 다음 구간은 이 판으로 구른다.",
     inputSchema: toToolSchema(OrdersSchema),
   },
   {
     name: ADVANCE_MATCH_TOOL,
     description:
-      "한 구간을 굴린다 — 다음 정지점(골·퇴장·부상·하프타임·종료)까지. orders가 있으면 먼저 판에 걸고 굴린다. 감독이 진행하라고 했을 때만 부른다. 결과로 확정된 사건 목록과 구간 뒤의 장부·패킷이 온다. 포메이션이 바뀐 지시는 판만 바꾸고 굴리지 않는다 — 감독이 전술판을 본 뒤 다음 턴에 굴린다.",
-    inputSchema: toToolSchema(AdvanceSchema),
+      "경기를 다음 정지점(골·퇴장·부상·하프타임·종료)까지 굴린다. 지시가 마무리되고 경기가 이어질 자리에서 부른다. 굴리기 전에 상대 벤치도 판을 읽고 움직인다. 결과로 확정된 사건 목록과 구간 뒤의 장부·패킷이 온다.",
+    inputSchema: toToolSchema(EmptySchema),
   },
   {
     name: FINALIZE_MATCH_TOOL,
@@ -148,13 +147,15 @@ async function applyOrders(
   state: GameState,
   ctx: MatchToolContext,
   orders: string,
-  roll: boolean,
 ): Promise<{ ok: boolean; message: string }> {
+  const roll = false;
   const parsed = await runMatchIntent(state, orders);
   if (!parsed.ok) return { ok: false, message: parsed.message };
   const applied = applyMatchIntent(state, parsed.intent, ctx.calls, ctx.goals, ctx.cards, {
     roll,
   });
+  // 굴리지 않은 지시도 판을 다시 계산한다 — 다음 구간이 이 패킷으로 구르고, GM은 그것을 미리 읽는다
+  if (!roll) refreshPacket(state);
   const replies =
     applied.notes.length > 0
       ? ["<core_replies>", ...applied.notes.map((n) => `- ${n}`), "</core_replies>"]
@@ -164,7 +165,7 @@ async function applyOrders(
     message: [
       ...(applied.segment ? [applied.segment] : []),
       ...replies,
-      ledgerAfter(state, applied.segment !== null),
+      ledgerAfter(state, true),
     ].join("\n"),
   };
 }
@@ -187,20 +188,17 @@ export function buildMatchTools(
         handle: async (input: unknown) => {
           const p = OrdersSchema.safeParse(input);
           if (!p.success) return { ok: false, message: "orders에 감독의 말을 그대로 적으세요" };
-          return applyOrders(state, ctx, p.data.orders, false);
+          return applyOrders(state, ctx, p.data.orders);
         },
       },
       {
         ...advance!,
-        handle: async (input: unknown) => {
-          const p = AdvanceSchema.safeParse(input);
-          if (!p.success) return { ok: false, message: "orders는 감독의 말 원문이거나 비웁니다" };
+        handle: async () => {
           const pending = state.pendingMatch;
           if (!pending) return { ok: false, message: "진행 중인 경기가 없습니다" };
           if (pending.ledger.phase === "finished" && !awaitingShootout(state)) {
             return { ok: false, message: "경기가 끝났습니다 — 마감할 차례입니다" };
           }
-          if (p.data.orders) return applyOrders(state, ctx, p.data.orders, true);
           const applied = applyMatchIntent(state, {}, ctx.calls, ctx.goals, ctx.cards, {
             roll: true,
           });
