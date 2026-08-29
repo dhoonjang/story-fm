@@ -27,10 +27,10 @@ function isMarketCard(payload: unknown): payload is MarketCard {
 }
 
 /**
- * 스킬 결과를 **카드와 칩으로 가른다.**
+ * 호출 결과를 **카드와 칩으로 가른다.**
  *
- * 가르는 기준은 payload의 모양이 아니라 **스킬 이름**이다(`CARD_SKILLS`) — 갈 장부가
- * 없는 스킬만 카드로 선다. 모양으로 가르던 때는 카드를 실어야 할 스킬이 payload를
+ * 가르는 기준은 payload의 모양이 아니라 **호출 이름**이다(`CARD_SKILLS`) — 갈 장부가
+ * 없는 호출만 카드로 선다. 모양으로 가르던 때는 카드를 실어야 할 호출이 payload를
  * 빠뜨려도 그냥 칩이 되어, 화면이 코어의 누락을 감췄다.
  *
  * `CARD_SKILLS`인데 카드가 성하지 않으면 그 호출은 **어느 쪽에도 서지 않고** 콘솔에
@@ -54,7 +54,7 @@ export function splitMarketCalls<T extends { name: string; payload?: unknown }>(
 
   if (broken.length > 0 && typeof console !== "undefined") {
     console.error(
-      "[market-calls] 카드로 서야 할 스킬이 성한 payload를 갖고 있지 않다:",
+      "[market-calls] 카드로 서야 할 호출이 성한 payload를 갖고 있지 않다:",
       broken.map((call) => call.name),
     );
   }

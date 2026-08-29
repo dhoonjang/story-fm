@@ -643,7 +643,7 @@ export const HISTORY_WINDOW = defineHarness({
 
 export const PROMPT_REGRESSION = defineHarness({
   id: "prompt-regression",
-  what: "프롬프트 층의 글자·프리픽스 안정성 · 모의 세션의 장면 문법과 스킬 적중률 · 중계 위생",
+  what: "프롬프트 층의 글자·프리픽스 안정성 · 모의 세션의 장면 문법과 도구 적중률 · 중계 위생",
   doc: PROMPTS,
   cost: "세계 셋 + 모의 GM 세션 + 모의 경기 한 판 — 수 초",
   // prettier-ignore
@@ -668,8 +668,8 @@ export const PROMPT_REGRESSION = defineHarness({
     { metric: "중계 시각 헤더 보존율", role: "guard", min: 1, unit: "ratio", why: "위생 전후로 첫 줄 헤더가 같아야 한다 — 구간마다 새로 찍는 시각 줄은 중계에서 소음이 아니고, 걷히면 화면의 시계가 멎는다" },
     { metric: "시점 헤더 파싱 성공률", role: "guard", min: 1, unit: "ratio", why: "헤더를 못 읽으면 그 턴의 시계가 멎는다 (prompts.md §1)" },
     { metric: "평균 장면 글자", role: "measure", unit: "count", why: "모의 GM의 장면 길이 — 실모드의 400~800 예산과는 다른 눈금이다" },
-    { metric: "스킬 적중률", role: "guard", min: 1, unit: "ratio", why: "코퍼스가 겨냥한 스킬을 실제로 불렀는가 — 떨어지면 스킬 표면이나 모의 GM이 갈린 것이다 (agents.md §8)" },
-    { metric: "불린 스킬 가짓수", role: "measure", unit: "count", why: "코퍼스가 훑는 표면의 폭" },
+    { metric: "도구 적중률", role: "guard", min: 1, unit: "ratio", why: "코퍼스가 겨냥한 도구를 실제로 불렀는가 — 떨어지면 도구 표면이나 모의 GM이 갈린 것이다 (agents.md §8)" },
+    { metric: "불린 도구 가짓수", role: "measure", unit: "count", why: "코퍼스가 훑는 표면의 폭" },
   ],
 });
 

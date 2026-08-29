@@ -125,7 +125,7 @@ import { matchRating } from "../match/ratings";
 import { missionReportLine, scoutReportLine } from "../views/views";
 import { missionLabel, pruneDeferredScouts, pruneWaitingMissions } from "../squad/scouting";
 import { rankMissionCandidates } from "../squad/scout-mission";
-import { grantManagerXP, settleTactics } from "../skills";
+import { grantManagerXP, settleTactics } from "../commands";
 import {
   allMatchesDone,
   declareRetirements,

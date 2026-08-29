@@ -1,7 +1,7 @@
 /**
  * GM 오케스트레이터 — 단일 GM, 장면 라우팅 (agents.md §1·§2).
  * 실모드: 설정된 제공자의 tool loop. mock 모드: 규칙 기반 (mock-gm.ts).
- * 두 모드는 같은 엔진 스킬 경로만 사용한다 — 상태 변경의 유일한 통로.
+ * 두 모드는 같은 엔진 명령 경로만 사용한다 — 상태 변경의 유일한 통로.
  */
 import {
   advanceTime,
@@ -106,7 +106,7 @@ function hasSceneLine(text: string): boolean {
 }
 
 /**
- * 장면이 비어 돌아온 턴을 세우는 **코어의 기록** — 스킬이 남긴 요약을 내레이션
+ * 장면이 비어 돌아온 턴을 세우는 **코어의 기록** — 호출이 남긴 요약을 내레이션
  * (`@:`) 줄로 옮긴다.
  *
  * ⚠️ **대사는 쓰지 않는다.** 여기 서는 것은 장부가 이미 아는 사실뿐이고, 그래서
@@ -571,7 +571,7 @@ async function runRealGmTurn(
       const head = `${state.date} ${formatClock(clockOf(state))}${
         moved.short ? ` — ${ADVANCE_STOP_KO[moved.stopped] ?? "멈췄다"}` : ""
       }`;
-      // 스킬 호출이 아니라 코어가 시계를 옮긴 결과다 (`TIME_PASSED` 주석 참고)
+      // 호출이 아니라 코어가 시계를 옮긴 결과다 (`TIME_PASSED` 주석 참고)
       calls.push({
         name: TIME_PASSED,
         summary: [head, ...moved.digest].join("\n"),

@@ -27,8 +27,8 @@ import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { assignSquadNumber } from "../squad/numbers";
 import { arrivingSquadLevel } from "../squad/registration";
 import { clearDepartedState } from "./departures";
-import type { SkillResult } from "../skills";
-import { item } from "../skills/brief";
+import type { SkillResult } from "../commands";
+import { item } from "../commands/brief";
 
 /**
  * 조건부 조항 — **되사기와 셀온** (transfer.md §5-3).

@@ -10,7 +10,7 @@ export type MatchBoardOrder =
       value: number;
     }
   /**
-   * 죽은 공 키커 지정 — 평시와 경기 중이 **같은 스킬 하나**를 지난다
+   * 죽은 공 키커 지정 — 평시와 경기 중이 **같은 명령 하나**를 지난다
    * (docs/simulation/match.md §2 키커 지정). `playerId`가 `null`이면 지정 해제다.
    */
   | { kind: "setPiece"; role: SetPieceRole; playerId: string | null };

@@ -668,7 +668,7 @@ export function isRelease(transfer: { reason?: TransferReason; note?: string }):
 /**
  * 협상은 **원장이 아니다.** TRANSFER가 "일어난 이동"이라면 NEGOTIATION은 "합의되지
  * 않은 흥정"이고, 둘을 한 테이블에 섞으면 원장이 더러워진다. 합의(`agreed`) 뒤
- * 수락 스킬이 TRANSFER·CONTRACT·재정을 쓰고 그때 `completed`가 된다.
+ * 수락 명령이 TRANSFER·CONTRACT·재정을 쓰고 그때 `completed`가 된다.
  * (docs/simulation/transfer.md)
  */
 /**
@@ -1476,7 +1476,7 @@ export const SCOUT_CONCURRENT_LIMIT = 3;
 
 /**
  * **한도에 막혀 못 나간 파견 요청** — 감독이 지목했으나 동시 한도가 차서 나가지
- * 못한 이름. 반려는 스킬 결과 문구로 그 턴에 한 번 나가고 끝이라, 남겨 두지
+ * 못한 이름. 반려는 호출 결과 문구로 그 턴에 한 번 나가고 끝이라, 남겨 두지
  * 않으면 다음 턴의 모델에는 읽을 자리가 없다 (player.md §9.4).
  *
  * 파견이 아니므로 `ScoutReport`가 아니다 — 여기 있는 이름은 아직 아무 데도 안
@@ -2674,7 +2674,7 @@ export const NarrativeKindSchema = z.enum([
   "gm-event",
   /** GM의 `record_incident` — 하루 한도가 걸리는 유일한 갈래 (people.md §6) */
   "incident",
-  /** 그 밖의 스킬 결과·tick 사건 */
+  /** 그 밖의 호출 결과·tick 사건 */
   "other",
 ]);
 export type NarrativeKind = z.infer<typeof NarrativeKindSchema>;

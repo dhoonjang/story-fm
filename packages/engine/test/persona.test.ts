@@ -58,7 +58,7 @@ import {
   relationPressureWeight,
   relationTierOf,
 } from "../src/world/relations";
-import { applyTalkToPlayer } from "../src/skills";
+import { applyTalkToPlayer } from "../src/commands";
 import { playersOf } from "../src/core/state";
 import { selectCharacters } from "../src/world/character-book";
 import type { GameState } from "../src/core/state";

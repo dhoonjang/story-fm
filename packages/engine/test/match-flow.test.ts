@@ -595,7 +595,7 @@ describe("회귀: 부상·정지 선수는 경기에 나설 수 없다", () => {
     expect(keepers).toHaveLength(1);
   });
 
-  it("부상 선수를 선발로 확정하려 하면 스킬이 반려한다", () => {
+  it("부상 선수를 선발로 확정하려 하면 명령이 반려한다", () => {
     const state = createTestGame();
     const lineup = assignmentsOf(state, state.userTeamId, "starting").map((a) => ({
       playerId: a.playerId,
@@ -1061,7 +1061,7 @@ describe("상대 벤치의 모양 변경 (match.md §2)", () => {
 
     expect(shifts.length, "상대 벤치가 이 경기에서 한 번도 판을 옮기지 않았다").toBeGreaterThan(0);
     for (const shift of shifts) {
-      // 전환은 상대 벤치의 것뿐이다 — 감독의 전술 변경은 스킬이지 사건이 아니다
+      // 전환은 상대 벤치의 것뿐이다 — 감독의 전술 변경은 도구가 지나는 길이지 사건이 아니다
       expect(shift.team).toBe(aiSide);
       // 근거 태그 하나가 갈래를 싣는다 — 문장은 읽는 쪽이 만든다
       expect(tagOf(shift)?.source).toBe("ai-shift");
@@ -1308,7 +1308,7 @@ describe("감독 경기 마감의 대칭 (match.md §6)", () => {
 });
 
 /**
- * match 스킬 표면 점검에서 나온 다섯 가지 — **감독의 말이 판에 닿는 길**을 고정한다.
+ * match 도구 표면 점검에서 나온 다섯 가지 — **감독의 말이 판에 닿는 길**을 고정한다.
  * (docs/simulation/match.md의 분업: 무엇을 지시했는지는 LLM, 얼마나 먹히는지는 코어)
  */
 describe("지시가 판에 닿는 길", () => {

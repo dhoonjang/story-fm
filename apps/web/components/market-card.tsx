@@ -11,7 +11,7 @@ import { IconFinance, IconInsight, IconPerson, IconTrash } from "@/components/ic
 import { ratingTone } from "@/lib/scout-report-display";
 
 /**
- * **협상·스카우트 카드** — 갈 화면이 없는 스킬의 결과가 서는 자리.
+ * **협상·스카우트 카드** — 갈 화면이 없는 호출의 결과가 서는 자리.
  *
  * 진행 중인 협상은 어느 장부에도 실리지 않아서 레일이 알릴 수 없고, 칩 속에 줄글로
  * 접어 두면 조건을 견주려 매번 펼쳐야 했다. 금액·확률·기한은 **다음 판단의 입력**이라

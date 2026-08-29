@@ -1,22 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { SKILL_CATALOG } from "@story-fm/agents";
 import { CARD_SKILLS, hasRailHint } from "../lib/panel-hints";
-import { SKILL_LABEL } from "../lib/skill-label";
+import { SKILL_LABEL } from "../lib/call-label";
 
 /**
- * **스킬 결과가 화면에 서는 길은 둘뿐이다** (overview.md §3).
+ * **호출 결과가 화면에 서는 길은 둘뿐이다** (overview.md §3).
  *
- * 1. **칩 + 말풍선** — 갈 장부가 있는 스킬. 그 턴에 바뀐 장부들이 탭 순서대로
+ * 1. **칩 + 말풍선** — 갈 장부가 있는 호출. 그 턴에 바뀐 장부들이 탭 순서대로
  *    한 장씩 알림으로 서고, 채팅에 남은 칩을 누르면 그 말풍선이 다시 선다.
- * 2. **카드** — 갈 장부가 없는 스킬(협상·스카우트). 조건·확률·기한을 카드로 정리한다.
+ * 2. **카드** — 갈 장부가 없는 호출(협상·스카우트). 조건·확률·기한을 카드로 정리한다.
  *
  * 어느 쪽도 아니면 **아예 노출하지 않는다** — 조회 도구는 호출을 기록조차 하지
  * 않고(`read`), 코어가 한 일은 `silent`로 걸러진다. 이 테스트는 그 셋 밖으로
- * 새는 스킬(= 칩 속 줄글로만 남는 스킬)을 잡는다.
+ * 새는 호출(= 칩 속 줄글로만 남는 스킬)을 잡는다.
  */
 
 /**
- * 경기 중에만 부를 수 있고 **장부에 흔적을 남기지 않는** 스킬 — 그때는 장부
+ * 경기 중에만 부를 수 있고 **장부에 흔적을 남기지 않는** 호출 — 그때는 장부
  * 레일이 아예 서지 않고(`game-screen`은 경기 중 `PANELS`를 그리지 않는다) 지시는
  * 경기가 끝나면 사라진다. 그래서 갈 말풍선이 없다. 대신 증거는 **판세 뷰**가
  * 세운다 — 공략은 "공략 중"으로, 지역 플랜은 패킷의 새 키포인트로 선다
@@ -24,8 +24,8 @@ import { SKILL_LABEL } from "../lib/skill-label";
  */
 const MATCH_ONLY = new Set(["exploit_point", "set_match_plan"]);
 
-describe("스킬이 화면에 서는 길", () => {
-  it("조작형 스킬은 모두 말풍선 아니면 카드다", () => {
+describe("호출이 화면에 서는 길", () => {
+  it("조작형 호출은 모두 말풍선 아니면 카드다", () => {
     const orphans = SKILL_CATALOG.filter(
       (s) =>
         !s.readOnly && !hasRailHint(s.name) && !CARD_SKILLS.has(s.name) && !MATCH_ONLY.has(s.name),
@@ -39,7 +39,7 @@ describe("스킬이 화면에 서는 길", () => {
     }
   });
 
-  it("한 스킬이 두 길을 함께 가지 않는다 — 같은 사실이 두 번 서면 안 된다", () => {
+  it("한 호출이 두 길을 함께 가지 않는다 — 같은 사실이 두 번 서면 안 된다", () => {
     const both = [...CARD_SKILLS].filter((name) => hasRailHint(name));
     expect(both).toEqual([]);
   });
@@ -49,7 +49,7 @@ describe("스킬이 화면에 서는 길", () => {
  * 표시 이름은 웹이 갖는다(카탈로그를 직접 import하면 `node:path`가 딸려 와
  * 클라이언트 번들이 깨진다). 대신 **어긋나지 않는지는 여기서 지킨다.**
  */
-describe("스킬 표시 이름", () => {
+describe("호출 표시 이름", () => {
   it("카탈로그와 같은 이름을 쓴다", () => {
     for (const skill of SKILL_CATALOG) {
       expect(SKILL_LABEL[skill.name], skill.name).toBe(skill.label);

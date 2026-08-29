@@ -19,8 +19,8 @@ import { pickAnyPlayer } from "../core/player-ref";
 import { ownerOf } from "../world/persona";
 import { USER_WAGE_HEADROOM, clubWageBudget, wageRoomOf } from "../world/wages";
 import { formatMoney, recordCapitalAsset, seasonWageRatio, STADIUM_ASSET_MONTHS } from "./finance";
-import { item } from "../skills/brief";
-import type { SkillResult } from "../skills";
+import { item } from "../commands/brief";
+import type { SkillResult } from "../commands";
 
 /**
  * 감독이 보드에 거는 요청 — **`board-demand.ts`와 방향이 반대인 별개 상태다**
@@ -191,7 +191,7 @@ export function boardRequestCeiling(state: GameState, kind: BoardRequestKind): n
   return Math.floor(headroomOf(state, kind) * factor);
 }
 
-// ── 접수 (스킬) ────────────────────────────────────────────────
+// ── 접수 (명령) ────────────────────────────────────────────────
 
 export interface RequestBoardInput {
   kind: BoardRequestKind;

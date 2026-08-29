@@ -69,7 +69,7 @@ describe("이력 압축 판정", () => {
     expect(state.chat.length).toBe(before);
   });
 
-  it("브리프의 턴마다 장부 골격이 붙는다 — 스킬 요약과 코어 기록이 [장부] 줄로", () => {
+  it("브리프의 턴마다 장부 골격이 붙는다 — 호출 요약과 코어 기록이 [장부] 줄로", () => {
     const state = sourceOf(38, 1_000);
     state.chat[1]!.toolCalls = [
       {

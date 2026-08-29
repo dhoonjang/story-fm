@@ -1,23 +1,23 @@
 import type { GameToolSpec } from "@story-fm/llm";
 
 /**
- * **받아쓰기 스킬의 묶음 산출** — 해석기가 코어 스킬의 인자를 대신 채운다 (agents.md §1).
+ * **받아쓰기 명령의 묶음 산출** — 해석기가 코어 명령의 인자를 대신 채운다 (agents.md §1).
  *
- * 인자가 값 몇 개인 스킬(오퍼·재계약·훈련·멘토·보드 요청…)은 GM이 장면을 쓰는 왕복에서
+ * 인자가 값 몇 개인 명령(오퍼·재계약·훈련·멘토·보드 요청…)은 GM이 장면을 쓰는 왕복에서
  * 채우면 하나를 빠뜨린다. 그래서 감독의 말 원문을 받은 해석기가 채우는데, 그 스키마를
  * 여기서 **다시 적지 않는다** — 도구 정의(`buildSkillTools`)의 JSON 스키마를 그대로
- * 스킬 이름 아래 배열로 묶는다. 검증도 그 도구의 Zod가 한다. 한 벌이면 갈릴 데가 없다.
+ * 호출 이름 아래 배열로 묶는다. 검증도 그 도구의 Zod가 한다. 한 벌이면 갈릴 데가 없다.
  *
  * 모양: `{ ops: { send_offer: [{...}], open_renewal: [{...}] } }` — 합집합(`anyOf`)을
  * 쓰지 않는 이유는 제공자마다 받는 스키마 부분집합이 달라서다 (tool-schema.ts).
  */
 
-/** 한 스킬을 한 턴에 부를 수 있는 수 — 오퍼 셋은 있어도 여덟은 없다 */
+/** 한 명령을 한 턴에 부를 수 있는 수 — 오퍼 셋은 있어도 여덟은 없다 */
 export const OPS_PER_SKILL = 4;
 
 export type OpsInput = Record<string, unknown[]>;
 
-/** `ops`의 JSON 스키마 — 스킬 이름마다 그 도구의 입력 스키마를 배열로 */
+/** `ops`의 JSON 스키마 — 호출 이름마다 그 도구의 입력 스키마를 배열로 */
 export function buildOpsSchema(
   specs: ReadonlyMap<string, GameToolSpec>,
   names: readonly string[],

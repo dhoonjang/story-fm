@@ -28,10 +28,10 @@ import { toToolSchema } from "./tool-schema";
  * 나오는 것은 `Orders` 하나뿐이다. 가른 이유는 두 일이 다른 것을 요구하기
  * 때문이다 — 해석은 구조와 정확도의 문제이고 중계는 문장의 문제다.
  *
- * ## 스킬을 부르지 않는다
+ * ## 도구를 들지 않는다
  *
- * 산출은 `report_intent` 하나로만 나온다. 그것은 **구조화 출력을 강제하는 그릇**이지
- * 스킬이 아니다(캐스터 종료 턴의 `settle_match`와 같은 자리). 상태를 바꾸는 것은 이
+ * 산출은 `report_intent` 하나로만 나온다. 그것은 도구가 아니라 **이 호출의 출력
+ * 스키마**다(캐스터 종료 턴의 `settle_match`와 같은 자리). 상태를 바꾸는 것은 이
  * 객체를 받은 코어이고, 실재 확인(없는 선수·떠난 표적·우리 쪽 지점)도 거기서 한다.
  * 그래서 프롬프트는 코어가 이미 막는 것을 다시 지시하지 않는다.
  *
@@ -75,7 +75,7 @@ export const APPLY_ORDERS_SYSTEM = `당신은 경기 중 감독의 말을 구조
 - setPieceRoutine — 세트피스에 몇 명이 서는가: ${SET_PIECE_ROUTINE_AXES.map(setPieceRoutineChoiceText).join(" · ")}. 감독이 말한 축만 싣고, 지시를 푸는 말이면 ${SET_PIECE_ROUTINE_NEUTRAL}을 넣는다.
 
 # 선수단 운영 (ops — 평시에만)
-스킬 이름 아래 그 인자를 배열로. 감독이 정한 것만.
+호출 이름 아래 그 인자를 배열로. 감독이 정한 것만.
 - set_training — 훈련의 단일 입구. 감독이 말한 훈련만 등록하고 빈 세션을 채우지 않는다. 날짜 sessions 또는 요일 repeatWeekly에 am·pm, label, focus(능력치 축·tactical·recovery). 없애는 지시는 clear(rest=true면 쉬는 날로 못 박고, false면 특별 훈련만 걷는다). 한 선수의 개인 훈련은 player(axis 또는 position, clear=true면 거둔다). 휴가 중엔 감독이 접겠다고 했을 때만 recallSquad.
 - set_development_focus — 2군 유망주 집중 육성(최대 3). 목록 교체다 — <squad_ops>의 지금 목록에 더하거나 빼서 전체를 다시 적는다. 생략하면 해제.
 - set_mentor — 고참(1군 30세 이상·리더십 55 이상)에게 23세 이하를 맡긴다(멘토당 3). 그 멘토의 멘티 전체를 다시 적는다. menteeIds 생략은 다 푸는 것.
@@ -103,7 +103,7 @@ const ORDERS_TURN_CHARS = 1200;
  * 없으면 빈 문자열.
  */
 /**
- * 해석기가 채우는 **선수단 운영 스킬** — 훈련·집중 육성·멘토·2군 방침·등번호·유스 계약.
+ * 해석기가 채우는 **선수단 운영 명령** — 훈련·집중 육성·멘토·2군 방침·등번호·유스 계약.
  * 평시에만 뜻이 있고, 인자는 그 도구의 스키마 그대로다 (orders-ops.ts).
  */
 export const SQUAD_OPS: readonly string[] = [
@@ -115,7 +115,7 @@ export const SQUAD_OPS: readonly string[] = [
   "sign_youth",
 ];
 
-/** `<squad_ops>` — 운영 스킬이 목록 교체라서 지금 목록을 알아야 하는 것들 */
+/** `<squad_ops>` — 운영 명령이 목록 교체라서 지금 목록을 알아야 하는 것들 */
 function buildSquadOpsBlock(state: GameState): string[] {
   const name = (id: string): string => playerName(state, id);
   const mentoring = (state.mentoring ?? []).filter((m) => m.until === undefined);
@@ -179,7 +179,7 @@ function makeReportTool(
   onIntent: (intent: Orders) => void,
 ): GameToolSpec {
   const base = toToolSchema(OrdersSchema);
-  // 운영 스킬은 평시에만 — 경기 중에는 그 자리가 스키마에 서지 않는다
+  // 운영 명령은 평시에만 — 경기 중에는 그 자리가 스키마에 서지 않는다
   const inputSchema = specs
     ? {
         ...base,

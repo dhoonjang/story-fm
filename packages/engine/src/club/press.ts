@@ -68,8 +68,8 @@ import { derbyRecordOf } from "./derby";
 import { formerClubFactsOf, isFirstMeeting, managerReturnOf } from "./former-club";
 import { reportersOf, rivalVoiceOf } from "../world/persona";
 import { MANAGER_SUBJECT, moveRelation, stanceRelationEvent } from "../world/relations";
-import type { SkillResult } from "../skills";
-import { deltaItems } from "../skills/brief";
+import type { SkillResult } from "../commands";
+import { deltaItems } from "../commands/brief";
 
 /**
  * 기자회견 — **코어는 자리를 만들고 한도를 정하고, 판정은 LLM이 한다.**

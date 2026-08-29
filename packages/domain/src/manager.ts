@@ -16,7 +16,7 @@ import { DateString } from "./date-string";
  *
  * ⚠️ **평판(`ManagerReputation`)의 `media`와 다른 것이다.** 능력치는 감독이 가진
  * 역량이고 평판은 세계가 그를 보는 눈이다 — 미디어는 후자에만 남는다.
- * (능력치 축이던 `media`를 `analysis`로 바꾼 이유: 대응 스킬 하나에만 걸린 축보다
+ * (능력치 축이던 `media`를 `analysis`로 바꾼 이유: 대응 도구 하나에만 걸린 축보다
  * 스카우팅·상대 분석이라는 상시 루프가 감독의 역량으로 읽힌다)
  */
 export const ManagerAttributesSchema = z.object({

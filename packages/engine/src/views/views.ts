@@ -182,7 +182,7 @@ import type {
 } from "@story-fm/domain";
 import { listingOf } from "../market/negotiation";
 import { openManagerOffers, USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
-import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../skills";
+import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../commands";
 import {
   askingPriceFor,
   marketValueOf,

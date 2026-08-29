@@ -42,7 +42,7 @@ import {
   TacticsSpecSchema,
   tacticsSignature,
 } from "@story-fm/domain";
-import type { SkillResult } from "../skills";
+import type { SkillResult } from "../commands";
 import {
   MAX_EXPLOITS,
   accumulateFatigue,
@@ -71,8 +71,8 @@ import { applyResultMood } from "../squad/slump";
 import { derbyForMatch } from "../club/derby";
 import { managerTacticsOf } from "./manager-tactics";
 import { matchRating, type MatchRatingBrief, type PlayerMatchBrief } from "./ratings";
-import { grantManagerXP, IN_MATCH_FAMILIARITY_LOSS } from "../skills";
-import { recallRole } from "../skills/role-memory";
+import { grantManagerXP, IN_MATCH_FAMILIARITY_LOSS } from "../commands";
+import { recallRole } from "../commands/role-memory";
 import { buildMatchPress, openPress } from "../club/press";
 import { easeProneness, openInjuryFor, pronenessOf } from "../squad/injury";
 import { serveSuspensions, simSquadOf, simulateOtherMatches } from "../core/tick";
@@ -105,7 +105,7 @@ import {
   type SkillBrief,
 } from "../core/state";
 import { pickOurPlayer } from "../core/player-ref";
-import { briefNames, item } from "../skills/brief";
+import { briefNames, item } from "../commands/brief";
 import { competitionLabel } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
 import { advanceDomesticCups } from "../competition/domestic-cup";
@@ -843,11 +843,11 @@ export function advanceSegment(state: GameState): {
   /**
    * **굴리기 직전에 판을 다시 계산한다.**
    *
-   * 판을 고치는 스킬마다 각자 `refreshPacket`을 부르게 하면 빠뜨린 스킬의
+   * 판을 고치는 명령마다 각자 `refreshPacket`을 부르게 하면 빠뜨린 명령의
    * 구간은 절반만 새 전술이 된다 — 6축과 개인 지시는 아래 인자로 새로 가는데
    * 존 전력·소화율은 옛 패킷 값이 남는다.
    *
-   * 스킬마다 기억하게 하는 대신 **여기 한 곳**에서 본다. 어느 경로로 상태가
+   * 명령마다 기억하게 하는 대신 **여기 한 곳**에서 본다. 어느 경로로 상태가
    * 바뀌었든 굴러가는 판은 지금 상태다. 구간이 끝난 뒤에도 한 번 더 부르는 이유는
    * 그때 쌓인 피로가 다음 스냅샷에 실려야 하기 때문이다.
    */

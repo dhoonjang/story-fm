@@ -102,7 +102,7 @@ export function reserveAppsBoost(apps: number): number {
 /**
  * 집중 육성 명단 — **우리 2군만 남긴다.** 승격·이적으로 떠난 선수는 여기서
  * 걷어낸다: 1군은 결산 판정(LLM)의 몫이라 코어 배율이 닿을 자리가 없고, 남의
- * 선수는 우리 코치진의 것이 아니다. 스킬(`setDevelopmentFocus`)과 월간 성장이
+ * 선수는 우리 코치진의 것이 아니다. 명령(`setDevelopmentFocus`)과 월간 성장이
  * 같은 문을 지나므로 어느 쪽이 먼저 와도 명단은 같다.
  */
 export function pruneDevelopmentFocus(state: GameState): string[] {

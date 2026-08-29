@@ -807,7 +807,7 @@ function membersOfLeague(
     .map((t) => t.id);
 }
 
-/** 경기·이적창 일정 엔트리 생성 — 훈련 엔트리는 스킬이 따로 만든다 */
+/** 경기·이적창 일정 엔트리 생성 — 훈련 엔트리는 명령이 따로 만든다 */
 export function buildScheduleEntries(
   matches: MatchRecord[],
   windows: TransferWindow[],

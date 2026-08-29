@@ -77,7 +77,7 @@ export const EVENT_CREDIT: Record<SettlingEvent["kind"], number> = {
  *
  * 같은 "격려"라도 통역을 붙여 준 이야기와 지나가며 한 말은 다르다. 그 차이는
  * outcome·intensity 두 눈금으로 표현되지 않으므로, GM이 그 대화가 실제로
- * 얼마짜리였는지를 스킬 인자로 적는다. 코어는 **앵커에서 이만큼까지만** 허용한다 —
+ * 얼마짜리였는지를 명령 인자로 적는다. 코어는 **앵커에서 이만큼까지만** 허용한다 —
  * 판정을 넘기되 눈금이 통째로 밀려나지는 않게.
  */
 export const EVENT_BAND: Record<SettlingEvent["kind"], number> = {

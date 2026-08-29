@@ -1,4 +1,4 @@
-import type { MarketSkillResult } from "../skills";
+import type { MarketSkillResult } from "../commands";
 import type { GamePlayer, Negotiation, NegotiationVerdict, SquadStatus } from "@story-fm/domain";
 import {
   MAX_PAYMENT_YEARS,

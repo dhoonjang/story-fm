@@ -359,7 +359,7 @@ function turnsOfMatch(state: GameState, match: MatchRecord): ChatTurn[] {
 }
 
 /**
- * 라커룸의 결과 — 그 경기의 팀토크 자리와 판정. 스킬 기록의 입력(`team_talk`)에서
+ * 라커룸의 결과 — 그 경기의 팀토크 자리와 판정. 호출 기록의 입력(`team_talk`)에서
  * 읽는다: 코어가 적은 사실이지 중계 문장이 아니다.
  */
 function lockerRoomLine(turns: readonly ChatTurn[]): string | null {
@@ -376,7 +376,7 @@ function lockerRoomLine(turns: readonly ChatTurn[]): string | null {
 
 /**
  * 그라운드를 떠난 우리 선수 — 퇴장·부상·교체. 장부의 사건 목록(`result.events`)이
- * 원본이고, 사건이 남지 않은 옛 세이브는 그 턴의 카드·부상 기록·교체 스킬 입력으로
+ * 원본이고, 사건이 남지 않은 옛 세이브는 그 턴의 카드·부상 기록·교체 명령 입력으로
  * 떨어진다. 없으면 줄을 세우지 않는다.
  */
 function departedLine(
@@ -604,7 +604,7 @@ function opponentBlock(state: GameState): string | null {
 
 /**
  * 회견·찾아온 사람 — **id가 태그의 속성으로 선다.** 답할 자리라 모델이 그 id를
- * 스킬 인자로 되돌려 주어야 하고, 여는 태그가 이름을 대므로 안쪽 첫 줄은 맥락부터
+ * 명령 인자로 되돌려 주어야 하고, 여는 태그가 이름을 대므로 안쪽 첫 줄은 맥락부터
  * 시작한다 (prompts.md §5-1).
  */
 function pressBlock(state: GameState): string | null {

@@ -700,7 +700,7 @@ export function SquadView({
   /**
    * 죽은 공 키커 지정 — **역할과 같은 문을 지난다.** 평시엔 자동 저장에 실리고,
    * 경기 중엔 오퍼레이터 지시가 되어 다음 진행 턴에 실린다 (match.md §8). 평시와
-   * 경기 중이 같은 스킬 하나에 닿는다는 규약을 화면도 그대로 따른다.
+   * 경기 중이 같은 명령 하나에 닿는다는 규약을 화면도 그대로 따른다.
    */
   function chooseTaker(role: SetPieceRole, playerId: string | null) {
     const next = { ...board, setPieces: { ...board.setPieces, [role]: playerId } };

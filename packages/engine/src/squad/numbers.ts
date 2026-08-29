@@ -216,7 +216,7 @@ export function numberBlockText(block: SquadNumberBlock): string {
   }
 }
 
-/** 번호가 옮겨 간 뒤의 사실 — 문장은 스킬과 GM이 쓴다 */
+/** 번호가 옮겨 간 뒤의 사실 — 문장은 명령과 GM이 쓴다 */
 export interface NumberAssignment {
   number: number;
   /** 그가 앞서 달던 번호 — 처음 받는 것이면 null */

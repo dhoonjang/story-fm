@@ -33,7 +33,7 @@ import { outOfBand, reportOf, type Readings } from "../../engine/harness/harness
  *   pnpm balance prompt-regression
  *
  * 재는 것은 둘이다: 프롬프트가 **실려 나가는 모양**(층의 글자·프리픽스 안정성)과,
- * 그 위에서 도는 **코어의 파서·위생**(장면 문법·스킬 선택). 둘 다 결정적이라 고정
+ * 그 위에서 도는 **코어의 파서·위생**(장면 문법·도구 선택). 둘 다 결정적이라 고정
  * 시드 하나면 재현된다.
  *
  * ⚠️ **모델을 부르지 않는다.** 세션은 모의 GM으로 돌므로 API 키가 필요 없고, 키가
@@ -111,9 +111,9 @@ function identical(a: string, b: string): number {
 }
 
 /**
- * 감독 발화 코퍼스 — 발화 하나와 **그 발화가 겨냥한 스킬** 하나.
+ * 감독 발화 코퍼스 — 발화 하나와 **그 발화가 겨냥한 도구** 하나.
  *
- * 조회 도구는 호출 기록을 남기지 않으므로(prompts.md §2) 상태를 바꾸는 스킬만 겨눈다.
+ * 조회 도구는 호출 기록을 남기지 않으므로(prompts.md §2) 상태를 바꾸는 도구만 겨눈다.
  * 선수 이름은 세계에서 꺼낸다 — 카탈로그가 바뀌어도 코퍼스가 따라온다.
  */
 function corpusOf(state: GameState): ReadonlyArray<readonly [string, string]> {
@@ -174,7 +174,7 @@ function casterArm(seed: number): CasterArm {
 }
 
 describe("프롬프트 회귀", () => {
-  it("층의 글자·프리픽스 안정성 · 모의 세션의 문법과 스킬 적중률 · 중계 위생", () => {
+  it("층의 글자·프리픽스 안정성 · 모의 세션의 문법과 도구 적중률 · 중계 위생", () => {
     const state = build(7, "김감독", BACKGROUND);
     const other = build(21, "박감독", OTHER_BACKGROUND);
 
@@ -241,8 +241,8 @@ describe("프롬프트 회귀", () => {
       "중계 시각 헤더 보존율": caster.headers / Math.max(1, caster.turns),
       "시점 헤더 파싱 성공률": headers / corpus.length,
       "평균 장면 글자": sceneChars / corpus.length,
-      "스킬 적중률": hits / corpus.length,
-      "불린 스킬 가짓수": called.size,
+      "도구 적중률": hits / corpus.length,
+      "불린 도구 가짓수": called.size,
     };
 
     console.log(

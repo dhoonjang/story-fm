@@ -93,7 +93,7 @@ function roleOf(message: unknown): string {
  * 그 조각을 누가 썼는가 — **모델이 쓴 것만 output이다.**
  *
  * `assistant`(Anthropic·OpenAI)와 `model`(Gemini)만 모델의 몫이고, 나머지는 전부
- * 모델에 **들어간** 것이다: 우리 발화도, 스킬이 돌려준 `tool_result`도 이력에서는
+ * 모델에 **들어간** 것이다: 우리 발화도, 호출이 돌려준 `tool_result`도 이력에서는
  * user·tool 역할로 적힌다(Anthropic은 tool_result까지 `role:"user"`다).
  */
 function wroteIt(role: string): "in" | "out" | "unknown" {

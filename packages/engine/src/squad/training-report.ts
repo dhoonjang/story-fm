@@ -22,7 +22,7 @@ import { attributeDeclineScale, attributeGainScale } from "../world/attributes";
 import { archetypeTraitsOf } from "../world/player-persona";
 import { mentorAxisBoost, mentorFactorFor } from "./mentoring";
 import { seasonRating } from "@story-fm/domain";
-import { setPlayerPosition } from "../skills";
+import { setPlayerPosition } from "../commands";
 import {
   assignmentsOf,
   isAvailable,

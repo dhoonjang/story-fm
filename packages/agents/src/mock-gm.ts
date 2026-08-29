@@ -99,7 +99,7 @@ import { MAX_REPORT_CARDS, takeArrivedReports } from "./report-cards";
 
 /**
  * mock GM — LLM 없이 도는 결정적 오케스트레이터. e2e·오프라인 개발용이며,
- * 실모드 GM(gm.ts)과 같은 스킬 경로(엔진 함수)만 사용한다. 서사 품질이
+ * 실모드 GM(gm.ts)과 같은 명령 경로(엔진 함수)만 사용한다. 서사 품질이
  * 아니라 "시나리오가 끝까지 도는가"를 보장하는 것이 목적이다.
  */
 
@@ -452,7 +452,7 @@ export function runMockGmTurn(
     ...(arrived && arrived.reports.length > 0 ? { reports: arrived.reports } : {}),
     ...(arrived && arrived.missions.length > 0 ? { missions: arrived.missions } : {}),
     text: computed.text ? `${stamp}\n${computed.text}` : computed.text,
-    // ⚠️ 스킬 자리(line)는 본문 기준이다 — 여기서 헤더가 붙으므로 한 줄씩 밀어야
+    // ⚠️ 호출 자리(line)는 본문 기준이다 — 여기서 헤더가 붙으므로 한 줄씩 밀어야
     // 실모드(헤더 포함 셈)와 눈금이 같다
     toolCalls: computed.toolCalls.map((call) =>
       call.line === undefined || !computed.text ? call : { ...call, line: call.line + 1 },
@@ -478,7 +478,7 @@ function computeMockGmTurn(
    * ── 손잡이 — **아래의 자연어보다 먼저 갈린다** ────────────────────────
    *
    * `message`는 조작에서 만든 표시 문구일 뿐이라 여기서 되읽지 않는다. 아래로
-   * 흘려보내면 그 문구가 다른 갈래의 정규식에 걸려 손잡이 하나가 엉뚱한 스킬을
+   * 흘려보내면 그 문구가 다른 갈래의 정규식에 걸려 손잡이 하나가 엉뚱한 명령을
    * 부른다 — mock이 실모드와 갈라지던 자리가 여기였다 (agents.md §2).
    *
    * 시간 이동은 **평시에만** 뜻이 있다 — 실모드의 `advanceForOperation`과 같은
@@ -521,7 +521,7 @@ function computeMockGmTurn(
     /**
      * 손잡이로 온 진행 — **해석할 것이 없다.** 전술판 조작은 코어가 이미
      * 적용했고(turn-runner), `advance_match`가 뜻하는 것은 한 구간 더뿐이다.
-     * 여기서 문구를 정규식으로 되읽어 스킬을 다시 걸면 **이미 반영된 교체
+     * 여기서 문구를 정규식으로 되읽어 명령을 다시 걸면 **이미 반영된 교체
      * 문구**가 아래 `/교체/`에 걸려 같은 교체가 두 번 일어난다 (실모드에는
      * 없는 갈래다).
      *
@@ -877,7 +877,7 @@ function computeMockGmTurn(
     const slot: "am" | "pm" = /오후|오후에/u.test(msg) ? "pm" : "am"; // 기본 오전
     const session = { label, focus };
     const dows = WEEKDAY_KEYWORDS.filter(([re]) => re.test(msg)).map(([, d]) => d);
-    // 요일 명시 없으면 평일(월~금)에 등록. 스킬이 일정 엔트리를 직접 펼친다 (v6)
+    // 요일 명시 없으면 평일(월~금)에 등록. 명령이 일정 엔트리를 직접 펼친다 (v6)
     const targetDows = dows.length > 0 ? dows : ["1", "2", "3", "4", "5"];
     const input = {
       repeatWeekly: targetDows.map((d) => ({

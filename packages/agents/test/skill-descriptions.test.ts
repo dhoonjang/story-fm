@@ -44,7 +44,7 @@ const STATE = (() => {
 })();
 
 const TOOLS = buildGmTools(STATE, []);
-/** 코어 스킬 전부 — 판을 세우는 것들은 GM에게 보이지 않고 해석이 부른다 (agents.md §1) */
+/** 코어 명령 전부 — 판을 세우는 것들은 GM에게 보이지 않고 해석이 부른다 (agents.md §1) */
 const SKILL_TOOLS = buildSkillTools(STATE, []);
 
 describe("스킬 설명 — 코드가 유일한 원본이다", () => {
@@ -369,7 +369,7 @@ function walk(node: unknown, name = ""): Array<[string, Record<string, unknown>]
 }
 
 /**
- * 산출 도구 셋은 GM 도구가 아니라 저마다의 호출이 강제하는 도구 하나다 — 카탈로그에도
+ * 출력 스키마 셋은 GM 도구가 아니라 저마다의 호출이 강제하는 도구 하나다 — 카탈로그에도
  * `buildGmTools`에도 서지 않는다. 그래도 모델이 받는 입력이라 계약은 같다.
  */
 const RATER_TOOLS = [

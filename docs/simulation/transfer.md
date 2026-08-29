@@ -120,7 +120,7 @@ GM은 감독이 방금 내린 결정의 반대를 장면으로 확정한다.
 
 ## 1-1. 이적 요청 — 선수가 시작하는 매각
 
-**요청은 사건이고 감독의 답은 스킬이다.** 선수가 나가겠다고 말하는 순간 코어가
+**요청은 사건이고 감독의 답은 명령이다.** 선수가 나가겠다고 말하는 순간 코어가
 장부에 한 줄(`state.transferRequests` — `TransferRequest { gamePlayerId, since,
 reason, answeredOn?, answer? }`)을 세우고, 감독은
 `respond_transfer_request(playerId, accept | refuse)`로 답한다. **답할 기한은

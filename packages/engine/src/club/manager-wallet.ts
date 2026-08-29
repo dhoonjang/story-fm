@@ -7,8 +7,8 @@ import { diffDays } from "../core/dates";
 import { pickOurPlayer } from "../core/player-ref";
 import { ownerOf } from "../world/persona";
 import { clampForm, moraleToForm } from "../squad/form";
-import { item } from "../skills/brief";
-import type { SkillResult } from "../skills";
+import { item } from "../commands/brief";
+import type { SkillResult } from "../commands";
 
 /**
  * **감독의 지갑** — 구단 장부와 다른 돈이다 (career.md §5.4 · §7 ·

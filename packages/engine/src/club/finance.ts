@@ -48,7 +48,7 @@ import {
   type GameState,
   type SkillBrief,
 } from "../core/state";
-import { item } from "../skills/brief";
+import { item } from "../commands/brief";
 import { makeRng } from "../core/rng";
 import { catalogTierOf, tierOfTeamIn } from "../core/club-tier";
 

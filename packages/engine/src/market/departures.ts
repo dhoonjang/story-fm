@@ -22,9 +22,9 @@ import { clearRelationsOf, closeTo, MANAGER_SUBJECT, moveRelation } from "../wor
 import { makeRng } from "../core/rng";
 import { assignSquadNumber } from "../squad/numbers";
 import { admitOnLoan, arrivingSquadLevel } from "../squad/registration";
-import type { SkillResult } from "../skills";
-import { forgetRoles } from "../skills/role-memory";
-import { item, signed } from "../skills/brief";
+import type { SkillResult } from "../commands";
+import { forgetRoles } from "../commands/role-memory";
+import { item, signed } from "../commands/brief";
 import { pickAnyPlayer } from "../core/player-ref";
 import {
   activeContract,

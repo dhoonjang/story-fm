@@ -81,10 +81,10 @@ import {
   stanceRow,
   STANCE_KO,
 } from "./press";
-import type { PromiseInput, SkillResult } from "../skills";
+import type { PromiseInput, SkillResult } from "../commands";
 // 면담과 **같은 조각**을 쓴다 — 같은 말이 자리마다 다른 줄로 서지 않게 (people.md §5-2)
-import { promisePiece } from "../skills";
-import { deltaItems, item } from "../skills/brief";
+import { promisePiece } from "../commands";
+import { deltaItems, item } from "../commands/brief";
 import { openPromise, squadStatusOf, startsInWindow } from "../squad/promises";
 
 /**

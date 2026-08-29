@@ -52,10 +52,10 @@ describe("시장 결과 카드와 칩", () => {
   });
 
   /**
-   * 가르는 기준은 **스킬 이름**이다. 모양으로 가르던 때는 카드를 실어야 할 스킬이
+   * 가르는 기준은 **호출 이름**이다. 모양으로 가르던 때는 카드를 실어야 할 호출이
    * payload를 빠뜨려도 그냥 칩이 되어 화면이 코어의 누락을 감췄다.
    */
-  it("카드 스킬은 payload가 성하지 않으면 어느 쪽에도 서지 않고 콘솔에 남는다", () => {
+  it("카드 호출은 payload가 성하지 않으면 어느 쪽에도 서지 않고 콘솔에 남는다", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const call = { name: "send_offer", summary: "아스날에 매각을 제안했습니다" };
 
@@ -80,7 +80,7 @@ describe("시장 결과 카드와 칩", () => {
    * 카드 대상 목록은 `CARD_SKILLS` 하나뿐이다 — 여기와 `skill-surface.test.ts`가
    * 같은 상수를 본다. 둘로 나뉘면 한쪽만 고칠 때 조용히 갈린다.
    */
-  it("CARD_SKILLS의 스킬은 전부 카드로 간다", () => {
+  it("CARD_CALLS의 호출은 전부 카드로 간다", () => {
     for (const name of CARD_SKILLS) {
       const { cards, chips } = splitMarketCalls([{ name, payload: offered }]);
       expect(cards, name).toEqual([offered]);

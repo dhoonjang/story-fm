@@ -72,8 +72,8 @@ import {
   type GameState,
   type SkillBriefItem,
 } from "../core/state";
-import type { SkillResult } from "../skills";
-import { item } from "../skills/brief";
+import type { SkillResult } from "../commands";
+import { item } from "../commands/brief";
 
 /**
  * 감독 시장 — **벤치의 사람도 바뀐다.**

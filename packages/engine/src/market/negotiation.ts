@@ -107,9 +107,9 @@ import { evaluatePitch, latitudeOf } from "./persuasion";
 import { bandOpen, clampToBand, counterBoundsOf, outgoingCounterFloor } from "./counter-bounds";
 import { derivedSquadStatus } from "../squad/promises";
 import { makeRng, pickWeighted } from "../core/rng";
-import type { MarketSkillResult, SkillResult } from "../skills";
-import { grantManagerXP } from "../skills";
-import { deltaItems, item } from "../skills/brief";
+import type { MarketSkillResult, SkillResult } from "../commands";
+import { grantManagerXP } from "../commands";
+import { deltaItems, item } from "../commands/brief";
 import { applyStanceOutcome, buildTransferPress, openPress, signed } from "../club/press";
 import { pickAnyPlayer } from "../core/player-ref";
 import {

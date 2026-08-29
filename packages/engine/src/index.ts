@@ -130,7 +130,7 @@ export * from "./club/manager-wallet";
 export * from "./club/vision";
 
 // skills — 감독 지시(GM 도구)의 실행부
-export * from "./skills";
+export * from "./commands";
 
 // views — 오피스 뷰·읽기 전용 조회
 export * from "./views/views";

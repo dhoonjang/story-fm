@@ -148,7 +148,7 @@ import {
   moveRelation,
   relationFactor,
 } from "../world/relations";
-// 잔향 — 그 대화를 쥔 스킬이 심경 한 문장을 남긴다 (people.md §5)
+// 잔향 — 그 대화를 쥔 호출이 심경 한 문장을 남긴다 (people.md §5)
 import {
   applyMoodNotes,
   TEAM_TALK_MOODS,
@@ -190,7 +190,7 @@ import { pickAnyPlayer, pickOurPlayer, pickPlayerAmong } from "../core/player-re
 import { briefNames, deltaItems, item, signed } from "./brief";
 
 /**
- * 스킬 = 상태 변경의 유일한 통로 (overview §2.2·§5).
+ * 도구와 코어 명령 = 상태 변경의 유일한 통로 (overview §2.2·§5).
  * 판정형: LLM은 {outcome, intensity}만 정하고 변화량은 여기 공식이 정한다
  * (overview §7). 감독 능력치가 계수로 들어간다 (career.md §2).
  */
@@ -204,15 +204,15 @@ export interface SkillResult {
    *
    * 손댄 것을 다 이어 붙인 `message`를 화면이 되쪼개면 한 줄이 글자 벽이 된다.
    *
-   * ⚠️ **말풍선을 갖는 스킬(`PANEL_OF`)은 모두 채운다** — 비우면 그 호출은 말풍선에
+   * ⚠️ **말풍선을 갖는 호출(`PANEL_OF`)은 모두 채운다** — 비우면 그 호출은 말풍선에
    * 서지 않는다. `message`는 모델에게 돌려주는 줄이지 화면의 항목이 아니라서,
    * 화면이 그 줄을 갈라 세우면 코어가 쓴 문장의 첫 줄이 곧 UI가 된다
    * (→ docs/data/game-state.md §3.6).
    */
   brief?: SkillBrief;
   /**
-   * 화면이 카드로 그릴 **구조화된 결과** — 채우는 스킬만 채운다.
-   * 넣지 않는 것이 기본이고, 시장 스킬만은 `MarketSkillResult`로 강제된다.
+   * 화면이 카드로 그릴 **구조화된 결과** — 채우는 호출만 채운다.
+   * 넣지 않는 것이 기본이고, 시장 명령만은 `MarketSkillResult`로 강제된다.
    */
   payload?: unknown;
   /** 결이 좋은가 — 대화형 스킬의 칩 색 (펼치지 않아도 알게) */
@@ -228,7 +228,7 @@ export interface SkillResult {
 }
 
 /**
- * **시장 스킬의 반환 계약** — 성공했으면 카드가 반드시 있다.
+ * **시장 명령의 반환 계약** — 성공했으면 카드가 반드시 있다.
  *
  * 협상·스카우트는 갈 장부가 없어서 채팅 카드가 유일한 자리다(`CARD_SKILLS`).
  * `payload`를 optional로 풀면 빠뜨려도 컴파일이 통과하고, 화면이 조용히 칩으로
@@ -245,7 +245,7 @@ export type MarketSkillResult =
 // ── 선수 지목 ───────────────────────────────────────────
 //
 // 이름 해석은 코어가 한 벌만 갖는다 (`pickOurPlayer`·`pickAnyPlayer`, core/state.ts) —
-// 이적·교체 스킬도 같은 것을 쓴다.
+// 이적·교체 명령도 같은 것을 쓴다.
 
 /** 라인업 한 자리 — 풀리면 id로 바뀐 자리, 아니면 그 이유 */
 function ourSlot(state: GameState, slot: LineupSlotInput): LineupSlotInput | string {
@@ -482,7 +482,7 @@ export function setSquadLevels(
   return { ok: true, message, brief: { head: "1·2군 이동", items } };
 }
 
-/** 1군 인원 하한을 말하는 한 문장 — 두 스킬이 같은 말을 해야 감독이 같은 규칙으로 읽는다 */
+/** 1군 인원 하한을 말하는 한 문장 — 두 명령이 같은 말을 해야 감독이 같은 규칙으로 읽는다 */
 function matchdaySquadFloor(): string {
   const starters = MATCHDAY_SQUAD - MATCHDAY_BENCH;
   return `1군은 매치데이 명단(선발 ${starters} + 벤치 ${MATCHDAY_BENCH})을 채울 ${MATCHDAY_SQUAD}명 이상이어야 합니다`;
@@ -576,7 +576,7 @@ export function setMentor(
   input: { mentorId: string; menteeIds?: string[] },
 ): SkillResult {
   /**
-   * **장부를 먼저 추린다** — 스킬과 월간 성장이 같은 문을 지나야 어느 쪽이 먼저 와도
+   * **장부를 먼저 추린다** — 명령과 월간 성장이 같은 문을 지나야 어느 쪽이 먼저 와도
    * 명단이 같다 (`pruneDevelopmentFocus`가 그런 것과 같은 이유). 나이를 넘긴 멘티가
    * 남아 있으면 감독이 상한에 걸리지 않을 자리에서 걸린다.
    */
@@ -1976,7 +1976,7 @@ export function setPlayerTactic(
   },
 ): SkillResult {
   const notes: string[] = [];
-  /** 항목은 하위 스킬이 각자 낸 것을 잇는다 — 세 조각이 한 줄로 엉키지 않게 */
+  /** 항목은 하위 명령이 각자 낸 것을 잇는다 — 세 조각이 한 줄로 엉키지 않게 */
   const items: SkillBriefItem[] = [];
   /** 이미 바꾼 것이 있는가 — 있으면 뒤따르는 반려는 되돌리지 않고 결과로 적는다 */
   let changed = false;
@@ -2395,7 +2395,7 @@ export function setPlayerPosition(
  * 킥력 최고 · `penaltySkill` 최고)으로 돌아간다 — 감독이 손을 떼는 길이 있어야
  * 한 번 지정한 사람이 팔린 뒤에도 그 이름이 남지 않는다.
  *
- * 평시와 경기 중이 같은 스킬을 지난다. 지정은 팀 전술에 남으므로 그라운드에 없는
+ * 평시와 경기 중이 같은 명령을 지난다. 지정은 팀 전술에 남으므로 그라운드에 없는
  * 선수를 지목해도 반려하지 않는다 — 다음 경기의 선발일 수 있다. 그 경기에서만
  * 기본값이 설 뿐이다.
  */
@@ -2907,7 +2907,7 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillR
   /**
    * 포메이션 이름은 **좌표의 파생값**이라 여기서 갈아 끼우지 않는다 (`shapeOf`).
    * 이름만 바꾸면 판은 그대로인데 장부의 모양이 달라져 화면과 갈라진다 — 판을
-   * 바꾸는 것은 배치 스킬(`setLineup`·`setPlayerTactic`)의 일이다.
+   * 바꾸는 것은 배치 명령(`setLineup`·`setPlayerTactic`)의 일이다.
    */
   const { formation: _shapeName, ...axes } = spec;
   void _shapeName;
@@ -3134,7 +3134,7 @@ export function setPlayerInstruction(
   };
 }
 
-// ---- 훈련: 스킬이 일정 엔트리를 직접 생성한다 (규칙 테이블 없음) ----
+// ---- 훈련: 명령이 일정 엔트리를 직접 생성한다 (규칙 테이블 없음) ----
 
 const TRAIN_ATTRS: TrainAttr[] = [...ATTRIBUTE_AXES, "tactical", "recovery"];
 const WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"];
@@ -3247,7 +3247,7 @@ function addTrainingEntry(
 
 /**
  * 훈련 지정 — 자연어 label + focus(효과 대상). 특정 날짜(sessions) 또는
- * 요일 반복(repeatWeekly)으로 받고, 스킬이 그 즉시 SCHEDULE_ENTRY를 생성한다.
+ * 요일 반복(repeatWeekly)으로 받고, 명령이 그 즉시 SCHEDULE_ENTRY를 생성한다.
  * 반복은 규칙으로 남지 않고 실제 일정으로 펼쳐진다 (v6 — 일정이 단일 원본).
  */
 /**
@@ -3935,7 +3935,7 @@ export function scoutMission(state: GameState, input: ScoutMissionInput): Market
     /**
      * 못 나갔다는 사실을 **표에 남긴다** — 반려 문구는 이 턴에만 살아 있어, 남기지
      * 않으면 다음 턴의 모델에는 이 임무를 읽을 자리가 없다 (player.md §9.4).
-     * 자리가 나도 코어가 대신 보내지 않는다: 상태 전이는 스킬 한 경로뿐이다.
+     * 자리가 나도 코어가 대신 보내지 않는다: 상태 전이는 명령 한 경로뿐이다.
      */
     missions.push(draft);
     return {

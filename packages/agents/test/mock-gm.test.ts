@@ -103,7 +103,7 @@ describe("mock GM — 유저 여정 시나리오", () => {
     expect(turn.text).not.toContain(call.summary);
   });
 
-  it("훈련 지시 → set_training 스킬이 세션을 등록한다", () => {
+  it("훈련 지시 → set_training 명령이 세션을 등록한다", () => {
     const state = newGame();
     const turn = runMockGmTurn(state, "월요일 오전은 세트피스 반복 훈련 잡아줘");
     expectGmGrammar(turn.text);
@@ -152,7 +152,7 @@ describe("mock GM — 유저 여정 시나리오", () => {
     // 경기일에 닿을 때까지 다시 진행시킨다 (감독이 실제로 하는 일과 같다)
     const advanced = runMockGmTurn(state, "다음 경기로 가자");
     expectGmGrammar(advanced.text);
-    // 시계 이동은 스킬이 아니라 코어의 처리 결과라 사람이 읽는 이름으로 남는다
+    // 시계 이동은 도구 호출이 아니라 코어의 처리 결과라 사람이 읽는 이름으로 남는다
     expect(advanced.toolCalls.map((c) => c.name)).toContain(TIME_PASSED);
     let toMatchday = 30;
     while (state.phase !== "matchday" && toMatchday-- > 0) {

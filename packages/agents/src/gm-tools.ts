@@ -1,8 +1,8 @@
 /**
- * GM 도구 바인딩 — 엔진 스킬을 GameToolSpec으로 감싼다.
+ * GM 도구 바인딩 — 엔진 명령을 GameToolSpec으로 감싼다.
  *
  * **전부 평시 GM의 것이다.** 경기 중에는 도구 표면이 0이고, 감독의 말은 지시 해석이
- * JSON 하나로 옮긴 뒤 코어가 같은 엔진 스킬을 직접 부른다 (docs/llm/agents.md §3).
+ * JSON 하나로 옮긴 뒤 코어가 같은 엔진 명령을 직접 부른다 (docs/llm/agents.md §3).
  */
 import { z } from "zod";
 import {
@@ -137,8 +137,8 @@ import { inputError, toToolSchema } from "./tool-schema";
 import { recordCall, type GmToolCall, type SkillReturn } from "./gm-types";
 
 /**
- * **GM에게 보이지 않는 스킬** — 판을 세우는 여덟과 교체. 감독의 전술 지시는
- * `apply_orders`/`apply_orders` 뒤의 지시 해석이 JSON으로 옮기고 코어가 이 스킬들을
+ * **GM에게 보이지 않는 코어 명령** — 판을 세우는 여덟과 교체. 감독의 전술 지시는
+ * `apply_orders`/`apply_orders` 뒤의 지시 해석이 JSON으로 옮기고 코어가 이 명령들을
  * 부른다 (agents.md §1). 설명은 모델에게 가지 않으므로 이름만 든다 — 판정 근거는
  * `APPLY_ORDERS_SYSTEM`의 것이다.
  */
@@ -256,7 +256,7 @@ const settlingArg = (kind: "talk" | "team_talk") =>
     );
 
 /**
- * 심경 잔향 — 그 선수와 있었던 일을 쓴 스킬이 한 문장을 함께 남긴다 (agents.md §4-3).
+ * 심경 잔향 — 그 선수와 있었던 일을 쓴 호출이 한 문장을 함께 남긴다 (agents.md §4-3).
  * 검사는 코어의 것이다(`applyMoodNotes`): 대상 밖의 선수는 버리고, 불만이 걸린 선수의
  * 문장은 `acknowledgesIssue`로 그 사실을 안아야 남는다 — 낱말을 세지 않는다.
  */
@@ -404,14 +404,14 @@ const TRAINING_INPUT = z
   .partial();
 
 /**
- * 지금까지 쓰인 본문 줄 수 — 스킬 칩이 설 자리.
+ * 지금까지 쓰인 본문 줄 수 — 호출 칩이 설 자리.
  * ⚠️ 빈 줄은 세지 않는다 — 화면(`chat.tsx`)과 셈이 갈리면 칩이 한 줄씩 어긋난다.
  */
 function writtenLines(text: string): number {
   return text.split("\n").filter((line) => line.trim().length > 0).length;
 }
 
-/** 실모드 GM의 스킬 도구 바인딩 — 엔진 함수를 GameToolSpec으로 감싼다 */
+/** 실모드 GM의 도구 바인딩 — 엔진 함수를 GameToolSpec으로 감싼다 */
 export function buildSkillTools(
   state: GameState,
   calls: GmToolCall[],
@@ -465,7 +465,7 @@ export function buildSkillTools(
     },
   });
 
-  /** 읽기 전용 조회 도구 — 호출을 기록하지 않는다 (조회 로그가 스킬 칩을 덮는다) */
+  /** 읽기 전용 조회 도구 — 호출을 기록하지 않는다 (조회 로그가 호출 칩을 덮는다) */
   const read = <T>(
     name: string,
     description: string,
@@ -1486,9 +1486,9 @@ const OrdersArgsSchema = z.object({
 });
 
 /**
- * **평시 GM이 받는 도구** — 코어 스킬 전부에서 판을 세우는 것들(`INTERNAL_SKILLS`)을
+ * **평시 GM이 받는 도구** — 코어 명령 전부에서 판을 세우는 것들(`INTERNAL_SKILLS`)을
  * 빼고 `apply_orders` 하나를 얹는다 (agents.md §1·§2). 그 하나의 핸들러 뒤에서 지시
- * 해석이 감독의 말을 JSON으로 옮기고 코어가 내부 스킬을 부른다 — 기록은 내부 스킬의
+ * 해석이 감독의 말을 JSON으로 옮기고 코어가 코어 명령을 부른다 — 기록은 코어 명령의
  * 이름으로 남아 칩과 말풍선이 그대로 선다.
  */
 export function buildGmTools(
@@ -1553,7 +1553,7 @@ export function buildGmTools(
   };
   /**
    * **이적·재정 지시** — 판 지시와 같은 무늬다 (agents.md §1). 감독의 말 원문이 넘어가고
-   * 도구 뒤의 해석기가 시장·장부 스킬의 인자를 채운다. 스킬 자체는 GM에게 보이지 않는다.
+   * 도구 뒤의 해석기가 시장·장부 명령의 인자를 채운다. 명령 자체는 GM에게 보이지 않는다.
    */
   const market: GameToolSpec = {
     name: "market_orders",

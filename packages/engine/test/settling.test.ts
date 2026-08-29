@@ -377,7 +377,7 @@ describe("감독의 말도 정착을 움직인다 (SETTLING_EVENT)", () => {
 describe("무게는 GM이 정하고 경계는 코어가 쥔다", () => {
   const talkAnchor = settlingAnchor("talk", { intensity: 2 });
 
-  it("스킬 인자로 준 무게가 그대로 실린다", () => {
+  it("명령 인자로 준 무게가 그대로 실린다", () => {
     const state = createTestGame(11);
     const target = opponentsOf(state)[0]!;
     sign(state, target.id);
@@ -482,7 +482,7 @@ describe("붙여 준 멘토가 정착을 앞당긴다", () => {
 });
 
 /**
- * 앵커와 대역의 **눈금 자체** — 스킬을 거치지 않고 두 함수만 본다.
+ * 앵커와 대역의 **눈금 자체** — 명령을 거치지 않고 두 함수만 본다.
  *
  * 위 describe가 보는 건 "GM이 준 무게가 어떻게 실리는가"이고, 여기서 고정하는 건
  * 그 무게가 서는 자리다: 종류마다 기본 무게가 다르고(면담 > 팀토크, 주장 지명이

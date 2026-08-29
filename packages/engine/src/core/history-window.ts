@@ -59,7 +59,7 @@ export interface HistoryFoldBrief {
   rounds: number;
   /**
    * 접히는 구간의 원문 — 요약 에이전트가 읽는다. `facts`는 그 턴의 **장부 골격**
-   * (`turnFactLines` — 스킬 호출 요약과 코어 기록)이다: 이적 확정·약속·회견 답·시간
+   * (`turnFactLines` — 호출 요약과 코어 기록)이다: 이적 확정·약속·회견 답·시간
    * 경과가 대사에서만 읽히던 자리라, 요약이 장부가 아는 일을 다시 짓지 않는다 (§5-1).
    */
   turns: ReadonlyArray<{ role: ChatTurn["role"]; text: string; at: string; facts: string[] }>;

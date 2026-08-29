@@ -1164,7 +1164,7 @@ tier 3 감독에게 한 시즌에 **한 번** 온다. 자리를 옮기는 일이
   §9.2 · §9.6). 시즌 상한은 `MANAGER_TERMS_BY_TIER[등급].budgetPledge`의 **절반**이다
   (tier 1 £15M · 2 £7.5M · 3 £3M · 4 £1M) — 상한이 없으면 tier 4에 부임한 엘리트 감독의
   지갑 하나가 그 구단의 한 시즌 예산을 통째로 갈아치운다.
-- **여력은 감독이 금액을 고르는 순간에만 선다** — 사재 출연 스킬의 응답과 GM의 커리어
+- **여력은 감독이 금액을 고르는 순간에만 선다** — 사재 출연 명령의 응답과 GM의 커리어
   카드, 그 둘이다. 실제로 넣을 수 있는 최대는 `min(지갑, 여력)`이라 여력만 따로 세우면
   지갑보다 큰 수가 쓸 수 있는 돈으로 읽힌다. **커리어 화면은 지갑 잔고만 말한다.**
 - **보너스는 주급으로 잰다.** 그 선수 **주급의 몇 주치**인가가 눈금이고 4주치 미만은
@@ -1438,7 +1438,7 @@ board: {
   장부에서 그것을 충족하는 것뿐이고, 조건을 두고 다시 흥정하거나(기한 연장·조건 완화)
   거절해 부분 승인으로 되돌리는 길이 없다 — 왕복은 한 번이다. 방향이 반대인 §5.2의
   흥정과 갈라져 있는 자리다.
-- 전 축이 상한(`skills/index.ts`의 `MANAGER_ATTR_CAP` 90)에 닿은 시나리오의 **게임감**이
+- 전 축이 상한(`commands/index.ts`의 `MANAGER_ATTR_CAP` 90)에 닿은 시나리오의 **게임감**이
   검증되지 않았다. XP는 §3대로 99에서 멈춰 장부는 닫혔지만, 더 오를 곳이 없는 감독에게
   성장 말고 무엇이 남는지는 설계에 없다.
 
@@ -1450,7 +1450,7 @@ board: {
 | 시작 지갑 앵커·판정 한도           | `packages/engine/src/world/onboarding.ts` · `packages/agents/src/onboarding-judge.ts`              |
 | 지갑 입출금·지출 갈래              | `packages/engine/src/club/manager-wallet.ts`                                                       |
 | 능력치·평판·계약·조건 표           | `packages/domain/src/manager.ts`                                                                   |
-| XP·팀토크·면담 계수                | `packages/engine/src/skills/index.ts`                                                              |
+| XP·팀토크·면담 계수                | `packages/engine/src/commands/index.ts`                                                            |
 | 소화율·`tacticalFit`               | `packages/sim/src/strength-packet.ts`                                                              |
 | 훈련 결산 흡수율·인원 상한         | `packages/engine/src/squad/training-report.ts`                                                     |
 | 키포인트 개수·정밀도               | `packages/sim/src/key-points.ts`                                                                   |

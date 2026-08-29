@@ -25,7 +25,7 @@ import { TALK_OUTCOMES, TEAM_TALK_OUTCOMES } from "@story-fm/engine";
  * 여기 오는 것은 "무엇을 하라고 했나"까지이고 "얼마나 먹히나"는 시뮬이 정한다.
  *
  * **실재는 코어가 가린다.** 없는 선수, 그라운드를 떠난 표적, 우리 쪽 공략 지점은
- * 스킬이 거른다. 해석은 감독이 **무엇을 말했는지**까지만 책임진다.
+ * 코어가 거른다. 해석은 감독이 **무엇을 말했는지**까지만 책임진다.
  */
 
 const playerId = z.string().min(1);
@@ -197,7 +197,7 @@ export const OrdersSchema = z.object({
   unresolved: z.string().min(1).max(200).optional().describe("어느 갈래에도 담기지 않은 말"),
 });
 
-/** 해석의 산출 — 평시에는 운영 스킬의 인자(`ops`)가 함께 온다 (orders-ops.ts) */
+/** 해석의 산출 — 평시에는 운영 명령의 인자(`ops`)가 함께 온다 (orders-ops.ts) */
 export type Orders = z.infer<typeof OrdersSchema> & { ops?: Record<string, unknown[]> };
 
 /**

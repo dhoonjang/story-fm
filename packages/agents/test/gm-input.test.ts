@@ -463,7 +463,7 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
 
   /**
    * 경기 → 평시 다리 — 팀토크가 backfired 했는지, 누가 퇴장·교체로 나갔는지는 서사
-   * 줄로는 `<recent>`에 거의 들지 못했다. 코어가 장부(스킬 기록·사건 목록)에서 뽑아
+   * 줄로는 `<recent>`에 거의 들지 못했다. 코어가 장부(호출 기록·사건 목록)에서 뽑아
    * 직전 경기 블록에 세운다 (agents.md §5).
    */
   it("직전 경기 블록에 라커룸 결과와 그라운드를 떠난 사람이 선다", () => {
@@ -1070,7 +1070,7 @@ describe("도구 구성", () => {
   it("시간을 흘리는 도구는 없다 — 시계는 장면 헤더가 움직인다", () => {
     const state = game();
     const names = buildGmTools(state, []).map((t) => t.name);
-    // 시간 진행은 스킬이 아니다 — 모델이 첫 줄 헤더로 선언하고 코어가 받는다
+    // 시간 진행은 도구가 아니다 — 모델이 첫 줄 헤더로 선언하고 코어가 받는다
     expect(names).not.toContain("advance_time");
     expect(names).not.toContain(TIME_PASSED);
     expect(names).not.toContain(MATCH_ADVANCED);
@@ -1128,7 +1128,7 @@ describe("도구 구성", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("스킬이 불린 자리를 남긴다 — 화면이 장면 중간에 칩을 세운다", async () => {
+  it("호출이 불린 자리를 남긴다 — 화면이 장면 중간에 칩을 세운다", async () => {
     const state = game();
     const calls: GmToolCall[] = [];
     const tools = buildSkillTools(state, calls);
