@@ -58,6 +58,20 @@ export const COUNTERPARTY_ACCEPT_AT = 50;
 /** 이 확률 위면 상대가 되부른다 — 그 아래는 결렬 */
 export const COUNTERPARTY_COUNTER_AT = 25;
 /**
+ * **사다리의 바닥** — 이 확률에 못 미치면 되부를 칸이 없다 (transfer.md §12-1).
+ *
+ * 사다리가 ±한 칸인 탓에 결렬의 이웃은 조정뿐이고, 테이블 호출은 언제나 그 이웃으로
+ * 내려왔다 — 결렬 앵커 일곱이 전부 조정이 됐다. 그래서 감독이 정중하기만 하면 가망
+ * 없는 로볼이 창이 닫힐 때까지 살아 있었다. 바닥 아래에서 한 칸을 닫아 코어의 판정이
+ * 서게 한다.
+ *
+ * 값이 조정 문턱의 **절반**인 것은 그 아래가 흥정이 아니라 거절인 자리이기 때문이다:
+ * 잰 네 판에서 호가의 절반을 부른 오퍼가 0%·5%·9%·16%였고, 조정 문턱은 호가의
+ * 6~8할에 걸렸다. 바닥과 조정 문턱 사이(12.5~25%)는 앵커가 결렬이되 상대가 정가를
+ * 되부를 수 있는 구간으로 남는다 — 아슬아슬한 오퍼 하나로 문이 닫히지 않는다.
+ */
+export const COUNTERPARTY_HOPELESS_AT = COUNTERPARTY_COUNTER_AT / 2;
+/**
  * 상대가 앵커 금액에서 움직일 수 있는 폭.
  *
  * 코어가 이미 조정 상한으로 쓰는 폭(`COUNTER_CEILING` 1.15)과 같은 값이다 — 두
@@ -72,7 +86,7 @@ export const COUNTERPARTY_YEARS_BAND = 1;
  */
 export const COUNTERPARTY_STATUS_BAND = 1;
 
-/** 판정의 사다리 — 상대는 앵커에서 **한 칸**까지 움직인다 */
+/** 판정의 사다리 — 상대는 앵커에서 **한 칸**까지 움직인다 (바닥 아래에서는 한 칸도 없다) */
 const LADDER: readonly NegotiationVerdict[] = ["reject", "counter", "accept"];
 
 /** 상대가 실제로 부를 수 있는 값의 구간 — 프롬프트에 적히는 것도 이 값이다 */
@@ -113,7 +127,7 @@ export interface CounterpartyAnchor {
   negotiationId: string;
   /** 코어가 잰 성사 확률 */
   probability: number;
-  /** 확인된 설득 논거가 연 여유(%p) — 사다리의 두 문턱이 이만큼 내려간다 */
+  /** 확인된 설득 논거가 연 여유(%p) — 사다리의 세 문턱이 이만큼 내려간다 */
   latitude: number;
   /** 코어의 판정 — 모델이 죽으면 이것이 그대로 반영된다 */
   verdict: NegotiationVerdict;
@@ -135,7 +149,7 @@ export interface CounterpartyAnchor {
   squadStatus?: SquadStatus;
   /** 그 지위가 움직일 수 있는 폭 — 서열의 구간이다 */
   statusRoom?: TermsRoom;
-  /** 분할 연수를 되부를 수 있는 갈래인가 */
+  /** 분할 연수를 되부를 수 있는가 — 갈래가 나눌 수 있고, 조정을 고를 수 있을 때 */
   splittable: boolean;
   /**
    * **조정에 걸 수 있는 기한** — 대리인 원형의 `ultimatumDays`가 정한다
@@ -188,7 +202,7 @@ function axisOpen(band: CounterBand | null): boolean {
 /**
  * 코어의 판정 — **확률 하나에서 나온다.**
  *
- * 답이 도착한 협상이 아니면 `null`이다. 사다리의 두 문턱은 설득이 연 여유만큼 함께
+ * 답이 도착한 협상이 아니면 `null`이다. 사다리의 세 문턱은 설득이 연 여유만큼 함께
  * 내려간다 (transfer.md §4).
  */
 export function counterpartyAnchor(
@@ -224,12 +238,25 @@ export function counterpartyAnchor(
         : "reject";
   const verdict: NegotiationVerdict =
     ladder === "counter" && !canCounter ? (canAccept ? "accept" : "reject") : ladder;
+  /**
+   * **바닥 아래에는 올라갈 칸이 없다** (`COUNTERPARTY_HOPELESS_AT`). 문턱과 같은
+   * 방향으로 설득의 여유만큼 내려간다 — 셋이 함께 움직여야 설득의 뜻이 한 벌이다.
+   */
+  const hopeless = verdict === "reject" && probability < COUNTERPARTY_HOPELESS_AT - bounds.latitude;
 
   const index = LADDER.indexOf(verdict);
   const allowed = LADDER.filter(
     (v, i) =>
-      Math.abs(i - index) <= 1 && (v !== "accept" || canAccept) && (v !== "counter" || canCounter),
+      Math.abs(i - index) <= 1 &&
+      (v !== "accept" || canAccept) &&
+      (v !== "counter" || (canCounter && !hopeless)),
   );
+  /**
+   * **조정에만 쓰이는 것은 조정을 고를 수 있을 때만 실린다** — 부르는 값과 그 폭,
+   * 분할 연수, 기한. 고를 수 없는 판정의 구간을 서류에 적어 주면 「결렬뿐」이라고
+   * 말한 앵커가 같은 자리에서 되부를 값을 함께 내미는 꼴이 된다.
+   */
+  const canOffer = allowed.includes("counter");
 
   const fee = bounds.fee ? clampToBand(bounds.fee, bounds.fee.expectation) : null;
   const wage = bounds.wage ? clampToBand(bounds.wage, bounds.wage.expectation) : null;
@@ -247,9 +274,7 @@ export function counterpartyAnchor(
   const ultimatumDays = agentProfileOf(state, negotiation.gamePlayerId).ultimatumDays;
   const deadline = ultimatumDays > 0 ? addDays(state.date, ultimatumDays) : null;
   const ultimatumOn =
-    deadline !== null && allowed.includes("counter") && deadline < negotiation.expiresOn
-      ? deadline
-      : undefined;
+    deadline !== null && canOffer && deadline < negotiation.expiresOn ? deadline : undefined;
   return {
     negotiationId: negotiation.id,
     probability,
@@ -257,20 +282,20 @@ export function counterpartyAnchor(
     verdict,
     allowed,
     ...(ultimatumOn === undefined ? {} : { ultimatumOn }),
-    ...(fee === null || !bounds.fee ? {} : { fee, feeRoom: roomOf(fee, bounds.fee) }),
-    ...(wage === null || !bounds.wage
+    ...(fee === null || !bounds.fee || !canOffer ? {} : { fee, feeRoom: roomOf(fee, bounds.fee) }),
+    ...(wage === null || !bounds.wage || !canOffer
       ? {}
       : { weeklyWage: wage, wageRoom: roomOf(wage, bounds.wage) }),
-    ...(years === null || !bounds.years
+    ...(years === null || !bounds.years || !canOffer
       ? {}
       : { contractYears: years, yearsRoom: yearsRoomOf(years, bounds.years) }),
-    ...(status === null || !bounds.status
+    ...(status === null || !bounds.status || !canOffer
       ? {}
       : {
           squadStatus: statusAtRank(status),
           statusRoom: statusRoomOf(status, bounds.status),
         }),
-    splittable: bounds.splittable,
+    splittable: canOffer && bounds.splittable,
     bounds,
   };
 }
