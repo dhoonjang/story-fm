@@ -802,6 +802,52 @@ export const MedicalSchema = z.object({
 });
 export type Medical = z.infer<typeof MedicalSchema>;
 
+// ── 시작 사건 ─────────────────────────────────────────
+/**
+ * **시작 사건** — 부임 첫 주의 진행을 이끄는 열린 실마리 (career.md §1 · agents.md §4-2).
+ *
+ * 온보딩 판정이 배경과 구단의 사실에서 제안하고 코어가 검증해 앉힌다. 아크(`NarrativeArc`)와
+ * 다른 것은 **장부의 사실에서 열리지 않는다**는 점이다 — 아크는 불만·부상·연승이 열고
+ * 닫지만, 시작 사건은 배경이 열고 기한이 닫는다. 그래서 따로 산다.
+ */
+export const OPENING_KINDS = [
+  /** 구단주·보드의 시선 — 무엇을 지켜보는가 */
+  "board",
+  /** 라커룸 — 누가 새 감독을 재는가 */
+  "dressing-room",
+  /** 언론 — 어떤 이름표가 붙었는가 */
+  "press",
+  /** 감독 개인사 — 배경이 남긴 것 */
+  "personal",
+] as const;
+export const OpeningKindSchema = z.enum(OPENING_KINDS);
+export type OpeningKind = z.infer<typeof OpeningKindSchema>;
+export const OPENING_KIND_KO: Record<OpeningKind, string> = {
+  board: "보드",
+  "dressing-room": "라커룸",
+  press: "언론",
+  personal: "개인사",
+};
+export const OPENING_TITLE_MAX = 40;
+export const OPENING_LINE_MAX = 160;
+
+export const OpeningSchema = z.object({
+  id: z.string().min(1),
+  kind: OpeningKindSchema,
+  /** 한 줄 이름 */
+  title: z.string().min(1).max(OPENING_TITLE_MAX),
+  /** 사실의 꼴로 적은 실마리 — 문장은 GM이 쓴다 */
+  line: z.string().min(1).max(OPENING_LINE_MAX),
+  /** 걸린 사람 — 우리 선수의 id 또는 인물의 characterId. 없을 수 있다 */
+  subjectId: z.string().min(1).optional(),
+  openedOn: DateString,
+  /** 이 날이 지나면 닫힌다 — 실마리는 첫 몇 주의 것이다 */
+  dueOn: DateString,
+  /** null = 아직 열려 있다 */
+  resolvedOn: DateString.nullable(),
+});
+export type Opening = z.infer<typeof OpeningSchema>;
+
 /** 테이블의 한 줄에 쓸 수 있는 글자 — 감독의 말도 상대의 답도 이 안이다 */
 export const TABLE_LINE_MAX = 600;
 /**

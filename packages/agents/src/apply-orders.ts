@@ -9,8 +9,8 @@ import {
   setPieceRoutineChoiceText,
   tacticToggleChoiceText,
 } from "@story-fm/domain";
-import { buildLedgerNote, buildOperatorMessage } from "./gm-input";
-import { MatchIntentSchema, type MatchIntent } from "./match-intent-schema";
+import { buildLedgerNote, buildOperatorMessage, buildStandingBlock } from "./gm-input";
+import { OrdersSchema, type Orders } from "./orders-schema";
 import { ModelOutputError, retryOnce, requireToolCall } from "./retry";
 import { toToolSchema } from "./tool-schema";
 
@@ -18,7 +18,7 @@ import { toToolSchema } from "./tool-schema";
  * 지시 해석 — **경기 중 감독의 말을 구조화된 의도 하나로 옮긴다** (agents.md §3).
  *
  * 이 에이전트는 장면도 대사도 쓰지 않는다. 중계는 다음 호출의 몫이고, 여기서
- * 나오는 것은 `MatchIntent` 하나뿐이다. 가른 이유는 두 일이 다른 것을 요구하기
+ * 나오는 것은 `Orders` 하나뿐이다. 가른 이유는 두 일이 다른 것을 요구하기
  * 때문이다 — 해석은 구조와 정확도의 문제이고 중계는 문장의 문제다.
  *
  * ## 스킬을 부르지 않는다
@@ -32,10 +32,10 @@ import { toToolSchema } from "./tool-schema";
  * 중에는 도구 표면이 0이라 `SKILL_CATALOG`의 설명이 실리지 않는다. 없으면 같은 판정이
  * 평시와 경기에서 다른 근거로 내려진다 (docs/llm/prompts.md §5).
  */
-export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조화된 의도 하나로 옮기는 해석기다. 중계도 대사도 쓰지 않는다.
+export const APPLY_ORDERS_SYSTEM = `당신은 경기 중 감독의 말을 구조화된 의도 하나로 옮기는 해석기다. 중계도 대사도 쓰지 않는다.
 
 # 입력
-경기 중에는 <ledger>(명단·시각·교체 횟수) · <standing>(걸려 있는 전술과 개인 지시) · <targets>(공략 목록) · <match_log>(이 경기의 지난 턴 전부 — 중계와 감독의 말), 평시에는 <squad>(포메이션·팀 전술·선발·벤치·예비) · <recent_turns>(지난 턴들) 뒤에 이번 턴 감독의 말이 @감독: 으로 온다.
+경기 중에는 <ledger>(명단·시각·교체 횟수) · <standing>(걸려 있는 전술과 개인 지시) · <targets>(공략 목록) · <match_log>(이 경기의 지난 턴 전부 — 중계와 감독의 말), 평시에는 <standing>(지금 걸려 있는 것 전부 — 6축·갈래·세트피스 인원·지역 전술·개인 지시와 역할·완장·세트피스 키커) · <squad>(선발·벤치·예비와 자리) · <recent_turns>(지난 다섯 턴) 뒤에 이번 턴 감독의 말이 @감독: 으로 온다. 바꾸라는 말은 <standing>의 지금 값에서 움직인다.
 
 # 무엇을 고르나
 감독이 명시한 것만 싣는다. 말하지 않은 축·갈래·자리·역할은 보내지 않는다. 프리셋을 적용하거나 전원을 재배치하지 않는다.
@@ -53,6 +53,7 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 # 판을 바꾸는 것
 - lineup — 평시에 선발을 새로 짜라는 말에만. 열한 명 전부와 자리(포지션 코드), 2군 선수를 올리면 squadLevels에 first로 함께. 한두 자리만 바꾸는 말은 playerTactics다.
 - squadLevels — 층만 옮기는 1·2군 이동.
+- captain — 완장. 주장은 playerId, 부주장은 vice(풀라는 말이면 null). 감독이 말한 자리만.
 - substitutions — 경기 중의 교체. out/in은 <ledger>의 id.
 - tactics — 6축(1~5)과 갈래 넷 중 감독이 말한 것만. 갈래는 눈금이 없다 — ${TACTIC_TOGGLES.map(tacticToggleChoiceText).join(" · ")}.
 - playerTactics — 한 선수의 자리·역할·개인 지시.
@@ -76,7 +77,7 @@ const REPORT_INTENT_TOOL = "report_intent";
  * 중계 턴 본문 하나의 상한 — 지시를 해석하는 데 필요한 것은 누가 무슨 말을 했고 무슨
  * 일이 있었는가이지 중계의 문장 전부가 아니다.
  */
-const MATCH_INTENT_TURN_CHARS = 1200;
+const ORDERS_TURN_CHARS = 1200;
 
 /**
  * `<match_log>` — **이 경기의 지난 턴 전부** (agents.md §3). 감독의 지시는 앞 턴의
@@ -85,19 +86,28 @@ const MATCH_INTENT_TURN_CHARS = 1200;
  * 모델 턴은 본문(잘라서), 감독 턴은 `@감독:` 봉투, 손잡이 턴은 오퍼레이터 봉투다.
  * 없으면 빈 문자열.
  */
-/** 평시의 지난 턴 수 — 이름 없는 지목이 가리키는 대상은 직전 대화에 있다 */
-const PEACE_RECENT_TURNS = 2;
+/**
+ * 평시의 지난 턴 수 — 이름 없는 지목("걔", "아까 그 자리")이 가리키는 대상은 직전
+ * 대화에 있고, 판을 세우는 지시는 며칠에 걸친 대화의 끝에 온다.
+ */
+const PEACE_RECENT_TURNS = 5;
 
-/** 평시의 판 — 스쿼드 뷰(포메이션·전술·선발·벤치)와 지난 두 턴 */
+/**
+ * 평시의 판 — `<tactics>`(지금 걸려 있는 것 전부: 6축·갈래·개인 지시·역할·지역 전술·
+ * 완장·세트피스 키커 — 경기 장부 노트와 같은 블록) · `<squad>`(선발·벤치·예비와
+ * 자리) · `<recent_turns>`(지난 다섯 턴).
+ */
 function buildPeaceContext(state: GameState): string[] {
   const squad = squadView(state, {});
+  const standing = buildStandingBlock(state);
   const turns = state.chat.filter((t) => t.inMatch !== true).slice(-PEACE_RECENT_TURNS);
   const lines = turns.map((t) => {
     if (t.role === "user") return `@감독: ${t.text}`;
     if (t.role === "operator") return buildOperatorMessage(t.text);
-    return t.text.slice(0, MATCH_INTENT_TURN_CHARS);
+    return t.text.slice(0, ORDERS_TURN_CHARS);
   });
   return [
+    ...standing,
     `<squad>`,
     squad.message,
     `</squad>`,
@@ -114,18 +124,18 @@ export function buildMatchLogBlock(state: GameState): string {
   const lines = turns.map((t) => {
     if (t.role === "user") return `@감독: ${t.text}`;
     if (t.role === "operator") return buildOperatorMessage(t.text);
-    return t.text.slice(0, MATCH_INTENT_TURN_CHARS);
+    return t.text.slice(0, ORDERS_TURN_CHARS);
   });
   return ["<match_log>", ...lines, "</match_log>"].join("\n");
 }
 
-function makeReportTool(onIntent: (intent: MatchIntent) => void): GameToolSpec {
+function makeReportTool(onIntent: (intent: Orders) => void): GameToolSpec {
   return {
     name: REPORT_INTENT_TOOL,
     description: "감독의 말을 구조화된 의도로 제출한다. 이 도구로만 답한다.",
-    inputSchema: toToolSchema(MatchIntentSchema),
+    inputSchema: toToolSchema(OrdersSchema),
     handle: (input: unknown) => {
-      const parsed = MatchIntentSchema.safeParse(input);
+      const parsed = OrdersSchema.safeParse(input);
       if (!parsed.success) {
         // 무엇이 틀렸는지 돌려줘야 모델이 같은 실수를 반복하지 않는다
         return { ok: false, message: `형식이 맞지 않습니다 — ${parsed.error.issues[0]?.message}` };
@@ -147,22 +157,22 @@ function makeReportTool(onIntent: (intent: MatchIntent) => void): GameToolSpec {
  * 해석하지 못한 턴에 무언가를 짐작해 적용하면 감독이 내리지 않은 지시가 판에 오르고,
  * 그것은 아무 일도 일어나지 않는 것보다 나쁘다.
  */
-export async function runMatchIntent(
+export async function runOrders(
   state: GameState,
   message: string,
   llm?: GameLLM,
-): Promise<{ ok: true; intent: MatchIntent } | { ok: false; message: string }> {
-  let intent: MatchIntent | null = null;
+): Promise<{ ok: true; intent: Orders } | { ok: false; message: string }> {
+  let intent: Orders | null = null;
   let client = llm;
   const matchLog = buildMatchLogBlock(state);
   try {
     await retryOnce(
-      "match:intent",
+      "orders:apply",
       () =>
         requireToolCall(REPORT_INTENT_TOOL, () => {
-          client ??= createGameLLM(agentConfig("match-intent"));
+          client ??= createGameLLM(agentConfig("apply-orders"));
           return client.runTurn({
-            system: MATCH_INTENT_SYSTEM,
+            system: APPLY_ORDERS_SYSTEM,
             history: [],
             // 명단·현재 6축과 갈래·걸린 지시·공략 표적만 — 분류에 쓰이지 않는 판세는 빠진다
             // 분류기에는 감독의 이름이 없다 — 자리 태그 하나로 감독의 말을 세운다
@@ -191,7 +201,7 @@ export async function runMatchIntent(
      */
     if (intent === null && !(error instanceof ModelOutputError)) throw error;
     // 삼키는 것이 아니라 판정을 아래로 미룬다 — 무슨 일이 있었는지는 남아야 한다
-    console.warn("[match:intent] 해석 호출이 실패했습니다:", error);
+    console.warn("[orders:apply] 해석 호출이 실패했습니다:", error);
   }
   if (intent === null) {
     return { ok: false, message: "지시를 옮기지 못했습니다 — 다시 말씀해 주세요" };

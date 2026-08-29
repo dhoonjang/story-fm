@@ -28,7 +28,7 @@ export const PANEL_OF: Record<string, PanelKey> = {
   set_lineup: "스쿼드",
   set_squad_level: "스쿼드",
   set_tactics: "스쿼드",
-  apply_tactics: "스쿼드",
+  apply_orders: "스쿼드",
   set_player_tactic: "스쿼드",
   // 세트피스는 판의 사실이다 — 키커도 인원도 확인하러 갈 화면은 전술판이 선 스쿼드다
   set_set_piece_takers: "스쿼드",

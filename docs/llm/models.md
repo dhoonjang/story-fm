@@ -14,7 +14,7 @@ version: 1
 max_retries: 2 # 요청 하나를 다시 부르는 횟수 — 제공자 셋이 함께 쓴다 (§1-1)
 agents:
   gm:            { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000, thinking_level: minimal }
-  match-intent:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 16000, timeout_ms: 60000,  thinking_level: minimal }
+  apply-orders:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 16000, timeout_ms: 60000,  thinking_level: minimal }
   match-gm:      { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000, thinking_level: minimal }
   finalize-match:{ provider: google, model: gemini-3.6-flash,      max_tokens: 16000, timeout_ms: 90000,  thinking_level: minimal }
   negotiation-table: { provider: google, model: gemini-3.6-flash,  max_tokens: 8000,  timeout_ms: 60000,  thinking_level: minimal }
@@ -23,16 +23,16 @@ agents:
   onboarding-judge:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 4000,  timeout_ms: 30000,  thinking_level: minimal }
 ```
 
-| 에이전트            | 담당                                     | 출력 상한 | 시한  |
-| ------------------- | ---------------------------------------- | --------- | ----- |
-| `gm`                | 평시 서사 · 의도 해석 · 판정             | 64,000    | 180초 |
-| `match-intent`      | 경기 중 감독의 말 → 의도                 | 16,000    | 60초  |
-| `match-gm`          | 경기 중계 · 벤치 대화 · 도구로 경기 진행 | 64,000    | 180초 |
-| `finalize-match`    | 끝난 경기의 결산 · 마무리 중계           | 16,000    | 90초  |
-| `negotiation-table` | 협상 테이블 건너편 — 감독의 말에 답 하나 | 8,000     | 60초  |
-| `training-rater`    | 훈련 결산                                | 8,000     | 30초  |
-| `history-compactor` | 밀려난 평시 이력 → 요약 한 벌            | 8,000     | 60초  |
-| `onboarding-judge`  | 새 게임의 배경 → 시작 지갑               | 4,000     | 30초  |
+| 에이전트            | 담당                                        | 출력 상한 | 시한  |
+| ------------------- | ------------------------------------------- | --------- | ----- |
+| `gm`                | 평시 서사 · 의도 해석 · 판정                | 64,000    | 180초 |
+| `apply-orders`      | 감독의 판 지시 → 의도 하나 (경기·평시)      | 16,000    | 60초  |
+| `match-gm`          | 경기 중계 · 벤치 대화 · 도구로 경기 진행    | 64,000    | 180초 |
+| `finalize-match`    | 끝난 경기의 결산 · 마무리 중계              | 16,000    | 90초  |
+| `negotiation-table` | 협상 테이블 건너편 — 감독의 말에 답 하나    | 8,000     | 60초  |
+| `training-rater`    | 훈련 결산                                   | 8,000     | 30초  |
+| `history-compactor` | 밀려난 평시 이력 → 요약 한 벌               | 8,000     | 60초  |
+| `onboarding-judge`  | 새 게임의 배경 → 지갑·능력치의 결·시작 사건 | 4,000     | 30초  |
 
 - **해석이 싼 자리로 가는 이유는 그 일이 판단이 아니라 분류이기 때문**이다 — 무엇을
   하라는 말인지 고르는 것이고, 그것이 사실인지와 얼마나 먹히는지는 코어가 정한다.
@@ -557,7 +557,7 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
 - **production에서는 아무 파일도 쓰지 않는다** — 켜지는 조건이 위의 하나뿐이고,
   `LLM_MODE=mock`처럼 기록할 호출이 없는 턴은 파일도 만들지 않는다.
 - **한 채팅 턴은 호출 하나가 아니다.** 평시 턴은 `gm` + 결산 raters, 경기 턴은
-  `match-gm`과 그 도구 뒤의 `match-intent`·`finalize-match`가 함께 돈다. 그래서 키가 호출이
+  `match-gm`과 그 도구 뒤의 `apply-orders`·`finalize-match`가 함께 돈다. 그래서 키가 호출이
   아니라 턴이고, 한 턴을 열면 그 턴에 오간 왕복이 **순서대로 전부** 보인다.
 - **어느 호출이 이 턴의 것인가는 실행 문맥이 정한다**(`AsyncLocalStorage`). 시각이나
   전역 큐로 가르면 두 게임이 같은 프로세스에서 동시에 턴을 돌릴 때 남의 호출이

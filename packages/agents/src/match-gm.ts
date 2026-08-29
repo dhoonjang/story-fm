@@ -10,8 +10,8 @@ import type { GameLLM, GameToolSpec, JsonObjectSchema } from "@story-fm/llm";
 import { finalizeMatchTurn } from "./finalize-match";
 import { buildLedgerNote } from "./gm-input";
 import type { GmToolCall } from "./gm-types";
-import { applyMatchIntent } from "./match-intent-apply";
-import { runMatchIntent } from "./match-intent";
+import { applyOrders } from "./orders-apply";
+import { runOrders } from "./apply-orders";
 import { toToolSchema } from "./tool-schema";
 
 export { buildSegmentMessage, buildShootoutMessage } from "./match-script";
@@ -143,15 +143,15 @@ function ledgerAfter(state: GameState, rolled: boolean): string {
  * 지시 → 판. 해석기가 두 번 실패하면 **반려로 답한다** — 턴은 이어지고 GM은 반려된
  * 대로 쓴다 (agents.md §3). 호출 실패(시한·혼잡)는 그대로 올라간다.
  */
-async function applyOrders(
+async function runOrdersTool(
   state: GameState,
   ctx: MatchToolContext,
   orders: string,
 ): Promise<{ ok: boolean; message: string }> {
   const roll = false;
-  const parsed = await runMatchIntent(state, orders);
+  const parsed = await runOrders(state, orders);
   if (!parsed.ok) return { ok: false, message: parsed.message };
-  const applied = applyMatchIntent(state, parsed.intent, ctx.calls, ctx.goals, ctx.cards, {
+  const applied = applyOrders(state, parsed.intent, ctx.calls, ctx.goals, ctx.cards, {
     roll,
   });
   // 굴리지 않은 지시도 판을 다시 계산한다 — 다음 구간이 이 패킷으로 구르고, GM은 그것을 미리 읽는다
@@ -188,7 +188,7 @@ export function buildMatchTools(
         handle: async (input: unknown) => {
           const p = OrdersSchema.safeParse(input);
           if (!p.success) return { ok: false, message: "orders에 감독의 말을 그대로 적으세요" };
-          return applyOrders(state, ctx, p.data.orders);
+          return runOrdersTool(state, ctx, p.data.orders);
         },
       },
       {
@@ -199,7 +199,7 @@ export function buildMatchTools(
           if (pending.ledger.phase === "finished" && !awaitingShootout(state)) {
             return { ok: false, message: "경기가 끝났습니다 — 마감할 차례입니다" };
           }
-          const applied = applyMatchIntent(state, {}, ctx.calls, ctx.goals, ctx.cards, {
+          const applied = applyOrders(state, {}, ctx.calls, ctx.goals, ctx.cards, {
             roll: true,
           });
           return {

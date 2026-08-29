@@ -14,17 +14,17 @@ import {
   type GoalMark,
 } from "@story-fm/engine";
 import {
-  applyMatchIntent,
+  applyOrders,
   buildLedgerNote,
   buildSegmentMessage,
   GmTurnFailure,
   MATCH_ADVANCED,
-  MatchIntentSchema,
+  OrdersSchema,
   runGmTurn,
   stampMatchScene,
   stampMatchStream,
   type GmToolCall,
-  type MatchIntent,
+  type Orders,
 } from "@story-fm/agents";
 import { LlmTimeoutError, type GameToolSpec, type TurnRequest } from "@story-fm/llm";
 import { ModelOutputError } from "../src/retry";
@@ -72,15 +72,15 @@ const matchState = (): GameState => structuredClone(KICKOFF);
 /** 한 턴 — 해석이 냈을 의도를 그대로 코어에 넣는다 (LLM은 이 경로에 없다) */
 function turn(
   state: GameState,
-  intent: MatchIntent,
+  intent: Orders,
   goals: GoalMark[] = [],
   cards: CardMark[] = [],
   calls: GmToolCall[] = [],
 ) {
-  return { applied: applyMatchIntent(state, intent, calls, goals, cards), calls, goals, cards };
+  return { applied: applyOrders(state, intent, calls, goals, cards), calls, goals, cards };
 }
 
-const GO: MatchIntent = { advance: "segment" };
+const GO: Orders = { advance: "segment" };
 
 /** 요청이 강제한 도구 — 어느 에이전트의 호출인지는 이것이 가른다 */
 const forced = (req: TurnRequest): string | undefined =>
@@ -141,7 +141,7 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
 
   /**
    * **경기 중에도 세트피스 인원이 장부에 닿는다** (match.md §2). 의도의 갈래 하나가
-   * 평시와 같은 스킬을 지나는 자리라, 이름이 어긋나면 `applyMatchIntent`의 `call`이
+   * 평시와 같은 스킬을 지나는 자리라, 이름이 어긋나면 `applyOrders`의 `call`이
    * 조용히 아무것도 하지 않는다 — 감독에게는 지시가 걸린 것처럼 보이는 거짓 성공이다.
    */
   it("세트피스 인원 지시가 그 턴에 팀 전술로 들어간다", () => {
@@ -259,7 +259,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
   }
 
   /** 해석기 흉내 — 지시 하나를 낸다 (advance는 의도의 것이 아니다) */
-  const interpreter = async (req: TurnRequest, intent: MatchIntent = {}) => {
+  const interpreter = async (req: TurnRequest, intent: Orders = {}) => {
     const tool = req.tools?.find((t) => t.name === "report_intent");
     if (tool) await tool.handle(intent);
     return answered("", tool ? 1 : 0);
@@ -352,7 +352,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
   it("도구 뒤의 해석이 시한을 넘기면 그 오류가 종류를 든 채 올라간다", async () => {
     const state = rolling();
     const minute = state.pendingMatch!.ledger.minute;
-    const thrown = new LlmTimeoutError("match-intent", 60_000);
+    const thrown = new LlmTimeoutError("apply-orders", 60_000);
     runTurn.mockImplementation(async (req: TurnRequest) => {
       if (forced(req) === "report_intent") throw thrown;
       const orders = req.tools?.find((t) => t.name === "apply_orders");
@@ -771,21 +771,25 @@ describe("평시 GM 턴 — 상한을 도구로 채운 턴", () => {
     stopReason: "tool_use" as const,
   });
 
-  it("장면이 비어도 코어 기록이 model 턴에 남는다 — 바뀐 완장과 함께", async () => {
+  it("장면이 비어도 코어 기록이 model 턴에 남는다 — 바뀐 등번호와 함께", async () => {
     const state = structuredClone(IDLE);
+    const taken = new Set(
+      state.players.filter((p) => p.teamId === state.userTeamId).map((p) => p.squadNumber),
+    );
+    const number = [...Array(99).keys()].map((i) => i + 1).find((n) => !taken.has(n))!;
     const skipper = state.players.find((p) => p.teamId === state.userTeamId && !p.isCaptain)!;
     runTurn.mockImplementationOnce(async (req: { tools?: GameToolSpec[] }) => {
-      const tool = req.tools?.find((spec) => spec.name === "set_captain");
-      expect((await tool?.handle({ playerId: skipper.name }))?.ok).toBe(true);
+      const tool = req.tools?.find((spec) => spec.name === "set_squad_number");
+      expect((await tool?.handle({ playerId: skipper.name, number }))?.ok).toBe(true);
       // 상한을 채운 턴의 증상 — 작업 서술 한 줄만 남고 장면이 없다
-      return capped("완장을 옮기겠습니다.");
+      return capped("등번호를 옮기겠습니다.");
     });
 
-    const turn = await runGmTurn(state, `${skipper.name}한테 완장 줘`);
+    const turn = await runGmTurn(state, `${skipper.name} 등번호 ${number}번으로`);
 
     // 상태는 바뀐 채로 남는다 — 되돌리면 감독의 지시가 함께 사라진다
-    expect(state.players.find((p) => p.id === skipper.id)!.isCaptain).toBe(true);
-    expect(turn.toolCalls.map((call) => call.name)).toContain("set_captain");
+    expect(state.players.find((p) => p.id === skipper.id)!.squadNumber).toBe(number);
+    expect(turn.toolCalls.map((call) => call.name)).toContain("set_squad_number");
     // 장면 자리에는 코어의 기록이 선다 — 시점 헤더와 `@:` 내레이션
     expect(turn.text.startsWith("[")).toBe(true);
     expect(turn.text.split("\n").some((line) => line.startsWith("@:"))).toBe(true);
@@ -807,7 +811,7 @@ describe("평시 GM 턴 — 상한을 도구로 채운 턴", () => {
  */
 describe("경기 의도 스키마의 경계", () => {
   const ids = (n: number) => Array.from({ length: n }, (_, i) => `p${i}`);
-  const parses = (intent: unknown) => MatchIntentSchema.safeParse(intent).success;
+  const parses = (intent: unknown) => OrdersSchema.safeParse(intent).success;
 
   it("한 턴에 담기는 갈래마다 개수 상한이 있다", () => {
     const talk = (n: number) =>

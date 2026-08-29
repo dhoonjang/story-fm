@@ -8,7 +8,7 @@ import type { LlmProvider } from "./game-llm";
 export const AGENT_NAMES = [
   "gm",
   "match-gm",
-  "match-intent",
+  "apply-orders",
   "finalize-match",
   "negotiation-table",
   "training-rater",
@@ -157,7 +157,7 @@ const LlmConfigFileSchema = z
       .object({
         gm: RawAgentConfigSchema,
         "match-gm": RawAgentConfigSchema,
-        "match-intent": RawAgentConfigSchema,
+        "apply-orders": RawAgentConfigSchema,
         "finalize-match": RawAgentConfigSchema,
         "negotiation-table": RawAgentConfigSchema,
         "training-rater": RawAgentConfigSchema,

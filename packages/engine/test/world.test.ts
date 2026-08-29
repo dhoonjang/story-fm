@@ -33,6 +33,14 @@ import {
   buildTransferWindows,
   windowOpenOn,
   interpretBackgroundHeuristic,
+  clampJudgedAttributes,
+  seedOpenings,
+  tickOpenings,
+  ATTRIBUTE_JUDGE_BAND,
+  ATTRIBUTE_SUM_BAND,
+  MAX_OPENINGS,
+  OPENING_DAYS,
+  addDays,
   specialtyAxesOf,
   careerTierOf,
   teamFloorOf,
@@ -974,5 +982,50 @@ describe("가명 매핑 (sources.md §7.3)", () => {
     const names = pseudonymSquad("이탈리아", squad);
     expect(new Set(names.map((n) => n.nameKo)).size).toBe(squad.length);
     expect(new Set(names.map((n) => n.nameEn)).size).toBe(squad.length);
+  });
+});
+
+describe("온보딩 판정 — 능력치의 결과 시작 사건 (career.md §1)", () => {
+  const anchor = { leadership: 50, tactics: 50, training: 50, negotiation: 50, analysis: 50 };
+
+  it("판정이 없으면 앵커가 그대로고, 축은 ±폭으로 잘린다", () => {
+    expect(clampJudgedAttributes(undefined, anchor)).toEqual(anchor);
+    const wide = clampJudgedAttributes({ tactics: 99, training: 10 }, anchor);
+    expect(wide.tactics).toBe(50 + ATTRIBUTE_JUDGE_BAND);
+    expect(wide.training).toBe(50 - ATTRIBUTE_JUDGE_BAND);
+    expect(wide.leadership).toBe(50);
+  });
+
+  it("합이 폭을 넘으면 델타를 비례 축소한다 — 총량은 앵커가 쥔다", () => {
+    const up = clampJudgedAttributes(
+      { leadership: 58, tactics: 58, training: 58, negotiation: 58, analysis: 58 },
+      anchor,
+    );
+    const sum = Object.values(up).reduce((a, b) => a + b, 0);
+    expect(sum - 250).toBeLessThanOrEqual(ATTRIBUTE_SUM_BAND);
+    // 결은 남는다 — 다섯 축이 같은 만큼 올랐으니 같은 값이다
+    expect(new Set(Object.values(up)).size).toBe(1);
+  });
+
+  it("시작 사건은 셋까지, 실재하는 사람에게만, 기한은 코어가 박고 지나면 닫힌다", () => {
+    const state = createTestGame();
+    const ours = state.players.find((p) => p.teamId === state.userTeamId)!;
+    const seeded = seedOpenings(state, [
+      { kind: "press", title: "낙하산", line: "지역지가 연줄을 물었다" },
+      { kind: "dressing-room", title: "주장의 시선", line: "새 감독을 잰다", subjectId: ours.id },
+      { kind: "board", title: "없는 사람", line: "…", subjectId: "nobody" },
+      { kind: "personal", title: "빚", line: "부임 전의 빚" },
+      { kind: "personal", title: "넷째", line: "상한 밖" },
+    ]);
+    expect(seeded).toBe(MAX_OPENINGS);
+    expect(state.openings!.map((o) => o.title)).toEqual(["낙하산", "주장의 시선", "빚"]);
+    expect(state.openings![0]!.dueOn).toBe(addDays(state.date, OPENING_DAYS));
+    const digest: string[] = [];
+    tickOpenings(state, digest);
+    expect(state.openings!.every((o) => o.resolvedOn === null)).toBe(true);
+    state.date = addDays(state.date, OPENING_DAYS + 1);
+    tickOpenings(state, digest);
+    expect(state.openings!.every((o) => o.resolvedOn !== null)).toBe(true);
+    expect(digest).toHaveLength(MAX_OPENINGS);
   });
 });

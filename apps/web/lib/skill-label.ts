@@ -14,7 +14,7 @@ export const SKILL_LABEL: Record<string, string> = {
   accept_manager_offer: "감독직 수락",
   counter_manager_offer: "감독직 흥정",
   apply_manager_job: "감독직 지원",
-  apply_tactics: "전술 지시",
+  apply_orders: "전술 지시",
   speak_at_table: "테이블",
   set_lineup: "라인업",
   set_squad_level: "1·2군 이동",

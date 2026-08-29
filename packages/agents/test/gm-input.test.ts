@@ -49,6 +49,7 @@ import {
   buildGmReference,
   buildGmStateNote,
   buildGmTools,
+  buildSkillTools,
   buildMatchReference,
   describeCharacters,
   describeClub,
@@ -1130,7 +1131,7 @@ describe("도구 구성", () => {
   it("스킬이 불린 자리를 남긴다 — 화면이 장면 중간에 칩을 세운다", async () => {
     const state = game();
     const calls: GmToolCall[] = [];
-    const tools = buildGmTools(state, calls);
+    const tools = buildSkillTools(state, calls);
     const captain = tools.find((t) => t.name === "set_captain")!;
     const target = userPlayers(state)[0]!;
     // 헤더 한 줄 + 지문 + 대사까지 쓴 뒤에 불렸다 (빈 줄은 세지 않는다)
@@ -1169,7 +1170,7 @@ describe("도구 구성", () => {
   it("자리를 안 넘기면 남기지 않는다 — 옛 기록처럼 맨 앞에 선다", async () => {
     const state = game();
     const calls: GmToolCall[] = [];
-    const tools = buildGmTools(state, calls);
+    const tools = buildSkillTools(state, calls);
     tools.find((t) => t.name === "set_captain")!.handle({ playerId: userPlayers(state)[0]!.id });
     expect(calls[0]!.line).toBeUndefined();
   });

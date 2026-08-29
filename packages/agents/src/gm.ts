@@ -38,7 +38,7 @@ import { buildOnboardingTurn, runMockGmTurn } from "./mock-gm";
 import { retryOnce, ModelOutputError } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
 import { buildGmTools } from "./gm-tools";
-import { applyMatchIntent, type AppliedIntent } from "./match-intent-apply";
+import { applyOrders, type AppliedOrders } from "./orders-apply";
 import {
   buildGmDigest,
   buildGmHistory,
@@ -339,9 +339,9 @@ async function runRealGmTurn(
    * 킥오프 턴은 지나간다 — 감독이 아직 아무것도 지시하지 않았고, 첫 휘슬만 여는
    * 자리라 구간이 굴러가면 안 된다.
    */
-  let applied: AppliedIntent | null = null;
+  let applied: AppliedOrders | null = null;
   if (inMatch && !kickoff && operator) {
-    applied = applyMatchIntent(state, {}, calls, goals, cards, { roll: true });
+    applied = applyOrders(state, {}, calls, goals, cards, { roll: true });
   }
   /** 마감이 지운 장부의 마지막 분 — 화면의 시각 줄이 읽는다 (agents.md §3) */
   let finalMinute: number | null = null;

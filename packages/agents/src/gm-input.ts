@@ -16,6 +16,7 @@ import {
   clubHonoursLine,
   coachCues,
   describeActiveArcs,
+  describeOpenings,
   computeStandings,
   dayOfWeek,
   describeBuyBackRights,
@@ -64,6 +65,7 @@ import {
   squadReturnOf,
   subLimitsOf,
   tacticsOf,
+  playersOf,
   teamName,
   topNarrative,
   userPlayers,
@@ -1401,11 +1403,84 @@ export function buildGmStateNote(
     // 활성 서사 아크 — 닫힐 때까지 매 턴 실려 GM이 시즌을 가로지르는 흐름을 잃지 않는다
     // (people.md §9). 개폐도 사실 줄도 코어의 것이다
     block("arcs", describeActiveArcs(state)),
+    // 시작 사건 — 부임 첫 몇 주의 실마리. 기한이 닫을 때까지 매 턴 선다 (career.md §1)
+    block("openings", describeOpenings(state)),
     block("recent", recent.map((r) => `- ${r}`).join("\n")),
     `</snapshot>`,
   ]
     .filter((x): x is string => x !== null)
     .join("\n");
+}
+
+/**
+ * `<standing>` — **지금 우리가 걸어 둔 것 전부**: 6축과 갈래·세트피스 인원·지역 전술·
+ * 개인 지시와 역할·완장·세트피스 키커. 경기 장부 노트와 평시의 지시 해석이 같은 블록을
+ * 읽는다 — 두 벌이면 "압박 올려"의 지금 값이 한쪽에서 지어내진다 (agents.md §1).
+ */
+export function buildStandingBlock(
+  state: GameState,
+  regionalPlans?: NonNullable<GameState["pendingMatch"]>["regionalPlans"],
+): string[] {
+  const squad = playersOf(state, state.userTeamId);
+  const captain = squad.find((p) => p.isCaptain);
+  const vice = squad.find((p) => p.isViceCaptain === true);
+  const takers = tacticsOf(state, state.userTeamId).setPieceTakers ?? {};
+  const takerName = (id: string | undefined): string => (id ? playerName(state, id) : "지정 없음");
+  /**
+   * **지금 내가 무엇을 걸어 뒀는가** — 경기 중에는 평시 스냅샷(6축이 적힌 줄)이
+   * 실리지 않아 여기가 유일한 자리다. 없으면 "압박 올려"에 지금 값이 지어내진다.
+   */
+  const ourTeamTactics = tacticsOf(state, state.userTeamId);
+  const ourTactics = ourTeamTactics.spec;
+  const assignments = ourTeamTactics.assignments.filter(
+    (a) => a.role === "starting" && (a.directive || a.instruction || a.roleId),
+  );
+  /**
+   * 걸어 둔 갈래 — **중립인 것은 세우지 않는다** (`tacticsBrief`와 같은 규칙).
+   * 낱말은 `TACTIC_TOGGLES` 하나에서 온다 — 손으로 적으면 해석 프롬프트가 가르치는
+   * 낱말과 이 줄이 갈린다 (prompts.md §5-2).
+   */
+  const ourToggles = TACTIC_TOGGLES.flatMap((toggle) => {
+    const value = tacticToggleValue(ourTactics, toggle.key);
+    return value === null ? [] : [`${toggle.brief} ${tacticToggleWord(toggle.key, value)}`];
+  });
+  /**
+   * 걸어 둔 세트피스 지시 — 갈래와 **같은 규칙으로 중립은 서지 않는다.** 이 줄이
+   * 없으면 걸어 둔 축이 「지금 걸어 둔 것」 목록에서 빠져, 인원을 올려 둔 판을 두고
+   * 모델이 세트피스는 손대지 않았다고 답한다 (match.md §2).
+   */
+  const ourRoutine = SET_PIECE_ROUTINE_AXES.flatMap((axis) => {
+    const level = setPieceRoutineLevel(ourTeamTactics.setPieceRoutine, axis.key);
+    return level === SET_PIECE_ROUTINE_NEUTRAL
+      ? []
+      : [`${axis.label} ${setPieceRoutineWord(axis.key, level)}`];
+  });
+  return [
+    `<standing>`,
+    `전술 ${ourTactics.formation} · 멘탈${ourTactics.mentality} 라인${ourTactics.defensiveLine} ` +
+      `압박${ourTactics.pressing} 템포${ourTactics.tempo} 폭${ourTactics.width} 패스${ourTactics.passStyle}` +
+      (ourToggles.length > 0 ? ` · ${ourToggles.join(" · ")}` : ``) +
+      (ourRoutine.length > 0 ? ` · ${SET_PIECE_KO} ${ourRoutine.join(" · ")}` : ``),
+    regionalPlans && regionalPlans.length > 0
+      ? `지역 전술: ${regionalPlans
+          .map((r) => `${r.band}/${r.lane} ${r.intent} "${r.note}"`)
+          .join(" · ")} (동시에 2곳까지 — 셋째를 걸면 가장 오래된 것이 밀린다)`
+      : `지역 전술: 없음`,
+    assignments.length > 0
+      ? `개인 지시·역할: ${assignments
+          .map(
+            (a) =>
+              `${playerName(state, a.playerId)}(${a.position}` +
+              `${a.roleId ? ` ${a.roleId}` : ""}` +
+              `${a.directive ? ` [${a.directive.kind}]` : ""}` +
+              `${a.instruction && !a.directive ? ` "말로만: ${a.instruction}"` : ""})`,
+          )
+          .join(", ")}`
+      : `개인 지시·역할: 없음`,
+    `주장: ${captain ? playerName(state, captain.id) : "없음"} · 부주장: ${vice ? playerName(state, vice.id) : "없음"}`,
+    `세트피스 키커: 코너 ${takerName(takers.corner)} · 프리킥 ${takerName(takers.freeKick)} · 페널티 ${takerName(takers.penalty)}`,
+    `</standing>`,
+  ];
 }
 
 /**
@@ -1488,60 +1563,7 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
           `</targets>`,
         ]
       : [];
-  /**
-   * **지금 내가 무엇을 걸어 뒀는가** — 경기 중에는 평시 스냅샷(6축이 적힌 줄)이
-   * 실리지 않아 여기가 유일한 자리다. 없으면 "압박 올려"에 지금 값이 지어내진다.
-   */
-  const ourTeamTactics = tacticsOf(state, state.userTeamId);
-  const ourTactics = ourTeamTactics.spec;
-  const assignments = ourTeamTactics.assignments.filter(
-    (a) => a.role === "starting" && (a.directive || a.instruction || a.roleId),
-  );
-  /**
-   * 걸어 둔 갈래 — **중립인 것은 세우지 않는다** (`tacticsBrief`와 같은 규칙).
-   * 낱말은 `TACTIC_TOGGLES` 하나에서 온다 — 손으로 적으면 해석 프롬프트가 가르치는
-   * 낱말과 이 줄이 갈린다 (prompts.md §5-2).
-   */
-  const ourToggles = TACTIC_TOGGLES.flatMap((toggle) => {
-    const value = tacticToggleValue(ourTactics, toggle.key);
-    return value === null ? [] : [`${toggle.brief} ${tacticToggleWord(toggle.key, value)}`];
-  });
-  /**
-   * 걸어 둔 세트피스 지시 — 갈래와 **같은 규칙으로 중립은 서지 않는다.** 이 줄이
-   * 없으면 걸어 둔 축이 「지금 걸어 둔 것」 목록에서 빠져, 인원을 올려 둔 판을 두고
-   * 모델이 세트피스는 손대지 않았다고 답한다 (match.md §2).
-   */
-  const ourRoutine = SET_PIECE_ROUTINE_AXES.flatMap((axis) => {
-    const level = setPieceRoutineLevel(ourTeamTactics.setPieceRoutine, axis.key);
-    return level === SET_PIECE_ROUTINE_NEUTRAL
-      ? []
-      : [`${axis.label} ${setPieceRoutineWord(axis.key, level)}`];
-  });
-  const standingLines = [
-    ``,
-    `<standing>`,
-    `전술 ${ourTactics.formation} · 멘탈${ourTactics.mentality} 라인${ourTactics.defensiveLine} ` +
-      `압박${ourTactics.pressing} 템포${ourTactics.tempo} 폭${ourTactics.width} 패스${ourTactics.passStyle}` +
-      (ourToggles.length > 0 ? ` · ${ourToggles.join(" · ")}` : ``) +
-      (ourRoutine.length > 0 ? ` · ${SET_PIECE_KO} ${ourRoutine.join(" · ")}` : ``),
-    pending.regionalPlans && pending.regionalPlans.length > 0
-      ? `지역 전술: ${pending.regionalPlans
-          .map((r) => `${r.band}/${r.lane} ${r.intent} "${r.note}"`)
-          .join(" · ")} (동시에 2곳까지 — 셋째를 걸면 가장 오래된 것이 밀린다)`
-      : `지역 전술: 없음`,
-    assignments.length > 0
-      ? `개인 지시·역할: ${assignments
-          .map(
-            (a) =>
-              `${playerName(state, a.playerId)}(${a.position}` +
-              `${a.roleId ? ` ${a.roleId}` : ""}` +
-              `${a.directive ? ` [${a.directive.kind}]` : ""}` +
-              `${a.instruction && !a.directive ? ` "말로만: ${a.instruction}"` : ""})`,
-          )
-          .join(", ")}`
-      : `개인 지시·역할: 없음`,
-    `</standing>`,
-  ];
+  const standingLines = ["", ...buildStandingBlock(state, pending.regionalPlans)];
   // 사건은 싣지 않는다 — 코어가 이미 굴린 구간은 <segment>로 따로
   // 실린다. 이 블록은 그 구간이 끝난 자리의 장부다 (agents.md §3)
   /**

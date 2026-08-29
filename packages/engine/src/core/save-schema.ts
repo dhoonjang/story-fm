@@ -20,6 +20,7 @@ import {
   MatchRecordSchema,
   MentoringSchema,
   NarrativeArcSchema,
+  OpeningSchema,
   NarrativeNoteSchema,
   NegotiationSchema,
   PaymentScheduleSchema,
@@ -151,6 +152,8 @@ export const SaveSchema = z
     /** 관계 점수 — 움직인 쌍만 앉는다 (people.md §6). 옛 세이브엔 없다 */
     relations: z.array(RelationSchema).optional(),
     arcs: z.array(NarrativeArcSchema).optional(),
+    /** 시작 사건 (career.md §1). 옛 세이브엔 없다 */
+    openings: z.array(OpeningSchema).optional(),
     paymentSchedules: z.array(PaymentScheduleSchema).optional(),
     developmentFocus: z.array(z.string()).optional(),
     mentoring: z.array(MentoringSchema).optional(),

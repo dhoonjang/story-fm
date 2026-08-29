@@ -127,18 +127,18 @@ import {
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
 
 import { skillDescriptions } from "./skill-descriptions";
-import { runMatchIntent } from "./match-intent";
+import { runOrders } from "./apply-orders";
 import { runTableReply } from "./negotiation-table";
 import { MONEY_MAX, WAGE_MAX, money } from "./ruling-schema";
-import { applyMatchIntent } from "./match-intent-apply";
+import { applyOrders } from "./orders-apply";
 import { inputError, toToolSchema } from "./tool-schema";
 import { recordCall, type GmToolCall, type SkillReturn } from "./gm-types";
 
 /**
  * **GM에게 보이지 않는 스킬** — 판을 세우는 여덟과 교체. 감독의 전술 지시는
- * `apply_tactics`/`apply_orders` 뒤의 지시 해석이 JSON으로 옮기고 코어가 이 스킬들을
+ * `apply_orders`/`apply_orders` 뒤의 지시 해석이 JSON으로 옮기고 코어가 이 스킬들을
  * 부른다 (agents.md §1). 설명은 모델에게 가지 않으므로 이름만 든다 — 판정 근거는
- * `MATCH_INTENT_SYSTEM`의 것이다.
+ * `APPLY_ORDERS_SYSTEM`의 것이다.
  */
 export const INTERNAL_SKILLS: ReadonlySet<string> = new Set([
   "set_lineup",
@@ -150,6 +150,7 @@ export const INTERNAL_SKILLS: ReadonlySet<string> = new Set([
   "exploit_point",
   "set_match_plan",
   "substitute",
+  "set_captain",
 ]);
 const INTERNAL_DESCRIPTIONS: Record<string, string> = {
   set_lineup: "선발 11명과 벤치, 1·2군 이동",
@@ -161,6 +162,7 @@ const INTERNAL_DESCRIPTIONS: Record<string, string> = {
   exploit_point: "약점 공략",
   set_match_plan: "지역 전술",
   substitute: "교체",
+  set_captain: "완장 — 주장과 부주장",
 };
 
 /**
@@ -463,7 +465,7 @@ export function buildSkillTools(
     ),
     wrap(
       "set_captain",
-      descriptions.set_captain,
+      INTERNAL_DESCRIPTIONS.set_captain!,
       z.object({
         playerId: playerRef.optional().describe("주장으로 세울 선수 — 생략하면 주장은 그대로"),
         vice: playerRef.nullable().optional().describe("부주장으로 세울 선수 — null이면 지정 해제"),
@@ -1428,7 +1430,7 @@ const TacticsOrdersSchema = z.object({
 
 /**
  * **평시 GM이 받는 도구** — 코어 스킬 전부에서 판을 세우는 것들(`INTERNAL_SKILLS`)을
- * 빼고 `apply_tactics` 하나를 얹는다 (agents.md §1·§2). 그 하나의 핸들러 뒤에서 지시
+ * 빼고 `apply_orders` 하나를 얹는다 (agents.md §1·§2). 그 하나의 핸들러 뒤에서 지시
  * 해석이 감독의 말을 JSON으로 옮기고 코어가 내부 스킬을 부른다 — 기록은 내부 스킬의
  * 이름으로 남아 칩과 말풍선이 그대로 선다.
  */
@@ -1442,8 +1444,8 @@ export function buildGmTools(
     (t) => !INTERNAL_SKILLS.has(t.name),
   );
   const tactics: GameToolSpec = {
-    name: "apply_tactics",
-    description: descriptions.apply_tactics,
+    name: "apply_orders",
+    description: descriptions.apply_orders,
     inputSchema: toToolSchema(TacticsOrdersSchema),
     async handle(input: unknown) {
       const parsed = TacticsOrdersSchema.safeParse(input);
@@ -1454,10 +1456,10 @@ export function buildGmTools(
           message: `${state.manager.name} 감독은 지금 맡은 팀이 없습니다 — 부임한 뒤에 할 수 있는 일입니다`,
         };
       }
-      const intent = await runMatchIntent(state, parsed.data.orders);
+      const intent = await runOrders(state, parsed.data.orders);
       if (!intent.ok) return { ok: false, message: intent.message };
       // 평시에는 굴릴 판이 없다 — 골·카드 표식도 없다
-      const applied = applyMatchIntent(state, intent.intent, calls, [], [], { roll: false });
+      const applied = applyOrders(state, intent.intent, calls, [], [], { roll: false });
       return {
         ok: true,
         message: applied.notes.length > 0 ? applied.notes.join("\n") : "지시를 판에 걸었습니다",
