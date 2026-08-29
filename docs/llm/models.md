@@ -524,7 +524,9 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   떨어지고, 본문은 `Request contains an invalid argument.` 한 줄뿐이라 어느 칸이 문제인지
   말하지 않는다(§1-1의 표에서 `unknown`이라 화면에는 "응답을 받지 못해"만 선다). 지시
   해석의 `ops`가 그 자리다 — 명령 열셋에 4를 걸면 넘고, 셋이면 지난다. **개수 상한은
-  코어가 쥐고 모델에는 설명 문장으로 간다**(`buildOpsSchema` · `parseOps`).
+  코어가 쥐고 모델에는 설명 문장으로 간다**(`buildOpsSchema` · `parseOps`). 문장은
+  디코더가 아니라 준수에 기대므로 넘겨 오는 일이 있고, **넘겨 온 것을 자른 수는 한 줄로
+  감독에게 돌아간다**([agents.md](./agents.md) §1).
 
 ## 3-3. `operator_channel` — 상태 스냅샷을 어디에 넣는가
 
