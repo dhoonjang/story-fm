@@ -499,3 +499,53 @@ describe("같은 종류의 인자는 같은 검증을 지난다", () => {
     }
   });
 });
+
+/**
+ * **감독이 부르지 않은 액수는 코어에 닿지 않는다** (docs/simulation/transfer.md §1).
+ *
+ * `send_offer`의 `fee`가 스키마에서 필수이던 자리다 — 해석기는 명령을 부르는 순간
+ * 숫자를 만들어야 했고, 지어낸 0이 **£0 매각 오퍼**가 되어 코어를 지났다. 프롬프트가
+ * 지어내지 말라고 적어도 규칙이 두 곳에서 반대로 서면 모델은 스키마를 따른다.
+ */
+describe("액수는 감독이 부른 것만 실린다", () => {
+  /** 받아쓰기가 코어를 부르는 그 문 — `applyOps`와 같은 자리다 (동기 명령만) */
+  function call(name: string, input: unknown): { ok: boolean; message: string } {
+    const spec = SKILL_TOOLS.find((t) => t.name === name);
+    if (!spec) throw new Error(`${name} 명령이 없다`);
+    const result = spec.handle(input);
+    if (result instanceof Promise) throw new Error(`${name}: 동기 명령이 아니다`);
+    return result;
+  }
+
+  const ours = STATE.players.find((p) => p.teamId === STATE.userTeamId)!;
+  const theirs = STATE.players.find((p) => p.teamId !== STATE.userTeamId)!;
+  const buyer = STATE.teams.find((t) => t.id !== STATE.userTeamId)!.id;
+
+  it("이적료가 빠지면 협상이 열리지 않고, 코어의 자가 한 줄로 돌아온다", () => {
+    const before = STATE.negotiations.length;
+    for (const input of [
+      { playerId: theirs.name },
+      { playerId: ours.name, kind: "sell", teamId: buyer },
+      { playerId: ours.name, kind: "loan_out", teamId: buyer },
+    ]) {
+      const result = call("send_offer", input);
+      expect(result.ok, JSON.stringify(input)).toBe(false);
+      // 스키마 반려가 아니라 코어의 답이다 — 무엇이 비었는지와 그 갈래의 자를 든다
+      expect(result.message).toContain("부르지 않았습니다");
+      expect(result.message).toMatch(/£/);
+    }
+    expect(STATE.negotiations, "액수 없는 오퍼는 협상을 남기지 않는다").toHaveLength(before);
+  });
+
+  /**
+   * 반려는 **코어의 판단**이어야 한다 — 스키마가 필수로 걸면 해석기는 액수를 비운
+   * 채로는 명령을 부를 수조차 없어, 「감독이 말하지 않았다」가 어디에도 남지 않는다.
+   */
+  it("액수 자리를 스키마가 필수로 걸지 않는다", () => {
+    const spec = SKILL_TOOLS.find((t) => t.name === "send_offer")!;
+    const required = ((spec.inputSchema as Record<string, unknown>).required ?? []) as string[];
+    expect(required).toContain("playerId");
+    expect(required).not.toContain("fee");
+    expect(required).not.toContain("weeklyWage");
+  });
+});
