@@ -171,8 +171,9 @@ pnpm balance --report out  # 전부 돌리고 측정값을 out/에 남긴다 (�
 ## 7. 미해결
 
 - **하네스는 두 패키지에 있다.** 대부분은 `packages/engine/harness/`이고 —
-  `packages/sim`의 분포를 재는 자리도 결국 세계를 세워야 해서 엔진 쪽이다 — 프롬프트를
-  재는 둘(`history-window` · `prompt-regression`)만 `packages/agents/harness/`다. 엔진은
+  `packages/sim`의 분포를 재는 자리도 결국 세계를 세워야 해서 엔진 쪽이다 — 프롬프트와
+  그 선언을 재는 셋(`history-window` · `prompt-regression` · `live-schema`)만
+  `packages/agents/harness/`다. 엔진은
   에이전트를 import할 수 없다. 서술자(`catalog.ts`)는 그대로 엔진 것 하나를 쓴다.
 
 ## 코드 위치

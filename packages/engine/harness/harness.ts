@@ -142,28 +142,61 @@ export interface ReadingLine {
   readonly what: string;
   readonly doc: string;
   readonly label: string;
+  /**
+   * 돌 조건이 없어 건너뛴 줄 — 측정값이 없어 `bands`가 비어 있다.
+   *
+   * **건너뛴 것은 보고한 것이다.** 이 줄이 없으면 리포트가 그 하네스를 「돌지
+   * 못했다」(`missing`) 이탈로 세어 주간 워크플로가 이슈를 연다 — 키가 없어 돌지
+   * 않은 것은 이탈이 아니다 (→ `docs/simulation/balance-harness.md` §5).
+   */
+  readonly skipped?: true;
   readonly bands: ReadonlyArray<Band & { value: number | null; outside: boolean }>;
+}
+
+/**
+ * 리포트 파일에 줄 하나를 붙인다 — 비어 있으면 아무것도 쓰지 않는다.
+ *
+ * 워커 프로세스가 여럿이라 이어쓰기다 — 줄 하나가 짧아 섞이지 않는다.
+ */
+function appendLine(line: ReadingLine): void {
+  const file = process.env[REPORT_ENV];
+  if (file === undefined || file.length === 0) return;
+  appendFileSync(file, `${JSON.stringify(line)}\n`);
 }
 
 /**
  * 표를 세우는 그 자리에서 파일에도 한 줄 붙인다 — **하네스 본체는 아무것도 하지
  * 않는다.** 리포트를 위해 하네스마다 호출을 하나 더 적게 하면 새로 쓰는 하네스가
  * 그 줄을 빠뜨리고, 빠진 하네스는 리포트에서 「돌지 않았다」로 읽힌다.
- *
- * 워커 프로세스가 여럿이라 이어쓰기다 — 줄 하나가 짧아 섞이지 않는다.
  */
 function appendReport(harness: Harness, rows: readonly Verdict[], label: string): void {
-  const file = process.env[REPORT_ENV];
-  if (file === undefined || file.length === 0) return;
-  const line: ReadingLine = {
+  appendLine({
     id: harness.id,
     what: harness.what,
     doc: harness.doc,
     label,
     // NaN은 JSON에서 null이 된다 — 읽는 쪽이 그대로 「측정값 없음」으로 읽는다
     bands: rows.map((row) => ({ ...row.band, value: row.value, outside: row.outside })),
-  };
-  appendFileSync(file, `${JSON.stringify(line)}\n`);
+  });
+}
+
+/**
+ * 돌 조건이 없어 건너뛴 하네스 — **보고는 남기고** 사람이 읽을 한 줄을 돌려준다
+ * (→ `docs/simulation/balance-harness.md` §3 「키가 필요한 하네스」).
+ *
+ * `reportOf`와 같은 자리다: 하네스 본체가 리포트 줄을 손으로 적으면 다음 하네스가
+ * 그것을 빠뜨리고, 빠뜨린 하네스는 이탈로 읽힌다.
+ */
+export function skipOf(harness: Harness, why: string): string {
+  appendLine({
+    id: harness.id,
+    what: harness.what,
+    doc: harness.doc,
+    label: why,
+    skipped: true,
+    bands: [],
+  });
+  return `[${harness.id}] 건너뜀 — ${why}`;
 }
 
 /** 돌린 뒤의 표 — 지표 · 측정 · 구간 · 판정 */

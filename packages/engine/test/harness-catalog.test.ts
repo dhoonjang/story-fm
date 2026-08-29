@@ -1,9 +1,11 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as catalog from "../harness/catalog";
-import { HARNESSES } from "../harness/catalog";
-import type { Harness } from "../harness/harness";
+import { HARNESSES, LIVE_SCHEMA } from "../harness/catalog";
+import { skipOf, type Harness } from "../harness/harness";
+import { breachesOf, prepareReportDir, readReadings, summaryOf } from "../harness/report";
 
 /**
  * **`pnpm balance --list`에 서는 것과 돌릴 수 있는 것은 같아야 한다**
@@ -90,5 +92,33 @@ describe("밸런스 하네스 목록", () => {
   it("하네스 파일은 서술자 없이 서지 않는다", () => {
     const orphans = files.filter((file) => referencedBy(file).length === 0);
     expect(orphans).toEqual([]);
+  });
+});
+
+/**
+ * **건너뛴 것은 보고한 것이다** (→ `docs/simulation/balance-harness.md` §5).
+ *
+ * 돌 조건이 없어 건너뛴 하네스(키가 필요한 `live-schema`)가 리포트에 아무 줄도 남기지
+ * 않으면 주간 판정이 그것을 `missing` 이탈로 세어 이슈를 연다 — 키 없는 CI에서 매주
+ * 같은 이슈가 열린다는 뜻이다. 조용한 상태 전이라 여기서 못 박는다.
+ */
+describe("건너뛴 하네스", () => {
+  it("보고 줄을 남겨 missing 이탈로 세지 않는다", () => {
+    const dir = mkdtempSync(join(tmpdir(), "balance-skip-"));
+    const before = process.env.BALANCE_REPORT;
+    try {
+      process.env.BALANCE_REPORT = prepareReportDir(dir);
+      skipOf(LIVE_SCHEMA, "제공자 키가 없다");
+
+      const lines = readReadings(dir);
+      // 걸러 돌지 않은 주간 실행이 판정하는 자리 그대로다(`expectAll`)
+      const breaches = breachesOf(lines, true);
+      expect(breaches.filter((b) => b.harness === LIVE_SCHEMA.id)).toEqual([]);
+      expect(summaryOf(lines, breaches)).toContain("건너뜀");
+    } finally {
+      if (before === undefined) delete process.env.BALANCE_REPORT;
+      else process.env.BALANCE_REPORT = before;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
