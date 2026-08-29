@@ -360,9 +360,10 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
     >;
     expect(tactic.substitute?.description).toContain(`최대 ${TACTIC_CAPS.substitute}건`);
     const over = Array.from({ length: TACTIC_CAPS.substitute! + 2 }, () => ({}));
-    expect(parseOps({ substitute: over }, TACTIC_OPS, TACTIC_CAPS).substitute).toHaveLength(
-      TACTIC_CAPS.substitute!,
-    );
+    const parsed = parseOps({ substitute: over }, TACTIC_OPS, TACTIC_CAPS);
+    expect(parsed.ops.substitute).toHaveLength(TACTIC_CAPS.substitute!);
+    // 자른 것은 조용히 사라지지 않는다 — 잘린 수가 `applyOps`의 줄로 돌아간다 (§1)
+    expect(parsed.truncated.substitute).toBe(2);
   });
 
   /**

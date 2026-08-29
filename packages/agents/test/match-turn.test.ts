@@ -14,6 +14,7 @@ import {
   type GoalMark,
 } from "@story-fm/engine";
 import {
+  applyOps,
   applyTacticOrders,
   buildLedgerNote,
   buildSegmentMessage,
@@ -26,6 +27,7 @@ import {
   runGmTurn,
   stampMatchScene,
   stampMatchStream,
+  truncatedNote,
   type GmToolCall,
   type TacticOrders,
 } from "@story-fm/agents";
@@ -836,12 +838,12 @@ describe("받아쓰기 산출의 경계", () => {
   const many = (n: number) => Array.from({ length: n }, (_, i) => ({ i }));
 
   it("목록에 없는 명령은 버린다", () => {
-    const ops = parseOps({ set_tactics: [{ pressing: 4 }], drop_player: [{}] }, TACTIC_OPS);
+    const { ops } = parseOps({ set_tactics: [{ pressing: 4 }], drop_player: [{}] }, TACTIC_OPS);
     expect(Object.keys(ops)).toEqual(["set_tactics"]);
   });
 
   it("명령마다 정해진 수까지만 싣는다 — 나머지는 잘린다", () => {
-    const ops = parseOps(
+    const { ops, truncated } = parseOps(
       { substitute: many(7), set_match_plan: many(4), set_tactics: many(9) },
       TACTIC_OPS,
       TACTIC_CAPS,
@@ -850,10 +852,59 @@ describe("받아쓰기 산출의 경계", () => {
     expect(ops.set_match_plan).toHaveLength(TACTIC_CAPS.set_match_plan!);
     // 상한을 적지 않은 명령은 기본값이 선다
     expect(ops.set_tactics).toHaveLength(OPS_PER_COMMAND);
+    // 잘린 수는 명령마다 따로 센다 — 7-5 · 4-2 · 9-4
+    expect(truncated).toEqual({ substitute: 2, set_match_plan: 2, set_tactics: 5 });
   });
 
   it("빈 배열은 부르지 않은 것이다 — 자리를 만들지 않는다", () => {
-    expect(parseOps({ substitute: [] }, TACTIC_OPS)).toEqual({});
-    expect(parseOps(null, TACTIC_OPS)).toEqual({});
+    expect(parseOps({ substitute: [] }, TACTIC_OPS)).toEqual({ ops: {}, truncated: {} });
+    expect(parseOps(null, TACTIC_OPS)).toEqual({ ops: {}, truncated: {} });
+  });
+
+  /**
+   * **상한에 잘린 것도 옮기지 못한 말이다** (agents.md §1). 자르는 것은 코어의 몫이지만
+   * (상한은 스키마가 아니라 설명 문장으로 간다 — models.md §3-2), 잘린 사실이 코어 안에서
+   * 끝나면 GM은 걸린 다섯만 보고 장면을 쓰고 감독은 여섯이 다 걸린 줄 안다.
+   */
+  describe("잘린 지시는 도구 결과로 돌아간다", () => {
+    const echo = (name: string): GameToolSpec => ({
+      name,
+      description: name,
+      inputSchema: { type: "object" },
+      handle: () => ({ ok: true, message: `${name} 걸었습니다` }),
+    });
+    const specs = new Map<string, GameToolSpec>(
+      TACTIC_OPS.map((name) => [name, echo(name)] as const),
+    );
+    const applied = (raw: unknown): string[] => {
+      const notes: string[] = [];
+      applyOps(specs, parseOps(raw, TACTIC_OPS, TACTIC_CAPS), TACTIC_OPS, notes);
+      return notes;
+    };
+
+    it("상한 + 1이면 잘린 수가 걸린 답들 뒤에 한 줄로 선다", () => {
+      const cap = TACTIC_CAPS.substitute!;
+      const notes = applied({ substitute: many(cap + 1) });
+      expect(notes).toHaveLength(cap + 1);
+      expect(notes[cap]).toBe(truncatedNote(cap, 1));
+    });
+
+    it("상한 그대로면 아무 줄도 더 서지 않는다", () => {
+      const cap = TACTIC_CAPS.substitute!;
+      expect(applied({ substitute: many(cap) })).toHaveLength(cap);
+    });
+
+    // 자른 줄은 그 명령의 답 뒤다 — 두 명령이 넘치면 각자의 자리에 하나씩
+    it("명령마다 제 자리에 선다", () => {
+      const notes = applied({ substitute: many(6), set_match_plan: many(3) });
+      expect(notes.filter((n) => n === truncatedNote(TACTIC_CAPS.substitute!, 1))).toHaveLength(1);
+      expect(notes.filter((n) => n === truncatedNote(TACTIC_CAPS.set_match_plan!, 1))).toHaveLength(
+        1,
+      );
+      // 순서는 `TACTIC_OPS`가 정한다 — 교체가 먼저, 지역 플랜이 뒤
+      expect(notes.indexOf(truncatedNote(TACTIC_CAPS.substitute!, 1))).toBeLessThan(
+        notes.indexOf(truncatedNote(TACTIC_CAPS.set_match_plan!, 1)),
+      );
+    });
   });
 });
