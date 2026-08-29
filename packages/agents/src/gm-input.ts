@@ -1421,7 +1421,11 @@ export function buildGmStateNote(
     // 활성 서사 아크 — 닫힐 때까지 매 턴 실려 GM이 시즌을 가로지르는 흐름을 잃지 않는다
     // (people.md §9). 개폐도 사실 줄도 코어의 것이다
     block("arcs", describeActiveArcs(state)),
-    // 시작 사건 — 부임 첫 몇 주의 실마리. 기한이 닫을 때까지 매 턴 선다 (career.md §1)
+    /**
+     * 시작 사건 — 부임 첫 몇 주의 실마리. 아크와 같이 **개폐가 코어의 것**이라 여기
+     * 실리는 것은 아직 열린 줄뿐이다: 감독이 그 실마리에 걸린 일을 하면 다음 턴에
+     * 빠지고, 아무도 손대지 않은 것만 기한까지 선다 (career.md §1).
+     */
     block("openings", describeOpenings(state)),
     block("recent", recent.map((r) => `- ${r}`).join("\n")),
     `</snapshot>`,

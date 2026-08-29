@@ -55,6 +55,7 @@ import { applyMoodNotes, issueReasonText, type MoodLine } from "../squad/mood";
 import { receptivityLine, receptivityOf } from "../squad/receptivity";
 import { leaderGroupOf, leaderRoleOf, leaderWeightOf } from "../squad/hierarchy";
 import { recentOutcomes } from "../squad/slump";
+import { touchOpenings } from "../world/openings";
 import { agentForPlayer, ownerOf } from "../world/persona";
 import { relationPressureWeight } from "../world/relations";
 import { settleInterview, USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
@@ -1658,6 +1659,15 @@ export function respondToApproach(
     `${approach.speakerId} 면담 (${contextTextOf(state, approach)} · ${label})`,
     approach.step >= 3 ? 4 : 3,
   );
+  /**
+   * 찾아온 사람과 마주 앉은 것이 그 사람에게 걸린 실마리를 닫는다 (career.md §1).
+   * 화자는 인물의 `characterId`이고 `about`은 선수의 id라 — 실마리가 어느 쪽으로
+   * 걸렸든 같은 자리에서 닫힌다. 구단주 자리는 걸린 사람 없는 보드 실마리도 닫는다.
+   */
+  touchOpenings(state, {
+    subjectIds: [approach.speakerId, ...(approach.about ? [approach.about] : [])],
+    ...(approach.channel === "owner" ? { kinds: ["board" as const] } : {}),
+  });
   const net = effect.board + effect.squad + effect.team + effect.target;
   return {
     ok: true,
