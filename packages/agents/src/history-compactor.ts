@@ -227,6 +227,9 @@ export function untitledArcs(state: GameState): { id: string; line: string }[] {
  */
 export const REPORT_DIGEST_TOOL = "report_digest";
 
+export const REPORT_DIGEST_DESCRIPTION =
+  "접히는 구간의 요약 두 칸(지난 일·열린 일)과 캐릭터북 갱신을 함께 제출한다. 검사에 걸린 항목은 코어가 버린다.";
+
 interface CompactionResult {
   folded: boolean;
   memories: number;
@@ -240,8 +243,7 @@ function makeReportTool(
 ): GameToolSpec {
   return {
     name: REPORT_DIGEST_TOOL,
-    description:
-      "접히는 구간의 요약 두 칸(지난 일·열린 일)과 캐릭터북 갱신을 함께 제출한다. 검사에 걸린 항목은 코어가 버린다.",
+    description: REPORT_DIGEST_DESCRIPTION,
     inputSchema: REPORT_DIGEST_INPUT,
     handle: (input: unknown) => {
       const parsed = ReportInputSchema.safeParse(input);

@@ -155,7 +155,8 @@ export function buildMatchLogBlock(state: GameState): string {
   return ["<match_log>", ...renderTurns(turns), "</match_log>"].join("\n");
 }
 
-const SPEC: OpsAgentSpec = {
+/** 이 해석기의 한 벌 — 강제 선언 목록(`forcedTools`)도 이것을 읽는다 */
+export const TACTIC_ORDERS_SPEC: OpsAgentSpec = {
   agent: "tactic-orders",
   tool: "report_tactic_orders",
   system: TACTIC_ORDERS_SYSTEM,
@@ -190,6 +191,6 @@ export async function runTacticOrders(
     ``,
     `@감독: ${message}`,
   ].join("\n");
-  const answered = await runOpsOrders(SPEC, specs, user, llm);
+  const answered = await runOpsOrders(TACTIC_ORDERS_SPEC, specs, user, llm);
   return answered.ok ? { ok: true, intent: answered.orders } : answered;
 }
