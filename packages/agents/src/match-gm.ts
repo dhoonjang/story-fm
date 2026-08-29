@@ -140,15 +140,13 @@ async function runTacticOrdersTool(
   ctx: MatchToolContext,
   orders: string,
 ): Promise<{ ok: boolean; message: string }> {
-  const roll = false;
   const specs = new Map(buildToolSpecs(state, ctx.calls).map((t) => [t.name, t] as const));
   const parsed = await runTacticOrders(state, specs, orders);
   if (!parsed.ok) return { ok: false, message: parsed.message };
-  const applied = applyTacticOrders(state, parsed.intent, ctx.calls, ctx.goals, ctx.cards, {
-    roll,
-  });
+  // 시계를 미는 것은 `advance_match` 하나다 — 지시는 판만 바꾼다 (agents.md §3)
+  const applied = applyTacticOrders(state, parsed.intent, ctx.calls, ctx.goals, ctx.cards);
   // 굴리지 않은 지시도 판을 다시 계산한다 — 다음 구간이 이 패킷으로 구르고, GM은 그것을 미리 읽는다
-  if (!roll) refreshPacket(state);
+  refreshPacket(state);
   const replies =
     applied.notes.length > 0
       ? ["<core_replies>", ...applied.notes.map((n) => `- ${n}`), "</core_replies>"]

@@ -31,6 +31,7 @@ import {
 import { describeManagerSkills, describeReputation } from "@story-fm/domain";
 import {
   MATCH_ADVANCED,
+  SKILL_CATALOG,
   TIME_PASSED,
   filterCasterStream,
   filterSceneStream,
@@ -1056,15 +1057,19 @@ describe("이력 창 — 시작점을 STEP 단위로만 옮긴다", () => {
 });
 
 describe("도구 구성", () => {
-  it("조회 도구는 readOnly로 표시된다 (채팅 칩에 남지 않는다)", () => {
-    const state = game();
-    const tools = buildGmTools(state, []);
-    const byName = new Map(tools.map((t) => [t.name, t]));
-    for (const name of ["search_players", "get_squad", "get_team", "get_league", "get_career"]) {
-      expect(byName.get(name)?.readOnly).toBe(true);
-    }
-    // 상태를 바꾸는 도구는 기록 대상
-    expect(byName.get("scout_player")?.readOnly).toBeUndefined();
+  /**
+   * `readOnly`가 적히는 자리는 둘이다 — 도구를 세우는 `read()`(gm-tools.ts)와
+   * 카탈로그(`SKILL_CATALOG`). 앞은 호출을 기록할지를, 뒤는 화면이 그 호출을 어디에
+   * 세울지를 정한다(`skill-surface.test.ts`). 둘이 갈리면 조회가 채팅 칩으로 새거나
+   * 조작이 화면 어디에도 서지 않는데, **어느 쪽도 그 자리에서는 조용하다.**
+   */
+  it("조회 도구는 카탈로그와 같은 것을 readOnly로 표시한다", () => {
+    const tools = buildGmTools(game(), []);
+    const fromSpec = tools.filter((t) => t.readOnly === true).map((t) => t.name);
+    const fromCatalog = SKILL_CATALOG.filter((s) => s.readOnly).map((s) => s.name);
+    expect(fromSpec.sort()).toEqual(fromCatalog.sort());
+    // 상태를 바꾸는 도구는 기록 대상 — 표시가 아예 서지 않는다
+    expect(tools.find((t) => t.name === "scout_player")?.readOnly).toBeUndefined();
   });
 
   it("시간을 흘리는 도구는 없다 — 시계는 장면 헤더가 움직인다", () => {
