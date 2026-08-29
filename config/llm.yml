@@ -35,11 +35,22 @@ agents:
     timeout_ms: 60000
     thinking_level: minimal
 
-  match-caster:
+  # 경기의 GM — 이 경기의 이력 전부를 쥐고 도구 셋으로 경기를 진행한다 (docs/llm/agents.md §3).
+  # 시한은 도구 뒤의 해석·마감 호출까지 덮는다.
+  match-gm:
     provider: google
     model: gemini-3.6-flash
     max_tokens: 64000
     timeout_ms: 180000
+    thinking_level: minimal
+
+  # 끝난 경기의 결산과 마무리 중계 — 이 경기의 중계 전부를 읽으므로 싼 자리로 보내지
+  # 않는다. 경기당 한 번이고 매치 GM의 도구 뒤에서 돈다.
+  finalize-match:
+    provider: google
+    model: gemini-3.6-flash
+    max_tokens: 16000
+    timeout_ms: 90000
     thinking_level: minimal
 
   training-rater:

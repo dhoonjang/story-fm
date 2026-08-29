@@ -36,7 +36,7 @@ import {
   type MatchLedgerState,
 } from "@story-fm/sim";
 import { agentConfig, createGameLLM, type TurnHistory, type TurnUsage } from "@story-fm/llm";
-import { MATCH_CASTER_SYSTEM, buildSegmentMessage } from "@story-fm/agents";
+import { MATCH_GM_SYSTEM, buildSegmentMessage } from "@story-fm/agents";
 
 /**
  * 킥오프 턴 유저 메시지 — 패킷 + 감독의 사전 지시. **이 프로토타입만 읽는다.**
@@ -174,8 +174,8 @@ function runSegment(): { note: string; stop: string } {
   };
 }
 
-// ---- ③ 매치 캐스터 LLM 진행 루프 ----
-const llm = createGameLLM(agentConfig("match-caster"));
+// ---- ③ 매치 GM LLM 진행 루프 — 프로토타입은 손잡이 턴처럼 코어가 먼저 굴린 대본을 싣는다 ----
+const llm = createGameLLM(agentConfig("match-gm"));
 const totalUsage: TurnUsage = {
   inputTokens: 0,
   outputTokens: 0,
@@ -198,7 +198,7 @@ for (let turn = 1; turn <= maxTurns && !finished; turn++) {
         // 프로토타입만 읽는 문구라 여기 산다 (prompts.md §5 원칙 13)
         [`@감독: 좋아, 계속 진행해.`, segment.note, describeLedger(ledger, names)].join("\n\n");
   const result = await llm.runTurn({
-    system: MATCH_CASTER_SYSTEM,
+    system: MATCH_GM_SYSTEM,
     history,
     user: userMessage,
   });

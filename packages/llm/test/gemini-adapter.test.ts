@@ -17,7 +17,7 @@ import {
 } from "@story-fm/llm";
 
 const testConfig = {
-  agent: "match-caster" as const,
+  agent: "match-gm" as const,
   provider: "google" as const,
   model: "gemini-test",
   maxTokens: 1024,

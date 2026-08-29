@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   GM_SYSTEM,
+  MATCH_GM_SYSTEM,
+  MATCH_TOOL_DEFINITIONS,
   SETTLE_MATCH_DESCRIPTION,
   SETTLE_MATCH_INPUT,
   SKILL_CATALOG,
@@ -73,23 +75,33 @@ function fixedLayer(state: GameState): string {
 }
 
 /**
- * 종료 턴의 고정층 — 캐스터가 그 턴 한 번만 받는 결산 도구 하나(설명 + 스키마).
- * 중계 프롬프트에 매 턴 실리지 않으므로 고정층 예산과는 다른 눈금이다 (agents.md §3).
+ * 경기 마감의 고정층 — 마감 에이전트가 받는 결산 도구 하나(설명 + 스키마).
+ * 경기당 한 번 실리므로 고정층 예산과는 다른 눈금이다 (agents.md §3).
  */
 function settlementLayer(): number {
   return SETTLE_MATCH_DESCRIPTION.length + JSON.stringify(SETTLE_MATCH_INPUT).length;
 }
 
-/** 한 주를 넘긴 구간의 훈련 브리프 — 결산 호출의 입력 그대로 */
-const TRAINING_WINDOW_DAYS = 7;
+/** 경기의 고정층 — 매치 GM 프롬프트 + 경기 도구 셋. 매 경기 턴의 캐시 프리픽스다 */
+function matchLayer(): number {
+  return MATCH_GM_SYSTEM.length + JSON.stringify(MATCH_TOOL_DEFINITIONS).length;
+}
+
+/** 새 게임 첫날부터 첫 경기일까지 — 소집 뒤 며칠의 훈련이 이 안에 든다 */
+const TRAINING_WINDOW_DAYS = 20;
 
 function trainingBriefChars(seed: number): number {
   const state = build(seed, "최감독", BACKGROUND);
-  // 소집 뒤라야 훈련이 돈다 — 첫 이동이 소집일을 지나도록 한 달을 민다
-  advanceTime(state, { days: 31 });
   const from = state.date;
-  const moved = advanceTime(state, { days: TRAINING_WINDOW_DAYS });
-  const brief = buildTrainingBrief(state, moved.trained?.sessions ?? [], { from, to: state.date });
+  // 소집(7월 둘째 월요일)부터 첫 경기일 전까지가 훈련이 도는 첫 구간이다 — 하루씩 밀어
+  // 세션을 모으고, 경기일이 막아서면 거기서 끝난다
+  const sessions = [];
+  for (let day = 0; day < TRAINING_WINDOW_DAYS; day += 1) {
+    const moved = advanceTime(state, { days: 1 });
+    sessions.push(...(moved.trained?.sessions ?? []));
+    if (moved.stopped === "blocked" || moved.stopped === "matchday") break;
+  }
+  const brief = buildTrainingBrief(state, sessions, { from, to: state.date });
   return brief ? buildTrainingPrompt(brief).length : 0;
 }
 
@@ -213,7 +225,8 @@ describe("프롬프트 회귀", () => {
       "도구 스펙 글자": fixed.length - GM_SYSTEM.length,
       "도구 설명 총 글자": SKILL_CATALOG.reduce((sum, skill) => sum + skill.description.length, 0),
       "가장 긴 도구 설명 글자": Math.max(...SKILL_CATALOG.map((s) => s.description.length)),
-      "종료 턴 고정층 글자": settlementLayer(),
+      "경기 고정층 글자": matchLayer(),
+      "경기 마감 고정층 글자": settlementLayer(),
       "훈련 브리프 글자": trainingBriefChars(13),
       "레퍼런스층 글자": reference.length,
       "매 턴 층 글자": stateNote.length,

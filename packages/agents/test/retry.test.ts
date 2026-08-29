@@ -12,11 +12,11 @@ import {
   type TrainingBrief,
 } from "@story-fm/engine";
 import { ARC_TITLE_MAX, CharacterMemorySchema } from "@story-fm/domain";
-import type { GameLLM, JsonObjectSchema } from "@story-fm/llm";
+import type { GameLLM, JsonObjectSchema, ToolOutcome } from "@story-fm/llm";
 import { LlmCallError, LlmTimeoutError, TokenBudgetExceededError } from "@story-fm/llm";
 import { retryOnce, anchorStands, ModelOutputError } from "../src/retry";
 import { runMatchIntent } from "../src/match-intent";
-import { makeSettleTool, SETTLE_MATCH_INPUT } from "../src/match-caster";
+import { makeSettleTool, SETTLE_MATCH_INPUT } from "../src/finalize-match";
 import { REPORT_TRAINING_INPUT, reportTraining } from "../src/training-rater";
 import { REPORT_DIGEST_INPUT } from "../src/history-compactor";
 
@@ -212,7 +212,7 @@ describe("결산 스키마의 수용 폭", () => {
     call: (llm: GameLLM) => Promise<unknown>,
     input: unknown,
   ): Promise<{ ok: boolean; message: string }> {
-    let answer: { ok: boolean; message: string } | undefined;
+    let answer: ToolOutcome | Promise<ToolOutcome> | undefined;
     await call({
       runTurn: (req) => {
         answer = req.tools?.[0]?.handle(input);
@@ -220,7 +220,7 @@ describe("결산 스키마의 수용 폭", () => {
       },
     });
     if (answer === undefined) throw new Error("요청에 도구가 실리지 않았습니다");
-    return answer;
+    return await answer;
   }
 
   /** 도구 스키마의 한 자리 — `properties`가 unknown이라 여기서 한 번만 좁힌다 */
@@ -261,25 +261,27 @@ describe("결산 스키마의 수용 폭", () => {
   };
 
   /** 종료 턴의 캐스터가 쥐는 결산 도구 — 상태를 만지기 전에 반려되는 입력만 넣는다 */
-  const settle = (input: unknown) =>
+  const settle = async (input: unknown) =>
     makeSettleTool(stubState, ratingBrief, () => undefined).handle(input);
 
-  it("평점은 코어 밴드보다 넓게 받고, 그 폭 밖은 코어에 닿기 전에 반려한다", () => {
+  it("평점은 코어 밴드보다 넓게 받고, 그 폭 밖은 코어에 닿기 전에 반려한다", async () => {
     const rating = schemaAt(SETTLE_MATCH_INPUT, "ratings.[].rating");
     // 모델이 보는 폭이 코어 밴드보다 양쪽으로 넓다 (코어는 앵커 ±RATING_BAND로 다시 자른다)
     expect(rating.maximum).toBeGreaterThan(RATING_MAX);
     expect(rating.minimum).toBe(0);
 
-    const over = settle({ ratings: [{ playerId: "p1", rating: Number(rating.maximum) + 1 }] });
+    const over = await settle({
+      ratings: [{ playerId: "p1", rating: Number(rating.maximum) + 1 }],
+    });
     expect(over.ok).toBe(false);
     expect(over.message).toContain("rating");
     // 빈 제출도, 한 경기 명단을 넘는 제출도 여기서 걸린다
-    expect(settle({ ratings: [] }).ok).toBe(false);
+    expect((await settle({ ratings: [] })).ok).toBe(false);
     const flood = Array.from({ length: 31 }, (_, i) => ({ playerId: `p${i}`, rating: 7 }));
-    expect(settle({ ratings: flood }).ok).toBe(false);
+    expect((await settle({ ratings: flood })).ok).toBe(false);
   });
 
-  it("심경 한 줄은 세이브의 상한에서 끊기고, 한 번에 세는 인원도 물려 있다", () => {
+  it("심경 한 줄은 세이브의 상한에서 끊기고, 한 번에 세는 인원도 물려 있다", async () => {
     // 길이는 세이브의 계약이 정한다 — 여기 다시 적으면 그 자리가 갈린다
     expect(schemaAt(SETTLE_MATCH_INPUT, "moods.[].text").maxLength).toBe(MOOD_NOTE_MAX);
 
@@ -289,11 +291,11 @@ describe("결산 스키마의 수용 폭", () => {
       text: "말".repeat(chars),
       acknowledgesIssue: false,
     });
-    const long = settle({ ratings, moods: [note(MOOD_NOTE_MAX + 1)] });
+    const long = await settle({ ratings, moods: [note(MOOD_NOTE_MAX + 1)] });
     expect(long.ok).toBe(false);
     expect(long.message).toContain("text");
     const flood = Array.from({ length: MOOD_BATCH + 1 }, () => note(10));
-    expect(settle({ ratings, moods: flood }).ok).toBe(false);
+    expect((await settle({ ratings, moods: flood })).ok).toBe(false);
   });
 
   const trainingBrief: TrainingBrief = {

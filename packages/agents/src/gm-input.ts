@@ -1934,7 +1934,8 @@ export function stampMatchScene(text: string, minute: number): string {
  * 판정되는 순간(`[`로 열지 않았다) 그 자리에서 흘려보낸다.
  */
 export function stampMatchStream(
-  minute: number,
+  /** 장부의 분 — 함수면 **첫 델타가 나가는 순간**에 읽는다 (도구가 시계를 옮긴 뒤다) */
+  minute: number | (() => number),
   emit: (delta: string) => void,
 ): (delta: string) => void {
   let opened = false;
@@ -1946,7 +1947,7 @@ export function stampMatchStream(
   };
   return (delta: string) => {
     if (!opened) {
-      emit(`${matchHeader(minute)}\n`);
+      emit(`${matchHeader(typeof minute === "function" ? minute() : minute)}\n`);
       opened = true;
     }
     if (head === null) {

@@ -4,7 +4,7 @@ import {
   isStoredLlmHistory,
   isTextHistoryMessage,
   type GameLLM,
-  type GameToolSpec,
+  type ToolOutcome,
   type StopReason,
   type TurnHistory,
   type TurnRequest,
@@ -375,8 +375,8 @@ export class AnthropicGameLLM implements GameLLM {
         toolCallCount++;
         const spec = tools.find((t) => t.name === block.name);
         // 이 반복의 텍스트까지 누적된 뒤다 — 도구가 불린 자리가 그대로 실린다
-        const outcome: ReturnType<GameToolSpec["handle"]> = spec
-          ? spec.handle(block.input, { text })
+        const outcome: ToolOutcome = spec
+          ? await spec.handle(block.input, { text })
           : { ok: false, message: `알 수 없는 도구: ${block.name}` };
         results.push({
           type: "tool_result",

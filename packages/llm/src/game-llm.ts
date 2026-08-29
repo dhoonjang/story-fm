@@ -102,12 +102,22 @@ export type ToolChoice = "auto" | { name: string };
  * 어댑터가 이를 tool_result(is_error)로 되돌려 LLM이 수정 재시도하게
  * 한다 (AGENTS.md 6-2 재시도 규약).
  */
+/** 도구 하나의 답 — 실패면 `message`가 모델에게 오류로 돌아간다 */
+export interface ToolOutcome {
+  ok: boolean;
+  message: string;
+}
+
 export interface GameToolSpec {
   name: string;
   description: string;
   /** 제공자 중립 JSON Schema — 각 어댑터가 자기 함수 선언 형식으로 변환한다. */
   inputSchema: JsonObjectSchema;
-  handle(input: unknown, context?: ToolCallContext): { ok: boolean; message: string };
+  /**
+   * 도구의 답 — 동기여도 되고 프로미스여도 된다. 핸들러 안에서 다른 에이전트를
+   * 부르는 자리(경기의 해석·마감 — agents.md §3)가 있어 어댑터는 언제나 `await`한다.
+   */
+  handle(input: unknown, context?: ToolCallContext): ToolOutcome | Promise<ToolOutcome>;
   /**
    * 읽기 전용 조회 도구 — 상태를 바꾸지 않는다. 호출 기록을 스킬 칩으로
    * 남기지 않아 채팅이 조회 로그로 덮이는 것을 막는다.

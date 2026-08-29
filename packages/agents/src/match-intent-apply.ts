@@ -12,7 +12,7 @@ import {
 import { shootoutTally } from "@story-fm/domain";
 import type { GameToolSpec } from "@story-fm/llm";
 import { buildGmTools, collectMatchMarks, sideTeamName } from "./gm-tools";
-import { buildSegmentMessage, buildShootoutMessage } from "./match-caster";
+import { buildSegmentMessage, buildShootoutMessage } from "./match-script";
 import { touchesPitch, type MatchIntent } from "./match-intent-schema";
 import { MATCH_ADVANCED, type GmToolCall } from "./gm-types";
 
@@ -54,6 +54,8 @@ export function applyMatchIntent(
   calls: GmToolCall[],
   goals: GoalMark[],
   cards: CardMark[],
+  /** 굴릴지는 매치 GM이 부른 도구가 정한다 — 없으면 의도의 `advance`를 읽는다 (agents.md §3) */
+  options: { roll?: boolean } = {},
 ): AppliedIntent {
   const specs = new Map<string, GameToolSpec>(
     buildGmTools(state, calls).map((tool) => [tool.name, tool] as const),
@@ -64,6 +66,8 @@ export function applyMatchIntent(
     const spec = specs.get(name);
     if (!spec) return;
     const result = spec.handle(input);
+    // 평시 도구는 동기다 — 이 자리가 프로미스를 받으면 배선이 갈린 것이다
+    if (result instanceof Promise) throw new Error(`${name}: 경기 적용은 동기 도구만 부른다`);
     if (result.message) notes.push(result.message);
   };
 
@@ -106,7 +110,7 @@ export function applyMatchIntent(
   const nameOf = (id: string): string => playerName(state, id);
   const sideName = (side: "home" | "away"): string => sideTeamName(state, side);
   const shapeChanged = shapeOfTactics(state) !== shapeBefore;
-  const wants = intent.advance === "segment";
+  const wants = options.roll ?? intent.advance === "segment";
   if (!pending || !wants || shapeChanged) {
     if (wants && shapeChanged) notes.push(SHAPE_CHANGED_NOTE);
     /**

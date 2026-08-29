@@ -97,7 +97,7 @@ describe("누적 — 세션 전체와 에이전트별", () => {
     expect(ledger.byAgent["training-rater"].calls).toBe(2);
     expect(ledger.byAgent["training-rater"].usage.outputTokens).toBe(10);
     // 안 부른 에이전트는 0으로 남는다 — 없는 칸이 아니라 빈 칸이다
-    expect(ledger.byAgent["match-caster"].calls).toBe(0);
+    expect(ledger.byAgent["match-gm"].calls).toBe(0);
   });
 
   it("장부를 되돌려 주고 원본은 그대로다 — 순수 함수", () => {
@@ -232,7 +232,7 @@ describe("상한 정책 — 게임 진행을 막지 않는다", () => {
     expect(verdict.over).toBe(true);
     expect(agentAllowed("training-rater", verdict)).toBe(false);
     expect(agentAllowed("gm", verdict)).toBe(true);
-    expect(agentAllowed("match-caster", verdict)).toBe(true);
+    expect(agentAllowed("match-gm", verdict)).toBe(true);
   });
 
   it("상한 아래면 아무도 막지 않는다", () => {
@@ -315,12 +315,12 @@ describe("meterLlm — 계약이 같으므로 부르는 쪽은 감싼 줄 모른
         { inputTokens: 4000, outputTokens: 200 },
         { inputTokens: 4500, outputTokens: 300 },
       ]);
-      const llm = meterLlm(withDeadline(inner, "match-caster", 30_000), "match-caster");
+      const llm = meterLlm(withDeadline(inner, "match-gm", 30_000), "match-gm");
       const settled = expect(llm.runTurn(request)).rejects.toBeInstanceOf(LlmTimeoutError);
       await vi.advanceTimersByTimeAsync(30_000);
       await settled;
 
-      expect(billedTokens(llmUsage().byAgent["match-caster"].usage)).toBe(9000);
+      expect(billedTokens(llmUsage().byAgent["match-gm"].usage)).toBe(9000);
     } finally {
       vi.useRealTimers();
     }
@@ -452,9 +452,9 @@ describe("모델 호출 시한", () => {
    * 예전에는 문구에 `timeout`이 남아 있어야 했고, 그 낱말이 곧 계약이었다.
    */
   it("시한 초과는 종류가 timeout이다 — 문구가 아니라", () => {
-    const error = new LlmTimeoutError("match-caster", 1_000);
+    const error = new LlmTimeoutError("match-gm", 1_000);
     expect(llmErrorKind(error)).toBe("timeout");
-    expect(error.agent).toBe("match-caster");
+    expect(error.agent).toBe("match-gm");
   });
 
   /** 예산 상한도 종류를 든다 — 결산이 삼켜도 장면 호출은 배너로 나간다 */

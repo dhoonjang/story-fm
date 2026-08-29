@@ -15,7 +15,7 @@ import {
   isStoredLlmHistory,
   isTextHistoryMessage,
   type GameLLM,
-  type GameToolSpec,
+  type ToolOutcome,
   type StopReason,
   type TurnHistory,
   type TurnRequest,
@@ -395,22 +395,23 @@ export class GeminiGameLLM implements GameLLM {
         break;
       }
 
-      const results: Part[] = calls.map((call) => {
+      const results: Part[] = [];
+      for (const call of calls) {
         toolCallCount++;
         const name = call.name ?? "unknown_function";
         const spec = tools.find((tool) => tool.name === name);
         // 이 반복의 텍스트까지 누적된 뒤다 — 도구가 불린 자리가 그대로 실린다
-        const outcome: ReturnType<GameToolSpec["handle"]> = spec
-          ? spec.handle(call.args ?? {}, { text })
+        const outcome: ToolOutcome = spec
+          ? await spec.handle(call.args ?? {}, { text })
           : { ok: false, message: `알 수 없는 도구: ${name}` };
-        return {
+        results.push({
           functionResponse: {
             ...(call.id ? { id: call.id } : {}),
             name,
             response: outcome.ok ? { output: outcome.message } : { error: outcome.message },
           },
-        };
-      });
+        });
+      }
 
       // 마지막 왕복은 `NONE`으로 나가 여기 닿지 않는 것이 정상이다 — 제공자가 그
       // 모드를 무시하고 함수를 부른 경우에만 결과를 합성 content로 닫고 끝낸다

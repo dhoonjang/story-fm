@@ -4,7 +4,7 @@ import {
   isStoredLlmHistory,
   isTextHistoryMessage,
   type GameLLM,
-  type GameToolSpec,
+  type ToolOutcome,
   type StopReason,
   type TurnHistory,
   type TurnRequest,
@@ -497,8 +497,8 @@ export class OpenAiGameLLM implements GameLLM {
           continue;
         }
         // 이 반복까지 누적된 본문 — 도구가 불린 자리가 그대로 실린다
-        const outcome: ReturnType<GameToolSpec["handle"]> = spec
-          ? spec.handle(parsed, { text })
+        const outcome: ToolOutcome = spec
+          ? await spec.handle(parsed, { text })
           : { ok: false, message: `알 수 없는 도구: ${call.name}` };
         input.push({
           type: "function_call_output",

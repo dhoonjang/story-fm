@@ -165,7 +165,8 @@ export const MatchIntentSchema = z.object({
    * (match.md §2).
    */
   shootoutOrder: z.array(playerId).max(11).optional().describe("승부차기 키커 순서"),
-  advance: z.enum(ADVANCE_INTENTS),
+  /** 진행 여부 — 이제 매치 GM이 어느 도구를 불렀는가가 정한다. 없으면 진행하지 않는다 */
+  advance: z.enum(ADVANCE_INTENTS).optional(),
   /**
    * 옮기지 못한 말 — **비워 두지 않는다.**
    *
@@ -192,6 +193,6 @@ export function touchesPitch(intent: MatchIntent): boolean {
     intent.setPieceTakers !== undefined ||
     intent.setPieceRoutine !== undefined ||
     intent.tactics !== undefined ||
-    intent.advance !== "none"
+    (intent.advance ?? "none") !== "none"
   );
 }

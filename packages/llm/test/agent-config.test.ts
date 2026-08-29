@@ -10,14 +10,15 @@ import {
 
 const yamlWith = (agents: string): string => `version: 1\nagents:\n${agents}`;
 
-/** 에이전트 일곱이 같은 한 벌을 쓰는 최소 표 — 파일 머리(`max_retries`)를 재는 자리용 */
+/** 에이전트 여덟이 같은 한 벌을 쓰는 최소 표 — 파일 머리(`max_retries`)를 재는 자리용 */
 const AGENT_YAML = `  gm: &agent
     provider: google
     model: gemini-test
     max_tokens: 100
     timeout_ms: 1000
   match-intent: *agent
-  match-caster: *agent
+  finalize-match: *agent
+  match-gm: *agent
   training-rater: *agent
   negotiator: *agent
   history-compactor: *agent
@@ -67,11 +68,16 @@ describe("에이전트별 LLM 설정", () => {
     model: gemini-custom
     max_tokens: 150
     timeout_ms: 1500
-  match-caster:
+  match-gm:
     provider: openai
     model: gpt-custom
     max_tokens: 200
     timeout_ms: 2000
+  finalize-match:
+    provider: google
+    model: gemini-final
+    max_tokens: 250
+    timeout_ms: 2500
   training-rater:
     provider: anthropic
     model: claude-training
@@ -97,7 +103,7 @@ describe("에이전트별 LLM 설정", () => {
     );
 
     expect(config.agents.gm).toMatchObject({ provider: "anthropic", model: "claude-custom" });
-    expect(config.agents["match-caster"]).toMatchObject({
+    expect(config.agents["match-gm"]).toMatchObject({
       provider: "openai",
       model: "gpt-custom",
     });
@@ -120,7 +126,8 @@ describe("에이전트별 LLM 설정", () => {
     max_tokens: 100
     timeout_ms: 1000
   match-intent: *google
-  match-caster: *google
+  finalize-match: *google
+  match-gm: *google
   training-rater: *google
   negotiator: *google
   history-compactor: *google
@@ -137,7 +144,8 @@ describe("에이전트별 LLM 설정", () => {
     max_tokens: 100
     timeout_ms: 1000${extra}
   match-intent: *agent
-  match-caster: *agent
+  finalize-match: *agent
+  match-gm: *agent
   training-rater: *agent
   negotiator: *agent
   history-compactor: *agent
