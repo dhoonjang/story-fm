@@ -16,14 +16,17 @@ max_retries: 2
 # Google은 `thinkingConfig.thinkingLevel`, OpenAI는 Responses의 `reasoning.effort`.
 # **적지 않으면 Anthropic·OpenAI는 그 파라미터를 아예 싣지 않는다** — 사고를 모르는
 # 모델도 400 없이 돈다. Google만 생략 시 minimal이다 (docs/llm/models.md §1-2).
+#
+# ⚠️ 눈금을 받는 것은 제공자가 아니라 **모델**이다 — gemini-3.7-flash는 minimal에
+# 400을 낸다. 모델을 올릴 때 이 줄을 함께 본다 (docs/llm/models.md §1-2).
 
 agents:
   gm:
     provider: google
-    model: gemini-3.6-flash
+    model: gemini-3.7-flash
     max_tokens: 64000
     timeout_ms: 180000
-    thinking_level: minimal
+    thinking_level: low
 
   # 감독의 말을 구조화된 의도 하나로 옮긴다 — 판단이 아니라 분류라 가벼운 모델로 둔다.
   # 경기 한 턴이 두 호출이 됐으므로(docs/llm/agents.md §3) 여기서 지연을 갚아야 한다.
@@ -37,10 +40,10 @@ agents:
 
   match-caster:
     provider: google
-    model: gemini-3.6-flash
+    model: gemini-3.7-flash
     max_tokens: 64000
     timeout_ms: 180000
-    thinking_level: minimal
+    thinking_level: low
 
   match-rater:
     provider: google
@@ -69,7 +72,7 @@ agents:
   # 하나에 금액 둘이라 작고, 평시 턴 앞에 서므로 시한은 감독을 기다리게 하지 않는다.
   negotiator:
     provider: google
-    model: gemini-3.6-flash
+    model: gemini-3.7-flash
     max_tokens: 8000
     timeout_ms: 45000
     thinking_level: low
@@ -90,7 +93,7 @@ agents:
   # 넘을 때만이라 드물게 돈다.
   history-compactor:
     provider: google
-    model: gemini-3.6-flash
+    model: gemini-3.7-flash
     max_tokens: 8000
     timeout_ms: 60000
-    thinking_level: minimal
+    thinking_level: low

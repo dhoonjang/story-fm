@@ -13,14 +13,14 @@
 version: 1
 max_retries: 2 # 요청 하나를 다시 부르는 횟수 — 제공자 셋이 함께 쓴다 (§1-1)
 agents:
-  gm:            { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000, thinking_level: minimal }
+  gm:            { provider: google, model: gemini-3.7-flash,      max_tokens: 64000, timeout_ms: 180000, thinking_level: low }
   match-intent:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 16000, timeout_ms: 60000,  thinking_level: minimal }
-  match-caster:  { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000, thinking_level: minimal }
+  match-caster:  { provider: google, model: gemini-3.7-flash,      max_tokens: 64000, timeout_ms: 180000, thinking_level: low }
   match-rater:   { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
   training-rater:{ provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
   mood-rater:    { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
-  negotiator:    { provider: google, model: gemini-3.6-flash,      max_tokens: 8000,  timeout_ms: 45000,  thinking_level: low }
-  history-compactor: { provider: google, model: gemini-3.6-flash,      max_tokens: 8000,  timeout_ms: 60000,  thinking_level: minimal }
+  negotiator:    { provider: google, model: gemini-3.7-flash,      max_tokens: 8000,  timeout_ms: 45000,  thinking_level: low }
+  history-compactor: { provider: google, model: gemini-3.7-flash,      max_tokens: 8000,  timeout_ms: 60000,  thinking_level: low }
   onboarding-judge:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 4000,  timeout_ms: 30000,  thinking_level: minimal }
 ```
 
@@ -265,6 +265,11 @@ OpenAI는 2회를 기본으로 돌고 `@google/genai`는 **옵션을 주지 않�
   지금은 셋 다 싣는다. 제공자 이름을 보고 분기하는 자리는 그 표 밖 어디에도 없다.
 - Google에서 생략하면 `minimal`이다 — 어댑터가 사고 수준을 반드시 실어야 하는 쪽이라
   여기만 기본값을 갖는다.
+- ⚠️ **눈금을 받는 것은 제공자가 아니라 모델이다.** `PROVIDER_TRAITS`가 참이어도 그
+  모델이 그 값을 거절할 수 있다 — Gemini 3.7 flash는 `MINIMAL`에 400
+  (`Thinking level MINIMAL is not supported for this model`)을 낸다. **모델을
+  올리면 이 칸을 함께 본다**: 400은 §1-1의 표에서 `unknown`이라 화면에는 "응답을
+  받지 못해"만 서고, 설정이 틀렸다는 사실이 어디에도 안 적힌다.
 
 ## 2. 설정을 읽는 규칙
 
