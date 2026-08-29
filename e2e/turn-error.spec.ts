@@ -5,6 +5,9 @@ import { COLD_MS } from "./timeouts";
 /** 서버가 돌려주는 실패 문장 — 이 스펙이 만들어 넣고 배너에서 그대로 되찾는다 */
 const SERVER_ERROR = "모델 서버가 혼잡합니다";
 
+/** 다시 불러도 같은 실패 — 서버가 `retry: false`를 함께 적어 보낸다 (models.md §1-1) */
+const PERMANENT_ERROR = "요청이나 설정이 잘못됐습니다 — 서버 로그를 확인하세요";
+
 /**
  * LLM 실패 시 UI — **채팅은 그대로 두고 배너로만 알린다.** 실패한 턴은 채팅에
  * 아무것도 남기지 않는다: 유저 발화도, 사과 대사를 읊는 모델 턴도.
@@ -48,6 +51,26 @@ test("LLM 실패 배너", async ({ page }) => {
   await expect(page.getByTestId("model-turn")).toHaveCount(turnsBefore);
   // 입력은 되돌아온다 (그대로 다시 시도 가능)
   await expect(page.getByTestId("chat-input")).toHaveValue("훈련 잡아줘");
+  const retry = page.getByTestId("turn-error").getByRole("button", { name: "다시 시도" });
+  await expect(retry).toBeVisible();
+
+  /**
+   * **다시 불러도 같은 실패에는 그 버튼이 서지 않는다** (models.md §1-1). 설정이나
+   * 스키마가 틀린 400은 몇 번을 불러도 같은 답이라, 다시 걸어 보라고 이르는 것은
+   * 사실과 다르다. 무엇으로 가르는지는 **서버가 적어 보내는 `retry` 하나**다 —
+   * 화면이 문구를 읽어 짐작하면 그 문안이 바뀌는 날 조용히 무너진다.
+   */
+  await page.unroute("**/turn/stream");
+  await page.route("**/turn/stream", (route) =>
+    route.fulfill({
+      status: 502,
+      contentType: "application/json",
+      body: JSON.stringify({ error: PERMANENT_ERROR, retry: false }),
+    }),
+  );
+  await page.getByTestId("chat-send").click();
+  await expect(page.getByTestId("turn-error")).toContainText(PERMANENT_ERROR);
+  await expect(retry).toHaveCount(0);
 });
 
 /**
