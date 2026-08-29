@@ -117,6 +117,8 @@ import {
   PLAYER_DIRECTIVE_KINDS,
   PRESS_STANCES,
   PROMISE_KINDS,
+  PROMISE_KIND_KO,
+  PROMISE_KIND_MEANING,
   SEARCH_MAX_AGE,
   SEARCH_MIN_AGE,
   SET_PIECE_ROUTINE_LEVELS,
@@ -137,7 +139,7 @@ import { runTableReply } from "./negotiation-table";
 import { MARKET_OPS, runMarketOrders } from "./market-orders";
 import { TRAINING_OPS, runTrainingOrders } from "./training-orders";
 import { OrdersArgsSchema, applyOps } from "./orders-ops";
-import { MONEY_MAX, WAGE_MAX, money } from "./ruling-schema";
+import { MONEY_MAX, SQUAD_STATUS_LINE, WAGE_MAX, money } from "./ruling-schema";
 import { applyTacticOrders } from "./tactic-apply";
 import { inputError, toToolSchema } from "./tool-schema";
 import { recordCall, type GmToolCall, type CommandReturn } from "./gm-types";
@@ -331,7 +333,9 @@ const promiseArg = z
     kind: z
       .enum(PROMISE_KINDS)
       .describe(
-        "minutes=선발로 쓰겠다 · transfer=내보내 주겠다 · renewal=재계약을 열겠다 · captain=주장을 맡기겠다 · number=그 등번호를 주겠다",
+        PROMISE_KINDS.map((k) => `${k}(${PROMISE_KIND_KO[k]}): ${PROMISE_KIND_MEANING[k]}`).join(
+          " · ",
+        ),
       ),
     days: z
       .number()
@@ -357,9 +361,7 @@ const promiseArg = z
 const squadStatusArg = z
   .enum(SQUAD_STATUSES)
   .optional()
-  .describe(
-    "key=핵심 · starter=주전 · rotation=로테이션 · backup=백업 · prospect=유망주. 감독이 자리를 약속했을 때만 싣는다",
-  );
+  .describe(`${SQUAD_STATUS_LINE}. 감독이 자리를 약속했을 때만 싣는다`);
 
 // 훈련 세션 스키마 (set_training) — 자유 label + focus 대상
 const TRAIN_FOCUS = [...ATTRIBUTE_AXES, "tactical", "recovery"] as const;

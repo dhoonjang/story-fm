@@ -17,6 +17,7 @@ import {
   AXIS_KO,
   DateString,
   TRAINING_MARKS,
+  TRAINING_MARK_KO,
   TrainingMarkSchema,
   type TrainingReport,
 } from "@story-fm/domain";
@@ -102,7 +103,7 @@ const OutcomeSchema = z.object({
    * 코어가 잘라 낸다 (`applyTrainingOutcomes`).
    */
   mark: TrainingMarkSchema.nullish().describe(
-    `훈련 태도 — ${TRAINING_MARKS.join("·")} 중 하나 (해당 없으면 비운다)`,
+    `훈련 태도 — ${TRAINING_MARKS.map((m) => `${m}(${TRAINING_MARK_KO[m]})`).join(" · ")} 중 하나 (해당 없으면 비운다)`,
   ),
 });
 const ReportInputSchema = z.object({ results: z.array(OutcomeSchema).max(MAX_TRAINED_PLAYERS) });

@@ -239,8 +239,11 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
   낱말표를 든 갈래는 **그 표에서 끌어와** 도구 설명이나 `.describe()`, 또는 그 호출의 시스템
   프롬프트에 싣는다 — 사건 기록(`INCIDENT_KIND_KO`) · 시작 사건(`OPENING_KIND_KO`) · 설득
   논거(`PITCH_CLAIM_KO`) · 테이블의 태도(`TABLE_STANCE_KO`) · 감독의 약속(`PROMISE_KIND_KO`) ·
-  훈련 표식(`TRAINING_MARK_KO`). 손으로 한 벌 더 적으면 표를 고쳐도 모델은 옛 뜻을 계속 받고,
-  한 갈래만 낱말이 빠지면 모델은 그 값을 **「나머지」**로 읽는다.
+  훈련 표식(`TRAINING_MARK_KO`) · 계약 지위(`SQUAD_STATUS_KO`) · 개인 지시와 그 세기
+  (`PLAYER_DIRECTIVE_KO` · `DIRECTIVE_INTENSITY_KO`). 손으로 한 벌 더 적으면 표를 고쳐도
+  모델은 옛 뜻을 계속 받고, 한 갈래만 낱말이 빠지면 모델은 그 값을 **「나머지」**로 읽는다.
+  **낱말이 곧 토큰인 갈래는 예외다** — `corner`·`freeKick`·`penalty`처럼 토큰 자체가 뜻인
+  자리에 낱말을 얹는 것은 벌어질 어긋남이 없는 글자 수다.
 - **낱말이 갈래를 가르지 못하는 자리에는 뜻 표가 하나 더 선다** (`PITCH_CLAIM_MEANING` ·
   `PROMISE_KIND_MEANING`). 낱말표는 장부 줄과 화면이 쓰는 이름이라 짧다 — 「출전」은 교체
   출전까지 품지만 기한 날 장부가 재는 것은 **선발 비율**이고(→ [../data/people.md](../data/people.md)

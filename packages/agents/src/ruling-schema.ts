@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MAX_PAYMENT_YEARS, SQUAD_STATUSES } from "@story-fm/domain";
+import { MAX_PAYMENT_YEARS, SQUAD_STATUSES, SQUAD_STATUS_KO } from "@story-fm/domain";
 import { RENEWAL_YEARS_MAX } from "@story-fm/engine";
 
 /**
@@ -13,6 +13,16 @@ export const MONEY_MAX = 500_000_000;
 /** 주급의 상한 */
 export const WAGE_MAX = 2_000_000;
 export const money = (max: number) => z.number().int().min(0).max(max);
+
+/**
+ * 지위 다섯의 낱말 — **코어의 표에서 온다** (prompts.md §2). 서류는 지위를 낱말로
+ * 적고(`describeAnchor` — "기준 주전, 로테이션~핵심 안에서") 모델은 토큰으로 답하므로,
+ * 둘을 잇는 표가 없으면 모델은 「핵심」이 `key`인지 `starter`인지를 짐작한다.
+ * 오퍼·재계약이 싣는 지위 인자와 **한 자리에서 나온다**.
+ */
+export const SQUAD_STATUS_LINE = SQUAD_STATUSES.map((s) => `${s}(${SQUAD_STATUS_KO[s]})`).join(
+  " · ",
+);
 
 /**
  * 판정의 필드 — **여기에 이번 협상의 숫자를 적지 않는다.** 도구 정의는 고정층이라
@@ -36,7 +46,9 @@ export const CounterpartyRulingFieldsSchema = z.object({
   squadStatus: z
     .enum(SQUAD_STATUSES)
     .optional()
-    .describe("재계약·영입 조정에서 선수가 원하는 계약 지위. 서류의 구간 안에서"),
+    .describe(
+      `재계약·영입 조정에서 선수가 원하는 계약 지위. 서류의 구간 안에서 — ${SQUAD_STATUS_LINE}`,
+    ),
   paymentYears: z
     .number()
     .int()

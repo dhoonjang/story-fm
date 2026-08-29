@@ -23,6 +23,7 @@ import {
   SETTLE_MATCH_DESCRIPTION,
   SETTLE_MATCH_INPUT,
   SETTLE_MATCH_TOOL,
+  NEGOTIATION_TABLE_SYSTEM,
   ONBOARDING_JUDGE_SYSTEM,
   SKILL_CATALOG,
   SKILL_NAMES,
@@ -46,9 +47,22 @@ import {
   PITCH_CLAIM_KINDS,
   PITCH_CLAIM_KO,
   PITCH_CLAIM_MEANING,
+  DIRECTIVE_INTENSITIES,
+  DIRECTIVE_INTENSITY_KO,
+  PLAYER_DIRECTIVE_KINDS,
+  PLAYER_DIRECTIVE_KO,
+  PROMISE_KIND_KO,
+  PROMISE_KIND_MEANING,
+  PROMISE_KINDS,
   SET_PIECE_ROUTINE_AXES,
   SET_PIECE_ROUTINE_NEUTRAL,
+  SQUAD_STATUS_KO,
+  SQUAD_STATUSES,
+  TABLE_STANCE_KO,
+  TABLE_STANCES,
   TACTIC_TOGGLES,
+  TRAINING_MARK_KO,
+  TRAINING_MARKS,
 } from "@story-fm/domain";
 import { AXIS_AGING, agingDelta, createGame, interpretBackgroundHeuristic } from "@story-fm/engine";
 
@@ -241,6 +255,66 @@ describe("규칙이 사는 자리", () => {
          */
         tables: [PITCH_CLAIM_KO, PITCH_CLAIM_MEANING] as Array<Record<string, string>>,
         reads: "",
+      },
+      {
+        where: "reply_at_table.stance",
+        node: enumArg([reply], reply.name, "stance"),
+        kinds: TABLE_STANCES as readonly string[],
+        tables: [TABLE_STANCE_KO as Record<string, string>],
+        reads: NEGOTIATION_TABLE_SYSTEM,
+      },
+      {
+        /** 면담과 다가옴의 응대가 **같은 인자 하나**를 쓴다 — 한 자리를 재면 둘 다 잰다 */
+        where: "talk_to_player.promise.kind",
+        node: enumArg(TOOLS, "talk_to_player", "kind"),
+        kinds: PROMISE_KINDS as readonly string[],
+        /**
+         * 여기도 표가 둘이다. 낱말은 장부 줄과 화면이 쓰는 이름이고(「출전」),
+         * **뜻**은 기한 날 장부가 무엇을 재는지를 가르는 문장이라(선발 비율)
+         * 낱말만으로는 감독의 말이 어느 갈래인지 서지 않는다 (people.md §5-2).
+         */
+        tables: [PROMISE_KIND_KO, PROMISE_KIND_MEANING] as Array<Record<string, string>>,
+        reads: "",
+      },
+      {
+        where: "report_training.results[].mark",
+        node: enumArg(RATER_TOOLS, REPORT_TRAINING_TOOL, "mark"),
+        kinds: TRAINING_MARKS as readonly string[],
+        tables: [TRAINING_MARK_KO as Record<string, string>],
+        reads: TRAINING_RATER_SYSTEM,
+      },
+      {
+        /**
+         * 오퍼·재계약이 싣는 지위와 조정이 되부르는 지위는 **같은 줄**을 읽는다
+         * (`SQUAD_STATUS_LINE`) — 서류는 지위를 낱말로 적고 모델은 토큰으로 답한다.
+         */
+        where: "send_offer.squadStatus",
+        node: enumArg(SKILL_TOOLS, "send_offer", "squadStatus"),
+        kinds: SQUAD_STATUSES as readonly string[],
+        tables: [SQUAD_STATUS_KO as Record<string, string>],
+        reads: "",
+      },
+      {
+        where: "reply_at_table.ruling.squadStatus",
+        node: enumArg([reply], reply.name, "squadStatus"),
+        kinds: SQUAD_STATUSES as readonly string[],
+        tables: [SQUAD_STATUS_KO as Record<string, string>],
+        reads: "",
+      },
+      {
+        /** 개인 지시는 해석기가 고른다 — 뜻은 그 호출의 시스템 프롬프트에 선다 */
+        where: "set_player_tactic.instruction.kind",
+        node: enumArg(SKILL_TOOLS, "set_player_tactic", "kind"),
+        kinds: PLAYER_DIRECTIVE_KINDS as readonly string[],
+        tables: [PLAYER_DIRECTIVE_KO as Record<string, string>],
+        reads: TACTIC_ORDERS_SYSTEM,
+      },
+      {
+        where: "set_player_tactic.instruction.intensity",
+        node: enumArg(SKILL_TOOLS, "set_player_tactic", "intensity"),
+        kinds: DIRECTIVE_INTENSITIES as readonly string[],
+        tables: [DIRECTIVE_INTENSITY_KO as Record<string, string>],
+        reads: TACTIC_ORDERS_SYSTEM,
       },
     ];
     for (const row of rows) {
