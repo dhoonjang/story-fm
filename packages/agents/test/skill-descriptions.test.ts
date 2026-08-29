@@ -3,8 +3,11 @@ import { z } from "zod";
 import {
   DEFAULT_SKILL_DESCRIPTIONS,
   GM_SYSTEM,
+  CORE_COMMANDS,
+  MARKET_OPS,
   TACTIC_CAPS,
   TACTIC_OPS,
+  TRAINING_OPS,
   buildOpsSchema,
   TACTIC_ORDERS_SYSTEM,
   REPORT_DIGEST_INPUT,
@@ -328,14 +331,56 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
    */
   it("해석기의 ops 항목은 그 명령의 입력 스키마 그대로다", () => {
     const specs = new Map(SKILL_TOOLS.map((t) => [t.name, t] as const));
-    const ops = buildOpsSchema(specs, TACTIC_OPS, "판", TACTIC_CAPS).properties as Record<
-      string,
-      { items?: unknown; maxItems?: number }
-    >;
-    for (const name of TACTIC_OPS) {
-      expect(ops[name]?.items, name).toBe(specs.get(name)!.inputSchema);
+    for (const [label, list, caps] of [
+      ["tactic", TACTIC_OPS, TACTIC_CAPS],
+      ["training", TRAINING_OPS, {}],
+      ["market", MARKET_OPS, {}],
+    ] as const) {
+      const ops = buildOpsSchema(specs, list, "인자", caps).properties as Record<
+        string,
+        { items?: unknown; maxItems?: number }
+      >;
+      for (const name of list) {
+        // 이름이 어긋나면 그 자리가 스키마에서 조용히 사라져 모델이 부를 길을 잃는다
+        expect(specs.has(name), `${label}: ${name}`).toBe(true);
+        expect(ops[name]?.items, `${label}: ${name}`).toBe(specs.get(name)!.inputSchema);
+      }
     }
-    expect(ops.substitute?.maxItems).toBe(TACTIC_CAPS.substitute);
+    const tactic = buildOpsSchema(specs, TACTIC_OPS, "판", TACTIC_CAPS).properties as Record<
+      string,
+      { maxItems?: number }
+    >;
+    expect(tactic.substitute?.maxItems).toBe(TACTIC_CAPS.substitute);
+  });
+
+  /**
+   * **받아쓰기는 동기 명령만 지난다** (`applyOps`). 해석기의 JSON은 한 번에 여럿을
+   * 부르므로 프로미스를 돌려주는 손잡이(`tactic_orders`·`market_orders`…)가 목록에 들면
+   * 적용이 그 자리에서 터진다 — 이름 한 줄로 벌어지는 일이라 여기서 막는다.
+   */
+  it("ops 목록의 명령은 전부 동기다 — 손잡이는 목록에 들지 않는다", () => {
+    const specs = new Map(SKILL_TOOLS.map((t) => [t.name, t] as const));
+    for (const name of [...TACTIC_OPS, ...TRAINING_OPS, ...MARKET_OPS]) {
+      expect(specs.get(name)!.handle.constructor.name, name).not.toBe("AsyncFunction");
+    }
+  });
+
+  /**
+   * **부를 길이 없는 코어 명령은 없다.** GM에게 보이지 않는 명령(`CORE_COMMANDS`)은
+   * 해석기의 목록에 정확히 한 번 서야 한다 — 빠지면 아무도 못 부르고, 둘에 서면 같은
+   * 명령이 두 해석기에서 다른 문맥으로 채워진다.
+   */
+  it("코어 명령은 어느 해석기 목록에 정확히 한 번 선다", () => {
+    const lists = [...TACTIC_OPS, ...TRAINING_OPS, ...MARKET_OPS];
+    for (const name of CORE_COMMANDS) {
+      expect(
+        lists.filter((n) => n === name),
+        name,
+      ).toHaveLength(1);
+    }
+    // 거꾸로, 목록에 있는데 코어 명령도 카탈로그 스킬도 아닌 이름은 없다
+    const known = new Set([...CORE_COMMANDS, ...SKILL_CATALOG.map((s) => s.name)]);
+    for (const name of lists) expect(known.has(name), name).toBe(true);
   });
 
   /** 중첩된 객체·배열도 같은 규칙을 지난다 — 안쪽에서 제약이 사라지면 아무도 못 본다 */

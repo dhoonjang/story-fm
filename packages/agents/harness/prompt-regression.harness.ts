@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  MARKET_OPS,
+  MARKET_ORDERS_SYSTEM,
+  TACTIC_CAPS,
+  TACTIC_OPS,
+  TACTIC_ORDERS_SYSTEM,
+  TRAINING_OPS,
+  TRAINING_ORDERS_SYSTEM,
+  buildOpsSchema,
+  buildToolSpecs,
+  type OpsCaps,
   GM_SYSTEM,
   MATCH_GM_SYSTEM,
   MATCH_TOOL_DEFINITIONS,
@@ -80,6 +90,19 @@ function fixedLayer(state: GameState): string {
  */
 function settlementLayer(): number {
   return SETTLE_MATCH_DESCRIPTION.length + JSON.stringify(SETTLE_MATCH_INPUT).length;
+}
+
+/**
+ * 해석기 하나가 매 호출에 싣는 고정층 — 시스템 프롬프트 + `ops`의 인자 스키마.
+ *
+ * 인자 스키마가 **명령의 도구 정의에서 그대로 오므로**(agents.md §1), 명령 하나의 설명이
+ * 길어지면 그 명령을 든 해석기의 요청이 그만큼 길어진다 — 평시 고정층과 달리 아무도
+ * 보지 않던 자리라 여기서 잰다.
+ */
+function interpreterLayer(ops: readonly string[], system: string, caps: OpsCaps = {}): number {
+  const state = build(7, "최감독", BACKGROUND);
+  const specs = new Map(buildToolSpecs(state, []).map((t) => [t.name, t] as const));
+  return system.length + JSON.stringify(buildOpsSchema(specs, ops, "인자", caps)).length;
 }
 
 /** 경기의 고정층 — 매치 GM 프롬프트 + 경기 도구 셋. 매 경기 턴의 캐시 프리픽스다 */
@@ -227,6 +250,9 @@ describe("프롬프트 회귀", () => {
       "가장 긴 도구 설명 글자": Math.max(...SKILL_CATALOG.map((s) => s.description.length)),
       "경기 고정층 글자": matchLayer(),
       "경기 마감 고정층 글자": settlementLayer(),
+      "전술 해석 고정층 글자": interpreterLayer(TACTIC_OPS, TACTIC_ORDERS_SYSTEM, TACTIC_CAPS),
+      "훈련 해석 고정층 글자": interpreterLayer(TRAINING_OPS, TRAINING_ORDERS_SYSTEM),
+      "시장 해석 고정층 글자": interpreterLayer(MARKET_OPS, MARKET_ORDERS_SYSTEM),
       "훈련 브리프 글자": trainingBriefChars(13),
       "레퍼런스층 글자": reference.length,
       "매 턴 층 글자": stateNote.length,

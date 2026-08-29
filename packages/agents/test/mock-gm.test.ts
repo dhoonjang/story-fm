@@ -541,3 +541,25 @@ describe("테이블 — 건너편은 메인 채팅을 읽지 않는다 (agents.m
     );
   });
 });
+
+describe("mock — 테이블에 앉으면 칩이 선다", () => {
+  it("마주 앉겠다는 말에 speak_at_table이 기록되고 상대가 서류대로 답한다", async () => {
+    const state = newGame();
+    const player = playersOf(state, state.userTeamId)[0]!;
+    activeContract(state, player.id)!.until = addDays(state.date, 120);
+    const opened = openRenewal(state, {
+      playerId: player.id,
+      weeklyWage: Math.round(renewalExpectation(state, player) * 0.8),
+      years: 3,
+    });
+    expect(opened.ok, opened.message).toBe(true);
+
+    const turn = await runMockGmTurn(state, `${player.name}랑 마주 앉아서 얘기하자`);
+
+    expect(turn.toolCalls.map((c) => c.name)).toContain("speak_at_table");
+    const renewal = state.negotiations.find((n) => n.kind === "renew")!;
+    // 감독의 말이 테이블에 남고, 답 없는 자리는 코어가 앵커로 마감한다
+    expect(renewal.table!.lines[0]).toMatchObject({ by: "us" });
+    expect(renewal.table!.lines.some((l) => l.by === "ledger")).toBe(true);
+  });
+});

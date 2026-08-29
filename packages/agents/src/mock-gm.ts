@@ -29,6 +29,8 @@ import {
   respondToMedia,
   declinePress,
   arrivedResponses,
+  settleTableReply,
+  sitAtTable,
   counterpartyAnchor,
   settleCounterparty,
   type CounterpartyRuling,
@@ -964,6 +966,30 @@ function computeMockGmTurn(
       text: `@: *책상 위에 놓인 요청서 한 장*\n@${playerName(state, request.gamePlayerId)}: ${TRANSFER_REQUEST_REASON_KO[request.reason]} 때문입니다. 보내 주십시오.\n${coach(state)} ${result.message}`,
       toolCalls: calls,
     };
+  }
+
+  /**
+   * ── 테이블 — 감독이 마주 앉겠다고 하면 그 자리에서 답한다 (transfer.md §12-2).
+   *
+   * mock은 상대의 대사를 쓰지 않는다: 답 없이 마감하면 코어가 앵커를 그대로 반영하므로
+   * (`settleTableReply`) 실모드의 폴백과 같은 사다리를 지난다. 이 갈래가 없으면
+   * `speak_at_table`의 칩과 카드가 mock에서 한 번도 서지 않아 화면 경로가 시험되지 않는다.
+   */
+  if (/마주 앉|테이블|직접 만나|얼굴 보고|불러서 담판/u.test(msg)) {
+    const open = state.negotiations.find((n) => n.status === "open");
+    if (open) {
+      const seated = sitAtTable(state, open.id, message);
+      if (seated.ok) {
+        const outcome = settleTableReply(state, seated.seat);
+        recordCall(calls, "speak_at_table", outcome, {
+          input: { negotiationId: open.id, line: message },
+        });
+        return {
+          text: `@: *테이블 건너편에 앉는다*\n${coach(state)} ${outcome.message.split("\n")[0] ?? ""}`,
+          toolCalls: calls,
+        };
+      }
+    }
   }
 
   // ── 이적 협상 (mock) — 실모드는 LLM이 상대편이 되어 판정하지만 mock은 테스트

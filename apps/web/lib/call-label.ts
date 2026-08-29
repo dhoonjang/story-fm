@@ -33,6 +33,7 @@ export const CALL_LABEL: Record<string, string> = {
   set_training: "훈련 지정",
   exploit_point: "약점 공략",
   set_match_plan: "지역 전술",
+  set_shootout_order: "승부차기 순서",
   team_talk: "팀 토크",
   talk_to_player: "선수 면담",
   respond_to_media: "기자회견 대응",
