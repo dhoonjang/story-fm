@@ -2,7 +2,6 @@ export * from "./aging-line";
 export * from "./match-gm";
 export * from "./match-script";
 export * from "./finalize-match";
-export * from "./tactic-schema";
 export * from "./tactic-orders";
 export * from "./tactic-apply";
 export * from "./counterparty-brief";

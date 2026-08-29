@@ -19,7 +19,10 @@ import {
   buildSegmentMessage,
   GmTurnFailure,
   MATCH_ADVANCED,
-  TacticOrdersSchema,
+  TACTIC_CAPS,
+  TACTIC_OPS,
+  OPS_PER_COMMAND,
+  parseOps,
   runGmTurn,
   stampMatchScene,
   stampMatchStream,
@@ -87,7 +90,7 @@ function turn(
 }
 
 /** 진행하는 턴 — 굴릴지는 매치 GM이 부른 도구가 정한다 (agents.md §3) */
-const GO: TacticOrders = {};
+const GO: TacticOrders = { ops: {} };
 
 /** 요청이 강제한 도구 — 어느 에이전트의 호출인지는 이것이 가른다 */
 const forced = (req: TurnRequest): string | undefined =>
@@ -97,7 +100,7 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
   it("진행 의도가 없으면 경기가 한 발도 나가지 않는다", () => {
     const state = matchState();
     const minute = state.pendingMatch!.ledger.minute;
-    const { applied } = turn(state, {});
+    const { applied } = turn(state, { ops: {} });
     expect(applied.segment).toBeNull();
     expect(state.pendingMatch!.ledger.minute).toBe(minute);
     expect(state.pendingMatch!.ledger.events).toHaveLength(0);
@@ -114,7 +117,7 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
     const minute = state.pendingMatch!.ledger.minute;
 
     const { applied } = turn(state, {
-      talk: [{ playerId: who, outcome: "motivated", intensity: 2 }],
+      ops: { talk_to_player: [{ playerId: who, outcome: "motivated", intensity: 2 }] },
     });
     expect(applied.segment).toBeNull();
     expect(state.pendingMatch!.ledger.minute).toBe(minute);
@@ -127,7 +130,14 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
     const out = ledger[side].onPitch[10]!;
     const incoming = ledger[side].bench[1]!;
 
-    const { applied } = turn(state, { substitutions: [{ out, in: incoming }] }, [], [], [], true);
+    const { applied } = turn(
+      state,
+      { ops: { substitute: [{ out, in: incoming }] } },
+      [],
+      [],
+      [],
+      true,
+    );
     expect(applied.segment).not.toBeNull();
 
     const after = state.pendingMatch!.ledger;
@@ -148,11 +158,11 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
    */
   it("세트피스 인원 지시가 그 턴에 팀 전술로 들어간다", () => {
     const state = matchState();
-    turn(state, { setPieceRoutine: { commit: "many" } });
+    turn(state, { ops: { set_set_piece_routine: [{ commit: "many" }] } });
     expect(userTactics(state).setPieceRoutine?.commit).toBe("many");
 
     // 중립은 지시를 푼다 — 칸이 비어야 「지시하지 않음」이 한 모양으로 적힌다
-    turn(state, { setPieceRoutine: { commit: "normal" } });
+    turn(state, { ops: { set_set_piece_routine: [{ commit: "normal" }] } });
     expect(userTactics(state).setPieceRoutine?.commit).toBeUndefined();
   });
 
@@ -164,7 +174,7 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
 
     const { applied } = turn(
       state,
-      { playerTactics: [{ playerId: mover, position: "CB" }] },
+      { ops: { set_player_tactic: [{ playerId: mover, position: "CB" }] } },
       [],
       [],
       [],
@@ -185,7 +195,7 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
    */
   it("해석하지 못한 말은 감독에게 되돌아간다", () => {
     const state = matchState();
-    const { applied } = turn(state, { unresolved: "골키퍼를 공격수로 올려" });
+    const { applied } = turn(state, { ops: {}, unresolved: "골키퍼를 공격수로 올려" });
     expect(applied.notes.join(" ")).toContain("골키퍼를 공격수로 올려");
   });
 
@@ -264,7 +274,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
   }
 
   /** 해석기 흉내 — 지시 하나를 낸다 (advance는 의도의 것이 아니다) */
-  const interpreter = async (req: TurnRequest, intent: TacticOrders = {}) => {
+  const interpreter = async (req: TurnRequest, intent: TacticOrders = { ops: {} }) => {
     const tool = req.tools?.find((t) => t.name === "report_tactic_orders");
     if (tool) await tool.handle(intent);
     return answered("", tool ? 1 : 0);
@@ -282,7 +292,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     const incoming = state.pendingMatch!.ledger[side].bench[0]!;
     runTurn.mockImplementation(async (req: TurnRequest) => {
       if (forced(req) === "report_tactic_orders") {
-        return interpreter(req, { substitutions: [{ out, in: incoming }] });
+        return interpreter(req, { ops: { substitute: [{ out, in: incoming }] } });
       }
       const orders = req.tools?.find((t) => t.name === "tactic_orders");
       const advance = req.tools?.find((t) => t.name === "advance_match");
@@ -817,95 +827,33 @@ describe("평시 GM 턴 — 상한을 도구로 채운 턴", () => {
 });
 
 /**
- * 해석의 산출은 **이 객체 하나**이고 도구가 없다 (agents.md §3). 감독의 말이 판으로
- * 옮겨지는 폭을 지키는 것이 이 스키마뿐이라, 상한이 풀리면 한 턴에 열 명과 대화하고
- * 플랜을 다섯 개 건 판이 서는데 감독은 그런 말을 한 적이 없다.
+ * 해석의 산출은 **부를 명령과 그 인자**다 (agents.md §3). 인자의 스키마는 그 명령의
+ * 도구 정의에서 그대로 오므로 여기서 지킬 것은 둘뿐이다 — **목록에 없는 이름은 버린다**
+ * (모델이 낼 수 없는 명령을 지어내도 판이 움직이지 않는다), **명령마다 정해진 수까지만
+ * 싣는다**(교체 다섯·개인 지시 열한 자리·지역 플랜 둘 — 규칙이 정한 수다).
  */
-describe("경기 의도 스키마의 경계", () => {
-  const ids = (n: number) => Array.from({ length: n }, (_, i) => `p${i}`);
-  const parses = (intent: unknown) => TacticOrdersSchema.safeParse(intent).success;
+describe("받아쓰기 산출의 경계", () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => ({ i }));
 
-  it("한 턴에 담기는 갈래마다 개수 상한이 있다", () => {
-    const talk = (n: number) =>
-      ids(n).map((playerId) => ({ playerId, outcome: "motivated", intensity: 2 }));
-    expect(parses({ talk: talk(4) })).toBe(true);
-    expect(parses({ talk: talk(5) })).toBe(false);
-
-    const plan = { band: "attack", lane: "left", intent: "overload", note: "왼쪽에 사람을 모은다" };
-    expect(parses({ plans: [plan, plan] })).toBe(true);
-    expect(parses({ plans: [plan, plan, plan] })).toBe(false);
-
-    const subs = (n: number) => ids(n).map((id) => ({ out: id, in: `${id}-in` }));
-    expect(parses({ substitutions: subs(5) })).toBe(true);
-    expect(parses({ substitutions: subs(6) })).toBe(false);
-
-    // 자리·역할·개인 지시는 그라운드에 선 열한 명까지다
-    const moves = (n: number) => ids(n).map((playerId) => ({ playerId }));
-    expect(parses({ playerTactics: moves(11) })).toBe(true);
-    expect(parses({ playerTactics: moves(12) })).toBe(false);
-
-    expect(parses({ exploits: ids(2) })).toBe(true);
-    expect(parses({ exploits: ids(3) })).toBe(false);
-
-    expect(parses({ shootoutOrder: ids(11) })).toBe(true);
-    expect(parses({ shootoutOrder: ids(12) })).toBe(false);
+  it("목록에 없는 명령은 버린다", () => {
+    const ops = parseOps({ set_tactics: [{ pressing: 4 }], drop_player: [{}] }, TACTIC_OPS);
+    expect(Object.keys(ops)).toEqual(["set_tactics"]);
   });
 
-  /**
-   * 숫자는 이 스키마에 없다 — 오는 것은 판정 라벨과 눈금뿐이고, 사기가 얼마나
-   * 움직이는지는 코어가 표와 리더십 계수로 정한다.
-   */
-  it("세기와 전술 축은 눈금 안의 값만 받는다 — 네 단계 세기도, 여섯 단계 축도 없다", () => {
-    const talk = (intensity: unknown) => ({
-      talk: [{ playerId: "p", outcome: "angered", intensity }],
-    });
-    expect(parses(talk(1))).toBe(true);
-    expect(parses(talk(3))).toBe(true);
-    expect(parses(talk(0))).toBe(false);
-    expect(parses(talk(4))).toBe(false);
-    expect(parses(talk(2.5))).toBe(false);
-    // 없는 판정 라벨은 코어가 아니라 여기서 걸린다
-    expect(parses({ talk: [{ playerId: "p", outcome: "기뻐함", intensity: 2 }] })).toBe(false);
-
-    const teamTalk = (intensity: unknown) => ({
-      teamTalk: { occasion: "half", outcome: "inspired", intensity },
-    });
-    expect(parses(teamTalk(3))).toBe(true);
-    expect(parses(teamTalk(4))).toBe(false);
-
-    // 말하지 않은 축은 지금 값을 그대로 둔다 — 여섯 축이 전부 선택이다
-    expect(parses({ tactics: {} })).toBe(true);
-    expect(parses({ tactics: { pressing: 5 } })).toBe(true);
-    expect(parses({ tactics: { pressing: 0 } })).toBe(false);
-    expect(parses({ tactics: { pressing: 6 } })).toBe(false);
-    expect(parses({ tactics: { pressing: 3.5 } })).toBe(false);
+  it("명령마다 정해진 수까지만 싣는다 — 나머지는 잘린다", () => {
+    const ops = parseOps(
+      { substitute: many(7), set_match_plan: many(4), set_tactics: many(9) },
+      TACTIC_OPS,
+      TACTIC_CAPS,
+    );
+    expect(ops.substitute).toHaveLength(TACTIC_CAPS.substitute!);
+    expect(ops.set_match_plan).toHaveLength(TACTIC_CAPS.set_match_plan!);
+    // 상한을 적지 않은 명령은 기본값이 선다
+    expect(ops.set_tactics).toHaveLength(OPS_PER_COMMAND);
   });
 
-  it("진행은 매치 GM의 도구가 정하고, 감독에게 되돌아가는 말에는 길이가 물려 있다", () => {
-    /**
-     * **시계를 미는가는 의도의 칸이 아니다** — 어느 도구를 불렀는가가 정한다
-     * (agents.md §3). 스키마에 진행 갈래를 남겨 두면 프롬프트가 가르치지 않는 칸을
-     * 모델이 채우고, 그 값이 조용히 판을 굴린다.
-     */
-    expect(parses({ advance: "segment" } as never)).toBe(true); // 모르는 칸은 무시된다
-    expect(TacticOrdersSchema.parse({ advance: "segment" } as never)).toEqual({});
-
-    const unresolved = (n: number) => ({ unresolved: "말".repeat(n) });
-    expect(parses(unresolved(200))).toBe(true);
-    expect(parses(unresolved(201))).toBe(false);
-    // 빈 줄은 되돌려 줄 말이 아니다 — 옮기지 못한 말이 없으면 자리를 비운다
-    expect(parses({ unresolved: "" })).toBe(false);
-
-    const note = (n: number) => ({
-      playerTactics: [{ playerId: "p", instruction: { note: "말".repeat(n) } }],
-    });
-    expect(parses(note(160))).toBe(true);
-    expect(parses(note(161))).toBe(false);
-
-    const planNote = (n: number) => ({
-      plans: [{ band: "midfield", lane: "center", intent: "press", note: "말".repeat(n) }],
-    });
-    expect(parses(planNote(120))).toBe(true);
-    expect(parses(planNote(121))).toBe(false);
+  it("빈 배열은 부르지 않은 것이다 — 자리를 만들지 않는다", () => {
+    expect(parseOps({ substitute: [] }, TACTIC_OPS)).toEqual({});
+    expect(parseOps(null, TACTIC_OPS)).toEqual({});
   });
 });

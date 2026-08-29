@@ -3,7 +3,6 @@ import {
   advanceShootout,
   awaitingShootout,
   playerName,
-  setShootoutOrder,
   shapeOfTactics,
   type CardMark,
   type GameState,
@@ -13,14 +12,14 @@ import { shootoutTally } from "@story-fm/domain";
 import type { GameToolSpec } from "@story-fm/llm";
 import { buildToolSpecs, collectMatchMarks, sideTeamName } from "./gm-tools";
 import { buildSegmentMessage, buildShootoutMessage } from "./match-script";
-import type { TacticOrders } from "./tactic-schema";
-import { unresolvedNote } from "./orders-ops";
+import { TACTIC_OPS, type TacticOrders } from "./tactic-orders";
+import { applyOps } from "./orders-ops";
 import { MATCH_ADVANCED, type GmToolCall } from "./gm-types";
 
 /**
  * 의도 → 상태. **경기 턴의 ③이다** (docs/llm/agents.md §3).
  *
- * 해석이 낸 `TacticOrders`를 엔진 명령로 옮기고, 진행 의도면 한 구간을 굴린다.
+ * 해석이 낸 `ops`를 코어 명령으로 옮기고, 진행 의도면 한 구간을 굴린다.
  * 여기서부터는 LLM이 없다 — 실재 확인도 이득 계산도 전부 결정적이다.
  *
  * ## 명령 배선을 다시 쓰지 않는다
@@ -53,63 +52,19 @@ export function applyTacticOrders(
   calls: GmToolCall[],
   goals: GoalMark[],
   cards: CardMark[],
-  /** 굴릴지는 매치 GM이 부른 도구가 정한다 — 없으면 의도의 `advance`를 읽는다 (agents.md §3) */
+  /** 굴릴지는 **매치 GM이 부른 도구가 정한다** — 의도에는 진행 칸이 없다 (agents.md §3) */
   options: { roll?: boolean; deferNegotiationIds?: ReadonlySet<string> } = {},
 ): AppliedTacticOrders {
   const specs = new Map<string, GameToolSpec>(
     buildToolSpecs(state, calls, options).map((tool) => [tool.name, tool] as const),
   );
   const notes: string[] = [];
-  /** 도구 하나를 부르고 결과를 말로 모은다 — 실패도 감독에게 돌아간다 */
-  const call = (name: string, input: unknown): void => {
-    const spec = specs.get(name);
-    if (!spec) return;
-    const result = spec.handle(input);
-    // 평시 도구는 동기다 — 이 자리가 프로미스를 받으면 배선이 갈린 것이다
-    if (result instanceof Promise) throw new Error(`${name}: 경기 적용은 동기 도구만 부른다`);
-    if (result.message) notes.push(result.message);
-  };
-
   const shapeBefore = shapeOfTactics(state);
-
-  // 판 자체가 먼저다 — 라인업·1·2군 이동은 그 뒤의 지시가 겨냥할 사람을 정한다 (평시)
-  if (intent.lineup) call("set_lineup", intent.lineup);
-  if (intent.squadLevels && intent.squadLevels.length > 0) {
-    call("set_squad_level", { moves: intent.squadLevels });
-  }
-  if (intent.captain) call("set_captain", intent.captain);
-  // 교체가 먼저다 — 뒤이은 지시가 방금 들어온 선수를 겨냥할 수 있다
-  for (const sub of intent.substitutions ?? []) call("substitute", sub);
-  if (intent.tactics && Object.keys(intent.tactics).length > 0) call("set_tactics", intent.tactics);
-  for (const one of intent.playerTactics ?? []) call("set_player_tactic", one);
-  for (const plan of intent.plans ?? []) call("set_match_plan", plan);
-  if (intent.exploits && intent.exploits.length > 0) {
-    call("exploit_point", { targetIds: intent.exploits });
-  }
-  // 세트피스 키커와 인원 — 둘 다 평시와 같은 명령을 지난다 (match.md §2)
-  if (intent.setPieceTakers) call("set_set_piece_takers", intent.setPieceTakers);
-  if (intent.setPieceRoutine) call("set_set_piece_routine", intent.setPieceRoutine);
-  if (intent.teamTalk) call("team_talk", intent.teamTalk);
-  for (const one of intent.talk ?? []) call("talk_to_player", one);
-
   /**
-   * 승부차기 키커 순서 — **엔진 함수를 직접 부른다.** 경기 중 도구 표면은 0이라
-   * (agents.md §3) `gm-tools`에 정의를 하나 더 얹으면 모델에게 갈 일이 없는 도구가
-   * 고정층만 부풀린다.
+   * 순서는 `TACTIC_OPS`가 갖는다 — 판을 먼저 세우고 교체를 넣은 뒤에 그 위의 지시가
+   * 온다. 옮기지 못한 말도 여기서 감독에게 되돌아간다 (`applyOps`).
    */
-  if (intent.shootoutOrder && intent.shootoutOrder.length > 0) {
-    const ordered = setShootoutOrder(state, { playerIds: intent.shootoutOrder });
-    if (ordered.message) notes.push(ordered.message);
-  }
-
-  /**
-   * 옮기지 못한 말은 **감독에게 그대로 돌아간다.** 조용히 버리면 감독은 그 지시가
-   * 걸린 줄 알고 다음 판단을 그 위에 쌓는다 — 이 저장소가 이미 여러 번 고친 거짓
-   * 성공이다.
-   */
-  if (intent.unresolved) {
-    notes.push(unresolvedNote(intent.unresolved));
-  }
+  applyOps(specs, intent, TACTIC_OPS, notes);
 
   const pending = state.pendingMatch;
   const nameOf = (id: string): string => playerName(state, id);

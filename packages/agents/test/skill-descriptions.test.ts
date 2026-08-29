@@ -3,6 +3,9 @@ import { z } from "zod";
 import {
   DEFAULT_SKILL_DESCRIPTIONS,
   GM_SYSTEM,
+  TACTIC_CAPS,
+  TACTIC_OPS,
+  buildOpsSchema,
   TACTIC_ORDERS_SYSTEM,
   REPORT_DIGEST_INPUT,
   REPORT_DIGEST_TOOL,
@@ -10,7 +13,6 @@ import {
   REPORT_ONBOARDING_INPUT,
   REPORT_ONBOARDING_TOOL,
   REPORT_TRAINING_TOOL,
-  TacticOrdersSchema,
   SETTLE_MATCH_DESCRIPTION,
   SETTLE_MATCH_INPUT,
   SETTLE_MATCH_TOOL,
@@ -104,9 +106,18 @@ describe("규칙이 사는 자리", () => {
   /** `substitutions`가 `substitute`로 잡히지 않게 — 이름 전체가 서야 중복이다 */
   const mentions = (prompt: string, name: string) => new RegExp(`\\b${name}\\b`).test(prompt);
 
-  it("어느 프롬프트 층도 도구 이름을 적지 않는다", () => {
+  it("어느 프롬프트 층도 부를 수 없는 도구의 이름을 적지 않는다", () => {
+    /**
+     * GM의 프롬프트에는 도구 이름이 한 번도 서지 않는다 — 언제 부르고 인자를 어떻게
+     * 채우는지는 그 도구의 `description`이 갖는다 (prompts.md §5).
+     *
+     * 해석기는 다르다: **자기가 채울 명령의 이름은 적어야 한다**(`ops`의 열쇠다).
+     * 그래서 여기서 막는 것은 «그 해석기가 부를 수 없는 이름»뿐이다 — 적혀 있으면
+     * 모델은 낼 수 없는 자리를 배운다.
+     */
     for (const name of SKILL_NAMES) {
       expect(mentions(GM_SYSTEM, name), `GM_SYSTEM: ${name}`).toBe(false);
+      if (TACTIC_OPS.includes(name)) continue;
       expect(mentions(TACTIC_ORDERS_SYSTEM, name), `TACTIC_ORDERS_SYSTEM: ${name}`).toBe(false);
     }
   });
@@ -283,18 +294,10 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
       return n.type === "boolean" ? ["true", "false"] : [];
     };
     const setTactics = SKILL_TOOLS.find((t) => t.name === "set_tactics")!.inputSchema.properties;
-    const intent = toToolSchema(TacticOrdersSchema).properties?.tactics as {
-      properties?: Record<string, unknown>;
-    };
     for (const toggle of TACTIC_TOGGLES) {
-      for (const [where, props] of [
-        ["set_tactics", setTactics],
-        ["tactic-orders", intent.properties],
-      ] as const) {
-        expect(choices(props?.[toggle.key]), `${where}.${toggle.key}`).toContain(
-          toggle.neutralValue,
-        );
-      }
+      expect(choices(setTactics?.[toggle.key]), `set_tactics.${toggle.key}`).toContain(
+        toggle.neutralValue,
+      );
     }
   });
 
@@ -309,21 +312,30 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
       return Array.isArray(n.enum) ? n.enum.map(String) : [];
     };
     const routine = SKILL_TOOLS.find((t) => t.name === "set_set_piece_routine")!;
-    const intentRoutine = toToolSchema(TacticOrdersSchema).properties?.setPieceRoutine as {
-      properties?: Record<string, unknown>;
-    };
     for (const axis of SET_PIECE_ROUTINE_AXES) {
-      for (const [where, props] of [
-        ["set_set_piece_routine", routine.inputSchema.properties],
-        ["tactic-orders", intentRoutine.properties],
-      ] as const) {
-        expect(enumOf(props?.[axis.key]), `${where}.${axis.key}`).toContain(
-          SET_PIECE_ROUTINE_NEUTRAL,
-        );
-      }
+      expect(enumOf(routine.inputSchema.properties?.[axis.key]), axis.key).toContain(
+        SET_PIECE_ROUTINE_NEUTRAL,
+      );
     }
     // 낱말을 가르치는 것은 해석 프롬프트 하나다 — 손으로 적으면 낱말표를 고쳐도 남는다
     expect(TACTIC_ORDERS_SYSTEM).toContain(SET_PIECE_ROUTINE_NEUTRAL);
+  });
+
+  /**
+   * **인자 스키마는 한 벌이다** (agents.md §1). 해석기가 모델에게 보이는 `ops`의 항목은
+   * 그 명령의 도구 정의 그대로다 — 손으로 한 벌 더 적던 시절에 공략 상한이 2와 4로
+   * 갈려 감독이 부른 지점이 말없이 잘렸다.
+   */
+  it("해석기의 ops 항목은 그 명령의 입력 스키마 그대로다", () => {
+    const specs = new Map(SKILL_TOOLS.map((t) => [t.name, t] as const));
+    const ops = buildOpsSchema(specs, TACTIC_OPS, "판", TACTIC_CAPS).properties as Record<
+      string,
+      { items?: unknown; maxItems?: number }
+    >;
+    for (const name of TACTIC_OPS) {
+      expect(ops[name]?.items, name).toBe(specs.get(name)!.inputSchema);
+    }
+    expect(ops.substitute?.maxItems).toBe(TACTIC_CAPS.substitute);
   });
 
   /** 중첩된 객체·배열도 같은 규칙을 지난다 — 안쪽에서 제약이 사라지면 아무도 못 본다 */

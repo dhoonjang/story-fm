@@ -559,7 +559,7 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
 줄이다 — 세 번 적지 않는다.
 
 **`TACTIC_ORDERS_SYSTEM`.** 분류기다. 역할 한 줄과 입력의 지도 뒤에 산출의 갈래마다 한 절 —
-무엇을 고르나 · advance · 대화 · 판을 바꾸는 것 · unresolved. 평시 도구 설명이 갖는 판정
+무엇을 내나(`ops`) · 무엇을 고르나 · 대화 · 판을 바꾸는 명령 · unresolved. 평시 도구 설명이 갖는 판정
 기준(맥락 적합성·설득 근거·수용성), "부름은 면담이 아니다", 전술 6축과 갈래 넷과 세트피스
 두 축의 낱말을 여기도 갖는다 — 경기에는 도구 설명이 실리지 않는다. 지금 걸려 있는 갈래와
 세트피스 지시는 `<standing>`이 낸다(중립인 것은 서지 않는다).
@@ -698,20 +698,20 @@ prompt-regression`, 밴드는 서술자가 쥔다
 
 ## 코드 위치
 
-| 무엇                                                                         | 어디                                                        |
-| ---------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| 평시 시스템 프롬프트 (`GM_SYSTEM`)                                           | `packages/agents/src/gm-prompt.ts`                          |
-| 지시 해석 프롬프트·스키마 (`TACTIC_ORDERS_SYSTEM`)                           | `packages/agents/src/tactic-orders.ts` · `tactic-schema.ts` |
-| 매치 GM 프롬프트·경기 도구 셋 (`MATCH_GM_SYSTEM` · `buildMatchTools`)        | `packages/agents/src/match-gm.ts`                           |
-| 마감 프롬프트 (`FINALIZE_MATCH_SYSTEM`)                                      | `packages/agents/src/finalize-match.ts`                     |
-| 훈련 결산 프롬프트                                                           | `packages/agents/src/training-rater.ts`                     |
-| 경기 결산 도구 설명 (`settle_match`)                                         | `packages/agents/src/finalize-match.ts`                     |
-| 이력 요약 프롬프트 (`HISTORY_COMPACTOR_SYSTEM`)                              | `packages/agents/src/history-compactor.ts`                  |
-| 첫 장면 지시 (`ONBOARDING_INSTRUCTION`)                                      | `packages/agents/src/gm.ts`                                 |
-| 도구 설명·그룹·표시 이름 (`SKILL_CATALOG`)                                   | `packages/agents/src/skill-descriptions.ts`                 |
-| 도구 바인딩·스키마                                                           | `packages/agents/src/gm-tools.ts`                           |
-| 인물 카드 · 구단·감독 · 스냅샷 · 이번 턴 메시지 · 이력 창 · 장면 위생 · 헤더 | `packages/agents/src/gm-input.ts`                           |
-| 구간 → 어휘 표 (§5-2)                                                        | `packages/domain/src/manager.ts` · `tactics.ts`             |
-| 스냅샷 안의 범례 블록 (회견 · 찾아온 사람)                                   | `packages/engine/src/club/press.ts` · `approach.ts`         |
-| 명령 실행부                                                                  | `packages/engine/src/commands/index.ts`                     |
-| 회귀 하네스 (§7)                                                             | `packages/agents/harness/prompt-regression.harness.ts`      |
+| 무엇                                                                         | 어디                                                     |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------- |
+| 평시 시스템 프롬프트 (`GM_SYSTEM`)                                           | `packages/agents/src/gm-prompt.ts`                       |
+| 지시 해석 프롬프트·명령 목록 (`TACTIC_ORDERS_SYSTEM`)                        | `packages/agents/src/tactic-orders.ts` · `orders-ops.ts` |
+| 매치 GM 프롬프트·경기 도구 셋 (`MATCH_GM_SYSTEM` · `buildMatchTools`)        | `packages/agents/src/match-gm.ts`                        |
+| 마감 프롬프트 (`FINALIZE_MATCH_SYSTEM`)                                      | `packages/agents/src/finalize-match.ts`                  |
+| 훈련 결산 프롬프트                                                           | `packages/agents/src/training-rater.ts`                  |
+| 경기 결산 도구 설명 (`settle_match`)                                         | `packages/agents/src/finalize-match.ts`                  |
+| 이력 요약 프롬프트 (`HISTORY_COMPACTOR_SYSTEM`)                              | `packages/agents/src/history-compactor.ts`               |
+| 첫 장면 지시 (`ONBOARDING_INSTRUCTION`)                                      | `packages/agents/src/gm.ts`                              |
+| 도구 설명·그룹·표시 이름 (`SKILL_CATALOG`)                                   | `packages/agents/src/skill-descriptions.ts`              |
+| 도구 바인딩·스키마                                                           | `packages/agents/src/gm-tools.ts`                        |
+| 인물 카드 · 구단·감독 · 스냅샷 · 이번 턴 메시지 · 이력 창 · 장면 위생 · 헤더 | `packages/agents/src/gm-input.ts`                        |
+| 구간 → 어휘 표 (§5-2)                                                        | `packages/domain/src/manager.ts` · `tactics.ts`          |
+| 스냅샷 안의 범례 블록 (회견 · 찾아온 사람)                                   | `packages/engine/src/club/press.ts` · `approach.ts`      |
+| 명령 실행부                                                                  | `packages/engine/src/commands/index.ts`                  |
+| 회귀 하네스 (§7)                                                             | `packages/agents/harness/prompt-regression.harness.ts`   |

@@ -40,11 +40,18 @@ export const OPS_PER_COMMAND = 4;
 
 export type OpsInput = Record<string, unknown[]>;
 
+/**
+ * 명령마다 다른 상한 — **규칙이 정한 수가 있는 자리는 그 수를 쓴다.** 교체는 다섯,
+ * 개인 지시는 열한 자리, 지역 플랜은 둘. 적지 않은 명령은 `OPS_PER_COMMAND`다.
+ */
+export type OpsCaps = Readonly<Record<string, number>>;
+
 /** `ops`의 JSON 스키마 — 호출 이름마다 그 도구의 입력 스키마를 배열로 */
 export function buildOpsSchema(
   specs: ReadonlyMap<string, GameToolSpec>,
   names: readonly string[],
   description: string,
+  caps: OpsCaps = {},
 ): Record<string, unknown> {
   const properties: Record<string, unknown> = {};
   for (const name of names) {
@@ -53,7 +60,7 @@ export function buildOpsSchema(
     properties[name] = {
       type: "array",
       items: spec.inputSchema,
-      maxItems: OPS_PER_COMMAND,
+      maxItems: caps[name] ?? OPS_PER_COMMAND,
       description: spec.description,
     };
   }
@@ -61,12 +68,14 @@ export function buildOpsSchema(
 }
 
 /** 모델이 낸 `ops` — 목록에 있는 이름의 배열만 남긴다. 검증은 적용 때 도구가 한다 */
-export function parseOps(raw: unknown, names: readonly string[]): OpsInput {
+export function parseOps(raw: unknown, names: readonly string[], caps: OpsCaps = {}): OpsInput {
   const ops: OpsInput = {};
   if (typeof raw !== "object" || raw === null) return ops;
   for (const name of names) {
     const value = (raw as Record<string, unknown>)[name];
-    if (Array.isArray(value) && value.length > 0) ops[name] = value.slice(0, OPS_PER_COMMAND);
+    if (Array.isArray(value) && value.length > 0) {
+      ops[name] = value.slice(0, caps[name] ?? OPS_PER_COMMAND);
+    }
   }
   return ops;
 }
@@ -129,6 +138,8 @@ export interface OpsAgentSpec {
   system: string;
   /** 채울 명령과 그 순서 */
   ops: readonly string[];
+  /** 명령마다 다른 상한 — 적지 않으면 `OPS_PER_COMMAND` */
+  caps?: OpsCaps;
   opsHint: string;
   unresolvedHint: string;
   /** 옮길 것이 하나도 없을 때 감독에게 되묻는 말 */
@@ -156,7 +167,7 @@ export async function runOpsOrders(
     inputSchema: {
       type: "object",
       properties: {
-        ops: buildOpsSchema(specs, spec.ops, spec.opsHint),
+        ops: buildOpsSchema(specs, spec.ops, spec.opsHint, spec.caps),
         unresolved: {
           type: "string",
           minLength: 1,
@@ -169,7 +180,7 @@ export async function runOpsOrders(
       const parsed = ReportSchema.safeParse(input);
       // 무엇이 틀렸는지 자리까지 돌려줘야 재시도가 같은 실수를 반복하지 않는다
       if (!parsed.success) return inputError(parsed.error);
-      const ops = parseOps((input as { ops?: unknown }).ops, spec.ops);
+      const ops = parseOps((input as { ops?: unknown }).ops, spec.ops, spec.caps);
       orders = { ops, ...(parsed.data.unresolved ? { unresolved: parsed.data.unresolved } : {}) };
       return { ok: true, message: "지시를 받았습니다" };
     },

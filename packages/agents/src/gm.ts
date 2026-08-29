@@ -341,7 +341,7 @@ async function runRealGmTurn(
    */
   let applied: AppliedTacticOrders | null = null;
   if (inMatch && !kickoff && operator) {
-    applied = applyTacticOrders(state, {}, calls, goals, cards, { roll: true });
+    applied = applyTacticOrders(state, { ops: {} }, calls, goals, cards, { roll: true });
   }
   /** 마감이 지운 장부의 마지막 분 — 화면의 시각 줄이 읽는다 (agents.md §3) */
   let finalMinute: number | null = null;

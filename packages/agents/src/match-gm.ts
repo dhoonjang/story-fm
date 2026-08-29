@@ -11,6 +11,7 @@ import { finalizeMatchTurn } from "./finalize-match";
 import { buildLedgerNote } from "./gm-input";
 import type { GmToolCall } from "./gm-types";
 import { applyTacticOrders } from "./tactic-apply";
+import { buildToolSpecs } from "./gm-tools";
 import { OrdersArgsSchema } from "./orders-ops";
 import { runTacticOrders } from "./tactic-orders";
 import { toToolSchema } from "./tool-schema";
@@ -140,7 +141,8 @@ async function runTacticOrdersTool(
   orders: string,
 ): Promise<{ ok: boolean; message: string }> {
   const roll = false;
-  const parsed = await runTacticOrders(state, orders);
+  const specs = new Map(buildToolSpecs(state, ctx.calls).map((t) => [t.name, t] as const));
+  const parsed = await runTacticOrders(state, specs, orders);
   if (!parsed.ok) return { ok: false, message: parsed.message };
   const applied = applyTacticOrders(state, parsed.intent, ctx.calls, ctx.goals, ctx.cards, {
     roll,
@@ -190,7 +192,7 @@ export function buildMatchTools(
           if (pending.ledger.phase === "finished" && !awaitingShootout(state)) {
             return { ok: false, message: "경기가 끝났습니다 — 마감할 차례입니다" };
           }
-          const applied = applyTacticOrders(state, {}, ctx.calls, ctx.goals, ctx.cards, {
+          const applied = applyTacticOrders(state, { ops: {} }, ctx.calls, ctx.goals, ctx.cards, {
             roll: true,
           });
           return {

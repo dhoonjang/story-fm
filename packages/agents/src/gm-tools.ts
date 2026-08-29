@@ -95,6 +95,7 @@ import {
   type CardMark,
   type GameState,
   type GoalMark,
+  setShootoutOrder,
   sitAtTable,
   settleTableReply,
 } from "@story-fm/engine";
@@ -155,6 +156,7 @@ export const CORE_COMMANDS: ReadonlySet<string> = new Set([
   "set_match_plan",
   "substitute",
   "set_captain",
+  "set_shootout_order",
   // 선수단 운영 — training-orders의 ops (평시)
   "set_training",
   "set_development_focus",
@@ -194,6 +196,7 @@ const CORE_COMMAND_LABELS: Record<string, string> = {
   set_match_plan: "지역 전술",
   substitute: "교체",
   set_captain: "완장 — 주장과 부주장",
+  set_shootout_order: "승부차기 키커 순서",
   set_training: "훈련 지정",
   set_development_focus: "집중 육성",
   set_mentor: "멘토링",
@@ -662,6 +665,18 @@ export function buildToolSpecs(
           .optional(),
       }),
       (input) => setPlayerTactic(state, input),
+    ),
+    wrap(
+      "set_shootout_order",
+      CORE_COMMAND_LABELS.set_shootout_order!,
+      z.object({
+        playerIds: z
+          .array(playerRef)
+          .min(1)
+          .max(11)
+          .describe("감독이 이름을 든 사람만 — 나머지는 코어의 기본 순서가 잇는다"),
+      }),
+      (input) => setShootoutOrder(state, input),
     ),
     wrap(
       "set_set_piece_takers",
@@ -1524,7 +1539,7 @@ export function buildGmTools(
       if (!parsed.success) return inputError(parsed.error);
       const blocked = dismissed(state, true);
       if (blocked) return blocked;
-      const intent = await runTacticOrders(state, parsed.data.orders);
+      const intent = await runTacticOrders(state, specs, parsed.data.orders);
       if (!intent.ok) return { ok: false, message: intent.message };
       // 평시에는 굴릴 판이 없다 — 골·카드 표식도 없다
       const applied = applyTacticOrders(state, intent.intent, calls, [], [], {

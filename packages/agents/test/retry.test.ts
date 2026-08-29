@@ -12,7 +12,7 @@ import {
   type TrainingBrief,
 } from "@story-fm/engine";
 import { ARC_TITLE_MAX, CharacterMemorySchema } from "@story-fm/domain";
-import type { GameLLM, JsonObjectSchema, ToolOutcome } from "@story-fm/llm";
+import type { GameLLM, GameToolSpec, JsonObjectSchema, ToolOutcome } from "@story-fm/llm";
 import { LlmCallError, LlmTimeoutError, TokenBudgetExceededError } from "@story-fm/llm";
 import { retryOnce, anchorStands, ModelOutputError } from "../src/retry";
 import { runTacticOrders } from "../src/tactic-orders";
@@ -99,12 +99,25 @@ describe("runTacticOrders — 의도를 받은 뒤의 실패", () => {
     ],
   } as unknown as GameState;
 
+  /** 해석기가 인자를 옮길 명령의 스펙 — 이 갈래의 시험에는 스키마만 있으면 된다 */
+  const SPECS = new Map<string, GameToolSpec>([
+    [
+      "set_tactics",
+      {
+        name: "set_tactics",
+        description: "팀 전술 6축과 갈래",
+        inputSchema: { type: "object", properties: {} },
+        handle: () => ({ ok: true, message: "" }),
+      },
+    ],
+  ]);
+
   /** 첫 호출에서 `report_tactic_orders`를 부른 뒤 깨지는 모델 */
   const failsAfterReporting = (): GameLLM => ({
     runTurn: (req) => {
       req.tools
         ?.find((t) => t.name === "report_tactic_orders")
-        ?.handle({ tactics: { pressing: 4 } });
+        ?.handle({ ops: { set_tactics: [{ pressing: 4 }] } });
       return Promise.reject(new Error("Connection error"));
     },
   });
@@ -114,10 +127,10 @@ describe("runTacticOrders — 의도를 받은 뒤의 실패", () => {
     const llm = failsAfterReporting();
     const spy = vi.spyOn(llm, "runTurn");
 
-    const result = await runTacticOrders(emptyState, "계속 갑시다", llm);
+    const result = await runTacticOrders(emptyState, SPECS, "계속 갑시다", llm);
 
     expect(result.ok).toBe(true);
-    expect(result.ok && result.intent.tactics?.pressing).toBe(4);
+    expect(result.ok && result.intent.ops.set_tactics).toEqual([{ pressing: 4 }]);
     // 자국이 남은 뒤라 다시 부르지 않는다 — 두 번 부르면 의도가 두 번 적용된다
     expect(spy).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalled(); // 무슨 일이 있었는지는 사라지지 않는다
@@ -144,7 +157,7 @@ describe("runTacticOrders — 의도를 받은 뒤의 실패", () => {
     };
     const spy = vi.spyOn(llm, "runTurn");
 
-    const result = await runTacticOrders(emptyState, "왼쪽을 두껍게", llm);
+    const result = await runTacticOrders(emptyState, SPECS, "왼쪽을 두껍게", llm);
 
     expect(result.ok).toBe(false);
     expect(spy).toHaveBeenCalledTimes(2);
@@ -168,7 +181,7 @@ describe("runTacticOrders — 의도를 받은 뒤의 실패", () => {
     const llm: GameLLM = { runTurn: () => Promise.reject(thrown) };
     const spy = vi.spyOn(llm, "runTurn");
 
-    await expect(runTacticOrders(emptyState, "왼쪽을 두껍게", llm)).rejects.toBe(thrown);
+    await expect(runTacticOrders(emptyState, SPECS, "왼쪽을 두껍게", llm)).rejects.toBe(thrown);
     expect(spy).toHaveBeenCalledTimes(1);
   });
 });
