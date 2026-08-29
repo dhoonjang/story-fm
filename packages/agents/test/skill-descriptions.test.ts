@@ -17,6 +17,7 @@ import {
   TRAINING_RATER_SYSTEM,
   agingDeclineLine,
   buildGmTools,
+  buildSkillTools,
   toToolSchema,
 } from "@story-fm/agents";
 import {
@@ -43,6 +44,8 @@ const STATE = (() => {
 })();
 
 const TOOLS = buildGmTools(STATE, []);
+/** 코어 스킬 전부 — 판을 세우는 것들은 GM에게 보이지 않고 해석이 부른다 (agents.md §1) */
+const SKILL_TOOLS = buildSkillTools(STATE, []);
 
 describe("스킬 설명 — 코드가 유일한 원본이다", () => {
   /**
@@ -75,14 +78,13 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
     for (const skill of SKILL_CATALOG) perGroup[skill.group] = (perGroup[skill.group] ?? 0) + 1;
     expect(perGroup).toEqual({
       진행: 5,
-      "전술·훈련": 15,
+      "전술·훈련": 8,
       "대화·서사": 5,
-      경기: 1,
-      이적: 13,
+      이적: 14,
       재정: 6,
       조회: 11,
     });
-    expect(SKILL_CATALOG.length).toBe(56);
+    expect(SKILL_CATALOG.length).toBe(49);
     expect(SKILL_CATALOG.filter((s) => s.readOnly).length).toBe(11);
   });
 });
@@ -278,7 +280,7 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
       if (Array.isArray(n.enum)) return n.enum.map(String);
       return n.type === "boolean" ? ["true", "false"] : [];
     };
-    const setTactics = TOOLS.find((t) => t.name === "set_tactics")!.inputSchema.properties;
+    const setTactics = SKILL_TOOLS.find((t) => t.name === "set_tactics")!.inputSchema.properties;
     const intent = toToolSchema(MatchIntentSchema).properties?.tactics as {
       properties?: Record<string, unknown>;
     };
@@ -304,7 +306,7 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
       const n = node as { enum?: unknown[] };
       return Array.isArray(n.enum) ? n.enum.map(String) : [];
     };
-    const routine = TOOLS.find((t) => t.name === "set_set_piece_routine")!;
+    const routine = SKILL_TOOLS.find((t) => t.name === "set_set_piece_routine")!;
     const intentRoutine = toToolSchema(MatchIntentSchema).properties?.setPieceRoutine as {
       properties?: Record<string, unknown>;
     };
@@ -318,8 +320,7 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
         );
       }
     }
-    // 설명이 가르치는 토큰도 같은 것 하나다 — 손으로 적으면 낱말표를 고쳐도 남는다
-    expect(routine.description).toContain(SET_PIECE_ROUTINE_NEUTRAL);
+    // 낱말을 가르치는 것은 해석 프롬프트 하나다 — 손으로 적으면 낱말표를 고쳐도 남는다
     expect(MATCH_INTENT_SYSTEM).toContain(SET_PIECE_ROUTINE_NEUTRAL);
   });
 

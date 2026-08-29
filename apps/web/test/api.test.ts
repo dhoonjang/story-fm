@@ -1051,7 +1051,7 @@ describe("계측 라우트 — 히트율의 문턱", () => {
     expect(gm.cacheHitRate).toBeNull();
     expect(rater.cacheHitRate).toBeCloseTo(0.4, 6);
     // 부르지 않은 자리는 「캐시가 안 걸렸다」가 아니라 잰 것이 없다
-    expect(body.agents.find((a) => a.agent === "negotiator")!.cacheHitRate).toBeNull();
+    expect(body.agents.find((a) => a.agent === "history-compactor")!.cacheHitRate).toBeNull();
     expect(body.totals.billed).toBe(11_300);
     resetLlmUsage();
   });

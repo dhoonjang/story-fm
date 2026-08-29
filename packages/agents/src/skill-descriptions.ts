@@ -4,17 +4,9 @@ import {
   INCIDENT_KINDS,
   MISSION_CANDIDATES,
   MISSION_DAYS,
-  SET_PIECE_KO,
-  SET_PIECE_ROUTINE_AXES,
-  SET_PIECE_ROUTINE_NEUTRAL,
-  TACTIC_AXES,
-  TACTIC_TOGGLES,
-  setPieceRoutineChoiceText,
-  tacticAxisScaleText,
-  tacticToggleChoiceText,
 } from "@story-fm/domain";
 
-export type SkillGroup = "진행" | "전술·훈련" | "대화·서사" | "조회" | "경기" | "이적" | "재정";
+export type SkillGroup = "진행" | "전술·훈련" | "대화·서사" | "조회" | "이적" | "재정";
 
 export interface SkillCatalogEntry {
   name: string;
@@ -43,24 +35,6 @@ export const SKILL_CATALOG = [
       "그날 남은 일이 경기뿐일 때 되묻지 말고 부른다. " +
       "부르면 감독에게 입장 확인 창이 뜨므로 이 턴에는 경기장으로 향하는 장면까지만 쓰고 킥오프·중계는 쓰지 않는다. " +
       "감독이 입장하면 경기 마스터가 진행한다.",
-  },
-  {
-    name: "set_lineup",
-    label: "라인업",
-    group: "전술·훈련",
-    readOnly: false,
-    description:
-      "선발 11명과 벤치를 정한다. 자리는 포지션 코드로 지정하고, 지정하지 않은 선수의 자리는 건드리지 않는다. squadLevels로 1·2군 이동을 같은 요청에 실어라 — 2군 선수를 선발에 넣으려면 그 배열에 first로 함께 적는다.",
-  },
-  {
-    name: "set_squad_level",
-    label: "1·2군 이동",
-    group: "전술·훈련",
-    readOnly: false,
-    description:
-      "선수를 1군으로 올리거나 2군으로 내린다 — 배치는 건드리지 않는다. 감독이 층만 말했으면 라인업을 다시 짜지 말고 이 도구를 쓴다. " +
-      "여럿이면 moves에 모아 한 번에 보낸다 — 하나라도 규칙(등록 명단·1군 하한 20명)에 걸리면 아무도 옮기지 않는다. " +
-      "내려간 선수는 전술 배치에서 함께 빠진다. 2군 선수를 곧바로 선발에 넣는 지시라면 set_lineup에 squadLevels로 함께 실어라.",
   },
   {
     name: "set_development_focus",
@@ -103,6 +77,16 @@ export const SKILL_CATALOG = [
       "팀 하나에 방침 하나이고, 1군과 타 팀에는 닿지 않는다.",
   },
   {
+    name: "apply_tactics",
+    label: "전술 지시",
+    group: "전술·훈련",
+    readOnly: false,
+    description:
+      "감독이 판을 세우는 지시를 했을 때 — 라인업·1·2군 이동·팀 전술 6축과 갈래·선수의 자리·역할·개인 지시·세트피스 키커와 인원·지역 플랜·약점 공략. " +
+      "orders에 감독의 말을 원문 그대로 적는다 — 요약하지 않는다. 결과로 무엇이 걸렸고 무엇이 반려됐는지가 온다. 반려된 대로 쓴다. " +
+      "완장·등번호·훈련은 이 도구가 아니다.",
+  },
+  {
     name: "set_captain",
     label: "완장 지정",
     group: "전술·훈련",
@@ -123,60 +107,6 @@ export const SKILL_CATALOG = [
       "이미 동료가 달고 있는 번호면 반려되고 누가 달고 있는지가 돌아오므로, 그것을 감독에게 전하고 넘길지를 물은 뒤 take=true로 다시 부른다 — 되묻지 않고 바로 번호를 옮기지 않는다. " +
       "번호를 빼앗긴 선수는 자리 관례로 새 번호를 받고, 그 번호에 애착이 있던 사람이면 라커룸에 불만이 선다. " +
       "임대 나간 선수와 남의 구단 선수에게는 쓰지 않는다.",
-  },
-  {
-    name: "set_tactics",
-    label: "팀 전술 변경",
-    group: "전술·훈련",
-    readOnly: false,
-    description:
-      "팀 전술 6축과 갈래 넷을 변경한다. 축은 모두 1~5이며 3이 보통이다 — " +
-      `${TACTIC_AXES.map(tacticAxisScaleText).join(" · ")}. ` +
-      "갈래는 눈금이 없다 — " +
-      `${TACTIC_TOGGLES.map(tacticToggleChoiceText).join(" · ")}. ` +
-      "현재 값과 다른 것 중 감독이 변경을 명시한 축·갈래만 보내라. 언급하지 않은 축을 균형값이나 추천값으로 보정하지 않는다. 포메이션과 선수 배치는 이 도구로 바꾸지 않는다.",
-  },
-  {
-    name: "set_player_tactic",
-    label: "선수 전술",
-    group: "전술·훈련",
-    readOnly: false,
-    description:
-      "한 선수의 자리·역할·개인 지시 중 감독이 명시한 항목만 바꾼다. 생략한 항목은 기존 값을 유지한다. 이미 그라운드에 있는 선수만 옮기며 벤치 선수를 넣으려면 substitute를 쓴다. 자리는 move로 옮긴다 — 특정 자리로 바꾸라는 지시에만 position에 코드를 적는다. instruction은 kind를 함께 보내야 판이 움직인다 — 갈래에 담기지 않는 말이면 지역을 겨냥한 지시인지 보고 set_match_plan을 쓴다. 자연어 포메이션 변경은 get_squad로 현재 배치를 본 뒤 목표 모양에 꼭 필요한 최소 선수만 이동한다. 프리셋을 적용하거나 전원을 자동 재배치하지 않는다.",
-  },
-  {
-    name: "set_set_piece_takers",
-    label: `${SET_PIECE_KO} 키커`,
-    group: "전술·훈련",
-    readOnly: false,
-    description: `${SET_PIECE_KO}를 차는 사람을 지정한다 — corner(코너)·freeKick(프리킥)·penalty(페널티) 셋을 따로 둔다. 감독이 말한 자리만 보내고 나머지는 생략한다. 지정을 풀라는 지시에는 그 자리에 null을 보낸다 — 그러면 그라운드 위 킥력 최고(페널티는 결정력·침착성·킥력이 섞인 기량 최고)가 다시 찬다. 지정은 팀 전술에 남아 다음 경기에도 이어지고, 경기 중에도 같은 도구로 바꾼다. 승부차기 순서와 몇 명이 올라가고 남는지는 이 도구가 아니다 — 순서는 경기 중 승부차기 정지점에서 정한다.`,
-  },
-  {
-    name: "set_set_piece_routine",
-    label: `${SET_PIECE_KO} 인원`,
-    group: "전술·훈련",
-    readOnly: false,
-    description:
-      `${SET_PIECE_KO}에 몇 명이 서는지 정한다 — 축 둘을 따로 둔다: ` +
-      `${SET_PIECE_ROUTINE_AXES.map(setPieceRoutineChoiceText).join(" · ")}. ` +
-      `감독이 말한 축만 보내고 나머지는 생략한다. 지시를 푸는 말에는 ${SET_PIECE_ROUTINE_NEUTRAL}을 보낸다. ` +
-      "지시는 팀 전술에 남아 다음 경기에도 이어지고, 경기 중에도 같은 도구로 바꾼다.",
-  },
-  {
-    name: "exploit_point",
-    label: "약점 공략",
-    group: "전술·훈련",
-    readOnly: false,
-    description:
-      "감독이 읽어낸 약점을 겨냥한다. 동시에 두 곳까지고 한쪽을 파고들면 다른 쪽이 열린다. 경기 중에만 뜻이 있다.",
-  },
-  {
-    name: "set_match_plan",
-    label: "지역 전술",
-    group: "전술·훈련",
-    readOnly: false,
-    description:
-      "감독의 자연어 세부 전술을 지역 플랜으로 만든다. band는 우리 진영(defense)·중원·상대 진영(attack)이다. 선수 한 명의 자리나 역할 지시는 set_player_tactic을, 이미 발견된 약점을 그대로 노리는 지시는 exploit_point를 쓴다. 동시에 두 곳까지고 셋째를 걸면 가장 오래된 것이 밀린다.",
   },
   {
     name: "set_training",
@@ -231,14 +161,6 @@ export const SKILL_CATALOG = [
       "구단주가 건 조건을 두고 감독이 되물었으면 counter에 싣는다 — 기한을 늘려 달라면 extendDays, 조건을 낮춰 달라면 relax: true. 한 차례뿐이고 얼마나 물러서는지는 구단주가 정한다. " +
       "압력이 연 자리는 압력만 되돌린다 — 불만은 talk_to_player·승격·선발로만 풀린다. " +
       "감독직 면접 자리에서는 답이 제안 조건을 정한다 — own·defend는 기본 조건, bold는 연봉·이적 예산 약속을 흥정 천장까지 올리고 흥정 기회를 태우며, criticise·deflect·decline은 제안 없이 문을 닫는다.",
-  },
-  {
-    name: "substitute",
-    label: "선수 교체",
-    group: "경기",
-    readOnly: false,
-    description:
-      "경기 정지점에서 우리 팀 선수를 교체한다. out에는 나가는 선수, in에는 들어오는 벤치 선수를 이름으로 적는다.",
   },
   {
     name: "record_incident",
@@ -503,6 +425,16 @@ export const SKILL_CATALOG = [
     readOnly: false,
     description:
       "상대가 넣은 오퍼에 감독의 뜻대로 답한다 (accept·counter·reject). 우리가 넣은 오퍼에 대한 상대의 답은 당신이 판정하지 않는다 — 그 자리는 이미 끝나 상태 스냅샷의 📨 줄에 있고, 당신은 그것을 장면으로 전한다. 감독이 답을 정한 협상은 서사만 쓰지 말고 이 도구로 기록해야 다음 단계로 간다. deal_odds의 확률과 근거를 앵커로 삼고 note에 한 줄을 남긴다. counter는 우리가 값을 올려 부르는 것이고(받은 값 초과), paymentYears를 얹으면 같은 금액을 분할로 되부르는 것이다 — 총액 한도는 그대로 걸리고 분할은 그 위의 흥정이다.",
+  },
+  {
+    name: "rule_offer_response",
+    label: "상대의 답",
+    group: "이적",
+    readOnly: false,
+    description:
+      "스냅샷에 <counterparty> 서류가 선 협상에 당신이 테이블 건너편이 되어 답한다 — 감독의 편이 아니다. " +
+      "판정은 서류가 적은 것 중에서, 금액·연수·지위는 서류의 구간 안에서. 확률이 낮다고 기계적으로 결렬시키지 말고 확인된 논거가 그 사람에게 얼마나 큰지 판정하며, 높다고 덥석 받지도 않는다. " +
+      "note는 상대가 감독에게 전하는 한 줄 — 수치가 아니라 이유를. 서류가 없으면 부르지 마라.",
   },
   {
     name: "accept_deal",

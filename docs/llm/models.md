@@ -18,7 +18,6 @@ agents:
   match-gm:      { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000, thinking_level: minimal }
   finalize-match:{ provider: google, model: gemini-3.6-flash,      max_tokens: 16000, timeout_ms: 90000,  thinking_level: minimal }
   training-rater:{ provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
-  negotiator:    { provider: google, model: gemini-3.6-flash,      max_tokens: 8000,  timeout_ms: 45000,  thinking_level: low }
   history-compactor: { provider: google, model: gemini-3.6-flash,      max_tokens: 8000,  timeout_ms: 60000,  thinking_level: minimal }
   onboarding-judge:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 4000,  timeout_ms: 30000,  thinking_level: minimal }
 ```
@@ -30,7 +29,6 @@ agents:
 | `match-gm`          | 경기 중계 · 벤치 대화 · 도구로 경기 진행 | 64,000    | 180초 |
 | `finalize-match`    | 끝난 경기의 결산 · 마무리 중계           | 16,000    | 90초  |
 | `training-rater`    | 훈련 결산                                | 8,000     | 30초  |
-| `negotiator`        | 우리 오퍼에 대한 상대의 판정             | 8,000     | 45초  |
 | `history-compactor` | 밀려난 평시 이력 → 요약 한 벌            | 8,000     | 60초  |
 | `onboarding-judge`  | 새 게임의 배경 → 시작 지갑               | 4,000     | 30초  |
 
@@ -47,13 +45,9 @@ agents:
   드물다. 심경 한 줄에는 키가 없다 — 그 선수와 있었던 일을 쓴 스킬의 인자로 선다(§4-3).
 - **해석은 매치 GM의 도구 뒤에서 돈다.** 시한 60초가 GM 호출(180초) 안에 든다 —
   둘을 더한 값이 한 턴의 상한이 아니라, GM의 시한이 그 안의 도구 왕복까지 덮는다.
-- **교섭 상대만 사고 수준이 `low`다.** 출력은 판정 하나에 금액 둘이라 결산만큼 작지만,
-  읽는 것이 인물지·오퍼 이력·설득 논거라 결산의 싼 자리로 보내면 앵커를 그대로 되읊는다
-  (agents.md §4-1). 대신 평시 턴 앞에 서므로 시한은 감독을 기다리게 하지 않는 45초다 —
-  협상은 하루에 몇 건이지 90분에 스무 번이 아니다.
-- **교섭 상대도 Google로 간다.** 제공자를 하나 더 늘리면 키가 하나 더 필요해지고, 키가
-  없는 제공자로 간 자리는 조용히 mock으로 떨어진다(§2). 자리마다 제공자를 고를 수 있다는
-  것이 **자리마다 골라야 한다**는 뜻은 아니다.
+- **교섭 상대에는 키가 없다.** 우리 오퍼에 온 답은 GM이 서류와 앵커를 읽고 상대가 되어
+  답하고 코어가 앵커 ± 한도로 자른다 (agents.md §4-1).
+
 - **압축이 훈련 결산의 싼 자리로 가지 않는 이유는 읽는 양**이다 — 접히는 구간 전부를
   장부 골격과 함께 한 번에 읽고 거기 새로 선 인물까지 판정한다(agents.md §5-1). 기억의
   주 저자이기도 하다. 대신 이력이 상한을 넘을 때만 도니 드물다.
@@ -487,7 +481,7 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
 | ---------------------------- | --------------------------------------------------------------------------------------- |
 | 예산이 세는 것               | `inputTokens + outputTokens` (게임 누적)                                                |
 | 상한                         | `LLM_TOKEN_BUDGET` — 없거나 0 이하면 무제한                                             |
-| 상한 초과 시 끊기는 에이전트 | 훈련 결산 + 교섭 + 압축 + 온보딩 판정 — GM·중계(종료 턴의 결산 포함)는 계속 돈다        |
+| 상한 초과 시 끊기는 에이전트 | 훈련 결산 + 경기 마감 + 압축 + 온보딩 판정 — GM·매치 GM은 계속 돈다                     |
 | 캐시 히트율                  | `cacheReadTokens ÷ inputTokens`                                                         |
 | 히트율 경고 문턱             | 평균 입력이 **그 에이전트 제공자의 최소 캐시 프리픽스** 이상 × 3회 이상 호출 × 히트율 0 |
 | 장부의 키                    | **에이전트 이름** — 설정의 이름이 그대로 계측 키가 된다                                 |

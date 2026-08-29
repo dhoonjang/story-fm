@@ -1,4 +1,4 @@
-import type { GameState } from "@story-fm/engine";
+import { squadView, type GameState } from "@story-fm/engine";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
 import {
   DIRECTIVE_INTENSITIES,
@@ -35,7 +35,7 @@ import { toToolSchema } from "./tool-schema";
 export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조화된 의도 하나로 옮기는 해석기다. 중계도 대사도 쓰지 않는다.
 
 # 입력
-<ledger>(명단·시각·교체 횟수) · <standing>(걸려 있는 전술과 개인 지시) · <targets>(공략 목록) · <match_log>(이 경기의 지난 턴 전부 — 중계와 감독의 말) 뒤에 이번 턴 감독의 말이 @감독: 으로 온다.
+경기 중에는 <ledger>(명단·시각·교체 횟수) · <standing>(걸려 있는 전술과 개인 지시) · <targets>(공략 목록) · <match_log>(이 경기의 지난 턴 전부 — 중계와 감독의 말), 평시에는 <squad>(포메이션·팀 전술·선발·벤치·예비) · <recent_turns>(지난 턴들) 뒤에 이번 턴 감독의 말이 @감독: 으로 온다.
 
 # 무엇을 고르나
 감독이 명시한 것만 싣는다. 말하지 않은 축·갈래·자리·역할은 보내지 않는다. 프리셋을 적용하거나 전원을 재배치하지 않는다.
@@ -51,7 +51,9 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 - teamTalk.occasion — 킥오프 전 pre · 하프타임 half · 종료 후 post · 그 밖 daily · 굴러가던 중 정지점에서 팀 전체에 던진 짧은 말 shout("정신 차려", "머리 들어", "진정해").
 
 # 판을 바꾸는 것
-- substitutions — 교체. out/in은 <ledger>의 id.
+- lineup — 평시에 선발을 새로 짜라는 말에만. 열한 명 전부와 자리(포지션 코드), 2군 선수를 올리면 squadLevels에 first로 함께. 한두 자리만 바꾸는 말은 playerTactics다.
+- squadLevels — 층만 옮기는 1·2군 이동.
+- substitutions — 경기 중의 교체. out/in은 <ledger>의 id.
 - tactics — 6축(1~5)과 갈래 넷 중 감독이 말한 것만. 갈래는 눈금이 없다 — ${TACTIC_TOGGLES.map(tacticToggleChoiceText).join(" · ")}.
 - playerTactics — 한 선수의 자리·역할·개인 지시.
   - 자리는 move로만 옮긴다: lane(left·center·right) × band(defense=우리 진영, midfield, attack=상대 진영). 지정하지 않은 축은 그대로 둔다. 좌표를 지어내지 않는다.
@@ -83,6 +85,26 @@ const MATCH_INTENT_TURN_CHARS = 1200;
  * 모델 턴은 본문(잘라서), 감독 턴은 `@감독:` 봉투, 손잡이 턴은 오퍼레이터 봉투다.
  * 없으면 빈 문자열.
  */
+/** 평시의 지난 턴 수 — 이름 없는 지목이 가리키는 대상은 직전 대화에 있다 */
+const PEACE_RECENT_TURNS = 2;
+
+/** 평시의 판 — 스쿼드 뷰(포메이션·전술·선발·벤치)와 지난 두 턴 */
+function buildPeaceContext(state: GameState): string[] {
+  const squad = squadView(state, {});
+  const turns = state.chat.filter((t) => t.inMatch !== true).slice(-PEACE_RECENT_TURNS);
+  const lines = turns.map((t) => {
+    if (t.role === "user") return `@감독: ${t.text}`;
+    if (t.role === "operator") return buildOperatorMessage(t.text);
+    return t.text.slice(0, MATCH_INTENT_TURN_CHARS);
+  });
+  return [
+    `<squad>`,
+    squad.message,
+    `</squad>`,
+    ...(lines.length > 0 ? [`<recent_turns>`, ...lines, `</recent_turns>`] : []),
+  ];
+}
+
 export function buildMatchLogBlock(state: GameState): string {
   const matchId = state.pendingMatch?.matchId;
   const turns = state.chat.filter(
@@ -145,8 +167,9 @@ export async function runMatchIntent(
             // 명단·현재 6축과 갈래·걸린 지시·공략 표적만 — 분류에 쓰이지 않는 판세는 빠진다
             // 분류기에는 감독의 이름이 없다 — 자리 태그 하나로 감독의 말을 세운다
             user: [
-              buildLedgerNote(state),
-              ...(matchLog.length > 0 ? [matchLog] : []),
+              ...(state.pendingMatch
+                ? [buildLedgerNote(state), ...(matchLog.length > 0 ? [matchLog] : [])]
+                : buildPeaceContext(state)),
               ``,
               `@감독: ${message}`,
             ].join("\n"),

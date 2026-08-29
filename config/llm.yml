@@ -60,17 +60,6 @@ agents:
     timeout_ms: 30000
     thinking_level: minimal
 
-  # 우리가 넣은 오퍼에 **상대가 되어** 답한다 (docs/llm/agents.md §4-1). 결산과 같은
-  # 앵커 ± 한도 계약이지만 싼 자리로 보내지 않는다 — 읽는 것이 인물지·오퍼 이력·설득
-  # 논거라, 무딘 모델은 앵커를 그대로 되읊어 별도 호출이 값을 못 한다. 출력은 판정
-  # 하나에 금액 둘이라 작고, 평시 턴 앞에 서므로 시한은 감독을 기다리게 하지 않는다.
-  negotiator:
-    provider: google
-    model: gemini-3.6-flash
-    max_tokens: 8000
-    timeout_ms: 45000
-    thinking_level: low
-
   # 새 게임의 배경 한 문단을 읽고 시작 지갑 하나를 판정한다 (docs/llm/agents.md §4-2).
   # 결산과 같은 앵커 ± 한도 계약이고 게임당 한 번뿐이다 — 읽는 것이 500자 배경과
   # 앵커 둘뿐이라 싼 자리로 보낸다. 실패하면 앵커가 그대로 답이므로 시한도 짧다.

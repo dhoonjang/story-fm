@@ -771,20 +771,21 @@ describe("평시 GM 턴 — 상한을 도구로 채운 턴", () => {
     stopReason: "tool_use" as const,
   });
 
-  it("장면이 비어도 코어 기록이 model 턴에 남는다 — 바뀐 전술과 함께", async () => {
+  it("장면이 비어도 코어 기록이 model 턴에 남는다 — 바뀐 완장과 함께", async () => {
     const state = structuredClone(IDLE);
+    const skipper = state.players.find((p) => p.teamId === state.userTeamId && !p.isCaptain)!;
     runTurn.mockImplementationOnce(async (req: { tools?: GameToolSpec[] }) => {
-      const tool = req.tools?.find((spec) => spec.name === "set_tactics");
-      expect((await tool?.handle({ pressing: 5 }))?.ok).toBe(true);
+      const tool = req.tools?.find((spec) => spec.name === "set_captain");
+      expect((await tool?.handle({ playerId: skipper.name }))?.ok).toBe(true);
       // 상한을 채운 턴의 증상 — 작업 서술 한 줄만 남고 장면이 없다
-      return capped("압박을 올리겠습니다.");
+      return capped("완장을 옮기겠습니다.");
     });
 
-    const turn = await runGmTurn(state, "압박 좀 올려줘");
+    const turn = await runGmTurn(state, `${skipper.name}한테 완장 줘`);
 
     // 상태는 바뀐 채로 남는다 — 되돌리면 감독의 지시가 함께 사라진다
-    expect(userTactics(state).spec.pressing).toBe(5);
-    expect(turn.toolCalls.map((call) => call.name)).toContain("set_tactics");
+    expect(state.players.find((p) => p.id === skipper.id)!.isCaptain).toBe(true);
+    expect(turn.toolCalls.map((call) => call.name)).toContain("set_captain");
     // 장면 자리에는 코어의 기록이 선다 — 시점 헤더와 `@:` 내레이션
     expect(turn.text.startsWith("[")).toBe(true);
     expect(turn.text.split("\n").some((line) => line.startsWith("@:"))).toBe(true);

@@ -119,7 +119,22 @@ const MatchPlanSchema = z.object({
  */
 export const ADVANCE_INTENTS = ["none", "segment"] as const;
 
+/** 평시의 판 — 선발 열한 명과 벤치, 1·2군 이동 (`set_lineup`의 인자 그대로) */
+const LineupSchema = z.object({
+  starting: z.array(z.object({ playerId, position: z.string().min(1).optional() })).length(11),
+  bench: z.array(z.object({ playerId, position: z.string().min(1).optional() })).optional(),
+  squadLevels: z
+    .array(z.object({ playerId, level: z.enum(["first", "reserve"]) }))
+    .optional()
+    .describe("2군 선수를 선발에 넣으려면 여기에 first로 함께"),
+});
+const SquadLevelSchema = z.object({ playerId, level: z.enum(["first", "reserve"]) });
+
 export const MatchIntentSchema = z.object({
+  /** 선발을 새로 짜라는 말 — 평시에만. 열한 명을 전부 적는다 */
+  lineup: LineupSchema.optional().describe("선발 11명을 새로 짤 때만 — 자리는 포지션 코드"),
+  /** 층만 옮기는 1·2군 이동 — 라인업을 다시 짜지 않는다 */
+  squadLevels: z.array(SquadLevelSchema).max(11).optional().describe("1·2군 이동만"),
   /** 선수·코치와의 대화 — 여럿을 한 턴에 부를 수 있다 */
   talk: z.array(PlayerTalkSchema).max(4).optional().describe("선수·코치와의 대화"),
   teamTalk: TeamTalkSchema.optional().describe("팀 전체를 향한 말"),

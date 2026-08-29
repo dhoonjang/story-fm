@@ -5,7 +5,7 @@ export * from "./finalize-match";
 export * from "./match-intent-schema";
 export * from "./match-intent";
 export * from "./match-intent-apply";
-export * from "./negotiator";
+export * from "./counterparty-brief";
 export * from "./history-compactor";
 export * from "./training-rater";
 export * from "./gm-types";

@@ -109,9 +109,9 @@ describe("누적 — 세션 전체와 에이전트별", () => {
   });
 
   it("건너뛴 호출도 적는다 — 안 적으면 결산이 왜 비었는지 알 수 없다", () => {
-    const ledger = recordSkip(emptyLedger(), "negotiator");
+    const ledger = recordSkip(emptyLedger(), "history-compactor");
     expect(ledger.skipped).toBe(1);
-    expect(ledger.byAgent["negotiator"].skipped).toBe(1);
+    expect(ledger.byAgent["history-compactor"].skipped).toBe(1);
     // 건너뛴 것은 호출이 아니다
     expect(ledger.calls).toBe(0);
   });
@@ -159,7 +159,11 @@ describe("캐시 히트율 — 프리픽스가 살아 있는가", () => {
   it("짧은 입력은 신호가 아니다 — 결산은 애초에 캐시가 안 걸릴 수 있다", () => {
     let ledger = emptyLedger();
     for (let i = 0; i < 5; i++) {
-      ledger = recordUsage(ledger, "negotiator", usageOf({ inputTokens: 300, outputTokens: 50 }));
+      ledger = recordUsage(
+        ledger,
+        "history-compactor",
+        usageOf({ inputTokens: 300, outputTokens: 50 }),
+      );
     }
     expect(cacheAlerts(ledger)).toEqual([]);
   });
@@ -177,11 +181,11 @@ describe("캐시 히트율 — 프리픽스가 살아 있는가", () => {
   it("문턱이 낮은 제공자의 짧은 호출도 신호로 잡는다", () => {
     let ledger = emptyLedger();
     for (let i = 0; i < 3; i++) {
-      ledger = recordUsage(ledger, "negotiator", usageOf({ inputTokens: 2000 }));
+      ledger = recordUsage(ledger, "history-compactor", usageOf({ inputTokens: 2000 }));
     }
     // 4,096 하나로 재면 안 보인다
     expect(cacheAlerts(ledger, () => 4096)).toEqual([]);
-    expect(cacheAlerts(ledger, () => 1024)).toEqual(["negotiator"]);
+    expect(cacheAlerts(ledger, () => 1024)).toEqual(["history-compactor"]);
   });
 });
 
@@ -215,7 +219,7 @@ describe("상한 정책 — 게임 진행을 막지 않는다", () => {
       null,
     );
     expect(verdict.over).toBe(false);
-    expect(agentAllowed("negotiator", verdict)).toBe(true);
+    expect(agentAllowed("history-compactor", verdict)).toBe(true);
   });
 
   /**
@@ -394,7 +398,7 @@ describe("beginGameUsage — 장부는 한 번에 게임 하나를 담는다", (
     expect(llmUsage().calls).toBe(0);
     expect(billedTokens(llmUsage().usage)).toBe(0);
     // 새 게임의 결산은 상한 아래에서 다시 시작한다
-    expect(agentAllowed("negotiator", budgetVerdict(llmUsage(), 100))).toBe(true);
+    expect(agentAllowed("history-compactor", budgetVerdict(llmUsage(), 100))).toBe(true);
   });
 
   it("리셋은 소유자 표시도 비운다 — 같은 이름의 게임이 다시 열려도 새로 센다", async () => {

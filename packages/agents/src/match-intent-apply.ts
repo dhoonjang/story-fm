@@ -11,7 +11,7 @@ import {
 } from "@story-fm/engine";
 import { shootoutTally } from "@story-fm/domain";
 import type { GameToolSpec } from "@story-fm/llm";
-import { buildGmTools, collectMatchMarks, sideTeamName } from "./gm-tools";
+import { buildSkillTools, collectMatchMarks, sideTeamName } from "./gm-tools";
 import { buildSegmentMessage, buildShootoutMessage } from "./match-script";
 import { touchesPitch, type MatchIntent } from "./match-intent-schema";
 import { MATCH_ADVANCED, type GmToolCall } from "./gm-types";
@@ -58,7 +58,7 @@ export function applyMatchIntent(
   options: { roll?: boolean } = {},
 ): AppliedIntent {
   const specs = new Map<string, GameToolSpec>(
-    buildGmTools(state, calls).map((tool) => [tool.name, tool] as const),
+    buildSkillTools(state, calls).map((tool) => [tool.name, tool] as const),
   );
   const notes: string[] = [];
   /** 도구 하나를 부르고 결과를 말로 모은다 — 실패도 감독에게 돌아간다 */
@@ -73,6 +73,11 @@ export function applyMatchIntent(
 
   const shapeBefore = shapeOfTactics(state);
 
+  // 판 자체가 먼저다 — 라인업·1·2군 이동은 그 뒤의 지시가 겨냥할 사람을 정한다 (평시)
+  if (intent.lineup) call("set_lineup", intent.lineup);
+  if (intent.squadLevels && intent.squadLevels.length > 0) {
+    call("set_squad_level", { moves: intent.squadLevels });
+  }
   // 교체가 먼저다 — 뒤이은 지시가 방금 들어온 선수를 겨냥할 수 있다
   for (const sub of intent.substitutions ?? []) call("substitute", sub);
   if (intent.tactics && Object.keys(intent.tactics).length > 0) call("set_tactics", intent.tactics);

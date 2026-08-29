@@ -25,11 +25,11 @@ import {
   userPlayers,
 } from "@story-fm/engine";
 import {
-  REPORT_VERDICT_TOOL,
   TIME_PASSED,
+  buildCounterpartyBlock,
+  buildGmTools,
   buildOnboardingTurn,
   runMockGmTurn,
-  runNegotiator,
 } from "@story-fm/agents";
 
 function build(seed: number): GameState {
@@ -293,24 +293,14 @@ describe("mock GM — 재계약", () => {
 });
 
 /**
- * **실모드의 교섭 상대** — mock은 앵커를 그대로 반영하지만(위), 실모드는 모델의 판정이
- * `report_verdict`의 스키마를 지나 코어의 폭으로 잘린다 (agents.md §4-1).
+ * **실모드의 교섭** — mock은 앵커를 그대로 반영하지만(위), 실모드는 GM이 상대가 되어
+ * 낸 판정이 `rule_offer_response`의 스키마를 지나 코어의 폭으로 잘린다 (agents.md §4-1).
  *
  * 재계약의 연수는 **스키마에 칸이 없으면 파싱에서 조용히 버려진다** — 코어가 폭을
  * 만들어 둬도 언제나 앵커 연수가 서고, 화면에는 정상으로 보인다. 서류에 폭이 적히지
  * 않는 것도 마찬가지로 드러나지 않는다. 두 자리를 여기서 함께 잰다.
  */
-describe("교섭 상대 — 모델이 되부르는 연수", () => {
-  /** 도구를 부른 응답 — `requireToolCall`이 재시도로 돌리지 않게 한 번 불렀다고 답한다 */
-  const answered = {
-    text: "",
-    history: { version: 1 as const, provider: "anthropic" as const, model: "test", messages: [] },
-    historyBase: 0,
-    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
-    toolCallCount: 1,
-    stopReason: "completed" as const,
-  };
-
+describe("교섭 — GM이 되부르는 연수", () => {
   it("폭 밖의 연수도 반려되지 않고 폭 끝으로 잘려 라운드에 남는다", async () => {
     const state = newGame();
     const player = playersOf(state, state.userTeamId)[0]!;
@@ -329,22 +319,21 @@ describe("교섭 상대 — 모델이 되부르는 연수", () => {
     // 스키마가 열어 둔 폭(계약 상한)은 코어의 폭(앵커 ±1년)보다 넓다 — 그래서 자를 것이 있다
     expect(anchor.yearsRoom!.max).toBeLessThan(RENEWAL_YEARS_MAX);
 
-    let asked: string | undefined;
-    const settled = await runNegotiator(state, renewal, {
-      runTurn: (req) => {
-        asked = req.user;
-        req.tools
-          ?.find((tool) => tool.name === REPORT_VERDICT_TOOL)
-          ?.handle({ verdict: "counter", contractYears: RENEWAL_YEARS_MAX });
-        return Promise.resolve(answered);
-      },
-    });
-
     // 서류에 폭이 없으면 모델은 연수를 판정의 재료로 읽지도 못한다
-    expect(asked).toContain(`조정 연수: 기준 ${anchor.contractYears}년`);
-    expect(settled?.result.ok, settled?.result.message).toBe(true);
-    expect(settled?.input.contractYears).toBe(anchor.yearsRoom!.max);
+    const block = buildCounterpartyBlock(state, renewal);
+    expect(block).toContain(`조정 연수: 기준 ${anchor.contractYears}년`);
+    expect(block).toContain(`<counterparty id="${renewal.id}">`);
+
+    const tool = buildGmTools(state, []).find((t) => t.name === "rule_offer_response")!;
+    const settled = await tool.handle({
+      negotiationId: renewal.id,
+      verdict: "counter",
+      contractYears: RENEWAL_YEARS_MAX,
+    });
+    expect(settled.ok, settled.message).toBe(true);
     expect(renewal.rounds[renewal.rounds.length - 1]!.contractYears).toBe(anchor.yearsRoom!.max);
+    // 답이 선 협상은 서류가 더 서지 않는다 — 두 번 답하지 않는다
+    expect(buildCounterpartyBlock(state, renewal)).toBeNull();
   });
 });
 

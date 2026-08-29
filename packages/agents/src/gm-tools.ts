@@ -12,6 +12,9 @@ import {
   applyForManagerJob,
   answerOffer,
   arrivedResponses,
+  RENEWAL_YEARS_MAX,
+  counterpartyAnchor,
+  settleCounterparty,
   applyFinanceEvent,
   applyTalkToPlayer,
   applyTeamTalk,
@@ -124,8 +127,39 @@ import {
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
 
 import { skillDescriptions } from "./skill-descriptions";
+import { runMatchIntent } from "./match-intent";
+import { applyMatchIntent } from "./match-intent-apply";
 import { inputError, toToolSchema } from "./tool-schema";
 import { recordCall, type GmToolCall, type SkillReturn } from "./gm-types";
+
+/**
+ * **GM에게 보이지 않는 스킬** — 판을 세우는 여덟과 교체. 감독의 전술 지시는
+ * `apply_tactics`/`apply_orders` 뒤의 지시 해석이 JSON으로 옮기고 코어가 이 스킬들을
+ * 부른다 (agents.md §1). 설명은 모델에게 가지 않으므로 이름만 든다 — 판정 근거는
+ * `MATCH_INTENT_SYSTEM`의 것이다.
+ */
+export const INTERNAL_SKILLS: ReadonlySet<string> = new Set([
+  "set_lineup",
+  "set_squad_level",
+  "set_tactics",
+  "set_player_tactic",
+  "set_set_piece_takers",
+  "set_set_piece_routine",
+  "exploit_point",
+  "set_match_plan",
+  "substitute",
+]);
+const INTERNAL_DESCRIPTIONS: Record<string, string> = {
+  set_lineup: "선발 11명과 벤치, 1·2군 이동",
+  set_squad_level: "1·2군 이동",
+  set_tactics: "팀 전술 6축과 갈래",
+  set_player_tactic: "한 선수의 자리·역할·개인 지시",
+  set_set_piece_takers: "세트피스 키커",
+  set_set_piece_routine: "세트피스 인원",
+  exploit_point: "약점 공략",
+  set_match_plan: "지역 전술",
+  substitute: "교체",
+};
 
 /**
  * 인자의 갈래 — **같은 종류는 같은 검증을 지난다** (prompts.md §2).
@@ -155,6 +189,53 @@ const SEASON_MAX = 200;
  * 실제로 내주는 날 수는 원형의 여유가 정한다 (career.md §5.2 「흥정」).
  */
 const COUNTER_DAYS_MAX = 120;
+
+/** 상대가 감독에게 남기는 한 줄의 상한 — 장부와 카드에 그대로 남는다 */
+const COUNTERPARTY_NOTE_MAX = 200;
+
+/**
+ * GM이 내는 판정 — **여기에 이번 협상의 숫자를 적지 않는다.** 도구 정의는 고정층이라
+ * 값이 들어가면 협상마다 캐시 프리픽스가 깨진다 — 구간도 앵커도 서류가 싣는다 (agents.md §5).
+ */
+export const CounterpartyRulingSchema = z.object({
+  negotiationId: z.string().min(1).describe("<counterparty id>의 id 그대로"),
+  verdict: z.enum(["accept", "counter", "reject"]).describe("고를 수 있는 판정은 서류가 적는다"),
+  fee: money(MONEY_MAX)
+    .optional()
+    .describe("조정에서 상대가 부르는 이적료·임대료·정산금. 서류의 구간 안에서"),
+  weeklyWage: money(WAGE_MAX)
+    .optional()
+    .describe("조정에서 상대가 부르는 주급. 서류의 구간 안에서"),
+  contractYears: z
+    .number()
+    .int()
+    .min(1)
+    .max(RENEWAL_YEARS_MAX)
+    .optional()
+    .describe("재계약 조정에서 선수가 원하는 계약 연수. 서류의 구간 안에서"),
+  squadStatus: z
+    .enum(SQUAD_STATUSES)
+    .optional()
+    .describe("재계약·영입 조정에서 선수가 원하는 계약 지위. 서류의 구간 안에서"),
+  paymentYears: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_PAYMENT_YEARS)
+    .optional()
+    .describe("같은 금액을 나눠 받겠다면 그 연수 — 나눌 수 있는 갈래에서만 뜻이 있다"),
+  ultimatum: z
+    .boolean()
+    .optional()
+    .describe("서류에 기한이 적힌 조정에서, 그 기한을 걸 것인가. 비우면 건다"),
+  note: z
+    .string()
+    .min(1)
+    .max(COUNTERPARTY_NOTE_MAX)
+    .optional()
+    .describe("상대가 감독에게 전하는 한 줄"),
+});
+export type CounterpartyRulingArgs = z.infer<typeof CounterpartyRulingSchema>;
 
 /** 정착 무게 인자 — 코어가 앵커 ±EVENT_BAND로 자른다 (settling.ts) */
 const settlingArg = (kind: "talk" | "team_talk") =>
@@ -325,7 +406,7 @@ function writtenLines(text: string): number {
 }
 
 /** 실모드 GM의 스킬 도구 바인딩 — 엔진 함수를 GameToolSpec으로 감싼다 */
-export function buildGmTools(
+export function buildSkillTools(
   state: GameState,
   calls: GmToolCall[],
   options?: { deferNegotiationIds?: ReadonlySet<string> },
@@ -400,7 +481,7 @@ export function buildGmTools(
     wrap("start_match", descriptions.start_match, z.object({}), () => startMatch(state)),
     wrap(
       "set_lineup",
-      descriptions.set_lineup,
+      INTERNAL_DESCRIPTIONS.set_lineup!,
       z.object({
         starting: z
           .array(z.object({ playerId: playerRef, position: z.string().min(1).optional() }))
@@ -417,7 +498,7 @@ export function buildGmTools(
     ),
     wrap(
       "set_squad_level",
-      descriptions.set_squad_level,
+      INTERNAL_DESCRIPTIONS.set_squad_level!,
       z.object({
         /**
          * 상한을 두지 않는다 — 몇 명까지 옮길 수 있는지는 임의의 숫자가 아니라
@@ -503,7 +584,7 @@ export function buildGmTools(
     ),
     wrap(
       "set_tactics",
-      descriptions.set_tactics,
+      INTERNAL_DESCRIPTIONS.set_tactics!,
       z
         .object({
           mentality: z.number().int().min(1).max(5),
@@ -526,7 +607,7 @@ export function buildGmTools(
     ),
     wrap(
       "set_player_tactic",
-      descriptions.set_player_tactic,
+      INTERNAL_DESCRIPTIONS.set_player_tactic!,
       z.object({
         playerId: playerRef,
         /**
@@ -563,7 +644,7 @@ export function buildGmTools(
     ),
     wrap(
       "set_set_piece_takers",
-      descriptions.set_set_piece_takers,
+      INTERNAL_DESCRIPTIONS.set_set_piece_takers!,
       z.object({
         corner: playerRef.nullable().optional().describe("코너 키커 — null이면 지정 해제"),
         freeKick: playerRef.nullable().optional().describe("프리킥 키커 — null이면 지정 해제"),
@@ -573,7 +654,7 @@ export function buildGmTools(
     ),
     wrap(
       "set_set_piece_routine",
-      descriptions.set_set_piece_routine,
+      INTERNAL_DESCRIPTIONS.set_set_piece_routine!,
       z
         .object({
           // 낱말은 도구 설명이 `SET_PIECE_ROUTINE_AXES`에서 만들어 싣는다 (prompts.md §5-2).
@@ -587,7 +668,7 @@ export function buildGmTools(
     ),
     wrap(
       "exploit_point",
-      descriptions.exploit_point,
+      INTERNAL_DESCRIPTIONS.exploit_point!,
       z.object({
         targetIds: z
           .array(z.string().min(1))
@@ -599,7 +680,7 @@ export function buildGmTools(
     ),
     wrap(
       "set_match_plan",
-      descriptions.set_match_plan,
+      INTERNAL_DESCRIPTIONS.set_match_plan!,
       z.object({
         band: z.enum(["defense", "midfield", "attack"]),
         lane: z.enum(["left", "center", "right"]),
@@ -737,7 +818,7 @@ export function buildGmTools(
     ),
     wrap(
       "substitute",
-      descriptions.substitute,
+      INTERNAL_DESCRIPTIONS.substitute!,
       z.object({ out: playerRef, in: playerRef }),
       (input) => substitutePlayer(state, input),
     ),
@@ -1246,6 +1327,29 @@ export function buildGmTools(
       },
     ),
     wrap(
+      "rule_offer_response",
+      descriptions.rule_offer_response,
+      CounterpartyRulingSchema,
+      (input) => {
+        /**
+         * 답이 도착한 협상만이다 — 서류(`<counterparty>`)가 선 자리. 코어가 앵커를 박고
+         * 판정을 앵커 ± 한도로 잘라 반영한다 (agents.md §4-1).
+         */
+        const negotiation = arrivedResponses(state).find((n) => n.id === input.negotiationId);
+        if (!negotiation) {
+          return {
+            ok: false,
+            message: "답이 도착한 협상이 아닙니다 — <counterparty> 서류가 선 협상만 답합니다",
+          };
+        }
+        const anchor = counterpartyAnchor(state, negotiation);
+        if (!anchor) return { ok: false, message: "이 협상에는 답할 자리가 없습니다" };
+        const ruling = { ...input };
+        delete (ruling as { negotiationId?: string }).negotiationId;
+        return settleCounterparty(state, anchor, ruling).result;
+      },
+    ),
+    wrap(
       "accept_deal",
       descriptions.accept_deal,
       z.object({ negotiationId: z.string().min(1) }),
@@ -1387,4 +1491,51 @@ export function sideTeamName(state: GameState, side: "home" | "away"): string {
   const match = state.matches.find((m) => m.id === state.pendingMatch?.matchId);
   if (!match) return side === "home" ? "홈" : "어웨이";
   return teamName(side === "home" ? match.homeTeamId : match.awayTeamId);
+}
+
+/** 지시 원문의 상한 — `apply_orders`와 같은 폭 */
+const TACTICS_ORDERS_MAX = 2000;
+const TacticsOrdersSchema = z.object({
+  orders: z.string().min(1).max(TACTICS_ORDERS_MAX).describe("감독의 말 원문 그대로"),
+});
+
+/**
+ * **평시 GM이 받는 도구** — 코어 스킬 전부에서 판을 세우는 것들(`INTERNAL_SKILLS`)을
+ * 빼고 `apply_tactics` 하나를 얹는다 (agents.md §1·§2). 그 하나의 핸들러 뒤에서 지시
+ * 해석이 감독의 말을 JSON으로 옮기고 코어가 내부 스킬을 부른다 — 기록은 내부 스킬의
+ * 이름으로 남아 칩과 말풍선이 그대로 선다.
+ */
+export function buildGmTools(
+  state: GameState,
+  calls: GmToolCall[],
+  options?: { deferNegotiationIds?: ReadonlySet<string> },
+): GameToolSpec[] {
+  const descriptions = skillDescriptions();
+  const visible = buildSkillTools(state, calls, options).filter(
+    (t) => !INTERNAL_SKILLS.has(t.name),
+  );
+  const tactics: GameToolSpec = {
+    name: "apply_tactics",
+    description: descriptions.apply_tactics,
+    inputSchema: toToolSchema(TacticsOrdersSchema),
+    async handle(input: unknown) {
+      const parsed = TacticsOrdersSchema.safeParse(input);
+      if (!parsed.success) return inputError(parsed.error);
+      if (state.dismissal) {
+        return {
+          ok: false,
+          message: `${state.manager.name} 감독은 지금 맡은 팀이 없습니다 — 부임한 뒤에 할 수 있는 일입니다`,
+        };
+      }
+      const intent = await runMatchIntent(state, parsed.data.orders);
+      if (!intent.ok) return { ok: false, message: intent.message };
+      // 평시에는 굴릴 판이 없다 — 골·카드 표식도 없다
+      const applied = applyMatchIntent(state, intent.intent, calls, [], [], { roll: false });
+      return {
+        ok: true,
+        message: applied.notes.length > 0 ? applied.notes.join("\n") : "지시를 판에 걸었습니다",
+      };
+    },
+  };
+  return [...visible, tactics];
 }

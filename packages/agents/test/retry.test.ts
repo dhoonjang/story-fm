@@ -85,8 +85,9 @@ describe("retryOnce — 폴백 대신 한 번의 재시도", () => {
  */
 describe("runMatchIntent — 의도를 받은 뒤의 실패", () => {
   /** 이 경기의 지난 중계 턴 하나 — 해석기가 `<match_log>`로 읽는다 (agents.md §3) */
+  // 장부 없는 경기 상태 — 해석기의 입력 조립이 경기 갈래로 가되 실을 것이 없다
   const emptyState = {
-    pendingMatch: undefined,
+    pendingMatch: { matchId: "m" },
     chat: [
       {
         role: "model",

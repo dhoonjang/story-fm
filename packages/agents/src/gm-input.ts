@@ -1041,11 +1041,6 @@ export function buildGmStateNote(
   arrivedReports: readonly ScoutReportCard[] = [],
   /** 같은 자리의 임무 보고 — 지목과 한 블록을 나눠 쓴다 */
   arrivedMissions: readonly MissionReportCard[] = [],
-  /**
-   * 장면보다 먼저 교섭 상대가 낸 답 (agents.md §4-1) — GM은 판정하지 않고 **전한다**.
-   * 판정이 이미 끝났으므로 아래 `pendingVerdicts`에는 그 협상이 서지 않는다.
-   */
-  counterpartyReplies: readonly string[] = [],
 ): string {
   // 무직이면 실을 것이 다른 것들이다 (career.md §5.1)
   if (managedTeamId(state) === null) return buildUnemployedNote(state, passed);
@@ -1116,9 +1111,7 @@ export function buildGmStateNote(
   ).length;
 
   const alerts = [
-    // 상대가 방금 낸 답이 맨 앞 — 이 줄이 없으면 GM은 협상이 움직인 줄 모른다
-    ...counterpartyReplies.map((line) => `📨 ${line}`),
-    // 판정 대기 협상이 그다음 — 답은 다음 턴 입력에 실리므로 여기서 세우지 않으면 잊힌다
+    // 판정 대기 협상이 맨 앞 — 답은 다음 턴 입력에 실리므로 여기서 세우지 않으면 잊힌다
     ...pendingVerdicts(state).map((v) => `❗ ${v.label} (${v.negotiation.id})`),
     /**
      * 감독이 아직 답하지 않은 이적 요청 — 기한이 없어 저절로 사라지지 않는다
