@@ -503,7 +503,8 @@ describe("AnthropicGameLLM 오류 종류", () => {
     ["429 한도", apiError(429, "rate_limit_error"), "rate_limit"],
     ["401 인증", apiError(401, "authentication_error"), "auth"],
     ["403 권한", apiError(403, "permission_error"), "auth"],
-    ["400 잘못된 요청", apiError(400, "invalid_request_error"), "unknown"],
+    ["400 잘못된 요청", apiError(400, "invalid_request_error"), "invalid_request"],
+    ["404 없는 모델·경로", apiError(404, "not_found_error"), "invalid_request"],
     ["중단 신호", new AnthropicSdk.APIUserAbortError(), "timeout"],
     ["연결 시한", new AnthropicSdk.APIConnectionTimeoutError(), "timeout"],
   ];

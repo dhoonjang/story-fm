@@ -200,29 +200,48 @@ export function busyResponse(error: unknown): Response {
 
 export type TurnOutcome =
   | { ok: true; payload: GamePayload }
-  | { ok: false; status: number; error: string; detail?: string };
+  /**
+   * `retry`는 **이 턴을 그대로 다시 보내면 통할 수 있는가**다 — 화면의 배너가 이 값
+   * 하나로 「다시 시도」를 세울지 정한다. 서버가 사실을 적어 보내므로 화면이 문구나
+   * 상태 코드를 읽어 짐작하지 않는다 (`busyResponse`가 409에 쓰는 것과 같은 말).
+   */
+  | { ok: false; status: number; error: string; retry: boolean; detail?: string };
 
 /**
- * LLM 실패를 감독에게 보일 한 줄로 — **게임 밖의 사건**이므로 픽션 밖 말투로.
- * 다시 걸어 보라는 말은 배너의 `다시 시도` 버튼이 이미 하고 있다.
- * 새 게임 첫 장면(`/api/games`)도 같은 문구를 쓴다 — 폴백 장면은 없다.
+ * LLM 실패를 감독에게 보일 한 줄과, 그 배너에 「다시 시도」를 세울지 — **게임 밖의
+ * 사건**이므로 픽션 밖 말투로. 새 게임 첫 장면(`/api/games`)도 같은 문구를 쓴다 —
+ * 폴백 장면은 없다.
  *
  * **고르는 근거는 `kind` 하나다** (models.md §1-1). 오류 문자열에서 낱말을 찾던
  * 예전 분류는 제공자가 메시지 문안을 손보는 날 조용히 무너졌고, 그 낱말을 지키느라
  * 오류 문구까지 코드의 제약이 됐다.
+ *
+ * ⚠️ **문구와 버튼은 한 줄에 함께 적는다.** 종류를 세우는 기준이 "화면이 다른 말을
+ * 해야 하는가"라, 표가 둘로 갈리면 새 종류가 한쪽에만 들어가 문구는 바뀌었는데
+ * 버튼은 그대로인 배너가 선다. `invalid_request`가 그 자리다 — 몇 번을 불러도 같은
+ * 400이 오므로 다시 걸어 보라고 이르는 것은 사실과 다르다.
  */
-const TURN_ERROR_MESSAGE: Record<LlmErrorKind, string> = {
-  overloaded: "모델 서버가 혼잡합니다",
-  rate_limit: "요청 한도를 넘었습니다",
-  timeout: "응답이 지연돼 턴을 취소했습니다",
-  auth: "LLM 인증 정보가 올바르지 않습니다",
-  filtered: "모델이 이 요청을 거절했습니다",
-  budget: "이 게임의 토큰 예산 상한에 닿았습니다",
-  unknown: "응답을 받지 못해 지시를 반영하지 못했습니다",
+const TURN_ERROR: Record<LlmErrorKind, { message: string; retry: boolean }> = {
+  overloaded: { message: "모델 서버가 혼잡합니다", retry: true },
+  rate_limit: { message: "요청 한도를 넘었습니다", retry: true },
+  timeout: { message: "응답이 지연돼 턴을 취소했습니다", retry: true },
+  auth: { message: "LLM 인증 정보가 올바르지 않습니다", retry: false },
+  filtered: { message: "모델이 이 요청을 거절했습니다", retry: true },
+  budget: { message: "이 게임의 토큰 예산 상한에 닿았습니다", retry: false },
+  invalid_request: {
+    message: "요청이나 설정이 잘못됐습니다 — 서버 로그를 확인하세요",
+    retry: false,
+  },
+  unknown: { message: "응답을 받지 못해 지시를 반영하지 못했습니다", retry: true },
 };
 
 export function turnErrorMessage(kind: LlmErrorKind): string {
-  return TURN_ERROR_MESSAGE[kind];
+  return TURN_ERROR[kind].message;
+}
+
+/** 그대로 다시 보내면 통할 실패인가 — 배너의 「다시 시도」가 읽는 값 */
+export function turnErrorRetry(kind: LlmErrorKind): boolean {
+  return TURN_ERROR[kind].retry;
 }
 
 /**
@@ -278,7 +297,9 @@ export function runTurnLocked(
       // (models.md §4). 잠금 안이라 한 프로세스에서 두 게임이 겹치지 않는다.
       beginGameUsage(id);
       const state = loadGame(id);
-      if (!state) return { ok: false as const, status: 404, error: "게임을 찾을 수 없습니다" };
+      // 없는 게임은 다시 물어도 없다
+      if (!state)
+        return { ok: false as const, status: 404, error: "게임을 찾을 수 없습니다", retry: false };
 
       /**
        * 경기 턴인가 — **턴을 시작할 때** 본다. 이 턴에서 경기가 끝나더라도 감독이
@@ -300,6 +321,8 @@ export function runTurnLocked(
               ok: false as const,
               status: 400,
               error: "전술판 지시를 반영하지 못했습니다",
+              // 같은 판에 같은 지시를 다시 보내면 같은 자리에서 막힌다
+              retry: false,
               detail: result.message,
             };
           }
@@ -368,6 +391,7 @@ export function runTurnLocked(
            * 바꿔 쓰면 "지시를 옮기지 못했다"가 "응답을 받지 못했다"로 둔갑한다.
            */
           error: error instanceof GmTurnFailure ? error.message : turnErrorMessage(kind),
+          retry: turnErrorRetry(kind),
           ...errorDetail(error),
         };
       }
@@ -379,7 +403,7 @@ export function runTurnLocked(
      * (`runTurnLocked`는 성공할 때만 저장한다) 전술판 지시는 대기열로 돌아간다.
      */
     if (error instanceof GameBusyError)
-      return { ok: false as const, status: 409, error: error.message };
+      return { ok: false as const, status: 409, error: error.message, retry: true };
     throw error;
   });
 }
