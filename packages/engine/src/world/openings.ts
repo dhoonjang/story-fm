@@ -1,7 +1,7 @@
-import type { Opening, OpeningKind } from "@story-fm/domain";
+import type { Opening, OpeningClose, OpeningKind } from "@story-fm/domain";
 import { OPENING_KIND_KO, OPENING_LINE_MAX, OPENING_TITLE_MAX } from "@story-fm/domain";
 import { addDays } from "../competition/calendar";
-import { playerById, playersOf, type GameState } from "../core/state";
+import { playerById, playersOf, pushNarrative, type GameState } from "../core/state";
 
 /**
  * **시작 사건** — 부임 첫 몇 주의 진행을 이끄는 실마리 (career.md §1 · agents.md §4-2).
@@ -67,12 +67,62 @@ export function activeOpenings(state: GameState): Opening[] {
   return (state.openings ?? []).filter((o) => o.resolvedOn === null);
 }
 
+/** 닫힌 실마리가 서사 기억에 남는 무게 — 면담 한 건과 같은 줄이다 */
+const OPENING_CLOSE_SALIENCE = 2;
+
+/**
+ * 실마리 하나를 닫는다 — **두 사유가 같은 문을 지난다** (career.md §1). 돌려주는 것은
+ * 일지에 남길 줄이고, 그 자리에 열린 실마리가 없으면 null이다.
+ */
+export function resolveOpening(state: GameState, id: string, reason: OpeningClose): string | null {
+  const opening = (state.openings ?? []).find((o) => o.id === id && o.resolvedOn === null);
+  if (!opening) return null;
+  opening.resolvedOn = state.date;
+  opening.resolvedBy = reason;
+  return reason === "handled"
+    ? `${opening.title} — 감독이 매듭지었다`
+    : `${opening.title} — 첫 몇 주가 지났다`;
+}
+
+/** 감독이 한 일이 어디에 닿았는가 — 사람과 갈래 (career.md §1의 표) */
+export interface OpeningTouch {
+  /** 이 일이 닿은 사람 — 우리 선수의 id 또는 인물의 characterId */
+  subjectIds?: readonly string[];
+  /** **걸린 사람이 없는** 실마리를 닫는 갈래 */
+  kinds?: readonly OpeningKind[];
+}
+
+/**
+ * 감독이 한 일이 실마리에 닿았으면 닫는다 — 돌려주는 것은 **닫힌 수**다 (career.md §1).
+ *
+ * **걸린 사람이 있으면 사람이 가른다.** 갈래는 걸린 사람이 없는 실마리에만 쓴다 —
+ * 라야에게 걸린 라커룸 실마리가 선수단 전체에 한 말로 닫히면 「그 사람과의 일」이 아무
+ * 뜻도 갖지 않는다.
+ *
+ * 닫힌 줄은 서사 기억으로 간다 — 명령에는 다이제스트가 없고, 다음 턴 GM이 그 사실을
+ * 읽는 자리는 `<recent>`다. 기한이 닫는 길은 `tickOpenings`가 다이제스트로 나른다.
+ */
+export function touchOpenings(state: GameState, touch: OpeningTouch): number {
+  const subjects = new Set(touch.subjectIds ?? []);
+  const kinds = new Set(touch.kinds ?? []);
+  let closed = 0;
+  for (const opening of activeOpenings(state)) {
+    const hit = opening.subjectId ? subjects.has(opening.subjectId) : kinds.has(opening.kind);
+    if (!hit) continue;
+    const line = resolveOpening(state, opening.id, "handled");
+    if (line === null) continue;
+    pushNarrative(state, line, OPENING_CLOSE_SALIENCE);
+    closed += 1;
+  }
+  return closed;
+}
+
 /** 기한이 지난 실마리를 닫는다 — 첫 몇 주가 지나면 이야기는 장부의 아크가 잇는다 */
 export function tickOpenings(state: GameState, digest: string[]): void {
   for (const opening of activeOpenings(state)) {
     if (state.date <= opening.dueOn) continue;
-    opening.resolvedOn = state.date;
-    digest.push(`${opening.title} — 첫 몇 주가 지났다`);
+    const line = resolveOpening(state, opening.id, "expired");
+    if (line !== null) digest.push(line);
   }
 }
 

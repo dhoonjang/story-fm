@@ -165,6 +165,7 @@ import {
   type Receptivity,
 } from "../squad/receptivity";
 import { applyCharacterMemories } from "../world/persona";
+import { touchOpenings } from "../world/openings";
 import { dressingRoomFactor, dressingRoomVoice, leaderGroupOf } from "../squad/hierarchy";
 import {
   groupOf,
@@ -1158,6 +1159,8 @@ export function applyTeamTalk(
     // 하루 한 번의 라커룸 장면과 90분 사이의 한마디가 같은 무게로 남지는 않는다
     shout ? 1 : 2,
   );
+  // 선수단에 한 말은 **걸린 사람 없는** 라커룸 실마리만 닫는다 (career.md §1)
+  touchOpenings(state, { kinds: ["dressing-room"] });
   return {
     ok: true,
     // 펼치지 않아도 잘 풀렸는지는 알아야 한다 — 숫자는 펼쳤을 때만
@@ -1367,6 +1370,8 @@ export function applyTalkToPlayer(
     `${player.name} 면담(${outcome}) — 사기 ${bounded >= 0 ? "+" : ""}${bounded}`,
     2,
   );
+  // 그 선수에게 걸린 시작 사건은 마주 앉은 것으로 닫힌다 (career.md §1)
+  touchOpenings(state, { subjectIds: [player.id] });
   return {
     ok: true,
     tone: bounded >= 0 ? ("good" as const) : ("bad" as const),
@@ -3729,6 +3734,8 @@ export function recordIncident(
     })),
   );
   pushNarrative(state, summary, salience, "incident");
+  // 당사자에게 걸린 시작 사건은 그 사건이 닫는다 (career.md §1)
+  touchOpenings(state, { subjectIds: parties.map((p) => p.id) });
   (state.incidents ??= []).push({
     date: state.date,
     kind: input.kind,
