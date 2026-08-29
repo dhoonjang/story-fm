@@ -583,7 +583,7 @@ function dailyTick(
   driftFamiliarity(state);
 
   // 감독 팀은 기억(`drilled`)만 갱신한다 — **시간은 적응도를 올리지 않는다**
-  // (skills/index.ts의 계약). 상승 경로는 훈련·경기 결산 판정뿐이다.
+  // (commands/index.ts의 계약). 상승 경로는 훈련·경기 결산 판정뿐이다.
   if (managed) settleTactics(state, state.date);
 
   // 휴식은 소화할 것이 없다 — 지나갔다는 표시만 남긴다

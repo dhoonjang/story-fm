@@ -132,15 +132,15 @@ import { runTacticOrders } from "./tactic-orders";
 import { runTableReply } from "./negotiation-table";
 import { MARKET_OPS, runMarketOrders } from "./market-orders";
 import { TRAINING_OPS, runTrainingOrders } from "./training-orders";
-import { applyOps } from "./orders-ops";
+import { OrdersArgsSchema, applyOps } from "./orders-ops";
 import { MONEY_MAX, WAGE_MAX, money } from "./ruling-schema";
 import { applyTacticOrders } from "./tactic-apply";
 import { inputError, toToolSchema } from "./tool-schema";
 import { recordCall, type GmToolCall, type CommandReturn } from "./gm-types";
 
 /**
- * **GM에게 보이지 않는 코어 명령** — 판을 세우는 여덟과 교체. 감독의 전술 지시는
- * `tactic_orders`/`tactic_orders` 뒤의 지시 해석이 JSON으로 옮기고 코어가 이 명령들을
+ * **GM에게 보이지 않는 코어 명령** — 판을 세우는 열과 훈련 여섯, 시장 열아홉. 감독의 전술 지시는
+ * `tactic_orders`(평시·경기)·`training_orders`·`market_orders` 뒤의 해석이 JSON으로 옮기고 코어가 이 명령들을
  * 부른다 (agents.md §1). 설명은 모델에게 가지 않으므로 이름만 든다 — 판정 근거는
  * `TACTIC_ORDERS_SYSTEM`의 것이다.
  */
@@ -155,7 +155,7 @@ export const CORE_COMMANDS: ReadonlySet<string> = new Set([
   "set_match_plan",
   "substitute",
   "set_captain",
-  // 선수단 운영 — tactic-orders의 ops (평시)
+  // 선수단 운영 — training-orders의 ops (평시)
   "set_training",
   "set_development_focus",
   "set_mentor",
@@ -413,6 +413,18 @@ function writtenLines(text: string): number {
   return text.split("\n").filter((line) => line.trim().length > 0).length;
 }
 
+/**
+ * **무직인 감독의 문** — 한 문장이 한 자리에만 산다. `wrap`도 손으로 지은 명령도 손잡이도
+ * 같은 함수를 지나므로, 새 자리가 생겨도 이 문구를 다시 적을 일이 없다 (career.md §5.1).
+ */
+function dismissed(state: GameState, applies: boolean): { ok: false; message: string } | null {
+  if (!applies || !state.dismissal) return null;
+  return {
+    ok: false,
+    message: `${state.manager.name} 감독은 지금 맡은 팀이 없습니다 — 부임한 뒤에 할 수 있는 일입니다`,
+  };
+}
+
 /** 실모드 GM의 도구 바인딩 — 엔진 함수를 GameToolSpec으로 감싼다 */
 export function buildToolSpecs(
   state: GameState,
@@ -460,12 +472,8 @@ export function buildToolSpecs(
     description,
     inputSchema: toToolSchema(schema),
     handle(input: unknown, context?: ToolCallContext) {
-      if (state.dismissal && !OUT_OF_WORK_TOOLS.has(name)) {
-        return {
-          ok: false,
-          message: `${state.manager.name} 감독은 지금 맡은 팀이 없습니다 — 부임한 뒤에 할 수 있는 일입니다`,
-        };
-      }
+      const blocked = dismissed(state, !OUT_OF_WORK_TOOLS.has(name));
+      if (blocked) return blocked;
       const parsed = schema.safeParse(input);
       if (!parsed.success) return inputError(parsed.error);
       return record(name, run(parsed.data), parsed.data, context);
@@ -716,6 +724,8 @@ export function buildToolSpecs(
       description: CORE_COMMAND_LABELS.set_training!,
       inputSchema: toToolSchema(TRAINING_INPUT),
       handle(input: unknown, context?: ToolCallContext) {
+        const blocked = dismissed(state, true);
+        if (blocked) return blocked;
         const parsed = TRAINING_INPUT.safeParse(input);
         if (!parsed.success) return inputError(parsed.error);
         // 팀 일정·비우기·개인 훈련의 단일 입구 — 대상이 같으면 입구도 하나다
@@ -1486,12 +1496,6 @@ export function sideTeamName(state: GameState, side: "home" | "away"): string {
   return teamName(side === "home" ? match.homeTeamId : match.awayTeamId);
 }
 
-/** 지시 원문의 상한 — `tactic_orders`와 같은 폭 */
-const TACTICS_ORDERS_MAX = 2000;
-const OrdersArgsSchema = z.object({
-  orders: z.string().min(1).max(TACTICS_ORDERS_MAX).describe("감독의 말 원문 그대로"),
-});
-
 /**
  * **평시 GM이 받는 도구** — 코어 명령 전부에서 판을 세우는 것들(`CORE_COMMANDS`)을
  * 빼고 `tactic_orders` 하나를 얹는다 (agents.md §1·§2). 그 하나의 핸들러 뒤에서 지시
@@ -1504,7 +1508,13 @@ export function buildGmTools(
   options?: { deferNegotiationIds?: ReadonlySet<string> },
 ): GameToolSpec[] {
   const descriptions = skillDescriptions();
-  const visible = buildToolSpecs(state, calls, options).filter((t) => !CORE_COMMANDS.has(t.name));
+  /**
+   * 명령 배선은 **한 번만 짓는다** — 손잡이 셋이 각자 다시 지으면 같은 상태를 두고 스펙
+   * 쉰여섯 벌이 턴마다 네 번 만들어지고, 그중 하나가 `options`를 빠뜨리면 조용히 갈린다.
+   */
+  const specList = buildToolSpecs(state, calls, options);
+  const specs = new Map(specList.map((t) => [t.name, t] as const));
+  const visible = specList.filter((t) => !CORE_COMMANDS.has(t.name));
   const tactics: GameToolSpec = {
     name: "tactic_orders",
     description: descriptions.tactic_orders,
@@ -1512,16 +1522,17 @@ export function buildGmTools(
     async handle(input: unknown) {
       const parsed = OrdersArgsSchema.safeParse(input);
       if (!parsed.success) return inputError(parsed.error);
-      if (state.dismissal) {
-        return {
-          ok: false,
-          message: `${state.manager.name} 감독은 지금 맡은 팀이 없습니다 — 부임한 뒤에 할 수 있는 일입니다`,
-        };
-      }
+      const blocked = dismissed(state, true);
+      if (blocked) return blocked;
       const intent = await runTacticOrders(state, parsed.data.orders);
       if (!intent.ok) return { ok: false, message: intent.message };
       // 평시에는 굴릴 판이 없다 — 골·카드 표식도 없다
-      const applied = applyTacticOrders(state, intent.intent, calls, [], [], { roll: false });
+      const applied = applyTacticOrders(state, intent.intent, calls, [], [], {
+        roll: false,
+        ...(options?.deferNegotiationIds
+          ? { deferNegotiationIds: options.deferNegotiationIds }
+          : {}),
+      });
       return {
         ok: true,
         message: applied.notes.length > 0 ? applied.notes.join("\n") : "지시를 판에 걸었습니다",
@@ -1539,13 +1550,8 @@ export function buildGmTools(
     async handle(input: unknown) {
       const parsed = OrdersArgsSchema.safeParse(input);
       if (!parsed.success) return inputError(parsed.error);
-      if (state.dismissal) {
-        return {
-          ok: false,
-          message: `${state.manager.name} 감독은 지금 맡은 팀이 없습니다 — 부임한 뒤에 할 수 있는 일입니다`,
-        };
-      }
-      const specs = new Map(buildToolSpecs(state, calls, options).map((t) => [t.name, t] as const));
+      const blocked = dismissed(state, true);
+      if (blocked) return blocked;
       const parsedOrders = await runTrainingOrders(
         state,
         specs,
@@ -1554,10 +1560,7 @@ export function buildGmTools(
       );
       if (!parsedOrders.ok) return { ok: false, message: parsedOrders.message };
       const notes: string[] = [];
-      applyOps(specs, parsedOrders.orders.ops, TRAINING_OPS, notes);
-      if (parsedOrders.orders.unresolved) {
-        notes.push(`옮기지 못한 지시: "${parsedOrders.orders.unresolved}"`);
-      }
+      applyOps(specs, parsedOrders.orders, TRAINING_OPS, notes);
       return { ok: true, message: notes.length > 0 ? notes.join("\n") : "훈련을 걸었습니다" };
     },
   };
@@ -1573,12 +1576,8 @@ export function buildGmTools(
     async handle(input: unknown, context?: ToolCallContext) {
       const parsed = TableLineArgsSchema.safeParse(input);
       if (!parsed.success) return inputError(parsed.error);
-      if (state.dismissal) {
-        return {
-          ok: false,
-          message: `${state.manager.name} 감독은 지금 맡은 팀이 없습니다 — 부임한 뒤에 할 수 있는 일입니다`,
-        };
-      }
+      const blocked = dismissed(state, true);
+      if (blocked) return blocked;
       const seated = sitAtTable(state, parsed.data.negotiationId, parsed.data.line);
       if (!seated.ok) return seated;
       const reply = await runTableReply(state, seated.seat, parsed.data.line);
@@ -1600,25 +1599,21 @@ export function buildGmTools(
     async handle(input: unknown) {
       const parsed = OrdersArgsSchema.safeParse(input);
       if (!parsed.success) return inputError(parsed.error);
-      if (state.dismissal && !/감독직|지원|수락|제안/.test(parsed.data.orders)) {
-        return {
-          ok: false,
-          message: `${state.manager.name} 감독은 지금 맡은 팀이 없습니다 — 부임한 뒤에 할 수 있는 일입니다`,
-        };
-      }
-      const specs = new Map(buildToolSpecs(state, calls, options).map((t) => [t.name, t] as const));
+      // 무직이어도 감독직을 두드리는 말은 지난다 — `OUT_OF_WORK_TOOLS`와 같은 결이다
+      const blocked = dismissed(state, !SEAT_ORDERS.test(parsed.data.orders));
+      if (blocked) return blocked;
       const parsedOrders = await runMarketOrders(state, specs, parsed.data.orders);
       if (!parsedOrders.ok) return { ok: false, message: parsedOrders.message };
       const notes: string[] = [];
-      applyOps(specs, parsedOrders.orders.ops, MARKET_OPS, notes);
-      if (parsedOrders.orders.unresolved) {
-        notes.push(`옮기지 못한 지시: "${parsedOrders.orders.unresolved}"`);
-      }
-      return { ok: true, message: notes.join("\n") };
+      applyOps(specs, parsedOrders.orders, MARKET_OPS, notes);
+      return { ok: true, message: notes.length > 0 ? notes.join("\n") : "장부에 걸었습니다" };
     },
   };
   return [...visible, tactics, training, table, market];
 }
+
+/** 무직인 감독도 넘길 수 있는 말 — 감독직을 두드리는 자리 (career.md §5.1) */
+const SEAT_ORDERS = /감독직|지원|수락|제안/;
 
 /** 테이블에 건네는 감독의 말 — 원문 그대로다 */
 const TableLineArgsSchema = z.object({

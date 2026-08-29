@@ -129,7 +129,7 @@ export * from "./club/board-request";
 export * from "./club/manager-wallet";
 export * from "./club/vision";
 
-// skills — 감독 지시(GM 도구)의 실행부
+// commands — 감독 지시(도구·해석기)가 닿는 코어 명령의 실행부
 export * from "./commands";
 
 // views — 오피스 뷰·읽기 전용 조회

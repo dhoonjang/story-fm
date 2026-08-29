@@ -44,7 +44,7 @@ agents:
     timeout_ms: 60000
     thinking_level: minimal
 
-  # 감독의 이적·재정 지시를 시장·장부 스킬의 인자로 옮긴다 — 판 지시의 해석과 같은 자리
+  # 감독의 이적·재정 지시를 시장·장부 명령의 인자로 옮긴다 — 판 지시의 해석과 같은 자리
   # (docs/llm/agents.md §1). 분류라 가벼운 모델로 둔다.
   market-orders:
     provider: google

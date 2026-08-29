@@ -35,7 +35,7 @@ interface LockRecord {
  *
  * 한 턴이 **정당하게** 쥐는 최대 시간은 그 턴이 부르는 에이전트들의 `timeout_ms` 합이다.
  * 지금 설정에서 가장 긴 것은 경기 턴 — `tactic-orders`(60초) + `match-gm`(180초) +
- * 결산 셋(30초×3) + `history-compactor`(60초) ≈ 6분 30초 (config/llm.yml).
+ * `finalize-match`(90초) + `history-compactor`(60초) ≈ 6분 30초 (config/llm.yml).
  * 15분은 그 두 배 남짓이다. **이 값이 그 합보다 짧으면 멀쩡히 돌고 있는 턴의 락을
  * 빼앗는다** — 잃어버린 갱신을 막으려고 세운 락이 스스로 그 길을 연다.
  *

@@ -1,4 +1,3 @@
-import { z } from "zod";
 import {
   describeBoardRequests,
   describeBuyBackRights,
@@ -8,10 +7,9 @@ import {
   pendingVerdicts,
   type GameState,
 } from "@story-fm/engine";
-import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import type { GameLLM, GameToolSpec } from "@story-fm/llm";
 import { buildRecentTurnsBlock, managerSeatLines } from "./gm-input";
-import { buildOpsSchema, hasOps, parseOps, type OpsInput } from "./orders-ops";
-import { ModelOutputError, retryOnce, requireToolCall } from "./retry";
+import { runOpsOrders, tagged, type OpsAgentSpec, type OpsOrders } from "./orders-ops";
 
 /**
  * 이적·재정 지시 해석 — **감독의 말을 시장·장부 명령의 인자로 옮긴다** (agents.md §1).
@@ -47,9 +45,6 @@ export const MARKET_ORDERS_SYSTEM = `당신은 감독의 말을 이적·재정 �
 # unresolved
 어느 명령에도 담기지 않은 말, 액수가 빠진 지시는 감독의 표현 그대로 unresolved에 남긴다.`;
 
-/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
-const REPORT_TOOL = "report_market_orders";
-
 /**
  * 해석기가 채우는 시장·장부 명령 — **적용 순서다.** 답할 것과 접을 것을 먼저, 새로
  * 여는 것을 뒤에: 같은 선수의 협상을 접고 다시 여는 말이 한 턴에 올 수 있다.
@@ -76,14 +71,17 @@ export const MARKET_OPS: readonly string[] = [
   "apply_manager_job",
 ];
 
-const ReportSchema = z.object({
-  unresolved: z.string().min(1).max(200).optional(),
-});
+const SPEC: OpsAgentSpec = {
+  agent: "market-orders",
+  tool: "report_market_orders",
+  system: MARKET_ORDERS_SYSTEM,
+  ops: MARKET_OPS,
+  opsHint: "부를 명령과 그 인자 — 감독이 정한 것만",
+  unresolvedHint: "어느 명령에도 담기지 않은 말, 액수가 빠진 지시",
+  emptyHint: "옮길 지시가 없습니다 — 무엇을 할지 감독에게 물어보세요",
+};
 
-export interface MarketOrders {
-  ops: OpsInput;
-  unresolved?: string;
-}
+export type MarketOrders = OpsOrders;
 
 /** 해석기의 입력 — 협상·관심·되사기·보드·감독직·재정·지난 다섯 턴 */
 export function buildMarketContext(state: GameState): string[] {
@@ -93,58 +91,24 @@ export function buildMarketContext(state: GameState): string[] {
   const board = describeBoardRequests(state);
   const buybacks = describeBuyBackRights(state);
   const interest = describeInterests(state);
-  const block = (tag: string, body: string | null): string[] =>
-    body === null || body.trim().length === 0 ? [] : [`<${tag}>`, body, `</${tag}>`];
   return [
-    ...block(
+    ...tagged(
       "negotiations",
       [...(negotiations.startsWith("진행 중인 협상 없음") ? [] : [negotiations]), ...verdicts].join(
         "\n",
       ),
     ),
-    ...block("interest", interest.join("\n")),
-    ...block("buybacks", buybacks),
-    ...block("board", board),
-    ...block("seat", seat.join("\n")),
-    ...block("finance", financeLookup(state).message),
-    ...block("recent_turns", buildRecentTurnsBlock(state)),
+    ...tagged("interest", interest.join("\n")),
+    ...tagged("buybacks", buybacks ?? ""),
+    ...tagged("board", board ?? ""),
+    ...tagged("seat", seat.join("\n")),
+    ...tagged("finance", financeLookup(state).message),
+    ...tagged("recent_turns", buildRecentTurnsBlock(state)),
   ];
 }
 
-function makeReportTool(
-  specs: ReadonlyMap<string, GameToolSpec>,
-  onReport: (orders: MarketOrders) => void,
-): GameToolSpec {
-  return {
-    name: REPORT_TOOL,
-    description: "감독의 말을 시장·장부 명령의 인자로 제출한다. 이 도구로만 답한다.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        ops: buildOpsSchema(specs, MARKET_OPS, "부를 명령과 그 인자 — 감독이 정한 것만"),
-        unresolved: {
-          type: "string",
-          minLength: 1,
-          maxLength: 200,
-          description: "어느 명령에도 담기지 않은 말, 액수가 빠진 지시",
-        },
-      },
-    },
-    handle: (input: unknown) => {
-      const parsed = ReportSchema.safeParse(input);
-      if (!parsed.success) {
-        return { ok: false, message: `형식이 맞지 않습니다 — ${parsed.error.issues[0]?.message}` };
-      }
-      const ops = parseOps((input as { ops?: unknown }).ops, MARKET_OPS);
-      onReport({ ops, ...(parsed.data.unresolved ? { unresolved: parsed.data.unresolved } : {}) });
-      return { ok: true, message: "지시를 받았습니다" };
-    },
-  };
-}
-
 /**
- * 감독의 말 → 시장·장부 명령 인자. 판 지시의 해석과 같은 계약이다(agents.md §1) —
- * 산출이 나온 뒤의 실패는 실패가 아니고, 산출 없이 두 번 실패하면 오류다.
+ * 감독의 말 → 시장·장부 명령의 인자. 훈련 해석과 같은 뼈대를 지난다(`runOpsOrders`).
  */
 export async function runMarketOrders(
   state: GameState,
@@ -152,34 +116,6 @@ export async function runMarketOrders(
   message: string,
   llm?: GameLLM,
 ): Promise<{ ok: true; orders: MarketOrders } | { ok: false; message: string }> {
-  let orders: MarketOrders | null = null;
-  let client = llm;
-  try {
-    await retryOnce(
-      "market:orders",
-      () =>
-        requireToolCall(REPORT_TOOL, () => {
-          client ??= createGameLLM(agentConfig("market-orders"));
-          return client.runTurn({
-            system: MARKET_ORDERS_SYSTEM,
-            history: [],
-            user: [...buildMarketContext(state), ``, `@감독: ${message}`].join("\n"),
-            tools: [makeReportTool(specs, (value) => (orders = value))],
-            toolChoice: { name: REPORT_TOOL },
-          });
-        }),
-      () => orders !== null,
-    );
-  } catch (error) {
-    if (orders === null && !(error instanceof ModelOutputError)) throw error;
-    console.warn("[market:orders] 해석 호출이 실패했습니다:", error);
-  }
-  if (orders === null) {
-    return { ok: false, message: "지시를 옮기지 못했습니다 — 다시 말씀해 주세요" };
-  }
-  const got: MarketOrders = orders;
-  if (!hasOps(got.ops) && !got.unresolved) {
-    return { ok: false, message: "옮길 지시가 없습니다 — 무엇을 할지 감독에게 물어보세요" };
-  }
-  return { ok: true, orders: got };
+  const user = [...buildMarketContext(state), ``, `@감독: ${message}`].join("\n");
+  return runOpsOrders(SPEC, specs, user, llm);
 }

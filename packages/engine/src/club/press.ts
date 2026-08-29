@@ -223,7 +223,7 @@ const LEADERSHIP_FACTOR_MIN = 0.7;
 /** 리더십이 최고까지 더해 주는 몫 — 0.7~1.3 */
 const LEADERSHIP_FACTOR_SPAN = 0.6;
 
-/** 리더십 계수 — 같은 말도 리더십이 자라면 라커룸에 더 크게 울린다 (skills.ts와 같은 자) */
+/** 리더십 계수 — 같은 말도 리더십이 자라면 라커룸에 더 크게 울린다 (commands/index.ts와 같은 자) */
 function leadershipFactor(state: GameState): number {
   return (
     LEADERSHIP_FACTOR_MIN +

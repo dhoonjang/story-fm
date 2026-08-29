@@ -13,7 +13,8 @@ import { shootoutTally } from "@story-fm/domain";
 import type { GameToolSpec } from "@story-fm/llm";
 import { buildToolSpecs, collectMatchMarks, sideTeamName } from "./gm-tools";
 import { buildSegmentMessage, buildShootoutMessage } from "./match-script";
-import { touchesPitch, type TacticOrders } from "./tactic-schema";
+import type { TacticOrders } from "./tactic-schema";
+import { unresolvedNote } from "./orders-ops";
 import { MATCH_ADVANCED, type GmToolCall } from "./gm-types";
 
 /**
@@ -36,8 +37,6 @@ export interface AppliedTacticOrders {
   notes: string[];
   /** 이번 구간에 일어난 일. 진행하지 않았으면 `null` */
   segment: string | null;
-  /** 판을 건드렸는가 — 중계에 패킷을 실을지 정한다 */
-  touched: boolean;
 }
 
 /**
@@ -55,10 +54,10 @@ export function applyTacticOrders(
   goals: GoalMark[],
   cards: CardMark[],
   /** 굴릴지는 매치 GM이 부른 도구가 정한다 — 없으면 의도의 `advance`를 읽는다 (agents.md §3) */
-  options: { roll?: boolean } = {},
+  options: { roll?: boolean; deferNegotiationIds?: ReadonlySet<string> } = {},
 ): AppliedTacticOrders {
   const specs = new Map<string, GameToolSpec>(
-    buildToolSpecs(state, calls).map((tool) => [tool.name, tool] as const),
+    buildToolSpecs(state, calls, options).map((tool) => [tool.name, tool] as const),
   );
   const notes: string[] = [];
   /** 도구 하나를 부르고 결과를 말로 모은다 — 실패도 감독에게 돌아간다 */
@@ -109,14 +108,14 @@ export function applyTacticOrders(
    * 성공이다.
    */
   if (intent.unresolved) {
-    notes.push(`판에 옮기지 못한 지시: "${intent.unresolved}"`);
+    notes.push(unresolvedNote(intent.unresolved));
   }
 
   const pending = state.pendingMatch;
   const nameOf = (id: string): string => playerName(state, id);
   const sideName = (side: "home" | "away"): string => sideTeamName(state, side);
   const shapeChanged = shapeOfTactics(state) !== shapeBefore;
-  const wants = options.roll ?? intent.advance === "segment";
+  const wants = options.roll === true;
   if (!pending || !wants || shapeChanged) {
     if (wants && shapeChanged) notes.push(SHAPE_CHANGED_NOTE);
     /**
@@ -134,7 +133,6 @@ export function applyTacticOrders(
             sideName,
           )
         : null,
-      touched: touchesPitch(intent),
     };
   }
 
@@ -147,7 +145,7 @@ export function applyTacticOrders(
     // 굴러간 한 발은 대본이 갖는다 — 여기 또 실으면 같은 사실이 두 번 간다
     if (!kicked.ok) {
       notes.push(kicked.message);
-      return { notes, segment: null, touched: touchesPitch(intent) };
+      return { notes, segment: null };
     }
     // 세계가 굴러간 기록이지 감독이 부른 도구가 아니다 — 칩으로 세우지 않는다
     calls.push({ name: MATCH_ADVANCED, summary: kicked.message, silent: true });
@@ -160,7 +158,6 @@ export function applyTacticOrders(
         nameOf,
         sideName,
       ),
-      touched: true,
     };
   }
 
@@ -168,7 +165,7 @@ export function applyTacticOrders(
   const step = advanceMatchTo(state, pending.ledger.minute + 1);
   if (!step.ok) {
     notes.push(step.message);
-    return { notes, segment: null, touched: touchesPitch(intent) };
+    return { notes, segment: null };
   }
   pending.lastSegment = { events: step.events, stop: step.stop ?? "flow" };
   collectMatchMarks(state, step.events, scoreBefore, goals, cards);
@@ -183,6 +180,5 @@ export function applyTacticOrders(
       ``,
       `[구간 뒤 장부] 스코어 ${ledger.score.home}:${ledger.score.away} · ${ledger.minute}′ · ${ledger.phase}`,
     ].join("\n"),
-    touched: true,
   };
 }

@@ -1885,7 +1885,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
       player.state.form = clampForm(player.state.form + formDeltaFromMatch(player, rating, result));
       /**
        * ⚠️ **전술 적응도는 여기서 올리지 않는다.** 경기가 그 선수에게 무엇을 남겼는지는
-       * 사건 목록을 읽는 평점 판정이 함께 정한다(`match-rater` → `applyMatchFamiliarity`).
+       * 사건 목록을 읽는 평점 판정이 함께 정한다(`finalize-match` → `applyMatchFamiliarity`).
        * 출전 시간은 그 판정의 기준값으로만 넘어간다.
        */
       gainMatchProficiency(state, player, seatOf(state, player), entry?.id ?? null);

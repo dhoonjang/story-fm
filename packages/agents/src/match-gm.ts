@@ -11,6 +11,7 @@ import { finalizeMatchTurn } from "./finalize-match";
 import { buildLedgerNote } from "./gm-input";
 import type { GmToolCall } from "./gm-types";
 import { applyTacticOrders } from "./tactic-apply";
+import { OrdersArgsSchema } from "./orders-ops";
 import { runTacticOrders } from "./tactic-orders";
 import { toToolSchema } from "./tool-schema";
 
@@ -20,7 +21,7 @@ export { buildSegmentMessage, buildShootoutMessage } from "./match-script";
  * 매치 GM — 경기 장면의 GM. 이 경기의 이력 전부를 쥔 채 감독의 말에 반응하고, 판을
  * 움직여야 할 때만 도구를 부른다 (agents.md §3). 사건은 코어가 xg로 확정하고 GM은
  * 그것을 중계·연출·대화로 옮긴다 — **경기를 바꿀 도구는 없다** (match.md). 도구 셋은
- * 코어를 부르는 손잡이이고 그 뒤에 해석·마감 에이전트가 선다(`MATCH_TOOLS`).
+ * 코어를 부르는 손잡이이고 그 뒤에 해석·마감 에이전트가 선다(`buildMatchTools`).
  * 프롬프트는 코드처럼 버전 관리한다 (AGENTS.md 6-5).
  */
 export const MATCH_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 경기 마스터다. 코어가 굴린 경기를 중계하고 벤치의 대화를 연출하며, 감독의 말에 따라 도구로 경기를 진행한다. 경기의 결과를 바꿀 도구는 없다.
@@ -82,16 +83,6 @@ export const TACTIC_ORDERS_TOOL = "tactic_orders";
 export const ADVANCE_MATCH_TOOL = "advance_match";
 export const FINALIZE_MATCH_TOOL = "finalize_match";
 
-/** 감독의 말 한 턴의 상한 — 원문 그대로 넘기는 자리라 오타를 막는 폭이다 */
-const ORDERS_MAX = 2000;
-
-const TacticOrdersSchema = z.object({
-  orders: z
-    .string()
-    .min(1)
-    .max(ORDERS_MAX)
-    .describe("감독이 이번 턴에 한 말 — 요약하지 않고 원문 그대로"),
-});
 const EmptySchema = z.object({});
 
 /**
@@ -107,7 +98,7 @@ export const MATCH_TOOL_DEFINITIONS: ReadonlyArray<{
     name: TACTIC_ORDERS_TOOL,
     description:
       "감독의 지시를 판에 건다 — 교체·전술·개인 지시·지역 플랜·공략·세트피스·팀토크·면담. 시계는 그대로다. 지시가 나올 때마다 부른다. 결과로 무엇이 걸렸고 무엇이 반려됐는지와, 그 지시로 다시 계산한 판(패킷)이 온다 — 다음 구간은 이 판으로 구른다.",
-    inputSchema: toToolSchema(TacticOrdersSchema),
+    inputSchema: toToolSchema(OrdersArgsSchema),
   },
   {
     name: ADVANCE_MATCH_TOOL,
@@ -143,7 +134,7 @@ function ledgerAfter(state: GameState, rolled: boolean): string {
  * 지시 → 판. 해석기가 두 번 실패하면 **반려로 답한다** — 턴은 이어지고 GM은 반려된
  * 대로 쓴다 (agents.md §3). 호출 실패(시한·혼잡)는 그대로 올라간다.
  */
-async function runOrdersTool(
+async function runTacticOrdersTool(
   state: GameState,
   ctx: MatchToolContext,
   orders: string,
@@ -186,9 +177,9 @@ export function buildMatchTools(
       {
         ...orders!,
         handle: async (input: unknown) => {
-          const p = TacticOrdersSchema.safeParse(input);
+          const p = OrdersArgsSchema.safeParse(input);
           if (!p.success) return { ok: false, message: "orders에 감독의 말을 그대로 적으세요" };
-          return runOrdersTool(state, ctx, p.data.orders);
+          return runTacticOrdersTool(state, ctx, p.data.orders);
         },
       },
       {

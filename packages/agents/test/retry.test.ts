@@ -99,10 +99,12 @@ describe("runTacticOrders — 의도를 받은 뒤의 실패", () => {
     ],
   } as unknown as GameState;
 
-  /** 첫 호출에서 `report_intent`를 부른 뒤 깨지는 모델 */
+  /** 첫 호출에서 `report_tactic_orders`를 부른 뒤 깨지는 모델 */
   const failsAfterReporting = (): GameLLM => ({
     runTurn: (req) => {
-      req.tools?.find((t) => t.name === "report_intent")?.handle({ advance: "segment" });
+      req.tools
+        ?.find((t) => t.name === "report_tactic_orders")
+        ?.handle({ tactics: { pressing: 4 } });
       return Promise.reject(new Error("Connection error"));
     },
   });
@@ -115,7 +117,7 @@ describe("runTacticOrders — 의도를 받은 뒤의 실패", () => {
     const result = await runTacticOrders(emptyState, "계속 갑시다", llm);
 
     expect(result.ok).toBe(true);
-    expect(result.ok && result.intent.advance).toBe("segment");
+    expect(result.ok && result.intent.tactics?.pressing).toBe(4);
     // 자국이 남은 뒤라 다시 부르지 않는다 — 두 번 부르면 의도가 두 번 적용된다
     expect(spy).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalled(); // 무슨 일이 있었는지는 사라지지 않는다
@@ -147,7 +149,7 @@ describe("runTacticOrders — 의도를 받은 뒤의 실패", () => {
     expect(result.ok).toBe(false);
     expect(spy).toHaveBeenCalledTimes(2);
     // 요청에 강제 도구가 실렸는지 — 프롬프트 문장만으로는 이 자리가 비어 있었다
-    expect(spy.mock.calls[0]![0].toolChoice).toEqual({ name: "report_intent" });
+    expect(spy.mock.calls[0]![0].toolChoice).toEqual({ name: "report_tactic_orders" });
     // 이 경기의 지난 턴이 장부 뒤·감독 발화 앞에 선다 — "걔 빼"가 가리킬 대상이 여기 있다
     const user = spy.mock.calls[0]![0].user;
     expect(user).toContain("<match_log>\n@중계: 브루노가 절뚝이며");
@@ -261,7 +263,7 @@ describe("결산 스키마의 수용 폭", () => {
     ],
   };
 
-  /** 종료 턴의 캐스터가 쥐는 결산 도구 — 상태를 만지기 전에 반려되는 입력만 넣는다 */
+  /** 경기를 마감하는 자리의 결산 호출 — 상태를 만지기 전에 반려되는 입력만 넣는다 */
   const settle = async (input: unknown) =>
     makeSettleTool(stubState, ratingBrief, () => undefined).handle(input);
 

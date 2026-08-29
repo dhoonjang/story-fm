@@ -11,9 +11,9 @@ import {
 } from "@story-fm/domain";
 import {
   buildLedgerNote,
-  buildOperatorMessage,
   buildRecentTurnsBlock,
   buildStandingBlock,
+  renderTurns,
 } from "./gm-input";
 import { TacticOrdersSchema, type TacticOrders } from "./tactic-schema";
 import { ModelOutputError, retryOnce, requireToolCall } from "./retry";
@@ -28,8 +28,8 @@ import { toToolSchema } from "./tool-schema";
  *
  * ## 도구를 들지 않는다
  *
- * 산출은 `report_intent` 하나로만 나온다. 그것은 도구가 아니라 **이 호출의 출력
- * 스키마**다(캐스터 종료 턴의 `settle_match`와 같은 자리). 상태를 바꾸는 것은 이
+ * 산출은 `report_tactic_orders` 하나로만 나온다. 그것은 도구가 아니라 **이 호출의 출력
+ * 스키마**다(경기 마감의 `settle_match`와 같은 자리). 상태를 바꾸는 것은 이
  * 객체를 받은 코어이고, 실재 확인(없는 선수·떠난 표적·우리 쪽 지점)도 거기서 한다.
  * 그래서 프롬프트는 코어가 이미 막는 것을 다시 지시하지 않는다.
  *
@@ -76,13 +76,7 @@ export const TACTIC_ORDERS_SYSTEM = `당신은 감독의 전술 지시를 구조
 어느 갈래에도 담기지 않은 말은 감독의 표현 그대로 unresolved에 남긴다.`;
 
 /** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
-const REPORT_INTENT_TOOL = "report_intent";
-
-/**
- * 중계 턴 본문 하나의 상한 — 지시를 해석하는 데 필요한 것은 누가 무슨 말을 했고 무슨
- * 일이 있었는가이지 중계의 문장 전부가 아니다.
- */
-const TACTIC_TURN_CHARS = 1200;
+const REPORT_TACTIC_TOOL = "report_tactic_orders";
 
 /**
  * `<match_log>` — **이 경기의 지난 턴 전부** (agents.md §3). 감독의 지시는 앞 턴의
@@ -114,17 +108,12 @@ export function buildMatchLogBlock(state: GameState): string {
     (t) => t.inMatch === true && (t.matchId === undefined || t.matchId === matchId),
   );
   if (turns.length === 0) return "";
-  const lines = turns.map((t) => {
-    if (t.role === "user") return `@감독: ${t.text}`;
-    if (t.role === "operator") return buildOperatorMessage(t.text);
-    return t.text.slice(0, TACTIC_TURN_CHARS);
-  });
-  return ["<match_log>", ...lines, "</match_log>"].join("\n");
+  return ["<match_log>", ...renderTurns(turns), "</match_log>"].join("\n");
 }
 
 function makeReportTool(onIntent: (intent: TacticOrders) => void): GameToolSpec {
   return {
-    name: REPORT_INTENT_TOOL,
+    name: REPORT_TACTIC_TOOL,
     description: "감독의 말을 구조화된 의도로 제출한다. 이 도구로만 답한다.",
     inputSchema: toToolSchema(TacticOrdersSchema),
     handle: (input: unknown) => {
@@ -142,7 +131,7 @@ function makeReportTool(onIntent: (intent: TacticOrders) => void): GameToolSpec 
 /**
  * 감독의 말 → 의도 하나.
  *
- * **산출이 나온 뒤의 실패는 실패가 아니다** (agents.md §3 ②). `report_intent`가 의도를
+ * **산출이 나온 뒤의 실패는 실패가 아니다** (agents.md §3 ②). `report_tactic_orders`가 의도를
  * 낸 다음 이어지는 요청이 깨져도 이 걸음의 산출은 이미 완성돼 있다 — 받은 의도로
  * 진행한다. 그래서 실패 판정은 오직 `intent`가 비었는가로 가른다.
  *
@@ -160,9 +149,9 @@ export async function runTacticOrders(
   const matchLog = buildMatchLogBlock(state);
   try {
     await retryOnce(
-      "orders:apply",
+      "tactic-orders",
       () =>
-        requireToolCall(REPORT_INTENT_TOOL, () => {
+        requireToolCall(REPORT_TACTIC_TOOL, () => {
           client ??= createGameLLM(agentConfig("tactic-orders"));
           return client.runTurn({
             system: TACTIC_ORDERS_SYSTEM,
@@ -177,7 +166,7 @@ export async function runTacticOrders(
               `@감독: ${message}`,
             ].join("\n"),
             tools: [makeReportTool((value) => (intent = value))],
-            toolChoice: { name: REPORT_INTENT_TOOL },
+            toolChoice: { name: REPORT_TACTIC_TOOL },
           });
         }),
       () => intent !== null,
@@ -194,10 +183,19 @@ export async function runTacticOrders(
      */
     if (intent === null && !(error instanceof ModelOutputError)) throw error;
     // 삼키는 것이 아니라 판정을 아래로 미룬다 — 무슨 일이 있었는지는 남아야 한다
-    console.warn("[orders:apply] 해석 호출이 실패했습니다:", error);
+    console.warn("[tactic-orders] 해석 호출이 실패했습니다:", error);
   }
   if (intent === null) {
     return { ok: false, message: "지시를 옮기지 못했습니다 — 다시 말씀해 주세요" };
   }
-  return { ok: true, intent };
+  /**
+   * **빈 의도는 성공이 아니다** — 모든 갈래가 선택이라 `report_tactic_orders({})`도 스키마를
+   * 지난다. 그대로 두면 아무것도 걸지 않고 "판에 걸었습니다"가 감독에게 돌아간다
+   * (다른 두 해석기의 `hasOps` 가드와 같은 자리).
+   */
+  const got: TacticOrders = intent;
+  if (Object.keys(got).length === 0) {
+    return { ok: false, message: "옮길 지시가 없습니다 — 무엇을 바꿀지 감독에게 물어보세요" };
+  }
+  return { ok: true, intent: got };
 }

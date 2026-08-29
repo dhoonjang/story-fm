@@ -68,7 +68,7 @@ packages/
                    #   core/(state, save, tick, dates, rng) world/(catalog, generation, wages)
                    #   competition/(calendar, league, cup, europe) match/(match flow, quick sim)
                    #   squad/(form, morale, injury, training, scouting) market/(transfers, negotiation)
-                   #   club/(finance, press) skills/(manager instructions) views/(screens, queries)
+                   #   club/(finance, press) commands/(manager instructions) views/(screens, queries)
                    #   data/(catalog, seed)
   agents/          # GM orchestrator · commentary · summary writers · mock GM
   llm/             # provider-neutral GameLLM + Anthropic/Gemini/OpenAI adapters

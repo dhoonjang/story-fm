@@ -8,7 +8,7 @@ import {
   TEAM_TALK_OCCASIONS,
   TRANSITION_MODES,
 } from "@story-fm/domain";
-import { TALK_OUTCOMES, TEAM_TALK_OUTCOMES } from "@story-fm/engine";
+import { MAX_EXPLOITS, TALK_OUTCOMES, TEAM_TALK_OUTCOMES } from "@story-fm/engine";
 
 /**
  * 경기 중 감독의 말 → **구조화된 의도 하나** (docs/llm/agents.md §3).
@@ -21,7 +21,7 @@ import { TALK_OUTCOMES, TEAM_TALK_OUTCOMES } from "@story-fm/engine";
  *
  * **숫자는 여기 없다.** 대화의 산출은 사기 델타가 아니라 판정 라벨(`outcome` +
  * `intensity`)이고, 변화량은 코어가 표와 리더십 계수로 계산해 한도로 자른다
- * (`engine/skills`의 `TALK_BASE`·`TEAM_TALK_BASE`). 전력에 닿는 값도 마찬가지다 —
+ * (`engine/commands`의 `TALK_BASE`·`TEAM_TALK_BASE`). 전력에 닿는 값도 마찬가지다 —
  * 여기 오는 것은 "무엇을 하라고 했나"까지이고 "얼마나 먹히나"는 시뮬이 정한다.
  *
  * **실재는 코어가 가린다.** 없는 선수, 그라운드를 떠난 표적, 우리 쪽 공략 지점은
@@ -111,14 +111,6 @@ const MatchPlanSchema = z.object({
   note: z.string().min(1).max(120),
 });
 
-/**
- * 시계를 미는가 — **감독이 그러라고 했을 때만 민다.**
- *
- * 대화만 건 턴에 조금이라도 흘려 주면 이기고 있을 때 말을 걸어 시간을 끄는 길이
- * 열린다. 공이 멈춰 있을 때 감독이 말하는 것은 공짜여야 한다 (agents.md §3).
- */
-export const ADVANCE_INTENTS = ["none", "segment"] as const;
-
 /** 평시의 판 — 선발 열한 명과 벤치, 1·2군 이동 (`set_lineup`의 인자 그대로) */
 const LineupSchema = z.object({
   starting: z.array(z.object({ playerId, position: z.string().min(1).optional() })).length(11),
@@ -148,7 +140,7 @@ export const TacticOrdersSchema = z.object({
   playerTactics: z.array(PlayerTacticSchema).max(11).optional(),
   plans: z.array(MatchPlanSchema).max(2).optional(),
   /** 노릴 표적의 id — 코어가 실재를 대조한다 (`exploits.ts`) */
-  exploits: z.array(z.string().min(1)).max(2).optional(),
+  exploits: z.array(z.string().min(1)).max(MAX_EXPLOITS).optional(),
   /**
    * **세트피스 키커** — 감독이 말한 자리만. `null`은 지정 해제다 (match.md §1.4).
    *
@@ -185,8 +177,6 @@ export const TacticOrdersSchema = z.object({
    * (match.md §2).
    */
   shootoutOrder: z.array(playerId).max(11).optional().describe("승부차기 키커 순서"),
-  /** 진행 여부 — 이제 매치 GM이 어느 도구를 불렀는가가 정한다. 없으면 진행하지 않는다 */
-  advance: z.enum(ADVANCE_INTENTS).optional(),
   /**
    * 옮기지 못한 말 — **비워 두지 않는다.**
    *
@@ -198,21 +188,3 @@ export const TacticOrdersSchema = z.object({
 });
 
 export type TacticOrders = z.infer<typeof TacticOrdersSchema>;
-
-/**
- * 판을 건드리는 의도가 하나라도 있는가 — 없으면 **대화 턴**이다.
- * 대화 턴은 패킷을 싣지 않고 시계도 옮기지 않는다 (agents.md §3).
- */
-export function touchesPitch(intent: TacticOrders): boolean {
-  return (
-    (intent.substitutions?.length ?? 0) > 0 ||
-    (intent.playerTactics?.length ?? 0) > 0 ||
-    (intent.plans?.length ?? 0) > 0 ||
-    (intent.exploits?.length ?? 0) > 0 ||
-    (intent.shootoutOrder?.length ?? 0) > 0 ||
-    intent.setPieceTakers !== undefined ||
-    intent.setPieceRoutine !== undefined ||
-    intent.tactics !== undefined ||
-    (intent.advance ?? "none") !== "none"
-  );
-}

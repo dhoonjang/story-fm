@@ -560,7 +560,7 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   남지 않는다.
 - **production에서는 아무 파일도 쓰지 않는다** — 켜지는 조건이 위의 하나뿐이고,
   `LLM_MODE=mock`처럼 기록할 호출이 없는 턴은 파일도 만들지 않는다.
-- **한 채팅 턴은 호출 하나가 아니다.** 평시 턴은 `gm` + 결산 raters, 경기 턴은
+- **한 채팅 턴은 호출 하나가 아니다.** 평시 턴은 `gm` + 훈련 결산, 경기 턴은
   `match-gm`과 그 도구 뒤의 `tactic-orders`·`finalize-match`가 함께 돈다. 그래서 키가 호출이
   아니라 턴이고, 한 턴을 열면 그 턴에 오간 왕복이 **순서대로 전부** 보인다.
 - **어느 호출이 이 턴의 것인가는 실행 문맥이 정한다**(`AsyncLocalStorage`). 시각이나

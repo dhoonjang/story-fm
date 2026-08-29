@@ -242,7 +242,7 @@ async function answerLetters(state: GameState, calls: GmToolCall[]): Promise<str
   return letters;
 }
 
-/** 실모드 — 일상은 GM, 경기 장면은 매치 캐스터 설정으로 라우팅 */
+/** 실모드 — 일상은 `gm`, 경기 장면은 `match-gm` 설정으로 라우팅 */
 async function runRealGmTurn(
   state: GameState,
   message: string,

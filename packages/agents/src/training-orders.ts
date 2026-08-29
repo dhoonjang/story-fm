@@ -1,9 +1,7 @@
-import { z } from "zod";
 import { playerName, squadView, type GameState } from "@story-fm/engine";
-import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import type { GameLLM, GameToolSpec } from "@story-fm/llm";
 import { buildRecentTurnsBlock } from "./gm-input";
-import { buildOpsSchema, hasOps, parseOps, type OpsInput } from "./orders-ops";
-import { ModelOutputError, retryOnce, requireToolCall } from "./retry";
+import { runOpsOrders, tagged, type OpsAgentSpec, type OpsOrders } from "./orders-ops";
 
 /**
  * 훈련·육성 지시 해석 — **감독의 말을 선수단 운영 명령의 인자로 옮긴다** (agents.md §1).
@@ -13,7 +11,8 @@ import { ModelOutputError, retryOnce, requireToolCall } from "./retry";
  * 방침·유스 후보)에서 움직인다. 한 해석기에 둘을 얹으면 경기 중에도 훈련 갈래가 스키마에
  * 서고, 전술 한마디에 훈련 목록이 딸려 바뀐다.
  *
- * 이 호출은 장면도 판정도 쓰지 않는다 — 낼 것은 `report_training_orders` 하나다.
+ * 호출의 뼈대는 시장 해석과 한 벌이다(`runOpsOrders`) — 여기 있는 것은 프롬프트와
+ * 명령 목록과 입력뿐이다.
  */
 export const TRAINING_ORDERS_SYSTEM = `당신은 감독의 훈련·육성 지시를 선수단 운영 명령의 인자로 옮기는 해석기다. 장면도 대사도 판정도 쓰지 않는다. 전술·라인업은 다른 해석기의 몫이다.
 
@@ -34,9 +33,6 @@ export const TRAINING_ORDERS_SYSTEM = `당신은 감독의 훈련·육성 지시
 # unresolved
 어느 명령에도 담기지 않은 말, 대상이 빠진 지시는 감독의 표현 그대로 unresolved에 남긴다.`;
 
-/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
-const REPORT_TOOL = "report_training_orders";
-
 /**
  * 해석기가 채우는 **선수단 운영 명령** — **적용 순서다.** 층·번호를 먼저 정하고 그 위에
  * 훈련과 육성을 얹는다: 갓 승격한 선수에게 그날의 개인 훈련이 걸릴 수 있다.
@@ -50,14 +46,17 @@ export const TRAINING_OPS: readonly string[] = [
   "set_training",
 ];
 
-const ReportSchema = z.object({
-  unresolved: z.string().min(1).max(200).optional(),
-});
+const SPEC: OpsAgentSpec = {
+  agent: "training-orders",
+  tool: "report_training_orders",
+  system: TRAINING_ORDERS_SYSTEM,
+  ops: TRAINING_OPS,
+  opsHint: "부를 명령과 그 인자 — 감독이 정한 것만",
+  unresolvedHint: "어느 명령에도 담기지 않은 말, 대상이 빠진 지시",
+  emptyHint: "옮길 지시가 없습니다 — 무엇을 훈련할지 감독에게 물어보세요",
+};
 
-export interface TrainingOrders {
-  ops: OpsInput;
-  unresolved?: string;
-}
+export type TrainingOrders = OpsOrders;
 
 /** `<squad_ops>` — 목록 교체 명령이 지금 목록을 알아야 한다 */
 export function buildSquadOpsBlock(state: GameState): string[] {
@@ -68,69 +67,35 @@ export function buildSquadOpsBlock(state: GameState): string[] {
     byMentor.set(m.mentorId, [...(byMentor.get(m.mentorId) ?? []), m.menteeId]);
   const focus = state.developmentFocus ?? [];
   const youth = (state.youthCandidates ?? []).filter((c) => c.teamId === state.userTeamId);
-  return [
-    `<squad_ops>`,
-    `멘토링: ${
-      byMentor.size > 0
-        ? [...byMentor].map(([m, ids]) => `${name(m)} → ${ids.map(name).join("·")}`).join(" / ")
-        : "없음"
-    }`,
-    `집중 육성: ${focus.length > 0 ? focus.map(name).join("·") : "없음"}`,
-    `2군 훈련 방침: ${state.reserveTraining ?? "balanced"}`,
-    ...(youth.length > 0
-      ? [
-          `유스 후보 (${youth[0]!.deadline}까지): ${youth
-            .map((c) => `${c.player.id} ${c.player.name}`)
-            .join(" · ")}`,
-        ]
-      : []),
-    `</squad_ops>`,
-  ];
+  return tagged(
+    "squad_ops",
+    [
+      `멘토링: ${
+        byMentor.size > 0
+          ? [...byMentor].map(([m, ids]) => `${name(m)} → ${ids.map(name).join("·")}`).join(" / ")
+          : "없음"
+      }`,
+      `집중 육성: ${focus.length > 0 ? focus.map(name).join("·") : "없음"}`,
+      `2군 훈련 방침: ${state.reserveTraining ?? "balanced"}`,
+      ...(youth.length > 0
+        ? [
+            `유스 후보 (${youth[0]!.deadline}까지): ${youth
+              .map((c) => `${c.player.id} ${c.player.name}`)
+              .join(" · ")}`,
+          ]
+        : []),
+    ].join("\n"),
+  );
 }
 
 /** 해석기의 입력 — 이번 주 일정·지금 걸린 목록·명단·지난 다섯 턴 */
 export function buildTrainingContext(state: GameState, schedule: string): string[] {
-  const squad = squadView(state, { level: "all" });
-  const recent = buildRecentTurnsBlock(state);
   return [
-    ...(schedule.trim().length > 0 ? [`<schedule>`, schedule, `</schedule>`] : []),
+    ...tagged("schedule", schedule),
     ...buildSquadOpsBlock(state),
-    `<squad>`,
-    squad.message,
-    `</squad>`,
-    ...(recent.length > 0 ? [`<recent_turns>`, recent, `</recent_turns>`] : []),
+    ...tagged("squad", squadView(state, { level: "all" }).message),
+    ...tagged("recent_turns", buildRecentTurnsBlock(state)),
   ];
-}
-
-function makeReportTool(
-  specs: ReadonlyMap<string, GameToolSpec>,
-  onReport: (orders: TrainingOrders) => void,
-): GameToolSpec {
-  return {
-    name: REPORT_TOOL,
-    description: "감독의 말을 선수단 운영 명령의 인자로 제출한다. 이 도구로만 답한다.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        ops: buildOpsSchema(specs, TRAINING_OPS, "부를 명령과 그 인자 — 감독이 정한 것만"),
-        unresolved: {
-          type: "string",
-          minLength: 1,
-          maxLength: 200,
-          description: "어느 명령에도 담기지 않은 말, 대상이 빠진 지시",
-        },
-      },
-    },
-    handle: (input: unknown) => {
-      const parsed = ReportSchema.safeParse(input);
-      if (!parsed.success) {
-        return { ok: false, message: `형식이 맞지 않습니다 — ${parsed.error.issues[0]?.message}` };
-      }
-      const ops = parseOps((input as { ops?: unknown }).ops, TRAINING_OPS);
-      onReport({ ops, ...(parsed.data.unresolved ? { unresolved: parsed.data.unresolved } : {}) });
-      return { ok: true, message: "지시를 받았습니다" };
-    },
-  };
 }
 
 /**
@@ -144,34 +109,6 @@ export async function runTrainingOrders(
   message: string,
   llm?: GameLLM,
 ): Promise<{ ok: true; orders: TrainingOrders } | { ok: false; message: string }> {
-  let orders: TrainingOrders | null = null;
-  let client = llm;
-  try {
-    await retryOnce(
-      "training:orders",
-      () =>
-        requireToolCall(REPORT_TOOL, () => {
-          client ??= createGameLLM(agentConfig("training-orders"));
-          return client.runTurn({
-            system: TRAINING_ORDERS_SYSTEM,
-            history: [],
-            user: [...buildTrainingContext(state, schedule), ``, `@감독: ${message}`].join("\n"),
-            tools: [makeReportTool(specs, (value) => (orders = value))],
-            toolChoice: { name: REPORT_TOOL },
-          });
-        }),
-      () => orders !== null,
-    );
-  } catch (error) {
-    if (orders === null && !(error instanceof ModelOutputError)) throw error;
-    console.warn("[training:orders] 해석 호출이 실패했습니다:", error);
-  }
-  if (orders === null) {
-    return { ok: false, message: "지시를 옮기지 못했습니다 — 다시 말씀해 주세요" };
-  }
-  const got: TrainingOrders = orders;
-  if (!hasOps(got.ops) && !got.unresolved) {
-    return { ok: false, message: "옮길 지시가 없습니다 — 무엇을 훈련할지 감독에게 물어보세요" };
-  }
-  return { ok: true, orders: got };
+  const user = [...buildTrainingContext(state, schedule), ``, `@감독: ${message}`].join("\n");
+  return runOpsOrders(SPEC, specs, user, llm);
 }

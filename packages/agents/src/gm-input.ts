@@ -1435,16 +1435,22 @@ export const RECENT_TURNS = 5;
 /** 지난 턴 본문 하나의 상한 — 해석에 필요한 것은 누가 무슨 말을 했는가지 장면 전부가 아니다 */
 const RECENT_TURN_CHARS = 1200;
 
-/** `<recent_turns>`의 본문 — 평시의 지난 턴들. 감독 턴은 `@감독:`, 손잡이 턴은 오퍼레이터 봉투 */
+/**
+ * 턴 목록을 해석기가 읽는 줄로 — **평시의 `<recent_turns>`와 경기의 `<match_log>`가 같은
+ * 함수를 쓴다.** 감독 턴은 `@감독:` 봉투, 손잡이 턴은 오퍼레이터 봉투, 모델 턴은 본문을
+ * 잘라서. 두 벌이면 한쪽만 고쳐져 두 해석기가 다른 말을 읽는다.
+ */
+export function renderTurns(turns: readonly ChatTurn[]): string[] {
+  return turns.map((t) => {
+    if (t.role === "user") return `@감독: ${t.text}`;
+    if (t.role === "operator") return buildOperatorMessage(t.text);
+    return t.text.slice(0, RECENT_TURN_CHARS);
+  });
+}
+
+/** `<recent_turns>`의 본문 — 평시의 지난 턴들 */
 export function buildRecentTurnsBlock(state: GameState, count = RECENT_TURNS): string {
-  const turns = state.chat.filter((t) => t.inMatch !== true).slice(-count);
-  return turns
-    .map((t) => {
-      if (t.role === "user") return `@감독: ${t.text}`;
-      if (t.role === "operator") return buildOperatorMessage(t.text);
-      return t.text.slice(0, RECENT_TURN_CHARS);
-    })
-    .join("\n");
+  return renderTurns(state.chat.filter((t) => t.inMatch !== true).slice(-count)).join("\n");
 }
 
 /**

@@ -7,6 +7,8 @@ import {
   REPORT_DIGEST_INPUT,
   REPORT_DIGEST_TOOL,
   REPORT_TRAINING_INPUT,
+  REPORT_ONBOARDING_INPUT,
+  REPORT_ONBOARDING_TOOL,
   REPORT_TRAINING_TOOL,
   TacticOrdersSchema,
   SETTLE_MATCH_DESCRIPTION,
@@ -369,11 +371,12 @@ function walk(node: unknown, name = ""): Array<[string, Record<string, unknown>]
 }
 
 /**
- * 출력 스키마 셋은 GM 도구가 아니라 저마다의 호출이 강제하는 도구 하나다 — 카탈로그에도
+ * 출력 스키마 넷은 GM 도구가 아니라 저마다의 호출이 강제하는 도구 하나다 — 카탈로그에도
  * `buildGmTools`에도 서지 않는다. 그래도 모델이 받는 입력이라 계약은 같다.
  */
 const RATER_TOOLS = [
   { name: SETTLE_MATCH_TOOL, inputSchema: SETTLE_MATCH_INPUT },
+  { name: REPORT_ONBOARDING_TOOL, inputSchema: REPORT_ONBOARDING_INPUT },
   { name: REPORT_TRAINING_TOOL, inputSchema: REPORT_TRAINING_INPUT },
   { name: REPORT_DIGEST_TOOL, inputSchema: REPORT_DIGEST_INPUT },
 ];

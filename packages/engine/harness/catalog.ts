@@ -129,7 +129,7 @@ export const ASSIST_RATE = defineHarness({
   bands: [
     { metric: "골", role: "measure", unit: "count", why: "골이 없으면 시험이 성립하지 않는다" },
     { metric: "도움", role: "measure", unit: "count", why: "빈 칸이 아닌 도움만 센다" },
-    { metric: "골 대비 도움 비율", role: "guard", min: 0.35, unit: "ratio", why: "설계값 68%(`ASSIST_RATE`)가 만드는 분포. 표본이 작아 하한만 넉넉히 잡는다 — 도움이 사라지는 회귀는 `assist-record.test.ts`가 0이 아님으로 못 박는다" },
+    { metric: "골 대비 도움 비율", role: "guard", min: 0.35, unit: "ratio", why: "설계값 68%(`ASSIST_RATE`)가 만드는 분포. 표본이 작아 하한만 넉넉히 잡는다 — 도움이 사라지는 회귀는 `ratings.test.ts`가 0이 아님으로 못 박는다" },
   ],
 });
 

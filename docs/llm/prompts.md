@@ -124,7 +124,7 @@
 (agents.md §1). 매치 GM이 쥐는 해석기는 `tactic-orders` 하나다. 경기 중에는 매치
 GM이 **경기 도구 셋**(`tactic_orders` · `advance_match` · `finalize_match`)만 쥔다 — 지시는
 그 도구 뒤의 해석이 JSON 하나로 옮기고 코어가 같은 명령 함수를 부른다
-([agents.md](./agents.md) §3). 경기 도구 셋은 이 카탈로그에 없다(`MATCH_TOOLS` —
+([agents.md](./agents.md) §3). 경기 도구 셋은 이 카탈로그에 없다(`buildMatchTools` —
 `match-gm.ts`). 같은 순간에 함께 정해지는 것들이 갈려 있으면 해석기가 하나를 빠뜨린다 —
 라인업은 1·2군 이동까지 한 요청(`set_lineup`의 `squadLevels`), 한 선수의 자리·역할·개인
 지시는 `set_player_tactic` 하나, 오퍼는 방향을 인자로(`send_offer` kind=buy/sell/loan/loan_out),
@@ -404,7 +404,7 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
 | 시스템 프롬프트 (`GM_SYSTEM`)           | 도구와 무관하게 매 턴 서는 것 — 입력의 지도 · 권한 경계와 인물 · 장면의 속도 · 지시를 받았을 때 · 출력 문법 · 말                                                                |
 | 도구 설명 (`SKILL_CATALOG`)             | 그 도구를 **언제 부르고, 인자를 어떻게 채우고, 결과를 장면에 어떻게 옮기는가** — 인자의 낱말은 코어 표에서 만든다                                                               |
 | 매치 GM 프롬프트 (`MATCH_GM_SYSTEM`)    | 입력의 지도 · 사건을 옮기는 법 · 한 턴 · 출력 문법 · 말. 어느 도구를 언제 부르는지는 경기 도구 셋의 설명이 갖는다                                                               |
-| 경기 도구 셋 (`MATCH_TOOLS`)            | `tactic_orders`(지시 → 판·패킷) · `advance_match`(구간 하나 — 상대 벤치가 먼저 움직인다) · `finalize_match` — 언제 부르고 무엇이 돌아오는가. 감독의 말은 `orders`에 원문 그대로 |
+| 경기 도구 셋 (`buildMatchTools`)        | `tactic_orders`(지시 → 판·패킷) · `advance_match`(구간 하나 — 상대 벤치가 먼저 움직인다) · `finalize_match` — 언제 부르고 무엇이 돌아오는가. 감독의 말은 `orders`에 원문 그대로 |
 | 마감 프롬프트 (`FINALIZE_MATCH_SYSTEM`) | 결산의 화자 · `<commentary>`·`<settlement>`를 읽는 법 · 마무리 중계의 길이                                                                                                      |
 | 해석 프롬프트 (`TACTIC_ORDERS_SYSTEM`)  | 경기 중 필요한 판정·해석 근거 전부 — 전술 6축과 갈래 넷, 세트피스 두 축의 낱말까지. 도구 표면이 0이라(§2) 도구 설명이 실리지 않는다                                             |
 | 훈련 결산 · 압축                        | 무엇을 보는가 · 규칙. 폭과 인원은 코어 상수에서 읽는다 (agents.md §4)                                                                                                           |
@@ -701,8 +701,8 @@ prompt-regression`, 밴드는 서술자가 쥔다
 | 무엇                                                                         | 어디                                                        |
 | ---------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | 평시 시스템 프롬프트 (`GM_SYSTEM`)                                           | `packages/agents/src/gm-prompt.ts`                          |
-| 지시 해석 프롬프트·스키마 (`TACTIC_ORDERS_SYSTEM`)                           | `packages/agents/src/tactic-orders.ts` · `orders-schema.ts` |
-| 매치 GM 프롬프트·경기 도구 셋 (`MATCH_GM_SYSTEM` · `MATCH_TOOLS`)            | `packages/agents/src/match-gm.ts`                           |
+| 지시 해석 프롬프트·스키마 (`TACTIC_ORDERS_SYSTEM`)                           | `packages/agents/src/tactic-orders.ts` · `tactic-schema.ts` |
+| 매치 GM 프롬프트·경기 도구 셋 (`MATCH_GM_SYSTEM` · `buildMatchTools`)        | `packages/agents/src/match-gm.ts`                           |
 | 마감 프롬프트 (`FINALIZE_MATCH_SYSTEM`)                                      | `packages/agents/src/finalize-match.ts`                     |
 | 훈련 결산 프롬프트                                                           | `packages/agents/src/training-rater.ts`                     |
 | 경기 결산 도구 설명 (`settle_match`)                                         | `packages/agents/src/finalize-match.ts`                     |
