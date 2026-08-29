@@ -28,7 +28,9 @@ export const PANEL_OF: Record<string, PanelKey> = {
   set_lineup: "스쿼드",
   set_squad_level: "스쿼드",
   set_tactics: "스쿼드",
-  apply_orders: "스쿼드",
+  tactic_orders: "스쿼드",
+  // 훈련 지시 자체는 기록되지 않는다 — 뒤의 명령들이 달력과 스쿼드에 선다
+  training_orders: "달력",
   // 이적·재정 지시 자체는 기록되지 않는다 — 뒤의 명령들이 카드와 말풍선을 세운다
   market_orders: "재정",
   set_player_tactic: "스쿼드",
@@ -90,7 +92,7 @@ export const PANEL_OF: Record<string, PanelKey> = {
  * 이 목록에도 `PANEL_OF`에도 없는 조작형 호출은 **화면에 서는 길이 없다** —
  * 그런 호출이 생기면 `skill-surface.test.ts`가 실패해 결정을 요구한다.
  */
-export const CARD_SKILLS: ReadonlySet<string> = new Set([
+export const CARD_CALLS: ReadonlySet<string> = new Set([
   "send_offer",
   "respond_offer",
   // 테이블의 답이 오퍼를 판정하면 그 카드가 선다 — 말만 오간 턴은 카드 없이 지나간다
@@ -107,7 +109,7 @@ export const CARD_SKILLS: ReadonlySet<string> = new Set([
  *
  * `label`(무엇에 대한 것) · `text`(바뀐 값) · `note`(그 값의 갈래). 셋을 한 문자열로
  * 붙여 세우면 값도 갈래도 같은 굵기로 눌려 정작 무엇이 달라졌는지가 안 읽힌다 —
- * 그래서 코어가 나눠 내고(`SkillBriefItem`) 화면은 자리마다 톤을 달리 준다.
+ * 그래서 코어가 나눠 내고(`CommandBriefItem`) 화면은 자리마다 톤을 달리 준다.
  *
  * 갈래(`skill`)는 아이콘이 세우고, 여러 항목 중 **첫 줄에만** 머리줄(`head`)이 붙는다.
  */

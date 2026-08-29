@@ -8,7 +8,7 @@ import type { TurnTraceCall, TurnUsage } from "@story-fm/llm";
  * 문구도 픽션 밖의 말투를 쓴다.
  *
  * 한 채팅 턴은 LLM 호출 하나가 아니다 — 평시 턴은 `gm` + 결산 rater, 경기 턴은
- * `apply-orders`·`match-gm`가 함께 돈다(종료 턴은 캐스터가 결산 왕복을 더 갖는다). 그 왕복 전부가
+ * `tactic-orders`·`match-gm`가 함께 돈다(종료 턴은 캐스터가 결산 왕복을 더 갖는다). 그 왕복 전부가
  * 라우트가 준 **순서 그대로** 선다 (docs/llm/models.md §5).
  */
 

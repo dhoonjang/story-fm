@@ -1,4 +1,4 @@
-import type { MarketSkillResult } from "../commands";
+import type { MarketCommandResult } from "../commands";
 import type { GamePlayer, Negotiation, NegotiationVerdict, SquadStatus } from "@story-fm/domain";
 import {
   MAX_PAYMENT_YEARS,
@@ -352,7 +352,7 @@ export function settleCounterparty(
   state: GameState,
   anchor: CounterpartyAnchor,
   ruling?: CounterpartyRulingInput,
-): { input: CounterpartyRuling; result: MarketSkillResult } {
+): { input: CounterpartyRuling; result: MarketCommandResult } {
   const input = clampCounterpartyRuling(anchor, ruling);
   return { input, result: respondOffer(state, input) };
 }

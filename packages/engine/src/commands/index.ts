@@ -183,8 +183,8 @@ import {
   FAMILIARITY_BASELINE,
   MATCHDAY_BENCH,
   type GameState,
-  type SkillBrief,
-  type SkillBriefItem,
+  type CommandBrief,
+  type CommandBriefItem,
 } from "../core/state";
 import { pickAnyPlayer, pickOurPlayer, pickPlayerAmong } from "../core/player-ref";
 import { briefNames, deltaItems, item, signed } from "./brief";
@@ -195,12 +195,12 @@ import { briefNames, deltaItems, item, signed } from "./brief";
  * (overview §7). 감독 능력치가 계수로 들어간다 (career.md §2).
  */
 
-export interface SkillResult {
+export interface CommandResult {
   ok: boolean;
   /** LLM에게 돌려주는 줄 — 모델이 읽을 것이므로 길어도 된다 */
   message: string;
   /**
-   * **화면이 항목으로 세우는 요약** (`SkillBrief`) — 말풍선과 칩이 이걸 읽는다.
+   * **화면이 항목으로 세우는 요약** (`CommandBrief`) — 말풍선과 칩이 이걸 읽는다.
    *
    * 손댄 것을 다 이어 붙인 `message`를 화면이 되쪼개면 한 줄이 글자 벽이 된다.
    *
@@ -209,10 +209,10 @@ export interface SkillResult {
    * 화면이 그 줄을 갈라 세우면 코어가 쓴 문장의 첫 줄이 곧 UI가 된다
    * (→ docs/data/game-state.md §3.6).
    */
-  brief?: SkillBrief;
+  brief?: CommandBrief;
   /**
    * 화면이 카드로 그릴 **구조화된 결과** — 채우는 호출만 채운다.
-   * 넣지 않는 것이 기본이고, 시장 명령만은 `MarketSkillResult`로 강제된다.
+   * 넣지 않는 것이 기본이고, 시장 명령만은 `MarketCommandResult`로 강제된다.
    */
   payload?: unknown;
   /** 결이 좋은가 — 대화형 스킬의 칩 색 (펼치지 않아도 알게) */
@@ -230,16 +230,16 @@ export interface SkillResult {
 /**
  * **시장 명령의 반환 계약** — 성공했으면 카드가 반드시 있다.
  *
- * 협상·스카우트는 갈 장부가 없어서 채팅 카드가 유일한 자리다(`CARD_SKILLS`).
+ * 협상·스카우트는 갈 장부가 없어서 채팅 카드가 유일한 자리다(`CARD_CALLS`).
  * `payload`를 optional로 풀면 빠뜨려도 컴파일이 통과하고, 화면이 조용히 칩으로
  * 폴백해 **금액·확률·기한이 줄글에 접힌 채** 지나간다 — 성공 경로에 카드가
  * 없으면 타입이 막아야 한다.
  *
  * 실패(`ok: false`)에는 카드가 없다 — 반려 메시지가 곧 결과다.
  */
-export type MarketSkillResult =
+export type MarketCommandResult =
   | { ok: true; payload: MarketCard; message: string; tone?: "good" | "bad" }
-  /** 실패 분기의 `payload?: undefined`는 `SkillResult`와 구조를 맞추기 위한 것이다 */
+  /** 실패 분기의 `payload?: undefined`는 `CommandResult`와 구조를 맞추기 위한 것이다 */
   | { ok: false; payload?: undefined; message: string; tone?: "good" | "bad" };
 
 // ── 선수 지목 ───────────────────────────────────────────
@@ -266,7 +266,7 @@ const alreadyAtLevel = (player: GamePlayer, level: "first" | "reserve"): string 
 export function setSquadLevel(
   state: GameState,
   input: { playerId: string; level: "first" | "reserve" },
-): SkillResult {
+): CommandResult {
   const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
@@ -399,7 +399,7 @@ function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | 
 export function setSquadLevels(
   state: GameState,
   input: { moves: Array<{ playerId: string; level: "first" | "reserve" }> },
-): SkillResult {
+): CommandResult {
   if (input.moves.length === 0) return { ok: false, message: "누구를 옮길지 알려주세요" };
 
   // ── 검증 ───────────────────────────────────────────────
@@ -459,7 +459,7 @@ export function setSquadLevels(
     ...already.map((p) => alreadyAtLevel(p, asked.get(p.id)!)),
   ];
 
-  const items: SkillBriefItem[] = [];
+  const items: CommandBriefItem[] = [];
   if (promoting.length > 0) {
     items.push(item({ label: "1군 승격", text: briefNames(promoting.map((p) => p.name)) }));
   }
@@ -499,7 +499,7 @@ function matchdaySquadFloor(): string {
 export function setDevelopmentFocus(
   state: GameState,
   input: { playerIds?: string[] },
-): SkillResult {
+): CommandResult {
   const players: GamePlayer[] = [];
   for (const id of input.playerIds ?? []) {
     const pick = pickOurPlayer(state, id);
@@ -574,7 +574,7 @@ function menteeNote(state: GameState, mentor: GamePlayer, mentee: GamePlayer): s
 export function setMentor(
   state: GameState,
   input: { mentorId: string; menteeIds?: string[] },
-): SkillResult {
+): CommandResult {
   /**
    * **장부를 먼저 추린다** — 명령과 월간 성장이 같은 문을 지나야 어느 쪽이 먼저 와도
    * 명단이 같다 (`pruneDevelopmentFocus`가 그런 것과 같은 이유). 나이를 넘긴 멘티가
@@ -665,7 +665,7 @@ export function setMentor(
     };
   }
 
-  const items: SkillBriefItem[] = [
+  const items: CommandBriefItem[] = [
     item({ label: "멘토", text: mentor.name, note: mentorNote(state, mentor) }),
     ...mentees.map((mentee) =>
       item({ label: "멘티", text: mentee.name, note: menteeNote(state, mentor, mentee) }),
@@ -696,7 +696,7 @@ export function setMentor(
 export function setReserveTraining(
   state: GameState,
   input: { policy: ReserveTrainingPolicy },
-): SkillResult {
+): CommandResult {
   const { policy } = input;
   const title = reserveTrainingTitle(policy);
   const current = state.reserveTraining ?? "balanced";
@@ -749,7 +749,7 @@ export function setReserveTraining(
  * ⚠️ **소프트락 방지는 감독의 결정 밖이다** — 고른 뒤에도 포지션군이 최소 인원
  * 아래면 코어가 남은 후보에서 그 자리를 채우고, 무엇을 채웠는지 답에 적는다.
  */
-export function signYouth(state: GameState, input: { playerIds?: string[] }): SkillResult {
+export function signYouth(state: GameState, input: { playerIds?: string[] }): CommandResult {
   const rows = ourYouthCandidates(state);
   if (rows.length === 0) {
     return {
@@ -1006,7 +1006,7 @@ function receptivityPiece(
   tier: Receptivity,
   asked: string,
   stood: string,
-): { text: string; item: SkillBriefItem } | null {
+): { text: string; item: CommandBriefItem } | null {
   if (asked === stood) return null;
   return {
     text: ` (수용성 ${RECEPTIVITY_KO[tier]} — ${asked}은 ${stood}으로)`,
@@ -1052,7 +1052,7 @@ export function applyTeamTalk(
     /** 잔향 — 그 말을 들은 선수에게 남는 심경 한 문장, 최대 `TEAM_TALK_MOODS` (people.md §5) */
     moods?: MoodNoteSubmission[];
   },
-): SkillResult {
+): CommandResult {
   const shout = input.occasion === "shout";
   /**
    * **외침을 세는 것은 하루가 아니라 경기다** (career.md §2). 라커룸 밖의 말이라
@@ -1217,7 +1217,7 @@ export interface PromiseInput {
 /** 장부에 선 약속 한 조각 — 감독이 읽는 줄과 말풍선 항목 */
 interface PromisePiece {
   text: string;
-  item: SkillBriefItem;
+  item: CommandBriefItem;
 }
 
 /**
@@ -1264,7 +1264,7 @@ export function applyTalkToPlayer(
     /** 잔향 — 이 면담이 그 선수에게 남긴 심경 한 문장 (people.md §5) */
     mood?: MoodLine;
   },
-): SkillResult {
+): CommandResult {
   const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
@@ -1463,7 +1463,7 @@ function lineupChanges(
   state: GameState,
   prev: ReadonlyMap<string, TacticAssignment>,
   next: readonly TacticAssignment[],
-): { notes: string[]; items: SkillBriefItem[] } {
+): { notes: string[]; items: CommandBriefItem[] } {
   const nameOf = (id: string) => playerName(state, id);
   const pointOf = (a: TacticAssignment) => a.point ?? anchorOf(a.position);
   const sideOf = (list: readonly TacticAssignment[]): LineupSide => {
@@ -1485,7 +1485,7 @@ function lineupChanges(
   }
 
   const notes: string[] = [];
-  const items: SkillBriefItem[] = [];
+  const items: CommandBriefItem[] = [];
   if (diff.shapeChanged) {
     const move = `${diff.shapeBefore} → ${diff.shapeAfter}`;
     notes.push(`포메이션 ${move}`);
@@ -1551,7 +1551,7 @@ export function setLineup(
      */
     squadLevels?: Array<{ playerId: string; level: "first" | "reserve" }>;
   },
-): SkillResult {
+): CommandResult {
   const tactics = userTactics(state);
   const norm = (x: string | LineupSlotInput): LineupSlotInput =>
     typeof x === "string" ? { playerId: x } : x;
@@ -1974,13 +1974,13 @@ export function setPlayerTactic(
       intensity?: DirectiveIntensity;
     };
   },
-): SkillResult {
+): CommandResult {
   const notes: string[] = [];
   /** 항목은 하위 명령이 각자 낸 것을 잇는다 — 세 조각이 한 줄로 엉키지 않게 */
-  const items: SkillBriefItem[] = [];
+  const items: CommandBriefItem[] = [];
   /** 이미 바꾼 것이 있는가 — 있으면 뒤따르는 반려는 되돌리지 않고 결과로 적는다 */
   let changed = false;
-  const take = (res: SkillResult) => {
+  const take = (res: CommandResult) => {
     notes.push(res.message);
     items.push(...(res.brief?.items ?? []));
     if (res.unchanged !== true) changed = true;
@@ -1993,7 +1993,7 @@ export function setPlayerTactic(
    */
   const rejected: string[] = [];
   /** 반려를 어디로 보낼지 — 통째로 반려면 그 결과를, 결과에 실을 것이면 null을 낸다 */
-  const reject = (res: SkillResult): SkillResult | null => {
+  const reject = (res: CommandResult): CommandResult | null => {
     if (!changed) return res;
     rejected.push(res.message);
     return null;
@@ -2060,7 +2060,7 @@ export function movePlayerSlot(
     /** 이름으로 부르는 이동 — 말로 지시하는 쪽(LLM)이 쓴다 */
     move?: { lane?: "left" | "center" | "right"; band?: "defense" | "midfield" | "attack" };
   },
-): SkillResult {
+): CommandResult {
   const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
@@ -2175,7 +2175,7 @@ export function setPlayerTraining(
     rest?: { until: string };
     clear?: boolean;
   },
-): SkillResult {
+): CommandResult {
   const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
@@ -2241,7 +2241,7 @@ export function setPlayerTraining(
   else state.playerTraining.push(program);
 
   const parts: string[] = [];
-  const items: SkillBriefItem[] = [];
+  const items: CommandBriefItem[] = [];
   if (axis) {
     const ko = AXIS_KO[axis];
     parts.push(ko);
@@ -2283,7 +2283,7 @@ export function setPlayerTraining(
 export function setPlayerRole(
   state: GameState,
   input: { playerId: string; role: string },
-): SkillResult {
+): CommandResult {
   const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
@@ -2357,7 +2357,7 @@ export function setPlayerRole(
 export function setPlayerPosition(
   state: GameState,
   input: { playerId: string; position: string },
-): SkillResult {
+): CommandResult {
   const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
@@ -2402,11 +2402,11 @@ export function setPlayerPosition(
 export function setSetPieceTakers(
   state: GameState,
   input: Partial<Record<SetPieceRole, string | null>>,
-): SkillResult {
+): CommandResult {
   const tactics = userTactics(state);
   const next: SetPieceTakers = { ...(tactics.setPieceTakers ?? {}) };
   const notes: string[] = [];
-  const items: SkillBriefItem[] = [];
+  const items: CommandBriefItem[] = [];
   let changed = false;
   for (const role of SET_PIECE_ROLES) {
     const ref = input[role];
@@ -2450,11 +2450,11 @@ export function setSetPieceTakers(
 export function setSetPieceRoutine(
   state: GameState,
   input: Partial<Record<SetPieceRoutineKey, SetPieceRoutineLevel | null>>,
-): SkillResult {
+): CommandResult {
   const tactics = userTactics(state);
   const next: SetPieceRoutine = { ...(tactics.setPieceRoutine ?? {}) };
   const notes: string[] = [];
-  const items: SkillBriefItem[] = [];
+  const items: CommandBriefItem[] = [];
   let changed = false;
   for (const key of SET_PIECE_ROUTINE_KEYS) {
     const want = input[key];
@@ -2502,8 +2502,8 @@ function armbandNote(state: GameState, player: GamePlayer): string {
 export function setCaptain(
   state: GameState,
   input: { playerId?: string | null; vice?: string | null },
-): SkillResult {
-  const items: SkillBriefItem[] = [];
+): CommandResult {
+  const items: CommandBriefItem[] = [];
   const notes: string[] = [];
 
   if (input.playerId !== undefined && input.playerId !== null) {
@@ -2603,7 +2603,7 @@ const NUMBER_INHERIT_MORALE = 4;
 export function setSquadNumber(
   state: GameState,
   input: { playerId: string; number: number; take?: boolean },
-): SkillResult {
+): CommandResult {
   const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
@@ -2620,7 +2620,7 @@ export function setSquadNumber(
   const notes: string[] = [
     from === null ? `${player.name} ${number}번` : `${player.name} ${from}번 → ${number}번`,
   ];
-  const items: SkillBriefItem[] = [
+  const items: CommandBriefItem[] = [
     item({
       label: "등번호",
       text: `${number}번`,
@@ -2902,7 +2902,7 @@ function retuneFamiliarity(
  * 스키마가 검증한다 (→ docs/simulation/match.md §1.2). 주지 않은 필드는 지금 값을
  * 그대로 잇고, `null`은 그 갈래의 지시를 푸는 자리다.
  */
-export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillResult {
+export function setTactics(state: GameState, spec: Partial<TacticsSpec>): CommandResult {
   const tactics = userTactics(state);
   /**
    * 포메이션 이름은 **좌표의 파생값**이라 여기서 갈아 끼우지 않는다 (`shapeOf`).
@@ -3024,7 +3024,7 @@ export function setPlayerInstruction(
     /** 얼마나 세게 — 없으면 `normal`이라 세기를 안 보내는 호출이 그대로 선다 */
     intensity?: DirectiveIntensity;
   },
-): SkillResult {
+): CommandResult {
   const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
@@ -3326,14 +3326,14 @@ const REPEAT_WEEKS_DEFAULT = 6;
 const REPEAT_WEEKS_MIN = 1;
 const REPEAT_WEEKS_MAX = 20;
 
-export function setTraining(state: GameState, input: TrainingPlanInput): SkillResult {
+export function setTraining(state: GameState, input: TrainingPlanInput): CommandResult {
   const applied: string[] = [];
   /**
    * 말풍선 항목 — **건수와 갈래까지만.** 세션 하나하나를 적으면(월·수·금이면 셋)
    * 알림이 달력 화면을 옮겨 적는 자리가 된다. 조기 소집 대가·휴가 건너뜀은
    * `message`에 남아 GM이 장면으로 푼다.
    */
-  const items: SkillBriefItem[] = [];
+  const items: CommandBriefItem[] = [];
   const sessions = input.sessions ?? [];
   const repeats = input.repeatWeekly ?? [];
 
@@ -3529,7 +3529,7 @@ export interface ClearTrainingInput {
   rest?: boolean;
 }
 
-export function clearTraining(state: GameState, input: ClearTrainingInput): SkillResult {
+export function clearTraining(state: GameState, input: ClearTrainingInput): CommandResult {
   const from = input.from ?? state.date;
   const to = input.to ?? from;
   if (!DATE_RE.test(from)) return { ok: false, message: `날짜 형식이 잘못됨: ${from}` };
@@ -3660,7 +3660,7 @@ export function recordIncident(
     /** 잔향 — 당사자에게 남는 심경 문장. `playerId`는 이름일 수 있다 */
     moods?: MoodNoteSubmission[];
   },
-): SkillResult {
+): CommandResult {
   const todayCount = state.narrative.filter(
     (n) => n.date === state.date && n.kind === "incident",
   ).length;
@@ -3779,7 +3779,7 @@ export function recordIncident(
  * 잠재력 추정을 좁힌다 — 한 번 보고 성장 여력을 단정하는 스카우트는 없다
  * (SCOUT_REPEAT_LIMIT까지 · scouting.ts 규약).
  */
-export function scoutPlayer(state: GameState, ref: string): MarketSkillResult {
+export function scoutPlayer(state: GameState, ref: string): MarketCommandResult {
   const pick = pickAnyPlayer(state, ref);
   if (!pick.ok) return pick;
   const player = pick.player;
@@ -3883,7 +3883,7 @@ export interface ScoutMissionInput {
  * 줄을 세운다. 지금 고르면 두 주 동안 값도 나이도 움직인 뒤에 도착한 목록이 두 주
  * 전의 세계를 말한다.
  */
-export function scoutMission(state: GameState, input: ScoutMissionInput): MarketSkillResult {
+export function scoutMission(state: GameState, input: ScoutMissionInput): MarketCommandResult {
   const competition = resolveCompetition(input.competition);
   if (!competition.ok) return competition;
 

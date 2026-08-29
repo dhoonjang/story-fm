@@ -16,7 +16,7 @@ import { ModelOutputError, retryOnce, requireToolCall } from "./retry";
 /**
  * 이적·재정 지시 해석 — **감독의 말을 시장·장부 명령의 인자로 옮긴다** (agents.md §1).
  *
- * 판 지시의 해석(`apply-orders`)과 같은 자리다: 장면을 쓰는 GM은 `market_orders(orders)`
+ * 판 지시의 해석(`tactic-orders`)과 같은 자리다: 장면을 쓰는 GM은 `market_orders(orders)`
  * 하나만 부르고, 오퍼·답·재계약·해지·리스트·되사기·임대 복귀·예산·보드 요청·사재·표값·
  * 감독직 오퍼의 인자는 여기서 채운다. 이 호출은 장면도 판정도 쓰지 않는다 — 낼 것은
  * `report_market_orders` 하나다. 확률(`deal_odds`)을 보고 값을 정하는 것은 GM과 감독의

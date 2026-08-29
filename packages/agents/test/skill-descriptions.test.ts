@@ -3,12 +3,12 @@ import { z } from "zod";
 import {
   DEFAULT_SKILL_DESCRIPTIONS,
   GM_SYSTEM,
-  APPLY_ORDERS_SYSTEM,
+  TACTIC_ORDERS_SYSTEM,
   REPORT_DIGEST_INPUT,
   REPORT_DIGEST_TOOL,
   REPORT_TRAINING_INPUT,
   REPORT_TRAINING_TOOL,
-  OrdersSchema,
+  TacticOrdersSchema,
   SETTLE_MATCH_DESCRIPTION,
   SETTLE_MATCH_INPUT,
   SETTLE_MATCH_TOOL,
@@ -17,7 +17,7 @@ import {
   TRAINING_RATER_SYSTEM,
   agingDeclineLine,
   buildGmTools,
-  buildSkillTools,
+  buildToolSpecs,
   toToolSchema,
 } from "@story-fm/agents";
 import {
@@ -45,7 +45,7 @@ const STATE = (() => {
 
 const TOOLS = buildGmTools(STATE, []);
 /** 코어 명령 전부 — 판을 세우는 것들은 GM에게 보이지 않고 해석이 부른다 (agents.md §1) */
-const SKILL_TOOLS = buildSkillTools(STATE, []);
+const SKILL_TOOLS = buildToolSpecs(STATE, []);
 
 describe("스킬 설명 — 코드가 유일한 원본이다", () => {
   /**
@@ -78,13 +78,13 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
     for (const skill of SKILL_CATALOG) perGroup[skill.group] = (perGroup[skill.group] ?? 0) + 1;
     expect(perGroup).toEqual({
       진행: 2,
-      "전술·훈련": 1,
+      "전술·훈련": 2,
       "대화·서사": 5,
       이적: 4,
       재정: 1,
       조회: 11,
     });
-    expect(SKILL_CATALOG.length).toBe(24);
+    expect(SKILL_CATALOG.length).toBe(25);
     expect(SKILL_CATALOG.filter((s) => s.readOnly).length).toBe(11);
   });
 });
@@ -105,7 +105,7 @@ describe("규칙이 사는 자리", () => {
   it("어느 프롬프트 층도 도구 이름을 적지 않는다", () => {
     for (const name of SKILL_NAMES) {
       expect(mentions(GM_SYSTEM, name), `GM_SYSTEM: ${name}`).toBe(false);
-      expect(mentions(APPLY_ORDERS_SYSTEM, name), `APPLY_ORDERS_SYSTEM: ${name}`).toBe(false);
+      expect(mentions(TACTIC_ORDERS_SYSTEM, name), `TACTIC_ORDERS_SYSTEM: ${name}`).toBe(false);
     }
   });
 
@@ -281,13 +281,13 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
       return n.type === "boolean" ? ["true", "false"] : [];
     };
     const setTactics = SKILL_TOOLS.find((t) => t.name === "set_tactics")!.inputSchema.properties;
-    const intent = toToolSchema(OrdersSchema).properties?.tactics as {
+    const intent = toToolSchema(TacticOrdersSchema).properties?.tactics as {
       properties?: Record<string, unknown>;
     };
     for (const toggle of TACTIC_TOGGLES) {
       for (const [where, props] of [
         ["set_tactics", setTactics],
-        ["apply-orders", intent.properties],
+        ["tactic-orders", intent.properties],
       ] as const) {
         expect(choices(props?.[toggle.key]), `${where}.${toggle.key}`).toContain(
           toggle.neutralValue,
@@ -307,13 +307,13 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
       return Array.isArray(n.enum) ? n.enum.map(String) : [];
     };
     const routine = SKILL_TOOLS.find((t) => t.name === "set_set_piece_routine")!;
-    const intentRoutine = toToolSchema(OrdersSchema).properties?.setPieceRoutine as {
+    const intentRoutine = toToolSchema(TacticOrdersSchema).properties?.setPieceRoutine as {
       properties?: Record<string, unknown>;
     };
     for (const axis of SET_PIECE_ROUTINE_AXES) {
       for (const [where, props] of [
         ["set_set_piece_routine", routine.inputSchema.properties],
-        ["apply-orders", intentRoutine.properties],
+        ["tactic-orders", intentRoutine.properties],
       ] as const) {
         expect(enumOf(props?.[axis.key]), `${where}.${axis.key}`).toContain(
           SET_PIECE_ROUTINE_NEUTRAL,
@@ -321,7 +321,7 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
       }
     }
     // 낱말을 가르치는 것은 해석 프롬프트 하나다 — 손으로 적으면 낱말표를 고쳐도 남는다
-    expect(APPLY_ORDERS_SYSTEM).toContain(SET_PIECE_ROUTINE_NEUTRAL);
+    expect(TACTIC_ORDERS_SYSTEM).toContain(SET_PIECE_ROUTINE_NEUTRAL);
   });
 
   /** 중첩된 객체·배열도 같은 규칙을 지난다 — 안쪽에서 제약이 사라지면 아무도 못 본다 */

@@ -186,7 +186,7 @@ export interface PendingEdit {
  * 값도 갈래도 같은 굵기로 눌려 무엇이 바뀌었는지가 안 읽힌다. 무엇을 강조할지는
  * 화면이 정하되 **어디까지가 값인지는 코어만 안다** — 그래서 코어가 나눠 낸다.
  */
-export interface SkillBriefItem {
+export interface CommandBriefItem {
   /** 무엇에 대한 것인가 — 한 톤 낮춰 **앞에** 선다 (`선발 투입`, `포메이션`) */
   label?: string;
   /** 바뀐 값 — 항목에서 가장 또렷한 자리 (`김민재 외 2명`, `4-4-2 → 4-3-3`) */
@@ -212,11 +212,11 @@ export interface SkillBriefItem {
  * ⚠️ **항목 하나는 한 줄에 든다.** 건수와 갈래까지만 적고, LLM이 쓴 자유 문장은
  * 싣지 않는다 (그 문장은 장면과 서사 로그에 이미 있다).
  */
-export interface SkillBrief {
+export interface CommandBrief {
   /** 무엇을 했나 — 호출 이름값의 짧은 머리줄 (`라인업 확정`) */
   head: string;
   /** 무엇이 바뀌었나 — 각 항목이 말풍선 한 줄이다 */
-  items: SkillBriefItem[];
+  items: CommandBriefItem[];
 }
 
 export interface ToolCallRecord {
@@ -226,7 +226,7 @@ export interface ToolCallRecord {
    * 화면이 항목으로 세우는 요약 — 없으면 `summary` 문자열로 폴백한다
    * (옛 세이브의 기록에는 없다).
    */
-  brief?: SkillBrief;
+  brief?: CommandBrief;
   input?: unknown;
   /**
    * 그 호출이 남긴 **구조화된 결과** — 채팅이 카드로 그린다.

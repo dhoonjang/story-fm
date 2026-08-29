@@ -10,8 +10,8 @@ import type { GameLLM, GameToolSpec, JsonObjectSchema } from "@story-fm/llm";
 import { finalizeMatchTurn } from "./finalize-match";
 import { buildLedgerNote } from "./gm-input";
 import type { GmToolCall } from "./gm-types";
-import { applyOrders } from "./orders-apply";
-import { runOrders } from "./apply-orders";
+import { applyTacticOrders } from "./tactic-apply";
+import { runTacticOrders } from "./tactic-orders";
 import { toToolSchema } from "./tool-schema";
 
 export { buildSegmentMessage, buildShootoutMessage } from "./match-script";
@@ -78,14 +78,14 @@ export const KICKOFF_BLOCK = "<kickoff>감독이 경기장에 들어섰다 — �
 
 // ── 경기 도구 셋 — 코어를 부르는 손잡이 ──────────────────────
 
-export const APPLY_ORDERS_TOOL = "apply_orders";
+export const TACTIC_ORDERS_TOOL = "tactic_orders";
 export const ADVANCE_MATCH_TOOL = "advance_match";
 export const FINALIZE_MATCH_TOOL = "finalize_match";
 
 /** 감독의 말 한 턴의 상한 — 원문 그대로 넘기는 자리라 오타를 막는 폭이다 */
 const ORDERS_MAX = 2000;
 
-const OrdersSchema = z.object({
+const TacticOrdersSchema = z.object({
   orders: z
     .string()
     .min(1)
@@ -104,10 +104,10 @@ export const MATCH_TOOL_DEFINITIONS: ReadonlyArray<{
   inputSchema: JsonObjectSchema;
 }> = [
   {
-    name: APPLY_ORDERS_TOOL,
+    name: TACTIC_ORDERS_TOOL,
     description:
       "감독의 지시를 판에 건다 — 교체·전술·개인 지시·지역 플랜·공략·세트피스·팀토크·면담. 시계는 그대로다. 지시가 나올 때마다 부른다. 결과로 무엇이 걸렸고 무엇이 반려됐는지와, 그 지시로 다시 계산한 판(패킷)이 온다 — 다음 구간은 이 판으로 구른다.",
-    inputSchema: toToolSchema(OrdersSchema),
+    inputSchema: toToolSchema(TacticOrdersSchema),
   },
   {
     name: ADVANCE_MATCH_TOOL,
@@ -149,9 +149,9 @@ async function runOrdersTool(
   orders: string,
 ): Promise<{ ok: boolean; message: string }> {
   const roll = false;
-  const parsed = await runOrders(state, orders);
+  const parsed = await runTacticOrders(state, orders);
   if (!parsed.ok) return { ok: false, message: parsed.message };
-  const applied = applyOrders(state, parsed.intent, ctx.calls, ctx.goals, ctx.cards, {
+  const applied = applyTacticOrders(state, parsed.intent, ctx.calls, ctx.goals, ctx.cards, {
     roll,
   });
   // 굴리지 않은 지시도 판을 다시 계산한다 — 다음 구간이 이 패킷으로 구르고, GM은 그것을 미리 읽는다
@@ -186,7 +186,7 @@ export function buildMatchTools(
       {
         ...orders!,
         handle: async (input: unknown) => {
-          const p = OrdersSchema.safeParse(input);
+          const p = TacticOrdersSchema.safeParse(input);
           if (!p.success) return { ok: false, message: "orders에 감독의 말을 그대로 적으세요" };
           return runOrdersTool(state, ctx, p.data.orders);
         },
@@ -199,7 +199,7 @@ export function buildMatchTools(
           if (pending.ledger.phase === "finished" && !awaitingShootout(state)) {
             return { ok: false, message: "경기가 끝났습니다 — 마감할 차례입니다" };
           }
-          const applied = applyOrders(state, {}, ctx.calls, ctx.goals, ctx.cards, {
+          const applied = applyTacticOrders(state, {}, ctx.calls, ctx.goals, ctx.cards, {
             roll: true,
           });
           return {

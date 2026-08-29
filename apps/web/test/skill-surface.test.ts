@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SKILL_CATALOG } from "@story-fm/agents";
-import { CARD_SKILLS, hasRailHint } from "../lib/panel-hints";
-import { SKILL_LABEL } from "../lib/call-label";
+import { CARD_CALLS, hasRailHint } from "../lib/panel-hints";
+import { CALL_LABEL } from "../lib/call-label";
 
 /**
  * **호출 결과가 화면에 서는 길은 둘뿐이다** (overview.md §3).
@@ -28,19 +28,19 @@ describe("호출이 화면에 서는 길", () => {
   it("조작형 호출은 모두 말풍선 아니면 카드다", () => {
     const orphans = SKILL_CATALOG.filter(
       (s) =>
-        !s.readOnly && !hasRailHint(s.name) && !CARD_SKILLS.has(s.name) && !MATCH_ONLY.has(s.name),
+        !s.readOnly && !hasRailHint(s.name) && !CARD_CALLS.has(s.name) && !MATCH_ONLY.has(s.name),
     ).map((s) => s.name);
-    expect(orphans, "말풍선(PANEL_OF)이나 카드(CARD_SKILLS) 중 하나로 보내야 한다").toEqual([]);
+    expect(orphans, "말풍선(PANEL_OF)이나 카드(CARD_CALLS) 중 하나로 보내야 한다").toEqual([]);
   });
 
   it("조회 도구는 어느 쪽에도 없다 — 조회 로그는 화면에 서지 않는다", () => {
     for (const skill of SKILL_CATALOG.filter((s) => s.readOnly)) {
-      expect(hasRailHint(skill.name) || CARD_SKILLS.has(skill.name), skill.name).toBe(false);
+      expect(hasRailHint(skill.name) || CARD_CALLS.has(skill.name), skill.name).toBe(false);
     }
   });
 
   it("한 호출이 두 길을 함께 가지 않는다 — 같은 사실이 두 번 서면 안 된다", () => {
-    const both = [...CARD_SKILLS].filter((name) => hasRailHint(name));
+    const both = [...CARD_CALLS].filter((name) => hasRailHint(name));
     expect(both).toEqual([]);
   });
 });
@@ -52,7 +52,7 @@ describe("호출이 화면에 서는 길", () => {
 describe("호출 표시 이름", () => {
   it("카탈로그와 같은 이름을 쓴다", () => {
     for (const skill of SKILL_CATALOG) {
-      expect(SKILL_LABEL[skill.name], skill.name).toBe(skill.label);
+      expect(CALL_LABEL[skill.name], skill.name).toBe(skill.label);
     }
   });
 });

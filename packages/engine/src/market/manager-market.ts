@@ -70,9 +70,9 @@ import {
   teamShortNameIn,
   weeklyWagesOf,
   type GameState,
-  type SkillBriefItem,
+  type CommandBriefItem,
 } from "../core/state";
-import type { SkillResult } from "../commands";
+import type { CommandResult } from "../commands";
 import { item } from "../commands/brief";
 
 /**
@@ -915,7 +915,7 @@ function leaveClub(state: GameState, card: Dismissal, channel: string): void {
  *
  * **지갑이 모자라면 못 나간다** — 물지 못하는 계약은 깨지지 않는다.
  */
-export function resignPost(state: GameState): SkillResult {
+export function resignPost(state: GameState): CommandResult {
   const teamId = managedTeamId(state);
   if (teamId === null) return { ok: false, message: "이미 무직입니다" };
 
@@ -1194,7 +1194,7 @@ function offerMatches(state: GameState, offer: ManagerOffer, ref: string): boole
  * 지금 구단의 것이라 지울 이유가 없다. 이적 예산 약속은 부임과 같이 그 자리에서
  * 이행된다.
  */
-function acceptRenewal(state: GameState, offer: ManagerOffer): SkillResult {
+function acceptRenewal(state: GameState, offer: ManagerOffer): CommandResult {
   if (offer.teamId !== state.userTeamId) {
     return { ok: false, message: `${teamNameIn(state, offer.teamId)}의 제안이 아닙니다` };
   }
@@ -1295,7 +1295,7 @@ function leaveForMove(state: GameState, offer: ManagerOffer): Dismissal {
  *
  * @param ref 제안 id 또는 구단 이름·약칭
  */
-export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
+export function acceptManagerOffer(state: GameState, ref: string): CommandResult {
   const offer = (state.managerOffers ?? []).find((o) => offerMatches(state, o, ref));
   /**
    * **재계약은 부임이 아니다** (career.md §5.4) — 구단도 자리도 그대로라 아래의
@@ -1503,7 +1503,7 @@ export function counterManagerOffer(
   state: GameState,
   ref: string,
   ask: { salary?: number; transferBudget?: number },
-): SkillResult {
+): CommandResult {
   const offer = (state.managerOffers ?? []).find((o) => offerMatches(state, o, ref));
   /**
    * 재직 중에 되부를 수 있는 것은 재직 중에 설 수 있는 제안뿐이다 — 보드의 재계약
@@ -1536,7 +1536,7 @@ export function counterManagerOffer(
   const headroom = counterHeadroom(reputation, tier);
   const parts: string[] = [];
   /** 흥정이 실제로 선 값 — 축마다 한 줄이다 (모델이 읽는 줄과 같은 자에서 갈린다) */
-  const items: SkillBriefItem[] = [];
+  const items: CommandBriefItem[] = [];
 
   /** 한 축의 흥정 — 제시액 아래로는 내려가지 않고, 천장 위로는 올라가지 않는다 */
   const settle = (label: string, offered: number, asked: number): number => {
@@ -1794,7 +1794,7 @@ export function settleInterview(
   state: GameState,
   approach: Approach,
   stance: PressStance | null,
-): SkillResult {
+): CommandResult {
   const teamId = approach.teamId ?? "";
   const name = teamNameIn(state, teamId);
   const terms = stance === null ? "closed" : INTERVIEW_TERMS[stance];
@@ -1908,7 +1908,7 @@ export function settleInterview(
  *
  * @param teamRef 구단 id 또는 이름·약칭
  */
-export function applyForManagerJob(state: GameState, teamRef: string): SkillResult {
+export function applyForManagerJob(state: GameState, teamRef: string): CommandResult {
   const inPost = state.dismissal === undefined;
   if (openManagerOffers(state).length > 0) {
     return {

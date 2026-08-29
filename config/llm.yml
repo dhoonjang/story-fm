@@ -28,7 +28,16 @@ agents:
   # 감독의 말을 구조화된 의도 하나로 옮긴다 — 판단이 아니라 분류라 가벼운 모델로 둔다.
   # 경기 한 턴이 두 호출이 됐으므로(docs/llm/agents.md §3) 여기서 지연을 갚아야 한다.
   # 한 턴에 교체·전술·지시가 함께 올 수 있어 훈련 결산보다는 넉넉하다.
-  apply-orders:
+  tactic-orders:
+    provider: google
+    model: gemini-3.5-flash-lite
+    max_tokens: 16000
+    timeout_ms: 60000
+    thinking_level: minimal
+
+  # 감독의 훈련·육성 지시를 선수단 운영 명령의 인자로 옮긴다 — 전술 해석과 가른 이유는
+  # 읽는 것이 다르기 때문이다(주간 일정·지금 걸린 목록). 분류라 가벼운 모델로 둔다.
+  training-orders:
     provider: google
     model: gemini-3.5-flash-lite
     max_tokens: 16000

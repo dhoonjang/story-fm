@@ -47,7 +47,7 @@ export function MatchOverview({ match }: { match: Match }) {
     <div className="match-view" data-testid="view-match">
       <ZoneBars match={match} />
       <KeyPoints points={match.keyPoints} />
-      <Orders exploiting={match.exploiting} notes={match.tactics[ours].notes} />
+      <TacticOrders exploiting={match.exploiting} notes={match.tactics[ours].notes} />
     </div>
   );
 }
@@ -411,7 +411,7 @@ function KeyPoints({ points }: { points: Match["keyPoints"] }) {
  * 개인 지시의 결과는 노트 한 줄로 선다 — 노트가 없으면 감독은 걸리지 않은 공략을
  * 걸린 줄 안다.
  */
-function Orders({ exploiting, notes }: { exploiting: string[]; notes: string[] }) {
+function TacticOrders({ exploiting, notes }: { exploiting: string[]; notes: string[] }) {
   if (exploiting.length === 0 && notes.length === 0) return null;
   return (
     <div className="mv-orders" data-testid="match-orders">

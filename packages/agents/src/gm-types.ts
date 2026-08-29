@@ -1,12 +1,12 @@
 import type { MissionReportCard, ScoutReportCard } from "@story-fm/domain";
-import type { CardMark, GoalMark, SkillBrief } from "@story-fm/engine";
+import type { CardMark, GoalMark, CommandBrief } from "@story-fm/engine";
 
 /** GM 턴 결과 — mock/실모드 공통 계약 */
 export interface GmToolCall {
   name: string;
   summary: string;
   /** 화면이 항목으로 세우는 요약 (`ToolCallRecord.brief`) — 없으면 요약 문자열로 폴백 */
-  brief?: SkillBrief;
+  brief?: CommandBrief;
   /** 호출 파라미터 — 채팅에서 칩을 펼치면 보여준다 */
   input?: unknown;
   /** 구조화된 결과 — 채팅이 카드로 그린다 (`ToolCallRecord.payload`) */
@@ -25,11 +25,11 @@ export interface GmToolCall {
   line?: number;
 }
 
-/** 엔진 명령이 돌려주는 것 — `SkillResult`와 같은 모양이되 GM 쪽에서 좁게 읽는다 */
-export type SkillReturn = {
+/** 엔진 명령이 돌려주는 것 — `CommandResult`와 같은 모양이되 GM 쪽에서 좁게 읽는다 */
+export type CommandReturn = {
   ok: boolean;
   message: string;
-  brief?: SkillBrief;
+  brief?: CommandBrief;
   payload?: unknown;
   tone?: "good" | "bad";
 };
@@ -46,9 +46,9 @@ export type SkillReturn = {
 export function recordCall(
   calls: GmToolCall[],
   name: string,
-  result: SkillReturn,
+  result: CommandReturn,
   extra?: { input?: unknown; line?: number; silent?: boolean },
-): SkillReturn {
+): CommandReturn {
   if (!result.ok) return result;
   calls.push({
     name,

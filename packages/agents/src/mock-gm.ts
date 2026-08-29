@@ -32,7 +32,7 @@ import {
   counterpartyAnchor,
   settleCounterparty,
   type CounterpartyRuling,
-  type MarketSkillResult,
+  type MarketCommandResult,
   buildOfficeViews,
   dealOdds,
   describeNegotiations,
@@ -150,7 +150,7 @@ function answerAsCounterparty(
   state: GameState,
   negotiation: Negotiation,
   notes: readonly [string, string],
-): { input: CounterpartyRuling; result: MarketSkillResult; verdict: NegotiationVerdict } {
+): { input: CounterpartyRuling; result: MarketCommandResult; verdict: NegotiationVerdict } {
   const anchor = counterpartyAnchor(state, negotiation);
   if (!anchor) {
     return {

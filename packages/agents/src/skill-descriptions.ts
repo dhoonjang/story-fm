@@ -22,7 +22,7 @@ export interface SkillCatalogEntry {
  * 한 도구의 사용법은 여기에만 산다 — 언제 부르고, 인자를 어떻게 채우고, 결과를
  * 장면에 어떻게 옮기는가. `GM_SYSTEM`은 도구와 무관한 규칙만 갖는다
  * (docs/llm/prompts.md §5). 경기 중에는 이 설명이 실리지 않으므로 경기에서도 필요한
- * 판정 근거는 `APPLY_ORDERS_SYSTEM`이 따로 갖는다 — 그 겹침은 중복이 아니다.
+ * 판정 근거는 `TACTIC_ORDERS_SYSTEM`이 따로 갖는다 — 그 겹침은 중복이 아니다.
  */
 export const SKILL_CATALOG = [
   {
@@ -37,14 +37,24 @@ export const SKILL_CATALOG = [
       "감독이 입장하면 경기 마스터가 진행한다.",
   },
   {
-    name: "apply_orders",
+    name: "tactic_orders",
     label: "전술 지시",
     group: "전술·훈련",
     readOnly: false,
     description:
-      "감독이 판을 세우거나 선수단을 운영하는 지시를 했을 때 — 라인업·1·2군 이동·팀 전술 6축과 갈래·선수의 자리·역할·개인 지시·세트피스 키커와 인원·지역 플랜·약점 공략·완장·훈련·집중 육성·멘토·2군 방침·등번호·유스 계약. " +
+      "감독이 판을 세우는 지시를 했을 때 — 라인업·1·2군 이동·팀 전술 6축과 갈래·선수의 자리·역할·개인 지시·세트피스 키커와 인원·지역 플랜·약점 공략·완장. " +
       "orders에 감독의 말을 원문 그대로 적는다 — 요약하지 않는다. 결과로 무엇이 걸렸고 무엇이 반려됐는지가 온다. 반려된 대로 쓴다. " +
-      "이적·재정·회견·면담은 이 도구가 아니다.",
+      "훈련·육성은 training_orders, 이적·재정은 market_orders다. 회견·면담은 각자의 도구가 있다.",
+  },
+  {
+    name: "training_orders",
+    label: "훈련 지시",
+    group: "전술·훈련",
+    readOnly: false,
+    description:
+      "감독이 훈련이나 육성을 지시했을 때 — 훈련 일정 등록·비우기·개인 훈련·집중 육성·멘토링·2군 훈련 방침·등번호·유스 첫 계약. " +
+      "orders에 감독의 말을 원문 그대로 적는다 — 날짜·대상을 대신 채우지 않는다. 결과로 무엇이 걸렸고 무엇이 반려됐는지가 온다. " +
+      "라인업·전술은 tactic_orders다.",
   },
   {
     name: "team_talk",

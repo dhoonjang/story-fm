@@ -68,7 +68,7 @@ import { derbyRecordOf } from "./derby";
 import { formerClubFactsOf, isFirstMeeting, managerReturnOf } from "./former-club";
 import { reportersOf, rivalVoiceOf } from "../world/persona";
 import { MANAGER_SUBJECT, moveRelation, stanceRelationEvent } from "../world/relations";
-import type { SkillResult } from "../commands";
+import type { CommandResult } from "../commands";
 import { deltaItems } from "../commands/brief";
 
 /**
@@ -2053,7 +2053,7 @@ export function respondToMedia(
     /** 잔향 — 이름이 불린 선수에게 남는 심경 한 문장. 그 선수가 없으면 버린다 */
     mood?: MoodLine;
   },
-): SkillResult {
+): CommandResult {
   const conference = pendingPress(state);
   if (!conference) return { ok: false, message: "지금 답할 기자회견이 없습니다" };
 
@@ -2172,7 +2172,7 @@ function sameManager(name: string, ref: string): boolean {
  * 회견 거절 — **하나의 답이다.** 감독이 마이크를 잡지 않는 것도 세계가 읽는다.
  * 실제로도 의무 회견 불참은 벌금과 비판을 부른다.
  */
-export function declinePress(state: GameState): SkillResult {
+export function declinePress(state: GameState): CommandResult {
   const conference = pendingPress(state);
   if (!conference) return { ok: false, message: "지금 열린 기자회견이 없습니다" };
   const effect = applyPressOutcome(state, conference, null);

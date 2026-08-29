@@ -5,7 +5,7 @@ import type { GameToolSpec } from "@story-fm/llm";
  *
  * 인자가 값 몇 개인 명령(오퍼·재계약·훈련·멘토·보드 요청…)은 GM이 장면을 쓰는 왕복에서
  * 채우면 하나를 빠뜨린다. 그래서 감독의 말 원문을 받은 해석기가 채우는데, 그 스키마를
- * 여기서 **다시 적지 않는다** — 도구 정의(`buildSkillTools`)의 JSON 스키마를 그대로
+ * 여기서 **다시 적지 않는다** — 도구 정의(`buildToolSpecs`)의 JSON 스키마를 그대로
  * 호출 이름 아래 배열로 묶는다. 검증도 그 도구의 Zod가 한다. 한 벌이면 갈릴 데가 없다.
  *
  * 모양: `{ ops: { send_offer: [{...}], open_renewal: [{...}] } }` — 합집합(`anyOf`)을
@@ -13,7 +13,7 @@ import type { GameToolSpec } from "@story-fm/llm";
  */
 
 /** 한 명령을 한 턴에 부를 수 있는 수 — 오퍼 셋은 있어도 여덟은 없다 */
-export const OPS_PER_SKILL = 4;
+export const OPS_PER_COMMAND = 4;
 
 export type OpsInput = Record<string, unknown[]>;
 
@@ -30,7 +30,7 @@ export function buildOpsSchema(
     properties[name] = {
       type: "array",
       items: spec.inputSchema,
-      maxItems: OPS_PER_SKILL,
+      maxItems: OPS_PER_COMMAND,
       description: spec.description,
     };
   }
@@ -43,7 +43,7 @@ export function parseOps(raw: unknown, names: readonly string[]): OpsInput {
   if (typeof raw !== "object" || raw === null) return ops;
   for (const name of names) {
     const value = (raw as Record<string, unknown>)[name];
-    if (Array.isArray(value) && value.length > 0) ops[name] = value.slice(0, OPS_PER_SKILL);
+    if (Array.isArray(value) && value.length > 0) ops[name] = value.slice(0, OPS_PER_COMMAND);
   }
   return ops;
 }

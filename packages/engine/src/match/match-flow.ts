@@ -42,7 +42,7 @@ import {
   TacticsSpecSchema,
   tacticsSignature,
 } from "@story-fm/domain";
-import type { SkillResult } from "../commands";
+import type { CommandResult } from "../commands";
 import {
   MAX_EXPLOITS,
   accumulateFatigue,
@@ -102,7 +102,7 @@ import {
   MATCHDAY_BENCH,
   type GameState,
   type PendingMatch,
-  type SkillBrief,
+  type CommandBrief,
 } from "../core/state";
 import { pickOurPlayer } from "../core/player-ref";
 import { briefNames, item } from "../commands/brief";
@@ -121,8 +121,8 @@ import { makeRng } from "../core/rng";
 export interface FlowResult {
   ok: boolean;
   message: string;
-  /** 화면이 항목으로 세우는 요약 — `SkillResult.brief`와 같은 계약이다 */
-  brief?: SkillBrief;
+  /** 화면이 항목으로 세우는 요약 — `CommandResult.brief`와 같은 계약이다 */
+  brief?: CommandBrief;
 }
 
 function currentMatch(state: GameState): MatchRecord {
@@ -713,7 +713,7 @@ const HOLD_SHAPES: readonly Formation[] = ["5-4-1"];
 /**
  * **상대 벤치도 판단한다** — 구간이 구르기 **전에**, 정지점에서 스코어·남은 시간과
  * **감독의 지금 전술**을 보고 무게를 옮긴다 (match.md §2). 감독이 정지점에서 건
- * 지시(`apply_orders`)가 이미 판에 올라 있으므로 상대는 그것을 읽고 맞설 수 있다.
+ * 지시(`tactic_orders`)가 이미 판에 올라 있으므로 상대는 그것을 읽고 맞설 수 있다.
  *
  * 옮긴 값은 `pendingMatch`에만 남아 그 경기에서만 쓰인다(저장된 팀 전술은 불변).
  * 그리고 **옮겼다는 사실은 사건으로 남는다** — 상태만 바꾸면 중계는 사건 목록에 없는
@@ -2127,7 +2127,7 @@ export { MAX_EXPLOITS, subLimitsOf };
  * 없는 id를 주면 실패로 돌려준다. 조용히 버리지 않는 이유는 모델이 그 사실을
  * 알아야 다음 턴에 다시 시도하지 않기 때문이다.
  */
-export function setExploits(state: GameState, input: { targetIds: string[] }): SkillResult {
+export function setExploits(state: GameState, input: { targetIds: string[] }): CommandResult {
   const pending = state.pendingMatch;
   if (!pending) return { ok: false, message: "경기 중이 아닙니다" };
   const packet = pending.packet ? normalizePacket(pending.packet) : null;

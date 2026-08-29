@@ -14,17 +14,17 @@ import {
   type GoalMark,
 } from "@story-fm/engine";
 import {
-  applyOrders,
+  applyTacticOrders,
   buildLedgerNote,
   buildSegmentMessage,
   GmTurnFailure,
   MATCH_ADVANCED,
-  OrdersSchema,
+  TacticOrdersSchema,
   runGmTurn,
   stampMatchScene,
   stampMatchStream,
   type GmToolCall,
-  type Orders,
+  type TacticOrders,
 } from "@story-fm/agents";
 import { LlmTimeoutError, type GameToolSpec, type TurnRequest } from "@story-fm/llm";
 import { ModelOutputError } from "../src/retry";
@@ -72,15 +72,15 @@ const matchState = (): GameState => structuredClone(KICKOFF);
 /** 한 턴 — 해석이 냈을 의도를 그대로 코어에 넣는다 (LLM은 이 경로에 없다) */
 function turn(
   state: GameState,
-  intent: Orders,
+  intent: TacticOrders,
   goals: GoalMark[] = [],
   cards: CardMark[] = [],
   calls: GmToolCall[] = [],
 ) {
-  return { applied: applyOrders(state, intent, calls, goals, cards), calls, goals, cards };
+  return { applied: applyTacticOrders(state, intent, calls, goals, cards), calls, goals, cards };
 }
 
-const GO: Orders = { advance: "segment" };
+const GO: TacticOrders = { advance: "segment" };
 
 /** 요청이 강제한 도구 — 어느 에이전트의 호출인지는 이것이 가른다 */
 const forced = (req: TurnRequest): string | undefined =>
@@ -141,7 +141,7 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
 
   /**
    * **경기 중에도 세트피스 인원이 장부에 닿는다** (match.md §2). 의도의 갈래 하나가
-   * 평시와 같은 명령을 지나는 자리라, 이름이 어긋나면 `applyOrders`의 `call`이
+   * 평시와 같은 명령을 지나는 자리라, 이름이 어긋나면 `applyTacticOrders`의 `call`이
    * 조용히 아무것도 하지 않는다 — 감독에게는 지시가 걸린 것처럼 보이는 거짓 성공이다.
    */
   it("세트피스 인원 지시가 그 턴에 팀 전술로 들어간다", () => {
@@ -259,7 +259,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
   }
 
   /** 해석기 흉내 — 지시 하나를 낸다 (advance는 의도의 것이 아니다) */
-  const interpreter = async (req: TurnRequest, intent: Orders = {}) => {
+  const interpreter = async (req: TurnRequest, intent: TacticOrders = {}) => {
     const tool = req.tools?.find((t) => t.name === "report_intent");
     if (tool) await tool.handle(intent);
     return answered("", tool ? 1 : 0);
@@ -279,12 +279,12 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
       if (forced(req) === "report_intent") {
         return interpreter(req, { substitutions: [{ out, in: incoming }] });
       }
-      const orders = req.tools?.find((t) => t.name === "apply_orders");
+      const orders = req.tools?.find((t) => t.name === "tactic_orders");
       const advance = req.tools?.find((t) => t.name === "advance_match");
       expect(req.tools?.map((t) => t.name).sort()).toEqual([
         "advance_match",
-        "apply_orders",
         "finalize_match",
+        "tactic_orders",
       ]);
       // 지시는 판만 바꾸고 새 패킷을 돌려준다 — 구간은 아직이다
       const ordered = await orders!.handle({ orders: `${incoming} 넣고 계속 가자` });
@@ -331,7 +331,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     runTurn.mockImplementation(async (req: TurnRequest) => {
       // 해석기가 도구 없이 본문만 낸다 — 두 번 다
       if (forced(req) === "report_intent") return answered("해석해 보겠습니다.");
-      const orders = req.tools?.find((t) => t.name === "apply_orders");
+      const orders = req.tools?.find((t) => t.name === "tactic_orders");
       const reply = await orders!.handle({ orders: "압박 올려" });
       expect(reply.ok).toBe(false);
       return answered("@레오 카스텔라노: 무슨 말씀이신지 다시 한번 짚어 주시겠습니까.", 1);
@@ -352,10 +352,10 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
   it("도구 뒤의 해석이 시한을 넘기면 그 오류가 종류를 든 채 올라간다", async () => {
     const state = rolling();
     const minute = state.pendingMatch!.ledger.minute;
-    const thrown = new LlmTimeoutError("apply-orders", 60_000);
+    const thrown = new LlmTimeoutError("tactic-orders", 60_000);
     runTurn.mockImplementation(async (req: TurnRequest) => {
       if (forced(req) === "report_intent") throw thrown;
-      const orders = req.tools?.find((t) => t.name === "apply_orders");
+      const orders = req.tools?.find((t) => t.name === "tactic_orders");
       await orders!.handle({ orders: "압박 올려" });
       return answered("닿지 않는다", 1);
     });
@@ -818,7 +818,7 @@ describe("평시 GM 턴 — 상한을 도구로 채운 턴", () => {
  */
 describe("경기 의도 스키마의 경계", () => {
   const ids = (n: number) => Array.from({ length: n }, (_, i) => `p${i}`);
-  const parses = (intent: unknown) => OrdersSchema.safeParse(intent).success;
+  const parses = (intent: unknown) => TacticOrdersSchema.safeParse(intent).success;
 
   it("한 턴에 담기는 갈래마다 개수 상한이 있다", () => {
     const talk = (n: number) =>

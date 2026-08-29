@@ -126,23 +126,25 @@ import {
 } from "@story-fm/domain";
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
 
+import { buildTrainingSchedule } from "./gm-input";
 import { skillDescriptions } from "./skill-descriptions";
-import { runOrders } from "./apply-orders";
+import { runTacticOrders } from "./tactic-orders";
 import { runTableReply } from "./negotiation-table";
 import { MARKET_OPS, runMarketOrders } from "./market-orders";
+import { TRAINING_OPS, runTrainingOrders } from "./training-orders";
 import { applyOps } from "./orders-ops";
 import { MONEY_MAX, WAGE_MAX, money } from "./ruling-schema";
-import { applyOrders } from "./orders-apply";
+import { applyTacticOrders } from "./tactic-apply";
 import { inputError, toToolSchema } from "./tool-schema";
-import { recordCall, type GmToolCall, type SkillReturn } from "./gm-types";
+import { recordCall, type GmToolCall, type CommandReturn } from "./gm-types";
 
 /**
  * **GM에게 보이지 않는 코어 명령** — 판을 세우는 여덟과 교체. 감독의 전술 지시는
- * `apply_orders`/`apply_orders` 뒤의 지시 해석이 JSON으로 옮기고 코어가 이 명령들을
+ * `tactic_orders`/`tactic_orders` 뒤의 지시 해석이 JSON으로 옮기고 코어가 이 명령들을
  * 부른다 (agents.md §1). 설명은 모델에게 가지 않으므로 이름만 든다 — 판정 근거는
- * `APPLY_ORDERS_SYSTEM`의 것이다.
+ * `TACTIC_ORDERS_SYSTEM`의 것이다.
  */
-export const INTERNAL_SKILLS: ReadonlySet<string> = new Set([
+export const CORE_COMMANDS: ReadonlySet<string> = new Set([
   "set_lineup",
   "set_squad_level",
   "set_tactics",
@@ -153,7 +155,7 @@ export const INTERNAL_SKILLS: ReadonlySet<string> = new Set([
   "set_match_plan",
   "substitute",
   "set_captain",
-  // 선수단 운영 — apply-orders의 ops (평시)
+  // 선수단 운영 — tactic-orders의 ops (평시)
   "set_training",
   "set_development_focus",
   "set_mentor",
@@ -181,7 +183,7 @@ export const INTERNAL_SKILLS: ReadonlySet<string> = new Set([
   "counter_manager_offer",
   "apply_manager_job",
 ]);
-const INTERNAL_DESCRIPTIONS: Record<string, string> = {
+const CORE_COMMAND_LABELS: Record<string, string> = {
   set_lineup: "선발 11명과 벤치, 1·2군 이동",
   set_squad_level: "1·2군 이동",
   set_tactics: "팀 전술 6축과 갈래",
@@ -412,13 +414,18 @@ function writtenLines(text: string): number {
 }
 
 /** 실모드 GM의 도구 바인딩 — 엔진 함수를 GameToolSpec으로 감싼다 */
-export function buildSkillTools(
+export function buildToolSpecs(
   state: GameState,
   calls: GmToolCall[],
   options?: { deferNegotiationIds?: ReadonlySet<string> },
 ): GameToolSpec[] {
   const descriptions = skillDescriptions();
-  const record = (name: string, result: SkillReturn, input?: unknown, context?: ToolCallContext) =>
+  const record = (
+    name: string,
+    result: CommandReturn,
+    input?: unknown,
+    context?: ToolCallContext,
+  ) =>
     recordCall(calls, name, result, {
       input,
       ...(context ? { line: writtenLines(context.text) } : {}),
@@ -447,7 +454,7 @@ export function buildSkillTools(
     name: string,
     description: string,
     schema: z.ZodType<T>,
-    run: (input: T) => SkillReturn,
+    run: (input: T) => CommandReturn,
   ): GameToolSpec => ({
     name,
     description,
@@ -487,7 +494,7 @@ export function buildSkillTools(
     wrap("start_match", descriptions.start_match, z.object({}), () => startMatch(state)),
     wrap(
       "set_lineup",
-      INTERNAL_DESCRIPTIONS.set_lineup!,
+      CORE_COMMAND_LABELS.set_lineup!,
       z.object({
         starting: z
           .array(z.object({ playerId: playerRef, position: z.string().min(1).optional() }))
@@ -504,7 +511,7 @@ export function buildSkillTools(
     ),
     wrap(
       "set_squad_level",
-      INTERNAL_DESCRIPTIONS.set_squad_level!,
+      CORE_COMMAND_LABELS.set_squad_level!,
       z.object({
         /**
          * 상한을 두지 않는다 — 몇 명까지 옮길 수 있는지는 임의의 숫자가 아니라
@@ -519,7 +526,7 @@ export function buildSkillTools(
     ),
     wrap(
       "set_captain",
-      INTERNAL_DESCRIPTIONS.set_captain!,
+      CORE_COMMAND_LABELS.set_captain!,
       z.object({
         playerId: playerRef.optional().describe("주장으로 세울 선수 — 생략하면 주장은 그대로"),
         vice: playerRef.nullable().optional().describe("부주장으로 세울 선수 — null이면 지정 해제"),
@@ -528,7 +535,7 @@ export function buildSkillTools(
     ),
     wrap(
       "set_squad_number",
-      INTERNAL_DESCRIPTIONS.set_squad_number!,
+      CORE_COMMAND_LABELS.set_squad_number!,
       z.object({
         playerId: playerRef.describe("번호를 줄 선수"),
         number: z.number().int().min(1).max(99).describe("등번호 — 1~99"),
@@ -543,7 +550,7 @@ export function buildSkillTools(
     ),
     wrap(
       "set_development_focus",
-      INTERNAL_DESCRIPTIONS.set_development_focus!,
+      CORE_COMMAND_LABELS.set_development_focus!,
       z.object({
         playerIds: z
           .array(playerRef)
@@ -555,7 +562,7 @@ export function buildSkillTools(
     ),
     wrap(
       "sign_youth",
-      INTERNAL_DESCRIPTIONS.sign_youth!,
+      CORE_COMMAND_LABELS.sign_youth!,
       z.object({
         playerIds: z
           .array(playerRef)
@@ -567,7 +574,7 @@ export function buildSkillTools(
     ),
     wrap(
       "set_mentor",
-      INTERNAL_DESCRIPTIONS.set_mentor!,
+      CORE_COMMAND_LABELS.set_mentor!,
       z.object({
         mentorId: playerRef.describe("유망주를 맡을 고참 — 1군 30세 이상 · 리더십 55 이상"),
         menteeIds: z
@@ -580,7 +587,7 @@ export function buildSkillTools(
     ),
     wrap(
       "set_reserve_training",
-      INTERNAL_DESCRIPTIONS.set_reserve_training!,
+      CORE_COMMAND_LABELS.set_reserve_training!,
       z.object({
         policy: z
           .enum(RESERVE_TRAINING_POLICIES)
@@ -590,7 +597,7 @@ export function buildSkillTools(
     ),
     wrap(
       "set_tactics",
-      INTERNAL_DESCRIPTIONS.set_tactics!,
+      CORE_COMMAND_LABELS.set_tactics!,
       z
         .object({
           mentality: z.number().int().min(1).max(5),
@@ -613,7 +620,7 @@ export function buildSkillTools(
     ),
     wrap(
       "set_player_tactic",
-      INTERNAL_DESCRIPTIONS.set_player_tactic!,
+      CORE_COMMAND_LABELS.set_player_tactic!,
       z.object({
         playerId: playerRef,
         /**
@@ -650,7 +657,7 @@ export function buildSkillTools(
     ),
     wrap(
       "set_set_piece_takers",
-      INTERNAL_DESCRIPTIONS.set_set_piece_takers!,
+      CORE_COMMAND_LABELS.set_set_piece_takers!,
       z.object({
         corner: playerRef.nullable().optional().describe("코너 키커 — null이면 지정 해제"),
         freeKick: playerRef.nullable().optional().describe("프리킥 키커 — null이면 지정 해제"),
@@ -660,7 +667,7 @@ export function buildSkillTools(
     ),
     wrap(
       "set_set_piece_routine",
-      INTERNAL_DESCRIPTIONS.set_set_piece_routine!,
+      CORE_COMMAND_LABELS.set_set_piece_routine!,
       z
         .object({
           // 낱말은 도구 설명이 `SET_PIECE_ROUTINE_AXES`에서 만들어 싣는다 (prompts.md §5-2).
@@ -674,7 +681,7 @@ export function buildSkillTools(
     ),
     wrap(
       "exploit_point",
-      INTERNAL_DESCRIPTIONS.exploit_point!,
+      CORE_COMMAND_LABELS.exploit_point!,
       z.object({
         targetIds: z
           .array(z.string().min(1))
@@ -686,7 +693,7 @@ export function buildSkillTools(
     ),
     wrap(
       "set_match_plan",
-      INTERNAL_DESCRIPTIONS.set_match_plan!,
+      CORE_COMMAND_LABELS.set_match_plan!,
       z.object({
         band: z.enum(["defense", "midfield", "attack"]),
         lane: z.enum(["left", "center", "right"]),
@@ -706,7 +713,7 @@ export function buildSkillTools(
      */
     {
       name: "set_training",
-      description: INTERNAL_DESCRIPTIONS.set_training!,
+      description: CORE_COMMAND_LABELS.set_training!,
       inputSchema: toToolSchema(TRAINING_INPUT),
       handle(input: unknown, context?: ToolCallContext) {
         const parsed = TRAINING_INPUT.safeParse(input);
@@ -824,7 +831,7 @@ export function buildSkillTools(
     ),
     wrap(
       "substitute",
-      INTERNAL_DESCRIPTIONS.substitute!,
+      CORE_COMMAND_LABELS.substitute!,
       z.object({ out: playerRef, in: playerRef }),
       (input) => substitutePlayer(state, input),
     ),
@@ -864,7 +871,7 @@ export function buildSkillTools(
     ),
     wrap(
       "adjust_transfer_budget",
-      INTERNAL_DESCRIPTIONS.adjust_transfer_budget!,
+      CORE_COMMAND_LABELS.adjust_transfer_budget!,
       z.object({
         delta: z.number().int().min(-MONEY_MAX).max(MONEY_MAX),
         note: z
@@ -877,7 +884,7 @@ export function buildSkillTools(
     ),
     wrap(
       "request_board",
-      INTERNAL_DESCRIPTIONS.request_board!,
+      CORE_COMMAND_LABELS.request_board!,
       z.object({
         kind: z.enum(BOARD_REQUEST_KINDS),
         /**
@@ -898,7 +905,7 @@ export function buildSkillTools(
     ),
     wrap(
       "fund_transfer_budget",
-      INTERNAL_DESCRIPTIONS.fund_transfer_budget!,
+      CORE_COMMAND_LABELS.fund_transfer_budget!,
       z.object({
         /** 상한은 오타를 막는 자리다 — 실제 문은 지갑 잔고와 시즌 한도가 건다 */
         amount: money(MONEY_MAX).describe("지갑에서 이적 예산으로 넣을 금액 (£)"),
@@ -907,7 +914,7 @@ export function buildSkillTools(
     ),
     wrap(
       "pay_player_bonus",
-      INTERNAL_DESCRIPTIONS.pay_player_bonus!,
+      CORE_COMMAND_LABELS.pay_player_bonus!,
       z.object({
         playerId: playerRef,
         amount: money(MONEY_MAX).describe("지갑에서 그 선수에게 줄 금액 (£)"),
@@ -917,7 +924,7 @@ export function buildSkillTools(
     wrap("resign", descriptions.resign, z.object({}), () => resignPost(state)),
     wrap(
       "set_ticket_price",
-      INTERNAL_DESCRIPTIONS.set_ticket_price!,
+      CORE_COMMAND_LABELS.set_ticket_price!,
       z.object({
         /**
          * 표 한 장의 값이다 — 상한은 오타를 막는 자리이고, 실제 폭은 코어가 기준가
@@ -1012,13 +1019,13 @@ export function buildSkillTools(
     ),
     wrap(
       "accept_manager_offer",
-      INTERNAL_DESCRIPTIONS.accept_manager_offer!,
+      CORE_COMMAND_LABELS.accept_manager_offer!,
       z.object({ offer: z.string().min(1).describe("제안 id 또는 구단 이름·약칭") }),
       (input) => acceptManagerOffer(state, input.offer),
     ),
     wrap(
       "counter_manager_offer",
-      INTERNAL_DESCRIPTIONS.counter_manager_offer!,
+      CORE_COMMAND_LABELS.counter_manager_offer!,
       z.object({
         offer: z.string().min(1).describe("제안 id 또는 구단 이름·약칭"),
         salary: money(MONEY_MAX).optional().describe("되부르는 연봉 (£/년)"),
@@ -1032,7 +1039,7 @@ export function buildSkillTools(
     ),
     wrap(
       "apply_manager_job",
-      INTERNAL_DESCRIPTIONS.apply_manager_job!,
+      CORE_COMMAND_LABELS.apply_manager_job!,
       z.object({ team: z.string().min(1).describe("구단 id 또는 이름·약칭") }),
       (input) => applyForManagerJob(state, input.team),
     ),
@@ -1232,7 +1239,7 @@ export function buildSkillTools(
     ),
     wrap(
       "send_offer",
-      INTERNAL_DESCRIPTIONS.send_offer!,
+      CORE_COMMAND_LABELS.send_offer!,
       z.object({
         playerId: playerRef,
         kind: z
@@ -1293,7 +1300,7 @@ export function buildSkillTools(
     ),
     wrap(
       "respond_offer",
-      INTERNAL_DESCRIPTIONS.respond_offer!,
+      CORE_COMMAND_LABELS.respond_offer!,
       z.object({
         negotiationId: z.string().min(1),
         verdict: z.enum(["accept", "counter", "reject"]),
@@ -1334,13 +1341,13 @@ export function buildSkillTools(
     ),
     wrap(
       "accept_deal",
-      INTERNAL_DESCRIPTIONS.accept_deal!,
+      CORE_COMMAND_LABELS.accept_deal!,
       z.object({ negotiationId: z.string().min(1) }),
       (input) => acceptDeal(state, input.negotiationId),
     ),
     wrap(
       "open_renewal",
-      INTERNAL_DESCRIPTIONS.open_renewal!,
+      CORE_COMMAND_LABELS.open_renewal!,
       z.object({
         playerId: playerRef,
         weeklyWage: money(WAGE_MAX),
@@ -1351,7 +1358,7 @@ export function buildSkillTools(
     ),
     wrap(
       "open_release",
-      INTERNAL_DESCRIPTIONS.open_release!,
+      CORE_COMMAND_LABELS.open_release!,
       z.object({
         playerId: playerRef,
         severance: money(MONEY_MAX).describe(
@@ -1371,7 +1378,7 @@ export function buildSkillTools(
     ),
     wrap(
       "set_transfer_list",
-      INTERNAL_DESCRIPTIONS.set_transfer_list!,
+      CORE_COMMAND_LABELS.set_transfer_list!,
       z.object({
         playerId: playerRef,
         listed: z.boolean().describe("true=등재, false=해제"),
@@ -1382,7 +1389,7 @@ export function buildSkillTools(
     ),
     wrap(
       "respond_transfer_request",
-      INTERNAL_DESCRIPTIONS.respond_transfer_request!,
+      CORE_COMMAND_LABELS.respond_transfer_request!,
       z.object({
         playerId: playerRef,
         answer: z
@@ -1397,26 +1404,26 @@ export function buildSkillTools(
     ),
     wrap(
       "release_player",
-      INTERNAL_DESCRIPTIONS.release_player!,
+      CORE_COMMAND_LABELS.release_player!,
       z.object({ playerId: playerRef }),
       (input) => releasePlayer(state, input),
     ),
     wrap(
       "recall_loan",
-      INTERNAL_DESCRIPTIONS.recall_loan!,
+      CORE_COMMAND_LABELS.recall_loan!,
       z.object({ playerId: playerRef }),
       (input) => recallLoan(state, input),
     ),
     wrap(
       "exercise_buyback",
-      INTERNAL_DESCRIPTIONS.exercise_buyback!,
+      CORE_COMMAND_LABELS.exercise_buyback!,
       z.object({ playerId: playerRef }),
       (input) => exerciseBuyBack(state, input),
     ),
 
     wrap(
       "withdraw_offer",
-      INTERNAL_DESCRIPTIONS.withdraw_offer!,
+      CORE_COMMAND_LABELS.withdraw_offer!,
       z.object({ negotiationId: z.string().min(1) }),
       (input) => withdrawOffer(state, input.negotiationId),
     ),
@@ -1479,15 +1486,15 @@ export function sideTeamName(state: GameState, side: "home" | "away"): string {
   return teamName(side === "home" ? match.homeTeamId : match.awayTeamId);
 }
 
-/** 지시 원문의 상한 — `apply_orders`와 같은 폭 */
+/** 지시 원문의 상한 — `tactic_orders`와 같은 폭 */
 const TACTICS_ORDERS_MAX = 2000;
 const OrdersArgsSchema = z.object({
   orders: z.string().min(1).max(TACTICS_ORDERS_MAX).describe("감독의 말 원문 그대로"),
 });
 
 /**
- * **평시 GM이 받는 도구** — 코어 명령 전부에서 판을 세우는 것들(`INTERNAL_SKILLS`)을
- * 빼고 `apply_orders` 하나를 얹는다 (agents.md §1·§2). 그 하나의 핸들러 뒤에서 지시
+ * **평시 GM이 받는 도구** — 코어 명령 전부에서 판을 세우는 것들(`CORE_COMMANDS`)을
+ * 빼고 `tactic_orders` 하나를 얹는다 (agents.md §1·§2). 그 하나의 핸들러 뒤에서 지시
  * 해석이 감독의 말을 JSON으로 옮기고 코어가 코어 명령을 부른다 — 기록은 코어 명령의
  * 이름으로 남아 칩과 말풍선이 그대로 선다.
  */
@@ -1497,12 +1504,10 @@ export function buildGmTools(
   options?: { deferNegotiationIds?: ReadonlySet<string> },
 ): GameToolSpec[] {
   const descriptions = skillDescriptions();
-  const visible = buildSkillTools(state, calls, options).filter(
-    (t) => !INTERNAL_SKILLS.has(t.name),
-  );
+  const visible = buildToolSpecs(state, calls, options).filter((t) => !CORE_COMMANDS.has(t.name));
   const tactics: GameToolSpec = {
-    name: "apply_orders",
-    description: descriptions.apply_orders,
+    name: "tactic_orders",
+    description: descriptions.tactic_orders,
     inputSchema: toToolSchema(OrdersArgsSchema),
     async handle(input: unknown) {
       const parsed = OrdersArgsSchema.safeParse(input);
@@ -1513,14 +1518,47 @@ export function buildGmTools(
           message: `${state.manager.name} 감독은 지금 맡은 팀이 없습니다 — 부임한 뒤에 할 수 있는 일입니다`,
         };
       }
-      const intent = await runOrders(state, parsed.data.orders);
+      const intent = await runTacticOrders(state, parsed.data.orders);
       if (!intent.ok) return { ok: false, message: intent.message };
       // 평시에는 굴릴 판이 없다 — 골·카드 표식도 없다
-      const applied = applyOrders(state, intent.intent, calls, [], [], { roll: false });
+      const applied = applyTacticOrders(state, intent.intent, calls, [], [], { roll: false });
       return {
         ok: true,
         message: applied.notes.length > 0 ? applied.notes.join("\n") : "지시를 판에 걸었습니다",
       };
+    },
+  };
+  /**
+   * **훈련·육성 지시** — 전술과 같은 무늬다 (agents.md §1). 감독의 말 원문이 넘어가고
+   * 도구 뒤의 해석기가 선수단 운영 명령의 인자를 채운다.
+   */
+  const training: GameToolSpec = {
+    name: "training_orders",
+    description: descriptions.training_orders,
+    inputSchema: toToolSchema(OrdersArgsSchema),
+    async handle(input: unknown) {
+      const parsed = OrdersArgsSchema.safeParse(input);
+      if (!parsed.success) return inputError(parsed.error);
+      if (state.dismissal) {
+        return {
+          ok: false,
+          message: `${state.manager.name} 감독은 지금 맡은 팀이 없습니다 — 부임한 뒤에 할 수 있는 일입니다`,
+        };
+      }
+      const specs = new Map(buildToolSpecs(state, calls, options).map((t) => [t.name, t] as const));
+      const parsedOrders = await runTrainingOrders(
+        state,
+        specs,
+        buildTrainingSchedule(state),
+        parsed.data.orders,
+      );
+      if (!parsedOrders.ok) return { ok: false, message: parsedOrders.message };
+      const notes: string[] = [];
+      applyOps(specs, parsedOrders.orders.ops, TRAINING_OPS, notes);
+      if (parsedOrders.orders.unresolved) {
+        notes.push(`옮기지 못한 지시: "${parsedOrders.orders.unresolved}"`);
+      }
+      return { ok: true, message: notes.length > 0 ? notes.join("\n") : "훈련을 걸었습니다" };
     },
   };
   /**
@@ -1568,9 +1606,7 @@ export function buildGmTools(
           message: `${state.manager.name} 감독은 지금 맡은 팀이 없습니다 — 부임한 뒤에 할 수 있는 일입니다`,
         };
       }
-      const specs = new Map(
-        buildSkillTools(state, calls, options).map((t) => [t.name, t] as const),
-      );
+      const specs = new Map(buildToolSpecs(state, calls, options).map((t) => [t.name, t] as const));
       const parsedOrders = await runMarketOrders(state, specs, parsed.data.orders);
       if (!parsedOrders.ok) return { ok: false, message: parsedOrders.message };
       const notes: string[] = [];
@@ -1581,7 +1617,7 @@ export function buildGmTools(
       return { ok: true, message: notes.join("\n") };
     },
   };
-  return [...visible, tactics, table, market];
+  return [...visible, tactics, training, table, market];
 }
 
 /** 테이블에 건네는 감독의 말 — 원문 그대로다 */

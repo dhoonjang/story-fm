@@ -16,10 +16,11 @@ const AGENT_YAML = `  gm: &agent
     model: gemini-test
     max_tokens: 100
     timeout_ms: 1000
-  apply-orders: *agent
+  tactic-orders: *agent
   finalize-match: *agent
   negotiation-table: *agent
   market-orders: *agent
+  training-orders: *agent
   match-gm: *agent
   training-rater: *agent
   history-compactor: *agent
@@ -64,7 +65,7 @@ describe("에이전트별 LLM 설정", () => {
     model: claude-custom
     max_tokens: 100
     timeout_ms: 1000
-  apply-orders:
+  tactic-orders:
     provider: google
     model: gemini-custom
     max_tokens: 150
@@ -87,6 +88,11 @@ describe("에이전트별 LLM 설정", () => {
   market-orders:
     provider: google
     model: gemini-market
+    max_tokens: 250
+    timeout_ms: 2500
+  training-orders:
+    provider: google
+    model: gemini-training-orders
     max_tokens: 250
     timeout_ms: 2500
   training-rater:
@@ -131,10 +137,11 @@ describe("에이전트별 LLM 설정", () => {
     model: gemini-test
     max_tokens: 100
     timeout_ms: 1000
-  apply-orders: *google
+  tactic-orders: *google
   finalize-match: *google
   negotiation-table: *google
   market-orders: *google
+  training-orders: *google
   match-gm: *google
   training-rater: *google
   history-compactor: *google
@@ -150,10 +157,11 @@ describe("에이전트별 LLM 설정", () => {
     model: test-model
     max_tokens: 100
     timeout_ms: 1000${extra}
-  apply-orders: *agent
+  tactic-orders: *agent
   finalize-match: *agent
   negotiation-table: *agent
   market-orders: *agent
+  training-orders: *agent
   match-gm: *agent
   training-rater: *agent
   history-compactor: *agent

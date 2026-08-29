@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { splitMarketCalls } from "../lib/market-calls";
-import { CARD_SKILLS } from "../lib/panel-hints";
+import { CARD_CALLS } from "../lib/panel-hints";
 
 const accepted = {
   kind: "verdict",
@@ -67,7 +67,7 @@ describe("시장 결과 카드와 칩", () => {
 
   it("모양이 깨진 카드도 칩으로 흘리지 않는다", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    // counterpart가 없다 — 코어 계약(MarketSkillResult)이 깨진 경우
+    // counterpart가 없다 — 코어 계약(MarketCommandResult)이 깨진 경우
     const call = { name: "scout_player", payload: { kind: "scout", playerName: "누구" } };
 
     expect(splitMarketCalls([call])).toEqual({ cards: [], chips: [] });
@@ -77,11 +77,11 @@ describe("시장 결과 카드와 칩", () => {
   });
 
   /**
-   * 카드 대상 목록은 `CARD_SKILLS` 하나뿐이다 — 여기와 `skill-surface.test.ts`가
+   * 카드 대상 목록은 `CARD_CALLS` 하나뿐이다 — 여기와 `skill-surface.test.ts`가
    * 같은 상수를 본다. 둘로 나뉘면 한쪽만 고칠 때 조용히 갈린다.
    */
   it("CARD_CALLS의 호출은 전부 카드로 간다", () => {
-    for (const name of CARD_SKILLS) {
+    for (const name of CARD_CALLS) {
       const { cards, chips } = splitMarketCalls([{ name, payload: offered }]);
       expect(cards, name).toEqual([offered]);
       expect(chips, name).toEqual([]);

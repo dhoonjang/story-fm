@@ -12,7 +12,7 @@ import type { ScoutReportCard } from "@story-fm/domain";
 import { MarketCardView, MissionReportCardView } from "@/components/market-card";
 import { splitMarketCalls } from "@/lib/market-calls";
 import { ratingTone, scoutMargin, scoutValue } from "@/lib/scout-report-display";
-import { SKILL_LABEL } from "@/lib/call-label";
+import { CALL_LABEL } from "@/lib/call-label";
 import type { SpeakerKind, SpeakerRole } from "@story-fm/engine";
 import {
   IconBroadcast,
@@ -157,7 +157,7 @@ function ToolChip({
 }) {
   const [open, setOpen] = useState(false);
   const head = calls[0]!;
-  const label = SKILL_LABEL[head.name] ?? head.name;
+  const label = CALL_LABEL[head.name] ?? head.name;
   const tone = head.tone ? ` ${head.tone}` : "";
   const toRail = onReveal !== undefined && hasRailHint(head.name);
   const shown = toRail ? revealed : open;

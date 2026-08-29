@@ -16,7 +16,7 @@
  *    닫힌다.
  * 3. **키는 호출이 아니라 채팅 턴이다.** 한 채팅 턴은 LLM 호출 하나가 아니다 —
  *    평시 턴은 `gm` + 결산 raters, 경기 턴은 `match-gm`과 그 도구 뒤의
- *    `apply-orders`·`finalize-match`가 함께 돈다. 그 왕복
+ *    `tactic-orders`·`finalize-match`가 함께 돈다. 그 왕복
  *    전부가 턴 하나 아래 순서대로 붙는다.
  */
 

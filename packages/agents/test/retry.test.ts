@@ -15,7 +15,7 @@ import { ARC_TITLE_MAX, CharacterMemorySchema } from "@story-fm/domain";
 import type { GameLLM, JsonObjectSchema, ToolOutcome } from "@story-fm/llm";
 import { LlmCallError, LlmTimeoutError, TokenBudgetExceededError } from "@story-fm/llm";
 import { retryOnce, anchorStands, ModelOutputError } from "../src/retry";
-import { runOrders } from "../src/apply-orders";
+import { runTacticOrders } from "../src/tactic-orders";
 import { makeSettleTool, SETTLE_MATCH_INPUT } from "../src/finalize-match";
 import { REPORT_TRAINING_INPUT, reportTraining } from "../src/training-rater";
 import { REPORT_DIGEST_INPUT } from "../src/history-compactor";
@@ -83,7 +83,7 @@ describe("retryOnce — 폴백 대신 한 번의 재시도", () => {
  * 경기 중 명단·패킷이 없는 상태라 `buildLedgerNote`가 빈 줄을 낸다 — 이 테스트가 보는
  * 것은 프롬프트가 아니라 실패와 산출이 만나는 자리다.
  */
-describe("runOrders — 의도를 받은 뒤의 실패", () => {
+describe("runTacticOrders — 의도를 받은 뒤의 실패", () => {
   /** 이 경기의 지난 중계 턴 하나 — 해석기가 `<match_log>`로 읽는다 (agents.md §3) */
   // 장부 없는 경기 상태 — 해석기의 입력 조립이 경기 갈래로 가되 실을 것이 없다
   const emptyState = {
@@ -112,7 +112,7 @@ describe("runOrders — 의도를 받은 뒤의 실패", () => {
     const llm = failsAfterReporting();
     const spy = vi.spyOn(llm, "runTurn");
 
-    const result = await runOrders(emptyState, "계속 갑시다", llm);
+    const result = await runTacticOrders(emptyState, "계속 갑시다", llm);
 
     expect(result.ok).toBe(true);
     expect(result.ok && result.intent.advance).toBe("segment");
@@ -142,7 +142,7 @@ describe("runOrders — 의도를 받은 뒤의 실패", () => {
     };
     const spy = vi.spyOn(llm, "runTurn");
 
-    const result = await runOrders(emptyState, "왼쪽을 두껍게", llm);
+    const result = await runTacticOrders(emptyState, "왼쪽을 두껍게", llm);
 
     expect(result.ok).toBe(false);
     expect(spy).toHaveBeenCalledTimes(2);
@@ -166,7 +166,7 @@ describe("runOrders — 의도를 받은 뒤의 실패", () => {
     const llm: GameLLM = { runTurn: () => Promise.reject(thrown) };
     const spy = vi.spyOn(llm, "runTurn");
 
-    await expect(runOrders(emptyState, "왼쪽을 두껍게", llm)).rejects.toBe(thrown);
+    await expect(runTacticOrders(emptyState, "왼쪽을 두껍게", llm)).rejects.toBe(thrown);
     expect(spy).toHaveBeenCalledTimes(1);
   });
 });

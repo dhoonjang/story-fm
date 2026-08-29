@@ -498,6 +498,30 @@ export interface TimePassed {
  */
 const TOP_RATED_SHOWN = 2;
 const TRAINING_SHOWN = 3;
+
+/** 훈련 해석기가 읽는 예정 훈련 수 — 주간 일정을 통째로 보고 겹침을 판단한다 */
+const TRAINING_SCHEDULE_SHOWN = 20;
+
+/**
+ * 예정된 훈련 줄 — 스냅샷의 요약(`TRAINING_SHOWN`)과 훈련 해석기의 `<schedule>`이
+ * **같은 함수를 읽는다.** 두 벌이면 화면이 말하는 일정과 해석기가 읽는 일정이 갈린다.
+ */
+export function upcomingTrainingLines(state: GameState, limit = TRAINING_SHOWN): string[] {
+  return state.schedule
+    .filter((e) => e.type === "training" && e.status === "scheduled" && e.date >= state.date)
+    .slice(0, limit)
+    .map((e) => {
+      const s = state.trainingSessions.find((x) => x.id === e.refId);
+      return `${e.date.slice(5)} ${slotOfTime(e.time) === "am" ? "오전" : "오후"} ${s?.label ?? "훈련"}`;
+    });
+}
+
+/** 훈련 해석기의 `<schedule>` 본문 — 없으면 빈 문자열 */
+export function buildTrainingSchedule(state: GameState): string {
+  return upcomingTrainingLines(state, TRAINING_SCHEDULE_SHOWN)
+    .map((line) => `- ${line}`)
+    .join("\n");
+}
 const EXPIRING_SHOWN = 3;
 /**
  * 떠나기로 한 선수를 몇 명까지 이름으로 적나 — **만료 임박보다 짧다.** 그 자리는
@@ -1101,13 +1125,7 @@ export function buildGmStateNote(
     .map((p) => p.name);
   const unhappy = state.issues.map((i) => playerName(state, i.gamePlayerId));
 
-  const training = state.schedule
-    .filter((e) => e.type === "training" && e.status === "scheduled" && e.date >= state.date)
-    .slice(0, TRAINING_SHOWN)
-    .map((e) => {
-      const s = state.trainingSessions.find((x) => x.id === e.refId);
-      return `${e.date.slice(5)} ${slotOfTime(e.time) === "am" ? "오전" : "오후"} ${s?.label ?? "훈련"}`;
-    });
+  const training = upcomingTrainingLines(state);
   const trainingCount = state.schedule.filter(
     (e) => e.type === "training" && e.status === "scheduled" && e.date >= state.date,
   ).length;

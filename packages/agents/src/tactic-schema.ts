@@ -67,7 +67,7 @@ const TacticsSchema = z
     tempo: axis,
     width: axis,
     passStyle: axis,
-    // 낱말은 `APPLY_ORDERS_SYSTEM`이 `TACTIC_TOGGLES`에서 만들어 싣는다 (prompts.md §5-2)
+    // 낱말은 `TACTIC_ORDERS_SYSTEM`이 `TACTIC_TOGGLES`에서 만들어 싣는다 (prompts.md §5-2)
     transition: z.enum(TRANSITION_MODES).nullable(),
     offsideTrap: z.boolean(),
     tackling: z.enum(TACKLING_LEVELS),
@@ -130,7 +130,7 @@ const LineupSchema = z.object({
 });
 const SquadLevelSchema = z.object({ playerId, level: z.enum(["first", "reserve"]) });
 
-export const OrdersSchema = z.object({
+export const TacticOrdersSchema = z.object({
   /** 선발을 새로 짜라는 말 — 평시에만. 열한 명을 전부 적는다 */
   lineup: LineupSchema.optional().describe("선발 11명을 새로 짤 때만 — 자리는 포지션 코드"),
   /** 완장 — 감독이 말한 자리만. `vice: null`은 부주장 해제다 (people.md §5-1) */
@@ -167,7 +167,7 @@ export const OrdersSchema = z.object({
    * **세트피스 인원** — 가담·수비 두 축 중 감독이 말한 것만 (match.md §1.4).
    *
    * 0-1로 지고 있을 때의 "이제부터 다 올려"가 그 자리다. 지시를 푸는 값은 열거 안의
-   * `normal`이고, 낱말은 `APPLY_ORDERS_SYSTEM`이 `SET_PIECE_ROUTINE_AXES`에서 만들어
+   * `normal`이고, 낱말은 `TACTIC_ORDERS_SYSTEM`이 `SET_PIECE_ROUTINE_AXES`에서 만들어
    * 싣는다 (prompts.md §5-2).
    */
   setPieceRoutine: z
@@ -197,14 +197,13 @@ export const OrdersSchema = z.object({
   unresolved: z.string().min(1).max(200).optional().describe("어느 갈래에도 담기지 않은 말"),
 });
 
-/** 해석의 산출 — 평시에는 운영 명령의 인자(`ops`)가 함께 온다 (orders-ops.ts) */
-export type Orders = z.infer<typeof OrdersSchema> & { ops?: Record<string, unknown[]> };
+export type TacticOrders = z.infer<typeof TacticOrdersSchema>;
 
 /**
  * 판을 건드리는 의도가 하나라도 있는가 — 없으면 **대화 턴**이다.
  * 대화 턴은 패킷을 싣지 않고 시계도 옮기지 않는다 (agents.md §3).
  */
-export function touchesPitch(intent: Orders): boolean {
+export function touchesPitch(intent: TacticOrders): boolean {
   return (
     (intent.substitutions?.length ?? 0) > 0 ||
     (intent.playerTactics?.length ?? 0) > 0 ||

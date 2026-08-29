@@ -11,17 +11,15 @@ import {
 } from "@story-fm/engine";
 import { shootoutTally } from "@story-fm/domain";
 import type { GameToolSpec } from "@story-fm/llm";
-import { buildSkillTools, collectMatchMarks, sideTeamName } from "./gm-tools";
+import { buildToolSpecs, collectMatchMarks, sideTeamName } from "./gm-tools";
 import { buildSegmentMessage, buildShootoutMessage } from "./match-script";
-import { touchesPitch, type Orders } from "./orders-schema";
-import { SQUAD_OPS } from "./apply-orders";
-import { applyOps } from "./orders-ops";
+import { touchesPitch, type TacticOrders } from "./tactic-schema";
 import { MATCH_ADVANCED, type GmToolCall } from "./gm-types";
 
 /**
  * 의도 → 상태. **경기 턴의 ③이다** (docs/llm/agents.md §3).
  *
- * 해석이 낸 `Orders`를 엔진 명령로 옮기고, 진행 의도면 한 구간을 굴린다.
+ * 해석이 낸 `TacticOrders`를 엔진 명령로 옮기고, 진행 의도면 한 구간을 굴린다.
  * 여기서부터는 LLM이 없다 — 실재 확인도 이득 계산도 전부 결정적이다.
  *
  * ## 명령 배선을 다시 쓰지 않는다
@@ -33,7 +31,7 @@ import { MATCH_ADVANCED, type GmToolCall } from "./gm-types";
  */
 
 /** 무엇을 적용했고 무엇이 굴렀는가 — 중계 호출의 입력이 된다 */
-export interface AppliedOrders {
+export interface AppliedTacticOrders {
   /** 호출이 돌려준 말 — 감독에게 되돌아가고 중계의 근거가 된다 */
   notes: string[];
   /** 이번 구간에 일어난 일. 진행하지 않았으면 `null` */
@@ -50,17 +48,17 @@ export interface AppliedOrders {
  */
 const SHAPE_CHANGED_NOTE = "포메이션이 바뀌었습니다 — 전술판을 확인하고 진행하세요";
 
-export function applyOrders(
+export function applyTacticOrders(
   state: GameState,
-  intent: Orders,
+  intent: TacticOrders,
   calls: GmToolCall[],
   goals: GoalMark[],
   cards: CardMark[],
   /** 굴릴지는 매치 GM이 부른 도구가 정한다 — 없으면 의도의 `advance`를 읽는다 (agents.md §3) */
   options: { roll?: boolean } = {},
-): AppliedOrders {
+): AppliedTacticOrders {
   const specs = new Map<string, GameToolSpec>(
-    buildSkillTools(state, calls).map((tool) => [tool.name, tool] as const),
+    buildToolSpecs(state, calls).map((tool) => [tool.name, tool] as const),
   );
   const notes: string[] = [];
   /** 도구 하나를 부르고 결과를 말로 모은다 — 실패도 감독에게 돌아간다 */
@@ -81,8 +79,6 @@ export function applyOrders(
     call("set_squad_level", { moves: intent.squadLevels });
   }
   if (intent.captain) call("set_captain", intent.captain);
-  // 선수단 운영 — 평시의 받아쓰기 명령 (orders-ops.ts)
-  if (intent.ops) applyOps(specs, intent.ops, SQUAD_OPS, notes);
   // 교체가 먼저다 — 뒤이은 지시가 방금 들어온 선수를 겨냥할 수 있다
   for (const sub of intent.substitutions ?? []) call("substitute", sub);
   if (intent.tactics && Object.keys(intent.tactics).length > 0) call("set_tactics", intent.tactics);

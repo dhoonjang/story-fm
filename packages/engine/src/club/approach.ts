@@ -81,7 +81,7 @@ import {
   stanceRow,
   STANCE_KO,
 } from "./press";
-import type { PromiseInput, SkillResult } from "../commands";
+import type { PromiseInput, CommandResult } from "../commands";
 // 면담과 **같은 조각**을 쓴다 — 같은 말이 자리마다 다른 줄로 서지 않게 (people.md §5-2)
 import { promisePiece } from "../commands";
 import { deltaItems, item } from "../commands/brief";
@@ -1589,7 +1589,7 @@ export function respondToApproach(
     /** 잔향 — 찾아온 당사자에게 남는 심경 한 문장. 면접·주장·구단주 자리에는 버린다 */
     mood?: MoodLine;
   },
-): SkillResult {
+): CommandResult {
   const approach = pendingApproach(state);
   if (!approach) return { ok: false, message: "지금 답할 자리가 없습니다" };
   /**

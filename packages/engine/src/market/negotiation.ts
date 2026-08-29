@@ -107,7 +107,7 @@ import { evaluatePitch, latitudeOf } from "./persuasion";
 import { bandOpen, clampToBand, counterBoundsOf, outgoingCounterFloor } from "./counter-bounds";
 import { derivedSquadStatus } from "../squad/promises";
 import { makeRng, pickWeighted } from "../core/rng";
-import type { MarketSkillResult, SkillResult } from "../commands";
+import type { MarketCommandResult, CommandResult } from "../commands";
 import { grantManagerXP } from "../commands";
 import { deltaItems, item } from "../commands/brief";
 import { applyStanceOutcome, buildTransferPress, openPress, signed } from "../club/press";
@@ -377,7 +377,7 @@ export function arrivedResponses(state: GameState): Negotiation[] {
  * 확률은 여기서 계산해 라운드에 **함께 저장한다.** 나중에 "확률 34%였는데 LLM이
  * 수락했다"를 집계할 수 있어야 판정의 분포를 검증할 수 있다 (설계 §6).
  */
-export function sendOffer(state: GameState, input: DealTerms): MarketSkillResult {
+export function sendOffer(state: GameState, input: DealTerms): MarketCommandResult {
   const pick = pickAnyPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
@@ -703,7 +703,7 @@ export function answerOffer(
     paymentYears?: number;
     note?: string;
   },
-): MarketSkillResult {
+): MarketCommandResult {
   const negotiation = state.negotiations.find((n) => n.id === input.negotiationId);
   if (!negotiation) {
     return { ok: false, message: `협상 "${input.negotiationId}"을 찾지 못했습니다` };
@@ -734,7 +734,7 @@ export function respondOffer(
     deadlineOn?: string;
     note?: string;
   },
-): MarketSkillResult {
+): MarketCommandResult {
   const target = answerTarget(
     state,
     input.negotiationId,
@@ -1117,7 +1117,7 @@ export function listingOf(state: GameState, playerId: string) {
 export function setTransferList(
   state: GameState,
   input: { playerId: string; listed: boolean; askingPrice?: number; note?: string },
-): SkillResult {
+): CommandResult {
   const pick = pickAnyPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
@@ -1249,7 +1249,7 @@ export function respondTransferRequest(
     askingPrice?: number;
     note?: string;
   },
-): SkillResult {
+): CommandResult {
   const pick = pickAnyPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
@@ -1364,7 +1364,7 @@ export function offerPlayerOut(
     /** 이적료 분할 연수 — 임대료는 나누지 않는다 (transfer.md §5-2) */
     paymentYears?: number;
   },
-): MarketSkillResult {
+): MarketCommandResult {
   const pick = pickAnyPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
@@ -1889,7 +1889,7 @@ export function answerIncomingOffer(
     weeklyWage?: number;
     note?: string;
   },
-): MarketSkillResult {
+): MarketCommandResult {
   const target = answerTarget(
     state,
     input.negotiationId,
@@ -2041,7 +2041,7 @@ export function openRenewal(
     /** 감독이 제시하는 계약 지위 — 합의되면 새 계약에 적힌다 (people.md §5-2) */
     squadStatus?: SquadStatus;
   },
-): MarketSkillResult {
+): MarketCommandResult {
   const pick = pickAnyPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
@@ -2151,7 +2151,7 @@ export function openRenewal(
 export function openRelease(
   state: GameState,
   input: { playerId: string; severance: number; paymentYears?: number },
-): MarketSkillResult {
+): MarketCommandResult {
   const pick = pickAnyPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
@@ -2237,7 +2237,7 @@ function executeRelease(
   state: GameState,
   negotiation: Negotiation,
   agreed: Negotiation["rounds"][number],
-): SkillResult {
+): CommandResult {
   const done = releasePlayer(state, {
     playerId: negotiation.gamePlayerId,
     severance: agreed.fee,
@@ -2257,7 +2257,7 @@ function executeLoanOut(
   state: GameState,
   negotiation: Negotiation,
   agreed: Negotiation["rounds"][number],
-): SkillResult {
+): CommandResult {
   const player = playerById(state, negotiation.gamePlayerId);
   if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
   /**
@@ -2336,7 +2336,7 @@ function executeLoanIn(
   state: GameState,
   negotiation: Negotiation,
   agreed: Negotiation["rounds"][number],
-): SkillResult {
+): CommandResult {
   const player = playerById(state, negotiation.gamePlayerId);
   if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
   const from = negotiation.counterpartTeamId ?? player.teamId;
@@ -2499,7 +2499,7 @@ function executeRenewal(
   state: GameState,
   negotiation: Negotiation,
   agreed: Negotiation["rounds"][number],
-): SkillResult {
+): CommandResult {
   const player = playerById(state, negotiation.gamePlayerId);
   if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
   if (player.teamId !== state.userTeamId) {
@@ -2580,7 +2580,7 @@ function executeRenewal(
  * 도장을 찍고 기자회견까지 여는 장면이 한 턴에 담기는 것을 막는다. 장부를
  * 옮기는 것은 검진이 끝난 뒤 `executeDeal`이 한다.
  */
-export function acceptDeal(state: GameState, negotiationId: string): SkillResult {
+export function acceptDeal(state: GameState, negotiationId: string): CommandResult {
   const negotiation = state.negotiations.find((n) => n.id === negotiationId);
   if (!negotiation) return { ok: false, message: `협상 "${negotiationId}"을 찾지 못했습니다` };
   if (negotiation.status !== "agreed") {
@@ -2604,7 +2604,7 @@ function passMedicalGate(
   state: GameState,
   negotiation: Negotiation,
   player: GamePlayer,
-): SkillResult | null {
+): CommandResult | null {
   if (!negotiation.medical) {
     const medical = scheduleMedical(state, negotiation);
     if (medical.onDate > state.date) {
@@ -2670,7 +2670,7 @@ function medicalFlagResult(
   negotiation: Negotiation,
   player: GamePlayer,
   concern: MedicalConcern,
-): SkillResult {
+): CommandResult {
   const note = medicalConcernText(concern);
   if (isIncomingDeal(negotiation)) {
     pushNarrative(state, `${player.name} 메디컬 소견 — ${note}`, 4);
@@ -2787,7 +2787,7 @@ function affordabilityGate(
      */
     gamePlayerId?: string;
   },
-): SkillResult | null {
+): CommandResult | null {
   if (deal.skipWindow !== true && !windowOpenOn(state.windows, state.date)) {
     return { ok: false, message: `이적시장이 닫혀 있어 ${deal.what}을 확정할 수 없습니다` };
   }
@@ -2823,7 +2823,7 @@ function affordabilityGate(
  *
  * @returns 여력이 모자라면 감독에게 돌려줄 이유, 괜찮으면 null
  */
-function wageRoomGate(state: GameState, weeklyWage: number): SkillResult | null {
+function wageRoomGate(state: GameState, weeklyWage: number): CommandResult | null {
   const room = userWageRoom(state);
   if (weeklyWage <= room) return null;
   return {
@@ -2857,14 +2857,14 @@ const NEGOTIATION_XP: Record<Negotiation["kind"], number> = {
  * (`runAiRenewals`)은 계약 row를 직접 갈아 끼우고 이 함수를 지나지 않는다 —
  * 그래서 여기서 협상 XP를 주는 것이 곧 "감독이 맺은 딜에만" 이다.
  */
-export function executeDeal(state: GameState, negotiation: Negotiation): SkillResult {
+export function executeDeal(state: GameState, negotiation: Negotiation): CommandResult {
   const result = settleDeal(state, negotiation);
   if (!result.ok) return result;
   const grown = grantManagerXP(state, "negotiation", NEGOTIATION_XP[negotiation.kind]);
   return grown ? { ...result, message: `${result.message} · ${grown}` } : result;
 }
 
-function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
+function settleDeal(state: GameState, negotiation: Negotiation): CommandResult {
   const player = playerById(state, negotiation.gamePlayerId);
   if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
 
@@ -3151,7 +3151,7 @@ function executePrecontract(
   negotiation: Negotiation,
   agreed: Negotiation["rounds"][number],
   player: GamePlayer,
-): SkillResult {
+): CommandResult {
   /**
    * 합의와 확정 사이의 며칠이 이 갈래의 위험이다 — 그사이 남이 먼저 예약했거나
    * 그가 은퇴를 예고했으면 예약할 자리가 없다. 오퍼 때 `dealOdds`가 본 것과
@@ -3214,7 +3214,7 @@ function executeSale(
   state: GameState,
   negotiation: Negotiation,
   agreed: Negotiation["rounds"][number],
-): SkillResult {
+): CommandResult {
   const player = playerById(state, negotiation.gamePlayerId);
   if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
   if (player.teamId !== state.userTeamId) {
@@ -3427,7 +3427,7 @@ function executeSale(
 }
 
 /** 협상 철회 — 감독이 물러선다 */
-export function withdrawOffer(state: GameState, negotiationId: string): MarketSkillResult {
+export function withdrawOffer(state: GameState, negotiationId: string): MarketCommandResult {
   const negotiation = state.negotiations.find((n) => n.id === negotiationId);
   if (!negotiation) return { ok: false, message: `협상 "${negotiationId}"을 찾지 못했습니다` };
   if (negotiation.status === "completed") {

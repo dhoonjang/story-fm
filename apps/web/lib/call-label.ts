@@ -9,12 +9,13 @@
  * (`skill-surface.test.ts` — 새 이름이 라벨 없이 들어오면 실패한다).
  * 없는 이름은 그대로 보여주므로 누락돼도 화면이 깨지지는 않는다.
  */
-export const SKILL_LABEL: Record<string, string> = {
+export const CALL_LABEL: Record<string, string> = {
   start_match: "경기 시작",
   accept_manager_offer: "감독직 수락",
   counter_manager_offer: "감독직 흥정",
   apply_manager_job: "감독직 지원",
-  apply_orders: "전술 지시",
+  tactic_orders: "전술 지시",
+  training_orders: "훈련 지시",
   speak_at_table: "테이블",
   market_orders: "이적·재정 지시",
   set_lineup: "라인업",
