@@ -12,7 +12,7 @@ import {
   topLeagues,
 } from "@story-fm/engine";
 import { boardExpectationText } from "@story-fm/domain";
-import { judgeOnboarding, runOnboardingTurn } from "@story-fm/agents";
+import { runOnboarding } from "@story-fm/agents";
 import { beginGameUsage, bindTurnTrace, llmErrorKind, traceTurn } from "@story-fm/llm";
 import { toPayload } from "@/lib/store";
 import { errorDetail, turnErrorMessage } from "@/lib/turn-runner";
@@ -106,21 +106,15 @@ export async function POST(request: Request) {
   beginGameUsage(state.id);
 
   /**
-   * **시작 지갑·능력치의 결·시작 사건은 판정이 정한다** — 앵커 ± 한도
-   * (career.md §1 · agents.md §4-2). 첫 장면과 달리 실패해도 게임은 선다: 앵커가 그대로
-   * 답이고 시작 사건은 비어 있을 뿐이다. `judgeOnboarding`이 실패를 삼키므로 여기 try가 없다.
-   */
-  await judgeOnboarding(state, background);
-
-  /**
-   * 첫 장면은 폴백 없이 모델이 쓴다 (`runOnboardingTurn`이 한 번 재시도한다).
-   * 실패하면 **게임을 만들지 않는다** — 규칙 장면으로 열어 두면 유저는 그것이
+   * **새 게임은 한 호출로 선다** — 시작 지갑·능력치의 결·시작 사건을 판정하고, 그 위에서
+   * 부임 첫날의 첫 장면을 쓴다 (career.md §1 · agents.md §4-2). `runOnboarding`이 한 번
+   * 재시도하고, 실패하면 **게임을 만들지 않는다** — 규칙 장면으로 열어 두면 유저는 그것이
    * 이 게임의 첫 장면인 줄 알고, 다시 시작할 기회를 잃는다.
    */
   // 첫 장면의 원문도 그 model 턴에 묶인다 — 묶는 것은 `traceTurn` 범위 안에서만 된다
   const opened = await traceTurn(async () => {
     try {
-      const intro = await runOnboardingTurn(state);
+      const intro = await runOnboarding(state, background);
       state.chat.push({
         role: "model",
         text: intro.text,
@@ -130,7 +124,7 @@ export async function POST(request: Request) {
       bindTurnTrace(state.id, state.chat.length - 1);
       return { ok: true as const };
     } catch (error) {
-      console.error("[games] 첫 장면 생성 실패 — 게임을 만들지 않는다:", error);
+      console.error("[games] 온보딩 실패 — 게임을 만들지 않는다:", error);
       return { ok: false as const, error };
     }
   });

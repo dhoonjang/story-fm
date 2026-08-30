@@ -91,15 +91,16 @@ agents:
     timeout_ms: 30000
     thinking_level: minimal
 
-  # 새 게임의 배경 한 문단을 읽고 시작 지갑 하나를 판정한다 (docs/llm/agents.md §4-2).
-  # 결산과 같은 앵커 ± 한도 계약이고 게임당 한 번뿐이다 — 읽는 것이 500자 배경과
-  # 앵커 둘뿐이라 싼 자리로 보낸다. 실패하면 앵커가 그대로 답이므로 시한도 짧다.
+  # 새 게임의 배경을 읽고 지갑·능력치의 결·시작 사건을 판정한 뒤, 그 위에서 부임 첫날의
+  # 첫 장면까지 쓴다 (docs/llm/agents.md §4-2). **싼 자리로 보내지 않는다** — 판정만 낼
+  # 때는 앵커가 답을 받쳐 줬지만 첫 장면에는 앵커가 없고, 그것이 이 게임의 첫인상이다.
+  # 게임당 한 번뿐이라 이 자리의 값은 장부에 거의 서지 않는다.
   onboarding-judge:
     provider: google
-    model: gemini-3.5-flash-lite
-    max_tokens: 4000
-    timeout_ms: 30000
-    thinking_level: minimal
+    model: gemini-3.7-flash
+    max_tokens: 16000
+    timeout_ms: 90000
+    thinking_level: low
 
   # 접히는 평시 대화를 한 벌 요약으로 옮긴다 (docs/llm/agents.md §5-1). 결산과 같은
   # 계약이라 실패는 삼키지만 읽는 양이 다르다 — 한 번에 접히는 구간 전부를 읽고 거기

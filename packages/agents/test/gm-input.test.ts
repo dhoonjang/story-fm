@@ -60,7 +60,7 @@ import {
   recordCharacterInjection,
   runGmTurn,
   runMockGmTurn,
-  runOnboardingTurn,
+  runOnboarding,
   type GmToolCall,
 } from "@story-fm/agents";
 import { awardTitle, boardExpectationLine, normalizeSpeaker, SCOUT_DAYS } from "@story-fm/domain";
@@ -610,99 +610,7 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
   });
 });
 
-describe("새 게임 첫 장면", () => {
-  it("실모드는 감독·구단 컨텍스트로 GM에게 매번 생성시킨다", async () => {
-    const state = game();
-    // 수석코치는 직책이 아니라 **이름**으로 말한다 — 검증도 그 태그를 본다
-    const tag = `@${headCoachOf(state).characterId}:`;
-    let request: TurnRequest | undefined;
-    const llm: GameLLM = {
-      runTurn: async (input) => {
-        request = input;
-        return {
-          text: [
-            "@: *비가 갠 아침, 아스날 훈련장 문이 열린다*",
-            `${tag} 김감독님, 선수단이 첫 미팅을 기다리고 있습니다.`,
-            `${tag} 여름 이적시장과 개막전 준비를 함께 정리하겠습니다.`,
-            `${tag} 훈련과 선수단 점검 중 무엇부터 시작할까요?`,
-          ].join("\n"),
-          history: {
-            version: 1,
-            provider: "anthropic",
-            model: "test-model",
-            messages: [],
-          },
-          historyBase: 0,
-          usage: {
-            inputTokens: 100,
-            outputTokens: 80,
-            cacheReadTokens: 0,
-            cacheWriteTokens: 0,
-          },
-          toolCallCount: 0,
-          stopReason: "completed" as const,
-        };
-      },
-    };
-    const previousMode = process.env.LLM_MODE;
-    process.env.LLM_MODE = "real";
-    try {
-      await runOnboardingTurn(state, llm);
-    } finally {
-      if (previousMode === undefined) delete process.env.LLM_MODE;
-      else process.env.LLM_MODE = previousMode;
-    }
-
-    // 첫 장면의 지시는 **캐시 밖**(상태 스냅샷)에 실린다 — 문구가 아니라 그 자리를 잰다
-    expect(request?.stateNote).toContain(state.date);
-    const system = request?.system;
-    expect(Array.isArray(system) ? system.join("\n") : (system ?? "")).not.toContain(state.date);
-    // 시스템은 고정 계층 + 레퍼런스 계층 두 블록이다 (캐시 프리픽스의 모양)
-    expect(request?.system).toHaveLength(2);
-    // 출력 상한을 따로 좁히지 않는다 — 상한은 사고와 본문을 함께 덮으므로
-    // 장면 길이로 잡으면 첫 문장이 한복판에서 잘린다 (실제로 그렇게 잘렸다)
-    expect(request?.maxTokens).toBeUndefined();
-  });
-
-  /**
-   * **검증과 프롬프트 사이의 계약이다.** `isValidOnboardingText`는 수석코치의
-   * **이름** 태그를 요구하는데, 그 이름이 프롬프트에 없으면 모델은 직책으로 태그를
-   * 달고 첫 장면이 매번 반려된다 — 실모드에서 새 게임을 만들 수 없게 된다.
-   * 레퍼런스에서 인물 카드가 내려간 뒤 실제로 이 계약이 깨졌다.
-   */
-  it("첫 장면 프롬프트가 검증이 요구하는 수석코치의 이름을 담는다", async () => {
-    const state = game();
-    const coachId = headCoachOf(state).characterId;
-    let request: TurnRequest | undefined;
-    const llm: GameLLM = {
-      runTurn: async (input) => {
-        request = input;
-        return reply(scene(state, "무엇부터 보시겠습니까?"));
-      },
-    };
-    await onboardInRealMode(state, llm);
-
-    // 이름은 **이번 턴 층**에 실린다 — 캐시 프리픽스인 레퍼런스에 두면 매 턴 정가다
-    expect(request?.user).toContain(`@${coachId}:`);
-    expect(Array.isArray(request?.system) ? request.system.join("\n") : "").not.toContain(coachId);
-    // 카드가 감독 발화보다 앞에 선다 — 평시 턴·이력과 같은 순서다
-    expect(request?.user.indexOf(coachId)).toBeLessThan(
-      request?.user.indexOf(state.manager.name) ?? -1,
-    );
-  });
-
-  /** 실모드에서 첫 장면을 만들어 본다 — LLM_MODE를 되돌리는 것까지 한 자리에서 */
-  async function onboardInRealMode(state: GameState, llm: GameLLM) {
-    const previousMode = process.env.LLM_MODE;
-    process.env.LLM_MODE = "real";
-    try {
-      return await runOnboardingTurn(state, llm);
-    } finally {
-      if (previousMode === undefined) delete process.env.LLM_MODE;
-      else process.env.LLM_MODE = previousMode;
-    }
-  }
-
+describe("새 게임 온보딩 — 판정과 첫 장면이 한 호출이다", () => {
   const scene = (state: GameState, tail: string) =>
     [
       "@: *이른 아침, 훈련장에 안개가 걷힌다*",
@@ -710,18 +618,117 @@ describe("새 게임 첫 장면", () => {
       `@${headCoachOf(state).characterId}: ${tail}`,
     ].join("\n");
 
-  const reply = (text: string, stopReason: StopReason = "completed") => ({
-    text,
-    history: {
-      version: 1 as const,
-      provider: "anthropic" as const,
-      model: "test-model",
-      messages: [],
-    },
-    historyBase: 0,
-    usage: { inputTokens: 100, outputTokens: 80, cacheReadTokens: 0, cacheWriteTokens: 0 },
-    toolCallCount: 0,
-    stopReason,
+  /** 판정 하나 — 강제 도구가 받는 인자의 모양 */
+  const report = {
+    wallet: 2_000_000,
+    reason: "에이전트로 오래 벌었다",
+    attributes: { negotiation: 70 },
+    openings: [
+      { kind: "press" as const, title: "언론의 의문", line: "부임 첫날부터 이름표가 붙는다." },
+    ],
+  };
+
+  /**
+   * 산출 도구를 부르고 본문으로 장면을 쓰는 응답 — 실제 호출의 두 왕복을 한 자리에서
+   * 흉내낸다. `tools`에 실린 핸들러를 그대로 부르므로 Zod 검증도 같은 문을 지난다.
+   */
+  const reply = (
+    input: TurnRequest,
+    text: string,
+    options: { stopReason?: StopReason; ops?: unknown; skipTool?: boolean } = {},
+  ) => {
+    if (!options.skipTool) input.tools?.[0]?.handle(options.ops ?? report);
+    return {
+      text,
+      history: {
+        version: 1 as const,
+        provider: "anthropic" as const,
+        model: "test-model",
+        messages: [],
+      },
+      historyBase: 0,
+      usage: { inputTokens: 100, outputTokens: 80, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      toolCallCount: options.skipTool ? 0 : 1,
+      stopReason: options.stopReason ?? ("completed" as const),
+    };
+  };
+
+  /** 실모드에서 온보딩을 돌린다 — LLM_MODE를 되돌리는 것까지 한 자리에서 */
+  async function onboardInRealMode(state: GameState, llm: GameLLM) {
+    const previousMode = process.env.LLM_MODE;
+    process.env.LLM_MODE = "real";
+    try {
+      return await runOnboarding(state, "에이전트 출신으로 협상에 능하다.", llm);
+    } finally {
+      if (previousMode === undefined) delete process.env.LLM_MODE;
+      else process.env.LLM_MODE = previousMode;
+    }
+  }
+
+  /**
+   * **한 호출이 둘을 낸다** — 갈라 두면 장면을 쓰는 쪽이 방금 정해진 실마리를 모른다.
+   * 도구가 장부를 움직이고 본문이 장면이 되는 것을 한 자리에서 잰다 (agents.md §4-2).
+   */
+  it("도구의 판정이 장부에 서고 본문이 첫 장면이 된다", async () => {
+    const state = game();
+    const llm: GameLLM = {
+      runTurn: async (input) => reply(input, scene(state, "선수단부터 보시겠습니까.")),
+    };
+
+    const turn = await onboardInRealMode(state, llm);
+
+    expect(turn.text).toContain("선수단부터");
+    // 시계는 움직이지 않는다 — 헤더는 코어가 세운다
+    expect(turn.text.startsWith(`[${state.date}`)).toBe(true);
+    expect(turn.toolCalls).toEqual([]);
+    // 판정은 앵커 ± 한도로 잘려 장부에 선다
+    expect(state.manager.wallet).toBeGreaterThan(0);
+    expect(state.openings?.map((o) => o.title)).toEqual(["언론의 의문"]);
+  });
+
+  /** 산출은 도구 하나로 강제한다 — 본문만 돌아온 응답은 실패다 (agents.md §8) */
+  it("도구를 부르지 않은 응답은 다시 시도한다", async () => {
+    const state = game();
+    let call = 0;
+    const llm: GameLLM = {
+      runTurn: async (input) =>
+        ++call === 1
+          ? reply(input, scene(state, "무엇부터 볼까요."), { skipTool: true })
+          : reply(input, scene(state, "선수단부터 보시겠습니까.")),
+    };
+
+    await onboardInRealMode(state, llm);
+    expect(call).toBe(2);
+  });
+
+  /**
+   * **검증과 프롬프트 사이의 계약이다.** `isValidOnboardingText`는 수석코치의
+   * **이름** 태그를 요구하는데, 그 이름이 프롬프트에 없으면 모델은 직책으로 태그를
+   * 달고 첫 장면이 매번 반려된다 — 실모드에서 새 게임을 만들 수 없게 된다.
+   */
+  it("프롬프트가 검증이 요구하는 수석코치의 이름과 오늘의 사실을 담는다", async () => {
+    const state = game();
+    const coachId = headCoachOf(state).characterId;
+    let request: TurnRequest | undefined;
+    const llm: GameLLM = {
+      runTurn: async (input) => {
+        request = input;
+        return reply(input, scene(state, "무엇부터 보시겠습니까?"));
+      },
+    };
+    await onboardInRealMode(state, llm);
+
+    expect(request?.user).toContain(`@${coachId}:`);
+    // 첫 장면이 짚을 사실은 스냅샷이 갖는다 — 오늘 날짜가 그 자리의 표식이다
+    expect(request?.user).toContain(state.date);
+    // 시스템은 이 호출의 프롬프트 하나다 — 날짜가 섞이면 캐시 프리픽스가 매 게임 갈린다
+    const system = request?.system;
+    expect(Array.isArray(system) ? system.join("\n") : (system ?? "")).not.toContain(state.date);
+    // 산출은 강제된 도구 하나다
+    expect(request?.toolChoice).toEqual({ name: "report_onboarding" });
+    // 출력 상한을 따로 좁히지 않는다 — 상한은 사고와 본문을 함께 덮으므로
+    // 장면 길이로 잡으면 첫 문장이 한복판에서 잘린다 (실제로 그렇게 잘렸다)
+    expect(request?.maxTokens).toBeUndefined();
   });
 
   /**
@@ -733,10 +740,10 @@ describe("새 게임 첫 장면", () => {
     const state = game();
     let call = 0;
     const llm: GameLLM = {
-      runTurn: async () =>
+      runTurn: async (input) =>
         ++call === 1
-          ? reply(scene(state, "이적시장 목표 파"), "truncated")
-          : reply(scene(state, "선수단부터 보시겠습니까.")),
+          ? reply(input, scene(state, "이적시장 목표 파"), { stopReason: "truncated" })
+          : reply(input, scene(state, "선수단부터 보시겠습니까.")),
     };
 
     const turn = await onboardInRealMode(state, llm);
@@ -759,14 +766,18 @@ describe("새 게임 첫 장면", () => {
     expect(call).toBe(1);
   });
 
-  it("문법을 어긴 장면도 두 번째까지 어기면 오류다", async () => {
+  /**
+   * 판정만 있던 시절과 갈리는 자리다 — 그때는 앵커가 답이 되어 게임이 섰지만, 첫 장면에는
+   * 답을 대신할 앵커가 없다. 두 번째까지 문법을 어기면 **게임을 만들지 않는다**.
+   */
+  it("문법을 어긴 장면도 두 번째까지 어기면 오류다 — 게임이 서지 않는다", async () => {
     const state = game();
     let call = 0;
     // 감독을 대신 연기한 장면 — 첫 턴부터 규약이 깨진다
     const llm: GameLLM = {
-      runTurn: async () => {
+      runTurn: async (input) => {
         call++;
-        return reply(`@${state.manager.name}: 반갑습니다, 여러분.`);
+        return reply(input, `@${state.manager.name}: 반갑습니다, 여러분.`);
       },
     };
 

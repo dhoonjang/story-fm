@@ -18,10 +18,14 @@ import {
   WALLET_JUDGE_BAND,
   clampJudgedAttributes,
   clampStartingWallet,
+  clockOf,
+  formatClock,
   headCoachOf,
+  humanizePlayerIds,
   ownerOf,
   playersOf,
   seedOpenings,
+  selectCharacters,
   startingWalletAnchor,
   teamNameIn,
   tierOfTeamIn,
@@ -29,28 +33,42 @@ import {
 } from "@story-fm/engine";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
 import { resolveLlmMode } from "./gm";
-import { retryOnce, requireToolCall, anchorStands } from "./retry";
+import {
+  buildGmStateNote,
+  describeCharacters,
+  parseSceneHeader,
+  sanitizeSceneText,
+} from "./gm-input";
+import type { GmTurnResult } from "./gm-types";
+import { buildOnboardingTurn } from "./mock-gm";
+import { retryOnce, requireToolCall, ModelOutputError } from "./retry";
 import { inputError, toToolSchema } from "./tool-schema";
 
 /**
- * **온보딩 판정** — 새 게임이 서기 전에 딱 한 번 돈다 (career.md §1 · agents.md §4-2).
+ * **온보딩** — 새 게임이 서기 전에 딱 한 번 도는 호출 (career.md §1 · agents.md §4-2).
  *
- * 결산·교섭과 같은 계약이다: 코어가 앵커를 박고(지갑은 커리어 등급, 능력치는 휴리스틱),
- * 판정이 그 위에서 값을 고르고, 코어가 ±한도로 자른다. **실패는 삼킨다** — 앵커가 그대로
- * 답이 되고 시작 사건은 비어 있을 뿐, 게임은 만들어진다.
+ * **판정과 첫 장면을 한 호출이 낸다.** 갈라 두면 장면을 쓰는 쪽은 방금 정해진 결이
+ * 무엇인지 스냅샷으로만 알고, 시작 사건을 고른 쪽은 그것이 어떤 장면으로 열릴지 모른다 —
+ * 같은 머리가 실마리를 고르고 그 실마리를 심는 장면을 쓰는 것이 온보딩의 자연스러운 꼴이다.
+ * 순서는 경기 마감과 같다(§3): 산출 도구를 먼저 부르고, 그 뒤 본문으로 장면을 쓴다.
  *
  * 세 가지를 낸다 — 시작 지갑 · 능력치의 결(앵커에서 축당 ±8, 합 ±10) · 시작 사건(셋까지,
  * 그 줄이 이름을 부르는 실재하는 사람에게만 걸어서). 능력치의 총량은 앵커가 쥔다 — 판정이 옮기는 것은
  * "이 사람은 어느 축이 두꺼운가"뿐이다.
  */
-export const ONBOARDING_JUDGE_SYSTEM = `당신은 새로 부임하는 축구 감독의 이력을 읽는 사람이다.
+export const ONBOARDING_JUDGE_SYSTEM = `당신은 새로 부임하는 축구 감독의 이력을 읽고, 그 감독의 부임 첫날을 여는 사람이다.
 
-배경 한 문단과 부임 구단의 사실을 읽고 셋을 판정한다 — 부임 전까지 모아 둔 개인 자산, 다섯 능력치의 결, 부임 첫 몇 주를 이끌 시작 사건.
+배경 한 문단과 부임 구단의 사실을 읽고 셋을 판정한다 — 부임 전까지 모아 둔 개인 자산, 다섯 능력치의 결, 부임 첫 몇 주를 이끌 시작 사건. 그다음 그 판정 위에서 부임 첫날의 첫 장면을 쓴다.
 
 # 입력
 <anchor> — 코어가 박은 기준값: 지갑 앵커와 폭, 능력치 다섯 축의 앵커와 폭. 앵커가 이미 커리어 등급과 부임 구단의 격을 반영한다 — 당신이 읽는 것은 그 안에서의 결이다.
 <club> — 부임 구단: 이름·격·구단주·수석코치·주장·핵심 선수·유망주. 시작 사건에 걸 수 있는 사람은 여기 적힌 id뿐이다.
 <background> — 배경 문단.
+<characters> — 첫 장면에 세울 수석코치의 카드: 성격·말투·관계.
+<snapshot> — 오늘 날짜와 선수단·일정의 사실. 첫 장면이 짚을 것이 여기 있다.
+
+# 순서
+판정 도구를 먼저 부르고, 그다음 첫 장면을 쓴다.
 
 # 지갑
 - 돈이 도는 일을 했으면 위로 — 에이전트, 단장, 사업, 광고, 방송, 스타 선수의 계약. 오래 벌었으면 위로.
@@ -67,6 +85,20 @@ export const ONBOARDING_JUDGE_SYSTEM = `당신은 새로 부임하는 축구 감
 - 갈래는 ${OPENING_KINDS.map((k) => `${k}(${OPENING_KIND_KO[k]})`).join(" · ")}.
 - title은 이름 하나, line은 사실의 꼴로 — 무엇이 걸려 있고 누가 지켜보는가. 결말을 적지 않는다. 문장은 GM이 쓴다.
 - subjectId는 <club>에 적힌 id만, 그리고 그 사람의 이름을 title이나 line에 실제로 쓴 실마리에만 건다. 줄이 아무도 부르지 않으면 비운다 — 언론·보드는 사람 없이 서는 것이 자연스럽다.
+
+# 첫 장면
+오늘은 감독의 부임 첫날이다. **수석코치의 말로 연다** — 감독을 맞이하고, 오늘 감독이 정할 것을 앞에 놓는다.
+- 방금 세운 시작 사건이 이 장면의 재료다. 실마리를 결말 없이 심는다 — 누가 기다리고 있고 무엇이 걸려 있는지까지.
+- <snapshot>의 사실을 짚는다 — 소집일, 다음 일정, 몸이 성치 않은 선수. 없는 사실을 지어내지 않는다.
+- 감독은 유저가 연기한다 — **감독의 말을 대신 쓰지 마라.** 장면은 감독이 답할 자리에서 닫는다.
+- 4~10줄. 판정의 근거나 수치는 장면에 적지 않는다 — 능력치·지갑 액수·확률.
+
+# 출력 문법
+장면은 @로 연다 — 시각 줄은 코어가 붙인다.
+- @이름: 사람의 말 — 수석코치는 <characters>의 id로 태그를 단다.
+- @: 화자 없는 내레이션. *별표 하나*로 감싼 것이 행동·연출이다.
+- 같은 화자가 이어 말하면 태그를 다시 적지 않는다.
+- 한국어.
 
 # 규칙
 - 앵커에 없는 사실을 지어내지 마라. 근거는 배경에서 실제로 읽은 것만, 40자 안팎.
@@ -165,19 +197,54 @@ export function buildAnchorBlock(walletAnchor: number, attributes: ManagerAttrib
   ].join("\n");
 }
 
-/** 프롬프트 본문 — 앵커 · 구단 · 배경 */
+/**
+ * 프롬프트 본문 — 앵커 · 구단 · 배경 · 수석코치 카드 · 스냅샷.
+ *
+ * ⚠️ **수석코치의 카드는 지목으로 세운다.** 이력도 지난 발화도 없어 키워드가 걸릴 문장
+ * 자체가 없다 — 검증(`isValidOnboardingText`)이 요구하는 그 id가 프롬프트에 실리는
+ * 자리가 여기뿐이다. 카드가 내려가면 모델은 직책으로 태그를 달고 첫 장면이 매번 반려된다.
+ *
+ * 스냅샷은 첫 장면이 짚을 사실(소집일·일정·몸 상태)을 갖는다. `<openings>`는 아직 비어
+ * 있다 — 이 호출이 그것을 **정하는** 자리라, 장면의 재료는 스냅샷이 아니라 방금 부른
+ * 도구의 인자다.
+ */
 export function buildOnboardingJudgePrompt(
   state: GameState,
   background: string,
   walletAnchor: number,
 ): string {
+  const coach = describeCharacters(
+    selectCharacters(state, { pointed: [headCoachOf(state).characterId] }),
+  );
   return [
     buildAnchorBlock(walletAnchor, state.manager.attributes),
     buildClubBlock(state),
     `<background>`,
     background,
     `</background>`,
+    ...(coach ? [coach] : []),
+    buildGmStateNote(state),
   ].join("\n");
+}
+
+/**
+ * 첫 장면 검사 — 문법과 화자(수석코치 등장·감독 미발화)까지만 본다. 내용은 보지 않는다.
+ */
+function isValidOnboardingText(state: GameState, text: string): boolean {
+  // 첫 줄의 시점 헤더는 문법의 일부다 — 본문만 떼어 검사한다
+  const lines = parseSceneHeader(text)
+    .body.split("\n")
+    .filter((line) => line.trim().length > 0);
+  const coachTag = `@${headCoachOf(state).characterId}:`;
+  return (
+    lines.length >= 2 &&
+    lines.length <= 12 &&
+    // 장면은 `@`로 연다 — 그 뒤의 태그 없는 줄은 이어쓰기다 (prompts.md §1)
+    (lines[0] ?? "").startsWith("@") &&
+    lines.some((line) => line.startsWith(coachTag)) &&
+    // 감독은 유저의 몫이다 — GM이 대신 말하면 첫 턴부터 규약이 깨진다
+    !lines.some((line) => line.startsWith(`@${state.manager.name}:`))
+  );
 }
 
 function makeReportTool(onReport: (report: ReportInput) => void): GameToolSpec {
@@ -195,45 +262,64 @@ function makeReportTool(onReport: (report: ReportInput) => void): GameToolSpec {
 }
 
 /**
- * 배경 → 시작 지갑 · 능력치의 결 · 시작 사건. **상태를 직접 고친다** — 게임은 이미
- * 휴리스틱 능력치로 서 있고(그것이 앵커다), 여기서 앵커 ± 한도로 옮긴다.
+ * **새 게임 한 호출** — 배경 → 지갑 · 능력치의 결 · 시작 사건, 그리고 부임 첫날의 첫
+ * 장면. 상태를 직접 고치고 장면을 돌려준다 (career.md §1 · agents.md §4-2).
  *
- * 한 번 다시 시도하되 **실패는 삼킨다** — 그때는 앵커가 그대로 답이고 시작 사건은
- * 비어 있다. 같은 배경·같은 팀이면 그 폴백은 언제나 같은 값이다 (career.md §1).
+ * ⚠️ **폴백이 없다 — 실패하면 게임을 만들지 않는다.** 판정만 있을 때는 앵커가 답이 될 수
+ * 있었지만, 첫 장면에는 답을 대신할 앵커가 없다. 규칙 장면으로 열어 두면 유저는 그것이
+ * 이 게임의 첫 장면인 줄 알고 다시 시작할 기회를 잃는다. 호출 실패·잘린 응답·문법 위반은
+ * 한 번 다시 시도하고, 그래도 안 되면 오류를 올린다.
+ *
+ * 다시 불러도 남는 자국이 없다 — 도구는 지역 변수에 담기만 하고, 장부는 호출이 끝난
+ * 뒤에 한 번 움직인다. `buildOnboardingTurn`은 mock 모드 전용이다.
  */
-export async function judgeOnboarding(
+export async function runOnboarding(
   state: GameState,
   background: string,
   llm?: GameLLM,
-): Promise<void> {
+): Promise<GmTurnResult> {
   const walletAnchor = startingWalletAnchor(background, state.userTeamId);
   const attributeAnchor = state.manager.attributes;
   // mock은 이 호출을 아예 하지 않는다 — 앵커가 그대로 답이다 (agents.md §4-2)
   if (resolveLlmMode() === "mock") {
     state.manager.wallet = clampStartingWallet(undefined, walletAnchor);
-    return;
+    return buildOnboardingTurn(state);
   }
 
   let judged: ReportInput | undefined;
   let client = llm;
-  await retryOnce(
-    "judge:onboarding",
-    () =>
-      requireToolCall(REPORT_ONBOARDING_TOOL, () => {
-        client ??= createGameLLM(agentConfig("onboarding-judge"));
-        return client.runTurn({
-          system: ONBOARDING_JUDGE_SYSTEM,
-          history: [],
-          user: buildOnboardingJudgePrompt(state, background, walletAnchor),
-          tools: [makeReportTool((r) => (judged = r))],
-          toolChoice: { name: REPORT_ONBOARDING_TOOL },
-        });
-      }),
-    () => judged !== undefined, // 이미 값을 받았으면 다시 부르지 않는다
-  ).catch(anchorStands("judge:onboarding"));
+  const turn = await retryOnce("onboarding", () =>
+    requireToolCall(REPORT_ONBOARDING_TOOL, async () => {
+      client ??= createGameLLM(agentConfig("onboarding-judge"));
+      const result = await client.runTurn({
+        system: ONBOARDING_JUDGE_SYSTEM,
+        history: [],
+        user: buildOnboardingJudgePrompt(state, background, walletAnchor),
+        tools: [makeReportTool((r) => (judged = r))],
+        toolChoice: { name: REPORT_ONBOARDING_TOOL },
+        // ⚠️ maxTokens를 좁히지 않는다 — 상한은 사고(thinking)+본문 합산이라
+        // 장면 길이만 보고 잡으면 본문이 문장 한복판에서 잘린다
+      });
+      // 상한에 걸린 응답은 문장이 끊겨 있다 — 문법 검사를 통과해도 걸러낸다
+      if (result.stopReason === "truncated") {
+        throw new ModelOutputError("첫 장면이 출력 상한에 걸려 문장이 잘렸습니다");
+      }
+      const text = humanizePlayerIds(state, sanitizeSceneText(result.text).trim());
+      if (!isValidOnboardingText(state, text)) {
+        throw new ModelOutputError(`첫 장면이 출력 문법을 어겼습니다:\n${text}`);
+      }
+      return { ...result, text };
+    }),
+  );
 
   const report: ReportInput | undefined = judged;
   state.manager.wallet = clampStartingWallet(report?.wallet, walletAnchor);
   state.manager.attributes = clampJudgedAttributes(report?.attributes, attributeAnchor);
   if (report?.openings && report.openings.length > 0) seedOpenings(state, report.openings);
+
+  // 첫 장면은 시계를 옮기지 않는다 — 헤더가 없으면 세워 준다
+  const stamped = parseSceneHeader(turn.text).point
+    ? turn.text
+    : `[${state.date} ${formatClock(clockOf(state))}]\n${turn.text}`;
+  return { text: stamped, toolCalls: [], usage: turn.usage };
 }

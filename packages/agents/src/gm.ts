@@ -11,7 +11,6 @@ import {
   clockOf,
   diffDays,
   formatClock,
-  headCoachOf,
   humanizePlayerIds,
   markEntered,
   minutesOfClock,
@@ -27,15 +26,15 @@ import {
   type GoalMark,
   type TrainingBrief,
 } from "@story-fm/engine";
-import { agentConfig, createGameLLM, hasKey, type GameLLM } from "@story-fm/llm";
+import { agentConfig, createGameLLM, hasKey } from "@story-fm/llm";
 import { MAX_REPORT_CARDS, NO_CARDS, takeArrivedReports } from "./report-cards";
 import { reportTraining } from "./training-rater";
 import { buildMatchTools, KICKOFF_BLOCK, MATCH_GM_SYSTEM, type MatchToolContext } from "./match-gm";
 import { finalizeMatchTurn } from "./finalize-match";
 import { runTableReply } from "./negotiation-table";
 import { counterpartOf, openLetter, playerById, settleTableReply } from "@story-fm/engine";
-import { buildOnboardingTurn, runMockGmTurn } from "./mock-gm";
-import { retryOnce, ModelOutputError } from "./retry";
+import { runMockGmTurn } from "./mock-gm";
+import { retryOnce } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
 import { buildGmTools } from "./gm-tools";
 import { applyTacticOrders, type AppliedTacticOrders } from "./tactic-apply";
@@ -49,7 +48,6 @@ import {
   recordCharacterInjection,
   buildLedgerNote,
   buildMatchReference,
-  buildOperatorMessage,
   filterCasterStream,
   filterSceneStream,
   lastScenePoint,
@@ -138,84 +136,6 @@ export function resolveLlmMode(): LlmMode {
   const forced = process.env.LLM_MODE;
   if (forced === "mock" || forced === "real") return forced;
   return hasKey(agentConfig("gm").provider) ? "real" : "mock";
-}
-
-/**
- * 첫 장면 지시 — 누가 여는지만 정한다. ⚠️ 소재·구성 체크리스트를 덧붙이지 마라 —
- * 모델은 항목 수만큼 문단으로 갚아 모든 세이브의 첫 장면이 같은 골격이 된다.
- */
-const ONBOARDING_INSTRUCTION = buildOperatorMessage(
-  "새 게임 첫 장면 — 오늘은 감독의 부임 첫날이다. 상태와 인물 카드를 읽고 수석코치의 말로 첫 장면을 열어라.",
-);
-
-/** 첫 장면 검사 — 문법과 화자(수석코치 등장·감독 미발화)까지만 본다. 내용은 보지 않는다. */
-function isValidOnboardingText(state: GameState, text: string): boolean {
-  // 첫 줄의 시점 헤더는 문법의 일부다 — 본문만 떼어 검사한다
-  const lines = parseSceneHeader(text)
-    .body.split("\n")
-    .filter((line) => line.trim().length > 0);
-  const coachTag = `@${headCoachOf(state).characterId}:`;
-  return (
-    lines.length >= 2 &&
-    lines.length <= 12 &&
-    // 장면은 `@`로 연다 — 그 뒤의 태그 없는 줄은 이어쓰기다 (prompts.md §1)
-    (lines[0] ?? "").startsWith("@") &&
-    lines.some((line) => line.startsWith(coachTag)) &&
-    // 감독은 유저의 몫이다 — GM이 대신 말하면 첫 턴부터 규약이 깨진다
-    !lines.some((line) => line.startsWith(`@${state.manager.name}:`))
-  );
-}
-
-/**
- * 새 게임 첫 장면 — 실모드는 GM 프롬프트로 매번 생성한다.
- *
- * **폴백은 없다.** 호출 실패·잘린 응답·문법 위반은 한 번 다시 시도하고, 그래도
- * 안 되면 오류를 올린다 — 규칙 장면으로 대신 채우면 실모드가 도는 줄 알고
- * 넘어간다. `buildOnboardingTurn`은 mock 모드 전용이다.
- */
-export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promise<GmTurnResult> {
-  const config = agentConfig("gm");
-  if (resolveLlmMode() === "mock") return buildOnboardingTurn(state);
-  const client = llm ?? createGameLLM(config);
-
-  /**
-   * 첫 장면의 수석코치는 **지목으로 선다** — 이력도 지난 발화도 없어 키워드가 걸릴
-   * 문장 자체가 없고, 레퍼런스에도 인물 카드는 없다(people.md §6). 검증
-   * (`isValidOnboardingText`)이 요구하는 이름이 프롬프트에 실리는 자리가 여기뿐이다.
-   */
-  const characters = selectCharacters(state, { pointed: [headCoachOf(state).characterId] });
-
-  // 도구도 스트리밍도 없는 호출이라 다시 불러도 남는 자국이 없다
-  return retryOnce("gm:onboarding", async () => {
-    const result = await client.runTurn({
-      system: peaceSystem(state),
-      history: [],
-      // 평시 턴과 같은 모양이다 — 카드 → 발화, 그 뒤에 어댑터가 스냅샷을 붙인다.
-      // 이 발화는 채팅에 남지 않으므로 꼬리가 아니라 여기서 만든다
-      user: renderTurnGroup(
-        state,
-        [{ role: "user", text: "*새 감독으로서 구단에 첫 출근한다*" }],
-        characters,
-      ),
-      // 첫 장면 지시는 그 턴만의 오퍼레이터 지시라 스냅샷과 함께 발화 뒤에 선다
-      stateNote: `${ONBOARDING_INSTRUCTION}\n\n${buildGmStateNote(state)}`,
-      // ⚠️ maxTokens를 좁히지 않는다 — 상한은 사고(thinking)+본문 합산이라
-      // 장면 길이만 보고 잡으면 본문이 문장 한복판에서 잘린다
-    });
-    // 상한에 걸린 응답은 문장이 끊겨 있다 — 문법 검사를 통과해도 걸러낸다
-    if (result.stopReason === "truncated") {
-      throw new ModelOutputError("첫 장면이 출력 상한에 걸려 문장이 잘렸습니다");
-    }
-    const text = humanizePlayerIds(state, result.text.trim());
-    if (!isValidOnboardingText(state, text)) {
-      throw new ModelOutputError(`첫 장면이 출력 문법을 어겼습니다:\n${text}`);
-    }
-    // 첫 장면은 시계를 옮기지 않는다 — 헤더가 없으면 세워 준다
-    const stamped = parseSceneHeader(text).point
-      ? text
-      : `[${state.date} ${formatClock(clockOf(state))}]\n${text}`;
-    return { text: stamped, toolCalls: [], usage: result.usage };
-  });
 }
 
 /**
