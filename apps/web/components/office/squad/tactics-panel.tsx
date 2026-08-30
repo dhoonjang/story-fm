@@ -170,8 +170,16 @@ export function SetPiecePanel({
       <b className="setpiece-head">{SET_PIECE_KO}</b>
       {SET_PIECE_ROLES.map((role) => {
         const { designated, taker } = takers[role];
-        /** 지정과 갈릴 때만 선다 — 같으면 같은 이름을 두 번 적는 셈이다 */
+        /**
+         * 지정과 갈릴 때만 선다 — 같으면 같은 이름을 두 번 적는 셈이다.
+         *
+         * **두 뜻이 한 자리에 있으므로 생김새로 가른다.** 지정이 없어 코어가 세운
+         * 사람(`default`)은 **정상**이고, 지정한 사람이 선발 밖이라 다른 사람이 차는 것
+         * (`swap`)은 **감독이 고쳐야 할 사실**이다. 둘을 같은 색으로 세우면 지정이 하나도
+         * 없는 새 세이브에서 세 줄이 전부 경고색이 되어, 정작 어긋난 자리가 그 안에 묻힌다.
+         */
         const stand = taker !== null && taker !== designated ? taker : null;
+        const swapped = stand !== null && designated !== null;
         return (
           <span className="sp-slot" key={role}>
             <i className="sp-role">{SET_PIECE_ROLE_KO[role]}</i>
@@ -213,11 +221,11 @@ export function SetPiecePanel({
             )}
             {stand !== null && (
               <em
-                className="sp-stand"
+                className={`sp-stand${swapped ? " swap" : ""}`}
                 title={
-                  designated === null
-                    ? "지정이 없어 이 선수가 찹니다"
-                    : "지정한 선수가 선발에 없어 이 선수가 찹니다"
+                  swapped
+                    ? "지정한 선수가 선발에 없어 이 선수가 찹니다"
+                    : "지정이 없어 이 선수가 찹니다"
                 }
               >
                 {nameOf(stand)}
@@ -237,27 +245,31 @@ export function SetPiecePanel({
               /* 세 칸 중 **하나만** 서는 눈금이라 전술 여섯 축과 같은 라디오 묶음이다.
                  선택이 색(`on`)으로만 서면 색약에게도 스크린리더에게도 닿지 않으므로
                  `aria-checked`가 같은 사실을 따로 말한다 */
-              <span className="sp-steps" role="radiogroup" aria-label={axis.label}>
-                {SET_PIECE_ROUTINE_LEVELS.map((step) => {
-                  const word = setPieceRoutineWord(axis.key, step);
-                  return (
-                    <button
-                      key={step}
-                      type="button"
-                      role="radio"
-                      aria-checked={level === step}
-                      aria-label={word}
-                      className={`tactic-step wide${level === step ? " on" : ""}`}
-                      onClick={() => onRoutine(axis.key, step)}
-                      data-testid={`setpiece-routine-${axis.key}-${step}`}
-                    >
-                      {word}
-                    </button>
-                  );
-                })}
+              <span className="sp-steps" role="radiogroup" aria-label={axis.hint}>
+                {SET_PIECE_ROUTINE_LEVELS.map((step) => (
+                  <button
+                    key={step}
+                    type="button"
+                    role="radio"
+                    aria-checked={level === step}
+                    aria-label={`${axis.words[step]} — ${axis.counts[step]}명`}
+                    className={`tactic-step wide${level === step ? " on" : ""}`}
+                    onClick={() => onRoutine(axis.key, step)}
+                    data-testid={`setpiece-routine-${axis.key}-${step}`}
+                  >
+                    {axis.words[step]}
+                    {/* 낱말 옆의 수 — **이 축이 정하는 것이 곧 이 수다.** 「많이」가 얼마나
+                        많은지를 낱말은 말하지 못해, 세 칸이 이름만 다른 셋으로 보였다.
+                        표는 코어와 한 벌이다 (`SetPieceRoutineAxis.counts`) */}
+                    <b>{axis.counts[step]}</b>
+                  </button>
+                ))}
               </span>
             ) : (
-              <span className="sp-read">{setPieceRoutineWord(axis.key, level)}</span>
+              <span className="sp-read">
+                {setPieceRoutineWord(axis.key, level)}
+                <b>{axis.counts[level]}</b>
+              </span>
             )}
           </span>
         );

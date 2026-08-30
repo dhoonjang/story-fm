@@ -1786,6 +1786,12 @@ export interface SetPieceRoutineAxis {
   hint: string;
   /** 값 → 낱말 */
   words: Readonly<Record<SetPieceRoutineLevel, string>>;
+  /**
+   * 값 → **박스에 서는 사람 수.** 이 축이 정하는 것이 곧 이 수다 — 「많이」가 얼마나
+   * 많은지는 낱말이 말하지 못하고, 화면에서 그것을 모르면 세 칸이 이름만 다른 셋이 된다.
+   * 죽은 공의 질을 재는 것도 이 수이므로(`sim/strength-packet.ts`) **표는 여기 하나다.**
+   */
+  counts: Readonly<Record<SetPieceRoutineLevel, number>>;
 }
 
 /**
@@ -1800,12 +1806,14 @@ export const SET_PIECE_ROUTINE_AXES: readonly SetPieceRoutineAxis[] = [
     label: "가담",
     hint: "우리 세트피스에 박스로 올라가는 사람",
     words: { few: "적게", normal: "보통", many: "많이" },
+    counts: { few: 3, normal: 4, many: 6 },
   },
   {
     key: "guard",
     label: "수비",
     hint: "상대 세트피스에 박스에 남는 사람",
     words: { few: "적게", normal: "보통", many: "많이" },
+    counts: { few: 4, normal: 5, many: 7 },
   },
 ];
 
@@ -1828,6 +1836,11 @@ export function setPieceRoutineLevel(
 /** 값 하나의 낱말 */
 export function setPieceRoutineWord(key: SetPieceRoutineKey, level: SetPieceRoutineLevel): string {
   return setPieceRoutineAxisOf(key).words[level];
+}
+
+/** 값 하나가 박스에 세우는 사람 수 — 코어의 죽은 공 계산과 화면이 같은 표를 읽는다 */
+export function setPieceRoutineCount(key: SetPieceRoutineKey, level: SetPieceRoutineLevel): number {
+  return setPieceRoutineAxisOf(key).counts[level];
 }
 
 /**

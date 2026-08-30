@@ -11,7 +11,6 @@ import type {
   PositionGroup,
   SetPieceProfile,
   SetPieceRoutine,
-  SetPieceRoutineLevel,
   SetPieceTakers,
   RegionalBand,
   RegionalInstruction,
@@ -36,6 +35,7 @@ import {
   RATING_MAX,
   roleFit,
   roleWeights,
+  setPieceRoutineCount,
   setPieceRoutineLevel,
   setPieceRoutineStep,
   tacticalSensitivityOf,
@@ -1260,15 +1260,12 @@ export function teamFoulRate(intensity: number): number {
  */
 const PENALTY_ROUGH_SCALE = 40;
 /**
- * 죽은 공에 올라가는 사람 수 — 우리 제공권을 재는 창. 감독의 가담 지시가 정한다.
- * `normal`이 축이 서기 전의 값이라 지시하지 않은 팀은 셈이 달라지지 않는다.
+ * 죽은 공에 서는 사람 수는 **축의 낱말표가 함께 갖는다**(`setPieceRoutineCount`,
+ * domain/tactics.ts) — 화면의 세 칸도 같은 수를 세우므로 표가 둘이면 갈린다.
+ * 올라가는 쪽은 우리 제공권을 재는 창이고(가담), 남는 쪽은 골키퍼를 포함한다(수비 —
+ * 공중볼은 그의 영역이다). `normal`이 축이 서기 전의 값이라 지시하지 않은 팀은 셈이
+ * 달라지지 않는다.
  */
-const SET_PIECE_TARGETS: Record<SetPieceRoutineLevel, number> = { few: 3, normal: 4, many: 6 };
-/**
- * 박스를 지키는 사람 수 — 골키퍼를 포함한다(공중볼은 그의 영역이다). 상대의 수비
- * 지시가 정한다: 우리 죽은 공의 질은 **상대가 박스에 몇을 남겼는가**로도 갈린다.
- */
-const SET_PIECE_DEFENDERS: Record<SetPieceRoutineLevel, number> = { few: 4, normal: 5, many: 7 };
 /** 킥력·제공권을 로그오즈로 옮기는 기준점과 눈금 — 슈팅 질의 그것과 같은 축 */
 const SET_PIECE_SKILL_PIVOT = 65;
 const SET_PIECE_SKILL_SCALE = 34;
@@ -1396,8 +1393,8 @@ function buildSetPiece(input: SetPieceInput): SetPieceBuild {
    * 함께 서므로 평균이 내려가고, 인원의 이득에서 그만큼이 도로 빠진다. 이 몫만은
    * 소화율을 타지 않는다 — 어설프게 올려 보낸 여섯은 사람만 흩어 놓는다.
    */
-  const targets = SET_PIECE_TARGETS[setPieceRoutineLevel(routine, "commit")];
-  const defenders = SET_PIECE_DEFENDERS[setPieceRoutineLevel(oppRoutine, "guard")];
+  const targets = setPieceRoutineCount("commit", setPieceRoutineLevel(routine, "commit"));
+  const defenders = setPieceRoutineCount("guard", setPieceRoutineLevel(oppRoutine, "guard"));
   const ourAerial = topMean(
     field.map((slot) => slot.player.attributes.aerial),
     targets,
@@ -1408,8 +1405,8 @@ function buildSetPiece(input: SetPieceInput): SetPieceBuild {
   );
   /** 인원 우열 — 중립(4 대 5)에서 정확히 0이라 지시 없는 판은 예전 수를 그대로 낸다 */
   const boxEdge =
-    uptake * Math.log(targets / SET_PIECE_TARGETS.normal) -
-    oppUptake * Math.log(defenders / SET_PIECE_DEFENDERS.normal);
+    uptake * Math.log(targets / setPieceRoutineCount("commit", "normal")) -
+    oppUptake * Math.log(defenders / setPieceRoutineCount("guard", "normal"));
   const kickingOf = (id: string | null) =>
     (id !== null ? byId.get(id)?.attributes.kicking : undefined) ?? SET_PIECE_SKILL_PIVOT;
   // 코너와 프리킥을 다른 사람이 차면 둘의 평균이 그 팀의 배급 수준이다
