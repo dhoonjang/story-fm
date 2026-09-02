@@ -4,13 +4,11 @@ import {
   capsOf,
   clampCondition,
   clampFatigue,
-  clampSharpness,
   fatigueOf,
   internationalGoalsOf,
   isAssociation,
-  sharpnessOf,
 } from "@story-fm/domain";
-import { fatigueFromMinutes, sharpnessAfterMinutes } from "@story-fm/sim";
+import { fatigueFromMinutes } from "@story-fm/sim";
 import { addDays, diffDays, INTERNATIONAL_BREAKS, seasonYear } from "./calendar";
 import { makeRng } from "../core/rng";
 import { groupOf, isInjured, openInjury, type GameState } from "../core/state";
@@ -351,9 +349,6 @@ export function settleCallUps(
     );
     player.state.condition = clampCondition(
       player.state.condition - CALL_UP_TRAVEL_FATIGUE - CALL_UP_FATIGUE_PER_APP * row.apps,
-    );
-    player.state.sharpness = clampSharpness(
-      sharpnessAfterMinutes(sharpnessOf(player.state), row.apps * MINUTES_PER_APP),
     );
 
     const rng = makeRng(state.seed, `call-up-return:${window.key}:${player.id}`);

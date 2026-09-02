@@ -1,9 +1,4 @@
-import {
-  INJURY_RISK_CAUSE_KO,
-  milestonePhrase,
-  PLAYER_ARCHETYPE_LABEL,
-  SQUAD_STATUS_KO,
-} from "@story-fm/domain";
+import { milestonePhrase, PLAYER_ARCHETYPE_LABEL, SQUAD_STATUS_KO } from "@story-fm/domain";
 import type { MentoringEnd, MilestoneCode } from "@story-fm/domain";
 import type { MoodFact, MoodRead } from "@story-fm/engine";
 
@@ -230,11 +225,14 @@ function sentenceOf(fact: MoodFact): string {
     case "condition":
       // 몸은 몸의 말로 — 여기서 감정을 읽으면 경기 다음 날 선수단 전원이 침울해진다
       return fact.level === "heavy" ? "다리가 무겁다" : "몸이 가볍다";
-    case "sharpness":
-      // 체력과 다른 축이다 — 잘 쉬었는데도 90분의 리듬이 몸에 없는 상태다
-      return fact.band === "blunt"
-        ? "오래 못 뛰어 경기 감각이 굳었다"
-        : "경기 감각이 아직 덜 올라왔다";
+    case "familiarity":
+      /**
+       * 몸의 축이 아니라 **판의 축**이다 (player.md §7.4) — 잘 쉬었는데도 감독이 깐
+       * 판이 몸에 없는 상태다. 오래 훈련장을 떠나 있었으면 그렇게 된다.
+       */
+      return fact.tier === "alien" || fact.tier === "raw"
+        ? "오래 자리를 비워 전술이 몸에서 빠졌다"
+        : "전술이 아직 몸에 덜 붙었다";
     case "fatigue":
       /**
        * 오늘 다리가 무거운 것과 다른 사실이다 — **시즌이 몸에 쌓아 둔 것**이라
@@ -244,16 +242,20 @@ function sentenceOf(fact: MoodFact): string {
       return fact.band === "overloaded"
         ? "몇 주째 쉬지 못해 몸이 비어 간다"
         : "시즌의 피로가 다리에 남아 있다";
-    case "risk": {
+    case "injury-history": {
       /**
-       * 몸의 두 축과 또 다른 사실이다 — 오늘 다리가 무거운 것도, 감각이 굳은 것도
-       * 아니고 **누가 다칠지 고르는 저울에서 위에 서 있다**는 뜻이다.
-       * 원인은 코어가 큰 순으로 골라 준 것이라 여기서 다시 세우지 않는다.
+       * 오늘의 몸이 아니라 **이 몸이 겪은 것**이다 (player.md §5.3).
+       *
+       * ⚠️ **여기서 「위험하다」고 단정하지 않는다.** 코어가 등급을 세우지 않는 이유가
+       * 그것이고, 얼마나 위태로운지는 이 사실을 읽는 쪽(감독·GM)이 판단한다. 화면은
+       * 그 사실을 사람의 말로 옮기기만 한다.
        */
-      const why = fact.causes.map((c) => INJURY_RISK_CAUSE_KO[c]).join(" · ");
-      return fact.grade === "high"
-        ? `지금 세우면 다칠 몸이다 — ${why}`
-        : `몸이 아슬아슬하다 — ${why}`;
+      const last = fact.history.last;
+      if (last !== null && last.open) return `${last.bodyPart}을 다쳐 재활 중이다`;
+      if (last !== null && last.daysAgo <= 30) {
+        return `${last.bodyPart} 부상에서 돌아온 지 ${last.daysAgo}일째다`;
+      }
+      return `두 시즌 동안 ${fact.history.count}번 다쳐 ${fact.history.daysOut}일을 결장했다`;
     }
     case "departure":
       // 라커룸 전체가 같은 사실을 든다 — 누가 그와 가까웠는지는 아직 아무도 모른다

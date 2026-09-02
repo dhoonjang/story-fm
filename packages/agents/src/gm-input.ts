@@ -34,7 +34,7 @@ import {
   formatClock,
   headCoachOf,
   historyStart,
-  injuryRiskFor,
+  injuryHistoryOf,
   internationalBreaksOf,
   isAvailableFor,
   nextMatchFor,
@@ -127,6 +127,7 @@ import {
   type MissionReportCard,
   type PersonaRelation,
   type ScoutReportCard,
+  injuryHistoryText,
 } from "@story-fm/domain";
 
 /** 경기 브리핑에 그대로 싣는 직전 평시 감독 발화 수 */
@@ -1100,15 +1101,20 @@ export function buildGmStateNote(
   /**
    * **다치기 전에 서는 줄** (player.md §5.3) — 부상 줄은 이미 쓰러진 뒤의 사실이라,
    * 이것이 없으면 수석코치가 "쉬게 하시죠"라고 말할 근거가 어디에도 없다.
-   * 지금 뛸 수 있는 **1군**만 센다 — 다친 선수의 위험은 감독이 손쓸 일이 아니고,
+   * 지금 뛸 수 있는 **1군**만 센다 — 다친 선수의 이력은 감독이 손쓸 일이 아니고,
    * 2군의 몸은 이번 주 라인업의 사정이 아니다 (수석코치의 눈도 같은 문이다).
+   *
+   * ⚠️ **등급이 아니라 이력이 간다.** 「위험 높음」은 코어의 판단이고, 이 줄이 하는
+   * 일은 모델이 판단할 **재료**를 주는 것이다 — 두 시즌의 건수·결장 일수·최근 부상을
+   * 주면 「최근에 돌아온 주전」과 「늘 삐끗하는 백업」을 모델이 갈라 말한다. 코어가
+   * 셋을 한 낱말로 접으면 그 갈림이 프롬프트에 닿지 못한다 (overview.md §1 철칙 4).
    */
   const atRisk = players
-    .filter(
-      (p) =>
-        squadLevelOf(p) === "first" && !isInjured(state, p.id) && injuryRiskFor(p).grade === "high",
-    )
-    .map((p) => p.name);
+    .filter((p) => squadLevelOf(p) === "first" && !isInjured(state, p.id))
+    .flatMap((p) => {
+      const line = injuryHistoryText(injuryHistoryOf(state, p.id));
+      return line === null ? [] : [`${p.name} — ${line}`];
+    });
   /**
    * **시즌이 몸에 쌓아 둔 것** (player.md §5.5) — 위험 줄과 **다른 줄인 이유는 감독이
    * 쥐는 손잡이가 다르기 때문이다.** 위험은 이번 경기의 라인업으로 답하고 과부하는
@@ -1152,7 +1158,7 @@ export function buildGmStateNote(
     })(),
     injured.length > 0 ? `부상 ${injured.length} (${injured.join(", ")})` : null,
     atRisk.length > 0
-      ? `부상 위험 높음 ${atRisk.length} (${atRisk.slice(0, AT_RISK_SHOWN).join(", ")}${
+      ? `부상 이력 ${atRisk.length} (${atRisk.slice(0, AT_RISK_SHOWN).join(" / ")}${
           atRisk.length > AT_RISK_SHOWN ? " …" : ""
         })`
       : null,

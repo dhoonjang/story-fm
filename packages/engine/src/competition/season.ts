@@ -17,7 +17,6 @@ import type {
   YouthCandidate,
 } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
-import { SHARPNESS_PRESEASON } from "@story-fm/sim";
 import {
   CONDITION_BASE,
   DEFAULT_FORMATION,
@@ -1842,11 +1841,11 @@ function applyTransition(state: GameState): string[] {
       // 새 시즌 — 쉬고 돌아왔다
       player.state.condition = CONDITION_BASE;
       /**
-       * **몸은 쉬어서 돌아오지만 경기 감각은 무뎌져서 돌아온다** (player.md §5.4).
-       * 프리시즌이 그것을 채우는 자리이고, 채우는 것은 훈련이 아니라 친선의 출전
-       * 분이다 — 이 한 줄이 없으면 7월의 5주가 몸에 관해 아무것도 결정하지 않는다.
+       * **적응도는 여기서 손대지 않는다** — 여름의 하루하루가 이미 끌고 간다
+       * (player.md §7.4). 훈련장을 떠난 날마다 55 쪽으로 내려가므로 6주의 휴가를
+       * 보낸 선수는 프리시즌을 77 언저리에서 열고, 소집일부터의 훈련 판정이 그것을
+       * 다시 채운다. 리셋 한 줄과 매일의 감쇠를 함께 두면 같은 사실을 두 번 물린다.
        */
-      player.state.sharpness = SHARPNESS_PRESEASON;
       /**
        * **여름이 통을 비운다** (player.md §5.5) — 6주의 휴가는 잔고를 사실상 0까지
        * 빼므로 명시적으로 0에서 다시 시작한다. 시계도 함께 지운다: 6월에 과부하였던

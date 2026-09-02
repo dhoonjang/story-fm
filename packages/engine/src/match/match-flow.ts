@@ -20,7 +20,6 @@ import {
   FORMATION_CHANGE_COST,
   clampCondition,
   clampFatigue,
-  clampSharpness,
   compareMilestones,
   keptCleanSheet,
   matchMinutesOf,
@@ -35,7 +34,6 @@ import {
   positionGrowthTarget,
   PROFICIENCY_MAX,
   fatigueOf,
-  sharpnessOf,
   shootoutSettled,
   shootoutTally,
   storedProficiencyFor,
@@ -55,7 +53,6 @@ import {
   mergeSubstitutions,
   planAiSubstitution,
   planAiTacticalShift,
-  sharpnessAfterMinutes,
   simulateSegment,
   subLimitsOf,
   type LineupSlot,
@@ -1874,14 +1871,6 @@ export function finalizeMatch(state: GameState): MatchDigest {
       // 폼에 골을 따로 더하지 않는 이유도 같다 — 골은 이미 평점에 크게 들어가 있고,
       // 또 올리면 이중 계산이라 "골 넣은 선수만 즉시 최고 폼"이 된다.
       player.state.condition = clampCondition(player.state.condition - (drained[id] ?? 0));
-      /**
-       * **뛴 만큼 경기 감각이 오른다** (player.md §5.4) — 체력과 반대 방향의 축이다.
-       * 경기는 몸을 깎으면서 리듬을 돌려준다. 친선도 그대로 올린다(season.md §2):
-       * 몸에 남는 것은 대회가 아닌 경기도 남긴다.
-       */
-      player.state.sharpness = clampSharpness(
-        sharpnessAfterMinutes(sharpnessOf(player.state), minutes),
-      );
       player.state.form = clampForm(player.state.form + formDeltaFromMatch(player, rating, result));
       /**
        * ⚠️ **전술 적응도는 여기서 올리지 않는다.** 경기가 그 선수에게 무엇을 남겼는지는

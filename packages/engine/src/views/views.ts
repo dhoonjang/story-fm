@@ -63,11 +63,7 @@ import {
   fatigueBand,
   fatigueLabel,
   fatigueOf,
-  sharpnessBand,
-  sharpnessLabel,
-  sharpnessOf,
   type FatigueBand,
-  type SharpnessBand,
   defaultRoleOf,
   growthLabel,
   naturalPositionOf,
@@ -144,7 +140,6 @@ import {
   setPieceTakersOf,
   subLimitsOf,
   zoneGrid,
-  type InjuryRisk,
   type TakerSlot,
 } from "@story-fm/sim";
 import { moodOf, type MoodRead } from "../squad/mood";
@@ -190,7 +185,8 @@ import {
   wageExpectationOf,
 } from "../market/market";
 import { settlingPercent } from "../squad/settling";
-import { INJURY_SEVERITY_KO, injuryRiskFor } from "../squad/injury";
+import { INJURY_SEVERITY_KO, injuryHistoryOf } from "../squad/injury";
+import type { InjuryHistory } from "@story-fm/domain";
 import {
   boardExpectation,
   computeStandings,
@@ -733,17 +729,6 @@ interface SquadViewRowMeta {
    */
   condition: ConditionRead;
   /**
-   * **경기 감각 0~100** — 최근에 뛰었는가 (player.md §5.4). 체력과 다른 축이다:
-   * 하루 쉬어서 돌아오는 것이 아니라 출전 분이 올리고 결장이 깎는다.
-   *
-   * 안개를 지나지 않는다 — 원본이 출전 기록과 부상이고 둘 다 공개 사실이다.
-   */
-  sharpness: number;
-  /** 경기 감각의 말 — "실전"·"올라옴"·"무딤"·"굳음" (player.ts와 같은 경계) */
-  sharpnessLabel: string;
-  /** 등급 자체 — 화면이 색과 정렬을 이 경계로 맞춘다 */
-  sharpnessBand: SharpnessBand;
-  /**
    * **누적 피로의 말** — "가뿐"·"쌓임"·"지침"·"과부하" (player.md §5.5).
    *
    * 체력 막대와 다른 축이다: 저건 오늘 아침의 예산이고 이건 시즌이 쌓아 둔 잔고라,
@@ -754,15 +739,13 @@ interface SquadViewRowMeta {
   /** 등급 자체 — 화면이 색과 정렬을 이 경계로 맞춘다 */
   fatigueBand: FatigueBand;
   /**
-   * **부상 위험 등급과 그 원인** (player.md §5.3) — 경기가 누가 다칠지 고를 때 쓰는
-   * 저울(`injuryWeight`)을 그대로 읽은 값이다. 체력 막대와 다른 축이다: 잘 쉰
-   * 유리몸도 여기서는 위로 선다.
+   * **부상 이력** (player.md §5.3) — 2시즌 창 안의 건수·결장 일수·최근 부상.
    *
-   * 성향 배수는 싣지 않는다 — 감독이 읽을 눈금이 없는 수다 (§10). 라벨은 화면이
-   * 도메인 표에서 붙인다(`INJURY_RISK_GRADE_KO`) — 여기서 문장을 만들면 GM 조회와
-   * 화면이 같은 등급을 두 낱말로 부른다.
+   * ⚠️ **등급이 아니라 사실이다.** 얼마나 위태로운지는 이력과 오늘의 몸을 함께 읽어야
+   * 나오는 판단이고, 그 판단은 이야기를 쥔 쪽이 문장으로 한다 (overview.md §1 철칙 4).
+   * 성향 배수도 싣지 않는다 — 감독이 읽을 눈금이 없는 수다 (§10).
    */
-  injuryRisk: InjuryRisk;
+  injuryHistory: InjuryHistory;
   /**
    * 지금 심경 — **코어가 고른 사실 카드**와, 결산(LLM)이 다시 쓴 한 줄(`moodOf`).
    * 문장은 화면이 쓴다 (`apps/web/lib/mood.ts` · overview.md §1 철칙 4).
@@ -3345,12 +3328,9 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           p.state.condition,
           liveSlot && liveMatchId ? { drain: worn[p.id] ?? 0, matchId: liveMatchId } : null,
         ),
-        sharpness: Math.round(sharpnessOf(p.state)),
-        sharpnessLabel: sharpnessLabel(sharpnessOf(p.state)),
-        sharpnessBand: sharpnessBand(sharpnessOf(p.state)),
         fatigueLabel: fatigueLabel(fatigueOf(p.state)),
         fatigueBand: fatigueBand(fatigueOf(p.state)),
-        injuryRisk: injuryRiskFor(p),
+        injuryHistory: injuryHistoryOf(state, p.id),
         mood: moodOf(state, p),
         role: (livePacket
           ? liveSlot

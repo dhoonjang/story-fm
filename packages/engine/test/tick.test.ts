@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  FAMILIARITY_AWAY_TARGET,
+  FAMILIARITY_MAX,
+  familiarityAfterAwayDay,
+  familiarityAwayDayOf,
   ageOf,
   clampFatigue,
   CONDITION_MAX,
   fatigueOf,
-  sharpnessBand,
-  sharpnessOf,
   FATIGUE_BASE,
   FATIGUE_BAND_FLOOR,
   FATIGUE_MAX,
-  SHARPNESS_BAND_FLOOR,
-  SHARPNESS_MAX,
 } from "@story-fm/domain";
 import {
   fatigueAfterDay,
@@ -18,16 +18,13 @@ import {
   fatigueFromMinutes,
   fatigueFromSessions,
   recoveryFactor,
-  sharpnessAfterDay,
-  sharpnessAfterMinutes,
-  sharpnessDayOf,
-  SHARPNESS_PRESEASON,
-  SHARPNESS_TARGET,
   stateModifier,
+  famFactor,
 } from "@story-fm/sim";
 import type { GamePlayer, PlayerState, PositionGroup } from "@story-fm/domain";
 import type { GameState } from "@story-fm/engine";
 import {
+  familiarityOf,
   leagueOfTeamIn,
   addDays,
   advanceTime,
@@ -760,84 +757,64 @@ describe("임대 자원이 서는 자리 (season.md §2 임대)", () => {
 });
 
 /**
- * 경기 감각 — **저장되는 셋째 축** (player.md §5.4).
+ * 전술 적응도의 **결장 감쇠** (player.md §7.4).
  *
  * 곡선 자체는 순수 함수라 세계를 세우지 않고 직접 부른다. 세계가 필요한 것은
- * "리그 전체가 같은 규칙으로 도는가"와 "시즌 전환이 되돌리는가" 둘뿐이다.
+ * "리그 전체가 같은 규칙으로 도는가"와 "훈련장에 있으면 잃지 않는가" 둘뿐이다.
+ *
+ * ⚠️ 이 축이 **경기 감각을 대신한다.** 오래 못 뛴 몸의 대가가 능력치를 평평하게
+ * 깎는 항이 아니라 판을 몸으로 기억하는 정도로 서므로, 같은 결장이라도 중원이
+ * 최전방보다 크게 문다 (`famFactor`).
  */
-describe("경기 감각 (player.md §5.4)", () => {
-  it("값이 없으면 기준점으로 읽는다 — 옛 세이브의 셈이 한 칸도 달라지지 않는다", () => {
-    const old: PlayerState = { form: 0, condition: 75 };
-    expect(sharpnessOf(old)).toBe(SHARPNESS_MAX);
-    expect(stateModifier(old)).toBe(1);
-    // 실전 등급(80) 위로는 얻을 것도 잃을 것도 없다 — 아래로만 깎인다
-    expect(stateModifier({ ...old, sharpness: SHARPNESS_MAX })).toBe(1);
-    expect(stateModifier({ ...old, sharpness: SHARPNESS_BAND_FLOOR.sharp })).toBe(1);
-    expect(stateModifier({ ...old, sharpness: 50 })).toBeCloseTo(0.955, 10);
-    expect(stateModifier({ ...old, sharpness: 0 })).toBeCloseTo(0.88, 10);
-    // 문턱 아래에서만 갈린다 — "실전"이라고 적힌 선수는 대가를 물지 않는다
-    expect(sharpnessBand(SHARPNESS_BAND_FLOOR.sharp)).toBe("sharp");
+describe("전술 적응도의 결장 감쇠 (player.md §7.4)", () => {
+  it("클럽에 있는 하루는 끌지 않는다 — 주말도 훈련 주간의 일부다", () => {
+    expect(familiarityAwayDayOf(false, false)).toBeNull();
+    // 감독이 뺀 기간 · 대표팀 · 여름 휴가 — 셋이 같은 하루다 (`offSite`)
+    expect(familiarityAwayDayOf(true, false)).toBe("idle");
+    // 재활은 그보다 아래다 — 팀 훈련에서 떨어져 있는 시간이다
+    expect(familiarityAwayDayOf(false, true)).toBe("rehab");
+    expect(familiarityAwayDayOf(true, true)).toBe("rehab");
   });
 
-  it("적립은 남은 폭을 지수로 채운다 — 구간을 나눠 뛰어도 총합이 같다", () => {
-    expect(sharpnessAfterMinutes(30, 0)).toBe(30);
-    // 같은 90분이 낮은 데서 더 크게 남는다 (훈련 적응의 꼴)
-    expect(sharpnessAfterMinutes(30, 90) - 30).toBeGreaterThan(sharpnessAfterMinutes(80, 90) - 80);
-    // 45분 두 번은 90분 한 번과 같다 — 교체로 나눠 뛴 선수가 손해 보지 않는다
-    expect(sharpnessAfterMinutes(sharpnessAfterMinutes(30, 45), 45)).toBeCloseTo(
-      sharpnessAfterMinutes(30, 90),
+  it("자리 쪽으로만 끌린다 — 아래에 있는 값을 끌어올리지 않는다", () => {
+    expect(familiarityAfterAwayDay(90, "idle")).toBeLessThan(90);
+    expect(familiarityAfterAwayDay(FAMILIARITY_AWAY_TARGET.idle, "idle")).toBeCloseTo(
+      FAMILIARITY_AWAY_TARGET.idle,
       10,
     );
-    // 상한을 넘지 않는다 (연장까지 뛰어도)
-    expect(sharpnessAfterMinutes(SHARPNESS_MAX, 120)).toBeLessThanOrEqual(SHARPNESS_MAX);
+    // 오르는 길은 판정 하나뿐이다 (§7) — 감쇠가 대신 올려 주지 않는다
+    expect(familiarityAfterAwayDay(20, "idle")).toBe(20);
+    expect(familiarityAfterAwayDay(20, "rehab")).toBe(20);
+    // 재활이 더 빨리 빠진다 — 팀 훈련이 잡아 주는 것이 없다
+    expect(familiarityAfterAwayDay(90, "rehab")).toBeLessThan(familiarityAfterAwayDay(90, "idle"));
   });
 
-  it("하루는 그날의 자리로 끌린다 — 자리 위면 내려오고 아래면 올라온다", () => {
-    expect(sharpnessAfterDay(90, "training")).toBeLessThan(90);
-    expect(sharpnessAfterDay(20, "training")).toBeGreaterThan(20);
-    expect(sharpnessAfterDay(SHARPNESS_TARGET.idle, "idle")).toBeCloseTo(SHARPNESS_TARGET.idle, 10);
-    // 재활이 가장 빨리, 본훈련이 가장 늦게 무뎌진다
-    expect(sharpnessAfterDay(90, "rehab")).toBeLessThan(sharpnessAfterDay(90, "idle"));
-    expect(sharpnessAfterDay(90, "idle")).toBeLessThan(sharpnessAfterDay(90, "training"));
+  it("90일 재활이면 판이 몸에서 빠진다 — 돌아온 날 온전한 전력이 아니다", () => {
+    let hurt = FAMILIARITY_MAX;
+    for (let d = 0; d < 90; d++) hurt = familiarityAfterAwayDay(hurt, "rehab");
+    // 「익히는 중」 아래 — 완숙으로 돌아오지 않는다
+    expect(hurt).toBeLessThan(45);
+    // 그 대가는 자리마다 다르다: 중원이 최전방보다 크게 문다
+    expect(famFactor(hurt, "CM")).toBeLessThan(famFactor(hurt, "ST"));
+    expect(famFactor(hurt, "CM")).toBeLessThan(0.9);
   });
 
-  it("하루의 성격은 회복 눈금과 같은 하루를 읽고, 재활만 따로 본다", () => {
-    expect(sharpnessDayOf("training", false)).toBe("training");
-    // 회복 세션은 가벼운 러닝이다 — 몸은 되찾아도 경기 감각은 채우지 않는다
-    expect(sharpnessDayOf("recovery", false)).toBe("idle");
-    expect(sharpnessDayOf("idle", false)).toBe("idle");
-    expect(sharpnessDayOf("training", true)).toBe("rehab");
+  it("여름 휴가가 프리시즌을 만든다 — 6주를 쉬면 완숙으로 열지 못한다", () => {
+    let rested = FAMILIARITY_MAX;
+    for (let d = 0; d < 42; d++) rested = familiarityAfterAwayDay(rested, "idle");
+    expect(rested).toBeLessThan(90);
+    expect(rested).toBeGreaterThan(FAMILIARITY_AWAY_TARGET.idle);
   });
 
-  it("90일 재활이면 굳고, 그 뒤 훈련만으로는 훈련장의 천장을 못 넘는다", () => {
-    let hurt = 86;
-    for (let d = 0; d < 90; d++) hurt = sharpnessAfterDay(hurt, "rehab");
-    expect(sharpnessBand(hurt)).toBe("blunt");
-    // 복귀 뒤 석 달을 본훈련만 해도 55 아래다 — 그 위는 출전 분만 채운다
-    let trained = hurt;
-    for (let d = 0; d < 90; d++) trained = sharpnessAfterDay(trained, "training");
-    expect(trained).toBeLessThan(SHARPNESS_TARGET.training);
-    // 한 경기로 실전 등급에 서지도 못한다 — "몇 경기 동안 온전한 전력이 아니다"
-    expect(sharpnessBand(sharpnessAfterMinutes(trained, 90))).not.toBe("sharp");
-  });
-
-  it("리그 전체가 같은 규칙으로 무뎌진다 — 감독 팀에만 걸리지 않는다", () => {
+  it("재활 중인 선수만 빠진다 — 훈련장에 있는 선수는 그대로다", () => {
     const state = createTestGame(7);
-    const mine = userPlayers(state)[0]!;
-    const theirs = playersOf(state, "mancity")[0]!;
-    mine.state.sharpness = 90;
-    theirs.state.sharpness = 90;
-    advanceDays(state, 7);
-    expect(mine.state.sharpness!).toBeLessThan(90);
-    expect(theirs.state.sharpness!).toBeLessThan(90);
-    // 재활 중인 선수가 더 빨리 굳는다 — 재활실은 훈련장이 아니다
-    const hurt = userPlayers(state)[1]!;
-    hurt.state.sharpness = 90;
-    const fit = userPlayers(state)[2]!;
-    fit.state.sharpness = 90;
+    const starters = assignmentsOf(state, state.userTeamId, "starting");
+    const hurtId = starters[0]!.playerId;
+    const fitId = starters[1]!.playerId;
+    for (const a of starters) a.familiarity = 90;
     state.injuries.push({
-      id: `inj-test-${hurt.id}`,
-      gamePlayerId: hurt.id,
+      id: `inj-test-${hurtId}`,
+      gamePlayerId: hurtId,
       bodyPart: "햄스트링",
       severity: "major",
       cause: "training",
@@ -846,16 +823,9 @@ describe("경기 감각 (player.md §5.4)", () => {
       returnedOn: null,
     });
     advanceDays(state, 7);
-    expect(hurt.state.sharpness!).toBeLessThan(fit.state.sharpness!);
-  });
-
-  it("시즌 전환이 전원을 프리시즌 값으로 되돌린다 — 몸은 쉬어도 감각은 무뎌진다", () => {
-    const state = createTestGame(42, "arsenal");
-    state.date = "2027-06-01";
-    for (const p of state.players) p.state.sharpness = 95;
-    endSeason(state);
-    expect(state.players.length).toBeGreaterThan(0);
-    for (const p of state.players) expect(p.state.sharpness).toBe(SHARPNESS_PRESEASON);
+    expect(familiarityOf(state, hurtId)).toBeLessThan(90);
+    // 훈련장에 있었던 선수는 한 칸도 잃지 않는다 — 오르는 길만 판정의 것이다
+    expect(familiarityOf(state, fitId)).toBe(90);
   });
 });
 

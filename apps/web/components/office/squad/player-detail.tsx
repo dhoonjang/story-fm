@@ -10,6 +10,7 @@ import {
   milestoneTitle,
   physiqueLabel,
   rolesFor,
+  injuryHistoryText,
 } from "@story-fm/domain";
 import { moodSentence } from "@/lib/mood";
 import { FitGauge, FormArrow, RatingTrend, StatusBadges } from "./marks";
@@ -205,6 +206,22 @@ export function PlayerDetail({
             <b>
               <FitGauge value={p.adaptation} />
             </b>
+          </span>
+        )}
+        {/* **표에서 내려온 둘** — 스물몇 줄 위에 늘 서 있을 값이 아니라 한 사람을
+            들여다볼 때 읽는 값이다. 「가뿐」은 세우지 않는다: 기본값이 스물몇 줄을
+            채우면 정작 무거운 사람이 묻힌다 (명단의 옛 열과 같은 규칙) */}
+        {p.fatigueBand !== "clear" && (
+          <span title="누적 피로 — 시즌이 쌓아 둔 잔고다. 회복을 늦추고 부상 위험을 올린다">
+            누적 <b className={`load ${p.fatigueBand}`}>{p.fatigueLabel}</b>
+          </span>
+        )}
+        {/* **등급이 아니라 이력이다** (player.md §5.3) — 얼마나 위태로운지는 코어가
+            말하지 않는다. 이력이 없는 선수에게는 아무 줄도 서지 않으므로, 내력이 있는
+            사람만 도드라진다 */}
+        {p.injuryHistory.count > 0 && (
+          <span>
+            부상 이력 <b>{injuryHistoryText(p.injuryHistory)}</b>
           </span>
         )}
         {/* 임대 — **그 구단의 사실만** 적는다. 아래 시즌 기록도 그 구단 장부라

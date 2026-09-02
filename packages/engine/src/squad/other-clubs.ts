@@ -2,18 +2,14 @@ import {
   applyFamiliarityGain,
   clampCondition,
   clampFatigue,
-  clampSharpness,
   fatigueOf,
   isReserveMatch,
-  sharpnessOf,
 } from "@story-fm/domain";
 import {
   dailyRecovery,
   fatigueAfterDay,
   fatigueDayOf,
   fatigueFromSessions,
-  sharpnessAfterDay,
-  sharpnessDayOf,
   type RecoveryKind,
 } from "@story-fm/sim";
 import { managedTeamId, openInjuryIds, type GameState } from "../core/state";
@@ -97,13 +93,6 @@ export function tickOtherClubs(state: GameState): void {
     if (offSite.has(player.id)) kind = "idle";
     player.state.condition = clampCondition(player.state.condition + dailyRecovery(player, kind));
     player.state.form = decayedForm(player.state.form);
-    /**
-     * 경기 감각도 리그 전체가 같은 규칙으로 무뎌진다 (player.md §5.4) — 감독 팀에만
-     * 걸면 상대는 프리시즌 없이도 늘 실전 상태라 개막부터 전력 우위가 붙는다.
-     */
-    player.state.sharpness = clampSharpness(
-      sharpnessAfterDay(sharpnessOf(player.state), sharpnessDayOf(kind, injured.has(player.id))),
-    );
     /**
      * **누적 피로도 리그 전체가 같은 눈금으로 쌓고 뺀다** (player.md §5.5) — 감독
      * 팀에만 걸면 12월에 우리만 회복이 늦고 우리만 부상 저울이 올라, 순위표가

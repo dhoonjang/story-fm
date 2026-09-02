@@ -1443,6 +1443,65 @@ export const clampFamiliarity = (x: number): number =>
 export const FAMILIARITY_BASELINE = 60;
 
 /**
+ * **훈련장을 떠난 하루가 적응도를 끌고 가는 자리** (→ docs/data/player.md §7.4).
+ *
+ * 적응도가 오르는 길은 판정 하나뿐이고(§7 — 시간은 올리지 않는다) 내려가는 길은
+ * 코어의 것이다. 전술이 바뀌어 흔들리는 것(`shiftFactor`)에 더해, **몸이 그 자리에
+ * 없었던 날**도 내려간다: 두 달을 재활실에서 보낸 선수는 다리가 다 나은 날에도
+ * 판을 몸으로 기억하지 못한다.
+ *
+ * ⚠️ **본훈련을 소화한 날은 끌지 않는다.** 세션에 있었던 선수는 벤치에 앉아만 있어도
+ * 판을 잊지 않는다 — 「훈련만으로 95까지」(§7.1)의 뒷면이다. 그래서 이 표에는
+ * 훈련한 날의 자리가 없고, 끌리는 것은 훈련장을 떠난 하루뿐이다.
+ */
+export const FAMILIARITY_AWAY_TARGET = {
+  /** 훈련이 없는 날 · 회복 세션 · 여름 휴가 · 대표팀 차출 */
+  idle: 55,
+  /** 재활 중 — 팀 훈련에서 떨어져 있는 시간이라 가장 아래다 */
+  rehab: 30,
+} as const;
+export type FamiliarityAwayDay = keyof typeof FAMILIARITY_AWAY_TARGET;
+
+/**
+ * 그 자리로 내려앉는 속도의 시간상수(일) — 지수라 **남은 거리에 비례해** 준다.
+ *
+ * ⚠️ 선형으로 깎으면 평형이 없다. 고정으로 빼면 휴가 2주에 신입 기준선 아래로
+ * 눕고, 폭을 줄이면 90일을 재활한 선수가 여전히 완숙으로 돌아온다. 지수는 그 둘을
+ * 한 눈금으로 잇는다 — 2주 휴가는 100에서 90으로, 90일 재활은 37로 데려간다.
+ */
+const FAMILIARITY_AWAY_DAYS: Record<FamiliarityAwayDay, number> = {
+  idle: 60,
+  rehab: 40,
+};
+
+/**
+ * **오늘이 훈련장을 떠난 하루인가** — 적응도가 끌리는 날을 고른다.
+ *
+ * 셋뿐이다: 재활 중 · 감독이 기간을 정해 뺀 선수 · 클럽을 떠나 있는 선수(여름 휴가 ·
+ * 대표팀 차출 — `isAwayFromClub`). 그 밖의 하루는 `null`이다.
+ *
+ * ⚠️ **평범한 휴식일과 회복 세션은 여기 들지 않는다.** 주 5일 훈련하는 팀의 주말은
+ * 훈련 주간의 일부이지 판을 잊는 시간이 아니고, 매 주말 깎으면 오르는 길이 판정
+ * 하나뿐인 이 축이 리그 전체에서 55 쪽으로 흘러내린다 — 감독이 아무것도 하지 않아도
+ * 매주 손해가 나는 축은 판단이 아니라 세금이다.
+ */
+export function familiarityAwayDayOf(
+  offSite: boolean,
+  injured: boolean,
+): FamiliarityAwayDay | null {
+  if (injured) return "rehab";
+  return offSite ? "idle" : null;
+}
+
+/** 훈련장을 떠난 하루를 보낸 뒤의 적응도 — 자리 쪽으로 하루치만큼 끌린다 */
+export function familiarityAfterAwayDay(familiarity: number, day: FamiliarityAwayDay): number {
+  const target = FAMILIARITY_AWAY_TARGET[day];
+  // 이미 자리 아래면 끌어올리지 않는다 — 내려가는 길만 코어의 것이다 (§7)
+  if (familiarity <= target) return familiarity;
+  return target + (familiarity - target) * Math.exp(-1 / FAMILIARITY_AWAY_DAYS[day]);
+}
+
+/**
  * **팀 전술 적응 구간 → 어휘.** 판정이 전부 코어 안에서 끝나는 눈금이라 LLM에는
  * 숫자가 아니라 이 말이 실린다 (prompts.md §5-2).
  *
@@ -1467,6 +1526,18 @@ const familiarityTierOf = (value: number) =>
 /** 팀 평균 전술 적응을 말로 — LLM 입력이 읽는 유일한 형태 */
 export function familiarityLabel(value: number): string {
   return familiarityTierOf(value).ko;
+}
+
+export type FamiliarityTierKey = (typeof FAMILIARITY_TIERS)[number]["key"];
+
+/** 이 값이 선 구간의 열쇠 — 심경 카드가 사실로 싣는 자리 (people.md §5) */
+export function familiarityTierKey(value: number): FamiliarityTierKey {
+  return familiarityTierOf(value).key;
+}
+
+/** 구간 하나의 이름 — 카드를 문장으로 옮기는 자리가 함께 쓴다 */
+export function familiarityTierLabel(key: FamiliarityTierKey): string {
+  return (FAMILIARITY_TIERS.find((t) => t.key === key) ?? FAMILIARITY_TIERS[0]!).ko;
 }
 /** 아래 구간에서 판정을 그대로 받는 배율 — 가속은 두지 않는다 */
 const GAIN_EARLY_BOOST = 1;

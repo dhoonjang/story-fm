@@ -98,7 +98,10 @@ import {
   youthIntakeDeadline,
 } from "../competition/season";
 import { clampForm, moraleToForm } from "../squad/form";
-import { injuryRiskFor } from "../squad/injury";
+import { injuryHistoryOf } from "../squad/injury";
+
+/** 라인업 브리프가 「최근 복귀」로 세우는 창 — 심경 카드와 같은 자 (player.md §5.3) */
+const RECENT_RETURN_DAYS = 30;
 import { DEVELOPMENT_FOCUS_LIMIT, pruneDevelopmentFocus } from "../squad/development";
 import {
   closeMentorings,
@@ -1862,15 +1865,22 @@ export function setLineup(
   }
   const items = [...changes.items];
   /**
-   * **오늘 세운 열한 명 중 위험이 높은 사람** (player.md §5.3) — 명단이 확정되는
-   * 그 자리에서만 뜻이 있는 항목이라, 배치가 그대로여도 선다. 선발만 센다:
-   * 벤치의 위험은 감독이 그를 넣기로 하는 그 순간의 결정이다.
+   * **오늘 세운 열한 명 중 최근에 몸을 다쳤던 사람** (player.md §5.3) — 명단이
+   * 확정되는 그 자리에서만 뜻이 있는 항목이라, 배치가 그대로여도 선다. 선발만 센다:
+   * 벤치의 몸은 감독이 그를 넣기로 하는 그 순간의 사정이다.
+   *
+   * ⚠️ **등급을 세우지 않는다** — 코어가 「위험 높음」이라고 못 박는 대신 복귀한 지
+   * 얼마 안 된 사실만 세우고, 그것을 어떻게 볼지는 감독과 GM이 정한다.
    */
   const atRisk = startingAssignments
     .map((a) => userPlayerById(state, a.playerId))
-    .filter((p): p is GamePlayer => p !== null && injuryRiskFor(p).grade === "high");
+    .filter((p): p is GamePlayer => {
+      if (p === null) return false;
+      const last = injuryHistoryOf(state, p.id).last;
+      return last !== null && !last.open && last.daysAgo <= RECENT_RETURN_DAYS;
+    });
   if (atRisk.length > 0) {
-    items.push(item({ label: "부상 위험", text: briefNames(atRisk.map((p) => p.name)) }));
+    items.push(item({ label: "최근 복귀", text: briefNames(atRisk.map((p) => p.name)) }));
   }
   if (levelMoved.first.length > 0) {
     items.push(item({ label: "1군 승격", text: briefNames(levelMoved.first) }));

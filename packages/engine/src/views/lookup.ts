@@ -24,7 +24,7 @@ import {
   DERBY_HEAT_KO,
   leaderboardTitle,
   VISION_CODE_KO,
-  injuryRiskText,
+  injuryHistoryText,
   yellowBanMatches,
   isReserveMatch,
   MatchStageSchema,
@@ -42,8 +42,6 @@ import {
   boardExpectationLine,
   boardExpectationText,
   conditionLabel,
-  sharpnessLabel,
-  sharpnessOf,
   describeReputation,
   familiarityLabel,
   footLabel,
@@ -89,7 +87,7 @@ import {
 import { careerOf, careerTotalsOf, type CareerTotals } from "../squad/career";
 import { leaderGroupOf } from "../squad/hierarchy";
 import { formLabel } from "../squad/form";
-import { INJURY_SEVERITY_KO, injuryRiskFor } from "../squad/injury";
+import { INJURY_SEVERITY_KO, injuryHistoryOf } from "../squad/injury";
 import { ABSENT_REASON_KO, buildOpponentReport } from "../match/preview";
 import { issueReasonText, moodAnchor, moodOf } from "../squad/mood";
 import { numberLineageOf } from "../squad/numbers";
@@ -1132,12 +1130,11 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
   }
 
   if (knowledge === "own") {
-    const risk = injuryRiskFor(p);
+    // 등급이 아니라 이력이다 — 위태로운지는 읽는 쪽이 판단한다 (player.md §5.3)
+    const history = injuryHistoryText(injuryHistoryOf(state, p.id));
     lines.push(
-      `컨디션: 폼 ${formLabel(p.state.form)} · 체력 ${p.state.condition} (${conditionLabel(p.state.condition)})` +
-        ` · 경기 감각 ${sharpnessLabel(sharpnessOf(p.state))}` +
-        // 성향 배수는 싣지 않는다 — 감독이 읽을 눈금이 없는 수다 (player.md §10)
-        ` · 부상 위험 ${injuryRiskText(risk.grade, risk.causes)}`,
+      `컨디션: 폼 ${formLabel(p.state.form)} · 체력 ${p.state.condition} (${conditionLabel(p.state.condition)})`,
+      ...(history === null ? [] : [`부상 이력: ${history}`]),
       `심경: ${moodLine(state, p)}`,
       `소화 포지션: ${p.positions
         .map((x) => `${x.position}${x.isNatural ? "*" : ""}${x.proficiency}`)
@@ -1353,16 +1350,16 @@ function assignedRow(
     grievance ? (reason ? `불만(${reason})` : "불만") : null,
     /**
      * **다치기 전에 서는 유일한 줄이다** (player.md §5.3) — 부상 플래그는 이미
-     * 쓰러진 뒤의 사실이라, 이 줄이 없으면 라인업을 세우는 자리에서 감독이
-     * 위험을 읽을 자리가 없다. `elevated`는 싣지 않는다: 스쿼드의 15%가 그 등급이라
-     * 스물몇 줄이 통째로 ⚠를 달면 진짜 경고가 묻힌다.
+     * 쓰러진 뒤의 사실이라, 이 줄이 없으면 라인업을 세우는 자리에서 감독이 몸의
+     * 내력을 읽을 자리가 없다. **등급을 세우지 않는다** — 이력이 없는 선수는 아무
+     * 줄도 달지 않으므로, 내력이 있는 사람만 도드라진다 (player.md §5.3).
      */
-    injuryRiskFor(p).grade === "high" ? "부상 위험 높음" : null,
+    injuryHistoryText(injuryHistoryOf(state, p.id)),
   ].filter((x): x is string => x !== null);
   return (
     `  ${position.padEnd(4)} ${p.name}${armband(p)} (${p.id}) ${ageOf(p.birthdate, state.date)}세 · ` +
     `${roleLabel(position, roleId)} · OVR${p.attributes.overall} 자리적합${roleFit(p.attributes, position, roleId)} 포지션적응${proficiencyAt(p, position)} ` +
-    `전술적응${familiarity} · 폼 ${formLabel(p.state.form)} 체력${p.state.condition} 감각 ${sharpnessLabel(sharpnessOf(p.state))}` +
+    `전술적응${familiarity} · 폼 ${formLabel(p.state.form)} 체력${p.state.condition}` +
     // **라인업을 세우는 자리가 재계약을 판단하는 자리이기도 하다** (finance.md §8.3) —
     // 만료일이 없으면 감독은 여름에 사라질 주전을 붙박이로 세운다
     (contract ? ` · 계약${contractLabel(contract)}` : "") +

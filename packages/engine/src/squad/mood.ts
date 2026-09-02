@@ -3,23 +3,22 @@ import {
   fatigueBand,
   fatigueBandLabel,
   fatigueOf,
-  injuryRiskText,
+  injuryHistoryText,
   isRelease,
   issueReasonKo,
   LEADER_ROLE_LABEL,
   milestonePhrase,
   MOOD_NOTE_MAX,
+  familiarityTierKey,
+  familiarityTierLabel,
   PLAYER_ARCHETYPE_LABEL,
-  sharpnessBand,
-  sharpnessBandLabel,
-  sharpnessOf,
   SQUAD_STATUS_KO,
 } from "@story-fm/domain";
 import type {
+  FamiliarityTierKey,
   FatigueBand,
   GamePlayer,
-  InjuryRiskCause,
-  InjuryRiskGrade,
+  InjuryHistory,
   LeaderRole,
   MatchRecord,
   MentoringEnd,
@@ -27,14 +26,13 @@ import type {
   PlayerArchetypeKey,
   PlayerIssueReason,
   RetirementReason,
-  SharpnessBand,
   SquadStatus,
 } from "@story-fm/domain";
 import { RELATION_TIER_RANK } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { milestonesOf } from "./career";
 import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
-import { injuryRiskFor } from "./injury";
+import { injuryHistoryOf } from "./injury";
 import { settlingOf } from "./settling";
 import { playerArchetypeOf } from "../world/player-persona";
 // 해지 카드는 떠난 사람과 가까웠던 사람에게만 선다 (people.md §5·§6)
@@ -48,6 +46,7 @@ import { demotionPatienceDaysOf } from "./demotion";
 import { squadStatusOf, startsInWindow } from "./promises";
 import {
   activeContract,
+  familiarityOf,
   activeSuspension,
   assignmentFor,
   isOurPlayer,
@@ -80,6 +79,17 @@ import { playerReturnFixture } from "../club/former-club";
  * 우선순위는 "감독이 지금 조치해야 하는 순서"다 — 못 뛰는 사유(부상·정지)가 먼저,
  * 그다음 마음(불만·2군 강등·정착·직전 경기의 여운), 출전 기회, 폼, 마지막이 몸이다.
  */
+
+/**
+ * **최근에 돌아왔는가** — 복귀 뒤 이 날수 안이면 몸이 아직 그 부상의 것이다.
+ *
+ * 등급을 세우지 않는 대신 「지금 말할 만한 이력인가」를 가르는 자리다 — 두 시즌에
+ * 한 번 삐끗한 선수까지 내면 스물다섯 명이 통째로 그 카드가 된다 (player.md §5.3).
+ */
+const INJURY_ECHO_DAYS = 30;
+
+const recentReturn = (history: InjuryHistory): boolean =>
+  history.last !== null && (history.last.open || history.last.daysAgo <= INJURY_ECHO_DAYS);
 
 /** 경기의 여운이 남아 있는 기간 — 이 안이면 심경이 그 경기에 매여 있다 */
 const AFTERGLOW_DAYS = 3;
@@ -183,13 +193,13 @@ export type MoodFact =
    * `low`는 서지 않는다 — 짚을 것이 없어서 낮음이다. 원인은 큰 순의 코드고, 말은
    * 화면·GM이 붙인다.
    */
-  | { cause: "risk"; grade: Exclude<InjuryRiskGrade, "low">; causes: InjuryRiskCause[] }
+  | { cause: "injury-history"; history: InjuryHistory }
   /**
    * **경기 감각**이 무뎌졌다 (player.md §5.4) — 몸의 예산(`condition`)과 다른 사실이다.
    * 잘 쉬었지만 몇 주째 못 뛴 선수가 여기서 갈린다. 등급만 낸다: 감독이 관측하는
    * 것은 출전 기록이지 숫자가 아니고, 말은 화면·GM이 붙인다.
    */
-  | { cause: "sharpness"; band: SharpnessBand }
+  | { cause: "familiarity"; tier: FamiliarityTierKey }
   /**
    * **시즌이 몸에 쌓아 둔 것** (player.md §5.5) — 오늘의 체력과도, 경기 감각과도
    * 다른 사실이다. 하루 쉬어서 돌아오는 것이 아니라 몇 주를 덜어 내야 빠지는
@@ -600,9 +610,10 @@ export function moodFactsOf(
      * 그 선수의 사실이다.
      */
     if (state.date >= state.calendar.start) {
-      const band = sharpnessBand(sharpnessOf(player.state));
-      if (band === "blunt") facts.push({ cause: "sharpness", band });
-      else if (band === "rusty" && facts.length === 0) facts.push({ cause: "sharpness", band });
+      const tier = familiarityTierKey(familiarityOf(state, player.id));
+      if (tier === "alien" || tier === "raw") facts.push({ cause: "familiarity", tier });
+      else if (tier === "learning" && facts.length === 0)
+        facts.push({ cause: "familiarity", tier });
     }
 
     /**
@@ -614,35 +625,37 @@ export function moodFactsOf(
     /**
      * **위험 `high`가 체력보다 먼저 선다** (people.md §5) — 「다리가 무겁다」는
      * 오늘의 사실이고 「지금 세우면 다칠 몸이다」는 감독이 라인업에서 손을 써야
-     * 하는 사실이다. `elevated`는 달리 할 말이 없을 때만이다 — 스쿼드의 15%가
-     * 그 등급이라 늘 내면 소음이 된다 (`sharpness`와 같은 규칙).
+     * 하는 사실이다. ⚠️ **등급이 아니라 이력이 선다** — 「위험 높음」은 코어의 판단이고
+     * 감독이 읽어야 하는 것은 「이 몸이 무엇을 겪었나」다 (player.md §5.3). 최근에
+     * 돌아왔거나 창 안에 무거운 결장이 있는 선수만 낸다 — 두 시즌에 한 번 삐끗한
+     * 선수까지 내면 스물다섯 명이 통째로 그 카드가 된다 (전술 적응 카드와 같은 규칙).
      *
      * ⚠️ **우리 선수에게만 선다** — 성향은 장부에 있어도 남의 선수의 몸을 감독이
      * 재지는 못한다 (player.md §10). 임대 보낸 선수는 우리 선수다(`isOurPlayer`) —
      * `teamId`로 가르면 명단의 「위험」 열과 그 선수의 심경이 서로 다른 말을 한다.
      */
     const ours = isOurPlayer(state, player);
-    const risk = ours ? injuryRiskFor(player) : null;
+    const history = ours ? injuryHistoryOf(state, player.id) : null;
     /**
      * **누적 피로가 맨 앞이다** (player.md §5.5) — 셋 중 그것만이 며칠 안에 손을
      * 쓰지 않으면 라커룸으로 가는 사실이고(`overload` 불만), 나머지 둘은 오늘의
      * 사실이다. 「지침」은 달리 할 말이 없을 때만이다 — 시즌 중반이면 주전 대부분이
-     * 그 등급이라 늘 내면 소음이 된다 (`sharpness`·위험 `elevated`와 같은 규칙).
+     * 그 등급이라 늘 내면 소음이 된다 (전술 적응·위험 `elevated`와 같은 규칙).
      *
      * ⚠️ **개막 전에는 내지 않는다** — 시즌 전환이 전원을 0으로 비우므로 7월에는
-     * 아무에게도 설 수 없지만, 문을 명시적으로 두는 것은 `sharpness`와 같은 이유다.
+     * 아무에게도 설 수 없지만, 문을 명시적으로 두는 것은 전술 적응 카드와 같은 이유다.
      * ⚠️ **우리 선수에게만** — 남의 선수의 몸은 감독이 재지 못한다 (player.md §10).
      */
     const band =
       ours && state.date >= state.calendar.start ? fatigueBand(fatigueOf(player.state)) : null;
     if (band === "overloaded") {
       facts.push({ cause: "fatigue", band });
-    } else if (risk?.grade === "high") {
-      facts.push({ cause: "risk", grade: "high", causes: risk.causes });
+    } else if (history !== null && recentReturn(history)) {
+      facts.push({ cause: "injury-history", history });
     } else if (condition <= CONDITION_HEAVY) {
       facts.push({ cause: "condition", level: "heavy" });
-    } else if (risk?.grade === "elevated" && facts.length === 0) {
-      facts.push({ cause: "risk", grade: "elevated", causes: risk.causes });
+    } else if (history !== null && history.count > 0 && facts.length === 0) {
+      facts.push({ cause: "injury-history", history });
     } else if (band === "heavy" && facts.length === 0) {
       facts.push({ cause: "fatigue", band });
     } else if (condition >= CONDITION_LIGHT && facts.length === 0) {
@@ -827,14 +840,14 @@ function factLine(fact: MoodFact): string {
       return fact.level === "heavy"
         ? `체력 ${CONDITION_HEAVY} 이하`
         : `체력 ${CONDITION_LIGHT} 이상`;
-    case "sharpness":
-      return `경기 감각 ${sharpnessBandLabel(fact.band)}`;
+    case "familiarity":
+      return `전술 적응 ${familiarityTierLabel(fact.tier)}`;
     // 잔고의 숫자는 적지 않는다 — 감독이 관측하는 것은 출전 기록과 일정이다
     case "fatigue":
       return `누적 피로 ${fatigueBandLabel(fact.band)}`;
-    case "risk":
-      // 배수는 적지 않는다 — 감독이 읽는 것은 등급과 그것을 들어 올린 항이다
-      return `부상 위험 ${injuryRiskText(fact.grade, fact.causes)}`;
+    case "injury-history":
+      // 등급은 적지 않는다 — 위태로운지는 이 사실을 읽는 쪽이 판단한다 (player.md §5.3)
+      return `부상 이력 ${injuryHistoryText(fact.history) ?? "없음"}`;
     case "departure":
       return `${fact.name} 계약 해지 · ${dayWord(fact.days)}`;
     // 어떻게 떠났는지는 회견 카드의 것이다 — 심경이 드는 것은 어느 구단과 언제인가다

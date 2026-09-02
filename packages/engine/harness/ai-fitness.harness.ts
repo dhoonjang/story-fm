@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { firstTeamPlayers, isFriendly, playersOf, type GameState } from "@story-fm/engine";
-import { CONDITION_MAX, FATIGUE_BAND_FLOOR, fatigueOf, sharpnessOf } from "@story-fm/domain";
+import {
+  familiarityOf,
+  firstTeamPlayers,
+  isFriendly,
+  playersOf,
+  type GameState,
+} from "@story-fm/engine";
+import { CONDITION_MAX, FATIGUE_BAND_FLOOR, fatigueOf } from "@story-fm/domain";
 import { createTestGame } from "../test/helpers";
 import { AI_FITNESS } from "./catalog";
 import { playSeason, playUntil } from "./season";
@@ -46,9 +52,9 @@ function overloadedCount(state: GameState, teamId: string): number {
 }
 
 /** 상위 n명의 평균 경기 감각 — 같은 자를 감각 축에 댄 값 */
-function topSharpness(state: GameState, teamId: string, n: number): number {
+function topFamiliarity(state: GameState, teamId: string, n: number): number {
   const top = firstTeamPlayers(state, teamId)
-    .map((p) => sharpnessOf(p.state))
+    .map((p) => familiarityOf(state, p.id))
     .sort((a, b) => b - a)
     .slice(0, n);
   return mean(top);
@@ -91,8 +97,8 @@ describe("한 시즌을 돈 뒤의 체력·출전 분포", () => {
     const ours = firstTeamPlayers(state, state.userTeamId);
     const played = ours.filter((p) => (friendlyApps.get(p.id) ?? 0) >= PRESEASON_PLAYED);
     const rested = ours.filter((p) => (friendlyApps.get(p.id) ?? 0) === 0);
-    const openingPlayed = mean(played.map((p) => sharpnessOf(p.state)));
-    const openingRested = mean(rested.map((p) => sharpnessOf(p.state)));
+    const openingPlayed = mean(played.map((p) => familiarityOf(state, p.id)));
+    const openingRested = mean(rested.map((p) => familiarityOf(state, p.id)));
 
     /**
      * **잔고의 본론은 시즌 말의 스냅숏이 아니라 시즌 중의 봉우리다** (player.md §5.5).
@@ -125,8 +131,8 @@ describe("한 시즌을 돈 뒤의 체력·출전 분포", () => {
     const us = topCondition(state, state.userTeamId, LINEUP);
     const spread = [...RIVALS, "newcastle"].map((t) => topCondition(state, t, LINEUP));
     const them = spread.reduce((a, b) => a + b, 0) / spread.length;
-    const ourSharp = topSharpness(state, state.userTeamId, LINEUP);
-    const theirSharp = mean([...RIVALS, "newcastle"].map((t) => topSharpness(state, t, LINEUP)));
+    const ourSharp = topFamiliarity(state, state.userTeamId, LINEUP);
+    const theirSharp = mean([...RIVALS, "newcastle"].map((t) => topFamiliarity(state, t, LINEUP)));
     const ourLoad = topLoad(state, state.userTeamId, XI);
     const theirLoad = mean([...RIVALS, "newcastle"].map((t) => topLoad(state, t, XI)));
     const apps = playersOf(state, "mancity")

@@ -1,6 +1,6 @@
-import type { GamePlayer, InjurySeverity } from "@story-fm/domain";
+import type { GamePlayer, InjuryHistory, InjurySeverity } from "@story-fm/domain";
 // 성향의 바닥·천장은 세이브 스키마와 같은 상수를 읽는다 (player.md §5.3)
-import { INJURY_PRONENESS_MAX, INJURY_PRONENESS_MIN } from "@story-fm/domain";
+import { INJURY_PRONENESS_MAX, INJURY_PRONENESS_MIN, INJURY_SEVERITY_KO } from "@story-fm/domain";
 import { INJURY_PER_MATCH, injuryRiskOf, type InjuryRisk } from "@story-fm/sim";
 import { addDays, diffDays } from "../competition/calendar";
 import { playerCatalog } from "../world/catalog";
@@ -22,17 +22,11 @@ import { openInjury, playerById, type GameState } from "../core/state";
 const INJURY_PARTS = ["햄스트링", "발목", "무릎", "종아리", "허벅지", "어깨", "허리"];
 
 /**
- * 심각도의 한글 라벨 — **원본은 이 표 하나다.**
- *
- * 화면(`views.ts`)과 GM 조회 도구(`lookup.ts`)가 같은 표를 읽는다. 두 벌을 두면 같은
- * 부상이 스쿼드 화면에서는 "경상", GM 대사에서는 "경미"가 되고, 감독은 그게 같은
- * 부상인지 알 수 없다 (player.md §5.3).
+ * 심각도의 한글 라벨 — **원본은 domain의 표 하나다** (`records.ts`). 이력 한 줄
+ * (`injuryHistoryText`)도 그 표를 읽으므로, 여기 한 벌 더 두면 같은 부상이 자리마다
+ * 다른 낱말이 된다 (player.md §5.3). 코어 쪽 부르는 곳이 옮기지 않게 다시 내보낸다.
  */
-export const INJURY_SEVERITY_KO: Record<InjurySeverity, string> = {
-  minor: "경상",
-  moderate: "중상",
-  major: "장기",
-};
+export { INJURY_SEVERITY_KO, type InjuryHistory };
 
 /** 부상 발생 — INJURY row 생성 (현재 부상 = returnedOn null) */
 export function openInjuryFor(
@@ -344,4 +338,38 @@ export function seedInjuryHistory(state: GameState): void {
     }
     player.state.injuryProneness = pronenessFromDaysOut(unionDays(spans));
   }
+}
+
+// ── 부상 이력 — 등급 대신 사실 ─────────────────────────────
+
+/** 이력을 보는 창 — 2시즌. 그보다 오래된 부상은 지금의 몸과 무관하다 (`SEED_WINDOW_DAYS`) */
+const HISTORY_WINDOW_DAYS = SEED_WINDOW_DAYS;
+
+/**
+ * 이 선수의 부상 이력 — **창 안의 사실만.** 창 밖은 이 몸의 이야기가 아니다.
+ *
+ * 결장 일수는 성향을 만든 그 셈과 같은 문을 지난다(`unionDays`) — 두 부상을 동시에
+ * 안고 있던 날을 두 번 세면 화면의 숫자가 코어의 성향과 어긋난다.
+ */
+export function injuryHistoryOf(state: GameState, playerId: string): InjuryHistory {
+  const from = addDays(state.date, -HISTORY_WINDOW_DAYS);
+  const rows = state.injuries
+    .filter((i) => i.gamePlayerId === playerId && (i.returnedOn ?? state.date) >= from)
+    .sort((a, b) => (a.occurredOn < b.occurredOn ? -1 : a.occurredOn > b.occurredOn ? 1 : 0));
+  const daysOut = unionDays(rows.map((i) => [i.occurredOn, i.returnedOn ?? state.date] as const));
+  const last = rows[rows.length - 1];
+  return {
+    count: rows.length,
+    daysOut,
+    last:
+      last === undefined
+        ? null
+        : {
+            bodyPart: last.bodyPart,
+            severity: last.severity,
+            // 복귀했으면 복귀일로부터, 아직이면 발생일로부터 — 감독이 세는 날이 다르다
+            daysAgo: diffDays(last.returnedOn ?? last.occurredOn, state.date),
+            open: last.returnedOn === null,
+          },
+  };
 }

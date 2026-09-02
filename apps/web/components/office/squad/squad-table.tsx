@@ -1,14 +1,7 @@
 "use client";
 
 import { Fragment, useMemo } from "react";
-import {
-  INJURY_RISK_CAUSE_KO,
-  INJURY_RISK_GRADE_KO,
-  PROMISE_KIND_KO,
-  SQUAD_STATUS_KO,
-  squadStatusRank,
-} from "@story-fm/domain";
-import type { FatigueBand, InjuryRiskGrade } from "@story-fm/domain";
+import { PROMISE_KIND_KO, SQUAD_STATUS_KO, squadStatusRank } from "@story-fm/domain";
 import { ConditionBar } from "@/components/condition-bar";
 import { moodSentence } from "@/lib/mood";
 import {
@@ -38,9 +31,6 @@ export type SortKey =
   | "adaptation"
   | "form"
   | "condition"
-  | "sharpness"
-  | "load"
-  | "risk"
   | "rating";
 const ROLE_ORDER: Record<string, number> = { 선발: 0, 벤치: 1, 스쿼드: 2 };
 /**
@@ -51,15 +41,6 @@ const ROLE_ORDER: Record<string, number> = { 선발: 0, 벤치: 1, 스쿼드: 2 
  */
 const TIER_ORDER: Record<Tier, number> = { 선발: 0, 벤치: 1, 예비: 2, "2군": 3, 임대: 4 };
 const GROUP_ORDER: Record<string, number> = { GK: 0, DF: 1, MF: 2, FW: 3 };
-/** 위험 열의 정렬 — 큰 수가 위태롭다. 기본 방향(내림)에서 높음이 맨 위에 선다 */
-const RISK_ORDER: Record<InjuryRiskGrade, number> = { low: 0, elevated: 1, high: 2 };
-/** 누적 피로 열의 정렬 — 같은 규약. 감독이 찾는 것은 맨 위의 과부하다 */
-const LOAD_ORDER: Record<FatigueBand, number> = {
-  clear: 0,
-  building: 1,
-  heavy: 2,
-  overloaded: 3,
-};
 
 /** 명단 표 — 열 머리를 눌러 정렬한다. 기본은 역할 → 포지션 라인 → OVR */
 export function SquadTable({
@@ -121,14 +102,6 @@ export function SquadTable({
           return p.form;
         case "condition":
           return p.condition.value;
-        case "sharpness":
-          return p.sharpness;
-        // 등급 순 — 큰 수가 무겁다. 기본 방향(내림)에서 과부하가 맨 위에 선다
-        case "load":
-          return LOAD_ORDER[p.fatigueBand];
-        // 등급 순 — 낮음이 맨 아래다. 같은 등급 안의 순서는 OVR이 아니라 안정 정렬이다
-        case "risk":
-          return RISK_ORDER[p.injuryRisk.grade];
         case "rating":
           // 기록 없는 선수는 정렬 맨 아래로 — 0.00과 "아직 없음"은 다르다
           return p.seasonRating ?? -1;
@@ -186,29 +159,6 @@ export function SquadTable({
           {th("adaptation", "적응", "hide-sm", "지금 맡은 자리에서 이 전술을 얼마나 소화하는가")}
           {th("form", "폼")}
           {th("condition", "체력")}
-          {/* 체력과 다른 축이다 — 잘 쉬어도 오래 못 뛰면 무뎌진다 (player.md §5.4) */}
-          {th(
-            "sharpness",
-            "감각",
-            "hide-sm",
-            "경기 감각 — 출전 분이 올리고 결장이 깎는다. 체력과 다른 축이다",
-          )}
-          {/* 오늘의 몸이 아니라 시즌의 몸이다 — 하루 쉬어서 돌아오지 않는다 (player.md §5.5).
-              ⚠️ 머리글이 「피로」가 아닌 이유는 이 화면에 그 낱말의 옛 뜻(= 100 − 체력)이
-              있었기 때문이다 — 체력 옆에 나란히 서면 감독이 두 열을 서로의 역수로 읽는다 */}
-          {th(
-            "load",
-            "누적",
-            "hide-sm",
-            "누적 피로 — 시즌이 쌓아 둔 잔고다. 회복을 늦추고 부상 위험을 올린다. 체력과 다른 축이다",
-          )}
-          {/* 다치기 전에 서는 유일한 열이다 — 체력 막대와 다른 축이다 (player.md §5.3) */}
-          {th(
-            "risk",
-            "위험",
-            "hide-sm",
-            "부상 위험 — 경기가 누가 다칠지 고를 때 쓰는 저울이다. 체력·몸싸움·부상 이력이 함께 정한다",
-          )}
           {th("rating", "평점", "hide-sm")}
         </tr>
       </thead>
@@ -433,33 +383,6 @@ export function SquadTable({
                   경기 중에는 판세 탭과 같은 읽은 값이라 막대에 모르는 폭이 붙는다 */}
               <td title={moodSentence(p.mood)}>
                 <ConditionBar c={p.condition} />
-              </td>
-              {/* 숫자가 아니라 등급이다 — 감독이 읽는 사실은 "최근에 뛰었나"이지 73이 아니다 */}
-              <td className="hide-sm">
-                <span className={`sharpness ${p.sharpnessBand}`}>{p.sharpnessLabel}</span>
-              </td>
-              {/* 「가뿐」은 글자를 세우지 않는다 — 위험 열과 같은 이유로, 스물몇 줄이
-                  기본값으로 차면 정작 무거운 두 줄이 묻힌다 */}
-              <td className="hide-sm">
-                {p.fatigueBand === "clear" ? (
-                  <span className="load clear">—</span>
-                ) : (
-                  <span className={`load ${p.fatigueBand}`}>{p.fatigueLabel}</span>
-                )}
-              </td>
-              {/* 낮음은 글자를 세우지 않는다 — 스물몇 줄이 「낮음」으로 차면
-                  정작 위태로운 두 줄이 그 안에 묻힌다 */}
-              <td className="hide-sm">
-                {p.injuryRisk.grade === "low" ? (
-                  <span className="injury-risk low">—</span>
-                ) : (
-                  <span
-                    className={`injury-risk ${p.injuryRisk.grade}`}
-                    title={p.injuryRisk.causes.map((c) => INJURY_RISK_CAUSE_KO[c]).join(" · ")}
-                  >
-                    {INJURY_RISK_GRADE_KO[p.injuryRisk.grade]}
-                  </span>
-                )}
               </td>
               {/* 골 대신 평점 — 골 수는 행을 펼치면 시즌 기록에 그대로 있다 */}
               <td

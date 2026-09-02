@@ -5,14 +5,15 @@ import {
   FULL_TIME_MINUTES,
   addToSeasonStat,
   clampCondition,
+  clampFamiliarity,
+  familiarityAwayDayOf,
   clampFatigue,
-  clampSharpness,
+  familiarityAfterAwayDay,
   fatigueOf,
   isReserveMatch,
   keptCleanSheet,
   naturalPositionOf,
   positionGroupOfPlayer,
-  sharpnessOf,
   slotOfTime,
 } from "@story-fm/domain";
 import {
@@ -24,9 +25,6 @@ import {
   fatigueFromMinutes,
   fatigueFromSessions,
   injuryWeight,
-  sharpnessAfterDay,
-  sharpnessAfterMinutes,
-  sharpnessDayOf,
   type RecoveryKind,
 } from "@story-fm/sim";
 import {
@@ -532,21 +530,27 @@ function dailyTick(
      */
     player.state.form = decayedForm(player.state.form);
     /**
-     * **경기 감각은 그날이 무엇이었나로 끌린다** (player.md §5.4) — 본훈련이면 55,
-     * 훈련이 없으면 25, 재활 중이면 10 쪽이다. 회복 눈금(`dayKind`)과 **같은
-     * 하루**를 읽으므로 두 축이 서로 다른 날을 살지 않는다.
+     * **적응도는 훈련장을 떠난 날에 끌린다** (player.md §7.4) — 클럽을 떠나 있으면
+     * 55, 재활 중이면 30 쪽이다. 「떠나 있다」는 위에서 이미 센 그 하루다(`offSite` —
+     * 감독이 뺀 기간 · 대표팀 · 여름 휴가).
      *
      * ⚠️ 부상자를 갈라 보는 것은 이 축뿐이다. 체력은 위에서 부상 중에도 회복하지만
-     * (그게 복귀일에 몸이 준비돼 있는 이유다), 재활실은 훈련장이 아니라서 감각은
-     * 그동안 굳는다 — 장기 부상 복귀 선수가 곧장 온전한 전력이 아닌 이유다.
+     * (그게 복귀일에 몸이 준비돼 있는 이유다), 재활실은 훈련장이 아니라서 판은
+     * 그동안 몸에서 빠진다 — 장기 부상 복귀 선수가 곧장 온전한 전력이 아닌 이유다.
+     *
+     * ⚠️ **평범한 휴식일은 끌지 않는다.** 주말은 훈련 주간의 일부이지 판을 잊는
+     * 시간이 아니고, 오르는 길이 판정 하나뿐인 축을 매주 깎으면 감독이 아무것도
+     * 하지 않아도 손해가 나는 세금이 된다 (§7.4).
      */
-    player.state.sharpness = clampSharpness(
-      sharpnessAfterDay(
-        sharpnessOf(player.state),
-        // 훈련장을 떠난 하루는 **훈련이 없는 날**이다 — 재활실이 아니다
-        sharpnessDayOf(offSite ? "idle" : dayKind, injuredPlayers.has(player.id)),
-      ),
-    );
+    const awayDay = familiarityAwayDayOf(offSite, injuredPlayers.has(player.id));
+    if (awayDay !== null) {
+      const assignment = assignmentFor(state, player.id);
+      if (assignment) {
+        assignment.familiarity = clampFamiliarity(
+          familiarityAfterAwayDay(assignment.familiarity, awayDay),
+        );
+      }
+    }
     if (issuePlayers.has(player.id)) {
       player.state.condition = clampCondition(player.state.condition - 1);
     }
@@ -1697,7 +1701,6 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
          * 몸에 남는 것은 친선도 겪는 자리이고, 프리시즌이 몸을 만든다는 말이
          * 장부에 서는 곳이 여기다.
          */
-        p.state.sharpness = clampSharpness(sharpnessAfterMinutes(sharpnessOf(p.state), minutes));
       }
     }
     /**
@@ -1797,9 +1800,6 @@ function reserveXI(state: GameState, teamId: string): GamePlayer[] {
  * 벤치 없이 열한 명으로 90분을 굴린다(`simSquadFor`) — 교체가 없으니 출전자가 곧
  * 선발이고, 라인업이 그대로 출전 기록의 원본이다.
  */
-/** 2군 경기의 출전 분 — 교체가 없으므로 선발 열한 명이 정규 시간을 다 뛴다 */
-const RESERVE_MATCH_MINUTES = 90;
-
 export function simulateReserveMatch(state: GameState, match: MatchRecord, digest: string[]): void {
   /**
    * 2군 리그의 대회 id — 편성이 언제나 붙여 주지만(`reserveCompetitionId`), 없으면
@@ -1865,17 +1865,12 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
         outcome,
       });
       /**
-       * **2군 경기가 1군 몸에 닿는 유일한 자리** (season.md §2 · player.md §5.4).
-       *
-       * 나머지(폼·체력·부상·카드)를 닫아 둔 이유는 감독에게 그 일정을 조정할
-       * 손잡이가 없어서인데, 경기 감각만은 반대다: 2군에서 90분을 뛴 유망주가
-       * 1군에 올라왔을 때 감각이 그대로면 감독이 그를 내려보낸 일이 아무것도
-       * 아니었던 것이 된다. 장기 부상 복귀 선수를 끌어올리는 길도 이 한 칸이 연다.
-       * 벤치 없이 열한 명이 90분을 굴리므로 출전 분은 전원 정규 시간이다.
+       * **2군 경기는 1군 몸에 닿지 않는다** (season.md §2) — 폼·체력·부상·카드가
+       * 전부 닫혀 있고, 감독에게 그 일정을 조정할 손잡이가 없어서다. 적응도도
+       * 마찬가지다: 오르는 길은 판정 하나뿐이고(player.md §7) 2군 경기는 판정을
+       * 지나지 않는다. 내려보낸 선수가 잃지 않는 것은 **그가 훈련장에 있기 때문**
+       * 이지 2군에서 뛰었기 때문이 아니다 (§7.4).
        */
-      p.state.sharpness = clampSharpness(
-        sharpnessAfterMinutes(sharpnessOf(p.state), RESERVE_MATCH_MINUTES),
-      );
       // 2군 리그도 제 대회 id를 갖는다(`reserve:<리그>`) — 1군 행과 섞이지 않는다
       const stat = ensureSeasonStat(state, p.id, teamId, reserveCompetitionId, p);
       stat.reserveApps = (stat.reserveApps ?? 0) + 1;

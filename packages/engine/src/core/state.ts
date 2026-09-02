@@ -111,7 +111,7 @@ import {
   standingScore,
   sumSeasonStats,
 } from "@story-fm/domain";
-import { profFactor, SHARPNESS_PRESEASON, type MatchLedgerState } from "@story-fm/sim";
+import { profFactor, type MatchLedgerState } from "@story-fm/sim";
 import type { AiDeal } from "../market/ai-market";
 import {
   buildScheduleEntries,
@@ -2230,7 +2230,6 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
          * 시즌 전환이 세우는 값과 같은 자리에서 출발해야 첫 시즌의 프리시즌도
          * 두 번째 시즌의 프리시즌과 같은 판이 된다.
          */
-        sharpness: SHARPNESS_PRESEASON,
       },
       isCaptain: false,
     };

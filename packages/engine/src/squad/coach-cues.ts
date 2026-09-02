@@ -1,7 +1,7 @@
 import {
   ageOf,
   growthLabel,
-  injuryRiskText,
+  injuryHistoryText,
   isReserveMatch,
   TRAINING_MARK_KO,
   normalizeSpeaker,
@@ -19,7 +19,7 @@ import {
 } from "@story-fm/domain";
 import { injuryWeight } from "@story-fm/sim";
 import { formLabel } from "./form";
-import { injuryRiskFor, pronenessValue } from "./injury";
+import { injuryHistoryOf, pronenessValue } from "./injury";
 import { isSettling } from "./settling";
 import { CUE_ROTATION_TURNS, recentSpeakers, rotationDay } from "./cues";
 import { diffDays, nextMatchFor } from "../competition/calendar";
@@ -241,20 +241,19 @@ const injuryRisk: CoachEye = (state) => {
     .filter((p) => squadLevelOf(p) === "first" && !isInjured(state, p.id))
     .map((p) => ({
       player: p,
-      risk: injuryRiskFor(p),
+      history: injuryHistoryOf(state, p.id),
+      // 순서는 코어의 저울이 정한다 — 무엇을 말할지는 읽는 쪽이 정한다
       weight: injuryWeight(p, 0, pronenessValue(p)),
     }))
-    .filter((r) => r.risk.grade !== "low")
+    .filter((r) => r.history.count > 0)
     .sort((a, b) => b.weight - a.weight || (a.player.id < b.player.id ? -1 : 1))
     .slice(0, NAMES_SHOWN);
   if (rows.length === 0) return null;
   return {
     code: "injury-risk",
     fact:
-      "부상 위험: " +
-      rows
-        .map((r) => `${r.player.name} ${injuryRiskText(r.risk.grade, r.risk.causes)}`)
-        .join(" · "),
+      "부상 이력: " +
+      rows.map((r) => `${r.player.name} ${injuryHistoryText(r.history)}`).join(" · "),
     playerIds: rows.map((r) => r.player.id),
   };
 };
