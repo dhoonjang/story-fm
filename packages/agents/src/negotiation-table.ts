@@ -12,7 +12,13 @@ import {
   type TableLine,
 } from "@story-fm/domain";
 import type { CounterpartyVoice, GameState, TableReply, TableSeat } from "@story-fm/engine";
-import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import {
+  agentConfig,
+  createGameLLM,
+  resolveLlmMode,
+  type GameLLM,
+  type GameToolSpec,
+} from "@story-fm/llm";
 import { buildCounterpartyBlock, describeAnchor } from "./counterparty-brief";
 import { retryOnce, requireToolCall } from "./retry";
 import { CounterpartyRulingFieldsSchema } from "./ruling-schema";
@@ -177,6 +183,8 @@ export async function runTableReply(
   line: string | null,
   llm?: GameLLM,
 ): Promise<TableReply | null> {
+  // mock 모드에는 부를 모델이 없다 — 코어가 서류대로 마감한다 (agents.md §4-1의 mock)
+  if (llm === undefined && resolveLlmMode() === "mock") return null;
   const user = buildTableInput(state, seat, line);
   if (user === null) return null;
   let reply: TableReplyArgs | null = null;

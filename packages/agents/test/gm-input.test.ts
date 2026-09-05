@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  activeContract,
   addDays,
   advanceTime,
   applyScenePoint,
+  askingPriceFor,
   characterEntry,
   clubHonoursLine,
   createGame,
@@ -15,10 +17,15 @@ import {
   HISTORY_STEP,
   missionReportCard,
   openPress,
+  openRenewal,
   ownerOf,
   pendingPress,
+  renewalExpectation,
   reportersOf,
   selectCharacters,
+  sendOffer,
+  settleTableReply,
+  sitAtTable,
   speakerRoles,
   scoutPlayer,
   scoutReportCard,
@@ -26,6 +33,7 @@ import {
   teamName,
   playersOf,
   userPlayers,
+  wageExpectationOf,
   type GameState,
 } from "@story-fm/engine";
 import { describeManagerSkills, describeReputation } from "@story-fm/domain";
@@ -45,6 +53,7 @@ import {
   TurnOperationSchema,
   buildGmDigest,
   buildGmHistory,
+  buildTableInput,
   buildGmTurnMessage,
   buildManagerMessage,
   buildGmReference,
@@ -59,7 +68,6 @@ import {
   parseSceneHeader,
   recordCharacterInjection,
   runGmTurn,
-  runMockGmTurn,
   runOnboarding,
   type GmToolCall,
 } from "@story-fm/agents";
@@ -1866,15 +1874,132 @@ describe("도착한 카드 — 한 줄에서 지목과 임무를 가른다", () 
     advanceTime(state, { days: SCOUT_DAYS });
     expect(state.pendingReportCards).toEqual([target.id]);
 
-    // 경기 중 — mock 캐스터가 도는 자리다. 줄은 그대로 있어야 한다
-    state.phase = "match";
-    runMockGmTurn(state, "진행");
-    expect(state.pendingReportCards).toEqual([target.id]);
+    stubRunTurn.mockImplementation(async (): Promise<TurnResult> => ({
+      text: `[${state.date} AM 10:00]\n@스티브 홀랜드: 알겠습니다.`,
+      history: { version: 1, provider: "google", model: "test", messages: [] },
+      historyBase: 0,
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      toolCallCount: 0,
+      stopReason: "completed",
+    }));
+    const previousMode = process.env.LLM_MODE;
+    process.env.LLM_MODE = "real";
+    try {
+      // 경기 중 — 중계가 도는 자리다. 줄은 그대로 있어야 한다
+      state.phase = "match";
+      await runGmTurn(state, "진행");
+      expect(state.pendingReportCards).toEqual([target.id]);
 
-    // 경기가 끝난 첫 평시 턴 — mock도 실모드와 같은 자리에서 꺼낸다
-    state.phase = "idle";
-    const peace = runMockGmTurn(state, "수고했다");
-    expect(peace.reports?.map((r) => r.playerId)).toEqual([target.id]);
+      // 경기가 끝난 첫 평시 턴 — 밀린 카드가 여기서 선다
+      state.phase = "idle";
+      const peace = await runGmTurn(state, "수고했다");
+      expect(peace.reports?.map((r) => r.playerId)).toEqual([target.id]);
+    } finally {
+      if (previousMode === undefined) delete process.env.LLM_MODE;
+      else process.env.LLM_MODE = previousMode;
+    }
     expect(state.pendingReportCards ?? []).toEqual([]);
+  });
+});
+
+/**
+ * 교섭 서류·테이블 입력 — **누가 무엇을 답하나** (agents.md §4-1 · transfer.md §12-1).
+ *
+ * 부르는 쪽이 `<counterparty>`·`<situation>`·`<table_log>`·`<anchor>`를 변경 빈도 순으로
+ * 쌓는 자리라, 이 파일의 다른 케이스들과 같은 것을 잰다 — 그 호출이 무엇을 보고
+ * 무엇을 보지 못하는가.
+ */
+describe("교섭 테이블의 입력 — 화자와 그가 답하는 칸", () => {
+  /** 계약이 곧 끝나는 우리 선수와 재계약 협상 하나 */
+  function renewal(state: GameState) {
+    const player = playersOf(state, state.userTeamId)[0]!;
+    activeContract(state, player.id)!.until = addDays(state.date, 120);
+    const opened = openRenewal(state, {
+      playerId: player.id,
+      weeklyWage: Math.round(renewalExpectation(state, player) * 0.8),
+      years: 3,
+    });
+    expect(opened.ok, opened.message).toBe(true);
+    return { player, negotiation: state.negotiations.find((n) => n.kind === "renew")! };
+  }
+
+  it("입력은 서류·상황·대화·앵커 순이고, 감독이 다른 데서 한 말은 없다", () => {
+    const state = game();
+    const { negotiation } = renewal(state);
+    // 오퍼 없이 말만 오가는 자리 — 판정이 협상을 닫지 않는다
+    negotiation.rounds.pop();
+    // 감독이 이사회에 한 말 — 테이블 건너편이 알아서는 안 되는 문장
+    const secret = "사실 예산은 두 배까지 열려 있습니다";
+    state.chat.push({ role: "user", text: secret, toolCalls: [], at: state.date });
+
+    const first = sitAtTable(state, negotiation.id, "남아 주면 좋겠습니다");
+    if (!first.ok) throw new Error(first.message);
+    settleTableReply(state, first.seat, {
+      lines: [{ speaker: "agent", text: "조건을 들어 보고요." }],
+      stance: "steady",
+      // 장부 줄이 서는 답 — 말투가 인내를 깎은 사실이 대화 사이에 남는다
+      heard: { tone: "hostile", claims: [] },
+    });
+    const second = sitAtTable(state, negotiation.id, "주급은 그대로, 연수는 4년");
+    if (!second.ok) throw new Error(second.message);
+    const input = buildTableInput(state, second.seat, "주급은 그대로, 연수는 4년")!;
+    const order = [
+      "<counterparty",
+      "<situation",
+      "<table_log>",
+      "<anchor>",
+      "@감독: 주급은 그대로",
+    ];
+    const positions = order.map((tag) => input.indexOf(tag));
+    expect(
+      positions.every((p) => p >= 0),
+      input,
+    ).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    expect(input).not.toContain(secret);
+    // 지난 답과 장부 줄은 대화에 서고, 이번 말은 대화에 없다
+    expect(input).toContain("조건을 들어 보고요.");
+    expect(input).toContain("[장부]");
+    expect(input).toContain("남은 인내");
+    expect(input.indexOf("주급은 그대로, 연수는 4년")).toBe(
+      input.lastIndexOf("주급은 그대로, 연수는 4년"),
+    );
+  });
+
+  it("재계약의 서류에는 목소리가 하나 선다 — 이적료를 받을 구단이 없다", () => {
+    const state = game();
+    const { negotiation } = renewal(state);
+    const seat = sitAtTable(state, negotiation.id, "남아 주십시오");
+    if (!seat.ok) throw new Error(seat.message);
+    expect(seat.seat.voices.map((v) => v.speaker)).toEqual(["agent"]);
+    expect(buildTableInput(state, seat.seat, "남아 주십시오")!).toContain(
+      `agent "${seat.seat.voices[0]!.name}" —`,
+    );
+  });
+
+  it("영입의 서류는 화자를 둘 적고, 화자 없는 옛 줄은 구단으로 읽힌다", () => {
+    const state = game();
+    const target = state.players.find((p) => p.teamId !== state.userTeamId)!;
+    const sent = sendOffer(state, {
+      playerId: target.id,
+      fee: askingPriceFor(state, target),
+      weeklyWage: wageExpectationOf(state, target),
+      years: 4,
+    });
+    expect(sent.ok, sent.message).toBe(true);
+    const buy = state.negotiations.find((n) => n.kind === "buy")!;
+    const seat = sitAtTable(state, buy.id, "값부터 맞춥시다");
+    if (!seat.ok) throw new Error(seat.message);
+    const [club, agent] = seat.seat.voices;
+    expect(club!.speaker).toBe("club");
+    expect(agent!.speaker).toBe("agent");
+
+    // 화자 칸이 없는 줄 — 목소리가 둘이 되기 전의 세이브가 남긴 답이다
+    buy.table!.lines.push({ date: state.date, by: "them", text: "옛 세이브의 답이다" });
+    const input = buildTableInput(state, seat.seat, "값부터 맞춥시다")!;
+    expect(input).toContain(`club "${club!.name}" —`);
+    expect(input).toContain(`agent "${agent!.name}" —`);
+    // 그 답은 서류가 부르는 상대 하나, 곧 파는 구단의 말로 읽힌다
+    expect(input).toContain(`@${club!.name}: 옛 세이브의 답이다`);
   });
 });
