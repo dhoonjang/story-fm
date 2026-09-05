@@ -431,8 +431,8 @@ export function CareerView({
           <div className="bg">{squad.manager.background}</div>
           {/**
            * 감독에게 딸린 값은 **두 갈래**고 생김새가 그것을 가른다 — 견주는 눈금
-           * (평판·보드 경고)은 상자 하나에 함께 담고, 읽는 사실(계약·지갑)은 상자 없이
-           * 라벨과 값으로 선다. 둘 다 이름·배경보다 아래 단이다.
+           * (평판)은 상자에 담고, 읽는 사실(계약·지갑)은 상자 없이 라벨과 값으로
+           * 선다. 둘 다 이름·배경보다 아래 단이다.
            */}
           <div className="mgr-meters">
             <div className="mgr-gauges">
@@ -458,41 +458,6 @@ export function CareerView({
                       </span>
                       <b>{value}</b>
                     </span>
-                  ))}
-                </div>
-              </div>
-              {/**
-               * 보드 경고 — 평판과 **같은 무게로, 다른 물건으로** 그린다. 경질은 이
-               * 세이브가 끝나는 유일한 길이라 카운터가 화면에 없으면 끝이 예고 없이
-               * 온다. 평판은 0~100 사이를 오가는 눈금이지만 경고는 **세는 것**이라
-               * 막대가 아니라 칸이다 — 찬 칸이 받은 경고고, 마지막 칸이 차면 붉다.
-               */}
-              <div className="mgr-warn">
-                <div className="mgr-rep-title">보드 경고</div>
-                <div
-                  className="mgr-warn-cells"
-                  data-testid="board-warnings"
-                  role="img"
-                  aria-label={`보드 경고 ${squad.manager.boardWarnings}/${squad.manager.warningLimit}${
-                    squad.manager.lastWarnedOn ? ` · 마지막 ${squad.manager.lastWarnedOn}` : ""
-                  }`}
-                  title={
-                    squad.manager.lastWarnedOn
-                      ? `마지막 경고 ${squad.manager.lastWarnedOn}`
-                      : undefined
-                  }
-                >
-                  {Array.from({ length: squad.manager.warningLimit }, (_, i) => (
-                    <i
-                      key={i}
-                      className={
-                        i < squad.manager.boardWarnings
-                          ? i === squad.manager.warningLimit - 1
-                            ? "on last"
-                            : "on"
-                          : ""
-                      }
-                    />
                   ))}
                 </div>
               </div>
