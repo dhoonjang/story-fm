@@ -22,6 +22,8 @@ import {
   isMarketOnlyLeague,
   isClubTeam,
   monthlyFixedCostOf,
+  namedStaffMonthlyOf,
+  staffWageBaseOf,
   seasonBudgetBaseOf,
   NARRATIVE_EXPENSE_CATEGORIES,
   NARRATIVE_FINANCE_WAGE_LIMIT,
@@ -447,6 +449,50 @@ describe("월간 보고서", () => {
     expect(Array.isArray(report.noteCards)).toBe(true);
     expect(report.notes, "코어가 노트 문장을 저장했다").toBeUndefined();
     expect(report.psr).not.toBeNull();
+  });
+});
+
+/**
+ * 명명 스태프 — 파생 비율에서 덜어 낸다 (finance.md §6.4-1).
+ *
+ * 고용은 스태프 급여를 **늘리는 것이 아니라 그 안에서 이름을 얻는 것**이다. 파생 줄에서
+ * 명명된 만큼을 빼지 않으면 새 게임의 인건비가 조용히 무거워져 §10.2의 실측이 어긋나고,
+ * 반대로 대상별 줄을 접어 합계 한 줄로 두면 감독이 사람 단위로 드릴다운할 곳이 사라진다.
+ */
+describe("스태프 급여", () => {
+  it("명명 스태프가 이름으로 서고 총액은 파생 기준액 그대로다", () => {
+    const state = createMiniGame();
+    const teamId = state.userTeamId;
+    runMonthlyFinance(state, []);
+
+    const lines = financeOf(state, teamId).ledger.filter((e) => categoryOf(e) === "staff_wages");
+    // 감독은 스태프가 아니다 — 파생 몫 위에 따로 얹힌다
+    const total = lines.filter((e) => e.label !== "감독 연봉").reduce((s, e) => s + e.amount, 0);
+
+    const base = staffWageBaseOf(state, teamId);
+    const named = namedStaffMonthlyOf(state, teamId);
+    // 시작 인원(수석코치 + 코치 2 · 의료진 1 · 스카우트 1)은 기준액 한참 아래다
+    expect(named).toBeGreaterThan(0);
+    expect(named).toBeLessThan(base);
+    expect(total).toBe(Math.round(Math.max(base, named)));
+    expect(lines.find((e) => e.label === "코칭·사무 스태프 급여")?.amount).toBe(
+      Math.round(base) - named,
+    );
+
+    // 대상별로 이름과 직책을 달고 선다
+    const people = (state.personas ?? []).filter((p) => p.employment?.teamId === teamId);
+    expect(people.length).toBeGreaterThanOrEqual(5);
+    for (const person of people) {
+      const job = person.employment!;
+      expect(
+        lines.find((e) => e.label === `${person.name} (${job.title})`)?.amount,
+        `${person.name} 급여 줄`,
+      ).toBe(Math.round(job.contract.salary / 12));
+    }
+
+    // AI 구단은 명명 스태프가 없다 — 파생 줄 하나뿐이라 예전과 같다
+    const rival = state.teams.find((t) => t.id !== teamId && isClubTeam(t.id))!;
+    expect(namedStaffMonthlyOf(state, rival.id)).toBe(0);
   });
 });
 
