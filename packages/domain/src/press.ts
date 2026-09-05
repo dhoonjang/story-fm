@@ -10,6 +10,8 @@ import {
   type ApproachChannel,
 } from "./persona";
 import {
+  awardDetail,
+  awardTitle,
   boardExpectationText,
   INCIDENT_KIND_KO,
   INTEREST_STAGE_KO,
@@ -123,6 +125,15 @@ export const PressFactKindSchema = z.enum([
   "rumour",
   /** 방금 끝난 경기가 세운 기록 — 데뷔·첫 골·구단 통산 문턱·해트트릭 (match.md §6) */
   "milestone",
+  /**
+   * **시즌 시상** — 지금 우리 선수단에 있는 사람이 **가장 최근에 매겨진 시즌**에 받은 상
+   * (season.md §6 「상이 사실로 서는 자리」 · people.md §4). `tags[0]`이 상 코드,
+   * `tags[1]`이 그 대회의 이름, `values`가 시즌과 근거 수치(`awardDetail`이 읽는 칸)다.
+   *
+   * 어느 셔츠로 받았는지는 묻지 않는다 — 지난 시즌 남의 리그 득점왕을 여름에 데려온
+   * 것이야말로 개막 전야에 설 사실이다.
+   */
+  "award",
   /** 이번 시즌 뒤 은퇴 — 1월에 선 예고 (season.md §6) */
   "retirement",
   /**
@@ -881,6 +892,26 @@ export function pressFactText(fact: PressFact): string {
       return `새 시즌 이적 예산 ${formatMoney(v.budget ?? 0)}`;
     case "milestone":
       return `${name} ${milestonePhrase((sub ?? "apps") as MilestoneCode, v.value ?? 1)}`;
+    case "award": {
+      /**
+       * 근거 수치의 조각은 **시즌 다이제스트가 쓰는 그 하나**다(`awardDetail`) — 카드가
+       * 제 문구를 쓰면 같은 상이 결산 화면과 회견에서 다른 말로 선다.
+       *
+       * 이름은 **있을 때만** 앞에 선다: 다가옴의 카드는 `about`이 이미 그 사람이라
+       * 이름을 다시 부르면 한 줄에 같은 이름이 두 번 선다 (`call-up`과 같은 규약).
+       */
+      const who = name ? `${name} ` : "";
+      const where = tags[1] ? `${tags[1]} ` : "";
+      const detail = awardDetail({
+        code: sub ?? "",
+        apps: v.apps ?? 0,
+        goals: v.goals ?? 0,
+        assists: v.assists ?? 0,
+        ...(v.rating === undefined ? {} : { rating: v.rating }),
+        ...(v.age === undefined ? {} : { age: v.age }),
+      });
+      return `${who}시즌 ${v.season ?? 0} ${where}${awardTitle(sub ?? "")} — ${detail}`;
+    }
     case "contract-demand":
       return (
         `계약 만료 ${v.days ?? 0}일 · 현 주급 ${formatMoney(v.wage ?? 0)}/주` +

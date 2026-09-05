@@ -5,6 +5,7 @@ import {
   describeReputation,
   isPlayerDeal,
   mediaFactText,
+  milestonePhrase,
   naturalPositionOf,
   seasonRating,
   type GamePlayer,
@@ -12,6 +13,7 @@ import {
 } from "@story-fm/domain";
 import {
   MANAGER_SUBJECT,
+  awardLine,
   betterAtPosition,
   competitionName,
   computeStandings,
@@ -22,6 +24,7 @@ import {
   formLabel,
   formatMoney,
   hasIssue,
+  lastSeasonAwardsOf,
   leagueOfTeamIn,
   moodOf,
   openInjury,
@@ -29,6 +32,7 @@ import {
   playerById,
   playersOf,
   relationTierOf,
+  seasonMilestonesOf,
   seasonStatOf,
   squadStatusOf,
   stageScaleOf,
@@ -53,6 +57,10 @@ import {
 const SITUATION_MEDIA_LINES = 3;
 /** 두 구단 사이의 지난 거래 — 최근 것부터 이만큼 */
 const SITUATION_PAST_DEALS = 3;
+/** 지난 시즌 시상 — 장부 순서로 이만큼. 더 적으면 서류가 시상식이 된다 */
+const SITUATION_AWARDS = 2;
+/** 이번 시즌 마일스톤 — 드문 것부터 이만큼 */
+const SITUATION_MILESTONES = 3;
 
 /** 리그 순위 한 줄 — `프리미어리그 4위 (12경기 승점 25)` */
 function standingLine(state: GameState, teamId: string): string | null {
@@ -99,7 +107,13 @@ function clubBlock(state: GameState, teamId: string, player: GamePlayer): string
   ];
 }
 
-/** 선수의 지금 — 시즌 기록·폼·부상·지위·심경·약속·감독과의 관계 */
+/**
+ * 선수의 지금 — 시즌 기록·폼·부상·지위·심경·약속·감독과의 관계·시상·마일스톤.
+ *
+ * 시상의 창은 `state.season - 1` 하나이고(`lastSeasonAwardsOf` — season.md §6),
+ * 마일스톤은 이번 시즌 것만이다. 없으면 그 줄이 아예 없다 — 「시상 없음」은 사실이
+ * 아니라 빈칸을 메운 말이다.
+ */
 function playerBlock(state: GameState, negotiation: Negotiation, player: GamePlayer): string[] {
   const ours = player.teamId === state.userTeamId;
   const stat = seasonStatOf(state, player.id);
@@ -107,6 +121,11 @@ function playerBlock(state: GameState, negotiation: Negotiation, player: GamePla
   const injury = openInjury(state, player.id);
   const mood = moodOf(state, player).note;
   const promises = ours ? openPromises(state, player.id) : [];
+  const awards = lastSeasonAwardsOf(state, player.id).slice(0, SITUATION_AWARDS);
+  const milestones = seasonMilestonesOf(state, player.id, state.season).slice(
+    0,
+    SITUATION_MILESTONES,
+  );
   return [
     `<player_now>`,
     stat
@@ -125,6 +144,14 @@ function playerBlock(state: GameState, negotiation: Negotiation, player: GamePla
       : []),
     ...(ours || isPlayerDeal(negotiation.kind)
       ? [`감독과의 관계: ${RELATION_TIER_KO[relationTierOf(state, MANAGER_SUBJECT, player.id)]}`]
+      : []),
+    ...(awards.length > 0
+      ? [`지난 시즌 시상: ${awards.map((a) => awardLine(a)).join(" · ")}`]
+      : []),
+    // 「구단 통산」 접두를 붙이는 것은 `milestonePhrase`다 — 떼면 읽는 쪽이 100경기를
+    // 커리어 통산으로 읽고 원장에 없는 부임 전 이력을 흥정에 지어 넣는다
+    ...(milestones.length > 0
+      ? [`이번 시즌 기록: ${milestones.map((m) => milestonePhrase(m.code, m.value)).join(" · ")}`]
       : []),
     `</player_now>`,
   ];

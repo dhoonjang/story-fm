@@ -2688,6 +2688,36 @@ export function awardTitle(code: string): string {
 }
 
 /**
+ * 상이 선 **근거 수치 한 조각** — 「38경기 25골」·「결승 · 평점 8.20 · 1골」.
+ *
+ * 상마다 읽는 칸이 다르다: 득점왕은 골, 도움왕은 도움, 영플레이어는 나이, 결승 MOM은
+ * **그 한 경기**다(출전 수를 적으면 「1경기」가 되어 사실을 흐린다 — season.md §6).
+ *
+ * ⚠️ **이 조각은 한 벌이다.** 시즌 다이제스트의 줄(`awardLine`)과 회견·다가옴의 사실
+ * 카드(`pressFactText`의 `award`)가 같은 함수를 부른다 — 자리마다 제 문구를 쓰면 같은
+ * 상이 결산 화면과 회견에서 다른 말로 선다 (season.md §6 「상이 사실로 서는 자리」).
+ */
+export function awardDetail(
+  a: Pick<SeasonAward, "code" | "apps" | "goals" | "assists"> &
+    Partial<Pick<SeasonAward, "rating" | "age">>,
+): string {
+  const rating = a.rating === undefined ? "" : ` · 평점 ${a.rating.toFixed(2)}`;
+  if (a.code === "final-motm") {
+    const scored = [a.goals > 0 ? `${a.goals}골` : null, a.assists > 0 ? `${a.assists}도움` : null]
+      .filter((x) => x !== null)
+      .join(" ");
+    return `결승${rating}${scored === "" ? "" : ` · ${scored}`}`;
+  }
+  if (a.code === "top-scorer") return `${a.apps}경기 ${a.goals}골`;
+  if (a.code === "top-assister") return `${a.apps}경기 ${a.assists}도움`;
+  // 나이를 모르는 줄(옛 세이브·카드의 빈 칸)은 「만 undefined세」 대신 나이를 빼고 선다
+  if (a.code === "young-player" && a.age !== undefined) {
+    return `만 ${a.age}세 · ${a.apps}경기${rating}`;
+  }
+  return `${a.apps}경기${rating}`;
+}
+
+/**
  * 시상 한 건 — 코드 + **그 상이 선 근거 수치**.
  *
  * 수상자 **이름**을 함께 적는 것은 그것이 사실이라서다 — 은퇴하면

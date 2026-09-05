@@ -153,7 +153,9 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
     const minute = state.pendingMatch!.ledger.minute;
 
     const { applied } = turn(state, {
-      ops: { talk_to_player: [{ playerId: who, outcome: "motivated", intensity: 2 }] },
+      ops: {
+        team_talk: [{ occasion: "daily", players: [who], outcome: "encouraged", intensity: 2 }],
+      },
     });
     expect(applied.segment).toBeNull();
     expect(state.pendingMatch!.ledger.minute).toBe(minute);

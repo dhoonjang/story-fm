@@ -10,6 +10,7 @@ import {
   type ChatTurn,
 } from "@story-fm/engine";
 import { STALLED_CLOCK_TURNS } from "@story-fm/agents";
+import { buildPlayerNameIndex, playerIdsIn } from "./player-names";
 
 /** 응답에 실을 장부 — 라우트가 **자기가 바꾼 것만** 고른다 */
 export type ViewKey = keyof OfficeViews;
@@ -84,11 +85,30 @@ const ID_LIKE = /[a-z][a-z0-9]*(?:-[a-z0-9]+)+/g;
  * 턴마다 사전 전체를 훑으므로 화면이 느려지는 값이기도 하다. 실제로 필요한 건
  * **우리 선수단**(대화의 대부분)과 **이미 대화에 나온 id**뿐이다 — 새 id가
  * 스트리밍 중에 튀어나와도 그 턴이 커밋되면 이 사전에 들어와 치환된다.
+ *
+ * 이 사전은 이제 **손잡이가 설 수 있는 이름의 폭**이기도 하다 (player.md §9.5) —
+ * 화면은 여기 있는 이름만 누를 수 있게 잇는다. 그래서 이야기가 **이름으로** 부른
+ * 남의 선수도 담는다: 이적 대상도 상대 팀 선수도 id 없이 산문에만 서므로, 위의
+ * 토큰 훑기로는 영영 잡히지 않는다.
+ *
+ * 폭을 넓히되 짐은 그대로다 — 전 리그로 색인을 **한 번** 지어 대화가 부른 id만
+ * 골라 담으므로, 나가는 것은 여전히 우리 선수단 + 이야기에 선 몇 명이다.
+ * ⚠️ 색인은 payload 한 번에 한 번 짓는다(문장마다 지으면 5,725명짜리 사전을 한
+ * 화면에 수백 번 짓는다), 그리고 **서버에만 남는다** — 클라이언트로 가는 것은
+ * 여기서 만드는 id→이름 사전뿐이다.
+ * ⚠️ **새로 담는 기준은 전체 이름이다** — 전 리그 색인에 낱말 하나짜리 열쇠를 두면
+ * 수석코치 「스티브 홀랜드」의 「스티브」가 생판 남인 선수를 사전에 끌어들인다.
+ * 낱말 하나로 부른 이름은 이미 사전에 선 사람에게만 걸린다 (화면이 그렇게 잇는다).
  */
 function namesForChat(state: GameState): Record<string, string> {
   const mentioned = new Set<string>();
+  const index = buildPlayerNameIndex(
+    Object.fromEntries(state.players.map((p) => [p.id, p.name])),
+    false,
+  );
   for (const turn of state.chat) {
     for (const token of turn.text.match(ID_LIKE) ?? []) mentioned.add(token);
+    for (const id of playerIdsIn(turn.text, index)) mentioned.add(id);
   }
   const names: Record<string, string> = {};
   for (const p of state.players) {

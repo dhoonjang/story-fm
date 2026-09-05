@@ -462,9 +462,15 @@ erDiagram
   내려가고, 리그 평균이 시즌마다 위로 밀린다.
 - 같은 결로 `PlayerState.moodNote`와 `SETTLING_EVENT`도 저장한다 — 원본이 그
   구간의 대화·사건인데 그건 어디에도 표로 남지 않는다.
-- `PlayerState.talkedOn`(마지막 면담 날짜)도 같다. `SETTLING_EVENT`는 **정착 중인
-  선수만** 남기므로, 나머지 선수에게 "오늘 이미 이야기했나"를 물을 표가 없다.
-  옛 세이브엔 없다 — 없으면 아직 이야기한 적 없는 것으로 읽고 버전을 올리지 않는다.
+- `PlayerState.talkMorale`(최근 이레의 날짜별 대화 사기 합계)도 같다. 대화 판정은
+  어디에도 표로 남지 않아 "이 선수가 이번 주에 대화로 얼마나 움직였나"를 파생할 원본이
+  없고, 그 합계가 곧 하루 ±8·이레 ±20 상한을 세우는 자다
+  (→ [../simulation/career.md](../simulation/career.md) §2). 이레를 지난 줄은 쓸 때마다
+  걷히므로 장부가 자라지 않는다. 옛 세이브엔 없다 — 없으면 빈 장부로 읽고 버전을
+  올리지 않는다.
+  ⚠️ `PlayerState.talkedOn`·`Manager.teamTalkedOn`은 **날짜 게이트가 있던 시절의 자리**이고
+  지금은 아무 데서도 읽지 않는다. 옛 세이브가 들고 오는 값을 반려하지 않으려고 스키마에만
+  남아 있다 — 새로 쓰이지 않는다.
 - `PlayerState.caps` · `internationalGoals`(통산 A매치 출전·골)도 같다 — 소집 표는
   최근 두 시즌만 남으므로 표에서 파생하면 통산이 세 시즌 뒤에 사라진다
   (→ [competition](competition.md) §5-1). `summerReturn`(여름 대회로 늦어진 합류일)도

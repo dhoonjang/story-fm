@@ -10,6 +10,7 @@ import {
 } from "@story-fm/domain";
 import type { OfficeViews } from "@story-fm/engine";
 import { IconChevron } from "../icons";
+import { PlayerName } from "../player-card";
 
 // ── 대회 — 대회별 탭 · 순위표 · 라운드별 일정 ──────────────
 type Competition = OfficeViews["competitions"]["list"][number];
@@ -284,7 +285,9 @@ function LeadersSection({ competition }: { competition: Competition }) {
               {board.rows.map((row, i) => (
                 <tr key={row.gamePlayerId} className={row.ours ? "me" : ""}>
                   <td>{i + 1}</td>
-                  <td className="team-cell">{row.playerName}</td>
+                  <td className="team-cell">
+                    <PlayerName id={row.gamePlayerId} name={row.playerName} />
+                  </td>
                   <td className="dim-cell">{row.teamShortName}</td>
                   {columns.map((c) => (
                     <td key={c.head}>{c.strong ? <b>{c.of(row)}</b> : c.of(row)}</td>
@@ -474,7 +477,9 @@ function MatchPreviewPanel({ preview }: { preview: MatchPreview }) {
                   className={`mp-p${preview.guessed > 0 && !p.carried ? " guessed" : ""}`}
                   key={p.id}
                 >
-                  <b>{p.name}</b>
+                  <b>
+                    <PlayerName id={p.id} name={p.name} />
+                  </b>
                   <i>{p.position}</i>
                 </span>
               ))}
@@ -487,7 +492,9 @@ function MatchPreviewPanel({ preview }: { preview: MatchPreview }) {
               <div className="mp-out">
                 {preview.absent.map((a, i) => (
                   <span className={`mp-p out-${a.reason}`} key={i}>
-                    <b>{a.name}</b>
+                    <b>
+                      <PlayerName id={a.id} name={a.name} />
+                    </b>
                     <i>{a.note}</i>
                   </span>
                 ))}

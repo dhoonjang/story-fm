@@ -31,7 +31,7 @@ import { playerById, playersOf, teamNameIn, type GameState } from "../core/state
  *
  * 대부분 저장하지 않는다. TRANSFER 원장(언제 왔나) · 경기 출전 명단(몇 번
  * 뛰었나) · 훈련 일정(며칠 함께 훈련했나)에서 파생하므로 세이브 버전이 오르지
- * 않고, 같은 상태면 언제나 같은 값이다. **면담·팀토크만 원장이 필요하다**
+ * 않고, 같은 상태면 언제나 같은 값이다. **대화만 원장이 필요하다**
  * (`SETTLING_EVENT`) — 대화는 어디에도 기록이 남지 않아 파생할 원본이 없다.
  */
 
@@ -59,9 +59,9 @@ export const DAY_CREDIT = 0.5;
  * 안 그러면 면담을 연타하는 것이 최적 전략이 된다.
  */
 export const EVENT_CREDIT: Record<SettlingEvent["kind"], number> = {
-  /** 개인 면담 — 좋은 결과면 이만큼, 나쁘면 음수로 뒤집힌다 */
+  /** 한 명과 마주 앉은 대화 — 좋은 결과면 이만큼, 나쁘면 음수로 뒤집힌다 */
   talk: 5,
-  /** 팀토크 — 팀 전체에 한 말이라 개인 면담보다 작다 */
+  /** 둘 이상이 들은 대화 — 라커룸 앞에서 이름이 불린 것이라 마주 앉은 말보다 작다 */
   team_talk: 1.5,
   /**
    * 주장 지명 — 새 영입에게 완장을 채우는 건 라커룸 한가운데 세우는 일이다.
@@ -120,7 +120,7 @@ export interface Settling {
   matches: number;
   trainings: number;
   days: number;
-  /** 면담·팀토크·주장 지명이 보탠 몫 (음수일 수 있다) */
+  /** 대화·주장 지명이 보탠 몫 (음수일 수 있다) */
   eventCredit: number;
   factors: SettlingFactor[];
   done: boolean;

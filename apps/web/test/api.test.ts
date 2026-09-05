@@ -50,6 +50,7 @@ import {
 import { FORMATION_LAYOUTS, boardExpectationText } from "@story-fm/domain";
 import type { ChatTurn } from "@story-fm/engine";
 import { visibleChat } from "../lib/store";
+import { buildPlayerNameIndex, playerIdsIn } from "../lib/player-names";
 import { LOCK_WAIT_MS, withGameLock } from "../lib/turn-runner";
 import type { GamePayload, GameSlice } from "../lib/store";
 
@@ -486,6 +487,61 @@ describe("API — 온보딩부터 경기까지", () => {
     const names = Object.keys(game.playerNames);
     expect(names.length, "우리 선수단이 빠졌다").toBeGreaterThanOrEqual(20);
     expect(names.length, "전 리그를 통째로 실었다").toBeLessThan(200);
+  });
+
+  /**
+   * 사전의 폭은 곧 **손잡이가 설 수 있는 이름의 폭**이다 (player.md §9.5). 이야기가
+   * 이름으로만 부른 남의 선수는 id 토큰이 없어 예전 규칙으로는 영영 안 잡혔고,
+   * 안 잡힌 것은 화면에서 그냥 글자로 남는다 — 조용히 어긋나는 값이라 여기 선다.
+   *
+   * 담는 자와 안 담는 자가 한 케이스에 함께 있는 이유는 그 둘이 **같은 선**이기
+   * 때문이다: 새로 담는 기준은 전체 이름이고, 낱말 하나는 이미 사전에 선 사람에게만
+   * 걸린다. 한쪽만 보면 사전이 넓어지다 리그를 통째로 삼켜도 초록으로 남는다.
+   */
+  it("이름 사전 — 전체 이름으로 부른 남의 선수만 담고, 낱말 하나는 담지 않는다", async () => {
+    const created = await createGame(
+      json({ teamId: "tottenham", managerName: "사전", background: "분석가", seed: 77 }),
+    );
+    const game = (await created.json()) as GamePayload;
+    const state = loadGame(game.id)!;
+    const byId = new Map(state.players.map((p) => [p.id, p] as const));
+
+    // 리그 안에서 그 이름으로 불릴 사람이 하나뿐인 남의 선수 — 동명이인은 어느 쪽인지
+    // 알 수 없어 사전이 아예 담지 않는다 (`buildPlayerNameIndex`)
+    const count = new Map<string, number>();
+    for (const p of state.players) count.set(p.name, (count.get(p.name) ?? 0) + 1);
+    const theirs = state.players.filter((p) => p.teamId !== state.userTeamId);
+    const called = theirs.find((p) => count.get(p.name) === 1)!;
+    state.chat.push({
+      role: "model",
+      text: `${called.name} 계약이 내년에 끝난다.`,
+      toolCalls: [],
+      at: state.date,
+    });
+
+    /**
+     * 낱말 하나로 부른 남의 선수 — **화면 사전에서는 열쇠인 낱말**을 고른다
+     * (`partials` 기본값). 서버가 그 자로 담기 시작하면 수석코치 「스티브 홀랜드」의
+     * 「스티브」가 생판 남인 선수를 사전에 끌어들인다.
+     */
+    const onScreen = buildPlayerNameIndex(
+      Object.fromEntries(state.players.map((p) => [p.id, p.name])),
+    );
+    const [word, wordId] = [...onScreen.byName].find(
+      ([key, id]) =>
+        id !== called.id && key !== byId.get(id)!.name && byId.get(id)!.teamId !== state.userTeamId,
+    )!;
+    const oneWord = `${word}는 좋은 선수다.`;
+    state.chat.push({ role: "model", text: oneWord, toolCalls: [], at: state.date });
+    saveGame(state);
+
+    const res = await getGame(new Request("http://test.local"), params(game.id));
+    const payload = (await res.json()) as GamePayload;
+    expect(payload.playerNames[called.id], "이야기가 부른 선수가 사전에 없다").toBe(called.name);
+    // 자가 맞는지부터 — 화면이라면 이 낱말에 손잡이가 선다
+    expect(playerIdsIn(oneWord, onScreen), "낱말 열쇠를 못 고른 테스트다").toContain(wordId);
+    expect(payload.playerNames[wordId], "낱말 하나가 남을 사전에 끌어들였다").toBeUndefined();
+    expect(Object.keys(payload.playerNames).length, "전 리그를 통째로 실었다").toBeLessThan(200);
   });
 
   it("라인업 편집 — GK 없는 선발은 400", async () => {

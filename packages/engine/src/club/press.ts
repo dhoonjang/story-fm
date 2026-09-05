@@ -26,7 +26,6 @@ import {
   naturalPositionOf,
   PLAYER_ISSUE_REASONS,
   pressFactText,
-  RATING_MAX,
   RENEWAL_NOTICE_DAYS,
 } from "@story-fm/domain";
 import type { GameState } from "../core/state";
@@ -49,6 +48,8 @@ import { clampForm, formLabel, moraleToForm } from "../squad/form";
 import { applyMoodNotes, type MoodLine } from "../squad/mood";
 import { receptivityLine, receptivityOf } from "../squad/receptivity";
 import { careerTotalsOf, matchMilestones } from "../squad/career";
+// 리더십 계수는 라커룸 계수와 한 자리에 산다 (squad/hierarchy.ts)
+import { leadershipFactor } from "../squad/hierarchy";
 import { managerCareerTotals } from "../competition/records";
 import { numberLineageOf } from "../squad/numbers";
 import { recentOutcomes } from "../squad/slump";
@@ -60,7 +61,13 @@ import {
   previousBreakKey,
   type InternationalBreak,
 } from "../competition/international";
-import { boardExpectation, computeStandings, retirementJudgeDate } from "../competition/season";
+import {
+  awardFact,
+  boardExpectation,
+  computeStandings,
+  lastSeasonAwardsOf,
+  retirementJudgeDate,
+} from "../competition/season";
 import { predictedPlaceOf, predictionOf } from "../competition/prediction";
 import { leagueOfTeamIn } from "../competition/promotion";
 import { derbyNameOf, derbyOf } from "../data/derbies";
@@ -217,19 +224,6 @@ function cardManager(
 const REPUTATION_MAX = 100;
 
 export const clampRep = (v: number) => Math.max(0, Math.min(REPUTATION_MAX, Math.round(v)));
-
-/** 리더십 0이 갖는 울림 */
-const LEADERSHIP_FACTOR_MIN = 0.7;
-/** 리더십이 최고까지 더해 주는 몫 — 0.7~1.3 */
-const LEADERSHIP_FACTOR_SPAN = 0.6;
-
-/** 리더십 계수 — 같은 말도 리더십이 자라면 라커룸에 더 크게 울린다 (commands/index.ts와 같은 자) */
-function leadershipFactor(state: GameState): number {
-  return (
-    LEADERSHIP_FACTOR_MIN +
-    (state.manager.attributes.leadership / RATING_MAX) * LEADERSHIP_FACTOR_SPAN
-  );
-}
 
 /**
  * 녹아웃 단계 — **경기 뒤 회견의 무게가 대회를 읽는 자리** (people.md §4).
@@ -608,7 +602,30 @@ function seasonEndFacts(state: GameState): PressFact[] {
     about: null,
     sharp: false,
   });
+  facts.push(...awardFacts(state));
   return facts;
+}
+
+// ── 지난 시즌의 상 (season.md §6) ─────────────────────
+
+/** 한 회견이 싣는 상의 수 — 셋을 실으면 그 자리가 시상식이 된다 (people.md §4) */
+const AWARD_FACTS_SHOWN = 2;
+
+/**
+ * 지금 우리 선수단이 **가장 최근에 매겨진 시즌**에 받은 상 — 개막 전야와 시즌
+ * 최종전이 같은 함수를 쓴다 (season.md §6 「상이 사실로 서는 자리」).
+ * 어느 셔츠로 받았는지는 묻지 않는다.
+ *
+ * ⚠️ **명단 배열 순서로 자르지 않는다** — 영입·은퇴가 배열을 흔들면 같은 세이브가
+ * 다른 두 장을 싣는다. `id`로 한 겹 정렬해 자르는 자리를 결정적으로 만든다.
+ */
+function awardFacts(state: GameState): PressFact[] {
+  return playersOf(state, state.userTeamId)
+    .map((p) => p.id)
+    .sort()
+    .flatMap((id) => lastSeasonAwardsOf(state, id))
+    .slice(0, AWARD_FACTS_SHOWN)
+    .map((a) => awardFact(a, { named: true }));
 }
 
 /**
@@ -1494,6 +1511,7 @@ function buildOpeningPress(
   }
   const inherited = summerNumberInheritance(state);
   if (inherited) facts.push(inherited);
+  facts.push(...awardFacts(state));
 
   return {
     id: `press-opening-${state.season}`,
