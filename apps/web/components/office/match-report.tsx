@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useState } from "react";
 import type { MatchReportView } from "@story-fm/engine";
+import { PlayerName } from "@/components/player-card";
 
 /**
  * ── 경기 리포트 — 끝난 경기 한 장 (match.md §8) ─────────────
@@ -281,7 +282,7 @@ function PlayerTable({
                       ▲
                     </span>
                   )}
-                  {p.name}
+                  <PlayerName id={p.id} name={p.name} />
                 </td>
                 <td>{p.minutes}</td>
                 {COLS.map((c) => (
@@ -344,7 +345,10 @@ export function MatchReport({ report }: { report: MatchReportView }) {
           )}
           {report.motm && (
             <span className="mr-motm" data-testid="match-report-motm">
-              MOTM {report.motm.name} <b>{report.motm.rating.toFixed(1)}</b>
+              {/* 알약 안이 `inline-flex`라 칸 사이는 `gap`이 낸다 — 공백 노드가 아니다 */}
+              MOTM
+              <PlayerName id={report.motm.id} name={report.motm.name} />
+              <b>{report.motm.rating.toFixed(1)}</b>
             </span>
           )}
         </div>
