@@ -50,6 +50,7 @@ import {
 import { FORMATION_LAYOUTS, boardExpectationText } from "@story-fm/domain";
 import type { ChatTurn } from "@story-fm/engine";
 import { visibleChat } from "../lib/store";
+import { buildPlayerNameIndex, playerIdsIn } from "../lib/player-names";
 import { LOCK_WAIT_MS, withGameLock } from "../lib/turn-runner";
 import type { GamePayload, GameSlice } from "../lib/store";
 
