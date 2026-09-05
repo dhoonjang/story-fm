@@ -21,6 +21,7 @@ import {
   isClubTeam,
   computeStandings,
   leaderboardOf,
+  leaderboardsOf,
   RATING_APPS_DIVISOR,
   standingsBySplit,
   teamStatsOf,
@@ -228,7 +229,7 @@ describe("순위표", () => {
   });
 });
 
-describe("리그 리더보드 (competition.md §2 「개인 순위」)", () => {
+describe("대회 리더보드 (competition.md §2 「개인 순위」)", () => {
   // 한 세이브를 나눠 쓰고, 케이스마다 시즌 기록표만 다시 깐다
   const state = createTestGame();
   const league = leagueOfTeamIn(state, state.userTeamId);
@@ -242,6 +243,30 @@ describe("리그 리더보드 (competition.md §2 「개인 순위」)", () => {
     m.result = { homeGoals: 1, awayGoals: 1, scorers: [] };
   }
   const RATING_FLOOR = Math.ceil(PLAYED / RATING_APPS_DIVISOR);
+
+  /**
+   * 대항전 — 리그 페이즈 둘에 녹아웃 둘(준결승·결승)을 치른 상태로 깐다.
+   *
+   * 순위표(`computeStandings`)는 리그 페이즈만 세므로 두 수가 **다르다**: 문턱이
+   * 순위표에서 나오면 1, 그 대회에서 치른 경기에서 나오면 2다. 그 차이가 이 표의
+   * 요점이다 — 컵에는 순위표가 아예 없다.
+   */
+  const CUP = "ucl";
+  const CUP_LEAGUE_PHASE = 2;
+  const ourCupMatches = state.matches
+    .filter(
+      (m) =>
+        m.competitionId === CUP &&
+        m.season === state.season &&
+        (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    )
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const CUP_PLAYED = CUP_LEAGUE_PHASE + 2;
+  for (const [i, m] of ourCupMatches.slice(0, CUP_PLAYED).entries()) {
+    if (i >= CUP_LEAGUE_PHASE) m.stage = i === CUP_PLAYED - 1 ? "final" : "sf";
+    m.result = { homeGoals: 1, awayGoals: 0, scorers: [] };
+  }
+  const CUP_FLOOR = Math.ceil(CUP_PLAYED / RATING_APPS_DIVISOR);
 
   function record(rows: ReadonlyArray<Partial<SeasonStat> & { gamePlayerId: string }>): void {
     state.seasonStats.length = 0;
@@ -303,6 +328,120 @@ describe("리그 리더보드 (competition.md §2 「개인 순위」)", () => {
         table[i]!.goalsAgainst,
       ]);
     }
+  });
+
+  it("대항전의 평점 문턱은 순위표가 아니라 그 대회에서 치른 경기에서 나온다", () => {
+    // 순위표가 세는 것은 리그 페이즈뿐이다 — 녹아웃 둘이 표 밖에 있다
+    const inTable = computeStandings(state, CUP).find((r) => r.teamId === state.userTeamId);
+    expect(inTable?.played).toBe(CUP_LEAGUE_PHASE);
+    expect(CUP_FLOOR, "두 수가 같으면 이 케이스는 아무것도 가르지 않는다").toBeGreaterThan(
+      Math.ceil(CUP_LEAGUE_PHASE / RATING_APPS_DIVISOR),
+    );
+
+    record([
+      { gamePlayerId: one!.id, apps: CUP_FLOOR, ratingSum: 8 * CUP_FLOOR, competitionId: CUP },
+      // 순위표에서 나온 문턱이라면 이 선수가 1위로 섰을 자리다
+      {
+        gamePlayerId: two!.id,
+        apps: CUP_FLOOR - 1,
+        ratingSum: 9.5 * (CUP_FLOOR - 1),
+        competitionId: CUP,
+      },
+    ]);
+    const board = leaderboardOf(state, CUP, "rating").map((r) => r.gamePlayerId);
+    expect(board).toContain(one!.id);
+    expect(board).not.toContain(two!.id);
+  });
+
+  it("최종 라운드가 끝나면 대항전 표의 1위가 그 대회의 득점왕이다", () => {
+    record([
+      { gamePlayerId: one!.id, apps: CUP_PLAYED, goals: 3, competitionId: CUP },
+      // 골이 많고 출전이 같으면 사슬의 첫 칸에서 갈린다
+      { gamePlayerId: two!.id, apps: CUP_PLAYED, goals: 5, competitionId: CUP },
+    ]);
+    const top = leaderboardOf(state, CUP, "goals")[0];
+    const award = seasonAwards(state).find(
+      (a) => a.competitionId === CUP && a.code === "top-scorer",
+    );
+    expect(top?.gamePlayerId).toBe(two!.id);
+    expect(award?.gamePlayerId, "시상과 표가 다른 규칙으로 뽑혔다").toBe(top?.gamePlayerId);
+    expect(award?.goals).toBe(top?.goals);
+  });
+});
+
+/**
+ * 지나간 시즌의 표 — 행은 남고 **경기는 갈아 끼워진다** (game-state.md §3.3).
+ * 그래서 평점 축의 문턱은 리그만 결산 스냅샷에서 세울 수 있다.
+ */
+describe("지나간 시즌의 개인 순위 (competition.md §2 「개인 순위」)", () => {
+  const state = createTestGame();
+  const league = leagueOfTeamIn(state, state.userTeamId);
+  const [one, two] = playersOf(state, state.userTeamId);
+  const PAST = state.season;
+  const PAST_PLAYED = 6;
+  const PAST_FLOOR = Math.ceil(PAST_PLAYED / RATING_APPS_DIVISOR);
+
+  for (const m of state.matches.filter(
+    (m) => m.competitionId === league && m.season === PAST && m.round <= PAST_PLAYED,
+  )) {
+    m.result = { homeGoals: 1, awayGoals: 1, scorers: [] };
+  }
+  state.seasonStats = [
+    {
+      gamePlayerId: one!.id,
+      season: PAST,
+      teamId: state.userTeamId,
+      competitionId: league,
+      apps: PAST_FLOOR,
+      goals: 4,
+      ratingSum: 7 * PAST_FLOOR,
+    },
+    {
+      gamePlayerId: two!.id,
+      season: PAST,
+      teamId: state.userTeamId,
+      competitionId: league,
+      apps: PAST_FLOOR - 1,
+      goals: 9,
+      ratingSum: 9 * (PAST_FLOOR - 1),
+    },
+    {
+      gamePlayerId: one!.id,
+      season: PAST,
+      teamId: state.userTeamId,
+      competitionId: "ucl",
+      apps: 2,
+      goals: 2,
+      ratingSum: 16,
+    },
+  ];
+  // 시즌 전환이 하는 그대로 — 스냅샷을 남기고 경기를 치운다
+  recordSeasonHistory(state);
+  state.matches = [];
+  state.season = PAST + 1;
+
+  it("득점 축은 남은 행으로 그대로 선다 — 리그도 대항전도", () => {
+    expect(leaderboardOf(state, league, "goals", 10, PAST)[0]?.gamePlayerId).toBe(two!.id);
+    expect(leaderboardOf(state, "ucl", "goals", 10, PAST)[0]?.gamePlayerId).toBe(one!.id);
+    // 이번 시즌 표는 비어 있다 — 행이 그 시즌의 것이 아니다
+    expect(leaderboardOf(state, league, "goals")).toEqual([]);
+  });
+
+  it("리그의 평점 문턱은 결산 스냅샷의 최종 표에서 나온다", () => {
+    const rows = state.history?.[0]?.leagues.find((l) => l.leagueId === league)?.rows;
+    expect(rows?.find((r) => r.teamId === state.userTeamId)?.record?.played).toBe(PAST_PLAYED);
+    const board = leaderboardOf(state, league, "rating", 10, PAST).map((r) => r.gamePlayerId);
+    expect(board).toContain(one!.id);
+    // 평점이 더 높아도 문턱 아래다 — 이번 시즌의 표와 같은 자다
+    expect(board).not.toContain(two!.id);
+  });
+
+  it("문턱을 셀 수 없는 대항전에는 평점 축이 서지 않는다", () => {
+    expect(leaderboardOf(state, "ucl", "rating", 10, PAST)).toEqual([]);
+    expect(
+      leaderboardsOf(state, "ucl", 10, PAST).map((b) => b.key),
+      "문턱이 없는 평점 표는 한 경기 뛴 선수를 1위로 세운다",
+    ).not.toContain("rating");
   });
 });
 

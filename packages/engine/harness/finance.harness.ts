@@ -1,5 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { financeOf, isMarketOnlyLeague, leagueOfTeam, type GameState } from "@story-fm/engine";
+import {
+  annualRevenueEstimate,
+  financeOf,
+  isMarketOnlyLeague,
+  isTopLeague,
+  leagueOfTeam,
+  type GameState,
+} from "@story-fm/engine";
 import { advanceAndPlay, createTestGame, keepSeat } from "../test/helpers";
 import {
   FINANCE_LEAGUES,
@@ -138,18 +145,39 @@ describe("세 시즌", () => {
       if (state.date === before || state.season > 3) break;
     }
 
-    const byLeague = new Map<string, number[]>();
+    const byLeague = new Map<string, { balance: number; revenue: number }[]>();
     for (const f of state.finances) {
       const league = leagueOfTeam(f.teamId);
       // 자유계약 자리와 시장 전용 리그는 클럽이 아니다 — 낼 것도 받을 것도 없다
       if (league === null || league === "free" || isMarketOnlyLeague(league)) continue;
-      byLeague.set(league, [...(byLeague.get(league) ?? []), f.balance]);
+      byLeague.set(league, [
+        ...(byLeague.get(league) ?? []),
+        { balance: f.balance, revenue: annualRevenueEstimate(state, f.teamId) },
+      ]);
     }
+    /**
+     * 불변식 2의 자 — **그 리그 중간 구단의 연 매출**이다 (finance.md §10.3).
+     * AI 구단은 원장을 남기지 않으므로(§4.5) 매출은 공식의 어림값을 쓴다.
+     */
+    const ceilings = [...byLeague.entries()].map(([league, xs]) => {
+      const balance = medianOf(xs.map((x) => x.balance));
+      const revenue = medianOf(xs.map((x) => x.revenue));
+      return { league, balance, ratio: revenue > 0 ? balance / revenue : 0 };
+    });
+    const tallest = [...ceilings].sort((a, b) => b.ratio - a.ratio)[0];
+    const topFlight = Math.max(
+      ...ceilings.filter((c) => isTopLeague(c.league)).map((c) => c.ratio),
+    );
     const readings: Readings<typeof FINANCE_MULTI_SEASON> = {
       "도달한 시즌": state.season,
-      "리그별 중간 잔고의 최소": Math.min(...[...byLeague.values()].map(medianOf)),
+      "리그별 중간 잔고의 최소": Math.min(...ceilings.map((c) => c.balance)),
+      "1부 중간 잔고 ÷ 중간 연 매출의 최대": topFlight,
+      "전 리그 중간 잔고 ÷ 중간 연 매출의 최대": tallest?.ratio ?? 0,
+      "천장에 가장 가까운 리그의 중간 잔고": tallest?.balance ?? 0,
     };
-    console.log(reportOf(FINANCE_MULTI_SEASON, readings, `리그 ${byLeague.size}개`));
+    console.log(
+      reportOf(FINANCE_MULTI_SEASON, readings, `리그 ${byLeague.size}개 · 천장 ${tallest?.league}`),
+    );
     expect(outOfBand(FINANCE_MULTI_SEASON, readings)).toEqual([]);
   });
 });

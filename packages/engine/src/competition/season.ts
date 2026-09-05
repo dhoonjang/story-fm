@@ -89,6 +89,7 @@ import {
   closeSeasonBooks,
   payLeaguePrizes,
   paySeasonBonuses,
+  seasonBudgetBaseOf,
   topUpTransferBudget,
 } from "../club/finance";
 import { derbyMatchesOf, derbyRecordFrom } from "../club/derby";
@@ -99,7 +100,6 @@ import type { SuperCupSource } from "./super-cup";
 import {
   applyPromotionRelegation,
   reinforcePromotedSquads,
-  clubEconomyLevelIn,
   leagueOfTeamIn,
   leagueSizeIn,
   teamsOfLeagueIn,
@@ -482,25 +482,6 @@ export function allMatchesDone(state: GameState): boolean {
   }
   for (const cup of cupCatalog()) if (!euroChampion(state, cup.id)) return false;
   return true;
-}
-
-/**
- * 시즌 예산 보충 (£) — 등급별. 큰 영입은 여기에 **판매 대금**을 얹어야 가능하다.
- *
- * 표는 **EPL 기준이고 구단 경제 수준을 곱한다**(`seasonBudgetBaseOf` —
- * finance.md §6.2). 곱하지 않으면 리그 1 구단이 EPL과 같은 예산을 매 시즌
- * 받아 이적 시장의 눈금이 리그를 잃는다.
- */
-export const SEASON_BUDGET_TOPUP: Record<number, number> = {
-  1: 45_000_000,
-  2: 30_000_000,
-  3: 18_000_000,
-  4: 12_000_000,
-};
-
-export function seasonBudgetBaseOf(state: GameState, teamId: string): number {
-  const tier = tierOfTeamIn(state, teamId);
-  return Math.round((SEASON_BUDGET_TOPUP[tier] ?? 0) * clubEconomyLevelIn(state, teamId));
 }
 
 /**
@@ -2209,7 +2190,7 @@ function applyTransition(state: GameState): string[] {
   // 이적 예산 보충 — 등급별 base. 일률 £15M이면 시즌 2부터 68~72 OVR밖에 못 사서
   // 이적 루프가 첫 여름 이후 죽는다. 등급별 순이익과 같은 자리에 뒀다
   // (transfer.md §3). 나머지는 선수 판매로 만든다.
-  // base 위에 **재정 성과**가 얹히고, PSR 위반이면 동결된다.
+  // base 위에 **지난 시즌 잉여의 재투자분**이 얹히고, PSR 위반이면 동결된다 (§9.1).
   for (const finance of state.finances) {
     // 무소속은 구단이 아니다 — 영입할 주체가 없으니 예산도 없다 (team.md §7).
     // 월초 정산은 이미 `isClubTeam`으로 거르는데 여기만 빠져 있어, 쓰이지 않는
