@@ -167,8 +167,8 @@ const PROMISE_ALERT_DAYS = 7;
  *
  * **감독이 붙여 준 사이**(멘토링 — people.md §5-3)에는 원형 축이 없다: 그 자리에
  * 섰다는 사실 하나가 근거다. **원형에서 시작한 사이**는 먼저 보는 것을 함께 든다.
- * 어느 쪽이든 앞에 서는 것은 지금의 등급이고, 등급이 없는 줄은 감독이 세웠다는
- * 사실만으로 서 있는 중립의 사이다.
+ * 어느 쪽이든 앞에 서는 것은 지금의 등급이고, 등급이 빠지는 것은 가운데 둘
+ * (`distant`·`cordial`)일 때다 — 결이 서지 않는 사이는 카드에 등급을 세우지 않는다.
  */
 function relationLine(r: PersonaRelation): string {
   const grade = r.tier ? RELATION_TIER_KO[r.tier] : null;
@@ -189,7 +189,7 @@ export function describePersona(entry: CharacterEntry): string {
     ...(entry.motivation ? [`동기: ${entry.motivation}`] : []),
     ...(entry.speechStyle ? [`말투: ${entry.speechStyle.note}`] : []),
     ...(entry.speechStyle?.samples ?? []).map((s) => `  예) ${s}`),
-    // 관계 — **지금의 등급**이다 (people.md §6 「관계 점수」). 숫자는 싣지 않는다:
+    // 관계 — **지금의 등급**이다 (people.md §6 「관계 등급」). 숫자는 싣지 않는다:
     // 카드는 이력에 굳으므로 매 턴 달라지는 값을 실으면 지난 턴들의 바이트가 함께 바뀐다
     ...(entry.relations ?? []).map((r) => relationLine(r)),
     // 감독이 아는 만큼만 그린다 — 소문으로만 아는 사람에게 속내를 주면 만난 적 없는
