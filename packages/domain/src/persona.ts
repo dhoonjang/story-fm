@@ -494,11 +494,9 @@ export const REINVEST_SHARE_OF_ARCHETYPE: Record<string, number> = {
 export const REINVEST_SHARE_DEFAULT = 0.5;
 
 /** 이 구단주가 되돌리는 몫 — 카드가 없거나 표 밖의 라벨이면 기본값 */
-export function reinvestShareOf(archetype: string | undefined): number {
-  return (
-    (archetype === undefined ? undefined : REINVEST_SHARE_OF_ARCHETYPE[archetype]) ??
-    REINVEST_SHARE_DEFAULT
-  );
+export function reinvestShareOf(archetype?: string): number {
+  if (archetype === undefined) return REINVEST_SHARE_DEFAULT;
+  return REINVEST_SHARE_OF_ARCHETYPE[archetype] ?? REINVEST_SHARE_DEFAULT;
 }
 
 // ── 에이전트 원형 — 협상 테이블 건너편의 세 사람 ────────────────

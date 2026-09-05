@@ -3,6 +3,7 @@ import {
   annualRevenueEstimate,
   financeOf,
   isMarketOnlyLeague,
+  isTopLeague,
   leagueOfTeam,
   type GameState,
 } from "@story-fm/engine";
@@ -164,10 +165,14 @@ describe("세 시즌", () => {
       return { league, balance, ratio: revenue > 0 ? balance / revenue : 0 };
     });
     const tallest = [...ceilings].sort((a, b) => b.ratio - a.ratio)[0];
+    const topFlight = Math.max(
+      ...ceilings.filter((c) => isTopLeague(c.league)).map((c) => c.ratio),
+    );
     const readings: Readings<typeof FINANCE_MULTI_SEASON> = {
       "도달한 시즌": state.season,
       "리그별 중간 잔고의 최소": Math.min(...ceilings.map((c) => c.balance)),
-      "리그별 중간 잔고 ÷ 중간 연 매출의 최대": tallest?.ratio ?? 0,
+      "1부 중간 잔고 ÷ 중간 연 매출의 최대": topFlight,
+      "전 리그 중간 잔고 ÷ 중간 연 매출의 최대": tallest?.ratio ?? 0,
       "천장에 가장 가까운 리그의 중간 잔고": tallest?.balance ?? 0,
     };
     console.log(
