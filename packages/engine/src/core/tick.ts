@@ -1,4 +1,10 @@
-import type { GamePlayer, MatchRecord, ScheduleEntry, TrainingSession } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  MatchRecord,
+  ScheduleEntry,
+  TrainingSession,
+  TurnOperation,
+} from "@story-fm/domain";
 import {
   FAMILIARITY_BASELINE,
   FATIGUE_BAND_FLOOR,
@@ -2080,7 +2086,41 @@ export interface SceneAdvance extends AdvanceOutcome {
 }
 
 /**
- * 장면이 선언한 시점까지 장부를 옮긴다 — **시계가 움직이는 유일한 경로.**
+ * 이번 턴 **날짜의 주인** — 시계를 옮겨 달라고 말한 것이 무엇인가.
+ *
+ * 시계가 도는 자리가 셋이라 날짜를 미는 규칙도 셋인데, 그 셋이 부르는 쪽에 흩어져
+ * 있으면 한 갈래를 고칠 때마다 나머지 둘을 다시 읽어야 한다. 출처를 이름으로 받아
+ * 규칙은 코어가 갖는다 (docs/llm/agents.md §2 「시계」).
+ */
+export type ClockSource =
+  /** 평시의 보통 턴 — 모델의 시점 헤더가 날짜까지 민다 */
+  | "header"
+  /** 손잡이가 이 턴 앞에서 이미 굴렸다 — 헤더는 그 날 안의 시각만 따라간다 */
+  | "operator"
+  /** 경기·경기일 — 날짜의 주인은 장부다 */
+  | "ledger";
+
+/** 날짜가 흐르지 않는 턴 — 주인이 헤더가 아니거나, 판이 열려 있다 */
+function dateIsPinned(state: GameState, source: ClockSource): boolean {
+  return source !== "header" || state.phase !== "idle";
+}
+
+/**
+ * 못 민 날짜를 기록으로 남기는가 — **날짜를 달라고 한 것이 헤더일 때만.**
+ *
+ * 손잡이 턴의 헤더는 코어가 도착시킨 자리를 적은 것이지 더 가자는 요청이 아니다.
+ * 남기면 한 턴에 「요청한 만큼 진행했다」와 「진행하지 못했다」가 나란히 선다.
+ */
+function reportsHeldDate(source: ClockSource): boolean {
+  return source !== "operator";
+}
+
+/** 경기가 열린 채 날짜를 밀어 달라고 한 턴에 남는 사실 */
+const DATE_HELD = "경기 중에는 날짜가 흐르지 않습니다";
+
+/**
+ * 장면이 선언한 시점까지 장부를 옮긴다 — **모델 뒤에 시계가 움직이는 유일한 경로**
+ * (모델 앞의 것은 손잡이의 `advanceForOperation`이다).
  *
  * 순서가 뒤집혀 있다는 것을 알고 쓴다: 모델이 "언제의 장면인가"를 먼저 말하고
  * 코어가 그 뒤를 따라간다. 그래서 **코어는 선언을 그대로 믿지 않는다** — 가는
@@ -2090,42 +2130,35 @@ export interface SceneAdvance extends AdvanceOutcome {
  * 과거를 선언하면 시계를 되감지 않는다 — 모델이 날짜를 착각해도 기록이 뒤로
  * 가지는 않아야 한다.
  */
-export function applyScenePoint(state: GameState, target: ScenePoint): SceneAdvance {
+export function applyScenePoint(
+  state: GameState,
+  target: ScenePoint,
+  source: ClockSource,
+): SceneAdvance {
   const here = (): ScenePoint => ({ date: state.date, clock: clockOf(state) });
 
-  if (state.phase !== "idle") {
-    /**
-     * **날짜는 안 흐르지만 시계는 흐른다.**
-     *
-     * 경기는 몇 시간에 걸친 일이고 그동안에도 장면은 이어진다. 시계를 통째로
-     * 묶어 두면 화면 상단이 킥오프 직전 시각에 얼어붙는데(실제로 09:00에 멈춘
-     * 세이브를 봤다), 채팅의 장면 시각은 계속 흐르므로 **같은 화면의 두 시계가
-     * 어긋난다.** 막아야 할 것은 날짜가 넘어가는 것뿐이다 — 경기 중에 하루가
-     * 지나면 훈련·성장·협상이 통째로 굴러 버린다.
-     */
-    if (
-      target.date === state.date &&
-      minutesOfClock(target.clock) > minutesOfClock(clockOf(state))
-    ) {
-      state.clock = target.clock;
-      return { ok: true, digest: [], stopped: "reached", reached: here(), short: false };
-    }
+  /**
+   * **날짜는 안 흐르지만 시계는 흐른다.**
+   *
+   * 날짜가 고정된 턴과 오늘 안에서 끝나는 턴이 같은 자리로 온다 — 굴릴 것이 없고
+   * 되감기만 막는다. 시계까지 묶으면 화면 상단이 킥오프 직전 시각에 얼어붙는데
+   * (실제로 09:00에 멈춘 세이브를 봤다) 채팅의 장면 시각은 계속 흐르므로 **같은
+   * 화면의 두 시계가 어긋난다.** 막아야 할 것은 날짜가 넘어가는 것뿐이다 — 경기
+   * 중에 하루가 지나면 훈련·성장·협상이 통째로 굴러 버린다.
+   */
+  if (dateIsPinned(state, source) || target.date === state.date) {
+    if (minutesOfClock(target.clock) > minutesOfClock(clockOf(state))) state.clock = target.clock;
+    const held = target.date !== state.date && reportsHeldDate(source);
     return {
-      ok: false,
-      digest: ["경기 중에는 날짜가 흐르지 않습니다"],
-      stopped: "blocked",
+      ok: !held,
+      digest: held ? [DATE_HELD] : [],
+      stopped: held ? "blocked" : "reached",
       reached: here(),
-      short: true,
+      short: held,
     };
   }
   if (target.date < state.date) {
     return { ok: true, digest: [], stopped: "reached", reached: here(), short: true };
-  }
-
-  if (target.date === state.date) {
-    // 같은 날 안에서는 굴릴 것이 없다 — 되감기만 막는다
-    if (minutesOfClock(target.clock) > minutesOfClock(clockOf(state))) state.clock = target.clock;
-    return { ok: true, digest: [], stopped: "reached", reached: here(), short: false };
   }
 
   const days = diffDays(state.date, target.date);
@@ -2139,4 +2172,25 @@ export function applyScenePoint(state: GameState, target: ScenePoint): SceneAdva
     reached: here(),
     short: state.date !== target.date,
   };
+}
+
+/**
+ * 손잡이가 가리키는 만큼 시계를 옮긴다 — **모델을 거치지 않는 유일한 시간 이동.**
+ * 경기 중이거나 이미 지난 날짜면 아무것도 하지 않는다.
+ *
+ * 다음 경기는 날짜로 넘어온다(`skip_to_next_match`) — 화면이 달력에서 이미 아는
+ * 값이라 코어가 일정을 다시 찾을 이유가 없고, 그 사이 일정이 바뀌었더라도
+ * `advanceTime`이 경기일 앞에서 멈춰 세운다.
+ *
+ * 이 턴의 헤더는 날짜를 또 밀지 못한다 — 그것이 `ClockSource`의 `operator`다.
+ */
+export function advanceForOperation(
+  state: GameState,
+  operation: TurnOperation,
+): AdvanceOutcome | null {
+  if (state.phase !== "idle") return null;
+  if (operation.kind === "advance_match") return null;
+  if (operation.kind === "skip_days") return advanceTime(state, { days: operation.days });
+  const days = diffDays(state.date, operation.date);
+  return days > 0 ? advanceTime(state, { days }) : null;
 }
