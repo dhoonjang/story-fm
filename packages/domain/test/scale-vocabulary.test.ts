@@ -9,9 +9,14 @@ import {
   REPUTATION_TIERS,
   describeManagerSkills,
   describeReputation,
+  POSITION_CODES,
   familiarityLabel,
+  findRole,
   managerSkillLabel,
   reputationLabel,
+  roleChoiceText,
+  roleVocabularyText,
+  rolesFor,
 } from "@story-fm/domain";
 
 /**
@@ -127,5 +132,51 @@ describe("팀 전술 적응 구간 → 어휘", () => {
     expect(familiarityLabel(90)).toBe("완숙");
     expect(familiarityLabel(FAMILIARITY_MAX)).toBe("완숙");
     expect(familiarityLabel(0)).toBe("생소");
+  });
+});
+
+/**
+ * **역할의 표기는 셋이고 그 셋이 한 역할로 모인다** (player.md §3.1).
+ *
+ * 전술판은 id를 보내고 **감독의 말을 옮기는 해석기는 이름을 적는다** — 한 표기만 받으면
+ * 그쪽 경로의 역할 지시만 조용히 반려되고, 한 번 부르는 해석기에는 그 반려를 보고 다시
+ * 시도할 자리가 없다. 표기가 서로 부딪혀도 같은 실패라, 50종 전부를 견준다.
+ */
+describe("자리별 역할 → 어휘", () => {
+  it("이름·id·약어가 저마다 그 역할 하나로 걸린다", () => {
+    for (const position of POSITION_CODES) {
+      for (const def of rolesFor(position)) {
+        for (const spelling of [def.ko, def.id, def.abbr]) {
+          expect(findRole(position, spelling)?.id, `${position}: ${spelling}`).toBe(def.id);
+        }
+      }
+    }
+  });
+
+  it("대소문자·공백·붙임표는 견줄 때 지운다", () => {
+    for (const spelling of ["인사이드 포워드", "인사이드포워드", "Inside Forward", "if"]) {
+      expect(findRole("LW", spelling)?.id, spelling).toBe("inside-forward");
+    }
+  });
+
+  it("그 자리에 없는 역할과 빈 말은 걸리지 않는다", () => {
+    expect(findRole("CB", "포처")).toBeUndefined();
+    expect(findRole("CB", "  ")).toBeUndefined();
+  });
+
+  /**
+   * 표의 왼쪽은 **모델이 명단·스냅샷에서 읽는 포지션 코드**다. 코드가 하나라도 빠지면
+   * 그 자리의 역할은 모델에게 없는 것과 같고, `weightSlotOf`의 폴백이 조용히 CM의
+   * 역할을 걸어 준다.
+   */
+  it("역할 표가 포지션 코드 전부를 세우고 그 자리의 역할을 싣는다", () => {
+    const table = roleVocabularyText();
+    const codes = table.split("\n").flatMap((line) => line.split(" — ")[0]!.split("/"));
+    expect([...codes].sort()).toEqual([...POSITION_CODES].sort());
+    for (const position of POSITION_CODES) {
+      for (const def of rolesFor(position)) {
+        expect(table, `${position}: ${def.id}`).toContain(roleChoiceText(def));
+      }
+    }
   });
 });
