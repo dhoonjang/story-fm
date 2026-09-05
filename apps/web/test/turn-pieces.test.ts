@@ -710,6 +710,35 @@ describe("splitPlayerNames", () => {
     expect(splitPlayerNames("이김민재라는 사람", index)).toEqual([{ text: "이김민재라는 사람" }]);
   });
 
+  /**
+   * 두 글자 성은 흔한 낱말의 앞머리이기도 하다 — 실 세이브에서 「알렉스 토트」의
+   * 성이 「토트넘」을 물었다. 조사 표에 없는 꼬리는 이름이 아닌 쪽으로 판정한다.
+   */
+  it("이름 뒤가 조사가 아니면 이름이 아니다", () => {
+    const toth = buildPlayerNameIndex({ "alex-toth": "알렉스 토트", "alex-valle": "알렉스 바예" });
+    expect(splitPlayerNames("토트넘으로 지불되었고", toth)).toEqual([
+      { text: "토트넘으로 지불되었고" },
+    ]);
+    expect(splitPlayerNames("라요 바예카노의 검진", toth)).toEqual([
+      { text: "라요 바예카노의 검진" },
+    ]);
+    // 같은 성이라도 조사가 붙으면 그 사람이다
+    expect(splitPlayerNames("토트가 나선다", toth)).toEqual([
+      { text: "토트", playerId: "alex-toth" },
+      { text: "가 나선다" },
+    ]);
+  });
+
+  /** 가른 조각을 도로 이으면 원문이다 — 손잡이가 글자를 먹으면 이야기가 깨진다 */
+  it("조각을 이으면 원문 그대로다", () => {
+    const text = "첫째, 세너 라먼스가 토트넘으로 떠나고 김민재는 남는다 (손흥민 · 라먼스).";
+    expect(
+      splitPlayerNames(text, index)
+        .map((p) => p.text)
+        .join(""),
+    ).toBe(text);
+  });
+
   it("사전에 없는 이름은 글자 그대로다", () => {
     expect(splitPlayerNames("홀란드가 넣었다", index)).toEqual([{ text: "홀란드가 넣었다" }]);
   });
