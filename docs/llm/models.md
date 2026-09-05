@@ -385,7 +385,26 @@ OpenAI는 2회를 기본으로 돌고 `@google/genai`는 **옵션을 주지 않�
   읽는다 — 그러지 않으면 그 변수가 뒤의 이름을 가린다.
 
 **`LLM_MODE=mock|real`** — 미지정이면 GM 에이전트의 제공자 키가 있는지로 정한다.
-mock은 폴백이 아니라 **모드**이고 규칙 기반 오케스트레이터가 대신 돈다 (agents.md §8).
+mock은 폴백이 아니라 **모드**이고, 모델을 부르는 자리마다 대본 어댑터가 대신 선다
+(§2-1 · agents.md §8). 모드를 읽는 자리는 `resolveLlmMode()` 하나다 — 키 검사와 같은
+파일에 있어 "키가 있는가"와 "지금 어느 모드인가"가 갈리지 않는다.
+
+## 2-1. 대본 어댑터 (`ScriptedGameLLM`)
+
+**모델을 부르지 않고 미리 정해진 도구 호출로 턴을 채우는 `GameLLM`이다.** 어댑터
+셋과 같은 계약을 지키므로 부르는 쪽(에이전트)은 mock인지 알지 못한다 — e2e·오프라인
+개발이 실 경로를 그대로 밟는 것이 이 어댑터의 유일한 목적이다 (agents.md §8).
+
+- **대본이 무엇을 아는지는 이 패키지의 일이 아니다.** 어댑터가 받는 것은 `(config,
+script)` 둘이고, `script`는 요청 하나를 받아 「부를 도구 이름과 인자, 그리고 본문」을
+  돌려주는 함수다. 게임을 아는 쪽(`packages/agents`)이 그 함수를 만들어 넘긴다 — 그러지
+  않으면 제공자 중립 패키지가 훈련이며 이적을 알게 된다.
+- **도구는 요청에 실려 온 것을 부른다.** 대본이 이름으로 고르고 그 `handle`을 그대로
+  `await`하므로, Zod 검증·기록·엔진 호출이 실모드와 **같은 코드**를 지난다. 요청에 없는
+  이름은 경고 한 줄로 지나간다 — 대본의 버그이지 턴을 세울 이유가 아니다.
+- ⚠️ **계측·원문 기록·시한 래퍼를 지나지 않는다** (§4·§5). 부르지 않은 호출의 토큰을
+  장부에 적으면 예산이 픽션으로 차고, 시한은 잴 것이 없다. `createGameLLM`이 그 셋을
+  붙이는 문이라, 대본 어댑터는 그 문을 지나지 않고 부르는 쪽에서 직접 선다.
 
 ## 3. 어댑터 — 제공자 중립 계약 하나 (`GameLLM`)
 
@@ -705,9 +724,10 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   돌려준 `tool_result`도 같은 이력에 적는다(Anthropic은 `tool_result`까지
   `role:"user"`다). 그래서 팝업은 보낸 것(파랑)과 받은 것(초록)을 갈라 세우고,
   꼬리 안에서는 **`role`이 경계다** — `assistant`·`model`만 모델이 쓴 것이다.
-- ⚠️ **`LLM_MODE=mock`은 기록이 비어 있다.** 모의 GM은 `createGameLLM`을 지나지
-  않는다(agents.md §8) — 팝업이 모드를 함께 받아 "모의 GM은 모델을 부르지 않는다"고
-  말한다. 빈 기록을 고장으로 읽지 않게 하는 것이 이 한 줄의 일이다.
+- ⚠️ **`LLM_MODE=mock`은 기록이 비어 있다.** 대본 어댑터는 원문 기록을 붙이는 문
+  (`createGameLLM`)을 지나지 않고, 적을 요청도 없다(§2-1) — 팝업이 모드를 함께 받아
+  "모의 GM은 모델을 부르지 않는다"고 말한다. 빈 기록을 고장으로 읽지 않게 하는 것이 이
+  한 줄의 일이다.
 
 ## 5-1. 계측 뷰 (`/admin` → 계측)
 
@@ -797,4 +817,6 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
 | 원문 팝업·롱프레스           | `apps/web/components/turn-trace.tsx` · `components/chat.tsx`                        |
 | 계측 라우트 (§5-1)           | `apps/web/app/api/admin/usage/route.ts`                                             |
 | 계측 화면 (§5-1)             | `apps/web/app/admin/usage-panel.tsx`                                                |
-| 모드 해석 (`LLM_MODE`)       | `packages/agents/src/gm.ts` (`resolveLlmMode`)                                      |
+| 모드 해석 (`LLM_MODE`)       | `packages/llm/src/config.ts` (`resolveLlmMode`)                                     |
+| 대본 어댑터 (§2-1)           | `packages/llm/src/scripted-adapter.ts`                                              |
+| mock 대본 (발화 → 도구 표)   | `packages/agents/src/mock-script.ts` · 어댑터 선택은 `mock-gm.ts`                   |

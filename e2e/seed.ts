@@ -110,10 +110,11 @@ export function seedFinishedSeason(teamId = "arsenal", seed = 406): string {
 /**
  * **오퍼 한 건이 성사되는 세이브** — 상대와 조건은 여기서 고르고, 넣는 것은 브라우저다.
  *
- * mock GM은 성사 확률로 답을 가른다(`MOCK_ACCEPT_PROB` 50). 아무나 지목하면 그 답이
- * 수락일지 조정일지가 카탈로그에 달리므로, 스펙은 `if (수락이면)`을 쓰게 된다 —
- * 그 조건문이 이 이슈가 지우려는 것이다. 그래서 **확률이 문턱을 확실히 넘는 상대를
- * 코어에게 물어서** 고르고, 스펙은 그 이름 하나만 받아 조건 없이 단언한다.
+ * 상대의 답은 **코어 앵커가** 낸다 — mock은 교섭 상대를 부르지 않으므로 도착한 편지가
+ * 서류대로 마감된다 (docs/llm/agents.md §4-1의 mock). 아무나 지목하면 그 답이 수락일지
+ * 조정일지가 카탈로그에 달리므로, 스펙은 `if (수락이면)`을 쓰게 된다 — 그 조건문이 이
+ * 픽스처가 지우는 것이다. 그래서 **확률이 문턱을 확실히 넘는 상대를 코어에게 물어서**
+ * 고르고, 스펙은 그 이름 하나만 받아 조건 없이 단언한다.
  *
  * 문턱은 70이다. 코어의 답신 지연도 이 구간에서 짧아진다(`responseDelayDays`의
  * `probability >= 70` → 0~3일) — 브라우저가 하루씩 미는 횟수를 적게 유지한다.
@@ -134,7 +135,7 @@ export function seedTransferTarget(
     const terms = suggestTerms(state, player.id);
     if (!terms) continue;
     if (dealOdds(state, terms).probability < TARGET_ODDS_FLOOR) continue;
-    // 동명이인은 mock의 이름 탐색이 다른 선수를 집는다 — 그런 이름은 넘긴다
+    // 동명이인은 이름으로 지목할 수 없다(`pickAnyPlayer`가 되묻는다) — 그런 이름은 넘긴다
     if (state.players.filter((p) => p.name === player.name).length > 1) continue;
     /**
      * **답이 내일 오는 상대만 고른다.** 지연은 확률과 해시가 함께 정하므로

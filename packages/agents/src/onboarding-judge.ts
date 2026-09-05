@@ -31,8 +31,13 @@ import {
   tierOfTeamIn,
   type GameState,
 } from "@story-fm/engine";
-import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
-import { resolveLlmMode } from "./gm";
+import {
+  agentConfig,
+  createGameLLM,
+  resolveLlmMode,
+  type GameLLM,
+  type GameToolSpec,
+} from "@story-fm/llm";
 import {
   buildGmStateNote,
   describeCharacters,

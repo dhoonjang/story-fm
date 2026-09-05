@@ -1,7 +1,9 @@
 /**
  * GM 오케스트레이터 — 단일 GM, 장면 라우팅 (agents.md §1·§2).
- * 실모드: 설정된 제공자의 tool loop. mock 모드: 규칙 기반 (mock-gm.ts).
- * 두 모드는 같은 엔진 명령 경로만 사용한다 — 상태 변경의 유일한 통로.
+ *
+ * **모드로 갈리지 않는다.** 실모드는 설정된 제공자의 tool loop이고, `LLM_MODE=mock`은
+ * 그 모델 자리에 대본 어댑터를 세운다(`mock-gm.ts` — agents.md §8) — 도구도 입력 조립도
+ * 기록도 같은 코드다. 상태 변경의 유일한 통로는 엔진 명령 하나뿐이다.
  *
  * 실모드 한 턴은 **앞·호출·뒤** 셋이다 (agents.md §2 「턴은 앞·호출·뒤 셋이다」) —
  * `openTurn`이 모델보다 먼저 코어를 굴리고, `callGm`이 3층 입력을 조립해 부르고,
@@ -32,14 +34,14 @@ import {
   type TrainingBrief,
 } from "@story-fm/engine";
 import type { CharacterEntry } from "@story-fm/domain";
-import { agentConfig, createGameLLM, hasKey, type TurnResult } from "@story-fm/llm";
+import { agentConfig, createGameLLM, resolveLlmMode, type TurnResult } from "@story-fm/llm";
 import { MAX_REPORT_CARDS, NO_CARDS, takeArrivedReports, type ArrivedCards } from "./report-cards";
 import { reportTraining } from "./training-rater";
 import { buildMatchTools, KICKOFF_BLOCK, MATCH_GM_SYSTEM, type MatchToolContext } from "./match-gm";
 import { finalizeMatchTurn } from "./finalize-match";
 import { runTableReply } from "./negotiation-table";
 import { counterpartOf, openLetter, playerById, settleTableReply } from "@story-fm/engine";
-import { runMockGmTurn } from "./mock-gm";
+import { mockGmLlm } from "./mock-gm";
 import { retryOnce } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
 import { buildGmTools } from "./gm-tools";
@@ -120,13 +122,12 @@ function peaceSystem(state: GameState): string[] {
     : [GM_SYSTEM, buildGmReference(state)];
 }
 
-export type LlmMode = "mock" | "real";
-
-export function resolveLlmMode(): LlmMode {
-  const forced = process.env.LLM_MODE;
-  if (forced === "mock" || forced === "real") return forced;
-  return hasKey(agentConfig("gm").provider) ? "real" : "mock";
-}
+/**
+ * 모드 해석은 `packages/llm`이 갖는다 — 키를 읽는 자리와 같은 파일이다
+ * (models.md §2). 여기서 다시 내보내는 것은 화면·에이전트가 부르던 자리를
+ * 그대로 두기 위해서다.
+ */
+export { resolveLlmMode, type LlmMode } from "@story-fm/llm";
 
 /**
  * **편지의 답 — 답할 날이 된 오퍼는 턴이 열리기 전에 상대가 답한다** (agents.md §4-1).
@@ -346,7 +347,19 @@ async function callGm(
 ): Promise<GmCall> {
   const { inMatch, kickoff, operator } = shape;
   const config = agentConfig(inMatch ? "match-gm" : "gm");
-  const llm = createGameLLM(config);
+  /**
+   * **모델 자리에 서는 것** — mock 모드면 대본 어댑터다 (agents.md §8). 턴 앞이 이미
+   * 남긴 기록(손잡이의 시간 이동·도착한 편지)이 있으면 대본은 장면을 비워 낸다:
+   * 그 기록이 아래에서 장면을 세운다.
+   */
+  const llm =
+    mockGmLlm(config, state, {
+      message,
+      inMatch,
+      kickoff,
+      operator,
+      recorded: () => ledger.calls.length > 0,
+    }) ?? createGameLLM(config);
   /**
    * 경기 중 도구는 **경기 도구 셋**뿐이다 — 코어를 부르는 손잡이이고 경기를 바꾸지
    * 못한다 (agents.md §3). 손잡이 턴은 마감 하나, 킥오프 턴은 없다. 도구 정의는
@@ -636,9 +649,12 @@ async function closeTurn(
   if (!inMatch && !hasSceneLine(body)) {
     const record = sceneFromToolCalls(ledger.calls);
     if (record) {
-      console.warn(
-        `[gm] 장면이 비어 코어 기록으로 세웁니다 — 종료 사유: ${result.stopReason ?? "없음"}`,
-      );
+      // mock 모드에서는 이것이 계약이다 — 대본은 장면을 쓰지 않는다 (agents.md §8)
+      if (resolveLlmMode() !== "mock") {
+        console.warn(
+          `[gm] 장면이 비어 코어 기록으로 세웁니다 — 종료 사유: ${result.stopReason ?? "없음"}`,
+        );
+      }
       body = record;
       // 모델이 헤더도 못 썼으면 코어가 지금 시각을 세운다 — 헤더가 없으면 화면의
       // 시각이 스트리밍이 끝나는 순간 사라진다
@@ -675,12 +691,23 @@ async function closeTurn(
   };
 }
 
-/** 실모드 — 일상은 `gm`, 경기 장면은 `match-gm` 설정으로 라우팅 */
-async function runRealGmTurn(
+/**
+ * **GM 턴 실행** — 일상은 `gm`, 경기 장면은 `match-gm` 설정으로 라우팅한다.
+ *
+ * 모드로 갈리지 않는다: `LLM_MODE=mock`이면 모델 자리에 대본 어댑터가 서고 나머지는
+ * 그대로다 (agents.md §8). `onText`를 주면 서사 텍스트가 스트리밍으로 흐른다 —
+ * 실모드는 진짜 델타, 대본은 완성 텍스트를 줄로 쪼개 즉시 방출한다.
+ */
+export async function runGmTurn(
   state: GameState,
   message: string,
   onText?: (delta: string) => void,
+  /**
+   * 손잡이가 보낸 조작 — 있으면 이 턴은 감독의 발화가 아니다. `message`는 그
+   * 구조체에서 만든 **표시 문구**이므로 아무도 되읽지 않는다 (agents.md §2).
+   */
   operation?: TurnOperation | null,
+  /** 전술판 조작 — 코어가 **이미 적용한** 것의 기록이다 */
   operatorOrders?: readonly string[],
 ): Promise<GmTurnResult> {
   const inMatch = state.phase === "match";
@@ -714,28 +741,4 @@ async function runRealGmTurn(
     operatorOrders,
   );
   return closeTurn(state, shape, opening, ledger, call);
-}
-
-/**
- * GM 턴 실행 — 모드 자동 해석 (env LLM_MODE 우선).
- * onText를 주면 서사 텍스트를 스트리밍으로 흘려보낸다 (실모드는 진짜 델타,
- * mock은 완성 텍스트를 청크로 쪼개 즉시 방출).
- */
-export async function runGmTurn(
-  state: GameState,
-  message: string,
-  onText?: (delta: string) => void,
-  /**
-   * 손잡이가 보낸 조작 — 있으면 이 턴은 감독의 발화가 아니다. `message`는 그
-   * 구조체에서 만든 **표시 문구**이므로 아무도 되읽지 않는다 (agents.md §2).
-   */
-  operation?: TurnOperation | null,
-  /**
-   * 전술판 조작 — 코어가 **이미 적용한** 것의 기록이다. mock에는 넘기지 않는다:
-   * 규칙 기반이라 그 문장을 지시로 되읽어 같은 교체를 두 번 걸었다.
-   */
-  operatorOrders?: readonly string[],
-): Promise<GmTurnResult> {
-  if (resolveLlmMode() === "mock") return runMockGmTurn(state, message, onText, operation);
-  return runRealGmTurn(state, message, onText, operation, operatorOrders);
 }
