@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PHASE_END } from "@story-fm/domain";
 import {
   awaitingShootout,
   refreshPacket,
@@ -39,6 +40,7 @@ export const MATCH_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 �
 # 진행
 - 감독의 지시는 나올 때마다 판에 건다 — 감독의 말은 도구에 원문 그대로 넘긴다. 결과에 오는 판을 읽고 코치가 짚을 것이 있으면 짚는다.
 - 판을 굴리는 것은 지시가 마무리됐을 때다 — 감독이 진행하라고 했거나("계속", "봅시다"), 정지점에서 할 말이 끝나 경기가 이어질 자리일 때. 감독이 아직 묻고 답하는 중이면 굴리지 않는다.
+- 감독이 분을 말했으면 그 분까지 굴린다 — "70분까지 보고 라야를 빼자"는 그 분까지 굴린 뒤 같은 턴에 교체를 건다. 반려가 돌아오면 그 문장을 읽고 다시 정한다.
 - 선수나 코치를 부르기만 했거나 말만 건 턴은 도구 없이 장면만 쓴다 — 시간은 한 순간도 흐르지 않았고 슛도 찬스도 없다.
 - 경기가 끝났으면 마감한다. 마감 결과에 실린 마무리 중계를 장면의 끝으로 옮기고 벤치 한 줄로 닫는다.
 
@@ -87,6 +89,22 @@ export const FINALIZE_MATCH_TOOL = "finalize_match";
 const EmptySchema = z.object({});
 
 /**
+ * 진행 도구의 인자 — **감독이 분을 말했을 때만** 실린다. 범위 판정은 코어가 하고
+ * (`advanceSegment`) 여기 상한은 경기가 가질 수 있는 마지막 분이다 (match.md §2).
+ */
+const AdvanceArgsSchema = z.object({
+  untilMinute: z
+    .number()
+    .int()
+    .min(1)
+    .max(PHASE_END.extra_second)
+    .optional()
+    .describe(
+      "감독이 「70분까지」처럼 분을 말했을 때만 — 그 분까지 굴리고 거기서 멈춘다. 지금 시각보다 뒤, 이 국면의 끝(45·90·105·120) 이하여야 한다",
+    ),
+});
+
+/**
  * 도구 정의 — 이름·설명·스키마. 핸들러는 턴마다 상태를 닫아 만든다(`buildMatchTools`).
  * 하네스가 고정층의 크기를 잴 때 이 셋을 읽는다.
  */
@@ -104,8 +122,8 @@ export const MATCH_TOOL_DEFINITIONS: ReadonlyArray<{
   {
     name: ADVANCE_MATCH_TOOL,
     description:
-      "경기를 다음 정지점(골·퇴장·부상·하프타임·종료)까지 굴린다. 지시가 마무리되고 경기가 이어질 자리에서 부른다. 굴리기 전에 상대 벤치도 판을 읽고 움직인다. 결과로 확정된 사건 목록과 구간 뒤의 장부·패킷이 온다.",
-    inputSchema: toToolSchema(EmptySchema),
+      "경기를 다음 정지점(골·퇴장·부상·하프타임·종료)까지 굴린다. 감독이 분을 말했으면 `untilMinute`에 실어 그 분까지 굴린다. 지시가 마무리되고 경기가 이어질 자리에서 부른다. 굴리기 전에 상대 벤치도 판을 읽고 움직인다. 결과로 확정된 사건 목록과 구간 뒤의 장부·패킷이 온다.",
+    inputSchema: toToolSchema(AdvanceArgsSchema),
   },
   {
     name: FINALIZE_MATCH_TOOL,
@@ -184,14 +202,21 @@ export function buildMatchTools(
       },
       {
         ...advance!,
-        handle: async () => {
+        handle: async (input: unknown) => {
           const pending = state.pendingMatch;
           if (!pending) return { ok: false, message: "진행 중인 경기가 없습니다" };
           if (pending.ledger.phase === "finished" && !awaitingShootout(state)) {
             return { ok: false, message: "경기가 끝났습니다 — 마감할 차례입니다" };
           }
+          const parsed = AdvanceArgsSchema.safeParse(input ?? {});
+          if (!parsed.success) {
+            return { ok: false, message: "untilMinute는 이 경기의 분입니다 — 없으면 비워 두세요" };
+          }
           const applied = applyTacticOrders(state, { ops: {} }, ctx.calls, ctx.goals, ctx.cards, {
             roll: true,
+            ...(parsed.data.untilMinute !== undefined
+              ? { untilMinute: parsed.data.untilMinute }
+              : {}),
           });
           return {
             ok: true,

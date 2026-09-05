@@ -194,6 +194,11 @@ function renderSegment(state: GameState, events: MatchEvent[], stop: string): st
   }
   if (stop === "goal") {
     lines.push(`${coach(state)} 흐름이 우리 쪽인지 확인할 시점입니다. 이대로 갈까요?`);
+  } else if (stop === "requested") {
+    // 감독이 고른 자리 — 조용히 지나갔어도 그 분에 섰다는 한 줄은 있어야 한다
+    lines.push(
+      `${coach(state)} 말씀하신 ${state.pendingMatch?.ledger.minute ?? 0}′입니다. ${scoreLine(state)}.`,
+    );
   } else if (stop === "half_time") {
     lines.push(
       `@: *하프타임 — 라커룸으로 향한다*`,
@@ -296,6 +301,9 @@ function runShootoutTurn(state: GameState, calls: GmToolCall[]): string {
   return lines.join("\n");
 }
 
+/** 감독이 말한 목표 분 — "70분까지". 실모드에선 매치 GM이 도구 인자로 싣는 자리다 */
+const UNTIL_MINUTE = /(\d{1,3})\s*분\s*까지/u;
+
 /**
  * 경기 진행 — 실모드와 같은 코어 함수(`advanceSegment`)로 굴린다.
  * 두 모드의 차이는 화자뿐이다 — 여기선 템플릿, 실모드에선 캐스터 LLM.
@@ -305,12 +313,14 @@ function advanceMatchTurn(
   calls: GmToolCall[],
   goals: GoalMark[],
   cards: CardMark[] = [],
+  /** 감독이 말한 목표 분 — 없으면 다음 정지점까지 (match.md §2) */
+  untilMinute?: number,
 ): string {
   // 장부가 끝났어도 승부가 남은 경기 — 구간이 아니라 승부차기를 굴린다
   if (awaitingShootout(state)) return runShootoutTurn(state, calls);
   const before = { ...(state.pendingMatch?.ledger.score ?? { home: 0, away: 0 }) };
   const ourSide = userSide(state);
-  const step = advanceSegment(state);
+  const step = advanceSegment(state, untilMinute !== undefined ? { untilMinute } : {});
   if (!step.ok || !step.plan) {
     return `${coach(state)} ${step.message}`;
   }
@@ -609,7 +619,15 @@ function computeMockGmTurn(
     }
     const goals: GoalMark[] = [];
     const cards: CardMark[] = [];
-    const text = advanceMatchTurn(state, calls, goals, cards);
+    // 감독이 분을 말했으면 그 분까지 — 실모드에선 GM이 도구 인자로 싣는 자리다
+    const until = msg.match(UNTIL_MINUTE)?.[1];
+    const text = advanceMatchTurn(
+      state,
+      calls,
+      goals,
+      cards,
+      until === undefined ? undefined : Number(until),
+    );
     return {
       text,
       toolCalls: calls,

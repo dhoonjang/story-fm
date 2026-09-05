@@ -65,6 +65,11 @@ export type SegmentStop =
   /** 연장 전반 종료 */
   | "extra_half_time"
   | "full_time"
+  /**
+   * 호출부가 말한 분에 닿았다 (`maxMinutes`) — 감독의 "70분까지"가 여기로 온다
+   * (match.md §2). 휴식 정지점이 아니므로 이 자리의 교체는 창을 소모한다 (§5).
+   */
+  | "requested"
   /** 사건 없이 흐름만 흘렀다 — 25분 상한 */
   | "flow";
 
@@ -140,12 +145,13 @@ export interface SegmentInput {
    */
   toExtraTime?: boolean;
   /**
-   * 이 구간을 몇 분까지만 굴릴 것인가 — 없으면 정지점까지(상한 25분).
+   * 이 구간을 **몇 분 굴릴 것인가** — 없으면 정지점까지(상한 25분). 정지점보다 이
+   * 창이 먼저 닫히면 정지 사유는 `requested`다.
    *
-   * 감독이 벤치에서 말만 건 턴은 구간 하나를 쓸 자리가 아니다(match.md §2). 1을
-   * 넣으면 그 1분에 실제로 일어난 것만 확정하고, **아무 일도 없었으면 사건을
-   * 지어내지 않는다** — 25분 침묵은 발생률이 비정상이라는 신호지만 1분 침묵은
-   * 흔하다. 사건 없이 흐른 시각은 호출부가 `advanceClock`으로 민다.
+   * 감독이 "70분까지"라고 말한 턴이 여기로 온다 (match.md §2) — 목표 분과 지금
+   * 연속 시계의 거리를 코어가 재서 넣는다(`segmentStartClock`). 짧게 부른 구간은
+   * **아무 일도 없었으면 사건을 지어내지 않는다** — 25분 침묵은 발생률이 비정상이라는
+   * 신호지만 1분 침묵은 흔하다. 사건 없이 흐른 시각은 호출부가 `advanceClock`으로 민다.
    */
   maxMinutes?: number;
   /**
@@ -165,6 +171,11 @@ export interface SegmentInput {
  * 벤치가 같은 빈도로 판을 읽어야 교체 총량이 한 눈금에 선다.
  */
 export const MAX_SEGMENT_MINUTES = 25;
+/**
+ * 연속 시계의 합이 정수를 아주 조금 밑돌 때 그 분을 잃지 않게 하는 여유 —
+ * 63.4에서 6.6분을 굴린 자리는 70′이지 69′가 아니다.
+ */
+const CLOCK_EPSILON = 1e-6;
 /**
  * 한 구간에 담을 이벤트 상한 — 장부의 배치 한도(`LEDGER_LIMITS.maxEventsPerBatch` 20)
  * 아래로 둔다. 정지 이벤트와 AI 교체(한 창 `SUB_WINDOW_MAX`장), 전술 전환 한 줄이
@@ -719,11 +730,25 @@ export const EXTRA_TIME_DENSITY =
   (EXTRA_TIME_SHOT_SHARE * PHASE_END.second_half) / EXTRA_TIME_MINUTES;
 
 /**
+ * **다음 구간이 출발하는 연속 시각** — 목표 분까지의 거리를 재는 자리다.
+ *
+ * 장부의 분은 마지막 사건의 것이라 굴린 시계보다 뒤에 서 있을 수 있다. 목표 분을
+ * 장부의 분에서 재면 이미 지나친 분을 남은 거리로 읽어 구간이 거꾸로 잘린다.
+ * `simulateSegment`가 실제로 출발하는 자리와 **같은 규칙 하나**로 답한다.
+ */
+export function segmentStartClock(ledger: MatchLedgerState, clock?: number): number {
+  if (!ledger.events.some((e) => e.type === "kickoff")) return 0;
+  const phase: PlayPhase = ledger.phase === "finished" ? "second_half" : ledger.phase;
+  const from = Math.max(ledger.minute, PHASE_START[phase]);
+  return Math.max(clock ?? from, from);
+}
+
+/**
  * 다음 정지점까지 굴린다 — 코어가 사건을 확정하고 장부에 넣을 이벤트를 돌려준다.
  *
- * 정지점: 골 · 퇴장 · 부상 · 하프타임 · 종료 · (조용하면) 25분 상한.
- * 첫 옐로 카드와 슛·찬스는 정지점이 아니라 구간 안에 섞인다 — 실제 경기에서
- * 감독이 그때마다 벤치에서 일어나지는 않는다.
+ * 정지점: 골 · 퇴장 · 부상 · 하프타임 · 종료 · **호출부가 말한 분**(`maxMinutes`) ·
+ * (조용하면) 25분 상한. 첫 옐로 카드와 슛·찬스는 정지점이 아니라 구간 안에 섞인다 —
+ * 실제 경기에서 감독이 그때마다 벤치에서 일어나지는 않는다.
  */
 export function simulateSegment(input: SegmentInput): SegmentPlan {
   const {
@@ -801,6 +826,12 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
   const halfEnd = PHASE_END[phase];
   /** 이 구간이 흐를 수 있는 분 — 호출부가 더 짧게 부를 수는 있어도 길게는 못 한다 */
   const span = Math.min(MAX_SEGMENT_MINUTES, input.maxMinutes ?? MAX_SEGMENT_MINUTES);
+  /**
+   * 창이 하프보다 먼저 닫혔을 때 그 자리의 이름 — **누가 창을 좁혔는가**가 가른다.
+   * 25분 상한은 조용한 경기를 감독에게 돌려주는 코어의 장치라 `flow`이고, 호출부가
+   * 더 좁게 부른 창은 감독이 고른 분이라 `requested`다 (match.md §2).
+   */
+  const windowStop: SegmentStop = span < MAX_SEGMENT_MINUTES ? "requested" : "flow";
 
   const started = ledger.events.some((e) => e.type === "kickoff");
   if (!started) events.push({ minute: 0, type: "kickoff", actors: [], causes: [] });
@@ -820,7 +851,7 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
    * 다시 출발하면 정지점마다 최대 1분이 두 번 굴려져 경기당 슈팅이 패킷 기대치를
    * 넘는다(구간 7~8개면 3~4분). 앞 구간의 `clock`을 받으면 그 되감김이 사라진다.
    */
-  let t = Math.max(input.clock ?? from, from);
+  let t = segmentStartClock(ledger, input.clock);
   /** 이 구간이 굴리기 시작한 연속 시각 — 창(`span`)은 여기서부터 센다 */
   const clockFrom = t;
   /**
@@ -1055,7 +1086,17 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
          * 한 번 더 세므로, 장부의 분과 연속 시계는 따로 돌려준다.
          */
         const last = events[events.length - 1]?.minute ?? Math.floor(rollTo);
-        return finish("flow", Math.max(last, ledger.minute), rollTo);
+        if (windowStop === "flow") return finish("flow", Math.max(last, ledger.minute), rollTo);
+        /**
+         * **감독이 말한 분만은 장부의 시각이 된다** — 그 자리는 사건이 만든 것이 아니라
+         * 감독이 고른 것이라, 조용히 지나갔다고 장부가 아까 그 분에 머물면 "70분까지
+         * 보자"에 63′이 돌아온다. 사건이 없으면 호출부가 `advanceClock`으로 민다.
+         */
+        return finish(
+          "requested",
+          Math.max(Math.floor(rollTo + CLOCK_EPSILON), last, ledger.minute),
+          rollTo,
+        );
       }
       // 장부는 시간 역행을 반려한다 — 짧게 부른 구간이 밀어 둔 시각보다 이르면 안 된다
       const minute = Math.max(halfEnd, ledger.minute);

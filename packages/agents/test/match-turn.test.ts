@@ -19,6 +19,7 @@ import {
   applyOps,
   applyTacticOrders,
   buildLedgerNote,
+  buildMatchTools,
   buildSegmentMessage,
   GmTurnFailure,
   MATCH_ADVANCED,
@@ -110,9 +111,14 @@ function turn(
   cards: CardMark[] = [],
   calls: GmToolCall[] = [],
   roll = false,
+  /** 감독이 말한 목표 분 — 진행 도구가 싣는 자리 (match.md §2) */
+  untilMinute?: number,
 ) {
   return {
-    applied: applyTacticOrders(state, intent, calls, goals, cards, { roll }),
+    applied: applyTacticOrders(state, intent, calls, goals, cards, {
+      roll,
+      ...(untilMinute !== undefined ? { untilMinute } : {}),
+    }),
     calls,
     goals,
     cards,
@@ -220,6 +226,48 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
   });
 
   /**
+   * **감독이 말한 분이 정지점이 된다** (match.md §2). 조용한 경기에서 감독이 개입할
+   * 자리가 하프타임 하나로 줄지 않으려면 "30분까지"가 그 분에서 서야 하고, 그 자리는
+   * 휴식 정지점이 아니므로 거기서 부른 교체는 교체 창을 문다 (§5).
+   */
+  it("말한 분에서 멈추고, 그 정지점의 교체는 창을 소모한다", () => {
+    const state = matchState();
+    const side = userSide(state);
+    let stop = "";
+    // 골·부상이 먼저 오면 그 자리가 더 이르다 — 어느 쪽이든 30′을 넘어서지 않는다
+    for (let guard = 0; guard < 8 && stop !== "requested"; guard++) {
+      turn(state, GO, [], [], [], true, 30);
+      stop = state.pendingMatch!.lastSegment?.stop ?? "";
+      expect(state.pendingMatch!.ledger.minute, stop).toBeLessThanOrEqual(30);
+    }
+    expect(stop).toBe("requested");
+    expect(state.pendingMatch!.ledger.minute).toBe(30);
+    expect(state.pendingMatch!.ledger[side].subWindows).toBe(0);
+
+    const ledger = state.pendingMatch!.ledger;
+    const out = ledger[side].onPitch[10]!;
+    const incoming = ledger[side].bench[1]!;
+    turn(state, { ops: { substitute: [{ out, in: incoming }] } });
+    // 휴식 정지점이 아니다 — 하프타임이었다면 창이 그대로 0이다
+    expect(state.pendingMatch!.ledger[side].subWindows).toBe(1);
+    expect(state.pendingMatch!.ledger.minute).toBe(30);
+  });
+
+  /**
+   * 범위 밖의 분은 **한 발도 굴리지 않고** 반려한다 — 굴려 놓고 다른 자리에서 멈추면
+   * 감독은 자기가 말한 분에 선 줄 알고 다음 판단을 쌓는다.
+   */
+  it("이 국면 밖의 분은 반려하고 시계는 그대로다", () => {
+    const state = matchState();
+    for (const minute of [90, 0]) {
+      const { applied } = turn(state, GO, [], [], [], true, minute);
+      expect(applied.segment, `${minute}′`).toBeNull();
+      expect(state.pendingMatch!.ledger.minute, `${minute}′`).toBe(0);
+      expect(state.pendingMatch!.ledger.events, `${minute}′`).toHaveLength(0);
+    }
+  });
+
+  /**
    * 옮기지 못한 말은 조용히 사라지지 않는다 — 감독이 지시가 걸린 줄 알고 다음 판단을
    * 그 위에 쌓는 것이 이 저장소가 여러 번 고친 거짓 성공이다.
    */
@@ -299,6 +347,28 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     if (tool) await tool.handle(intent);
     return answered("", tool ? 1 : 0);
   };
+
+  /**
+   * 목표 분은 **도구의 인자**로 온다 — 스키마가 그 칸을 안 내면 GM은 분을 말할 길이
+   * 없고, 핸들러가 안 넘기면 코어는 언제나 정지점까지 간다 (agents.md §3).
+   */
+  it("진행 도구가 목표 분을 받아 그 분을 넘지 않는다", async () => {
+    const state = rolling();
+    const advance = buildMatchTools(state, { calls: [], goals: [], cards: [] }).find(
+      (t) => t.name === "advance_match",
+    )!;
+
+    const rolled = await advance.handle({ untilMinute: 20 });
+    expect(rolled.ok).toBe(true);
+    const minute = state.pendingMatch!.ledger.minute;
+    expect(minute).toBeGreaterThan(0);
+    expect(minute).toBeLessThanOrEqual(20);
+
+    // 이 국면 밖의 분은 반려되고 시계는 그대로다 — 전반에 90′은 없다
+    const rejected = await advance.handle({ untilMinute: 90 });
+    expect(rejected.message).toContain("45′");
+    expect(state.pendingMatch!.ledger.minute).toBe(minute);
+  });
 
   /**
    * **지시 → 도구 → 구간 → 중계가 한 호출이다** (agents.md §3). GM이 `advance_match`를

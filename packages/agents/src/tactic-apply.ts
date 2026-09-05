@@ -53,7 +53,15 @@ export function applyTacticOrders(
   goals: GoalMark[],
   cards: CardMark[],
   /** 굴릴지는 **매치 GM이 부른 도구가 정한다** — 의도에는 진행 칸이 없다 (agents.md §3) */
-  options: { roll?: boolean; deferNegotiationIds?: ReadonlySet<string> } = {},
+  options: {
+    roll?: boolean;
+    /**
+     * 감독이 말한 목표 분 — 그 분까지 굴리고 거기서 멈춘다 (match.md §2). 진행 도구가
+     * 실어 오고, 범위 밖이면 코어의 반려 문장이 `notes`로 돌아간다.
+     */
+    untilMinute?: number;
+    deferNegotiationIds?: ReadonlySet<string>;
+  } = {},
 ): AppliedTacticOrders {
   const specs = new Map<string, GameToolSpec>(
     buildToolSpecs(state, calls, options).map((tool) => [tool.name, tool] as const),
@@ -117,7 +125,14 @@ export function applyTacticOrders(
   }
 
   const scoreBefore = { ...pending.ledger.score };
-  const step = advanceMatchTo(state, pending.ledger.minute + 1);
+  /**
+   * 감독이 분을 말했으면 그 분이 목표이고 구간이 거기서 끊긴다. 말하지 않았으면
+   * 목표는 「한 발 앞」이라 구간은 다음 정지점까지 간다 — 예전과 같은 진행이다.
+   */
+  const step =
+    options.untilMinute !== undefined
+      ? advanceMatchTo(state, options.untilMinute, { requested: true })
+      : advanceMatchTo(state, pending.ledger.minute + 1);
   if (!step.ok) {
     notes.push(step.message);
     return { notes, segment: null };
