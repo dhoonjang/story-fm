@@ -229,6 +229,32 @@ export function openPromises(state: GameState, playerId?: string): ManagerPromis
 }
 
 /**
+ * 감독 앞에 세우는 창(일) — **계약 만료(180)보다 훨씬 짧다** (people.md §5-2).
+ *
+ * 계약 만료는 반년 전부터 손을 쓸 수 있는 일이지만, 약속은 기한 그 주에 감독이 할 수
+ * 있는 일(선발로 세운다·리스트에 올린다·재계약을 연다·완장을 채운다)이 남아 있는
+ * 동안만 경고가 뜻을 갖는다. 한 달 전부터 매 턴 뜨면 그 줄은 배경음이 되고, 정작
+ * 기한 전날의 줄이 묻힌다.
+ *
+ * ⚠️ **창은 하나다.** GM 스냅샷의 주의 줄과 화면의 안건 띠가 같은 값을 읽는다 — 두
+ * 벌로 두면 한쪽만 조율되고, 판정이 기한 날 하루뿐이라 그 어긋남이 곧 사기 −8이다.
+ */
+export const PROMISE_ALERT_DAYS = 7;
+
+/**
+ * 기한이 다가온 약속 — **이른 기한이 앞이다** (people.md §5-2).
+ *
+ * 스냅샷의 주의 줄과 뷰의 안건 칩이 함께 부른다. 정렬까지 여기서 하는 것은 둘 다
+ * "가장 급한 하나"를 앞에서 집기 때문이다 — 두 곳에서 각자 정렬하면 같은 날짜의
+ * 약속 둘이 자리마다 다른 순서로 선다.
+ */
+export function duePromises(state: GameState, withinDays = PROMISE_ALERT_DAYS): ManagerPromise[] {
+  return openPromises(state)
+    .filter((p) => diffDays(state.date, p.dueOn) <= withinDays)
+    .sort((a, b) => (a.dueOn < b.dueOn ? -1 : a.dueOn > b.dueOn ? 1 : 0));
+}
+
+/**
  * 이 갈래의 기한 — **날수가 아닌 갈래가 둘이다** (people.md §5-2).
  * `transfer`는 다음 이적창 마감을, `number`는 다음 시즌 개막일을 본다.
  */
