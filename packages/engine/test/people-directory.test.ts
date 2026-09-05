@@ -7,7 +7,7 @@ import {
   characterDepthOf,
   characterEntry,
   selectCharacters,
-} from "../src/world/character-book";
+} from "../src/world/people-directory";
 import { headCoachOf, reportersOf } from "../src/world/persona";
 
 /** 이번 턴에 실린 이름들 — 순서까지 보는 케이스만 배열을 직접 읽는다 */
@@ -35,7 +35,7 @@ function openNegotiation(state: GameState, playerId: string): void {
   state.negotiations.push(negotiation);
 }
 
-describe("캐릭터북 — 이번 턴에 실을 인물지", () => {
+describe("인물 사전 — 이번 턴에 실을 인물지", () => {
   let base: GameState;
   let squad: GamePlayer[];
 
@@ -187,7 +187,7 @@ describe("캐릭터북 — 이번 턴에 실을 인물지", () => {
 
   /**
    * 카드가 그 사람의 말을 인용하라고 요구해 놓고 인물지를 싣지 않으면, GM이 그
-   * 이름으로 즉흥의 말투를 지어낸다 — 캐릭터북이 풀었던 그 문제다 (people.md §4).
+   * 이름으로 즉흥의 말투를 지어낸다 — 인물 사전이 풀었던 그 문제다 (people.md §4).
    */
   it("회견 카드에 오른 상대 감독은 이름이 불리지 않아도 자리를 받는다", () => {
     const state = structuredClone(base);

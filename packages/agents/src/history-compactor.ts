@@ -28,7 +28,7 @@ import { inputError, toToolSchema } from "./tool-schema";
 
 /**
  * 이력 압축 — 창 밖으로 밀려나는 평시 구간을 요약 한 벌로 옮기고, 그 김에
- * 캐릭터북을 갱신한다 (agents.md §5-1 · people.md §9-1).
+ * 인물 사전을 갱신한다 (agents.md §5-1 · people.md §9-1).
  *
  * 결산 셋과 같은 계약이다: 검사는 전부 코어의 몫이고(`applyHistoryDigest`·
  * `applyCharacterMemories`·`registerCharacters`), **실패하면 접지 않는다** —
@@ -188,7 +188,7 @@ export function buildCompactionPrompt(
     return label === undefined ? `- ${p.characterId}` : `- ${p.characterId} (${label})`;
   });
   if (standing.length > 0) {
-    blocks.push("## 이미 캐릭터북에 선 사람 — 다시 세우지 않는다", ...standing, "");
+    blocks.push("## 이미 인물 사전에 선 사람 — 다시 세우지 않는다", ...standing, "");
   }
   if (arcs.length > 0) {
     blocks.push(
@@ -221,14 +221,14 @@ export function untitledArcs(state: GameState): { id: string; line: string }[] {
 /**
  * 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3).
  *
- * 캐릭터북 갱신을 별도 도구로 두지 않은 이유가 그것이다: `toolChoice`는 도구
+ * 인물 사전 갱신을 별도 도구로 두지 않은 이유가 그것이다: `toolChoice`는 도구
  * **하나**를 강제하고 그것도 첫 요청에만 걸리므로, 둘로 나누면 나머지 하나는
  * 모델이 부를 수도 안 부를 수도 있는 자리가 된다.
  */
 export const REPORT_DIGEST_TOOL = "report_digest";
 
 export const REPORT_DIGEST_DESCRIPTION =
-  "접히는 구간의 요약 두 칸(지난 일·열린 일)과 캐릭터북 갱신을 함께 제출한다. 검사에 걸린 항목은 코어가 버린다.";
+  "접히는 구간의 요약 두 칸(지난 일·열린 일)과 인물 사전 갱신을 함께 제출한다. 검사에 걸린 항목은 코어가 버린다.";
 
 interface CompactionResult {
   folded: boolean;
@@ -249,7 +249,7 @@ function makeReportTool(
       const parsed = ReportInputSchema.safeParse(input);
       if (!parsed.success) return inputError(parsed.error);
       /**
-       * 요약이 먼저다 — 거절당하면 이 턴은 접지 않으므로 캐릭터북도 건드리지 않는다.
+       * 요약이 먼저다 — 거절당하면 이 턴은 접지 않으므로 인물 사전도 건드리지 않는다.
        * 길이는 위 스키마가 먼저 거르므로 여기 남는 것은 빈 문장과 낡은 브리프다.
        */
       const draft = {

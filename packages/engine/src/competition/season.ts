@@ -1862,7 +1862,7 @@ function applyTransition(state: GameState): string[] {
         digest.push(`은퇴: ${ours.map((p) => p.name).join(", ")}`);
         /**
          * **명부로 옮긴다** (season.md §6). 명단에서 빠지면 id로는 이름도 나이도
-         * 되찾지 못해 오프시즌 블록·캐릭터북·시상 기록이 그 사람을 부를 수 없다.
+         * 되찾지 못해 오프시즌 블록·인물 사전·시상 기록이 그 사람을 부를 수 없다.
          * 감독 팀에서 은퇴한 선수만 담는 것은 `milestones`와 같은 규약이다.
          */
         state.retired = [

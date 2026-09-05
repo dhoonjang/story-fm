@@ -60,7 +60,7 @@ import {
 } from "../src/world/relations";
 import { applyTalkToPlayer } from "../src/commands";
 import { playersOf } from "../src/core/state";
-import { selectCharacters } from "../src/world/character-book";
+import { selectCharacters } from "../src/world/people-directory";
 import type { GameState } from "../src/core/state";
 import { createTestGame } from "./helpers";
 
@@ -682,7 +682,7 @@ describe("가상 감독 — 명부 밖 벤치의 사람 (people.md §2)", () => 
     expect(state.teams.map((t) => t.managerName)).toEqual(before);
   });
 
-  it("화자 사전과 캐릭터북이 상대 벤치를 안다 — 감독 라벨, 이름으로 걸리는 카드", () => {
+  it("화자 사전과 인물 사전이 상대 벤치를 안다 — 감독 라벨, 이름으로 걸리는 카드", () => {
     const state = createTestGame();
     // 새 게임이 열어 둔 부임 회견의 기자가 한 턴 상한을 함께 다툰다 (people.md §4·§6)
     state.pressConferences = [];
@@ -705,7 +705,7 @@ describe("가상 감독 — 명부 밖 벤치의 사람 (people.md §2)", () => 
 });
 
 /**
- * 캐릭터북 키워드 — **나열한 것만 본다** (people.md §6). 만드는 자리가 한 곳이라
+ * 인물 사전 키워드 — **나열한 것만 본다** (people.md §6). 만드는 자리가 한 곳이라
  * 자리마다 다른 규칙이 생기지 않는다.
  */
 describe("페르소나 키워드", () => {
@@ -746,10 +746,10 @@ describe("페르소나 키워드", () => {
 });
 
 /**
- * 캐릭터북 갱신 — 이력이 접힐 때 LLM에 맡기는 둘 (people.md §9-1).
+ * 인물 사전 갱신 — 이력이 접힐 때 LLM에 맡기는 둘 (people.md §9-1).
  * 성격·동기·말투는 시드의 것이고, 코어가 검사해 통과한 것만 세이브에 남는다.
  */
-describe("캐릭터북 갱신", () => {
+describe("인물 사전 갱신", () => {
   const draftOf = (over: Partial<CharacterDraft> = {}): CharacterDraft => ({
     characterId: "미란다 코스타",
     name: "미란다 코스타",
@@ -826,7 +826,7 @@ describe("캐릭터북 갱신", () => {
     const state = createTestGame();
     const before = state.personas!.length;
 
-    // 명부 이름으로 friend를 세우면 캐릭터북이 등록본을 먼저 찾아 표의 인격이 가려진다
+    // 명부 이름으로 friend를 세우면 인물 사전이 등록본을 먼저 찾아 표의 인격이 가려진다
     expect(
       registerCharacters(state, [draftOf({ characterId: "조제 무리뉴", name: "조제 무리뉴" })]),
     ).toBe(0);

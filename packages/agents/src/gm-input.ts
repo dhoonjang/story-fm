@@ -205,7 +205,7 @@ export function describePersona(entry: CharacterEntry): string {
 }
 
 /**
- * 이번 장면의 인물들 — 캐릭터북이 고른 카드 묶음 (people.md §6).
+ * 이번 장면의 인물들 — 인물 사전이 고른 카드 묶음 (people.md §6).
  *
  * ⚠️ **여기 있는 것은 "이 사람이 누구인가"뿐이다.** 카드는 이력에 굳으므로 변하는
  * 값(폼·컨디션·부상·심경·계약)이 들어가면 3주 뒤 모델이 낡은 사실로 말한다. 지금의
@@ -262,7 +262,7 @@ export function describeManager(
  *
  * ⚠️ **인물 카드는 여기 없다.** 코치·구단주·기자 다섯 장은 회견도 협상도 없는 턴에
  * 한 번도 쓰이지 않는데 매 턴 읽혔다. 그렇다고 조건부로 넣었다 뺐다 하면 더 나쁘다 —
- * 프리픽스가 바뀌는 턴마다 이 블록과 그 뒤 이력이 통째로 무효가 된다. 카드는 캐릭터북이
+ * 프리픽스가 바뀌는 턴마다 이 블록과 그 뒤 이력이 통째로 무효가 된다. 카드는 인물 사전이
  * 골라 **이번 턴 층**에 싣고 다음 턴부터 이력의 일부가 된다 (people.md §6).
  * ⚠️ 선수의 이름도 id도 여기 두지 않는다 — 명단은 영입·매각·2군 승격·주장 변경마다
  * 바뀌고, 한 줄이 달라지면 이 블록과 그 뒤의 이력이 통째로 무효가 된다. 이름은 매 턴
@@ -318,7 +318,7 @@ export function buildMatchReference(state: GameState): string {
   return [
     buildGmReference(state),
     // 벤치에서 감독 옆에 서 있는 사람이다 — 경기 중 조언도 같은 사람의 말투여야 한다.
-    // 경기 내내 같은 한 사람이라 여기서는 캐릭터북을 거치지 않고 상주한다
+    // 경기 내내 같은 한 사람이라 여기서는 인물 사전을 거치지 않고 상주한다
     describeCharacters([characterEntry(headCoachOf(state), "full")]),
     buildMatchBrief(state),
   ]
@@ -2084,7 +2084,7 @@ function historyEnd(chat: GameState["chat"]): number {
 }
 
 /**
- * 이력 창 **안에** 서 있는 카드 — 캐릭터북이 「이미 실렸다」를 판단하는 근거다.
+ * 이력 창 **안에** 서 있는 카드 — 인물 사전이 「이미 실렸다」를 판단하는 근거다.
  *
  * 창 밖으로 밀려난 기록은 여기 오지 않으므로 그 인물은 그 순간 다시 주입 대상이
  * 된다 — 만료 규칙을 따로 두지 않는 이유다 (people.md §6).
@@ -2101,7 +2101,7 @@ export function injectedCharacters(state: GameState): CharacterInjection[] {
  * 카드 텍스트를 저장하면 채팅 화면에 프롬프트가 새고 이력이 그때의 문장으로 굳는다.
  *
  * 기억 줄 수도 함께 적는다 — 기억은 이 턴 층에만 서므로(§6), 그 뒤에 늘어난 것을
- * 재주입으로 나르려면 캐릭터북이 **그때 실린 수**를 알아야 한다.
+ * 재주입으로 나르려면 인물 사전이 **그때 실린 수**를 알아야 한다.
  */
 export function recordCharacterInjection(
   state: GameState,

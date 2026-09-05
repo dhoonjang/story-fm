@@ -534,7 +534,7 @@ export type Transfer = z.infer<typeof TransferSchema>;
  *
  * 은퇴하면 `state.players`에서 빠지므로 id로는 이름도 나이도 되찾지 못한다. 원장의
  * `TRANSFER.type = "retire"` 줄은 **누가**를 id로만 아는 줄이라, 그 줄만으로는
- * 오프시즌 블록도 캐릭터북도 시상 기록도 그 사람을 부를 수 없다.
+ * 오프시즌 블록도 인물 사전도 시상 기록도 그 사람을 부를 수 없다.
  *
  * ⚠️ **통산은 여기 적지 않는다.** `seasonStats`의 행은 은퇴로 지워지지 않아
  * `careerTotalsOf`가 같은 수를 그대로 낸다 — 한 값을 두 곳에 적으면 언젠가 갈린다

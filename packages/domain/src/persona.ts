@@ -75,7 +75,7 @@ export const PersonaSchema = z.object({
   motivation: z.string().min(1),
   speechStyle: SpeechStyleSchema,
   /**
-   * 이 인물이 불렸다고 볼 말들 — 캐릭터북이 이력과 이번 턴 발화에서 훑는다 (people.md §6).
+   * 이 인물이 불렸다고 볼 말들 — 인물 사전이 이력과 이번 턴 발화에서 훑는다 (people.md §6).
    *
    * ⚠️ **나열된 것만 본다.** 성만 쓴 "홀란드"를 같은 사람으로 보는 부분 일치는 오탐을
    * 만든다는 `normalizeSpeaker`의 원칙이 여기도 그대로다 — 별칭이 필요하면 여기 적는다.
@@ -273,7 +273,7 @@ export interface PersonaRelation {
 }
 
 /**
- * 인물지 — 캐릭터북이 조립하는 **구조**다. 문장으로 옮기는 것은 프롬프트의 몫이고
+ * 인물지 — 인물 사전이 조립하는 **구조**다. 문장으로 옮기는 것은 프롬프트의 몫이고
  * (`describePersona`), 코어는 사실만 낸다 (overview.md §1 철칙 4).
  *
  * ⚠️ **변하는 값은 여기 없다** — 폼·컨디션·부상·심경·계약·관측 능력치는 주입한 카드가

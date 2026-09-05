@@ -343,7 +343,7 @@ async function runRealGmTurn(
    */
   if (!inMatch) {
     takeNews(state);
-    // 기사도 같은 규약이다 — 스냅샷과 캐릭터북이 둘 다 읽은 뒤에 비운다 (people.md §4-1)
+    // 기사도 같은 규약이다 — 스냅샷과 인물 사전이 둘 다 읽은 뒤에 비운다 (people.md §4-1)
     takeMedia(state);
   }
   // 킥오프 턴의 이력은 경기 전 대화다 — `relevantTurns`가 그 한 턴만 평시로 읽는다

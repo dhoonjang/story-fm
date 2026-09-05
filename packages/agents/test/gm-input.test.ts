@@ -221,7 +221,7 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
     expect(buildGmReference(state)).toBe(before);
   });
 
-  it("인물 카드는 레퍼런스에도 상태 스냅샷에도 없다 — 캐릭터북이 이번 턴 층에 싣는다", () => {
+  it("인물 카드는 레퍼런스에도 상태 스냅샷에도 없다 — 인물 사전이 이번 턴 층에 싣는다", () => {
     const state = game();
     const coach = headCoachOf(state);
     const reference = buildGmReference(state);
@@ -292,7 +292,7 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
     // 카드가 발화보다 앞이다 — 이력에 남는 것들 안의 순서라 캐시와 무관하고, 보낼 때와
     // 같은 함수가 그리므로 같은 순서다 (`renderTurnGroup`)
     expect(turn.content.indexOf(coach.motivation)).toBeLessThan(turn.content.indexOf("불러줘"));
-    // 창 안에 선 카드는 캐릭터북이 「이미 실렸다」로 읽는다
+    // 창 안에 선 카드는 인물 사전이 「이미 실렸다」로 읽는다
     expect(injectedCharacters(state)).toEqual([{ characterId: coach.characterId, depth: "full" }]);
   });
 
