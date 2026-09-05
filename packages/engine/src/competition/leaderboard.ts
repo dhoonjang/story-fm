@@ -1,22 +1,26 @@
 import type { LeaderboardKey } from "@story-fm/domain";
 import { LEADERBOARD_KEYS, ageOf, disciplinePoints, seasonRating } from "@story-fm/domain";
 import { computeStandings, countsInStandings } from "./season";
+import { leagueTableOf } from "./records";
 import { leagueOfTeamIn } from "./promotion";
 import { teamShortNameIn, type GameState } from "../core/state";
 
 /**
- * 리그 개인 순위 — **시상이 읽는 그 표를 시즌 중에 그대로 보여 준다**
+ * 대회 개인 순위 — **시상이 읽는 그 표를 시즌 중에 그대로 보여 준다**
  * (→ docs/data/competition.md §2 「개인 순위」 · docs/simulation/season.md §6).
  *
  * 집계도 동점 사슬도 여기 한 벌뿐이라, 최종 라운드가 끝나는 순간 이 표의 1위가
- * 그대로 그해 득점왕이 된다(`seasonAwards`는 여기서 머리 하나를 꺼내 갈 뿐이다).
- * 두 벌로 두면 3월의 득점 순위와 5월의 득점왕이 다른 규칙으로 뽑힌다.
+ * 그대로 그해 그 대회의 득점왕이 된다(`seasonAwards`는 여기서 머리 하나를 꺼내 갈
+ * 뿐이다). 두 벌로 두면 3월의 득점 순위와 5월의 득점왕이 다른 규칙으로 뽑힌다.
+ *
+ * **리그·국내 컵·대항전이 같은 함수를 지난다.** 시즌 인자를 주면 지나간 시즌의
+ * 표다 — 행은 시즌 전환 뒤에도 남기 때문이다(game-state.md §3.4).
  */
 
 /**
  * 평점 상의 출전 문턱을 만드는 나눗수 — 라운드(또는 지금까지 치른 경기)를 이 수로
  * 나눈 몫(올림)이다. 평점은 평균이라 문턱이 없으면 두 경기 뛴 교체 자원이 주장을
- * 이긴다.
+ * 이긴다 — 그래서 문턱을 셀 수 없는 표에서는 **평점 축이 아예 서지 않는다.**
  */
 export const RATING_APPS_DIVISOR = 2;
 
@@ -132,16 +136,24 @@ export function pickWinner(
  * 그 시즌 전 대회의 합계이고, 옛 규칙이 정확히 그것이었다(그 리그 소속 선수의 시즌
  * 최다 득점 — season.md §6). 컵 id로는 어느 팀의 리그와도 같지 않으므로 컵의 표는
  * 옛 세이브에서 비어 있다: 없는 사실을 지어내는 대신 그 상이 없는 해로 남는다.
+ * 그 읽기는 **이번 시즌에만** 걸린다 — 세이브가 아는 소속은 지금의 것이고, 지나간
+ * 시즌의 소속은 그 사이 승강으로 바뀌어 있다.
  */
-export function talliesOf(state: GameState, competitionId: string, onDate: string): LeagueTally[] {
+export function talliesOf(
+  state: GameState,
+  competitionId: string,
+  onDate: string,
+  season = state.season,
+): LeagueTally[] {
   const players = new Map(state.players.map((p) => [p.id, p]));
   const merged = new Map<string, LeagueTally & { ratingSum: number | null }>();
   /** 그 대회에서 팀마다 몇 경기 뛰었나 — 그 선수의 팀을 고르는 근거 */
   const appsByTeam = new Map<string, Map<string, number>>();
 
   for (const stat of state.seasonStats) {
-    if (stat.season !== state.season) continue;
+    if (stat.season !== season) continue;
     if (stat.competitionId === undefined) {
+      if (season !== state.season) continue;
       // 승강은 아직 적용되기 전이다 — 소속의 원본은 카탈로그가 아니라 세이브다 (§8 불변식)
       if (leagueOfTeamIn(state, stat.teamId) !== competitionId) continue;
     } else if (stat.competitionId !== competitionId) continue;
@@ -207,20 +219,20 @@ export interface LeaderRow {
 }
 
 /**
- * 그 리그의 개인 순위 상위 `limit`명 — **그 리그 경기만의 표다** (`talliesOf`).
+ * 그 대회의 개인 순위 상위 `limit`명 — **그 대회 경기만의 표다** (`talliesOf`).
  *
- * ⚠️ **대항전에는 아직 서지 않는다** (season.md §9). 집계는 대회별로 나오지만
- * 평점·클린시트 축의 출전 문턱이 순위표에서 나오는데(`ratingFloorOf`) 컵에는
- * 순위표가 없다. 대회의 개인상은 시즌 끝에 선다(`seasonAwards`).
+ * 리그·국내 컵·대항전이 모두 선다. `season`을 주면 지나간 시즌의 표이고, 그때는
+ * 평점 축이 리그에만 선다 — 문턱을 셀 경기가 남지 않기 때문이다(`ratingFloorOf`).
  */
 export function leaderboardOf(
   state: GameState,
-  leagueId: string,
+  competitionId: string,
   key: LeaderboardKey,
   limit = LEADERBOARD_LIMIT,
+  season = state.season,
 ): LeaderRow[] {
-  const tallies = talliesOf(state, leagueId, state.date);
-  return boardFrom(state, tallies, key, () => ratingFloorOf(state, leagueId), limit);
+  const tallies = talliesOf(state, competitionId, state.date, season);
+  return boardFrom(state, tallies, key, () => ratingFloorOf(state, competitionId, season), limit);
 }
 
 /** 개인 순위 한 표 — 축과 그 줄들 */
@@ -235,13 +247,15 @@ export interface LeaderBoard {
  */
 export function leaderboardsOf(
   state: GameState,
-  leagueId: string,
+  competitionId: string,
   limit = LEADERBOARD_LIMIT,
+  season = state.season,
 ): LeaderBoard[] {
-  const tallies = talliesOf(state, leagueId, state.date);
-  // 문턱은 순위표를 한 번 세우는 값이라 축마다 다시 세지 않는다
-  let floor: Map<string, number> | null = null;
-  const floorOf = (): Map<string, number> => (floor ??= ratingFloorOf(state, leagueId));
+  const tallies = talliesOf(state, competitionId, state.date, season);
+  // 문턱은 경기를 한 번 훑는 값이라 축마다 다시 세지 않는다 (`null`도 답이므로 두 겹이다)
+  let floor: { of: Map<string, number> | null } | null = null;
+  const floorOf = (): Map<string, number> | null =>
+    (floor ??= { of: ratingFloorOf(state, competitionId, season) }).of;
   return LEADERBOARD_KEYS.map((key) => ({
     key,
     rows: boardFrom(state, tallies, key, floorOf, limit),
@@ -252,7 +266,7 @@ function boardFrom(
   state: GameState,
   tallies: readonly LeagueTally[],
   key: LeaderboardKey,
-  floorOf: () => Map<string, number>,
+  floorOf: () => Map<string, number> | null,
   limit: number,
 ): LeaderRow[] {
   return sortByChain(eligibleFor(tallies, key, floorOf), ORDER_OF[key])
@@ -274,30 +288,72 @@ function boardFrom(
     }));
 }
 
-/** 그 축에 설 자격 — 평점만 출전 문턱을 지나고 나머지는 값이 0이면 서지 않는다 */
+/**
+ * 그 축에 설 자격 — 평점만 출전 문턱을 지나고 나머지는 값이 0이면 서지 않는다.
+ * 문턱을 셀 수 없으면(`null`) 평점 표는 **비어 있다** — 0으로 열면 한 경기 뛴
+ * 교체 자원이 그 표의 1위가 된다.
+ */
 function eligibleFor(
   tallies: readonly LeagueTally[],
   key: LeaderboardKey,
-  floorOf: () => Map<string, number>,
+  floorOf: () => Map<string, number> | null,
 ): LeagueTally[] {
   if (key !== "rating") return tallies.filter((t) => leaderValueOf(t, key) >= MIN_LEADER_TALLY);
   const floor = floorOf();
+  if (floor === null) return [];
   return tallies.filter((t) => t.rating !== null && t.apps >= (floor.get(t.teamId) ?? 0));
 }
 
 /**
- * 평점 표의 출전 문턱 — 그 **팀이 지금까지 치른 리그전의 절반**(올림).
+ * 평점 표의 출전 문턱 — 그 **팀이 그 대회에서 지금까지 치른 경기의 절반**(올림).
+ * 셀 수 없으면 `null`이고, 그러면 평점 축이 서지 않는다 (`eligibleFor`).
  *
  * 시상은 시즌이 끝난 뒤라 리그의 라운드 수로 나눌 수 있지만, 10월의 표는 아직
  * 치르지 않은 경기를 문턱에 넣을 수 없다 — 넣으면 그 리그의 평점 순위가 3월까지
  * 비어 있다. 지금까지 치른 경기로 끊으면 시즌 마지막 날 두 문턱이 같은 값에서 만난다.
  */
-function ratingFloorOf(state: GameState, leagueId: string): Map<string, number> {
-  const floor = new Map<string, number>();
-  for (const row of computeStandings(state, leagueId)) {
-    floor.set(row.teamId, Math.ceil(row.played / RATING_APPS_DIVISOR));
+function ratingFloorOf(
+  state: GameState,
+  competitionId: string,
+  season: number,
+): Map<string, number> | null {
+  const played = matchesPlayedIn(state, competitionId, season);
+  if (played === null) return null;
+  return new Map([...played].map(([teamId, n]) => [teamId, Math.ceil(n / RATING_APPS_DIVISOR)]));
+}
+
+/**
+ * 그 대회에서 팀마다 **결과가 나온 경기**를 몇 번 치렀나 — 문턱의 유일한 재료다.
+ *
+ * 순위표(`computeStandings`) 대신 경기를 직접 세는 이유는 하나다: 순위표는 리그전만
+ * 세므로(`countsInStandings`) 녹아웃뿐인 국내 컵에는 아예 없고, 대항전에서는 리그
+ * 페이즈까지만 센다. 리그에서는 두 수가 같다 — 리그에는 녹아웃 단계가 없어 순위표의
+ * `played`가 곧 그 팀이 그 대회에서 치른 경기다.
+ *
+ * ⚠️ **지나간 시즌은 경기가 남지 않는다** — 시즌 전환이 `state.matches`를 통째로
+ * 갈아 끼운다(game-state.md §3.3). 리그는 결산 스냅샷의 최종 표가 `played`를 들고
+ * 있어 거기서 세지만, 컵·대항전은 그 수가 남지 않아 `null`이다.
+ */
+function matchesPlayedIn(
+  state: GameState,
+  competitionId: string,
+  season: number,
+): Map<string, number> | null {
+  const played = new Map<string, number>();
+  for (const match of state.matches) {
+    if (match.season !== season || match.competitionId !== competitionId || !match.result) continue;
+    for (const teamId of [match.homeTeamId, match.awayTeamId]) {
+      played.set(teamId, (played.get(teamId) ?? 0) + 1);
+    }
   }
-  return floor;
+  // 이번 시즌이면 빈 표도 답이다 — 아직 한 경기도 치르지 않았다는 사실이다
+  if (played.size > 0 || season === state.season) return played;
+  const table = leagueTableOf(state, season, competitionId);
+  if (table === null) return null;
+  const rows = new Map<string, number>();
+  // 이관된 옛 행은 순위만 안다 — 없는 수를 0으로 세우면 문턱이 통째로 사라진다
+  for (const row of table) if (row.record) rows.set(row.teamId, row.record.played);
+  return rows.size > 0 ? rows : null;
 }
 
 // ── 팀 열 ──────────────────────────────────────────────
