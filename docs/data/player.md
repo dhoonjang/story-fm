@@ -1234,8 +1234,8 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 | 경기 출전 1회                | 8                             |
 | 팀 훈련 1일 (휴식·부상 제외) | 1.5                           |
 | 그냥 함께 보낸 하루          | 0.5                           |
-| 면담 `talk_to_player`        | 앵커 5 ± 4 (나쁜 결과면 음수) |
-| 팀토크 `team_talk`           | 앵커 1.5 ± 1.5                |
+| 대화 `team_talk` (한 명)     | 앵커 5 ± 4 (나쁜 결과면 음수) |
+| 대화 `team_talk` (둘 이상)   | 앵커 1.5 ± 1.5                |
 | 주장 지명 `set_captain`      | 15 (소속 기간에 한 번)        |
 
 목표 = 100 × 배수: 나라를 건넜으면 ×1.3 · 라커룸에 같은 협회 출신 ×0.85 ·
@@ -1253,9 +1253,13 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 
 - **대화의 무게는 GM이 정하고 경계는 코어가 쥔다** — 호출이 `settling` 인자를
   받고 코어는 앵커 ±`EVENT_BAND`로 자른다 (경기 평점과 같은 구조).
-- ⚠️ **면담은 하루에 한 번** — 크레딧뿐 아니라 **사기·리더십 XP까지** 그날 첫 면담만
-  셈한다(`PlayerState.talkedOn`). 반복이 이득이면 면담 연타가 최적 전략이 된다
-  (→ [../simulation/career.md](../simulation/career.md) §2).
+- ⚠️ **정착 크레딧은 하루에 한 번** — 대화는 하루에 몇 번이든 판정이 서지만 크레딧은
+  그날 첫 대화만 쌓는다(`creditSettling`). 사기와 리더십 XP는 게이트가 아니라 **합계
+  상한**으로 잘린다 — 하루 ±8, 이레 ±20
+  (→ [../simulation/career.md](../simulation/career.md) §2). 반복이 그대로 이득이면
+  대화 연타가 최적 전략이 된다.
+- **앵커는 대상 수가 가른다** — 한 명과 마주 앉은 말이 5±4, 둘 이상이 들은 말이
+  1.5±1.5다. 정지점의 외침에는 크레딧이 없다.
 - **결과가 `neutral`이면 크레딧은 0이다** — 사기가 움직이지 않은 대화를 나쁜 결과로 세면
   적응이 뒤로 밀린다. 앵커의 방향은 사기 델타의 부호를 따르고, 부호가 없으면 남기지 않는다.
 - 거의 다 파생이다(TRANSFER 원장·출전 명단·훈련 일정). **대화만 원장이 필요하다**
@@ -1683,7 +1687,7 @@ offTheBall  = base − tilt × (1 − a)
 | 부상 저울과 위험 등급 (`injuryWeight`·`injuryRiskOf`·`INJURY_RISK_FLOOR`) — §5.3                                                | `packages/sim/src/match-engine.ts` (낱말은 `packages/domain/src/records.ts`)            |
 | 안개의 크기·잠재력·경기 중 체력 (`observationMargin`·`readCondition`)                                                           | `packages/engine/src/squad/scouting.ts`                                                 |
 | 안개를 얹는 규칙·등급표 (`observedFit`·`observedOverall`·`RATING_TIERS`) — 화면도 같이 부른다                                   | `packages/domain/src/player.ts` (엔진이 재수출)                                         |
-| 파견 한도·대기 (`scoutPlayer`·`deferScout`·`scoutingSummary`)                                                                   | `packages/engine/src/commands/index.ts` · `packages/engine/src/squad/scouting.ts`       |
+| 파견 한도·대기 (`scoutPlayer`·`deferScout`·`scoutingSummary`)                                                                   | `packages/engine/src/commands/scouting.ts` · `packages/engine/src/squad/scouting.ts`    |
 | 보고서 카드와 도착 줄 (`scoutReportCard`·`scoutReportLine`)                                                                     | `packages/engine/src/views/views.ts`                                                    |
 | 정착 (`settlingOf`·`SETTLING_EVENT`)                                                                                            | `packages/engine/src/squad/settling.ts`                                                 |
 | 역할 기억 (`recallRole`·`rememberRole`)                                                                                         | `packages/engine/src/commands/role-memory.ts`                                           |

@@ -37,6 +37,25 @@ export const LEADER_WEIGHT: Record<LeaderRole, number> = {
 /** 리더가 아닌 선수의 배수 — 곱해도 아무것도 달라지지 않는다 */
 export const PLAIN_WEIGHT = 1;
 
+/** 리더십이 0일 때의 계수 — 말은 통하지 않아도 완전히 죽지는 않는다 */
+const LEADERSHIP_FACTOR_FLOOR = 0.7;
+/** 리더십이 눈금 끝까지 올랐을 때 더해지는 폭 — 바닥과 합쳐 0.7~1.3이다 */
+const LEADERSHIP_FACTOR_SPAN = 0.6;
+
+/**
+ * **감독의 리더십 계수** — 같은 말도 리더십이 자라면 더 크게 울린다 (career.md §2).
+ *
+ * 말을 하는 사람의 계수라 대화·회견·조기 소집이 같은 것을 탄다. 라커룸 계수
+ * (`dressingRoomFactor`)가 그 말이 울리는 방이라면 이쪽은 말하는 사람이고, 둘이 곱해져
+ * 폭을 정한다 — 그래서 한 자리에 함께 산다 (AGENTS.md §5 "한 규칙, 한 정의").
+ */
+export function leadershipFactor(state: GameState): number {
+  return (
+    LEADERSHIP_FACTOR_FLOOR +
+    (state.manager.attributes.leadership / RATING_MAX) * LEADERSHIP_FACTOR_SPAN
+  );
+}
+
 /** 라커룸 계수의 바닥과 폭 — 감독의 리더십 계수(0.70~1.30)와 곱해진다 */
 const ROOM_FACTOR_FLOOR = 0.8;
 const ROOM_FACTOR_SPAN = 0.4;

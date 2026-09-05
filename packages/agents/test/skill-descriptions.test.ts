@@ -117,12 +117,12 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
     expect(perGroup).toEqual({
       진행: 2,
       "전술·훈련": 2,
-      "대화·서사": 5,
+      "대화·서사": 4,
       이적: 4,
       재정: 1,
       조회: 11,
     });
-    expect(SKILL_CATALOG.length).toBe(25);
+    expect(SKILL_CATALOG.length).toBe(24);
     expect(SKILL_CATALOG.filter((s) => s.readOnly).length).toBe(11);
   });
 });
@@ -267,9 +267,9 @@ describe("규칙이 사는 자리", () => {
         reads: NEGOTIATION_TABLE_SYSTEM,
       },
       {
-        /** 면담과 다가옴의 응대가 **같은 인자 하나**를 쓴다 — 한 자리를 재면 둘 다 잰다 */
-        where: "talk_to_player.promise.kind",
-        node: enumArg(TOOLS, "talk_to_player", "kind"),
+        /** 대화와 다가옴의 응대가 **같은 인자 하나**를 쓴다 — 한 자리를 재면 둘 다 잰다 */
+        where: "team_talk.promise.kind",
+        node: enumArg(TOOLS, "team_talk", "kind"),
         kinds: PROMISE_KINDS as readonly string[],
         /**
          * 여기도 표가 둘이다. 낱말은 장부 줄과 화면이 쓰는 이름이고(「출전」),

@@ -135,11 +135,11 @@ export function describeManagerSkills(attributes: ManagerAttributes): string {
 }
 
 /**
- * **자리별 마지막 팀토크 날짜** — 같은 자리의 팀토크를 하루 한 번으로 자르는 문
- * (career.md §2). 경기 전 `pre` · 하프타임 `half` · 경기 후 `post` · 평시 `daily`.
+ * ⚠️ **날짜 게이트가 있던 시절의 자리** — 지금은 아무 데서도 읽지 않는다.
  *
- * 팀토크는 선수 하나가 아니라 라커룸 전체에 걸리므로, 면담의 `PlayerState.talkedOn`과
- * 달리 감독이 들고 있어야 한다.
+ * 대화는 하루에 몇 번이든 판정이 서고, 되풀이를 자르는 것은 게이트가 아니라 듣는
+ * 선수마다의 사기 합계 상한이다(`PlayerState.talkMorale` — career.md §2). 옛 세이브가
+ * 들고 오는 값을 반려하지 않으려고 스키마에만 남는다 — 새로 쓰이지 않는다.
  */
 export const TeamTalkLogSchema = z
   .object({
@@ -151,15 +151,15 @@ export const TeamTalkLogSchema = z
   .partial();
 export type TeamTalkLog = z.infer<typeof TeamTalkLogSchema>;
 
-/** 라커룸의 네 자리 — 하루 한 번을 세는 단위이자 `TeamTalkLog`의 키다 (career.md §2) */
+/** 라커룸의 네 자리 — 정지점의 외침(`shout`)을 뺀 나머지이자 `TeamTalkLog`의 키다 */
 export type DailyTeamTalkOccasion = keyof TeamTalkLog;
 
 /**
- * 팀토크를 꺼낸 **자리**.
+ * 감독이 말을 꺼낸 **자리**.
  *
- * 넷은 라커룸이고 하루 한 번을 센다(`TeamTalkLog`). 다섯째 `shout`은 진행 중 정지점에서
- * 팀 전체에 던지는 짧은 말이라 **하루가 아니라 경기가 센다** — 장부는 `teamTalkedOn`이
- * 아니라 `PendingMatch.shouts`이고, 폭도 라커룸의 한마디보다 좁다 (career.md §2).
+ * 넷은 라커룸이다. 다섯째 `shout`은 진행 중 정지점에서 던지는 짧은 말이라 **경기가
+ * 센다** — 장부는 `PendingMatch.shouts`(경기당 `SHOUT_PER_MATCH`)이고, 폭도 라커룸의
+ * 한마디보다 좁다 (career.md §2).
  */
 export const TEAM_TALK_OCCASIONS = ["pre", "half", "post", "daily", "shout"] as const;
 export type TeamTalkOccasion = (typeof TEAM_TALK_OCCASIONS)[number];

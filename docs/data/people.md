@@ -901,14 +901,13 @@ Employment {          // 수석코치 · 코치 · 의료진 · 스카우트 (�
 
 규칙만으로는 늘 같은 문장이 나온다 — 같은 "불만"도 벤치의 고참과 이적 요청을
 넣은 주전이 다르다. 그 문장을 쓰기에 가장 맞는 자리는 **그 대화를 쥔 호출**이다 —
-면담·팀토크·회견·응대·사건 기록은 GM의 도구 인자로, 경기 뒤는 경기 마감의
+대화·회견·응대·사건 기록은 GM의 도구 인자로, 경기 뒤는 경기 마감의
 결산으로 (→ [../llm/agents.md](../llm/agents.md) §4-3). 별도 호출이 그 구간의 사실
 조각만 읽고 다시 쓰던 자리다 — 언쟁 다음 날 그 선수의 한 줄이 「폼 침체」를 말하고
 언쟁은 몰랐다.
 
 | 자리                       | 인자                     | 대상              |
 | -------------------------- | ------------------------ | ----------------- |
-| `talk_to_player`           | `mood`                   | 그 선수           |
 | `team_talk`                | `moods` (≤ 3)            | 그 말을 들은 선수 |
 | `respond_to_media`         | `mood`                   | 이름이 불린 선수  |
 | `respond_to_approach`      | `mood`                   | 찾아온 당사자     |
@@ -946,7 +945,7 @@ Employment {          // 수석코치 · 코치 · 의료진 · 스카우트 (�
 | `contract`        | 만료가 문턱 안인데 열린 재계약이 없다 (`core/tick.ts`)                          | —                        |
 | `out-of-position` | 주 포지션 밖 선발이 4경기 이어졌을 때 (`match-flow.ts`)                         | `count` = 연속 경기      |
 | `promise`         | 감독이 한 약속의 기한이 지났는데 장부가 이행을 못 찾을 때 (`squad/promises.ts`) | —                        |
-| `number`          | 감독이 그의 등번호를 다른 선수에게 넘겼을 때 (`commands/index.ts`)              | `count` = 잃은 번호      |
+| `number`          | 감독이 그의 등번호를 다른 선수에게 넘겼을 때 (`commands/lineup.ts`)             | `count` = 잃은 번호      |
 | `overload`        | 누적 피로가 「과부하」에 머문 날이 그 사람의 문턱을 넘었을 때 (`core/tick.ts`)  | `count` = 과부하 며칠째  |
 
 열한 사유가 **한 자에 선다** — 화면의 ⚠불만 줄도, 심경 카드도, 회견의 유출 카드도,
@@ -1227,8 +1226,10 @@ CB에서 ST로 올린 것이 다른 일이기 때문이다.
 
 ### 약속 장부 (`state.promises`) — 기한이 있는 약속
 
-면담(`talk_to_player`)과 다가옴의 응대(`respond_to_approach`)에서 감독이 한 말 중
-**갈래가 있는 것**만 장부에 선다.
+대화(`team_talk` — 이름이 **하나**일 때만)와 다가옴의 응대(`respond_to_approach`)에서
+감독이 한 말 중 **갈래가 있는 것**만 장부에 선다. 여럿에게 동시에 한 약속은 누가 그
+약속의 주인인지 장부가 가리지 못하므로 반려된다
+(→ [../simulation/career.md](../simulation/career.md) §2).
 
 | 갈래       | 감독이 한 말         | 기본 기한        | 이행 판정 (`tickPromises`)                     |
 | ---------- | -------------------- | ---------------- | ---------------------------------------------- |
@@ -2104,7 +2105,8 @@ GM이 아는 "이야기가 있는 선수"가 늘 같은 두세 명이라 모델�
 사라지므로, 시간이 그 위를 지나가면 감독은 답할 기회 없이 대가만 치른다.
 
 **⚠️ 답이 원인을 지우지는 않는다.** 응답은 압력만 되돌린다. 불만을 실제로 푸는 길은
-면담(`talk_to_player`)·승격·선발이고, 순위를 되돌리는 길은 승점뿐이다.
+**이름을 불러 건넨 대화**(`team_talk`의 `players`)·승격·선발이고, 순위를 되돌리는 길은
+승점뿐이다. 이름 없이 선수단 전체에 한 말은 아무 불만도 풀지 않는다.
 
 ### 효과는 그 자리에 있던 사람에게만 닿는다
 
@@ -2346,7 +2348,7 @@ title? }` — 세이브에 남고(옛 세이브는 빈 배열), **개폐는 전�
 | 멘토링 (자격 · 멘토 항 · 정리)                        | `packages/engine/src/squad/mentoring.ts` (+ `packages/domain/src/records.ts` `Mentoring`)                  |
 | 심경 카드 · 잔향 검사 (`applyMoodNotes`)              | `packages/engine/src/squad/mood.ts`                                                                        |
 | 수용성 (열림·경계·닫힘과 근거)                        | `packages/engine/src/squad/receptivity.ts`                                                                 |
-| 사건 기록 (효과표 · 하루 한도 · 회견 카드 · 기억)     | `packages/engine/src/commands/index.ts` (`recordIncident`) · `packages/domain/src/records.ts` (`Incident`) |
+| 사건 기록 (효과표 · 하루 한도 · 회견 카드 · 기억)     | `packages/engine/src/commands/talk.ts` (`recordIncident`) · `packages/domain/src/records.ts` (`Incident`)  |
 | 선수 근황                                             | `packages/engine/src/squad/cues.ts`                                                                        |
 | 수석코치의 눈 (원형이 고르는 사실)                    | `packages/engine/src/squad/coach-cues.ts`                                                                  |
 | 서사 메모리                                           | `packages/domain/src/records.ts` (`NarrativeNote`) · `packages/engine/src/core/state.ts` (`pushNarrative`) |

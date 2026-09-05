@@ -363,12 +363,17 @@ function turnsOfMatch(state: GameState, match: MatchRecord): ChatTurn[] {
 /**
  * 라커룸의 결과 — 그 경기의 팀토크 자리와 판정. 호출 기록의 입력(`team_talk`)에서
  * 읽는다: 코어가 적은 사실이지 중계 문장이 아니다.
+ *
+ * ⚠️ **방 전체에 한 말만 센다.** 대화 도구 하나가 이름을 부른 말도 나르므로(`players`),
+ * 그것까지 세면 한 선수와 나눈 하프타임의 말이 라커룸 전체의 판정으로 선다.
  */
 function lockerRoomLine(turns: readonly ChatTurn[]): string | null {
   const talks: string[] = [];
   for (const call of turns.flatMap((t) => t.toolCalls)) {
     if (call.name !== "team_talk") continue;
-    const input = call.input as { occasion?: unknown; outcome?: unknown } | undefined;
+    const input = call.input as
+      { occasion?: unknown; outcome?: unknown; players?: unknown } | undefined;
+    if (Array.isArray(input?.players) && input.players.length > 0) continue;
     if (typeof input?.occasion !== "string" || typeof input.outcome !== "string") continue;
     const occasion = (TEAM_TALK_OCCASION_KO as Record<string, string>)[input.occasion];
     talks.push(`${occasion ?? input.occasion} 팀토크 ${input.outcome}`);

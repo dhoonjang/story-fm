@@ -491,7 +491,7 @@ test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page 
    * 면담은 칩으로 남고, 바뀐 것(사기·심경)은 **스쿼드 말풍선**이 알린다.
    * 펼치지 않아도 잘 풀렸는지는 보여야 하므로 칩이 결(`good`/`bad`)을 갖는다.
    */
-  const chip = page.getByTestId("tool-talk_to_player").first();
+  const chip = page.getByTestId("tool-team_talk").first();
   await expect(chip).toBeVisible();
   await expect(chip).toHaveClass(/good|bad/);
   await expect(page.getByTestId("hint-스쿼드")).toBeVisible();
