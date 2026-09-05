@@ -2563,6 +2563,8 @@ describe("협상 상대의 앵커와 한도", () => {
   const anchorOf = (over: Partial<CounterpartyAnchor> = {}): CounterpartyAnchor => ({
     negotiationId: "n1",
     probability: 34,
+    clubOdds: 58,
+    playerOdds: 59,
     latitude: 0,
     verdict: "counter",
     allowed: ["reject", "counter", "accept"],
@@ -3226,7 +3228,7 @@ describe("테이블 — 마주 앉으면 그 자리에서 답한다 (transfer.md
     expect(first.seat.anchor).toBeNull();
     const max = first.seat.table.patienceMax;
     settleTableReply(state, first.seat, {
-      line: "그 말은 선을 넘었습니다.",
+      lines: [{ speaker: "club", text: "그 말은 선을 넘었습니다." }],
       stance: "leaving",
       heard: { tone: "hostile", claims: [{ kind: "manager_reputation" }] },
     });
@@ -3240,6 +3242,56 @@ describe("테이블 — 마주 앉으면 그 자리에서 답한다 (transfer.md
     expect(negotiation.pitched ?? []).not.toContain("manager_reputation");
   });
 
+  it("영입의 테이블에는 목소리가 둘 서고, 두 화자의 답이 한 판정으로 접힌다", () => {
+    const state = createTestGame();
+    const { negotiation } = seated(state);
+    const seat = sitAtTable(state, negotiation.id, "값과 조건을 오늘 맞춰 봅시다");
+    if (!seat.ok) throw new Error(seat.message);
+    // 이적료를 받는 구단과 개인 조건을 답하는 선수 쪽 — 축의 주인이 둘이다 (§12-1)
+    expect(seat.seat.voices.map((v) => v.speaker)).toEqual(["club", "agent"]);
+
+    const outcome = settleTableReply(state, seat.seat, {
+      lines: [
+        { speaker: "club", text: "그 값에는 못 놓습니다." },
+        { speaker: "agent", text: "주급은 우리 쪽이 따로 봅니다." },
+      ],
+      stance: "steady",
+      heard: { tone: "civil", claims: [] },
+    });
+    expect(outcome.ok).toBe(true);
+    // 줄은 둘이 남되 판정은 하나다 — 앵커도 구간도 오퍼 전체에 하나이기 때문이다
+    const them = negotiation.table!.lines.filter((l) => l.by === "them");
+    expect(them.map((l) => l.speaker)).toEqual(["club", "agent"]);
+    expect(outcome.message.match(/\[장부\] 판정 /g)).toHaveLength(1);
+    expect(pendingOffer(negotiation)).toBeNull();
+    // GM에게 가는 줄은 화자를 이름으로 부른다
+    for (const voice of seat.seat.voices) expect(outcome.message).toContain(`name="${voice.name}"`);
+  });
+
+  it("서 있지 않은 화자는 앉은 목소리로 접힌다 — 재계약의 답은 선수 쪽이다", () => {
+    const state = createTestGame();
+    const player = playersOf(state, state.userTeamId)[0]!;
+    activeContract(state, player.id)!.until = addDays(state.date, 120);
+    const opened = openRenewal(state, {
+      playerId: player.id,
+      weeklyWage: renewalExpectation(state, player),
+      years: 3,
+    });
+    expect(opened.ok, opened.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    const seat = sitAtTable(state, negotiation.id, "남아 주십시오");
+    if (!seat.ok) throw new Error(seat.message);
+    // 이적료를 받을 구단이 없는 갈래라 목소리는 하나다
+    expect(seat.seat.voices.map((v) => v.speaker)).toEqual(["agent"]);
+    settleTableReply(state, seat.seat, {
+      lines: [{ speaker: "club", text: "생각해 보겠습니다." }],
+      stance: "steady",
+      heard: { tone: "civil", claims: [] },
+    });
+    const them = negotiation.table!.lines.filter((l) => l.by === "them");
+    expect(them[them.length - 1]!.speaker).toBe("agent");
+  });
+
   it("인내가 바닥나면 상대가 일어나고 협상은 이번 창에서 결렬이다", () => {
     const state = createTestGame();
     const { negotiation } = seated(state);
@@ -3248,7 +3300,7 @@ describe("테이블 — 마주 앉으면 그 자리에서 답한다 (transfer.md
     if (!seat.ok) throw new Error(seat.message);
     seat.seat.table.patience = 1;
     const outcome = settleTableReply(state, seat.seat, {
-      line: "여기까지입니다.",
+      lines: [{ speaker: "club", text: "여기까지입니다." }],
       stance: "leaving",
       heard: { tone: "hostile", claims: [] },
     });
