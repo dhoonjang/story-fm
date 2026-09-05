@@ -26,7 +26,6 @@ import {
   naturalPositionOf,
   PLAYER_ISSUE_REASONS,
   pressFactText,
-  RATING_MAX,
   RENEWAL_NOTICE_DAYS,
 } from "@story-fm/domain";
 import type { GameState } from "../core/state";
@@ -49,6 +48,8 @@ import { clampForm, formLabel, moraleToForm } from "../squad/form";
 import { applyMoodNotes, type MoodLine } from "../squad/mood";
 import { receptivityLine, receptivityOf } from "../squad/receptivity";
 import { careerTotalsOf, matchMilestones } from "../squad/career";
+// 리더십 계수는 라커룸 계수와 한 자리에 산다 (squad/hierarchy.ts)
+import { leadershipFactor } from "../squad/hierarchy";
 import { managerCareerTotals } from "../competition/records";
 import { numberLineageOf } from "../squad/numbers";
 import { recentOutcomes } from "../squad/slump";
@@ -217,19 +218,6 @@ function cardManager(
 const REPUTATION_MAX = 100;
 
 export const clampRep = (v: number) => Math.max(0, Math.min(REPUTATION_MAX, Math.round(v)));
-
-/** 리더십 0이 갖는 울림 */
-const LEADERSHIP_FACTOR_MIN = 0.7;
-/** 리더십이 최고까지 더해 주는 몫 — 0.7~1.3 */
-const LEADERSHIP_FACTOR_SPAN = 0.6;
-
-/** 리더십 계수 — 같은 말도 리더십이 자라면 라커룸에 더 크게 울린다 (commands/index.ts와 같은 자) */
-function leadershipFactor(state: GameState): number {
-  return (
-    LEADERSHIP_FACTOR_MIN +
-    (state.manager.attributes.leadership / RATING_MAX) * LEADERSHIP_FACTOR_SPAN
-  );
-}
 
 /**
  * 녹아웃 단계 — **경기 뒤 회견의 무게가 대회를 읽는 자리** (people.md §4).
