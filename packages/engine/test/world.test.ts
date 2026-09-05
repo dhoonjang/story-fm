@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  type GamePlayer,
   type ManagerAttributes,
   FORMATIONS,
   presetOf,
@@ -78,6 +79,8 @@ import {
   pseudonymSquad,
   type PlayerNameInput,
 } from "@story-fm/engine";
+import { TIER_BASE } from "../src/data/team-catalog";
+import { potentialGapBand } from "../src/world/synthesis";
 import { createTestGame, userFixtureCount, createMiniGame, playFullSeason } from "./helpers";
 
 /** 스쿼드를 갖는 팀 — 무소속(`free`)은 비어 있게 시작한다 */
@@ -344,6 +347,83 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
     const namesB = new Set<string>();
     expect(youthOf(takenB, namesB)).toEqual(youthOf(takenA, namesA));
     expect(namesA.size).toBe(6); // 같은 팀에 콜업된 유스끼리도 겹치지 않는다
+  });
+});
+
+/**
+ * 유스 인테이크의 공식 — **천장이 먼저 서고 지금 실력이 거기서 내려온다**
+ * (season.md §6 · player.md §6.5).
+ *
+ * 세계는 닫혀 있고 AI 구단은 떠난 수만큼만 유스로 채우므로, 여름마다 들어오는 사람의
+ * 천장이 곧 다음 세대 리그의 천장이다. 여기가 어긋나면 리그가 세대마다 다른 게임이
+ * 되는데, 그 어긋남은 열다섯 시즌을 굴려야 보인다(`squad-longevity`) — 공식 자체는
+ * 여기서 표본으로 잰다.
+ */
+describe("유스 인테이크 — 천장이 먼저 선다 (season.md §6)", () => {
+  /** 표본 — 세계를 세우지 않고 공식만 부르므로 넉넉히 든다 */
+  const SAMPLE = 1500;
+  const REF_YEAR = 2026;
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  /** 같은 시드열을 두 번 쓰지 않으려고 체급·활용도마다 시드 구간을 가른다 */
+  const cohort = (tier: 1 | 2 | 3 | 4, ceilingBonus = 0) =>
+    Array.from({ length: SAMPLE }, (_, i) =>
+      generateYouthPlayer(
+        9_000_000 + tier * 100_000 + ceilingBonus * 10_000 + i,
+        "arsenal",
+        3,
+        i,
+        tier,
+        new Set(),
+        undefined,
+        REF_YEAR,
+        new Set(),
+        ceilingBonus,
+      ),
+    );
+  const potentialOf = (squad: readonly GamePlayer[]) =>
+    mean(squad.map((p) => p.attributes.potential));
+  const gapOf = (squad: readonly GamePlayer[]) =>
+    mean(squad.map((p) => p.attributes.potential - p.attributes.overall));
+
+  it("체급별 천장의 평균이 그 체급 기준선에 선다", () => {
+    for (const tier of [1, 2, 3, 4] as const) {
+      // 위로의 꼬리(`YOUTH_CEILING_TAIL`)가 평균을 반 칸 남짓 밀어 올린다
+      const ceiling = potentialOf(cohort(tier));
+      expect(ceiling, `tier${tier}`).toBeGreaterThan(TIER_BASE[tier] - 1);
+      expect(ceiling, `tier${tier}`).toBeLessThan(TIER_BASE[tier] + 1.5);
+    }
+  });
+
+  it("여지는 나이 대역 안이다 — 세계 생성이 읽는 그 표에서 나온다", () => {
+    for (const player of cohort(2)) {
+      const age = REF_YEAR - Number(player.birthdate.slice(0, 4));
+      const gap = player.attributes.potential - player.attributes.overall;
+      const band = potentialGapBand(age);
+      expect(gap, `${age}세 ${player.name}`).toBeGreaterThanOrEqual(band.min);
+      expect(gap, `${age}세 ${player.name}`).toBeLessThanOrEqual(band.max);
+    }
+  });
+
+  it("아카데미 활용도는 천장의 평균만 옮긴다 — 여지는 나이의 것이다", () => {
+    // 99에서 접히지 않는 체급으로 잰다 — 접히면 활용도의 몫이 그만큼 사라져 보인다
+    const plain = cohort(3);
+    const backed = cohort(3, 3);
+    expect(potentialOf(backed) - potentialOf(plain)).toBeCloseTo(3, 0);
+    expect(gapOf(backed)).toBeCloseTo(gapOf(plain), 0);
+  });
+
+  it("무리 전체가 1군을 밀어내지는 않는다 — 지금 실력은 천장에서 나이만큼 내려와 있다", () => {
+    /**
+     * 예전 공식이 막던 자리다 — 기준선을 지금 실력 쪽에 박아 합성 유스가 실명
+     * 유망주 위에 서지 못하게 했고, 그 대가로 천장이 체급 아래에 섰다. 이제 막는
+     * 것은 **무리의 평균**이다: 열일곱~열아홉의 여지가 열댓 칸이라 인테이크 한 해가
+     * 통째로 1군을 밀어내지 못하고, 드물게 그 위로 서는 한 명이 그해의 사건이 된다.
+     */
+    for (const tier of [1, 2, 3, 4] as const) {
+      expect(mean(cohort(tier).map((p) => p.attributes.overall)), `tier${tier}`).toBeLessThan(
+        TIER_BASE[tier] - 12,
+      );
+    }
   });
 });
 

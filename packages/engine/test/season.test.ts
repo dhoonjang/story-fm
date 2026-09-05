@@ -1435,10 +1435,12 @@ describe("유스 인테이크 (season.md §6)", () => {
     );
   });
 
-  it("후보 수와 잠재력 여지는 체급과 아카데미 활용도의 결정적 함수다", () => {
-    // 활용도 0과 1이 후보 수와 여지를 함께 움직인다
-    expect(youthIntakeOf(2, 1, 0)).toEqual({ candidates: 6, fills: 2, upsideBonus: 0 });
-    expect(youthIntakeOf(2, 1, 1)).toEqual({ candidates: 8, fills: 2, upsideBonus: 6 });
+  it("후보 수와 천장은 체급과 아카데미 활용도의 결정적 함수다", () => {
+    // 활용도 0과 1이 후보 수와 천장을 함께 움직인다
+    expect(youthIntakeOf(2, 1, 0)).toEqual({ candidates: 6, fills: 2, ceilingBonus: 0 });
+    expect(youthIntakeOf(2, 1, 1)).toEqual({ candidates: 8, fills: 2, ceilingBonus: 3 });
+    // 천장은 눈금이 없는 값이라 접지 않는다 — 접으면 활용도 0.5와 0.83이 같은 인테이크를 낸다
+    expect(youthIntakeOf(2, 1, 0.5).ceilingBonus).toBe(1.5);
     // 체급이 낮으면 고를 여지가 좁다
     expect(youthIntakeOf(2, 4, 0).candidates).toBe(4);
     /**
