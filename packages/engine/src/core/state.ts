@@ -2381,6 +2381,8 @@ export function addMissingClubs(state: GameState): number {
       teamId: team.id,
       balance: finance.balance,
       transferBudget: finance.budget,
+      // 첫 시즌의 잉여도 제 값이어야 한다 — 없으면 시즌 2가 통째로 0을 읽는다 (finance.md §9.1)
+      seasonOpeningBalance: finance.balance,
       ledger: [],
       prizesPaid: [],
     });
@@ -3203,6 +3205,8 @@ export function createGame(input: CreateGameInput): GameState {
         teamId: t.id,
         balance: f.balance,
         transferBudget: f.budget,
+        // 첫 시즌의 잉여도 제 값이어야 한다 — 없으면 시즌 2가 통째로 0을 읽는다 (finance.md §9.1)
+        seasonOpeningBalance: f.balance,
         ledger: [],
         prizesPaid: [],
       };

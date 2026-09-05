@@ -1125,6 +1125,11 @@ describe("리그별 편차", () => {
 });
 
 describe("PSR", () => {
+  /** 구단주의 원형은 세이브의 데이터다 — 재투자 몫이 여기서 갈린다 (people.md §2) */
+  function ownerArchetype(state: GameState, archetype: string): void {
+    state.personas!.find((p) => p.role === "owner")!.archetype = archetype;
+  }
+
   it("3시즌 누적 손실이 한도를 넘으면 이적 예산을 동결한다", () => {
     const state = createTestGame();
     state.financeReports.push({
@@ -1245,34 +1250,67 @@ describe("PSR", () => {
     expect(psrStatus(state).rolling3Season).toBe(-50_000_000); // 시즌 3·4 (5는 보고서가 없다)
   });
 
-  it("여유가 있으면 지난 시즌 손익이 예산에 반영된다", () => {
+  /**
+   * 예산 보충의 성과 조각 (finance.md §9.1) — 자는 장부 손익이 아니라 **잔고의 차**다.
+   * 상각이 비용의 3할이라 손익은 본전 근처인데 잔고는 시즌마다 £145M씩 불었고, 손익에
+   * 건 예산은 그 잉여를 영영 돌려주지 않았다.
+   */
+  it("지난 시즌 현금 잉여가 구단주의 몫만큼 예산으로 돌아온다", () => {
     const state = createTestGame();
     state.season = 2;
-    state.financeReports.push({
-      id: "fr-test",
-      teamId: state.userTeamId,
-      month: "2027-05",
-      season: 1,
-      openingBalance: 0,
-      closingBalance: 0,
-      income: [],
-      expense: [],
-      incomeTotal: 40_000_000,
-      expenseTotal: 0,
-      cashNet: 40_000_000,
-      pnlNet: 40_000_000,
-      wageRatio: 0.5,
-      seasonToDate: { income: 0, expense: 0, cashNet: 0, pnlNet: 0 },
-      psr: null,
-      notes: [],
-    });
     const finance = financeOf(state, state.userTeamId);
+    ownerArchetype(state, "국부펀드형"); // 재투자 몫 0.8
+    finance.seasonOpeningBalance = finance.balance - 40_000_000; // 지난 시즌 잉여 £40M
     // 시작 예산이 base보다 크다 — 이월이 잘리는 상황인지 먼저 못박는다
     expect(finance.transferBudget).toBeGreaterThan(45_000_000);
     topUpTransferBudget(state, state.userTeamId, 45_000_000, []);
     expect(finance.budgetFrozen).toBe(false);
-    // 이월 45M(한 시즌치) + base 45M + 지난 시즌 운영 손익의 절반 20M
-    expect(finance.transferBudget).toBe(110_000_000);
+    // 이월 45M(한 시즌치) + base 45M + 잉여 40M × 0.8
+    expect(finance.transferBudget).toBe(122_000_000);
+    // 기준점이 지금 잔고로 다시 선다 — 같은 잉여가 다음 시즌에 또 예산이 되지 않는다
+    expect(finance.seasonOpeningBalance).toBe(finance.balance);
+    finance.transferBudget = 0;
+    topUpTransferBudget(state, state.userTeamId, 45_000_000, []);
+    expect(finance.transferBudget).toBe(45_000_000);
+  });
+
+  /**
+   * 같은 잉여에 원형이 다르면 다음 시즌 예산이 다르다 — 원형이 재정 눈금에 닿는
+   * 유일한 자리다 (people.md §2). AI 구단은 구단주 카드가 없어 중앙값으로 떨어진다.
+   */
+  it("재투자 몫은 구단주 원형이 정하고, 구단주 없는 구단은 중앙값이다", () => {
+    const budgetAfter = (archetype: string, teamId?: string) => {
+      const state = createTestGame();
+      state.season = 2;
+      ownerArchetype(state, archetype);
+      const id = teamId ?? state.userTeamId;
+      const finance = financeOf(state, id);
+      finance.seasonOpeningBalance = finance.balance - 40_000_000;
+      finance.transferBudget = 0; // 이월을 빼고 이번 보충만 본다
+      topUpTransferBudget(state, id, 45_000_000, []);
+      return finance.transferBudget - 45_000_000;
+    };
+
+    expect(budgetAfter("국부펀드형")).toBe(32_000_000); // 0.8
+    expect(budgetAfter("투자자형")).toBe(12_000_000); // 0.3
+    // 구단주 카드는 감독의 구단에만 선다 — 나머지 95개 구단은 중앙값 0.5다
+    expect(budgetAfter("국부펀드형", "chelsea")).toBe(20_000_000);
+  });
+
+  /**
+   * 잉여가 음수여도 다음 시즌이 통째로 지워지지는 않는다 — 판 돈으로 다시 세우는
+   * 길(transfer.md §3)까지 막히기 때문이다.
+   */
+  it("적자 시즌의 삭감은 base의 절반에서 멈춘다", () => {
+    const state = createTestGame();
+    state.season = 2;
+    ownerArchetype(state, "국부펀드형"); // 몫이 가장 큰 원형이어도 하한은 같다
+    const finance = financeOf(state, state.userTeamId);
+    finance.seasonOpeningBalance = finance.balance + 300_000_000; // 잉여 −£300M
+    finance.transferBudget = 0;
+    topUpTransferBudget(state, state.userTeamId, 45_000_000, []);
+    // base 45M − 45M × 0.5
+    expect(finance.transferBudget).toBe(22_500_000);
   });
 
   /**
@@ -1320,45 +1358,6 @@ describe("PSR", () => {
   });
 
   /**
-   * 매각 대금은 협상이 타결될 때 이미 예산에 들어간다. 손익으로 또 세면 한 번 판
-   * 선수로 예산을 두 번 받는다 — 감사가 지목한 최대 150% 회수 경로다.
-   */
-  it("성과 보너스는 매각 대금을 세지 않는다", () => {
-    const report = (income: { category: FinanceCategory; amount: number }[]) => ({
-      id: "fr-test",
-      teamId: "arsenal",
-      month: "2027-05",
-      season: 1,
-      openingBalance: 0,
-      closingBalance: 0,
-      income: income.map((l) => ({ ...l, top: [] })),
-      expense: [],
-      incomeTotal: 40_000_000,
-      expenseTotal: 0,
-      cashNet: 40_000_000,
-      pnlNet: 40_000_000,
-      wageRatio: 0.5,
-      seasonToDate: { income: 0, expense: 0, cashNet: 0, pnlNet: 0 },
-      psr: null,
-      notes: [],
-    });
-    const budgetAfter = (income: { category: FinanceCategory; amount: number }[]) => {
-      const state = createTestGame();
-      state.season = 2;
-      state.financeReports.push({ ...report(income), teamId: state.userTeamId });
-      const finance = financeOf(state, state.userTeamId);
-      finance.transferBudget = 0; // 이월을 빼고 이번 보충만 본다
-      topUpTransferBudget(state, state.userTeamId, 45_000_000, []);
-      return finance.transferBudget;
-    };
-
-    // 살림으로 번 £40M — 절반이 성과로 얹힌다
-    expect(budgetAfter([{ category: "matchday", amount: 40_000_000 }])).toBe(65_000_000);
-    // 같은 £40M이 선수를 판 돈이면 성과가 없다 — 그 돈은 이미 예산에 들어갔다
-    expect(budgetAfter([{ category: "transfer_in", amount: 40_000_000 }])).toBe(45_000_000);
-  });
-
-  /**
    * 시즌은 6월 초에 끝나고 전환이 곧바로 7월 1일로 건너뛰므로, 월초 훅에 맡기면
    * 상금·보너스가 앉은 마지막 달이 8월에야 마감된다. 그런데 예산·PSR은 전환 **안에서**
    * 지난 시즌 손익을 읽는다 — 마지막 달이 빠진 성과로 다음 시즌이 정해졌다
@@ -1392,7 +1391,7 @@ describe("PSR", () => {
     // 손익 창(PSR)도 이 달을 본다
     expect(psrStatus(state).rolling3Season).toBe(june!.pnlNet);
     // 예산의 성과 조각도 — 마지막 달이 빠지면 지난 시즌 보고서가 하나도 없어 0이 된다
-    expect(digest.some((line) => line.includes("재정 성과를 반영해"))).toBe(true);
+    expect(digest.some((line) => line.includes("이적 예산으로 돌렸다"))).toBe(true);
     expect(finance.transferBudget).toBeGreaterThan(seasonBudgetBaseOf(state, state.userTeamId));
   });
 
