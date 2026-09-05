@@ -26,6 +26,7 @@ import { setPlayerPosition } from "../commands";
 import {
   assignmentsOf,
   isAvailable,
+  latestTrainingReport,
   playerById,
   recomputeOverall,
   recordGrowth,
@@ -34,10 +35,12 @@ import {
   squadLevelOf,
   teamNameIn,
 } from "../core/state";
+import { SESSIONS_PER_WEEK } from "./training-plan";
 
 /**
- * 전향 훈련이 한 결산에서 올릴 수 있는 최대 폭.
- * 경기 한 번이 +1이니 며칠치 훈련이 그보다 크게 오르지 않는다.
+ * 전향 훈련이 한 결산에서 올릴 수 있는 최대 폭 — 판정의 눈금이자 반영의 천장이다.
+ * 경기 한 번이 +1이니 며칠치 훈련이 그보다 크게 오르지 않는다. 여러 주를 한 번에
+ * 넘긴 구간의 나머지는 캐리에 남아 다음 결산에서 나간다.
  */
 export const POSITION_TRAIN_MAX = 2;
 
@@ -75,11 +78,14 @@ import { turnFactLines } from "../core/turn-facts";
  */
 
 /**
- * 한 구간의 훈련이 전술 적응도에 남기는 폭 — **−1 ~ 3 중 하나**.
+ * **한 주치** 훈련이 전술 적응도에 남기는 폭 — **−1 ~ 3 중 하나**.
  *
  * 눈금을 잘게 두는 이유는 빈도다. `advance_time`은 시즌에 수십 번 돌고, 한 번에 크게
- * 움직일 수 있으면 진행을 잘게 쪼개는 것만으로 적응도를 불릴 수 있다. **−1**을 둔 건
- * 훈련이 늘 남기는 건 아니기 때문이다 — 지친 선수를 굴리면 오히려 흐트러진다.
+ * 움직일 수 있으면 게임이 흔들린다. **−1**을 둔 건 훈련이 늘 남기는 건 아니기
+ * 때문이다 — 지친 선수를 굴리면 오히려 흐트러진다.
+ *
+ * 판정자는 구간의 길이와 상관없이 이 사다리를 그대로 내고, 실제 폭은 코어가
+ * `settlementWeeks()`로 접는다.
  */
 export const TACTIC_GAIN_MIN = -1;
 export const TACTIC_GAIN_MAX = 3;
@@ -144,6 +150,23 @@ export function trainingAttrCap(training: number): number {
  * 어떻게 쪼개도 같다. 소수로 쌓이고 100에서 한 칸이 된다 (`grantManagerXP`).
  */
 export const TRAINING_XP_PER_SESSION = 0.5;
+
+/**
+ * 이 결산이 덮는 **주 수** — 판정의 눈금을 실제 폭으로 접는 배율이다.
+ *
+ * 결산은 **턴이 넘긴 구간**마다 돈다(`buildTrainingBrief` 호출 자리 — agents.md §4).
+ * 폭이 결산당 고정이면 같은 한 주도 손잡이로 넘기면 한 번, 장면 헤더로 하루씩 가면
+ * 다섯 번 매겨져 **감독의 턴 페이스가 성장 속도를 정한다.** 그래서 판정자는 한 주치
+ * 사다리를 그대로 내고(`TACTIC_GAIN_MAX` · `ATTR_STEP_MAX` · `POSITION_TRAIN_MAX`),
+ * 코어가 여기에 이 배율을 곱한다 — 하루치는 0.2, 한 주치는 1, 한 달치는 4쯤.
+ *
+ * ⚠️ **위로 자르지 않는다.** 스무 세션은 어떻게 쪼개도 스무 세션이고, 천장을 두면
+ * 이번엔 큰 걸음이 손해를 봐 페이스가 다시 성장 속도를 정한다. 한 번에 넘어가는
+ * 눈금은 반영하는 쪽이 잡는다 (능력치는 한 칸, 자리는 `POSITION_TRAIN_MAX`).
+ */
+export function settlementWeeks(sessions: number): number {
+  return sessions / SESSIONS_PER_WEEK;
+}
 
 /** 이 구간에 소화된 훈련 세션 하나 */
 export interface TrainedSession {
@@ -357,6 +380,20 @@ export function buildTrainingBrief(
   }
   if (subjects.length === 0) return null;
 
+  /**
+   * 대화 창의 시작 — **마지막 결산 카드의 끝 날짜**, 없으면 이 턴의 시작.
+   *
+   * 이 턴이 시작한 날짜로 자르면 시계가 움직이지 않은 턴이 이어지거나 훈련 없는
+   * 구간이 끼었을 때 그 사이의 대화가 어느 브리프에도 실리지 않는다 — 감독이
+   * 걸어 둔 주문이 판정에 닿지 않는 자리다. 결산 카드는 판정이 돌지 않은 구간에도
+   * 서므로 이 기준은 언제나 있다 (docs/simulation/season.md §4). 카드는 이 턴의
+   * 모델 장면이 `state.chat`에 실리기 **전에** 서므로, 그 장면은 다음 브리프의
+   * 첫 줄이 된다 — 같은 턴이 두 결산에 겹쳐 실리지 않는다.
+   */
+  const lastSettled = latestTrainingReport(state)?.to;
+  const chatFrom =
+    lastSettled !== undefined && lastSettled < window.from ? lastSettled : window.from;
+
   return {
     teamName: teamNameIn(state, state.userTeamId),
     from: window.from,
@@ -364,12 +401,12 @@ export function buildTrainingBrief(
     sessions,
     subjects,
     /**
-     * 이 구간의 대화 — 판정자가 "감독이 무엇을 주문했나"를 읽는 자리다.
+     * **지난 결산 이후**의 대화 — 판정자가 "감독이 무엇을 주문했나"를 읽는 자리다.
      * **화면 조작(`operator`)은 뺀다** — 시간 이동 손잡이는 감독의 말이 아니라
      * 훈련 의도와 아무 상관이 없는데, 섞이면 판정자가 그것도 지시로 읽는다.
      */
     chat: state.chat
-      .filter((t) => t.at >= window.from && t.role !== "operator")
+      .filter((t) => t.at >= chatFrom && t.role !== "operator")
       .slice(-CHAT_KEEP)
       .map((t) => ({
         at: t.at,
@@ -449,6 +486,11 @@ export function applyTrainingOutcomes(
   const moved: TrainingReport["moved"] = [];
   const marks: TrainingReport["marks"] = [];
   let attrSpent = 0;
+  /**
+   * 이 결산의 폭 — 판정의 눈금은 한 주치이고, 소화된 세션 수만큼만 접어 반영한다.
+   * 표식(`marks`)에는 곱하지 않는다 — 눈에 띈 것은 사실이지 양이 아니다.
+   */
+  const weeks = settlementWeeks(brief.sessions.length);
   // 감독의 훈련 축 — 흡수율과 인원 상한을 함께 정한다 (docs/simulation/career.md §2)
   const training = state.manager.attributes.training;
   const uptake = managerTrainingUptake(training);
@@ -484,7 +526,7 @@ export function applyTrainingOutcomes(
         // 흐트러짐이 더뎌지는 거꾸로 된 결과가 된다
         assignment.familiarity = applyFamiliarityGain(
           before,
-          gain > 0 ? gain * uptake : gain,
+          (gain > 0 ? gain * uptake : gain) * weeks,
           "training",
           tacticalUptake(player.attributes),
         );
@@ -511,18 +553,27 @@ export function applyTrainingOutcomes(
     //    자리를 결산에 넘겼다: 전술 적응도·능력치와 같은 눈으로 판정한다.
     const program = state.playerTraining.find((t) => t.gamePlayerId === player.id);
     if (program?.position && outcome.positionGain) {
-      const gain = Math.max(0, Math.min(POSITION_TRAIN_MAX, Math.round(outcome.positionGain)));
-      if (gain > 0) {
-        const slot = player.positions.find((x) => x.position === program.position);
-        // 처음 배우는 자리는 **주발을 벗긴 원값**에서 출발한다 — 저장에 보정을
-        // 남기면 조회가 다시 얹는다 (player.md §8)
-        const before =
-          slot?.proficiency ?? storedProficiencyFor(player.positions, program.position);
+      const rated = Math.max(0, Math.min(POSITION_TRAIN_MAX, Math.round(outcome.positionGain)));
+      const slot = player.positions.find((x) => x.position === program.position);
+      // 처음 배우는 자리는 **주발을 벗긴 원값**에서 출발한다 — 저장에 보정을
+      // 남기면 조회가 다시 얹는다 (player.md §8)
+      const before = slot?.proficiency ?? storedProficiencyFor(player.positions, program.position);
+      if (rated > 0 && before < PROFICIENCY_MAX) {
+        /**
+         * 자리 적응도는 **정수**라 하루치 결산의 0.2를 담을 곳이 없다 — 능력치와 같은
+         * 그릇(`growthCarry`)의 `pos:<자리>` 칸에 쌓았다가 한 칸이 될 때 올린다.
+         * 위끝에 닿은 자리에는 쌓지 않는다: 나갈 곳 없는 몫이 그릇에 남는다.
+         */
+        const carryKey = positionGrowthTarget(program.position);
+        const carried = (player.growthCarry?.[carryKey] ?? 0) + rated * weeks;
+        // 한 결산이 넘기는 눈금은 여전히 `POSITION_TRAIN_MAX`까지 — 나머지는 다음으로
+        const gain = Math.min(POSITION_TRAIN_MAX, Math.trunc(carried));
+        player.growthCarry = { ...(player.growthCarry ?? {}), [carryKey]: carried - gain };
         const after = Math.min(PROFICIENCY_MAX, before + gain);
         /**
-         * **실제로 넘어간 만큼만 장부에 적는다.** 위끝에 닿은 자리는 판정이 +2를
-         * 내도 아무것도 오르지 않는데, 그 구간마다 "적응 +2"가 성장 로그와
-         * 요약에 남아 감독은 오르고 있다고 읽는다.
+         * **실제로 넘어간 만큼만 장부에 적는다.** 위끝에 걸린 자리는 판정이 +2를
+         * 내도 한 칸밖에 안 오르는데, 그 구간마다 "적응 +2"가 성장 로그와
+         * 요약에 남으면 감독은 두 칸이 올랐다고 읽는다.
          */
         const gained = after - before;
         if (gained > 0) {
@@ -538,16 +589,12 @@ export function applyTrainingOutcomes(
             player.id,
             session.entryId,
             "training",
-            positionGrowthTarget(program.position),
+            carryKey,
             gained,
             "position-conversion",
             session.date,
           );
-          moved.push({
-            gamePlayerId: player.id,
-            target: positionGrowthTarget(program.position),
-            delta: gained,
-          });
+          moved.push({ gamePlayerId: player.id, target: carryKey, delta: gained });
         }
         // 새 자리가 본업을 넘어서면 전향이 끝난 것이다 (장부 정리는 코어 몫)
         const natural = naturalPositionOf(player);
@@ -575,14 +622,18 @@ export function applyTrainingOutcomes(
        * 경로를 바꾸면 근거 한 줄을 잃는다.
        */
       factor: uptake * mentorAxisBoost(state, player.id, outcome.attribute),
+      weeks,
       source: "training",
       origin: "training-settlement",
       entryId: session.entryId,
       on: session.date,
     });
+    // 인원 상한은 **건드린 인원**을 센다 — 캐리에만 쌓인 선수도 한 자리를 쓴다
     if (stepped) {
       attrSpent += 1;
-      moved.push({ gamePlayerId: player.id, target: stepped.axis, delta: stepped.step });
+      if (stepped.step !== 0) {
+        moved.push({ gamePlayerId: player.id, target: stepped.axis, delta: stepped.step });
+      }
     }
 
     /**
@@ -663,7 +714,11 @@ function markOf(value: unknown): TrainingMark | null {
  * 늙는다), 대신 1 아래로는 안 내려간다.
  *
  * @param allowed 허용 축 (훈련은 그 구간에 훈련한 축만, 경기는 제한 없음 → null)
- * @returns 실제로 움직인 축·방향·결과값, 못 움직였으면 null
+ * @returns 이 판정이 **이 선수를 건드렸으면** 그 축·넘어간 방향·결과값. 캐리만
+ *          움직이고 눈금이 안 넘어갔으면 `step`이 0이다 — 그래도 인원 상한의 한
+ *          자리를 쓴다(호출 자리가 그렇게 센다). 아무 일도 못 하면 null.
+ *          ⚠️ 넘어간 인원만 세면 하루치 결산에서는 아무도 안 넘어가 상한이
+ *          전원에게 열린다 (docs/data/player.md §6.1).
  */
 export function applyAttributeStep(
   state: GameState,
@@ -679,6 +734,12 @@ export function applyAttributeStep(
      * 노화가 느려지는 거꾸로 된 결과가 된다. 경기 결산은 주지 않는다.
      */
     factor?: number;
+    /**
+     * 이 결산이 덮는 주 수 (기본 1 · `settlementWeeks`) — **상승과 하락 양쪽에**
+     * 곱한다. 사람의 항이 아니라 「며칠치인가」라, 하락만 한 주치로 남으면 페이스가
+     * 다시 성장 속도를 정한다. 경기 결산은 한 경기가 곧 한 번이라 주지 않는다.
+     */
+    weeks?: number;
     source: "training" | "match";
     /** 어느 경로로 올랐나 — 문장이 아니라 코드다 (records.ts `GrowthOrigin`) */
     origin: GrowthOrigin;
@@ -719,12 +780,13 @@ export function applyAttributeStep(
       : attributeDeclineScale(axis, age);
   if (scale <= 0) return null;
 
-  const carry = (player.growthCarry?.[axis] ?? 0) + move * scale;
+  const carry = (player.growthCarry?.[axis] ?? 0) + move * scale * (opts.weeks ?? 1);
   // 한 칸을 채웠나 — 0 쪽으로 자른다(−0.7은 아직 −1이 아니다)
   const whole = Math.trunc(carry);
   if (whole === 0) {
     player.growthCarry = { ...(player.growthCarry ?? {}), [axis]: carry };
-    return null;
+    // 장부는 그대로지만 이 판정은 이 선수를 건드렸다 — 인원 상한의 한 자리를 쓴다
+    return { axis, step: 0, value };
   }
 
   // 한 번에 한 칸까지만 — 캐리가 밀려 있어도 장부가 갑자기 두 칸 뛰지 않는다
