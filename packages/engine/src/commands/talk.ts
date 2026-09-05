@@ -26,7 +26,6 @@ import { MANAGER_SUBJECT, relationFactor } from "../world/relations";
 import {
   applyMoodNotes,
   TEAM_TALK_MOODS,
-  type MoodLine,
   type MoodNoteSubmission,
 } from "../squad/mood";
 // 판정은 수용성 앵커 ± 한 단계 안에서만 선다 (career.md §2)
@@ -399,7 +398,6 @@ export function applyTalk(state: GameState, input: TalkInput): CommandResult {
         message: `이번 경기의 외침 ${SHOUT_PER_MATCH}번을 다 썼습니다 — 남은 말은 라커룸의 몫입니다`,
       };
     }
-    pending.shouts = used + 1;
   }
 
   const present = matchSquadIds(state);
@@ -424,6 +422,13 @@ export function applyTalk(state: GameState, input: TalkInput): CommandResult {
   const heard = shout && present ? addressed.filter((p) => present.has(p.id)) : addressed;
   if (heard.length === 0) {
     return { ok: true, message: "그 말을 들은 선수가 없습니다 — 명단에 없는 이름입니다" };
+  }
+  /**
+   * 외침은 **들은 사람이 정해진 뒤에** 셈한다 — 아무에게도 닿지 않은 말이 경기당 셋
+   * 중 하나를 먹으면 감독이 명단에 없는 이름을 부른 대가로 남은 외침을 잃는다.
+   */
+  if (shout && state.pendingMatch) {
+    state.pendingMatch.shouts = (state.pendingMatch.shouts ?? 0) + 1;
   }
   /** 이름을 불렀는가 — 불만 해소·약속·정착 앵커가 갈리는 자리다 */
   const toEveryone = input.players === undefined;

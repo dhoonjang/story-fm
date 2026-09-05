@@ -36,7 +36,7 @@ export const RECEPTIVITY_ANCHOR: Record<Receptivity, -1 | 0 | 1> = {
 
 export interface ReceptivityRead {
   tier: Receptivity;
-  /** 눈금의 합 — 팀토크가 명단의 중앙값을 낼 때 읽는다 */
+  /** 눈금의 합 — 둘 이상이 들은 대화가 그 사람들의 중앙값을 낼 때 읽는다 */
   score: number;
   /** 근거 코드 — 사실만, 문장 아님 (`relation:strained` · `issue` · `last-match:loss` …) */
   reasons: string[];
