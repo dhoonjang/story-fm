@@ -59,7 +59,6 @@ import {
   parseSceneHeader,
   recordCharacterInjection,
   runGmTurn,
-  runMockGmTurn,
   runOnboarding,
   type GmToolCall,
 } from "@story-fm/agents";
@@ -1866,15 +1865,30 @@ describe("도착한 카드 — 한 줄에서 지목과 임무를 가른다", () 
     advanceTime(state, { days: SCOUT_DAYS });
     expect(state.pendingReportCards).toEqual([target.id]);
 
-    // 경기 중 — mock 캐스터가 도는 자리다. 줄은 그대로 있어야 한다
-    state.phase = "match";
-    runMockGmTurn(state, "진행");
-    expect(state.pendingReportCards).toEqual([target.id]);
+    stubRunTurn.mockImplementation(async (): Promise<TurnResult> => ({
+      text: `[${state.date} AM 10:00]\n@스티브 홀랜드: 알겠습니다.`,
+      history: { version: 1, provider: "google", model: "test", messages: [] },
+      historyBase: 0,
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      toolCallCount: 0,
+      stopReason: "completed",
+    }));
+    const previousMode = process.env.LLM_MODE;
+    process.env.LLM_MODE = "real";
+    try {
+      // 경기 중 — 중계가 도는 자리다. 줄은 그대로 있어야 한다
+      state.phase = "match";
+      await runGmTurn(state, "진행");
+      expect(state.pendingReportCards).toEqual([target.id]);
 
-    // 경기가 끝난 첫 평시 턴 — mock도 실모드와 같은 자리에서 꺼낸다
-    state.phase = "idle";
-    const peace = runMockGmTurn(state, "수고했다");
-    expect(peace.reports?.map((r) => r.playerId)).toEqual([target.id]);
+      // 경기가 끝난 첫 평시 턴 — 밀린 카드가 여기서 선다
+      state.phase = "idle";
+      const peace = await runGmTurn(state, "수고했다");
+      expect(peace.reports?.map((r) => r.playerId)).toEqual([target.id]);
+    } finally {
+      if (previousMode === undefined) delete process.env.LLM_MODE;
+      else process.env.LLM_MODE = previousMode;
+    }
     expect(state.pendingReportCards ?? []).toEqual([]);
   });
 });
