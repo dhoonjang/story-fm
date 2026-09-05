@@ -86,8 +86,12 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   });
 
   it("세이브가 담은 사람은 시드가 만든 그 사람이다 (결정적)", () => {
-    // 세계가 담아 둔 인물과 순수 함수가 만드는 인물이 같아야 로드가 시드로 복원된다
-    expect(headCoachOf(createTestGame(42))).toEqual(generateHeadCoach(42, "arsenal"));
+    // 세계가 담아 둔 인물과 순수 함수가 만드는 인물이 같아야 로드가 시드로 복원된다.
+    // 고용 정보는 부임일이 있어야 서므로 세계의 시작일을 함께 넘긴다 (people.md §2-2)
+    const state = createTestGame(42);
+    expect(headCoachOf(state)).toEqual(
+      generateHeadCoach(42, "arsenal", state.calendar.preseasonStart),
+    );
     expect(generateHeadCoach(42, "arsenal")).toEqual(generateHeadCoach(42, "arsenal"));
   });
 
@@ -338,8 +342,8 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
     state.personas = state.personas!.filter((p) => p.role === "head_coach");
     ensurePersonas(state);
     expect(ownerOf(state)).toEqual(expected);
-    // 수석코치 · 구단주 · 기자 셋
-    expect(state.personas).toHaveLength(5);
+    // 수석코치 · 구단주 · 기자 셋 · 스태프 넷 (코치 둘 · 의료진 · 스카우트)
+    expect(state.personas).toHaveLength(9);
   });
 
   it("페르소나가 없는 옛 세이브는 로드 때 채워진다 (버전을 올리지 않는다)", () => {
@@ -350,8 +354,8 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
     ensurePersonas(state);
     // 시드로 만들었으므로 "그 세이브의 코치"가 그대로 복원된다
     expect(headCoachOf(state)).toEqual(expected);
-    // 자리를 아는 인물 — 수석코치 · 구단주 · 기자 셋
-    expect(state.personas).toHaveLength(5);
+    // 자리를 아는 인물 — 수석코치 · 구단주 · 기자 셋 · 스태프 넷
+    expect(state.personas).toHaveLength(9);
   });
 
   it("이미 있으면 덮어쓰지 않는다 (감독이 만난 사람이 바뀌지 않는다)", () => {
@@ -359,8 +363,8 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
     const coach = headCoachOf(state);
     ensurePersonas(state);
     ensurePersonas(state);
-    // 여러 번 불러도 인물이 늘지 않는다 (수석코치 · 구단주 · 기자 셋)
-    expect(state.personas).toHaveLength(5);
+    // 여러 번 불러도 인물이 늘지 않는다 (수석코치 · 구단주 · 기자 셋 · 스태프 넷)
+    expect(state.personas).toHaveLength(9);
     expect(headCoachOf(state)).toEqual(coach);
   });
 });
@@ -686,11 +690,19 @@ describe("가상 감독 — 명부 밖 벤치의 사람 (people.md §2)", () => 
     const state = createTestGame();
     // 새 게임이 열어 둔 부임 회견의 기자가 한 턴 상한을 함께 다툰다 (people.md §4·§6)
     state.pressConferences = [];
+    /**
+     * **이름 조각이 우리 사람과 겹치지 않는 벤치를 고른다.** 키워드는 이름 조각까지
+     * 담으므로(`personaKeywords`), 우리 코치와 성이 같은 감독을 고르면 한 턴 3장을
+     * 우리 사람이 먼저 채운다 — 그건 이 케이스가 재려는 것이 아니라 `near` 규칙이
+     * 제대로 도는 증거다 (people.md §6).
+     */
+    const ourWords = new Set((state.personas ?? []).flatMap((p) => p.name.split(/\s+/u)));
     const bench = state.teams.find(
       (t) =>
         t.id !== state.userTeamId &&
         t.managerName !== undefined &&
-        worldFigureManagerOf(t.id) === null,
+        worldFigureManagerOf(t.id) === null &&
+        !t.managerName.split(/\s+/u).some((w) => ourWords.has(w)),
     )!;
     const name = bench.managerName!;
     // 화면이 붙일 직책 — 명부 감독과 같은 자리다
@@ -741,7 +753,7 @@ describe("페르소나 키워드", () => {
     }
     // 선수 페르소나는 파생이라 세이브에 들어가지 않는다
     expect(state.personas?.some((p) => p.role === "player")).toBe(false);
-    expect(state.personas).toHaveLength(5);
+    expect(state.personas).toHaveLength(9);
   });
 });
 

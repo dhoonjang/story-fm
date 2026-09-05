@@ -118,6 +118,7 @@ export * from "./market/ai-market";
 export * from "./market/medical";
 export * from "./market/departures";
 export * from "./market/manager-market";
+export * from "./market/staff-market";
 export * from "./market/persuasion";
 
 // club — 구단 재정·기자회견

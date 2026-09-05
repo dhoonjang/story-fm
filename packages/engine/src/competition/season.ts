@@ -55,6 +55,7 @@ import {
   seasonYear,
 } from "./calendar";
 import { clearDepartedState, toFreeAgency } from "../market/departures";
+import { refreshStaffPool, renewStaffContracts } from "../market/staff-market";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import {
   TOP_EURO_CUP_ID,
@@ -2208,6 +2209,17 @@ function applyTransition(state: GameState): string[] {
     if (!isClubTeam(finance.teamId)) continue;
     topUpTransferBudget(state, finance.teamId, seasonBudgetBaseOf(state, finance.teamId), digest);
   }
+
+  /**
+   * **스태프** — 만료된 계약은 같은 조건으로 갱신되고, 무직 풀은 그해 자른 사람만
+   * 남기고 다시 선다 (people.md §2-2). `season++` 뒤라야 새 시즌의 눈금으로 선다.
+   *
+   * 갱신을 다이제스트에 적지 않는 이유: 스태프 계약은 흥정 테이블이 없어 감독이
+   * 답할 것이 없고, 매 여름 네 줄이 서면 전환 요약이 사무 절차가 된다. 계약이
+   * 언제까지인지는 스쿼드 화면의 스태프 줄이 늘 답한다.
+   */
+  renewStaffContracts(state, nextCalendar.preseasonStart);
+  refreshStaffPool(state, nextSeason);
 
   /**
    * **클럽 비전** — 기한이 지난 계획이 그때의 체급으로 새로 서는 자리다 (career.md §5).

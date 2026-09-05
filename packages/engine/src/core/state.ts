@@ -32,6 +32,7 @@ import type {
   ManagerAttributes,
   ManagerOffer,
   ManagerPoolEntry,
+  StaffPoolEntry,
   ManagerVacancy,
   MatchRecord,
   MatchSide,
@@ -163,6 +164,7 @@ import {
   generateHeadCoach,
   generateOwner,
   generateReporters,
+  generateStaff,
   occupiedPersonNames,
   seededVirtualManagerName,
 } from "../world/persona";
@@ -797,6 +799,14 @@ export interface GameState {
    * (optional — SAVE_VERSION 유지).
    */
   managerPool?: ManagerPoolEntry[];
+  /**
+   * **무직 스태프 풀** — 자리를 찾는 코치·의료진·스카우트 (people.md §2-2).
+   *
+   * 감독 풀과 달리 **여름의 결정적 추첨이 채운다** — 세계가 스태프를 자르지 않기
+   * 때문이다(AI 구단엔 명명 스태프가 없다). 그 시즌에 감독이 자른 사람만 사건으로
+   * 들어온다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  staffPool?: StaffPoolEntry[];
   /**
    * **아직 GM이 읽지 않은 화면 조작** — 전술판·명단·역할을 직접 만진 것.
    *
@@ -3283,6 +3293,7 @@ export function createGame(input: CreateGameInput): GameState {
     // 새 게임의 풀은 비어 있다 — 아직 아무도 자리를 잃지 않았다. **빈 배열로 세우는
     // 것이 곧 표식이다**: 로드 보정이 옛 사람됨 채널을 쓰던 세이브를 이것으로 가른다
     managerPool: [],
+    staffPool: [],
     boardDemands: [],
     boardRequests: [],
 
@@ -3297,10 +3308,15 @@ export function createGame(input: CreateGameInput): GameState {
     // 부임하면 사람이 먼저 기다린다 — 수석코치는 시드로 결정되므로
     // 같은 세이브는 언제 열어도 같은 사람이다 (persona.ts)
     personas: [
-      generateHeadCoach(seed, input.userTeamId),
+      generateHeadCoach(seed, input.userTeamId, calendar.preseasonStart),
       generateOwner(seed, input.userTeamId),
       // 기자단 — 회견은 세계가 먼저 부르는 자리라 부를 사람이 세이브에 있어야 한다
       ...generateReporters(seed, input.userTeamId),
+      /**
+       * 코치 둘 · 의료진 · 스카우트 — 감독이 오기 전부터 그 구단에 있던 사람들이다
+       * (people.md §2-2). 부임일이 오늘보다 앞서는 이유가 그것이다.
+       */
+      ...generateStaff(seed, input.userTeamId, calendar.preseasonStart),
     ],
     formUnitScale: true,
     // 카탈로그는 읽을 때 이미 벗겨져 들어온다(`world/catalog.ts`) — 새 세이브에

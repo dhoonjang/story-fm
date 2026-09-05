@@ -25,6 +25,7 @@ import {
   NegotiationSchema,
   PaymentScheduleSchema,
   PersonaSchema,
+  StaffPoolEntrySchema,
   PlayerIssueSchema,
   ManagerPromiseSchema,
   PlayerTrainingSchema,
@@ -129,6 +130,8 @@ export const SaveSchema = z
     history: z.array(SeasonHistorySchema),
     // 없을 수 있는 것 — 로드가 채우지 않는다(없는 것이 곧 뜻이다)
     personas: z.array(PersonaSchema).optional(),
+    /** 무직 스태프 풀 (people.md §2-2). 옛 세이브엔 없다 */
+    staffPool: z.array(StaffPoolEntrySchema).optional(),
     deferredScouts: z.array(DeferredScoutSchema).optional(),
     scoutMissions: z.array(ScoutMissionSchema).optional(),
     dismissal: DismissalSchema.optional(),
