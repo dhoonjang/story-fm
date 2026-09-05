@@ -4,6 +4,7 @@ import {
   ATTRIBUTE_AXES,
   INJURY_PRONENESS_MIN,
   PlayerStateSchema,
+  RELATION_TIER_RANK,
   RELEASE_NOTE,
   type GamePlayer,
   type Transfer,
@@ -58,8 +59,8 @@ import {
   minutesShortfalls,
   openPromise,
   openPromises,
-  moveRelation,
   relationTierOf,
+  setRelationTier,
   squadStatusOf,
   tickPromises,
 } from "@story-fm/engine";
@@ -68,12 +69,12 @@ import { createMiniGame, createTestGame, advanceAndPlay, advanceDays } from "./h
 /**
  * 두 사람을 `close` 위로 올린다 — 계약 해지 카드가 서는 조건이다 (people.md §6).
  *
- * 사건 표를 통해 올리는 것이 요점이다: 줄을 손으로 적으면 이 시험은 `moveRelation`이
- * 실제로 무엇을 하는지와 무관해진다.
+ * 압축이 지나는 문으로 올리는 것이 요점이다: 줄을 손으로 적으면 이 시험은
+ * `setRelationTier`가 실제로 무엇을 하는지와 무관해진다. 한 번에 한 칸이라 되풀이한다.
  */
 function beFriends(state: GameState, a: GamePlayer, b: GamePlayer): void {
   while (!["close", "trusted"].includes(relationTierOf(state, a.id, b.id))) {
-    moveRelation(state, a.id, b.id, "captain-named");
+    if (!setRelationTier(state, a.name, b.name, "close")) throw new Error("사이가 움직이지 않는다");
   }
 }
 
@@ -136,7 +137,7 @@ describe("라커룸이 계약 해지를 알아보는 표식", () => {
       (p) =>
         p.id !== leaver.id &&
         p.id !== near.id &&
-        relationTierOf(state, leaver.id, p.id) === "neutral",
+        RELATION_TIER_RANK[relationTierOf(state, leaver.id, p.id)] < RELATION_TIER_RANK.close,
     )!;
     departed(state, { reason: "release-agreed" });
 

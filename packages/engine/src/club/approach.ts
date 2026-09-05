@@ -1490,21 +1490,17 @@ function closeApproach(
 ): ApproachEffect {
   /**
    * **면접은 아무 축도 옮기지 않는다** (career.md §5.1) — 감독은 아직 그 구단의
-   * 사람이 아니라 옮길 보드 평판이 없고, 오늘 처음 만난 사람과의 사이도 이 자리에서
-   * 서지 않는다. 이 답이 남기는 것은 제안이거나 닫힌 문이다.
+   * 사람이 아니라 옮길 보드 평판이 없다. 이 답이 남기는 것은 제안이거나 닫힌 문이다.
    *
    * ⚠️ 스탠스 표를 태우고 폭을 0으로 두지 않는다 — 우리 구단주의 축이 걸린 표라,
    * 폭 하나가 잘못 서면 남의 집 면접이 우리 보드 평판을 옮긴다.
    */
   if (approach.topic === "interview") return NO_EFFECT;
-  const counterpart = relationCounterpartOf(state, approach);
   const effect = applyStanceOutcome(state, {
     row: stance === null ? IGNORED : stanceRow(stance),
     band: APPROACH_BAND * Math.min(approach.step, BAND_STEP_CAP),
     targetPlayerId: approach.about,
     axes: APPROACH_AXES[approach.channel],
-    stance,
-    ...(counterpart === null ? {} : { relationWith: counterpart }),
   });
 
   /**
@@ -1532,19 +1528,6 @@ function closeApproach(
     row.step = approach.step;
   }
   return effect;
-}
-
-/**
- * 감독의 맞은편에 있던 사람 — **관계가 움직이는 상대다** (people.md §6).
- *
- * 압력 열쇠(`subjectOf`)와 갈라져 있는 것은 라커룸과 보드가 **자리**이지 사람이
- * 아니기 때문이다: 압력은 주장이 바뀌어도 이어지지만 사이는 그날 문을 두드린 사람의
- * 것이다. 주장이 비어 있으면 옮길 사이가 없다.
- */
-function relationCounterpartOf(state: GameState, approach: Approach): string | null {
-  if (approach.channel === "player" || approach.channel === "agent") return approach.about ?? null;
-  if (approach.channel === "owner") return ownerOf(state).characterId;
-  return userPlayers(state).find((p) => p.isCaptain)?.id ?? null;
 }
 
 /** 그 자리의 압력 열쇠 — 선수 채널만 사람을 가리킨다 */
