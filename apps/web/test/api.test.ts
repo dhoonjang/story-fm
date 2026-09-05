@@ -87,8 +87,13 @@ const gameList = () =>
  * 한 턴 — 화면이 부르는 그 라우트다. 스트림이 흘린 NDJSON에서 최종 페이로드를
  * 걷는다(`{"type":"done"}`); 실패는 이벤트로 오므로 여기서 사유째 터뜨린다.
  */
-async function turn(id: string, message: string): Promise<GamePayload> {
-  const res = await postTurn(json({ message }), params(id));
+/** 감독의 말 하나, 또는 화면의 손잡이 하나 — 턴 라우트가 받는 두 입구 그대로다 */
+async function turn(
+  id: string,
+  message: string,
+  operation?: { kind: "advance_match" },
+): Promise<GamePayload> {
+  const res = await postTurn(json(operation ? { operation } : { message }), params(id));
   expect(res.status).toBe(200);
   const events = (await res.text())
     .split("\n")
@@ -227,12 +232,12 @@ describe("API — 온보딩부터 경기까지", () => {
     }
     expect(advanced.phase).toBe("matchday");
 
-    // 킥오프 → 계속 → 종료
-    let current = await turn(game.id, "경기 시작");
+    // 킥오프 → 진행 손잡이 → 종료. 경기를 미는 것은 **손잡이 하나**다 (match.md §2)
+    let current = await turn(game.id, "경기 시작하자");
     expect(current.phase === "match" || current.phase === "idle").toBe(true);
     let guard = 20;
     while (current.phase === "match" && guard-- > 0) {
-      current = await turn(game.id, "계속");
+      current = await turn(game.id, "", { kind: "advance_match" });
     }
     expect(current.phase).toBe("idle");
 

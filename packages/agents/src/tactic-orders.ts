@@ -17,6 +17,7 @@ import {
   buildStandingBlock,
   renderTurns,
 } from "./gm-input";
+import { mockOrdersLlm } from "./mock-gm";
 import { runOpsOrders, type OpsAgentSpec } from "./orders-ops";
 import type { OpsCaps, OpsOrders } from "./orders-ops";
 
@@ -193,6 +194,11 @@ export async function runTacticOrders(
     ``,
     `@감독: ${message}`,
   ].join("\n");
-  const answered = await runOpsOrders(TACTIC_ORDERS_SPEC, specs, user, llm);
+  const answered = await runOpsOrders(
+    TACTIC_ORDERS_SPEC,
+    specs,
+    user,
+    llm ?? mockOrdersLlm(state, TACTIC_ORDERS_SPEC, message),
+  );
   return answered.ok ? { ok: true, intent: answered.orders } : answered;
 }

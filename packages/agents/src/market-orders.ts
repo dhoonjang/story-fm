@@ -9,6 +9,7 @@ import {
 } from "@story-fm/engine";
 import type { GameLLM, GameToolSpec } from "@story-fm/llm";
 import { buildRecentTurnsBlock, managerSeatLines } from "./gm-input";
+import { mockOrdersLlm } from "./mock-gm";
 import { runOpsOrders, tagged, type OpsAgentSpec, type OpsOrders } from "./orders-ops";
 
 /**
@@ -118,5 +119,10 @@ export async function runMarketOrders(
   llm?: GameLLM,
 ): Promise<{ ok: true; orders: MarketOrders } | { ok: false; message: string }> {
   const user = [...buildMarketContext(state), ``, `@감독: ${message}`].join("\n");
-  return runOpsOrders(MARKET_ORDERS_SPEC, specs, user, llm);
+  return runOpsOrders(
+    MARKET_ORDERS_SPEC,
+    specs,
+    user,
+    llm ?? mockOrdersLlm(state, MARKET_ORDERS_SPEC, message),
+  );
 }

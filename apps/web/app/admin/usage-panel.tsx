@@ -142,8 +142,8 @@ export function UsagePanel({ onError }: { onError: (e: string | null) => void })
       </div>
 
       {/*
-        빈 장부를 고장으로 읽지 않게 한다 — 모의 GM은 `createGameLLM`을 지나지 않아
-        모델을 한 번도 부르지 않는다 (models.md §5의 원문 팝업과 같은 이유).
+        빈 장부를 고장으로 읽지 않게 한다 — mock 모드의 대본 어댑터는 계측을 붙이는 문
+        (`createGameLLM`)을 지나지 않고, 애초에 모델을 부르지 않는다 (models.md §2-1).
       */}
       {usage.mode === "mock" && totals.calls === 0 && (
         <p className="admin-note">

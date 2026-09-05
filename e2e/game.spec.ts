@@ -7,6 +7,11 @@ import { COLD_MS } from "./timeouts";
  * 핵심 유저 여정 e2e (mock GM):
  * 게임 목록 → 새 게임(팀 선택 + 감독 직접 입력) → 부임 브리핑 → 훈련 지시
  * (스킬 카드) → 경기일 진행 → 킥오프 → 경기 완주 → 오피스 4뷰 검증
+ *
+ * ⚠️ **채팅에 치는 말은 mock 대본의 키다** (`packages/agents/src/mock-script.ts` —
+ * docs/llm/agents.md §8). 대본은 자연어를 해석하지 않으므로 글자가 하나만 달라도
+ * 그 턴은 아무 도구도 부르지 않는다. 표에 없는 말을 치는 자리는 「턴이 그냥 돈다」를
+ * 재는 자리뿐이다.
  */
 
 /**
@@ -464,22 +469,23 @@ test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page 
 
   // 스쿼드에서 첫 선수 이름을 읽어와 면담 지시
   await page.getByTestId("tab-스쿼드").click();
-  const firstName = await page
+  /**
+   * 이름 칸에는 등번호·완장·세트피스 표식이 함께 서고, 그 뒤로 국적·등록 배지가
+   * 붙는다 — 칸의 글자를 통째로 읽으면 `산체스ESPHG`가 나온다. **이름은 `.row-name`의
+   * 마지막 텍스트 노드**이고, 코어는 감독이 부른 이름을 그대로 받으므로
+   * (`pickOurPlayer`) 그 이름을 그대로 친다.
+   */
+  const playerName = await page
     .getByTestId("view-squad")
-    .locator("tbody tr.row-tier")
+    .locator("tbody tr.row-tier .row-name")
     .first()
-    .locator("td")
-    .first()
-    .textContent();
-  // 성(姓)을 사용 — 이름 풀에 1글자 이름("톰" 등)이 있어 성이 안전하다
-  const parts = (firstName ?? "").replace("Ⓒ", "").trim().split(" ");
-  const shortName = parts[parts.length - 1] ?? "";
-  expect(shortName.length).toBeGreaterThan(1);
+    .evaluate((node) => node.lastChild?.textContent?.trim() ?? "");
+  expect(playerName.length).toBeGreaterThan(1);
 
   // 채팅 탭으로 돌아와 면담 지시 (입력창은 채팅 탭에만 있다)
   await page.getByTestId("tab-채팅").click();
   const input = page.getByTestId("chat-input");
-  await input.fill(`${shortName} 면담 좀 하자`);
+  await input.fill(`${playerName} 면담 좀 하자`);
   await page.getByTestId("chat-send").click();
   /**
    * 면담은 칩으로 남고, 바뀐 것(사기·심경)은 **스쿼드 말풍선**이 알린다.
