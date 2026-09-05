@@ -73,15 +73,15 @@ describe("이력 압축 판정", () => {
     const state = sourceOf(38, 1_000);
     state.chat[1]!.toolCalls = [
       {
-        name: "talk_to_player",
+        name: "team_talk",
         summary: "김선수 사기 +4",
-        brief: { head: "김선수 면담", items: [{ label: "사기", text: "+4", delta: 4 }] },
+        brief: { head: "김선수 대화", items: [{ label: "사기", text: "+4", delta: 4 }] },
       },
       { name: "시간 경과", summary: "2026-07-01 → 2026-07-03\n훈련 2회", silent: true },
     ];
     const brief = planHistoryFold(state)!;
     expect(brief.turns[1]!.facts).toEqual([
-      "[장부] 김선수 면담 — 사기 +4",
+      "[장부] 김선수 대화 — 사기 +4",
       "[장부] 2026-07-01 → 2026-07-03 · 훈련 2회",
     ]);
     expect(brief.turns[0]!.facts).toEqual([]);

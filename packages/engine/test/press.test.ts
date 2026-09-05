@@ -41,6 +41,7 @@ import type {
   MatchRecord,
   MatchStage,
   PressConference,
+  SeasonAward,
 } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 import { derbyNameOf } from "../src/data/derbies";
@@ -104,6 +105,29 @@ function newGame(): GameState {
   const state = createTestGame();
   state.pressConferences = [];
   return state;
+}
+
+/**
+ * 지난 시즌의 상 한 줄 — **장부에 직접 세운다.** 시즌 전환을 굴리면 몇 분이 들고,
+ * 여기서 재는 것은 선정 규칙이 아니라 「그 상이 회견에 서는가」다.
+ */
+function award(state: GameState, player: GamePlayer, code: string, season: number): SeasonAward {
+  return {
+    code,
+    season,
+    competitionId: leagueOfTeamIn(state, state.userTeamId),
+    gamePlayerId: player.id,
+    playerName: player.name,
+    teamId: player.teamId,
+    apps: 38,
+    goals: 25,
+    assists: 10,
+  };
+}
+
+/** 우리 선수단을 id 순으로 — 회견이 상을 자르는 그 순서다 */
+function byId(state: GameState): GamePlayer[] {
+  return [...userPlayers(state)].sort((a, b) => (a.id < b.id ? -1 : 1));
 }
 
 /** 같은 리그의 다른 구단으로 옮기는 제안 하나 — 경질 카드까지 세운다 */
@@ -989,6 +1013,39 @@ describe("기자회견 — 전야", () => {
     expect(opened[0]!.facts.some((f) => f.kind === "fixture")).toBe(true);
   });
 
+  /**
+   * 창은 하나(`state.season - 1`)이고 장수는 둘이다 (season.md §6). 창을 넓히거나
+   * 장수를 늘리면 개막 전야가 시상식이 되는데, 회견의 무게에는 표시가 나지 않는다 —
+   * 상 카드는 날 서지 않아 `weight`를 올리지 않기 때문이다.
+   */
+  it("개막 전야는 지난 시즌의 상을 두 장까지 싣는다 — 상이 없으면 한 장도 없다", () => {
+    const bare = newGame();
+    eveOf(bare, leagueMatches(bare)[0]!);
+    openEvePress(bare);
+    expect(pendingPress(bare)!.facts.some((f) => f.kind === "award")).toBe(false);
+
+    const state = newGame();
+    const squad = byId(state);
+    state.awards = [
+      award(state, squad[0]!, "top-scorer", state.season - 1),
+      award(state, squad[1]!, "top-assister", state.season - 1),
+      award(state, squad[2]!, "player-of-season", state.season - 1),
+      // 창 밖 — 그 전 시즌의 상은 어느 자리에도 서지 않는다
+      award(state, squad[3]!, "young-player", state.season - 2),
+    ];
+    eveOf(state, leagueMatches(state)[0]!);
+    openEvePress(state);
+
+    const press = pendingPress(state)!;
+    const cards = press.facts.filter((f) => f.kind === "award");
+    expect(cards).toHaveLength(2);
+    // 자르는 자리는 명단 배열이 아니라 id 순이다 — 영입·은퇴로 흔들리지 않는다
+    expect(cards.map((f) => f.about)).toEqual([squad[0]!.id, squad[1]!.id]);
+    // 기자가 캐물을 일이 아니라 물어봐 줄 일이다 — 무게도 그대로 1이다
+    for (const f of cards) expect(f.sharp).toBe(false);
+    expect(press.weight).toBe(press.facts.some((f) => f.sharp) ? 2 : 1);
+  });
+
   it("더비 전야는 더비 회견이다 — 개막이 아니어도 열린다", () => {
     const state = newGame();
     const derby = leagueMatches(state).find(
@@ -1253,12 +1310,37 @@ describe("기자회견 — 부임과 시즌의 마디", () => {
     expect(press.weight).toBe(3);
     expect(press.context).toContain("시즌 최종전");
     expect(press.facts.some((f) => f.data?.tags?.[0] === "board-target")).toBe(true);
+    // 상이 없으면 그 자리에도 한 줄이 없다
+    expect(press.facts.some((f) => f.kind === "award")).toBe(false);
 
     // 최종전이 아닌 경기는 그대로 경기 뒤 회견이다
     const plain = newGame();
     const first = leagueOf(plain)[0]!;
     settle(plain, first, { us: 1, them: 1 });
     expect(buildMatchPress(plain, first.id)!.trigger).toBe("match");
+  });
+
+  /**
+   * 최종전이 서는 5월에도 장부에서 가장 최근인 상은 **그 전 시즌**의 것이다
+   * (season.md §6) — 진행 중인 시즌의 상은 시즌 전환이 아직 매기지 않았다.
+   */
+  it("시즌 최종전의 자리도 같은 창에서 상을 싣는다 — 두 장까지", () => {
+    const state = newGame();
+    const squad = byId(state);
+    state.awards = [
+      award(state, squad[0]!, "top-scorer", state.season - 1),
+      award(state, squad[1]!, "player-of-season", state.season - 1),
+      award(state, squad[2]!, "top-assister", state.season - 1),
+      award(state, squad[3]!, "young-player", state.season - 2),
+    ];
+    const league = leagueOf(state);
+    const last = league[league.length - 1]!;
+    settle(state, last, { us: 1, them: 1 });
+
+    const cards = buildMatchPress(state, last.id)!.facts.filter((f) => f.kind === "award");
+    expect(cards).toHaveLength(2);
+    expect(cards.map((f) => f.about)).toEqual([squad[0]!.id, squad[1]!.id]);
+    for (const f of cards) expect(f.sharp).toBe(false);
   });
 
   it("계약 만료 90일 안의 회견에는 감독 자신의 거취가 선다", () => {

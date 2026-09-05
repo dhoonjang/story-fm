@@ -53,7 +53,6 @@ export const PANEL_OF: Record<string, PanelKey> = {
   record_incident: "스쿼드",
   // 대화형 — 바뀌는 것은 사기·심경이고 그건 명단이 보여준다
   team_talk: "스쿼드",
-  talk_to_player: "스쿼드",
   // ── 달력 — 일정과 훈련 ──
   set_training: "달력",
   start_match: "달력",
@@ -67,7 +66,7 @@ export const PANEL_OF: Record<string, PanelKey> = {
   set_ticket_price: "재정",
   // 사재는 감독의 돈이지만 오르는 것은 구단 이적 예산이다 — 확인할 화면은 재정이다
   fund_transfer_budget: "재정",
-  // 오르는 것은 그 선수의 사기다 — 팀토크·면담과 같은 자리 (스쿼드)
+  // 오르는 것은 그 선수의 사기다 — 대화와 같은 자리 (스쿼드)
   pay_player_bonus: "스쿼드",
   // 달라지는 것은 **누가 서 있는가**다 — 스쿼드 화면의 스태프 줄이 그 답을 든다.
   // 사재 보너스와 같은 자리다: 돈이 움직여도 감독이 확인할 것은 사람 쪽이다

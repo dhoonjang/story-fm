@@ -118,7 +118,7 @@
 
 ## 2. 도구 표면 — 한 판단은 한 도구
 
-도구는 **25개**이고 **전부 평시 GM의 것**이다. 받아쓰기 명령 36개(판 11 · 훈련·육성 6 ·
+도구는 **24개**이고 **전부 평시 GM의 것**이다. 받아쓰기 명령 36개(판 11 · 훈련·육성 6 ·
 이적·재정·감독직 19)는 GM에게 보이지 않는다 — `tactic_orders`·`training_orders`·
 `market_orders` 뒤의 세 해석기가 감독의 말 원문을 받아 그 명령의 인자를 채운다
 (agents.md §1). 매치 GM이 쥐는 해석기는 `tactic-orders` 하나다. 경기 중에는 매치
@@ -136,7 +136,7 @@ GM이 **경기 도구 셋**(`tactic_orders` · `advance_match` · `finalize_matc
 | --------- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 진행      | 2   | `start_match` · `resign`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 전술·훈련 | 2   | `tactic_orders`(→ 해석이 `set_lineup` · `set_squad_level` · `set_tactics` · `set_player_tactic` · `set_set_piece_takers` · `set_set_piece_routine` · `set_match_plan` · `exploit_point` · `set_captain`으로) · `training_orders`(→ 해석이 `set_training` · `set_development_focus` · `set_mentor` · `set_reserve_training` · `set_squad_number` · `sign_youth`로)                                                                                                                          |
-| 대화·서사 | 5   | `team_talk` · `talk_to_player` · `respond_to_media` · `respond_to_approach` · `record_incident`                                                                                                                                                                                                                                                                                                                                                                                            |
+| 대화·서사 | 4   | `team_talk` · `respond_to_media` · `respond_to_approach` · `record_incident`                                                                                                                                                                                                                                                                                                                                                                                                               |
 | 이적      | 4   | `deal_odds` · `list_negotiations` · `speak_at_table` · `market_orders`(→ 해석이 `send_offer` · `respond_offer` · `accept_deal` · `withdraw_offer` · `open_renewal` · `open_release` · `release_player` · `set_transfer_list` · `respond_transfer_request` · `exercise_buyback` · `recall_loan` · `adjust_transfer_budget` · `request_board` · `fund_transfer_budget` · `pay_player_bonus` · `set_ticket_price` · `accept_manager_offer` · `counter_manager_offer` · `apply_manager_job`로) |
 | 재정      | 1   | `apply_finance_event`                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 조회      | 11  | `search_players` · `get_squad` · `get_team` · `get_league` · `get_match_report` · `get_opponent_report` · `get_career` · `get_history` · `get_finance` · `scout_player` · `scout_mission`                                                                                                                                                                                                                                                                                                  |
@@ -152,7 +152,15 @@ GM이 **경기 도구 셋**(`tactic_orders` · `advance_match` · `finalize_matc
 | 전술형 | `tactic_orders`·`training_orders` — 감독의 말 원문을 넘기면 도구 뒤의 해석이 JSON으로 옮기고 코어가 명령으로 적용 (agents.md §1)                                                                                  |
 | 사건형 | `record_incident` — 코어 밖의 사건(벌금·포상·병문안·공개 칭찬과 질책·사과·중재·규칙·회식)을 **효과의 모양**으로 받고, 효과표·한도는 코어 ([../data/people.md](../data/people.md) §6)                              |
 
-- **심경 한 줄은 판정형·사건형이 함께 남긴다** — `talk_to_player.mood` · `team_talk.moods` ·
+- **대화의 판정은 대화가 마무리된 턴에 한 번 선다** — `team_talk`은 감독이 자리를
+  뜨거나 화제가 닫히거나 장면이 넘어갈 때 불린다. 대화 도중에는 부르지 않는다: 첫
+  문장에서 판정이 서면 그 뒤로 이어지는 말싸움과 설득이 결과에 남지 않고 연극이 된다.
+  대상은 인자다 — `players`에 이름을 적으면 그 사람들, 비우면 선수단 전체
+  ([../simulation/career.md](../simulation/career.md) §2). 경기 중 해석기
+  (`tactic-orders`)의 대화 절이 **같은 문장**을 든다 — 경기 중에는 도구 설명이 실리지
+  않으므로 그 겹침은 중복이 아니다(§5).
+
+- **심경 한 줄은 판정형·사건형이 함께 남긴다** — `team_talk.moods` ·
   `respond_to_media.mood` · `respond_to_approach.mood` · `record_incident.moods`. 그 대화를
   쥔 호출이 그 선수의 한 문장을 쓰고 코어가 검사한다 ([agents.md](./agents.md) §4-3).
 
@@ -617,7 +625,8 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
 
 **`TACTIC_ORDERS_SYSTEM`.** 분류기다. 역할 한 줄과 입력의 지도 뒤에 산출의 갈래마다 한 절 —
 무엇을 내나(`ops`) · 무엇을 고르나 · 대화 · 판을 바꾸는 명령 · unresolved. 평시 도구 설명이 갖는 판정
-기준(맥락 적합성·설득 근거·수용성), "부름은 면담이 아니다", 전술 6축과 갈래 넷과 세트피스
+기준(맥락 적합성·설득 근거·수용성), "부름은 판정이 아니다"와 「대화가 마무리된 턴에 한
+번」, 전술 6축과 갈래 넷과 세트피스
 두 축의 낱말을 여기도 갖는다 — 경기에는 도구 설명이 실리지 않는다. 지금 걸려 있는 갈래와
 세트피스 지시는 `<standing>`이 낸다(중립인 것은 서지 않는다).
 
@@ -773,7 +782,7 @@ prompt-regression`, 밴드는 서술자가 쥔다
 | 인물 카드 · 구단·감독 · 스냅샷 · 이번 턴 메시지 · 이력 창 · 장면 위생 · 헤더 | `packages/agents/src/gm-input.ts`                        |
 | 구간 → 어휘 표 (§5-2)                                                        | `packages/domain/src/manager.ts` · `tactics.ts`          |
 | 스냅샷 안의 범례 블록 (회견 · 찾아온 사람)                                   | `packages/engine/src/club/press.ts` · `approach.ts`      |
-| 명령 실행부                                                                  | `packages/engine/src/commands/index.ts`                  |
+| 명령 실행부 (갈래마다 한 파일 · `index.ts`는 재수출)                         | `packages/engine/src/commands/`                          |
 | 회귀 하네스 (§7)                                                             | `packages/agents/harness/prompt-regression.harness.ts`   |
 | 강제 산출 선언 목록 (`forcedTools`)                                          | `packages/agents/src/forced-tools.ts`                    |
 | 실모드 스키마 스모크 하네스                                                  | `packages/agents/harness/live-schema.harness.ts`         |

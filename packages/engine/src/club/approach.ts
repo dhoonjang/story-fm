@@ -49,7 +49,12 @@ import { makeRng } from "../core/rng";
 import { TIER_OF_EXPECTATION } from "../core/club-tier";
 import { buildSeasonCalendar, diffDays } from "../competition/calendar";
 import { fundingFactOf } from "./manager-wallet";
-import { boardExpectation, computeStandings } from "../competition/season";
+import {
+  awardFact,
+  boardExpectation,
+  computeStandings,
+  lastSeasonAwardsOf,
+} from "../competition/season";
 import { formLabel } from "../squad/form";
 import { applyMoodNotes, issueReasonText, type MoodLine } from "../squad/mood";
 import { receptivityLine, receptivityOf } from "../squad/receptivity";
@@ -604,8 +609,15 @@ function playerFacts(
       }
     }
   })();
+  /**
+   * 지난 시즌 그 선수가 받은 상 — **계약 주제에만 한 장** (people.md §8 · season.md §6).
+   * 다른 사유의 다가옴에는 붙지 않는다: 에이전트가 값을 부르며 읽는 사실이지
+   * 불만의 근거가 아니다. 이름은 싣지 않는다 — `about`이 이미 그 사람이다.
+   */
+  const award = topic === "contract" ? lastSeasonAwardsOf(state, player.id)[0] : undefined;
   return [
     head,
+    ...(award ? [awardFact(award, { named: false })] : []),
     {
       kind: "slump",
       data: { tags: [formLabel(player.state.form)] },

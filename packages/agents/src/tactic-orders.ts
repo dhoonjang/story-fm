@@ -72,7 +72,6 @@ export const TACTIC_OPS: readonly string[] = [
   "set_set_piece_routine",
   "set_shootout_order",
   "team_talk",
-  "talk_to_player",
 ];
 
 /**
@@ -83,7 +82,11 @@ export const TACTIC_CAPS: OpsCaps = {
   substitute: 5,
   set_player_tactic: 11,
   set_match_plan: 2,
-  talk_to_player: 4,
+  /**
+   * 대화는 도구 하나가 `players`로 여럿을 담는다 — 한 턴에 셋이면 라커룸 하나와
+   * 마주 앉은 둘까지다. 대상마다 한 건이던 넷은 도구가 갈려 있을 때의 수다.
+   */
+  team_talk: 3,
 };
 
 export type TacticOrders = OpsOrders;
@@ -99,13 +102,14 @@ ops에 부를 명령 이름을 적고 그 인자를 배열로 싣는다. 감독�
 # 무엇을 고르나
 프리셋을 적용하거나 전원을 재배치하지 않는다. 감독이 한 말의 범위 안에서만 움직인다.
 
-# 대화 (talk_to_player · team_talk)
+# 대화 (team_talk)
 감독이 그 사람에게 건넨 말이 있을 때만 싣고, 그 말이 어떻게 닿았는지를 라벨로 고른다.
-- 이름을 부르기만 한 말("브루노 일루와봐", "잠깐 와봐")은 부름이지 면담이 아니다 — 비운다.
-- 이름 없이 가리키면 <match_log>에서 가장 최근에 그 자리에 있던 사람이다. 지시가 앞 턴의 대화를 잇는 말이면 그 대화가 근거다.
-- outcome은 감독 발화의 (a) 맥락 적합성 (b) 설득 근거 (c) 대상 수용성으로 판정한다.
-- intensity 1~3 — 말의 세기. team_talk의 occasion은 킥오프 전 pre · 하프타임 half · 종료 후 post · 그 밖 daily · 굴러가던 중 정지점의 짧은 외침 shout("정신 차려", "머리 들어").
-- 그 사람의 심경이 한 줄로 남을 만하면 mood(팀토크는 moods)에 적는다. 새 영입의 적응이 움직였으면 settling에.
+- 판정은 의미 있는 대화가 마무리된 턴에 한 번이다 — 감독이 자리를 뜨거나 화제가 닫히거나 장면이 넘어갈 때. 대화 도중에는 싣지 않는다.
+- 이름을 부르기만 한 말("브루노 일루와봐", "잠깐 와봐")은 부름이지 대화가 아니다 — 비운다.
+- players에 이름을 적으면 그 사람들, 비우면 선수단 전체다. 이름 없이 가리키면 <match_log>에서 가장 최근에 그 자리에 있던 사람이다. 지시가 앞 턴의 대화를 잇는 말이면 그 대화가 근거다.
+- outcome은 감독 발화의 (a) 맥락 적합성 (b) 설득 근거 (c) 대상 수용성으로 판정한다. inspired는 드물다 — 말이 그 사람의 처지에 정확히 닿고 근거가 섰을 때만이고, 평범한 격려는 encouraged다.
+- intensity 1~3 — 말의 세기. occasion은 킥오프 전 pre · 하프타임 half · 종료 후 post · 그 밖 daily · 굴러가던 중 정지점의 짧은 외침 shout("정신 차려", "머리 들어").
+- 그 사람의 심경이 한 줄로 남을 만하면 moods에 적는다. 새 영입의 적응이 움직였으면 settling에.
 
 # 판을 바꾸는 명령
 - set_lineup — 평시에 선발을 새로 짜라는 말에만. 열한 명 전부와 자리(포지션 코드), 2군 선수를 올리면 squadLevels에 first로 함께. 한두 자리만 바꾸는 말은 set_player_tactic이다.

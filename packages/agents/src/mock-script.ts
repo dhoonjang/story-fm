@@ -120,7 +120,10 @@ const SCRIPT: readonly ScriptLine[] = [
   {
     say: `${NAME_SLOT} 면담 좀 하자`,
     gm: ({ named }) => [
-      { tool: "talk_to_player", input: { playerId: named, outcome: "motivated", intensity: 2 } },
+      {
+        tool: "team_talk",
+        input: { occasion: "daily", players: [named], outcome: "encouraged", intensity: 2 },
+      },
     ],
   },
   { say: "회견장 가자", gm: () => [{ tool: "respond_to_media", input: { stance: "defend" } }] },

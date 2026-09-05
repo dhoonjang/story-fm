@@ -19,8 +19,7 @@ import {
   INCIDENT_MORALE_BOUND,
   MANAGER_SUBJECT,
   MAX_INCIDENTS_PER_DAY,
-  applyTalkToPlayer,
-  applyTeamTalk,
+  applyTalk,
   assignmentsOf,
   buildOfficeViews,
   grantManagerXP,
@@ -147,13 +146,13 @@ function waryWithIssue(state: GameState, skip: ReadonlySet<string> = new Set()):
 }
 
 describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)", () => {
-  it("팀토크: outcome×intensity×리더십 계수로 사기가 움직인다", () => {
+  it("대화: outcome×intensity×리더십 계수로 선수단 전체의 사기가 움직인다", () => {
     const state = createTestGame();
     const before = userPlayers(state).map((p) => ({
       form: p.state.form,
       condition: p.state.condition,
     }));
-    const result = applyTeamTalk(state, { occasion: "pre", outcome: "inspired", intensity: 3 });
+    const result = applyTalk(state, { occasion: "pre", outcome: "inspired", intensity: 3 });
     expect(result.ok).toBe(true);
     const after = userPlayers(state).map((p) => ({
       form: p.state.form,
@@ -165,7 +164,7 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
     }
   });
 
-  it("리더십이 높을수록 같은 팀토크가 더 크게 울린다 (career.md §2)", () => {
+  it("리더십이 높을수록 같은 말이 더 크게 울린다 (career.md §2)", () => {
     const low = createTestGame();
     low.manager.attributes.leadership = 40;
     const high = createTestGame();
@@ -174,8 +173,8 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
     const targetHigh = userPlayers(high)[0]!;
     const lowBefore = target.state.form;
     const highBefore = targetHigh.state.form;
-    applyTeamTalk(low, { occasion: "pre", outcome: "inspired", intensity: 2 });
-    applyTeamTalk(high, { occasion: "pre", outcome: "inspired", intensity: 2 });
+    applyTalk(low, { occasion: "pre", outcome: "inspired", intensity: 2 });
+    applyTalk(high, { occasion: "pre", outcome: "inspired", intensity: 2 });
     expect(targetHigh.state.form - highBefore).toBeGreaterThanOrEqual(
       target.state.form - lowBefore,
     );
@@ -186,14 +185,14 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
    * (people.md §5-1 · career.md §2). 이 값이 죽으면 주장 지명은 다시 서사에서만
    * 뜻을 갖는 결정이 된다.
    */
-  it("리더십 80인 라커룸과 30인 라커룸이 같은 팀토크에서 다른 폭을 낸다", () => {
+  it("리더십 80인 라커룸과 30인 라커룸이 같은 말에서 다른 폭을 낸다", () => {
     const play = (leadership: number) => {
       const state = createTestGame();
       state.manager.attributes.leadership = 60; // 감독 계수는 양쪽이 같다
       for (const p of userPlayers(state)) p.attributes.leadership = leadership;
       const target = userPlayers(state)[0]!;
       const before = target.state.form;
-      const result = applyTeamTalk(state, { occasion: "pre", outcome: "inspired", intensity: 3 });
+      const result = applyTalk(state, { occasion: "pre", outcome: "inspired", intensity: 3 });
       return { gain: target.state.form - before, result };
     };
     const strong = play(80);
@@ -205,6 +204,33 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
     expect(room?.note).toContain("리더십");
   });
 
+  /**
+   * **방은 둘 이상이 들었을 때만 선다** (career.md §2). 마주 앉은 말에까지 라커룸
+   * 계수를 곱하면 주장 지명이 일대일 면담의 폭까지 정하게 되고, 감독이 한 사람에게
+   * 건넨 말이 그 사람과 무관한 값에 흔들린다.
+   */
+  it("라커룸 계수는 둘 이상이 들었을 때만 걸린다", () => {
+    const state = createTestGame();
+    const [one, two] = userPlayers(state);
+    const alone = applyTalk(state, {
+      occasion: "daily",
+      players: [one!.id],
+      outcome: "encouraged",
+      intensity: 2,
+    });
+    expect(alone.ok).toBe(true);
+    expect(alone.brief?.items.some((i) => i.label === "라커룸")).toBe(false);
+
+    const pair = applyTalk(state, {
+      occasion: "daily",
+      players: [one!.id, two!.id],
+      outcome: "encouraged",
+      intensity: 2,
+    });
+    expect(pair.ok).toBe(true);
+    expect(pair.brief?.items.some((i) => i.label === "라커룸")).toBe(true);
+  });
+
   it("잘 통하는 라커룸에서는 어긋난 말도 그만큼 크게 울린다 — 계수는 부호를 가리지 않는다", () => {
     const drop = (leadership: number) => {
       const state = createTestGame();
@@ -212,136 +238,275 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
       for (const p of userPlayers(state)) p.attributes.leadership = leadership;
       const target = userPlayers(state)[0]!;
       const before = target.state.form;
-      applyTeamTalk(state, { occasion: "pre", outcome: "backfired", intensity: 3 });
+      applyTalk(state, { occasion: "pre", outcome: "backfired", intensity: 3 });
       return target.state.form - before;
     };
     expect(drop(80)).toBeLessThan(drop(30));
   });
 
-  it("한 번의 말이 움직이는 폭엔 한도가 있다 — 면담 ±8 (overview §7)", () => {
+  /**
+   * **폭은 듣는 사람 수가 정한다** (career.md §2) — 한 명 ±8 · 둘 이상 ±6.
+   * 여기를 하나로 접으면 전원 소집이 마주 앉은 대화를 완전히 대체한다.
+   */
+  it("한 번의 말이 움직이는 폭엔 한도가 있다 — 한 명 ±8", () => {
     const state = createTestGame();
     state.manager.attributes.leadership = 99; // 계수가 가장 큰 자리 — 한도를 미는 쪽
     const players = userPlayers(state);
-    /** 한 선수에게 한 번, 0에서 출발해 남은 폼을 읽는다 (면담은 하루 한 번이다) */
+    /** 한 선수에게 한 번, 0에서 출발해 남은 폼을 읽는다 (합계 상한은 선수마다 따로다) */
     const formAfter = (
       index: number,
-      outcome: "motivated" | "reassured" | "angered",
+      outcome: "inspired" | "encouraged" | "backfired",
       intensity: 1 | 2 | 3,
     ) => {
       const player = players[index]!;
       // 사다리 끝의 말은 그쪽으로 열린 사람에게만 닿는다 — 앵커가 먼저 선다 (career.md §2)
-      if (outcome === "motivated") openUp(state, player);
-      if (outcome === "angered") closeOff(state, player);
+      if (outcome === "inspired") openUp(state, player);
+      if (outcome === "backfired") closeOff(state, player);
       player.state.form = 0;
-      expect(applyTalkToPlayer(state, { playerId: player.id, outcome, intensity }).ok).toBe(true);
+      expect(
+        applyTalk(state, { occasion: "daily", players: [player.id], outcome, intensity }).ok,
+      ).toBe(true);
       return player.state.form;
     };
 
     // 한도 아래에서는 더 센 말이 더 크게 남는다
-    expect(formAfter(0, "motivated", 2)).toBeGreaterThan(formAfter(1, "reassured", 2));
+    expect(formAfter(0, "inspired", 2)).toBeGreaterThan(formAfter(1, "encouraged", 2));
     // 한도 위에서는 둘 다 같은 자리에 선다 — 8에서 잘린다
-    expect(formAfter(2, "motivated", 3)).toBeCloseTo(moraleToForm(8), 10);
-    expect(formAfter(3, "reassured", 3)).toBeCloseTo(moraleToForm(8), 10);
+    expect(formAfter(2, "inspired", 3)).toBeCloseTo(moraleToForm(8), 10);
     // 아래쪽 한도도 같은 폭이다
-    expect(formAfter(4, "angered", 3)).toBeCloseTo(moraleToForm(-8), 10);
+    expect(formAfter(4, "backfired", 3)).toBeCloseTo(moraleToForm(-8), 10);
   });
 
-  it("팀토크는 한도에 딱 닿는다 — 여기서 더 세지면 조용히 잘린다 (overview §7)", () => {
+  it("둘 이상이 들으면 폭은 ±6이다 — 한 명을 부른 말보다 좁다", () => {
     const state = createTestGame();
     state.manager.attributes.leadership = 99;
     const player = userPlayers(state)[0]!;
 
-    // 방이 열려 있어야 `inspired`가 선다 — 앵커는 명단의 중앙값이다
+    // 방이 열려 있어야 `inspired`가 선다 — 앵커는 들은 사람들의 중앙값이다
     for (const p of userPlayers(state)) openUp(state, p);
     player.state.form = 0;
-    expect(applyTeamTalk(state, { occasion: "pre", outcome: "inspired", intensity: 3 }).ok).toBe(
-      true,
-    );
+    expect(applyTalk(state, { occasion: "pre", outcome: "inspired", intensity: 3 }).ok).toBe(true);
     expect(player.state.form).toBeCloseTo(moraleToForm(6), 10);
 
-    // 같은 폭이 아래로도 열려 있다 (자리가 다르면 하루에 또 한 번이다)
+    // 같은 폭이 아래로도 열려 있다 — 하루 합계 상한에 걸리지 않게 다음 날로 넘긴다
     for (const p of userPlayers(state)) closeOff(state, p);
+    state.date = addDays(state.date, 1);
     player.state.form = 0;
-    expect(applyTeamTalk(state, { occasion: "half", outcome: "backfired", intensity: 3 }).ok).toBe(
+    expect(applyTalk(state, { occasion: "half", outcome: "backfired", intensity: 3 }).ok).toBe(
       true,
     );
     expect(player.state.form).toBeCloseTo(moraleToForm(-6), 10);
   });
 
-  it("면담이 불만 이슈를 푸는 것은 잘 풀렸을 때뿐이다 (career.md §2)", () => {
+  it("대화가 불만 이슈를 푸는 것은 따뜻하게 닿았을 때뿐이다 (career.md §2)", () => {
     const state = createTestGame();
     const calmed = waryWithIssue(state);
     const shouted = waryWithIssue(state, new Set([calmed.id]));
+    const scared = waryWithIssue(state, new Set([calmed.id, shouted.id]));
     expect(
-      applyTalkToPlayer(state, { playerId: calmed.id, outcome: "reassured", intensity: 2 }).ok,
+      applyTalk(state, {
+        occasion: "daily",
+        players: [calmed.id],
+        outcome: "encouraged",
+        intensity: 2,
+      }).ok,
     ).toBe(true);
     expect(
-      applyTalkToPlayer(state, { playerId: shouted.id, outcome: "angered", intensity: 2 }).ok,
+      applyTalk(state, {
+        occasion: "daily",
+        players: [shouted.id],
+        outcome: "backfired",
+        intensity: 2,
+      }).ok,
     ).toBe(true);
-    // 화를 내고 나오는 것이 불만 해소책이 되면 안 된다
-    expect(state.issues.map((i) => i.gamePlayerId)).toEqual([shouted.id]);
+    // `feared`도 사기는 올리지만 방치를 풀지는 않는다 — 다시 본 것이 아니라 무서워한 것이다
+    expect(
+      applyTalk(state, {
+        occasion: "daily",
+        players: [scared.id],
+        outcome: "feared",
+        intensity: 2,
+      }).ok,
+    ).toBe(true);
+    // 화를 내고 나오는 것도, 겁을 주는 것도 불만 해소책이 되면 안 된다
+    expect(state.issues.map((i) => i.gamePlayerId).sort()).toEqual([shouted.id, scared.id].sort());
   });
 
-  it("같은 선수의 면담은 하루에 한 번만 셈한다 (`talkedOn` — career.md §2)", () => {
+  /**
+   * **이름을 부르지 않은 말은 아무 불만도 풀지 않는다** (career.md §2) — 라커룸에
+   * 던진 격려는 그와 마주 앉은 것이 아니다. 풀리면 감독이 매일 아침 "다들 모여봐"
+   * 한 번으로 선수단의 불만을 통째로 지운다.
+   */
+  it("이름 없이 선수단 전체에 한 말은 불만을 풀지 않는다", () => {
+    const state = createTestGame();
+    const unhappy = waryWithIssue(state);
+    expect(applyTalk(state, { occasion: "daily", outcome: "inspired", intensity: 3 }).ok).toBe(
+      true,
+    );
+    expect(state.issues.map((i) => i.gamePlayerId)).toEqual([unhappy.id]);
+
+    // 같은 판정도 이름을 부르면 푼다
+    expect(
+      applyTalk(state, {
+        occasion: "daily",
+        players: [unhappy.id],
+        outcome: "encouraged",
+        intensity: 2,
+      }).ok,
+    ).toBe(true);
+    expect(state.issues).toHaveLength(0);
+  });
+
+  /**
+   * **대상은 인자가 정한다** (career.md §2) — 수비진만 모아 하는 말, 주장단 소집,
+   * 회식 자리의 서넛과의 대화가 담길 그릇이 여기다.
+   */
+  it("이름을 부른 넷에게만 닿는다 — 나머지 선수단은 그대로다", () => {
+    const state = createTestGame();
+    for (const p of userPlayers(state)) p.state.form = 0;
+    const four = userPlayers(state).slice(0, 4);
+    expect(
+      applyTalk(state, {
+        occasion: "daily",
+        players: four.map((p) => p.name),
+        outcome: "encouraged",
+        intensity: 2,
+      }).ok,
+    ).toBe(true);
+    for (const p of four) expect(p.state.form).toBeGreaterThan(0);
+    for (const p of userPlayers(state).slice(4)) expect(p.state.form).toBe(0);
+  });
+
+  /**
+   * **날짜 게이트가 아니라 합계 상한이다** (career.md §2). 게이트는 그날의 두 번째
+   * 대화를 통째로 없는 말로 만들어, 경기일 아침의 격려와 경기 뒤의 위로 중 뒤의 것이
+   * 사라졌다. 상한은 대화를 막지 않고 판에 남기는 몫만 자른다.
+   */
+  it("하루에 몇 번이든 판정은 서고, 사기 합계만 ±8에서 잘린다", () => {
     const state = createTestGame();
     const player = userPlayers(state)[4]!;
     player.state.form = 0;
-    const talk = { playerId: player.id, outcome: "motivated", intensity: 3 } as const;
+    const talk = {
+      occasion: "daily",
+      players: [player.id],
+      outcome: "encouraged",
+      intensity: 1,
+    } as const;
+    /** 그날 장부에 적힌 합계 — 폼은 걸음마다 반올림되므로 합계는 여기서 읽는다 */
+    const today = () =>
+      (player.state.talkMorale ?? []).find((row) => row.on === state.date)?.sum ?? 0;
 
-    expect(applyTalkToPlayer(state, talk).ok).toBe(true);
-    expect(player.state.talkedOn).toBe(state.date);
-    const form = player.state.form;
-    const xp = state.managerXP.leadership;
     const narrated = state.narrative.length;
-    expect(form).toBeGreaterThan(0);
+    let calls = 0;
+    // 한 번에 상한을 넘지 않는 말이라 여러 번에 걸쳐 쌓인다 — 상한에 닿을 때까지
+    while (calls < 12 && today() < 8) {
+      expect(applyTalk(state, talk).ok).toBe(true);
+      calls += 1;
+    }
+    expect(calls).toBeGreaterThan(1); // 한 번에 닿았다면 상한을 재는 케이스가 아니다
+    expect(today()).toBe(8); // 정확히 상한에 선다 — 넘겨 놓고 잘라 내지 않는다
+    const form = player.state.form;
 
-    // 두 번째부터는 사기도 XP도 서사도 움직이지 않는다 — 반려가 아니라 무효다
-    expect(applyTalkToPlayer(state, talk).ok).toBe(true);
+    // 상한에 닿은 뒤로도 판정은 서고, 사기와 XP만 멈춘다
+    const xp = state.managerXP.leadership;
+    expect(applyTalk(state, talk).ok).toBe(true);
+    expect(today()).toBe(8);
     expect(player.state.form).toBe(form);
     expect(state.managerXP.leadership).toBe(xp);
-    expect(state.narrative.length).toBe(narrated);
+    expect(state.narrative.length).toBe(narrated + calls + 1);
 
-    // 날이 바뀌면 다시 열린다
+    // 날이 바뀌면 하루치가 다시 열린다 — 이레 상한은 아직 여유가 있다
     state.date = addDays(state.date, 1);
-    expect(applyTalkToPlayer(state, talk).ok).toBe(true);
+    expect(applyTalk(state, talk).ok).toBe(true);
+    expect(today()).toBeGreaterThan(0);
     expect(player.state.form).toBeGreaterThan(form);
-    expect(player.state.talkedOn).toBe(state.date);
   });
 
-  it("팀토크는 occasion마다 하루에 한 번만 셈한다 (career.md §2)", () => {
+  it("이레 동안 매일 최고 판정을 받아도 합계는 ±20에서 멈춘다", () => {
     const state = createTestGame();
-    const player = userPlayers(state)[0]!;
+    state.manager.attributes.leadership = 99;
+    const player = userPlayers(state)[3]!;
+    openUp(state, player); // 사다리 끝은 열린 사람에게만 선다
     player.state.form = 0;
-    const pre = { occasion: "pre", outcome: "inspired", intensity: 3 } as const;
+    const talk = {
+      occasion: "daily",
+      players: [player.id],
+      outcome: "inspired",
+      intensity: 3,
+    } as const;
+    /** 창 안의 합계 — 폼은 걸음마다 반올림되므로 합계는 장부에서 읽는다 */
+    const week = () => (player.state.talkMorale ?? []).reduce((sum, row) => sum + row.sum, 0);
 
-    expect(applyTeamTalk(state, pre).ok).toBe(true);
-    expect(state.manager.teamTalkedOn?.pre).toBe(state.date);
-    const form = player.state.form;
-    const xp = state.managerXP.leadership;
-    const narrated = state.narrative.length;
-    expect(form).toBeGreaterThan(0);
-
-    expect(applyTeamTalk(state, pre).ok).toBe(true);
-    expect(player.state.form).toBe(form);
-    expect(state.managerXP.leadership).toBe(xp);
-    expect(state.narrative.length).toBe(narrated);
-
-    // 하프타임의 한마디는 경기 전의 한마디와 다른 순간이다 — 자리마다 따로 센다
-    expect(applyTeamTalk(state, { ...pre, occasion: "half" }).ok).toBe(true);
-    const afterHalf = player.state.form;
-    expect(afterHalf).toBeGreaterThan(form);
-
-    // 날이 바뀌면 같은 자리도 다시 열린다
+    // 하루 상한에 딱 닿는 말이라 이틀이면 16, 사흘째에 남은 4만 들어온다
+    applyTalk(state, talk);
+    expect(week()).toBe(8);
     state.date = addDays(state.date, 1);
-    expect(applyTeamTalk(state, pre).ok).toBe(true);
-    expect(player.state.form).toBeGreaterThan(afterHalf);
+    applyTalk(state, talk);
+    expect(week()).toBe(16);
+    state.date = addDays(state.date, 1);
+    applyTalk(state, talk);
+    expect(week()).toBe(20);
+
+    // 나흘째부터 이레째까지는 아무것도 남지 않는다
+    for (let day = 4; day <= 7; day++) {
+      state.date = addDays(state.date, 1);
+      expect(applyTalk(state, talk).ok).toBe(true);
+      expect(week()).toBe(20);
+    }
+
+    // 여드레째에는 첫날이 창 밖으로 나가 그만큼이 다시 열린다
+    state.date = addDays(state.date, 1);
+    applyTalk(state, talk);
+    expect(week()).toBe(20); // 창 안의 합계는 여전히 상한이고
+    expect(player.state.form).toBeGreaterThan(moraleToForm(20)); // 폼은 그만큼 더 올랐다
+    // 장부는 창 안의 이레만 든다 — 매일 부른다고 자라지 않는다
+    expect((player.state.talkMorale ?? []).length).toBeLessThanOrEqual(7);
   });
 
-  it("잘못된 선수 면담은 반려된다", () => {
+  /**
+   * **약속은 상대가 한 명일 때만 장부에 선다** (career.md §2 · people.md §5-2) —
+   * 여럿에게 동시에 한 약속은 누가 그 약속의 주인인지 장부가 가리지 못한다.
+   */
+  it("여럿에게 한 약속은 반려되고 대화 자체는 그대로 성립한다", () => {
+    const state = createTestGame();
+    const [one, two] = userPlayers(state);
+    const many = applyTalk(state, {
+      occasion: "daily",
+      players: [one!.id, two!.id],
+      outcome: "encouraged",
+      intensity: 2,
+      promise: { kind: "minutes" },
+    });
+    expect(many.ok).toBe(true);
+    expect(state.promises).toHaveLength(0);
+    expect(many.message).toContain("약속 반려");
+
+    const alone = applyTalk(state, {
+      occasion: "daily",
+      players: [one!.id],
+      outcome: "encouraged",
+      intensity: 2,
+      promise: { kind: "minutes" },
+    });
+    expect(alone.ok).toBe(true);
+    expect(state.promises).toHaveLength(1);
+  });
+
+  it("찾지 못한 이름만 있으면 반려된다 — 일부만 풀리면 나머지에게 닿는다", () => {
     const state = createTestGame();
     expect(
-      applyTalkToPlayer(state, { playerId: "ghost", outcome: "neutral", intensity: 1 }).ok,
+      applyTalk(state, { occasion: "daily", players: ["ghost"], outcome: "neutral", intensity: 1 })
+        .ok,
     ).toBe(false);
+    const real = userPlayers(state)[0]!;
+    const mixed = applyTalk(state, {
+      occasion: "daily",
+      players: [real.name, "ghost"],
+      outcome: "encouraged",
+      intensity: 2,
+    });
+    expect(mixed.ok).toBe(true);
+    expect(mixed.message).toContain("ghost");
   });
 });
 
@@ -377,7 +542,7 @@ describe("정지점의 외침 — 하루가 아니라 경기가 센다 (career.m
     // 사다리 끝의 외침은 그쪽으로 열린 명단에만 닿는다 — 앵커가 먼저 선다
     for (const p of userPlayers(state)) openUp(state, p);
     player.state.form = 0;
-    expect(applyTeamTalk(state, { occasion: "shout", outcome: "inspired", intensity: 3 }).ok).toBe(
+    expect(applyTalk(state, { occasion: "shout", outcome: "inspired", intensity: 3 }).ok).toBe(
       true,
     );
     expect(player.state.form).toBeCloseTo(moraleToForm(2), 10);
@@ -385,7 +550,7 @@ describe("정지점의 외침 — 하루가 아니라 경기가 센다 (career.m
     // 같은 폭이 아래로도 열려 있다
     for (const p of userPlayers(state)) closeOff(state, p);
     player.state.form = 0;
-    expect(applyTeamTalk(state, { occasion: "shout", outcome: "backfired", intensity: 3 }).ok).toBe(
+    expect(applyTalk(state, { occasion: "shout", outcome: "backfired", intensity: 3 }).ok).toBe(
       true,
     );
     expect(player.state.form).toBeCloseTo(moraleToForm(-2), 10);
@@ -398,7 +563,7 @@ describe("정지점의 외침 — 하루가 아니라 경기가 센다 (career.m
     const shout = { occasion: "shout", outcome: "encouraged", intensity: 2 } as const;
 
     for (let i = 1; i <= 3; i++) {
-      expect(applyTeamTalk(state, shout).ok).toBe(true);
+      expect(applyTalk(state, shout).ok).toBe(true);
       expect(state.pendingMatch?.shouts).toBe(i);
     }
     const form = player.state.form;
@@ -406,28 +571,25 @@ describe("정지점의 외침 — 하루가 아니라 경기가 센다 (career.m
     const narrated = state.narrative.length;
     expect(form).toBeGreaterThan(0);
 
-    // 넷째부터는 반려가 아니라 무효다 — 팀토크의 하루 한 번과 같은 결
-    expect(applyTeamTalk(state, shout).ok).toBe(true);
+    // 넷째부터는 반려가 아니라 무효다 — 판정 자체가 서지 않는 유일한 자리다
+    expect(applyTalk(state, shout).ok).toBe(true);
     expect(player.state.form).toBe(form);
     expect(state.managerXP.leadership).toBe(xp);
     expect(state.narrative.length).toBe(narrated);
     expect(state.pendingMatch?.shouts).toBe(3);
   });
 
-  it("외침 셋을 다 써도 하프타임 팀토크는 그대로 남는다 (#569)", () => {
+  it("외침 셋을 다 써도 하프타임의 한마디는 그대로 남는다 (#569)", () => {
     const state = structuredClone(base);
     const player = onSquad(state);
+    // 외침은 경기가 세고 라커룸의 한마디는 세지 않는다 — 자리를 가른 뜻이 여기다
     for (let i = 0; i < 3; i++) {
-      applyTeamTalk(state, { occasion: "shout", outcome: "encouraged", intensity: 2 });
+      applyTalk(state, { occasion: "shout", outcome: "encouraged", intensity: 2 });
     }
-    // 외침은 하루의 장부에 적히지 않는다 — 네 자리가 모두 열려 있어야 한다
-    expect(state.manager.teamTalkedOn).toBeUndefined();
+    expect(state.pendingMatch?.shouts).toBe(3);
 
     player.state.form = 0;
-    expect(applyTeamTalk(state, { occasion: "half", outcome: "inspired", intensity: 3 }).ok).toBe(
-      true,
-    );
-    expect(state.manager.teamTalkedOn?.half).toBe(state.date);
+    expect(applyTalk(state, { occasion: "half", outcome: "inspired", intensity: 3 }).ok).toBe(true);
     // 라커룸의 한마디는 외침보다 넓다 — 같은 한도에 걸리면 자리를 가른 뜻이 없다
     expect(player.state.form).toBeGreaterThan(moraleToForm(2));
   });
@@ -435,7 +597,7 @@ describe("정지점의 외침 — 하루가 아니라 경기가 센다 (career.m
   it("경기 밖에서는 반려된다 — 벤치가 없으면 외칠 자리도 없다", () => {
     const state = structuredClone(base);
     state.pendingMatch = null;
-    expect(applyTeamTalk(state, { occasion: "shout", outcome: "inspired", intensity: 2 }).ok).toBe(
+    expect(applyTalk(state, { occasion: "shout", outcome: "inspired", intensity: 2 }).ok).toBe(
       false,
     );
   });
@@ -1662,37 +1824,40 @@ describe("사건 기록 — 감독이 말로 만든 사건이 장부에 선다 (
  * 선다 (career.md §2). 사기·관계는 **잘린 outcome**으로 셈한다.
  */
 describe("수용성 — 판정은 앵커 ± 한 단계 안에서만 선다 (career.md §2)", () => {
-  it("닫힌 선수에게 보낸 motivated는 neutral에서 멈춘다", () => {
+  it("닫힌 선수에게 보낸 inspired는 neutral에서 멈춘다", () => {
     const state = createTestGame();
     const player = userPlayers(state)[0]!;
     closeOff(state, player);
     player.state.form = 0;
-    const result = applyTalkToPlayer(state, {
-      playerId: player.id,
-      outcome: "motivated",
+    const result = applyTalk(state, {
+      occasion: "daily",
+      players: [player.id],
+      outcome: "inspired",
       intensity: 3,
     });
     expect(result.ok).toBe(true);
     expect(player.state.form).toBe(0);
-    expect(result.message).toContain("motivated은 neutral으로");
+    expect(result.message).toContain("inspired은 neutral으로");
     expect(result.brief?.items.find((i) => i.label === "수용성")?.text).toBe("닫힘");
   });
 
-  it("열린 선수에게 보낸 angered도 neutral에서 멈춘다", () => {
+  it("열린 선수에게 보낸 backfired도 neutral에서 멈춘다", () => {
     const state = createTestGame();
     const player = userPlayers(state)[1]!;
     openUp(state, player);
     player.state.form = 0;
-    const result = applyTalkToPlayer(state, {
-      playerId: player.id,
-      outcome: "angered",
+    const result = applyTalk(state, {
+      occasion: "daily",
+      players: [player.id],
+      outcome: "backfired",
       intensity: 3,
     });
     expect(player.state.form).toBe(0);
-    expect(result.message).toContain("angered은 neutral으로");
+    expect(result.message).toContain("backfired은 neutral으로");
     // 잘리지 않은 판정에는 그 조각이 없다 — 사실 줄만 남는다
-    const plain = applyTalkToPlayer(state, {
-      playerId: userPlayers(state)[2]!.id,
+    const plain = applyTalk(state, {
+      occasion: "daily",
+      players: [userPlayers(state)[2]!.id],
       outcome: "neutral",
       intensity: 1,
     });
@@ -1702,36 +1867,38 @@ describe("수용성 — 판정은 앵커 ± 한 단계 안에서만 선다 (care
 });
 
 describe("잔향 — 그 대화를 쥔 호출이 심경 한 문장을 남긴다 (people.md §5)", () => {
-  it("면담의 mood가 그 선수의 moodNote로 선다", () => {
+  it("마주 앉은 대화의 mood가 그 선수의 moodNote로 선다", () => {
     const state = createTestGame();
     const player = waryOne(state);
-    applyTalkToPlayer(state, {
-      playerId: player.id,
-      outcome: "reassured",
+    applyTalk(state, {
+      occasion: "daily",
+      players: [player.id],
+      outcome: "encouraged",
       intensity: 2,
-      mood: { text: "자리를 약속받고 한결 가벼워졌다" },
+      moods: [{ playerId: player.id, text: "자리를 약속받고 한결 가벼워졌다" }],
     });
     expect(player.state.moodNote?.text).toBe("자리를 약속받고 한결 가벼워졌다.");
     expect(player.state.moodNote?.on).toBe(state.date);
   });
 
-  it("불만을 푼 면담의 문장은 acknowledgesIssue 없이도 선다 — 해소가 잔향보다 먼저다", () => {
+  it("불만을 푼 대화의 문장은 acknowledgesIssue 없이도 선다 — 해소가 잔향보다 먼저다", () => {
     const state = createTestGame();
     const player = waryWithIssue(state);
-    applyTalkToPlayer(state, {
-      playerId: player.id,
-      outcome: "reassured",
+    applyTalk(state, {
+      occasion: "daily",
+      players: [player.id],
+      outcome: "encouraged",
       intensity: 2,
-      mood: { text: "응어리가 풀렸다" },
+      moods: [{ playerId: player.id, text: "응어리가 풀렸다" }],
     });
     expect(state.issues.some((i) => i.gamePlayerId === player.id)).toBe(false);
     expect(player.state.moodNote?.text).toBe("응어리가 풀렸다.");
   });
 
-  it("팀토크의 moods는 셋까지다 — 넷이 오면 앞의 셋만", () => {
+  it("대화의 moods는 셋까지다 — 넷이 오면 앞의 셋만", () => {
     const state = createTestGame();
     const four = userPlayers(state).slice(0, 4);
-    applyTeamTalk(state, {
+    applyTalk(state, {
       occasion: "daily",
       outcome: "neutral",
       intensity: 1,
