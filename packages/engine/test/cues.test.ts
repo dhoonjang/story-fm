@@ -536,9 +536,8 @@ const rowOf = (state: GameState, subject: string) =>
 /**
  * 사다리를 그 계단까지 올린다 — 자리가 열릴 때마다 감독이 답한다(압력은 0으로).
  *
- * **답은 `deflect`다** — 사이를 옮기지 않는 유일한 스탠스라(people.md §6 사건 표)
- * 그 뒤에 재는 임계가 관계 배수를 타지 않는다. 여기서 재려는 것은 사다리의 눈금이지
- * 감독이 무슨 말을 했느냐가 아니다.
+ * **답은 `deflect`다** — 사기도 평판도 가장 적게 옮기는 스탠스라, 여기서 재려는 것이
+ * 사다리의 눈금이지 감독이 무슨 말을 했느냐가 아니라는 것이 그 선택이다.
  */
 function climbTo(state: GameState, subject: string, step: number): void {
   for (let day = 0; day < 400; day++) {

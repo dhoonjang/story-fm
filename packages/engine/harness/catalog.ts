@@ -510,9 +510,7 @@ export const APPROACH_RATE = defineHarness({
     { metric: "갓 열린 회견과 겹친 자리", role: "guard", max: 0, unit: "count", why: "한 번에 답을 요구하는 자리는 하나다 — 사흘 지난 회견은 세지 않는다" },
     { metric: "가장 높이 오른 계단", role: "measure", unit: "count", why: "방치만 하는 감독이 사다리 끝까지 가는가 — 선수 주제는 5, 주장·구단주는 3이 꼭대기다" },
     { metric: "첫 자리까지 걸린 날", role: "measure", unit: "count", why: "임계 100을 채우는 데 걸린 실제 날 수" },
-    { metric: "사이가 상한 선수", role: "guard", max: 12, unit: "count", why: "시즌 끝에 감독과 `strained` 이하인 우리 선수 (people.md §6). 방치하는 감독의 상한이다 — 관계가 나쁠수록 압력이 빨리 쌓이므로(배수 1.3) 이 줄과 위 합계는 서로를 밀어 올린다. 스쿼드의 한 줌을 넘으면 그 되먹임이 눈금이 아니라 눈덩이다" },
-    { metric: "가장 낮은 관계 점수", role: "measure", unit: "score", why: "그 되먹임이 어디까지 갔는가 — −100에 닿으면 눈금의 끝에서 멈춘 것이고, 사건 폭(최대 12)에 견줘 몇 번의 자리가 그 사람에게 있었는지를 읽는 자다" },
-    { metric: "관계 줄", role: "measure", unit: "count", why: "세이브가 실제로 든 줄 수 — 움직인 쌍만 앉는다(people.md §6). 스쿼드 크기를 크게 넘으면 움직이지 않은 쌍이 장부에 앉고 있다는 뜻이다" },
+    { metric: "사이가 상한 선수", role: "measure", unit: "count", why: "시즌 끝에 감독과 `strained` 이하인 우리 선수 (people.md §6). 등급을 옮기는 자리가 이력 압축뿐이라 모델 없는 하네스에서는 **첫인상 그대로**여야 한다 — 0이 아니면 코어가 어딘가에서 사이를 옮기고 있다는 뜻이고, 그 자리가 곧 결정성 경계를 넘은 자리다" }
   ],
 });
 

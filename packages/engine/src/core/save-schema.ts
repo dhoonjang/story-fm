@@ -152,7 +152,7 @@ export const SaveSchema = z
     characterMemories: z.array(CharacterMemorySchema).optional(),
     /** 감독이 말로 만든 사건 (people.md §6 「사건 기록」). 옛 세이브엔 없다 */
     incidents: z.array(IncidentSchema).optional(),
-    /** 관계 점수 — 움직인 쌍만 앉는다 (people.md §6). 옛 세이브엔 없다 */
+    /** 관계 등급 — 압축이 등급을 매긴 쌍만 앉는다 (people.md §6). 옛 세이브엔 없다 */
     relations: z.array(RelationSchema).optional(),
     arcs: z.array(NarrativeArcSchema).optional(),
     /** 시작 사건 (career.md §1). 옛 세이브엔 없다 */

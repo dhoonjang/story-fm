@@ -3,6 +3,9 @@ import {
   ARC_STAGE_KO,
   ARC_TITLE_MAX,
   CharacterMemorySchema,
+  RELATION_TIERS,
+  RELATION_TIER_KO,
+  RelationTierSchema,
   personaRoleLabel,
   type Persona,
 } from "@story-fm/domain";
@@ -14,12 +17,15 @@ import {
   applyArcTitles,
   applyCharacterMemories,
   applyHistoryDigest,
+  applyRelationTiers,
   arcFactLine,
   planHistoryFold,
   registerCharacters,
+  relationTierBrief,
   worldFigures,
   type GameState,
   type HistoryFoldBrief,
+  type RelationTierProposal,
 } from "@story-fm/engine";
 import {
   agentConfig,
@@ -33,18 +39,27 @@ import { inputError, toToolSchema } from "./tool-schema";
 
 /**
  * 이력 압축 — 창 밖으로 밀려나는 평시 구간을 요약 한 벌로 옮기고, 그 김에
- * 인물 사전을 갱신한다 (agents.md §5-1 · people.md §9-1).
+ * 인물 사전과 사람 사이의 등급을 갱신한다 (agents.md §5-1 · people.md §6 · §9-1).
  *
  * 결산 셋과 같은 계약이다: 검사는 전부 코어의 몫이고(`applyHistoryDigest`·
- * `applyCharacterMemories`·`registerCharacters`), **실패하면 접지 않는다** —
+ * `applyCharacterMemories`·`registerCharacters`·`applyRelationTiers`), **실패하면 접지 않는다** —
  * 요약이 비는 자리를 만들지 않기 위해 세이브는 그대로 두고 다음 기회에 다시 온다.
  */
+
+/**
+ * 등급 여섯을 프롬프트에 세우는 한 줄 — 나쁜 쪽에서 좋은 쪽 순이다.
+ *
+ * 표를 손으로 적지 않는 이유는 낱말이 도메인의 계약이기 때문이다 — 여기 베껴 두면
+ * `RELATION_TIER_KO`가 바뀌는 날 프롬프트만 옛 낱말로 남는다. 모델이 내는 것은 코드이고
+ * 한국어는 그 코드가 무슨 사이인지를 말한다.
+ */
+const RELATION_TIER_LINE = RELATION_TIERS.map((t) => `${t}(${RELATION_TIER_KO[t]})`).join(" · ");
 
 export const HISTORY_COMPACTOR_SYSTEM = `당신은 구단의 기록 담당이다.
 
 감독과 구단 사람들이 나눈 대화 중 이력에서 밀려나는 구간을 읽고, 그 구간을
 요약 한 벌로 남긴다. 같은 김에 그 구간에 있던 사람의 기억을 적고, 새로 나타난
-사람을 명부에 세운다.
+사람을 명부에 세우고, 달라진 사이의 등급을 옮긴다.
 
 ## 요약
 - 요약은 두 칸이다. 지난 일(past)은 ${HISTORY_DIGEST_CHARS}자 이내, 열린 일(open)은 ${HISTORY_OPEN_CHARS}자 이내.
@@ -67,6 +82,12 @@ export const HISTORY_COMPACTOR_SYSTEM = `당신은 구단의 기록 담당이다
 - 자리는 셋뿐이다 — 기자는 reporter, 감독의 지인 등 구단 밖 사람은 friend, 이름
   있는 서포터는 supporter.
 - 집단은 사람이 아니다. 이름 없는 "취재진"·"관중"은 세우지 않는다.
+
+## 사이
+- 그 구간에 실제로 무언가 오간 쌍만 적는다. 아무 일도 없었으면 비운다.
+- 지금 등급 표가 함께 주어진다. 한 쌍을 한 번에 한 칸까지만 옮긴다.
+- 이름은 표에 있는 그대로 쓴다.
+- 등급 여섯 — ${RELATION_TIER_LINE}.
 
 ## 아크 제목
 - "이름 없는 이야기" 목록이 주어지면, 그 아크에 어울리는 제목을 제안한다.
@@ -92,6 +113,21 @@ const MemorySchema = z.object({
   salience: CharacterMemorySchema.shape.salience
     .optional()
     .describe("1~5 — 지나가는 일이 1, 관계를 바꾼 일이 5"),
+});
+
+/**
+ * 한 압축이 낼 수 있는 관계 줄의 상한 — 기억과 같은 오타 방지용이다.
+ *
+ * 한 구간에 사이가 달라지는 쌍은 몇 안 된다. 스쿼드 전원의 사이가 한 번에 움직이는 압축은
+ * 그 구간을 읽은 것이 아니라 표를 베낀 것이고, 겹친 쌍은 코어가 하나로 본다.
+ */
+const RELATIONS_MAX = 40;
+
+/** 등급의 낱말은 도메인의 계약이 정한다 — `MemorySchema`와 같은 규약이다 */
+const RelationRowSchema = z.object({
+  a: z.string().min(1).describe("원문 @태그의 이름 그대로"),
+  b: z.string().min(1).describe("상대의 이름 — 원문 @태그의 이름 그대로"),
+  tier: RelationTierSchema.describe("그 구간을 지난 뒤의 등급 — 지금 등급에서 한 칸까지"),
 });
 
 const CharacterSchema = z.object({
@@ -149,6 +185,11 @@ const ReportInputSchema = z.object({
     .array(CharacterSchema)
     .optional()
     .describe("이 구간에서 처음 선 인물 — 없으면 비운다"),
+  relations: z
+    .array(RelationRowSchema)
+    .max(RELATIONS_MAX)
+    .optional()
+    .describe("사이가 달라진 쌍 — 한 쌍에 한 줄, 지금 등급에서 한 칸까지. 없으면 비운다"),
   arcTitles: z
     .array(ArcTitleSchema)
     .optional()
@@ -165,7 +206,10 @@ function speakerOf(role: HistoryFoldBrief["turns"][number]["role"]): string {
   return "감독";
 }
 
-/** 브리프를 프롬프트 본문으로 — 이전 요약 + 이미 선 사람 + 이름 없는 아크 + 접히는 원문 */
+/**
+ * 브리프를 프롬프트 본문으로 — 이전 요약 + 이미 선 사람 + 지금 사이 + 이름 없는 아크 +
+ * 접히는 원문.
+ */
 export function buildCompactionPrompt(
   // 명부의 감독은 **지금 어디 서 있는가**로 걸러지므로 벤치와 무직 풀이 함께 와야
   // 한다 (people.md §2-1) — 없으면 잘린 뒤 다른 벤치에 선 사람이 목록에서 빠진다
@@ -178,6 +222,9 @@ export function buildCompactionPrompt(
   },
   brief: HistoryFoldBrief,
   arcs: readonly { id: string; line: string }[] = [],
+  // 지금 등급 표는 **호출자가 계산해 넘긴다** — `relationTierBrief`는 `GameState`를 받고
+  // 이 함수의 첫 인자는 좁은 구조 타입이다 (아크 목록과 같은 결)
+  relations: readonly RelationTierProposal[] = [],
 ): string {
   const blocks: string[] = [];
   if (brief.previous !== null) {
@@ -194,6 +241,13 @@ export function buildCompactionPrompt(
   });
   if (standing.length > 0) {
     blocks.push("## 이미 인물 사전에 선 사람 — 다시 세우지 않는다", ...standing, "");
+  }
+  if (relations.length > 0) {
+    blocks.push(
+      "## 지금 사이 — 이 표의 등급에서 한 칸까지 옮길 수 있다",
+      ...relations.map((r) => `- ${r.a} ↔ ${r.b}: ${RELATION_TIER_KO[r.tier]}`),
+      "",
+    );
   }
   if (arcs.length > 0) {
     blocks.push(
@@ -239,6 +293,7 @@ interface CompactionResult {
   folded: boolean;
   memories: number;
   characters: number;
+  relations: number;
 }
 
 function makeReportTool(
@@ -270,12 +325,14 @@ function makeReportTool(
       // 등록이 기억보다 먼저다 — 새로 선 사람은 등록된 뒤에야 이 세계의 화자가 된다
       const characters = registerCharacters(state, parsed.data.characters ?? []);
       const memories = applyCharacterMemories(state, parsed.data.memories ?? []);
+      // 사이도 코어가 검증한다 — 모르는 화자는 반려, 한 칸 초과는 한 칸, 한 쌍은 한 번
+      const relations = applyRelationTiers(state, parsed.data.relations ?? []);
       // 제목은 코어가 검증한다 — 아크가 있고·활성이고·아직 이름이 없을 때만 (people.md §9)
       const titles = applyArcTitles(state, parsed.data.arcTitles ?? []);
-      onApplied({ folded: true, memories, characters });
+      onApplied({ folded: true, memories, characters, relations });
       return {
         ok: true,
-        message: `요약 갱신 · 기억 ${memories} · 인물 ${characters} · 아크 제목 ${titles}`,
+        message: `요약 갱신 · 기억 ${memories} · 인물 ${characters} · 아크 제목 ${titles} · 사이 ${relations}`,
       };
     },
   };
@@ -288,7 +345,7 @@ function makeReportTool(
  * 그때는 접히지 않은 이력이 그대로 남아 다음 기회에 다시 판정된다.
  */
 export async function compactHistory(state: GameState, llm?: GameLLM): Promise<CompactionResult> {
-  const skipped = { folded: false, memories: 0, characters: 0 };
+  const skipped = { folded: false, memories: 0, characters: 0, relations: 0 };
   // mock 모드에는 부를 모델이 없다 — 클라이언트를 직접 받은 호출만 그대로 돈다
   if (llm === undefined && resolveLlmMode() === "mock") return skipped;
   const brief = planHistoryFold(state);
@@ -304,7 +361,7 @@ export async function compactHistory(state: GameState, llm?: GameLLM): Promise<C
         return client.runTurn({
           system: HISTORY_COMPACTOR_SYSTEM,
           history: [],
-          user: buildCompactionPrompt(state, brief, untitledArcs(state)),
+          user: buildCompactionPrompt(state, brief, untitledArcs(state), relationTierBrief(state)),
           tools: [makeReportTool(state, brief, (r) => (result = r))],
           toolChoice: { name: REPORT_DIGEST_TOOL },
         });

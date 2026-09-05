@@ -1,12 +1,12 @@
-import type {
-  GamePlayer,
-  IncidentKind,
-  Persona,
-  PersonaRelation,
-  PressStance,
-  RelationTier,
+import type { GamePlayer, Persona, PersonaRelation, RelationTier } from "@story-fm/domain";
+import {
+  RELATION_TIER_RANK,
+  RELATION_TIER_RANK_MAX,
+  relationTierDistance,
+  relationTierIntensity,
+  relationTierStep,
+  stanceOfTier,
 } from "@story-fm/domain";
-import { RELATION_TIER_RANK, relationTier, stanceOfTier } from "@story-fm/domain";
 import { playerById, playersOf, type GameState } from "../core/state";
 import { diffDays } from "../core/dates";
 import { isClubTeam } from "../data/team-catalog";
@@ -14,22 +14,22 @@ import { activeMentorings } from "../squad/mentoring";
 import { headCoachOf, ownerOf, reportersOf } from "./persona";
 
 /**
- * **관계 점수** — 사건이 사람 사이를 움직인다 (people.md §6 「관계 점수」).
+ * **관계 등급** — 이야기가 사람 사이를 바꾼다 (people.md §6 「관계 등급」).
  *
- * 세이브가 드는 값이지만 장부에 앉는 것은 **움직인 쌍뿐**이다: 줄이 없는 쌍의 값은
- * 원형 축과 원장이 결정적으로 답하는 **첫인상**이다. 그래서 옛 세이브는 빈 배열로
- * 열려도 오늘의 카드가 어제와 같다.
+ * 사이는 점수가 아니라 **여섯 칸의 등급 하나**이고, 그것을 옮기는 자리는 이력이 접힐 때의
+ * 압축 하나뿐이다(`applyRelationTiers`). 사건마다 정해진 수를 걷어 낸 이유가 그것이다 —
+ * 같은 사과가 누구에게나 +5이면 그 사람과의 그간의 일도, 말의 내용도, 장면의 결도 사이를
+ * 움직이지 못한다.
+ *
+ * 세이브가 드는 값이지만 장부에 앉는 것은 **등급이 매겨진 쌍뿐**이다: 줄이 없는 쌍의 값은
+ * 원형 축과 원장이 결정적으로 답하는 **첫인상**이다. 그래서 옛 세이브는 빈 배열로 열려도
+ * 오늘의 카드가 어제와 같다.
  *
  * 여기 있는 것은 전부 결정적 순수 함수다. 난수도 시각도 LLM도 들어오지 않는다.
  */
 
 /** 감독의 고정 열쇠 — 선수 id도 `characterId`도 아닌 자리라 이름 하나가 필요하다 */
 export const MANAGER_SUBJECT = "@manager";
-
-/** 눈금의 양끝 — 0이 중립이다 */
-const RELATION_MAX = 100;
-
-const clampRelation = (v: number) => Math.max(-RELATION_MAX, Math.min(RELATION_MAX, Math.round(v)));
 
 /**
  * 원형이 **먼저 보는 축** — 같은 사건을 두고 무엇부터 묻는가.
@@ -123,8 +123,8 @@ function relationPersonas(state: GameState): Persona[] {
 /**
  * 저장 페르소나끼리의 관계 줄 — **원형의 축을 함께 든다.**
  *
- * 등급은 점수가 정하고(`relationTierOf`), 축은 그 사이가 어디서 시작했는지를 말한다.
- * 중립은 서지 않는다: 카드에 오르는 것은 결이 통하거나 부딪히는 사이뿐이다.
+ * 등급은 장부와 첫인상이 정하고(`relationTierOf`), 축은 그 사이가 어디서 시작했는지를
+ * 말한다. 가운데 둘은 서지 않는다: 카드에 오르는 것은 결이 통하거나 부딪히는 사이뿐이다.
  */
 export function personaRelations(state: GameState, characterId: string): PersonaRelation[] {
   const personas = relationPersonas(state);
@@ -179,7 +179,7 @@ export function mentoringRelations(state: GameState, characterId: string): Perso
     if (!other) continue;
     /**
      * `stance`는 등급이 아니라 **감독이 그렇게 정했다**는 사실이 정한다 — 그것이 이
-     * 줄의 근거다. 등급은 중립이 아닐 때만 얹혀 「붙여 준 사이인데 틀어졌다」가 카드에
+     * 줄의 근거다. 등급은 결이 설 때만 얹혀 「붙여 준 사이인데 틀어졌다」가 카드에
      * 설 수 있게 한다.
      */
     const tier = relationTierOf(state, self.id, other.id);
@@ -187,101 +187,18 @@ export function mentoringRelations(state: GameState, characterId: string): Perso
       characterId: other.name,
       name: other.name,
       stance: "aligned",
-      ...(tier === "neutral" ? {} : { tier }),
+      ...(stanceOfTier(tier) === null ? {} : { tier }),
       bond,
     });
   }
   return relations;
 }
 
-// ── 점수 ──────────────────────────────────────────────────────
+// ── 첫인상 (people.md §6) ─────────────────────────────────────
 
-/** 원형 짝이 까는 첫인상의 폭 — `aligned`는 +, `tense`는 − 이 값이다 */
-const ARCHETYPE_IMPRESSION = 30;
-
-/** 같은 협회에서 자란 동포 — 첫날의 라커룸을 가르는 유일한 사실이다 */
-const SAME_ASSOCIATION = 20;
-
-/** 같은 구단에서 함께 보낸 **한 해**마다 붙는 폭과 그 상한 */
-const TOGETHER_PER_YEAR = 8;
-const TOGETHER_CAP = 24;
+/** 함께 보낸 해가 이만큼이면 서로 `close`에서 출발한다 — 같은 협회와 같은 무게다 */
+const TOGETHER_YEARS_FOR_CLOSE = 2;
 const DAYS_PER_YEAR = 365;
-
-/**
- * **한 사건이 옮길 수 있는 폭** — 표의 어느 줄도 이것을 넘지 않는다 (people.md §6).
- *
- * 등급 한 칸이 20이므로 한 번으로는 칸을 건너지 못한다: 사이가 뒤집히려면 같은 일이
- * 두 번은 있어야 한다. 폭을 이름 하나로 잰다는 것이 곧 그 규약이다.
- */
-export const RELATION_EVENT_BOUND = 12;
-
-/**
- * 사건 → 점수. **표는 여기 하나뿐이다** (people.md §6 「사건 표」).
- *
- * 전부 코어가 이미 판정하는 자리다 — 새 판정을 세우지 않는다. 0인 줄을 지우지 않는
- * 이유는 「아무것도 아니었던 대화」가 사건 목록에서 빠지면 부르는 쪽이 그 자리에서
- * 무엇을 해야 하는지 다시 정해야 하기 때문이다.
- */
-export const RELATION_EVENTS = {
-  // 면담 — 결과가 폭을 정한다 (career.md §2)
-  "talk-motivated": 6,
-  "talk-reassured": 5,
-  "talk-neutral": 0,
-  "talk-disappointed": -5,
-  "talk-angered": -10,
-  // 스탠스 — 회견의 지목과 다가옴의 응대가 같은 표를 탄다 (people.md §4 · §8)
-  "stance-defend": 8,
-  "stance-own": 4,
-  "stance-deflect": 0,
-  "stance-bold": -2,
-  "stance-criticise": -10,
-  /** 답하지 않았다 — 방치도 돌려보냄도 그 사람이 겪은 일이다 */
-  "stance-none": -7,
-  // 감독의 결정
-  "captain-named": 10,
-  "promise-kept": 8,
-  "promise-broken": -12,
-  /** 가까운 동료가 팀을 떠났다 — 남은 사람이 감독을 보는 눈이다 */
-  "teammate-gone": -6,
-  // 보드 (career.md §5)
-  "board-warned": -10,
-  "board-eased": 6,
-  "demand-met": 8,
-  "demand-failed": -10,
-  // 감독이 말로 만든 사건 — 감독 ↔ 당사자 (people.md §6 「사건 기록」). 세기와 무관하다
-  "incident-discipline": -6,
-  "incident-reward": 5,
-  "incident-care": 6,
-  "incident-public-praise": 3,
-  "incident-public-criticism": -6,
-  "incident-apology": 5,
-  "incident-mediation": 2,
-  "incident-rule": 0,
-  "incident-outing": 2,
-  "incident-other": 0,
-  /** 당사자 ↔ 당사자 — 선수 사이를 움직이는 사건은 감독이 세운 이 둘뿐이다 */
-  mediated: 6,
-  "outing-together": 3,
-} as const satisfies Record<string, number>;
-export type RelationEvent = keyof typeof RELATION_EVENTS;
-
-/**
- * 사건의 갈래가 감독 ↔ 당사자의 관계 사건이 된다 — `stanceRelationEvent`와 같은
- * 완결성 검사다: 갈래가 하나 늘면 표에 줄이 없어 컴파일이 멈춘다.
- */
-export function incidentRelationEvent(kind: IncidentKind): RelationEvent {
-  return `incident-${kind}`;
-}
-
-/**
- * 스탠스 한 줄이 관계 사건이 된다 — `null`은 답하지 않은 자리다.
- *
- * 이름을 붙여 넘기는 것이 곧 완결성 검사다: 스탠스가 하나 늘면 표에 줄이 없어
- * 컴파일이 멈춘다.
- */
-export function stanceRelationEvent(stance: PressStance | null): RelationEvent {
-  return stance === null ? "stance-none" : `stance-${stance}`;
-}
 
 /** 무순서 쌍의 정규형 — `a < b`(코드포인트)라야 어느 순서로 물어도 한 줄이다 */
 function pairOf(a: string, b: string): { a: string; b: string } {
@@ -333,99 +250,196 @@ function joinedOn(player: GamePlayer, index: JoinIndex): string | null {
 /**
  * 두 선수의 첫인상 — **같은 협회와 함께 보낸 해** (people.md §6).
  *
- * ⚠️ **지금 같은 구단일 때만이고, 함께 뛴 기간도 지금 구단에서만 센다.** 원장 이전은
- * 한 덩어리의 모름이라(`EPOCH` — transfer.md §4) 그것을 기간으로 읽으면 시드가 세운
- * 스쿼드 전원이 첫날부터 평생의 친구가 된다. 옛 구단에서 겹친 이력은 설득의
- * `reunion` 주장이 걷는다 — 거기서는 겹쳤는가만 물으므로 덩어리를 읽어도 상하지 않는다.
+ * 다른 구단의 둘은 `distant`다: 매일 같은 건물에서 마주치지 않는 사이라 예의를 나눌
+ * 자리도 없다. 같은 구단이면 `cordial`에서 시작하고, 동포이거나 함께 보낸 해가
+ * `TOGETHER_YEARS_FOR_CLOSE`를 넘으면 `close`다.
+ *
+ * ⚠️ **함께 뛴 기간은 지금 구단에서만 센다.** 원장 이전은 한 덩어리의 모름이라
+ * (`EPOCH` — transfer.md §4) 그것을 기간으로 읽으면 시드가 세운 스쿼드 전원이 첫날부터
+ * 평생의 친구가 된다. 옛 구단에서 겹친 이력은 설득의 `reunion` 주장이 걷는다 — 거기서는
+ * 겹쳤는가만 물으므로 덩어리를 읽어도 상하지 않는다.
  */
 function teammateImpression(
   state: GameState,
   a: GamePlayer,
   b: GamePlayer,
   index: JoinIndex,
-): number {
-  if (a.teamId !== b.teamId || !isClubTeam(a.teamId)) return 0;
-  const association =
-    a.homegrownCountry !== undefined && a.homegrownCountry === b.homegrownCountry
-      ? SAME_ASSOCIATION
-      : 0;
+): RelationTier {
+  if (a.teamId !== b.teamId || !isClubTeam(a.teamId)) return "distant";
+  if (a.homegrownCountry !== undefined && a.homegrownCountry === b.homegrownCountry) return "close";
   const since = [joinedOn(a, index), joinedOn(b, index)].filter((d) => d !== null);
-  if (since.length < 2) return association;
+  if (since.length < 2) return "cordial";
   const from = since[0]! > since[1]! ? since[0]! : since[1]!;
   const years = Math.floor(Math.max(0, diffDays(from, state.date)) / DAYS_PER_YEAR);
-  return association + Math.min(TOGETHER_CAP, years * TOGETHER_PER_YEAR);
+  return years >= TOGETHER_YEARS_FOR_CLOSE ? "close" : "cordial";
 }
 
 /**
  * 줄이 없는 쌍의 값 — **결정적으로 파생한 첫인상** (people.md §6).
  *
- * 감독은 어느 쪽으로도 0에서 시작한다: 방금 부임한 사람에게 첫인상을 지어 주면
- * 그가 아무것도 하지 않은 자리가 이미 사이가 된다.
+ * 감독은 어느 쪽으로도 `cordial`에서 시작한다: 가운데가 없는 눈금에는 「아무것도 아니다」를
+ * 적을 칸이 없고, 부임 첫날의 라커룸은 적의가 아니라 예의다.
  */
-function initialRelation(state: GameState, a: string, b: string, index?: JoinIndex): number {
-  if (a === MANAGER_SUBJECT || b === MANAGER_SUBJECT) return 0;
+function initialRelation(state: GameState, a: string, b: string, index?: JoinIndex): RelationTier {
+  if (a === MANAGER_SUBJECT || b === MANAGER_SUBJECT) return "cordial";
 
   const playerA = playerById(state, a);
   const playerB = playerById(state, b);
   if (playerA && playerB) {
     return teammateImpression(state, playerA, playerB, index ?? joinIndexOf(state));
   }
-  if (playerA || playerB) return 0;
+  if (playerA || playerB) return "cordial";
 
   const personas = relationPersonas(state);
   const self = personas.find((p) => p.characterId === a);
   const other = personas.find((p) => p.characterId === b);
-  if (!self || !other) return 0;
+  if (!self || !other) return "cordial";
   const ours = axisOfArchetype(self.archetype);
   const theirs = axisOfArchetype(other.archetype);
-  if (ours === undefined || theirs === undefined) return 0;
+  if (ours === undefined || theirs === undefined) return "cordial";
   const stance = stanceOf(ours, theirs);
-  if (stance === undefined) return 0;
-  return stance === "aligned" ? ARCHETYPE_IMPRESSION : -ARCHETYPE_IMPRESSION;
+  if (stance === undefined) return "cordial";
+  return stance === "aligned" ? "close" : "strained";
 }
 
 /**
- * 지금 두 사람 사이의 점수 — 장부의 줄이 있으면 그것, 없으면 첫인상.
+ * 지금 두 사람 사이의 등급 — 장부의 줄이 있으면 그것, 없으면 첫인상.
  *
  * `index`는 여러 쌍을 잇달아 묻는 자리가 원장을 한 번만 훑게 하는 재료다. 한 쌍만
  * 묻는 자리는 넘기지 않아도 된다 — 그때만 여기서 만든다.
  */
-export function relationOf(state: GameState, a: string, b: string, index?: JoinIndex): number {
-  if (a === b) return 0;
-  const key = pairOf(a, b);
-  const row = (state.relations ?? []).find((r) => r.a === key.a && r.b === key.b);
-  return row?.score ?? initialRelation(state, key.a, key.b, index);
-}
-
-/** 지금 두 사람 사이의 등급 — 카드도 계수도 전부 이것을 읽는다 */
 export function relationTierOf(
   state: GameState,
   a: string,
   b: string,
   index?: JoinIndex,
 ): RelationTier {
-  return relationTier(relationOf(state, a, b, index));
+  if (a === b) return "cordial";
+  const key = pairOf(a, b);
+  const row = (state.relations ?? []).find((r) => r.a === key.a && r.b === key.b);
+  return row?.tier ?? initialRelation(state, key.a, key.b, index);
+}
+
+// ── 압축이 등급을 매긴다 (people.md §6 · agents.md §5-1) ──────
+
+/** 압축이 낸 관계 한 줄 — 이름은 사람 이름이고 열쇠로 옮기는 문은 하나다 */
+export interface RelationTierProposal {
+  a: string;
+  b: string;
+  tier: RelationTier;
 }
 
 /**
- * 사건 하나가 사이를 옮긴다 — **장부에 줄이 생기는 유일한 자리다.**
+ * 이름 → 관계 장부의 열쇠. **이 문을 지나지 못하는 이름은 알려진 화자가 아니다.**
  *
- * 폭이 0인 사건은 아무것도 하지 않는다: 「아무것도 아니었던 대화」가 줄을 만들면
- * 세이브가 움직이지 않은 쌍으로 채워진다.
+ * 감독은 자기 이름으로 불리고 고정 열쇠 `@manager`에 앉는다. 저장 페르소나는
+ * `characterId`가 곧 열쇠이고, 우리 선수는 이름으로 불려 id에 앉는다.
  */
-export function moveRelation(state: GameState, a: string, b: string, event: RelationEvent): void {
-  const delta = RELATION_EVENTS[event];
-  if (delta === 0 || a === b) return;
-  const key = pairOf(a, b);
+function subjectOfCharacter(state: GameState, characterId: string): string | null {
+  if (characterId === state.manager.name || characterId === MANAGER_SUBJECT) {
+    return MANAGER_SUBJECT;
+  }
+  if (relationPersonas(state).some((p) => p.characterId === characterId)) return characterId;
+  return playersOf(state, state.userTeamId).find((p) => p.name === characterId)?.id ?? null;
+}
+
+/**
+ * 한 쌍의 등급을 앉힌다 — **장부에 줄이 생기는 유일한 자리다** (people.md §6).
+ *
+ * 검사는 둘이다. 모르는 이름은 **반려**하고(등록·기억과 같은 계약), 지금 등급에서 두 칸을
+ * 넘는 제안은 **한 칸으로 자른다** — 방향은 모델의 것이고 폭은 코어의 것이다
+ * (AGENTS.md §6.4). 자른 뒤 제자리면 줄을 만들지 않는다: 안 움직인 쌍으로 세이브를
+ * 채우지 않는다.
+ *
+ * @returns 장부가 움직였으면 `true`
+ */
+export function setRelationTier(
+  state: GameState,
+  a: string,
+  b: string,
+  tier: RelationTier,
+): boolean {
+  const subjectA = subjectOfCharacter(state, a);
+  const subjectB = subjectOfCharacter(state, b);
+  if (subjectA === null || subjectB === null || subjectA === subjectB) return false;
+
+  const key = pairOf(subjectA, subjectB);
+  const now = relationTierOf(state, key.a, key.b);
+  const next = relationTierDistance(now, tier) > 1 ? relationTierStep(now, tier) : tier;
+  if (next === now) return false;
+
   const rows = (state.relations ??= []);
   const row = rows.find((r) => r.a === key.a && r.b === key.b);
-  const score = clampRelation((row?.score ?? initialRelation(state, key.a, key.b)) + delta);
-  if (row) {
-    row.score = score;
-    row.updatedOn = state.date;
-    return;
+  if (row) row.tier = next;
+  else rows.push({ ...key, tier: next });
+  return true;
+}
+
+/**
+ * 압축이 낸 등급을 한 벌 앉힌다 — 인물 기억·등록과 같은 계약이다 (agents.md §5-1).
+ *
+ * **한 쌍은 한 번만 받는다.** 같은 쌍이 두 줄로 오면 한 번의 압축이 두 칸을 옮기고,
+ * 그러면 「한 번에 한 칸」이 줄 수를 늘리는 것만으로 뚫린다.
+ *
+ * @returns 실제로 움직인 쌍의 수
+ */
+export function applyRelationTiers(
+  state: GameState,
+  rows: readonly RelationTierProposal[],
+): number {
+  const seen = new Set<string>();
+  let moved = 0;
+  for (const row of rows) {
+    const key = pairKey(row.a, row.b);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (setRelationTier(state, row.a, row.b, row.tier)) moved += 1;
   }
-  rows.push({ ...key, score, updatedOn: state.date });
+  return moved;
+}
+
+/**
+ * 압축 브리프에 싣는 **지금 등급 표** (agents.md §5-1).
+ *
+ * 감독 ↔ 세이브 페르소나 · 감독 ↔ 우리 선수단 · 그리고 장부에 이미 줄이 선 나머지 쌍.
+ * 표에 없는 쌍의 앵커는 파생 첫인상이고, 모델이 그것을 못 봤다고 한 칸 한도가 넓어지지는
+ * 않는다 — 표는 모델이 헛디디지 않게 하는 자리이지 한도를 대신하지 않는다.
+ *
+ * 이름으로 낸다: 모델이 부르는 것은 열쇠가 아니라 사람 이름이다.
+ */
+export function relationTierBrief(state: GameState): RelationTierProposal[] {
+  const index = joinIndexOf(state);
+  const nameOf = new Map<string, string>([[MANAGER_SUBJECT, state.manager.name]]);
+  const counterparts: string[] = [];
+  for (const persona of relationPersonas(state)) {
+    nameOf.set(persona.characterId, persona.name);
+    counterparts.push(persona.characterId);
+  }
+  for (const player of playersOf(state, state.userTeamId)) {
+    nameOf.set(player.id, player.name);
+    counterparts.push(player.id);
+  }
+
+  const rows: RelationTierProposal[] = [];
+  const seen = new Set<string>();
+  for (const subject of counterparts) {
+    const key = pairOf(MANAGER_SUBJECT, subject);
+    seen.add(pairKey(key.a, key.b));
+    rows.push({
+      a: state.manager.name,
+      b: nameOf.get(subject)!,
+      tier: relationTierOf(state, MANAGER_SUBJECT, subject, index),
+    });
+  }
+  // 장부에 선 나머지 쌍 — 선수끼리·페르소나끼리는 여기서만 표에 오른다
+  for (const row of state.relations ?? []) {
+    if (seen.has(pairKey(row.a, row.b))) continue;
+    const a = nameOf.get(row.a);
+    const b = nameOf.get(row.b);
+    if (a === undefined || b === undefined) continue;
+    rows.push({ a, b, tier: row.tier });
+  }
+  return rows;
 }
 
 /**
@@ -439,28 +453,24 @@ export function clearRelationsOf(state: GameState, subject: string): void {
   state.relations = state.relations.filter((r) => r.a !== subject && r.b !== subject);
 }
 
-// ── 곱해지는 자리 (people.md §6) ───────────────────────────────
+// ── 등급이 옮겨 앉는 자리 (people.md §6) ──────────────────────
 
 /** 사이가 최악일 때의 계수 — 말이 통하지 않아도 완전히 죽지는 않는다 */
 export const RELATION_FACTOR_FLOOR = 0.7;
 /** 사이가 가장 좋을 때 더해지는 폭 — 바닥과 합쳐 0.7~1.3, 리더십 계수와 같은 자다 */
 export const RELATION_FACTOR_SPAN = 0.6;
 
-/** 등급의 폭 — 순위 −2~+2를 0~1로 편다 */
-const TIER_RANGE = RELATION_TIER_RANK.trusted - RELATION_TIER_RANK.hostile;
-
 /**
  * **그 말을 듣는 사람** — 면담의 사기 델타에 곱해진다 (career.md §2).
+ *
+ * 순위 0~5를 0~1로 펴 바닥 위에 얹는다 — 칸 사이가 고르므로 한 칸이 어디서나 같은 폭이다.
  *
  * ⚠️ **부호를 가리지 않는다** — 리더십 계수·라커룸 계수와 같은 규약이다. 믿는 선수는
  * 칭찬도 질책도 크게 듣고, 틀어진 선수는 어느 쪽도 흘려 듣는다.
  */
 export function relationFactor(state: GameState, a: string, b: string): number {
   const rank = RELATION_TIER_RANK[relationTierOf(state, a, b)];
-  return (
-    RELATION_FACTOR_FLOOR +
-    ((rank - RELATION_TIER_RANK.hostile) / TIER_RANGE) * RELATION_FACTOR_SPAN
-  );
+  return RELATION_FACTOR_FLOOR + (rank / RELATION_TIER_RANK_MAX) * RELATION_FACTOR_SPAN;
 }
 
 /**
@@ -473,8 +483,9 @@ export function relationFactor(state: GameState, a: string, b: string): number {
  */
 export const RELATION_PRESSURE_WEIGHT: Record<RelationTier, number> = {
   hostile: 1.3,
-  strained: 1.15,
-  neutral: 1,
+  strained: 1.2,
+  distant: 1.1,
+  cordial: 1,
   close: 0.9,
   trusted: 0.8,
 };
@@ -490,7 +501,9 @@ export function relationPressureWeight(state: GameState, playerId: string): numb
 export function closeTo(state: GameState, subject: string): GamePlayer[] {
   const index = joinIndexOf(state);
   return playersOf(state, state.userTeamId).filter(
-    (p) => p.id !== subject && RELATION_TIER_RANK[relationTierOf(state, subject, p.id, index)] > 0,
+    (p) =>
+      p.id !== subject &&
+      RELATION_TIER_RANK[relationTierOf(state, subject, p.id, index)] >= RELATION_TIER_RANK.close,
   );
 }
 
@@ -503,12 +516,6 @@ export function closeTo(state: GameState, subject: string): GamePlayer[] {
  * 관계 목록이 되고, 성격도 말투도 그 아래로 밀린다.
  */
 export const RELATION_CARD_LIMIT = 4;
-
-/** 이 인물이 점수 장부에서 갖는 열쇠 — 저장 페르소나는 `characterId`, 우리 선수는 id */
-function subjectOfCharacter(state: GameState, characterId: string): string | null {
-  if (relationPersonas(state).some((p) => p.characterId === characterId)) return characterId;
-  return playersOf(state, state.userTeamId).find((p) => p.name === characterId)?.id ?? null;
-}
 
 /** 이 카드에서 상대가 불리는 이름 — 카드의 열쇠는 선수의 경우 **이름**이다 */
 interface Counterpart {
@@ -535,26 +542,25 @@ function counterpartsOf(state: GameState): Counterpart[] {
 }
 
 /**
- * 점수가 세운 관계 줄 — **감독과의 사이가 맨 앞이다** (people.md §6).
+ * 등급이 세운 관계 줄 — **감독과의 사이가 맨 앞이다** (people.md §6).
  *
- * 그 뒤는 사이가 센 순서이고, 같으면 열쇠의 코드포인트 순이라 세이브를 다시 열어도
- * 같은 카드가 나온다. 중립은 서지 않는다.
+ * 그 뒤는 가운데에서 먼 등급부터이고, 같으면 열쇠의 코드포인트 순이라 세이브를 다시
+ * 열어도 같은 카드가 나온다. 결이 서지 않는 가운데 둘은 서지 않는다.
  */
-export function scoreRelations(state: GameState, characterId: string): PersonaRelation[] {
+export function tierRelations(state: GameState, characterId: string): PersonaRelation[] {
   const self = subjectOfCharacter(state, characterId);
   if (self === null) return [];
 
   const index = joinIndexOf(state);
-  const rows: { row: PersonaRelation; score: number; subject: string }[] = [];
+  const rows: { row: PersonaRelation; intensity: number; subject: string }[] = [];
   for (const other of counterpartsOf(state)) {
     if (other.subject === self) continue;
-    const score = relationOf(state, self, other.subject, index);
-    const tier = relationTier(score);
+    const tier = relationTierOf(state, self, other.subject, index);
     const stance = stanceOfTier(tier);
     if (stance === null) continue;
     rows.push({
       row: { characterId: other.characterId, name: other.name, stance, tier },
-      score,
+      intensity: relationTierIntensity(tier),
       subject: other.subject,
     });
   }
@@ -564,8 +570,7 @@ export function scoreRelations(state: GameState, characterId: string): PersonaRe
     .filter((r) => r.subject !== MANAGER_SUBJECT)
     .sort(
       (x, y) =>
-        Math.abs(y.score) - Math.abs(x.score) ||
-        (x.subject < y.subject ? -1 : x.subject > y.subject ? 1 : 0),
+        y.intensity - x.intensity || (x.subject < y.subject ? -1 : x.subject > y.subject ? 1 : 0),
     );
   return [...(manager ? [manager] : []), ...rest].map((r) => r.row);
 }

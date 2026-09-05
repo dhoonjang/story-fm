@@ -144,14 +144,8 @@ import { openPromise, type PromiseOpened } from "../squad/promises";
 // 감독이 지목한 번호는 코어가 배정하고, 사실만 돌려준다 (player.md §1.1)
 import { assignRequestedNumber, numberBlockText } from "../squad/numbers";
 import { archetypeTraitsOf } from "../world/player-persona";
-// 면담과 완장은 사이를 옮긴다 (people.md §6 「관계 점수」)
-import {
-  MANAGER_SUBJECT,
-  RELATION_EVENTS,
-  incidentRelationEvent,
-  moveRelation,
-  relationFactor,
-} from "../world/relations";
+// 면담의 사기는 감독과 그 선수 사이의 등급을 탄다 (people.md §6 「관계 등급」)
+import { MANAGER_SUBJECT, relationFactor } from "../world/relations";
 // 잔향 — 그 대화를 쥔 호출이 심경 한 문장을 남긴다 (people.md §5)
 import {
   applyMoodNotes,
@@ -1302,8 +1296,8 @@ export function applyTalkToPlayer(
    * 그 말을 듣는 사람이다. 부호를 가리지 않는 것은 리더십·라커룸 계수와 같은 규약이라,
    * 믿는 선수는 칭찬도 질책도 크게 듣는다.
    *
-   * ⚠️ **계수를 읽는 것이 관계를 옮기는 것보다 먼저다** — 오늘의 말은 어제까지의
-   * 사이로 울린다.
+   * ⚠️ **면담이 사이를 옮기지는 않는다** — 오늘의 말은 어제까지의 사이로 울릴 뿐이고,
+   * 등급을 매기는 자리는 이력이 접힐 때의 압축 하나뿐이다 (people.md §6 「관계 등급」).
    */
   const delta = Math.round(
     base *
@@ -1313,7 +1307,6 @@ export function applyTalkToPlayer(
   );
   const bounded = Math.max(-TALK_MORALE_BOUND, Math.min(TALK_MORALE_BOUND, delta));
   player.state.form = clampForm(player.state.form + moraleToForm(bounded));
-  moveRelation(state, MANAGER_SUBJECT, player.id, `talk-${outcome}`);
 
   /**
    * 면담은 방치 이슈를 해소한다 — **잘 풀렸을 때만** (career.md §2). 결과와 무관하게
@@ -2544,8 +2537,6 @@ export function setCaptain(
       player.state.captainedOn = state.date;
       player.state.condition = clampCondition(player.state.condition + CAPTAIN_FIRST_LIFT);
     }
-    // 완장은 감독이 그를 어떻게 보는지의 선언이다 — 사이가 그만큼 움직인다 (people.md §6)
-    moveRelation(state, MANAGER_SUBJECT, player.id, "captain-named");
     // 새 영입에게 완장을 채우는 건 라커룸 한가운데 세우는 일이다 (settling.ts)
     const settled = creditSettling(state, player.id, "captain") > 0;
     const settling = settled ? settlingOf(state, player.id) : null;
@@ -3635,7 +3626,8 @@ const INCIDENT_MEMORY_MAX = 120;
 
 /**
  * 갈래 → 효과의 모양 (people.md §6 「사건 기록」) — 당사자 사기는 세기 2의 값이고,
- * 팀 사기는 세기와 무관하다. 관계는 `RELATION_EVENTS`의 `incident-*` 줄이 갖는다.
+ * 팀 사기는 세기와 무관하다. **사이는 여기서 움직이지 않는다** (career.md §2) — 그 일이
+ * 두 사람 사이에 무엇을 했는지는 이력이 접힐 때의 압축이 읽는다.
  */
 const INCIDENT_EFFECTS: Record<IncidentKind, { morale: number; team: number }> = {
   discipline: { morale: -4, team: 1 },
@@ -3648,12 +3640,6 @@ const INCIDENT_EFFECTS: Record<IncidentKind, { morale: number; team: number }> =
   rule: { morale: -1, team: 0 },
   outing: { morale: 2, team: 2 },
   other: { morale: 0, team: 0 },
-};
-
-/** 당사자 ↔ 당사자를 움직이는 갈래 — 이 둘만이 선수 사이를 움직이는 사건이다 */
-const INCIDENT_PAIR_EVENT: Partial<Record<IncidentKind, "mediated" | "outing-together">> = {
-  mediation: "mediated",
-  outing: "outing-together",
 };
 
 /** 정착 크레딧이 붙는 갈래 — 겉도는 새 영입에게 감독이 손을 뻗은 일 */
@@ -3719,17 +3705,6 @@ export function recordIncident(
     }
   }
 
-  const event = incidentRelationEvent(input.kind);
-  for (const p of parties) moveRelation(state, MANAGER_SUBJECT, p.id, event);
-  const pairEvent = INCIDENT_PAIR_EVENT[input.kind];
-  if (pairEvent) {
-    for (let i = 0; i < parties.length; i += 1) {
-      for (let j = i + 1; j < parties.length; j += 1) {
-        moveRelation(state, parties[i]!.id, parties[j]!.id, pairEvent);
-      }
-    }
-  }
-
   const settled = INCIDENT_SETTLING_KINDS.has(input.kind)
     ? parties.filter(
         (p) =>
@@ -3762,7 +3737,6 @@ export function recordIncident(
   applyMoodNotes(state, resolveMoods(state, input.moods ?? []), new Set(parties.map((p) => p.id)));
 
   const names = parties.map((p) => p.name);
-  const relation = RELATION_EVENTS[event];
   const head = INCIDENT_KIND_KO[input.kind];
   return {
     ok: true,
@@ -3771,10 +3745,6 @@ export function recordIncident(
       `${head} — ${names.join(", ")}` +
       ` · 사기 ${signed(morale)}` +
       (effect.team === 0 ? "" : ` · 팀 사기 ${signed(effect.team)}`) +
-      (relation === 0 ? "" : ` · 관계 ${signed(relation)}`) +
-      (pairEvent && parties.length > 1
-        ? ` · 당사자 사이 ${signed(RELATION_EVENTS[pairEvent])}`
-        : "") +
       (settled > 0 ? ` · 적응 중인 ${settled}명이 한 걸음 가까워졌습니다` : ""),
     brief: {
       head,
@@ -3783,7 +3753,6 @@ export function recordIncident(
         ...deltaItems([
           ["사기", morale],
           ["팀 사기", effect.team],
-          ["관계", relation],
         ]),
         ...(settled > 0 ? [item({ label: "적응", text: `${settled}명` })] : []),
       ],

@@ -6,11 +6,8 @@ import {
   generateOwner,
   inventPersonName,
   occupiedPersonNames,
-  ownerOf,
   reseatClubPersonas,
 } from "../world/persona";
-// 경고도 그 지워짐도 구단주와의 사이를 옮긴다 (people.md §6)
-import { MANAGER_SUBJECT, moveRelation } from "../world/relations";
 import { makeRng, randInt } from "../core/rng";
 import { addDays, contractUntil, diffDays } from "../core/dates";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
@@ -1115,8 +1112,6 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
   if (standing.position <= boardExpectation(state, state.userTeamId).target) {
     if (warnings > 0) {
       manager.boardWarnings = warnings - 1;
-      // 지워진 경고는 구단주와의 사이도 되돌린다 — 압박이 이야기가 되려면 양쪽이 있어야 한다
-      moveRelation(state, MANAGER_SUBJECT, ownerOf(state).characterId, "board-eased");
       digest.push(
         `보드가 한숨 돌렸다 — 경고 하나가 지워졌다 (${manager.boardWarnings}/${USER_WARNINGS_BEFORE_SACK})`,
       );
@@ -1141,12 +1136,6 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
   if (next < USER_WARNINGS_BEFORE_SACK || !sackable || board > USER_BOARD_FLOOR) {
     manager.boardWarnings = next;
     manager.reputation.board = clampReputation(board - WARNING_BOARD_HIT);
-    /**
-     * **평판과 사이는 다른 값이다** (people.md §6) — 평판은 구단이 감독을 어떻게
-     * 보는가이고, 이쪽은 그 사람과의 사이다. 경고를 세 번 받은 감독과 요청을 세 번
-     * 지킨 감독의 구단주가 같은 카드로 말하지 않는 자리가 여기다.
-     */
-    moveRelation(state, MANAGER_SUBJECT, ownerOf(state).characterId, "board-warned");
     digest.push(
       `⚠️ 보드가 성적을 문제 삼았다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)}인데 현재 ${standing.position}위다` +
         ` (경고 ${next}/${USER_WARNINGS_BEFORE_SACK})`,

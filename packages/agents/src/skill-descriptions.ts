@@ -111,7 +111,7 @@ export const SKILL_CATALOG = [
       "벌금·포상·휴가·병문안·공개 칭찬과 질책·사과·중재·라커룸 규칙·회식처럼 다른 도구가 없는 행동을 감독이 했을 때 세운다. " +
       `kind는 효과의 모양이다: ${INCIDENT_KINDS.map((k) => `${k}(${INCIDENT_KIND_KO[k]})`).join(" · ")}. ` +
       "playerIds는 당사자의 이름, intensity는 세기 1~3, summary는 무슨 일이었나 한 줄. " +
-      `사기와 관계만 움직이고 능력치·컨디션은 그대로다. 하루 ${MAX_INCIDENTS_PER_DAY}건까지. 당사자의 심경은 moods에.`,
+      `사기만 움직이고 능력치·컨디션은 그대로다. 하루 ${MAX_INCIDENTS_PER_DAY}건까지. 당사자의 심경은 moods에.`,
   },
   {
     name: "apply_finance_event",

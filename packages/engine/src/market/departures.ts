@@ -17,8 +17,8 @@ import {
   windowOpenForTeam,
 } from "./market";
 import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
-// 떠남은 관계 줄을 걷고, 가까웠던 사람에게 자국을 남긴다 (people.md §6)
-import { clearRelationsOf, closeTo, MANAGER_SUBJECT, moveRelation } from "../world/relations";
+// 떠난 사람의 관계 줄은 그 문에서 걷힌다 (people.md §6)
+import { clearRelationsOf } from "../world/relations";
 import { makeRng } from "../core/rng";
 import { assignSquadNumber } from "../squad/numbers";
 import { admitOnLoan, arrivingSquadLevel } from "../squad/registration";
@@ -116,7 +116,7 @@ export function clearDepartedState(state: GameState, player: GamePlayer, from: s
    */
   closeMentoringsFor(state, player.id, "departure");
   /**
-   * 관계 점수의 줄도 함께 걷는다 (people.md §6) — 불만·약속과 같은 문이다.
+   * 관계 등급의 줄도 함께 걷는다 (people.md §6) — 불만·약속과 같은 문이다.
    *
    * 그 뒤 사흘의 심경 카드가 「가까웠는가」를 물으면 **첫인상이 답한다**: 함께 뛴
    * 해도 협회도 원장에 남아 있어 파생이 상하지 않는다.
@@ -210,12 +210,6 @@ export function releasePlayer(
   const wasCaptain = player.isCaptain;
   // 완장을 벗기기 전에 읽는다 — 떠나는 문이 곧 그 사람의 자리를 지운다
   const squadMorale = departureSquadMorale(state, player);
-  /**
-   * **가까웠던 사람들도 떠나는 문 앞에서 읽는다** (people.md §6) — 그 문이 그의 관계
-   * 줄을 지운다. 남는 것은 감독을 보는 눈이다: 라커룸 전체가 아니라 그와 가까웠던
-   * 사람만 이 값을 치른다.
-   */
-  const bereft = closeTo(state, player.id).map((mate) => mate.id);
   const transferId = toFreeAgency(state, player, agreed ? "release-agreed" : "release-unilateral");
   if (severance > 0) {
     if (paymentYears !== undefined) {
@@ -254,12 +248,6 @@ export function releasePlayer(
       mate.state.form = clampForm(mate.state.form + moraleToForm(squadMorale));
     }
   }
-
-  /**
-   * 가까웠던 사람들이 감독을 보는 눈 — **해지가 끝난 뒤에 옮긴다** (people.md §6).
-   * 명단은 문 앞에서 읽어 두었다: 지금은 그의 관계 줄이 이미 걷혀 있다.
-   */
-  for (const mateId of bereft) moveRelation(state, MANAGER_SUBJECT, mateId, "teammate-gone");
 
   pushNarrative(state, `${player.name} 계약 해지`, wasCaptain ? 5 : 4);
   return {
