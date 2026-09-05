@@ -1,82 +1,16 @@
 "use client";
 
 import {
-  AXIS_GROUPS,
-  AXIS_GROUP_KO,
-  AXIS_KO,
   defaultRoleOf,
-  footLabel,
   isNaturalAt,
-  milestoneTitle,
   physiqueLabel,
   rolesFor,
   injuryHistoryText,
 } from "@story-fm/domain";
 import { moodSentence } from "@/lib/mood";
+import { AxisGrid, CareerBlock, FootMarks } from "@/components/player-facts";
 import { FitGauge, FormArrow, RatingTrend, StatusBadges } from "./marks";
 import type { SquadRow } from "./types";
-
-/** 상세에서 보여줄 축 묶음 순서 — 라벨·구성은 domain(AXIS_GROUPS)이 단일 소스 */
-const AXIS_GROUP_ORDER = ["physical", "technical", "mental", "goalkeeping"] as const;
-
-/**
- * 두 발 숙련도를 **발 아이콘 두 개**로 — 숫자 두 개보다 한눈에 읽힌다.
- * 진하기가 곧 등급이고(1~5), 더 잘 쓰는 발만 색이 붙는다. 정확한 숫자는 툴팁에.
- */
-function FootMarks({ foot }: { foot: SquadRow["foot"] }) {
-  /**
-   * 배치는 **(왼 숫자)(왼발)(오른발)(오른 숫자)** — 숫자를 바깥으로 빼면 두 발이
-   * 가운데서 마주 보게 되고, 아치가 서로를 향해 굽어 어느 쪽이 어느 발인지가
-   * 글자 없이 읽힌다. 숫자를 발 오른쪽에 붙여 두었을 땐 두 아이콘이 같은 방향을
-   * 보는 것처럼 보여 매번 헷갈렸다.
-   */
-  return (
-    <span className="foot-marks" title={`${footLabel(foot)} (좌우 분화 자리의 적응도를 가른다)`}>
-      <b className={`foot-num w${foot.left}`}>{foot.left}</b>
-      {(["L", "R"] as const).map((side) => {
-        const rating = side === "L" ? foot.left : foot.right;
-        return (
-          <span className="foot-pair" key={side}>
-            <svg
-              /* 색이 곧 등급이다 — 1(빨강) ~ 5(초록). 적응도 게이지와 같은 척도를 쓴다 */
-              className={`foot-mark w${rating}`}
-              viewBox="0 0 24 34"
-              aria-hidden
-            >
-              {/**
-               * 발자국 하나를 좌우 반전해 반대 발로 쓴다 — 엄지발가락과 아치가
-               * 방향을 만든다.
-               *
-               * ⚠️ **원본 도형은 오른발이다.** 발가락이 큰 것(cx 6.6)부터 작은 것
-               * (cx 20.8)으로 왼쪽→오른쪽으로 놓여 있는데, 위에서 내려다본 발은
-               * 엄지가 **안쪽**을 향한다. 엄지가 왼쪽이면 그 안쪽은 왼편 —
-               * 오른발이다.
-               */}
-              <g transform={side === "L" ? "translate(24,0) scale(-1,1)" : undefined}>
-                <path d="M6.2 13.2c4.3-1.7 10-1.3 12.6 1.5 1.9 2 1.5 4.7.3 6.9-1 1.9-2.1 3.3-2.1 5.4 0 3.2-2.2 5.4-5.2 5.4s-5.3-2.2-5.3-5.4c0-2.1.8-3.5 1.3-5.1.6-1.9.3-3.3-1-4.5-1.4-1.2-1.6-3.5-.6-4.2z" />
-                <ellipse cx="6.6" cy="7.2" rx="3.1" ry="3.6" />
-                <ellipse cx="12.4" cy="5" rx="2.4" ry="2.7" />
-                <ellipse cx="17" cy="5.6" rx="2.1" ry="2.4" />
-                <ellipse cx="20.8" cy="7.6" rx="1.8" ry="2" />
-              </g>
-            </svg>
-          </span>
-        );
-      })}
-      <b className={`foot-num w${foot.right}`}>{foot.right}</b>
-    </span>
-  );
-}
-
-/**
- * 2군 리그 기록 — 1군 숫자 **옆에 곁들인다.** 더해서 한 칸에 적으면 표의 "출전
- * 38"이 1·2군 혼합값이 되고(season.md §2), 열을 따로 세우면 대부분의 행이 빈
- * 열 둘이 표를 넓힌다. 있을 때만 나타나므로 없는 선수의 표는 그대로 좁다.
- */
-function ReserveMark({ value }: { value: number }) {
-  if (value <= 0) return null;
-  return <i title={`2군 리그 ${value}`}>+{value}</i>;
-}
 
 /**
  * 추정 폭을 말로 — 같은 "잠재력 78~86"도 확신의 정도가 다르다.
@@ -109,7 +43,6 @@ export function PlayerDetail({
    */
   roleId?: string | null;
 }) {
-  const axes = p as unknown as Record<string, number>;
   /**
    * 역할이 성립하는 자리 — 고른 칩이면 그 자리, 아니면 이 행이 지금 선 자리.
    * `p`는 명단 사본이라 `assignedPosition`이 곧 판 위의 좌표에서 읽은 코드고,
@@ -362,99 +295,22 @@ export function PlayerDetail({
           )}
         </div>
 
-        {/* 능력치 16축 — 묶음별 한 줄, 값은 세로로 줄 맞춰 훑기 쉽게 */}
-        <div className="pd-axis-groups">
-          {AXIS_GROUP_ORDER.map((group) => (
-            <div className="pd-axis-group" key={group}>
-              <span className="pd-axis-group-name">{AXIS_GROUP_KO[group]}</span>
-              <div className="pd-axes">
-                {AXIS_GROUPS[group].map((a) => (
-                  <span className="pd-axis" key={a}>
-                    <span className="pd-axis-label">{AXIS_KO[a]}</span>
-                    <b>{axes[a] ?? 0}</b>
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+        {/* 능력치 16축 — 카드와 나눠 쓰는 조각 (`player-facts.tsx`) */}
+        <AxisGrid axes={p as unknown as Record<string, number>} />
       </div>
 
       {/* 커리어 — 시즌 × 팀의 표와 그 옆의 마일스톤. **머리글 줄이 아니라 제
           블록이다**: 요약 줄은 한 줄로 훑는 자리라 격자가 낄 자리가 없다.
           기록이 없으면 아무것도 세우지 않는다 (위 `showCareer` 주석) */}
-      {(showCareer || p.milestones.length > 0) && (
-        <div className="pd-career">
-          {showCareer && (
-            <table className="pd-career-table">
-              <thead>
-                <tr>
-                  <th>시즌</th>
-                  <th>팀</th>
-                  <th>출전</th>
-                  <th>골</th>
-                  <th>도움</th>
-                  <th>평점</th>
-                </tr>
-              </thead>
-              <tbody>
-                {/* 시즌 안에 팀을 옮겼으면 **행도 팀별로 갈린다** — 합치면 어느
-                    셔츠로 몇 경기를 뛰었는지가 사라진다 (player.md §10) */}
-                {careerRows.map((row) => (
-                  <tr key={`${row.season}-${row.teamId}`}>
-                    <td>{row.season}</td>
-                    <td>{row.team}</td>
-                    <td>
-                      {row.apps}
-                      <ReserveMark value={row.reserveApps} />
-                    </td>
-                    <td>
-                      {row.goals}
-                      <ReserveMark value={row.reserveGoals} />
-                    </td>
-                    <td>{row.assists}</td>
-                    <td>{row.rating === null ? "—" : row.rating.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              {/* 통산은 표의 **마지막 줄**이다 — 같은 열을 쓰므로 시즌 행과 세로로
-                  바로 견줘진다 (따로 떼어 놓으면 무엇의 합인지가 멀어진다) */}
-              <tfoot>
-                <tr>
-                  <th colSpan={2}>통산</th>
-                  <td>
-                    {p.career.totals.apps}
-                    <ReserveMark value={p.career.totals.reserveApps} />
-                  </td>
-                  <td>
-                    {p.career.totals.goals}
-                    <ReserveMark value={p.career.totals.reserveGoals} />
-                  </td>
-                  <td>{p.career.totals.assists}</td>
-                  <td>
-                    {p.career.totals.rating === null ? "—" : p.career.totals.rating.toFixed(2)}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          )}
-          {/* 마일스톤 — 코어가 내는 것은 코드와 수치뿐이고 라벨은 domain이 만든다
-              (`milestoneTitle`). 남의 팀 선수에겐 장부가 없지만 명단은 우리 선수뿐이다 */}
-          {p.milestones.length > 0 && (
-            <div className="pd-milestones">
-              <span className="pd-axis-group-name">마일스톤</span>
-              <ul>
-                {p.milestones.map((m) => (
-                  <li key={`${m.date}-${m.code}-${m.value}`}>
-                    <b>{milestoneTitle(m.code, m.value)}</b>
-                    <i>{m.date}</i>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
+      {/* 커리어 — 시즌 × 팀의 표와 그 옆의 마일스톤. **머리글 줄이 아니라 제
+          블록이다**: 요약 줄은 한 줄로 훑는 자리라 격자가 낄 자리가 없다.
+          기록이 없으면 아무것도 세우지 않는다 (위 `showCareer` 주석) */}
+      <CareerBlock
+        seasons={p.career.seasons}
+        totals={p.career.totals}
+        milestones={p.milestones}
+        showTable={showCareer}
+      />
 
       {p.instruction && <p className="pd-foot">개인 지시 “{p.instruction}”</p>}
     </div>

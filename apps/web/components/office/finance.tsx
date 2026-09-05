@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { OfficeViews } from "@story-fm/engine";
 import { formatMoney } from "@story-fm/domain";
 import { IconChevron } from "@/components/icons";
+import { PlayerName } from "@/components/player-card";
 
 // ── 재정 (요약 카드 + 실시간 활동 + 월간 보고서) ─────────────
 type FinanceMonth = OfficeViews["finance"]["current"];
@@ -119,7 +120,12 @@ function FinanceFeedLine({ entry }: { entry: FinanceFeedRow }) {
     <>
       <span className="date">{entry.date.slice(5)}</span>
       <span className="cat">{entry.categoryLabel}</span>
-      <span className="label">{feedLabel(entry)}</span>
+      {/* 라벨 칸 통째로 손잡이다 — 이름이 코어가 낸 문자열 안에 앉아 있어, 여기서
+          쪼개면 화면이 장부를 되쪼는 짓이 된다 (overview.md §5). 접힌 머리줄은 여러
+          사람의 합이라 `playerId`를 싣지 않으므로 펼침 버튼 안에 버튼이 겹치지 않는다 */}
+      <span className="label">
+        <PlayerName id={entry.playerId} name={feedLabel(entry)} />
+      </span>
       <span className={entry.kind === "income" ? "amt plus" : "amt minus"}>
         {sign}
         {formatMoney(entry.amount)}
@@ -145,7 +151,9 @@ function FinanceFeedLine({ entry }: { entry: FinanceFeedRow }) {
         <div className="fin-feed-items">
           {items.map((item, i) => (
             <div className="fin-feed-item" key={`${item.label}-${i}`}>
-              <span className="label">{item.label}</span>
+              <span className="label">
+                <PlayerName id={item.playerId} name={item.label} />
+              </span>
               <span className={entry.kind === "income" ? "amt plus" : "amt minus"}>
                 {sign}
                 {formatMoney(item.amount)}
@@ -286,7 +294,7 @@ function ExpiringBlock({ rows }: { rows: ExpiringContract[] }) {
         {rows.map((row) => (
           <div className="fin-line" key={row.playerId}>
             <span>
-              {row.name} {row.age}세 · ~{row.until}
+              <PlayerName id={row.playerId} name={row.name} /> {row.age}세 · ~{row.until}
               {row.leavingTo ? (
                 <span className="fin-tag danger">{row.leavingTo}로 떠남</span>
               ) : (
