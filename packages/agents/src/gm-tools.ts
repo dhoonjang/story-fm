@@ -13,8 +13,7 @@ import {
   answerOffer,
   arrivedResponses,
   applyFinanceEvent,
-  applyTalkToPlayer,
-  applyTeamTalk,
+  applyTalk,
   careerView,
   counterManagerOffer,
   dealOdds,
@@ -90,7 +89,6 @@ import {
   suggestTerms,
   TALK_OUTCOMES,
   TEAM_TALK_MOODS,
-  TEAM_TALK_OUTCOMES,
   teamName,
   teamProfile,
   wageExpectationOf,
@@ -108,6 +106,7 @@ import {
   BOARD_REQUEST_KINDS,
   DateString,
   DIRECTIVE_INTENSITIES,
+  FIRST_TEAM_LIMIT,
   type GamePlayer,
   INCIDENT_KINDS,
   KEEPER_DISTRIBUTIONS,
@@ -261,17 +260,22 @@ const SEASON_MAX = 200;
  */
 const COUNTER_DAYS_MAX = 120;
 
-/** 정착 무게 인자 — 코어가 앵커 ±EVENT_BAND로 자른다 (settling.ts) */
-const settlingArg = (kind: "talk" | "team_talk") =>
-  z
-    .number()
-    .min(-(EVENT_CREDIT[kind] + EVENT_BAND[kind]))
-    .max(EVENT_CREDIT[kind] + EVENT_BAND[kind])
-    .optional()
-    .describe(
-      "새로 영입해 아직 적응 중인 선수에게 이 말이 남긴 무게. 생략하면 코어가 outcome·강도로 정한다. " +
-        "적응을 겨냥한 이야기(자리·역할 약속, 라커룸 소개, 사는 문제)면 크게, 지나가는 말이면 작게.",
-    );
+/**
+ * 정착 무게 인자 — 코어가 앵커 ±EVENT_BAND로 자른다 (settling.ts).
+ *
+ * 폭은 **넓은 쪽(`talk`) 하나다.** 대화 도구가 하나가 되어 대상 수는 모델이 `players`로
+ * 정하는데, 스키마에 좁은 쪽(`team_talk`)을 걸면 마주 앉은 면담의 무게가 코어에 닿기도
+ * 전에 잘린다. 실제 앵커는 코어가 대상 수로 고르고 거기서 다시 자른다 (talk.ts).
+ */
+const settlingArg = z
+  .number()
+  .min(-(EVENT_CREDIT.talk + EVENT_BAND.talk))
+  .max(EVENT_CREDIT.talk + EVENT_BAND.talk)
+  .optional()
+  .describe(
+    "새로 영입해 아직 적응 중인 선수에게 이 말이 남긴 무게. 생략하면 코어가 outcome·강도로 정한다. " +
+      "적응을 겨냥한 이야기(자리·역할 약속, 라커룸 소개, 사는 문제)면 크게, 지나가는 말이면 작게.",
+  );
 
 /**
  * 심경 잔향 — 그 선수와 있었던 일을 쓴 호출이 한 문장을 함께 남긴다 (agents.md §4-3).
@@ -813,21 +817,19 @@ export function buildToolSpecs(
       descriptions.team_talk,
       z.object({
         occasion: z.enum(TEAM_TALK_OCCASIONS),
-        outcome: z.enum(TEAM_TALK_OUTCOMES),
-        intensity: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-        settling: settlingArg("team_talk"),
-        moods: moodNotesArg(TEAM_TALK_MOODS),
-      }),
-      (input) => applyTeamTalk(state, input),
-    ),
-    wrap(
-      "talk_to_player",
-      descriptions.talk_to_player,
-      z.object({
-        playerId: playerRef,
+        players: z
+          .array(playerRef)
+          /**
+           * 상한은 규칙이 아니라 **오타를 막는 자리다.** 이름을 다 부르는 자리는
+           * `players`를 비우는 것이고, 1군 정원(`FIRST_TEAM_LIMIT`)을 넘겨 한 사람씩
+           * 부르는 말은 감독의 말이 아니라 모델의 폭주다.
+           */
+          .max(FIRST_TEAM_LIMIT)
+          .optional()
+          .describe("감독이 이름을 부른 선수 — 비우면 선수단 전체"),
         outcome: z.enum(TALK_OUTCOMES),
         intensity: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-        settling: settlingArg("talk"),
+        settling: settlingArg,
         settlingNote: z
           .string()
           .min(1)
@@ -835,9 +837,9 @@ export function buildToolSpecs(
           .optional()
           .describe("settling을 그렇게 매긴 근거 한 줄"),
         promise: promiseArg,
-        mood: moodLineArg,
+        moods: moodNotesArg(TEAM_TALK_MOODS),
       }),
-      (input) => applyTalkToPlayer(state, input),
+      (input) => applyTalk(state, input),
     ),
     wrap(
       "respond_to_media",

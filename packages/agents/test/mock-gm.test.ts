@@ -123,7 +123,7 @@ describe("mock 대본 — 표의 한 줄이 코어 명령까지 닿는다", () =
     expect(tacticsOf(state, state.userTeamId).spec.mentality).toBe(4);
   });
 
-  it("이름 자리를 둔 줄은 감독이 부른 이름을 받아 talk_to_player로 간다", async () => {
+  it("이름 자리를 둔 줄은 감독이 부른 이름을 받아 team_talk로 간다", async () => {
     const state = newGame();
     const player = userPlayers(state)[3];
     if (!player) throw new Error("no player");
@@ -131,7 +131,7 @@ describe("mock 대본 — 표의 한 줄이 코어 명령까지 닿는다", () =
     // 성(姓)으로 부른다 — 이름이 한 글자인 선수가 있어 긴 조각이 안전하다
     const called = player.name.split(" ").reduce((a, b) => (b.length > a.length ? b : a));
     const turn = await runGmTurn(state, `${called} 면담 좀 하자`);
-    expect(namesOf(turn)).toContain("talk_to_player");
+    expect(namesOf(turn)).toContain("team_talk");
     expect(player.state.form).toBeGreaterThan(before);
   });
 
