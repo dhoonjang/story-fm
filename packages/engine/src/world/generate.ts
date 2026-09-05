@@ -11,6 +11,7 @@ import {
   syntheticFoot,
 } from "./catalog";
 import { claimPlayerId, slugifyName } from "./player-id";
+import { sampleGapFor } from "./synthesis";
 import { makeRng, pick, randInt } from "../core/rng";
 import { seasonYear } from "../core/dates";
 
@@ -34,8 +35,44 @@ const OUTFIELD_GK = { from: 15, span: 20 } as const;
 /** 유스가 합류하는 나이 */
 const YOUTH_AGE = { min: 17, max: 19 } as const;
 
-/** 지금 실력 위에 얹는 성장 여지 — 드물게 진짜 물건이 섞이는 폭이다 */
-export const YOUTH_UPSIDE = { min: 10, max: 26 } as const;
+/**
+ * 천장의 흩어짐 — **체급 기준선 둘레의 표준편차** (season.md §6).
+ *
+ * 리그 상위권은 언제나 이 분포의 위 끝에서 나오므로 좁히면 세계에 진짜 물건이 나지
+ * 않고, 넓히면 체급이 뜻을 잃는다 — `squad-longevity`의 드리프트 가드가 이 손잡이에
+ * 먼저 답한다.
+ *
+ * 자리를 정한 것은 **시드 세계의 같은 나이 무리**다: 1등급 클럽 카탈로그의 열일곱~
+ * 열아홉은 종합이 ±7.8로 흩어져 있고, 여기서 나온 지금 실력(천장 − 여지)의 흩어짐이
+ * 그 폭에 선다. 인테이크가 시드보다 평평하면 여름마다 같은 아이만 태어난다.
+ */
+const YOUTH_CEILING_SPREAD = 6;
+
+/** 균등 둘의 합이 갖는 표준편차 폭 — 가운데가 두껍고 꼬리가 여기서 끊긴다 */
+const SPREAD_BOUND = Math.sqrt(6);
+
+/** 흩어짐 위의 꼬리 — 이 몫의 후보에게 0~`span`을 더 얹는다. 드물게 진짜 물건이 섞인다 */
+const YOUTH_CEILING_TAIL = { share: 0.1, span: 6 } as const;
+
+/**
+ * `syntheticAxes`가 기준선 위에 얹는 몫 — 자리에 맞는 축이 위로만 치우치므로
+ * (`strong`) 종합이 기준선보다 이만큼 높게 나온다. **지금 실력을 겨냥하려면 그만큼
+ * 되민다** — 안 되밀면 인테이크가 노린 자리보다 통째로 이만큼 위에 선다.
+ */
+const AXES_OVERALL_LIFT = 1.5;
+
+/**
+ * 천장이 체급 기준선에서 벗어나는 폭 — 흩어짐 + 드문 위꼬리.
+ *
+ * ⚠️ **난수를 언제나 네 번 뽑는다.** 꼬리에 걸린 후보만 한 번 더 뽑으면 그 뒤의
+ * 이름·축·생일이 통째로 밀려, 꼬리 하나가 같은 시드에서 다른 사람을 낸다.
+ */
+function ceilingOffset(rng: () => number): number {
+  const spread = (rng() + rng() - 1) * SPREAD_BOUND * YOUTH_CEILING_SPREAD;
+  const rolled = rng();
+  const tail = rng() * YOUTH_CEILING_TAIL.span;
+  return spread + (rolled < YOUTH_CEILING_TAIL.share ? tail : 0);
+}
 
 /** 합류 시점의 체력 */
 const JOINING_CONDITION = { min: 70, max: 84 } as const;
@@ -123,26 +160,34 @@ export function generateYouthPlayer(
    */
   takenNames: Set<string> = new Set(),
   /**
-   * 잠재력 여지의 **위끝**에 얹는 폭 — 아카데미 활용도가 인테이크의 질을 움직이는
-   * 유일한 자리다 (season.md §6). 기준선(`TIER_BASE`)은 체급의 것이고 여기가 여지의
-   * 것이다. 뽑는 난수의 **수와 순서는 그대로**라, 0이면 예전과 같은 사람이 나온다.
+   * 아카데미 활용도가 **천장의 평균**에 얹는 폭 — 감독이 인테이크의 질을 움직이는
+   * 유일한 자리다 (season.md §6). 흩어짐도 꼬리도 건드리지 않는다: 아카데미에 자리를
+   * 준 구단은 **천장이 더 높은 아이**를 받고, 지금 실력은 그 천장에서 나이가 정한 만큼
+   * 내려온 자리에 그대로 선다.
    */
-  upsideBonus = 0,
+  ceilingBonus = 0,
 ): GamePlayer {
-  const rng = makeRng(seed, `youth:${teamId}:${season}:${index}`);
+  const channel = `youth:${teamId}:${season}:${index}`;
+  const rng = makeRng(seed, channel);
   const groups: PositionGroup[] = ["GK", "DF", "DF", "MF", "MF", "FW", "FW"];
   const group = forceGroup ?? pick(rng, groups);
   const position = pick(rng, GROUP_POSITION[group]);
+
+  const age = randInt(rng, YOUTH_AGE.min, YOUTH_AGE.max);
   /**
-   * 합성 유스는 **채움용**이다 — 실명 유망주보다 낮아야 한다.
-   *
-   * 기준선을 높게 잡으면 합성 선수가 실명 유망주는 물론 **1군 최저보다도
-   * 높아져** 2군 상위를 이름 없는 선수들이 독점하고 유스 발굴의 재미가
-   * 사라진다. 실명 유망주 분포(62~72)의 아래쪽에 깔리게 낮춘다.
-   *
-   * 대신 **잠재력은 넉넉히 준다**(아래) — 유스의 매력은 지금 실력이 아니라 여지다.
+   * **천장을 먼저 세운다** (season.md §6). 세계는 닫혀 있고 AI 구단은 떠난 수만큼만
+   * 유스로 채우므로, 여름마다 들어오는 사람의 천장이 곧 다음 세대 리그의 천장이다 —
+   * 기준선을 지금 실력 쪽에 박고 그 위에 여지를 얹으면 천장이 체급보다 낮은 자리에
+   * 서고, 은퇴가 그보다 높은 사람을 데려가는 만큼 리그가 해마다 가라앉는다.
    */
-  const base = TIER_BASE[tier] - 24;
+  const ceiling = TIER_BASE[tier] + ceilingBonus + ceilingOffset(rng);
+  /**
+   * 지금 실력은 천장에서 **그 나이가 남긴 여지**만큼 내려온 자리다 — 세계 생성이 읽는
+   * 그 표를 같은 함수로 읽는다 (`sampleGapFor` — player.md §6.5). 지문의 열쇠에 시드가
+   * 들어가야 세계마다 다른 사람이 난다.
+   */
+  const gap = sampleGapFor(age, `${seed}:${channel}`);
+  const base = ceiling - gap - AXES_OVERALL_LIFT;
 
   const { ko: nameKo, en: nameEn } = claimSyntheticName(
     rng,
@@ -152,7 +197,6 @@ export function generateYouthPlayer(
   const attrs = syntheticAxes(rng, group, base);
   const nationality = deriveNationality(teamId, undefined);
 
-  const age = randInt(rng, YOUTH_AGE.min, YOUTH_AGE.max);
   const month = randInt(rng, 1, 12);
   const day = randInt(rng, 1, 28);
   const birthdate = `${refYear - age}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -186,9 +230,10 @@ export function generateYouthPlayer(
     attributes: {
       ...axes,
       overall,
-      // 유스의 매력은 지금 실력이 아니라 **성장 여지**다 — 기준선을 낮춘 만큼
-      // 잠재력 폭을 넓혀, 드물게 진짜 물건이 섞이게 둔다
-      potential: clamp99(overall + randInt(rng, YOUTH_UPSIDE.min, YOUTH_UPSIDE.max + upsideBonus)),
+      // 뽑아 둔 그 여지를 **실측 종합 위에 그대로** 얹는다 — 축 표집이 종합을 흔든
+      // 만큼 천장도 함께 흔들리되, `potential − overall`은 언제나 나이 대역 안이다
+      // (player.md §6.5). 천장을 고정하고 종합만 흔들면 대역 밖의 사람이 난다.
+      potential: clamp99(overall + gap),
     },
     state: {
       form: 0,

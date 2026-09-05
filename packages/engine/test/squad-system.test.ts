@@ -15,12 +15,10 @@ import {
 } from "@story-fm/domain";
 import {
   advanceTime,
-  playersOf,
   squadLevelOf,
   firstTeamPlayers,
   isHomegrownFor,
   isTopFlight,
-  playerCatalog,
   squadRegistrationOf,
   reservePlayers,
   applyMonthlyDevelopment,
@@ -353,56 +351,14 @@ describe("1·2군 이동 — 한 요청이 여럿을 옮긴다", () => {
   });
 });
 
-describe("2군 — 합성 유스는 채움용이다", () => {
-  it("어느 구단에서도 합성이 실명 유망주 위에 서지 않는다", () => {
-    /**
-     * `generateYouthPlayer`가 `TIER_BASE - 24`에서 출발하는 이유다 — 예전 기준선에선
-     * 열여섯 살 합성 선수가 1군 최저보다 높게 나와 2군 상위를 이름 없는 선수들이
-     * 독점했다.
-     *
-     * ⚠️ **재는 상대는 "2군에 있는 카탈로그 선수"가 아니라 그 구단의 실명 U21**이다.
-     * 2군 배정은 별개 로직이고(`fillSlots`), 카탈로그의 아카데미 자리도 합성 가명이라
-     * (people.md §2) 섞어 재면 이 테스트가 카탈로그 보충 기준선(`topUpBase`)을 따라
-     * 흔들린다 — 그쪽은 attributes.test.ts가 따로 잰다.
-     */
-    const state = createTestGame();
-    const seasonStartYear = Number(state.date.slice(0, 4));
-    const realIds = new Set(
-      playerCatalog()
-        .filter((e) => !e.synthetic)
-        .map((e) => e.id),
-    );
-    let compared = 0;
-    for (const teamId of ["manutd", "arsenal", "liverpool", "chelsea", "tottenham"]) {
-      const squad = playersOf(state, teamId);
-      const prospects = squad.filter(
-        (p) =>
-          p.catalogId !== null &&
-          realIds.has(p.catalogId) &&
-          isUnder21(p.birthdate, seasonStartYear),
-      );
-      const synthetic = squad.filter((p) => p.catalogId === null);
-      if (prospects.length === 0 || synthetic.length === 0) continue;
-      compared++;
-      const bestProspect = Math.max(...prospects.map((p) => p.attributes.overall));
-      const bestSynthetic = Math.max(...synthetic.map((p) => p.attributes.overall));
-      expect(bestSynthetic, `${teamId}`).toBeLessThan(bestProspect);
-    }
-    // 다섯 구단 모두 실유망주와 합성 유스를 함께 갖는다 — 하나도 못 견주면 잰 것이 없다
-    expect(compared, "견줄 수 있는 구단이 하나도 없었다").toBe(5);
-  });
-
-  it("대신 잠재력은 넉넉하다 — 유스의 매력은 여지다", () => {
-    const state = createTestGame();
-    const synthetic = playersOf(state, "manutd").filter(
-      (p) => squadLevelOf(p) === "reserve" && p.catalogId === null,
-    );
-    expect(synthetic.length).toBeGreaterThan(0);
-    for (const p of synthetic) {
-      expect(p.attributes.potential - p.attributes.overall, p.name).toBeGreaterThanOrEqual(8);
-    }
-  });
-});
+/**
+ * **합성 유스의 공식은 `world.test.ts`가 잰다** — 「유스 인테이크 — 천장이 먼저 선다」.
+ *
+ * 여기 있던 「합성이 실명 유망주 위에 서지 않는다」는 지금 실력 쪽에 기준선을 박아
+ * 지키던 선이고, 그 대가로 천장이 체급 아래에 서서 세계가 시즌마다 가라앉았다
+ * (season.md §6). 이제 막는 것은 개인이 아니라 **무리의 평균**이라, 재는 자리도
+ * 세계 생성이 아니라 공식 쪽이다.
+ */
 
 // ─── 등번호 배정 (squad-numbers.test.ts에서 옮겨 왔다) ───
 /**

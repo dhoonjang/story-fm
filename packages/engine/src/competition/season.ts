@@ -1433,8 +1433,14 @@ const YOUTH_POOL_BY_TIER: Record<1 | 2 | 3 | 4, number> = { 1: 4, 2: 3, 3: 3, 4:
 /** 아카데미 활용도(0~1)가 더하는 후보 수 */
 const YOUTH_POOL_ACADEMY = 2;
 
-/** 아카데미 활용도가 잠재력 여지의 위끝에 얹는 폭 (`YOUTH_UPSIDE.max` 위) */
-const YOUTH_ACADEMY_UPSIDE = 6;
+/**
+ * 아카데미 활용도가 **유스 천장의 평균**에 얹는 폭 (season.md §6).
+ *
+ * 여지의 위끝이 아니라 천장이다 — 위끝에 얹으면 활용도가 높은 구단의 유스만 여지가
+ * 넓어져 지금 실력이 그만큼 낮게 서고, 아카데미에 자리를 준 대가가 "더 덜 자란 아이"가
+ * 된다. 천장을 옮기면 실력은 그 천장에서 나이가 정한 만큼 내려온 자리에 그대로 선다.
+ */
+const YOUTH_ACADEMY_CEILING = 3;
 
 /**
  * 아카데미가 자리를 내주는 나이 — 실제 U21 리그의 자격과 같은 자다. 밴드가 아니라
@@ -1484,8 +1490,8 @@ export interface YouthIntake {
   candidates: number;
   /** 답이 없을 때 코어가 채우는 수 — 옛 규칙 그대로 */
   fills: number;
-  /** 잠재력 여지의 위끝에 얹는 폭 */
-  upsideBonus: number;
+  /** 유스 천장의 평균에 얹는 폭 */
+  ceilingBonus: number;
 }
 
 /**
@@ -1497,7 +1503,9 @@ export function youthIntakeOf(fills: number, tier: 1 | 2 | 3 | 4, academyUse: nu
   return {
     candidates: fills + extra,
     fills,
-    upsideBonus: Math.round(academyUse * YOUTH_ACADEMY_UPSIDE),
+    // 후보 수와 달리 반올림하지 않는다 — 천장은 눈금이 없는 값이고, 접으면 활용도
+    // 0.5와 0.83이 같은 인테이크를 낸다
+    ceilingBonus: academyUse * YOUTH_ACADEMY_CEILING,
   };
 }
 
@@ -1939,7 +1947,7 @@ function applyTransition(state: GameState): string[] {
         forced[i],
         seasonYear(nextSeason),
         takenNames,
-        intake.upsideBonus,
+        intake.ceilingBonus,
       );
       if (ours) {
         candidates.push({
