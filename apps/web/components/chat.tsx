@@ -15,24 +15,37 @@ import { ratingTone, scoutMargin, scoutValue } from "@/lib/scout-report-display"
 import { CALL_LABEL } from "@/lib/call-label";
 import type { SpeakerRole } from "@story-fm/engine";
 import { IconBroadcast, IconMatch, IconPerson, SPEAKER_ICON } from "@/components/icons";
+import { useProseNames } from "@/components/player-card";
+
+/**
+ * 산문 한 조각을 손잡이 섞인 노드로 — `useProseNames()`가 돌려주는 그 함수다.
+ * 훅은 컴포넌트가 부르고, 아래 평범한 함수들은 그것을 받아 쓴다.
+ */
+type ProseNames = ReturnType<typeof useProseNames>;
 
 /**
  * *연출* 구간을 <em>으로 렌더 — 나누는 규칙은 `splitStaging`이 갖는다(연속 별표·
  * 짝이 안 맞는 별표·스트리밍 중 열린 채 끝난 `*…`).
+ *
+ * 갈라 낸 조각은 그대로 글자가 되지 않고 `prose`를 지난다 — 사전에 있는 이름이
+ * 손잡이로 서는 자리다(player.md §9.5). 연출 안의 이름도 같다: 「*라먼스가 고개를
+ * 젓는다*」의 그도 부를 수 있어야 한다.
  */
-function renderStaging(text: string) {
-  return splitStaging(text).map((part, i) =>
-    part.staging ? <em key={i}>{part.text}</em> : <Fragment key={i}>{part.text}</Fragment>,
-  );
+function renderStaging(text: string, prose: ProseNames, key: string) {
+  return splitStaging(text).map((part, i) => {
+    const node = prose(part.text, `${key}-${i}`);
+    return part.staging ? <em key={i}>{node}</em> : <Fragment key={i}>{node}</Fragment>;
+  });
 }
 
 /** 화자 없는 줄 — 장면 지문 */
 function NarrationLines({ lines }: { lines: string[] }) {
+  const prose = useProseNames();
   return (
     <>
       {lines.map((content, i) => (
         <div className="line narration" key={i}>
-          {renderStaging(content)}
+          {renderStaging(content, prose, `n${i}`)}
         </div>
       ))}
     </>
@@ -47,6 +60,7 @@ function UtteranceBlock({
   utterance: Utterance;
   roles?: Record<string, SpeakerRole>;
 }) {
+  const prose = useProseNames();
   const { speaker, lines } = utterance;
   if (speaker === "") return <NarrationLines lines={lines} />;
   const isBroadcast = speaker === BROADCAST_SPEAKER;
@@ -69,7 +83,7 @@ function UtteranceBlock({
       </div>
       {lines.map((content, i) => (
         <div className="line" key={i}>
-          {renderStaging(content)}
+          {renderStaging(content, prose, `l${i}`)}
         </div>
       ))}
     </div>
@@ -477,13 +491,15 @@ export function ChatTurnView({
 }) {
   const text = useMemo(() => humanize(turn.text, playerNames), [turn.text, playerNames]);
   const press = useLongPress(onLongPress);
+  const prose = useProseNames();
 
   // 감독의 말은 오른쪽 말풍선이라 그 자체로 갈린다 — 구간 표시는 모델 턴이 맡는다.
-  // 다만 문법은 같다: 감독이 쓴 `*…*`도 연출로 서고, 새어 든 id도 이름으로 편다
+  // 다만 문법은 같다: 감독이 쓴 `*…*`도 연출로 서고, 새어 든 id도 이름으로 편다.
+  // 이름이 손잡이가 되는 것도 같다 — 감독이 부른 선수도 그 자리에서 열린다
   if (turn.role === "user") {
     return (
       <div className="turn-user" {...press}>
-        {renderStaging(text)}
+        {renderStaging(text, prose, "u")}
       </div>
     );
   }
