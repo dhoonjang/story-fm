@@ -219,13 +219,15 @@ export const FINANCE_LEAGUES = defineHarness({
 
 export const FINANCE_MULTI_SEASON = defineHarness({
   id: "finance-multi-season",
-  what: "세 시즌을 굴려도 가라앉는 리그가 없다",
+  what: "세 시즌을 굴려도 가라앉는 리그도, 돈만 쌓는 리그도 없다",
   doc: `${FINANCE}.3`,
   cost: "전체 세계 세 시즌 · 십수 분",
   // prettier-ignore
   bands: [
     { metric: "도달한 시즌", role: "guard", min: 4, unit: "count", why: "세 시즌은 리그가 가라앉는지 보이는 가장 짧은 창이다" },
     { metric: "리그별 중간 잔고의 최소", role: "guard", min: 0, unit: "money", why: "한 시즌은 발산을 감추기에 충분히 짧다 (불변식 1). 자유계약·시장 전용 리그는 클럽이 아니라 대상 밖" },
+    { metric: "리그별 중간 잔고 ÷ 중간 연 매출의 최대", role: "guard", max: 1.25, unit: "ratio", why: "불변식 2 — 바닥만 재던 자리의 천장이다. 한 해 버는 것보다 많은 현금을 들고 앉은 리그는 잉여가 이적 시장으로 돌아오지 않는다는 뜻이고, 그러면 PSR도 예산도 죽은 코드가 된다. 불변식 자체는 1.0이고 가드가 그 위에 서는 것은 리그 중간 잔고가 이적 시장 하나에 수십 %씩 움직이기 때문이다 — 세 시즌 실측 0.99 (finance.md §10.3)" },
+    { metric: "천장에 가장 가까운 리그의 중간 잔고", role: "measure", unit: "money", why: "위 비율이 어느 규모에서 나온 값인가 — 작은 리그의 얇은 매출은 같은 비율도 다른 뜻이다" },
   ],
 });
 

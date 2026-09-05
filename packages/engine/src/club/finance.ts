@@ -7,6 +7,7 @@ import type {
   LedgerEntry,
   MatchRecord,
   PaymentSchedule,
+  TeamFinance,
   Transfer,
 } from "@story-fm/domain";
 import {
@@ -16,6 +17,7 @@ import {
   FINANCE_INCOME_CATEGORIES,
   formatMoney,
   isReserveMatch,
+  reinvestShareOf,
 } from "@story-fm/domain";
 import {
   addDays,
@@ -51,6 +53,7 @@ import {
 import { item } from "../commands/brief";
 import { makeRng } from "../core/rng";
 import { catalogTierOf, tierOfTeamIn } from "../core/club-tier";
+import { ownerOf } from "../world/persona";
 
 /**
  * 구단 재정 — 실제 구단의 매출·비용 구조 (docs/simulation/finance.md).
@@ -2509,6 +2512,32 @@ export function payLeaguePrizes(state: GameState, digest: string[]): void {
 }
 
 /**
+ * 시즌 예산 보충 (£) — 등급별. 큰 영입은 여기에 **판매 대금**을 얹어야 가능하다.
+ *
+ * 표는 **EPL 기준이고 구단 경제 수준을 곱한다**(`seasonBudgetBaseOf` — §6.2).
+ * 곱하지 않으면 리그 1 구단이 EPL과 같은 예산을 매 시즌 받아 이적 시장의 눈금이
+ * 리그를 잃는다.
+ */
+export const SEASON_BUDGET_TOPUP: Record<number, number> = {
+  1: 45_000_000,
+  2: 30_000_000,
+  3: 18_000_000,
+  4: 12_000_000,
+};
+
+/**
+ * 이 구단이 한 시즌에 쓰는 돈의 크기 — **예산의 기준액.**
+ *
+ * 시즌 보충(§9.1)만의 값이 아니라 보드 요청의 여력(§9.6)이 재는 자이기도 하다.
+ * 그래서 시즌 전환이 아니라 재정 상수 옆에 산다 — 두 자리가 같은 눈금을 읽어야
+ * "보드가 한 시즌에 얹어 주는 돈"이 그 구단의 규모를 탄다.
+ */
+export function seasonBudgetBaseOf(state: GameState, teamId: string): number {
+  const tier = tierOfTeamIn(state, teamId);
+  return Math.round((SEASON_BUDGET_TOPUP[tier] ?? 0) * clubEconomyLevelIn(state, teamId));
+}
+
+/**
  * 이월 상한 — **한 시즌치를 넘겨 쌓을 수 없다.**
  *
  * `+=`로 얹기만 하던 시절 안 쓴 예산이 그대로 남고 그 위에 base와 성과가 얹혀
@@ -2521,25 +2550,35 @@ export function payLeaguePrizes(state: GameState, digest: string[]): void {
 const BUDGET_CARRY_SEASONS = 1;
 
 /**
- * 성과 보너스의 자 — **운영 손익**(장부 손익에서 매각 대금을 뺀 것).
+ * 적자가 예산을 깎는 폭의 바닥 — **base의 절반까지.**
  *
- * 매각 대금은 협상이 타결될 때 이미 예산에 들어간다. 그것을 손익으로 또 세면 한 번
- * 판 선수로 예산을 두 번 받는다 — 매각 즉시 +이적료, 다음 시즌 +최대 base다.
- * 보드가 보상하려는 것은 장사가 아니라 **살림**이다.
+ * 잉여에는 상한이 없지만(그 벽이 곧 현금이 쌓이던 이유다 — §9.1) 적자에는 바닥이
+ * 있다. 한 시즌의 손실이 그대로 곱해 내려오면 다음 시즌이 통째로 지워지고, 그러면
+ * 판 돈으로 다시 세우는 길(transfer.md §3)까지 함께 막힌다.
  */
-function operatingPnlOf(state: GameState, season: number): number {
-  let total = 0;
-  for (const report of userReports(state)) {
-    if (report.season !== season) continue;
-    const sold = report.income.find((l) => l.category === "transfer_in")?.amount ?? 0;
-    total += report.pnlNet - sold;
-  }
-  return total;
+const BUDGET_DEFICIT_FLOOR = 0.5;
+
+/**
+ * 지난 시즌 **현금 잉여** — 시즌을 시작한 잔고와 지금 잔고의 차 (§9.1).
+ *
+ * 장부 손익이 아니라 잔고인 이유 둘. ① 상각은 비용의 3할인데 현금이 나가지 않아,
+ * 손익이 본전 근처인 시즌에도 잔고는 시즌마다 £145M씩 불었다 — 손익에 건 예산은
+ * 그 잉여를 영영 돌려주지 않는다. ② 원장을 남기지 않는 AI 구단도(§4.5) 같은 자로
+ * 재려면 기준이 보고서가 아니라 통장이어야 한다.
+ *
+ * 기준점이 없는 옛 세이브는 잉여를 0으로 읽는다 — 그 전환 한 번만 그렇고 다음
+ * 시즌부터는 제 값이 선다.
+ */
+function seasonCashSurplusOf(finance: TeamFinance): number {
+  return finance.balance - (finance.seasonOpeningBalance ?? finance.balance);
 }
 
 /**
- * 시즌 이적 예산 보충 — 등급별 base에 **재정 성과**를 얹고, 이월분을 자른다.
+ * 시즌 이적 예산 보충 — 등급별 base에 **잉여의 재투자분**을 얹고, 이월분을 자른다.
  * PSR 여유가 없으면 동결한다 (결정 D — 승점은 건드리지 않는다).
+ *
+ * 보충이 끝나면 **잉여의 기준점을 지금 잔고로 다시 세운다** — 이 자리를 지나는 것이
+ * 곧 시즌이 바뀌는 것이고, 다시 세우지 않으면 같은 잉여가 매 시즌 또 예산이 된다.
  */
 export function topUpTransferBudget(
   state: GameState,
@@ -2549,6 +2588,10 @@ export function topUpTransferBudget(
 ): void {
   const finance = financeOf(state, teamId);
   const isUser = teamId === state.userTeamId;
+
+  const surplus = seasonCashSurplusOf(finance);
+  // 다음 시즌의 잉여는 여기서부터 센다 — 동결로 일찍 빠지는 길에서도 기준점은 선다
+  finance.seasonOpeningBalance = finance.balance;
 
   // 동결이면 보충도 없다 — PSR과 부채가 같은 출구를 쓴다 (§9.2·§9.4)
   refreshBudgetFreeze(state, teamId, digest);
@@ -2564,9 +2607,14 @@ export function topUpTransferBudget(
     return;
   }
 
-  // 성과 보너스 — 지난 시즌 **운영** 손익의 절반까지 (손실이면 깎인다)
-  const pnl = isUser ? operatingPnlOf(state, state.season - 1) : 0;
-  const performance = Math.max(-base * 0.5, Math.min(base, pnl * 0.5));
+  /**
+   * 재투자분 — 지난 시즌 현금 잉여 × **구단주가 정한 몫** (§9.1 · people.md §2).
+   *
+   * 구단주 카드는 감독의 구단에만 서므로 나머지 구단은 중앙값으로 떨어진다
+   * (`reinvestShareOf`) — 세계가 잉여를 쓰지 않으면 이적 시장이 그만큼 마른다.
+   */
+  const share = reinvestShareOf(isUser ? ownerOf(state).archetype : undefined);
+  const performance = Math.round(Math.max(-base * BUDGET_DEFICIT_FLOOR, surplus * share));
 
   // 이월은 한 시즌치까지 — 그 위는 보드가 회수한다
   const carried = Math.min(finance.transferBudget, base * BUDGET_CARRY_SEASONS);
@@ -2581,7 +2629,7 @@ export function topUpTransferBudget(
   if (isUser && Math.abs(performance) >= 1_000_000) {
     digest.push(
       performance > 0
-        ? `보드가 재정 성과를 반영해 이적 예산을 ${money(performance)} 더 얹었다`
+        ? `구단주가 지난 시즌 잉여 ${money(surplus)} 중 ${money(performance)}를 이적 예산으로 돌렸다`
         : `지난 시즌 적자로 이적 예산이 ${money(-performance)} 깎였다`,
     );
   }

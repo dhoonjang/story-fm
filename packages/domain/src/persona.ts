@@ -452,6 +452,55 @@ export function normalizeSpeaker(name: string): string {
   return name.replace(/\s+/gu, "");
 }
 
+// ── 구단주 원형 — 잉여의 얼마를 스쿼드에 되돌리는가 ────────────────
+
+/**
+ * 구단주 원형 → **재투자 몫** — 지난 시즌 현금 잉여의 얼마가 다음 시즌 이적 예산으로
+ * 돌아오는가 (people.md §2 · simulation/finance.md §9.1).
+ *
+ * 원형이 재정 눈금에 직접 닿는 유일한 자리다. 되걸기(`CONDITION_OF_ARCHETYPE`)와
+ * 구단주 요청(`DEMAND_OF_ARCHETYPE`)이 **감독이 물었을 때의 답**을 가른다면, 이 표는
+ * **묻지 않아도 내주는 몫**을 가른다.
+ *
+ * 폭을 0.30~0.80으로 잡은 것은 그 사이에서 사람이 갈리게 하려는 것이다 — 0에 가까운
+ * 원형을 두면 그 구단은 몇 시즌 만에 이적 시장에서 사라지고, 1에 가까우면 잉여가
+ * 통째로 예산이 되어 이월 상한(§9.1)이 하는 일이 없어진다.
+ *
+ * 키가 아니라 **라벨**로 적는다 — 세이브에 남는 것이 라벨이고(`Persona.archetype`),
+ * `DEMAND_OF_ARCHETYPE`·`CONDITION_OF_ARCHETYPE`이 이미 같은 규약이다. 표에 없는
+ * 라벨은 기본값으로 떨어진다.
+ */
+export const REINVEST_SHARE_OF_ARCHETYPE: Record<string, number> = {
+  /** "예산은 문제가 아닙니다" — 쌓아 둘 이유가 없는 사람 */
+  국부펀드형: 0.8,
+  /** 화제를 사는 사람 — 남은 돈은 다음 스타의 값이다 */
+  흥행가형: 0.6,
+  /** 장부를 읽지 않는다 — 남으면 쓰지만 계산해서 쓰지는 않는다 */
+  축구광형: 0.55,
+  /** 빚만 없으면 만족 — 흑자면 내주되 여유는 남긴다 */
+  "지역 유지형": 0.45,
+  /** 효율의 사람 — 잉여는 구조를 고치는 데 먼저 쓴다 */
+  산업가형: 0.35,
+  /** 회수 우선 — 잉여는 구단의 가치이지 다음 영입의 재원이 아니다 */
+  투자자형: 0.3,
+};
+
+/**
+ * 구단주 카드가 없는 구단의 몫 — **여섯의 중앙값**이다.
+ *
+ * 페르소나는 감독의 구단에만 서므로(people.md §1) 나머지 95개 구단이 여기로 온다.
+ * 평균이 아니라 중앙값인 것은 국부펀드형 하나가 표를 끌어올리기 때문이다.
+ */
+export const REINVEST_SHARE_DEFAULT = 0.5;
+
+/** 이 구단주가 되돌리는 몫 — 카드가 없거나 표 밖의 라벨이면 기본값 */
+export function reinvestShareOf(archetype: string | undefined): number {
+  return (
+    (archetype === undefined ? undefined : REINVEST_SHARE_OF_ARCHETYPE[archetype]) ??
+    REINVEST_SHARE_DEFAULT
+  );
+}
+
 // ── 에이전트 원형 — 협상 테이블 건너편의 세 사람 ────────────────
 
 /**

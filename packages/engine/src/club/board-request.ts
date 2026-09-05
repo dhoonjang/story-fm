@@ -19,7 +19,13 @@ import { pickAnyPlayer } from "../core/player-ref";
 import { touchOpenings } from "../world/openings";
 import { ownerOf } from "../world/persona";
 import { USER_WAGE_HEADROOM, clubWageBudget, wageRoomOf } from "../world/wages";
-import { formatMoney, recordCapitalAsset, seasonWageRatio, STADIUM_ASSET_MONTHS } from "./finance";
+import {
+  formatMoney,
+  recordCapitalAsset,
+  seasonBudgetBaseOf,
+  seasonWageRatio,
+  STADIUM_ASSET_MONTHS,
+} from "./finance";
 import { item } from "../commands/brief";
 import type { CommandResult } from "../commands";
 
@@ -54,15 +60,26 @@ export const BOARD_REQUEST = {
   /** 살림 계수의 계단 — 시즌 급여 비중 (finance.md §9.3의 경고선 그대로) */
   WAGE_RATIO_CAUTION: 0.65,
   WAGE_RATIO_DANGER: 0.75,
-  /** 이적 예산 여력 = 잔고 × 이것 */
-  BUDGET_OF_BALANCE: 0.25,
   /**
-   * 건별 영입 여력 = 잔고 × 이것 − 걸려 있는 승인분.
+   * 이적 예산 여력 = **시즌 예산 기준액**(`seasonBudgetBaseOf`) × 이것.
    *
-   * 총액 증액(0.25)보다 큰 것이 이 종류가 있는 이유다 — 백지수표와 이름 붙은 선수
-   * 하나는 보드에게 다른 일이다. 대신 그 선수 밖으로는 한 푼도 못 나간다.
+   * 자가 잔고이면 현금이 불수록 물어서 받는 값이 함께 불어 요청이 화수분이 된다
+   * (4시즌 뒤 £1,138M 잔고 → 한 번 물어 £275M — finance.md §9.6). 보드가 한 시즌에
+   * 얹어 주는 돈은 그 구단이 원래 한 시즌에 쓰는 돈의 배수여야 체급을 타되 시간에
+   * 불지 않는다.
+   *
+   * 0.6인 이유: 새 게임의 잔고는 기준액의 2.1~2.7배라(`TIER_FINANCE`) 옛 계수 0.25가
+   * t=0에서 서 있던 자리가 기준액의 0.52~0.67배다 — 시작의 눈금은 그대로다.
    */
-  SIGNING_OF_BALANCE: 0.4,
+  BUDGET_OF_BASE: 0.6,
+  /**
+   * 건별 영입 여력 = 기준액 × 이것 − 걸려 있는 승인분.
+   *
+   * 총액 증액(0.6)보다 큰 것이 이 종류가 있는 이유다 — 백지수표와 이름 붙은 선수
+   * 하나는 보드에게 다른 일이다. 대신 그 선수 밖으로는 한 푼도 못 나간다.
+   * 옛 계수 0.40이 t=0에서 서 있던 자리가 기준액의 0.83~1.07배다.
+   */
+  SIGNING_OF_BASE: 1.0,
   /** 승인분이 그 선수 앞에 걸려 있는 기간 — 만료가 없으면 허가가 아니라 예산이다 */
   EARMARK_DAYS: 60,
   /** 되걸기가 서는 문턱 — 한도가 부른 값의 이만큼을 넘으면 조건 없이 그만큼 내준다 */
@@ -150,20 +167,27 @@ export function boardThriftFactor(wageRatio: number): number {
   return 1;
 }
 
-/** 종류별 여력 — 계수가 걸리기 전의 날것 */
+/**
+ * 종류별 여력 — 계수가 걸리기 전의 날것.
+ *
+ * **돈의 두 종류는 기준액을, 구장은 잔고를 본다** (finance.md §9.6). 예산과 영입 허가는
+ * 보드가 내주는 한도라 그 구단이 한 시즌에 쓰는 돈의 배수여야 하고, 좌석은 허가가
+ * 아니라 공사비라 그날 현금이 실제로 나간다.
+ */
 function headroomOf(state: GameState, kind: BoardRequestKind): number {
   const teamId = state.userTeamId;
   const finance = financeOf(state, teamId);
   const balance = Math.max(0, finance.balance);
+  const base = seasonBudgetBaseOf(state, teamId);
   switch (kind) {
     case "transfer-budget":
-      return balance * BOARD_REQUEST.BUDGET_OF_BALANCE;
+      return base * BOARD_REQUEST.BUDGET_OF_BASE;
     case "signing":
       /**
        * 이미 걸려 있는 승인분을 뺀다 — `wage-room`이 이번 시즌 누계를 빼는 것과 같은
-       * 자다. 없으면 승인 하나마다 잔고의 40%가 새로 서서 허가 셋이 잔고를 넘는다.
+       * 자다. 없으면 승인 하나마다 기준액만큼이 새로 서서 허가 셋이 세 시즌치 예산이 된다.
        */
-      return Math.max(0, balance * BOARD_REQUEST.SIGNING_OF_BALANCE - earmarkedTotal(state));
+      return Math.max(0, base * BOARD_REQUEST.SIGNING_OF_BASE - earmarkedTotal(state));
     case "wage-room":
       return Math.max(
         0,
