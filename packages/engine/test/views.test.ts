@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activeContract,
   applyFinanceEvent,
+  arrivedResponses,
   buildOfficeViews,
   buildPlayerCard,
   marketValueOf,
@@ -14,6 +15,11 @@ import {
   loanPlayer,
   motmOf,
   type MatchReportPlayerView,
+  openNegotiationFor,
+  openPromise,
+  pendingVerdicts,
+  playersOf,
+  sendOffer,
   setTraining,
   startMatch,
   userPlayers,
@@ -1036,5 +1042,60 @@ describe("선수 카드 — 남의 구단 선수의 안개 (player.md §9.5)", (
     expect(card.contractUntil).toBe(activeContract(state, player!.id)?.until ?? null);
     expect(card.nationality).toBe(player!.nationality ?? null);
     expect(card.season.goals).toBe(seasonStatOf(state, player!.id)?.goals ?? 0);
+  });
+});
+
+/**
+ * **안건 띠** — 답을 미루면 기한이 지나가는 일 (overview.md §5).
+ *
+ * 화면이 그리는 것은 이 목록 그대로라 칩이 사라지면 눈에 보이지만, **접는 규칙과
+ * 겹침**은 조용히 어긋난다: 이름이 셋 늘어서도, 협상 하나가 칩 둘로 서도 화면은
+ * 멀쩡해 보인다.
+ */
+describe("안건 띠 — views.attention", () => {
+  it("없는 갈래는 서지 않고, 하나면 이름 · 여럿이면 수로 접힌다", () => {
+    const state = createTestGame();
+    // 새 게임에 열려 있는 것은 부임 회견 하나다 — 나머지 넷은 설 것이 없으면 안 선다
+    expect(buildOfficeViews(state).attention.map((i) => i.kind)).toEqual(["press"]);
+
+    const [one, two] = userPlayers(state).filter((p) => !p.isCaptain);
+    // 기한을 창(`PROMISE_ALERT_DAYS`) 안으로 좁혀 연다 — 90일짜리 완장 약속은 아직 안건이 아니다
+    expect(openPromise(state, one!.id, "captain", 7).ok).toBe(true);
+    expect(buildOfficeViews(state).attention.find((i) => i.kind === "promises")).toMatchObject({
+      count: 1,
+      name: one!.name,
+      daysLeft: 7,
+    });
+
+    expect(openPromise(state, two!.id, "minutes", 7).ok).toBe(true);
+    expect(buildOfficeViews(state).attention.find((i) => i.kind === "promises")).toMatchObject({
+      count: 2,
+      name: null,
+      daysLeft: 7,
+    });
+  });
+
+  /**
+   * `arrivedResponses`는 `pendingVerdicts`의 부분집합이다 — 도착한 답은 판정 대기이기도
+   * 하다. 그대로 세우면 협상 하나가 편지 칩과 협상 칩으로 두 번 선다.
+   */
+  it("도착한 편지는 협상 칩으로 두 번 서지 않는다", () => {
+    const state = createTestGame();
+    const target = playersOf(state, "chelsea").find((p) => p.teamId !== state.userTeamId)!;
+    expect(
+      sendOffer(state, { playerId: target.id, fee: 20_000_000, weeklyWage: 90_000, years: 4 }).ok,
+    ).toBe(true);
+    const negotiation = openNegotiationFor(state, target.id)!;
+    // 답이 오늘 도착했다
+    negotiation.rounds[negotiation.rounds.length - 1]!.respondsOn = state.date;
+    expect(arrivedResponses(state)).toHaveLength(1);
+    expect(pendingVerdicts(state).map((v) => v.negotiation.id)).toContain(negotiation.id);
+
+    const attention = buildOfficeViews(state).attention;
+    expect(attention.find((i) => i.kind === "letters")).toMatchObject({
+      count: 1,
+      name: target.name,
+    });
+    expect(attention.find((i) => i.kind === "verdicts")).toBeUndefined();
   });
 });
