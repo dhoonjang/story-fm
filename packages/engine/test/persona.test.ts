@@ -1249,7 +1249,7 @@ describe("관계 등급 — 이야기가 사이를 바꾼다 (people.md §6)", (
     const rows = relationTierBrief(state);
     expect(rows.every((r) => r.a === managerName)).toBe(true);
     expect(rows.find((r) => r.b === player.name)?.tier).toBe("close");
-    // 수석코치도 표에 선다 — 사건 표 시절 어떤 줄도 닿지 않던 쌍이다
+    // 수석코치도 표에 선다 — 코어가 판정할 사건이 하나도 없는 쌍이라 표가 유일한 앵커다
     expect(rows.some((r) => r.b === headCoachOf(state).name)).toBe(true);
   });
 });
