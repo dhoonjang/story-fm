@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MatchEvent } from "@story-fm/domain";
 import {
+  addDays,
   advanceTime,
+  clockOf,
   createGame,
   interpretBackgroundHeuristic,
   markEntered,
@@ -25,6 +27,7 @@ import {
   OPS_PER_COMMAND,
   parseOps,
   runGmTurn,
+  STALLED_CLOCK_TURNS,
   stampMatchScene,
   stampMatchStream,
   truncatedNote,
@@ -73,6 +76,31 @@ function buildMatchState(seed: number): GameState {
  */
 const KICKOFF = buildMatchState(5);
 const matchState = (): GameState => structuredClone(KICKOFF);
+
+/**
+ * 부임 첫날의 평시 판 — 도구를 쥐는 것은 평시 GM뿐이다 (경기 중엔 도구 표면이 0).
+ * `KICKOFF`과 같은 규약으로 한 번만 세우고 케이스마다 복제한다.
+ */
+const IDLE = ((): GameState => {
+  const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
+  return createGame({
+    seed: 11,
+    userTeamId: "arsenal",
+    managerName: "김감독",
+    background,
+    attributes: interpretBackgroundHeuristic(background),
+  });
+})();
+
+/** 모델의 응답 — 문장과 도구 호출 수 */
+const answered = (text: string, toolCallCount = 0) => ({
+  text,
+  history: { version: 1 as const, provider: "anthropic" as const, model: "test", messages: [] },
+  historyBase: 0,
+  usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+  toolCallCount,
+  stopReason: "completed" as const,
+});
 
 /** 한 턴 — 해석이 냈을 의도를 그대로 코어에 넣는다 (LLM은 이 경로에 없다) */
 function turn(
@@ -258,16 +286,6 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     else process.env.LLM_MODE = previousMode;
   });
 
-  /** 모델의 응답 — 문장과 도구 호출 수 */
-  const answered = (text: string, toolCallCount = 0) => ({
-    text,
-    history: { version: 1 as const, provider: "anthropic" as const, model: "test", messages: [] },
-    historyBase: 0,
-    usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
-    toolCallCount,
-    stopReason: "completed" as const,
-  });
-
   /** 첫 휘슬은 지나간 판 */
   function rolling(): GameState {
     const state = matchState();
@@ -436,15 +454,6 @@ describe("경기 마감 — 결산은 도구 뒤의 에이전트가, 마무리�
   afterEach(() => {
     if (previousMode === undefined) delete process.env.LLM_MODE;
     else process.env.LLM_MODE = previousMode;
-  });
-
-  const answered = (text: string, toolCallCount = 0) => ({
-    text,
-    history: { version: 1 as const, provider: "anthropic" as const, model: "test", messages: [] },
-    historyBase: 0,
-    usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
-    toolCallCount,
-    stopReason: "completed" as const,
   });
 
   /** `<settlement>` 표의 행에서 id를 읽는다 — 모델이 돌려줘야 할 그 id다 */
@@ -766,18 +775,6 @@ describe("평시 GM 턴 — 상한을 도구로 채운 턴", () => {
     else process.env.LLM_MODE = previousMode;
   });
 
-  /** 부임 첫날의 판 — 도구를 쥐는 것은 평시 GM뿐이다 (경기 중엔 도구 표면이 0) */
-  const IDLE = ((): GameState => {
-    const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
-    return createGame({
-      seed: 11,
-      userTeamId: "arsenal",
-      managerName: "김감독",
-      background,
-      attributes: interpretBackgroundHeuristic(background),
-    });
-  })();
-
   /** 상한에 걸린 응답 — 도구는 돌았고 장면은 오지 않았다 */
   const capped = (text: string) => ({
     text,
@@ -825,6 +822,98 @@ describe("평시 GM 턴 — 상한을 도구로 채운 턴", () => {
     runTurn.mockResolvedValue(capped(""));
 
     await expect(runGmTurn(state, "오늘은 좀 쉬자")).rejects.toBeInstanceOf(GmTurnFailure);
+  });
+});
+
+/**
+ * **시계는 출처 하나로 돈다** (docs/llm/agents.md §2 「시계」).
+ *
+ * 날짜를 미는 것은 헤더뿐이고, 손잡이가 이 턴 앞에서 이미 굴렸거나 판이 열려 있으면
+ * 날짜는 서고 **그 날 안의 시각만** 흐른다. 갈래는 코어의 `ClockSource` 하나가 갖고
+ * GM은 턴마다 한 번 부르므로, 여기서 지키는 것은 GM이 세 출처를 제 이름으로 부르는가다
+ * — 조용히 어긋나면 하루를 눌렀는데 이틀이 가거나, 경기 중에 훈련·성장이 통째로 구른다.
+ */
+describe("시계 — 출처가 날짜의 주인을 정한다", () => {
+  const previousMode = process.env.LLM_MODE;
+  beforeEach(() => {
+    process.env.LLM_MODE = "real";
+    runTurn.mockReset();
+  });
+  afterEach(() => {
+    if (previousMode === undefined) delete process.env.LLM_MODE;
+    else process.env.LLM_MODE = previousMode;
+  });
+
+  /**
+   * 장면 하나만 내는 모델 — 도구를 강제한 호출(결산 판정)은 빈손으로 돌린다.
+   * 그쪽은 앵커가 남으므로 이 판의 시계와는 상관이 없다.
+   */
+  const scene = (text: string) => async (req: TurnRequest) =>
+    forced(req) ? answered("") : answered(text);
+
+  /** 시점 헤더 한 줄 — 읽히는 형식은 `[날짜 시간대 시:분]`이다 (prompts.md §1) */
+  const header = (date: string, clock = "오후 3:20") => `[${date} ${clock}]`;
+
+  it("평시 턴의 헤더는 날짜와 시각을 함께 민다", async () => {
+    const state = structuredClone(IDLE);
+    const target = addDays(state.date, 2);
+    runTurn.mockImplementation(scene(`${header(target)}\n@스티브 홀랜드: 이틀이 지났습니다.`));
+
+    await runGmTurn(state, "이틀 뒤에 보자");
+
+    expect(state.date).toBe(target);
+    expect(clockOf(state)).toBe("15:20");
+  });
+
+  it("손잡이가 굴린 턴의 헤더는 날짜를 또 밀지 못한다", async () => {
+    const state = structuredClone(IDLE);
+    const start = state.date;
+    // 모델은 도착한 자리를 잘못 적었다 — 코어가 민 것은 손잡이가 누른 하루뿐이다
+    runTurn.mockImplementation(
+      scene(`${header(addDays(start, 9))}\n@스티브 홀랜드: 하루가 지났습니다.`),
+    );
+
+    await runGmTurn(state, "시간 진행 — 하루", undefined, { kind: "skip_days", days: 1 });
+
+    expect(state.date).toBe(addDays(start, 1));
+    // 그 날 안의 시각은 따라간다 — 묶어 두면 상단 띠가 하루의 시작에 얼어붙는다
+    expect(clockOf(state)).toBe("15:20");
+  });
+
+  it("경기 중에는 날짜가 서고 그 날의 시각만 흐른다", async () => {
+    const state = matchState();
+    markEntered(state);
+    const day = state.date;
+    runTurn.mockImplementation(
+      scene(`${header(addDays(day, 1), "오후 11:30")}\n@중계: 경기가 이어집니다.`),
+    );
+
+    await runGmTurn(state, "계속 지켜보자");
+
+    expect(state.date).toBe(day);
+    expect(clockOf(state)).toBe("23:30");
+  });
+
+  it("헤더 없는 평시 턴이 셋 연달으면 그 수가 턴 결과로 올라가고, 손잡이가 그것을 되돌린다", async () => {
+    const state = structuredClone(IDLE);
+    const start = state.date;
+    runTurn.mockImplementation(scene("@스티브 홀랜드: 헤더를 잊었습니다."));
+
+    const stalled: (number | undefined)[] = [];
+    for (let turn = 0; turn < STALLED_CLOCK_TURNS; turn++) {
+      stalled.push((await runGmTurn(state, "얘기 좀 하자")).clockStalled);
+    }
+    // 한두 번은 이어지는 대화일 수 있다 — 셋이면 우연이 아니다
+    expect(stalled).toEqual([undefined, undefined, STALLED_CLOCK_TURNS]);
+    expect(state.date).toBe(start);
+
+    // 손잡이가 시계를 옮긴 턴은 헤더가 없어도 멎은 것이 아니다
+    const moved = await runGmTurn(state, "시간 진행 — 하루", undefined, {
+      kind: "skip_days",
+      days: 1,
+    });
+    expect(moved.clockStalled).toBeUndefined();
+    expect(state.date).toBe(addDays(start, 1));
   });
 });
 
