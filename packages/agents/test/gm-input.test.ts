@@ -527,11 +527,11 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
 
     const card = scoutReportCard(state, target.id)!;
     const note = buildGmStateNote(state, null, [card]);
-    expect(note).toContain("<scout_reports>");
+    expect(note).toContain("<scout_reports name=");
     expect(note).toContain(formatMoney(card.marketValue));
     expect(note).toContain(formatMoney(card.wageExpectation));
     // 실리지 않은 턴에는 한 줄도 쓰지 않는다 — 매 턴 정가로 읽히는 블록이다
-    expect(buildGmStateNote(state)).not.toContain("<scout_reports>");
+    expect(buildGmStateNote(state)).not.toContain("<scout_reports");
   });
 
   /**
@@ -557,7 +557,7 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
     const card = missionReportCard(state, "mission-lb")!;
     // 지목은 하나도 없는 턴이다 — 임무만으로도 블록이 서야 한다
     const note = buildGmStateNote(state, null, [], [card]);
-    expect(note).toContain("<scout_reports>");
+    expect(note).toContain("<scout_reports name=");
     expect(note).toContain(card.brief);
     for (const c of card.candidates) expect(note).toContain(c.name);
     expect(note).toContain(formatMoney(card.candidates[0]!.marketValue));

@@ -92,10 +92,23 @@ function drawPool(state: GameState, season: number): StaffPoolEntry[] {
 }
 
 /**
- * 로드 보정 — 풀이 없던 세이브를 채운다. **멱등이다**(있으면 손대지 않는다).
+ * 지금 자리를 찾는 사람들 — **읽기만 한다** (people.md §2-2).
+ *
+ * 표가 없으면(새 게임·옛 세이브) 그해의 추첨을 그 자리에서 돌려준다. 세이브를 건드리지
+ * 않는 것이 요점이다: 프롬프트 입력을 조립하는 자리(`describeStaffPool`)와 화면이 이
+ * 함수를 부르는데, 입력을 만드는 일이 상태를 바꾸면 같은 턴을 두 번 그릴 때 세계가
+ * 달라진다. 추첨이 결정적이라 나중에 `ensureStaffPool`이 적어 넣는 값과 같다.
+ */
+export function staffPoolOf(state: GameState): readonly StaffPoolEntry[] {
+  return state.staffPool ?? drawPool(state, state.season);
+}
+
+/**
+ * 로드 보정 — 풀이 없던 세이브를 **적어 넣는다**. 멱등이다(있으면 손대지 않는다).
  *
  * 생성이 (시드, 시즌)으로 결정적이라 채워도 그 세이브의 사람은 늘 같다 — 세이브
- * 버전을 올리지 않는 근거다 (AGENTS.md 세이브 호환성).
+ * 버전을 올리지 않는 근거다 (AGENTS.md 세이브 호환성). 쓰는 자리는 여기와 고용·해고
+ * 뿐이다.
  */
 export function ensureStaffPool(state: GameState): void {
   if (state.staffPool !== undefined) return;
@@ -297,10 +310,12 @@ export function renewStaffContracts(state: GameState, on: string): string[] {
   return renewed;
 }
 
-/** 스태프 이름 목록 — 감독이 부른 이름을 그 사람으로 옮기는 자리 (`get_squad`·해석기) */
+/**
+ * 자리를 찾는 사람들 한 줄씩 — 감독이 부른 이름을 그 사람으로 옮기는 자리
+ * (`get_squad`·시장 해석기). **읽기만 한다** (`staffPoolOf`).
+ */
 export function describeStaffPool(state: GameState): string[] {
-  ensureStaffPool(state);
-  return (state.staffPool ?? []).map(
+  return staffPoolOf(state).map(
     (e) =>
       `${e.name} · ${e.title} · ${e.archetype} · 요구 연봉 ${formatMoney(e.ask)}${
         e.from === undefined ? "" : ` · ${teamNameIn(state, e.from)} 출신`

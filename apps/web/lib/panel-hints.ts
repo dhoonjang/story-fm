@@ -69,6 +69,9 @@ export const PANEL_OF: Record<string, PanelKey> = {
   fund_transfer_budget: "재정",
   // 오르는 것은 그 선수의 사기다 — 팀토크·면담과 같은 자리 (스쿼드)
   pay_player_bonus: "스쿼드",
+  // 스태프는 장부에 자기 연봉 한 줄로 선다 — 고용도 해지(위약금)도 확인할 화면은 재정이다
+  hire_staff: "재정",
+  release_staff: "재정",
   // ── 커리어 — 세계가 감독을 보는 눈 ──
   respond_to_media: "커리어",
   // 다가옴도 옮기는 것이 평판 3축이다 — 사기 변화는 스쿼드에도 서지만 자리는 하나다

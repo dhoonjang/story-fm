@@ -274,7 +274,7 @@ Employment {          // 수석코치 · 코치 · 의료진 · 스카우트 (�
 갱신은 sources.md §4.1의 시드 갱신과 같은 결로 **표를 고치는 것으로 끝나야 한다** —
 코드가 이름을 알면 안 된다. 실명 부채는 sources.md §7의 별도 항목이다.
 
-## 2-2. 스태프 — 구단이 고용한 사람들 (`market/staff-market.ts`)
+## 2-2. 스태프 — 구단이 고용한 사람들
 
 **감독이 매일 마주하는 사람은 수석코치 하나가 아니다.** 훈련장에는 코치가 서고,
 의무실에는 의료진이 있고, 보고서는 스카우트가 들고 온다. 셋은 원형과 말투를 갖는
@@ -335,6 +335,11 @@ Employment {          // 수석코치 · 코치 · 의료진 · 스카우트 (�
   풀이 새 구단의 눈금으로 다시 선다.
 - 풀에 앉은 이름도 `occupiedPersonNames`가 센다 — 이름이 곧 `characterId`(전역 유일)라,
   세계가 그 이름으로 다른 사람을 만들면 두 사람이 하나로 읽힌다.
+- **표가 없으면 읽는 자리가 그해의 추첨을 그 자리에서 답한다** (`staffPoolOf`) — 새 게임도
+  옛 세이브도 이 표 없이 서고, 세이브에 적히는 것은 로드 보정과 고용·해고 때뿐이다.
+  프롬프트 입력을 조립하는 일이 상태를 바꾸면 같은 턴을 두 번 그릴 때 세계가 달라진다.
+  **빈 배열은 다른 뜻이다**: 감독이 여덟을 다 데려갔다는 사실이고, 그 자리는 다음 여름까지
+  비어 있다.
 
 ### 고용과 해고 — 흥정 테이블은 없다
 
@@ -2289,7 +2294,8 @@ title? }` — 세이브에 남고(옛 세이브는 빈 배열), **개폐는 전�
 | 실명 시드 (코치·구단주)                               | `packages/engine/src/data/coach-seeds.ts` · `owner-seeds.ts`                                               |
 | 세계 인물 명부 (타 팀 감독·에이전트·해설)             | `packages/engine/src/data/world-figures.ts`                                                                |
 | 인물 사전 (키워드 판정 · 인물지 조립 · 선수 페르소나) | `packages/engine/src/world/people-directory.ts`                                                            |
-| 스태프 (원형 표 · 풀 · 고용·해고 · 연봉·위약금)       | `packages/engine/src/market/staff-market.ts`                                                               |
+| 스태프 원형 표 · 생성 · 연봉 · 화자 표               | `packages/engine/src/world/persona.ts`                                                                     |
+| 스태프 풀 · 고용·해고 · 위약금                       | `packages/engine/src/market/staff-market.ts`                                                               |
 | 인물 카드 → 프롬프트 (이번 턴 층 · 이력)              | `packages/agents/src/gm-input.ts` (`describePersona`)                                                      |
 | 장면을 여는 사람 규칙 · 철칙                          | `packages/agents/src/gm-prompt.ts`                                                                         |
 | 기자회견 (사실 카드 스키마 · 스탠스 효과)             | `packages/domain/src/press.ts` · `packages/engine/src/club/press.ts`                                       |

@@ -52,9 +52,11 @@ import {
   recordIncident,
   exerciseBuyBack,
   releasePlayer,
+  releaseStaff,
   requestBoard,
   resignPost,
   fundTransferBudget,
+  hireStaff,
   payPlayerBonus,
   setTicketPrice,
   respondToApproach,
@@ -145,7 +147,7 @@ import { inputError, toToolSchema } from "./tool-schema";
 import { recordCall, type GmToolCall, type CommandReturn } from "./gm-types";
 
 /**
- * **GM에게 보이지 않는 코어 명령** — 판을 세우는 열과 훈련 여섯, 시장 열아홉. 감독의 전술 지시는
+ * **GM에게 보이지 않는 코어 명령** — 판을 세우는 열과 훈련 여섯, 시장 스물하나. 감독의 전술 지시는
  * `tactic_orders`(평시·경기)·`training_orders`·`market_orders` 뒤의 해석이 JSON으로 옮기고 코어가 이 명령들을
  * 부른다 (agents.md §1). 설명은 모델에게 가지 않으므로 이름만 든다 — 판정 근거는
  * `TACTIC_ORDERS_SYSTEM`의 것이다.
@@ -186,6 +188,8 @@ export const CORE_COMMANDS: ReadonlySet<string> = new Set([
   "fund_transfer_budget",
   "pay_player_bonus",
   "set_ticket_price",
+  "hire_staff",
+  "release_staff",
   "accept_manager_offer",
   "counter_manager_offer",
   "apply_manager_job",
@@ -224,6 +228,8 @@ const CORE_COMMAND_LABELS: Record<string, string> = {
   fund_transfer_budget: "사재 출연",
   pay_player_bonus: "사재 보너스",
   set_ticket_price: "티켓 가격",
+  hire_staff: "스태프 고용",
+  release_staff: "스태프 계약 해지",
   accept_manager_offer: "감독직 수락",
   counter_manager_offer: "감독직 흥정",
   apply_manager_job: "감독직 지원",
@@ -237,6 +243,8 @@ const CORE_COMMAND_LABELS: Record<string, string> = {
  * 감독 발화가 통째로 실려 원장 라벨 한 줄이 단락이 됐다.
  */
 const playerRef = z.string().min(1);
+/** 선수가 아닌 사람의 이름 자리 — 스태프처럼 id가 없고 이름이 곧 그 사람이다 */
+const personRef = z.string().min(1);
 const dateArg = DateString;
 /** 나이 조건이 설 수 있는 폭 — 검색과 임무가 같은 자를 쓴다 (records.ts) */
 const ageArg = z.number().int().min(SEARCH_MIN_AGE).max(SEARCH_MAX_AGE);
@@ -984,6 +992,26 @@ export function buildToolSpecs(
         price: z.number().int().min(1).max(TICKET_PRICE_MAX).describe("표 한 장의 값 (£)"),
       }),
       (input) => setTicketPrice(state, input),
+    ),
+    /**
+     * **스태프 고용·해지** (people.md §2-2). 흥정 테이블이 없는 자리라 문 넷(풀에 있는
+     * 이름·요구 연봉·주급 여력·자리)을 코어가 한 번에 지나고 그 자리에서 계약된다.
+     */
+    wrap(
+      "hire_staff",
+      CORE_COMMAND_LABELS.hire_staff!,
+      z.object({
+        name: personRef.describe("자리를 찾는 스태프의 이름 — 감독이 부른 이름 그대로"),
+        /** 상한은 오타를 막는 자리다 — 실제 문은 요구 연봉과 주급 여력이 건다 */
+        salary: money(MONEY_MAX).describe("감독이 부른 연봉 (£/년)"),
+      }),
+      (input) => hireStaff(state, input),
+    ),
+    wrap(
+      "release_staff",
+      CORE_COMMAND_LABELS.release_staff!,
+      z.object({ name: personRef.describe("우리 구단 스태프의 이름 — 감독이 부른 이름 그대로") }),
+      (input) => releaseStaff(state, input),
     ),
 
     // ── 조회 (읽기 전용) — 컨텍스트에 없는 사실은 전부 여기로 ──
