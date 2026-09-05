@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { GamePayload, GameSlice } from "@/lib/store";
 import { mergeSlice } from "@/lib/game-slice";
-import type { ChatTurn } from "@story-fm/engine";
+import type { AttentionItemView, ChatTurn } from "@story-fm/engine";
 import type { TurnOperation } from "@story-fm/agents";
 import { ChatTurnView, turnStamp } from "./chat";
 import { chatForActiveMatch } from "@/lib/match-chat";
@@ -122,6 +122,44 @@ function groupMatchTurns(chat: readonly ChatTurn[]): ChatBlock[] {
  * 인라인하므로 프로덕션 빌드에서는 상수 `false`가 되어 제스처가 통째로 사라진다.
  */
 const TRACE_ENABLED = process.env.NODE_ENV !== "production";
+
+/**
+ * **오늘의 안건** — 답을 미루면 기한이 지나가는 일이 띠에 선다 (overview.md §5).
+ *
+ * 회견은 다음 회견이 밀어내고, 찾아온 사람은 사흘이면 돌아가고, 약속의 판정은 기한
+ * 하루뿐이다. 그것이 전부 GM의 스냅샷 안에만 있으면 감독은 모른 채 지나간다 — 장부가
+ * 바뀐 것을 레일 말풍선이 가리키는 것과 같은 결로, **읽는 값**을 화면이 든다.
+ *
+ * 코어가 낸 사실(`views.attention`)을 그대로 세운다: 갈래 이름 · 여럿이면 수 ·
+ * 하나면 이름 · 약속이면 남은 날. 문장도 안내도 붙이지 않는다 — 무엇을 할지는 감독이
+ * 말로 정한다.
+ */
+function Agenda({ items }: { items: readonly AttentionItemView[] }) {
+  if (items.length === 0) return null;
+  return (
+    <ul className="topbar-agenda" aria-label="오늘의 안건" data-testid="agenda">
+      {items.map((item) => {
+        /**
+         * 이름과 남은 날은 **좁아지면 접히는 군말**이다(`.abbr` — 직함·연도와 같은 칸).
+         * 갈래와 수는 남는다: 무엇이 몇 건인가가 이 띠의 알맹이다.
+         */
+        const detail = [
+          item.name,
+          item.daysLeft === null ? null : item.daysLeft === 0 ? "오늘" : `${item.daysLeft}일`,
+        ]
+          .filter((x): x is string => x !== null)
+          .join(" ");
+        return (
+          <li key={item.kind} className="agenda-chip" data-kind={item.kind}>
+            <span className="agenda-label">{item.label}</span>
+            {item.count > 1 && <span className="agenda-n">{item.count}</span>}
+            {detail !== "" && <span className="abbr agenda-detail">{detail}</span>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 export function GameScreen({ gameId }: { gameId: string }) {
   const [game, setGame] = useState<GamePayload | null>(null);
@@ -858,6 +896,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
                 </span>
               )}
             </span>
+            {/* 안건은 **평시에만** 선다 — 90분은 답할 자리가 아니고, 그 칸은 경기
+                시계의 것이다 (장부 아이콘 줄이 경기 중에 서지 않는 것과 같은 결) */}
+            {liveMatch === null && <Agenda items={game.views.attention} />}
           </div>
           {/*
            * 장부 뷰 — 무대의 주인은 채팅이므로 오른쪽 끝에 아이콘 줄로만 둔다.
