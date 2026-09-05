@@ -87,7 +87,18 @@ const PARTICLES = new Set(
  * 전체 이름을 먼저 넣고 성을 그 위에 얹는다 — 어떤 사람의 성이 다른 사람의 전체
  * 이름과 같으면 전체 이름이 이긴다(그 글자로 불릴 사람은 그쪽이다).
  */
-export function buildPlayerNameIndex(names: Record<string, string>): PlayerNameIndex {
+export function buildPlayerNameIndex(
+  names: Record<string, string>,
+  /**
+   * 낱말 하나로도 찾을까 — **사전에 새로 담을 사람을 고를 때는 끈다.**
+   *
+   * 서버는 리그 5,725명으로 색인을 지어 대화가 부른 선수를 찾는데, 그 색인에
+   * 낱말 하나짜리 열쇠가 있으면 수석코치 「스티브 홀랜드」의 「스티브」가 생판 남인
+   * 선수를 사전에 끌어들인다. 새로 담는 기준은 **전체 이름**이고, 낱말 하나는 이미
+   * 사전에 선 사람에게만 걸린다 (player.md §9.5).
+   */
+  partials = true,
+): PlayerNameIndex {
   const byName = new Map<string, string>();
   const ambiguous = new Set<string>();
   for (const [id, name] of Object.entries(names)) {
@@ -102,19 +113,19 @@ export function buildPlayerNameIndex(names: Record<string, string>): PlayerNameI
    * 절반이 글자로 남는다. 대신 겹치면 **둘 다 버린다**: 「브루누」가 한 사람의
    * 이름이면서 다른 사람의 성이면 어느 쪽인지 알 길이 없다.
    */
-  const partials = new Map<string, string>();
+  const byWord = new Map<string, string>();
   for (const [id, name] of Object.entries(names)) {
-    const words = name.split(" ");
+    const words = partials ? name.split(" ") : [];
     if (words.length < 2) continue;
     for (const word of words) {
       // 전체 이름으로 이미 선 글자는 건드리지 않는다 — 그 이름이 우선이다
       if (word.length < MIN_PARTIAL || byName.has(word)) continue;
-      const found = partials.get(word);
+      const found = byWord.get(word);
       if (found !== undefined && found !== id) ambiguous.add(word);
-      else partials.set(word, id);
+      else byWord.set(word, id);
     }
   }
-  for (const [word, id] of partials) byName.set(word, id);
+  for (const [word, id] of byWord) byName.set(word, id);
   for (const name of ambiguous) byName.delete(name);
   let longest = 0;
   const heads = new Set<string>();
