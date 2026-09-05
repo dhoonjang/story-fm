@@ -721,6 +721,26 @@ describe("splitPlayerNames", () => {
     });
   });
 
+  /**
+   * 두 글자 낱말은 한국어의 흔한 낱말과 겹친다 — 조사 표로도 못 막는다
+   * (「하지만」의 「만」은 진짜 조사다). 아예 걸지 않는 것이 규칙이다.
+   */
+  it("두 글자 낱말은 손잡이가 되지 않는다", () => {
+    const short = buildPlayerNameIndex({
+      "samuel-gigot": "사뮈엘 지고",
+      "alex-toth": "알렉스 토트",
+    });
+    expect(splitPlayerNames("점수가 지고 있다", short)).toEqual([{ text: "점수가 지고 있다" }]);
+    expect(splitPlayerNames("토트넘으로 지불되었고", short)).toEqual([
+      { text: "토트넘으로 지불되었고" },
+    ]);
+    // 전체 이름은 이 문턱을 지나지 않는다
+    expect(splitPlayerNames("사뮈엘 지고가 나선다", short)[0]).toEqual({
+      text: "사뮈엘 지고",
+      playerId: "samuel-gigot",
+    });
+  });
+
   it("성만 부른 이름도 사전 안에서 유일하면 선다", () => {
     const one = buildPlayerNameIndex({ "a-sener-lamens": "세너 라먼스" });
     expect(splitPlayerNames("라먼스가 넣었다", one)).toEqual([
@@ -738,16 +758,11 @@ describe("splitPlayerNames", () => {
    * 성이 「토트넘」을 물었다. 조사 표에 없는 꼬리는 이름이 아닌 쪽으로 판정한다.
    */
   it("이름 뒤가 조사가 아니면 이름이 아니다", () => {
-    const toth = buildPlayerNameIndex({ "alex-toth": "알렉스 토트", "alex-valle": "알렉스 바예" });
-    expect(splitPlayerNames("토트넘으로 지불되었고", toth)).toEqual([
-      { text: "토트넘으로 지불되었고" },
-    ]);
-    expect(splitPlayerNames("라요 바예카노의 검진", toth)).toEqual([
-      { text: "라요 바예카노의 검진" },
-    ]);
-    // 같은 성이라도 조사가 붙으면 그 사람이다
-    expect(splitPlayerNames("토트가 나선다", toth)).toEqual([
-      { text: "토트", playerId: "alex-toth" },
+    const dier = buildPlayerNameIndex({ "eric-dier": "에릭 다이어" });
+    expect(splitPlayerNames("다이어트를 시켰다", dier)).toEqual([{ text: "다이어트를 시켰다" }]);
+    // 조사가 붙으면 그 사람이다
+    expect(splitPlayerNames("다이어가 나선다", dier)).toEqual([
+      { text: "다이어", playerId: "eric-dier" },
       { text: "가 나선다" },
     ]);
     // 서술격 어미도 조사다 — 「발레바군요」의 그는 발레바다

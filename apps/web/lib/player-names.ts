@@ -9,9 +9,10 @@
  *
  * 규칙은 넷이다.
  * - **긴 이름이 이긴다** — 「세너 라먼스」가 서면 성 하나로 다시 자르지 않는다.
- * - **낱말 하나만 부른 이름은 사전 안에서 유일할 때만** 손잡이다. 성이든 이름이든
- *   같다 — 「브루누」는 브루누 페르난데스의 이름이면서 카이키 브루누의 성이라,
- *   둘 중 하나로 걸면 절반은 틀린 카드를 연다. 모르면 걸지 않는다.
+ * - **낱말 하나만 부른 이름은 세 글자 이상이고 사전 안에서 유일할 때만** 손잡이다.
+ *   성이든 이름이든 같다 — 「브루누」는 브루누 페르난데스의 이름이면서 카이키
+ *   브루누의 성이라, 둘 중 하나로 걸면 절반은 틀린 카드를 연다. 두 글자는 아예
+ *   걸지 않는다(`MIN_PARTIAL`).
  * - **앞이 한글이면 이름이 아니다** — 다른 이름의 꼬리를 자르지 않는다.
  * - **뒤에 붙을 수 있는 것은 조사뿐이다** — 이름 뒤의 한글 덩어리가 조사 표에 없으면
  *   그 자리는 이름이 아니다. 두 글자 성은 흔한 낱말의 앞머리이기도 해서
@@ -34,6 +35,17 @@ export interface PlayerNameIndex {
 
 /** 이름이 성립하는 가장 짧은 길이 — 한 글자 성은 아무 문장에나 걸린다 */
 const MIN_NAME = 2;
+
+/**
+ * **낱말 하나로 부를 때의 최소 길이** — 두 글자는 손잡이를 걸지 않는다.
+ *
+ * 두 글자 이름은 한국어의 흔한 낱말과 그대로 겹친다: 「지고」(사뮈엘 지고)는
+ * 「지고 있다」에, 「보니」는 「보니까」에, 「모두」·「올라」·「하지」는 문장 어디에나
+ * 선다. 조사 표로도 못 막는다 — 「하지만」의 꼬리 「만」은 진짜 조사다.
+ * 그 이름들이 글자로 남는 값보다, 감독이 「모두」를 눌러 세네갈 유망주의 카드를
+ * 여는 값이 크다 (전체 이름은 이 문턱을 지나지 않는다).
+ */
+const MIN_PARTIAL = 3;
 
 const HANGUL = /[가-힣]/;
 /**
@@ -96,7 +108,7 @@ export function buildPlayerNameIndex(names: Record<string, string>): PlayerNameI
     if (words.length < 2) continue;
     for (const word of words) {
       // 전체 이름으로 이미 선 글자는 건드리지 않는다 — 그 이름이 우선이다
-      if (word.length < MIN_NAME || byName.has(word)) continue;
+      if (word.length < MIN_PARTIAL || byName.has(word)) continue;
       const found = partials.get(word);
       if (found !== undefined && found !== id) ambiguous.add(word);
       else partials.set(word, id);
