@@ -28,7 +28,9 @@ import {
   cupCatalogById,
   domesticCupById,
   financeOf,
+  FREE_AGENT_YOUTH_CAP,
   groupOf,
+  isFreeAgent,
   leaderGroupOf,
   isFriendly,
   leagueOfTeamIn,
@@ -57,7 +59,9 @@ import {
   teamsOfLeagueIn,
   tierOfTeamIn,
   transitionSeason,
+  unsignedYouthOriginOf,
   userPlayers,
+  youthFreeAgents,
   visionProgress,
   visionScore,
   weeklyWagesOf,
@@ -1518,6 +1522,30 @@ describe("유스 인테이크 (season.md §6)", () => {
     }
   });
 
+  /**
+   * **명부는 여름마다 새로 서고 부풀지 않는다** (season.md §6 「계약을 받지 못한
+   * 아이」). 상한(`FREE_AGENT_YOUTH_CAP`)과 「한 시즌」 규칙이 함께 지키는 자리라
+   * 한 여름만 봐서는 보이지 않는다 — 이 하네스가 아니라 케이스인 것은 세 여름이
+   * 결정적이고, 여기서 어긋나면 세이브가 해마다 무거워지기 때문이다.
+   */
+  it("계약을 받지 못한 유스가 여름마다 명부에 서되 상한을 넘지 않는다", () => {
+    const state = createTestGame(7);
+    const perSummer: number[] = [];
+    for (let s = 0; s < 3; s++) {
+      transitionSeason(state);
+      const pool = youthFreeAgents(state);
+      perSummer.push(pool.length);
+      expect(pool.length).toBeLessThanOrEqual(FREE_AGENT_YOUTH_CAP);
+      // 아무도 부르지 않은 세계라 이번 여름의 아이만 서 있어야 한다
+      for (const youth of pool) {
+        expect(unsignedYouthOriginOf(state, youth.id)?.on, youth.id).toBe(
+          state.calendar.preseasonStart,
+        );
+      }
+    }
+    expect(Math.min(...perSummer), "여름마다 명부에 유스가 선다").toBeGreaterThan(0);
+  });
+
   it("답하지 않으면 코어가 앞에서부터 정해진 수만큼 계약한다", () => {
     const state = createTestGame(5);
     transitionSeason(state);
@@ -1534,14 +1562,26 @@ describe("유스 인테이크 (season.md §6)", () => {
       ).toBe(true);
       expect(activeContract(state, id), id).not.toBeNull();
     }
-    // 나머지는 사라진다 — 명단에도 원장에도 남지 않는다
-    for (const row of rows) {
-      if (auto.includes(row.player.id)) continue;
+    /**
+     * **나머지는 사라지지 않는다 — 무소속 명부로 간다** (season.md §6). 명부의 자리는
+     * 상한이 있어(`FREE_AGENT_YOUTH_CAP`) 세계의 또래에게 밀린 아이는 서지 못하지만,
+     * 어느 쪽이든 우리 명단에는 없다.
+     */
+    const leftovers = rows.filter((row) => !auto.includes(row.player.id));
+    for (const row of leftovers) {
       expect(
-        state.players.some((p) => p.id === row.player.id),
+        userPlayers(state).some((p) => p.id === row.player.id),
         row.player.id,
       ).toBe(false);
+      const stood = state.players.find((p) => p.id === row.player.id);
+      if (!stood) continue;
+      expect(isFreeAgent(stood), row.player.id).toBe(true);
+      expect(unsignedYouthOriginOf(state, stood.id)?.teamId, row.player.id).toBe(state.userTeamId);
     }
+    expect(
+      leftovers.some((row) => state.players.some((p) => p.id === row.player.id)),
+      "돌려보낸 후보가 한 명도 명부에 서지 않았다",
+    ).toBe(true);
     expect(digest.length).toBeGreaterThan(0);
   });
 

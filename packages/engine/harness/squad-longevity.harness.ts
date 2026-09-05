@@ -13,6 +13,7 @@ import {
   playersOf,
   settleYouthIntake,
   transitionSeason,
+  youthFreeAgents,
 } from "@story-fm/engine";
 import type { GameState } from "@story-fm/engine";
 import { createTestGame } from "../test/helpers";
@@ -66,6 +67,8 @@ describe("15시즌을 전환한 뒤의 스쿼드", () => {
     /** 여름마다 우리 앞에 선 후보와 그중 실제로 계약한 수 — 인테이크가 마르지 않는가 */
     const candidatesPerSummer: number[] = [];
     const signedPerSummer: number[] = [];
+    /** 여름마다 무소속 명부에 선 미계약 유스 — 상한이 실제로 지켜지는가 */
+    const youthPoolPerSummer: number[] = [];
     let summersWithoutCandidates = 0;
     for (let s = 0; s < SEASONS; s++) {
       /**
@@ -96,6 +99,8 @@ describe("15시즌을 전환한 뒤의 스쿼드", () => {
       const sizeBefore = playersOf(state, state.userTeamId).length;
       settleYouthIntake(state, []);
       signedPerSummer.push(playersOf(state, state.userTeamId).length - sizeBefore);
+      // 계약을 받지 못한 아이가 서는 명부 — 여름마다 부풀지 않는가 (season.md §6)
+      youthPoolPerSummer.push(youthFreeAgents(state).length);
     }
     const after = leagueTopMean(state);
 
@@ -145,6 +150,8 @@ describe("15시즌을 전환한 뒤의 스쿼드", () => {
       "후보가 서지 않은 여름": summersWithoutCandidates,
       "우리 인테이크 후보 — 여름 평균": mean(candidatesPerSummer),
       "우리 인테이크 계약 — 여름 평균": mean(signedPerSummer),
+      "무소속 유스 명부 — 15시즌 뒤": youthPoolPerSummer[youthPoolPerSummer.length - 1] ?? 0,
+      "무소속 유스 — 여름 평균": mean(youthPoolPerSummer),
     };
     console.log(reportOf(SQUAD_LONGEVITY, readings, `시드 42 · ${SEASONS}시즌 · ${state.date}`));
     expect(outOfBand(SQUAD_LONGEVITY, readings)).toEqual([]);

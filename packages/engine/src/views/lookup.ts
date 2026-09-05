@@ -197,7 +197,12 @@ import {
   teamShortNameIn,
   type GameState,
 } from "../core/state";
-import { loanReportOf, loanedOut, type LoanReport } from "../market/departures";
+import {
+  loanReportOf,
+  loanedOut,
+  unsignedYouthOriginOf,
+  type LoanReport,
+} from "../market/departures";
 import { headCoachOf, staffOf } from "../world/persona";
 import { describeStaffPool } from "../market/staff-market";
 
@@ -836,12 +841,19 @@ function trainingNoteFor(state: GameState, playerId: string, date: string): stri
 }
 
 const CAUSE_KO: Record<string, string> = { match: "경기", training: "훈련", other: "기타" };
+/**
+ * 이동 한 줄의 낱말 — **갈래 코드와 사유 코드를 한 표가 든다**(둘은 겹치지 않는다,
+ * `PLAYER_EXIT_KO`와 같은 규약). 사유가 갈래보다 정확한 줄만 사유로 적는다: 계약을
+ * 받지 못하고 아카데미를 나온 줄은 `type`이 `free`라 그대로 두면 「자유계약」이 되는데,
+ * 그는 끝낼 계약을 가진 적이 없다.
+ */
 const TRANSFER_KO: Record<string, string> = {
   transfer: "이적",
   loan: "임대",
   free: "자유계약",
   youth: "유스 승격",
   retire: "은퇴",
+  "youth-unsigned": "유스 미계약",
 };
 
 /**
@@ -984,7 +996,7 @@ function historyLines(state: GameState, p: GamePlayer): string[] {
     .slice(-3)
     .map(
       (t) =>
-        `${t.date} ${TRANSFER_KO[t.type] ?? t.type} ` +
+        `${t.date} ${TRANSFER_KO[t.reason ?? ""] ?? TRANSFER_KO[t.type] ?? t.type} ` +
         `${t.fromTeamId ? teamShortNameIn(state, t.fromTeamId) : "—"}→${t.toTeamId ? teamShortNameIn(state, t.toTeamId) : "—"}` +
         (t.fee > 0 ? ` ${formatMoney(t.fee)}` : ""),
     );
@@ -1145,6 +1157,12 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
   const knowledge: Knowledge = knowledgeOf(state, p.id);
   const stat = seasonStatOf(state, p.id);
   const contract = activeContract(state, p.id);
+  /**
+   * **계약 없음과 정보 없음은 다른 사실이다** — 아카데미를 계약 없이 나온 아이는
+   * 「알 수 없다」가 아니라 「아직 아무도 계약을 주지 않았다」이고, 어느 아카데미가
+   * 놓았는지가 감독이 그를 판단할 근거다 (transfer.md §6 · season.md §6).
+   */
+  const youthOrigin = unsignedYouthOriginOf(state, p.id);
   const injury = openInjury(state, p.id);
   const suspension = activeSuspension(state, p.id);
   const lines: string[] = [
@@ -1308,7 +1326,11 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
     [
       contract
         ? `계약: 주급 ${formatMoney(contract.weeklyWage)} · 만료 ${contract.until}`
-        : "계약: 정보 없음",
+        : youthOrigin
+          ? `계약: 없음 — 유스 출신 · ${
+              youthOrigin.teamId === null ? "아카데미" : teamShortNameIn(state, youthOrigin.teamId)
+            } 아카데미가 ${youthOrigin.on} 계약을 주지 않았다 · 프로 계약 이력 없음`
+          : "계약: 정보 없음",
       ...ledger,
     ].join(" · "),
   );

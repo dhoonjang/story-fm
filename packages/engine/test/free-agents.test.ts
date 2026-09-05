@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import type { GamePlayer } from "@story-fm/domain";
 import {
   FREE_AGENT_TEAM,
+  FREE_AGENT_YOUTH_CAP,
   LOAN_FEE_RATE,
   activeContract,
   addDays,
+  admitUnsignedYouth,
   answerOffer,
   dealOdds,
   freeAgents,
@@ -19,7 +22,11 @@ import {
   runAiRenewals,
   sendOffer,
   signFreeAgents,
+  dropStaleYouthFreeAgents,
+  transitionSeason,
+  unsignedYouthOriginOf,
   userPlayers,
+  youthFreeAgents,
   wageExpectationOf,
   weeklyWagesOf,
   windowOpenOn,
@@ -347,5 +354,124 @@ describe("판정을 기다리는 협상은 눈에 띈다", () => {
     expect(answered.ok, answered.message).toBe(true);
     const waiting = pendingVerdicts(state);
     expect(waiting[0]!.action).toBe("accept_deal");
+  });
+});
+
+/**
+ * **계약을 받지 못한 유스가 명부에 선다** (transfer.md §6 · season.md §6).
+ *
+ * 문(상한)과 「한 시즌」 규칙은 세이브가 여름마다 부풀지 않게 하는 자리라 화면에
+ * 드러나지 않는다 — 어긋나도 그 시즌에는 아무도 모르고, 열 시즌 뒤 무거워진
+ * 세이브로만 보인다. 그래서 케이스가 값한다.
+ */
+describe("무소속 명부의 유스 (transfer.md §6)", () => {
+  /** 진짜 선수를 복제해 천장과 나이만 바꾼다 — 후보 객체를 손으로 짓지 않는다 */
+  const youthLike = (
+    src: GamePlayer,
+    teamId: string,
+    i: number,
+    potential: number,
+    birthYear: number,
+  ): GamePlayer => ({
+    ...structuredClone(src),
+    id: `youth-${i}`,
+    catalogId: null,
+    teamId,
+    squadNumber: undefined,
+    squadLevel: "reserve",
+    birthdate: `${birthYear}-01-01`,
+    attributes: { ...src.attributes, potential },
+  });
+
+  it("자리가 차면 나이가 많고 천장이 낮은 쪽부터 서지 못한다", () => {
+    const state = createTestGame(3);
+    state.date = "2026-07-01";
+    const src = userPlayers(state)[0]!;
+    /**
+     * 천장이 낮을수록 뒤에 서게 짓는다 — 나이는 같게 두어 **천장 하나만** 순위를
+     * 가르게 한다(나이 항은 아래 케이스가 본다).
+     */
+    const born = Array.from({ length: FREE_AGENT_YOUTH_CAP + 5 }, (_, i) =>
+      youthLike(src, state.userTeamId, i, 90 - i, 2008),
+    );
+    const { admitted, turnedAway } = admitUnsignedYouth(state, born, state.date);
+
+    expect(admitted).toHaveLength(FREE_AGENT_YOUTH_CAP);
+    expect(turnedAway).toBe(5);
+    expect(youthFreeAgents(state)).toHaveLength(FREE_AGENT_YOUTH_CAP);
+    // 밀린 다섯은 세계에 들어오지도 않는다 — 원장에도 줄이 없다
+    for (let i = FREE_AGENT_YOUTH_CAP; i < FREE_AGENT_YOUTH_CAP + 5; i++) {
+      expect(playerById(state, `youth-${i}`), `youth-${i}`).toBeNull();
+      expect(state.transfers.some((t) => t.gamePlayerId === `youth-${i}`)).toBe(false);
+    }
+    // 선 아이는 무소속이고, 카드가 읽을 출신 줄을 갖는다
+    const stood = playerById(state, "youth-0")!;
+    expect(stood.teamId).toBe(FREE_AGENT_TEAM);
+    expect(unsignedYouthOriginOf(state, stood.id)).toEqual({
+      teamId: state.userTeamId,
+      on: state.date,
+    });
+  });
+
+  it("천장이 같으면 나이가 순위를 가른다", () => {
+    const state = createTestGame(3);
+    state.date = "2026-07-01";
+    const src = userPlayers(state)[0]!;
+    /**
+     * 천장은 모두 같고 **마지막 하나만 두 살 많다** — 자리는 상한 하나가 모자라므로
+     * 나이 항(`YOUTH_POOL_AGE_STEP`)이 없으면 밀려나는 사람이 갈리지 않는다.
+     */
+    const born = Array.from({ length: FREE_AGENT_YOUTH_CAP + 1 }, (_, i) =>
+      youthLike(src, state.userTeamId, i, 80, i === FREE_AGENT_YOUTH_CAP ? 2007 : 2009),
+    );
+    const { turnedAway } = admitUnsignedYouth(state, born, state.date);
+    expect(turnedAway).toBe(1);
+    expect(playerById(state, `youth-${FREE_AGENT_YOUTH_CAP}`), "나이 많은 쪽이 남았다").toBeNull();
+  });
+
+  it("한 시즌이 지나면 명부를 떠나되 갈 곳이 정해진 아이는 남는다", () => {
+    const state = createTestGame(3);
+    state.date = "2026-07-01";
+    const src = userPlayers(state)[0]!;
+    admitUnsignedYouth(
+      state,
+      [
+        youthLike(src, state.userTeamId, 0, 80, 2009),
+        youthLike(src, state.userTeamId, 1, 80, 2009),
+      ],
+      state.date,
+    );
+
+    const nextSummer = "2027-07-01";
+    /** 갈 곳이 정해진 아이는 남는다 — 지우면 그 계약이 사람 없이 남는다 */
+    state.contracts.push({
+      id: "c-pending-youth-1",
+      gamePlayerId: "youth-1",
+      teamId: "chelsea",
+      weeklyWage: 5_000,
+      since: nextSummer,
+      until: "2030-06-30",
+      status: "pending",
+    });
+    const gone = dropStaleYouthFreeAgents(state, nextSummer);
+    expect(gone.map((p) => p.id)).toEqual(["youth-0"]);
+    expect(youthFreeAgents(state).map((p) => p.id)).toEqual(["youth-1"]);
+  });
+
+  it("여름의 미계약 유스를 구단이 데려간다", () => {
+    const state = createTestGame(11);
+    transitionSeason(state);
+    const pool = youthFreeAgents(state);
+    expect(pool.length, "전환이 명부에 유스를 세우지 않았다").toBeGreaterThan(0);
+    const ids = new Set(pool.map((p) => p.id));
+
+    const digest: string[] = [];
+    for (let day = 0; day < 30; day++) {
+      state.date = addDays(state.date, 1);
+      signFreeAgents(state, digest);
+    }
+    const taken = state.players.filter((p) => ids.has(p.id) && isClubTeam(p.teamId));
+    expect(taken.length, "한 달 동안 어린 무소속을 아무도 데려가지 않았다").toBeGreaterThan(0);
+    for (const youth of taken) expect(activeContract(state, youth.id), youth.id).not.toBeNull();
   });
 });

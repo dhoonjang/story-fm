@@ -370,6 +370,8 @@ export const SQUAD_LONGEVITY = defineHarness({
     { metric: "후보가 서지 않은 여름", role: "guard", max: 0, unit: "count", why: "인테이크는 후보가 서야 사건이다 (season.md §6) — 한 여름이라도 비면 그해 감독에게는 고를 것이 없고, 코어가 채우는 기본값마저 서지 않는다" },
     { metric: "우리 인테이크 후보 — 여름 평균", role: "measure", unit: "count", why: "감독 앞에 선 후보 수 — 코어가 채울 수 위에 체급·아카데미 활용도가 얹은 여지" },
     { metric: "우리 인테이크 계약 — 여름 평균", role: "measure", unit: "count", why: "그중 실제로 계약한 수. 이 하네스는 답하지 않는 감독이라 곧 **기본값**이고, 위 줄과의 차가 감독이 고를 수 있었던 폭이다" },
+    { metric: "무소속 유스 명부 — 15시즌 뒤", role: "guard", max: 40, unit: "count", why: "`FREE_AGENT_YOUTH_CAP` — 계약을 받지 못한 아이가 서는 명부가 **여름마다 부풀지 않는가** (season.md §6). 상한과 「한 시즌」 규칙 둘 다 여기서만 보인다: 한 여름은 단위 테스트가 지키지만 열다섯 여름을 쌓아 자라는 것은 그 케이스에 보이지 않고, 자라면 세이브도 매일 도는 무소속 순회도 함께 무거워진다" },
+    { metric: "무소속 유스 — 여름 평균", role: "measure", unit: "count", why: "여름마다 명부에 선 수 — 상한에 눌린 값인지 세계가 낸 값인지를 위 줄과 함께 읽는다" },
   ],
 });
 

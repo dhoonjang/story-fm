@@ -56,7 +56,12 @@ import {
   seasonEndDate,
   seasonYear,
 } from "./calendar";
-import { clearDepartedState, toFreeAgency } from "../market/departures";
+import {
+  admitUnsignedYouth,
+  clearDepartedState,
+  dropStaleYouthFreeAgents,
+  toFreeAgency,
+} from "../market/departures";
 import { refreshStaffPool, renewStaffContracts } from "../market/staff-market";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import {
@@ -1463,6 +1468,34 @@ const YOUTH_POOL_BY_TIER: Record<1 | 2 | 3 | 4, number> = { 1: 4, 2: 3, 3: 3, 4:
 const YOUTH_POOL_ACADEMY = 2;
 
 /**
+ * **AI 아카데미가 자리보다 많이 길러 내는 수** — 그만큼이 계약을 받지 못하고 무소속
+ * 명부로 간다 (season.md §6 「계약을 받지 못한 아이」).
+ *
+ * 위 두 체급뿐인 것은 강등을 다투는 구단의 문제가 자리가 아니라 사람이기 때문이다 —
+ * 그들은 길러 낸 아이를 다 쥔다. 실제로도 방출 자원이 나오는 곳은 큰 아카데미이고
+ * 그 아이를 줍는 곳은 아래 리그다. 여름마다 38명이 명부에 서는 수이고, 명부의
+ * 상한(`FREE_AGENT_YOUTH_CAP` = 40)이 그 위에 선 문이다.
+ */
+const YOUTH_RELEASE_BY_TIER: Record<1 | 2 | 3 | 4, number> = { 1: 1, 2: 1, 3: 0, 4: 0 };
+
+/**
+ * 방출반의 천장이 계약반보다 낮은 폭 — **`TIER_BASE` 한 칸**(체급 하나)이다.
+ *
+ * 같은 분포에서 뽑아 놓고 "자리가 없어서"라고 하면 1등급 아카데미의 방출 자원이
+ * 1등급이 계약하는 아이와 같은 물건이 된다. 계약을 못 받은 이유가 이 폭이고,
+ * 흩어짐과 꼬리는 그대로라 드물게 제 아카데미의 선 위에 서는 아이가 섞인다 —
+ * 그게 「다른 구단이 놓친 아이」다.
+ */
+const YOUTH_RELEASE_CEILING_DROP = 4;
+
+/**
+ * 방출반이 쓰는 난수 채널의 시작 번호 — 계약반의 인덱스와 **겹치지 않아야** 한다
+ * (`generateYouthPlayer`의 채널은 `youth:팀:시즌:인덱스`다). 겹치면 한 아카데미에서
+ * 같은 사람이 둘 난다.
+ */
+const YOUTH_RELEASE_INDEX_BASE = 100;
+
+/**
  * 아카데미 활용도가 **유스 천장의 평균**에 얹는 폭 (season.md §6).
  *
  * 여지의 위끝이 아니라 천장이다 — 위끝에 얹으면 활용도가 높은 구단의 유스만 여지가
@@ -1626,18 +1659,19 @@ export function ourYouthCandidates(state: GameState): YouthCandidate[] {
 /**
  * 후보를 계약시킨다 — **한 번의 확정** (season.md §6).
  *
- * 고른 이름이 계약을 받고 **나머지 후보는 사라진다.** 다만 고른 뒤에도 포지션군이
- * 최소 인원 아래면 코어가 남은 후보에서 그 자리를 채운다 — 소프트락 방지는 감독의
- * 결정 밖이다.
+ * 고른 이름이 계약을 받고 **나머지 후보는 구단을 떠난다** — 사라지는 것이 아니라
+ * 무소속 명부로 간다(`admitUnsignedYouth` — transfer.md §6). 다만 고른 뒤에도
+ * 포지션군이 최소 인원 아래면 코어가 남은 후보에서 그 자리를 채운다 — 소프트락
+ * 방지는 감독의 결정 밖이다.
  *
  * ⚠️ 후보에 없는 id는 조용히 무시하지 않는다 — 부르는 쪽(`signYouth`)이 먼저 거른다.
  */
 export function signYouthCandidates(
   state: GameState,
   chosenIds: readonly string[],
-): { signed: GamePlayer[]; filled: GamePlayer[] } {
+): { signed: GamePlayer[]; filled: GamePlayer[]; released: GamePlayer[]; turnedAway: number } {
   const rows = state.youthCandidates ?? [];
-  if (rows.length === 0) return { signed: [], filled: [] };
+  if (rows.length === 0) return { signed: [], filled: [], released: [], turnedAway: 0 };
   const teamId = rows[0]!.teamId;
   const chosen = new Set(chosenIds);
   const signed: GamePlayer[] = [];
@@ -1664,7 +1698,16 @@ export function signYouthCandidates(
 
   state.youthCandidates = [];
   if (signed.length > 0 || filled.length > 0) promoteToMatchdaySquad(playersOf(state, teamId));
-  return { signed, filled };
+  /**
+   * **감독이 놓은 아이는 세계로 나간다** (season.md §6). 계약을 받지 못한 후보가
+   * 여기서 버려지면 감독이 다시 부를 자리도, 다른 구단이 주울 자리도 없다.
+   */
+  const { admitted, turnedAway } = admitUnsignedYouth(
+    state,
+    pool.map((row) => row.player),
+    state.date,
+  );
+  return { signed, filled, released: admitted, turnedAway };
 }
 
 /**
@@ -1675,8 +1718,12 @@ export function settleYouthIntake(state: GameState, digest: string[]): void {
   const rows = state.youthCandidates ?? [];
   if (rows.length === 0) return;
   const auto = rows.filter((row) => row.autoSign).map((row) => row.player.id);
-  const { signed, filled } = signYouthCandidates(state, auto);
+  const { signed, filled, released } = signYouthCandidates(state, auto);
   const all = [...signed, ...filled];
+  // 계약을 받지 못한 아이는 명부에 선다 — 다시 부를 수 있는지가 그 줄에 달렸다
+  if (released.length > 0) {
+    digest.push(`계약을 받지 못한 유스 ${released.length}명이 무소속 명부에 섰습니다`);
+  }
   if (all.length === 0) return;
   const line = `유스 계약: ${all.map((p) => p.name).join(", ")} — 감독이 답하지 않아 구단이 채웠다`;
   digest.push(line);
@@ -1821,6 +1868,15 @@ function applyTransition(state: GameState): string[] {
    * (소집일이 이미 정리했다). 무직으로 넘긴 시즌이면 아무도 서지 않는다.
    */
   state.youthCandidates = [];
+
+  /**
+   * **한 시즌이 지나도록 아무도 부르지 않은 아이는 명부를 떠난다** (season.md §6) —
+   * 새 아이가 설 자리를 내는 문이다. 사전 계약 발효보다 앞에 서면 예약된 아이를
+   * 지울 수 있으므로 `boundElsewhere`가 그 자리를 지킨다(`departures.ts`).
+   */
+  const staleYouth = dropStaleYouthFreeAgents(state, nextCalendar.preseasonStart).length;
+  /** 이번 여름 아카데미가 계약을 주지 않은 아이 — 팀 루프가 끝난 뒤 한 번에 명부에 선다 */
+  const releasedYouth: GamePlayer[] = [];
 
   // 사전 계약이 먼저 발효한다 — 계약 만료·유스 콜업·자동 갱신보다 앞이다 (season.md §6)
   settlePrecontracts(state, nextCalendar.preseasonStart, digest);
@@ -2012,6 +2068,32 @@ function applyTransition(state: GameState): string[] {
       playerIndex.set(youth.id, youth);
       squad.push(youth);
     }
+    /**
+     * **아카데미는 자리보다 많이 길러 낸다** (season.md §6). 계약반의 **뒤에** 따로
+     * 태어나므로 계약반의 이름도 능력치도 오늘과 같다 — 고르기가 리그 체급을 밀어
+     * 올리면 `squad-longevity`의 잠재력 드리프트 가드가 이 문 하나에 흔들린다.
+     *
+     * 우리 아카데미에는 방출반이 없다 — 감독 앞에 선 후보 줄이 이미 그 여지이고,
+     * 고르지 않은 후보가 같은 명부로 간다(`signYouthCandidates`).
+     */
+    const releases = ours ? 0 : YOUTH_RELEASE_BY_TIER[tier];
+    for (let j = 0; j < releases; j++) {
+      releasedYouth.push(
+        generateYouthPlayer(
+          state.seed + YOUTH_INTAKE_SEED_OFFSET,
+          team.id,
+          nextSeason,
+          YOUTH_RELEASE_INDEX_BASE + j,
+          tier,
+          takenIds,
+          undefined,
+          seasonYear(nextSeason),
+          takenNames,
+          -YOUTH_RELEASE_CEILING_DROP,
+        ),
+      );
+    }
+
     if (ours) {
       state.youthCandidates = candidates;
       const line =
@@ -2087,6 +2169,20 @@ function applyTransition(state: GameState): string[] {
         slots: layoutSlots.slice(0, 11),
         points: layoutPoints.slice(0, 11),
       },
+    );
+  }
+
+  /**
+   * **계약을 받지 못한 아이가 명부에 선다** — 팀 루프가 끝난 뒤 한 번에 세운다.
+   * 구단마다 세우면 앞 구단의 아이가 상한을 채워, 명부에 서는지가 세계를 도는
+   * 순서로 정해진다 (season.md §6).
+   */
+  if (releasedYouth.length > 0) {
+    const { admitted } = admitUnsignedYouth(state, releasedYouth, nextCalendar.preseasonStart);
+    // 다이제스트 한 줄 — 명부가 여름마다 바뀐다는 사실이 감독이 시장에 나갈 근거다
+    digest.push(
+      `무소속 명부에 유스 ${admitted.length}명이 새로 섰습니다` +
+        (staleYouth > 0 ? ` (지난 여름의 ${staleYouth}명은 명부를 떠났다)` : ""),
     );
   }
 

@@ -369,6 +369,11 @@ export const TransferReasonSchema = z.enum([
   "precontract",
   "retire",
   "youth-callup",
+  /**
+   * 아카데미가 계약을 주지 않아 무소속 명부로 나갔다 (→ docs/simulation/season.md §6).
+   * `youth-callup`의 반대쪽 문이고 `contract-expiry`와도 다르다 — 끝난 계약이 없다.
+   */
+  "youth-unsigned",
 ]);
 export type TransferReason = z.infer<typeof TransferReasonSchema>;
 
