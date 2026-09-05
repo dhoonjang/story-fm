@@ -1,5 +1,6 @@
 import type {
   AssignmentRole,
+  AttributeAxis,
   AxisValues,
   BoardPoint,
   EdgeSize,
@@ -148,6 +149,8 @@ import { moodOf, type MoodRead } from "../squad/mood";
 import { openPromises, squadStatusOf } from "../squad/promises";
 import { isHomegrownFor, occupiesSquadList, squadRegistrationOf } from "../squad/registration";
 import {
+  KNOWLEDGE_KO,
+  knowledgeOf,
   observationOf,
   observedFit,
   observedOverall,
@@ -163,6 +166,7 @@ import {
   scoutedAttributes,
   youthCandidateFog,
   type ConditionRead,
+  type Knowledge,
   type Observation,
 } from "../squad/scouting";
 import type {
@@ -212,8 +216,11 @@ import { tierOfTeamIn } from "../core/club-tier";
 import { isCupOnlyLeague, leagueName } from "../data/league-catalog";
 import {
   activeContract,
+  activeSuspension,
   activeSuspensionFor,
   isAvailableFor,
+  isOurPlayer,
+  assignmentFor,
   assignmentsOf,
   financeOf,
   groupOf,
@@ -236,7 +243,7 @@ import {
   weeklyWagesOf,
   type GameState,
 } from "../core/state";
-import { loanReports } from "../market/departures";
+import { loanReportOf, loanReports } from "../market/departures";
 import { visionOf, visionReadings, visionSpanOf, visionYearOf } from "../club/vision";
 
 /**
@@ -290,6 +297,17 @@ function growthSummary(state: GameState, date: string, entryId?: string): string
     .join(" · ");
 }
 
+/**
+ * 원장 한 건이 가리키는 선수 — 아니면 빈 객체다 (전개해 그대로 얹는다).
+ *
+ * `ref`는 선수만 가리키는 칸이 아니다(이적·시설도 여기 앉는다) — 갈래를 보고
+ * 선수일 때만 낸다. 이름 문자열에서 되찾지 않는 이유는 하나다: 라벨은 사람이 읽는
+ * 말이고 동명이인에서 갈린다 (player.md §9.5).
+ */
+function playerRefOf(entry: LedgerEntry): { playerId?: string } {
+  return entry.ref?.type === "player" ? { playerId: entry.ref.id } : {};
+}
+
 /** 재정의 한 달 — 마감된 보고서와 진행 중인 달이 같은 모양을 쓴다 */
 export interface FinanceMonthView {
   month: string;
@@ -328,8 +346,14 @@ export interface FinanceFeedRow {
   /** 접힌 줄이면 묶음의 합계 */
   amount: number;
   noncash: boolean;
+  /**
+   * **이 줄이 가리키는 선수** — 원장의 `ref`가 선수를 가리키는 한 건짜리 줄에만 선다
+   * (주급 명세·이적료 상각). 이름을 눌러 카드를 여는 손잡이의 열쇠다
+   * (player.md §9.5) — 라벨의 이름으로 되찾으면 동명이인에서 갈린다.
+   */
+  playerId?: string;
   /** 2건 이상 접혔을 때만 — 펼치면 나오는 대상별 명세. 금액이 큰 것부터 */
-  items?: Array<{ label: string; amount: number }>;
+  items?: Array<{ label: string; amount: number; playerId?: string }>;
   /**
    * 명세를 **무엇으로 세는가** — 묶인 엔트리가 모두 선수를 가리키면 `명`, 아니면 `건`.
    * 세는 단위는 무엇이 묶였는지가 정하므로 코어가 안다. 화면은 이 낱말과 `items.length`로
@@ -366,7 +390,7 @@ function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
     key: string;
     row: FinanceFeedRow;
     head: string;
-    items: Array<{ label: string; amount: number }>;
+    items: Array<{ label: string; amount: number; playerId?: string }>;
     /** 묶인 엔트리의 `ref.type` — 하나로 모이지 않으면 null */
     refType: NonNullable<LedgerEntry["ref"]>["type"] | null;
   };
@@ -388,7 +412,7 @@ function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
     const found = groups.get(key);
     if (found) {
       found.row.amount += e.amount;
-      found.items.push({ label: item, amount: e.amount });
+      found.items.push({ label: item, amount: e.amount, ...playerRefOf(e) });
       if (found.refType !== (e.ref?.type ?? null)) found.refType = null;
       continue;
     }
@@ -396,7 +420,7 @@ function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
       key,
       head,
       refType: e.ref?.type ?? null,
-      items: [{ label: item, amount: e.amount }],
+      items: [{ label: item, amount: e.amount, ...playerRefOf(e) }],
       row: {
         id: e.id ?? `led-${e.date}-${i}`,
         date: e.date,
@@ -407,6 +431,7 @@ function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
         label: head ? e.label : item,
         amount: e.amount,
         noncash,
+        ...playerRefOf(e),
       },
     };
     groups.set(key, group);
@@ -414,9 +439,11 @@ function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
   }
   return order.slice(0, FINANCE_FEED_ROWS).map(({ key, row, head, items, refType }) => {
     if (items.length < 2) return row;
+    // 접힌 줄은 여러 사람의 합이라 머리줄이 한 사람을 가리키지 않는다 — 손잡이는 명세에만
+    const rest = { ...row, playerId: undefined };
     // 접힌 줄은 항목명만 남기고 원래 라벨은 명세로 내려간다 — 큰 금액이 위로
     return {
-      ...row,
+      ...rest,
       id: `fold-${key}`,
       label: head,
       items: [...items].sort((a, b) => b.amount - a.amount),
@@ -1084,8 +1111,12 @@ export interface MatchPreviewView {
   basis: { date: string; label: string } | null;
   /** 직전 경기 선발에서 이어지지 못해 코어가 메운 인원 — 예상의 흐릿한 정도다 */
   guessed: number;
-  /** 부상·정지·대표팀 소집으로 못 나오는 상대 선수 (`AbsentReason` — `match/preview.ts`) */
-  absent: { name: string; position: string; reason: AbsentReason; note: string }[];
+  /**
+   * 부상·정지·대표팀 소집으로 못 나오는 상대 선수 (`AbsentReason` — `match/preview.ts`).
+   * **id가 함께 선다** — 이름을 눌러 그 선수의 카드를 여는 손잡이의 열쇠다
+   * (player.md §9.5). 이름으로 되찾으면 동명이인에서 갈린다.
+   */
+  absent: { id: string; name: string; position: string; reason: AbsentReason; note: string }[];
   /** 상대가 세워 둔 모양과 6축 — 전술판과 같은 조각이라 화면이 같은 낱말을 쓴다 */
   shape: TacticsView;
   /**
@@ -2494,6 +2525,7 @@ function matchPreviewView(state: GameState, matchId: string): MatchPreviewView |
      */
     guessed: report.basis === null ? 0 : report.expectedXI.filter((p) => !p.carried).length,
     absent: report.absent.map((a) => ({
+      id: a.id,
       name: a.name,
       position: a.position,
       reason: a.reason,
@@ -4538,4 +4570,346 @@ export function buildMatchReport(state: GameState, matchId: string): MatchReport
     motm: motm ? { id: motm.id, name: motm.name, rating: motm.rating ?? 0 } : null,
     hasDetail: events.length > 0,
   };
+}
+
+// ── 선수 카드 — 이름을 눌러 여는 한 장 (player.md §9.5) ──────
+
+/**
+ * 관측된 축 하나 — **값과 그 값이 얼마나 틀릴 수 있는가** (player.md §9).
+ *
+ * 폭을 함께 싣는 까닭은 명단의 `±N`과 같다: 흐리다는 사실만으로는 **얼마나**
+ * 흐린지를 말하지 못해 스카우팅을 마친 선수와 소문으로만 아는 선수가 같아 보인다.
+ * 폭은 축마다 다르다 — 몸과 발(관측형)은 좁고 판단(분석형)은 넓다.
+ */
+export interface PlayerCardAxisView {
+  key: AttributeAxis;
+  /** **관측값** — 남의 선수에게는 참값이 아니다 */
+  value: number;
+  margin: number;
+}
+
+/**
+ * **우리 계약에만 서는 칸** — 상태와 우리 원장 (player.md §9.5).
+ *
+ * 안개가 걷힌 값이 아니라 우리 훈련장과 우리 장부만 아는 사실이라, 남의 선수
+ * 카드에는 이 묶음이 통째로 없다(`null`). 「모름」으로 세우면 없는 자리를 있는
+ * 것처럼 그린다.
+ */
+export interface PlayerCardOursView {
+  squadNumber: number | null;
+  form: number;
+  formLabel: string;
+  formAngle: number;
+  formTone: "up" | "flat" | "down";
+  recentRatings: RecentRatingView[];
+  /**
+   * 체력 — 경기 중 출전 명단에 든 선수는 **판세 탭과 같은 읽은 값**이다
+   * (`conditionShown` · player.md §9.2). 카드만 참값을 쓰면 감독이 두 자리를
+   * 견주는 것만으로 안개가 걷힌다.
+   */
+  condition: ConditionRead;
+  fatigueLabel: string;
+  fatigueBand: FatigueBand;
+  mood: MoodRead;
+  squadStatus: SquadStatus;
+  /** 아직 기한 전인 감독의 약속 — 갈래와 기한뿐이다 (people.md §5-2) */
+  promises: Array<{ kind: PromiseKind; dueOn: string }>;
+  isCaptain: boolean;
+  isViceCaptain: boolean;
+  /** 라커룸 서열 — 리더 그룹 밖이면 null (people.md §5-1) */
+  leaderRank: number | null;
+  homegrown: boolean;
+  /** 정착 진행도 — 끝났거나 원소속이면 null. 이 값이 있는 동안 축은 참값이 아니다 */
+  settling: number | null;
+  /**
+   * 지금 전술판에서 맡은 것 — 배치가 없으면 null.
+   *
+   * **카드는 고르는 자리가 아니다** — 역할을 바꾸는 손잡이는 전술판 하나뿐이라
+   * (읽는 값과 조작 대상은 생김새가 다르다 — overview.md §5) 여기 실리는 것은
+   * 지금 무엇을 맡고 있는가뿐이다. **자리가 있어야 역할이 있다**(player.md §3.1) —
+   * 좌표가 없는 벤치 배치는 역할 칸이 비어 있다.
+   */
+  assignment: {
+    tier: "선발" | "벤치";
+    position: string;
+    /** 그 자리의 세부 역할 — 자리가 없는 벤치 배치는 null */
+    role: { id: string; ko: string } | null;
+    familiarity: number;
+    instruction: string | null;
+  } | null;
+  loan: SquadViewRow["loan"];
+  away: SquadViewRow["away"];
+  /** 마일스톤 — 최근 것 몇 건 (`SQUAD_MILESTONES_SHOWN`). 장부는 우리 선수만 담는다 */
+  milestones: MilestoneView[];
+}
+
+/**
+ * **선수 한 장** — 이야기와 장부에 선 이름을 누르면 열리는 카드 (player.md §9.5).
+ *
+ * 매 턴 오는 짐에 싣지 않고 **열 때 하나씩** 온다
+ * (`GET /api/games/[id]/player/[playerId]`) — 끝난 경기의 리포트와 같은 길이다
+ * (match.md §8). 명단에 설 수 없는 남의 구단 선수가 화면에 서는 첫 자리라 **안개를
+ * 통과한 값만 싣는다**: 참값을 보내고 화면이 흐리는 것이 아니라 코어가 흐린 값을
+ * 낸다(player.md §9 · §10). 흐리는 것은 능력치와 시장가뿐이고 기록·계약·국적·부상
+ * 이력은 신문에 실리는 사실이라 두 얼굴이 같다.
+ */
+export interface PlayerCardView {
+  id: string;
+  name: string;
+  age: number;
+  /** 소속 구단 — 풀네임. 화면은 카탈로그를 못 읽는다 (`CareerSeasonView.team`과 같은 이유) */
+  team: string;
+  teamId: string;
+  /** 국적은 안개 밖이다 (player.md §10) — 남의 선수도 참값 그대로 */
+  nationality: string | null;
+  secondNationality: string | null;
+  caps: number;
+  internationalGoals: number;
+  position: string;
+  positionGroup: string;
+  /** 소화 가능한 자리 — 적응도와 **관측 축에서 낸** 그 자리 전력 (`observedFit`) */
+  positions: SquadPositionView[];
+  foot: Foot;
+  height: number | null;
+  weight: number | null;
+
+  /** 이 선수를 얼마나 아는가 — 아래 숫자 전부에 걸리는 단서다 (player.md §9) */
+  knowledge: Knowledge;
+  knowledgeLabel: string;
+  /**
+   * 무엇까지 알아냈나 한 줄 — **코어가 낸다**(`knowledgeNote`). 조회 도구의 카드와
+   * 같은 문장이라 GM이 채팅에서 하는 말과 화면이 갈리지 않는다.
+   */
+  note: string;
+  observation: Observation;
+  /** **관측** 종합 — 참값이 아니다 (`observedOverall`) */
+  overall: number;
+  /** 16축 — 축마다의 관측값과 오차폭 */
+  attributes: PlayerCardAxisView[];
+  /** 잠재력 **추정 구간** — 짐작할 근거가 없으면 null (player.md §9.1) */
+  potential: { low: number; high: number; margin: number; confidence: string } | null;
+
+  /**
+   * **관측** 시장가 — `deal_odds`가 부르는 것과 같은 흐린 값(`observedMarketValue`).
+   * 우리 선수는 흐림 폭이 0이라 참값이다.
+   */
+  marketValue: number;
+  /** 주급·계약 만료일은 흐리지 않는다 — 공개 기록 계열이다 (player.md §10) */
+  weeklyWage: number | null;
+  contractUntil: string | null;
+  /** 이적 리스트 호가 — 올라 있지 않으면 null */
+  transferListed: number | null;
+
+  /** 지금 부상 (없으면 null) — 공개 기록이라 남의 선수도 그대로 선다 */
+  injury: { bodyPart: string; severity: string; expectedReturn: string } | null;
+  /** 출장 정지 잔여 경기 (0이면 정지 아님) */
+  suspended: number;
+  /** 부상 이력 — 2시즌 창의 건수·결장 일수. **등급이 아니라 사실이다** (player.md §5.3) */
+  injuryHistory: InjuryHistory;
+
+  /** 이번 시즌 이 팀의 한 행 — 기록은 안개 밖이다 (player.md §10) */
+  season: {
+    apps: number;
+    goals: number;
+    assists: number;
+    /** 평균 평점 — 출전이 없으면 null (0.00과 "기록 없음"은 다르다) */
+    rating: number | null;
+    minutes: number;
+    shots: number;
+    xg: number;
+    saves: number;
+    cleanSheets: number;
+    yellows: number;
+    reds: number;
+  };
+  /** 이번 시즌 **대회별** — 대회가 하나뿐이면 합계가 같은 수를 말하므로 빈 배열 */
+  seasonByCompetition: SquadViewRow["seasonByCompetition"];
+  /** 시즌별과 통산 — 스쿼드 상세와 **같은 함수**가 접는다 (player.md §10) */
+  career: { seasons: CareerSeasonView[]; totals: CareerTotalsView };
+
+  /** 우리 계약일 때만 — 남의 선수는 null (`isOurPlayer`: 소속이 아니라 계약이 가른다) */
+  ours: PlayerCardOursView | null;
+}
+
+/**
+ * 그 선수 한 장을 짓는다 — 없는 선수면 null.
+ *
+ * **명단 행이 쓰는 그 함수들을 그대로 지난다**(`observedRating` · `observedFit` ·
+ * `potentialBand` · `observedMarketValue`) — 카드가 제 자를 따로 들면 같은 선수의
+ * 종합이 명단과 카드에서 두 숫자로 선다.
+ */
+export function buildPlayerCard(state: GameState, playerId: string): PlayerCardView | null {
+  const p = playerById(state, playerId);
+  if (!p) return null;
+  const knowledge = knowledgeOf(state, p.id);
+  const observation = observationOf(state, p.id);
+  const observed = Object.fromEntries(
+    ATTRIBUTE_AXES.map((a) => [a, observedRating(state, p.id, a, p.attributes[a])]),
+  ) as AxisValues;
+  const contract = activeContract(state, p.id);
+  const suspension = activeSuspension(state, p.id);
+  const injury = openInjury(state, p.id);
+  const stat = seasonStatOf(state, p.id);
+  /** 커리어는 그 선수의 **전 행**을 접는다 — 스쿼드 상세와 같은 자다(`careerViewOf`) */
+  const statRows = state.seasonStats.filter((s) => s.gamePlayerId === p.id);
+  return {
+    id: p.id,
+    name: p.name,
+    age: ageOf(p.birthdate, state.date),
+    team: teamNameIn(state, p.teamId),
+    teamId: p.teamId,
+    nationality: p.nationality ?? null,
+    secondNationality: p.secondNationality ?? null,
+    caps: capsOf(p.state),
+    internationalGoals: internationalGoalsOf(p.state),
+    position: naturalPositionOf(p).position,
+    positionGroup: groupOf(p),
+    positions: p.positions.map((x) => ({
+      ...x,
+      overall: observedFit(observed, observation, x.position),
+    })),
+    foot: p.foot ?? { left: 3, right: 3 },
+    height: p.height ?? null,
+    weight: p.weight ?? null,
+    knowledge,
+    knowledgeLabel: KNOWLEDGE_KO[knowledge],
+    note: knowledgeNote(state, p.id),
+    observation,
+    overall: observedOverall(p.attributes.overall, observation),
+    attributes: ATTRIBUTE_AXES.map((key) => ({
+      key,
+      value: observed[key],
+      margin: observationMargin(state, p.id, key),
+    })),
+    potential: potentialBand(state, p),
+    marketValue: observedMarketValue(state, p),
+    weeklyWage: contract?.weeklyWage ?? null,
+    contractUntil: contract?.until ?? null,
+    transferListed: listingOf(state, p.id)?.askingPrice ?? null,
+    injury: injury
+      ? {
+          bodyPart: injury.bodyPart,
+          severity: INJURY_SEVERITY_KO[injury.severity],
+          expectedReturn: injury.expectedReturn,
+        }
+      : null,
+    suspended: suspension ? suspension.lengthMatches - suspension.served : 0,
+    injuryHistory: injuryHistoryOf(state, p.id),
+    season: {
+      apps: stat?.apps ?? 0,
+      goals: stat?.goals ?? 0,
+      assists: stat?.assists ?? 0,
+      rating: seasonRating(stat),
+      minutes: stat?.minutes ?? 0,
+      shots: stat?.shots ?? 0,
+      xg: stat?.xg ?? 0,
+      saves: stat?.saves ?? 0,
+      cleanSheets: stat?.cleanSheets ?? 0,
+      yellows: stat?.yellows ?? 0,
+      reds: stat?.reds ?? 0,
+    },
+    seasonByCompetition: competitionRowsOf(
+      statRows.filter((s) => s.season === state.season && s.teamId === p.teamId),
+    ).map((row) => ({
+      competitionId: row.competitionId,
+      name: competitionShortName(row.competitionId),
+      apps: row.apps,
+      goals: row.goals,
+      assists: row.assists ?? 0,
+    })),
+    career: {
+      seasons: careerSeasonRowsOf(statRows)
+        .map((row) => ({ row, totals: careerTotalsView(row) }))
+        .filter(({ totals }) => totals.apps > 0 || totals.reserveApps > 0)
+        .map(({ row, totals }) => ({
+          season: row.season,
+          teamId: row.teamId,
+          team: teamShortNameIn(state, row.teamId),
+          ...totals,
+        })),
+      totals: careerTotalsView(foldCareer(statRows)),
+    },
+    ours: isOurPlayer(state, p) ? oursCardOf(state, p) : null,
+  };
+}
+
+/**
+ * 카드의 우리 칸 — **명단 행이 내는 것과 같은 값**이다.
+ *
+ * 다른 것은 전술뿐이다: 명단은 역할을 고를 수 있는 목록을 싣지만 카드는 지금 맡은
+ * 것 하나를 사실로 싣는다 (카드에는 전술판이 없다).
+ */
+function oursCardOf(state: GameState, p: GamePlayer): PlayerCardOursView {
+  const assignment = assignmentFor(state, p.id);
+  const loan = loanReportOf(state, p.id);
+  const slotted = assignment?.role === "starting";
+  /** 자리가 있어야 역할이 있다 — 벤치 배치의 `position`은 주 포지션이 채운 값이다 */
+  const role =
+    slotted && assignment
+      ? (rolesFor(assignment.position).find(
+          (r) => r.id === (assignment.roleId ?? defaultRoleOf(assignment.position)),
+        ) ?? null)
+      : null;
+  return {
+    squadNumber: p.squadNumber ?? null,
+    form: Math.round(p.state.form * 100) / 100,
+    formLabel: formLabel(p.state.form),
+    formAngle: formAngle(p.state.form),
+    formTone: formTone(p.state.form),
+    recentRatings: recentRatingsOf(state, p.id),
+    condition: conditionShown(state, p.id, p.state.condition, liveWearOf(state, p.id)),
+    fatigueLabel: fatigueLabel(fatigueOf(p.state)),
+    fatigueBand: fatigueBand(fatigueOf(p.state)),
+    mood: moodOf(state, p),
+    squadStatus: squadStatusOf(state, p),
+    promises: openPromises(state, p.id).map((x) => ({ kind: x.kind, dueOn: x.dueOn })),
+    isCaptain: p.isCaptain,
+    isViceCaptain: p.isViceCaptain === true,
+    leaderRank:
+      leaderGroupOf(state, state.userTeamId).findIndex((row) => row.playerId === p.id) + 1 || null,
+    homegrown: isHomegrownFor(p, state.userTeamId),
+    settling: settlingPercent(state, p.id),
+    assignment: assignment
+      ? {
+          tier: assignment.role === "starting" ? "선발" : "벤치",
+          position: assignment.position,
+          role: role ? { id: role.id, ko: role.ko } : null,
+          familiarity: assignment.familiarity,
+          instruction: assignment.instruction ?? null,
+        }
+      : null,
+    loan: loan
+      ? {
+          teamId: loan.teamId,
+          team: teamShortNameIn(state, loan.teamId),
+          until: loan.until,
+          apps: loan.apps,
+          goals: loan.goals,
+          rating: loan.rating,
+          benchRun: loan.benchRun,
+          growth: loan.growth,
+        }
+      : null,
+    away: awayViewOf(state, p),
+    milestones: (state.milestones ?? [])
+      .filter((m) => m.gamePlayerId === p.id)
+      .slice(-SQUAD_MILESTONES_SHOWN)
+      .map((m) => ({ code: m.code, value: m.value, date: m.date, teamId: m.teamId })),
+  };
+}
+
+/**
+ * 지금 뛰고 있는 경기가 이 다리에서 가져간 만큼 — 출전 명단 밖이면 null.
+ *
+ * 명단 화면이 `liveSlots`로 세우는 그 값이다(`conditionShown`이 이걸 받아 판세 탭과
+ * 같은 읽은 값을 낸다). 카드는 한 사람만 물으므로 명단을 세우는 대신 패킷을 본다.
+ */
+function liveWearOf(state: GameState, playerId: string): { drain: number; matchId: string } | null {
+  const pending = state.pendingMatch;
+  if (state.phase !== "match" || !pending) return null;
+  const inPacket = ([pending.packet.home, pending.packet.away] as const).some((side) =>
+    [...side.lineup, ...side.bench].some((entry) => entry.id === playerId),
+  );
+  if (!inPacket) return null;
+  return { drain: pending.matchFatigue?.[playerId] ?? 0, matchId: pending.matchId };
 }

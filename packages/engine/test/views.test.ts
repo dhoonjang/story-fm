@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeContract,
   applyFinanceEvent,
   buildOfficeViews,
+  buildPlayerCard,
+  marketValueOf,
+  seasonStatOf,
   categoryOf,
   cupProgressOf,
   type BracketStageView,
@@ -957,5 +961,69 @@ describe("대회 뷰 — 역대", () => {
     const trophies = buildOfficeViews(state).career.trophies;
     expect(trophies).toHaveLength(1);
     expect(trophies[0]!.teamName).toBe(state.teams.find((t) => t.id === state.userTeamId)!.name);
+  });
+});
+
+/**
+ * 선수 카드 — **명단에 설 수 없는 남의 구단 선수가 화면에 서는 첫 자리**라
+ * (player.md §9.5) 참값이 새면 명단을 흐린 일이 통째로 무의미해진다.
+ *
+ * 안개는 `(seed, 선수 id, 축)` 해시라 결정적이다 — "흔들린 선수가 있다"는 세이브마다
+ * 같은 사람을 가리키는 사실이지 뽑기가 아니다 (player.md §9).
+ */
+describe("선수 카드 — 남의 구단 선수의 안개 (player.md §9.5)", () => {
+  const state = createTestGame();
+  // 카드 하나가 원장을 훑으므로 표본을 끊는다 — 안개는 선수마다 독립이라 이걸로 족하다
+  const theirs = state.players.filter((p) => p.teamId !== state.userTeamId).slice(0, 60);
+  const cards = theirs.map((p) => buildPlayerCard(state, p.id)!);
+
+  it("우리 장부의 칸이 통째로 없다 — 「모름」으로 세우지 않는다", () => {
+    for (const card of cards) expect(card.ours, card.name).toBeNull();
+    expect(buildPlayerCard(state, userPlayers(state)[0]!.id)!.ours).not.toBeNull();
+  });
+
+  it("16축은 관측값이고 참값은 언제나 그 폭 안이다", () => {
+    for (const [i, card] of cards.entries()) {
+      const truth = theirs[i]!.attributes;
+      for (const axis of card.attributes) {
+        expect(axis.margin, `${card.name} ${axis.key}`).toBeGreaterThan(0);
+        expect(
+          Math.abs(axis.value - truth[axis.key]),
+          `${card.name} ${axis.key}`,
+        ).toBeLessThanOrEqual(axis.margin);
+      }
+    }
+  });
+
+  it("참 능력치도 참 시장가도 그대로 실리지 않는다", () => {
+    const shifted = cards.filter((c, i) => c.overall !== theirs[i]!.attributes.overall);
+    const fuzzed = cards.filter((c, i) => c.marketValue !== marketValueOf(state, theirs[i]!));
+    expect(
+      shifted.length,
+      "종합이 참값 그대로면 안개가 표현 계층에 닿지 않은 것이다",
+    ).toBeGreaterThan(0);
+    expect(
+      fuzzed.length,
+      "시장가가 참값 그대로면 `deal_odds`와 카드가 다른 자를 든 것이다",
+    ).toBeGreaterThan(0);
+  });
+
+  it("잠재력은 숫자가 아니라 구간이고 참값을 품는다", () => {
+    for (const [i, card] of cards.entries()) {
+      if (card.potential === null) continue;
+      const truth = theirs[i]!.attributes.potential;
+      expect(card.potential.margin, card.name).toBeGreaterThan(0);
+      expect(card.potential.low, card.name).toBeLessThanOrEqual(truth);
+      expect(card.potential.high, card.name).toBeGreaterThanOrEqual(truth);
+    }
+  });
+
+  /** 기록·계약은 신문에 실리는 사실이다 — 흐리는 것은 능력치이지 장부가 아니다 (§10) */
+  it("기록과 계약은 두 얼굴이 같다", () => {
+    const [player] = theirs;
+    const card = cards[0]!;
+    expect(card.contractUntil).toBe(activeContract(state, player!.id)?.until ?? null);
+    expect(card.nationality).toBe(player!.nationality ?? null);
+    expect(card.season.goals).toBe(seasonStatOf(state, player!.id)?.goals ?? 0);
   });
 });
