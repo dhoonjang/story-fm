@@ -583,10 +583,14 @@ export function applyTalk(state: GameState, input: TalkInput): CommandResult {
   else touchOpenings(state, { subjectIds: heard.map((p) => p.id) });
 
   const capped = moved < heard.length;
+  const moraleLabel = toEveryone ? (shout ? "명단" : "팀") : alone ? "" : `${heard.length}명`;
   return {
     ok: true,
-    // 펼치지 않아도 잘 풀렸는지는 알아야 한다 — 숫자는 펼쳤을 때만
-    tone: (moved === 0 ? base >= 0 : high >= 0) ? ("good" as const) : ("bad" as const),
+    /**
+     * 펼치지 않아도 잘 풀렸는지는 알아야 한다 — 숫자는 펼쳤을 때만.
+     * 결은 **그 말이 어떻게 닿았는가**이지 합계 상한이 얼마를 통과시켰는가가 아니다.
+     */
+    tone: base >= 0 ? ("good" as const) : ("bad" as const),
     message:
       `${whoKo} 사기 ${moraleText}` +
       (clipped ? clipped.text : "") +
@@ -614,9 +618,19 @@ export function applyTalk(state: GameState, input: TalkInput): CommandResult {
             ? `${heard[0]!.name} 대화`
             : `${heard.length}명 대화`,
       items: [
+        /**
+         * 항목의 이름은 **몇 명이 들었는가**다 — 누가 들었는지는 머리가 든다.
+         * 이름을 여기까지 실으면 항목 한 줄이 이름으로 채워져 숫자가 밀린다.
+         */
         ...(low === high
-          ? [item({ label: `${whoKo} 사기`, text: moraleText, delta: low })]
-          : [item({ label: `${whoKo} 사기`, text: moraleText })]),
+          ? [
+              item({
+                label: moraleLabel ? `${moraleLabel} 사기` : "사기",
+                text: moraleText,
+                delta: low,
+              }),
+            ]
+          : [item({ label: moraleLabel ? `${moraleLabel} 사기` : "사기", text: moraleText })]),
         ...(clipped ? [clipped.item] : []),
         ...(capped ? [item({ label: "상한", text: `${heard.length - moved}명` })] : []),
         ...(relieved.length > 0
