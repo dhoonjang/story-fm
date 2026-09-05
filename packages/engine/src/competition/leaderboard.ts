@@ -252,10 +252,12 @@ export function leaderboardsOf(
   season = state.season,
 ): LeaderBoard[] {
   const tallies = talliesOf(state, competitionId, state.date, season);
-  // 문턱은 경기를 한 번 훑는 값이라 축마다 다시 세지 않는다 (`null`도 답이므로 두 겹이다)
-  let floor: { of: Map<string, number> | null } | null = null;
-  const floorOf = (): Map<string, number> | null =>
-    (floor ??= { of: ratingFloorOf(state, competitionId, season) }).of;
+  // 문턱은 경기를 한 번 훑는 값이라 축마다 다시 세지 않는다 — `null`도 답이라 `undefined`가 「아직 안 셌다」다
+  let floor: Map<string, number> | null | undefined;
+  const floorOf = (): Map<string, number> | null => {
+    if (floor === undefined) floor = ratingFloorOf(state, competitionId, season);
+    return floor;
+  };
   return LEADERBOARD_KEYS.map((key) => ({
     key,
     rows: boardFrom(state, tallies, key, floorOf, limit),
