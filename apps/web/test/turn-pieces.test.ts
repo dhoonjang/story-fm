@@ -698,6 +698,29 @@ describe("splitPlayerNames", () => {
     expect(splitPlayerNames("라먼스가 넣었다", index)).toEqual([{ text: "라먼스가 넣었다" }]);
   });
 
+  /**
+   * 실 세이브에서 「브루누」가 브루누 페르난데스의 **이름**이면서 카이키 브루누의
+   * **성**이었다 — 성만 담으면 절반이 틀린 카드를 연다.
+   */
+  it("이름과 성이 겹치면 어느 쪽도 걸지 않는다", () => {
+    const brunos = buildPlayerNameIndex({
+      "bruno-fernandes": "브루누 페르난데스",
+      "kaiki-bruno": "카이키 브루누",
+    });
+    expect(splitPlayerNames("브루누와 이야기했다", brunos)).toEqual([
+      { text: "브루누와 이야기했다" },
+    ]);
+    // 겹치지 않는 낱말은 그대로 선다 — 성이든 이름이든
+    expect(splitPlayerNames("페르난데스가 말했다", brunos)[0]).toEqual({
+      text: "페르난데스",
+      playerId: "bruno-fernandes",
+    });
+    expect(splitPlayerNames("카이키가 말했다", brunos)[0]).toEqual({
+      text: "카이키",
+      playerId: "kaiki-bruno",
+    });
+  });
+
   it("성만 부른 이름도 사전 안에서 유일하면 선다", () => {
     const one = buildPlayerNameIndex({ "a-sener-lamens": "세너 라먼스" });
     expect(splitPlayerNames("라먼스가 넣었다", one)).toEqual([
@@ -726,6 +749,13 @@ describe("splitPlayerNames", () => {
     expect(splitPlayerNames("토트가 나선다", toth)).toEqual([
       { text: "토트", playerId: "alex-toth" },
       { text: "가 나선다" },
+    ]);
+    // 서술격 어미도 조사다 — 「발레바군요」의 그는 발레바다
+    const baleba = buildPlayerNameIndex({ "carlos-baleba": "카를로스 발레바" });
+    expect(splitPlayerNames("브라이튼의 카를로스 발레바군요", baleba)).toEqual([
+      { text: "브라이튼의 " },
+      { text: "카를로스 발레바", playerId: "carlos-baleba" },
+      { text: "군요" },
     ]);
   });
 

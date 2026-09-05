@@ -9,8 +9,9 @@
  *
  * 규칙은 넷이다.
  * - **긴 이름이 이긴다** — 「세너 라먼스」가 서면 성 하나로 다시 자르지 않는다.
- * - **성만 부른 이름은 사전 안에서 유일할 때만** 손잡이다. 동명이인은 어느 쪽인지
- *   알 수 없고, 모르면서 거는 손잡이는 틀린 카드를 연다.
+ * - **낱말 하나만 부른 이름은 사전 안에서 유일할 때만** 손잡이다. 성이든 이름이든
+ *   같다 — 「브루누」는 브루누 페르난데스의 이름이면서 카이키 브루누의 성이라,
+ *   둘 중 하나로 걸면 절반은 틀린 카드를 연다. 모르면 걸지 않는다.
  * - **앞이 한글이면 이름이 아니다** — 다른 이름의 꼬리를 자르지 않는다.
  * - **뒤에 붙을 수 있는 것은 조사뿐이다** — 이름 뒤의 한글 덩어리가 조사 표에 없으면
  *   그 자리는 이름이 아니다. 두 글자 성은 흔한 낱말의 앞머리이기도 해서
@@ -54,76 +55,19 @@ const WORD_CHAR = /[가-힣A-Za-z0-9]/;
  * 이름과 조사 사이를 띄어 쓰는 일은 없으므로, 이름 뒤의 한글은 **다음 경계까지
  * 통째로** 이 표와 맞춘다 — 앞머리만 맞춰 보면 「넘으로」가 「으로」로 통과한다.
  */
-const PARTICLES = new Set([
-  // 격조사·보조사
-  "가",
-  "이",
-  "은",
-  "는",
-  "을",
-  "를",
-  "의",
-  "도",
-  "만",
-  "과",
-  "와",
-  "랑",
-  "에",
-  "께",
-  "로",
-  "나",
-  "야",
-  "아",
-  "여",
-  "님",
-  "씨",
-  "께서",
-  "에게",
-  "에서",
-  "한테",
-  "으로",
-  "로서",
-  "로써",
-  "보다",
-  "처럼",
-  "같이",
-  "부터",
-  "까지",
-  "마저",
-  "조차",
-  "밖에",
-  "이나",
-  "이랑",
-  "에게서",
-  "한테서",
-  "으로서",
-  "으로써",
-  // 서술격 — 「그 자리는 토날리다」
-  "다",
-  "고",
-  "라",
-  "이다",
-  "이고",
-  "이며",
-  "인데",
-  "이란",
-  "인가",
-  "인지",
-  "이자",
-  "였다",
-  "라도",
-  "라는",
-  "라고",
-  "라며",
-  "라서",
-  "이라도",
-  "이라는",
-  "이라고",
-  "이라며",
-  "이라서",
-  "입니다",
-  "이었다",
-]);
+const PARTICLES = new Set(
+  // 격조사·보조사·호격
+  (
+    "가 이 은 는 을 를 의 도 만 과 와 랑 에 께 로 나 야 아 여 님 씨 " +
+    "께서 에게 에서 한테 으로 로서 로써 보다 처럼 같이 부터 까지 마저 조차 밖에 이나 이랑 에다 " +
+    "에게서 한테서 으로서 으로써 " +
+    // 서술격 조사와 그 어미 — 「그 자리는 토날리다」·「발레바군요」
+    "다 고 지 죠 인 라 이다 이고 이며 이지 이죠 인데 이란 인가 인지 이자 이야 예요 였다 였고 " +
+    "군요 네요 구나 지요 라도 라는 라고 라며 라서 라면 라니 지만 " +
+    "이에요 이군요 이네요 이구나 인가요 이지요 이지만 입니다 이었다 이었고 " +
+    "이라도 이라는 이라고 이라며 이라서 이라면 이라니 였습니다 이었습니다"
+  ).split(" "),
+);
 
 /**
  * id→이름 사전을 **찾을 수 있는 사전**으로.
@@ -140,18 +84,25 @@ export function buildPlayerNameIndex(names: Record<string, string>): PlayerNameI
     if (found !== undefined && found !== id) ambiguous.add(name);
     else byName.set(name, id);
   }
-  const surnames = new Map<string, string>();
+  /**
+   * 낱말 하나로 부른 이름 — **성만이 아니라 이름도다.** 두 낱말짜리 이름에서 어느
+   * 쪽으로 불릴지는 사람마다 다르고(「토날리」·「브루누」), 한쪽만 담으면 나머지
+   * 절반이 글자로 남는다. 대신 겹치면 **둘 다 버린다**: 「브루누」가 한 사람의
+   * 이름이면서 다른 사람의 성이면 어느 쪽인지 알 길이 없다.
+   */
+  const partials = new Map<string, string>();
   for (const [id, name] of Object.entries(names)) {
-    const cut = name.lastIndexOf(" ");
-    if (cut < 0) continue;
-    const surname = name.slice(cut + 1);
-    // 전체 이름으로 이미 선 글자는 건드리지 않는다 — 그 이름이 우선이다
-    if (surname.length < MIN_NAME || byName.has(surname)) continue;
-    const found = surnames.get(surname);
-    if (found !== undefined && found !== id) ambiguous.add(surname);
-    else surnames.set(surname, id);
+    const words = name.split(" ");
+    if (words.length < 2) continue;
+    for (const word of words) {
+      // 전체 이름으로 이미 선 글자는 건드리지 않는다 — 그 이름이 우선이다
+      if (word.length < MIN_NAME || byName.has(word)) continue;
+      const found = partials.get(word);
+      if (found !== undefined && found !== id) ambiguous.add(word);
+      else partials.set(word, id);
+    }
   }
-  for (const [surname, id] of surnames) byName.set(surname, id);
+  for (const [word, id] of partials) byName.set(word, id);
   for (const name of ambiguous) byName.delete(name);
   let longest = 0;
   const heads = new Set<string>();
