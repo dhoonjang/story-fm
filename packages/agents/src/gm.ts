@@ -4,14 +4,18 @@
  * **모드로 갈리지 않는다.** 실모드는 설정된 제공자의 tool loop이고, `LLM_MODE=mock`은
  * 그 모델 자리에 대본 어댑터를 세운다(`mock-gm.ts` — agents.md §8) — 도구도 입력 조립도
  * 기록도 같은 코드다. 상태 변경의 유일한 통로는 엔진 명령 하나뿐이다.
+ *
+ * 실모드 한 턴은 **앞·호출·뒤** 셋이다 (agents.md §2 「턴은 앞·호출·뒤 셋이다」) —
+ * `openTurn`이 모델보다 먼저 코어를 굴리고, `callGm`이 3층 입력을 조립해 부르고,
+ * `closeTurn`이 장면·시계·결산을 받아 적는다. 세 단계가 주고받는 것은 이번 턴의
+ * 장부(`TurnLedger`)와 턴 앞이 남긴 것(`TurnOpening`)뿐이다.
  */
 import {
-  advanceTime,
+  advanceForOperation,
   applyScenePoint,
   awaitingShootout,
   buildTrainingBrief,
   clockOf,
-  diffDays,
   formatClock,
   humanizePlayerIds,
   markEntered,
@@ -24,12 +28,14 @@ import {
   toolCallFactLine,
   type AdvanceOutcome,
   type CardMark,
+  type ClockSource,
   type GameState,
   type GoalMark,
   type TrainingBrief,
 } from "@story-fm/engine";
-import { agentConfig, createGameLLM, resolveLlmMode } from "@story-fm/llm";
-import { MAX_REPORT_CARDS, NO_CARDS, takeArrivedReports } from "./report-cards";
+import type { CharacterEntry } from "@story-fm/domain";
+import { agentConfig, createGameLLM, resolveLlmMode, type TurnResult } from "@story-fm/llm";
+import { MAX_REPORT_CARDS, NO_CARDS, takeArrivedReports, type ArrivedCards } from "./report-cards";
 import { reportTraining } from "./training-rater";
 import { buildMatchTools, KICKOFF_BLOCK, MATCH_GM_SYSTEM, type MatchToolContext } from "./match-gm";
 import { finalizeMatchTurn } from "./finalize-match";
@@ -83,22 +89,6 @@ const ADVANCE_STOP_KO: Record<string, string> = {
   season_end: "시즌이 끝났다",
   blocked: "진행하지 못했다",
 };
-
-/**
- * 손잡이가 가리키는 만큼 시계를 옮긴다 — **모델을 거치지 않는 유일한 시간 이동.**
- * 경기 중이거나 이미 지난 날짜면 아무것도 하지 않는다.
- *
- * 다음 경기는 날짜로 넘어온다(`skip_to_next_match`) — 화면이 달력에서 이미 아는
- * 값이라 코어가 일정을 다시 찾을 이유가 없고, 그 사이 일정이 바뀌었더라도
- * `advanceTime`이 경기일 앞에서 멈춰 세운다.
- */
-function advanceForOperation(state: GameState, operation: TurnOperation): AdvanceOutcome | null {
-  if (state.phase !== "idle") return null;
-  if (operation.kind === "advance_match") return null;
-  if (operation.kind === "skip_days") return advanceTime(state, { days: operation.days });
-  const days = diffDays(state.date, operation.date);
-  return days > 0 ? advanceTime(state, { days }) : null;
-}
 
 /** 장면이 섰는가 — 출력 문법이 요구하는 것은 `@`로 여는 줄 하나다 (prompts.md §1) */
 function hasSceneLine(text: string): boolean {
@@ -163,43 +153,108 @@ async function answerLetters(state: GameState, calls: GmToolCall[]): Promise<str
   return letters;
 }
 
-/**
- * **GM 턴 실행** — 일상은 `gm`, 경기 장면은 `match-gm` 설정으로 라우팅한다.
- *
- * 모드로 갈리지 않는다: `LLM_MODE=mock`이면 모델 자리에 대본 어댑터가 서고 나머지는
- * 그대로다 (agents.md §8). `onText`를 주면 서사 텍스트가 스트리밍으로 흐른다 —
- * 실모드는 진짜 델타, 대본은 완성 텍스트를 줄로 쪼개 즉시 방출한다.
- */
-export async function runGmTurn(
-  state: GameState,
-  message: string,
-  onText?: (delta: string) => void,
-  /**
-   * 손잡이가 보낸 조작 — 있으면 이 턴은 감독의 발화가 아니다. `message`는 그
-   * 구조체에서 만든 **표시 문구**이므로 아무도 되읽지 않는다 (agents.md §2).
-   */
-  operation?: TurnOperation | null,
-  /** 전술판 조작 — 코어가 **이미 적용한** 것의 기록이다 */
-  operatorOrders?: readonly string[],
-): Promise<GmTurnResult> {
-  /** 이 턴이 손잡이인가 — 감독이 친 말이 아니다 (`message`는 표시 문구다) */
-  const operator = operation != null;
-  const calls: GmToolCall[] = [];
-  const inMatch = state.phase === "match";
+/** 이 턴이 어떤 턴인가 — 세 단계가 같은 것을 읽는다 */
+interface TurnShape {
+  /** 경기 장면인가 — 라우팅이 `match-gm`으로 갈린다 */
+  inMatch: boolean;
   /**
    * 킥오프 턴 — **경기의 첫 호흡.** 감독이 경기장에 들어선 그 한 턴이다.
    *
    * 도구를 주지 않아 구간이 굴러갈 수 없고, 패킷도 싣지 않는다. 대신 평시 이력을
    * 그대로 넘겨(`relevantTurns`) 라커룸에서 이어지는 목소리로 첫 휘슬만 연다.
    */
-  const kickoff = inMatch && state.pendingMatch?.entered !== true;
-  const config = agentConfig(inMatch ? "match-gm" : "gm");
+  kickoff: boolean;
+  /** 손잡이 턴인가 — 감독이 친 말이 아니다 (`message`는 표시 문구다) */
+  operator: boolean;
+}
 
-  const pendingTraining: TrainingBrief[] = [];
+/**
+ * 세 단계가 함께 채우는 **이번 턴의 장부** — 호출 기록·표식·결산 대기.
+ * 도구 핸들러도 같은 배열에 적으므로 참조로 돌아다닌다.
+ */
+interface TurnLedger {
+  calls: GmToolCall[];
   /** 이번 턴에 들어간 골 — 장부의 사건에서 만든다 (중계 문장을 되읽지 않는다) */
-  const goals: GoalMark[] = [];
+  goals: GoalMark[];
   /** 이번 턴의 경고·퇴장 — 같은 경로다. 경고는 다음 교체 판단의 입력이다 */
-  const cards: CardMark[] = [];
+  cards: CardMark[];
+  /** 굴러간 구간에 소화된 훈련 — 턴 뒤에서 한 번에 결산한다 */
+  training: TrainingBrief[];
+  /** 마감이 지운 장부의 마지막 분 — 화면의 시각 줄이 읽는다 (agents.md §3) */
+  finalMinute: number | null;
+}
+
+/** 턴 앞이 남긴 것 — 호출과 턴 뒤가 함께 읽는다 */
+interface TurnOpening {
+  /**
+   * 이 턴이 시작한 날짜·시각 — **손잡이보다도, 장면보다도 먼저** 잡는다.
+   *
+   * 결산(훈련·심경)이 보는 구간의 시작이 `from`이다. 시계가 도는 자리가 둘이라
+   * (손잡이는 장면 앞, 헤더는 장면 뒤 — agents.md §2) 장면 뒤에 잡으면 손잡이 턴의
+   * 구간이 길이 0이 되어 결산이 아예 돌지 않는다. `clockFrom`은 "시계가 제자리인가"를
+   * 재는 자리다.
+   */
+  from: string;
+  clockFrom: string;
+  /** 손잡이가 굴린 결과 — 굴릴 것이 없었거나 손잡이 턴이 아니면 null */
+  skipped: AdvanceOutcome | null;
+  /** 답할 날이 된 편지 — 이번 턴 층에 실린다 */
+  letters: string[];
+  /**
+   * 지난 턴이 **장면 뒤에** 받아 둔 보고서 — 이번 턴 스냅샷이 값을 싣고 카드도 이번
+   * 턴에 선다.
+   */
+  carried: ArrivedCards;
+  /** 손잡이가 굴려 도착한 보고서 — 그 값은 「그 사이 벌어진 일」이 이미 싣는다 */
+  skippedCards: ArrivedCards;
+  /** 시간 이동 중 새로 생긴 오퍼 — 이번 장면에서 보고만 하고 감독의 답을 기다린다 */
+  deferNegotiationIds: Set<string>;
+  /** 손잡이 턴에 코어가 먼저 굴린 구간 — GM은 그 대본을 받아 중계만 쓴다 */
+  applied: AppliedTacticOrders | null;
+  /** 호출 직전 장부의 분 — 평시는 null. 경기 장면의 시각이 여기서 온다 (agents.md §3 ④) */
+  matchMinute: number | null;
+}
+
+/**
+ * 코어가 시계를 옮긴 자국 — **호출이 아니라 코어가 한 일**이라 조용히 남는다
+ * (`TIME_PASSED` 주석). 시계가 도는 두 자리가 같은 함수로 적는다.
+ */
+function noteTimePassed(ledger: TurnLedger, head: string, digest: readonly string[]): void {
+  ledger.calls.push({ name: TIME_PASSED, summary: [head, ...digest].join("\n"), silent: true });
+}
+
+/** 굴러간 구간의 훈련 결산 — 소화된 세션이 없으면 브리핑이 서지 않는다 */
+function noteTraining(
+  state: GameState,
+  ledger: TurnLedger,
+  moved: AdvanceOutcome,
+  from: string,
+): void {
+  const brief = buildTrainingBrief(state, moved.trained?.sessions ?? [], { from, to: state.date });
+  if (brief) ledger.training.push(brief);
+}
+
+/** 지금 장부의 분 — 도구가 시계를 옮겼으면 옮긴 뒤의 것, 마감 뒤면 마지막 분 */
+function minuteNow(state: GameState, ledger: TurnLedger, opening: TurnOpening): number {
+  return ledger.finalMinute ?? state.pendingMatch?.ledger.minute ?? opening.matchMinute ?? 0;
+}
+
+/**
+ * **턴 앞 — 모델보다 먼저 코어가 하는 일.**
+ *
+ * 답할 날이 된 편지, 손잡이의 시간 이동, 지난 턴이 받아 둔 보고서, 손잡이 턴의
+ * 전술판 적용. 여기서 바뀐 상태가 그대로 이번 턴의 입력이 되므로 **모델은 도착한
+ * 자리에서 보고한다**.
+ */
+async function openTurn(
+  state: GameState,
+  shape: TurnShape,
+  operation: TurnOperation | null | undefined,
+  ledger: TurnLedger,
+): Promise<TurnOpening> {
+  const { inMatch, kickoff, operator } = shape;
+  const from = state.date;
+  const clockFrom = clockOf(state);
   /**
    * 이번 턴에 조립이 안 된 보고서 — 줄에는 그대로 남아 있다. 아래에서 줄을 한 번 더
    * 보므로(손잡이가 시계를 옮긴 턴) 적어 두지 않으면 두 번째 호출이 같은 자리에서
@@ -207,48 +262,29 @@ export async function runGmTurn(
    */
   const stuckCards = new Set<string>();
   /**
-   * 지난 턴이 **장면 뒤에** 받아 둔 보고서 — 이번 턴 스냅샷이 값을 싣고 카드도 이번
-   * 턴에 선다. ⚠️ 손잡이가 시계를 옮기기 **전에** 꺼낸다: 그 뒤에 도착하는 것은
-   * 「그 사이 벌어진 일」이 따로 실으므로, 여기 섞이면 한 프롬프트에 같은 값이 두 번
-   * 실린다 (agents.md §6).
+   * ⚠️ 손잡이가 시계를 옮기기 **전에** 꺼낸다: 그 뒤에 도착하는 것은 「그 사이 벌어진
+   * 일」이 따로 실으므로, 여기 섞이면 한 프롬프트에 같은 값이 두 번 실린다 (agents.md §6).
    */
-  const carriedCards = inMatch ? NO_CARDS : takeArrivedReports(state, MAX_REPORT_CARDS, stuckCards);
+  const carried = inMatch ? NO_CARDS : takeArrivedReports(state, MAX_REPORT_CARDS, stuckCards);
   // 손잡이로 넘긴 시간은 모델보다 먼저 흐른다 — 코어가 먼저 굴리고 "그 사이
   // 벌어진 일"을 상태에 실어, 모델은 도착한 자리에서 보고한다
   const pendingBeforeSkip = new Set(pendingVerdicts(state).map((v) => v.negotiation.id));
-  /**
-   * 이 턴이 시작한 날짜 — **손잡이보다도, 장면보다도 먼저** 잡는다.
-   *
-   * 결산(훈련·심경)이 보는 구간의 시작이 여기다. 시계가 도는 자리가 둘이라
-   * (손잡이는 장면 앞, 헤더는 장면 뒤 — agents.md §2) 장면 뒤에 잡으면 손잡이 턴의
-   * 구간이 길이 0이 되어 결산이 아예 돌지 않는다.
-   */
-  const turnFrom = state.date;
   const skipped = !inMatch && operation ? advanceForOperation(state, operation) : null;
   if (skipped) {
-    calls.push({
-      name: TIME_PASSED,
-      summary: [
-        `${turnFrom} → ${state.date} — ${ADVANCE_STOP_KO[skipped.stopped] ?? "진행했다"}`,
-        ...skipped.digest,
-      ].join("\n"),
-      silent: true,
-    });
-    const brief = buildTrainingBrief(state, skipped.trained?.sessions ?? [], {
-      from: turnFrom,
-      to: state.date,
-    });
-    if (brief) pendingTraining.push(brief);
+    noteTimePassed(
+      ledger,
+      `${from} → ${state.date} — ${ADVANCE_STOP_KO[skipped.stopped] ?? "진행했다"}`,
+      skipped.digest,
+    );
+    noteTraining(state, ledger, skipped, from);
   }
-  // 손잡이가 굴려 도착한 보고서 — 그 값은 바로 위 다이제스트가 이미 싣는다
   const skippedCards = skipped
     ? takeArrivedReports(
         state,
-        MAX_REPORT_CARDS - carriedCards.reports.length - carriedCards.missions.length,
+        MAX_REPORT_CARDS - carried.reports.length - carried.missions.length,
         stuckCards,
       )
     : NO_CARDS;
-  /** 시간 이동 중 새로 생긴 오퍼는 이번 장면에서 보고만 하고 감독의 답을 기다린다. */
   const deferNegotiationIds = new Set(
     skipped
       ? pendingVerdicts(state)
@@ -257,32 +293,73 @@ export async function runGmTurn(
       : [],
   );
   // 답할 날이 된 편지는 상대가 먼저 답한다 — 이번 턴의 장면은 그 답 뒤에 선다 (agents.md §4-1)
-  const letters = inMatch ? [] : await answerLetters(state, calls);
+  const letters = inMatch ? [] : await answerLetters(state, ledger.calls);
   /**
-   * **경기 턴** — 매치 GM이 이 경기의 이력을 쥔 채 도구로 판을 움직인다
-   * (docs/llm/agents.md §3). 감독의 말은 GM이 읽고, 진행하라는 말에만 `advance_match`를
-   * 불러 코어가 구간을 굴린다 — 그 대본이 도구 결과로 같은 호출에 돌아온다.
-   *
-   * **손잡이로 온 턴은 모델이 결정할 것이 없다** — 화면의 대기 중 교체·좌표·역할·전술
-   * 축은 코어가 이미 적용했고(match.md §2), `계속`이 뜻하는 것은 진행 하나뿐이다.
+   * **손잡이로 온 경기 턴은 모델이 결정할 것이 없다** — 화면의 대기 중 교체·좌표·역할·
+   * 전술 축은 코어가 이미 적용했고(match.md §2), `계속`이 뜻하는 것은 진행 하나뿐이다.
    * 코어가 먼저 굴려 대본을 이번 턴 층에 싣고, GM은 그 턴에 마감 도구만 쥔다.
    *
    * 킥오프 턴은 지나간다 — 감독이 아직 아무것도 지시하지 않았고, 첫 휘슬만 여는
    * 자리라 구간이 굴러가면 안 된다.
    */
-  let applied: AppliedTacticOrders | null = null;
-  if (inMatch && !kickoff && operator) {
-    applied = applyTacticOrders(state, { ops: {} }, calls, goals, cards, { roll: true });
-  }
-  /** 마감이 지운 장부의 마지막 분 — 화면의 시각 줄이 읽는다 (agents.md §3) */
-  let finalMinute: number | null = null;
-  const matchCtx: MatchToolContext = {
-    calls,
-    goals,
-    cards,
-    onFinalized: (minute) => (finalMinute = minute),
+  const applied =
+    inMatch && !kickoff && operator
+      ? applyTacticOrders(state, { ops: {} }, ledger.calls, ledger.goals, ledger.cards, {
+          roll: true,
+        })
+      : null;
+  return {
+    from,
+    clockFrom,
+    skipped,
+    letters,
+    carried,
+    skippedCards,
+    deferNegotiationIds,
+    applied,
+    // 구간이 굴러간 뒤이자 `finalizeMatch`가 장부를 지우기 전인 지금이 읽을 수 있는 유일한 자리다
+    matchMinute: inMatch ? (state.pendingMatch?.ledger.minute ?? null) : null,
   };
+}
 
+/** 호출이 낸 것 — 턴 뒤가 읽는다 */
+interface GmCall {
+  result: TurnResult;
+  /** 이번 턴에 세운 인물 카드 — 턴 뒤가 기록으로 남긴다 */
+  characters: CharacterEntry[];
+}
+
+/**
+ * **호출 — 3층 입력을 조립해 한 번 부른다** (agents.md §5).
+ *
+ * 입력은 안정성 순 3층이다: ① 고정 프롬프트 ② 레퍼런스 ③ 발화+상태 스냅샷.
+ * 앞 두 층만 캐시 프리픽스(0.1×)다.
+ */
+async function callGm(
+  state: GameState,
+  message: string,
+  shape: TurnShape,
+  opening: TurnOpening,
+  ledger: TurnLedger,
+  matchCtx: MatchToolContext,
+  onText: ((delta: string) => void) | undefined,
+  operatorOrders: readonly string[] | undefined,
+): Promise<GmCall> {
+  const { inMatch, kickoff, operator } = shape;
+  const config = agentConfig(inMatch ? "match-gm" : "gm");
+  /**
+   * **모델 자리에 서는 것** — mock 모드면 대본 어댑터다 (agents.md §8). 턴 앞이 이미
+   * 남긴 기록(손잡이의 시간 이동·도착한 편지)이 있으면 대본은 장면을 비워 낸다:
+   * 그 기록이 아래에서 장면을 세운다.
+   */
+  const llm =
+    mockGmLlm(config, state, {
+      message,
+      inMatch,
+      kickoff,
+      operator,
+      recorded: () => ledger.calls.length > 0,
+    }) ?? createGameLLM(config);
   /**
    * 경기 중 도구는 **경기 도구 셋**뿐이다 — 코어를 부르는 손잡이이고 경기를 바꾸지
    * 못한다 (agents.md §3). 손잡이 턴은 마감 하나, 킥오프 턴은 없다. 도구 정의는
@@ -292,10 +369,7 @@ export async function runGmTurn(
     ? kickoff
       ? []
       : buildMatchTools(state, matchCtx, { operator })
-    : buildGmTools(state, calls, { deferNegotiationIds });
-
-  // 입력은 안정성 순 3층 — ① 고정 프롬프트 ② 레퍼런스 ③ 발화+상태 스냅샷.
-  // 앞 두 층만 캐시 프리픽스(0.1×)다 (docs/llm/agents.md §5)
+    : buildGmTools(state, ledger.calls, { deferNegotiationIds: opening.deferNegotiationIds });
   const system = inMatch ? [MATCH_GM_SYSTEM, buildMatchReference(state)] : peaceSystem(state);
   /**
    * **패킷은 구간이 굴러간 뒤에만 싣는다.** 선수를 부른 한 마디에 패킷 전체를 실으면
@@ -305,19 +379,22 @@ export async function runGmTurn(
    * 우열을 읊는다.
    */
   const stateNote = inMatch
-    ? buildLedgerNote(state, { withPacket: applied?.segment != null })
+    ? buildLedgerNote(state, { withPacket: opening.applied?.segment != null })
     : buildGmStateNote(
         state,
-        skipped
+        opening.skipped
           ? {
-              from: turnFrom,
-              stopped: ADVANCE_STOP_KO[skipped.stopped] ?? "진행했다",
-              digest: skipped.digest,
+              from: opening.from,
+              stopped: ADVANCE_STOP_KO[opening.skipped.stopped] ?? "진행했다",
+              digest: opening.skipped.digest,
             }
           : null,
-        carriedCards.reports,
-        carriedCards.missions,
-      ) + (letters.length > 0 ? `\n\n<letters>\n${letters.join("\n")}\n</letters>` : "");
+        opening.carried.reports,
+        opening.carried.missions,
+      ) +
+      (opening.letters.length > 0
+        ? `\n\n<letters>\n${opening.letters.join("\n")}\n</letters>`
+        : "");
   /**
    * 이번 장면에 설 인물 — **평시만이다.** 경기 중에는 벤치의 코치 한 사람이
    * 레퍼런스에 상주하고(`buildMatchReference`), 중계가 읽을 것은 판이지 인물지가 아니다.
@@ -360,9 +437,6 @@ export async function runGmTurn(
   // 킥오프 턴의 이력은 경기 전 대화다 — `relevantTurns`가 그 한 턴만 평시로 읽는다
   const history =
     inMatch && !kickoff ? (state.pendingMatch?.casterHistory ?? []) : buildGmHistory(state);
-
-  // 헤더가 옮기기 전의 시각 — "시계가 제자리인가"를 재는 자리다 (날짜는 `turnFrom`)
-  const clockFrom = clockOf(state);
   /**
    * 재시도의 조건 — **이 호출이 아직 아무 자국도 남기지 않았을 때만.** 도구가
    * 돌았으면 상태가 이미 바뀌었고(이중 반영), 글자가 나갔으면 화면에 장면이 두 번
@@ -376,41 +450,20 @@ export async function runGmTurn(
       }
     : undefined;
   /**
-   * **경기 장면의 시각** — 이 턴의 장부가 준다 (agents.md §3 ④). 구간이 굴러간
-   * 뒤이자 `finalizeMatch`가 장부를 지우기 전인 지금이 읽을 수 있는 유일한 자리다.
-   */
-  const matchMinute = inMatch ? (state.pendingMatch?.ledger.minute ?? null) : null;
-  /**
    * 경기의 첫 줄은 코어가 쓴다 — 모델이 적은 시각은 화면에 닿기 전에 걷힌다.
    * 위생은 두 국면에 다 걸린다 — 걸러질 줄이 화면에 잠깐 떴다 사라지면 그것대로
    * 눈에 띄므로 저장과 화면에 같은 것이 선다 (agents.md §2). 중계가 읽는 것은
    * 꺾쇠 규칙 하나뿐이고, 코어의 시각 줄은 그 체를 지나 화면에 선다.
    */
-  /** 지금 장부의 분 — 도구가 시계를 옮겼으면 옮긴 뒤의 것, 마감 뒤면 마지막 분 */
-  const minuteNow = (): number =>
-    finalMinute ?? state.pendingMatch?.ledger.minute ?? matchMinute ?? 0;
-  /** 이 호출이 남긴 자국 — 그 전에 코어가 남긴 기록(손잡이의 구간)은 세지 않는다 */
-  const callsBefore = calls.length;
   const streamText = !trackText
     ? undefined
     : inMatch
-      ? matchMinute !== null
-        ? stampMatchStream(minuteNow, filterCasterStream(trackText))
+      ? opening.matchMinute !== null
+        ? stampMatchStream(() => minuteNow(state, ledger, opening), filterCasterStream(trackText))
         : filterCasterStream(trackText)
       : filterSceneStream(trackText);
-  /**
-   * **모델 자리에 서는 것** — mock 모드면 대본 어댑터다 (agents.md §8). 여기서 세우는
-   * 것은 이 호출 앞에서 코어가 이미 남긴 기록(손잡이의 시간 이동·도착한 편지)을
-   * 대본이 읽어야 하기 때문이다.
-   */
-  const llm =
-    mockGmLlm(config, state, {
-      message,
-      inMatch,
-      kickoff,
-      operator,
-      recorded: () => calls.length > 0,
-    }) ?? createGameLLM(config);
+  /** 이 호출이 남긴 자국 — 그 전에 코어가 남긴 기록(손잡이의 구간)은 세지 않는다 */
+  const callsBefore = ledger.calls.length;
   const result = await retryOnce(
     inMatch ? "gm:match" : "gm:turn",
     () =>
@@ -425,9 +478,13 @@ export async function runGmTurn(
           ...(inMatch && !kickoff && operator
             ? [
                 ``,
-                applied?.segment ?? "<segment>\n- (진행 없음)\n</segment>",
-                ...(applied && applied.notes.length > 0
-                  ? [`<core_replies>`, ...applied.notes.map((n) => `- ${n}`), `</core_replies>`]
+                opening.applied?.segment ?? "<segment>\n- (진행 없음)\n</segment>",
+                ...(opening.applied && opening.applied.notes.length > 0
+                  ? [
+                      `<core_replies>`,
+                      ...opening.applied.notes.map((n) => `- ${n}`),
+                      `</core_replies>`,
+                    ]
                   : []),
               ]
             : []),
@@ -441,8 +498,40 @@ export async function runGmTurn(
      * 다시 부르지 않는다. 손잡이가 이 호출 **앞에** 굴린 구간은 이 호출의 자국이
      * 아니다 — 그것까지 세면 손잡이 턴이 첫 실패에 그대로 무너진다 (agents.md §3·§8).
      */
-    () => streamed || calls.slice(callsBefore).some((c) => c.name !== TIME_PASSED),
+    () => streamed || ledger.calls.slice(callsBefore).some((c) => c.name !== TIME_PASSED),
   );
+  // 출력 상한에 잘린 턴은 이미 스트리밍으로 나가 되돌릴 수 없다 — 원인만 로그에 남긴다
+  if (result.stopReason === "truncated") {
+    console.error(
+      `[gm] 응답이 출력 상한(${config.maxTokens})에 걸려 잘렸습니다 — config/llm.yml의 max_tokens를 올려야 합니다`,
+    );
+  }
+  return { result, characters };
+}
+
+/**
+ * 이번 턴 **날짜의 주인** — 시계를 옮기는 코어 호출이 이것 하나로 갈린다
+ * (agents.md §2 「시계」). 규칙 자체는 `applyScenePoint`가 갖는다.
+ */
+function clockSourceOf(shape: TurnShape, opening: TurnOpening): ClockSource {
+  if (shape.inMatch) return "ledger";
+  return opening.skipped ? "operator" : "header";
+}
+
+/**
+ * **턴 뒤 — 모델이 낸 것을 코어가 받아 적는다.**
+ *
+ * 장면 위생 · 헤더 파싱 · **시계 한 줄** · 코어의 마감 · 훈련 결산 · 저장할 본문 조립.
+ */
+async function closeTurn(
+  state: GameState,
+  shape: TurnShape,
+  opening: TurnOpening,
+  ledger: TurnLedger,
+  call: GmCall,
+): Promise<GmTurnResult> {
+  const { inMatch, kickoff } = shape;
+  const { result } = call;
   /**
    * **GM이 마감을 부르지 않았으면 코어가 대신 부른다** (agents.md §3 「경기 마감」) —
    * 경기가 끝났는데 열려 있는 세이브는 없다. 마무리 중계는 장면 끝에 붙는다.
@@ -454,8 +543,8 @@ export async function runGmTurn(
     state.pendingMatch.ledger.phase === "finished" &&
     !awaitingShootout(state)
   ) {
-    finalMinute = state.pendingMatch.ledger.minute;
-    const outcome = await finalizeMatchTurn(state, calls);
+    ledger.finalMinute = state.pendingMatch.ledger.minute;
+    const outcome = await finalizeMatchTurn(state, ledger.calls);
     if (outcome && outcome.closing.length > 0) closingTail = outcome.closing;
   }
 
@@ -473,8 +562,14 @@ export async function runGmTurn(
    */
   const scenePoint = lastScenePoint(sceneText);
   // 중계가 적은 분은 쓰이지 않지만, 장부와 갈렸다는 사실은 프롬프트가 흔들린 신호다
-  if (matchMinute !== null && scene.minute !== null && scene.minute !== minuteNow()) {
-    console.warn(`[gm] 중계의 시각 ${scene.minute}′ — 장부(${minuteNow()}′)로 세웁니다`);
+  if (
+    opening.matchMinute !== null &&
+    scene.minute !== null &&
+    scene.minute !== minuteNow(state, ledger, opening)
+  ) {
+    console.warn(
+      `[gm] 중계의 시각 ${scene.minute}′ — 장부(${minuteNow(state, ledger, opening)}′)로 세웁니다`,
+    );
   }
   /**
    * 헤더를 못 읽으면 시계가 멈춘다 — 첫 줄을 로그에 남기고 **연달은 횟수를 센다.**
@@ -484,7 +579,7 @@ export async function runGmTurn(
    */
   let clockStalled: number | null = null;
   if (!inMatch) {
-    clockStalled = noteSceneHeader(state, scenePoint !== null || skipped !== null);
+    clockStalled = noteSceneHeader(state, scenePoint !== null || opening.skipped !== null);
     if (!scenePoint) {
       const first = sceneText.split("\n").find((line) => line.trim().length > 0) ?? "";
       console.warn(
@@ -494,39 +589,31 @@ export async function runGmTurn(
   }
   // 헤더는 읽혔는데 시각이 안 움직인 턴 — 이어지는 대화면 정상이지만 몇 턴이고
   // 반복되면 세계가 정지하므로 로그로 드러낸다
-  if (!inMatch && !skipped && scenePoint && scenePoint.date === turnFrom) {
-    if (minutesOfClock(scenePoint.clock) <= minutesOfClock(clockFrom)) {
-      // 헤더가 여럿이면 시계를 정하는 것은 마지막 것이라, 읽어낸 시점을 그대로 적는다
-      console.warn(
-        `[gm] 시계가 제자리입니다 (${turnFrom} ${clockFrom}) — 헤더가 닿은 곳: ${scenePoint.date} ${scenePoint.clock}`,
+  if (
+    !inMatch &&
+    !opening.skipped &&
+    scenePoint &&
+    scenePoint.date === opening.from &&
+    minutesOfClock(scenePoint.clock) <= minutesOfClock(opening.clockFrom)
+  ) {
+    // 헤더가 여럿이면 시계를 정하는 것은 마지막 것이라, 읽어낸 시점을 그대로 적는다
+    console.warn(
+      `[gm] 시계가 제자리입니다 (${opening.from} ${opening.clockFrom}) — 헤더가 닿은 곳: ${scenePoint.date} ${scenePoint.clock}`,
+    );
+  }
+  // ⚠️ 시계를 옮기는 자리는 여기 하나다 — 날짜를 미는지 고정하는지는 출처가 정한다
+  if (scenePoint) {
+    const moved = applyScenePoint(state, scenePoint, clockSourceOf(shape, opening));
+    if (moved.digest.length > 0 || moved.short) {
+      noteTimePassed(
+        ledger,
+        `${state.date} ${formatClock(clockOf(state))}${
+          moved.short ? ` — ${ADVANCE_STOP_KO[moved.stopped] ?? "멈췄다"}` : ""
+        }`,
+        moved.digest,
       );
     }
-  }
-  if (inMatch && scenePoint) {
-    // 경기 중엔 날짜를 막고 그날 안의 시각만 따라간다 — 안 그러면 상단 시계가
-    // 킥오프 시각에 얼어붙는다
-    applyScenePoint(state, { date: state.date, clock: scenePoint.clock });
-  } else if (!inMatch && scenePoint && skipped) {
-    // 손잡이가 이미 시계를 옮긴 턴 — 헤더의 날짜까지 따르면 하루를 눌렀는데 이틀이 간다
-    applyScenePoint(state, { date: state.date, clock: scenePoint.clock });
-  } else if (!inMatch && scenePoint) {
-    const moved = applyScenePoint(state, scenePoint);
-    if (moved.digest.length > 0 || moved.short) {
-      const head = `${state.date} ${formatClock(clockOf(state))}${
-        moved.short ? ` — ${ADVANCE_STOP_KO[moved.stopped] ?? "멈췄다"}` : ""
-      }`;
-      // 호출이 아니라 코어가 시계를 옮긴 결과다 (`TIME_PASSED` 주석 참고)
-      calls.push({
-        name: TIME_PASSED,
-        summary: [head, ...moved.digest].join("\n"),
-        silent: true,
-      });
-    }
-    const brief = buildTrainingBrief(state, moved.trained?.sessions ?? [], {
-      from: turnFrom,
-      to: state.date,
-    });
-    if (brief) pendingTraining.push(brief);
+    noteTraining(state, ledger, moved, opening.from);
   }
   /**
    * 훈련 결산 — 코어 앵커 위에 LLM이 맥락을 더한다 (실패해도 앵커가 남는다).
@@ -536,7 +623,7 @@ export async function runGmTurn(
    * 스냅샷 `<coach>` 첫 줄이 구간과 이름을 싣는다
    * (docs/simulation/season.md §4 · docs/llm/agents.md §6).
    */
-  for (const brief of pendingTraining) {
+  for (const brief of ledger.training) {
     await reportTraining(state, brief);
   }
 
@@ -545,12 +632,6 @@ export async function runGmTurn(
     state.pendingMatch.casterHistory = result.history;
     // 첫 휘슬을 불었다 — 이 뒤로는 경기 도구 셋을 쥔 보통의 진행 턴이다
     if (kickoff) markEntered(state);
-  }
-  // 출력 상한에 잘린 턴은 이미 스트리밍으로 나가 되돌릴 수 없다 — 원인만 로그에 남긴다
-  if (result.stopReason === "truncated") {
-    console.error(
-      `[gm] 응답이 출력 상한(${config.maxTokens})에 걸려 잘렸습니다 — config/llm.yml의 max_tokens를 올려야 합니다`,
-    );
   }
   // 선수 id를 이름으로 바꾸고 헤더를 되붙여 저장한다 — ⚠️ 헤더를 떼면 화면
   // (scene-stamp)의 시각이 스트리밍이 끝나는 순간 사라진다.
@@ -566,7 +647,7 @@ export async function runGmTurn(
    * (agents.md §2·§8). 기록도 장면도 없으면 저장하지 않고 턴을 되돌린다.
    */
   if (!inMatch && !hasSceneLine(body)) {
-    const record = sceneFromToolCalls(calls);
+    const record = sceneFromToolCalls(ledger.calls);
     if (record) {
       // mock 모드에서는 이것이 계약이다 — 대본은 장면을 쓰지 않는다 (agents.md §8)
       if (resolveLlmMode() !== "mock") {
@@ -583,8 +664,8 @@ export async function runGmTurn(
     }
   }
   const text =
-    matchMinute !== null
-      ? stampMatchScene(body, minuteNow())
+    opening.matchMinute !== null
+      ? stampMatchScene(body, minuteNow(state, ledger, opening))
       : header
         ? `${header}\n${body}`
         : body;
@@ -593,19 +674,71 @@ export async function runGmTurn(
    * 굴렀으므로 그 도착은 줄에 남아 다음 턴에 선다 (`pendingReportCards`) — 이번 턴에
    * 조립이 안 된 것도 마찬가지로 줄에 남는다 (player.md §9.4-1).
    */
-  const reports = [...carriedCards.reports, ...skippedCards.reports];
-  const missions = [...carriedCards.missions, ...skippedCards.missions];
+  const reports = [...opening.carried.reports, ...opening.skippedCards.reports];
+  const missions = [...opening.carried.missions, ...opening.skippedCards.missions];
   // 실은 카드를 그 턴에 기록한다 — 다음 턴부터 이력이 같은 카드를 다시 그린다.
   // 턴이 실패하면 상태가 통째로 버려지므로 기록도 함께 없던 일이 된다
-  recordCharacterInjection(state, characters);
+  recordCharacterInjection(state, call.characters);
   return {
     text,
-    toolCalls: calls,
-    ...(goals.length > 0 ? { goals } : {}),
-    ...(cards.length > 0 ? { cards } : {}),
+    toolCalls: ledger.calls,
+    ...(ledger.goals.length > 0 ? { goals: ledger.goals } : {}),
+    ...(ledger.cards.length > 0 ? { cards: ledger.cards } : {}),
     ...(reports.length > 0 ? { reports } : {}),
     ...(missions.length > 0 ? { missions } : {}),
     ...(clockStalled !== null ? { clockStalled } : {}),
     usage: result.usage,
   };
+}
+
+/**
+ * **GM 턴 실행** — 일상은 `gm`, 경기 장면은 `match-gm` 설정으로 라우팅한다.
+ *
+ * 모드로 갈리지 않는다: `LLM_MODE=mock`이면 모델 자리에 대본 어댑터가 서고 나머지는
+ * 그대로다 (agents.md §8). `onText`를 주면 서사 텍스트가 스트리밍으로 흐른다 —
+ * 실모드는 진짜 델타, 대본은 완성 텍스트를 줄로 쪼개 즉시 방출한다.
+ */
+export async function runGmTurn(
+  state: GameState,
+  message: string,
+  onText?: (delta: string) => void,
+  /**
+   * 손잡이가 보낸 조작 — 있으면 이 턴은 감독의 발화가 아니다. `message`는 그
+   * 구조체에서 만든 **표시 문구**이므로 아무도 되읽지 않는다 (agents.md §2).
+   */
+  operation?: TurnOperation | null,
+  /** 전술판 조작 — 코어가 **이미 적용한** 것의 기록이다 */
+  operatorOrders?: readonly string[],
+): Promise<GmTurnResult> {
+  const inMatch = state.phase === "match";
+  const shape: TurnShape = {
+    inMatch,
+    kickoff: inMatch && state.pendingMatch?.entered !== true,
+    operator: operation != null,
+  };
+  const ledger: TurnLedger = {
+    calls: [],
+    goals: [],
+    cards: [],
+    training: [],
+    finalMinute: null,
+  };
+  const matchCtx: MatchToolContext = {
+    calls: ledger.calls,
+    goals: ledger.goals,
+    cards: ledger.cards,
+    onFinalized: (minute) => (ledger.finalMinute = minute),
+  };
+  const opening = await openTurn(state, shape, operation, ledger);
+  const call = await callGm(
+    state,
+    message,
+    shape,
+    opening,
+    ledger,
+    matchCtx,
+    onText,
+    operatorOrders,
+  );
+  return closeTurn(state, shape, opening, ledger, call);
 }

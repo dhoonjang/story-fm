@@ -234,7 +234,10 @@ export function applyMatchAttributes(
       origin: "match-settlement",
     });
     if (!moved) continue;
+    // 인원 상한은 **건드린 인원**을 센다 — 캐리에만 쌓인 선수도 한 자리를 쓴다
     spent += 1;
+    // 눈금이 안 넘어간 줄은 요약에 서지 않는다 — 감독이 읽는 것은 장부다
+    if (moved.step === 0) continue;
     lines.push(
       `${player.name} ${AXIS_KO[moved.axis]} ${moved.step > 0 ? "+" : "−"}1 → ${moved.value}`,
     );

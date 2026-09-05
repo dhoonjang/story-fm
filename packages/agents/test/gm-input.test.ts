@@ -1352,13 +1352,13 @@ describe("장면 헤더", () => {
   it("선언한 날짜까지 달력이 움직이고, 과거는 되감지 않는다", () => {
     const state = game();
     const start = state.date;
-    const moved = applyScenePoint(state, { date: addDays(start, 2), clock: "19:00" });
+    const moved = applyScenePoint(state, { date: addDays(start, 2), clock: "19:00" }, "header");
     expect(moved.ok).toBe(true);
     // 프리시즌 첫 이틀에는 세워 세울 일이 없다 — 선언한 곳에 그대로 닿는다
     expect(moved.short).toBeFalsy();
     expect(state.date).toBe(addDays(start, 2));
     expect(clockOf(state)).toBe("19:00");
-    const back = applyScenePoint(state, { date: start, clock: "09:00" });
+    const back = applyScenePoint(state, { date: start, clock: "09:00" }, "header");
     expect(state.date).not.toBe(start);
     expect(back.short).toBe(true);
   });
@@ -1460,7 +1460,7 @@ describe("시계는 장면이 걸린 만큼 민다", () => {
   it("같은 날 안에서는 시각만 흐르고 세계는 굴러가지 않는다", () => {
     const state = game();
     const before = state.date;
-    const moved = applyScenePoint(state, { date: before, clock: "15:20" });
+    const moved = applyScenePoint(state, { date: before, clock: "15:20" }, "header");
     expect(moved.ok).toBe(true);
     expect(state.date).toBe(before);
     expect(clockOf(state)).toBe("15:20");
@@ -1470,8 +1470,8 @@ describe("시계는 장면이 걸린 만큼 민다", () => {
 
   it("되감기지는 않는다 — 이미 지난 시각을 적어도 시계는 그대로다", () => {
     const state = game();
-    applyScenePoint(state, { date: state.date, clock: "15:20" });
-    applyScenePoint(state, { date: state.date, clock: "10:00" });
+    applyScenePoint(state, { date: state.date, clock: "15:20" }, "header");
+    applyScenePoint(state, { date: state.date, clock: "10:00" }, "header");
     expect(clockOf(state)).toBe("15:20");
   });
 });
