@@ -459,7 +459,8 @@ lastMovedOn, pressedOn? }`)로 남는다.
    ⚠️ **원장이 아는 방식은 `TRANSFER.reason` 코드다.** 계약 만료도 해지도 은퇴도
    `type: "free"`로 같은 줄에 서므로 갈래를 가를 칸이 따로 있어야 한다 —
    `release-agreed` · `release-unilateral` · `contract-expiry` · `retire` ·
-   `youth-callup`. 옛 세이브는 이 칸이 없어 `note` 문장으로 읽는다(§12).
+   `youth-callup` · `youth-unsigned`. 옛 세이브는 이 칸이 없어 `note` 문장으로
+   읽는다(§12).
    문장으로 가르던 자리라, 문구를 고치면 라커룸이 사람이 사라진 것을 못 알아봤다.
 
    - **회견** — 주장이었거나 우리 스쿼드 상위 14명(`SQUAD_CORE_SIZE`) 안이던 자원이면

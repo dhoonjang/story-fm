@@ -695,6 +695,7 @@ const PLAYER_EXIT_KO: Record<string, string> = {
   "contract-expiry": "계약 만료",
   precontract: "사전 계약",
   "youth-callup": "유스 승격",
+  "youth-unsigned": "유스 미계약",
 };
 
 /**

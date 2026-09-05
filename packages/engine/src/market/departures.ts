@@ -88,6 +88,159 @@ export function freeAgents(state: GameState): GamePlayer[] {
 }
 
 /**
+ * **명부의 유스 몫 상한** — 계약을 받지 못한 아이는 이만큼만 선다
+ * (→ docs/simulation/transfer.md §6 · season.md §6).
+ *
+ * 상한이 없으면 여름마다 수십 명이 얹히고 그 무게는 되돌아오지 않는다 — 세이브도
+ * 매일 도는 무소속 순회도 함께 자란다. 감독 풀(`MANAGER_POOL_MAX`)과 같은 자리의
+ * 같은 이유이고, 40인 것도 같은 이유다: 검색 한 번에 훑을 만한 명부의 크기다.
+ */
+export const FREE_AGENT_YOUTH_CAP = 40;
+
+/**
+ * 명부의 순위에서 **한 살이 갖는 천장 몇 칸의 값**. 한 살 어린 아이는 천장까지 한
+ * 시즌을 더 쥐고 있고, U21 한 시즌의 종합 상승이 두 칸 언저리다
+ * (`youth-development` 하네스의 「타 팀 2군 U21 성장」).
+ */
+const YOUTH_POOL_AGE_STEP = 2;
+
+/** 명부에 남을 순위 — **나이가 많고 천장이 낮은 쪽부터** 떠난다 (transfer.md §6) */
+function youthPoolRank(state: GameState, player: GamePlayer): number {
+  return player.attributes.potential - ageOf(player.birthdate, state.date) * YOUTH_POOL_AGE_STEP;
+}
+
+/**
+ * 이 무소속이 **계약을 받지 못한 유스인가** — 원장의 마지막 줄이 답한다.
+ *
+ * 명단에 따로 칸을 두지 않는 것은 사실이 이미 원장에 있기 때문이다: 아카데미를
+ * 계약 없이 나온 사람의 마지막 이동은 `youth-unsigned`이고, 어느 구단이든 그를
+ * 데려가는 순간 그 위에 새 줄이 선다.
+ */
+function unsignedYouthEntries(state: GameState): Map<string, string> {
+  const last = new Map<string, { reason: TransferReason | undefined; date: string }>();
+  for (const t of state.transfers) last.set(t.gamePlayerId, { reason: t.reason, date: t.date });
+  const entries = new Map<string, string>();
+  for (const player of state.players) {
+    if (player.teamId !== FREE_AGENT_TEAM) continue;
+    const row = last.get(player.id);
+    if (row?.reason === "youth-unsigned") entries.set(player.id, row.date);
+  }
+  return entries;
+}
+
+/**
+ * **이 사람이 계약 없이 아카데미를 나온 아이인가** — 맞으면 어느 아카데미에서
+ * 언제 나왔는가. 조회가 카드에 세우는 사실 한 줄이 이 값이다 (transfer.md §6).
+ *
+ * 원장의 **마지막 줄**만 본다: 어느 구단이든 그를 데려가는 순간 그 위에 새 줄이
+ * 서므로, 계약을 한 번이라도 받은 사람에게는 이 줄이 서지 않는다.
+ */
+export function unsignedYouthOriginOf(
+  state: GameState,
+  playerId: string,
+): { teamId: string | null; on: string } | null {
+  for (let i = state.transfers.length - 1; i >= 0; i--) {
+    const row = state.transfers[i]!;
+    if (row.gamePlayerId !== playerId) continue;
+    if (row.reason !== "youth-unsigned") return null;
+    return { teamId: row.fromTeamId, on: row.date };
+  }
+  return null;
+}
+
+/** 지금 명부에 선 미계약 유스 */
+export function youthFreeAgents(state: GameState): GamePlayer[] {
+  const entries = unsignedYouthEntries(state);
+  return state.players.filter((p) => entries.has(p.id));
+}
+
+/**
+ * **갈 곳이 정해진 사람은 명부에서 지우지 않는다** — 발효 대기 계약(§1-4)이 섰거나
+ * 협상이 열려 있는 아이다. 지우면 그 계약이 사람 없이 남고, 감독은 마주 앉아 있던
+ * 상대가 사라지는 것을 본다.
+ */
+function boundElsewhere(state: GameState, playerId: string): boolean {
+  if (pendingContractOf(state, playerId)) return true;
+  return state.negotiations.some(
+    (n) => n.gamePlayerId === playerId && (n.status === "open" || n.status === "agreed"),
+  );
+}
+
+/**
+ * **계약을 받지 못한 아이가 명부에 선다** — 우리 아카데미의 미계약 후보도, AI
+ * 아카데미가 자리보다 많이 길러 낸 아이도 이 문 하나로 들어온다
+ * (→ docs/simulation/season.md §6).
+ *
+ * 자리는 `FREE_AGENT_YOUTH_CAP`뿐이고, **새로 온 아이와 이미 선 아이가 한 줄에
+ * 서서** 순위 아래쪽부터 잘린다. 새로 온 아이는 원장에 오르기 전에 잘리므로
+ * 명부에 서 본 적 없는 사람의 이동 줄이 남지 않는다.
+ *
+ * ⚠️ 후보 객체는 아직 `state.players`에 없다 — 인테이크가 계약시키지 않은 아이는
+ * 어느 명단에도 서지 않았다. 명부에 세우는 것이 곧 그를 세계에 들이는 일이다.
+ */
+export function admitUnsignedYouth(
+  state: GameState,
+  arrivals: readonly GamePlayer[],
+  on = state.date,
+): { admitted: GamePlayer[]; turnedAway: number; evicted: number } {
+  // 상한은 들어올 때만 넘을 수 있다 — 올 사람이 없으면 원장을 훑을 이유도 없다
+  if (arrivals.length === 0) return { admitted: [], turnedAway: 0, evicted: 0 };
+  const standing = youthFreeAgents(state);
+  const pinned = standing.filter((p) => boundElsewhere(state, p.id)).length;
+  const contest = [
+    ...standing
+      .filter((p) => !boundElsewhere(state, p.id))
+      .map((player) => ({ player, isNew: false })),
+    ...arrivals.map((player) => ({ player, isNew: true })),
+  ].sort(
+    (a, b) =>
+      youthPoolRank(state, b.player) - youthPoolRank(state, a.player) ||
+      (a.player.id < b.player.id ? -1 : 1),
+  );
+  const room = Math.max(0, FREE_AGENT_YOUTH_CAP - pinned);
+
+  const admitted: GamePlayer[] = [];
+  const evictedIds = new Set<string>();
+  let turnedAway = 0;
+  for (const [rank, row] of contest.entries()) {
+    if (rank < room) {
+      if (!row.isNew) continue;
+      state.players.push(row.player);
+      toFreeAgency(state, row.player, "youth-unsigned", on);
+      admitted.push(row.player);
+      continue;
+    }
+    // 하부 리그로 갔다고 본다 — 명부에 자리가 없는 아이는 세계가 데리고 있지 않는다
+    if (row.isNew) turnedAway += 1;
+    else evictedIds.add(row.player.id);
+  }
+  if (evictedIds.size > 0) {
+    state.players = state.players.filter((p) => !evictedIds.has(p.id));
+  }
+  return { admitted, turnedAway, evicted: evictedIds.size };
+}
+
+/**
+ * **한 시즌이 그 아이의 시간이다** — 지난 여름에 명부에 서서 아직 아무 구단도 부르지
+ * 않은 아이는 전환에서 명부를 떠난다(하부 리그로 갔다고 본다). 이 문이 없으면
+ * 상한이 해마다 꽉 찬 채로 남아 새 아이가 설 자리가 없다.
+ *
+ * `on`은 이번 전환이 명부를 채우는 날이다 — 그날 들어온 아이는 아직 시간을 쓰지
+ * 않았으므로 그 앞의 줄만 지운다.
+ */
+export function dropStaleYouthFreeAgents(state: GameState, on: string): GamePlayer[] {
+  const entries = unsignedYouthEntries(state);
+  const stale = state.players.filter((p) => {
+    const stood = entries.get(p.id);
+    return stood !== undefined && stood < on && !boundElsewhere(state, p.id);
+  });
+  if (stale.length === 0) return [];
+  const gone = new Set(stale.map((p) => p.id));
+  state.players = state.players.filter((p) => !gone.has(p.id));
+  return stale;
+}
+
+/**
  * 떠나는 선수가 **남기고 가는 것들** — 어느 문으로 나가든 같다.
  *
  * 전술 배치 · 이적 리스트 · 개인 훈련 · 역할 기억 · 주장 완장 · 라커룸 불만은 그
@@ -583,6 +736,21 @@ const FREE_AGENT_OLD_APPEAL = 0.35;
 const FREE_AGENT_VETERAN_AGE = 31;
 const FREE_AGENT_VETERAN_APPEAL = 0.7;
 /**
+ * **어린 자원의 나이 문턱과 계수** (transfer.md §6) — 노장 계수의 반대쪽 끝이다.
+ *
+ * 종합만 보면 천장 75짜리 열여덟은 종합이 55라 아무도 부르지 않고, 명부에 든 유스가
+ * 그대로 늙어 사라진다. 값이 붙지 않고 자리가 남아 있어 데려가는 쪽이 많은 자원이라
+ * 계수가 1을 넘는다.
+ */
+const FREE_AGENT_PROSPECT_AGE = 21;
+const FREE_AGENT_PROSPECT_APPEAL = 1.3;
+/**
+ * 어린 자원에게 **위쪽으로만** 열리는 수준 폭 — 지금 실력이 아니라 여지를 보고 2군에
+ * 앉히는 자리다. 아래쪽(구단이 그 선수보다 한참 낮은 쪽)은 `SUITOR_LEVEL_BAND` 그대로다:
+ * 그건 어려서 데려가는 것이 아니라 감당할 수 없는 자원을 데려가는 것이다.
+ */
+const SUITOR_PROSPECT_LEVEL_BAND = 20;
+/**
  * 무소속을 더 받지 않는 **전체 인원**(1군·2군·유스 합) — 이만큼 데리고 있는 구단은
  * 공짜라도 한 명을 더 얹지 않는다.
  *
@@ -598,7 +766,10 @@ const FREE_AGENT_SUITOR_SQUAD_CAP = 40;
  *
  * 아무 데나 가지 않는다. **자리가 얇고 수준이 비슷한** 구단이 데려간다:
  * 그 포지션군이 부족할수록, 팀의 스쿼드 수준과 선수의 실력이 가까울수록 확률이
- * 오른다. 좋은 선수일수록 빨리 팔리고, 나이가 많을수록 더디다.
+ * 오른다. 좋은 선수일수록 빨리 팔리고, 나이가 많을수록 더디다. **어린 자원은
+ * 반대쪽 끝이다** — 잣대가 천장을 함께 읽고(`FREE_AGENT_PROSPECT_APPEAL`) 수준
+ * 폭이 위로 열려(`SUITOR_PROSPECT_LEVEL_BAND`), 아카데미가 계약을 주지 않은 아이가
+ * 명부에서 늙지 않는다 (transfer.md §6).
  *
  * **우리 팀은 이 경로로 선수를 받지 않는다** — 감독이 직접 데려와야 한다.
  * 안 그러면 아무것도 안 해도 스쿼드가 채워진다.
@@ -618,14 +789,26 @@ export function signFreeAgents(state: GameState, digest: string[]): void {
      */
     if (pendingContractOf(state, player.id)) continue;
     const age = ageOf(player.birthdate, state.date);
-    // 이름값이 클수록 빨리, 나이가 많을수록 더디게 (기준 등급은 종합 눈금을 탄다)
+    /**
+     * 이름값이 클수록 빨리, 나이가 많을수록 더디게 (기준 등급은 종합 눈금을 탄다).
+     * **어린 자원의 잣대는 종합과 천장의 가운데다** (transfer.md §6) — 사는 것이
+     * 지금이 아니라 여지라, 종합만 읽으면 명부의 유스가 영영 안 팔린다. 천장은
+     * 참값이다: 안개는 감독의 화면이 쓰는 것이고 세계가 값을 매기는 자리는 이미
+     * 참값을 읽는다(`marketValueOf`의 나이 곡선).
+     */
+    const measure =
+      age <= FREE_AGENT_PROSPECT_AGE
+        ? (player.attributes.overall + player.attributes.potential) / 2
+        : player.attributes.overall;
     const appeal =
-      (player.attributes.overall / FREE_AGENT_PAR_RATING) *
+      (measure / FREE_AGENT_PAR_RATING) *
       (age >= FREE_AGENT_OLD_AGE
         ? FREE_AGENT_OLD_APPEAL
         : age >= FREE_AGENT_VETERAN_AGE
           ? FREE_AGENT_VETERAN_APPEAL
-          : 1);
+          : age <= FREE_AGENT_PROSPECT_AGE
+            ? FREE_AGENT_PROSPECT_APPEAL
+            : 1);
     if (rng() > FREE_AGENT_SIGN_CHANCE * appeal) continue;
 
     const suitor = pickSuitor(state, player, rng);
@@ -637,9 +820,15 @@ export function signFreeAgents(state: GameState, digest: string[]): void {
   }
 }
 
-/** 그 선수를 데려갈 만한 구단 — 자리가 얇고 수준이 맞는 곳 */
+/**
+ * 그 선수를 데려갈 만한 구단 — 자리가 얇고 수준이 맞는 곳.
+ *
+ * **어린 자원에게는 위가 열린다** (transfer.md §6) — 지금 실력으로만 재면 종합 55의
+ * 열여덟은 최하위권 몇 구단하고만 맞아, 명부에 든 유스가 갈 곳을 못 찾는다.
+ */
 function pickSuitor(state: GameState, player: GamePlayer, rng: () => number): string | null {
   const group = groupOf(player);
+  const prospect = ageOf(player.birthdate, state.date) <= FREE_AGENT_PROSPECT_AGE;
   const candidates: string[] = [];
   for (const team of state.teams) {
     if (team.id === state.userTeamId) continue; // 감독이 직접 데려와야 한다
@@ -659,8 +848,10 @@ function pickSuitor(state: GameState, player: GamePlayer, rng: () => number): st
         .sort((a, b) => b - a)
         .slice(0, SUITOR_LEVEL_SAMPLE)
         .reduce((sum, v) => sum + v, 0) / Math.min(SUITOR_LEVEL_SAMPLE, squad.length);
-    const gap = Math.abs(level - player.attributes.overall);
-    if (gap > SUITOR_LEVEL_BAND) continue;
+    // 양수는 구단이 그 선수보다 높다는 뜻 — 어린 자원에게 열리는 쪽이 이쪽이다
+    const gap = level - player.attributes.overall;
+    if (gap > (prospect ? SUITOR_PROSPECT_LEVEL_BAND : SUITOR_LEVEL_BAND)) continue;
+    if (-gap > SUITOR_LEVEL_BAND) continue;
 
     // 급할수록 여러 번 이름을 넣는다 (결정적 rng 하나로 뽑기 위해)
     const weight = Math.max(1, SUITOR_GROUP_CROWD - atGroup);
