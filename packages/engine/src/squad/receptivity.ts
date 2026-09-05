@@ -3,7 +3,6 @@ import {
   PLAYER_ARCHETYPE_LABEL,
   PLAYER_ARCHETYPE_TRAITS,
   RELATION_TIER_KO,
-  RELATION_TIER_RANK,
 } from "@story-fm/domain";
 import { playerById, type GameState } from "../core/state";
 import { diffDays } from "../core/dates";
@@ -57,6 +56,21 @@ export const RECEPTIVITY_HOT_RATING = 7.0;
  */
 const RECEPTIVITY_TIER_STEP = 2;
 /**
+ * 등급이 눈금에 얹는 값 — 순위(0~5)를 그대로 더하면 눈금이 통째로 위로 밀린다.
+ *
+ * 옛 다섯 칸의 −2~+2를 그대로 두고 가운데 둘을 0에 놓았다: 등급을 여섯으로 가르는 일이
+ * 수용성의 밸런스까지 함께 옮기지 않게 한다.
+ */
+const RECEPTIVITY_RELATION_STEP: Record<RelationTier, number> = {
+  hostile: -2,
+  strained: -1,
+  distant: 0,
+  cordial: 0,
+  close: 1,
+  trusted: 2,
+};
+
+/**
  * 원형이 수용성에 거는 자리 — 계수 넷 중 **직업의식**을 읽는다: 코치의 말을 흡수하는
  * 축(`applyAttributeStep`)이라 감독의 말을 듣는 쪽에 가장 가깝다. 표(people.md §6)에서
  * 1.15 이상이 셋(장인·프로페셔널·영상 분석형), 0.9 이하가 둘(승부욕 과열·저울질하는 스타)이다.
@@ -91,7 +105,7 @@ export function receptivityTierOf(score: number): Receptivity {
 }
 
 /**
- * 눈금 넷의 합 — 감독과의 관계 등급 순위(−2~+2) · 열린 불만(−1) · 직전 경기(자기 평점
+ * 눈금 넷의 합 — 감독과의 관계 등급(−2~+2) · 열린 불만(−1) · 직전 경기(자기 평점
  * 호조 +1 · 팀 패배 −1) · 원형(±1).
  */
 export function receptivityOf(state: GameState, playerId: string): ReceptivityRead {
@@ -99,9 +113,10 @@ export function receptivityOf(state: GameState, playerId: string): ReceptivityRe
   let score = 0;
 
   const relation: RelationTier = relationTierOf(state, MANAGER_SUBJECT, playerId);
-  const tierRank = RELATION_TIER_RANK[relation];
-  score += tierRank;
-  if (relation !== "neutral") reasons.push(`relation:${relation}`);
+  const step = RECEPTIVITY_RELATION_STEP[relation];
+  score += step;
+  // 기여가 0인 가운데 둘은 근거가 아니다 — 매 줄에 「무난한 사이」가 서면 사실 줄이 잡음이 된다
+  if (step !== 0) reasons.push(`relation:${relation}`);
 
   if (state.issues.some((i) => i.gamePlayerId === playerId)) {
     score -= 1;
@@ -140,11 +155,7 @@ export function receptivityOf(state: GameState, playerId: string): ReceptivityRe
    * (people.md §6)이 여기서 새로 뚫린다.
    */
   const tier =
-    tierRank === RELATION_TIER_RANK.trusted
-      ? "open"
-      : tierRank === RELATION_TIER_RANK.hostile
-        ? "closed"
-        : receptivityTierOf(score);
+    relation === "trusted" ? "open" : relation === "hostile" ? "closed" : receptivityTierOf(score);
   return { tier, score, reasons };
 }
 

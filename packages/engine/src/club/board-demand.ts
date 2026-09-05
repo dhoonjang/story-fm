@@ -23,7 +23,6 @@ import { addDays } from "../core/dates";
 import { academyPlayerIdsOf } from "./vision";
 import { windowOpenForTeam } from "../market/market";
 import { ownerOf } from "../world/persona";
-import { MANAGER_SUBJECT, moveRelation } from "../world/relations";
 import {
   PROMISE_MIN_MATCHES,
   PROMISE_WINDOW_MATCHES,
@@ -552,13 +551,6 @@ function judgeDemand(state: GameState, demand: BoardDemand, digest: string[]): v
   const delta = verdict ? BOARD_DEMAND.MET_BOARD : BOARD_DEMAND.FAILED_BOARD;
   const rep = state.manager.reputation;
   rep.board = clampRep(rep.board + delta);
-  // 요청을 지켰는가는 구단주와의 **사이**이기도 하다 (people.md §6 「관계 점수」)
-  moveRelation(
-    state,
-    MANAGER_SUBJECT,
-    ownerOf(state).characterId,
-    verdict ? "demand-met" : "demand-failed",
-  );
   const line = `보드 요청 ${verdict ? "이행" : "불이행"} — ${describeDemand(state, demand)}`;
   digest.push(`${line} (${signed("보드", delta) ?? ""})`);
   pushNarrative(state, line, verdict ? 3 : 4);

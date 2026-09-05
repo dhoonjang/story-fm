@@ -2054,6 +2054,15 @@ export const TeamFinanceSchema = z.object({
   /** 보드가 이적 예산을 동결했는가 — PSR 한도 초과 **또는** 부채 한도 초과 (finance.md §9.2·§9.4) */
   budgetFrozen: z.boolean().optional(),
   /**
+   * **이번 시즌을 시작한 잔고** — 시즌 예산 보충이 읽는 「지난 시즌 현금 잉여」의
+   * 기준점이다 (finance.md §9.1). 전환마다 그때의 잔고로 다시 선다.
+   *
+   * 보고서가 아니라 통장인 이유: 원장을 남기지 않는 AI 구단도(§4.5) 같은 자로 재야
+   * 세계가 잉여를 예산으로 되돌린다. 옛 세이브엔 없다 — 그 세이브의 첫 전환은
+   * 잉여를 0으로 읽고, 그 다음 시즌부터 제 값이 선다 (optional — 세이브 버전 유지).
+   */
+  seasonOpeningBalance: z.number().optional(),
+  /**
    * `adjust_transfer_budget`이 **오늘** 움직인 금액의 합 (날짜 + 절대값).
    * 한도는 하루 누적이라 어제 것과 섞이면 안 된다 — 원장에 남지 않는 자본
    * 이동이라 되짚을 곳이 여기밖에 없다. 옛 세이브엔 없다(optional).

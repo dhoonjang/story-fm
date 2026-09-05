@@ -7,7 +7,6 @@ import {
   pendingApproach,
   pendingPress,
   playersOf,
-  relationOf,
   relationTierOf,
   type GameState,
 } from "@story-fm/engine";
@@ -59,15 +58,8 @@ const REVIEW_TAIL_DAYS = 7;
 /** 시즌 끝에 감독과 `strained` 이하인 우리 선수 */
 function sourPlayers(state: GameState) {
   return playersOf(state, state.userTeamId).filter(
-    (p) => RELATION_TIER_RANK[relationTierOf(state, MANAGER_SUBJECT, p.id)] < 0,
-  );
-}
-
-/** 감독이 누군가와 가장 멀어진 자리 — 아무도 없으면 0 */
-function lowestRelation(state: GameState): number {
-  return Math.min(
-    0,
-    ...playersOf(state, state.userTeamId).map((p) => relationOf(state, MANAGER_SUBJECT, p.id)),
+    (p) =>
+      RELATION_TIER_RANK[relationTierOf(state, MANAGER_SUBJECT, p.id)] < RELATION_TIER_RANK.distant,
   );
 }
 
@@ -202,13 +194,11 @@ describe("한 시즌의 다가옴", () => {
       "가장 높이 오른 계단": Math.max(0, ...opened.map((a) => a.step)),
       "첫 자리까지 걸린 날": opened[0] ? diffDays(start, opened[0].date) : Number.NaN,
       /**
-       * **관계는 되먹임이다** (people.md §6) — 답하지 않은 자리마다 사이가 내려가고,
-       * 사이가 내려가면 압력이 빨리 쌓여 자리가 더 자주 열린다. 그 고리가 눈덩이가
-       * 되는지는 시즌을 굴려야만 보인다.
+       * **여기서는 사이가 움직이지 않아야 한다** (people.md §6) — 등급을 매기는 자리가
+       * 이력 압축 하나뿐이고 하네스에는 모델이 없다. 압력 배수(1.3)는 여전히 등급을
+       * 읽으므로, 이 줄이 0을 벗어나면 코어가 어딘가에서 사이를 옮겨 되먹임이 다시 선 것이다.
        */
       "사이가 상한 선수": sourPlayers(state).length,
-      "가장 낮은 관계 점수": lowestRelation(state),
-      "관계 줄": (state.relations ?? []).length,
     };
     console.log(
       reportOf(

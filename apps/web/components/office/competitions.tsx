@@ -242,8 +242,9 @@ function leaderColumns(
  * 개인 순위 — 축을 하나 골라 상위 열 명을 본다.
  *
  * 시즌 끝에만 서던 시상을 시즌 중에 미리 읽는 자리다
- * (docs/data/competition.md §2 「개인 순위」). ⚠️ 대항전은 시즌 기록이 대회별로
- * 갈리지 않아 개인 순위가 서지 않고 팀 열만 선다.
+ * (docs/data/competition.md §2 「개인 순위」). **대회 다섯 곳 전부에 선다** — 국내
+ * 컵은 라운드가 적어 표가 짧고, 순위표가 없어 팀 열 대신 개인 순위만 선다. 줄이
+ * 하나도 없는 축은 코어가 이미 빼므로 화면은 온 것을 그대로 세운다.
  */
 function LeadersSection({ competition }: { competition: Competition }) {
   const leaders = competition.leaders;

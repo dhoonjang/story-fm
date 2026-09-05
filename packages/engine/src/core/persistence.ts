@@ -26,6 +26,7 @@ import {
   migrateMirrorProficiency,
   migrateNationalities,
   migratePassStyles,
+  migrateRelationTiers,
   migrateSquadLevels,
   splitPositioningAxis,
 } from "./migrations";
@@ -386,6 +387,8 @@ function migrate(save: Record<string, unknown>, state: GameState): void {
   migrateGrowthSources(state);
   // 시상의 `leagueId` → `competitionId` — 스키마가 새 칸을 요구하므로 parse보다 앞이다
   migrateAwardCompetition(save);
+  // 관계 점수 → 등급. 스키마에서 `score`를 빼고 `tier`를 요구하므로 이것도 parse보다 앞이다
+  migrateRelationTiers(state);
   // 좌우 미러 자리에 얹혀 있던 주발 보정을 벗긴다 — 저장은 원값, 주발은 조회 때
   // (player.md §8). 마커가 없는 세이브에서만 한 번: 다시 돌면 경기·훈련이 그
   // 자리에 쌓은 적응도를 같이 민다.

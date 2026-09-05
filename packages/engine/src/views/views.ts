@@ -1272,11 +1272,11 @@ export interface CompetitionView {
   homeTable: StandingRow[];
   awayTable: StandingRow[];
   /**
-   * 개인 순위와 팀 열 — 순위표가 없는 국내 컵은 null.
+   * 개인 순위와 팀 열 — **대회 다섯 곳 전부에 선다.** 둘 다 빌 때만 null이다.
    *
-   * ⚠️ **개인 순위는 리그에만 선다** — 기록은 대회별로 갈리지만 평점 축의 출전
-   * 문턱이 순위표에서 나오고 컵에는 순위표가 없다 (season.md §9). 팀 열은 경기
-   * 결과에서 나오므로 대항전 리그 페이즈에도 선다.
+   * 개인 순위는 그 대회의 기록만 접고(`talliesOf`) 출전 문턱도 그 대회의 경기에서
+   * 나온다 (competition.md §2 「개인 순위」). 팀 열은 순위표가 센 경기와 같은
+   * 집합이라 순수 녹아웃(국내 컵)에서는 빈 배열이다.
    */
   leaders: CompetitionLeadersView | null;
   /** 순위 구역 — 챔스·유로파 진출권(리그) 또는 본선 직행·플레이오프(대항전) */
@@ -1310,9 +1310,9 @@ export interface CompetitionView {
 
 /** 대회 화면의 개인 순위·팀 열 (competition.md §2 「개인 순위」) */
 export interface CompetitionLeadersView {
-  /** 축별 상위 열 — 줄이 하나도 없는 축은 빠진다. 대항전은 빈 배열 */
+  /** 축별 상위 열 — 줄이 하나도 없는 축은 빠진다 */
   players: LeaderBoard[];
-  /** 팀 열 — 순위표와 같은 순서다 */
+  /** 팀 열 — 순위표와 같은 순서다. 순위표가 없는 국내 컵은 빈 배열 */
   teams: TeamStatRow[];
 }
 
@@ -2707,14 +2707,17 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
   if (current) current.current = true;
 
   const standings = computeStandings(state, competitionId);
-  // 개인 순위는 리그의 것이다 — 대항전은 팀 열만 선다 (competition.md §2)
+  /**
+   * 개인 순위는 대회마다 선다 — 국내 컵도 라운드가 적을 뿐 표는 표다
+   * (competition.md §2 「개인 순위」). 팀 열은 순위표가 센 경기와 같은 집합이라
+   * 순수 녹아웃에서는 비고, 그때는 개인 순위만 남는다.
+   */
+  const leaderRows = leaderboardsOf(state, competitionId);
+  const teamRows = teamStatsOf(state, competitionId);
   const leaders: CompetitionLeadersView | null =
-    standings.length === 0
+    leaderRows.length === 0 && teamRows.length === 0
       ? null
-      : {
-          players: cup ? [] : leaderboardsOf(state, competitionId),
-          teams: teamStatsOf(state, competitionId),
-        };
+      : { players: leaderRows, teams: teamRows };
   /**
    * 이 대회의 다음 우리 경기 — **팀 단위와 같은 함수로 고른다.**
    *

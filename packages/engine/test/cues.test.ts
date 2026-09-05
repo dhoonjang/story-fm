@@ -536,9 +536,8 @@ const rowOf = (state: GameState, subject: string) =>
 /**
  * 사다리를 그 계단까지 올린다 — 자리가 열릴 때마다 감독이 답한다(압력은 0으로).
  *
- * **답은 `deflect`다** — 사이를 옮기지 않는 유일한 스탠스라(people.md §6 사건 표)
- * 그 뒤에 재는 임계가 관계 배수를 타지 않는다. 여기서 재려는 것은 사다리의 눈금이지
- * 감독이 무슨 말을 했느냐가 아니다.
+ * **답은 `deflect`다** — 사기도 평판도 가장 적게 옮기는 스탠스라, 여기서 재려는 것이
+ * 사다리의 눈금이지 감독이 무슨 말을 했느냐가 아니라는 것이 그 선택이다.
  */
 function climbTo(state: GameState, subject: string, step: number): void {
   for (let day = 0; day < 400; day++) {
@@ -1471,8 +1470,8 @@ describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () 
   it("답은 그 자리에서 나오지 않는다 — 종류가 정한 날에 도착해 예산에 얹힌다", () => {
     const state = board(createTestGame(11), 100_000_000, 80);
     const budgetBefore = financeOf(state, state.userTeamId).transferBudget;
-    // 잔고 £100M × 0.25 × 신뢰 1.0 × 살림 1.0
-    expect(boardRequestCeiling(state, "transfer-budget")).toBe(25_000_000);
+    // 기준액 £45M × 0.6 × 신뢰 1.0 × 살림 1.0 — 잔고는 이 자에 들어오지 않는다
+    expect(boardRequestCeiling(state, "transfer-budget")).toBe(27_000_000);
 
     expect(requestBoard(state, { kind: "transfer-budget", amount: 20_000_000 }).ok).toBe(true);
     // 답이 오기 전날까지는 아무 일도 없다
@@ -1499,8 +1498,26 @@ describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () 
 
     const answered = (state.boardRequests ?? [])[0]!;
     expect(answered.status).toBe("approved");
-    expect(answered.granted).toBe(25_000_000);
-    expect(financeOf(state, state.userTeamId).transferBudget).toBe(budgetBefore + 25_000_000);
+    expect(answered.granted).toBe(27_000_000);
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(budgetBefore + 27_000_000);
+  });
+
+  /**
+   * 돈의 두 종류가 재는 자는 **기준액**이다 (finance.md §9.6). 자가 잔고이면 현금이
+   * 불수록 물어서 받는 값이 함께 불어 요청이 화수분이 된다 — 잔고가 열 배가 되어도
+   * 한도가 그대로인 것이 이 축의 단일 지표다.
+   */
+  it("돈의 여력은 잔고를 읽지 않는다 — 구장만 잔고를 본다", () => {
+    const state = board(createTestGame(11), 100_000_000, 80);
+    const budget = boardRequestCeiling(state, "transfer-budget");
+    const signing = boardRequestCeiling(state, "signing");
+    const seats = boardRequestCeiling(state, "stadium");
+
+    financeOf(state, state.userTeamId).balance = 1_000_000_000;
+    expect(boardRequestCeiling(state, "transfer-budget")).toBe(budget);
+    expect(boardRequestCeiling(state, "signing")).toBe(signing);
+    // 좌석은 허가가 아니라 공사비라 현금이 실제로 나간다 — 이쪽만 잔고를 탄다
+    expect(boardRequestCeiling(state, "stadium")).toBeGreaterThan(seats);
   });
 
   it("보드 평판이 바닥이면 한도가 0이라 거절이고, 동결이면 잔고가 있어도 거절이다", () => {
@@ -1621,7 +1638,7 @@ describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () 
   it("되거는 원형은 부분 승인 대신 조건을 걸고, 장부가 채워진 날 부른 값 그대로 승인이다", () => {
     const state = ownedBy(board(createTestGame(11), 100_000_000, 80), "투자자형");
     const before = financeOf(state, state.userTeamId).transferBudget;
-    // 한도 £25M < 부른 £40M — 되거는 원형이라 절반을 내주는 대신 조건이 선다
+    // 한도 £27M < 부른 £40M — 되거는 원형이라 일부를 내주는 대신 조건이 선다
     requestBoard(state, { kind: "transfer-budget", amount: 40_000_000 });
     untilAnswer(state, "transfer-budget");
 
@@ -1630,7 +1647,7 @@ describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () 
     expect(asked.condition).toEqual({
       kind: "raise",
       // 모자란 만큼이다 — 굴리지 않는다
-      amount: 15_000_000,
+      amount: 13_000_000,
       since: state.date,
       until: addDays(state.date, BOARD_REQUEST.CONDITION_DAYS),
     });
@@ -1639,7 +1656,7 @@ describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () 
     expect(requestBoard(state, { kind: "wage-room", amount: 1000 }).ok).toBe(false);
     expect(financeOf(state, state.userTeamId).transferBudget).toBe(before);
 
-    sold(state, 15_000_000);
+    sold(state, 13_000_000);
     state.date = addDays(state.date, 1);
     tickBoardRequests(state, []);
 
@@ -1678,7 +1695,7 @@ describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () 
     untilAnswer(state, "transfer-budget");
     const answered = state.boardRequests![0]!;
     expect(answered.status).toBe("approved");
-    expect(answered.granted).toBe(25_000_000);
+    expect(answered.granted).toBe(27_000_000);
   });
 
   it("건별 영입 승인분은 그 선수 밖으로 새지 않는다 — 확정도 만료도 예산을 늘리지 않는다", () => {
@@ -1689,8 +1706,8 @@ describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () 
     const target = outside[0]!;
     const other = outside[1]!;
 
-    // 잔고 £100M × 0.40 — 총액 증액(0.25)보다 큰 자리다
-    expect(boardRequestCeiling(state, "signing")).toBe(40_000_000);
+    // 기준액 £45M × 1.0 — 총액 증액(0.6)보다 큰 자리다
+    expect(boardRequestCeiling(state, "signing")).toBe(45_000_000);
     expect(requestBoard(state, { kind: "signing", amount: 30_000_000 }).ok).toBe(false);
     expect(
       requestBoard(state, { kind: "signing", amount: 30_000_000, playerId: target.id }).ok,
@@ -1705,7 +1722,7 @@ describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () 
     expect(signingBudgetOf(state, target.id)).toBe(before + 30_000_000);
     expect(signingBudgetOf(state, other.id)).toBe(before);
     // 걸려 있는 몫만큼 다음 건별 승인의 여력이 준다
-    expect(boardRequestCeiling(state, "signing")).toBe(10_000_000);
+    expect(boardRequestCeiling(state, "signing")).toBe(15_000_000);
 
     // 기한이 지나면 사라진다 — 예산으로 흘러들지 않는다
     state.date = addDays(state.date, BOARD_REQUEST.EARMARK_DAYS + 1);

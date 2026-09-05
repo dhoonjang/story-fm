@@ -19,7 +19,6 @@ import {
   INCIDENT_MORALE_BOUND,
   MANAGER_SUBJECT,
   MAX_INCIDENTS_PER_DAY,
-  RELATION_EVENTS,
   applyTalkToPlayer,
   applyTeamTalk,
   assignmentsOf,
@@ -32,13 +31,12 @@ import {
   lineupSignature,
   movePlayerSlot,
   moraleToForm,
-  moveRelation,
   playerById,
   pushNarrative,
   receptivityOf,
   recordIncident,
-  relationOf,
   relationTierOf,
+  setRelationTier,
   recordEdit,
   occupiesSquadList,
   isHomegrownFor,
@@ -113,13 +111,13 @@ function currentLineup(state: ReturnType<typeof createTestGame>) {
  */
 function openUp(state: GameState, player: GamePlayer): void {
   while (relationTierOf(state, MANAGER_SUBJECT, player.id) !== "trusted") {
-    moveRelation(state, MANAGER_SUBJECT, player.id, "promise-kept");
+    setRelationTier(state, state.manager.name, player.name, "trusted");
   }
   expect(receptivityOf(state, player.id).tier).toBe("open");
 }
 function closeOff(state: GameState, player: GamePlayer): void {
   while (relationTierOf(state, MANAGER_SUBJECT, player.id) !== "hostile") {
-    moveRelation(state, MANAGER_SUBJECT, player.id, "promise-broken");
+    setRelationTier(state, state.manager.name, player.name, "hostile");
   }
   expect(receptivityOf(state, player.id).tier).toBe("closed");
 }
@@ -137,7 +135,7 @@ function waryOne(state: GameState, skip: ReadonlySet<string> = new Set()): GameP
  */
 function waryWithIssue(state: GameState, skip: ReadonlySet<string> = new Set()): GamePlayer {
   const player = waryOne(state, skip);
-  for (let i = 0; i < 3; i += 1) moveRelation(state, MANAGER_SUBJECT, player.id, "promise-kept");
+  setRelationTier(state, state.manager.name, player.name, "close");
   state.issues.push({
     gamePlayerId: player.id,
     kind: "unhappy",
@@ -1589,22 +1587,22 @@ describe("사건 기록 — 감독이 말로 만든 사건이 장부에 선다 (
     expect(fire().ok, "네 번째가 통과했다").toBe(false);
   });
 
-  it("효과표 한 줄 — discipline 세기 2는 당사자 사기 −4 · 팀 사기 +1 · 관계 −6", () => {
+  it("효과표 한 줄 — discipline 세기 2는 당사자 사기 −4 · 팀 사기 +1", () => {
     const state = createTestGame();
     const [party, other] = userPlayers(state) as [GamePlayer, GamePlayer];
     party.state.form = 0;
     other.state.form = 0;
-    const before = relationOf(state, MANAGER_SUBJECT, party.id);
+    const before = relationTierOf(state, MANAGER_SUBJECT, party.id);
 
     const result = incident(state, { kind: "discipline", intensity: 2, playerIds: [party.id] });
     expect(result.ok).toBe(true);
     // 당사자도 팀의 한 사람이다 — 자기 몫 −4 위에 팀 몫 +1이 얹힌다
     expect(party.state.form).toBeCloseTo(moraleToForm(-4 + 1), 10);
     expect(other.state.form).toBeCloseTo(moraleToForm(1), 10);
-    expect(relationOf(state, MANAGER_SUBJECT, party.id)).toBe(
-      before + RELATION_EVENTS["incident-discipline"],
-    );
     expect(result.brief?.items.find((i) => i.label === "사기")?.delta).toBe(-4);
+    // 벌금이 그 자리에서 사이를 옮기지는 않는다 — 등급은 압축이 매긴다 (people.md §6)
+    expect(relationTierOf(state, MANAGER_SUBJECT, party.id)).toBe(before);
+    expect(state.relations ?? []).toHaveLength(0);
   });
 
   it("세기가 사기를 늘이되 `INCIDENT_MORALE_BOUND` 밖으로는 못 나간다", () => {
@@ -1615,20 +1613,6 @@ describe("사건 기록 — 감독이 말로 만든 사건이 장부에 선다 (
     expect(result.brief?.items.find((i) => i.label === "사기")?.delta).toBe(INCIDENT_MORALE_BOUND);
     const low = incident(state, { kind: "discipline", intensity: 3, playerIds: [player.id] });
     expect(low.brief?.items.find((i) => i.label === "사기")?.delta).toBe(-INCIDENT_MORALE_BOUND);
-  });
-
-  it("mediation은 두 선수 사이를 +6, 감독과는 각각 +2 옮긴다", () => {
-    const state = createTestGame();
-    const [a, b] = userPlayers(state) as [GamePlayer, GamePlayer];
-    const pair = relationOf(state, a.id, b.id);
-    const withA = relationOf(state, MANAGER_SUBJECT, a.id);
-    expect(incident(state, { kind: "mediation", intensity: 2, playerIds: [a.id, b.id] }).ok).toBe(
-      true,
-    );
-    expect(relationOf(state, a.id, b.id)).toBe(pair + RELATION_EVENTS.mediated);
-    expect(relationOf(state, MANAGER_SUBJECT, a.id)).toBe(
-      withA + RELATION_EVENTS["incident-mediation"],
-    );
   });
 
   it("장부와 인물 기억에 즉시 선다 — 당사자는 이름으로 불러도 id로 적힌다", () => {
@@ -1683,7 +1667,6 @@ describe("수용성 — 판정은 앵커 ± 한 단계 안에서만 선다 (care
     const player = userPlayers(state)[0]!;
     closeOff(state, player);
     player.state.form = 0;
-    const before = relationOf(state, MANAGER_SUBJECT, player.id);
     const result = applyTalkToPlayer(state, {
       playerId: player.id,
       outcome: "motivated",
@@ -1691,7 +1674,6 @@ describe("수용성 — 판정은 앵커 ± 한 단계 안에서만 선다 (care
     });
     expect(result.ok).toBe(true);
     expect(player.state.form).toBe(0);
-    expect(relationOf(state, MANAGER_SUBJECT, player.id)).toBe(before);
     expect(result.message).toContain("motivated은 neutral으로");
     expect(result.brief?.items.find((i) => i.label === "수용성")?.text).toBe("닫힘");
   });
@@ -1701,14 +1683,12 @@ describe("수용성 — 판정은 앵커 ± 한 단계 안에서만 선다 (care
     const player = userPlayers(state)[1]!;
     openUp(state, player);
     player.state.form = 0;
-    const before = relationOf(state, MANAGER_SUBJECT, player.id);
     const result = applyTalkToPlayer(state, {
       playerId: player.id,
       outcome: "angered",
       intensity: 3,
     });
     expect(player.state.form).toBe(0);
-    expect(relationOf(state, MANAGER_SUBJECT, player.id)).toBe(before);
     expect(result.message).toContain("angered은 neutral으로");
     // 잘리지 않은 판정에는 그 조각이 없다 — 사실 줄만 남는다
     const plain = applyTalkToPlayer(state, {

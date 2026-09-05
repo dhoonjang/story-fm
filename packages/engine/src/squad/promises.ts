@@ -25,7 +25,6 @@ import {
   type GameState,
 } from "../core/state";
 import { SQUAD_CORE_SIZE } from "../club/press";
-import { MANAGER_SUBJECT, moveRelation } from "../world/relations";
 import { clampForm, moraleToForm } from "./form";
 import { numberBlockText } from "./numbers";
 import { betterAtPosition } from "./depth";
@@ -405,12 +404,6 @@ export function tickPromises(state: GameState, digest: string[]): void {
     state.manager.reputation.squad = clampReputation(
       state.manager.reputation.squad + (kept ? PROMISE.keptSquad : PROMISE.brokenSquad),
     );
-    /**
-     * **감독이 한 말은 그 선수와의 사이에 남는다** (people.md §6 「관계 점수」).
-     * 어긴 쪽이 지킨 쪽보다 큰 것은 사기 폭이 그런 것과 같은 이유다 — 약속은 지켜져야
-     * 본전이고, 어기면 다음 말이 통하지 않는다.
-     */
-    moveRelation(state, MANAGER_SUBJECT, player.id, kept ? "promise-kept" : "promise-broken");
     const label = PROMISE_KIND_KO[promise.kind];
     if (kept) {
       digest.push(`${player.name} ${label} 약속을 지켰다 — 사기 +${PROMISE.keptMorale}`);

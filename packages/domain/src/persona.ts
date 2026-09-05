@@ -259,65 +259,87 @@ export const CharacterInjectionSchema = z.object({
 export type CharacterInjection = z.infer<typeof CharacterInjectionSchema>;
 
 /**
- * **관계 점수** — 무순서 쌍 하나에 한 줄 (people.md §6 「관계 점수」).
+ * 카드가 읽는 눈금 — **관계는 등급 하나다** (people.md §6 「관계 등급」).
  *
- * 세이브가 든다. 감독이 무엇을 했는지의 누적이라 장부에서 파생할 수 없는 값이고,
- * 압력 눈금(§8)이 세이브를 드는 이유와 같다. 줄은 **사건이 처음 움직일 때** 생긴다 —
- * 안 움직인 쌍의 값은 첫인상이 결정적으로 답하므로 적어 둘 이유가 없다.
+ * 순서가 곧 크기다(적대 → 신뢰). ⚠️ **가운데가 없다** — 칸이 짝수인 것이 규칙이다.
+ * 등급을 고르는 것은 모델이라, 「아직 아무 일도 없다」를 뜻하는 가운데 칸이 있으면 어느
+ * 쪽으로 기울지 정하지 않고도 답을 낼 수 있다. 가운데에 가장 가까운 답은 `distant`와
+ * `cordial`이고, 둘 다 이미 한쪽으로 기울어 있다.
+ *
+ * 숫자를 싣지 않는 것은 카드가 이력에 굳기 때문이다: 매 턴 달라지는 값을 실으면 지난
+ * 턴들의 바이트가 함께 바뀌어 캐시 프리픽스가 통째로 깨진다.
  */
-export const RelationSchema = z.object({
-  /** 쌍의 앞 열쇠 — `a < b`(코드포인트)로 정규화한다. 로케일에 기대면 세이브가 갈린다 */
-  a: z.string().min(1),
-  b: z.string().min(1),
-  /** −100~100, 0이 중립 */
-  score: z.number().int().min(-100).max(100),
-  updatedOn: DateString,
-});
-export type Relation = z.infer<typeof RelationSchema>;
+export const RELATION_TIERS = [
+  "hostile",
+  "strained",
+  "distant",
+  "cordial",
+  "close",
+  "trusted",
+] as const;
+export type RelationTier = (typeof RELATION_TIERS)[number];
+export const RelationTierSchema = z.enum(RELATION_TIERS);
 
 /**
- * 카드가 읽는 눈금 — **점수가 아니라 등급이 카드에 선다** (people.md §6).
+ * 등급의 순위 — **0(적대)에서 5(신뢰)까지 여섯 칸**이고 가운데가 없다.
  *
- * 순서가 곧 크기다(틀어짐 → 믿음). 숫자를 싣지 않는 것은 카드가 이력에 굳기
- * 때문이다: 매 턴 달라지는 값을 실으면 지난 턴들의 바이트가 함께 바뀌어 캐시
- * 프리픽스가 통째로 깨진다. 다섯 칸이라 경계를 넘는 날에만 그 줄이 바뀐다.
+ * 계수·앵커·배수·문턱이 전부 이 눈금을 탄다. 압축이 한 번에 옮길 수 있는 폭도 여기서
+ * 한 칸이다 — 칸 사이가 고르므로 「한 칸」이 어디서나 같은 뜻이다.
  */
-export const RELATION_TIERS = ["hostile", "strained", "neutral", "close", "trusted"] as const;
-export type RelationTier = (typeof RELATION_TIERS)[number];
-
-/** 등급의 경계 — 음수 쪽은 대칭이다. 경계 하나가 두 방향을 함께 정한다 */
-export const RELATION_TIER_BOUNDS = { close: 20, trusted: 55 } as const;
-
-/** 등급의 순위 — 중립이 0이다. 계수와 비교는 전부 이 눈금을 탄다 */
 export const RELATION_TIER_RANK: Record<RelationTier, number> = {
-  hostile: -2,
-  strained: -1,
-  neutral: 0,
-  close: 1,
-  trusted: 2,
+  hostile: 0,
+  strained: 1,
+  distant: 2,
+  cordial: 3,
+  close: 4,
+  trusted: 5,
 };
+
+/** 눈금의 위 끝 — 순위를 0~1로 펴는 자리가 이 수로 나눈다 */
+export const RELATION_TIER_RANK_MAX = RELATION_TIER_RANK.trusted;
 
 /** 카드에 서는 말 — 코어는 사실만 내고 문장은 GM이 쓴다 (people.md §6) */
 export const RELATION_TIER_KO: Record<RelationTier, string> = {
   hostile: "틀어진 사이",
   strained: "껄끄러운 사이",
-  neutral: "그저 그런 사이",
+  distant: "서먹한 사이",
+  cordial: "무난한 사이",
   close: "가까운 사이",
   trusted: "믿는 사이",
 };
 
-/** 점수 → 등급. 표는 여기 하나뿐이다 */
-export function relationTier(score: number): RelationTier {
-  if (score >= RELATION_TIER_BOUNDS.trusted) return "trusted";
-  if (score >= RELATION_TIER_BOUNDS.close) return "close";
-  if (score <= -RELATION_TIER_BOUNDS.trusted) return "hostile";
-  if (score <= -RELATION_TIER_BOUNDS.close) return "strained";
-  return "neutral";
+/**
+ * 두 등급이 몇 칸 떨어져 있는가 — 압축의 한 칸 한도를 재는 자다 (people.md §6).
+ */
+export function relationTierDistance(a: RelationTier, b: RelationTier): number {
+  return Math.abs(RELATION_TIER_RANK[a] - RELATION_TIER_RANK[b]);
 }
 
 /**
- * 등급 → 카드의 결. **중립은 결이 없다** — 카드에 서는 것은 통하거나 부딪히는
- * 사이뿐이라는 규칙이 여기 한 줄로 서 있다.
+ * `from`에서 `to` 쪽으로 **한 칸까지만** — 두 칸을 부른 제안을 자르는 자리.
+ *
+ * 반려가 아니라 자르는 이유: 방향은 모델의 것이고 폭은 코어의 것이다 (AGENTS.md §6.4).
+ */
+export function relationTierStep(from: RelationTier, to: RelationTier): RelationTier {
+  const here = RELATION_TIER_RANK[from];
+  const there = RELATION_TIER_RANK[to];
+  if (there === here) return from;
+  return RELATION_TIERS[here + (there > here ? 1 : -1)]!;
+}
+
+/**
+ * 가운데에서 얼마나 먼가 — 카드의 관계 줄이 센 사이부터 세우는 자다.
+ *
+ * 칸이 짝수라 가운데가 칸 사이에 있다. 순위를 두 배 해 홀수 눈금 위에서 재면 정수로
+ * 떨어진다 — `hostile`·`trusted` 5, `strained`·`close` 3, `distant`·`cordial` 1.
+ */
+export function relationTierIntensity(tier: RelationTier): number {
+  return Math.abs(RELATION_TIER_RANK[tier] * 2 - RELATION_TIER_RANK_MAX);
+}
+
+/**
+ * 등급 → 카드의 결. **가운데 둘은 결이 없다** — 카드에 서는 것은 통하거나 부딪히는
+ * 사이뿐이라는 규칙이 여기 한 줄로 서 있다. 여섯이 전부 서면 인물지가 관계 목록이 된다.
  */
 export function stanceOfTier(tier: RelationTier): PersonaRelation["stance"] | null {
   if (tier === "close" || tier === "trusted") return "aligned";
@@ -326,9 +348,27 @@ export function stanceOfTier(tier: RelationTier): PersonaRelation["stance"] | nu
 }
 
 /**
+ * **관계 등급** — 무순서 쌍 하나에 한 줄 (people.md §6 「관계 등급」).
+ *
+ * 세이브가 든다. 사이는 그간의 일이 쌓인 결과라 장부에서 파생할 수 없는 값이고,
+ * 압력 눈금(§8)이 세이브를 드는 이유와 같다. 줄은 **압축이 처음 등급을 매길 때** 생긴다 —
+ * 아무도 손대지 않은 쌍의 값은 첫인상이 결정적으로 답하므로 적어 둘 이유가 없다.
+ *
+ * ⚠️ **점수가 아니다.** 사건마다 정해진 수를 걷어 낸 자리라 옮기는 쪽은 이력 압축
+ * 하나뿐이고, 옛 세이브의 `score`는 로드가 등급으로 접는다(`migrateRelationTiers`).
+ */
+export const RelationSchema = z.object({
+  /** 쌍의 앞 열쇠 — `a < b`(코드포인트)로 정규화한다. 로케일에 기대면 세이브가 갈린다 */
+  a: z.string().min(1),
+  b: z.string().min(1),
+  tier: RelationTierSchema,
+});
+export type Relation = z.infer<typeof RelationSchema>;
+
+/**
  * 인물지에 서는 관계 한 줄 — **지금의 등급**이다 (people.md §6).
  *
- * 원형이 깐 첫인상 위로 사건이 오르내린 결과이고, 중립은 줄이 되지 않는다.
+ * 원형이 깐 첫인상 위로 압축이 등급을 옮긴 결과이고, 가운데 둘은 줄이 되지 않는다.
  */
 export interface PersonaRelation {
   characterId: string;
@@ -338,9 +378,9 @@ export interface PersonaRelation {
   /**
    * 지금의 등급 — 카드가 읽는 것은 이쪽이고 `stance`는 그 요약이다.
    *
-   * **중립이면 없다.** 점수에서 나온 줄은 중립이면 아예 서지 않으므로 언제나 있고,
-   * `bond`가 세운 줄(멘토링 — §5-3)에는 그 쌍이 중립일 때 없다: 그 줄의 근거는
-   * 등급이 아니라 감독이 그렇게 정했다는 사실이다.
+   * **결이 없는 등급이면 없다.** 등급에서 나온 줄은 가운데 둘(`distant`·`cordial`)이면
+   * 아예 서지 않으므로 언제나 있고, `bond`가 세운 줄(멘토링 — §5-3)에는 그 쌍이 가운데일
+   * 때 없다: 그 줄의 근거는 등급이 아니라 감독이 그렇게 정했다는 사실이다.
    */
   tier?: RelationTier;
   /**
@@ -450,6 +490,53 @@ export const BROADCAST_SPEAKER = "중계";
  */
 export function normalizeSpeaker(name: string): string {
   return name.replace(/\s+/gu, "");
+}
+
+// ── 구단주 원형 — 잉여의 얼마를 스쿼드에 되돌리는가 ────────────────
+
+/**
+ * 구단주 원형 → **재투자 몫** — 지난 시즌 현금 잉여의 얼마가 다음 시즌 이적 예산으로
+ * 돌아오는가 (people.md §2 · simulation/finance.md §9.1).
+ *
+ * 원형이 재정 눈금에 직접 닿는 유일한 자리다. 되걸기(`CONDITION_OF_ARCHETYPE`)와
+ * 구단주 요청(`DEMAND_OF_ARCHETYPE`)이 **감독이 물었을 때의 답**을 가른다면, 이 표는
+ * **묻지 않아도 내주는 몫**을 가른다.
+ *
+ * 폭을 0.30~0.80으로 잡은 것은 그 사이에서 사람이 갈리게 하려는 것이다 — 0에 가까운
+ * 원형을 두면 그 구단은 몇 시즌 만에 이적 시장에서 사라지고, 1에 가까우면 잉여가
+ * 통째로 예산이 되어 이월 상한(§9.1)이 하는 일이 없어진다.
+ *
+ * 키가 아니라 **라벨**로 적는다 — 세이브에 남는 것이 라벨이고(`Persona.archetype`),
+ * `DEMAND_OF_ARCHETYPE`·`CONDITION_OF_ARCHETYPE`이 이미 같은 규약이다. 표에 없는
+ * 라벨은 기본값으로 떨어진다.
+ */
+export const REINVEST_SHARE_OF_ARCHETYPE: Record<string, number> = {
+  /** "예산은 문제가 아닙니다" — 쌓아 둘 이유가 없는 사람 */
+  국부펀드형: 0.8,
+  /** 화제를 사는 사람 — 남은 돈은 다음 스타의 값이다 */
+  흥행가형: 0.6,
+  /** 장부를 읽지 않는다 — 남으면 쓰지만 계산해서 쓰지는 않는다 */
+  축구광형: 0.55,
+  /** 빚만 없으면 만족 — 흑자면 내주되 여유는 남긴다 */
+  "지역 유지형": 0.45,
+  /** 효율의 사람 — 잉여는 구조를 고치는 데 먼저 쓴다 */
+  산업가형: 0.35,
+  /** 회수 우선 — 잉여는 구단의 가치이지 다음 영입의 재원이 아니다 */
+  투자자형: 0.3,
+};
+
+/**
+ * 구단주 카드가 없는 구단의 몫 — **여섯의 중앙값**이다.
+ *
+ * 페르소나는 감독의 구단에만 서므로(people.md §1) 나머지 95개 구단이 여기로 온다.
+ * 평균이 아니라 중앙값인 것은 국부펀드형 하나가 표를 끌어올리기 때문이다.
+ */
+export const REINVEST_SHARE_DEFAULT = 0.5;
+
+/** 이 구단주가 되돌리는 몫 — 카드가 없거나 표 밖의 라벨이면 기본값 */
+export function reinvestShareOf(archetype?: string): number {
+  if (archetype === undefined) return REINVEST_SHARE_DEFAULT;
+  return REINVEST_SHARE_OF_ARCHETYPE[archetype] ?? REINVEST_SHARE_DEFAULT;
 }
 
 // ── 에이전트 원형 — 협상 테이블 건너편의 세 사람 ────────────────

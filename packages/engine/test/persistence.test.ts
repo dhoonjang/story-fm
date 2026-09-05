@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { hostname } from "node:os";
-import { GrowthSourceSchema } from "@story-fm/domain";
+import { GrowthSourceSchema, RelationSchema } from "@story-fm/domain";
 import {
   teamCatalog,
   acquireSaveLock,
@@ -39,6 +39,7 @@ import {
   migrateMirrorProficiency,
   migrateNationalities,
   migratePassStyles,
+  migrateRelationTiers,
   migrateSquadLevels,
   splitPositioningAxis,
   stripStoredFootAdjust,
@@ -926,6 +927,33 @@ describe("옛 세이브를 지금 모양으로", () => {
     // 옮긴 뒤의 값은 지금 스키마를 통과한다 — 그것이 이 마이그레이션의 존재 이유다
     for (const g of save.growthLog)
       expect(GrowthSourceSchema.safeParse(g.source).success).toBe(true);
+  });
+
+  it("관계 점수가 여섯 등급으로 접힌다 — 옛 중립대는 부호가 가르고, 두 번 돌려도 같다", () => {
+    // 새 스키마에 `score` 칸이 없고 `tier`는 필수라, 접지 않으면 멀쩡한 세이브가 parse에서 막힌다
+    const save: { relations: { a: string; b: string; score?: number; tier?: string }[] } = {
+      relations: [55, 20, 19, 0, -1, -20, -55].map((score, i) => ({
+        a: `a${i}`,
+        b: `b${i}`,
+        score,
+        updatedOn: "2025-08-01",
+      })),
+    };
+    migrateRelationTiers(save);
+    expect(save.relations.map((r) => r.tier)).toEqual([
+      "trusted",
+      "close",
+      "cordial",
+      "cordial",
+      "distant",
+      "strained",
+      "hostile",
+    ]);
+    // 이미 등급을 든 줄은 건드리지 않는다 — 로드는 한 세이브에 몇 번이고 다시 일어난다
+    migrateRelationTiers(save);
+    expect(save.relations[0]!.tier).toBe("trusted");
+    // 옮긴 뒤의 줄은 지금 스키마를 통과한다 — 그것이 이 마이그레이션의 존재 이유다
+    for (const row of save.relations) expect(RelationSchema.safeParse(row).success).toBe(true);
   });
 
   it("경기 도중 저장된 옛 세이브의 빈 기대 득점 칸이 0으로 선다", () => {

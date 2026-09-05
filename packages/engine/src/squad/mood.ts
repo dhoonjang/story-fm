@@ -428,7 +428,7 @@ function recentDeparture(state: GameState, mate: GamePlayer): MoodFact | null {
     const name = playerById(state, transfer.gamePlayerId)?.name;
     if (name === undefined) continue;
     const tier = relationTierOf(state, transfer.gamePlayerId, mate.id);
-    if (RELATION_TIER_RANK[tier] <= 0) continue;
+    if (RELATION_TIER_RANK[tier] < RELATION_TIER_RANK.close) continue;
     return { cause: "departure", name, days };
   }
   return null;

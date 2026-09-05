@@ -1165,7 +1165,9 @@ export function buildToolSpecs(
           .min(1)
           .max(SEASON_MAX)
           .optional()
-          .describe("지나간 시즌 — 순위표는 그때의 최종 표, 일정은 감독 팀의 경기"),
+          .describe(
+            "지나간 시즌 — 순위표는 그때의 최종 표, 개인 순위는 그 시즌의 표(팀 열은 없다), 일정은 결산에 남은 감독 팀의 경기",
+          ),
         when: z.enum(["past", "upcoming", "both"]).optional(),
         from: dateArg.optional(),
         to: dateArg.optional(),

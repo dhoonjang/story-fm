@@ -26,16 +26,19 @@ import {
   settlingOf,
   settlingPercent,
   MANAGER_SUBJECT,
-  moveRelation,
   relationTierOf,
+  setRelationTier,
   type GameState,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
 
 /** 질책이 잘리지 않게 사이를 틀어 둔다 — 수용성 앵커가 outcome을 자른다 (career.md §2) */
 function closeOff(state: GameState, playerId: string): void {
+  const name = state.players.find((p) => p.id === playerId)!.name;
   while (relationTierOf(state, MANAGER_SUBJECT, playerId) !== "hostile") {
-    moveRelation(state, MANAGER_SUBJECT, playerId, "promise-broken");
+    if (!setRelationTier(state, state.manager.name, name, "hostile")) {
+      throw new Error("사이가 움직이지 않는다");
+    }
   }
 }
 
