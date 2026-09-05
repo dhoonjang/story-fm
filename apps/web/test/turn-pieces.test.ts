@@ -164,9 +164,9 @@ describe("호출 칩은 불린 자리에 선다", () => {
   ];
 
   it("장면을 쓴 뒤에 불린 호출은 그 대사 뒤에 붙는다", () => {
-    expect(shape(lines, { calls: [call("talk_to_player", 2)] })).toEqual([
+    expect(shape(lines, { calls: [call("team_talk", 2)] })).toEqual([
       "@: *감독실 문이 닫힌다*",
-      "talk_to_player",
+      "team_talk",
       "@스티브 홀랜드: 사기가 올랐습니다.",
     ]);
   });
@@ -195,9 +195,9 @@ describe("호출 칩은 불린 자리에 선다", () => {
 
   it("떼어 낸 헤더만큼 자리를 당긴다 — 시각 표시는 줄에서 빠졌다", () => {
     // 저장된 본문은 `[2026-08-15 AM 9:00]` 헤더를 포함해 세므로 3, 화면에서는 2다
-    expect(shape(lines, { calls: [call("talk_to_player", 3)], cuts: [0] })).toEqual([
+    expect(shape(lines, { calls: [call("team_talk", 3)], cuts: [0] })).toEqual([
       "@: *감독실 문이 닫힌다*",
-      "talk_to_player",
+      "team_talk",
       "@스티브 홀랜드: 사기가 올랐습니다.",
     ]);
   });
@@ -205,12 +205,12 @@ describe("호출 칩은 불린 자리에 선다", () => {
   it("본문 한복판에서 떼어 낸 헤더는 그 뒤의 자리만 당긴다", () => {
     // 원문 2번째 줄이 헤더였다 — 그 앞(1)은 그대로, 뒤(3)는 한 칸 당겨진다
     expect(
-      shape(lines, { calls: [call("get_squad", 1), call("talk_to_player", 3)], cuts: [2] }),
+      shape(lines, { calls: [call("get_squad", 1), call("team_talk", 3)], cuts: [2] }),
     ).toEqual([
       "@: *감독실 문이 닫힌다*",
       "get_squad",
       "@손흥민: 믿어주셔서 감사합니다.",
-      "talk_to_player",
+      "team_talk",
       "@스티브 홀랜드: 사기가 올랐습니다.",
     ]);
   });
