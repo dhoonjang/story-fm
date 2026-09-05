@@ -935,7 +935,7 @@ Employment {          // 수석코치 · 코치 · 의료진 · 스카우트 (�
 | `contract`        | 만료가 문턱 안인데 열린 재계약이 없다 (`core/tick.ts`)                          | —                        |
 | `out-of-position` | 주 포지션 밖 선발이 4경기 이어졌을 때 (`match-flow.ts`)                         | `count` = 연속 경기      |
 | `promise`         | 감독이 한 약속의 기한이 지났는데 장부가 이행을 못 찾을 때 (`squad/promises.ts`) | —                        |
-| `number`          | 감독이 그의 등번호를 다른 선수에게 넘겼을 때 (`commands/index.ts`)              | `count` = 잃은 번호      |
+| `number`          | 감독이 그의 등번호를 다른 선수에게 넘겼을 때 (`commands/lineup.ts`)             | `count` = 잃은 번호      |
 | `overload`        | 누적 피로가 「과부하」에 머문 날이 그 사람의 문턱을 넘었을 때 (`core/tick.ts`)  | `count` = 과부하 며칠째  |
 
 열한 사유가 **한 자에 선다** — 화면의 ⚠불만 줄도, 심경 카드도, 회견의 유출 카드도,
@@ -2335,7 +2335,7 @@ title? }` — 세이브에 남고(옛 세이브는 빈 배열), **개폐는 전�
 | 멘토링 (자격 · 멘토 항 · 정리)                        | `packages/engine/src/squad/mentoring.ts` (+ `packages/domain/src/records.ts` `Mentoring`)                  |
 | 심경 카드 · 잔향 검사 (`applyMoodNotes`)              | `packages/engine/src/squad/mood.ts`                                                                        |
 | 수용성 (열림·경계·닫힘과 근거)                        | `packages/engine/src/squad/receptivity.ts`                                                                 |
-| 사건 기록 (효과표 · 하루 한도 · 회견 카드 · 기억)     | `packages/engine/src/commands/index.ts` (`recordIncident`) · `packages/domain/src/records.ts` (`Incident`) |
+| 사건 기록 (효과표 · 하루 한도 · 회견 카드 · 기억)     | `packages/engine/src/commands/talk.ts` (`recordIncident`) · `packages/domain/src/records.ts` (`Incident`)  |
 | 선수 근황                                             | `packages/engine/src/squad/cues.ts`                                                                        |
 | 수석코치의 눈 (원형이 고르는 사실)                    | `packages/engine/src/squad/coach-cues.ts`                                                                  |
 | 서사 메모리                                           | `packages/domain/src/records.ts` (`NarrativeNote`) · `packages/engine/src/core/state.ts` (`pushNarrative`) |

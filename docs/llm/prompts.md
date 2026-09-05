@@ -782,7 +782,7 @@ prompt-regression`, 밴드는 서술자가 쥔다
 | 인물 카드 · 구단·감독 · 스냅샷 · 이번 턴 메시지 · 이력 창 · 장면 위생 · 헤더 | `packages/agents/src/gm-input.ts`                        |
 | 구간 → 어휘 표 (§5-2)                                                        | `packages/domain/src/manager.ts` · `tactics.ts`          |
 | 스냅샷 안의 범례 블록 (회견 · 찾아온 사람)                                   | `packages/engine/src/club/press.ts` · `approach.ts`      |
-| 명령 실행부                                                                  | `packages/engine/src/commands/index.ts`                  |
+| 명령 실행부 (갈래마다 한 파일 · `index.ts`는 재수출)                         | `packages/engine/src/commands/`                          |
 | 회귀 하네스 (§7)                                                             | `packages/agents/harness/prompt-regression.harness.ts`   |
 | 강제 산출 선언 목록 (`forcedTools`)                                          | `packages/agents/src/forced-tools.ts`                    |
 | 실모드 스키마 스모크 하네스                                                  | `packages/agents/harness/live-schema.harness.ts`         |

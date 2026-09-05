@@ -1106,7 +1106,7 @@ mock에서만 서던 **실패 칩**이 여기서 사라진다: e2e가 실모드�
 | 훈련 결산                               | `packages/agents/src/training-rater.ts`                                                     |
 | 장부 골격 (`turnFactLines`)             | `packages/engine/src/core/turn-facts.ts`                                                    |
 | 수용성 (코어)                           | `packages/engine/src/squad/receptivity.ts`                                                  |
-| 사건 기록 (코어 효과표)                 | `packages/engine/src/commands/index.ts` (`recordIncident`)                                  |
+| 사건 기록 (코어 효과표)                 | `packages/engine/src/commands/talk.ts` (`recordIncident`)                                   |
 | 교섭 서류·상황·상대의 답 (편지·테이블)  | `packages/agents/src/counterparty-brief.ts` · `table-situation.ts` · `negotiation-table.ts` |
 | 온보딩 판정 프롬프트·호출               | `packages/agents/src/onboarding-judge.ts`                                                   |
 | 시작 지갑 앵커·한도 (코어)              | `packages/engine/src/world/onboarding.ts`                                                   |

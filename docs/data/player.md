@@ -1635,7 +1635,7 @@ offTheBall  = base − tilt × (1 − a)
 | 부상 저울과 위험 등급 (`injuryWeight`·`injuryRiskOf`·`INJURY_RISK_FLOOR`) — §5.3                                                | `packages/sim/src/match-engine.ts` (낱말은 `packages/domain/src/records.ts`)            |
 | 안개의 크기·잠재력·경기 중 체력 (`observationMargin`·`readCondition`)                                                           | `packages/engine/src/squad/scouting.ts`                                                 |
 | 안개를 얹는 규칙·등급표 (`observedFit`·`observedOverall`·`RATING_TIERS`) — 화면도 같이 부른다                                   | `packages/domain/src/player.ts` (엔진이 재수출)                                         |
-| 파견 한도·대기 (`scoutPlayer`·`deferScout`·`scoutingSummary`)                                                                   | `packages/engine/src/commands/index.ts` · `packages/engine/src/squad/scouting.ts`       |
+| 파견 한도·대기 (`scoutPlayer`·`deferScout`·`scoutingSummary`)                                                                   | `packages/engine/src/commands/scouting.ts` · `packages/engine/src/squad/scouting.ts`    |
 | 보고서 카드와 도착 줄 (`scoutReportCard`·`scoutReportLine`)                                                                     | `packages/engine/src/views/views.ts`                                                    |
 | 정착 (`settlingOf`·`SETTLING_EVENT`)                                                                                            | `packages/engine/src/squad/settling.ts`                                                 |
 | 역할 기억 (`recallRole`·`rememberRole`)                                                                                         | `packages/engine/src/commands/role-memory.ts`                                           |
