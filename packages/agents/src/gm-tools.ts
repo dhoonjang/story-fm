@@ -684,7 +684,13 @@ export function buildToolSpecs(
           .optional()
           .describe("방향으로 옮긴다 — 지정하지 않은 축은 지금 자리를 그대로 쓴다"),
         position: z.string().min(1).optional().describe("옮길 자리 (이미 그라운드에 있는 선수만)"),
-        role: z.string().min(1).optional().describe("그 자리의 세부 역할 (FM 역할명)"),
+        // 자리마다 목록이 달라 열거로 서지 못한다 — 낱말은 해석 프롬프트의 역할 표가
+        // 싣고 코어가 이름·id·약어를 같은 것으로 받는다 (prompts.md §2 · player.md §3.1)
+        role: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("그 자리의 세부 역할 — 역할 표의 이름·id·약어 중 하나"),
         instruction: z
           .object({
             // 상한이 없던 때는 감독 발언이 통째로 인용돼 지시 한 줄이 단락이 됐다

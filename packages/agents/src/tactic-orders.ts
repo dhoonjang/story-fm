@@ -8,6 +8,7 @@ import {
   SET_PIECE_ROUTINE_AXES,
   SET_PIECE_ROUTINE_NEUTRAL,
   TACTIC_TOGGLES,
+  roleVocabularyText,
   setPieceRoutineChoiceText,
   tacticToggleChoiceText,
 } from "@story-fm/domain";
@@ -114,6 +115,7 @@ ops에 부를 명령 이름을 적고 그 인자를 배열로 싣는다. 감독�
 - set_tactics — 6축(1~5)과 갈래 넷 중 감독이 말한 것만. 갈래는 눈금이 없다 — ${TACTIC_TOGGLES.map(tacticToggleChoiceText).join(" · ")}.
 - set_player_tactic — 한 선수의 자리·역할·개인 지시.
   - 자리는 move로만 옮긴다: lane(left·center·right) × band(defense=우리 진영, midfield, attack=상대 진영). 지정하지 않은 축은 그대로 둔다. 좌표를 지어내지 않는다.
+  - role은 그 자리의 역할이다 — 감독이 시키는 일이 「자리별 역할」의 한 종이면 그것을 적는다. 이름·id·약어 어느 표기든 걸린다. 표에 없는 말은 instruction으로 옮긴다.
   - instruction.note는 감독의 말 그대로. instruction.kind가 있어야 판이 움직인다: ${PLAYER_DIRECTIVE_KINDS.map((k) => `${k}(${PLAYER_DIRECTIVE_KO[k]})`).join(" · ")}. man_mark·press_target은 targetId가 필요하다.
   - instruction.intensity(${DIRECTIVE_INTENSITIES.map((i) => `${i}(${DIRECTIVE_INTENSITY_KO[i]})`).join(" · ")}) — 감독이 세기를 말했을 때만.
   - 갈래에 담기지 않는 말이면 지역 지시인지 보고 set_match_plan을 쓴다.
@@ -122,6 +124,9 @@ ops에 부를 명령 이름을 적고 그 인자를 배열로 싣는다. 감독�
 - set_set_piece_takers — 세트피스 키커. corner·freeKick·penalty 중 감독이 말한 자리만 싣고, 지정을 풀라는 말이면 그 자리에 null을 넣는다.
 - set_set_piece_routine — 세트피스에 몇 명이 서는가: ${SET_PIECE_ROUTINE_AXES.map(setPieceRoutineChoiceText).join(" · ")}. 감독이 말한 축만 싣고, 지시를 푸는 말이면 ${SET_PIECE_ROUTINE_NEUTRAL}을 넣는다.
 - set_shootout_order — 승부차기 키커 순서. 감독이 이름을 든 사람만.
+
+# 자리별 역할 (set_player_tactic의 role)
+${roleVocabularyText()}
 
 # unresolved
 어느 명령에도 담기지 않은 말은 감독의 표현 그대로 unresolved에 남긴다.`;

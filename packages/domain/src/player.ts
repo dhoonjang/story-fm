@@ -1516,6 +1516,57 @@ export function defaultRoleOf(position: string): string {
 }
 
 /**
+ * 표기를 견주는 꼴로 — 대소문자·공백·가운뎃점·붙임표를 지운다. 「인사이드 포워드」와
+ * `inside-forward`와 `Inside Forward`가 한 자리에 모인다.
+ */
+const roleKey = (text: string) => text.toLowerCase().replace(/[\s·・_-]/g, "");
+
+/**
+ * **감독이 부른 표기로 그 자리의 역할을 찾는다** — 이름·id·약어를 같은 것으로 받는다
+ * (player.md §3.1). 전술판은 id를 보내고 **말을 옮기는 해석기는 이름을 적으므로**,
+ * 한 표기만 받으면 그쪽 경로의 역할 지시가 통째로 반려된다.
+ *
+ * ⚠️ 자리 밖은 보지 않는다 — 역할 목록은 자리마다 다르고, 이름이 두 자리에 걸치는 넷은
+ * `delta`가 자리마다 따로 적힌다(§3.1). 없는 역할은 `undefined`고 반려는 부르는 쪽의 몫이다.
+ */
+export function findRole(position: string, name: string): RoleDef | undefined {
+  const wanted = roleKey(name);
+  if (wanted.length === 0) return undefined;
+  return rolesFor(position).find((def) =>
+    [def.id, def.ko, def.abbr].some((token) => roleKey(token) === wanted),
+  );
+}
+
+/** 자리 하나를 부르는 포지션 코드 전부 — 역할 표의 왼쪽에 선다 */
+function positionCodesOf(slot: WeightSlot): string[] {
+  return Object.keys(SLOT_OF_POSITION).filter((code) => SLOT_OF_POSITION[code] === slot);
+}
+
+/** 역할 하나를 모델에게 설명하는 조각 — `인사이드 포워드(inside-forward·IF)` */
+export function roleChoiceText(def: RoleDef): string {
+  return `${def.ko}(${def.id}·${def.abbr})`;
+}
+
+/**
+ * 모델에게 역할을 설명하는 표 — **자리 한 줄에 그 자리의 역할 전부**
+ * (`LM/RM/LW/RW — 윙어(winger·W) · 인사이드 포워드(inside-forward·IF) · …`).
+ *
+ * `set_player_tactic.role`은 자리마다 목록이 달라 열거로 서지 못하는 자유 문자열이라,
+ * 낱말이 모델에게 닿는 길이 이 표 하나뿐이다. 없으면 「안쪽으로 파고들어」가 어느
+ * 명령에도 담기지 못한다 (docs/llm/agents.md §3). 왼쪽에 포지션 코드를 세우는 것은
+ * 모델이 읽는 명단·스냅샷이 자리를 그 코드로 부르기 때문이다.
+ */
+export function roleVocabularyText(): string {
+  const slots = Object.keys(ROLE_DEFS) as WeightSlot[];
+  return slots
+    .map(
+      (slot) =>
+        `${positionCodesOf(slot).join("/")} — ${ROLE_DEFS[slot].map(roleChoiceText).join(" · ")}`,
+    )
+    .join("\n");
+}
+
+/**
  * **자리를 옮겼을 때 되찾는 역할** — ① 지금 걸린 역할이 새 자리 목록에 있으면 그대로
  * → ② 그 자리의 기억 (§3.2). 둘 다 없으면 `undefined`, 곧 **그 자리의 기본 역할**이다.
  *
