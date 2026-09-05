@@ -7,8 +7,7 @@ import {
   addDays,
   clampSettlingCredit,
   settlingAnchor,
-  applyTalkToPlayer,
-  applyTeamTalk,
+  applyTalk,
   setCaptain,
   SETTLING_TARGET,
   isSettling,
@@ -280,9 +279,10 @@ describe("감독의 말도 정착을 움직인다 (SETTLING_EVENT)", () => {
     sign(state, target.id);
     const before = settlingOf(state, target.id)!.progress;
 
-    const res = applyTalkToPlayer(state, {
-      playerId: target.id,
-      outcome: "motivated",
+    const res = applyTalk(state, {
+      occasion: "daily",
+      players: [target.id],
+      outcome: "encouraged",
       intensity: 2,
     });
     expect(res.ok).toBe(true);
@@ -293,10 +293,20 @@ describe("감독의 말도 정착을 움직인다 (SETTLING_EVENT)", () => {
     const state = createTestGame(11);
     const target = opponentsOf(state)[0]!;
     sign(state, target.id);
-    applyTalkToPlayer(state, { playerId: target.id, outcome: "motivated", intensity: 2 });
+    applyTalk(state, {
+      occasion: "daily",
+      players: [target.id],
+      outcome: "encouraged",
+      intensity: 2,
+    });
     const once = settlingOf(state, target.id)!.eventCredit;
     for (let i = 0; i < 5; i++) {
-      applyTalkToPlayer(state, { playerId: target.id, outcome: "motivated", intensity: 2 });
+      applyTalk(state, {
+        occasion: "daily",
+        players: [target.id],
+        outcome: "encouraged",
+        intensity: 2,
+      });
     }
     expect(settlingOf(state, target.id)!.eventCredit).toBe(once);
   });
@@ -308,8 +318,9 @@ describe("감독의 말도 정착을 움직인다 (SETTLING_EVENT)", () => {
     play(state, target.id, 4); // 뒤로 밀리는 것을 보려면 쌓아 둔 게 있어야 한다
     const before = settlingOf(state, target.id)!.progress;
     // GM이 무게를 매겨 보내도 방향이 없는 자리에는 실리지 않는다
-    applyTalkToPlayer(state, {
-      playerId: target.id,
+    applyTalk(state, {
+      occasion: "daily",
+      players: [target.id],
       outcome: "neutral",
       intensity: 2,
       settling: 99,
@@ -318,20 +329,32 @@ describe("감독의 말도 정착을 움직인다 (SETTLING_EVENT)", () => {
     expect(settlingOf(state, target.id)!.progress).toBe(before);
   });
 
-  it("같은 날 두 번째 면담은 사기도 움직이지 않는다 — 다음 날이면 다시 셈한다", () => {
+  /**
+   * **정착 크레딧과 사기는 다른 자로 잘린다** (career.md §2 · player.md §9.3).
+   * 크레딧은 하루 한 번이고 사기는 합계 상한이다 — 같은 날 두 번째 대화가 사기를
+   * 옮기는데 크레딧은 그대로여야, 감독이 대화로 정착을 연타할 수 없으면서도 그날의
+   * 두 번째 대화가 없는 말이 되지 않는다.
+   */
+  it("같은 날 두 번째 대화도 사기는 움직인다 — 멈추는 것은 정착 크레딧뿐이다", () => {
     const state = createTestGame(11);
     const target = opponentsOf(state)[0]!;
     sign(state, target.id);
     const player = playerById(state, target.id)!;
+    const talk = {
+      occasion: "daily",
+      players: [target.id],
+      outcome: "encouraged",
+      intensity: 1,
+    } as const;
 
-    applyTalkToPlayer(state, { playerId: target.id, outcome: "motivated", intensity: 2 });
+    applyTalk(state, talk);
     const afterFirst = player.state.form;
-    applyTalkToPlayer(state, { playerId: target.id, outcome: "motivated", intensity: 2 });
-    expect(player.state.form).toBe(afterFirst);
+    const credit = settlingOf(state, target.id)!.eventCredit;
+    expect(credit).toBeGreaterThan(0);
 
-    state.date = addDays(state.date, 1);
-    applyTalkToPlayer(state, { playerId: target.id, outcome: "motivated", intensity: 2 });
+    applyTalk(state, talk);
     expect(player.state.form).toBeGreaterThan(afterFirst);
+    expect(settlingOf(state, target.id)!.eventCredit).toBe(credit);
   });
 
   it("몰아세우면 오히려 더 겉돈다", () => {
@@ -341,7 +364,12 @@ describe("감독의 말도 정착을 움직인다 (SETTLING_EVENT)", () => {
     play(state, target.id, 4); // 바닥에서 깎이는 걸 보려면 쌓아 둔 게 있어야 한다
     const before = settlingOf(state, target.id)!.progress;
     closeOff(state, target.id);
-    applyTalkToPlayer(state, { playerId: target.id, outcome: "angered", intensity: 3 });
+    applyTalk(state, {
+      occasion: "daily",
+      players: [target.id],
+      outcome: "backfired",
+      intensity: 3,
+    });
     expect(settlingOf(state, target.id)!.progress).toBeLessThan(before);
   });
 
@@ -350,7 +378,7 @@ describe("감독의 말도 정착을 움직인다 (SETTLING_EVENT)", () => {
     const [a, b] = opponentsOf(state);
     sign(state, a!.id);
     sign(state, b!.id);
-    applyTeamTalk(state, { occasion: "daily", outcome: "inspired", intensity: 2 });
+    applyTalk(state, { occasion: "daily", outcome: "inspired", intensity: 2 });
     expect(settlingOf(state, a!.id)!.eventCredit).toBeGreaterThan(0);
     expect(settlingOf(state, b!.id)!.eventCredit).toBeGreaterThan(0);
   });
@@ -372,7 +400,12 @@ describe("감독의 말도 정착을 움직인다 (SETTLING_EVENT)", () => {
     const target = opponentsOf(state)[0]!;
     sign(state, target.id);
     play(state, target.id, Math.ceil((SETTLING_TARGET * 2) / MATCH_CREDIT));
-    applyTalkToPlayer(state, { playerId: target.id, outcome: "motivated", intensity: 3 });
+    applyTalk(state, {
+      occasion: "daily",
+      players: [target.id],
+      outcome: "encouraged",
+      intensity: 3,
+    });
     expect(state.settlingEvents).toEqual([]);
   });
 });
@@ -384,9 +417,10 @@ describe("무게는 GM이 정하고 경계는 코어가 쥔다", () => {
     const state = createTestGame(11);
     const target = opponentsOf(state)[0]!;
     sign(state, target.id);
-    applyTalkToPlayer(state, {
-      playerId: target.id,
-      outcome: "motivated",
+    applyTalk(state, {
+      occasion: "daily",
+      players: [target.id],
+      outcome: "encouraged",
       intensity: 2,
       settling: talkAnchor + 2,
       settlingNote: "통역과 숙소 문제를 함께 풀어 줬다",
@@ -400,9 +434,10 @@ describe("무게는 GM이 정하고 경계는 코어가 쥔다", () => {
     const state = createTestGame(11);
     const target = opponentsOf(state)[0]!;
     sign(state, target.id);
-    applyTalkToPlayer(state, {
-      playerId: target.id,
-      outcome: "motivated",
+    applyTalk(state, {
+      occasion: "daily",
+      players: [target.id],
+      outcome: "encouraged",
       intensity: 2,
       settling: 999,
     });
@@ -413,7 +448,12 @@ describe("무게는 GM이 정하고 경계는 코어가 쥔다", () => {
     const state = createTestGame(11);
     const target = opponentsOf(state)[0]!;
     sign(state, target.id);
-    applyTalkToPlayer(state, { playerId: target.id, outcome: "motivated", intensity: 3 });
+    applyTalk(state, {
+      occasion: "daily",
+      players: [target.id],
+      outcome: "encouraged",
+      intensity: 3,
+    });
     expect(state.settlingEvents[0]!.credit).toBe(settlingAnchor("talk", { intensity: 3 }));
   });
 
@@ -422,9 +462,10 @@ describe("무게는 GM이 정하고 경계는 코어가 쥔다", () => {
     const target = opponentsOf(state)[0]!;
     sign(state, target.id);
     closeOff(state, target.id);
-    applyTalkToPlayer(state, {
-      playerId: target.id,
-      outcome: "angered",
+    applyTalk(state, {
+      occasion: "daily",
+      players: [target.id],
+      outcome: "backfired",
       intensity: 3,
       settling: 50,
     });
@@ -437,7 +478,7 @@ describe("무게는 GM이 정하고 경계는 코어가 쥔다", () => {
     const state = createTestGame(11);
     const target = opponentsOf(state)[0]!;
     sign(state, target.id);
-    applyTeamTalk(state, {
+    applyTalk(state, {
       occasion: "daily",
       outcome: "inspired",
       intensity: 2,
