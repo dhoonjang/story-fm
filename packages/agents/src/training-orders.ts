@@ -1,6 +1,7 @@
 import { playerName, squadView, type GameState } from "@story-fm/engine";
 import type { GameLLM, GameToolSpec } from "@story-fm/llm";
 import { buildRecentTurnsBlock } from "./gm-input";
+import { mockOrdersLlm } from "./mock-gm";
 import { runOpsOrders, tagged, type OpsAgentSpec, type OpsOrders } from "./orders-ops";
 
 /**
@@ -111,5 +112,10 @@ export async function runTrainingOrders(
   llm?: GameLLM,
 ): Promise<{ ok: true; orders: TrainingOrders } | { ok: false; message: string }> {
   const user = [...buildTrainingContext(state, schedule), ``, `@감독: ${message}`].join("\n");
-  return runOpsOrders(TRAINING_ORDERS_SPEC, specs, user, llm);
+  return runOpsOrders(
+    TRAINING_ORDERS_SPEC,
+    specs,
+    user,
+    llm ?? mockOrdersLlm(state, TRAINING_ORDERS_SPEC, message),
+  );
 }

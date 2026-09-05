@@ -21,7 +21,13 @@ import {
   TrainingMarkSchema,
   type TrainingReport,
 } from "@story-fm/domain";
-import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import {
+  agentConfig,
+  createGameLLM,
+  resolveLlmMode,
+  type GameLLM,
+  type GameToolSpec,
+} from "@story-fm/llm";
 import { agingDeclineLine } from "./aging-line";
 import { retryOnce, requireToolCall, anchorStands } from "./retry";
 import { inputError, toToolSchema } from "./tool-schema";
@@ -220,6 +226,14 @@ export async function reportTraining(
   llm?: GameLLM,
 ): Promise<{ report: TrainingReport | null }> {
   if (brief.sessions.length === 0 || brief.subjects.length === 0) return { report: null };
+  /**
+   * mock 모드에는 부를 모델이 없다 — 앵커가 그대로 남는다 (agents.md §8). **빈 카드는
+   * 그대로 선다**: "판정이 돌지 않았다"가 사실이고, 카드가 없으면 다음 턴의 GM이
+   * 훈련장의 일을 지어낸다 (season.md §4).
+   */
+  if (llm === undefined && resolveLlmMode() === "mock") {
+    return { report: recordEmptyTrainingReport(state, brief) };
+  }
   let report: TrainingReport | null = null;
   let client = llm;
   await retryOnce(

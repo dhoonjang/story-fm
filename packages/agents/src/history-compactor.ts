@@ -21,8 +21,13 @@ import {
   type GameState,
   type HistoryFoldBrief,
 } from "@story-fm/engine";
-import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
-import { resolveLlmMode } from "./gm";
+import {
+  agentConfig,
+  createGameLLM,
+  resolveLlmMode,
+  type GameLLM,
+  type GameToolSpec,
+} from "@story-fm/llm";
 import { retryOnce, requireToolCall } from "./retry";
 import { inputError, toToolSchema } from "./tool-schema";
 
