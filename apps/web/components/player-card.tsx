@@ -9,10 +9,17 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { formatMoney, injuryHistoryText, physiqueLabel } from "@story-fm/domain";
+import {
+  PROMISE_KIND_KO,
+  SQUAD_STATUS_KO,
+  formatMoney,
+  injuryHistoryText,
+  physiqueLabel,
+} from "@story-fm/domain";
 import type { PlayerCardView } from "@story-fm/engine";
 import { moodSentence } from "@/lib/mood";
 import { AxisGrid, CareerBlock, FootMarks } from "@/components/player-facts";
+import { RatingTrend } from "@/components/office/squad/marks";
 import { buildPlayerNameIndex, splitPlayerNames, type PlayerNameIndex } from "@/lib/player-names";
 
 /**
@@ -273,9 +280,7 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
       <header className="pc-head">
         <div className="pc-who">
           <b className="pc-name">{card.name}</b>
-          {ours?.squadNumber !== null && ours !== null && (
-            <i className="pc-number">{ours.squadNumber}</i>
-          )}
+          {ours && ours.squadNumber !== null && <i className="pc-number">{ours.squadNumber}</i>}
           <span className="pc-meta">
             {card.team} · {card.age}세 · {card.position}
             {card.nationality && ` · ${card.nationality}`}
@@ -340,7 +345,8 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
                 <span className={`load ${ours.fatigueBand}`}>{ours.fatigueLabel}</span>
               </Fact>
             )}
-            <Fact label="지위">{ours.squadStatus}</Fact>
+            {/* 계약에 적힌 자리 — 코드는 장부의 것이고 표기는 도메인이 갖는다 */}
+            <Fact label="지위">{SQUAD_STATUS_KO[ours.squadStatus]}</Fact>
           </>
         )}
         {card.caps > 0 && (
@@ -379,9 +385,7 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
             · {ours.away.returnsOn} 복귀
           </span>
         )}
-        {ours?.settling !== null && ours !== null && (
-          <span className="pc-mark">정착 {ours.settling}%</span>
-        )}
+        {ours && ours.settling !== null && <span className="pc-mark">정착 {ours.settling}%</span>}
         {ours?.assignment && (
           <span className="pc-mark">
             {ours.assignment.tier} {ours.assignment.position}
@@ -389,8 +393,25 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
             {ours.assignment.familiarity}
           </span>
         )}
+        {ours && ours.leaderRank !== null && (
+          <span className="pc-mark" title="라커룸 서열 — 리더 그룹 안의 순위 (people.md §5-1)">
+            라커룸 {ours.leaderRank}위
+          </span>
+        )}
+        {ours?.homegrown && (
+          <span className="pc-mark" title="등록 명단의 홈그로운 8명을 채우는 선수">
+            홈그로운
+          </span>
+        )}
         {ours?.isCaptain && <span className="pc-mark">주장</span>}
         {ours?.isViceCaptain && <span className="pc-mark">부주장</span>}
+        {/* 감독이 한 말 — **갈래와 기한뿐이다**. 무슨 말로 약속했는지는 장면의 것이다
+            (people.md §5-2). 기한이 지난 약속은 코어가 이미 걷어 낸다 */}
+        {ours?.promises.map((promise) => (
+          <span className="pc-mark" key={`${promise.kind}-${promise.dueOn}`}>
+            {PROMISE_KIND_KO[promise.kind]} 약속 ~{promise.dueOn}
+          </span>
+        ))}
       </div>
 
       {/* 소화 포지션 — **읽는 값이다.** 자리를 바꾸는 손잡이는 전술판 하나뿐이라
@@ -430,6 +451,12 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
               {season.yellows > 0 && `경고 ${season.yellows}`}
               {season.yellows > 0 && season.reds > 0 && " · "}
               {season.reds > 0 && `퇴장 ${season.reds}`}
+            </Fact>
+          )}
+          {/* 폼의 시간 축 — 최근 경기가 오른쪽. 평점은 우리 팀 경기에만 남는다 */}
+          {ours && ours.recentRatings.length > 0 && (
+            <Fact label="최근">
+              <RatingTrend ratings={ours.recentRatings} />
             </Fact>
           )}
           {/* 대회별 — 위 「시즌」은 대회 합이라 "리그에서 몇 골"을 말하지 못한다 */}

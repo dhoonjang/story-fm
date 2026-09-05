@@ -23,6 +23,10 @@
   background: none;
   color: inherit;
   font: inherit;
+  /* 문장 한복판에 서므로 줄의 기준선과 줄 높이를 그대로 물려받는다 — 버튼의
+     기본값(가운데 정렬·제 줄 높이)을 두면 이름이 실린 줄만 들썩인다 */
+  vertical-align: baseline;
+  line-height: inherit;
   text-align: inherit;
   cursor: pointer;
   text-decoration: underline dotted rgba(255, 255, 255, 0.28);
