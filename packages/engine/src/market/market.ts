@@ -506,6 +506,30 @@ export interface DealOdds {
    * 아니라 **가능한 판정의 경계**를 넓힌다 (persuasion.ts).
    */
   latitude: number;
+  /** 확률 하나를 만든 두 관문 (§3 「관문의 수와 기준점」) */
+  gates: DealGates;
+}
+
+/**
+ * **관문별 확률** — `probability` 하나를 만든 두 조각이다 (transfer.md §3).
+ *
+ * 테이블에 목소리가 둘 서는 자리(§12-1)가 이것을 읽는다: 나누지 않으면 파는 구단과
+ * 선수의 에이전트가 같은 숫자를 보고 서로 다른 이유를 지어낸다.
+ *
+ * ⚠️ **배수도 안개도 걸리지 않는다.** 마감 임박·인내심은 관문 밖에서 곱해지고, 안개는
+ * 우리가 그 선수를 얼마나 아는가지 테이블 건너편 사람의 무지가 아니다. 그래서 두 값의
+ * 곱은 `probability`가 아니라 그 앞의 값이다 — 사다리를 가르는 것은 여전히 하나다.
+ */
+export interface DealGates {
+  /** 구단 관문 — 그 값에 팔까·살까. 이적료를 주고받을 구단이 없는 갈래는 `null` */
+  club: number | null;
+  /** 선수 관문 — 그 조건에 갈까·남을까 */
+  player: number;
+}
+
+/** 관문 점수를 백분율로 — 확률과 같은 시그모이드를 지난다 */
+function gatePercent(score: number): number {
+  return Math.max(0, Math.min(100, Math.round(sigmoid(score) * 100)));
 }
 
 export interface DealTerms {
@@ -768,6 +792,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     factors: [],
     blockers: [`"${terms.playerId}"라는 선수를 찾지 못했습니다`],
     latitude: 0,
+    gates: { club: null, player: 0 },
   };
   if (!player) return empty;
 
@@ -1235,6 +1260,10 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   return {
     latitude: pitch?.latitude ?? 0,
     probability: shown,
+    gates: {
+      club: precontract ? null : gatePercent(sumOf("club", NONE)),
+      player: gatePercent(sumOf("player", NONE)),
+    },
     marketValue: fuzzMoney(state, `mv:${player.id}`, marketValue, margin),
     askingPrice: fuzzMoney(state, `ap:${player.id}`, askingPrice, margin),
     wageExpectation,
@@ -1362,6 +1391,7 @@ function loanOdds(
   return {
     latitude: 0,
     probability: Math.max(0, Math.min(100, Math.round(raw))),
+    gates: { club: gatePercent(sumOf("club", NONE)), player: gatePercent(sumOf("player", NONE)) },
     marketValue,
     askingPrice: expectedFee,
     wageExpectation,
@@ -1499,6 +1529,7 @@ function sellOdds(
   return {
     latitude: 0,
     probability: Math.max(0, Math.min(100, Math.round(raw))),
+    gates: { club: gatePercent(sumOf("club", NONE)), player: gatePercent(sumOf("player", NONE)) },
     marketValue,
     askingPrice: buyerCeiling,
     wageExpectation,
@@ -2035,6 +2066,8 @@ function renewOdds(
   return {
     latitude: 0,
     probability: Math.max(0, Math.min(100, Math.round(raw))),
+    // 관문이 하나라 그 하나가 곧 확률이다 — 파는 구단이 없다
+    gates: { club: null, player: gatePercent(sum()) },
     marketValue: marketValueOf(state, player),
     askingPrice: 0, // 재계약에 이적료는 없다
     wageExpectation: expectation,
@@ -2173,6 +2206,8 @@ function releaseOdds(
   return {
     latitude: 0,
     probability: Math.max(0, Math.min(100, Math.round(raw))),
+    // 재계약과 같이 관문이 하나다
+    gates: { club: null, player: gatePercent(sum()) },
     marketValue: marketValueOf(state, player),
     // 이 갈래에서 "요구액"은 선수가 기대하는 정산금이다 — 주급은 흥정 대상이 아니다
     askingPrice: expectation,

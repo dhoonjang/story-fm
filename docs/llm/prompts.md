@@ -238,7 +238,8 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
   JSDoc을 싣지 않으므로, 뜻이 주석에만 있으면 모델은 **뜻 없는 낱말 열**을 받는다. 코어가
   낱말표를 든 갈래는 **그 표에서 끌어와** 도구 설명이나 `.describe()`, 또는 그 호출의 시스템
   프롬프트에 싣는다 — 사건 기록(`INCIDENT_KIND_KO`) · 시작 사건(`OPENING_KIND_KO`) · 설득
-  논거(`PITCH_CLAIM_KO`) · 테이블의 태도(`TABLE_STANCE_KO`) · 감독의 약속(`PROMISE_KIND_KO`) ·
+  논거(`PITCH_CLAIM_KO`) · 테이블의 태도(`TABLE_STANCE_KO`)와 화자(`TABLE_SPEAKER_KO`) ·
+  감독의 약속(`PROMISE_KIND_KO`) ·
   훈련 표식(`TRAINING_MARK_KO`) · 계약 지위(`SQUAD_STATUS_KO`) · 개인 지시와 그 세기
   (`PLAYER_DIRECTIVE_KO` · `DIRECTIVE_INTENSITY_KO`). 손으로 한 벌 더 적으면 표를 고쳐도
   모델은 옛 뜻을 계속 받고, 한 갈래만 낱말이 빠지면 모델은 그 값을 **「나머지」**로 읽는다.

@@ -1,11 +1,18 @@
 import type { MarketCommandResult } from "../commands";
-import type { GamePlayer, Negotiation, NegotiationVerdict, SquadStatus } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  Negotiation,
+  NegotiationVerdict,
+  SquadStatus,
+  TableSpeaker,
+} from "@story-fm/domain";
 import {
   MAX_PAYMENT_YEARS,
   PITCH_CLAIM_KO,
   PLAYER_ARCHETYPE_LABEL,
   SQUAD_STATUS_KO,
   ageOf,
+  isPlayerDeal,
   naturalPositionOf,
   squadStatusRank,
   statusAtRank,
@@ -127,6 +134,16 @@ export interface CounterpartyAnchor {
   negotiationId: string;
   /** 코어가 잰 성사 확률 */
   probability: number;
+  /**
+   * **구단 관문의 확률** — 파는·사는 구단이 이 값에 응할까 (`DealGates`).
+   * 이적료를 주고받을 구단이 없는 갈래(재계약·해지·사전 계약)에는 없다.
+   *
+   * 사다리를 가르는 것은 여전히 `probability` 하나다. 이 둘이 따로 서는 것은
+   * 목소리가 둘인 테이블에서 각자 자기 관문을 근거로 말하기 위해서다 (§12-1).
+   */
+  clubOdds?: number;
+  /** **선수 관문의 확률** — 그 조건에 갈까·남을까. 모든 갈래에 있다 */
+  playerOdds: number;
   /** 확인된 설득 논거가 연 여유(%p) — 사다리의 세 문턱이 이만큼 내려간다 */
   latitude: number;
   /** 코어의 판정 — 모델이 죽으면 이것이 그대로 반영된다 */
@@ -278,6 +295,8 @@ export function counterpartyAnchor(
   return {
     negotiationId: negotiation.id,
     probability,
+    ...(odds.gates.club === null ? {} : { clubOdds: odds.gates.club }),
+    playerOdds: odds.gates.player,
     latitude: bounds.latitude,
     verdict,
     allowed,
@@ -383,6 +402,90 @@ export function settleCounterparty(
 }
 
 /**
+ * **이 테이블에서 답하는 한 목소리** — 화자와 그가 답하는 칸 (transfer.md §12-1).
+ */
+export interface CounterpartyVoice {
+  /** 모델이 답의 줄에 적는 토큰 그대로다 */
+  speaker: TableSpeaker;
+  /** 그 목소리의 이름 — 구단 이름, 또는 대리 에이전트(명부에 없으면 선수 본인) */
+  name: string;
+  /** 그가 답하는 칸 — 열린 축이 정한다 (`counterBoundsOf`가 그 폭을 잰다) */
+  answers: readonly string[];
+}
+
+/** 그 갈래에서 오가는 돈의 이름 — 서류가 오퍼 이력에 쓰는 낱말과 같다 */
+function moneyAxisKo(kind: Negotiation["kind"]): string {
+  if (kind === "release") return "정산금";
+  return kind === "loan" || kind === "loan_out" ? "임대료" : "이적료";
+}
+
+/**
+ * **이 테이블에서 답하는 목소리** — 열린 축의 주인이 화자다 (transfer.md §12-1).
+ *
+ * 돈의 축(이적료·임대료·정산금 · 분할 · 기한)은 그 돈을 받는 쪽이 답하고, 개인 조건의
+ * 축(주급·계약 연수·계약 지위·등번호)은 언제나 선수 쪽이 답한다. 두 주인이 다른
+ * 사람일 때만 둘이 서고(영입·임대 영입), 그 밖은 하나다 — 매각·임대 송출은 개인 조건의
+ * 축이 닫혀 있고(`counterBoundsOf`), 재계약·해지·사전 계약은 돈을 받을 구단이 없다.
+ *
+ * **갈래마다 손으로 적지 않는다.** 축이 닫히는 날 말할 것이 없는 사람이 테이블에 남고,
+ * 그 사람이 답한 줄은 장부에 화자만 남긴 채 뜻을 잃는다.
+ */
+export function tableVoicesOf(state: GameState, negotiation: Negotiation): CounterpartyVoice[] {
+  const player = playerById(state, negotiation.gamePlayerId);
+  if (!player) return [];
+  const kind = negotiation.kind;
+  const precontract = negotiation.precontract === true;
+
+  /** 돈의 축이 있는가 — 재계약과 사전 계약에는 없다 (`counterBoundsOf`의 `fee`) */
+  const hasMoneyAxis = kind !== "renew" && !precontract;
+  /** 그 돈을 받는 것이 구단인가 — 해지의 정산금은 선수가 받는다 */
+  const clubTakesMoney = hasMoneyAxis && !isPlayerDeal(kind);
+  const outgoing = kind === "sell" || kind === "loan_out";
+  const splittable = kind === "sell" || kind === "release" || (kind === "buy" && !precontract);
+  const moneyAnswers = hasMoneyAxis
+    ? [moneyAxisKo(kind), ...(splittable ? ["분할 연수"] : []), "기한"]
+    : [];
+
+  /** 개인 조건의 축 — 우리가 주급을 내는 갈래에서만 열린다 (`counterBoundsOf`) */
+  const personal =
+    outgoing || kind === "release"
+      ? []
+      : [
+          "주급",
+          ...(kind === "renew" ? ["계약 연수"] : []),
+          ...(kind === "buy" || kind === "renew" ? ["계약 지위"] : []),
+          ...(kind === "buy" ? ["등번호"] : []),
+        ];
+
+  const agent = agentForPlayer(state, player.id);
+  const voices: CounterpartyVoice[] = [];
+  if (clubTakesMoney) {
+    voices.push({
+      speaker: "club",
+      name: teamName(outgoing ? (negotiation.counterpartTeamId ?? player.teamId) : player.teamId),
+      answers: moneyAnswers,
+    });
+  }
+  const playerSide = [...(clubTakesMoney ? [] : moneyAnswers), ...personal];
+  if (playerSide.length > 0) {
+    voices.push({
+      speaker: "agent",
+      // 명부에 에이전트가 없으면 선수 본인이 그 자리에 선다 — 화자를 지우지 않는다
+      name: agent?.name ?? player.name,
+      answers: playerSide,
+    });
+  }
+  /**
+   * **설득 논거를 듣는 것은 선수 쪽이다** — 마음이 얼마나 움직이는지가 그 사람의 몫이라
+   * (transfer.md §4). 선수 쪽이 서지 않는 테이블(매각·임대 송출)에서는 그 자리에 앉은
+   * 구단이 듣는다 — 코어가 논거를 대조하는 것은 어느 쪽이든 같다 (`evaluatePitch`).
+   */
+  const hears = voices[voices.length - 1];
+  if (hears) hears.answers = [...hears.answers, "설득 논거의 답"];
+  return voices;
+}
+
+/**
  * 협상 서류 — 모델이 읽을 **사실만**이다 (prompts.md §5).
  *
  * 문장을 짓는 것은 부르는 쪽(`packages/agents`)의 몫이고, 여기서는 장부가 아는 것을
@@ -394,6 +497,8 @@ export interface CounterpartyBrief {
   kindKo: string;
   /** 협상 테이블 건너편의 이름 (구단 또는 선수 본인) */
   counterpart: string;
+  /** 이 테이블에서 답하는 목소리 — 하나이거나 둘이다 (`tableVoicesOf`) */
+  voices: CounterpartyVoice[];
   /** 우리 구단 */
   ourClub: string;
   /** 선수의 지금 — 카드에 굳지 않는 값이라 매 호출 새로 싣는다 */
@@ -506,6 +611,7 @@ export function buildCounterpartyBrief(
     negotiationId: negotiation.id,
     kindKo: negotiationKindKo(negotiation),
     counterpart: counterpartOf(negotiation, player),
+    voices: tableVoicesOf(state, negotiation),
     ourClub: teamName(state.userTeamId),
     playerFacts: [
       `${player.name} · ${ageOf(player.birthdate, state.date)}세 · ${naturalPositionOf(player).position}`,

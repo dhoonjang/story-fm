@@ -9,6 +9,7 @@ import {
   characterEntryOf,
   formatMoney,
   type CounterpartyAnchor,
+  type CounterpartyVoice,
   type GameState,
 } from "@story-fm/engine";
 import { describeCharacters } from "./gm-input";
@@ -36,6 +37,13 @@ export function describeAnchor(anchor: CounterpartyAnchor): string {
     `<anchor>`,
     `성사 확률 ${anchor.probability}%` +
       (anchor.latitude > 0 ? ` · 확인된 논거가 연 여유 +${anchor.latitude}%p` : ""),
+    /**
+     * **관문별 확률** — 성사 확률 하나를 만든 두 조각이다 (transfer.md §12-1). 목소리가
+     * 둘인 테이블에서 각자 자기 관문을 근거로 말하라고 싣는다. 판정을 가르는 것은
+     * 여전히 위의 하나다.
+     */
+    (anchor.clubOdds === undefined ? "" : `구단 관문 ${anchor.clubOdds}% · `) +
+      `선수 관문 ${anchor.playerOdds}%`,
     `기준 판정: ${VERDICT_KO[anchor.verdict]}`,
     `고를 수 있는 판정: ${anchor.allowed.map((v) => VERDICT_KO[v]).join(" · ")}`,
     ...(anchor.fee !== undefined && anchor.feeRoom
@@ -75,6 +83,21 @@ export function describeAnchor(anchor: CounterpartyAnchor): string {
 }
 
 /**
+ * `<voices>` — **누가 무엇을 답하나** (transfer.md §12-1). 줄의 첫 낱말이 곧 모델이 답의
+ * 화자 칸에 적는 토큰이다: 적어 주지 않으면 모델이 그 자리에 이름을 적거나 갈래를
+ * 짐작한다 (지위 낱말을 `SQUAD_STATUS_LINE`이 적어 주는 것과 같은 자리다 — prompts.md §2).
+ * 목소리가 하나인 갈래는 줄도 하나다.
+ */
+function describeVoices(voices: readonly CounterpartyVoice[]): string[] {
+  if (voices.length === 0) return [];
+  return [
+    `<voices>`,
+    ...voices.map((v) => `${v.speaker} "${v.name}" — ${v.answers.join(" · ")}`),
+    `</voices>`,
+  ];
+}
+
+/**
  * `<counterparty>` 블록 — 협상 하나의 서류. 앵커는 싣지 않는다 — 그것은 대화 뒤에 따로
  * 선다(`negotiation-table.ts`). 열린 협상이 아니면 `null`.
  */
@@ -89,7 +112,8 @@ export function buildCounterpartyBlock(state: GameState, negotiation: Negotiatio
   );
   return [
     `<counterparty id="${negotiation.id}">`,
-    `<negotiation>${brief.kindKo} · 답하는 쪽: ${brief.counterpart} · 상대: ${brief.ourClub}</negotiation>`,
+    `<negotiation>${brief.kindKo} · 건너편: ${brief.counterpart} · 감독의 구단: ${brief.ourClub}</negotiation>`,
+    ...describeVoices(brief.voices),
     `<player>`,
     ...brief.playerFacts,
     `</player>`,

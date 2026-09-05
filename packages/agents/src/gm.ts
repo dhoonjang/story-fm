@@ -38,7 +38,7 @@ import { reportTraining } from "./training-rater";
 import { buildMatchTools, KICKOFF_BLOCK, MATCH_GM_SYSTEM, type MatchToolContext } from "./match-gm";
 import { finalizeMatchTurn } from "./finalize-match";
 import { runTableReply } from "./negotiation-table";
-import { counterpartOf, openLetter, playerById, settleTableReply } from "@story-fm/engine";
+import { openLetter, settleTableReply } from "@story-fm/engine";
 import { runMockGmTurn } from "./mock-gm";
 import { retryOnce } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
@@ -140,13 +140,17 @@ async function answerLetters(state: GameState, calls: GmToolCall[]): Promise<str
   for (const negotiation of [...arrivedResponses(state)]) {
     const opened = openLetter(state, negotiation.id);
     if (!opened.ok) continue;
-    const player = playerById(state, negotiation.gamePlayerId);
-    const counterpart = player ? counterpartOf(negotiation, player) : "상대";
+    /**
+     * **편지도 화자를 싣는다** — 답한 목소리가 둘일 수 있다 (transfer.md §12-1). 누가
+     * 어느 말을 했는지는 `outcome.message`의 `<reply speaker name>` 줄이 들고, 여기
+     * `from`은 그 사람들을 이름으로 부른다.
+     */
+    const from = opened.seat.voices.map((v) => v.name).join(" · ") || "상대";
     const reply = await runTableReply(state, opened.seat, null);
     const outcome = settleTableReply(state, opened.seat, reply ?? undefined);
     recordCall(calls, "respond_offer", outcome, { input: { negotiationId: negotiation.id } });
     letters.push(
-      `<letter negotiation="${negotiation.id}" from="${counterpart}">\n${outcome.message}\n</letter>`,
+      `<letter negotiation="${negotiation.id}" from="${from}">\n${outcome.message}\n</letter>`,
     );
   }
   return letters;

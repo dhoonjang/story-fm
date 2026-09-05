@@ -4,6 +4,7 @@ import {
   RENEWAL_YEARS_MAX,
   activeContract,
   addDays,
+  askingPriceFor,
   createGame,
   financeOf,
   generateIncomingOffers,
@@ -16,6 +17,7 @@ import {
   playerById,
   playersOf,
   renewalExpectation,
+  sendOffer,
   suggestTerms,
   tacticsOf,
   teamName,
@@ -25,6 +27,7 @@ import {
   sitAtTable,
   settleTableReply,
   openLetter,
+  wageExpectationOf,
 } from "@story-fm/engine";
 import { TIME_PASSED, buildOnboardingTurn, runMockGmTurn, buildTableInput } from "@story-fm/agents";
 
@@ -320,13 +323,13 @@ describe("편지 — 답할 날이 된 오퍼는 테이블과 같은 상대가 �
     expect(anchor.yearsRoom!.max).toBeLessThan(RENEWAL_YEARS_MAX);
 
     // 편지의 입력 — 감독의 말 대신 <letter>가 서고, 서류에 폭이 적힌다
-    const input = buildTableInput(state, letter.seat, player.name, null)!;
+    const input = buildTableInput(state, letter.seat, null)!;
     expect(input).toContain(`<letter>`);
     expect(input).not.toContain("@감독:");
     expect(input).toContain(`조정 연수: 기준 ${anchor.contractYears}년`);
 
     const outcome = settleTableReply(state, letter.seat, {
-      line: "한 해는 더 봐야겠습니다.",
+      lines: [{ speaker: "agent", text: "한 해는 더 봐야겠습니다." }],
       stance: "steady",
       heard: { tone: "civil", claims: [] },
       ruling: { verdict: "counter", contractYears: RENEWAL_YEARS_MAX },
@@ -510,14 +513,14 @@ describe("테이블 — 건너편은 메인 채팅을 읽지 않는다 (agents.m
     const first = sitAtTable(state, renewal.id, "남아 주면 좋겠습니다");
     if (!first.ok) throw new Error(first.message);
     settleTableReply(state, first.seat, {
-      line: "조건을 들어 보고요.",
+      lines: [{ speaker: "agent", text: "조건을 들어 보고요." }],
       stance: "steady",
       // 장부 줄이 서는 답 — 말투가 인내를 깎은 사실이 대화 사이에 남는다
       heard: { tone: "hostile", claims: [] },
     });
     const second = sitAtTable(state, renewal.id, "주급은 그대로, 연수는 4년");
     if (!second.ok) throw new Error(second.message);
-    const input = buildTableInput(state, second.seat, player.name, "주급은 그대로, 연수는 4년")!;
+    const input = buildTableInput(state, second.seat, "주급은 그대로, 연수는 4년")!;
     const order = [
       "<counterparty",
       "<situation",
@@ -539,6 +542,32 @@ describe("테이블 — 건너편은 메인 채팅을 읽지 않는다 (agents.m
     expect(input.indexOf("주급은 그대로, 연수는 4년")).toBe(
       input.lastIndexOf("주급은 그대로, 연수는 4년"),
     );
+  });
+
+  it("서류가 화자를 적고, 화자 없는 옛 줄은 구단으로 읽힌다", () => {
+    const state = newGame();
+    const target = state.players.find((p) => p.teamId !== state.userTeamId)!;
+    const sent = sendOffer(state, {
+      playerId: target.id,
+      fee: askingPriceFor(state, target),
+      weeklyWage: wageExpectationOf(state, target),
+      years: 4,
+    });
+    expect(sent.ok, sent.message).toBe(true);
+    const buy = state.negotiations.find((n) => n.kind === "buy")!;
+    const seat = sitAtTable(state, buy.id, "값부터 맞춥시다");
+    if (!seat.ok) throw new Error(seat.message);
+    const [club, agent] = seat.seat.voices;
+    expect(club!.speaker).toBe("club");
+    expect(agent!.speaker).toBe("agent");
+
+    // 화자 칸이 없는 줄 — 목소리가 둘이 되기 전의 세이브가 남긴 답이다
+    buy.table!.lines.push({ date: state.date, by: "them", text: "옛 세이브의 답이다" });
+    const input = buildTableInput(state, seat.seat, "값부터 맞춥시다")!;
+    expect(input).toContain(`club "${club!.name}" —`);
+    expect(input).toContain(`agent "${agent!.name}" —`);
+    // 그 답은 서류가 부르는 상대 하나, 곧 파는 구단의 말로 읽힌다
+    expect(input).toContain(`@${club!.name}: 옛 세이브의 답이다`);
   });
 });
 

@@ -3,6 +3,7 @@ import type {
   NegotiationTable,
   PitchClaim,
   TableLine,
+  TableSpeaker,
   TableStance,
 } from "@story-fm/domain";
 import { PITCH_CLAIM_KO, TABLE_LINE_MAX, TABLE_STANCE_KO } from "@story-fm/domain";
@@ -12,8 +13,10 @@ import { agentProfileOf } from "./agent-profile";
 import {
   counterpartyAnchor,
   settleCounterparty,
+  tableVoicesOf,
   type CounterpartyAnchor,
   type CounterpartyRulingInput,
+  type CounterpartyVoice,
 } from "./counterparty";
 import { pendingOffer } from "./negotiation";
 import { LATITUDE_PER_CLAIM, evaluatePitch } from "./persuasion";
@@ -48,9 +51,20 @@ export interface TableHeard {
   claims: PitchClaim[];
 }
 
+/**
+ * 상대가 말한 한 줄 — **화자가 붙는다** (transfer.md §12-1). 영입의 테이블에는 값을
+ * 답하는 구단과 개인 조건을 답하는 선수 쪽이 함께 앉으므로, 한 답이 두 줄일 수 있다.
+ */
+export interface TableReplyLine {
+  speaker: TableSpeaker;
+  text: string;
+}
+
 /** 모델의 답 — 어느 값도 그대로 믿지 않는다 */
 export interface TableReply {
-  line: string;
+  /** 화자가 붙은 말 — 서 있는 목소리마다 한 줄, 없는 화자는 코어가 접는다 */
+  lines: readonly TableReplyLine[];
+  /** **답 하나에 태도 하나** — 화자가 둘이어도 테이블의 온도는 한 자리에서 잰다 */
   stance: TableStance;
   heard: TableHeard;
   /** 테이블에 오퍼가 올라 있을 때만 — 앵커 ± 한도로 잘린다 (counterparty.ts) */
@@ -62,6 +76,8 @@ export interface TableSeat {
   table: NegotiationTable;
   /** 답할 오퍼가 올라 있으면 그 앵커 — 없으면 말만 오간다 */
   anchor: CounterpartyAnchor | null;
+  /** 이 테이블에서 답하는 목소리 — 하나이거나 둘이다 (`tableVoicesOf`) */
+  voices: CounterpartyVoice[];
 }
 
 export interface TableOutcome {
@@ -105,9 +121,16 @@ export function sitAtTable(
   if (offer && offer.respondsOn !== null && offer.respondsOn > state.date) {
     offer.respondsOn = state.date;
   }
+  return { ok: true, seat: seatOf(state, negotiation) };
+}
+
+/** 자리 하나 — 협상·테이블·앵커·목소리를 한 자리에서 세운다 */
+function seatOf(state: GameState, negotiation: Negotiation): TableSeat {
   return {
-    ok: true,
-    seat: { negotiation, table: negotiation.table, anchor: counterpartyAnchor(state, negotiation) },
+    negotiation,
+    table: negotiation.table!,
+    anchor: counterpartyAnchor(state, negotiation),
+    voices: tableVoicesOf(state, negotiation),
   };
 }
 
@@ -133,10 +156,7 @@ export function openLetter(
   const patience = tablePatienceOf(state, negotiation.gamePlayerId);
   negotiation.table ??= { openedOn: state.date, patience, patienceMax: patience, lines: [] };
   negotiation.table.lines.push(ledgerLine(state, "감독의 오퍼가 서면으로 왔다 — 마주 앉지 않았다"));
-  return {
-    ok: true,
-    seat: { negotiation, table: negotiation.table, anchor: counterpartyAnchor(state, negotiation) },
-  };
+  return { ok: true, seat: seatOf(state, negotiation) };
 }
 
 function ledgerLine(state: GameState, text: string): TableLine {
@@ -162,6 +182,17 @@ export function settleTableReply(
   const player = playerById(state, negotiation.gamePlayerId);
   const name = player?.name ?? negotiation.gamePlayerId;
   const ledger: string[] = [];
+  /**
+   * **화자를 서 있는 목소리로 접는다** — 모델이 이 테이블에 없는 사람을 적어도 장부에는
+   * 앉아 있는 사람만 남는다 (transfer.md §12-1). 목소리가 하나인 갈래는 그 하나로 접히고,
+   * 그래서 재계약·매각의 줄은 지금까지와 똑같이 읽힌다.
+   */
+  const spoken = (reply?.lines ?? []).map((line) => ({
+    speaker: seat.voices.some((v) => v.speaker === line.speaker)
+      ? line.speaker
+      : (seat.voices[0]?.speaker ?? line.speaker),
+    text: line.text.trim().slice(0, TABLE_LINE_MAX),
+  }));
 
   // ── 논거 — 사실만 가린다 (persuasion.ts) ──
   const claims = reply?.heard.claims ?? [];
@@ -197,7 +228,11 @@ export function settleTableReply(
   // ── 오퍼가 올라 있었으면 판정 — 앵커 ± 한도 ──
   let payload: MarketCard | undefined;
   if (seat.anchor) {
-    const note = reply?.line.slice(0, 200);
+    // 두 목소리가 왔으면 메모도 둘의 말을 잇는다 — 라운드에 적히는 것은 한 줄이다
+    const note = spoken
+      .map((l) => l.text)
+      .join(" ")
+      .slice(0, 200);
     const ruling: CounterpartyRulingInput | undefined = reply?.ruling
       ? { ...reply.ruling, ...(note ? { note } : {}) }
       : reply
@@ -226,24 +261,37 @@ export function settleTableReply(
       ? "cooling"
       : reply.stance
     : undefined;
-  if (reply) {
+  /**
+   * **한 답의 태도는 모든 줄에 같이 선다** — 답 하나에 태도가 하나라서다. 줄마다 다른
+   * 온도를 적으면 인내를 재는 자리가 둘이 된다 (transfer.md §12-2).
+   */
+  for (const line of spoken) {
     table.lines.push({
       date: state.date,
       by: "them",
-      text: reply.line.trim().slice(0, TABLE_LINE_MAX),
+      text: line.text,
+      speaker: line.speaker,
       ...(stance ? { stance } : {}),
     });
-  } else {
-    ledger.unshift("상대는 말없이 서류대로 움직였다");
   }
+  if (!reply) ledger.unshift("상대는 말없이 서류대로 움직였다");
   for (const text of ledger) table.lines.push(ledgerLine(state, text));
 
   const message = [
-    ...(reply ? [`<reply stance="${stance ?? "steady"}">`, reply.line.trim(), `</reply>`] : []),
+    ...spoken.map(
+      (line) =>
+        `<reply speaker="${line.speaker}" name="${speakerName(seat, line.speaker)}" ` +
+        `stance="${stance ?? "steady"}">\n${line.text}\n</reply>`,
+    ),
     ...ledger.map((l) => `[장부] ${l}`),
     `인내 ${table.patience}/${table.patienceMax}` +
       (stance ? ` · ${TABLE_STANCE_KO[stance]}` : "") +
       (closed ? ` · 협상 ${negotiation.status}` : ""),
   ].join("\n");
   return { ok: true, message, ...(payload ? { payload } : {}), closed };
+}
+
+/** 그 화자의 이름 — 서류가 부르는 이름 그대로다 (`tableVoicesOf`) */
+export function speakerName(seat: TableSeat, speaker: TableSpeaker): string {
+  return seat.voices.find((v) => v.speaker === speaker)?.name ?? "상대";
 }

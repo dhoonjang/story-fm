@@ -925,6 +925,20 @@ export const TABLE_STANCE_KO: Record<TableStance, string> = {
 };
 
 /**
+ * **테이블 건너편의 화자** — 값을 받는 구단(`club`)과 선수 쪽(`agent`)
+ * (transfer.md §12-1). 열린 축의 주인이 정하므로 갈래마다 손으로 적지 않는다:
+ * 이적료·분할·기한은 `club`이, 주급·연수·지위·등번호는 언제나 `agent`가 답한다.
+ * 명부에 에이전트가 없으면 `agent` 자리에 선수 본인이 선다 — 화자가 사라지지는 않는다.
+ */
+export const TABLE_SPEAKERS = ["club", "agent"] as const;
+export const TableSpeakerSchema = z.enum(TABLE_SPEAKERS);
+export type TableSpeaker = z.infer<typeof TableSpeakerSchema>;
+export const TABLE_SPEAKER_KO: Record<TableSpeaker, string> = {
+  club: "구단",
+  agent: "선수 쪽",
+};
+
+/**
  * 테이블의 한 줄 — 감독의 말(`us`) · 상대의 답(`them`) · 코어가 적은 사실(`ledger`).
  * 장부 줄이 대화 사이에 서는 이유: 논거가 사실이었는지, 판정이 무엇으로 굳었는지는
  * 다음 답을 쓰는 쪽이 알아야 한다 — 대사에 묻히면 상대가 자기 답을 모른다.
@@ -935,6 +949,12 @@ export const TableLineSchema = z.object({
   text: z.string().min(1).max(TABLE_LINE_MAX),
   /** 상대의 답에만 — 그 줄을 말한 태도 */
   stance: TableStanceSchema.optional(),
+  /**
+   * 상대의 답에만 — **그 줄을 말한 화자** (transfer.md §12-2). 옛 세이브의 줄에는
+   * 없고, 없는 줄은 **서류가 부르는 상대 하나**로 읽힌다(영입이면 파는 구단) —
+   * 목소리가 둘인 테이블이 생기기 전의 답은 전부 그 한 사람의 것이었다.
+   */
+  speaker: TableSpeakerSchema.optional(),
 });
 export type TableLine = z.infer<typeof TableLineSchema>;
 
