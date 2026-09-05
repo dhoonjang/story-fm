@@ -23,11 +23,7 @@ import { openPromise, type PromiseOpened } from "../squad/promises";
 // 면담의 사기는 감독과 그 선수 사이의 등급을 탄다 (people.md §6 「관계 등급」)
 import { MANAGER_SUBJECT, relationFactor } from "../world/relations";
 // 잔향 — 그 대화를 쥔 호출이 심경 한 문장을 남긴다 (people.md §5)
-import {
-  applyMoodNotes,
-  TEAM_TALK_MOODS,
-  type MoodNoteSubmission,
-} from "../squad/mood";
+import { applyMoodNotes, TEAM_TALK_MOODS, type MoodNoteSubmission } from "../squad/mood";
 // 판정은 수용성 앵커 ± 한 단계 안에서만 선다 (career.md §2)
 import {
   RECEPTIVITY_ANCHOR,
