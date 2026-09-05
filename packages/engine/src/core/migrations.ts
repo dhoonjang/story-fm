@@ -7,7 +7,7 @@ import {
   splitPositioning,
   weightSlotOf,
 } from "@story-fm/domain";
-import type { GamePlayer } from "@story-fm/domain";
+import type { GamePlayer, RelationTier } from "@story-fm/domain";
 import { keeperOffTheBall } from "../world/attributes";
 
 /**
@@ -467,5 +467,42 @@ export function migrateNationalities(
     if (found.nationality === undefined) continue;
     player.nationality = found.nationality;
     if (found.secondNationality !== undefined) player.secondNationality = found.secondNationality;
+  }
+}
+
+interface RelationTierSave {
+  /** 옛 줄은 `{ a, b, score, updatedOn }`, 지금 줄은 `{ a, b, tier }`다 */
+  relations?: Array<{ a: string; b: string; score?: number; tier?: string }>;
+}
+
+/** 옛 점수의 등급 경계 — 다섯 칸 시절 ±20·±55가 갈라 두던 자리 그대로다 */
+const LEGACY_RELATION_CLOSE = 20;
+const LEGACY_RELATION_TRUSTED = 55;
+
+/**
+ * 옛 중립대는 부호가 가른다 — **0은 `cordial`이다.** 줄이 있다는 것은 그 쌍에 무언가
+ * 있었다는 뜻이고, 오간 일이 상쇄돼 0이면 그 사이는 「무난」이다. 여섯 칸에는
+ * 「아직 아무 일도 없다」를 적을 가운데가 없다 (people.md §6).
+ */
+function legacyRelationTier(score: number): RelationTier {
+  if (score >= LEGACY_RELATION_TRUSTED) return "trusted";
+  if (score >= LEGACY_RELATION_CLOSE) return "close";
+  if (score >= 0) return "cordial";
+  if (score > -LEGACY_RELATION_CLOSE) return "distant";
+  if (score > -LEGACY_RELATION_TRUSTED) return "strained";
+  return "hostile";
+}
+
+/**
+ * 관계가 **−100~100 점수 하나에서 여섯 등급으로** 바뀌었다 (people.md §6 「관계 등급」).
+ *
+ * 새 스키마에 `score` 칸이 없고 `tier`는 필수라, 접지 않은 옛 줄은 세이브를 통째로
+ * `schema`로 막는다 — parse보다 앞에서 돈다. `updatedOn`은 읽는 자리가 없어 버리고,
+ * 찌꺼기 키는 parse가 떨군다. 이미 등급을 든 줄은 손대지 않으므로 멱등이다.
+ */
+export function migrateRelationTiers(save: RelationTierSave): void {
+  for (const relation of save.relations ?? []) {
+    if (relation.tier !== undefined) continue;
+    relation.tier = legacyRelationTier(relation.score ?? 0);
   }
 }

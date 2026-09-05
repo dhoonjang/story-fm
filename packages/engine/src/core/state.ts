@@ -903,12 +903,13 @@ export interface GameState {
    */
   approachPressure?: ApproachPressure[];
   /**
-   * **관계 점수** — 무순서 쌍 하나에 한 줄 (people.md §6 「관계 점수」).
+   * **관계 등급** — 무순서 쌍 하나에 한 줄 (people.md §6 「관계 등급」).
    *
-   * 압력 눈금과 같은 이유로 세이브가 든다: 감독이 무엇을 했는지의 누적이라 장부에서
-   * 파생할 수 없다. **움직인 쌍만 앉는다** — 안 움직인 쌍은 첫인상이 결정적으로
-   * 답하므로(`world/relations.ts`) 줄이 없는 것과 0인 것은 다른 뜻이 아니다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 압력 눈금과 같은 이유로 세이브가 든다: 그간의 일이 쌓인 결과라 장부에서 파생할 수
+   * 없다. **압축이 등급을 매긴 쌍만 앉는다** — 아무도 손대지 않은 쌍은 첫인상이
+   * 결정적으로 답하므로(`world/relations.ts`) 줄이 없는 것이 곧 첫인상이다.
+   * 옛 세이브엔 없고, 점수를 들던 세이브는 로드가 등급으로 접는다
+   * (`migrateRelationTiers` — optional · SAVE_VERSION 유지).
    */
   relations?: Relation[];
   /**
