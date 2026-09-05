@@ -270,7 +270,7 @@ row, 지난 일 = 그대로 이력.**
 못 채우는 것이 아니다.
 
 ⚠️ **은퇴 명부는 이름을 잃지 않기 위한 표다.** 은퇴한 선수는 `state.players`에서
-빠지므로 id로는 아무것도 되찾지 못한다 — 시상 기록·회견·캐릭터북이 그 이름을 부르려면
+빠지므로 id로는 아무것도 되찾지 못한다 — 시상 기록·회견·인물 사전이 그 이름을 부르려면
 그 사람이 어디엔가 남아 있어야 한다. **통산은 적지 않는다**: `seasonStats` 행은
 그대로 남아 `careerTotalsOf`가 같은 수를 낸다
 ([../simulation/season.md](../simulation/season.md) §6).
@@ -343,7 +343,8 @@ row, 지난 일 = 그대로 이력.**
 | `seasonRecords` `SeasonRecord`                     | 시즌 성적 — 감독에 소속(팀을 옮겨도 남는다)                                                                                 | `domain/records.ts` |
 | `trophies` `Trophy` · `achievements` `Achievement` | 우승 · 업적                                                                                                                 | `domain/records.ts` |
 | `awards` `SeasonAward`                             | 시상 — 코드·**대회**·수상자·근거 수치. 리그도 컵·대항전도, **세계 전체**에 쌓인다 ([season.md](../simulation/season.md) §6) | `domain/records.ts` |
-| `personas` `Persona`                               | 인물 — 수석코치·구단주·기자. 성격·동기·말투+예시 대사                                                                       | `domain/persona.ts` |
+| `personas` `Persona`                               | 인물 — 수석코치·구단주·기자, 그리고 고용 정보를 든 코치·의료진·스카우트 (people.md §2-2)                                    | `domain/persona.ts` |
+| `staffPool` `StaffPoolEntry`                       | 자리를 찾는 코치·의료진·스카우트 — 이름·자리·원형·요구 연봉. 여름마다 다시 선다 (people.md §2-2). 옛 세이브엔 없다          | `domain/persona.ts` |
 | `narrative` `NarrativeNote`                        | GM 기억 — 날짜·문장·중요도(1\~5)·갈래                                                                                       | `domain/records.ts` |
 | `incidents` `Incident`                             | 감독이 말로 만든 사건 — 날짜·갈래(효과의 모양)·당사자·세기·요약 (people.md §6). 옛 세이브엔 없다                            | `domain/records.ts` |
 | `arcs` `NarrativeArc`                              | 서사 아크 — 갈래·주인·단계·제목. 개폐는 장부에서 결정적 (people.md §9)                                                      | `domain/records.ts` |
