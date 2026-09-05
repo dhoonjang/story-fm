@@ -32,6 +32,7 @@ import type {
   ManagerAttributes,
   ManagerOffer,
   ManagerPoolEntry,
+  StaffPoolEntry,
   ManagerVacancy,
   MatchRecord,
   MatchSide,
@@ -163,6 +164,7 @@ import {
   generateHeadCoach,
   generateOwner,
   generateReporters,
+  generateStaff,
   occupiedPersonNames,
   seededVirtualManagerName,
 } from "../world/persona";
@@ -798,6 +800,20 @@ export interface GameState {
    */
   managerPool?: ManagerPoolEntry[];
   /**
+   * **무직 스태프 풀** — 자리를 찾는 코치·의료진·스카우트 (people.md §2-2).
+   *
+   * 감독 풀과 달리 **여름의 결정적 추첨이 채운다** — 세계가 스태프를 자르지 않기
+   * 때문이다(AI 구단엔 명명 스태프가 없다). 그 시즌에 감독이 자른 사람만 사건으로
+   * 들어온다.
+   *
+   * ⚠️ **새 게임도 `undefined`로 선다** — 빈 배열이 아니다. 추첨이 이미 선 사람들의
+   * 이름을 피해야 하는데(`occupiedPersonNames`), `createGame`이 스태프 시장을 값으로
+   * 부르면 `core/state`와 `market/staff-market`이 서로를 import한다. 풀을 읽는 자리가
+   * `ensureStaffPool`을 먼저 부르므로 결과는 같고, **빈 배열은 「다 데려갔다」는
+   * 다른 뜻으로 남는다.** 옛 세이브도 `undefined`다 (optional — SAVE_VERSION 유지).
+   */
+  staffPool?: StaffPoolEntry[];
+  /**
    * **아직 GM이 읽지 않은 화면 조작** — 전술판·명단·역할을 직접 만진 것.
    *
    * 이 조작들은 채팅 턴을 만들지 않는다(장부 편집이다). 그런데 감독은 판을
@@ -973,7 +989,7 @@ export interface GameState {
    * **은퇴 명부** — 그만둔 사람이 남기는 한 줄 (season.md §6).
    *
    * 은퇴하면 `state.players`에서 빠지므로 id로는 이름도 나이도 되찾지 못한다 — 원장의
-   * `retire` 줄만으로는 오프시즌 블록도 캐릭터북도 그 사람을 부를 수 없다. 통산은 여기
+   * `retire` 줄만으로는 오프시즌 블록도 인물 사전도 그 사람을 부를 수 없다. 통산은 여기
    * 적지 않는다: `seasonStats`가 그대로 남아 `careerTotalsOf`가 같은 수를 낸다.
    * **감독 팀에서 은퇴한 선수만** 담는다 — `milestones`와 같은 규약이다.
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
@@ -3297,10 +3313,15 @@ export function createGame(input: CreateGameInput): GameState {
     // 부임하면 사람이 먼저 기다린다 — 수석코치는 시드로 결정되므로
     // 같은 세이브는 언제 열어도 같은 사람이다 (persona.ts)
     personas: [
-      generateHeadCoach(seed, input.userTeamId),
+      generateHeadCoach(seed, input.userTeamId, calendar.preseasonStart),
       generateOwner(seed, input.userTeamId),
       // 기자단 — 회견은 세계가 먼저 부르는 자리라 부를 사람이 세이브에 있어야 한다
       ...generateReporters(seed, input.userTeamId),
+      /**
+       * 코치 둘 · 의료진 · 스카우트 — 감독이 오기 전부터 그 구단에 있던 사람들이다
+       * (people.md §2-2). 부임일이 오늘보다 앞서는 이유가 그것이다.
+       */
+      ...generateStaff(seed, input.userTeamId, calendar.preseasonStart),
     ],
     formUnitScale: true,
     // 카탈로그는 읽을 때 이미 벗겨져 들어온다(`world/catalog.ts`) — 새 세이브에

@@ -46,6 +46,8 @@ export const CALL_LABEL: Record<string, string> = {
   set_ticket_price: "티켓 가격",
   fund_transfer_budget: "사재 출연",
   pay_player_bonus: "사재 보너스",
+  hire_staff: "스태프 고용",
+  release_staff: "스태프 계약 해지",
   resign: "사임",
   search_players: "선수 검색",
   get_squad: "스쿼드·라인업 조회",

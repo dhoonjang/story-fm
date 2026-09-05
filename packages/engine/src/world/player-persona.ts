@@ -236,7 +236,7 @@ function archetypeWeight(archetype: PlayerArchetype, slot: WeightSlot, band: Age
  * 원형 뽑기가 읽는 전부 — **명단에 없는 사람도 이 넷이면 같은 사람이 된다.**
  *
  * 은퇴 명부의 한 줄이 이 모양이라(`RetiredPlayer` — season.md §6), 그만둔 선수를
- * 캐릭터북이 부를 때 현역 때와 같은 채널을 지나 같은 목소리가 선다 (people.md §6).
+ * 인물 사전이 부를 때 현역 때와 같은 채널을 지나 같은 목소리가 선다 (people.md §6).
  */
 export interface PersonaSubject {
   id: string;

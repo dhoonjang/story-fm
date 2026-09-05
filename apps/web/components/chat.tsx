@@ -13,34 +13,8 @@ import { MarketCardView, MissionReportCardView } from "@/components/market-card"
 import { splitMarketCalls } from "@/lib/market-calls";
 import { ratingTone, scoutMargin, scoutValue } from "@/lib/scout-report-display";
 import { CALL_LABEL } from "@/lib/call-label";
-import type { SpeakerKind, SpeakerRole } from "@story-fm/engine";
-import {
-  IconBroadcast,
-  IconCaptain,
-  IconCoach,
-  IconJersey,
-  IconOwner,
-  IconMatch,
-  IconPerson,
-  IconReporter,
-  type IconComponent,
-} from "@/components/icons";
-
-/**
- * 자리 → 아이콘 — **모든 화자가 하나씩 갖는다.**
- *
- * 이름만으로는 누가 코치고 누가 선수인지 매번 읽어야 안다. 아이콘이 앞에 서면
- * 대화를 훑을 때 자리가 먼저 눈에 든다. 세이브가 자리를 모르는 화자(기자·에이전트·
- * 남의 팀 사람)에는 **사람 아이콘**이 선다 — 틀린 직책을 다느니 "누군가 말한다"까지만
- * 말한다. 자리는 화면이 추측하지 않는다: `speakerRoles`가 코어에서 정해 실어 보낸다.
- */
-const KIND_ICON: Partial<Record<SpeakerKind, IconComponent>> = {
-  head_coach: IconCoach,
-  owner: IconOwner,
-  reporter: IconReporter,
-  captain: IconCaptain,
-  player: IconJersey,
-};
+import type { SpeakerRole } from "@story-fm/engine";
+import { IconBroadcast, IconMatch, IconPerson, SPEAKER_ICON } from "@/components/icons";
 
 /**
  * *연출* 구간을 <em>으로 렌더 — 나누는 규칙은 `splitStaging`이 갖는다(연속 별표·
@@ -78,7 +52,7 @@ function UtteranceBlock({
   const isBroadcast = speaker === BROADCAST_SPEAKER;
   // 직책은 모델이 아니라 세이브가 안다 — 이름만 맞으면 어떤 턴에서도 함께 보인다
   const role = roles?.[normalizeSpeaker(speaker)];
-  const Icon = isBroadcast ? IconBroadcast : (role && KIND_ICON[role.kind]) || IconPerson;
+  const Icon = isBroadcast ? IconBroadcast : (role && SPEAKER_ICON[role.kind]) || IconPerson;
   return (
     <div className={`say${isBroadcast ? " broadcast" : ""}`}>
       <div className="say-who">

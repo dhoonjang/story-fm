@@ -1944,3 +1944,60 @@
   min-width: 4.2em;
   color: var(--accent-2);
 }
+
+/**
+ * 스태프 — 구단이 고용한 사람들 (docs/data/people.md §2-2). 명단 아래에 선다.
+ *
+ * **읽는 값이다.** 고용·해고는 채팅으로 하는 일이라 이 구획에는 손잡이가 하나도 없다 —
+ * 호버 강조도, 포인터 커서도, 눌릴 것처럼 밝아지는 테두리도 두지 않는다.
+ *
+ * 유스 구획의 금색·강조색을 빌리지 않는다: 그 색은 **아직 계약하지 않은 사람**에게
+ * 붙어 「곧 결정할 것」을 뜻하고, 여기 선 사람들은 이미 구단의 사람이다. 명단 표와
+ * 같은 두 톤(`--text`·`--muted`)만 쓴다 — 늘 거기 있는 것은 눈에 띌 일이 없다.
+ */
+.club-staff {
+  /* 명단과 붙지 않는다 — 옆 열은 `gap: 0`이라(책갈피가 표에 닿아야 한다) 이 한 칸은
+     제 여백을 스스로 갖는다 */
+  margin-top: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+.club-staff-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-md);
+  margin-bottom: 6px;
+}
+.club-staff-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.club-staff-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  flex-wrap: wrap;
+}
+/* 값이지 손잡이가 아니다 — 읽는 칸은 폭만 고정하고 테두리를 두지 않는다 */
+.cs-name {
+  min-width: 6em;
+}
+/* 이름 다음으로 읽히는 사실은 훈련장의 어느 자리냐다 — 나머지 칸(원형·날짜)만
+   `.muted`로 물러선다. 색을 하나 더 쓰지 않고 두 톤으로 가른다 */
+.cs-title {
+  min-width: 5.4em;
+}
+/* 도형은 밑변이 없어 baseline에 얹으면 글자보다 처진다 — 이 칸만 가운데로 선다 */
+.cs-icon {
+  align-self: center;
+  display: inline-flex;
+  color: var(--muted);
+}

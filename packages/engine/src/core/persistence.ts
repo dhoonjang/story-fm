@@ -33,6 +33,7 @@ import { SaveSchema } from "./save-schema";
 import { saveLockPath } from "./save-lock";
 import type { GamePhase, GameState } from "./state";
 import { ensureManagerPool, ensurePersonas } from "../world/persona";
+import { ensureStaffPool } from "../market/staff-market";
 import { ensureSquadNumbers } from "../squad/numbers";
 import { deriveNationality, playerCatalog } from "../world/catalog";
 import { addMissingClubs, ensureSeededManagers, recomputeOverall, teamNameIn } from "./state";
@@ -432,6 +433,12 @@ function migrate(save: Record<string, unknown>, state: GameState): void {
    * 채우는 빈 벤치는 사람됨이 없던 자리라 표식을 받으면 안 된다.
    */
   ensureManagerPool(state);
+  /**
+   * 스태프 풀 도입 (people.md §2-2) — **`ensurePersonas` 뒤여야 한다**: 풀의 이름은
+   * 이미 선 사람들을 피해서 뽑는다(`occupiedPersonNames`). 앞에서 돌면 방금 채운
+   * 코치와 같은 이름이 풀에 앉는다.
+   */
+  ensureStaffPool(state);
   // 세계 인물 명부 도입 — 이름 없이 서 있던 AI 구단 벤치에 명부의 감독을 채운다.
   // 명부가 결정적이라 채워도 그 세이브의 사람은 같다 (people.md §2-1).
   ensureSeededManagers(state);

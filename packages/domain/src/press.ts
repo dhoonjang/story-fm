@@ -211,7 +211,7 @@ export const PressFactKindSchema = z.enum([
   /**
    * **상대 감독의 말** — 이번 대진의 반대편 벤치가 마이크 앞에서 무슨 결로 말했나
    * (people.md §4). `tags[0]`이 결 코드(`RIVAL_VOICES`), `name`이 그 감독이자
-   * 캐릭터북의 `characterId`, `refId`가 상대 구단이다.
+   * 인물 사전의 `characterId`, `refId`가 상대 구단이다.
    *
    * 카드가 드는 것은 **이름과 결 하나뿐이다** — 대사를 코어에 박으면 그 사람이
    * 시즌 내내 같은 말을 한다 (overview.md §1 철칙 4).
@@ -506,7 +506,7 @@ export const ApproachSchema = z.object({
   topic: ApproachTopicSchema,
   /**
    * 말을 거는 사람 (`Persona.characterId`). 선수·주장은 그 선수의 이름이고
-   * 구단주는 구단주의 이름이다 — 회견의 `reporterId`와 같은 자리로 캐릭터북에
+   * 구단주는 구단주의 이름이다 — 회견의 `reporterId`와 같은 자리로 인물 사전에
    * 실린다(people.md §6). **세계가 먼저 여는 자리는 감독이 이름을 부르기를
    * 기다리지 않는다.**
    */
@@ -518,7 +518,7 @@ export const ApproachSchema = z.object({
    *
    * 다른 주제에는 없다(optional): 나머지는 전부 감독이 맡은 구단 안의 일이라 자리를
    * 가리킬 것이 없고, 면접만 **아직 남의 구단**에서 열린다 — 화자도 그 구단의
-   * 구단주라 이 칸이 없으면 캐릭터북이 우리 구단주를 되찾는다.
+   * 구단주라 이 칸이 없으면 인물 사전이 우리 구단주를 되찾는다.
    */
   teamId: z.string().min(1).optional(),
   /** 한 줄 배경의 카드 — 옛 세이브엔 없다(optional) */
@@ -1214,7 +1214,7 @@ export const MediaFactSchema = z.object({
   date: DateString,
   /**
    * 이름이 걸린 사람 (`Persona.characterId`) — 없으면 지면 전체의 사실이다.
-   * 화자가 있는 기사는 회견의 기자처럼 그 턴 캐릭터북에 지목된다 (people.md §6).
+   * 화자가 있는 기사는 회견의 기자처럼 그 턴 인물 사전에 지목된다 (people.md §6).
    */
   speakerId: z.string().min(1).optional(),
   data: PressFactDataSchema,

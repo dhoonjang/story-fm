@@ -220,7 +220,7 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
     expect(buildGmReference(state)).toBe(before);
   });
 
-  it("인물 카드는 레퍼런스에도 상태 스냅샷에도 없다 — 캐릭터북이 이번 턴 층에 싣는다", () => {
+  it("인물 카드는 레퍼런스에도 상태 스냅샷에도 없다 — 인물 사전이 이번 턴 층에 싣는다", () => {
     const state = game();
     const coach = headCoachOf(state);
     const reference = buildGmReference(state);
@@ -291,7 +291,7 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
     // 카드가 발화보다 앞이다 — 이력에 남는 것들 안의 순서라 캐시와 무관하고, 보낼 때와
     // 같은 함수가 그리므로 같은 순서다 (`renderTurnGroup`)
     expect(turn.content.indexOf(coach.motivation)).toBeLessThan(turn.content.indexOf("불러줘"));
-    // 창 안에 선 카드는 캐릭터북이 「이미 실렸다」로 읽는다
+    // 창 안에 선 카드는 인물 사전이 「이미 실렸다」로 읽는다
     expect(injectedCharacters(state)).toEqual([{ characterId: coach.characterId, depth: "full" }]);
   });
 
@@ -526,11 +526,11 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
 
     const card = scoutReportCard(state, target.id)!;
     const note = buildGmStateNote(state, null, [card]);
-    expect(note).toContain("<scout_reports>");
+    expect(note).toContain("<scout_reports name=");
     expect(note).toContain(formatMoney(card.marketValue));
     expect(note).toContain(formatMoney(card.wageExpectation));
     // 실리지 않은 턴에는 한 줄도 쓰지 않는다 — 매 턴 정가로 읽히는 블록이다
-    expect(buildGmStateNote(state)).not.toContain("<scout_reports>");
+    expect(buildGmStateNote(state)).not.toContain("<scout_reports");
   });
 
   /**
@@ -556,7 +556,7 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
     const card = missionReportCard(state, "mission-lb")!;
     // 지목은 하나도 없는 턴이다 — 임무만으로도 블록이 서야 한다
     const note = buildGmStateNote(state, null, [], [card]);
-    expect(note).toContain("<scout_reports>");
+    expect(note).toContain("<scout_reports name=");
     expect(note).toContain(card.brief);
     for (const c of card.candidates) expect(note).toContain(c.name);
     expect(note).toContain(formatMoney(card.candidates[0]!.marketValue));

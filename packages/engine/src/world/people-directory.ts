@@ -30,7 +30,7 @@ import {
 } from "./relations";
 
 /**
- * 캐릭터북 — **「이 인물이 지금 필요하다」를 판정해 그 턴에만 싣는다** (people.md §6).
+ * 인물 사전 — **「이 인물이 지금 필요하다」를 판정해 그 턴에만 싣는다** (people.md §6).
  *
  * 인물 카드에는 두 상태밖에 없었다: 레퍼런스 층에 늘 서 있거나(코치·구단주·기자단)
  * 아예 없거나(선수). 상주하는 쪽은 회견도 협상도 없는 턴에 매번 읽히고, 없는 쪽은
@@ -285,7 +285,7 @@ function interviewOwnerOf(state: GameState): Persona | null {
   return generateOwner(state.seed, open.teamId);
 }
 
-export interface CharacterBookInput {
+export interface PeopleDirectoryInput {
   /** 이번 턴 감독 발화 — 아직 이력에 없다. "홀란드 불러줘"는 그 턴에 걸려야 한다 */
   message?: string;
   /**
@@ -326,7 +326,7 @@ interface Candidate {
  */
 export function selectCharacters(
   state: GameState,
-  input: CharacterBookInput = {},
+  input: PeopleDirectoryInput = {},
 ): CharacterEntry[] {
   const message = input.message ?? "";
   const history = historyWindow(state);
@@ -518,7 +518,7 @@ function pointedIds(
   /**
    * **회견 카드에 오른 상대 감독** — 기자와 같은 자리다 (people.md §4). 그 사람의
    * 말을 인용하라고 카드가 요구해 놓고 인물지를 싣지 않으면, GM이 그 이름으로
-   * 즉흥의 말투를 지어낸다 — 캐릭터북이 풀었던 그 문제다.
+   * 즉흥의 말투를 지어낸다 — 인물 사전이 풀었던 그 문제다.
    */
   for (const fact of conference?.facts ?? []) {
     if (fact.kind !== "rival-quote") continue;

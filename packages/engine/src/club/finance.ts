@@ -242,7 +242,14 @@ const FRIENDLY_TICKET_FACTOR = 0.6;
 
 /** 주급을 월액으로 옮기는 자 — 한 해 52주를 열두 달로 고르게 편다 */
 const WEEKS_PER_MONTH = 52 / 12;
-/** 스태프 급여 — 월 선수 급여 대비 (하위 팀일수록 상대 비중이 크다) */
+/**
+ * 스태프 급여 — 월 선수 급여 대비 (하위 팀일수록 상대 비중이 크다).
+ *
+ * **명명 스태프의 연봉은 이 안에서 이름을 얻는다** — 비율을 손대지 않고 파생 줄에서
+ * 명명된 만큼을 뺀다 (`staffWageBaseOf` · §6.4-1). 임금 천장(`affordableWageBill`)이
+ * 읽는 것은 실제 합계가 아니라 **구단 규모의 자**인 이 비율 그대로다: 스태프를 몇 명
+ * 자르면 선수 주급 천장이 오르는 세계는 감독이 읽을 수 없다.
+ */
 const STAFF_WAGE_RATE: Record<1 | 2 | 3 | 4, number> = { 1: 0.22, 2: 0.24, 3: 0.26, 4: 0.28 };
 /** 승리 수당 — 주급 총액 대비 */
 const WIN_BONUS_RATE = 0.1;
@@ -1654,6 +1661,47 @@ function relegatedYear(state: GameState, teamId: string): number | null {
   return year >= 0 && year < RELEGATED_COMMERCIAL.length ? year : null;
 }
 
+/** 명명 스태프 한 사람이 원장에 남기는 줄 — 라벨과 그달의 몫 */
+interface NamedStaffWage {
+  label: string;
+  monthly: number;
+}
+
+/**
+ * 이 구단이 **이름으로 급여를 주는 사람들** — 수석코치·코치·의료진·스카우트
+ * (finance.md §6.4-1 · ../data/people.md §2-2). 고용 정보를 든 인물이 곧 그 목록이다.
+ *
+ * 감독은 여기 없다 — 스태프가 아니라 구단이 감독과 맺은 계약이고, 파생 몫 위에 따로
+ * 얹힌다. 인물은 감독의 구단에만 서므로 AI 구단은 언제나 빈 목록이다.
+ *
+ * ⚠️ **사람마다 반올림한 뒤 더한다.** 합계를 먼저 내고 열둘로 나누면 원장에 선 줄들의
+ * 합과 파생 몫이 잔돈만큼 어긋나 총액이 기준액에서 밀린다.
+ */
+function namedStaffWagesOf(state: GameState, teamId: string): NamedStaffWage[] {
+  return (state.personas ?? []).flatMap((persona) => {
+    const job = persona.employment;
+    if (!job || job.teamId !== teamId) return [];
+    return [
+      { label: `${persona.name} (${job.title})`, monthly: Math.round(job.contract.salary / 12) },
+    ];
+  });
+}
+
+/** 명명 스태프의 월 급여 합 — 파생 몫이 이만큼 덜어진다 (§6.4-1) */
+export function namedStaffMonthlyOf(state: GameState, teamId: string): number {
+  return namedStaffWagesOf(state, teamId).reduce((sum, wage) => sum + wage.monthly, 0);
+}
+
+/**
+ * 스태프 급여의 **파생 기준액** — 월 선수 급여 대비 구단 규모의 몫 (§6.4-1).
+ *
+ * 명명된 사람은 이 안에서 이름을 얻고, 명명 합계가 이를 넘어선 뒤부터 고용이 실제로
+ * 총액을 올린다. 그달의 `staff_wages`는 `max(이 값, 명명 합계)`다.
+ */
+export function staffWageBaseOf(state: GameState, teamId: string): number {
+  return weeklyWagesOf(state, teamId) * WEEKS_PER_MONTH * STAFF_WAGE_RATE[tierOf(state, teamId)];
+}
+
 function postMonthlyItems(state: GameState): void {
   // 96팀 × 전 경기 순회를 피한다 (월초 정산은 전 팀에 적용된다)
   const winRates = recentWinRates(state, MERCH_FORM_MATCHES);
@@ -1680,7 +1728,6 @@ function postMonthlyItems(state: GameState): void {
       }
       continue;
     }
-    const tier = tierOf(state, team.id);
     const pool = poolOf(state, team.id);
     const { commercialTier } = profileOf(state, team.id);
 
@@ -1775,12 +1822,27 @@ function postMonthlyItems(state: GameState): void {
       });
     }
 
-    // 스태프 급여 — 월 선수 급여 대비
+    /**
+     * 스태프 급여 — **명명된 사람은 대상별 한 줄, 남은 몫이 파생 줄**이다 (§6.4-1).
+     *
+     * 총액은 `max(파생 기준액, 명명 합계)`라 시작 인원에서는 지금 실측 그대로다:
+     * 고용은 스태프 급여를 늘리는 것이 아니라 그 안에서 이름을 얻는 것이고, 감독이
+     * 기준액보다 많이 고용했을 때에야 총액이 오른다.
+     */
+    for (const wage of namedStaffWagesOf(state, team.id)) {
+      recordFinance(state, team.id, {
+        kind: "expense",
+        category: "staff_wages",
+        label: wage.label,
+        amount: wage.monthly,
+      });
+    }
+    // 명명 합계가 기준액을 넘으면 파생 몫은 0 — `recordFinance`가 0인 줄을 걸러 준다
     recordFinance(state, team.id, {
       kind: "expense",
       category: "staff_wages",
       label: "코칭·사무 스태프 급여",
-      amount: weeklyWagesOf(state, team.id) * WEEKS_PER_MONTH * STAFF_WAGE_RATE[tier],
+      amount: Math.max(0, staffWageBaseOf(state, team.id) - namedStaffMonthlyOf(state, team.id)),
     });
     // 감독 연봉 — 계약이 있는 것은 감독 팀뿐이다 (career.md §5.1, 경질은 계약을
     // 지운다). AI 벤치의 몫은 위 스태프 급여율에 이미 뭉쳐 있다
