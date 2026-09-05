@@ -323,6 +323,7 @@ describe("한 시즌의 유스 육성", () => {
       "직업의식 격차": growthOf(diligent) - growthOf(lazy),
       "아카데미 활용도": academyUse,
       "다음 여름 유스 후보": intake.length,
+      "유스 후보 천장 — 평균": mean(intake.map((p) => p.attributes.potential)),
       "유스 후보 잠재력 여지 — 평균": mean(intakeUpside),
       "유스 후보 잠재력 여지 — 최대": Math.max(...intakeUpside),
     };

@@ -287,13 +287,26 @@ export function potentialGapBand(age: number): { min: number; max: number } {
   };
 }
 
-function potentialOf(key: string, age: number, overall: number): number {
+/**
+ * 이 나이가 남긴 여지 한 표집 — `POTENTIAL_GAP`에서 뽑아 대역(§6.5) 안으로 접는다.
+ *
+ * **세계 생성과 유스 인테이크가 같이 부르는 자리다** (`world/generate.ts`
+ * `generateYouthPlayer` — season.md §6). 표가 둘이면 어느 여름에 태어났는가가 열여덟
+ * 살의 뜻을 바꾼다: 인테이크가 제 공식을 쥐고 있던 동안 여름마다 들어오는 사람이
+ * 시드 세계의 같은 나이보다 얇았고, 닫힌 세계가 그만큼 해마다 가라앉았다.
+ *
+ * `key`는 결정적 지문의 열쇠다 — 같은 열쇠는 언제나 같은 여지를 낸다.
+ */
+export function sampleGapFor(age: number, key: string): number {
   const band = POTENTIAL_GAP.find((b) => age <= b.untilAge) ?? POTENTIAL_GAP_OLDEST;
   const sd = (band.p90 - band.mean) / MEAN_P90_SIGMA;
   const sampled = band.mean + fingerprint(key, "potential") * sd;
   const limit = potentialGapBand(age);
-  const gap = Math.max(limit.min, Math.min(limit.max, Math.round(sampled)));
-  return clamp99(overall + gap);
+  return Math.max(limit.min, Math.min(limit.max, Math.round(sampled)));
+}
+
+function potentialOf(key: string, age: number, overall: number): number {
+  return clamp99(overall + sampleGapFor(age, key));
 }
 
 // ── ④ 되맞춤 ────────────────────────────────────

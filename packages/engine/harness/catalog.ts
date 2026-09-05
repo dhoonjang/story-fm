@@ -366,7 +366,7 @@ export const SQUAD_LONGEVITY = defineHarness({
     { metric: "시즌당 종합 드리프트", role: "measure", unit: "score", why: "성장과 노화의 수지 — 한 시즌에 리그 체급이 얼마나 움직이는가" },
     { metric: "리그 1군 상위 15 잠재력 — 시작", role: "measure", unit: "score", why: "체급의 천장 — 종합과 함께 읽어야 드리프트의 원인이 갈린다" },
     { metric: "리그 1군 상위 15 잠재력 — 15시즌 뒤", role: "measure", unit: "score", why: "같은 자로 잰 도착선" },
-    { metric: "시즌당 잠재력 드리프트", role: "measure", unit: "score", why: "천장 자체가 움직였는가 — 종합만 내려가면 성장이 못 닿은 것이고, 함께 내려가면 여름마다 세계가 건네는 사람이 얇아진 것이다" },
+    { metric: "시즌당 잠재력 드리프트", role: "guard", min: -0.1, max: 0.1, unit: "score", why: "**천장 자체가 움직였는가.** 세계는 닫혀 있어 여름마다 들어오는 사람의 천장이 곧 다음 세대 리그의 천장이므로(season.md §6), 이 줄이 0에서 멀어지면 리그가 세대마다 다른 게임이 된다 — 인테이크가 제 공식을 쥐고 있던 동안 −0.45였고, 열다섯 시즌에 체급이 6.7 내려앉았다. 폭이 ±0.1인 것은 열다섯 시즌에 1.5, 곧 **한 눈금 반**이 감독이 알아채지 못할 최대이기 때문이다. 종합 쪽은 성장 곡선(`youth-development`)과 함께 움직이므로 여기서 판정하지 않는다" },
     { metric: "후보가 서지 않은 여름", role: "guard", max: 0, unit: "count", why: "인테이크는 후보가 서야 사건이다 (season.md §6) — 한 여름이라도 비면 그해 감독에게는 고를 것이 없고, 코어가 채우는 기본값마저 서지 않는다" },
     { metric: "우리 인테이크 후보 — 여름 평균", role: "measure", unit: "count", why: "감독 앞에 선 후보 수 — 코어가 채울 수 위에 체급·아카데미 활용도가 얹은 여지" },
     { metric: "우리 인테이크 계약 — 여름 평균", role: "measure", unit: "count", why: "그중 실제로 계약한 수. 이 하네스는 답하지 않는 감독이라 곧 **기본값**이고, 위 줄과의 차가 감독이 고를 수 있었던 폭이다" },
@@ -407,8 +407,9 @@ export const YOUTH_DEVELOPMENT = defineHarness({
     { metric: "직업의식 격차", role: "reference", min: 0, unit: "score", why: "성실 − 게으름. 배율이 없는 표본이라 남는 차이는 원형뿐이다 — 0 이하면 계수가 세계에 닿지 않았다 (people.md §6)" },
     { metric: "아카데미 활용도", role: "guard", min: 0.3, max: 1, unit: "ratio", why: "그 시즌 우리 2군 출전 중 21세 이하의 몫 (season.md §6) — 다음 여름 인테이크의 수와 여지가 여기서 나온다. 하한은 '2군이 유망주의 자리로 돌아가고 있다'를 가르는 자리다: 그 아래면 2군이 늙은 백업의 대기실이라는 뜻이고, 그러면 아래 두 줄이 재는 것이 감독의 선택이 아니라 그 사실 하나가 된다" },
     { metric: "다음 여름 유스 후보", role: "guard", min: 3, unit: "count", why: "감독 앞에 선 후보 수 — 고를 것이 한둘이면 인테이크는 결정이 아니라 통보다" },
-    { metric: "유스 후보 잠재력 여지 — 평균", role: "reference", min: 10, max: 32, unit: "score", why: "후보의 `potential − overall` 평균. 아래끝은 `YOUTH_UPSIDE.min`(10)이고 위끝은 활용도가 만점일 때의 상단(26+6)이라, 밴드를 벗어나면 여지의 공식이나 활용도 항이 어긋난 것이다" },
-    { metric: "유스 후보 잠재력 여지 — 최대", role: "measure", unit: "score", why: "그해 인테이크에 진짜 물건이 섞였는가 — 유스의 매력은 지금 실력이 아니라 이 꼬리다" },
+    { metric: "유스 후보 천장 — 평균", role: "reference", min: 82, max: 92, unit: "score", why: "후보의 `potential` 평균 — **인테이크의 무게 중심이다** (season.md §6). 우리 팀은 1등급이라 체급 기준선 `TIER_BASE[1]`(84)에 활용도 항이 얹힌 자리에 서야 한다. 밴드가 그보다 넓은 것은 후보 열몇의 평균이라 천장의 흩어짐(`YOUTH_CEILING_SPREAD`)이 그만큼 흔들기 때문이고, 평균 자체가 기준선에 서는지는 `world.test.ts`가 표본 수천으로 지킨다" },
+    { metric: "유스 후보 잠재력 여지 — 평균", role: "reference", min: 13, max: 23, unit: "score", why: "후보의 `potential − overall` 평균. 세계 생성과 같은 나이별 표에서 나오므로(`sampleGapFor`) 열일곱~열아홉의 표 평균 17.7 둘레에 선다 — 밴드를 벗어나면 인테이크가 그 표를 안 읽고 있는 것이다" },
+    { metric: "유스 후보 잠재력 여지 — 최대", role: "measure", unit: "score", why: "그해 인테이크에서 가장 덜 자란 아이 — 여지가 큰 쪽이 그해 가장 먼 길을 갈 아이다" },
   ],
 });
 

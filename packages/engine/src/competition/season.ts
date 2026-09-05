@@ -6,6 +6,7 @@ import type {
   MatchRecord,
   Outcome,
   PositionGroup,
+  PressFact,
   RetiredPlayer,
   RetirementReason,
   SeasonAward,
@@ -29,6 +30,7 @@ import {
   achievementTitle,
   ageOf,
   anchorOf,
+  awardDetail,
   awardTitle,
   boardExpectationText,
   mediaVerdictOf,
@@ -792,19 +794,46 @@ export function awardLine(a: SeasonAward): string {
   );
 }
 
-function awardDetail(a: SeasonAward): string {
-  const rating = a.rating === undefined ? "" : ` · 평점 ${a.rating.toFixed(2)}`;
-  // 결승 MOM의 근거는 **그 한 경기**다 — 출전 수를 적으면 "1경기"가 되어 사실을 흐린다
-  if (a.code === "final-motm") {
-    const scored = [a.goals > 0 ? `${a.goals}골` : null, a.assists > 0 ? `${a.assists}도움` : null]
-      .filter((x) => x !== null)
-      .join(" ");
-    return `결승${rating}${scored === "" ? "" : ` · ${scored}`}`;
-  }
-  if (a.code === "top-scorer") return `${a.apps}경기 ${a.goals}골`;
-  if (a.code === "top-assister") return `${a.apps}경기 ${a.assists}도움`;
-  if (a.code === "young-player") return `만 ${a.age}세 · ${a.apps}경기${rating}`;
-  return `${a.apps}경기${rating}`;
+/**
+ * **가장 최근에 매겨진 시즌**(`state.season - 1`)에 그 선수가 받은 상 — 장부 순서 그대로.
+ *
+ * 시상은 시즌 전환이 매기므로 진행 중인 시즌에는 아직 상이 없다. 창이 하나인 것이 규약이다
+ * (season.md §6 「상이 사실로 서는 자리」) — 자리마다 다른 창을 쓰면 같은 상이 협상 서류엔
+ * 서고 회견엔 서지 않는다.
+ */
+export function lastSeasonAwardsOf(state: GameState, playerId: string): readonly SeasonAward[] {
+  return (state.awards ?? []).filter(
+    (a) => a.season === state.season - 1 && a.gamePlayerId === playerId,
+  );
+}
+
+/**
+ * 상 한 건의 **사실 카드** — 회견(`opening`·`season-end`)과 계약 다가옴이 같은 장을 쓴다
+ * (people.md §4 `award`).
+ *
+ * 날 선 자리가 아니다: 기자가 캐물을 일이 아니라 물어봐 줄 일이고, 날을 세우면 그 자리의
+ * 무게가 올라 상이 결국 눈금을 움직인다 (season.md §6).
+ *
+ * 이름은 **부르는 자리에서만** 싣는다 — 다가옴의 카드는 `about`이 이미 그 사람이다.
+ */
+export function awardFact(a: SeasonAward, opts: { named: boolean }): PressFact {
+  return {
+    kind: "award",
+    data: {
+      ...(opts.named ? { name: a.playerName } : {}),
+      values: {
+        season: a.season,
+        apps: a.apps,
+        goals: a.goals,
+        assists: a.assists,
+        ...(a.rating === undefined ? {} : { rating: a.rating }),
+        ...(a.age === undefined ? {} : { age: a.age }),
+      },
+      tags: [a.code, competitionShortName(a.competitionId)],
+    },
+    about: a.gamePlayerId,
+    sharp: false,
+  };
 }
 
 /** 기록 경신 코드가 가리키는 것 — 세이브에 남는 것은 코드와 수치뿐이다 (season.md §6) */
@@ -1433,8 +1462,14 @@ const YOUTH_POOL_BY_TIER: Record<1 | 2 | 3 | 4, number> = { 1: 4, 2: 3, 3: 3, 4:
 /** 아카데미 활용도(0~1)가 더하는 후보 수 */
 const YOUTH_POOL_ACADEMY = 2;
 
-/** 아카데미 활용도가 잠재력 여지의 위끝에 얹는 폭 (`YOUTH_UPSIDE.max` 위) */
-const YOUTH_ACADEMY_UPSIDE = 6;
+/**
+ * 아카데미 활용도가 **유스 천장의 평균**에 얹는 폭 (season.md §6).
+ *
+ * 여지의 위끝이 아니라 천장이다 — 위끝에 얹으면 활용도가 높은 구단의 유스만 여지가
+ * 넓어져 지금 실력이 그만큼 낮게 서고, 아카데미에 자리를 준 대가가 "더 덜 자란 아이"가
+ * 된다. 천장을 옮기면 실력은 그 천장에서 나이가 정한 만큼 내려온 자리에 그대로 선다.
+ */
+const YOUTH_ACADEMY_CEILING = 3;
 
 /**
  * 아카데미가 자리를 내주는 나이 — 실제 U21 리그의 자격과 같은 자다. 밴드가 아니라
@@ -1484,8 +1519,8 @@ export interface YouthIntake {
   candidates: number;
   /** 답이 없을 때 코어가 채우는 수 — 옛 규칙 그대로 */
   fills: number;
-  /** 잠재력 여지의 위끝에 얹는 폭 */
-  upsideBonus: number;
+  /** 유스 천장의 평균에 얹는 폭 */
+  ceilingBonus: number;
 }
 
 /**
@@ -1497,7 +1532,9 @@ export function youthIntakeOf(fills: number, tier: 1 | 2 | 3 | 4, academyUse: nu
   return {
     candidates: fills + extra,
     fills,
-    upsideBonus: Math.round(academyUse * YOUTH_ACADEMY_UPSIDE),
+    // 후보 수와 달리 반올림하지 않는다 — 천장은 눈금이 없는 값이고, 접으면 활용도
+    // 0.5와 0.83이 같은 인테이크를 낸다
+    ceilingBonus: academyUse * YOUTH_ACADEMY_CEILING,
   };
 }
 
@@ -1939,7 +1976,7 @@ function applyTransition(state: GameState): string[] {
         forced[i],
         seasonYear(nextSeason),
         takenNames,
-        intake.upsideBonus,
+        intake.ceilingBonus,
       );
       if (ours) {
         candidates.push({

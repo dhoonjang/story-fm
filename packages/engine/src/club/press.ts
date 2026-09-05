@@ -61,7 +61,13 @@ import {
   previousBreakKey,
   type InternationalBreak,
 } from "../competition/international";
-import { boardExpectation, computeStandings, retirementJudgeDate } from "../competition/season";
+import {
+  awardFact,
+  boardExpectation,
+  computeStandings,
+  lastSeasonAwardsOf,
+  retirementJudgeDate,
+} from "../competition/season";
 import { predictedPlaceOf, predictionOf } from "../competition/prediction";
 import { leagueOfTeamIn } from "../competition/promotion";
 import { derbyNameOf, derbyOf } from "../data/derbies";
@@ -596,7 +602,30 @@ function seasonEndFacts(state: GameState): PressFact[] {
     about: null,
     sharp: false,
   });
+  facts.push(...awardFacts(state));
   return facts;
+}
+
+// ── 지난 시즌의 상 (season.md §6) ─────────────────────
+
+/** 한 회견이 싣는 상의 수 — 셋을 실으면 그 자리가 시상식이 된다 (people.md §4) */
+const AWARD_FACTS_SHOWN = 2;
+
+/**
+ * 지금 우리 선수단이 **가장 최근에 매겨진 시즌**에 받은 상 — 개막 전야와 시즌
+ * 최종전이 같은 함수를 쓴다 (season.md §6 「상이 사실로 서는 자리」).
+ * 어느 셔츠로 받았는지는 묻지 않는다.
+ *
+ * ⚠️ **명단 배열 순서로 자르지 않는다** — 영입·은퇴가 배열을 흔들면 같은 세이브가
+ * 다른 두 장을 싣는다. `id`로 한 겹 정렬해 자르는 자리를 결정적으로 만든다.
+ */
+function awardFacts(state: GameState): PressFact[] {
+  return playersOf(state, state.userTeamId)
+    .map((p) => p.id)
+    .sort()
+    .flatMap((id) => lastSeasonAwardsOf(state, id))
+    .slice(0, AWARD_FACTS_SHOWN)
+    .map((a) => awardFact(a, { named: true }));
 }
 
 /**
@@ -1482,6 +1511,7 @@ function buildOpeningPress(
   }
   const inherited = summerNumberInheritance(state);
   if (inherited) facts.push(inherited);
+  facts.push(...awardFacts(state));
 
   return {
     id: `press-opening-${state.season}`,

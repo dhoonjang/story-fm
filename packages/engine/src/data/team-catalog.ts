@@ -1341,7 +1341,13 @@ export const TEAM_CATALOG_SEED: readonly TeamCatalogEntry[] = TEAM_SEED_BASE.map
   return honours ? { ...team, honours } : team;
 });
 
-/** tier별 능력치 기준선 (overall 평균 어림) */
+/**
+ * tier별 능력치 기준선 (overall 평균 어림).
+ *
+ * 두 자리가 읽는다: 실선수 시드가 없는 스쿼드의 절차 생성(team.md §4)과 **유스
+ * 인테이크의 천장**(`world/generate.ts` — season.md §6). 뒤쪽에서 이 값은 실력이
+ * 아니라 천장이다 — 유스는 여기서 나이가 정한 여지만큼 내려온 자리에 선다.
+ */
 export const TIER_BASE: Record<1 | 2 | 3 | 4, number> = {
   1: 84,
   2: 80,

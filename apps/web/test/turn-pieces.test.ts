@@ -7,6 +7,7 @@ import {
   splitStaging,
   weaveTurn,
 } from "../lib/turn-pieces";
+import { buildPlayerNameIndex, splitPlayerNames } from "../lib/player-names";
 import { mergeSlice } from "../lib/game-slice";
 import { chatForActiveMatch } from "../lib/match-chat";
 import { buildTraceIndex } from "../lib/turn-trace-index";
@@ -662,5 +663,138 @@ describe("previewLine", () => {
 
   it("길면 자른다 — 줄 하나로 서는 자리다", () => {
     expect(previewLine("가".repeat(200), 10)).toBe(`${"가".repeat(10)}…`);
+  });
+});
+
+/**
+ * 산문의 이름을 손잡이로 — **규칙이 한 벌이어야 한다** (player.md §9.5).
+ * 서버가 사전에 무엇을 실을지 고르는 자와 화면이 문장을 가르는 자가 같은 함수다.
+ */
+describe("splitPlayerNames", () => {
+  const index = buildPlayerNameIndex({
+    "a-sener-lamens": "세너 라먼스",
+    "b-kim": "김민재",
+    "c-park-lamens": "박 라먼스",
+    "d-son": "손흥민",
+  });
+
+  it("전체 이름이 서면 성으로 다시 자르지 않는다", () => {
+    expect(splitPlayerNames("세너 라먼스가 뛴다", index)).toEqual([
+      { text: "세너 라먼스", playerId: "a-sener-lamens" },
+      { text: "가 뛴다" },
+    ]);
+  });
+
+  it("조사는 이름 밖이다", () => {
+    expect(splitPlayerNames("김민재는 남고 손흥민을 뺀다", index)).toEqual([
+      { text: "김민재", playerId: "b-kim" },
+      { text: "는 남고 " },
+      { text: "손흥민", playerId: "d-son" },
+      { text: "을 뺀다" },
+    ]);
+  });
+
+  it("성이 둘이면 손잡이가 서지 않는다 — 어느 쪽인지 모른다", () => {
+    expect(splitPlayerNames("라먼스가 넣었다", index)).toEqual([{ text: "라먼스가 넣었다" }]);
+  });
+
+  /**
+   * 실 세이브에서 「브루누」가 브루누 페르난데스의 **이름**이면서 카이키 브루누의
+   * **성**이었다 — 성만 담으면 절반이 틀린 카드를 연다.
+   */
+  it("이름과 성이 겹치면 어느 쪽도 걸지 않는다", () => {
+    const brunos = buildPlayerNameIndex({
+      "bruno-fernandes": "브루누 페르난데스",
+      "kaiki-bruno": "카이키 브루누",
+    });
+    expect(splitPlayerNames("브루누와 이야기했다", brunos)).toEqual([
+      { text: "브루누와 이야기했다" },
+    ]);
+    // 겹치지 않는 낱말은 그대로 선다 — 성이든 이름이든
+    expect(splitPlayerNames("페르난데스가 말했다", brunos)[0]).toEqual({
+      text: "페르난데스",
+      playerId: "bruno-fernandes",
+    });
+    expect(splitPlayerNames("카이키가 말했다", brunos)[0]).toEqual({
+      text: "카이키",
+      playerId: "kaiki-bruno",
+    });
+  });
+
+  /**
+   * 두 글자 낱말은 한국어의 흔한 낱말과 겹친다 — 조사 표로도 못 막는다
+   * (「하지만」의 「만」은 진짜 조사다). 아예 걸지 않는 것이 규칙이다.
+   */
+  it("두 글자 낱말은 손잡이가 되지 않는다", () => {
+    const short = buildPlayerNameIndex({
+      "samuel-gigot": "사뮈엘 지고",
+      "alex-toth": "알렉스 토트",
+    });
+    expect(splitPlayerNames("점수가 지고 있다", short)).toEqual([{ text: "점수가 지고 있다" }]);
+    expect(splitPlayerNames("토트넘으로 지불되었고", short)).toEqual([
+      { text: "토트넘으로 지불되었고" },
+    ]);
+    // 전체 이름은 이 문턱을 지나지 않는다
+    expect(splitPlayerNames("사뮈엘 지고가 나선다", short)[0]).toEqual({
+      text: "사뮈엘 지고",
+      playerId: "samuel-gigot",
+    });
+  });
+
+  it("성만 부른 이름도 사전 안에서 유일하면 선다", () => {
+    const one = buildPlayerNameIndex({ "a-sener-lamens": "세너 라먼스" });
+    expect(splitPlayerNames("라먼스가 넣었다", one)).toEqual([
+      { text: "라먼스", playerId: "a-sener-lamens" },
+      { text: "가 넣었다" },
+    ]);
+  });
+
+  it("앞이 한글이면 이름이 아니다 — 다른 이름의 꼬리를 자르지 않는다", () => {
+    expect(splitPlayerNames("이김민재라는 사람", index)).toEqual([{ text: "이김민재라는 사람" }]);
+  });
+
+  /**
+   * 두 글자 성은 흔한 낱말의 앞머리이기도 하다 — 실 세이브에서 「알렉스 토트」의
+   * 성이 「토트넘」을 물었다. 조사 표에 없는 꼬리는 이름이 아닌 쪽으로 판정한다.
+   */
+  it("이름 뒤가 조사가 아니면 이름이 아니다", () => {
+    const dier = buildPlayerNameIndex({ "eric-dier": "에릭 다이어" });
+    expect(splitPlayerNames("다이어트를 시켰다", dier)).toEqual([{ text: "다이어트를 시켰다" }]);
+    // 조사가 붙으면 그 사람이다
+    expect(splitPlayerNames("다이어가 나선다", dier)).toEqual([
+      { text: "다이어", playerId: "eric-dier" },
+      { text: "가 나선다" },
+    ]);
+    // 서술격 어미도 조사다 — 「발레바군요」의 그는 발레바다
+    const baleba = buildPlayerNameIndex({ "carlos-baleba": "카를로스 발레바" });
+    expect(splitPlayerNames("브라이튼의 카를로스 발레바군요", baleba)).toEqual([
+      { text: "브라이튼의 " },
+      { text: "카를로스 발레바", playerId: "carlos-baleba" },
+      { text: "군요" },
+    ]);
+  });
+
+  /** 가른 조각을 도로 이으면 원문이다 — 손잡이가 글자를 먹으면 이야기가 깨진다 */
+  it("조각을 이으면 원문 그대로다", () => {
+    const text = "첫째, 세너 라먼스가 토트넘으로 떠나고 김민재는 남는다 (손흥민 · 라먼스).";
+    expect(
+      splitPlayerNames(text, index)
+        .map((p) => p.text)
+        .join(""),
+    ).toBe(text);
+  });
+
+  it("사전에 없는 이름은 글자 그대로다", () => {
+    expect(splitPlayerNames("홀란드가 넣었다", index)).toEqual([{ text: "홀란드가 넣었다" }]);
+  });
+
+  it("id 토큰 한복판은 이름이 아니다", () => {
+    const latin = buildPlayerNameIndex({ "arsenal-raya": "raya" });
+    expect(splitPlayerNames("arsenal-raya-2", latin)).toEqual([{ text: "arsenal-raya-2" }]);
+  });
+
+  it("동명이인은 어느 쪽도 걸지 않는다", () => {
+    const twins = buildPlayerNameIndex({ "a-kim": "김민재", "b-kim": "김민재" });
+    expect(splitPlayerNames("김민재가 뛴다", twins)).toEqual([{ text: "김민재가 뛴다" }]);
   });
 });
