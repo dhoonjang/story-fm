@@ -1479,7 +1479,7 @@ mock 진행(경질·계약 만료 없이 `keepSeat` — 보드가 인내하고, 
 | 9   | GM 도구 `get_finance` · `apply_finance_event` · `set_ticket_price` | `agents/skill-descriptions.ts` · `agents/gm-tools.ts`                        |
 | 10  | 보드 요청 접수·판정·반영 (§9.6)                                    | `club/board-request.ts` (+ `packages/domain/src/board-request.ts`)           |
 | 10a | 감독 지갑 입출금·사재 지출 (§9.7)                                  | `club/manager-wallet.ts` (+ `packages/domain/src/manager.ts`)                |
-| 10b | 명명 스태프 연봉·풀·고용·해고 (§6.4-1)                             | `market/staff-market.ts` (+ `packages/domain/src/persona.ts`)                |
+| 10b | 명명 스태프 — 풀·고용·해고·위약금 (§6.4-1)                         | `market/staff-market.ts` · 연봉 표는 `world/persona.ts` (`staffSalaryOf`)    |
 | 11  | 테스트                                                             | `packages/engine/test/finance.test.ts` · `test/cues.test.ts`                 |
 
 경로는 `packages/engine/src/` 기준이다.

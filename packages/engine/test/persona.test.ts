@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   PersonaSchema,
   HEAD_COACH_ROLE_LABEL,
+  STAFF_ROLES,
   normalizeSpeaker,
   byLoyalty,
   PLAYER_ARCHETYPE_KEYS,
@@ -32,10 +33,17 @@ import {
 import {
   applyCharacterMemories,
   CHARACTER_MEMORY_KEEP,
+  factSpeakerOf,
+  generateStaff,
   generateVirtualManager,
+  headCoachSalaryOf,
   MANAGER_ARCHETYPE_LABELS,
   personaKeywords,
   registerCharacters,
+  reseatClubPersonas,
+  staffOf,
+  staffSalaryOf,
+  STAFF_OPENINGS,
   type CharacterDraft,
 } from "../src/world/persona";
 import { ensureSeededManagers } from "../src/core/state";
@@ -370,6 +378,101 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
 });
 
 /**
+ * 스태프 — **구단이 고용한 사람들** (people.md §2-2). 여기서 재는 것은 생성이
+ * 결정적인가와 고용 정보가 사실을 제대로 드는가다. 화면에 바로 드러나는 것(직책 칩·
+ * 스태프 줄)은 깨지는 순간 보이므로 케이스를 두지 않는다 (AGENTS.md §5).
+ */
+describe("스태프 — 고용 정보를 든 인물 (people.md §2-2)", () => {
+  const START = "2026-07-01";
+
+  it("시작 인원은 코치 둘 · 의료진 하나 · 스카우트 하나다", () => {
+    const staff = generateStaff(42, "arsenal", START);
+    for (const role of STAFF_ROLES) {
+      expect(
+        staff.filter((p) => p.role === role),
+        role,
+      ).toHaveLength(STAFF_OPENINGS[role]);
+    }
+    // 스키마를 통과해야 세이브에 들어간다 — 고용 정보가 붙은 페르소나도 같은 문이다
+    for (const persona of staff) expect(PersonaSchema.safeParse(persona).success).toBe(true);
+  });
+
+  it("같은 시드·같은 구단은 같은 사람이고, 구단이 다르면 다른 사람이다", () => {
+    expect(generateStaff(42, "arsenal", START)).toEqual(generateStaff(42, "arsenal", START));
+    expect(generateStaff(42, "arsenal", START).map((p) => p.name)).not.toEqual(
+      generateStaff(42, "chelsea", START).map((p) => p.name),
+    );
+  });
+
+  it("한 역할 안에서 원형이 겹치지 않는다 — 피지컬 코치 둘은 구분할 수 없다", () => {
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+      const coaches = generateStaff(seed, "arsenal", START).filter((p) => p.role === "coach");
+      const titles = coaches.map((p) => p.employment!.title);
+      expect(new Set(titles).size, `시드 ${seed}`).toBe(titles.length);
+    }
+  });
+
+  it("이름은 수석코치·구단주·기자와 겹치지 않는다 — 태그는 전역 유일이다", () => {
+    const state = createTestGame(42);
+    const names = (state.personas ?? []).map((p) => p.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("부임일은 감독보다 앞서고 계약은 6월 30일에 끝난다", () => {
+    for (const persona of generateStaff(42, "arsenal", START)) {
+      const employment = persona.employment!;
+      expect(employment.since < START).toBe(true);
+      expect(employment.contract.until.slice(5)).toBe("06-30");
+      expect(employment.contract.until > START).toBe(true);
+      expect(employment.teamId).toBe("arsenal");
+    }
+  });
+
+  it("연봉은 구단의 살림을 탄다 — 큰 구단의 코치가 작은 구단의 코치보다 받는다", () => {
+    // 리그 축(2부)과 등급 축(같은 리그 안)이 둘 다 걸린다 (people.md §2-2)
+    expect(staffSalaryOf("arsenal", "coach")).toBeGreaterThan(staffSalaryOf("leeds", "coach"));
+    // 자리마다 값이 다르고, 수석코치는 코치의 두 배다
+    expect(staffSalaryOf("arsenal", "coach")).toBeGreaterThan(staffSalaryOf("arsenal", "scout"));
+    expect(headCoachSalaryOf("arsenal")).toBe(staffSalaryOf("arsenal", "coach") * 2);
+  });
+
+  it("수석코치도 고용 정보를 든다 — 없던 세이브는 로드가 채운다", () => {
+    const state = createTestGame(42);
+    expect(headCoachOf(state).employment?.title).toBe(HEAD_COACH_ROLE_LABEL);
+    const coach = state.personas!.find((p) => p.role === "head_coach")!;
+    delete coach.employment;
+    ensurePersonas(state);
+    expect(headCoachOf(state).employment?.contract.salary).toBe(
+      headCoachSalaryOf(state.userTeamId),
+    );
+  });
+
+  it("스태프는 구단의 사람이라 부임하면 갈린다 — 옛 구단의 사람은 따라오지 않는다", () => {
+    const state = createTestGame(42);
+    const before = staffOf(state).map((p) => p.name);
+    reseatClubPersonas(state, "chelsea", { crossedLeague: false });
+    const after = staffOf(state);
+    expect(after.map((p) => p.name)).not.toEqual(before);
+    expect(after.every((p) => p.employment?.teamId === "chelsea")).toBe(true);
+    // 자리는 그대로 채워진다 — 새 구단에도 코치 둘·의료진·스카우트가 이미 서 있다
+    for (const role of STAFF_ROLES) {
+      expect(staffOf(state, role), role).toHaveLength(STAFF_OPENINGS[role]);
+    }
+  });
+
+  it("화자 표 — 갈래마다 그 역할의 사람이 서고, 자리가 비면 수석코치가 선다", () => {
+    const state = createTestGame(42);
+    expect(factSpeakerOf(state, "medical").role).toBe("medic");
+    expect(factSpeakerOf(state, "scouting").role).toBe("scout");
+    expect(factSpeakerOf(state, "training").role).toBe("coach");
+    expect(factSpeakerOf(state, "coach_eye").role).toBe("head_coach");
+    // 의료진을 자른 세이브 — 부상 줄은 여전히 서야 하므로 수석코치가 대신 선다
+    state.personas = (state.personas ?? []).filter((p) => p.role !== "medic");
+    expect(factSpeakerOf(state, "medical").role).toBe("head_coach");
+  });
+});
+
+/**
  * 기자단 — 회견은 **세계가 먼저 부르는 자리**라, 부를 사람이 세이브에 있어야 한다.
  * 없으면 GM이 즉흥으로 지어내 매번 다른 기자가 묻는다.
  */
@@ -690,19 +793,11 @@ describe("가상 감독 — 명부 밖 벤치의 사람 (people.md §2)", () => 
     const state = createTestGame();
     // 새 게임이 열어 둔 부임 회견의 기자가 한 턴 상한을 함께 다툰다 (people.md §4·§6)
     state.pressConferences = [];
-    /**
-     * **이름 조각이 우리 사람과 겹치지 않는 벤치를 고른다.** 키워드는 이름 조각까지
-     * 담으므로(`personaKeywords`), 우리 코치와 성이 같은 감독을 고르면 한 턴 3장을
-     * 우리 사람이 먼저 채운다 — 그건 이 케이스가 재려는 것이 아니라 `near` 규칙이
-     * 제대로 도는 증거다 (people.md §6).
-     */
-    const ourWords = new Set((state.personas ?? []).flatMap((p) => p.name.split(/\s+/u)));
     const bench = state.teams.find(
       (t) =>
         t.id !== state.userTeamId &&
         t.managerName !== undefined &&
-        worldFigureManagerOf(t.id) === null &&
-        !t.managerName.split(/\s+/u).some((w) => ourWords.has(w)),
+        worldFigureManagerOf(t.id) === null,
     )!;
     const name = bench.managerName!;
     // 화면이 붙일 직책 — 명부 감독과 같은 자리다
@@ -721,10 +816,17 @@ describe("가상 감독 — 명부 밖 벤치의 사람 (people.md §2)", () => 
  * 자리마다 다른 규칙이 생기지 않는다.
  */
 describe("페르소나 키워드", () => {
-  it("이름과 이름 조각이 키워드가 된다 — 두 글자 미만은 되지 못한다", () => {
+  it("전체 이름과 성이 키워드가 된다 — 이름 조각은 담지 않는다", () => {
     const keywords = personaKeywords({ name: "스티브 홀랜드", role: "player" });
     expect(keywords).toContain("스티브 홀랜드");
     expect(keywords).toContain("홀랜드");
+    /**
+     * **given은 담지 않는다** — 인물 풀은 given 열여섯 × family 열여섯이라, 한 세이브의
+     * 열일곱 명(구단 아홉 + 무직 풀 여덟)이 그 열여섯을 나눠 갖는다. given을 담으면
+     * 감독이 「스티브」 한 사람을 부른 턴에 같은 given의 셋이 함께 서서 한 턴 상한
+     * 3장을 조각이 통째로 먹는다 (people.md §6 · 가상 감독이 이미 지키던 규칙).
+     */
+    expect(keywords).not.toContain("스티브");
     // 중복도 한 글자도 남지 않는다
     expect(new Set(keywords).size).toBe(keywords.length);
     expect(personaKeywords({ name: "박 지", role: "player" })).toEqual(["박 지"]);

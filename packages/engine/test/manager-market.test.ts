@@ -29,6 +29,7 @@ import {
   generateHeadCoach,
   generateOwner,
   generateReporters,
+  headCoachOf,
   isTopFlight,
   leagueOfTeamIn,
   MANAGER_WALLET,
@@ -61,6 +62,13 @@ import {
   reviewManagerContract,
   reviewUserSeat,
   runManagerMarket,
+  ensureStaffPool,
+  refreshStaffPool,
+  releaseStaff,
+  hireStaff,
+  renewStaffContracts,
+  staffOf,
+  STAFF_LIMIT,
   scoutPlayer,
   sendOffer,
   setTraining,
@@ -1793,5 +1801,101 @@ describe("재직 중에도 다른 구단이 손을 뻗는다", () => {
     // 같은 임기에 같은 문을 두 번 두드릴 수는 없다
     const again = applyForManagerJob(state, "fulham");
     expect(again.ok).toBe(false);
+  });
+});
+
+/**
+ * 스태프 시장 — **감독 풀과 같은 패턴이되 부르는 쪽이 감독뿐이다** (people.md §2-2).
+ *
+ * 여기서 재는 것은 상태 전이(풀 → 명단 → 풀)와 위약금이다. 값은 조용히 어긋나고
+ * 어긋난 채 오래 산다 (AGENTS.md §5).
+ */
+describe("스태프 시장 — 고용과 해고 (people.md §2-2)", () => {
+  /** 풀은 읽는 자리가 채운다 — 새 게임은 `undefined`로 선다 (`GameState.staffPool`) */
+  const poolOf = (state: GameState, role: "coach" | "medic" | "scout") => {
+    ensureStaffPool(state);
+    return (state.staffPool ?? []).filter((e) => e.role === role);
+  };
+
+  it("요구 연봉 이상이면 그 자리에서 계약된다 — 흥정 테이블이 없다", () => {
+    const state = createTestGame(42);
+    const entry = poolOf(state, "coach")[0]!;
+    const before = staffOf(state, "coach").length;
+
+    // 요구액 아래는 그 자리에서 거절된다 — 되부르기가 없다
+    expect(hireStaff(state, { name: entry.name, salary: entry.ask - 1 }).ok).toBe(false);
+    expect(staffOf(state, "coach")).toHaveLength(before);
+
+    expect(hireStaff(state, { name: entry.name, salary: entry.ask }).ok).toBe(true);
+    const hired = staffOf(state, "coach").find((p) => p.name === entry.name)!;
+    expect(hired.employment?.contract.salary).toBe(entry.ask);
+    expect(hired.employment?.teamId).toBe(state.userTeamId);
+    // 풀에서 빠진다 — 두 구단이 한 사람을 쓸 수 없다
+    expect((state.staffPool ?? []).some((e) => e.name === entry.name)).toBe(false);
+  });
+
+  it("자리가 다 차면 더 못 앉힌다 — 훈련장의 자리는 유한하다", () => {
+    const state = createTestGame(42);
+    for (const entry of [...poolOf(state, "coach")]) {
+      hireStaff(state, { name: entry.name, salary: entry.ask });
+    }
+    expect(staffOf(state, "coach").length).toBe(STAFF_LIMIT.coach);
+    const left = poolOf(state, "coach")[0];
+    if (left) expect(hireStaff(state, { name: left.name, salary: left.ask }).ok).toBe(false);
+  });
+
+  it("해고는 잔여 계약의 위약금을 무는 지출이고, 자른 사람은 그해 풀에 앉는다", () => {
+    const state = createTestGame(42);
+    const medic = staffOf(state, "medic")[0]!;
+    const employment = medic.employment!;
+    const expected = managerSeveranceOf(employment.contract, state.date);
+    expect(expected).toBeGreaterThan(0);
+    const before = financeOf(state, state.userTeamId).balance;
+
+    expect(releaseStaff(state, { name: medic.name }).ok).toBe(true);
+    expect(staffOf(state, "medic")).toHaveLength(0);
+    expect(financeOf(state, state.userTeamId).balance).toBe(before - expected);
+    // 그해 안에는 마음을 되돌릴 수 있다 — 자른 사람이 풀 맨 앞에 앉는다
+    const listed = (state.staffPool ?? []).find((e) => e.name === medic.name)!;
+    expect(listed.from).toBe(state.userTeamId);
+    expect(listed.listedOn).toBe(state.season);
+  });
+
+  it("우리 사람이 아닌 이름은 자를 수 없다", () => {
+    const state = createTestGame(42);
+    expect(releaseStaff(state, { name: "없는 사람" }).ok).toBe(false);
+    // 수석코치는 이 명령이 다루지 않는다 — 그 자리가 비면 감독 옆에 아무도 없다
+    expect(releaseStaff(state, { name: headCoachOf(state).name }).ok).toBe(false);
+  });
+
+  it("여름 갱신은 그해 자른 사람만 남기고 다시 세운다", () => {
+    const state = createTestGame(42);
+    const scout = staffOf(state, "scout")[0]!;
+    releaseStaff(state, { name: scout.name });
+    const drawn = (state.staffPool ?? []).filter((e) => e.from === undefined).map((e) => e.name);
+
+    refreshStaffPool(state, state.season + 1);
+    // 자른 사람은 한 시즌 더 앉아 있고, 추첨으로 섰던 줄은 새 시즌의 것으로 갈린다
+    expect((state.staffPool ?? []).some((e) => e.name === scout.name)).toBe(true);
+    expect(
+      (state.staffPool ?? []).filter((e) => e.from === undefined).map((e) => e.name),
+    ).not.toEqual(drawn);
+
+    refreshStaffPool(state, state.season + 2);
+    // 다음 여름이면 그는 다른 구단으로 갔다
+    expect((state.staffPool ?? []).some((e) => e.name === scout.name)).toBe(false);
+  });
+
+  it("만료된 계약은 같은 조건으로 갱신된다 — 의무실이 조용히 비지 않는다", () => {
+    const state = createTestGame(42);
+    const medic = staffOf(state, "medic")[0]!;
+    const salary = medic.employment!.contract.salary;
+    const after = addDays(medic.employment!.contract.until, 1);
+
+    expect(renewStaffContracts(state, after)).toContain(medic.name);
+    expect(medic.employment!.contract.until > after).toBe(true);
+    expect(medic.employment!.contract.salary).toBe(salary);
+    // 만료가 남은 계약은 건드리지 않는다
+    expect(renewStaffContracts(state, state.date)).not.toContain(medic.name);
   });
 });

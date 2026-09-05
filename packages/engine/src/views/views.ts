@@ -31,6 +31,7 @@ import {
   BOARD_REQUEST_LABEL,
   SET_PIECE_ROLES,
   SET_PIECE_ROUTINE_KEYS,
+  STAFF_ROLES,
   VISION_CODE_KO,
   boardConditionAmountText,
   boardExpectationText,
@@ -42,6 +43,7 @@ import {
   normalizePacket,
   packetTagContext,
   packetTagText,
+  personaRoleLabel,
   setPieceRoutineLevel,
   subCauseText,
 } from "@story-fm/domain";
@@ -172,9 +174,12 @@ import type {
   SetPieceRole,
   SetPieceRoutineKey,
   SetPieceRoutineLevel,
+  Persona,
   SetPieceTakers,
+  StaffRole,
   TacticAssignment,
 } from "@story-fm/domain";
+import { headCoachOf, staffOf } from "../world/persona";
 import { listingOf } from "../market/negotiation";
 import { openManagerOffers, USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../commands";
@@ -577,6 +582,29 @@ export interface YouthIntakeView {
   /** 감독의 답을 기다리는 마지막 날 = 선수단 소집일 */
   deadline: string;
   candidates: YouthCandidateView[];
+}
+
+/**
+ * **스태프 한 줄** — 구단이 고용한 사람 (people.md §2-2). 감독이 훈련장·의무실에서
+ * 매일 마주하는 사람들이고, 명단 행이 아니라 제 구획에 선다: 부릴 수 있는 인원이
+ * 아니다.
+ *
+ * ⚠️ **코어는 사실만 낸다** — 「부임 2년째」는 화면이 오늘과 `since`로 만든다
+ * (overview.md §1 철칙 4). 고용 정보가 없는 옛 세이브는 날짜 칸이 null이다.
+ */
+export interface StaffMemberView {
+  /** 이름 = `characterId` — 채팅에서 그를 부르는 그 이름이다 (people.md §1) */
+  name: string;
+  /** 자리 — 화면의 아이콘이 `speakerRoles`의 `kind`와 **같은 표**를 보고 고른다 */
+  role: "head_coach" | StaffRole;
+  /** 이름 옆의 직책 — 「피지컬 코치」. 역할 라벨(「코치」)보다 좁다 */
+  title: string;
+  /** 원형 한 낱말 — 같은 자리라도 어떤 결의 사람인가 */
+  archetype: string;
+  /** 부임일 — 감독보다 앞설 수 있다 (people.md §2-2) */
+  since: string | null;
+  /** 계약 만료일 — 시즌 단위로 끝난다 */
+  until: string | null;
 }
 
 export type SquadViewRow = SquadViewRowMeta & AxisValues;
@@ -1643,6 +1671,12 @@ export interface OfficeViews {
      * 참값을 그리면 안개가 뚫린다.
      */
     youthIntake: YouthIntakeView | null;
+    /**
+     * **구단이 고용한 사람들** — 수석코치·코치·의료진·스카우트 (people.md §2-2).
+     * 선수단 화면에 서는 이유는 이들이 감독이 매일 마주하는 사람이어서다: 훈련장에
+     * 수석코치 혼자 서 있는 화면은 세계에 셋이 없다는 뜻이었다.
+     */
+    staff: StaffMemberView[];
   };
   calendar: {
     today: string;
@@ -2959,6 +2993,30 @@ function boardView(state: GameState): OfficeViews["finance"]["board"] {
 }
 
 /**
+ * 스태프 구획 — **수석코치가 맨 앞이고 그다음이 코치·의료진·스카우트다.** 사람이
+ * 읽는 순서이고, `staffOf`의 저장 순서가 아니다: 세이브에 담긴 차례는 생성 순서라
+ * 감독이 그 판을 볼 이유가 없다.
+ *
+ * 수석코치는 자리가 비지 않는다 (`headCoachOf`가 옛 세이브에서도 시드로 세운다).
+ * 자른 자리는 그냥 줄이 하나 없다 — 빈 칸을 세우지 않는다.
+ */
+function staffViews(state: GameState): StaffMemberView[] {
+  const rows: Array<{ persona: Persona; role: StaffMemberView["role"] }> = [
+    { persona: headCoachOf(state), role: "head_coach" },
+    ...STAFF_ROLES.flatMap((role) => staffOf(state, role).map((persona) => ({ persona, role }))),
+  ];
+  return rows.map(({ persona, role }) => ({
+    name: persona.name,
+    role,
+    // 고용 정보가 없는 옛 세이브는 역할 라벨로 선다 — 화자 칩(`speakerRoles`)과 같은 폴백이다
+    title: persona.employment?.title ?? personaRoleLabel(role) ?? role,
+    archetype: persona.archetype,
+    since: persona.employment?.since ?? null,
+    until: persona.employment?.contract.until ?? null,
+  }));
+}
+
+/**
  * 유스 후보 구획 — **안개는 조회·GM 스냅샷과 같은 함수를 지난다**
  * (`youthCandidateFog`). 화면이 참값을 그리면 같은 후보가 두 숫자로 갈린다.
  */
@@ -3744,6 +3802,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         ]),
       ) as Record<SetPieceRoutineKey, SetPieceRoutineLevel>,
       youthIntake: youthIntakeView(state),
+      staff: staffViews(state),
     },
     calendar: {
       today: state.date,

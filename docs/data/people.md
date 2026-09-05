@@ -74,7 +74,7 @@ Employment {          // 수석코치 · 코치 · 의료진 · 스카우트 (�
   **감독이 실제로 마주 앉는 얼굴**을 적는다(맨유 = 랫클리프). 감독 시장의 후임
   감독 이름도 같은 풀을 쓴다 (`inventPersonName`).
 - **한 팀 안에서는 이름만으로 사람이 갈린다.** 지어낸 이름은 나라별 풀
-  (`data/names.ts`)에서 뽑되 **그 팀에 이미 있는 이름이면 같은 시드로 다시
+  (`data/names.ts` — given·family 각 열둘\~열여섯, 잉글랜드가 가장 넓다)에서 뽑되 **그 팀에 이미 있는 이름이면 같은 시드로 다시
   뽑는다** — 인물 다섯(수석코치·구단주·기자 3인)도, 절차 생성 선수도
   (`world/catalog.ts` · `world/generate.ts`) 같은 규칙이다. 재추첨에는 상한이
   있고, 닿으면 남은 조합을 결정적으로 훑는다 — 같은 시드는 언제나 같은 명단이다.
@@ -1395,10 +1395,15 @@ CB에서 ST로 올린 것이 다른 일이기 때문이다.
 ### 인물 사전에 있는 것
 
 - **화자** — 페르소나가 있는 사람 전부. 선수도 포함된다.
-- **키워드** — 이름, 이름 조각, 직책어, 소속 매체, 역할어("구단주" · "이적" ·
+- **키워드** — **전체 이름과 성**, 직책어, 소속 매체, 역할어("구단주" · "이적" ·
   "회견"). ⚠️ **명시적으로 나열한 것만 본다.** 성만 쓴 "홀란드"를 같은 사람으로 보는
   부분 일치는 오탐을 만든다는 §1의 원칙(`normalizeSpeaker`)이 여기도 그대로다 —
   별칭이 필요하면 키워드로 적는다. 두 글자 미만은 키워드가 되지 못한다.
+  ⚠️ **이름 조각을 전부 담지는 않는다** — given은 빠진다. 인물 이름 풀은 나라마다
+  given 열둘~~열여섯 × family 열둘~~열여섯이고 한 세이브가 이름 지을 사람은 열일곱이라
+  (구단 아홉 + 무직 스태프 풀 여덟), given을 담으면 감독이 한 사람을 부른 턴에 같은
+  given의 셋이 함께 서서 한 턴 상한 3장을 조각이 통째로 먹는다. 가상 감독이 처음부터
+  지키던 규칙이고(§2 「가상 감독」), 이제 저장 인물도 같은 규칙이다.
 - **인물지** — 성격·동기·말투·예시 대사·관계. 코어가 조립하는 것은 **구조**이고
   (`characterEntry`), 문장으로 옮기는 것은 프롬프트의 몫이다.
 - **관계는 점수다** — 원형이 깐 첫인상 위로 **사건이 오르내리게 한다**(`world/relations.ts`).
@@ -2294,8 +2299,8 @@ title? }` — 세이브에 남고(옛 세이브는 빈 배열), **개폐는 전�
 | 실명 시드 (코치·구단주)                               | `packages/engine/src/data/coach-seeds.ts` · `owner-seeds.ts`                                               |
 | 세계 인물 명부 (타 팀 감독·에이전트·해설)             | `packages/engine/src/data/world-figures.ts`                                                                |
 | 인물 사전 (키워드 판정 · 인물지 조립 · 선수 페르소나) | `packages/engine/src/world/people-directory.ts`                                                            |
-| 스태프 원형 표 · 생성 · 연봉 · 화자 표               | `packages/engine/src/world/persona.ts`                                                                     |
-| 스태프 풀 · 고용·해고 · 위약금                       | `packages/engine/src/market/staff-market.ts`                                                               |
+| 스태프 원형 표 · 생성 · 연봉 · 화자 표                | `packages/engine/src/world/persona.ts`                                                                     |
+| 스태프 풀 · 고용·해고 · 위약금                        | `packages/engine/src/market/staff-market.ts`                                                               |
 | 인물 카드 → 프롬프트 (이번 턴 층 · 이력)              | `packages/agents/src/gm-input.ts` (`describePersona`)                                                      |
 | 장면을 여는 사람 규칙 · 철칙                          | `packages/agents/src/gm-prompt.ts`                                                                         |
 | 기자회견 (사실 카드 스키마 · 스탠스 효과)             | `packages/domain/src/press.ts` · `packages/engine/src/club/press.ts`                                       |

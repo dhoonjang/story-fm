@@ -129,7 +129,8 @@ export const PersonaSchema = z.object({
    *
    * ⚠️ **나열된 것만 본다.** 성만 쓴 "홀란드"를 같은 사람으로 보는 부분 일치는 오탐을
    * 만든다는 `normalizeSpeaker`의 원칙이 여기도 그대로다 — 별칭이 필요하면 여기 적는다.
-   * 옛 세이브엔 없다 (optional) — 로드가 채운다.
+   * 담기는 것은 **전체 이름과 성**이고 given은 빠진다 (people.md §6 — 이름 풀이 좁아
+   * 같은 given을 가진 셋이 한 턴 상한을 먹는다). 옛 세이브엔 없다 (optional) — 로드가 채운다.
    */
   keywords: z.array(z.string().min(1)).optional(),
   /**

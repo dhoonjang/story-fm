@@ -73,11 +73,22 @@ const ROLE_KEYWORDS: Partial<Record<PersonaRole, readonly string[]>> = {
   scout: ["스카우트"],
 };
 
-/** 이 인물이 불렸다고 볼 말들 — 이름 · 이름 조각 · 자리를 부르는 말 · 소속 매체 */
+/**
+ * 이 인물이 불렸다고 볼 말들 — **전체 이름 · 성 · 자리를 부르는 말 · 소속 매체**.
+ *
+ * ⚠️ **이름 조각을 전부 담지 않는다.** 가상 감독이 이미 지키던 규칙이다
+ * (`generateVirtualManager`) — 인물 이름 풀은 given 여덟 × family 여덟이라, 이름을
+ * 통째로 쪼개 담으면 한 세이브의 열일곱 명이 여덟 개의 given을 나눠 갖는다. 그러면
+ * 감독이 「제임스」 한 사람을 부른 턴에 같은 given을 가진 셋이 함께 서고, 한 턴 상한
+ * 3장을 그 조각이 통째로 먹는다. 성은 자리가 하나뿐인 사람들 사이에서 훨씬 덜 겹치고,
+ * 겹쳐도 `speakerRoles`·인물 사전이 이미 동명이인을 다루는 자리가 있다.
+ */
 export function personaKeywords(persona: Pick<Persona, "name" | "role" | "outlet">): string[] {
+  const parts = persona.name.split(/\s+/u);
+  const surname = parts[parts.length - 1] ?? "";
   const candidates = [
     persona.name,
-    ...persona.name.split(/\s+/u),
+    ...(surname !== persona.name ? [surname] : []),
     ...(persona.outlet !== undefined ? [persona.outlet] : []),
     ...(ROLE_KEYWORDS[persona.role] ?? []),
   ];

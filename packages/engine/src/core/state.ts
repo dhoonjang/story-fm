@@ -804,7 +804,13 @@ export interface GameState {
    *
    * 감독 풀과 달리 **여름의 결정적 추첨이 채운다** — 세계가 스태프를 자르지 않기
    * 때문이다(AI 구단엔 명명 스태프가 없다). 그 시즌에 감독이 자른 사람만 사건으로
-   * 들어온다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 들어온다.
+   *
+   * ⚠️ **새 게임도 `undefined`로 선다** — 빈 배열이 아니다. 추첨이 이미 선 사람들의
+   * 이름을 피해야 하는데(`occupiedPersonNames`), `createGame`이 스태프 시장을 값으로
+   * 부르면 `core/state`와 `market/staff-market`이 서로를 import한다. 풀을 읽는 자리가
+   * `ensureStaffPool`을 먼저 부르므로 결과는 같고, **빈 배열은 「다 데려갔다」는
+   * 다른 뜻으로 남는다.** 옛 세이브도 `undefined`다 (optional — SAVE_VERSION 유지).
    */
   staffPool?: StaffPoolEntry[];
   /**
@@ -3293,7 +3299,6 @@ export function createGame(input: CreateGameInput): GameState {
     // 새 게임의 풀은 비어 있다 — 아직 아무도 자리를 잃지 않았다. **빈 배열로 세우는
     // 것이 곧 표식이다**: 로드 보정이 옛 사람됨 채널을 쓰던 세이브를 이것으로 가른다
     managerPool: [],
-    staffPool: [],
     boardDemands: [],
     boardRequests: [],
 
