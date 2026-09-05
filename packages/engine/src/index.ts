@@ -39,7 +39,7 @@ export * from "./world/player-id";
 export * from "./world/catalog";
 export * from "./world/persona";
 export * from "./world/player-persona";
-export * from "./world/character-book";
+export * from "./world/people-directory";
 export * from "./world/relations";
 export * from "./world/arcs";
 export * from "./world/generate";
@@ -118,6 +118,7 @@ export * from "./market/ai-market";
 export * from "./market/medical";
 export * from "./market/departures";
 export * from "./market/manager-market";
+export * from "./market/staff-market";
 export * from "./market/persuasion";
 
 // club — 구단 재정·기자회견

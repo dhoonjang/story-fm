@@ -7,6 +7,11 @@ import type { BoardPoint } from "@story-fm/domain";
 export type BoardSlot = { playerId: string; point: BoardPoint } | null;
 
 export type SquadRow = OfficeViews["squad"]["players"][number];
+/**
+ * 스태프 한 줄 — 구단이 고용한 사람 (docs/data/people.md §2-2). 명단 행과 나란히
+ * 두지 않는 이유는 유스 후보와 같다: 판에 올릴 수 있는 인원이 아니다.
+ */
+export type OfficeStaff = OfficeViews["squad"]["staff"][number];
 export type TacticsView = OfficeViews["squad"]["tactics"];
 /**
  * 죽은 공 키커 셋 — 자리마다 **지정**과 **지금 실제로 설 사람** (match.md §1.4).

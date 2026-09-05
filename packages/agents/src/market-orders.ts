@@ -3,6 +3,7 @@ import {
   describeBuyBackRights,
   describeInterests,
   describeNegotiations,
+  describeStaffPool,
   financeLookup,
   pendingVerdicts,
   type GameState,
@@ -17,9 +18,9 @@ import { runOpsOrders, tagged, type OpsAgentSpec, type OpsOrders } from "./order
  *
  * 판 지시의 해석(`tactic-orders`)과 같은 자리다: 장면을 쓰는 GM은 `market_orders(orders)`
  * 하나만 부르고, 오퍼·답·재계약·해지·리스트·되사기·임대 복귀·예산·보드 요청·사재·표값·
- * 감독직 오퍼의 인자는 여기서 채운다. 이 호출은 장면도 판정도 쓰지 않는다 — 낼 것은
- * `report_market_orders` 하나다. 확률(`deal_odds`)을 보고 값을 정하는 것은 GM과 감독의
- * 일이고, 여기 오는 것은 이미 정해진 말이다.
+ * 스태프 고용·해지·감독직 오퍼의 인자는 여기서 채운다. 이 호출은 장면도 판정도 쓰지
+ * 않는다 — 낼 것은 `report_market_orders` 하나다. 확률(`deal_odds`)을 보고 값을 정하는
+ * 것은 GM과 감독의 일이고, 여기 오는 것은 이미 정해진 말이다.
  *
  * **도구 설명이 갖던 판정 근거는 이 프롬프트가 가져야 한다** — 이 명령들은 GM에게
  * 보이지 않아 카탈로그 설명이 실리지 않는다 (prompts.md §5).
@@ -27,7 +28,7 @@ import { runOpsOrders, tagged, type OpsAgentSpec, type OpsOrders } from "./order
 export const MARKET_ORDERS_SYSTEM = `당신은 감독의 말을 이적·재정 명령의 인자로 옮기는 해석기다. 장면도 대사도 판정도 쓰지 않는다.
 
 # 입력
-<negotiations>(진행 중인 협상 — id·상대·마지막 오퍼·답할 차례) · <interest>(우리 선수를 보는 구단과 우리가 노리는 선수의 경쟁 구단) · <buybacks>(행사할 수 있는 되사기) · <board>(보드에 건 요청) · <seat>(감독직 제안·공석) · <finance>(잔고·예산·주급 여력·표값) · <recent_turns>(지난 다섯 턴) 뒤에 이번 턴 감독의 말이 @감독: 으로 온다.
+<negotiations>(진행 중인 협상 — id·상대·마지막 오퍼·답할 차례) · <interest>(우리 선수를 보는 구단과 우리가 노리는 선수의 경쟁 구단) · <buybacks>(행사할 수 있는 되사기) · <board>(보드에 건 요청) · <seat>(감독직 제안·공석) · <finance>(잔고·예산·주급 여력·표값) · <staff_pool>(자리를 찾는 코치·의료진·스카우트 — 이름·직책·원형·요구 연봉) · <recent_turns>(지난 다섯 턴) 뒤에 이번 턴 감독의 말이 @감독: 으로 온다.
 
 # 무엇을 고르나
 감독이 정한 것만 싣는다. 액수·연수·상대를 감독이 말하지 않았으면 지어내지 않고 unresolved에 남긴다. 이름 없이 가리키면 <recent_turns>에서 가장 최근의 그 사람이다. 선수 인자에는 감독이 부른 이름을 그대로 적는다.
@@ -41,6 +42,7 @@ export const MARKET_ORDERS_SYSTEM = `당신은 감독의 말을 이적·재정 �
 - set_transfer_list — 팔겠다·리스트에서 뺀다. askingPrice는 말했을 때만. respond_transfer_request — 선수의 이적 요청에 accept·refuse.
 - exercise_buyback — 되사기 행사(<buybacks>에 선 선수만). recall_loan — 임대 복귀.
 - adjust_transfer_budget — 구단주가 예산을 움직인다(delta, 음수 가능). request_board — 보드에 요청(kind: transfer-budget·signing·wage-room·stadium, amount는 감독이 부른 값 그대로, signing은 playerId). fund_transfer_budget — 감독 사재를 예산에. pay_player_bonus — 사재 보너스. set_ticket_price — 표값(<finance>의 지금 값에서 "10% 올려"를 계산해 적는다).
+- hire_staff — 스태프 고용. name은 <staff_pool>의 이름, salary는 감독이 부른 연봉(£/년). release_staff — 스태프 계약 해지(name). 감독이 이름을 대고 연봉까지 말했을 때만 싣고, 연봉이 없으면 unresolved다.
 - accept_manager_offer · counter_manager_offer · apply_manager_job — 감독직 제안의 수락·흥정·지원. offer는 <seat>의 id 또는 구단 이름. 감독이 분명히 말했을 때만.
 
 # unresolved
@@ -67,6 +69,9 @@ export const MARKET_OPS: readonly string[] = [
   "fund_transfer_budget",
   "pay_player_bonus",
   "set_ticket_price",
+  // 자른 자리에 그 턴 안에 다시 앉힐 수 있게 — 자리 상한과 주급 여력을 해고가 먼저 비운다
+  "release_staff",
+  "hire_staff",
   "accept_manager_offer",
   "counter_manager_offer",
   "apply_manager_job",
@@ -85,7 +90,7 @@ export const MARKET_ORDERS_SPEC: OpsAgentSpec = {
 
 export type MarketOrders = OpsOrders;
 
-/** 해석기의 입력 — 협상·관심·되사기·보드·감독직·재정·지난 다섯 턴 */
+/** 해석기의 입력 — 협상·관심·되사기·보드·감독직·재정·스태프 풀·지난 다섯 턴 */
 export function buildMarketContext(state: GameState): string[] {
   const negotiations = describeNegotiations(state);
   const verdicts = pendingVerdicts(state).map((v) => `❗ ${v.label} (${v.negotiation.id})`);
@@ -105,6 +110,8 @@ export function buildMarketContext(state: GameState): string[] {
     ...tagged("board", board ?? ""),
     ...tagged("seat", seat.join("\n")),
     ...tagged("finance", financeLookup(state).message),
+    // 감독이 부른 이름을 그 사람으로 옮기는 자리 — 풀에 없는 이름은 고용할 수 없다
+    ...tagged("staff_pool", describeStaffPool(state).join("\n")),
     ...tagged("recent_turns", buildRecentTurnsBlock(state)),
   ];
 }

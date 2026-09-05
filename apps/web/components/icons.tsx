@@ -8,6 +8,8 @@
  * 24 그리드에 stroke 1.7 — 12~20px 어디에 놓아도 획 굵기가 같아 보인다.
  */
 
+import type { SpeakerKind } from "@story-fm/engine";
+
 export type IconProps = { size?: number };
 
 /**
@@ -341,6 +343,41 @@ export function IconReporter({ size = 15 }: IconProps) {
 }
 
 /**
+ * 의료진 — **십자.** 의무실을 가리키는 표식이고, 설명이 필요 없는 유일한 그림이다.
+ *
+ * 두 획을 겹친 `+`는 **더하기 아이콘과 같은 그림이라** 쓸 수 없다 (`IconPlus`).
+ * 그래서 십자의 **윤곽을 그린다** — 15px에서도 두 아이콘이 한눈에 갈린다.
+ */
+export function IconMedic({ size = 15 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M8.4 3.8h7.2v4.6h4.6v7.2h-4.6v4.6H8.4v-4.6H3.8V8.4h4.6z" />
+    </svg>
+  );
+}
+
+/**
+ * 스카우트 — **쌍안경.** 그가 하는 일이 멀리 있는 것을 보고 오는 것이라, 보고서나
+ * 수첩보다 이쪽이 자리를 곧바로 말한다 (수첩은 코치의 클립보드와 헷갈린다).
+ *
+ * 통 둘과 접안부만 남긴다 — 초점 다이얼까지 그리면 15px에서 가운데가 뭉친다.
+ */
+export function IconScout({ size = 15 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      {/* 렌즈 통 둘 */}
+      <circle cx="7.2" cy="15.5" r="3.9" />
+      <circle cx="16.8" cy="15.5" r="3.9" />
+      {/* 두 통을 잇는 다리 */}
+      <path d="M11.1 15.5h1.8" />
+      {/* 접안부 — 눈에 대는 쪽이 위로 좁아진다 */}
+      <path d="M5.6 12.2V6a1.4 1.4 0 0 1 1.4-1.4h1.6A1.4 1.4 0 0 1 10 6v6.2" />
+      <path d="M18.4 12.2V6a1.4 1.4 0 0 0-1.4-1.4h-1.6A1.4 1.4 0 0 0 14 6v6.2" />
+    </svg>
+  );
+}
+
+/**
  * 구단주 — **넥타이.** 감독을 고용한 사람이고, 감독실 밖에서 오는 유일한 목소리다.
  * 왕관·돈다발도 후보였지만 하나는 과장이고 하나는 인물을 희화한다.
  */
@@ -353,6 +390,31 @@ export function IconOwner({ size = 15 }: IconProps) {
     </svg>
   );
 }
+
+/**
+ * 자리 → 아이콘 — **모든 화자가 하나씩 갖는다** (docs/data/people.md §3).
+ *
+ * 이름만으로는 누가 코치고 누가 선수인지 매번 읽어야 안다. 아이콘이 앞에 서면 자리가
+ * 먼저 눈에 든다. 세이브가 자리를 모르는 화자(에이전트·남의 팀 사람)에는 부르는 쪽이
+ * **사람 아이콘**(`IconPerson`)을 세운다 — 틀린 직책을 다느니 "누군가 말한다"까지만
+ * 말한다. 자리는 화면이 추측하지 않는다: `speakerRoles`가 코어에서 정해 실어 보낸다.
+ *
+ * **코치는 수석코치와 같은 클립보드를 쓴다** — 둘 다 코치이고, 훈련장의 어느 자리인지는
+ * 이름 옆 직책 칩이 말한다.
+ *
+ * 채팅의 화자 머리와 선수단 화면의 스태프 줄이 **같은 표**를 본다 — 두 곳이 표를 따로
+ * 들면 같은 사람이 화면마다 다른 그림을 단다.
+ */
+export const SPEAKER_ICON: Partial<Record<SpeakerKind, IconComponent>> = {
+  head_coach: IconCoach,
+  coach: IconCoach,
+  medic: IconMedic,
+  scout: IconScout,
+  owner: IconOwner,
+  reporter: IconReporter,
+  captain: IconCaptain,
+  player: IconJersey,
+};
 
 /** 접기·펼치기 — 아래 꺾쇠. 펼쳐지면 CSS가 뒤집는다 */
 export function IconChevron({ size = 14 }: IconProps) {

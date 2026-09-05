@@ -7,6 +7,7 @@ import type {
   MatchEventType,
   MatchRecord,
   MatchStage,
+  Persona,
   ScheduleEntry,
   SeasonHistory,
   SeasonMatchRow,
@@ -29,6 +30,7 @@ import {
   isReserveMatch,
   MatchStageSchema,
   packetTagText,
+  personaRoleLabel,
   PROMISE_KIND_KO,
   SQUAD_STATUS_KO,
   tacticsBrief,
@@ -194,6 +196,8 @@ import {
   type GameState,
 } from "../core/state";
 import { loanReportOf, loanedOut, type LoanReport } from "../market/departures";
+import { headCoachOf, staffOf } from "../world/persona";
+import { describeStaffPool } from "../market/staff-market";
 
 /**
  * 읽기 전용 조회 (lookup) — GM이 온디맨드로 부르는 조회 도구의 엔진 구현.
@@ -1520,6 +1524,28 @@ export function squadView(state: GameState, input: SquadViewInput = {}): LookupR
       ...candidates.map((row) => youthCandidateRow(state, row)),
     );
   }
+  /**
+   * **스태프 구획** — 훈련장·의무실·보고서를 맡은 사람들 (people.md §2-2). 명단에
+   * 섞지 않는 이유는 유스 후보와 같다: 판에 올릴 수 있는 인원이 아니다.
+   *
+   * 자리를 찾는 풀까지 함께 서는 것은 감독이 "피지컬 코치 하나 데려오자"를 말할
+   * 근거가 여기 있어서다 — 지금 누가 있고 밖에 누가 있는가가 한 자리에서 읽힌다.
+   * 빈 절은 세우지 않는다.
+   *
+   * ⚠️ **좁힌 조회에는 서지 않는다** — 층(`level`)도 역할(`role`)도 스쿼드의 칸이고
+   * 스태프는 그 칸에 없다. 층을 지정한 호출까지 이 절을 달면 「임대 1명」을 물은
+   * 답에 열세 줄이 딸려 온다.
+   */
+  if (teamId === state.userTeamId && input.role === undefined && input.level === undefined) {
+    // 수석코치는 자리가 비지 않는다 (`headCoachOf`) — 이 절은 언제나 한 줄 이상이다
+    const ours = [headCoachOf(state), ...staffOf(state)];
+    lines.push(`── 스태프 ${ours.length}명 ──`, ...ours.map(staffRow));
+    const pool = describeStaffPool(state);
+    if (pool.length > 0) {
+      // 유스 절이 `sign_youth`를 대는 것과 같은 규약 — 이 목록으로 무엇을 할 수 있는가
+      lines.push(`── 자리를 찾는 스태프 ${pool.length}명 (hire_staff) ──`, ...pool);
+    }
+  }
   const personal = tactics.assignments.filter((a) => a.instruction);
   if (personal.length > 0 && !input.role) {
     lines.push(
@@ -1529,6 +1555,26 @@ export function squadView(state: GameState, input: SquadViewInput = {}): LookupR
     );
   }
   return { ok: true, message: lines.join("\n") };
+}
+
+/**
+ * 스태프 한 줄 — 이름 · 직책 · 원형 · 부임일 · 계약 만료일.
+ *
+ * 직책이 역할 라벨보다 앞서는 것은 화자 칩과 같은 규약이다 (people.md §3): 「코치」는
+ * 이미 알고 있고, 감독이 알아야 할 것은 훈련장의 어느 자리냐다. 고용 정보가 없는 옛
+ * 세이브는 역할 라벨로 서고 날짜 칸이 빠진다 — 없는 계약을 지어내지 않는다.
+ */
+function staffRow(persona: Persona): string {
+  const employment = persona.employment;
+  const facts = [
+    employment?.title ?? personaRoleLabel(persona.role) ?? persona.role,
+    persona.archetype,
+    employment === undefined ? null : `부임 ${employment.since}`,
+    employment === undefined ? null : `계약 ~${employment.contract.until}`,
+  ].filter((x): x is string => x !== null);
+  // ⚠️ 두 칸 들여쓰기는 **배치 줄의 것이다** — 유스 후보 줄과 같이 스태프도 들여쓰지
+  // 않는다. 층·역할의 칸에 서지 않는 사람은 명단의 자를 빌리지 않는다
+  return `${persona.name} · ${facts.join(" · ")}`;
 }
 
 /**
@@ -1656,7 +1702,7 @@ export function teamProfile(state: GameState, team: string): LookupResult {
         ? `${rank || "?"}위 (${row.played}경기 ${row.wins}승 ${row.draws}무 ${row.losses}패 · 승점 ${row.points} · 득실 ${row.goalDiff >= 0 ? "+" : ""}${row.goalDiff})`
         : "순위 미정 (아직 경기 없음)"),
     `전술: ${tactics.spec.formation} · 멘탈리티${tactics.spec.mentality} 압박${tactics.spec.pressing} 템포${tactics.spec.tempo} 패스${tactics.spec.passStyle}`,
-    // 상대 벤치에 서는 사람 — 이름이 여기 나와야 캐릭터북이 그 인물지를 세운다
+    // 상대 벤치에 서는 사람 — 이름이 여기 나와야 인물 사전이 그 인물지를 세운다
     // (people.md §2-1). 이름을 모르는 구단은 줄이 서지 않는다
     ...(bench?.managerName === undefined ? [] : [managerLine(state, bench)]),
     `스쿼드: ${squad.length}명 · 평균 ${avgAge.toFixed(1)}세 · 구단 등급 ${tierOfTeamIn(state, teamId)}`,

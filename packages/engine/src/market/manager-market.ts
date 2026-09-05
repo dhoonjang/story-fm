@@ -819,8 +819,15 @@ export function runManagerMarket(state: GameState, digest: string[]): boolean {
  * **경질 위약금** — 잔여 계약에 비례하되 연봉 1년치에서 멈춘다 (career.md §5.4).
  *
  * 만료로 끝난 계약에는 잔여가 없어 0이다 — 끝까지 간 계약에 물 것은 없다.
+ *
+ * ⚠️ **스태프 해고도 이 식이다** (people.md §2-2 · `releaseStaff`). 인자를 연봉과
+ * 만료일까지로 좁혀 둔 이유가 그것이다 — 두 곳이 같은 자를 쓰지 않으면 한쪽만
+ * 조정되는 날이 온다 (AGENTS.md §5 — 한 규칙 한 정의).
  */
-export function managerSeveranceOf(contract: ManagerContract, today: string): number {
+export function managerSeveranceOf(
+  contract: Pick<ManagerContract, "salary" | "until">,
+  today: string,
+): number {
   const left = Math.max(0, diffDays(today, contract.until));
   return Math.min(
     contract.salary,

@@ -6,6 +6,7 @@ import {
   SET_PIECE_ROLES,
   TACTIC_AXES,
   adaptationOf,
+  ageOf,
   anchorOf,
   defaultRoleOf,
   formatMoney,
@@ -33,7 +34,7 @@ import {
   swappedLists,
   type BoardState,
 } from "@/lib/board-roles";
-import { IconBoard } from "@/components/icons";
+import { IconBoard, IconPerson, SPEAKER_ICON } from "@/components/icons";
 import { PitchChip, PitchGround } from "../../pitch";
 import { createLineupSaver, type LineupSaveOutcome, type LineupSaver } from "../../lineup-saver";
 import { useBoardDrag } from "./board-drag";
@@ -43,6 +44,7 @@ import { SquadTable, type SortKey } from "./squad-table";
 import { SetPiecePanel, TacticsPanel } from "./tactics-panel";
 import type {
   BoardSlot,
+  OfficeStaff,
   Selection,
   SetPieceRoutineView,
   SetPieceTakersView,
@@ -1160,8 +1162,58 @@ export function SquadView({
 
         <div className="squad-side-col">
           <div className="roster-scroll">{rosterTable}</div>
+          {/* 명단 **아래**에 선다 — 전술판 옆에 두면 판이 매일 그만큼 눌리는데,
+              스쿼드 화면에서 늘 눌러야 하는 것은 판이다. 명단은 어차피 굴러가는
+              목록이라 이 높이를 내줘도 잃는 것이 없다 */}
+          <StaffPanel staff={squad.staff} today={game.views.calendar.today} />
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * **스태프** — 구단이 고용한 사람들 (docs/data/people.md §2-2). 수석코치가 맨 앞이고
+ * 그다음이 코치·의료진·스카우트다 — 코어가 그 순서로 실어 보낸다.
+ *
+ * **읽는 값이다.** 고용·해고는 채팅으로 하는 일이라(「피지컬 코치 하나 데려오자」)
+ * 여기엔 손잡이가 없고, 그래서 유스 후보 줄처럼 테두리 없는 칸으로만 선다 — 버튼처럼
+ * 생긴 것이 하나라도 있으면 감독은 여기서 사람을 자를 수 있다고 읽는다.
+ *
+ * 아이콘은 채팅의 화자 머리와 **같은 표**(`SPEAKER_ICON`)를 본다: 훈련장에서 본 얼굴이
+ * 대화에서 말을 걸 때 같은 그림이어야 그 사람인 줄 안다.
+ */
+function StaffPanel({ staff, today }: { staff: OfficeStaff[]; today: string }) {
+  if (staff.length === 0) return null;
+  return (
+    <div className="club-staff" data-testid="club-staff">
+      <div className="club-staff-head">
+        <b>스태프</b>
+        <span className="muted">{staff.length}명</span>
+      </div>
+      <ul className="club-staff-list">
+        {staff.map((person) => {
+          const Icon = SPEAKER_ICON[person.role] ?? IconPerson;
+          return (
+            <li key={person.name}>
+              <span className="cs-icon" aria-hidden>
+                <Icon size={13} />
+              </span>
+              <span className="cs-name">{person.name}</span>
+              <span className="cs-title">{person.title}</span>
+              <span className="muted">{person.archetype}</span>
+              {/* 「부임 2년째」는 화면의 문장이다 — 코어가 내는 것은 날짜뿐이고,
+                  지난 햇수를 세는 규칙은 나이와 같은 함수를 쓴다 (`ageOf`) */}
+              {person.since && (
+                <span className="muted" title={`부임 ${person.since}`}>
+                  부임 {ageOf(person.since, today) + 1}년째
+                </span>
+              )}
+              {person.until && <span className="muted">계약 {person.until}까지</span>}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

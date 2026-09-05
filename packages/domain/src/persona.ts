@@ -25,6 +25,14 @@ export const PersonaRoleSchema = z.enum([
   "owner",
   "reporter",
   "player",
+  /**
+   * 구단이 고용한 사람들 — **수석코치와 같은 자리가 아니다** (people.md §2-2).
+   * 수석코치는 감독 옆에 서는 한 사람이고, 이쪽은 훈련장·의무실·보고서를 맡은
+   * 사람들이다. 셋만이 `employment`을 들고 감독이 고용·해고할 수 있다.
+   */
+  "coach",
+  "medic",
+  "scout",
   /** 감독의 사람 — 구단 밖에서 그를 아는 이 */
   "friend",
   /**
@@ -56,6 +64,48 @@ export const SpeechStyleSchema = z.object({
 });
 export type SpeechStyle = z.infer<typeof SpeechStyleSchema>;
 
+/**
+ * **고용 정보** — 구단이 급여를 주는 사람만 든다 (people.md §2-2).
+ *
+ * 수석코치·코치·의료진·스카우트가 갖고 **구단주는 갖지 않는다** — 그는 고용된 사람이
+ * 아니라 고용하는 쪽이다. 선수의 계약(`Contract`)과 다른 표인 이유는 자리가 다르기
+ * 때문이다: 스태프는 등록 명단에도 이적 시장에도 서지 않고, 장부에서 `staff_wages`로
+ * 선다 (→ ../../../docs/simulation/finance.md §6.4-1).
+ *
+ * 옛 세이브엔 없다 (optional — 로드가 채운다, 세이브 버전 유지).
+ */
+export const EmploymentSchema = z.object({
+  /** 어느 구단의 사람인가 — 감독이 이직해도 이 사람은 옛 구단에 남는다 */
+  teamId: z.string().min(1),
+  /** 그 사람의 직책 — 「피지컬 코치」. 역할 라벨(「코치」)보다 좁고, 화면 칩이 이것을 쓴다 */
+  title: z.string().min(1),
+  /** 부임일 — 카드의 「부임 2년째」가 여기서 나온다. 감독보다 앞설 수 있다 */
+  since: DateString,
+  /**
+   * 연봉(£/년)과 만료일. **위약금의 근거이기도 하다** — 자르면 잔여 계약에 비례해
+   * 문다(감독 경질과 같은 식 — career.md §5.4).
+   */
+  contract: z.object({ salary: z.number().int().min(0), until: DateString }),
+  /** 데려온 곳 — 무직 풀에서 왔으면 그 사람의 옛 구단. 처음부터 있던 사람에겐 없다 */
+  from: z.string().min(1).optional(),
+});
+export type Employment = z.infer<typeof EmploymentSchema>;
+
+/**
+ * 감독이 고용·해고할 수 있는 자리 — **수석코치는 여기 없다** (people.md §2-2).
+ *
+ * 그 자리가 비면 감독 옆에 아무도 없고, 경기 레퍼런스가 상주시키는 카드도 사라진다
+ * (agents.md §5). 수석코치도 `employment`을 들되 고용 명령이 다루는 대상은 아니다.
+ */
+export const STAFF_ROLES = ["coach", "medic", "scout"] as const;
+export const StaffRoleSchema = z.enum(STAFF_ROLES);
+export type StaffRole = z.infer<typeof StaffRoleSchema>;
+
+/** 이 역할이 고용·해고의 대상인가 — 표를 직접 인덱싱하는 자리를 한 곳으로 묶는다 */
+export function isStaffRole(role: PersonaRole): role is StaffRole {
+  return (STAFF_ROLES as readonly string[]).includes(role);
+}
+
 export const PersonaSchema = z.object({
   /**
    * 채팅 @태그와 1:1 (people.md §3) — **그 사람의 이름**이다.
@@ -75,11 +125,12 @@ export const PersonaSchema = z.object({
   motivation: z.string().min(1),
   speechStyle: SpeechStyleSchema,
   /**
-   * 이 인물이 불렸다고 볼 말들 — 캐릭터북이 이력과 이번 턴 발화에서 훑는다 (people.md §6).
+   * 이 인물이 불렸다고 볼 말들 — 인물 사전이 이력과 이번 턴 발화에서 훑는다 (people.md §6).
    *
    * ⚠️ **나열된 것만 본다.** 성만 쓴 "홀란드"를 같은 사람으로 보는 부분 일치는 오탐을
    * 만든다는 `normalizeSpeaker`의 원칙이 여기도 그대로다 — 별칭이 필요하면 여기 적는다.
-   * 옛 세이브엔 없다 (optional) — 로드가 채운다.
+   * 담기는 것은 **전체 이름과 성**이고 given은 빠진다 (people.md §6 — 이름 풀이 좁아
+   * 같은 given을 가진 셋이 한 턴 상한을 먹는다). 옛 세이브엔 없다 (optional) — 로드가 채운다.
    */
   keywords: z.array(z.string().min(1)).optional(),
   /**
@@ -95,6 +146,11 @@ export const PersonaSchema = z.object({
    * 가상 인물엔 없다(옵셔널).
    */
   real: z.boolean().optional(),
+  /**
+   * 구단이 이 사람에게 급여를 주는가 — 자리·부임일·계약 (people.md §2-2).
+   * 수석코치·코치·의료진·스카우트에게만 있다. 옛 세이브엔 없다 (optional).
+   */
+  employment: EmploymentSchema.optional(),
   /** 생성 재현용 — 같은 세이브는 같은 사람을 만난다 */
   seed: z.number().int(),
 });
@@ -115,6 +171,9 @@ export const PERSONA_ROLE_LABEL: Partial<Record<PersonaRole, string>> = {
   owner: "구단주",
   reporter: "기자",
   player: "선수",
+  coach: "코치",
+  medic: "의료진",
+  scout: "스카우트",
   manager: "감독",
   agent: "에이전트",
   pundit: "해설위원",
@@ -124,6 +183,34 @@ export const PERSONA_ROLE_LABEL: Partial<Record<PersonaRole, string>> = {
 export function personaRoleLabel(role: PersonaRole): string | undefined {
   return PERSONA_ROLE_LABEL[role];
 }
+
+/**
+ * **무직 스태프 풀의 한 줄** — 자리를 찾는 코치·의료진·스카우트 (people.md §2-2).
+ *
+ * 감독 풀(`ManagerPoolEntry`)과 같은 패턴이되 셋이 다르다: 채우는 것이 경질이 아니라
+ * **여름의 결정적 추첨**이고, 부르는 쪽이 AI 구단이 아니라 **감독뿐**이며, 요구 연봉을
+ * 넘기면 흥정 없이 그 자리에서 계약된다.
+ *
+ * ⚠️ **사람됨은 줄이 들지 않는다.** 이름·역할·자리·원형만 있으면 원형 표에서 성격·동기·
+ * 말투가 결정적으로 파생하므로(`staffPersonaOf`), 카드를 줄에 넣으면 같은 사실이 두 곳에
+ * 산다. 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+ */
+export const StaffPoolEntrySchema = z.object({
+  /** 이름이 곧 `characterId`다 (people.md §1) */
+  name: z.string().min(1),
+  role: StaffRoleSchema,
+  /** 그 사람이 맡을 자리 — 「피지컬 코치」 */
+  title: z.string().min(1),
+  /** 원형 라벨 — 표를 되짚어 성격·말투를 세운다 */
+  archetype: z.string().min(1),
+  /** 요구 연봉 (£/년) — 이 이상을 부르면 그 자리에서 계약된다 */
+  ask: z.number().int().min(0),
+  /** 이 줄이 선 시즌 — 여름 갱신이 「그해 자른 사람만 남긴다」를 판단하는 기준 */
+  listedOn: z.number().int(),
+  /** 직전 구단 — 감독이 자른 사람에게만 있다 */
+  from: z.string().min(1).optional(),
+});
+export type StaffPoolEntry = z.infer<typeof StaffPoolEntrySchema>;
 
 /**
  * 인물지의 **깊이** — 감독이 그 사람을 얼마나 아는가 (people.md §6).
@@ -273,7 +360,7 @@ export interface PersonaRelation {
 }
 
 /**
- * 인물지 — 캐릭터북이 조립하는 **구조**다. 문장으로 옮기는 것은 프롬프트의 몫이고
+ * 인물지 — 인물 사전이 조립하는 **구조**다. 문장으로 옮기는 것은 프롬프트의 몫이고
  * (`describePersona`), 코어는 사실만 낸다 (overview.md §1 철칙 4).
  *
  * ⚠️ **변하는 값은 여기 없다** — 폼·컨디션·부상·심경·계약·관측 능력치는 주입한 카드가

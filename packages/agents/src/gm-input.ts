@@ -30,6 +30,7 @@ import {
   pendingPress,
   describeWindowState,
   expiringContracts,
+  factSpeakerOf,
   financeOf,
   formatClock,
   headCoachOf,
@@ -205,7 +206,7 @@ export function describePersona(entry: CharacterEntry): string {
 }
 
 /**
- * 이번 장면의 인물들 — 캐릭터북이 고른 카드 묶음 (people.md §6).
+ * 이번 장면의 인물들 — 인물 사전이 고른 카드 묶음 (people.md §6).
  *
  * ⚠️ **여기 있는 것은 "이 사람이 누구인가"뿐이다.** 카드는 이력에 굳으므로 변하는
  * 값(폼·컨디션·부상·심경·계약)이 들어가면 3주 뒤 모델이 낡은 사실로 말한다. 지금의
@@ -262,7 +263,7 @@ export function describeManager(
  *
  * ⚠️ **인물 카드는 여기 없다.** 코치·구단주·기자 다섯 장은 회견도 협상도 없는 턴에
  * 한 번도 쓰이지 않는데 매 턴 읽혔다. 그렇다고 조건부로 넣었다 뺐다 하면 더 나쁘다 —
- * 프리픽스가 바뀌는 턴마다 이 블록과 그 뒤 이력이 통째로 무효가 된다. 카드는 캐릭터북이
+ * 프리픽스가 바뀌는 턴마다 이 블록과 그 뒤 이력이 통째로 무효가 된다. 카드는 인물 사전이
  * 골라 **이번 턴 층**에 싣고 다음 턴부터 이력의 일부가 된다 (people.md §6).
  * ⚠️ 선수의 이름도 id도 여기 두지 않는다 — 명단은 영입·매각·2군 승격·주장 변경마다
  * 바뀌고, 한 줄이 달라지면 이 블록과 그 뒤의 이력이 통째로 무효가 된다. 이름은 매 턴
@@ -318,7 +319,7 @@ export function buildMatchReference(state: GameState): string {
   return [
     buildGmReference(state),
     // 벤치에서 감독 옆에 서 있는 사람이다 — 경기 중 조언도 같은 사람의 말투여야 한다.
-    // 경기 내내 같은 한 사람이라 여기서는 캐릭터북을 거치지 않고 상주한다
+    // 경기 내내 같은 한 사람이라 여기서는 인물 사전을 거치지 않고 상주한다
     describeCharacters([characterEntry(headCoachOf(state), "full")]),
     buildMatchBrief(state),
   ]
@@ -563,17 +564,22 @@ function lines(...items: (string | null)[]): string {
 }
 
 /**
- * 수석코치가 먼저 짚는 사실 — **이름이 태그의 속성으로 선다.** 안쪽 줄에 `이름:`을
+ * 코치가 먼저 짚는 사실 — **이름이 태그의 속성으로 선다.** 안쪽 줄에 `이름:`을
  * 적으면 모델의 발화 문법(`@이름:`)과 한 글자 차이라, 코어가 낸 사실 줄이 코치가
  * 이미 한 말처럼 읽힌다 (prompts.md §5-1과 같은 이유로 회견·다가옴도 속성을 쓴다).
+ *
+ * **화자마다 한 덩어리다** — 원형이 고른 사실은 수석코치의 것이고, 훈련장·2군·임대는
+ * 훈련장을 맡은 코치의 것이다 (people.md §3 화자 표). 태그는 같고 속성이 다르다.
+ * 자리가 비어 두 갈래의 화자가 같은 사람이면 덩어리도 하나다 — 같은 이름으로 두 번
+ * 서면 한 사람이 둘로 읽힌다. 순서는 코어가 정한 사실의 순서 그대로다.
  */
-function coachBlock(state: GameState, cues: readonly CoachCue[]): string | null {
-  if (cues.length === 0) return null;
-  return block(
-    "coach",
-    cues.map((c) => `- ${c.fact}`).join("\n"),
-    ` name="${headCoachOf(state).name}"`,
-  );
+function coachBlocks(state: GameState, cues: readonly CoachCue[]): (string | null)[] {
+  const byName = new Map<string, string[]>();
+  for (const cue of cues) {
+    const name = factSpeakerOf(state, cue.by === "coach" ? "training" : "coach_eye").name;
+    byName.set(name, [...(byName.get(name) ?? []), `- ${cue.fact}`]);
+  }
+  return [...byName].map(([name, facts]) => block("coach", facts.join("\n"), ` name="${name}"`));
 }
 
 /**
@@ -1156,20 +1162,8 @@ export function buildGmStateNote(
             .join(", ")}${requests.length > TRANSFER_REQUEST_SHOWN ? " …" : ""})`
         : null;
     })(),
-    injured.length > 0 ? `부상 ${injured.length} (${injured.join(", ")})` : null,
-    atRisk.length > 0
-      ? `부상 이력 ${atRisk.length} (${atRisk.slice(0, AT_RISK_SHOWN).join(" / ")}${
-          atRisk.length > AT_RISK_SHOWN ? " …" : ""
-        })`
-      : null,
-    overloaded.length > 0
-      ? `과부하 ${overloaded.length} (${overloaded.slice(0, OVERLOADED_SHOWN).join(", ")}${
-          overloaded.length > OVERLOADED_SHOWN ? " …" : ""
-        })`
-      : null,
     suspended.length > 0 ? `정지 ${suspended.length} (${suspended.join(", ")})` : null,
     unhappy.length > 0 ? `불만 ${unhappy.length} (${unhappy.join(", ")})` : null,
-    ...scoutingSummary(state),
     /**
      * 만료 임박 계약 — 재계약 서사의 씨앗. 놓치면 자유계약으로 떠난다.
      *
@@ -1225,6 +1219,28 @@ export function buildGmStateNote(
         : null;
     })(),
   ].filter((x): x is string => x !== null);
+
+  /**
+   * **몸의 사실 — 의료진의 것이다** (people.md §3 화자 표). 주의 줄에 뭉쳐 있던
+   * 셋이 화자를 얻어 나온 자리다. 사실은 한 글자도 달라지지 않는다: 달라지는 것은
+   * 이 사실이 프롬프트에서 누구의 것으로 서는가뿐이다.
+   */
+  const medical = [
+    injured.length > 0 ? `부상 ${injured.length} (${injured.join(", ")})` : null,
+    atRisk.length > 0
+      ? `부상 이력 ${atRisk.length} (${atRisk.slice(0, AT_RISK_SHOWN).join(" / ")}${
+          atRisk.length > AT_RISK_SHOWN ? " …" : ""
+        })`
+      : null,
+    overloaded.length > 0
+      ? `과부하 ${overloaded.length} (${overloaded.slice(0, OVERLOADED_SHOWN).join(", ")}${
+          overloaded.length > OVERLOADED_SHOWN ? " …" : ""
+        })`
+      : null,
+  ].filter((x): x is string => x !== null);
+
+  // 스카우팅 진행과 도착한 보고서는 **같은 사람의 것이다** — 덩어리 둘의 이름이 하나다
+  const scout = factSpeakerOf(state, "scouting");
 
   const cues = speakerCues(state);
   const coach = coachCues(state);
@@ -1344,16 +1360,23 @@ export function buildGmStateNote(
     ),
     // 한 줄에 하나 — 이어 붙이면 일곱 항목이 가운뎃점 사이에 묻힌다
     block("alerts", alerts.join("\n")),
+    // 부상·부상 이력·과부하 — 의무실을 맡은 사람의 것. 자리가 비면 수석코치가 선다
+    block("medical", medical.join("\n"), ` name="${factSpeakerOf(state, "medical").name}"`),
+    // 파견 중인 스카우트 — 도착한 보고서(<scout_reports>)와 같은 사람의 덩어리다
+    block("scouting", scoutingSummary(state).join("\n"), ` name="${scout.name}"`),
     // 선수 근황 — 선수단 중 **사실이 붙는** 셋이다.
     // 코어는 사실만 낸다(speakerCues) — 누가 말할지, 무슨 말을 할지는 GM의 몫
     block("cues", cues.map((c) => `- ${c.name} ${c.fact}`).join("\n")),
     /**
-     * 수석코치가 먼저 짚는 사실 — **원형이 고른다** (people.md §7-1). 근황과 같은
+     * 코치가 먼저 짚는 사실 — **원형이 고른다** (people.md §7-1). 근황과 같은
      * 결이되 고르는 눈이 다르다: 분석가는 상대의 표를, 조련사는 다리를 먼저 본다.
      * 여기도 사실뿐이고(`coachCues`) 그 사실로 무슨 말을 할지는 GM이 쓴다.
      * 무직이면 코어가 빈손을 내므로 이 덩어리는 서지 않는다.
+     *
+     * 화자가 둘일 수 있다 — 훈련장·2군·임대는 그 자리를 맡은 코치의 것이라 같은 태그가
+     * 이름만 달리해 한 번 더 선다 (people.md §3 화자 표).
      */
-    coachBlock(state, coach),
+    ...coachBlocks(state, coach),
     /**
      * 경기 전날·당일의 상대 분석 — 감독이 라인업과 6축을 정하는 자리다.
      * 조회 도구·다음 경기 카드와 **같은 리포트**를 읽는다 (match.md §1.8).
@@ -1385,6 +1408,7 @@ export function buildGmStateNote(
         ...arrivedReports.map((c) => `- ${scoutReportLine(state, c.playerId) ?? c.name}`),
         ...arrivedMissions.map((m) => `- ${missionReportLine(state, m.missionId) ?? m.brief}`),
       ].join("\n"),
+      ` name="${scout.name}"`,
     ),
     /**
      * 경기 뒤 들어온 소식 — 재정과 같은 라운드의 다른 경기·대진.
@@ -2084,7 +2108,7 @@ function historyEnd(chat: GameState["chat"]): number {
 }
 
 /**
- * 이력 창 **안에** 서 있는 카드 — 캐릭터북이 「이미 실렸다」를 판단하는 근거다.
+ * 이력 창 **안에** 서 있는 카드 — 인물 사전이 「이미 실렸다」를 판단하는 근거다.
  *
  * 창 밖으로 밀려난 기록은 여기 오지 않으므로 그 인물은 그 순간 다시 주입 대상이
  * 된다 — 만료 규칙을 따로 두지 않는 이유다 (people.md §6).
@@ -2101,7 +2125,7 @@ export function injectedCharacters(state: GameState): CharacterInjection[] {
  * 카드 텍스트를 저장하면 채팅 화면에 프롬프트가 새고 이력이 그때의 문장으로 굳는다.
  *
  * 기억 줄 수도 함께 적는다 — 기억은 이 턴 층에만 서므로(§6), 그 뒤에 늘어난 것을
- * 재주입으로 나르려면 캐릭터북이 **그때 실린 수**를 알아야 한다.
+ * 재주입으로 나르려면 인물 사전이 **그때 실린 수**를 알아야 한다.
  */
 export function recordCharacterInjection(
   state: GameState,

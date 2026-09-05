@@ -70,6 +70,11 @@ export interface CoachCue {
   fact: string;
   /** 이름이 걸린 선수 — 회전이 이 이름으로 근황과 겹침을 피한다 */
   playerIds: string[];
+  /**
+   * **이 사실 옆에 서는 사람** — 비면 수석코치다 (people.md §3 화자 표).
+   * 훈련장·2군·임대는 그 자리를 맡은 코치의 것이라 화자가 갈린다.
+   */
+  by?: "coach";
 }
 
 /** 조련사가 "곧"이라고 보는 창 — 이 안이면 회복이 다음 경기에 걸린다 */
@@ -366,6 +371,7 @@ const prospects: CoachEye = (state) => {
   if (young.length === 0) return null;
   return {
     code: "prospects",
+    by: "coach",
     fact:
       "2군 잠재력 상위: " +
       young
@@ -395,6 +401,7 @@ const reserveRecord: CoachEye = (state) => {
   });
   return {
     code: "reserve-record",
+    by: "coach",
     fact: `2군 리그: ${rows.join(" · ")}`,
     playerIds: young.map((p) => p.id),
   };
@@ -554,6 +561,7 @@ function trainingReportCue(state: GameState): CoachCue | null {
   ].filter((x): x is string => x !== null);
   return {
     code: "training-report",
+    by: "coach",
     // 아무것도 움직이지 않은 구간도 사실이다 — 그 자리를 비우면 지어낸다
     fact: `${head} — ${parts.length > 0 ? parts.join(" · ") : "장부에 남은 변화 없음"}`,
     playerIds: [...grew, ...report.marks.map((m) => m.gamePlayerId)],
@@ -598,6 +606,7 @@ function loanReportCue(state: GameState): CoachCue | null {
   });
   return {
     code: "loan-report",
+    by: "coach",
     fact:
       `${state.date.slice(0, 7)} 임대 ${reports.length}건 — ` +
       `${shown.join(" / ")}${reports.length > shown.length ? " …" : ""}`,
@@ -641,6 +650,9 @@ export const COACH_EYE_KEYS: readonly string[] = Object.keys(COACH_EYE);
  *
  * **재직 중에만 선다** — 맡은 팀이 없으면 벤치에 함께 앉는 사람도 없다.
  * 결정적이다: 같은 날 같은 세이브면 같은 목록이다.
+ *
+ * 목록의 화자는 하나가 아니다 — `by: "coach"`가 붙은 장은 훈련장을 맡은 코치의 것이고,
+ * 나머지는 수석코치의 것이다 (people.md §3 화자 표).
  */
 export function coachCues(state: GameState, limit = 2): CoachCue[] {
   if (managedTeamId(state) === null) return [];
