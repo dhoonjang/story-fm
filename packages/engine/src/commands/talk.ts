@@ -411,10 +411,16 @@ export function applyTalk(state: GameState, input: TalkInput): CommandResult {
       if (!named.some((p) => p.id === pick.player.id)) named.push(pick.player);
     } else unresolved.push(ref);
   }
-  if ((input.players?.length ?? 0) > 0 && named.length === 0) {
+  /**
+   * **빈 배열은 이름을 부르지 않은 것과 같다** — 모델이 `players: []`로 보내는 것은
+   * "아무에게도"가 아니라 "특정한 누구도 아닌", 곧 선수단 전체다. 여기서 가르지 않으면
+   * 그 호출이 아무에게도 닿지 않는 말이 되어 조용히 사라진다.
+   */
+  const toEveryone = (input.players?.length ?? 0) === 0;
+  if (!toEveryone && named.length === 0) {
     return { ok: false, message: `그 이름을 찾지 못했습니다 — ${unresolved.join(" · ")}` };
   }
-  const addressed = input.players === undefined ? squad : named;
+  const addressed = toEveryone ? squad : named;
   const heard = shout && present ? addressed.filter((p) => present.has(p.id)) : addressed;
   if (heard.length === 0) {
     return { ok: true, message: "그 말을 들은 선수가 없습니다 — 명단에 없는 이름입니다" };
@@ -427,7 +433,6 @@ export function applyTalk(state: GameState, input: TalkInput): CommandResult {
     state.pendingMatch.shouts = (state.pendingMatch.shouts ?? 0) + 1;
   }
   /** 이름을 불렀는가 — 불만 해소·약속·정착 앵커가 갈리는 자리다 */
-  const toEveryone = input.players === undefined;
   const alone = heard.length === 1;
 
   // 앵커는 들은 사람이 정한다 — 판정은 그 앵커 ± 한 단계 안에서만 선다 (career.md §2)
