@@ -7,6 +7,7 @@ import {
   splitStaging,
   weaveTurn,
 } from "../lib/turn-pieces";
+import { buildPlayerNameIndex, splitPlayerNames } from "../lib/player-names";
 import { mergeSlice } from "../lib/game-slice";
 import { chatForActiveMatch } from "../lib/match-chat";
 import { buildTraceIndex } from "../lib/turn-trace-index";
@@ -662,5 +663,64 @@ describe("previewLine", () => {
 
   it("길면 자른다 — 줄 하나로 서는 자리다", () => {
     expect(previewLine("가".repeat(200), 10)).toBe(`${"가".repeat(10)}…`);
+  });
+});
+
+/**
+ * 산문의 이름을 손잡이로 — **규칙이 한 벌이어야 한다** (player.md §9.5).
+ * 서버가 사전에 무엇을 실을지 고르는 자와 화면이 문장을 가르는 자가 같은 함수다.
+ */
+describe("splitPlayerNames", () => {
+  const index = buildPlayerNameIndex({
+    "a-sener-lamens": "세너 라먼스",
+    "b-kim": "김민재",
+    "c-park-lamens": "박 라먼스",
+    "d-son": "손흥민",
+  });
+
+  it("전체 이름이 서면 성으로 다시 자르지 않는다", () => {
+    expect(splitPlayerNames("세너 라먼스가 뛴다", index)).toEqual([
+      { text: "세너 라먼스", playerId: "a-sener-lamens" },
+      { text: "가 뛴다" },
+    ]);
+  });
+
+  it("조사는 이름 밖이다", () => {
+    expect(splitPlayerNames("김민재는 남고 손흥민을 뺀다", index)).toEqual([
+      { text: "김민재", playerId: "b-kim" },
+      { text: "는 남고 " },
+      { text: "손흥민", playerId: "d-son" },
+      { text: "을 뺀다" },
+    ]);
+  });
+
+  it("성이 둘이면 손잡이가 서지 않는다 — 어느 쪽인지 모른다", () => {
+    expect(splitPlayerNames("라먼스가 넣었다", index)).toEqual([{ text: "라먼스가 넣었다" }]);
+  });
+
+  it("성만 부른 이름도 사전 안에서 유일하면 선다", () => {
+    const one = buildPlayerNameIndex({ "a-sener-lamens": "세너 라먼스" });
+    expect(splitPlayerNames("라먼스가 넣었다", one)).toEqual([
+      { text: "라먼스", playerId: "a-sener-lamens" },
+      { text: "가 넣었다" },
+    ]);
+  });
+
+  it("앞이 한글이면 이름이 아니다 — 다른 이름의 꼬리를 자르지 않는다", () => {
+    expect(splitPlayerNames("이김민재라는 사람", index)).toEqual([{ text: "이김민재라는 사람" }]);
+  });
+
+  it("사전에 없는 이름은 글자 그대로다", () => {
+    expect(splitPlayerNames("홀란드가 넣었다", index)).toEqual([{ text: "홀란드가 넣었다" }]);
+  });
+
+  it("id 토큰 한복판은 이름이 아니다", () => {
+    const latin = buildPlayerNameIndex({ "arsenal-raya": "raya" });
+    expect(splitPlayerNames("arsenal-raya-2", latin)).toEqual([{ text: "arsenal-raya-2" }]);
+  });
+
+  it("동명이인은 어느 쪽도 걸지 않는다", () => {
+    const twins = buildPlayerNameIndex({ "a-kim": "김민재", "b-kim": "김민재" });
+    expect(splitPlayerNames("김민재가 뛴다", twins)).toEqual([{ text: "김민재가 뛴다" }]);
   });
 });

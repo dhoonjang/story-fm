@@ -1,0 +1,218 @@
+/**
+ * ── 선수 카드 — 이름을 눌러 여는 한 장 (docs/data/player.md §9.5) ─────
+ *
+ * 뷰 파일 밖에 서는 이유는 경기 리포트와 같다: **어느 화면에서도 열린다.**
+ * 재정 줄에서도 대회 개인 순위에서도 채팅 산문에서도 같은 카드가 서므로 그 스타일이
+ * 어느 한 뷰의 것일 수 없다.
+ *
+ * 능력치 격자·커리어 표·발 표식은 명단 상세와 **한 벌을 나눠 쓴다**
+ * (`components/player-facts.tsx` · `office/squad.css`의 `pd-*`) — 여기서 다시
+ * 그리지 않고, 그 규칙이 기대는 값(`--pd-rule`)만 카드 안에도 세워 준다.
+ */
+
+/**
+ * **이름 손잡이** — 읽는 값과 조작 대상은 생김새가 다르다(overview.md §5).
+ *
+ * 알약도 버튼도 아니다: 표의 한 칸과 문장 한복판에 함께 서므로 줄 높이를 바꾸면
+ * 이름이 실린 줄이 들썩인다. 점선 밑줄 하나가 "이건 누를 수 있다"를 말하고,
+ * 나머지는 둘레의 글자와 같다.
+ */
+.player-name {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted rgba(255, 255, 255, 0.28);
+  text-underline-offset: 3px;
+  transition: color var(--ease);
+}
+.player-name:hover,
+.player-name:focus-visible {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
+}
+
+/* 베일 — 경기 종료 카드와 같은 자리다 (`.fulltime`). 채팅 위에 덮인다 */
+.player-card-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+  background: rgb(4 8 13 / 0.72);
+  backdrop-filter: blur(4px);
+  animation: fulltime-in 160ms var(--ease-panel) both;
+}
+.player-card {
+  --pd-rule: rgba(255, 255, 255, 0.09);
+  display: flex;
+  flex-direction: column;
+  /* 16축이 다섯 열로 서는 폭이다 — 좁히면 격자가 접혀 묶음이 두 줄씩 쌓인다 */
+  width: min(680px, 100%);
+  max-height: min(760px, calc(100dvh - 48px));
+  overflow-y: auto;
+  padding: var(--sp-5);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.42);
+  font-size: var(--fs-sm);
+}
+.pc {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 머리 — 이름이 주어이고 종합이 오른쪽 끝에 홀로 선다 */
+.pc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.pc-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+.pc-name {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+}
+/* 등번호는 이름의 곁이다 — 셔츠에 적힌 수라 이름보다 작고 흐리게 */
+.pc-number {
+  font-style: normal;
+  color: var(--muted);
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+}
+.pc-meta {
+  flex: 1 0 100%;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.pc-ovr {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.pc-ovr em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.08em;
+}
+.pc-ovr b {
+  font-size: var(--fs-2xl);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.pc-ovr .est {
+  margin-left: 3px;
+  font-size: var(--fs-xs);
+}
+
+/* 안개 한 줄과 심경 한 줄 — 아래 숫자들이 왜 그런지 */
+.pc-note,
+.pc-mood {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+.pc-note {
+  color: var(--accent-2);
+}
+
+/* 사실 줄 — 명단 상세의 요약 줄과 같은 결(`.pd-summary`) */
+.pc-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 14px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--pd-rule);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.pc-fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.pc-fact b {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.pc-fact .est {
+  margin-left: 2px;
+}
+
+/* 지금 못 뛰는 사실들 — 있을 때만 서므로 빈 줄이 자리를 차지하지 않는다 */
+.pc-marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pc-marks:empty {
+  display: none;
+}
+.pc-mark {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--muted);
+  font-size: var(--fs-2xs);
+}
+.pc-mark.out {
+  border-color: rgba(248, 113, 113, 0.4);
+  color: var(--danger);
+}
+
+.pc-positions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+/* 받아 오는 동안의 골격 — 카드가 열리자마자 크기가 잡혀 있어야 화면이 안 튄다 */
+.pc-blank {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 220px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.pc-skel {
+  height: 72px;
+  border-radius: var(--r-sm);
+}
+.pc-skel.short {
+  height: 120px;
+}
+
+/* 닫기 — 카드의 끝이자 되돌아가는 길. Esc와 바깥 클릭도 같은 일을 한다 */
+.pc-close {
+  align-self: center;
+  margin-top: var(--sp-4);
+  padding: 7px 22px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.pc-close:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
