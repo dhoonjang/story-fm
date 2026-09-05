@@ -291,7 +291,7 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
           <em>종합</em>
           <b>
             {card.overall}
-            {card.observation.margin > 0 && <i className="est">±{card.observation.margin}</i>}
+            {card.overallMargin > 0 && <i className="est">±{card.overallMargin}</i>}
           </b>
         </span>
       </header>
@@ -300,7 +300,7 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
        * **무엇까지 아는가** — 아래 숫자 전부에 걸리는 단서라 맨 위에 선다.
        * 정확히 아는 선수(우리 선수 대부분)에게는 아무것도 그리지 않는다.
        */}
-      {card.observation.margin > 0 && <p className="pc-note">{card.note}</p>}
+      {card.overallMargin > 0 && <p className="pc-note">{card.note}</p>}
       {/* 지금 심경 한 줄 — 아래 숫자들이 왜 그런지 (우리 선수만 아는 사실이다) */}
       {ours && <p className="pc-mood">{moodSentence(ours.mood)}</p>}
 

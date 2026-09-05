@@ -4677,11 +4677,20 @@ export interface PlayerCardView {
   knowledge: Knowledge;
   knowledgeLabel: string;
   /**
+   * 종합값의 오차 폭 (±) — 0이면 정확히 안다.
+   *
+   * ⚠️ **`Observation`을 통째로 싣지 않는다.** 그 안의 `overallOffset`은 참값에
+   * 얹은 오프셋이라, 관측값과 함께 나가면 빼기 한 번에 참 종합이 나온다 — 화면에
+   * 그리지 않아도 응답에 실리면 새어 나간 것이다 (player.md §10). 명단 행이 그것을
+   * 싣는 것은 전술판이 저장 전 배치의 전력을 **같은 규칙으로 다시 내야** 하기
+   * 때문이고(`observedFit`), 카드에는 다시 낼 자리가 없다.
+   */
+  overallMargin: number;
+  /**
    * 무엇까지 알아냈나 한 줄 — **코어가 낸다**(`knowledgeNote`). 조회 도구의 카드와
    * 같은 문장이라 GM이 채팅에서 하는 말과 화면이 갈리지 않는다.
    */
   note: string;
-  observation: Observation;
   /** **관측** 종합 — 참값이 아니다 (`observedOverall`) */
   overall: number;
   /** 16축 — 축마다의 관측값과 오차폭 */
@@ -4774,7 +4783,7 @@ export function buildPlayerCard(state: GameState, playerId: string): PlayerCardV
     knowledge,
     knowledgeLabel: KNOWLEDGE_KO[knowledge],
     note: knowledgeNote(state, p.id),
-    observation,
+    overallMargin: observation.margin,
     overall: observedOverall(p.attributes.overall, observation),
     attributes: ATTRIBUTE_AXES.map((key) => ({
       key,

@@ -1008,6 +1008,17 @@ describe("선수 카드 — 남의 구단 선수의 안개 (player.md §9.5)", (
     ).toBeGreaterThan(0);
   });
 
+  /**
+   * 오프셋은 참값에 **얹은 값**이라 관측값과 함께 나가면 빼기 한 번에 참값이 나온다.
+   * 화면에 그리지 않아도 응답에 실리면 새어 나간 것이다 (player.md §10).
+   */
+  it("관측 오프셋은 카드에 실리지 않는다 — 폭만 나간다", () => {
+    for (const card of cards) {
+      expect(card.overallMargin, card.name).toBeGreaterThan(0);
+      expect(JSON.stringify(card), card.name).not.toContain("overallOffset");
+    }
+  });
+
   it("잠재력은 숫자가 아니라 구간이고 참값을 품는다", () => {
     for (const [i, card] of cards.entries()) {
       if (card.potential === null) continue;
