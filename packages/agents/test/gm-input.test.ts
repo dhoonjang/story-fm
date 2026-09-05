@@ -59,7 +59,6 @@ import {
   parseSceneHeader,
   recordCharacterInjection,
   runGmTurn,
-  runMockGmTurn,
   runOnboarding,
   type GmToolCall,
 } from "@story-fm/agents";
@@ -1353,13 +1352,13 @@ describe("장면 헤더", () => {
   it("선언한 날짜까지 달력이 움직이고, 과거는 되감지 않는다", () => {
     const state = game();
     const start = state.date;
-    const moved = applyScenePoint(state, { date: addDays(start, 2), clock: "19:00" });
+    const moved = applyScenePoint(state, { date: addDays(start, 2), clock: "19:00" }, "header");
     expect(moved.ok).toBe(true);
     // 프리시즌 첫 이틀에는 세워 세울 일이 없다 — 선언한 곳에 그대로 닿는다
     expect(moved.short).toBeFalsy();
     expect(state.date).toBe(addDays(start, 2));
     expect(clockOf(state)).toBe("19:00");
-    const back = applyScenePoint(state, { date: start, clock: "09:00" });
+    const back = applyScenePoint(state, { date: start, clock: "09:00" }, "header");
     expect(state.date).not.toBe(start);
     expect(back.short).toBe(true);
   });
@@ -1461,7 +1460,7 @@ describe("시계는 장면이 걸린 만큼 민다", () => {
   it("같은 날 안에서는 시각만 흐르고 세계는 굴러가지 않는다", () => {
     const state = game();
     const before = state.date;
-    const moved = applyScenePoint(state, { date: before, clock: "15:20" });
+    const moved = applyScenePoint(state, { date: before, clock: "15:20" }, "header");
     expect(moved.ok).toBe(true);
     expect(state.date).toBe(before);
     expect(clockOf(state)).toBe("15:20");
@@ -1471,8 +1470,8 @@ describe("시계는 장면이 걸린 만큼 민다", () => {
 
   it("되감기지는 않는다 — 이미 지난 시각을 적어도 시계는 그대로다", () => {
     const state = game();
-    applyScenePoint(state, { date: state.date, clock: "15:20" });
-    applyScenePoint(state, { date: state.date, clock: "10:00" });
+    applyScenePoint(state, { date: state.date, clock: "15:20" }, "header");
+    applyScenePoint(state, { date: state.date, clock: "10:00" }, "header");
     expect(clockOf(state)).toBe("15:20");
   });
 });
@@ -1866,15 +1865,30 @@ describe("도착한 카드 — 한 줄에서 지목과 임무를 가른다", () 
     advanceTime(state, { days: SCOUT_DAYS });
     expect(state.pendingReportCards).toEqual([target.id]);
 
-    // 경기 중 — mock 캐스터가 도는 자리다. 줄은 그대로 있어야 한다
-    state.phase = "match";
-    runMockGmTurn(state, "진행");
-    expect(state.pendingReportCards).toEqual([target.id]);
+    stubRunTurn.mockImplementation(async (): Promise<TurnResult> => ({
+      text: `[${state.date} AM 10:00]\n@스티브 홀랜드: 알겠습니다.`,
+      history: { version: 1, provider: "google", model: "test", messages: [] },
+      historyBase: 0,
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      toolCallCount: 0,
+      stopReason: "completed",
+    }));
+    const previousMode = process.env.LLM_MODE;
+    process.env.LLM_MODE = "real";
+    try {
+      // 경기 중 — 중계가 도는 자리다. 줄은 그대로 있어야 한다
+      state.phase = "match";
+      await runGmTurn(state, "진행");
+      expect(state.pendingReportCards).toEqual([target.id]);
 
-    // 경기가 끝난 첫 평시 턴 — mock도 실모드와 같은 자리에서 꺼낸다
-    state.phase = "idle";
-    const peace = runMockGmTurn(state, "수고했다");
-    expect(peace.reports?.map((r) => r.playerId)).toEqual([target.id]);
+      // 경기가 끝난 첫 평시 턴 — 밀린 카드가 여기서 선다
+      state.phase = "idle";
+      const peace = await runGmTurn(state, "수고했다");
+      expect(peace.reports?.map((r) => r.playerId)).toEqual([target.id]);
+    } finally {
+      if (previousMode === undefined) delete process.env.LLM_MODE;
+      else process.env.LLM_MODE = previousMode;
+    }
     expect(state.pendingReportCards ?? []).toEqual([]);
   });
 });

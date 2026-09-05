@@ -12,8 +12,9 @@ import { invalidGameId } from "@/app/api/games/game-id";
  * 열린다 (없는 턴이 아니라 기록이 지워진 턴이다).
  *
  * `mode`를 함께 싣는 이유는 **`LLM_MODE=mock`이면 기록이 항상 비어 있기**
- * 때문이다 — 모의 GM은 `createGameLLM`을 지나지 않는다. 화면이 빈 기록을 고장으로
- * 읽지 않으려면 그 사실을 여기서 받아야 한다.
+ * 때문이다 — 대본 어댑터는 원문 기록을 붙이는 문(`createGameLLM`)을 지나지 않고 적을
+ * 요청도 없다 (models.md §2-1). 화면이 빈 기록을 고장으로 읽지 않으려면 그 사실을
+ * 여기서 받아야 한다.
  */
 export async function GET(
   _request: Request,

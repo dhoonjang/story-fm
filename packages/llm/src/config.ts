@@ -326,3 +326,18 @@ export function hasKey(provider: LlmProvider, env: LlmEnv = process.env): boolea
 export function keyNamesFor(provider: LlmProvider): string {
   return KEY_ENV_NAMES[provider].join(" 또는 ");
 }
+
+export type LlmMode = "mock" | "real";
+
+/**
+ * 지금 어느 모드인가 — `LLM_MODE`가 적혀 있으면 그것, 없으면 GM 에이전트의 키가
+ * 있는지로 정한다 (models.md §2).
+ *
+ * **키를 읽는 자리와 같은 파일에 있다.** "키가 있는가"와 "지금 어느 모드인가"가
+ * 갈리면 키가 있는 환경이 조용히 mock으로 돈다.
+ */
+export function resolveLlmMode(env: LlmEnv = process.env): LlmMode {
+  const forced = env.LLM_MODE;
+  if (forced === "mock" || forced === "real") return forced;
+  return hasKey(agentConfig("gm").provider, env) ? "real" : "mock";
+}

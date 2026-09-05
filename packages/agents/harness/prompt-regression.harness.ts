@@ -21,7 +21,7 @@ import {
   buildGmTools,
   buildTrainingPrompt,
   parseSceneHeader,
-  runMockGmTurn,
+  runGmTurn,
   sanitizeCasterText,
   sanitizeSceneText,
 } from "@story-fm/agents";
@@ -134,7 +134,12 @@ function identical(a: string, b: string): number {
 }
 
 /**
- * 감독 발화 코퍼스 — 발화 하나와 **그 발화가 겨냥한 도구** 하나.
+ * 감독 발화 코퍼스 — **대본의 키**와 그 말이 닿아야 할 코어 명령.
+ *
+ * 모의 세션은 자연어를 해석하지 않으므로(agents.md §8) 여기 서는 것은 표의 키
+ * 그대로다. 그래서 적중률이 재는 것은 「모의 GM이 말을 알아듣는가」가 아니라
+ * **표의 한 줄이 실 경로를 지나 그 명령까지 닿는가**다 — 도구 표면이 갈리거나
+ * 해석기 배선이 끊기면 여기서 떨어진다.
  *
  * 조회 도구는 호출 기록을 남기지 않으므로(prompts.md §2) 상태를 바꾸는 도구만 겨눈다.
  * 선수 이름은 세계에서 꺼낸다 — 카탈로그가 바뀌어도 코퍼스가 따라온다.
@@ -142,14 +147,14 @@ function identical(a: string, b: string): number {
 function corpusOf(state: GameState): ReadonlyArray<readonly [string, string]> {
   const who = userPlayers(state)[0]?.name ?? "";
   return [
-    ["4-4-2로 바꾸자, 좀 더 공격적으로", "set_tactics"],
-    ["훈련은 패스 위주로 화요일 오전에 넣자", "set_training"],
-    ["수요일은 훈련 쉬자", "set_training"],
-    [`주장은 ${who}으로 가자`, "set_captain"],
-    ["다들 모여, 한마디 하겠다", "team_talk"],
-    [`${who} 재계약 진행해줘`, "open_renewal"],
-    [`${who} 좀 불러줘, 얘기 좀 하자`, "talk_to_player"],
-    ["하루 넘어가자", "시간 경과"],
+    ["4-4-2로 바꾸고 공격적으로 가자", "set_tactics"],
+    ["평일 오전은 세트피스 반복 훈련 잡아줘", "set_training"],
+    ["훈련 쉬자", "set_training"],
+    [`${who} 주장 시키자`, "set_captain"],
+    ["다들 모여봐", "team_talk"],
+    ["계약 만료 다가오는 선수 재계약 하자", "open_renewal"],
+    [`${who} 면담 좀 하자`, "talk_to_player"],
+    ["하루 넘기자", "시간 경과"],
   ] as const;
 }
 
@@ -174,16 +179,17 @@ interface CasterArm {
  * 하나뿐이다. 여기서 읽는 것은 그 체가 **모의 중계에서 아무것도 걷지 않는가**와,
  * 걷고 난 뒤에도 **첫 줄의 시각 헤더가 그대로인가**다.
  */
-function casterArm(seed: number): CasterArm {
+async function casterArm(seed: number): Promise<CasterArm> {
   const state = build(seed, "이감독", BACKGROUND);
   // 경기일까지 — 추첨·기한 같은 것들이 중간에 시계를 세운다
   for (let guard = 0; guard < 40 && state.phase !== "matchday"; guard += 1) {
     advanceTime(state, "next_match");
   }
-  runMockGmTurn(state, "경기 시작하자");
+  await runGmTurn(state, "경기 시작하자");
   const arm: CasterArm = { turns: 0, rawLines: 0, keptLines: 0, headers: 0 };
   for (let t = 0; t < MATCH_TURN_CAP && state.phase === "match"; t += 1) {
-    const text = runMockGmTurn(state, "경기 진행", undefined, { kind: "advance_match" }).text ?? "";
+    const text =
+      (await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" })).text ?? "";
     if (text.length === 0) continue;
     arm.turns += 1;
     arm.rawLines += textLines(text).length;
@@ -197,7 +203,7 @@ function casterArm(seed: number): CasterArm {
 }
 
 describe("프롬프트 회귀", () => {
-  it("층의 글자·프리픽스 안정성 · 모의 세션의 문법과 도구 적중률 · 중계 위생", () => {
+  it("층의 글자·프리픽스 안정성 · 모의 세션의 문법과 도구 적중률 · 중계 위생", async () => {
     const state = build(7, "김감독", BACKGROUND);
     const other = build(21, "박감독", OTHER_BACKGROUND);
 
@@ -221,7 +227,7 @@ describe("프롬프트 회귀", () => {
     const called = new Set<string>();
 
     for (const [said, want] of corpus) {
-      const turn = runMockGmTurn(session, said);
+      const turn = await runGmTurn(session, said);
       const names = turn.toolCalls.map((call) => call.name);
       for (const name of names) called.add(name);
       if (names.includes(want)) hits += 1;
@@ -240,7 +246,7 @@ describe("프롬프트 회귀", () => {
       if ((textLines(parsed.body)[0] ?? "").startsWith("@")) grammatical += 1;
     }
 
-    const caster = casterArm(11);
+    const caster = await casterArm(11);
     const layers = fixed.length + reference.length + stateNote.length;
     const readings: Readings<typeof PROMPT_REGRESSION> = {
       "고정층 글자": fixed.length,

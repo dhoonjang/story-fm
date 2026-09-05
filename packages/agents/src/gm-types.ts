@@ -121,8 +121,8 @@ export class GmTurnFailure extends Error {
  * 목록에 없는 이름이 호출된 것처럼 읽힌다 — 그 기록은 헤더 방식으로
  * 바뀌며 사라졌다. 한글이라 영문 호출 이름들과 한눈에 갈린다.
  *
- * gm.ts가 아니라 여기 두는 이유는 순환 참조다 — gm이 mock-gm을 부르는데
- * mock-gm도 이 이름을 쓴다.
+ * gm.ts가 아니라 여기 두는 이유는 순환 참조다 — 이 이름을 쓰는 자리가 gm.ts와
+ * 그것이 부르는 형제 모듈에 걸쳐 있다.
  */
 export const TIME_PASSED = "시간 경과";
 

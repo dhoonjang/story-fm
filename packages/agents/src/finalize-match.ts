@@ -20,7 +20,13 @@ import {
   type GameState,
   type MatchRatingBrief,
 } from "@story-fm/engine";
-import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import {
+  agentConfig,
+  createGameLLM,
+  resolveLlmMode,
+  type GameLLM,
+  type GameToolSpec,
+} from "@story-fm/llm";
 import { agingDeclineLine } from "./aging-line";
 import { sanitizeCasterText } from "./gm-input";
 import type { GmToolCall } from "./gm-types";
@@ -229,6 +235,8 @@ export async function runFinalizeMatch(
   llm?: GameLLM,
 ): Promise<FinalizeOutcome> {
   if (brief.players.length === 0) return { settled: 0, closing: "" };
+  // mock 모드에는 부를 모델이 없다 — 앵커가 그대로 남는다 (agents.md §8)
+  if (llm === undefined && resolveLlmMode() === "mock") return { settled: 0, closing: "" };
   let settled = 0;
   let closing = "";
   let client = llm;

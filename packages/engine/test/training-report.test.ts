@@ -4,6 +4,7 @@ import {
   ATTR_STEP_MIN,
   MATCH_ATTR_CAP,
   POSITION_TRAIN_MAX,
+  SESSIONS_PER_WEEK,
   TRAINING_ATTR_CAP,
   TACTIC_GAIN_MAX,
   TACTIC_GAIN_MIN,
@@ -17,6 +18,7 @@ import {
   recordEmptyTrainingReport,
   reservePlayers,
   setPlayerTraining,
+  settlementWeeks,
   trainingSettled,
   trainsWithFirstTeam,
   userPlayers,
@@ -52,6 +54,48 @@ function trainOneDay(state: GameState, focus: string[], label = "훈련"): Train
   const from = state.date;
   const result = advanceTime(state, { days: 1 });
   return buildTrainingBrief(state, result.trained?.sessions ?? [], { from, to: state.date });
+}
+
+/**
+ * **한 주치** 훈련을 걸고 그만큼 진행 — 판정의 눈금이 그대로 반영되는 폭이다
+ * (`settlementWeeks` = 1).
+ *
+ * 결산의 폭은 소화된 세션 수에 비례하므로(docs/data/player.md §6.1), 사다리 자체를
+ * 보는 케이스는 하루치가 아니라 여기서 본다 — 하루치 브리프에는 배율 0.2가 걸려
+ * 있어 "판정 −1이 적응도 −1"이 성립하지 않는다. 감독이 건 세션만 남겨 기본 배치의
+ * 이중 세션이 폭을 흔들지 않게 한다.
+ */
+function clearWeekAhead(state: GameState): GameState {
+  afterSquadReturn(state);
+  // 경기가 끼면 진행이 경기일에서 멈춰 한 주가 안 채워진다 — 경기 없는 창으로 옮긴다
+  const matchDates = new Set(
+    state.matches
+      .filter((m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId)
+      .map((m) => m.date),
+  );
+  const blocked = () =>
+    Array.from({ length: SESSIONS_PER_WEEK }, (_, i) => addDays(state.date, i + 1)).some((d) =>
+      matchDates.has(d),
+    );
+  for (let guard = 0; blocked() && guard < 60; guard++) state.date = addDays(state.date, 1);
+  return state;
+}
+
+function trainOneWeek(state: GameState, focus: string[], label = "훈련"): TrainingBrief {
+  clearWeekAhead(state);
+  const from = state.date;
+  const dates = Array.from({ length: SESSIONS_PER_WEEK }, (_, i) => addDays(from, i + 1));
+  setTraining(state, {
+    sessions: dates.map((date) => ({ date, slot: "am" as const, label, focus: focus as never })),
+  });
+  const result = advanceTime(state, { days: SESSIONS_PER_WEEK });
+  const brief = buildTrainingBrief(state, result.trained?.sessions ?? [], {
+    from,
+    to: state.date,
+  })!;
+  const sessions = brief.sessions.filter((s) => s.ordered);
+  expect(sessions.length, "한 주치 세션이 다 걸리지 않았다").toBe(SESSIONS_PER_WEEK);
+  return { ...brief, sessions };
 }
 
 /**
@@ -93,22 +137,9 @@ describe("훈련 결산 브리프", () => {
 describe("결과는 훈련 날짜별로 남는다", () => {
   it("판정을 한 번에 돌려도 성장 로그는 그날그날 찍힌다", () => {
     const state = afterSquadReturn(createTestGame(7));
-    const days = [1, 2, 3].map((n) => addDays(state.date, n));
-    setTraining(state, {
-      sessions: days.map((date) => ({
-        date,
-        slot: "am" as const,
-        label: "전술 조직 훈련",
-        focus: ["tactical" as const],
-      })),
-    });
-    const from = state.date;
-    const result = advanceTime(state, { days: 3 });
-    const brief = buildTrainingBrief(state, result.trained?.sessions ?? [], {
-      from,
-      to: state.date,
-    })!;
-    expect(brief.sessions.length, "사흘치 세션이 한 브리프에 묶인다").toBeGreaterThanOrEqual(3);
+    const brief = trainOneWeek(state, ["tactical"], "전술 조직 훈련");
+    const days = brief.sessions.map((s) => s.date);
+    expect(brief.sessions.length, "한 주치 세션이 한 브리프에 묶인다").toBe(SESSIONS_PER_WEEK);
     // 세션마다 일정 엔트리를 가리킨다 — 성장 로그의 출처가 된다
     for (const s of brief.sessions) expect(s.entryId).toBeTruthy();
 
@@ -120,7 +151,8 @@ describe("결과는 훈련 날짜별로 남는다", () => {
       brief,
       targets.map((t, i) => ({
         playerId: t.playerId,
-        tacticGain: 1,
+        // 한 주치 폭의 최대 — 적응도가 눈금을 확실히 넘어야 성장 로그에 줄이 선다
+        tacticGain: TACTIC_GAIN_MAX,
         attribute: null,
         note: "",
         date: days[i % days.length]!,
@@ -137,10 +169,16 @@ describe("결과는 훈련 날짜별로 남는다", () => {
 
   it("판정이 엉뚱한 날짜를 대면 마지막 훈련일로 떨어진다", () => {
     const state = createTestGame(7);
-    const brief = trainOneDay(state, ["tactical"])!;
+    const brief = trainOneWeek(state, ["tactical"]);
     const target = brief.subjects[0]!;
     applyTrainingOutcomes(state, brief, [
-      { playerId: target.playerId, tacticGain: 1, attribute: null, note: "", date: "1999-01-01" },
+      {
+        playerId: target.playerId,
+        tacticGain: TACTIC_GAIN_MAX,
+        attribute: null,
+        note: "",
+        date: "1999-01-01",
+      },
     ]);
     const logged = state.growthLog.filter((g) => g.origin === "training-settlement");
     expect(logged.length).toBeGreaterThan(0);
@@ -153,7 +191,7 @@ describe("결과는 훈련 날짜별로 남는다", () => {
 describe("성장은 곡선을 타고 쌓인다 — 판정 한 번이 곧 한 칸은 아니다", () => {
   it("전성기를 지난 선수는 판정 한 번으로 오르지 않는다 — 대신 쌓인다", () => {
     const state = createTestGame(7);
-    const brief = trainOneDay(state, ["stamina"], "러닝")!;
+    const brief = trainOneWeek(state, ["stamina"], "러닝");
     // 나이·수준·잠재력을 곡선이 확실히 깎는 자리에 놓는다
     const target = brief.subjects[0]!;
     const player = playerById(state, target.playerId)!;
@@ -192,9 +230,9 @@ describe("성장은 곡선을 타고 쌓인다 — 판정 한 번이 곧 한 칸
     expect(player.growthCarry?.stamina ?? 0).toBeLessThan(1);
   });
 
-  it("유망주는 판정 한 번에 한 칸 오른다", () => {
+  it("유망주는 한 주치 결산 한 번에 한 칸 오른다", () => {
     const state = createTestGame(7);
-    const brief = trainOneDay(state, ["stamina"], "러닝")!;
+    const brief = trainOneWeek(state, ["stamina"], "러닝");
     const target = brief.subjects[0]!;
     const player = playerById(state, target.playerId)!;
     player.birthdate = `${Number(state.date.slice(0, 4)) - 18}-01-01`;
@@ -215,7 +253,7 @@ describe("성장은 곡선을 타고 쌓인다 — 판정 한 번이 곧 한 칸
 
   it("잠재력에 닿은 선수는 아무리 받아도 오르지 않는다", () => {
     const state = createTestGame(7);
-    const brief = trainOneDay(state, ["stamina"], "러닝")!;
+    const brief = trainOneWeek(state, ["stamina"], "러닝");
     const target = brief.subjects[0]!;
     const player = playerById(state, target.playerId)!;
     player.attributes.potential = player.attributes.stamina;
@@ -236,10 +274,121 @@ describe("성장은 곡선을 타고 쌓인다 — 판정 한 번이 곧 한 칸
   });
 });
 
+/**
+ * **결산의 폭은 소화된 세션 수에 비례한다** — 결산은 턴이 넘긴 구간마다 도므로,
+ * 폭이 결산당 고정이면 하루씩 진행한 감독이 같은 훈련으로 다섯 배를 가져간다.
+ * 여기서 보는 것은 그 등식 하나다: **하루치 다섯 번 = 한 주치 한 번.**
+ */
+describe("결산의 폭은 세션 수에 비례한다", () => {
+  /** 픽스처는 describe당 하나 — 케이스마다 다른 선수·축을 쓴다 */
+  const state = afterSquadReturn(createTestGame(7));
+
+  it("한 세션짜리 결산 다섯 번이 다섯 세션짜리 결산 한 번과 같다", () => {
+    expect(settlementWeeks(SESSIONS_PER_WEEK), "한 주치가 배율 1이 아니다").toBe(1);
+    const week = trainOneWeek(state, ["stamina", "pace"], "체력 훈련");
+    const target = week.subjects[0]!.playerId;
+    const player = playerById(state, target)!;
+    /**
+     * 곡선이 한 칸을 안 내주는 자리에 둔다 — 캐리에 남은 몫을 그대로 견준다.
+     * 두 축은 같은 노화 곡선(이르게 정점)이라 `axisClockFactor`가 같고, 같은 선수라
+     * 직업의식도 같다 — 남는 차이는 폭뿐이다.
+     */
+    player.birthdate = `${Number(state.date.slice(0, 4)) - 30}-01-01`;
+    player.attributes.stamina = 85;
+    player.attributes.pace = 85;
+    player.attributes.potential = 88;
+
+    // 하루씩 진행한 감독 — 세션 하나짜리 결산 다섯 번
+    for (const session of week.sessions) {
+      applyTrainingOutcomes(state, { ...week, sessions: [session] }, [
+        { playerId: target, tacticGain: 0, attribute: "stamina", attributeStep: 1, note: "" },
+      ]);
+    }
+    // 손잡이로 일주일을 넘긴 감독 — 같은 훈련을 한 번에
+    applyTrainingOutcomes(state, nextSettlement(state, week), [
+      { playerId: target, tacticGain: 0, attribute: "pace", attributeStep: 1, note: "" },
+    ]);
+
+    expect(player.attributes.stamina, "하루치 다섯 번이 한 칸을 넘겼다").toBe(85);
+    expect(player.growthCarry?.stamina ?? 0, "하루치 결산이 아무것도 안 남겼다").toBeGreaterThan(0);
+    expect(player.growthCarry?.stamina ?? 0, "감독의 턴 페이스가 성장 속도를 갈랐다").toBeCloseTo(
+      player.growthCarry?.pace ?? 0,
+      10,
+    );
+  });
+
+  it("전술 적응도도 세션 수만큼만 접혀 들어간다", () => {
+    const week = trainOneWeek(state, ["tactical"]);
+    const target = week.subjects[0]!.playerId;
+    const assignment = assignmentsOf(state, state.userTeamId).find((a) => a.playerId === target)!;
+    const row = {
+      playerId: target,
+      tacticGain: TACTIC_GAIN_MAX,
+      attribute: null,
+      note: "",
+    } as const;
+    const start = 40;
+
+    assignment.familiarity = start;
+    applyTrainingOutcomes(state, { ...week, sessions: week.sessions.slice(0, 1) }, [row]);
+    const oneSession = assignment.familiarity - start;
+
+    // 같은 자리에서 다시 — 흡수 곡선은 지금 위치가 정하므로 출발점을 되돌린다
+    assignment.familiarity = start;
+    applyTrainingOutcomes(state, nextSettlement(state, week), [row]);
+    const fullWeek = assignment.familiarity - start;
+
+    expect(oneSession, "하루치가 적응도를 아예 안 움직였다").toBeGreaterThan(0);
+    expect(fullWeek).toBeCloseTo(oneSession * SESSIONS_PER_WEEK, 10);
+  });
+
+  it("표식과 근거는 곱하지 않는다 — 눈에 띈 것은 양이 아니다", () => {
+    const week = trainOneWeek(state, ["stamina"], "체력 훈련");
+    const target = week.subjects[0]!.playerId;
+    const report = applyTrainingOutcomes(state, { ...week, sessions: week.sessions.slice(0, 1) }, [
+      {
+        playerId: target,
+        tacticGain: 0,
+        attribute: null,
+        note: "마지막까지 남아 뛰었다",
+        mark: "standout",
+      },
+    ])!;
+    expect(report.sessions, "하루치 결산이다").toBe(1);
+    const mark = report.marks.find((m) => m.gamePlayerId === target)!;
+    expect(mark.code).toBe("standout");
+    expect(mark.note).toBe("마지막까지 남아 뛰었다");
+  });
+
+  it("대화 창은 지난 결산 카드 이후다 — 같은 턴이 두 브리프에 겹치지 않는다", () => {
+    // 주문은 **이 구간이 시작하는 날**에 서야 한다 — 창을 먼저 잡고 그 위에 얹는다
+    const fresh = clearWeekAhead(afterSquadReturn(createTestGame(7)));
+    const order = "체력을 끌어올려라";
+    fresh.chat.push({ role: "user", text: order, toolCalls: [], at: fresh.date });
+
+    const first = trainOneWeek(fresh, ["stamina"], "체력 훈련");
+    expect(
+      first.chat.map((c) => c.text),
+      "이 턴의 주문이 브리프에 안 실렸다",
+    ).toContain(order);
+    // 판정이 비어도 카드는 선다 — 다음 창의 시작이 그 카드의 끝 날짜다
+    applyTrainingOutcomes(fresh, first, []);
+
+    // 결산이 끝난 뒤 그 턴의 장면이 실린다 — 다음 브리프의 첫 줄이 될 자리
+    const scene = "훈련장은 조용했다";
+    fresh.chat.push({ role: "model", text: scene, toolCalls: [], at: fresh.date });
+
+    const second = trainOneWeek(fresh, ["stamina"], "체력 훈련");
+    const texts = second.chat.map((c) => c.text);
+    expect(texts, "결산 뒤의 장면이 다음 브리프에서 빠졌다").toContain(scene);
+    expect(texts, "지난 결산이 이미 읽은 주문이 다시 실렸다").not.toContain(order);
+  });
+});
+
 describe("판정의 상한 — 한 번에 게임을 크게 흔들 수 없다", () => {
   it("전술 적응도 판정은 −1~3 중 하나로 접힌다", () => {
     const state = createTestGame(7);
-    const brief = trainOneDay(state, ["tactical"])!;
+    const brief = trainOneWeek(state, ["tactical"]);
     const target = brief.subjects[0]!;
     const famOf = () =>
       assignmentsOf(state, state.userTeamId).find((a) => a.playerId === target.playerId)!
@@ -278,7 +427,7 @@ describe("판정의 상한 — 한 번에 게임을 크게 흔들 수 없다", (
 
   it("능력치는 구간당 몇 명까지만 — 전원에게 줄 수 없다", () => {
     const state = createTestGame(7);
-    const brief = trainOneDay(state, ["stamina"], "러닝")!;
+    const brief = trainOneWeek(state, ["stamina"], "러닝");
     const before = new Map(
       brief.subjects.map((s) => [s.playerId, playerById(state, s.playerId)!.attributes.stamina]),
     );
@@ -328,7 +477,7 @@ describe("판정의 상한 — 한 번에 게임을 크게 흔들 수 없다", (
     player.positions.push({ position: learned, proficiency: 99, isNatural: false });
     setPlayerTraining(state, { playerId: target, position: learned });
 
-    const brief = trainOneDay(state, ["tactical"])!;
+    const brief = trainOneWeek(state, ["tactical"]);
     const report = applyTrainingOutcomes(state, brief, [
       { playerId: target, tacticGain: 0, attribute: null, positionGain: 2, note: "" },
     ])!;
@@ -358,7 +507,7 @@ describe("한 결산은 장부를 한 번만 움직인다", () => {
   const state = afterSquadReturn(createTestGame(7));
 
   it("같은 선수가 두 행으로 오면 첫 행만 받는다", () => {
-    const brief = trainOneDay(state, ["stamina"], "러닝")!;
+    const brief = trainOneWeek(state, ["stamina"], "러닝");
     const target = brief.subjects[0]!.playerId;
     const player = playerById(state, target)!;
     // 곡선이 확실히 한 칸을 내주는 자리 — 두 행이 다 들어가면 두 칸이 오른다
@@ -386,7 +535,7 @@ describe("한 결산은 장부를 한 번만 움직인다", () => {
   });
 
   it("같은 브리프를 두 번 반영해도 장부는 한 번만 움직인다", () => {
-    const brief = trainOneDay(state, ["stamina"], "러닝")!;
+    const brief = trainOneWeek(state, ["stamina"], "러닝");
     const assignment = assignmentsOf(state, state.userTeamId, "starting")[0]!;
     const target = assignment.playerId;
     const player = playerById(state, target)!;
@@ -518,7 +667,7 @@ describe("개인 훈련 축은 걸어 둔 선수에게만 열린다", () => {
     setPlayerTraining(state, { playerId: target, axis: "finishing" });
 
     // 팀은 러닝만 했다 — 결정력은 팀 세션에 없는 축이다
-    const brief = trainOneDay(state, ["stamina"], "러닝")!;
+    const brief = trainOneWeek(state, ["stamina"], "러닝");
     expect(brief.trainedAxes, "판정자에게 후보 축으로 보이지 않는다").toContain("finishing");
 
     // 둘 다 자랄 자리를 만들어 둔다 — 여기서 가르는 건 곡선이 아니라 허용 축이다
@@ -577,7 +726,7 @@ describe("전향 훈련 — 상한과 완료 전이", () => {
     setPlayerTraining(state, { playerId: target, position: learned });
     const posOf = () => player.positions.find((p) => p.position === learned)!.proficiency;
 
-    const brief = trainOneDay(state, ["tactical"])!;
+    const brief = trainOneWeek(state, ["tactical"]);
     applyTrainingOutcomes(state, brief, [
       { playerId: target, tacticGain: 0, attribute: null, positionGain: 99, note: "" },
     ]);
@@ -602,7 +751,7 @@ describe("전향 훈련 — 상한과 완료 전이", () => {
     player.positions.push({ position: learned, proficiency: 89, isNatural: false });
     setPlayerTraining(state, { playerId: target, position: learned });
 
-    const brief = trainOneDay(state, ["tactical"])!;
+    const brief = trainOneWeek(state, ["tactical"]);
     applyTrainingOutcomes(state, brief, [
       {
         playerId: target,
@@ -774,7 +923,7 @@ describe("한 칸의 규칙 (applyAttributeStep)", () => {
 describe("훈련 결산 카드", () => {
   it("한 구간에 한 장 — 움직인 눈금과 갈래·근거가 함께 실린다", () => {
     const state = afterSquadReturn(createTestGame(7));
-    const brief = trainOneDay(state, ["stamina"], "체력 훈련")!;
+    const brief = trainOneWeek(state, ["stamina"], "체력 훈련");
     const [a, b] = brief.subjects;
     const report = applyTrainingOutcomes(state, brief, [
       {
