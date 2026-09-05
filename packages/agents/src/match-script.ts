@@ -43,6 +43,8 @@ const STOP_KO: Record<string, string> = {
   extra_time_start: "90분이 승부를 못 가렸다 — 연장으로 간다",
   extra_half_time: "연장 전반이 끝났다",
   full_time: "경기가 끝났다 — 마무리 중계",
+  /** 감독이 고른 자리다 — 여기서 지시를 걸고 이어 굴린다 (match.md §2) */
+  requested: "감독이 말한 분까지 왔다",
   flow: "특별한 사건 없이 시간이 흘렀다",
   shootout_start: "120분이 승부를 못 가렸다 — 승부차기로 간다",
   shootout_kick: "승부차기 한 발이 끝났다 — 다음 키커가 준비한다",

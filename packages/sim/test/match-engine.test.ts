@@ -263,6 +263,40 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     }
   });
 
+  /**
+   * **감독이 말한 분도 정지점이다** (match.md §2). 25분 상한이 닫은 자리(`flow`)와
+   * 이름이 갈려야 GM이 「조용해서 돌려준 자리」와 「감독이 고른 자리」를 구별하고,
+   * 그 분이 곧 구간의 시각이라야 "70분까지"에 63′이 돌아가지 않는다.
+   */
+  it("말한 분에서 끊는다 — 사유는 requested, 시각은 그 분", () => {
+    const s = setup();
+    const roll = (seed: number, maxMinutes?: number) =>
+      simulateSegment({
+        packet: s.packet,
+        ledger: s.ledger,
+        squads: s.squads,
+        tactics: s.tactics,
+        ...(maxMinutes !== undefined ? { maxMinutes } : {}),
+        rng: rngOf(seed),
+      });
+    const stops = new Set<string>();
+    for (const seed of [3, 8, 21, 42, 77]) {
+      const plan = roll(seed, 12);
+      const at = `seed ${seed} / ${plan.stop}`;
+      // 창 밖으로는 한 발도 나가지 않는다 — 골·부상이 먼저 오면 그 자리가 더 이르다
+      expect(plan.minute, at).toBeLessThanOrEqual(12);
+      expect(plan.clock, at).toBeLessThanOrEqual(12);
+      if (plan.stop === "requested") {
+        expect(plan.minute, at).toBe(12);
+        expect(plan.clock, at).toBeCloseTo(12);
+      }
+      stops.add(plan.stop);
+    }
+    expect(stops.has("requested")).toBe(true);
+    // 창을 좁히지 않은 구간에는 그 이름이 서지 않는다 — 25분 상한은 여전히 `flow`다
+    for (const seed of [3, 8, 21, 42, 77]) expect(roll(seed).stop).not.toBe("requested");
+  });
+
   it("정지점에서 멈춘다 — 골·퇴장·부상은 구간의 마지막 사건", () => {
     const { plans } = playMatch(setup(85, 70), 13);
     for (const plan of plans) {

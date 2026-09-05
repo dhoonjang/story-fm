@@ -29,6 +29,7 @@ import {
   normalizePacket,
   packetTagContext,
   packetTagText,
+  PHASE_END,
   positionGroupOf,
   positionGroupOfPlayer,
   positionGrowthTarget,
@@ -44,6 +45,7 @@ import type { CommandResult } from "../commands";
 import {
   MAX_EXPLOITS,
   accumulateFatigue,
+  advanceClock,
   addStats,
   applyEvents,
   buildStrengthPacket,
@@ -53,6 +55,7 @@ import {
   mergeSubstitutions,
   planAiSubstitution,
   planAiTacticalShift,
+  segmentStartClock,
   simulateSegment,
   subLimitsOf,
   type LineupSlot,
@@ -792,6 +795,23 @@ function planAiShift(
 }
 
 /**
+ * **감독이 말한 분이 굴릴 수 있는 자리인가** — 지금 시각보다 뒤, 이 국면의 끝 이하
+ * (match.md §2). 재는 자리는 장부의 분이 아니라 **연속 시계**다: 장부는 마지막 사건의
+ * 분에 서 있어 시계보다 뒤일 수 있고, 그 차이를 무시하면 이미 지나친 분이 통과한다.
+ *
+ * @returns 반려 문장, 굴릴 수 있으면 `null`
+ */
+function rejectUntilMinute(pending: PendingMatch, untilMinute: number): string | null {
+  const phase = pending.ledger.phase;
+  if (phase === "finished") return "경기가 이미 종료되었습니다";
+  const now = segmentStartClock(pending.ledger, pending.segmentClock);
+  if (untilMinute <= now) return `이미 ${Math.floor(now)}′입니다 — 그보다 뒤의 분을 말하세요`;
+  const end = PHASE_END[phase];
+  if (untilMinute > end) return `이 국면은 ${end}′에 끝납니다 — 목표 분은 그 이하여야 합니다`;
+  return null;
+}
+
+/**
  * 다음 정지점까지 코어가 굴린다 — **경기 결과가 정해지는 단일 지점**.
  *
  * mock과 실모드가 같은 함수를 쓴다. 차이는 사건을 누가 *이야기하는가*뿐이다
@@ -801,7 +821,15 @@ function planAiShift(
  * 구간 번호를 난수 채널에 넣으므로 같은 세이브·같은 개입이면 같은 경기가 나오고,
  * 감독이 개입하면 패킷이 달라져 그다음 구간부터 확률이 바뀐다.
  */
-export function advanceSegment(state: GameState): {
+export function advanceSegment(
+  state: GameState,
+  /**
+   * 감독이 말한 목표 분 — 그 분에서 끊고 정지 사유는 `requested`다. 없으면 예전처럼
+   * 다음 정지점까지(상한 25분). 목표까지 25분이 넘으면 상한이 먼저 걸려 `flow`로
+   * 한 번 끊기므로, 목표에 닿는 것은 이어 부르는 `advanceMatchTo`의 몫이다.
+   */
+  options: { untilMinute?: number } = {},
+): {
   ok: boolean;
   plan: SegmentPlan | null;
   message: string;
@@ -812,6 +840,11 @@ export function advanceSegment(state: GameState): {
   }
   if (pending.ledger.phase === "finished") {
     return { ok: false, plan: null, message: "경기가 이미 종료되었습니다" };
+  }
+  const until = options.untilMinute;
+  if (until !== undefined) {
+    const rejected = rejectUntilMinute(pending, until);
+    if (rejected) return { ok: false, plan: null, message: rejected };
   }
   const match = currentMatch(state);
   const squadFor = (teamId: string, side: { onPitch: string[]; bench: string[] }) => ({
@@ -903,6 +936,14 @@ export function advanceSegment(state: GameState): {
      * 값이 없다 — 그때는 예전처럼 장부의 분이 출발점이다.
      */
     clock: pending.segmentClock,
+    /**
+     * 감독이 말한 분까지 남은 거리 — 구간 시뮬은 목표 분이 아니라 **굴릴 길이**를
+     * 받는다 (`SegmentInput.maxMinutes`). 출발점은 위 `clock`과 같은 자리이므로 같은
+     * 함수로 잰다.
+     */
+    ...(until !== undefined
+      ? { maxMinutes: until - segmentStartClock(pending.ledger, pending.segmentClock) }
+      : {}),
     rng,
   });
 
@@ -932,6 +973,12 @@ export function advanceSegment(state: GameState): {
     if (!applied.ok) return { ok: false, plan: null, message: applied.message };
     message = applied.message;
   }
+  /**
+   * **굴린 자리까지 장부의 시각을 민다** — 사건이 없거나 마지막 사건이 그보다 이를 때
+   * (감독이 말한 분에서 끊은 구간이 그렇다) 장부만 뒤에 남으면 "70분까지"에 63′이
+   * 돌아온다. 되감기지 않으므로 정지점까지 간 구간에는 아무 일도 하지 않는다.
+   */
+  pending.ledger = advanceClock(pending.ledger, plan.minute);
   // 흐름의 양(패스·슛·xg·선방)은 사건이 아니라 숫자로 쌓인다
   pending.ledger = addStats(pending.ledger, plan.stats);
   pending.segment = segment + 1;
@@ -955,7 +1002,7 @@ export function advanceSegment(state: GameState): {
 }
 
 /**
- * 캐스터가 선언한 분까지 굴린다 — **경기 시계가 움직이는 유일한 경로.**
+ * 선언한 분까지 굴린다 — **경기 시계가 움직이는 유일한 경로.**
  *
  * 구간 시뮬레이터는 한 번에 최대 25분까지만 가므로 목표에 닿을 때까지 이어
  * 부른다. 다만 **사건이 나면 거기서 멈춘다** — 골·퇴장·부상·하프타임은 감독이
@@ -965,6 +1012,13 @@ export function advanceSegment(state: GameState): {
 export function advanceMatchTo(
   state: GameState,
   targetMinute: number,
+  /**
+   * **감독이 그 분을 말했는가.** 말했으면 목표가 구간의 상한이 되어 정지점이 없어도
+   * 거기서 끊고(`requested`), 범위 밖이면 한 발도 굴리지 않고 반려한다 (match.md §2).
+   * 말하지 않았으면 목표는 "적어도 여기까지"라 구간은 다음 정지점까지 간다 — 진행
+   * 한 번이 곧 구간 하나인 보통의 턴이 이 갈래다.
+   */
+  options: { requested?: boolean } = {},
 ): {
   ok: boolean;
   events: MatchEvent[];
@@ -985,7 +1039,10 @@ export function advanceMatchTo(
     if (ledger.phase === "finished") break;
     if (ledger.minute >= targetMinute && events.length > 0) break;
 
-    const step = advanceSegment(state);
+    const step = advanceSegment(
+      state,
+      options.requested === true ? { untilMinute: targetMinute } : {},
+    );
     if (!step.ok || !step.plan) {
       return {
         ok: events.length > 0,
@@ -997,7 +1054,7 @@ export function advanceMatchTo(
     }
     events.push(...step.plan.events);
     stop = step.plan.stop;
-    // 감독이 반응해야 하는 사건에서는 목표에 못 미쳤어도 멈춘다
+    // 감독이 반응해야 하는 사건에서는 목표에 못 미쳤어도 멈춘다 — 감독이 말한 분도 그 자리다
     if (stop !== "flow") break;
     if (pending.ledger.minute >= targetMinute) break;
   }

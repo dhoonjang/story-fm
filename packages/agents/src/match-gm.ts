@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PHASE_END } from "@story-fm/domain";
 import {
   awaitingShootout,
   refreshPacket,
@@ -87,6 +88,22 @@ export const FINALIZE_MATCH_TOOL = "finalize_match";
 const EmptySchema = z.object({});
 
 /**
+ * 진행 도구의 인자 — **감독이 분을 말했을 때만** 실린다. 범위 판정은 코어가 하고
+ * (`advanceSegment`) 여기 상한은 경기가 가질 수 있는 마지막 분이다 (match.md §2).
+ */
+const AdvanceArgsSchema = z.object({
+  untilMinute: z
+    .number()
+    .int()
+    .min(1)
+    .max(PHASE_END.extra_second)
+    .optional()
+    .describe(
+      "감독이 「70분까지」처럼 분을 말했을 때만 — 그 분까지 굴리고 거기서 멈춘다. 지금 시각보다 뒤, 이 국면의 끝(45·90·105·120) 이하여야 한다",
+    ),
+});
+
+/**
  * 도구 정의 — 이름·설명·스키마. 핸들러는 턴마다 상태를 닫아 만든다(`buildMatchTools`).
  * 하네스가 고정층의 크기를 잴 때 이 셋을 읽는다.
  */
@@ -104,8 +121,8 @@ export const MATCH_TOOL_DEFINITIONS: ReadonlyArray<{
   {
     name: ADVANCE_MATCH_TOOL,
     description:
-      "경기를 다음 정지점(골·퇴장·부상·하프타임·종료)까지 굴린다. 지시가 마무리되고 경기가 이어질 자리에서 부른다. 굴리기 전에 상대 벤치도 판을 읽고 움직인다. 결과로 확정된 사건 목록과 구간 뒤의 장부·패킷이 온다.",
-    inputSchema: toToolSchema(EmptySchema),
+      "경기를 다음 정지점(골·퇴장·부상·하프타임·종료)까지 굴린다. 감독이 분을 말했으면 `untilMinute`에 실어 그 분까지 굴리고, 그 자리에서 걸 지시는 같은 턴에 이어 건다. 지시가 마무리되고 경기가 이어질 자리에서 부른다. 굴리기 전에 상대 벤치도 판을 읽고 움직인다. 결과로 확정된 사건 목록과 구간 뒤의 장부·패킷이 온다.",
+    inputSchema: toToolSchema(AdvanceArgsSchema),
   },
   {
     name: FINALIZE_MATCH_TOOL,
@@ -184,14 +201,21 @@ export function buildMatchTools(
       },
       {
         ...advance!,
-        handle: async () => {
+        handle: async (input: unknown) => {
           const pending = state.pendingMatch;
           if (!pending) return { ok: false, message: "진행 중인 경기가 없습니다" };
           if (pending.ledger.phase === "finished" && !awaitingShootout(state)) {
             return { ok: false, message: "경기가 끝났습니다 — 마감할 차례입니다" };
           }
+          const parsed = AdvanceArgsSchema.safeParse(input ?? {});
+          if (!parsed.success) {
+            return { ok: false, message: "untilMinute는 이 경기의 분입니다 — 없으면 비워 두세요" };
+          }
           const applied = applyTacticOrders(state, { ops: {} }, ctx.calls, ctx.goals, ctx.cards, {
             roll: true,
+            ...(parsed.data.untilMinute !== undefined
+              ? { untilMinute: parsed.data.untilMinute }
+              : {}),
           });
           return {
             ok: true,
