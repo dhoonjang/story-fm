@@ -51,6 +51,7 @@ import {
   DIRECTIVE_INTENSITY_KO,
   PLAYER_DIRECTIVE_KINDS,
   PLAYER_DIRECTIVE_KO,
+  POSITION_CODES,
   PROMISE_KIND_KO,
   PROMISE_KIND_MEANING,
   PROMISE_KINDS,
@@ -63,6 +64,8 @@ import {
   TACTIC_TOGGLES,
   TRAINING_MARK_KO,
   TRAINING_MARKS,
+  roleVocabularyText,
+  rolesFor,
 } from "@story-fm/domain";
 import { AXIS_AGING, agingDelta, createGame, interpretBackgroundHeuristic } from "@story-fm/engine";
 
@@ -450,6 +453,22 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
     }
     // 낱말을 가르치는 것은 해석 프롬프트 하나다 — 손으로 적으면 낱말표를 고쳐도 남는다
     expect(TACTIC_ORDERS_SYSTEM).toContain(SET_PIECE_ROUTINE_NEUTRAL);
+  });
+
+  /**
+   * **역할 50종의 낱말도 해석 프롬프트가 든다** (agents.md §3). `set_player_tactic.role`은
+   * 자리마다 목록이 달라 열거로 서지 못하는 자유 문자열이라, 표가 빠지면 "안쪽으로
+   * 파고들어"가 어느 명령에도 담기지 못하고 `unresolved`로 떨어진다 — 갈래 넷과 같은
+   * 실패고, 화면에는 드러나지 않는다.
+   */
+  it("해석 프롬프트가 자리별 역할 표를 통째로 싣는다", () => {
+    expect(TACTIC_ORDERS_SYSTEM).toContain(roleVocabularyText());
+    // 표가 비어도 위 줄은 통과한다 — 50종이 실제로 실렸는지는 역할마다 본다
+    for (const position of POSITION_CODES) {
+      for (const def of rolesFor(position)) {
+        expect(TACTIC_ORDERS_SYSTEM, `${position}: ${def.id}`).toContain(def.id);
+      }
+    }
   });
 
   /**

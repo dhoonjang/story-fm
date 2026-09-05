@@ -68,6 +68,7 @@ import {
   positionGroupOf,
   clampFamiliarity,
   defaultRoleOf,
+  findRole,
   inheritedRole,
   storedProficiencyFor,
   rolesFor,
@@ -2292,6 +2293,10 @@ export function setPlayerTraining(
  * 역할은 자리 위에 얹히는 축이다 — 같은 센터백이라도 노넌센스와 볼 플레잉은 요구
  * 역량이 다르고, 그 차이는 `roleFit`이 낸다. 그 자리에 없는 역할은 받지 않는다.
  *
+ * **표기는 이름·id·약어 셋 다 받는다**(`findRole`) — 전술판은 id를 보내고 감독의 말을
+ * 옮기는 해석기는 이름을 적는다. 한쪽만 받으면 말로 건 역할만 반려되고, 한 번 부르는
+ * 해석기에는 그 반려를 보고 다시 시도할 자리가 없다 (player.md §3.1).
+ *
  * ⚠️ **선발만 자리를 갖는다** — 벤치 배치의 `position`은 좌표가 아니라 주 포지션이라,
  * 그걸로 검증하면 화면이 말하는 자리와 다른 목록으로 반려한다 (player.md §3.1).
  */
@@ -2311,7 +2316,8 @@ export function setPlayerRole(
     return { ok: false, message: `${player.name}은 자리가 없습니다 — 먼저 선발로 세우세요` };
   }
   const options = rolesFor(assignment.position);
-  const def = options.find((r) => r.id === input.role || r.abbr === input.role);
+  // 감독이 부른 표기 그대로 견준다 — 화면은 id를, 해석기는 이름을 보낸다 (player.md §3.1)
+  const def = findRole(assignment.position, input.role);
   if (!def) {
     return {
       ok: false,

@@ -1130,8 +1130,9 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
   }
 
   const board = manager.reputation.board;
-  // 경고 수는 마지막 단계에서 멈춘다 — 4/3은 화면이 그릴 수 없는 숫자다.
-  // 평판 압박은 계속 걸린다(그게 마지막 경고를 마지막이게 하는 힘이다) (career.md §5)
+  // 경고 수는 마지막 단계에서 멈춘다 — 이 값을 말하는 자리가 `get_career`의 N/3이라
+  // 4/3은 셋 중 넷째를 부르는 숫자가 된다. 평판 압박은 계속 걸린다(그게 마지막 경고를
+  // 마지막이게 하는 힘이다) (career.md §5)
   const next = Math.min(warnings + 1, USER_WARNINGS_BEFORE_SACK);
   manager.lastWarnedOn = state.date;
 

@@ -1205,18 +1205,30 @@ describe("주장·전술·개인 지시", () => {
     expect(squadFamiliarity(state, state.userTeamId)).toBeCloseTo(home, 0);
   });
 
-  it("자리를 옮겨도 호환 역할은 유지하고 비호환 역할만 초기화한다", () => {
+  it("역할은 이름·id·약어로 걸리고, 자리를 옮겨도 호환 역할은 유지된다", () => {
     const state = createTestGame(7);
     const cb = pickCentreBack(state);
     expect(cb, "센터백 배치를 찾지 못했다").toBeTruthy();
 
-    // 그 자리에 없는 역할은 거부하고 고를 수 있는 목록을 알려 준다
-    const bad = setPlayerRole(state, { playerId: cb.playerId, role: "poacher" });
-    expect(bad.ok).toBe(false);
-    expect(bad.message).toContain("센터백");
+    // 그 자리에 없는 역할은 표기가 무엇이든 거부하고 고를 수 있는 목록을 알려 준다
+    for (const spelling of ["poacher", "포처", "P"]) {
+      const bad = setPlayerRole(state, { playerId: cb.playerId, role: spelling });
+      expect(bad.ok, spelling).toBe(false);
+      expect(bad.message, spelling).toContain("센터백");
+    }
 
-    const ok = setPlayerRole(state, { playerId: cb.playerId, role: "ball-playing-defender" });
-    expect(ok.ok).toBe(true);
+    /**
+     * 이름·id·약어는 **한 역할로 모인다** (player.md §3.1) — 전술판은 id를 보내고
+     * 감독의 말을 옮기는 해석기는 이름을 적는다. 이름으로 건 뒤의 둘이 `unchanged`인
+     * 것이 셋이 같은 역할에 닿았다는 뜻이다.
+     */
+    const ok = setPlayerRole(state, { playerId: cb.playerId, role: "볼 플레잉 디펜더" });
+    expect(ok.ok, ok.message).toBe(true);
+    for (const same of ["ball-playing-defender", "BPD"]) {
+      expect(setPlayerRole(state, { playerId: cb.playerId, role: same }).unchanged, same).toBe(
+        true,
+      );
+    }
     expect(
       assignmentsOf(state, state.userTeamId).find((a) => a.playerId === cb.playerId)!.roleId,
     ).toBe("ball-playing-defender");
