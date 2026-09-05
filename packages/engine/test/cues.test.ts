@@ -32,6 +32,7 @@ import {
   OWNER_SLACK,
   financeOf,
   internationalBreaksOf,
+  leagueOfTeamIn,
   openBoardDemand,
   OWNER_ARCHETYPE_LABELS,
   pendingApproach,
@@ -58,6 +59,7 @@ import type {
   BoardRequestKind,
   GamePlayer,
   PlayerIssueReason,
+  SeasonAward,
   Transfer,
 } from "@story-fm/domain";
 import { BOARD_REQUEST_KINDS, pressFactText } from "@story-fm/domain";
@@ -674,6 +676,24 @@ function closedOffer(
 }
 
 /**
+ * 지난 시즌의 상 한 줄 — **장부에 직접 세운다.** 시즌 전환을 굴리면 몇 분이 들고,
+ * 여기서 재는 것은 선정 규칙이 아니라 「그 상이 다가옴의 카드에 서는가」다.
+ */
+function award(state: GameState, player: GamePlayer, code: string, season: number): SeasonAward {
+  return {
+    code,
+    season,
+    competitionId: leagueOfTeamIn(state, state.userTeamId),
+    gamePlayerId: player.id,
+    playerName: player.name,
+    teamId: player.teamId,
+    apps: 38,
+    goals: 25,
+    assists: 10,
+  };
+}
+
+/**
  * 에이전트 채널 — **계약과 관심은 협상 테이블 건너편에서 온다** (people.md §8).
  *
  * 사다리 꼭대기(계단 5)에서만 서던 대리인이 계단 1부터 서는 자리라, 「누가 오는가」와
@@ -697,6 +717,49 @@ describe("계약과 관심 — 에이전트가 계단 1부터 온다", () => {
     expect(open.about).toBe(target.id);
     expect(open.facts[0]?.kind).toBe("contract-demand");
     expect(open.contextCard?.code).toBe("contract-demand");
+  });
+
+  /**
+   * 상은 **계약의 카드에만 한 장** 선다 (people.md §8 · season.md §6). 요구 주급은
+   * 상을 세지 않으므로 이 줄이 늘거나 사라져도 눈금에는 표시가 나지 않는다.
+   */
+  it("지난 시즌의 상이 대리인의 카드에 한 줄 선다 — 상이 없으면 그 줄도 없다", () => {
+    const bare = quiet(createTestGame(11));
+    gripe(bare, best(bare).id, "contract");
+    pressDays(bare, 20);
+    expect(pendingApproach(bare)!.facts.some((f) => f.kind === "award")).toBe(false);
+
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    const other = plains(state, 1).find((p) => p.id !== target.id)!;
+    state.awards = [
+      award(state, target, "top-scorer", state.season - 1),
+      award(state, target, "player-of-season", state.season - 1),
+      // 창 밖 — 그 전 시즌의 상은 서지 않는다
+      award(state, target, "young-player", state.season - 2),
+      award(state, other, "top-scorer", state.season - 1),
+    ];
+
+    // 사유가 다르면 붙지 않는다 — 상은 불만의 근거가 아니라 계약이 읽는 사실이다
+    gripe(state, other.id, "minutes");
+    gripe(state, target.id, "contract");
+    pressDays(state, 15);
+    const minutes = pendingApproach(state)!;
+    expect(minutes.topic).toBe("minutes");
+    expect(minutes.facts.some((f) => f.kind === "award")).toBe(false);
+    respondToApproach(state, { stance: "deflect" });
+
+    // 계약은 하루 5 — 임계 100을 넘는 날 대리인이 온다
+    for (let day = 0; day < 40 && pendingApproach(state) === null; day++) pressDays(state, 1);
+    const open = pendingApproach(state)!;
+    expect(open.topic).toBe("contract");
+    const cards = open.facts.filter((f) => f.kind === "award");
+    // 흥정의 자리는 시상식이 아니다 — 두 장을 받았어도 한 장이다
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.about).toBe(target.id);
+    // `about`이 이미 그 사람이다 — 이름을 다시 부르지 않는다
+    expect(cards[0]!.data?.name).toBeUndefined();
+    expect(cards[0]!.sharp).toBe(false);
   });
 
   it("재계약을 열면 압력이 식는다 — 불만은 그대로 남는다", () => {
