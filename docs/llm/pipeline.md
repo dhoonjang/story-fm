@@ -125,15 +125,15 @@ flowchart TB
   S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6
 ```
 
-| 층          | 블록                                     | 조립 함수                                | 담는 것 · 담지 않는 것                                                                |
-| ----------- | ---------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
-| ① 고정      | 도구 정의 · `GM_SYSTEM`                  | `buildGmTools` · `gm-prompt.ts`          | 규칙 전부. 세이브에 따라 달라지는 값(날짜·id·구단·선수)은 없다                        |
-| ② 레퍼런스  | `<club name>` · `<manager name tag>`     | `buildGmReference`                       | 구단 이름·역대, 감독 이름·태그·배경. **선수 이름·감독 수치·인물 카드는 없다**(캐시)   |
-| ③ 요약      | `<summary at>`                           | `buildGmDigest`                          | `HistoryDigest.text`(지난 일) · `.open`(열린 일)                                      |
-| ④ 이력      | 지난 턴들                                | `buildGmHistory` → `renderTurnGroup`     | 그 턴에 실렸던 인물 카드를 같은 자리에 다시 그린다 — 기억 줄은 빼고 신원까지          |
-| ⑤ 이번 턴   | `<characters>` → `<operator>` → `@감독:` | `buildGmTurnMessage` → `renderTurnGroup` | 카드 최대 셋(`selectCharacters`) · 조작 표시 문구(`operationLabel`) · 감독의 말       |
-| ⑥ 스냅샷    | `<snapshot>` 안의 태그들 · `<letters>`   | `buildGmStateNote` · `answerLetters`     | 오늘의 사실만 — 태그는 내용이 있을 때만 선다. 태그 목록은 [agents.md](./agents.md) §6 |
-| ⑦ 도구 결과 | 텍스트                                   | 각 도구의 `handle`                       | 코어의 답(`CommandReturn.message`) · 조회 뷰 · 해석기가 옮기지 못한 말                |
+| 층          | 블록                                     | 조립 함수                                | 담는 것 · 담지 않는 것                                                                     |
+| ----------- | ---------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------ |
+| ① 고정      | 도구 정의 · `GM_SYSTEM`                  | `buildGmTools` · `gm-prompt.ts`          | 규칙 전부. 세이브에 따라 달라지는 값(날짜·id·구단·선수)은 없다                             |
+| ② 레퍼런스  | `<club name>` · `<manager name tag>`     | `buildGmReference`                       | 구단 이름·역대·홈구장, 감독 이름·태그·배경. **선수 이름·감독 수치·인물 카드는 없다**(캐시) |
+| ③ 요약      | `<summary at>`                           | `buildGmDigest`                          | `HistoryDigest.text`(지난 일) · `.open`(열린 일)                                           |
+| ④ 이력      | 지난 턴들                                | `buildGmHistory` → `renderTurnGroup`     | 그 턴에 실렸던 인물 카드를 같은 자리에 다시 그린다 — 기억 줄은 빼고 신원까지               |
+| ⑤ 이번 턴   | `<characters>` → `<operator>` → `@감독:` | `buildGmTurnMessage` → `renderTurnGroup` | 카드 최대 셋(`selectCharacters`) · 조작 표시 문구(`operationLabel`) · 감독의 말            |
+| ⑥ 스냅샷    | `<snapshot>` 안의 태그들 · `<letters>`   | `buildGmStateNote` · `answerLetters`     | 오늘의 사실만 — 태그는 내용이 있을 때만 선다. 태그 목록은 [agents.md](./agents.md) §6      |
+| ⑦ 도구 결과 | 텍스트                                   | 각 도구의 `handle`                       | 코어의 답(`CommandReturn.message`) · 조회 뷰 · 해석기가 옮기지 못한 말                     |
 
 - **⑤와 ④는 같은 함수가 그린다.** 보낼 때(`buildGmTurnMessage`)와 다음 턴 이력에서
   다시 그릴 때(`buildGmHistory`) 둘 다 `renderTurnGroup`이므로 바이트까지 같고, 캐시
