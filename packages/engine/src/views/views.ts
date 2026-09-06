@@ -1563,6 +1563,14 @@ export interface MatchView {
   competition: string;
   stage: string;
   /**
+   * 어디서 치르나 — **홈 팀의 구장**(`clubProfileIn`). 킥오프 게이트의 데이트라인이
+   * 「대회 · 단계 · 경기장 · 날짜」로 읽는 값이다 (match.md §8).
+   *
+   * 미등재 클럽(어드민이 만든 팀)은 프로필에 구장 이름이 없어 `null`이고, 그때
+   * 데이트라인은 그 칸만 빠진 채 선다 — 빈 가운뎃점이 남지 않게.
+   */
+  stadium: string | null;
+  /**
    * `id`는 문장(`crestOf`)과 구단 색의 열쇠다 — 이름으로 되찾으면 어드민 편집에서 갈린다.
    * `colours`는 카탈로그의 공식 색 — 화면은 엔진을 값으로 못 읽으므로 여기 실려 간다
    * (ui/design-system.md §2). 없으면(어드민이 만든 클럽) 문장이 id 해시로 색을 낸다.
@@ -2533,6 +2541,7 @@ function buildMatchView(state: GameState): MatchView | null {
     matchId: match.id,
     competition: competitionShortName(match.competitionId),
     stage: competitionStageLabel(match.competitionId, match.stage ?? "league", match.round),
+    stadium: clubProfileIn(state, match.homeTeamId).stadium || null,
     home: {
       id: match.homeTeamId,
       name: teamNameIn(state, match.homeTeamId),
@@ -4546,8 +4555,16 @@ export interface MatchReportEventView {
 
 /** 한 팀의 경기 스탯 — 선수별 기록과 사건의 합, 두 벌로 두지 않는다 */
 export interface MatchReportTeamView {
+  /**
+   * 팀 id — 문장(`crestOf`)과 구단 색의 열쇠다 (ui/design-system.md §2). 종료 카드의
+   * 머리가 스코어보드와 **같은 해부**(플랭크 · 문장 · 이름 · 스코어)로 서려면 이름만으로는
+   * 모자란다 — 어드민 편집으로 이름이 갈리면 문장도 함께 갈린다.
+   */
+  id: string;
   name: string;
   short: string;
+  /** 카탈로그의 공식 색 — 화면은 엔진을 값으로 못 읽으므로 여기 실려 간다 */
+  colours?: ClubColours;
   ours: boolean;
   goals: number;
   shots: number;
@@ -4629,6 +4646,15 @@ export interface MatchReportView {
   /** 최우수 선수 — 평점에서 파생한다 (`motmOf`) */
   motm: { id: string; name: string; rating: number } | null;
   /**
+   * **이 경기가 표를 옮긴 몫** — 「12위 → 9위」 (match.md §8).
+   *
+   * 리그전이면서 우리 팀이 뛴 경기에만 선다. `after`는 이 경기의 킥오프 시각까지
+   * 치러진 경기로 세운 표, `before`는 거기서 **이 경기만** 뺀 표다 — 같은 라운드의
+   * 남의 결과는 양쪽에 다 들어 있으므로 두 순위의 차이는 오직 이 경기가 낸 것이고,
+   * 반년 뒤에 리포트를 열어도 같은 값이 나온다.
+   */
+  standings: { competition: string; before: number; after: number } | null;
+  /**
    * **사건이 남아 있는 경기인가.** 타 팀 간이 시뮬과 옛 세이브에는 사건이 없어
    * 타임라인이 득점 줄뿐이다 — 읽는 쪽이 그것을 "조용했던 경기"로 읽지 않게 한다.
    */
@@ -4677,6 +4703,36 @@ function goalTimelineOf(
       subCause: null,
     };
   });
+}
+
+/**
+ * 이 경기가 표를 옮긴 몫 — **같은 시점의 표를 두 번 세워 뺀다** (match.md §8).
+ *
+ * 기준선을 "오늘의 표"로 잡으면 그 사이 치러진 남의 경기까지 우리 결과인 양 읽히고,
+ * 리포트를 여는 날짜에 따라 값이 달라진다. 그래서 두 표 모두 **이 경기의 킥오프
+ * 시각까지**로 좁히고, 뺀 것은 이 경기 하나뿐이다.
+ */
+function standingsMoveOf(
+  state: GameState,
+  match: MatchRecord,
+  ourSide: "home" | "away" | null,
+): MatchReportView["standings"] {
+  // 녹아웃은 표에 들어가지 않고(`countsInStandings`), 남의 경기에는 물을 순위가 없다
+  const competitionId = match.competitionId;
+  if (ourSide === null || competitionId === null) return null;
+  if ((match.stage ?? "league") !== "league") return null;
+  const kickoff = { date: match.date, time: match.time ?? "" };
+  const playedBy = (m: MatchRecord) =>
+    m.date < kickoff.date || (m.date === kickoff.date && (m.time ?? "") <= kickoff.time);
+  const placeIn = (rows: readonly StandingRow[]) =>
+    rows.findIndex((r) => r.teamId === state.userTeamId) + 1;
+  const after = placeIn(computeStandings(state, competitionId, playedBy));
+  const before = placeIn(
+    computeStandings(state, competitionId, (m) => playedBy(m) && m.id !== match.id),
+  );
+  // 표에 우리 행이 없는 대회(국내 컵·미배정 대항전)는 순위를 말하지 않는다
+  if (after === 0 || before === 0) return null;
+  return { competition: competitionShortName(competitionId), before, after };
 }
 
 /**
@@ -4776,8 +4832,10 @@ export function buildMatchReport(state: GameState, matchId: string): MatchReport
   const sumOf = (side: "home" | "away", read: (p: MatchReportPlayerView) => number) =>
     players.reduce((sum, p) => (p.side === side ? sum + read(p) : sum), 0);
   const teamOf = (side: "home" | "away"): MatchReportTeamView => ({
+    id: teamIdOf[side],
     name: teamNameIn(state, teamIdOf[side]),
     short: teamShortNameIn(state, teamIdOf[side]),
+    colours: clubColoursOf(teamIdOf[side]),
     ours: teamIdOf[side] === state.userTeamId,
     goals: side === "home" ? result.homeGoals : result.awayGoals,
     // 팀 합계는 마감이 이미 적어 두었다 — 옛 경기만 선수별 기록에서 다시 센다
@@ -4819,6 +4877,7 @@ export function buildMatchReport(state: GameState, matchId: string): MatchReport
   const kicks = result.penalties?.kicks ?? [];
   const motm = motmOf(players);
   return {
+    standings: standingsMoveOf(state, match, ourSide),
     matchId: match.id,
     date: match.date,
     label: competitionLabel(match.competitionId, match.stage ?? "league", match.round),

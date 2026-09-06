@@ -169,9 +169,15 @@ export function MatchClock({ match }: { match: Match }) {
  * ⚠️ 경기 화면의 상단 띠에 선다. 어느 탭을 보든 사라지지 않아야 하는 하나이고,
  * 나머지 탭은 전부 "왜 그 스코어인가"를 설명하는 것들이다.
  */
-export function MatchHeadline({ match }: { match: Match }) {
+/**
+ * 경기 머리 — 상단 띠 아래에 붙는 스코어보드.
+ *
+ * `closing`은 **휘슬 뒤 걷히는 280ms**다 (design-system.md §5 모션 5). 종료 카드의
+ * 「확인」이 켜고, 그동안 판은 화면에 남아 위로 올라간다 — 킥오프에 내려온 길의 역순.
+ */
+export function MatchHeadline({ match, closing = false }: { match: Match; closing?: boolean }) {
   return (
-    <div className="match-headline">
+    <div className={closing ? "match-headline closing" : "match-headline"}>
       <Scoreboard match={match} />
       <GoalLog goals={match.goals} />
       <ShootoutLog shootout={match.shootout} />

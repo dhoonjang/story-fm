@@ -12,7 +12,7 @@
   font-size: var(--fs-sm);
 }
 
-/* 머리 — 대회·날짜 / 스코어 / 표식(연장·승부차기·MOTM) */
+/* 머리 — 대회·날짜 / 스코어보드 해부 / 표식(연장·승부차기·MOTM) */
 .mr-head {
   display: flex;
   flex-direction: column;
@@ -31,36 +31,87 @@
   font-style: normal;
   color: var(--text-3);
 }
-.mr-score {
+/**
+ * 스코어보드 해부 — 경기 화면(`.mv-score`)과 **같은 뼈대**다: 양 끝 구단 색 플랭크
+ * 6px · 문장 · 팀 이름 · 가운데 스코어. 면을 깔지 않는 것은 이 해부가 서는 두 자리
+ * (종료 카드 `--pop` · 달력 상세 `--panel`)의 바탕이 다르기 때문이다 — 플랭크와
+ * 스코어만으로 스코어버그가 읽힌다.
+ */
+.mr-scoreboard {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  align-items: baseline;
-  gap: var(--sp-3);
+  align-items: center;
+  gap: 2px var(--sp-3);
   width: 100%;
+  padding: var(--sp-2) var(--sp-3);
 }
-.mr-score b {
+/* 플랭크 — 양 끝 6px. 홈은 늘 왼쪽이고 색(`--club`/`--opp`)은 어느 쪽이 우리인지에
+   따라 갈리므로 컴포넌트가 인라인으로 준다 (경기 화면의 `.mv-flank`와 같은 규칙) */
+.mr-flank {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+}
+.mr-flank.home {
+  left: 0;
+}
+.mr-flank.away {
+  right: 0;
+}
+/* 두 팀 이름 — 우리 팀도 같은 잉크다. 어느 쪽이 우리인지는 플랭크의 구단 색이
+   말한다. 340px 자리에서는 이름이 접힌다 — 말줄임은 없다 (design-system §3) */
+.mr-sb-team {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
   min-width: 0;
-  color: var(--text-2);
-  font-weight: 600;
-}
-.mr-score b:first-of-type {
+  font-size: var(--fs-lg);
+  font-weight: 700;
   text-align: right;
 }
-.mr-score b:last-of-type {
+.mr-sb-team.away {
+  justify-content: flex-start;
   text-align: left;
 }
-/* 우리 팀은 밝다 — 스코어 어느 쪽이 우리인지가 색 하나로 갈린다 */
-.mr-score b.ours {
-  color: var(--text);
+.mr-sb-mid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
 /* 스코어 — 숫자와 대시만 서는 자리라 스코어 서체를 받는다(한글 없음) */
-.mr-score-num {
+.mr-sb-score {
   font-family: var(--font-score);
-  font-size: var(--fs-2xl);
+  font-size: var(--fs-3xl);
   font-weight: 700;
   line-height: var(--lh-fig);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
   white-space: nowrap;
+}
+/* 결과어 — 승/무/패는 상태의 색이다. 구단 색이 서는 자리가 아니다 (§2 충돌 규칙 1) */
+.mr-sb-outcome {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  font-style: normal;
+}
+.mr-sb-outcome.o-W {
+  color: var(--win);
+}
+.mr-sb-outcome.o-D {
+  color: var(--draw);
+}
+.mr-sb-outcome.o-L {
+  color: var(--loss);
+}
+@media (max-width: 699px) {
+  .mr-sb-score {
+    font-size: var(--fs-2xl);
+  }
 }
 .mr-marks {
   display: flex;
@@ -114,16 +165,46 @@
   color: var(--text-3);
   font-size: var(--fs-xs);
 }
-/* 자리표시 막대 — 펄스 없음(design-system.md §5). `.skel`의 애니메이션을 여기서 끈다 */
-.mr-skel {
-  height: 10px;
-  width: 100%;
-  background: var(--panel-2);
-  animation: none;
-  opacity: 1;
+/* ── 주요 사건 목차 ───────────────────────────────────────
+   골 · 경고 · 퇴장 · 교체만 분 순서로 **흐르는 한 줄**이다(경기 화면의 득점 기록과
+   같은 결). 세로로 쌓으면 아래 타임라인과 같은 모양이 되어 둘 다 안 읽힌다 */
+.mr-index {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--text-2);
 }
-.mr-skel.short {
-  width: 55%;
+.mr-idx {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.mr-idx i,
+.mr-idx em {
+  font-style: normal;
+  color: var(--text-3);
+}
+.mr-idx i {
+  font-variant-numeric: tabular-nums;
+}
+.mr-idx em {
+  font-size: var(--fs-2xs);
+}
+/* 우리 편 사건은 밝고 상대 것은 잠긴다 — 타임라인과 같은 규칙 */
+.mr-idx.ours {
+  color: var(--text);
+}
+.mr-idx.k-goal {
+  font-weight: 700;
+}
+.mr-idx.k-goal em {
+  color: var(--text-2);
+}
+.mr-idx.k-yellow_card em {
+  color: var(--warn);
+}
+.mr-idx.k-red_card em {
+  color: var(--loss);
 }
 
 /* ── 팀 스탯 대조 ──────────────────────────────────────────
@@ -394,6 +475,43 @@
   color: var(--text-3);
   font-size: var(--fs-2xs);
   border-bottom: 1px solid var(--line);
+}
+
+/* ── 순위 변화 — 이 경기 하나가 표를 옮긴 몫 ───────────────
+   「12위 → 9위」의 방향은 꺾쇠 픽토그램과 색이 낸다(화살표 글리프 금지 —
+   design-system §3). 「12위」는 한글이 붙는 낱말이라 스코어 서체가 아니다 */
+.mr-standings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.mr-st-comp {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+.mr-st-from {
+  color: var(--text-3);
+}
+.mr-st-move {
+  display: inline-flex;
+  align-items: center;
+}
+.mr-st-to {
+  font-weight: 600;
+}
+.mr-standings.m-up .mr-st-to,
+.mr-standings.m-up .mr-st-move {
+  color: var(--win);
+}
+.mr-standings.m-down .mr-st-to,
+.mr-standings.m-down .mr-st-move {
+  color: var(--loss);
+}
+.mr-standings.m-flat .mr-st-to {
+  color: var(--text-2);
 }
 
 /* ── 달력 상세의 접이식 ──────────────────────────────────── */

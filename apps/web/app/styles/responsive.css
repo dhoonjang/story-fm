@@ -85,6 +85,55 @@
     flex: none;
     min-height: auto;
   }
+  /**
+   * ── 경기의 앞뒤 두 카드는 **바닥에서 올라온다** ──────────────
+   *
+   * 가운데 뜬 카드는 폭이 남을 때의 모양이다. 이 폭에서는 좌우 여백이 카드를
+   * 눌러 팀시트 두 열도 선수 표도 서지 못한다. 시트는 폭을 다 쓰고, 위 모서리만
+   * 둥글고, 화면의 92%까지 오른다 (match.md §8 「700 아래 — 바닥 시트」).
+   */
+  .kickoff-gate,
+  .fulltime {
+    place-items: end center;
+    padding: 0;
+  }
+  .kickoff-card,
+  .fulltime-card {
+    width: 100%;
+    max-height: 92dvh;
+    border-radius: var(--r-md) var(--r-md) 0 0;
+    padding: var(--sp-5) var(--sp-4) var(--sp-4);
+  }
+  .kickoff-card {
+    overflow-y: auto;
+  }
+  /**
+   * 팀시트는 「선발 11명」 한 행으로 접힌다 — 두 열이 설 폭이 아니다.
+   *
+   * 손잡이는 숨은 체크박스 하나다(`kickoff-gate.tsx`). 넓은 화면에서는 그 손잡이가
+   * 걷혀 있어(`match-gate.css`) 팀시트가 늘 펼쳐진 채로 서고, 여기서만 접힌다 —
+   * 화면 폭을 JS로 재지 않으므로 첫 그림부터 맞는다.
+   * 접지 않는 것: 데이트라인 · 대진 · 감독 노트 · 주 버튼.
+   */
+  .kg-xi-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 36px;
+    padding: 0 var(--sp-2);
+    border-radius: var(--r-sm);
+    background: var(--panel-2);
+    color: var(--text);
+    font-size: var(--fs-md);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .kg-xi-toggle:focus-visible + .kg-xi-summary {
+    box-shadow: var(--ring);
+  }
+  .kg-xi-toggle:not(:checked) ~ .kg-sheets {
+    display: none;
+  }
 }
 
 /* ── 반응형 (세로가 짧은 화면) ───────────────────
