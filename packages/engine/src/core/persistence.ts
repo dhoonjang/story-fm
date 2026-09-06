@@ -33,11 +33,19 @@ import {
 import { SaveSchema } from "./save-schema";
 import { saveLockPath } from "./save-lock";
 import type { GamePhase, GameState } from "./state";
+import type { ClubColours } from "@story-fm/domain";
 import { ensureManagerPool, ensurePersonas } from "../world/persona";
 import { ensureStaffPool } from "../market/staff-market";
 import { ensureSquadNumbers } from "../squad/numbers";
 import { deriveNationality, playerCatalog } from "../world/catalog";
-import { addMissingClubs, ensureSeededManagers, recomputeOverall, teamNameIn } from "./state";
+import { teamCatalogById } from "../data/team-catalog";
+import {
+  addMissingClubs,
+  ensureSeededManagers,
+  recomputeOverall,
+  teamNameIn,
+  teamShortNameIn,
+} from "./state";
 
 export { dataDir };
 
@@ -609,6 +617,14 @@ export function listGames(): string[] {
 /** 게임 목록 화면용 요약 — 저장된 게임을 최근 생성 순으로 */
 export interface GameSummary {
   id: string;
+  /** 팀 id·약칭 — 목록 카드가 문장과 구단 색을 세우는 열쇠 */
+  teamId: string;
+  teamShortName: string;
+  /**
+   * 공식 색 — 카탈로그에서 팀 id로 읽는다 (사이드카에 쓰지 않는다: 세이브가 아니라
+   * 카탈로그의 것이다). 없으면(어드민이 만든 클럽) 문장이 id 해시로 색을 낸다.
+   */
+  colours?: ClubColours;
   teamName: string;
   managerName: string;
   season: number;
@@ -637,6 +653,9 @@ export type GameListEntry = ({ readable: true } & GameSummary) | UnreadableGame;
 function summaryOf(state: GameState): GameSummary {
   return {
     id: state.id,
+    teamId: state.userTeamId,
+    teamShortName: teamShortNameIn(state, state.userTeamId),
+    colours: teamCatalogById(state.userTeamId)?.colours,
     teamName: teamNameIn(state, state.userTeamId),
     managerName: state.manager.name,
     season: state.season,
@@ -740,7 +759,17 @@ function readSummary(id: string): GameListEntry | null {
         createdAt: f.createdAt,
       };
     }
-    for (const key of ["id", "teamName", "managerName", "date", "phase", "createdAt"]) {
+    // 팀 id·약칭이 없는 옛 사이드카는 버린다 — 한 번 본문에서 다시 지어 채운다
+    for (const key of [
+      "id",
+      "teamId",
+      "teamShortName",
+      "teamName",
+      "managerName",
+      "date",
+      "phase",
+      "createdAt",
+    ]) {
       if (typeof s[key] !== "string") return null;
     }
     if (typeof s.season !== "number") return null;
@@ -751,6 +780,9 @@ function readSummary(id: string): GameListEntry | null {
     return {
       readable: true,
       id: s.id as string,
+      teamId: s.teamId as string,
+      teamShortName: s.teamShortName as string,
+      colours: teamCatalogById(s.teamId as string)?.colours,
       teamName: s.teamName as string,
       managerName: s.managerName as string,
       season: s.season,

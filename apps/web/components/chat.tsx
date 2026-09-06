@@ -7,7 +7,8 @@ import { cutStamps } from "../lib/scene-stamp";
 import { hasRailHint } from "../lib/panel-hints";
 import { groupChips, groupPieces, splitStaging, weaveTurn } from "../lib/turn-pieces";
 import type { Utterance } from "../lib/turn-pieces";
-import { BROADCAST_SPEAKER, formatMoney, normalizeSpeaker } from "@story-fm/domain";
+import { BROADCAST_SPEAKER, formatMoney, formatScore, normalizeSpeaker } from "@story-fm/domain";
+import { contractUntil } from "../lib/dateline";
 import type { ScoutReportCard } from "@story-fm/domain";
 import { MarketCardView, MissionReportCardView } from "@/components/market-card";
 import { splitMarketCalls } from "@/lib/market-calls";
@@ -111,7 +112,7 @@ function GoalCard({ goal }: { goal: GoalMark }) {
       <span className="goal-scorer">{goal.scorer}</span>
       {goal.assist && <span className="goal-assist">도움 {goal.assist}</span>}
       <span className="goal-score">
-        {goal.team} {goal.score.home} : {goal.score.away}
+        {goal.team} <span className="fig">{formatScore(goal.score.home, goal.score.away)}</span>
       </span>
     </div>
   );
@@ -293,7 +294,7 @@ function ScoutReport({ report: r }: { report: ScoutReportCard }) {
           <em>잠재력</em>
           <b title={r.potential ? "잠재력 추정 구간" : "성장 여력을 짐작할 근거가 없다"}>
             {potentialLow !== null && potentialHigh !== null
-              ? `${potentialLow}~${potentialHigh}`
+              ? `${potentialLow}–${potentialHigh}`
               : "미지"}
           </b>
         </span>
@@ -322,7 +323,7 @@ function ScoutReport({ report: r }: { report: ScoutReportCard }) {
         {r.contractUntil && (
           <span>
             <em>계약</em>
-            <b>{r.contractUntil}</b>
+            <b>{contractUntil(r.contractUntil)}</b>
           </span>
         )}
       </div>

@@ -6,9 +6,12 @@ import {
   SET_PIECE_ROLE_KO,
   SET_PIECE_ROLE_MARK,
   formatMoney,
+  formatRating,
   positionProficiency,
   type SetPieceRole,
 } from "@story-fm/domain";
+import { IconCaptain, IconLeader, IconViceCaptain, type IconComponent } from "@/components/icons";
+import { humanDate } from "@/lib/dateline";
 
 import type { SetPieceTakersView, SquadRow } from "./types";
 
@@ -76,25 +79,32 @@ export function ovrTitle(p: SquadRow): string | undefined {
 }
 
 /**
- * 완장과 서열 — **한 글자로, 같은 모양의 세 자리** (docs/data/people.md §5-1).
+ * 완장과 서열 — **같은 완장 셋, 안쪽 글자만 다르다** (docs/data/people.md §5-1).
  *
  * 주장만 표식을 달던 자리다. 서열이 팀토크의 폭과 불만의 속도를 정하는데 화면에
  * 완장 하나만 서면, 감독은 그 판정이 어디서 나왔는지를 볼 자리가 없다.
- * 셋을 같은 글꼴·같은 크기의 원문자로 두어 **한 계열로 읽히게** 한다 — 서로 다른
- * 모양을 주면 세 표식이 각자 다른 뜻의 배지로 보인다.
+ * 셋을 같은 도형(`IconCaptain` 계열)으로 두어 **한 계열로 읽히게** 한다 — 서로 다른
+ * 모양을 주면 세 표식이 각자 다른 뜻의 배지로 보인다. 원문자 글리프(Ⓒ)는 쓰지
+ * 않는다 — 폰트마다 크기가 달라 이름 줄에서 홀로 튄다 (design-system.md §3).
  */
 export function Armband({ row }: { row: SquadRow }) {
-  const seat = row.isCaptain
-    ? { mark: "Ⓒ", label: "주장" }
+  const seat: { Icon: IconComponent; label: string } | null = row.isCaptain
+    ? { Icon: IconCaptain, label: "주장" }
     : row.isViceCaptain
-      ? { mark: "Ⓥ", label: "부주장" }
+      ? { Icon: IconViceCaptain, label: "부주장" }
       : row.leaderRank !== null
-        ? { mark: "Ⓛ", label: "라커룸 리더" }
+        ? { Icon: IconLeader, label: "라커룸 리더" }
         : null;
   if (!seat) return null;
+  const { Icon } = seat;
   return (
-    <i className="armband" title={`${seat.label} · 라커룸 서열 ${row.leaderRank ?? "-"}위`}>
-      {seat.mark}
+    <i
+      className="armband"
+      role="img"
+      aria-label={seat.label}
+      title={`${seat.label} · 라커룸 서열 ${row.leaderRank ?? "-"}위`}
+    >
+      <Icon size={13} />
     </i>
   );
 }
@@ -265,9 +275,9 @@ export function RatingTrend({ ratings }: { ratings: SquadRow["recentRatings"] })
         <span
           className={`rt-dot ${r.tone}`}
           key={i}
-          title={`${i + 1}번째 전 경기 평점 ${r.value.toFixed(1)}`}
+          title={`${i + 1}번째 전 경기 평점 ${formatRating(r.value, "match")}`}
         >
-          {r.value.toFixed(1)}
+          {formatRating(r.value, "match")}
         </span>
       ))}
     </span>
@@ -289,7 +299,7 @@ export function StatusBadges({ p }: { p: SquadRow }) {
       {p.injury && (
         <span
           className="tag st alert"
-          title={`${p.injury.bodyPart} · ${p.injury.severity} · 복귀 예상 ${p.injury.expectedReturn}`}
+          title={`${p.injury.bodyPart} · ${p.injury.severity} · 복귀 예상 ${humanDate(p.injury.expectedReturn)}`}
         >
           부상
         </span>

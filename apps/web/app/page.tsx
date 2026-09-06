@@ -2,11 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import type { ClubColours } from "@story-fm/domain";
 import { IconDatabase, IconMark, IconPlus, IconTrash } from "@/components/icons";
 import { GameListSkeleton } from "@/components/skeleton";
+import { Crest, clubStyle } from "@/components/crest";
+import { humanDate } from "@/lib/dateline";
 
 interface GameSummary {
   id: string;
+  /** 팀 id·약칭·공식 색 — 슬롯이 문장과 구단 띠를 세우는 열쇠 (ui/design-system.md §2) */
+  teamId: string;
+  teamShortName: string;
+  colours?: ClubColours;
   teamName: string;
   managerName: string;
   season: number;
@@ -147,17 +154,24 @@ export default function HomePage() {
               </button>
             </div>
           ) : (
-            <div key={g.id} className="game-card">
+            /* 슬롯마다 `--club*`가 선다 — 왼쪽 3px 띠와 문장이 어느 구단의 세이브인지를
+               이름보다 먼저 말한다 */
+            <div
+              key={g.id}
+              className="game-card"
+              style={clubStyle(g.colours, g.teamId, g.teamShortName)}
+            >
               {/* 카드를 여는 것은 링크다 — 가운데 클릭·키보드가 그냥 되고, 삭제
                   버튼과 조작이 겹치지 않는다 */}
               <Link className="game-card-body" href={`/game/${g.id}`} data-testid={`game-${g.id}`}>
+                <Crest id={g.teamId} shortName={g.teamShortName} colours={g.colours} size={32} />
                 <span className="game-card-main">
                   <span className="game-card-team">{g.teamName}</span>
                   <span className="game-card-sub">{g.managerName} 감독</span>
                 </span>
                 <span className="game-card-when">
                   <span className="game-card-season">시즌 {g.season}</span>
-                  <span className="game-card-date">{g.date}</span>
+                  <span className="game-card-date">{humanDate(g.date, { year: true })}</span>
                 </span>
               </Link>
               <button

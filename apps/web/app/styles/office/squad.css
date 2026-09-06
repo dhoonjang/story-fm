@@ -49,15 +49,14 @@
   gap: 5px;
   margin-left: auto;
   padding: 3px 9px 3px 7px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
+  border: none;
+  border-radius: var(--r-pill);
+  background: var(--panel-2);
+  color: var(--text-2);
   font-size: var(--fs-sm);
   cursor: pointer;
   transition:
     color var(--ease),
-    border-color var(--ease),
     background var(--ease);
 }
 .board-toggle svg {
@@ -65,13 +64,12 @@
   height: 15px;
 }
 .board-toggle:hover {
-  color: var(--fg);
-  border-color: var(--border-strong, var(--border));
+  color: var(--text);
+  background: var(--pop);
 }
 .board-toggle.on {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-ink);
+  background: var(--accent);
 }
 /**
  * 판을 접으면 **명단만 남는다** — 머리글도 한 열이 되어 책갈피가 명단 바로 위에
@@ -141,22 +139,12 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  /* 모서리를 자식이 넘지 않게 — 판의 초록이 각진 채로 삐져나온다 */
   overflow: hidden;
-}
-/* 판과 줄은 제 테두리를 내려놓는다 — 덩어리가 이미 두르고 있다 */
-.board-stack .pitch-board {
-  border: none;
-  border-radius: 0;
 }
 .board-stack .tactics-panel,
 .board-stack .mv-tactics {
-  border: none;
   /* 둘 사이의 선 하나 — 붙어 있되 어디까지가 판인지는 보인다 */
-  border-top: 1px solid var(--border);
-  border-radius: 0;
+  border-top: 1px solid var(--line);
 }
 .board-stack .mv-tactics.one {
   margin-top: 0;
@@ -187,8 +175,8 @@
   overflow-y: auto;
   padding: 12px 14px;
   background: var(--panel);
-  border-top: 1px solid var(--border);
-  animation: tac-grid-up 170ms var(--ease-panel);
+  border-top: 1px solid var(--line);
+  animation: tac-grid-up 160ms var(--ease-panel);
 }
 /* 아래에서 밀려 올라온다 — 손잡이(줄)에서 나온 것이 눈에 이어진다 */
 @keyframes tac-grid-up {
@@ -230,8 +218,6 @@
 /* 전술 패널 */
 .tactics-panel {
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
   padding: 12px 14px;
 }
 /**
@@ -295,7 +281,7 @@
 .tactics-brief i {
   margin-right: 4px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-style: normal;
 }
 .tactics-brief > span + span::before {
@@ -327,28 +313,37 @@
   color: var(--muted);
 }
 .tactic-steps {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   flex-wrap: wrap;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
 }
 .tactic-step {
   min-width: 24px;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--muted);
-  border-radius: var(--r-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  border-radius: var(--r-xs);
   padding: 2px 0;
   font-size: var(--fs-xs);
+  transition:
+    color var(--ease),
+    background var(--ease);
 }
 .tactic-step.wide {
   min-width: auto;
   padding: 2px 8px;
 }
+.tactic-step:hover {
+  color: var(--text);
+}
 .tactic-step.on {
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 700;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
 }
 .tactic-value {
   color: var(--text);
@@ -373,7 +368,7 @@
 .tactic-meter span {
   display: block;
   height: 100%;
-  background: var(--accent-2);
+  background: var(--text-2);
 }
 
 /**
@@ -394,8 +389,6 @@
   align-items: center;
   gap: 4px 8px;
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
   padding: 8px 14px;
   font-size: var(--fs-sm);
 }
@@ -408,9 +401,7 @@
   display: contents;
 }
 .board-stack .setpiece-panel {
-  border: none;
-  border-top: 1px solid var(--border);
-  border-radius: 0;
+  border-top: 1px solid var(--line);
 }
 .setpiece-head {
   color: var(--muted);
@@ -427,7 +418,7 @@
 .sp-role {
   grid-column: 1;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-style: normal;
 }
 /**
@@ -438,7 +429,7 @@
 .sp-pick {
   max-width: 150px;
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: none;
   border-radius: var(--r-sm);
   /**
    * ⚠️ **아래 낱말 칸(`tactic-step`)과 같은 상자여야 한다.** 네이티브 셀렉트의 기본
@@ -452,7 +443,7 @@
   font-size: var(--fs-xs);
 }
 .sp-pick:hover {
-  border-color: var(--muted);
+  background: var(--pop);
 }
 /* 무직 — 손잡이가 없는 자리는 글자로만 선다 (잠긴 버튼을 두지 않는다) */
 .sp-read {
@@ -471,8 +462,11 @@
   grid-column: 2 / -1;
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   flex-wrap: wrap;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
 }
 /**
  * 낱말 옆의 사람 수 — **낱말에 딸린 주석이지 눈금의 번호가 아니다.** 전술 여섯 축의
@@ -531,23 +525,21 @@
  * 조작은 모양(화살표)이 말하게 둔다.
  */
 .swap-btn {
-  border: 1px solid rgba(255, 255, 255, 0.24);
+  border: none;
   border-radius: var(--r-sm);
   padding: 0 6px;
   font-size: var(--fs-md);
   line-height: 17px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--panel-2);
   color: var(--text);
   font-weight: 700;
 }
 .swap-btn:hover {
-  border-color: var(--text);
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--pop);
 }
 .swap-btn:disabled {
   opacity: 0.4;
-  border-color: var(--border);
-  color: var(--muted);
+  color: var(--text-3);
   cursor: not-allowed;
 }
 
@@ -590,8 +582,8 @@
   font-variant-numeric: tabular-nums;
 }
 .pd-summary i {
-  font-style: normal;
   color: var(--muted);
+  font-style: normal;
 }
 /* 능력치 16축 — 묶음별로 줄을 나누고, 값은 세로로 줄 맞춰 훑게 한다 */
 /* 능력치와 포지션을 한 줄에 — 축 격자가 남긴 오른쪽 여백을 포지션이 채운다 */
@@ -622,11 +614,10 @@
 .pd-axis-group-name {
   flex: 0 0 32px;
   text-align: right;
-  color: var(--muted);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  opacity: 0.7;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   line-height: 1.9;
 }
 /* 세로선 하나로 "분류 | 축들" 두 열을 만든다 (묶음 사이 간격 0이라 선이 이어진다) */
@@ -725,7 +716,7 @@
  */
 .pd-pos.here {
   padding: 1px 3px 3px;
-  font-weight: 800;
+  font-weight: 700;
   box-shadow: inset 0 -2px 0 var(--accent-2);
 }
 .pd-pos .fit-gauge {
@@ -763,28 +754,29 @@
    대상인지가 모양만으로 갈린다 */
 .pd-role {
   padding: 2px 9px;
-  border: 1px solid var(--border);
+  /* 투명 테두리 — 폭은 남는다. e2e가 포지션(0)과 역할(1px)의 테두리 폭으로 값과
+     조작을 가른다(game.spec.ts). 색은 켜졌을 때만 든다 */
+  border: 1px solid transparent;
   border-radius: var(--r-pill);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--muted);
-  font-size: 11px;
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
   cursor: pointer;
   transition:
-    border-color 0.12s,
-    background 0.12s,
-    color 0.12s;
+    border-color var(--ease),
+    background var(--ease),
+    color var(--ease);
 }
 .pd-role:hover:not(:disabled) {
-  border-color: var(--accent-2);
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--pop);
   color: var(--text);
 }
 .pd-role:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: scale(0.97);
 }
 .pd-role:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--ring);
 }
 .pd-role:disabled {
   cursor: default;
@@ -792,9 +784,9 @@
 }
 .pd-role.on {
   border-color: var(--accent);
-  background: rgba(52, 211, 153, 0.18);
-  color: var(--text);
-  font-weight: 700;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
 }
 /**
  * 명단 칸이 좁으면 상세를 접는다.
@@ -835,10 +827,10 @@
 .squad-table tr.detail-row td,
 .squad-table tr.detail-row:hover td {
   padding: 0;
-  background: rgba(0, 0, 0, 0.24);
+  background: var(--bg);
 }
 .squad-table tr.detail-row .player-detail {
-  --pd-rule: rgba(255, 255, 255, 0.09);
+  --pd-rule: var(--line);
   /**
    * 왼쪽 여백은 **명단의 이름과 같은 x**에서 시작한다. 칸 여백과 선은 상세 행도
    * 똑같이 갖고 있으므로, 이름 앞에 더 있는 것(교체 화살표 자리 + 간격)만 얹으면
@@ -899,11 +891,10 @@
 /* 열 이름은 **분류**지 값이 아니다 — 능력치 묶음 이름과 같은 결로 가라앉힌다 */
 .pd-career-table thead th {
   border-bottom: 1px solid var(--pd-rule);
-  color: var(--muted);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  opacity: 0.7;
+  font-weight: 600;
+  letter-spacing: 0.06em;
 }
 .pd-career-table tbody td {
   color: var(--text);
@@ -916,9 +907,9 @@
   font-weight: 700;
 }
 .pd-career-table tfoot th {
-  color: var(--muted);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
 }
 /* 2군은 1군 숫자에 **곁들인 표시**다 — 같은 칸에 있되 크기와 색으로 갈린다 */
 .pd-career-table i {
@@ -1000,36 +991,34 @@
   stroke-linecap: round;
 }
 /**
- * 10 단위 색 계단 — 붉음(못 소화) → 주황 → 노랑 → 연두 → 초록(숙달).
- *
- * 색상환을 그냥 도는 대신 **채도와 밝기를 함께** 움직인다. 낮은 쪽은 진하고 탁하게
- * (눈에 걸린다), 높은 쪽은 밝고 선명하게. 그래야 "괜찮음"과 "아주 좋음"이 갈린다.
+ * 10 단위 색 계단 — 못 소화(`--loss`) → 주의(`--warn`) → 숙달(`--win`).
+ * 세 토큰 사이를 oklab으로 섞는다 — 팔레트가 바뀌면 계단도 함께 움직인다.
  */
 .fit-gauge.f0,
 .fit-gauge.f1,
 .fit-gauge.f2 {
-  color: hsl(0 72% 58%);
+  color: var(--loss);
 }
 .fit-gauge.f3 {
-  color: hsl(14 74% 58%);
+  color: color-mix(in oklab, var(--loss), var(--warn) 33%);
 }
 .fit-gauge.f4 {
-  color: hsl(28 78% 56%);
+  color: color-mix(in oklab, var(--loss), var(--warn) 67%);
 }
 .fit-gauge.f5 {
-  color: hsl(40 82% 55%);
+  color: var(--warn);
 }
 .fit-gauge.f6 {
-  color: hsl(52 80% 52%);
+  color: color-mix(in oklab, var(--warn), var(--win) 25%);
 }
 .fit-gauge.f7 {
-  color: hsl(74 62% 48%);
+  color: color-mix(in oklab, var(--warn), var(--win) 50%);
 }
 .fit-gauge.f8 {
-  color: hsl(104 56% 46%);
+  color: color-mix(in oklab, var(--warn), var(--win) 75%);
 }
 .fit-gauge.f9 {
-  color: hsl(142 62% 45%);
+  color: var(--win);
 }
 
 /* 폼 화살표 — **도형 하나를 각도로 돌린다** (각도는 engine/form.ts).
@@ -1048,7 +1037,7 @@
   height: 18px;
   overflow: visible;
   /* 폼이 조금 변해도 각도가 따라 도는 게 눈에 보인다 */
-  transition: transform 0.25s ease;
+  transition: transform var(--ease);
 }
 .form-arrow path {
   fill: none;
@@ -1071,10 +1060,10 @@
   color: color-mix(in oklab, var(--muted), var(--hot) calc(var(--f, 0) * 100%));
 }
 .form-arrow.pos {
-  --hot: var(--accent);
+  --hot: var(--win);
 }
 .form-arrow.neg {
-  --hot: var(--danger);
+  --hot: var(--loss);
 }
 
 /* 최근 경기 평점 추이 — 폼의 시간 축. 왼쪽이 오래된 경기, 오른쪽이 최근 */
@@ -1085,22 +1074,19 @@
 }
 .rt-dot {
   font-size: var(--fs-xs);
-  font-weight: 700;
-  padding: 0 3px;
-  border-radius: var(--r-xs);
-  background: var(--panel-2);
+  font-weight: 600;
 }
 .rt-dot.hot {
-  color: var(--accent);
+  color: var(--rate-top);
 }
 .rt-dot.good {
-  color: var(--text);
+  color: var(--rate-good);
 }
 .rt-dot.flat {
-  color: var(--muted);
+  color: var(--rate-mid);
 }
 .rt-dot.cold {
-  color: var(--danger);
+  color: var(--rate-low);
 }
 .rt-empty {
   color: var(--muted);
@@ -1108,14 +1094,14 @@
 }
 .ghost-btn {
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: none;
   color: var(--text);
   border-radius: var(--r-sm);
   padding: 6px 12px;
   font-size: var(--fs-md);
 }
 .ghost-btn:hover {
-  border-color: var(--accent-2);
+  background: var(--pop);
 }
 .ghost-btn:disabled {
   opacity: 0.4;
@@ -1126,15 +1112,13 @@
   border-radius: var(--r-sm);
   margin-bottom: 10px;
   background: var(--panel-2);
-  border: 1px solid var(--border);
 }
 .lineup-status.ok {
-  border-color: var(--accent);
-  color: var(--accent);
+  color: var(--text-2);
 }
 .lineup-status.warn {
-  border-color: var(--gold);
-  color: var(--gold);
+  color: var(--warn);
+  box-shadow: inset 3px 0 0 var(--warn);
 }
 /* 전술판 */
 .board-toolbar {
@@ -1151,7 +1135,7 @@
 }
 .board-toolbar select {
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: none;
   color: var(--text);
   border-radius: var(--r-sm);
   padding: 6px 8px;
@@ -1172,15 +1156,7 @@
   width: auto;
   aspect-ratio: 3 / 4;
   margin: 0 auto;
-  border-radius: var(--r-md);
-  background:
-    repeating-linear-gradient(
-      to bottom,
-      rgba(255, 255, 255, 0.02) 0 12.5%,
-      rgba(0, 0, 0, 0.05) 12.5% 25%
-    ),
-    linear-gradient(to bottom, #14532d, #166534);
-  border: 1px solid #14532d;
+  background: repeating-linear-gradient(90deg, var(--pitch) 0 12.5%, var(--pitch-2) 12.5% 25%);
   overflow: hidden;
 }
 .pitch-lines {
@@ -1196,10 +1172,9 @@
   top: 50%;
   width: 26%;
   aspect-ratio: 1;
-  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  border: 1.5px solid var(--pitch-line);
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 0 200vmax transparent;
 }
 .pitch-lines::after {
   content: "";
@@ -1207,7 +1182,7 @@
   left: 0;
   right: 0;
   top: 50%;
-  border-top: 1.5px solid rgba(255, 255, 255, 0.25);
+  border-top: 1.5px solid var(--pitch-line);
 }
 /* 페널티 박스 — 위(상대 골문)·아래(우리 골문) */
 .pitch-box {
@@ -1216,7 +1191,7 @@
   transform: translateX(-50%);
   width: 58%;
   height: 16%;
-  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  border: 1.5px solid var(--pitch-line);
   pointer-events: none;
 }
 .pitch-box.top {
@@ -1251,11 +1226,11 @@
 }
 /* 수비 라인 — 우리 최종선. 실선이라 "여기까지가 우리 블록"이 분명하다 */
 .tac-line.def {
-  border-top: 1.5px solid rgba(255, 255, 255, 0.42);
+  border-top: 1.5px solid var(--pitch-line);
 }
 /* 압박 시작선 — 여기부터 쫓는다. 실선이 아닌 이유는 자리가 아니라 **약속**이라서다 */
 .tac-line.press {
-  border-top: 1.5px dashed rgba(255, 255, 255, 0.28);
+  border-top: 1.5px dashed color-mix(in srgb, var(--pitch-line) 65%, transparent);
 }
 /* 우리가 지키는 구역 — 수비 라인 아래. 선 하나보다 블록의 깊이가 먼저 읽힌다 */
 .tac-block {
@@ -1263,7 +1238,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   transition: top 200ms var(--ease-panel);
 }
 /* 공격 폭 — 좌우로 얼마나 벌리나 */
@@ -1271,8 +1246,8 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  border-left: 1.5px dashed rgba(255, 255, 255, 0.15);
-  border-right: 1.5px dashed rgba(255, 255, 255, 0.15);
+  border-left: 1.5px dashed color-mix(in srgb, var(--pitch-line) 40%, transparent);
+  border-right: 1.5px dashed color-mix(in srgb, var(--pitch-line) 40%, transparent);
   transition:
     left 200ms var(--ease-panel),
     right 200ms var(--ease-panel);
@@ -1288,10 +1263,10 @@
 .pitch-zone {
   position: absolute;
   left: 8px;
-  color: rgba(255, 255, 255, 0.18);
+  color: color-mix(in srgb, var(--text) 18%, transparent);
   font-size: var(--fs-2xs);
-  font-weight: 800;
-  letter-spacing: 2px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   pointer-events: none;
 }
 .pitch-slot {
@@ -1311,7 +1286,7 @@
   /* 좌우 여백은 **글자에 준다** — 칩 폭은 겹침 판정에 묶여 늘릴 수 없으니, 안에서
      빼앗을 수 있는 것은 패딩뿐이다. 이 4px가 한 줄에 담기는 이름의 길이를 정한다 */
   padding: 0.8cqw 0.45cqw;
-  border-radius: 1.7cqw;
+  border-radius: var(--r-xs);
   gap: 0;
   /* 포인터 드래그가 스크롤·확대로 가로채이지 않게 */
   touch-action: none;
@@ -1327,14 +1302,7 @@
  * 눌려 상세를 열고(잠긴 건 배치지 선수가 아니다), 갈 곳은 머리줄의 버튼이 갖는다.
  */
 .pitch-board.locked {
-  background:
-    repeating-linear-gradient(
-      to bottom,
-      rgba(255, 255, 255, 0.02) 0 12.5%,
-      rgba(0, 0, 0, 0.05) 12.5% 25%
-    ),
-    linear-gradient(to bottom, #24312b, #2b3a33);
-  border-color: #24312b;
+  background: repeating-linear-gradient(90deg, var(--panel-2) 0 12.5%, var(--pop) 12.5% 25%);
 }
 /* 끌고 있는 칩 — 손가락을 지연 없이 따라오게 transition을 끊는다 */
 .pitch-chip.dragging {
@@ -1342,7 +1310,6 @@
   cursor: grabbing;
   transition: none;
   border-color: var(--accent);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   transform: translate(-50%, -50%) scale(1.08);
 }
 /**
@@ -1391,10 +1358,15 @@
    셋이 같은 크기·같은 자리에 서야 한 계열로 읽힌다. 완장은 금색이고 리더 그룹은
    눈금이라 옅다 — 감독이 채운 자리와 코어가 낸 자리를 색이 가른다 */
 .armband {
+  display: inline-flex;
+  align-items: center;
   margin-right: 0.2em;
   color: var(--gold);
-  font-size: 0.82em;
-  font-style: normal;
+  vertical-align: middle;
+}
+.armband svg {
+  width: 12px;
+  height: 12px;
 }
 .armband[title^="라커룸 리더"] {
   color: var(--muted);
@@ -1475,58 +1447,48 @@
   min-width: 64px;
   max-width: 86px;
   padding: 5px 7px;
-  border-radius: var(--r-md);
-  background: rgba(14, 17, 22, 0.88);
-  border: 1.5px solid var(--border);
+  border-radius: var(--r-xs);
+  background: var(--chip-base);
+  border: 1.5px solid var(--pitch-line);
   color: var(--text);
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    box-shadow 0.15s,
-    transform 0.1s;
+    border-color var(--ease),
+    transform var(--ease);
 }
 /**
- * **자리의 색** — 배경 톤만 바꾼다. 뒤따르는 상태 규칙이 테두리를 가져가므로
- * 순서가 곧 우선순위다(여기서 border-color를 건드리면 선택·부상 표시를 덮는다).
- * 톤이 옅은 건 칩 안의 글자가 먼저 읽혀야 하기 때문이다 — 색은 라인을 훑을 때
- * 배경에서 알아채는 층이다.
+ * **자리의 색** — 배경 톤만 바꾼다(18%, design-system.md §1). 윤곽은 상태 규칙의
+ * 몫이라 여기서 border-color를 건드리지 않는다. 톤이 옅은 건 칩 안의 글자가 먼저
+ * 읽혀야 하기 때문이다 — 색은 라인을 훑을 때 배경에서 알아채는 층이다.
+ * 중원은 잔디와 같은 색상이라 판에 묻히면 이 한 줄만 올린다.
  */
 .pitch-chip.g-fw {
   background:
-    linear-gradient(rgba(var(--pos-fw), 0.26), rgba(var(--pos-fw), 0.26)), var(--chip-base);
-  border-color: rgba(var(--pos-fw), 0.55);
+    linear-gradient(rgba(var(--pos-fw), 0.18), rgba(var(--pos-fw), 0.18)), var(--chip-base);
 }
-/**
- * ⚠️ 중원만 톤이 다르다 — **잔디가 초록이라서**다. 다른 색과 같은 농도로 깔면
- * 미드필더 칩이 판에 묻혀 라인이 사라진다(실제로 그랬다). 더 밝고 진하게 얹어
- * "잔디보다 밝은 초록"으로 갈라 세운다.
- */
 .pitch-chip.g-mf {
   background:
-    linear-gradient(rgba(var(--pos-mf), 0.42), rgba(var(--pos-mf), 0.42)), var(--chip-base);
-  border-color: rgba(var(--pos-mf), 0.72);
+    linear-gradient(rgba(var(--pos-mf), 0.18), rgba(var(--pos-mf), 0.18)), var(--chip-base);
 }
 .pitch-chip.g-df {
   background:
-    linear-gradient(rgba(var(--pos-df), 0.26), rgba(var(--pos-df), 0.26)), var(--chip-base);
-  border-color: rgba(var(--pos-df), 0.55);
+    linear-gradient(rgba(var(--pos-df), 0.18), rgba(var(--pos-df), 0.18)), var(--chip-base);
 }
 .pitch-chip.g-gk {
   background:
-    linear-gradient(rgba(var(--pos-gk), 0.24), rgba(var(--pos-gk), 0.24)), var(--chip-base);
-  border-color: rgba(var(--pos-gk), 0.55);
+    linear-gradient(rgba(var(--pos-gk), 0.18), rgba(var(--pos-gk), 0.18)), var(--chip-base);
 }
 
 .pitch-chip:hover {
-  border-color: var(--accent-2);
+  border-color: var(--text);
 }
 .pitch-chip.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.25);
   transform: translate(-50%, -50%) scale(1.06);
 }
 .pitch-chip.unavailable {
-  border-color: var(--danger);
+  border-style: dashed;
+  border-color: var(--loss);
   opacity: 0.75;
 }
 .slot-pos {
@@ -1534,43 +1496,26 @@
   align-items: center;
   gap: 3px;
   font-size: var(--fs-2xs);
-  font-weight: 800;
+  font-weight: 700;
   color: var(--gold);
-  letter-spacing: 0.5px;
+  letter-spacing: 0.06em;
 }
 /**
  * 맡은 역할 — 기본 역할이 아닐 때만 붙는 FM 약칭. 자리 코드와 같은 줄에 두되
  * 금색을 나눠 갖지 않는다: 자리는 좌표가 정하고 역할은 감독이 고른 것이라
  * 서로 다른 층이다.
  *
- * **색은 자리를 따라가고 톤만 다르다** (`.pitch-chip.g-* .slot-role`) — 카드와
- * 같은 색을 더 진하게 얹어 "이 카드 안의 것"으로 읽힌다. 전원에게 한 색을
- * 쓰면 붉은 공격수 카드 위에서는 색이 부딪히고, 초록 중원 카드에서는
- * 배경에 묻혀 약칭이 안 보인다.
+ * 자리 색은 칩 배경 18%에만 선다(design-system.md §1) — 약칭은 한 톤의 밝은 꼬리표다.
  */
 .slot-role {
   padding: 0 3px;
-  border-radius: 3px;
-  background: rgba(148, 163, 184, 0.24);
+  border-radius: var(--r-xs);
+  background: color-mix(in srgb, var(--text) 24%, transparent);
   color: var(--text);
   font-size: clamp(6px, 1.9cqw, 9px);
   font-style: normal;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0.02em;
-}
-.pitch-chip.g-fw .slot-role {
-  background: rgba(var(--pos-fw), 0.45);
-}
-.pitch-chip.g-mf .slot-role {
-  background: rgba(var(--pos-mf), 0.42);
-  color: #0f1a12;
-}
-.pitch-chip.g-df .slot-role {
-  background: rgba(var(--pos-df), 0.45);
-}
-.pitch-chip.g-gk .slot-role {
-  background: rgba(var(--pos-gk), 0.45);
-  color: #1b1706;
 }
 .slot-name {
   font-size: var(--fs-xs);
@@ -1593,12 +1538,12 @@
   font-size: var(--fs-xs);
 }
 .slot-flag {
-  color: var(--danger);
+  color: var(--loss);
   font-size: var(--fs-3xs);
 }
 .slot-flag.warn {
-  color: var(--gold);
-  font-weight: 800;
+  color: var(--warn);
+  font-weight: 700;
 }
 /* 명단 열(오른쪽) — 머리글 줄 + 표는 자체 스크롤이라 전술판이 항상 보인다 */
 /**
@@ -1613,21 +1558,17 @@
   justify-content: space-between;
   gap: var(--sp-2);
   flex-wrap: wrap;
-  /* 밑줄은 두지 않는다 — 명단 표가 바로 아래 닿아 있어 표의 윗변이 그 몫을 한다.
-     둘 다 그리면 같은 자리에 선이 두 겹 겹친다 */
+  /* 탭 묶음의 밑선 — 켜진 탭의 2px 밑줄이 이 선 위에 겹쳐 선다 */
+  border-bottom: 1px solid var(--line);
 }
 .roster-tabs {
   display: flex;
   gap: var(--sp-1);
-  /* 탭의 밑변이 머리글의 밑줄과 정확히 겹쳐야 "끊긴 줄"이 보인다 */
+  /* 탭의 밑변이 머리글의 밑줄과 정확히 겹쳐야 밑줄이 선을 덮는다 */
   margin-bottom: -1px;
 }
 /**
- * 책갈피 — 고른 쪽만 밑줄을 끊고 위로 올라온다.
- *
- * 알약 버튼(`ghost-btn`) 두 개를 나란히 두던 때는 둘 다 "누를 수 있는 것"으로만
- * 보이고 **무엇이 켜져 있는지**가 테두리 색 하나에 걸려 있었다. 책갈피는 켜진
- * 쪽이 아래 표와 이어져 있어 상태가 모양 자체다.
+ * 밑줄 탭 — 켜진 쪽만 글자가 밝아지고 키 컬러 밑줄을 갖는다(design-system.md §1).
  */
 .roster-tab {
   display: inline-flex;
@@ -1635,39 +1576,30 @@
   gap: 6px;
   padding: 7px 14px;
   background: none;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: var(--r-sm) var(--r-sm) 0 0;
-  color: var(--muted);
+  border: none;
+  color: var(--text-2);
   font-size: var(--fs-md);
   line-height: 1.2;
   transition:
     color var(--ease),
-    background var(--ease);
+    box-shadow var(--ease);
 }
 .roster-tab:hover {
   color: var(--text);
 }
 .roster-tab.on {
-  /* 표 머리와 **같은 배경** — 다르면 둘이 만나는 자리에 이음매가 보인다 */
-  background: var(--panel-2);
-  border-color: var(--border);
   color: var(--text);
-  font-weight: 700;
-  /* 켜진 탭이 **표의 윗변을 그 폭만큼 덮는다** — 그래야 탭과 명단이 한 장이 된다.
-     표가 DOM에서 뒤에 오므로 위로 끌어올리지 않으면 그 선에 가린다 */
-  position: relative;
-  z-index: 1;
-  box-shadow: 0 1px 0 0 var(--panel-2);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 /* 인원수는 이름보다 한 단 작게 — 읽는 값이지 이름의 일부가 아니다 */
 .roster-tab-n {
   font-size: var(--fs-xs);
   font-weight: 400;
-  color: var(--muted);
+  color: var(--text-3);
 }
 .roster-tab.on .roster-tab-n {
-  color: var(--accent-2);
+  color: var(--text-2);
 }
 /* 벤치/예비 정원 — 문장이 아니라 계기판 숫자다.
    `margin-left: auto`로 **오른쪽 끝에 못박는다** — space-between에 맡기면 옆에
@@ -1691,10 +1623,6 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  border: 1px solid var(--border);
-  /* 책갈피가 얹히는 **왼쪽 위만 각지게** — 둥근 모서리 위에 탭이 서면 둘이
-     어긋난 곳에서 만나 종이 두 장이 겹친 것처럼 보인다 */
-  border-radius: 0 var(--r-md) var(--r-md) var(--r-md);
 }
 /* 칸이 좁아도 표가 글자 단위로 접히지 않게 — 최소 폭을 주고 가로 스크롤에 맡긴다 */
 .roster-scroll .squad-table {
@@ -1719,7 +1647,10 @@
 }
 /* 명단 표 — 정렬 가능한 머리글, 상태 막대 */
 .squad-table th.sorted {
-  color: var(--accent);
+  color: var(--text);
+}
+.squad-table th.sorted .sort-btn {
+  font-weight: 600;
 }
 /**
  * 정렬 손잡이 — **머리 칸 전체가 버튼이다.** `<th>`는 열 머리로 남아야
@@ -1742,30 +1673,40 @@
   cursor: pointer;
 }
 .squad-table th.sortable .sort-btn:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: -1px;
+  outline: none;
+  box-shadow: var(--ring);
   border-radius: var(--r-xs);
 }
 .squad-table .sort-mark {
-  font-size: var(--fs-3xs);
+  display: inline-flex;
+  vertical-align: middle;
   margin-left: 3px;
+}
+.squad-table .sort-mark svg {
+  width: 10px;
+  height: 10px;
+}
+.slot-flag svg {
+  width: 10px;
+  height: 10px;
+  vertical-align: middle;
 }
 .squad-table tbody tr {
   cursor: pointer;
 }
 .squad-table tbody tr:hover td {
-  background: rgba(96, 165, 250, 0.06);
+  background: var(--panel-2);
 }
 /* 키보드로 닿은 행 — 어드민 표와 같은 규칙이다(호버와 같은 자리를 밝힌다) */
 .squad-table tbody tr:focus-visible {
   outline: none;
 }
 .squad-table tbody tr:focus-visible td {
-  background: rgba(96, 165, 250, 0.06);
+  background: var(--panel-2);
   box-shadow: inset 0 -1px 0 var(--accent);
 }
 .squad-table tbody tr.picked td {
-  background: rgba(96, 165, 250, 0.1);
+  background: var(--pop);
 }
 /**
  * 칸(선발·벤치·예비·2군)은 **행의 왼쪽 선 색**이 말한다.
@@ -1774,7 +1715,7 @@
  * 열이 표 폭을 먹고 시선도 이름에서 멀다. 색은 폭을 안 먹고 훑을 때 먼저 들어온다.
  */
 .squad-table tbody tr.row-tier td:first-child {
-  border-left: 2px solid transparent;
+  border-left: 3px solid transparent;
   padding-left: 8px;
 }
 /* 펼친 상세도 그 행의 연장이라 선이 이어져야 한다 (안쪽 여백은 카드가 갖는다) */
@@ -1790,25 +1731,26 @@
  */
 .squad-table tbody tr.tier-head td {
   padding: 5px 0 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
   background: none;
 }
+/* 선발만 구단의 색을 받는다 — 정체성 자리(레일)이고, 나머지 칸은 무채색 계단이다 */
 .squad-table tbody tr.t-start td:first-child {
-  border-left-color: var(--accent);
+  border-left-color: var(--club-hi);
 }
 .squad-table tbody tr.t-bench td:first-child {
-  border-left-color: var(--accent-2);
+  border-left-color: var(--text-3);
 }
 .squad-table tbody tr.t-squad td:first-child {
-  border-left-color: rgba(148, 163, 184, 0.5);
+  border-left-color: var(--border);
 }
 .squad-table tbody tr.t-reserve td:first-child {
-  border-left-color: rgba(148, 163, 184, 0.18);
+  border-left-color: color-mix(in srgb, var(--border) 50%, transparent);
 }
 /* 임대 — 우리 계약이지만 **여기 없는 사람**이라 판의 색(선발·벤치)과 다른 계열이다.
    승격·강등으로 오갈 수 있는 2군의 회색과도 갈려야 한다: 이 행에는 손잡이가 없다 */
 .squad-table tbody tr.t-loan td:first-child {
-  border-left-color: rgba(251, 191, 36, 0.45);
+  border-left-color: color-mix(in srgb, var(--warn) 45%, transparent);
 }
 /* 이름 칸 — 교체 화살표 자리와 상태 배지를 함께 안는다 */
 /**
@@ -1844,13 +1786,13 @@
   color: var(--muted);
 }
 .squad-table .sharpness.sharp {
-  color: var(--accent);
+  color: var(--win);
 }
 .squad-table .sharpness.rising {
   color: var(--text);
 }
 .squad-table .sharpness.blunt {
-  color: var(--danger);
+  color: var(--loss);
 }
 
 /**
@@ -1870,7 +1812,7 @@
   color: var(--gold-soft);
 }
 .squad-table .load.overloaded {
-  color: var(--danger);
+  color: var(--loss);
 }
 
 /**
@@ -1893,7 +1835,7 @@
   color: var(--gold-soft);
 }
 .squad-table .injury-risk.high {
-  color: var(--danger);
+  color: var(--loss);
 }
 
 /* 유스 인테이크 — 아직 계약하지 않은 사람들이라 명단 표가 아니라 제 구획이다
@@ -1901,9 +1843,7 @@
 .youth-intake {
   margin-bottom: 10px;
   padding: 8px 12px;
-  border: 1px solid var(--border);
   border-left: 3px solid var(--gold);
-  border-radius: var(--r-sm);
   background: var(--panel-2);
 }
 .youth-intake-head {
@@ -1959,10 +1899,8 @@
   /* 명단과 붙지 않는다 — 옆 열은 `gap: 0`이라(책갈피가 표에 닿아야 한다) 이 한 칸은
      제 여백을 스스로 갖는다 */
   margin-top: 10px;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--panel);
+  padding: 10px 0 0;
+  border-top: 1px solid var(--line);
 }
 .club-staff-head {
   display: flex;

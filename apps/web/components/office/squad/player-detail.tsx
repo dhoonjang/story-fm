@@ -2,18 +2,20 @@
 
 import {
   defaultRoleOf,
+  formatRating,
   isNaturalAt,
   physiqueLabel,
   rolesFor,
   injuryHistoryText,
 } from "@story-fm/domain";
 import { moodSentence } from "@/lib/mood";
+import { contractUntil, humanDate } from "@/lib/dateline";
 import { AxisGrid, CareerBlock, FootMarks } from "@/components/player-facts";
 import { FitGauge, FormArrow, RatingTrend, StatusBadges } from "./marks";
 import type { SquadRow } from "./types";
 
 /**
- * 추정 폭을 말로 — 같은 "잠재력 78~86"도 확신의 정도가 다르다.
+ * 추정 폭을 말로 — 같은 "잠재력 78–86"도 확신의 정도가 다르다.
  * 폭이 어느 정도부터 무슨 낱말인지는 **스카우팅이 정한다**(`potentialConfidence`).
  * 화면은 그 낱말을 받아 문장에 끼울 뿐, 임계값을 다시 재지 않는다.
  */
@@ -123,7 +125,7 @@ export function PlayerDetail({
         {/* 잠재력은 숫자 하나가 아니라 **구간**이다 — 우리 선수도 단정할 수 없다.
             폭이 좁을수록 확신이 크고, 근거가 없으면 "미지" (scouting.ts §잠재력) */}
         <span title={potentialHint(p.potential)}>
-          잠재력 <b>{p.potential ? `${p.potential.low}~${p.potential.high}` : "미지"}</b>
+          잠재력 <b>{p.potential ? `${p.potential.low}–${p.potential.high}` : "미지"}</b>
         </span>
         {/* 체력은 여기 두지 않는다 — 바로 위 명단 행에 바가 있고, 왜 그런지는
             맨 위 심경 한 줄이 말한다. 같은 값을 두 번 쓰면 상세가 표의 복사본이 된다 */}
@@ -161,10 +163,10 @@ export function PlayerDetail({
             어디서 낸 숫자인지가 이 줄 옆에 서 있어야 읽힌다. 무엇을 하라는 말은
             여기 붙지 않는다 (근거 코드가 뜻하는 사실만 옮긴다) */}
         {p.loan !== null && (
-          <span title={`${p.loan.team} 임대 — ${p.loan.until} 복귀`}>
+          <span title={`${p.loan.team} 임대 — ${humanDate(p.loan.until)} 복귀`}>
             임대{" "}
             <b>
-              {p.loan.team} ~{p.loan.until}
+              {p.loan.team} {contractUntil(p.loan.until)}
             </b>
             {p.loan.benchRun > 0 && ` · 최근 ${p.loan.benchRun}경기 명단 밖`}
             {p.loan.growth > 0 && ` · 임대 이후 성장 +${p.loan.growth}`}
@@ -183,7 +185,7 @@ export function PlayerDetail({
             </span>
             {typeof p.seasonRating === "number" && (
               <span>
-                평점 <b>{p.seasonRating.toFixed(2)}</b>
+                평점 <b>{formatRating(p.seasonRating, "season")}</b>
               </span>
             )}
             {/* 대회별 — 위 「시즌」은 대회 합이라 "리그에서 몇 골"을 말하지 못한다
@@ -213,7 +215,7 @@ export function PlayerDetail({
         <FootMarks foot={p.foot} />
         {p.contractUntil && (
           <span>
-            계약 <b>{p.contractUntil}</b>
+            계약 <b>{contractUntil(p.contractUntil)}</b>
           </span>
         )}
         <StatusBadges p={p} />

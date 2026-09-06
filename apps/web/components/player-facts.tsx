@@ -1,8 +1,16 @@
 "use client";
 
-import { AXIS_GROUPS, AXIS_GROUP_KO, AXIS_KO, footLabel, milestoneTitle } from "@story-fm/domain";
+import {
+  AXIS_GROUPS,
+  AXIS_GROUP_KO,
+  AXIS_KO,
+  footLabel,
+  formatRating,
+  milestoneTitle,
+} from "@story-fm/domain";
 import type { Foot } from "@story-fm/domain";
 import type { CareerSeasonView, CareerTotalsView, MilestoneView } from "@story-fm/engine";
+import { humanDate } from "@/lib/dateline";
 
 /**
  * ── 선수 한 사람을 그리는 조각 ───────────────────────────────
@@ -169,7 +177,7 @@ export function CareerBlock({
                   <ReserveMark value={row.reserveGoals} />
                 </td>
                 <td>{row.assists}</td>
-                <td>{row.rating === null ? "—" : row.rating.toFixed(2)}</td>
+                <td>{row.rating === null ? "—" : formatRating(row.rating, "season")}</td>
               </tr>
             ))}
           </tbody>
@@ -187,7 +195,7 @@ export function CareerBlock({
                 <ReserveMark value={totals.reserveGoals} />
               </td>
               <td>{totals.assists}</td>
-              <td>{totals.rating === null ? "—" : totals.rating.toFixed(2)}</td>
+              <td>{totals.rating === null ? "—" : formatRating(totals.rating, "season")}</td>
             </tr>
           </tfoot>
         </table>
@@ -201,7 +209,8 @@ export function CareerBlock({
             {milestones.map((m) => (
               <li key={`${m.date}-${m.code}-${m.value}`}>
                 <b>{milestoneTitle(m.code, m.value)}</b>
-                <i>{m.date}</i>
+                {/* 마일스톤은 여러 시즌에 걸친다 — 연도가 없으면 어느 해의 3월인지 모른다 */}
+                <i>{humanDate(m.date, { year: true, weekday: false })}</i>
               </li>
             ))}
           </ul>

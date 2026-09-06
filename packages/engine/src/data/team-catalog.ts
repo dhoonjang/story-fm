@@ -16,8 +16,9 @@
  * 겹쳐 BRS로 바꿨고, 모나코는 공식 약어 ASM이라 몬차 MON과 구분된다).
  * 분데스리가 공식 약어에는 숫자가 들어간다 (B04·M05·S04).
  */
-import type { Formation } from "@story-fm/domain";
+import type { ClubColours, Formation } from "@story-fm/domain";
 import { DEFAULT_FORMATION } from "@story-fm/domain";
+import { CLUB_COLOURS } from "./club-colours";
 import { leagueCatalog, isCupOnlyLeague, isTopLeague, leagueCatalogById } from "./league-catalog";
 import { catalogSource } from "./catalog-source";
 import { readTeamOverride } from "./team-override";
@@ -80,6 +81,12 @@ export interface TeamCatalogEntry {
    * 않는다. 전수가 아니라 확인된 클럽만 든다 (`CLUB_HONOURS_SEED`).
    */
   honours?: readonly ClubHonour[];
+  /**
+   * 공식 색 — `CLUB_COLOURS`에서 붙는다 (team.md §3.1 · sources.md §7.5). 1부 96팀만
+   * 갖고, 없는 클럽(2부·시장 전용·어드민 추가)은 문장이 id 해시로 색을 낸다.
+   * 어드민이 편집하지 않는 값이라 오버라이드에 없어도 `teamCatalog()`가 다시 붙인다.
+   */
+  colours?: ClubColours;
 }
 
 /** 한 대회의 역대 우승 — 대회 id별로 한 줄 */
@@ -1338,8 +1345,15 @@ const TEAM_SEED_BASE: readonly TeamCatalogEntry[] = [
  */
 export const TEAM_CATALOG_SEED: readonly TeamCatalogEntry[] = TEAM_SEED_BASE.map((team) => {
   const honours = CLUB_HONOURS_SEED[team.id];
-  return honours ? { ...team, honours } : team;
+  return withColours(honours ? { ...team, honours } : team);
 });
+
+/** 공식 색을 붙인다 — 표에 없는 클럽은 그대로 (문장이 해시로 답한다) */
+function withColours(team: TeamCatalogEntry): TeamCatalogEntry {
+  if (team.colours !== undefined) return team;
+  const colours = CLUB_COLOURS[team.id];
+  return colours === undefined ? team : { ...team, colours };
+}
 
 /**
  * tier별 능력치 기준선 (overall 평균 어림).
@@ -1364,8 +1378,9 @@ export const TIER_BASE: Record<1 | 2 | 3 | 4, number> = {
  */
 export const SECOND_DIVISION_PENALTY = 9;
 
+// 색이 없던 시절의 오버라이드 파일도 같은 색을 얻는다 — 색은 편집 대상이 아니다
 const teams = catalogSource<readonly TeamCatalogEntry[]>(
-  () => readTeamOverride()?.teams ?? TEAM_CATALOG_SEED,
+  () => readTeamOverride()?.teams.map(withColours) ?? TEAM_CATALOG_SEED,
 );
 
 /** 지금 유효한 팀 카탈로그 — 오버라이드가 있으면 그것, 없으면 시드 */

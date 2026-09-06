@@ -94,6 +94,23 @@ export type GameTeam = z.infer<typeof GameTeamSchema>;
 /** 관례상 짧은 별칭 */
 export type Team = GameTeam;
 
+/** `#rrggbb` 소문자 — 화면이 그대로 CSS에 세우므로 표기를 하나로 못 박는다 */
+const HexColourSchema = z.string().regex(/^#[0-9a-f]{6}$/);
+
+/**
+ * 구단의 공식 색 (team.md §3.1 · ui/design-system.md §2).
+ *
+ * 값은 카탈로그가 공식 값 그대로 갖는다 — 어두운 화면에서 안 보이는 남색·검정은
+ * 화면이 `clubTonesOf`로 밝힌 사본을 쓰고 여기 값은 손대지 않는다. `accent`는 가는
+ * 자리용 유채색이고, 흑백 구단은 빈 문자열이다(유채색이 없다는 사실).
+ */
+export const ClubColoursSchema = z.object({
+  primary: HexColourSchema,
+  secondary: HexColourSchema,
+  accent: z.union([HexColourSchema, z.literal("")]),
+});
+export type ClubColours = z.infer<typeof ClubColoursSchema>;
+
 /** 팀 카탈로그 (TEAM_CATALOG) — 게임과 무관한 마스터 데이터 */
 export interface TeamCatalogEntry {
   id: string;
@@ -104,4 +121,6 @@ export interface TeamCatalogEntry {
    * 게임이 시작된 뒤의 체급은 `GameTeam.tier`가 갖는다.
    */
   tier: 1 | 2 | 3 | 4;
+  /** 공식 색 — 1부 96팀만 갖는다. 없으면(어드민이 만든 클럽) 문장이 id 해시로 색을 낸다 */
+  colours?: ClubColours;
 }

@@ -2,8 +2,7 @@
 
 .manager-card {
   background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
   padding: 14px;
   margin-bottom: 14px;
 }
@@ -28,7 +27,7 @@
   flex-wrap: wrap;
   padding-bottom: 18px;
   margin-bottom: 4px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 .mgr-head .mgr-info {
   flex: 1 1 240px;
@@ -36,7 +35,7 @@
 }
 .mgr-head h3 {
   font-size: var(--fs-lg);
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.01em;
   margin-bottom: 6px;
 }
@@ -60,8 +59,8 @@
   margin-top: 14px;
 }
 /**
- * 눈금 묶음 — 감독에게 딸린 **견주는 수치**가 서는 상자다. 지금 담기는 것은 평판
- * 하나이고, 테두리 하나가 그 경계를 말하면 충분하다.
+ * 눈금 묶음 — 감독에게 딸린 **견주는 수치**가 서는 면이다. 지금 담기는 것은 평판
+ * 하나이고, 한 단 밝은 면이 그 경계를 말하면 충분하다.
  *
  * ⚠️ `inline-flex`라 **내용 폭만큼만** 넓어진다. 블록으로 두면 왼쪽 열 끝까지
  * 늘어나 상자 오른쪽이 통째로 비고, 그게 이 화면에서 카드를 걷어냈던 이유였다.
@@ -71,8 +70,7 @@
   align-items: flex-start;
   padding: 10px 14px 11px;
   background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
 }
 /**
  * 담긴 항목이 하나라 **제 내용 폭만** 갖는다 — 기준 폭(`200px`)을 주면 그보다 좁은
@@ -91,8 +89,8 @@
  */
 .mgr-rep-title {
   font-size: var(--fs-xs);
-  font-weight: 800;
-  letter-spacing: 0.08em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   color: var(--silver);
   margin-bottom: 9px;
 }
@@ -126,10 +124,11 @@
   background: var(--border);
   overflow: hidden;
 }
+/* 채움은 구단의 가는 색 — 평판은 세계가 이 구단의 감독을 보는 눈이다 */
 .rep-bar i {
   display: block;
   height: 100%;
-  background: var(--accent-2);
+  background: var(--club-hi);
 }
 .rep-item b {
   min-width: 1.6em;
@@ -161,8 +160,8 @@
 }
 .mgr-fact dt {
   font-size: var(--fs-xs);
-  font-weight: 800;
-  letter-spacing: 0.08em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   color: var(--muted);
 }
 .mgr-fact dd {
@@ -171,7 +170,7 @@
 }
 /* 비갱신 통보는 만료일이 곧 끝이라는 뜻이다 — 같은 줄에서 색으로 갈린다 */
 .mgr-nonrenewal {
-  color: var(--danger);
+  color: var(--loss);
 }
 /**
  * 지출 이력 — 지갑 줄 **아래 자기 줄**이다 (career.md §5.4). 지갑 칸 안에 품고
@@ -187,7 +186,7 @@
   align-self: stretch;
   max-width: 340px;
   padding-top: 7px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 .mgr-spend {
   display: flex;
@@ -199,7 +198,7 @@
 }
 .mgr-spend b {
   margin-left: auto;
-  color: var(--danger);
+  color: var(--loss);
   font-weight: 600;
 }
 .trophy-list {
@@ -207,24 +206,24 @@
   flex-direction: column;
   gap: 8px;
 }
+/* 트로피 행 — 금색 레일 하나. 둘러싸지 않고 왼쪽에 세운다 */
 .trophy {
   display: flex;
   align-items: center;
   gap: 8px;
   background: var(--panel-2);
-  border: 1px solid var(--gold);
-  border-radius: var(--r-md);
+  border-left: 3px solid var(--gold);
+  border-radius: var(--r-sm);
   padding: 10px 14px;
 }
-/* 트로피 아이콘 — 테두리와 같은 금색이라 카드 하나가 한 색으로 읽힌다 */
+/* 트로피 아이콘 — 레일과 같은 금색이라 카드 하나가 한 색으로 읽힌다 */
 .trophy > svg {
   flex-shrink: 0;
   color: var(--gold);
 }
 .achv {
   background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
   padding: 10px 14px;
 }
 .achv .desc {
@@ -238,7 +237,7 @@
 }
 /* 경질 이력 줄 — 무직 카드(.dismissed-head .when)와 같은 붉은 표식을 쓴다 */
 .career-sacked {
-  color: var(--danger);
+  color: var(--loss);
   font-size: var(--fs-sm);
 }
 /**
@@ -293,9 +292,8 @@
 }
 .dismissed {
   background: var(--panel-2);
-  border: 1px solid var(--danger);
-  border-left-width: 3px;
-  border-radius: var(--r-md);
+  border-left: 3px solid var(--loss);
+  border-radius: var(--r-sm);
   padding: 10px 14px;
 }
 .dismissed-head {
@@ -304,7 +302,7 @@
   gap: 8px;
 }
 .dismissed-head .when {
-  color: var(--danger);
+  color: var(--loss);
   font-size: var(--fs-sm);
 }
 .dismissed-why,
@@ -319,13 +317,13 @@
 }
 .offer {
   background: var(--panel-2);
-  border: 1px solid var(--accent-2);
-  border-radius: var(--r-md);
+  border-left: 3px solid var(--accent-2);
+  border-radius: var(--r-sm);
   padding: 10px 14px;
 }
-/* 공석 — 제안이 아니라 문이다: 답을 기다리는 강조 테두리를 물려받지 않는다 */
+/* 공석 — 제안이 아니라 문이다: 답을 기다리는 강조 레일을 물려받지 않는다 */
 .offer.vacant {
-  border-color: var(--border);
+  border-left-color: var(--border);
 }
 .offer.vacant .offer-head .until {
   color: var(--muted);

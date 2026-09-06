@@ -7,50 +7,116 @@
 }
 
 :root {
-  --bg: #0e1116;
-  --panel: #161b23;
-  --panel-2: #1d242f;
-  --border: #2a3342;
-  --text: #e6ebf2;
-  --muted: #8b96a8;
-  --accent: #4ade80;
-  --accent-2: #60a5fa;
-  --danger: #f87171;
-  /**
-   * 자리의 색 — 전술판 칩의 배경 톤. 실제 팀 시트가 라인을 색으로 나누는 방식과
-   * 같다: 최전방 붉게 · 중원 초록 · 수비 파랑 · 골키퍼 노랑.
-   * **테두리에 쓰지 않는다** — 거기는 상태(선택·못 뛰는 선수)의 자리다.
-   */
-  /** 칩의 바탕 — 색은 이 **위에** 얹는다. 바로 칠하면 잔디가 비쳐 초록 칩이 판에 묻힌다 */
-  --chip-base: rgba(14, 17, 22, 0.92);
-  --pos-fw: 248, 113, 113;
-  --pos-mf: 74, 222, 128;
-  --pos-df: 96, 165, 250;
-  --pos-gk: 250, 204, 21;
-  --gold: #fbbf24;
-  /* 같은 금색의 낮은 채도 — **강조가 아니라 분류**일 때 쓴다.
-     선수 상세의 선호 포지션처럼 "한눈에 갈리되 시선을 끌지는 않아야" 하는 자리.
-     400 계열 원색(#fbbf24)을 그대로 쓰면 능력치 표보다 먼저 읽힌다 */
-  --gold-soft: #c2a05e;
-  /* 은색 — 금색(선호)과 짝을 이루는 "할 줄은 안다"의 색 */
-  --silver: #ccd6e4;
-  /* 못 보는 자리 — 은색과 **한눈에 갈려야** 한다. `--muted`(#8b96a8)를 썼더니
-     은색과 밝기 차이가 작아 헷갈렸다: 여기서 필요한 건 "조금 흐림"이 아니라
-     "꺼져 있음"이다 */
-  --dim: #5f6875;
-  /* 추첨 표식 — 경기(파랑)·훈련(노랑)과 겹치지 않는 세 번째 색.
-     팔레트의 다른 색과 같은 400 계열이라 채도·명도가 튀지 않는다 */
-  --violet: #c084fc;
+  /* ── 팔레트 — 이름과 뜻은 docs/ui/design-system.md §1이 갖는다 ───────────
+     다크 전용. 화면은 hex를 쓰지 않고 이 토큰만 쓴다. e2e는 색을 토큰 이름으로 잰다
+     (`e2e/palette.ts`) — 이름을 바꾸지 않고 값만 바꾼다. */
 
-  /**
-   * ── 디자인 토큰 ───────────────────────────────────────────
-   *
-   * 값을 눈대중으로 고르면 화면마다 3px·5px·7px이 섞여 정렬이 미세하게 어긋난다.
-   * 아래 눈금에서만 고른다.
-   *
-   * **간격은 4의 배수.** 리듬이 생기고, 두 요소 사이가 "한 칸인지 두 칸인지"가
-   * 눈에 읽힌다.
-   */
+  /* 표면과 글자 — 높이는 그림자가 아니라 밝기다 (bg → panel → panel-2 → pop) */
+  --bg: #0a0d0b;
+  --panel: #121714;
+  --panel-2: #1a211c;
+  --pop: #202823;
+  /* 헤어라인 — 표 행 사이·밑선·데이트라인. 컨테이너 테두리가 아니다 */
+  --line: rgba(242, 239, 230, 0.08);
+  /* 트랙·컷선 — 정보 없는 선 */
+  --border: #2f3a33;
+  --text: #f2efe6;
+  /* 2·3층이 알파인 이유: 구단 워시·판세 워시 위에서도 같은 잉크로 물러난다 */
+  --text-2: rgba(242, 239, 230, 0.7);
+  --text-3: rgba(242, 239, 230, 0.54);
+  /* 꺼짐 — disabled에만 */
+  --dim: #646e66;
+  /* 은 — OVR 70–77 · "할 줄 안다" 포지션 · 화자 이름 */
+  --silver: #c9d1c8;
+
+  /* 조작 — 키 컬러 하나. 조작 대상은 테두리가 아니라 면의 밝기와 이 색으로 갈린다 */
+  --accent: #44ad62;
+  --accent-ink: #0a0d0b;
+  /* 키 컬러 14% ⊕ panel — 감독 말풍선 바탕 */
+  --key-wash: #192c1f;
+  /* 포커스 링 — `:focus-visible`, 조작 대상에만 */
+  --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+
+  /* 의미 — 한 색에 뜻을 둘 이상 싣지 않는다. 예외는 `--win = --accent` 하나 */
+  --win: var(--accent);
+  --draw: #8b948c;
+  --loss: #df7377;
+  --warn: #daba62;
+  /* 트로피의 금 / 분류의 금 */
+  --gold: #d9ab3f;
+  --gold-soft: #b3985e;
+  --accent-2: #6d9be0;
+  --violet: #ad8de3;
+  --comp-league: var(--accent-2);
+  --comp-cup: var(--gold);
+  --comp-euro: var(--violet);
+  --zone-direct: var(--violet);
+  --zone-uecl: var(--accent-2);
+  --zone-playoff: var(--gold);
+  --zone-drop: var(--loss);
+  /* 포지션 — 칩 배경 18% 알파에만. 글자·띠 금지 */
+  --pos-fw: 214, 90, 96;
+  --pos-mf: 92, 166, 118;
+  --pos-df: 92, 140, 214;
+  --pos-gk: 214, 176, 80;
+  /* 칩의 바탕 — 색은 이 **위에** 얹는다. 바로 칠하면 잔디가 비쳐 초록 칩이 판에 묻힌다 */
+  --chip-base: rgba(10, 13, 11, 0.92);
+  /* 잔디 두 평면색 줄무늬 + 분필 라인 — 이 프로젝트의 유일한 질감 */
+  --pitch: #203226;
+  --pitch-2: #24382b;
+  --pitch-line: rgba(242, 239, 230, 0.42);
+  /* 경기 평점 4단 · OVR 4단 — 숫자 색에만. 문턱 숫자는 코어가 갖는다 */
+  --rate-low: var(--loss);
+  --rate-mid: var(--text-2);
+  --rate-good: var(--text);
+  --rate-top: var(--win);
+  --tier-gold: var(--gold-soft);
+  --tier-silver: var(--silver);
+  --tier-base: var(--text);
+  --tier-low: var(--text-2);
+  /* 모달·시트 뒷막 — 블러 없음 */
+  --scrim: rgba(6, 9, 7, 0.78);
+  /* `--pop` 표면의 그림자 — 유일한 그림자 */
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.55);
+
+  /* 구단 슬롯 — 구단이 없을 때의 기본값. 주입은 `.app`·`.onboarding`·카드 요소가
+     인라인으로 한다 (§2). `var(--club*)`를 참조하는 토큰은 주입 요소에서 다시 선언한다 */
+  --club: #2f3a33;
+  --club-2: #2f3a33;
+  --club-ink: #f2efe6;
+  --club-hi: #c9c4ba;
+  --club-wash: var(--panel);
+  --club-wash-pop: var(--pop);
+  --opp: #2f3a33;
+  --opp-2: #2f3a33;
+  --opp-ink: #f2efe6;
+  --opp-hi: #c9c4ba;
+  --opp-wash: var(--panel);
+  --opp-wash-pop: var(--pop);
+  --role-coach: var(--accent-2);
+  --role-board: var(--gold);
+  --role-media: var(--violet);
+  --role-staff: var(--text-3);
+
+  /* 별칭 — 옛 이름이 서 있는 자리를 위해. 새 규칙은 오른쪽 이름을 쓴다 */
+  --muted: var(--text-2);
+  --danger: var(--loss);
+  --border-soft: var(--line);
+
+  /* ── 서체 — 서체는 요소가 아니라 클래스가 정한다. `--font-score`는 `.fig`에만 ── */
+  --font-ui:
+    "Pretendard Variable", "ui-fallback", "ui-fallback-win", "Apple SD Gothic Neo", "Malgun Gothic",
+    "Noto Sans KR", system-ui, sans-serif;
+  --font-score: "Barlow Condensed", "Roboto Condensed", "Arial Narrow", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* 예약 — 도입 보류. 토큰 이름만 */
+  --font-story: var(--font-ui);
+  --lh-ui: 1.5;
+  --lh-prose: 1.75;
+  --lh-table: 1.35;
+  --lh-fig: 1;
+
+  /* ── 간격 — 4의 배수 ─────────────────────────────────────── */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -58,34 +124,24 @@
   --sp-5: 24px;
   --sp-6: 32px;
 
-  /** 모서리 — 네 단계. 태그 · 칩/버튼 · 카드/패널 · 알약 */
-  --r-xs: 4px;
-  --r-sm: 8px;
-  --r-md: 12px;
+  /* 모서리 넷 — 태그·칩 · 버튼·카드 · 입력창·말풍선·pop 위의 것 · 알약.
+     표·전술판·판세·스코어보드·순위표·달력 셀·상단 띠·KPI는 0 */
+  --r-xs: 2px;
+  --r-sm: 4px;
+  --r-md: 8px;
   --r-pill: 999px;
 
-  /**
-   * 글자 크기 — **눈금 아홉 칸.** 이전에는 8.5~28px 사이에 열아홉 가지가 섞여
-   * 있었다. 12px과 12.5px의 차이는 위계로 읽히지 않는다 — 그냥 줄이 안 맞아
-   * 보일 뿐이다. 조밀한 표·칩까지 포함해야 하므로 칸이 아래쪽에 촘촘하다.
-   */
-  --fs-3xs: 9px; /* 칩 안의 꼬리표 (달력 셀의 대회 약칭 등) */
-  --fs-2xs: 10px; /* 배지·미세 라벨 */
-  --fs-xs: 11px; /* 보조 라벨 */
-  --fs-sm: 12px; /* 표·조밀한 목록 */
-  --fs-md: 13px; /* 본문 보조 */
-  --fs-base: 14px; /* 본문 */
-  --fs-lg: 16px; /* 소제목 */
-  --fs-xl: 20px; /* 섹션 제목·홀로 서는 수치 */
-  --fs-2xl: 26px; /* 화면 제목·스코어 */
-
-  /**
-   * 표면의 높이는 **그림자가 아니라 밝기**로 나타낸다 — 어두운 화면에서 그림자는
-   * 배경에 묻혀 보이지 않는다. 떠 있는 것일수록 밝다 (bg → panel → panel-2).
-   * 그림자는 화면 위에 겹치는 것(팝오버)에만 쓴다.
-   */
-  --border-soft: rgba(42, 51, 66, 0.5);
-  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45);
+  /* 글자 눈금 — 아홉 칸. 12px과 12.5px의 차이는 위계로 읽히지 않는다 */
+  --fs-2xs: 10px; /* 칩 꼬리표 · 표 머리 · 국적 태그 */
+  --fs-xs: 11px; /* 배지 · 데이트라인 · 섹션 라벨 · 직책 칩 */
+  --fs-sm: 12px; /* 표 셀 · 순위표 · 시계 */
+  --fs-md: 13px; /* 장부 본문 보조 · 선수 이름 셀 · 버튼 */
+  --fs-base: 14px; /* UI 본문 · 칩 글자 */
+  --fs-lg: 16px; /* 소제목 · 구단명 · 채팅 산문 */
+  --fs-xl: 20px; /* 섹션 제목 · 홀로 서는 수치 */
+  --fs-2xl: 28px; /* 화면 제목 · 온보딩 질문 · 보조 KPI */
+  --fs-3xl: 40px; /* 스코어 · 잔고 KPI — `--font-score` 700 전용 */
+  --fs-3xs: var(--fs-2xs); /* 별칭 — 눈금 밖이던 9px 자리 */
 
   /**
    * 상태 전이 — 같은 속도를 써야 화면이 한 몸으로 움직인다.
@@ -122,14 +178,28 @@ body {
 body {
   background: var(--bg);
   color: var(--text);
-  font-family:
-    "Pretendard",
-    "Apple SD Gothic Neo",
-    "Noto Sans KR",
-    -apple-system,
-    sans-serif;
+  font-family: var(--font-ui);
   font-size: var(--fs-base);
-  line-height: 1.55;
+  line-height: var(--lh-ui);
+  /* 숫자는 한 번 깔고 산문 선택자만 되돌린다 — 표·시계·스코어가 자릿수로 선다 */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings:
+    "tnum" 1,
+    "ss05" 1;
+}
+/* 한글 서체에는 이탤릭 face가 없다 — 강조는 굵기로, 지문·주석은 색으로 (ui/design-system.md §3) */
+em,
+i {
+  font-style: normal;
+}
+em {
+  font-weight: 600;
+}
+/* 스코어버그의 얼굴 — 스코어 · 시계 · 분′ · 등번호 · xG · KPI · OVR. 한글 옆에 서지 않는다 */
+.fig {
+  font-family: var(--font-score);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lh-fig);
 }
 
 button {
@@ -150,6 +220,7 @@ textarea {
 }
 .onboarding h1 {
   font-size: var(--fs-2xl);
+  letter-spacing: -0.02em;
   margin-bottom: 4px;
 }
 .onboarding .tagline {
@@ -206,7 +277,7 @@ textarea {
 .onboarding .step-rail li.current {
   opacity: 1;
   color: var(--text);
-  font-weight: 700;
+  font-weight: 600;
   border-bottom-color: var(--accent);
 }
 
@@ -230,9 +301,11 @@ textarea {
 .league-ring polygon {
   vector-effect: non-scaling-stroke;
   fill: none;
-  stroke: var(--border-soft);
+  stroke: var(--line);
   stroke-width: 1;
 }
+/* 고르는 칩 — 조작 대상이라 면(`--panel-2`)으로 서고, 손이 닿으면 한 단 밝아진다.
+   고른 것은 키 컬러 링이 말한다 — 테두리는 없다 */
 .league-node {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -241,26 +314,21 @@ textarea {
   align-items: center;
   gap: 2px;
   min-width: 132px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  background: var(--panel-2);
+  border: none;
+  border-radius: var(--r-pill);
   padding: 11px 18px;
   color: var(--text);
   transition:
-    border-color 160ms var(--ease-panel),
-    background 160ms var(--ease-panel),
-    box-shadow 160ms var(--ease-panel);
+    background var(--ease),
+    box-shadow var(--ease);
 }
-.league-node:hover,
-.league-node:focus-visible {
-  border-color: var(--accent);
-  background: var(--panel-2);
-  box-shadow: 0 0 0 4px rgb(from var(--accent) r g b / 12%);
-  outline: none;
+.league-node:hover {
+  background: var(--pop);
 }
 .league-node.selected {
-  border-color: var(--accent);
   background: var(--panel-2);
+  box-shadow: var(--ring);
 }
 .league-node .node-name {
   font-weight: 700;
@@ -295,19 +363,31 @@ textarea {
   gap: 10px;
 }
 .team-card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel-2);
+  border: none;
+  /* 구단 띠 — 카드 요소가 세운 `--club-hi`. 조작 테두리가 아니라 정체성 자리다 (ui/design-system.md §2) */
+  border-left: 4px solid var(--club-hi);
+  border-radius: var(--r-sm);
   padding: 12px 14px;
   text-align: left;
   color: var(--text);
+  transition:
+    background var(--ease),
+    box-shadow var(--ease);
 }
 .team-card:hover {
-  border-color: var(--accent-2);
+  background: var(--pop);
 }
+/* 고른 팀 — 구단 워시(카드 요소가 `--club*`를 세운다)와 키 컬러 링 */
 .team-card.selected {
-  border-color: var(--accent);
-  background: var(--panel-2);
+  background: var(--club-wash);
+  box-shadow: var(--ring);
+}
+.team-card > span {
+  min-width: 0;
 }
 .team-card .team-name {
   font-weight: 700;
@@ -319,9 +399,16 @@ textarea {
 /* 부임 확인 — 어느 팀에 어떤 기대를 안고 들어가는지가 이름을 적기 전에 선다.
    읽는 자리라 카드가 아니라 왼쪽 선 하나로 세운다 (고르는 카드와 섞이지 않게) */
 .onboarding .appointment {
-  border-left: 3px solid var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  /* 부임하는 구단의 색 — 온보딩 루트가 `--club*`를 세운 뒤에만 이 화면이 선다 */
+  border-left: 3px solid var(--club-hi);
   padding: 2px 0 2px 14px;
   margin-bottom: 24px;
+}
+.onboarding .appointment > span {
+  min-width: 0;
 }
 .onboarding .appointment-club {
   font-size: var(--fs-lg);
@@ -350,11 +437,15 @@ textarea {
 .onboarding input[type="text"],
 .onboarding textarea {
   width: 100%;
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border: 1px solid transparent;
   border-radius: var(--r-md);
   padding: 12px;
   color: var(--text);
+}
+.onboarding input[type="text"]:focus-visible,
+.onboarding textarea:focus-visible {
+  border-color: var(--accent);
 }
 .onboarding textarea {
   min-height: 108px;
@@ -362,15 +453,11 @@ textarea {
 }
 .primary-btn {
   background: var(--accent);
-  color: #06220f;
+  color: var(--accent-ink);
   border: none;
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
   padding: 12px 24px;
   font-weight: 700;
-}
-.primary-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 .error-text {
   color: var(--danger);
@@ -385,11 +472,12 @@ textarea {
   justify-content: space-between;
   gap: var(--sp-4);
   padding-bottom: var(--sp-5);
-  border-bottom: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--line);
   margin-bottom: var(--sp-2);
 }
 .home-head h1 {
   font-size: var(--fs-2xl);
+  letter-spacing: -0.02em;
   margin-bottom: 2px;
 }
 /* 로고 마크 + 이름 — 게임 화면 상단 띠와 같은 정체성이 첫 화면에도 선다 */
@@ -434,16 +522,16 @@ textarea {
   border-radius: var(--r-sm);
 }
 /* 어드민은 **곁문**이다 — 색을 주면 초록 "새 게임"과 둘 다 주인공이 되어 어디로
-   가야 하는지가 흐려진다. 테두리로 문이라는 것만 알린다 */
+   가야 하는지가 흐려진다. 보조 버튼의 면만 갖는다 */
 .home-head-actions .ghost-btn {
   text-decoration: none;
   white-space: nowrap;
-  background: none;
+  background: var(--panel-2);
+  border: none;
   color: var(--muted);
 }
 .home-head-actions .ghost-btn:hover {
-  background: var(--panel-2);
-  border-color: var(--border);
+  background: var(--pop);
   color: var(--text);
 }
 @media (max-width: 699px) {
@@ -473,20 +561,20 @@ textarea {
 }
 .admin-head h1 {
   font-size: var(--fs-2xl);
+  letter-spacing: -0.02em;
   margin-top: 4px;
 }
-/* 탭 — 카탈로그의 층(선수·팀·리그·컵). 고른 탭만 아래 패널과 같은 면에 선다 */
+/* 탭 — 카탈로그의 층(선수·팀·리그·컵). 고른 탭은 키 컬러 밑줄 하나로 선다 */
 .admin-tabs {
   display: flex;
   gap: var(--sp-1);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
   margin-bottom: var(--sp-4);
 }
 .admin-tab {
   background: none;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  border: none;
+  border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   padding: 8px 18px;
   color: var(--muted);
@@ -496,8 +584,7 @@ textarea {
   color: var(--text);
 }
 .admin-tab[aria-selected="true"] {
-  background: var(--panel);
-  border-color: var(--border);
+  border-bottom-color: var(--accent);
   color: var(--text);
   font-weight: 600;
 }
@@ -523,7 +610,7 @@ textarea {
 .admin-toolbar select,
 .admin-search {
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: none;
   color: var(--text);
   border-radius: var(--r-sm);
   padding: 8px 10px;
@@ -545,14 +632,12 @@ textarea {
   font-size: var(--fs-md);
 }
 .admin-msg.ok {
-  background: rgba(74, 222, 128, 0.1);
-  border: 1px solid var(--accent);
+  background: var(--key-wash);
   color: var(--accent);
 }
 .admin-msg.err {
-  background: rgba(248, 113, 113, 0.1);
-  border: 1px solid var(--danger);
-  color: var(--danger);
+  background: color-mix(in srgb, var(--loss) 12%, var(--panel));
+  color: var(--loss);
 }
 /**
  * 요약 목록 — 표는 **읽는 일만** 한다. 편집은 행을 눌러 여는 팝업이 맡는다.
@@ -560,8 +645,7 @@ textarea {
  * 좌우 스크롤이 계속 잡아먹는다.
  */
 .admin-list-wrap {
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  background: var(--panel);
   overflow: hidden;
 }
 .admin-list {
@@ -576,11 +660,11 @@ textarea {
   font-size: var(--fs-sm);
   padding: 8px 12px;
   background: var(--panel);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 .admin-list td {
   padding: 7px 12px;
-  border-bottom: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--line);
 }
 .admin-list tbody tr:last-child td {
   border-bottom: none;
@@ -640,7 +724,7 @@ textarea {
 }
 .ai {
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: none;
   color: var(--text);
   border-radius: var(--r-sm);
   padding: 4px 6px;
@@ -656,25 +740,26 @@ textarea {
   text-align: right;
 }
 .mini-btn {
-  border: 1px solid var(--border);
+  border: none;
   border-radius: var(--r-sm);
   padding: 4px 8px;
   font-size: var(--fs-sm);
   background: var(--panel-2);
   color: var(--muted);
 }
+.mini-btn:hover:not(:disabled) {
+  background: var(--pop);
+  color: var(--text);
+}
 .mini-btn.save {
-  border-color: var(--accent);
   color: var(--accent);
 }
 .mini-btn.save:disabled {
-  opacity: 0.35;
-  border-color: var(--border);
   color: var(--muted);
 }
 .mini-btn.del:hover {
-  border-color: var(--danger);
-  color: var(--danger);
+  background: color-mix(in srgb, var(--loss) 12%, var(--panel));
+  color: var(--loss);
 }
 /* ── 계측 탭 — 표는 .admin-list를 그대로 쓰고, 여기 있는 것은 그 위의 칩과 강조뿐 */
 .usage-head {
@@ -685,7 +770,6 @@ textarea {
 }
 .usage-chip {
   background: var(--panel-2);
-  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   padding: 4px 10px;
   font-size: var(--fs-sm);
@@ -713,7 +797,7 @@ textarea {
   margin: 12px 0 4px;
 }
 .admin-pager .mini-btn:disabled {
-  opacity: 0.35;
+  opacity: 0.45;
 }
 .admin-page-info {
   display: flex;
@@ -733,15 +817,14 @@ textarea {
   position: fixed;
   inset: 0;
   z-index: 50;
-  background: rgba(6, 8, 12, 0.72);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: var(--sp-4);
 }
 .admin-modal {
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--pop);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-pop);
   width: 100%;
@@ -760,7 +843,7 @@ textarea {
   justify-content: space-between;
   gap: var(--sp-3);
   padding: var(--sp-4);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 .admin-modal-title {
   font-size: var(--fs-lg);
@@ -783,7 +866,7 @@ textarea {
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-4);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 .admin-modal-foot .primary-btn {
   padding: 9px 20px;
@@ -793,10 +876,11 @@ textarea {
 /* 삭제는 저장과 같은 손이 닿지 않는 자리에 둔다 */
 .admin-modal-danger {
   margin-left: auto;
-  color: var(--danger);
+  color: var(--loss);
 }
 .admin-modal-danger:hover {
-  border-color: var(--danger);
+  background: color-mix(in srgb, var(--loss) 12%, var(--panel));
+  color: var(--loss);
 }
 
 .admin-fields {
@@ -818,7 +902,7 @@ textarea {
 .admin-field input,
 .admin-field select {
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: none;
   color: var(--text);
   border-radius: var(--r-sm);
   padding: 6px 8px;
@@ -888,7 +972,7 @@ textarea {
 .admin-pos-row select,
 .admin-squad-row select {
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: none;
   color: var(--text);
   border-radius: var(--r-sm);
   padding: 4px 6px;
@@ -923,9 +1007,7 @@ textarea {
 .admin-squad-btn {
   font-variant-numeric: tabular-nums;
 }
-.admin-squad-btn:hover,
-.admin-squad-btn:focus-visible {
-  border-color: var(--accent-2);
+.admin-squad-btn:hover {
   color: var(--text);
 }
 .admin-squad-rows {
@@ -937,7 +1019,7 @@ textarea {
   align-items: center;
   gap: var(--sp-2);
   padding: 4px 0;
-  border-bottom: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--line);
 }
 .admin-squad-row:last-child {
   border-bottom: none;
@@ -1052,7 +1134,7 @@ textarea {
   min-width: 90px;
   max-width: 200px;
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: none;
   color: var(--text);
   border-radius: var(--r-sm);
   padding: 4px 6px;
@@ -1066,7 +1148,7 @@ textarea {
   font-size: var(--fs-xs);
 }
 .admin-sum.warn {
-  color: var(--danger);
+  color: var(--loss);
 }
 
 /* 컵 탭은 표가 둘이다 (대항전 · 국내 컵) — 두 표가 붙어 보이지 않게 */
@@ -1092,8 +1174,7 @@ textarea {
 .skill-card {
   min-width: 0;
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
   padding: 12px;
 }
 .skill-card-head {
@@ -1120,7 +1201,7 @@ textarea {
 .skill-badges span {
   padding: 2px 6px;
   border-radius: var(--r-pill);
-  background: var(--surface);
+  background: var(--panel-2);
   color: var(--muted);
   font-size: var(--fs-2xs);
 }
@@ -1129,17 +1210,16 @@ textarea {
   width: 100%;
   min-height: 108px;
   resize: vertical;
-  background: #0b0f14;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
   color: var(--text);
   padding: 9px;
   font-size: var(--fs-sm);
-  line-height: 1.5;
+  line-height: var(--lh-ui);
 }
-.skill-card textarea:focus {
-  outline: none;
-  border-color: var(--accent-2);
+.skill-card textarea:focus-visible {
+  border-color: var(--accent);
 }
 .skill-char-count {
   margin-top: 5px;
@@ -1176,15 +1256,13 @@ textarea {
   flex-direction: column;
   gap: var(--sp-2);
 }
-/* 게임이 없을 때 — 카드가 들어올 자리를 점선으로 비워 둔다. 정렬은 `.empty`의
-   원칙대로 왼쪽(제목·카드와 같은 축), 마크는 머리줄의 초록 마크와 층을 가르려 --dim */
+/* 게임이 없을 때 — 카드가 들어올 자리. 정렬은 `.empty`의 원칙대로 왼쪽(제목·카드와
+   같은 축), 마크는 머리줄의 초록 마크와 층을 가르려 --dim */
 .empty.home-empty {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-5) var(--sp-4);
-  border: 1px dashed var(--border);
-  border-radius: var(--r-md);
   font-size: var(--fs-md);
 }
 .home-empty svg {
@@ -1195,11 +1273,10 @@ textarea {
   display: flex;
   align-items: center;
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  transition:
-    border-color var(--ease),
-    background var(--ease);
+  /* 세이브의 구단 띠 — 카드 요소가 `--club-hi`를 세운다 */
+  border-left: 3px solid var(--club-hi);
+  border-radius: var(--r-sm);
+  transition: background var(--ease);
 }
 /**
  * 카드가 밝아지는 것은 **본문 링크에 손이 올라왔을 때만**이다. 카드 전체를
@@ -1208,7 +1285,6 @@ textarea {
  */
 .game-card:has(.game-card-body:hover),
 .game-card:has(.game-card-body:focus-visible) {
-  border-color: var(--accent-2);
   background: var(--panel-2);
 }
 .game-card-body {
@@ -1220,8 +1296,7 @@ textarea {
   padding: var(--sp-3) var(--sp-4);
   color: inherit;
   text-decoration: none;
-  border-radius: var(--r-md);
-  outline: none;
+  border-radius: var(--r-sm);
 }
 .game-card-main {
   flex: 1;
@@ -1262,12 +1337,11 @@ textarea {
 }
 /**
  * 열 수 없는 세이브 — 열리는 카드와 **생김새가 달라야 한다.** 채워진 판 대신
- * 점선 테두리에 빈 바탕이라 목록을 훑을 때 손이 가지 않고, 본문이 `.game-card-body`가
+ * 빈 바탕이라 목록을 훑을 때 손이 가지 않고, 본문이 `.game-card-body`가
  * 아니므로 위의 hover 규칙에도 걸리지 않는다 — 밝아지지 않는 것이 열리지 않는다는 말이다.
  */
 .game-card-stale {
   background: none;
-  border-style: dashed;
 }
 .game-card-stale-body {
   flex: 1;
@@ -1292,7 +1366,7 @@ textarea {
   flex-shrink: 0;
   font-size: var(--fs-2xs);
   font-weight: 700;
-  color: var(--danger);
+  color: var(--loss);
 }
 /**
  * 삭제 — 평소엔 꺼진 색으로 서 있고, 자기 위에 손이 올라올 때만 붉게 켜진다.
@@ -1316,11 +1390,8 @@ textarea {
 }
 .game-del:hover:not(:disabled),
 .game-del:focus-visible {
-  background: rgba(248, 113, 113, 0.13);
-  color: var(--danger);
-}
-.game-del:disabled {
-  opacity: 0.4;
+  background: color-mix(in srgb, var(--loss) 12%, var(--panel));
+  color: var(--loss);
 }
 
 /* ── 게임 화면 셸 ─────────────────────────────
@@ -1342,7 +1413,7 @@ textarea {
   padding: 0 var(--sp-4);
   min-height: 52px;
   background: var(--panel);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
   /* 줄이 넘칠 땐 **왼쪽 정보가 줄어든다** — 이동 수단(아이콘 줄)은 화면이 좁아도
      끝까지 남아야 한다. 이걸 안 걸면 좁은 화면에서 띠가 페이지를 옆으로 늘린다.
      세로는 잘라선 안 된다 — 아이콘 말풍선이 띠 아래로 나와야 읽힌다 */
@@ -1405,6 +1476,24 @@ textarea {
   color: var(--text) !important;
   font-weight: 600;
 }
+/* 구단 띠 4px + 문장 + 이름 — 상단 띠에서 유일하게 구단 색이 서는 자리 (ui/design-system.md §2 규칙 5) */
+.topbar-club-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border-left: 4px solid var(--club-hi);
+  padding-left: 10px;
+}
+/* 문장 — 크기는 컴포넌트가 정하고(눈금 여섯), 흐름만 여기서 */
+.crest {
+  display: inline-flex;
+  flex-shrink: 0;
+  line-height: 0;
+}
+.crest svg {
+  display: block;
+}
 /* 각주 줄 — 가운뎃점으로 이어 한 문장처럼 읽힌다 */
 .topbar-sub {
   display: flex;
@@ -1459,7 +1548,7 @@ textarea {
   background: var(--panel-2);
   color: var(--muted);
   font-size: var(--fs-xs);
-  line-height: 1.6;
+  line-height: var(--lh-ui);
   /* 갈래 이름과 수는 한 덩어리다 — 둘 사이에서 줄이 갈리면 수가 미아가 된다 */
   white-space: nowrap;
 }
@@ -1544,10 +1633,9 @@ textarea {
     var(--tail-slot, 0) * (var(--rail-btn) + var(--rail-gap)) + var(--rail-btn) / 2 + 20px
   );
   padding: var(--sp-2) var(--sp-3);
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--pop);
   border-radius: var(--r-md);
-  box-shadow: 0 14px 32px -18px rgb(0 0 0 / 0.95);
+  box-shadow: var(--shadow-pop);
   text-align: left;
   /* 알림은 읽히기 위한 것이지 눌리기 위한 것이 아니다 — 아이콘이 조작을 맡는다 */
   pointer-events: none;
@@ -1568,16 +1656,14 @@ textarea {
   );
   width: 8px;
   height: 8px;
-  background: var(--panel-2);
-  border-left: 1px solid var(--border);
-  border-top: 1px solid var(--border);
+  background: var(--pop);
   transform: rotate(45deg);
 }
 /* 장부 하나 — 머리(어느 장부)와 몸(무엇이 바뀌었나) */
 .rail-hint + .rail-hint {
   margin-top: var(--sp-2);
   padding-top: var(--sp-2);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 .rail-hint-head {
   display: flex;
@@ -1595,7 +1681,7 @@ textarea {
 .rail-hint-body {
   display: block;
   font-size: var(--fs-xs);
-  line-height: 1.5;
+  line-height: var(--lh-ui);
   /* 기본은 한 단 낮다 — 또렷한 것은 값(`.rail-hint-value`)뿐이다 */
   color: var(--muted);
 }
@@ -1681,7 +1767,7 @@ textarea {
   color: var(--accent);
 }
 .rail-hint-what b.down {
-  color: var(--danger);
+  color: var(--loss);
 }
 /* 접어 둔 나머지 — 줄들과 같은 자리에서 시작한다 */
 .rail-hint-body > i {
@@ -1709,9 +1795,15 @@ textarea {
   }
 }
 
+/* 활성 아이콘 — 글자 1층 + 키 컬러 밑줄. 초록 채움은 세그먼트(경기 탭 줄)의 것이다 */
 .rail button.active {
-  color: var(--accent);
-  background: var(--panel-2);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.rail button.active:focus-visible {
+  box-shadow:
+    var(--ring),
+    inset 0 -2px 0 var(--accent);
 }
 /**
  * 경기 탭 줄 — 여섯 칸이 **한 덩어리**로 보여야 한다.
@@ -1721,19 +1813,26 @@ textarea {
  */
 .rail.match-rail {
   gap: 0;
-  padding: 3px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  padding: 2px;
+  background: var(--panel-2);
+  border-radius: var(--r-sm);
 }
 .rail.match-rail button {
   width: 38px;
   height: 30px;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-xs);
 }
+.rail.match-rail button:hover {
+  background: var(--pop);
+}
+/* 세그먼트 활성 — 키 컬러 채움 */
 .rail.match-rail button.active {
-  background: var(--panel-2);
-  color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: none;
+}
+.rail.match-rail button.active:focus-visible {
+  box-shadow: var(--ring);
 }
 .rail .rail-sep {
   width: 1px;
@@ -1845,7 +1944,7 @@ textarea {
 .match-headline {
   flex-shrink: 0;
   padding: var(--sp-3) var(--sp-4);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
   background: var(--panel);
 }
 /* 상단 띠 안에서는 카드가 아니라 한 줄이다 — 스코어만 남았으므로 크게 선다 */
@@ -1868,18 +1967,17 @@ textarea {
  */
 .side-tabs {
   display: inline-flex;
-  padding: 3px;
+  padding: 2px;
   margin-bottom: var(--sp-3);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  background: var(--panel-2);
+  border-radius: var(--r-sm);
 }
 .side-tab {
   min-width: 88px;
   padding: 6px 16px;
   background: none;
   border: none;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-xs);
   color: var(--muted);
   font-size: var(--fs-md);
   line-height: 1.3;
@@ -1888,12 +1986,14 @@ textarea {
     background var(--ease);
 }
 .side-tab:hover {
+  background: var(--pop);
   color: var(--text);
 }
+/* 세그먼트 활성 — 키 컬러 채움 */
 .side-tab.on {
-  background: var(--panel-2);
-  color: var(--text);
-  font-weight: 700;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
 }
 
 /**
@@ -1906,8 +2006,7 @@ textarea {
   display: grid;
   place-items: center;
   padding: var(--sp-6);
-  background: rgb(4 8 13 / 0.72);
-  backdrop-filter: blur(4px);
+  background: var(--scrim);
   animation: fulltime-in 160ms var(--ease-panel) both;
 }
 .kickoff-card {
@@ -1916,15 +2015,14 @@ textarea {
   width: min(400px, 100%);
   padding: var(--sp-6);
   text-align: center;
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--pop);
   border-radius: var(--r-md);
-  box-shadow: 0 24px 64px rgb(0 0 0 / 0.42);
+  box-shadow: var(--shadow-pop);
 }
 .kickoff-tag {
   font-size: var(--fs-xs);
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.06em;
   color: var(--accent);
 }
 /**
@@ -1956,7 +2054,7 @@ textarea {
   font-size: var(--fs-2xs);
   font-style: normal;
   font-weight: 600;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.06em;
 }
 .kickoff-where {
   margin-top: var(--sp-4);
@@ -1965,11 +2063,6 @@ textarea {
 }
 .kickoff-card .primary-btn {
   margin-top: var(--sp-6);
-}
-/* 열리자마자 포커스가 앉는 자리 — accent 위라 링은 밝은 쪽으로 */
-.kickoff-card .primary-btn:focus-visible {
-  outline: 2px solid var(--text);
-  outline-offset: 2px;
 }
 @media (max-width: 479px) {
   .kickoff-gate {
@@ -1990,8 +2083,7 @@ textarea {
   display: grid;
   place-items: center;
   padding: var(--sp-6);
-  background: rgb(4 8 13 / 0.72);
-  backdrop-filter: blur(4px);
+  background: var(--scrim);
   animation: fulltime-in 160ms var(--ease-panel) both;
 }
 .fulltime-card {
@@ -2004,10 +2096,9 @@ textarea {
   max-height: min(720px, calc(100dvh - 48px));
   overflow-y: auto;
   padding: var(--sp-6);
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--pop);
   border-radius: var(--r-md);
-  box-shadow: 0 24px 64px rgb(0 0 0 / 0.42);
+  box-shadow: var(--shadow-pop);
 }
 /* 스코어와 상대는 리포트의 머리가 갖는다 — 여기 남는 것은 "경기 종료" 하나다 */
 .fulltime-header {
@@ -2020,7 +2111,7 @@ textarea {
 .fulltime-tag {
   font-size: var(--fs-xs);
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.06em;
   color: var(--accent);
 }
 .fulltime .primary-btn {
@@ -2059,9 +2150,9 @@ textarea {
   gap: var(--sp-2);
   padding: var(--sp-3);
   margin-bottom: var(--sp-3);
-  background: rgba(74, 222, 128, 0.08);
-  border: 1px solid rgba(74, 222, 128, 0.35);
-  border-radius: var(--r-md);
+  /* 감독의 지시가 반영된 자리 — 감독 말풍선과 같은 키 워시 */
+  background: var(--key-wash);
+  border-radius: var(--r-sm);
 }
 .mv-exploit-tag {
   font-size: var(--fs-xs);
@@ -2380,11 +2471,9 @@ textarea {
     padding: var(--sp-5);
     gap: 0;
     background: var(--bg);
-    /* 붙는 쪽엔 이음매를 두지 않는다 — 명단 패널의 테두리가 이미 그 선이다 */
-    border-left: 1px solid var(--border);
     border-radius: var(--r-md) 0 0 var(--r-md);
-    /* 그림자는 **왼쪽으로** 떨어진다 — 서랍이 그쪽으로 나와 있다는 표시다 */
-    box-shadow: -16px 0 34px rgba(0, 0, 0, 0.45);
+    /* 떠 있는 것이라 그림자를 갖는다 — 화면의 유일한 그림자 */
+    box-shadow: var(--shadow-pop);
     animation: board-slide-in var(--panel-anim) var(--ease-panel);
     /* 덩어리가 남는 높이에서 제 폭을 되짚을 수 있게 */
     container-type: size;
@@ -2411,8 +2500,8 @@ textarea {
     margin: 0 auto;
     width: min(100cqw, calc((100cqh - var(--board-foot)) * 0.75), 720px);
     max-height: 100%;
-    /* 그림자는 서랍이 갖는다 — 그 위에 또 띄우면 판이 두 겹으로 떠 보인다 */
-    border: 1px solid var(--border);
+    /* 판과 줄이 한 면 위에 선다 — 테두리 대신 한 단 밝은 바탕이 덩어리를 만든다 */
+    background: var(--panel);
     border-radius: var(--r-md);
     /* 모서리를 자식이 넘지 않게 — 판의 초록이 각진 채로 삐져나온다 */
     overflow: hidden;
@@ -2436,7 +2525,7 @@ textarea {
     width: 100%;
     margin: 0;
     border: none;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
     border-radius: 0;
   }
   /**
@@ -2610,19 +2699,19 @@ textarea {
   gap: var(--sp-3);
   align-self: stretch;
   padding: var(--sp-2) var(--sp-3);
-  background: none;
-  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border: none;
   border-left: 2px solid var(--gold-soft);
   border-radius: var(--r-sm);
   color: var(--muted);
   font-size: var(--fs-md);
   text-align: left;
   transition:
-    border-color var(--ease),
+    background var(--ease),
     color var(--ease);
 }
 .match-log-head:hover {
-  border-color: var(--gold-soft);
+  background: var(--pop);
   color: var(--text);
 }
 .match-log-head b {
@@ -2685,16 +2774,18 @@ textarea {
 .turn-user {
   align-self: flex-end;
   max-width: 72%;
-  background: #26405e;
-  border-radius: var(--r-md) 14px 4px 14px;
+  /* 키 워시 — 구단색이 아니다. 셸은 구단 색을 받지 않는다 */
+  background: var(--key-wash);
+  border-radius: var(--r-md) var(--r-md) var(--r-xs) var(--r-md);
   padding: 10px 15px;
-  line-height: 1.65;
+  line-height: var(--lh-prose);
+  font-variant-numeric: proportional-nums;
   white-space: pre-wrap;
 }
 /* 감독의 연출도 대사와 층위가 갈려야 한다 — 다만 말풍선 바탕이 짙어 `--muted`로는
    글자가 묻는다. 같은 글자색을 낮춰 대비를 지킨다 */
 .turn-user em {
-  font-style: italic;
+  font-weight: 600;
   opacity: 0.72;
 }
 .turn-model {
@@ -2723,14 +2814,15 @@ textarea {
   gap: var(--sp-3);
   margin: 6px 0 2px;
   font-size: var(--fs-xs);
+  font-weight: 600;
   letter-spacing: 0.06em;
-  color: var(--muted);
+  color: var(--text-2);
 }
 .scene-stamp::after {
   content: "";
   height: 1px;
   flex: 1;
-  background: var(--border);
+  background: var(--line);
 }
 .tool-chip-wrap {
   display: inline-block;
@@ -2739,31 +2831,29 @@ textarea {
 /**
  * 스킬 칩 — **가라앉아 있다가 눌리면 열린다.**
  *
- * 파란 테두리가 줄마다 서면 채팅이 버튼 밭으로 읽힌다. 무대의 주인은 서사이므로
- * 칩은 배경에 가깝게 두고, 마우스가 닿을 때만 또렷해진다.
+ * 테두리가 줄마다 서면 채팅이 버튼 밭으로 읽힌다. 무대의 주인은 서사이므로
+ * 칩은 면 한 단(`--panel-2`)으로만 서고, 마우스가 닿을 때 한 단 더 밝아진다.
  */
 .tool-chip {
   display: inline-block;
   font-size: var(--fs-xs);
   color: var(--muted);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  background: var(--panel-2);
+  border: none;
+  border-radius: var(--r-pill);
   padding: 2px 10px;
   cursor: pointer;
   transition:
     color var(--ease),
-    background var(--ease),
-    border-color var(--ease);
+    background var(--ease);
 }
 .tool-chip:hover {
   color: var(--text);
-  background: var(--panel-2);
+  background: var(--pop);
 }
 .tool-chip.open {
   color: var(--text);
-  background: var(--panel-2);
-  border-color: var(--border-strong, var(--border));
+  background: var(--pop);
 }
 /**
  * 묶인 횟수 — **수 하나.** 연달아 불린 같은 스킬은 칩 하나라(`groupChips`) 몇 번을
@@ -2799,29 +2889,27 @@ textarea {
   background: var(--accent);
 }
 .tool-chip.bad::before {
-  background: var(--danger);
+  background: var(--loss);
 }
 /**
  * 골 카드 — 대화 줄에서 **한 칸 튀어나온 띠.**
  *
  * 말풍선과 같은 배경에 두면 또 하나의 발화로 읽힌다. 왼쪽 굵은 선 + 밝은 면으로
- * 대화가 아닌 **사실**임을 알리고, 우리 골만 강조색을 갖는다(상대 골은 붉게
- * 가라앉는다 — 같은 색이면 스코어를 읽기 전엔 누가 넣었는지 모른다).
+ * 대화가 아닌 **사실**임을 알린다. 이벤트 카드는 레일 = 팀 — 우리 골은 `--club-hi`,
+ * 상대 골은 `--opp-hi`라 스코어를 읽기 전에 누가 넣었는지가 보인다.
  */
 /**
  * 스카우팅 보고서 — **대화 밖에 놓인 서류 한 장.**
  *
- * 말풍선과 같은 배경에 두면 또 하나의 발화로 읽힌다. 한 단계 밝은 면 + 또렷한
- * 테두리로 "누가 가져다 놓은 문서"처럼 보이게 하고, 머리에 표식을 달아 무엇인지를
- * 먼저 알린다. 며칠을 기다려 얻은 것이므로 대화보다 조금 더 자리를 차지해도 된다.
+ * 말풍선과 같은 배경에 두면 또 하나의 발화로 읽힌다. 한 단계 밝은 면으로 "누가
+ * 가져다 놓은 문서"처럼 보이게 하고, 머리에 표식을 달아 무엇인지를 먼저 알린다.
+ * 며칠을 기다려 얻은 것이므로 대화보다 조금 더 자리를 차지해도 된다.
  */
 .scout-report {
   margin: var(--sp-3) 0;
   padding: var(--sp-3) var(--sp-4);
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  box-shadow: 0 12px 28px -22px rgb(0 0 0 / 0.9);
+  border-radius: var(--r-sm);
   animation: goal-in 0.28s var(--ease-panel) both;
 }
 .sr-head {
@@ -2830,16 +2918,16 @@ textarea {
   flex-wrap: wrap;
   gap: 6px 10px;
   padding-bottom: var(--sp-2);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 .sr-badge,
 .mn-badge {
-  font-size: var(--fs-3xs);
+  font-size: var(--fs-2xs);
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   padding: 2px 7px;
-  border-radius: var(--r-sm);
-  background: rgb(96 165 250 / 0.14);
+  border-radius: var(--r-xs);
+  background: color-mix(in srgb, var(--accent-2) 14%, transparent);
   color: var(--accent-2);
 }
 .sr-name {
@@ -2872,7 +2960,7 @@ textarea {
 .sr-ovr b i {
   margin-left: 3px;
   color: var(--muted);
-  font-size: var(--fs-3xs);
+  font-size: var(--fs-2xs);
   font-style: normal;
   font-weight: 500;
 }
@@ -2909,15 +2997,13 @@ textarea {
 .sr-pos {
   font-size: var(--fs-2xs);
   padding: 1px 7px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--silver) 42%, transparent);
-  background: color-mix(in srgb, var(--silver) 8%, transparent);
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--silver) 12%, transparent);
   color: var(--silver);
 }
 /* 선호는 금색, 소화 가능은 은색 — 적응도 숫자는 카드에서 다루지 않는다. */
 .sr-pos.natural {
-  border-color: color-mix(in srgb, var(--gold-soft) 50%, transparent);
-  background: color-mix(in srgb, var(--gold-soft) 10%, transparent);
+  background: color-mix(in srgb, var(--gold-soft) 14%, transparent);
   color: var(--gold-soft);
   font-weight: 600;
 }
@@ -2941,10 +3027,10 @@ textarea {
   gap: 3px;
 }
 .sr-group-name {
-  font-size: var(--fs-3xs);
+  font-size: var(--fs-2xs);
   color: var(--dim);
   padding-bottom: 2px;
-  border-bottom: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--line);
 }
 .sr-axis {
   display: grid;
@@ -3041,7 +3127,7 @@ textarea {
  * 또렷하고 상대는 가라앉는다: **내가 손볼 자리**가 아니기 때문이다.
  */
 .booking-card {
-  --book: #facc15;
+  --book: var(--warn);
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -3052,7 +3138,7 @@ textarea {
 }
 .booking-card.red,
 .booking-card.second_yellow {
-  --book: var(--danger);
+  --book: var(--loss);
 }
 .booking-card.ours {
   color: var(--muted);
@@ -3061,7 +3147,7 @@ textarea {
 .booking-mark {
   width: 9px;
   height: 13px;
-  border-radius: 2px;
+  border-radius: var(--r-xs);
   background: var(--book);
   flex-shrink: 0;
   /* 심판이 들어 올린 각도 — 정면으로 두면 그냥 색 막대로 읽힌다 */
@@ -3102,16 +3188,15 @@ textarea {
   margin: var(--sp-2) 0;
   padding: var(--sp-2) var(--sp-3);
   background: var(--panel);
-  border: 1px solid var(--border);
   border-left: 2px solid var(--deal);
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
   animation: goal-in 0.28s var(--ease-panel) both;
 }
 .market-card.accept {
-  --deal: var(--accent);
+  --deal: var(--win);
 }
 .market-card.reject {
-  --deal: var(--danger);
+  --deal: var(--loss);
 }
 .market-card.counter {
   --deal: var(--gold);
@@ -3137,12 +3222,12 @@ textarea {
 }
 /* 배지는 방향까지 실어 두 낱말이 된다(`임대 송출 조정안`) — 중간에서 접히면 두 표식으로 읽힌다 */
 .mc-badge {
-  font-size: var(--fs-3xs);
+  font-size: var(--fs-2xs);
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   white-space: nowrap;
   padding: 2px 7px;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-xs);
   background: color-mix(in srgb, var(--deal) 16%, transparent);
   color: var(--deal);
 }
@@ -3230,15 +3315,14 @@ textarea {
   margin-top: 6px;
 }
 .mc-pitch span {
-  font-size: var(--fs-3xs);
+  font-size: var(--fs-2xs);
   padding: 1px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  border-radius: var(--r-xs);
   color: var(--dim);
 }
 .mc-pitch span.on {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
-  color: var(--accent);
+  color: var(--win);
 }
 .mc-foot {
   display: flex;
@@ -3264,10 +3348,6 @@ textarea {
 .mc-note {
   color: var(--muted);
 }
-/* 상대의 한마디 — 코어의 사실이 아니라 사람의 말이므로 기울여 앉힌다 */
-.mc-note.said {
-  font-style: italic;
-}
 
 /**
  * 스카우트 임무 보고 — **대화 옆에 놓인 후보 명단.**
@@ -3281,9 +3361,8 @@ textarea {
   margin: var(--sp-2) 0;
   padding: var(--sp-2) var(--sp-3);
   background: var(--panel);
-  border: 1px solid var(--border);
   border-left: 2px solid var(--accent-2);
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
   animation: goal-in 0.28s var(--ease-panel) both;
 }
 .mn-head {
@@ -3367,11 +3446,11 @@ textarea {
   font-size: var(--fs-2xs);
   color: var(--dim);
   padding-bottom: 4px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 /* 줄을 가르는 실선 — 여덟 칸을 가로로 따라갈 때 눈이 한 줄에 머물게 한다 */
 .mn-row:not(.head):not(:last-child) > * {
-  border-bottom: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--line);
 }
 .mn-who {
   font-weight: 600;
@@ -3387,7 +3466,7 @@ textarea {
   margin-left: 3px;
   font-style: normal;
   font-weight: 500;
-  font-size: var(--fs-3xs);
+  font-size: var(--fs-2xs);
   color: var(--muted);
 }
 .mn-pot,
@@ -3402,7 +3481,7 @@ textarea {
 }
 
 .goal-card {
-  --goal: var(--danger);
+  --goal: var(--opp-hi);
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -3410,12 +3489,12 @@ textarea {
   padding: 7px var(--sp-3);
   border-radius: var(--r-sm);
   border-left: 3px solid var(--goal);
-  background: color-mix(in srgb, var(--goal) 10%, var(--panel));
+  background: var(--panel);
   font-size: var(--fs-md);
   animation: goal-in 0.28s var(--ease-panel) both;
 }
 .goal-card.ours {
-  --goal: var(--accent);
+  --goal: var(--club-hi);
 }
 .goal-ball {
   display: inline-flex;
@@ -3455,7 +3534,6 @@ textarea {
 .tool-detail {
   margin-top: 4px;
   background: var(--panel);
-  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   padding: 8px 10px;
   font-size: var(--fs-sm);
@@ -3466,7 +3544,7 @@ textarea {
 .tool-detail-call + .tool-detail-call {
   margin-top: 6px;
   padding-top: 6px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 .tool-detail-summary {
   color: var(--text);
@@ -3490,7 +3568,7 @@ textarea {
 .tool-lines + .tool-lines {
   margin-top: 5px;
   padding-top: 5px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 .tool-item {
   display: inline-flex;
@@ -3501,7 +3579,7 @@ textarea {
   border-radius: var(--r-sm);
   color: var(--text);
   font-size: var(--fs-xs);
-  line-height: 1.5;
+  line-height: var(--lh-ui);
 }
 /* 이름표(앞)와 갈래(뒤) — 알약 안에서도 또렷한 것은 값 하나다 */
 .tool-item em {
@@ -3524,7 +3602,8 @@ textarea {
   padding: 8px;
   overflow-x: auto;
   font-size: var(--fs-xs);
-  line-height: 1.5;
+  line-height: var(--lh-ui);
+  font-family: var(--font-mono);
 }
 
 /* 스트리밍 타이핑 커서 — **마지막 발화의 마지막 줄** 하나에만.
@@ -3593,22 +3672,23 @@ textarea {
   color: var(--gold-soft);
 }
 .line {
-  /* 한국어 긴 문장은 행간이 곧 가독성이다 */
-  line-height: 1.75;
+  /* 한국어 긴 문장은 행간이 곧 가독성이다 — 산문은 숫자도 산문 폭으로 */
+  line-height: var(--lh-prose);
+  font-variant-numeric: proportional-nums;
 }
 /* 대사는 이름 아래로 한 칸 들어간다 — 누구의 말인지 덩어리로 읽힌다 */
 .say .line {
   padding-left: 11px;
 }
 /**
- * 직책 — **칩**. 이름에 딸린 정보라 한 단계 물러나되, 괄호 대신 테두리가
- * 경계를 말한다. 괄호로 묶으면 이름과 같은 줄의 같은 글자라 어디까지가 이름인지
+ * 직책 — **칩**. 이름에 딸린 정보라 한 단계 물러나되, 괄호 대신 면이 경계를
+ * 말한다. 괄호로 묶으면 이름과 같은 줄의 같은 글자라 어디까지가 이름인지
  * 눈이 한 번 더 짚는다.
  */
 .speaker-role {
   display: inline-block;
   padding: 1px 7px 2px;
-  border: 1px solid var(--border);
+  background: var(--panel-2);
   border-radius: var(--r-pill);
   font-size: var(--fs-2xs);
   font-weight: 600;
@@ -3617,15 +3697,14 @@ textarea {
   vertical-align: 1px;
 }
 .line.narration {
-  color: var(--muted);
-  font-style: italic;
+  color: var(--text-2);
   /* 장면 지문은 대사와 다른 층위다 — 얇은 선 하나로 갈라 놓는다 */
   padding-left: 11px;
   border-left: 2px solid var(--border);
 }
 .line em {
-  color: var(--muted);
-  font-style: italic;
+  color: var(--text-2);
+  font-weight: 600;
 }
 /* 턴 실패 알림 — 게임 밖 사건이므로 말풍선이 아니라 시스템 띠로 (chat.tsx와 구분) */
 .turn-error {
@@ -3634,9 +3713,10 @@ textarea {
   justify-content: space-between;
   gap: 10px;
   padding: 9px 20px;
-  border-top: 1px solid var(--danger);
-  background: rgba(248, 113, 113, 0.1);
-  color: var(--danger);
+  border-top: 1px solid var(--line);
+  /* 턴 실패 워시 8% */
+  background: color-mix(in srgb, var(--loss) 8%, var(--panel));
+  color: var(--loss);
   font-size: var(--fs-sm);
 }
 .turn-error-actions {
@@ -3646,18 +3726,15 @@ textarea {
   flex-shrink: 0;
 }
 .turn-error button {
-  background: transparent;
-  border: 1px solid var(--danger);
+  background: color-mix(in srgb, var(--loss) 12%, var(--panel));
+  border: none;
   border-radius: var(--r-sm);
-  color: var(--danger);
+  color: var(--loss);
   font-size: var(--fs-sm);
   padding: 3px 10px;
 }
-.turn-error button:disabled {
-  opacity: 0.4;
-}
 .turn-error button.ghost {
-  border-color: transparent;
+  background: none;
   color: var(--muted);
   padding: 3px 6px;
 }
@@ -3671,7 +3748,7 @@ textarea {
   align-items: center;
   gap: 10px;
   padding: 9px 20px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--muted);
   font-size: var(--fs-sm);
@@ -3722,10 +3799,9 @@ textarea {
   flex-direction: column;
   min-width: 168px;
   padding: 5px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--pop);
   border-radius: var(--r-md);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-pop);
 }
 .skip-menu button {
   display: flex;
@@ -3746,7 +3822,7 @@ textarea {
   flex-shrink: 0;
 }
 .skip-menu button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 .skip-menu button:hover:not(:disabled) svg {
   color: var(--accent-2);
@@ -3774,19 +3850,23 @@ textarea {
    * 여백**이라 6px면 테두리와 고르게 뜬다. 여백과 버튼 높이가 어긋나면
    * 한쪽만 1px 더 붙어 보인다.
    */
-  padding: 6px 6px 6px 15px;
+  padding: 8px 8px 8px 15px;
+  min-height: 52px;
   background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  transition: border-color 0.15s;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  transition:
+    border-color var(--ease),
+    box-shadow var(--ease);
 }
 .chat-input:focus-within {
-  border-color: var(--accent-2);
+  border-color: var(--accent);
+  box-shadow: var(--ring);
 }
 /**
  * 한 줄일 때 **버튼과 키가 같아야** 위아래 여백이 같다.
- * 21(line-height 1.5 × 14) + 7 + 7 = 35 = 버튼 35. 둘이 어긋나면 한쪽만 더 떠
- * 보인다(`align-items: flex-end`라 남는 자리가 위로 몰린다).
+ * 21(line-height 1.5 × 14) + 7 + 7 = 35 ≒ 버튼 36(하한 36으로 맞춘다). 둘이 어긋나면
+ * 한쪽만 더 떠 보인다(`align-items: flex-end`라 남는 자리가 위로 몰린다).
  *
  * 거기서부터 **쓴 만큼 자라고, 상한은 여기 한 번만 적는다.** `scrollHeight`를
  * 재서 `style.height`에 얹는 자바스크립트에 상한을 한 번 더 박으면 두 숫자는
@@ -3806,12 +3886,16 @@ textarea {
   /* 내용이 폭도 밀지 않게 — `field-sizing`은 가로도 내용에 맞추려 들고,
      flex 자식의 기본 하한(`min-width: auto`)이 그것을 그대로 받는다 */
   min-width: 0;
+  min-height: 36px;
   max-height: 160px;
-  line-height: 1.5;
+  line-height: var(--lh-ui);
   font-family: inherit;
 }
-.chat-input textarea:focus {
+/* 링은 입력창 전체(`:focus-within`)가 갖는다 — 안쪽 칸에 한 번 더 두르지 않는다 */
+.chat-input textarea:focus,
+.chat-input textarea:focus-visible {
   outline: none;
+  box-shadow: none;
 }
 /**
  * 손잡이 하나 — 정사각형이라 어느 쪽 여백도 같다.
@@ -3824,23 +3908,14 @@ textarea {
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  width: 35px;
-  height: 35px;
+  width: 36px;
+  height: 36px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   background: var(--accent);
-  color: #06220f;
+  color: var(--accent-ink);
   cursor: pointer;
-  transition:
-    filter 0.15s,
-    opacity 0.15s;
-}
-.chat-input button:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-.chat-input button:disabled {
-  opacity: 0.35;
-  cursor: default;
+  transition: opacity var(--ease);
 }
 /**
  * 기다리는 중 — 점 세 개. **문장으로 적지 않는다.**
@@ -4024,7 +4099,7 @@ textarea {
  */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.32) transparent;
+  scrollbar-color: color-mix(in srgb, var(--text) 28%, transparent) transparent;
 }
 ::-webkit-scrollbar {
   width: 12px;
@@ -4035,13 +4110,13 @@ textarea {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.28);
+  background: color-mix(in srgb, var(--text) 24%, transparent);
   background-clip: content-box;
   border: 4px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.5);
+  background: color-mix(in srgb, var(--text) 42%, transparent);
   background-clip: content-box;
 }
 
@@ -4072,23 +4147,23 @@ textarea {
   opacity: 0.6;
 }
 .mgr-radar .area {
-  fill: rgba(74, 222, 128, 0.16);
-  stroke: var(--accent);
+  fill: color-mix(in srgb, var(--club-hi) 16%, transparent);
+  stroke: var(--club-hi);
   stroke-width: 1.6;
   stroke-linejoin: round;
 }
 .mgr-radar .dot {
-  fill: var(--accent);
+  fill: var(--club-hi);
 }
 .mgr-radar .axis-label {
   fill: var(--muted);
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   dominant-baseline: middle;
 }
 .mgr-radar .axis-value {
   fill: var(--text);
-  font-weight: 800;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 /**
@@ -4100,7 +4175,7 @@ textarea {
   fill: var(--border);
 }
 .mgr-radar .xp-fill {
-  fill: var(--accent);
+  fill: var(--club-hi);
   opacity: 0.7;
 }
 
@@ -4122,15 +4197,16 @@ textarea {
 }
 .ledger-body th {
   text-align: left;
-  color: var(--muted);
+  color: var(--text-3);
   font-weight: 500;
   padding: 6px 6px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 .ledger-body td {
   padding: 7px 6px;
-  border-bottom: 1px solid rgba(42, 51, 66, 0.5);
+  border-bottom: 1px solid var(--line);
 }
+/* 우리 행 — 구단 워시 */
 .ledger-body tr.me td {
-  background: rgba(74, 222, 128, 0.07);
+  background: var(--club-wash);
 }

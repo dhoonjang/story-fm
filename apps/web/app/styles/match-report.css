@@ -24,12 +24,12 @@
   display: inline-flex;
   align-items: baseline;
   gap: var(--sp-2);
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
 }
 .mr-label em {
   font-style: normal;
-  color: var(--dim);
+  color: var(--text-3);
 }
 .mr-score {
   display: grid;
@@ -40,7 +40,7 @@
 }
 .mr-score b {
   min-width: 0;
-  color: var(--muted);
+  color: var(--text-2);
   font-weight: 600;
 }
 .mr-score b:first-of-type {
@@ -53,8 +53,12 @@
 .mr-score b.ours {
   color: var(--text);
 }
+/* 스코어 — 숫자와 대시만 서는 자리라 스코어 서체를 받는다(한글 없음) */
 .mr-score-num {
-  font-size: var(--fs-xl);
+  font-family: var(--font-score);
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  line-height: var(--lh-fig);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -65,16 +69,14 @@
   align-items: center;
   gap: var(--sp-1) var(--sp-2);
 }
-/* 최우수 선수 — 금색은 이 화면에서 하나뿐인 자리다 */
+/* 최우수 선수 — 금색 밑줄 하나. 워시도 알약도 아니다 */
 .mr-motm {
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
-  padding: 1px 8px;
-  border: 1px solid rgba(251, 191, 36, 0.35);
-  border-radius: var(--r-pill);
-  background: rgba(251, 191, 36, 0.08);
-  color: var(--gold);
+  padding: 1px 0 2px;
+  box-shadow: inset 0 -1px 0 var(--gold);
+  color: var(--text);
   font-size: var(--fs-2xs);
 }
 .mr-motm b {
@@ -84,20 +86,20 @@
 /* 작은 꼬리표 — 연장·승부차기·세트피스 갈래가 같은 모양으로 선다 */
 .mr-tag {
   padding: 0 6px;
-  border: 1px solid var(--border);
   border-radius: var(--r-xs);
-  color: var(--muted);
+  background: var(--panel-2);
+  color: var(--text-2);
   font-size: var(--fs-2xs);
   white-space: nowrap;
 }
 
 .mr-section {
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--line);
   padding-top: var(--sp-3);
 }
 .mr-section h4 {
   margin: 0 0 var(--sp-2);
-  color: var(--dim);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -109,12 +111,16 @@
   flex-direction: column;
   gap: 6px;
   padding: var(--sp-2) 0;
-  color: var(--dim);
+  color: var(--text-3);
   font-size: var(--fs-xs);
 }
+/* 자리표시 막대 — 펄스 없음(design-system.md §5). `.skel`의 애니메이션을 여기서 끈다 */
 .mr-skel {
   height: 10px;
   width: 100%;
+  background: var(--panel-2);
+  animation: none;
+  opacity: 1;
 }
 .mr-skel.short {
   width: 55%;
@@ -135,7 +141,7 @@
   gap: 2px var(--sp-2);
 }
 .mr-stat b {
-  color: var(--muted);
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -147,23 +153,22 @@
 }
 .mr-stat-label {
   text-align: center;
-  color: var(--dim);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
 }
+/* 두 구단의 몫 — 왼쪽(우리)은 채움, 오른쪽(상대)은 바탕이 그린다. 두 막대를 겹치면
+   반올림 틈이 생긴다 */
 .mr-stat-bar {
   grid-column: 1 / -1;
   display: block;
   height: 3px;
-  border-radius: var(--r-pill);
-  /* 오른쪽(원정)의 몫은 바탕이 그린다 — 두 막대를 겹치면 반올림 틈이 생긴다 */
-  background: var(--border);
+  background: var(--opp-hi);
   overflow: hidden;
 }
 .mr-stat-bar i {
   display: block;
   height: 100%;
-  background: var(--accent-2);
-  opacity: 0.75;
+  background: var(--club-hi);
 }
 
 /* ── 타임라인 ─────────────────────────────────────────────
@@ -179,16 +184,16 @@
   align-items: baseline;
   gap: 2px var(--sp-2);
   padding: 1px 0;
-  color: var(--muted);
+  color: var(--text-2);
 }
 .mr-ev-min {
   text-align: right;
-  color: var(--dim);
+  color: var(--text-3);
   font-variant-numeric: tabular-nums;
   font-size: var(--fs-xs);
 }
 .mr-ev-kind {
-  color: var(--dim);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
 }
 .mr-ev-body {
@@ -206,25 +211,25 @@
   color: var(--text);
 }
 .mr-ev.ours .mr-ev-kind {
-  color: var(--muted);
+  color: var(--text-2);
 }
 .mr-ev.k-goal .mr-ev-kind {
-  color: var(--accent);
+  color: var(--text);
   font-weight: 700;
 }
 .mr-ev.k-goal .mr-ev-who {
   font-weight: 700;
 }
 .mr-ev.k-red_card .mr-ev-kind {
-  color: var(--danger);
+  color: var(--loss);
 }
 .mr-ev.k-yellow_card .mr-ev-kind {
-  color: rgb(var(--pos-gk));
+  color: var(--warn);
 }
 .mr-ev-assist,
 .mr-ev-why {
   font-style: normal;
-  color: var(--dim);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
 }
 .mr-xg {
@@ -238,16 +243,16 @@
   align-items: center;
   gap: var(--sp-2);
   margin: var(--sp-1) 0;
-  color: var(--dim);
-  font-size: var(--fs-3xs);
-  letter-spacing: 0.08em;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.06em;
 }
 .mr-break::before,
 .mr-break::after {
   content: "";
   flex: 1;
   height: 1px;
-  background: var(--border-soft);
+  background: var(--line);
 }
 
 /* ── 승부차기 — 찬 순서 그대로 (경기 화면의 킥 줄과 같은 결) ── */
@@ -256,12 +261,12 @@
   flex-wrap: wrap;
   gap: 4px 12px;
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .mr-kick i,
 .mr-kick em {
   font-style: normal;
-  color: var(--dim);
+  color: var(--text-3);
 }
 .mr-kick i {
   margin-right: 3px;
@@ -273,11 +278,11 @@
   color: var(--text);
 }
 .mr-kick.o-scored em {
-  color: var(--accent);
+  color: var(--win);
 }
 .mr-kick.o-saved em,
 .mr-kick.o-missed em {
-  color: var(--danger);
+  color: var(--loss);
 }
 
 /* ── 선수 기록 ────────────────────────────────────────────
@@ -299,18 +304,20 @@
   text-align: right;
 }
 .mr-table thead th {
-  color: var(--dim);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
   font-weight: 600;
-  border-bottom: 1px solid var(--border);
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--line);
 }
 .mr-table tbody td {
-  color: var(--muted);
-  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-2);
+  border-bottom: 1px solid var(--line);
 }
 .mr-table .mr-num {
   width: 1.8rem;
   text-align: right;
-  color: var(--dim);
+  color: var(--text-3);
 }
 .mr-table .mr-who {
   text-align: left;
@@ -319,36 +326,41 @@
 }
 .mr-table thead .mr-who {
   font-size: var(--fs-xs);
-  color: var(--muted);
+  letter-spacing: 0;
+  color: var(--text-2);
 }
 .mr-table thead .mr-who .ours {
   color: var(--text);
 }
-/* 교체 투입 — 이름 앞의 작은 삼각. "교체"라 적으면 이름이 한 칸 밀린다 */
+/* 교체 투입 — 이름 앞의 작은 표식. "교체"라 적으면 이름이 한 칸 밀린다 */
+.mr-in svg {
+  width: 10px;
+  height: 10px;
+  vertical-align: middle;
+}
 .mr-in {
   margin-right: 3px;
-  color: var(--accent);
-  font-size: 7px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
   vertical-align: middle;
 }
 .mr-zero {
-  color: var(--dim);
-  opacity: 0.5;
+  color: var(--text-3);
 }
 .mr-rating {
   font-variant-numeric: tabular-nums;
 }
 .mr-rating.t-hot {
-  color: var(--accent);
+  color: var(--rate-top);
 }
 .mr-rating.t-good {
-  color: var(--silver);
+  color: var(--rate-good);
 }
 .mr-rating.t-flat {
-  color: var(--muted);
+  color: var(--rate-mid);
 }
 .mr-rating.t-cold {
-  color: var(--danger);
+  color: var(--rate-low);
 }
 .mr-cards {
   white-space: nowrap;
@@ -357,19 +369,19 @@
   display: inline-block;
   width: 5px;
   height: 8px;
-  border-radius: 1px;
+  border-radius: var(--r-xs);
   vertical-align: middle;
   margin-left: 2px;
 }
 .mr-card.y {
-  background: rgb(var(--pos-gk));
+  background: var(--warn);
 }
 .mr-card.r {
-  background: var(--danger);
+  background: var(--loss);
 }
-/* 최우수 선수의 줄 — 금색 왼쪽 띠 하나. 배경까지 칠하면 표가 두 색이 된다 */
-.mr-table tbody tr.motm .mr-num {
-  box-shadow: inset 2px 0 0 var(--gold-soft);
+/* 최우수 선수의 줄 — 이름 아래 금색 밑줄 하나. 배경까지 칠하면 표가 두 색이 된다 */
+.mr-table tbody tr.motm .mr-who {
+  box-shadow: inset 0 -1px 0 var(--gold);
 }
 /**
  * 평점 한 줄 근거 — 결산이 선수마다 써 두고도 아무도 못 읽던 줄이다.
@@ -379,9 +391,9 @@
   padding: 0 5px 4px 2.6rem;
   text-align: left;
   white-space: normal;
-  color: var(--dim);
+  color: var(--text-3);
   font-size: var(--fs-2xs);
-  border-bottom: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--line);
 }
 
 /* ── 달력 상세의 접이식 ──────────────────────────────────── */
@@ -397,20 +409,20 @@
   gap: 4px;
   margin: 3px 0 0 40px;
   padding: 1px 8px;
-  background: transparent;
-  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border: none;
   border-radius: var(--r-pill);
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-2xs);
   font-family: inherit;
   cursor: pointer;
   transition:
     color var(--ease),
-    border-color var(--ease);
+    background var(--ease);
 }
 .cal-report-btn:hover {
   color: var(--text);
-  border-color: var(--muted);
+  background: var(--pop);
 }
 .cal-report-btn svg {
   transition: transform var(--ease);
@@ -423,7 +435,7 @@
 .cal-sched-wrap .mr-blank {
   margin: var(--sp-2) 0 var(--sp-3);
   padding-left: var(--sp-2);
-  border-left: 2px solid var(--border);
+  border-left: 2px solid var(--line);
 }
 
 /* 종료 카드 안 — 확인 버튼과 리포트가 붙지 않게 한 칸 (카드 폭은 shell.css) */

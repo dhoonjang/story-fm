@@ -376,10 +376,11 @@ describe("오피스 뷰", () => {
     const comp = buildOfficeViews(state).competitions.list.find((c) => c.europe !== null)!;
     const finalStage = comp.bracket.find((b) => b.stage === "final")!;
     expect(finalStage.ties).toHaveLength(1);
-    expect(finalStage.ties[0]!.score).toMatch(/^\d+-\d+/);
+    // 자는 `formatScore` 하나 — en dash 양옆 hair space, 승부차기는 괄호 (design-system.md §3)
+    expect(finalStage.ties[0]!.score).toMatch(/^\d+\u200A\u2013\u200A\d+/);
     for (const stage of comp.bracket) {
       for (const tie of stage.ties) {
-        if (tie.score?.includes("승부차기")) expect(tie.score).toMatch(/승부차기 \d+-\d+/);
+        if (tie.score?.includes("(")) expect(tie.score).toMatch(/\(\d+\u2013\d+\)$/);
       }
     }
   });

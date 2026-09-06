@@ -3,18 +3,13 @@
 import { useMemo, useState } from "react";
 import type { OfficeViews } from "@story-fm/engine";
 import { scheduleRowOf, type CalRowIcon, type CalScheduleRow } from "@/lib/calendar-detail";
+import { humanDate } from "@/lib/dateline";
 import { MatchReportPanel } from "./match-report";
 import { IconChevron } from "../icons";
 
 // ── 달력 (일정 축: 경기·훈련·이적창 + 일자 상세) ─────────────
 function isoOf(d: Date): string {
   return d.toISOString().slice(0, 10);
-}
-
-/** "2026-09-01" → "9월 1일" — 달 제목과 같은 표기(앞자리 0 없이) */
-function korDay(iso: string): string {
-  const [, month, day] = iso.split("-");
-  return `${Number(month)}월 ${Number(day)}일`;
 }
 
 type CalEntry = OfficeViews["calendar"]["entries"][number];
@@ -237,6 +232,7 @@ export function CalendarView({
     cur = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1));
   }
 
+  /** 요일 머리 — 요일 글자 자체는 `humanDate`와 같은 순서(일요일부터)다 */
   const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
   const dowOf = (iso: string) => new Date(`${iso}T00:00:00Z`).getUTCDay();
   const matchOf = (iso: string) => byDate.get(iso)?.find((e) => e.type === "match");
@@ -253,7 +249,6 @@ export function CalendarView({
   const detail = selected
     ? {
         iso: selected,
-        dow: dowOf(selected),
         entries: byDate.get(selected) ?? [],
         events: calendar.events[selected] ?? [],
         isPast: selected < calendar.today,
@@ -267,9 +262,7 @@ export function CalendarView({
   const detailPanel = detail && (
     <div className="cal-detail" data-testid="cal-detail">
       <div className="cal-detail-head">
-        <b>
-          {detail.iso} ({WEEK[detail.dow]})
-        </b>
+        <b>{humanDate(detail.iso)}</b>
         <button className="ghost-btn" onClick={() => setSelected(null)}>
           닫기
         </button>
@@ -294,7 +287,7 @@ export function CalendarView({
       )}
 
       {detail.entries.length === 0 && detail.events.length === 0 && (
-        <div className="cal-detail-sub">일정 없음</div>
+        <div className="cal-detail-sub">일정 0</div>
       )}
     </div>
   );
@@ -308,7 +301,7 @@ export function CalendarView({
         <span className={openWindow ? "cal-focus open" : "cal-focus"}>
           {openWindow ? (
             <>
-              {openWindow.kind} 이적시장 <b>{korDay(openWindow.closesOn)}까지</b>
+              {openWindow.kind} 이적시장 <b>{humanDate(openWindow.closesOn)}까지</b>
             </>
           ) : (
             "이적시장 닫힘"
@@ -398,7 +391,10 @@ export function CalendarView({
                             </span>
                             {mt.match.opponent}
                           </span>
-                          {mt.match.score && <span className="cal-fx-score">{mt.match.score}</span>}
+                          {/* 스코어는 코어가 `formatScore`로 적어 보낸 값이다 — 라틴·숫자뿐이라 `.fig` */}
+                          {mt.match.score && (
+                            <span className="cal-fx-score fig">{mt.match.score}</span>
+                          )}
                         </div>
                       )}
                       {/* 추첨 전이라 상대는 비어 있지만 라운드 날짜는 이미 안다 */}

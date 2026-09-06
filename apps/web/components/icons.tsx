@@ -416,11 +416,79 @@ export const SPEAKER_ICON: Partial<Record<SpeakerKind, IconComponent>> = {
   player: IconJersey,
 };
 
+/**
+ * 부주장 — 주장과 **같은 완장**, 안쪽 글자만 V. 서열 셋이 한 계열로 읽히도록
+ * 바깥 도형은 `IconCaptain`과 같다.
+ */
+export function IconViceCaptain({ size = 15 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="4.4" y="4" width="15.2" height="16" rx="2.8" />
+      <path d="m8.8 8.4 3.2 7.2 3.2-7.2" />
+    </svg>
+  );
+}
+
+/** 라커룸 리더 — 같은 완장에 L. 완장을 차지 않았지만 서열이 있는 자리다 */
+export function IconLeader({ size = 15 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="4.4" y="4" width="15.2" height="16" rx="2.8" />
+      <path d="M9.6 8.4v7.2h5.2" />
+    </svg>
+  );
+}
+
 /** 접기·펼치기 — 아래 꺾쇠. 펼쳐지면 CSS가 뒤집는다 */
 export function IconChevron({ size = 14 }: IconProps) {
   return (
     <svg {...base(size)}>
       <path d="m6 9.5 6 6 6-6" />
+    </svg>
+  );
+}
+
+/** 위 꺾쇠 — 오름차순 정렬 표식. 아래 꺾쇠와 짝이라 CSS 회전 없이 둘이 선다 */
+export function IconChevronUp({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="m6 14.5 6-6 6 6" />
+    </svg>
+  );
+}
+
+/** 닫기 — 두 획의 X. `✕` 글자는 폰트마다 굵기가 달라 버튼 안에서 홀로 튄다 */
+export function IconClose({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  );
+}
+
+/** 오른쪽 화살표 — 들어간 것(input)·이동의 방향 */
+export function IconArrowRight({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M4.5 12h15M13 5.5l6.5 6.5-6.5 6.5" />
+    </svg>
+  );
+}
+
+/** 왼쪽 화살표 — 돌아온 것(output)·되돌리는 방향 */
+export function IconArrowLeft({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M19.5 12h-15M11 5.5 4.5 12 11 18.5" />
+    </svg>
+  );
+}
+
+/** 위 화살표 — 교체 투입처럼 "올라온" 사실의 표식 */
+export function IconArrowUp({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M12 19.5v-15M5.5 11 12 4.5 18.5 11" />
     </svg>
   );
 }

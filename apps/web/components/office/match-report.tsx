@@ -2,7 +2,10 @@
 
 import { Fragment, useEffect, useState } from "react";
 import type { MatchReportView } from "@story-fm/engine";
+import { formatRating, formatScore } from "@story-fm/domain";
 import { PlayerName } from "@/components/player-card";
+import { IconArrowUp } from "@/components/icons";
+import { humanDate } from "@/lib/dateline";
 
 /**
  * ── 경기 리포트 — 끝난 경기 한 장 (match.md §8) ─────────────
@@ -183,9 +186,10 @@ function TimelineRow({ event }: { event: EventRow }) {
     );
   }
   const origin = event.origin === null ? "" : ORIGIN_KO[event.origin];
+  // 교체는 「나간 사람 – 들어온 사람」 — 화살표 글리프 대신 허용 글리프 en dash
   const who =
     event.type === "substitution"
-      ? [event.actors[0], event.actors[1]].filter(Boolean).join(" → ")
+      ? [event.actors[0], event.actors[1]].filter(Boolean).join(" – ")
       : (event.actors[0] ?? "");
   const assist = event.type === "goal" ? event.actors[1] : undefined;
   return (
@@ -278,8 +282,8 @@ function PlayerTable({
                 <td className="mr-who">
                   {/* 선발과 교체는 생김새로 갈린다 — "교체"라고 적으면 이름이 밀린다 */}
                   {!p.started && (
-                    <span className="mr-in" title="교체 투입" aria-label="교체 투입">
-                      ▲
+                    <span className="mr-in" title="교체 투입" role="img" aria-label="교체 투입">
+                      <IconArrowUp size={10} />
                     </span>
                   )}
                   <PlayerName id={p.id} name={p.name} />
@@ -299,7 +303,9 @@ function PlayerTable({
                   {p.rating === null ? (
                     <span className="mr-zero">·</span>
                   ) : (
-                    <b className={`mr-rating t-${p.tone ?? "flat"}`}>{p.rating.toFixed(1)}</b>
+                    <b className={`mr-rating t-${p.tone ?? "flat"}`}>
+                      {formatRating(p.rating, "match")}
+                    </b>
                   )}
                 </td>
               </tr>
@@ -327,12 +333,12 @@ export function MatchReport({ report }: { report: MatchReportView }) {
       <header className="mr-head">
         <span className="mr-label">
           {report.label}
-          <em>{report.date}</em>
+          <em>{humanDate(report.date)}</em>
         </span>
         <div className="mr-score">
           <b className={report.home.ours ? "ours" : undefined}>{report.home.name}</b>
-          <span className="mr-score-num">
-            {report.home.goals} : {report.away.goals}
+          <span className="mr-score-num fig">
+            {formatScore(report.home.goals, report.away.goals)}
           </span>
           <b className={report.away.ours ? "ours" : undefined}>{report.away.name}</b>
         </div>
@@ -340,7 +346,10 @@ export function MatchReport({ report }: { report: MatchReportView }) {
           {report.aet && <span className="mr-tag">연장</span>}
           {report.penalties && (
             <span className="mr-tag">
-              승부차기 {report.penalties.home}-{report.penalties.away}
+              승부차기{" "}
+              <span className="fig">
+                {formatScore(report.penalties.home, report.penalties.away)}
+              </span>
             </span>
           )}
           {report.motm && (
@@ -348,7 +357,7 @@ export function MatchReport({ report }: { report: MatchReportView }) {
               {/* 알약 안이 `inline-flex`라 칸 사이는 `gap`이 낸다 — 공백 노드가 아니다 */}
               MOTM
               <PlayerName id={report.motm.id} name={report.motm.name} />
-              <b>{report.motm.rating.toFixed(1)}</b>
+              <b>{formatRating(report.motm.rating, "match")}</b>
             </span>
           )}
         </div>

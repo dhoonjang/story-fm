@@ -42,6 +42,7 @@ const match = entry({
     matchId: "m-liv",
     competition: null,
     stage: "R4",
+    opponentId: "liverpool",
     opponent: "LIV",
     opponentName: "리버풀",
     venue: "away",

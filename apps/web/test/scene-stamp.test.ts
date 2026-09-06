@@ -3,7 +3,7 @@ import type { ChatTurn } from "@story-fm/engine";
 import { cutStamps, partOfDayStamp, turnStamp } from "../lib/scene-stamp";
 
 /**
- * 장면 시각의 눈금 — **때(오전·오후·저녁…).**
+ * 장면 시각의 눈금 — **때(오전·오후·저녁…)**, 날짜는 사람 표기(`7월 2일 목`).
  * 정확한 시각은 상단 띠가 갖는다. 채팅이 알려야 하는 건 장면이 언제로
  * 넘어갔나뿐이라 눈금은 굵을수록 좋다.
  */
@@ -17,12 +17,12 @@ const modelTurn = (text: string): ChatTurn => ({
 
 describe("partOfDayStamp", () => {
   it("하루를 때로 접는다 — 정확한 시각은 상단 띠가 갖는다", () => {
-    expect(partOfDayStamp("2026-07-02 AM 5:40")).toBe("2026-07-02 새벽");
-    expect(partOfDayStamp("2026-07-02 AM 8:10")).toBe("2026-07-02 아침");
-    expect(partOfDayStamp("2026-07-02 AM 10:10")).toBe("2026-07-02 오전");
-    expect(partOfDayStamp("2026-07-02 PM 2:30")).toBe("2026-07-02 오후");
-    expect(partOfDayStamp("2026-07-02 PM 7:05")).toBe("2026-07-02 저녁");
-    expect(partOfDayStamp("2026-07-02 PM 10:40")).toBe("2026-07-02 밤");
+    expect(partOfDayStamp("2026-07-02 AM 5:40")).toBe("7월 2일 목 새벽");
+    expect(partOfDayStamp("2026-07-02 AM 8:10")).toBe("7월 2일 목 아침");
+    expect(partOfDayStamp("2026-07-02 AM 10:10")).toBe("7월 2일 목 오전");
+    expect(partOfDayStamp("2026-07-02 PM 2:30")).toBe("7월 2일 목 오후");
+    expect(partOfDayStamp("2026-07-02 PM 7:05")).toBe("7월 2일 목 저녁");
+    expect(partOfDayStamp("2026-07-02 PM 10:40")).toBe("7월 2일 목 밤");
   });
 
   it("같은 때의 장면들은 한 눈금으로 묶인다 — 스탬프가 매번 서지 않는다", () => {
@@ -33,8 +33,8 @@ describe("partOfDayStamp", () => {
   });
 
   it("정오·자정의 12시 표기를 바로 읽는다", () => {
-    expect(partOfDayStamp("2026-07-02 PM 12:05")).toBe("2026-07-02 오후");
-    expect(partOfDayStamp("2026-07-02 AM 12:40")).toBe("2026-07-02 새벽");
+    expect(partOfDayStamp("2026-07-02 PM 12:05")).toBe("7월 2일 목 오후");
+    expect(partOfDayStamp("2026-07-02 AM 12:40")).toBe("7월 2일 목 새벽");
   });
 
   it("시각이 아닌 헤더는 그대로 둔다 — 경기 중 분 표시", () => {
@@ -51,7 +51,7 @@ describe("cutStamps", () => {
       "@짐 랫클리프: 합의됐습니다.",
     ]);
     expect(cut.lines).toEqual(["판정을 먼저 하겠습니다.", "@짐 랫클리프: 합의됐습니다."]);
-    expect(cut.stamps).toEqual([{ after: 1, stamp: "2026-07-15 오전" }]);
+    expect(cut.stamps).toEqual([{ after: 1, stamp: "7월 15일 수 오전" }]);
     expect(cut.cuts).toEqual([1]);
   });
 
@@ -62,7 +62,7 @@ describe("cutStamps", () => {
       "[2026-07-15 PM 3:00]",
       "@코치: 끝났습니다.",
     ]);
-    expect(cut.stamps.map((s) => s.stamp)).toEqual(["2026-07-15 오전", "2026-07-15 오후"]);
+    expect(cut.stamps.map((s) => s.stamp)).toEqual(["7월 15일 수 오전", "7월 15일 수 오후"]);
     expect(cut.stamps.map((s) => s.after)).toEqual([0, 1]);
   });
 
@@ -76,7 +76,7 @@ describe("cutStamps", () => {
 describe("turnStamp", () => {
   it("첫 줄의 시점 헤더를 때로 읽는다", () => {
     expect(turnStamp(modelTurn("[2026-07-02 AM 10:10]\n@코치: 안녕하세요."))).toBe(
-      "2026-07-02 오전",
+      "7월 2일 목 오전",
     );
   });
 
@@ -87,7 +87,7 @@ describe("turnStamp", () => {
           "판정하겠습니다.\n[2026-07-02 AM 10:10]\n@코치: 네.\n[2026-07-02 PM 8:00]\n@코치: 끝.",
         ),
       ),
-    ).toBe("2026-07-02 저녁");
+    ).toBe("7월 2일 목 저녁");
   });
 
   it("헤더가 없으면 null", () => {

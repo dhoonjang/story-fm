@@ -12,24 +12,18 @@
 .cal-legend .section-title {
   margin: 0;
 }
-/* 이적창 표식 — 라벨은 색, 마감일은 굵기로 두 층으로 갈라 읽게 한다.
-   닫혔을 땐 꺼진 테두리: 초록은 "지금 할 수 있는 일"의 자리다 */
+/* 이적창 표식 — 읽는 값이라 글자로만 선다. 라벨은 흐리고 마감일은 굵다 */
 .cal-focus {
   display: inline-flex;
   align-items: baseline;
   gap: 5px;
   flex-shrink: 0;
-  padding: 2px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
   white-space: nowrap;
 }
 .cal-focus.open {
-  background: rgba(74, 222, 128, 0.08);
-  border-color: rgba(74, 222, 128, 0.35);
-  color: var(--accent);
+  color: var(--text);
 }
 .cal-focus b {
   color: var(--text);
@@ -43,8 +37,7 @@
 }
 .cal-month {
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
   padding: 12px 12px 10px;
 }
 .cal-month-title {
@@ -66,10 +59,10 @@
 }
 .cal-cell {
   min-height: 54px;
-  border-radius: var(--r-sm);
-  padding: 3px;
+  border-radius: 0;
+  padding: 4px;
   background: transparent;
-  border: 1px solid transparent;
+  border: 0;
   position: relative;
   overflow: hidden;
   display: flex;
@@ -77,40 +70,42 @@
   gap: 2px;
   text-align: left;
   color: var(--text);
+  transition: background var(--ease);
 }
 /* 경기 없는 날은 배경 없이 날짜만 — 경기가 있는 칸이 도드라진다 */
 .cal-cell.has-match {
   background: var(--panel-2);
 }
 .cal-cell:hover {
-  border-color: var(--border);
+  background: var(--panel-2);
 }
 .cal-cell.empty {
   background: transparent;
   pointer-events: none;
 }
-.cal-cell.today {
-  border-color: var(--accent-2);
-}
+/* 고른 칸 — 분필 선 하나와 한 단 밝은 면. 테두리색으로 조작을 말하지 않는다 */
 .cal-cell.selected {
   background: var(--panel-2);
-  border-color: var(--accent);
+  outline: 1px solid var(--pitch-line);
+  outline-offset: -1px;
 }
 .cal-day {
   font-size: var(--fs-2xs);
-  color: var(--muted);
+  color: var(--text-2);
   line-height: 1.2;
 }
-/* 주말은 색으로 — 달력의 오랜 관례 (경기가 몰리는 날이기도 하다) */
-.cal-day.sun {
-  color: #e79a9a;
-}
+/* 주말도 같은 잉크다 — 일요일이 붉으면 패의 색과 겹쳐 읽힌다 */
+.cal-day.sun,
 .cal-day.sat {
-  color: #93b4e8;
+  color: var(--text-2);
 }
+/* 오늘 — 날짜 밑의 키 컬러 선 하나 */
 .cal-cell.today .cal-day {
-  color: var(--accent-2);
+  align-self: flex-start;
+  padding-bottom: 1px;
+  color: var(--text);
   font-weight: 700;
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 /* 경기 칩 — 대회(컵만) / 홈·원정 + 상대 약칭 / 스코어.
@@ -124,12 +119,13 @@
   font-size: var(--fs-2xs);
   line-height: 1.25;
   background: var(--panel);
-  border-left: 3px solid var(--border);
+  /* 레일은 결과의 자리다 — 안 치른 경기는 비워 둔다 (폭은 지켜 칩이 밀리지 않게) */
+  border-left: 3px solid transparent;
 }
+/* 대회 꼬리표 — 칩에 서는 대회는 컵뿐이라 컵 톤이다. 갈래가 늘면 TSX가 종류 클래스를 단다 */
 .cal-fx-comp {
-  font-size: var(--fs-3xs);
-  color: var(--gold);
-  letter-spacing: -0.2px;
+  font-size: var(--fs-2xs);
+  color: var(--comp-cup);
   word-break: keep-all;
 }
 .cal-fx-opp {
@@ -138,13 +134,13 @@
   overflow-wrap: anywhere;
 }
 .cal-fx-venue {
-  font-size: var(--fs-3xs);
-  color: var(--muted);
+  font-size: var(--fs-2xs);
+  color: var(--text-2);
   font-weight: 500;
   margin-right: 3px;
 }
 .cal-fx-venue.home {
-  color: var(--accent);
+  color: var(--text);
 }
 .cal-fx-score {
   font-variant-numeric: tabular-nums;
@@ -155,29 +151,27 @@
    선은 이어 두고 배경·색을 흐려 "확정 아님"을 말한다 */
 .cal-fx.pending {
   background: transparent;
-  border-left-color: rgba(251, 191, 36, 0.45);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .cal-fx.pending .cal-fx-opp {
   font-weight: 500;
 }
 
-/* 다음 경기 — 글자로 "다음"이라 쓰지 않고 테두리로 알린다 */
+/* 다음 경기 — 글자로 "다음"이라 쓰지 않고 분필 윤곽으로 알린다 (레일은 결과의 자리다) */
 .cal-fx.next {
-  border-left-color: var(--accent-2);
-  background: rgba(96, 165, 250, 0.12);
+  box-shadow: inset 0 0 0 1px var(--pitch-line);
 }
 .cal-fx.r-W {
-  border-left-color: var(--accent);
-  color: var(--accent);
+  border-left-color: var(--win);
+  color: var(--win);
 }
 .cal-fx.r-L {
-  border-left-color: var(--danger);
-  color: var(--danger);
+  border-left-color: var(--loss);
+  color: var(--loss);
 }
 .cal-fx.r-D {
-  border-left-color: var(--muted);
-  color: var(--muted);
+  border-left-color: var(--draw);
+  color: var(--draw);
 }
 
 /* 일지 한 줄 — 아이콘 + 글, 상세가 있으면 눌러서 펼친다 */
@@ -212,19 +206,21 @@
 }
 /* 색은 뜻이 있을 때만 — 나머지는 글자와 같은 톤으로 읽힌다 */
 .ev-icon.ev-yellow {
-  color: var(--gold);
+  color: var(--warn);
   opacity: 1;
 }
 .ev-icon.ev-red {
-  color: var(--danger);
+  color: var(--loss);
   opacity: 1;
 }
 .ev-icon.ev-injury {
-  color: var(--danger);
+  color: var(--loss);
 }
+/* 성장·복귀 — 초록은 조작과 승의 자리라 여기서는 밝기로만 선다 */
 .ev-icon.ev-growth,
 .ev-icon.ev-return {
-  color: var(--accent);
+  color: var(--text);
+  opacity: 1;
 }
 .ev-text {
   flex: 1;
@@ -236,24 +232,24 @@
   padding: 0 5px;
   border-radius: 999px;
   background: var(--panel-2);
-  color: var(--muted);
-  font-size: 10.5px;
+  color: var(--text-2);
+  font-size: var(--fs-2xs);
   font-variant-numeric: tabular-nums;
 }
 .ev-row.open .ev-count {
   background: var(--accent);
-  color: #06231a;
+  color: var(--accent-ink);
 }
 .ev-details {
   margin: 2px 0 4px 19px;
   padding-left: 8px;
   border-left: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 11.5px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
   line-height: 1.7;
 }
 
-/* 표식 — 훈련(노랑)·그 밖의 일정(파랑, 추첨·이적창)·소식(회색)을 점으로만 알린다.
+/* 표식 — 훈련(회색)·그 밖의 일정(파랑, 이적창)·추첨(보라)·소식(회색)을 점으로만 알린다.
    무엇인지는 툴팁과 칸을 눌러 여는 상세가 말한다 */
 /* 표식은 날짜 바로 아래에 붙인다 — 칸 바닥으로 밀면 빈 칸에서 홀로 떠 보인다 */
 .cal-marks {
@@ -269,13 +265,11 @@
   border-radius: 50%;
 }
 .cal-mark.train {
-  background: var(--gold);
-  opacity: 0.5;
+  background: var(--text-3);
 }
-/* 성과가 남은 훈련 — 같은 노랑을 진하게. 달력을 훑으면 "무언가 남은 날"이 먼저 보인다 */
+/* 성과가 남은 훈련 — 같은 점을 밝게. 달력을 훑으면 "무언가 남은 날"이 먼저 보인다 */
 .cal-mark.train.gained {
-  opacity: 1;
-  box-shadow: 0 0 0 1.5px rgba(251, 191, 36, 0.28);
+  background: var(--text);
 }
 .cal-mark.event {
   background: var(--accent-2);
@@ -285,32 +279,30 @@
   background: var(--violet);
 }
 /**
- * 휴식 — 감독이 **비워 둔** 자리다. 훈련(노랑)과 뜻이 반대라 색을 나누되,
- * 채도 없는 회색으로 **속을 비운 원**이다: 무언가 있는 날이 아니라 없는 날이라는
- * 사실이 형태로 읽혀야 한다. 훈련 점보다 눈에 덜 띄는 것이 맞다.
+ * 휴식 — 감독이 **비워 둔** 자리다. 훈련 점과 뜻이 반대라 **속을 비운 원**이다:
+ * 무언가 있는 날이 아니라 없는 날이라는 사실이 형태로 읽혀야 한다. 훈련 점보다
+ * 눈에 덜 띄는 것이 맞다.
  */
 .cal-mark.rest {
   background: transparent;
-  box-shadow: inset 0 0 0 1px var(--muted);
-  opacity: 0.65;
+  box-shadow: inset 0 0 0 1px var(--text-3);
 }
 /**
- * 소식 — 다른 표식은 전부 **앞날의 일정**(훈련 금색·이적창 파랑·추첨 보라)인데
+ * 소식 — 다른 표식은 전부 **앞날의 일정**(훈련·이적창 파랑·추첨 보라)인데
  * 이것만 **이미 벌어진 일**이다. 그래서 뜻을 가진 색을 쓰지 않고 채도 없는
  * 회색을 **속이 찬 원**으로 쓴다 — 속을 비운 휴식 점과는 형태로, 일정 색들과는
  * 뜻으로 갈린다. 소식은 거의 매일 서므로 톤을 낮춰 얼룩이 되지 않게 한다.
  */
 .cal-mark.news {
-  background: var(--muted);
+  background: var(--text-3);
   opacity: 0.55;
 }
 
 /* 일자 상세 — 고른 칸이 있는 달 카드 안에서 펼쳐진다. 그래서 선택된 칸과
-   같은 배경(panel-2)과 왼쪽 강조 띠로 이어 붙인다 (명단의 선수 상세와 같은 결) */
+   같은 배경(panel-2)과 왼쪽 지문 선으로 이어 붙인다 (명단의 선수 상세와 같은 결) */
 .cal-detail {
   background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--accent);
+  border-left: 2px solid var(--border);
   border-radius: var(--r-sm);
   padding: 10px 12px;
   margin-top: 10px;
@@ -323,7 +315,7 @@
 }
 .cal-detail-block {
   padding: 8px 0;
-  border-top: 1px solid rgba(42, 51, 66, 0.5);
+  border-top: 1px solid var(--line);
 }
 .cal-detail-block:first-of-type {
   border-top: none;
@@ -360,24 +352,24 @@
 .cal-sched-name {
   font-weight: 600;
 }
-/* 대회는 달력 칸의 경기 칩과 같은 금색이다 — 같은 것을 같은 색으로 */
+/* 대회는 달력 칸의 경기 칩과 같은 컵 톤이다 — 같은 것을 같은 색으로 */
 .cal-sched-comp {
   font-size: var(--fs-2xs);
-  color: var(--gold);
+  color: var(--comp-cup);
 }
 .cal-sched-stage,
 .cal-sched-venue {
   font-size: var(--fs-2xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .cal-sched-venue.home {
-  color: var(--accent);
+  color: var(--text);
 }
-/* 훈련 축 — 이름이 아니라 딸린 조각이라 테두리로 낮춘다 */
+/* 훈련 축 — 이름이 아니라 딸린 조각이라 한 단 어두운 면으로 낮춘다 */
 .cal-sched-tag {
   font-size: var(--fs-2xs);
-  color: var(--muted);
-  border: 1px solid var(--border);
+  color: var(--text-2);
+  background: var(--panel);
   border-radius: var(--r-xs);
   padding: 0 4px;
 }
@@ -402,17 +394,17 @@
 }
 /* 승·무·패 — 달력 칸의 경기 칩과 같은 세 색 */
 .cal-detail-result {
-  font-weight: 800;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 .cal-detail-result.r-W {
-  color: var(--accent);
+  color: var(--win);
 }
 .cal-detail-result.r-L {
-  color: var(--danger);
+  color: var(--loss);
 }
 .cal-detail-result.r-D {
-  color: var(--muted);
+  color: var(--draw);
 }
 .cal-detail-sub {
   color: var(--muted);

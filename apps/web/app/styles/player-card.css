@@ -29,7 +29,7 @@
   line-height: inherit;
   text-align: inherit;
   cursor: pointer;
-  text-decoration: underline dotted rgba(255, 255, 255, 0.28);
+  text-decoration: underline dotted var(--text-3);
   text-underline-offset: 3px;
   transition: color var(--ease);
 }
@@ -47,12 +47,12 @@
   display: grid;
   place-items: center;
   padding: var(--sp-5);
-  background: rgb(4 8 13 / 0.72);
-  backdrop-filter: blur(4px);
+  background: var(--scrim);
   animation: fulltime-in 160ms var(--ease-panel) both;
 }
+/* 떠 있는 것 — 표면 3단과 그 그림자를 갖는 유일한 자리다 */
 .player-card {
-  --pd-rule: rgba(255, 255, 255, 0.09);
+  --pd-rule: var(--line);
   display: flex;
   flex-direction: column;
   /* 16축이 다섯 열로 서는 폭이다 — 좁히면 격자가 접혀 묶음이 두 줄씩 쌓인다 */
@@ -60,10 +60,9 @@
   max-height: min(760px, calc(100dvh - 48px));
   overflow-y: auto;
   padding: var(--sp-5);
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--pop);
   border-radius: var(--r-md);
-  box-shadow: 0 24px 64px rgb(0 0 0 / 0.42);
+  box-shadow: var(--shadow-pop);
   font-size: var(--fs-sm);
 }
 .pc {
@@ -109,18 +108,24 @@
 }
 .pc-ovr em {
   font-style: normal;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-2xs);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
 }
+/* 종합 — 숫자뿐인 자리라 스코어 서체로 선다 */
 .pc-ovr b {
-  font-size: var(--fs-2xl);
-  line-height: 1;
+  font-family: var(--font-score);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: var(--lh-fig);
   font-variant-numeric: tabular-nums;
 }
+/* 오차 「±10」 — 위첨자가 아니라 작은 3층 글자 */
 .pc-ovr .est {
   margin-left: 3px;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  color: var(--text-3);
 }
 
 /* 안개 한 줄과 심경 한 줄 — 아래 숫자들이 왜 그런지 */
@@ -171,14 +176,14 @@
 }
 .pc-mark {
   padding: 2px 8px;
-  border: 1px solid var(--border);
+  background: var(--panel-2);
   border-radius: var(--r-pill);
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-2xs);
 }
 .pc-mark.out {
-  border-color: rgba(248, 113, 113, 0.4);
-  color: var(--danger);
+  background: color-mix(in srgb, var(--loss) 12%, transparent);
+  color: var(--loss);
 }
 
 .pc-positions {
@@ -196,9 +201,12 @@
   color: var(--muted);
   font-size: var(--fs-sm);
 }
+/* 골격은 숨 쉬지 않는다 — 한 단 밝은 면이 자리만 지킨다 */
 .pc-skel {
   height: 72px;
   border-radius: var(--r-sm);
+  background: var(--panel-2);
+  animation: none;
 }
 .pc-skel.short {
   height: 120px;
@@ -210,13 +218,17 @@
   margin-top: var(--sp-4);
   padding: 7px 22px;
   background: var(--panel-2);
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--r-sm);
   color: var(--text);
   font-size: var(--fs-sm);
   cursor: pointer;
+  transition: background var(--ease);
 }
 .pc-close:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--pop);
+}
+.pc-close:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
