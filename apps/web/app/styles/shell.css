@@ -79,8 +79,9 @@
   /* `--pop` 표면의 그림자 — 유일한 그림자 */
   --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.55);
 
-  /* 구단 슬롯 — 구단이 없을 때의 기본값. 주입은 `.app`·`.onboarding`·카드 요소가
-     인라인으로 한다 (§2). `var(--club*)`를 참조하는 토큰은 주입 요소에서 다시 선언한다 */
+  /* 구단 슬롯 — 구단이 없을 때의 기본값. 주입은 `.app`·카드 요소가 인라인으로 한다 (§2).
+     `var(--club*)`를 참조하는 토큰은 주입 요소에서 다시 선언한다. 상대는 원색 두 벌뿐이다 —
+     밝힘도 워시도 상대가 설 자리가 없다 */
   --club: #2f3a33;
   --club-2: #2f3a33;
   --club-hi: #c9c4ba;
@@ -88,9 +89,6 @@
   --club-wash-pop: var(--pop);
   --opp: #2f3a33;
   --opp-2: #2f3a33;
-  --opp-hi: #c9c4ba;
-  --opp-wash: var(--panel);
-  --opp-wash-pop: var(--pop);
   --role-coach: var(--accent-2);
   --role-board: var(--gold);
   --role-media: var(--violet);
@@ -153,8 +151,23 @@
    */
   --panel-anim: 260ms;
   /**
+   * ── 경기장 비율 — **실제 경기장 105:68**(FIFA 권장 규격) ─────────────
+   *
+   * 판세 격자(눕힌 판)와 전술판(세운 판)이 **같은 자를 쓰는 자리**다. 판 위
+   * 좌표는 백분율이라 판의 비율이 곧 선수 사이의 거리이므로, 화면이 이 값을
+   * 벗어나면 감독이 눈으로 재는 간격이 코어가 계산한 간격과 어긋난다
+   * (코어 쪽 짝은 `PITCH_ASPECT` — `packages/domain/src/tactics.ts`).
+   *
+   * 두 벌인 것은 CSS가 비를 뒤집지 못해서다. 둘 다 `aspect-ratio`에 그대로 서고
+   * `calc()` 안에서는 곱으로 선다 — `calc(H * var(--pitch-ratio-portrait))`가
+   * 그 높이가 허락하는 폭이고, `calc(W * var(--pitch-ratio))`가 그 폭이 부르는
+   * 높이다.
+   */
+  --pitch-ratio: 105 / 68;
+  --pitch-ratio-portrait: 68 / 105;
+  /**
    * 전술판 아래 **붙은 전술 줄의 높이** — 패딩 12+12에 한 줄 21.
-   * 판은 3:4라 남는 높이에서 폭을 되짚는데, 그때 먼저 빼는 몫이다
+   * 판은 실제 비율이라 남는 높이에서 폭을 되짚는데, 그때 먼저 빼는 몫이다
    * (`.board-stack` 폭 계산). 줄이 두 줄로 흐르면 그만큼 어긋난다.
    */
   --board-foot: 45px;
@@ -370,9 +383,9 @@ textarea {
 .team-card:hover {
   background: var(--pop);
 }
-/* 고른 팀 — 구단 워시(카드 요소가 `--club*`를 세운다)와 키 컬러 링 */
+/* 고른 팀 — 키 컬러 링 하나. 구단은 왼쪽 띠가 이미 말하므로 워시를 겹치면 한 카드에
+   구단 색이 두 번이고, 워시가 답하는 질문은 「누구인가」가 아니라 「골랐는가」다 */
 .team-card.selected {
-  background: var(--club-wash);
   box-shadow: var(--ring);
 }
 .team-card > span {
@@ -1568,14 +1581,13 @@ textarea {
   color: var(--text) !important;
   font-weight: 600;
 }
-/* 구단 띠 4px + 문장 + 이름 — 상단 띠에서 유일하게 구단 색이 서는 자리 (ui/design-system.md §2 규칙 5) */
+/* 문장 + 이름 — 셸이라 구단 색을 받지 않는다. 어느 구단인지는 문장과 이름이 말한다
+   (ui/design-system.md §2 규칙 5) */
 .topbar-club-line {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  border-left: 4px solid var(--club-hi);
-  padding-left: 10px;
 }
 /* 문장 — 크기는 컴포넌트가 정하고(눈금 여섯), 흐름만 여기서 */
 .crest {
@@ -2495,9 +2507,10 @@ textarea {
    * 둘이 따로 떠 있으면 "판을 보는 화면"인지 "전술을 고치는 화면"인지가 흐리다.
    * 한 테두리 안에 위아래로 붙이면 줄이 판의 손잡이로 읽힌다.
    *
-   * 폭은 **세로에서 되짚는다**: 판은 3:4라 남는 높이가 폭의 상한을 정하고
-   * (`(100cqh - 줄 높이) × 0.75`), 그 값이 곧 덩어리의 폭이다. 판을 칸에 맞추고
-   * 줄만 따로 재던 예전 방식은 세로가 짧아질 때마다 둘의 폭이 어긋났다.
+   * 폭은 **세로에서 되짚는다**: 판은 실제 경기장 비율이라 남는 높이가 폭의 상한을
+   * 정하고(`(100cqh - 줄 높이) × --pitch-ratio-portrait`), 그 값이 곧 덩어리의
+   * 폭이다. 판을 칸에 맞추고 줄만 따로 재던 예전 방식은 세로가 짧아질 때마다
+   * 둘의 폭이 어긋났다.
    */
   .board-open .board-stack {
     /* 펼친 눈금이 이 안에서 판 위로 올라온다 */
@@ -2509,7 +2522,7 @@ textarea {
        서랍이 넓어졌으니 폭 상한도 그만큼 올린다 — 안 그러면 8할까지 편 자리에
        예전 폭(559.5)의 판만 서고 나머지가 빈 여백이 된다 */
     margin: 0 auto;
-    width: min(100cqw, calc((100cqh - var(--board-foot)) * 0.75), 720px);
+    width: min(100cqw, calc((100cqh - var(--board-foot)) * var(--pitch-ratio-portrait)), 720px);
     max-height: 100%;
     /* 판과 줄이 한 면 위에 선다 — 테두리 대신 한 단 밝은 바탕이 덩어리를 만든다 */
     background: var(--panel);
@@ -2525,7 +2538,7 @@ textarea {
   .board-open .board-stack .pitch-board {
     width: 100%;
     height: auto;
-    aspect-ratio: 3 / 4;
+    aspect-ratio: var(--pitch-ratio-portrait);
     margin: 0;
     border: none;
     border-radius: 0;
@@ -2905,8 +2918,9 @@ textarea {
  * 골 카드 — 대화 줄에서 **한 칸 튀어나온 띠.**
  *
  * 말풍선과 같은 배경에 두면 또 하나의 발화로 읽힌다. 왼쪽 굵은 선 + 밝은 면으로
- * 대화가 아닌 **사실**임을 알린다. 골 카드는 레일 = 팀 — 우리 골은 `--club-hi`,
- * 상대 골은 `--opp-hi`라 스코어를 읽기 전에 누가 넣었는지가 보인다.
+ * 대화가 아닌 **사실**임을 알린다. 레일의 색이 답하는 것은 「어느 팀인가」가 아니라
+ * **「잘한 일인가 당한 일인가」**다 — 넣은 골과 먹은 골은 W/L과 같은 축이라 의미 토큰으로
+ * 서고(`--win` : `--loss`), 그 한 벌이 편까지 함께 가른다 (ui/design-system.md §2 규칙 1).
  */
 /**
  * 스카우팅 보고서 — **대화 밖에 놓인 서류 한 장.**
@@ -3481,7 +3495,7 @@ textarea {
 }
 
 .goal-card {
-  --goal: var(--opp-hi);
+  --goal: var(--loss);
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -3494,7 +3508,7 @@ textarea {
   animation: goal-in 0.28s var(--ease-panel) both;
 }
 .goal-card.ours {
-  --goal: var(--club-hi);
+  --goal: var(--win);
 }
 .goal-ball {
   display: inline-flex;

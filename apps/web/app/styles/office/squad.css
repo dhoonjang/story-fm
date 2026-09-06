@@ -207,7 +207,7 @@
  *
  * `container-type: size`라 안쪽에서 `cqh`/`cqw`로 남는 높이와 폭을 둘 다 읽을 수
  * 있다. 높이만 맞추면 폭이 열을 넘고, 폭만 맞추면 세로로 넘친다 — 둘 중 작은 쪽을
- * 골라야 3:4 비율이 살아남는다.
+ * 골라야 경기장 비율이 살아남는다.
  */
 .pitch-wrap {
   flex: 1;
@@ -1144,11 +1144,11 @@
   position: relative;
   /* 칩 크기를 보드 폭(cqw)에 비례시키기 위한 컨테이너 기준 */
   container-type: inline-size;
-  /* 남는 높이(100cqh)와 열 폭이 허락하는 높이(4/3 × 100cqw) 중 작은 쪽.
-     746px는 예전 상한 560px를 높이로 옮긴 값이다 (560 ÷ 0.75) */
-  height: min(100cqh, 133.333cqw, 746px);
+  /* 남는 높이(100cqh)와 열 폭이 허락하는 높이 중 작은 쪽. 셋째 몫은 판의 폭
+     상한 560px를 같은 자로 높이에 옮긴 값이다 */
+  height: min(100cqh, calc(100cqw * var(--pitch-ratio)), calc(560px * var(--pitch-ratio)));
   width: auto;
-  aspect-ratio: 3 / 4;
+  aspect-ratio: var(--pitch-ratio-portrait);
   margin: 0 auto;
   background: repeating-linear-gradient(90deg, var(--pitch) 0 12.5%, var(--pitch-2) 12.5% 25%);
   overflow: hidden;

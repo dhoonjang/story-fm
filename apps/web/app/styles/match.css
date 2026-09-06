@@ -185,6 +185,13 @@
 .mv-pitch {
   display: grid;
   gap: 6px;
+  /**
+   * 실제 비율은 눕혀도 세로가 폭의 65%다 — 정지점 화면을 판 한 장이 다 먹지
+   * 않도록 **세로에 상한(45dvh)을 두고 거기서 폭을 되짚는다.** 상한을 판이 아니라
+   * 덩어리가 갖는 것은 머리·발치 라벨이 칸과 같은 폭에 서야 하기 때문이다.
+   */
+  width: min(100%, calc(45dvh * var(--pitch-ratio)));
+  margin-inline: auto;
 }
 .mv-pitch-head {
   display: grid;
@@ -211,8 +218,8 @@
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
   gap: 0;
-  /* 실제 경기장(105:68)보다 납작하게 — 세로가 커지면 판세 한 장이 화면을 먹는다 */
-  aspect-ratio: 2.4 / 1;
+  /* 실제 경기장 그대로 — 판 위 좌표가 백분율이라 비율이 곧 선수 사이의 거리다 */
+  aspect-ratio: var(--pitch-ratio);
   padding: 0;
   border-radius: 0;
   background: repeating-linear-gradient(90deg, var(--pitch) 0 12.5%, var(--pitch-2) 12.5% 25%);
