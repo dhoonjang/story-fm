@@ -124,6 +124,11 @@ describe("API — 온보딩부터 경기까지", () => {
       })(),
     );
 
+    // 리그 행이 세우는 「20팀」과 보드 기대가 쓰는 인원은 **같은 수**다 — 응답이
+    // 한 번 세어 내려보내므로 화면이 팀 배열을 따로 세다가 갈릴 자리가 없다
+    const leagues = data.leagues as Array<{ id: string; size: number }>;
+    expect(leagues.find((l) => l.id === "epl")?.size).toBe(teamsOfLeague("epl").length);
+
     // 랜딩이 받는 것 — 카탈로그는 한 조각도 실리지 않는다
     const landing = await getCatalog(new Request("http://test.local/api/games")).json();
     expect(landing.teams).toBeUndefined();
