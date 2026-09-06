@@ -316,6 +316,7 @@
   place-items: center;
   width: 18px;
   height: 18px;
+  padding: 0;
   border-radius: var(--r-xs);
   border: 1.5px solid var(--text-3);
   background: transparent;
@@ -330,6 +331,30 @@
   background: var(--text);
   border-color: var(--text);
   color: var(--bg);
+}
+/**
+ * **누를 수 있는 마커는 면을 갖는다** (design-system.md §1 조작).
+ *
+ * 카드가 열리는 마커만 버튼으로 서므로 선택자는 요소 그 자체다 — 클래스를 하나 더
+ * 두면 "버튼인가"와 "버튼처럼 보이는가"가 갈려 조용히 어긋난다. 읽기만 하는 마커는
+ * 잔디 위에 그은 윤곽이고, 누를 수 있는 마커는 표면 2단 위에 **놓인 것**이 된다.
+ * 테두리로 강조하지 않는 것이 규칙이고(면의 밝기와 키 컬러로 갈린다), 편을 가르는
+ * 채움:윤곽도 그대로다 — `--panel-2`는 잔디와 같은 어둠이라 우리 마커의 `--text`
+ * 채움과 층이 섞이지 않는다 (§2 충돌 규칙 7).
+ */
+button.mv-marker {
+  background: var(--panel-2);
+  transition: box-shadow var(--ease);
+}
+/* hover도 포커스와 같은 채널(키 컬러 링)이다 — 18px 정사각에는 밑줄을 그을 자리가
+   없고, 면을 한 단 올리면 편을 가르는 채움:윤곽과 다툰다. 링이 얇은 쪽이 hover다 */
+button.mv-marker:hover {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+/* 손과 키보드가 같은 마커에 함께 있으면 포커스 링이 이긴다 — 둘 중 하나만 보이는데
+   그 하나는 "지금 어디에 서 있나"여야 한다 */
+button.mv-marker:focus-visible {
+  box-shadow: var(--ring);
 }
 /* 다리가 멈춘 선수 — 교체 신호는 판 위에서도 보여야 한다 */
 .mv-marker.gassed {
@@ -612,11 +637,18 @@
 }
 
 /**
- * 상대 칩 — 우리 판의 칩과 같은 크기·색이되 **누를 수 없다.**
- * 읽는 값과 조작 대상은 생김새가 달라야 하므로 커서와 눌림 반응을 주지 않는다.
+ * 상대 칩 — 우리 판의 칩과 같은 크기·색이되 **자리는 못 옮긴다.**
+ *
+ * 끌 수 없으므로 기본은 읽는 값의 커서다. 다만 카드를 열 무대가 있으면 칩이
+ * 버튼으로 서고(`OpponentBoard`), 그때는 누를 수 있는 것의 커서와 `.pitch-chip`이
+ * 이미 가진 hover 윤곽을 되받는다 — 고칠 수 없는 것은 남의 배치이지 그 선수에
+ * 대해 아는 것이 아니다.
  */
 .pitch-slot.theirs {
   cursor: default;
+}
+button.pitch-slot.theirs {
+  cursor: pointer;
 }
 .pitch-slot.theirs.gassed {
   border-color: var(--loss);

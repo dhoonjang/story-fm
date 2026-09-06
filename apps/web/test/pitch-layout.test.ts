@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { anchorOf, PITCH_BANDS } from "@story-fm/domain";
-import { pitchPointOf, spreadMarkers } from "../lib/pitch-layout";
+import { nextInDirection, pitchPointOf, spreadMarkers } from "../lib/pitch-layout";
 import { XG_BOX, xgRaceOf } from "../lib/xg-race";
 
 /** 판세 격자가 칸을 나누는 자리 — 선수도 같은 칸 안에 서야 한다 */
@@ -134,5 +134,62 @@ describe("누적 xG 계단선의 자리", () => {
     // 종료 뒤(분이 마지막 점보다 이르지 않다)에는 덧붙지 않는다
     const done = xgRaceOf([{ minute: 30, home: 1, away: 0 }], 30);
     expect(done?.home.trimEnd().endsWith("V 0")).toBe(true);
+  });
+});
+
+/**
+ * 방향키가 고르는 다음 마커 — 값은 화면에서 잰 픽셀 중심이라 여기서는 그 자리에
+ * 직접 숫자를 놓는다. 판 위의 자리는 줄이 아니라 평면이므로 "배열의 다음"이 아니라
+ * "그 방향에 실제로 서 있는 가장 가까운 것"이 답이다.
+ */
+describe("판 위의 방향키 — 그 방향에 서 있는 가장 가까운 마커", () => {
+  it("오른쪽은 오른쪽에 있는 것 중 가장 가까운 하나다", () => {
+    const centers = [
+      { x: 100, y: 100 }, // 0 — 여기서 출발
+      { x: 40, y: 100 }, // 1 — 더 가깝지만 왼쪽이다
+      { x: 160, y: 100 }, // 2
+      { x: 300, y: 100 }, // 3
+    ];
+    expect(nextInDirection(centers, 0, "right")).toBe(2);
+    expect(nextInDirection(centers, 0, "left")).toBe(1);
+  });
+
+  it("그 방향에 아무도 없으면 감아 돌지 않고 제자리다", () => {
+    const centers = [
+      { x: 100, y: 100 },
+      { x: 40, y: 100 },
+    ];
+    expect(nextInDirection(centers, 0, "right")).toBeNull();
+    expect(nextInDirection(centers, 0, "up")).toBeNull();
+  });
+
+  it("축에서 벗어난 것부터 진다 — 옆으로 새는 거리는 두 배로 물린다", () => {
+    const centers = [
+      { x: 0, y: 0 }, // 0
+      { x: 20, y: 90 }, // 1 — 20px 오른쪽이지만 90px 아래로 샌다 (20 + 180)
+      { x: 120, y: 0 }, // 2 — 멀지만 같은 줄이다 (120 + 0)
+    ];
+    expect(nextInDirection(centers, 0, "right")).toBe(2);
+    // 새는 폭이 줄면 가까운 쪽이 되돌려 이긴다 (20 + 40 < 120)
+    expect(nextInDirection([centers[0]!, { x: 20, y: 20 }, centers[2]!], 0, "right")).toBe(1);
+  });
+
+  it("겹쳐 선 마커는 그 방향의 후보가 아니다 — 반올림으로 제자리를 고르지 않게", () => {
+    const centers = [
+      { x: 100, y: 100 },
+      { x: 100.2, y: 100 }, // 사실상 같은 자리
+      { x: 140, y: 100 },
+    ];
+    expect(nextInDirection(centers, 0, "right")).toBe(2);
+  });
+
+  it("위아래는 세로로 잰다 — 같은 열의 아래가 대각선을 이긴다", () => {
+    const centers = [
+      { x: 0, y: 0 },
+      { x: 90, y: 30 }, // 30px 아래지만 90px 옆이다 (30 + 180)
+      { x: 0, y: 60 }, // 60px 아래, 같은 열 (60 + 0)
+    ];
+    expect(nextInDirection(centers, 0, "down")).toBe(2);
+    expect(nextInDirection(centers, 2, "up")).toBe(0);
   });
 });
