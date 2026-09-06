@@ -19,3 +19,4 @@ export * from "./date-string";
 export * from "./turn-operation";
 export * from "./money";
 export * from "./crest";
+export * from "./tick-event";

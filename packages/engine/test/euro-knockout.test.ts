@@ -34,6 +34,7 @@ import {
   playerById,
   playersOf,
   tieAggregate,
+  eventTexts,
 } from "@story-fm/engine";
 import { createTestGame, keepSeat, playMockMatch, playPreseason } from "./helpers";
 
@@ -409,8 +410,8 @@ describe("한 시즌 완주 (mock 경기)", () => {
       // 대회 진행을 재는 동안 자리는 지킨다 — 경질은 시계를 멈춘다(reviewUserSeat)
       keepSeat(state);
       const advanced = advanceTime(state, "next_match");
-      digest.push(...advanced.digest);
-      expect(advanced.ok, advanced.digest.join(" / ")).toBe(true);
+      digest.push(...eventTexts(advanced.events));
+      expect(advanced.ok, eventTexts(advanced.events).join(" / ")).toBe(true);
       if (advanced.stopped === "season_end") {
         ended = true;
         break;
@@ -436,7 +437,7 @@ describe("한 시즌 완주 (mock 경기)", () => {
     const cupTrophies = state.trophies.filter(
       (t) => isEuroCup(t.competitionId ?? null) && t.teamId === state.userTeamId,
     );
-    const wonUcl = digest.some((d) => d.includes("🏆 UEFA 챔피언스리그 우승"));
+    const wonUcl = digest.some((d) => d.includes("UEFA 챔피언스리그 우승"));
     expect(cupTrophies.length).toBe(wonUcl ? 1 : 0);
     expect(state.seasonRecords).toHaveLength(1);
     // 시즌 340일을 하루씩 도는 통합 테스트다. 재는 것은 **완주**이지 속도가 아니므로

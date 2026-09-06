@@ -15,6 +15,7 @@ import {
   rivalQuoteFact,
   simSquadOf,
   type GameState,
+  eventTexts,
 } from "@story-fm/engine";
 import { createTestGame, drillUserTactics, playMockMatch } from "../test/helpers";
 import { AI_ROTATION, LEAGUE_SPREAD, WORLD_SEASON } from "./catalog";
@@ -384,7 +385,7 @@ describe("전체 세계 한 시즌", () => {
       for (let i = 0; i < 600; i++) {
         const advanced = advanceTime(state, "next_match");
         if (!advanced.ok) {
-          note = ` ⚠️ ${advanced.digest.join(" / ")}`;
+          note = ` ⚠️ ${eventTexts(advanced.events).join(" / ")}`;
           break;
         }
         if (state.season === 1) season = seasonReadings(state);

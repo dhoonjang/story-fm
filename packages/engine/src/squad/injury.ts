@@ -1,4 +1,4 @@
-import type { GamePlayer, InjuryHistory, InjurySeverity } from "@story-fm/domain";
+import type { GamePlayer, InjuryHistory, InjurySeverity, TickSink } from "@story-fm/domain";
 // 성향의 바닥·천장은 세이브 스키마와 같은 상수를 읽는다 (player.md §5.3)
 import { INJURY_PRONENESS_MAX, INJURY_PRONENESS_MIN, INJURY_SEVERITY_KO } from "@story-fm/domain";
 import { INJURY_PER_MATCH, injuryRiskOf, type InjuryRisk } from "@story-fm/sim";
@@ -72,7 +72,7 @@ export function openInjuryFor(
 }
 
 /** 부상 복귀 처리 — 예상 복귀일이 지나면 returnedOn을 기록해 이력으로 닫는다 */
-export function resolveInjuries(state: GameState, digest: string[]): void {
+export function resolveInjuries(state: GameState, digest: TickSink): void {
   for (const injury of state.injuries) {
     if (injury.returnedOn !== null) continue;
     if (state.date < injury.expectedReturn) continue;

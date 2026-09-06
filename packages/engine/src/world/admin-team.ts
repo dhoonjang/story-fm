@@ -141,7 +141,7 @@ function violations(teams: readonly TeamCatalogEntry[]): string[] {
 /** 성공 메시지에 붙는 경고 — 대회가 조용히 사라지는 편집을 알린다 */
 function withWarnings(message: string, teams: readonly TeamCatalogEntry[]): string {
   const warnings = catalogWarnings(candidate(teams));
-  return warnings.length === 0 ? message : `${message} — ⚠️ ${warnings.join(" · ")}`;
+  return warnings.length === 0 ? message : `${message} — ${warnings.join(" · ")}`;
 }
 
 function validateProfile(patch: {

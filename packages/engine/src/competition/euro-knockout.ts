@@ -1,4 +1,4 @@
-import type { MatchRecord, MatchStage } from "@story-fm/domain";
+import type { MatchRecord, MatchStage, TickSink } from "@story-fm/domain";
 import { addDays } from "./calendar";
 import {
   cupCatalog,
@@ -155,7 +155,7 @@ function createStage(
   cup: CupCatalogEntry,
   stage: MatchStage,
   pairs: Array<[string, string]>,
-  digest: string[],
+  digest: TickSink,
 ): void {
   const seeds = leaguePhaseSeeds(state, cup.id);
   const created: MatchRecord[] = [];
@@ -176,7 +176,7 @@ function createStage(
   if (ours) {
     const opponent = ours.homeTeamId === state.userTeamId ? ours.awayTeamId : ours.homeTeamId;
     digest.push(
-      `🎫 ${short} ${label} 대진 확정 — 상대는 ${teamNameIn(state, opponent)} (${ours.date})`,
+      `${short} ${label} 대진 확정 — 상대는 ${teamNameIn(state, opponent)} (${ours.date})`,
     );
     pushNarrative(state, `${short} ${label} 진출 — vs ${teamNameIn(state, opponent)}`, 4);
   } else {
@@ -227,7 +227,7 @@ function reportEuroTie(
   cup: CupCatalogEntry,
   stage: MatchStage,
   winners: string[],
-  digest: string[],
+  digest: TickSink,
 ): void {
   reportOurTie(
     state,
@@ -250,7 +250,7 @@ function reportEuroTie(
  * (매일 호출되는 함수에서 중복 보고를 피하는 가장 단순한 방법이다).
  * 우승·트로피는 시즌 리뷰가 맡는다 (`reviewSeason` — 결승은 리그 종료 뒤에 열린다).
  */
-export function advanceEuroKnockouts(state: GameState, digest: string[]): void {
+export function advanceEuroKnockouts(state: GameState, digest: TickSink): void {
   for (const cup of cupCatalog()) {
     if (!euroLeaguePhaseDone(state, cup.id)) continue;
     const stages = knockoutStages(cup);
@@ -317,7 +317,7 @@ function scheduleEuroDraw(
   cup: CupCatalogEntry,
   stage: MatchStage,
   participants: string[],
-  digest: string[],
+  digest: TickSink,
 ): boolean {
   const firstLeg = knockoutDates(state.season, stage)[0];
   const latest = firstLeg ? addDays(firstLeg, -1) : addDays(state.date, EURO_DRAW_LEAD_DAYS);
@@ -327,7 +327,7 @@ function scheduleEuroDraw(
   const created = scheduleDraw(state, cup.id, stage, date, forUser);
   if (created && forUser) {
     const short = competitionShortName(cup.id);
-    digest.push(`🎲 ${short} ${stageLabel(stage, 1, false)} 대진 추첨 — ${date}`);
+    digest.push(`${short} ${stageLabel(stage, 1, false)} 대진 추첨 — ${date}`);
   }
   return created;
 }

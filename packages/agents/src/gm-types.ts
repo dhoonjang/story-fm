@@ -1,4 +1,4 @@
-import type { MissionReportCard, ScoutReportCard } from "@story-fm/domain";
+import type { MissionReportCard, ScoutReportCard, TickEvent } from "@story-fm/domain";
 import type { CardMark, GoalMark, CommandBrief } from "@story-fm/engine";
 
 /** GM 턴 결과 — mock/실모드 공통 계약 */
@@ -77,6 +77,14 @@ export interface GmTurnResult {
   reports?: ScoutReportCard[];
   /** 이번 턴에 도착한 스카우트 임무 보고 — 채팅이 후보 목록 카드로 편다 */
   missions?: MissionReportCard[];
+  /**
+   * **이번 턴에 시간이 지나간 자리에 남은 사건** — 화면이 하나를 카드 하나로 세운다
+   * (overview.md §2 · `ChatTurn.events`).
+   *
+   * 시계가 도는 자리가 둘이라(손잡이는 장면 앞, 헤더는 장면 뒤 — agents.md §2)
+   * 한 턴에 둘 다 굴 수 있다. 그때는 **민 순서대로 이어 붙인다**.
+   */
+  events?: TickEvent[];
   /**
    * **시계가 멎은 채로 이어진 평시 턴 수** — 첫 줄 헤더를 연달아 못 읽었다
    * (`STALLED_CLOCK_TURNS` 이상일 때만 실린다).

@@ -12,6 +12,7 @@ import type {
   PressAxis,
   SquadStatus,
   Transfer,
+  TickSink,
 } from "@story-fm/domain";
 import {
   MAX_PAYMENT_YEARS,
@@ -1518,7 +1519,7 @@ export function incomingOffers(state: GameState): Negotiation[] {
  * 값이 나가는 선수에게 온다 (실제로도 에이전트가 그런 선수를 움직인다).
  * 사는 구단은 그 자리가 우리보다 약하고 예산이 되는 곳에서 고른다.
  */
-export function generateIncomingOffers(state: GameState, digest: string[]): void {
+export function generateIncomingOffers(state: GameState, digest: TickSink): void {
   // **창은 사는 쪽 협회 것을 본다.** 우리 창이 닫혀도 사우디·MLS는 계속 노린다
   if (incomingOffers(state).length >= MAX_INCOMING) return;
   const anyWindowOpen =
@@ -1639,7 +1640,7 @@ export function generateIncomingOffers(state: GameState, digest: string[]): void
     // 처음엔 시장가보다 낮게 부른다 (75~100%) — 흥정의 여지를 남긴다
     (feeBias) => Math.round((marketValue * (0.75 + rng() * 0.25) * feeBias) / 100_000) * 100_000,
     ({ buyerName, fee, expiresOn }) =>
-      `📩 ${buyerName}가 ${bid.player.name} 영입 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
+      `${buyerName}가 ${bid.player.name} 영입 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
     bid.interest.teamId,
   );
   // 사다리의 끝 — 그 사실은 이제 협상이 든다. 창이 닫혀 못 열렸으면 줄은 남는다
@@ -1654,7 +1655,7 @@ function openIncomingSellOffer(
   state: GameState,
   player: GamePlayer,
   rng: () => number,
-  digest: string[],
+  digest: TickSink,
   quote: (feeBias: number) => number,
   line: (ctx: { buyerName: string; fee: number; expiresOn: Negotiation["expiresOn"] }) => string,
   /** 이미 정해진 구단 — 관심 갈래는 장부의 줄이 주인을 갖고 온다 (§1-2) */
@@ -1722,7 +1723,7 @@ function openListedOffer(
   player: GamePlayer,
   askingPrice: number,
   rng: () => number,
-  digest: string[],
+  digest: TickSink,
 ): void {
   openIncomingSellOffer(
     state,
@@ -1732,7 +1733,7 @@ function openListedOffer(
     (feeBias) =>
       Math.round((askingPrice * (1 - LISTED_DISCOUNT * rng()) * feeBias) / 100_000) * 100_000,
     ({ buyerName, fee, expiresOn }) =>
-      `📩 ${buyerName}가 이적 리스트의 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (호가 ${formatMoney(askingPrice)} · 기한 ${expiresOn})`,
+      `${buyerName}가 이적 리스트의 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (호가 ${formatMoney(askingPrice)} · 기한 ${expiresOn})`,
   );
 }
 
@@ -1744,7 +1745,7 @@ function openRequestedOffer(
   state: GameState,
   player: GamePlayer,
   rng: () => number,
-  digest: string[],
+  digest: TickSink,
 ): void {
   const market = marketValueOf(state, player);
   openIncomingSellOffer(
@@ -1755,7 +1756,7 @@ function openRequestedOffer(
     (feeBias) =>
       Math.round((market * (1 - REQUESTED_DISCOUNT * rng()) * feeBias) / 100_000) * 100_000,
     ({ buyerName, fee, expiresOn }) =>
-      `📩 ${buyerName}가 이적을 요청한 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
+      `${buyerName}가 이적을 요청한 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
   );
 }
 
@@ -2430,7 +2431,7 @@ function executeLoanIn(
       `${player.name}을(를) ${teamName(from)}에서 임대로 데려왔습니다 — ${until}까지 · ` +
       `임대료 ${formatMoney(agreed.fee)} · 주급 ${Math.round(wageShare * 100)}% 부담` +
       ` · 등번호 ${squadNumber}번` +
-      (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
+      (slot.ok ? "" : ` ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
     brief: {
       head: "임대 영입",
       items: [
@@ -3106,7 +3107,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): CommandResult {
       // 합의한 번호를 못 준 사실은 여기서 한 번 더 선다 — 모델이 읽는 줄이다
       (numberBlock ? ` (요구는 ${numberBlockText(numberBlock)})` : "") +
       `. 남은 이적 예산 ${formatMoney(ourFinance.transferBudget)}` +
-      (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
+      (slot.ok ? "" : ` ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
     brief: {
       head: "영입 완료",
       items: [
@@ -3481,15 +3482,15 @@ const MEDICAL_DISCOUNT = 0.85;
  * 절차이지 새 판단을 요구하는 자리가 아니다 — 통과한 딜은 그날 계약이 된다.
  * 감독이 다시 결정해야 하는 것은 **소견이 붙었을 때뿐**이다.
  */
-export function runMedicals(state: GameState, digest: string[]): void {
+export function runMedicals(state: GameState, digest: TickSink): void {
   for (const outcome of resolveMedicals(state)) {
     const { negotiation, player } = outcome;
     if (outcome.passed) {
       const done = executeDeal(state, negotiation);
       digest.push(
         done.ok
-          ? `🩺 ${player.name} 메디컬 통과 — ${done.message}`
-          : `🩺 ${player.name} 메디컬은 통과했지만 계약을 확정하지 못했습니다 — ${done.message}`,
+          ? `${player.name} 메디컬 통과 — ${done.message}`
+          : `${player.name} 메디컬은 통과했지만 계약을 확정하지 못했습니다 — ${done.message}`,
       );
       continue;
     }
@@ -3503,7 +3504,7 @@ export function runMedicals(state: GameState, digest: string[]): void {
     // 통과하지 않았으면 소견 카드가 반드시 붙는다 (`resolveMedical`)
     if (!outcome.concern) continue;
     const flagged = medicalFlagResult(state, negotiation, player, outcome.concern);
-    if (flagged.ok) digest.push(`🩺 ${flagged.message}`);
+    if (flagged.ok) digest.push(`${flagged.message}`);
   }
 }
 
@@ -3541,14 +3542,14 @@ export function standingDeadlineOf(negotiation: Negotiation): string | null {
     : null;
 }
 
-export function expireNegotiations(state: GameState, digest: string[]): void {
+export function expireNegotiations(state: GameState, digest: TickSink): void {
   for (const negotiation of state.negotiations) {
     if (negotiation.status !== "open" && negotiation.status !== "agreed") continue;
     if (medicalDecisionOutOfWindow(state, negotiation)) {
       negotiation.status = "expired";
       const player = playerById(state, negotiation.gamePlayerId);
       digest.push(
-        `🩺 ${player?.name ?? negotiation.gamePlayerId} 건은 메디컬 소견을 안은 채 이적창이 ` +
+        `${player?.name ?? negotiation.gamePlayerId} 건은 메디컬 소견을 안은 채 이적창이 ` +
           `닫혔습니다 — 이 건은 무산됐습니다`,
       );
       /**
@@ -3568,9 +3569,9 @@ export function expireNegotiations(state: GameState, digest: string[]): void {
       const player = playerById(state, negotiation.gamePlayerId);
       digest.push(
         deadline
-          ? `⏳ ${player?.name ?? negotiation.gamePlayerId} — 상대가 건 기한이 내일입니다. ` +
+          ? `${player?.name ?? negotiation.gamePlayerId} — 상대가 건 기한이 내일입니다. ` +
               `넘기면 협상이 끝납니다`
-          : `⏳ ${player?.name ?? negotiation.gamePlayerId} 협상이 내일 만료됩니다 — 오늘 안에 결정해야 합니다`,
+          : `${player?.name ?? negotiation.gamePlayerId} 협상이 내일 만료됩니다 — 오늘 안에 결정해야 합니다`,
       );
     }
     if (state.date <= negotiation.expiresOn) continue;
@@ -3874,7 +3875,7 @@ const RENEWAL_WAGE_SPAN = 0.25;
  * 서둘러 잡는다.** 우리가 노리던 선수가 재계약하면 진행 중이던 협상은 그 자리에서
  * 끝난다. 그게 이 시스템의 요점이다: 기다리는 데에도 대가가 있다.
  */
-export function runAiRenewals(state: GameState, digest: string[]): void {
+export function runAiRenewals(state: GameState, digest: TickSink): void {
   const limit = addDays(state.date, AI_RENEWAL_WINDOW_DAYS);
   const rng = makeRng(state.seed, `ai-renewal:${state.date}`);
   /**
@@ -3959,7 +3960,7 @@ export function runAiRenewals(state: GameState, digest: string[]): void {
     if (ours) {
       ours.status = "rejected";
       digest.push(
-        `🚪 ${teamName(contract.teamId)}가 ${player.name}과 재계약했습니다 (${years}년) — 우리 협상은 끝났습니다`,
+        `${teamName(contract.teamId)}가 ${player.name}과 재계약했습니다 (${years}년) — 우리 협상은 끝났습니다`,
       );
       pushNarrative(state, `${player.name} 재계약 — 영입 무산`, 4);
     } else if (state.scoutReports.some((r) => r.gamePlayerId === player.id && r.completedOn)) {
@@ -4013,7 +4014,7 @@ const PRECONTRACT_WAGE_SPAN = 0.3;
  * (열린 `renew` 협상이 있는 동안 후보에서 빠진다), 성사되면 만료가 밀려 창 자체가
  * 닫힌다 — 반년 전의 재계약에 값이 생기는 자리가 여기다.
  */
-export function runAiPrecontracts(state: GameState, digest: string[]): void {
+export function runAiPrecontracts(state: GameState, digest: TickSink): void {
   /**
    * **창부터 연다** — 원장을 한 번 훑어 만료가 창 안인 우리 계약만 집는다. 선수마다
    * `precontractDaysLeft`를 물으면 그 안의 `activeContract`가 선수 수 × 계약 수를
@@ -4095,7 +4096,7 @@ export function runAiPrecontracts(state: GameState, digest: string[]): void {
     });
 
     digest.push(
-      `🚪 ${player.name}이(가) ${teamName(teamId)}와 사전 계약했습니다 — ${since}에 떠납니다`,
+      `${player.name}이(가) ${teamName(teamId)}와 사전 계약했습니다 — ${since}에 떠납니다`,
     );
     pushNarrative(state, `${player.name} 사전 계약 — ${teamName(teamId)}로 ${since} 이적`, 5);
   }

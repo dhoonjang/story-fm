@@ -88,6 +88,7 @@ import {
   weeklyWagesOf,
   windowStartFor,
   withdrawOffer,
+  eventTexts,
 } from "@story-fm/engine";
 import {
   ageOf,
@@ -750,7 +751,7 @@ describe("시간이 흐르면", () => {
     while (guard-- > 0 && state.date < respondsOn) {
       const advanced = advanceTime(state, { days: 1 });
       stopped = advanced.stopped;
-      if (advanced.digest.some((d) => d.includes("답이 도착"))) break;
+      if (eventTexts(advanced.events).some((d) => d.includes("답이 도착"))) break;
     }
     expect(state.date >= respondsOn).toBe(true);
     expect(arrivedResponses(state)).toHaveLength(1);

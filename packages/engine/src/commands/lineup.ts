@@ -842,7 +842,7 @@ export function setLineup(
   return {
     ok: true,
     message: `라인업 확정 — ${[...changes.notes, ...levelNotes].join(" · ")}`,
-    brief: { head: "라인업 확정", items },
+    brief: { head: "라인업", items },
   };
 }
 
@@ -1414,7 +1414,7 @@ export function setCaptain(
   return {
     ok: true,
     message: notes.join(" · "),
-    brief: { head: "완장", items },
+    brief: { head: "완장 지정", items },
   };
 }
 
@@ -1831,7 +1831,7 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): Comman
     ok: true,
     message: `전술 변경 — ${parsed.data.formation}, 멘탈리티 ${parsed.data.mentality}${toggleNote}${note}`,
     brief: {
-      head: "전술 변경",
+      head: "팀 전술 변경",
       items: [
         item({ label: "포메이션", text: parsed.data.formation }),
         item({ label: "멘탈리티", text: `${parsed.data.mentality}` }),

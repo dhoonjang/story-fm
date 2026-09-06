@@ -1,4 +1,4 @@
-import type { GamePlayer, Interest } from "@story-fm/domain";
+import type { GamePlayer, Interest, TickSink } from "@story-fm/domain";
 import { INTEREST_STAGE_KO } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { makeRng, pickWeighted } from "../core/rng";
@@ -134,7 +134,7 @@ function pruneInterests(state: GameState): void {
 }
 
 /** 사다리를 한 칸 올린다 — **창이 열린 구단만.** 오르는 순간이 곧 밖에 나는 순간이다 */
-function climbInterests(state: GameState, digest: string[]): void {
+function climbInterests(state: GameState, digest: TickSink): void {
   const rows = state.interests ?? [];
   if (rows.length === 0) return;
   const rng = makeRng(state.seed, `interest-step:${state.date}`);
@@ -156,14 +156,14 @@ function climbInterests(state: GameState, digest: string[]): void {
 }
 
 /** 칸이 오른 사실 한 줄 — 우리 선수인가 우리가 노리는 선수인가로 결이 갈린다 */
-function announce(state: GameState, row: Interest, player: GamePlayer, digest: string[]): void {
+function announce(state: GameState, row: Interest, player: GamePlayer, digest: TickSink): void {
   const club = teamNameIn(state, row.teamId);
   const ours = player.teamId === state.userTeamId;
   const line = ours
     ? row.stage === "enquired"
-      ? `📰 ${club}에서 ${player.name}에 대해 문의가 왔습니다`
-      : `📰 ${club}가 ${player.name} 영입을 준비하고 있습니다`
-    : `📰 ${club}도 ${player.name}에게 ${INTEREST_STAGE_KO[row.stage]} 단계입니다 — 우리 협상과 겹칩니다`;
+      ? `${club}에서 ${player.name}에 대해 문의가 왔습니다`
+      : `${club}가 ${player.name} 영입을 준비하고 있습니다`
+    : `${club}도 ${player.name}에게 ${INTEREST_STAGE_KO[row.stage]} 단계입니다 — 우리 협상과 겹칩니다`;
   digest.push(line);
   // 문의는 알아 둘 일이고 입찰 임박은 오늘 움직일 일이다 (오퍼 도착이 3 · people.md §9)
   pushNarrative(
@@ -235,7 +235,7 @@ function standOnTarget(
   state: GameState,
   rng: () => number,
   depthOf: () => SquadDepth,
-  digest: string[],
+  digest: TickSink,
 ): void {
   const targets = ourTargets(state);
   if (targets.length === 0) return;
@@ -289,7 +289,7 @@ function pruneCompetingBids(state: GameState): void {
  */
 export function tickCompetingBids(
   state: GameState,
-  digest: string[],
+  digest: TickSink,
   depthOf: () => SquadDepth = () => squadDepthOf(state),
 ): void {
   pruneCompetingBids(state);
@@ -312,7 +312,7 @@ export function tickCompetingBids(
       lift: COMPETING_BID_LIFT,
     });
     const club = teamNameIn(state, rival.teamId);
-    digest.push(`📰 ${club}가 ${player.name}에게 값을 불렀습니다 — 호가가 올랐습니다`);
+    digest.push(`${club}가 ${player.name}에게 값을 불렀습니다 — 호가가 올랐습니다`);
     // 오늘 움직일 일이다 — 오퍼 도착과 같은 눈금 (people.md §9)
     pushNarrative(state, `${club} — ${player.name} 경쟁 입찰`, 3);
   }
@@ -322,7 +322,7 @@ export function tickCompetingBids(
  * 하루치 관심 — tick이 `generateIncomingOffers` **앞에서** 부른다.
  * 걷고, 올리고, 세우고, 부른다. 오늘 선 줄은 오늘 오르지 않는다(`INTEREST_STEP_DAYS`).
  */
-export function tickInterests(state: GameState, digest: string[]): void {
+export function tickInterests(state: GameState, digest: TickSink): void {
   pruneInterests(state);
   climbInterests(state, digest);
 

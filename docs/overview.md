@@ -143,6 +143,32 @@ flowchart LR
 둘 사이의 중재)은 GM이 `record_incident`로 그 턴에 세우고, 효과표는 코어가 갖는다
 ([data/people.md](data/people.md) §6).
 
+### 시간이 지나간 자리 — 코어는 **사건 배열**을 낸다
+
+손잡이로 며칠을 넘기면 모델보다 코어가 먼저 굴고(§4 ·
+[simulation/season.md](simulation/season.md) §5), 그 사이 벌어진 일을 **사건 하나에 원소
+하나인 배열**로 낸다 — 「 · 」로 이어 붙인 한 문단이 아니다.
+
+```ts
+type TickEvent = { kind: TickEventKind; text: string };
+// kind: "injury" | "board" | "draw" | "interest" | "matchday" | "news"
+```
+
+- **`text`는 코어가 쓴 사실 문장 그대로다.** 종류가 붙는다고 문장이 달라지지 않고,
+  종류를 문장 안에 적지도 않는다.
+- **`kind`는 코어가 정하고 화면이 읽는다.** 화면은 사건 하나를 **카드 하나**로 세우고
+  그 종류로 꼬리표와 픽토그램을 고른다([ui/design-system.md](ui/design-system.md) §6).
+  코어는 꼬리표 글자도 아이콘 이름도 모른다 — 그건 화면의 어휘다.
+- **문장에 이모지를 붙이지 않는다.** 종류를 그림으로 말하는 것은 화면의 일이고, 화면이
+  쓰는 그림은 24그리드 픽토그램뿐이다(design-system.md §3 허용 글리프 여섯). 코어가
+  ⚽·📰를 붙이면 종류가 **두 벌**로 서고, 그중 하나는 화면이 고칠 수 없다.
+- **id 목록은 싣지 않는다.** 문장에 선 이름을 손잡이로 잇는 사전은 화면이 이미 짓는다
+  (`store.ts` `namesForChat` · [data/player.md](data/player.md) §9.5) — 같은 사실을 코어가
+  한 벌 더 내면 두 목록이 언젠가 갈린다.
+
+배열이 가는 곳은 둘이다 — GM 스냅샷의 「그 사이 벌어진 일」(**문장만** 간다. 종류는
+화면의 것이다)과, 그 턴의 채팅 기록(`ChatTurn.events` → 사건 카드).
+
 ## 3. 채팅 문법
 
 | 요소      | 형식                                                             | 예                              |

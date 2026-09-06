@@ -9,6 +9,7 @@ import {
   setSquadLevel,
   squadLevelOf,
   userPlayers,
+  eventTexts,
 } from "@story-fm/engine";
 import { createMiniGame, drillUserTactics, keepSeat, playMockMatch } from "../test/helpers";
 import { DEMOTION_GRIEVANCE } from "./catalog";
@@ -113,11 +114,11 @@ describe("한 시즌의 2군 강등", () => {
     let finished = false;
     for (let i = 0; i < ADVANCE_LIMIT; i++) {
       let advanced = advanceTime(state, { days: ROTATION_CHECK_DAYS });
-      if (!advanced.ok) throw new Error(advanced.digest.join(" / "));
+      if (!advanced.ok) throw new Error(eventTexts(advanced.events).join(" / "));
       // 안 치른 경기가 시계를 막으면 그 경기까지 간다
       if (advanced.stopped === "blocked") {
         advanced = advanceTime(state, "next_match");
-        if (!advanced.ok) throw new Error(advanced.digest.join(" / "));
+        if (!advanced.ok) throw new Error(eventTexts(advanced.events).join(" / "));
       }
       sample();
       if (advanced.stopped === "season_end") {
