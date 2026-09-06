@@ -599,12 +599,18 @@ function restoreTactics(state: GameState): string | null {
 }
 
 /**
- * 우리와 **같은 날 같은 시각에 킥오프하는 경기**의 골 시각 — 라이브 스코어의 원본
- * (match.md §7 「같은 시각에 킥오프한 경기」).
+ * 우리와 **같은 대회, 같은 날, 같은 시각에 킥오프하는 경기**의 골 시각 — 라이브
+ * 스코어의 원본 (match.md §7 「같은 시각에 킥오프한 경기」).
  *
  * 킥오프 순서의 규칙이 막는 것은 결과를 미리 아는 것이지 옆 구장을 보는 것이 아니다.
  * 우리보다 먼저 시작한 경기는 이미 결과가 있고(`simulateOtherMatches`), 늦게 시작하는
  * 경기는 아직 아무 일도 없다 — 그래서 굴릴 것은 **정확히 같은 시각**의 미진행 경기뿐이다.
+ *
+ * **같은 대회로 좁히는 것은 화면이 그것만 세우기 때문이다.** 라이브가 서는 자리는
+ * 이 경기가 속한 대회의 일정 표 하나고, 다른 대회의 라운드는 그 표에 없다. 좁히지
+ * 않으면 프리시즌 친선 하루에 다섯 리그의 79경기가 굴려진다(실측) — 아무 화면에도
+ * 서지 않는 값에 킥오프 턴이 300ms를 낸다. 친선은 어느 대회에도 속하지 않으므로
+ * 이 문 하나가 함께 거른다.
  *
  * ⚠️ 채널과 경기의 사실은 `quickSimKeyOf`·`quickSimOptionsOf`가 조립한다. 종료 뒤
  * 그 경기를 장부에 적는 굴림이 같은 함수를 읽으므로 **여기서 본 스코어가 그대로
@@ -614,10 +620,12 @@ function rollConcurrentMatches(
   state: GameState,
   ours: MatchRecord,
 ): NonNullable<PendingMatch["otherScores"]> {
+  if (ours.competitionId === null) return [];
   const kickoff = ours.time ?? DEFAULT_KICKOFF;
   const rows: NonNullable<PendingMatch["otherScores"]> = [];
   for (const match of matchesOn(state.matches, state.date)) {
     if (match.result || match.id === ours.id) continue;
+    if (match.competitionId !== ours.competitionId) continue;
     // 2군 리그는 조용히 돈다 — 옆 구장의 스코어가 아니다 (match.md §7)
     if (isReserveMatch(match)) continue;
     if ((match.time ?? DEFAULT_KICKOFF) !== kickoff) continue;
