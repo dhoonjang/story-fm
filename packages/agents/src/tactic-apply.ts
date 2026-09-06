@@ -8,7 +8,7 @@ import {
   type GameState,
   type GoalMark,
 } from "@story-fm/engine";
-import { shootoutTally } from "@story-fm/domain";
+import { formatScore, shootoutTally } from "@story-fm/domain";
 import type { GameToolSpec } from "@story-fm/llm";
 import { buildToolSpecs, collectMatchMarks, sideTeamName } from "./gm-tools";
 import { buildSegmentMessage, buildShootoutMessage } from "./match-script";
@@ -146,9 +146,9 @@ export function applyTacticOrders(
   return {
     notes,
     segment: [
-      buildSegmentMessage(step.events, step.stop ?? "flow", nameOf, sideName),
+      buildSegmentMessage(step.events, step.stop ?? "flow", nameOf, sideName, scoreBefore),
       ``,
-      `[구간 뒤 장부] 스코어 ${ledger.score.home}:${ledger.score.away} · ${ledger.minute}′ · ${ledger.phase}`,
+      `[구간 뒤 장부] 스코어 ${formatScore(ledger.score.home, ledger.score.away)} · ${ledger.minute}′ · ${ledger.phase}`,
     ].join("\n"),
   };
 }

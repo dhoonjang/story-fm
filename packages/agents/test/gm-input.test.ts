@@ -7,6 +7,7 @@ import {
   askingPriceFor,
   characterEntry,
   clubHonoursLine,
+  clubProfileIn,
   createGame,
   clockOf,
   formatMoney,
@@ -121,11 +122,14 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
     const state = game();
     const ref = buildGmReference(state);
     expect(ref).not.toContain("<reference>");
-    // 역대 한 줄이 본문에 선다 — 이 구단은 카탈로그 시드가 있다 (team.md §1)
+    // 역대 한 줄과 홈구장이 본문에 선다 — 이 구단은 카탈로그 시드가 있다 (team.md §1)
     expect(describeClub(state)).toBe(
-      [`<club name="아스날">`, `역대: ${clubHonoursLine(state, state.userTeamId)}`, `</club>`].join(
-        "\n",
-      ),
+      [
+        `<club name="아스날">`,
+        `역대: ${clubHonoursLine(state, state.userTeamId)}`,
+        `홈구장: ${clubProfileIn(state, state.userTeamId).stadium}`,
+        `</club>`,
+      ].join("\n"),
     );
     expect(describeManager(state.manager)).toBe(
       [
@@ -160,7 +164,23 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
   it("우승을 모르는 구단에는 역대 줄이 서지 않는다", () => {
     const state = game();
     state.userTeamId = "chelsea";
-    expect(describeClub(state)).toBe(`<club name="첼시" />`);
+    expect(describeClub(state)).not.toContain("역대:");
+    expect(describeClub(state)).toContain(`<club name="첼시">`);
+  });
+
+  /**
+   * **홈구장의 이름은 세계가 아는 사실이다** — 장면 헤더의 장소가 이 이름을 부르므로
+   * (prompts.md §1), 없으면 GM이 구장 이름을 지어내 재정 뷰와 갈린다. 세이브에 이름이
+   * 없는 구단(어드민이 넣은 팀)은 폴백 문구가 아니라 줄 자체가 서지 않는다.
+   */
+  it("홈구장 이름은 세이브에 실린 것만 선다", () => {
+    const state = game();
+    expect(describeClub(state)).toContain(
+      `홈구장: ${clubProfileIn(state, state.userTeamId).stadium}`,
+    );
+    const team = state.teams.find((t) => t.id === state.userTeamId)!;
+    team.stadium = "";
+    expect(describeClub(state)).not.toContain("홈구장:");
   });
 
   it("선수의 id도 이름도 담지 않는다 — 명단 한 줄이 바뀌면 뒤의 이력까지 무효가 된다", () => {
@@ -1279,6 +1299,25 @@ describe("장면 헤더", () => {
     expect(at("[2026-07-18 수요일]")).toEqual({ date: "2026-07-18", clock: "09:00" });
   });
 
+  /**
+   * **장소 필드는 시계를 멈추지 못한다** (prompts.md §1) — 헤더는 시각 다음에 장소를
+   * 싣는데, 파서가 그 꼬리에서 걸리면 그 턴의 날짜가 통째로 흐르지 않는다. 구분자는
+   * 모델이 고르는 것이므로 넷 다 받고, 없어도 받는다.
+   */
+  it("헤더 끝의 장소를 흘려 읽는다 — 시계는 날짜가 민다", () => {
+    const at = (header: string) => parseSceneHeader(`${header}\n@:`).point;
+    expect(at("[2026-07-18 AM 9:30 · 훈련장]")).toEqual({ date: "2026-07-18", clock: "09:30" });
+    expect(at("[2026-07-18 AM 9:30 — 에미레이츠 스타디움]")).toEqual({
+      date: "2026-07-18",
+      clock: "09:30",
+    });
+    expect(at("[2026-07-18 오후, 감독실]")).toEqual({ date: "2026-07-18", clock: "14:00" });
+    expect(at("[2026-07-18 오전 런던 콜니 훈련장]")).toEqual({
+      date: "2026-07-18",
+      clock: "09:00",
+    });
+  });
+
   it("시간대만 적으면 그 시간대의 기본 시각으로 읽는다", () => {
     const clock = (header: string) => parseSceneHeader(`${header}\n@:`).point?.clock;
     // 훈련은 오전, 미팅은 오후, 협상 전화는 밤 — 프롬프트가 말하는 결 그대로
@@ -1976,7 +2015,7 @@ describe("교섭 테이블의 입력 — 화자와 그가 답하는 칸", () => 
     if (!seat.ok) throw new Error(seat.message);
     expect(seat.seat.voices.map((v) => v.speaker)).toEqual(["agent"]);
     expect(buildTableInput(state, seat.seat, "남아 주십시오")!).toContain(
-      `agent "${seat.seat.voices[0]!.name}" —`,
+      `agent “${seat.seat.voices[0]!.name}” —`,
     );
   });
 
@@ -2000,8 +2039,8 @@ describe("교섭 테이블의 입력 — 화자와 그가 답하는 칸", () => 
     // 화자 칸이 없는 줄 — 목소리가 둘이 되기 전의 세이브가 남긴 답이다
     buy.table!.lines.push({ date: state.date, by: "them", text: "옛 세이브의 답이다" });
     const input = buildTableInput(state, seat.seat, "값부터 맞춥시다")!;
-    expect(input).toContain(`club "${club!.name}" —`);
-    expect(input).toContain(`agent "${agent!.name}" —`);
+    expect(input).toContain(`club “${club!.name}” —`);
+    expect(input).toContain(`agent “${agent!.name}” —`);
     // 그 답은 서류가 부르는 상대 하나, 곧 파는 구단의 말로 읽힌다
     expect(input).toContain(`@${club!.name}: 옛 세이브의 답이다`);
   });

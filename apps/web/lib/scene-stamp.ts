@@ -8,10 +8,10 @@ import { humanDate } from "./dateline";
  * 성립하고, 그래서 테스트가 JSX를 거치지 않는다.
  */
 
-/** 헤더 줄인가 — 대괄호 한 쌍에 32자 이내 */
-const HEADER_RE = /^\[[^\]]{1,32}\]$/u;
-/** `2026-07-02 AM 10:10` 꼴에서 시각 부분만 잡는다 */
-const CLOCK_RE = /^(.*?)(AM|PM)\s*(\d{1,2}):(\d{2})$/u;
+/** 헤더 줄인가 — 대괄호 한 쌍에 48자 이내 (시각 뒤에 장소가 붙는다) */
+const HEADER_RE = /^\[[^\]]{1,48}\]$/u;
+/** `2026-07-02 AM 10:10 · 훈련장` 꼴에서 시각과 그 뒤의 장소를 잡는다 */
+const CLOCK_RE = /^(.*?)(AM|PM)\s*(\d{1,2}):(\d{2})(?:\s*[·—–,-]?\s*(.+))?$/u;
 
 /**
  * 시각을 **때(part of day)로 접는다** — `2026-08-15 오후`.
@@ -27,17 +27,27 @@ const CLOCK_RE = /^(.*?)(AM|PM)\s*(\d{1,2}):(\d{2})$/u;
  *
  * 날짜는 **사람 표기**로 선다(`7월 2일 목 오전`) — ISO는 프롬프트의 문법이고 감독이
  * 읽는 문법이 아니다 (design-system.md §3 · §6). 헤더의 날짜가 ISO가 아니면 그대로다.
+ *
+ * **장소는 시각 뒤에 붙어 온다**(`[2026-07-18 AM 9:30 · 에미레이츠]` — prompts.md §1).
+ * 데이트라인은 그것을 「7월 18일 토 오전 — 에미레이츠」로 세우고, 그래서 장면의 첫
+ * 문장은 같은 장소를 다시 말하지 않는다. 프롬프트의 구분자(`·`)와 화면의 구분자(`—`)가
+ * 갈리는 것은 날짜가 ISO에서 사람 표기로 바뀌는 것과 같은 이유다 — 헤더는 모델의
+ * 문법이고 데이트라인은 감독이 읽는 문법이다.
  */
 export function partOfDayStamp(stamp: string): string {
   const m = CLOCK_RE.exec(stamp);
   if (!m) return stamp;
-  // 네 그룹은 모두 필수다 — 기본값은 색인 검사를 달래는 자리고 실제로 쓰이지 않는다
-  const [, head = "", suffix = "", hour = "0", minute = "0"] = m;
+  // 앞 네 그룹은 필수다 — 기본값은 색인 검사를 달래는 자리고 실제로 쓰이지 않는다
+  const [, head = "", suffix = "", hour = "0", minute = "0", place] = m;
   const h = Number(hour) % 12;
   const pm = suffix.toUpperCase() === "PM";
   const minutes = (pm ? h + 12 : h) * 60 + Number(minute);
   const date = head.trim();
-  return `${date ? `${humanDate(date)} ` : ""}${partOfDay(minutes)}`;
+  const where = place?.trim();
+  return [
+    `${date ? `${humanDate(date)} ` : ""}${partOfDay(minutes)}`,
+    ...(where ? [where] : []),
+  ].join(" — ");
 }
 
 /** 하루를 다섯 때로 — 새벽·아침·오전·오후·저녁·밤 */

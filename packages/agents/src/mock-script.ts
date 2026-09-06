@@ -1,7 +1,8 @@
 import type { MatchEvent, ShootoutOutcome } from "@story-fm/domain";
-import { packetTagText, shootoutTally } from "@story-fm/domain";
+import { formatScore, packetTagText, shootoutTally } from "@story-fm/domain";
 import {
   addDays,
+  BIG_CHANCE_XG,
   clockOf,
   describeNextFixture,
   expiringContracts,
@@ -210,9 +211,15 @@ function clockOfMinutes(total: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
+/**
+ * 대본이 여는 자리 — 감독의 하루는 여기서 시작한다. 실모드의 GM은 장면마다 장소를
+ * 고르지만 대본에는 고를 사실이 없으므로 한 자리를 지킨다 (prompts.md §1).
+ */
+const SCRIPT_PLACE = "감독실";
+
 /** 실모드와 같은 모양의 시점 헤더 — 이 한 줄이 코어의 시계를 민다 (agents.md §2) */
 function sceneHeader(date: string, clock: string): string {
-  return `[${date} ${formatClock(clock)}]`;
+  return `[${date} ${formatClock(clock)} · ${SCRIPT_PLACE}]`;
 }
 
 /** 이 줄이 가리키는 시점 — 넘기는 말이면 그 날짜, 아니면 오늘의 한 걸음 뒤 */
@@ -266,12 +273,13 @@ export function ordersScript(state: GameState, tool: string, said: string): Scri
 // 그것을 문장으로 옮기는 자가 없으면 경기 화면이 빈 채로 돈다. 실모드에서 이 자리를
 // 맡는 것이 캐스터 LLM이다.
 
-function scoreLine(state: GameState): string {
+/** 스코어 한 줄 — 자는 `formatScore` 하나다 (design-system.md §3) */
+function scoreLine(state: GameState, score: { home: number; away: number }): string {
   const match = state.pendingMatch;
   if (!match) return "";
   const record = state.matches.find((m) => m.id === match.matchId);
   if (!record) return "";
-  return `${teamName(record.homeTeamId)} ${match.ledger.score.home} : ${match.ledger.score.away} ${teamName(record.awayTeamId)}`;
+  return `${teamName(record.homeTeamId)} ${formatScore(score.home, score.away)} ${teamName(record.awayTeamId)}`;
 }
 
 /** 죽은 공에서 나온 슛인가 — 대본도 그 사실을 문장에 싣는다 (match.md §1.4) */
@@ -281,18 +289,71 @@ const SHOT_ORIGIN_KO: Record<string, string> = {
   penalty: "페널티킥 — ",
 };
 
-function renderEvent(state: GameState, ev: MatchEvent): string[] {
+/**
+ * **빗나간 슛의 갈래** — 장부가 슛마다 들고 있는 결과다(`shotOutcome`).
+ *
+ * 한 문형으로 뭉뚱그리면 구간의 슛 일곱 개가 같은 문장으로 선다 (prompts.md §1).
+ * 실모드에서 이 갈래를 가르는 것은 구간 대본의 슛 줄이고(`buildSegmentMessage`),
+ * 대본에는 고를 재량이 없으므로 **같은 갈래가 다시 오면 다음 꼴로 넘어간다**.
+ */
+const SHOT_KO: Record<string, ReadonlyArray<(who: string) => string>> = {
+  // 이름 뒤의 조사는 받침을 타므로 쓰지 않는다 — 자리는 「~의」와 쉼표가 연다
+  saved: [
+    (who) => `${who}의 슈팅, 골키퍼가 몸을 날려 쳐냅니다.`,
+    (who) => `${who}의 노림수 — 골키퍼 손끝에 걸립니다.`,
+  ],
+  blocked: [
+    (who) => `${who}의 슛, 수비 몸에 맞고 굴절됩니다.`,
+    (who) => `${who}의 마무리 — 앞에 선 수비가 몸으로 막아 냅니다.`,
+  ],
+  off_target: [
+    (who) => `${who}의 슛 — 골문을 크게 벗어납니다.`,
+    (who) => `${who}의 감아 찬 공, 골대 옆으로 흐릅니다.`,
+  ],
+};
+
+/**
+ * 한 문형이 한 구간에서 되풀이되지 않게 — 같은 갈래가 몇 번째로 오는지를 센다.
+ * 구간마다 새로 세므로 같은 세이브는 같은 중계를 낸다(대본은 결정적이다).
+ */
+function shapeTurns(): (key: string) => number {
+  const used = new Map<string, number>();
+  return (key) => {
+    const n = used.get(key) ?? 0;
+    used.set(key, n + 1);
+    return n;
+  };
+}
+
+function renderEvent(
+  state: GameState,
+  ev: MatchEvent,
+  /** 이 사건까지의 스코어 — 골 줄이 그 골 뒤의 값을 적는다 */
+  score: { home: number; away: number },
+  /** 이 갈래가 이 구간에서 몇 번째인가 — 문형을 돌리는 자리 */
+  turnOf: (key: string) => number,
+): string[] {
   const name = ev.actors[0] ? playerName(state, ev.actors[0]) : "";
   const from = ev.shotOrigin ? (SHOT_ORIGIN_KO[ev.shotOrigin] ?? "") : "";
   switch (ev.type) {
     case "kickoff":
       return [`@중계: 킥오프! 경기가 시작됩니다.`];
     case "goal": {
-      const cause = ev.causes[0] ? ` (${packetTagText(ev.causes[0])})` : "";
-      return [`@중계: *${ev.minute}′ — ${from}${name}, 골입니다!* ${scoreLine(state)}${cause}`];
+      // 근거는 괄호 밖에 둔다 — 괄호가 둘이면 득점자와 근거가 같은 무게로 읽힌다
+      const cause = ev.causes[0] ? ` — ${packetTagText(ev.causes[0])}` : "";
+      // 골의 꼴은 하나다 — 「골! 홈 1 – 0 원정 (득점자 34′)」 (prompts.md §1)
+      return [
+        `@중계: 골! ${scoreLine(state, score)} (${from}${name} ${ev.minute}′)${cause}`.trimEnd(),
+      ];
     }
-    case "shot":
-      return [`@중계: ${ev.minute}′ ${from}${name}의 슛 — 아깝게 빗나갑니다.`];
+    case "shot": {
+      const big = (ev.xg ?? 0) >= BIG_CHANCE_XG ? "결정적인 장면! " : "";
+      const shapes = ev.shotOutcome ? SHOT_KO[ev.shotOutcome] : undefined;
+      const shape = shapes?.[turnOf(ev.shotOutcome ?? "shot") % shapes.length];
+      return [
+        `@중계: ${ev.minute}′ ${big}${shape ? shape(`${from}${name}`) : `${from}${name}의 슛이 이어집니다.`}`,
+      ];
+    }
     case "foul":
       return [`@중계: ${ev.minute}′ ${name}의 반칙 — 주심이 점을 가리킵니다!`];
     case "chance":
@@ -304,9 +365,9 @@ function renderEvent(state: GameState, ev: MatchEvent): string[] {
     case "red_card":
       return [`@중계: *${ev.minute}′ ${name} 퇴장!*`];
     case "injury":
-      return [`@중계: ${ev.minute}′ ${name}이 쓰러집니다 — 의료진이 들어옵니다.`];
+      return [`@중계: ${ev.minute}′ ${name}, 그라운드에 쓰러집니다 — 의료진이 들어옵니다.`];
     case "full_time":
-      return [`@중계: *경기 종료 휘슬* 최종 스코어 ${scoreLine(state)}.`];
+      return [`@중계: *경기 종료 휘슬* 최종 스코어 ${scoreLine(state, score)}.`];
     case "substitution":
       return [
         `@: *교체 보드가 올라간다 — ${playerName(state, ev.actors[0] ?? "")} OUT, ${playerName(state, ev.actors[1] ?? "")} IN*`,
@@ -334,6 +395,30 @@ const SHOOTOUT_KO: Record<ShootoutOutcome, string> = {
   missed: "골문을 벗어납니다!",
 };
 
+/**
+ * 구간이 열린 자리의 스코어 — 장부는 구간이 **끝난 뒤**의 값이라 골만큼 되감는다.
+ * 실모드의 대본이 굴리기 전의 스코어를 받는 것과 같은 값이다(`buildSegmentMessage`).
+ */
+function scoreAtSegmentStart(
+  state: GameState,
+  events: readonly MatchEvent[],
+): { home: number; away: number } {
+  const score = { ...(state.pendingMatch?.ledger.score ?? { home: 0, away: 0 }) };
+  for (const ev of events) if (ev.type === "goal" && ev.team) score[ev.team] -= 1;
+  return score;
+}
+
+/**
+ * **같은 분의 슛과 선방은 한 장면이다** (prompts.md §1) — 코어는 막힌 슛 하나에
+ * 슛 줄과 선방 줄을 함께 남기므로(`pushSave`), 둘을 그대로 옮기면 한 순간이 두 문장이
+ * 된다. 슛 줄이 이미 「골키퍼가 쳐냅니다」를 말하므로 그 분의 선방 줄은 서지 않는다.
+ */
+function savesToldByShots(events: readonly MatchEvent[]): ReadonlySet<number> {
+  return new Set(
+    events.filter((ev) => ev.type === "shot" && ev.shotOutcome === "saved").map((ev) => ev.minute),
+  );
+}
+
 /** 승부차기 한 발 — 코어가 굴린 그 발을 문장으로 옮긴다 (match.md §2) */
 function shootoutLines(state: GameState): string[] {
   const kicks = state.pendingMatch?.shootout?.kicks ?? [];
@@ -345,7 +430,7 @@ function shootoutLines(state: GameState): string[] {
           `@중계: ${last.round}번째 키커 ${playerName(state, last.taker)} — ${SHOOTOUT_KO[last.outcome]}`,
         ]
       : [`@중계: *120분이 승부를 가르지 못했습니다 — 승부차기로 갑니다.*`]),
-    `@중계: *승부차기 ${tally.home} : ${tally.away}.*`,
+    `@중계: *승부차기 ${formatScore(tally.home, tally.away)}.*`,
   ];
 }
 
@@ -369,18 +454,28 @@ export function matchScript(
       ].join("\n"),
     };
   }
+  const now = state.pendingMatch?.ledger.score ?? { home: 0, away: 0 };
   // 굴린 것이 없는 턴 — 감독이 말만 건 자리다. 장부의 지금만 읽어 준다
   if (!options.operator) {
-    return { text: `@중계: ${state.pendingMatch?.ledger.minute ?? 0}′ — ${scoreLine(state)}.` };
+    return {
+      text: `@중계: ${state.pendingMatch?.ledger.minute ?? 0}′ — ${scoreLine(state, now)}.`,
+    };
   }
   const segment = state.pendingMatch?.lastSegment;
   if (!segment) return { text: shootoutLines(state).join("\n") };
-  const lines = segment.events.flatMap((ev) => renderEvent(state, ev));
+  const running = scoreAtSegmentStart(state, segment.events);
+  const told = savesToldByShots(segment.events);
+  const turnOf = shapeTurns();
+  const lines = segment.events.flatMap((ev) => {
+    if (ev.type === "save" && told.has(ev.minute)) return [];
+    if (ev.type === "goal" && ev.team) running[ev.team] += 1;
+    return renderEvent(state, ev, running, turnOf);
+  });
   const stop = STOP_KO[segment.stop];
-  if (stop) lines.push(`@중계: ${stop} ${scoreLine(state)}`);
+  if (stop) lines.push(`@중계: ${stop} ${scoreLine(state, now)}`);
   // 사건 없이 흐른 구간에도 한 줄은 선다 — 빈 장면은 턴이 취소되는 자리다
   if (lines.length === 0) {
-    lines.push(`@중계: ${state.pendingMatch?.ledger.minute ?? 0}′ — ${scoreLine(state)}.`);
+    lines.push(`@중계: ${state.pendingMatch?.ledger.minute ?? 0}′ — ${scoreLine(state, now)}.`);
   }
   return { text: lines.join("\n") };
 }

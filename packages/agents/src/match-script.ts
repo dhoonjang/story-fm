@@ -1,5 +1,6 @@
 import type { MatchEvent, ShootoutKick, ShootoutOutcome, ShotOrigin } from "@story-fm/domain";
-import { packetTagText, subCauseText } from "@story-fm/domain";
+import { formatScore, packetTagText, subCauseText } from "@story-fm/domain";
+import { BIG_CHANCE_XG } from "@story-fm/engine";
 
 /**
  * 구간 대본 — 코어가 확정한 사건을 매치 GM이 읽는 문장으로 옮긴다 (agents.md §3).
@@ -8,7 +9,8 @@ import { packetTagText, subCauseText } from "@story-fm/domain";
 const EVENT_KO: Record<MatchEvent["type"], string> = {
   kickoff: "킥오프",
   goal: "골",
-  shot: "슛(무득점)",
+  /** 무득점의 갈래는 결과가 적는다 (`SHOT_OUTCOME_KO`) — 여기서 또 적으면 문장이 하나가 된다 */
+  shot: "슛",
   save: "선방",
   chance: "찬스 무산",
   foul: "파울",
@@ -33,6 +35,19 @@ const SHOT_ORIGIN_KO: Record<ShotOrigin, string> = {
   corner: "코너에서",
   free_kick: "프리킥에서",
   penalty: "페널티킥",
+};
+
+/**
+ * **슛이 어떻게 끝났나** — 장부가 슛마다 들고 있는 사실이다(`shotOutcome`).
+ *
+ * 이 한 마디가 없으면 대본이 캐스터에게 주는 사실은 「슛」 하나뿐이라, 한 구간의 슛
+ * 일곱 개가 같은 문장으로 중계된다 (prompts.md §1 「같은 문형은 한 장면에 한 번」).
+ */
+const SHOT_OUTCOME_KO: Record<NonNullable<MatchEvent["shotOutcome"]>, string> = {
+  goal: "",
+  saved: "골키퍼가 막았다",
+  blocked: "수비 몸에 맞았다",
+  off_target: "골문을 벗어났다",
 };
 
 const STOP_KO: Record<string, string> = {
@@ -72,13 +87,31 @@ function actorsNote(ev: MatchEvent, nameOf: (id: string) => string): string {
   return ev.actors.map(nameOf).join(" → ");
 }
 
+/**
+ * **슛의 성질** — 큰 기회였나, 그리고 어떻게 끝났나.
+ *
+ * 문턱은 경기 리포트가 타임라인에 세우는 것과 **같은 상수**다(`BIG_CHANCE_XG` —
+ * match.md §8). xG 자체는 싣지 않는다: 화자가 입에 담을 수 없는 수치이고, 캐스터가
+ * 판정할 것도 없다 (agents.md §3).
+ */
+function shotNote(ev: MatchEvent): string {
+  const marks = [
+    ...((ev.xg ?? 0) >= BIG_CHANCE_XG ? ["큰 기회"] : []),
+    ...(ev.shotOutcome ? [SHOT_OUTCOME_KO[ev.shotOutcome]] : []),
+  ].filter((mark) => mark.length > 0);
+  return marks.length > 0 ? ` — ${marks.join(", ")}` : "";
+}
+
 /** 구간 대본 → 캐스터 입력. 선수는 이름으로 준다 — id를 주면 중계에 id가 흘러나온다. */
 export function buildSegmentMessage(
   events: MatchEvent[],
   stop: string,
   nameOf: (id: string) => string,
   sideName: (side: "home" | "away") => string,
+  /** 구간이 열린 자리의 스코어 — 골 줄이 **그 골 뒤의** 스코어를 적는다 */
+  scoreBefore: { home: number; away: number },
 ): string {
+  const score = { ...scoreBefore };
   const lines = events.map((ev) => {
     const who = actorsNote(ev, nameOf);
     const team = ev.team ? `${sideName(ev.team)} ` : "";
@@ -91,7 +124,15 @@ export function buildSegmentMessage(
     const detail = ev.detail ? ` · ${ev.detail}` : "";
     const origin = ev.shotOrigin ? SHOT_ORIGIN_KO[ev.shotOrigin] : "";
     const from = origin ? `${origin} ` : "";
-    return `- ${ev.minute}′ ${team}${from}${EVENT_KO[ev.type]}${who ? `: ${who}` : ""}${cause}${detail}`;
+    // 골 줄은 **그 골이 들어간 뒤의** 스코어를 두 이름과 함께 단다 — 중계의 골 문형이
+    // 이 한 줄에서 나오고(prompts.md §1), 구간에 골이 둘이면 중간 스코어를 중계가
+    // 세지 않아도 된다. 자는 `formatScore` 하나다 (design-system.md §3)
+    if (ev.type === "goal" && ev.team) score[ev.team] += 1;
+    const mark =
+      ev.type === "goal"
+        ? ` (${sideName("home")} ${formatScore(score.home, score.away)} ${sideName("away")})`
+        : shotNote(ev);
+    return `- ${ev.minute}′ ${team}${from}${EVENT_KO[ev.type]}${mark}${who ? `: ${who}` : ""}${cause}${detail}`;
   });
   return [
     "<segment>",
