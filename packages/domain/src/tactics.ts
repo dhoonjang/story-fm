@@ -631,11 +631,33 @@ export function snapToBoard(p: BoardPoint): BoardPoint {
 }
 
 /**
+ * 실제 경기장의 크기 — **길이 105m × 폭 68m** (FIFA 권장 규격).
+ *
+ * 판 위 좌표는 판 크기 대비 백분율이라 **판의 비율이 곧 선수 사이의 거리**다.
+ * 화면이 판을 이 비율보다 눕히면 측면이 실제보다 멀고 앞뒤가 가까워져, 감독이
+ * 눈으로 재는 간격이 코어가 계산한 간격과 달라진다.
+ * 화면 쪽 짝은 `--pitch-ratio`·`--pitch-ratio-portrait`
+ * (`apps/web/app/styles/shell.css` `:root`).
+ */
+export const PITCH_METRES = { length: 105, width: 68 } as const;
+
+/**
+ * 눕힌 판의 가로:세로 (≈1.544). 세로 1%가 가로 1%의 몇 분의 일인지이기도 해서,
+ * 화면이 두 축의 거리를 같은 자로 재려면 한쪽을 이 값으로 되짚는다
+ * (`MARKER_GAP` — `apps/web/lib/pitch-layout.ts`).
+ */
+export const PITCH_ASPECT = PITCH_METRES.length / PITCH_METRES.width;
+
+/**
  * 전술판 칩의 크기 (보드 대비 %) — **겹침 판정의 기준**이다.
  * CSS `.pitch-chip`의 실제 크기와 함께 움직여야 한다: 여기 값이 실제보다 작으면
  * 화면에서 카드가 겹치고, 크면 붙여 놓을 수 있는 자리가 과하게 좁아진다.
+ *
+ * 폭은 판 폭에 비례하는 값(`13cqw`)이라 판의 비율과 무관하지만, **높이는 픽셀로
+ * 고정**이라 판이 세로로 길어지면 같은 칩이 더 작은 백분율이 된다 — 판이 실제
+ * 비율(`PITCH_ASPECT`)로 서면서 3:4 시절의 8이 7이 됐다(8 × 1.333 ÷ 1.544).
  */
-export const CHIP_SIZE = { w: 14, h: 8 } as const;
+export const CHIP_SIZE = { w: 14, h: 7 } as const;
 
 /** 겹침 해소 반복 상한 — 11칩이면 몇 번이면 수렴한다 (무한 루프 방지용 상한) */
 const SEPARATE_PASSES = 30;
