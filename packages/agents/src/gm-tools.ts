@@ -1285,7 +1285,7 @@ export function buildToolSpecs(
         // 금액을 말하지 않았으면 기본값(갈래의 자·주급 기대치)으로 본다
         const suggested = suggestTerms(state, player.id);
         if (!suggested) {
-          return { ok: false, message: `"${input.playerId}" 선수를 찾지 못했습니다` };
+          return { ok: false, message: `“${input.playerId}” 선수를 찾지 못했습니다` };
         }
         const fee = quotedFee(state, player, input.kind);
         // 감독이 부른 구단 이름이 그대로 실려 온다 (core/team-ref.ts)

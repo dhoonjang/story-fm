@@ -170,7 +170,7 @@ export function hasOps(ops: OpsInput): boolean {
 
 /** 옮기지 못한 말이 감독에게 돌아가는 한 줄 — **문구는 여기 하나다** */
 export function unresolvedNote(text: string): string {
-  return `옮기지 못한 지시: "${text}"`;
+  return `옮기지 못한 지시: “${text}”`;
 }
 
 /**

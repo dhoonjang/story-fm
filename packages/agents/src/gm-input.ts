@@ -58,6 +58,7 @@ import {
   playerName,
   recordBreakLine,
   recordBreaksOf,
+  savedClubProfile,
   scoutingSummary,
   scoutReportLine,
   speakerCues,
@@ -98,6 +99,7 @@ import {
   fatigueBand,
   fatigueOf,
   formatMoney,
+  formatScore,
   matchupText,
   mediaFactText,
   normalizePacket,
@@ -223,9 +225,20 @@ export function describeClub(state: GameState): string | null {
   const teamId = managedTeamId(state);
   if (teamId === null) return null;
   const honours = clubHonoursLine(state, teamId);
-  return honours === null
+  /**
+   * **홈구장의 이름** — 장면 헤더의 장소 필드가 이 이름을 부른다 (prompts.md §1).
+   * 없으면 GM이 구장 이름을 지어내고, 재정 뷰가 부르는 이름과 갈린다. 세이브에
+   * 실린 값만 싣는다 — 카탈로그 폴백(「홈 구장」)은 이름이 아니라 자리 표시다.
+   * 보드가 새 구장을 올려 줄 때만 바뀌므로 캐시 프리픽스는 그때만 깨진다.
+   */
+  const stadium = savedClubProfile(state, teamId)?.stadium.trim();
+  const body = [
+    ...(honours === null ? [] : [`역대: ${honours}`]),
+    ...(stadium ? [`홈구장: ${stadium}`] : []),
+  ];
+  return body.length === 0
     ? `<club name="${teamName(teamId)}" />`
-    : [`<club name="${teamName(teamId)}">`, `역대: ${honours}`, `</club>`].join("\n");
+    : [`<club name="${teamName(teamId)}">`, ...body, `</club>`].join("\n");
 }
 
 /**
@@ -326,7 +339,7 @@ export function buildMatchBrief(state: GameState): string {
   const said = state.chat
     .filter((t) => t.inMatch !== true && t.role === "user")
     .slice(-MATCH_BRIEF_TURNS)
-    .map((t) => `- "${t.text}"`);
+    .map((t) => `- “${t.text}”`);
   if (said.length === 0) return "";
   return [`<pre_match>`, ...said, `</pre_match>`].join("\n");
 }
@@ -1552,7 +1565,7 @@ export function buildStandingBlock(
               `${playerName(state, a.playerId)}(${a.position}` +
               `${a.roleId ? ` ${a.roleId}` : ""}` +
               `${a.directive ? ` [${a.directive.kind}]` : ""}` +
-              `${a.instruction && !a.directive ? ` "말로만: ${a.instruction}"` : ""})`,
+              `${a.instruction && !a.directive ? ` “말로만: ${a.instruction}”` : ""})`,
           )
           .join(", ")}`
       : `개인 지시·역할: 없음`,
@@ -1653,7 +1666,8 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
   const subLimits = subLimitsOf(ledger.phase);
   return [
     `<ledger>`,
-    `스코어 ${ledger.score.home}:${ledger.score.away} · ${ledger.minute}′ · ${ledger.phase}`,
+    // 스코어의 자는 하나다 — 모델이 되받아 쓰는 자리라 화면과 같은 표기로 싣는다
+    `스코어 ${formatScore(ledger.score.home, ledger.score.away)} · ${ledger.minute}′ · ${ledger.phase}`,
     `홈 온필드: ${withNames(ledger.home.onPitch)}`,
     `홈 벤치: ${withNames(ledger.home.bench)} (교체 ${ledger.home.subsUsed}/${subLimits.maxSubs}, 기회 ${ledger.home.subWindows}/${subLimits.maxSubWindows})`,
     `어웨이 온필드: ${withNames(ledger.away.onPitch)}`,
@@ -1669,10 +1683,13 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
 }
 
 /**
- * 장면 헤더 — 모델이 첫 줄에 적는 시점. 시계를 움직이는 유일한 입구다.
- * 일상 `[2026-07-13 오후]` · 경기 `[67']`. 형식이 어긋나면 시간이 멈춘다(로그로 드러낸다).
+ * 장면 헤더 — 모델이 첫 줄에 적는 시점과 장소. 시계를 움직이는 유일한 입구다.
+ * 일상 `[2026-07-13 오후 · 훈련장]` · 경기 `[67']`. 형식이 어긋나면 시간이 멈춘다
+ * (로그로 드러낸다).
  * ⚠️ 날짜만 필수 — 시:분을 필수로 좁히면 `[2026-07-20 월요일 오전]`을 못 잡아
- * 시계가 며칠씩 멈춘다.
+ * 시계가 며칠씩 멈춘다. **장소도 같은 이유로 흘려 읽는다**: 시계는 날짜가 미는 것이고
+ * 장소는 화면이 데이트라인으로 세우는 것이라(`partOfDayStamp`), 장소가 없거나
+ * 구분자가 다르다고 그 턴의 시계를 멈출 이유가 없다 (prompts.md §1).
  */
 const SCENE_HEADER_RE = new RegExp(
   [
@@ -1680,6 +1697,7 @@ const SCENE_HEADER_RE = new RegExp(
     /(?:\s*[,·]?\s*\(?\s*[월화수목금토일](?:요일)?\s*\)?)?/, // 요일 (수) · 월요일
     /(?:\s*[,·]?\s*(AM|PM|오전|오후|아침|점심|저녁|밤|새벽))?/, // 시간대
     /(?:\s*(\d{1,2}):(\d{2}))?/, // 시각
+    /(?:\s*[·—–,-]?\s*[^\]]*)?/, // 장소 — 구분자가 무엇이든, 없어도 읽는 것은 화면이다
     /\s*\]/,
   ]
     .map((r) => r.source)

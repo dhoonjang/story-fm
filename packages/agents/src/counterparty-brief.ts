@@ -92,7 +92,7 @@ function describeVoices(voices: readonly CounterpartyVoice[]): string[] {
   if (voices.length === 0) return [];
   return [
     `<voices>`,
-    ...voices.map((v) => `${v.speaker} "${v.name}" — ${v.answers.join(" · ")}`),
+    ...voices.map((v) => `${v.speaker} “${v.name}” — ${v.answers.join(" · ")}`),
     `</voices>`,
   ];
 }
