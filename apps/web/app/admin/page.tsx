@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAdminCatalog } from "./catalog-store";
 import { CupsPanel } from "./cups-panel";
 import { LeaguesPanel } from "./leagues-panel";
+import { PalettePanel } from "./palette-panel";
 import { PlayersPanel } from "./players-panel";
 import { TeamsPanel } from "./teams-panel";
 import { UsagePanel } from "./usage-panel";
@@ -17,6 +18,9 @@ import { UsagePanel } from "./usage-panel";
  * 편집은 각 패널이 맡는다. 탭을 옮기면 패널은 언마운트되지만 카탈로그는 여기
  * 남아 있어 다시 받지 않는다 (`catalog-store.ts`).
  *
+ * 「팔레트」는 층이 아니라 **팀 층을 읽기만 하는 시트**다 — 구단 색 규칙을 전체
+ * 팔레트를 상대로 검수하는 자리라 편집 손잡이를 갖지 않는다 (design-system.md §2).
+ *
  * ⚠️ **계측 탭만 카탈로그를 쓰지 않는다** — 세션 장부는 서버 쪽에서 저 혼자
  * 움직이므로(턴을 돌 때마다) 그 패널이 제 손으로 받는다 (models.md §5-1).
  */
@@ -26,6 +30,7 @@ const TABS = [
   { key: "teams", label: "팀" },
   { key: "leagues", label: "리그" },
   { key: "cups", label: "컵" },
+  { key: "palette", label: "팔레트" },
   { key: "usage", label: "계측" },
 ] as const;
 
@@ -120,6 +125,7 @@ export default function AdminPage() {
             onError={setErr}
           />
         )}
+        {tab === "palette" && <PalettePanel teams={catalog.teams} />}
         {tab === "usage" && <UsagePanel onError={setErr} />}
       </div>
     </main>

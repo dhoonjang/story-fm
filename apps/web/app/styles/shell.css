@@ -757,6 +757,113 @@ textarea {
   background: color-mix(in srgb, var(--loss) 12%, var(--panel));
   color: var(--loss);
 }
+/**
+ * ── 팔레트 탭 — 96팀의 색을 한 시트에 세운다 (design-system.md §2 「검수」).
+ *
+ * 견본은 저마다 **실제로 설 표면** 위에 앉는다: 밝힘은 `--panel-2`, 워시와 플랭크는
+ * `--panel`. 표 배경 위에 대충 세우면 눈으로 본 것과 옆 칸의 대비 수치가 갈린다.
+ * 색 값은 전부 데이터에서 인라인으로 온다 — 이 파일에 구단 hex는 없다.
+ */
+.palette-list {
+  font-size: var(--fs-sm);
+}
+.palette-list td {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.palette-list code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-2);
+}
+/* 리그 머리 — 표를 가로지르는 섹션 라벨. 행이 아니라 구획이라 밑선이 없다 */
+.palette-group td {
+  padding: 14px 12px 4px;
+  border-bottom: none;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.palette-tag {
+  margin-left: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+.palette-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.palette-swatch i {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--r-xs);
+}
+.palette-none {
+  color: var(--text-3);
+}
+.palette-hi {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* 밝힘 견본 — 가는 자리가 실제로 서는 면 위의 3px 레일과 점 (§2 「--club-hi의 규칙」) */
+.palette-rail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 56px;
+  height: 24px;
+  padding: 0 6px;
+  background: var(--panel-2);
+  border-radius: var(--r-xs);
+}
+.palette-rail i {
+  flex: 1;
+  height: 3px;
+}
+.palette-rail b {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-pill);
+}
+/* 워시 견본 — 밑색 16%를 --panel에 섞은 면 위의 글자 1층 (§2 충돌 규칙 3) */
+.palette-wash {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--r-xs);
+  color: var(--text);
+  font-size: var(--fs-2xs);
+}
+/* 플랭크 견본 — 스코어보드의 6px 두 줄 */
+.palette-flank {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+}
+.palette-flank i {
+  width: 6px;
+  height: 20px;
+}
+/* 문턱 아래 · 목표에 못 미침 — 검수가 걸려야 하는 두 자리 */
+.palette-under {
+  color: var(--loss);
+  font-weight: 600;
+}
+.palette-near {
+  color: var(--warn);
+}
+/* 도구 줄 안의 세그먼트 — 아래 여백은 줄 자신이 갖는다 */
+.admin-toolbar .side-tabs {
+  margin-bottom: 0;
+}
+
 /* ── 계측 탭 — 표는 .admin-list를 그대로 쓰고, 여기 있는 것은 그 위의 칩과 강조뿐 */
 .usage-head {
   display: flex;
