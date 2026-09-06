@@ -13,7 +13,7 @@ import type {
   TacticAssignment,
   TacticsSpec,
 } from "@story-fm/domain";
-import { isReserveMatch } from "@story-fm/domain";
+import { isReserveMatch, parseScorerEntry } from "@story-fm/domain";
 import {
   addToSeasonStat,
   ageOf,
@@ -62,7 +62,7 @@ import {
   type SegmentPlan,
   type SegmentStop,
 } from "@story-fm/sim";
-import { matchesOn } from "../competition/calendar";
+import { DEFAULT_KICKOFF, matchesOn } from "../competition/calendar";
 import { applyMatchFinance } from "../club/finance";
 import { careerTotalsOf, settleMilestones } from "../squad/career";
 import { clampForm, formDeltaFromMatch } from "../squad/form";
@@ -76,6 +76,7 @@ import { recallRole } from "../commands/role-memory";
 import { buildMatchPress, openPress } from "../club/press";
 import { easeProneness, openInjuryFor, pronenessOf } from "../squad/injury";
 import { serveSuspensions, simSquadOf, simulateOtherMatches } from "../core/tick";
+import { quickSimKeyOf, quickSimOptionsOf, quickSimulate } from "./quick-sim";
 import {
   activeSuspension,
   assignmentsOf,
@@ -597,6 +598,49 @@ function restoreTactics(state: GameState): string | null {
   return changed ? "경기 중 조정한 전술·개인 지시를 킥오프 전으로 되돌렸습니다" : null;
 }
 
+/**
+ * 우리와 **같은 날 같은 시각에 킥오프하는 경기**의 골 시각 — 라이브 스코어의 원본
+ * (match.md §7 「같은 시각에 킥오프한 경기」).
+ *
+ * 킥오프 순서의 규칙이 막는 것은 결과를 미리 아는 것이지 옆 구장을 보는 것이 아니다.
+ * 우리보다 먼저 시작한 경기는 이미 결과가 있고(`simulateOtherMatches`), 늦게 시작하는
+ * 경기는 아직 아무 일도 없다 — 그래서 굴릴 것은 **정확히 같은 시각**의 미진행 경기뿐이다.
+ *
+ * ⚠️ 채널과 경기의 사실은 `quickSimKeyOf`·`quickSimOptionsOf`가 조립한다. 종료 뒤
+ * 그 경기를 장부에 적는 굴림이 같은 함수를 읽으므로 **여기서 본 스코어가 그대로
+ * 결과가 된다** — 두 곳에서 각자 키를 이으면 45분에 1–0으로 보던 경기가 0–2로 적힌다.
+ */
+function rollConcurrentMatches(
+  state: GameState,
+  ours: MatchRecord,
+): NonNullable<PendingMatch["otherScores"]> {
+  const kickoff = ours.time ?? DEFAULT_KICKOFF;
+  const rows: NonNullable<PendingMatch["otherScores"]> = [];
+  for (const match of matchesOn(state.matches, state.date)) {
+    if (match.result || match.id === ours.id) continue;
+    // 2군 리그는 조용히 돈다 — 옆 구장의 스코어가 아니다 (match.md §7)
+    if (isReserveMatch(match)) continue;
+    if ((match.time ?? DEFAULT_KICKOFF) !== kickoff) continue;
+    const result = quickSimulate(
+      simSquadOf(state, match.homeTeamId, match.competitionId),
+      simSquadOf(state, match.awayTeamId, match.competitionId),
+      state.seed,
+      quickSimKeyOf(state.season, match),
+      quickSimOptionsOf(match),
+    );
+    const minutes = result.goalMinutes;
+    const goals = result.scorers
+      .map((entry, i) => ({
+        minute: minutes[i] ?? 0,
+        // 편이 없는 줄은 없다(간이 시뮬이 늘 붙인다) — 그래도 홈으로 읽어 칸을 비우지 않는다
+        side: parseScorerEntry(entry).side ?? ("home" as MatchSide),
+      }))
+      .sort((a, b) => a.minute - b.minute);
+    rows.push({ matchId: match.id, goals });
+  }
+  return rows;
+}
+
 export function startMatch(state: GameState): FlowResult {
   if (state.phase === "match") return { ok: false, message: "이미 경기가 진행 중입니다" };
   if (state.phase !== "matchday") {
@@ -657,6 +701,11 @@ export function startMatch(state: GameState): FlowResult {
     casterHistory: [],
     servingSuspension: serving,
     tacticsBefore: snapshotTactics(state),
+    /**
+     * 옆 구장 — **같은 시각에 킥오프하는 경기의 골 시각**을 여기서 한 번 굴려 둔다.
+     * 뷰가 우리 장부의 분으로 자르므로 진행만 보이고 결과는 미리 새지 않는다 (§7).
+     */
+    otherScores: rollConcurrentMatches(state, match),
   };
   const packet = buildPacketFor(state, opening, match, true);
   state.pendingMatch = { ...opening, packet };

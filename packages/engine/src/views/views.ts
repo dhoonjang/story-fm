@@ -6,6 +6,7 @@ import type {
   ClubColours,
   EdgeSize,
   LedgerEntry,
+  MatchEvent,
   MatchEventType,
   MatchRecord,
   MatchSide,
@@ -31,6 +32,7 @@ import type {
 import {
   BOARD_CONDITION_LABEL,
   BOARD_REQUEST_LABEL,
+  PHASE_END,
   SET_PIECE_ROLES,
   SET_PIECE_ROUTINE_KEYS,
   STAFF_ROLES,
@@ -137,6 +139,7 @@ import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { euroCompetitionOf } from "../competition/europe";
 import { careerSeasonRowsOf, foldCareer, type CareerTotals } from "../squad/career";
 import { formAngle, formLabel, formTone } from "../squad/form";
+import { squadRatingsOf } from "../squad/depth";
 import { leaderGroupOf } from "../squad/hierarchy";
 import { ratingTone, type RatingTone } from "../match/ratings";
 import { buildOpponentReport, type AbsentReason } from "../match/preview";
@@ -1024,6 +1027,12 @@ export interface CalendarEntryView {
     venue: "home" | "away" | "neutral";
     /** 우리 관점 스코어 (`formatScore`) — 미진행이면 null */
     score: string | null;
+    /**
+     * 상대의 **전력 한 숫자** — 스쿼드 상위 열한 명의 평균 OVR
+     * (`squadRating` → docs/data/team.md §2.2). 우리 팀의 값은 모든 줄에서 같아
+     * 줄마다 적을 이유가 없으므로 상대만 싣는다. 스쿼드가 빈 팀은 `null`이다.
+     */
+    opponentStrength: number | null;
   } | null;
   /**
    * 컵 조각 — 추첨(`draw`)과 예정 라운드(`cup-round`)가 함께 쓴다.
@@ -1057,6 +1066,23 @@ export interface CompetitionMatchView {
   /** 우리 경기의 결과 (아니면 null) */
   win: "W" | "D" | "L" | null;
   neutral: boolean;
+  /**
+   * 양 팀의 **전력 한 숫자** — 스쿼드 상위 열한 명의 평균 OVR
+   * (`squadRating` → docs/data/team.md §2.2). 스쿼드가 빈 팀은 `null`이다.
+   *
+   * 난이도를 색 레일로만 말하면 색을 못 가르는 감독에게는 없는 정보이고, 세 단계의
+   * 레일은 78과 74의 차이를 담지 못한다. 그래서 숫자를 그대로 싣는다.
+   */
+  strength: { home: number; away: number } | null;
+  /**
+   * **옆 구장의 진행** — 우리와 같은 시각에 킥오프해 지금 굴러가고 있는 경기
+   * (match.md §7 「같은 시각에 킥오프한 경기」). 결과가 이미 있는 경기와 우리보다
+   * 늦게 시작하는 경기는 `null`이다.
+   *
+   * 골은 킥오프에 한 번 굴려 둔 것(`PendingMatch.otherScores`)에서 **우리 장부의 분
+   * 이하**만 센다 — 감독은 진행을 보고 결과를 미리 알지 않는다.
+   */
+  live: { minute: number; home: number; away: number } | null;
 }
 
 /** 라운드/단계 하나 — 대회 일정의 묶음 단위 */
@@ -1582,6 +1608,15 @@ export interface MatchView {
   }[];
   /** 90분 기대 득점 — 지금 판세의 요약 숫자 */
   expectedGoals: { home: number; away: number };
+  /**
+   * **누적 xG의 계단선** — 요약 숫자 둘이 못 말하는 「언제 기울었나」 (match.md §8).
+   *
+   * 슛 하나마다 한 점이고 값은 그 시각까지의 **누적**이다. 장부의 슛·골 사건이 이미
+   * 그 장면의 xG를 싣고 있어(§4) 여기서 시간순으로 접기만 한다 — 구간마다 배열을
+   * 따로 쌓으면 같은 사실이 두 벌이 되어 조용히 갈린다. xG를 싣지 않는 옛 세이브의
+   * 장부에서는 **빈 배열**이고 화면은 자리를 비운다.
+   */
+  xgTimeline: { minute: number; home: number; away: number }[];
   /**
    * 판세 격자 — 세 전선을 좌·중·우로 쪼갠 9칸.
    *
@@ -2265,6 +2300,77 @@ function conditionShown(
  * 채팅은 흘러가지만 판세는 남아 있어야 한다. 감독이 정지점에서 보고 싶은 건
  * "어디가 밀리나 · 무엇이 통하나 · 누구를 빼야 하나" 셋이다.
  */
+/**
+ * 누적 xG의 계단선 — **장부가 원본이다** (match.md §8).
+ *
+ * 슛과 골 사건이 각자 그 장면의 xG를 싣고 있으므로(`MatchEvent.xg`) 시간순으로
+ * 누적하면 그것이 곧 계단선이다. 값을 싣지 않는 옛 세이브의 사건은 지나가고, 아무
+ * 사건도 값을 싣지 않으면 빈 배열이 나가 화면이 자리를 비운다.
+ *
+ * 소수는 둘째 자리까지 — 리포트의 xG와 같은 자다(match.md §8). 자리수가 갈리면 같은
+ * 경기의 xG가 화면마다 다른 숫자로 보인다.
+ */
+function xgTimelineOf(events: readonly MatchEvent[]): MatchView["xgTimeline"] {
+  const points: MatchView["xgTimeline"] = [];
+  let home = 0;
+  let away = 0;
+  for (const event of events) {
+    if (event.xg === undefined) continue;
+    if (event.team === "away") away += event.xg;
+    else home += event.xg;
+    points.push({ minute: event.minute, home: roundTo(home, 2), away: roundTo(away, 2) });
+  }
+  return points;
+}
+
+/**
+ * 옆 구장의 진행 — 경기 id → 지금까지의 스코어 (match.md §7).
+ *
+ * 킥오프에 한 번 굴려 둔 골 시각(`PendingMatch.otherScores`)에서 **우리 장부의 분
+ * 이하**만 센다. 우리 경기가 연장으로 가면 그쪽은 이미 끝났으므로 분은 정규 90′에서
+ * 멎는다 — 「연장 105′」이라고 적으면 끝난 경기가 아직 뛰고 있는 것처럼 읽힌다.
+ */
+function liveScoresOf(state: GameState): Map<string, NonNullable<CompetitionMatchView["live"]>> {
+  const live = new Map<string, NonNullable<CompetitionMatchView["live"]>>();
+  const pending = state.pendingMatch;
+  if (!pending || state.phase !== "match") return live;
+  /**
+   * 입장 전에도 문을 따로 두지 않는다 — 그때 장부의 분은 0이라 아무 골도 실리지
+   * 않는다. 분이 이미 하는 일을 조건으로 한 번 더 쓰면, 그 조건을 지나지 않는
+   * 호출부(mock GM·테스트)에서만 옆 구장이 조용해진다.
+   */
+  const minute = Math.min(pending.ledger.minute, PHASE_END.second_half);
+  for (const row of pending.otherScores ?? []) {
+    const played = row.goals.filter((g) => g.minute <= minute);
+    live.set(row.matchId, {
+      minute,
+      home: played.filter((g) => g.side === "home").length,
+      away: played.filter((g) => g.side === "away").length,
+    });
+  }
+  return live;
+}
+
+/**
+ * 팀 하나의 전력 숫자 — 정수로 자른 `squadRating` (docs/data/team.md §2.2).
+ * 스쿼드가 빈 팀(어드민이 막 만든 클럽)은 `null`이라 화면이 자리를 비운다.
+ */
+function strengthOf(ratings: ReadonlyMap<string, number>, teamId: string): number | null {
+  const value = ratings.get(teamId);
+  return value === undefined || value <= 0 ? null : Math.round(value);
+}
+
+/** 한 대진의 두 숫자 — 한쪽이라도 없으면 칸을 세우지 않는다 (반쪽 비교는 오독을 만든다) */
+function strengthPairOf(
+  ratings: ReadonlyMap<string, number>,
+  homeTeamId: string,
+  awayTeamId: string,
+): CompetitionMatchView["strength"] {
+  const home = strengthOf(ratings, homeTeamId);
+  const away = strengthOf(ratings, awayTeamId);
+  return home === null || away === null ? null : { home, away };
+}
+
 function buildMatchView(state: GameState): MatchView | null {
   const pending = state.pendingMatch;
   if (!pending || state.phase !== "match") return null;
@@ -2498,6 +2604,7 @@ function buildMatchView(state: GameState): MatchView | null {
         };
       }),
     expectedGoals: { ...packet.guide.expectedGoals },
+    xgTimeline: xgTimelineOf(ledger.events),
     /**
      * 자리는 홈 기준 그대로 두고 **값만 우리 편으로 접는다.**
      *
@@ -2727,7 +2834,18 @@ function competitionSeasonsOf(state: GameState, competitionId: string): Competit
   return seasons;
 }
 
-function buildCompetitionView(state: GameState, competitionId: string): CompetitionView {
+function buildCompetitionView(
+  state: GameState,
+  competitionId: string,
+  /**
+   * 전 팀의 전력 한 숫자 — 호출부가 **한 번 훑어** 세운 것을 받는다
+   * (`squadRatingsOf` → docs/data/team.md §2.2). 대회마다 다시 세우면 그 자리가
+   * 「대회 수 × 선수 수」가 된다.
+   */
+  squadRatings: ReadonlyMap<string, number>,
+): CompetitionView {
+  // 옆 구장 — 경기 중에만 값이 있다 (match.md §7)
+  const live = liveScoresOf(state);
   const cup = isCup(competitionId);
   const matches = state.matches
     .filter((m) => m.competitionId === competitionId && m.season === state.season)
@@ -2768,6 +2886,8 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
       ours: m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
       win: outcomeFor(m, state.userTeamId),
       neutral: m.neutral === true,
+      strength: strengthPairOf(squadRatings, m.homeTeamId, m.awayTeamId),
+      live: live.get(m.id) ?? null,
     });
     if (m.date < round.date) round.date = m.date;
     grouped.set(key, round);
@@ -3648,6 +3768,13 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       a.role === b.role ? b.overall - a.overall : roleRank[a.role] - roleRank[b.role],
     );
 
+  /**
+   * 전 팀의 전력 한 숫자 — **한 번만 훑는다** (docs/data/team.md §2.2). 일정 행과
+   * 달력의 경기 줄이 같은 지도를 읽으므로 같은 상대가 두 화면에서 다른 숫자로
+   * 보이지 않는다.
+   */
+  const squadRatings = squadRatingsOf(state);
+
   // 대회 탭 — 우리 리그 → 우리가 나가는 대항전 → 우리 나라 국내 컵 (명성 순)
   // 리그는 **지금 뛰는 리그**다 — 강등되면 카탈로그와 갈린다 (`promotion.ts`)
   const ourLeague = leagueOfTeamIn(state, userTeamId);
@@ -3656,7 +3783,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     ourLeague,
     ...(ourEuroCup ? [ourEuroCup] : []),
     ...domesticCupsOf(userTeamId).map((c) => c.id),
-  ].map((id) => buildCompetitionView(state, id));
+  ].map((id) => buildCompetitionView(state, id, squadRatings));
   /**
    * 다음 경기 — **지금 치르는 경기는 빼고 본다.**
    *
@@ -3815,6 +3942,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
                   home ? m.result.awayGoals : m.result.homeGoals,
                 )
               : null,
+            opponentStrength: strengthOf(squadRatings, home ? m.awayTeamId : m.homeTeamId),
           },
           cup: null,
         };

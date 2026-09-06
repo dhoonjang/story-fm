@@ -1619,3 +1619,52 @@ describe("경기 전 상대 분석 (match.md §1.8)", () => {
     expect(buildOfficeViews(state).competitions.preview).toBeNull();
   });
 });
+
+/**
+ * 옆 구장 — **라이브 스코어와 장부에 적히는 결과는 같은 숫자여야 한다**
+ * (docs/simulation/match.md §7 「같은 시각에 킥오프한 경기」).
+ *
+ * 킥오프의 굴림(`startMatch`)과 종료 뒤의 굴림(`simulateOtherMatches`)이 서로 다른
+ * 함수 안에 있으므로, 난수 채널을 만드는 자리가 갈리는 순간 45분에 1–0으로 보던
+ * 경기가 0–2로 적힌다. 그 등식이 조용히 깨지는 것을 여기서 잡는다.
+ */
+describe("같은 시각 타 경기의 라이브 스코어 (match.md §7)", () => {
+  it("킥오프에 굴린 골 시각이 종료 뒤 장부의 결과와 같다", () => {
+    const state = atMatchday();
+    let rolled: NonNullable<GameState["pendingMatch"]>["otherScores"] = [];
+    let ourKickoff = "";
+    playMockMatch(state, (mid) => {
+      rolled = mid.pendingMatch?.otherScores ?? [];
+      const ours = mid.matches.find((m) => m.id === mid.pendingMatch?.matchId);
+      ourKickoff = ours?.time ?? "";
+    });
+
+    // 전제 — 우리와 같은 시각에 킥오프한 경기가 있어야 등식을 잴 것이 있다
+    expect(rolled.length, `${ourKickoff} 킥오프에 동시 경기가 없다`).toBeGreaterThan(0);
+
+    for (const row of rolled) {
+      const match = state.matches.find((m) => m.id === row.matchId);
+      const result = match?.result;
+      expect(result, `${row.matchId}가 종료 뒤에도 굴려지지 않았다`).toBeTruthy();
+      if (!result) continue;
+      const goalsOf = (side: "home" | "away") => row.goals.filter((g) => g.side === side).length;
+      expect([goalsOf("home"), goalsOf("away")]).toEqual([result.homeGoals, result.awayGoals]);
+      // 분까지 같아야 한다 — 스코어만 같고 분이 다르면 라이브가 엉뚱한 때에 오른다
+      expect([...row.goals.map((g) => g.minute)].sort((a, b) => a - b)).toEqual(
+        [...(result.goalMinutes ?? [])].sort((a, b) => a - b),
+      );
+    }
+  });
+
+  it("우리보다 늦게 킥오프하는 경기는 굴리지 않는다", () => {
+    const state = atMatchday();
+    expect(startMatch(state).ok).toBe(true);
+    const pending = state.pendingMatch!;
+    const ours = state.matches.find((m) => m.id === pending.matchId)!;
+    for (const row of pending.otherScores ?? []) {
+      const match = state.matches.find((m) => m.id === row.matchId)!;
+      expect(match.time).toBe(ours.time);
+      expect(match.date).toBe(ours.date);
+    }
+  });
+});

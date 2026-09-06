@@ -56,7 +56,6 @@ import { advanceDomesticCups } from "../competition/domestic-cup";
 import { hasCups } from "../world/scope";
 import { driftFamiliarity, tickOtherClubs } from "../squad/other-clubs";
 import { applyResultMood } from "../squad/slump";
-import { derbyForMatch } from "../club/derby";
 import { advanceEuroKnockouts } from "../competition/euro-knockout";
 import { advanceSuperCups } from "../competition/super-cup";
 import { applyMonthlyDevelopment } from "../squad/development";
@@ -120,7 +119,14 @@ import {
 // 서열대로 받고 있는가를 묻는 곡선 — 재계약·이적이 읽는 것과 같은 자다
 import { wageByRating } from "../market/market";
 import { tickInterests } from "../market/interest";
-import { playedIn, quickSimulate, type SimSquad } from "../match/quick-sim";
+import { derbyForMatch } from "../club/derby";
+import {
+  playedIn,
+  quickSimKeyOf,
+  quickSimOptionsOf,
+  quickSimulate,
+  type SimSquad,
+} from "../match/quick-sim";
 import { managerTacticsOf } from "../match/manager-tactics";
 import { recordCard } from "../match/discipline";
 import { runAiTransfers } from "../market/ai-market";
@@ -1518,19 +1524,19 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       home: simSquadOf(state, match.homeTeamId, match.competitionId),
       away: simSquadOf(state, match.awayTeamId, match.competitionId),
     };
+    // 라커룸이 읽는 열기 — 시뮬 입력은 `quickSimOptionsOf`가 같은 표에서 세운다
     const derby = derbyForMatch(match);
+    /**
+     * 채널과 경기의 사실(중립·더비)을 조립하는 자리는 한 곳이다 — 킥오프에 굴리는
+     * 라이브 스코어가 같은 함수를 읽어야 45분에 본 스코어가 여기 그대로 적힌다
+     * (match.md §7 「같은 시각에 킥오프한 경기」).
+     */
     const result = quickSimulate(
       squads.home,
       squads.away,
       state.seed,
-      `${state.season}:${match.competitionId ?? "friendly"}:${match.stage ?? "league"}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`,
-      // 중립 경기장과 더비는 **경기가 갖고 있는 사실**이다 — 안 넘기면 결승의
-      // 명목상 홈이 홈 어드밴티지를 그대로 받고, 리그의 더비는 카드·부상·판세에
-      // 닿지 않는다 (match.md §7)
-      {
-        neutral: match.neutral === true,
-        ...(derby ? { derby: { name: derby.name, heat: derby.heat } } : {}),
-      },
+      quickSimKeyOf(state.season, match),
+      quickSimOptionsOf(match),
     );
     /**
      * 부상·카드·교체는 각자의 표가 갖는다 — 경기 결과에 섞어 넣지 않는다.
