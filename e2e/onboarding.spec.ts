@@ -5,7 +5,7 @@ import { COLD_MS } from "./timeouts";
 
 test("새 게임 첫 메시지가 부임 장면과 수석코치 브리핑으로 표시된다", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
+  await expect(page.getByTestId("league-list")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
 
@@ -42,14 +42,14 @@ test("부임은 리그 → 팀 → 감독 한 단계씩 서고, 되돌아갈 수
    * 고른 것은 다음 단계의 맥락으로 남는다 (season.md §1).
    */
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
+  await expect(page.getByTestId("league-list")).toBeVisible({ timeout: COLD_MS });
   // 리그를 고르기 전에는 팀도 감독도 화면에 없다 — 안내 문구로 때울 자리가 없다
   await expect(page.getByTestId("team-grid")).toHaveCount(0);
   await expect(page.getByTestId("manager-name")).toHaveCount(0);
 
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
-  await expect(page.getByTestId("league-ring")).toHaveCount(0);
+  await expect(page.getByTestId("league-list")).toHaveCount(0);
   await expect(page.getByTestId("step-context")).toContainText("프리미어리그");
 
   await page.getByTestId("team-arsenal").click();
@@ -68,7 +68,7 @@ test("부임은 리그 → 팀 → 감독 한 단계씩 서고, 되돌아갈 수
   await page.getByTestId("league-epl").click();
   await page.getByTestId("step-back").click();
   await expect(page.getByTestId("league-epl")).toHaveClass(/selected/);
-  await expect(page.getByTestId("league-ring")).toBeVisible();
+  await expect(page.getByTestId("league-list")).toBeVisible();
 
   // 리그를 바꾸면 팀 선택은 무효 — 보이지 않는 선택은 남지 않는다
   await page.getByTestId("league-laliga").click();
@@ -83,7 +83,7 @@ test("같은 시각은 다시 적지 않는다 — 화자 이름은 턴마다 �
    * 이름이 빠진 턴은 누가 말하는지를 위쪽까지 거슬러 찾아야 한다.
    */
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
+  await expect(page.getByTestId("league-list")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await page.getByTestId("team-arsenal").click();
   await page.getByTestId("manager-name").fill("접기테스트");

@@ -124,7 +124,7 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page).toHaveURL(/\/new$/, { timeout: COLD_MS });
 
   // ── 온보딩 ──
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
+  await expect(page.getByTestId("league-list")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-arsenal").click();
@@ -424,7 +424,7 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
  */
 test("목록에서 재개하면 대화가 그대로고, 지우면 사라진다", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
+  await expect(page.getByTestId("league-list")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-tottenham").click();
@@ -471,7 +471,7 @@ test("목록에서 재개하면 대화가 그대로고, 지우면 사라진다",
 
 test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
+  await expect(page.getByTestId("league-list")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-chelsea").click();
@@ -540,7 +540,7 @@ test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page 
  */
 test("협상은 카드로 선다 — 재계약 제안", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
+  await expect(page.getByTestId("league-list")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-arsenal").click();
@@ -568,7 +568,7 @@ test("협상은 카드로 선다 — 재계약 제안", async ({ page }) => {
 
 test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
+  await expect(page.getByTestId("league-list")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-liverpool").click();
@@ -900,7 +900,7 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
 
 test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정한다", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
+  await expect(page.getByTestId("league-list")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-mancity").click();
@@ -1068,7 +1068,7 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
  */
 test("전술판 편집은 턴보다 먼저 서버에 닿는다", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
+  await expect(page.getByTestId("league-list")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-arsenal").click();
