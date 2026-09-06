@@ -1,4 +1,4 @@
-import { PITCH_BANDS, type BoardPoint } from "@story-fm/domain";
+import { PITCH_ASPECT, PITCH_BANDS, type BoardPoint } from "@story-fm/domain";
 
 /**
  * 전술판 배치 → **경기장 위의 자리.**
@@ -22,8 +22,12 @@ export interface PitchPoint {
   top: number;
 }
 
-/** 화면 비율 탓에 가로·세로의 1%가 서로 다른 길이다 — 겹침도 그만큼 다르게 잰다 */
-const MIN_GAP = { x: 3.4, y: 8 };
+/**
+ * 화면 비율 탓에 가로·세로의 1%가 서로 다른 길이다 — 겹침도 그만큼 다르게 잰다.
+ * 눕힌 판에서 세로 1%는 가로 1%의 1/`PITCH_ASPECT`이므로, 두 축이 같은 거리를
+ * 말하려면 세로 임계가 그 배만큼 커야 한다. 판의 비율을 고치면 여기도 따라온다.
+ */
+export const MARKER_GAP = { x: 3.4, y: 3.4 * PITCH_ASPECT };
 /** 밀어내기 횟수 — 스물두 명이면 서너 번에 잦아든다 */
 const SPREAD_PASSES = 14;
 
@@ -37,8 +41,8 @@ function bandedLeft(y: number): number {
   return 200 / 3 + ((midAttack - y) / midAttack) * (100 / 3 - 12);
 }
 
-/** 마커가 경기장 밖으로 잘리지 않게 안쪽으로 들이는 여백(%) */
-const INSET = { x: 3.5, y: 7 };
+/** 마커가 경기장 밖으로 잘리지 않게 안쪽으로 들이는 여백(%) — 세로는 같은 자로 되짚는다 */
+const INSET = { x: 3.5, y: 3.5 * PITCH_ASPECT };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -68,12 +72,12 @@ export function spreadMarkers(points: readonly PitchPoint[]): PitchPoint[] {
       for (let j = i + 1; j < out.length; j++) {
         const a = out[i]!;
         const b = out[j]!;
-        const overlapX = MIN_GAP.x - Math.abs(b.left - a.left);
-        const overlapY = MIN_GAP.y - Math.abs(b.top - a.top);
+        const overlapX = MARKER_GAP.x - Math.abs(b.left - a.left);
+        const overlapY = MARKER_GAP.y - Math.abs(b.top - a.top);
         if (overlapX <= 0 || overlapY <= 0) continue;
         moved = true;
         // 겹친 비율이 작은 축으로 민다 — 적게 움직여야 모양이 남는다
-        if (overlapX / MIN_GAP.x <= overlapY / MIN_GAP.y) {
+        if (overlapX / MARKER_GAP.x <= overlapY / MARKER_GAP.y) {
           const push = (overlapX / 2 + 0.05) * (a.left <= b.left ? -1 : 1);
           a.left = clamp(a.left + push, INSET.x, 100 - INSET.x);
           b.left = clamp(b.left - push, INSET.x, 100 - INSET.x);

@@ -153,8 +153,23 @@
    */
   --panel-anim: 260ms;
   /**
+   * ── 경기장 비율 — **실제 경기장 105:68**(FIFA 권장 규격) ─────────────
+   *
+   * 판세 격자(눕힌 판)와 전술판(세운 판)이 **같은 자를 쓰는 자리**다. 판 위
+   * 좌표는 백분율이라 판의 비율이 곧 선수 사이의 거리이므로, 화면이 이 값을
+   * 벗어나면 감독이 눈으로 재는 간격이 코어가 계산한 간격과 어긋난다
+   * (코어 쪽 짝은 `PITCH_ASPECT` — `packages/domain/src/tactics.ts`).
+   *
+   * 두 벌인 것은 CSS가 비를 뒤집지 못해서다. 둘 다 `aspect-ratio`에 그대로 서고
+   * `calc()` 안에서는 곱으로 선다 — `calc(H * var(--pitch-ratio-portrait))`가
+   * 그 높이가 허락하는 폭이고, `calc(W * var(--pitch-ratio))`가 그 폭이 부르는
+   * 높이다.
+   */
+  --pitch-ratio: 105 / 68;
+  --pitch-ratio-portrait: 68 / 105;
+  /**
    * 전술판 아래 **붙은 전술 줄의 높이** — 패딩 12+12에 한 줄 21.
-   * 판은 3:4라 남는 높이에서 폭을 되짚는데, 그때 먼저 빼는 몫이다
+   * 판은 실제 비율이라 남는 높이에서 폭을 되짚는데, 그때 먼저 빼는 몫이다
    * (`.board-stack` 폭 계산). 줄이 두 줄로 흐르면 그만큼 어긋난다.
    */
   --board-foot: 45px;
@@ -2495,9 +2510,10 @@ textarea {
    * 둘이 따로 떠 있으면 "판을 보는 화면"인지 "전술을 고치는 화면"인지가 흐리다.
    * 한 테두리 안에 위아래로 붙이면 줄이 판의 손잡이로 읽힌다.
    *
-   * 폭은 **세로에서 되짚는다**: 판은 3:4라 남는 높이가 폭의 상한을 정하고
-   * (`(100cqh - 줄 높이) × 0.75`), 그 값이 곧 덩어리의 폭이다. 판을 칸에 맞추고
-   * 줄만 따로 재던 예전 방식은 세로가 짧아질 때마다 둘의 폭이 어긋났다.
+   * 폭은 **세로에서 되짚는다**: 판은 실제 경기장 비율이라 남는 높이가 폭의 상한을
+   * 정하고(`(100cqh - 줄 높이) × --pitch-ratio-portrait`), 그 값이 곧 덩어리의
+   * 폭이다. 판을 칸에 맞추고 줄만 따로 재던 예전 방식은 세로가 짧아질 때마다
+   * 둘의 폭이 어긋났다.
    */
   .board-open .board-stack {
     /* 펼친 눈금이 이 안에서 판 위로 올라온다 */
@@ -2509,7 +2525,7 @@ textarea {
        서랍이 넓어졌으니 폭 상한도 그만큼 올린다 — 안 그러면 8할까지 편 자리에
        예전 폭(559.5)의 판만 서고 나머지가 빈 여백이 된다 */
     margin: 0 auto;
-    width: min(100cqw, calc((100cqh - var(--board-foot)) * 0.75), 720px);
+    width: min(100cqw, calc((100cqh - var(--board-foot)) * var(--pitch-ratio-portrait)), 720px);
     max-height: 100%;
     /* 판과 줄이 한 면 위에 선다 — 테두리 대신 한 단 밝은 바탕이 덩어리를 만든다 */
     background: var(--panel);
@@ -2525,7 +2541,7 @@ textarea {
   .board-open .board-stack .pitch-board {
     width: 100%;
     height: auto;
-    aspect-ratio: 3 / 4;
+    aspect-ratio: var(--pitch-ratio-portrait);
     margin: 0;
     border: none;
     border-radius: 0;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { anchorOf, PITCH_BANDS } from "@story-fm/domain";
-import { pitchPointOf, spreadMarkers } from "../lib/pitch-layout";
+import { MARKER_GAP, pitchPointOf, spreadMarkers } from "../lib/pitch-layout";
 import { XG_BOX, xgRaceOf } from "../lib/xg-race";
 
 /** 판세 격자가 칸을 나누는 자리 — 선수도 같은 칸 안에 서야 한다 */
@@ -79,8 +79,8 @@ describe("겹치지 않게 밀어낸다", () => {
       for (let j = i + 1; j < out.length; j++) {
         const dx = Math.abs(out[i]!.left - out[j]!.left);
         const dy = Math.abs(out[i]!.top - out[j]!.top);
-        // 두 축 모두 최소 간격 안이면 겹친 것이다
-        expect(dx >= 3.4 || dy >= 8, `${i} vs ${j}`).toBe(true);
+        // 두 축 모두 최소 간격 안이면 겹친 것이다 — 임계는 판의 비율이 정한다
+        expect(dx >= MARKER_GAP.x || dy >= MARKER_GAP.y, `${i} vs ${j}`).toBe(true);
       }
     }
   });
