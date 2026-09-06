@@ -19,7 +19,8 @@ import { pitchPointOf, spreadMarkers, type PitchPoint } from "@/lib/pitch-layout
 import { XG_BOX, xgRaceOf } from "@/lib/xg-race";
 import { IconBoard } from "@/components/icons";
 import { ConditionBar } from "@/components/condition-bar";
-import { PitchChip, PitchGround } from "./pitch";
+import { PitchChip, PitchGround, useRovingMarkers } from "./pitch";
+import { usePlayerCard } from "./player-card";
 import { Crest, cachedCrest } from "./crest";
 
 type Match = NonNullable<OfficeViews["match"]>;
@@ -433,34 +434,77 @@ function ZoneBars({ match }: { match: Match }) {
           {/* 경기장 선 — 읽는 값이 아니라 자리를 알려주는 그림이다 */}
           <span className="mv-pitch-lines" aria-hidden />
           {/* 배치 — 밀리는 칸에 누가 서 있는지 */}
-          <div className="mv-pitch-players">
-            {placeBothSides(match).map(({ player, no, at }) => (
-              <span
-                className={`mv-marker${player.ours ? " ours" : ""}${player.gassed ? " gassed" : ""}`}
-                key={player.id}
-                style={{ left: `${at.left}%`, top: `${at.top}%` }}
-                title={`${player.squadNumber === null ? "임시 " : ""}${no}번 · ${player.name} (${player.position}) — 전력 ${player.effective}${player.gassed ? " · 다리가 멈췄다" : ""}`}
-                /**
-                 * **읽는 값이지 조작 대상이 아니다.** 눌러서 열리는 것이 없는데도
-                 * 탭 정지점이었던 탓에, 판 하나를 지나려면 스물두 번을 눌러야 했고
-                 * 멈춘 자리마다 포커스 링만 떴다. 탭 순서에서 빼고 `role="img"`로
-                 * 세워 이름은 `aria-label`이 갖는다 — 번호만 읽히면 누구인지 모른다.
-                 * 다리가 멈춘 것도 여기 싣는다: 판에서는 빨간 테두리뿐이라 색을
-                 * 못 보면 교체 신호가 통째로 사라진다.
-                 */
-                role="img"
-                aria-label={`${no}번 ${player.name}, ${player.position}, 전력 ${player.effective}${player.gassed ? ", 다리가 멈췄다" : ""}`}
-              >
-                {no}
-              </span>
-            ))}
-          </div>
+          <PitchMarkers match={match} />
         </div>
         <div className="mv-pitch-foot" aria-hidden>
           <span>{match.home.short} 골문</span>
           <span>{match.away.short} 골문</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 판 위의 스물두 마커 — **누르면 그 선수의 카드가 열린다** (player.md §9.5).
+ *
+ * `PlayerName`과 같은 규약이다: 카드를 열 무대(`PlayerCardProvider`)가 있으면
+ * 버튼, 없으면 지금까지의 `role="img"`로 남는다. 밀리는 칸을 찾아 놓고 거기 선
+ * 선수를 더 보려면 명단 탭으로 건너가 이름을 다시 찾아야 했고, `title` 툴팁은
+ * 마우스에만 있어 터치에서는 마커가 말하는 것이 번호뿐이었다. 상대 마커도 같은
+ * 길로 열린다 — **안개는 코어가 씌우므로**(`buildPlayerCard`) 참값이 새지 않는다.
+ *
+ * 이름은 어느 꼴에서든 `aria-label`이 갖는다 — 번호만 읽히면 누구인지 모른다.
+ * 다리가 멈춘 것도 여기 싣는다: 판에서는 빨간 테두리뿐이라 색을 못 보면 교체
+ * 신호가 통째로 사라진다.
+ */
+function PitchMarkers({ match }: { match: Match }) {
+  const card = usePlayerCard();
+  const markers = placeBothSides(match);
+  const roving = useRovingMarkers(markers.map((m) => m.player.id));
+  return (
+    /* 스물두 손잡이가 각자 탭 정지점이면 판 하나를 지나는 데 스물두 번이다 —
+       묶음이 정지점 하나를 갖고 안에서는 방향키가 옮긴다 (overview.md §5) */
+    <div
+      className="mv-pitch-players"
+      role={card ? "group" : undefined}
+      aria-label={card ? "선수 배치" : undefined}
+      onKeyDown={card ? roving.onKeyDown : undefined}
+    >
+      {markers.map(({ player, no, at }) => {
+        const className = `mv-marker${player.ours ? " ours" : ""}${player.gassed ? " gassed" : ""}`;
+        const style = { left: `${at.left}%`, top: `${at.top}%` };
+        const title = `${player.squadNumber === null ? "임시 " : ""}${no}번 · ${player.name} (${player.position}) — 전력 ${player.effective}${player.gassed ? " · 다리가 멈췄다" : ""}`;
+        const label = `${no}번 ${player.name}, ${player.position}, 전력 ${player.effective}${player.gassed ? ", 다리가 멈췄다" : ""}`;
+        if (!card)
+          return (
+            <span
+              className={className}
+              key={player.id}
+              style={style}
+              title={title}
+              role="img"
+              aria-label={label}
+            >
+              {no}
+            </span>
+          );
+        return (
+          <button
+            type="button"
+            className={className}
+            key={player.id}
+            style={style}
+            title={title}
+            aria-label={label}
+            data-marker={player.id}
+            tabIndex={roving.tabIndexOf(player.id)}
+            onClick={() => card.open(player.id)}
+          >
+            {no}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -611,6 +655,11 @@ function Dots({ value, align, title }: { value: number; align: "left" | "right";
  *
  * 숫자는 전력 하나뿐이고 그마저 흐리다 — 옆의 오차 표식이 얼마나 못 미더운지 말한다.
  *
+ * **배치는 못 고쳐도 선수는 열린다** — 판세의 마커와 같은 규약이라 칩을 누르면 그
+ * 상대 선수의 카드가 선다(player.md §9.5). 고칠 수 없는 것은 남의 배치이지 그
+ * 선수에 대해 아는 것이 아니고, 안개는 카드 쪽에서도 코어가 씌운다. 열한 칩이 각자
+ * 탭 정지점이 되지 않도록 판세와 **같은 묶음 규약**을 쓴다(overview.md §5).
+ *
  * ⚠️ 기본 자리를 그대로 쓰면 **칩이 서로를 가린다** — 같은 라인에 세 명이 서는
  * 백3나 이름이 붙은 중앙 자리(CB·RCB)가 겹친다. 우리 판이 쓰는 것과 **같은
  * 분리 함수**(`separateBoardPoints`)를 지나게 해서 라인을 넘지 않는 선에서
@@ -623,33 +672,46 @@ function OpponentBoard({
   players: MatchPlayer[];
   tactics: Match["tactics"]["home"];
 }) {
+  const card = usePlayerCard();
   const points = separateBoardPoints(players.map((p) => anchorOf(p.position)));
+  const roving = useRovingMarkers(players.map((p) => p.id));
   return (
     /* 상대도 같은 그라운드에 같은 칩으로 선다 — 두 판이 한 컴포넌트를 쓰므로
        한쪽만 손질돼 서로 다른 모양이 되는 일이 없다 (pitch.tsx) */
     <PitchGround testId="opponent-board" tactics={tactics}>
-      {players.map((p, i) => {
-        const point = points[i]!;
-        const group = positionGroupOf(p.position);
-        return (
-          <PitchChip
-            key={p.id}
-            variant={`theirs${group ? ` g-${group.toLowerCase()}` : ""}${p.gassed ? " gassed" : ""}`}
-            style={{ left: `${point.x}%`, top: `${point.y}%` }}
-            testId={`opp-slot-${p.id}`}
-            title={[
-              p.name,
-              `${p.position} 자리 기준 ${p.effective}${p.margin > 0 ? ` (±${p.margin})` : ""}`,
-              `${p.condition.label} — 체력 ${p.condition.low}~${p.condition.high}`,
-            ].join("\n")}
-            code={p.position}
-            squadNumber={p.squadNumber}
-            name={p.name}
-            ovr={p.effective}
-            metaExtra={p.margin > 0 && <i className="slot-margin">±{p.margin}</i>}
-          />
-        );
-      })}
+      <div
+        className="pitch-markers"
+        role={card ? "group" : undefined}
+        aria-label={card ? "상대 배치" : undefined}
+        onKeyDown={card ? roving.onKeyDown : undefined}
+      >
+        {players.map((p, i) => {
+          const point = points[i]!;
+          const group = positionGroupOf(p.position);
+          return (
+            <PitchChip
+              key={p.id}
+              as={card ? "button" : "span"}
+              onClick={card ? () => card.open(p.id) : undefined}
+              markerId={card ? p.id : undefined}
+              tabIndex={card ? roving.tabIndexOf(p.id) : undefined}
+              variant={`theirs${group ? ` g-${group.toLowerCase()}` : ""}${p.gassed ? " gassed" : ""}`}
+              style={{ left: `${point.x}%`, top: `${point.y}%` }}
+              testId={`opp-slot-${p.id}`}
+              title={[
+                p.name,
+                `${p.position} 자리 기준 ${p.effective}${p.margin > 0 ? ` (±${p.margin})` : ""}`,
+                `${p.condition.label} — 체력 ${p.condition.low}~${p.condition.high}`,
+              ].join("\n")}
+              code={p.position}
+              squadNumber={p.squadNumber}
+              name={p.name}
+              ovr={p.effective}
+              metaExtra={p.margin > 0 && <i className="slot-margin">±{p.margin}</i>}
+            />
+          );
+        })}
+      </div>
     </PitchGround>
   );
 }

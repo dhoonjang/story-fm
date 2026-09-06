@@ -1,6 +1,8 @@
 "use client";
 
+import { useCallback, useState, type KeyboardEvent } from "react";
 import type { CSSProperties, PointerEvent, ReactNode, Ref } from "react";
+import { nextInDirection, type MarkerDirection } from "@/lib/pitch-layout";
 
 /**
  * ── 전술판 ────────────────────────────────────────────────
@@ -124,6 +126,10 @@ type PitchChipProps = {
   style?: CSSProperties;
   title?: string;
   testId?: string;
+  /** 방향키 묶음의 정지점인가 — `useRovingMarkers`가 낸 값 (버튼일 때만 뜻이 있다) */
+  tabIndex?: number;
+  /** 그 묶음이 자기를 되찾는 표식 — 같은 훅이 읽는다 */
+  markerId?: string;
   onPointerDown?: (e: PointerEvent<HTMLElement>) => void;
   onClick?: () => void;
 };
@@ -148,6 +154,8 @@ export function PitchChip({
   style,
   title,
   testId,
+  tabIndex,
+  markerId,
   onPointerDown,
   onClick,
 }: PitchChipProps) {
@@ -188,6 +196,8 @@ export function PitchChip({
         style={style}
         title={title}
         data-testid={testId}
+        tabIndex={tabIndex}
+        data-marker={markerId}
         onPointerDown={onPointerDown}
         onClick={onClick}
       >
@@ -200,3 +210,52 @@ export function PitchChip({
     </span>
   );
 }
+
+/**
+ * ── 판 위의 손잡이 묶음 — **정지점 하나, 안에서는 방향키** ────────
+ *
+ * 판 하나에 열 개 넘는 버튼이 서면 탭만으로는 판을 지날 수 없다(overview.md §5).
+ * 그래서 묶음이 탭 정지점 하나를 갖고(`tabIndexOf`), 그 안에서는 방향키가 자리를
+ * 옮긴다.
+ *
+ * **자리는 화면에서 읽는다** — 마커의 좌표는 겹침을 푼 뒤의 값이라 컴포넌트가 쥔
+ * 숫자와 실제로 그려진 자리가 다를 수 있고, 판마다 가로세로 비도 다르다. 눌린
+ * 순간의 `getBoundingClientRect()`가 두 사정을 한 번에 지운다.
+ *
+ * 쥔 것은 **id**다: 교체로 명단이 바뀌어도 정지점이 엉뚱한 자리로 옮겨 가지 않고,
+ * 그 선수가 판에서 사라지면 첫 마커가 정지점을 되받는다.
+ */
+export function useRovingMarkers(ids: readonly string[]): {
+  onKeyDown: (e: KeyboardEvent<HTMLElement>) => void;
+  tabIndexOf: (id: string) => 0 | -1;
+} {
+  const [held, setHeld] = useState<string | null>(null);
+  const stop = held !== null && ids.includes(held) ? held : (ids[0] ?? null);
+  const onKeyDown = useCallback((e: KeyboardEvent<HTMLElement>) => {
+    const dir = ARROW_DIRS[e.key];
+    if (!dir) return;
+    const items = [...e.currentTarget.querySelectorAll<HTMLElement>("[data-marker]")];
+    const from = items.indexOf(document.activeElement as HTMLElement);
+    if (from < 0) return;
+    const next = nextInDirection(items.map(centerOf), from, dir);
+    if (next === null) return;
+    // 판 위에서 방향키는 자리를 옮긴다 — 그 아래 패널이 함께 스크롤되면 판이 달아난다
+    e.preventDefault();
+    const target = items[next]!;
+    target.focus();
+    setHeld(target.dataset.marker ?? null);
+  }, []);
+  return { onKeyDown, tabIndexOf: (id) => (id === stop ? 0 : -1) };
+}
+
+const ARROW_DIRS: Record<string, MarkerDirection | undefined> = {
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  ArrowUp: "up",
+  ArrowDown: "down",
+};
+
+const centerOf = (el: HTMLElement) => {
+  const r = el.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+};

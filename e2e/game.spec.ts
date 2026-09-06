@@ -263,6 +263,24 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.getByTestId("match-tactics")).toHaveCount(0);
 
   /**
+   * 판 위의 마커는 **손잡이다** — 누르면 그 선수의 카드가 선다 (player.md §9.5).
+   * 스물두 손잡이가 각자 탭 정지점이면 판 하나를 지나는 데 스물두 번이므로,
+   * 묶음이 정지점 하나를 갖는다 (overview.md §5).
+   */
+  const markers = page.locator(".mv-pitch-players");
+  await expect(markers.locator('[tabindex="0"]')).toHaveCount(1);
+  await markers.locator("button.mv-marker.ours").first().click();
+  await expect(page.getByTestId("player-card-body")).toBeVisible();
+  // 우리 선수라 우리 훈련장만 아는 칸이 선다 — 심경 한 줄
+  await expect(page.locator(".player-card .pc-mood")).toHaveCount(1);
+  await page.getByTestId("player-card-close").click();
+  // 상대 마커도 같은 길로 열린다. 안개는 코어가 씌우므로 우리만 아는 칸이 아예 없다
+  await markers.locator("button.mv-marker:not(.ours)").first().click();
+  await expect(page.getByTestId("player-card-body")).toBeVisible();
+  await expect(page.locator(".player-card .pc-mood")).toHaveCount(0);
+  await page.getByTestId("player-card-close").click();
+
+  /**
    * 팀 탭 — **우리와 상대가 같은 구성, 다른 정확도.**
    * 양쪽 다 판 → 전술 → 명단으로 읽히고, 상대는 안개를 지나 조작이 없다.
    */
@@ -290,6 +308,11 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await pressBoardToggle(page, "opp-board-toggle");
   await expect(page.getByTestId("opponent-board")).toBeVisible();
   await expect(page.locator(".pitch-slot.theirs")).toHaveCount(11);
+  // 배치는 못 고쳐도 선수는 열린다 — 판세의 마커와 같은 규약이다 (정지점도 하나)
+  await expect(page.locator('.pitch-markers [tabindex="0"]')).toHaveCount(1);
+  await page.locator("button.pitch-slot.theirs").first().click();
+  await expect(page.getByTestId("player-card-body")).toBeVisible();
+  await page.getByTestId("player-card-close").click();
   // 상대 전술은 읽기 전용 — 우리 쪽에만 있는 조작 버튼이 여기엔 없다
   await expect(page.getByTestId("match-tactics")).toBeVisible();
   await expect(page.getByTestId("tactic-pressing-5")).toHaveCount(0);

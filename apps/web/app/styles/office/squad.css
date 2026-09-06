@@ -1269,6 +1269,21 @@
   z-index: 1;
 }
 /**
+ * 칩을 한 묶음으로 담는 칸 — 방향키가 도는 자리(`useRovingMarkers`).
+ *
+ * 판을 그대로 덮으므로 칩의 % 좌표는 보드를 기준으로 잴 때와 같은 자리에 떨어진다.
+ * 이 칸 자체는 손을 받지 않는다 — 판 위 빈 잔디를 눌렀을 때 묶음이 그것을 삼키면
+ * 아래의 판이 손을 못 받는다.
+ */
+.pitch-markers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.pitch-markers .pitch-slot {
+  pointer-events: auto;
+}
+/**
  * 보드 위 칩은 **보드 폭에 비례**해 크기가 정해진다 (cqw = pitch-board 폭의 1%).
  * domain의 CHIP_SIZE(겹침 판정 기준, 14%×8%)보다 작게 유지해야 화면에서
  * 카드가 겹치지 않는다 — 둘 중 하나만 바꾸면 판정과 그림이 어긋난다.

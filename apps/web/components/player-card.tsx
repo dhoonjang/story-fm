@@ -103,10 +103,11 @@ export function PlayerCardProvider({
 /**
  * 이 자리에서 카드를 열 수 있는가 — 감싸는 자리가 없으면 `null`이다.
  *
- * `null`을 되돌리는 것이 규약이다: 손잡이 컴포넌트가 그때 **글자로 선다**. 오프라인
- * 렌더러(테스트·관리자 화면)가 선수 이름을 그리는 자리마다 무대를 세울 이유는 없다.
+ * `null`을 되돌리는 것이 규약이다: 손잡이 컴포넌트가 그때 **읽는 값으로 선다** —
+ * 이름은 글자로, 판 위의 마커는 `role="img"`로. 오프라인 렌더러(테스트·관리자
+ * 화면)가 선수를 그리는 자리마다 무대를 세울 이유는 없다.
  */
-function usePlayerCard(): PlayerCardHandle | null {
+export function usePlayerCard(): PlayerCardHandle | null {
   return useContext(PlayerCardContext);
 }
 
