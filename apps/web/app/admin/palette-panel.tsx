@@ -41,7 +41,7 @@ interface PaletteRow {
   accent: string;
   /** 문장 글자·윤곽선 */
   ink: string;
-  /** `--club-hi` — 띠·레일·점이 쓰는 색 */
+  /** `--club-hi` — 띠와 레일이 쓰는 색 */
   hi: string;
   /** 공식 값을 그대로 못 쓰고 명도만 올렸는가 */
   lifted: boolean;
@@ -124,7 +124,6 @@ function PaletteRowCells({ row, showLeague }: { row: PaletteRow; showLeague: boo
         <span className="palette-hi">
           <span className="palette-rail">
             <i style={{ background: row.hi }} />
-            <b style={{ background: row.hi }} />
           </span>
           <code>{row.hi}</code>
           {row.lifted && <span className="palette-tag">올림</span>}

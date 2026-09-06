@@ -1725,9 +1725,11 @@
   border-bottom: 1px solid var(--line);
   background: none;
 }
-/* 선발만 구단의 색을 받는다 — 정체성 자리(레일)이고, 나머지 칸은 무채색 계단이다 */
+/* 네 칸은 **무채색 계단 하나**다 — 선발이 맨 위(분필 백색)고 아래로 한 단씩 흐려진다.
+   구단 색을 여기 세우면 우리 명단만 서는 표에서 그 색이 "선발"이라는 상태를 뜻하게 된다
+   (ui/design-system.md §2 충돌 규칙 1) */
 .squad-table tbody tr.t-start td:first-child {
-  border-left-color: var(--club-hi);
+  border-left-color: var(--text);
 }
 .squad-table tbody tr.t-bench td:first-child {
   border-left-color: var(--text-3);

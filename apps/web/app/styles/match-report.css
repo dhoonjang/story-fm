@@ -235,18 +235,19 @@
   font-size: var(--fs-2xs);
 }
 /* 두 구단의 몫 — 왼쪽(우리)은 채움, 오른쪽(상대)은 바탕이 그린다. 두 막대를 겹치면
-   반올림 틈이 생긴다 */
+   반올림 틈이 생긴다. 잉크는 줄 양 끝의 두 숫자와 같은 층이다(우리 1층·상대 3층) —
+   구단 색은 이 카드에서 머리의 플랭크가 이미 한 벌 썼다 (design-system §2 규칙 7) */
 .mr-stat-bar {
   grid-column: 1 / -1;
   display: block;
   height: 3px;
-  background: var(--opp-hi);
+  background: var(--text-3);
   overflow: hidden;
 }
 .mr-stat-bar i {
   display: block;
   height: 100%;
-  background: var(--club-hi);
+  background: var(--text);
 }
 
 /* ── 타임라인 ─────────────────────────────────────────────

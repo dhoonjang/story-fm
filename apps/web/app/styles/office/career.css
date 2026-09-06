@@ -123,11 +123,12 @@
   background: var(--border);
   overflow: hidden;
 }
-/* 채움은 구단의 가는 색 — 평판은 세계가 이 구단의 감독을 보는 눈이다 */
+/* 채움은 분필 — 평판은 **감독이 쌓은 값**이라 구단이 바뀌어도 같은 자로 읽혀야 한다
+   (ui/design-system.md §2 충돌 규칙 1) */
 .rep-bar i {
   display: block;
   height: 100%;
-  background: var(--club-hi);
+  background: var(--text);
 }
 .rep-item b {
   min-width: 1.6em;

@@ -118,7 +118,10 @@
 
 /**
  * 팀시트 — 두 열, 각 1–11. 한 줄은 등번호 · 포지션 · 이름뿐이다.
- * 열 머리는 팀 이름 하나이고, 그 옆의 3px 레일이 구단이다 (design-system §2).
+ * 열 머리는 팀 이름 하나다 — **레일은 없다.** 바로 위 대진에서 우리 열이 이미 구단
+ * 워시로 물들어 있고 열의 자리도 그대로라, 여기 띠를 한 번 더 세우면 같은 카드에서
+ * 구단 색이 두 벌이 된다 (design-system §2 충돌 규칙 7). 상대 열은 잉크가 한 단
+ * 물러나는 것으로 갈린다.
  */
 .kg-sheets {
   display: grid;
@@ -132,15 +135,12 @@
   min-width: 0;
 }
 .kg-sheet-head {
-  padding-left: var(--sp-2);
-  border-left: 3px solid var(--club-hi);
   font-size: var(--fs-sm);
   font-weight: 600;
   line-height: var(--lh-table);
   word-break: keep-all;
 }
 .kg-sheet.theirs .kg-sheet-head {
-  border-left-color: var(--opp-hi);
   color: var(--text-2);
 }
 .kg-xi-list {
