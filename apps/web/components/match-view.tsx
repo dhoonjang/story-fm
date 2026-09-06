@@ -16,6 +16,7 @@ import {
   tacticWord,
 } from "@story-fm/domain";
 import { pitchPointOf, spreadMarkers, type PitchPoint } from "@/lib/pitch-layout";
+import { XG_BOX, xgRaceOf } from "@/lib/xg-race";
 import { IconBoard } from "@/components/icons";
 import { ConditionBar } from "@/components/condition-bar";
 import { PitchChip, PitchGround } from "./pitch";
@@ -321,6 +322,57 @@ function placeBothSides(match: Match): {
  * 아홉 칸은 새 수치가 아니라 존 전력을 좌·중·우로 **나눈 것**이다
  * (sim `zone-grid.ts`) — 화면에만 있고 결과에 닿지 않는 숫자는 감독을 속인다.
  */
+/**
+ * 누적 xG 계단선 — **머리의 두 숫자가 못 말하는 「언제 기울었나」**
+ * (docs/simulation/match.md §8).
+ *
+ * 기대 득점은 90분의 투영이고 이 선은 **실제로 만든 장면**의 누적이라, 같은 0–1이
+ * 「막판까지 밀어붙였는데 안 들어간 경기」인지 「전반에 다 내주고 후반에만 살아난
+ * 경기」인지가 여기서 갈린다. 선의 평평한 구간이 곧 아무 일도 없던 시간이다.
+ *
+ * 색은 스코어보드와 같은 구단색이라 범례를 세우지 않는다. 다만 **색만으로 말하지
+ * 않는다** — 선 끝의 두 숫자와 `aria-label`이 같은 사실을 글자로 다시 적는다.
+ */
+function XgRaceLine({ match }: { match: Match }) {
+  const race = xgRaceOf(match.xgTimeline, match.minute);
+  // 장부에 xG를 실은 슛이 없으면 그릴 것이 없다 (옛 세이브·킥오프 직후)
+  if (!race) return null;
+  const weAreHome = match.home.ours;
+  const ours = weAreHome ? race.total.home : race.total.away;
+  const theirs = weAreHome ? race.total.away : race.total.home;
+  return (
+    <div className="mv-xg-race" data-testid="match-xg-race">
+      <div className="mv-xg">
+        <span className="mv-xg-label">쌓인 xG</span>
+        {/* 순서는 스코어와 같은 홈 : 원정이고, 색만 우리 편으로 접힌다 */}
+        <span className="mv-xg-score">
+          <b className={weAreHome ? "ours" : "theirs"}>{race.total.home.toFixed(2)}</b>
+          <i>:</i>
+          <b className={weAreHome ? "theirs" : "ours"}>{race.total.away.toFixed(2)}</b>
+        </span>
+      </div>
+      <svg
+        className="mv-xg-line"
+        viewBox={`0 0 ${XG_BOX.width} ${XG_BOX.height}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`${match.minute}분까지 쌓인 기대 득점 — 우리 ${ours.toFixed(2)} · 상대 ${theirs.toFixed(2)}`}
+      >
+        {/* 축 — 0xG 바닥과 하프타임, 연장이면 90′ 자리까지. 그 밖의 눈금은 두지 않는다 */}
+        <g className="mv-xg-axis" aria-hidden>
+          <line x1="0" y1={XG_BOX.height} x2={XG_BOX.width} y2={XG_BOX.height} />
+          <line x1={race.halfX} y1="0" x2={race.halfX} y2={XG_BOX.height} />
+          {race.fullX !== null && (
+            <line x1={race.fullX} y1="0" x2={race.fullX} y2={XG_BOX.height} />
+          )}
+        </g>
+        <path className={weAreHome ? "ours" : "theirs"} d={race.home} />
+        <path className={weAreHome ? "theirs" : "ours"} d={race.away} />
+      </svg>
+    </div>
+  );
+}
+
 function ZoneBars({ match }: { match: Match }) {
   const cellOf = (band: string, lane: string) =>
     match.grid.find((c) => c.band === band && c.lane === lane);
@@ -341,6 +393,7 @@ function ZoneBars({ match }: { match: Match }) {
           </b>
         </span>
       </div>
+      <XgRaceLine match={match} />
       <div className="mv-pitch">
         {/* 줄 이름과 그 줄의 우열 — 격자를 읽는 눈금이라 그림 쪽이다 */}
         <div className="mv-pitch-head" aria-hidden>
