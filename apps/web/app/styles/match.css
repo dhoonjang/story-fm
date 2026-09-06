@@ -840,3 +840,57 @@
     animation: none;
   }
 }
+
+/**
+ * 누적 xG 계단선 — **기대 득점 두 숫자 아래, 격자 위** (match.md §8).
+ *
+ * 머리의 숫자는 90분의 투영이고 이 선은 실제로 만든 장면의 누적이라, 같은 0–1이
+ * 어떻게 만들어진 0–1인지가 여기서 갈린다. 두 줄이 같은 꼴(`mv-xg`)을 쓰되 라벨과
+ * 그것이 가리키는 그림 사이에는 선을 두지 않는다 — 헤어라인은 블록 아래 한 줄이다.
+ */
+.mv-xg-race {
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.mv-xg-race .mv-xg {
+  margin-bottom: 4px;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+/* 선의 색이 곧 범례다 — 스코어보드의 구단색과 같은 자다 (design-system §2) */
+.mv-xg-race .mv-xg-score b.ours {
+  color: var(--club-hi);
+}
+.mv-xg-race .mv-xg-score b.theirs {
+  color: var(--opp-hi);
+}
+/**
+ * 상자 — 폭은 판을 채우고 높이는 눈금 안의 값이다. `viewBox`를 늘려 쓰므로
+ * (`preserveAspectRatio: none`) 선 굵기는 `non-scaling-stroke`로 붙잡는다: 그러지
+ * 않으면 넓은 화면에서 1.5px가 세 배로 굵어져 격자의 레일보다 두꺼워진다.
+ */
+.mv-xg-line {
+  display: block;
+  width: 100%;
+  height: 64px;
+}
+.mv-xg-line path {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linejoin: miter;
+  stroke-linecap: butt;
+  vector-effect: non-scaling-stroke;
+}
+.mv-xg-line path.ours {
+  stroke: var(--club-hi);
+}
+.mv-xg-line path.theirs {
+  stroke: var(--opp-hi);
+}
+/* 축 — 0xG 바닥과 하프타임(연장이면 90′까지). 정보 없는 선이라 헤어라인이다 */
+.mv-xg-line .mv-xg-axis line {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}

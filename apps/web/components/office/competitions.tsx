@@ -10,6 +10,7 @@ import {
   tacticWord,
 } from "@story-fm/domain";
 import type { OfficeViews } from "@story-fm/engine";
+import { ratingTone } from "@/lib/scout-report-display";
 import { IconArrowLeft, IconArrowRight, IconChevron } from "../icons";
 import { PlayerName } from "../player-card";
 import { Crest } from "../crest";
@@ -348,6 +349,23 @@ function LeadersSection({ competition }: { competition: Competition }) {
   );
 }
 
+/**
+ * 팀 전력 한 숫자 — 스쿼드 상위 열한 명의 평균 OVR (docs/data/team.md §2.2).
+ *
+ * **난이도를 색으로만 말하지 않는다** — 색 레일은 색을 못 가르는 감독에게 없는
+ * 정보이고, 세 단계로는 78과 74의 차이를 담지 못한다. 색은 숫자 위에 얹히는 강약의
+ * 표식일 뿐이고, 자르는 문턱은 코어가 갖는다(`ratingTone` → `ratingTier`).
+ */
+function Strength({ value }: { value: number | null }) {
+  // 값이 없으면 자리를 비운다 — 대체 문자를 세우면 없는 것이 있는 것처럼 읽힌다
+  if (value === null) return null;
+  return (
+    <span className="fx-str fig" data-rating={ratingTone(value)}>
+      {value}
+    </span>
+  );
+}
+
 /** 라운드 하나의 경기 목록 — 라운드 선택기로 오간다 */
 function RoundFixtures({ competition }: { competition: Competition }) {
   const rounds = competition.rounds;
@@ -410,12 +428,21 @@ function RoundFixtures({ competition }: { competition: Competition }) {
                 size={14}
               />
               {m.homeName}
+              <Strength value={m.strength?.home ?? null} />
             </span>
-            <span className={`mid${m.score ? " played" : ""}`}>
-              {m.score ?? "vs"}
+            {/**
+             * 가운데 칸 — 끝난 경기는 스코어, **굴러가는 경기는 스코어와 분**,
+             * 아직 시작하지 않은 경기는 `vs`다 (match.md §7·§8). 진행 중임을 말로
+             * 적지 않는다: 분이 붙어 있는 것 자체가 그 표식이고, `played`는 끝난
+             * 경기만의 클래스다(e2e가 그것으로 소화된 라운드를 센다).
+             */}
+            <span className={`mid${m.score ? " played" : m.live ? " live" : ""}`}>
+              {m.score ?? (m.live ? formatScore(m.live.home, m.live.away) : "vs")}
+              {m.live && !m.score && <i className="fx-min fig">{m.live.minute}′</i>}
               {m.win && <b className={`wdl ${m.win}`}>{m.win}</b>}
             </span>
             <span className="side away">
+              <Strength value={m.strength?.away ?? null} />
               {m.awayName}
               <Crest
                 id={m.awayId}

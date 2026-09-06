@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { anchorOf, PITCH_BANDS } from "@story-fm/domain";
 import { pitchPointOf, spreadMarkers } from "../lib/pitch-layout";
+import { XG_BOX, xgRaceOf } from "../lib/xg-race";
 
 /** 판세 격자가 칸을 나누는 자리 — 선수도 같은 칸 안에 서야 한다 */
 const THIRD = 100 / 3;
@@ -82,5 +83,56 @@ describe("겹치지 않게 밀어낸다", () => {
         expect(dx >= 3.4 || dy >= 8, `${i} vs ${j}`).toBe(true);
       }
     }
+  });
+});
+
+/**
+ * 누적 xG 계단선의 좌표 — 판세가 그리는 또 하나의 자 (docs/simulation/match.md §8).
+ * 축이 시간과 무관해지거나 그릴 것 없는 장부에 선이 서는 것을 여기서 잡는다.
+ */
+describe("누적 xG 계단선의 자리", () => {
+  it("장부에 슛이 없으면 그릴 것이 없다", () => {
+    expect(xgRaceOf([], 0)).toBeNull();
+  });
+
+  it("xG가 전부 0이면 그릴 것이 없다 — 평평한 선 둘은 값이 아니다", () => {
+    expect(xgRaceOf([{ minute: 12, home: 0, away: 0 }], 20)).toBeNull();
+  });
+
+  it("축은 90분에서 시작한다 — 전반의 45′가 축의 가운데다", () => {
+    const race = xgRaceOf([{ minute: 20, home: 0.4, away: 0 }], 30);
+    if (!race) throw new Error("계단선이 서지 않았다");
+    expect(race.span).toBe(90);
+    expect(race.halfX).toBeCloseTo(XG_BOX.width / 2, 6);
+    // 정규 시간 안에서는 90′ 눈금이 오른끝과 겹치므로 서지 않는다
+    expect(race.fullX).toBeNull();
+  });
+
+  it("연장으로 가면 축이 늘고 90′ 눈금이 안쪽에 선다", () => {
+    const race = xgRaceOf([{ minute: 104, home: 1.2, away: 0.8 }], 112);
+    if (!race) throw new Error("계단선이 서지 않았다");
+    expect(race.span).toBe(112);
+    expect(race.fullX).toBeCloseTo((90 / 112) * XG_BOX.width, 6);
+    expect(race.halfX).toBeLessThan(XG_BOX.width / 2);
+  });
+
+  it("높이는 두 팀 중 큰 값이 천장이다 — 앞선 쪽 선이 상자 위에 닿는다", () => {
+    const race = xgRaceOf([{ minute: 45, home: 2, away: 0.5 }], 45);
+    if (!race) throw new Error("계단선이 서지 않았다");
+    // 마지막 V가 천장(y=0)으로 간다
+    expect(race.home.trimEnd().endsWith("V 0")).toBe(true);
+    // 뒤진 쪽은 바닥과 천장 사이 — 4분의 1 높이라 y는 상자의 4분의 3이다
+    expect(race.away).toContain(`V ${XG_BOX.height * 0.75}`);
+    expect(race.total).toEqual({ home: 2, away: 0.5 });
+  });
+
+  it("마지막 슛 뒤의 지금까지는 평평하게 잇는다", () => {
+    const flat = xgRaceOf([{ minute: 30, home: 1, away: 0 }], 70);
+    if (!flat) throw new Error("계단선이 서지 않았다");
+    // 30′의 계단 뒤에 70′까지 수평 이동 하나가 더 붙는다
+    expect(flat.home.trimEnd().endsWith(`H ${(70 / 90) * XG_BOX.width}`)).toBe(true);
+    // 종료 뒤(분이 마지막 점보다 이르지 않다)에는 덧붙지 않는다
+    const done = xgRaceOf([{ minute: 30, home: 1, away: 0 }], 30);
+    expect(done?.home.trimEnd().endsWith("V 0")).toBe(true);
   });
 });
