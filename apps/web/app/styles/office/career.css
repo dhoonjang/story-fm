@@ -10,7 +10,7 @@
   margin-bottom: 6px;
 }
 .manager-card .bg {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
   margin-bottom: 10px;
 }
@@ -36,11 +36,10 @@
 .mgr-head h3 {
   font-size: var(--fs-lg);
   font-weight: 700;
-  letter-spacing: -0.01em;
   margin-bottom: 6px;
 }
 .mgr-head .bg {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
 }
 /**
@@ -115,7 +114,7 @@
 /* 라벨 폭을 맞춰 막대의 시작점이 항목마다 어긋나지 않게 (보드 2자 · 선수단 3자) */
 .rep-label {
   min-width: 3.2em;
-  color: var(--muted);
+  color: var(--text-2);
 }
 .rep-bar {
   width: 48px;
@@ -133,7 +132,7 @@
 .rep-item b {
   min-width: 1.6em;
   color: var(--text);
-  font-weight: 700;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 .mgr-head .mgr-radar {
@@ -145,7 +144,7 @@
  * 한 줄이라 테두리를 주지 않는다: 라벨은 눈금 상자의 제목과 같은 결로 쓰되(작게·
  * 굵게·자간 넓게) 값보다 흐려서, 상자 밖의 꼬리표라는 것이 색으로 읽힌다.
  * ⚠️ 라벨을 `--dim`까지 낮추면 그 줄이 무엇의 값인지 말하는 유일한 글자가 배경에
- * 묻는다 — 여기서 흐림의 바닥은 `--muted`다.
+ * 묻는다 — 여기서 흐림의 바닥은 `--text-2`다.
  */
 .mgr-facts {
   display: flex;
@@ -162,7 +161,7 @@
   font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.06em;
-  color: var(--muted);
+  color: var(--text-2);
 }
 .mgr-fact dd {
   color: var(--silver);
@@ -192,7 +191,7 @@
   display: flex;
   align-items: baseline;
   gap: 7px;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
   white-space: nowrap;
 }
@@ -227,12 +226,12 @@
   padding: 10px 14px;
 }
 .achv .desc {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
 }
 /* 보드 평가 — 시즌 기록 표에서 유일하게 문장인 칸이라 가라앉혀 둔다 */
 .career-verdict {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
 }
 /* 경질 이력 줄 — 무직 카드(.dismissed-head .when)와 같은 붉은 표식을 쓴다 */
@@ -245,7 +244,7 @@
  * 경고색으로 칠하면 다른 구단이 위약금을 물고 데려간 해가 잘린 해로 읽힌다.
  */
 .career-sacked.career-moved {
-  color: var(--muted);
+  color: var(--text-2);
 }
 /**
  * 클럽 비전 항목 — 보드 평가 아래 딸린 **읽는 값**이다 (career.md §5).
@@ -268,13 +267,13 @@
   color: var(--text);
 }
 .vision-item .target {
-  color: var(--muted);
+  color: var(--text-2);
 }
 /* 달성률은 항목마다 자리가 같아야 세로로 비교된다 — 오른쪽 끝에 세우고 폭을 고정한다 */
 .vision-item .rate {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
-  color: var(--muted);
+  color: var(--text-2);
 }
 
 /**
@@ -307,7 +306,7 @@
 }
 .dismissed-why,
 .offer-why {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
 }
 .offer-list {
@@ -326,7 +325,7 @@
   border-left-color: var(--border);
 }
 .offer.vacant .offer-head .until {
-  color: var(--muted);
+  color: var(--text-2);
 }
 .offer-head {
   display: flex;
@@ -335,7 +334,7 @@
 }
 .offer-head .tier,
 .offer-head .until {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
 }
 /* 기한은 답이 사라지는 날이다 — 등급보다 앞으로 읽히게 오른쪽 끝에 세운다 */

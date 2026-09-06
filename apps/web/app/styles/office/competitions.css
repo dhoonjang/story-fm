@@ -18,15 +18,14 @@
   display: contents;
 }
 .recent-label {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
-  font-style: normal;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .recent-team {
-  color: var(--muted);
+  color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -37,12 +36,12 @@
 /* 우리 편 — 두 이름 중 어느 쪽이 우리인지가 이 줄에서 제일 먼저 읽혀야 한다 */
 .recent-us {
   color: var(--text);
-  font-weight: 700;
+  font-weight: 600;
 }
 /* 승패는 스코어의 **색**이 말한다 — 낱말을 덧붙이면 줄이 하나 더 길어진다 */
 .recent-score {
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
 }
 .recent-W .recent-score {
   color: var(--win);
@@ -57,7 +56,6 @@
 .recent-pens {
   color: var(--text-3);
   font-size: var(--fs-xs);
-  font-style: normal;
   white-space: nowrap;
 }
 
@@ -89,7 +87,7 @@
   flex-wrap: wrap;
   gap: 4px 14px;
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
   margin-top: 6px;
 }
 .zone-key {
@@ -118,11 +116,11 @@
   background: var(--club-wash);
 }
 .euro-tie .euro-when {
-  color: var(--muted);
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 .euro-tie .euro-score {
-  color: var(--muted);
+  color: var(--text-2);
   white-space: nowrap;
 }
 
@@ -167,7 +165,7 @@
   padding: 10px 14px;
 }
 .comp-head span {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
   text-align: right;
 }
@@ -220,7 +218,7 @@
   background: var(--club-wash);
 }
 .fixture .when {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
   white-space: nowrap;
 }
@@ -244,12 +242,12 @@
 }
 .fixture .mid {
   text-align: center;
-  color: var(--muted);
+  color: var(--text-2);
   white-space: nowrap;
 }
 .fixture .mid.played {
   color: var(--text);
-  font-weight: 700;
+  font-weight: 600;
 }
 /* 굴러가는 경기 — 끝난 경기(밝은 700)와 아직인 경기(2층) 사이의 자리. 색은 주의색이
    아니라 글자 1층이다: 옆 구장은 경고가 아니라 지금 벌어지는 사실이다 */
@@ -325,7 +323,7 @@
   color: var(--gold);
 }
 .honours-last {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
 }
 .honours-won {
@@ -338,7 +336,6 @@
   border-radius: var(--r-xs);
   color: var(--text-2);
   font-size: var(--fs-xs);
-  font-style: normal;
   font-variant-numeric: tabular-nums;
   padding: 1px 6px;
 }
@@ -395,7 +392,6 @@
 .season-slot i {
   color: var(--text-3);
   font-size: var(--fs-xs);
-  font-style: normal;
 }
 /* 우리 순위 — 구단 색은 상태 자리에 서지 않으므로 글자 무게로만 갈린다 */
 .season-slot.ours b {
@@ -421,17 +417,15 @@
 .season-award i {
   color: var(--gold);
   font-size: var(--fs-xs);
-  font-style: normal;
   white-space: nowrap;
 }
 .season-award span {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
 }
 .season-award em {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
-  font-style: normal;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -485,7 +479,6 @@
   gap: 2px;
 }
 .form-mark {
-  font-style: normal;
   font-size: var(--fs-xs);
   line-height: 1.5;
   width: 1.35em;
@@ -510,5 +503,5 @@
 
 /* 읽기만 하는 곁칸 — 개인 순위의 팀 약칭, 순위표의 예상 순위. 한 톤 낮춘다 */
 .dim-cell {
-  color: var(--muted);
+  color: var(--text-2);
 }

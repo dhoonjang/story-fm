@@ -42,9 +42,9 @@
 }
 .cal-month-title {
   font-size: var(--fs-md);
-  font-weight: 700;
+  font-weight: 600;
   margin-bottom: 8px;
-  color: var(--muted);
+  color: var(--text-2);
 }
 .cal-grid {
   display: grid;
@@ -54,7 +54,7 @@
 .cal-dow {
   text-align: center;
   font-size: var(--fs-2xs);
-  color: var(--muted);
+  color: var(--text-2);
   padding-bottom: 4px;
 }
 .cal-cell {
@@ -104,7 +104,7 @@
   align-self: flex-start;
   padding-bottom: 1px;
   color: var(--text);
-  font-weight: 700;
+  font-weight: 600;
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 
@@ -129,7 +129,7 @@
   word-break: keep-all;
 }
 .cal-fx-opp {
-  font-weight: 700;
+  font-weight: 500;
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
@@ -144,7 +144,7 @@
 }
 .cal-fx-score {
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
+  font-weight: 600;
 }
 /**
  * 남은 경기 옆의 상대 전력 — 스코어가 설 자리에 대신 선다 (docs/data/team.md §2.2).
@@ -223,7 +223,7 @@
   width: 13px;
   height: 13px;
   align-self: center;
-  color: var(--muted);
+  color: var(--text-2);
   opacity: 0.85;
 }
 /* 색은 뜻이 있을 때만 — 나머지는 글자와 같은 톤으로 읽힌다 */
@@ -357,7 +357,7 @@
   font-size: var(--fs-sm);
 }
 .cal-sched-time {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
 }
@@ -397,17 +397,17 @@
 }
 .cal-sched-note {
   grid-column: 3;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
 }
 /* 쉬는 날은 비워 둔 자리다 — 점(.cal-mark.rest)과 같이 눈에 덜 띈다 */
 .cal-sched.k-rest .cal-sched-name {
-  color: var(--muted);
+  color: var(--text-2);
   font-weight: 500;
 }
 /* 아직 대진이 없다 — 칸의 .cal-fx.pending과 같은 흐림 */
 .cal-sched.pending .cal-sched-name {
-  color: var(--muted);
+  color: var(--text-2);
   font-weight: 500;
 }
 /* 다음 경기 — 글자로 "다음"이라 쓰지 않고 색으로 알린다 (칸의 .cal-fx.next와 같은 파랑) */
@@ -416,7 +416,7 @@
 }
 /* 승·무·패 — 달력 칸의 경기 칩과 같은 세 색 */
 .cal-detail-result {
-  font-weight: 700;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 .cal-detail-result.r-W {
@@ -429,7 +429,7 @@
   color: var(--draw);
 }
 .cal-detail-sub {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
   padding: 1px 0;
 }

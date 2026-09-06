@@ -83,7 +83,7 @@
 }
 .kg-club {
   font-size: var(--fs-lg);
-  font-weight: 700;
+  font-weight: 600;
   line-height: var(--lh-ui);
   /* 한국어는 어절로 끊는다 — 없으면 "맨체스터 유나 / 이티드"가 된다 */
   word-break: keep-all;
@@ -104,7 +104,7 @@
 .kg-rating b {
   color: var(--text);
   font-size: var(--fs-md);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 /**

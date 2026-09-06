@@ -84,7 +84,7 @@ button:disabled,
 }
 
 .hint {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
   margin-top: 10px;
   line-height: var(--lh-ui);
@@ -100,7 +100,7 @@ button:disabled,
   border-radius: var(--r-xs);
   padding: 1px 6px;
   background: var(--panel-2);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .badge.warn {
   background: color-mix(in srgb, var(--loss) 12%, var(--panel));
@@ -114,11 +114,11 @@ button:disabled,
   gap: 10px;
   margin-bottom: 6px;
   font-size: var(--fs-sm);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .attr-row > span:last-child {
   color: var(--text);
-  font-weight: 700;
+  font-weight: 500;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -135,7 +135,7 @@ button:disabled,
 /* 빈 상태 — **왼쪽 정렬**이다. 가운데로 두면 제목(왼쪽)과 축이 어긋나 화면이
    지그재그로 읽힌다. 비어 있다는 사실도 목록의 한 줄일 뿐이다 */
 .empty {
-  color: var(--muted);
+  color: var(--text-2);
   padding: 10px 0;
 }
 /**
@@ -196,7 +196,7 @@ button:disabled,
 .tt-sub {
   display: block;
   margin-top: 2px;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
 }
 .tt-head-tools {
@@ -211,7 +211,7 @@ button:disabled,
   background: var(--panel-2);
   border: none;
   border-radius: var(--r-sm);
-  color: var(--muted);
+  color: var(--text-2);
   padding: 2px 8px;
   cursor: pointer;
 }
@@ -244,7 +244,7 @@ button:disabled,
 }
 /* 비었을 때·실패했을 때의 한 줄 — 개발 도구의 말투다 */
 .tt-note {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-md);
   line-height: var(--lh-ui);
   padding: var(--sp-3) 0;
@@ -288,14 +288,13 @@ button:disabled,
 }
 /* 호출 순서 — 무엇이 먼저 돌았는지가 곧 그 턴의 경로다 */
 .tt-agent > i {
-  font-style: normal;
   font-size: var(--fs-2xs);
   color: var(--dim);
 }
 .tt-model {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .tt-facts {
   margin-left: auto;
@@ -303,7 +302,7 @@ button:disabled,
   flex-wrap: wrap;
   gap: var(--sp-2);
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 .tt-error {
@@ -353,7 +352,7 @@ button:disabled,
   line-height: 1;
 }
 .tt-side-facts {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-2xs);
   font-variant-numeric: tabular-nums;
 }
@@ -398,7 +397,7 @@ button:disabled,
   color: var(--text);
 }
 .tt-block-label {
-  font-weight: 700;
+  font-weight: 600;
   color: var(--silver);
   font-family: var(--font-mono);
 }
@@ -451,7 +450,6 @@ button:disabled,
   flex: none;
   width: 2.2em;
   text-align: right;
-  font-style: normal;
   font-size: var(--fs-2xs);
   color: var(--dim);
   font-variant-numeric: tabular-nums;
@@ -461,7 +459,7 @@ button:disabled,
   width: 5.5em;
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .tt-hist-role.in {
   color: var(--accent-2);
@@ -481,7 +479,7 @@ button:disabled,
 .tt-hist-peek {
   flex: 1;
   min-width: 0;
-  color: var(--muted);
+  color: var(--text-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -541,7 +539,7 @@ button:disabled,
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
   padding: 4px 10px;
   cursor: pointer;
@@ -562,7 +560,6 @@ button:disabled,
 }
 /* 호출 순서 — 무엇이 먼저 돌았는지가 곧 그 턴의 경로다 (`.tt-agent > i`와 같은 결) */
 .tt-tab > i {
-  font-style: normal;
   font-size: var(--fs-2xs);
   color: var(--dim);
 }
@@ -574,7 +571,6 @@ button:disabled,
 }
 /* 실패한 호출은 열어 봐야 아는 것이 아니라 탭에서 보인다 */
 .tt-tab-bad {
-  font-style: normal;
   font-size: var(--fs-2xs);
   color: var(--loss);
 }
@@ -600,7 +596,7 @@ button:disabled,
 }
 .tt-flow-facts {
   margin-left: auto;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-2xs);
   font-variant-numeric: tabular-nums;
 }
@@ -626,7 +622,6 @@ button:disabled,
   background: var(--panel-2);
 }
 .tt-step-no {
-  font-style: normal;
   font-size: var(--fs-2xs);
   color: var(--dim);
   font-variant-numeric: tabular-nums;
@@ -642,7 +637,7 @@ button:disabled,
   background: var(--panel-2);
   border-radius: var(--r-xs);
   padding: 0 5px;
-  color: var(--muted);
+  color: var(--text-2);
 }
 .tt-kind.skill {
   color: var(--accent);
@@ -666,7 +661,7 @@ button:disabled,
 .tt-outcome {
   flex: 1;
   min-width: 0;
-  color: var(--muted);
+  color: var(--text-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
