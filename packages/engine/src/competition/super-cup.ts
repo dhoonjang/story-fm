@@ -1,4 +1,5 @@
-import type { MatchRecord } from "@story-fm/domain";
+import type { MatchRecord, TickSink } from "@story-fm/domain";
+import { pushEvent } from "@story-fm/domain";
 import { cupLegMatchId } from "@story-fm/domain";
 import { addDays, buildSeasonCalendar } from "./calendar";
 import { cupCatalog } from "../data/cup-catalog";
@@ -149,7 +150,7 @@ export function superCupChampion(state: GameState, cupId: string): string | null
  * 이 대회를 이미 결산했다"는 사실이라, 매일 부르는 이 함수가 같은 우승을 되풀이해
  * 보고하지 않는다.
  */
-export function advanceSuperCups(state: GameState, digest: string[]): void {
+export function advanceSuperCups(state: GameState, digest: TickSink): void {
   for (const cup of SUPER_CUP_CATALOG) {
     const match = superCupMatch(state, cup.id);
     if (!match?.result) continue;
@@ -187,13 +188,13 @@ export function advanceSuperCups(state: GameState, digest: string[]): void {
     });
 
     if (champion === state.userTeamId) {
-      digest.push(`🏆 ${cup.name} 우승 — ${teamNameIn(state, runnerUp)}을 꺾었다`);
+      pushEvent(digest, "news", `${cup.name} 우승 — ${teamNameIn(state, runnerUp)}을 꺾었다`);
       pushNarrative(state, `${cup.name} 우승`, 4);
     } else if (runnerUp === state.userTeamId) {
-      digest.push(`${cup.short} 준우승 — ${teamNameIn(state, champion)}에 졌다`);
+      pushEvent(digest, "news", `${cup.short} 준우승 — ${teamNameIn(state, champion)}에 졌다`);
       pushNarrative(state, `${cup.short} 준우승`, 3);
     } else {
-      digest.push(`${cup.short} 우승: ${teamNameIn(state, champion)}`);
+      pushEvent(digest, "news", `${cup.short} 우승: ${teamNameIn(state, champion)}`);
     }
   }
 }

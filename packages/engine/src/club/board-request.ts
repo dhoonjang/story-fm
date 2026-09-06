@@ -3,6 +3,7 @@ import type {
   BoardConditionKind,
   BoardRequest,
   BoardRequestKind,
+  TickSink,
 } from "@story-fm/domain";
 import { BOARD_REQUEST_LABEL, boardRequestAmountText } from "@story-fm/domain";
 import type { GameState } from "../core/state";
@@ -326,7 +327,7 @@ export function requestBoard(state: GameState, input: RequestBoardInput): Comman
  * 좌석을 세운다. 공사가 먼저다 — 오늘 좌석이 서야 오늘 거는 새 요청의 여력이
  * 늘어난 수용인원을 읽는다.
  */
-export function tickBoardRequests(state: GameState, digest: string[]): void {
+export function tickBoardRequests(state: GameState, digest: TickSink): void {
   const requests = (state.boardRequests ??= []);
   for (const request of requests) deliverStadium(state, request, digest);
   // 기한이 지난 영입 승인을 먼저 지운다 — 오늘 비는 몫이 오늘 거는 요청의 여력이다
@@ -340,7 +341,7 @@ export function tickBoardRequests(state: GameState, digest: string[]): void {
 }
 
 /** 답이 도착했다 — 오늘의 한도와 부른 값을 견준다 */
-function judgeRequest(state: GameState, request: BoardRequest, digest: string[]): void {
+function judgeRequest(state: GameState, request: BoardRequest, digest: TickSink): void {
   const ceiling = boardRequestCeiling(state, request.kind);
   const granted = Math.min(request.amount, ceiling);
 
@@ -404,7 +405,7 @@ function counterCondition(
  * 충족된 날 한도를 다시 재지 않는다: 되건 것은 약속이다. 단 그날 예산이 동결이면
  * 거절이다 — PSR도 부채도 규정의 문제라 약속으로 풀리지 않는다 (finance.md §9.2).
  */
-function judgeCondition(state: GameState, request: BoardRequest, digest: string[]): void {
+function judgeCondition(state: GameState, request: BoardRequest, digest: TickSink): void {
   const condition = request.condition;
   if (!condition) return;
   if (conditionMet(state, condition)) {
@@ -443,7 +444,7 @@ function raisedSince(state: GameState, since: string): number {
 }
 
 /** 답이 끝났다 — 나온 값이 그 자리에서 장부에 앉는다 */
-function approve(state: GameState, request: BoardRequest, granted: number, digest: string[]): void {
+function approve(state: GameState, request: BoardRequest, granted: number, digest: TickSink): void {
   request.status = "approved";
   request.granted = granted;
   request.resolvedOn = state.date;
@@ -458,7 +459,7 @@ function approve(state: GameState, request: BoardRequest, granted: number, diges
 }
 
 /** 답이 끝났다 — 아무것도 나오지 않았다 */
-function reject(state: GameState, request: BoardRequest, digest: string[]): void {
+function reject(state: GameState, request: BoardRequest, digest: TickSink): void {
   request.status = "rejected";
   request.granted = 0;
   request.resolvedOn = state.date;
@@ -572,7 +573,7 @@ export function consumeEarmark(state: GameState, gamePlayerId: string, dueNow: n
 }
 
 /** 기한이 지난 승인분을 지운다 — 만료가 없으면 허가가 아니라 예산이다 */
-function expireEarmarks(state: GameState, digest: string[]): void {
+function expireEarmarks(state: GameState, digest: TickSink): void {
   const finance = financeOf(state, state.userTeamId);
   const rows = finance.earmarked;
   if (!rows || rows.length === 0) return;
@@ -592,7 +593,7 @@ function expireEarmarks(state: GameState, digest: string[]): void {
  * 세이브의 구단 카드는 셋(구장·수용인원·상업 등급)이 함께 있어야 카탈로그를
  * 덮으므로(`clubProfileIn`), 지금 값 그대로 셋을 다 적는다.
  */
-function deliverStadium(state: GameState, request: BoardRequest, digest: string[]): void {
+function deliverStadium(state: GameState, request: BoardRequest, digest: TickSink): void {
   if (request.kind !== "stadium" || request.status !== "approved") return;
   if (request.deliveredOn !== undefined || !request.deliversOn) return;
   if (state.date < request.deliversOn) return;

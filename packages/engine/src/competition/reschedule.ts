@@ -1,4 +1,5 @@
-import type { MatchRecord } from "@story-fm/domain";
+import type { MatchRecord, TickSink } from "@story-fm/domain";
+import { pushEvent } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import { addDays, dayOfWeek, tooClose } from "./calendar";
 import { competitionShortName, isCup } from "../data/cup-catalog";
@@ -192,7 +193,7 @@ export function clearForCup(
   state: GameState,
   teams: string[],
   date: string,
-  digest: string[],
+  digest: TickSink,
   time?: string,
 ): boolean {
   const clashes = clashesToClear(state, teams, date, time);
@@ -215,8 +216,10 @@ export function clearForCup(
   for (const m of clashes) {
     if (m.homeTeamId !== state.userTeamId && m.awayTeamId !== state.userTeamId) continue;
     const opponent = m.homeTeamId === state.userTeamId ? m.awayTeamId : m.homeTeamId;
-    digest.push(
-      `🗓️ ${competitionShortName(m.competitionId)} ${m.round}R vs ${teamName(opponent)} 경기가 ${m.date}로 연기됐다 — 컵 일정과 겹쳤다`,
+    pushEvent(
+      digest,
+      "matchday",
+      `${competitionShortName(m.competitionId)} ${m.round}R vs ${teamName(opponent)} 경기가 ${m.date}로 연기됐다 — 컵 일정과 겹쳤다`,
     );
   }
   return true;

@@ -128,6 +128,7 @@ import {
   type MissionReportCard,
   type PersonaRelation,
   type ScoutReportCard,
+  type TickEvent,
   injuryHistoryText,
 } from "@story-fm/domain";
 
@@ -480,7 +481,13 @@ function dayGap(from: string, to: string): number {
 export interface TimePassed {
   from: string;
   stopped: string;
-  digest: string[];
+  /**
+   * 그 사이 벌어진 일 — 코어가 낸 **사건 배열 그대로**다 (overview.md §2).
+   *
+   * ⚠️ 프롬프트에는 **문장만** 간다. 꼬리표(`kind`)는 화면의 어휘라
+   * (`injury`·`board` 같은 영문 enum) 데이터 블록에 새면 모델이 그 낱말로 쓴다.
+   */
+  events: TickEvent[];
 }
 
 /**
@@ -645,11 +652,11 @@ function approachBlock(state: GameState): string | null {
 
 /** 시간이 흘렀다 — 손잡이로 넘긴 턴에만 붙는 덩어리. 재직·무직 스냅샷이 같이 쓴다 */
 function timePassedLine(state: GameState, passed?: TimePassed | null): string | null {
-  if (!passed || (passed.digest.length === 0 && passed.from === state.date)) return null;
+  if (!passed || (passed.events.length === 0 && passed.from === state.date)) return null;
   return lines(
     `${passed.from} → ${state.date} (${passed.stopped}) — 장면은 ${state.date}에서 연다.`,
-    passed.digest.length > 0
-      ? passed.digest.map((d) => `- ${d}`).join("\n")
+    passed.events.length > 0
+      ? passed.events.map((e) => `- ${e.text}`).join("\n")
       : `그 사이 특별한 일은 없었다.`,
   );
 }

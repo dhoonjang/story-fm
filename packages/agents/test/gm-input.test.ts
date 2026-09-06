@@ -1447,11 +1447,14 @@ describe("시간 이동 손잡이", () => {
     const note = buildGmStateNote(state, {
       from: "2026-07-01",
       stopped: "요청한 만큼 진행했다",
-      digest: ["훈련 중 부상: 손흥민 — 햄스트링, 약 12일 결장 예상"],
+      events: [{ kind: "injury", text: "훈련 중 부상: 손흥민 — 햄스트링, 약 12일 결장 예상" }],
     });
     expect(note).toContain("<time_passed>");
     expect(note).toContain("2026-07-01 → ");
     expect(note).toContain("햄스트링");
+    // 종류는 **화면의 어휘다** — 영문 enum이 데이터 블록에 새면 모델이 그 낱말로 쓴다
+    // (overview.md §2). 문장만 간다
+    expect(note).not.toContain("injury");
   });
 
   it("손잡이를 누르지 않은 턴에는 그 블록이 없다", () => {
@@ -1474,7 +1477,7 @@ describe("시계는 장면이 걸린 만큼 민다", () => {
     expect(state.date).toBe(before);
     expect(clockOf(state)).toBe("15:20");
     // 하루가 소화되지 않았으므로 브리핑할 것도 없다
-    expect(moved.digest).toHaveLength(0);
+    expect(moved.events).toHaveLength(0);
   });
 
   it("되감기지는 않는다 — 이미 지난 시각을 적어도 시계는 그대로다", () => {

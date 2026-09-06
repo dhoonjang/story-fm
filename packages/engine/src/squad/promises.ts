@@ -1,4 +1,10 @@
-import type { GamePlayer, ManagerPromise, PromiseKind, SquadStatus } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  ManagerPromise,
+  PromiseKind,
+  SquadStatus,
+  TickSink,
+} from "@story-fm/domain";
 import {
   PROMISE_KIND_KO,
   SQUAD_STATUS_KO,
@@ -413,7 +419,7 @@ function verdictOf(state: GameState, promise: ManagerPromise, player: GamePlayer
  * 판정은 기한 **하루**뿐이다. 지난 약속은 `kept`·`broken`으로 남아 이력이 되고,
  * 같은 선수에게 다시 약속할 수 있는 것은 그때부터다.
  */
-export function tickPromises(state: GameState, digest: string[]): void {
+export function tickPromises(state: GameState, digest: TickSink): void {
   const due = openPromises(state).filter((p) => p.dueOn <= state.date);
   if (due.length === 0) return;
   for (const promise of due) {

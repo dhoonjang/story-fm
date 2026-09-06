@@ -1,4 +1,4 @@
-import type { BuyBackClause, GamePlayer, SellOnClause, Transfer } from "@story-fm/domain";
+import type { BuyBackClause, GamePlayer, SellOnClause, Transfer, TickSink } from "@story-fm/domain";
 import {
   BUYBACK_EXERCISE_MARGIN,
   ageOf,
@@ -100,7 +100,7 @@ export function settleSellOn(
     resaleFee: number;
     /** 근거 원장 — 이번 재판매의 TRANSFER row */
     resaleTransferId: string;
-    digest?: string[];
+    digest?: TickSink;
   },
 ): number {
   if (input.resaleFee <= 0) return 0;
@@ -136,7 +136,7 @@ export function settleSellOn(
       payeeTeamId === state.userTeamId
         ? `${name} 셀온 ${rate}% 정산 — ${teamName(input.sellerTeamId)}에서 ${formatMoney(amount)} 수령`
         : `${name} 셀온 ${rate}% 정산 — ${teamName(payeeTeamId)}에 ${formatMoney(amount)} 지급`;
-    input.digest?.push(`💷 ${line}`);
+    input.digest?.push(`${line}`);
     pushNarrative(state, line, 3);
   }
   return amount;
@@ -343,7 +343,7 @@ export function exerciseBuyBack(state: GameState, input: { playerId: string }): 
  */
 export function runBuyBacks(
   state: GameState,
-  digest: string[],
+  digest: TickSink,
   affordable: (teamId: string, fee: number) => boolean,
 ): void {
   for (const right of liveBuyBacks(state)) {
@@ -359,7 +359,7 @@ export function runBuyBacks(
      */
     if (done.fromTeamId !== state.userTeamId) continue;
     const line = `${right.player.name}이(가) 되사기 조항으로 ${teamName(right.holderTeamId)}에 돌아갔습니다 — ${formatMoney(done.fee)}`;
-    digest.push(`↩️ ${line}`);
+    digest.push(`${line}`);
     pushNarrative(state, line, 4);
   }
 }

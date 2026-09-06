@@ -15,6 +15,7 @@ import type {
   PressStance,
   PressTrigger,
   RivalVoice,
+  TickSink,
 } from "@story-fm/domain";
 import {
   ageOf,
@@ -887,7 +888,7 @@ const DAYS_PER_YEAR = 365;
 export function openAppointmentPress(
   state: GameState,
   predecessor?: { position?: number; target: number; expectationCode: BoardExpectationCode },
-  digest?: string[],
+  digest?: TickSink,
 ): void {
   const conference = buildAppointmentPress(state, predecessor);
   if ((state.pressConferences ?? []).some((c) => c.id === conference.id)) return;
@@ -1601,7 +1602,7 @@ function biggestSigning(state: GameState): { player: GamePlayer; fee: number } |
  * 아니면 자리가 없다. 트리거는 둘이고 **더비가 개막을 이긴다** — 개막전이 더비면
  * 물어야 할 것은 더비 쪽이다.
  */
-export function openEvePress(state: GameState, digest?: string[]): void {
+export function openEvePress(state: GameState, digest?: TickSink): void {
   const leagueId = leagueOfTeamIn(state, state.userTeamId);
   const tomorrow = addDays(state.date, 1);
   /**
@@ -1819,7 +1820,7 @@ export function pendingPress(state: GameState): PressConference | null {
  * 개막 전야 회견이 지난 시즌의 자리를 방치로 읽어, 새 시즌 첫날에 지난 시즌의
  * 대가가 청구된다.
  */
-export function declinePendingPress(state: GameState, digest?: string[]): void {
+export function declinePendingPress(state: GameState, digest?: TickSink): void {
   const open = pendingPress(state);
   if (!open) return;
   applyPressOutcome(state, open, null);
@@ -1847,7 +1848,7 @@ export function expirePendingPress(state: GameState): void {
  * 답하지 않고 다음 경기로 가버린 것이고, 실제로도 그 자리는 지나간 것이다.
  * 대가도 거절과 같아야 한다 — 무시가 공짜면 아무도 답하지 않는다.
  */
-export function openPress(state: GameState, conference: PressConference, digest?: string[]): void {
+export function openPress(state: GameState, conference: PressConference, digest?: TickSink): void {
   state.pressConferences ??= [];
   declinePendingPress(state, digest);
   loadLeaks(state, conference);

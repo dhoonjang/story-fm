@@ -5,6 +5,7 @@ import type {
   GamePlayer,
   PressFact,
   TransferWindow,
+  TickSink,
 } from "@story-fm/domain";
 import { BOARD_DEMAND_LABEL, boardDemandText, DEMAND_LEVERS } from "@story-fm/domain";
 import type { GameState } from "../core/state";
@@ -190,7 +191,7 @@ export function lastJudgedDemand(state: GameState): BoardDemand | null {
  * 순서가 뜻을 갖는다: **판정이 발행보다 먼저다** — 창이 닫혀 기한이 지난 요청을
  * 정산한 뒤라야, 다음 창이 열린 날 새 요청이 그 자리를 이어받는다.
  */
-export function tickBoardDemands(state: GameState, digest: string[]): void {
+export function tickBoardDemands(state: GameState, digest: TickSink): void {
   const demands = (state.boardDemands ??= []);
   const open = demands.find((d) => d.status === "open");
   if (open) judgeDemand(state, open, digest);
@@ -206,7 +207,7 @@ export function tickBoardDemands(state: GameState, digest: string[]): void {
  * **창이 열려 있는지가 갈래를 가른다** (career.md §5.2): 열려 있으면 이적 시장의
  * 조건이(재정 갈래가 먼저 묻는다), 닫혀 있으면 창 밖의 기용 요청이 선다.
  */
-function issueDemand(state: GameState, demands: BoardDemand[], digest: string[]): void {
+function issueDemand(state: GameState, demands: BoardDemand[], digest: TickSink): void {
   const window = windowOpenForTeam(state, state.userTeamId);
   const demand = window ? windowDemand(state, demands, window) : seasonDemand(state, demands);
   if (!demand) return;
@@ -477,7 +478,7 @@ function starPlayer(state: GameState): string | null {
  * 창이 닫힌 뒤에는 어차피 되돌릴 수 없는 사실이라서다. 나머지는 기한이 지난 첫날
  * 판정한다: 창이 닫히기 전의 순지출은 마지막 날의 매각 한 건으로 뒤집힐 수 있다.
  */
-function judgeDemand(state: GameState, demand: BoardDemand, digest: string[]): void {
+function judgeDemand(state: GameState, demand: BoardDemand, digest: TickSink): void {
   const expired = state.date > demand.deadline;
   const verdict = ((): boolean | null => {
     switch (demand.kind) {

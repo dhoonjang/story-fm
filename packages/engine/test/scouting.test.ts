@@ -49,6 +49,7 @@ import {
   ratingTier,
   scoutReportCard,
   scoutReportLine,
+  eventTexts,
 } from "@story-fm/engine";
 import {
   ageOf,
@@ -362,7 +363,7 @@ describe("스카우트 파견 규칙", () => {
     const target = anyOpponent(state);
     scoutPlayer(state, target.id);
     const outcome = advanceTime(state, { days: SCOUT_DAYS });
-    expect(outcome.digest.join("\n")).toContain("스카우트 보고서 도착");
+    expect(eventTexts(outcome.events).join("\n")).toContain("스카우트 보고서 도착");
   });
 
   it("없는 선수는 반려한다", () => {
@@ -856,8 +857,9 @@ describe("보고서 한 장", () => {
     let arrival = "";
     for (let i = 0; i < SCOUT_DAYS * 3 && !arrival; i++) {
       arrival =
-        advanceTime(state, { days: 1 }).digest.find((d) => d.startsWith("스카우트 보고서 도착")) ??
-        "";
+        eventTexts(advanceTime(state, { days: 1 }).events).find((d) =>
+          d.startsWith("스카우트 보고서 도착"),
+        ) ?? "";
     }
     const card = scoutReportCard(state, p.id)!;
     expect(arrival).toBe(`스카우트 보고서 도착 — ${scoutReportLine(state, p.id)}`);

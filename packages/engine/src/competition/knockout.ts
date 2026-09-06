@@ -1,4 +1,5 @@
-import type { MatchRecord, MatchStage } from "@story-fm/domain";
+import type { MatchRecord, MatchStage, TickSink } from "@story-fm/domain";
+import { pushEvent } from "@story-fm/domain";
 import { sortEntries } from "./calendar";
 import { pairOf } from "./extra-time";
 import { pushNarrative, type GameState } from "../core/state";
@@ -64,13 +65,15 @@ export interface TieReport {
 }
 
 /** 우리 팀이 뛴 단계의 결과 보고 — 다음 단계 편성과 같은 시점에 한 번만 */
-export function reportOurTie(state: GameState, tie: TieReport, digest: string[]): void {
+export function reportOurTie(state: GameState, tie: TieReport, digest: TickSink): void {
   const played = tie.matches.some(
     (m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
   );
   if (!played) return;
   const advanced = tie.winners.includes(state.userTeamId);
   const what = `${tie.short} ${tie.label} ${advanced ? "통과" : "탈락"}`;
-  digest.push(what);
+  // 통과·탈락은 추첨이 아니라 **경기가 낸 결과**다 — 그 패스가 추첨으로 잡혀 있어도
+  // 이 줄만 경기로 선다 (season.md §5)
+  pushEvent(digest, "matchday", what);
   pushNarrative(state, what, 4);
 }
