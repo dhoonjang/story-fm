@@ -87,8 +87,12 @@ export function matchHeadFacts(
         scorer: goal.scorer,
         assist: goal.assist,
         ours: goal.ours,
-        // 표식이 아는 것은 넣은 팀 이름이다 — 좌우 자리는 홈 기준이라 이름으로 가른다
-        side: goal.team === log.home.name ? "home" : "away",
+        /**
+         * 좌우 자리는 홈 기준이라 편을 홈/원정으로 되돌려야 한다. 표식이 아는 것은
+         * 「우리 골인가」뿐이므로 **우리가 어느 쪽인지**로 가른다 — 팀 이름을 맞대
+         * 보면 약칭·정식명이 갈리는 자리에서 조용히 틀린다.
+         */
+        side: goal.ours === (ours === "home") ? "home" : "away",
       });
     }
   }

@@ -6,6 +6,7 @@ import type { GamePayload, GameSlice } from "@/lib/store";
 import { humanDate } from "@/lib/dateline";
 import { matchHeadFacts, matchScoreOf, matchTitleOf } from "@/lib/match-head";
 import { mergeSlice } from "@/lib/game-slice";
+import { reducedMotion } from "@/lib/motion";
 import type { AttentionItemView, ChatTurn } from "@story-fm/engine";
 import type { TurnOperation } from "@story-fm/agents";
 import { ChatTurnView, turnStamp } from "./chat";
@@ -65,6 +66,14 @@ type Panel = (typeof PANELS)[number]["key"];
  * 접히는 동안은 내용을 그려 두고(빈 칸이 접히면 화면이 툭 꺼진다) 이만큼 뒤에 지운다.
  */
 const PANEL_ANIM_MS = 260;
+
+/**
+ * 킥오프 의식 — **스코어보드가 위에서 내려오고, 확인 한 번에 도로 걷힌다.**
+ * `match.css`의 `kickoff-drop`·`kickoff-lift`와 같은 값이어야 한다
+ * (ui/design-system.md §5 모션 5). 90분이 열리고 닫힌 것이 화면의 움직임으로 남는
+ * 자리는 여기 하나다.
+ */
+const KICKOFF_SLIDE_MS = 280;
 
 /**
  * 턴이 끝난 뒤 서버 상태를 다시 받아 오는 시도 횟수 — 한 번은 `settled=1`의 상한
@@ -285,6 +294,26 @@ export function GameScreen({ gameId }: { gameId: string }) {
    */
   const [finished, setFinished] = useState<string | null>(null);
   const wasInMatch = useRef<string | null>(null);
+  /**
+   * 휘슬 뒤에도 남는 스코어보드 — **종료 카드가 닫힐 때 위로 걷힌다.**
+   *
+   * 판이 사라지는 것은 마감이 끝난 순간이지만, 그때 스코어보드까지 함께 꺼지면
+   * 킥오프에 내려온 것이 아무 일 없이 증발한다. 마지막으로 선 판을 쥐고 있다가
+   * 「확인」의 280ms 동안 도로 올려 보낸다 (design-system.md §5 모션 5).
+   */
+  const lastLive = useRef<NonNullable<GamePayload["views"]["match"]> | null>(null);
+  /** 스코어보드가 걷히는 중 — 이 동안만 판이 화면에 남는다 */
+  const [whistleClosing, setWhistleClosing] = useState(false);
+  if (liveMatch) lastLive.current = liveMatch;
+  /** 지금 스코어보드가 읽을 판 — 경기 중이면 그 판, 휘슬 뒤면 마지막으로 선 판 */
+  const whistleView = liveMatch ?? (finished !== null || whistleClosing ? lastLive.current : null);
+  const closeFulltime = useCallback(() => {
+    setFinished(null);
+    // 움직임을 줄여 달라고 했으면 타이머도 0이다 — 멎은 화면을 붙들지 않는다
+    if (reducedMotion()) return;
+    setWhistleClosing(true);
+    window.setTimeout(() => setWhistleClosing(false), KICKOFF_SLIDE_MS);
+  }, []);
   /** 경기 중 오른쪽에 선 탭 — 킥오프 직후엔 판세부터 본다 */
   const [matchTab, setMatchTab] = useState<MatchTab>("판세");
   /** 선수 탭의 하위 갈래 — 우리 팀과 상대는 담는 게 같고 정확도만 다르다 */
@@ -991,8 +1020,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
             </nav>
           )}
         </header>
-        {/* 경기 머리 — 어느 탭을 보든 스코어·시계·득점자는 사라지지 않는다 */}
-        {liveMatch && <MatchHeadline match={liveMatch} />}
+        {/* 경기 머리 — 어느 탭을 보든 스코어·시계·득점자는 사라지지 않는다.
+          휘슬 뒤에도 종료 카드가 닫힐 때까지 남아 있다가 위로 걷힌다 */}
+        {whistleView && <MatchHeadline match={whistleView} closing={whistleClosing} />}
         {/* 입장 확인 — 경기의 문. 매치데이 프로그램 한 장이 그 자리에 선다 */}
         {pendingMatch?.beforeKickoff === true && (
           <KickoffGate
@@ -1030,11 +1060,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
                 matchId={finished}
                 head={matchHeadFacts(game.matchLogs[finished], game.chat, finished)}
               />
-              <button
-                className="primary-btn"
-                onClick={() => setFinished(null)}
-                data-testid="fulltime-close"
-              >
+              <button className="primary-btn" onClick={closeFulltime} data-testid="fulltime-close">
                 확인
               </button>
             </div>
