@@ -17,7 +17,7 @@ const PERMANENT_ERROR = "요청이나 설정이 잘못됐습니다 — 서버 �
  */
 test("LLM 실패 배너", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
+  await expect(page.getByTestId("league-list")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await page.getByTestId("team-arsenal").click();
   await page.getByTestId("manager-name").fill("에러확인");
@@ -86,7 +86,7 @@ test("LLM 실패 배너", async ({ page }) => {
  */
 test("멎은 턴도 실패로 끝나고 다음 턴을 막지 않는다", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
+  await expect(page.getByTestId("league-list")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await page.getByTestId("team-arsenal").click();
   await page.getByTestId("manager-name").fill("무응답확인");
