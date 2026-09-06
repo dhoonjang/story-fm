@@ -28,7 +28,7 @@ import {
   type GameToolSpec,
 } from "@story-fm/llm";
 import { agingDeclineLine } from "./aging-line";
-import { sanitizeCasterText } from "./gm-input";
+import { TURN_EXCERPT_CHARS, sanitizeCasterText } from "./gm-input";
 import type { GmToolCall } from "./gm-types";
 import { anchorStands, requireToolCall, retryOnce } from "./retry";
 import { inputError, toToolSchema } from "./tool-schema";
@@ -159,9 +159,8 @@ export function buildSettlementMessage(brief: MatchRatingBrief): string {
 
 /**
  * 이 경기의 중계 전부 — 저장된 경기 턴의 본문이다. 마감 에이전트가 읽는 흐름의 원본이고,
- * 한 턴이 이 길이를 넘으면 앞머리만 싣는다 (결산에 필요한 것은 장면의 요지다).
+ * 한 턴이 `TURN_EXCERPT_CHARS`를 넘으면 앞머리만 싣는다 (결산에 필요한 것은 장면의 요지다).
  */
-const COMMENTARY_TURN_CHARS = 1500;
 
 export function buildCommentaryBlock(state: GameState, matchId: string): string {
   const lines = state.chat
@@ -171,7 +170,7 @@ export function buildCommentaryBlock(state: GameState, matchId: string): string 
         t.role === "model" &&
         (t.matchId === undefined || t.matchId === matchId),
     )
-    .map((t) => t.text.slice(0, COMMENTARY_TURN_CHARS));
+    .map((t) => t.text.slice(0, TURN_EXCERPT_CHARS));
   return ["<commentary>", ...(lines.length > 0 ? lines : ["(중계가 없다)"]), "</commentary>"].join(
     "\n",
   );

@@ -1695,9 +1695,11 @@ export function buildGmTools(
     async handle(input: unknown) {
       const parsed = OrdersArgsSchema.safeParse(input);
       if (!parsed.success) return inputError(parsed.error);
-      // 무직이어도 감독직을 두드리는 말은 지난다 — `OUT_OF_WORK_TOOLS`와 같은 결이다
-      const blocked = dismissed(state, !SEAT_ORDERS.test(parsed.data.orders));
-      if (blocked) return blocked;
+      /**
+       * 무직의 문은 여기서 열지 않는다 — 감독의 말을 되읽어 가르지 않고, 해석기가 낸
+       * 명령마다 그 명령의 `wrap`이 판정한다(`OUT_OF_WORK_TOOLS`). 감독직을 두드리는
+       * 명령은 지나고 나머지는 그 자리에서 무직의 문구로 반려된다.
+       */
       const parsedOrders = await runMarketOrders(state, specs, parsed.data.orders);
       if (!parsedOrders.ok) return { ok: false, message: parsedOrders.message };
       const notes: string[] = [];
@@ -1707,9 +1709,6 @@ export function buildGmTools(
   };
   return [...visible, tactics, training, table, market];
 }
-
-/** 무직인 감독도 넘길 수 있는 말 — 감독직을 두드리는 자리 (career.md §5.1) */
-const SEAT_ORDERS = /감독직|지원|수락|제안/;
 
 /** 테이블에 건네는 감독의 말 — 원문 그대로다 */
 const TableLineArgsSchema = z.object({

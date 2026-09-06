@@ -593,7 +593,7 @@ function achievementDetail(a: Achievement): string {
 }
 
 /**
- * 그해 **리그전을 돈 리그** — 순위표 보관(`recordLeagueHistory`)과 시상이 같은
+ * 그해 **리그전을 돈 리그** — 순위표 보관(`recordSeasonHistory`)과 시상이 같은
  * 창에서 같은 집합을 본다 (season.md §6). 친선(대회 없음)도 컵도 2군 리그도
  * 리그전이 아니다.
  */

@@ -1459,8 +1459,12 @@ export function buildGmStateNote(
 
 /** 해석기가 읽는 지난 턴 수 — 이름 없는 지목이 가리키는 대상은 직전 대화에 있다 */
 export const RECENT_TURNS = 5;
-/** 지난 턴 본문 하나의 상한 — 해석에 필요한 것은 누가 무슨 말을 했는가지 장면 전부가 아니다 */
-const RECENT_TURN_CHARS = 1200;
+/**
+ * 지난 턴 본문 하나를 다른 호출에 실을 때의 상한 — 해석기의 `<recent_turns>`·
+ * `<match_log>`와 마감의 `<commentary>`가 같은 자를 쓴다. 읽는 쪽에 필요한 것은
+ * 누가 무슨 말을 했고 흐름이 어땠는가지 장면 전부가 아니다.
+ */
+export const TURN_EXCERPT_CHARS = 1500;
 
 /**
  * 턴 목록을 해석기가 읽는 줄로 — **평시의 `<recent_turns>`와 경기의 `<match_log>`가 같은
@@ -1471,7 +1475,7 @@ export function renderTurns(turns: readonly ChatTurn[]): string[] {
   return turns.map((t) => {
     if (t.role === "user") return `@감독: ${t.text}`;
     if (t.role === "operator") return buildOperatorMessage(t.text);
-    return t.text.slice(0, RECENT_TURN_CHARS);
+    return t.text.slice(0, TURN_EXCERPT_CHARS);
   });
 }
 
