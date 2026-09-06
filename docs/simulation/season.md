@@ -679,8 +679,31 @@ advance_time(until):
   for day in (today .. until):
     dailyTick(day)      # 회복·부상 경과·훈련·폼·시장·재정·타 팀 경기
     if 감독의 결정이 필요한 일: break   # 그 날짜에서 정지
-  return digest          # 그 사이 벌어진 일 — 상태 스냅샷으로 GM에 전달
+  return events          # 그 사이 벌어진 일 — 사건 하나에 원소 하나
 ```
+
+### 넘긴 시간이 남기는 것 — `AdvanceOutcome.events`
+
+`advanceTime`이 돌려주는 것은 **사건 배열**이다(`TickEvent[]` — `packages/domain`). 원소
+하나가 사건 하나이고, 화면은 그것을 카드 하나로 세운다
+([../overview.md](../overview.md) §2 · [../ui/design-system.md](../ui/design-system.md) §6).
+
+| kind       | 무엇                                                     | 어디서 나오나                                                                                   |
+| ---------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `injury`   | 부상 발생·경과·복귀                                      | `squad/injury.ts` · 훈련 중 부상(`core/tick.ts`)                                                |
+| `board`    | 구단주가 건 요청과 그 판정, 보드가 감독에게 내린 결정    | `club/board-demand.ts` · `club/board-request.ts` · 보드 재계약·경질(`market/manager-market.ts`) |
+| `draw`     | 추첨과 그 결과로 정해진 대진                             | `competition/domestic-cup.ts` · `euro-knockout.ts` · `super-cup.ts` · `knockout.ts`             |
+| `interest` | 우리 선수를 향한 문의·오퍼, 우리가 건 협상의 진행과 기한 | `market/interest.ts` · `market/negotiation.ts`                                                  |
+| `matchday` | 경기가 치러졌다 — 같은 라운드의 결과·2군 경기·일정 연기  | `simulateOtherMatches` · `competition/reschedule.ts`                                            |
+| `news`     | 그 밖의 사실 — 재정·성장·계약·시장·시즌 전환·소식        | 나머지 전부                                                                                     |
+
+- **종류를 붙이지 않고 민 사실은 `news`다.** 사실을 쌓는 자리(`TickSink`)는 `push`만 있는
+  모양이라 `string[]`이 그대로 들어맞고, 종류를 붙이는 자리는 둘뿐이다 — 한 패스가 내는
+  것이 전부 한 종류면 `events.of(kind)`로 자리를 파서 넘기고, 그 패스 안에서 한 줄만
+  종류가 다르면 `pushEvent(sink, kind, …)`로 그 줄에만 붙인다.
+- **문장은 종류를 알지 못한다.** 이모지도 접두어도 붙이지 않는다 — 종류를 그림으로
+  말하는 것은 화면의 일이다(design-system.md §3).
+- **시즌 종료 tick의 줄도 같은 배열에 든다** — `endSeason`이 내는 문장들은 `news`로 선다.
 
 **시계를 세우는 것은 오늘이 지나면 기회가 없어지는 일뿐:**
 
