@@ -133,11 +133,8 @@ export default function NewGamePage() {
     );
 
   return (
-    /* 팀을 고른 뒤에는 온보딩 루트가 그 구단의 `--club*`를 든다 (ui/design-system.md §2 「주입」) */
-    <main
-      className="onboarding"
-      style={team ? clubStyle(team.colours, team.id, team.shortName) : undefined}
-    >
+    /* 구단 색은 팀 카드마다 선다 — 온보딩 루트가 들 것은 없다 (ui/design-system.md §2 「주입」) */
+    <main className="onboarding">
       <div className="onboarding-top">
         {step === "league" || prevStep === undefined ? (
           <Link href="/" className="back-link" data-testid="back-to-list">
@@ -221,7 +218,8 @@ export default function NewGamePage() {
               보드 기대가 붙는다. 줄로 갈라 묶지는 않는다, 순서가 이미 말한다 */}
           <div className="team-grid" data-testid="team-grid">
             {leagueTeams.map((t) => (
-              /* 카드마다 자기 구단의 `--club*`가 선다 — 띠와 문장, 고르면 워시까지 그 색이다 */
+              /* 카드마다 자기 구단의 `--club*`가 선다 — 띠와 문장이 그 색이다. 고른 카드는
+                 키 컬러 링으로 갈린다, 구단 색은 「누구인가」만 말한다 (§2 규칙 1) */
               <button
                 key={t.id}
                 className={`team-card${teamId === t.id ? " selected" : ""}`}

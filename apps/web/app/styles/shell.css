@@ -79,8 +79,9 @@
   /* `--pop` 표면의 그림자 — 유일한 그림자 */
   --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.55);
 
-  /* 구단 슬롯 — 구단이 없을 때의 기본값. 주입은 `.app`·`.onboarding`·카드 요소가
-     인라인으로 한다 (§2). `var(--club*)`를 참조하는 토큰은 주입 요소에서 다시 선언한다 */
+  /* 구단 슬롯 — 구단이 없을 때의 기본값. 주입은 `.app`·카드 요소가 인라인으로 한다 (§2).
+     `var(--club*)`를 참조하는 토큰은 주입 요소에서 다시 선언한다. 상대는 원색 두 벌뿐이다 —
+     밝힘도 워시도 상대가 설 자리가 없다 */
   --club: #2f3a33;
   --club-2: #2f3a33;
   --club-hi: #c9c4ba;
@@ -88,9 +89,6 @@
   --club-wash-pop: var(--pop);
   --opp: #2f3a33;
   --opp-2: #2f3a33;
-  --opp-hi: #c9c4ba;
-  --opp-wash: var(--panel);
-  --opp-wash-pop: var(--pop);
   --role-coach: var(--accent-2);
   --role-board: var(--gold);
   --role-media: var(--violet);
@@ -370,9 +368,9 @@ textarea {
 .team-card:hover {
   background: var(--pop);
 }
-/* 고른 팀 — 구단 워시(카드 요소가 `--club*`를 세운다)와 키 컬러 링 */
+/* 고른 팀 — 키 컬러 링 하나. 구단은 왼쪽 띠가 이미 말하므로 워시를 겹치면 한 카드에
+   구단 색이 두 번이고, 워시가 답하는 질문은 「누구인가」가 아니라 「골랐는가」다 */
 .team-card.selected {
-  background: var(--club-wash);
   box-shadow: var(--ring);
 }
 .team-card > span {
@@ -1568,14 +1566,13 @@ textarea {
   color: var(--text) !important;
   font-weight: 600;
 }
-/* 구단 띠 4px + 문장 + 이름 — 상단 띠에서 유일하게 구단 색이 서는 자리 (ui/design-system.md §2 규칙 5) */
+/* 문장 + 이름 — 셸이라 구단 색을 받지 않는다. 어느 구단인지는 문장과 이름이 말한다
+   (ui/design-system.md §2 규칙 5) */
 .topbar-club-line {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  border-left: 4px solid var(--club-hi);
-  padding-left: 10px;
 }
 /* 문장 — 크기는 컴포넌트가 정하고(눈금 여섯), 흐름만 여기서 */
 .crest {
@@ -2905,8 +2902,9 @@ textarea {
  * 골 카드 — 대화 줄에서 **한 칸 튀어나온 띠.**
  *
  * 말풍선과 같은 배경에 두면 또 하나의 발화로 읽힌다. 왼쪽 굵은 선 + 밝은 면으로
- * 대화가 아닌 **사실**임을 알린다. 골 카드는 레일 = 팀 — 우리 골은 `--club-hi`,
- * 상대 골은 `--opp-hi`라 스코어를 읽기 전에 누가 넣었는지가 보인다.
+ * 대화가 아닌 **사실**임을 알린다. 레일의 색이 답하는 것은 「어느 팀인가」가 아니라
+ * **「잘한 일인가 당한 일인가」**다 — 넣은 골과 먹은 골은 W/L과 같은 축이라 의미 토큰으로
+ * 서고(`--win` : `--loss`), 그 한 벌이 편까지 함께 가른다 (ui/design-system.md §2 규칙 1).
  */
 /**
  * 스카우팅 보고서 — **대화 밖에 놓인 서류 한 장.**
@@ -3481,7 +3479,7 @@ textarea {
 }
 
 .goal-card {
-  --goal: var(--opp-hi);
+  --goal: var(--loss);
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -3494,7 +3492,7 @@ textarea {
   animation: goal-in 0.28s var(--ease-panel) both;
 }
 .goal-card.ours {
-  --goal: var(--club-hi);
+  --goal: var(--win);
 }
 .goal-ball {
   display: inline-flex;

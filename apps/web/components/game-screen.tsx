@@ -898,7 +898,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       {/* `data-phase` — 화면에 단계를 적지 않는 대신 e2e가 읽는 자리. 감독에게는
           달력·채팅이 이미 말해 주므로 배지가 자리를 차지할 이유가 없었다 */}
       {/* 구단 색은 여기서 선다 — `--club*`는 세이브 팀, `--opp*`는 이번 경기의 상대
-          (ui/design-system.md §2 「주입」). 아래 어디서든 `var(--club-hi)`가 이 값이다 */}
+          (ui/design-system.md §2 「주입」). 아래 어디서든 `var(--club-wash)`가 이 값이다 */}
       <div
         className={`app${liveMatch ? " in-match" : ""}`}
         data-phase={game.phase}
@@ -924,7 +924,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
            * 연도, 경기 중이면 대회 이름까지. 이름과 날짜 자체는 남는다.
            */}
           <div className="topbar-meta">
-            {/* 구단 띠 4px + 문장 + 이름 — 상단 띠에서 유일하게 구단 색이 서는 자리 (§2 규칙 5) */}
+            {/* 문장 + 이름 — 셸이라 구단 색은 서지 않는다. 어느 구단인지는 문장이 말한다 (§2 규칙 5) */}
             <span className="topbar-club-line">
               <Crest
                 id={game.team.id}
