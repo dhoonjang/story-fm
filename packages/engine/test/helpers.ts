@@ -26,6 +26,7 @@ import {
   FAMILIARITY_DRIFT_CAP,
   FAMILIARITY_DRIFT_PER_DAY,
   assignmentsOf as assignmentsOfTeam,
+  eventTexts,
 } from "@story-fm/engine";
 import { applyFamiliarityGain } from "@story-fm/domain";
 import type { GamePlayer } from "@story-fm/domain";
@@ -111,7 +112,7 @@ export function createMiniGame(seed = 42, teamId = "arsenal"): GameState {
 export function playFullSeason(state: GameState, limit = 400): boolean {
   for (let i = 0; i < limit; i++) {
     const advanced = advanceTime(state, "next_match");
-    if (!advanced.ok) throw new Error(advanced.digest.join(" / "));
+    if (!advanced.ok) throw new Error(eventTexts(advanced.events).join(" / "));
     if (advanced.stopped === "season_end") return true;
     if (advanced.stopped === "blocked") return false;
     if (advanced.stopped === "matchday") {
@@ -188,7 +189,7 @@ export function advanceToMatchday(state: GameState): void {
   let guard = 30;
   while (guard-- > 0) {
     const advanced = advanceTime(state, "next_match");
-    if (!advanced.ok) throw new Error(advanced.digest.join(" / "));
+    if (!advanced.ok) throw new Error(eventTexts(advanced.events).join(" / "));
     if (advanced.stopped === "attention") continue;
     return;
   }
@@ -227,7 +228,7 @@ export function advanceAndPlay(state: GameState): void {
   let guard = 10;
   while (guard-- > 0) {
     const advanced = advanceTime(state, "next_match");
-    if (!advanced.ok) throw new Error(advanced.digest.join(" / "));
+    if (!advanced.ok) throw new Error(eventTexts(advanced.events).join(" / "));
     // 경질은 시계가 멈춘 상태다 — 오류가 아니라 끝이다
     if (advanced.stopped === "season_end" || advanced.stopped === "blocked") return;
     if (advanced.stopped === "attention") continue; // 부상·불만 보고 후 계속
@@ -270,7 +271,7 @@ export function advanceDays(state: GameState, days: number): void {
   while (consumed < target && guard-- > 0) {
     const before = state.date;
     const r = advanceTime(state, { days: target - consumed });
-    if (!r.ok) throw new Error(r.digest.join(" / "));
+    if (!r.ok) throw new Error(eventTexts(r.events).join(" / "));
     consumed += diffDays(before, state.date);
     if (r.stopped === "matchday" || r.stopped === "season_end") return;
   }

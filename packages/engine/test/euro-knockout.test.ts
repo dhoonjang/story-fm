@@ -34,6 +34,7 @@ import {
   playerById,
   playersOf,
   tieAggregate,
+  eventTexts,
 } from "@story-fm/engine";
 import { createTestGame, keepSeat, playMockMatch, playPreseason } from "./helpers";
 
@@ -409,8 +410,8 @@ describe("한 시즌 완주 (mock 경기)", () => {
       // 대회 진행을 재는 동안 자리는 지킨다 — 경질은 시계를 멈춘다(reviewUserSeat)
       keepSeat(state);
       const advanced = advanceTime(state, "next_match");
-      digest.push(...advanced.digest);
-      expect(advanced.ok, advanced.digest.join(" / ")).toBe(true);
+      digest.push(...eventTexts(advanced.events));
+      expect(advanced.ok, eventTexts(advanced.events).join(" / ")).toBe(true);
       if (advanced.stopped === "season_end") {
         ended = true;
         break;

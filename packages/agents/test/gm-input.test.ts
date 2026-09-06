@@ -1474,7 +1474,7 @@ describe("시계는 장면이 걸린 만큼 민다", () => {
     expect(state.date).toBe(before);
     expect(clockOf(state)).toBe("15:20");
     // 하루가 소화되지 않았으므로 브리핑할 것도 없다
-    expect(moved.digest).toHaveLength(0);
+    expect(moved.events).toHaveLength(0);
   });
 
   it("되감기지는 않는다 — 이미 지난 시각을 적어도 시계는 그대로다", () => {

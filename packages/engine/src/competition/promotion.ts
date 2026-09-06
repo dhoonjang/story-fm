@@ -1,4 +1,4 @@
-import type { PositionGroup } from "@story-fm/domain";
+import type { PositionGroup, TickSink } from "@story-fm/domain";
 import { isTopLeague, leagueCatalog, leagueCatalogById, leagueName } from "../data/league-catalog";
 import { clubEconomyLevel } from "../data/league-economy";
 import { tierOfTeamIn } from "../core/club-tier";
@@ -157,7 +157,7 @@ function setLeague(state: GameState, teamId: string, leagueId: string): void {
 export function applyPromotionRelegation(
   state: GameState,
   finalTables: Record<string, string[]>,
-  digest: string[],
+  digest: TickSink,
 ): string[] {
   const ourLeague = leagueOfTeamIn(state, state.userTeamId);
   /** 올라간 팀 — 보강이 이 목록을 받는다 (`reinforcePromotedSquads`) */
@@ -252,7 +252,7 @@ function neediestGroup(have: Record<PositionGroup, number>): PositionGroup {
 export function reinforcePromotedSquads(
   state: GameState,
   promoted: readonly string[],
-  digest: string[],
+  digest: TickSink,
 ): void {
   // id는 세계 전체에서 유일해야 한다 — 한 번 쥐고 팀을 돌며 등록한다
   const takenIds = new Set(state.players.map((p) => p.id));

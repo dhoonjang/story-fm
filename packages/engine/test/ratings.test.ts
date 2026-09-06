@@ -20,6 +20,7 @@ import {
   playersOf,
   seasonStatOf,
   type GameState,
+  eventTexts,
 } from "@story-fm/engine";
 import { advanceToMatchday, createMiniGame, playMockMatch, playPreseason } from "./helpers";
 
@@ -392,7 +393,7 @@ describe("도움이 사라지지 않는다", () => {
     let guard = 12;
     while (state.phase !== "matchday" && guard-- > 0) {
       const moved = advanceTime(state, "next_match");
-      if (!moved.ok) throw new Error(moved.digest.join(" / "));
+      if (!moved.ok) throw new Error(eventTexts(moved.events).join(" / "));
       if (moved.stopped === "season_end") throw new Error("리그 경기 전에 시즌이 끝났다");
     }
     if (state.phase !== "matchday") throw new Error("경기일에 닿지 못했다");

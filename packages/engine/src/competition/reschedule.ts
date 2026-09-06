@@ -1,4 +1,4 @@
-import type { MatchRecord } from "@story-fm/domain";
+import type { MatchRecord, TickSink } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import { addDays, dayOfWeek, tooClose } from "./calendar";
 import { competitionShortName, isCup } from "../data/cup-catalog";
@@ -192,7 +192,7 @@ export function clearForCup(
   state: GameState,
   teams: string[],
   date: string,
-  digest: string[],
+  digest: TickSink,
   time?: string,
 ): boolean {
   const clashes = clashesToClear(state, teams, date, time);

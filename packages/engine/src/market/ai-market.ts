@@ -4,6 +4,7 @@ import {
   FIRST_TEAM_LIMIT,
   type GamePlayer,
   type Transfer,
+  type TickSink,
 } from "@story-fm/domain";
 import {
   addDays,
@@ -233,7 +234,7 @@ function moveClub(
   squads: Squads,
   player: GamePlayer,
   toTeamId: string,
-  input: { fee: number; type: "transfer" | "free"; rng: () => number; digest?: string[] },
+  input: { fee: number; type: "transfer" | "free"; rng: () => number; digest?: TickSink },
 ): void {
   const fromTeamId = player.teamId;
   const windowId = windowOpenForTeam(state, toTeamId)?.id ?? null;
@@ -548,7 +549,7 @@ function settle(
   state: GameState,
   deal: AiDeal,
   rng: () => number,
-  digest: string[],
+  digest: TickSink,
 ): GamePlayer | null {
   const player = state.players.find((p) => p.id === deal.gamePlayerId);
   if (!player || player.teamId === deal.toTeamId) return null;
@@ -697,7 +698,7 @@ function minDate(a: string, b: string): string {
  * 브리핑이 이적 공시로 덮인다 — 감독이 알아야 할 것은 "우리 리그의 누가
  * 어디로 갔나"이고, 나머지는 조회 도구가 갖는다.
  */
-export function runAiTransfers(state: GameState, digest: string[]): void {
+export function runAiTransfers(state: GameState, digest: TickSink): void {
   const queue = (state.aiDeals ??= []);
   const rng = makeRng(state.seed, `ai-market:${state.date}`);
 

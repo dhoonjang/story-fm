@@ -59,6 +59,7 @@ import {
   clockOf,
   userPlayers,
   weeklyWagesOf,
+  eventTexts,
 } from "@story-fm/engine";
 import {
   advanceDays,
@@ -87,7 +88,7 @@ describe("advance_time — 시간은 도구로만 흐른다 (season.md §5)", ()
       .filter((m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId)
       .sort((a, b) => (a.date < b.date ? -1 : 1))[0];
     expect(state.date).toBe(first?.date);
-    expect(result.digest.some((d) => d.includes("경기일"))).toBe(true);
+    expect(eventTexts(result.events).some((d) => d.includes("경기일"))).toBe(true);
   });
 
   it("게임 시작 시 여름 창은 이미 열려 있고, 폐장은 진행 중 안내된다", () => {
@@ -426,7 +427,7 @@ describe("시간은 웬만하면 지나간다", () => {
     const result = advanceTime(state, { days: 7 });
     expect(result.stopped).toBe("attention");
     expect(state.date).toBe("2026-07-13");
-    expect(result.digest.join(" ")).toContain("오늘이 기한");
+    expect(eventTexts(result.events).join(" ")).toContain("오늘이 기한");
   });
 });
 
@@ -581,8 +582,10 @@ describe("계약 만료 예고 — 문턱마다 한 번 (season.md §5)", () => 
     let lastTicked = state.date;
     for (let i = 0; i < 400; i++) {
       const result = advanceTime(state, "next_match");
-      expect(result.ok, result.digest.join(" / ")).toBe(true);
-      warnings.push(...result.digest.filter((d) => d.includes(`${player.name}의 계약이`)));
+      expect(result.ok, eventTexts(result.events).join(" / ")).toBe(true);
+      warnings.push(
+        ...eventTexts(result.events).filter((d) => d.includes(`${player.name}의 계약이`)),
+      );
       if (result.stopped === "season_end") break;
       lastTicked = state.date;
       if (result.stopped === "matchday") {
@@ -1011,7 +1014,7 @@ describe("A매치 휴식기 — 소집과 복귀", () => {
     let guard = 20;
     while (state.date < target && guard-- > 0) {
       const advanced = advanceTime(state, { days: 1 });
-      if (!advanced.ok) throw new Error(advanced.digest.join(" / "));
+      if (!advanced.ok) throw new Error(eventTexts(advanced.events).join(" / "));
       if (advanced.stopped === "matchday") playMockMatch(state);
     }
     expect(state.date).toBe(target);

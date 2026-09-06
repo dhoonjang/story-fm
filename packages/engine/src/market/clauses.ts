@@ -1,4 +1,4 @@
-import type { BuyBackClause, GamePlayer, SellOnClause, Transfer } from "@story-fm/domain";
+import type { BuyBackClause, GamePlayer, SellOnClause, Transfer, TickSink } from "@story-fm/domain";
 import {
   BUYBACK_EXERCISE_MARGIN,
   ageOf,
@@ -100,7 +100,7 @@ export function settleSellOn(
     resaleFee: number;
     /** 근거 원장 — 이번 재판매의 TRANSFER row */
     resaleTransferId: string;
-    digest?: string[];
+    digest?: TickSink;
   },
 ): number {
   if (input.resaleFee <= 0) return 0;
@@ -343,7 +343,7 @@ export function exerciseBuyBack(state: GameState, input: { playerId: string }): 
  */
 export function runBuyBacks(
   state: GameState,
-  digest: string[],
+  digest: TickSink,
   affordable: (teamId: string, fee: number) => boolean,
 ): void {
   for (const right of liveBuyBacks(state)) {

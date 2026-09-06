@@ -49,6 +49,7 @@ import {
   type ManagerVacancy,
   type PressFact,
   type PressStance,
+  type TickSink,
 } from "@story-fm/domain";
 import {
   activeContract,
@@ -487,7 +488,7 @@ function offerExpectation(offer: ManagerOffer): string {
 }
 
 /** 기한이 지난 제안은 사라진다 — 답하지 않은 것도 답이다 */
-function expireStaleOffers(state: GameState, digest: string[]): void {
+function expireStaleOffers(state: GameState, digest: TickSink): void {
   for (const offer of state.managerOffers ?? []) {
     if (offer.status !== "open" || offer.expiresOn >= state.date) continue;
     offer.status = "expired";
@@ -568,7 +569,7 @@ export function offerVacancy(
   state: GameState,
   teamId: string,
   position: number,
-  digest: string[],
+  digest: TickSink,
 ): boolean {
   // 감독이 답할 자리는 한 번에 하나다 — 열린 제안도, 답을 기다리는 면접도 그 하나다
   if (openManagerOffers(state).length > 0 || pendingInterview(state)) return false;
@@ -588,7 +589,7 @@ function poachInPost(
   state: GameState,
   teamId: string,
   position: number,
-  digest: string[],
+  digest: TickSink,
 ): boolean {
   const contract = state.manager.contract;
   // 물 위약금이 없는 자리는 데려가는 협상이 아니다 (계약을 갖지 않는 옛 세이브)
@@ -659,7 +660,7 @@ function offerToUnemployed(
   dismissal: Dismissal,
   teamId: string,
   position: number,
-  digest: string[],
+  digest: TickSink,
 ): boolean {
   const offers = state.managerOffers ?? [];
   /**
@@ -717,7 +718,7 @@ function offerToUnemployed(
  *
  * @returns 오늘 새 제안이 붙었으면 true — tick이 거기서 멈춰 세운다
  */
-export function runManagerMarket(state: GameState, digest: string[]): boolean {
+export function runManagerMarket(state: GameState, digest: TickSink): boolean {
   const rng = makeRng(state.seed, `manager-market:${state.date}`);
   let sacked = 0;
   let offered = false;
@@ -981,7 +982,7 @@ export function resignPost(state: GameState): CommandResult {
  * 조건은 지금 등급의 기본 표이되 현 연봉이 그보다 높으면 현 연봉을 유지한다 —
  * 구단이 스스로 깎아 부르지는 않는다. 흥정도 수락도 이직 제안과 같은 길을 탄다.
  */
-function standRenewalOffer(state: GameState, contract: ManagerContract, digest: string[]): void {
+function standRenewalOffer(state: GameState, contract: ManagerContract, digest: TickSink): void {
   const teamId = state.userTeamId;
   const tier = tierOfTeamIn(state, teamId);
   const terms = MANAGER_TERMS_BY_TIER[tier];
@@ -1025,7 +1026,7 @@ function standRenewalOffer(state: GameState, contract: ManagerContract, digest: 
  */
 export function reviewManagerContract(
   state: GameState,
-  digest: string[],
+  digest: TickSink,
 ): "expired" | "notice" | null {
   // 무직에겐 계약이 없다 — 경질이 이미 지웠다
   if (state.dismissal) return null;
@@ -1088,7 +1089,7 @@ export function reviewManagerContract(
  * @returns **오늘** 경질됐으면 true — tick이 그날 하루만 시계를 세운다.
  *          이미 무직이면 볼 자리가 없어 false다 (career.md §5.1).
  */
-export function reviewUserSeat(state: GameState, digest: string[]): boolean {
+export function reviewUserSeat(state: GameState, digest: TickSink): boolean {
   if (state.dismissal) return false;
   /**
    * 부임 직후엔 보지 않는다 — 새 구단의 순위는 앞 감독이 만든 것이다.
@@ -1773,7 +1774,7 @@ function openInterview(state: GameState, vacancy: ManagerVacancy): Approach {
  *
  * @returns 오늘 닫았으면 true — tick이 그 하루를 세워 감독에게 알린다
  */
-function expireInterview(state: GameState, digest: string[]): boolean {
+function expireInterview(state: GameState, digest: TickSink): boolean {
   const open = pendingInterview(state);
   if (!open || diffDays(open.date, state.date) < APPROACH_PATIENCE_DAYS) return false;
   open.status = "expired";

@@ -1,4 +1,4 @@
-import type { GamePlayer, Injury, TransferReason } from "@story-fm/domain";
+import type { GamePlayer, Injury, TransferReason, TickSink } from "@story-fm/domain";
 import { ageOf, buildPaymentInstallments, seasonRating } from "@story-fm/domain";
 import { contractUntil, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
@@ -589,7 +589,7 @@ function returnFromLoan(state: GameState, player: GamePlayer): void {
 }
 
 /** 복귀일이 지난 임대를 되돌린다 — tick이 매일 부른다 */
-export function returnDueLoans(state: GameState, digest: string[]): void {
+export function returnDueLoans(state: GameState, digest: TickSink): void {
   for (const player of state.players) {
     if (!player.loan) continue;
     if (player.loan.until > state.date) continue;
@@ -774,7 +774,7 @@ const FREE_AGENT_SUITOR_SQUAD_CAP = 40;
  * **우리 팀은 이 경로로 선수를 받지 않는다** — 감독이 직접 데려와야 한다.
  * 안 그러면 아무것도 안 해도 스쿼드가 채워진다.
  */
-export function signFreeAgents(state: GameState, digest: string[]): void {
+export function signFreeAgents(state: GameState, digest: TickSink): void {
   const pool = freeAgents(state);
   if (pool.length === 0) return;
   const rng = makeRng(state.seed, `freeagents:${state.date}`);

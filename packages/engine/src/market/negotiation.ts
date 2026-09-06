@@ -12,6 +12,7 @@ import type {
   PressAxis,
   SquadStatus,
   Transfer,
+  TickSink,
 } from "@story-fm/domain";
 import {
   MAX_PAYMENT_YEARS,
@@ -1518,7 +1519,7 @@ export function incomingOffers(state: GameState): Negotiation[] {
  * 값이 나가는 선수에게 온다 (실제로도 에이전트가 그런 선수를 움직인다).
  * 사는 구단은 그 자리가 우리보다 약하고 예산이 되는 곳에서 고른다.
  */
-export function generateIncomingOffers(state: GameState, digest: string[]): void {
+export function generateIncomingOffers(state: GameState, digest: TickSink): void {
   // **창은 사는 쪽 협회 것을 본다.** 우리 창이 닫혀도 사우디·MLS는 계속 노린다
   if (incomingOffers(state).length >= MAX_INCOMING) return;
   const anyWindowOpen =
@@ -1654,7 +1655,7 @@ function openIncomingSellOffer(
   state: GameState,
   player: GamePlayer,
   rng: () => number,
-  digest: string[],
+  digest: TickSink,
   quote: (feeBias: number) => number,
   line: (ctx: { buyerName: string; fee: number; expiresOn: Negotiation["expiresOn"] }) => string,
   /** 이미 정해진 구단 — 관심 갈래는 장부의 줄이 주인을 갖고 온다 (§1-2) */
@@ -1722,7 +1723,7 @@ function openListedOffer(
   player: GamePlayer,
   askingPrice: number,
   rng: () => number,
-  digest: string[],
+  digest: TickSink,
 ): void {
   openIncomingSellOffer(
     state,
@@ -1744,7 +1745,7 @@ function openRequestedOffer(
   state: GameState,
   player: GamePlayer,
   rng: () => number,
-  digest: string[],
+  digest: TickSink,
 ): void {
   const market = marketValueOf(state, player);
   openIncomingSellOffer(
@@ -3481,7 +3482,7 @@ const MEDICAL_DISCOUNT = 0.85;
  * 절차이지 새 판단을 요구하는 자리가 아니다 — 통과한 딜은 그날 계약이 된다.
  * 감독이 다시 결정해야 하는 것은 **소견이 붙었을 때뿐**이다.
  */
-export function runMedicals(state: GameState, digest: string[]): void {
+export function runMedicals(state: GameState, digest: TickSink): void {
   for (const outcome of resolveMedicals(state)) {
     const { negotiation, player } = outcome;
     if (outcome.passed) {
@@ -3541,7 +3542,7 @@ export function standingDeadlineOf(negotiation: Negotiation): string | null {
     : null;
 }
 
-export function expireNegotiations(state: GameState, digest: string[]): void {
+export function expireNegotiations(state: GameState, digest: TickSink): void {
   for (const negotiation of state.negotiations) {
     if (negotiation.status !== "open" && negotiation.status !== "agreed") continue;
     if (medicalDecisionOutOfWindow(state, negotiation)) {
@@ -3874,7 +3875,7 @@ const RENEWAL_WAGE_SPAN = 0.25;
  * 서둘러 잡는다.** 우리가 노리던 선수가 재계약하면 진행 중이던 협상은 그 자리에서
  * 끝난다. 그게 이 시스템의 요점이다: 기다리는 데에도 대가가 있다.
  */
-export function runAiRenewals(state: GameState, digest: string[]): void {
+export function runAiRenewals(state: GameState, digest: TickSink): void {
   const limit = addDays(state.date, AI_RENEWAL_WINDOW_DAYS);
   const rng = makeRng(state.seed, `ai-renewal:${state.date}`);
   /**
@@ -4013,7 +4014,7 @@ const PRECONTRACT_WAGE_SPAN = 0.3;
  * (열린 `renew` 협상이 있는 동안 후보에서 빠진다), 성사되면 만료가 밀려 창 자체가
  * 닫힌다 — 반년 전의 재계약에 값이 생기는 자리가 여기다.
  */
-export function runAiPrecontracts(state: GameState, digest: string[]): void {
+export function runAiPrecontracts(state: GameState, digest: TickSink): void {
   /**
    * **창부터 연다** — 원장을 한 번 훑어 만료가 창 안인 우리 계약만 집는다. 선수마다
    * `precontractDaysLeft`를 물으면 그 안의 `activeContract`가 선수 수 × 계약 수를

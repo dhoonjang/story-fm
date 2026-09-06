@@ -16,6 +16,7 @@ import type {
   SeasonTableRow,
   Trophy,
   YouthCandidate,
+  TickSink,
 } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import {
@@ -933,7 +934,7 @@ const DERBY_SWEEP_MATCHES = 2;
  * 대항전 우승 **상금** — 구단이 받는 돈이라 감독의 커리어와 갈라져 있다.
  * 무직으로 맞은 시즌 끝에도 옛 구단의 장부에는 앉아야 한다 (career.md §5.1).
  */
-function payEuropeanWinnerPrizes(state: GameState, digest: string[]): void {
+function payEuropeanWinnerPrizes(state: GameState, digest: TickSink): void {
   for (const cup of cupCatalog()) {
     const champion = euroChampion(state, cup.id);
     if (!champion) continue;
@@ -1367,7 +1368,7 @@ function retirementReasonOf(state: GameState, player: GamePlayer): RetirementRea
  * ⚠️ **색인을 먼저 짓는다.** 선수가 5,800명이고 시즌 기록이 그만큼 있어서, 선수마다
  * 원장을 훑으면 예고 하루가 수천만 번 비교가 된다 (전환 루프가 같은 이유로 색인을 쓴다).
  */
-export function declareRetirements(state: GameState, digest: string[]): void {
+export function declareRetirements(state: GameState, digest: TickSink): void {
   const judgeDate = retirementJudgeDate(state.season);
   /** 계약 만료의 경계 — 다음 시즌이 시작하기 전에 끝나는 계약이 「이번 시즌 끝」이다 */
   const expiryCutoff = buildSeasonCalendar(state.season + 1).preseasonStart;
@@ -1714,7 +1715,7 @@ export function signYouthCandidates(
  * **소집일 — 미결 후보를 코어가 정리한다** (season.md §6). 방치는 시간의 결과다:
  * 답이 없으면 옛 규칙의 수만큼(`autoSign`) 앞에서부터 계약하고 나머지는 돌려보낸다.
  */
-export function settleYouthIntake(state: GameState, digest: string[]): void {
+export function settleYouthIntake(state: GameState, digest: TickSink): void {
   const rows = state.youthCandidates ?? [];
   if (rows.length === 0) return;
   const auto = rows.filter((row) => row.autoSign).map((row) => row.player.id);
@@ -1742,7 +1743,7 @@ export function settleYouthIntake(state: GameState, digest: string[]): void {
  * 선수를 새 구단으로. 갈라 두면 「활성 계약 없는 선수」나 「계약 둘인 선수」가
  * 그 틈에 선다.
  */
-function settlePrecontracts(state: GameState, on: string, digest: string[]): void {
+function settlePrecontracts(state: GameState, on: string, digest: TickSink): void {
   const managed = managedTeamId(state);
   const nextSeason = state.season + 1;
   // 발효가 계약의 status를 갈아 끼우므로 도는 동안 목록이 흔들리지 않게 먼저 뜬다

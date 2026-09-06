@@ -1,4 +1,4 @@
-import type { MatchStage } from "@story-fm/domain";
+import type { MatchStage, TickSink } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { formatMoney, payOnce } from "../club/finance";
 
@@ -58,7 +58,7 @@ export interface PrizePayment {
  * 않았다"는 사실이라, 매일 불리는 정산이 우승 보고를 되풀이하지 않는 문지기가 된다
  * (`advanceSuperCups`).
  */
-export function payPrize(state: GameState, prize: PrizePayment, digest: string[]): boolean {
+export function payPrize(state: GameState, prize: PrizePayment, digest: TickSink): boolean {
   const label = prizeLabel(prize.cup, state.season, prize.what);
   const paid = payOnce(state, prize.teamId, prizeKey(prize.cup.id, prize.kind, state.season), {
     kind: "income",

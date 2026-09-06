@@ -13,6 +13,7 @@ import type {
   PressFact,
   PressStance,
   SeasonRecord,
+  TickSink,
 } from "@story-fm/domain";
 import { ageOf, isReserveMatch } from "@story-fm/domain";
 import {
@@ -915,7 +916,7 @@ function standingFacts(
  * 순서가 뜻을 갖는다: 사흘을 넘긴 자리를 먼저 닫고(그 대가를 치르게 한 뒤), 압력을
  * 움직이고, 마지막에 하나를 연다. 닫기 전에 열면 감독 앞에 두 자리가 선다.
  */
-export function tickApproaches(state: GameState, digest: string[]): boolean {
+export function tickApproaches(state: GameState, digest: TickSink): boolean {
   withdrawRequests(state, digest);
   /**
    * 시장이 세우는 요청은 **자리를 열지 않으므로** 아래의 문(하루 한 건 · 동시 하나)을
@@ -973,7 +974,7 @@ function contextTextOf(
 }
 
 /** 사흘 동안 답이 없으면 감독이 지나친 것이다 — 거절과 같은 값을 치른다 */
-function expireApproach(state: GameState, digest: string[]): boolean {
+function expireApproach(state: GameState, digest: TickSink): boolean {
   const open = pendingApproach(state);
   if (!open || diffDays(open.date, state.date) < APPROACH_PATIENCE_DAYS) return false;
   const effect = closeApproach(state, open, null);
@@ -995,7 +996,7 @@ function expireApproach(state: GameState, digest: string[]): boolean {
  *
  * 셋째 길인 「팀을 떠나면」은 `clearDepartedState`가 다른 상태와 함께 지운다.
  */
-function withdrawRequests(state: GameState, digest: string[]): void {
+function withdrawRequests(state: GameState, digest: TickSink): void {
   const windowOpen = windowOpenForTeam(state, state.userTeamId) !== null;
   for (const player of userPlayers(state)) {
     const request = transferRequestOf(state, player.id);
@@ -1038,7 +1039,7 @@ const BIGGER_CLUB_CHANCE = 0.0015;
  * **하루 한 건이다.** 여러 후보가 굴러도 그날 서는 요청은 하나 — 창이 열린 첫날
  * 스쿼드의 절반이 동시에 나가겠다고 말하는 일은 사건이 아니라 버그로 읽힌다.
  */
-function standBiggerClubRequests(state: GameState, digest: string[]): void {
+function standBiggerClubRequests(state: GameState, digest: TickSink): void {
   if (windowOpenForTeam(state, state.userTeamId) === null) return;
   const listed = new Set(state.transferList.map((l) => l.gamePlayerId));
   const candidates = userPlayers(state)
@@ -1161,7 +1162,7 @@ const APPROACH_TOPIC_ORDER: Record<ApproachTopic, number> = {
  * ⚠️ **유출은 압력을 풀지 않는다** — 말한 것은 신문이지 감독이 아니다. 직전 임계의
  * 75%가 남아 다음 계단(이적 요청)을 앞당긴다 (people.md §8).
  */
-function leakToPress(state: GameState, row: ApproachPressure, digest: string[]): boolean {
+function leakToPress(state: GameState, row: ApproachPressure, digest: TickSink): boolean {
   const player = playerById(state, row.subject);
   const issue = state.issues.find((i) => i.gamePlayerId === row.subject && i.reason === row.topic);
   if (!player || player.teamId !== state.userTeamId || !issue) return false;
@@ -1186,7 +1187,7 @@ function leakToPress(state: GameState, row: ApproachPressure, digest: string[]):
  * 겹치면 **가장 많이 넘친 것**이 선다. 절대값이 아니라 임계 대비인 이유는 계단마다
  * 임계가 다르기 때문이다 — 300을 채운 3계단은 100을 채운 1계단보다 급하지 않다.
  */
-function openApproach(state: GameState, digest: string[]): boolean {
+function openApproach(state: GameState, digest: TickSink): boolean {
   if (pendingApproach(state)) return false;
   /**
    * **한 번에 답을 요구하는 자리는 하나다.** 회견장에 앉혀 놓고 감독실 문까지
@@ -1336,7 +1337,7 @@ function demandsKeptFact(state: GameState): PressFact | null {
  * 압력 줄도 서지 않고, 시즌당 한 번 프리시즌 첫 주에 선다. 그래도 **소음의 문 넷은
  * 그대로 지난다**: 문에 막힌 날은 열리지 않고 창 안에서 다음 날 다시 온다.
  */
-function openSeasonReview(state: GameState, digest: string[]): boolean {
+function openSeasonReview(state: GameState, digest: TickSink): boolean {
   // 무직에게는 마주 앉을 구단주가 없다 — 보드도 이제 남의 것이다 (career.md §5.1)
   if (managedTeamId(state) === null) return false;
   const since = diffDays(state.calendar.preseasonStart, state.date);

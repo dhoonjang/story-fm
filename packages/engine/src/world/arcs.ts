@@ -1,4 +1,11 @@
-import type { ArcKind, ArcStage, Negotiation, NarrativeArc, PlayerIssue } from "@story-fm/domain";
+import type {
+  ArcKind,
+  ArcStage,
+  Negotiation,
+  NarrativeArc,
+  PlayerIssue,
+  TickSink,
+} from "@story-fm/domain";
 import {
   ARC_STAGE_KO,
   MANAGER_EXIT_KO,
@@ -557,7 +564,7 @@ export function describeActiveArcs(state: GameState): string | null {
  * 다가옴 계단이 내려간다) 되감기면 GM이 지난 턴과 다른 흐름을 읽는다. 물러난
  * 사실이 아크를 움직이는 길은 **닫히는 것** 하나뿐이다.
  */
-export function tickArcs(state: GameState, digest: string[]): void {
+export function tickArcs(state: GameState, digest: TickSink): void {
   const arcs = (state.arcs ??= []);
   const teamId = managedTeamId(state);
 

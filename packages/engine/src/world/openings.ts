@@ -1,4 +1,4 @@
-import type { Opening, OpeningClose, OpeningKind } from "@story-fm/domain";
+import type { Opening, OpeningClose, OpeningKind, TickSink } from "@story-fm/domain";
 import { OPENING_KIND_KO, OPENING_LINE_MAX, OPENING_TITLE_MAX } from "@story-fm/domain";
 import { addDays } from "../competition/calendar";
 import { playerById, pushNarrative, type GameState } from "../core/state";
@@ -155,7 +155,7 @@ export function touchOpenings(state: GameState, touch: OpeningTouch): number {
 }
 
 /** 기한이 지난 실마리를 닫는다 — 첫 몇 주가 지나면 이야기는 장부의 아크가 잇는다 */
-export function tickOpenings(state: GameState, digest: string[]): void {
+export function tickOpenings(state: GameState, digest: TickSink): void {
   for (const opening of activeOpenings(state)) {
     if (state.date <= opening.dueOn) continue;
     const line = resolveOpening(state, opening.id, "expired");
