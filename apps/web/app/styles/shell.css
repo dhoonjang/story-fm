@@ -235,9 +235,12 @@ textarea {
 .onboarding-step h1 {
   margin-bottom: 28px;
 }
-/* 첫 화면만 가운데로 — 고리가 가운데 서므로 제목이 왼쪽에 있으면 축이 둘이 된다 */
-.onboarding-step.step-league h1 {
-  text-align: center;
+/* 리그 걸음은 자기 열 안에 선다 — 제목·목록·되돌아가는 링크가 한 왼쪽 축을 쓴다.
+   고리 시절엔 판이 가운데 섰으므로 제목도 가운데였다 (ui/design-system.md §7) */
+.onboarding-step.step-league {
+  /* 행 높이 — 행과 대기 헤어라인이 같은 수를 쓴다 */
+  --league-row-h: 56px;
+  width: min(560px, 100%);
 }
 /* 앞 단계에서 고른 것 — 제목 위에 얹혀 지금 어디에 서 있는지를 말한다 */
 .onboarding .step-context {
@@ -281,80 +284,73 @@ textarea {
   border-bottom-color: var(--accent);
 }
 
-/* ── 리그 고리 ───────────────────────────
-   다섯 리그가 정오각형의 꼭짓점에 선다. 판은 정사각형이고 SVG viewBox(0~100)와
-   칩의 left/top이 같은 좌표를 쓴다 — 계산은 `lib/ring.ts` 한 곳이다. */
-.league-ring {
-  position: relative;
-  width: min(520px, 100%);
-  aspect-ratio: 1;
-  margin: 0 auto;
-}
-.league-ring svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-/* 선은 판이 커져도 굵어지지 않는다 — 굵기는 화면 픽셀로 잰다 */
-.league-ring polygon {
-  vector-effect: non-scaling-stroke;
-  fill: none;
-  stroke: var(--line);
-  stroke-width: 1;
-}
-/* 고르는 칩 — 조작 대상이라 면(`--panel-2`)으로 서고, 손이 닿으면 한 단 밝아진다.
-   고른 것은 키 컬러 링이 말한다 — 테두리는 없다 */
-.league-node {
-  position: absolute;
-  transform: translate(-50%, -50%);
+/* ── 리그 목록 ───────────────────────────
+   행 하나가 리그 하나다 — 대회 톤 점·이름·국가·팀 수가 한 줄에 선다. 리그가 늘면
+   줄이 늘 뿐이라 개수가 배치를 바꾸지 않는다 (ui/design-system.md §7). */
+.league-list {
   display: flex;
   flex-direction: column;
+  gap: var(--sp-1);
+}
+/* 고르는 행 — 조작 대상이라 면(`--panel-2`)으로 서고, 손이 닿으면 한 단 밝아진다.
+   고른 것은 키 워시와 링이 말한다 — 테두리는 없다 */
+.league-row {
+  display: grid;
+  grid-template-columns: 8px auto 1fr auto;
   align-items: center;
-  gap: 2px;
-  min-width: 132px;
+  gap: 0 var(--sp-3);
+  /* 높이가 아니라 최소 높이 — 이름이 접히면 행이 늘어난다, 글자를 자르지 않는다 */
+  min-height: var(--league-row-h);
+  padding: var(--sp-2) var(--sp-4);
   background: var(--panel-2);
   border: none;
-  border-radius: var(--r-pill);
-  padding: 11px 18px;
+  border-radius: var(--r-sm);
+  text-align: left;
   color: var(--text);
   transition:
     background var(--ease),
     box-shadow var(--ease);
 }
-.league-node:hover {
+.league-row:hover {
   background: var(--pop);
 }
-.league-node.selected {
-  background: var(--panel-2);
+/* 고른 리그 — 팀 카드의 「워시 + 링」과 같은 꼴이고, 리그엔 구단색이 없으니 키 워시다 */
+.league-row.selected {
+  background: var(--key-wash);
   box-shadow: var(--ring);
 }
-.league-node .node-name {
-  font-weight: 700;
+/* 대회 톤 점 — 이 목록에 서는 것은 리그뿐이라는 표식 (ui/design-system.md §1 대회 톤) */
+.league-tone {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--comp-league);
 }
-.league-node .node-country {
-  color: var(--muted);
-  font-size: var(--fs-sm);
+.league-name {
+  font-size: var(--fs-lg);
+  font-weight: 600;
 }
-/* 뼈대 막대는 칩 안에서 가운데로 선다 — 카드 시절의 퍼센트 폭은 여기서 통하지 않는다 */
-.league-node .skel-league {
-  width: 84px;
-  height: 15px;
+.league-country {
+  font-size: var(--fs-md);
+  color: var(--text-2);
+}
+/* 팀 수 — 한글이 붙는 수치라 스코어 서체가 아니다 (ui/design-system.md §3) */
+.league-size {
+  font-size: var(--fs-md);
+  color: var(--text-3);
+}
+/* 리그가 올 자리 — 라벨 하나와 행 높이만큼 띄운 헤어라인 셋. 개수는 말하지 않는다 */
+.league-wait {
+  display: flex;
+  flex-direction: column;
+}
+.league-wait .section-title {
   margin: 0;
 }
-.league-node .skel-country {
-  width: 52px;
-  height: 13px;
-  margin: 0;
-}
-/* 좁은 화면 — 고리는 그대로 두고 칩만 줄인다 (판이 정사각형이라 같이 준다) */
-@media (max-width: 699px) {
-  .league-node {
-    min-width: 0;
-    padding: 8px 10px;
-    font-size: var(--fs-md);
-  }
+.league-wait-line {
+  height: 1px;
+  background: var(--line);
+  margin-top: var(--league-row-h);
 }
 
 .team-grid {
@@ -4079,17 +4075,6 @@ textarea {
   width: 76px;
   height: 12px;
   margin-top: 5px;
-}
-/* 리그 칸 — 이름(14/1.55≈22) + 나라(12/1.55≈19) */
-.skel-league {
-  width: 76%;
-  height: 15px;
-  margin-top: 3px;
-}
-.skel-country {
-  width: 48%;
-  height: 13px;
-  margin-top: 10px;
 }
 
 /**
