@@ -1,4 +1,10 @@
-import type { CallUp, CallUpReturnState, GamePlayer, PositionGroup } from "@story-fm/domain";
+import type {
+  CallUp,
+  CallUpReturnState,
+  GamePlayer,
+  PositionGroup,
+  TickSink,
+} from "@story-fm/domain";
 import {
   ageOf,
   capsOf,
@@ -285,7 +291,7 @@ function seasonOfKey(key: string): number {
  *
  * 다이제스트에는 **우리 팀 선수만** 선다. 세계 전체의 명단은 감독이 읽을 사실이 아니다.
  */
-export function openCallUps(state: GameState, window: InternationalBreak, digest: string[]): void {
+export function openCallUps(state: GameState, window: InternationalBreak, digest: TickSink): void {
   const rows: CallUp[] = [];
   for (const [country, squad] of sortedBoard(state)) {
     for (let rank = 0; rank < squad.length; rank++) {
@@ -325,7 +331,7 @@ export function openCallUps(state: GameState, window: InternationalBreak, digest
 export function settleCallUps(
   state: GameState,
   window: InternationalBreak,
-  digest: string[],
+  digest: TickSink,
 ): void {
   for (const row of state.callUps ?? []) {
     if (row.breakKey !== window.key || row.returnedOn !== null) continue;
@@ -442,7 +448,7 @@ export function applySummerTournament(
   state: GameState,
   season: number,
   squadReturn: string,
-  digest: string[],
+  digest: TickSink,
 ): void {
   for (const player of state.players) delete player.state.summerReturn;
   const tournament = majorTournamentOf(season);

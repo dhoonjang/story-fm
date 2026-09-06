@@ -63,6 +63,7 @@ import type {
   ScoutReport,
   ScoutReportCard,
   SeasonAward,
+  TickEvent,
   Milestone,
   SeasonRecord,
   CompetitionSeasonStat,
@@ -215,7 +216,7 @@ export interface CommandBriefItem {
  * 싣지 않는다 (그 문장은 장면과 서사 로그에 이미 있다).
  */
 export interface CommandBrief {
-  /** 무엇을 했나 — 호출 이름값의 짧은 머리줄 (`라인업 확정`) */
+  /** 무엇을 했나 — 그 행동의 이름 (`라인업` · `commands/brief.ts`) */
   head: string;
   /** 무엇이 바뀌었나 — 각 항목이 말풍선 한 줄이다 */
   items: CommandBriefItem[];
@@ -316,6 +317,16 @@ export interface ChatTurn {
    * 다른 쪽은 다섯 줄의 목록이다. 옛 세이브엔 없다 (optional).
    */
   missions?: MissionReportCard[];
+  /**
+   * 이 턴 앞에서 **코어가 굴린 시간이 남긴 사건들** — 화면이 사건 하나를 카드 하나로
+   * 세운다 (overview.md §2 · ui/design-system.md §6).
+   *
+   * 보고서(`reports`)와 같은 이유로 턴에 남는다: tick의 사건이라 호출 칩이 없고, 한
+   * 문자열로 이어 붙이면 화면이 되쪼갤 수 없다. 카드가 서는 자리는 장면보다 **앞**이다 —
+   * 돌아온 감독이 먼저 읽을 것이 그 사이 벌어진 일이다.
+   * 옛 세이브엔 없다 — optional이라 세이브 버전을 올리지 않는다.
+   */
+  events?: TickEvent[];
   /**
    * 이 턴에 실린 **인물지** — 카드 텍스트가 아니라 **기록**이다 (people.md §6).
    *

@@ -49,6 +49,7 @@ import {
   type ManagerVacancy,
   type PressFact,
   type PressStance,
+  type TickSink,
 } from "@story-fm/domain";
 import {
   activeContract,
@@ -487,12 +488,12 @@ function offerExpectation(offer: ManagerOffer): string {
 }
 
 /** 기한이 지난 제안은 사라진다 — 답하지 않은 것도 답이다 */
-function expireStaleOffers(state: GameState, digest: string[]): void {
+function expireStaleOffers(state: GameState, digest: TickSink): void {
   for (const offer of state.managerOffers ?? []) {
     if (offer.status !== "open" || offer.expiresOn >= state.date) continue;
     offer.status = "expired";
     if (offer.via === "renewal") {
-      digest.push(`💼 ${teamShortNameIn(state, offer.teamId)}의 재계약 제안이 만료됐다`);
+      digest.push(`${teamShortNameIn(state, offer.teamId)}의 재계약 제안이 만료됐다`);
       continue;
     }
     /**
@@ -504,13 +505,13 @@ function expireStaleOffers(state: GameState, digest: string[]): void {
       const manager = state.manager;
       manager.reputation.board = clampReputation(manager.reputation.board + LOYALTY_BOARD_LIFT);
       digest.push(
-        `💼 ${teamShortNameIn(state, offer.teamId)}의 접근이 답 없이 지나갔다 —` +
+        `${teamShortNameIn(state, offer.teamId)}의 접근이 답 없이 지나갔다 —` +
           ` 보드가 그것을 봤다 (보드 평판 +${LOYALTY_BOARD_LIFT})`,
       );
       pushNarrative(state, `${teamNameIn(state, offer.teamId)} 접근 무응답`, 4);
       continue;
     }
-    digest.push(`💼 ${teamShortNameIn(state, offer.teamId)}의 감독직 제안이 만료됐다`);
+    digest.push(`${teamShortNameIn(state, offer.teamId)}의 감독직 제안이 만료됐다`);
   }
 }
 
@@ -568,7 +569,7 @@ export function offerVacancy(
   state: GameState,
   teamId: string,
   position: number,
-  digest: string[],
+  digest: TickSink,
 ): boolean {
   // 감독이 답할 자리는 한 번에 하나다 — 열린 제안도, 답을 기다리는 면접도 그 하나다
   if (openManagerOffers(state).length > 0 || pendingInterview(state)) return false;
@@ -588,7 +589,7 @@ function poachInPost(
   state: GameState,
   teamId: string,
   position: number,
-  digest: string[],
+  digest: TickSink,
 ): boolean {
   const contract = state.manager.contract;
   // 물 위약금이 없는 자리는 데려가는 협상이 아니다 (계약을 갖지 않는 옛 세이브)
@@ -643,7 +644,7 @@ function poachInPost(
     },
   ];
   digest.push(
-    `💼 ${teamShortNameIn(state, teamId)}가 재직 중인 감독에게 손을 뻗었다 —` +
+    `${teamShortNameIn(state, teamId)}가 재직 중인 감독에게 손을 뻗었다 —` +
       ` 기대는 ${boardExpectationText(expectation.code, expectation.target)}` +
       ` · 연봉 ${formatMoney(terms.salary)}·${terms.years}년` +
       (compensation > 0 ? ` · 우리 구단에 보상금 ${formatMoney(compensation)}` : "") +
@@ -659,7 +660,7 @@ function offerToUnemployed(
   dismissal: Dismissal,
   teamId: string,
   position: number,
-  digest: string[],
+  digest: TickSink,
 ): boolean {
   const offers = state.managerOffers ?? [];
   /**
@@ -701,7 +702,7 @@ function offerToUnemployed(
     },
   ];
   digest.push(
-    `💼 ${teamShortNameIn(state, teamId)}가 감독직을 제안했다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)}` +
+    `${teamShortNameIn(state, teamId)}가 감독직을 제안했다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)}` +
       ` · 연봉 ${formatMoney(terms.salary)}·${terms.years}년 · ${OFFER_DAYS}일 안에 답해야 한다`,
   );
   pushNarrative(state, `${teamNameIn(state, teamId)} 감독직 제안`, 5);
@@ -717,7 +718,7 @@ function offerToUnemployed(
  *
  * @returns 오늘 새 제안이 붙었으면 true — tick이 거기서 멈춰 세운다
  */
-export function runManagerMarket(state: GameState, digest: string[]): boolean {
+export function runManagerMarket(state: GameState, digest: TickSink): boolean {
   const rng = makeRng(state.seed, `manager-market:${state.date}`);
   let sacked = 0;
   let offered = false;
@@ -774,7 +775,7 @@ export function runManagerMarket(state: GameState, digest: string[]): boolean {
     // 우리 리그의 일만 브리핑한다 — 5대 리그 전체를 올리면 소음이다
     if (leagueOfTeamIn(state, team.id) === ourLeague) {
       digest.push(
-        `📰 ${teamShortName(team.id)}가 감독을 경질했다 — 후임은 ${team.managerName}` +
+        `${teamShortName(team.id)}가 감독을 경질했다 — 후임은 ${team.managerName}` +
           // 풀에서 온 사람이면 어디서 왔는지가 곧 그 선임의 뜻이다 (transfer.md §7)
           (hired === null ? "" : ` (전 ${teamShortNameIn(state, hired.lastTeamId)} 감독)`),
       );
@@ -981,7 +982,7 @@ export function resignPost(state: GameState): CommandResult {
  * 조건은 지금 등급의 기본 표이되 현 연봉이 그보다 높으면 현 연봉을 유지한다 —
  * 구단이 스스로 깎아 부르지는 않는다. 흥정도 수락도 이직 제안과 같은 길을 탄다.
  */
-function standRenewalOffer(state: GameState, contract: ManagerContract, digest: string[]): void {
+function standRenewalOffer(state: GameState, contract: ManagerContract, digest: TickSink): void {
   const teamId = state.userTeamId;
   const tier = tierOfTeamIn(state, teamId);
   const terms = MANAGER_TERMS_BY_TIER[tier];
@@ -1005,7 +1006,7 @@ function standRenewalOffer(state: GameState, contract: ManagerContract, digest: 
     },
   ];
   digest.push(
-    `💼 보드가 재계약을 제안했다 — 연봉 ${formatMoney(salary)}·${terms.years}년 ·` +
+    `보드가 재계약을 제안했다 — 연봉 ${formatMoney(salary)}·${terms.years}년 ·` +
       ` 이적 예산 약속 ${formatMoney(terms.budgetPledge)} · ${OFFER_DAYS}일 안에 답해야 한다`,
   );
   pushNarrative(state, `${teamNameIn(state, teamId)} 재계약 제안`, 5);
@@ -1025,7 +1026,7 @@ function standRenewalOffer(state: GameState, contract: ManagerContract, digest: 
  */
 export function reviewManagerContract(
   state: GameState,
-  digest: string[],
+  digest: TickSink,
 ): "expired" | "notice" | null {
   // 무직에겐 계약이 없다 — 경질이 이미 지웠다
   if (state.dismissal) return null;
@@ -1051,9 +1052,7 @@ export function reviewManagerContract(
       },
       "contract-expired",
     );
-    digest.push(
-      `💼 계약 만료 — ${teamNameIn(state, teamId)}와의 계약이 ${contract.until}로 끝났다`,
-    );
+    digest.push(`계약 만료 — ${teamNameIn(state, teamId)}와의 계약이 ${contract.until}로 끝났다`);
     pushNarrative(state, `${teamNameIn(state, teamId)} 계약 만료`, 5);
     return "expired";
   }
@@ -1067,7 +1066,7 @@ export function reviewManagerContract(
   if (board < RENEWAL_BOARD_GATE) {
     contract.renewalOffered = false;
     digest.push(
-      `💼 보드가 재계약하지 않기로 했다 — 계약은 ${contract.until}에 끝난다` +
+      `보드가 재계약하지 않기로 했다 — 계약은 ${contract.until}에 끝난다` +
         ` (보드 평판 ${board} · 문턱 ${RENEWAL_BOARD_GATE})`,
     );
     pushNarrative(state, `재계약 불가 통보 — ${contract.until} 만료`, 5);
@@ -1088,7 +1087,7 @@ export function reviewManagerContract(
  * @returns **오늘** 경질됐으면 true — tick이 그날 하루만 시계를 세운다.
  *          이미 무직이면 볼 자리가 없어 false다 (career.md §5.1).
  */
-export function reviewUserSeat(state: GameState, digest: string[]): boolean {
+export function reviewUserSeat(state: GameState, digest: TickSink): boolean {
   if (state.dismissal) return false;
   /**
    * 부임 직후엔 보지 않는다 — 새 구단의 순위는 앞 감독이 만든 것이다.
@@ -1137,7 +1136,7 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
     manager.boardWarnings = next;
     manager.reputation.board = clampReputation(board - WARNING_BOARD_HIT);
     digest.push(
-      `⚠️ 보드가 성적을 문제 삼았다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)}인데 현재 ${standing.position}위다` +
+      `보드가 성적을 문제 삼았다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)}인데 현재 ${standing.position}위다` +
         ` (경고 ${next}/${USER_WARNINGS_BEFORE_SACK})`,
     );
     pushNarrative(state, `보드 경고 ${next}회`, 4);
@@ -1165,7 +1164,7 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
     "user-sacked",
   );
 
-  digest.push(`💼 경질 — ${teamNameIn(state, sackedTeamId)}가 감독 계약을 해지했다`);
+  digest.push(`경질 — ${teamNameIn(state, sackedTeamId)}가 감독 계약을 해지했다`);
   pushNarrative(state, `${teamNameIn(state, sackedTeamId)} 경질`, 5);
   return true;
 }
@@ -1773,12 +1772,12 @@ function openInterview(state: GameState, vacancy: ManagerVacancy): Approach {
  *
  * @returns 오늘 닫았으면 true — tick이 그 하루를 세워 감독에게 알린다
  */
-function expireInterview(state: GameState, digest: string[]): boolean {
+function expireInterview(state: GameState, digest: TickSink): boolean {
   const open = pendingInterview(state);
   if (!open || diffDays(open.date, state.date) < APPROACH_PATIENCE_DAYS) return false;
   open.status = "expired";
   const name = teamNameIn(state, open.teamId ?? "");
-  digest.push(`💼 ${name}와의 면접이 답 없이 지나갔다 — 그 자리는 닫혔다`);
+  digest.push(`${name}와의 면접이 답 없이 지나갔다 — 그 자리는 닫혔다`);
   pushNarrative(state, `${name} 감독직 면접 무응답`, 4);
   return true;
 }

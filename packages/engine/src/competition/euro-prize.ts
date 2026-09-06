@@ -1,4 +1,4 @@
-import type { MatchStage } from "@story-fm/domain";
+import type { MatchStage, TickSink } from "@story-fm/domain";
 import { cupCatalog, cupCatalogById, knockoutStages, stageLabel } from "../data/cup-catalog";
 import type { GameState } from "../core/state";
 import { migratePrizeKeys, payPrize, prizeKey, prizeLabel } from "./prize";
@@ -46,7 +46,7 @@ export function migrateEuroPrizeKeys(state: GameState): void {
  * 리그 페이즈 정산 — 참가비 + 승/무 수당. 리그 페이즈가 끝난 뒤 한 번에 준다.
  * (실제로는 경기마다 들어오지만, 원장을 경기 수만큼 부풀릴 이유가 없다.)
  */
-export function payLeaguePhasePrizes(state: GameState, cupId: string, digest: string[]): void {
+export function payLeaguePhasePrizes(state: GameState, cupId: string, digest: TickSink): void {
   const cup = cupCatalogById(cupId);
   if (!cup) return;
   const phase = state.matches.filter(
@@ -89,7 +89,7 @@ export function payStagePrizes(
   cupId: string,
   stage: MatchStage,
   teams: string[],
-  digest: string[],
+  digest: TickSink,
 ): void {
   const cup = cupCatalogById(cupId);
   const amount = cup?.prize.stage[stage] ?? 0;
@@ -105,7 +105,7 @@ export function payWinnerPrize(
   state: GameState,
   cupId: string,
   champion: string,
-  digest: string[],
+  digest: TickSink,
 ): void {
   const cup = cupCatalogById(cupId);
   if (!cup) return;

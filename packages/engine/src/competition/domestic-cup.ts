@@ -1,4 +1,4 @@
-import type { MatchRecord, MatchStage } from "@story-fm/domain";
+import type { MatchRecord, MatchStage, TickSink } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import {
   MIN_REST_HOURS,
@@ -273,7 +273,7 @@ function pickTieDate(
   home: string,
   away: string,
   from: string,
-  options: { weekdays?: Set<number>; isFinal?: boolean; digest?: string[] } = {},
+  options: { weekdays?: Set<number>; isFinal?: boolean; digest?: TickSink } = {},
 ): { date: string; time: string } {
   const weekdays = options.weekdays ?? CUP_WEEKDAYS;
   const teams = [home, away];
@@ -488,7 +488,7 @@ function createTie(
   pairCount: number,
   a: string,
   b: string,
-  digest: string[],
+  digest: TickSink,
 ): MatchRecord[] {
   const isFinal = stage === "final";
   const home = isFinal ? a : homeSideOf(state, cup, a, b);
@@ -566,7 +566,7 @@ function payRoundPrize(
   cup: DomesticCupEntry,
   stage: MatchStage,
   teams: string[],
-  digest: string[],
+  digest: TickSink,
 ): void {
   const amount = cup.prize.round[stage] ?? 0;
   if (amount <= 0) return;
@@ -696,7 +696,7 @@ function createStage(
   cup: DomesticCupEntry,
   stage: MatchStage,
   teams: string[],
-  digest: string[],
+  digest: TickSink,
 ): void {
   const firstStage = stage === DOMESTIC_STAGES[0];
   const order =
@@ -739,7 +739,7 @@ function createStage(
     const opponent = ours.homeTeamId === state.userTeamId ? ours.awayTeamId : ours.homeTeamId;
     const where = ours.neutral ? "중립" : ours.homeTeamId === state.userTeamId ? "홈" : "원정";
     digest.push(
-      `🎫 ${cup.short} ${label} 대진 확정 — ${where}에서 ${teamName(opponent)} (${ours.date})`,
+      `${cup.short} ${label} 대진 확정 — ${where}에서 ${teamName(opponent)} (${ours.date})`,
     );
     pushNarrative(state, `${cup.short} ${label} vs ${teamName(opponent)}`, 4);
   }
@@ -812,7 +812,7 @@ function reportDomesticTie(
   cup: DomesticCupEntry,
   stage: MatchStage,
   winners: string[],
-  digest: string[],
+  digest: TickSink,
 ): void {
   reportOurTie(
     state,
@@ -841,7 +841,7 @@ function scheduleNextDraw(
   cup: DomesticCupEntry,
   stage: MatchStage,
   created: MatchRecord[],
-  digest: string[],
+  digest: TickSink,
 ): void {
   if (cup.drawStyle === "fixed-bracket") return;
   const next = DOMESTIC_STAGES[DOMESTIC_STAGES.indexOf(stage) + 1];
@@ -850,7 +850,7 @@ function scheduleNextDraw(
   const lastTie = created.reduce((max, m) => (m.date > max ? m.date : max), created[0]!.date);
   const date = addDays(lastTie, cup.drawDelayDays);
   if (scheduleDraw(state, cup.id, next, date, userStillIn(state, cup.id))) {
-    digest.push(`🎲 ${cup.short} ${domesticStageLabel(cup, next)} 대진 추첨 — ${date}`);
+    digest.push(`${cup.short} ${domesticStageLabel(cup, next)} 대진 추첨 — ${date}`);
   }
 }
 
@@ -890,7 +890,7 @@ export function cupRunsThisSeason(state: GameState, cup: DomesticCupEntry): bool
  * 이후는 직전 라운드 마지막 경기 + `drawDelayDays`.
  * 우승·트로피는 시즌 리뷰가 확정한다 (`reviewDomesticCups`).
  */
-export function advanceDomesticCups(state: GameState, digest: string[]): void {
+export function advanceDomesticCups(state: GameState, digest: TickSink): void {
   for (const cup of domesticCupCatalog()) {
     if (!cupRunsThisSeason(state, cup)) continue;
     let previousWinners: string[] | null = null;
@@ -1040,7 +1040,7 @@ const CUP_RUNNER_UP_MEDIA = 3;
  * 끝**이다: 그 시즌은 감독에게 남지 않지만 옛 구단의 장부는 계속 돌아야 하고, 시즌 키가
  * 바뀌므로 여기서 안 주면 영영 못 준다 (career.md §5.1).
  */
-export function payDomesticCupPrizes(state: GameState, digest: string[]): void {
+export function payDomesticCupPrizes(state: GameState, digest: TickSink): void {
   for (const cup of domesticCupCatalog()) {
     const champion = domesticChampion(state, cup.id);
     if (!champion) continue;
@@ -1074,7 +1074,7 @@ export function reviewDomesticCups(state: GameState): string[] {
       state.manager.reputation.board = clampReputation(
         state.manager.reputation.board + CUP_TITLE_BOARD,
       );
-      digest.push(`🏆 ${cup.name} 우승`);
+      digest.push(`${cup.name} 우승`);
       pushNarrative(state, `${cup.name} 우승`, 5);
     } else if (ours) {
       state.manager.reputation.media = clampReputation(

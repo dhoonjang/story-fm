@@ -9,6 +9,7 @@ import {
   type GameState,
   type MatchView,
   type OfficeViews,
+  eventTexts,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
 
@@ -35,7 +36,7 @@ function intoMatch(seed: number) {
   let guard = 12;
   while (state.phase !== "matchday" && guard-- > 0) {
     const moved = advanceTime(state, "next_match");
-    if (!moved.ok) throw new Error(moved.digest.join(" / "));
+    if (!moved.ok) throw new Error(eventTexts(moved.events).join(" / "));
     if (moved.stopped === "season_end") throw new Error("시즌이 끝났다");
   }
   const started = startMatch(state);

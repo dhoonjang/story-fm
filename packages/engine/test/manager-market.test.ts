@@ -79,6 +79,7 @@ import {
   wageExpectationOf,
   type GameState,
   type TrainingBrief,
+  eventTexts,
 } from "@story-fm/engine";
 import {
   APPROACH_PATIENCE_DAYS,
@@ -836,7 +837,7 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
     const from = state.date;
     const advanced = advanceTime(state, { days: 7 });
 
-    expect(advanced.ok, advanced.digest.join(" ")).toBe(true);
+    expect(advanced.ok, eventTexts(advanced.events).join(" ")).toBe(true);
     expect(advanced.stopped, "경질이 시계를 세웠다").not.toBe("blocked");
     expect(state.date > from, "무직인데 날짜가 그대로다").toBe(true);
     expect(advanced.trained?.sessions ?? [], "무직인데 훈련을 소화했다").toHaveLength(0);

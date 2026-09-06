@@ -94,7 +94,7 @@ function violations(input: Parameters<typeof candidate>[0]): string[] {
 /** 성공 메시지에 붙는 경고 — 대회가 조용히 사라지는 편집을 알린다 */
 function withWarnings(message: string, input: Parameters<typeof candidate>[0]): string {
   const warnings = catalogWarnings(candidate(input));
-  return warnings.length === 0 ? message : `${message} — ⚠️ ${warnings.join(" · ")}`;
+  return warnings.length === 0 ? message : `${message} — ${warnings.join(" · ")}`;
 }
 
 /**

@@ -9,6 +9,7 @@ import type {
   PaymentSchedule,
   TeamFinance,
   Transfer,
+  TickSink,
 } from "@story-fm/domain";
 import {
   BOARD_DEMAND_CAUSE_LABEL,
@@ -879,7 +880,7 @@ export function applyMatchFinance(
   state: GameState,
   match: MatchRecord,
   outcome: "win" | "draw" | "loss",
-  digest: string[],
+  digest: TickSink,
 ): void {
   applyAiMatchFinance(state, match);
   const teamId = state.userTeamId;
@@ -912,7 +913,7 @@ export function applyMatchFinance(
       ref,
     });
     digest.push(
-      `💰 관중 ${gate.attendance.toLocaleString("en-US")}명 (${Math.round(gate.occupancy * 100)}%) — 입장 수입 ${money(gate.income)}`,
+      `관중 ${gate.attendance.toLocaleString("en-US")}명 (${Math.round(gate.occupancy * 100)}%) — 입장 수입 ${money(gate.income)}`,
     );
   }
   if (travels && !isFriendly(match)) {
@@ -1132,7 +1133,7 @@ export const PAYMENT_KIND_KO: Record<PaymentSchedule["kind"], string> = {
  * tick이 매일 부르고, 확정(`executeDeal`·`executeSale`·`releasePlayer`)이 그
  * 자리에서 한 번 부른다.
  */
-export function settleDuePayments(state: GameState, digest?: string[]): void {
+export function settleDuePayments(state: GameState, digest?: TickSink): void {
   for (const schedule of state.paymentSchedules ?? []) {
     const total = schedule.installments.length;
     const name =
@@ -1177,7 +1178,7 @@ export function settleDuePayments(state: GameState, digest?: string[]): void {
       // 확정일의 첫 회분은 확정 메시지가 이미 말한다 — 일지는 뒤에 오는 회분만
       if (index > 0) {
         digest?.push(
-          `💷 ${name} ${what} 분할 ${index + 1}/${total}회분 ${formatMoney(installment.amount)} 지급`,
+          `${name} ${what} 분할 ${index + 1}/${total}회분 ${formatMoney(installment.amount)} 지급`,
         );
       }
     }
@@ -1549,7 +1550,7 @@ function recentWinRates(state: GameState, window: number): Map<string, number> {
  * 순서가 중요하다: 보고서는 **지난달**을 담아야 하므로 이번 달 항목을 붙이기
  * 전에 마감한다.
  */
-export function runMonthlyFinance(state: GameState, digest: string[]): void {
+export function runMonthlyFinance(state: GameState, digest: TickSink): void {
   closeMonths(state, digest, previousMonth(monthOf(state.date)));
   postMonthlyItems(state);
   /**
@@ -1579,7 +1580,7 @@ export function runMonthlyFinance(state: GameState, digest: string[]): void {
  * ⚠️ `state.season`·`state.calendar`가 **아직 끝난 시즌일 때** 돌아야 한다. 보고서의
  * 시즌 번호를 그 둘로 역산하고, 남은 월요일도 다음 시즌 달력으로 세기 때문이다.
  */
-export function closeSeasonBooks(state: GameState, digest: string[]): void {
+export function closeSeasonBooks(state: GameState, digest: TickSink): void {
   const nextSeasonStart = buildSeasonCalendar(state.season + 1).preseasonStart;
   payWeeklyWages(state, skippedWageWeeks(state.date, nextSeasonStart));
   closeMonths(state, digest, monthOf(state.date));
@@ -2189,7 +2190,7 @@ function previousMonth(month: string): string {
 }
 
 /** `through`까지 마감 — 유저 팀만. 같은 달을 두 번 마감하지 않는다 */
-function closeMonths(state: GameState, digest: string[], through: string): void {
+function closeMonths(state: GameState, digest: TickSink, through: string): void {
   const finance = financeOf(state, state.userTeamId);
   const months = [...new Set(finance.ledger.map((e) => monthOf(e.date)))]
     .filter((m) => m <= through)
@@ -2199,7 +2200,7 @@ function closeMonths(state: GameState, digest: string[], through: string): void 
     const report = buildReport(state, month, finance.ledger);
     state.financeReports.push(report);
     digest.push(
-      `📊 ${month.replace("-", "년 ")}월 재정 보고서 — 수입 ${money(report.incomeTotal)} / 지출 ${money(report.expenseTotal)} / 순 ${report.cashNet >= 0 ? "+" : "−"}${money(Math.abs(report.cashNet))}`,
+      `${month.replace("-", "년 ")}월 재정 보고서 — 수입 ${money(report.incomeTotal)} / 지출 ${money(report.expenseTotal)} / 순 ${report.cashNet >= 0 ? "+" : "−"}${money(Math.abs(report.cashNet))}`,
       ...financeNoteTexts(report).map((n) => `   ${n}`),
     );
     pushNarrative(
@@ -2405,7 +2406,7 @@ export function budgetFreezeLabel(state: GameState, teamId: string): string {
 }
 
 /** 예산 동결 판정 — 매달 다시 본다. 갚으면 그 자리에서 풀린다 (§9.4) */
-function refreshBudgetFreeze(state: GameState, teamId: string, digest: string[]): void {
+function refreshBudgetFreeze(state: GameState, teamId: string, digest: TickSink): void {
   const finance = financeOf(state, teamId);
   const isUser = teamId === state.userTeamId;
   const cause = budgetFreezeReason(state, teamId);
@@ -2416,7 +2417,7 @@ function refreshBudgetFreeze(state: GameState, teamId: string, digest: string[])
   if (finance.budgetFrozen) {
     const reason =
       cause === "psr" ? "PSR 한도를 넘겨" : `부채가 ${money(debtOf(state, teamId))}에 이르러`;
-    digest.push(`⚠️ 보드가 ${reason} 이적 예산을 동결했다 — 매각 없이는 영입할 수 없다`);
+    digest.push(`보드가 ${reason} 이적 예산을 동결했다 — 매각 없이는 영입할 수 없다`);
     pushNarrative(state, `이적 예산 동결 — ${reason}`, 4);
   } else {
     digest.push(`보드가 이적 예산 동결을 풀었다`);
@@ -2445,7 +2446,7 @@ const SEASON_BONUS = {
 } as const;
 
 /** 우승·유럽 진출 보너스 — 시즌 리뷰에서 (주급 총액 배수) */
-export function paySeasonBonuses(state: GameState, position: number, digest: string[]): void {
+export function paySeasonBonuses(state: GameState, position: number, digest: TickSink): void {
   const wages = weeklyWagesOf(state, state.userTeamId);
   const bonus =
     position === SEASON_BONUS.champion.position
@@ -2480,7 +2481,7 @@ const LEAGUE_PRIZE_STEP = 700_000;
  * 승격팀도 자기가 없는 순위표를 받아 rank 0 — **상금이 통째로 사라진다.** 순위표는
  * 카탈로그 리그로, 리그 크기·중계 배율은 세이브 리그로 읽던 것이 어긋난 자리다.
  */
-export function payLeaguePrizes(state: GameState, digest: string[]): void {
+export function payLeaguePrizes(state: GameState, digest: TickSink): void {
   for (const team of state.teams) {
     if (isOutsideOurEconomy(team.id)) continue;
     const league = leagueOfTeamIn(state, team.id);
@@ -2506,7 +2507,7 @@ export function payLeaguePrizes(state: GameState, digest: string[]): void {
       }) &&
       team.id === state.userTeamId
     ) {
-      digest.push(`💰 리그 순위 상금 ${money(amount)} 입금 (${rank}위)`);
+      digest.push(`리그 순위 상금 ${money(amount)} 입금 (${rank}위)`);
     }
   }
 }
@@ -2584,7 +2585,7 @@ export function topUpTransferBudget(
   state: GameState,
   teamId: string,
   base: number,
-  digest: string[],
+  digest: TickSink,
 ): void {
   const finance = financeOf(state, teamId);
   const isUser = teamId === state.userTeamId;

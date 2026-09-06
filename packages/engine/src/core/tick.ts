@@ -4,7 +4,11 @@ import type {
   ScheduleEntry,
   TrainingSession,
   TurnOperation,
+  TickSink,
+  TickEvent,
+  TickEventKind,
 } from "@story-fm/domain";
+import { pushEvent, scopeEvents, tickEvents } from "@story-fm/domain";
 import {
   FAMILIARITY_BASELINE,
   FATIGUE_BAND_FLOOR,
@@ -186,6 +190,23 @@ import {
 import { makeRng } from "./rng";
 
 /**
+ * 사건 배열의 계약은 `packages/domain`이 갖는다 — 화면도 코어도 같은 것을 읽는다
+ * (AGENTS.md §5 「한 규칙 한 정의」). 코어 쪽에서 부르던 자리가 옮겨 다니지 않도록
+ * 여기서 그대로 다시 낸다.
+ */
+export {
+  TICK_EVENT_KINDS,
+  eventTexts,
+  pushEvent,
+  scopeEvents,
+  tickEvents,
+  type TickEvent,
+  type TickEventKind,
+  type TickEventSink,
+  type TickSink,
+} from "@story-fm/domain";
+
+/**
  * advance_time — 캘린더 시계가 흐르는 유일한 경로 (season.md §5).
  * 하루 단위 tick을 결정적으로 적용하고, 감독의 결정이 필요한 이벤트에서 멈춘다.
  *
@@ -196,7 +217,11 @@ import { makeRng } from "./rng";
 
 export interface AdvanceOutcome {
   ok: boolean;
-  digest: string[];
+  /**
+   * 그 사이 벌어진 일 — **사건 하나에 원소 하나** (overview.md §2 · season.md §5).
+   * 이어 붙인 한 문자열이 아니다: 화면이 사건마다 카드 하나를 세운다.
+   */
+  events: TickEvent[];
   /**
    * 이 구간에 소화된 훈련 — 결산 판정(`training-report.ts`)의 입력.
    * 코어는 앵커를 이미 반영해 뒀고, 이건 "무슨 훈련이 있었나"를 밖으로 내보내는
@@ -272,7 +297,7 @@ function reportCardLost(state: GameState, ids: readonly string[], why: string): 
  * 스카우트 파견 완료 — dueOn에 도달한 리포트를 닫고 보고한다.
  * 완료 이후 그 선수의 능력치 안개가 걷힌다 (scouting.ts).
  */
-function resolveScouting(state: GameState, digest: string[]): void {
+function resolveScouting(state: GameState, digest: TickSink): void {
   // 한도에 막혀 못 나간 요청은 대기 기간이 지나면 뜻이 지나간다 (player.md §9.4)
   pruneDeferredScouts(state);
   pruneWaitingMissions(state);
@@ -324,7 +349,7 @@ function resolveScouting(state: GameState, digest: string[]): void {
  * 오르므로(`pickedByMission`), 적은 뒤에 다시 세우면 관측값이 달라져 카드와 어긋난다.
  * 그래서 후보는 **한 번만** 적고 카드는 적힌 목록을 읽는다 (player.md §9.4).
  */
-function resolveMissions(state: GameState, digest: string[]): void {
+function resolveMissions(state: GameState, digest: TickSink): void {
   for (const mission of state.scoutMissions ?? []) {
     if (mission.dueOn === null || mission.completedOn !== null) continue;
     if (state.date < mission.dueOn) continue;
@@ -412,9 +437,25 @@ export function contractGrievanceDue(state: GameState, player: GamePlayer): bool
  * 번에** 보고된다. 멈춰야 하는 것은 오늘이 지나면 기회 자체가 없어지는 일뿐이다.
  */
 
+/**
+ * 하루가 내는 사실의 **종류별 자리** — 한 패스가 내는 것이 전부 한 종류일 때 쓴다
+ * (season.md §5의 표). 한 패스에서 한 줄만 종류가 다르면 그 줄만 `pushEvent`로 붙인다.
+ */
+function tickKinds(digest: TickSink): Record<TickEventKind, TickSink> {
+  const of = (k: TickEventKind): TickSink => scopeEvents(digest, k);
+  return {
+    injury: of("injury"),
+    board: of("board"),
+    draw: of("draw"),
+    interest: of("interest"),
+    matchday: of("matchday"),
+    news: digest,
+  };
+}
+
 function dailyTick(
   state: GameState,
-  digest: string[],
+  digest: TickSink,
   trained?: { sessions: TrainedSession[] },
 ): boolean {
   /**
@@ -424,6 +465,7 @@ function dailyTick(
    * 전부 이 하나를 묻는다 — 그러면 그 구단은 `tickOtherClubs`가 도는 AI 클럽의
    * 길로 자연히 넘어간다. 세계가 감독을 따라 멈추지는 않는다.
    */
+  const kind = tickKinds(digest);
   const managed = managedTeamId(state);
   const players = managed ? userPlayers(state) : [];
   const dow = dayOfWeek(state.date);
@@ -466,7 +508,7 @@ function dailyTick(
       ? "recovery"
       : "training";
 
-  resolveInjuries(state, digest);
+  resolveInjuries(state, kind.injury);
   // 오늘 재활 중인 선수 — 경기 감각의 자리를 가르는 유일한 사실 (아래 루프)
   const injuredPlayers = openInjuryIds(state);
   /**
@@ -665,7 +707,11 @@ function dailyTick(
           }
         }
         const { days, part } = openInjuryFor(state, victim, "training", rng);
-        digest.push(`훈련 중 부상: ${victim.name} — ${part}, 약 ${days}일 결장 예상`);
+        pushEvent(
+          digest,
+          "injury",
+          `훈련 중 부상: ${victim.name} — ${part}, 약 ${days}일 결장 예상`,
+        );
         pushNarrative(state, `${victim.name} 훈련 중 ${part} 부상 (${days}일)`, 3);
       }
       // 훈련도 노출이다 — 다치지 않고 소화한 만큼 성향이 내려간다
@@ -928,13 +974,13 @@ function dailyTick(
 
   // 협상 — 기한 경과 처리 + 들어오는 오퍼 + 상대의 답 도착.
   // 무직이면 흥정할 구단이 없다 — 경질과 함께 진행 중이던 협상은 이미 사라졌다
-  if (managed) expireNegotiations(state, digest);
+  if (managed) expireNegotiations(state, kind.interest);
   /**
    * 메디컬 — 합의한 딜은 검진일에 계약이 된다. **통과는 시계를 세우지 않는다**:
    * 감독이 이미 결정한 일이라 확인만 남았다. 소견이 붙어도 오늘 답할 필요는
    * 없으므로 여기서 멈추지 않고, 주의 줄에 서서 다음 턴에 감독을 기다린다.
    */
-  if (managed) runMedicals(state, digest);
+  if (managed) runMedicals(state, kind.interest);
   // 다른 구단의 재계약 — 노리던 선수를 놓칠 수 있다
   runAiRenewals(state, digest);
   /**
@@ -954,14 +1000,16 @@ function dailyTick(
      * 관심 — **오퍼보다 먼저 부른다** (transfer.md §1-2). 오퍼는 `bidding`까지 오른
      * 관심에서만 나오므로, 사다리가 먼저 서야 그날의 오퍼가 그 줄을 읽을 수 있다.
      */
-    tickInterests(state, digest);
-    generateIncomingOffers(state, digest);
+    tickInterests(state, kind.interest);
+    generateIncomingOffers(state, kind.interest);
     for (const negotiation of arrivedResponses(state)) {
       const player = playerById(state, negotiation.gamePlayerId);
       const offer = pendingOffer(negotiation);
       if (!player || !offer) continue;
-      digest.push(
-        `📨 ${teamNameIn(state, negotiation.counterpartTeamId ?? "")}에서 ${player.name} 오퍼(${formatMoney(offer.fee)})에 대한 답이 도착했습니다`,
+      pushEvent(
+        digest,
+        "interest",
+        `${teamNameIn(state, negotiation.counterpartTeamId ?? "")}에서 ${player.name} 오퍼(${formatMoney(offer.fee)})에 대한 답이 도착했습니다`,
       );
       /**
        * 다이제스트는 그 턴에만 서고 사라진다 — 되짚을 자리는 서사 표뿐이다.
@@ -995,13 +1043,13 @@ function dailyTick(
    * 먼저 판정해야 구단주가 오는 자리의 사실 카드가 오늘의 요청 상태를 싣는다.
    * 무직에게는 요청이 서지도 판정되지도 않는다 — 보드도 이제 남의 것이다.
    */
-  if (managed !== null) tickBoardDemands(state, digest);
+  if (managed !== null) tickBoardDemands(state, kind.board);
   /**
    * 감독이 보드에 건 요청 — 오늘 답이 도착했으면 판정하고 그 자리에서 반영한다
    * (finance.md §9.6). 구단주 요청과 방향이 반대인 별개 상태라 눈금을 나누지
    * 않는다. 무직에게는 답할 보드가 없다.
    */
-  if (managed !== null) tickBoardRequests(state, digest);
+  if (managed !== null) tickBoardRequests(state, kind.board);
   const approached = managed !== null && tickApproaches(state, digest);
 
   /**
@@ -1035,7 +1083,7 @@ function dailyTick(
    * **찾아온 사람도 같은 자리에 선다** (people.md §8) — 그 자리는 사흘이면 사라지고,
    * 시간이 그 위를 지나가면 남는 것은 평판이 깎였다는 다이제스트 한 줄뿐이다.
    */
-  return approached || offered || (managed !== null && standsToday(state, digest));
+  return approached || offered || (managed !== null && standsToday(state, kind.interest));
 }
 
 /**
@@ -1091,14 +1139,14 @@ export function dueExpiryStage(left: number, warned: number | undefined): number
  *
  * @param final 시즌이 끝나는 tick — 이 뒤로 그 계약에 닿는 날이 없으니 남은 문턱을 낸다
  */
-export function warnExpiringContracts(state: GameState, digest: string[], final = false): void {
+export function warnExpiringContracts(state: GameState, digest: TickSink, final = false): void {
   for (const { player, contract } of expiringContracts(state, EXPIRY_WARN_STAGES[0])) {
     const left = diffDays(state.date, contract.until);
     const stage = dueExpiryStage(final ? 0 : left, contract.expiryWarnedStage);
     if (stage === null) continue;
     contract.expiryWarnedStage = stage;
     digest.push(
-      `⏳ ${player.name}의 계약이 ${left}일 남았습니다 (${contract.until}) — 재계약하지 않으면 시즌 뒤 떠납니다`,
+      `${player.name}의 계약이 ${left}일 남았습니다 (${contract.until}) — 재계약하지 않으면 시즌 뒤 떠납니다`,
     );
     pushNarrative(state, `${player.name} 계약 ${left}일 남음`, stage <= 90 ? 4 : 3);
   }
@@ -1112,11 +1160,11 @@ export function warnExpiringContracts(state: GameState, digest: string[], final 
  * 그래서 다른 알림은 다 지나가되 **오늘 답하지 않으면 없어지는 것** 앞에서만
  * 멈춘다 — 한 협상당 많아야 하루다.
  */
-function standsToday(state: GameState, digest: string[]): boolean {
+function standsToday(state: GameState, digest: TickSink): boolean {
   const due = pendingVerdicts(state).filter((v) => v.negotiation.expiresOn === state.date);
   if (due.length === 0) return false;
   for (const v of due) {
-    digest.push(`⛔ ${v.label} — 오늘이 기한입니다. 넘기면 협상이 사라집니다`);
+    digest.push(`${v.label} — 오늘이 기한입니다. 넘기면 협상이 사라집니다`);
     // 오퍼 답 도착과 같은 눈금 — 오늘 답해야 하는 일은 3이다 (people.md §9).
     // `label`이 아니라 `subject`를 싣는다: 표에는 도구 이름이 아니라 사실만 선다
     pushNarrative(state, `${v.subject} — 오늘이 협상 기한`, 3);
@@ -1502,7 +1550,7 @@ export function simSquadOf(
  * 같은 시각 킥오프(최종 라운드의 동시 킥오프)는 **나중**이다 — 동시에 시작한
  * 경기의 결과를 우리 경기 전에 알 수는 없다.
  */
-export function simulateOtherMatches(state: GameState, digest: string[]): void {
+export function simulateOtherMatches(state: GameState, digest: TickSink): void {
   // 무직이면 옛 구단 경기도 여기서 굴러간다 — 감독이 들어갈 경기가 없다 (career.md §5.1)
   const managed = managedTeamId(state);
   const ours = matchesOn(state.matches, state.date).find(
@@ -1812,7 +1860,7 @@ function reserveXI(state: GameState, teamId: string): GamePlayer[] {
  * 벤치 없이 열한 명으로 90분을 굴린다(`simSquadFor`) — 교체가 없으니 출전자가 곧
  * 선발이고, 라인업이 그대로 출전 기록의 원본이다.
  */
-export function simulateReserveMatch(state: GameState, match: MatchRecord, digest: string[]): void {
+export function simulateReserveMatch(state: GameState, match: MatchRecord, digest: TickSink): void {
   /**
    * 2군 리그의 대회 id — 편성이 언제나 붙여 주지만(`reserveCompetitionId`), 없으면
    * 얹을 행이 없다. 축 없는 행에 2군 기록을 섞으면 그 행이 무엇의 합인지 사라진다.
@@ -1923,7 +1971,9 @@ export function advanceTime(
   if (state.phase !== "idle") {
     return {
       ok: false,
-      digest: ["오늘은 경기가 있습니다 — 경기를 먼저 치러야 시간이 흐릅니다."],
+      events: [
+        { kind: "matchday", text: "오늘은 경기가 있습니다 — 경기를 먼저 치러야 시간이 흐릅니다." },
+      ],
       stopped: "blocked",
     };
   }
@@ -1939,15 +1989,23 @@ export function advanceTime(
     if (minutesOfClock(until.clock) < minutesOfClock(now)) {
       return {
         ok: false,
-        digest: [`이미 ${formatClock(now)}입니다 — 지난 시각으로는 돌아갈 수 없습니다`],
+        events: [
+          {
+            kind: "news",
+            text: `이미 ${formatClock(now)}입니다 — 지난 시각으로는 돌아갈 수 없습니다`,
+          },
+        ],
         stopped: "blocked",
       };
     }
     state.clock = until.clock;
-    return { ok: true, digest: [], stopped: "reached" };
+    return { ok: true, events: [], stopped: "reached" };
   }
 
-  const digest: string[] = [];
+  const sink = tickEvents();
+  const digest: TickSink = sink;
+  const events = sink.events;
+  const kind = tickKinds(digest);
   // 이 구간에 소화된 훈련 — 끝나고 한 묶음으로 결산 판정에 넘긴다
   const trained = { sessions: [] as TrainedSession[] };
   const maxDays =
@@ -1966,7 +2024,7 @@ export function advanceTime(
        */
       if (managedTeamId(state)) declinePendingPress(state, digest);
       digest.push(...endSeason(state));
-      return { ok: true, digest, stopped: "season_end", trained };
+      return { ok: true, events, stopped: "season_end", trained };
     }
 
     state.date = addDays(state.date, 1);
@@ -1981,16 +2039,16 @@ export function advanceTime(
      * 경질을 먼저 봐야 지운 계약을 다시 재지 않는다 — `reviewManagerContract`는
      * `dismissal`이 서 있으면 스스로 물러난다.
      */
-    const seatLost = reviewUserSeat(state, digest);
-    const contractDay = reviewManagerContract(state, digest);
-    simulateOtherMatches(state, digest);
+    const seatLost = reviewUserSeat(state, kind.board);
+    const contractDay = reviewManagerContract(state, kind.board);
+    simulateOtherMatches(state, kind.matchday);
     // 녹아웃 — 직전 단계가 끝났으면 다음 단계를 편성한다.
     // 대항전을 먼저 돌려야 예약된 대항전 날짜가 컵 날짜 선택에 반영된다.
     if (hasCups(state.world)) {
-      advanceEuroKnockouts(state, digest);
-      advanceDomesticCups(state, digest);
+      advanceEuroKnockouts(state, kind.draw);
+      advanceDomesticCups(state, kind.draw);
       // 슈퍼컵은 한 경기라 편성할 다음 단계가 없다 — 끝난 경기의 승부만 가린다
-      advanceSuperCups(state, digest);
+      advanceSuperCups(state, kind.draw);
     }
     // 경기 일정이 바뀌었으면 기본 훈련을 다시 깐다 (감독 지시 세션은 그대로).
     // ⚠️ "경기 수가 늘었을 때"로 게이트하면 안 된다 — 컵 대진은 **경기일 몇 주
@@ -2001,7 +2059,7 @@ export function advanceTime(
 
     // 자리를 잃은 날은 경질과 같은 무게로 시계가 멈춘다 — 세계의 하루는 이미 끝났다
     if (seatLost || contractDay === "expired") {
-      return { ok: true, digest, stopped: "blocked", trained };
+      return { ok: true, events, stopped: "blocked", trained };
     }
 
     const managed = managedTeamId(state);
@@ -2013,22 +2071,24 @@ export function advanceTime(
     if (userMatch) {
       state.phase = "matchday";
       const home = userMatch.homeTeamId === managed;
-      digest.push(
+      pushEvent(
+        digest,
+        "matchday",
         `경기일 — ${competitionLabel(userMatch.competitionId, userMatch.stage ?? "league", userMatch.round)} ${userMatch.neutral ? "중립" : home ? "홈" : "원정"} vs ${teamNameIn(state, home ? userMatch.awayTeamId : userMatch.homeTeamId)}`,
       );
-      return { ok: true, digest, stopped: "matchday", trained };
+      return { ok: true, events, stopped: "matchday", trained };
     }
 
     // 통보가 선 날은 답할 자리가 생긴 날이다 — 경기일이 아니면 주의로 멈춘다
     if (needsAttention || contractDay === "notice") {
-      return { ok: true, digest, stopped: "attention", trained };
+      return { ok: true, events, stopped: "attention", trained };
     }
     if (typeof until === "object" && d + 1 >= until.days) {
-      return { ok: true, digest, stopped: "reached", trained };
+      return { ok: true, events, stopped: "reached", trained };
     }
   }
 
-  return { ok: true, digest, stopped: "reached", trained };
+  return { ok: true, events, stopped: "reached", trained };
 }
 
 /** 프리시즌·이적창 상태 요약 — GM 컨텍스트·브리핑용 */
@@ -2157,14 +2217,14 @@ export function applyScenePoint(
     const held = target.date !== state.date && reportsHeldDate(source);
     return {
       ok: !held,
-      digest: held ? [DATE_HELD] : [],
+      events: held ? [{ kind: "news" as const, text: DATE_HELD }] : [],
       stopped: held ? "blocked" : "reached",
       reached: here(),
       short: held,
     };
   }
   if (target.date < state.date) {
-    return { ok: true, digest: [], stopped: "reached", reached: here(), short: true };
+    return { ok: true, events: [], stopped: "reached", reached: here(), short: true };
   }
 
   const days = diffDays(state.date, target.date);

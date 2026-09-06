@@ -360,6 +360,8 @@ export function runTurnLocked(
           ...(turn.cards && turn.cards.length > 0 ? { cards: turn.cards } : {}),
           ...(turn.reports && turn.reports.length > 0 ? { reports: turn.reports } : {}),
           ...(turn.missions && turn.missions.length > 0 ? { missions: turn.missions } : {}),
+          // 넘긴 시간이 남긴 사건들 — 화면이 하나를 카드 하나로 세운다 (design-system.md §6)
+          ...(turn.events && turn.events.length > 0 ? { events: turn.events } : {}),
           // 유저 턴과 같은 표식 — 한 턴의 두 줄이 서로 다른 이력으로 갈리면 안 된다
           ...mark,
         });

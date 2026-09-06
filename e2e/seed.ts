@@ -13,6 +13,7 @@ import {
   suggestTerms,
   type GameState,
   type WorldScope,
+  eventTexts,
 } from "@story-fm/engine";
 import { buildOnboardingTurn } from "@story-fm/agents";
 
@@ -95,10 +96,11 @@ export function seedFinishedSeason(teamId = "arsenal", seed = 406): string {
   const state = appoint({ teamId, managerName: "결산", seed, world: ONE_LEAGUE });
   for (let guard = 0; guard < 400 && !allMatchesDone(state); guard++) {
     const advanced = advanceTime(state, "next_match");
-    if (!advanced.ok) throw new Error(`시즌 픽스처가 멎었다: ${advanced.digest.join(" / ")}`);
+    if (!advanced.ok)
+      throw new Error(`시즌 픽스처가 멎었다: ${eventTexts(advanced.events).join(" / ")}`);
     // 경질은 시계가 멈춘 상태다 — 픽스처가 재려는 것이 아니므로 크게 실패시킨다
     if (advanced.stopped === "blocked") {
-      throw new Error(`시즌을 끝내기 전에 막혔다: ${advanced.digest.join(" / ")}`);
+      throw new Error(`시즌을 끝내기 전에 막혔다: ${eventTexts(advanced.events).join(" / ")}`);
     }
     if (advanced.stopped === "matchday") playMatch(state);
   }

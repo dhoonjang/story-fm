@@ -29,11 +29,12 @@ import {
   type AdvanceOutcome,
   type CardMark,
   type ClockSource,
+  type CommandBriefItem,
   type GameState,
   type GoalMark,
   type TrainingBrief,
 } from "@story-fm/engine";
-import type { CharacterEntry } from "@story-fm/domain";
+import type { CharacterEntry, TickEvent } from "@story-fm/domain";
 import { agentConfig, createGameLLM, resolveLlmMode, type TurnResult } from "@story-fm/llm";
 import { MAX_REPORT_CARDS, NO_CARDS, takeArrivedReports, type ArrivedCards } from "./report-cards";
 import { reportTraining } from "./training-rater";
@@ -105,10 +106,30 @@ function hasSceneLine(text: string): boolean {
  */
 function sceneFromToolCalls(calls: readonly GmToolCall[]): string | null {
   const lines = calls
-    .map(toolCallFactLine)
+    // ⚠️ **시간 경과는 여기 서지 않는다.** 그 사실은 이번 턴의 사건 카드가 이미 진다
+    // (`GmTurnResult.events` → `ChatTurn.events`) — 지문으로도 펴면 같은 사건이 카드
+    // N장과 문장 N줄로 두 번 선다. 한 사실은 한 자리에만 (overview.md §2)
+    .filter((call) => call.name !== TIME_PASSED)
+    .flatMap((call) =>
+      // 항목을 가진 기록은 **항목 하나가 한 줄**이다 — 한 문단으로 접으면 화면이
+      // 사건 하나를 한 줄로 세우지 못한다 (overview.md §2). 항목이 없던 옛 기록은
+      // 지금처럼 요약 한 줄이다
+      call.brief
+        ? [call.brief.head, ...call.brief.items.map(briefItemLine)]
+        : [toolCallFactLine(call)],
+    )
+    .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .map((line) => `@: *${line}*`);
   return lines.length > 0 ? lines.join("\n") : null;
+}
+
+/**
+ * 항목 하나를 줄로 — **접는 규칙은 장부 줄과 한 벌이다**(`toolCallFactLine`).
+ * 레이블·부연을 붙이는 자를 여기서 다시 쓰면 `[장부]` 줄과 코어 기록이 언젠가 갈린다.
+ */
+function briefItemLine(item: CommandBriefItem): string {
+  return toolCallFactLine({ summary: "", brief: { head: "", items: [item] } });
 }
 
 /**
@@ -186,6 +207,11 @@ interface TurnLedger {
   training: TrainingBrief[];
   /** 마감이 지운 장부의 마지막 분 — 화면의 시각 줄이 읽는다 (agents.md §3) */
   finalMinute: number | null;
+  /**
+   * 이번 턴에 시계가 지나간 자리에 남은 사건 — 손잡이가 굴린 구간과 헤더가 민 구간이
+   * **민 순서대로** 여기 쌓이고, 턴 결과(`GmTurnResult.events`)로 화면에 올라간다.
+   */
+  events: TickEvent[];
 }
 
 /** 턴 앞이 남긴 것 — 호출과 턴 뒤가 함께 읽는다 */
@@ -223,8 +249,20 @@ interface TurnOpening {
  * 코어가 시계를 옮긴 자국 — **호출이 아니라 코어가 한 일**이라 조용히 남는다
  * (`TIME_PASSED` 주석). 시계가 도는 두 자리가 같은 함수로 적는다.
  */
-function noteTimePassed(ledger: TurnLedger, head: string, digest: readonly string[]): void {
-  ledger.calls.push({ name: TIME_PASSED, summary: [head, ...digest].join("\n"), silent: true });
+function noteTimePassed(ledger: TurnLedger, head: string, events: readonly TickEvent[]): void {
+  /**
+   * ⚠️ **사건을 `\n`으로 이어 붙이지 않는다.** 그렇게 접으면 `toolCallFactLine`이
+   * 「 · 」로 다시 이어, 며칠치의 사건이 프롬프트에도 화면에도 한 문자열로 선다.
+   * 항목으로 실으면 장부 줄은 호출 하나에 한 줄 그대로이고(`brief`가 먼저 읽힌다),
+   * 화면은 사건 하나를 카드 하나로 세운다 (overview.md §2).
+   */
+  ledger.calls.push({
+    name: TIME_PASSED,
+    summary: head,
+    brief: { head, items: events.map((e) => ({ text: e.text })) },
+    silent: true,
+  });
+  ledger.events.push(...events);
 }
 
 /** 굴러간 구간의 훈련 결산 — 소화된 세션이 없으면 브리핑이 서지 않는다 */
@@ -278,7 +316,7 @@ async function openTurn(
     noteTimePassed(
       ledger,
       `${from} → ${state.date} — ${ADVANCE_STOP_KO[skipped.stopped] ?? "진행했다"}`,
-      skipped.digest,
+      skipped.events,
     );
     noteTraining(state, ledger, skipped, from);
   }
@@ -390,7 +428,7 @@ async function callGm(
           ? {
               from: opening.from,
               stopped: ADVANCE_STOP_KO[opening.skipped.stopped] ?? "진행했다",
-              digest: opening.skipped.digest,
+              events: opening.skipped.events,
             }
           : null,
         opening.carried.reports,
@@ -608,13 +646,13 @@ async function closeTurn(
   // ⚠️ 시계를 옮기는 자리는 여기 하나다 — 날짜를 미는지 고정하는지는 출처가 정한다
   if (scenePoint) {
     const moved = applyScenePoint(state, scenePoint, clockSourceOf(shape, opening));
-    if (moved.digest.length > 0 || moved.short) {
+    if (moved.events.length > 0 || moved.short) {
       noteTimePassed(
         ledger,
         `${state.date} ${formatClock(clockOf(state))}${
           moved.short ? ` — ${ADVANCE_STOP_KO[moved.stopped] ?? "멈췄다"}` : ""
         }`,
-        moved.digest,
+        moved.events,
       );
     }
     noteTraining(state, ledger, moved, opening.from);
@@ -648,9 +686,12 @@ async function closeTurn(
    * **장면이 비어 돌아온 턴** — 왕복 상한을 도구로 채우면(`stopReason === "tool_use"`)
    * 모델은 "확인하겠습니다" 한 줄만 남기거나 아무것도 쓰지 못한다. 도구는 이미 돌아
    * 라인업과 훈련이 바뀐 뒤라 되돌릴 수 없으므로, 코어가 이번 턴의 기록으로 세운다
-   * (agents.md §2·§8). 기록도 장면도 없으면 저장하지 않고 턴을 되돌린다.
+   * (agents.md §2·§8). 기록도 사건도 장면도 없으면 저장하지 않고 턴을 되돌린다.
    */
   if (!inMatch && !hasSceneLine(body)) {
+    // 모델이 헤더도 못 썼을 때 코어가 세우는 지금 시각 — 헤더가 없으면 화면의
+    // 시각이 스트리밍이 끝나는 순간 사라진다
+    const now = () => `[${state.date} ${formatClock(clockOf(state))}]`;
     const record = sceneFromToolCalls(ledger.calls);
     if (record) {
       // mock 모드에서는 이것이 계약이다 — 대본은 장면을 쓰지 않는다 (agents.md §8)
@@ -660,11 +701,18 @@ async function closeTurn(
         );
       }
       body = record;
-      // 모델이 헤더도 못 썼으면 코어가 지금 시각을 세운다 — 헤더가 없으면 화면의
-      // 시각이 스트리밍이 끝나는 순간 사라진다
-      header ??= `[${state.date} ${formatClock(clockOf(state))}]`;
+      header ??= now();
     } else if (body.trim().length === 0) {
-      throw new GmTurnFailure("모델이 아무 장면도 내지 않아 턴을 취소했습니다.");
+      /**
+       * **손잡이만 눌러 시간만 흐른 턴** — 장면도 세울 기록도 없지만 코어가 낸 사건이
+       * 있으면 그 턴은 일어난 일이 있다. 화면은 사건 카드로 그 턴을 세우므로 되돌리지
+       * 않는다 (overview.md §2). 경고도 남기지 않는다 — 정상적인 길이라 mock에서는
+       * 매 턴 뜬다.
+       */
+      if (ledger.events.length === 0) {
+        throw new GmTurnFailure("모델이 아무 장면도 내지 않아 턴을 취소했습니다.");
+      }
+      header ??= now();
     }
   }
   const text =
@@ -690,6 +738,8 @@ async function closeTurn(
     ...(ledger.cards.length > 0 ? { cards: ledger.cards } : {}),
     ...(reports.length > 0 ? { reports } : {}),
     ...(missions.length > 0 ? { missions } : {}),
+    // 손잡이가 굴린 구간과 헤더가 민 구간의 사건이 민 순서대로 함께 온다
+    ...(ledger.events.length > 0 ? { events: ledger.events } : {}),
     ...(clockStalled !== null ? { clockStalled } : {}),
     usage: result.usage,
   };
@@ -726,6 +776,7 @@ export async function runGmTurn(
     cards: [],
     training: [],
     finalMinute: null,
+    events: [],
   };
   const matchCtx: MatchToolContext = {
     calls: ledger.calls,
