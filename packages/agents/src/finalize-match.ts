@@ -61,7 +61,7 @@ export const SETTLE_MATCH_TOOL = "settle_match";
 export const SETTLE_MATCH_DESCRIPTION = `출전한 선수 전원의 경기 결산을 한 번에 제출한다 — 평점과 한 줄 근거, 전술 적응도, 능력치, 심경.
 - 기록(골·도움·슛·선방·카드)은 이미 기준 평점에 반영돼 있다. 더할 것은 기록에 안 남는 것이다 — 중계가 그린 지배력, 위기 관리, 실점 장면에서의 책임, 교체 투입 후의 영향, 짧게 뛰고도 흐름을 바꾼 순간.
 - 출전 시간을 감안한다. 15분 뛴 교체 선수를 90분 뛴 선수와 같은 잣대로 재지 않는다. 자리를 감안한다. 수비수의 무실점과 공격수의 무득점은 같은 무게가 아니다. 팀 결과에 휩쓸리지 않는다.
-- rating — ${RATING_MIN}~${RATING_MAX}, 기준 평점에서 ±${RATING_BAND}를 넘지 않는다. note는 한 문장 40자 안팎 — "무난했다" 같은 빈 말 대신 그 경기의 사실을 적는다.
+- rating — ${RATING_MIN}~${RATING_MAX}, 기준 평점에서 ±${RATING_BAND}를 넘지 않는다. note는 한 문장 40자 안팎 — “무난했다” 같은 빈 말 대신 그 경기의 사실을 적는다.
 - drill — 이 경기로 전술 적응도가 얼마나 올랐는가, ${MATCH_FAMILIARITY_MIN}~${MATCH_FAMILIARITY_MAX}. 빠뜨린 선수는 변화가 없는 것으로 본다.
 - attribute · attributeStep — 이 경기로 한 축이 움직인 선수만, 0~${MATCH_ATTR_CAP}명, 각 한 축 +${ATTR_STEP_MAX} 또는 −${-ATTR_STEP_MIN}. ${agingDeclineLine()}
 - moods — 그 경기가 남긴 심경 한 문장(60자 안팎), ${MOOD_BATCH}명까지. 불만이 걸린 선수는 그 사실을 문장에 담고 acknowledgesIssue를 true로 적는다. 수치(평점·체력·퍼센트)는 문장에 적지 않는다.

@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MatchEvent } from "@story-fm/domain";
+import { formatScore } from "@story-fm/domain";
 import {
   addDays,
   advanceTime,
+  BIG_CHANCE_XG,
   clockOf,
   createGame,
   interpretBackgroundHeuristic,
@@ -773,8 +775,8 @@ const NAMES: Record<string, string> = {
 const nameOf = (id: string) => NAMES[id] ?? id;
 const sideName = (side: "home" | "away") => (side === "home" ? "토트넘" : "아스널");
 
-function script(ev: MatchEvent): string {
-  return buildSegmentMessage([ev], "flow", nameOf, sideName);
+function script(ev: MatchEvent, scoreBefore = { home: 0, away: 0 }): string {
+  return buildSegmentMessage([ev], "flow", nameOf, sideName, scoreBefore);
 }
 
 describe("구간 대본 — 배우 표기", () => {
@@ -825,6 +827,65 @@ describe("구간 대본 — 배우 표기", () => {
     expect(script({ minute: 45, type: "half_time", actors: [], causes: [] })).toContain(
       "- 45′ 하프타임",
     );
+  });
+});
+
+/**
+ * **한 문형이 되풀이되는 것은 규칙이 아니라 사실의 결핍이다** (prompts.md §1).
+ *
+ * 장부는 슛마다 결과와 xG를, 골마다 그 뒤의 스코어를 들고 있다. 대본이 그것을
+ * 빠뜨리면 캐스터에게 가는 사실이 「슛」 하나뿐이라 일곱 개가 한 문장으로 나온다.
+ */
+describe("구간 대본 — 골의 스코어와 슛의 갈래", () => {
+  it("골 줄은 그 골이 들어간 뒤의 스코어를 두 이름과 함께 적는다", () => {
+    const line = script({ minute: 44, type: "goal", team: "away", actors: ["p1"], causes: [] });
+    expect(line).toContain(`토트넘 ${formatScore(0, 1)} 아스널`);
+  });
+
+  it("한 구간의 두 골은 각자 자기 시점의 스코어를 갖는다 — 중계가 세지 않는다", () => {
+    const message = buildSegmentMessage(
+      [
+        { minute: 12, type: "goal", team: "home", actors: ["p1"], causes: [] },
+        { minute: 40, type: "goal", team: "away", actors: ["p2"], causes: [] },
+      ],
+      "goal",
+      nameOf,
+      sideName,
+      { home: 1, away: 0 },
+    );
+    expect(message).toContain(`토트넘 ${formatScore(2, 0)} 아스널`);
+    expect(message).toContain(`토트넘 ${formatScore(2, 1)} 아스널`);
+  });
+
+  it("슛은 결과와 큰 기회 여부로 갈린다 — 같은 사건 종류가 같은 줄이 되지 않는다", () => {
+    const saved = script({
+      minute: 20,
+      type: "shot",
+      team: "home",
+      actors: ["p1"],
+      causes: [],
+      xg: BIG_CHANCE_XG,
+      shotOutcome: "saved",
+    });
+    const wide = script({
+      minute: 21,
+      type: "shot",
+      team: "home",
+      actors: ["p1"],
+      causes: [],
+      xg: BIG_CHANCE_XG - 0.01,
+      shotOutcome: "off_target",
+    });
+    expect(saved).toContain("슛 — 큰 기회, 골키퍼가 막았다");
+    expect(wide).toContain("슛 — 골문을 벗어났다");
+    // xG는 화자가 입에 담을 수 없는 수치다 — 문턱만 어휘로 선다
+    expect(saved).not.toContain(String(BIG_CHANCE_XG));
+  });
+
+  it("갈래를 모르는 옛 세이브의 슛은 슛까지만 적는다", () => {
+    expect(
+      script({ minute: 20, type: "shot", team: "home", actors: ["p1"], causes: [] }),
+    ).toContain("- 20′ 토트넘 슛: 손흥민");
   });
 });
 

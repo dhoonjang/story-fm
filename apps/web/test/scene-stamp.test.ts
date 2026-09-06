@@ -37,6 +37,25 @@ describe("partOfDayStamp", () => {
     expect(partOfDayStamp("2026-07-02 AM 12:40")).toBe("7월 2일 목 새벽");
   });
 
+  /**
+   * **장소는 시각 뒤에 온다** (prompts.md §1) — 데이트라인이 그 자리를 세우므로
+   * 장면의 첫 문장이 같은 장소를 다시 말하지 않는다. 구분자는 모델이 고르는 것이라
+   * 넷 다 받고, 없으면 날짜와 때까지만 선다.
+   */
+  it("헤더의 장소를 데이트라인에 세운다", () => {
+    expect(partOfDayStamp("2026-07-18 AM 9:30 · 에미레이츠")).toBe("7월 18일 토 오전 — 에미레이츠");
+    expect(partOfDayStamp("2026-07-18 PM 7:05 — 런던 콜니 훈련장")).toBe(
+      "7월 18일 토 저녁 — 런던 콜니 훈련장",
+    );
+    expect(partOfDayStamp("2026-07-18 AM 9:30")).toBe("7월 18일 토 오전");
+  });
+
+  it("장소가 다르면 같은 때라도 장면이 갈린다 — 스탬프가 다시 선다", () => {
+    expect(partOfDayStamp("2026-07-18 AM 9:30 · 훈련장")).not.toBe(
+      partOfDayStamp("2026-07-18 AM 11:00 · 감독실"),
+    );
+  });
+
   it("시각이 아닌 헤더는 그대로 둔다 — 경기 중 분 표시", () => {
     expect(partOfDayStamp("43분")).toBe("43분");
     expect(partOfDayStamp("하프타임")).toBe("하프타임");

@@ -1,6 +1,7 @@
 import {
   buildOfficeViews,
   clockOf,
+  clubProfileIn,
   describeNextFixture,
   formatClock,
   headCoachOf,
@@ -76,17 +77,31 @@ function coachTag(state: GameState): string {
   return `@${headCoachOf(state).characterId}:`;
 }
 
+/**
+ * 첫 장면의 자리 — **장소는 헤더가 갖고 첫 줄은 그 자리에서 벌어지는 것부터 쓴다**
+ * (prompts.md §1). 실모드의 GM이 받는 규칙과 같은 규칙이라 대본도 같은 꼴로 연다.
+ */
 const ONBOARDING_SCENES = [
-  (team: string) =>
-    `@: *${team} 트레이닝 센터 정문. 새 감독을 기다리던 카메라 셔터가 일제히 터진다*`,
-  (team: string) =>
-    `@: *이른 아침의 ${team} 훈련장. 잔디에 물기가 남은 가운데 첫 출근 차량이 멈춰 선다*`,
-  (team: string) =>
-    `@: *${team} 홈구장 선수 통로. 아직 빈 관중석 너머로 새 시즌 준비 소리가 울린다*`,
-  (team: string) =>
-    `@: *${team} 구단 사무동. 벽을 채운 역대 시즌 사진 앞에서 새 감독의 첫날이 시작된다*`,
-  (team: string) =>
-    `@: *여름 이적시장 첫날, ${team} 구단 전화가 쉴 새 없이 울리는 가운데 감독실 문이 열린다*`,
+  {
+    place: (team: string) => `${team} 트레이닝 센터`,
+    line: () => `@: *정문 앞, 새 감독을 기다리던 카메라 셔터가 일제히 터진다*`,
+  },
+  {
+    place: (team: string) => `${team} 훈련장`,
+    line: () => `@: *잔디에 물기가 남은 이른 아침, 첫 출근 차량이 멈춰 선다*`,
+  },
+  {
+    place: (_team: string, stadium: string) => stadium,
+    line: () => `@: *선수 통로. 아직 빈 관중석 너머로 새 시즌 준비 소리가 울린다*`,
+  },
+  {
+    place: (team: string) => `${team} 사무동`,
+    line: () => `@: *벽을 채운 역대 시즌 사진 앞에서 새 감독의 첫날이 시작된다*`,
+  },
+  {
+    place: () => `감독실`,
+    line: () => `@: *여름 이적시장 첫날. 구단 전화가 쉴 새 없이 울리는 가운데 문이 열린다*`,
+  },
 ] as const;
 
 const ONBOARDING_WELCOMES = [
@@ -127,15 +142,16 @@ export function buildOnboardingTurn(state: GameState): GmTurnResult {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 2)
     .map(([axis]) => MANAGER_ATTRIBUTE_KO[axis as keyof typeof MANAGER_ATTRIBUTE_KO] ?? axis);
+  const scene = pick(rng, ONBOARDING_SCENES);
   return {
     text: [
-      // 첫 장면도 시점을 세우고 연다 — 실모드와 같은 문법이다
-      `[${state.date} ${formatClock(clockOf(state))}]`,
-      pick(rng, ONBOARDING_SCENES)(team),
+      // 첫 장면도 시점과 장소를 세우고 연다 — 실모드와 같은 문법이다
+      `[${state.date} ${formatClock(clockOf(state))} · ${scene.place(team, clubProfileIn(state, state.userTeamId).stadium)}]`,
+      scene.line(),
       pick(rng, ONBOARDING_WELCOMES)(state.manager.name, tag, persona.name),
       // 코치의 사람됨을 첫 만남에 밝힌다 — motivation은 3인칭 서술이라 대사로 옮기지 않는다
       `${tag} 저에 대해서는 ${persona.traits.join(" · ")} — 그렇게들 말합니다.`,
-      `${tag} "${state.manager.background}"이라는 이력도 검토했습니다. 보드는 특히 감독님의 ${topAxes.join("과 ")}을 높이 샀습니다.`,
+      `${tag} “${state.manager.background}”이라는 이력도 검토했습니다. 보드는 특히 감독님의 ${topAxes.join("과 ")}을 높이 샀습니다.`,
       `${tag} 스쿼드의 축은 ${views.squad.players
         .slice(0, 3)
         .map((p) => p.name)

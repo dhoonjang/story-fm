@@ -161,14 +161,20 @@ function runSegment(): { note: string; stop: string } {
   const aiSubs = planAiSubstitution("away", squads.away, ledger, plan, rng);
   // 끼우는 순서는 엔진과 한 벌이다 (sim/segment.ts) — 부상 교체만 사건 뒤에 선다
   const events: MatchEvent[] = mergeSubstitutions(plan.events, aiSubs);
+  // 골 줄이 그 골 뒤의 스코어를 적는다 — 굴리기 전의 스코어가 그 셈의 시작이다
+  const scoreBefore = { ...ledger.score };
   const result = applyEvents(ledger, events);
   if (!result.ok) return { note: `[진행 실패] ${result.errors.join(" / ")}`, stop: plan.stop };
   ledger = result.state;
   segmentIndex += 1;
   accumulateFatigue(matchFatigue, plan.fatigue);
   return {
-    note: buildSegmentMessage(events, plan.stop, nameOf, (side) =>
-      side === "home" ? names.home : names.away,
+    note: buildSegmentMessage(
+      events,
+      plan.stop,
+      nameOf,
+      (side) => (side === "home" ? names.home : names.away),
+      scoreBefore,
     ),
     stop: plan.stop,
   };

@@ -54,7 +54,7 @@ export const TRAINING_RATER_SYSTEM = `당신은 축구 구단의 훈련장을 �
   지친 선수를 굴려 오히려 흐트러졌을 때다.
 - 능력치는 0~${TRAINING_ATTR_CAP}명, 각 한 축 +${ATTR_STEP_MAX} 또는 −${-ATTR_STEP_MIN}, 그 기간에 실제로 훈련한 축만.
   아무에게도 변화가 없는 구간이 정상이다. ${agingDeclineLine()}
-- 개인 훈련으로 자리를 배우는 선수(대상 표에 "전향 …"으로 표시)에게는
+- 개인 훈련으로 자리를 배우는 선수(대상 표에 “전향 …”으로 표시)에게는
   positionGain을 0~${POSITION_TRAIN_MAX}으로 적는다. 전향이 걸리지 않은 선수에게는 적지 않는다.
 - 대화에서는 감독이 무엇을 주문했는지와 그 근거만 읽는다. 장면의 말은 여러 사람의 것이고, 실제로 걸린 것은 [장부] 줄이 말한다.
 - 대상 전원을 빠뜨리지 마라.
@@ -145,7 +145,7 @@ export function buildTrainingPrompt(brief: TrainingBrief): string {
       `컨디션 ${p.condition} · 폼 ${p.form > 0.2 ? "좋음" : p.form < -0.2 ? "나쁨" : "보통"}`,
       p.apps > 0 ? `시즌 ${p.apps}경기 평점 ${p.rating?.toFixed(1) ?? "—"}` : "출전 없음",
     ];
-    if (p.instruction) parts.push(`개인지시 "${p.instruction}"`);
+    if (p.instruction) parts.push(`개인지시 “${p.instruction}”`);
     if (p.program?.position) parts.push(`전향 ${p.program.position} 훈련 중`);
     if (p.program?.axis)
       parts.push(`개인훈련 ${AXIS_KO[p.program.axis as never] ?? p.program.axis}`);
