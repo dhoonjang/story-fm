@@ -193,6 +193,12 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await input.fill("경기 시작하자");
   await page.getByTestId("chat-send").click();
   await expect(page.getByTestId("kickoff-gate")).toBeVisible();
+  /**
+   * 게이트는 **매치데이 프로그램**이다 (match.md §8) — 한 줄과 버튼 하나가 아니라
+   * 양 팀의 1–11이 두 열로 선다. 문이 열렸다는 것만 재면 그 안이 다시 한 줄로
+   * 줄어들어도 초록이다.
+   */
+  await expect(page.locator(".kickoff-gate .kg-line")).toHaveCount(22);
   // 중계는 화자다 — 문구가 아니라 그 화자의 말풍선(`.say.broadcast`)이 섰는지를 본다
   // (`BROADCAST_SPEAKER`, packages/domain/src/persona.ts)
   const broadcast = page.locator(".say.broadcast");
@@ -321,6 +327,16 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   const fulltime = page.getByTestId("fulltime");
   await expect(fulltime).toBeVisible();
   await expect(fulltime).toContainText("경기 종료");
+  /**
+   * **첫 화면에 스코어와 결과어가 선다** — 리포트 요청을 기다리지 않는다 (match.md §8).
+   * 머리가 읽는 사실은 이미 화면에 와 있는 것(접힌 경기 머리 · 턴의 골 표식)이라,
+   * 카드가 서는 순간 이 자리가 비어 있으면 그 길이 끊긴 것이다.
+   */
+  await expect(fulltime.locator(".mr-sb-score")).toBeVisible();
+  await expect(fulltime.locator(".mr-sb-outcome")).toBeVisible();
+  // 리포트가 닿으면 선수 표까지 한 장이 된다 — 그때도 스코어는 같은 자리에 그대로다
+  await expect(page.getByTestId("match-report")).toBeVisible();
+  await expect(fulltime.locator(".mr-sb-score")).toBeVisible();
   await page.getByTestId("fulltime-close").click();
   await expect(fulltime).toHaveCount(0);
   /*
