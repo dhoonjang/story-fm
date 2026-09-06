@@ -3,6 +3,7 @@ import type {
   AttributeAxis,
   AxisValues,
   BoardPoint,
+  ClubColours,
   EdgeSize,
   LedgerEntry,
   MatchEventType,
@@ -68,6 +69,7 @@ import {
   fatigueOf,
   type FatigueBand,
   defaultRoleOf,
+  formatScore,
   growthLabel,
   naturalPositionOf,
   outcomeFor,
@@ -119,6 +121,7 @@ import {
   knockoutStages,
 } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
+import { teamCatalogById } from "../data/team-catalog";
 import {
   championOf,
   clubRecordsOf,
@@ -1012,12 +1015,14 @@ export interface CalendarEntryView {
     competition: string | null;
     /** 단계 표기 — 리그는 라운드(`R7`), 컵은 `16강 1차전` */
     stage: string;
+    /** 상대 팀 id — 문장과 구단 색의 열쇠 */
+    opponentId: string;
     /** 상대 팀 약칭 (`LIV`) — 좁은 칸에서 풀네임은 세 줄로 접힌다 */
     opponent: string;
     /** 상대 팀 이름 — 자리가 있는 상세 패널이 쓴다 */
     opponentName: string;
     venue: "home" | "away" | "neutral";
-    /** 우리 관점 스코어 `2-1` — 미진행이면 null */
+    /** 우리 관점 스코어 (`formatScore`) — 미진행이면 null */
     score: string | null;
   } | null;
   /**
@@ -1038,6 +1043,9 @@ export interface CompetitionMatchView {
   id: string;
   date: string;
   time: string;
+  /** 팀 id — 문장과 구단 색의 열쇠 */
+  homeId: string;
+  awayId: string;
   homeName: string;
   awayName: string;
   homeShort: string;
@@ -1292,6 +1300,12 @@ export interface CompetitionView {
    */
   nextMatch: NextMatchView | null;
   rounds: CompetitionRoundView[];
+  /**
+   * 이 대회에 선 구단들의 공식 색 — 팀 id → `colours`. 순위표 행과 라운드 일정이
+   * 문장을 그릴 때 같은 사전을 읽는다. 카탈로그에 색이 없는 클럽은 빠진다
+   * (문장이 id 해시로 색을 낸다 — team.md §3.1).
+   */
+  clubColours: Record<string, ClubColours>;
   /** 녹아웃 단계별 대진 — 리그는 빈 배열 */
   bracket: BracketStageView[];
   /** 컵에서 우리가 어디까지 갔나 — 순위표가 없는 대회의 "현재 위치" */
@@ -1522,8 +1536,13 @@ export interface MatchView {
   matchId: string;
   competition: string;
   stage: string;
-  home: { name: string; short: string; ours: boolean };
-  away: { name: string; short: string; ours: boolean };
+  /**
+   * `id`는 문장(`crestOf`)과 구단 색의 열쇠다 — 이름으로 되찾으면 어드민 편집에서 갈린다.
+   * `colours`는 카탈로그의 공식 색 — 화면은 엔진을 값으로 못 읽으므로 여기 실려 간다
+   * (ui/design-system.md §2). 없으면(어드민이 만든 클럽) 문장이 id 해시로 색을 낸다.
+   */
+  home: { id: string; name: string; short: string; ours: boolean; colours?: ClubColours };
+  away: { id: string; name: string; short: string; ours: boolean; colours?: ClubColours };
   score: { home: number; away: number };
   minute: number;
   /** "전반" · "후반" · "종료" */
@@ -2059,7 +2078,7 @@ function buildBracket(state: GameState, competitionId: string): BracketStageView
         const h = agg.get(home) ?? 0;
         const a = agg.get(away) ?? 0;
         const pens = decider.result?.penalties;
-        score = pens ? `${h}-${a} (승부차기 ${pens.home}-${pens.away})` : `${h}-${a}`;
+        score = formatScore(h, a, pens);
         const winner = pens
           ? pens.home > pens.away
             ? home
@@ -2073,7 +2092,7 @@ function buildBracket(state: GameState, competitionId: string): BracketStageView
       } else if (played.length > 0) {
         // 1차전만 끝난 대진 — 진행 중임을 스코어로 보인다
         const leg = played[0]!;
-        score = `1차전 ${leg.result!.homeGoals}-${leg.result!.awayGoals}`;
+        score = `1차전 ${formatScore(leg.result!.homeGoals, leg.result!.awayGoals)}`;
       }
       return {
         date: decider.date,
@@ -2167,12 +2186,11 @@ function buildStandingZones(
   return zones;
 }
 
-/** 경기 결과 표기 — 승부차기까지 (미진행이면 null) */
+/** 경기 결과 표기 — 승부차기까지, 자는 `formatScore` 하나 (미진행이면 null) */
 function scoreOf(match: MatchRecord): string | null {
   if (!match.result) return null;
   const { homeGoals, awayGoals, penalties } = match.result;
-  const pens = penalties ? ` (승부차기 ${penalties.home}-${penalties.away})` : "";
-  return `${homeGoals}-${awayGoals}${pens}`;
+  return formatScore(homeGoals, awayGoals, penalties);
 }
 
 /**
@@ -2410,14 +2428,18 @@ function buildMatchView(state: GameState): MatchView | null {
     competition: competitionShortName(match.competitionId),
     stage: competitionStageLabel(match.competitionId, match.stage ?? "league", match.round),
     home: {
+      id: match.homeTeamId,
       name: teamNameIn(state, match.homeTeamId),
       short: teamShortNameIn(state, match.homeTeamId),
       ours: match.homeTeamId === state.userTeamId,
+      colours: clubColoursOf(match.homeTeamId),
     },
     away: {
+      id: match.awayTeamId,
       name: teamNameIn(state, match.awayTeamId),
       short: teamShortNameIn(state, match.awayTeamId),
       ours: match.awayTeamId === state.userTeamId,
+      colours: clubColoursOf(match.awayTeamId),
     },
     score: { ...ledger.score },
     minute: ledger.minute,
@@ -2577,6 +2599,21 @@ function matchPreviewView(state: GameState, matchId: string): MatchPreviewView |
   };
 }
 
+/** 구단의 공식 색 — 카탈로그가 갖고 세이브는 갖지 않는다 (team.md §3.1) */
+function clubColoursOf(teamId: string): ClubColours | undefined {
+  return teamCatalogById(teamId)?.colours;
+}
+
+/** 팀 id 목록 → 공식 색 사전. 색이 없는 클럽은 열쇠도 없다 */
+function clubColoursIn(teamIds: readonly string[]): Record<string, ClubColours> {
+  const out: Record<string, ClubColours> = {};
+  for (const id of new Set(teamIds)) {
+    const colours = clubColoursOf(id);
+    if (colours !== undefined) out[id] = colours;
+  }
+  return out;
+}
+
 function nextMatchView(state: GameState, m: MatchRecord, label: string): NextMatchView {
   const userTeamId = state.userTeamId;
   return {
@@ -2721,6 +2758,8 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
       id: m.id,
       date: m.date,
       time: m.time ?? DEFAULT_KICKOFF,
+      homeId: m.homeTeamId,
+      awayId: m.awayTeamId,
       homeName: teamNameIn(state, m.homeTeamId),
       awayName: teamNameIn(state, m.awayTeamId),
       homeShort: teamShortNameIn(state, m.homeTeamId),
@@ -2790,6 +2829,10 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
     userPosition: standings.findIndex((r) => r.teamId === state.userTeamId) + 1,
     nextMatch: nextOurs ? nextMatchView(state, nextOurs, roundLabelOf(nextOurs)) : null,
     rounds,
+    clubColours: clubColoursIn([
+      ...standings.map((r) => r.teamId),
+      ...matches.flatMap((m) => [m.homeTeamId, m.awayTeamId]),
+    ]),
     bracket,
     cupProgress,
     // 통과 경계선은 리그 페이즈가 있는 대항전에만 있다 (국내 컵은 순위표가 없다)
@@ -3761,12 +3804,16 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             competition: cup || isFriendly(m) ? competitionShortName(m.competitionId) : null,
             // 친선은 단계가 없어 빈 문자열이다 — 화면이 빈 칩을 그리지 않는다
             stage,
+            opponentId: home ? m.awayTeamId : m.homeTeamId,
             opponent: teamShortNameIn(state, home ? m.awayTeamId : m.homeTeamId),
             opponentName: opponent,
             venue: m.neutral ? "neutral" : home ? "home" : "away",
             // 칸이 좁아 정규시간 스코어만 — 승부차기 여부는 색(승/패)과 툴팁에 있다
             score: m.result
-              ? `${home ? m.result.homeGoals : m.result.awayGoals}-${home ? m.result.awayGoals : m.result.homeGoals}`
+              ? formatScore(
+                  home ? m.result.homeGoals : m.result.awayGoals,
+                  home ? m.result.awayGoals : m.result.homeGoals,
+                )
               : null,
           },
           cup: null,

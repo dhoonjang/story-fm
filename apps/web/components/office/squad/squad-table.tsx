@@ -1,8 +1,10 @@
 "use client";
 
 import { Fragment, useMemo } from "react";
-import { PROMISE_KIND_KO, SQUAD_STATUS_KO, squadStatusRank } from "@story-fm/domain";
+import { PROMISE_KIND_KO, SQUAD_STATUS_KO, formatRating, squadStatusRank } from "@story-fm/domain";
 import { ConditionBar } from "@/components/condition-bar";
+import { IconChevron, IconChevronUp } from "@/components/icons";
+import { contractUntil, humanDate } from "@/lib/dateline";
 import { moodSentence } from "@/lib/mood";
 import {
   Armband,
@@ -129,7 +131,7 @@ export function SquadTable({
    * 정렬 머리 — **누르는 것은 안쪽 버튼이고, `<th>`는 열 머리로 남는다.**
    *
    * `<th>`에 `role="button"`을 얹으면 열 머리가 아니게 되어 `aria-sort`가 성립하지
-   * 않는다. 지금 어느 열로 어느 방향으로 정렬돼 있는지는 화살표(▲▼)와 `aria-sort`가
+   * 않는다. 지금 어느 열로 어느 방향으로 정렬돼 있는지는 꺾쇠(위·아래)와 `aria-sort`가
    * 같은 사실을 말하고, 버튼이라 탭 키로 닿고 Enter·Space로 눌린다.
    */
   const th = (key: SortKey, label: string, className?: string, title?: string) => (
@@ -139,7 +141,11 @@ export function SquadTable({
     >
       <button type="button" className="sort-btn" onClick={() => onSort(key)} title={title}>
         {label}
-        {sort.key === key && <span className="sort-mark">{sort.desc ? "▼" : "▲"}</span>}
+        {sort.key === key && (
+          <span className="sort-mark" aria-hidden>
+            {sort.desc ? <IconChevron size={10} /> : <IconChevronUp size={10} />}
+          </span>
+        )}
       </button>
     </th>
   );
@@ -149,7 +155,7 @@ export function SquadTable({
       <thead>
         <tr>
           {/* 첫 칸이 **기본 정렬로 돌아오는 자리**다 — 흩어 놓은 명단을 칸 순으로 되돌린다 */}
-          {th("role", "선수", undefined, "칸 순으로 (선발 → 벤치 → 예비)")}
+          {th("role", "선수", undefined, "칸 순으로 (선발·벤치·예비)")}
           {th("position", "포지션")}
           {/* 지위는 **읽는 값**이다 — 바꾸는 길은 협상 테이블이라(transfer.md §1)
               누를 것처럼 세우지 않고 나이·OVR과 같은 층의 글자로 둔다 */}
@@ -241,7 +247,7 @@ export function SquadTable({
                             onSwapIn(p.id);
                           }}
                           data-testid={`swapin-${p.id}`}
-                          title={`${p.name}(${rowTier}) ↔ ${swapPair.name}(${swapPair.tier}) 맞바꾸기`}
+                          title={`${p.name}(${rowTier})와 ${swapPair.name}(${swapPair.tier}) 맞바꾸기`}
                         >
                           {rowGoesUp ? "←" : "→"}
                         </button>
@@ -309,7 +315,7 @@ export function SquadTable({
                     className="tag intl"
                     title={
                       `${p.away.countryName ?? p.away.country ?? "대표팀"} ` +
-                      `${p.away.reason === "call-up" ? "소집" : "여름 대회"} — ${p.away.returnsOn} 복귀` +
+                      `${p.away.reason === "call-up" ? "소집" : "여름 대회"} — ${humanDate(p.away.returnsOn)} 복귀` +
                       (p.away.apps === null ? "" : ` · ${p.away.apps}경기 ${p.away.goals ?? 0}골`)
                     }
                   >
@@ -320,12 +326,12 @@ export function SquadTable({
                   <span
                     className="tag loan"
                     title={
-                      `${p.loan.team} 임대 — ${p.loan.until} 복귀` +
+                      `${p.loan.team} 임대 — ${humanDate(p.loan.until)} 복귀` +
                       (p.loan.benchRun > 0 ? ` · 최근 ${p.loan.benchRun}경기 명단 밖` : "") +
                       (p.loan.growth > 0 ? ` · 임대 이후 성장 +${p.loan.growth}` : "")
                     }
                   >
-                    {p.loan.team} ~{p.loan.until.slice(2)}
+                    {p.loan.team} {contractUntil(p.loan.until)}
                   </span>
                 )}
                 <StatusBadges p={p} />
@@ -340,9 +346,10 @@ export function SquadTable({
                   <span
                     key={promise.kind}
                     className="tag st note"
-                    title={`${PROMISE_KIND_KO[promise.kind]} 약속 — ${promise.dueOn}까지`}
+                    title={`${PROMISE_KIND_KO[promise.kind]} 약속 — ${humanDate(promise.dueOn)}까지`}
                   >
-                    {PROMISE_KIND_KO[promise.kind]} ~{promise.dueOn.slice(2)}
+                    {PROMISE_KIND_KO[promise.kind]} {humanDate(promise.dueOn, { weekday: false })}
+                    까지
                   </span>
                 ))}
               </td>
@@ -394,7 +401,7 @@ export function SquadTable({
                   `${p.seasonApps}경기 ${p.seasonGoals}골 ${p.seasonAssists}도움`
                 }
               >
-                {typeof p.seasonRating === "number" ? p.seasonRating.toFixed(2) : "—"}
+                {typeof p.seasonRating === "number" ? formatRating(p.seasonRating, "season") : "—"}
               </td>
             </tr>
             {/* 선택한 선수의 상세를 그 행 바로 아래에 붙인다 — 시선이 명단을 떠나지 않는다 */}

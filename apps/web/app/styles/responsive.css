@@ -294,6 +294,9 @@
   }
   /* 한 줄일 때 손잡이와 키가 같아야 한다(shell.css `.chat-input textarea`) —
      글자가 커진 만큼 24(16 × 1.5) + 7 + 7 = 38로 다시 맞춘다 */
+  .chat-input textarea {
+    min-height: 38px;
+  }
   .chat-input button {
     width: 38px;
     height: 38px;
@@ -309,23 +312,23 @@
  * 선수) 이 규칙이 배경 소음이 되지는 않는다.
  */
 .est {
-  color: var(--muted);
-  font-size: var(--fs-3xs);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
   margin-left: 2px;
-  vertical-align: super;
+  /* 위첨자가 아니다 — 숫자 옆에 같은 줄로 앉는다 (design-system.md §3) */
+  vertical-align: baseline;
   white-space: nowrap;
 }
 
-/* 칩은 자리가 좁다 — 위첨자를 띄우지 않고 숫자에 붙인다 */
+/* 칩은 자리가 좁다 — 숫자에 더 붙인다 */
 .slot-meta .est {
-  vertical-align: baseline;
   margin-left: 1px;
 }
 
 /* 등록 명단 — 스쿼드 헤더의 상시 표시. 위반이면 색으로 알린다 */
 .reg-chip {
   padding: 1px 8px;
-  border: 1px solid var(--border);
+  background: var(--panel-2);
   border-radius: var(--r-pill);
   color: var(--muted);
   font-size: var(--fs-xs);
@@ -336,19 +339,19 @@
   font-variant-numeric: tabular-nums;
 }
 .reg-chip.over {
-  border-color: var(--danger);
-  color: var(--danger);
+  background: color-mix(in srgb, var(--loss) 12%, var(--panel));
+  color: var(--loss);
 }
 .reg-chip.over b {
-  color: var(--danger);
+  color: var(--loss);
 }
 /* 국적 — **사실이지 표식이 아니다.** 알약(.tag)으로 두면 자격 표식과 한 물건으로
    읽혀 "국적에 해당한다"가 된다. 배경 없이 코드만 두고, 등번호와 같은 회색 층에
    세운다 — 이름 뒤에서 조용히 읽히는 값이다. */
 .squad-table .nat {
   margin-left: 6px;
-  color: var(--muted);
-  font-size: var(--fs-3xs);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
   font-weight: 500;
   letter-spacing: 0.06em;
   vertical-align: 1px;
@@ -361,30 +364,30 @@
   margin-left: 5px;
   padding: 0 4px;
   border-radius: var(--r-xs);
-  font-size: var(--fs-3xs);
+  font-size: var(--fs-2xs);
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.06em;
   vertical-align: 1px;
 }
 .squad-table .tag.hg {
-  background: rgba(74, 222, 128, 0.07);
-  color: #7f9c8a;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text-2);
 }
 .squad-table .tag.u21 {
-  background: rgba(148, 163, 184, 0.07);
-  color: #78828f;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text-3);
 }
 /* 임대 — 자격 표식이 아니라 **지금 어디에 있는가**라, 각주보다 한 층 앞에 선다
    (행의 왼쪽 선 색과 같은 계열이라 둘이 한 사실로 읽힌다) */
 .squad-table .tag.loan {
-  background: rgba(251, 191, 36, 0.1);
-  color: #a3854f;
+  background: color-mix(in srgb, var(--gold-soft) 12%, transparent);
+  color: var(--gold-soft);
 }
 /* 대표팀 소집 — 임대와 같은 층이다(지금 어디에 있는가). 색만 갈라 둔다:
    임대는 시즌을 통째로 비우고 이쪽은 열흘이라, 한 색이면 둘이 한 사실로 읽힌다 */
 .squad-table .tag.intl {
-  background: rgba(96, 165, 250, 0.1);
-  color: #6d86ab;
+  background: color-mix(in srgb, var(--accent-2) 12%, transparent);
+  color: var(--accent-2);
 }
 /**
  * 상태 표식(부상·정지·불만·이적 리스트) — **자격 표식과 같은 크기·모양**이고
@@ -399,11 +402,11 @@
   font-weight: 700;
 }
 .squad-table .tag.st.alert {
-  background: rgba(248, 113, 113, 0.14);
-  color: var(--danger);
+  background: color-mix(in srgb, var(--loss) 14%, transparent);
+  color: var(--loss);
 }
 .squad-table .tag.st.note {
-  background: rgba(148, 163, 184, 0.12);
+  background: color-mix(in srgb, var(--silver) 12%, transparent);
   color: var(--silver);
 }
 

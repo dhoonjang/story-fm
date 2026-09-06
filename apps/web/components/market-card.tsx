@@ -8,6 +8,7 @@ import {
   type MissionReportCard,
 } from "@story-fm/domain";
 import { IconFinance, IconInsight, IconPerson, IconTrash } from "@/components/icons";
+import { humanDate, humanMonthYear } from "@/lib/dateline";
 import { ratingTone } from "@/lib/scout-report-display";
 
 /**
@@ -207,7 +208,7 @@ export function MarketCardView({ card }: { card: MarketCard }) {
         {card.dueOn && (
           <span className="mc-due">
             <em>{card.kind === "scout" ? "보고 예정" : "답"}</em>
-            <b>{card.dueOn}</b>
+            <b>{humanDate(card.dueOn)}</b>
           </span>
         )}
         {/**
@@ -252,14 +253,15 @@ export function MissionReportCardView({ card }: { card: MissionReportCard }) {
         <span className="mn-scope">{card.scope}</span>
         {/* 나간 날과 돌아온 날 — 며칠을 기다린 서류인지가 카드마다 같은 자리에 선다 */}
         <span className="mn-when">
-          <b>{card.requestedOn}</b>
-          <i aria-hidden>→</i>
-          <b>{card.completedOn}</b>
+          <b>{humanDate(card.requestedOn, { weekday: false })}</b>
+          {/* 구간은 en dash — 화살표 글리프는 쓰지 않는다 (design-system.md §3) */}
+          <i aria-hidden>–</i>
+          <b>{humanDate(card.completedOn, { weekday: false })}</b>
         </span>
       </div>
 
       {card.candidates.length === 0 ? (
-        <p className="mn-empty">조건에 맞는 선수를 찾지 못했다</p>
+        <p className="mn-empty">조건에 맞는 후보 0명</p>
       ) : (
         /* 여덟 열은 좁은 화면의 폭에 들어가지 않는다 — 표만 가로로 흐르고 머리는 접힌다 */
         <div className="mn-table-wrap">
@@ -287,10 +289,13 @@ export function MissionReportCardView({ card }: { card: MissionReportCard }) {
                 </span>
                 {/* 잠재력은 끝까지 폭으로만 안다 — 짐작할 근거가 없으면 숫자를 짓지 않는다 */}
                 <span className="mn-pot">
-                  {c.potential ? `${c.potential.low}~${c.potential.high}` : "미지"}
+                  {c.potential ? `${c.potential.low}–${c.potential.high}` : "미지"}
                 </span>
                 <span className="mn-val">{formatMoney(c.marketValue)}</span>
-                <span className="mn-until">{c.contractUntil ?? "자유계약"}</span>
+                {/* 머리가 「계약 만료」라 「까지」 없이 달만 — `2027년 6월` */}
+                <span className="mn-until">
+                  {c.contractUntil === null ? "자유계약" : humanMonthYear(c.contractUntil)}
+                </span>
               </div>
             ))}
           </div>

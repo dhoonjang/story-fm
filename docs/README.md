@@ -8,6 +8,9 @@
 ```mermaid
 flowchart LR
   OV["overview.md<br/>세 층 · 한 턴의 길 · 게임 루프 · 화면"]
+  subgraph UI["ui/ — 화면이 무엇을 어떤 값으로 그리는가"]
+    DS["design-system.md<br/>토큰 · 구단 색 · 서체 · 표면 · 모션"]
+  end
   subgraph LLM["llm/ — 그것을 어떻게 말하는가 (상태를 못 바꾼다)"]
     direction TB
     PL["pipeline.md<br/>한 턴: 입력 조립 → 모델 → 출력 → 코어"]
@@ -33,6 +36,7 @@ flowchart LR
     PE["people.md<br/>페르소나 · 화자 · 회견 · 심경 · 인물 사전"]
     SO["sources.md<br/>데이터 출처 · 라이선스 부채"]
   end
+  OV --> UI
   OV --> LLM
   OV --> SIM
   OV --> DATA
@@ -45,6 +49,7 @@ flowchart LR
 | [data/](data/)             | 무엇이 존재하는가 — 선수·팀·대회·인물·세이브               | 카탈로그와 상태  |
 | [simulation/](simulation/) | 무엇이 일어나는가 — 경기·시즌·이적·재정·커리어             | 결정적 순수 함수 |
 | [llm/](llm/)               | 그것을 어떻게 말하는가 — 파이프라인·에이전트·프롬프트·모델 | 상태를 못 바꾼다 |
+| [ui/](ui/)                 | 화면이 무엇을 어떤 값으로 그리는가 — 토큰·구단 색·서체     | 값의 단일 소스   |
 
 ## 읽는 순서
 
@@ -77,6 +82,7 @@ flowchart LR
 | 구단 살림을 만진다               | [simulation/finance.md](simulation/finance.md)                                                             |
 | 감독 성장·보드·경질을 만진다     | [simulation/career.md](simulation/career.md)                                                               |
 | 선수·팀 데이터의 출처를 묻는다   | [data/sources.md](data/sources.md)                                                                         |
+| 화면의 색·서체·간격을 만진다     | [ui/design-system.md](ui/design-system.md)                                                                 |
 
 ## 문서의 규약
 

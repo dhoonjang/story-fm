@@ -283,6 +283,8 @@ flowchart LR
   같은 실패에는 배너가 「다시 시도」를 세우지 않는다
   ([models.md](./llm/models.md) §1-1).
 - UI에 조작법 안내 문구를 넣지 않는다 — 조작은 보이는 것으로 알린다.
+- 색·서체·간격·모서리·모션의 값과 구단 색을 세우는 규칙은
+  [ui/design-system.md](./ui/design-system.md)가 갖는다.
 
 ## 6. 세계의 규모
 

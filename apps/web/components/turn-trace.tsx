@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { TurnTraceCall, TurnUsage } from "@story-fm/llm";
+import { IconArrowLeft, IconArrowRight, IconClose } from "@/components/icons";
 
 import {
   alreadyShown,
@@ -183,7 +184,7 @@ function TraceSide({
     <section className={`tt-side ${dir}`}>
       <div className="tt-side-head">
         <span className="tt-arrow" aria-hidden>
-          {dir === "in" ? "→" : "←"}
+          {dir === "in" ? <IconArrowRight size={12} /> : <IconArrowLeft size={12} />}
         </span>
         <b>{dir === "in" ? "보낸 것 (input)" : "받은 것 (output)"}</b>
         <span className="tt-side-facts">{facts}</span>
@@ -650,7 +651,7 @@ export function TurnTracePopup({
               </button>
             )}
             <button className="tt-close" onClick={onClose} aria-label="닫기">
-              ✕
+              <IconClose size={14} />
             </button>
           </div>
         </header>

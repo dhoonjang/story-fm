@@ -7,6 +7,8 @@ import {
   TACTIC_AXES,
   TACTIC_TOGGLES,
   anchorOf,
+  flankTone,
+  formatScore,
   positionGroupOf,
   separateBoardPoints,
   tacticToggleValue,
@@ -17,6 +19,7 @@ import { pitchPointOf, spreadMarkers, type PitchPoint } from "@/lib/pitch-layout
 import { IconBoard } from "@/components/icons";
 import { ConditionBar } from "@/components/condition-bar";
 import { PitchChip, PitchGround } from "./pitch";
+import { Crest, cachedCrest } from "./crest";
 
 type Match = NonNullable<OfficeViews["match"]>;
 type MatchPlayer = Match["onPitch"]["home"][number];
@@ -175,28 +178,53 @@ export function MatchHeadline({ match }: { match: Match }) {
   );
 }
 
+/** 플랭크 폭 — 스코어보드 양 끝의 구단 색 (ui/design-system.md §2) */
+
 /**
  * 스코어보드 — **스코어와 두 팀 이름뿐.**
  *
  * 대회·라운드·시계는 상단 띠(`MatchClock`)로 올라갔다. 셋을 한 덩어리에 쌓으면
  * 정작 커야 할 스코어가 작아지고, 그것들은 "지금 몇 분 몇 대 몇"이라는 한 줄로
  * 상단에서 읽히는 편이 낫다.
+ *
+ * 홈은 언제나 왼쪽이고 양 끝의 플랭크가 그 구단의 색이다 — 우리가 원정이면 왼쪽이
+ * `--opp`다. 두 밑색이 갈리지 않으면 원정만 보조색으로 물러난다 (§2 충돌 규칙 4).
  */
 function Scoreboard({ match }: { match: Match }) {
+  const homeCrest = cachedCrest(match.home.id, match.home.short, match.home.colours);
+  const awayCrest = cachedCrest(match.away.id, match.away.short, match.away.colours);
+  const tone = flankTone(homeCrest, awayCrest);
+  const awaySteps = tone.away !== awayCrest.primary;
+  const homeVar = match.home.ours ? "club" : "opp";
+  const awayVar = match.away.ours ? "club" : "opp";
   return (
     <div className="mv-score" data-testid="match-score">
-      {/* 칩이 어느 쪽이 홈인지 말한다 — 이름만으로는 매번 헷갈린다.
-          칩은 줄의 **바깥쪽** 끝에 서고, 안쪽은 이름과 스코어가 붙어 읽힌다 */}
+      {/* 플랭크의 자리는 match.css, 색만 어느 쪽이 우리인지에 따라 여기서 */}
+      <i className="mv-flank home" style={{ background: `var(--${homeVar})` }} />
+      <i
+        className="mv-flank away"
+        style={{ background: `var(--${awayVar}${awaySteps ? "-2" : ""})` }}
+      />
       <span className={`mv-team ${match.home.ours ? "ours" : ""}`}>
-        <i className="mv-ground">Home</i>
+        <Crest
+          id={match.home.id}
+          shortName={match.home.short}
+          colours={match.home.colours}
+          size={24}
+        />
         {match.home.name}
       </span>
       <b className="mv-goals">
-        {match.score.home} : {match.score.away}
+        <span className="fig">{formatScore(match.score.home, match.score.away)}</span>
       </b>
       <span className={`mv-team away ${match.away.ours ? "ours" : ""}`}>
         {match.away.name}
-        <i className="mv-ground">Away</i>
+        <Crest
+          id={match.away.id}
+          shortName={match.away.short}
+          colours={match.away.colours}
+          size={24}
+        />
       </span>
       {/* 퇴장 — 인원이 왜 줄었는지 화면이 설명해야 한다. 표에서 사라진 이름을
           감독이 스스로 추리하게 두면 안 된다 */}

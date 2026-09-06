@@ -3,13 +3,16 @@ import {
   speakerRoles,
   type SpeakerRole,
   teamName,
+  teamShortNameIn,
   clockOf,
   formatClock,
+  teamCatalogById,
   type GameState,
   type OfficeViews,
   type ChatTurn,
 } from "@story-fm/engine";
 import { STALLED_CLOCK_TURNS } from "@story-fm/agents";
+import { formatScore, type ClubColours } from "@story-fm/domain";
 import { buildPlayerNameIndex, playerIdsIn } from "./player-names";
 
 /** 응답에 실을 장부 — 라우트가 **자기가 바꾼 것만** 고른다 */
@@ -44,6 +47,11 @@ export interface GamePayload {
   season: number;
   phase: string;
   teamName: string;
+  /**
+   * 우리 구단의 id·약칭·공식 색 — 화면이 문장과 `--club*` 토큰을 세우는 열쇠
+   * (ui/design-system.md §2). 색은 카탈로그의 것이라 세이브에 없다 — 여기서 실어 보낸다.
+   */
+  team: { id: string; shortName: string; colours?: ClubColours };
   managerName: string;
   chat: ChatTurn[];
   views: OfficeViews;
@@ -158,7 +166,9 @@ function matchLogsOf(state: GameState): GamePayload["matchLogs"] {
     const opponent = teamName(ours ? m.awayTeamId : m.homeTeamId);
     logs[id] = {
       title: `${ours ? "홈" : "원정"} · ${opponent}`,
-      score: m.result ? `${m.result.homeGoals} : ${m.result.awayGoals}` : null,
+      score: m.result
+        ? formatScore(m.result.homeGoals, m.result.awayGoals, m.result.penalties)
+        : null,
       date: m.date,
     };
   }
@@ -189,6 +199,11 @@ export function toPayload(state: GameState, only?: readonly ViewKey[]): GamePayl
     season: state.season,
     phase: state.phase,
     teamName: teamName(state.userTeamId),
+    team: {
+      id: state.userTeamId,
+      shortName: teamShortNameIn(state, state.userTeamId),
+      colours: teamCatalogById(state.userTeamId)?.colours,
+    },
     managerName: state.manager.name,
     chat: visibleChat(state.chat),
     views: buildOfficeViews(state),

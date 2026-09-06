@@ -1,10 +1,93 @@
 /* ── 여러 뷰가 함께 쓰는 낱개 규칙 — 어느 뷰의 것도 아니다 ─────────────────────────── */
 
+/**
+ * ── 조작 대상의 공용 규칙 (design-system.md §1 조작 · §5 모션) ────────────
+ *
+ * 포커스는 링 하나 — 테두리도 발광도 없다. 눌림은 scale(.97) 120ms. 꺼짐은 .45.
+ * 링은 `:focus-visible`에만 — 마우스로 누른 자리에 링이 서면 조작마다 깜빡인다.
+ */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.primary-btn,
+.ghost-btn,
+.mini-btn,
+.admin-tab,
+.side-tab,
+.tt-tab,
+.tt-close,
+.tt-toggle,
+.tt-copy,
+.tool-chip,
+.league-node,
+.team-card,
+.match-log-head,
+.game-del,
+.turn-error button,
+.skip-menu button,
+.chat-input button,
+.rail button {
+  transition-property: background, color, opacity, box-shadow, transform;
+  transition-duration: 0.16s, 0.16s, 0.16s, 0.16s, 0.12s;
+}
+.primary-btn:active:not(:disabled),
+.ghost-btn:active:not(:disabled),
+.mini-btn:active:not(:disabled),
+.admin-tab:active:not(:disabled),
+.side-tab:active:not(:disabled),
+.tt-tab:active:not(:disabled),
+.tt-close:active:not(:disabled),
+.tt-toggle:active:not(:disabled),
+.tt-copy:active:not(:disabled),
+.tool-chip:active,
+.league-node:active:not(:disabled),
+.team-card:active:not(:disabled),
+.match-log-head:active:not(:disabled),
+.game-del:active:not(:disabled),
+.turn-error button:active:not(:disabled),
+.skip-menu button:active:not(:disabled),
+.chat-input button:active:not(:disabled),
+.rail button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+button:disabled,
+.primary-btn:disabled,
+.mini-btn:disabled,
+.chat-input button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+@media (prefers-reduced-motion: reduce) {
+  .primary-btn:active,
+  .ghost-btn:active,
+  .mini-btn:active,
+  .admin-tab:active,
+  .side-tab:active,
+  .tt-tab:active,
+  .tool-chip:active,
+  .league-node:active,
+  .team-card:active,
+  .match-log-head:active,
+  .game-del:active,
+  .skip-menu button:active,
+  .chat-input button:active,
+  .rail button:active {
+    transform: none;
+  }
+}
+
 .hint {
   color: var(--muted);
   font-size: var(--fs-sm);
   margin-top: 10px;
-  line-height: 1.5;
+  line-height: var(--lh-ui);
 }
 /* 어드민 안내 — 한 줄이 너무 길어지지 않게 폭을 제한한다 */
 .admin-note {
@@ -14,15 +97,14 @@
 .badge {
   display: inline-block;
   font-size: var(--fs-xs);
-  border-radius: var(--r-sm);
+  border-radius: var(--r-xs);
   padding: 1px 6px;
   background: var(--panel-2);
-  border: 1px solid var(--border);
   color: var(--muted);
 }
 .badge.warn {
-  color: var(--danger);
-  border-color: var(--danger);
+  background: color-mix(in srgb, var(--loss) 12%, var(--panel));
+  color: var(--loss);
 }
 
 .attr-row {
@@ -57,23 +139,17 @@
   padding: 10px 0;
 }
 /**
- * 섹션 제목 — **본문보다 작고, 밝고, 자간이 넓다.**
- *
- * 본문(14px `--muted`)과 크기·색이 비슷해지면 제목으로 안 읽힌다. 크게 만드는
- * 대신 **작게 하되 밝히고 자간을 벌리는**
- * 쪽이다 — 화면마다 제목이 서너 개씩 서는데 그때마다 큰 글자가 들어오면
- * 목록이 제목에 잘려 보인다. 위 여백을 아래보다 두 배 넘게 둬서 제목이
- * **자기 아래 내용에 붙는다**.
- *
- * 위계: 이름(16 · 800 · text) > 섹션 제목(12 · 800 · silver) >
- * 묶음 라벨(10.5 · 700 · dim) · 본문(14 · text/muted)
+ * 섹션 라벨 — **본문보다 작고 자간이 넓다** (design-system.md §4: 11px 600 +0.06em
+ * `--text-3`). 구획은 테두리가 아니라 밝기 한 단계 + 24px 간격 + 이 라벨이다.
+ * 화면마다 제목이 서너 개씩 서는데 그때마다 큰 글자가 들어오면 목록이 제목에
+ * 잘려 보인다. 위 여백을 아래보다 두 배 넘게 둬서 제목이 **자기 아래 내용에 붙는다**.
  */
 .section-title {
-  font-size: var(--fs-sm);
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  color: var(--silver);
-  margin: 26px 0 10px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  margin: var(--sp-5) 0 var(--sp-2);
 }
 
 /* ── 턴 원문 뷰어 — 개발 모드에서 턴을 길게 눌렀을 때 서는 창 ─────────────────────────── */
@@ -87,15 +163,14 @@
   position: fixed;
   inset: 0;
   z-index: 60;
-  background: rgba(6, 8, 12, 0.78);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: var(--sp-4);
 }
 .tt-modal {
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--pop);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-pop);
   width: 100%;
@@ -113,7 +188,7 @@
   justify-content: space-between;
   gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-4);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 .tt-title {
   font-size: var(--fs-lg);
@@ -133,8 +208,8 @@
 .tt-close,
 .tt-toggle,
 .tt-copy {
-  background: none;
-  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border: none;
   border-radius: var(--r-sm);
   color: var(--muted);
   padding: 2px 8px;
@@ -143,6 +218,7 @@
 .tt-close:hover,
 .tt-toggle:hover,
 .tt-copy:hover {
+  background: var(--panel);
   color: var(--text);
 }
 .tt-toggle,
@@ -170,7 +246,7 @@
 .tt-note {
   color: var(--muted);
   font-size: var(--fs-md);
-  line-height: 1.6;
+  line-height: var(--lh-ui);
   padding: var(--sp-3) 0;
 }
 
@@ -195,16 +271,14 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--panel);
+  background: var(--pop);
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--sp-2);
   margin: 0 calc(-1 * var(--sp-4));
   padding: var(--sp-2) var(--sp-4);
-  border-bottom: 1px solid var(--border);
-  /* 아래로 지나가는 원문과의 경계 — 선 하나로는 글자가 선에 닿아 붙어 보인다 */
-  box-shadow: 0 6px 10px -8px rgba(0, 0, 0, 0.6);
+  border-bottom: 1px solid var(--line);
 }
 .tt-agent {
   font-size: var(--fs-base);
@@ -219,7 +293,7 @@
   color: var(--dim);
 }
 .tt-model {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--fs-xs);
   color: var(--muted);
 }
@@ -234,7 +308,7 @@
 }
 .tt-error {
   margin-top: var(--sp-2);
-  color: var(--danger);
+  color: var(--loss);
   font-size: var(--fs-sm);
 }
 
@@ -266,6 +340,12 @@
 }
 .tt-side-head > b {
   color: var(--tt-dir);
+}
+.tt-arrow svg,
+.tt-close svg {
+  width: 14px;
+  height: 14px;
+  vertical-align: middle;
 }
 .tt-arrow {
   color: var(--tt-dir);
@@ -301,7 +381,7 @@
   margin-left: auto;
   flex: none;
   background: none;
-  border: 1px solid transparent;
+  border: none;
   border-radius: var(--r-xs);
   color: var(--dim);
   font-size: var(--fs-2xs);
@@ -312,15 +392,15 @@
 .tt-block > summary:hover .tt-block-copy,
 .tt-block-copy:focus-visible {
   opacity: 1;
-  border-color: var(--border);
 }
 .tt-block-copy:hover {
+  background: var(--panel-2);
   color: var(--text);
 }
 .tt-block-label {
   font-weight: 700;
   color: var(--silver);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 /**
  * 방향이 그 자리와 다른 블록 — 응답 꼬리에 섞인 우리 발화·`tool_result`가 그렇다.
@@ -348,12 +428,11 @@
   list-style: none;
   margin: var(--sp-1) 0 var(--sp-2);
   padding: 0;
-  border: 1px solid var(--border-soft);
   border-radius: var(--r-xs);
-  background: var(--panel-2);
+  background: var(--panel);
 }
 .tt-hist-row + .tt-hist-row {
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--line);
 }
 .tt-hist-row > details > summary {
   display: flex;
@@ -365,7 +444,7 @@
   min-width: 0;
 }
 .tt-hist-row > details > summary:hover {
-  background: var(--panel);
+  background: var(--panel-2);
 }
 /* 차례 — 이력의 몇 번째인가. 오른쪽 정렬이라 자릿수가 늘어도 줄이 흔들리지 않는다 */
 .tt-hist-no {
@@ -380,7 +459,7 @@
 .tt-hist-role {
   flex: none;
   width: 5.5em;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--fs-2xs);
   color: var(--muted);
 }
@@ -422,12 +501,11 @@
 .tt-pre {
   margin: var(--sp-1) 0 var(--sp-2);
   padding: var(--sp-2);
-  background: var(--panel-2);
-  border: 1px solid var(--border-soft);
+  background: var(--panel);
   border-radius: var(--r-xs);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--fs-xs);
-  line-height: 1.55;
+  line-height: var(--lh-ui);
   color: var(--text);
   /* 줄바꿈은 원문 그대로 지키되, 창보다 긴 줄은 접어 다 보이게 한다 */
   white-space: pre-wrap;
@@ -457,13 +535,12 @@
   flex-wrap: wrap;
   gap: var(--sp-1);
   padding: var(--sp-2) var(--sp-4) 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 .tt-tab {
   background: none;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: var(--r-xs) var(--r-xs) 0 0;
+  border: none;
+  border-bottom: 2px solid transparent;
   color: var(--muted);
   font-size: var(--fs-xs);
   padding: 4px 10px;
@@ -471,18 +548,17 @@
   display: inline-flex;
   align-items: baseline;
   gap: var(--sp-1);
-  /* 탭 줄의 아래 선을 덮어 고른 탭이 본문과 이어져 보이게 한다 */
+  /* 밑줄이 탭 줄의 헤어라인 위에 겹친다 */
   margin-bottom: -1px;
 }
 .tt-tab:hover {
   color: var(--text);
 }
+/* 활성 탭 — 글자 600 + 키 컬러 밑줄 */
 .tt-tab.on {
   color: var(--text);
-  background: var(--panel);
-  border-color: var(--border);
-  /* 아래 선을 본문 바탕으로 덮어 고른 탭이 본문과 한 칸으로 이어진다 */
-  border-bottom: 1px solid var(--panel);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
 }
 /* 호출 순서 — 무엇이 먼저 돌았는지가 곧 그 턴의 경로다 (`.tt-agent > i`와 같은 결) */
 .tt-tab > i {
@@ -500,7 +576,7 @@
 .tt-tab-bad {
   font-style: normal;
   font-size: var(--fs-2xs);
-  color: var(--danger);
+  color: var(--loss);
 }
 
 /**
@@ -512,9 +588,8 @@
  */
 .tt-flow {
   margin-top: var(--sp-2);
-  border: 1px solid var(--border-soft);
   border-radius: var(--r-xs);
-  background: var(--panel-2);
+  background: var(--panel);
   padding: var(--sp-2);
 }
 .tt-flow-head {
@@ -548,7 +623,7 @@
   min-width: 0;
 }
 .tt-step > details > summary:hover {
-  background: var(--panel);
+  background: var(--panel-2);
 }
 .tt-step-no {
   font-style: normal;
@@ -564,25 +639,24 @@
 .tt-kind {
   flex: none;
   font-size: var(--fs-2xs);
-  border: 1px solid var(--border);
+  background: var(--panel-2);
   border-radius: var(--r-xs);
   padding: 0 5px;
   color: var(--muted);
 }
 .tt-kind.skill {
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--accent);
 }
 .tt-tool {
   flex: none;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--fs-2xs);
 }
 .tt-args {
   flex: none;
   max-width: 34%;
   color: var(--dim);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--fs-2xs);
   white-space: nowrap;
   overflow: hidden;
@@ -598,10 +672,10 @@
   text-overflow: ellipsis;
 }
 .tt-step.bad > details > summary {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  background: color-mix(in srgb, var(--loss) 12%, transparent);
 }
 .tt-step.bad .tt-outcome {
-  color: var(--danger);
+  color: var(--loss);
 }
 
 /**
@@ -634,8 +708,8 @@
   opacity: 0.28;
 }
 .cond-bar.low span {
-  background: var(--gold);
+  background: var(--warn);
 }
 .cond-bar.spent span {
-  background: var(--danger);
+  background: var(--loss);
 }

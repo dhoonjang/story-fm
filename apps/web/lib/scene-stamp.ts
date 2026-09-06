@@ -1,4 +1,5 @@
 import type { ChatTurn } from "@story-fm/engine";
+import { humanDate } from "./dateline";
 
 /**
  * 장면의 시각 — 첫 줄의 시점 헤더(`[2026-07-02 AM 10:10]`)에서 읽는다.
@@ -23,6 +24,9 @@ const CLOCK_RE = /^(.*?)(AM|PM)\s*(\d{1,2}):(\d{2})$/u;
  *
  * 경계는 헤더 프롬프트의 결을 그대로 쓴다 (`PART_OF_DAY` — 훈련은 오전, 미팅은
  * 오후, 협상 전화는 밤). 경기 중 헤더(`[43분]`)처럼 시각이 아닌 것은 통과한다.
+ *
+ * 날짜는 **사람 표기**로 선다(`7월 2일 목 오전`) — ISO는 프롬프트의 문법이고 감독이
+ * 읽는 문법이 아니다 (design-system.md §3 · §6). 헤더의 날짜가 ISO가 아니면 그대로다.
  */
 export function partOfDayStamp(stamp: string): string {
   const m = CLOCK_RE.exec(stamp);
@@ -32,7 +36,8 @@ export function partOfDayStamp(stamp: string): string {
   const h = Number(hour) % 12;
   const pm = suffix.toUpperCase() === "PM";
   const minutes = (pm ? h + 12 : h) * 60 + Number(minute);
-  return `${head}${partOfDay(minutes)}`.trim();
+  const date = head.trim();
+  return `${date ? `${humanDate(date)} ` : ""}${partOfDay(minutes)}`;
 }
 
 /** 하루를 다섯 때로 — 새벽·아침·오전·오후·저녁·밤 */

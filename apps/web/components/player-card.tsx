@@ -13,11 +13,13 @@ import {
   PROMISE_KIND_KO,
   SQUAD_STATUS_KO,
   formatMoney,
+  formatRating,
   injuryHistoryText,
   physiqueLabel,
 } from "@story-fm/domain";
 import type { PlayerCardView } from "@story-fm/engine";
 import { moodSentence } from "@/lib/mood";
+import { contractUntil, humanDate } from "@/lib/dateline";
 import { AxisGrid, CareerBlock, FootMarks } from "@/components/player-facts";
 import { RatingTrend } from "@/components/office/squad/marks";
 import { buildPlayerNameIndex, splitPlayerNames, type PlayerNameIndex } from "@/lib/player-names";
@@ -313,7 +315,7 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
               : "성장 여력을 짐작할 근거가 없습니다"
           }
         >
-          {card.potential ? `${card.potential.low}~${card.potential.high}` : "미지"}
+          {card.potential ? `${card.potential.low}–${card.potential.high}` : "미지"}
         </Fact>
         <Fact
           label="시장가"
@@ -326,7 +328,9 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
           {formatMoney(card.marketValue)}
         </Fact>
         {card.weeklyWage !== null && <Fact label="주급">{formatMoney(card.weeklyWage)}/주</Fact>}
-        {card.contractUntil !== null && <Fact label="계약">{card.contractUntil}</Fact>}
+        {card.contractUntil !== null && (
+          <Fact label="계약">{contractUntil(card.contractUntil)}</Fact>
+        )}
         {card.transferListed !== null && (
           <Fact label="이적 리스트">{formatMoney(card.transferListed)}</Fact>
         )}
@@ -367,13 +371,15 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
       <div className="pc-marks">
         {card.injury && (
           <span className="pc-mark out">
-            {card.injury.bodyPart} {card.injury.severity} · ~{card.injury.expectedReturn}
+            {card.injury.bodyPart} {card.injury.severity} · {humanDate(card.injury.expectedReturn)}{" "}
+            복귀
           </span>
         )}
         {card.suspended > 0 && <span className="pc-mark out">출장 정지 {card.suspended}경기</span>}
         {ours?.loan && (
           <span className="pc-mark">
-            임대 {ours.loan.team} ~{ours.loan.until} · 출전 {ours.loan.apps}/득점 {ours.loan.goals}
+            임대 {ours.loan.team} {contractUntil(ours.loan.until)} · 출전 {ours.loan.apps}/득점{" "}
+            {ours.loan.goals}
             {ours.loan.benchRun > 0 && ` · 최근 ${ours.loan.benchRun}경기 명단 밖`}
           </span>
         )}
@@ -382,7 +388,7 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
             {ours.away.reason === "call-up"
               ? `${ours.away.countryName ?? "대표팀"} 소집 중`
               : "여름 대회 참가 중"}{" "}
-            · {ours.away.returnsOn} 복귀
+            · {humanDate(ours.away.returnsOn)} 복귀
           </span>
         )}
         {ours && ours.settling !== null && <span className="pc-mark">정착 {ours.settling}%</span>}
@@ -409,7 +415,7 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
             (people.md §5-2). 기한이 지난 약속은 코어가 이미 걷어 낸다 */}
         {ours?.promises.map((promise) => (
           <span className="pc-mark" key={`${promise.kind}-${promise.dueOn}`}>
-            {PROMISE_KIND_KO[promise.kind]} 약속 ~{promise.dueOn}
+            {PROMISE_KIND_KO[promise.kind]} 약속 {humanDate(promise.dueOn)}까지
           </span>
         ))}
       </div>
@@ -440,7 +446,9 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
           <Fact label="시즌">
             {season.apps}경기 {season.goals}골 {season.assists}도움
           </Fact>
-          {season.rating !== null && <Fact label="평점">{season.rating.toFixed(2)}</Fact>}
+          {season.rating !== null && (
+            <Fact label="평점">{formatRating(season.rating, "season")}</Fact>
+          )}
           {season.minutes > 0 && <Fact label="출전">{season.minutes}분</Fact>}
           {season.shots > 0 && <Fact label="슛">{season.shots}</Fact>}
           {season.xg > 0 && <Fact label="xG">{season.xg.toFixed(2)}</Fact>}

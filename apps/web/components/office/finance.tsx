@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import type { OfficeViews } from "@story-fm/engine";
-import { formatMoney } from "@story-fm/domain";
+import { formatMoney, formatPounds } from "@story-fm/domain";
 import { IconChevron } from "@/components/icons";
 import { PlayerName } from "@/components/player-card";
+import { contractUntil, humanDate, humanMonthYear } from "@/lib/dateline";
 
 // ── 재정 (요약 카드 + 실시간 활동 + 월간 보고서) ─────────────
 type FinanceMonth = OfficeViews["finance"]["current"];
@@ -72,8 +73,8 @@ function BoardBlock({ board }: { board: FinanceBoard }) {
           </div>
           <div className="sub">
             {request.condition
-              ? `${request.condition.label} ${request.condition.amount} · ${request.condition.until}까지`
-              : `${request.askedOn} 접수 · ${request.respondOn} 답`}
+              ? `${request.condition.label} ${request.condition.amount} · ${humanDate(request.condition.until)}까지`
+              : `${humanDate(request.askedOn)} 접수 · ${humanDate(request.respondOn)} 답`}
           </div>
         </div>
       )}
@@ -83,7 +84,7 @@ function BoardBlock({ board }: { board: FinanceBoard }) {
             <span className="what">영입 승인분 · {row.playerName}</span>
             <span className="amt">{formatMoney(row.amount)}</span>
           </div>
-          <div className="sub">{row.until}까지</div>
+          <div className="sub">{humanDate(row.until)}까지</div>
         </div>
       ))}
     </div>
@@ -118,7 +119,7 @@ function FinanceFeedLine({ entry }: { entry: FinanceFeedRow }) {
   const sign = entry.kind === "income" ? "+" : "−";
   const cells = (
     <>
-      <span className="date">{entry.date.slice(5)}</span>
+      <span className="date">{humanDate(entry.date, { weekday: false })}</span>
       <span className="cat">{entry.categoryLabel}</span>
       {/* 라벨 칸 통째로 손잡이다 — 이름이 코어가 낸 문자열 안에 앉아 있어, 여기서
           쪼개면 화면이 장부를 되쪼는 짓이 된다 (overview.md §5). 접힌 머리줄은 여러
@@ -166,19 +167,13 @@ function FinanceFeedLine({ entry }: { entry: FinanceFeedRow }) {
   );
 }
 
-/** "2026-11" → "2026년 11월" (달력의 달 제목과 같은 표기) */
-function monthLabel(month: string): string {
-  const [year, mm] = month.split("-");
-  return `${year}년 ${Number(mm)}월`;
-}
-
 /** 한 달 — 마감된 보고서와 진행 중인 이번 달이 같은 모양을 쓴다 */
 function FinanceMonthCard({ month }: { month: FinanceMonth }) {
   return (
     <div className="fin-month" data-testid={`fin-month-${month.month}`}>
       <div className="fin-month-head">
         <b>
-          {monthLabel(month.month)}
+          {humanMonthYear(month.month)}
           {!month.closed && <span className="fin-tag">진행 중</span>}
         </b>
         <span className={month.cashNet >= 0 ? "fin-net plus" : "fin-net minus"}>
@@ -263,7 +258,8 @@ function PaymentColumn({
       {side.rows.map((row) => (
         <div className="fin-line" key={`${row.scheduleId}-${row.index}`}>
           <span>
-            {row.dueOn} {row.playerName}
+            {/* 회분은 여러 해에 걸친다 — 연도가 없으면 내년 여름과 내후년 여름이 같은 줄이다 */}
+            {humanDate(row.dueOn, { year: true, weekday: false })} {row.playerName}
             {/* 상대가 없는 회분은 해지 정산 — 받는 쪽이 선수 본인이다 */}
             {row.teamName && ` · ${row.teamName}`}
             <span className="fin-tag">
@@ -294,7 +290,8 @@ function ExpiringBlock({ rows }: { rows: ExpiringContract[] }) {
         {rows.map((row) => (
           <div className="fin-line" key={row.playerId}>
             <span>
-              <PlayerName id={row.playerId} name={row.name} /> {row.age}세 · ~{row.until}
+              <PlayerName id={row.playerId} name={row.name} /> {row.age}세 ·{" "}
+              {contractUntil(row.until)}
               {row.leavingTo ? (
                 <span className="fin-tag danger">{row.leavingTo}로 떠남</span>
               ) : (
@@ -389,11 +386,11 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
             {finance.stadium.name} {finance.stadium.capacity.toLocaleString("en-US")}석
           </div>
         </div>
-        {/* 티켓은 £ 단위 그대로다 — `formatMoney`의 천/백만 눈금은 표 한 장을 £0k로 적는다 */}
+        {/* 티켓은 £ 단위 그대로다(`formatPounds`) — `formatMoney`의 천/백만 눈금은 표 한 장을 £0k로 적는다 */}
         <div className="fin-stat">
           <div className="label">티켓 단가</div>
-          <div className="value">£{Math.round(finance.ticket.price)}</div>
-          <div className="sub">기준가 £{Math.round(finance.ticket.base)}</div>
+          <div className="value">{formatPounds(finance.ticket.price)}</div>
+          <div className="sub">기준가 {formatPounds(finance.ticket.base)}</div>
         </div>
       </div>
 
@@ -402,7 +399,7 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
       <ExpiringBlock rows={finance.expiringContracts} />
 
       <div className="section-title">재정 활동</div>
-      {finance.feed.length === 0 && <div className="empty">아직 기록이 없습니다</div>}
+      {finance.feed.length === 0 && <div className="empty">기록 0건</div>}
       {finance.feed.length > 0 && (
         <div className="fin-feed" data-testid="fin-feed">
           {finance.feed.map((entry) => (

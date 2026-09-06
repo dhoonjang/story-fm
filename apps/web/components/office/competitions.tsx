@@ -4,13 +4,15 @@ import { useState } from "react";
 import {
   TACTIC_AXES,
   awardTitle,
+  formatScore,
   leaderboardTitle,
   outcomeLabel,
   tacticWord,
 } from "@story-fm/domain";
 import type { OfficeViews } from "@story-fm/engine";
-import { IconChevron } from "../icons";
+import { IconArrowLeft, IconArrowRight, IconChevron } from "../icons";
 import { PlayerName } from "../player-card";
+import { Crest } from "../crest";
 
 // ── 대회 — 대회별 탭 · 순위표 · 라운드별 일정 ──────────────
 type Competition = OfficeViews["competitions"]["list"][number];
@@ -153,9 +155,20 @@ function StandingsTable({ competition }: { competition: Competition }) {
                   .join(" ")}
                 data-testid={zone ? `standing-zone-${zone.kind}` : undefined}
               >
-                {/* 순위 앞의 색 띠가 구역이다 — 무슨 구역인지는 툴팁과 표 아래 범례에 있다 */}
+                {/* 순위 앞의 색 띠가 구역이다 — 무슨 구역인지는 툴팁과 표 아래 범례에 있다.
+                    팀 칸은 문장이다 — 한 행에 띠는 하나 (ui/design-system.md §2 규칙 6) */}
                 <td title={zone?.label}>{i + 1}</td>
-                <td className="team-cell">{row.name}</td>
+                <td className="team-cell">
+                  <span>
+                    <Crest
+                      id={row.teamId}
+                      shortName={row.shortName}
+                      colours={competition.clubColours[row.teamId]}
+                      size={16}
+                    />
+                    {row.name}
+                  </span>
+                </td>
                 {predicted ? <td className="dim-cell">{row.predicted ?? "—"}</td> : null}
                 {/* 열 하나가 늘면 자리로 짚던 것이 다 밀린다 — 세는 칸은 이름으로 짚는다 */}
                 <td data-testid="standing-played">{box.played}</td>
@@ -361,7 +374,7 @@ function RoundFixtures({ competition }: { competition: Competition }) {
           disabled={index === 0}
           aria-label="이전 라운드"
         >
-          ◀
+          <IconArrowLeft size={14} />
         </button>
         <select
           value={index}
@@ -380,7 +393,7 @@ function RoundFixtures({ competition }: { competition: Competition }) {
           disabled={index === rounds.length - 1}
           aria-label="다음 라운드"
         >
-          ▶
+          <IconArrowRight size={14} />
         </button>
       </div>
       <div className="fixture-list">
@@ -389,12 +402,28 @@ function RoundFixtures({ competition }: { competition: Competition }) {
             <span className="when">
               {m.date.slice(5)} <span className="hide-sm">{m.time}</span>
             </span>
-            <span className="side home">{m.homeName}</span>
+            <span className="side home">
+              <Crest
+                id={m.homeId}
+                shortName={m.homeShort}
+                colours={competition.clubColours[m.homeId]}
+                size={14}
+              />
+              {m.homeName}
+            </span>
             <span className={`mid${m.score ? " played" : ""}`}>
               {m.score ?? "vs"}
               {m.win && <b className={`wdl ${m.win}`}>{m.win}</b>}
             </span>
-            <span className="side away">{m.awayName}</span>
+            <span className="side away">
+              {m.awayName}
+              <Crest
+                id={m.awayId}
+                shortName={m.awayShort}
+                colours={competition.clubColours[m.awayId]}
+                size={14}
+              />
+            </span>
             {m.neutral && <span className="fin-tag">중립</span>}
           </div>
         ))}
@@ -553,7 +582,7 @@ function RecentResultLine({ r }: { r: RecentResult }) {
       <i className="recent-label">{r.label}</i>
       <span className={`recent-team recent-home ${side("home") ?? ""}`}>{r.home}</span>
       <b className="recent-score">
-        {r.homeGoals}-{r.awayGoals}
+        <span className="fig">{formatScore(r.homeGoals, r.awayGoals)}</span>
       </b>
       <span className={`recent-team recent-away ${side("away") ?? ""}`}>{r.away}</span>
       {/* 승부차기가 없어도 **칸은 낸다** — 줄이 격자를 나눠 쓰는 구조라 한 줄이

@@ -280,6 +280,7 @@ non-deterministic LLM.
 | `data/`       | What exists                                              | [game-state](./docs/data/game-state.md) · [player](./docs/data/player.md) · [team](./docs/data/team.md) · [competition](./docs/data/competition.md) · [people](./docs/data/people.md) · [sources](./docs/data/sources.md)                                           |
 | `simulation/` | What happens                                             | [match](./docs/simulation/match.md) · [season](./docs/simulation/season.md) · [transfer](./docs/simulation/transfer.md) · [finance](./docs/simulation/finance.md) · [career](./docs/simulation/career.md) · [balance-harness](./docs/simulation/balance-harness.md) |
 | `llm/`        | How it speaks                                            | [pipeline](./docs/llm/pipeline.md) · [agents](./docs/llm/agents.md) · [prompts](./docs/llm/prompts.md) · [models](./docs/llm/models.md)                                                                                                                             |
+| `ui/`         | What the screen draws, with which values                 | [design-system](./docs/ui/design-system.md)                                                                                                                                                                                                                         |
 
 ## Status
 

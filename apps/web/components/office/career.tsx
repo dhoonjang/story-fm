@@ -7,8 +7,10 @@ import {
   achievementTitle,
   awardTitle,
   formatMoney,
+  formatRating,
 } from "@story-fm/domain";
 import { IconTrophy } from "@/components/icons";
+import { contractUntil, humanDate } from "@/lib/dateline";
 
 type SeasonRow = OfficeViews["career"]["seasons"][number];
 type AchievementRow = OfficeViews["career"]["achievements"][number];
@@ -34,7 +36,7 @@ function achievementDetailOf(a: AchievementRow): string {
  * 나이와 평점. 출전은 넷 모두의 바탕이라 늘 뒤에 붙는다.
  */
 function awardDetailOf(a: AwardRow): string {
-  const rating = a.rating === undefined ? null : `평점 ${a.rating.toFixed(2)}`;
+  const rating = a.rating === undefined ? null : `평점 ${formatRating(a.rating, "season")}`;
   const grounds =
     a.code === "top-scorer"
       ? [`${a.goals}골`]
@@ -93,7 +95,7 @@ function OfferCard({ offer: o }: { offer: OfferRow }) {
               ? `접근 · ${o.tier}티어`
               : `${o.tier}티어`}
         </span>
-        <span className="until">{o.expiresOn}까지</span>
+        <span className="until">{humanDate(o.expiresOn)}까지</span>
       </div>
       <div className="offer-why">
         기대 {o.expectation} ({o.target}위)
@@ -130,7 +132,7 @@ function Vacancies({ vacancies }: { vacancies: readonly VacancyRow[] }) {
           <div className="offer-head">
             <b>{v.teamName}</b>
             <span className="tier">{v.tier}티어</span>
-            <span className="until">{v.on} 공석</span>
+            <span className="until">{humanDate(v.on)} 공석</span>
           </div>
           {v.position !== null && <div className="offer-why">현재 {v.position}위</div>}
         </div>
@@ -190,7 +192,7 @@ function OutOfWork({ career }: { career: CareerView }) {
         <div className="dismissed-head">
           <b>{d.teamName}</b>
           <span className="when">
-            {d.on} {LEAVE_KO[d.kind]}
+            {humanDate(d.on)} {LEAVE_KO[d.kind]}
           </span>
         </div>
         <div className="dismissed-why">{dismissalLineOf(d)}</div>
@@ -204,7 +206,7 @@ function OutOfWork({ career }: { career: CareerView }) {
       </div>
       <div className="offer-list" data-testid="manager-offers">
         {career.offers.length === 0 ? (
-          <div className="empty">들어온 감독직 제안이 없습니다</div>
+          <div className="empty">감독직 제안 0</div>
         ) : (
           career.offers.map((o) => <OfferCard offer={o} key={o.id} />)
         )}
@@ -476,8 +478,8 @@ export function CareerView({
                 <div className="mgr-fact">
                   <dt>계약</dt>
                   <dd>
-                    연봉 {formatMoney(career.contract.salary)} · {career.contract.until}까지 (
-                    {career.contract.daysLeft}일)
+                    연봉 {formatMoney(career.contract.salary)} ·{" "}
+                    {contractUntil(career.contract.until)} ({career.contract.daysLeft}일)
                     {career.contract.renewal === "declined" && (
                       <b className="mgr-nonrenewal"> 재계약 없음</b>
                     )}
@@ -497,7 +499,7 @@ export function CareerView({
               <div className="mgr-spending">
                 {career.spending.slice(0, SPENDING_SHOWN).map((s, i) => (
                   <div className="mgr-spend" key={i}>
-                    <span className="when">{s.on}</span>
+                    <span className="when">{humanDate(s.on, { year: true, weekday: false })}</span>
                     <span>
                       {s.kind}
                       {s.playerName ? ` — ${s.playerName}` : ""}
@@ -522,7 +524,10 @@ export function CareerView({
 
       <div className="section-title">트로피 보관함</div>
       <div className="trophy-list">
-        {career.trophies.length === 0 && <div className="empty">아직 트로피가 없습니다</div>}
+        {/* 빈 자리도 사실로 — 「없습니다」가 아니라 수 0과, 그 수가 왜 0인지(첫 시즌) */}
+        {career.trophies.length === 0 && (
+          <div className="empty">트로피 0{career.seasons.length === 0 && " · 첫 시즌"}</div>
+        )}
         {career.trophies.map((t, i) => (
           <div className="trophy" key={i}>
             <IconTrophy size={16} />
@@ -535,7 +540,7 @@ export function CareerView({
 
       <div className="section-title">업적</div>
       <div className="trophy-list">
-        {career.achievements.length === 0 && <div className="empty">달성한 업적이 없습니다</div>}
+        {career.achievements.length === 0 && <div className="empty">업적 0</div>}
         {career.achievements.map((a, i) => {
           const detail = achievementDetailOf(a);
           return (
@@ -556,7 +561,7 @@ export function CareerView({
        */}
       <div className="section-title">시상</div>
       <div className="trophy-list">
-        {career.awards.length === 0 && <div className="empty">받은 시상이 없습니다</div>}
+        {career.awards.length === 0 && <div className="empty">시상 0</div>}
         {career.awards.map((a, i) => (
           <div className="achv" key={i}>
             <div>{awardTitle(a.code)}</div>
@@ -605,7 +610,7 @@ export function CareerView({
                   <td>{r.d.teamName}</td>
                   <td>—</td>
                   <td className={`career-sacked${r.d.kind === "moved" ? " career-moved" : ""}`}>
-                    {r.d.on} {LEAVE_KO[r.d.kind]}
+                    {humanDate(r.d.on)} {LEAVE_KO[r.d.kind]}
                   </td>
                   <td className="career-verdict">{dismissalLineOf(r.d)}</td>
                 </tr>

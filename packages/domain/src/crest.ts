@@ -5,10 +5,12 @@
  * 그려야 하는 자리는 전부 여기를 지난다. 자산 파일이 없다 — 96팀이든 어드민이
  * 방금 만든 클럽이든 같은 경로다.
  *
- * ⚠️ **실물과 닮게 조율하지 않는다.** 색은 id가 정한다. 특정 클럽의 결과가 마음에
- * 들지 않아 상수를 손보면 그 순간 미탑재 방침이 깨진다 (sources.md §7.1) — 조율은
- * 언제나 전체 팔레트를 상대로 한다.
+ * ⚠️ **실물과 닮게 조율하지 않는다.** 도형은 id가 정하고, 색은 카탈로그의 공식 값
+ * (`colours`)이 있으면 그 값, 없으면 id가 정한다. 특정 클럽의 결과가 마음에 들지
+ * 않아 상수를 손보면 그 순간 미탑재 방침이 깨진다 (sources.md §7.1) — 조율은 언제나
+ * 전체 팔레트를 상대로 한다.
  */
+import type { ClubColours } from "./team";
 
 /** 문장 축 — 캔버스는 정사각이고 방패가 그 안에 들어앉는다 */
 const CANVAS = 64;
@@ -95,12 +97,17 @@ const PRIMARY_LIGHTNESS = [31, 39, 47] as const;
 const SECONDARY_SATURATION = 46;
 const SECONDARY_LIGHTNESS_GAP = 33;
 const SECONDARY_HUE_OFFSETS = [30, 150, 210] as const;
-/** 분할이 보이는 최소 대비. 글자 대비(4.5)와 다른 축이다 — 여기는 면과 면 사이다 */
-const FIELD_SEPARATION = 1.9;
+/**
+ * 분할이 보이는 최소 대비. 글자 대비(4.5)와 다른 축이다 — 여기는 면과 면 사이다.
+ * 두 구단이 나란히 설 때도 같은 자다 (`flankTone` · ui/design-system.md §2 충돌 규칙 4).
+ */
+export const FIELD_SEPARATION = 1.9;
 
 /** 글자·윤곽선 두 벌. 밑색 명도가 어느 쪽을 쓸지 정한다 */
 const INK_LIGHT = "#f7f3ea";
 const INK_DARK = "#141a20";
+/** 잉크 두 벌을 밖에서 읽는 자리 — 대비 불변식이 "닿을 수 있는 최대"를 재는 기준 */
+export const CREST_INKS = { light: INK_LIGHT, dark: INK_DARK } as const;
 
 /**
  * 밑색은 잉크와 최소 대비를 얻을 때까지 어두워진다. 색상마다 명도를 손으로 맞추면
@@ -162,21 +169,55 @@ export function contrastRatio(a: string, b: string): number {
   return (Math.max(one, other) + 0.05) / (Math.min(one, other) + 0.05);
 }
 
+/** 두 잉크 중 밑색과 더 대비되는 쪽 — 같으면 밝은 잉크 */
+function readableInk(fill: string): string {
+  return contrastRatio(INK_LIGHT, fill) >= contrastRatio(INK_DARK, fill) ? INK_LIGHT : INK_DARK;
+}
+
+interface CrestField {
+  readonly fill: string;
+  readonly ink: string;
+  /** HSL 명도(%) — 보조색이 여기서 명도로 갈라진다 */
+  readonly lightness: number;
+}
+
 /** 잉크와 최소 대비를 지키는 밑색 한 벌 */
-function readableField(
-  hue: number,
-  lightness: number,
-): { readonly fill: string; readonly ink: string; readonly lightness: number } {
+function readableField(hue: number, lightness: number): CrestField {
   let l = lightness;
   for (let step = 0; step < FIELD_DEEPEN_LIMIT; step++) {
     const fill = hslToHex(hue, PRIMARY_SATURATION, l);
-    const ink =
-      contrastRatio(INK_LIGHT, fill) >= contrastRatio(INK_DARK, fill) ? INK_LIGHT : INK_DARK;
+    const ink = readableInk(fill);
     if (contrastRatio(ink, fill) >= CREST_MIN_INK_CONTRAST) return { fill, ink, lightness: l };
     l -= FIELD_DEEPEN_STEP;
   }
   // 명도가 0에 닿으면 어떤 색상이든 밝은 잉크와 대비가 남아 여기까지 오지 않는다
   return { fill: hslToHex(hue, PRIMARY_SATURATION, 0), ink: INK_LIGHT, lightness: 0 };
+}
+
+/**
+ * 공식 색의 밑색 — **깊게 하지 않는다.** 카탈로그 값은 공식 값 그대로이고, 잉크만
+ * 둘 중 더 읽히는 쪽을 고른다. 순수한 빨강처럼 어느 잉크로도 4.5에 못 미치는 색이
+ * 있고, 그때 얻는 것은 닿을 수 있는 최대 대비다 (team.md §3.1).
+ */
+function officialField(colours: ClubColours | undefined): CrestField | undefined {
+  if (colours === undefined || colours.primary === "") return undefined;
+  const fill = colours.primary.toLowerCase();
+  return { fill, ink: readableInk(fill), lightness: hslOf(fill).lightness };
+}
+
+/** #rrggbb → HSL(0~360, %, %) — 유채색 판정과 공식 밑색의 명도가 여기서 나온다 */
+function hslOf(hex: string): { hue: number; saturation: number; lightness: number } {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) return { hue: 0, saturation: 0, lightness: l * 100 };
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return { hue: (h * 60 + HUE_TURN) % HUE_TURN, saturation: s * 100, lightness: l * 100 };
 }
 
 /**
@@ -312,6 +353,8 @@ function initialsFontSize(count: number): number {
 export interface CrestSubject {
   readonly id: string;
   readonly shortName?: string;
+  /** 카탈로그의 공식 색 — 있으면 채움이 이 값이고, 없으면 id 해시다 (team.md §3.1) */
+  readonly colours?: ClubColours;
 }
 
 /**
@@ -337,8 +380,11 @@ export function crestOf(subject: CrestSubject): Crest {
   const lightness = pick(id, "tone", PRIMARY_LIGHTNESS) + lift;
   const secondaryHue = hue + pick(id, "pair", SECONDARY_HUE_OFFSETS);
 
-  const field = readableField(hue, lightness);
-  const secondary = separatedSecondary(secondaryHue, field.fill, field.lightness);
+  const field = officialField(subject.colours) ?? readableField(hue, lightness);
+  // 공식 보조색이 비어 있으면 해시 색상이 공식 밑색에서 갈라진다
+  const secondary =
+    subject.colours?.secondary.toLowerCase() ||
+    separatedSecondary(secondaryHue, field.fill, field.lightness);
 
   const shape = pick(id, "shape", CREST_SHAPES);
   const division = pick(id, "division", CREST_DIVISIONS);
@@ -361,6 +407,184 @@ export function crestOf(subject: CrestSubject): Crest {
       initials,
     }),
   };
+}
+
+// ── 화면 톤 ─────────────────────────────────────────────────────────────────
+
+/**
+ * 가는 자리(띠·레일·점·선)가 지켜야 할 최소 대비 — WCAG 비텍스트 3:1.
+ * 글자 대비(`CREST_MIN_INK_CONTRAST`)와 다른 축이다.
+ */
+export const CLUB_HI_MIN_CONTRAST = 3;
+
+/** 화면의 바닥 — `--panel-2`(가는 자리가 서는 면)와 `--bg`(밝힌 색 위 어두운 잉크) */
+export interface ClubToneSurface {
+  readonly panel2: string;
+  readonly bg: string;
+}
+
+/** ui/design-system.md §1의 값. 화면이 토큰을 바꾸면 여기도 따라와야 한다 */
+export const CLUB_TONE_SURFACE: ClubToneSurface = { panel2: "#1a211c", bg: "#0a0d0b" };
+
+/** 유채색이 하나도 없는 구단(흑백)의 가는 자리 — `--silver` */
+const ACHROMATIC_HI = "#c9d1c8";
+
+/**
+ * 유채색 판정 — 채도가 이 아래면 회색이고, 명도가 양끝이면 검정·흰이다.
+ * 흰·검 구단의 `secondary`가 후보에서 빠지는 문이다.
+ */
+const CHROMATIC_MIN_SATURATION = 18;
+const CHROMATIC_LIGHTNESS = [8, 92] as const;
+
+/** OKLCH 명도를 올리는 걸음 — 작을수록 원색에 가까운 첫 값을 얻는다 */
+const LIFT_STEP = 0.02;
+/** 색역 안으로 채도를 접을 때의 이분 탐색 횟수 — 24면 8비트 아래로 수렴한다 */
+const GAMUT_BISECTIONS = 24;
+/** 8비트 반올림이 흡수하는 색역 밖 오차 */
+const GAMUT_EPSILON = 1 / 510;
+
+export interface ClubTones {
+  /** 가는 자리의 색 — `--club-hi` */
+  readonly hi: string;
+  /** `hi` 채움 위 글자 — 바닥색과 밝은 잉크 중 더 대비되는 쪽 */
+  readonly hiInk: string;
+  /** 공식 색을 그대로 못 쓰고 명도를 올렸는가 */
+  readonly lifted: boolean;
+}
+
+function isChromatic(hex: string): boolean {
+  const { saturation, lightness } = hslOf(hex);
+  return (
+    saturation >= CHROMATIC_MIN_SATURATION &&
+    lightness >= CHROMATIC_LIGHTNESS[0] &&
+    lightness <= CHROMATIC_LIGHTNESS[1]
+  );
+}
+
+/**
+ * 가는 자리의 색 (ui/design-system.md §2 「`--club-hi`의 규칙」).
+ *
+ * 후보 순서: (1) 공식 강조색이 유채색이고 바닥 위 3:1을 넘으면 그 값 (2) 두 번째
+ * 공식색이 그러면 그 값 (3) 그래도 없으면 강조색(없으면 밑색)을 OKLCH에서 색상·채도를
+ * 지키고 명도만 올린 첫 값 (4) 유채색이 하나도 없으면 은색.
+ *
+ * `colours`가 없으면 문장의 해시 색이 공식 색 자리에 선다 — 어드민이 만든 클럽도
+ * 같은 규칙으로 밝힌다.
+ */
+export function clubTonesOf(
+  crest: Crest,
+  colours?: ClubColours,
+  surface: ClubToneSurface = CLUB_TONE_SURFACE,
+): ClubTones {
+  const palette = colours ?? {
+    primary: crest.primary,
+    secondary: crest.secondary,
+    accent: crest.primary,
+  };
+  const accent = palette.accent.toLowerCase();
+  const secondary = palette.secondary.toLowerCase();
+  const primary = palette.primary.toLowerCase();
+  const standsAsIs = (hex: string): boolean =>
+    hex !== "" && isChromatic(hex) && contrastRatio(hex, surface.panel2) >= CLUB_HI_MIN_CONTRAST;
+
+  let hi: string;
+  let lifted = false;
+  if (standsAsIs(accent)) hi = accent;
+  else if (standsAsIs(secondary)) hi = secondary;
+  else {
+    const source = [accent, primary, secondary].find((hex) => hex !== "" && isChromatic(hex));
+    if (source === undefined) hi = ACHROMATIC_HI;
+    else {
+      hi = liftedTone(source, surface.panel2);
+      lifted = true;
+    }
+  }
+  const hiInk =
+    contrastRatio(surface.bg, hi) >= contrastRatio(INK_LIGHT, hi) ? surface.bg : INK_LIGHT;
+  return { hi, hiInk, lifted };
+}
+
+/**
+ * 두 구단이 나란히 설 때의 플랭크 색 — 홈은 언제나 밑색이고, 두 밑색이 갈리지
+ * 않으면 원정만 보조색으로 물러난다 (ui/design-system.md §2 충돌 규칙 4).
+ */
+export function flankTone(
+  home: Crest,
+  away: Crest,
+): { readonly home: string; readonly away: string } {
+  const apart = contrastRatio(home.primary, away.primary) >= FIELD_SEPARATION;
+  return { home: home.primary, away: apart ? away.primary : away.secondary };
+}
+
+/**
+ * 색상·채도를 지키고 명도만 올려 바닥 위 최소 대비에 닿는 첫 값.
+ * 밝아지며 색역을 벗어나는 채도는 접는다 — 접지 않으면 채널이 잘려 색상이 돈다.
+ */
+function liftedTone(hex: string, surface: string): string {
+  const { lightness, a, b } = oklabOf(hex);
+  const chroma = Math.hypot(a, b);
+  const hue = Math.atan2(b, a);
+  for (let l = lightness + LIFT_STEP; l < 1; l += LIFT_STEP) {
+    const candidate = inGamut(l, chroma, hue);
+    if (contrastRatio(candidate, surface) >= CLUB_HI_MIN_CONTRAST) return candidate;
+  }
+  return INK_LIGHT;
+}
+
+/** 색역 안에서 가장 채도가 높은 값 — 채도를 이분 탐색으로 접는다 */
+function inGamut(lightness: number, chroma: number, hue: number): string {
+  const rgbAt = (c: number): readonly [number, number, number] =>
+    oklabToRgb(lightness, c * Math.cos(hue), c * Math.sin(hue));
+  const fits = (rgb: readonly [number, number, number]): boolean =>
+    rgb.every((v) => v >= -GAMUT_EPSILON && v <= 1 + GAMUT_EPSILON);
+  if (fits(rgbAt(chroma))) return rgbToHex(rgbAt(chroma));
+  let low = 0;
+  let high = chroma;
+  for (let i = 0; i < GAMUT_BISECTIONS; i++) {
+    const mid = (low + high) / 2;
+    if (fits(rgbAt(mid))) low = mid;
+    else high = mid;
+  }
+  return rgbToHex(rgbAt(low));
+}
+
+// ── OKLab ───────────────────────────────────────────────────────────────────
+// Björn Ottosson의 행렬 (https://bottosson.github.io/posts/oklab/). domain은 외부
+// 의존이 없어 직접 든다 — 명도만 올리는 자리라 CIE 변환보다 색상이 덜 돈다.
+
+function oklabOf(hex: string): { lightness: number; a: number; b: number } {
+  const r = linearChannel(hex, 1);
+  const g = linearChannel(hex, 3);
+  const bl = linearChannel(hex, 5);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * bl);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * bl);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * bl);
+  return {
+    lightness: 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    a: 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    b: 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  };
+}
+
+/** OKLab → 선형 sRGB. 색역 밖이면 채널이 0~1을 벗어난 채로 돌아온다 */
+function oklabToRgb(lightness: number, a: number, b: number): readonly [number, number, number] {
+  const l = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (lightness - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  return [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+}
+
+/** 선형 sRGB → #rrggbb (감마 되돌리기 포함) */
+function rgbToHex(rgb: readonly [number, number, number]): string {
+  return `#${rgb.map((v) => hexByte(gammaChannel(clamp01(v)))).join("")}`;
+}
+
+function gammaChannel(linear: number): number {
+  return linear <= 0.0031308 ? linear * 12.92 : 1.055 * Math.pow(linear, 1 / 2.4) - 0.055;
 }
 
 // ── SVG ─────────────────────────────────────────────────────────────────────

@@ -34,7 +34,8 @@ import {
   swappedLists,
   type BoardState,
 } from "@/lib/board-roles";
-import { IconBoard, IconPerson, SPEAKER_ICON } from "@/components/icons";
+import { IconBoard, IconClose, IconPerson, SPEAKER_ICON } from "@/components/icons";
+import { contractUntil, humanDate } from "@/lib/dateline";
 import { PitchChip, PitchGround } from "../../pitch";
 import { createLineupSaver, type LineupSaveOutcome, type LineupSaver } from "../../lineup-saver";
 import { useBoardDrag } from "./board-drag";
@@ -995,16 +996,17 @@ export function SquadView({
         <div className="lineup-status warn" data-testid="lineup-status">
           {/* 경고는 사실만 — "교체하세요" 같은 지시나 규칙 설명은 붙이지 않는다.
               저장이 멈추는 GK 문제만 이유를 밝힌다 (안 그러면 왜 안 되는지 모른다) */}
-          {gkIssue && <div>⚠ GK 자리 {gkCount}곳 — 한 명이 될 때까지 저장이 보류됩니다.</div>}
-          {gkWarning && <div>⚠ GK 자리에 필드 플레이어</div>}
+          {/* 경고 글리프(⚠)는 달지 않는다 — 이 칸의 색(`--warn`)이 이미 경고다 */}
+          {gkIssue && <div>GK 자리 {gkCount}곳 — 한 명이 될 때까지 저장이 보류됩니다.</div>}
+          {gkWarning && <div>GK 자리에 필드 플레이어</div>}
           {unavailableInXI.length > 0 && (
-            <div>⚠ 선발 불가(부상·정지): {unavailableInXI.map((p) => p.name).join(", ")}</div>
+            <div>선발 불가(부상·정지): {unavailableInXI.map((p) => p.name).join(", ")}</div>
           )}
           {unavailableOnBench.length > 0 && (
-            <div>⚠ 벤치에 출전 불가: {unavailableOnBench.map((p) => p.name).join(", ")}</div>
+            <div>벤치에 출전 불가: {unavailableOnBench.map((p) => p.name).join(", ")}</div>
           )}
           {misfits.length > 0 && (
-            <div>⚠ 낯선 자리: {misfits.map((x) => `${x.p!.name}(${x.code})`).join(", ")}</div>
+            <div>낯선 자리: {misfits.map((x) => `${x.p!.name}(${x.code})`).join(", ")}</div>
           )}
           {saveError && <div data-testid="lineup-error">{saveError}</div>}
         </div>
@@ -1022,7 +1024,7 @@ export function SquadView({
         <div className="youth-intake" data-testid="youth-intake">
           <div className="youth-intake-head">
             <b>유스 후보 {squad.youthIntake.candidates.length}명</b>
-            <span className="muted">소집일 {squad.youthIntake.deadline}</span>
+            <span className="muted">소집일 {humanDate(squad.youthIntake.deadline)}</span>
           </div>
           <ul className="youth-intake-list">
             {squad.youthIntake.candidates.map((c) => (
@@ -1030,9 +1032,12 @@ export function SquadView({
                 <span className="yc-pos">{c.position}</span>
                 <span className="yc-name">{c.name}</span>
                 <span className="muted">{c.age}세</span>
-                <span className="yc-ovr">~{c.overall}</span>
+                {/* 안개 속 값 — 물결표 대신 툴팁이 "추정"임을 말한다 (허용 글리프 밖이다) */}
+                <span className="yc-ovr" title="추정 종합">
+                  {c.overall}
+                </span>
                 <span className="yc-pot" title={c.potential.confidence}>
-                  {c.potential.low}~{c.potential.high}
+                  {c.potential.low}–{c.potential.high}
                 </span>
                 <span className="muted">
                   {formatMoney(c.weeklyWage)}/주 · {c.years}년
@@ -1133,7 +1138,11 @@ export function SquadView({
                       p && (
                         <>
                           <Margin observation={p.observation} />
-                          {!p.available && <span className="slot-flag">✖</span>}
+                          {!p.available && (
+                            <span className="slot-flag" role="img" aria-label="출전 불가">
+                              <IconClose size={10} />
+                            </span>
+                          )}
                           {p.hasIssue && <span className="slot-flag warn">!</span>}
                         </>
                       )
@@ -1205,11 +1214,11 @@ function StaffPanel({ staff, today }: { staff: OfficeStaff[]; today: string }) {
               {/* 「부임 2년째」는 화면의 문장이다 — 코어가 내는 것은 날짜뿐이고,
                   지난 햇수를 세는 규칙은 나이와 같은 함수를 쓴다 (`ageOf`) */}
               {person.since && (
-                <span className="muted" title={`부임 ${person.since}`}>
+                <span className="muted" title={`부임 ${humanDate(person.since, { year: true })}`}>
                   부임 {ageOf(person.since, today) + 1}년째
                 </span>
               )}
-              {person.until && <span className="muted">계약 {person.until}까지</span>}
+              {person.until && <span className="muted">계약 {contractUntil(person.until)}</span>}
             </li>
           );
         })}

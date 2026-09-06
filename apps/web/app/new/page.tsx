@@ -6,6 +6,8 @@ import Link from "next/link";
 import { LeagueRingSkeleton } from "@/components/skeleton";
 import { Loading } from "@/components/loading";
 import { ringPoints, ringPolygon } from "@/lib/ring";
+import type { ClubColours } from "@story-fm/domain";
+import { Crest, clubStyle } from "@/components/crest";
 
 interface TeamEntry {
   id: string;
@@ -13,6 +15,8 @@ interface TeamEntry {
   shortName: string;
   leagueId: string;
   tier: number;
+  /** 공식 색 — 카탈로그 항목이 그대로 내려온다. 없으면 문장이 id 해시로 색을 낸다 */
+  colours?: ClubColours;
   /** 시즌 평가가 쓰는 그 문구 — 화면이 tier로 따로 만들지 않는다 */
   expectation: string;
 }
@@ -129,7 +133,11 @@ export default function NewGamePage() {
     );
 
   return (
-    <main className="onboarding">
+    /* 팀을 고른 뒤에는 온보딩 루트가 그 구단의 `--club*`를 든다 (ui/design-system.md §2 「주입」) */
+    <main
+      className="onboarding"
+      style={team ? clubStyle(team.colours, team.id, team.shortName) : undefined}
+    >
       <div className="onboarding-top">
         {step === "league" || prevStep === undefined ? (
           <Link href="/" className="back-link" data-testid="back-to-list">
@@ -217,14 +225,19 @@ export default function NewGamePage() {
               보드 기대가 붙는다. 줄로 갈라 묶지는 않는다, 순서가 이미 말한다 */}
           <div className="team-grid" data-testid="team-grid">
             {leagueTeams.map((t) => (
+              /* 카드마다 자기 구단의 `--club*`가 선다 — 띠와 문장, 고르면 워시까지 그 색이다 */
               <button
                 key={t.id}
                 className={`team-card${teamId === t.id ? " selected" : ""}`}
+                style={clubStyle(t.colours, t.id, t.shortName)}
                 onClick={() => selectTeam(t.id)}
                 data-testid={`team-${t.id}`}
               >
-                <div className="team-name">{t.name}</div>
-                <div className="tier">{t.expectation}</div>
+                <Crest id={t.id} shortName={t.shortName} colours={t.colours} size={32} />
+                <span>
+                  <div className="team-name">{t.name}</div>
+                  <div className="tier">{t.expectation}</div>
+                </span>
               </button>
             ))}
           </div>
@@ -235,10 +248,13 @@ export default function NewGamePage() {
         <section className="onboarding-step">
           {/* 앞에서 고른 것이 여기 남아 맥락이 된다 — 마지막 단계는 부임 확인이다 */}
           <div className="appointment" data-testid="appointment">
-            <div className="appointment-club">{team.name}</div>
-            <div className="tier">
-              {league?.name ?? ""} · 보드 기대: {team.expectation}
-            </div>
+            <Crest id={team.id} shortName={team.shortName} colours={team.colours} size={48} />
+            <span>
+              <div className="appointment-club">{team.name}</div>
+              <div className="tier">
+                {league?.name ?? ""} · 보드 기대: {team.expectation}
+              </div>
+            </span>
           </div>
           <h1>당신은 누구입니까?</h1>
           <label className="field">

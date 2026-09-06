@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { GamePayload, GameSlice } from "@/lib/store";
+import { humanDate } from "@/lib/dateline";
 import { mergeSlice } from "@/lib/game-slice";
 import type { AttentionItemView, ChatTurn } from "@story-fm/engine";
 import type { TurnOperation } from "@story-fm/agents";
@@ -20,6 +21,7 @@ import { MatchReportPanel } from "./office/match-report";
 import { createLineupSaver, type LineupSaver } from "./lineup-saver";
 import { MatchClock, MatchHeadline, MatchOpponent, MatchOverview } from "./match-view";
 import { StageSplitHandle } from "./stage-split-handle";
+import { Crest, clubStyle, oppStyle } from "./crest";
 import { PlayerCardProvider } from "./player-card";
 import {
   IconBoard,
@@ -33,6 +35,7 @@ import {
   IconMatch,
   IconSquad,
   IconTrophy,
+  IconClose,
 } from "./icons";
 
 /**
@@ -172,6 +175,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
    */
   const pendingMatch = game?.views.match ?? null;
   const liveMatch = pendingMatch?.beforeKickoff === true ? null : pendingMatch;
+  /** 이번 경기의 상대 — 입장 전 게이트도 상대 색을 읽으므로 `pendingMatch` 기준이다 */
+  const opponent = pendingMatch
+    ? pendingMatch.home.ours
+      ? pendingMatch.away
+      : pendingMatch.home
+    : null;
   /** 열린 장부 뷰 — null이면 무대(채팅 / 경기+채팅)가 보인다 */
   const [panel, setPanel] = useState<Panel | null>(null);
   /**
@@ -757,9 +766,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
                     aria-expanded={open}
                   >
                     <IconBroadcast size={14} />
-                    <b>{log?.score}</b>
+                    <b className="fig">{log?.score}</b>
                     <span className="match-log-title">{log?.title}</span>
-                    <span className="match-log-date">{log?.date}</span>
+                    <span className="match-log-date">{log ? humanDate(log.date) : null}</span>
                     <IconChevron size={14} />
                   </button>
                 )}
@@ -797,7 +806,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
               보여준다. 세계의 화자는 이 일을 알지 못한다 (turn-runner.ts) */}
       {error && (
         <div className="turn-error" data-testid="turn-error" title={errorDetail ?? undefined}>
-          <span>⚠️ {error}</span>
+          <span>{error}</span>
           <div className="turn-error-actions">
             {errorRetry && (
               <button onClick={() => send()} disabled={busy || !input.trim()}>
@@ -812,7 +821,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
               }}
               aria-label="알림 닫기"
             >
-              ✕
+              <IconClose size={14} />
             </button>
           </div>
         </div>
@@ -826,7 +835,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       {game.clockStalled !== undefined && (
         <div className="turn-notice" data-testid="clock-stalled" role="status">
           <span>
-            ⏸ 시계가 {game.clockStalled}턴째 {game.date} {game.timeOfDay}에 멈춰 있습니다
+            시계가 {game.clockStalled}턴째 {humanDate(game.date)} {game.timeOfDay}에 멈춰 있습니다
           </span>
         </div>
       )}
@@ -857,7 +866,16 @@ export function GameScreen({ gameId }: { gameId: string }) {
     >
       {/* `data-phase` — 화면에 단계를 적지 않는 대신 e2e가 읽는 자리. 감독에게는
           달력·채팅이 이미 말해 주므로 배지가 자리를 차지할 이유가 없었다 */}
-      <div className={`app${liveMatch ? " in-match" : ""}`} data-phase={game.phase}>
+      {/* 구단 색은 여기서 선다 — `--club*`는 세이브 팀, `--opp*`는 이번 경기의 상대
+          (ui/design-system.md §2 「주입」). 아래 어디서든 `var(--club-hi)`가 이 값이다 */}
+      <div
+        className={`app${liveMatch ? " in-match" : ""}`}
+        data-phase={game.phase}
+        style={{
+          ...clubStyle(game.team.colours, game.team.id, game.team.shortName),
+          ...(opponent ? oppStyle(opponent.colours, opponent.id, opponent.short) : {}),
+        }}
+      >
         <header className="topbar">
           {/* 로고 = 게임 목록으로 나가는 문 (진행 중 턴은 서버가 마무리해 저장한다) */}
           <Link href="/" className="brand" data-testid="home-link" title="게임 목록으로">
@@ -875,8 +893,17 @@ export function GameScreen({ gameId }: { gameId: string }) {
            * 연도, 경기 중이면 대회 이름까지. 이름과 날짜 자체는 남는다.
            */}
           <div className="topbar-meta">
-            <span className="meta topbar-club" data-testid="team-name">
-              {game.teamName}
+            {/* 구단 띠 4px + 문장 + 이름 — 상단 띠에서 유일하게 구단 색이 서는 자리 (§2 규칙 5) */}
+            <span className="topbar-club-line">
+              <Crest
+                id={game.team.id}
+                shortName={game.team.shortName}
+                colours={game.team.colours}
+                size={20}
+              />
+              <span className="meta topbar-club" data-testid="team-name">
+                {game.teamName}
+              </span>
             </span>
             <span className="topbar-sub">
               <span className="meta">
@@ -891,8 +918,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
               ) : (
                 <span className="meta" data-testid="game-date">
                   {/* 연도는 좁아지면 접힌다 — 한 시즌 안에서 바뀌는 건 월·일이다 */}
-                  <span className="abbr">{game.date.slice(0, 5)}</span>
-                  {game.date.slice(5)} {game.timeOfDay}
+                  <span className="abbr">{game.date.slice(0, 4)}년 </span>
+                  {humanDate(game.date)} {game.timeOfDay}
                 </span>
               )}
             </span>
@@ -996,7 +1023,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
                 </b>
               </div>
               <span className="kickoff-where">
-                {pendingMatch.home.ours ? "홈" : "원정"} · {game.date}
+                {pendingMatch.home.ours ? "홈" : "원정"} · {humanDate(game.date)}
               </span>
               <button
                 className="primary-btn"
