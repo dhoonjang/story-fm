@@ -16,6 +16,8 @@
 @import "./styles/office/finance.css";
 @import "./styles/office/career.css";
 @import "./styles/office/competitions.css";
+/* 경기의 문 — 킥오프 게이트 한 장. 아래의 반응형이 이 값을 덮는다 */
+@import "./styles/match-gate.css";
 @import "./styles/responsive.css";
 @import "./styles/match.css";
 /* 경기 리포트 — 달력 상세와 종료 카드가 같이 쓰는 한 벌이라 뷰 파일 밖에 선다 */

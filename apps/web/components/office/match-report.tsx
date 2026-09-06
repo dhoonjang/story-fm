@@ -6,6 +6,7 @@ import { formatRating, formatScore } from "@story-fm/domain";
 import { PlayerName } from "@/components/player-card";
 import { IconArrowUp } from "@/components/icons";
 import { humanDate } from "@/lib/dateline";
+import type { MatchHeadFacts } from "@/lib/match-head";
 
 /**
  * ── 경기 리포트 — 끝난 경기 한 장 (match.md §8) ─────────────
@@ -55,8 +56,23 @@ function useMatchReport(gameId: string, matchId: string) {
   return { report, error };
 }
 
-/** 리포트를 열어 그리는 자리 — 받아오는 동안에도 골격이 서 있다 */
-export function MatchReportPanel({ gameId, matchId }: { gameId: string; matchId: string }) {
+/**
+ * 리포트를 열어 그리는 자리 — **기다리는 동안에도 머리는 서 있다.**
+ *
+ * `head`는 요청 없이 이미 화면에 와 있는 사실이다(접힌 경기 머리 + 턴의 사건 표식 —
+ * `matchHeadFacts`). 종료 카드가 그것을 넘겨 주므로 휘슬 뒤 첫 화면에 스코어와 골이
+ * 곧바로 서고, 분필 점 셋은 **표 자리에만** 돈다 (match.md §8). 달력 상세처럼 그 사실을
+ * 쥐고 있지 않은 자리는 넘기지 않는다.
+ */
+export function MatchReportPanel({
+  gameId,
+  matchId,
+  head = null,
+}: {
+  gameId: string;
+  matchId: string;
+  head?: MatchHeadFacts | null;
+}) {
   const { report, error } = useMatchReport(gameId, matchId);
   if (error !== null) {
     return (
@@ -67,9 +83,22 @@ export function MatchReportPanel({ gameId, matchId }: { gameId: string; matchId:
   }
   if (report === null) {
     return (
-      <div className="mr-blank" role="status" aria-label="경기 리포트 불러오는 중">
-        <span className="skel mr-skel" aria-hidden />
-        <span className="skel mr-skel short" aria-hidden />
+      <div className="mr mr-waiting">
+        {head && (
+          <div className="mr-score">
+            <b className={head.home.ours ? "ours" : undefined}>{head.home.name}</b>
+            <span className="mr-score-num fig">
+              {formatScore(head.score.home, head.score.away, head.score.penalties)}
+            </span>
+            <b className={head.away.ours ? "ours" : undefined}>{head.away.name}</b>
+          </div>
+        )}
+        {/* 표 자리에만 분필 점 셋이 돈다 — 스켈레톤 펄스는 없다 (design-system §5) */}
+        <div className="thinking" role="status" aria-label="경기 리포트 불러오는 중">
+          <i />
+          <i />
+          <i />
+        </div>
       </div>
     );
   }

@@ -238,10 +238,15 @@ export function countsInStandings(
  *
  * 여러 리그가 동시에 진행되므로 팀·경기를 모두 그 대회로 좁혀야 한다. 대항전
  * 리그 페이즈도 단일 순위표라 같은 함수로 계산된다 — 참가 팀만 배정에서 가져온다.
+ *
+ * `counts`는 **그 위에 덧대는 체**다 (기본값은 전부 통과). 지난 어느 시점의 표를
+ * 세우는 자리(리포트의 순위 변화 — match.md §8)가 쓴다 — 거르는 규칙 자체는 여전히
+ * `countsInStandings` 하나이고, 이쪽은 "어디까지 치렀나"만 좁힌다.
  */
 export function computeStandings(
   state: GameState,
   competitionId = leagueOfTeamIn(state, state.userTeamId),
+  counts: (match: MatchRecord) => boolean = () => true,
 ): StandingRow[] {
   // 이적 시장 전용 리그는 경기를 안 하므로 순위가 없다 — 국내 컵과 같은 취급
   if (isMarketOnlyLeague(competitionId)) return [];
@@ -276,7 +281,7 @@ export function computeStandings(
     recent.set(teamId, list);
   };
   for (const match of state.matches) {
-    if (!countsInStandings(match, state.season, competitionId)) continue;
+    if (!countsInStandings(match, state.season, competitionId) || !counts(match)) continue;
     const homeRow = rows.get(match.homeTeamId);
     const awayRow = rows.get(match.awayTeamId);
     const result = match.result;

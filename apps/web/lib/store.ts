@@ -12,7 +12,7 @@ import {
   type ChatTurn,
 } from "@story-fm/engine";
 import { STALLED_CLOCK_TURNS } from "@story-fm/agents";
-import { formatScore, type ClubColours } from "@story-fm/domain";
+import { type ClubColours } from "@story-fm/domain";
 import { buildPlayerNameIndex, playerIdsIn } from "./player-names";
 
 /** 응답에 실을 장부 — 라우트가 **자기가 바꾼 것만** 고른다 */
@@ -77,7 +77,30 @@ export interface GamePayload {
    * 자리에 남는 카드가 무엇의 기록인지 말하려면 그 셋이면 된다 — 그 안을 되돌아보는
    * 것은 리포트가 갖는다 (match.md §8).
    */
-  matchLogs: Record<string, { title: string; score: string | null; date: string }>;
+  matchLogs: Record<string, MatchLogHead>;
+}
+
+/** 접힌 경기 머리가 아는 한 팀 — 문장과 구단 색의 열쇠까지 (design-system.md §2) */
+export interface MatchLogTeam {
+  id: string;
+  name: string;
+  short: string;
+  ours: boolean;
+  colours?: ClubColours;
+}
+
+/**
+ * 끝났거나 진행 중인 경기 하나의 **머리 사실** — 문장이 아니라 값이다.
+ *
+ * 「홈 · 프라이부르크」를 조립하는 것은 화면이고, 같은 사실을 두 자리가 읽는다:
+ * 채팅에 접힌 경기 카드와, 리포트가 도착하기 전의 종료 카드 머리 (match.md §8).
+ */
+export interface MatchLogHead {
+  date: string;
+  home: MatchLogTeam;
+  away: MatchLogTeam;
+  /** 결과가 난 경기만 — 진행 중이면 null */
+  score: { home: number; away: number; penalties?: { home: number; away: number } } | null;
 }
 
 /**
@@ -151,6 +174,10 @@ export function visibleChat(chat: readonly ChatTurn[]): ChatTurn[] {
  * **머리글이 전부다.** 득점·평점 상위는 여기서 접지 않는다: 같은 경기를 두 벌로
  * 접던 자리라, 이제 리포트 한 벌이 그 자리를 갖는다
  * (`GET /api/games/[id]/match-report/[matchId]` · match.md §8).
+ *
+ * 싣는 것은 **사실**이지 문장이 아니다 — 「홈 · 프라이부르크」도 「2 – 1」도 화면이
+ * 조립한다. 종료 카드가 리포트를 기다리는 동안 머리를 세우는 값이 여기서 오므로,
+ * 두 자리가 같은 사실을 읽고 도착 뒤에 스코어가 다시 그려지지 않는다.
  */
 function matchLogsOf(state: GameState): GamePayload["matchLogs"] {
   const ids = new Set(
@@ -159,17 +186,29 @@ function matchLogsOf(state: GameState): GamePayload["matchLogs"] {
   const logs: GamePayload["matchLogs"] = {};
   if (ids.size === 0) return logs;
   const matchById = new Map(state.matches.map((m) => [m.id, m] as const));
+  const team = (teamId: string): MatchLogTeam => ({
+    id: teamId,
+    name: teamName(teamId),
+    short: teamShortNameIn(state, teamId),
+    ours: teamId === state.userTeamId,
+    colours: teamCatalogById(teamId)?.colours,
+  });
   for (const id of ids) {
     const m = matchById.get(id);
     if (!m) continue;
-    const ours = m.homeTeamId === state.userTeamId;
-    const opponent = teamName(ours ? m.awayTeamId : m.homeTeamId);
     logs[id] = {
-      title: `${ours ? "홈" : "원정"} · ${opponent}`,
-      score: m.result
-        ? formatScore(m.result.homeGoals, m.result.awayGoals, m.result.penalties)
-        : null,
       date: m.date,
+      home: team(m.homeTeamId),
+      away: team(m.awayTeamId),
+      score: m.result
+        ? {
+            home: m.result.homeGoals,
+            away: m.result.awayGoals,
+            ...(m.result.penalties
+              ? { penalties: { home: m.result.penalties.home, away: m.result.penalties.away } }
+              : {}),
+          }
+        : null,
     };
   }
   return logs;

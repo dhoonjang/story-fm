@@ -1,0 +1,92 @@
+/**
+ * ── 킥오프 게이트 — 매치데이 프로그램 (match.md §8) ─────────────────────
+ *
+ * 경기의 문. 종료 카드와 한 쌍이라 같은 무게로 화면을 덮는다. 종료 카드의 틀은
+ * `shell.css`의 `.fulltime*`이고, 그 안을 채우는 리포트는 `match-report.css`다.
+ *
+ * ⚠️ 이 파일은 `globals.css`에서 **`responsive.css`보다 먼저** 불린다 — 700 아래의
+ * 바닥 시트가 여기 값을 덮는 쪽이지 그 반대가 아니다.
+ */
+/**
+ * 입장 확인 — 경기의 문. 종료 화면과 한 쌍이라 같은 무게로 화면을 덮는다.
+ */
+.kickoff-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-6);
+  background: var(--scrim);
+  animation: fulltime-in 160ms var(--ease-panel) both;
+}
+.kickoff-card {
+  display: flex;
+  flex-direction: column;
+  width: min(400px, 100%);
+  padding: var(--sp-6);
+  text-align: center;
+  background: var(--pop);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+}
+.kickoff-tag {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+/**
+ * 대진 — **홈이 위, 원정이 아래**로 세운다. 팀 이름은 두 글자부터 열 글자까지
+ * 제각각이라 좌우로 늘어놓으면 긴 쪽만 접혀 한쪽이 두 줄이 된다.
+ * 우리 쪽만 또렷하고 상대는 한 걸음 물러선다.
+ */
+.kickoff-teams {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-top: var(--sp-4);
+  font-size: var(--fs-xl);
+  line-height: 1.3;
+  /* 한국어는 어절로 끊는다 — 없으면 "맨체스터 유나 / 이티드"가 된다 */
+  word-break: keep-all;
+}
+.kickoff-teams b {
+  color: var(--muted);
+  font-weight: 600;
+}
+.kickoff-teams b.ours {
+  color: var(--text);
+  font-weight: 700;
+}
+.kickoff-teams i {
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.kickoff-where {
+  margin-top: var(--sp-4);
+  color: var(--dim);
+  font-size: var(--fs-sm);
+}
+.kickoff-card .primary-btn {
+  margin-top: var(--sp-6);
+}
+@media (max-width: 479px) {
+  .kickoff-gate {
+    padding: var(--sp-4);
+  }
+  .kickoff-card {
+    padding: var(--sp-5);
+  }
+}
+
+/* 모션 값은 전부 0 — `.fulltime`의 같은 규칙은 shell.css가 갖는다 (design-system §5) */
+@media (prefers-reduced-motion: reduce) {
+  .kickoff-gate {
+    animation: none;
+  }
+}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { GamePayload, GameSlice } from "@/lib/store";
 import { humanDate } from "@/lib/dateline";
+import { matchHeadFacts, matchScoreOf, matchTitleOf } from "@/lib/match-head";
 import { mergeSlice } from "@/lib/game-slice";
 import type { AttentionItemView, ChatTurn } from "@story-fm/engine";
 import type { TurnOperation } from "@story-fm/agents";
@@ -22,6 +23,7 @@ import { createLineupSaver, type LineupSaver } from "./lineup-saver";
 import { MatchClock, MatchHeadline, MatchOpponent, MatchOverview } from "./match-view";
 import { StageSplitHandle } from "./stage-split-handle";
 import { Crest, clubStyle, oppStyle } from "./crest";
+import { KickoffGate } from "./kickoff-gate";
 import { PlayerCardProvider } from "./player-card";
 import {
   IconBoard,
@@ -766,8 +768,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
                     aria-expanded={open}
                   >
                     <IconBroadcast size={14} />
-                    <b className="fig">{log?.score}</b>
-                    <span className="match-log-title">{log?.title}</span>
+                    <b className="fig">{log ? matchScoreOf(log) : null}</b>
+                    <span className="match-log-title">{log ? matchTitleOf(log) : null}</span>
                     <span className="match-log-date">{log ? humanDate(log.date) : null}</span>
                     <IconChevron size={14} />
                   </button>
@@ -991,52 +993,14 @@ export function GameScreen({ gameId }: { gameId: string }) {
         </header>
         {/* 경기 머리 — 어느 탭을 보든 스코어·시계·득점자는 사라지지 않는다 */}
         {liveMatch && <MatchHeadline match={liveMatch} />}
-        {/**
-         * 입장 확인 — **경기의 문.**
-         *
-         * `start_match`는 판을 세울 뿐이고 공은 감독이 들어갈 때 구른다. 상주
-         * 버튼을 두면 그날의 대화가 무슨 이야기로 흐르든 화면이 늘 같은 손잡이
-         * 하나를 들이민다.
-         * GM이 문을 열었을 때만 이 창이 서고, 이것이 유일한 출구다 —
-         * 닫는 손잡이를 두면 되돌아간 자리에서 다시 열 방법이 없다.
-         */}
+        {/* 입장 확인 — 경기의 문. 매치데이 프로그램 한 장이 그 자리에 선다 */}
         {pendingMatch?.beforeKickoff === true && (
-          <div
-            className="kickoff-gate"
-            data-testid="kickoff-gate"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="kickoff-heading"
-          >
-            <div className="kickoff-card">
-              <span className="kickoff-tag" id="kickoff-heading">
-                {/* 친선은 단계가 없다 — 가운뎃점이 홀로 남지 않게 */}
-                {[pendingMatch.competition, pendingMatch.stage].filter(Boolean).join(" · ")}
-              </span>
-              <div className="kickoff-teams">
-                <b className={pendingMatch.home.ours ? "ours" : undefined}>
-                  {pendingMatch.home.name}
-                </b>
-                <i>vs</i>
-                <b className={pendingMatch.away.ours ? "ours" : undefined}>
-                  {pendingMatch.away.name}
-                </b>
-              </div>
-              <span className="kickoff-where">
-                {pendingMatch.home.ours ? "홈" : "원정"} · {humanDate(game.date)}
-              </span>
-              <button
-                className="primary-btn"
-                autoFocus
-                disabled={busy}
-                /* 경기의 문도 손잡이다 — 킥오프 턴인지는 장부가 안다(`beforeKickoff`) */
-                onClick={() => void send(undefined, { kind: "advance_match" })}
-                data-testid="kickoff-enter"
-              >
-                경기장 입장
-              </button>
-            </div>
-          </div>
+          <KickoffGate
+            match={pendingMatch}
+            date={game.date}
+            busy={busy}
+            onEnter={() => void send(undefined, { kind: "advance_match" })}
+          />
         )}
         {/**
          * 종료 화면 — **휘슬과 평시 사이의 한 걸음.**
@@ -1059,7 +1023,13 @@ export function GameScreen({ gameId }: { gameId: string }) {
                   경기 종료
                 </span>
               </header>
-              <MatchReportPanel gameId={gameId} matchId={finished} />
+              {/* 리포트를 기다리는 동안에도 머리와 골은 이미 화면에 있다 — 접힌 경기
+                머리와 턴의 사건 표식이 같은 사실을 든다 (match.md §8) */}
+              <MatchReportPanel
+                gameId={gameId}
+                matchId={finished}
+                head={matchHeadFacts(game.matchLogs[finished], game.chat, finished)}
+              />
               <button
                 className="primary-btn"
                 onClick={() => setFinished(null)}
