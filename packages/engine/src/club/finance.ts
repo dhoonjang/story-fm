@@ -913,7 +913,7 @@ export function applyMatchFinance(
       ref,
     });
     digest.push(
-      `💰 관중 ${gate.attendance.toLocaleString("en-US")}명 (${Math.round(gate.occupancy * 100)}%) — 입장 수입 ${money(gate.income)}`,
+      `관중 ${gate.attendance.toLocaleString("en-US")}명 (${Math.round(gate.occupancy * 100)}%) — 입장 수입 ${money(gate.income)}`,
     );
   }
   if (travels && !isFriendly(match)) {
@@ -1178,7 +1178,7 @@ export function settleDuePayments(state: GameState, digest?: TickSink): void {
       // 확정일의 첫 회분은 확정 메시지가 이미 말한다 — 일지는 뒤에 오는 회분만
       if (index > 0) {
         digest?.push(
-          `💷 ${name} ${what} 분할 ${index + 1}/${total}회분 ${formatMoney(installment.amount)} 지급`,
+          `${name} ${what} 분할 ${index + 1}/${total}회분 ${formatMoney(installment.amount)} 지급`,
         );
       }
     }
@@ -2200,7 +2200,7 @@ function closeMonths(state: GameState, digest: TickSink, through: string): void 
     const report = buildReport(state, month, finance.ledger);
     state.financeReports.push(report);
     digest.push(
-      `📊 ${month.replace("-", "년 ")}월 재정 보고서 — 수입 ${money(report.incomeTotal)} / 지출 ${money(report.expenseTotal)} / 순 ${report.cashNet >= 0 ? "+" : "−"}${money(Math.abs(report.cashNet))}`,
+      `${month.replace("-", "년 ")}월 재정 보고서 — 수입 ${money(report.incomeTotal)} / 지출 ${money(report.expenseTotal)} / 순 ${report.cashNet >= 0 ? "+" : "−"}${money(Math.abs(report.cashNet))}`,
       ...financeNoteTexts(report).map((n) => `   ${n}`),
     );
     pushNarrative(
@@ -2417,7 +2417,7 @@ function refreshBudgetFreeze(state: GameState, teamId: string, digest: TickSink)
   if (finance.budgetFrozen) {
     const reason =
       cause === "psr" ? "PSR 한도를 넘겨" : `부채가 ${money(debtOf(state, teamId))}에 이르러`;
-    digest.push(`⚠️ 보드가 ${reason} 이적 예산을 동결했다 — 매각 없이는 영입할 수 없다`);
+    digest.push(`보드가 ${reason} 이적 예산을 동결했다 — 매각 없이는 영입할 수 없다`);
     pushNarrative(state, `이적 예산 동결 — ${reason}`, 4);
   } else {
     digest.push(`보드가 이적 예산 동결을 풀었다`);
@@ -2507,7 +2507,7 @@ export function payLeaguePrizes(state: GameState, digest: TickSink): void {
       }) &&
       team.id === state.userTeamId
     ) {
-      digest.push(`💰 리그 순위 상금 ${money(amount)} 입금 (${rank}위)`);
+      digest.push(`리그 순위 상금 ${money(amount)} 입금 (${rank}위)`);
     }
   }
 }

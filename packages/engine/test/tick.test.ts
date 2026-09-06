@@ -88,7 +88,10 @@ describe("advance_time — 시간은 도구로만 흐른다 (season.md §5)", ()
       .filter((m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId)
       .sort((a, b) => (a.date < b.date ? -1 : 1))[0];
     expect(state.date).toBe(first?.date);
-    expect(eventTexts(result.events).some((d) => d.includes("경기일"))).toBe(true);
+    // 사건 배열은 **종류를 달고 나온다** — 화면이 그것으로 카드의 꼬리표를 고른다
+    // (season.md §5). 종류가 조용히 전부 `news`로 무너지면 카드가 다 같은 얼굴이 된다.
+    const matchday = result.events.filter((e) => e.kind === "matchday");
+    expect(matchday.some((e) => e.text.includes("경기일"))).toBe(true);
   });
 
   it("게임 시작 시 여름 창은 이미 열려 있고, 폐장은 진행 중 안내된다", () => {

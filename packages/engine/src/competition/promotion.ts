@@ -184,8 +184,8 @@ export function applyPromotionRelegation(
 
     if (leagueId !== ourLeague && second !== ourLeague) continue;
     digest.push(
-      `⬇️ ${leagueName(leagueId)} 강등: ${down.map((id) => teamShortNameIn(state, id)).join(" · ")}`,
-      `⬆️ ${leagueName(leagueId)} 승격: ${up.map((id) => teamShortNameIn(state, id)).join(" · ")}`,
+      `${leagueName(leagueId)} 강등: ${down.map((id) => teamShortNameIn(state, id)).join(" · ")}`,
+      `${leagueName(leagueId)} 승격: ${up.map((id) => teamShortNameIn(state, id)).join(" · ")}`,
     );
     if (down.includes(state.userTeamId)) {
       digest.push(

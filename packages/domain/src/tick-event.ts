@@ -65,11 +65,12 @@ function kindedOf(sink: TickSink): KindedSink | null {
   return typeof maybe.note === "function" ? (sink as KindedSink) : null;
 }
 
-function kinded(note: KindedSink["note"]): KindedSink {
+/** 종류를 붙이지 않고 민 사실에 `fallback`이 붙는 자리 */
+function kinded(note: KindedSink["note"], fallback: TickEventKind): KindedSink {
   return {
     note,
     push(...texts: string[]) {
-      note("news", texts);
+      note(fallback, texts);
       return texts.length;
     },
   };
@@ -94,7 +95,12 @@ export function pushEvent(sink: TickSink, kind: TickEventKind, ...texts: string[
 export function scopeEvents(sink: TickSink, kind: TickEventKind): TickSink {
   const target = kindedOf(sink);
   if (!target) return sink;
-  return kinded((k, texts) => target.note(k === "news" ? kind : k, texts));
+  /**
+   * ⚠️ 그냥 민 것에만 이 종류가 붙는다. **`pushEvent`로 붙여 온 종류는 그대로 지나간다**
+   * — 그러지 않으면 추첨으로 잡힌 패스 안에서 「상금 입금」을 소식으로 붙여도 도로
+   * 추첨이 되어, 한 줄만 다른 종류로 세우는 길이 막힌다.
+   */
+  return kinded((k, texts) => target.note(k, texts), kind);
 }
 
 /**
@@ -104,7 +110,7 @@ export function tickEvents(): TickEventSink {
   const events: TickEvent[] = [];
   const sink = kinded((kind, texts) => {
     for (const text of texts) events.push({ kind, text });
-  });
+  }, "news");
   return Object.assign(sink, { events });
 }
 

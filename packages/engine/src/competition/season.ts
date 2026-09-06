@@ -965,7 +965,7 @@ function reviewEuropeanCampaign(state: GameState): string[] {
       state.manager.reputation.board = clampReputation(
         state.manager.reputation.board + EURO_TITLE_BOARD,
       );
-      digest.push(`🏆 ${cup.name} 우승`);
+      digest.push(`${cup.name} 우승`);
       pushNarrative(state, `${cup.name} 우승`, 5);
     } else if (ours) {
       state.manager.reputation.media = clampReputation(
@@ -1059,7 +1059,7 @@ export function reviewSeason(state: GameState): string[] {
 
   // 트로피는 이미 원장에 있다 — 전 구단의 우승을 `recordChampions`가 먼저 적었다
   if (position === 1) {
-    digest.push(`🏆 ${leagueName(leagueOfTeamIn(state, state.userTeamId))} 우승`);
+    digest.push(`${leagueName(leagueOfTeamIn(state, state.userTeamId))} 우승`);
   }
   payEuropeanWinnerPrizes(state, digest);
   digest.push(...reviewEuropeanCampaign(state));

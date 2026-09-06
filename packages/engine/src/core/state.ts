@@ -216,7 +216,7 @@ export interface CommandBriefItem {
  * 싣지 않는다 (그 문장은 장면과 서사 로그에 이미 있다).
  */
 export interface CommandBrief {
-  /** 무엇을 했나 — 호출 이름값의 짧은 머리줄 (`라인업 확정`) */
+  /** 무엇을 했나 — 그 행동의 이름 (`라인업` · `commands/brief.ts`) */
   head: string;
   /** 무엇이 바뀌었나 — 각 항목이 말풍선 한 줄이다 */
   items: CommandBriefItem[];

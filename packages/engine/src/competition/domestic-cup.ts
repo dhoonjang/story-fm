@@ -739,7 +739,7 @@ function createStage(
     const opponent = ours.homeTeamId === state.userTeamId ? ours.awayTeamId : ours.homeTeamId;
     const where = ours.neutral ? "중립" : ours.homeTeamId === state.userTeamId ? "홈" : "원정";
     digest.push(
-      `🎫 ${cup.short} ${label} 대진 확정 — ${where}에서 ${teamName(opponent)} (${ours.date})`,
+      `${cup.short} ${label} 대진 확정 — ${where}에서 ${teamName(opponent)} (${ours.date})`,
     );
     pushNarrative(state, `${cup.short} ${label} vs ${teamName(opponent)}`, 4);
   }
@@ -850,7 +850,7 @@ function scheduleNextDraw(
   const lastTie = created.reduce((max, m) => (m.date > max ? m.date : max), created[0]!.date);
   const date = addDays(lastTie, cup.drawDelayDays);
   if (scheduleDraw(state, cup.id, next, date, userStillIn(state, cup.id))) {
-    digest.push(`🎲 ${cup.short} ${domesticStageLabel(cup, next)} 대진 추첨 — ${date}`);
+    digest.push(`${cup.short} ${domesticStageLabel(cup, next)} 대진 추첨 — ${date}`);
   }
 }
 
@@ -1074,7 +1074,7 @@ export function reviewDomesticCups(state: GameState): string[] {
       state.manager.reputation.board = clampReputation(
         state.manager.reputation.board + CUP_TITLE_BOARD,
       );
-      digest.push(`🏆 ${cup.name} 우승`);
+      digest.push(`${cup.name} 우승`);
       pushNarrative(state, `${cup.name} 우승`, 5);
     } else if (ours) {
       state.manager.reputation.media = clampReputation(

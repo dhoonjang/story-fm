@@ -1640,7 +1640,7 @@ export function generateIncomingOffers(state: GameState, digest: TickSink): void
     // 처음엔 시장가보다 낮게 부른다 (75~100%) — 흥정의 여지를 남긴다
     (feeBias) => Math.round((marketValue * (0.75 + rng() * 0.25) * feeBias) / 100_000) * 100_000,
     ({ buyerName, fee, expiresOn }) =>
-      `📩 ${buyerName}가 ${bid.player.name} 영입 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
+      `${buyerName}가 ${bid.player.name} 영입 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
     bid.interest.teamId,
   );
   // 사다리의 끝 — 그 사실은 이제 협상이 든다. 창이 닫혀 못 열렸으면 줄은 남는다
@@ -1733,7 +1733,7 @@ function openListedOffer(
     (feeBias) =>
       Math.round((askingPrice * (1 - LISTED_DISCOUNT * rng()) * feeBias) / 100_000) * 100_000,
     ({ buyerName, fee, expiresOn }) =>
-      `📩 ${buyerName}가 이적 리스트의 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (호가 ${formatMoney(askingPrice)} · 기한 ${expiresOn})`,
+      `${buyerName}가 이적 리스트의 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (호가 ${formatMoney(askingPrice)} · 기한 ${expiresOn})`,
   );
 }
 
@@ -1756,7 +1756,7 @@ function openRequestedOffer(
     (feeBias) =>
       Math.round((market * (1 - REQUESTED_DISCOUNT * rng()) * feeBias) / 100_000) * 100_000,
     ({ buyerName, fee, expiresOn }) =>
-      `📩 ${buyerName}가 이적을 요청한 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
+      `${buyerName}가 이적을 요청한 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
   );
 }
 
@@ -2431,7 +2431,7 @@ function executeLoanIn(
       `${player.name}을(를) ${teamName(from)}에서 임대로 데려왔습니다 — ${until}까지 · ` +
       `임대료 ${formatMoney(agreed.fee)} · 주급 ${Math.round(wageShare * 100)}% 부담` +
       ` · 등번호 ${squadNumber}번` +
-      (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
+      (slot.ok ? "" : ` ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
     brief: {
       head: "임대 영입",
       items: [
@@ -3107,7 +3107,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): CommandResult {
       // 합의한 번호를 못 준 사실은 여기서 한 번 더 선다 — 모델이 읽는 줄이다
       (numberBlock ? ` (요구는 ${numberBlockText(numberBlock)})` : "") +
       `. 남은 이적 예산 ${formatMoney(ourFinance.transferBudget)}` +
-      (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
+      (slot.ok ? "" : ` ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
     brief: {
       head: "영입 완료",
       items: [
@@ -3489,8 +3489,8 @@ export function runMedicals(state: GameState, digest: TickSink): void {
       const done = executeDeal(state, negotiation);
       digest.push(
         done.ok
-          ? `🩺 ${player.name} 메디컬 통과 — ${done.message}`
-          : `🩺 ${player.name} 메디컬은 통과했지만 계약을 확정하지 못했습니다 — ${done.message}`,
+          ? `${player.name} 메디컬 통과 — ${done.message}`
+          : `${player.name} 메디컬은 통과했지만 계약을 확정하지 못했습니다 — ${done.message}`,
       );
       continue;
     }
@@ -3504,7 +3504,7 @@ export function runMedicals(state: GameState, digest: TickSink): void {
     // 통과하지 않았으면 소견 카드가 반드시 붙는다 (`resolveMedical`)
     if (!outcome.concern) continue;
     const flagged = medicalFlagResult(state, negotiation, player, outcome.concern);
-    if (flagged.ok) digest.push(`🩺 ${flagged.message}`);
+    if (flagged.ok) digest.push(`${flagged.message}`);
   }
 }
 
@@ -3549,7 +3549,7 @@ export function expireNegotiations(state: GameState, digest: TickSink): void {
       negotiation.status = "expired";
       const player = playerById(state, negotiation.gamePlayerId);
       digest.push(
-        `🩺 ${player?.name ?? negotiation.gamePlayerId} 건은 메디컬 소견을 안은 채 이적창이 ` +
+        `${player?.name ?? negotiation.gamePlayerId} 건은 메디컬 소견을 안은 채 이적창이 ` +
           `닫혔습니다 — 이 건은 무산됐습니다`,
       );
       /**
@@ -3569,9 +3569,9 @@ export function expireNegotiations(state: GameState, digest: TickSink): void {
       const player = playerById(state, negotiation.gamePlayerId);
       digest.push(
         deadline
-          ? `⏳ ${player?.name ?? negotiation.gamePlayerId} — 상대가 건 기한이 내일입니다. ` +
+          ? `${player?.name ?? negotiation.gamePlayerId} — 상대가 건 기한이 내일입니다. ` +
               `넘기면 협상이 끝납니다`
-          : `⏳ ${player?.name ?? negotiation.gamePlayerId} 협상이 내일 만료됩니다 — 오늘 안에 결정해야 합니다`,
+          : `${player?.name ?? negotiation.gamePlayerId} 협상이 내일 만료됩니다 — 오늘 안에 결정해야 합니다`,
       );
     }
     if (state.date <= negotiation.expiresOn) continue;
@@ -3960,7 +3960,7 @@ export function runAiRenewals(state: GameState, digest: TickSink): void {
     if (ours) {
       ours.status = "rejected";
       digest.push(
-        `🚪 ${teamName(contract.teamId)}가 ${player.name}과 재계약했습니다 (${years}년) — 우리 협상은 끝났습니다`,
+        `${teamName(contract.teamId)}가 ${player.name}과 재계약했습니다 (${years}년) — 우리 협상은 끝났습니다`,
       );
       pushNarrative(state, `${player.name} 재계약 — 영입 무산`, 4);
     } else if (state.scoutReports.some((r) => r.gamePlayerId === player.id && r.completedOn)) {
@@ -4096,7 +4096,7 @@ export function runAiPrecontracts(state: GameState, digest: TickSink): void {
     });
 
     digest.push(
-      `🚪 ${player.name}이(가) ${teamName(teamId)}와 사전 계약했습니다 — ${since}에 떠납니다`,
+      `${player.name}이(가) ${teamName(teamId)}와 사전 계약했습니다 — ${since}에 떠납니다`,
     );
     pushNarrative(state, `${player.name} 사전 계약 — ${teamName(teamId)}로 ${since} 이적`, 5);
   }

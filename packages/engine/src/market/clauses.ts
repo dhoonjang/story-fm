@@ -136,7 +136,7 @@ export function settleSellOn(
       payeeTeamId === state.userTeamId
         ? `${name} 셀온 ${rate}% 정산 — ${teamName(input.sellerTeamId)}에서 ${formatMoney(amount)} 수령`
         : `${name} 셀온 ${rate}% 정산 — ${teamName(payeeTeamId)}에 ${formatMoney(amount)} 지급`;
-    input.digest?.push(`💷 ${line}`);
+    input.digest?.push(`${line}`);
     pushNarrative(state, line, 3);
   }
   return amount;
@@ -359,7 +359,7 @@ export function runBuyBacks(
      */
     if (done.fromTeamId !== state.userTeamId) continue;
     const line = `${right.player.name}이(가) 되사기 조항으로 ${teamName(right.holderTeamId)}에 돌아갔습니다 — ${formatMoney(done.fee)}`;
-    digest.push(`↩️ ${line}`);
+    digest.push(`${line}`);
     pushNarrative(state, line, 4);
   }
 }

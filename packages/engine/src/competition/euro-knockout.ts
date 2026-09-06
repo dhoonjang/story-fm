@@ -176,7 +176,7 @@ function createStage(
   if (ours) {
     const opponent = ours.homeTeamId === state.userTeamId ? ours.awayTeamId : ours.homeTeamId;
     digest.push(
-      `🎫 ${short} ${label} 대진 확정 — 상대는 ${teamNameIn(state, opponent)} (${ours.date})`,
+      `${short} ${label} 대진 확정 — 상대는 ${teamNameIn(state, opponent)} (${ours.date})`,
     );
     pushNarrative(state, `${short} ${label} 진출 — vs ${teamNameIn(state, opponent)}`, 4);
   } else {
@@ -327,7 +327,7 @@ function scheduleEuroDraw(
   const created = scheduleDraw(state, cup.id, stage, date, forUser);
   if (created && forUser) {
     const short = competitionShortName(cup.id);
-    digest.push(`🎲 ${short} ${stageLabel(stage, 1, false)} 대진 추첨 — ${date}`);
+    digest.push(`${short} ${stageLabel(stage, 1, false)} 대진 추첨 — ${date}`);
   }
   return created;
 }

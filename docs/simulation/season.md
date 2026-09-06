@@ -699,8 +699,8 @@ advance_time(until):
 
 - **종류를 붙이지 않고 민 사실은 `news`다.** 사실을 쌓는 자리(`TickSink`)는 `push`만 있는
   모양이라 `string[]`이 그대로 들어맞고, 종류를 붙이는 자리는 둘뿐이다 — 한 패스가 내는
-  것이 전부 한 종류면 `events.of(kind)`로 자리를 파서 넘기고, 그 패스 안에서 한 줄만
-  종류가 다르면 `pushEvent(sink, kind, …)`로 그 줄에만 붙인다.
+  것이 전부 한 종류면 `scopeEvents(sink, kind)`로 자리를 파서 넘기고, 그 패스 안에서 한
+  줄만 종류가 다르면 `pushEvent(sink, kind, …)`로 그 줄에만 붙인다.
 - **문장은 종류를 알지 못한다.** 이모지도 접두어도 붙이지 않는다 — 종류를 그림으로
   말하는 것은 화면의 일이다(design-system.md §3).
 - **시즌 종료 tick의 줄도 같은 배열에 든다** — `endSeason`이 내는 문장들은 `news`로 선다.

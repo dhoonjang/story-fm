@@ -290,7 +290,7 @@ function moveClub(
   const voided = voidPendingContract(state, player.id);
   if (voided?.teamId === state.userTeamId) {
     const line = `${player.name} 사전 계약 무산 — ${teamShortNameIn(state, toTeamId)}로 이적했습니다`;
-    input.digest?.push(`🚪 ${line}`);
+    input.digest?.push(`${line}`);
     pushNarrative(state, line, 4);
   }
 
@@ -750,7 +750,7 @@ export function runAiTransfers(state: GameState, digest: TickSink): void {
     .slice(0, NOTABLE_PER_DAY);
   for (const { player, deal } of notable) {
     const fee = deal.fee > 0 ? ` (${formatMoney(deal.fee)})` : " (자유계약)";
-    digest.push(`📰 ${player.name} → ${teamShortNameIn(state, deal.toTeamId)}${fee}`);
+    digest.push(`${player.name} → ${teamShortNameIn(state, deal.toTeamId)}${fee}`);
     pushNarrative(state, `${player.name} ${teamShortNameIn(state, deal.toTeamId)} 이적`, 2);
   }
 }
