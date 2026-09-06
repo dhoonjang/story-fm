@@ -98,11 +98,6 @@
   --role-media: var(--violet);
   --role-staff: var(--text-3);
 
-  /* 별칭 — 옛 이름이 서 있는 자리를 위해. 새 규칙은 오른쪽 이름을 쓴다 */
-  --muted: var(--text-2);
-  --danger: var(--loss);
-  --border-soft: var(--line);
-
   /* ── 서체 — 서체는 요소가 아니라 클래스가 정한다. `--font-score`는 `.fig`에만 ── */
   --font-ui:
     "Pretendard Variable", "ui-fallback", "ui-fallback-win", "Apple SD Gothic Neo", "Malgun Gothic",
@@ -141,7 +136,6 @@
   --fs-xl: 20px; /* 섹션 제목 · 홀로 서는 수치 */
   --fs-2xl: 28px; /* 화면 제목 · 온보딩 질문 · 보조 KPI */
   --fs-3xl: 40px; /* 스코어 · 잔고 KPI — `--font-score` 700 전용 */
-  --fs-3xs: var(--fs-2xs); /* 별칭 — 눈금 밖이던 9px 자리 */
 
   /**
    * 상태 전이 — 같은 속도를 써야 화면이 한 몸으로 움직인다.
@@ -224,11 +218,12 @@ textarea {
   margin-bottom: 4px;
 }
 .onboarding .tagline {
-  color: var(--muted);
+  color: var(--text-2);
   margin-bottom: 32px;
 }
 .onboarding h2 {
   font-size: var(--fs-lg);
+  font-weight: 600;
   margin: 24px 0 12px;
 }
 /* 단계 하나가 화면을 채운다 — 제목과 고르는 자리 사이가 이 화면의 유일한 간격이다 */
@@ -244,7 +239,7 @@ textarea {
 }
 /* 앞 단계에서 고른 것 — 제목 위에 얹혀 지금 어디에 서 있는지를 말한다 */
 .onboarding .step-context {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
   margin-bottom: 4px;
 }
@@ -258,7 +253,7 @@ textarea {
   font-size: var(--fs-sm);
 }
 .onboarding .step-rail li {
-  color: var(--muted);
+  color: var(--text-2);
   opacity: 0.5;
   padding-bottom: 4px;
   border-bottom: 2px solid transparent;
@@ -270,7 +265,7 @@ textarea {
   background: none;
   border: none;
   padding: 0;
-  color: var(--muted);
+  color: var(--text-2);
   font: inherit;
   transition: color 160ms var(--ease-panel);
 }
@@ -386,10 +381,10 @@ textarea {
   min-width: 0;
 }
 .team-card .team-name {
-  font-weight: 700;
+  font-weight: 600;
 }
 .team-card .tier {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
 }
 /* 부임 확인 — 어느 팀에 어떤 기대를 안고 들어가는지가 이름을 적기 전에 선다.
@@ -408,10 +403,10 @@ textarea {
 }
 .onboarding .appointment-club {
   font-size: var(--fs-lg);
-  font-weight: 700;
+  font-weight: 600;
 }
 .onboarding .appointment .tier {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
 }
 .onboarding .field {
@@ -421,12 +416,12 @@ textarea {
 .onboarding .field-label {
   display: block;
   font-size: var(--fs-md);
-  font-weight: 700;
+  font-weight: 600;
   margin-bottom: 4px;
 }
 .onboarding .field-note {
   display: block;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
   margin-bottom: 6px;
 }
@@ -453,10 +448,10 @@ textarea {
   border: none;
   border-radius: var(--r-sm);
   padding: 12px 24px;
-  font-weight: 700;
+  font-weight: 600;
 }
 .error-text {
-  color: var(--danger);
+  color: var(--loss);
   margin-top: 8px;
 }
 
@@ -492,7 +487,10 @@ textarea {
   margin-bottom: 0;
   font-size: var(--fs-md);
 }
+/* 「내 게임」 — 화면 제목 아래의 소제목이라 굵기도 크기도 제목을 따르지 않는다 */
 .home-head + h2 {
+  font-size: var(--fs-lg);
+  font-weight: 600;
   margin-top: var(--sp-5);
 }
 .home-head .primary-btn {
@@ -524,7 +522,7 @@ textarea {
   white-space: nowrap;
   background: var(--panel-2);
   border: none;
-  color: var(--muted);
+  color: var(--text-2);
 }
 .home-head-actions .ghost-btn:hover {
   background: var(--pop);
@@ -573,7 +571,7 @@ textarea {
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   padding: 8px 18px;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-base);
 }
 .admin-tab:hover {
@@ -618,7 +616,7 @@ textarea {
   max-width: 360px;
 }
 .admin-count {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-md);
 }
 .admin-msg {
@@ -651,7 +649,7 @@ textarea {
 }
 .admin-list th {
   text-align: left;
-  color: var(--muted);
+  color: var(--text-2);
   font-weight: 500;
   font-size: var(--fs-sm);
   padding: 8px 12px;
@@ -681,7 +679,7 @@ textarea {
 }
 .admin-list-empty td {
   text-align: center;
-  color: var(--muted);
+  color: var(--text-2);
   padding: var(--sp-5);
 }
 .admin-name .muted {
@@ -689,12 +687,12 @@ textarea {
   font-size: var(--fs-xs);
 }
 .admin-team {
-  color: var(--muted);
+  color: var(--text-2);
   max-width: 200px;
   word-break: keep-all;
 }
 .admin-ovr {
-  font-weight: 700;
+  font-weight: 500;
 }
 /**
  * 포지션 칸 — 본업(선호)과 겸업이 **굵기·색으로** 갈린다. 칩(테두리·배경)을 씌우지
@@ -706,17 +704,17 @@ textarea {
 .admin-pos {
   display: inline-block;
   min-width: 34px;
-  font-weight: 700;
+  font-weight: 500;
 }
 .admin-pos-more {
   margin-left: 6px;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
 }
 /* 값이 그 자리에서 이미 틀렸다는 표시 (티켓 합 ≠ 참가 팀 수) */
 .admin-cell-warn {
-  color: var(--danger);
-  font-weight: 700;
+  color: var(--loss);
+  font-weight: 600;
 }
 .ai {
   background: var(--panel-2);
@@ -741,7 +739,7 @@ textarea {
   padding: 4px 8px;
   font-size: var(--fs-sm);
   background: var(--panel-2);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .mini-btn:hover:not(:disabled) {
   background: var(--pop);
@@ -751,7 +749,7 @@ textarea {
   color: var(--accent);
 }
 .mini-btn.save:disabled {
-  color: var(--muted);
+  color: var(--text-2);
 }
 .mini-btn.del:hover {
   background: color-mix(in srgb, var(--loss) 12%, var(--panel));
@@ -876,19 +874,19 @@ textarea {
   border-radius: var(--r-sm);
   padding: 4px 10px;
   font-size: var(--fs-sm);
-  color: var(--muted);
+  color: var(--text-2);
 }
 /* 열이 열둘이라 글자를 한 눈금 줄여야 한 화면에 든다 */
 .usage-list {
   font-size: var(--fs-sm);
 }
 .usage-list .muted {
-  color: var(--muted);
+  color: var(--text-2);
 }
 /* 프리픽스가 깨진 것으로 보이는 자리와 예산을 넘긴 자리 — 요금만 오르고 화면엔
    증상이 없는 부류라(models.md §4) 표에서 눈에 걸려야 한다 */
 .usage-alert {
-  color: var(--danger);
+  color: var(--loss);
   font-weight: 600;
 }
 
@@ -954,7 +952,7 @@ textarea {
 .admin-modal-sub {
   display: block;
   margin-top: 2px;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
 }
 .admin-modal-body {
@@ -996,7 +994,7 @@ textarea {
   flex-direction: column;
   gap: var(--sp-1);
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .admin-field.grow {
   flex: 1;
@@ -1030,7 +1028,7 @@ textarea {
   font-size: var(--fs-md);
 }
 .admin-section-note {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
 }
 .admin-section-head .mini-btn {
@@ -1062,10 +1060,10 @@ textarea {
   border-left-color: var(--accent);
 }
 .admin-pos-row.nat select {
-  font-weight: 700;
+  font-weight: 600;
 }
 .admin-pos-head {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
 }
 /* 라벨은 자기 칸의 손잡이 위에 선다 — 체크박스는 가운데라 라벨도 가운데다 */
@@ -1142,12 +1140,12 @@ textarea {
   font-size: var(--fs-xs);
 }
 .admin-squad-vals {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 .admin-squad-empty {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-md);
 }
 
@@ -1159,7 +1157,7 @@ textarea {
 }
 .admin-axis-group-name {
   display: block;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
   margin-bottom: var(--sp-1);
 }
@@ -1227,7 +1225,7 @@ textarea {
 }
 .admin-kv-name {
   flex: 0 0 132px;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
   word-break: keep-all;
   overflow-wrap: anywhere;
@@ -1247,7 +1245,7 @@ textarea {
 /* 합계는 저장 가능한지를 미리 말한다 — 어긋나면 색이 먼저 바뀐다 */
 .admin-sum {
   margin-left: auto;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
 }
 .admin-sum.warn {
@@ -1305,7 +1303,7 @@ textarea {
   padding: 2px 6px;
   border-radius: var(--r-pill);
   background: var(--panel-2);
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-2xs);
 }
 .skill-card textarea {
@@ -1326,7 +1324,7 @@ textarea {
 }
 .skill-char-count {
   margin-top: 5px;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-2xs);
   text-align: right;
 }
@@ -1409,12 +1407,12 @@ textarea {
 }
 .game-card-team {
   font-size: var(--fs-lg);
-  font-weight: 700;
+  font-weight: 600;
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
 .game-card-sub {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
   word-break: keep-all;
   overflow-wrap: anywhere;
@@ -1430,12 +1428,12 @@ textarea {
 }
 .game-card-season {
   font-size: var(--fs-sm);
-  font-weight: 700;
+  font-weight: 500;
   color: var(--silver);
 }
 .game-card-date {
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 /**
@@ -1457,8 +1455,8 @@ textarea {
 /* 팀 이름 자리에 서는 파일 이름 — 감독이 디스크에서 찾을 단서라 잘리면 안 된다 */
 .game-card-id {
   font-size: var(--fs-md);
-  font-weight: 700;
-  color: var(--muted);
+  font-weight: 600;
+  color: var(--text-2);
   word-break: break-all;
 }
 .game-card-why {
@@ -1468,7 +1466,7 @@ textarea {
 .game-card-stale-tag {
   flex-shrink: 0;
   font-size: var(--fs-2xs);
-  font-weight: 700;
+  font-weight: 600;
   color: var(--loss);
 }
 /**
@@ -1611,7 +1609,7 @@ textarea {
   color: var(--dim);
 }
 .topbar .meta {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-md);
   word-break: keep-all;
   overflow-wrap: anywhere;
@@ -1649,7 +1647,7 @@ textarea {
   padding: 1px 8px;
   border-radius: var(--r-pill);
   background: var(--panel-2);
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
   line-height: var(--lh-ui);
   /* 갈래 이름과 수는 한 덩어리다 — 둘 사이에서 줄이 갈리면 수가 미아가 된다 */
@@ -1666,7 +1664,7 @@ textarea {
   color: var(--text);
 }
 .agenda-detail {
-  color: var(--muted);
+  color: var(--text-2);
 }
 /* 아이콘 줄 — 오른쪽 끝. 글자 없이 아이콘만 두되 `title`·`aria-label`로 이름을
    남긴다(화면에 조작 안내를 깔지 않는다는 규칙). 선택 상태는 밝기로 알린다 —
@@ -1691,7 +1689,7 @@ textarea {
   background: none;
   border: none;
   border-radius: var(--r-sm);
-  color: var(--muted);
+  color: var(--text-2);
   transition:
     color var(--ease),
     background var(--ease);
@@ -1774,7 +1772,7 @@ textarea {
   gap: 5px;
   margin-bottom: 3px;
   font-size: var(--fs-2xs);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.06em;
   color: var(--accent);
 }
 .rail-hint-head svg {
@@ -1786,7 +1784,7 @@ textarea {
   font-size: var(--fs-xs);
   line-height: var(--lh-ui);
   /* 기본은 한 단 낮다 — 또렷한 것은 값(`.rail-hint-value`)뿐이다 */
-  color: var(--muted);
+  color: var(--text-2);
 }
 /**
  * 한 줄 = **갈래 아이콘 + 무슨 일**. 문장만 세 줄 쌓으면 글자 벽이 되어 무엇이
@@ -1842,7 +1840,6 @@ textarea {
 /* 무엇에 대한 것인가 — 값 앞에서 이름표 노릇만 한다 */
 .rail-hint-label {
   margin-right: 5px;
-  font-style: normal;
   color: var(--dim);
 }
 /* 바뀐 값 — 줄에서 유일하게 본문 색을 갖는다 */
@@ -1855,12 +1852,11 @@ textarea {
  */
 .rail-hint-aside {
   margin-left: 6px;
-  font-style: normal;
   font-size: var(--fs-2xs);
   color: var(--dim);
 }
 .rail-hint-aside span {
-  color: var(--muted);
+  color: var(--text-2);
 }
 /* 오르내린 수치 — 숫자 하나가 방향을 말한다 */
 .rail-hint-what b {
@@ -1877,7 +1873,6 @@ textarea {
   display: block;
   margin-top: 5px;
   padding-left: 20px;
-  font-style: normal;
   font-size: var(--fs-2xs);
   color: var(--dim);
 }
@@ -2081,7 +2076,7 @@ textarea {
   background: none;
   border: none;
   border-radius: var(--r-xs);
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-md);
   line-height: 1.3;
   transition:
@@ -2136,7 +2131,7 @@ textarea {
 }
 .fulltime-tag {
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--accent);
 }
@@ -2191,7 +2186,7 @@ textarea {
 /* 경기 시계 — 상단 띠에서 날짜가 쓰던 자리 */
 .match-clock {
   font-size: var(--fs-md);
-  color: var(--muted);
+  color: var(--text-2);
   white-space: nowrap;
 }
 .match-clock b {
@@ -2728,7 +2723,7 @@ textarea {
   border: none;
   border-left: 2px solid var(--gold-soft);
   border-radius: var(--r-sm);
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-md);
   text-align: left;
   transition:
@@ -2807,7 +2802,7 @@ textarea {
   font-variant-numeric: proportional-nums;
   white-space: pre-wrap;
 }
-/* 감독의 연출도 대사와 층위가 갈려야 한다 — 다만 말풍선 바탕이 짙어 `--muted`로는
+/* 감독의 연출도 대사와 층위가 갈려야 한다 — 다만 말풍선 바탕이 짙어 `--text-2`로는
    글자가 묻는다. 같은 글자색을 낮춰 대비를 지킨다 */
 .turn-user em {
   font-weight: 600;
@@ -2862,7 +2857,7 @@ textarea {
 .tool-chip {
   display: inline-block;
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
   background: var(--panel-2);
   border: none;
   border-radius: var(--r-pill);
@@ -2887,13 +2882,12 @@ textarea {
  */
 .tool-chip-count {
   margin-left: 5px;
-  font-style: normal;
   font-variant-numeric: tabular-nums;
   color: var(--dim);
 }
 .tool-chip:hover .tool-chip-count,
 .tool-chip.open .tool-chip-count {
-  color: var(--muted);
+  color: var(--text-2);
 }
 /**
  * 대화형 스킬의 **결** — 면담·팀토크·기자회견은 펼치지 않아도 잘 풀렸는지 보인다.
@@ -2948,7 +2942,7 @@ textarea {
 .sr-badge,
 .mn-badge {
   font-size: var(--fs-2xs);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.06em;
   padding: 2px 7px;
   border-radius: var(--r-xs);
@@ -2962,7 +2956,7 @@ textarea {
 }
 .sr-meta {
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 /* 종합 추정치는 오른쪽 끝 — 보고서마다 같은 자리라야 세로로 훑힌다. */
 .sr-ovr {
@@ -2972,21 +2966,19 @@ textarea {
   gap: 5px;
 }
 .sr-ovr em {
-  font-style: normal;
   font-size: var(--fs-2xs);
   color: var(--dim);
 }
 .sr-ovr b {
   font-size: var(--fs-lg);
-  font-weight: 700;
+  font-weight: 600;
   color: var(--grade);
   font-variant-numeric: tabular-nums;
 }
 .sr-ovr b i {
   margin-left: 3px;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-2xs);
-  font-style: normal;
   font-weight: 500;
 }
 
@@ -3004,7 +2996,6 @@ textarea {
   gap: 5px;
 }
 .sr-facts em {
-  font-style: normal;
   color: var(--dim);
 }
 .sr-facts b {
@@ -3065,8 +3056,7 @@ textarea {
   font-size: var(--fs-2xs);
 }
 .sr-axis em {
-  font-style: normal;
-  color: var(--muted);
+  color: var(--text-2);
 }
 .sr-axis b {
   color: var(--grade);
@@ -3117,25 +3107,25 @@ textarea {
 .sr-axis,
 .mn-ovr {
   --grade: var(--text);
-  --bar: var(--muted);
+  --bar: var(--text-2);
 }
 .sr-ovr[data-rating="top"],
 .sr-axis[data-rating="top"],
 .mn-ovr[data-rating="top"] {
   --grade: var(--gold-soft);
-  --bar: color-mix(in srgb, var(--gold-soft) 76%, var(--muted));
+  --bar: color-mix(in srgb, var(--gold-soft) 76%, var(--text-2));
 }
 .sr-ovr[data-rating="strong"],
 .sr-axis[data-rating="strong"],
 .mn-ovr[data-rating="strong"] {
   --grade: var(--accent-2);
-  --bar: color-mix(in srgb, var(--accent-2) 72%, var(--muted));
+  --bar: color-mix(in srgb, var(--accent-2) 72%, var(--text-2));
 }
 .sr-ovr[data-rating="solid"],
 .sr-axis[data-rating="solid"],
 .mn-ovr[data-rating="solid"] {
   --grade: var(--silver);
-  --bar: color-mix(in srgb, var(--silver) 62%, var(--muted));
+  --bar: color-mix(in srgb, var(--silver) 62%, var(--text-2));
 }
 .sr-ovr[data-rating="low"],
 .sr-axis[data-rating="low"],
@@ -3166,7 +3156,7 @@ textarea {
   --book: var(--loss);
 }
 .booking-card.ours {
-  color: var(--muted);
+  color: var(--text-2);
 }
 /* 카드 조각 — 실제 옐로/레드 카드의 비율(가로:세로 ≈ 2:3) */
 .booking-mark {
@@ -3248,7 +3238,7 @@ textarea {
 /* 배지는 방향까지 실어 두 낱말이 된다(`임대 송출 조정안`) — 중간에서 접히면 두 표식으로 읽힌다 */
 .mc-badge {
   font-size: var(--fs-2xs);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.06em;
   white-space: nowrap;
   padding: 2px 7px;
@@ -3258,16 +3248,16 @@ textarea {
 }
 .mc-who {
   font-size: var(--fs-sm);
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text);
 }
 .mc-counterpart {
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .mc-summary {
   min-width: 0;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
 }
 /* 성사 가능성은 오른쪽 끝 — 카드마다 같은 자리라야 세로로 훑힌다 */
@@ -3279,14 +3269,13 @@ textarea {
 }
 /* 이름표는 값에 딸린 글자다 — 답(`.mc-due`)과 같은 결로 앉힌다 */
 .mc-odds em {
-  font-style: normal;
   font-size: var(--fs-2xs);
   white-space: nowrap;
   color: var(--dim);
 }
 .mc-odds b {
   font-size: var(--fs-sm);
-  font-weight: 700;
+  font-weight: 600;
   color: var(--deal);
   /* 숫자 표기일 때만 뜻이 있다 — 안개 딜의 문구에는 영향이 없다 */
   font-variant-numeric: tabular-nums;
@@ -3316,7 +3305,6 @@ textarea {
   gap: 5px;
 }
 .mc-terms em {
-  font-style: normal;
   color: var(--dim);
 }
 .mc-terms b {
@@ -3327,7 +3315,7 @@ textarea {
 /* 이름표는 접히지 않는다 — 열 폭은 그리드가 정한다 */
 .mc-side {
   white-space: nowrap;
-  color: var(--muted) !important;
+  color: var(--text-2) !important;
 }
 .mc-terms.demand b {
   color: var(--gold);
@@ -3363,15 +3351,14 @@ textarea {
   gap: 5px;
 }
 .mc-due em {
-  font-style: normal;
   color: var(--dim);
 }
 .mc-due b {
-  color: var(--muted);
+  color: var(--text-2);
   font-weight: 600;
 }
 .mc-note {
-  color: var(--muted);
+  color: var(--text-2);
 }
 
 /**
@@ -3408,13 +3395,13 @@ textarea {
 /* 무엇을 찾아오라 했나 — 카드에서 가장 큰 사실이라 이름 자리에 선다 */
 .mn-brief {
   font-size: var(--fs-sm);
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text);
 }
 /* 어디를 뒤졌나 — 조건에 딸린 곳이므로 한 단계 가라앉는다 */
 .mn-scope {
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 /* 나간 날과 돌아온 날은 오른쪽 끝 — 카드마다 같은 자리라야 세로로 훑힌다 */
 .mn-when {
@@ -3423,18 +3410,17 @@ textarea {
   align-items: baseline;
   gap: 5px;
   font-size: var(--fs-2xs);
-  color: var(--muted);
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .mn-when i {
-  font-style: normal;
   color: var(--dim);
 }
 .mn-empty {
   margin-top: 6px;
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 
 /* 여덟 열은 좁은 화면의 폭에 들어가지 않는다 — 표만 가로로 흐르고 머리는 접힌다 */
@@ -3449,7 +3435,7 @@ textarea {
   width: max-content;
   font-size: var(--fs-sm);
   /* 가라앉은 것이 바탕이고, 또렷해야 하는 칸만 자기 색을 갖는다 */
-  color: var(--muted);
+  color: var(--text-2);
   white-space: nowrap;
 }
 .mn-row {
@@ -3466,7 +3452,6 @@ textarea {
   padding-right: 0;
 }
 .mn-row.head > * {
-  font-style: normal;
   font-weight: 600;
   font-size: var(--fs-2xs);
   color: var(--dim);
@@ -3483,16 +3468,15 @@ textarea {
 }
 .mn-ovr {
   color: var(--grade);
-  font-weight: 700;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 /* 오차폭은 값에 딸린 글자다 — 숫자와 같은 크기면 둘 다 종합으로 읽힌다 */
 .mn-ovr i {
   margin-left: 3px;
-  font-style: normal;
   font-weight: 500;
   font-size: var(--fs-2xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .mn-pot,
 .mn-until {
@@ -3534,7 +3518,7 @@ textarea {
   color: var(--text);
 }
 .goal-assist {
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
 }
 /* 스코어는 오른쪽 끝 — 카드마다 같은 자리에 있어야 세로로 훑힌다 */
@@ -3579,7 +3563,7 @@ textarea {
 .tool-brief-head {
   color: var(--text);
   font-size: var(--fs-xs);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.06em;
 }
 .tool-brief-head + .tool-lines {
   margin-top: 5px;
@@ -3608,20 +3592,18 @@ textarea {
 }
 /* 이름표(앞)와 갈래(뒤) — 알약 안에서도 또렷한 것은 값 하나다 */
 .tool-item em {
-  font-style: normal;
-  color: var(--muted);
+  color: var(--text-2);
 }
 .tool-item i {
-  font-style: normal;
   color: var(--dim);
 }
 .tool-item b {
-  font-weight: 700;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 .tool-detail-input {
   margin-top: 6px;
-  color: var(--muted);
+  color: var(--text-2);
   background: var(--bg);
   border-radius: var(--r-sm);
   padding: 8px;
@@ -3674,7 +3656,7 @@ textarea {
 .say-who .speaker-icon {
   display: flex;
   align-self: center;
-  color: var(--muted);
+  color: var(--text-2);
   flex-shrink: 0;
 }
 .say.broadcast .say-who .speaker-icon {
@@ -3690,7 +3672,6 @@ textarea {
   font-size: var(--fs-md);
   font-weight: 700;
   color: var(--silver);
-  letter-spacing: 0.01em;
 }
 /* 중계는 화자가 아니라 무대 밖의 목소리다 — 여기만 색을 갖되 채도는 낮게 */
 .say.broadcast .say-who .speaker {
@@ -3717,8 +3698,8 @@ textarea {
   border-radius: var(--r-pill);
   font-size: var(--fs-2xs);
   font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--muted);
+  letter-spacing: 0.06em;
+  color: var(--text-2);
   vertical-align: 1px;
 }
 .line.narration {
@@ -3760,7 +3741,7 @@ textarea {
 }
 .turn-error button.ghost {
   background: none;
-  color: var(--muted);
+  color: var(--text-2);
   padding: 3px 6px;
 }
 /**
@@ -3775,7 +3756,7 @@ textarea {
   padding: 9px 20px;
   border-top: 1px solid var(--line);
   background: var(--panel-2);
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-sm);
 }
 /**
@@ -3843,7 +3824,7 @@ textarea {
   cursor: pointer;
 }
 .skip-menu button svg {
-  color: var(--muted);
+  color: var(--text-2);
   flex-shrink: 0;
 }
 .skip-menu button:hover:not(:disabled) {
@@ -3963,7 +3944,7 @@ textarea {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--muted);
+  background: var(--text-2);
   animation: thinking-pulse 1.25s ease-in-out infinite;
 }
 .thinking i:nth-child(2) {
@@ -4171,14 +4152,14 @@ textarea {
   fill: var(--club-hi);
 }
 .mgr-radar .axis-label {
-  fill: var(--muted);
+  fill: var(--text-2);
   font-size: var(--fs-xs);
   font-weight: 600;
   dominant-baseline: middle;
 }
 .mgr-radar .axis-value {
   fill: var(--text);
-  font-weight: 700;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 /**

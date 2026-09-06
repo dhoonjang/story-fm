@@ -31,15 +31,13 @@
   gap: 4px 12px;
   padding: 0 4px;
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .mv-goal i {
-  font-style: normal;
   color: var(--text-3);
   margin-right: 3px;
 }
 .mv-goal em {
-  font-style: normal;
   color: var(--text-3);
 }
 .mv-goal.ours {
@@ -65,7 +63,7 @@
   color: var(--text-3);
 }
 .mv-totals b {
-  color: var(--muted);
+  color: var(--text-2);
   font-weight: 600;
   margin-left: 2px;
 }
@@ -79,7 +77,7 @@
 }
 .mv-tally .tl {
   font-size: var(--fs-2xs);
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1.5;
   padding: 0 5px;
   border-radius: var(--r-xs);
@@ -109,7 +107,7 @@
   gap: 8px;
   min-width: 0;
   font-size: var(--fs-lg);
-  font-weight: 700;
+  font-weight: 600;
   text-align: right;
 }
 .mv-team.away {
@@ -151,11 +149,10 @@
   grid-column: 2;
   text-align: center;
   font-size: var(--fs-sm);
-  color: var(--muted);
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 .mv-clock i {
-  font-style: normal;
   margin-left: 3px;
 }
 .mv-comp {
@@ -163,7 +160,7 @@
   grid-row: 2;
   text-align: left;
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .mv-sentoff {
   grid-column: 1 / -1;
@@ -195,7 +192,7 @@
   gap: 4px;
   text-align: center;
   font-size: var(--fs-xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 /* 그 전선의 우열 — 칸 색과 같은 규칙이라 머리만 봐도 어디가 밀리는지 읽힌다 */
 .mv-band {
@@ -319,7 +316,7 @@
   background: transparent;
   font-family: var(--font-score);
   font-size: var(--fs-2xs);
-  font-weight: 700;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text);
   pointer-events: auto;
@@ -359,17 +356,16 @@
   gap: 6px;
   font-family: var(--font-score);
   font-size: var(--fs-xl);
-  font-weight: 700;
+  font-weight: 600;
   line-height: var(--lh-fig);
   font-variant-numeric: tabular-nums;
-  color: var(--muted);
+  color: var(--text-2);
 }
 /* 앞선 쪽만 밝힌다 — 둘 다 밝으면 어느 쪽이 큰지 다시 세어야 한다 */
 .mv-xg-score b.lead {
   color: var(--text);
 }
 .mv-xg-score i {
-  font-style: normal;
   font-size: var(--fs-md);
   color: var(--text-3);
 }
@@ -420,7 +416,7 @@
   font-size: var(--fs-sm);
 }
 .mv-exploits b {
-  color: var(--muted);
+  color: var(--text-2);
   font-weight: 600;
 }
 /* 걸려 있는 표적 — 지금 실제로 판에 얹혀 있는 것이라 칩으로 또렷하게 선다 */
@@ -434,7 +430,7 @@
 .mv-note {
   font-size: var(--fs-xs);
   line-height: 1.6;
-  color: var(--muted);
+  color: var(--text-2);
 }
 .mv-tac-notes {
   display: flex;
@@ -464,7 +460,7 @@
   padding-bottom: 8px;
   margin-bottom: 4px;
   border-bottom: 1px solid var(--line);
-  font-weight: 700;
+  font-weight: 600;
 }
 .mv-tac-head span:first-child {
   text-align: right;
@@ -473,8 +469,7 @@
   color: var(--text);
 }
 .mv-tac-head i {
-  font-style: normal;
-  color: var(--muted);
+  color: var(--text-2);
   font-weight: 500;
 }
 /**
@@ -497,12 +492,12 @@
   white-space: nowrap;
 }
 .mv-tac-shift span {
-  color: var(--muted);
+  color: var(--text-2);
   line-height: 1.5;
 }
 .mv-tac-axis {
   text-align: center;
-  color: var(--muted);
+  color: var(--text-2);
 }
 .mv-dots {
   display: flex;
@@ -562,7 +557,7 @@
 }
 .mv-tactics.one .mv-tac-head span {
   text-align: right;
-  color: var(--muted);
+  color: var(--text-2);
   font-weight: 500;
 }
 
@@ -602,9 +597,8 @@
 }
 /* 전력 옆의 오차 — 명단에서도 안개가 보여야 한다 (칩은 좁아 툴팁에 맡긴다) */
 .mv-eff-margin {
-  font-style: normal;
   font-weight: 500;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: 0.8em;
   margin-left: 2px;
 }
@@ -621,8 +615,7 @@
 }
 /* 전력 옆의 오차 — 이 숫자를 얼마나 믿을 수 있나 (안개) */
 .slot-margin {
-  font-style: normal;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: 0.85em;
 }
 
@@ -652,18 +645,16 @@
   line-height: 1.2;
 }
 .next-fixture i {
-  font-style: normal;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: var(--fs-xs);
 }
 .nf-venue {
-  font-style: normal;
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: 600;
   padding: 1px 6px;
   border-radius: var(--r-xs);
   background: var(--panel-2);
-  color: var(--muted);
+  color: var(--text-2);
   vertical-align: middle;
 }
 /* 홈은 초록이 아니다 — 초록은 조작과 승의 자리다 */
@@ -711,11 +702,10 @@
 }
 /* 접힌 줄에도 서는 수 — 펼칠 이유가 카드 밖에 있으면 감독은 펼치지 않는다 */
 .mp-chip {
-  font-style: normal;
   padding: 0 6px;
   border-radius: var(--r-xs);
   background: var(--panel-2);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .mp-body {
   display: flex;
@@ -736,15 +726,14 @@
   align-items: baseline;
   gap: 8px;
   font-size: var(--fs-xs);
-  font-weight: 700;
-  color: var(--muted);
+  font-weight: 600;
+  color: var(--text-2);
 }
 /* 근거는 제목 옆에 한 톤 낮춰 — 예상이 무엇에서 나왔는지가 값의 일부다 */
 .mp-basis {
-  font-style: normal;
   font-weight: 400;
   font-size: var(--fs-2xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 .mp-xi,
 .mp-out,
@@ -765,9 +754,8 @@
 }
 .mp-p i,
 .mp-axis i {
-  font-style: normal;
   font-size: var(--fs-2xs);
-  color: var(--muted);
+  color: var(--text-2);
 }
 /**
  * 직전 경기 선발에서 이어지지 못해 코어가 메운 자리 — **점선이 추정을 말한다.**

@@ -28,7 +28,6 @@
   font-size: var(--fs-xs);
 }
 .mr-label em {
-  font-style: normal;
   color: var(--text-3);
 }
 /**
@@ -70,7 +69,7 @@
   gap: 8px;
   min-width: 0;
   font-size: var(--fs-lg);
-  font-weight: 700;
+  font-weight: 600;
   text-align: right;
 }
 .mr-sb-team.away {
@@ -97,7 +96,6 @@
 .mr-sb-outcome {
   font-size: var(--fs-lg);
   font-weight: 600;
-  font-style: normal;
 }
 .mr-sb-outcome.o-W {
   color: var(--win);
@@ -181,7 +179,6 @@
 }
 .mr-idx i,
 .mr-idx em {
-  font-style: normal;
   color: var(--text-3);
 }
 .mr-idx i {
@@ -195,7 +192,7 @@
   color: var(--text);
 }
 .mr-idx.k-goal {
-  font-weight: 700;
+  font-weight: 600;
 }
 .mr-idx.k-goal em {
   color: var(--text-2);
@@ -296,10 +293,10 @@
 }
 .mr-ev.k-goal .mr-ev-kind {
   color: var(--text);
-  font-weight: 700;
+  font-weight: 600;
 }
 .mr-ev.k-goal .mr-ev-who {
-  font-weight: 700;
+  font-weight: 600;
 }
 .mr-ev.k-red_card .mr-ev-kind {
   color: var(--loss);
@@ -309,7 +306,6 @@
 }
 .mr-ev-assist,
 .mr-ev-why {
-  font-style: normal;
   color: var(--text-3);
   font-size: var(--fs-2xs);
 }
@@ -346,7 +342,6 @@
 }
 .mr-kick i,
 .mr-kick em {
-  font-style: normal;
   color: var(--text-3);
 }
 .mr-kick i {
