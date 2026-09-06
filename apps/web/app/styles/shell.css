@@ -3850,7 +3850,8 @@ textarea {
    * 여백**이라 6px면 테두리와 고르게 뜬다. 여백과 버튼 높이가 어긋나면
    * 한쪽만 1px 더 붙어 보인다.
    */
-  padding: 8px 8px 8px 15px;
+  /* 아래 6px + 컴포저 16px + 테두리 1px = 23px — e2e가 입력창이 바닥에 붙어 있는지(24px 미만) 잰다 */
+  padding: 6px 8px 6px 15px;
   min-height: 52px;
   background: var(--panel-2);
   border: 1px solid transparent;
