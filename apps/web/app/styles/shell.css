@@ -4211,3 +4211,106 @@ textarea {
 .ledger-body tr.me td {
   background: var(--club-wash);
 }
+
+/**
+ * 사건 카드 — **넘긴 시간이 남긴 사실 하나에 줄 하나** (design-system.md §6).
+ *
+ * 여러 날을 넘기면 사건이 여럿 온다. 하나의 문단으로 이어져 있으면 눈이 어디까지가
+ * 한 사건인지 짚지 못하므로, 카드 하나가 줄 하나를 통째로 갖는다. 테두리는 없고
+ * 구획은 왼쪽 3px 레일이 한다 — 그 레일의 색이 곧 종류다.
+ *
+ * 카드가 서는 자리는 턴 맨 위, 장면보다 앞이다(chat.tsx). 순서는 코어가 민 순서다.
+ */
+/**
+ * 카드 사이는 **턴의 마디보다 좁다** — 여러 장이 한 덩어리로 읽혀야 "그 사이 벌어진
+ * 일들"이 되고, 8px씩 벌어지면 사건마다 다른 문단처럼 보인다. 장면과의 거리는
+ * 여기서 재지 않는다 — `.turn-model`이 이미 `gap: 8px`이라 여백을 또 얹으면 두 배가 된다.
+ */
+.tick-events {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.tick-event {
+  /* 종류를 모르는 기록도 레일은 선다 — 색만 정보 없는 선이 된다 */
+  --tick: var(--border);
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--panel);
+  border-left: 3px solid var(--tick);
+  border-radius: var(--r-sm);
+  /* 등장 — §5 3(opacity 0→1 + 4px), 목록은 아래에서 40ms씩 밀린다 */
+  animation: goal-in 160ms var(--ease-panel) both;
+}
+/**
+ * 스태거는 **다섯까지**다 — 열 장이 40ms씩 밀리면 마지막 카드가 0.4초 뒤에 서고,
+ * 그동안 감독은 아직 다 오지 않은 목록을 읽는다.
+ */
+.tick-event:nth-child(2) {
+  animation-delay: 40ms;
+}
+.tick-event:nth-child(3) {
+  animation-delay: 80ms;
+}
+.tick-event:nth-child(4) {
+  animation-delay: 120ms;
+}
+.tick-event:nth-child(n + 5) {
+  animation-delay: 160ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tick-event {
+    animation: none;
+  }
+}
+/* 종류의 톤 — 레일과 픽토그램이 같은 색을 든다 (표는 design-system.md §6) */
+.tick-event[data-kind="injury"] {
+  --tick: var(--loss);
+}
+.tick-event[data-kind="board"] {
+  --tick: var(--warn);
+}
+.tick-event[data-kind="draw"] {
+  --tick: var(--violet);
+}
+.tick-event[data-kind="interest"] {
+  --tick: var(--accent-2);
+}
+.tick-event[data-kind="matchday"] {
+  --tick: var(--gold);
+}
+.tick-event[data-kind="news"] {
+  --tick: var(--border);
+}
+/**
+ * 픽토그램은 **카드의 세로 중심이 아니라 첫 줄에** 맞는다 — 두 줄로 접힌 문장에서
+ * 가운데에 서면 어느 줄의 것인지 모르는 표식이 된다. 칸의 높이를 첫 줄 높이로 두고
+ * 그 안에서 중심을 잡으면 한 줄이든 세 줄이든 같은 자리다.
+ */
+.te-icon {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  height: calc(var(--fs-md) * var(--lh-ui));
+  color: var(--tick);
+}
+/* 꼬리표는 낱말 둘로 고정 폭에 가깝다 — 여기서 접히면 두 표식으로 읽힌다 */
+.te-tag {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+/* 사실 문장 — 카드에서 가장 큰 것이라 본문 잉크로 선다 */
+.te-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-md);
+  line-height: var(--lh-ui);
+  color: var(--text);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}

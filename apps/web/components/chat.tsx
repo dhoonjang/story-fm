@@ -9,10 +9,11 @@ import { groupChips, groupPieces, splitStaging, weaveTurn } from "../lib/turn-pi
 import type { Utterance } from "../lib/turn-pieces";
 import { BROADCAST_SPEAKER, formatMoney, formatScore, normalizeSpeaker } from "@story-fm/domain";
 import { contractUntil } from "../lib/dateline";
-import type { ScoutReportCard } from "@story-fm/domain";
+import type { ScoutReportCard, TickEvent } from "@story-fm/domain";
 import { MarketCardView, MissionReportCardView } from "@/components/market-card";
 import { splitMarketCalls } from "@/lib/market-calls";
 import { ratingTone, scoutMargin, scoutValue } from "@/lib/scout-report-display";
+import { tickEventLook } from "@/lib/tick-event-display";
 import { CALL_LABEL } from "@/lib/call-label";
 import type { SpeakerRole } from "@story-fm/engine";
 import { IconBroadcast, IconMatch, IconPerson, SPEAKER_ICON } from "@/components/icons";
@@ -169,7 +170,7 @@ function ToolChip({
           {calls.map((call, i) => (
             // 묶인 호출은 저마다 한 칸 — 셋을 한 덩이로 이으면 어디까지가 한 교체인지 흐려진다
             <div className="tool-detail-call" key={i}>
-              <ToolDetail call={call} />
+              <ToolDetail call={call} label={label} />
             </div>
           ))}
         </div>
@@ -177,6 +178,16 @@ function ToolChip({
     </span>
   );
 }
+
+/**
+ * 같은 말인가 — **공백만 다른 것은 같은 말이다.**
+ *
+ * 칩 제목과 머리줄이 겹치는지 보는 데만 쓴다. 코어의 머리줄과 화면의 라벨은 서로
+ * 모르는 자리에서 쓰여 한쪽에 여백이 하나 더 들 수 있고, 그 하나로 접수줄이 다시
+ * 서면 규칙이 있으나 마나다.
+ */
+const sameWording = (a: string, b: string) =>
+  a.trim().replace(/\s+/gu, " ") === b.trim().replace(/\s+/gu, " ");
 
 /**
  * 칩을 펼친 속 — **코어가 낸 항목을 그대로 세운다.**
@@ -187,13 +198,19 @@ function ToolChip({
  *
  * 입력(JSON)은 더 이상 그리지 않는다 — 감독이 읽을 것이 아니라 디버깅용이었고,
  * 상세가 정돈된 뒤로는 잡음이다.
+ *
+ * **머리줄은 칩이 이미 말한 이름을 되풀이하지 않는다** — 바로 위 버튼에 「등번호」가
+ * 서 있는데 펼친 속 첫 줄이 또 「등번호」면 접수증 두 장이다. 코어가 내는 `head`는
+ * 프롬프트의 장부 줄도 쓰므로 코어를 고치지 않고 화면이 안 그리는 것으로 끝낸다.
+ * 단 **항목이 없으면 머리줄이 남는다** — 그것까지 지우면 펼친 칸이 비어 버린다.
  */
-function ToolDetail({ call }: { call: ToolCallRecord }) {
+function ToolDetail({ call, label }: { call: ToolCallRecord; label: string }) {
   const brief = call.brief;
   if (!brief) return <div className="tool-detail-summary">{call.summary}</div>;
+  const echoesChip = brief.items.length > 0 && sameWording(brief.head, label);
   return (
     <>
-      <div className="tool-brief-head">{brief.head}</div>
+      {!echoesChip && <div className="tool-brief-head">{brief.head}</div>}
       {brief.items.length > 0 && (
         <div className="tool-lines">
           {brief.items.map((item, i) => (
@@ -233,6 +250,32 @@ function BookingCard({ card }: { card: CardMark }) {
       <span className="booking-player">{card.player}</span>
       <span className="booking-kind">{label}</span>
       <span className="booking-team">{card.team}</span>
+    </div>
+  );
+}
+
+/**
+ * 사건 카드 — **넘긴 시간이 남긴 사실 하나에 카드 하나** (design-system.md §6).
+ *
+ * 시간을 넘기면 그 사이 벌어진 일이 여럿 온다(부상·추첨·이적 관심·경기일). 그것들을
+ * 한 문단으로 이어 붙이면 화면은 도로 쪼갤 수 없고, 여덟 줄짜리 지문 하나가 되어
+ * 어디까지가 한 사건인지 눈이 짚지 못한다. 코어가 배열로 내므로(`ChatTurn.events`)
+ * 화면은 원소 하나를 줄 하나로 세운다.
+ *
+ * 종류는 코어의 것이고 **꼬리표와 픽토그램은 화면의 어휘**다
+ * (`tick-event-display.ts`) — 레일의 톤은 CSS가 `data-kind`로 고른다.
+ */
+function TickEventCard({ event }: { event: TickEvent }) {
+  const prose = useProseNames();
+  const { label, Icon } = tickEventLook(event.kind);
+  return (
+    <div className="tick-event" data-kind={event.kind} data-testid="tick-event">
+      <span className="te-icon" aria-hidden>
+        <Icon size={15} />
+      </span>
+      <span className="te-tag">{label}</span>
+      {/* 사건 문장의 이름도 손잡이다 — 부상 소식을 읽은 자리에서 그 선수를 열 수 있어야 한다 */}
+      <span className="te-text">{prose(event.text, "te")}</span>
     </div>
   );
 }
@@ -568,6 +611,28 @@ export function ChatTurnView({
       data-testid="model-turn"
       {...press}
     >
+      {/**
+       * 사건 카드는 **턴 맨 위, 장면 스탬프보다도 앞이다** — 돌아온 감독이 먼저
+       * 읽을 것은 그 사이 벌어진 일이다. 보고서·임무 보고가 턴 끝에 서는 것과
+       * 대칭이고, 이유도 반대다: 서류는 대화가 "이런 게 왔습니다" 한 뒤에 놓이지만
+       * 사건은 그 대화의 전제다.
+       *
+       * 스탬프 아래로 내리지 않는 이유는 **시간의 방향**이다. 스탬프는 장면이 열리는
+       * 시각이고 사건은 거기 닿기까지의 구간에서 벌어졌다 — 사실이 먼저, 도착한
+       * 시각이 그다음이다. 스탬프는 머리글이 아니라 장면과 장면 사이의 경계선이라
+       * (`.scene-stamp`) 턴 끝에 서도 홀로 뜨지 않는다: 뒤따르는 장면으로 이어진다.
+       *
+       * ⚠️ **`pieces` 밖이다.** 본문이 빈 턴(대본이 시점 헤더만 내는 「시간만 흐른
+       * 턴」)에서는 `lines`가 비고 `pieces`가 스탬프뿐인데, 카드를 그 안에 끼우면
+       * 그때 함께 사라진다. 카드는 장면이 있든 없든 사실이므로 장면과 무관하게 선다.
+       */}
+      {turn.events && turn.events.length > 0 && (
+        <div className="tick-events">
+          {turn.events.map((event, i) => (
+            <TickEventCard event={event} key={i} />
+          ))}
+        </div>
+      )}
       {pieces.map((piece, i) => {
         if (!piece.mark) {
           return (

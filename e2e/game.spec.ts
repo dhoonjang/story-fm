@@ -184,6 +184,19 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   // 시계 이동은 스킬이 아니라 코어의 처리 결과다 — **칩으로 세우지 않는다**.
   // 시간이 흘렀다는 증거는 위의 phase(=matchday)이고, 칩은 감독이 부른 것만 선다
   await expect(page.getByTestId("tool-시간 경과")).toHaveCount(0);
+  /**
+   * 그 사이 벌어진 일은 **사건 카드**로 선다 (overview.md §2 · design-system.md §6).
+   * 경기일에 닿은 tick은 「경기일 — …」을 반드시 밀므로 이 자리에 카드가 없다는 것은
+   * 코어→에이전트→화면 어딘가에서 배열이 한 문자열로 접혔다는 뜻이다.
+   */
+  await expect(page.getByTestId("tick-event").first()).toBeVisible();
+  /*
+   * 칩으로 서지 않는 대신 **사건 카드**로 선다 — 넘긴 시간이 남긴 사실 하나에
+   * 카드 하나다(design-system.md §6). 이 턴들은 본문이 비어 있다(대본이 시점
+   * 헤더만 낸다) — 그래도 카드는 서야 하고, 그것이 이 자리에서 재는 것이다.
+   * 경기일에 닿은 턴은 적어도 「경기일 — …」 하나를 싣는다(tick.ts `stopped: "matchday"`).
+   */
+  await expect(page.getByTestId("tick-event").first()).toBeVisible();
 
   /**
    * ── 킥오프는 **세 걸음**이다 ──────────────────────────
