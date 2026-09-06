@@ -236,6 +236,12 @@
 - 높이: 상단 띠 52(480 아래 44) · 스코어보드 64(700 아래 56) · 표 행 36(순위표 32) · 칩 24 ·
   버튼 36(게이트 40, 480 아래 44) · 입력 최소 52 · 아이콘 칸 28(터치 40) ·
   온보딩 리그 행 최소 56.
+- 경기장은 **실물 비율 하나**다 — 105:68(FIFA 권장 규격). 눕힌 판세 격자가 `--pitch-ratio`,
+  세워 둔 전술판이 `--pitch-ratio-portrait`를 읽고, 코어 쪽 짝은 `PITCH_ASPECT`
+  (`packages/domain/src/tactics.ts`)다. 판 위 좌표는 백분율이라 **판의 비율이 곧 선수
+  사이의 거리**다 — 눕힌 판에서는 측면이 실제보다 멀고 앞뒤가 가까워진다. 늘어난 세로는
+  폭 상한으로 받는다: 판세 격자 45dvh · 한 열 전술판 70dvh. 비율을 다시 눕혀서 푸는 것이
+  아니다.
 - 화면 눈금은 480·700·1024·1200(+세로 900) 넷뿐(`breakpoints.css`). 열 접힘 순서는
   `responsive.css` 한 곳: 스쿼드(나이·지위 → 평점 → 적응 → 체력), 순위표(득·실 → 다음 →
   예상 → 폼). 말줄임이 없으므로 순서가 규칙이다.
@@ -344,6 +350,9 @@
 - `--club-wash`·`--role-*`처럼 `var(--club*)`를 참조하는 토큰은 주입 요소에서 선언한다.
 - 문턱 숫자(평점 6.0/7.0/8.0 · OVR 60/70/78 · 체력 밴드)는 코어에만 있다. 화면 CSS·TSX에
   숫자 리터럴로 서지 않는다.
+- 경기장을 그리는 판은 `--pitch-ratio`·`--pitch-ratio-portrait` 밖의 비율을 갖지 않는다.
+  화면이 재는 간격(`MARKER_GAP`·`CHIP_SIZE`)도 같은 비율에서 되짚는다 — 한쪽만 바꾸면
+  코어가 계산한 간격과 눈으로 재는 간격이 어긋난다.
 
 ## 코드 위치
 
@@ -354,6 +363,7 @@
 | 서체 선언 · 폴백 메트릭                         | `apps/web/app/styles/fonts.css` · `apps/web/public/fonts/` |
 | 공용 조작 요소 (버튼·탭·세그먼트·시트)          | `apps/web/app/styles/shared.css`                           |
 | 열 접힘 순서                                    | `apps/web/app/styles/responsive.css`                       |
+| 경기장 비율 · 판 위 간격                        | `packages/domain/src/tactics.ts`                           |
 | 구단 색 (카탈로그 `colours`)                    | `packages/engine/src/data/club-colours.ts`                 |
 | 문장 · `clubTonesOf` · `flankTone`              | `packages/domain/src/crest.ts`                             |
 | `formatScore` · `formatRating` · `formatPounds` | `packages/domain/src/money.ts`                             |
