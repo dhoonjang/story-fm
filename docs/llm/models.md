@@ -5,7 +5,8 @@
 **`config/llm.yml` 하나**가 갖는다 — 모델을 바꾸는 데 코드 diff가 필요 없다.
 
 누가 무엇을 하는지는 [agents.md](./agents.md), 모델에게 무엇을 어떻게 말하는지는
-[prompts.md](./prompts.md).
+[prompts.md](./prompts.md), 한 턴이 어댑터를 지나 코어에 닿는 순서는
+[pipeline.md](./pipeline.md).
 
 ## 1. 설정 파일 (`config/llm.yml`)
 

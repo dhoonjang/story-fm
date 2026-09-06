@@ -37,22 +37,24 @@
 
 문서 폴더가 곧 이 층이다.
 
-```
-           감독 (자연어)                      화면 (읽기 전용 장부)
-                │                                      ▲
-                ▼                                      │
-   ┌────────────────────────┐                          │
-   │  LLM  docs/llm/        │  의도를 명령으로, 결과를 서사로
-   │  모델 · 에이전트 · 프롬프트 │  ── 상태를 직접 바꾸지 못한다
-   └───────────┬────────────┘
-               │ 도구 호출 (Zod 검증)
-               ▼
-   ┌────────────────────────┐         ┌────────────────────────┐
-   │ 시뮬레이션 docs/simulation/│ ◀────▶ │   데이터  docs/data/     │
-   │ 경기 · 시즌 · 이적 ·      │  읽고   │ 선수 · 팀 · 대회 · 인물   │
-   │ 재정 · 커리어            │  쓴다   │ 게임 상태(세이브)         │
-   └────────────────────────┘         └────────────────────────┘
-             결정적 순수 함수                  카탈로그 + 세이브
+```mermaid
+flowchart TB
+  M["감독 (자연어)"]
+  UI["화면 (읽기 전용 장부)"]
+  subgraph LLM["LLM — docs/llm/ · 모델 · 에이전트 · 프롬프트"]
+    L["의도를 명령으로, 결과를 서사로<br/>상태를 직접 바꾸지 못한다"]
+  end
+  subgraph SIM["시뮬레이션 — docs/simulation/"]
+    S["경기 · 시즌 · 이적 · 재정 · 커리어<br/>결정적 순수 함수"]
+  end
+  subgraph DATA["데이터 — docs/data/"]
+    D["선수 · 팀 · 대회 · 인물 · 게임 상태(세이브)<br/>카탈로그 + 세이브"]
+  end
+  M --> L
+  L -->|"도구 호출 (Zod 검증)"| S
+  S <-->|읽고 쓴다| D
+  D -->|파생 뷰| UI
+  L -->|장면| UI
 ```
 
 - **데이터**는 _무엇이 존재하는가_ — 선수·팀·대회·인물, 그리고 그것들이 세이브에
@@ -119,16 +121,19 @@
 
 ## 2. 한 턴이 지나가는 길
 
-감독이 한마디 하면 이렇게 흐른다 — 이 경로가 이 게임의 전부다.
+감독이 한마디 하면 이렇게 흐른다 — 이 경로가 이 게임의 전부다. 입력이 어떻게
+조립되고 출력이 어떻게 파싱되어 코어에 닿는지는 [llm/pipeline.md](llm/pipeline.md)가
+코드 순서 그대로 그린다.
 
-```
-감독 발화
-  → GM이 의도를 읽고 도구를 고른다            docs/llm/agents.md
-  → Zod 검증 → 코어가 상태를 바꾼다            docs/data/game-state.md
-  → 바뀐 상태로 시뮬레이션이 굴러간다           docs/simulation/
-  → 코어가 결과를 사실로 넘긴다 (앵커·사실 카드)
-  → GM이 그것을 장면으로 쓴다                  docs/llm/prompts.md
-  → 화면은 장부에서 파생된 것만 보여준다
+```mermaid
+flowchart LR
+  A["감독 발화"] --> B["GM이 의도를 읽고<br/>도구를 고른다<br/>(llm/agents.md)"]
+  B -->|"tool call"| C["Zod 검증 →<br/>코어가 상태를 바꾼다<br/>(data/game-state.md)"]
+  C --> D["바뀐 상태로<br/>시뮬레이션이 굴러간다<br/>(simulation/)"]
+  D --> E["코어가 결과를 사실로 넘긴다<br/>앵커 · 사실 카드"]
+  E -->|"tool result"| F["GM이 그것을<br/>장면으로 쓴다<br/>(llm/prompts.md)"]
+  F --> G["화면은 장부에서<br/>파생된 것만 보여준다"]
+  C -.->|"파생 뷰"| G
 ```
 
 **판정이 필요한 자리에서는 코어와 LLM이 일을 나눈다.** 코어가 앵커(가능한 범위)를
@@ -165,12 +170,13 @@
 게임은 **7월 1일(여름 이적창 개장)**에 시작한다. 선수단 소집은 7월 둘째 월요일,
 개막은 8월 중순 — 프리시즌 동안 영입·훈련·시즌 계획이 선수단보다 먼저 움직인다.
 
-```
-온보딩 (팀 선택 + 감독 캐릭터 생성)          → simulation/career.md
- → 일상: 채팅 지시 ↔ 시간 진행(tick)         → simulation/season.md
- → 경기일: 패킷 → 구간 진행 → 검증 → 반영     → simulation/match.md
- → 시즌 종료: 보드 평가 · 전환 · 승강          → simulation/season.md
- → 다음 시즌 (멀티시즌)
+```mermaid
+flowchart LR
+  O["온보딩<br/>팀 선택 + 감독 캐릭터 생성<br/>(career.md §1)"] --> P["일상<br/>채팅 지시 ↔ 시간 진행(tick)<br/>(season.md §5)"]
+  P -->|경기일| Q["경기<br/>패킷 → 구간 진행 → 검증 → 반영<br/>(match.md)"]
+  Q --> P
+  P -->|시즌 마지막 tick| R["시즌 종료<br/>보드 평가 · 전환 · 승강<br/>(season.md §6)"]
+  R -->|다음 시즌| P
 ```
 
 **tick(하루)이 세계를 굴린다** — 훈련·회복·성장·부상, AI 팀의 경기·이적·재계약·
@@ -319,22 +325,23 @@
 
 ## 문서 지도
 
-|                | 문서                                                           | 다루는 것                                             |
-| -------------- | -------------------------------------------------------------- | ----------------------------------------------------- |
-| **데이터**     | [data/game-state.md](data/game-state.md)                       | 2-레이어 · 엔티티와 관계 · 파생 · 세이브 호환         |
-|                | [data/player.md](data/player.md)                               | 능력치 16축 · 역할 · 폼 · 체력 · 성장 · 적응도 · 안개 |
-|                | [data/team.md](data/team.md)                                   | 구단 체급 · 프로필 · 1·2군과 등록 명단 · 팀의 종류    |
-|                | [data/competition.md](data/competition.md)                     | 리그 · 국내 컵 · 유럽 대항전 · 승강의 규정            |
-|                | [data/people.md](data/people.md)                               | 페르소나 · 화자 규칙 · 기자회견 · 심경                |
-|                | [data/sources.md](data/sources.md)                             | 선수·팀 데이터의 출처와 라이선스 부채                 |
-| **시뮬레이션** | [simulation/match.md](simulation/match.md)                     | 전력 패킷 · 점유 · xg 시뮬 · 상성 · 연장 · 평점       |
-|                | [simulation/season.md](simulation/season.md)                   | 달력 편성 · tick · 훈련 계획 · 시즌 전환              |
-|                | [simulation/transfer.md](simulation/transfer.md)               | 협상 · 설득 · 메디컬 · AI 시장 · 주급                 |
-|                | [simulation/finance.md](simulation/finance.md)                 | 수입·지출 · 상각 · PSR · 강등의 타격                  |
-|                | [simulation/career.md](simulation/career.md)                   | 감독 능력치 · 평판 · 보드 · 트로피                    |
-|                | [simulation/balance-harness.md](simulation/balance-harness.md) | 밸런스 하네스 — 무엇을 재고 어느 대역을 지키는가      |
-| **LLM**        | [llm/models.md](llm/models.md)                                 | 에이전트별 모델 설정 · 어댑터 · 토큰 예산             |
-|                | [llm/agents.md](llm/agents.md)                                 | GM · 중계 · 결산 라터 · 입력 3층                      |
-|                | [llm/prompts.md](llm/prompts.md)                               | 프롬프트 원칙 · 입력의 해부 · 출력 문법 · 도구 표면   |
+|                | 문서                                                           | 다루는 것                                                                |
+| -------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **데이터**     | [data/game-state.md](data/game-state.md)                       | 2-레이어 · 엔티티와 관계 · 파생 · 세이브 호환                            |
+|                | [data/player.md](data/player.md)                               | 능력치 16축 · 역할 · 폼 · 체력 · 성장 · 적응도 · 안개                    |
+|                | [data/team.md](data/team.md)                                   | 구단 체급 · 프로필 · 1·2군과 등록 명단 · 팀의 종류                       |
+|                | [data/competition.md](data/competition.md)                     | 리그 · 국내 컵 · 유럽 대항전 · 승강의 규정                               |
+|                | [data/people.md](data/people.md)                               | 페르소나 · 화자 규칙 · 기자회견 · 심경                                   |
+|                | [data/sources.md](data/sources.md)                             | 선수·팀 데이터의 출처와 라이선스 부채                                    |
+| **시뮬레이션** | [simulation/match.md](simulation/match.md)                     | 전력 패킷 · 점유 · xg 시뮬 · 상성 · 연장 · 평점                          |
+|                | [simulation/season.md](simulation/season.md)                   | 달력 편성 · tick · 훈련 계획 · 시즌 전환                                 |
+|                | [simulation/transfer.md](simulation/transfer.md)               | 협상 · 설득 · 메디컬 · AI 시장 · 주급                                    |
+|                | [simulation/finance.md](simulation/finance.md)                 | 수입·지출 · 상각 · PSR · 강등의 타격                                     |
+|                | [simulation/career.md](simulation/career.md)                   | 감독 능력치 · 평판 · 보드 · 트로피                                       |
+|                | [simulation/balance-harness.md](simulation/balance-harness.md) | 밸런스 하네스 — 무엇을 재고 어느 대역을 지키는가                         |
+| **LLM**        | [llm/pipeline.md](llm/pipeline.md)                             | 한 턴의 파이프라인 — 입력 조립 · 출력 파싱 · 도구 세 겹 · 실패 (mermaid) |
+|                | [llm/agents.md](llm/agents.md)                                 | 열 에이전트의 계약 · 결산과 교섭 · 입력 층 · 스냅샷 · 조회               |
+|                | [llm/prompts.md](llm/prompts.md)                               | 프롬프트 원칙 · 입력의 해부 · 출력 문법 · 도구 표면                      |
+|                | [llm/models.md](llm/models.md)                                 | 에이전트별 모델 설정 · 어댑터 · 실패 종류 · 토큰 예산                    |
 
 > 비전과 개발 규약은 저장소 루트의 [AGENTS.md](../AGENTS.md).
