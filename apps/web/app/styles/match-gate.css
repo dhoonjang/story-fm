@@ -1,0 +1,223 @@
+/**
+ * ── 킥오프 게이트 — 매치데이 프로그램 (match.md §8) ─────────────────────
+ *
+ * 경기의 문. 종료 카드와 한 쌍이라 같은 무게로 화면을 덮는다. 종료 카드의 틀은
+ * `shell.css`의 `.fulltime*`이고, 그 안을 채우는 리포트는 `match-report.css`다.
+ *
+ * ⚠️ 이 파일은 `globals.css`에서 **`responsive.css`보다 먼저** 불린다 — 700 아래의
+ * 바닥 시트가 여기 값을 덮는 쪽이지 그 반대가 아니다. 그래서 이 파일에는 좁은
+ * 화면의 규칙이 없다.
+ */
+.kickoff-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-6);
+  background: var(--scrim);
+  /* 종료 카드와 같은 등장 — 키프레임은 shell.css가 갖는다 (한 쌍이라 한 벌이다) */
+  animation: fulltime-in 160ms var(--ease-panel) both;
+}
+/**
+ * 한 장에 오늘의 판이 통째로 든다 — 데이트라인 · 대진 · 팀시트 두 열 · 감독 노트 ·
+ * 입장. 팀시트가 두 열이라 폭은 종료 카드에 준하고, 노트가 길어지는 경기가 있어
+ * 높이는 화면에 맞춰 잘린다.
+ *
+ * **스크롤하는 것은 읽는 부분(`.kg-body`)뿐이고 주 버튼은 그 밖에 선다** — 버튼이
+ * 스크롤 안에 있으면 `autoFocus`가 카드를 끝까지 밀어 내려, 열리는 순간 감독이 보는
+ * 것이 대진이 아니라 버튼이 된다.
+ */
+.kickoff-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  width: min(640px, 100%);
+  max-height: calc(100dvh - var(--sp-6) * 2);
+  padding: var(--sp-6);
+  background: var(--pop);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+}
+.kg-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  /* flex 자식은 내용보다 작아지지 않는다 — 0을 풀어야 여기서 잘린다 */
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* 대회 · 단계 · 경기장 · 날짜 — 없는 칸은 컴포넌트가 빼고 온다 */
+.kg-dateline {
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+/**
+ * 대진 — **홈이 왼쪽, 원정이 오른쪽.** 스코어보드·득점과 좌우가 늘 같아야 해서
+ * 우리 편이 어느 쪽인지로 자리가 바뀌지 않는다 (design-system §2 충돌 규칙 4).
+ * 우리 열만 구단 워시로 물든다 — 카드가 `--pop` 표면 위라 `-pop` 쪽 값이다.
+ */
+.kg-fixture {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+}
+.kg-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-3);
+  border-radius: var(--r-sm);
+  text-align: center;
+}
+.kg-side.ours {
+  background: var(--club-wash-pop);
+}
+.kg-club {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  line-height: var(--lh-ui);
+  /* 한국어는 어절로 끊는다 — 없으면 "맨체스터 유나 / 이티드"가 된다 */
+  word-break: keep-all;
+}
+.kg-side.theirs .kg-club {
+  color: var(--text-2);
+  font-weight: 600;
+}
+.kg-side-foot {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.06em;
+}
+/* 견줄 숫자는 XI 평균 하나뿐이다 — 팀시트에는 수치가 서지 않는다 (match.md §8) */
+.kg-rating b {
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+
+/**
+ * 팀시트 접힘 손잡이 — 700 아래에서만 선다. 넓은 화면에서는 두 열이 늘 펼쳐져
+ * 있으므로 손잡이가 걷힌다 (`responsive.css`가 그 아래를 갖는다).
+ */
+.kg-xi-toggle,
+.kg-xi-summary {
+  display: none;
+}
+
+/**
+ * 팀시트 — 두 열, 각 1–11. 한 줄은 등번호 · 포지션 · 이름뿐이다.
+ * 열 머리는 팀 이름 하나이고, 그 옆의 3px 레일이 구단이다 (design-system §2).
+ */
+.kg-sheets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4);
+}
+.kg-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.kg-sheet-head {
+  padding-left: var(--sp-2);
+  border-left: 3px solid var(--club-hi);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: var(--lh-table);
+  word-break: keep-all;
+}
+.kg-sheet.theirs .kg-sheet-head {
+  border-left-color: var(--opp-hi);
+  color: var(--text-2);
+}
+.kg-xi-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  list-style: none;
+}
+.kg-line {
+  display: grid;
+  grid-template-columns: 20px 24px 1fr;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-md);
+  line-height: var(--lh-table);
+}
+.kg-no {
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  text-align: right;
+}
+.kg-pos {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.06em;
+}
+.kg-player {
+  font-weight: 500;
+  word-break: keep-all;
+}
+
+/**
+ * 감독 노트 — 이 경기에 걸어 둔 것. 이름과 값 두 열이고, 한 이름이 값을 여럿
+ * 들면(공략 중 · 전술 노트) 값만 아래로 쌓인다.
+ */
+.kg-notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.kg-label {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.kg-note-rows {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--sp-1) var(--sp-3);
+}
+.kg-note-rows dt {
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-table);
+  word-break: keep-all;
+}
+.kg-note-rows dd {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-table);
+  word-break: keep-all;
+}
+
+/* 경기장 입장 — 게이트의 버튼 높이는 40 (design-system §4). 카드가 잘리는 높이에서도
+   눌리지 않게 `flex: none`이다 — 문이 얇아지면 손잡이로 안 읽힌다 */
+.kickoff-card .primary-btn {
+  flex: none;
+  height: 40px;
+  padding: 0 var(--sp-5);
+}
+
+/* 모션 값은 전부 0 — `.fulltime`의 같은 규칙은 shell.css가 갖는다 (design-system §5) */
+@media (prefers-reduced-motion: reduce) {
+  .kickoff-gate {
+    animation: none;
+  }
+}

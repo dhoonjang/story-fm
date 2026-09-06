@@ -1,11 +1,13 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useState, type CSSProperties } from "react";
 import type { MatchReportView } from "@story-fm/engine";
-import { formatRating, formatScore } from "@story-fm/domain";
+import { flankTone, formatRating, formatScore } from "@story-fm/domain";
 import { PlayerName } from "@/components/player-card";
-import { IconArrowUp } from "@/components/icons";
+import { Crest, cachedCrest, clubStyle, oppStyle } from "@/components/crest";
+import { IconArrowUp, IconChevron, IconChevronUp } from "@/components/icons";
 import { humanDate } from "@/lib/dateline";
+import { outcomeWordOf, type MatchHeadFacts } from "@/lib/match-head";
 
 /**
  * ── 경기 리포트 — 끝난 경기 한 장 (match.md §8) ─────────────
@@ -13,6 +15,10 @@ import { humanDate } from "@/lib/dateline";
  * **읽는 곳이 둘인데 그리는 곳은 하나다**: 달력 상세의 접이식과 종료 카드.
  * 둘이 각자 접으면 같은 경기가 두 가지로 보인다. 만드는 곳도 하나다 —
  * 코어의 `buildMatchReport`가 접어 준 것을 여기서는 **배치만** 한다.
+ *
+ * 위에서 아래로가 곧 감독의 질문 순서다: 몇 대 몇으로 끝났나(머리) → 무슨 일이
+ * 있었나(주요 사건) → 어느 쪽이 경기를 쥐었나(팀 스탯) → 누가 잘했나(선수 표) →
+ * 이 결과가 표를 어떻게 옮겼나(순위 변화).
  */
 
 type TeamStat = MatchReportView["home"];
@@ -55,8 +61,23 @@ function useMatchReport(gameId: string, matchId: string) {
   return { report, error };
 }
 
-/** 리포트를 열어 그리는 자리 — 받아오는 동안에도 골격이 서 있다 */
-export function MatchReportPanel({ gameId, matchId }: { gameId: string; matchId: string }) {
+/**
+ * 리포트를 열어 그리는 자리 — **기다리는 동안에도 머리는 서 있다.**
+ *
+ * `head`는 요청 없이 이미 화면에 와 있는 사실이다(접힌 경기 머리 + 턴의 사건 표식 —
+ * `matchHeadFacts`). 종료 카드가 그것을 넘겨 주므로 휘슬 뒤 첫 화면에 스코어와 골이
+ * 곧바로 서고, 분필 점 셋은 **표 자리에만** 돈다 (match.md §8). 달력 상세처럼 그 사실을
+ * 쥐고 있지 않은 자리는 넘기지 않는다.
+ */
+export function MatchReportPanel({
+  gameId,
+  matchId,
+  head = null,
+}: {
+  gameId: string;
+  matchId: string;
+  head?: MatchHeadFacts | null;
+}) {
   const { report, error } = useMatchReport(gameId, matchId);
   if (error !== null) {
     return (
@@ -67,9 +88,14 @@ export function MatchReportPanel({ gameId, matchId }: { gameId: string; matchId:
   }
   if (report === null) {
     return (
-      <div className="mr-blank" role="status" aria-label="경기 리포트 불러오는 중">
-        <span className="skel mr-skel" aria-hidden />
-        <span className="skel mr-skel short" aria-hidden />
+      <div className="mr" style={head ? reportTones(head) : undefined}>
+        {head && <ReportHead facts={head} rows={goalIndexOf(head.goals)} />}
+        {/* 아직 안 온 표 자리에만 분필 점 셋이 돈다 — 스켈레톤 펄스는 없다 (design-system §5) */}
+        <div className="thinking" role="status" aria-label="경기 리포트 불러오는 중">
+          <i />
+          <i />
+          <i />
+        </div>
       </div>
     );
   }
@@ -109,6 +135,194 @@ function kickOutcome(kick: KickRow): string {
   if (kick.outcome === "scored") return "성공";
   if (kick.outcome === "saved") return kick.keeper ? `${kick.keeper} 선방` : "선방";
   return "실축";
+}
+
+/** 교체는 「나간 사람 – 들어온 사람」 — 화살표 글리프 대신 허용 글리프 en dash */
+function actorsOf(event: EventRow): string {
+  if (event.type !== "substitution") return event.actors[0] ?? "";
+  return [event.actors[0], event.actors[1]].filter(Boolean).join(" – ");
+}
+
+// ── 머리와 주요 사건 — 리포트 앞뒤가 같은 자리 ──────────────
+
+/**
+ * 머리가 읽는 사실 — 골 목록만 뺀 `MatchHeadFacts`다(목차가 따로 접는다).
+ * 리포트도 `headFactsOf`가 같은 꼴로 접어 주므로 **머리를 그리는 코드는 하나다**:
+ * 두 벌로 그리면 리포트 도착 전후로 같은 자리가 두 모양이 된다 (match.md §8).
+ */
+type HeadFacts = Omit<MatchHeadFacts, "goals">;
+
+/** 목차 한 줄 — 분 · 갈래 · 이름. 원인 태그·xG·도움은 아래 타임라인의 몫이다 */
+interface IndexRow {
+  minute: number;
+  kind: EventRow["type"];
+  who: string;
+  ours: boolean | null;
+}
+
+/** 목차에 서는 갈래 — 골 · 경고 · 퇴장 · 교체. 나머지는 타임라인에만 선다 */
+const INDEX_KINDS = new Set<EventRow["type"]>(["goal", "yellow_card", "red_card", "substitution"]);
+
+/** 리포트의 목차 — 장부의 타임라인에서 갈래 넷만 고른다 (이미 분 순서다) */
+function timelineIndexOf(timeline: readonly EventRow[]): IndexRow[] {
+  return timeline
+    .filter((e) => INDEX_KINDS.has(e.type))
+    .map((e) => ({ minute: e.minute, kind: e.type, who: actorsOf(e), ours: e.ours }));
+}
+
+/** 리포트가 닿기 전의 목차 — 턴의 골 표식뿐이라 카드·교체는 도착 뒤에 붙는다 */
+function goalIndexOf(goals: MatchHeadFacts["goals"]): IndexRow[] {
+  return goals.map((g) => ({
+    minute: g.minute,
+    kind: "goal" as const,
+    who: g.scorer,
+    ours: g.ours,
+  }));
+}
+
+/**
+ * 리포트 → 머리의 사실. 스코어는 양 팀의 골이고 **승부차기는 꼬리표가 든다** —
+ * 스코어에 함께 넣으면 리포트가 닿는 순간 스코어 글자가 다시 그려진다.
+ */
+function headFactsOf(report: MatchReportView): HeadFacts {
+  return {
+    home: report.home,
+    away: report.away,
+    date: report.date,
+    score: {
+      home: report.home.goals,
+      away: report.away.goals,
+      penalties: report.penalties
+        ? { home: report.penalties.home, away: report.penalties.away }
+        : undefined,
+    },
+    outcome: report.outcome,
+  };
+}
+
+/**
+ * 이 리포트의 구단 토큰 한 벌 — **`.mr` 뿌리에 얹는다** (design-system §2 「주입」).
+ *
+ * 종료 카드가 설 때 `.app` 루트의 `--opp*`는 이미 지워져 있고(경기가 끝나면 상대가
+ * 없다), 달력 상세는 애초에 남의 경기도 연다. 머리에만 주입하면 팀 스탯 막대의
+ * 원정 쪽이 구단이 없을 때의 기본값으로 서서 같은 카드 안에서 두 자가 갈린다.
+ *
+ * 우리 팀이 `--club`, 상대가 `--opp`. 우리가 뛰지 않은 경기는 홈이 `--club` 자리에 선다.
+ */
+function reportTones(facts: HeadFacts): CSSProperties {
+  const homeIsClub = facts.home.ours || !facts.away.ours;
+  const ours = homeIsClub ? facts.home : facts.away;
+  const theirs = homeIsClub ? facts.away : facts.home;
+  return {
+    ...clubStyle(ours.colours, ours.id, ours.short),
+    ...oppStyle(theirs.colours, theirs.id, theirs.short),
+  };
+}
+
+/**
+ * 머리와 「주요 사건」 — **경기 화면의 스코어보드와 같은 해부**(match.md §8):
+ * 양 끝 구단 색 플랭크 6px · 문장 · 팀 이름 · 가운데 스코어 · 결과어.
+ */
+function ReportHead({
+  facts,
+  rows,
+  report = null,
+}: {
+  facts: HeadFacts;
+  rows: readonly IndexRow[];
+  /** 리포트가 닿은 뒤에만 서는 것 — 대회 이름 · 연장 · MOTM */
+  report?: MatchReportView | null;
+}) {
+  const homeCrest = cachedCrest(facts.home.id, facts.home.short, facts.home.colours);
+  const awayCrest = cachedCrest(facts.away.id, facts.away.short, facts.away.colours);
+  // 두 밑색의 대비가 모자라면 원정만 보조색으로 물러난다 (design-system §2 충돌 규칙 4)
+  const awaySteps = flankTone(homeCrest, awayCrest).away !== awayCrest.primary;
+  // 플랭크가 읽는 두 벌은 `.mr` 뿌리가 이미 세웠다 (`reportTones`)
+  const homeIsClub = facts.home.ours || !facts.away.ours;
+  const outcome = facts.outcome;
+  const pens = facts.score.penalties;
+  const motm = report?.motm ?? null;
+  const aet = report?.aet === true;
+  return (
+    <>
+      <header className="mr-head">
+        <span className="mr-label">
+          {report?.label}
+          <em>{humanDate(facts.date)}</em>
+        </span>
+        <div className="mr-scoreboard">
+          {/* 플랭크의 자리는 CSS, 색만 어느 쪽이 우리인지에 따라 여기서 */}
+          <i
+            className="mr-flank home"
+            style={{ background: `var(--${homeIsClub ? "club" : "opp"})` }}
+          />
+          <i
+            className="mr-flank away"
+            style={{
+              background: `var(--${homeIsClub ? "opp" : "club"}${awaySteps ? "-2" : ""})`,
+            }}
+          />
+          <span className="mr-sb-team">
+            <Crest
+              id={facts.home.id}
+              shortName={facts.home.short}
+              colours={facts.home.colours}
+              size={24}
+            />
+            {facts.home.name}
+          </span>
+          <span className="mr-sb-mid">
+            <b className="mr-sb-score fig">{formatScore(facts.score.home, facts.score.away)}</b>
+            {outcome !== null && (
+              <em className={`mr-sb-outcome o-${outcome}`}>{outcomeWordOf(outcome)}</em>
+            )}
+          </span>
+          <span className="mr-sb-team away">
+            {facts.away.name}
+            <Crest
+              id={facts.away.id}
+              shortName={facts.away.short}
+              colours={facts.away.colours}
+              size={24}
+            />
+          </span>
+        </div>
+        {(aet || pens !== undefined || motm !== null) && (
+          <div className="mr-marks">
+            {aet && <span className="mr-tag">연장</span>}
+            {pens !== undefined && (
+              <span className="mr-tag">
+                승부차기 <span className="fig">{formatScore(pens.home, pens.away)}</span>
+              </span>
+            )}
+            {motm !== null && (
+              <span className="mr-motm" data-testid="match-report-motm">
+                {/* 알약 안이 `inline-flex`라 칸 사이는 `gap`이 낸다 — 공백 노드가 아니다 */}
+                MOTM
+                <PlayerName id={motm.id} name={motm.name} />
+                <b>{formatRating(motm.rating, "match")}</b>
+              </span>
+            )}
+          </div>
+        )}
+      </header>
+
+      {rows.length > 0 && (
+        <section className="mr-section">
+          <h4>주요 사건</h4>
+          <div className="mr-index" data-testid="match-report-index">
+            {rows.map((row, i) => (
+              <span className={`mr-idx k-${row.kind}${row.ours === true ? " ours" : ""}`} key={i}>
+                <i>{row.minute}′</i>
+                <em>{EVENT_KO[row.kind] ?? row.kind}</em>
+                {row.who}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+    </>
+  );
 }
 
 // ── 팀 스탯 대조 ────────────────────────────────────────────
@@ -156,21 +370,24 @@ function TeamStats({ report }: { report: MatchReportView }) {
     v === null ? "—" : row.fmt ? row.fmt(v) : String(v);
 
   return (
-    <div className="mr-stats" data-testid="match-report-stats">
-      {rows.map(({ row, home, away }) => {
-        const pct = shareOf(home ?? 0, away ?? 0);
-        return (
-          <div className="mr-stat" key={row.label}>
-            <b className={report.home.ours ? "ours" : undefined}>{fmt(row, home)}</b>
-            <span className="mr-stat-label">{row.label}</span>
-            <b className={report.away.ours ? "ours" : undefined}>{fmt(row, away)}</b>
-            <span className="mr-stat-bar" aria-hidden>
-              {pct !== null && <i style={{ width: `${pct}%` }} />}
-            </span>
-          </div>
-        );
-      })}
-    </div>
+    <section className="mr-section">
+      <h4>팀 스탯</h4>
+      <div className="mr-stats" data-testid="match-report-stats">
+        {rows.map(({ row, home, away }) => {
+          const pct = shareOf(home ?? 0, away ?? 0);
+          return (
+            <div className="mr-stat" key={row.label}>
+              <b className={report.home.ours ? "ours" : undefined}>{fmt(row, home)}</b>
+              <span className="mr-stat-label">{row.label}</span>
+              <b className={report.away.ours ? "ours" : undefined}>{fmt(row, away)}</b>
+              <span className="mr-stat-bar" aria-hidden>
+                {pct !== null && <i style={{ width: `${pct}%` }} />}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -186,11 +403,7 @@ function TimelineRow({ event }: { event: EventRow }) {
     );
   }
   const origin = event.origin === null ? "" : ORIGIN_KO[event.origin];
-  // 교체는 「나간 사람 – 들어온 사람」 — 화살표 글리프 대신 허용 글리프 en dash
-  const who =
-    event.type === "substitution"
-      ? [event.actors[0], event.actors[1]].filter(Boolean).join(" – ")
-      : (event.actors[0] ?? "");
+  const who = actorsOf(event);
   const assist = event.type === "goal" ? event.actors[1] : undefined;
   return (
     <div className={`mr-ev k-${event.type}${event.ours === true ? " ours" : ""}`}>
@@ -323,45 +536,48 @@ function PlayerTable({
   );
 }
 
+// ── 순위 변화 ──────────────────────────────────────────────
+
+/**
+ * 이 경기가 표를 옮긴 몫 — 「12위 → 9위」 (match.md §8). 리그전이 아니거나 우리
+ * 경기가 아니면 리포트에 실리지 않으므로(`null`) 절도 서지 않는다.
+ *
+ * 방향은 화살표 글리프가 아니라 꺾쇠 픽토그램과 색이 낸다 (design-system §3).
+ * 제자리면 두 값이 같으므로 한 번만 선다.
+ */
+function Standings({ standings }: { standings: MatchReportView["standings"] }) {
+  if (standings === null) return null;
+  const { competition, before, after } = standings;
+  // 순위는 작을수록 위다 — 숫자가 줄면 올라간 것
+  const move = after < before ? "up" : after > before ? "down" : "flat";
+  return (
+    <section className="mr-section" data-testid="match-report-standings">
+      <h4>순위 변화</h4>
+      <div className={`mr-standings m-${move}`}>
+        <span className="mr-st-comp">{competition}</span>
+        {move !== "flat" && (
+          <>
+            <span className="mr-st-from">{before}위</span>
+            <i className="mr-st-move" aria-hidden>
+              {move === "up" ? <IconChevronUp size={14} /> : <IconChevron size={14} />}
+            </i>
+          </>
+        )}
+        <span className="mr-st-to">{after}위</span>
+      </div>
+    </section>
+  );
+}
+
 // ── 리포트 한 장 ───────────────────────────────────────────
 
 export function MatchReport({ report }: { report: MatchReportView }) {
   const home = report.players.filter((p) => p.side === "home");
   const away = report.players.filter((p) => p.side === "away");
+  const facts = headFactsOf(report);
   return (
-    <div className="mr" data-testid="match-report">
-      <header className="mr-head">
-        <span className="mr-label">
-          {report.label}
-          <em>{humanDate(report.date)}</em>
-        </span>
-        <div className="mr-score">
-          <b className={report.home.ours ? "ours" : undefined}>{report.home.name}</b>
-          <span className="mr-score-num fig">
-            {formatScore(report.home.goals, report.away.goals)}
-          </span>
-          <b className={report.away.ours ? "ours" : undefined}>{report.away.name}</b>
-        </div>
-        <div className="mr-marks">
-          {report.aet && <span className="mr-tag">연장</span>}
-          {report.penalties && (
-            <span className="mr-tag">
-              승부차기{" "}
-              <span className="fig">
-                {formatScore(report.penalties.home, report.penalties.away)}
-              </span>
-            </span>
-          )}
-          {report.motm && (
-            <span className="mr-motm" data-testid="match-report-motm">
-              {/* 알약 안이 `inline-flex`라 칸 사이는 `gap`이 낸다 — 공백 노드가 아니다 */}
-              MOTM
-              <PlayerName id={report.motm.id} name={report.motm.name} />
-              <b>{formatRating(report.motm.rating, "match")}</b>
-            </span>
-          )}
-        </div>
-      </header>
+    <div className="mr" data-testid="match-report" style={reportTones(facts)}>
+      <ReportHead facts={facts} rows={timelineIndexOf(report.timeline)} report={report} />
 
       <TeamStats report={report} />
 
@@ -409,6 +625,8 @@ export function MatchReport({ report }: { report: MatchReportView }) {
           <PlayerTable team={report.away} players={away} motmId={report.motm?.id ?? null} />
         </section>
       )}
+
+      <Standings standings={report.standings} />
     </div>
   );
 }

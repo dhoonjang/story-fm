@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { OfficeViews } from "@story-fm/engine";
 import { scheduleRowOf, type CalRowIcon, type CalScheduleRow } from "@/lib/calendar-detail";
+import { ratingTone } from "@/lib/scout-report-display";
 import { humanDate } from "@/lib/dateline";
 import { MatchReportPanel } from "./match-report";
 import { IconChevron } from "../icons";
@@ -394,6 +395,20 @@ export function CalendarView({
                           {/* 스코어는 코어가 `formatScore`로 적어 보낸 값이다 — 라틴·숫자뿐이라 `.fig` */}
                           {mt.match.score && (
                             <span className="cal-fx-score fig">{mt.match.score}</span>
+                          )}
+                          {/**
+                           * 상대의 전력 한 숫자 (docs/data/team.md §2.2) — **남은 경기에만**.
+                           * 끝난 경기는 스코어가 이미 답이고, 좁은 칸에 둘을 함께 세우면
+                           * 어느 쪽이 결과인지 흐려진다. 우리 팀의 값은 모든 줄에서 같아
+                           * 세울 이유가 없으므로 상대만 선다.
+                           */}
+                          {!mt.match.score && mt.match.opponentStrength !== null && (
+                            <span
+                              className="cal-fx-str fig"
+                              data-rating={ratingTone(mt.match.opponentStrength)}
+                            >
+                              {mt.match.opponentStrength}
+                            </span>
                           )}
                         </div>
                       )}

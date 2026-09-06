@@ -251,6 +251,46 @@
   color: var(--text);
   font-weight: 700;
 }
+/* 굴러가는 경기 — 끝난 경기(밝은 700)와 아직인 경기(2층) 사이의 자리. 색은 주의색이
+   아니라 글자 1층이다: 옆 구장은 경고가 아니라 지금 벌어지는 사실이다 */
+.fixture .mid.live {
+  color: var(--text);
+  font-weight: 500;
+}
+/* 분 — 스코어 옆에 붙는 작은 시계. 이 숫자가 「진행 중」이라는 말을 대신한다 */
+.fixture .fx-min {
+  margin-left: 4px;
+  font-size: var(--fs-xs);
+  color: var(--warn);
+}
+/**
+ * 전력 숫자 — 이름과 스코어 사이. **읽는 값이라 테두리도 면도 없다**
+ * (design-system §1 「조작」). 색 넷은 강약만 접는다 — 경계는 코어(`ratingTier`)의 것이고
+ * 여기서 다시 자르면 같은 76이 두 색이 된다.
+ */
+.fixture .fx-str {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text);
+}
+.fixture .side.home .fx-str {
+  margin-left: 4px;
+}
+.fixture .side.away .fx-str {
+  margin-right: 4px;
+}
+.fixture .fx-str[data-rating="top"] {
+  color: var(--gold-soft);
+}
+.fixture .fx-str[data-rating="strong"] {
+  color: var(--accent-2);
+}
+.fixture .fx-str[data-rating="solid"] {
+  color: var(--silver);
+}
+.fixture .fx-str[data-rating="low"] {
+  color: var(--dim);
+}
 .fixture .wdl {
   margin-left: 5px;
   font-size: var(--fs-xs);

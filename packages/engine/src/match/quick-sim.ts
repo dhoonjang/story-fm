@@ -1,5 +1,6 @@
 import type {
   GamePlayer,
+  MatchRecord,
   Player,
   SetPieceRoutine,
   SetPieceTakers,
@@ -45,6 +46,7 @@ import {
   type LineupSlot,
 } from "@story-fm/sim";
 import { makeRng } from "../core/rng";
+import { derbyForMatch } from "../club/derby";
 
 /** 시뮬 입력 — 라인업은 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
 export interface SimSquad {
@@ -919,6 +921,36 @@ export function simulateExtraTime(
     homeExpectedGoals: sum("home", (shot) => shot.goalProbability),
     awayExpectedGoals: sum("away", (shot) => shot.goalProbability),
     playerStats: statLinesOf(sampled.shots, sampled.saves),
+  };
+}
+
+/**
+ * 간이 시뮬의 **난수 채널** — 부르는 자리가 둘이라 조립은 한 곳이다.
+ *
+ * 킥오프에 굴리는 라이브 스코어(`match-flow.ts`)와 그 경기를 실제로 장부에 적는
+ * 굴림(`core/tick.ts`의 `simulateOtherMatches`)이 이 함수를 함께 읽는다. 두 곳에서
+ * 각자 문자열을 이으면 45분에 1–0으로 보던 옆 경기가 종료 뒤 0–2로 적힌다
+ * (match.md §7 「같은 시각에 킥오프한 경기」).
+ */
+export function quickSimKeyOf(season: number, match: MatchRecord): string {
+  return `${season}:${match.competitionId ?? "friendly"}:${match.stage ?? "league"}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`;
+}
+
+/**
+ * 간이 시뮬에 넘기는 **경기가 갖고 있는 사실** — 중립 경기장과 더비.
+ *
+ * 채널과 같은 이유로 한 곳이다: 안 넘기면 결승의 명목상 홈이 홈 어드밴티지를 그대로
+ * 받고 리그의 더비가 카드·부상·판세에 닿지 않는데(match.md §7), 두 호출부 중 한
+ * 곳만 넘기면 라이브 스코어와 장부의 결과가 갈린다.
+ */
+export function quickSimOptionsOf(match: MatchRecord): {
+  neutral: boolean;
+  derby?: { name: string; heat: number };
+} {
+  const derby = derbyForMatch(match);
+  return {
+    neutral: match.neutral === true,
+    ...(derby ? { derby: { name: derby.name, heat: derby.heat } } : {}),
   };
 }
 

@@ -515,6 +515,19 @@ export interface PendingMatch {
    */
   lastSegment?: { events: import("@story-fm/domain").MatchEvent[]; stop: string };
   /**
+   * **우리와 같은 시각에 킥오프한 타 경기의 골** — 경기 중 라이브 스코어의 원본
+   * (match.md §7 「같은 시각에 킥오프한 경기」).
+   *
+   * 킥오프에 한 번 굴려(`startMatch`) 골의 분과 편만 남긴다. 매 턴 다시 굴리면 팀마다
+   * 라인업을 다시 짜야 해 진행 턴마다 수십 ms가 붙고, 화면이 값을 쥐면 뷰가 장부가
+   * 된다. 뷰는 우리 장부의 분 이하인 골만 세므로(`CompetitionMatchView.live`) 감독은
+   * 옆 구장의 **진행**만 보고 결과를 미리 알지 않는다. 옛 세이브엔 없다 (optional).
+   */
+  otherScores?: Array<{
+    matchId: string;
+    goals: Array<{ minute: number; side: MatchSide }>;
+  }>;
+  /**
    * **승부차기가 남았을 때만** — 장부는 `finished`지만 경기는 끝나지 않았다.
    *
    * 120분이 끝났는데 승부가 남은 감독의 경기에서만 선다(`advanceMatchTo`가 세운다).

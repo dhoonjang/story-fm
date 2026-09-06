@@ -1619,3 +1619,92 @@ describe("경기 전 상대 분석 (match.md §1.8)", () => {
     expect(buildOfficeViews(state).competitions.preview).toBeNull();
   });
 });
+
+/**
+ * 옆 구장 — **라이브 스코어와 장부에 적히는 결과는 같은 숫자여야 한다**
+ * (docs/simulation/match.md §7 「같은 시각에 킥오프한 경기」).
+ *
+ * 킥오프의 굴림(`startMatch`)과 종료 뒤의 굴림(`simulateOtherMatches`)이 서로 다른
+ * 함수 안에 있으므로, 난수 채널을 만드는 자리가 갈리는 순간 45분에 1–0으로 보던
+ * 경기가 0–2로 적힌다. 그 등식이 조용히 깨지는 것을 여기서 잡는다.
+ */
+describe("같은 시각 타 경기의 라이브 스코어 (match.md §7)", () => {
+  /**
+   * 우리 경기를 같은 대회의 다른 경기와 **같은 슬롯에 세운다.**
+   *
+   * 중계 슬롯 표는 라운드의 절반을 한 경기씩 흩어 두므로(토 12:30·17:30 …) 개막
+   * 라운드가 동시 킥오프를 갖는지는 시드 운이다. 여기서 재는 것은 슬롯 편성이 아니라
+   * **두 굴림이 같은 숫자를 내는가**이므로, 아직 결과가 없는(=우리 시각 이후의) 같은
+   * 대회 경기 하나에 우리 시각을 맞춰 그 상황을 확정한다.
+   */
+  function withConcurrent(): { state: GameState; other: string } {
+    const state = atMatchday(42, { afterPreseason: true });
+    const ours = state.matches.find(
+      (m) =>
+        !m.result &&
+        m.date === state.date &&
+        (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    );
+    if (!ours) throw new Error("오늘 우리 경기를 찾지 못했다");
+    /**
+     * 옆 구장은 **아직 안 굴려진 경기**를 옮겨 세운다. 오늘의 같은 대회 경기는 우리보다
+     * 먼저 킥오프해 이미 결과가 있으므로(킥오프 순서 — match.md §7) 그중에서 고르면
+     * 굴릴 것이 없다. 뒷 라운드의 경기를 오늘 우리 시각으로 옮기면 두 굴림이 같은
+     * 상태를 보고, 난수 채널은 라운드에서 나오므로(`quickSimKeyOf`) 그대로 유지된다.
+     */
+    const other = state.matches.find(
+      (m) => !m.result && m.competitionId === ours.competitionId && m.date !== state.date,
+    );
+    if (!other) throw new Error("옮겨 세울 같은 대회 경기가 없다");
+    other.date = ours.date;
+    other.time = ours.time;
+    return { state, other: other.id };
+  }
+
+  it("킥오프에 굴린 골 시각이 종료 뒤 장부의 결과와 같다", () => {
+    const { state, other } = withConcurrent();
+    let rolled: NonNullable<GameState["pendingMatch"]>["otherScores"] = [];
+    playMockMatch(state, (mid) => {
+      rolled = mid.pendingMatch?.otherScores ?? [];
+    });
+
+    // 전제 — 같은 슬롯에 세운 그 경기가 실제로 굴려졌다
+    expect(rolled.map((r) => r.matchId)).toContain(other);
+
+    for (const row of rolled) {
+      const result = state.matches.find((m) => m.id === row.matchId)?.result;
+      expect(result, `${row.matchId}가 종료 뒤에도 굴려지지 않았다`).toBeTruthy();
+      if (!result) continue;
+      const goalsOf = (side: "home" | "away") => row.goals.filter((g) => g.side === side).length;
+      expect([goalsOf("home"), goalsOf("away")]).toEqual([result.homeGoals, result.awayGoals]);
+      // 분까지 같아야 한다 — 스코어만 같고 분이 다르면 라이브가 엉뚱한 때에 오른다
+      expect([...row.goals.map((g) => g.minute)].sort((a, b) => a - b)).toEqual(
+        [...(result.goalMinutes ?? [])].sort((a, b) => a - b),
+      );
+    }
+  });
+
+  it("굴리는 것은 같은 대회·같은 날·같은 시각의 경기뿐이다", () => {
+    const { state } = withConcurrent();
+    expect(startMatch(state).ok).toBe(true);
+    const pending = state.pendingMatch!;
+    const ours = state.matches.find((m) => m.id === pending.matchId)!;
+    const rows = pending.otherScores ?? [];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      const match = state.matches.find((m) => m.id === row.matchId)!;
+      expect(match.competitionId).toBe(ours.competitionId);
+      expect(match.time).toBe(ours.time);
+      expect(match.date).toBe(ours.date);
+    }
+  });
+
+  it("대회가 없는 경기(프리시즌 친선)에는 옆 구장이 없다", () => {
+    const state = atMatchday();
+    expect(startMatch(state).ok).toBe(true);
+    const ours = state.matches.find((m) => m.id === state.pendingMatch!.matchId)!;
+    // 전제 — 프리시즌의 첫 경기일은 친선이다
+    expect(ours.competitionId).toBeNull();
+    expect(state.pendingMatch!.otherScores).toEqual([]);
+  });
+});

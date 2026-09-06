@@ -146,6 +146,28 @@
   font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
+/**
+ * 남은 경기 옆의 상대 전력 — 스코어가 설 자리에 대신 선다 (docs/data/team.md §2.2).
+ * 스코어처럼 굵게 세우지 않는다: 결과는 사실이고 이쪽은 난이도의 눈금이다.
+ * 색 넷은 강약만 접고, 문턱은 코어(`ratingTier`)가 갖는다.
+ */
+.cal-fx-str {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.cal-fx-str[data-rating="top"] {
+  color: var(--gold-soft);
+}
+.cal-fx-str[data-rating="strong"] {
+  color: var(--accent-2);
+}
+.cal-fx-str[data-rating="solid"] {
+  color: var(--silver);
+}
+.cal-fx-str[data-rating="low"] {
+  color: var(--dim);
+}
 /* 추첨 전 컵 라운드 — 아직 대진이 없는 자리.
    점선 테두리는 28px 높이에서 서너 조각으로 쪼개져 깨진 선처럼 보였다.
    선은 이어 두고 배경·색을 흐려 "확정 아님"을 말한다 */

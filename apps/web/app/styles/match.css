@@ -802,3 +802,95 @@
 .mp-point.theirs {
   border-left-color: var(--opp-hi);
 }
+
+/**
+ * ── 킥오프 의식 — 스코어보드가 내려오고, 걷힌다 ──────────────────────
+ *
+ * 「경기장 입장」 뒤 100ms를 두고 위에서 280ms 내려오고, 종료 카드의 「확인」 뒤에는
+ * 같은 길을 역순으로 올라간다 (ui/design-system.md §5 모션 5). 90분이 열리고 닫힌
+ * 것이 화면의 움직임으로 남는 자리는 여기 하나다.
+ *
+ * ⚠️ 280은 `game-screen.tsx`의 `KICKOFF_SLIDE_MS`와 같은 값이어야 한다 — 걷히는 동안
+ * 판을 화면에 붙들어 두는 시간이다. 틀은 `shell.css`의 `.match-headline`이 갖고,
+ * 여기서는 움직임만 얹는다(이 파일이 뒤에 불려 이 규칙이 이긴다).
+ * ⚠️ `--ease`는 시간이 들어 있어 `animation:`에 쓰면 지연으로 읽힌다 — 곡선만 든
+ * `--ease-panel`을 쓴다 (shell.css `:root`).
+ */
+.match-headline {
+  animation: kickoff-drop 280ms var(--ease-panel) 100ms both;
+}
+.match-headline.closing {
+  animation: kickoff-lift 280ms var(--ease-panel) both;
+}
+@keyframes kickoff-drop {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+}
+@keyframes kickoff-lift {
+  to {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .match-headline,
+  .match-headline.closing {
+    animation: none;
+  }
+}
+
+/**
+ * 누적 xG 계단선 — **기대 득점 두 숫자 아래, 격자 위** (match.md §8).
+ *
+ * 머리의 숫자는 90분의 투영이고 이 선은 실제로 만든 장면의 누적이라, 같은 0–1이
+ * 어떻게 만들어진 0–1인지가 여기서 갈린다. 두 줄이 같은 꼴(`mv-xg`)을 쓰되 라벨과
+ * 그것이 가리키는 그림 사이에는 선을 두지 않는다 — 헤어라인은 블록 아래 한 줄이다.
+ */
+.mv-xg-race {
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.mv-xg-race .mv-xg {
+  margin-bottom: 4px;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+/* 선의 색이 곧 범례다 — 스코어보드의 구단색과 같은 자다 (design-system §2) */
+.mv-xg-race .mv-xg-score b.ours {
+  color: var(--club-hi);
+}
+.mv-xg-race .mv-xg-score b.theirs {
+  color: var(--opp-hi);
+}
+/**
+ * 상자 — 폭은 판을 채우고 높이는 눈금 안의 값이다. `viewBox`를 늘려 쓰므로
+ * (`preserveAspectRatio: none`) 선 굵기는 `non-scaling-stroke`로 붙잡는다: 그러지
+ * 않으면 넓은 화면에서 1.5px가 세 배로 굵어져 격자의 레일보다 두꺼워진다.
+ */
+.mv-xg-line {
+  display: block;
+  width: 100%;
+  height: 64px;
+}
+.mv-xg-line path {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linejoin: miter;
+  stroke-linecap: butt;
+  vector-effect: non-scaling-stroke;
+}
+.mv-xg-line path.ours {
+  stroke: var(--club-hi);
+}
+.mv-xg-line path.theirs {
+  stroke: var(--opp-hi);
+}
+/* 축 — 0xG 바닥과 하프타임(연장이면 90′까지). 정보 없는 선이라 헤어라인이다 */
+.mv-xg-line .mv-xg-axis line {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}

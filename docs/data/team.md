@@ -272,6 +272,40 @@ TeamCatalogEntry {
 | 앙제 (리그 1)       | 4 · 4       | 0.449     | £11.2M · £5.4M   | £5.4M     |
 | 챔피언십 구단 (2부) | 3 · 3       | 0.252     | £10.1M · £5.5M   | £4.5M     |
 
+### 2.2 팀 전력 한 숫자 (`squadRating` — `squad/depth.ts`)
+
+**스쿼드 상위 열한 명의 평균 OVR.** 팀 하나를 한 숫자로 줄이는 자는 이것 하나뿐이다 —
+체급 재산정의 전력 축(§2.1) · 승격 클럽 줄 세우기와 보강 기준선(§5) · 이적 시장의 무대
+자([../simulation/transfer.md](../simulation/transfer.md) §1-3) · 개막 전 예상
+순위([../simulation/season.md](../simulation/season.md) §2), 그리고 **일정과 달력의 상대
+전력 칸**이 같은 자를 읽는다. 전 팀을 한 번에 세우는 진입점(`squadRatingsOf`)은
+`state.players`를 한 번만 훑는다 — 팀마다 부르면 그 자리 하나가 「팀 수 × 선수 수」가
+된다.
+
+**일정·달력이 이 숫자를 세우는 이유는 색맹 안전이다.** 남은 경기의 난이도를 색 레일로만
+말하면 그 정보는 색을 못 가르는 감독에게 없는 정보고, 레일의 세 단계는 「78과 74의
+차이」를 담지 못한다. 그래서 숫자를 그대로 세운다 — OVR 4단(`ratingTier`)의 색은 그
+숫자에 얹히는 것이지 숫자를 대신하지 않는다
+([../ui/design-system.md](../ui/design-system.md) §1).
+
+- 뷰 필드는 둘이다. 대회 일정 행은 양 팀(`CompetitionMatchView.strength`), 달력의 경기
+  행은 상대만(`CalendarEntryView.match.opponentStrength`) — 우리 팀의 값은 모든 줄에서
+  같아 줄마다 적을 이유가 없다. 스쿼드가 빈 팀(어드민이 막 만든 클럽)은 `null`이고
+  화면은 자리를 비운다.
+- **1군·2군을 가리지 않는다** — 상위 열한 명을 고르므로 유스가 그 안에 들 일이 거의
+  없고, §2.1의 전력 축과 같은 집합을 봐야 같은 자로 잰 값이 된다.
+- **가용(부상·정지·소집)을 보지 않는다.** 3주 뒤 경기의 결장자는 아무도 모르고, 오늘의
+  결장으로 먼 경기의 숫자를 흔들면 감독이 손댈 수 없는 이유로 난이도가 오르내린다.
+  이 값은 **스쿼드의 전력**이지 그 경기에 설 열한 명의 전력이 아니다 — 후자는 경기 전
+  상대 분석이 답한다 ([../simulation/match.md](../simulation/match.md) §1.8).
+- ⚠️ **안개를 지나지 않는다** — 참값이다. 스카우팅의 안개는 「이 선수가 얼마나
+  좋은가」를 가리는 것이고([player.md](./player.md) §9), 팀의 체급은 순위표·몸값·언론이
+  이미 말하는 공개 사실이다. 열한 개의 오차를 평균하면 참값에서 ±0.3 안쪽이라 흐려도
+  달라지는 것이 없는데, 흐리는 값은 선수마다 「우리와의 경기에서 봤는가」를 물어
+  경기 원장을 통째로 훑는다(`hasSeenPlay`) — 매 턴 오는 뷰가 팀마다 그것을 하면
+  숫자 하나에 수십 ms가 든다. 안개가 한 겹인 것도 그대로다: 스쿼드 평균에서 개인의
+  능력치를 되돌릴 수는 없다.
+
 ## 3. 구단 프로필 (`data/club-profile.ts`)
 
 ```ts
@@ -328,7 +362,9 @@ id에서 결정적으로 뽑고, 색은 카탈로그에서 읽는다.
 - **색의 출처는 원장에 적는다.** 96팀의 값과 출처는 [sources.md](sources.md) §7.5,
   화면이 그 색을 어디에 어떻게 세우는지는 [ui/design-system.md](../ui/design-system.md)
   §2. 색을 "보기 좋게" 손보지 않는다 — 어두운 바닥에서 안 보이는 남색·검정은 화면이
-  `clubTonesOf`로 명도만 올려 쓰고, 카탈로그 값은 공식 값 그대로 둔다.
+  `clubTonesOf`로 명도만 올려 쓰고, 카탈로그 값은 공식 값 그대로 둔다. 조율을 전체
+  팔레트를 상대로 하는 자리는 `/admin`의 「팔레트」 탭이다 — 전 구단의 색과 대비 수치가
+  리그별로 한 시트에 선다 (읽기 전용).
 - 도형(`shape` · `division`)은 실물 엠블럼과 닮게 조율하지 않는다. 그 자리는 여전히
   미탑재다.
 
@@ -857,3 +893,4 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 | 승격 클럽 보강 (승강 뒤 25명 하한)         | `packages/engine/src/competition/promotion.ts` · `world/generate.ts` |
 | 축소 세계                                  | `packages/engine/src/world/scope.ts`                                 |
 | 구단 주급 예산                             | `packages/engine/src/world/wages.ts`                                 |
+| 팀 전력 한 숫자 (`squadRating`, §2.2)      | `packages/engine/src/squad/depth.ts`                                 |

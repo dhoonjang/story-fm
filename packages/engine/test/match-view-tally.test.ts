@@ -245,3 +245,37 @@ describe("흐름의 양 — 사건이 아닌 기록", () => {
     }
   });
 });
+
+/**
+ * xG 계단선 — **장부의 슛·골 사건이 원본이다** (match.md §8). 누적과 자리수가 여기서
+ * 갈리면 판세의 선과 머리의 두 숫자가 다른 경기를 말한다.
+ */
+describe("누적 xG 계단선 (match.md §8)", () => {
+  it("슛 하나마다 한 점이고, 값은 누적이며 되돌아가지 않는다", () => {
+    const { state, match: view } = intoMatch(11);
+    const shots = state.pendingMatch!.ledger.events.filter((e) => e.xg !== undefined);
+    expect(shots.length, "xG를 실은 사건이 없다").toBeGreaterThan(0);
+    expect(view.xgTimeline).toHaveLength(shots.length);
+
+    let prev = { minute: 0, home: 0, away: 0 };
+    for (const point of view.xgTimeline) {
+      expect(point.minute).toBeGreaterThanOrEqual(prev.minute);
+      expect(point.home).toBeGreaterThanOrEqual(prev.home);
+      expect(point.away).toBeGreaterThanOrEqual(prev.away);
+      prev = point;
+    }
+  });
+
+  it("마지막 점이 그 시각까지의 팀 xG 합이다", () => {
+    const { state, match: view } = intoMatch(11);
+    const events = state.pendingMatch!.ledger.events;
+    const sumOf = (side: "home" | "away") =>
+      events
+        .filter((e) => e.xg !== undefined && (e.team === "away" ? "away" : "home") === side)
+        .reduce((acc, e) => acc + (e.xg ?? 0), 0);
+    const last = view.xgTimeline[view.xgTimeline.length - 1]!;
+    // 소수 둘째 자리까지 자르므로 누적 오차의 한도는 그 자리다 (리포트의 xG와 같은 자)
+    expect(last.home).toBeCloseTo(sumOf("home"), 2);
+    expect(last.away).toBeCloseTo(sumOf("away"), 2);
+  });
+});

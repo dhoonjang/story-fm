@@ -47,6 +47,7 @@ const match = entry({
     opponentName: "리버풀",
     venue: "away",
     score: "2-1",
+    opponentStrength: 79,
   },
 });
 
