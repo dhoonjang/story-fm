@@ -3,9 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { LeagueRingSkeleton } from "@/components/skeleton";
+import { LeagueListSkeleton } from "@/components/skeleton";
 import { Loading } from "@/components/loading";
-import { ringPoints, ringPolygon } from "@/lib/ring";
 import type { ClubColours } from "@story-fm/domain";
 import { Crest, clubStyle } from "@/components/crest";
 
@@ -25,6 +24,8 @@ interface LeagueEntry {
   id: string;
   name: string;
   country: string;
+  /** 1부 팀 수 — 카탈로그가 센 것을 그대로 받는다. 화면이 팀 배열을 따로 세지 않는다 */
+  size: number;
 }
 
 /**
@@ -97,7 +98,6 @@ export default function NewGamePage() {
   const stepIndex = STEPS.findIndex((s) => s.key === step);
   const prevStep = STEPS[stepIndex - 1];
   const leagueTeams = teams.filter((t) => t.leagueId === leagueId).sort(byTier);
-  const ring = ringPoints(leagues.length || 1);
 
   async function start() {
     if (!teamId || !name.trim() || !background.trim()) return;
@@ -181,34 +181,30 @@ export default function NewGamePage() {
         <section className="onboarding-step step-league">
           <h1>어느 리그에서 시작합니까?</h1>
           {leagues.length === 0 && !error ? (
-            <LeagueRingSkeleton />
+            <LeagueListSkeleton />
           ) : (
             /**
-             * 리그는 목록이 아니라 **고리**다 — 리그가 정n각형의 꼭짓점에 서고
-             * 한가운데는 비어 있다. 어느 하나가 위가 아니라는 것을 배치가 말한다
-             * (칸을 위아래로 쌓으면 첫 줄이 곧 서열로 읽힌다).
+             * 리그는 **세로 목록**이다 — 행 하나가 리그 하나고, 대회 톤 점·이름·
+             * 국가·팀 수가 한 줄에 선다. 리그가 늘면 줄이 늘 뿐이라 개수가 배치를
+             * 바꾸지 않는다 (ui/design-system.md §7).
              */
-            <div className="league-ring" data-testid="league-ring">
-              <svg viewBox="0 0 100 100" aria-hidden>
-                <polygon points={ringPolygon(ring)} />
-              </svg>
-              {leagues.map((l, i) => {
-                // 고리는 리그 수만큼 찍는다 — 자리가 없으면 세울 곳도 없다
-                const at = ring[i];
-                if (at === undefined) return null;
-                return (
-                  <button
-                    key={l.id}
-                    className={`league-node${leagueId === l.id ? " selected" : ""}`}
-                    style={{ left: `${at.x}%`, top: `${at.y}%` }}
-                    onClick={() => selectLeague(l.id)}
-                    data-testid={`league-${l.id}`}
-                  >
-                    <span className="node-name">{l.name}</span>
-                    <span className="node-country">{l.country}</span>
-                  </button>
-                );
-              })}
+            <div className="league-list" data-testid="league-list">
+              {leagues.map((l) => (
+                <button
+                  key={l.id}
+                  className={`league-row${leagueId === l.id ? " selected" : ""}`}
+                  // 고른 리그는 워시·링만이 아니라 이것으로도 전해진다 (overview.md §5)
+                  aria-current={leagueId === l.id ? "true" : undefined}
+                  onClick={() => selectLeague(l.id)}
+                  data-testid={`league-${l.id}`}
+                >
+                  <span className="league-tone" aria-hidden />
+                  <span className="league-name">{l.name}</span>
+                  <span className="league-country">{l.country}</span>
+                  {/* 팀이 아직 없는 리그는 「0팀」이라 적지 않는다 — 셀이 빈다 */}
+                  {l.size > 0 && <span className="league-size">{l.size}팀</span>}
+                </button>
+              ))}
             </div>
           )}
         </section>

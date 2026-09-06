@@ -60,7 +60,8 @@ export function GET(request: Request) {
   // 기대 순위는 리그 인원에서 나온다 (career.md §5) — 세이브가 없으니 카탈로그가 센다
   const sizeOf = new Map(leagues.map((l) => [l.id, teamsOfLeague(l.id).length]));
   return NextResponse.json({
-    leagues,
+    // 리그 행이 「20팀」을 세우는 그 수 — 화면이 팀 배열을 따로 세지 않는다
+    leagues: leagues.map((l) => ({ ...l, size: sizeOf.get(l.id) ?? 0 })),
     teams: teamCatalog()
       .filter((t) => ids.has(t.leagueId))
       .map((t) => ({

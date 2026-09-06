@@ -5,11 +5,10 @@
  * 때 줄이 튀지 않고, 기다리는 동안에도 화면이 자기 골격을 유지한다. 반대로
  * 게임 화면처럼 무엇이 올지 모양으로 요약할 수 없는 자리에는 마크(`Loading`)가 선다.
  *
- * ⚠️ 뼈대는 **진짜 마크업과 같은 클래스**(`.game-card` · `.league-node`)를 쓴다 —
- * 여기서 따로 상자를 만들면 카드 여백이 바뀔 때마다 두 곳을 고쳐야 하고, 결국
- * 어긋난다. 바뀌는 것은 안에 든 글자가 막대가 되는 것뿐이다.
+ * ⚠️ 뼈대는 **진짜 마크업과 같은 클래스**(`.game-card`)를 쓴다 — 여기서 따로 상자를
+ * 만들면 카드 여백이 바뀔 때마다 두 곳을 고쳐야 하고, 결국 어긋난다. 바뀌는 것은
+ * 안에 든 글자가 막대가 되는 것뿐이다.
  */
-import { ringPoints, ringPolygon } from "@/lib/ring";
 
 /** 게임 카드 — 몇 장이 올지는 알 수 없으니 "목록이 온다"만 말하는 두 장이다 */
 export function GameListSkeleton() {
@@ -36,24 +35,19 @@ export function GameListSkeleton() {
   );
 }
 
-/** 리그 고리 — 5대 리그가 올 자리라 오각형이다 (좌표는 `lib/ring`이 정한다) */
-export function LeagueRingSkeleton() {
-  const points = ringPoints(5);
+/**
+ * 리그가 올 자리 — **라벨 하나와 헤어라인 셋.**
+ *
+ * 리그가 몇인지는 카탈로그가 정한다(어드민이 더하거나 뺀다). 그래서 행 뼈대를
+ * 다섯 개 세우면 도착하는 순간 개수가 어긋나 줄이 튄다 — 헤어라인은 행 높이만큼
+ * 띄워 **행이 갈릴 자리**만 잡고, 개수는 말하지 않는다 (ui/design-system.md §7).
+ */
+export function LeagueListSkeleton() {
   return (
-    <div className="league-ring" role="status" aria-label="리그 불러오는 중">
-      <svg viewBox="0 0 100 100" aria-hidden>
-        <polygon points={ringPolygon(points)} />
-      </svg>
-      {points.map((p, i) => (
-        <div
-          className="league-node skel-box"
-          key={i}
-          style={{ left: `${p.x}%`, top: `${p.y}%` }}
-          aria-hidden
-        >
-          <span className="skel skel-league" />
-          <span className="skel skel-country" />
-        </div>
+    <div className="league-wait" role="status">
+      <span className="section-title">리그 불러오는 중</span>
+      {[0, 1, 2].map((i) => (
+        <span className="league-wait-line" key={i} aria-hidden />
       ))}
     </div>
   );
