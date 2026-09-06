@@ -2151,7 +2151,7 @@ DF +1.4 · MF +1.1 · FW +0.9 · 도움 +0.6 · 무실점 GK +0.8/DF +0.5 · 실
   두 곳에서 각자 키를 조립하면 45분에 1–0으로 보던 경기가 종료 뒤 0–2로 적힌다.
   경기 중에 다른 팀의 상태가 바뀌지 않는 것이 나머지 절반의 근거다 — 한 라운드에서 한
   팀은 한 경기만 뛰고, 우리 경기의 부상·카드는 우리와 상대에게만 닿는다.
-  `packages/engine/test/match-live-scores.test.ts`가 그 등식을 지킨다.
+  `match-flow.test.ts`가 그 등식을 지킨다.
 - **우리 경기보다 늦게 킥오프하는 경기에는 아무것도 실리지 않는다** — 아직 시작하지
   않은 경기라 화면은 킥오프 시각만 세운다.
 
@@ -2435,6 +2435,7 @@ OVR(`CompetitionMatchView.strength` → [../data/team.md](../data/team.md) §2.2
 | 경기 흐름·정지점·마감            | `packages/engine/src/match/match-flow.ts`                                  |
 | 경기 전 상대 분석 리포트         | `packages/engine/src/match/preview.ts` (`buildOpponentReport`)             |
 | 경기 리포트 뷰·MOTM              | `packages/engine/src/views/views.ts` (`buildMatchReport`·`motmOf`)         |
+| 판세의 xG 계단선·옆 구장 스코어  | `packages/engine/src/views/views.ts` (`xgTimelineOf`·`liveScoresOf`)       |
 | 연장 판정·타 팀 연장·승부차기    | `packages/engine/src/competition/extra-time.ts` · `shootout.ts`            |
 | 간이 시뮬·평점·징계              | `packages/engine/src/match/quick-sim.ts` · `ratings.ts` · `discipline.ts`  |
 | 더비 표 · 더비의 문              | `packages/engine/src/data/derbies.ts` · `club/derby.ts` (`derbyForMatch`)  |

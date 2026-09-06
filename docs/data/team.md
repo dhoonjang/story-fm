@@ -891,3 +891,4 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 | 승격 클럽 보강 (승강 뒤 25명 하한)         | `packages/engine/src/competition/promotion.ts` · `world/generate.ts` |
 | 축소 세계                                  | `packages/engine/src/world/scope.ts`                                 |
 | 구단 주급 예산                             | `packages/engine/src/world/wages.ts`                                 |
+| 팀 전력 한 숫자 (`squadRating`, §2.2)      | `packages/engine/src/squad/depth.ts`                                 |
