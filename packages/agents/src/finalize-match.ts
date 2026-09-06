@@ -287,7 +287,9 @@ export async function finalizeMatchTurn(
    */
   calls.push({
     name: "finalize_match",
-    summary: digest.ours.join(" · "),
+    // 요약은 **머리줄 하나**다 — 항목은 `brief`가 싣는다. 여기서 이어 붙이면 장부 줄도
+    // 화면도 한 문자열을 받아 도로 쪼개야 한다 (overview.md §2)
+    summary: "경기 종료",
     brief: { head: "경기 종료", items: digest.ours.map((text) => ({ text })) },
   });
   pushNews(state, [...digest.finance, ...digest.others]);
