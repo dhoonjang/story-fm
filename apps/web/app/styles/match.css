@@ -303,7 +303,12 @@
   z-index: 2;
   pointer-events: none;
 }
-/* 번호표 — 상대는 상대 구단의 가는 색 윤곽, 우리는 우리 구단의 가는 색 채움 */
+/**
+ * 번호표 — **상대는 윤곽, 우리는 채움.** 스코어보드 플랭크가 이 판의 구단 색을
+ * 이미 다 썼으므로(ui/design-system.md §2 충돌 규칙 7) 여기서 편을 가르는 것은
+ * 꼴과 잉크의 층이다. 판세 워시가 깔린 칸 위에 서니 색을 하나 더 얹으면 그 톤과
+ * 다툰다.
+ */
 .mv-marker {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -312,18 +317,18 @@
   width: 18px;
   height: 18px;
   border-radius: var(--r-xs);
-  border: 1.5px solid var(--opp-hi);
+  border: 1.5px solid var(--text-3);
   background: transparent;
   font-family: var(--font-score);
   font-size: var(--fs-2xs);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: var(--text);
+  color: var(--text-2);
   pointer-events: auto;
 }
 .mv-marker.ours {
-  background: var(--club-hi);
-  border-color: var(--club-hi);
+  background: var(--text);
+  border-color: var(--text);
   color: var(--bg);
 }
 /* 다리가 멈춘 선수 — 교체 신호는 판 위에서도 보여야 한다 */
@@ -377,9 +382,12 @@
   gap: 0;
 }
 /**
- * 키포인트 한 줄 — **레일이 편을 말한다.** 우리에게 이로우면 우리 구단의 가는 색,
- * 불리하면 상대의 것. 편을 모르는 줄(옛 세이브의 진행 중 경기)은 트랙 색으로 선다.
+ * 키포인트 한 줄 — **레일이 유불리를 말한다.** 우리에게 이로우면 우세의 톤,
+ * 불리하면 패의 톤. 편을 모르는 줄(옛 세이브의 진행 중 경기)은 트랙 색으로 선다.
  * 줄 사이는 헤어라인 하나다.
+ *
+ * ⚠️ 구단 색이 아니다 — 이 줄이 말하는 것은 어느 팀인가가 아니라 이롭다/불리하다는
+ * **상태**이고, 상태 자리에 구단 색은 서지 않는다 (ui/design-system.md §2 충돌 규칙 1).
  */
 .mv-key {
   font-size: var(--fs-sm);
@@ -391,10 +399,10 @@
   border-top: 1px solid var(--line);
 }
 .mv-key.good {
-  border-left-color: var(--club-hi);
+  border-left-color: var(--win);
 }
 .mv-key.bad {
-  border-left-color: var(--opp-hi);
+  border-left-color: var(--loss);
 }
 
 /**
@@ -774,7 +782,7 @@
   flex-direction: column;
   gap: 0;
 }
-/* 지점 한 줄 — 판세 화면의 키포인트와 같은 규칙이다 (레일 = 팀) */
+/* 지점 한 줄 — 판세 화면의 키포인트와 같은 규칙이다 (레일 = 유불리) */
 .mp-point {
   font-size: var(--fs-xs);
   line-height: 1.5;
@@ -784,11 +792,11 @@
 .mp-point + .mp-point {
   border-top: 1px solid var(--line);
 }
-.mp-point.ours {
-  border-left-color: var(--club-hi);
+.mp-point.good {
+  border-left-color: var(--win);
 }
-.mp-point.theirs {
-  border-left-color: var(--opp-hi);
+.mp-point.bad {
+  border-left-color: var(--loss);
 }
 
 /**
@@ -846,12 +854,15 @@
   padding-bottom: 0;
   border-bottom: none;
 }
-/* 선의 색이 곧 범례다 — 스코어보드의 구단색과 같은 자다 (design-system §2) */
+/**
+ * 끝값 두 숫자가 곧 범례다 — 아래 두 선과 **같은 두 잉크**로 선다. 구단 색은 이 판에서
+ * 스코어보드 플랭크가 이미 한 벌 썼다 (design-system §2 충돌 규칙 7).
+ */
 .mv-xg-race .mv-xg-score b.ours {
-  color: var(--club-hi);
+  color: var(--text);
 }
 .mv-xg-race .mv-xg-score b.theirs {
-  color: var(--opp-hi);
+  color: var(--text-3);
 }
 /**
  * 상자 — 폭은 판을 채우고 높이는 눈금 안의 값이다. `viewBox`를 늘려 쓰므로
@@ -871,10 +882,10 @@
   vector-effect: non-scaling-stroke;
 }
 .mv-xg-line path.ours {
-  stroke: var(--club-hi);
+  stroke: var(--text);
 }
 .mv-xg-line path.theirs {
-  stroke: var(--opp-hi);
+  stroke: var(--text-3);
 }
 /* 축 — 0xG 바닥과 하프타임(연장이면 90′까지). 정보 없는 선이라 헤어라인이다 */
 .mv-xg-line .mv-xg-axis line {

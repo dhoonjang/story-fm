@@ -578,7 +578,7 @@ function MatchPreviewPanel({ preview }: { preview: MatchPreview }) {
               <div className="mp-points">
                 {preview.keyPoints.map((k, i) => (
                   <div
-                    className={`mp-point${k.ours === null ? "" : k.ours ? " ours" : " theirs"}`}
+                    className={`mp-point${k.ours === null ? "" : k.ours ? " good" : " bad"}`}
                     key={i}
                   >
                     {k.text}
