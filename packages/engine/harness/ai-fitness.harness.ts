@@ -14,8 +14,8 @@ import { outOfBand, reportOf, type Readings } from "./harness";
 
 /**
  * 한 시즌을 다 굴린 뒤의 **체력·출전 분포** — 리그가 우리와 같은 규칙으로 돌았는가.
- * 개막 아침에 한 번 멈춰 **경기 감각**도 잰다 (player.md §5.4): 프리시즌이 몸에
- * 관해 무엇을 결정했는지는 그 자리에서만 보인다.
+ * 개막 아침에 한 번 멈춰 **프리시즌이 몸에 남긴 것**도 잰다 (player.md §5.5): 시즌 말
+ * 스냅숏에는 남지 않는 값이라 그 자리에서만 보인다.
  *
  *   pnpm balance ai-fitness
  */
@@ -32,7 +32,7 @@ function topCondition(state: GameState, teamId: string, n: number): number {
 /**
  * **가장 무거운 n명의 평균 누적 피로** — 라인업을 계속 진 사람들이 얼마나 쌓였는가.
  *
- * 체력·감각과 달리 **위에서 자른다**: 저 둘은 "쓸 만한 자원이 있는가"를 묻지만 이 축이
+ * 체력·적응도와 달리 **위에서 자른다**: 저 둘은 "쓸 만한 자원이 있는가"를 묻지만 이 축이
  * 묻는 것은 "누가 갈려 나갔는가"라, 잘 쉰 백업까지 섞으면 로테이션한 팀과 열한 명으로
  * 버틴 팀이 같은 값으로 선다 (player.md §5.5).
  */
@@ -51,7 +51,7 @@ function overloadedCount(state: GameState, teamId: string): number {
   ).length;
 }
 
-/** 상위 n명의 평균 경기 감각 — 같은 자를 감각 축에 댄 값 */
+/** 상위 n명의 평균 전술 적응도 — 체력과 같은 자를 적응도 축에 댄 값 */
 function topFamiliarity(state: GameState, teamId: string, n: number): number {
   const top = firstTeamPlayers(state, teamId)
     .map((p) => familiarityOf(state, p.id))
@@ -65,8 +65,8 @@ function mean(values: readonly number[]): number {
 }
 
 /**
- * 선수별 친선 출전 경기 수 — **감각 값이 아니라 출전에서 무리를 가른다.**
- * 감각으로 상위·하위를 자르면 "감각이 높은 선수가 감각이 높다"를 재게 된다.
+ * 선수별 친선 출전 경기 수 — **재려는 값이 아니라 출전에서 무리를 가른다.**
+ * 잔고로 상위·하위를 자르면 "많이 쌓인 선수가 많이 쌓였다"를 재게 된다.
  */
 function friendlyAppsOf(state: GameState): Map<string, number> {
   const apps = new Map<string, number>();
@@ -91,14 +91,21 @@ describe("한 시즌을 돈 뒤의 체력·출전 분포", () => {
   it("시드 7", () => {
     const state = createTestGame(7);
 
-    // ── 개막 아침 — 프리시즌이 몸에 무엇을 남겼는가 ──
+    /**
+     * ── 개막 아침 — **프리시즌이 몸에 무엇을 남겼는가** ──
+     *
+     * 그 질문을 지던 축(「경기 감각」)은 걷혔고, 지금 친선 넷이 개막까지 남기는 것은
+     * **누적 피로**다 (player.md §5.5). 적응도 쪽은 친선을 뛰었는지가 아니라 여름을
+     * 클럽 밖에서 보냈는지가 가르므로(§7.4) 무리를 나눠 재지 않고 상위 14명으로 읽는다.
+     */
     playUntil(state, state.calendar.start);
     const friendlyApps = friendlyAppsOf(state);
     const ours = firstTeamPlayers(state, state.userTeamId);
     const played = ours.filter((p) => (friendlyApps.get(p.id) ?? 0) >= PRESEASON_PLAYED);
     const rested = ours.filter((p) => (friendlyApps.get(p.id) ?? 0) === 0);
-    const openingPlayed = mean(played.map((p) => familiarityOf(state, p.id)));
-    const openingRested = mean(rested.map((p) => familiarityOf(state, p.id)));
+    const openingPlayed = mean(played.map((p) => fatigueOf(p.state)));
+    const openingRested = mean(rested.map((p) => fatigueOf(p.state)));
+    const openingDrilled = topFamiliarity(state, state.userTeamId, LINEUP);
 
     /**
      * **잔고의 본론은 시즌 말의 스냅숏이 아니라 시즌 중의 봉우리다** (player.md §5.5).
@@ -150,12 +157,13 @@ describe("한 시즌을 돈 뒤의 체력·출전 분포", () => {
       ),
       "우리와 상대의 체력 격차": Math.abs(us - them),
       "한 시즌 출전 인원 (맨시티)": apps.length,
-      "개막 감각 — 친선 3경기 이상": openingPlayed,
-      "개막 감각 — 친선 0경기": openingRested,
-      "개막 감각 차 (친선 3+ vs 0)": openingPlayed - openingRested,
-      "개막 감각을 잰 인원": Math.min(played.length, rested.length),
-      "시즌 말 감각 (상위 14명)": ourSharp,
-      "우리와 상대의 감각 격차": Math.abs(ourSharp - theirSharp),
+      "개막 잔고 — 친선 3경기 이상": openingPlayed,
+      "개막 잔고 — 친선 0경기": openingRested,
+      "개막 잔고 차 (친선 3+ vs 0)": openingPlayed - openingRested,
+      "개막의 두 무리를 잰 인원": Math.min(played.length, rested.length),
+      "개막 적응도 (상위 14명)": openingDrilled,
+      "시즌 말 적응도 (상위 14명)": ourSharp,
+      "우리와 상대의 적응도 격차": Math.abs(ourSharp - theirSharp),
       "시즌 말 누적 피로 — 우리 상위 11": ourLoad,
       "시즌 말 누적 피로 — 상대 상위 11": theirLoad,
       "우리와 상대의 피로 격차": Math.abs(ourLoad - theirLoad),
@@ -170,7 +178,7 @@ describe("한 시즌을 돈 뒤의 체력·출전 분포", () => {
         AI_FITNESS,
         readings,
         `시드 7 · 우리 ${us.toFixed(1)} vs 상대 ${them.toFixed(1)} · ` +
-          `개막 감각 친선 ${played.length}명 / 미출전 ${rested.length}명`,
+          `개막 프리시즌 친선 ${played.length}명 / 미출전 ${rested.length}명`,
       ),
     );
     expect(outOfBand(AI_FITNESS, readings)).toEqual([]);
