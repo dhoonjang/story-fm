@@ -223,6 +223,7 @@ describe("프롬프트 회귀", () => {
     let keptLines = 0;
     let headers = 0;
     let sceneChars = 0;
+    let bodied = 0;
     let grammatical = 0;
     const called = new Set<string>();
 
@@ -241,9 +242,20 @@ describe("프롬프트 회귀", () => {
 
       const parsed = parseSceneHeader(text);
       if (parsed.header !== null) headers += 1;
-      // 문법 — 헤더를 뗀 본문은 `@` 줄로 연다. 그 뒤의 태그 없는 줄은 직전 화자의
-      // 이어쓰기라 세지 않는다 (prompts.md §1)
-      if ((textLines(parsed.body)[0] ?? "").startsWith("@")) grammatical += 1;
+      /**
+       * 문법 — 헤더를 뗀 본문은 `@` 줄로 연다. 그 뒤의 태그 없는 줄은 직전 화자의
+       * 이어쓰기라 세지 않는다 (prompts.md §1).
+       *
+       * ⚠️ **본문이 없는 턴은 분모에 들지 않는다.** 시간만 흐른 턴은 헤더만 서고
+       * 본문이 비는데, 그 사실은 이번 턴의 사건 카드가 이미 진다 (overview.md §2) —
+       * 문법을 어긴 것이 아니라 쓸 장면이 없는 것이다. 분모가 통째로 비는 자리는
+       * 아래 「본문이 선 장면 비율」이 잡는다.
+       */
+      const opening = textLines(parsed.body)[0];
+      if (opening !== undefined) {
+        bodied += 1;
+        if (opening.startsWith("@")) grammatical += 1;
+      }
     }
 
     const caster = await casterArm(11);
@@ -265,7 +277,8 @@ describe("프롬프트 회귀", () => {
       "고정층 비중": fixed.length / layers,
       "고정층 프리픽스 안정성": identical(fixed, fixedLayer(other)),
       "레퍼런스층 프리픽스 안정성": identical(reference, buildGmReference(later)),
-      "장면 문법 준수율": grammatical / corpus.length,
+      "장면 문법 준수율": grammatical / Math.max(1, bodied),
+      "본문이 선 장면 비율": bodied / corpus.length,
       "위생이 걷어낸 줄 비율": (rawLines - keptLines) / Math.max(1, rawLines),
       "중계 턴": caster.turns,
       "중계 위생이 걷어낸 줄 비율":
@@ -281,7 +294,7 @@ describe("프롬프트 회귀", () => {
       reportOf(
         PROMPT_REGRESSION,
         readings,
-        `도구 ${SKILL_CATALOG.length}개 · 발화 ${corpus.length}건 · 중계 ${caster.turns}턴 · 층 합계 ${layers.toLocaleString()}자`,
+        `도구 ${SKILL_CATALOG.length}개 · 발화 ${corpus.length}건(본문 ${bodied}) · 중계 ${caster.turns}턴 · 층 합계 ${layers.toLocaleString()}자`,
       ),
     );
     expect(outOfBand(PROMPT_REGRESSION, readings)).toEqual([]);

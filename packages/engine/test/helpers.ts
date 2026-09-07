@@ -23,12 +23,10 @@ import {
   FRIENDLY_ROUNDS,
   isFriendly,
   MINI_WORLD,
-  FAMILIARITY_DRIFT_CAP,
-  FAMILIARITY_DRIFT_PER_DAY,
+  driftTeamFamiliarity,
   assignmentsOf as assignmentsOfTeam,
   eventTexts,
 } from "@story-fm/engine";
-import { applyFamiliarityGain } from "@story-fm/domain";
 import type { GamePlayer } from "@story-fm/domain";
 
 /** 간이 시뮬 입력 조립 — 배치 선발에서 가용 선수를 뽑는다 (테스트용) */
@@ -124,13 +122,6 @@ export function playFullSeason(state: GameState, limit = 400): boolean {
 }
 
 /**
- * 훈련하는 감독 — 감독 팀의 전술 적응도를 AI 팀과 같은 눈금으로 올린다.
- *
- * 실제 플레이에서는 훈련·경기 결산(LLM)이 이 자리를 채워 95·100까지 간다.
- * mock 모드에는 그 판정이 없어서, 하네스가 이걸 하지 않으면 **감독 팀만 기준선
- * (60)에 멎은 채** AI 팀은 80까지 붙는 세계를 측정하게 된다.
- */
-/**
  * 인내하는 보드 — 측정용. 경질은 시계를 멈추므로(state.dismissal) 재정·시즌
  * 분포를 재는 하네스는 자리를 지킨 채 한 시즌을 다 돌아야 한다.
  *
@@ -147,14 +138,19 @@ export function keepSeat(state: GameState): void {
   if (renewal && !state.dismissal) acceptManagerOffer(state, renewal.id);
 }
 
+/**
+ * 훈련하는 감독 — **결산 판정(LLM)의 대역**이다 (→ docs/simulation/balance-harness.md §4).
+ *
+ * 감독 팀의 전술 적응도를 움직이는 것은 훈련·경기 결산 판정 하나뿐이라(player.md §7)
+ * 실제 플레이에서는 95·100까지 가지만, mock 모드에는 그 판정이 없다. 대역을 세우지
+ * 않으면 **감독 팀만 기준선(60)에 멎은 채** 리그는 매일 붙어 천장(80)까지 가는 세계를
+ * 재게 된다 — 그 값이 재는 것은 이 축의 건강이 아니라 판정의 부재다.
+ *
+ * ⚠️ **리그가 쓰는 그 함수를 부른다**(`driftTeamFamiliarity`) — 여기서 곡선을 따로
+ * 적으면 감독 팀과 리그가 다른 눈금으로 붙는다.
+ */
 export function drillUserTactics(state: GameState, days = 1): void {
-  for (const a of assignmentsOfTeam(state, state.userTeamId)) {
-    if (a.familiarity >= FAMILIARITY_DRIFT_CAP) continue;
-    a.familiarity = Math.min(
-      FAMILIARITY_DRIFT_CAP,
-      applyFamiliarityGain(a.familiarity, FAMILIARITY_DRIFT_PER_DAY * days, "training"),
-    );
-  }
+  driftTeamFamiliarity(assignmentsOfTeam(state, state.userTeamId), days);
 }
 
 export function createTestGame(seed = 42, teamId = "arsenal"): GameState {

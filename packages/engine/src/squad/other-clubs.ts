@@ -4,6 +4,7 @@ import {
   clampFatigue,
   fatigueOf,
   isReserveMatch,
+  type TacticAssignment,
 } from "@story-fm/domain";
 import {
   dailyRecovery,
@@ -68,7 +69,10 @@ function recoveryKindOf(state: GameState, teamId: string): RecoveryKind {
  */
 const AI_SESSIONS_PER_TRAINING_DAY = 1;
 
-/** AI 구단의 하루 — 회복·폼 회귀·경기 감각·누적 피로 (감독 팀은 `dailyTick`이 같은 눈금으로 처리한다) */
+/**
+ * AI 구단의 하루 — 회복·폼 회귀·누적 피로 (감독 팀은 `dailyTick`이 같은 눈금으로 처리한다).
+ * 전술 적응도는 이 루프가 아니라 `driftFamiliarity`가 따로 붙인다.
+ */
 export function tickOtherClubs(state: GameState): void {
   const kinds = new Map<string, RecoveryKind>();
   // 감독이 잘려 무직이면 옛 구단도 여기서 돈다 — `managedTeamId`가 null이다
@@ -115,18 +119,29 @@ export function tickOtherClubs(state: GameState): void {
   }
 }
 
+/**
+ * **한 팀의 배치에 하루치(또는 며칠치) 전술 적응을 붙인다** — 천장까지.
+ *
+ * 규칙이 사는 자리는 여기 하나다. 리그의 하루(`driftFamiliarity`)와, 결산 판정이 없는
+ * 하네스가 감독 팀에 세우는 대역(`drillUserTactics` — balance-harness.md §4)이 같은
+ * 함수를 부른다. 곡선과 천장을 두 벌로 적으면 재는 자리와 재려는 대상이 다른 눈금을 쓴다.
+ */
+export function driftTeamFamiliarity(assignments: readonly TacticAssignment[], days = 1): void {
+  for (const assignment of assignments) {
+    if (assignment.familiarity >= FAMILIARITY_DRIFT_CAP) continue;
+    assignment.familiarity = Math.min(
+      FAMILIARITY_DRIFT_CAP,
+      applyFamiliarityGain(assignment.familiarity, FAMILIARITY_DRIFT_PER_DAY * days, "training"),
+    );
+  }
+}
+
 /** 하루치 전술 적응 — AI 클럽만, 천장까지 */
 export function driftFamiliarity(state: GameState): void {
   const managed = managedTeamId(state);
   for (const tactics of state.tactics) {
     if (tactics.teamId === managed) continue;
     if (!isClubTeam(tactics.teamId)) continue;
-    for (const assignment of tactics.assignments) {
-      if (assignment.familiarity >= FAMILIARITY_DRIFT_CAP) continue;
-      assignment.familiarity = Math.min(
-        FAMILIARITY_DRIFT_CAP,
-        applyFamiliarityGain(assignment.familiarity, FAMILIARITY_DRIFT_PER_DAY, "training"),
-      );
-    }
+    driftTeamFamiliarity(tactics.assignments);
   }
 }
