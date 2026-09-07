@@ -12,7 +12,6 @@
 /* 스코어보드 — 상단 띠 아래의 한 줄(`.match-headline`, shell.css). 판세·전술·명단을
    훑느라 아래로 내려가도 지금 몇 대 몇인지는 늘 보인다. 각진 면 하나에 밑선 하나다. */
 .mv-score {
-  position: relative;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   grid-template-rows: auto auto;
@@ -21,7 +20,7 @@
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   border-radius: 0;
-  padding: 12px 16px;
+  padding: 12px 0;
 }
 
 /* 득점 기록 — 스코어 바로 아래, 한 줄로 흐른다 */
@@ -114,23 +113,13 @@
   justify-content: flex-start;
   text-align: left;
 }
-/* 우리 팀도 같은 잉크다 — 어느 쪽이 우리인지는 플랭크의 구단 색이 말한다 */
+/* **잉크의 층이 편을 가른다** — 우리 1층, 상대 3층 (design-system §2 충돌 규칙 7).
+   종료 카드의 `.mr-sb-team`과 같은 짝이다 — 두 스코어보드는 같은 해부다 */
 .mv-team.ours {
   color: var(--text);
 }
-/* 플랭크 — 스코어버그 양 끝의 구단 색 6px. 홈은 늘 왼쪽. 색(`--club`/`--opp`)은 어느 쪽이 우리인지에
-   따라 갈리므로 컴포넌트가 인라인으로 준다 */
-.mv-flank {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 6px;
-}
-.mv-flank.home {
-  left: 0;
-}
-.mv-flank.away {
-  right: 0;
+.mv-team.theirs {
+  color: var(--text-3);
 }
 /* Home·Away 칩 — 자리(홈 왼쪽·원정 오른쪽)가 이미 말하는 것이라 서지 않는다 */
 .mv-ground {
@@ -311,7 +300,7 @@
   pointer-events: none;
 }
 /**
- * 번호표 — **상대는 윤곽, 우리는 채움.** 스코어보드 플랭크가 이 판의 구단 색을
+ * 번호표 — **상대는 윤곽, 우리는 채움.** 스코어보드의 문장 둘이 이 판의 구단 색을
  * 이미 다 썼으므로(ui/design-system.md §2 충돌 규칙 7) 여기서 편을 가르는 것은
  * 꼴과 잉크의 층이다. 판세 워시가 깔린 칸 위에 서니 색을 하나 더 얹으면 그 톤과
  * 다툰다.
@@ -895,7 +884,7 @@ button.pitch-slot.theirs {
 }
 /**
  * 끝값 두 숫자가 곧 범례다 — 아래 두 선과 **같은 두 잉크**로 선다. 구단 색은 이 판에서
- * 스코어보드 플랭크가 이미 한 벌 썼다 (design-system §2 충돌 규칙 7).
+ * 스코어보드의 문장 둘이 이미 한 벌 썼다 (design-system §2 충돌 규칙 7).
  */
 .mv-xg-race .mv-xg-score b.ours {
   color: var(--text);

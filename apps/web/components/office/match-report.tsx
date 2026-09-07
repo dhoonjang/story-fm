@@ -1,10 +1,10 @@
 "use client";
 
-import { Fragment, useEffect, useState, type CSSProperties } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { MatchReportView } from "@story-fm/engine";
-import { flankTone, formatRating, formatScore } from "@story-fm/domain";
+import { formatRating, formatScore } from "@story-fm/domain";
 import { PlayerName } from "@/components/player-card";
-import { Crest, cachedCrest, clubStyle, oppStyle } from "@/components/crest";
+import { Crest } from "@/components/crest";
 import { IconArrowUp, IconChevron, IconChevronUp } from "@/components/icons";
 import { humanDate } from "@/lib/dateline";
 import { outcomeWordOf, type MatchHeadFacts } from "@/lib/match-head";
@@ -88,7 +88,7 @@ export function MatchReportPanel({
   }
   if (report === null) {
     return (
-      <div className="mr" style={head ? reportTones(head) : undefined}>
+      <div className="mr">
         {head && <ReportHead facts={head} rows={goalIndexOf(head.goals)} />}
         {/* 아직 안 온 표 자리에만 분필 점 셋이 돈다 — 스켈레톤 펄스는 없다 (design-system §5) */}
         <div className="thinking" role="status" aria-label="경기 리포트 불러오는 중">
@@ -201,27 +201,23 @@ function headFactsOf(report: MatchReportView): HeadFacts {
 }
 
 /**
- * 이 리포트의 구단 토큰 한 벌 — **`.mr` 뿌리에 얹는다** (design-system §2 「주입」).
- *
- * 종료 카드가 설 때 `.app` 루트의 `--opp*`는 이미 지워져 있고(경기가 끝나면 상대가
- * 없다), 달력 상세는 애초에 남의 경기도 연다. 뿌리에서 세우지 않으면 플랭크의 원정
- * 쪽이 구단이 없을 때의 기본값으로 서서 같은 카드 안에서 두 자가 갈린다.
- *
- * 우리 팀이 `--club`, 상대가 `--opp`. 우리가 뛰지 않은 경기는 홈이 `--club` 자리에 선다.
+ * 이 쪽 이름이 받을 잉크의 층 — **우리 1층, 상대 3층** (design-system §2 충돌 규칙 7).
+ * 달력 상세는 우리가 뛰지 않은 경기도 여는데, 그때는 가릴 편이 없으므로 한쪽을 흐리지
+ * 않는다 — 편을 가르는 것은 자리와 문장뿐이다.
  */
-function reportTones(facts: HeadFacts): CSSProperties {
-  const homeIsClub = facts.home.ours || !facts.away.ours;
-  const ours = homeIsClub ? facts.home : facts.away;
-  const theirs = homeIsClub ? facts.away : facts.home;
-  return {
-    ...clubStyle(ours.colours, ours.id, ours.short),
-    ...oppStyle(theirs.colours, theirs.id, theirs.short),
-  };
+function sideClass(ours: boolean, otherOurs: boolean): string {
+  if (ours) return "ours";
+  return otherOurs ? "theirs" : "";
 }
 
 /**
  * 머리와 「주요 사건」 — **경기 화면의 스코어보드와 같은 해부**(match.md §8):
- * 양 끝 구단 색 플랭크 6px · 문장 · 팀 이름 · 가운데 스코어 · 결과어.
+ * 문장 · 팀 이름 · 가운데 스코어 · 결과어.
+ *
+ * **구단 토큰을 하나도 읽지 않는다** (design-system §2 「주입」). 종료 카드는 경기가
+ * 끝난 뒤 `.app`이 우리 구단을 세운 채로 서고 달력 상세는 남의 경기도 여는데, 편을
+ * 가르는 셋 — 자리 · 문장 · 잉크 — 은 전부 카드가 받은 사실에서 나오므로 어느 자리에
+ * 서든 같은 답이 된다.
  */
 function ReportHead({
   facts,
@@ -233,12 +229,6 @@ function ReportHead({
   /** 리포트가 닿은 뒤에만 서는 것 — 대회 이름 · 연장 · MOTM */
   report?: MatchReportView | null;
 }) {
-  const homeCrest = cachedCrest(facts.home.id, facts.home.short, facts.home.colours);
-  const awayCrest = cachedCrest(facts.away.id, facts.away.short, facts.away.colours);
-  // 두 밑색의 대비가 모자라면 원정만 보조색으로 물러난다 (design-system §2 충돌 규칙 4)
-  const awaySteps = flankTone(homeCrest, awayCrest).away !== awayCrest.primary;
-  // 플랭크가 읽는 두 벌은 `.mr` 뿌리가 이미 세웠다 (`reportTones`)
-  const homeIsClub = facts.home.ours || !facts.away.ours;
   const outcome = facts.outcome;
   const pens = facts.score.penalties;
   const motm = report?.motm ?? null;
@@ -251,18 +241,7 @@ function ReportHead({
           <em>{humanDate(facts.date)}</em>
         </span>
         <div className="mr-scoreboard">
-          {/* 플랭크의 자리는 CSS, 색만 어느 쪽이 우리인지에 따라 여기서 */}
-          <i
-            className="mr-flank home"
-            style={{ background: `var(--${homeIsClub ? "club" : "opp"})` }}
-          />
-          <i
-            className="mr-flank away"
-            style={{
-              background: `var(--${homeIsClub ? "opp" : "club"}${awaySteps ? "-2" : ""})`,
-            }}
-          />
-          <span className="mr-sb-team">
+          <span className={`mr-sb-team ${sideClass(facts.home.ours, facts.away.ours)}`}>
             <Crest
               id={facts.home.id}
               shortName={facts.home.short}
@@ -277,7 +256,7 @@ function ReportHead({
               <em className={`mr-sb-outcome o-${outcome}`}>{outcomeWordOf(outcome)}</em>
             )}
           </span>
-          <span className="mr-sb-team away">
+          <span className={`mr-sb-team away ${sideClass(facts.away.ours, facts.home.ours)}`}>
             {facts.away.name}
             <Crest
               id={facts.away.id}
@@ -576,7 +555,7 @@ export function MatchReport({ report }: { report: MatchReportView }) {
   const away = report.players.filter((p) => p.side === "away");
   const facts = headFactsOf(report);
   return (
-    <div className="mr" data-testid="match-report" style={reportTones(facts)}>
+    <div className="mr" data-testid="match-report">
       <ReportHead facts={facts} rows={timelineIndexOf(report.timeline)} report={report} />
 
       <TeamStats report={report} />

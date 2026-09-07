@@ -80,15 +80,11 @@
   --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.55);
 
   /* 구단 슬롯 — 구단이 없을 때의 기본값. 주입은 `.app`·카드 요소가 인라인으로 한다 (§2).
-     `var(--club*)`를 참조하는 토큰은 주입 요소에서 다시 선언한다. 상대는 원색 두 벌뿐이다 —
-     밝힘도 워시도 상대가 설 자리가 없다 */
-  --club: #2f3a33;
-  --club-2: #2f3a33;
+     원색 자체는 토큰이 아니다 — 구단 색으로 채우는 것은 문장뿐이고 문장은 제 svg 안에서
+     그 값을 직접 쓴다. 상대에게는 세울 토큰이 아예 없다 */
   --club-hi: #c9c4ba;
   --club-wash: var(--panel);
   --club-wash-pop: var(--pop);
-  --opp: #2f3a33;
-  --opp-2: #2f3a33;
   --role-coach: var(--accent-2);
   --role-board: var(--gold);
   --role-media: var(--violet);
@@ -768,8 +764,8 @@ textarea {
 /**
  * ── 팔레트 탭 — 96팀의 색을 한 시트에 세운다 (design-system.md §2 「검수」).
  *
- * 견본은 저마다 **실제로 설 표면** 위에 앉는다: 밝힘은 `--panel-2`, 워시와 플랭크는
- * `--panel`. 표 배경 위에 대충 세우면 눈으로 본 것과 옆 칸의 대비 수치가 갈린다.
+ * 견본은 저마다 **실제로 설 표면** 위에 앉는다: 밝힘은 `--panel-2`, 워시는 `--panel`.
+ * 표 배경 위에 대충 세우면 눈으로 본 것과 옆 칸의 대비 수치가 갈린다.
  * 색 값은 전부 데이터에서 인라인으로 온다 — 이 파일에 구단 hex는 없다.
  */
 .palette-list {
@@ -841,17 +837,6 @@ textarea {
   border-radius: var(--r-xs);
   color: var(--text);
   font-size: var(--fs-2xs);
-}
-/* 플랭크 견본 — 스코어보드의 6px 두 줄 */
-.palette-flank {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  height: 24px;
-}
-.palette-flank i {
-  width: 6px;
-  height: 20px;
 }
 /* 문턱 아래 · 목표에 못 미침 — 검수가 걸려야 하는 두 자리 */
 .palette-under {
@@ -2050,7 +2035,6 @@ textarea {
 }
 /* 상단 띠 안에서는 카드가 아니라 한 줄이다 — 스코어만 남았으므로 크게 선다 */
 .match-headline .mv-score {
-  position: static;
   padding: 0;
   background: none;
   border: none;
@@ -2691,20 +2675,12 @@ textarea {
   margin: 0 auto;
 }
 /**
- * 경기 중에 오간 말 — **이력에서 평시와 갈린다** (`ChatTurn.inMatch`).
+ * `.turn-model.in-match`는 **표식일 뿐 칠하지 않는다** (`ChatTurn.inMatch`).
  *
- * 평시의 GM과 경기의 중계는 다른 에이전트이고 감독이 거는 말도 다르다(훈련·이적
- * 지시 vs 교체·팀토크). 지나고 나서 대화를 거슬러 읽을 때 그 경계가 없으면
- * 한 시즌치 이력이 한 덩어리로 흐른다. 그래서 **창이 아니라 턴**에 표시한다 —
- * 경기가 끝나도 그 턴들은 계속 구분되어 남는다.
- *
- * 색은 이 화면에서 이미 "무대 밖의 목소리"를 뜻하던 `--gold-soft`다
- * (`.say.broadcast`의 중계 화자 이름과 같은 색이라 설명이 필요 없다).
+ * 경기 중에는 채팅 전체가 중계라 모든 턴이 같은 레일을 달아 아무것도 가르지
+ * 못하고, 경기가 끝나면 그 턴들은 아래 카드 하나로 접혀 보이지 않는다. 평시
+ * 대화 사이에서 경기를 가르는 표지는 접힌 카드의 레일 하나다.
  */
-.turn-model.in-match {
-  border-left: 2px solid var(--gold-soft);
-  padding-left: var(--sp-4);
-}
 /**
  * 접힌 경기 기록 — **결과 한 줄만 남는다.**
  *

@@ -23,7 +23,7 @@ import { MatchReportPanel } from "./office/match-report";
 import { createLineupSaver, type LineupSaver } from "./lineup-saver";
 import { MatchClock, MatchHeadline, MatchOpponent, MatchOverview } from "./match-view";
 import { StageSplitHandle } from "./stage-split-handle";
-import { Crest, clubStyle, oppStyle } from "./crest";
+import { Crest, clubStyle } from "./crest";
 import { KickoffGate } from "./kickoff-gate";
 import { PlayerCardProvider } from "./player-card";
 import {
@@ -186,12 +186,6 @@ export function GameScreen({ gameId }: { gameId: string }) {
    */
   const pendingMatch = game?.views.match ?? null;
   const liveMatch = pendingMatch?.beforeKickoff === true ? null : pendingMatch;
-  /** 이번 경기의 상대 — 입장 전 게이트도 상대 색을 읽으므로 `pendingMatch` 기준이다 */
-  const opponent = pendingMatch
-    ? pendingMatch.home.ours
-      ? pendingMatch.away
-      : pendingMatch.home
-    : null;
   /** 열린 장부 뷰 — null이면 무대(채팅 / 경기+채팅)가 보인다 */
   const [panel, setPanel] = useState<Panel | null>(null);
   /**
@@ -897,15 +891,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
     >
       {/* `data-phase` — 화면에 단계를 적지 않는 대신 e2e가 읽는 자리. 감독에게는
           달력·채팅이 이미 말해 주므로 배지가 자리를 차지할 이유가 없었다 */}
-      {/* 구단 색은 여기서 선다 — `--club*`는 세이브 팀, `--opp*`는 이번 경기의 상대
-          (ui/design-system.md §2 「주입」). 아래 어디서든 `var(--club-wash)`가 이 값이다 */}
+      {/* 구단 색은 여기서 선다 — 세이브 팀의 `--club*` 한 벌이다 (ui/design-system.md
+          §2 「주입」). 아래 어디서든 `var(--club-wash)`가 이 값이다 */}
       <div
         className={`app${liveMatch ? " in-match" : ""}`}
         data-phase={game.phase}
-        style={{
-          ...clubStyle(game.team.colours, game.team.id, game.team.shortName),
-          ...(opponent ? oppStyle(opponent.colours, opponent.id, opponent.short) : {}),
-        }}
+        style={clubStyle(game.team.colours, game.team.id, game.team.shortName)}
       >
         <header className="topbar">
           {/* 로고 = 게임 목록으로 나가는 문 (진행 중 턴은 서버가 마무리해 저장한다) */}
