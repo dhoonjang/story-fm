@@ -509,13 +509,13 @@ function dailyTick(
       : "training";
 
   resolveInjuries(state, kind.injury);
-  // 오늘 재활 중인 선수 — 경기 감각의 자리를 가르는 유일한 사실 (아래 루프)
+  // 오늘 재활 중인 선수 — 적응도가 끌리는 자리(재활 30 · 떠나 있음 55)를 가르는 사실
   const injuredPlayers = openInjuryIds(state);
   /**
    * **오늘 몸을 쓰는 세션 수** — 누적 피로와 훈련 부상이 같은 이 수를 읽는다.
    *
    * 여기서 한 번만 세는 것은 순서 때문이다: 잔고를 적립하는 루프가 세션 루프보다
-   * 앞에 서야 하고(회복·폼·감각과 한 하루에 얹힌다), 세션 루프는 엔트리에 `done`을
+   * 앞에 서야 하고(회복·폼·적응도와 한 하루에 얹힌다), 세션 루프는 엔트리에 `done`을
    * 찍으므로 뒤로 옮길 수 없다. 두 곳에서 따로 세면 프리시즌 이중 세션이 한쪽에만
    * 잡히는 날이 온다.
    */
@@ -529,8 +529,8 @@ function dailyTick(
      * **오늘 이 선수가 우리 훈련장에 있었나** — 감독이 기간을 정해 뺐거나, 재활
      * 중이거나, **대표팀에 가 있으면** 아니다 (season.md §4 · player.md §5.5 ·
      * competition.md §5-1). 셋은 이유가 다르되 하루의 성격은 같다: 우리가 깐 세션을
-     * 그가 소화하지 않았다. 잔고가 가장 빨리 빠지는 하루이고, 그 대신 경기 감각은
-     * 훈련장을 떠난 값(25) 쪽으로 끌린다.
+     * 그가 소화하지 않았다. 잔고가 가장 빨리 빠지는 하루이고, 그 대신 전술 적응도는
+     * 훈련장을 떠난 자리 쪽으로 끌린다 (player.md §7.4).
      */
     const offSite = restingOn(state, player.id) || isAwayFromClub(state, player);
     const away = offSite || injuredPlayers.has(player.id);
@@ -1756,11 +1756,6 @@ export function simulateOtherMatches(state: GameState, digest: TickSink): void {
           p.state.condition -
             conditionDrain(p, position, spec, minutes, today, 1, possession[side]),
         );
-        /**
-         * 뛴 만큼 경기 감각이 오른다 — **친선도 그대로 올린다** (season.md §2).
-         * 몸에 남는 것은 친선도 겪는 자리이고, 프리시즌이 몸을 만든다는 말이
-         * 장부에 서는 곳이 여기다.
-         */
       }
     }
     /**
