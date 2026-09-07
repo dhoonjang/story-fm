@@ -2266,11 +2266,6 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
         form: randInt(rng, -1, 1) * 0.15,
         // 프리시즌 시작 — 잘 쉬고 돌아왔다
         condition: randInt(rng, 70, 86),
-        /**
-         * 몸은 쉬고 왔지만 **경기 감각은 무뎌진 채로 온다** (player.md §5.4).
-         * 시즌 전환이 세우는 값과 같은 자리에서 출발해야 첫 시즌의 프리시즌도
-         * 두 번째 시즌의 프리시즌과 같은 판이 된다.
-         */
       },
       isCaptain: false,
     };

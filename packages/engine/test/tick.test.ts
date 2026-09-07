@@ -768,9 +768,9 @@ describe("임대 자원이 서는 자리 (season.md §2 임대)", () => {
  * 곡선 자체는 순수 함수라 세계를 세우지 않고 직접 부른다. 세계가 필요한 것은
  * "리그 전체가 같은 규칙으로 도는가"와 "훈련장에 있으면 잃지 않는가" 둘뿐이다.
  *
- * ⚠️ 이 축이 **경기 감각을 대신한다.** 오래 못 뛴 몸의 대가가 능력치를 평평하게
- * 깎는 항이 아니라 판을 몸으로 기억하는 정도로 서므로, 같은 결장이라도 중원이
- * 최전방보다 크게 문다 (`famFactor`).
+ * ⚠️ 이 감쇠가 **「오래 못 뛰었다」의 대가를 진다.** 능력치를 평평하게 깎는 항이
+ * 아니라 판을 몸으로 기억하는 정도로 서므로, 같은 결장이라도 중원이 최전방보다
+ * 크게 문다 (`famFactor`).
  */
 describe("전술 적응도의 결장 감쇠 (player.md §7.4)", () => {
   it("클럽에 있는 하루는 끌지 않는다 — 주말도 훈련 주간의 일부다", () => {
@@ -846,7 +846,7 @@ describe("누적 피로 (player.md §5.5)", () => {
   it("값이 없으면 빈 통이고, 전력에는 한 칸도 닿지 않는다", () => {
     const old: PlayerState = { form: 0, condition: 75 };
     expect(fatigueOf(old)).toBe(FATIGUE_BASE);
-    // ⚠️ 이 축의 계약 — 유효 능력치의 항은 폼·체력·감각 셋뿐이다
+    // ⚠️ 이 축의 계약 — 유효 능력치의 항은 폼·체력 둘뿐이다 (적응도는 `famFactor`가 따로 문다)
     expect(stateModifier({ ...old, fatigue: FATIGUE_MAX })).toBe(stateModifier(old));
     expect(clampFatigue(-5)).toBe(0);
     expect(clampFatigue(FATIGUE_MAX + 5)).toBe(FATIGUE_MAX);
