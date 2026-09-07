@@ -436,7 +436,7 @@ const TRAINING_INPUT = z
         position: z.string().min(1).optional(),
         rest: z
           .object({ until: dateArg })
-          .describe("그날까지 이 선수만 훈련에서 뺀다 — 누적 피로가 빠지고 경기 감각은 무뎌진다")
+          .describe("그날까지 이 선수만 훈련에서 뺀다 — 누적 피로가 빠지고 전술 적응도가 무뎌진다")
           .optional(),
         clear: z.boolean().optional(),
       })
