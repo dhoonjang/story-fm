@@ -7,7 +7,6 @@ import {
   TACTIC_AXES,
   TACTIC_TOGGLES,
   anchorOf,
-  flankTone,
   formatScore,
   positionGroupOf,
   separateBoardPoints,
@@ -21,7 +20,7 @@ import { IconBoard } from "@/components/icons";
 import { ConditionBar } from "@/components/condition-bar";
 import { PitchChip, PitchGround, useRovingMarkers } from "./pitch";
 import { usePlayerCard } from "./player-card";
-import { Crest, cachedCrest } from "./crest";
+import { Crest } from "./crest";
 
 type Match = NonNullable<OfficeViews["match"]>;
 type MatchPlayer = Match["onPitch"]["home"][number];
@@ -186,8 +185,6 @@ export function MatchHeadline({ match, closing = false }: { match: Match; closin
   );
 }
 
-/** 플랭크 폭 — 스코어보드 양 끝의 구단 색 (ui/design-system.md §2) */
-
 /**
  * 스코어보드 — **스코어와 두 팀 이름뿐.**
  *
@@ -195,25 +192,14 @@ export function MatchHeadline({ match, closing = false }: { match: Match; closin
  * 정작 커야 할 스코어가 작아지고, 그것들은 "지금 몇 분 몇 대 몇"이라는 한 줄로
  * 상단에서 읽히는 편이 낫다.
  *
- * 홈은 언제나 왼쪽이고 양 끝의 플랭크가 그 구단의 색이다 — 우리가 원정이면 왼쪽이
- * `--opp`다. 두 밑색이 갈리지 않으면 원정만 보조색으로 물러난다 (§2 충돌 규칙 4).
+ * 편을 가르는 것은 셋이고 셋 다 이 줄에 이미 서 있다 — **자리**(홈 왼쪽·원정
+ * 오른쪽) · **문장**(이 판의 구단 색 한 벌) · **잉크**(우리 1층·상대 3층 —
+ * `.mv-team`의 `ours`/`theirs`). 구단 색 면을 하나 더 깔지 않는다 (§2 충돌 규칙 7).
  */
 function Scoreboard({ match }: { match: Match }) {
-  const homeCrest = cachedCrest(match.home.id, match.home.short, match.home.colours);
-  const awayCrest = cachedCrest(match.away.id, match.away.short, match.away.colours);
-  const tone = flankTone(homeCrest, awayCrest);
-  const awaySteps = tone.away !== awayCrest.primary;
-  const homeVar = match.home.ours ? "club" : "opp";
-  const awayVar = match.away.ours ? "club" : "opp";
   return (
     <div className="mv-score" data-testid="match-score">
-      {/* 플랭크의 자리는 match.css, 색만 어느 쪽이 우리인지에 따라 여기서 */}
-      <i className="mv-flank home" style={{ background: `var(--${homeVar})` }} />
-      <i
-        className="mv-flank away"
-        style={{ background: `var(--${awayVar}${awaySteps ? "-2" : ""})` }}
-      />
-      <span className={`mv-team ${match.home.ours ? "ours" : ""}`}>
+      <span className={`mv-team ${match.home.ours ? "ours" : "theirs"}`}>
         <Crest
           id={match.home.id}
           shortName={match.home.short}
@@ -225,7 +211,7 @@ function Scoreboard({ match }: { match: Match }) {
       <b className="mv-goals">
         <span className="fig">{formatScore(match.score.home, match.score.away)}</span>
       </b>
-      <span className={`mv-team away ${match.away.ours ? "ours" : ""}`}>
+      <span className={`mv-team away ${match.away.ours ? "ours" : "theirs"}`}>
         {match.away.name}
         <Crest
           id={match.away.id}

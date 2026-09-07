@@ -31,13 +31,11 @@
   color: var(--text-3);
 }
 /**
- * 스코어보드 해부 — 경기 화면(`.mv-score`)과 **같은 뼈대**다: 양 끝 구단 색 플랭크
- * 6px · 문장 · 팀 이름 · 가운데 스코어. 면을 깔지 않는 것은 이 해부가 서는 두 자리
- * (종료 카드 `--pop` · 달력 상세 `--panel`)의 바탕이 다르기 때문이다 — 플랭크와
- * 스코어만으로 스코어버그가 읽힌다.
+ * 스코어보드 해부 — 경기 화면(`.mv-score`)과 **같은 뼈대**다: 문장 · 팀 이름 · 가운데
+ * 스코어. 면을 깔지 않는 것은 이 해부가 서는 두 자리(종료 카드 `--pop` · 달력 상세
+ * `--panel`)의 바탕이 다르기 때문이다 — 문장과 스코어만으로 스코어버그가 읽힌다.
  */
 .mr-scoreboard {
-  position: relative;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
@@ -45,22 +43,7 @@
   width: 100%;
   padding: var(--sp-2) var(--sp-3);
 }
-/* 플랭크 — 양 끝 6px. 홈은 늘 왼쪽이고 색(`--club`/`--opp`)은 어느 쪽이 우리인지에
-   따라 갈리므로 컴포넌트가 인라인으로 준다 (경기 화면의 `.mv-flank`와 같은 규칙) */
-.mr-flank {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 6px;
-}
-.mr-flank.home {
-  left: 0;
-}
-.mr-flank.away {
-  right: 0;
-}
-/* 두 팀 이름 — 우리 팀도 같은 잉크다. 어느 쪽이 우리인지는 플랭크의 구단 색이
-   말한다. 340px 자리에서는 이름이 접힌다 — 말줄임은 없다 (design-system §3) */
+/* 두 팀 이름 — 340px 자리에서는 이름이 접힌다, 말줄임은 없다 (design-system §3) */
 .mr-sb-team {
   display: flex;
   flex-wrap: wrap;
@@ -75,6 +58,14 @@
 .mr-sb-team.away {
   justify-content: flex-start;
   text-align: left;
+}
+/* **잉크의 층이 편을 가른다** — 우리 1층, 상대 3층 (design-system §2 충돌 규칙 7).
+   경기 화면의 `.mv-team`과 같은 짝이다. 남의 경기는 둘 다 서지 않는다 (`sideClass`) */
+.mr-sb-team.ours {
+  color: var(--text);
+}
+.mr-sb-team.theirs {
+  color: var(--text-3);
 }
 .mr-sb-mid {
   display: flex;
@@ -236,7 +227,7 @@
 }
 /* 두 구단의 몫 — 왼쪽(우리)은 채움, 오른쪽(상대)은 바탕이 그린다. 두 막대를 겹치면
    반올림 틈이 생긴다. 잉크는 줄 양 끝의 두 숫자와 같은 층이다(우리 1층·상대 3층) —
-   구단 색은 이 카드에서 머리의 플랭크가 이미 한 벌 썼다 (design-system §2 규칙 7) */
+   구단 색은 이 카드에서 머리의 문장 둘이 이미 한 벌 썼다 (design-system §2 규칙 7) */
 .mr-stat-bar {
   grid-column: 1 / -1;
   display: block;

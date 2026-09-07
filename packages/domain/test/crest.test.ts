@@ -4,13 +4,10 @@ import {
   CLUB_TONE_SURFACE,
   CREST_INKS,
   CREST_MIN_INK_CONTRAST,
-  FIELD_SEPARATION,
   type ClubColours,
-  type Crest,
   clubTonesOf,
   contrastRatio,
   crestOf,
-  flankTone,
 } from "@story-fm/domain";
 /**
  * 96팀의 공식 색 — 엔진의 데이터 파일이지만 domain 타입만 가져오는 잎 모듈이라 엔진
@@ -241,25 +238,5 @@ describe("clubTonesOf — 후보 순서 (ui/design-system.md §2 「--club-hi의
       const tones = clubTonesOf(crestOf({ id }));
       expect(contrastRatio(tones.hi, PANEL_2), id).toBeGreaterThanOrEqual(CLUB_HI_MIN_CONTRAST);
     }
-  });
-});
-
-describe("flankTone — 두 밑색이 갈리지 않으면 원정만 보조색으로 물러난다", () => {
-  const withPrimary = (crest: Crest, primary: string): Crest => ({ ...crest, primary });
-  const home = withPrimary(crestOf({ id: "h" }), "#000000");
-  const away = crestOf({ id: "a" });
-
-  it("경계 1.9 — 닿으면 밑색, 못 닿으면 보조색", () => {
-    // #3c3c3c은 검정 위 1.90, #3b3b3b은 1.87 — 경계 양옆 한 단계
-    const apart = withPrimary(away, "#3c3c3c");
-    const close = withPrimary(away, "#3b3b3b");
-    expect(contrastRatio(home.primary, apart.primary)).toBeGreaterThanOrEqual(FIELD_SEPARATION);
-    expect(contrastRatio(home.primary, close.primary)).toBeLessThan(FIELD_SEPARATION);
-    expect(flankTone(home, apart)).toEqual({ home: home.primary, away: apart.primary });
-    expect(flankTone(home, close)).toEqual({ home: home.primary, away: close.secondary });
-  });
-
-  it("홈은 언제나 밑색이다", () => {
-    expect(flankTone(home, withPrimary(away, "#000000")).home).toBe(home.primary);
   });
 });

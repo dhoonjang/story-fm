@@ -4557,7 +4557,7 @@ export interface MatchReportEventView {
 export interface MatchReportTeamView {
   /**
    * 팀 id — 문장(`crestOf`)과 구단 색의 열쇠다 (ui/design-system.md §2). 종료 카드의
-   * 머리가 스코어보드와 **같은 해부**(플랭크 · 문장 · 이름 · 스코어)로 서려면 이름만으로는
+   * 머리가 스코어보드와 **같은 해부**(문장 · 이름 · 스코어)로 서려면 이름만으로는
    * 모자란다 — 어드민 편집으로 이름이 갈리면 문장도 함께 갈린다.
    */
   id: string;

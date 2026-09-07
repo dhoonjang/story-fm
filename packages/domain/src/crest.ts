@@ -97,10 +97,7 @@ const PRIMARY_LIGHTNESS = [31, 39, 47] as const;
 const SECONDARY_SATURATION = 46;
 const SECONDARY_LIGHTNESS_GAP = 33;
 const SECONDARY_HUE_OFFSETS = [30, 150, 210] as const;
-/**
- * 분할이 보이는 최소 대비. 글자 대비(4.5)와 다른 축이다 — 여기는 면과 면 사이다.
- * 두 구단이 나란히 설 때도 같은 자다 (`flankTone` · ui/design-system.md §2 충돌 규칙 4).
- */
+/** 분할이 보이는 최소 대비. 글자 대비(4.5)와 다른 축이다 — 여기는 면과 면 사이다 */
 export const FIELD_SEPARATION = 1.9;
 
 /** 글자·윤곽선 두 벌. 밑색 명도가 어느 쪽을 쓸지 정한다 */
@@ -502,18 +499,6 @@ export function clubTonesOf(
   const hiInk =
     contrastRatio(surface.bg, hi) >= contrastRatio(INK_LIGHT, hi) ? surface.bg : INK_LIGHT;
   return { hi, hiInk, lifted };
-}
-
-/**
- * 두 구단이 나란히 설 때의 플랭크 색 — 홈은 언제나 밑색이고, 두 밑색이 갈리지
- * 않으면 원정만 보조색으로 물러난다 (ui/design-system.md §2 충돌 규칙 4).
- */
-export function flankTone(
-  home: Crest,
-  away: Crest,
-): { readonly home: string; readonly away: string } {
-  const apart = contrastRatio(home.primary, away.primary) >= FIELD_SEPARATION;
-  return { home: home.primary, away: apart ? away.primary : away.secondary };
 }
 
 /**

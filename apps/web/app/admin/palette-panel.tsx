@@ -22,7 +22,7 @@ import type { AdminTeamRow, TeamCatalogResponse } from "./types";
  * `packages/engine/src/data/club-colours.ts` 하나가 갖고, 팀 편집 창은 `colours`를
  * 노출하지 않는다.
  *
- * 견본은 저마다 **실제로 설 표면** 위에 앉는다. 밝힘은 `--panel-2`, 워시와 플랭크는
+ * 견본은 저마다 **실제로 설 표면** 위에 앉는다. 밝힘은 `--panel-2`, 워시는
  * `--panel`이다 — 표 배경 위에 대충 세우면 눈으로 본 것과 옆 칸의 대비 수치가 갈린다.
  */
 
@@ -134,12 +134,6 @@ function PaletteRowCells({ row, showLeague }: { row: PaletteRow; showLeague: boo
           {row.shortName}
         </span>
       </td>
-      <td>
-        <span className="palette-flank">
-          <i style={{ background: row.primary }} />
-          <i style={{ background: row.secondary }} />
-        </span>
-      </td>
       <td className="num">
         <Contrast value={row.rail} floor={CLUB_HI_MIN_CONTRAST} target={CLUB_HI_MIN_CONTRAST} />
       </td>
@@ -151,7 +145,7 @@ function PaletteRowCells({ row, showLeague }: { row: PaletteRow; showLeague: boo
 }
 
 /** 열 수 — 리그 머리 행과 빈 행이 표를 가로지른다 */
-const COLUMNS = 10;
+const COLUMNS = 9;
 
 export function PalettePanel({ teams }: { teams: CatalogLayer<TeamCatalogResponse> }) {
   const [query, setQuery] = useState("");
@@ -223,7 +217,6 @@ export function PalettePanel({ teams }: { teams: CatalogLayer<TeamCatalogRespons
               <th>강조</th>
               <th>밝힘</th>
               <th>워시</th>
-              <th>플랭크</th>
               {/* 문턱은 그 열 위에 선다 — 숫자는 코어가 갖고 화면은 세우기만 한다 */}
               <th className="num">
                 띠 대비 <span className="muted">{CLUB_HI_MIN_CONTRAST}:1</span>
