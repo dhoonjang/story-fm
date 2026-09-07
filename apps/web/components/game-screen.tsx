@@ -76,6 +76,14 @@ const PANEL_ANIM_MS = 260;
 const KICKOFF_SLIDE_MS = 280;
 
 /**
+ * 게이트가 물러나는 시간 — **`match-gate.css`의 `kickoff-gate-out`과 같은 값이어야
+ * 한다.** 문은 누르는 순간 열리므로 무대는 이미 경기지만, 게이트를 그 프레임에
+ * 흐름에서 빼면 한 장이 툭 사라진다. 이만큼 더 그려 두고 그동안 걷힌다
+ * (ui/design-system.md §5 모션 5 — 스코어보드가 내려오는 100ms와 겹친다).
+ */
+const GATE_LEAVE_MS = 160;
+
+/**
  * 턴이 끝난 뒤 서버 상태를 다시 받아 오는 시도 횟수 — 한 번은 `settled=1`의 상한
  * (30초)만큼 기다리므로 셋이면 1분 30초다. 그보다 오래 도는 턴은 감독이 다음 조작을
  * 할 때 어차피 새 상태를 받는다 (docs/llm/models.md §1-1).
@@ -185,7 +193,24 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 감독은 마지막으로 명단을 훑거나 마음을 바꿀 수 있다.
    */
   const pendingMatch = game?.views.match ?? null;
-  const liveMatch = pendingMatch?.beforeKickoff === true ? null : pendingMatch;
+  /**
+   * 감독이 지금 문을 지나는 중인 경기 — **그 턴이 도는 동안만 산다.**
+   *
+   * 문을 연 것은 감독이고 그 사실은 화면이 먼저 안다. 코어가 `entered`를 세워
+   * 돌려줄 때까지 기다리면 첫 휘슬이 평시 채팅에서 울리고, 중계가 끝나는 순간
+   * 화면이 통째로 갈아 끼워진다 (match.md §2). 그래서 누른 순간을 여기 적고
+   * `liveMatch`가 그것을 장부와 **함께** 읽는다.
+   *
+   * 낙관이 `busy`에 매여 있으므로 되돌리는 코드가 따로 없다 — 턴이 끝나면 장부가
+   * 말한다. 실패한 턴은 문을 열지 못했으므로 `fail`이 이 값을 지운다.
+   */
+  const [entering, setEntering] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const liveMatch =
+    pendingMatch === null ||
+    (pendingMatch.beforeKickoff === true && !(busy && entering === pendingMatch.matchId))
+      ? null
+      : pendingMatch;
   /** 열린 장부 뷰 — null이면 무대(채팅 / 경기+채팅)가 보인다 */
   const [panel, setPanel] = useState<Panel | null>(null);
   /**
@@ -345,7 +370,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       return next;
     });
   }, []);
-  const [busy, setBusy] = useState(false);
+  /* `busy`는 위에 있다 — 문을 지나는 낙관이 그 턴만큼만 살아야 해서 `liveMatch`가 읽는다 */
   const [streamText, setStreamText] = useState("");
   const [error, setError] = useState<string | null>(null);
   /** 실패 원인(기술적) — 배너 툴팁으로만 보인다. 채팅·서사에는 절대 넣지 않는다 */
@@ -398,16 +423,23 @@ export function GameScreen({ gameId }: { gameId: string }) {
   }, [game?.chat.length, busy, streamText, panel]);
 
   /** 경기가 끝나는 순간을 잡는다 — 판세가 사라지면 그 경기의 종료 화면을 연다 */
+  const matchGone = pendingMatch === null;
   useEffect(() => {
     const now = liveMatch?.matchId ?? null;
-    if (wasInMatch.current !== null && now === null) setFinished(wasInMatch.current);
+    /**
+     * **끝난 경기와 되돌아간 문은 다르다.** 킥오프 턴이 실패하면 무대가 게이트로
+     * 돌아가는데(`entering`), 그때 판은 아직 장부에 서 있다. 그것까지 「끝났다」로
+     * 읽으면 시작도 안 한 경기의 종료 카드가 선다 — `matchLogs`는 채팅에 그
+     * `matchId`가 한 번이라도 실리면 이미 항목을 갖는다.
+     */
+    if (wasInMatch.current !== null && now === null && matchGone) setFinished(wasInMatch.current);
     /**
      * 킥오프 — 열어 두었던 장부를 닫는다. 90분 동안 오른쪽 칸의 주인은 판이고,
      * 그때 상단 줄은 경기 탭으로 바뀌어 있어 **장부를 닫을 손잡이 자체가 없다**.
      */
     if (wasInMatch.current === null && now !== null) setPanel(null);
     wasInMatch.current = now;
-  }, [liveMatch?.matchId]);
+  }, [liveMatch?.matchId, matchGone]);
 
   /**
    * 턴 전송 — `text`를 주면 입력창 대신 그 문장을 보낸다 (시간 이동 버튼).
@@ -461,6 +493,11 @@ export function GameScreen({ gameId }: { gameId: string }) {
        * 조작이면 아무것도 띄우지 않는다: 감독이 친 말이 아니라 손잡이를 누른
        * 것이라, 화면에는 진행 결과만 나타나야 한다. 기다리는 동안은 `busy`가
        * 띄우는 점 세 개(`.thinking`)가 이미 말해 준다.
+       *
+       * **어느 경기의 이력인가는 `liveMatch`가 정한다** — 그것이 장부와 문을 지나는
+       * 낙관을 함께 읽으므로(위), 서버가 `entered`를 세워 돌려주기 전에 보낸 턴도
+       * `matchId`를 달고 경기 채팅에 실린다. 서버 쪽 기준도 같다: 턴을 시작할 때
+       * `phase`가 `match`이면 경기 이력이다(lib/turn-runner.ts).
        */
       const activeMatchId = liveMatch?.matchId;
       const optimistic = operation
@@ -490,6 +527,15 @@ export function GameScreen({ gameId }: { gameId: string }) {
         if (optimistic) {
           setGame((g) => (g ? { ...g, chat: g.chat.filter((t) => t !== optimistic) } : g));
         }
+        /**
+         * 실패한 턴은 문을 열지 못했다 — 무대는 게이트로 돌아간다.
+         *
+         * 서버가 확실히 버린 턴이 아니어도(`settled`가 거짓) 되돌린다: 되돌린 자리에서
+         * 다시 **경기장 입장**을 눌러도 코어가 하는 일은 같고(`entered`가 이미 서 있으면
+         * 그 턴은 보통의 진행 턴이 된다 — match.md §2), 재조회가 곧 진실을 가져온다.
+         * 지시·입력과 달리 이 낙관은 서버에 두 번 실릴 것이 없다.
+         */
+        setEntering(null);
         setError(failure.reason);
         setErrorDetail(failure.detail ?? null);
         setErrorRetry(failure.retry);
@@ -611,6 +657,29 @@ export function GameScreen({ gameId }: { gameId: string }) {
     },
     [input, busy, game, liveMatch?.matchId, gameId, saver],
   );
+
+  /**
+   * 경기의 문을 지난다 — **무대를 먼저 바꾸고 턴을 보낸다.**
+   *
+   * 순서가 곧 이 화면의 규칙이다(match.md §2): 문을 연 것은 감독이므로 스코어보드와
+   * 경기 판은 누름과 함께 서고, 코어가 `entered`를 세워 돌려주는 것은 그다음이다.
+   * 게이트는 그 자리에서 물러난다 — 프레임 하나에 사라지면 한 장이 툭 없어진다.
+   */
+  const gateLeaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [gateLeaving, setGateLeaving] = useState(false);
+  useEffect(() => () => void (gateLeaveTimer.current && clearTimeout(gateLeaveTimer.current)), []);
+  const enterMatch = useCallback(() => {
+    const id = pendingMatch?.matchId;
+    if (id === undefined) return;
+    setEntering(id);
+    // 움직임을 줄여 달라고 했으면 타이머도 0이다 (design-system.md §5.8)
+    if (!reducedMotion()) {
+      setGateLeaving(true);
+      if (gateLeaveTimer.current) clearTimeout(gateLeaveTimer.current);
+      gateLeaveTimer.current = setTimeout(() => setGateLeaving(false), GATE_LEAVE_MS);
+    }
+    void send(undefined, { kind: "advance_match" });
+  }, [pendingMatch?.matchId, send]);
 
   /**
    * 마지막으로 화면에 선 시각 — 흘러오는 턴이 같은 시각을 다시 적지 않게 한다.
@@ -1014,13 +1083,16 @@ export function GameScreen({ gameId }: { gameId: string }) {
         {/* 경기 머리 — 어느 탭을 보든 스코어·시계·득점자는 사라지지 않는다.
           휘슬 뒤에도 종료 카드가 닫힐 때까지 남아 있다가 위로 걷힌다 */}
         {whistleView && <MatchHeadline match={whistleView} closing={whistleClosing} />}
-        {/* 입장 확인 — 경기의 문. 매치데이 프로그램 한 장이 그 자리에 선다 */}
-        {pendingMatch?.beforeKickoff === true && (
+        {/* 입장 확인 — 경기의 문. 매치데이 프로그램 한 장이 그 자리에 선다.
+          문이 닫힌 동안(`liveMatch`가 아직 null) 서고, 지나는 160ms 동안 더 그려져
+          물러난다 — 그동안 스코어보드는 이미 내려오는 중이다 (match.md §8 모션) */}
+        {pendingMatch !== null && (liveMatch === null || gateLeaving) && (
           <KickoffGate
             match={pendingMatch}
             date={game.date}
             busy={busy}
-            onEnter={() => void send(undefined, { kind: "advance_match" })}
+            leaving={liveMatch !== null}
+            onEnter={enterMatch}
           />
         )}
         {/**

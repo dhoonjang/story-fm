@@ -1,5 +1,6 @@
 import { advanceTime, allMatchesDone, type GameState } from "@story-fm/engine";
-import { playMockMatch } from "../test/helpers";
+import { diffDays } from "@story-fm/domain";
+import { drillUserTactics, playMockMatch } from "../test/helpers";
 
 /**
  * 하루씩 밀어 한 시즌을 끝까지 돈다 — 유저 경기는 구간 시뮬로 치른다.
@@ -44,6 +45,12 @@ function playWhile(
     const before = state.date;
     const advanced = advanceTime(state, { days: 1 });
     if (state.phase === "matchday") playMockMatch(state, onFullTime);
+    /**
+     * **결산 판정(LLM)의 대역** — 흐른 날수만큼, 리그가 쓰는 그 규칙으로
+     * (→ docs/simulation/balance-harness.md §4). 세우지 않으면 리그만 매일 판을 익히고
+     * 감독 팀은 기준선에 멎어, 적응도를 읽는 지표가 전부 판정의 부재를 재게 된다.
+     */
+    drillUserTactics(state, diffDays(before, state.date));
     onDay?.(state);
     if (state.date === before && advanced.stopped !== "matchday") break;
   }

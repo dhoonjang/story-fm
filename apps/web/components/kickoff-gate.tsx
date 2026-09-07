@@ -36,18 +36,24 @@ export function KickoffGate({
   match,
   date,
   busy,
+  leaving = false,
   onEnter,
 }: {
   match: MatchView;
   /** 오늘 — 게이트의 데이트라인이 읽는 날짜 */
   date: string;
   busy: boolean;
+  /**
+   * 감독이 **지금 이 문을 지나는 중**인가 — 무대는 이미 경기다(`GATE_LEAVE_MS`).
+   * 그 동안만 이 한 장이 더 그려져 물러난다.
+   */
+  leaving?: boolean;
   onEnter: () => void;
 }) {
   const ours = match.home.ours ? "home" : "away";
   return (
     <div
-      className="kickoff-gate"
+      className={leaving ? "kickoff-gate leaving" : "kickoff-gate"}
       data-testid="kickoff-gate"
       role="dialog"
       aria-modal="true"
@@ -84,7 +90,8 @@ export function KickoffGate({
           className="primary-btn"
           autoFocus
           disabled={busy}
-          /* 경기의 문도 손잡이다 — 킥오프 턴인지는 장부가 안다(`beforeKickoff`) */
+          /* 경기의 문도 손잡이다 — 무대는 누름과 함께 바뀌고(match.md §2), 그 턴이
+             킥오프인지는 코어가 안다(`entered`) */
           onClick={onEnter}
           data-testid="kickoff-enter"
         >

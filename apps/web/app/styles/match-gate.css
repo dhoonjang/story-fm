@@ -215,9 +215,30 @@
   padding: 0 var(--sp-5);
 }
 
+/**
+ * 문이 열린다 — **누르는 순간 물러난다.**
+ *
+ * 무대는 이미 경기다(`game-screen.tsx`의 `entering`) — 스코어보드는 100ms 뒤부터
+ * 내려오는 중이고, 이 한 장은 그 위에서 걷힌다. 둘이 겹치는 것이 **한 번의 몸짓**을
+ * 만든다: 프로그램이 걷히고 그 자리에 경기가 선다 (match.md §8 모션 · design-system §5 5).
+ *
+ * ⚠️ 160은 `game-screen.tsx`의 `GATE_LEAVE_MS`와 같은 값이어야 한다 — 그동안 게이트를
+ * 화면에 붙들어 두는 시간이다. 걷히는 동안은 손잡이가 아니다(`pointer-events`).
+ */
+.kickoff-gate.leaving {
+  animation: kickoff-gate-out 160ms var(--ease-panel) both;
+  pointer-events: none;
+}
+@keyframes kickoff-gate-out {
+  to {
+    opacity: 0;
+  }
+}
+
 /* 모션 값은 전부 0 — `.fulltime`의 같은 규칙은 shell.css가 갖는다 (design-system §5) */
 @media (prefers-reduced-motion: reduce) {
-  .kickoff-gate {
+  .kickoff-gate,
+  .kickoff-gate.leaving {
     animation: none;
   }
 }
