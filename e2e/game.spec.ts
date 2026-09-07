@@ -213,6 +213,15 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   const broadcast = page.locator(".say.broadcast");
   await expect(broadcast).toHaveCount(0);
   await page.getByTestId("kickoff-enter").click();
+  /**
+   * **문을 연 것은 감독이고 그 사실은 화면이 먼저 안다** (match.md §2) — 무대는 첫
+   * 중계가 흐르기 전에 이미 경기다. 재시도가 붙는 `expect`로 재면 중계가 끝난 뒤에
+   * 바뀌어도 초록이라, 여기서는 **누른 직후의 지금**을 그대로 센다. 서버의 답을
+   * 기다리던 때는 이 세 줄이 전부 평시였다(장부 레일이 서고 스코어보드가 없었다).
+   */
+  expect(await page.locator(".app.in-match").count()).toBe(1);
+  expect(await page.getByTestId("match-score").count()).toBe(1);
+  expect(await page.getByTestId("tab-스쿼드").count()).toBe(0);
   await expect(page.getByTestId("kickoff-gate")).toHaveCount(0);
   await expect(broadcast.first()).toBeVisible();
   // 첫 휘슬 턴은 시계를 움직이지 않는다 — 0분에서 감독의 차례로 돌아온다
