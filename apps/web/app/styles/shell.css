@@ -1582,18 +1582,31 @@ textarea {
   font-weight: 600;
 }
 /* 문장 + 이름 — 셸이라 구단 색을 받지 않는다. 어느 구단인지는 문장과 이름이 말한다
-   (ui/design-system.md §2 규칙 5) */
+   (ui/design-system.md §2 규칙 5). 이 줄의 밑선은 **이름이 낸다** (→ `.crest`) */
 .topbar-club-line {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
   min-width: 0;
 }
-/* 문장 — 크기는 컴포넌트가 정하고(눈금 여섯), 흐름만 여기서 */
+/**
+ * 문장 — 크기는 컴포넌트가 정하고(눈금 여섯), 흐름만 여기서.
+ *
+ * ⚠️ **문장은 줄의 밑선을 내지 않는다.** 안에 든 것이 svg 하나뿐이라 밑선이 글자에서
+ * 오지 못하고 아래 모서리로 합성된다 — 20px 문장이면 밑선이 20px 아래다. 그 값이 줄
+ * 전체의 밑선이 되면 옆에 선 글자가 제 밑선보다 그만큼 내려앉는다.
+ *
+ * 그래서 문장은 밑선 정렬에서 빠진다. 줄의 밑선은 남은 글자가 내고, 문장은 그 줄
+ * 안에서 가운데에 선다 — 플렉스 줄이면 `align-self`, 글줄 안이면 `vertical-align`이
+ * 그 일을 한다. 문장이 글자 옆에 서는 자리는 전부 같은 규칙이라, 옆에
+ * `align-items: baseline`만 두면 이 한 벌이 나머지를 맞춘다.
+ */
 .crest {
   display: inline-flex;
   flex-shrink: 0;
   line-height: 0;
+  align-self: center;
+  vertical-align: middle;
 }
 .crest svg {
   display: block;

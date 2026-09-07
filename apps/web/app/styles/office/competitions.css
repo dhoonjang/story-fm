@@ -202,11 +202,13 @@
   background: var(--panel);
   overflow: hidden;
 }
+/* 한 행의 글자는 **한 밑선에 선다** — 날짜·이름·전력·스코어는 크기가 제각각이라
+   가운데로 맞추면 넷이 다 다른 높이에 앉는다. 문장은 정렬에서 빠진다 (→ `.crest`) */
 .fixture {
   display: grid;
   grid-template-columns: 74px 1fr 110px 1fr auto;
   gap: 8px;
-  align-items: center;
+  align-items: baseline;
   padding: 7px 12px;
   font-size: var(--fs-sm);
   border-bottom: 1px solid var(--line);
@@ -224,7 +226,7 @@
 }
 .fixture .side {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
   min-width: 0;
   word-break: keep-all;
@@ -234,10 +236,11 @@
   justify-content: flex-end;
   text-align: right;
 }
-/* 순위표 팀 칸 — 문장 16 + 이름 */
+/* 순위표 팀 칸 — 문장 16 + 이름. 표의 칸끼리는 밑선으로 맞으므로 이 칸의 밑선도
+   이름이 내야 한다 — 문장이 내면 이름만 옆 숫자들보다 떠오른다 (→ `.crest`) */
 .team-cell > span {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
 }
 .fixture .mid {
