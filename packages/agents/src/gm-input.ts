@@ -108,18 +108,22 @@ import {
   personaRoleLabel,
   PROMISE_KIND_KO,
   SET_PIECE_KO,
+  SET_PIECE_ROLE_KO,
   SET_PIECE_ROUTINE_AXES,
   SET_PIECE_ROUTINE_NEUTRAL,
   setPieceRoutineLevel,
   setPieceRoutineWord,
   slotOfTime,
   TACTIC_TOGGLES,
+  tacticAxisOf,
+  tacticWord,
   tacticToggleValue,
   tacticToggleWord,
   tacticsBrief,
   RELATION_TIER_KO,
   TRANSFER_REQUEST_REASON_KO,
   visionItemText,
+  type BoardMove,
   type CallUpReturnState,
   type GamePlayer,
   type MatchRecord,
@@ -1573,6 +1577,41 @@ export function buildStandingBlock(
     `세트피스 키커: 코너 ${takerName(takers.corner)} · 프리킥 ${takerName(takers.freeKick)} · 페널티 ${takerName(takers.penalty)}`,
     `</standing>`,
   ];
+}
+
+/**
+ * `<board_moves>` — **이번 턴 감독이 전술판에서 직접 움직인 것.**
+ *
+ * 판 조작은 해석기를 거치지 않고 코어가 먼저 적용하므로 `<standing>`에 선 값은 이미
+ * 그 조작이 반영된 뒤의 값이다. 그것만 주면 판에서 라인을 내리고 같은 턴에 "한 칸
+ * 내려"라고 말한 감독이 두 칸 내려간 판을 받는다 — 해석기가 되풀이를 알아보려면
+ * **판이 떠나온 값**이 있어야 한다 (agents.md §3 지시 해석).
+ *
+ * 지난 턴의 조작은 여기 서지 않는다. 이 블록의 뜻은 "걸려 있다"가 아니라 "이번 턴에
+ * 이미 갔다"이고, 그 구별이 `<standing>`과 이것을 가른다.
+ */
+export function buildBoardMovesBlock(state: GameState, moves: readonly BoardMove[]): string[] {
+  if (moves.length === 0) return [];
+  const who = (id: string): string => playerName(state, id);
+  const lines = moves.map((move) => {
+    switch (move.kind) {
+      case "tactic": {
+        const axis = tacticAxisOf(move.axis);
+        return `- ${axis.label} ${move.from} → ${move.to}(${tacticWord(move.axis, move.to)})`;
+      }
+      case "position":
+        return `- ${who(move.playerId)} 자리 → ${move.position}`;
+      case "role":
+        return `- ${who(move.playerId)} 역할 → ${move.role}`;
+      case "substitution":
+        return `- 교체: ${who(move.out)} → ${who(move.in)}`;
+      case "setPiece":
+        return `- ${SET_PIECE_KO} ${SET_PIECE_ROLE_KO[move.role]} 키커 → ${
+          move.playerId === null ? "지정 해제" : who(move.playerId)
+        }`;
+    }
+  });
+  return [`<board_moves>`, ...lines, `</board_moves>`];
 }
 
 /**

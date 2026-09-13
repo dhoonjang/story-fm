@@ -37,7 +37,12 @@ import {
   wageExpectationOf,
   type GameState,
 } from "@story-fm/engine";
-import { describeManagerSkills, describeReputation } from "@story-fm/domain";
+import {
+  describeManagerSkills,
+  describeReputation,
+  tacticAxisOf,
+  tacticWord,
+} from "@story-fm/domain";
 import {
   MATCH_ADVANCED,
   SKILL_CATALOG,
@@ -60,6 +65,7 @@ import {
   buildGmReference,
   buildGmStateNote,
   buildGmTools,
+  buildBoardMovesBlock,
   buildToolSpecs,
   buildMatchReference,
   describeCharacters,
@@ -70,6 +76,7 @@ import {
   recordCharacterInjection,
   runGmTurn,
   runOnboarding,
+  runTacticOrders,
   type GmToolCall,
 } from "@story-fm/agents";
 import { awardTitle, boardExpectationLine, normalizeSpeaker, SCOUT_DAYS } from "@story-fm/domain";
@@ -2043,5 +2050,64 @@ describe("교섭 테이블의 입력 — 화자와 그가 답하는 칸", () => 
     expect(input).toContain(`agent “${agent!.name}” —`);
     // 그 답은 서류가 부르는 상대 하나, 곧 파는 구단의 말로 읽힌다
     expect(input).toContain(`@${club!.name}: 옛 세이브의 답이다`);
+  });
+});
+
+/**
+ * 판 조작은 해석기를 거치지 않고 코어가 먼저 적용하므로 `<standing>`은 **이미 움직인
+ * 뒤**의 값이다. 같은 턴에 같은 뜻을 말로도 하면 그 값에서 한 번 더 움직인다 —
+ * 되풀이를 가릴 근거는 판이 **떠나온 값**뿐이다 (agents.md §3 지시 해석).
+ */
+describe("<board_moves> — 이번 턴 판이 움직인 것", () => {
+  it("축은 앞 값과 뒤 값을 함께 든다 — 뒤 값만 주면 되풀이를 가릴 수 없다", () => {
+    const state = game();
+    const block = buildBoardMovesBlock(state, [
+      { kind: "tactic", axis: "defensiveLine", from: 4, to: 3 },
+    ]).join("\n");
+    expect(block).toContain("<board_moves>");
+    expect(block).toContain(`${tacticAxisOf("defensiveLine").label} 4 → 3`);
+    // 낱말표는 하나다 — 손으로 적으면 판과 해석기가 같은 3을 다르게 부른다
+    expect(block).toContain(tacticWord("defensiveLine", 3));
+  });
+
+  it("사람이 움직인 줄은 이름으로 선다 — 해석기 입력에 id만 서면 대 볼 수 없다", () => {
+    const state = game();
+    const [out, incoming] = userPlayers(state);
+    const block = buildBoardMovesBlock(state, [
+      { kind: "substitution", out: out!.id, in: incoming!.id },
+    ]).join("\n");
+    expect(block).toContain(out!.name);
+    expect(block).toContain(incoming!.name);
+  });
+
+  it("움직인 것이 없으면 블록이 서지 않는다 — 빈 태그를 세우지 않는다", () => {
+    expect(buildBoardMovesBlock(game(), [])).toEqual([]);
+  });
+
+  it("해석기가 보낸 입력에 그 블록이 감독의 말 앞에 선다", async () => {
+    // 장부 없는 경기 상태 — 입력 조립이 경기 갈래로 가되 실을 것이 없다
+    const state = { pendingMatch: { matchId: "m" }, chat: [] } as unknown as GameState;
+    let sent: TurnRequest | undefined;
+    const llm: GameLLM = {
+      runTurn: (req) => {
+        sent = req;
+        req.tools?.find((t) => t.name === "report_tactic_orders")?.handle({ ops: {} });
+        return Promise.resolve({
+          text: "",
+          history: { version: 1, provider: "google", model: "test", messages: [] },
+          historyBase: 0,
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          toolCallCount: 1,
+          stopReason: "completed" as StopReason,
+        });
+      },
+    };
+    await runTacticOrders(state, new Map(), "라인 한 칸 내립니다", {
+      llm,
+      boardMoves: [{ kind: "tactic", axis: "defensiveLine", from: 4, to: 3 }],
+    });
+    const user = sent!.user;
+    expect(user).toContain("<board_moves>");
+    expect(user.indexOf("<board_moves>")).toBeLessThan(user.indexOf("@감독:"));
   });
 });

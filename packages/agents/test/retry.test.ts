@@ -127,7 +127,7 @@ describe("runTacticOrders — 의도를 받은 뒤의 실패", () => {
     const llm = failsAfterReporting();
     const spy = vi.spyOn(llm, "runTurn");
 
-    const result = await runTacticOrders(emptyState, SPECS, "계속 갑시다", llm);
+    const result = await runTacticOrders(emptyState, SPECS, "계속 갑시다", { llm });
 
     expect(result.ok).toBe(true);
     expect(result.ok && result.intent.ops.set_tactics).toEqual([{ pressing: 4 }]);
@@ -157,7 +157,7 @@ describe("runTacticOrders — 의도를 받은 뒤의 실패", () => {
     };
     const spy = vi.spyOn(llm, "runTurn");
 
-    const result = await runTacticOrders(emptyState, SPECS, "왼쪽을 두껍게", llm);
+    const result = await runTacticOrders(emptyState, SPECS, "왼쪽을 두껍게", { llm });
 
     expect(result.ok).toBe(false);
     expect(spy).toHaveBeenCalledTimes(2);
@@ -181,7 +181,7 @@ describe("runTacticOrders — 의도를 받은 뒤의 실패", () => {
     const llm: GameLLM = { runTurn: () => Promise.reject(thrown) };
     const spy = vi.spyOn(llm, "runTurn");
 
-    await expect(runTacticOrders(emptyState, SPECS, "왼쪽을 두껍게", llm)).rejects.toBe(thrown);
+    await expect(runTacticOrders(emptyState, SPECS, "왼쪽을 두껍게", { llm })).rejects.toBe(thrown);
     expect(spy).toHaveBeenCalledTimes(1);
   });
 });

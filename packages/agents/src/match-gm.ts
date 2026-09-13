@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PHASE_END } from "@story-fm/domain";
+import { PHASE_END, type BoardMove } from "@story-fm/domain";
 import {
   awaitingShootout,
   refreshPacket,
@@ -145,6 +145,8 @@ export interface MatchToolContext {
   calls: GmToolCall[];
   goals: GoalMark[];
   cards: CardMark[];
+  /** 이번 턴 전술판이 이미 움직인 것 — 해석기가 되풀이를 가릴 근거다 (agents.md §3) */
+  boardMoves?: readonly BoardMove[];
   /** 마감 에이전트를 부를 때 쓸 클라이언트 — 테스트가 갈아 끼운다 */
   finalizeLlm?: GameLLM;
   /** 마감이 끝난 뒤 장부의 마지막 분 — 장부가 지워진 뒤 화면의 시각 줄이 읽는다 */
@@ -166,7 +168,9 @@ async function runTacticOrdersTool(
   orders: string,
 ): Promise<{ ok: boolean; message: string }> {
   const specs = new Map(buildToolSpecs(state, ctx.calls).map((t) => [t.name, t] as const));
-  const parsed = await runTacticOrders(state, specs, orders);
+  const parsed = await runTacticOrders(state, specs, orders, {
+    ...(ctx.boardMoves ? { boardMoves: ctx.boardMoves } : {}),
+  });
   if (!parsed.ok) return { ok: false, message: parsed.message };
   // 시계를 미는 것은 `advance_match` 하나다 — 지시는 판만 바꾼다 (agents.md §3)
   const applied = applyTacticOrders(state, parsed.intent, ctx.calls, ctx.goals, ctx.cards);

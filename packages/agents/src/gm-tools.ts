@@ -132,6 +132,7 @@ import {
   TEAM_TALK_OCCASIONS,
   TRANSITION_MODES,
   TABLE_LINE_MAX,
+  type BoardMove,
 } from "@story-fm/domain";
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
 
@@ -1664,7 +1665,11 @@ export function sideTeamName(state: GameState, side: "home" | "away"): string {
 export function buildGmTools(
   state: GameState,
   calls: GmToolCall[],
-  options?: { deferNegotiationIds?: ReadonlySet<string> },
+  options?: {
+    deferNegotiationIds?: ReadonlySet<string>;
+    /** 이번 턴 전술판이 이미 움직인 것 — 해석기가 되풀이를 가릴 근거다 (agents.md §3) */
+    boardMoves?: readonly BoardMove[];
+  },
 ): GameToolSpec[] {
   const descriptions = skillDescriptions();
   /**
@@ -1683,7 +1688,9 @@ export function buildGmTools(
       if (!parsed.success) return inputError(parsed.error);
       const blocked = dismissed(state, true);
       if (blocked) return blocked;
-      const intent = await runTacticOrders(state, specs, parsed.data.orders);
+      const intent = await runTacticOrders(state, specs, parsed.data.orders, {
+        ...(options?.boardMoves ? { boardMoves: options.boardMoves } : {}),
+      });
       if (!intent.ok) return { ok: false, message: intent.message };
       // 평시에는 굴릴 판이 없다 — 골·카드 표식도 없다
       const applied = applyTacticOrders(state, intent.intent, calls, [], [], {

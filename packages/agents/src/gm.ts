@@ -35,7 +35,7 @@ import {
   type GoalMark,
   type TrainingBrief,
 } from "@story-fm/engine";
-import type { CharacterEntry, TickEvent } from "@story-fm/domain";
+import type { BoardMove, CharacterEntry, TickEvent } from "@story-fm/domain";
 import { agentConfig, createGameLLM, resolveLlmMode, type TurnResult } from "@story-fm/llm";
 import { MAX_REPORT_CARDS, NO_CARDS, takeArrivedReports, type ArrivedCards } from "./report-cards";
 import { reportTraining } from "./training-rater";
@@ -396,6 +396,7 @@ async function callGm(
   matchCtx: MatchToolContext,
   onText: ((delta: string) => void) | undefined,
   operatorOrders: readonly string[] | undefined,
+  boardMoves: readonly BoardMove[] | undefined,
 ): Promise<GmCall> {
   const { inMatch, kickoff, operator } = shape;
   const config = agentConfig(inMatch ? "match-gm" : "gm");
@@ -421,7 +422,10 @@ async function callGm(
     ? kickoff
       ? []
       : buildMatchTools(state, matchCtx, { operator })
-    : buildGmTools(state, ledger.calls, { deferNegotiationIds: opening.deferNegotiationIds });
+    : buildGmTools(state, ledger.calls, {
+        deferNegotiationIds: opening.deferNegotiationIds,
+        ...(boardMoves && boardMoves.length > 0 ? { boardMoves } : {}),
+      });
   const system = inMatch ? [MATCH_GM_SYSTEM, buildMatchReference(state)] : peaceSystem(state);
   /**
    * **패킷은 구간이 굴러간 뒤에만 싣는다.** 선수를 부른 한 마디에 패킷 전체를 실으면
@@ -800,6 +804,11 @@ export async function runGmTurn(
   operation?: TurnOperation | null,
   /** 전술판 조작 — 코어가 **이미 적용한** 것의 기록이다 */
   operatorOrders?: readonly string[],
+  /**
+   * 같은 조작을 **해석기가 읽을 사실로** 적은 것 — `operatorOrders`가 GM에게 보일
+   * 문장이라면 이쪽은 어느 축이 어디서 어디로 갔는가다 (agents.md §3 지시 해석).
+   */
+  boardMoves?: readonly BoardMove[],
 ): Promise<GmTurnResult> {
   const inMatch = state.phase === "match";
   const shape: TurnShape = {
@@ -819,6 +828,7 @@ export async function runGmTurn(
     calls: ledger.calls,
     goals: ledger.goals,
     cards: ledger.cards,
+    ...(boardMoves && boardMoves.length > 0 ? { boardMoves } : {}),
     onFinalized: (minute) => (ledger.finalMinute = minute),
   };
   const opening = await openTurn(state, shape, operation, ledger);
@@ -831,6 +841,7 @@ export async function runGmTurn(
     matchCtx,
     onText,
     operatorOrders,
+    boardMoves,
   );
   return closeTurn(state, shape, opening, ledger, call);
 }
