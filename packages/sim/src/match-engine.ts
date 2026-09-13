@@ -10,7 +10,6 @@ import type {
   InjuryRiskGrade,
   Player,
   PositionGroup,
-  SetPieceProfile,
   ShotOrigin,
   StrengthPacket,
   SubCause,
@@ -35,7 +34,8 @@ import {
 } from "./directives";
 import { emptyStatLine, subLimitsOf, type MatchLedgerState } from "./match-ledger";
 import { conditionDrain, drainVariance } from "./stamina";
-import { penaltyRate, penaltySkill, sampleShot, savedShare } from "./shot-model";
+import { penaltyRate, sampleShot, savedShare } from "./shot-model";
+import { takerOnPitch, type SetPieceRole } from "./set-piece-taker";
 import { CORNER_SHOT_SHARE, DIRECT_FREE_KICK_SHARE } from "./strength-packet";
 
 /**
@@ -358,8 +358,12 @@ function weightedRoute(
   return routes[routes.length - 1] ?? null;
 }
 
+/** 그라운드 위 전원 — 퇴장한 사람만 빠진다 */
+const onPitch = (squad: SegmentSquad, gone: ReadonlySet<string> = new Set()) =>
+  squad.onPitch.filter((p) => !gone.has(p.id));
+
 const outfield = (squad: SegmentSquad, gone: ReadonlySet<string> = new Set()) =>
-  squad.onPitch.filter((p) => positionGroupOfPlayer(p) !== "GK" && !gone.has(p.id));
+  onPitch(squad, gone).filter((p) => positionGroupOfPlayer(p) !== "GK");
 
 /**
  * 도움 — 시야·패스. 모든 골에 붙지는 않는다 (단독 돌파·PK).
@@ -665,20 +669,17 @@ function causesFor(packet: StrengthPacket, side: MatchSide): PacketTag[] {
  * 대조한다 — 나간 사람이 코너를 차는 장부는 §5의 반려다.
  *
  * **간이 시뮬도 이 함수를 부른다** (match.md §7) — 키커를 고르는 규칙이 갈리면
- * 리그의 95%에서만 지정이 무시된다.
+ * 리그의 95%에서만 지정이 무시된다. 고르는 규칙 자체는 `set-piece-taker.ts`
+ * 하나가 갖는다: `players`는 **골키퍼까지 포함한 그라운드 위 전원**이어야 한다 —
+ * 걸러서 넘기면 감독이 지정한 골키퍼 키커가 여기서만 조용히 무시된다.
  */
 export function setPieceTaker(
   packet: StrengthPacket,
   side: MatchSide,
-  role: keyof SetPieceProfile["takers"],
-  candidates: readonly Player[],
+  role: SetPieceRole,
+  players: readonly Player[],
 ): Player | null {
-  if (candidates.length === 0) return null;
-  const named = packet.guide.setPieces?.[side].takers[role] ?? null;
-  const onPitch = named === null ? undefined : candidates.find((p) => p.id === named);
-  if (onPitch) return onPitch;
-  const read = role === "penalty" ? penaltySkill : (p: Player) => p.attributes.kicking;
-  return candidates.reduce((a, b) => (read(b) > read(a) ? b : a));
+  return takerOnPitch(packet.guide.setPieces?.[side].takers[role], role, players);
 }
 
 /**
@@ -972,7 +973,7 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
     if (minutes <= 0) return;
     for (const side of ["home", "away"] as const) {
       const squad = squadOf(side);
-      const players = squad.onPitch.filter((p) => !gone.has(p.id));
+      const players = onPitch(squad, gone);
       if (players.length === 0) continue;
       const spec = tactics[side];
       // 점유는 패킷이 갖는다 — 기대 득점·체력과 같은 값을 써야 갈리지 않는다
@@ -1010,12 +1011,7 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       if (!sp) continue;
       const elapsedShare = minutes / PHASE_END.second_half;
       const corners = Math.round(sp.corners * elapsedShare);
-      const cornerTaker = setPieceTaker(
-        packet,
-        side,
-        "corner",
-        players.filter((p) => positionGroupOfPlayer(p) !== "GK"),
-      );
+      const cornerTaker = setPieceTaker(packet, side, "corner", players);
       if (corners > 0 && cornerTaker) lineOf(cornerTaker.id).corners += corners;
       const fouls = spreadCount(Math.round(sp.fouls * elapsedShare), players, (p) =>
         // 발을 뺀 선수는 파울도 덜 한다 — 카드와 같은 가중이므로 여기서 함께 준다
@@ -1169,7 +1165,13 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       // 코너인가 프리킥인가 — 죽은 공 슛의 출처 분해다 (match.md §1.4)
       const corner = rng() < CORNER_SHOT_SHARE;
       const origin: ShotOrigin = corner ? "corner" : "free_kick";
-      const taker = setPieceTaker(packet, side, corner ? "corner" : "freeKick", candidates);
+      // 키커는 골키퍼까지 포함한 전원에서 고른다(지정) — 마무리는 필드 플레이어뿐이다
+      const taker = setPieceTaker(
+        packet,
+        side,
+        corner ? "corner" : "freeKick",
+        onPitch(squad, gone),
+      );
       /**
        * **직접 프리킥은 키커가 그대로 찬다** — 그때는 도움이 없다. 코너는 언제나
        * 올리고, 마무리는 공중볼 가중 추첨이다(박스에 올라가는 사람들).
@@ -1205,8 +1207,7 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
     }
 
     if (kind === "penalty") {
-      const candidates = outfield(squad, gone);
-      const taker = setPieceTaker(packet, side, "penalty", candidates);
+      const taker = setPieceTaker(packet, side, "penalty", onPitch(squad, gone));
       if (!taker) continue;
       const against = otherSide(side);
       const keeper = keeperOf(against);
