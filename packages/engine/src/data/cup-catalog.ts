@@ -2,15 +2,14 @@
  * 유럽 대항전 카탈로그 — 챔피언스리그·유로파리그·컨퍼런스리그.
  *
  * 리그처럼 대회(Competition)의 불변 정의이고 `MATCH.competitionId`가 이 id를 가리킨다.
- * 2024-25부터의 실제 포맷(단일 리그 페이즈 + 플레이오프 + 16강)을 따른다.
+ * 2024-25부터의 실제 포맷(단일 리그 페이즈 + 플레이오프 + 녹아웃)을 따른다.
  *
- * **정원의 절반 남짓은 2부가 선다.** 실제 UCL 36팀 중 12팀은 우리가 모델링하지 않은
- * 리그(에레디비시·프리메이라·스코티시 등)에서 온다. 그 몫을 5대 리그 1부에 얹으면
- * 96클럽의 1/3이 UCL에 나가는 비현실이 되므로, **1부 티켓은 실제 배정분 그대로 두고
- * 남는 자리를 2부 64클럽 풀이 채운다** — 그 클럽들이 "모델 밖 유럽"을 대신 서는
- * 자리다 (UCL 36 · UEL 24 · UECL 24 = 84클럽, 그중 2부가 34).
- * 하위 리그를 추가하면 아약스·벤피카·셀틱 같은 실제 참가 팀이 그 자리에 들어선다
- * (competition.md §4).
+ * **정원은 모델된 세계만큼이다.** 실제 UCL 36팀 중 12팀은 우리가 모델링하지 않은
+ * 리그(에레디비시·프리메이라·스코티시 등)에서 온다. 우리 세계에 있는 것은 다섯 나라
+ * 1부뿐이므로 **정원은 그 리그들이 받는 티켓 수의 합**이다 — UCL 24 · UEL 16 ·
+ * UECL 10. 남는 자리를 2부로 채우지 않는다: 2부 클럽이 챔피언스리그에 서는 화면은
+ * 대회 규모가 실제와 같다는 사실보다 훨씬 크게 어긋나 보인다 (competition.md §4).
+ * 그 나라들의 1부를 카탈로그에 올리면 정원이 실제 규모로 자란다.
  */
 import type { MatchStage } from "@story-fm/domain";
 import { domesticCupById, domesticStageLabel, isDomesticCup } from "./domestic-cup-catalog";
@@ -34,19 +33,18 @@ export interface CupCatalogEntry {
    * 리그별 티켓 수 — 도메스틱 최종 순위 상위부터 배정한다.
    * UCL 5장(잉글랜드·스페인·이탈리아·독일) + 4장(프랑스)은 실제 배정과 같다.
    *
-   * **2부 리그에도 티켓이 있다** — 우리가 모델링하지 않은 유럽 리그의 몫이다. 2부는
-   * 리그전을 돌지 않아 지난 시즌 표가 없으므로, 첫 시즌과 같은 규칙(체급 + 시드)이
-   * 매 시즌 새로 줄을 세운다 (`rankedTeams` — europe.ts). 그래서 나가는 클럽이
-   * 해마다 조금씩 바뀐다. 계수가 강한 리그가 UCL 자리를 더 갖는다.
+   * **1부 리그만 적힌다.** 2부에 티켓을 주면 그 클럽이 챔피언스리그에 서고, 한 나라가
+   * 한 대회에 여덟 팀을 내보낸다 (competition.md §4).
    */
   slots: Record<string, number>;
   /**
    * 리그 페이즈 통과 — 상위 `directSlots`팀은 본선 직행, 그 아래 `playoffSlots`팀은
    * 플레이오프(2차전제)를 거친다. 나머지는 탈락이다.
    *
-   * 본선 대진 수는 `directSlots + playoffSlots / 2`이고 **2의 거듭제곱**이어야
-   * 한다 (테스트로 고정). UCL은 실제 그대로 36 = 8직행 + 16플레이오프 + 12탈락이고,
-   * 24팀인 UEL·UECL은 4 + 8 + 12탈락이라 **리그 페이즈에서 절반이 떨어진다**.
+   * 본선 대진 수는 `directSlots + playoffSlots / 2`이고 **2의 거듭제곱**, 그리고
+   * `directSlots = playoffSlots / 2`여야 한다 (불변식 — catalog-invariants.ts).
+   * 그래서 통과 팀은 언제나 `3 × directSlots`다: UCL 24팀은 12통과(절반 탈락),
+   * UEL 16팀은 12통과, UECL 10팀은 6통과.
    */
   directSlots: number;
   playoffSlots: number;
@@ -76,36 +74,24 @@ export const CUP_CATALOG_SEED: readonly CupCatalogEntry[] = [
     id: "ucl",
     name: "UEFA 챔피언스리그",
     short: "UCL",
-    size: 36,
+    size: 24,
     matchesPerTeam: 8,
-    slots: {
-      epl: 5,
-      laliga: 5,
-      seriea: 5,
-      bundesliga: 5,
-      ligue1: 4,
-      // 모델 밖 유럽의 몫 — 계수가 강한 리그가 더 갖는다 (합 12)
-      championship: 3,
-      segunda: 3,
-      serieb: 2,
-      bundesliga2: 2,
-      ligue2: 2,
-      // ⚠️ 한 2부 리그의 세 대회 티켓 합은 **클럽 수 − 3** 이하여야 한다 —
-      // 지난 시즌 1부에서 뛴 강등 클럽 셋이 그해 풀에서 빠진다 (europe.ts `rankedTeams`)
-    },
-    directSlots: 8,
-    playoffSlots: 16,
+    slots: { epl: 5, laliga: 5, seriea: 5, bundesliga: 5, ligue1: 4 },
+    /**
+     * 24팀이라 **16강을 열지 못한다** — 통과 팀은 언제나 `3 × directSlots`이고
+     * (`directSlots = playoffSlots / 2`) 본선 대진 수가 2의 거듭제곱이어야 하므로,
+     * 고를 수 있는 것은 12통과(본선 8대진)와 24통과(본선 16대진)뿐이다. 뒤쪽은
+     * 리그 페이즈에서 아무도 떨어지지 않는다 — 단계 이름보다 그쪽이 더 어긋난다.
+     */
+    directSlots: 4,
+    playoffSlots: 8,
     prize: {
       participation: 12_000_000,
       win: 1_500_000,
       draw: 500_000,
-      stage: {
-        playoff: 2_000_000,
-        r16: 6_000_000,
-        qf: 8_000_000,
-        sf: 10_000_000,
-        final: 12_000_000,
-      },
+      // 16강은 24팀 브래킷에 없다 (`knockoutStages`) — 없는 단계에 값을 두면
+      // 우승 경로 총액을 읽는 자리가 실제로 지급되지 않는 돈을 센다
+      stage: { playoff: 2_000_000, qf: 8_000_000, sf: 10_000_000, final: 12_000_000 },
       winner: 8_000_000,
     },
   },
@@ -113,21 +99,10 @@ export const CUP_CATALOG_SEED: readonly CupCatalogEntry[] = [
     id: "uel",
     name: "UEFA 유로파리그",
     short: "UEL",
-    size: 24,
+    size: 16,
     matchesPerTeam: 8,
-    slots: {
-      epl: 4,
-      laliga: 3,
-      seriea: 3,
-      bundesliga: 3,
-      ligue1: 3,
-      // 모델 밖 유럽의 몫 (합 8)
-      championship: 2,
-      segunda: 2,
-      serieb: 2,
-      bundesliga2: 1,
-      ligue2: 1,
-    },
+    slots: { epl: 4, laliga: 3, seriea: 3, bundesliga: 3, ligue1: 3 },
+    /** 16팀 중 넷만 떨어진다 — directSlots를 2로 내리면 절반 넘게 떨어지지만 8강이 사라진다 */
     directSlots: 4,
     playoffSlots: 8,
     prize: {
@@ -142,23 +117,12 @@ export const CUP_CATALOG_SEED: readonly CupCatalogEntry[] = [
     id: "uecl",
     name: "UEFA 컨퍼런스리그",
     short: "UECL",
-    size: 24,
+    size: 10,
     matchesPerTeam: 6,
-    slots: {
-      epl: 2,
-      laliga: 2,
-      seriea: 2,
-      bundesliga: 2,
-      ligue1: 2,
-      // 모델 밖 유럽의 몫 — 가장 작은 대회라 2부가 절반을 넘는다 (합 14)
-      championship: 2,
-      segunda: 2,
-      serieb: 3,
-      bundesliga2: 4,
-      ligue2: 3,
-    },
-    directSlots: 4,
-    playoffSlots: 8,
+    slots: { epl: 2, laliga: 2, seriea: 2, bundesliga: 2, ligue1: 2 },
+    /** 가장 작은 대회 — 10팀에 통과 6이라 본선은 준결승부터다 */
+    directSlots: 2,
+    playoffSlots: 4,
     prize: {
       participation: 2_000_000,
       win: 300_000,
@@ -188,7 +152,7 @@ export function cupCatalogById(id: string): CupCatalogEntry | null {
 export const TOP_EURO_CUP_ID = "ucl";
 
 /**
- * 그 리그가 이 대회에 받는 티켓 수 — 배정이 없는 리그(2부·이적 전용)는 0이다.
+ * 그 리그가 이 대회에 받는 티켓 수 — 티켓이 없는 리그(2부·이적 전용)는 0이다.
  * 순위표의 구역선(`buildStandingZones`)도 유럽 진출 업적도 이 수를 경계로 쓴다.
  */
 export function euroSlotsOf(cupId: string, leagueId: string): number {
@@ -242,7 +206,7 @@ export function knockoutBracketSize(cup: CupCatalogEntry): number {
 
 /**
  * 이 대회가 치르는 단계 순서 — 플레이오프부터 결승까지.
- * 본선 대진 수가 대회 규모마다 달라서(UCL 16 · UEL·UECL 8) 시작 단계도 다르다.
+ * 본선 대진 수가 대회 규모마다 달라서(UCL·UEL 8 · UECL 4) 시작 단계도 다르다.
  */
 export function knockoutStages(cup: CupCatalogEntry): MatchStage[] {
   const bracket = knockoutBracketSize(cup);

@@ -1453,8 +1453,10 @@ export function isClubTeam(teamId: string): boolean {
 }
 
 /**
- * 이 팀이 속한 나라 — 홈그로운 판정(협회 기준)의 근거.
+ * 이 팀이 속한 나라 — 홈그로운 판정과 **대항전 추첨의 협회 회피**가 읽는 단위.
  * 카탈로그가 모르는 팀이면 `null`이다 (`leagueOfTeam`과 같은 이유).
+ *
+ * 승강이 카탈로그를 앞질러도 답이 흔들리지 않는다 — 승격·강등은 나라 안에서 일어난다.
  */
 export function countryOfTeam(teamId: string): string | null {
   const leagueId = leagueOfTeam(teamId);

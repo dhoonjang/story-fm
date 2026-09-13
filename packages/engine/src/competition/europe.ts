@@ -2,7 +2,7 @@ import type { MatchRecord } from "@story-fm/domain";
 import { addDays, dayOfWeek, diffDays, firstHalfPairs } from "./calendar";
 import { cupCatalog, cupCatalogById } from "../data/cup-catalog";
 import { leagueCatalogById } from "../data/league-catalog";
-import { leagueOfTeam, teamCatalogById, teamsOfLeague } from "../data/team-catalog";
+import { countryOfTeam, teamCatalogById, teamsOfLeague } from "../data/team-catalog";
 import { makeRng, shuffled } from "../core/rng";
 import { catalogTierOf } from "../core/club-tier";
 import { seasonYear } from "./calendar";
@@ -11,7 +11,7 @@ import { seasonYear } from "./calendar";
  * 유럽 대항전 — 참가 배정 · 리그 페이즈 편성 (2024-25 이후 포맷).
  *
  * 리그 페이즈는 단일 순위표다. 팀마다 서로 다른 상대와 정해진 수의 경기를 치르고
- * (홈 절반·원정 절반) 하나의 표로 줄을 세운다. 상위는 16강 직행, 중위는 플레이오프.
+ * (홈 절반·원정 절반) 하나의 표로 줄을 세운다. 상위는 본선 직행, 중위는 플레이오프.
  * 순위표는 리그와 같은 `computeStandings(state, cupId)`로 계산된다 — 대회 축이
  * 이미 competitionId로 갈라져 있으므로 컵도 그대로 얹힌다.
  */
@@ -110,6 +110,9 @@ const KNOCKOUT_MATCHDAYS: Record<string, Array<[number, number]>> = {
     [2, 10],
     [2, 17],
   ],
+  // 16강은 지금 어느 대항전도 열지 않는다(본선 대진이 UCL·UEL 8 · UECL 4). 날짜는
+  // 남긴다 — 브래킷 16짜리 대회가 오버라이드로 서면 그날이 필요하고, 리그 달력은
+  // 이미 이 두 주를 비켜 짜여 있다.
   r16: [
     [3, 3],
     [3, 10],
@@ -190,8 +193,8 @@ export type TierLookup = (teamId: string) => 1 | 2 | 3 | 4;
  * 그 리그에 **지금** 있는 클럽 — 승강이 카탈로그를 이긴다(`teamsOfLeagueIn`).
  * 새 게임처럼 세이브가 없는 자리는 카탈로그가 답한다.
  *
- * 2부 몫을 뽑을 때 이것이 중요해진다: 소속을 카탈로그로 물으면 승격한 클럽이
- * 1부 표와 2부 풀 **양쪽**에 서서 한 팀이 한 대회에 두 번 편성된다.
+ * 소속을 카탈로그로 물으면 승격한 클럽이 옛 리그와 새 리그 **양쪽**의 명단에 서서
+ * 한 팀이 한 대회에 두 번 편성된다.
  */
 export type LeagueMembers = (leagueId: string) => string[];
 
@@ -216,14 +219,13 @@ function rankedTeams(
   const previous = tables?.[leagueId];
   if (previous && previous.length > 0) return previous;
   /**
-   * 지난 시즌 표가 없는 리그 — **첫 시즌의 1부이거나, 언제나 2부**다. 2부는 리그전을
-   * 돌지 않아 표가 생길 일이 없고, 감독이 내려가 그 리그가 도는 시즌에도 그 표는
-   * 여기 오지 않는다(`finalTables`는 리그전을 도는 리그만 담는다) — 오면 **강등이 곧
-   * 다음 시즌 유럽행**이 된다.
+   * 지난 시즌 표가 없는 리그 — **첫 시즌의 1부이거나, 리그전을 돌지 않는 리그**다.
+   * 시드 카탈로그에서 후자에게는 티켓이 없지만(`cup-catalog.ts`), 카탈로그
+   * 오버라이드가 티켓을 주면 여기로 온다.
    *
-   * 같은 이유로 **지난 시즌 1부에서 뛴 클럽은 2부 몫에서 뺀다.** 강등된 클럽은 그
-   * 리그에서 가장 강해 서열 맨 위에 서므로, 두면 매년 강등 팀이 유럽에 나간다.
-   * 빼고도 정원은 남는다 — 12~14클럽에서 셋이 빠지고 티켓은 5~8장이다.
+   * **지난 시즌 1부에서 뛴 클럽은 뺀다.** 강등된 클럽은 그 리그에서 가장 강해 서열
+   * 맨 위에 서므로, 두면 매년 강등 팀이 유럽에 나간다 — 강등이 곧 다음 시즌 유럽행이
+   * 되는 자리다.
    */
   const playedTopFlight = new Set(Object.values(tables ?? {}).flat());
   const rng = makeRng(seed, `euro:${leagueId}:${season}`);
@@ -394,12 +396,23 @@ function ringPairs(n: number, rounds: number): Array<[number, number]> {
     .flatMap((round) => round.map(([a, b]) => [Number(a), Number(b)] as [number, number]));
 }
 
-/** 같은 리그 대결 한 건의 벌점 — 포트 편차보다 훨씬 무겁게 (실제 대회는 금지) */
-const SAME_LEAGUE_PENALTY = 100;
+/**
+ * 같은 협회 대결 한 건의 벌점 — **포트 비용 전체보다 크다.**
+ *
+ * 자리 배치가 협회 0을 이미 풀어 둔 상태에서 언덕오르기를 시작하므로
+ * (`countrySeats`), 벌점의 할 일은 "그 해를 깨는 이동을 절대 받지 않는 것"이다.
+ * 포트 비용은 자리마다 많아야 `2 × rounds`라 전체가 `2 × 정원 × rounds` —
+ * 지금 가장 큰 대회(24팀 8경기)에서 384다.
+ */
+const SAME_ASSOCIATION_PENALTY = 1000;
 
 /**
  * 이 배치의 추첨 품질 — 낮을수록 좋다.
- * ① 같은 리그끼리 붙는 대결 ② 포트별 상대 수가 고르지 않은 정도.
+ * ① 같은 협회끼리 붙는 대결 ② 포트별 상대 수가 고르지 않은 정도.
+ *
+ * ⚠️ 회피의 단위는 **나라(협회)**다. 리그로 물으면 잉글랜드 1부와 잉글랜드 2부의
+ * 대결이 "다른 리그"로 통과하고, 승강한 클럽은 카탈로그 리그가 낡아 한 해 동안
+ * 자기 나라 팀과 만난다 — 나라는 둘 다에 흔들리지 않는다.
  */
 function drawCost(
   order: string[],
@@ -413,7 +426,9 @@ function drawCost(
   for (const [i, j] of pairs) {
     const a = order[i]!;
     const b = order[j]!;
-    if (leagueOfTeam(a) === leagueOfTeam(b)) cost += SAME_LEAGUE_PENALTY;
+    // 카탈로그가 모르는 팀(`null`)끼리는 같은 협회가 아니다 — 모른다는 답이 둘 겹쳤을 뿐이다
+    const country = countryOfTeam(a);
+    if (country !== null && country === countryOfTeam(b)) cost += SAME_ASSOCIATION_PENALTY;
     const rowI = seen[i]!;
     const rowJ = seen[j]!;
     const potB = pots.get(b) ?? 0;
@@ -428,15 +443,135 @@ function drawCost(
 }
 
 /**
+ * 자리 탐색의 상한 — 넘으면 해가 없다고 보고 벌점만으로 다듬는다.
+ * 지금 정원에서는 첫 갈래로 풀려 수백 노드면 끝난다.
+ */
+const SEAT_SEARCH_NODES = 200_000;
+
+/**
+ * 같은 협회가 서로 만나지 않는 **자리 묶음** — 나라마다 서로 붙지 않는 자리를 준다.
+ *
+ * 대진은 자리가 정하므로(`ringPairs`) 협회 회피는 "같은 나라 팀을 서로 안 붙는
+ * 자리에 앉히기"다. 언덕오르기만으로는 여기 닿지 못한다 — 자리 두 개를 맞바꾸는
+ * 이동은 대결 여러 건을 한꺼번에 바꾸고 그 사이에 더 나쁜 배치가 놓여 있어서,
+ * 시드 예순을 돌리면 절반이 대회당 1~4건을 남겼다. 그래서 **제약을 먼저 풀고**
+ * 그 해에서 언덕오르기를 시작한다.
+ *
+ * 용량 있는 그래프 색칠이다(자리 = 정점, 나라 = 색, 나라별 팀 수 = 용량).
+ * 못 풀면 `null` — 카탈로그 오버라이드가 한 나라에 정원의 절반을 주면 해가 없을 수
+ * 있고, 그때는 벌점만으로 최선을 찾는다.
+ */
+function countrySeats(sizes: readonly number[], adjacent: readonly boolean[][]): number[][] | null {
+  const n = adjacent.length;
+  const seats: number[][] = sizes.map(() => []);
+  const left = [...sizes];
+  let nodes = 0;
+  const place = (position: number): boolean => {
+    if (position === n) return true;
+    if (nodes++ > SEAT_SEARCH_NODES) return false;
+    for (let c = 0; c < sizes.length; c++) {
+      if (left[c] === 0) continue;
+      if (seats[c]!.some((taken) => adjacent[position]![taken])) continue;
+      seats[c]!.push(position);
+      left[c] = left[c]! - 1;
+      if (place(position + 1)) return true;
+      seats[c]!.pop();
+      left[c] = left[c]! + 1;
+    }
+    return false;
+  };
+  return place(0) ? seats : null;
+}
+
+/**
+ * 같은 크기의 나라 묶음을 자리 묶음에 대응시키는 **모든 짝짓기** — 위쪽이 상한이다.
+ * 지금 정원에서 가장 많은 대회가 UECL(2팀 × 다섯 나라)의 120가지다.
+ */
+const SEATING_CANDIDATE_CAP = 720;
+
+/** 0..n-1의 순열 전부 (n이 작을 때만 쓴다 — 위 상한이 지킨다) */
+function permutations(items: number[]): number[][] {
+  if (items.length <= 1) return [items];
+  return items.flatMap((head, i) =>
+    permutations([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [head, ...rest]),
+  );
+}
+
+/**
+ * 협회 회피를 만족하는 출발 배치들 — 못 만들면 받은 배치 하나를 그대로 돌려준다.
+ *
+ * 나라를 **팀이 많은 순**으로 놓는다(같은 수면 목록에 먼저 나온 나라가 앞). 큰 묶음일수록
+ * 앉힐 자리가 까다로워, 늦게 놓으면 남은 자리로는 못 채우고 되돌아오기를 반복한다.
+ * 카탈로그가 나라를 모르는 팀은 저마다 한 나라로 센다 — 서로 피할 이유가 없다.
+ *
+ * **크기가 같은 나라 묶음끼리 자리를 맞바꾼 배치를 전부 낸다.** 그 갈래는 언덕오르기가
+ * 건너갈 수 없다 — 묶음 하나를 통째로 옮기려면 협회 제약을 깨는 중간 배치를 지나야 하고,
+ * 벌점이 그것을 막는다. 포트 분포는 어느 나라가 어느 묶음에 앉는지로 크게 갈리므로
+ * (UECL은 열 자리에 다섯 나라라 골라 앉힐 여지가 거의 없다) 여기서 고르지 않으면
+ * 한 팀이 상대 여섯 중 다섯을 한 포트에서 만난다.
+ */
+function seatingsByCountry(order: readonly string[], pairs: Array<[number, number]>): string[][] {
+  const adjacent = order.map(() => order.map(() => false));
+  for (const [i, j] of pairs) {
+    adjacent[i]![j] = true;
+    adjacent[j]![i] = true;
+  }
+  const groups = new Map<string, string[]>();
+  for (const teamId of order) {
+    const key = countryOfTeam(teamId) ?? `팀:${teamId}`;
+    const group = groups.get(key);
+    if (group) group.push(teamId);
+    else groups.set(key, [teamId]);
+  }
+  const byCountry = [...groups.values()].sort((a, b) => b.length - a.length);
+  const seats = countrySeats(
+    byCountry.map((g) => g.length),
+    adjacent,
+  );
+  if (!seats) return [[...order]];
+
+  /** 크기가 같은 자리 묶음끼리만 맞바꿀 수 있다 — 묶음 크기는 나라의 팀 수다 */
+  const classes = new Map<number, number[]>();
+  seats.forEach((block, i) => {
+    const same = classes.get(block.length);
+    if (same) same.push(i);
+    else classes.set(block.length, [i]);
+  });
+  const perClass = [...classes.values()].map((blocks) => permutations(blocks));
+  const total = perClass.reduce((product, list) => product * list.length, 1);
+  const mappings =
+    total > SEATING_CANDIDATE_CAP
+      ? [perClass.map((list) => list[0]!)]
+      : perClass.reduce<number[][][]>(
+          (acc, list) => acc.flatMap((prefix) => list.map((choice) => [...prefix, choice])),
+          [[]],
+        );
+
+  return mappings.map((mapping) => {
+    const seated = [...order];
+    [...classes.values()].forEach((blocks, c) => {
+      blocks.forEach((groupIndex, i) => {
+        const block = seats[mapping[c]![i]!]!;
+        block.forEach((position, k) => {
+          seated[position] = byCountry[groupIndex]![k]!;
+        });
+      });
+    });
+    return seated;
+  });
+}
+
+/**
  * 추첨 — 참가 클럽을 원형 편성의 자리에 앉힌다.
  *
  * 대진은 **자리**가 정하므로(위 `ringPairs`) 추첨은 "누구를 어느 자리에"의 문제다.
  * 강약을 번갈아 끼운 배치에서 시작해 **자리 두 개를 맞바꾸는 언덕오르기**로
- * 같은 리그 대결을 없애고 포트 분포를 고른다. 자리만 바꾸므로 편성 불변식은
+ * 같은 협회 대결을 없애고 포트 분포를 고른다. 자리만 바꾸므로 편성 불변식은
  * 그대로 남는다 — 라운드마다 완전 매칭, 팀당 경기 수·홈 절반 모두 자리에 딸린 값이다.
  *
- * 실제 대회의 "같은 협회 클럽과는 만나지 않는다"를 하드 제약으로 걸면 우리 규모
- * (한 나라에서 최대 여덟 팀 — 1부 5 + 2부 3)에서 해가 없을 수 있어 무거운 벌점으로 둔다.
+ * 실제 대회의 "같은 협회 클럽과는 만나지 않는다"를 하드 제약 대신 무거운 벌점으로
+ * 두는 것은, 축소 규모에서 완전 회피의 해가 없는 정원이 생길 수 있어서다. 지금
+ * 정원(한 나라 최대 5팀)에서는 실측으로 0이 나오고, 테스트가 0을 고정한다.
  */
 function drawOrder(teamIds: string[], seed: number, cupId: string, rounds: number): string[] {
   // 난수는 정렬 **전에** 셔플로 한 번만 쓴다 — 비교자에 넣으면 같은 쌍에 매번 다른
@@ -445,16 +580,22 @@ function drawOrder(teamIds: string[], seed: number, cupId: string, rounds: numbe
   const byStrength = shuffled(teamIds, seed, `ring:${cupId}`).sort(
     (a, b) => catalogTierOf(a) - catalogTierOf(b),
   );
-  const order: string[] = [];
+  const alternating: string[] = [];
   for (let i = 0, j = byStrength.length - 1; i <= j; i++, j--) {
-    order.push(byStrength[i]!);
-    if (i !== j) order.push(byStrength[j]!);
+    alternating.push(byStrength[i]!);
+    if (i !== j) alternating.push(byStrength[j]!);
   }
 
-  const potCount = euroPotCount(order.length);
+  const potCount = euroPotCount(alternating.length);
   const pots = potsOf(teamIds, seed, cupId, potCount);
-  const pairs = ringPairs(order.length, rounds);
+  const pairs = ringPairs(alternating.length, rounds);
   const perPot = rounds / potCount;
+  // 협회 회피를 만족하는 배치들 중 포트가 가장 고른 것에서 출발한다
+  const order = seatingsByCountry(alternating, pairs).reduce((best, seating) =>
+    drawCost(seating, pairs, pots, potCount, perPot) < drawCost(best, pairs, pots, potCount, perPot)
+      ? seating
+      : best,
+  );
 
   let cost = drawCost(order, pairs, pots, potCount, perPot);
   for (let pass = 0; pass < 40 && cost > 0; pass++) {
