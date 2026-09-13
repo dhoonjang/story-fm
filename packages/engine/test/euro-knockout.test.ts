@@ -100,9 +100,10 @@ describe("녹아웃 정의", () => {
   });
 
   it("단계 순서는 플레이오프 → 본선 → 결승이고 대진 수와 맞물린다", () => {
-    expect(knockoutStages(cupCatalogById("ucl")!)).toEqual(["playoff", "r16", "qf", "sf", "final"]);
+    // 본선 대진 수가 시작 단계를 정한다 — UCL·UEL은 8대진, UECL은 4대진이다
+    expect(knockoutStages(cupCatalogById("ucl")!)).toEqual(["playoff", "qf", "sf", "final"]);
     expect(knockoutStages(cupCatalogById("uel")!)).toEqual(["playoff", "qf", "sf", "final"]);
-    expect(knockoutStages(cupCatalogById("uecl")!)).toEqual(["playoff", "qf", "sf", "final"]);
+    expect(knockoutStages(cupCatalogById("uecl")!)).toEqual(["playoff", "sf", "final"]);
   });
 
   it("녹아웃 경기일은 수요일이고 결승은 리그 최종전 뒤 토요일이다", () => {
@@ -147,15 +148,15 @@ describe("단계 진행", () => {
     fillResults(leaguePhaseOf(state, "ucl"));
 
     advanceKnockouts(state, []);
-    expect(euroStageMatches(state, "ucl", "playoff")).toHaveLength(16); // 8대진 × 2차전
-    expect(euroStageMatches(state, "ucl", "r16")).toHaveLength(0); // 아직
+    expect(euroStageMatches(state, "ucl", "playoff")).toHaveLength(8); // 4대진 × 2차전
+    expect(euroStageMatches(state, "ucl", "qf")).toHaveLength(0); // 아직
 
     advanceKnockouts(state, []); // 플레이오프가 안 끝났으니 그대로
-    expect(euroStageMatches(state, "ucl", "r16")).toHaveLength(0);
+    expect(euroStageMatches(state, "ucl", "qf")).toHaveLength(0);
 
     fillResults(euroStageMatches(state, "ucl", "playoff"));
     advanceKnockouts(state, []);
-    expect(euroStageMatches(state, "ucl", "r16")).toHaveLength(16); // 8대진 × 2차전
+    expect(euroStageMatches(state, "ucl", "qf")).toHaveLength(8); // 4대진 × 2차전
   });
 
   it("대회마다 결승까지 도달하고 우승 팀이 하나 남는다", () => {
@@ -191,7 +192,7 @@ describe("단계 진행", () => {
     expect(finalMatch.neutral).toBe(true);
     expect(finalMatch.round).toBe(1);
 
-    for (const stage of ["playoff", "r16", "qf", "sf"] as const) {
+    for (const stage of ["playoff", "qf", "sf"] as const) {
       for (const m of euroStageMatches(state, "ucl", stage)) expect(m.neutral).toBeUndefined();
       // 같은 대진의 두 경기는 홈/원정이 뒤바뀐다
       const legs = euroStageMatches(state, "ucl", stage).filter((m) => /-p0-/.test(m.id));
@@ -361,11 +362,11 @@ describe("오피스 뷰", () => {
     expect(europe!.short).toBe("UCL");
     expect(europe!.standings).toHaveLength(cupCatalogById("ucl")!.size);
     expect(europe!.ourPosition).toBeGreaterThan(0);
-    expect(europe!.directSlots).toBe(8);
-    expect(europe!.playoffCutoff).toBe(24);
+    expect(europe!.directSlots).toBe(4);
+    expect(europe!.playoffCutoff).toBe(12);
 
     const playoff = comp!.bracket.find((b) => b.stage === "playoff");
-    expect(playoff!.ties).toHaveLength(8);
+    expect(playoff!.ties).toHaveLength(4);
     expect(playoff!.ties.every((t) => t.score === null)).toBe(true); // 아직 안 열렸다
     // 아스날은 직행이라 플레이오프에 없다
     expect(playoff!.ties.some((t) => t.ours)).toBe(false);
@@ -552,21 +553,20 @@ describe("상금", () => {
     const cup = cupCatalogById("ucl")!;
     runKnockouts(state, "ucl");
     // 지급 사실은 prizesPaid 키가 갖는다 — AI 팀은 상세 원장을 쌓지 않는다
-    const paidFor = (stage: "r16" | "qf" | "sf" | "final") => {
+    const paidFor = (stage: "qf" | "sf" | "final") => {
       const key = `prize:competition:ucl:stage:${stage}:S1`;
       return state.finances.filter((f) => (f.prizesPaid ?? []).includes(key)).length;
     };
-    expect(paidFor("r16")).toBe(16);
     expect(paidFor("qf")).toBe(8);
     expect(paidFor("sf")).toBe(4);
     expect(paidFor("final")).toBe(2);
     // 금액은 카탈로그 값 그대로 — 상세 원장을 갖는 유저 팀에 직접 지급해 확인한다
     const fresh = createTestGame(42);
-    payStagePrizes(fresh, "ucl", "r16", [fresh.userTeamId], []);
+    payStagePrizes(fresh, "ucl", "qf", [fresh.userTeamId], []);
     const entry = financeOf(fresh, fresh.userTeamId).ledger.find(
-      (e) => e.label === "UCL 16강 진출 상금 (S1)",
+      (e) => e.label === "UCL 8강 진출 상금 (S1)",
     );
-    expect(entry?.amount).toBe(cup.prize.stage.r16);
+    expect(entry?.amount).toBe(cup.prize.stage.qf);
     expect(entry?.category).toBe("prize");
   });
 
