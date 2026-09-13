@@ -11,8 +11,10 @@ import {
   roleVocabularyText,
   setPieceRoutineChoiceText,
   tacticToggleChoiceText,
+  type BoardMove,
 } from "@story-fm/domain";
 import {
+  buildBoardMovesBlock,
   buildLedgerNote,
   buildRecentTurnsBlock,
   buildStandingBlock,
@@ -100,9 +102,15 @@ ops에 부를 명령 이름을 적고 그 인자를 배열로 싣는다. 감독�
 
 # 입력
 경기 중에는 <ledger>(명단·시각·교체 횟수) · <standing>(걸려 있는 전술과 개인 지시) · <targets>(공략 목록) · <match_log>(이 경기의 지난 턴 전부 — 중계와 감독의 말), 평시에는 <standing>(지금 걸려 있는 것 전부 — 6축·갈래·세트피스 인원·지역 전술·개인 지시와 역할·완장·세트피스 키커) · <squad>(선발·벤치·예비와 자리) · <recent_turns>(지난 다섯 턴) 뒤에 이번 턴 감독의 말이 @감독: 으로 온다. 바꾸라는 말은 <standing>의 지금 값에서 움직인다.
+<board_moves>는 이번 턴 감독이 전술판에서 직접 움직인 것이고, 그 조작은 <standing>에 이미 반영돼 있다.
 
 # 무엇을 고르나
 프리셋을 적용하거나 전원을 재배치하지 않는다. 감독이 한 말의 범위 안에서만 움직인다.
+
+# 판에서 이미 움직인 것
+<board_moves>의 축·선수·자리를 가리키는 말은 감독의 말을 그 줄의 앞 값에 대 본다.
+판이 간 곳과 같으면 감독이 방금 판에서 한 일을 말로 설명한 것이다 — 그 명령을 싣지 않는다.
+다른 곳을 가리키면(더 멀리·반대로) <standing>의 지금 값에서 움직여 싣는다.
 
 # 대화 (team_talk)
 감독이 그 사람에게 건넨 말이 있을 때만 싣고, 그 말이 어떻게 닿았는지를 라벨로 고른다.
@@ -194,15 +202,25 @@ export async function runTacticOrders(
   state: GameState,
   specs: ReadonlyMap<string, GameToolSpec>,
   message: string,
-  llm?: GameLLM,
+  options: {
+    llm?: GameLLM;
+    /** 이번 턴 전술판이 이미 움직인 것 — `<board_moves>`가 된다 */
+    boardMoves?: readonly BoardMove[];
+  } = {},
 ): Promise<{ ok: true; intent: TacticOrders } | { ok: false; message: string }> {
   const matchLog = buildMatchLogBlock(state);
+  /**
+   * 판이 이번 턴에 움직인 것은 **감독의 말 바로 앞**에 선다 — 되풀이를 가리는 판정이
+   * 그 말을 읽는 자리에서 이뤄진다 (agents.md §3).
+   */
+  const boardMoves = buildBoardMovesBlock(state, options.boardMoves ?? []);
   // 명단·현재 6축과 갈래·걸린 지시·공략 표적만 — 분류에 쓰이지 않는 판세는 빠진다
   // 해석기에는 감독의 이름이 없다 — 자리 태그 하나로 감독의 말을 세운다
   const user = [
     ...(state.pendingMatch
       ? [buildLedgerNote(state), ...(matchLog.length > 0 ? [matchLog] : [])]
       : buildPeaceContext(state)),
+    ...boardMoves,
     ``,
     `@감독: ${message}`,
   ].join("\n");
@@ -210,7 +228,7 @@ export async function runTacticOrders(
     TACTIC_ORDERS_SPEC,
     specs,
     user,
-    llm ?? mockOrdersLlm(state, TACTIC_ORDERS_SPEC, message),
+    options.llm ?? mockOrdersLlm(state, TACTIC_ORDERS_SPEC, message),
     message,
   );
   return answered.ok ? { ok: true, intent: answered.orders } : answered;

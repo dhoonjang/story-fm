@@ -1913,6 +1913,22 @@ export const SET_PIECE_ROLE_MARK: Record<SetPieceRole, string> = {
 };
 
 /**
+ * **이번 턴 전술판이 움직인 것 하나** — 감독이 판에서 직접 한 조작이고 코어가 **이미**
+ * 적용했다 (→ docs/llm/agents.md §3 지시 해석).
+ *
+ * 화면의 대기열 항목(`MatchBoardOrder`)과 그릇이 다르다. 대기열은 「무엇을 보낼까」라
+ * 좌표까지 들고 있고, 이것은 「무엇이 움직였나」라 **앞 값과 뒤 값**을 든다 — 해석기가
+ * 감독의 말을 대 볼 곳이 앞 값이기 때문이다. 판이 라인을 4에서 3으로 내린 턴에
+ * "한 칸 내려"는 되풀이지만, 뒤 값만 주면 그 말이 3에서 다시 읽혀 2가 된다.
+ */
+export type BoardMove =
+  | { kind: "tactic"; axis: TacticAxisKey; from: number; to: number }
+  | { kind: "position"; playerId: string; position: string }
+  | { kind: "role"; playerId: string; role: string }
+  | { kind: "substitution"; out: string; in: string }
+  | { kind: "setPiece"; role: SetPieceRole; playerId: string | null };
+
+/**
  * **세트피스 지시** — 키커 말고 감독이 정하는 두 축 (match.md §1.4).
  *
  * ⚠️ **`TacticsSpec`에 넣지 않는다.** 여섯 축은 대칭·프리셋 리그 평균 3·`TACTIC_SWING`

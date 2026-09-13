@@ -9,6 +9,7 @@ import {
   setSetPieceTakers,
   setTactics,
   substitutePlayer,
+  tacticsOf,
   takeEdits,
   turnDigestOf,
   type GameState,
@@ -31,6 +32,7 @@ import {
   traceTurn,
   type LlmErrorKind,
 } from "@story-fm/llm";
+import type { BoardMove } from "@story-fm/domain";
 import { NextResponse } from "next/server";
 import { toPayload, type GamePayload } from "./store";
 import type { MatchBoardOrder } from "./match-orders";
@@ -72,6 +74,30 @@ function applyMatchBoardOrder(state: GameState, order: MatchBoardOrder) {
         case "passStyle":
           return setTactics(state, { passStyle: order.value });
       }
+  }
+}
+
+/**
+ * 적용한 조작 → **해석기가 읽을 사실 하나** (docs/llm/agents.md §3 지시 해석).
+ *
+ * 축은 **떠나온 값과 도착한 값**을 함께 든다. 판이 라인을 4에서 3으로 내린 턴에 감독이
+ * "한 칸 내려"라고 말하면 그것은 방금 한 조작을 설명하는 말이지만, 도착한 값만 주면
+ * 해석기가 3에서 다시 한 칸을 내려 2를 낸다 — 한 번의 결정에 축이 두 칸 움직인다.
+ * 되풀이인지 두 칸을 원한 것인지는 말의 뜻이라 코어가 세지 못하고, 코어가 낼 수 있는
+ * 사실은 어디서 어디로 갔는가뿐이다.
+ */
+function boardMoveOf(order: MatchBoardOrder, before: number | null): BoardMove {
+  switch (order.kind) {
+    case "position":
+      return { kind: "position", playerId: order.playerId, position: order.position };
+    case "role":
+      return { kind: "role", playerId: order.playerId, role: order.role };
+    case "substitution":
+      return { kind: "substitution", out: order.out, in: order.in };
+    case "setPiece":
+      return { kind: "setPiece", role: order.role, playerId: order.playerId };
+    case "tactic":
+      return { kind: "tactic", axis: order.axis, from: before ?? order.value, to: order.value };
   }
 }
 
@@ -345,8 +371,13 @@ export function runTurnLocked(
       // 판에서 쌓인 조작은 LLM이 다시 해석하지 않는다. 구조화된 ID·값을 코어 명령로
       // 먼저 적용하고, 모델에는 이미 반영된 사실만 넘긴다.
       const appliedOrders: string[] = [];
+      /** 같은 조작을 해석기가 읽을 사실로 — 문장이 아니라 어느 축이 어디서 어디로 갔는가다 */
+      const boardMoves: BoardMove[] = [];
       if (orders !== undefined && orders.length > 0) {
         for (const order of orders) {
+          // 축이 떠나온 값은 **적용 전에만** 읽을 수 있다
+          const before =
+            order.kind === "tactic" ? tacticsOf(state, state.userTeamId).spec[order.axis] : null;
           const result = applyMatchBoardOrder(state, order);
           // 전술판은 `wrap`을 지나지 않는 명령의 문이다 — 기록은 여기서 남긴다
           journal({
@@ -378,6 +409,7 @@ export function runTurnLocked(
             };
           }
           appliedOrders.push(`전술판 적용 완료 — ${result.message} (다시 적용하지 말 것)`);
+          boardMoves.push(boardMoveOf(order, before));
         }
         refreshPacket(state);
         state.chat.push({
@@ -401,7 +433,7 @@ export function runTurnLocked(
         ...mark,
       });
       try {
-        const turn = await runGmTurn(state, said, onDelta, operation, appliedOrders);
+        const turn = await runGmTurn(state, said, onDelta, operation, appliedOrders, boardMoves);
         state.chat.push({
           role: "model",
           text: turn.text,
