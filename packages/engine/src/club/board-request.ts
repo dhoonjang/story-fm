@@ -5,7 +5,7 @@ import type {
   BoardRequestKind,
   TickSink,
 } from "@story-fm/domain";
-import { BOARD_REQUEST_LABEL, boardRequestAmountText } from "@story-fm/domain";
+import { josa, BOARD_REQUEST_LABEL, boardRequestAmountText } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import {
   clubProfileIn,
@@ -283,7 +283,7 @@ export function requestBoard(state: GameState, input: RequestBoardInput): Comman
     const picked = pickAnyPlayer(state, input.playerId);
     if (!picked.ok) return { ok: false, message: picked.message };
     if (picked.player.teamId === state.userTeamId) {
-      return { ok: false, message: `${picked.player.name}은(는) 이미 우리 선수입니다` };
+      return { ok: false, message: `${josa(picked.player.name, "은/는")} 이미 우리 선수입니다` };
     }
     playerId = picked.player.id;
   }

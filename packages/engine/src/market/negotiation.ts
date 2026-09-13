@@ -27,6 +27,7 @@ import {
   registrationBlockText,
   squadStatusRank,
   statusAtRank,
+  josa,
 } from "@story-fm/domain";
 import {
   addDays,
@@ -316,7 +317,7 @@ function conflictingNegotiation(
 /** 다른 갈래가 열려 있을 때 감독에게 돌려줄 이유 */
 function kindConflictMessage(negotiation: Negotiation, playerName: string): string {
   return (
-    `${playerName}은(는) 이미 ${negotiationKindKo(negotiation)} 협상이 진행 중입니다 ` +
+    `${josa(playerName, "은/는")} 이미 ${negotiationKindKo(negotiation)} 협상이 진행 중입니다 ` +
     `(${negotiation.id}) — 먼저 정리해야 다른 갈래를 열 수 있습니다`
   );
 }
@@ -958,7 +959,7 @@ export function respondOffer(
         ok: true,
         payload: verdictCard({}),
         message:
-          `${player.name}이(가) 정산금 ${formatMoney(offer.fee)}${splitLabel(offer.paymentYears)}에 계약 해지를 받아들였습니다. ` +
+          `${josa(player.name, "이/가")} 정산금 ${formatMoney(offer.fee)}${splitLabel(offer.paymentYears)}에 계약 해지를 받아들였습니다. ` +
           "accept_deal로 확정하세요",
       };
     }
@@ -974,7 +975,7 @@ export function respondOffer(
         ok: true,
         payload: verdictCard({}),
         message:
-          `${player.name}이(가) 주급 ${formatMoney(offer.weeklyWage)} · ${offer.contractYears}년 재계약을 받아들였습니다. ` +
+          `${josa(player.name, "이/가")} 주급 ${formatMoney(offer.weeklyWage)} · ${offer.contractYears}년 재계약을 받아들였습니다. ` +
           "accept_deal로 서명해야 계약이 섭니다",
       };
     }
@@ -995,7 +996,7 @@ export function respondOffer(
         ok: true,
         payload: verdictCard({}),
         message:
-          `${player.name}이(가) 해지를 거부했습니다 — 남은 길은 잔여 급여 전액을 무는 ` +
+          `${josa(player.name, "이/가")} 해지를 거부했습니다 — 남은 길은 잔여 급여 전액을 무는 ` +
           `일방 해지(release_player · ${formatMoney(unilateralSeveranceOf(state, player.id))})입니다`,
       };
     }
@@ -1030,7 +1031,7 @@ export function respondOffer(
         }),
       }),
       message:
-        `${player.name}은(는) 정산금 ${formatMoney(counterSeverance)}${splitLabel(counterYears)}을 원합니다. ` +
+        `${josa(player.name, "은/는")} 정산금 ${josa(`${formatMoney(counterSeverance)}${splitLabel(counterYears)}`, "을/를")} 원합니다. ` +
         `그 조건으로 다시 제안하면 받아들일 것입니다.${deadlineNote}`,
     };
   }
@@ -1054,8 +1055,8 @@ export function respondOffer(
         counterTerms: dealTerms({ weeklyWage: counterWageDemand, years: yearsAsked }),
       }),
       message:
-        `${player.name}은(는) 주급 ${formatMoney(counterWageDemand)} · ${yearsAsked}년 계약` +
-        `${statusLabel(statusAsked)}을(를) 원합니다. 그 조건으로 다시 제안하면 받아들일 것입니다.` +
+        `${josa(player.name, "은/는")} 주급 ${formatMoney(counterWageDemand)} · ${yearsAsked}년 계약` +
+        `${josa(statusLabel(statusAsked), "을/를")} 원합니다. 그 조건으로 다시 제안하면 받아들일 것입니다.` +
         deadlineNote,
     };
   }
@@ -1149,12 +1150,13 @@ export function setTransferList(
   const locked = loanLockOf(player);
   if (locked) return { ok: false, message: locked };
   if (player.teamId !== state.userTeamId) {
-    return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
+    return { ok: false, message: `${josa(player.name, "은/는")} 우리 선수가 아닙니다` };
   }
 
   const index = state.transferList.findIndex((l) => l.gamePlayerId === player.id);
   if (!input.listed) {
-    if (index < 0) return { ok: false, message: `${player.name}은(는) 이적 리스트에 없습니다` };
+    if (index < 0)
+      return { ok: false, message: `${josa(player.name, "은/는")} 이적 리스트에 없습니다` };
     state.transferList.splice(index, 1);
     /**
      * **내리는 것이 원인을 지운다** (→ docs/data/people.md §5) — 불만을 세운 것이
@@ -1165,7 +1167,7 @@ export function setTransferList(
     return {
       ok: true,
       message:
-        `${player.name}을(를) 이적 리스트에서 뺐습니다` +
+        `${josa(player.name, "을/를")} 이적 리스트에서 뺐습니다` +
         (freed ? " · 등재 불만이 풀렸습니다" : ""),
       brief: { head: "이적 리스트", items: [item({ label: "해제", text: player.name })] },
     };
@@ -1205,7 +1207,7 @@ export function setTransferList(
   pushNarrative(state, `${player.name} 이적 리스트 등재 (${formatMoney(askingPrice)})`, 3);
   return {
     ok: true,
-    message: `${player.name}을(를) 이적 리스트에 올렸습니다 — 호가 ${formatMoney(askingPrice)}. ${STANCE_LINE[stance]}`,
+    message: `${josa(player.name, "을/를")} 이적 리스트에 올렸습니다 — 호가 ${formatMoney(askingPrice)}. ${STANCE_LINE[stance]}`,
     brief: {
       head: "이적 리스트",
       items: [
@@ -1279,11 +1281,11 @@ export function respondTransferRequest(
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
   if (player.teamId !== state.userTeamId) {
-    return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
+    return { ok: false, message: `${josa(player.name, "은/는")} 우리 선수가 아닙니다` };
   }
   const found = transferRequestOf(state, player.id);
   if (!found) {
-    return { ok: false, message: `${player.name}은(는) 이적을 요청하지 않았습니다` };
+    return { ok: false, message: `${josa(player.name, "은/는")} 이적을 요청하지 않았습니다` };
   }
   if (found.answer !== undefined) {
     return {
@@ -1382,7 +1384,7 @@ export function offerPlayerOut(
   const locked = loanLockOf(player);
   if (locked) return { ok: false, message: locked };
   if (player.teamId !== state.userTeamId) {
-    return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
+    return { ok: false, message: `${josa(player.name, "은/는")} 우리 선수가 아닙니다` };
   }
   // 감독이 부른 구단 이름이 그대로 실려 온다 — 여기서 id로 굳힌다 (core/team-ref.ts)
   const picked = pickTeam(state, input.teamId);
@@ -1394,7 +1396,10 @@ export function offerPlayerOut(
   }
   // 무소속은 구단이 아니라 구단이 없는 상태다 — 받을 장부가 없다 (transfer.md §2)
   if (!isClubTeam(buyer.id)) {
-    return { ok: false, message: `${teamName(buyer.id)}은(는) 구단이 아닙니다 — 넘길 수 없습니다` };
+    return {
+      ok: false,
+      message: `${josa(teamName(buyer.id), "은/는")} 구단이 아닙니다 — 넘길 수 없습니다`,
+    };
   }
 
   const kind: Negotiation["kind"] = input.loan ? "loan_out" : "sell";
@@ -1412,7 +1417,7 @@ export function offerPlayerOut(
     if (existing.counterpartTeamId !== buyer.id) {
       return {
         ok: false,
-        message: `${player.name}은(는) ${teamName(existing.counterpartTeamId ?? "")}와 협상 중입니다 — 먼저 정리해야 합니다`,
+        message: `${josa(player.name, "은/는")} ${josa(teamName(existing.counterpartTeamId ?? ""), "과/와")} 협상 중입니다 — 먼저 정리해야 합니다`,
       };
     }
     if (existing.rounds.length >= MAX_ROUNDS) {
@@ -1947,8 +1952,8 @@ export function answerIncomingOffer(
     const resented = resentBlockedMove(state, negotiation, offer, player, counterpart);
     /** 불만이 남은 것과 요청이 선 것은 다른 사실이다 — 한 문장으로 접으면 감독이 못 읽는다 */
     const RESENT_LINE: Record<Exclude<BlockedMove, "none">, string> = {
-      issue: ` · 값이 붙은 오퍼였습니다 — ${player.name}이(가) 알고 불만이 남습니다`,
-      request: ` · 이 창에서 값이 붙은 오퍼를 ${REQUEST_BLOCKS}번 막았습니다 — ${player.name}이(가) 이적을 요청했습니다`,
+      issue: ` · 값이 붙은 오퍼였습니다 — ${josa(player.name, "이/가")} 알고 불만이 남습니다`,
+      request: ` · 이 창에서 값이 붙은 오퍼를 ${REQUEST_BLOCKS}번 막았습니다 — ${josa(player.name, "이/가")} 이적을 요청했습니다`,
     };
     return {
       ok: true,
@@ -2060,7 +2065,7 @@ export function openRenewal(
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
   if (player.teamId !== state.userTeamId) {
-    return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
+    return { ok: false, message: `${josa(player.name, "은/는")} 우리 선수가 아닙니다` };
   }
   /**
    * **이미 남과 약속한 선수는 못 잡는다** (transfer.md §1-4). 재계약을 열어 두면 한
@@ -2071,7 +2076,7 @@ export function openRenewal(
     return {
       ok: false,
       message:
-        `${player.name}은(는) 이미 다른 구단과 약속했습니다 — ` +
+        `${josa(player.name, "은/는")} 이미 다른 구단과 약속했습니다 — ` +
         `${teamName(promised.teamId)}와 사전 계약을 맺어 ${promised.since}에 떠납니다`,
     };
   }
@@ -2356,7 +2361,7 @@ function executeLoanIn(
   const from = negotiation.counterpartTeamId ?? player.teamId;
   if (player.teamId === state.userTeamId) {
     negotiation.status = "expired";
-    return { ok: false, message: `${player.name}은(는) 이미 우리 선수입니다` };
+    return { ok: false, message: `${josa(player.name, "은/는")} 이미 우리 선수입니다` };
   }
   // 빌린 구단은 그 선수를 다시 빌려줄 수 없다 — 계약이 그쪽에 없다
   const locked = loanLockOf(player);
@@ -2365,7 +2370,7 @@ function executeLoanIn(
     return { ok: false, message: locked };
   }
   const contract = activeContract(state, player.id);
-  if (!contract) return { ok: false, message: `${player.name}은(는) 계약이 없습니다` };
+  if (!contract) return { ok: false, message: `${josa(player.name, "은/는")} 계약이 없습니다` };
   const until = minDate(`${seasonYear(state.season) + 1}-06-30`, contract.until);
 
   /**
@@ -2435,7 +2440,7 @@ function executeLoanIn(
   return {
     ok: true,
     message:
-      `${player.name}을(를) ${teamName(from)}에서 임대로 데려왔습니다 — ${until}까지 · ` +
+      `${josa(player.name, "을/를")} ${teamName(from)}에서 임대로 데려왔습니다 — ${until}까지 · ` +
       `임대료 ${formatMoney(agreed.fee)} · 주급 ${Math.round(wageShare * 100)}% 부담` +
       ` · 등번호 ${squadNumber}번` +
       (slot.ok ? "" : ` ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
@@ -2518,7 +2523,7 @@ function executeRenewal(
   if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
   if (player.teamId !== state.userTeamId) {
     negotiation.status = "expired";
-    return { ok: false, message: `${player.name}은(는) 이미 우리 선수가 아닙니다` };
+    return { ok: false, message: `${josa(player.name, "은/는")} 이미 우리 선수가 아닙니다` };
   }
   // 빌려 온 선수의 재계약은 남의 계약을 우리 것으로 바꿔치기하는 일이다
   const locked = loanLockOf(player);
@@ -2999,7 +3004,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): CommandResult {
     negotiation.status = "expired";
     return {
       ok: false,
-      message: `${player.name}은(는) 이미 ${teamName(player.teamId)}로 갔습니다 — 협상이 무효가 됐습니다`,
+      message: `${josa(player.name, "은/는")} 이미 ${josa(teamName(player.teamId), "으로/로")} 갔습니다 — 협상이 무효가 됐습니다`,
     };
   }
   /**
@@ -3038,7 +3043,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): CommandResult {
   if (sellerShort) {
     return {
       ok: false,
-      message: `${teamName(player.teamId)}이(가) ${squadShortfallText(sellerShort, "sell")}`,
+      message: `${josa(teamName(player.teamId), "이/가")} ${squadShortfallText(sellerShort, "sell")}`,
     };
   }
 
@@ -3326,7 +3331,7 @@ function executeSale(
   if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
   if (player.teamId !== state.userTeamId) {
     negotiation.status = "expired";
-    return { ok: false, message: `${player.name}은(는) 이미 우리 선수가 아닙니다` };
+    return { ok: false, message: `${josa(player.name, "은/는")} 이미 우리 선수가 아닙니다` };
   }
   // 우리 스쿼드에 있어도 계약이 남의 것이면 팔 수 없다 — 돈이 소유 구단을 지나쳐 온다
   const loanLocked = loanLockOf(player);
@@ -3507,7 +3512,7 @@ function executeSale(
   return {
     ok: true,
     message:
-      `${player.name}을(를) ${teamName(buyerTeamId)}로 보냈습니다 — ${formatMoney(agreed.fee)}` +
+      `${josa(player.name, "을/를")} ${josa(teamName(buyerTeamId), "으로/로")} 보냈습니다 — ${formatMoney(agreed.fee)}` +
       (paymentYears === undefined
         ? ""
         : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)})`) +
@@ -4196,7 +4201,7 @@ export function runAiPrecontracts(state: GameState, digest: TickSink): void {
     });
 
     digest.push(
-      `${player.name}이(가) ${teamName(teamId)}와 사전 계약했습니다 — ${since}에 떠납니다`,
+      `${josa(player.name, "이/가")} ${josa(teamName(teamId), "과/와")} 사전 계약했습니다 — ${since}에 떠납니다`,
     );
     pushNarrative(state, `${player.name} 사전 계약 — ${teamName(teamId)}로 ${since} 이적`, 5);
   }

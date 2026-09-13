@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { FORMATIONS, type Formation } from "@story-fm/domain";
+import { FORMATIONS, josa, type Formation } from "@story-fm/domain";
 import { Modal } from "./modal";
 import {
   GRADES,
@@ -156,7 +156,7 @@ export function TeamModal({
   async function remove() {
     if (!team) return;
     const ok = window.confirm(
-      `카탈로그에서 ${team.name}을(를) 삭제할까요? 소속 선수 ${team.squadSize}명도 함께 사라집니다.\n(새 게임부터 반영됩니다)`,
+      `카탈로그에서 ${josa(team.name, "을/를")} 삭제할까요? 소속 선수 ${team.squadSize}명도 함께 사라집니다.\n(새 게임부터 반영됩니다)`,
     );
     if (!ok) return;
     setSaving(true);

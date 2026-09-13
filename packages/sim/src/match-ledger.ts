@@ -1,5 +1,5 @@
 import type { MatchEvent, MatchPhase, MatchSide, MatchStatLine } from "@story-fm/domain";
-import { MATCHDAY_BENCH, PHASE_END, TEAM_EVENT_TYPES, isExtraTime } from "@story-fm/domain";
+import { MATCHDAY_BENCH, PHASE_END, TEAM_EVENT_TYPES, isExtraTime, josa } from "@story-fm/domain";
 
 /**
  * 경기 장부 — 사건을 검증해 기록하는 결정적 코어 (match.md §5).
@@ -276,10 +276,11 @@ export function applyEvents(state: MatchLedgerState, incoming: MatchEvent[]): Ap
     // (한 턴에 경기 전체를 밀어붙이는 것을 코어가 막는다, overview §4)
     const prev = i > 0 ? incoming[i - 1] : null;
     if (prev && BREAK_EVENTS.has(prev.type)) {
+      const breakKo = BREAK_KO[prev.type] ?? prev.type;
       return {
         ok: false,
         errors: [
-          `${label(i, ev)}: ${BREAK_KO[prev.type]}은(는) 정지점입니다 — 이후 사건은 다음 진행에서 기록하세요`,
+          `${label(i, ev)}: ${josa(breakKo, "은/는")} 정지점입니다 — 이후 사건은 다음 진행에서 기록하세요`,
         ],
       };
     }

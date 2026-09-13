@@ -508,7 +508,7 @@ describe("buildStrengthPacket", () => {
         pushed.home.zones.attack !== base.home.zones.attack ||
         pushed.home.zones.midfield !== base.home.zones.midfield ||
         pushed.home.zones.defense !== base.home.zones.defense;
-      expect(moved, `${label}이(가) 어떤 존도 움직이지 않았다`).toBe(true);
+      expect(moved, `어떤 존도 움직이지 않았다: ${label}`).toBe(true);
     }
   });
 
