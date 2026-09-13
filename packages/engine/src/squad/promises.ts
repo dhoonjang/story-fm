@@ -172,6 +172,26 @@ function startedIn(
 }
 
 /**
+ * 그 경기에 **그라운드를 밟았는가** — 선발과 교체 투입을 가리지 않는다.
+ *
+ * 「뛴 사람 전부」 칸(`homeLineup`)이 선발의 상위 집합이므로 그것을 먼저 읽고, 그
+ * 칸이 없는 옛 장부에서만 선발 칸으로 떨어진다 — 그때는 출전이 선발과 같은 수가
+ * 되어 카드가 오늘 이전과 같은 말을 한다.
+ */
+function appearedIn(
+  state: GameState,
+  match: (typeof state.matches)[number],
+  playerId: string,
+): boolean {
+  const result = match.result;
+  if (!result) return false;
+  const home = match.homeTeamId === state.userTeamId;
+  const lineup = home ? result.homeLineup : result.awayLineup;
+  const list = lineup ?? (home ? result.homeStarters : result.awayStarters) ?? [];
+  return list.includes(playerId);
+}
+
+/**
  * 우리 공식 경기를 **최근 순으로** — 창을 여러 번 재는 호출이 원장을 한 번만 훑게
  * 하는 색인이다.
  *
@@ -190,6 +210,16 @@ export interface StartRead {
   /** 그가 설 수 있었던 경기 수 — 부상으로 빠져 있던 날은 빠진다 */
   played: number;
   starts: number;
+  /**
+   * **그라운드를 밟은 경기 수** — 선발 + 교체 투입이라 `starts` 이상이다
+   * (people.md §5-2).
+   *
+   * ⚠️ **판정은 이 값을 보지 않는다.** 출전 약속의 뜻은 "주전으로 세우겠다"이므로
+   * 기한 날 재는 것은 `starts`뿐이다. 이 칸은 **사실 카드의 것**이다 — 카드가
+   * 선발 수만 실으면 「한 번도 못 뛰었다」와 「뛰었지만 선발은 아니었다」가 읽는
+   * 쪽에 같은 사실로 가고, GM이 후반 45분을 뛴 선수에게 투입되지 못했다고 쓴다.
+   */
+  apps: number;
   /** `played`가 0이면 1로 읽는다 — 나눌 것이 없는 자리에서 비율은 뜻이 없다 */
   share: number;
 }
@@ -217,12 +247,16 @@ export function startsInWindow(
     .slice(0, limit);
   let played = 0;
   let starts = 0;
+  let apps = 0;
   for (const match of ours) {
     if (injuredOn(state, player.id, match.date)) continue;
     played += 1;
-    if (startedIn(state, match, player.id)) starts += 1;
+    const started = startedIn(state, match, player.id);
+    if (started) starts += 1;
+    // 선발은 언제나 출전이다 — 두 칸이 다른 장부에서 나와도 `apps >= starts`는 선다
+    if (started || appearedIn(state, match, player.id)) apps += 1;
   }
-  return { played, starts, share: played > 0 ? starts / played : 1 };
+  return { played, starts, apps, share: played > 0 ? starts / played : 1 };
 }
 
 // ── 약속을 연다 ────────────────────────────────────────────────
