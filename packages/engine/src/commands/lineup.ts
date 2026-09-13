@@ -65,6 +65,7 @@ import {
   tacticToggleWord,
   withCurrentDrilled,
   josa,
+  josaOf,
 } from "@story-fm/domain";
 import { directiveStandingOf, nextDirectiveOrder } from "../match/directive-standing";
 import { settleRoleCost, shelveFamiliarity, unshelveFamiliarity } from "./familiarity-memory";
@@ -357,7 +358,7 @@ export function setSquadLevels(
 
 /** 1군 인원 하한을 말하는 한 문장 — 두 명령이 같은 말을 해야 감독이 같은 규칙으로 읽는다 */
 function matchdaySquadFloor(): string {
-  return `1군은 매치데이 명단(선발 ${STARTING_XI} + 벤치 ${MATCHDAY_BENCH})을 채울 ${MATCHDAY_SQUAD}명 이상이어야 합니다`;
+  return `1군은 매치데이 명단(선발 ${STARTING_XI} + 벤치 ${MATCHDAY_BENCH})${josaOf(String(MATCHDAY_BENCH), "을/를")} 채울 ${MATCHDAY_SQUAD}명 이상이어야 합니다`;
 }
 
 // ---- 설정형: 라인업 = 전술 배치 ----

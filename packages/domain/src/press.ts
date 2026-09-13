@@ -790,7 +790,7 @@ export function pressFactText(fact: PressFact): string {
         ? `${name} 계약 해지 (${tags[1] ?? ""})${feeSuffix("위약금", v.severance)}`
         : `${name} 매각 확정 (${tags[1] ?? ""})${feeSuffix("이적료", v.fee)}`;
     case "squeezed":
-      return `${josa(name, "이/가")} 같은 자리(${sub ?? ""})를 봐 왔다`;
+      return `${josa(name, "이/가")} 같은 자리(${sub ?? ""})${josaOf(sub ?? "", "을/를")} 봐 왔다`;
     case "minutes":
       /**
        * 지위와 창의 수치는 **있을 때만** 선다 (people.md §5·§5-2). 이것이 없으면

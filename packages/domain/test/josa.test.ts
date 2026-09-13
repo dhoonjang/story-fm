@@ -92,10 +92,31 @@ describe("josa — 「으로/로」의 ㄹ 예외", () => {
   });
 });
 
+describe("josa — 「이라는/라는」", () => {
+  it("받침이 있으면 「이라는」, 없으면 「라는」 — ㄹ도 예외가 아니다", () => {
+    expect(josa("손흥민", "이라는/라는")).toBe("손흥민이라는");
+    expect(josa("리버풀", "이라는/라는")).toBe("리버풀이라는");
+    expect(josa("첼시", "이라는/라는")).toBe("첼시라는");
+    expect(josa("Arsenal", "이라는/라는")).toBe("Arsenal이라는");
+  });
+});
+
 describe("josaOf — 조사만", () => {
   it("앞말이 떨어져 있는 자리에 쓴다", () => {
     expect(josaOf("손흥민", "이/가")).toBe("이");
     expect(josaOf("달로", "이/가")).toBe("가");
     expect(josaOf("선더랜드", "과/와")).toBe("와");
+  });
+
+  /**
+   * 닫는 따옴표·괄호는 소리가 없으므로(overview.md §1) 부호를 붙여 넘기든 앞말만
+   * 넘기든 같은 조사가 나온다 — 부르는 자리가 앞말만 넘기는 근거다.
+   */
+  it("닫는 부호를 붙여도 같은 조사가 나온다", () => {
+    expect(josaOf(`"리버풀"`, "은/는")).toBe(josaOf("리버풀", "은/는"));
+    expect(josaOf(`"리버풀"`, "은/는")).toBe("은");
+    expect(josaOf("(2)", "이/가")).toBe(josaOf("2", "이/가"));
+    expect(josaOf("(2)", "이/가")).toBe("가");
+    expect(josaOf(`"첼시"`, "이라는/라는")).toBe("라는");
   });
 });

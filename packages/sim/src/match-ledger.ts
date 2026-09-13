@@ -1,5 +1,12 @@
 import type { MatchEvent, MatchPhase, MatchSide, MatchStatLine } from "@story-fm/domain";
-import { MATCHDAY_BENCH, PHASE_END, TEAM_EVENT_TYPES, isExtraTime, josa } from "@story-fm/domain";
+import {
+  MATCHDAY_BENCH,
+  PHASE_END,
+  TEAM_EVENT_TYPES,
+  isExtraTime,
+  josa,
+  josaOf,
+} from "@story-fm/domain";
 
 /**
  * 경기 장부 — 사건을 검증해 기록하는 결정적 코어 (match.md §5).
@@ -344,10 +351,10 @@ function applyOne(
   const requireOnPitch = (playerId: string): string | null => {
     if (!side || !ev.team) return null;
     if (state.sentOff.includes(playerId)) {
-      return `${label(i, ev)}: "${playerId}"는 퇴장당해 그라운드에 없습니다`;
+      return `${label(i, ev)}: "${playerId}"${josaOf(playerId, "은/는")} 퇴장당해 그라운드에 없습니다`;
     }
     if (!side.onPitch.includes(playerId)) {
-      return `${label(i, ev)}: "${playerId}"는 ${ev.team} 팀의 그라운드 위 선수가 아닙니다`;
+      return `${label(i, ev)}: "${playerId}"${josaOf(playerId, "은/는")} ${ev.team} 팀의 그라운드 위 선수가 아닙니다`;
     }
     return null;
   };
@@ -440,10 +447,10 @@ function applyOne(
       const outErr = requireOnPitch(out);
       if (outErr) return outErr;
       if (!side.bench.includes(into)) {
-        return `${label(i, ev)}: "${into}"는 ${ev.team} 벤치에 없습니다`;
+        return `${label(i, ev)}: "${into}"${josaOf(into, "은/는")} ${ev.team} 벤치에 없습니다`;
       }
       if (state.sentOff.includes(into)) {
-        return `${label(i, ev)}: "${into}"는 퇴장당해 투입할 수 없습니다`;
+        return `${label(i, ev)}: "${into}"${josaOf(into, "은/는")} 퇴장당해 투입할 수 없습니다`;
       }
       side.onPitch = side.onPitch.filter((id) => id !== out).concat(into);
       side.bench = side.bench.filter((id) => id !== into);

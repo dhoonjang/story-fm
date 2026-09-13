@@ -9,6 +9,7 @@
  * GM이 되묻게 한다.
  */
 import { norm } from "../world/player-pool";
+import { josaOf } from "@story-fm/domain";
 import { teamNameIn, teamShortNameIn, type GameState } from "./state";
 
 /** 부분 일치로 닿지 않는 약칭만 둔다 ("맨유"는 "맨체스터 유나이티드"의 부분 문자열이 아니다) */
@@ -71,7 +72,10 @@ export function pickTeam(state: GameState, ref: string): TeamPickResult {
       .slice(0, CANDIDATES_SHOWN)
       .map((t) => `${t.name}(${t.id})`)
       .join(" / ");
-    return { ok: false, message: `"${said}"는 여러 팀과 맞습니다 — ${names}` };
+    return {
+      ok: false,
+      message: `"${said}"${josaOf(said, "은/는")} 여러 팀과 맞습니다 — ${names}`,
+    };
   }
-  return { ok: false, message: `"${said}"라는 팀을 찾지 못했습니다` };
+  return { ok: false, message: `"${said}"${josaOf(said, "이라는/라는")} 팀을 찾지 못했습니다` };
 }

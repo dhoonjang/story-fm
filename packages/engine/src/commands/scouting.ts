@@ -12,6 +12,7 @@ import {
   SCOUT_CONCURRENT_LIMIT,
   SCOUT_DAYS,
   josa,
+  josaOf,
 } from "@story-fm/domain";
 import { addDays } from "../competition/calendar";
 
@@ -159,7 +160,7 @@ export function scoutMission(state: GameState, input: ScoutMissionInput): Market
   if (position !== undefined && !POSITION_CODES.includes(position)) {
     return {
       ok: false,
-      message: `"${input.position}"라는 자리는 없습니다 — ${POSITION_CODES.join("·")}`,
+      message: `"${input.position}"${josaOf(position, "이라는/라는")} 자리는 없습니다 — ${POSITION_CODES.join("·")}`,
     };
   }
   /**

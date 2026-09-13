@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { josa } from "@story-fm/domain";
+import { josa, josaOf } from "@story-fm/domain";
 import type { MatchStage } from "@story-fm/domain";
 import { Modal } from "./modal";
 import {
@@ -214,7 +214,7 @@ export function EuroCupModal({
       if (!Number.isInteger(n) || n < 0) return `${josa(label, "은/는")} 0 이상의 정수여야 합니다`;
     }
     if (!slotsMatch) {
-      return `리그별 티켓 합(${slotSum})이 참가 팀 수(${size})와 다릅니다`;
+      return `리그별 티켓 합(${slotSum})${josaOf(String(slotSum), "이/가")} 참가 팀 수(${size})${josaOf(String(size), "과/와")} 다릅니다`;
     }
     return null;
   }

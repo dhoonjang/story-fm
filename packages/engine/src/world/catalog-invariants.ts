@@ -26,7 +26,7 @@ import { OWNER_NAMES } from "../data/owner-seeds";
 import { CLUB_PROFILES_SEED } from "../data/club-profile";
 import { WORLD_FIGURE_SEEDS } from "../data/world-figures";
 import { EURO_MATCHDAYS } from "../competition/europe";
-import { isAssociation, type PlayerCatalogEntry, josa } from "@story-fm/domain";
+import { isAssociation, type PlayerCatalogEntry, josa, josaOf } from "@story-fm/domain";
 import { slugifyName } from "./player-id";
 
 /**
@@ -164,17 +164,19 @@ export function checkEuroCupInvariants(
     const bracket = knockoutBracketSize(cup);
     if (!isPowerOfTwo(bracket)) {
       problems.push(
-        `${cup.name}: 본선 대진 수(직행 ${cup.directSlots} + 플레이오프 ${cup.playoffSlots}/2 = ${bracket})가 2의 거듭제곱이 아닙니다`,
+        `${cup.name}: 본선 대진 수(직행 ${cup.directSlots} + 플레이오프 ${cup.playoffSlots}/2 = ${bracket})${josaOf(String(bracket), "이/가")} 2의 거듭제곱이 아닙니다`,
       );
     }
     if (cup.directSlots + cup.playoffSlots > cup.size) {
       problems.push(
-        `${cup.name}: 통과 팀(${cup.directSlots + cup.playoffSlots})이 참가 팀(${cup.size})보다 많습니다`,
+        `${cup.name}: 통과 팀(${cup.directSlots + cup.playoffSlots})${josaOf(`${cup.directSlots + cup.playoffSlots}`, "이/가")} 참가 팀(${cup.size})보다 많습니다`,
       );
     }
     const slotSum = Object.values(cup.slots).reduce((sum, n) => sum + n, 0);
     if (slotSum !== cup.size) {
-      problems.push(`${cup.name}: 리그별 티켓 합(${slotSum})이 참가 팀 수(${cup.size})와 다릅니다`);
+      problems.push(
+        `${cup.name}: 리그별 티켓 합(${slotSum})${josaOf(String(slotSum), "이/가")} 참가 팀 수(${cup.size})${josaOf(String(cup.size), "과/와")} 다릅니다`,
+      );
     }
     for (const leagueId of Object.keys(cup.slots)) {
       if (!leagueIds.has(leagueId)) {

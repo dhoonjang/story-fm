@@ -10,6 +10,7 @@ import {
   TableSpeakerSchema,
   TableStanceSchema,
   type TableLine,
+  josaOf,
 } from "@story-fm/domain";
 import type { CounterpartyVoice, GameState, TableReply, TableSeat } from "@story-fm/engine";
 import {
@@ -60,7 +61,7 @@ export const NEGOTIATION_TABLE_SYSTEM = `당신은 협상 테이블 건너편이
 - heard.claims — 감독이 이번 말에서 실제로 든 설득 논거만. 목록에 없는 이야기는 other. 말하지 않은 논거를 넣지 않는다.
 - ruling — <anchor>에 오퍼가 올라 있을 때만. 판정은 <anchor>가 적은 것 중에서, 금액·연수·지위는 구간 안에서. 오퍼가 없으면 비운다.
 - stance — 이 답의 태도 하나: ${STANCE_LINE}. 두 사람이 말해도 테이블은 하나다.
-- lines — 상대의 말. 줄마다 speaker에 <voices>의 토큰(${SPEAKER_LINE})을 적는다. 이번에 할 말이 있는 화자만 줄을 내되, ruling이 되부른 칸은 그 칸을 답하는 쪽이 말한다. 각 줄은 그 인물의 말투로 2~5문장, ruling에 적은 수치와 어긋나지 않게. 지문은 *별표*로.`;
+- lines — 상대의 말. 줄마다 speaker에 <voices>의 토큰(${SPEAKER_LINE})${josaOf(SPEAKER_LINE, "을/를")} 적는다. 이번에 할 말이 있는 화자만 줄을 내되, ruling이 되부른 칸은 그 칸을 답하는 쪽이 말한다. 각 줄은 그 인물의 말투로 2~5문장, ruling에 적은 수치와 어긋나지 않게. 지문은 *별표*로.`;
 
 /** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 */
 export const REPLY_TOOL = "reply_at_table";

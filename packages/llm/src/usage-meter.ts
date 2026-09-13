@@ -199,6 +199,10 @@ export function cacheAlerts(
 /**
  * 상한에 걸려 부르지 않았다 — 종류 `budget` (models.md §1-1).
  * 결산의 "실패하면 앵커" 경로로 떨어지고, 장면을 쓰는 호출이면 화면의 배너가 된다.
+ *
+ * 이 문장에 조사를 세우지 않는 이유는 `josa()`가 `@story-fm/domain`에 있고 이 패키지는
+ * **공급자 중립**이어서 도메인을 참조하지 않기 때문이다 (AGENTS.md §3). 상한 숫자의
+ * 받침은 매번 갈리므로, 조사를 박는 대신 조사가 서지 않는 말로 적는다.
  */
 export class TokenBudgetExceededError extends LlmCallError {
   constructor(
@@ -207,7 +211,7 @@ export class TokenBudgetExceededError extends LlmCallError {
   ) {
     super(
       "budget",
-      `토큰 예산 상한(${verdict.limit})을 넘겨 ${agent} 호출을 건너뜁니다 — 누적 ${verdict.used}`,
+      `토큰 예산 상한(${verdict.limit}) 초과로 ${agent} 호출을 건너뜁니다 — 누적 ${verdict.used}`,
     );
     this.name = "TokenBudgetExceededError";
   }
