@@ -44,8 +44,11 @@ import {
   movePoint,
   naturalPositionOf,
   normalizePositionCode,
+  openSeats,
   positionAtPoint,
   positionGroupOf,
+  presetOf,
+  DEFAULT_FORMATION,
   clampFamiliarity,
   defaultRoleOf,
   findRole,
@@ -92,6 +95,7 @@ import {
   isInjured,
   isSuspendedFor,
   playerById,
+  proficiencyAt,
   playerName,
   pushNarrative,
   recomputeOverall,
@@ -370,15 +374,16 @@ export interface LineupSlotInput {
  *
  * 전술판에서 볼란치를 조금 올려 CM으로 만들어 놨는데, 채팅으로 다른 선수 하나를
  * 교체했다고 그 미세 조정이 프리셋으로 되돌아가면 안 된다. 그래서 우선순위를
- * "명시 → 유지 → 물려받기 → 프리셋" 순으로 둔다.
+ * "명시 → 유지" 순으로 둔다.
  *
  * 1. `point` — 전술판에서 찍은 점. 무조건 1순위.
  * 2. `position` — 코드로 자리를 지정했다. 그 선수가 **이미 그 코드**였다면 미세
  *    조정된 좌표를 지키고, 아니면 그 코드의 기본 좌표로 옮긴다.
  * 3. **아무것도 안 줬고 이미 선발이었다 → 기존 좌표 그대로.** 배열 순서도 프리셋도
  *    보지 않는다. 이게 "안 건드린다"의 실제 형태다.
- * 4. 새로 들어온 선수 → **빠진 선수의 자리를 물려받는다.** 교체는 자리를 잇는다.
- * 5. 그래도 자리가 없으면 프리셋, 마지막이 코드 기본 좌표.
+ * 4. 셋 다 아니면 **`null`** — 감독은 자리를 말하지 않았고 지킬 자리도 없다.
+ *    그 자리는 `seatStarting`이 **빈 자리에서** 고른다. 선수의 주 포지션을 자리로
+ *    삼지 않는 이유가 여기 있다 (→ docs/data/team.md §6).
  *
  * 포메이션 자체를 바꾸면 `setTactics`가 선발 좌표를 프리셋으로 되깔므로,
  * "명확한 포메이션 변경"일 때만 전면 재배치가 일어난다.
@@ -386,8 +391,7 @@ export interface LineupSlotInput {
 function candidatePoint(
   slot: LineupSlotInput,
   prev: TacticAssignment | undefined,
-  fallback: { inherited?: BoardPoint; preset?: BoardPoint; natural: string },
-): BoardPoint {
+): BoardPoint | null {
   if (slot.point) return clampToBoard(slot.point);
   const wasStarter = prev?.role === "starting" && prev.point !== undefined;
   if (slot.position) {
@@ -397,9 +401,69 @@ function candidatePoint(
     return anchorOf(code);
   }
   if (wasStarter) return prev!.point!;
-  if (fallback.inherited) return fallback.inherited;
-  if (fallback.preset) return fallback.preset;
-  return anchorOf(fallback.natural);
+  return null;
+}
+
+/**
+ * 자리를 말하지 않은 선발을 **빈 자리에 앉힌다 — 자리가 먼저고 사람이 나중이다.**
+ *
+ * 예전에는 그 선수의 **주 포지션**을 그대로 자리로 썼다. 그러면 왼쪽 윙어가 계약
+ * 만료로 떠난 여름에 남은 오른쪽 자원 둘이 나란히 `RW`의 기본 좌표에 서고 왼쪽 측면은
+ * 아무도 없이 남는다 — 이름 붙일 수 있는 모양이 아니고, 감독이 판에서 하지 않은 일이다.
+ *
+ * 자리는 두 곳에서 온다. 먼저 **이번에 선발에서 빠진 사람이 비운 자리**다(교체는 자리를
+ * 잇는다 — 감독이 만들어 둔 판의 모양이 그대로 남는다). 그것으로 모자라면 **포메이션의
+ * 빈 자리**(`openSeats`)가 이어 선다.
+ *
+ * 누가 어느 자리에 서는지는 **그 자리의 포지션 적응도**가 정한다 — 킥오프의 자동 대체와
+ * 같은 자다(match.md §2). 가장 잘 맞는 쌍부터 전역으로 짝짓고, 같으면 자리 순서·id
+ * 사전순이라 같은 지시가 언제나 같은 판을 만든다.
+ */
+function seatStarting(
+  state: GameState,
+  starting: readonly LineupSlotInput[],
+  held: readonly (BoardPoint | null)[],
+  vacated: readonly BoardPoint[],
+  formation: string,
+): BoardPoint[] {
+  const open = [...vacated];
+  const need = held.filter((point) => point === null).length;
+  if (need > open.length) {
+    open.push(
+      ...openSeats(
+        [...held.filter((point): point is BoardPoint => point !== null), ...open],
+        presetOf(formation) ?? DEFAULT_FORMATION,
+      ),
+    );
+  }
+  const pairs = held.flatMap((point, index) => {
+    if (point !== null) return [];
+    const playerId = starting[index]!.playerId;
+    const player = userPlayerById(state, playerId)!;
+    return open.map((seat, seatIndex) => ({
+      index,
+      seatIndex,
+      playerId,
+      fit: proficiencyAt(player, positionAtPoint(seat)),
+    }));
+  });
+  pairs.sort(
+    (a, b) => b.fit - a.fit || a.seatIndex - b.seatIndex || (a.playerId < b.playerId ? -1 : 1),
+  );
+  const seated = new Map<number, BoardPoint>();
+  const claimed = new Set<number>();
+  for (const pair of pairs) {
+    if (seated.has(pair.index) || claimed.has(pair.seatIndex)) continue;
+    seated.set(pair.index, open[pair.seatIndex]!);
+    claimed.add(pair.seatIndex);
+  }
+  return held.map(
+    (point, index) =>
+      point ??
+      seated.get(index) ??
+      // 열한 자리가 이미 다 찼다 — 그때만 예전처럼 주 포지션에 세운다
+      anchorOf(naturalPositionOf(userPlayerById(state, starting[index]!.playerId)!).position),
+  );
 }
 
 /**
@@ -735,21 +799,17 @@ export function setLineup(
   const vacated = tactics.assignments
     .filter((a) => a.role === "starting" && !staying.has(a.playerId) && a.point !== undefined)
     .map((a) => a.point!);
-  let nextVacant = 0;
 
   // 후보 좌표 → **겹침 해소** → 최종 코드.
   // 코드를 좌표보다 먼저 정하지 않는 이유: 밀어낸 뒤의 좌표가 코드의 유일한 원본이어야
   // "코드 = positionAtPoint(point)" 불변식이 깨지지 않는다. 밀려서 코드 표기가 바뀌는
   // 경우(CB 둘 → LCB/RCB, DM → CDM)는 모두 같은 자리라 전력에 영향이 없다.
+  //
+  // 감독이 자리를 말한 사람이 먼저 서고(`candidatePoint`), 말하지 않은 사람은 그러고도
+  // **비어 있는 자리**에 앉는다(`seatStarting`) — 자리가 먼저고 사람이 나중이다.
+  const held = starting.map((s) => candidatePoint(s, prev.get(s.playerId)));
   const startPoints = separateBoardPoints(
-    starting.map((s) => {
-      const before = prev.get(s.playerId);
-      const isNewcomer = !s.point && !s.position && before?.role !== "starting";
-      return candidatePoint(s, before, {
-        ...(isNewcomer && vacated[nextVacant] ? { inherited: vacated[nextVacant++]! } : {}),
-        natural: naturalPositionOf(userPlayerById(state, s.playerId)!).position,
-      });
-    }),
+    seatStarting(state, starting, held, vacated, tactics.spec.formation),
   );
   const startCodes = startPoints.map(positionAtPoint);
 
