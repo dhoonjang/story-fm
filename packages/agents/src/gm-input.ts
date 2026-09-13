@@ -51,6 +51,8 @@ import {
   openInjury,
   openManagerOffers,
   duePromises,
+  playerById,
+  startsInWindow,
   openTransferRequests,
   pendingContractOf,
   pendingVerdicts,
@@ -127,6 +129,7 @@ import {
   type CharacterEntry,
   type CharacterInjection,
   type ManagerOffer,
+  type ManagerPromise,
   type MissionReportCard,
   type PersonaRelation,
   type ScoutReportCard,
@@ -547,6 +550,21 @@ const EXPIRING_SHOWN = 3;
  */
 const PRECONTRACTED_SHOWN = 2;
 const PROMISE_SHOWN = 3;
+/**
+ * 약속 주의 줄에 붙는 **수치 한 조각** — `minutes` 갈래만 든다 (people.md §5-2).
+ *
+ * 다른 넷은 이행이 장부의 유무로 갈려 셀 것이 없다. 출전 약속만 감독이 기한까지
+ * 몇 번 더 세워야 하는지가 수치이고, **선발과 출전을 갈라 싣는다** — 판정은 선발만
+ * 세지만 그 하나만 실으면 후반 45분을 뛴 선수와 한 번도 못 뛴 선수가 GM에게 같은
+ * 사실로 가서, 자기가 방금 쓴 교체를 경기 뒤에 부정한다.
+ */
+function promiseProgress(state: GameState, promise: ManagerPromise): string {
+  if (promise.kind !== "minutes") return "";
+  const player = playerById(state, promise.gamePlayerId);
+  if (!player) return "";
+  const read = startsInWindow(state, player, { from: promise.madeOn });
+  return ` (약속 뒤 ${read.played}경기 선발 ${read.starts}·출전 ${read.apps})`;
+}
 const TRANSFER_REQUEST_SHOWN = 3;
 const AT_RISK_SHOWN = 3;
 /** 과부하로 이름을 적는 인원 — 위험 줄과 같은 폭 */
@@ -1226,7 +1244,9 @@ export function buildGmStateNote(
         ? `약속 기한 임박 ${due.length} (${due
             .slice(0, PROMISE_SHOWN)
             .map(
-              (p) => `${playerName(state, p.gamePlayerId)} ${PROMISE_KIND_KO[p.kind]}~${p.dueOn}`,
+              (p) =>
+                `${playerName(state, p.gamePlayerId)} ${PROMISE_KIND_KO[p.kind]}~${p.dueOn}` +
+                promiseProgress(state, p),
             )
             .join(", ")}${due.length > PROMISE_SHOWN ? " …" : ""})`
         : null;

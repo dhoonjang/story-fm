@@ -547,12 +547,23 @@ function playerFacts(
          * **그가 아는 것은 시즌 출전 수만이 아니다** (people.md §5·§5-2) — 자기가
          * 어떤 자리로 왔는지(계약 지위)와 최근 창에서 몇 번 섰는지가 그 불만의
          * 근거다. 이 셋이 없으면 백업의 침묵과 핵심의 불만이 같은 카드로 선다.
+         *
+         * 창의 출전 수(`windowApps`)가 선발 수와 나란히 서는 것은 **벤치에만 앉아
+         * 있던 사람과 교체로는 뛴 사람이 다른 말을 하기 때문이다** — 선발 수만
+         * 실으면 후반 45분을 뛴 선수의 카드가 한 번도 못 뛴 선수의 카드와 같다.
+         * 시즌 누계인 `apps`와 창의 것을 두 이름으로 두는 것도 그래서다.
          */
         const read = startsInWindow(state, player);
         return {
           kind: "minutes",
           data: {
-            values: { days, apps, starts: read.starts, played: read.played },
+            values: {
+              days,
+              apps,
+              starts: read.starts,
+              played: read.played,
+              windowApps: read.apps,
+            },
             tags: [squadStatusOf(state, player)],
           },
           about: player.id,
