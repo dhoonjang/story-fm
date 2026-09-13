@@ -8,6 +8,7 @@ import {
   clubTonesOf,
   contrastRatio,
   crestOf,
+  leagueTonesOf,
 } from "@story-fm/domain";
 /**
  * 96팀의 공식 색 — 엔진의 데이터 파일이지만 domain 타입만 가져오는 잎 모듈이라 엔진
@@ -134,6 +135,10 @@ const SKY: ClubColours = { primary: "#6cadde", secondary: "#00285d", accent: "#6
 const CLARET: ClubColours = { primary: "#480024", secondary: "#94bee5", accent: "#480024" };
 /** 흑백 — 유채색이 없다 */
 const MONO: ClubColours = { primary: "#000000", secondary: "#ffffff", accent: "" };
+/** 리그 색이 셀 계열 — 붉은 쪽·초록·호박 (ui/design-system.md §2-1) */
+const RED: ClubColours = { primary: "#e30613", secondary: "#ffffff", accent: "#e30613" };
+const GREEN: ClubColours = { primary: "#008835", secondary: "#ffffff", accent: "#008835" };
+const AMBER: ClubColours = { primary: "#f18a01", secondary: "#000000", accent: "#f18a01" };
 
 describe("공식 색 — 색은 카탈로그의 것이고 도형은 여전히 id의 것이다", () => {
   it("공식 색이 있으면 채움이 그 값 그대로다 — 깊게 하지 않는다", () => {
@@ -237,6 +242,53 @@ describe("clubTonesOf — 후보 순서 (ui/design-system.md §2 「--club-hi의
     for (const id of manyIds.slice(0, 40)) {
       const tones = clubTonesOf(crestOf({ id }));
       expect(contrastRatio(tones.hi, PANEL_2), id).toBeGreaterThanOrEqual(CLUB_HI_MIN_CONTRAST);
+    }
+  });
+});
+
+describe("leagueTonesOf — 리그 색 (ui/design-system.md §2-1)", () => {
+  /** 붉은 쪽에 몰린 리그 넷 — 최빈 계열로는 넷이 같은 답을 내는 모양이다 */
+  const RED_HEAVY = [NAVY, SKY, CLARET, MONO, ...Array<ClubColours>(6).fill(RED)];
+  const leagues = [
+    { id: "a", clubs: [...RED_HEAVY, GREEN, GREEN] },
+    { id: "b", clubs: [...RED_HEAVY, SKY, SKY] },
+    { id: "c", clubs: [...RED_HEAVY, NAVY, NAVY] },
+    { id: "d", clubs: [...RED_HEAVY, RED, RED] },
+    { id: "e", clubs: [...RED_HEAVY, AMBER, AMBER] },
+  ];
+
+  it("리그마다 색이 하나씩, 서로 다르게 선다", () => {
+    const tones = leagueTonesOf(leagues);
+    expect(tones.size).toBe(leagues.length);
+    expect(new Set(tones.values()).size).toBe(leagues.length);
+  });
+
+  it("가는 자리의 하한 — 전부 `--panel-2` 위 3:1을 넘는다", () => {
+    for (const [id, tone] of leagueTonesOf(leagues)) {
+      expect(contrastRatio(tone, PANEL_2), id).toBeGreaterThanOrEqual(CLUB_HI_MIN_CONTRAST);
+    }
+  });
+
+  it("같은 입력은 같은 답을 낸다 — 세이브에 굳힐 것이 없다", () => {
+    const once = leagueTonesOf(leagues);
+    const again = leagueTonesOf(leagues.map((l) => ({ ...l, clubs: [...l.clubs] })));
+    expect([...again]).toEqual([...once]);
+  });
+
+  it("구단 색이 하나도 없는 리그도 색을 받는다 — 남는 계열로 물러난다", () => {
+    const tones = leagueTonesOf([...leagues, { id: "f", clubs: [] }]);
+    expect(tones.size).toBe(leagues.length + 1);
+    expect(new Set(tones.values()).size).toBe(leagues.length + 1);
+  });
+
+  it("색은 리그 집합의 함수다 — 한 리그가 빠지면 남은 리그의 답도 움직일 수 있다", () => {
+    const five = leagueTonesOf(leagues);
+    const four = leagueTonesOf(leagues.slice(0, 4));
+    // 답이 「남들과 무엇이 다른가」라 집합이 줄면 계열 하나가 비고 주장의 순서가 바뀐다
+    expect([...four.keys()].sort()).toEqual(leagues.slice(0, 4).map((l) => l.id));
+    for (const [id, tone] of four) {
+      expect(contrastRatio(tone, PANEL_2), id).toBeGreaterThanOrEqual(CLUB_HI_MIN_CONTRAST);
+      expect(five.has(id)).toBe(true);
     }
   });
 });

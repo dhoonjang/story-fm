@@ -17,9 +17,15 @@
  * 분데스리가 공식 약어에는 숫자가 들어간다 (B04·M05·S04).
  */
 import type { ClubColours, Formation } from "@story-fm/domain";
-import { DEFAULT_FORMATION } from "@story-fm/domain";
+import { DEFAULT_FORMATION, leagueTonesOf } from "@story-fm/domain";
 import { CLUB_COLOURS } from "./club-colours";
-import { leagueCatalog, isCupOnlyLeague, isTopLeague, leagueCatalogById } from "./league-catalog";
+import {
+  leagueCatalog,
+  isCupOnlyLeague,
+  isTopLeague,
+  leagueCatalogById,
+  topLeagues,
+} from "./league-catalog";
 import { catalogSource } from "./catalog-source";
 import { readTeamOverride } from "./team-override";
 
@@ -1406,6 +1412,21 @@ export function honoursOf(teamId: string): readonly ClubHonour[] {
 /** 리그 소속 팀 — 리그별 일정·순위표의 참가자 목록 */
 export function teamsOfLeague(leagueId: string): TeamCatalogEntry[] {
   return teamCatalog().filter((t) => t.leagueId === leagueId);
+}
+
+/**
+ * 플레이 가능 리그의 정체성 색 — id → #rrggbb (ui/design-system.md §2-1).
+ *
+ * 규칙은 domain이 갖고(`leagueTonesOf`) 여기는 **어느 구단이 어느 리그에 있는가**만
+ * 답한다. 답이 리그 집합의 함수라 리그 하나씩 물을 수 없다 — 한 번에 다섯을 낸다.
+ */
+export function leagueTones(): ReadonlyMap<string, string> {
+  return leagueTonesOf(
+    topLeagues().map((l) => ({
+      id: l.id,
+      clubs: teamsOfLeague(l.id).flatMap((t) => (t.colours ? [t.colours] : [])),
+    })),
+  );
 }
 
 /**
