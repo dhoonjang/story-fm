@@ -9,6 +9,7 @@
  * 그래서 스쿼드 관리의 긴장이 "몇 명 데리고 있나"가 아니라 **"누구를 명단에서
  * 빼나"** 가 된다 — 명단 밖으로 밀린 베테랑이 반년을 통째로 날리는 그 드라마.
  */
+import type { PositionGroup } from "./player";
 
 /** 만 21세 초과 선수의 등록 상한 */
 export const SQUAD_LIST_LIMIT = 25;
@@ -17,7 +18,7 @@ export const HOMEGROWN_MIN = 8;
 /** 파생 — 홈그로운이 모자라면 그만큼 명단 자리가 비어도 못 채운다 */
 export const NON_HOMEGROWN_MAX = SQUAD_LIST_LIMIT - HOMEGROWN_MIN;
 /** 선발 인원 — 축구의 규칙이라 조정 대상이 아니다 */
-const STARTING_XI = 11;
+export const STARTING_XI = 11;
 /**
  * 매치데이 벤치 정원 — **이 숫자의 원본은 여기 하나뿐이다.**
  * 라인업 명령(`setLineup`)·라인업 라우트·전술판이 전부 이것을 읽는다. 같은 값을 여러
@@ -26,6 +27,12 @@ const STARTING_XI = 11;
 export const MATCHDAY_BENCH = 9;
 /** 매치데이 명단 = 선발 11 + 벤치 9. 1군 최소 인원의 근거다 */
 export const MATCHDAY_SQUAD = STARTING_XI + MATCHDAY_BENCH;
+/**
+ * 1군 골키퍼 최소 — **골문은 필드 선수가 대신 설 수 없는 유일한 자리다.**
+ * 필드 자리는 세지 않는다: 어느 필드 선수든 어느 필드 자리에 설 수는 있다.
+ * 벤치의 두 번째 골키퍼는 운영의 선호라 규칙이 아니다 (team.md §5).
+ */
+export const GOALKEEPER_MIN = 1;
 
 /**
  * 1군 인원 상한 — **리그 규정이 아니라 구단 운영의 상한이다.**
@@ -59,6 +66,8 @@ export interface RegistrablePlayer {
   birthdate: string;
   /** 이 팀 기준 홈그로운인가 — 협회가 다르면 같은 선수도 아닐 수 있다 */
   homegrown: boolean;
+  /** 주 포지션의 군 — 골문에 설 수 있는 사람을 세는 데 쓴다 */
+  positionGroup: PositionGroup;
 }
 
 export interface SquadRegistration {
@@ -71,6 +80,9 @@ export interface SquadRegistration {
   /** 명단 밖 — 무제한으로 둘 수 있고 경기에도 나간다 */
   under21: number;
   total: number;
+  /** 골문에 설 수 있는 사람 — 골키퍼군 */
+  goalkeepers: number;
+  goalkeeperMin: number;
   /** 지금 더 올릴 수 있는 21세 초과 인원 (홈그로운 여부별) */
   openHomegrown: number;
   openNonHomegrown: number;
@@ -105,6 +117,10 @@ export function squadRegistration(
   if (squad.length < MATCHDAY_SQUAD) {
     issues.push(`매치데이 명단 미달 — ${squad.length}/${MATCHDAY_SQUAD}명`);
   }
+  const goalkeepers = squad.filter((p) => p.positionGroup === "GK").length;
+  if (goalkeepers < GOALKEEPER_MIN) {
+    issues.push(`골키퍼 부족 — ${goalkeepers}/${GOALKEEPER_MIN}명`);
+  }
 
   return {
     listed,
@@ -113,6 +129,8 @@ export function squadRegistration(
     homegrownMin: HOMEGROWN_MIN,
     under21: squad.length - listed,
     total: squad.length,
+    goalkeepers,
+    goalkeeperMin: GOALKEEPER_MIN,
     openHomegrown: Math.max(0, SQUAD_LIST_LIMIT - listed),
     openNonHomegrown: Math.max(
       0,

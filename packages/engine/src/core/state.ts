@@ -2509,6 +2509,7 @@ function buildInitialSquads(
         id: player.id,
         birthdate: player.birthdate,
         homegrown: player.homegrownCountry === countryOfTeam(team.id),
+        positionGroup: positionGroupOfPlayer(player),
       };
       if (isUnder21(player.birthdate, seasonStartYear)) {
         // U21은 명단 밖이라 규정이 막지 않는다 — 몇 명을 붙일지는 운영 판단이다.
@@ -3051,6 +3052,11 @@ const XI_BONUS = 200;
  * 포지션군 감점(-400)이 여전히 이겨야 하기 때문이다: 지정 명단에 GK가 없거나
  * 그 GK가 2군이면, 강제로 채우는 순간 필드 플레이어가 골문에 선다.
  * 11명이 안 되거나 부상·징계로 빠진 자리는 평소대로 적합도 상위가 메운다.
+ *
+ * ⚠️ **골문에는 골키퍼만 앉는다** (team.md §6). 감점은 "누가 덜 나쁜가"이지 "서도
+ * 되는가"가 아니라, 풀에 골키퍼가 하나도 없으면 감점을 안은 채 수비형 미드필더가
+ * 골문에 섰다. 그때는 GK 슬롯을 배정에서 빼고 **골문을 비운 채 열 명**을 세운다 —
+ * 등록 현황이 사유를 세우고, 킥오프의 자동 대체가 채운다 (match.md §2).
  */
 export function buildAssignments(
   squad: GamePlayer[],
@@ -3084,16 +3090,26 @@ export function buildAssignments(
   // 사라진다.
   const fit = memoFit(wanted);
 
-  const chosen = fillSlots(pool, slots, fit);
+  // 골키퍼 없는 풀에서는 골문 자리를 배정에서 뺀다 — 비운 자리는 저장되지 않는다
+  const keeperInPool = pool.some((p) => groupOf(p) === "GK");
+  const seats = slots
+    .map((_, index) => index)
+    .filter((index) => keeperInPool || positionGroupOf(slots[index]!) !== "GK");
+  const chosen = fillSlots(
+    pool,
+    seats.map((index) => slots[index]!),
+    fit,
+  );
   for (const p of chosen) used.add(p.id);
 
   chosen.forEach((p, i) => {
+    const index = seats[i]!;
     assignments.push({
       playerId: p.id,
       role: "starting",
-      position: slots[i]!,
+      position: slots[index]!,
       familiarity,
-      point: layout[i],
+      point: layout[index],
     });
   });
 

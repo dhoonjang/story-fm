@@ -4,7 +4,9 @@ import {
   MATCHDAY_SQUAD,
   NON_HOMEGROWN_MAX,
   SQUAD_LIST_LIMIT,
+  STARTING_XI,
   isUnder21,
+  positionGroupOf,
   positionGroupOfPlayer,
   ATTRIBUTE_AXES,
   naturalPositionOf,
@@ -15,6 +17,10 @@ import {
 } from "@story-fm/domain";
 import {
   advanceTime,
+  assembleUserLineup,
+  buildAssignments,
+  FAMILIARITY_BASELINE,
+  playerById,
   squadLevelOf,
   firstTeamPlayers,
   isHomegrownFor,
@@ -215,6 +221,44 @@ describe("1·2군 스쿼드", () => {
       ),
       "첫 달 훈련 행이 월간 성장에 밀려났다",
     ).toBe(true);
+  });
+});
+
+describe("골키퍼 없는 1군 — 골문은 필드 선수가 대신 설 수 없다", () => {
+  it("등록 현황이 사유를 세우고, 자동 편성은 골문을 비운 채 열 명을 세우며, 킥오프는 2군 골키퍼를 부른다", () => {
+    const state = createTestGame();
+    const keepers = firstTeamPlayers(state, state.userTeamId).filter(
+      (p) => positionGroupOfPlayer(p) === "GK",
+    );
+    expect(keepers.length).toBeGreaterThan(0);
+    for (const keeper of keepers) keeper.squadLevel = "reserve";
+
+    // 등록 검사 — 골키퍼 0명은 명단이 성립하지 않는다는 사실이고 사유로 선다
+    const reg = squadRegistrationOf(state, state.userTeamId);
+    expect(reg.goalkeepers).toBe(0);
+    expect(reg.issues.join()).toContain("골키퍼 부족");
+
+    // 자동 편성 — 감점(-400)을 안은 채 필드 선수가 골문에 서던 자리다
+    const tactics = userTactics(state);
+    tactics.assignments = buildAssignments(
+      firstTeamPlayers(state, state.userTeamId),
+      "4-3-3",
+      FAMILIARITY_BASELINE,
+    );
+    const starting = tactics.assignments.filter((a) => a.role === "starting");
+    expect(starting).toHaveLength(STARTING_XI - 1);
+    expect(starting.some((a) => positionGroupOf(a.position) === "GK")).toBe(false);
+
+    // 킥오프 — 빈 골문은 골키퍼만 채우고, 1군에 없으니 2군을 부른다
+    const lineup = assembleUserLineup(state, null);
+    expect(lineup.error).toBeNull();
+    expect(lineup.onPitch).toHaveLength(STARTING_XI);
+    const onPitchKeepers = lineup.onPitch.filter(
+      (id) => positionGroupOfPlayer(playerById(state, id)!) === "GK",
+    );
+    expect(onPitchKeepers).toHaveLength(1);
+    expect(lineup.replaced.join()).toContain("(빈 자리) →");
+    expect(lineup.replaced.join()).toContain("2군 호출");
   });
 });
 
