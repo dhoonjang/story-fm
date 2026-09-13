@@ -6,6 +6,7 @@ import {
   PlayerStateSchema,
   RELATION_TIER_RANK,
   RELEASE_NOTE,
+  pressFactText,
   type GamePlayer,
   type Transfer,
 } from "@story-fm/domain";
@@ -62,6 +63,7 @@ import {
   relationTierOf,
   setRelationTier,
   squadStatusOf,
+  startsInWindow,
   tickPromises,
 } from "@story-fm/engine";
 import { createMiniGame, createTestGame, advanceAndPlay, advanceDays } from "./helpers";
@@ -990,7 +992,12 @@ describe("약속 — 감독의 말이 장부에 선다", () => {
    * 지난 경기 여덟 판을 장부에 세운다 — 선발 명단만 다르다. 시즌을 굴리지 않는 이유는
    * 재는 것이 **경기가 아니라 창의 셈**이어서다 (people.md §5-2).
    */
-  function recordPastMatches(state: GameState, startersOf: (index: number) => string[]): void {
+  function recordPastMatches(
+    state: GameState,
+    startersOf: (index: number) => string[],
+    /** 그 경기에 그라운드를 밟은 사람 전부 — 없으면 선발이 곧 출전이다 */
+    lineupOf?: (index: number) => string[],
+  ): void {
     for (let i = 0; i < PROMISE_WINDOW_MATCHES; i += 1) {
       const starters = startersOf(i);
       state.matches.push({
@@ -1006,7 +1013,7 @@ describe("약속 — 감독의 말이 장부에 선다", () => {
           awayGoals: 0,
           scorers: [],
           homeStarters: starters,
-          homeLineup: starters,
+          homeLineup: lineupOf ? lineupOf(i) : starters,
         },
       });
     }
@@ -1040,6 +1047,54 @@ describe("약속 — 감독의 말이 장부에 선다", () => {
     expect(hit?.played).toBe(PROMISE_WINDOW_MATCHES);
     // 두 번 물어도 같은 답이다 — 난수가 없다
     expect(minutesShortfalls(state).map((r) => r.player.id)).toEqual(rows.map((r) => r.player.id));
+  });
+
+  /**
+   * 판정은 선발만 세는 것이 맞다 — 이 약속의 뜻이 "주전으로 세우겠다"라서다. 갈리는
+   * 것은 **카드**다 (people.md §5-2): 후반 45분을 뛴 선수와 벤치에만 앉아 있던 선수가
+   * 같은 사실로 가면, GM이 자기가 방금 집행한 교체를 경기 뒤에 부정한다.
+   */
+  it("교체로만 뛴 선수는 「선발 0 · 출전 1」로 서고, 못 뛴 선수와 갈린다", () => {
+    const state = createTestGame();
+    state.issues = [];
+    const [starter, sub, benched] = healthy(state);
+    expect(starter && sub && benched).toBeTruthy();
+    // 마지막 한 경기에만 교체로 들어갔다 — 선발 명단은 창 내내 그대로다
+    recordPastMatches(
+      state,
+      () => [starter!.id],
+      (i) => (i === PROMISE_WINDOW_MATCHES - 1 ? [starter!.id, sub!.id] : [starter!.id]),
+    );
+
+    const subRead = startsInWindow(state, sub!);
+    expect(subRead.played).toBe(PROMISE_WINDOW_MATCHES);
+    expect(subRead.starts).toBe(0);
+    expect(subRead.apps).toBe(1);
+    // 판정의 자는 그대로다 — 교체 출전은 선발 비율을 올리지 않는다
+    expect(subRead.share).toBe(0);
+
+    const benchedRead = startsInWindow(state, benched!);
+    expect(benchedRead.starts).toBe(0);
+    expect(benchedRead.apps, "한 번도 못 뛴 선수가 출전으로 셌다").toBe(0);
+
+    // 선발은 언제나 출전이다 — 두 칸이 다른 장부에서 나와도 이 부등식은 선다
+    const starterRead = startsInWindow(state, starter!);
+    expect(starterRead.starts).toBe(PROMISE_WINDOW_MATCHES);
+    expect(starterRead.apps).toBe(PROMISE_WINDOW_MATCHES);
+  });
+
+  it("사실 카드가 그 갈래를 말로 옮긴다 — 「선발 0회 · 출전 1회」", () => {
+    const card = (values: Record<string, number>): string =>
+      pressFactText({
+        kind: "minutes",
+        data: { values: { days: 20, apps: 4, starts: 0, played: 8, ...values }, tags: ["starter"] },
+        about: "p-1",
+        sharp: false,
+      });
+    expect(card({ windowApps: 1 })).toContain("선발 0회 · 출전 1회");
+    expect(card({ windowApps: 0 })).toContain("선발 0회 · 출전 0회");
+    // 옛 세이브의 카드에는 그 칸이 없다 — 그때는 선발 조각만 남는다
+    expect(card({})).not.toContain("출전 0회");
   });
 
   it("창이 차기 전에는 서지 않는다 — 비율이 표본이 아니다", () => {
