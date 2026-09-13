@@ -439,6 +439,25 @@ export function IconLeader({ size = 15 }: IconProps) {
   );
 }
 
+/**
+ * 계약 — **서명한 문서.** 재계약·해지가 남기는 것이 이 종이 한 장이다.
+ *
+ * 도장·악수도 후보였지만 하나는 이 리그의 관습이 아니고 하나는 이적 합의와 겹친다.
+ * 귀퉁이를 접고 서명 획을 넣는 것은 **코치의 클립보드**(사각형에 줄)와 15px에서
+ * 갈리기 위해서다 — 조항 줄만 있으면 둘이 같은 그림이 된다.
+ */
+export function IconContract({ size = 15 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M14 2.8H7a1.6 1.6 0 0 0-1.6 1.6v15.2A1.6 1.6 0 0 0 7 21.2h10a1.6 1.6 0 0 0 1.6-1.6V7.4z" />
+      <path d="M14 2.8V6a1.4 1.4 0 0 0 1.4 1.4h3.2" />
+      <path d="M8.4 11.4h7.2" />
+      <path d="M8.6 15.8c1.4-2.8 2.4-2.4 2.2.2s.8 2 2-.8" />
+      <path d="M8.4 18.4h7.2" />
+    </svg>
+  );
+}
+
 /** 접기·펼치기 — 아래 꺾쇠. 펼쳐지면 CSS가 뒤집는다 */
 export function IconChevron({ size = 14 }: IconProps) {
   return (

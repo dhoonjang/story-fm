@@ -4258,9 +4258,33 @@ textarea {
   animation-delay: 160ms;
 }
 @media (prefers-reduced-motion: reduce) {
-  .tick-event {
+  .tick-event,
+  .tick-more {
     animation: none;
   }
+}
+/**
+ * 「나머지 N건」 — 카드는 읽는 값이고 이것은 **누르는 것**이라 면이 한 톤 올라간다
+ * (design-system.md §1 「조작」). 목록의 마지막 자식이라 카드의 `nth-child`를 밀지 않는다.
+ */
+.tick-more {
+  align-self: flex-start;
+  padding: var(--sp-1) var(--sp-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  transition: background var(--ease);
+  /* 마지막 카드와 함께 온다 — 목록이 아직 서는 중에 손잡이만 먼저 있으면 수가 틀려 보인다 */
+  animation: goal-in 160ms var(--ease-panel) 160ms both;
+}
+.tick-more:hover {
+  background: var(--pop);
+}
+.tick-more:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 /* 종류의 톤 — 레일과 픽토그램이 같은 색을 든다 (표는 design-system.md §6) */
 .tick-event[data-kind="injury"] {
@@ -4274,6 +4298,9 @@ textarea {
 }
 .tick-event[data-kind="interest"] {
   --tick: var(--accent-2);
+}
+.tick-event[data-kind="contract"] {
+  --tick: var(--warn);
 }
 .tick-event[data-kind="matchday"] {
   --tick: var(--gold);
