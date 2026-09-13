@@ -5,7 +5,7 @@
  * 흔들려도 닿아야 하되 **엉뚱한 사람을 조용히 골라서는 안 된다**: 명령은 상태를
  * 바꾸는 자리다. 갈리면 후보를 돌려 GM이 되묻게 한다.
  */
-import { josa, type GamePlayer } from "@story-fm/domain";
+import { josa, josaOf, type GamePlayer } from "@story-fm/domain";
 import { onLoanFromUs, playerById, resolvePlayerRef, userPlayers, type GameState } from "./state";
 
 /** 되물을 때 늘어놓는 후보 수 — 그 이상은 감독이 고를 목록이 아니다 */
@@ -27,8 +27,8 @@ export function pickAnyPlayer(state: GameState, ref: string): PlayerPickResult {
     ok: false,
     message:
       candidates.length > 0
-        ? `"${ref}"는 여러 선수와 맞습니다 — ${candidateLine(candidates)}`
-        : `"${ref}"라는 선수를 찾지 못했습니다`,
+        ? `"${ref}"${josaOf(ref, "은/는")} 여러 선수와 맞습니다 — ${candidateLine(candidates)}`
+        : `"${ref}"${josaOf(ref, "이라는/라는")} 선수를 찾지 못했습니다`,
   };
 }
 
@@ -52,14 +52,19 @@ function pickWithin(
     ok: false,
     message:
       candidates.length > 0
-        ? `"${ref}"는 여러 선수와 맞습니다 — ${candidateLine(candidates)}`
+        ? `"${ref}"${josaOf(ref, "은/는")} 여러 선수와 맞습니다 — ${candidateLine(candidates)}`
         : outside,
   };
 }
 
 /** 우리 팀 선수 하나 */
 export function pickOurPlayer(state: GameState, ref: string): PlayerPickResult {
-  return pickWithin(state, userPlayers(state), ref, `"${ref}"는 우리 팀 선수가 아닙니다`);
+  return pickWithin(
+    state,
+    userPlayers(state),
+    ref,
+    `"${ref}"${josaOf(ref, "은/는")} 우리 팀 선수가 아닙니다`,
+  );
 }
 
 /**
@@ -74,7 +79,7 @@ export function pickSignedPlayer(state: GameState, ref: string): PlayerPickResul
   const signed = state.players.filter(
     (p) => p.teamId === state.userTeamId || onLoanFromUs(state, p),
   );
-  return pickWithin(state, signed, ref, `"${ref}"는 우리 팀 선수가 아닙니다`);
+  return pickWithin(state, signed, ref, `"${ref}"${josaOf(ref, "은/는")} 우리 팀 선수가 아닙니다`);
 }
 
 /**
@@ -99,11 +104,16 @@ export function pickRivalPlayer(state: GameState, ref: string, ourNote?: string)
   const { player, candidates } = resolvePlayerRef(outside, ref);
   if (player) return { ok: true, player };
   if (candidates.length > 0) {
-    return { ok: false, message: `"${ref}"는 여러 선수와 맞습니다 — ${candidateLine(candidates)}` };
+    return {
+      ok: false,
+      message: `"${ref}"${josaOf(ref, "은/는")} 여러 선수와 맞습니다 — ${candidateLine(candidates)}`,
+    };
   }
   // 밖에 없는 이름이 우리 명단에 있으면 그 사실이 답이다 — "찾지 못했다"는 감독이 부른 이름을 없는 이름으로 만든다
   const mine = resolvePlayerRef(userPlayers(state), ref).player;
-  return mine ? ours(mine) : { ok: false, message: `"${ref}"라는 선수를 찾지 못했습니다` };
+  return mine
+    ? ours(mine)
+    : { ok: false, message: `"${ref}"${josaOf(ref, "이라는/라는")} 선수를 찾지 못했습니다` };
 }
 
 /**
@@ -123,7 +133,7 @@ export function pickPlayerAmong(
   if (pool.length === 0) return { ok: false, message: `${poolLabel}에 오른 선수가 없습니다` };
   const absent = {
     ok: false as const,
-    message: `"${ref}"는 ${poolLabel}에 없습니다 — ${candidateLine(pool)}`,
+    message: `"${ref}"${josaOf(ref, "은/는")} ${poolLabel}에 없습니다 — ${candidateLine(pool)}`,
   };
   // 세계의 정확한 id인데 후보 밖이면 거기서 끝이다 — 정확한 지목을 이름으로 다시 짐작하지 않는다
   const exact = playerById(state, ref.trim());
@@ -131,6 +141,9 @@ export function pickPlayerAmong(
   const { player, candidates } = resolvePlayerRef(pool, ref);
   if (player) return { ok: true, player };
   return candidates.length > 0
-    ? { ok: false, message: `"${ref}"는 여러 선수와 맞습니다 — ${candidateLine(candidates)}` }
+    ? {
+        ok: false,
+        message: `"${ref}"${josaOf(ref, "은/는")} 여러 선수와 맞습니다 — ${candidateLine(candidates)}`,
+      }
     : absent;
 }

@@ -28,6 +28,7 @@ import {
   squadStatusRank,
   statusAtRank,
   josa,
+  josaOf,
 } from "@story-fm/domain";
 import {
   addDays,
@@ -574,7 +575,10 @@ function answerTarget(
     } {
   const negotiation = state.negotiations.find((n) => n.id === negotiationId);
   if (!negotiation) {
-    return { ok: false, message: `협상 "${negotiationId}"을 찾지 못했습니다` };
+    return {
+      ok: false,
+      message: `협상 "${negotiationId}"${josaOf(negotiationId, "을/를")} 찾지 못했습니다`,
+    };
   }
   const blocked = guard?.(negotiation);
   if (blocked !== undefined && blocked !== null) return { ok: false, message: blocked };
@@ -713,7 +717,10 @@ export function answerOffer(
 ): MarketCommandResult {
   const negotiation = state.negotiations.find((n) => n.id === input.negotiationId);
   if (!negotiation) {
-    return { ok: false, message: `협상 "${input.negotiationId}"을 찾지 못했습니다` };
+    return {
+      ok: false,
+      message: `협상 "${input.negotiationId}"${josaOf(input.negotiationId, "을/를")} 찾지 못했습니다`,
+    };
   }
   // 마지막 라운드를 상대가 넣었으면 답할 사람은 **감독**이다
   return incomingOffer(negotiation) !== null
@@ -1381,7 +1388,11 @@ export function offerPlayerOut(
   const picked = pickTeam(state, input.teamId);
   if (!picked.ok) return { ok: false, message: picked.message };
   const buyer = state.teams.find((t) => t.id === picked.teamId);
-  if (!buyer) return { ok: false, message: `"${input.teamId}"라는 구단을 찾지 못했습니다` };
+  if (!buyer)
+    return {
+      ok: false,
+      message: `"${input.teamId}"${josaOf(input.teamId, "이라는/라는")} 구단을 찾지 못했습니다`,
+    };
   if (buyer.id === state.userTeamId) {
     return { ok: false, message: "우리 구단에 팔 수는 없습니다" };
   }
@@ -2685,7 +2696,11 @@ function acceptCounterTerms(
  */
 export function acceptDeal(state: GameState, negotiationId: string): CommandResult {
   const negotiation = state.negotiations.find((n) => n.id === negotiationId);
-  if (!negotiation) return { ok: false, message: `협상 "${negotiationId}"을 찾지 못했습니다` };
+  if (!negotiation)
+    return {
+      ok: false,
+      message: `협상 "${negotiationId}"${josaOf(negotiationId, "을/를")} 찾지 못했습니다`,
+    };
   /**
    * **상대의 조정이 서 있으면 그것을 받는 말이다** (transfer.md §1) — 합의 전의
    * `accept_deal`이 언제나 반려면 감독은 조정을 받아들일 길을 갖지 못한다.
@@ -3543,7 +3558,11 @@ function executeSale(
 /** 협상 철회 — 감독이 물러선다 */
 export function withdrawOffer(state: GameState, negotiationId: string): MarketCommandResult {
   const negotiation = state.negotiations.find((n) => n.id === negotiationId);
-  if (!negotiation) return { ok: false, message: `협상 "${negotiationId}"을 찾지 못했습니다` };
+  if (!negotiation)
+    return {
+      ok: false,
+      message: `협상 "${negotiationId}"${josaOf(negotiationId, "을/를")} 찾지 못했습니다`,
+    };
   if (negotiation.status === "completed") {
     return { ok: false, message: "이미 완료된 이적입니다" };
   }
@@ -3852,7 +3871,8 @@ export function describeNegotiations(state: GameState): string {
 /** 협상 한 건의 자세한 상황 — 오퍼 이력 + 현재 확률 근거 */
 export function describeNegotiation(state: GameState, negotiationId: string): string {
   const negotiation = state.negotiations.find((n) => n.id === negotiationId);
-  if (!negotiation) return `협상 "${negotiationId}"을 찾지 못했습니다`;
+  if (!negotiation)
+    return `협상 "${negotiationId}"${josaOf(negotiationId, "을/를")} 찾지 못했습니다`;
   const player = playerById(state, negotiation.gamePlayerId);
   const last = negotiation.rounds[negotiation.rounds.length - 1];
   const name = player?.name ?? negotiation.gamePlayerId;

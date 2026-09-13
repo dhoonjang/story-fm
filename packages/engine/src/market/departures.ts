@@ -1,5 +1,5 @@
 import type { GamePlayer, Injury, TransferReason, TickSink } from "@story-fm/domain";
-import { josa, ageOf, buildPaymentInstallments, seasonRating } from "@story-fm/domain";
+import { josa, josaOf, ageOf, buildPaymentInstallments, seasonRating } from "@story-fm/domain";
 import { contractUntil, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { formatMoney, recordFinance, settleDuePayments } from "../club/finance";
@@ -456,7 +456,11 @@ export function loanPlayer(
   if (player.loan)
     return { ok: false, message: `${josa(player.name, "은/는")} 이미 임대 중입니다` };
   const destination = state.teams.find((t) => t.id === input.teamId);
-  if (!destination) return { ok: false, message: `"${input.teamId}"라는 구단을 찾지 못했습니다` };
+  if (!destination)
+    return {
+      ok: false,
+      message: `"${input.teamId}"${josaOf(input.teamId, "이라는/라는")} 구단을 찾지 못했습니다`,
+    };
   if (destination.id === state.userTeamId) {
     return { ok: false, message: "우리 구단에 임대할 수는 없습니다" };
   }
@@ -480,7 +484,7 @@ export function loanPlayer(
   /** 기본 복귀일은 **시즌 마감**이다 — 실제 임대의 기본 형태이기도 하다 */
   const until = input.until ?? `${seasonYear(state.season) + 1}-06-30`;
   if (until <= state.date) {
-    return { ok: false, message: `복귀일(${until})이 오늘보다 앞섭니다` };
+    return { ok: false, message: `복귀일(${until})${josaOf(until, "이/가")} 오늘보다 앞섭니다` };
   }
   if (until > contract.until) {
     return { ok: false, message: `계약이 ${contract.until}에 끝나 그때까지만 보낼 수 있습니다` };

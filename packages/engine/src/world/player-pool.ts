@@ -1,5 +1,5 @@
 import type { GamePlayer } from "@story-fm/domain";
-import { ageOf } from "@story-fm/domain";
+import { ageOf, josaOf } from "@story-fm/domain";
 import { cupCatalog, isCup } from "../data/cup-catalog";
 import { domesticCupCatalog, isDomesticCup } from "../data/domestic-cup-catalog";
 import { marketLeagues, topLeagues } from "../data/league-catalog";
@@ -99,7 +99,7 @@ export function resolveCompetition(competition?: string): CompetitionResolution 
   if (!competitionId) {
     return {
       ok: false,
-      message: `"${competition}"라는 대회를 찾지 못했습니다 — ${competitionHint()}`,
+      message: `"${competition}"${josaOf(competition, "이라는/라는")} 대회를 찾지 못했습니다 — ${competitionHint()}`,
     };
   }
   return { ok: true, competitionId };

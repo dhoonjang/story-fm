@@ -156,7 +156,7 @@ export function buildOnboardingTurn(state: GameState): GmTurnResult {
       pick(rng, ONBOARDING_WELCOMES)(state.manager.name, tag, persona.name),
       // 코치의 사람됨을 첫 만남에 밝힌다 — motivation은 3인칭 서술이라 대사로 옮기지 않는다
       `${tag} 저에 대해서는 ${persona.traits.join(" · ")} — 그렇게들 말합니다.`,
-      `${tag} “${state.manager.background}”이라는 이력도 검토했습니다. 보드는 특히 감독님의 ${josa(axesText, "을/를")} 높이 샀습니다.`,
+      `${tag} “${state.manager.background}”${josaOf(state.manager.background, "이라는/라는")} 이력도 검토했습니다. 보드는 특히 감독님의 ${josa(axesText, "을/를")} 높이 샀습니다.`,
       `${tag} 스쿼드의 축은 ${views.squad.players
         .slice(0, 3)
         .map((p) => p.name)

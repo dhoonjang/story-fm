@@ -28,6 +28,7 @@ import {
   VISION_CODE_KO,
   injuryHistoryText,
   josa,
+  josaOf,
   yellowBanMatches,
   isReserveMatch,
   MatchStageSchema,
@@ -1151,8 +1152,8 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
       ok: false,
       message:
         candidates.length > 0
-          ? `"${playerId}"는 여러 선수와 맞습니다 — ${candidateLine(candidates)}`
-          : `"${playerId}"라는 선수를 찾지 못했습니다 — search_players로 id를 먼저 확인하라`,
+          ? `"${playerId}"${josaOf(playerId, "은/는")} 여러 선수와 맞습니다 — ${candidateLine(candidates)}`
+          : `"${playerId}"${josaOf(playerId, "이라는/라는")} 선수를 찾지 못했습니다 — search_players로 id를 먼저 확인하라`,
     };
   }
   const knowledge: Knowledge = knowledgeOf(state, p.id);
@@ -2073,7 +2074,7 @@ function competitionOfInput(
     if (!resolved) {
       return {
         ok: false,
-        message: `"${input.competition}"라는 대회를 찾지 못했습니다 — ${competitionHint()}`,
+        message: `"${input.competition}"${josaOf(input.competition, "이라는/라는")} 대회를 찾지 못했습니다 — ${competitionHint()}`,
       };
     }
     competitionId = resolved;
@@ -2419,7 +2420,7 @@ function fixturesView(state: GameState, input: LeagueViewInput): LookupResult {
     if (!competitionId) {
       return {
         ok: false,
-        message: `"${input.competition}"라는 대회를 찾지 못했습니다 — ${competitionHint()}`,
+        message: `"${input.competition}"${josaOf(input.competition, "이라는/라는")} 대회를 찾지 못했습니다 — ${competitionHint()}`,
       };
     }
   } else if (teamId === null) {
@@ -3195,14 +3196,20 @@ export function historyView(state: GameState, input: HistoryViewInput = {}): Loo
   if (input.player !== undefined) {
     const matches = resolveHistoryPerson(state, input.player);
     if (matches.length === 0) {
-      return { ok: false, message: `"${input.player}"라는 선수를 찾지 못했습니다` };
+      return {
+        ok: false,
+        message: `"${input.player}"${josaOf(input.player, "이라는/라는")} 선수를 찾지 못했습니다`,
+      };
     }
     if (matches.length > 1) {
       const names = matches
         .slice(0, 6)
         .map((p) => `${p.name}(${p.id})`)
         .join(" / ");
-      return { ok: false, message: `"${input.player}"는 여러 선수와 맞습니다 — ${names}` };
+      return {
+        ok: false,
+        message: `"${input.player}"${josaOf(input.player, "은/는")} 여러 선수와 맞습니다 — ${names}`,
+      };
     }
     return playerHistoryView(state, matches[0]!);
   }
@@ -3220,7 +3227,7 @@ export function historyView(state: GameState, input: HistoryViewInput = {}): Loo
     if (competitionId === null) {
       return {
         ok: false,
-        message: `"${input.competition}"라는 대회를 찾지 못했습니다 — ${competitionHint()}`,
+        message: `"${input.competition}"${josaOf(input.competition, "이라는/라는")} 대회를 찾지 못했습니다 — ${competitionHint()}`,
       };
     }
   }
@@ -3405,7 +3412,9 @@ function pickReportMatch(state: GameState, input: MatchReportInput): PickedMatch
     if (!m) {
       return {
         ok: false,
-        message: [`"${input.matchId}"라는 경기를 찾지 못했습니다 — 최근 우리 경기:`]
+        message: [
+          `"${input.matchId}"${josaOf(input.matchId, "이라는/라는")} 경기를 찾지 못했습니다 — 최근 우리 경기:`,
+        ]
           .concat(reportCandidates(state))
           .join("\n"),
       };
@@ -3435,7 +3444,7 @@ function pickReportMatch(state: GameState, input: MatchReportInput): PickedMatch
     if (!competitionId) {
       return {
         ok: false,
-        message: `"${input.competition}"라는 대회를 찾지 못했습니다 — ${competitionHint()}`,
+        message: `"${input.competition}"${josaOf(input.competition, "이라는/라는")} 대회를 찾지 못했습니다 — ${competitionHint()}`,
       };
     }
     pool = pool.filter((m) => m.competitionId === competitionId);

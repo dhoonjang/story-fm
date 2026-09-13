@@ -6,7 +6,7 @@ import type {
   TableSpeaker,
   TableStance,
 } from "@story-fm/domain";
-import { PITCH_CLAIM_KO, TABLE_LINE_MAX, TABLE_STANCE_KO } from "@story-fm/domain";
+import { PITCH_CLAIM_KO, TABLE_LINE_MAX, TABLE_STANCE_KO, josaOf } from "@story-fm/domain";
 import type { MarketCard } from "@story-fm/domain";
 import { playerById, pushNarrative, type GameState } from "../core/state";
 import { agentProfileOf } from "./agent-profile";
@@ -103,7 +103,11 @@ export function sitAtTable(
   line: string,
 ): { ok: false; message: string } | { ok: true; seat: TableSeat } {
   const negotiation = state.negotiations.find((n) => n.id === negotiationId);
-  if (!negotiation) return { ok: false, message: `협상 "${negotiationId}"을 찾지 못했습니다` };
+  if (!negotiation)
+    return {
+      ok: false,
+      message: `협상 "${negotiationId}"${josaOf(negotiationId, "을/를")} 찾지 못했습니다`,
+    };
   if (negotiation.status !== "open") {
     return { ok: false, message: `이미 끝난 협상입니다 (${negotiation.status})` };
   }
@@ -145,7 +149,11 @@ export function openLetter(
   negotiationId: string,
 ): { ok: false; message: string } | { ok: true; seat: TableSeat } {
   const negotiation = state.negotiations.find((n) => n.id === negotiationId);
-  if (!negotiation) return { ok: false, message: `협상 "${negotiationId}"을 찾지 못했습니다` };
+  if (!negotiation)
+    return {
+      ok: false,
+      message: `협상 "${negotiationId}"${josaOf(negotiationId, "을/를")} 찾지 못했습니다`,
+    };
   if (negotiation.status !== "open") {
     return { ok: false, message: `이미 끝난 협상입니다 (${negotiation.status})` };
   }

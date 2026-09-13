@@ -41,6 +41,7 @@ import {
   TacticsSpecSchema,
   tacticsSignature,
   josa,
+  josaOf,
 } from "@story-fm/domain";
 import type { CommandResult } from "../commands";
 import {
@@ -1508,7 +1509,9 @@ export function setRegionalPlan(
     ok: true,
     message:
       `지역 전술 적용 — ${note}` +
-      (dropped ? ` (동시에 ${MAX_REGIONAL_PLANS}곳까지 — "${dropped.note}"가 밀려났습니다)` : ""),
+      (dropped
+        ? ` (동시에 ${MAX_REGIONAL_PLANS}곳까지 — "${dropped.note}"${josaOf(dropped.note, "이/가")} 밀려났습니다)`
+        : ""),
   };
 }
 

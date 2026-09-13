@@ -20,6 +20,7 @@ import {
   squadStatusRank,
   type NumberWish,
   josa,
+  josaOf,
 } from "@story-fm/domain";
 import { buildSeasonCalendar, diffDays, windowOpenOn } from "../competition/calendar";
 import { claimLabel, evaluatePitch } from "./persuasion";
@@ -793,7 +794,9 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     knowledge,
     fuzzy: false,
     factors: [],
-    blockers: [`"${terms.playerId}"라는 선수를 찾지 못했습니다`],
+    blockers: [
+      `"${terms.playerId}"${josaOf(terms.playerId, "이라는/라는")} 선수를 찾지 못했습니다`,
+    ],
     latitude: 0,
     gates: { club: null, player: 0 },
   };

@@ -6,7 +6,7 @@
  * 1부에서 영원히 tier 4로 남아 보드가 잔류만 요구하고, 강등된 빅클럽이 2부에서
  * tier 1로 남아 우승 경쟁을 요구받는다.
  */
-import { boardExpectationText } from "@story-fm/domain";
+import { boardExpectationText, josaOf } from "@story-fm/domain";
 import { savedClubProfile, teamNameIn, type GameState } from "../core/state";
 import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
 import { isCupOnlyLeague, isTopLeague } from "../data/league-catalog";
@@ -189,6 +189,6 @@ export function recomputeClubTiers(state: GameState): string[] {
   const expectation = boardExpectationOfTier(after, leagueSizeIn(state, state.userTeamId));
   const name = boardExpectationText(expectation.code, expectation.target);
   return [
-    `${teamNameIn(state, state.userTeamId)} 구단 체급 ${before} → ${after} — 보드 기대는 "${name}"가 됐다`,
+    `${teamNameIn(state, state.userTeamId)} 구단 체급 ${before} → ${after} — 보드 기대는 "${name}"${josaOf(name, "이/가")} 됐다`,
   ];
 }

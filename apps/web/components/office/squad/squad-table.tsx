@@ -1,7 +1,13 @@
 "use client";
 
 import { Fragment, useMemo } from "react";
-import { PROMISE_KIND_KO, SQUAD_STATUS_KO, formatRating, squadStatusRank } from "@story-fm/domain";
+import {
+  PROMISE_KIND_KO,
+  SQUAD_STATUS_KO,
+  formatRating,
+  josaOf,
+  squadStatusRank,
+} from "@story-fm/domain";
 import { ConditionBar } from "@/components/condition-bar";
 import { IconChevron, IconChevronUp } from "@/components/icons";
 import { contractUntil, humanDate } from "@/lib/dateline";
@@ -247,7 +253,7 @@ export function SquadTable({
                             onSwapIn(p.id);
                           }}
                           data-testid={`swapin-${p.id}`}
-                          title={`${p.name}(${rowTier})와 ${swapPair.name}(${swapPair.tier}) 맞바꾸기`}
+                          title={`${p.name}(${rowTier})${josaOf(rowTier, "과/와")} ${swapPair.name}(${swapPair.tier}) 맞바꾸기`}
                         >
                           {rowGoesUp ? "←" : "→"}
                         </button>
