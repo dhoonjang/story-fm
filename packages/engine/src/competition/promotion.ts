@@ -192,7 +192,11 @@ export function applyPromotionRelegation(
       digest.push(
         `${josa(teamNameIn(state, state.userTeamId), "이/가")} 강등됐다 — 다음 시즌은 ${leagueName(second)}다`,
       );
-      pushNarrative(state, `${leagueName(leagueId)} 강등 — ${leagueName(second)}로`, 5);
+      pushNarrative(
+        state,
+        `${leagueName(leagueId)} 강등 — ${josa(leagueName(second), "으로/로")}`,
+        5,
+      );
     } else if (up.includes(state.userTeamId)) {
       digest.push(
         `${teamNameIn(state, state.userTeamId)} 승격! 다음 시즌은 ${leagueName(leagueId)}다`,

@@ -30,11 +30,10 @@ function milestoneSentence(day: string, m: { code: MilestoneCode; value: number 
     case "first-goal":
       return `${day} 이 구단에서의 첫 골을 넣었다`;
     case "apps":
-      return `${day} ${what}를 채웠다`;
     case "goals":
-      return `${day} ${what}을 채웠다`;
+      return `${day} ${josa(what, "을/를")} 채웠다`;
     case "hat-trick":
-      return `${day} ${what}을 기록했다`;
+      return `${day} ${josa(what, "을/를")} 기록했다`;
   }
 }
 
@@ -251,7 +250,7 @@ function sentenceOf(fact: MoodFact): string {
        * 그 사실을 사람의 말로 옮기기만 한다.
        */
       const last = fact.history.last;
-      if (last !== null && last.open) return `${last.bodyPart}을 다쳐 재활 중이다`;
+      if (last !== null && last.open) return `${josa(last.bodyPart, "을/를")} 다쳐 재활 중이다`;
       if (last !== null && last.daysAgo <= 30) {
         return `${last.bodyPart} 부상에서 돌아온 지 ${last.daysAgo}일째다`;
       }

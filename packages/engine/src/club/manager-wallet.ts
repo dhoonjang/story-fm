@@ -1,5 +1,5 @@
 import type { ManagerSpend, ManagerSpendKind, PressFact } from "@story-fm/domain";
-import { formatMoney, MANAGER_SPEND_KIND_KO, MANAGER_TERMS_BY_TIER } from "@story-fm/domain";
+import { formatMoney, josa, MANAGER_SPEND_KIND_KO, MANAGER_TERMS_BY_TIER } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { clampReputation, financeOf, managedTeamId, pushNarrative } from "../core/state";
 import { tierOfTeamIn } from "../core/club-tier";
@@ -138,7 +138,7 @@ export function spendFromWallet(
   if (amount > wallet) {
     return {
       ok: false,
-      message: `지갑에 ${formatMoney(wallet)}뿐입니다 — ${formatMoney(amount)}를 낼 수 없습니다`,
+      message: `지갑에 ${formatMoney(wallet)}뿐입니다 — ${josa(formatMoney(amount), "을/를")} 낼 수 없습니다`,
     };
   }
 

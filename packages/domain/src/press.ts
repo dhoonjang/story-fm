@@ -1025,7 +1025,7 @@ export function pressFactText(fact: PressFact): string {
        */
       return sub === "knock"
         ? `${name} 감독직에 지원했다`
-        : `${name}가 감독직을 제안했다 — 재직 중이다`;
+        : `${josa(name, "이/가")} 감독직을 제안했다 — 재직 중이다`;
     case "manager-fund":
       /**
        * 등급은 `tags[0]`이 들지만 줄에는 서지 않는다 — 백분율이 이미 그 사실이고,

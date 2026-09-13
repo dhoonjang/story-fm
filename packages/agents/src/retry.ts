@@ -5,6 +5,7 @@
  * 앵커를 남긴다 — 결산 하나 때문에 경기 결과나 시간 진행이 막히면 안 된다.
  */
 
+import { josa } from "@story-fm/domain";
 import { journal } from "@story-fm/engine";
 import type { TurnResult } from "@story-fm/llm";
 
@@ -35,7 +36,7 @@ export async function requireToolCall(
 ): Promise<TurnResult> {
   const result = await run();
   if (result.toolCallCount === 0) {
-    throw new ModelOutputError(`모델이 ${tool}을 부르지 않고 본문으로 답했습니다`);
+    throw new ModelOutputError(`모델이 ${josa(tool, "을/를")} 부르지 않고 본문으로 답했습니다`);
   }
   return result;
 }

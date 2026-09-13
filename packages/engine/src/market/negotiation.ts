@@ -984,7 +984,7 @@ export function respondOffer(
       ok: true,
       payload: verdictCard({}),
       message:
-        `${counterpart}가 오퍼를 받아들였습니다 — ${player.name}, ${formatMoney(offer.fee)}${splitLabel(offer.paymentYears)}. ` +
+        `${josa(counterpart, "이/가")} 오퍼를 받아들였습니다 — ${player.name}, ${formatMoney(offer.fee)}${splitLabel(offer.paymentYears)}. ` +
         "accept_deal로 검진을 잡아야 계약이 섭니다",
     };
   }
@@ -1003,7 +1003,7 @@ export function respondOffer(
     return {
       ok: true,
       payload: verdictCard({}),
-      message: `${counterpart}가 거절했습니다 — ${player.name} 협상은 이번 창에서 끝났습니다`,
+      message: `${josa(counterpart, "이/가")} 거절했습니다 — ${player.name} 협상은 이번 창에서 끝났습니다`,
     };
   }
 
@@ -1643,7 +1643,7 @@ export function generateIncomingOffers(state: GameState, digest: TickSink): void
     // 처음엔 시장가보다 낮게 부른다 (75~100%) — 흥정의 여지를 남긴다
     (feeBias) => Math.round((marketValue * (0.75 + rng() * 0.25) * feeBias) / 100_000) * 100_000,
     ({ buyerName, fee, expiresOn }) =>
-      `${buyerName}가 ${bid.player.name} 영입 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
+      `${josa(buyerName, "이/가")} ${bid.player.name} 영입 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
     bid.interest.teamId,
   );
   // 사다리의 끝 — 그 사실은 이제 협상이 든다. 창이 닫혀 못 열렸으면 줄은 남는다
@@ -1736,7 +1736,7 @@ function openListedOffer(
     (feeBias) =>
       Math.round((askingPrice * (1 - LISTED_DISCOUNT * rng()) * feeBias) / 100_000) * 100_000,
     ({ buyerName, fee, expiresOn }) =>
-      `${buyerName}가 이적 리스트의 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (호가 ${formatMoney(askingPrice)} · 기한 ${expiresOn})`,
+      `${josa(buyerName, "이/가")} 이적 리스트의 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (호가 ${formatMoney(askingPrice)} · 기한 ${expiresOn})`,
   );
 }
 
@@ -1759,7 +1759,7 @@ function openRequestedOffer(
     (feeBias) =>
       Math.round((market * (1 - REQUESTED_DISCOUNT * rng()) * feeBias) / 100_000) * 100_000,
     ({ buyerName, fee, expiresOn }) =>
-      `${buyerName}가 이적을 요청한 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
+      `${josa(buyerName, "이/가")} 이적을 요청한 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
   );
 }
 
@@ -2017,7 +2017,7 @@ export function answerIncomingOffer(
       ...(input.note ? { note: input.note } : {}),
     }),
     message:
-      `${player.name} 값으로 ${formatMoney(demanded)}을 불렀습니다 (성사 가능성 ${oddsText(odds)}) — ` +
+      `${player.name} 값으로 ${josa(formatMoney(demanded), "을/를")} 불렀습니다 (성사 가능성 ${oddsText(odds)}) — ` +
       describePending(waitDays),
   };
 }
@@ -2067,7 +2067,7 @@ export function openRenewal(
       ok: false,
       message:
         `${josa(player.name, "은/는")} 이미 다른 구단과 약속했습니다 — ` +
-        `${teamName(promised.teamId)}와 사전 계약을 맺어 ${promised.since}에 떠납니다`,
+        `${josa(teamName(promised.teamId), "과/와")} 사전 계약을 맺어 ${promised.since}에 떠납니다`,
     };
   }
   const terms: DealTerms = {
@@ -2094,7 +2094,10 @@ export function openRenewal(
       };
     }
     if (existing.rounds.length >= MAX_ROUNDS) {
-      return { ok: false, message: `${player.name}과의 대화가 겉돌고 있습니다 — 시간을 두세요` };
+      return {
+        ok: false,
+        message: `${josa(player.name, "과/와")}의 대화가 겉돌고 있습니다 — 시간을 두세요`,
+      };
     }
   }
   const negotiation: Negotiation =
@@ -2191,7 +2194,10 @@ export function openRelease(
       };
     }
     if (existing.rounds.length >= MAX_ROUNDS) {
-      return { ok: false, message: `${player.name}과의 대화가 겉돌고 있습니다 — 시간을 두세요` };
+      return {
+        ok: false,
+        message: `${josa(player.name, "과/와")}의 대화가 겉돌고 있습니다 — 시간을 두세요`,
+      };
     }
   }
   const negotiation: Negotiation =
@@ -2290,7 +2296,7 @@ function executeLoanOut(
     return {
       ok: false,
       message:
-        `${teamName(borrowerTeamId ?? "")}가 임대료 ${formatMoney(agreed.fee)}를 마련하지 못했습니다 — ` +
+        `${josa(teamName(borrowerTeamId ?? ""), "이/가")} 임대료 ${josa(formatMoney(agreed.fee), "을/를")} 마련하지 못했습니다 — ` +
         `가용 ${formatMoney(borrowerFinance.transferBudget)}. 이 건은 무산됐습니다`,
     };
   }
@@ -2794,7 +2800,7 @@ function medicalFlagResult(
     ok: true,
     message:
       `${teamName(receivingTeamOf(state, negotiation))}의 메디컬에서 ${player.name}에게 소견이 ` +
-      `나왔습니다 — ${note}. ${formatMoney(counter.agreedFee)}에서 ${formatMoney(counter.cut)}로 깎아 다시 ` +
+      `나왔습니다 — ${note}. ${formatMoney(counter.agreedFee)}에서 ${josa(formatMoney(counter.cut), "으로/로")} 깎아 다시 ` +
       `불렀습니다 — 답해야 합니다`,
     brief: {
       head: "메디컬 소견",
@@ -2892,7 +2898,10 @@ function affordabilityGate(
   },
 ): CommandResult | null {
   if (deal.skipWindow !== true && !windowOpenOn(state.windows, state.date)) {
-    return { ok: false, message: `이적시장이 닫혀 있어 ${deal.what}을 확정할 수 없습니다` };
+    return {
+      ok: false,
+      message: `이적시장이 닫혀 있어 ${josa(deal.what, "을/를")} 확정할 수 없습니다`,
+    };
   }
   const finance = state.finances.find((f) => f.teamId === state.userTeamId);
   if (!finance) return { ok: false, message: "재정 정보를 찾지 못했습니다" };
@@ -3341,7 +3350,7 @@ function executeSale(
   if (!window) {
     return {
       ok: false,
-      message: `${transferWindowLabel(state, buyerTeamId)}이 닫혀 있어 매각을 확정할 수 없습니다`,
+      message: `${josa(transferWindowLabel(state, buyerTeamId), "이/가")} 닫혀 있어 매각을 확정할 수 없습니다`,
     };
   }
   const shortfall = squadShortfall(state, state.userTeamId, player);
@@ -3391,7 +3400,7 @@ function executeSale(
       return {
         ok: false,
         message:
-          `${teamName(buyerTeamId)}가 ${formatMoney(agreed.fee)}를 일시금으로 마련하지 못해 ` +
+          `${josa(teamName(buyerTeamId), "이/가")} ${josa(formatMoney(agreed.fee), "을/를")} 일시금으로 마련하지 못해 ` +
           `${split}년 분할로 되불렀습니다 — 총액은 그대로, 첫 회분 ${formatMoney(firstInstallmentOf(agreed.fee, split))}. ` +
           "답해야 합니다",
       };
@@ -3400,7 +3409,7 @@ function executeSale(
     return {
       ok: false,
       message:
-        `${teamName(buyerTeamId)}가 ${formatMoney(agreed.fee)}를 마련하지 못했습니다 — ` +
+        `${josa(teamName(buyerTeamId), "이/가")} ${josa(formatMoney(agreed.fee), "을/를")} 마련하지 못했습니다 — ` +
         `가용 ${formatMoney(budget)}. ${MAX_PAYMENT_YEARS}년 분할로도 첫 회분을 못 냅니다. 이 건은 무산됐습니다`,
     };
   }
@@ -3490,7 +3499,7 @@ function executeSale(
 
   pushNarrative(
     state,
-    `${player.name} 매각 — ${teamName(buyerTeamId)}로 ${formatMoney(agreed.fee)}`,
+    `${player.name} 매각 — ${josa(teamName(buyerTeamId), "으로/로")} ${formatMoney(agreed.fee)}`,
     wasCaptain ? 5 : 4,
   );
   const salePress = buildTransferPress(state, {
@@ -3508,7 +3517,9 @@ function executeSale(
         ? ""
         : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)})`) +
       "." +
-      (sellOnPaid > 0 ? ` 셀온 조항으로 ${formatMoney(sellOnPaid)}가 나갔습니다.` : "") +
+      (sellOnPaid > 0
+        ? ` 셀온 조항으로 ${josa(formatMoney(sellOnPaid), "이/가")} 나갔습니다.`
+        : "") +
       `${captainNote} 이적 예산 ${formatMoney(ourFinance?.transferBudget ?? 0)}`,
     brief: {
       head: "매각 완료",
@@ -4056,12 +4067,14 @@ export function runAiRenewals(state: GameState, digest: TickSink): void {
     if (ours) {
       ours.status = "rejected";
       digest.push(
-        `${teamName(contract.teamId)}가 ${player.name}과 재계약했습니다 (${years}년) — 우리 협상은 끝났습니다`,
+        `${josa(teamName(contract.teamId), "이/가")} ${josa(player.name, "과/와")} 재계약했습니다 (${years}년) — 우리 협상은 끝났습니다`,
       );
       pushNarrative(state, `${player.name} 재계약 — 영입 무산`, 4);
     } else if (state.scoutReports.some((r) => r.gamePlayerId === player.id && r.completedOn)) {
       // 스카우팅해 둔 선수는 감독의 관심 목록이다 — 소식은 전한다
-      digest.push(`${teamName(contract.teamId)}가 ${player.name}과 재계약했습니다 (${years}년)`);
+      digest.push(
+        `${josa(teamName(contract.teamId), "이/가")} ${josa(player.name, "과/와")} 재계약했습니다 (${years}년)`,
+      );
     }
   }
 }
@@ -4194,6 +4207,10 @@ export function runAiPrecontracts(state: GameState, digest: TickSink): void {
     digest.push(
       `${josa(player.name, "이/가")} ${josa(teamName(teamId), "과/와")} 사전 계약했습니다 — ${since}에 떠납니다`,
     );
-    pushNarrative(state, `${player.name} 사전 계약 — ${teamName(teamId)}로 ${since} 이적`, 5);
+    pushNarrative(
+      state,
+      `${player.name} 사전 계약 — ${josa(teamName(teamId), "으로/로")} ${since} 이적`,
+      5,
+    );
   }
 }

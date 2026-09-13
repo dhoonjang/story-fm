@@ -5,7 +5,7 @@ import type {
   BoardRequestKind,
   TickSink,
 } from "@story-fm/domain";
-import { BOARD_REQUEST_LABEL, boardRequestAmountText } from "@story-fm/domain";
+import { josa, BOARD_REQUEST_LABEL, boardRequestAmountText } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import {
   clubProfileIn,
@@ -255,7 +255,7 @@ export function requestBoard(state: GameState, input: RequestBoardInput): Comman
     if (left > 0) {
       return {
         ok: false,
-        message: `${BOARD_REQUEST_LABEL[input.kind]}은 ${last.resolvedOn}에 답을 받았습니다 — 같은 안건은 ${left}일 뒤에 다시 걸 수 있습니다`,
+        message: `${josa(BOARD_REQUEST_LABEL[input.kind], "은/는")} ${last.resolvedOn}에 답을 받았습니다 — 같은 안건은 ${left}일 뒤에 다시 걸 수 있습니다`,
       };
     }
   }
@@ -630,7 +630,7 @@ function describeAsk(state: GameState, request: BoardRequest): string {
 function conditionText(condition: BoardCondition): string {
   switch (condition.kind) {
     case "raise":
-      return `매각으로 ${formatMoney(condition.amount)}를 만들면 승인`;
+      return `매각으로 ${josa(formatMoney(condition.amount), "을/를")} 만들면 승인`;
     case "wage-cut":
       return `주급 총액을 ${formatMoney(condition.amount)}/주 아래로 내리면 승인`;
   }

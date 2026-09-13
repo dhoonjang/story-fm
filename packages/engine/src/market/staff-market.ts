@@ -189,7 +189,7 @@ export function hireStaff(
   if (seatedCount(state, entry.role) >= limit) {
     return {
       ok: false,
-      message: `${PERSONA_ROLE_LABEL[entry.role]} 자리가 ${limit}로 다 찼습니다 — 한 사람을 내보내야 합니다`,
+      message: `${PERSONA_ROLE_LABEL[entry.role]} 자리가 ${josa(`${limit}`, "으로/로")} 다 찼습니다 — 한 사람을 내보내야 합니다`,
     };
   }
   const room = userWageRoom(state);
@@ -197,7 +197,7 @@ export function hireStaff(
   if (weekly > room) {
     return {
       ok: false,
-      message: `주급 여력을 넘습니다 — 연봉 ${formatMoney(salary)}는 주당 ${formatMoney(Math.round(weekly))}이고, 남은 여력은 ${formatMoney(Math.round(Math.max(0, room)))}입니다`,
+      message: `주급 여력을 넘습니다 — 연봉 ${josa(formatMoney(salary), "은/는")} 주당 ${formatMoney(Math.round(weekly))}이고, 남은 여력은 ${formatMoney(Math.round(Math.max(0, room)))}입니다`,
     };
   }
 

@@ -4,6 +4,7 @@ import {
   ageOf,
   bestOverall,
   isAssociation,
+  josa,
   naturalPositionOf,
   positionGroupOf,
 } from "@story-fm/domain";
@@ -369,7 +370,7 @@ function moveEntry(
   const target = teamCatalogById(teamId);
   if (!target) return { ok: false, message: `알 수 없는 팀: ${teamId}` };
   if (entry.teamId === teamId) {
-    return { ok: false, message: `${entry.nameKo}는 이미 ${target.name} 소속입니다` };
+    return { ok: false, message: `${josa(entry.nameKo, "은/는")} 이미 ${target.name} 소속입니다` };
   }
   const blocked = departureBlock(entries, entry, "이동");
   if (blocked) return { ok: false, message: blocked };

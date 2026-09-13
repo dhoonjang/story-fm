@@ -205,7 +205,7 @@ export function checkDomesticCupInvariants(cups: readonly DomesticCupEntry[]): s
     const owner = ticketOwner.get(key);
     if (owner) {
       problems.push(
-        `${cup.country}의 ${cup.europeanTicket.toUpperCase()} 티켓을 ${owner.name}과 ${cup.name}이 함께 줍니다 (나라마다 한 장입니다)`,
+        `${cup.country}의 ${cup.europeanTicket.toUpperCase()} 티켓을 ${josa(owner.name, "과/와")} ${josa(cup.name, "이/가")} 함께 줍니다 (나라마다 한 장입니다)`,
       );
     } else {
       ticketOwner.set(key, cup);
@@ -308,7 +308,7 @@ export function checkSeedInvariants(
         }
       } else if (seeded < MIN_SEEDED_SQUAD) {
         problems.push(
-          `${team.name}: ${league.name}는 실선수 시드 리그인데 시드가 ${seeded}명입니다 (${MIN_SEEDED_SQUAD}명 이상)`,
+          `${team.name}: ${josa(league.name, "은/는")} 실선수 시드 리그인데 시드가 ${seeded}명입니다 (${MIN_SEEDED_SQUAD}명 이상)`,
         );
       } else if (seededGoalkeepers(team.id) === 0) {
         problems.push(`${team.name}: 실선수 시드에 골키퍼가 없습니다`);
@@ -343,7 +343,7 @@ export function checkSeedInvariants(
   for (const { what, teamIds: referenced } of SEED_TEAM_REFERENCES) {
     for (const teamId of referenced) {
       if (!teamIds.has(teamId)) {
-        problems.push(`${what}가 카탈로그에 없는 팀을 가리킵니다: ${teamId}`);
+        problems.push(`${josa(what, "이/가")} 카탈로그에 없는 팀을 가리킵니다: ${teamId}`);
       }
     }
   }
@@ -499,7 +499,7 @@ export function catalogWarnings(input: CatalogCandidate): string[] {
     const clubs = input.teams.filter((t) => countryLeagues.has(t.leagueId)).length;
     if (clubs !== DOMESTIC_CUP_SIZE) {
       warnings.push(
-        `${cup.name}이 열리지 않습니다 — ${cup.country}의 클럽이 ${clubs}개입니다 (${DOMESTIC_CUP_SIZE}팀 필요)`,
+        `${josa(cup.name, "이/가")} 열리지 않습니다 — ${cup.country}의 클럽이 ${clubs}개입니다 (${DOMESTIC_CUP_SIZE}팀 필요)`,
       );
     }
     if (!input.leagues.some((l) => l.country === cup.country && l.kind === "playable")) {

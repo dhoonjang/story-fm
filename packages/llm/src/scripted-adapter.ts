@@ -77,7 +77,9 @@ export class ScriptedGameLLM implements GameLLM {
       const tool = byName.get(call.tool);
       if (!tool) {
         // 대본의 버그다 — 턴을 세울 이유는 아니고, 조용히 지나가지도 않는다
-        console.warn(`[${this.config.agent}] 대본이 부른 ${call.tool}이 이 턴의 도구에 없습니다`);
+        console.warn(
+          `[${this.config.agent}] 이 턴의 도구에 없는 것을 대본이 불렀습니다: ${call.tool}`,
+        );
         continue;
       }
       await tool.handle(call.input ?? {}, { text });
