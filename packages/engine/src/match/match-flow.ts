@@ -108,6 +108,7 @@ import {
   type CommandBrief,
 } from "../core/state";
 import { pickOurPlayer } from "../core/player-ref";
+import { directivesOnPitch } from "./directive-standing";
 import { briefNames, item } from "../commands/brief";
 import { competitionLabel } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
@@ -312,19 +313,6 @@ function reseatOnAiShape(state: GameState, teamId: string, slots: LineupSlot[]):
  * 전력 분석 패킷 (재)계산 — 전술 변경·교체 시에도 호출 (match.md §1).
  * 경기 중에는 장부의 현재 온필드 명단으로 계산한다 (교체·퇴장 반영).
  */
-/** 그라운드에 선 선수의 개인 지시 — 교체로 나간 선수의 지시는 따라 나간다 */
-export function directivesOnPitch(state: GameState, teamId: string, onPitch: readonly string[]) {
-  return assignmentsOf(state, teamId)
-    .filter((a) => a.directive && onPitch.includes(a.playerId))
-    .map((a) => ({
-      by: a.playerId,
-      kind: a.directive!.kind,
-      ...(a.directive!.targetId ? { targetId: a.directive!.targetId } : {}),
-      // 세기를 여기서 빠뜨리면 감독이 고른 정도가 저장만 되고 결과에 닿지 않는다
-      ...(a.directive!.intensity ? { intensity: a.directive!.intensity } : {}),
-    }));
-}
-
 export function refreshPacket(state: GameState): void {
   const pending = state.pendingMatch;
   if (!pending) return;

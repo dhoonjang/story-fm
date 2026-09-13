@@ -9,6 +9,7 @@ import {
   createLedger,
   directiveBookingScale,
   directiveDrain,
+  foldDirectives,
   simulateSegment,
   zoneMeanOf,
   type DirectiveInput,
@@ -289,6 +290,58 @@ describe("개인 지시 — 판에 닿지 못한 지시는 조용하지 않다",
       expect(withDead.notes).toHaveLength(three.notes.length + 1);
       expect(withDead.notes[0]).toEqual(run([dead]).notes[0]);
     }
+  });
+
+  /**
+   * **밀어내기** (match.md §2). 선착순으로 자리를 잠그면 "한 경기에 셋까지"가 실제로는
+   * "먼저 말한 셋까지"가 되어, 판이 바뀌어 필요해진 후반의 지시일수록 버려진다.
+   * 네 번째가 왔을 때 **무엇이 밀리는지**가 이 규칙의 전부라 여기서 못 박는다.
+   */
+  describe("네 번째 지시가 오면 가장 오래된 것이 밀린다", () => {
+    const onPitch = () => true;
+    const fold = (d: DirectiveInput[]) => foldDirectives(d, onPitch, onPitch);
+    /** 차례를 단 지시 넷 — 값이 클수록 나중에 내린 것이다 */
+    const ORDERED: DirectiveInput[] = [
+      { by: MARKER, kind: "focus_play", order: 1 },
+      { by: RIGHT_BACK, kind: "join_attack", order: 2 },
+      { by: LEFT_BACK, kind: "stay_back", order: 3 },
+      { by: "us-mf1", kind: "careful", order: 4 },
+    ];
+    const dropped = (d: DirectiveInput[]) =>
+      fold(d)
+        .filter((e) => !e.taken)
+        .map((e) => e.d.by);
+
+    it("밀리는 것은 차례가 가장 이른 하나다 — 배열의 자리가 아니라", () => {
+      expect(dropped(ORDERED)).toEqual([MARKER]);
+      // 배열을 거꾸로 담아도 같은 답이다 — 판정이 읽는 것은 차례뿐이다
+      expect(dropped([...ORDERED].reverse())).toEqual([MARKER]);
+      expect(fold(ORDERED).filter((e) => e.taken)).toHaveLength(DIRECTIVE_TUNING.MAX_EFFECTIVE);
+    });
+
+    it("차례가 같으면 앞선 것이 남는다 — 차례를 모르는 옛 세이브의 순서다", () => {
+      const flat: DirectiveInput[] = ORDERED.map((d) => ({ by: d.by, kind: d.kind }));
+      expect(dropped(flat)).toEqual(["us-mf1"]);
+    });
+
+    it("밀려난 지시는 다시 내리면 그 자리를 도로 가져온다", () => {
+      const again = ORDERED.map((d) => (d.by === MARKER ? { ...d, order: 5 } : d));
+      expect(dropped(again)).toEqual([RIGHT_BACK]);
+    });
+
+    it("걸릴 수 없는 지시는 차례가 가장 최근이어도 자리를 먹지 않는다", () => {
+      const bench: DirectiveInput = { by: "us-sub-fw", kind: "join_attack", order: 9 };
+      const out = foldDirectives([bench, ...ORDERED], (id) => id !== bench.by, onPitch);
+      expect(out.filter((e) => e.taken).map((e) => e.d.by)).toEqual([
+        RIGHT_BACK,
+        LEFT_BACK,
+        "us-mf1",
+      ]);
+      expect(out.filter((e) => !e.taken).map((e) => [e.d.by, !e.taken && e.code])).toEqual([
+        [bench.by, "off-pitch"],
+        [MARKER, "overflow"],
+      ]);
+    });
   });
 
   it("한 선수에게 두 번 적은 지시만 조용히 넘어간다 — 감독이 내린 적 없는 지시다", () => {

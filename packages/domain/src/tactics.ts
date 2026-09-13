@@ -1343,6 +1343,18 @@ export const PlayerDirectiveSchema = z.object({
   targetId: z.string().min(1).optional(),
   /** 얼마나 세게 — 없으면 `normal`이라 옛 세이브와 세기를 안 보낸 호출이 그대로 선다 */
   intensity: DirectiveIntensitySchema.optional(),
+  /**
+   * **감독이 내린 차례** — 클수록 최근이고, 자리를 다툴 때 이기는 쪽이다
+   * (→ docs/simulation/match.md §2 밀어내기).
+   *
+   * 세 자리를 배열 순서로 채우면 그 순서는 감독이 말한 차례가 아니라 **배치
+   * 순서**라, 후반에 내린 지시가 킥오프 전에 세워 둔 지시에게 진다. 차례를 값으로
+   * 들고 있어야 "나중에 내린 것이 이긴다"가 성립한다.
+   *
+   * 옛 세이브엔 없다 (optional — 없는 것끼리는 배치 순서로 갈리므로 판정이
+   * 움직이지 않는다).
+   */
+  order: z.number().int().nonnegative().optional(),
 });
 export type PlayerDirective = z.infer<typeof PlayerDirectiveSchema>;
 
