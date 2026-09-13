@@ -2302,10 +2302,28 @@ export function responseDelayDays(
  * 된다. 상태를 굴리는 것은 여전히 respondsOn이고, 밖으로 나가는 것만 어림이다.
  */
 export function describeWait(days: number): string {
-  if (days <= 0) return "답이 곧바로 왔습니다";
-  if (days <= 2) return "조만간 답이 올 겁니다";
-  if (days <= 5) return "며칠은 걸릴 겁니다";
-  return "한동안 소식이 없을 수도 있습니다";
+  /**
+   * ⚠️ **네 갈래 모두 아직 오지 않은 답을 말한다.** 여기서 완료형을 쓰면 오퍼를 낸
+   * 그 턴의 결과 줄이 답이 도착했다고 말하게 된다 — 답은 그 오퍼를 낸 턴이 닫힌
+   * 뒤에야 편지로 오고(`arrivedResponses`), 읽는 쪽은 결과 줄을 사실로 읽는다.
+   */
+  if (days <= 0) return "답장은 오늘 중에 옵니다";
+  if (days <= 2) return "답장은 조만간 옵니다";
+  if (days <= 5) return "답장은 며칠 걸립니다";
+  return "답장이 한동안 오지 않을 수도 있습니다";
+}
+
+/**
+ * 오퍼를 낸 자리의 결과 줄 꼬리 — **언제 답이 오는가**와 **아직 무엇이 아닌가**.
+ *
+ * 성공한 도구 호출은 오퍼가 나갔다는 뜻이지 성사됐다는 뜻이 아니다. 문장이 대기
+ * 시간에서 끝나면 오퍼와 계약 사이의 두 관문(상대의 답 · `accept_deal` 서명)이
+ * 결과 줄에 서지 않아, 읽는 쪽은 나간 오퍼를 그 턴에 맺어진 계약으로 옮긴다
+ * (transfer.md §5).
+ */
+export function describePending(days: number, kind: "deal" | "release" = "deal"): string {
+  const notYet = kind === "release" ? "해지가 성립하지 않습니다" : "계약이 아닙니다";
+  return `${describeWait(days)} — 답장이 수락이어도 accept_deal 전에는 ${notYet}`;
 }
 
 /** 협상 상황 한 줄 요약 — 조회 도구·상태 스냅샷용 */
