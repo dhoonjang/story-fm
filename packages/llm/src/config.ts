@@ -87,7 +87,7 @@ export interface ProviderTraits {
    *
    * 이보다 짧은 입력은 캐시가 애초에 안 걸리므로 히트율 0이 "프리픽스가 깨졌다"는
    * 뜻이 아니다. **제공자마다 다르고, 큰 값 하나로 통일하면 작은 쪽이 안 보인다** —
-   * Anthropic 결산 호출(1k~4k)은 Gemini의 4,096 문턱 아래에 통째로 들어앉는다.
+   * Anthropic 결산 호출(1k~4k)은 Gemini의 문턱 아래에 통째로 들어앉는다.
    */
   minCacheableInput: number;
   /**
@@ -112,8 +112,14 @@ export interface ProviderTraits {
  */
 const PROVIDER_TRAITS: Record<LlmProvider, ProviderTraits> = {
   anthropic: { thinkingLevel: true, minCacheableInput: 1024, operatorChannel: true },
-  // Gemini 3.x Flash
-  google: { thinkingLevel: true, minCacheableInput: 4096, operatorChannel: false },
+  /**
+   * Gemini 3.x Flash — **17,600은 제공자가 적어 둔 최소 요청 크기(4,096)가 아니라 실측한
+   * 발화점이다.** 암묵 캐시는 요청이 그만큼 큰지가 아니라 **매번 같은 프리픽스가 얼마나
+   * 긴지**로 걸리고, 그 수가 모델마다 다르다 — 3.6-flash는 10.5k, 3.5-flash-lite는
+   * 17.6k부터다(2026-09 실측, models.md §3). 큰 쪽을 쓰는 이유는 작은 쪽으로 두면 lite
+   * 자리에서 영영 거짓인 경고가 서기 때문이다 (§4).
+   */
+  google: { thinkingLevel: true, minCacheableInput: 17_600, operatorChannel: false },
   openai: { thinkingLevel: true, minCacheableInput: 1024, operatorChannel: true },
 };
 
