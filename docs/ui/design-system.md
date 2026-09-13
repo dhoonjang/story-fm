@@ -439,7 +439,7 @@
 - [ ] 눌러도 아무 일도 안 하는 손잡이 0곳 — 할 수 없으면 잠기고, 잠긴 이유는 `title` 한 줄.
 - [ ] e2e가 재는 토큰·클래스·testid 유지(`--gold-soft` `--silver` `--dim` `--accent-2` `--accent` ·
       `.say-who .speaker` `.speaker-role` `.narration` `.line` `.topbar-sub` `match-clock b` ·
-      `league-list`).
+      `.help-mark` `.help-pop` · `league-list`).
 - [ ] 말줄임 0곳 — 열을 접거나 줄을 바꾼다.
 
 ## ⚠️ 불변식
