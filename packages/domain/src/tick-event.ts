@@ -19,6 +19,7 @@ export const TICK_EVENT_KINDS = [
   "board",
   "draw",
   "interest",
+  "contract",
   "matchday",
   "news",
 ] as const;

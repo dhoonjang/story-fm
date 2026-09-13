@@ -152,29 +152,18 @@ describe("아크 개폐 판정", () => {
   it("같은 상태는 같은 아크를 낸다 — 열림도 단계도 id도", () => {
     const a = structuredClone(world());
     const b = structuredClone(world());
-    tickArcs(a, []);
-    tickArcs(b, []);
+    tickArcs(a);
+    tickArcs(b);
     expect(activeArcs(a)).toHaveLength(KINDS_IN_WORLD);
     expect(a.arcs).toEqual(b.arcs);
   });
 
   it("단계는 사실이 정한다 — 불만 31일은 절정, 3연패는 발단", () => {
     const state = world();
-    tickArcs(state, []);
+    tickArcs(state);
     expect(stageOf(state, "grievance")).toBe("climax");
     expect(stageOf(state, "losing-run")).toBe("open");
     expect(stageOf(state, "transfer-saga")).toBe("rising");
-  });
-
-  it("단계가 움직인 아크만 다이제스트에 선다", () => {
-    const state = world();
-    const digest: string[] = [];
-    tickArcs(state, digest);
-    expect(digest).toHaveLength(KINDS_IN_WORLD);
-    // 두 번째 tick은 사실이 그대로다 — 소식이 아니다
-    const again: string[] = [];
-    tickArcs(state, again);
-    expect(again).toEqual([]);
   });
 });
 
@@ -184,42 +173,42 @@ describe("아크 개폐 경계", () => {
 
   it("예상 결장 29일은 이야기가 아니고 30일은 이야기다", () => {
     const short = withInjury(29);
-    tickArcs(short, []);
+    tickArcs(short);
     expect(kindsOf(short)).toEqual([]);
 
     const long = withInjury(30);
-    tickArcs(long, []);
+    tickArcs(long);
     expect(kindsOf(long)).toEqual(["injury-comeback"]);
     expect(stageOf(long, "injury-comeback")).toBe("open");
   });
 
   it("불만 6일은 열리지 않고 7일은 열린다", () => {
     const six = stateOf({ players: [player("p1")], issues: [issueOf("p1", 6)] });
-    tickArcs(six, []);
+    tickArcs(six);
     expect(kindsOf(six)).toEqual([]);
 
     const seven = stateOf({ players: [player("p1")], issues: [issueOf("p1", 7)] });
-    tickArcs(seven, []);
+    tickArcs(seven);
     expect(kindsOf(seven)).toEqual(["grievance"]);
   });
 
   it("2연패는 열리지 않고 3연패는 열린다", () => {
     const two = stateOf({ matches: leagueRun(2, 0, 1) });
-    tickArcs(two, []);
+    tickArcs(two);
     expect(kindsOf(two)).toEqual([]);
 
     const three = stateOf({ matches: leagueRun(3, 0, 1) });
-    tickArcs(three, []);
+    tickArcs(three);
     expect(kindsOf(three)).toEqual(["losing-run"]);
   });
 
   it("협상 1라운드는 사가가 아니고 2라운드부터 사가다", () => {
     const one = stateOf({ players: [player("p1")], negotiations: [negotiationOf("p1", 1)] });
-    tickArcs(one, []);
+    tickArcs(one);
     expect(kindsOf(one)).toEqual([]);
 
     const two = stateOf({ players: [player("p1")], negotiations: [negotiationOf("p1", 2)] });
-    tickArcs(two, []);
+    tickArcs(two);
     expect(kindsOf(two)).toEqual(["transfer-saga"]);
   });
 });
@@ -239,7 +228,7 @@ describe("활성 상한", () => {
 
   it("우선순위 순으로 여섯 자리만 찬다 — 같은 갈래면 주인 사전순", () => {
     const state = crowded();
-    tickArcs(state, []);
+    tickArcs(state);
     expect(activeArcs(state).map((a) => `${a.kind}:${a.subjectId}`)).toEqual([
       `board-standoff:${TEAM}`,
       "grievance:p1",
@@ -255,12 +244,12 @@ describe("활성 상한", () => {
       players: ["p1", "p2", "p3", "p4", "p5", "p6", "p7"].map((id) => player(id)),
       negotiations: [1, 2, 3, 4, 5, 6].map((n) => negotiationOf(`p${n}`, 2)),
     });
-    tickArcs(state, []);
+    tickArcs(state);
     expect(kindsOf(state)).toEqual(Array(MAX_ACTIVE_ARCS).fill("transfer-saga"));
 
     // 자리가 없는 채로 불만이 곪는다 — 우선순위가 위지만 열리지 않는다
     state.issues = [issueOf("p7", 31)];
-    tickArcs(state, []);
+    tickArcs(state);
     expect(kindsOf(state)).toEqual(Array(MAX_ACTIVE_ARCS).fill("transfer-saga"));
   });
 });
@@ -276,22 +265,22 @@ describe("겹쳐 읽어야 열리는 갈래", () => {
   it("나이·출전·평점 셋이 다 서야 열린다", () => {
     // 셋이 다 선 자리
     const open = prospect(21, 5, 6.3);
-    tickArcs(open, []);
+    tickArcs(open);
     expect(kindsOf(open)).toEqual(["prospect-rise"]);
 
     // 하루 늦게 태어났어도 스물둘이면 아니다
     const grown = prospect(22, 5, 6.3);
-    tickArcs(grown, []);
+    tickArcs(grown);
     expect(kindsOf(grown)).toEqual([]);
 
     // 네 경기는 표본이 아니다
     const few = prospect(21, 4, 6.3);
-    tickArcs(few, []);
+    tickArcs(few);
     expect(kindsOf(few)).toEqual([]);
 
     // 기준선 위로 못 오른 평점은 돌파가 아니다
     const plain = prospect(21, 5, 6.29);
-    tickArcs(plain, []);
+    tickArcs(plain);
     expect(kindsOf(plain)).toEqual([]);
   });
 
@@ -302,7 +291,7 @@ describe("겹쳐 읽어야 열리는 갈래", () => {
       [15, "climax"],
     ] as const) {
       const state = prospect(21, apps, 6.5);
-      tickArcs(state, []);
+      tickArcs(state);
       expect(stageOf(state, "prospect-rise"), `${apps}경기`).toBe(stage);
     }
   });
@@ -316,12 +305,12 @@ describe("겹쳐 읽어야 열리는 갈래", () => {
       // 사전순으로는 a가 앞이지만 절정에 선 것은 b다
       seasonStats: [statOf("a-kid", 5, 6.5), statOf("b-kid", 15, 6.5)],
     });
-    tickArcs(state, []);
+    tickArcs(state);
     expect(activeArcs(state).map((arc) => arc.subjectId)).toEqual(["b-kid"]);
 
     // 하나가 서 있는 동안 다른 하나는 자리를 얻지 못한다
     state.date = addDays(TODAY, 1);
-    tickArcs(state, []);
+    tickArcs(state);
     expect(activeArcs(state).map((arc) => arc.subjectId)).toEqual(["b-kid"]);
   });
 
@@ -335,7 +324,7 @@ describe("겹쳐 읽어야 열리는 갈래", () => {
         { ...statOf("kid", 12, 6.6), teamId: "borrower" } as GameState["seasonStats"][number],
       ],
     });
-    tickArcs(state, []);
+    tickArcs(state);
     expect(kindsOf(state)).toEqual(["prospect-rise"]);
     expect(describeActiveArcs(state)).toContain("임대 borrower");
   });
@@ -348,20 +337,20 @@ describe("겹쳐 읽어야 열리는 갈래", () => {
       });
 
     const long = twilight(34, 366);
-    tickArcs(long, []);
+    tickArcs(long);
     expect(kindsOf(long)).toEqual([]);
 
     const young = twilight(32, 100);
-    tickArcs(young, []);
+    tickArcs(young);
     expect(kindsOf(young)).toEqual([]);
 
     const last = twilight(33, 365);
-    tickArcs(last, []);
+    tickArcs(last);
     expect(stageOf(last, "veteran-twilight")).toBe("open");
 
     // 이미 은퇴 문턱을 넘었으면 계약이 얼마나 남았든 이번 시즌이 마지막이다
     const done = twilight(35, 365);
-    tickArcs(done, []);
+    tickArcs(done);
     expect(stageOf(done, "veteran-twilight")).toBe("climax");
   });
 
@@ -374,7 +363,7 @@ describe("겹쳐 읽어야 열리는 갈래", () => {
       ],
       contracts: [contractOf("cap", 300), contractOf("heir", 900)],
     });
-    tickArcs(state, []);
+    tickArcs(state);
     expect(activeArcs(state).map((a) => a.subjectId)).toEqual([TEAM]);
     expect(describeActiveArcs(state)).toContain("부주장 공석");
 
@@ -382,7 +371,7 @@ describe("겹쳐 읽어야 열리는 갈래", () => {
     (state.players[0] as { isCaptain: boolean }).isCaptain = false;
     (state.players[1] as { isCaptain: boolean }).isCaptain = true;
     state.date = addDays(TODAY, 1);
-    tickArcs(state, []);
+    tickArcs(state);
     expect(activeArcs(state)).toEqual([]);
   });
 
@@ -398,11 +387,11 @@ describe("겹쳐 읽어야 열리는 갈래", () => {
       });
 
     const alone = absent(false);
-    tickArcs(alone, []);
+    tickArcs(alone);
     expect(stageOf(alone, "captain-succession")).toBe("climax");
 
     const covered = absent(true);
-    tickArcs(covered, []);
+    tickArcs(covered);
     expect(stageOf(covered, "captain-succession")).toBe("rising");
   });
 
@@ -416,32 +405,32 @@ describe("겹쳐 읽어야 열리는 갈래", () => {
       });
 
     const quiet = standoff(0);
-    tickArcs(quiet, []);
+    tickArcs(quiet);
     expect(kindsOf(quiet)).toEqual([]);
 
     const one = standoff(1);
-    tickArcs(one, []);
+    tickArcs(one);
     expect(stageOf(one, "board-standoff")).toBe("open");
     expect(describeActiveArcs(one)).toBe("- [발단] 보드 경고 1/3");
 
     const two = standoff(2);
-    tickArcs(two, []);
+    tickArcs(two);
     expect(stageOf(two, "board-standoff")).toBe("rising");
 
     // 경고 하나여도 구단주 요청을 어겼으면 절정이다
     const broken = standoff(1, true);
-    tickArcs(broken, []);
+    tickArcs(broken);
     expect(stageOf(broken, "board-standoff")).toBe("climax");
   });
 
   it("경고가 지워지면 대치가 닫힌다 — 경질·이직이 따로 닫지 않는 이유다", () => {
     const state = stateOf({ manager: { boardWarnings: 2 } as GameState["manager"] });
-    tickArcs(state, []);
+    tickArcs(state);
     expect(kindsOf(state)).toEqual(["board-standoff"]);
 
     state.manager.boardWarnings = 0;
     state.date = addDays(TODAY, 1);
-    tickArcs(state, []);
+    tickArcs(state);
     expect(activeArcs(state)).toEqual([]);
   });
 });
@@ -453,13 +442,13 @@ describe("아크의 단계는 뒤로 가지 않는다", () => {
       issues: [issueOf("p1", 7)],
       approachPressure: [{ subject: "p1", topic: "minutes", value: 210, step: 2 }],
     });
-    tickArcs(state, []);
+    tickArcs(state);
     expect(stageOf(state, "grievance")).toBe("climax");
 
     // 면담이 압력을 비웠다 — 불만은 8일째로 여전히 '발단'의 사실이다
     state.approachPressure = [];
     state.date = addDays(TODAY, 1);
-    tickArcs(state, []);
+    tickArcs(state);
     expect(stageOf(state, "grievance")).toBe("climax");
     expect(activeArcs(state)[0]?.updatedOn).toBe(TODAY);
   });
@@ -468,12 +457,12 @@ describe("아크의 단계는 뒤로 가지 않는다", () => {
 describe("아크가 닫히는 자리", () => {
   it("불만이 지워지면 닫힌다", () => {
     const state = stateOf({ players: [player("p1")], issues: [issueOf("p1", 31)] });
-    tickArcs(state, []);
+    tickArcs(state);
     expect(kindsOf(state)).toEqual(["grievance"]);
 
     state.issues = [];
     state.date = addDays(TODAY, 1);
-    tickArcs(state, []);
+    tickArcs(state);
     expect(activeArcs(state)).toEqual([]);
     expect(state.arcs?.[0]?.resolvedOn).toBe(addDays(TODAY, 1));
     expect(describeActiveArcs(state)).toBeNull();
@@ -481,11 +470,11 @@ describe("아크가 닫히는 자리", () => {
 
   it("연속이 끊기면 닫힌다", () => {
     const state = stateOf({ matches: leagueRun(3, 0, 2) });
-    tickArcs(state, []);
+    tickArcs(state);
     expect(kindsOf(state)).toEqual(["losing-run"]);
 
     state.matches = [...state.matches, ...leagueRun(1, 1, 1)];
-    tickArcs(state, []);
+    tickArcs(state);
     expect(activeArcs(state)).toEqual([]);
   });
 
@@ -495,11 +484,11 @@ describe("아크가 닫히는 자리", () => {
       issues: [issueOf("p1", 31)],
       injuries: [injuryOf("p2", "2026-07-01", 40)],
     });
-    tickArcs(state, []);
+    tickArcs(state);
     expect(activeArcs(state)).toHaveLength(2);
 
     state.dismissal = { on: TODAY, teamId: TEAM } as GameState["dismissal"];
-    tickArcs(state, []);
+    tickArcs(state);
     expect(activeArcs(state)).toEqual([]);
   });
 });
@@ -507,7 +496,7 @@ describe("아크가 닫히는 자리", () => {
 describe("아크 이름 짓기", () => {
   const named = (): GameState => {
     const state = stateOf({ players: [player("p1")], issues: [issueOf("p1", 31)] });
-    tickArcs(state, []);
+    tickArcs(state);
     return state;
   };
 
@@ -536,7 +525,7 @@ describe("아크 이름 짓기", () => {
     const state = named();
     const id = activeArcs(state)[0]?.id ?? "";
     state.issues = [];
-    tickArcs(state, []);
+    tickArcs(state);
     expect(applyArcTitles(state, [{ arcId: id, title: "지난 이야기" }])).toBe(0);
     expect((state.arcs as NarrativeArc[])[0]?.title).toBeUndefined();
   });
