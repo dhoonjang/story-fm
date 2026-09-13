@@ -8,6 +8,7 @@ export * from "./core/name-match";
 export * from "./core/state";
 export * from "./core/history-window";
 export * from "./core/turn-facts";
+export * from "./core/journal";
 export * from "./core/player-ref";
 export * from "./core/team-ref";
 export * from "./core/league-shape";
@@ -76,6 +77,7 @@ export * from "./competition/reschedule";
 
 // match — 경기 진행·간이 시뮬·평점·징계
 export * from "./match/match-flow";
+export * from "./match/packet-digest";
 export * from "./match/preview";
 export * from "./match/quick-sim";
 export * from "./match/ratings";

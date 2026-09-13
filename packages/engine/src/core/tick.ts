@@ -55,6 +55,7 @@ import {
   settleCallUps,
 } from "../competition/international";
 import { competitionLabel } from "../data/cup-catalog";
+import { journal } from "./journal";
 import { isFriendly } from "../competition/friendly";
 import { advanceDomesticCups } from "../competition/domestic-cup";
 import { hasCups } from "../world/scope";
@@ -1642,6 +1643,26 @@ export function simulateOtherMatches(state: GameState, digest: TickSink): void {
        */
       possession,
     };
+    journal({
+      kind: "tick.match",
+      matchId: match.id,
+      competitionId: match.competitionId,
+      stage: match.stage ?? null,
+      round: match.round ?? null,
+      date: state.date,
+      reserve: false,
+      home: match.homeTeamId,
+      away: match.awayTeamId,
+      score: { home: result.homeGoals, away: result.awayGoals },
+      shots: { home: result.homeShots, away: result.awayShots },
+      xg: { home: result.homeXg, away: result.awayXg },
+      expectedGoals: { home: result.homeExpectedGoals, away: result.awayExpectedGoals },
+      possession: { ...possession },
+      injuries: hurt.length,
+      cards: cards.length,
+      subs: subs.length,
+      key: quickSimKeyOf(state.season, match),
+    });
     /**
      * 출전 분 — **시즌 기록과 피로가 같은 값을 읽는다.** 들어온 분부터 나간 분까지고,
      * 교체와 퇴장이 같은 자격으로 시간을 끊는다: 구간 시뮬의 `matchMinutesOf`와 같은
@@ -1867,12 +1888,8 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
     away: simSquadFor(state, match.awayTeamId, reserveXI(state, match.awayTeamId)),
   };
   // 2군 경기는 라이벌 축을 타지 않는다 — 결과가 출전과 성장에만 닿는 경기다
-  const result = quickSimulate(
-    squads.home,
-    squads.away,
-    state.seed,
-    `${state.season}:${match.competitionId}:${match.stage ?? "league"}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`,
-  );
+  const key = `${state.season}:${match.competitionId}:${match.stage ?? "league"}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`;
+  const result = quickSimulate(squads.home, squads.away, state.seed, key);
   // 벤치가 없어 교체가 없고, 카드·부상은 정산하지 않는다 — 결과만 남긴다
   match.result = {
     homeGoals: result.homeGoals,
@@ -1896,6 +1913,26 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
     awayOnPitch: squads.away.starters.map((p) => p.id),
     possession: result.possession,
   };
+  journal({
+    kind: "tick.match",
+    matchId: match.id,
+    competitionId: match.competitionId,
+    stage: match.stage ?? null,
+    round: match.round ?? null,
+    date: state.date,
+    reserve: true,
+    home: match.homeTeamId,
+    away: match.awayTeamId,
+    score: { home: result.homeGoals, away: result.awayGoals },
+    shots: { home: result.homeShots, away: result.awayShots },
+    xg: { home: result.homeXg, away: result.awayXg },
+    expectedGoals: { home: result.homeExpectedGoals, away: result.awayExpectedGoals },
+    possession: { ...result.possession },
+    injuries: result.injuries.length,
+    cards: result.cards.length,
+    subs: result.subs.length,
+    key,
+  });
   for (const side of ["home", "away"] as const) {
     const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
     const scored = result.scorers
@@ -2018,13 +2055,30 @@ export function advanceTime(
        * 무직으로 맞은 시즌 끝에는 답할 자리가 애초에 없다 (career.md §5.1).
        */
       if (managedTeamId(state)) declinePendingPress(state, digest);
-      digest.push(...endSeason(state));
+      const seasonEnded = state.season;
+      const seasonLines = endSeason(state);
+      digest.push(...seasonLines);
+      journal({ kind: "tick.season_end", season: seasonEnded, lines: [...seasonLines] });
       return { ok: true, events, stopped: "season_end", trained };
     }
 
     state.date = addDays(state.date, 1);
     // 새 날은 하루의 시작으로 연다 — 장면의 시각은 날짜를 넘을 수 없다
     state.clock = DAY_START;
+    /**
+     * 하루의 사실 — 이 날에 쌓인 사건과 소화된 훈련, 시계가 선 이유 (models.md §5-3).
+     * 이 아래의 어느 `return`도 이 문을 지난다 — 멈춘 날이 기록에 없으면 멈춘 이유도 없다.
+     */
+    const dayMark = events.length;
+    const trainedMark = trained.sessions.length;
+    const closeDay = (stopped: string | null): void =>
+      journal({
+        kind: "tick.day",
+        date: state.date,
+        events: events.slice(dayMark),
+        trained: trained.sessions.length - trainedMark,
+        stopped,
+      });
     const needsAttention = dailyTick(state, digest, trained);
     /**
      * 감독의 자리와 계약 (career.md §5·§5.4) — 판정은 여기서 하되 **시계는 세계의
@@ -2054,6 +2108,7 @@ export function advanceTime(
 
     // 자리를 잃은 날은 경질과 같은 무게로 시계가 멈춘다 — 세계의 하루는 이미 끝났다
     if (seatLost || contractDay === "expired") {
+      closeDay("blocked");
       return { ok: true, events, stopped: "blocked", trained };
     }
 
@@ -2071,16 +2126,20 @@ export function advanceTime(
         "matchday",
         `경기일 — ${competitionLabel(userMatch.competitionId, userMatch.stage ?? "league", userMatch.round)} ${userMatch.neutral ? "중립" : home ? "홈" : "원정"} vs ${teamNameIn(state, home ? userMatch.awayTeamId : userMatch.homeTeamId)}`,
       );
+      closeDay("matchday");
       return { ok: true, events, stopped: "matchday", trained };
     }
 
     // 통보가 선 날은 답할 자리가 생긴 날이다 — 경기일이 아니면 주의로 멈춘다
     if (needsAttention || contractDay === "notice") {
+      closeDay("attention");
       return { ok: true, events, stopped: "attention", trained };
     }
     if (typeof until === "object" && d + 1 >= until.days) {
+      closeDay("reached");
       return { ok: true, events, stopped: "reached", trained };
     }
+    closeDay(null);
   }
 
   return { ok: true, events, stopped: "reached", trained };

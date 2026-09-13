@@ -131,5 +131,6 @@ export async function runMarketOrders(
     specs,
     user,
     llm ?? mockOrdersLlm(state, MARKET_ORDERS_SPEC, message),
+    message,
   );
 }

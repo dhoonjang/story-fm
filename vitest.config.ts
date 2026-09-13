@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { defineConfig } from "vitest/config";
 
@@ -11,6 +12,13 @@ export default defineConfig({
     // 시뮬 코어(장부·패킷)는 LLM 없이 단위 테스트한다 (AGENTS.md 5장)
     // apps/web/test는 API 통합 테스트 (mock GM 모드)
     include: ["packages/*/test/**/*.test.ts", "apps/*/test/**/*.test.ts"],
+    /**
+     * LLM 원문 기록(`.log`)은 **저장소 밖에 쌓는다** (docs/llm/models.md §5).
+     * 지금 스위트는 mock 경로라 기록을 남기지 않지만, 어느 케이스가 실 어댑터 문을
+     * 지나게 되는 날 작업 트리에 창고가 생기는 것을 여기서 막는다. 제 창고가 필요한
+     * 케이스는 이 값을 자기 임시 디렉터리로 덮는다(`turn-trace.test.ts`).
+     */
+    env: { STORY_FM_LOG_DIR: path.join(tmpdir(), "story-fm-test-log") },
     /**
      * 케이스 시간 상한 — **멈춘 것을 끊는 자**이지 속도를 재는 자가 아니다. 속도를
      * 재는 자리는 하네스이고(`vitest.balance.config.ts`), 회귀를 잡는 자는 케이스의

@@ -5,6 +5,7 @@
  * 앵커를 남긴다 — 결산 하나 때문에 경기 결과나 시간 진행이 막히면 안 된다.
  */
 
+import { journal } from "@story-fm/engine";
 import type { TurnResult } from "@story-fm/llm";
 
 /**
@@ -54,6 +55,7 @@ export async function retryOnce<T>(
     if (!(error instanceof ModelOutputError)) throw error;
     if (touched()) throw error;
     console.warn(`[${label}] 산출을 쓸 수 없습니다 — 한 번 다시 시도합니다:`, error);
+    journal({ kind: "llm.retry", label, error: error.message });
     return run();
   }
 }
@@ -65,5 +67,10 @@ export async function retryOnce<T>(
 export function anchorStands(label: string): (error: unknown) => void {
   return (error: unknown) => {
     console.warn(`[${label}] 결산을 건너뜁니다 — 코어 앵커가 남습니다:`, error);
+    journal({
+      kind: "llm.anchor",
+      label,
+      error: error instanceof Error ? error.message : String(error),
+    });
   };
 }

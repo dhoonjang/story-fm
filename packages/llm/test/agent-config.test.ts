@@ -3,7 +3,9 @@ import {
   AGENT_NAMES,
   LLM_CONFIG,
   findLlmConfigPath,
+  gameVersion,
   hasKey,
+  parseGameVersion,
   parseLlmConfig,
   resolveApiKey,
 } from "@story-fm/llm";
@@ -311,5 +313,25 @@ describe("에이전트별 LLM 설정", () => {
       parseLlmConfig(withProvider("google", "\n    operator_channel: false")).agents.gm
         .operatorChannel,
     ).toBe(false);
+  });
+});
+
+/**
+ * 게임 버전 (models.md §5-2) — 기록된 호출마다 함께 남는 값이라, 모양이 흔들리면
+ * 지난 로그와 지금 로그를 견주는 자가 사라진다. **값 자체는 재지 않는다** — 버전은
+ * 오르라고 있는 것이고, 오를 때마다 빨개지는 테스트는 규칙이 아니라 족쇄다.
+ */
+describe("게임 버전", () => {
+  it("major.minor.patch 세 자리만 받는다", () => {
+    expect(parseGameVersion("version: 1.4.2")).toBe("1.4.2");
+    for (const bad of ["version: 1.4", "version: v1.4.2", "version: 1.4.2-rc1", "version: 1"]) {
+      expect(() => parseGameVersion(bad)).toThrow(/major\.minor\.patch/);
+    }
+    // 줄이 없거나 파일이 비어도 같은 자리에서 거부한다
+    expect(() => parseGameVersion("")).toThrow(/major\.minor\.patch/);
+  });
+
+  it("저장소의 버전 파일이 그 모양을 지킨다", () => {
+    expect(gameVersion()).toMatch(/^\d+\.\d+\.\d+$/);
   });
 });

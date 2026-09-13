@@ -252,17 +252,25 @@ export function parseLlmConfig(source: string, label = "config/llm.yml"): LlmCon
 
 const CONFIG_RELATIVE_PATH = path.join("config", "llm.yml");
 
-/** 앱·CLI 어느 하위 디렉터리에서 시작해도 저장소 루트의 설정을 찾는다. */
-export function findLlmConfigPath(startDir = process.cwd()): string {
+/**
+ * 저장소 루트의 설정 파일을 찾는다 — 앱·CLI·테스트 어느 하위 디렉터리에서 시작해도.
+ *
+ * `config/` 아래 파일이 둘 이상이므로(모델 설정과 게임 버전) 올라가는 규칙은 하나다.
+ */
+export function findConfigFile(relativePath: string, startDir = process.cwd()): string {
   let current = path.resolve(startDir);
   while (true) {
-    const candidate = path.join(current, CONFIG_RELATIVE_PATH);
+    const candidate = path.join(current, relativePath);
     if (existsSync(candidate)) return candidate;
     const parent = path.dirname(current);
     if (parent === current) break;
     current = parent;
   }
-  throw new Error(`${CONFIG_RELATIVE_PATH}을 ${path.resolve(startDir)} 상위에서 찾지 못했습니다`);
+  throw new Error(`${relativePath}을 ${path.resolve(startDir)} 상위에서 찾지 못했습니다`);
+}
+
+export function findLlmConfigPath(startDir = process.cwd()): string {
+  return findConfigFile(CONFIG_RELATIVE_PATH, startDir);
 }
 
 export function loadLlmConfig(configPath = findLlmConfigPath()): LlmConfig {

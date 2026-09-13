@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { noteTurn, traceBoard } from "@story-fm/llm";
 import { deleteGame, loadGame } from "@story-fm/engine";
-import { deleteTurnTraces } from "@story-fm/llm";
 import { toPayload } from "@/lib/store";
 import { LOCK_WAIT_MS, busyResponse, withGameLock } from "@/lib/turn-runner";
 import { invalidGameId } from "@/app/api/games/game-id";
@@ -35,9 +35,18 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
   const { id } = await context.params;
   const bad = invalidGameId(id);
   if (bad) return bad;
-  const ok = deleteGame(id);
+  /**
+   * 지운 사실은 **전술판 선반**의 마지막 타임라인으로 선다 (models.md §5). 개발 모드의
+   * 기록은 **함께 지우지 않는다**: 기록은 게임의 부속물이 아니라 게임을 고치는 재료라,
+   * 지워진 판에서 무엇이 이상했는지가 그 판을 지우는 순간 사라지면 안 된다 — 창고는
+   * `.log/`에 그대로 남고 상한이 알아서 오래된 것부터 민다.
+   */
+  const ok = await traceBoard(id, async () => {
+    noteTurn({ input: { kind: "delete" } });
+    const deleted = deleteGame(id);
+    noteTurn({ outcome: { ok: deleted, saved: deleted } });
+    return deleted;
+  });
   if (!ok) return NextResponse.json({ error: "게임을 찾을 수 없습니다" }, { status: 404 });
-  // 개발 모드의 턴 원문 사이드카도 함께 — 본체가 사라지면 아무도 열지 않는다 (models.md §5)
-  deleteTurnTraces(id);
   return NextResponse.json({ ok: true });
 }

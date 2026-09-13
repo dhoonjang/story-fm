@@ -10,10 +10,11 @@ import {
   teamCatalog,
   teamsOfLeague,
   topLeagues,
+  turnDigestOf,
 } from "@story-fm/engine";
 import { boardExpectationText } from "@story-fm/domain";
 import { runOnboarding } from "@story-fm/agents";
-import { beginGameUsage, bindTurnTrace, llmErrorKind, traceTurn } from "@story-fm/llm";
+import { beginGameUsage, bindTurnTrace, llmErrorKind, noteTurn, traceTurn } from "@story-fm/llm";
 import { toPayload } from "@/lib/store";
 import { errorDetail, turnErrorMessage } from "@/lib/turn-runner";
 
@@ -112,8 +113,12 @@ export async function POST(request: Request) {
    * 재시도하고, 실패하면 **게임을 만들지 않는다** — 규칙 장면으로 열어 두면 유저는 그것이
    * 이 게임의 첫 장면인 줄 알고, 다시 시작할 기회를 잃는다.
    */
-  // 첫 장면의 원문도 그 model 턴에 묶인다 — 묶는 것은 `traceTurn` 범위 안에서만 된다
-  const opened = await traceTurn(async () => {
+  // 첫 장면의 원문도 이 게임의 사이드카에 앉는다 — 묶는 것은 `traceTurn` 범위 안에서만 된다
+  const opened = await traceTurn(state.id, async () => {
+    noteTurn({
+      input: { kind: "onboarding", teamId, seed, managerName, background, date: state.date },
+      before: turnDigestOf(state),
+    });
     try {
       const intro = await runOnboarding(state, background);
       state.chat.push({
@@ -123,9 +128,18 @@ export async function POST(request: Request) {
         at: state.date,
       });
       bindTurnTrace(state.id, state.chat.length - 1);
+      noteTurn({ outcome: { ok: true, saved: true }, after: turnDigestOf(state) });
       return { ok: true as const };
     } catch (error) {
       console.error("[games] 온보딩 실패 — 게임을 만들지 않는다:", error);
+      noteTurn({
+        outcome: {
+          ok: false,
+          saved: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        after: turnDigestOf(state),
+      });
       return { ok: false as const, error };
     }
   });

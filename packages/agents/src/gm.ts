@@ -18,6 +18,7 @@ import {
   clockOf,
   formatClock,
   humanizePlayerIds,
+  journal,
   markEntered,
   minutesOfClock,
   arrivedResponses,
@@ -170,6 +171,15 @@ async function answerLetters(state: GameState, calls: GmToolCall[]): Promise<str
     const from = opened.seat.voices.map((v) => v.name).join(" · ") || "상대";
     const reply = await runTableReply(state, opened.seat, null);
     const outcome = settleTableReply(state, opened.seat, reply ?? undefined);
+    // 감독이 부른 적 없는 명령이라 `wrap`을 지나지 않는다 — 기록은 여기서 남긴다
+    journal({
+      kind: "command",
+      name: "respond_offer",
+      input: { negotiationId: negotiation.id },
+      ok: outcome.ok,
+      message: outcome.message,
+      source: "tool",
+    });
     recordCall(calls, "respond_offer", outcome, { input: { negotiationId: negotiation.id } });
     letters.push(
       `<letter negotiation="${negotiation.id}" from="${from}">\n${outcome.message}\n</letter>`,
@@ -620,6 +630,9 @@ async function closeTurn(
    * 손잡이가 이미 시계를 옮긴 턴은 헤더가 날짜를 또 밀지 못하는 것이 정상이다.
    */
   let clockStalled: number | null = null;
+  /** 장면의 시계가 어디에 닿았는가 — 기록에 한 줄로 선다 (models.md §5-3) */
+  let movedFact: Extract<Parameters<typeof journal>[0], { kind: "scene" }>["moved"] = null;
+  let emptyScene = false;
   if (!inMatch) {
     clockStalled = noteSceneHeader(state, scenePoint !== null || opening.skipped !== null);
     if (!scenePoint) {
@@ -645,7 +658,15 @@ async function closeTurn(
   }
   // ⚠️ 시계를 옮기는 자리는 여기 하나다 — 날짜를 미는지 고정하는지는 출처가 정한다
   if (scenePoint) {
+    const from = { date: opening.from, clock: opening.clockFrom };
     const moved = applyScenePoint(state, scenePoint, clockSourceOf(shape, opening));
+    movedFact = {
+      from,
+      to: { ...moved.reached },
+      short: moved.short,
+      stopped: moved.stopped,
+      events: moved.events.length,
+    };
     if (moved.events.length > 0 || moved.short) {
       noteTimePassed(
         ledger,
@@ -701,6 +722,7 @@ async function closeTurn(
         );
       }
       body = record;
+      emptyScene = true;
       header ??= now();
     } else if (body.trim().length === 0) {
       /**
@@ -731,6 +753,21 @@ async function closeTurn(
   // 실은 카드를 그 턴에 기록한다 — 다음 턴부터 이력이 같은 카드를 다시 그린다.
   // 턴이 실패하면 상태가 통째로 버려지므로 기록도 함께 없던 일이 된다
   recordCharacterInjection(state, call.characters);
+  journal({
+    kind: "scene",
+    inMatch,
+    kickoff,
+    header: scene.header ?? null,
+    minute: scene.minute,
+    ledgerMinute: opening.matchMinute === null ? null : minuteNow(state, ledger, opening),
+    scenePoint: scenePoint ? { ...scenePoint } : null,
+    clockSource: inMatch ? null : clockSourceOf(shape, opening),
+    moved: movedFact,
+    stalled: clockStalled,
+    emptyScene,
+    closedByCore: closingTail.length > 0,
+    textChars: text.length,
+  });
   return {
     text,
     toolCalls: ledger.calls,

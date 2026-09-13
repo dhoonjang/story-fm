@@ -651,13 +651,89 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   왕복하다 시한에 걸린 턴이 그것이다. 시한 예외는 시한 래퍼가 만들고 어댑터의 예외는
   버려지므로, 예외에 실어 보내는 길로는 그 자리를 덮을 수 없다.
 
-## 5. 개발 모드 원문 열람 (`turn-trace.ts`)
+## 5. 개발 모드 기록 — 한 턴에 타임라인 하나 (`turn-trace.ts` · `pnpm log`)
 
-**한 턴이 모델에 보낸 것과 받은 것을 그 자리에서 읽는다.** 채팅에서 턴을 **길게
-누르면**(500ms) 그 턴의 호출들이 요청(system 블록 · 이력 · 발화 · 상태 스냅샷 ·
-도구 스펙)과 응답(본문 · 이력에 새로 붙은 메시지 · 사용량)까지 원문으로 열린다.
+**한 게임에 창고 하나, 한 턴에 타임라인 하나.** 감독의 입력, 모델 호출, 해석기가 낸 명령,
+코어가 걸고 반려한 것, 판이 구른 패킷과 난수 채널, 굴러간 하루하루 — 그 턴에 일어난
+전부가 **한 줄기에 일어난 순서로** 선다. 모델 호출도 코어의 사실도 같은 타임라인의
+항목이다. 갈라 두면 「해석기가 이렇게 답했는데 코어는 왜 저렇게 했나」를 두 창을 오가며
+시각으로 맞춰야 한다.
+
+```
+.log/<gameId>/
+  index.jsonl            목록 — 두 선반의 타임라인 하나가 한 줄, 닫힐 때 쓴다
+  turns/<턴 id>.jsonl    채팅 턴의 타임라인 — 항목 하나가 한 줄, 일어나는 즉시
+  board/<id>.jsonl       전술판 저장 · 게임 삭제의 타임라인 — 채팅 턴과 같은 모양
+  calls/<호출 id>.json   호출 하나의 원문 — 타임라인의 llm.call 항목이 가리킨다
+```
+
+**선반은 둘, 목록은 하나다.** `turns`는 채팅 턴 — 감독의 말이나 손잡이에 GM이 답하고
+세계가 움직인 한 번의 실행 흐름. `board`는 채팅 턴이 아닌 쓰기 — 전술판 저장과 게임 삭제.
+잠금 한 번, 세이브 한 번의 실행 흐름이되 GM도 채팅 자리도 없다. 선반을 가른 이유는
+「턴」이 채팅 턴만을 가리키게 하려는 것이고, 목록이 하나인 이유는 「전술판을 고친 뒤 무슨
+말을 했나」가 한 목록에서 순서대로 읽혀야 하기 때문이다. 이름의 앞자리가 선반을 말한다:
+`turn-…` · `board-…`. 전술판은 바뀐 것이 있을 때 조작이 멎은 뒤 한 번 저장되므로
+(`lineup-saver.ts`) 판을 짜는 한 번의 결정이 한 줄이다.
+
+**시각은 둘이다.** 항목마다 `at`은 그 일이 실제로 일어난 벽시계(ISO)이고, 턴의 시작 시각과
+소요는 `turn.open`·`turn.close`와 목록 줄이 든다. 게임 안의 날짜·시각은 입력(`input.date`)과
+앞뒤 상태 요약(`date` · `clock`)이 따로 든다 — 둘을 섞으면 「어제 저녁에 돌린 2027년 11월의
+턴」이 한 값이 된다.
+
+**모델 호출은 이름을 갖고, 그 이름으로 원문 전부가 다시 열린다.** 이름은
+`gm-m8k2x9q7-4f3a` — **에이전트 · 36진 시각 · 무작위 넉 자**다. 타임라인의 `llm.call`
+항목은 그 호출의 요약(누가 · 무엇으로 · 얼마나 · 도구 몇 · 실패했나)이고, 원문(요청의
+system 블록 · 이력 · 발화 · 상태 스냅샷 · 도구 스펙, 응답의 본문 · 이력에 새로 붙은
+메시지 · 사용량)은 `calls/`의 파일 하나가 갖는다 — 호출마다 수만 자라 타임라인에 실으면
+턴 하나가 수백 KB가 되기 때문이다. 턴도 이름을 갖는다: `turn-mtyjvr3j-5873`.
+
 계측은 토큰 수만 센다(§4) — 프롬프트가 잘못 나갔는지, 모델이 이상하게 답했는지,
 코어가 그걸 잘못 옮겼는지를 가르는 눈이 이쪽이다.
+
+**읽는 길이 둘이고 같은 파일을 본다.** 화면은 지금 벌어진 턴을, CLI는 지나간 것 전부를 연다.
+
+- **화면** — 채팅에서 턴을 **길게 누르면**(500ms) 그 턴의 타임라인이 선다. 호출 항목을
+  펼치면 그 자리에서 원문이 열린다.
+- **CLI** — `pnpm log`는 최근 턴을 두 선반 함께 일어난 순서로 한 줄씩 세우고(id · 시각 ·
+  버전 · 게임 · 선반 · 턴 · 결과 · 소요 · 항목 · 호출 · 머리), `pnpm log <턴 id>`는 그
+  타임라인을 편다. `pnpm log <호출 id>`는
+  그 호출의 요청과 응답을 원문으로 편다 — `--json`은 저장된 그대로, `--path`는 파일
+  경로만: 에이전트가 그 파일을 직접 여는 자리다. `--calls`는 턴 대신 호출을 한 줄씩
+  세우고(`--agent` · `--version`으로 거른다), `--facts <갈래>`는 항목을 jsonl로 흘린다
+  (§5-3). 거르는 손잡이는 `--game` · `--turn` · `--failed` · `--kind` · `--since 2h` · `--limit`.
+
+**턴은 호출들의 목록이 아니라 나무다.** 매치 GM이 `advance_match`를 부르면 그 도구
+안에서 지시 해석과 마감이 돌고, 그 둘이 끝나야 매치 GM의 응답이 돌아온다
+(agents.md §3). 그래서 호출마다 **자리(`seq`) · 부모(`parentId`) · 경유한
+도구(`viaTool`)**가 함께 남고, 도구 안에서 난 사실도 같은 표식(`via`)을 든다 — 평면
+목록으로 두면 셋이 우연히 순서대로 선 것처럼 보여, 느린 턴의 범인이 어느 호출인지
+읽히지 않는다.
+
+관계를 잡는 것은 **실행 문맥**이다. 도구 핸들러가 도는 동안에만 「지금 누구의 어느
+도구 안인가」가 서 있고 모델을 기다리는 동안에는 서지 않으므로, 같은 턴의 이웃
+호출이 자식으로 잘못 묶이지 않는다. 어댑터 셋은 손대지 않는다 — 기록을 따는
+문(`tapLlm`)이 그 호출이 쥔 도구 스펙만 감싸 구간을 표시한다.
+
+화면은 항목 줄의 `└ <도구>`로, CLI는 들여쓰기와 **턴이 시작된 뒤의 간격**으로 같은
+사실을 보인다:
+
+```
+$ pnpm log --turn 42 --game game-2ydabq
+turn-mtxy2rrq-91c0
+게임 game-2ydabq · 버전 1.0.1 · 턴 42 · 09-12 14:28:37 · 8.4s
+결과: 성공 · 저장됨
+
+타임라인 6항목
+    1     +0ms  llm.call                       match-gm · gemini-3.7-flash · 8.4s · in 41k out 612 캐시 88% · 도구 1  → match-gm-mtxy2rrx-4b8e
+    2   +1.2s  └ llm.call (advance_match)      tactic-orders · gemini-3.5-flash · 0.6s · …  → tactic-orders-mtxy2rsk-a618
+    3   +1.8s  └ orders.intent (advance_match) {"agent":"tactic-orders","ok":true,"ops":{"substitute":[…]}}
+    4   +1.9s  └ command (advance_match)       {"name":"substitute","ok":true,…}
+    5   +2.0s  └ match.segment (advance_match) {"segment":3,"channel":"segment:1:m-epl-1-12-arsenal:3","stop":"goal",…}
+    6   +8.4s  scene                           {"inMatch":true,"ledgerMinute":57,…}
+```
+
+⚠️ **항목의 자리(`seq`)는 시작 순서다.** 호출은 도구가 돌아오기를 기다려 늦게 앉지만
+자리는 시작할 때 잡았으므로, 그 호출의 도구 안에서 난 항목들보다 앞에 선다.
 
 - **호출 머리에 그 호출의 캐시 히트율(`cacheRead ÷ input`)이 선다.** 한 턴은 에이전트
   여럿이 도니(§5 머리) 그 줄이 곧 에이전트별 히트율이고, 세션 누적 경고(§4)가 세 번을
@@ -692,30 +768,57 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   **접은 턴에는 꼬리 원형(`messages`) 한 덩어리가 따로 선다** — 화면에서 닿지
   못하는 기록은 남기지 않는다.
 
-| 무엇             | 값                                                                                                                                           |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| 기록을 따는 자리 | **팩토리 하나** — `createGameLLM`의 `tapLlm` (계측·시한과 같은 문)                                                                           |
-| 켜지는 조건      | `NODE_ENV !== "production"` — 라우트도 제스처도 같은 기준으로 닫힌다                                                                         |
-| 사는 곳          | **디스크의 게임별 트레이스 디렉터리** — `<데이터 디렉터리>/<gameId>.trace/<index>.json`, 게임당 최근 20 채팅 턴, 넘치면 오래된 턴부터 지운다 |
-| 키               | **채팅 턴 인덱스** (`state.chat`의 자리) — 그 아래 호출 여럿이 순서대로 붙는다                                                               |
-| 묶는 자리        | `runTurnLocked`(평시·경기)와 `runOnboarding`(새 게임) — model 턴을 밀어 넣는 그 자리                                                         |
-| 라우트           | `GET /api/games/[id]/trace/[index]` — production이면 404                                                                                     |
+| 무엇             | 값                                                                                                                                                                                             |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 기록을 따는 자리 | **팩토리 하나** — `createGameLLM`의 `tapLlm` (계측·시한과 같은 문)                                                                                                                             |
+| 켜지는 조건      | `NODE_ENV !== "production"` — 라우트도 제스처도 CLI도 같은 기준으로 닫힌다                                                                                                                     |
+| 이름             | `<에이전트>-<36진 시각>-<넉 자>` — 호출 하나에 하나, 파일 이름이자 화면과 CLI가 부르는 말                                                                                                      |
+| 사는 곳          | **`.log/<gameId>/`** — 목록 `index.jsonl` · 채팅 턴 `turns/<턴 id>.jsonl` · 전술판 선반 `board/<id>.jsonl` · 원문 `calls/<호출 id>.json` (`STORY_FM_LOG_DIR`)                                  |
+| 관계             | `seq`(턴 안의 자리) · `parentId`(이 호출을 낳은 호출) · `viaTool`(경유한 도구) — 도구 핸들러가 도는 구간이 정한다                                                                              |
+| 쓰는 때          | **일어나는 즉시** — 항목은 타임라인에 한 줄씩, 원문은 호출이 끝나는 그 자리에서. 성공도 실패도. 채팅 자리(`index`)만 model 턴을 밀어 넣는 자리에서 적는다                                      |
+| 키               | **턴 id · 호출 id** — 타임라인의 `llm.call` 항목이 호출 id를 들고, 원문은 그 이름의 파일 하나가 갖는다                                                                                         |
+| 묶는 자리        | `runTurnLocked`(평시·경기)와 `runOnboarding`(새 게임) — model 턴을 밀어 넣는 그 자리                                                                                                           |
+| 보존             | 게임당 원문 `MAX_TRACED_CALLS`(5,000) · 채팅 턴 `MAX_TRACED_TURNS`(20,000) · 전술판 선반 `MAX_TRACED_BOARD`(5,000) — 한 플레이가 통째로 남는 폭이다. 오래된 파일부터 밀고 목록은 파일을 따른다 |
+| 지우는 자리      | **없다** — 게임을 지워도 남는다. 창고를 비우는 것은 사람이 `.log`를 지우는 일이다                                                                                                              |
+| 라우트           | `GET /api/games/[id]/trace/[index]` — 그 자리의 타임라인(`turn`)과 호출 원문(`calls`). production이면 404                                                                                      |
 
+- **항목은 일어나는 즉시 앉는다.** 시한을 넘긴 호출과 이력이 400을 맞은 호출이 가장 보고
+  싶은 자리인데 그런 턴은 채팅에 model 턴을 남기지 못한다 — 턴이 끝나는 자리에서
+  한꺼번에 쓰면 **실패한 턴이 통째로 사라진다**. 타임라인이 jsonl인 이유가 이것이다:
+  줄 하나가 항목 하나라 프로세스가 도중에 죽어도 그때까지가 남고, 목록에 줄이 없는
+  타임라인은 「닫히지 않은 턴」으로 선다. 턴 범위가 게임 id를 들고 열리므로
+  (`traceTurn(gameId, …)`) 항목은 제 자리를 처음부터 알고, 채팅 자리(`bindTurnTrace`)는
+  뒤에 적힌다.
+- **타임라인은 원문보다 오래 남는다.** `llm.call` 항목은 호출의 요약(에이전트 · 모델 ·
+  소요 · 사용량 · 도구 수 · 실패 사유 · 요청의 크기)이라 수백 바이트다. 원문이 상한 밖으로
+  밀려도 「그 자리에 그 에이전트가 이렇게 돌았다」는 항목은 남아, 되짚는 자리가 「기록이
+  없다」와 「기록이 밀렸다」를 가른다.
+- **플레이 데이터와 다른 디렉터리다.** 세이브는 `.data`, 기록은 `.log`. 둘은 수명도
+  주인도 다르다 — 세이브는 유저의 게임이고 지우면 끝이지만, 기록은 우리가 게임을
+  고치는 재료라 **그 판이 사라진 뒤에 더 필요해진다.** 자리가 갈려 있으면 세이브를
+  지우는 어떤 경로도 기록에 닿지 않고, 세이브 목록(`.json`을 세는 규칙)과 섞이지도
+  않는다. dev 서버는 `apps/web`에서 도므로 실제 자리는 보통 `apps/web/.log/`이고,
+  CLI는 `.log`와 `apps/web/.log`를 차례로 찾는다(`STORY_FM_LOG_DIR`이 있으면 그쪽).
+- **게임을 지워도 남는다 — 기록을 지우는 함수는 없다.** 지워진 판에서 무엇이
+  이상했는지가 그 판을 지우는 순간 사라지면 되짚어 고치는 일이 거기서 끝난다.
+  디스크를 쥐는 것은 상한뿐이고, 창고를 비우는 것은 사람이 `.log`를 지우는 일이다 —
+  `pnpm log --games`가 게임별로 얼마나 쌓였는지, 그 게임의 세이브가 아직 있는지를
+  적는다.
+- **저장소에 올라가지 않는다.** 루트 `.gitignore`의 `.log/` 한 줄이 창고를 통째로
+  덮는다 — 프롬프트 원문도 모델 응답도 커밋되지 않는다.
 - **세이브에는 넣지 않는다.** 시스템 프롬프트와 이력 원문은 턴마다 수만 토큰이고
-  세이브는 이미 수 MB다. 대신 세이브 옆의 **사이드카 디렉터리**에 턴 하나를 파일
-  하나로 둔다 — `.meta.json`·`.shard-*.json`과 같은 자리, 같은 원자적 쓰기
-  (tmp → rename). 그래서 dev 서버를 재시작해도 이전 턴의 원문이 그대로 열린다.
-  **게임을 삭제하면 그 디렉터리도 함께 지운다** — 지운 게임의 원문이 `.data`에
-  남지 않는다.
+  세이브는 이미 수 MB다. 대신 창고의 파일 하나에 호출 하나를 두되, 세이브와 같은
+  원자적 쓰기를 쓴다 (tmp → rename). 그래서 dev 서버를 재시작해도 이전 호출의 원문이
+  그대로 열린다.
 - **production에서는 아무 파일도 쓰지 않는다** — 켜지는 조건이 위의 하나뿐이고,
   `LLM_MODE=mock`처럼 기록할 호출이 없는 턴은 파일도 만들지 않는다.
 - **한 채팅 턴은 호출 하나가 아니다.** 평시 턴은 `gm` + 훈련 결산, 경기 턴은
-  `match-gm`과 그 도구 뒤의 `tactic-orders`·`finalize-match`가 함께 돈다. 그래서 키가 호출이
-  아니라 턴이고, 한 턴을 열면 그 턴에 오간 왕복이 **순서대로 전부** 보인다.
+  `match-gm`과 그 도구 뒤의 `tactic-orders`·`finalize-match`가 함께 돈다. 그래서 타임라인이
+  그 전부를 **순서대로** 들고, 한 턴을 열면 그 턴에 오간 왕복이 코어의 사실 사이에 선다.
 - **어느 호출이 이 턴의 것인가는 실행 문맥이 정한다**(`AsyncLocalStorage`). 시각이나
   전역 큐로 가르면 두 게임이 같은 프로세스에서 동시에 턴을 돌릴 때 남의 호출이
   섞인다.
-- **감독 발화 턴을 누르면 바로 뒤 model 턴의 기록이 열린다** — 그 발화가 실려 나간
+- **감독 발화 턴을 누르면 바로 뒤 model 턴의 타임라인이 열린다** — 그 발화가 실려 나간
   호출이 거기 있다.
 - **응답은 이력에 새로 붙은 메시지만 적는다** — `tool_use`·thinking 블록이 거기
   있고, 프롬프트로 이미 적은 이력을 두 번 적지 않는다. 경계는 어댑터가 돌려준
@@ -725,10 +828,10 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   돌려준 `tool_result`도 같은 이력에 적는다(Anthropic은 `tool_result`까지
   `role:"user"`다). 그래서 팝업은 보낸 것(파랑)과 받은 것(초록)을 갈라 세우고,
   꼬리 안에서는 **`role`이 경계다** — `assistant`·`model`만 모델이 쓴 것이다.
-- ⚠️ **`LLM_MODE=mock`은 기록이 비어 있다.** 대본 어댑터는 원문 기록을 붙이는 문
+- ⚠️ **`LLM_MODE=mock`은 호출이 비어 있다.** 대본 어댑터는 원문 기록을 붙이는 문
   (`createGameLLM`)을 지나지 않고, 적을 요청도 없다(§2-1) — 팝업이 모드를 함께 받아
-  "모의 GM은 모델을 부르지 않는다"고 말한다. 빈 기록을 고장으로 읽지 않게 하는 것이 이
-  한 줄의 일이다.
+  "모의 GM은 모델을 부르지 않는다"고 말한다. 코어의 사실은 그대로 쌓인다 — 호출 없는
+  타임라인이 곧 mock의 모양이다.
 
 ## 5-1. 계측 뷰 (`/admin` → 계측)
 
@@ -755,6 +858,156 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
 - **쓰기가 없다.** 장부를 비우는 손잡이를 두지 않는다 — 비우는 자리는 게임을 여는
   자리 하나(`beginGameUsage`)여야 상한이 세이브 하나에 걸린다는 계약이 유지된다.
 
+## 5-2. 게임 버전 — 모델이 받는 입력의 버전 (`config/game-version.yml`)
+
+기록은 반년 뒤에도 열린다. 그때 그 답이 **지금과 같은 프롬프트·같은 도구·같은
+모델**에서 나온 것인지 모르면, 두 응답의 차이가 모델의 변덕인지 우리가 바꾼 입력의
+결과인지 가릴 수 없다. 그래서 호출마다 `gameVersion`이 함께 남는다 — 팝업 호출
+머리의 `v1.0.0`, 목록 줄, CLI의 `--version 1.2`가 모두 이 한 값을 읽는다.
+
+**버전이 답하는 질문은 하나다 — 모델이 보는 것이 달라졌나.** 파일이 바뀌었나가
+아니다. 화면·테스트·문서만 고친 커밋은 움직이지 않고, 시스템 프롬프트에서 규칙 한
+줄이 지워지면 움직인다.
+
+| 자리      | 무엇이 달라졌나                           | 지난 로그는                                       |
+| --------- | ----------------------------------------- | ------------------------------------------------- |
+| **major** | 모델이 읽는 것의 **구조**, 또는 읽는 주체 | 견줄 수 없다 — 파이프라인 자체가 다르다           |
+| **minor** | 같은 구조 안의 **내용**                   | 견줄 수 있으나 규칙·도구·모델이 그대로가 아니다   |
+| **patch** | 보는 **값·표현**                          | 견줄 수 있다 — 문구와 숫자의 차이는 예정된 것이다 |
+
+- **major** — 에이전트 추가·삭제, 한 턴의 호출 구성 변경(§5의 나무가 달라진다), 층
+  재배치(고정·레퍼런스·이력 — AGENTS.md §6-3), 출력 문법 변경, 도구 카탈로그의 재편.
+- **minor** — 시스템 프롬프트의 규칙 추가·삭제, 도구 추가·삭제·이름·입력 스키마
+  변경, 스냅샷·레퍼런스 카드의 새 필드, 이력 창·압축 문턱 이동, `llm.yml`의 모델 ·
+  `thinking_level` · `max_tokens` · `operator_channel`.
+- **patch** — 묻는 것이 같은 채로 문구를 다듬는 것, 숫자의 포맷·단위·자릿수, 목록의
+  정렬, 코어 수식이 움직여 스냅샷의 숫자가 따라 움직이는 것.
+
+**올리는 것은 판단이고, 코드는 자동으로 올리지 않는다.** 경로만으로 「모델 입력의
+변화」가 갈리지 않기 때문이다 — 같은 파일의 한 줄이 주석일 수도 프롬프트일 수도
+있다. 판단 절차와 경로 지도는 `.claude/skills/game-version`이 들고 있고, 규약은 둘:
+
+- 한 PR은 **가장 높은 자리로 한 번만** 올린다 — 이 저장소는 squash-merge라 PR 하나가
+  main의 커밋 하나다.
+- 버전 한 줄은 **그 변경과 같은 커밋**에 담는다. 따로 커밋하면 로그가 가리키는 코드
+  상태가 실제로 존재한 적 없는 상태가 된다.
+
+⚠️ **읽지 못한 버전은 `0.0.0`으로 남는다.** 설정이 깨지면 모델 호출은 어차피 서지
+못하지만, 기록 한 줄 때문에 턴이 죽는 것은 과하다 — `0.0.0`이 「이 줄은 못 읽었다」를
+말한다.
+
+## 5-3. 타임라인의 항목 — 코어가 남기는 사실 (`journal` · `pnpm log --facts`)
+
+**호출 원문은 모델이 무엇을 보고 무엇을 답했는가까지다.** 그 답이 옳았는지를 되짚으려면
+**코어가 그 턴에 무엇을 했는가**가 그 옆에 있어야 한다 — 감독이 무슨 말을 했고, 해석기가
+그것을 어떤 명령으로 옮겼고, 코어가 무엇을 걸고 무엇을 반려했고, 판이 어떤 패킷과 어떤
+난수 채널로 굴렀고, 사건이 무엇이었고, 그 사이 세계가 어떻게 움직였는가. 프롬프트 안의
+한국어 문장을 정규식으로 긁어 세는 것이 이 질문에 답하는 길이어서는 안 된다.
+
+그래서 코어는 **사실(fact)** 을 일어난 자리에서 구조로 내고, 그것이 호출과 같은 타임라인에
+순서대로 앉는다. 문장이 아니라 JSON이다 — 같은 질문을 반년 뒤에 같은 `jq`로 다시 물을 수
+있게.
+
+| 무엇        | 값                                                                                                                                                             |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 사실의 문   | **`journal(entry)` 하나** (`packages/engine/src/core/journal.ts`) — 엔진·에이전트·라우트가 같은 함수를 부르고, 창고(`turn-trace.ts`)가 그것을 열린 턴에 앉힌다 |
+| 앉는 자리   | 그 턴의 타임라인 — 호출(`llm.call`)과 같은 줄기, 같은 `seq`. 도구 안에서 난 사실은 그 호출과 도구를 `via`로 든다                                               |
+| 켜지는 조건 | 호출과 같다 — `NODE_ENV !== "production"`. 범위 밖(CLI·테스트·하네스)의 사실은 버려진다                                                                        |
+| 턴의 겉     | 입력(`input`) · 앞뒤 상태 요약(`before`·`after`) · 결과(`outcome`) — `noteTurn`이 적고 읽는 쪽이 기록의 필드로 접는다                                          |
+| 읽는 길     | `pnpm log <턴 id>` (타임라인) · `pnpm log --facts <갈래>` (jsonl 스트림) · 팝업 · `GET /api/games/[id]/trace/[index]`의 `turn`                                 |
+
+### 타임라인 하나의 모양 (읽어 접은 것 — `TurnRecord`)
+
+```jsonc
+{
+  "id": "turn-mtyjvr3j-5873",
+  "at": "2026-09-13T00:39:12.004Z",
+  "gameVersion": "1.0.1",
+  "index": 1833,            // state.chat의 자리 — 실패한 턴은 null
+  "durationMs": 8410,
+  "closed": true,           // false면 프로세스가 도중에 죽은 턴
+  "input": { "kind": "message", "text": "전방부터 잡아라", "date": "2027-03-14", "phase": "match", "orders": [] },
+  "before": { /* 턴 앞의 상태 요약 — 날짜·국면·스코어·전술판·주요 표의 크기 */ },
+  "entries": [
+    { "seq": 2, "at": "…", "kind": "llm.call", "data": { "id": "match-gm-mtyjvr3j-5873", "agent": "match-gm", … } },
+    { "seq": 3, "at": "…", "kind": "llm.call", "via": { "call": "match-gm-…", "tool": "advance_match" }, "data": { "id": "tactic-orders-…", … } },
+    { "seq": 4, "at": "…", "kind": "orders.intent", "via": { … }, "data": { "ops": { … } } },
+    { "seq": 5, "at": "…", "kind": "match.segment", "via": { … }, "data": { "channel": "segment:2:m-epl-2-11-manutd:3", … } },
+    { "seq": 6, "at": "…", "kind": "scene", "data": { … } }
+  ],
+  "callIds": ["match-gm-mtyjvr3j-5873", "tactic-orders-mtyjvsd0-5d0d"],
+  "outcome": { "ok": true, "saved": true },
+  "after": { /* 턴 뒤의 상태 요약 */ }
+}
+```
+
+**상태 요약(`before`·`after`)은 장부의 사본이 아니다.** 날짜·시각·국면·시즌·진행 중인
+경기(분·스코어)·우리 전술판(6축·선발 열한 명의 자리와 좌표·벤치)·주요 표의 줄 수다 —
+두 요약을 견주면 그 턴이 무엇을 움직였는지가 보이고, 낱낱은 세이브가 갖는다.
+
+### 항목의 갈래
+
+| `kind`                     | 누가                                            | 무엇                                                                                                                   |
+| -------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `llm.call`                 | `tapLlm`                                        | **모델 호출 하나** — 에이전트·모델·부모와 경유 도구·소요·사용량·도구 수·종료 사유·실패. 원문은 `calls/<id>.json`       |
+| `match.kickoff`            | `startMatch`                                    | 대진·양 팀 선발과 벤치·전술·감독 능력·킥오프 패킷 요약                                                                 |
+| `match.segment`            | `advanceSegment`                                | **굴린 구간 하나** — 난수 채널·출발/도착 분과 연속 시계·정지 사유·사건 전부·선수별 기록과 피로 증가분·구른 패킷의 요약 |
+| `match.shootout`           | `advanceShootout`                               | 승부차기 한 발                                                                                                         |
+| `match.ruling`             | `applyMatchRatings`                             | 마감 판정 — 선수마다 모델이 준 평점·코어 앵커·한도로 자른 값. **앵커 ± 한도가 실제로 어디서 잘렸는가**                 |
+| `match.finalized`          | `finalizeMatch`                                 | 결과(스코어·슛·xG·점유·연장·승부차기)·평점 앵커·정산된 피로·다이제스트 세 갈래                                         |
+| `tick.day`                 | `advanceTime`                                   | 하루 — 그 날의 사건 배열·소화된 훈련 수·멈춘 사유                                                                      |
+| `tick.match`               | `simulateOtherMatches` · `simulateReserveMatch` | 남의 경기와 2군 경기의 간이 시뮬 결과 — 스코어·슛·xG·기대 득점·점유·부상·카드·교체 수·난수 키                          |
+| `tick.season_end`          | `advanceTime`                                   | 시즌 전환                                                                                                              |
+| `command`                  | `buildToolSpecs`의 `wrap` · 전술판 조작         | **코어 명령 하나** — 이름·인자·성공/반려·메시지·항목·카드. 반려도 남는다 — 화면의 칩(`recordCall`)은 성공만 세운다     |
+| `orders.intent`            | `runOpsOrders`                                  | 해석기 한 번 — 감독의 말 원문·낸 `ops`·잘린 수·못 옮긴 말·재시도 여부·실패                                             |
+| `orders.applied`           | `applyTacticOrders`                             | 의도를 판에 건 결과 — 되돌아간 문장·굴렀는가·모양이 바뀌었는가                                                         |
+| `llm.retry` · `llm.anchor` | `retryOnce` · `anchorStands`                    | 산출을 쓸 수 없어 다시 부른 자리 · 결산을 건너뛰고 앵커가 남은 자리                                                    |
+| `scene`                    | `closeTurn`                                     | 장면의 시계 — 헤더·시점·출처·실제로 옮긴 곳·멈춘 턴 수·장면이 비어 코어 기록으로 세웠는가                              |
+| `history.compacted`        | `runTurnLocked`                                 | 이력 압축의 결과                                                                                                       |
+| `warn`                     | 턴 경로의 `console.warn` 자리                   | 서버 콘솔로만 흐르던 경고 — 어디서·무엇을                                                                              |
+
+**패킷 요약(`packetDigest`)은 존·9칸 격자·매치업·기대 득점·점유·강도·키포인트 태그·
+전술 노트 태그·레인 편향·지역 플랜·양 팀 명단(자리·좌표·역할·개인 전력)이다.** 슈팅
+프로필처럼 크고 유도되는 것은 싣지 않는다 — 구간 하나가 10KB 안팎이라 두 시즌이 수십
+MB에 든다. 사실은 앉히는 순간 **복제**된다(`structuredClone`) — 장부가 뒤에서 같은
+객체를 고쳐 써도(원인 태그의 정규화가 그렇다) 기록은 그 순간의 값이다.
+
+- **기록은 읽지 않는다.** `journal`은 쓰기 전용이고 기본값은 아무것도 하지 않는
+  함수다 — 게임 로직이 기록에서 값을 읽는 순간 결정성이 기록의 유무에 걸린다.
+  묶는 것은 창고이고(`bindJournal`), 잇는 자리는 웹의 `turn-runner`다.
+- **사실은 일어난 자리에서 낸다.** 구간의 난수 채널은 `advanceSegment`가, 판정의
+  한도는 `applyMatchRatings`가 안다 — 밖에서 되짚어 재구성하면 재구성이 둘째 원본이
+  된다.
+- **문장이 아니라 코드다.** 사건은 `MatchEvent` 그대로, 키포인트는 `PacketTag` 그대로.
+  문장은 읽는 쪽이 같은 렌더러로 만든다 — 기록에 문장을 적으면 문구를 고친 날 옛
+  기록의 집계가 깨진다.
+- **채팅 턴이 아닌 쓰기는 전술판 선반에 선다.** 전술판 저장(`POST /lineup`)과 게임 삭제는
+  같은 규칙의 범위(`traceBoard`)를 지나 같은 모양의 타임라인을 남기고 같은 목록에 선다 —
+  걸리고 반려된 명령은 `command` 항목(`source: "board"`)으로, 저장 전후의 전술판은 상태
+  요약으로. 다른 것은 선반뿐이다: 채팅 자리가 없고, 파일이 `board/`에 살고, 상한이 따로다.
+- **`LLM_MODE=mock`에도 타임라인은 선다.** 대본 어댑터는 원문을 남기지 않지만(§5)
+  코어는 같은 길을 지나므로 사실은 그대로 쌓인다 — 호출이 비어 있는 타임라인이 곧
+  mock의 모양이다.
+
+### 읽는 법
+
+```bash
+pnpm log                                       최근 턴 스물다섯 줄 (모든 게임)
+pnpm log --game game-f0o7 --failed             실패한 턴만
+pnpm log --turn 1833 --game game-f0o7          그 채팅 자리의 턴 — 입력·타임라인·결과·앞뒤 diff
+pnpm log turn-mtyjvr3j-5873                    같은 것을 이름으로
+pnpm log turn-mtyjvr3j-5873 --entry 4          타임라인의 항목 하나의 전문
+pnpm log tactic-orders-mtyjvsd0-5d0d           호출의 원문 — --full · --part user · --json · --path
+pnpm log --calls --agent tactic-orders --failed  호출만 한 줄씩
+pnpm log --facts match.segment --game game-f0o7   그 갈래의 항목을 jsonl로 흘린다 — jq·python이 받는 자리
+pnpm log --facts llm.call,orders.intent --game game-f0o7   여럿을 함께
+pnpm log --board --game game-f0o7              전술판 선반만 — 전술판 저장·게임 삭제 (기본 목록은 두 선반이 일어난 순서로)
+```
+
+집계는 `--facts`가 전부다 — 한 게임의 `match.segment`를 흘려 `packet.zones`의 비를
+세면 존 편향이, `orders.intent`를 흘려 `ops`가 빈 비율을 세면 해석기의 빈손이, `command`를
+흘려 `ok:false`를 세면 반려의 분포가, `llm.call`을 흘려 `error`를 세면 시한과 혼잡이 나온다.
+
 ## 6. ⚠️ 불변식
 
 - **모델 ID는 `config/llm.yml` 밖에 쓰지 않는다.** 코드는 에이전트 이름으로만 부른다.
@@ -778,6 +1031,8 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   §1-1): SDK 기본값은 2·2·0이라, 적지 않으면 같은 설정이 제공자마다 다르게 돈다.
 - **재시도는 요청 하나에만 건다.** 도구가 이미 돈 턴을 다시 부르면 명령이 두 번 돈다
   (§1-1).
+- **기록은 쓰기 전용이다.** `journal`(§5-3)에서 값을 읽는 게임 코드는 없다 — 기록이 꺼진
+  프로세스(production·CLI·하네스)와 켜진 프로세스가 같은 세이브에서 같은 결과를 내야 한다.
 - **제공자의 능력은 설정이 적는다 — 오류 문장을 보고 알아내지 않는다.** 사고를 실을 수
   있는지(§1-2), 오퍼레이터 롤을 받는지(§3-3) 둘 다 표에 있고, 못 하는 조합은 시작할 때
   거부된다.
@@ -795,29 +1050,33 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
 
 ## 코드 위치
 
-| 무엇                         | 어디                                                                                |
-| ---------------------------- | ----------------------------------------------------------------------------------- |
-| 에이전트별 배치              | `config/llm.yml`                                                                    |
-| 설정 로드·검증               | `packages/llm/src/config.ts`                                                        |
-| 제공자 중립 계약             | `packages/llm/src/game-llm.ts`                                                      |
-| 어댑터 3종                   | `packages/llm/src/anthropic-adapter.ts` · `gemini-adapter.ts` · `openai-adapter.ts` |
-| 제공자 선택 + 계측·시한 부착 | `packages/llm/src/factory.ts` (에이전트별 어댑터 캐시)                              |
-| 종료 사유 중립 enum          | `packages/llm/src/game-llm.ts` (`StopReason`) · 매핑은 어댑터 셋                    |
-| 제공자 특성 표(사고·캐시)    | `packages/llm/src/config.ts` (`PROVIDER_TRAITS`)                                    |
-| 시한 래퍼                    | `packages/llm/src/deadline.ts`                                                      |
-| 오류 종류·재시도 판정        | `packages/llm/src/llm-error.ts` (`kindOfStatus` · `isRetryableStatus`)              |
-| 키 해석 (제공자별 환경변수)  | `packages/llm/src/config.ts` (`resolveApiKey`)                                      |
-| 게임 잠금 (대기 상한·409)    | `apps/web/lib/turn-runner.ts` (`withGameLock`)                                      |
-| 세이브 파일 락               | `packages/engine/src/core/save-lock.ts`                                             |
-| 스트리밍 턴의 하트비트       | `apps/web/app/api/games/[id]/turn/stream/route.ts`                                  |
-| 설정 검증 테스트             | `packages/llm/test/agent-config.test.ts`                                            |
-| 토큰 계측·예산 상한          | `packages/llm/src/usage-meter.ts`                                                   |
-| 원문 기록(사이드카·`tapLlm`) | `packages/llm/src/turn-trace.ts`                                                    |
-| 턴 인덱스에 묶는 자리        | `apps/web/lib/turn-runner.ts` · `apps/web/app/api/games/route.ts`                   |
-| 원문 라우트(dev 전용)        | `apps/web/app/api/games/[id]/trace/[index]/route.ts`                                |
-| 원문 팝업·롱프레스           | `apps/web/components/turn-trace.tsx` · `components/chat.tsx`                        |
-| 계측 라우트 (§5-1)           | `apps/web/app/api/admin/usage/route.ts`                                             |
-| 계측 화면 (§5-1)             | `apps/web/app/admin/usage-panel.tsx`                                                |
-| 모드 해석 (`LLM_MODE`)       | `packages/llm/src/config.ts` (`resolveLlmMode`)                                     |
-| 대본 어댑터 (§2-1)           | `packages/llm/src/scripted-adapter.ts`                                              |
-| mock 대본 (발화 → 도구 표)   | `packages/agents/src/mock-script.ts` · 어댑터 선택은 `mock-gm.ts`                   |
+| 무엇                               | 어디                                                                                           |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 에이전트별 배치                    | `config/llm.yml`                                                                               |
+| 설정 로드·검증                     | `packages/llm/src/config.ts`                                                                   |
+| 제공자 중립 계약                   | `packages/llm/src/game-llm.ts`                                                                 |
+| 어댑터 3종                         | `packages/llm/src/anthropic-adapter.ts` · `gemini-adapter.ts` · `openai-adapter.ts`            |
+| 제공자 선택 + 계측·시한 부착       | `packages/llm/src/factory.ts` (에이전트별 어댑터 캐시)                                         |
+| 종료 사유 중립 enum                | `packages/llm/src/game-llm.ts` (`StopReason`) · 매핑은 어댑터 셋                               |
+| 제공자 특성 표(사고·캐시)          | `packages/llm/src/config.ts` (`PROVIDER_TRAITS`)                                               |
+| 시한 래퍼                          | `packages/llm/src/deadline.ts`                                                                 |
+| 오류 종류·재시도 판정              | `packages/llm/src/llm-error.ts` (`kindOfStatus` · `isRetryableStatus`)                         |
+| 키 해석 (제공자별 환경변수)        | `packages/llm/src/config.ts` (`resolveApiKey`)                                                 |
+| 게임 잠금 (대기 상한·409)          | `apps/web/lib/turn-runner.ts` (`withGameLock`)                                                 |
+| 세이브 파일 락                     | `packages/engine/src/core/save-lock.ts`                                                        |
+| 스트리밍 턴의 하트비트             | `apps/web/app/api/games/[id]/turn/stream/route.ts`                                             |
+| 설정 검증 테스트                   | `packages/llm/test/agent-config.test.ts`                                                       |
+| 토큰 계측·예산 상한                | `packages/llm/src/usage-meter.ts`                                                              |
+| 기록 창고 — 타임라인·원문·`tapLlm` | `packages/llm/src/turn-trace.ts` (`traceTurn` · `noteFact` · `noteTurn`)                       |
+| 사실의 문·갈래·상태 요약           | `packages/engine/src/core/journal.ts` · 패킷 요약 `packages/engine/src/match/packet-digest.ts` |
+| 게임 버전 (§5-2)                   | `config/game-version.yml` · 읽는 자리 `packages/llm/src/game-version.ts`                       |
+| 버전 판단 규칙 (§5-2)              | `.claude/skills/game-version/SKILL.md`                                                         |
+| 턴 인덱스에 묶는 자리              | `apps/web/lib/turn-runner.ts` · `apps/web/app/api/games/route.ts`                              |
+| 기록 라우트(dev 전용)              | `apps/web/app/api/games/[id]/trace/[index]/route.ts`                                           |
+| 타임라인 팝업·롱프레스             | `apps/web/components/turn-trace.tsx` · `components/chat.tsx`                                   |
+| 기록 CLI (`pnpm log`)              | `scripts/log.ts` (창고 자리는 `logDir()`)                                                      |
+| 계측 라우트 (§5-1)                 | `apps/web/app/api/admin/usage/route.ts`                                                        |
+| 계측 화면 (§5-1)                   | `apps/web/app/admin/usage-panel.tsx`                                                           |
+| 모드 해석 (`LLM_MODE`)             | `packages/llm/src/config.ts` (`resolveLlmMode`)                                                |
+| 대본 어댑터 (§2-1)                 | `packages/llm/src/scripted-adapter.ts`                                                         |
+| mock 대본 (발화 → 도구 표)         | `packages/agents/src/mock-script.ts` · 어댑터 선택은 `mock-gm.ts`                              |

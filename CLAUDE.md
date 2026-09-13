@@ -17,6 +17,14 @@ Vision, architecture and development conventions all live in
   `config/llm.yml`. Never hard-code a model ID (docs/llm/models.md).
 - **Claude API details** (model IDs, pricing, caching, tool use) — check the
   `claude-api` skill or the current reference, never memory.
+- **Something looks wrong in play** — every turn keeps one timeline: the manager's
+  input, each LLM call (raw request/response under its name, `gm-m8k2x9q7-4f3a`), the
+  interpreter's ops, every core command incl. rejections, each match segment with its
+  rng channel and packet digest, tick events, outcome and a state digest before/after.
+  `pnpm log` lists turns, `pnpm log <turn-id>` opens a timeline, `pnpm log <call-id>`
+  opens a call's raw text (`--path` hands you the file), `pnpm log --facts <kind> --game
+<id>` streams one kind as jsonl for aggregation (docs/llm/models.md §5). Failed turns
+  are kept too — that is where the timeouts live. Ask the record, not the prompt text.
 - **Commit / push** — only when the user asks. Commit to the branch already
   checked out and `git push origin HEAD`; name the paths you add, and never
   rebase, stash or switch branches (AGENTS.md §5).
@@ -38,6 +46,7 @@ pnpm format           # Prettier --write · `pnpm format:check` is what CI runs
 pnpm test / pnpm e2e  # full suites — CI runs these; locally only on request
 pnpm dev              # web app dev server (LLM_MODE=mock needs no API key)
 pnpm match --dry      # match CLI prototype: prints the strength packet only
+pnpm log              # dev-mode record: turns · `pnpm log <turn|call id>` opens one · `--facts <kind>` streams jsonl
 ```
 
 > `LLM_MODE=mock|real` — unset falls back to `real` when `config/llm.yml` has a

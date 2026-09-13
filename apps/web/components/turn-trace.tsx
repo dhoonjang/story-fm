@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { TurnTraceCall, TurnUsage } from "@story-fm/llm";
+import type { TurnRecord, TurnTraceCall, TurnUsage } from "@story-fm/llm";
 import { IconArrowLeft, IconArrowRight, IconClose } from "@/components/icons";
 
 import {
   alreadyShown,
   compactJson,
+  factPeek,
   groupTraceMessages,
   previewLine,
   traceToolFlow,
@@ -26,6 +27,8 @@ import {
 interface TurnTracePayload {
   index: number;
   mode: "real" | "mock";
+  /** 그 자리의 턴 기록 — 코어가 한 일 (models.md §5-3). 원문이 밀린 뒤에도 남는다 */
+  turn: TurnRecord | null;
   calls: TurnTraceCall[];
 }
 
@@ -100,6 +103,31 @@ function BlockCopy({ value }: { value: string }) {
       }}
     >
       {done ? "복사됨" : "복사"}
+    </button>
+  );
+}
+
+/**
+ * 이 호출의 이름 — **창 밖으로 들고 나갈 수 있는 한 줄** (models.md §5).
+ *
+ * 화면을 찍어 보내는 대신 이 문자열만 옮기면 `pnpm log <id>`가 같은 것을 연다.
+ * 그래서 읽는 값이면서 집어 가는 값이라, 파일 이름의 꼴(mono) 그대로 서고 누르면
+ * 복사된다 — 눌렀다는 사실은 글자가 대신 말한다.
+ */
+function CallId({ id }: { id: string }) {
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (!done) return;
+    const timer = setTimeout(() => setDone(false), 1200);
+    return () => clearTimeout(timer);
+  }, [done]);
+  return (
+    <button
+      className="tt-call-id"
+      title={`복사 — pnpm log ${id}`}
+      onClick={() => void navigator.clipboard.writeText(id).then(() => setDone(true))}
+    >
+      {done ? "복사됨" : id}
     </button>
   );
 }
@@ -312,6 +340,143 @@ function TraceFlow({ steps, readOnly }: { steps: TraceToolStep[]; readOnly: Set<
   );
 }
 
+/** 사실 한 줄이 나쁜 소식인가 — 반려된 명령·경고·빈손의 해석·앵커로 떨어진 결산 */
+function badFact(kind: string, data: unknown): boolean {
+  if (kind === "warn" || kind === "llm.anchor" || kind === "llm.retry") return true;
+  const value = (data ?? {}) as { ok?: unknown; error?: unknown };
+  if (kind === "llm.call") return typeof value.error === "string";
+  return (kind === "command" || kind === "orders.intent") && value.ok === false;
+}
+
+/**
+ * 턴의 타임라인 — **한 턴에 일어난 전부가 한 줄기로** (models.md §5).
+ *
+ * 감독의 입력, 모델 호출, 해석이 낸 명령, 코어가 걸고 반려한 것, 판이 구른 구간이
+ * 일어난 순서로 선다. 호출 항목을 펼치면 그 호출의 원문(요청·응답)이 그 자리에서 열린다 —
+ * 원문은 따로 살지만 읽는 자리는 하나다. 도구 안에서 난 항목은 그 호출 아래로 들어간다.
+ */
+function TraceTimeline({
+  record,
+  calls,
+  expandAll,
+}: {
+  record: TurnRecord;
+  /** 이 턴의 호출 원문 — 상한 밖으로 밀린 것은 없다 */
+  calls: readonly TurnTraceCall[];
+  expandAll: boolean;
+}) {
+  const outcome = record.outcome;
+  const verdict = !record.closed
+    ? "닫히지 않음"
+    : outcome === null
+      ? "결과 없음"
+      : outcome.ok
+        ? outcome.saved
+          ? "저장됨"
+          : "성공"
+        : `실패 — ${outcome.error ?? "이유 없음"}`;
+  const facts = [
+    verdict,
+    duration(record.durationMs),
+    `항목 ${record.entries.length}`,
+    `호출 ${record.callIds.length}`,
+  ].join(" · ");
+  const origin = new Date(record.at).getTime();
+  const bad = record.entries.filter((entry) => badFact(entry.kind, entry.data)).length;
+  const originals = new Map(calls.map((call) => [call.id, call] as const));
+  return (
+    <section className="tt-call tt-record">
+      <header className="tt-call-head">
+        <b className="tt-agent">
+          <i>{record.index ?? "—"}</i>턴
+        </b>
+        <span className="tt-model">{verdict}</span>
+        <CallId id={record.id} />
+        <span className="tt-facts">
+          <span>v{record.gameVersion}</span>
+          <span>{facts}</span>
+        </span>
+        <CopyButton value={pretty(record)} />
+      </header>
+      <TraceBlock label="입력" meta={compactJson(record.input, 80)} open json>
+        {pretty(record.input)}
+      </TraceBlock>
+      {record.entries.length > 0 && (
+        <section className="tt-flow">
+          <div className="tt-flow-head">
+            <b>타임라인</b>
+            <span className="tt-flow-facts">
+              {record.entries.length}항목 · 일어난 순서{bad > 0 ? ` · 반려·실패·경고 ${bad}` : ""}
+            </span>
+          </div>
+          <ol className="tt-flow-list">
+            {record.entries.map((entry, i) => {
+              const call =
+                entry.kind === "llm.call"
+                  ? (originals.get((entry.data as { id?: string }).id ?? "") ?? null)
+                  : null;
+              const classes = [
+                "tt-step",
+                badFact(entry.kind, entry.data) ? "bad" : "",
+                entry.via === undefined ? "" : "nested",
+              ]
+                .filter((c) => c !== "")
+                .join(" ");
+              return (
+                <li className={classes} key={entry.seq}>
+                  <details open={expandAll}>
+                    <summary>
+                      <i className="tt-step-no">{i + 1}</i>
+                      {entry.via !== undefined && (
+                        <em
+                          className="tt-via"
+                          title={`${entry.via.call}의 ${entry.via.tool} 안에서`}
+                        >
+                          └ {entry.via.tool}
+                        </em>
+                      )}
+                      <span
+                        className={entry.kind === "llm.call" ? "tt-kind skill" : "tt-kind read"}
+                      >
+                        +{duration(Math.max(0, new Date(entry.at).getTime() - origin))}
+                      </span>
+                      <b className="tt-tool">{entry.kind}</b>
+                      <span className="tt-args">{factPeek(entry.kind, entry.data)}</span>
+                    </summary>
+                    {call !== null ? (
+                      <TraceCallView call={call} at={i} expandAll={expandAll} />
+                    ) : (
+                      <pre className="tt-pre json">
+                        {entry.kind === "llm.call"
+                          ? `(원문이 상한 밖으로 밀렸다 — 타임라인의 요약만 남았다)\n${pretty(entry.data)}`
+                          : pretty(entry.data)}
+                      </pre>
+                    )}
+                  </details>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      )}
+      <TraceBlock label="결과" meta={compactJson(record.outcome, 80)} open={expandAll} json>
+        {pretty(record.outcome)}
+      </TraceBlock>
+      <TraceBlock
+        label="상태 요약 — 앞"
+        meta={compactJson(record.before, 80)}
+        open={expandAll}
+        json
+      >
+        {pretty(record.before)}
+      </TraceBlock>
+      <TraceBlock label="상태 요약 — 뒤" meta={compactJson(record.after, 80)} open={expandAll} json>
+        {pretty(record.after)}
+      </TraceBlock>
+    </section>
+  );
+}
+
 /** 호출 하나 — 머리(누가·무엇으로·얼마나)와 방향으로 갈린 원문 */
 function TraceCallView({
   call,
@@ -373,7 +538,12 @@ function TraceCallView({
           {call.agent}
         </b>
         <span className="tt-model">{call.model ?? "—"}</span>
+        <CallId id={call.id} />
         <span className="tt-facts">
+          {/* 모델이 받은 입력의 버전 — 지난 기록과 견줄 때 먼저 맞춰야 하는 값이다 */}
+          <span>v{call.gameVersion}</span>
+          {/* 이 호출을 낳은 도구 — 앞 탭의 어느 도구 뒤에서 돌았는지가 곧 의존성이다 */}
+          {call.viaTool !== null && <span>via {call.viaTool}</span>}
           <span>{duration(call.durationMs)}</span>
           {request.streaming && <span>streaming</span>}
         </span>
@@ -542,19 +712,6 @@ export function TurnTracePopup({
    * 하나가 스무 개의 상태를 들고 있어야 한다.
    */
   const [expandAll, setExpandAll] = useState(false);
-  /**
-   * 지금 읽는 호출 — 한 턴은 에이전트 여럿이 돈다(models.md §5).
-   *
-   * 셋을 세로로 이으면 `gm`의 프롬프트 하나가 수만 자라 뒤의 rater까지 스크롤로만
-   * 닿는다. 다른 턴을 열면 첫 호출로 돌아간다 — 남아 있던 자리가 그 턴에는 없을 수
-   * 있고, 있어도 다른 에이전트다.
-   */
-  const [active, setActive] = useState(0);
-
-  useEffect(() => {
-    setActive(0);
-  }, [gameId, index]);
-
   useEffect(() => {
     const abort = new AbortController();
     setTrace(null);
@@ -607,10 +764,6 @@ export function TurnTracePopup({
     }
   }
 
-  // 탭이 가리키는 자리가 없을 수 있다 — 기록이 아직 안 왔거나 호출이 그보다 적다
-  const activeIndex = trace === null ? 0 : Math.min(active, Math.max(0, trace.calls.length - 1));
-  const activeCall = trace?.calls[activeIndex] ?? null;
-
   return (
     <div
       className="tt-backdrop"
@@ -634,14 +787,16 @@ export function TurnTracePopup({
             </b>
             <span className="tt-sub">
               {trace
-                ? `${trace.mode} · 호출 ${trace.calls.length}개`
+                ? trace.turn
+                  ? `${trace.mode} · 항목 ${trace.turn.entries.length}개 · 호출 ${trace.calls.length}개`
+                  : `${trace.mode} · 호출 ${trace.calls.length}개`
                 : error !== null
                   ? "불러오지 못했다"
                   : "불러오는 중…"}
             </span>
           </div>
           <div className="tt-head-tools">
-            {trace && trace.calls.length > 0 && (
+            {trace && (trace.calls.length > 0 || trace.turn !== null) && (
               <button
                 className="tt-toggle"
                 onClick={() => setExpandAll((on) => !on)}
@@ -656,44 +811,23 @@ export function TurnTracePopup({
           </div>
         </header>
         {/**
-         * 호출 탭 — **돈 순서 그대로**다. 그 순서가 곧 이 턴의 경로이므로
-         * (gm → rater, intent → caster → rater) 이름으로 다시 정렬하지 않는다.
-         * 하나뿐이면 탭 줄이 서지 않는다 — 고를 것이 없는 줄이 자리만 먹는다.
+         * 손잡이가 바뀌면 목록을 다시 세운다 — `<details>`의 기본 열림을 그렇게 바꾼다.
          */}
-        {trace && trace.calls.length > 1 && (
-          <div className="tt-tabs" role="tablist" aria-label="이 턴의 호출">
-            {trace.calls.map((call, i) => (
-              <button
-                className={i === active ? "tt-tab on" : "tt-tab"}
-                role="tab"
-                aria-selected={i === active}
-                key={i}
-                onClick={() => setActive(i)}
-              >
-                <i>{i + 1}</i>
-                {call.agent}
-                {/**
-                 * 탭은 **누구이고 무슨 일이 있었나**까지다 — 걸린 시간·모델·토큰은
-                 * 바로 아래 머리가 적는다. 같은 값을 두 줄에 겹쳐 적으면 고르는
-                 * 눈이 어느 쪽을 읽어야 할지 모른다.
-                 */}
-                {(call.response?.toolCallCount ?? 0) > 0 && (
-                  <span className="tt-tab-facts">도구 {call.response?.toolCallCount}</span>
-                )}
-                {/* 실패한 호출은 탭에서 보인다 — 열어 봐야 아는 것이면 못 찾는다 */}
-                {call.error !== null && <em className="tt-tab-bad">실패</em>}
-              </button>
-            ))}
-          </div>
-        )}
-        {/**
-         * 손잡이가 바뀌거나 탭을 옮기면 목록을 다시 세운다 — `<details>`의 기본
-         * 열림을 그렇게 바꾼다.
-         */}
-        <div className="tt-body" key={`${active}-${expandAll ? "all" : "prose"}`}>
+        <div className="tt-body" key={expandAll ? "all" : "prose"}>
           {error !== null && <p className="tt-note">기록을 불러오지 못했다 — {error}</p>}
-          {trace && trace.calls.length === 0 && <p className="tt-note">{emptyNote(trace.mode)}</p>}
-          {activeCall && <TraceCallView call={activeCall} at={activeIndex} expandAll={expandAll} />}
+          {/* 타임라인 하나 — 호출도 사실도 그 안의 항목이다 (models.md §5) */}
+          {trace?.turn && (
+            <TraceTimeline record={trace.turn} calls={trace.calls} expandAll={expandAll} />
+          )}
+          {/* 타임라인이 없는 옛 기록 — 호출 원문만 순서대로 선다 */}
+          {trace &&
+            trace.turn === null &&
+            trace.calls.map((call, i) => (
+              <TraceCallView key={call.id} call={call} at={i} expandAll={expandAll} />
+            ))}
+          {trace && trace.turn === null && trace.calls.length === 0 && (
+            <p className="tt-note">{emptyNote(trace.mode)}</p>
+          )}
         </div>
       </div>
     </div>

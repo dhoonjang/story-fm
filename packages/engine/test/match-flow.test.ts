@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  markEntered,
+  bindJournal,
   advanceSegment,
   applyMatchEvents,
   assignmentsOf,
@@ -36,6 +38,7 @@ import {
   userPlayers,
   userSide,
   type GameState,
+  type JournalEntry,
 } from "@story-fm/engine";
 import {
   advanceToMatchday,
@@ -122,6 +125,37 @@ describe("경기 흐름 (overview §4)", () => {
     ).toBeLessThan(95);
     // 자리마다 갈린다 (골키퍼는 덜, 중원·측면은 많이) — 하나로 뭉개지지 않는다
     expect(Math.max(...conditions) - Math.min(...conditions)).toBeGreaterThan(15);
+  });
+
+  /**
+   * 킥오프와 구간이 **기록의 사실**로 남는다 (models.md §5-3) — 구간의 난수 채널과 실제로
+   * 구른 패킷의 요약까지. 되짚을 때 "그 구간이 왜 그렇게 굴렀나"의 답이 여기 있다.
+   */
+  it("킥오프와 구간이 난수 채널·굴린 패킷과 함께 기록의 사실로 남는다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    const entries: JournalEntry[] = [];
+    bindJournal((entry) => entries.push(entry));
+    try {
+      expect(startMatch(state).ok).toBe(true);
+      markEntered(state);
+      const matchId = state.pendingMatch!.matchId;
+      const step = advanceSegment(state);
+      expect(step.ok).toBe(true);
+
+      expect(entries[0]?.kind).toBe("match.kickoff");
+      const segment = entries.find((entry) => entry.kind === "match.segment");
+      if (segment?.kind !== "match.segment") throw new Error("구간의 사실이 없다");
+      expect(segment.channel).toBe(`segment:${state.season}:${matchId}:0`);
+      expect(segment.from.minute).toBe(0);
+      expect(segment.to.minute).toBe(step.plan!.minute);
+      expect(segment.events).toEqual(step.plan!.events);
+      // 구른 패킷의 요약 — 9칸 격자와 양 팀 열한 명이 그대로 든다
+      expect(segment.packet.grid).toHaveLength(9);
+      expect(segment.packet.lineup.home).toHaveLength(11);
+      expect(segment.packet.lineup.away).toHaveLength(11);
+    } finally {
+      bindJournal(null);
+    }
   });
 
   /**

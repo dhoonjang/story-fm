@@ -6,6 +6,7 @@
  */
 import { z } from "zod";
 import {
+  journal,
   acceptDeal,
   acceptManagerOffer,
   adjustTransferBudget,
@@ -513,11 +514,52 @@ export function buildToolSpecs(
     description,
     inputSchema: toToolSchema(schema),
     handle(input: unknown, context?: ToolCallContext) {
+      /**
+       * 명령 하나가 기록에 한 줄 — **반려도 남는다** (models.md §5-3). 화면의 칩
+       * (`recordCall`)은 성공만 세우므로, 모델이 같은 스킬을 세 번 고쳐 부른 흐름은
+       * 여기에만 있다. 모델이 부른 것도 해석기가 옮긴 것도 이 문을 지난다.
+       */
       const blocked = dismissed(state, !OUT_OF_WORK_TOOLS.has(name));
-      if (blocked) return blocked;
+      if (blocked) {
+        journal({
+          kind: "command",
+          name,
+          input,
+          ok: false,
+          message: blocked.message,
+          source: "tool",
+          blocked: "dismissed",
+        });
+        return blocked;
+      }
       const parsed = schema.safeParse(input);
-      if (!parsed.success) return inputError(parsed.error);
-      return record(name, run(parsed.data), parsed.data, context);
+      if (!parsed.success) {
+        const rejected = inputError(parsed.error);
+        journal({
+          kind: "command",
+          name,
+          input,
+          ok: false,
+          message: rejected.message,
+          source: "tool",
+          blocked: "input",
+        });
+        return rejected;
+      }
+      const result = run(parsed.data);
+      journal({
+        kind: "command",
+        name,
+        input: parsed.data,
+        ok: result.ok,
+        message: result.message,
+        source: "tool",
+        ...((result as { unchanged?: boolean }).unchanged === true ? { unchanged: true } : {}),
+        ...(result.tone === undefined ? {} : { tone: result.tone }),
+        ...(result.brief === undefined ? {} : { brief: result.brief }),
+        ...(result.payload === undefined ? {} : { payload: result.payload }),
+      });
+      return record(name, result, parsed.data, context);
     },
   });
 

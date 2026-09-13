@@ -5,6 +5,8 @@ import {
   addDays,
   advanceTime,
   BIG_CHANCE_XG,
+  bindJournal,
+  type JournalEntry,
   clockOf,
   createGame,
   interpretBackgroundHeuristic,
@@ -275,6 +277,31 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
    * 옮기지 못한 말은 조용히 사라지지 않는다 — 감독이 지시가 걸린 줄 알고 다음 판단을
    * 그 위에 쌓는 것이 이 저장소가 여러 번 고친 거짓 성공이다.
    */
+  /**
+   * 반려된 명령은 화면의 칩(`recordCall`)에 서지 않는다 — 기록에는 선다 (models.md §5-3).
+   * 되짚을 때 "해석이 낸 명령이 왜 안 걸렸나"의 답이 여기뿐이다.
+   */
+  it("반려된 명령도 기록의 사실로 남는다 — 화면의 칩은 성공만 세운다", () => {
+    const state = matchState();
+    const entries: JournalEntry[] = [];
+    bindJournal((entry) => entries.push(entry));
+    try {
+      const { applied, calls } = turn(state, {
+        ops: { substitute: [{ out: "nobody-out", in: "nobody-in" }] },
+      });
+      expect(applied.notes.length).toBeGreaterThan(0);
+      const rejected = entries.filter((entry) => entry.kind === "command" && !entry.ok);
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0]?.kind === "command" && rejected[0].name).toBe("substitute");
+      expect(calls.some((call) => call.name === "substitute")).toBe(false);
+      // 의도를 판에 건 결과가 마지막에 선다 — 굴리지 않은 턴이다
+      const last = entries.at(-1);
+      expect(last?.kind === "orders.applied" && last.rolled).toBe(false);
+    } finally {
+      bindJournal(null);
+    }
+  });
+
   it("해석하지 못한 말은 감독에게 되돌아간다", () => {
     const state = matchState();
     const { applied } = turn(state, { ops: {}, unresolved: "골키퍼를 공격수로 올려" });

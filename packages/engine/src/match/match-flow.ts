@@ -70,6 +70,8 @@ import { matchCaptainOf } from "../squad/hierarchy";
 import { applyResultMood } from "../squad/slump";
 import { derbyForMatch } from "../club/derby";
 import { managerTacticsOf } from "./manager-tactics";
+import { journal, type KickoffSide } from "../core/journal";
+import { packetDigest } from "./packet-digest";
 import { matchRating, type MatchRatingBrief, type PlayerMatchBrief } from "./ratings";
 import { grantManagerXP, IN_MATCH_FAMILIARITY_LOSS } from "../commands";
 import { recallRole } from "../commands/role-memory";
@@ -718,6 +720,35 @@ export function startMatch(state: GameState): FlowResult {
   const packet = buildPacketFor(state, opening, match, true);
   state.pendingMatch = { ...opening, packet };
   state.phase = "match";
+  {
+    // 킥오프의 사실 — 양 팀이 무엇으로 섰는가 (models.md §5-3)
+    const sideOf = (
+      teamId: string,
+      ledgerSide: { onPitch: string[]; bench: string[] },
+    ): KickoffSide => ({
+      teamId,
+      onPitch: [...ledgerSide.onPitch],
+      bench: [...ledgerSide.bench],
+      tactics: tacticsOf(state, teamId).spec,
+      managerTactics: managerTacticsOf(state, teamId),
+    });
+    const derby = derbyForMatch(match);
+    journal({
+      kind: "match.kickoff",
+      matchId: match.id,
+      competitionId: match.competitionId,
+      stage: match.stage ?? null,
+      round: match.round ?? null,
+      neutral: match.neutral === true,
+      derby: derby ? { name: derby.name, heat: derby.heat } : null,
+      userSide: userIsHome ? "home" : "away",
+      home: sideOf(match.homeTeamId, userIsHome ? userSideLedger : aiSideLedger),
+      away: sideOf(match.awayTeamId, userIsHome ? aiSideLedger : userSideLedger),
+      replaced: [...lineup.replaced],
+      serving: [...serving],
+      packet: packetDigest(packet),
+    });
+  }
   const note = lineup.replaced.length > 0 ? ` (자동 대체: ${lineup.replaced.join(", ")})` : "";
   /**
    * **그 경기의 완장** (people.md §5-1) — 주장이 명단에 없으면 부주장이, 둘 다
@@ -959,6 +990,12 @@ export function advanceSegment(
 
   const channel = `segment:${state.season}:${match.id}:${segment}`;
   const rng = makeRng(state.seed, channel);
+  // 기록에 남는 것은 **이 구간이 실제로 구른** 판이다 — 상대의 전환이 반영된 뒤의 것
+  const rolled = packetDigest(pending.packet);
+  const scoreBefore = { ...pending.ledger.score };
+  const minuteBefore = pending.ledger.minute;
+  const clockBefore = pending.segmentClock ?? null;
+  const staminaKey = `${state.seed}:${match.id}`;
   const plan = simulateSegment({
     packet: pending.packet,
     ledger: pending.ledger,
@@ -980,7 +1017,7 @@ export function advanceSegment(
       away: directivesOnPitch(state, match.awayTeamId, pending.ledger.away.onPitch),
     },
     // 체력 소모의 그날의 몫 — 구간이 아니라 **경기** 단위로 고정된다 (stamina.ts)
-    staminaKey: `${state.seed}:${match.id}`,
+    staminaKey,
     accumulatedFatigue: pending.matchFatigue ?? {},
     /**
      * 90분이 지금 스코어로 끝나면 연장으로 가는가 — **컵을 아는 건 코어뿐**이다.
@@ -1042,6 +1079,25 @@ export function advanceSegment(
   // 다음 구간이 이어받을 연속 시계 — 장부의 정수 분이 잘라 버린 소수 자리를 여기 남긴다
   pending.segmentClock = plan.clock;
   accumulateFatigue((pending.matchFatigue ??= {}), plan.fatigue);
+  journal({
+    kind: "match.segment",
+    matchId: match.id,
+    segment,
+    channel,
+    staminaKey,
+    untilMinute: until ?? null,
+    from: { minute: minuteBefore, clock: clockBefore },
+    to: { minute: plan.minute, clock: plan.clock },
+    stop: plan.stop,
+    score: { before: scoreBefore, after: { ...pending.ledger.score } },
+    phase: pending.ledger.phase,
+    aiShift: shiftEvent !== null,
+    aiSubs: aiSubs.length,
+    events,
+    stats: plan.stats,
+    fatigue: plan.fatigue,
+    packet: rolled,
+  });
   // 피로가 쌓였으니 다음 구간의 전력이 달라진다 (교체·전술 변경과 같은 경로)
   refreshPacket(state);
   /**
@@ -1360,6 +1416,7 @@ export function advanceShootout(state: GameState): {
   shootout.kicks = [...shootout.kicks, kick];
   const tally = tallyOf();
   const done = shootoutSettled(shootout.kicks);
+  journal({ kind: "match.shootout", matchId: pending.matchId, kick, tally, done });
   return {
     ok: true,
     kick,
@@ -2212,6 +2269,31 @@ export function finalizeMatch(state: GameState): MatchDigest {
    */
   const press = buildMatchPress(state, match.id);
   if (press) openPress(state, press, otherLines);
+  {
+    // 마감의 사실 — 결과와 앵커, 정산된 피로, 세 갈래의 다이제스트 (models.md §5-3)
+    const result = match.result;
+    journal({
+      kind: "match.finalized",
+      matchId: match.id,
+      competitionId: match.competitionId,
+      score: { home: ledger.score.home, away: ledger.score.away },
+      outcome,
+      shots: { home: result?.homeShots ?? 0, away: result?.awayShots ?? 0 },
+      xg: { home: result?.homeXg ?? 0, away: result?.awayXg ?? 0 },
+      expectedGoals: {
+        home: result?.homeExpectedGoals ?? 0,
+        away: result?.awayExpectedGoals ?? 0,
+      },
+      possession,
+      aet: result?.aet === true,
+      penalties: result?.penalties
+        ? { home: result.penalties.home, away: result.penalties.away }
+        : null,
+      ratings: { ...(result?.ratings ?? {}) },
+      fatigue: { ...(pending.matchFatigue ?? {}) },
+      digest: { ours: [...digest], finance: [...financeLines], others: [...otherLines] },
+    });
+  }
   return { ours: digest, finance: financeLines, others: otherLines };
 }
 

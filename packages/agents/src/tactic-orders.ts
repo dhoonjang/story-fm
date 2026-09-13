@@ -208,6 +208,7 @@ export async function runTacticOrders(
     specs,
     user,
     llm ?? mockOrdersLlm(state, TACTIC_ORDERS_SPEC, message),
+    message,
   );
   return answered.ok ? { ok: true, intent: answered.orders } : answered;
 }

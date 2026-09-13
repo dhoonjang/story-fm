@@ -25,6 +25,7 @@ summary:focus-visible,
 .tt-close,
 .tt-toggle,
 .tt-copy,
+.tt-call-id,
 .tool-chip,
 .league-row,
 .team-card,
@@ -46,6 +47,7 @@ summary:focus-visible,
 .tt-close:active:not(:disabled),
 .tt-toggle:active:not(:disabled),
 .tt-copy:active:not(:disabled),
+.tt-call-id:active:not(:disabled),
 .tool-chip:active,
 .league-row:active:not(:disabled),
 .team-card:active:not(:disabled),
@@ -294,6 +296,24 @@ button:disabled,
 .tt-model {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+/**
+ * 호출의 이름 — 화면 밖으로 들고 나가는 한 줄이라 **파일 이름의 꼴**로 선다.
+ *
+ * 손잡이지만 버튼처럼 굵게 서지 않는다: 여기서 눈에 들어와야 하는 것은 에이전트와
+ * 모델이고, 이 줄은 옮겨 적을 때 찾으면 되는 값이다. 손을 얹었을 때만 밝아진다.
+ */
+.tt-call-id {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.tt-call-id:hover {
   color: var(--text-2);
 }
 .tt-facts {
@@ -563,6 +583,12 @@ button:disabled,
   font-size: var(--fs-2xs);
   color: var(--dim);
 }
+/* 부모의 도구 뒤에서 돈 호출 — 탭 줄에서도 계층이 보인다 (models.md §5) */
+.tt-tab-nest {
+  font-style: normal;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
 /* 이 호출에서 도구가 돌았다 — 탭에서 고를 이유가 되는 사실 하나 */
 .tt-tab-facts {
   font-size: var(--fs-2xs);
@@ -668,6 +694,16 @@ button:disabled,
 }
 .tt-step.bad > details > summary {
   background: color-mix(in srgb, var(--loss) 12%, transparent);
+}
+/* 도구 안에서 난 항목 — 그 호출 아래로 한 칸 들어간다 (models.md §5) */
+.tt-step.nested > details > summary {
+  margin-left: var(--sp-4);
+}
+.tt-via {
+  flex: none;
+  font-style: normal;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
 }
 .tt-step.bad .tt-outcome {
   color: var(--loss);

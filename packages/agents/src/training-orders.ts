@@ -117,5 +117,6 @@ export async function runTrainingOrders(
     specs,
     user,
     llm ?? mockOrdersLlm(state, TRAINING_ORDERS_SPEC, message),
+    message,
   );
 }

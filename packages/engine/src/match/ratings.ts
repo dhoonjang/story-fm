@@ -1,6 +1,7 @@
 import type { AttributeAxis, PositionGroup } from "@story-fm/domain";
 import { AXIS_KO, applyFamiliarityGain, tacticalUptake } from "@story-fm/domain";
 import { ensureSeasonStat, playerById, type GameState } from "../core/state";
+import { journal } from "../core/journal";
 import { MATCH_ATTR_CAP, applyAttributeStep } from "../squad/training-report";
 
 /**
@@ -253,8 +254,18 @@ export function applyMatchRatings(
   const match = state.matches.find((m) => m.id === matchId);
   if (!match?.result?.ratings) return { applied: 0, skipped: entries.length, already: false };
   if (match.result.rated === true) {
+    journal({
+      kind: "match.ruling",
+      matchId,
+      applied: 0,
+      skipped: entries.length,
+      already: true,
+      entries: [],
+    });
     return { applied: 0, skipped: entries.length, already: true };
   }
+  /** 기록에 남는 판정 — 모델이 준 값이 앵커의 한도 안에서 어디로 잘렸는가 (models.md §5-3) */
+  const rows: Array<{ playerId: string; given: number; anchor: number; bounded: number }> = [];
   // 자르는 기준은 **호출 진입 시점의 앵커**다 — 루프가 갱신하는 `ratings`를 보면
   // 같은 호출 안의 두 번째 줄이 앞줄 위에서 다시 ±RATING_BAND를 얻는다
   const anchors = { ...match.result.ratings };
@@ -293,6 +304,7 @@ export function applyMatchRatings(
     );
     const delta = bounded - anchor;
     ratings[entry.playerId] = bounded;
+    rows.push({ playerId: entry.playerId, given: entry.rating, anchor, bounded });
     if (entry.note) notes[entry.playerId] = entry.note.slice(0, NOTE_MAX);
     if (delta !== 0 && competitionId !== null) {
       const stat = ensureSeasonStat(state, entry.playerId, player.teamId, competitionId, player);
@@ -308,6 +320,7 @@ export function applyMatchRatings(
     // 한 명도 못 받은 호출은 표식을 세우지 않는다 — 모델이 id를 고쳐 다시 부를 자리다
     ...(applied > 0 ? { rated: true } : {}),
   };
+  journal({ kind: "match.ruling", matchId, applied, skipped, already: false, entries: rows });
   return { applied, skipped, already: false };
 }
 

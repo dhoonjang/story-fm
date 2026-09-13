@@ -2,6 +2,7 @@ import {
   advanceMatchTo,
   advanceShootout,
   awaitingShootout,
+  journal,
   playerName,
   shapeOfTactics,
   type CardMark,
@@ -79,8 +80,19 @@ export function applyTacticOrders(
   const sideName = (side: "home" | "away"): string => sideTeamName(state, side);
   const shapeChanged = shapeOfTactics(state) !== shapeBefore;
   const wants = options.roll === true;
+  /** 의도를 판에 건 결과 — 무엇이 되돌아갔고 굴렀는지 (models.md §5-3) */
+  const applied = (rolled: boolean, shootout: boolean): void =>
+    journal({
+      kind: "orders.applied",
+      notes: [...notes],
+      rolled,
+      shapeChanged,
+      untilMinute: options.untilMinute ?? null,
+      shootout,
+    });
   if (!pending || !wants || shapeChanged) {
     if (wants && shapeChanged) notes.push(SHAPE_CHANGED_NOTE);
+    applied(false, awaitingShootout(state));
     /**
      * 승부차기 정지점은 진행하지 않은 턴에도 자리를 밝힌다 — 대본이 없으면 캐스터가
      * "공은 120′에 멈춰 있다"로 읽어 키커 순서를 정하는 자리인 줄 모른다.
@@ -108,10 +120,12 @@ export function applyTacticOrders(
     // 굴러간 한 발은 대본이 갖는다 — 여기 또 실으면 같은 사실이 두 번 간다
     if (!kicked.ok) {
       notes.push(kicked.message);
+      applied(false, true);
       return { notes, segment: null };
     }
     // 세계가 굴러간 기록이지 감독이 부른 도구가 아니다 — 칩으로 세우지 않는다
     calls.push({ name: MATCH_ADVANCED, summary: kicked.message, silent: true });
+    applied(true, true);
     return {
       notes,
       segment: buildShootoutMessage(
@@ -135,12 +149,14 @@ export function applyTacticOrders(
       : advanceMatchTo(state, pending.ledger.minute + 1);
   if (!step.ok) {
     notes.push(step.message);
+    applied(false, false);
     return { notes, segment: null };
   }
   pending.lastSegment = { events: step.events, stop: step.stop ?? "flow" };
   collectMatchMarks(state, step.events, scoreBefore, goals, cards);
   // 세계가 굴러간 기록이지 감독이 부른 도구가 아니다 — 칩으로 세우지 않는다
   calls.push({ name: MATCH_ADVANCED, summary: step.message, silent: true });
+  applied(true, false);
 
   const ledger = pending.ledger;
   return {

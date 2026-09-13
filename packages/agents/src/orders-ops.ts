@@ -6,6 +6,7 @@ import {
   type GameLLM,
   type GameToolSpec,
 } from "@story-fm/llm";
+import { journal } from "@story-fm/engine";
 import { ModelOutputError, requireToolCall, retryOnce } from "./retry";
 import { inputError } from "./tool-schema";
 
@@ -229,9 +230,23 @@ export async function runOpsOrders(
   specs: ReadonlyMap<string, GameToolSpec>,
   user: string,
   llm?: GameLLM,
+  /** 감독의 말 원문 — 기록에 `ops` 옆에 선다. 프롬프트(`user`)에는 맥락이 함께 실려 있다 */
+  raw?: string,
 ): Promise<{ ok: true; orders: OpsOrders } | { ok: false; message: string }> {
   let orders: OpsOrders | null = null;
   let client = llm;
+  /** 기록의 밑절미 — 호출이 몇 번 돌았는지는 `attempts`가 센다 (models.md §5-3) */
+  let attempts = 0;
+  const intent = (rest: Record<string, unknown>) =>
+    journal({
+      kind: "orders.intent",
+      agent: spec.agent,
+      tool: spec.tool,
+      raw: raw ?? null,
+      retried: attempts > 1,
+      ok: false,
+      ...rest,
+    } as Parameters<typeof journal>[0]);
   const tool: GameToolSpec = {
     ...opsToolDeclaration(spec, specs),
     handle: (input: unknown) => {
@@ -252,6 +267,7 @@ export async function runOpsOrders(
       spec.agent,
       () =>
         requireToolCall(spec.tool, () => {
+          attempts += 1;
           client ??= createGameLLM(agentConfig(spec.agent));
           return client.runTurn({
             system: spec.system,
@@ -264,13 +280,31 @@ export async function runOpsOrders(
       () => orders !== null,
     );
   } catch (error) {
-    if (orders === null && !(error instanceof ModelOutputError)) throw error;
+    const failure = error instanceof Error ? error.message : String(error);
+    if (orders === null && !(error instanceof ModelOutputError)) {
+      intent({ failure });
+      throw error;
+    }
     console.warn(`[${spec.agent}] 해석 호출이 실패했습니다:`, error);
+    if (orders === null) {
+      intent({ failure, message: "지시를 옮기지 못했습니다 — 다시 말씀해 주세요" });
+      return { ok: false, message: "지시를 옮기지 못했습니다 — 다시 말씀해 주세요" };
+    }
   }
   if (orders === null) {
+    intent({ message: "지시를 옮기지 못했습니다 — 다시 말씀해 주세요" });
     return { ok: false, message: "지시를 옮기지 못했습니다 — 다시 말씀해 주세요" };
   }
   const got: OpsOrders = orders;
-  if (!hasOps(got.ops) && !got.unresolved) return { ok: false, message: spec.emptyHint };
+  const shape = {
+    ops: got.ops,
+    ...(got.truncated ? { truncated: got.truncated } : {}),
+    ...(got.unresolved ? { unresolved: got.unresolved } : {}),
+  };
+  if (!hasOps(got.ops) && !got.unresolved) {
+    intent({ ...shape, message: spec.emptyHint });
+    return { ok: false, message: spec.emptyHint };
+  }
+  intent({ ...shape, ok: true });
   return { ok: true, orders: got };
 }

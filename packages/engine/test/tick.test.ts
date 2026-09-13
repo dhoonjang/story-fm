@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isReserveMatch,
   FAMILIARITY_AWAY_TARGET,
   FAMILIARITY_MAX,
   familiarityAfterAwayDay,
@@ -24,6 +25,7 @@ import {
 import type { GamePlayer, PlayerState, PositionGroup } from "@story-fm/domain";
 import type { GameState } from "@story-fm/engine";
 import {
+  bindJournal,
   familiarityOf,
   leagueOfTeamIn,
   addDays,
@@ -60,6 +62,7 @@ import {
   userPlayers,
   weeklyWagesOf,
   eventTexts,
+  type JournalEntry,
 } from "@story-fm/engine";
 import {
   advanceDays,
@@ -92,6 +95,45 @@ describe("advance_time — 시간은 도구로만 흐른다 (season.md §5)", ()
     // (season.md §5). 종류가 조용히 전부 `news`로 무너지면 카드가 다 같은 얼굴이 된다.
     const matchday = result.events.filter((e) => e.kind === "matchday");
     expect(matchday.some((e) => e.text.includes("경기일"))).toBe(true);
+  });
+
+  /**
+   * 하루하루와 남의 경기가 **기록의 사실**로 남는다 (models.md §5-3) — 날짜마다 한
+   * 줄, 간이 시뮬 한 경기에 한 줄. 멈춘 날은 멈춘 이유를 든다.
+   */
+  it("하루하루와 남의 경기가 기록의 사실로 남는다", () => {
+    const state = createTestGame();
+    const from = state.date;
+    const entries: JournalEntry[] = [];
+    bindJournal((entry) => entries.push(entry));
+    try {
+      let result = advanceTime(state, "next_match");
+      let guard = 30;
+      while (result.stopped === "attention" && guard-- > 0) {
+        result = advanceTime(state, "next_match");
+      }
+      expect(result.stopped).toBe("matchday");
+
+      const days = entries.filter((entry) => entry.kind === "tick.day");
+      const elapsed = Math.round((Date.parse(state.date) - Date.parse(from)) / 86_400_000);
+      expect(days).toHaveLength(elapsed);
+      const last = days.at(-1);
+      expect(last?.kind === "tick.day" && last.stopped).toBe("matchday");
+      expect(last?.kind === "tick.day" && last.date).toBe(state.date);
+
+      // 결과가 박힌 남의 경기(2군 포함)마다 한 줄 — 감독의 1군 경기는 아직 안 치렀다
+      const played = state.matches.filter(
+        (m) =>
+          m.result &&
+          !(
+            (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId) &&
+            !isReserveMatch(m)
+          ),
+      );
+      expect(entries.filter((entry) => entry.kind === "tick.match")).toHaveLength(played.length);
+    } finally {
+      bindJournal(null);
+    }
   });
 
   it("게임 시작 시 여름 창은 이미 열려 있고, 폐장은 진행 중 안내된다", () => {

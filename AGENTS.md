@@ -135,6 +135,12 @@ e2e/               # Playwright specs — onboarding · game · admin · turn er
   convention here**, and a second branch cut to match the names already in the
   history leaves the first one stranded and detaches the work from the branch Orca
   tracks the issue by.
+- **When the model's input changes, move the game version** — one line in
+  `config/game-version.yml`. Prompts, tool specs, snapshot builders and
+  `config/llm.yml` are where it lives; screens, tests and docs never move it.
+  Every traced LLM call records the version, so it is what makes a log from
+  months ago comparable to today's (→ [docs/llm/models.md](./docs/llm/models.md)
+  §5-2; the digit rules and path map are the `game-version` skill).
 - Commit and push only when the user asks. When a unit of work is done, commit to
   **the branch already checked out** and `git push origin HEAD` — never switch
   branches to commit.
@@ -232,7 +238,9 @@ red change merged green. How the gate is sharded and what it runs on is
 
 - Ports 3000 and 3311 belong to the user's dev servers. Never kill them.
 - Isolate verification saves with `STORY_FM_DATA_DIR=<tmp>`; never touch
-  `apps/web/.data`.
+  `apps/web/.data`. The LLM trace store is a separate directory (`apps/web/.log`)
+  and it is the user's material for improving the game — read it
+  (`pnpm log` — one timeline per turn: calls, commands, segments, ticks), never clear it.
 - A pre-existing failure that does not name a file you touched is not yours to
   fix — report it as-is.
 

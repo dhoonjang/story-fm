@@ -1,5 +1,7 @@
 import {
   acquireSaveLock,
+  bindJournal,
+  journal,
   loadGame,
   refreshPacket,
   saveGame,
@@ -8,6 +10,7 @@ import {
   setTactics,
   substitutePlayer,
   takeEdits,
+  turnDigestOf,
   type GameState,
   type SaveLockHandle,
 } from "@story-fm/engine";
@@ -22,6 +25,8 @@ import {
   beginGameUsage,
   bindTurnTrace,
   llmErrorKind,
+  noteFact,
+  noteTurn,
   traceEnabled,
   traceTurn,
   type LlmErrorKind,
@@ -29,6 +34,14 @@ import {
 import { NextResponse } from "next/server";
 import { toPayload, type GamePayload } from "./store";
 import type { MatchBoardOrder } from "./match-orders";
+
+/**
+ * **사실의 문을 창고에 잇는다** (models.md §5-3). 엔진은 `journal`로 내기만 하고
+ * 창고(`turn-trace.ts`)는 엔진을 모르므로, 둘을 다 아는 이 자리가 한 번 잇는다.
+ * 프로세스에 한 번이면 된다 — 창고는 열린 턴 범위를 보고 앉히므로 두 게임의 턴이
+ * 섞이지 않는다. 기록이 꺼진 프로세스에서는 `noteFact`가 범위 없음으로 버린다.
+ */
+bindJournal(({ kind, ...data }) => noteFact(kind, data));
 
 function applyMatchBoardOrder(state: GameState, order: MatchBoardOrder) {
   switch (order.kind) {
@@ -290,9 +303,11 @@ export function runTurnLocked(
    */
   orders?: readonly MatchBoardOrder[],
 ): Promise<TurnOutcome> {
-  // 이 턴에 오간 원문은 model 턴을 채팅에 밀어 넣는 자리에서 그 인덱스에 묶인다
+  // 원문은 호출이 끝나는 즉시 이 게임의 사이드카에 앉고(models.md §5), 그 이름들이
+  // model 턴을 채팅에 밀어 넣는 자리에서 턴 인덱스에 묶인다 — 턴이 실패해 묶이지
+  // 못해도 원문은 남는다
   return withGameLock(id, LOCK_WAIT_MS.turn, () =>
-    traceTurn(async (): Promise<TurnOutcome> => {
+    traceTurn(id, async (): Promise<TurnOutcome> => {
       // 토큰 예산의 단위는 게임이다 — 다른 게임의 턴이면 여기서 장부를 비운다
       // (models.md §4). 잠금 안이라 한 프로세스에서 두 게임이 겹치지 않는다.
       beginGameUsage(id);
@@ -310,13 +325,49 @@ export function runTurnLocked(
       const inMatch = state.phase === "match";
       const matchId = state.pendingMatch?.matchId;
       const mark = inMatch ? { inMatch: true as const, ...(matchId ? { matchId } : {}) } : {};
+      /**
+       * 턴 기록의 겉 — 감독이 무엇을 보냈고 그때 세계가 어디 있었나 (models.md §5-3).
+       * 실패한 턴도 이 겉은 갖는다: 되짚을 때 「무엇을 보냈길래」가 먼저다.
+       */
+      noteTurn({
+        input: {
+          kind: operation ? "operation" : "message",
+          ...(message === undefined ? {} : { text: message }),
+          ...(operation === undefined ? {} : { operation }),
+          orders: orders ?? [],
+          pendingEdits: state.pendingEdits ?? [],
+          date: state.date,
+          phase: state.phase,
+          season: state.season,
+        },
+        before: turnDigestOf(state),
+      });
       // 판에서 쌓인 조작은 LLM이 다시 해석하지 않는다. 구조화된 ID·값을 코어 명령로
       // 먼저 적용하고, 모델에는 이미 반영된 사실만 넘긴다.
       const appliedOrders: string[] = [];
       if (orders !== undefined && orders.length > 0) {
         for (const order of orders) {
           const result = applyMatchBoardOrder(state, order);
+          // 전술판은 `wrap`을 지나지 않는 명령의 문이다 — 기록은 여기서 남긴다
+          journal({
+            kind: "command",
+            name: order.kind === "tactic" ? `set_tactics:${order.axis}` : order.kind,
+            input: order,
+            ok: result.ok,
+            message: result.message,
+            source: "board",
+            ...(result.brief === undefined ? {} : { brief: result.brief }),
+          });
           if (!result.ok) {
+            noteTurn({
+              outcome: {
+                ok: false,
+                saved: false,
+                error: "전술판 지시를 반영하지 못했습니다",
+                detail: result.message,
+              },
+              after: turnDigestOf(state),
+            });
             return {
               ok: false as const,
               status: 400,
@@ -377,24 +428,50 @@ export function runTurnLocked(
          * 굳는다 (agents.md §5-1). 실패는 삼킨다: 접지 않은 이력이 그대로 남을
          * 뿐 이번 턴은 성공으로 끝난다.
          */
-        await compactHistory(state).catch((error: unknown) => {
+        const compacted = await compactHistory(state).catch((error: unknown) => {
           console.warn(`[turn] 이력 압축을 건너뜁니다 (game=${id}):`, error);
+          journal({
+            kind: "warn",
+            where: "turn",
+            text: "이력 압축을 건너뜁니다",
+            detail: error instanceof Error ? error.message : String(error),
+          });
+          return null;
         });
+        if (compacted !== null) journal({ kind: "history.compacted", ...compacted });
         saveGame(state);
+        noteTurn({
+          outcome: { ok: true, saved: true },
+          after: turnDigestOf(state),
+        });
         return { ok: true as const, payload: toPayload(state) };
       } catch (error) {
         const kind = llmErrorKind(error);
         console.error(`[turn] GM 턴 실패 (game=${id}, kind=${kind}):`, error);
+        /**
+         * `GmTurnFailure`는 감독에게 보일 문구를 이미 들고 온다 — 원인을 짐작해
+         * 바꿔 쓰면 "지시를 옮기지 못했다"가 "응답을 받지 못했다"로 둔갑한다.
+         */
+        const shown = error instanceof GmTurnFailure ? error.message : turnErrorMessage(kind);
+        const detail = errorDetail(error);
+        // 실패한 턴의 상태는 버려진다 — 그래도 그 순간 세계가 어디 있었는지는 남긴다
+        noteTurn({
+          outcome: {
+            ok: false,
+            saved: false,
+            error: shown,
+            kind,
+            retry: turnErrorRetry(kind),
+            ...detail,
+          },
+          after: turnDigestOf(state),
+        });
         return {
           ok: false as const,
           status: 502,
-          /**
-           * `GmTurnFailure`는 감독에게 보일 문구를 이미 들고 온다 — 원인을 짐작해
-           * 바꿔 쓰면 "지시를 옮기지 못했다"가 "응답을 받지 못했다"로 둔갑한다.
-           */
-          error: error instanceof GmTurnFailure ? error.message : turnErrorMessage(kind),
+          error: shown,
           retry: turnErrorRetry(kind),
-          ...errorDetail(error),
+          ...detail,
         };
       }
     }),
