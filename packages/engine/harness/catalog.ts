@@ -765,7 +765,9 @@ export const PROMPT_REGRESSION = defineHarness({
   // prettier-ignore
   bands: [
     { metric: "고정층 글자", role: "guard", max: 30500, unit: "count", why: "매 턴 캐시 프리픽스로 나가는 하한 — 프롬프트는 지우는 방향으로 고친다 (prompts.md §5). 여백은 거의 없다: 문구가 늘면 잡히고, 도구가 늘어 넘겼으면 그때만 다시 자른다" },
-    { metric: "시스템 프롬프트 글자", role: "reference", min: 1500, max: 3000, unit: "count", why: "도구와 무관하게 매 턴 서는 규칙만 — 도구 사용법이 새어 들어오면 늘어난다" },
+    { metric: "시스템 프롬프트 글자", role: "measure", unit: "count", why: "평시 턴마다 실려 나가는 `GM_SYSTEM` 전체 — 총량의 상한은 위 「고정층 글자」가 쥔다. 규칙이 늘었는지는 아래 「지침 글자」가 묻는다" },
+    { metric: "시스템 프롬프트 지침 글자", role: "reference", min: 1500, max: 2500, unit: "count", why: "전체에서 입력 지도와 예시 한 장면을 뺀 나머지 — 곧 규칙이다. 프롬프트를 지우는 방향으로 고치게 하는 자리이므로(prompts.md §7) 여백은 규칙 서너 줄뿐이다. 도구 사용법이 새어 들어오면 늘어난다 — 그 줄은 그 도구의 description으로 내린다(§5 원칙 8)" },
+    { metric: "입력 지도 글자", role: "measure", unit: "count", why: "`# 입력` 섹션 — 규칙이 아니라 규칙을 줄이는 장치다(prompts.md §5 원칙 2). 입력 블록이 늘면 함께 자라므로 위 밴드가 세지 않는다. 지도가 이름과 몫을 넘어 출력 규칙까지 말하기 시작하면 여기가 먼저 부푼다" },
     { metric: "도구 스펙 글자", role: "measure", unit: "count", why: "설명 + Zod에서 파생된 JSON 스키마 — 고정층의 대부분이다" },
     { metric: "도구 설명 총 글자", role: "measure", unit: "count", why: "상한은 skill-descriptions.test.ts가 쥔다 — 여기서는 그 안 어디쯤인지만 읽는다" },
     { metric: "가장 긴 도구 설명 글자", role: "measure", unit: "count", why: "한 도구가 설명 예산을 혼자 먹고 있는가" },

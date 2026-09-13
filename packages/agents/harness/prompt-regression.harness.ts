@@ -85,6 +85,30 @@ function fixedLayer(state: GameState): string {
 }
 
 /**
+ * 시스템 프롬프트를 **지도 · 지침 · 예시** 셋으로 가른다.
+ *
+ * 밴드가 누르려는 것은 **규칙의 수**인데(prompts.md §7), 프롬프트가 싣는 것 가운데 규칙이
+ * 아닌 두 덩어리가 있다 — 입력 블록의 지도(`# 입력`)와 예시 한 장면(`<example>`). 둘은
+ * 규칙이 아니라 규칙을 줄이는 장치이고(§5 원칙 2·5), 지도는 게임의 **입력 블록이 늘 때**
+ * 함께 자란다. 통째로 한 숫자에 세면 스냅샷 덩어리 하나를 더한 PR이 「프롬프트를 줄여라」로
+ * 읽히고, 실제로 그렇게 몇 주가 지났다.
+ *
+ * 표식이 사라지면 지침이 통째로 커져 밴드가 빨개진다 — 조용히 0이 되지 않도록 못 박는다.
+ */
+function gmSystemParts(): { map: number; guide: number; example: number } {
+  const map = /\n# 입력\n[\s\S]*?(?=\n# )/.exec(GM_SYSTEM)?.[0];
+  const example = /\n<example>\n[\s\S]*<\/example>/.exec(GM_SYSTEM)?.[0];
+  if (map === undefined || example === undefined) {
+    throw new Error("GM_SYSTEM에서 「# 입력」 또는 <example>을 찾지 못했다 — 섹션이 움직였다");
+  }
+  return {
+    map: map.length,
+    guide: GM_SYSTEM.length - map.length - example.length,
+    example: example.length,
+  };
+}
+
+/**
  * 경기 마감의 고정층 — 마감 에이전트가 받는 결산 도구 하나(설명 + 스키마).
  * 경기당 한 번 실리므로 고정층 예산과는 다른 눈금이다 (agents.md §3).
  */
@@ -259,10 +283,13 @@ describe("프롬프트 회귀", () => {
     }
 
     const caster = await casterArm(11);
+    const prompt = gmSystemParts();
     const layers = fixed.length + reference.length + stateNote.length;
     const readings: Readings<typeof PROMPT_REGRESSION> = {
       "고정층 글자": fixed.length,
       "시스템 프롬프트 글자": GM_SYSTEM.length,
+      "시스템 프롬프트 지침 글자": prompt.guide,
+      "입력 지도 글자": prompt.map,
       "도구 스펙 글자": fixed.length - GM_SYSTEM.length,
       "도구 설명 총 글자": SKILL_CATALOG.reduce((sum, skill) => sum + skill.description.length, 0),
       "가장 긴 도구 설명 글자": Math.max(...SKILL_CATALOG.map((s) => s.description.length)),
