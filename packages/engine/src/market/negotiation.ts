@@ -126,6 +126,7 @@ import {
   playerById,
   playersOf,
   pushNarrative,
+  answerTransferRequest,
   standTransferRequest,
   teamName,
   transferRequestOf,
@@ -1241,8 +1242,9 @@ function requestedAskingPrice(state: GameState, player: GamePlayer, asked?: numb
  * (→ docs/simulation/transfer.md §1-1). 어느 쪽도 요청을 걷지 못한다 — 걷는 것은
  * 원인(불만·창·이적)이지 답이 아니다.
  *
- * **감독은 한 번만 답한다.** 이미 답한 요청에 다시 답하면 사기와 평판이 같은
- * 결정으로 몇 번이든 움직인다.
+ * **감독은 결정을 한 번만 내린다.** 결정이 선 요청에 다시 답하면 사기와 평판이 같은
+ * 결정으로 몇 번이든 움직인다. 면담으로 `answeredOn`만 선 요청은 아직 결정이 없다 —
+ * 면담에서 「가도 좋다」고 한 감독이 값을 정하러 오는 자리다 (transfer.md §1-1).
  */
 export function respondTransferRequest(
   state: GameState,
@@ -1264,11 +1266,10 @@ export function respondTransferRequest(
   if (!found) {
     return { ok: false, message: `${player.name}은(는) 이적을 요청하지 않았습니다` };
   }
-  if (found.answeredOn !== undefined) {
-    const said = found.answer ? ` · ${REQUEST_ANSWER_KO[found.answer]}` : "";
+  if (found.answer !== undefined) {
     return {
       ok: false,
-      message: `${player.name}의 이적 요청에는 이미 답했습니다 (${found.answeredOn}${said})`,
+      message: `${player.name}의 이적 요청에는 이미 답했습니다 (${found.answeredOn} · ${REQUEST_ANSWER_KO[found.answer]})`,
     };
   }
 
@@ -1285,20 +1286,7 @@ export function respondTransferRequest(
     if (!listed.ok) return listed;
   }
 
-  /**
-   * 옛 세이브의 요청은 `PlayerState.transferRequestedOn`에서 파생된 줄이라 장부에
-   * 없다 — 밀어 넣지 않으면 감독의 답이 아무 데도 남지 않는다 (transfer.md §1-1).
-   */
-  const rows = (state.transferRequests ??= []);
-  let request = rows.find((r) => r.gamePlayerId === player.id);
-  if (!request) {
-    request = found;
-    rows.push(request);
-  }
-  request.answeredOn = state.date;
-  request.answer = input.answer;
-  // 요청이 선 날과 감독이 답한 날은 다른 사실이라, 회견이 둘 다 싣는다
-  delete request.pressedOn;
+  answerTransferRequest(state, player.id, input.answer);
 
   const effect = applyStanceOutcome(state, {
     row: REQUEST_ANSWER[input.answer],
