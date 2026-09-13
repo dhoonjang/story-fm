@@ -37,8 +37,10 @@ import {
   mediaVerdictOf,
   MEDIA_VERDICT_KO,
   naturalPositionOf,
+  openSeats,
   parseScorerEntry,
   pickMotm,
+  positionAtPoint,
   presetOf,
   retiresAtSeasonEnd,
   visionItemText,
@@ -2144,16 +2146,21 @@ function applyTransition(state: GameState): string[] {
     const currentLayout = tactics.assignments.filter((a) => a.role === "starting");
     const layoutSlots = currentLayout.map((a) => a.position);
     const layoutPoints = currentLayout.map((a) => a.point ?? anchorOf(a.position));
-    // 옛 세이브나 얇은 컵 팀의 배치가 11칸 미만이면 선수들의 실제 주 포지션으로 채운다.
-    // 프리셋 폴백은 쓰지 않는다.
-    for (const player of [...squad].sort((a, b) => b.attributes.overall - a.attributes.overall)) {
+    /**
+     * 배치가 11칸 미만이면(옛 세이브 · 얇은 컵 팀) **포메이션의 빈 자리**로 채운다.
+     *
+     * 선수의 주 포지션으로 채우던 때는 왼쪽 윙어가 떠난 여름에 남은 오른쪽 자원 둘이
+     * 나란히 `RW`의 기본 좌표에 서고 왼쪽 측면이 빈 채로 새 시즌이 시작됐다 — 자리를
+     * 사람에게서 거꾸로 만들면 모양이 축구가 아니게 된다. 지금 선 자리를 걷어내고 남은
+     * 자리를 세우므로(`openSeats`) 같은 자리 코드가 둘이 되지도 않는다.
+     */
+    for (const seat of openSeats(
+      layoutPoints,
+      presetOf(tactics.spec.formation) ?? DEFAULT_FORMATION,
+    )) {
       if (layoutSlots.length >= 11) break;
-      const position = naturalPositionOf(player).position;
-      // 골문은 하나다 — 이미 GK 칸이 있는데 또 채우면 시즌을 넘길 때마다 골키퍼
-      // 칸이 늘어난다(17시즌을 돌리면 선발 11명 중 넷이 골키퍼가 됐다).
-      if (position === "GK" && layoutSlots.includes("GK")) continue;
-      layoutSlots.push(position);
-      layoutPoints.push(anchorOf(position));
+      layoutSlots.push(positionAtPoint(seat));
+      layoutPoints.push(seat);
     }
     if (!layoutSlots.some((position) => position === "GK")) {
       const goalkeeper = squad.find((player) => groupOf(player) === "GK");

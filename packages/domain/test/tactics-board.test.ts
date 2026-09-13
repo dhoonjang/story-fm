@@ -18,6 +18,7 @@ import {
   POSITION_CODES,
   anchorOf,
   normalizePositionCode,
+  openSeats,
   clampToBoard,
   movePoint,
   positionAtPoint,
@@ -351,6 +352,42 @@ describe("카드 겹침 해소 (separateBoardPoints)", () => {
   it("결정적이다 — 같은 입력이면 같은 결과", () => {
     const input = ["CM", "CM", "CM", "ST", "ST"].map(anchorOf);
     expect(separateBoardPoints(input)).toEqual(separateBoardPoints(input));
+  });
+});
+
+describe("빈 자리 (openSeats)", () => {
+  it("아무도 없으면 프리셋 열한 자리가 통째로 빈 자리다", () => {
+    for (const formation of FORMATIONS) {
+      expect(openSeats([], formation)).toEqual([...FORMATION_LAYOUTS[formation]]);
+    }
+  });
+
+  it("선 자리는 걷어낸다 — 프리셋대로 선 판에는 빈 자리가 없다", () => {
+    for (const formation of FORMATIONS) {
+      expect(openSeats([...FORMATION_LAYOUTS[formation]], formation)).toEqual([]);
+    }
+  });
+
+  it("한 명이 빠지면 **그 자리 하나만** 남는다 — 조금 옮겨 둔 자리도 제 자리를 문다", () => {
+    const seats = FORMATION_LAYOUTS["4-2-3-1"];
+    const gone = seats[9]!;
+    // 남은 열은 감독이 조금씩 만져 둔 좌표다 (자유 배치)
+    const taken = seats.filter((_, i) => i !== 9).map((p, i) => ({ x: p.x + (i % 2), y: p.y - 1 }));
+    expect(openSeats(taken, "4-2-3-1")).toEqual([gone]);
+  });
+
+  it("한쪽에만 몰려 서 있으면 반대쪽 측면이 빈 자리로 돌아온다", () => {
+    // 오른쪽 윙어 둘 — 한 명이 `RW`를 물고, 왼쪽 측면은 아무도 물지 않는다
+    const seats = FORMATION_LAYOUTS["4-2-3-1"];
+    const right = seats[8]!;
+    const open = openSeats([right, { x: right.x - 2, y: right.y + 1 }], "4-2-3-1");
+    expect(open).not.toContainEqual(right);
+    expect(open).toContainEqual(seats[9]);
+  });
+
+  it("자리보다 사람이 많으면 빈 자리는 없다 — 앉힐 자리를 지어내지 않는다", () => {
+    const seats = FORMATION_LAYOUTS["4-3-3"];
+    expect(openSeats([...seats, ...seats], "4-3-3")).toEqual([]);
   });
 });
 

@@ -8,6 +8,7 @@ import {
   isUnder21,
   positionGroupOf,
   positionGroupOfPlayer,
+  presetOf,
   ATTRIBUTE_AXES,
   naturalPositionOf,
   numberGrievanceStands,
@@ -259,6 +260,76 @@ describe("골키퍼 없는 1군 — 골문은 필드 선수가 대신 설 수 �
     expect(onPitchKeepers).toHaveLength(1);
     expect(lineup.replaced.join()).toContain("(빈 자리) →");
     expect(lineup.replaced.join()).toContain("2군 호출");
+  });
+});
+
+/**
+ * 자동으로 채우는 선발이 **선수의 주 포지션**을 자리로 삼던 때의 판을 세운다. 왼쪽 윙어가
+ * 계약 만료로 떠난 여름에 남은 오른쪽 자원 둘이 나란히 `RW`의 기본 좌표에 서고 왼쪽
+ * 측면이 빈 채로 시즌이 시작됐다 — 감독이 판에서 하지 않은 일이고 이름 붙일 수 있는
+ * 모양도 아니다 (→ docs/data/team.md §6).
+ */
+describe("자동으로 채운 선발 — 자리가 먼저고 사람이 나중이다", () => {
+  /** 이 자리가 왼쪽인가·오른쪽인가 — 전술판 x의 양 끝 3분의 1 */
+  const FLANK = { left: 35, right: 65 };
+
+  it("주 포지션이 한쪽에 몰린 열한 명을 세워도 같은 자리 코드가 둘 서지 않는다", () => {
+    const state = createTestGame();
+    const tactics = userTactics(state);
+    // 이어받을 자리가 하나도 없는 판 — 코어가 열한 자리를 통째로 고르는 그 자리다
+    tactics.assignments = [];
+
+    const pool = firstTeamPlayers(state, state.userTeamId);
+    const keeper = pool.find((p) => positionGroupOfPlayer(p) === "GK")!;
+    // 왼쪽 자원을 통째로 뺀 풀 — 이슈의 여름(쿠냐·래시포드가 떠난 뒤)과 같은 모양이다
+    const right = pool
+      .filter((p) => p.id !== keeper.id && !naturalPositionOf(p).position.startsWith("L"))
+      .sort((a, b) => b.attributes.overall - a.attributes.overall)
+      .slice(0, STARTING_XI - 1);
+    expect(right).toHaveLength(STARTING_XI - 1);
+
+    const res = setLineup(state, { starting: [keeper.id, ...right.map((p) => p.id)] });
+    expect(res.ok).toBe(true);
+
+    const starting = userTactics(state).assignments.filter((a) => a.role === "starting");
+    expect(starting).toHaveLength(STARTING_XI);
+    // 같은 자리 코드가 둘 서지 않는다
+    expect(new Set(starting.map((a) => a.position)).size).toBe(STARTING_XI);
+    // 한 점에 둘이 포개지지도 않는다
+    const points = starting.map((a) => a.point!);
+    expect(new Set(points.map((p) => `${p.x},${p.y}`)).size).toBe(STARTING_XI);
+    // 좌우가 한쪽만 비지 않는다
+    const left = points.filter((p) => p.x < FLANK.left).length;
+    const wide = points.filter((p) => p.x > FLANK.right).length;
+    expect(left).toBeGreaterThan(0);
+    expect(Math.abs(left - wide)).toBeLessThanOrEqual(1);
+    // 그리고 그 판은 이름이 붙는 모양이다
+    expect(presetOf(userTactics(state).spec.formation)).not.toBeNull();
+  });
+
+  it("자리를 비운 선발이 있으면 그 자리를 잇는다 — 판의 모양은 감독의 것이다", () => {
+    const state = createTestGame();
+    const before = userTactics(state).assignments.filter((a) => a.role === "starting");
+    const shape = userTactics(state).spec.formation;
+    const dropped = before.find((a) => positionGroupOf(a.position) !== "GK")!;
+    const spare = userPlayers(state).find(
+      (p) =>
+        squadLevelOf(p) === "first" &&
+        !before.some((a) => a.playerId === p.id) &&
+        positionGroupOfPlayer(p) !== "GK",
+    )!;
+
+    // 자리도 좌표도 말하지 않고 사람만 바꾼다 — 비운 자리를 그대로 물려받아야 한다
+    const res = setLineup(state, {
+      starting: [
+        ...before.filter((a) => a.playerId !== dropped.playerId).map((a) => a.playerId),
+        spare.id,
+      ],
+    });
+    expect(res.ok).toBe(true);
+    const after = userTactics(state).assignments.find((a) => a.playerId === spare.id)!;
+    expect(after.point).toEqual(dropped.point);
+    expect(userTactics(state).spec.formation).toBe(shape);
   });
 });
 
