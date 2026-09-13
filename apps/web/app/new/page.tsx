@@ -7,6 +7,7 @@ import { LeagueListSkeleton } from "@/components/skeleton";
 import { Loading } from "@/components/loading";
 import type { ClubColours } from "@story-fm/domain";
 import { Crest, clubStyle } from "@/components/crest";
+import { HelpPopover } from "@/components/help-popover";
 
 interface TeamEntry {
   id: string;
@@ -274,16 +275,26 @@ export default function NewGamePage() {
               data-testid="manager-name"
             />
           </label>
-          <label className="field">
-            <span className="field-label">이력</span>
-            {/* 능력치의 출처는 규칙이지 조작법이 아니다 — 적기 전에 알아야 한다 */}
-            <span className="field-note">여기 적은 이력이 감독의 초기 능력치가 된다</span>
+          {/* 표식이 칸 안에 서므로 `label`로 감싸지 않는다 — 라벨을 누른 클릭이
+              버튼까지 겸하면 도움말을 열 때마다 입력칸으로 포커스가 튄다 */}
+          <div className="field">
+            <span className="field-head">
+              <label className="field-label" htmlFor="manager-background">
+                이력
+              </label>
+              {/* 능력치의 출처는 규칙이지 조작법이 아니다 — 적기 전에 알아야 하지만
+                  화면에 펼쳐 두면 안내 문구가 된다 (design-system.md §1 조작) */}
+              <HelpPopover label="이력이 무엇을 정하는지">
+                여기 적으신 이력이 감독의 초기 능력치가 됩니다.
+              </HelpPopover>
+            </span>
             <textarea
+              id="manager-background"
               value={background}
               onChange={(e) => setBackground(e.target.value)}
               data-testid="manager-background"
             />
-          </label>
+          </div>
           {/* 누르는 순간 화면이 로딩으로 넘어가므로 버튼에 기다리는 글자를 두지 않는다 */}
           <button
             className="primary-btn"

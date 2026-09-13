@@ -423,11 +423,19 @@ textarea {
   font-weight: 600;
   margin-bottom: 4px;
 }
-.onboarding .field-note {
-  display: block;
-  color: var(--text-2);
-  font-size: var(--fs-sm);
-  margin-bottom: 6px;
+/**
+ * 라벨 옆에 도움말 표식이 서는 줄. 아이콘 칸(28)이 제 안에 여백을 갖고 있어 `?`은
+ * 이미 떨어져 보이지만, 포커스 링은 칸 **밖으로** 4px 나가므로 붙여 두면 링이 라벨
+ * 글자를 물고 선다. `--sp-1`은 그 링이 설 자리다.
+ */
+.onboarding .field-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-bottom: 4px;
+}
+.onboarding .field-head .field-label {
+  margin-bottom: 0;
 }
 .onboarding input[type="text"],
 .onboarding textarea {

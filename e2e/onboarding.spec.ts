@@ -60,6 +60,21 @@ test("부임은 리그 → 팀 → 감독 한 단계씩 서고, 되돌아갈 수
   await expect(appointment).toContainText("프리미어리그");
   await expect(page.getByTestId("start-game")).toContainText("아스날");
 
+  /**
+   * 이력이 능력치를 정한다는 **규칙**은 적기 전에 알아야 하지만 화면에 펼쳐 두면
+   * 안내 문구가 된다 — `?` 뒤에 선다 (design-system.md §1 조작).
+   * 여닫는 길은 눈에 보이므로 재지 않고, **키보드로 돌아오는 길**만 잰다:
+   * Esc가 닫고 포커스가 표식으로 돌아오지 않으면 탭 순서가 통째로 끊기는데
+   * 그건 화면을 봐서는 드러나지 않는다.
+   */
+  const helpMark = page.locator(".help-mark");
+  await expect(page.locator(".help-pop")).toHaveCount(0);
+  await helpMark.click();
+  await expect(page.locator(".help-pop")).toContainText("초기 능력치");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".help-pop")).toHaveCount(0);
+  await expect(helpMark).toBeFocused();
+
   // 진행 표시의 지나온 칸이 곧 되돌아가는 길이다 — 두 단계를 한 번에 건넌다
   await page.getByTestId("step-to-league").click();
   await expect(page.getByTestId("league-epl")).toHaveClass(/selected/);
