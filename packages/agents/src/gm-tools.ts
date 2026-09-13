@@ -219,7 +219,7 @@ const CORE_COMMAND_LABELS: Record<string, string> = {
   set_squad_number: "등번호",
   sign_youth: "유스 첫 계약",
   respond_offer: "오퍼에 감독이 답한다",
-  accept_deal: "계약 확정 — 메디컬로",
+  accept_deal: "합의 확정 · 상대 조정 수락",
   respond_transfer_request: "이적 요청 응답",
   withdraw_offer: "오퍼 철회",
   set_transfer_list: "이적 리스트",
