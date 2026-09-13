@@ -364,6 +364,10 @@ export async function compactHistory(state: GameState, llm?: GameLLM): Promise<C
           user: buildCompactionPrompt(state, brief, untitledArcs(state), relationTierBrief(state)),
           tools: [makeReportTool(state, brief, (r) => (result = r))],
           toolChoice: { name: REPORT_DIGEST_TOOL },
+          // 산출은 이 도구 하나다 — 요약도 인물도 핸들러가 코어에 옮긴다. 결과를
+          // 돌려주는 두 번째 요청은 고정분이 큰 이 입력을 한 번 더 읽고 아무도 읽지
+          // 않는 답을 받아 온다 (models.md §3-4)
+          outputOnly: true,
         });
       }),
     () => result.folded, // 이미 접혔으면 다시 부르지 않는다
