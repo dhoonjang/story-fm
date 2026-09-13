@@ -920,15 +920,19 @@ function planAiShift(
 
 /**
  * **감독이 말한 분이 굴릴 수 있는 자리인가** — 지금 시각보다 뒤, 이 국면의 끝 이하
- * (match.md §2). 재는 자리는 장부의 분이 아니라 **연속 시계**다: 장부는 마지막 사건의
- * 분에 서 있어 시계보다 뒤일 수 있고, 그 차이를 무시하면 이미 지나친 분이 통과한다.
+ * (match.md §2). 지금 시각은 **연속 시계와 장부의 분 중 뒤쪽**이다: 장부는 마지막
+ * 사건의 분에 서 있어 시계보다 뒤일 수도(사건 없이 흐른 자리), 앞일 수도 있고
+ * (골 뒤로 밀린 분, §1.4), 어느 쪽이든 이미 지나친 분은 통과하면 안 된다.
  *
  * @returns 반려 문장, 굴릴 수 있으면 `null`
  */
 function rejectUntilMinute(pending: PendingMatch, untilMinute: number): string | null {
   const phase = pending.ledger.phase;
   if (phase === "finished") return "경기가 이미 종료되었습니다";
-  const now = segmentStartClock(pending.ledger, pending.segmentClock);
+  const now = Math.max(
+    segmentStartClock(pending.ledger, pending.segmentClock),
+    pending.ledger.minute,
+  );
   if (untilMinute <= now) return `이미 ${Math.floor(now)}′입니다 — 그보다 뒤의 분을 말하세요`;
   const end = PHASE_END[phase];
   if (untilMinute > end) return `이 국면은 ${end}′에 끝납니다 — 목표 분은 그 이하여야 합니다`;
