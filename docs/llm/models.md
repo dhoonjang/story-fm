@@ -444,7 +444,7 @@ runTurn({ system, history, user, stateNote?, tools?, toolChoice?, maxTokens?, on
 | 어댑터    | 캐싱                                       | 최소 캐시 프리픽스 | 오퍼레이터 채널 (§3-3)          | 사고 (§1-2)                                   | 시한을 거는 자리                                            |
 | --------- | ------------------------------------------ | ------------------ | ------------------------------- | --------------------------------------------- | ----------------------------------------------------------- |
 | Anthropic | `cache_control` 브레이크포인트(요청당 4개) | 1,024 토큰         | `messages` 안의 `role:"system"` | `thinking: adaptive` + `output_config.effort` | `messages.stream(body, { signal, timeout })`                |
-| Gemini    | implicit (동일 프리픽스)                   | 4,096 토큰         | 없음 — 늘 발화 뒤에 접어 넣는다 | `thinkingConfig.thinkingLevel`                | `chats.create`의 `config.abortSignal`·`httpOptions.timeout` |
+| Gemini    | implicit (동일 프리픽스)                   | 17,600 토큰        | 없음 — 늘 발화 뒤에 접어 넣는다 | `thinkingConfig.thinkingLevel`                | `chats.create`의 `config.abortSignal`·`httpOptions.timeout` |
 | OpenAI    | 자동 프롬프트 캐시                         | 1,024 토큰         | `role:"developer"`              | `reasoning.effort`                            | `responses.create(body, { signal, timeout })`               |
 
 **사고·최소 캐시 프리픽스 두 칸은 설정이 읽는 값이지 어댑터에 박힌 상수가 아니다** —
@@ -464,6 +464,21 @@ runTurn({ system, history, user, stateNote?, tools?, toolChoice?, maxTokens?, on
 **Gemini** — thought signature와 function call id를 위치까지 그대로 보존해야 해서 SDK
 Chat 이력을 원형으로 저장한다. 스트리밍은 chunk마다 model content를 따로 남기므로
 이번 응답의 **모든** model content에서 함수 호출을 훑는다.
+
+⚠️ **암묵 캐시는 문서가 적은 4,096 토큰에서 걸리지 않는다.** 문서의 그 수는 요청 크기의
+최소값이고, 실제로 걸리는 자리는 **매번 같은 프리픽스가 얼마나 긴가**다 — 그것도 모델마다
+다르다. 같은 요청을 여섯 번 되풀이해 잰 값(2026-09): `gemini-3.6-flash`는 같은 프리픽스가
+10.5k를 넘어서야 걸리기 시작하고(그때 8.2k가 캐시로 읽힌다), `gemini-3.5-flash-lite`는
+17.6k를 넘어야 한다(14.1k에서는 0, 17.6k에서 12.3k). 그래서 한 벌로 요청을 새로 세우는
+자리 — 이력 없이 system·도구·이번 턴 입력만 보내는 해석기 계열 — 는 **고정분이 5.7k뿐이라
+걸릴 수 없다.** 입력 합계가 19k여도 걸리지 않는다: 문턱이 재는 것은 합계가 아니라 같은
+프리픽스의 길이다.
+
+⚠️ **systemInstruction도 도구 선언도 그 프리픽스를 만들지 못한다.** 7.8k짜리 같은
+systemInstruction에 매번 다른 짧은 contents를 붙여도 0이고, 고정 system을 contents 맨
+앞으로 옮겨도 0이다 — 블록 순서로 고칠 수 있는 문제가 아니다. 그 고정분을 캐시에 얹는
+길은 **명시 캐시**(`cachedContents`)뿐이고, 그쪽은 `systemInstruction`·`tools`·
+`toolConfig`를 요청이 아니라 캐시가 들어야 한다 — 요청에 함께 싣으면 400이다.
 
 **OpenAI** — **Responses API**(`responses.create`)를 부른다. 요청은 시스템 프롬프트를
 싣는 `instructions`와 아이템 배열 `input` 둘로 갈리고, 아이템은 네 갈래다: 메시지
@@ -628,13 +643,18 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   앞이 바뀌어 뒤가 전부 정가로 읽히는데, 화면엔 아무 증상이 없고 요금만 오른다. 결산의
   짧은 프롬프트는 애초에 캐시가 안 걸려 신호가 아니라서 문턱을 둔다.
 - **문턱은 제공자마다 다르고, 에이전트가 실제로 부르는 제공자의 값을 쓴다**
-  (`PROVIDER_TRAITS`) — Anthropic 1,024 · Google 4,096 · OpenAI 1,024 토큰.
+  (`PROVIDER_TRAITS`) — Anthropic 1,024 · Google 17,600 · OpenAI 1,024 토큰.
   ⚠️ **셋 중 큰 값 하나로 재면 못 보는 자리가 생긴다**: Anthropic 결산 호출은 입력이
-  1,000~4,000 토큰이라 4,096 문턱 아래에 통째로 들어앉아, 프리픽스가 매 턴 깨져도
+  1,000~4,000 토큰이라 Gemini의 문턱 아래에 통째로 들어앉아, 프리픽스가 매 턴 깨져도
   경고가 영영 올라오지 않는다. 반대로 낮은 쪽으로 통일하면 캐시가 걸릴 수 없는 Gemini
   호출까지 경고가 올라오고, 매번 거짓인 경고는 진짜 신호가 올라와도 읽히지 않는다.
   문턱이 "히트율 0을 경고로 읽어도 되는가"를 가르는 값이므로, 자리마다 그 자리의
   제공자에게 물어야 한다.
+- **Google의 값은 제공자가 적어 둔 최소 요청 크기가 아니라 실측한 발화점이다**(§3) —
+  `gemini-3.5-flash-lite`가 걸리기 시작한 17.6k를 쓴다. 두 모델 중 작은 쪽(3.6-flash의
+  10.5k)으로 두면 lite 자리에서 영영 거짓인 경고가 서고, 매번 거짓인 경고는 진짜 신호를
+  묻는다. 대신 3.6-flash가 10.5k~17.6k인 구간은 이 문턱이 보지 못한다 — 그 구간에서
+  히트율 0은 실제로 "안 걸렸다"인 쪽이 흔해서 잃는 것이 적다.
 - ⚠️ **상한은 게임을 멈추지 않는다.** 서사 자리에는 대신 세울 값이 없어 넘겨도 경고
   한 번만 남는다. 끊기는 자리는 실패해도 대신 설 것이 있는 곳뿐이라(`SKIPPABLE_AGENTS`)
   훈련 결산은 코어의 앵커가 그대로 서고, 압축은 접지 않은 채 다음 기회를 기다린다. 건너뛴
