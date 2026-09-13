@@ -1,4 +1,11 @@
-import type { MatchSide, MatchupZone, PacketTag, Player, PositionGroup } from "@story-fm/domain";
+import type {
+  MatchSide,
+  MatchupZone,
+  PacketTag,
+  Player,
+  PositionGroup,
+  SetPieceTakers,
+} from "@story-fm/domain";
 import {
   RATING_MAX,
   anchorOf,
@@ -6,6 +13,7 @@ import {
   positionGroupOf,
   positionGroupOfPlayer,
 } from "@story-fm/domain";
+import { deliveryTakerOf } from "./set-piece-taker";
 import type { LineupSlot } from "./strength-packet";
 import { laneOfX, type GridLane } from "./zone-grid";
 
@@ -39,7 +47,8 @@ import { laneOfX, type GridLane } from "./zone-grid";
  *   - **백라인 조율자** `backline-leader` — 서로를 부르는 사람이 있는가. 백라인 최고 leadership
  *   - **경합** `physical` — 몸싸움으로 밀어내는가. strength
  *   - **활동량** `stamina` — 90분을 버티는가. 중원 평균 stamina
- *   - **세트피스 키커** `set-piece` — 죽은 공에서 나오는 득점. kicking (**공략은 아니다**)
+ *   - **세트피스 키커** `set-piece` — 죽은 공에서 나오는 득점. 지정 키커, 없으면
+ *     필드 최고 kicking (**공략은 아니다**)
  *   - **거친 선수** `discipline` — 카드와 페널티의 씨앗. aggression - composure
  *
  * ## 감독의 눈만큼만 보인다
@@ -149,7 +158,7 @@ const AXIS_THRESHOLD = {
   physical: 13,
   /** 약점 — 중원 평균 stamina */
   stamina: 68,
-  /** 강점 — 최고 kicking */
+  /** 강점 — 그 팀 죽은 공을 차는 사람의 kicking (`deliveryTakerOf`) */
   "set-piece": 82,
   /** 강점 — aggression - composure, 거칠수록 크다 */
   discipline: 22,
@@ -199,7 +208,12 @@ const otherRel = (s: RelSide): RelSide => (s === "us" ? "them" : "us");
 /** 한쪽 팀이 상대에게 갖는 우위·약점 — 두 방향으로 각각 부른다 */
 type RawPoint = Omit<KeyPoint, "side" | "favours"> & { side: RelSide; favours: RelSide };
 
-function sidePoints(atk: LineupSlot[], def: LineupSlot[]): RawPoint[] {
+/**
+ * 한쪽이 상대에게 갖는 지점들. `designated`는 **공격 쪽(`atk`)의 지정 키커**다 —
+ * 세트피스 축이 세우는 이름은 감독이 지정한 사람이고, 지정이 없을 때만 능력값이
+ * 고른다 (`deliveryTakerOf`, match.md §1.4).
+ */
+function sidePoints(atk: LineupSlot[], def: LineupSlot[], designated?: SetPieceTakers): RawPoint[] {
   const out: RawPoint[] = [];
   /**
    * `who`는 **그 지점을 가진 선수의 슬롯**이다 — `side`가 `us`면 `atk` 쪽,
@@ -388,9 +402,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[]): RawPoint[] {
   }
 
   // ── 세트피스 키커 — 죽은 공에서 나오는 득점 ──
-  const kicker = [...atk].sort(
-    (a, b) => b.player.attributes.kicking - a.player.attributes.kicking,
-  )[0];
+  const kicker = deliveryTakerOf(atk, designated);
   if (kicker) {
     push(
       "set-piece",
@@ -428,8 +440,19 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[]): RawPoint[] {
   return out;
 }
 
-/** 두 팀의 키포인트 — 양방향으로 뽑고 큰 것부터 세운다. */
-export function buildKeyPoints(homeXI: LineupSlot[], awayXI: LineupSlot[]): KeyPoint[] {
+/**
+ * 두 팀의 키포인트 — 양방향으로 뽑고 큰 것부터 세운다.
+ *
+ * `designated`는 양 팀의 지정 키커(`TeamTactics.setPieceTakers`)다. 이것 없이는
+ * 세트피스 축이 능력값만 보고 이름을 세우고, 그 이름은 90분이 실제로 세우는
+ * 키커와 갈린다 — 감독은 브루누가 차는 경기를 보면서 「우리 키커는 골키퍼」라는
+ * 브리핑을 받는다.
+ */
+export function buildKeyPoints(
+  homeXI: LineupSlot[],
+  awayXI: LineupSlot[],
+  designated?: { home?: SetPieceTakers; away?: SetPieceTakers },
+): KeyPoint[] {
   /**
    * `sidePoints`의 `us`/`them`은 **그 방향 안에서만** 뜻이 있다 — 합치면서
    * 절대 좌표(home/away)로 옮긴다. 이걸 빠뜨리면 공략이 반대편에 걸린다
@@ -440,8 +463,8 @@ export function buildKeyPoints(homeXI: LineupSlot[], awayXI: LineupSlot[]): KeyP
     return points.map((p) => ({ ...p, side: abs(p.side), favours: abs(p.favours) }));
   };
   return [
-    ...absolute(sidePoints(homeXI, awayXI), "home"),
-    ...absolute(sidePoints(awayXI, homeXI), "away"),
+    ...absolute(sidePoints(homeXI, awayXI, designated?.home), "home"),
+    ...absolute(sidePoints(awayXI, homeXI, designated?.away), "away"),
   ].sort((a, b) => b.weight - a.weight);
 }
 

@@ -1,5 +1,6 @@
 export * from "./rng";
 export * from "./state-modifier";
+export * from "./set-piece-taker";
 export * from "./strength-packet";
 export * from "./directives";
 export * from "./key-points";
