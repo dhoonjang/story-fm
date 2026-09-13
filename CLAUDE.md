@@ -25,6 +25,10 @@ Vision, architecture and development conventions all live in
   opens a call's raw text (`--path` hands you the file), `pnpm log --facts <kind> --game
 <id>` streams one kind as jsonl for aggregation (docs/llm/models.md §5). Failed turns
   are kept too — that is where the timeouts live. Ask the record, not the prompt text.
+- **Playing a season** — the `simulation` skill opens the fixed scenario and plays one
+  season through the local API, one turn at a time (`.claude/skills/simulation/`).
+  Its rules are the lessons of the first run: substitutions, positions, contracts,
+  the ledger over the prose — and never in parallel.
 - **Commit / push** — only when the user asks. Commit to the branch already
   checked out and `git push origin HEAD`; name the paths you add, and never
   rebase, stash or switch branches (AGENTS.md §5).
