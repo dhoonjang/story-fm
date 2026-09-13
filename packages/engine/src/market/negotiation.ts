@@ -52,6 +52,7 @@ import {
   firstInstallmentOf,
   paymentYearsOf,
   describeOdds,
+  describePending,
   describeWait,
   loanLockOf,
   isSeriousOffer,
@@ -534,7 +535,7 @@ export function sendOffer(state: GameState, input: DealTerms): MarketCommandResu
   return {
     ok: true,
     payload: card,
-    message: `${head}${pitchNote} 성사 가능성 ${chance}. ${describeWait(waitDays)}`,
+    message: `${head}${pitchNote} 성사 가능성 ${chance}. ${describePending(waitDays)}`,
   };
 }
 
@@ -960,11 +961,29 @@ export function respondOffer(
           "accept_deal로 확정하세요",
       };
     }
+    /**
+     * **재계약의 수락은 이적이 아니다** — 이적료가 없어 `offer.fee`는 0이고, 오간
+     * 두 축은 주급과 연수다. 영입의 문장을 그대로 쓰면 편지가 「£0에 합의」라고
+     * 말하고, 합의와 서명 사이(`accept_deal`)도 문장에 서지 않는다 — 그 자리가
+     * 수락한 편지를 맺어진 계약으로 읽히게 한 틈이다 (transfer.md §5).
+     */
+    if (renewing) {
+      pushNarrative(state, `${player.name} 재계약 합의 (주급 ${formatMoney(offer.weeklyWage)})`, 4);
+      return {
+        ok: true,
+        payload: verdictCard({}),
+        message:
+          `${player.name}이(가) 주급 ${formatMoney(offer.weeklyWage)} · ${offer.contractYears}년 재계약을 받아들였습니다. ` +
+          "accept_deal로 서명해야 계약이 섭니다",
+      };
+    }
     pushNarrative(state, `${player.name} 이적 합의 (${formatMoney(offer.fee)})`, 4);
     return {
       ok: true,
       payload: verdictCard({}),
-      message: `${counterpart}가 오퍼를 받아들였습니다 — ${player.name}, ${formatMoney(offer.fee)}${splitLabel(offer.paymentYears)}. 계약을 확정하세요`,
+      message:
+        `${counterpart}가 오퍼를 받아들였습니다 — ${player.name}, ${formatMoney(offer.fee)}${splitLabel(offer.paymentYears)}. ` +
+        "accept_deal로 검진을 잡아야 계약이 섭니다",
     };
   }
 
@@ -1490,7 +1509,7 @@ export function offerPlayerOut(
   return {
     ok: true,
     payload: card,
-    message: `${head} 성사 가능성 ${chance}. ${describeWait(waitDays)}`,
+    message: `${head} 성사 가능성 ${chance}. ${describePending(waitDays)}`,
   };
 }
 /** 동시에 들어와 있을 수 있는 오퍼 수 — 감독이 감당할 만큼만 */
@@ -1971,8 +1990,8 @@ export function answerIncomingOffer(
       ok: true,
       payload: card,
       message: renegotiated
-        ? `${player.name} 메디컬 재협상안을 수락했습니다 — ${formatMoney(offer.fee)}. 계약을 확정하세요`
-        : `${player.name} 매각에 합의했습니다 — ${formatMoney(offer.fee)}. 계약을 확정하세요`,
+        ? `${player.name} 메디컬 재협상안을 수락했습니다 — ${formatMoney(offer.fee)}. accept_deal로 확정하세요`
+        : `${player.name} 매각에 합의했습니다 — ${formatMoney(offer.fee)}. accept_deal로 확정하세요`,
     };
   }
 
@@ -2015,7 +2034,7 @@ export function answerIncomingOffer(
     }),
     message:
       `${player.name} 값으로 ${formatMoney(demanded)}을 불렀습니다 (성사 가능성 ${oddsText(odds)}) — ` +
-      describeWait(waitDays),
+      describePending(waitDays),
   };
 }
 
@@ -2138,7 +2157,7 @@ export function openRenewal(
     message:
       `${player.name}에게 재계약 제안 — 주급 ${formatMoney(input.weeklyWage)} · ${input.years}년` +
       `${statusLabel(input.squadStatus)}` +
-      `${until ? ` (현 계약 ${until} 만료)` : ""}. 성사 가능성 ${oddsText(odds)}. ${describeWait(waitDays)}`,
+      `${until ? ` (현 계약 ${until} 만료)` : ""}. 성사 가능성 ${oddsText(odds)}. ${describePending(waitDays)}`,
   };
 }
 
@@ -2232,7 +2251,7 @@ export function openRelease(
     payload: card,
     message:
       `${player.name}에게 상호 계약 해지를 제안 — 정산금 ${formatMoney(terms.fee)}${splitLabel(paymentYears)} ` +
-      `(합의가 안 되면 일방 해지는 ${formatMoney(full)}). 성사 가능성 ${oddsText(odds)}. ${describeWait(waitDays)}`,
+      `(합의가 안 되면 일방 해지는 ${formatMoney(full)}). 성사 가능성 ${oddsText(odds)}. ${describePending(waitDays, "release")}`,
   };
 }
 
