@@ -598,7 +598,9 @@ export function firstInstallmentOf(total: number, paymentYears?: number): number
 /** 확률 근거에 붙는 분할 표기 — 깎여 보인 값을 함께 적지 않으면 %가 설명되지 않는다 */
 function splitNote(terms: DealTerms, effective: number): string {
   const n = paymentYearsOf(terms.paymentYears);
-  return n === undefined ? "" : ` · ${n}년 분할이라 ${josa(formatMoney(effective), "으로/로")} 친다`;
+  return n === undefined
+    ? ""
+    : ` · ${n}년 분할이라 ${josa(formatMoney(effective), "으로/로")} 친다`;
 }
 
 /**
