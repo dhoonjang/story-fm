@@ -366,6 +366,47 @@ describe("상대의 판정 — 코어가 가능한 것만 받는다", () => {
     expect(negotiation.rounds.at(-1)!.probability).toBe(repeated.probability);
   });
 
+  /**
+   * **조정을 받아들이는 말은 `accept_deal` 하나다** (transfer.md §1). 합의 전이라
+   * 서명할 것이 없고 `respond_offer`는 우리 오퍼에 온 답을 받지 않으므로, 여기가
+   * 막히면 「받아들이겠다」가 어느 명령에도 닿지 않는다.
+   */
+  it("조정이 선 협상의 accept_deal은 그 조건으로 우리 오퍼를 다시 세운다", () => {
+    const state = createTestGame(42);
+    const player = target(state);
+    const terms = offerFor(state, player.id, 0.9);
+    expect(sendOffer(state, terms).ok).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const countered = respondOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "counter",
+      fee: Math.round(terms.fee * 1.1),
+    });
+    expect(countered.ok, countered.message).toBe(true);
+    const demanded = negotiation.rounds.at(-1)!;
+    expect(demanded.by).toBe("them");
+
+    // 기한이 지난 협상은 여전히 반려다 — 조정이 서 있어도 문이 닫혔다
+    negotiation.status = "expired";
+    const late = acceptDeal(state, negotiation.id);
+    expect(late.ok).toBe(false);
+    expect(late.message).toContain("아직 합의된 협상이 아닙니다");
+    negotiation.status = "open";
+
+    const accepted = acceptDeal(state, negotiation.id);
+    expect(accepted.ok, accepted.message).toBe(true);
+    // 서명이 아니라 다시 나간 오퍼다 — 판정은 여전히 상대의 것이다
+    expect(negotiation.status).toBe("open");
+    const resent = pendingOffer(negotiation)!;
+    expect(resent.by).toBe("us");
+    expect(resent.verdict).toBeNull();
+    expect(resent.fee).toBe(demanded.fee);
+    expect(resent.weeklyWage).toBe(demanded.weeklyWage);
+    expect(resent.contractYears).toBe(demanded.contractYears);
+    expect(resent.respondsOn).not.toBeNull();
+  });
+
   it("확률이 바닥이면 수락할 수 없다", () => {
     const state = createTestGame(42);
     const player = target(state);

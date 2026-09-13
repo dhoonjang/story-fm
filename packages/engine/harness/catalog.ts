@@ -13,6 +13,7 @@ const FINANCE = "docs/simulation/finance.md §10";
 const HISTORY = "docs/llm/agents.md §5-1";
 const PROMPTS = "docs/llm/prompts.md §7";
 const TOOL_CONTRACT = "docs/llm/prompts.md §2";
+const CAREER = "docs/simulation/career.md §4";
 
 export const WORLD_SEASON = defineHarness({
   id: "world-season",
@@ -460,6 +461,44 @@ export const YOUTH_DEVELOPMENT = defineHarness({
 });
 
 /**
+ * 유스 인테이크의 **꼬리** — 한 여름 세계 전체가 낳은 잠재력·종합의 위 끝이
+ * 시드 세계의 그것과 같은 자리에 서는가 (`docs/simulation/season.md` §6).
+ *
+ * `squad-longevity`가 재는 것은 **평균**이다 — 리그 체급이 세대마다 가라앉는가.
+ * 평균은 멎어 있는데 위 끝만 부풀 수 있고, 그때 세계의 엘리트가 해마다 합성 유스로
+ * 갈아치워진다. 꼬리를 재는 자는 따로 서야 한다.
+ *
+ * **견주는 자리가 시드의 열일곱~열아홉이 아니라 시드 세계 전부인 이유**는 잠재력이
+ * 평생 바뀌지 않기 때문이다: 닫힌 세계에서 세월이 지나면 세계의 잠재력 분포는
+ * 인테이크의 분포 그것으로 수렴한다. 그래서 「여름 환산」 줄은 시드 세계의 비율에
+ * 한 여름 인원을 곱한 값이고, 인테이크 쪽 줄이 그 짝이다.
+ */
+export const YOUTH_INTAKE_TAIL = defineHarness({
+  id: "youth-intake-tail",
+  what: "한 여름 세계 전체 인테이크의 잠재력·종합 꼬리 — 시드 세계 분포와 나란히",
+  doc: "docs/simulation/season.md §6",
+  cost: "세계 넷 × 두 여름 · 약 20초",
+  // prettier-ignore
+  bands: [
+    { metric: "한 여름 인테이크 인원", role: "guard", min: 200, unit: "count", why: "표본이 없으면 아래 꼬리 줄이 전부 공허하게 통과한다 — 168 클럽이 은퇴·만료를 메우는 수보다 넉넉히 아래" },
+    { metric: "잠재력 ≥95 — 여름당", role: "guard", max: 2, unit: "count", why: "**세계가 쥔 95+의 재고는 인테이크가 정한다.** 시드 세계의 95+는 열 몇이고 한 선수가 세계에 머무는 햇수는 평균 열다섯이므로(선수 수 ÷ 한 여름 인테이크), 재고를 그 자리에 두는 유입은 여름에 하나다. 일곱이던 동안 첫 여름에 세계의 95+가 절반 넘게 불었다" },
+    { metric: "잠재력 ≥90 — 여름당", role: "guard", min: 6, max: 18, unit: "count", why: "같은 셈의 한 칸 아래 — 아래 「시드 세계 ≥90 — 여름 환산」이 그 자리다. 위끝이 그 환산보다 반쯤 두꺼운 것은 인테이크의 무게 중심이 시드 세계보다 한 칸 위에 서기 때문이고(§6 닫힌 세계), 그 한 칸이 폭으로 번지면 안 된다는 것이 상한이다. **하한도 가드다**: 꼬리를 더 좁히면 세계에 진짜 물건이 나지 않아 리그 상위권이 세대마다 얇아진다" },
+    { metric: "잠재력 ≥85 — 여름당", role: "reference", min: 35, max: 65, unit: "count", why: "꼬리가 아니라 어깨 — 좁히기가 위 끝이 아니라 분포 전체를 깎았는지가 여기서 보인다" },
+    { metric: "인테이크 잠재력 평균", role: "guard", min: 75, max: 79, unit: "score", why: "**무게 중심은 건드리지 않는다** — 체급 기준선 `TIER_BASE` 둘레에 서야 하고(§6), 여기가 내려가면 닫힌 세계가 세대마다 가라앉아 `squad-longevity`의 드리프트 가드가 먼저 빨개진다. 꼬리를 좁히는 변경이 실수로 평균을 끌고 내려가지 않았는지를 이 줄이 잡는다" },
+    { metric: "인테이크 잠재력 p99", role: "guard", max: 94, unit: "score", why: "위 끝의 자리 — 아래 「시드 세계 잠재력 p99」와 한 칸 안에서 만나야 한다. 개수 줄이 시드에 묻힐 만큼 작아도 분위는 흔들리지 않는다" },
+    { metric: "시드 세계 잠재력 평균", role: "measure", unit: "score", why: "견주는 쪽 — 밴드가 아니라 같은 표에 나란히 찍히는 값이다" },
+    { metric: "시드 세계 잠재력 p99", role: "measure", unit: "score", why: "같은 자로 잰 시드의 위 끝" },
+    { metric: "시드 세계 ≥95 — 여름 환산", role: "measure", unit: "count", why: "시드 세계의 95+ 비율 × 한 여름 인원 — 인테이크가 그 재고를 유지만 한다면 나와야 할 수" },
+    { metric: "시드 세계 ≥90 — 여름 환산", role: "measure", unit: "count", why: "같은 환산의 한 칸 아래" },
+    { metric: "시드 세계 ≥85 — 여름 환산", role: "measure", unit: "count", why: "같은 환산의 어깨" },
+    { metric: "17~18세 종합 p99", role: "guard", max: 78, unit: "score", why: "**지금 실력 쪽 꼬리.** 종합은 나이와 함께 자라므로 견줄 자리가 세계 전체가 아니라 시드의 **같은 나이**다 — 아래 줄이 그 짝이다. 열여덟이 스쿼드 최고 종합과 나란히 서면 시장가가 그 위에 서서 0경기 유망주에게 £400M 오퍼가 나간다" },
+    { metric: "시드 17~18세 종합 p99", role: "measure", unit: "score", why: "견주는 쪽 — 시드 클럽 명단의 열일곱~열여덟" },
+    { metric: "17~18세 종합 최대", role: "measure", unit: "score", why: "그 여름 가장 완성돼 들어온 아이 — 분위가 가리는 한 사람" },
+    { metric: "종합 ≥78 — 여름당", role: "guard", max: 7, unit: "count", why: "p99가 한 칸 눈금이라 놓치는 폭을 개수로 받는다 — 시드의 같은 나이는 열에 하나 비율(0.9%)이고, 인테이크가 그 두 배를 넘으면 그 여름 전체가 즉시 전력이 된다" },
+  ],
+});
+
+/**
  * 2군 강등이 낳는 불만 — **문턱이 로테이션과 방치를 가르는가** (`docs/data/people.md` §5).
  *
  * 상수 하나(21일)가 두 가지 플레이를 동시에 정한다: 짧으면 선수를 잠깐 내렸다
@@ -514,6 +553,34 @@ export const DEMOTION_GRIEVANCE = defineHarness({
     { metric: "시즌 강등발 불만 건수", role: "measure", unit: "count", why: "감독 하나가 한 시즌에 몇 번 이 자리를 만나는가" },
     { metric: "시즌 출전 불만 건수", role: "measure", unit: "count", why: "지위 대비 출전이 낳는 불만 (people.md §5). 강등 밴드의 분모를 흔드는 것이 이 줄이다 — 먼저 걸린 `minutes` 불만은 같은 선수의 `demotion` 불만을 막는다" },
     { metric: "시즌 약속 파기 건수", role: "measure", unit: "count", why: "아무 약속도 하지 않는 감독에게는 0이어야 한다 (people.md §5-2)" },
+  ],
+});
+
+/**
+ * 한 시즌을 한 말투로 보낸 감독을 세계가 어떻게 보는가 (`docs/simulation/career.md` §4).
+ *
+ * 회견 하나의 폭은 코드를 읽으면 나오지만, **시즌 마흔여덟 번의 누계가 성적 옆에서
+ * 어느 크기인가**는 굴려야 나온다. 목줄이 없던 동안 그 답은 「스무 배」였고, 리그
+ * 2위·21승 감독의 언론 평판이 0이었다. 여기가 재는 것은 목줄이 그 독점을 끊으면서도
+ * 스탠스를 무료로 만들지는 않았는가다.
+ */
+export const PRESS_REPUTATION = defineHarness({
+  id: "press-reputation",
+  what: "한 시즌 회견을 한 말투로 보낸 감독의 평판 3축 — 성적의 몫과 스탠스의 몫",
+  doc: CAREER,
+  cost: "축소 세계 한 시즌 + 손으로 세운 1부 규모 한 시즌 · 약 15초",
+  // prettier-ignore
+  bands: [
+    { metric: "축소 세계 시즌 회견 수", role: "measure", unit: "count", why: "축소 세계는 리그전이 열넷이라 1부의 마흔여덟에 닿지 않는다 — 아래 「1부 규모」 팔이 그 자리를 맡고, 이 줄은 회견이 실제로 열리기는 하는지의 표본이다" },
+    { metric: "축소 세계 경기당 회견 수", role: "reference", min: 0.8, max: 2, unit: "ratio", why: "실측 세이브는 시즌 48회 · 대회 경기 50경기 남짓이라 경기당 1 언저리다. 축소 세계는 부임·시즌 마디 회견이 같은 분자에 얹혀 조금 위에 선다 — 여기가 0.8 아래면 감싸는 감독이 회견을 만나지 못한 것이라 아래 줄들이 공허하다" },
+    { metric: "축소 세계 시즌 끝 언론", role: "measure", unit: "score", why: "1부 규모 쪽과 나란히 읽는다 — 회견 수가 다르므로 값이 아니라 방향이 같아야 한다" },
+    { metric: "축소 세계 시즌 중 세 축의 바닥", role: "guard", min: 20, unit: "score", why: "끝값만 보면 중간에 바닥을 지나온 것을 놓친다. **「관망」 문턱은 여기가 아니라 아래 1부 규모 팔의 것이다** — 축소 세계는 리그전이 열넷이라 성적이 옮기는 값도 1부의 3분의 1뿐이고, 그 판에서 부진한 구간의 감독이 「싸늘」을 지나는 것은 눈금이 아니라 설계다. 이 줄이 막는 것은 이슈 #787의 실패 모양 그 자체다: 회견 열여섯 번이 축을 0 언저리로 못박는가. 목줄이 없던 눈금이면 여기가 한 자리로 내려온다" },
+    { metric: "축소 세계 스탠스가 옮긴 최대 폭", role: "guard", max: 20, unit: "score", why: "`STANCE_SEASON_CAP`. 목줄은 축마다 따로 걸리므로 세 축 중 가장 멀리 간 축도 이 안이어야 한다 — 넘으면 누계가 새거나 시즌 경계에서 초기화가 어긋난 것이다" },
+    { metric: "1부 규모 스탠스가 옮긴 최대 폭", role: "guard", max: 20, unit: "score", why: "위와 같은 목줄을 마흔여덟 번으로 민 자리 — 회견 수를 세 배로 늘려도 같은 값에서 서야 목줄이 목줄이다" },
+    { metric: "1부 규모 스탠스 몫 — 언론", role: "guard", min: -20, max: -8, unit: "score", why: "**스탠스가 무료가 되면 안 된다.** 감싸기 마흔여덟 번이 언론에 아무 값도 남기지 않으면 「공짜인 스탠스는 없다」가 표에만 남는다. 위끝 −8은 회견 하나의 폭(무게 2에서 −3)의 세 걸음쯤 — 그보다 얕으면 목줄이 첫 회견부터 조인 것이다" },
+    { metric: "1부 규모 성적 몫 — 축당", role: "guard", min: 30, unit: "score", why: "2위 다툼(26승 7무 5패)이 한 축에 남기는 값. 언론 축이 성적을 놓치면 이 줄이 아니라 아래 두 줄이 무너지지만, 여기가 먼저 눈금을 보여 준다 — `MATCH_REPUTATION_SWING`을 좁히면 스탠스의 몫이 상대적으로 커진다" },
+    { metric: "1부 규모 시즌 끝 언론", role: "guard", min: 45, unit: "score", why: "**이 하네스의 본론이자 이슈 #787의 완료 조건.** 우승을 다투며 선수를 감싼 감독의 언론 평판이 「관망」(45) 위에 서야 한다. 여기가 0이었던 것이 이슈이고, 여기가 다시 45 아래로 내려오면 목줄이 성적을 이긴 것이다" },
+    { metric: "1부 규모 시즌 끝 세 축의 바닥", role: "guard", min: 45, unit: "score", why: "언론만 구제하면 보드가 대신 앉는다 — 셋 다 「관망」 위여야 영입 협상 `(언론+보드)/2`와 재계약 `(언론+선수단)/2`가 성적을 읽는다 (career.md §4)" },
   ],
 });
 
@@ -769,8 +836,10 @@ export const HARNESSES: readonly Harness[] = [
   NEGOTIATION,
   SQUAD_LONGEVITY,
   YOUTH_DEVELOPMENT,
+  YOUTH_INTAKE_TAIL,
   DEMOTION_GRIEVANCE,
   APPROACH_RATE,
+  PRESS_REPUTATION,
   OVERALL_SCALE,
   ATTRIBUTE_MODEL,
   HISTORY_WINDOW,
