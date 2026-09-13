@@ -209,7 +209,7 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
    * 없으면 정지점마다 그 잘린 몫이 되감겨 같은 시간이 두 번 굴려지고, 끊기는 횟수가
    * 곧 경기의 총량이 된다 — 감독이 말을 걸수록 더 쏘는 판이다.
    */
-  it("연속 시계가 정지점에서 되감기지 않는다 — 장부의 분보다 앞서 있고 90′에 닿는다", () => {
+  it("연속 시계가 정지점에서 되감기지 않는다 — 앞으로만 가고 90′에 닿는다", () => {
     for (const seed of [1, 7, 42]) {
       for (const chop of [undefined, 10, 3]) {
         const { ledger, plans } = playMatch(setup(), seed, false, chop);
@@ -217,8 +217,6 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
         expect(ledger.phase, at).toBe("finished");
         let previous = 0;
         for (const plan of plans) {
-          // 잘린 소수가 남아 있다 — 장부의 정수 분이 연속 시계를 되감지 않는다
-          expect(plan.clock, `${at} / ${plan.stop}`).toBeGreaterThanOrEqual(plan.minute);
           expect(plan.clock, `${at} / ${plan.stop}`).toBeGreaterThanOrEqual(previous);
           previous = plan.clock;
         }
@@ -226,6 +224,39 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
         expect(previous, at).toBe(90);
       }
     }
+  });
+
+  /**
+   * **골이 찍힌 분은 그 골 혼자 갖는다** (match.md §1.4).
+   *
+   * 규정 90분에는 재개까지의 시간이 없어, 골 직후의 사건이 골과 같은 정수 분에 앉는다 —
+   * 고치기 전에는 경기의 5.3%가 연속 두 골을 같은 분에 실었다(「46′ 골, 46′ 골」).
+   * 휘슬은 사건이 아니라 국면의 끝이라 이 규칙 밖이다 — 45′ 골 뒤의 하프타임은 45′다.
+   */
+  it("골 뒤의 사건은 다음 분부터다 — 연속 두 골이 같은 분을 받지 않는다", () => {
+    const whistles = new Set(["half_time", "full_time", "extra_time_start", "extra_half_time"]);
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const chop of [undefined, 5]) {
+        const { ledger } = playMatch(setup(), seed, false, chop);
+        const at = `seed ${seed} / ${chop ?? "정지점"}분`;
+        const events = ledger.events;
+        for (let i = 1; i < events.length; i++) {
+          const before = events[i - 1]!;
+          const after = events[i]!;
+          if (before.type !== "goal" || whistles.has(after.type)) continue;
+          expect(after.minute, `${at} — ${before.minute}′ goal → ${after.type}`).toBeGreaterThan(
+            before.minute,
+          );
+        }
+      }
+    }
+  });
+
+  /** 분을 벌리는 규칙도 코어의 일부다 — 같은 시드면 같은 분이 나온다 */
+  it("벌린 분이 결정적이다 — 같은 시드면 같은 기록지", () => {
+    const minutesOf = (seed: number) =>
+      playMatch(setup(), seed).ledger.events.map((e) => `${e.minute}:${e.type}`);
+    for (const seed of [5, 23]) expect(minutesOf(seed)).toEqual(minutesOf(seed));
   });
 
   /**

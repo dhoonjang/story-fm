@@ -733,15 +733,18 @@ export const EXTRA_TIME_DENSITY =
 /**
  * **다음 구간이 출발하는 연속 시각** — 목표 분까지의 거리를 재는 자리다.
  *
- * 장부의 분은 마지막 사건의 것이라 굴린 시계보다 뒤에 서 있을 수 있다. 목표 분을
- * 장부의 분에서 재면 이미 지나친 분을 남은 거리로 읽어 구간이 거꾸로 잘린다.
- * `simulateSegment`가 실제로 출발하는 자리와 **같은 규칙 하나**로 답한다.
+ * 장부의 분은 마지막 사건의 것이라 굴린 시계와 어긋난다. 뒤에 서 있기도 하고
+ * (사건 없이 흐른 자리) 앞에 서 있기도 하다 — 골 뒤로 밀린 분이 그렇다 (match.md
+ * §1.4). 목표 분을 장부의 분에서 재면 그 차이가 그대로 구간의 길이를 깎는다.
+ *
+ * 그래서 **시계가 있으면 시계만 읽는다.** 밀린 분이 시계로 흘러 들어가면 골 하나마다
+ * 최대 1분이 굴려지지 않은 채 사라져 슈팅 총량 계약이 깨진다. 장부의 분으로 돌아가는
+ * 것은 이 값이 없는 **옛 세이브**뿐이다.
  */
 export function segmentStartClock(ledger: MatchLedgerState, clock?: number): number {
   if (!ledger.events.some((e) => e.type === "kickoff")) return 0;
   const phase: PlayPhase = ledger.phase === "finished" ? "second_half" : ledger.phase;
-  const from = Math.max(ledger.minute, PHASE_START[phase]);
-  return Math.max(clock ?? from, from);
+  return Math.max(clock ?? ledger.minute, PHASE_START[phase]);
 }
 
 /**
@@ -837,14 +840,15 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
   const started = ledger.events.some((e) => e.type === "kickoff");
   if (!started) events.push({ minute: 0, type: "kickoff", actors: [], causes: [] });
   /**
-   * **피로와 패스가 세는 출발점 — 장부의 분이다.**
+   * **이 구간이 실을 수 있는 가장 이른 분** — 장부는 시간 역행을 반려한다.
    *
    * 하프의 첫 구간은 그 국면이 시작하는 분에서 출발한다 — 앞 하프가 규정 시각에
-   * 끝나므로(`halfEnd`) 45·90·105가 그대로 다음 하프의 0분이다. 장부는 정수 분만
-   * 갖고 구간마다 마지막 사건의 분에서 멈추므로, 구간들을 이어 붙인 시간이 정확히
-   * 그 하프의 분수가 된다.
+   * 끝나므로(`halfEnd`) 45·90·105가 그대로 다음 하프의 0분이다.
+   *
+   * 사건이 설 때마다 위로 움직인다(`stamp`). 굴린 시계보다 앞설 수 있고, 그것이
+   * 골 뒤로 밀린 분이다 — 피로와 흐름의 양은 이 값이 아니라 시계로 잰다 (§1.4).
    */
-  const from = started ? Math.max(ledger.minute, PHASE_START[phase]) : 0;
+  let minuteFloor = started ? Math.max(ledger.minute, PHASE_START[phase]) : 0;
   /**
    * **사건을 굴리는 연속 시계 — 소수 자리까지 이어받는다.**
    *
@@ -866,8 +870,8 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
   const positionOf = new Map(
     [...packet.home.lineup, ...packet.away.lineup].map((p) => [p.id, p.position] as const),
   );
-  const addFatigue = (until: number) => {
-    const elapsed = Math.max(0, until - from);
+  const addFatigue = (untilClock: number) => {
+    const elapsed = Math.max(0, untilClock - clockFrom);
     if (elapsed <= 0) return;
     for (const side of ["home", "away"] as const) {
       /**
@@ -928,15 +932,19 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
         causes: [],
       });
     }
-    addFatigue(minute);
-    // 흐름의 양 — 이 구간에 실제로 흐른 시간만큼 패스·코너·파울을 나눈다
-    spreadFlow(Math.max(0, minute - from));
+    /**
+     * **피로도 흐름의 양도 장부의 분이 아니라 굴린 시계로 잰다** — 골 뒤로 밀린 분은
+     * 시계를 움직이지 않으므로(match.md §1.4), 여기서 장부의 분을 읽으면 골 하나마다
+     * 최대 1분어치의 다리와 패스가 더 세어진다.
+     */
+    addFatigue(clock);
+    spreadFlow(Math.max(0, clock - clockFrom));
     return {
       events,
       stop,
       minute,
-      // 다음 구간이 이어받을 자리 — 장부의 분보다 뒤로 갈 수는 없다
-      clock: Math.max(clock, minute),
+      // 다음 구간이 이어받을 자리 — **실제로 굴린 소수 시각 그대로다**
+      clock,
       fatigue,
       sentOff: [...gone].filter((id) => !ledger.sentOff.includes(id)),
       stats,
@@ -1044,6 +1052,30 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
     ledger.events.filter((e) => e.type === "injury").flatMap((e) => e.actors),
   );
   const rate = totalRate(rates);
+  /**
+   * **직전 골의 분** — 그 분은 그 골 혼자 갖는다. 골은 시간순이라 마지막 것만 본다.
+   */
+  let goalMinute = -1;
+  for (const event of ledger.events) if (event.type === "goal") goalMinute = event.minute;
+  /**
+   * **연속 시계의 한 자리를 장부의 정수 분으로 옮긴다** (match.md §1.4).
+   *
+   * 규정 90분에는 재개까지의 시간이 없다 — 골이 들어가면 공은 센터서클로 돌아가고
+   * 그 사이가 추가시간이 된다. 시계에 그 자리가 없으니 골 직후의 사건이 골과 같은
+   * 분에 앉아 기록지에 「46′ 골, 46′ 골」이 연달아 찍힌다 (경기의 5.3%).
+   *
+   * 그래서 **골의 분과 겹치면 그다음 분**이다. 골 **앞**은 건드리지 않는다 —
+   * 같은 분의 슛 → 선방 → 골은 한 장면이고 그렇게 읽혀야 한다. 골이 아닌 사건끼리
+   * 같은 분에 서는 것도 그대로 둔다: 거기에 손을 대면 사건 간격에 바닥을 까는 것이라
+   * 경기당 슈팅이 깎인다 (§1.4).
+   *
+   * ⚠️ **밀린 분은 시계를 밀지 않는다.** `t`도 `SegmentPlan.clock`도 그대로다.
+   */
+  const stamp = (at: number): number => {
+    const m = Math.max(1, Math.floor(at), minuteFloor);
+    minuteFloor = m === goalMinute ? m + 1 : m;
+    return minuteFloor;
+  };
 
   // 사건 사이의 시간은 지수분포 — 발생률이 높으면 사건이 촘촘해진다
   for (let guard = 0; guard < 60; guard++) {
@@ -1053,7 +1085,7 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
      */
     if (events.length >= MAX_SEGMENT_EVENTS) {
       const last = events[events.length - 1]?.minute ?? Math.floor(t);
-      return finish("flow", Math.max(last, ledger.minute), t);
+      return finish("flow", Math.max(last, minuteFloor), t);
     }
     /**
      * 다음 사건까지의 대기 — **지수분포 그대로다.**
@@ -1082,7 +1114,7 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
          * 한 번 더 세므로, 장부의 분과 연속 시계는 따로 돌려준다.
          */
         const last = events[events.length - 1]?.minute ?? Math.floor(rollTo);
-        if (windowStop === "flow") return finish("flow", Math.max(last, ledger.minute), rollTo);
+        if (windowStop === "flow") return finish("flow", Math.max(last, minuteFloor), rollTo);
         /**
          * **감독이 말한 분만은 장부의 시각이 된다** — 그 자리는 사건이 만든 것이 아니라
          * 감독이 고른 것이라, 조용히 지나갔다고 장부가 아까 그 분에 머물면 "70분까지
@@ -1090,12 +1122,16 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
          */
         return finish(
           "requested",
-          Math.max(Math.floor(rollTo + CLOCK_EPSILON), last, ledger.minute),
+          Math.max(Math.floor(rollTo + CLOCK_EPSILON), last, minuteFloor),
           rollTo,
         );
       }
-      // 장부는 시간 역행을 반려한다 — 짧게 부른 구간이 밀어 둔 시각보다 이르면 안 된다
-      const minute = Math.max(halfEnd, ledger.minute);
+      /**
+       * 장부는 시간 역행을 반려한다 — **이 구간이 이미 실은 분보다 이르면 안 된다.**
+       * 짧게 부른 구간이 밀어 둔 시각도, 골 뒤로 밀린 분도 여기 들어 있다: 44′ 골 뒤의
+       * 골이 45′를 받으면 그 하프의 휘슬은 46′다 (추가시간이 그 자리다, §1.4).
+       */
+      const minute = Math.max(halfEnd, minuteFloor);
       /**
        * 국면이 끝나는 방식은 넷이다 — 하프타임 · **연장 개시** · 연장 하프타임 · 종료.
        * 90분 뒤에 연장이 붙는지는 코어가 이미 정해서 넘겨준다(`toExtraTime`).
@@ -1114,7 +1150,7 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
     }
     t = next;
 
-    const minute = Math.max(1, Math.floor(t));
+    const minute = stamp(t);
     const drawn = pickEvent(rng, rates);
     const side = drawn.side;
     const squad = squadOf(side);
@@ -1283,7 +1319,7 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
 
   // 발생률이 0에 가까운 극단 — 조용히 흐름만 흘렀다
   const quiet = events[events.length - 1]?.minute ?? Math.min(halfEnd - 1, Math.floor(t));
-  return finish("flow", Math.max(from, quiet, ledger.minute), t);
+  return finish("flow", Math.max(minuteFloor, quiet), t);
 }
 
 /**
