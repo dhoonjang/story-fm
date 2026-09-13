@@ -386,6 +386,13 @@ export class AnthropicGameLLM implements GameLLM {
         });
       }
       messages.push({ role: "user", content: results });
+
+      /**
+       * **산출만 받는 호출은 여기서 닫는다** — 결과는 이력에만 남기고 모델에게 돌려주지
+       * 않는다 (models.md §3-4). 돌려주면 같은 입력을 정가로 한 번 더 읽고, 아무도 읽지
+       * 않는 응답을 받아 온다.
+       */
+      if (req.outputOnly) break;
     }
 
     // 이력 위생 — 마지막 assistant 턴에 미해결 tool_use가 남아 있으면

@@ -275,6 +275,9 @@ export async function runOpsOrders(
             user,
             tools: [tool],
             toolChoice: { name: spec.tool },
+            // 산출은 이 도구 하나다 — 결과를 돌려주는 두 번째 요청은 같은 입력을
+            // 한 번 더 읽고 아무도 읽지 않는 답을 받아 온다 (models.md §3-4)
+            outputOnly: true,
           });
         }),
       () => orders !== null,
