@@ -152,6 +152,27 @@ export const SEGMENT_SHOTS = defineHarness({
   ],
 });
 
+export const ZONE_BASELINE = defineHarness({
+  id: "zone-baseline",
+  what: "킥오프 패킷의 매치업 비율이 1에 서는가 — 우리 공격/상대 수비 · 층별 분해 · 네 등급의 몫",
+  doc: "docs/simulation/match.md §1.1",
+  cost: "세계 둘 · 리그 편성 3,500경기 × 패킷 넷 · 40초쯤",
+  // prettier-ignore
+  bands: [
+    { metric: "편성 경기 수", role: "measure", unit: "count", why: "두 세계의 리그 편성 전부 — 표본의 크기" },
+    { metric: "공격/상대 수비 기하평균", role: "guard", min: 0.98, max: 1.02, why: "매치업 비율의 기준선 — `ZONE_BASELINE`이 지키는 자리. 벗어나면 그 비율의 제곱근만큼 두 값을 반대로 옮긴다. 기하평균이어야 두 방향이 서로의 역수다" },
+    { metric: "홈 중원/어웨이 중원 기하평균", role: "guard", min: 0.98, max: 1.02, why: "홈과 어웨이는 같은 눈금이다 — 홈 이점은 존이 아니라 슈팅 노출에만 붙는다 (§1.4)" },
+    { metric: "층 없이 — 공격/상대 수비", role: "measure", why: "공략과 전술을 둘 다 끈 값 — 남는 것은 기준선과 능력 항이라, 기준선을 걷어내면 역할 적합도의 기울기가 보인다" },
+    { metric: "공략 없이 — 공격/상대 수비", role: "measure", why: "AI 벤치의 공략만 끈 값 — 위 기준선과의 간격이 공략 층의 크기다" },
+    { metric: "전술 없이 — 공격/상대 수비", role: "measure", why: "프리셋을 전부 중립으로 놓은 값 — 위 기준선과의 간격이 전술 층의 크기다" },
+    { metric: "공격하는 쪽이 우위인 비율", role: "guard", min: 0.45, max: 0.55, unit: "ratio", why: "편이 갈린 공격·수비 매치업 중 공격하는 쪽이 이긴 몫 — 기준선이 기울면 어느 팀이든 여기가 한쪽으로 쏠린다. 「같은 전력이면 팽팽하다」의 리그 단위 불변식이다" },
+    { metric: "팽팽한 매치업 비율", role: "reference", min: 0.15, max: 0.3, unit: "ratio", why: "`EDGE_EVEN_RATIO` 안쪽 — 리그의 다섯에 하나쯤. 여기가 부풀면 격자가 회색이고, 사라지면 지시 한 칸이 편을 가른다" },
+    { metric: "근소한 우위 비율", role: "reference", min: 0.25, max: 0.4, unit: "ratio", why: "세 크기가 각각 몫을 가져야 문턱이 단계를 가른다" },
+    { metric: "뚜렷한 우위 비율", role: "reference", min: 0.25, max: 0.4, unit: "ratio", why: "같은 이유 — 능력 곡선에서 `EDGE_CLEAR_RATIO`는 평점 5점 차다" },
+    { metric: "압도적 우위 비율", role: "guard", max: 0.25, unit: "ratio", why: "최상위 등급은 소수여야 한다 — `EDGE_BIG_RATIO`는 평점 10점 차, 지시로 뒤집을 수 없는 격차다. 셋 중 가장 흔해지면 감독에게는 한 단계뿐이고 중계는 매 경기 「압도적」으로 수렴한다" },
+  ],
+});
+
 export const MATCH_STAMINA = defineHarness({
   id: "match-stamina",
   what: "풀타임 소모가 구멍 문턱에서 얼마나 떨어져 서는가 — 기본 전술과 고압박",
@@ -734,6 +755,7 @@ export const HARNESSES: readonly Harness[] = [
   ASSIST_RATE,
   SEGMENT_SHOTS,
   MATCH_STAMINA,
+  ZONE_BASELINE,
   INJURY_RATE,
   FINANCE_TIER1,
   FINANCE_LEAGUES,
