@@ -381,7 +381,7 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
           <span className="pc-mark">
             임대 {ours.loan.team} {contractUntil(ours.loan.until)} · 출전 {ours.loan.apps}/득점{" "}
             {ours.loan.goals}
-            {ours.loan.benchRun > 0 && ` · 최근 ${ours.loan.benchRun}경기 명단 밖`}
+            {ours.loan.benchRun > 0 && ` · 최근 ${ours.loan.benchRun}경기 출전 0`}
           </span>
         )}
         {ours?.away && (
