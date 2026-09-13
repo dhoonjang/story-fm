@@ -47,6 +47,7 @@ import {
 } from "@story-fm/sim";
 import { makeRng } from "../core/rng";
 import { derbyForMatch } from "../club/derby";
+import { isFriendly } from "../competition/friendly";
 
 /** 시뮬 입력 — 라인업은 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
 export interface SimSquad {
@@ -487,6 +488,8 @@ interface TimelineInput {
   cardMinutes: { home: readonly number[]; away: readonly number[] };
   /** 벤치 정책 가동 — 90분 본 경기만. 연장은 교체가 없다 (match.md §9) */
   bench: boolean;
+  /** 친선인가 — 교체 한도가 아홉 장으로 열린다 (match.md §5). 벤치가 설 때만 뜻이 있다 */
+  friendly?: boolean;
   /** 90분에서 넘어온 경고(연장) — 두 번째 경고 퇴장이 여기서 이어진다 */
   priorYellows?: ReadonlySet<string>;
   rng: () => number;
@@ -585,6 +588,7 @@ function runTimeline(input: TimelineInput): {
           minute,
           atBreak,
           phase: minute <= HALF_TIME ? "first_half" : "second_half",
+          friendly: input.friendly === true,
           diff: score[side] - score[other],
           subsUsed: mine.length,
           // 휴식 정지점(하프타임)의 교체는 창을 열지 않는다 — 장부와 같은 규칙
@@ -946,11 +950,14 @@ export function quickSimKeyOf(season: number, match: MatchRecord): string {
  */
 export function quickSimOptionsOf(match: MatchRecord): {
   neutral: boolean;
+  friendly: boolean;
   derby?: { name: string; heat: number };
 } {
   const derby = derbyForMatch(match);
   return {
     neutral: match.neutral === true,
+    // 감독의 경기와 같은 한도를 본다 — 나머지 세계의 친선도 아홉 장이 열린다 (season.md §2)
+    friendly: isFriendly(match),
     ...(derby ? { derby: { name: derby.name, heat: derby.heat } } : {}),
   };
 }
@@ -969,7 +976,7 @@ export function quickSimulate(
   away: SimSquad,
   seed: number,
   channel: string,
-  options: { neutral?: boolean; derby?: { name: string; heat: number } } = {},
+  options: { neutral?: boolean; friendly?: boolean; derby?: { name: string; heat: number } } = {},
 ): QuickResult {
   const rng = makeRng(seed, `quick:${channel}`);
   const squads = { home, away };
@@ -989,6 +996,7 @@ export function quickSimulate(
     ...(options.derby ? { derby: options.derby } : {}),
     cardMinutes,
     bench: true,
+    friendly: options.friendly === true,
     rng,
   });
   const { cards, subs, possession } = sampled;

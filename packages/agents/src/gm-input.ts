@@ -40,6 +40,8 @@ import {
   injuryHistoryOf,
   internationalBreaksOf,
   isAvailableFor,
+  isFriendly,
+  canReachExtraTime,
   nextMatchFor,
   isInjured,
   activeSuspension,
@@ -619,6 +621,32 @@ function coachBlocks(state: GameState, cues: readonly CoachCue[]): (string | nul
     byName.set(name, [...(byName.get(name) ?? []), `- ${cue.fact}`]);
   }
   return [...byName].map(([name, facts]) => block("coach", facts.join("\n"), ` name="${name}"`));
+}
+
+/**
+ * **다음 경기의 교체 한도 한 줄** — 감독이 경기 계획을 세우는 자리다.
+ *
+ * `<opponent>`가 아니라 `<now>`에 서는 이유가 시간이다: 상대 분석은 전날에야 서는데
+ * 감독은 사흘 전에 "후반에 전부 바꾼다"를 말한다. 코어가 이미 아는 숫자를 주지 않으면
+ * GM이 불가능한 계획에 동의해 놓고 킥오프에서 번복한다.
+ *
+ * 숫자의 원본은 장부의 `subLimitsOf` 하나다 — 프롬프트에 5/3을 적어 두면 친선(9인)과
+ * 연장(6인/4회)이 갈린 날 여기만 옛 규칙에 남는다 (AGENTS.md §5 · match.md §5).
+ *
+ * ⚠️ 데이터 블록이라 사실만 싣는다 — 규약도 지시문도 없다 (prompts.md §5-3).
+ */
+function nextSubLimitLine(state: GameState): string | null {
+  const managed = managedTeamId(state);
+  if (managed === null) return null;
+  const next = nextMatchFor(state.matches, managed, state.date);
+  if (!next) return null;
+  const friendly = isFriendly(next);
+  const regulation = subLimitsOf("first_half", friendly);
+  const line = `교체 한도: ${regulation.maxSubs}명 · 기회 ${regulation.maxSubWindows}회`;
+  // 연장이 붙을 수 있는 대진에서만 그 한 장을 말한다 — 리그전에 붙이면 없는 카드다
+  if (!canReachExtraTime(state, next)) return line;
+  const extra = subLimitsOf("extra_first", friendly);
+  return `${line} (연장에 들면 ${extra.maxSubs}명 · ${extra.maxSubWindows}회)`;
 }
 
 /**
@@ -1299,6 +1327,7 @@ export function buildGmStateNote(
           played > 0 && rank > 0 ? ` · 리그 ${rank}위` : ""
         } · ${describeWindowState(state)}`,
         describeNextFixture(state),
+        nextSubLimitLine(state),
         // 부임 직후엔 선수단이 여름 휴가 중 — 소집일을 밝혀야 빈 훈련장을 지어내지 않는다
         state.date < squadReturnOf(state.calendar)
           ? `선수단 여름 휴가 중 — ${squadReturnOf(state.calendar)} 소집`
@@ -1760,11 +1789,11 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
   // 사건은 싣지 않는다 — 코어가 이미 굴린 구간은 <segment>로 따로
   // 실린다. 이 블록은 그 구간이 끝난 자리의 장부다 (agents.md §3)
   /**
-   * 교체 한도는 **국면이 정한다** — 연장은 6인/4회다 (match.md §5). 5/3으로 박아
-   * 두면 연장에 들어간 모델이 아직 남은 카드를 없는 것으로 읽는다. 장부 검증과
-   * AI 판단이 보는 것과 같은 함수다.
+   * 교체 한도는 **그 경기가 정한다** — 연장은 6인/4회, 친선은 9인/3회다 (match.md §5).
+   * 5/3으로 박아 두면 연장에 들어간 모델이 아직 남은 카드를 없는 것으로 읽는다.
+   * 장부 검증과 AI 판단이 보는 것과 같은 함수다.
    */
-  const subLimits = subLimitsOf(ledger.phase);
+  const subLimits = subLimitsOf(ledger.phase, ledger.friendly);
   return [
     `<ledger>`,
     // 스코어의 자는 하나다 — 모델이 되받아 쓰는 자리라 화면과 같은 표기로 싣는다

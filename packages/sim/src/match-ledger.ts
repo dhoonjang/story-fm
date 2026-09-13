@@ -1,5 +1,5 @@
 import type { MatchEvent, MatchPhase, MatchSide, MatchStatLine } from "@story-fm/domain";
-import { PHASE_END, TEAM_EVENT_TYPES, isExtraTime } from "@story-fm/domain";
+import { MATCHDAY_BENCH, PHASE_END, TEAM_EVENT_TYPES, isExtraTime } from "@story-fm/domain";
 
 /**
  * 경기 장부 — 사건을 검증해 기록하는 결정적 코어 (match.md §5).
@@ -28,6 +28,14 @@ export interface MatchLedgerState {
   home: TeamLedger;
   away: TeamLedger;
   sentOff: string[];
+  /**
+   * 이 경기가 친선인가 — **교체 한도가 여기서 갈린다** (`subLimitsOf`, 9인).
+   *
+   * 장부가 이 사실을 쥐는 것은 한도를 검증하는 자리가 장부이기 때문이다. 대회 id는
+   * 경기 기록의 것이고 장부는 대진도 대회도 모르므로, 갈래 하나만 받아 둔다.
+   * 옛 세이브엔 없다(optional) — 없으면 공식전 한도로 읽는다 (SAVE_VERSION 유지).
+   */
+  friendly?: boolean;
   /**
    * 선수별 누적 기록 — **사건이 아닌 것들**(패스·전진 패스·슛·xg·선방).
    *
@@ -103,6 +111,18 @@ export const LEDGER_LIMITS = {
  */
 export const EXTRA_TIME_SUBS = 1;
 
+/**
+ * **친선의 교체 한도 — 명단에 든 사람 전부** (match.md §5 · season.md §2).
+ *
+ * 실제 친선의 교체 수는 규정이 아니라 양 구단의 합의이고, 프리시즌이 있는 이유가
+ * 영입의 정착·유망주 시험·체력 끌어올리기라 다섯 장으로는 그 시험이 열리지 않는다.
+ * 여는 것은 **명수뿐**이다 — 창은 경기를 몇 번 끊느냐를 세므로 친선이라고 달라질
+ * 이유가 없고, 하프타임은 창을 쓰지 않으니 라커룸에서 한 번에 다 쓸 길은 이미 있다.
+ *
+ * 벤치 정원에서 읽는다 — 숫자를 따로 적으면 정원이 움직인 날 친선만 옛 정원에 남는다.
+ */
+export const FRIENDLY_SUBS = MATCHDAY_BENCH;
+
 /** 한 선수가 이만큼 경고를 받으면 퇴장이다 */
 const YELLOWS_TO_SEND_OFF = 2;
 
@@ -113,15 +133,22 @@ const LEDGER_RECENT_EVENTS = 8;
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
 /**
- * 이 국면의 교체 한도 — 90분은 5인/3회, 연장은 6인/4회.
+ * 이 경기의 교체 한도 — 90분은 5인/3회, 연장은 6인/4회, 친선은 9인/3회.
  *
  * 장부 검증과 AI 판단(`planAiSubstitution`)이 **같은 함수**를 본다. 두 곳이 각자
- * 상수를 읽으면 AI가 쓸 수 있다고 여긴 교체를 장부가 반려해 경기가 멈춘다.
+ * 상수를 읽으면 AI가 쓸 수 있다고 여긴 교체를 장부가 반려해 경기가 멈춘다. 감독에게
+ * 한도를 말해 주는 자리(뷰·GM 스냅샷)도 여기를 지난다 — 그래야 모델이 동의한 계획과
+ * 장부가 받는 계획이 같다.
+ *
+ * 친선에 연장은 오지 않는다(녹아웃이 아니다) — 두 갈래가 섞이지 않는 이유다.
  */
-export function subLimitsOf(phase: MatchPhase): { maxSubs: number; maxSubWindows: number } {
+export function subLimitsOf(
+  phase: MatchPhase,
+  friendly = false,
+): { maxSubs: number; maxSubWindows: number } {
   const extra = isExtraTime(phase) ? EXTRA_TIME_SUBS : 0;
   return {
-    maxSubs: LEDGER_LIMITS.maxSubs + extra,
+    maxSubs: (friendly ? FRIENDLY_SUBS : LEDGER_LIMITS.maxSubs) + extra,
     maxSubWindows: LEDGER_LIMITS.maxSubWindows + extra,
   };
 }
@@ -132,7 +159,12 @@ export interface LedgerSide {
   bench: string[];
 }
 
-export function createLedger(home: LedgerSide, away: LedgerSide): MatchLedgerState {
+export function createLedger(
+  home: LedgerSide,
+  away: LedgerSide,
+  /** 이 경기가 친선인가 — 교체 한도가 갈린다. 아는 쪽(경기 기록)이 넘긴다 */
+  opts: { friendly?: boolean } = {},
+): MatchLedgerState {
   const side = (t: LedgerSide): TeamLedger => ({
     onPitch: [...t.onPitch],
     bench: [...t.bench],
@@ -149,6 +181,8 @@ export function createLedger(home: LedgerSide, away: LedgerSide): MatchLedgerSta
     home: side(home),
     away: side(away),
     sentOff: [],
+    // 공식전에는 칸을 세우지 않는다 — 옛 세이브와 같은 모양으로 남는다
+    ...(opts.friendly === true ? { friendly: true } : {}),
   };
 }
 
@@ -392,8 +426,8 @@ function applyOne(
       if (!out || !into) {
         return `${label(i, ev)}: actors는 [나가는 선수, 들어오는 선수] 2명이어야 합니다`;
       }
-      // 연장이면 한 장이 더 있다 (6인/4회) — 국면이 한도를 정한다
-      const limits = subLimitsOf(state.phase);
+      // 연장이면 한 장이 더 있고 친선이면 아홉 장이다 — 한도의 원본은 한 함수다
+      const limits = subLimitsOf(state.phase, state.friendly);
       if (side.subsUsed >= limits.maxSubs) {
         return `${label(i, ev)}: 교체 ${limits.maxSubs}명 소진 — 더 교체할 수 없습니다`;
       }
@@ -488,7 +522,7 @@ export function describeLedger(
   names: { home: string; away: string },
 ): string {
   const phaseKo = PHASE_KO[state.phase] ?? "경기 종료";
-  const limits = subLimitsOf(state.phase);
+  const limits = subLimitsOf(state.phase, state.friendly);
   const lines = [
     `[경기 장부] ${names.home} ${state.score.home} : ${state.score.away} ${names.away} — ${state.minute}′ (${phaseKo})`,
     `교체: 홈 ${state.home.subsUsed}/${limits.maxSubs}, 어웨이 ${state.away.subsUsed}/${limits.maxSubs}` +

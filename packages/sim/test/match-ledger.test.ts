@@ -4,6 +4,7 @@ import {
   accumulateFatigue,
   applyEvents,
   createLedger,
+  FRIENDLY_SUBS,
   MATCH_FATIGUE_MAX,
   mergeSubstitutions,
   finishingGoalProbability,
@@ -432,6 +433,79 @@ describe("연장 장부 (match.md §2)", () => {
       ev({ minute: 100, type: "substitution", team: "home", actors: ["hm-mf3", "b6"] }),
     ]);
     expect(refused(seventh)[0]).toContain("6명 소진");
+  });
+
+  /**
+   * 친선의 한도 — 감독이 사흘 전에 말하는 "후반 전원 교체"가 서는 자리다
+   * (match.md §5 · season.md §2). 라커룸은 휴식 정지점이라 아홉 장이 **창을 하나도
+   * 쓰지 않고** 선다.
+   */
+  it("친선은 명단에 든 사람 전부를 바꿀 수 있다 — 9인, 창은 3회 그대로", () => {
+    const deepBench = {
+      onPitch: home.onPitch,
+      bench: Array.from({ length: FRIENDLY_SUBS + 1 }, (_, i) => `b${i}`),
+    };
+    let state = passed(
+      applyEvents(createLedger(deepBench, away, { friendly: true }), [
+        ev({ minute: 45, type: "half_time" }),
+      ]),
+    );
+
+    const outfield = [
+      "hm-df1",
+      "hm-df2",
+      "hm-df3",
+      "hm-df4",
+      "hm-mf1",
+      "hm-mf2",
+      "hm-mf3",
+      "hm-mf4",
+      "hm-fw1",
+    ];
+    expect(outfield).toHaveLength(FRIENDLY_SUBS);
+    outfield.forEach((out, i) => {
+      const r = applyEvents(state, [
+        ev({ minute: 45, type: "substitution", team: "home", actors: [out, `b${i}`] }),
+      ]);
+      expect(r.ok, `${i + 1}번째 교체가 반려됐다`).toBe(true);
+      state = passed(r);
+    });
+    expect(state.home.subsUsed).toBe(FRIENDLY_SUBS);
+    expect(state.home.subWindows).toBe(0);
+
+    // 열 번째는 없다 — 연 것은 명수뿐이고 그 명수는 벤치 정원이다
+    const tenth = applyEvents(state, [
+      ev({
+        minute: 45,
+        type: "substitution",
+        team: "home",
+        actors: ["hm-fw2", `b${FRIENDLY_SUBS}`],
+      }),
+    ]);
+    expect(refused(tenth)[0]).toContain(`${FRIENDLY_SUBS}명 소진`);
+  });
+
+  /** 같은 장부라도 대회 경기면 여섯째부터 없다 — 갈래를 가르는 것은 그 칸 하나다 */
+  it("공식전은 친선 칸이 없어 5인 그대로다", () => {
+    const deepBench = {
+      onPitch: home.onPitch,
+      bench: Array.from({ length: 8 }, (_, i) => `b${i}`),
+    };
+    let state = passed(
+      applyEvents(createLedger(deepBench, away), [ev({ minute: 45, type: "half_time" })]),
+    );
+    const outfield = ["hm-df1", "hm-df2", "hm-df3", "hm-df4", "hm-mf1"];
+    outfield.forEach((out, i) => {
+      state = passed(
+        applyEvents(state, [
+          ev({ minute: 45, type: "substitution", team: "home", actors: [out, `b${i}`] }),
+        ]),
+      );
+    });
+    const sixth = applyEvents(state, [
+      ev({ minute: 45, type: "substitution", team: "home", actors: ["hm-mf2", "b5"] }),
+    ]);
+    expect(refused(sixth)[0]).toContain("5명 소진");
   });
 });
 
