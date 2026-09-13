@@ -70,6 +70,7 @@ import {
   RENEWAL_YEARS_MAX,
   respondOffer,
   standingDeadlineOf,
+  respondToApproach,
   respondTransferRequest,
   responseDelayDays,
   resolveMedical,
@@ -80,6 +81,7 @@ import {
   teamName,
   teamNameIn,
   tickInterests,
+  openTransferRequests,
   transferRequestOf,
   unilateralSeveranceOf,
   USER_WAGE_HEADROOM,
@@ -99,6 +101,7 @@ import {
   SELL_ON_MIN_RATE,
   SELL_ON_PEAK_AGE,
   clausesForSale,
+  formatMoney,
   isPlayerDeal,
   sellOnAmountOf,
   sellOnRateForAge,
@@ -1085,6 +1088,59 @@ describe("이적 요청 — 막힌 이적이 세우고 감독이 답한다", () 
     // 감독은 한 번만 답한다
     expect(respondTransferRequest(state, { playerId: player.id, answer: "refuse" }).ok).toBe(false);
   });
+
+  it("요청을 든 사람이 온 자리에서 한 답이 요청의 답이다 — 책상에서 내려가고 결정은 명령에 남는다", () => {
+    const state = shared;
+    const player = ours(state, 3);
+    state.transferRequests = (state.transferRequests ?? []).filter(
+      (r) => r.gamePlayerId !== player.id,
+    );
+    // 자리를 열지 않는 종류의 요청(bigger-club)이 서 있는데, 그 선수가 다른 일로 온다
+    state.transferRequests.push({
+      gamePlayerId: player.id,
+      since: addDays(state.date, -5),
+      reason: "bigger-club",
+      pressedOn: state.date,
+    });
+    const seat = (id: string) => ({
+      id,
+      date: state.date,
+      channel: "player" as const,
+      topic: "minutes" as const,
+      speakerId: player.name,
+      about: player.id,
+      context: `${player.name} · 출전 시간`,
+      facts: [],
+      step: 2,
+      status: "pending" as const,
+    });
+
+    // ── 돌려보낸 자리는 아무것도 답하지 않는다
+    state.approaches = [seat("approach-minutes-declined")];
+    expect(respondToApproach(state, { decline: true }).ok).toBe(true);
+    expect(transferRequestOf(state, player.id)?.answeredOn).toBeUndefined();
+    expect(openTransferRequests(state).some((r) => r.gamePlayerId === player.id)).toBe(true);
+
+    // ── 스탠스로 답하면 요청도 답한 것이다
+    state.approaches = [seat("approach-minutes-answered")];
+    const answered = respondToApproach(state, { stance: "own" });
+    expect(answered.ok, answered.message).toBe(true);
+    expect(answered.message).toContain("이적 요청 답함");
+    const request = transferRequestOf(state, player.id)!;
+    expect(request.answeredOn).toBe(state.date);
+    expect(request.answer, "팔지·거부할지는 명령의 결정이다").toBeUndefined();
+    expect(request.pressedOn, "답한 사실은 다음 회견이 다시 싣는다").toBeUndefined();
+    expect(
+      openTransferRequests(state).some((r) => r.gamePlayerId === player.id),
+      "책상에서 내려간다 — <alerts>의 ❗ 줄이 여기서 나온다",
+    ).toBe(false);
+
+    // ── 결정은 명령이 한 번 내린다
+    const refused = respondTransferRequest(state, { playerId: player.id, answer: "refuse" });
+    expect(refused.ok, refused.message).toBe(true);
+    expect(transferRequestOf(state, player.id)?.answer).toBe("refuse");
+    expect(respondTransferRequest(state, { playerId: player.id, answer: "accept" }).ok).toBe(false);
+  });
 });
 
 describe("재계약 — 상대가 선수 본인이다", () => {
@@ -1129,6 +1185,33 @@ describe("재계약 — 상대가 선수 본인이다", () => {
     expect(negotiation.counterpartTeamId).toBeNull();
     expect(negotiation.windowId).toBeNull();
     expect(negotiation.rounds[0]!.fee).toBe(0);
+  });
+
+  /**
+   * 결과 줄은 감독이 아니라 **모델이 읽는 면**이라 어긋나도 화면에는 아무것도 나타나지
+   * 않는다 — 오퍼가 나간 턴을 계약이 맺어진 턴으로 서술한 시즌이 그렇게 지나갔다
+   * (prompts.md §3).
+   */
+  it("제안과 수락의 결과 줄이 서명 전 상태를 말한다", () => {
+    const state = createTestGame(42);
+    const player = expiringPlayer(state);
+    const wage = renewalExpectation(state, player);
+
+    const opened = openRenewal(state, { playerId: player.id, weeklyWage: wage, years: 3 });
+    expect(opened.ok, opened.message).toBe(true);
+    // 답은 아직 오지 않았다 — 완료형이 서면 그 자리가 곧 「계약 확정」으로 읽힌다
+    expect(opened.message).not.toContain("왔습니다");
+    expect(opened.message).toContain("accept_deal");
+
+    const negotiation = state.negotiations.find((n) => n.kind === "renew")!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const letter = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(letter.ok, letter.message).toBe(true);
+    // 수락은 합의일 뿐이고, 재계약에는 이적료가 없어 오간 축은 주급과 연수다
+    expect(letter.message).toContain("accept_deal");
+    expect(letter.message).toContain("3년");
+    expect(letter.message).not.toContain(formatMoney(0));
+    expect(negotiation.status).toBe("agreed");
   });
 
   it("주급을 올리면 확률이 오르고, 만료가 가까우면 기대치가 높아진다", () => {

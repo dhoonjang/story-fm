@@ -236,7 +236,13 @@ function factOf(
   const request = transferRequestOf(state, player.id);
   if (request && request.answer !== "accept") {
     const reason = TRANSFER_REQUEST_REASON_KO[request.reason];
-    return `이적 요청 (${reason}) — ${request.answer === "refuse" ? "감독이 거부했다" : "아직 답하지 않았다"}`;
+    const said =
+      request.answer === "refuse"
+        ? "감독이 거부했다"
+        : request.answeredOn !== undefined
+          ? "감독이 면담으로 답했다"
+          : "아직 답하지 않았다";
+    return `이적 요청 (${reason}) — ${said}`;
   }
   /**
    * **밖에서 묻는 것은 나가겠다고 말한 것보다는 뒤고 나머지보다는 앞이다**

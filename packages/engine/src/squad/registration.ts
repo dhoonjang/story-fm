@@ -1,6 +1,12 @@
 import type { GamePlayer, RegistrablePlayer, SquadRegistration } from "@story-fm/domain";
 import type { RegistrationBlock } from "@story-fm/domain";
-import { FIRST_TEAM_LIMIT, canRegister, isUnder21, squadRegistration } from "@story-fm/domain";
+import {
+  FIRST_TEAM_LIMIT,
+  canRegister,
+  isUnder21,
+  positionGroupOfPlayer,
+  squadRegistration,
+} from "@story-fm/domain";
 import { seasonYear } from "../competition/calendar";
 import { countryOfTeam } from "../data/team-catalog";
 import { firstTeamPlayers, type GameState } from "../core/state";
@@ -28,15 +34,15 @@ export function occupiesSquadList(
   return !isUnder21(player.birthdate, seasonYear(state.season));
 }
 
-function registrableOf(
-  state: GameState,
-  player: Pick<GamePlayer, "id" | "birthdate" | "homegrownCountry">,
-  teamId: string,
-): RegistrablePlayer {
+/** 등록 규칙이 읽는 선수의 최소 모양 */
+type Registrable = Pick<GamePlayer, "id" | "birthdate" | "homegrownCountry" | "positions">;
+
+function registrableOf(state: GameState, player: Registrable, teamId: string): RegistrablePlayer {
   return {
     id: player.id,
     birthdate: player.birthdate,
     homegrown: isHomegrownFor(player, teamId),
+    positionGroup: positionGroupOfPlayer(player),
   };
 }
 
@@ -49,7 +55,7 @@ export function squadRegistrationOf(state: GameState, teamId: string): SquadRegi
 /** 이 선수를 그 팀 1군에 올릴 수 있는가 — 못 올리면 이유를 돌려준다 */
 export function canRegisterFor(
   state: GameState,
-  player: Pick<GamePlayer, "id" | "birthdate" | "homegrownCountry">,
+  player: Registrable,
   teamId: string,
 ): { ok: true } | { ok: false; block: RegistrationBlock } {
   const squad = firstTeamPlayers(state, teamId)
@@ -71,7 +77,7 @@ export function canRegisterFor(
  */
 export function canRegisterAllFor(
   state: GameState,
-  players: readonly Pick<GamePlayer, "id" | "birthdate" | "homegrownCountry">[],
+  players: readonly Registrable[],
   teamId: string,
   leaving: ReadonlySet<string> = new Set(),
 ): { ok: true } | { ok: false; playerId: string; block: RegistrationBlock } {

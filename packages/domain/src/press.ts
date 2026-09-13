@@ -844,8 +844,9 @@ export function pressFactText(fact: PressFact): string {
     case "transfer-request":
       /**
        * `tags[0]`이 **요청의 사유**(`TRANSFER_REQUEST_REASONS`), `tags[1]`이 감독의
-       * 답이다 (transfer.md §1-1). 옛 세이브의 카드는 `tags[0]`에 불만 사유를 들고
-       * 있어 표에서 안 잡히고, 그때만 사유 이름으로 떨어진다.
+       * 답이다 — 결정이거나 면담으로만 답한 `heard` (transfer.md §1-1). 옛 세이브의
+       * 카드는 `tags[0]`에 불만 사유를 들고 있어 표에서 안 잡히고, 그때만 사유
+       * 이름으로 떨어진다.
        */
       return (
         `${name} 이적 요청 (${TRANSFER_REQUEST_REASON_KO[sub as TransferRequestReason] ?? reasonOf(sub)})` +
@@ -854,7 +855,9 @@ export function pressFactText(fact: PressFact): string {
           ? " · 감독이 받아들였다"
           : tags[1] === "refuse"
             ? " · 감독이 거부했다"
-            : "")
+            : tags[1] === "heard"
+              ? " · 감독이 면담으로 답했다"
+              : "")
       );
     case "board-demand":
       // 종류가 든 숫자는 하나다 — 채워야 할 목표(`target`)이거나 발행 시점의 기준값
