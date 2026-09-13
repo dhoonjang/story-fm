@@ -121,6 +121,19 @@ const YOUNG_AGE = 20;
 const MOOD_FACT_LIMIT = 2;
 
 /**
+ * **못 뛴 선수가 그 경기에 있던 자리** — 벤치에 앉았나, 명단에 없었나.
+ *
+ * 심경 카드와 근황(`cues.ts`)이 **같은 말**을 쓴다. 두 벌을 두면 같은 사실이
+ * 자리마다 다른 이름으로 서고, 한쪽만 고쳐진 날 벤치에 앉아 있던 선수가 다시
+ * 「명단 제외」가 된다 (people.md §7).
+ */
+export type NoMinutesPlace = "bench" | "out";
+export const NO_MINUTES_PLACE_KO: Record<NoMinutesPlace, string> = {
+  bench: "벤치",
+  out: "명단 밖",
+};
+
+/**
  * 코어가 고르는 **심경의 사실 한 장** — 원인과 수치·기간만 담는다.
  * 이 카드를 문장으로 푸는 것은 GM과 화면의 몫이다.
  */
@@ -182,7 +195,7 @@ export type MoodFact =
        */
       milestone?: { code: MilestoneCode; value: number };
     }
-  | { cause: "no-minutes"; place: "bench" | "out" }
+  | { cause: "no-minutes"; place: NoMinutesPlace }
   | { cause: "form"; label: FormLabel }
   | { cause: "condition"; level: "heavy" | "light" }
   /**
@@ -836,7 +849,7 @@ function factLine(fact: MoodFact): string {
           : ` · ${milestonePhrase(fact.milestone.code, fact.milestone.value)}`)
       );
     case "no-minutes":
-      return `출전 0 · ${fact.place === "bench" ? "벤치" : "명단 밖"}`;
+      return `출전 0 · ${NO_MINUTES_PLACE_KO[fact.place]}`;
     case "form":
       return `폼 ${fact.label}`;
     case "condition":

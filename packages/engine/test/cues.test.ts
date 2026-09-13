@@ -215,12 +215,21 @@ describe("근황은 사실에서 온다", () => {
  *
  * `state.matches`는 날짜순이 아니다 — 컵·대항전 대진은 그 라운드가 확정될 때 배열
  * 뒤에 붙는다. 배열 끝에서 세면 시즌 후반의 "최근"이 방금 편성된 컵 경기가 되고,
- * 리그 3연속 명단 제외가 조용히 새어 나간다. 화면에 아무 소리도 나지 않는 종류라
+ * 리그 3연속 미출전이 조용히 새어 나간다. 화면에 아무 소리도 나지 않는 종류라
  * 여기가 아니면 드러날 자리가 없다.
  */
-describe("연속 명단 제외는 날짜순 직전 세 경기로 센다", () => {
-  /** 치른 경기 하나 — `lineup`에 있는 선수만 뛴 것으로 남는다 */
-  function played(state: GameState, id: string, date: string, lineup: readonly string[]) {
+describe("연속 미출전은 날짜순 직전 세 경기로 센다", () => {
+  /**
+   * 치른 경기 하나 — `lineup`에 있는 선수만 뛴 것으로 남는다. `bench`를 주지 않으면
+   * 벤치를 안 남긴 옛 경기다(그 칸은 우리 경기에만 생겼다 — match.md §4).
+   */
+  function played(
+    state: GameState,
+    id: string,
+    date: string,
+    lineup: readonly string[],
+    bench?: readonly string[],
+  ) {
     state.matches.push({
       id,
       season: state.season,
@@ -234,6 +243,7 @@ describe("연속 명단 제외는 날짜순 직전 세 경기로 센다", () => 
         awayGoals: 0,
         scorers: [],
         homeLineup: [...lineup],
+        ...(bench ? { homeBench: [...bench] } : {}),
       },
     });
   }
@@ -257,7 +267,59 @@ describe("연속 명단 제외는 날짜순 직전 세 경기로 센다", () => 
     played(state, "m-cup-old", addDays(state.date, -21), [target.id]);
 
     const cue = speakerCues(state, 40).find((c) => c.playerId === target.id);
-    expect(cue?.fact).toMatch(/^3경기 연속 명단 제외/u);
+    expect(cue?.fact).toMatch(/^3경기 연속 출전 0/u);
+  });
+
+  /**
+   * **못 뛴 것과 빠진 것은 다른 사실이다** (people.md §7).
+   *
+   * 세는 값은 출전이 없는 경기 수인데 그 줄이 「명단 제외」라고 불러, 매 경기
+   * 벤치에 앉아 있던 선수에게 「감독이 명단에서 뺐다」는 장면이 붙었다. 화면에는
+   * 아무 소리도 나지 않고 GM의 문장에서만 드러나는 종류라 여기가 아니면 볼 자리가
+   * 없다.
+   */
+  describe("벤치에 앉은 것과 명단에 없던 것이 다른 줄로 선다", () => {
+    /** 세 경기 내내 못 뛴 선수 하나 — 그 경기의 벤치를 `seat`가 정한다 */
+    function threeWithout(state: GameState, seat: (target: string) => string[] | undefined) {
+      const target = firsts(state, 1)[0]!;
+      const others = userPlayers(state)
+        .filter((p) => p.id !== target.id)
+        .map((p) => p.id);
+      for (const [i, day] of [4, 3, 2].entries()) {
+        played(state, `m-league-${i}`, addDays(state.date, -day), others, seat(target.id));
+      }
+      return target;
+    }
+
+    const factOf = (state: GameState, id: string) =>
+      speakerCues(state, 40).find((c) => c.playerId === id)?.fact;
+
+    it("세 경기 내내 벤치였으면 「벤치」다 — 명단 제외가 아니다", () => {
+      const state = quiet(createTestGame(11));
+      const target = threeWithout(state, (id) => [id]);
+      expect(factOf(state, target.id)).toMatch(/^3경기 연속 출전 0 · 벤치/u);
+    });
+
+    it("세 경기 내내 명단 밖이었으면 「명단 밖」이다", () => {
+      const state = quiet(createTestGame(11));
+      const target = threeWithout(state, () => []);
+      expect(factOf(state, target.id)).toMatch(/^3경기 연속 출전 0 · 명단 밖/u);
+    });
+
+    it("자리가 섞이면 말하지 않는다 — 한 단어로 부를 수 없다", () => {
+      const state = quiet(createTestGame(11));
+      const target = threeWithout(state, () => []);
+      // 그중 한 경기만 벤치에 앉았다 — 셋을 한 단어로 부를 수 없다
+      state.matches.find((m) => m.id === "m-league-1")!.result!.homeBench = [target.id];
+      expect(factOf(state, target.id)).toMatch(/^3경기 연속 출전 0 · 수용성/u);
+    });
+
+    it("벤치를 안 남긴 옛 경기가 끼면 자리를 지어내지 않는다", () => {
+      const state = quiet(createTestGame(11));
+      const target = threeWithout(state, (id) => [id]);
+      delete state.matches.find((m) => m.id === "m-league-1")!.result!.homeBench;
+      expect(factOf(state, target.id)).toMatch(/^3경기 연속 출전 0 · 수용성/u);
+    });
   });
 
   it("직전 경기에 나섰으면 근황이 아니다 — 배열 끝이 옛 대진이어도", () => {

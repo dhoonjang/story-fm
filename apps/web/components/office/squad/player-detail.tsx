@@ -168,7 +168,7 @@ export function PlayerDetail({
             <b>
               {p.loan.team} {contractUntil(p.loan.until)}
             </b>
-            {p.loan.benchRun > 0 && ` · 최근 ${p.loan.benchRun}경기 명단 밖`}
+            {p.loan.benchRun > 0 && ` · 최근 ${p.loan.benchRun}경기 출전 0`}
             {p.loan.growth > 0 && ` · 임대 이후 성장 +${p.loan.growth}`}
           </span>
         )}

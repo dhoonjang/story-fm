@@ -1851,6 +1851,17 @@ export function finalizeMatch(state: GameState): MatchDigest {
   };
   const homeLineup = participantsOf("home");
   const awayLineup = participantsOf("away");
+  /**
+   * **킥오프에 벤치에 앉은 선수** (people.md §7) — 장부의 `bench`는 교체로 들어간
+   * 선수를 덜어 내므로 끝 시점에는 **못 나간 자원**만 남는다. 나간 사람을 돌려놓아야
+   * 「그 경기 벤치에 앉았나」가 되고, 그들은 선발이 아닌 출전자다.
+   */
+  const benchOf = (which: "home" | "away"): string[] => {
+    const started = new Set(pending.startingXI?.[which] ?? []);
+    const played = which === "home" ? homeLineup : awayLineup;
+    const cameOn = pending.startingXI ? played.filter((id) => !started.has(id)) : [];
+    return [...ledger[which].bench, ...cameOn];
+  };
   const statSum = (
     ids: readonly string[],
     read: (line: NonNullable<typeof ledger.stats>[string]) => number,
@@ -1893,6 +1904,9 @@ export function finalizeMatch(state: GameState): MatchDigest {
     ...(pending.startingXI
       ? { homeStarters: pending.startingXI.home, awayStarters: pending.startingXI.away }
       : {}),
+    // 벤치는 **우리 경기에만** 남는다 — 여기가 그 경기다 (schedule.ts `homeBench`)
+    homeBench: benchOf("home"),
+    awayBench: benchOf("away"),
     /**
      * **사건과 선수별 기록은 장부에서 결과로 건너온다** (match.md §4).
      *
