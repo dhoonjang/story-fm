@@ -170,6 +170,12 @@ GM이 **경기 도구 셋**(`tactic_orders` · `advance_match` · `finalize_matc
 | 전술형 | `tactic_orders`·`training_orders` — 감독의 말 원문을 넘기면 도구 뒤의 해석이 JSON으로 옮기고 코어가 명령으로 적용 (agents.md §1)                                                                                  |
 | 사건형 | `record_incident` — 코어 밖의 사건(벌금·포상·병문안·공개 칭찬과 질책·사과·중재·규칙·회식)을 **효과의 모양**으로 받고, 효과표·한도는 코어 ([../data/people.md](../data/people.md) §6)                              |
 
+- **위임은 지시가 아니다.** "알아서 짜세요"·"당신이 판단해서 돌리세요"에는 감독이 정한
+  것이 없어 `tactic_orders`·`training_orders`·`market_orders`의 해석기가 채울 인자가
+  없다. 그래서 **구체화는 도구 앞의 GM이 한다** — 코치의 안을 장면으로 내놓고 감독이 못
+  박은 뒤에 그 말을 넘긴다. 도구 설명이 그 규약을 들고, 해석기는 위임형 문장을
+  `unresolved`로 남긴다 ([agents.md](./agents.md) §3). 해석기가 대신 지어내면 감독이
+  고르지 않은 선발이 판에 오르고, 그것은 아무 일도 일어나지 않는 것보다 나쁘다.
 - **대화의 판정은 대화가 마무리된 턴에 한 번 선다** — `team_talk`은 감독이 자리를
   뜨거나 화제가 닫히거나 장면이 넘어갈 때 불린다. 대화 도중에는 부르지 않는다: 첫
   문장에서 판정이 서면 그 뒤로 이어지는 말싸움과 설득이 결과에 남지 않고 연극이 된다.
@@ -271,13 +277,19 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
   논거(`PITCH_CLAIM_KO`) · 테이블의 태도(`TABLE_STANCE_KO`)와 화자(`TABLE_SPEAKER_KO`) ·
   감독의 약속(`PROMISE_KIND_KO`) ·
   훈련 표식(`TRAINING_MARK_KO`) · 계약 지위(`SQUAD_STATUS_KO`) · 개인 지시와 그 세기
-  (`PLAYER_DIRECTIVE_KO` · `DIRECTIVE_INTENSITY_KO`). 손으로 한 벌 더 적으면 표를 고쳐도
+  (`PLAYER_DIRECTIVE_KO` · `DIRECTIVE_INTENSITY_KO`) · 자리 코드(`POSITION_CODES`). 손으로 한 벌 더 적으면 표를 고쳐도
   모델은 옛 뜻을 계속 받고, 한 갈래만 낱말이 빠지면 모델은 그 값을 **「나머지」**로 읽는다.
   **낱말이 곧 토큰인 갈래는 예외다** — `corner`·`freeKick`·`penalty`처럼 토큰 자체가 뜻인
   자리에 낱말을 얹는 것은 벌어질 어긋남이 없는 글자 수다.
   **열거가 아닌 자리도 같은 규칙을 받는다** — `set_player_tactic.role`은 자리마다 목록이
   달라 열거로 서지 못하는 자유 문자열이고, 그래서 자리별 역할 표를 해석 프롬프트가 든다
-  (`roleVocabularyText` → [agents.md](./agents.md) §3).
+  (`roleVocabularyText` → [agents.md](./agents.md) §3). `set_lineup.position`도 같다 —
+  코드 서른한 개(`POSITION_CODES`)를 `.describe()`가 든다.
+- **낱말표를 실어도 모델은 자기 표기로 부른다 — 그래서 코어가 별칭을 읽는다.** 감독의
+  말을 옮기는 자리에서는 표에 없는 표기가 반드시 온다(`AML`·`DC`·`STC`). 표를 싣는 것과
+  별칭을 읽는 것은 **둘 다** 필요하다: 표만 실으면 감독이 쓴 말이 버려지고, 별칭만 읽으면
+  모델이 표에 없는 새 표기를 계속 만든다. 옮기는 자는 코어 하나
+  (`normalizePositionCode` → [../data/team.md](../data/team.md) §6).
 - **낱말이 갈래를 가르지 못하는 자리에는 뜻 표가 하나 더 선다** (`PITCH_CLAIM_MEANING` ·
   `PROMISE_KIND_MEANING`). 낱말표는 장부 줄과 화면이 쓰는 이름이라 짧다 — 「출전」은 교체
   출전까지 품지만 기한 날 장부가 재는 것은 **선발 비율**이고(→ [../data/people.md](../data/people.md)
