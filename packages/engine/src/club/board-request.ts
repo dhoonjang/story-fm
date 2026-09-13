@@ -5,7 +5,7 @@ import type {
   BoardRequestKind,
   TickSink,
 } from "@story-fm/domain";
-import { BOARD_REQUEST_LABEL, boardRequestAmountText } from "@story-fm/domain";
+import { josa, BOARD_REQUEST_LABEL, boardRequestAmountText } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import {
   clubProfileIn,
