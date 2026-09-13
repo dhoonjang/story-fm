@@ -300,10 +300,10 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
       </header>
 
       {/**
-       * **무엇까지 아는가** — 아래 숫자 전부에 걸리는 단서라 맨 위에 선다.
-       * 정확히 아는 선수(우리 선수 대부분)에게는 아무것도 그리지 않는다.
+       * 스카우트가 쓴 **한 줄 평** — 채팅 카드는 한 번 지나가고 사무실에 스카우팅
+       * 화면이 없으므로, 감독이 그 문장을 되찾는 자리가 여기다 (player.md §9.5).
        */}
-      {card.overallMargin > 0 && <p className="pc-note">{card.note}</p>}
+      {card.scoutReport?.verdict && <p className="pc-note">{card.scoutReport.verdict}</p>}
       {/* 지금 심경 한 줄 — 아래 숫자들이 왜 그런지 (우리 선수만 아는 사실이다) */}
       {ours && <p className="pc-mood">{moodSentence(ours.mood)}</p>}
 
@@ -328,7 +328,25 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
         >
           {formatMoney(card.marketValue)}
         </Fact>
-        {card.weeklyWage !== null && <Fact label="주급">{formatMoney(card.weeklyWage)}/주</Fact>}
+        {/**
+         * 보고서가 실어 온 세 값 — **데려오는 데 드는 돈**과 그 값이 언제 것인지.
+         * 요구액은 몸값이 아니라 상대가 부를 값이고(코치의 대사도 이 숫자다),
+         * 기대 주급은 **데려오려면 줘야 할** 돈이라 아래 「현 주급」과 다른 물음이다.
+         */}
+        {card.scoutReport && (
+          <>
+            <Fact label="요구액" title="상대 구단이 부를 값 — 몸값이 아니라 협상이 시작되는 자리다">
+              {formatMoney(card.scoutReport.askingPrice)}
+            </Fact>
+            <Fact label="기대 주급" title="데려오려면 줘야 할 주급 — 지금 받는 돈이 아니다">
+              {formatMoney(card.scoutReport.wageExpectation)}/주
+            </Fact>
+            <Fact label="보고서" title="스카우팅 보고서가 도착한 날">
+              {humanDate(card.scoutReport.on, { weekday: false })}
+            </Fact>
+          </>
+        )}
+        {card.weeklyWage !== null && <Fact label="현 주급">{formatMoney(card.weeklyWage)}/주</Fact>}
         {card.contractUntil !== null && (
           <Fact label="계약">{contractUntil(card.contractUntil)}</Fact>
         )}
