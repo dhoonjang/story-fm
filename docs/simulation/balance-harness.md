@@ -70,6 +70,7 @@ pnpm balance --report out  # 전부 돌리고 측정값을 out/에 남긴다 (�
 | `attribute-model`      | 자체 산정 모델이 낸 분포와 지금 시드 분포의 간격                               | [player](../data/player.md) §13                       |
 | `demotion-grievance`   | 한 시즌 2군 강등이 낳는 불만 건수 — 로테이션과 방치                            | [people](../data/people.md) §5                        |
 | `approach-rate`        | 한 시즌 다가옴 건수 · 채널 분포 · 소음 문이 서는가                             | [people](../data/people.md) §8                        |
+| `press-reputation`     | 한 시즌 회견을 한 말투로 보낸 감독의 평판 3축 — 성적과 스탠스의 몫             | [career](career.md) §4                                |
 | `overall-scale`        | 종합을 읽는 눈금 — 리그별·연령별 분포                                          | [match](match.md) §7                                  |
 | `history-window`       | 평시 이력의 창 — 몇 턴이 남는가 · 압축 주기 · 렌더 배율                        | [agents](../llm/agents.md) §5-1                       |
 | `prompt-regression`    | 프롬프트 층의 글자·프리픽스 안정성 · 장면 문법·도구                            | [prompts](../llm/prompts.md) §7                       |

@@ -55,6 +55,25 @@ export const ManagerReputationSchema = z.object({
 });
 export type ManagerReputation = z.infer<typeof ManagerReputationSchema>;
 
+/**
+ * **이번 시즌 스탠스가 옮긴 평판의 누계** — 시즌 목줄이 세는 자리 (career.md §4).
+ *
+ * 회견은 시즌에 마흔 번 넘게 열리므로 대가가 온전히 쌓이면 말투가 평판을 독점한다.
+ * 목줄(`STANCE_SEASON_CAP`)은 이 누계를 읽어 같은 방향의 다음 걸음을 좁힌다 —
+ * 되돌아오는 걸음은 좁히지 않으므로, 이 값은 쓰고 없어지는 예산이 아니라 **지금 서
+ * 있는 자리**다.
+ *
+ * `season`은 이 누계가 어느 시즌의 것인가다. 지금 시즌과 다르면 지난 시즌 장부라
+ * 0에서 다시 센다 — 롤오버가 지울 것이 없다.
+ */
+export const StanceSeasonSchema = z.object({
+  season: z.number().int(),
+  board: z.number().int(),
+  media: z.number().int(),
+  squad: z.number().int(),
+});
+export type StanceSeason = z.infer<typeof StanceSeasonSchema>;
+
 /** 평판 3축의 표시 순서 + 한글 이름 */
 export const REPUTATION_AXIS_KO: Record<keyof ManagerReputation, string> = {
   board: "보드",
@@ -262,6 +281,11 @@ export const ManagerSchema = z.object({
   background: z.string(),
   attributes: ManagerAttributesSchema,
   reputation: ManagerReputationSchema,
+  /**
+   * 이번 시즌 스탠스가 옮긴 평판 누계 — 시즌 목줄이 읽는 자리 (career.md §4).
+   * 옛 세이브엔 없다 (없으면 0에서 시작 — 세이브 버전 유지).
+   */
+  stanceSeason: StanceSeasonSchema.optional(),
   /**
    * 보드의 경고 횟수 — 세 번째에서 자리가 없어진다 (`manager-market.ts`).
    * 기대 위로 올라서면 하나가 지워진다: 되돌릴 수 있어야 압박이 이야기가 된다.
