@@ -989,6 +989,7 @@ export function SquadView({
 
       {(gkIssue ||
         gkWarning ||
+        squad.registration.issues.length > 0 ||
         unavailableInXI.length > 0 ||
         unavailableOnBench.length > 0 ||
         misfits.length > 0 ||
@@ -997,6 +998,13 @@ export function SquadView({
           {/* 경고는 사실만 — "교체하세요" 같은 지시나 규칙 설명은 붙이지 않는다.
               저장이 멈추는 GK 문제만 이유를 밝힌다 (안 그러면 왜 안 되는지 모른다) */}
           {/* 경고 글리프(⚠)는 달지 않는다 — 이 칸의 색(`--warn`)이 이미 경고다 */}
+          {/* 등록 명단의 사유는 칩의 툴팁에만 있었다 — 골키퍼 없는 1군처럼 킥오프 전에
+              반드시 읽어야 하는 사실이라 여기 그대로 세운다 (team.md §5) */}
+          {squad.registration.issues.map((issue) => (
+            <div key={issue} data-testid="registration-issue">
+              {issue}
+            </div>
+          ))}
           {gkIssue && <div>GK 자리 {gkCount}곳 — 한 명이 될 때까지 저장이 보류됩니다.</div>}
           {gkWarning && <div>GK 자리에 필드 플레이어</div>}
           {unavailableInXI.length > 0 && (

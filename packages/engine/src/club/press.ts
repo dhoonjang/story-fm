@@ -1187,7 +1187,15 @@ function loadTransferRequests(state: GameState, conference: PressConference): vo
       data: {
         name: player.name,
         values: { days: diffDays(request.since, state.date) },
-        tags: [request.reason, ...(request.answer ? [request.answer] : [])],
+        // 둘째 태그가 감독의 답 — 결정(accept·refuse)이거나, 면담으로만 답한 `heard`
+        tags: [
+          request.reason,
+          ...(request.answer
+            ? [request.answer]
+            : request.answeredOn !== undefined
+              ? ["heard"]
+              : []),
+        ],
       },
       about: player.id,
       sharp: true,

@@ -1586,6 +1586,36 @@ export function standTransferRequest(
   return true;
 }
 
+/**
+ * 요청에 답한다 — **답과 결정은 다른 칸이다** (transfer.md §1-1). `answeredOn`은
+ * 책상에서 내려간 날이고 `answer`는 팔지·거부할지의 결정이다. 면담의 답은 날짜만
+ * 찍고 결정을 비워 둔다 — 그래야 명령이 그 결정을 한 번 내릴 수 있다.
+ *
+ * 옛 세이브의 요청은 `PlayerState.transferRequestedOn`에서 파생된 줄이라 장부에
+ * 없다 — 밀어 넣지 않으면 감독의 답이 아무 데도 남지 않는다.
+ *
+ * 요청이 선 날과 감독이 답한 날은 다른 사실이라 회견이 둘 다 싣는다 — 실려 간
+ * 자리(`pressedOn`)를 비운다. 요청이 없으면 `null`.
+ */
+export function answerTransferRequest(
+  state: GameState,
+  playerId: string,
+  answer?: TransferRequest["answer"],
+): TransferRequest | null {
+  const found = transferRequestOf(state, playerId);
+  if (!found) return null;
+  const rows = (state.transferRequests ??= []);
+  let request = rows.find((r) => r.gamePlayerId === playerId);
+  if (!request) {
+    request = found;
+    rows.push(request);
+  }
+  request.answeredOn = state.date;
+  if (answer !== undefined) request.answer = answer;
+  delete request.pressedOn;
+  return request;
+}
+
 /** 요청을 걷는다 — 원인이 사라졌거나 그 선수가 팀을 떠났을 때 */
 export function withdrawTransferRequest(state: GameState, playerId: string): void {
   state.transferRequests = (state.transferRequests ?? []).filter(
@@ -2509,6 +2539,7 @@ function buildInitialSquads(
         id: player.id,
         birthdate: player.birthdate,
         homegrown: player.homegrownCountry === countryOfTeam(team.id),
+        positionGroup: positionGroupOfPlayer(player),
       };
       if (isUnder21(player.birthdate, seasonStartYear)) {
         // U21은 명단 밖이라 규정이 막지 않는다 — 몇 명을 붙일지는 운영 판단이다.
@@ -3051,6 +3082,11 @@ const XI_BONUS = 200;
  * 포지션군 감점(-400)이 여전히 이겨야 하기 때문이다: 지정 명단에 GK가 없거나
  * 그 GK가 2군이면, 강제로 채우는 순간 필드 플레이어가 골문에 선다.
  * 11명이 안 되거나 부상·징계로 빠진 자리는 평소대로 적합도 상위가 메운다.
+ *
+ * ⚠️ **골문에는 골키퍼만 앉는다** (team.md §6). 감점은 "누가 덜 나쁜가"이지 "서도
+ * 되는가"가 아니라, 풀에 골키퍼가 하나도 없으면 감점을 안은 채 수비형 미드필더가
+ * 골문에 섰다. 그때는 GK 슬롯을 배정에서 빼고 **골문을 비운 채 열 명**을 세운다 —
+ * 등록 현황이 사유를 세우고, 킥오프의 자동 대체가 채운다 (match.md §2).
  */
 export function buildAssignments(
   squad: GamePlayer[],
@@ -3084,16 +3120,26 @@ export function buildAssignments(
   // 사라진다.
   const fit = memoFit(wanted);
 
-  const chosen = fillSlots(pool, slots, fit);
+  // 골키퍼 없는 풀에서는 골문 자리를 배정에서 뺀다 — 비운 자리는 저장되지 않는다
+  const keeperInPool = pool.some((p) => groupOf(p) === "GK");
+  const seats = slots
+    .map((_, index) => index)
+    .filter((index) => keeperInPool || positionGroupOf(slots[index]!) !== "GK");
+  const chosen = fillSlots(
+    pool,
+    seats.map((index) => slots[index]!),
+    fit,
+  );
   for (const p of chosen) used.add(p.id);
 
   chosen.forEach((p, i) => {
+    const index = seats[i]!;
     assignments.push({
       playerId: p.id,
       role: "starting",
-      position: slots[i]!,
+      position: slots[index]!,
       familiarity,
-      point: layout[i],
+      point: layout[index],
     });
   });
 
