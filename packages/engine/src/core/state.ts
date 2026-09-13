@@ -1586,6 +1586,36 @@ export function standTransferRequest(
   return true;
 }
 
+/**
+ * 요청에 답한다 — **답과 결정은 다른 칸이다** (transfer.md §1-1). `answeredOn`은
+ * 책상에서 내려간 날이고 `answer`는 팔지·거부할지의 결정이다. 면담의 답은 날짜만
+ * 찍고 결정을 비워 둔다 — 그래야 명령이 그 결정을 한 번 내릴 수 있다.
+ *
+ * 옛 세이브의 요청은 `PlayerState.transferRequestedOn`에서 파생된 줄이라 장부에
+ * 없다 — 밀어 넣지 않으면 감독의 답이 아무 데도 남지 않는다.
+ *
+ * 요청이 선 날과 감독이 답한 날은 다른 사실이라 회견이 둘 다 싣는다 — 실려 간
+ * 자리(`pressedOn`)를 비운다. 요청이 없으면 `null`.
+ */
+export function answerTransferRequest(
+  state: GameState,
+  playerId: string,
+  answer?: TransferRequest["answer"],
+): TransferRequest | null {
+  const found = transferRequestOf(state, playerId);
+  if (!found) return null;
+  const rows = (state.transferRequests ??= []);
+  let request = rows.find((r) => r.gamePlayerId === playerId);
+  if (!request) {
+    request = found;
+    rows.push(request);
+  }
+  request.answeredOn = state.date;
+  if (answer !== undefined) request.answer = answer;
+  delete request.pressedOn;
+  return request;
+}
+
 /** 요청을 걷는다 — 원인이 사라졌거나 그 선수가 팀을 떠났을 때 */
 export function withdrawTransferRequest(state: GameState, playerId: string): void {
   state.transferRequests = (state.transferRequests ?? []).filter(

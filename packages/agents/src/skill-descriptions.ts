@@ -94,6 +94,7 @@ export const SKILL_CATALOG = [
       "감독의 발화를 stance 하나로 옮긴다 — respond_to_media와 같은 다섯이다. 자리를 주지 않고 돌려보냈으면 decline: true. 찾아온 선수의 심경은 mood에. " +
       "구단주가 건 조건을 두고 감독이 되물었으면 counter에 싣는다 — 기한을 늘려 달라면 extendDays, 조건을 낮춰 달라면 relax: true. 한 차례뿐이고 얼마나 물러서는지는 구단주가 정한다. " +
       "압력이 연 자리는 압력만 되돌린다 — 불만은 이름을 불러 건넨 대화·승격·선발로만 풀린다. " +
+      "이적 요청이 선 선수의 자리에서 답하면 그 요청도 답한 것으로 닫힌다 — 팔거나 거부하는 결정만 market_orders로 건넨다. " +
       "감독직 면접 자리에서는 답이 제안 조건을 정한다 — own·defend는 기본 조건, bold는 연봉·이적 예산 약속을 흥정 천장까지 올리고 흥정 기회를 태우며, criticise·deflect·decline은 제안 없이 문을 닫는다.",
   },
   {
