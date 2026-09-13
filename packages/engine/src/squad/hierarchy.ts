@@ -14,11 +14,11 @@ import { playersOf, squadLevelOf, type GameState } from "../core/state";
  */
 
 /**
- * 서열 점수의 규칙은 **도메인이 갖는다** — 세계를 보지 않는 순수 함수라 새 게임을
- * 세우는 자리(`createGame`)도 같은 자를 쓴다 (AGENTS.md §5 "한 규칙, 한 정의").
+ * 서열 점수와 **첫 주장**의 규칙은 **도메인이 갖는다** — 세계를 보지 않는 순수 함수라
+ * 새 게임을 세우는 자리(`createGame`)도 같은 자를 쓴다 (AGENTS.md §5 "한 규칙, 한 정의").
  * 코어 쪽에서 부르던 자리가 옮기지 않게 여기서 다시 내보낸다.
  */
-export { standingScore } from "@story-fm/domain";
+export { standingScore, initialCaptainOf } from "@story-fm/domain";
 
 /** 리더 그룹의 크기 — 1군 상위 몇 명이 라커룸을 이끄는가 */
 export const LEADER_GROUP_SIZE = 5;

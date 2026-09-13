@@ -10,6 +10,7 @@ import {
   MANAGER_ATTRIBUTES,
   FORMATION_SLOTS,
   GamePlayerSchema,
+  initialCaptainOf,
   TeamTacticsSchema,
   clusterOf,
   isMirrorPair,
@@ -662,8 +663,41 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
     expect(checked).toBeGreaterThan(20);
   });
 
-  it("주장이 정확히 1명이다", () => {
-    expect(playersOf(state, state.userTeamId).filter((p) => p.isCaptain)).toHaveLength(1);
+  it("주장이 정확히 1명이고, 개막전에 나서는 선발 중에서 나온다", () => {
+    const captains = playersOf(state, state.userTeamId).filter((p) => p.isCaptain);
+    expect(captains).toHaveLength(1);
+    /**
+     * 완장은 **경기에 나서는 사람**의 것이다 (people.md §5-1). 리더십과 나이만 보면
+     * 한 경기도 뛰지 않는 백업 골키퍼가 완장을 차고, 경기마다 `matchCaptainOf`가
+     * 그 완장을 다른 사람에게 넘긴다 — 라커룸의 축이 그라운드에 서지 않는다.
+     */
+    const starters = tacticsOf(state, state.userTeamId)
+      .assignments.filter((a) => a.role === "starting")
+      .map((a) => a.playerId);
+    expect(starters).toContain(captains[0]!.id);
+  });
+
+  /**
+   * 후보가 비는 자리에서 **완장까지 비우지는 않는다** — 배치가 없으면 1군으로,
+   * 1군도 없으면 명단 전체로 물러난다 (people.md §5-1).
+   */
+  it("첫 주장의 후보는 선발 → 1군 → 명단 전체 순으로 물러난다", () => {
+    const p = (id: string, leadership: number, level?: "first" | "reserve") => ({
+      id,
+      birthdate: "1996-01-01",
+      squadLevel: level,
+      attributes: { leadership },
+    });
+    const squad = [p("keeper", 90, "first"), p("winger", 60, "first"), p("kid", 80, "reserve")];
+    const asOf = "2026-07-01";
+
+    // 선발이 후보를 정한다 — 리더십 90이 명단에 있어도 선발이 아니면 서지 않는다
+    expect(initialCaptainOf(squad, ["winger"], asOf)?.id).toBe("winger");
+    // 배치가 비면 1군 — 2군의 리더십 80보다 1군의 90이 앞선다
+    expect(initialCaptainOf(squad, [], asOf)?.id).toBe("keeper");
+    // 1군도 비면 명단 전체 — 완장이 비지는 않는다
+    expect(initialCaptainOf([p("kid", 80, "reserve")], [], asOf)?.id).toBe("kid");
+    expect(initialCaptainOf([], [], asOf)).toBeNull();
   });
 
   it("초기 상태 — 기록 테이블은 부임 전 이력만 갖고 기본 훈련이 깔려 있다", () => {
