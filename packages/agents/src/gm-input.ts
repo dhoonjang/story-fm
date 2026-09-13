@@ -8,6 +8,8 @@ import {
   ABSENT_REASON_KO,
   boardExpectation,
   buildOpponentReport,
+  DIRECTIVE_DROP_KO,
+  directiveStandingOf,
   callUpsOfBreak,
   careerTotalsOf,
   characterEntry,
@@ -1529,6 +1531,28 @@ export function buildRecentTurnsBlock(state: GameState, count = RECENT_TURNS): s
 }
 
 /**
+ * 「개인 지시 자리」 — **걸어 둔 것이 아니라 걸린 것.**
+ *
+ * 지시는 한 경기에 셋까지고 넷째는 가장 오래된 것을 밀어낸다(match.md §2). 걸어 둔
+ * 목록만 주면 GM은 넷을 다 걸린 것으로 읽고 그 전제로 장면을 쓴다 — 남은 자리를
+ * 아는 GM은 감독이 넷째를 말하기 전에 **먼저** 말할 수 있고, 표적이 교체로 사라진
+ * 지시도 그 자리에서 감독에게 되돌려 준다.
+ *
+ * 판정은 코어의 것이다(`directiveStandingOf`) — 사실만 싣고 무엇을 하라는 말은
+ * 여기 적지 않는다.
+ */
+function directiveSlotLine(state: GameState): string {
+  const slots = directiveStandingOf(state, state.userTeamId);
+  const rows = slots.rows.map((d) => {
+    const target = d.targetId ? `→${playerName(state, d.targetId)}` : "";
+    const how = d.code ? DIRECTIVE_DROP_KO[d.code] : "걸림";
+    return `${playerName(state, d.playerId)} [${d.kind}${target}] ${how}`;
+  });
+  const head = `개인 지시 자리: ${slots.used}/${slots.limit}`;
+  return rows.length === 0 ? head : `${head} — ${rows.join(" · ")}`;
+}
+
+/**
  * `<standing>` — **지금 우리가 걸어 둔 것 전부**: 6축과 갈래·세트피스 인원·지역 전술·
  * 개인 지시와 역할·완장·세트피스 키커. 경기 장부 노트와 평시의 지시 해석이 같은 블록을
  * 읽는다 — 두 벌이면 "압박 올려"의 지금 값이 한쪽에서 지어내진다 (agents.md §1).
@@ -1593,6 +1617,7 @@ export function buildStandingBlock(
           )
           .join(", ")}`
       : `개인 지시·역할: 없음`,
+    directiveSlotLine(state),
     `주장: ${captain ? playerName(state, captain.id) : "없음"} · 부주장: ${vice ? playerName(state, vice.id) : "없음"}`,
     `세트피스 키커: 코너 ${takerName(takers.corner)} · 프리킥 ${takerName(takers.freeKick)} · 페널티 ${takerName(takers.penalty)}`,
     `</standing>`,

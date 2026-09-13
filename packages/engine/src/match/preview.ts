@@ -30,7 +30,8 @@ import {
   teamShortNameIn,
   type GameState,
 } from "../core/state";
-import { assembleUserLineup, directivesOnPitch, slotsFor } from "./match-flow";
+import { assembleUserLineup, slotsFor } from "./match-flow";
+import { directivesOnPitch } from "./directive-standing";
 import { managerTacticsOf } from "./manager-tactics";
 
 /**
