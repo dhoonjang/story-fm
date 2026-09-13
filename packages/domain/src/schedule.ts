@@ -115,6 +115,18 @@ export const MatchResultSchema = z.object({
   homeStarters: z.array(z.string()).optional(),
   awayStarters: z.array(z.string()).optional(),
   /**
+   * **킥오프에 벤치에 앉은 선수** — 위 세 칸은 전부 「그라운드를 밟은 사람」이라,
+   * 못 뛴 선수가 벤치에 있었는지 명단에 아예 없었는지를 가릴 수 없다. 그 둘은
+   * 감독의 다른 결정이고 근황 줄이 그것으로 갈린다 (→ docs/data/people.md §7).
+   *
+   * **우리 경기에만 남는다** — 평점(`ratings`)과 같은 규약이다. 리그 2,100경기의
+   * 벤치 아홉 명까지 적으면 아무도 읽지 않는 칸이 한 시즌에 ≈1MB이고, 이 줄을 읽는
+   * 자리는 우리 선수의 근황뿐이다. 옛 세이브엔 없어 optional이고, 없으면 읽는 쪽이
+   * **자리를 말하지 않는다** (SAVE_VERSION 유지).
+   */
+  homeBench: z.array(z.string()).optional(),
+  awayBench: z.array(z.string()).optional(),
+  /**
    * **종료 시각에 그라운드에 서 있던 선수** — 연장과 승부차기를 뛰는 사람들이다.
    *
    * 위 명단은 "뛴 사람 전부"라 교체로 나간 선수도 퇴장당한 선수도 들어 있다.

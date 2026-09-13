@@ -14,6 +14,8 @@ import { isSettling } from "./settling";
 import { openSymbolicNumbers, type NumberLineage } from "./numbers";
 // 심경(mood)과 같은 문을 지난다 — 두 벌이면 같은 사이가 자리마다 다른 말로 선다
 import { mentoringReadOf } from "./mentoring";
+// 못 뛴 자리의 말은 심경 카드와 한 벌이다 (people.md §7)
+import { NO_MINUTES_PLACE_KO, type NoMinutesPlace } from "./mood";
 import { diffDays } from "../competition/calendar";
 import { daysUntilReturn, internationalBreaksOf, openCallUp } from "../competition/international";
 import { playerArchetypeOf } from "../world/player-persona";
@@ -53,7 +55,7 @@ export interface SpeakerCue {
 /** 폼이 이야기가 되는 경계 — 이 안쪽은 "평소"라 말할 거리가 아니다 */
 const PEAK = 0.5;
 const SLUMP = -0.4;
-/** 이만큼 연속으로 명단에 못 들면 본인에게 사건이다 */
+/** 이만큼 연속으로 못 뛰면 본인에게 사건이다 — 벤치였든 명단 밖이었든 */
 const BENCHED_RUN = 3;
 /** 복귀가 눈앞인 부상 — 재활 막바지의 이야기 */
 const RETURN_SOON = 14;
@@ -76,27 +78,68 @@ export function rotationDay(date: string): number {
   return diffDays(EPOCH, date);
 }
 
+/** 치른 경기 하나에서 우리 쪽이 남긴 두 목록 — 벤치는 없는 경기가 있다 */
+interface Matchday {
+  /** 그라운드를 밟은 사람 — 교체 투입까지 */
+  played: ReadonlySet<string>;
+  /** 킥오프에 벤치에 앉은 사람. `null`은 **모른다**는 뜻이다 (옛 경기) */
+  bench: ReadonlySet<string> | null;
+}
+
 /**
- * 최근 우리 경기의 출전 명단 — 새 경기가 앞에 온다.
+ * 최근 우리 경기 — 새 경기가 앞에 온다.
  *
  * ⚠️ **최근은 날짜로 정한다.** `state.matches`는 날짜순이 아니다 — 컵·대항전 대진은
  * 그 라운드가 확정될 때 배열 **뒤에** 붙으므로, 배열 끝 세 원소는 시즌 후반이면
- * 방금 편성된 컵 경기다. 그것으로 세면 리그 3연속 명단 제외가 조용히 새어 나간다
+ * 방금 편성된 컵 경기다. 그것으로 세면 리그 3연속 미출전이 조용히 새어 나간다
  * (`mood.ts`·`slump.ts`도 같은 이유로 날짜순이다).
  */
-function recentLineups(state: GameState, limit: number): Array<ReadonlySet<string>> {
+function recentMatchdays(state: GameState, limit: number): Matchday[] {
   return (
     state.matches
       .filter((m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId)
-      // 2군 경기 명단은 1군 명단 제외의 근거가 아니다 — 1군 전원이 "제외"로 읽힌다
+      // 2군 경기 명단은 1군에서 못 뛴 근거가 아니다 — 1군 전원이 "제외"로 읽힌다
       .filter((m) => m.result !== null && !isReserveMatch(m))
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
       .slice(0, limit)
       .map((m) => {
         const home = m.homeTeamId === state.userTeamId;
-        return new Set(m.result?.[home ? "homeLineup" : "awayLineup"] ?? []);
+        const bench = m.result?.[home ? "homeBench" : "awayBench"];
+        return {
+          played: new Set(m.result?.[home ? "homeLineup" : "awayLineup"] ?? []),
+          bench: bench === undefined ? null : new Set(bench),
+        };
       })
   );
+}
+
+/** 못 뛴 경기 수와, 그 내내 그가 있던 자리 */
+interface BenchRun {
+  count: number;
+  /** `null`은 **말하지 않는다**는 뜻이다 — 자리가 섞였거나 모르는 경기가 있다 */
+  place: NoMinutesPlace | null;
+}
+
+/**
+ * **못 뛴 것과 빠진 것은 다른 사실이다** (people.md §7).
+ *
+ * 세는 것은 출전이 없는 경기 수이고, 자리는 그것과 별개의 사실이다 — 매 경기
+ * 벤치에 앉아 있던 선수를 「명단 제외」라고 부르면 GM이 없던 장면을 쓴다. 그래서
+ * 자리는 **그 경기들 내내 같았을 때만** 선다: 섞였으면 한 단어로 부를 수 없고,
+ * 벤치를 안 남긴 옛 경기가 하나라도 끼면 지어내는 대신 수만 낸다.
+ */
+function benchRunIn(days: readonly Matchday[], playerId: string): BenchRun {
+  let count = 0;
+  let place: NoMinutesPlace | null = null;
+  for (const day of days) {
+    if (day.played.has(playerId)) break;
+    const seat: NoMinutesPlace | null =
+      day.bench === null ? null : day.bench.has(playerId) ? "bench" : "out";
+    if (count === 0) place = seat;
+    else if (place !== seat) place = null;
+    count += 1;
+  }
+  return { count, place };
 }
 
 /**
@@ -206,12 +249,12 @@ function callUpFactOf(state: GameState, player: GamePlayer): string | null {
 function factOf(
   state: GameState,
   player: GamePlayer,
-  benched: number,
+  benched: BenchRun,
   openNumbers: readonly NumberLineage[],
 ): string | null {
   /**
-   * **이번 시즌 뒤 은퇴** — 맨 앞이다 (people.md §7 · season.md §6). 폼도 명단 제외도
-   * 그 사실 위에서 읽히므로, 뒤로 밀면 마지막 시즌을 보내는 선수가 「3경기 명단 제외」로만
+   * **이번 시즌 뒤 은퇴** — 맨 앞이다 (people.md §7 · season.md §6). 폼도 못 뛴 것도
+   * 그 사실 위에서 읽히므로, 뒤로 밀면 마지막 시즌을 보내는 선수가 「3경기 출전 0」으로만
    * 세계에 선다.
    */
   const retiring = player.state.retiringAfterSeason;
@@ -258,7 +301,15 @@ function factOf(
   const form = player.state.form;
   if (form >= PEAK) return `폼 ${formLabel(form)}`;
   if (form <= SLUMP) return `폼 ${formLabel(form)}`;
-  if (benched >= BENCHED_RUN) return `${benched}경기 연속 명단 제외`;
+  /**
+   * **센 것과 가른 것을 함께 낸다** (people.md §7) — 자리를 모르면 붙이지 않는다.
+   * 말은 심경 카드와 한 벌이라(`NO_MINUTES_PLACE_KO`) 같은 사실이 두 자리에서
+   * 다른 이름으로 서지 않는다.
+   */
+  if (benched.count >= BENCHED_RUN) {
+    const where = benched.place === null ? "" : ` · ${NO_MINUTES_PLACE_KO[benched.place]}`;
+    return `${benched.count}경기 연속 출전 0${where}`;
+  }
   /**
    * **멘토링** — 번호와 함께 맨 뒤다 (people.md §7). 지금 벌어지는 일이 아니라 그 밑에
    * 깔린 **서 있는 사이**라, 끝난 사이는 여기 오지 않는다: 그것은 심경의 자리이고
@@ -306,11 +357,11 @@ function factOf(
  * 손을 뻗는 일이다). 결정적이다 — 같은 날 같은 세이브면 같은 목록이다.
  */
 export function speakerCues(state: GameState, limit = 3): SpeakerCue[] {
-  const lineups = recentLineups(state, BENCHED_RUN);
+  const matchdays = recentMatchdays(state, BENCHED_RUN);
   const spoke = recentSpeakers(state, CUE_ROTATION_TURNS);
   /**
    * ⚠️ **한 번만 센다.** 계보는 시즌 기록 전체를 훑어 파생하므로, 1군 전원 루프
-   * 안에서 부르면 같은 원장을 사람 수만큼 다시 읽는다 (`recentLineups`·`spoke`와
+   * 안에서 부르면 같은 원장을 사람 수만큼 다시 읽는다 (`recentMatchdays`·`spoke`와
    * 같은 이유로 밖에서 선다).
    */
   const openNumbers = openSymbolicNumbers(state, state.userTeamId);
@@ -326,12 +377,7 @@ export function speakerCues(state: GameState, limit = 3): SpeakerCue[] {
   for (const player of playersOf(state, state.userTeamId)) {
     if (squadLevelOf(player) !== "first") continue;
     if (player.id === atTheDoor) continue;
-    let benched = 0;
-    for (const lineup of lineups) {
-      if (lineup.has(player.id)) break;
-      benched += 1;
-    }
-    const fact = factOf(state, player, benched, openNumbers);
+    const fact = factOf(state, player, benchRunIn(matchdays, player.id), openNumbers);
     if (fact === null) continue;
     cues.push({
       playerId: player.id,

@@ -327,7 +327,7 @@ export function SquadTable({
                     className="tag loan"
                     title={
                       `${p.loan.team} 임대 — ${humanDate(p.loan.until)} 복귀` +
-                      (p.loan.benchRun > 0 ? ` · 최근 ${p.loan.benchRun}경기 명단 밖` : "") +
+                      (p.loan.benchRun > 0 ? ` · 최근 ${p.loan.benchRun}경기 출전 0` : "") +
                       (p.loan.growth > 0 ? ` · 임대 이후 성장 +${p.loan.growth}` : "")
                     }
                   >
