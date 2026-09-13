@@ -5,7 +5,7 @@
  * 성장(`grantManagerXP`). LLM은 판정 라벨만 내고 변화량은 여기 공식이 정한다
  * (AGENTS.md §4 결정성 경계).
  */
-import { INCIDENT_KIND_KO, MANAGER_ATTRIBUTE_KO, PROMISE_KIND_KO } from "@story-fm/domain";
+import { INCIDENT_KIND_KO, josa, MANAGER_ATTRIBUTE_KO, PROMISE_KIND_KO } from "@story-fm/domain";
 import type {
   GamePlayer,
   IncidentKind,
@@ -230,7 +230,7 @@ function receptivityPiece(
 ): { text: string; item: CommandBriefItem } | null {
   if (asked === stood) return null;
   return {
-    text: ` (수용성 ${RECEPTIVITY_KO[tier]} — ${asked}은 ${stood}으로)`,
+    text: ` (수용성 ${RECEPTIVITY_KO[tier]} — ${josa(asked, "은/는")} ${josa(stood, "으로/로")})`,
     item: item({ label: "수용성", text: RECEPTIVITY_KO[tier] }),
   };
 }

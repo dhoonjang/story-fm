@@ -1343,10 +1343,16 @@ export function setPlayerRole(
   const tactics = userTactics(state);
   const assignment = tactics.assignments.find((a) => a.playerId === player.id);
   if (!assignment) {
-    return { ok: false, message: `${player.name}은 배치가 없습니다 — 먼저 선발·벤치에 넣으세요` };
+    return {
+      ok: false,
+      message: `${josa(player.name, "은/는")} 배치가 없습니다 — 먼저 선발·벤치에 넣으세요`,
+    };
   }
   if (assignment.role !== "starting") {
-    return { ok: false, message: `${player.name}은 자리가 없습니다 — 먼저 선발로 세우세요` };
+    return {
+      ok: false,
+      message: `${josa(player.name, "은/는")} 자리가 없습니다 — 먼저 선발로 세우세요`,
+    };
   }
   const options = rolesFor(assignment.position);
   // 감독이 부른 표기 그대로 견준다 — 화면은 id를, 해석기는 이름을 보낸다 (player.md §3.1)
@@ -1361,7 +1367,11 @@ export function setPlayerRole(
   if (from === def.id) {
     // 바뀐 것이 없다는 사실은 **반환값이** 말한다 (→ docs/data/player.md §3.1) —
     // 표식이 없으면 `setPlayerTactic`이 이 걸음을 "바꿨다"로 세어 뒤따르는 반려를 접는다
-    return { ok: true, unchanged: true, message: `${player.name}은 이미 ${def.ko}입니다` };
+    return {
+      ok: true,
+      unchanged: true,
+      message: `${josa(player.name, "은/는")} 이미 ${def.ko}입니다`,
+    };
   }
 
   /**
@@ -2101,7 +2111,7 @@ export function setPlayerInstruction(
       if (!found) {
         return {
           ok: false,
-          message: `${PLAYER_DIRECTIVE_KO[input.kind]}는 겨냥할 상대 선수가 필요합니다 — targetId를 주세요`,
+          message: `${josa(PLAYER_DIRECTIVE_KO[input.kind], "은/는")} 겨냥할 상대 선수가 필요합니다 — targetId를 주세요`,
         };
       }
       if (!found.ok) return found;

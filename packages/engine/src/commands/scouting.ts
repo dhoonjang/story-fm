@@ -216,7 +216,7 @@ export function scoutMission(state: GameState, input: ScoutMissionInput): Market
       ok: false,
       message:
         `${missionLabel(draft)} 임무는 보내지 못했습니다 — 동시 파견 한도 ` +
-        `${SCOUT_CONCURRENT_LIMIT}이 차 있습니다 (파견 중: ${inFlightScoutLabels(state).join(", ")}). ` +
+        `${josa(String(SCOUT_CONCURRENT_LIMIT), "이/가")} 차 있습니다 (파견 중: ${inFlightScoutLabels(state).join(", ")}). ` +
         `${earliestScoutReturn(state)} 보고가 들어오면 자리가 납니다. ` +
         `이 임무는 대기로 남습니다 — 자리가 난 뒤 다시 불러야 나갑니다`,
     };

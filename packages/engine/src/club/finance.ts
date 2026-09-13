@@ -18,6 +18,7 @@ import {
   FINANCE_INCOME_CATEGORIES,
   formatMoney,
   isReserveMatch,
+  josa,
   reinvestShareOf,
 } from "@story-fm/domain";
 import {
@@ -720,7 +721,7 @@ export function setTicketPrice(
       return {
         ok: false,
         message:
-          `티켓 값은 ${last.setOn}에 ${ticketText(base * before)}으로 매겼습니다 — ` +
+          `티켓 값은 ${last.setOn}에 ${josa(ticketText(base * before), "으로/로")} 매겼습니다 — ` +
           `시즌권과 예매가 이미 나가 ${left}일 뒤에 다시 매길 수 있습니다`,
       };
     }
@@ -741,7 +742,9 @@ export function setTicketPrice(
     ok: true,
     message:
       line +
-      (capped ? ` — 부른 값 ${ticketText(asked)}은 이 구단이 부를 수 있는 폭 밖입니다` : "") +
+      (capped
+        ? ` — 부른 값 ${josa(ticketText(asked), "은/는")} 이 구단이 부를 수 있는 폭 밖입니다`
+        : "") +
       `. 관중은 기준 대비 ${crowd >= 0 ? "+" : ""}${crowd}%로 움직입니다`,
     brief: {
       head: "티켓 가격",
@@ -2316,7 +2319,7 @@ export function financeNoteText(note: FinanceNote): string {
     case "wage-ratio-caution":
       return `급여 비중 ${pct(note.value)} — 주의 구간 (${pct(note.limit)} 이상)`;
     case "cash-deficit-transfer":
-      return `이적 지출 ${money(note.limit ?? 0)}으로 현금이 ${money(note.value ?? 0)} 줄었다`;
+      return `이적 지출 ${josa(money(note.limit ?? 0), "으로/로")} 현금이 ${money(note.value ?? 0)} 줄었다`;
     case "cash-deficit-operating":
       return `운영만으로 ${money(note.value ?? 0)} 적자`;
     case "psr-breach":
@@ -2325,8 +2328,8 @@ export function financeNoteText(note: FinanceNote): string {
       return `PSR 여유 ${money(note.value ?? 0)} (한도의 ${Math.round(PSR_HEADROOM_WARN * 100)}% 미만)`;
     case "debt-over-limit":
       return (
-        `부채 ${money(note.value ?? 0)} — 한도 ${money(note.limit ?? 0)}를 넘어 이적 예산이 ` +
-        `동결됐다. 연 이자 ${money(note.extra ?? 0)}가 매달 나간다`
+        `부채 ${money(note.value ?? 0)} — 한도 ${josa(money(note.limit ?? 0), "을/를")} 넘어 이적 예산이 ` +
+        `동결됐다. 연 이자 ${josa(money(note.extra ?? 0), "이/가")} 매달 나간다`
       );
     case "debt-under-limit":
       return `부채 ${money(note.value ?? 0)} (동결선 ${money(note.limit ?? 0)}) — 연 이자 ${money(note.extra ?? 0)}`;
@@ -2601,8 +2604,8 @@ export function topUpTransferBudget(
       const psr = psrStatus(state);
       digest.push(
         psr.headroom < 0
-          ? `3시즌 누적 ${money(psr.rolling3Season)}로 PSR 한도를 ${money(-psr.headroom)} 넘겼다`
-          : `부채 ${money(debtOf(state, teamId))}가 한도 ${money(debtLimitOf(state, teamId))}를 넘었다`,
+          ? `3시즌 누적 ${josa(money(psr.rolling3Season), "으로/로")} PSR 한도를 ${money(-psr.headroom)} 넘겼다`
+          : `부채 ${josa(money(debtOf(state, teamId)), "이/가")} 한도 ${josa(money(debtLimitOf(state, teamId)), "을/를")} 넘었다`,
       );
     }
     return;
@@ -2624,13 +2627,13 @@ export function topUpTransferBudget(
 
   if (isUser && lapsed >= 1_000_000) {
     digest.push(
-      `보드가 쓰지 않은 이적 예산 ${money(lapsed)}를 거둬들였다 — 예산은 이월되지 않는다`,
+      `보드가 쓰지 않은 이적 예산 ${josa(money(lapsed), "을/를")} 거둬들였다 — 예산은 이월되지 않는다`,
     );
   }
   if (isUser && Math.abs(performance) >= 1_000_000) {
     digest.push(
       performance > 0
-        ? `구단주가 지난 시즌 잉여 ${money(surplus)} 중 ${money(performance)}를 이적 예산으로 돌렸다`
+        ? `구단주가 지난 시즌 잉여 ${money(surplus)} 중 ${josa(money(performance), "을/를")} 이적 예산으로 돌렸다`
         : `지난 시즌 적자로 이적 예산이 ${money(-performance)} 깎였다`,
     );
   }
@@ -2751,7 +2754,7 @@ export function applyFinanceEvent(
   if (!allowed.includes(input.category)) {
     return {
       ok: false,
-      message: `${input.kind === "income" ? "수입" : "지출"}으로 쓸 수 없는 항목입니다: ${input.category} (가능: ${allowed.join(", ")})`,
+      message: `${josa(input.kind === "income" ? "수입" : "지출", "으로/로")} 쓸 수 없는 항목입니다: ${input.category} (가능: ${allowed.join(", ")})`,
     };
   }
 
@@ -2770,7 +2773,7 @@ export function applyFinanceEvent(
       ok: false,
       message:
         `${FINANCE_CATEGORY_KO[input.category]} 이벤트 한 건은 ${money(eventCap)}까지입니다 — ` +
-        `${money(amount)}은 이 구단에서 그 축이 움직이는 폭을 넘습니다`,
+        `${josa(money(amount), "은/는")} 이 구단에서 그 축이 움직이는 폭을 넘습니다`,
     };
   }
 

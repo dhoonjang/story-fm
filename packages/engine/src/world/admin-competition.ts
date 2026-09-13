@@ -1,4 +1,4 @@
-import { MatchStageSchema } from "@story-fm/domain";
+import { josa, MatchStageSchema } from "@story-fm/domain";
 import { CUP_CATALOG_SEED, cupCatalog, type CupCatalogEntry } from "../data/cup-catalog";
 import { asRecord } from "../data/catalog-source";
 import {
@@ -130,7 +130,7 @@ function validateStageMoney(value: unknown, label: string): string | null {
   if (table === null) return `${label} 표가 필요합니다`;
   for (const [stage, money] of Object.entries(table)) {
     if (!isMatchStage(stage)) return `알 수 없는 단계: ${stage}`;
-    if (numberAtLeast(money, 0) === null) return `${label}은 0 이상이어야 합니다`;
+    if (numberAtLeast(money, 0) === null) return `${josa(label, "은/는")} 0 이상이어야 합니다`;
   }
   return null;
 }
@@ -276,7 +276,8 @@ function validateCup(entry: CupCatalogEntry): string | null {
   if (textOf(entry.name) === null) return "대회 이름이 필요합니다";
   if (textOf(entry.short) === null) return "짧은 표기가 필요합니다";
   for (const [key, label] of CUP_COUNT_FIELDS) {
-    if (intAtLeast(entry[key], 0) === null) return `${label}는 0 이상의 정수여야 합니다`;
+    if (intAtLeast(entry[key], 0) === null)
+      return `${josa(label, "은/는")} 0 이상의 정수여야 합니다`;
   }
   const slots = asRecord(entry.slots);
   if (slots === null) return "리그별 티켓 표가 필요합니다";

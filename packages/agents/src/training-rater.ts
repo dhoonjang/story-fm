@@ -16,6 +16,7 @@ import {
   ATTRIBUTE_AXES,
   AXIS_KO,
   DateString,
+  josa,
   TRAINING_MARKS,
   TRAINING_MARK_KO,
   TrainingMarkSchema,
@@ -50,12 +51,12 @@ export const TRAINING_RATER_SYSTEM = `당신은 축구 구단의 훈련장을 �
 훈련 내용, 선수의 자리·나이·컨디션, 그 기간의 대화와 [장부] 줄, 걸려 있는 개인 지시.
 
 ## 규칙
-- 전술 적응도는 ${TACTIC_GAIN_MIN} ~ ${TACTIC_GAIN_MAX} 중 하나다. 대부분은 0~1이고, ${TACTIC_GAIN_MIN}은
+- 전술 적응도는 ${TACTIC_GAIN_MIN} ~ ${TACTIC_GAIN_MAX} 중 하나다. 대부분은 0~1이고, ${josa(String(TACTIC_GAIN_MIN), "은/는")}
   지친 선수를 굴려 오히려 흐트러졌을 때다.
 - 능력치는 0~${TRAINING_ATTR_CAP}명, 각 한 축 +${ATTR_STEP_MAX} 또는 −${-ATTR_STEP_MIN}, 그 기간에 실제로 훈련한 축만.
   아무에게도 변화가 없는 구간이 정상이다. ${agingDeclineLine()}
 - 개인 훈련으로 자리를 배우는 선수(대상 표에 “전향 …”으로 표시)에게는
-  positionGain을 0~${POSITION_TRAIN_MAX}으로 적는다. 전향이 걸리지 않은 선수에게는 적지 않는다.
+  positionGain을 0~${josa(String(POSITION_TRAIN_MAX), "으로/로")} 적는다. 전향이 걸리지 않은 선수에게는 적지 않는다.
 - 대화에서는 감독이 무엇을 주문했는지와 그 근거만 읽는다. 장면의 말은 여러 사람의 것이고, 실제로 걸린 것은 [장부] 줄이 말한다.
 - 대상 전원을 빠뜨리지 마라.
 - date에 그 변화가 나온 훈련 날짜를 적는다. 위 훈련 목록의 날짜 중 하나여야 한다.
