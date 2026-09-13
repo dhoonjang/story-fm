@@ -31,6 +31,7 @@ import {
   scoutPlayer,
   scoutReportCard,
   squadReturnOf,
+  subLimitsOf,
   teamName,
   playersOf,
   userPlayers,
@@ -42,6 +43,7 @@ import {
   describeReputation,
   tacticAxisOf,
   tacticWord,
+  type MatchRecord,
 } from "@story-fm/domain";
 import {
   MATCH_ADVANCED,
@@ -649,6 +651,64 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
     const before = buildGmStateNote(state);
     advanceTime(state, { days: 3 });
     expect(buildGmStateNote(state)).not.toBe(before);
+  });
+});
+
+/**
+ * 교체 한도 — 감독이 **경기 계획을 말하는 자리**다 (이슈 #774). 사흘 전에 "후반 전원
+ * 교체"를 말하는데 코어가 아는 숫자를 주지 않으면 GM이 불가능한 계획에 동의한다.
+ * 프롬프트에 숫자를 적지 않으므로 기대값도 장부의 `subLimitsOf`에서 세운다.
+ */
+describe("<now>의 교체 한도 — 다음 경기가 정한다", () => {
+  const withNext = (match: Partial<MatchRecord>): GameState => {
+    const state = game();
+    state.matches = [
+      {
+        id: "fx-p1-l1",
+        season: state.season,
+        competitionId: "epl",
+        round: 1,
+        date: "2026-08-08",
+        homeTeamId: state.userTeamId,
+        awayTeamId: "chelsea",
+        result: null,
+        ...match,
+      },
+    ];
+    return state;
+  };
+
+  it("친선은 명단 전부까지 열린다 — 숫자는 장부에서 온다", () => {
+    const limits = subLimitsOf("first_half", true);
+    expect(buildGmStateNote(withNext({ competitionId: null }))).toContain(
+      `교체 한도: ${limits.maxSubs}명 · 기회 ${limits.maxSubWindows}회`,
+    );
+  });
+
+  it("리그전은 5명이고 연장의 한 장은 말하지 않는다 — 없는 카드다", () => {
+    const note = buildGmStateNote(withNext({}));
+    expect(note).toContain("교체 한도: 5명 · 기회 3회");
+    expect(note).not.toContain("연장에 들면");
+  });
+
+  it("녹아웃 단판에는 연장의 한 장이 함께 선다", () => {
+    expect(buildGmStateNote(withNext({ competitionId: "fa-cup", stage: "qf" }))).toContain(
+      "(연장에 들면 6명 · 4회)",
+    );
+  });
+
+  /** 계획이 서는 자리와 같은 곳이라야 읽힌다 — 다음 일정 줄 바로 아래다 */
+  it("다음 경기 줄 바로 아래에 선다", () => {
+    const lines = buildGmStateNote(withNext({ competitionId: null })).split("\n");
+    const fixture = lines.findIndex((line) => line.startsWith("다음 경기:"));
+    expect(fixture).toBeGreaterThan(-1);
+    expect(lines[fixture + 1]).toMatch(/^교체 한도:/);
+  });
+
+  it("남은 일정이 없으면 줄도 서지 않는다", () => {
+    const state = game();
+    state.matches = [];
+    expect(buildGmStateNote(state)).not.toContain("교체 한도");
   });
 });
 

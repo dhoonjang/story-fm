@@ -1701,8 +1701,9 @@ export interface MatchView {
   /** 팀 합계 — 선수별 `tally`의 합. 표에 열을 더 세우지 않고 한 줄로 세운다 */
   totals: { home: MatchTally; away: MatchTally };
   /**
-   * 교체 사용량과 **국면의 한도** — 한도는 장부의 `subLimitsOf`가 정한다(연장 6인/4회).
-   * 화면이 5/3을 다시 적어 두면 연장에서 여섯 번째 카드가 없는 것처럼 읽힌다.
+   * 교체 사용량과 **그 경기의 한도** — 한도는 장부의 `subLimitsOf`가 정한다
+   * (연장 6인/4회 · 친선 9인/3회). 화면이 5/3을 다시 적어 두면 연장에서 여섯 번째
+   * 카드가, 친선에서 여섯째부터가 없는 것처럼 읽힌다.
    */
   subs: {
     home: { used: number; windows: number };
@@ -2563,7 +2564,7 @@ function buildMatchView(state: GameState): MatchView | null {
     away: rowsOf(packet.away.lineup, ledger.away.onPitch, match.awayTeamId),
   };
 
-  const subLimits = subLimitsOf(ledger.phase);
+  const subLimits = subLimitsOf(ledger.phase, ledger.friendly);
 
   /**
    * **판을 옮긴 정지점의 표식** — 장부의 마지막 `tactical_shift`에서 파생한다
