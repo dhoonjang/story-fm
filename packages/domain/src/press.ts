@@ -796,11 +796,18 @@ export function pressFactText(fact: PressFact): string {
        * "출전 기회 불만"이 어느 기대에 대해 모자란 것인지가 서지 않아, 백업의
        * 침묵과 핵심의 불만을 읽는 쪽이 가르지 못한다. 옛 세이브의 카드에는
        * 없으므로 그때는 앞의 두 조각만 남는다.
+       *
+       * 창의 출전 수(`windowApps`)는 선발 수 **옆에** 선다 — 「선발 0 · 출전 1」과
+       * 「선발 0 · 출전 0」은 읽는 쪽이 다른 말을 해야 하는 두 사실이다. 시즌
+       * 누계(`apps`)와 이름이 갈리는 것도 그래서다.
        */
       return (
         `출전 기회 불만 ${v.days ?? 0}일째 · 시즌 출전 ${v.apps ?? 0}경기` +
         (sub ? ` · ${SQUAD_STATUS_KO[sub as SquadStatus] ?? sub} 지위` : "") +
-        (v.played === undefined ? "" : ` · 최근 ${v.played}경기 선발 ${v.starts ?? 0}회`)
+        (v.played === undefined
+          ? ""
+          : ` · 최근 ${v.played}경기 선발 ${v.starts ?? 0}회` +
+            (v.windowApps === undefined ? "" : ` · 출전 ${v.windowApps}회`))
       );
     case "demoted":
       return `2군 ${v.days ?? 0}일째 · 불만 ${v.issueDays ?? 0}일째`;
