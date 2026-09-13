@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ASSOCIATIONS,
   EU_ASSOCIATIONS,
+  GOALKEEPER_MIN,
   HOMEGROWN_MIN,
   MATCHDAY_SQUAD,
   NON_HOMEGROWN_MAX,
@@ -17,6 +18,7 @@ import {
   promiseKept,
   squadStatusRank,
   startShortfall,
+  type PositionGroup,
   type RegistrablePlayer,
 } from "@story-fm/domain";
 
@@ -25,15 +27,17 @@ import {
 const SEASON = 2026;
 const player = (
   id: string,
-  opts: { homegrown?: boolean; born?: string } = {},
+  opts: { homegrown?: boolean; born?: string; group?: PositionGroup } = {},
 ): RegistrablePlayer => ({
   id,
   birthdate: opts.born ?? "1998-06-01",
   homegrown: opts.homegrown ?? false,
+  positionGroup: opts.group ?? "MF",
 });
 
+/** 첫 비홈그로운이 골키퍼다 — 골문이 빈 명단은 따로 만든다 */
 const squadOf = (nonHg: number, hg: number, u21 = 0): RegistrablePlayer[] => [
-  ...Array.from({ length: nonHg }, (_, i) => player(`n${i}`)),
+  ...Array.from({ length: nonHg }, (_, i) => player(`n${i}`, { group: i === 0 ? "GK" : "MF" })),
   ...Array.from({ length: hg }, (_, i) => player(`h${i}`, { homegrown: true })),
   ...Array.from({ length: u21 }, (_, i) => player(`y${i}`, { born: "2007-03-01" })),
 ];
@@ -86,6 +90,19 @@ describe("등록 현황", () => {
     const reg = squadRegistration(squadOf(10, 5), SEASON);
     expect(reg.total).toBe(15);
     expect(reg.issues.join()).toContain(`${MATCHDAY_SQUAD}명`);
+  });
+
+  it("골키퍼가 없으면 사유가 서고, 한 명이면 서지 않는다 — 경계는 0과 1 사이다", () => {
+    const noKeeper = squadOf(15, 8).map((p) => ({ ...p, positionGroup: "MF" as const }));
+    const reg = squadRegistration(noKeeper, SEASON);
+    expect(reg.goalkeepers).toBe(0);
+    expect(reg.issues).toEqual([`골키퍼 부족 — 0/${GOALKEEPER_MIN}명`]);
+
+    const oneKeeper = noKeeper.map((p, i) =>
+      i === 0 ? { ...p, positionGroup: "GK" as const } : p,
+    );
+    expect(squadRegistration(oneKeeper, SEASON).goalkeepers).toBe(1);
+    expect(squadRegistration(oneKeeper, SEASON).issues).toEqual([]);
   });
 
   it("남은 자리를 홈그로운/비홈그로운으로 나눠 알려 준다", () => {

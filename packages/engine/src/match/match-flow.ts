@@ -13,7 +13,7 @@ import type {
   TacticAssignment,
   TacticsSpec,
 } from "@story-fm/domain";
-import { isReserveMatch, parseScorerEntry } from "@story-fm/domain";
+import { isReserveMatch, parseScorerEntry, STARTING_XI } from "@story-fm/domain";
 import {
   addToSeasonStat,
   ageOf,
@@ -427,6 +427,9 @@ function buildPacketFor(
 /**
  * 킥오프 라인업 조립 — 배치(starting)에서 가용 선수를 뽑고, 부상·정지로 빈 자리는
  * 같은 그룹 우선으로 자동 대체한다. GK 자리는 반드시 GK 그룹으로 채운다.
+ *
+ * 배치가 열한 명에 못 미친 채 오면(골키퍼 없는 1군의 자동 편성 · 주전 강등) 빈
+ * 자리도 같은 문이 채운다 — **골문부터**, 그다음 필드 선수의 기량순 (match.md §2).
  */
 export function assembleUserLineup(
   state: GameState,
@@ -495,6 +498,36 @@ export function assembleUserLineup(
     taken.add(candidate.id);
     const calledUp = squadLevelOf(candidate) === "reserve" ? " (2군 호출)" : "";
     replaced.push(`${outgoing} → ${candidate.name}${calledUp}`);
+  }
+
+  /**
+   * **빈 자리** — 배치에 없던 자리다. 골문이 비었으면 골키퍼가 먼저고(1군, 없으면
+   * 2군 호출), 남은 자리는 필드 선수의 기량순이다. 골문에 필드 선수를 세우는 길은
+   * 없다 — 골키퍼가 세계에 없으면 경기가 열리지 않는다.
+   */
+  const keeperOnPitch = () => onPitch.some((id) => groupOf(playerById(state, id)!) === "GK");
+  const fillVacancy = (pool: GamePlayer[], keeper: boolean) =>
+    pool
+      .filter((p) => !taken.has(p.id) && !unavailable(p.id))
+      .filter((p) => (groupOf(p) === "GK") === keeper)
+      .sort((x, y) => y.attributes.overall - x.attributes.overall)[0];
+  while (onPitch.length < STARTING_XI) {
+    const keeper = !keeperOnPitch();
+    const candidate = fillVacancy(roster, keeper) ?? fillVacancy(reserves, keeper);
+    if (!candidate) {
+      return {
+        onPitch,
+        bench: [],
+        replaced,
+        error: keeper
+          ? "골문에 설 골키퍼가 없습니다 — 1군에도 2군에도 골키퍼가 없어 경기를 세울 수 없습니다"
+          : "선발 열한 명을 채울 가용 선수가 없습니다 — 스쿼드가 소진되었습니다",
+      };
+    }
+    onPitch.push(candidate.id);
+    taken.add(candidate.id);
+    const calledUp = squadLevelOf(candidate) === "reserve" ? " (2군 호출)" : "";
+    replaced.push(`(빈 자리) → ${candidate.name}${calledUp}`);
   }
 
   // 벤치 — 배치된 벤치 우선, 부족하면 가용 상위로 채움 (GK 1명 확보)
