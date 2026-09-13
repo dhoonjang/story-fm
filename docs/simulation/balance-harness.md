@@ -66,6 +66,7 @@ pnpm balance --report out  # 전부 돌리고 측정값을 out/에 남긴다 (�
 | `negotiation`          | 재계약·해지·영입의 성사 확률 분포 — 기대치를 맞춘 제안이 자동 통과인가         | [transfer](transfer.md) §3                            |
 | `squad-longevity`      | 15시즌 뒤의 선발 XI·계약 · 리그 체급과 그 천장의 드리프트(가드)                | [season](season.md) §6·§9                             |
 | `youth-development`    | 2군 경기 수 · 출전·집중 육성·멘토링이 가르는 성장 격차 · 다음 여름의 인테이크  | [season](season.md) §2·§6                             |
+| `youth-intake-tail`    | 한 여름 세계 전체 인테이크의 잠재력·종합 꼬리 — 시드 세계 분포와 나란히        | [season](season.md) §6                                |
 | `attribute-model`      | 자체 산정 모델이 낸 분포와 지금 시드 분포의 간격                               | [player](../data/player.md) §13                       |
 | `demotion-grievance`   | 한 시즌 2군 강등이 낳는 불만 건수 — 로테이션과 방치                            | [people](../data/people.md) §5                        |
 | `approach-rate`        | 한 시즌 다가옴 건수 · 채널 분포 · 소음 문이 서는가                             | [people](../data/people.md) §8                        |
@@ -73,6 +74,21 @@ pnpm balance --report out  # 전부 돌리고 측정값을 out/에 남긴다 (�
 | `history-window`       | 평시 이력의 창 — 몇 턴이 남는가 · 압축 주기 · 렌더 배율                        | [agents](../llm/agents.md) §5-1                       |
 | `prompt-regression`    | 프롬프트 층의 글자·프리픽스 안정성 · 장면 문법·도구                            | [prompts](../llm/prompts.md) §7                       |
 | `live-schema`          | 강제 도구로 나가는 산출 선언 여덟을 제공자가 실제로 받는가                     | [prompts](../llm/prompts.md) §2                       |
+
+### 평균을 보는 가드와 꼬리를 보는 가드는 따로 선다
+
+`squad-longevity`의 잠재력 드리프트는 **평균**이다 — 리그 1군 상위 열다섯의 잠재력
+평균이 열다섯 시즌에 얼마나 움직였는가. 그 질문에 평균이 맞는 자인 것은 묻는 것이
+「리그 체급이 세대마다 가라앉는가」라서다: 한 사람이 아니라 층 전체가 내려앉을 때만
+게임이 다른 게임이 된다.
+
+그래서 **그 가드는 위 끝이 부푸는 것을 보지 못한다.** 평균이 멎어 있는 채로 꼬리만
+두꺼워질 수 있고, 실제로 그랬다 — 드리프트가 0에 붙어 있는 동안 한 여름 인테이크가
+잠재력 95+를 일곱씩 냈고 세계가 쥔 95+ 전부가 열둘이었다. 꼬리를 재는 자는 따로
+서야 하고, 그 자리가 `youth-intake-tail`이다
+([season](season.md) §6). 둘은 같은 손잡이(`YOUTH_CEILING_SPREAD` ·
+`YOUTH_CEILING_TAIL`)에 서로 반대쪽에서 답하므로, 그 손잡이를 옮겼으면 **둘 다**
+돌린다.
 
 ### 키가 필요한 하네스
 
