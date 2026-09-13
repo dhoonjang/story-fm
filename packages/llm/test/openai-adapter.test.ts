@@ -153,6 +153,54 @@ describe("OpenAI 어댑터", () => {
     expect(sent[1]!.tool_choice).toBeUndefined();
   });
 
+  /**
+   * **산출만 받는 호출은 도구가 불린 자리에서 끝난다** (models.md §3-4). 재는 것은 둘이다:
+   * **요청 수** — 두 번째 요청은 같은 입력을 정가로 한 번 더 읽고 아무도 읽지 않는 답을
+   * 받아 온다 — 과 **이력의 모양** — `function_call`이 `function_call_output` 짝을 잃으면
+   * 그 이력을 재사용하는 다음 요청이 통째로 거부된다.
+   */
+  it("outputOnly는 요청 한 번으로 끝나고 도구 결과를 이력에 남긴다", async () => {
+    const { client, sent } = makeStubClient([
+      response([functionCall("c1", "report_training", "{}")]),
+      // 이 답은 나가지 않는다 — 두 번째 요청이 있으면 스텁이 이것을 소비한다
+      response([message("아무도 읽지 않는 답")]),
+    ]);
+    const handled: unknown[] = [];
+    const tool: GameToolSpec = {
+      name: "report_training",
+      description: "테스트 도구",
+      inputSchema: { type: "object" as const, properties: {} },
+      handle(input: unknown) {
+        handled.push(input);
+        return { ok: true, message: "반영" };
+      },
+    };
+
+    const llm = new OpenAiGameLLM(testConfig, client);
+    const result = await llm.runTurn({
+      system: "시스템",
+      history: [],
+      user: "결산",
+      tools: [tool],
+      toolChoice: { name: "report_training" },
+      outputOnly: true,
+    });
+
+    expect(sent).toHaveLength(1);
+    // 도구는 평소대로 돈다 — 닫는 것은 왕복이지 실행이 아니다
+    expect(handled).toEqual([{}]);
+    expect(result.toolCallCount).toBe(1);
+    expect(result.stopReason).toBe("tool_use");
+
+    const items = result.history.messages as InputItem[];
+    expect(items.map((item) => item.type ?? item.role)).toEqual([
+      "user",
+      "function_call",
+      "function_call_output",
+    ]);
+    expect(items[2]).toMatchObject({ call_id: "c1", output: "반영" });
+  });
+
   it("toolChoice가 없으면 tool_choice를 싣지 않는다", async () => {
     const { client, sent } = makeStubClient([response([message("됐다")])]);
     const tool: GameToolSpec = {

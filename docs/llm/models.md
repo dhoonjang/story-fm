@@ -410,7 +410,7 @@ script)` 둘이고, `script`는 요청 하나를 받아 「부를 도구 이름�
 ## 3. 어댑터 — 제공자 중립 계약 하나 (`GameLLM`)
 
 ```
-runTurn({ system, history, user, stateNote?, tools?, toolChoice?, maxTokens?, onText?, signal?, onUsage? })
+runTurn({ system, history, user, stateNote?, tools?, toolChoice?, outputOnly?, maxTokens?, onText?, signal?, onUsage? })
   → { text, history: StoredLlmHistory, historyBase, usage, toolCallCount, stopReason }
 ```
 
@@ -418,6 +418,9 @@ runTurn({ system, history, user, stateNote?, tools?, toolChoice?, maxTokens?, on
 - 도구는 `GameToolSpec` — 제공자 중립 JSON Schema + `handle()`. 검증 실패·규칙 위반은
   한국어 메시지로 돌아가 모델이 고쳐 다시 부른다.
 - `toolChoice`는 도구 호출을 강제할지다 — `"auto"`(기본) 또는 `{ name }` (§3-2).
+- **`outputOnly`는 도구가 불린 자리에서 턴을 닫는다** (§3-4) — 산출이 그 도구 하나뿐이고
+  뒤에 올 문장을 아무도 읽지 않는 호출이 쓴다. 어댑터는 이번 왕복의 도구를 실행한 뒤
+  **결과를 돌려보내지 않고** 끝낸다 — 두 번째 요청이 없다.
 - 한 턴의 도구 왕복 상한은 셋 다 **8회**(`MAX_TOOL_ITERATIONS`)이고, **마지막 한 번은
   도구를 못 부르게 걸어 보낸다** — 상한에 닿은 턴도 문장으로 끝나야 하기 때문이다
   (agents.md §2). 거는 자리는 제공자마다 다르다: Anthropic은 `tool_choice`의 `none`,
@@ -613,6 +616,49 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   메시지는 유저 턴 뒤에 와야 하고 `messages[0]`일 수 없다(현행 레퍼런스). OpenAI의
   `developer` 항목도 같은 자리다. 캐시로도 그 자리가 맞다: 고정 프리픽스(도구·시스템·
   이력·이번 턴 발화)가 앞이고, 매 턴 바뀌는 것은 뒤다 (§4).
+
+## 3-4. `outputOnly` — 산출만 받는 호출은 도구가 불린 순간 끝난다
+
+산출이 도구 하나뿐인 호출(지시 해석 셋 · 훈련 결산 — agents.md §1·§3)은 **그 도구가
+불린 자리에서 답이 완성된다.** 인자는 도구의 Zod가 검증하고 핸들러가 장부에 옮겼으니,
+그 뒤에 모델이 쓸 문장은 아무 데도 쓰이지 않는다.
+
+그런데 어댑터의 왕복 루프는 도구 결과를 **돌려줘야** 턴이 끝나는 구조다. 그래서 그
+자리마다 두 번째 요청이 나가고, 그 요청은 system·도구 선언·이번 턴 입력을 한 번 더
+싣는다 — 입력이 정확히 두 배가 되고, 돌아오는 것은 빈 응답이다. 기록된 호출 하나의
+이력이 그대로 보여 준다:
+
+```
+0 user   [text]
+1 model  [fnCall:report_tactic_orders]
+2 user   [fnResp:report_tactic_orders]
+3 model  []                ← 빈 응답. 아무도 읽지 않는다
+```
+
+**`outputOnly: true`면 그 두 번째 요청이 없다.** 어댑터는 이번 왕복의 도구를 평소대로
+실행하고, 그 결과를 **이력에만 남긴 채** 턴을 닫는다.
+
+- **이력의 모양이 계약이다** — 실행한 결과는 실행하지 않은 호출을 닫을 때와 같은 자리에
+  합성 content로 선다(§3). 이력은 `[발화, 도구 호출, 도구 결과]`로 끝나 **함수 호출이
+  짝을 잃지 않는다**: 짝 없는 호출이 남으면 그 이력을 재사용하는 다음 요청이 거부된다.
+- `stopReason`은 `tool_use`, `toolCallCount`는 실행한 수, `text`는 도구 앞까지 모델이 쓴
+  본문(대개 빈 문자열)이다.
+- **도구를 부르지 않고 본문으로 답한 응답은 이 길과 무관하게 그대로 끝난다** — 강제해도
+  안 부를 수 있고, 그것을 실패로 보고 다시 부르는 것은 호출하는 쪽의 몫이다
+  (agents.md §8).
+- **잘린 응답(`truncated`)의 호출은 여기서도 실행하지 않는다** — 합성 오류 결과로 닫는
+  길이 먼저다(§3).
+
+| 어댑터    | 결과를 남기는 자리                                                                       |
+| --------- | ---------------------------------------------------------------------------------------- |
+| Anthropic | `messages`에 붙인 `tool_result` user 메시지 하나가 그대로 저장 이력이 된다               |
+| Gemini    | `functionResponse` parts를 합성 user content로 저장 이력에 붙인다 — chat에 보내지 않는다 |
+| OpenAI    | `function_call_output` 아이템을 `input`에 붙인 채 끝낸다                                 |
+
+⚠️ **도구 뒤의 문장을 읽는 호출은 이 길로 보내지 않는다.** 경기 마감
+(`finalize-match`)은 `settle_match`를 강제로 부르게 하지만 **그 뒤의 마무리 중계가
+산출이고**(agents.md §3), 첫 장면(`onboarding-judge`)은 본문 자체가 장면이다. 갈래는
+**부르는 쪽이 정한다** — 어댑터는 도구가 무엇을 위한 것인지 묻지 않는다.
 
 ## 4. 계측과 예산 (`usage-meter.ts`)
 
@@ -1038,6 +1084,10 @@ pnpm log --board --game game-f0o7              전술판 선반만 — 전술판
 - **구조화 출력은 프롬프트 문장이 아니라 요청 파라미터로 강제한다.** 산출이 도구
   하나뿐인 호출은 `toolChoice: { name }`을 싣는다 — "이 도구로만 답한다"는 문장만으로는
   본문으로 답한 응답이 정상 종료로 지나간다 (§3-2).
+- **읽지 않을 답을 받으려고 요청을 한 번 더 보내지 않는다.** 산출이 도구 하나뿐인 호출은
+  `outputOnly`로 그 자리에서 닫는다 — 두 번째 요청은 같은 입력을 정가로 한 번 더 읽는다
+  (§3-4). ⚠️ **닫을 때도 도구 결과는 이력에 남긴다**: 짝 없는 함수 호출이 남으면 그
+  이력을 재사용하는 다음 요청이 통째로 거부된다.
 - **설정 파싱은 순수 함수로 남긴다**(`parseLlmConfig`) — 환경을 읽는 자리가 늘면 설정 검증 테스트가 깨진다.
 - **출력 상한은 사고와 본문을 함께 덮는다.** "장면이 몇 줄이니 이만큼"으로 좁히면 본문이
   문장 한복판에서 잘린다. 상한은 상한일 뿐 — 과금은 실제 생성분이다.
