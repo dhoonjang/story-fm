@@ -4,6 +4,7 @@ import {
   bestOverall,
   DEFAULT_TACTICS,
   defaultRoleOf,
+  POSITION_ALIASES,
   naturalPositionOf,
   positionAtPoint,
   positionGroupOf,
@@ -658,7 +659,9 @@ describe("라인업 = 전술 배치 (v6)", () => {
   it("11명·GK 1명·부상 제외를 강제한다", () => {
     const state = createTestGame();
     const lineup = currentLineup(state);
-    expect(setLineup(state, { starting: lineup.slice(0, 10) }).ok).toBe(false);
+    // 열두 명은 반려 — 모자란 쪽은 지금 선발이 채우지만(#780) 넘치는 쪽은 채울 자리가 없다
+    const extra = userPlayers(state).find((p) => !lineup.some((s) => s.playerId === p.id))!;
+    expect(setLineup(state, { starting: [...lineup, { playerId: extra.id }] }).ok).toBe(false);
 
     // GK 포지션 없이 11명 → 반려
     const noGk = lineup.map((s) => ({ ...s, position: s.position === "GK" ? "CB" : s.position }));
@@ -702,6 +705,123 @@ describe("라인업 = 전술 배치 (v6)", () => {
     expect(after.assignments.filter((a) => a.role === "bench")).toHaveLength(5);
     // 적응도 계승
     expect(after.assignments.find((a) => a.playerId === first.playerId)?.familiarity).toBe(77);
+  });
+});
+
+describe("set_lineup은 부른 자리만 바꾼다 (#780)", () => {
+  const startersOf = (state: GameState) => assignmentsOf(state, state.userTeamId, "starting");
+  const pointsOf = (state: GameState) =>
+    new Map(
+      startersOf(state).map((a) => [a.playerId, { ...(a.point ?? { x: 0, y: 0 }) }] as const),
+    );
+
+  it("골키퍼 한 자리만 불러도 걸린다 — 밀려나는 사람은 그 자리에 서 있던 사람이다", () => {
+    const state = createTestGame();
+    const before = pointsOf(state);
+    const keeper = startersOf(state).find((a) => positionGroupOf(a.position) === "GK")!;
+    const backup = assignmentsOf(state, state.userTeamId, "bench").find(
+      (a) => positionGroupOf(naturalPositionOf(playerById(state, a.playerId)!).position) === "GK",
+    )!;
+
+    const res = setLineup(state, { starting: [{ playerId: backup.playerId, position: "GK" }] });
+    expect(res.ok, res.message).toBe(true);
+
+    const after = startersOf(state);
+    expect(after).toHaveLength(11);
+    expect(after.map((a) => a.playerId)).toContain(backup.playerId);
+    // 골문에 서 있던 사람이 자리를 잃고 벤치로 내려온다
+    expect(after.map((a) => a.playerId)).not.toContain(keeper.playerId);
+    expect(assignmentsOf(state, state.userTeamId, "bench").map((a) => a.playerId)).toContain(
+      keeper.playerId,
+    );
+    expect(after.filter((a) => positionGroupOf(a.position) === "GK")).toHaveLength(1);
+    // 부르지 않은 열 자리는 좌표까지 그대로다
+    for (const [id, point] of before) {
+      if (id === keeper.playerId) continue;
+      expect(pointsOf(state).get(id), id).toEqual(point);
+    }
+  });
+
+  it("FM 표기로 부른 열한 명은 같은 판을 만든다 — 표기 하나 때문에 지시가 사라지지 않는다", () => {
+    const state = createTestGame();
+    const before = pointsOf(state);
+    /** 지금 코드를 가리키는 별칭이 있으면 그 표기로 부른다 (`DC`·`AML`·`STC` …) */
+    const aliasFor = (code: string) =>
+      Object.entries(POSITION_ALIASES).find(([, c]) => c === code)?.[0] ?? code;
+    const named = startersOf(state).map((a) => ({
+      playerId: a.playerId,
+      position: aliasFor(a.position),
+    }));
+    // 적어도 한 자리는 실제로 별칭으로 불린다 — 아니면 이 케이스가 아무것도 재지 않는다
+    expect(named.some((s, i) => s.position !== startersOf(state)[i]!.position)).toBe(true);
+
+    const res = setLineup(state, { starting: named });
+    expect(res.ok, res.message).toBe(true);
+    expect(res.message).not.toContain("읽지 못한");
+    expect(pointsOf(state)).toEqual(before);
+  });
+
+  it("읽지 못한 표기는 그 자리 하나만 버리고 나머지는 걸린다", () => {
+    const state = createTestGame();
+    const before = pointsOf(state);
+    const named = startersOf(state).map((a, i) =>
+      i === 0 ? { playerId: a.playerId, position: "리베로" } : { playerId: a.playerId },
+    );
+    const res = setLineup(state, { starting: named });
+    expect(res.ok, res.message).toBe(true);
+    expect(res.message).toContain("읽지 못한 자리 표기: 리베로");
+    // 그 선수도 원래 자리에 선다 — 판은 그대로다
+    expect(pointsOf(state)).toEqual(before);
+  });
+
+  it("지금 선발이 자리를 다 채우지 못하면 몇 명이 비었는지 말하고 반려한다", () => {
+    const state = createTestGame();
+    // 주전 하나를 2군으로 내리면 선발이 빈다 (team.md §6)
+    const dropped = startersOf(state).find((a) => positionGroupOf(a.position) !== "GK")!;
+    expect(
+      setSquadLevels(state, { moves: [{ playerId: dropped.playerId, level: "reserve" }] }).ok,
+    ).toBe(true);
+    expect(startersOf(state)).toHaveLength(10);
+
+    const stay = startersOf(state)[1]!;
+    const res = setLineup(state, { starting: [{ playerId: stay.playerId }] });
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("1명을 더 지정해 주세요");
+    // 반려는 아무것도 바꾸지 않는다
+    expect(startersOf(state)).toHaveLength(10);
+  });
+
+  it("벤치에 이름을 적으면 그 사람은 선발 자리를 지키지 않는다", () => {
+    const state = createTestGame();
+    const keeper = startersOf(state).find((a) => positionGroupOf(a.position) === "GK")!;
+    const backup = assignmentsOf(state, state.userTeamId, "bench").find(
+      (a) => positionGroupOf(naturalPositionOf(playerById(state, a.playerId)!).position) === "GK",
+    )!;
+    // 골키퍼를 벤치로 보내라는 말이 곧 그 자리를 비우라는 말이다
+    const res = setLineup(state, {
+      starting: [{ playerId: backup.playerId, position: "GK" }],
+      bench: [{ playerId: keeper.playerId }],
+    });
+    expect(res.ok, res.message).toBe(true);
+    const after = startersOf(state).map((a) => a.playerId);
+    expect(after).toHaveLength(11);
+    expect(after).toContain(backup.playerId);
+    expect(after).not.toContain(keeper.playerId);
+    // 벤치를 명시하면 그 지정이 이긴다 — 이어받은 벤치가 아니다
+    expect(assignmentsOf(state, state.userTeamId, "bench").map((a) => a.playerId)).toEqual([
+      keeper.playerId,
+    ]);
+  });
+
+  it("열 명만 불러도 남은 한 자리는 지금 선발이 지킨다", () => {
+    const state = createTestGame();
+    const before = pointsOf(state);
+    const named = startersOf(state)
+      .slice(0, 10)
+      .map((a) => ({ playerId: a.playerId }));
+    const res = setLineup(state, { starting: named });
+    expect(res.ok, res.message).toBe(true);
+    expect(pointsOf(state)).toEqual(before);
   });
 });
 
@@ -818,9 +938,12 @@ describe("라인업 명령은 검증 뒤에 적용한다 (team.md §6)", () => {
     expect(target, "승격 가능한 2군이 없다").toBeDefined();
     const before = lineupSignature(state);
 
-    // 승격 자체는 옳고 배치가 열 명이라 걸린다 — 예전엔 승격만 적용된 채 반려됐다
+    // 승격 자체는 옳고 배치에 골키퍼가 없어 걸린다 — 예전엔 승격만 적용된 채 반려됐다
     const res = setLineup(state, {
-      starting: currentLineup(state).slice(0, 10),
+      starting: currentLineup(state).map((s) => ({
+        ...s,
+        position: s.position === "GK" ? "CB" : s.position,
+      })),
       squadLevels: [{ playerId: target!.id, level: "first" }],
     });
     expect(res.ok).toBe(false);

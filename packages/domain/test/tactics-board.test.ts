@@ -13,8 +13,11 @@ import {
   FORMATION_LAYOUTS,
   FORMATION_SLOTS,
   PITCH_BANDS,
+  POSITION_ALIASES,
   POSITION_ANCHORS,
+  POSITION_CODES,
   anchorOf,
+  normalizePositionCode,
   clampToBoard,
   movePoint,
   positionAtPoint,
@@ -574,5 +577,49 @@ describe("옛 세이브 옮기기", () => {
     // 이미 숫자인 지문은 건드리지 않는다
     const now = tacticsSignature(DEFAULT_TACTICS);
     expect(migrateSignature(now)).toBe(now);
+  });
+});
+
+describe("자리 표기 별칭 (POSITION_ALIASES · normalizePositionCode)", () => {
+  it("키는 코드가 아니고 값은 모두 코드다 — 별칭이 코드를 가리면 그 자리가 사라진다", () => {
+    for (const [alias, code] of Object.entries(POSITION_ALIASES)) {
+      expect(positionGroupOf(alias), `${alias}는 이미 코드다`).toBeNull();
+      expect(POSITION_CODES, alias).toContain(code);
+    }
+  });
+
+  it("코드는 자기 자신으로 읽힌다", () => {
+    for (const code of POSITION_CODES) expect(normalizePositionCode(code)).toBe(code);
+  });
+
+  it("감독과 GM이 쓰는 표기가 코드로 옮겨진다 (요청 사례 — #780)", () => {
+    // 로그에 남은 그 열한 자리
+    expect(normalizePositionCode("AML")).toBe("LAM");
+    expect(normalizePositionCode("AMC")).toBe("CAM");
+    expect(normalizePositionCode("AMR")).toBe("RAM");
+    expect(normalizePositionCode("DL")).toBe("LB");
+    expect(normalizePositionCode("DC")).toBe("CB");
+    expect(normalizePositionCode("DR")).toBe("RB");
+    expect(normalizePositionCode("STC")).toBe("ST");
+  });
+
+  it("대소문자와 구분자를 걷는다", () => {
+    expect(normalizePositionCode("aml")).toBe("LAM");
+    expect(normalizePositionCode(" gk ")).toBe("GK");
+    expect(normalizePositionCode("am-l")).toBe("LAM");
+    expect(normalizePositionCode("st/c")).toBe("ST");
+  });
+
+  it("읽지 못한 표기는 null이다 — 기본값으로 접지 않는다", () => {
+    // 접어 버리면 감독은 자기가 부른 자리에 선 줄 안다
+    expect(normalizePositionCode("리베로")).toBeNull();
+    expect(normalizePositionCode("SW")).toBeNull();
+    expect(normalizePositionCode("")).toBeNull();
+  });
+
+  it("별칭으로 부른 자리의 기본 좌표는 코드로 부른 것과 같다", () => {
+    for (const [alias, code] of Object.entries(POSITION_ALIASES)) {
+      expect(anchorOf(alias), alias).toEqual(anchorOf(code));
+    }
   });
 });
