@@ -780,8 +780,71 @@ export const POSITION_ANCHORS: Record<string, BoardPoint> = {
   RST: { x: 64, y: 9 },
 };
 
+/**
+ * 자리 표기의 별칭 — **감독과 GM이 쓰는 말을 코어의 코드로 옮긴다.**
+ *
+ * 코드는 좌표가 파생되는 이름이라 한 자리에 하나뿐인데(`POSITION_ANCHORS`), 축구에서
+ * 같은 자리를 부르는 표기는 여럿이다 — FM 계열은 좌우를 뒤에 붙여 `AML`·`DC`·`STC`로
+ * 쓰고 중계·리포트는 `FW`·`WL`을 쓴다. 표에 없는 표기를 만나면 그 자리를 못 읽어,
+ * 열한 명을 이름과 자리까지 정확히 부른 지시가 표기 하나 때문에 사라졌다.
+ *
+ * **뜻이 같은 표기만 적는다.** 스위퍼·레지스타처럼 자리가 아니라 역할인 말은 넣지
+ * 않는다 — 역할의 그릇은 `ROLE_DEFS`이고, 여기서 받으면 감독이 고른 역할이 자리 코드로
+ * 접혀 사라진다. 키는 코드가 아닌 것만이다(`DM`은 코드라 여기 서지 않는다).
+ */
+export const POSITION_ALIASES: Record<string, string> = {
+  GKP: "GK",
+  G: "GK",
+  // 수비 — FM 표기는 좌우를 뒤에 붙인다
+  DL: "LB",
+  DR: "RB",
+  DC: "CB",
+  DCL: "LCB",
+  DCR: "RCB",
+  WBL: "LWB",
+  WBR: "RWB",
+  // 중원
+  DML: "LDM",
+  DMR: "RDM",
+  DMC: "CDM",
+  MC: "CM",
+  MCL: "LCM",
+  MCR: "RCM",
+  AMC: "CAM",
+  AML: "LAM",
+  AMR: "RAM",
+  // 측면 — 윙과 측면 미드는 코드가 갈려 있다 (`POSITION_CLUSTERS`가 같은 자리로 본다)
+  WL: "LW",
+  WR: "RW",
+  LWF: "LW",
+  RWF: "RW",
+  LWG: "LW",
+  RWG: "RW",
+  // 최전방
+  STC: "ST",
+  STL: "LST",
+  STR: "RST",
+  SC: "ST",
+  FW: "ST",
+  CFW: "CF",
+};
+
+/**
+ * 표기 하나를 코드로 — **읽지 못하면 `null`이다.**
+ *
+ * 대소문자와 구분자를 걷고 별칭표를 지나 `POSITION_GROUPS`가 아는 코드만 돌려준다.
+ * 기본값으로 접지 않는 이유: 읽지 못했다는 사실을 부르는 쪽이 알아야 한다. 코어가
+ * 조용히 CM으로 세우면 감독은 자기가 부른 자리에 선 줄 안다.
+ */
+export function normalizePositionCode(raw: string): string | null {
+  const key = raw.toUpperCase().replace(/[\s\-_/.]/g, "");
+  const code = POSITION_ALIASES[key] ?? key;
+  return positionGroupOf(code) ? code : null;
+}
+
 export function anchorOf(position: string): BoardPoint {
-  return POSITION_ANCHORS[position.toUpperCase()] ?? POSITION_ANCHORS.CM!;
+  const code = normalizePositionCode(position);
+  return (code === null ? undefined : POSITION_ANCHORS[code]) ?? POSITION_ANCHORS.CM!;
 }
 
 /**

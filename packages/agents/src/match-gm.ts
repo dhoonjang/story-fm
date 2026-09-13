@@ -13,7 +13,7 @@ import { buildLedgerNote } from "./gm-input";
 import type { GmToolCall } from "./gm-types";
 import { applyTacticOrders } from "./tactic-apply";
 import { buildToolSpecs } from "./gm-tools";
-import { OrdersArgsSchema } from "./orders-ops";
+import { OrdersArgsSchema, hasOps } from "./orders-ops";
 import { runTacticOrders } from "./tactic-orders";
 import { toToolSchema } from "./tool-schema";
 
@@ -177,7 +177,8 @@ async function runTacticOrdersTool(
       ? ["<core_replies>", ...applied.notes.map((n) => `- ${n}`), "</core_replies>"]
       : [];
   return {
-    ok: true,
+    // 아무 명령도 걸리지 않은 턴은 성공이 아니다 — 판은 그대로이고 GM은 반려된 대로 쓴다
+    ok: hasOps(parsed.intent.ops),
     message: [
       ...(applied.segment ? [applied.segment] : []),
       ...replies,

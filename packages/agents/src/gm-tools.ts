@@ -117,6 +117,7 @@ import {
   MAX_PITCH_CLAIMS,
   PitchClaimSchema,
   PLAYER_DIRECTIVE_KINDS,
+  POSITION_CODES,
   PRESS_STANCES,
   PROMISE_KINDS,
   PROMISE_KIND_KO,
@@ -140,7 +141,7 @@ import { runTacticOrders } from "./tactic-orders";
 import { runTableReply } from "./negotiation-table";
 import { MARKET_OPS, runMarketOrders } from "./market-orders";
 import { TRAINING_OPS, runTrainingOrders } from "./training-orders";
-import { OrdersArgsSchema, applyOps } from "./orders-ops";
+import { OrdersArgsSchema, applyOps, hasOps } from "./orders-ops";
 import { MONEY_MAX, SQUAD_STATUS_LINE, WAGE_MAX, money } from "./ruling-schema";
 import { applyTacticOrders } from "./tactic-apply";
 import { inputError, toToolSchema } from "./tool-schema";
@@ -243,6 +244,16 @@ const CORE_COMMAND_LABELS: Record<string, string> = {
  * 감독 발화가 통째로 실려 원장 라벨 한 줄이 단락이 됐다.
  */
 const playerRef = z.string().min(1);
+/**
+ * 자리 표기 — **코드 표를 모델에게 싣는다** (prompts.md §2). 코어가 낱말표를 든 갈래는
+ * 그 표에서 끌어와 설명에 싣는 규약이고, 표기가 표를 벗어나도 코어가 별칭을 읽는다
+ * (`normalizePositionCode`) — 둘 다 있어야 감독이 쓴 말도 모델이 쓴 말도 자리에 닿는다.
+ */
+const positionArg = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(`자리 코드 — ${POSITION_CODES.join("/")}`);
 /** 선수가 아닌 사람의 이름 자리 — 스태프처럼 id가 없고 이름이 곧 그 사람이다 */
 const personRef = z.string().min(1);
 const dateArg = DateString;
@@ -587,12 +598,22 @@ export function buildToolSpecs(
       "set_lineup",
       CORE_COMMAND_LABELS.set_lineup!,
       z.object({
+        /**
+         * **열한 명을 다 부르지 않아도 된다** (→ docs/data/team.md §6). 부른 자리만 바뀌고
+         * 남은 자리는 코어가 지금 선발로 채운다 — 평시에 벤치 선수를 그라운드에 세우는 문이
+         * 이 명령 하나뿐이라, 열한 명을 다 적어야만 걸리면 "골문에 킬브라이드"가 걸릴 길이 없다.
+         */
         starting: z
-          .array(z.object({ playerId: playerRef, position: z.string().min(1).optional() }))
-          .length(11),
+          .array(z.object({ playerId: playerRef, position: positionArg }))
+          .min(1)
+          .max(11)
+          .describe("선발로 세울 선수와 자리 — 부른 자리만 바뀌고 남은 자리는 지금 선발이 지킨다"),
         bench: z
-          .array(z.object({ playerId: playerRef, position: z.string().min(1).optional() }))
-          .optional(),
+          .array(z.object({ playerId: playerRef, position: positionArg }))
+          .optional()
+          .describe(
+            "벤치 — 생략하면 지금 벤치를 지킨다. 여기 적은 선수는 선발 자리를 지키지 않는다",
+          ),
         squadLevels: z
           .array(z.object({ playerId: playerRef, level: z.enum(["first", "reserve"]) }))
           .optional()
@@ -1671,8 +1692,13 @@ export function buildGmTools(
           ? { deferNegotiationIds: options.deferNegotiationIds }
           : {}),
       });
+      /**
+       * **아무 명령도 걸리지 않은 턴은 성공이 아니다** (agents.md §3). `ops`가 빈 채
+       * 돌아온 응답에 ok를 주면 GM은 "조정했습니다"로 장면을 닫고, 감독은 걸리지 않은
+       * 지시 위에 다음 경기를 맞는다 — 그때 결과에 실려 오는 것은 옮기지 못한 말뿐이다.
+       */
       return {
-        ok: true,
+        ok: hasOps(intent.intent.ops),
         message: applied.notes.length > 0 ? applied.notes.join("\n") : "지시를 판에 걸었습니다",
       };
     },
