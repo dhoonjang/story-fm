@@ -579,12 +579,12 @@ const MISMATCH_KO: Record<string, { sharp: (r: Render) => string; vague: (r: Ren
     "wing-duel": {
       sharp: (r) =>
         `${r.rival} 1대1 우위: ${r.who(0)}(${AXIS_KO.dribbling} ${r.v("dribbling")}) vs ${r.who(1)}(${AXIS_KO.tackling} ${r.v("tackling")})`,
-      vague: (r) => `${r.rival}는 측면에서 사람을 벗겨낼 수 있다`,
+      vague: (r) => `${josa(r.rival, "은/는")} 측면에서 사람을 벗겨낼 수 있다`,
     },
     aerial: {
       sharp: (r) =>
         `${r.rival} 제공권 우위: ${r.who(0)}(${AXIS_KO.aerial} ${r.v("aerial")}) vs ${r.who(1)}(${r.v("defenceAerial")})`,
-      vague: (r) => `${r.rival}가 공중에서 앞선다 — 크로스와 세트피스가 통한다`,
+      vague: (r) => `${josa(r.rival, "이/가")} 공중에서 앞선다 — 크로스와 세트피스가 통한다`,
     },
     "press-resistance": {
       sharp: (r) =>
@@ -609,7 +609,7 @@ const MISMATCH_KO: Record<string, { sharp: (r: Render) => string; vague: (r: Ren
     "keeper-distribution": {
       sharp: (r) =>
         `${r.subject} 골키퍼 배급: ${r.who(0)}(${AXIS_KO.passing} ${r.v("passing")}) — 뒤에서부터 풀어 나온다`,
-      vague: (r) => `${r.subject}는 골키퍼부터 빌드업한다`,
+      vague: (r) => `${josa(r.subject, "은/는")} 골키퍼부터 빌드업한다`,
     },
     "backline-shape": {
       sharp: (r) =>
@@ -633,7 +633,7 @@ const MISMATCH_KO: Record<string, { sharp: (r: Render) => string; vague: (r: Ren
     },
     "set-piece": {
       sharp: (r) => `${r.subject} 세트피스 키커: ${r.who(0)}(${AXIS_KO.kicking} ${r.v("kicking")})`,
-      vague: (r) => `${r.subject}는 ${SET_PIECE_KO}가 위협적이다`,
+      vague: (r) => `${josa(r.subject, "은/는")} ${SET_PIECE_KO}가 위협적이다`,
     },
     discipline: {
       sharp: (r) =>
@@ -809,11 +809,14 @@ export function packetTagText(tag: PacketTag, ctx?: PacketTagContext): string {
       const aerial = tag.values.aerial;
       if (!finisher || finisher === taker) {
         const skill = tag.sharp && kicking !== undefined ? ` (킥력 ${Math.round(kicking)})` : "";
-        return `${head} — ${taker}${skill}가 직접 마무리했다`;
+        return `${head} — ${josa(`${taker}${skill}`, "이/가")} 직접 마무리했다`;
       }
       const kick = tag.sharp && kicking !== undefined ? `(킥력 ${Math.round(kicking)})` : "";
       const head_ = tag.sharp && aerial !== undefined ? `(공중볼 ${Math.round(aerial)})` : "";
-      return `${head} — ${taker}${kick}가 올리고 ${finisher}${head_}가 마무리했다`;
+      return (
+        `${head} — ${josa(`${taker}${kick}`, "이/가")} 올리고 ` +
+        `${josa(`${finisher}${head_}`, "이/가")} 마무리했다`
+      );
     }
     case "directive": {
       const line = DIRECTIVE_KO[tag.code]?.(r.who(0), r.who(1));

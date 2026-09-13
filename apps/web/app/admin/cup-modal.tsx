@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { josa } from "@story-fm/domain";
 import type { MatchStage } from "@story-fm/domain";
 import { Modal } from "./modal";
 import {
@@ -210,7 +211,7 @@ export function EuroCupModal({
       ["플레이오프 팀 수", playoffSlots],
     ];
     for (const [label, n] of numbers) {
-      if (!Number.isInteger(n) || n < 0) return `${label}는 0 이상의 정수여야 합니다`;
+      if (!Number.isInteger(n) || n < 0) return `${josa(label, "은/는")} 0 이상의 정수여야 합니다`;
     }
     if (!slotsMatch) {
       return `리그별 티켓 합(${slotSum})이 참가 팀 수(${size})와 다릅니다`;

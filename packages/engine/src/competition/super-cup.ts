@@ -1,5 +1,5 @@
 import type { MatchRecord, TickSink } from "@story-fm/domain";
-import { pushEvent } from "@story-fm/domain";
+import { josa, pushEvent } from "@story-fm/domain";
 import { cupLegMatchId } from "@story-fm/domain";
 import { addDays, buildSeasonCalendar } from "./calendar";
 import { cupCatalog } from "../data/cup-catalog";
@@ -188,7 +188,11 @@ export function advanceSuperCups(state: GameState, digest: TickSink): void {
     });
 
     if (champion === state.userTeamId) {
-      pushEvent(digest, "news", `${cup.name} 우승 — ${teamNameIn(state, runnerUp)}을 꺾었다`);
+      pushEvent(
+        digest,
+        "news",
+        `${cup.name} 우승 — ${josa(teamNameIn(state, runnerUp), "을/를")} 꺾었다`,
+      );
       pushNarrative(state, `${cup.name} 우승`, 4);
     } else if (runnerUp === state.userTeamId) {
       pushEvent(digest, "news", `${cup.short} 준우승 — ${teamNameIn(state, champion)}에 졌다`);

@@ -1,5 +1,6 @@
 import {
   ageOf,
+  josa,
   normalizedLogCurve,
   FIRST_TEAM_LIMIT,
   type GamePlayer,
@@ -289,7 +290,7 @@ function moveClub(
    */
   const voided = voidPendingContract(state, player.id);
   if (voided?.teamId === state.userTeamId) {
-    const line = `${player.name} 사전 계약 무산 — ${teamShortNameIn(state, toTeamId)}로 이적했습니다`;
+    const line = `${player.name} 사전 계약 무산 — ${josa(teamShortNameIn(state, toTeamId), "으로/로")} 이적했습니다`;
     input.digest?.push(`${line}`);
     pushNarrative(state, line, 4);
   }
