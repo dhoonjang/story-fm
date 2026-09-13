@@ -202,8 +202,9 @@ export interface SetPieceProfile {
   fouls: number;
   /**
    * 죽은 공을 차는 사람 — 감독의 지정(`TeamTactics.setPieceTakers`)이 있으면 그 사람,
-   * 없으면 그라운드 위 최고(코너·프리킥은 `kicking`, 페널티는 `penaltySkill`).
-   * 명단이 비면 null이다.
+   * 없으면 그라운드 위 **필드 플레이어** 최고(코너·프리킥은 `kicking`, 페널티는
+   * `penaltySkill`). 골키퍼는 기본값의 후보가 아니다 — `kicking`이 골킥 능력이라
+   * 걸러 내지 않으면 모든 팀의 코너를 골키퍼가 올린다. 명단이 비면 null이다.
    */
   takers: { corner: string | null; freeKick: string | null; penalty: string | null };
 }

@@ -692,7 +692,8 @@ function runTimeline(input: TimelineInput): {
         for (let shot = samplePoisson(rng, sp.expectedShots * window); shot > 0; shot--) {
           if (field.length === 0) break;
           const corner = rng() < CORNER_SHOT_SHARE;
-          const taker = setPieceTaker(packet, side, corner ? "corner" : "freeKick", field);
+          // 키커는 골키퍼까지 포함한 전원에서 고른다(지정) — 마무리는 필드 플레이어뿐이다
+          const taker = setPieceTaker(packet, side, corner ? "corner" : "freeKick", active);
           const direct = !corner && taker !== null && rng() < DIRECT_FREE_KICK_SHARE;
           const shooter = direct ? taker : weightedPick(rng, field, (p) => p.attributes.aerial);
           if (!shooter) continue;
@@ -709,7 +710,7 @@ function runTimeline(input: TimelineInput): {
           });
         }
         for (let kick = samplePoisson(rng, sp.penalties * window); kick > 0; kick--) {
-          const taker = setPieceTaker(packet, side, "penalty", field);
+          const taker = setPieceTaker(packet, side, "penalty", active);
           if (!taker) break;
           const keeper =
             activeAt(side === "home" ? "away" : "home", t).find(
