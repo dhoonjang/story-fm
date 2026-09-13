@@ -176,3 +176,68 @@ describe("지시가 칸으로 실린다", () => {
     );
   });
 });
+
+/**
+ * 킥오프 직전의 손질 — 자리를 **이름으로** 지시하면 좌표는 그 자리의 기본값이라
+ * (`anchorOf`) 같은 자리를 두 번 받으면 둘이 정확히 겹쳐 서고 반대편이 빈다.
+ * 감독이 판에서 하지 않은 일이므로 패킷이 세울 때 편다 (`coverLineup`).
+ */
+describe("배치 손질 — 무너진 줄은 펴서 세운다", () => {
+  /** 이 선수를 그 좌표에 놓는다 */
+  const place = (side: SideInput, at: Array<[position: string, x: number, y: number]>) => {
+    for (const [position, x, y] of at) {
+      const slot = side.starters.find((s) => s.position === position && s.point === undefined)!;
+      slot.point = { x, y };
+    }
+    return side;
+  };
+  const attackLanes = (side: SideInput) => {
+    const grid = zoneGrid(buildStrengthPacket(side, makeSide("them", 78)));
+    return {
+      left: cellOf(grid, "attack", "left").home,
+      right: cellOf(grid, "attack", "right").home,
+    };
+  };
+
+  it("둘을 같은 자리에 세우면 좌우로 펴서 앉힌다", () => {
+    const stacked = place(makeSide("us", 78), [
+      ["ST", 86, 19],
+      ["ST", 86, 19],
+    ]);
+    const points = buildStrengthPacket(stacked, makeSide("them", 78)).home.lineup.map(
+      (p) => p.point,
+    );
+    const forwards = points.filter((p) => p && p.y <= 33.5) as Array<{ x: number; y: number }>;
+    expect(forwards).toHaveLength(2);
+    expect(forwards[0]!.x).not.toBe(forwards[1]!.x);
+    // 편 자리는 x=50의 거울이다
+    expect(forwards[0]!.x + forwards[1]!.x).toBeCloseTo(100, 6);
+  });
+
+  it("한쪽에 몰린 줄을 펴면 빈 칸이 반대편만큼 선다", () => {
+    const lopsided = attackLanes(
+      place(makeSide("us", 78), [
+        ["ST", 79, 27],
+        ["ST", 93, 27],
+      ]),
+    );
+    expect(lopsided.left / lopsided.right).toBeGreaterThan(0.9);
+  });
+
+  /**
+   * 손질이 과부하를 되돌리면 **감독의 수 하나가 통째로 사라진다** — 측면을
+   * 노리고 스트라이커를 끌어내는 것은 이 게임이 지원하는 수다.
+   */
+  it("의도한 과부하는 건드리지 않는다", () => {
+    const skewed = place(makeSide("us", 78), [["ST", 12, 18]]);
+    const lanes = attackLanes(skewed);
+    expect(lanes.left).toBeGreaterThan(lanes.right);
+  });
+
+  it("프리셋 그대로면 좌표가 그대로다", () => {
+    const plain = makeSide("us", 78);
+    const before = plain.starters.map((s) => s.point);
+    buildStrengthPacket(plain, makeSide("them", 78));
+    expect(plain.starters.map((s) => s.point)).toEqual(before);
+  });
+});

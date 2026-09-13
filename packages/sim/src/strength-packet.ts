@@ -44,6 +44,7 @@ import {
 import { applyDirectives, type DirectiveInput } from "./directives";
 import { applyExploits, autoExploits, exploitTargets } from "./exploits";
 import { buildKeyPoints, readKeyPoints } from "./key-points";
+import { coverLineup } from "./lineup-cover";
 import { stateModifier } from "./state-modifier";
 import { buildCounterContext, evaluateCounters, type CounterResult } from "./tactical-counters";
 import { GAP_PENALTY, GAP_THRESHOLD } from "./stamina";
@@ -1499,9 +1500,15 @@ export function buildStrengthPacket(
         ? awayIn.managerTactics
         : 99;
 
-  // 전술 적응도는 이제 **개인 계수**라 존 곱에는 감독 소화율만 남는다
-  const homeXI = homeIn.starters;
-  const awayXI = awayIn.starters;
+  /**
+   * 전술 적응도는 이제 **개인 계수**라 존 곱에는 감독 소화율만 남는다.
+   *
+   * ⚠️ **자리는 여기서 한 번 손본다** — 같은 자리를 두 번 지시받아 겹쳐 선 줄은
+   * 좌우 대칭으로 펴고 세운다 (`coverLineup`, match.md §1.7). 패킷이 경기로 가는
+   * 유일한 문이라 여기서 손보면 명단·격자·슈팅 경로가 **같은 좌표**를 읽는다.
+   */
+  const homeXI = coverLineup(homeIn.starters);
+  const awayXI = coverLineup(awayIn.starters);
   const squadFam = (slots: LineupSlot[]) =>
     slots.length === 0
       ? FAMILIARITY_BASELINE
@@ -1639,7 +1646,7 @@ export function buildStrengthPacket(
         }
       : {}),
     ...(homeLaneBias.length > 0 ? { laneBias: homeLaneBias } : {}),
-    lineup: roster(homeIn.starters),
+    lineup: roster(homeXI),
     bench: roster(homeIn.bench),
   };
   const away: SidePacket = {
@@ -1659,7 +1666,7 @@ export function buildStrengthPacket(
         }
       : {}),
     ...(awayLaneBias.length > 0 ? { laneBias: awayLaneBias } : {}),
-    lineup: roster(awayIn.starters),
+    lineup: roster(awayXI),
     bench: roster(awayIn.bench),
   };
 

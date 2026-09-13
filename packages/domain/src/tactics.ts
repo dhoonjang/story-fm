@@ -1159,25 +1159,41 @@ const LINE_GAP = 13;
  */
 const MAX_LINE_SPAN = 16;
 
-export function shapeOf(points: readonly BoardPoint[]): string {
-  // 골키퍼는 숫자에 넣지 않는다 (4-4-2는 필드 10명을 센 이름이다)
-  const field = points.filter((p) => positionAtPoint(p) !== "GK").sort((a, b) => b.y - a.y);
-  if (field.length === 0) return "";
-  const lines: number[] = [1];
+/**
+ * 뒤에서 앞으로 **줄로 묶는다** — 포메이션 이름을 세는 자이자, 킥오프 직전의 배치
+ * 손질이 「한 줄」로 볼 범위(`sim/lineup-cover.ts`)다. 두 곳이 다른 기준으로 끊으면
+ * 판이 4-2-3-1이라 말하는 동안 손질은 다른 줄을 편다.
+ *
+ * 골키퍼를 거르는 것은 **부르는 쪽의 몫**이다 — 모양 이름은 필드 열 명을 세지만
+ * 손질은 골키퍼도 자리를 가진 선수로 함께 읽는다.
+ */
+export function pitchLines<T>(items: readonly T[], yOf: (item: T) => number): T[][] {
+  const sorted = [...items].sort((a, b) => yOf(b) - yOf(a));
+  if (sorted.length === 0) return [];
+  const lines: T[][] = [[sorted[0]!]];
   // 지금 줄의 **맨 뒤 선수** — 폭은 여기서부터 잰다
-  let lineStart = field[0]!.y;
-  for (let i = 1; i < field.length; i++) {
-    const y = field[i]!.y;
-    const brokeGap = field[i - 1]!.y - y >= LINE_GAP;
+  let lineStart = yOf(sorted[0]!);
+  for (let i = 1; i < sorted.length; i++) {
+    const y = yOf(sorted[i]!);
+    const brokeGap = yOf(sorted[i - 1]!) - y >= LINE_GAP;
     const brokeSpan = lineStart - y > MAX_LINE_SPAN;
     if (brokeGap || brokeSpan) {
-      lines.push(1);
+      lines.push([sorted[i]!]);
       lineStart = y;
     } else {
-      lines[lines.length - 1] = (lines[lines.length - 1] ?? 0) + 1;
+      lines[lines.length - 1]!.push(sorted[i]!);
     }
   }
-  return lines.join("-");
+  return lines;
+}
+
+export function shapeOf(points: readonly BoardPoint[]): string {
+  // 골키퍼는 숫자에 넣지 않는다 (4-4-2는 필드 10명을 센 이름이다)
+  const field = points.filter((p) => positionAtPoint(p) !== "GK");
+  if (field.length === 0) return "";
+  return pitchLines(field, (p) => p.y)
+    .map((line) => line.length)
+    .join("-");
 }
 
 /**

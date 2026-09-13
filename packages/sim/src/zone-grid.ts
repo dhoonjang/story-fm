@@ -63,8 +63,13 @@ const BAND_Y: Record<GridBand, number> = PITCH_BANDS.center;
 /**
  * 한 선수가 칸에 닿는 거리 — 이보다 멀면 기여가 없다.
  * 좌우 칸 간격이 33이라, 옆 칸에는 절반쯤 흘러가고 대각선 끝까지는 닿지 않는다.
+ *
+ * 킥오프 직전의 배치 손질(`lineup-cover.ts`)이 「그 칸에 사람이 붙어 있는가」를
+ * 같은 커널로 재므로 내보낸다 — 두 곳이 다른 거리를 쓰면 손질이 편 줄과 격자가
+ * 읽는 줄이 어긋난다.
  */
-const REACH = 46;
+export const LANE_REACH = 46;
+const REACH = LANE_REACH;
 
 /**
  * 지역 플랜이 그 칸으로 끌어오는 전력의 몫 — 의도마다 무게가 다르다.
