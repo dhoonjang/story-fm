@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   RIVAL_BAND,
+  STANCE_SEASON_CAP,
   acceptManagerOffer,
   addDays,
   applyPressOutcome,
   buildMatchPress,
   buildTransferPress,
+  clampReputation,
   declinePress,
   describePendingPress,
   internationalBreaksOf,
   leagueOfTeamIn,
+  matchReputationDelta,
   fundTransferBudget,
   MANAGER_WALLET,
   INCIDENT_PRESS_DAYS,
@@ -30,6 +33,7 @@ import {
 import {
   MANAGER_TERMS_BY_TIER,
   PRESS_STANCES,
+  REPUTATION_TIERS,
   PressConferenceSchema,
   RIVAL_VOICES,
   mediaVerdictOf,
@@ -46,6 +50,15 @@ import type {
 import { createTestGame } from "./helpers";
 import { derbyNameOf } from "../src/data/derbies";
 import { FORMER_CLUB_YEARS } from "../src/club/former-club";
+
+/**
+ * 1부 한 시즌의 회견 수 — 리그 38 · 컵 · 유럽 · 프리시즌과 시즌 마디까지 세면
+ * 마흔 후반이다 (이슈 #787의 실측 45~48회).
+ */
+const SEASON_CONFERENCES = 48;
+
+/** 「관망」의 아래끝 — 세 축이 이 아래로 내려가면 세계가 감독에게 등을 돌린 것이다 */
+const WATCHING_MIN = REPUTATION_TIERS.find((t) => t.key === "watching")!.min;
 
 /**
  * 세계는 하나면 된다 — 이 파일의 어느 케이스도 **시드가 갈리는 것이 요점이 아니다.**
@@ -309,6 +322,78 @@ describe("기자회견 — 한도와 대가", () => {
     const a = applyPressOutcome(small, light, "bold");
     const b = applyPressOutcome(big, heavy, "bold");
     expect(Math.abs(b.media)).toBeGreaterThan(Math.abs(a.media));
+  });
+
+  /**
+   * **한 시즌을 한 말투로 보내도 그 축이 바닥에 못박히지 않는다** (career.md §4).
+   *
+   * 목줄이 없던 동안 감싸기 59회는 언론 −177이었고, 그 옆에 선 것은 경기 ±2와 시즌
+   * 리뷰 ±8뿐이라 리그 2위·21승 감독의 언론 평판이 0에 앉았다. 여기가 빨개지면
+   * `STANCE_SEASON_CAP`이 회견 횟수를 감당하지 못하는 것이다.
+   */
+  it("시즌 목줄 — 감싸기 48회가 한 축을 독점하지 않는다", () => {
+    const state = newGame();
+    const before = { ...state.manager.reputation };
+    for (let i = 0; i < SEASON_CONFERENCES; i++) {
+      applyPressOutcome(state, fakeConference({ id: `press-${i}`, weight: 2 }), "defend");
+    }
+    const moved = {
+      board: state.manager.reputation.board - before.board,
+      media: state.manager.reputation.media - before.media,
+      squad: state.manager.reputation.squad - before.squad,
+    };
+    // 목줄 안쪽에서 선다 — 걸음이 반올림으로 0이 되는 자리가 실제 도달점이다
+    for (const axis of ["board", "media", "squad"] as const) {
+      expect(Math.abs(moved[axis])).toBeLessThanOrEqual(STANCE_SEASON_CAP);
+    }
+    // 대가는 남아 있어야 한다 — 목줄이 스탠스를 무료로 만들면 표가 뜻을 잃는다
+    expect(moved.media).toBeLessThan(0);
+    expect(moved.squad).toBeGreaterThan(0);
+
+    /** 2위 다툼 한 시즌(26승 7무 5패)을 그 위에 얹으면 세 축이 「관망」 위에 선다 */
+    for (const outcome of ["win", "loss"] as const) {
+      const times = outcome === "win" ? 26 : 5;
+      for (let i = 0; i < times; i++) {
+        const delta = matchReputationDelta(outcome);
+        for (const axis of ["board", "media", "squad"] as const) {
+          state.manager.reputation[axis] = clampReputation(
+            state.manager.reputation[axis] + delta[axis],
+          );
+        }
+      }
+    }
+    for (const axis of ["board", "media", "squad"] as const) {
+      expect(state.manager.reputation[axis]).toBeGreaterThanOrEqual(WATCHING_MIN);
+    }
+  });
+
+  /**
+   * 목줄은 **쓰고 없어지는 예산이 아니라 지금 서 있는 자리**다 (career.md §4).
+   * 예산으로 두면 "이번 시즌 회견은 다 썼다"가 되어 남은 서른 번의 회견이 아무 뜻도
+   * 갖지 않는다.
+   */
+  it("시즌 목줄 — 되돌아오는 걸음은 좁혀지지 않는다", () => {
+    const leashed = newGame();
+    for (let i = 0; i < SEASON_CONFERENCES; i++) {
+      applyPressOutcome(leashed, fakeConference({ id: `press-${i}`, weight: 2 }), "defend");
+    }
+    const back = applyPressOutcome(leashed, fakeConference({ weight: 2 }), "bold").media;
+
+    const fresh = newGame();
+    const full = applyPressOutcome(fresh, fakeConference({ weight: 2 }), "bold").media;
+    expect(back).toBe(full);
+  });
+
+  /** 누계는 시즌의 것이다 — 적힌 시즌이 다르면 0에서 다시 센다 (career.md §4) */
+  it("시즌 목줄 — 시즌이 바뀌면 다시 센다", () => {
+    const state = newGame();
+    for (let i = 0; i < SEASON_CONFERENCES; i++) {
+      applyPressOutcome(state, fakeConference({ id: `press-${i}`, weight: 2 }), "defend");
+    }
+    const leashed = applyPressOutcome(state, fakeConference({ weight: 2 }), "defend").media;
+    state.season += 1;
+    const afterRollover = applyPressOutcome(state, fakeConference({ weight: 2 }), "defend").media;
+    expect(Math.abs(afterRollover)).toBeGreaterThan(Math.abs(leashed));
   });
 
   it("평판은 0~100을 넘지 않는다", () => {
