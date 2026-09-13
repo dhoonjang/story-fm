@@ -28,6 +28,7 @@ import {
   type PlayerDirectiveKind,
   MATCHDAY_SQUAD,
   POSITION_CODES,
+  STARTING_XI,
   SET_PIECE_KO,
   SET_PIECE_ROLES,
   SET_PIECE_ROLE_KO,
@@ -42,6 +43,7 @@ import {
   clampToBoard,
   movePoint,
   naturalPositionOf,
+  normalizePositionCode,
   positionAtPoint,
   positionGroupOf,
   clampFamiliarity,
@@ -335,9 +337,8 @@ export function setSquadLevels(
    * 갖지 않으므로 주전을 내리면 선발이 빈다 — 줄글에만 적으면 칩을 펴 보지 않은
    * 감독이 모자란 선발로 경기를 맞는다.
    */
-  const startersNeeded = MATCHDAY_SQUAD - MATCHDAY_BENCH;
   const starting = userTactics(state).assignments.filter((a) => a.role === "starting").length;
-  if (demoting.length > 0 && starting < startersNeeded) {
+  if (demoting.length > 0 && starting < STARTING_XI) {
     items.push(item({ label: "선발", text: `${starting}명`, note: "자리가 빕니다" }));
   }
   const message = notes.join(" · ");
@@ -348,8 +349,7 @@ export function setSquadLevels(
 
 /** 1군 인원 하한을 말하는 한 문장 — 두 명령이 같은 말을 해야 감독이 같은 규칙으로 읽는다 */
 function matchdaySquadFloor(): string {
-  const starters = MATCHDAY_SQUAD - MATCHDAY_BENCH;
-  return `1군은 매치데이 명단(선발 ${starters} + 벤치 ${MATCHDAY_BENCH})을 채울 ${MATCHDAY_SQUAD}명 이상이어야 합니다`;
+  return `1군은 매치데이 명단(선발 ${STARTING_XI} + 벤치 ${MATCHDAY_BENCH})을 채울 ${MATCHDAY_SQUAD}명 이상이어야 합니다`;
 }
 
 // ---- 설정형: 라인업 = 전술 배치 ----
@@ -400,6 +400,87 @@ function candidatePoint(
   if (fallback.inherited) return fallback.inherited;
   if (fallback.preset) return fallback.preset;
   return anchorOf(fallback.natural);
+}
+
+/**
+ * 부른 자리의 목표 좌표 — **밀려날 사람을 재기 전에 알아야 하는 것.**
+ *
+ * `candidatePoint`의 우선순위와 같은 순서를 보되 「빠진 선수의 자리를 물려받기」는 보지
+ * 않는다 — 누가 빠지는지가 이 값으로 정해지므로 순환이다.
+ */
+function slotDestination(
+  state: GameState,
+  tactics: TeamTactics,
+  slot: LineupSlotInput,
+): BoardPoint {
+  if (slot.point) return clampToBoard(slot.point);
+  if (slot.position) return anchorOf(slot.position);
+  const prev = tactics.assignments.find((a) => a.playerId === slot.playerId);
+  if (prev?.role === "starting" && prev.point) return prev.point;
+  return anchorOf(naturalPositionOf(userPlayerById(state, slot.playerId)!).position);
+}
+
+/**
+ * 부분 선발을 열한 명으로 채운다 — **부른 자리만 바꾸고 남은 자리는 지금 선발이다.**
+ *
+ * 감독은 "골문에 킬브라이드, 산투스는 중원으로"처럼 자리 둘을 갈아 부른다. 평시에 벤치
+ * 선수를 그라운드에 세우는 문은 이 명령 하나뿐이라(`movePlayerSlot`은 이미 뛰는 선수의
+ * 자리만 옮긴다) 열한 명을 다 적어야만 걸리면 그 지시는 걸릴 길이 없다 — 골키퍼가 0명이
+ * 된 판을 고치려는 말이 다섯 턴 내내 사라진 자리가 여기다.
+ *
+ * **자리를 잃는 사람은 감독이 부른 자리에 가장 가까이 서 있던 사람이다.** 코어가 셀 수
+ * 있는 사실은 자리의 거리뿐이다 — 누가 더 잘하는지, 누가 로테이션 차례인지는 감독의
+ * 판단이고, 코어가 대신 고르면 감독이 내리지 않은 결정이 판에 오른다. 거리가 같으면 id
+ * 사전순이라 같은 지시가 언제나 같은 판을 만든다 (→ docs/data/team.md §6).
+ */
+function completeStarting(
+  state: GameState,
+  tactics: TeamTactics,
+  named: readonly LineupSlotInput[],
+  demotingIds: ReadonlySet<string>,
+):
+  | { ok: true; starting: LineupSlotInput[]; benched: readonly string[] }
+  | { ok: false; message: string } {
+  const namedIds = new Set(named.map((s) => s.playerId));
+  /** 자리를 지킬 수 있는 사람 — 부르지 않았고, 내리지 않고, 아직 우리 선수다 */
+  const holding = tactics.assignments.filter(
+    (a) =>
+      a.role === "starting" &&
+      !namedIds.has(a.playerId) &&
+      !demotingIds.has(a.playerId) &&
+      userPlayerById(state, a.playerId) !== null,
+  );
+  // 열한 명을 다 부른 지시는 채울 것이 없다 — 밀려나는 사람도 없다(예전 그대로다)
+  if (named.length >= STARTING_XI) return { ok: true, starting: [...named], benched: [] };
+  const room = STARTING_XI - named.length;
+  if (holding.length < room) {
+    const short = room - holding.length;
+    return {
+      ok: false,
+      message: `선발이 ${STARTING_XI - short}명입니다 — ${short}명을 더 지정해 주세요`,
+    };
+  }
+  const targets = named.map((slot) => slotDestination(state, tactics, slot));
+  /** 감독이 부른 자리까지의 거리 — 제곱으로 견준다 (순서만 쓰므로 루트가 필요 없다) */
+  const toNamedSlot = (a: TacticAssignment): number => {
+    const p = a.point ?? anchorOf(a.position);
+    return Math.min(...targets.map((t) => (t.x - p.x) ** 2 + (t.y - p.y) ** 2));
+  };
+  const losing = new Set(
+    [...holding]
+      .sort((a, b) => toNamedSlot(a) - toNamedSlot(b) || (a.playerId < b.playerId ? -1 : 1))
+      .slice(0, holding.length - room)
+      .map((a) => a.playerId),
+  );
+  return {
+    ok: true,
+    // 자리를 지키는 사람은 코드도 좌표도 주지 않는다 — `candidatePoint`가 지금 좌표를 지킨다
+    starting: [
+      ...named,
+      ...holding.filter((a) => !losing.has(a.playerId)).map((a) => ({ playerId: a.playerId })),
+    ],
+    benched: [...losing],
+  };
 }
 
 /** 한 항목에 이름을 몇 개까지 적나 — 넘치면 접는다 (요약은 한 줄이다) */
@@ -533,35 +614,86 @@ export function setLineup(
   // 이름으로 부른 자리를 먼저 id로 바꾼다 — 아래 검증(중복·2군·부상)이 전부 id로 돈다
   const resolve = (slots: Array<string | LineupSlotInput>) =>
     slots.map((x) => ourSlot(state, norm(x)));
-  const startingPicked = resolve(input.starting);
-  const startingFailed = startingPicked.filter((p) => typeof p === "string");
-  if (startingFailed.length > 0) return { ok: false, message: startingFailed.join(" · ") };
-  const starting = startingPicked.filter((p): p is LineupSlotInput => typeof p !== "string");
+  const picked = (slots: Array<string | LineupSlotInput>) => {
+    const list = resolve(slots);
+    const failed = list.filter((x): x is string => typeof x === "string");
+    return failed.length > 0
+      ? { ok: false as const, message: failed.join(" · ") }
+      : {
+          ok: true as const,
+          slots: list.filter((x): x is LineupSlotInput => typeof x !== "string"),
+        };
+  };
+
+  /**
+   * **자리 표기를 먼저 코드로 옮긴다 — 읽지 못한 표기는 그 자리 하나만 버린다.**
+   *
+   * 감독과 GM은 `AML`·`DC`·`STC`처럼 자기 표기로 자리를 부르고(`POSITION_ALIASES`가
+   * 옮긴다), 그래도 표에 없는 말이 온다. 통째로 반려하던 때는 열한 명을 이름과 자리까지
+   * 정확히 부른 지시가 표기 하나 때문에 사라졌다 — 그 선수는 원래 자리에 세우고 읽지
+   * 못한 표기만 결과에 적는다 (→ docs/data/team.md §6).
+   */
+  const unreadable: string[] = [];
+  const readCodes = (slots: readonly LineupSlotInput[]): LineupSlotInput[] =>
+    slots.map((slot) => {
+      if (slot.position === undefined) return slot;
+      const code = normalizePositionCode(slot.position);
+      if (code) return { ...slot, position: code };
+      unreadable.push(slot.position);
+      // 자리는 비우고 선수는 남긴다 — 원래 자리(선발이면 지금 좌표, 아니면 주 포지션)에 선다
+      return { playerId: slot.playerId, ...(slot.point ? { point: slot.point } : {}) };
+    });
+
+  const startingRead = picked(input.starting);
+  if (!startingRead.ok) return startingRead;
+  const namedStarting = readCodes(startingRead.slots);
+  if (namedStarting.length > STARTING_XI) {
+    return { ok: false, message: `선발은 ${STARTING_XI}명까지입니다 (${namedStarting.length}명)` };
+  }
+  if (new Set(namedStarting.map((s) => s.playerId)).size !== namedStarting.length) {
+    return { ok: false, message: "선발에 중복 선수가 있습니다" };
+  }
+  /**
+   * 감독이 벤치에 이름을 적었으면 그 사람은 선발 자리를 지키지 않는다 — "킬브라이드를
+   * 골문에, 산투스는 벤치로"가 그 말이다. 벤치를 먼저 읽어야 자리를 채우는 셈이 그것을 본다.
+   */
+  const benchRead = input.bench ? picked(input.bench) : null;
+  if (benchRead && !benchRead.ok) return benchRead;
+  const namedBench = benchRead ? readCodes(benchRead.slots) : null;
+  const yielding = new Set([...(namedBench?.map((s) => s.playerId) ?? []), ...demotingIds]);
+
+  const completed = completeStarting(state, tactics, namedStarting, yielding);
+  if (!completed.ok) return completed;
+  const starting = completed.starting;
   const startingIds = new Set(starting.map((s) => s.playerId));
 
   /**
    * **벤치를 생략하면 지금 벤치를 지킨다.** 자리 하나만 바꾸는 지시가 벤치를 통째로
    * 지우면 다음 경기의 교체 카드가 통째로 사라진다. 이어받을 때는 이번에 선발이 된
    * 선수와 이번에 내리는 선수를 뺀다 — 그 둘은 감독이 방금 벤치에서 뺀 것이다.
+   *
+   * **자리를 잃은 선발은 그 앞에 선다** — 방금 자리를 뺀 선수가 교체 카드로 쓸 사람이다.
+   * 정원(`MATCHDAY_BENCH`)을 넘치는 만큼은 벤치 끝에서 예비로 내려가고 결과가 그 이름을 적는다.
    */
-  const inheritedBench = tactics.assignments
-    .filter(
-      (a) =>
-        a.role === "bench" &&
-        !startingIds.has(a.playerId) &&
-        !demotingIds.has(a.playerId) &&
-        // 팀을 떠난 선수의 배치가 남아 있어도 그것 때문에 저장이 막히지는 않는다
-        userPlayerById(state, a.playerId) !== undefined,
-    )
-    .map((a) => ({ playerId: a.playerId, position: a.position }));
-  const benchPicked = resolve(input.bench ?? inheritedBench);
-  const benchFailed = benchPicked.filter((p) => typeof p === "string");
-  if (benchFailed.length > 0) return { ok: false, message: benchFailed.join(" · ") };
-  const bench = benchPicked.filter((p): p is LineupSlotInput => typeof p !== "string");
+  const benchFallback: LineupSlotInput[] = [
+    ...completed.benched.map((playerId) => ({ playerId })),
+    ...tactics.assignments
+      .filter(
+        (a) =>
+          a.role === "bench" &&
+          !startingIds.has(a.playerId) &&
+          !demotingIds.has(a.playerId) &&
+          // 팀을 떠난 선수의 배치가 남아 있어도 그것 때문에 저장이 막히지는 않는다
+          // (`userPlayerById`는 없을 때 null이다 — undefined와 견주면 이 문이 안 닫힌다)
+          userPlayerById(state, a.playerId) !== null,
+      )
+      .map((a) => ({ playerId: a.playerId, position: a.position })),
+  ];
+  const squeezed = namedBench ? [] : benchFallback.slice(MATCHDAY_BENCH);
+  const bench = namedBench ?? benchFallback.slice(0, MATCHDAY_BENCH);
 
-  if (starting.length !== 11) return { ok: false, message: "선발은 정확히 11명이어야 합니다" };
-  if (startingIds.size !== 11) {
-    return { ok: false, message: "선발에 중복 선수가 있습니다" };
+  if (starting.length !== STARTING_XI) {
+    return { ok: false, message: `선발은 정확히 ${STARTING_XI}명이어야 합니다` };
   }
   const overlap = bench.filter((b) => startingIds.has(b.playerId));
   if (overlap.length > 0) {
@@ -594,15 +726,6 @@ export function setLineup(
   }
   // 기존 적응도·지시는 이어받는다 (배치가 바뀌어도 학습이 사라지지 않게)
   const prev = new Map(tactics.assignments.map((a) => [a.playerId, a]));
-
-  // 명시된 포지션 코드는 먼저 검증한다 — **벤치도 함께**. 벤치 코드는 좌표를 갖지
-  // 않을 뿐 배치에 그대로 적히므로, 안 보면 알 수 없는 코드가 명단에 남는다
-  const unknownPos = all
-    .map((s) => s.position?.toUpperCase())
-    .filter((code): code is string => code !== undefined && !positionGroupOf(code));
-  if (unknownPos.length > 0) {
-    return { ok: false, message: `알 수 없는 포지션: ${unknownPos.join(", ")}` };
-  }
 
   /**
    * 빠진 선발의 자리 — 새로 들어온 선수가 물려받는다. 교체 지시에 좌표가 없어도
@@ -839,9 +962,24 @@ export function setLineup(
   if (levelMoved.reserve.length > 0) {
     items.push(item({ label: "2군 이동", text: briefNames(levelMoved.reserve) }));
   }
+  /**
+   * **읽지 못한 것과 명단에서 밀려난 것은 결과가 적는다.** 둘 다 감독이 부른 지시와
+   * 판이 어긋난 자리라, 여기서 말하지 않으면 감독은 자기가 부른 대로 선 줄 안다.
+   */
+  const readNotes: string[] = [];
+  if (unreadable.length > 0) {
+    readNotes.push(`읽지 못한 자리 표기: ${unreadable.join(", ")} — 원래 자리에 세웠습니다`);
+  }
+  if (squeezed.length > 0) {
+    readNotes.push(
+      `벤치 정원이 차 매치데이 명단에서 빠졌습니다: ${nameList(
+        squeezed.map((s) => playerName(state, s.playerId)),
+      )}`,
+    );
+  }
   return {
     ok: true,
-    message: `라인업 확정 — ${[...changes.notes, ...levelNotes].join(" · ")}`,
+    message: `라인업 확정 — ${[...changes.notes, ...readNotes, ...levelNotes].join(" · ")}`,
     brief: { head: "라인업", items },
   };
 }
@@ -1044,15 +1182,17 @@ export function movePlayerSlot(
   }
   const from = assignment.point ?? anchorOf(assignment.position);
   // 지정하지 않은 축은 지금 자리를 그대로 쓴다 — "왼쪽으로"는 앞뒤를 안 건드린다
+  // 표기는 코드로 옮겨 받는다 — 감독이 `AML`로 부른 자리와 판의 `LAM`이 같은 자리다
+  const asked = input.position === undefined ? null : normalizePositionCode(input.position);
+  if (input.position !== undefined && asked === null) {
+    return { ok: false, message: `알 수 없는 포지션: ${input.position}` };
+  }
   const point = named
     ? movePoint(from, named)
     : input.point
       ? clampToBoard(input.point)
-      : anchorOf(input.position!);
-  const code = input.position && !named ? input.position.toUpperCase() : positionAtPoint(point);
-  if (!positionGroupOf(code)) {
-    return { ok: false, message: `알 수 없는 포지션: ${input.position}` };
-  }
+      : anchorOf(asked!);
+  const code = asked && !named ? asked : positionAtPoint(point);
   const currentPoint = from;
   if (assignment.position === code && currentPoint.x === point.x && currentPoint.y === point.y) {
     // 옮길 것이 없었던 것은 실패가 아니다 — 역할·지시만 바꾸는 호출을 막지 않는다
@@ -1207,8 +1347,8 @@ export function setPlayerPosition(
   const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
-  const code = input.position.toUpperCase();
-  if (!positionGroupOf(code)) {
+  const code = normalizePositionCode(input.position);
+  if (!code) {
     return {
       ok: false,
       message: `알 수 없는 포지션: ${input.position} (${POSITION_CODES.join("/")})`,
