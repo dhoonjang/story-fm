@@ -40,11 +40,11 @@ flowchart LR
 
 ### 요청과 응답의 모양
 
-| 방향 | 무엇                                                                                                                            | 어디                                                              |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| 요청 | `message`(감독의 말) **또는** `operation`(`skip_days` · `skip_to_next_match` · `advance_match`) — 둘 중 하나                    | `TurnSchema` — `apps/web/app/api/games/[id]/turn/stream/route.ts` |
-| 요청 | `orders[]` — 전술판에서 쌓인 조작(자리·역할·교체·6축). 모델을 거치지 않고 코어가 먼저 적용한다                                  | `applyMatchBoardOrder` — `apps/web/lib/turn-runner.ts`            |
-| 응답 | NDJSON 스트림: `delta`(장면 조각) · `ping`(10초 하트비트) · `done`(게임 페이로드) · `error`(문구 · `retry` · dev 전용 `detail`) | 같은 라우트                                                       |
+| 방향 | 무엇                                                                                                                                      | 어디                                                              |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| 요청 | `message`(감독의 말) **또는** `operation`(`skip_days` · `skip_to_next_match` · `advance_match`) — 둘 중 하나                              | `TurnSchema` — `apps/web/app/api/games/[id]/turn/stream/route.ts` |
+| 요청 | `orders[]` — 전술판에서 쌓인 조작(자리·역할·교체·6축). 모델을 거치지 않고 코어가 먼저 적용하고, 그 턴의 해석기에 `<board_moves>`로 실린다 | `applyMatchBoardOrder` — `apps/web/lib/turn-runner.ts`            |
+| 응답 | NDJSON 스트림: `delta`(장면 조각) · `ping`(10초 하트비트) · `done`(게임 페이로드) · `error`(문구 · `retry` · dev 전용 `detail`)           | 같은 라우트                                                       |
 
 ## 2. 평시 턴 — 입력은 어떻게 조립되는가
 
@@ -68,7 +68,7 @@ sequenceDiagram
   TR->>TR: withGameLock · loadGame
   TR->>CORE: 전술판 orders 적용 → operator 턴 push
   TR->>TR: user/operator 턴 push (operationLabel)
-  TR->>GM: runGmTurn(state, said, onDelta, operation)
+  TR->>GM: runGmTurn(state, said, onDelta, operation, 적용 기록·board_moves)
   GM->>CORE: takeArrivedReports (도착한 보고서)
   opt 손잡이 턴
     GM->>CORE: advanceForOperation (core/tick) — 코어가 먼저 굴린다 · 이 턴 날짜의 주인은 손잡이
@@ -275,11 +275,11 @@ unresolved }`), `parseOps`가 명령별 상한(`TACTIC_CAPS` 또는 `OPS_PER_COM
 세 해석기는 한 벌(`runOpsOrders`)이다 — 시스템 프롬프트 하나, 이력 없음, 맥락 블록 뒤에
 `@감독: <원문>`, 도구 하나를 `toolChoice`로 강제.
 
-| 해석기            | 맥락 블록                                                                                                                          | 채우는 명령      | 적용                                         |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------- |
-| `tactic-orders`   | 경기: `<ledger>`(장부·`<standing>`·`<targets>`) + `<match_log>`(이 경기의 턴 전부) · 평시: `<standing>` `<squad>` `<recent_turns>` | `TACTIC_OPS` 12  | `applyTacticOrders` — 경기면 패킷 재계산까지 |
-| `training-orders` | `<schedule>`(주간 일정) · `<squad_ops>`(지금 걸린 육성·멘토·방침) · `<squad>` · `<recent_turns>`                                   | `TRAINING_OPS` 6 | `applyOps`                                   |
-| `market-orders`   | `<negotiations>` · `<finance>` · `<interest>` · `<board>` · `<buybacks>` · `<seat>`(감독직) · `<recent_turns>`                     | `MARKET_OPS` 21  | `applyOps`                                   |
+| 해석기            | 맥락 블록                                                                                                                                                                              | 채우는 명령      | 적용                                         |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------- |
+| `tactic-orders`   | 경기: `<ledger>`(장부·`<standing>`·`<targets>`) + `<match_log>`(이 경기의 턴 전부) · 평시: `<standing>` `<squad>` `<recent_turns>` · 양쪽: `<board_moves>`(이번 턴 전술판이 움직인 것) | `TACTIC_OPS` 12  | `applyTacticOrders` — 경기면 패킷 재계산까지 |
+| `training-orders` | `<schedule>`(주간 일정) · `<squad_ops>`(지금 걸린 육성·멘토·방침) · `<squad>` · `<recent_turns>`                                                                                       | `TRAINING_OPS` 6 | `applyOps`                                   |
+| `market-orders`   | `<negotiations>` · `<finance>` · `<interest>` · `<board>` · `<buybacks>` · `<seat>`(감독직) · `<recent_turns>`                                                                         | `MARKET_OPS` 21  | `applyOps`                                   |
 
 ## 5. 경기 턴 — 매치 GM이 도구로 경기를 진행한다
 
