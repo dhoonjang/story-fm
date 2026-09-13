@@ -149,16 +149,31 @@ describe("승격 클럽 보강 — 스무 명으로 1부를 돌지 않는다", (
     }
   });
 
-  it("보강은 전력이 아니라 뎁스다 — 그 팀 최고 선수를 넘지 않는다", () => {
+  /**
+   * ⚠️ **한 사람이 아니라 무리로 잰다.** 기준선은 주전 평균에서 네 칸 아래이고
+   * (`REINFORCEMENT_DROP`) 그 위에 축 표집이 얹히므로, 다섯 중 가장 잘 뽑힌 하나는
+   * 그 팀 최고와 같은 자리까지 올라온다 — 그것은 규칙이 깨진 것이 아니라 뽑기다.
+   * 한 사람에 부등호를 걸면 세계 생성이 사람을 한 칸 미는 날 빨개지고, 정작
+   * 지켜야 할 것(기준선이 어디서 나오는가)은 그때도 멀쩡하다.
+   */
+  it("보강은 전력이 아니라 뎁스다 — 기준선이 그 팀 명단에서 나온다", () => {
     const { state, promoted } = afterSwap();
+    const mean = (xs: readonly number[]) => xs.reduce((sum, x) => sum + x, 0) / xs.length;
     let seen = 0;
     for (const teamId of promoted) {
       const squad = state.players.filter((p) => p.teamId === teamId);
       const signings = signingsOf(state, teamId);
       if (signings.length === 0) continue;
       seen += signings.length;
-      const best = Math.max(...squad.map((p) => p.attributes.overall));
-      for (const s of signings) expect(s.attributes.overall, s.name).toBeLessThan(best);
+      // 체급 상수(`TIER_BASE`)로 바꾸면 갓 올라온 팀이 1부 눈금의 선수를 다섯 공짜로
+      // 받아 첫 시즌부터 중위권이 된다 — 그 자리를 지키는 부등호다 (team.md §5)
+      const ids = new Set(signings.map((s) => s.id));
+      const starters = squad
+        .filter((p) => !ids.has(p.id))
+        .map((p) => p.attributes.overall)
+        .sort((a, b) => b - a)
+        .slice(0, 11);
+      expect(mean(signings.map((s) => s.attributes.overall)), teamId).toBeLessThan(mean(starters));
       // 계약 없이 명단에만 서는 선수는 없다 — 주급이 장부에 오르지 않는다
       for (const s of signings) {
         expect(state.contracts.some((c) => c.gamePlayerId === s.id && c.status === "active")).toBe(

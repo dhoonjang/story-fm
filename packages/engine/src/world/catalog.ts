@@ -517,32 +517,37 @@ function topUpEntries(
   teamId: string,
   seeds: readonly RealPlayerSeed[],
   base: number,
+  takenNames: Set<string>,
 ): CatalogDraft[] {
   const short = MIN_SQUAD - seeds.length;
   if (short <= 0) return [];
-  const all = fallbackEntries(teamId, base, {
-    takenNames: new Set(seeds.map((s) => s.nameKo)),
-  });
   const have: Record<string, number> = { GK: 0, DF: 0, MF: 0, FW: 0 };
   for (const s of seeds) have[s.positionGroup] = (have[s.positionGroup] ?? 0) + 1;
 
-  const out: CatalogDraft[] = [];
+  /**
+   * **고를 자리를 먼저 정하고, 정한 자리만 만든다.** 이름은 세계에서 유일하므로
+   * (people.md §2) 만들자마자 집합을 물고 나간다 — 버릴 후보까지 만들면 버려진
+   * 사람이 이름을 쥔 채 사라져, 시드가 두꺼운 리그일수록 풀이 통째로 말라 간다.
+   * 고르기는 템플릿 인덱스만 보므로 만들기 전에 끝난다.
+   */
+  const slots: number[] = [];
   const used = new Set<number>();
   // ① 부족한 포지션군을 1군급으로 (뒤쪽 = 로테이션 자리부터 가져온다)
-  for (let i = ACADEMY_FROM - 1; i >= 0 && out.length < short; i--) {
+  for (let i = ACADEMY_FROM - 1; i >= 0 && slots.length < short; i--) {
     const g = TEMPLATE_GROUPS[i]!;
     if ((have[g] ?? 0) >= GROUP_TARGET[g]) continue;
     have[g] = (have[g] ?? 0) + 1;
     used.add(i);
-    out.push(all[i]!);
+    slots.push(i);
   }
   // ② 나머지는 아카데미 유망주로
-  for (let i = ACADEMY_FROM; i < all.length && out.length < short; i++) out.push(all[i]!);
+  for (let i = ACADEMY_FROM; i < FALLBACK_TEMPLATE.length && slots.length < short; i++)
+    slots.push(i);
   // ③ 그래도 모자라면 남은 1군급으로
-  for (let i = 0; i < ACADEMY_FROM && out.length < short; i++) {
-    if (!used.has(i)) out.push(all[i]!);
+  for (let i = 0; i < ACADEMY_FROM && slots.length < short; i++) {
+    if (!used.has(i)) slots.push(i);
   }
-  return out;
+  return fallbackEntries(teamId, base, { takenNames, slots });
 }
 
 /**
@@ -552,21 +557,31 @@ function topUpEntries(
 function fallbackEntries(
   teamId: string,
   squadBase: number,
-  options: { template?: string[]; academyFrom?: number; takenNames?: Set<string> } = {},
+  options: {
+    template?: string[];
+    academyFrom?: number;
+    takenNames?: Set<string>;
+    /** 만들 템플릿 자리 — 안 주면 전부. 고르고 버리는 쪽이 쓴다 (`topUpEntries`) */
+    slots?: readonly number[];
+  } = {},
 ): CatalogDraft[] {
   const template = options.template ?? FALLBACK_TEMPLATE;
   const academyFrom = options.academyFrom ?? ACADEMY_FROM;
   // 이름 풀은 리그 국적을 따른다 — 세군다 명단이 통째로 잉글랜드 사람이 되지 않게
   const pool = syntheticNamePoolOf(countryOfTeam(teamId));
   /**
-   * **한 팀 안에서는 이름만으로 사람이 갈려야 한다** (people.md §2). 자리마다
-   * 독립 추첨하면 조합이 아무리 많아도 40명 스쿼드에서 같은 이름이 서고,
-   * 로마자까지 같아 `rankByName`이 매번 되묻는다. 실선수 시드가 있는 클럽은
-   * 그 이름들도 미리 쥐고 시작한다 (`topUpEntries`).
+   * **세계 안에서 이름만으로 사람이 갈려야 한다** (people.md §2). 자리마다 독립
+   * 추첨하면 조합이 아무리 많아도 40명 스쿼드에서 같은 이름이 서고, 로마자까지
+   * 같아 `rankByName`이 매번 되묻는다. 집합을 팀마다 새로 쥐면 그 다음이 무너진다 —
+   * 감독이 부르는 것은 이름 하나뿐이라(agents.md §5) 남의 팀 동명이인이 있으면
+   * 우리 선수를 가리킨 말이 후보 둘로 갈린다. 그래서 `buildFromSeed`가 세계 하나를
+   * 쥐고 전 클럽을 돈다 — 실선수 이름까지 미리 담아서.
    */
   const takenNames = options.takenNames ?? new Set<string>();
   const nationality = deriveNationality(teamId, undefined);
-  return template.map((position, i) => {
+  const slots = options.slots ?? template.map((_, i) => i);
+  return slots.map((i) => {
+    const position = template[i]!;
     const rng = makeRng(hashOf(`${teamId}:${i}`), `catalog:${teamId}:${i}`);
     const group = positionGroupOf(position) ?? "MF";
     const { ko: nameKo, en: nameEn } = claimSyntheticName(rng, pool, takenNames);
@@ -681,7 +696,7 @@ const MARKET_LEAGUE_TEMPLATE: string[] = [
  * 한 클럽의 스쿼드 초안 — 실선수 시드가 있으면 그것이 우선이고, 없거나 모자라면
  * 절차 생성으로 채운다. id는 아직 붙지 않는다 (전 클럽을 모은 뒤 한 번에 배정).
  */
-function teamDrafts(team: TeamCatalogEntry): CatalogDraft[] {
+function teamDrafts(team: TeamCatalogEntry, takenNames: Set<string>): CatalogDraft[] {
   /**
    * **무소속은 비어 있게 시작한다.** 클럽이 아니라 클럽이 없는 상태라
    * 초기 스쿼드가 없다 — 방출·계약 만료로만 사람이 들어온다.
@@ -698,7 +713,7 @@ function teamDrafts(team: TeamCatalogEntry): CatalogDraft[] {
       ...fallbackEntries(team.id, topUpBase(real, strengthBase(team)), {
         template: MARKET_LEAGUE_TEMPLATE,
         academyFrom: MARKET_LEAGUE_TEMPLATE.length,
-        takenNames: new Set(seeds.map((s) => s.nameKo)),
+        takenNames,
       }),
     ];
   }
@@ -707,6 +722,7 @@ function teamDrafts(team: TeamCatalogEntry): CatalogDraft[] {
     return fallbackEntries(team.id, strengthBase(team), {
       template: SECOND_DIVISION_TEMPLATE,
       academyFrom: SECOND_DIVISION_ACADEMY_FROM,
+      takenNames,
     });
   }
   const seeds = SQUAD_SEEDS[team.id];
@@ -716,27 +732,46 @@ function teamDrafts(team: TeamCatalogEntry): CatalogDraft[] {
       ...real,
       // 실선수 1군이 하한에 못 미치면 합성 선수로 보충한다.
       // 유소년은 실명을 쓰지 않는 결정(people.md §2)과도 맞는 방향이다.
-      ...topUpEntries(team.id, seeds, topUpBase(real, strengthBase(team))),
+      ...topUpEntries(team.id, seeds, topUpBase(real, strengthBase(team)), takenNames),
     ];
   }
-  return fallbackEntries(team.id, strengthBase(team));
+  return fallbackEntries(team.id, strengthBase(team), { takenNames });
+}
+
+/** 시드 명단에 실린 실선수 이름 전부 — 합성 이름이 피해 갈 자리다 */
+function seededNames(): Set<string> {
+  return new Set(Object.values(SQUAD_SEEDS).flatMap((squad) => squad.map((s) => s.nameKo)));
 }
 
 /**
  * 어드민이 새로 만든 클럽의 스쿼드 — 편집된 선수 카탈로그에 붙일 때 쓴다.
- * 이름 충돌을 피하려고 이미 쓰인 id를 받는다.
+ * 이름 충돌을 피하려고 이미 쓰인 id와 이름을 받는다.
  */
-export function buildTeamSquad(team: TeamCatalogEntry, taken: Set<string>): PlayerCatalogEntry[] {
-  return teamDrafts(team).map((e) => ({ id: claimPlayerId(e.nameEn, e.birthdate, taken), ...e }));
+export function buildTeamSquad(
+  team: TeamCatalogEntry,
+  taken: Set<string>,
+  takenNames: Set<string> = new Set(),
+): PlayerCatalogEntry[] {
+  return teamDrafts(team, takenNames).map((e) => ({
+    id: claimPlayerId(e.nameEn, e.birthdate, taken),
+    ...e,
+  }));
 }
 
 function buildFromSeed(): PlayerCatalogEntry[] {
   const entries: CatalogDraft[] = [];
-  for (const team of teamCatalog()) entries.push(...teamDrafts(team));
   /**
-   * id 배정은 **맨 마지막에 한 번에** 한다. 보충 후보를 만들었다가 버리는
-   * 경로(`topUpEntries`)가 있어, 만드는 자리에서 배정하면 버려진 후보가 이름을
-   * 선점해 실제로 남은 선수가 괜히 뒤 번호를 받는다.
+   * **이름은 세계 하나에서 고른다** (people.md §2). 팀마다 새 집합을 쥐면 조합이
+   * 아무리 넓어도 리그 전체에서는 수백 쌍이 겹치고, 그 동명이인 하나가 감독의
+   * 지시를 후보 둘로 갈라 죽인다. 실선수 이름을 먼저 담아 두므로 합성 선수가
+   * 실존 인물과 겹칠 수도 없다.
+   */
+  const takenNames = seededNames();
+  for (const team of teamCatalog()) entries.push(...teamDrafts(team, takenNames));
+  /**
+   * id 배정은 **맨 마지막에 한 번에** 한다 — 전 클럽이 한 집합을 봐야 세계에서
+   * 유일한 id가 나온다. 같은 이름·생일이 두 번 나오면 뒤에 선 쪽이 번호를 받으므로
+   * 순서도 여기서 한 번에 정해진다.
    */
   const taken = new Set<string>();
   return entries.map((e) => ({ id: claimPlayerId(e.nameEn, e.birthdate, taken), ...e }));

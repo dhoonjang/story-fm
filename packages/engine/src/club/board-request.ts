@@ -5,7 +5,7 @@ import type {
   BoardRequestKind,
   TickSink,
 } from "@story-fm/domain";
-import { josa, BOARD_REQUEST_LABEL, boardRequestAmountText } from "@story-fm/domain";
+import { BOARD_REQUEST_LABEL, boardRequestAmountText } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import {
   clubProfileIn,
@@ -16,7 +16,7 @@ import {
   weeklyWagesOf,
 } from "../core/state";
 import { addDays, diffDays, seasonYear } from "../core/dates";
-import { pickAnyPlayer } from "../core/player-ref";
+import { pickRivalPlayer } from "../core/player-ref";
 import { touchOpenings } from "../world/openings";
 import { ownerOf } from "../world/persona";
 import { USER_WAGE_HEADROOM, clubWageBudget, wageRoomOf } from "../world/wages";
@@ -280,11 +280,8 @@ export function requestBoard(state: GameState, input: RequestBoardInput): Comman
     if (!input.playerId) {
       return { ok: false, message: "영입 승인은 어느 선수인지 함께 말해야 합니다" };
     }
-    const picked = pickAnyPlayer(state, input.playerId);
+    const picked = pickRivalPlayer(state, input.playerId);
     if (!picked.ok) return { ok: false, message: picked.message };
-    if (picked.player.teamId === state.userTeamId) {
-      return { ok: false, message: `${josa(picked.player.name, "은/는")} 이미 우리 선수입니다` };
-    }
     playerId = picked.player.id;
   }
 

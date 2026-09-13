@@ -116,7 +116,7 @@ import type { MarketCommandResult, CommandResult } from "../commands";
 import { grantManagerXP } from "../commands";
 import { deltaItems, item } from "../commands/brief";
 import { applyStanceOutcome, buildTransferPress, openPress, signed } from "../club/press";
-import { pickAnyPlayer } from "../core/player-ref";
+import { pickAnyPlayer, pickOurPlayer, pickSignedPlayer } from "../core/player-ref";
 import { pickTeam } from "../core/team-ref";
 import {
   activeContract,
@@ -1143,15 +1143,12 @@ export function setTransferList(
   state: GameState,
   input: { playerId: string; listed: boolean; askingPrice?: number; note?: string },
 ): CommandResult {
-  const pick = pickAnyPlayer(state, input.playerId);
+  const pick = pickSignedPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
   // 임대는 양방향 다 막힌다 — 나간 선수는 `teamId`가 남의 팀이고, 온 선수는 남의 계약이다
   const locked = loanLockOf(player);
   if (locked) return { ok: false, message: locked };
-  if (player.teamId !== state.userTeamId) {
-    return { ok: false, message: `${josa(player.name, "은/는")} 우리 선수가 아닙니다` };
-  }
 
   const index = state.transferList.findIndex((l) => l.gamePlayerId === player.id);
   if (!input.listed) {
@@ -1277,12 +1274,9 @@ export function respondTransferRequest(
     note?: string;
   },
 ): CommandResult {
-  const pick = pickAnyPlayer(state, input.playerId);
+  const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
-  if (player.teamId !== state.userTeamId) {
-    return { ok: false, message: `${josa(player.name, "은/는")} 우리 선수가 아닙니다` };
-  }
   const found = transferRequestOf(state, player.id);
   if (!found) {
     return { ok: false, message: `${josa(player.name, "은/는")} 이적을 요청하지 않았습니다` };
@@ -1378,14 +1372,11 @@ export function offerPlayerOut(
     paymentYears?: number;
   },
 ): MarketCommandResult {
-  const pick = pickAnyPlayer(state, input.playerId);
+  const pick = pickSignedPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
   const locked = loanLockOf(player);
   if (locked) return { ok: false, message: locked };
-  if (player.teamId !== state.userTeamId) {
-    return { ok: false, message: `${josa(player.name, "은/는")} 우리 선수가 아닙니다` };
-  }
   // 감독이 부른 구단 이름이 그대로 실려 온다 — 여기서 id로 굳힌다 (core/team-ref.ts)
   const picked = pickTeam(state, input.teamId);
   if (!picked.ok) return { ok: false, message: picked.message };
@@ -2061,12 +2052,11 @@ export function openRenewal(
     squadStatus?: SquadStatus;
   },
 ): MarketCommandResult {
-  const pick = pickAnyPlayer(state, input.playerId);
+  // 임대 나간 선수도 계약은 우리 것이라 문을 지난다 — 그에게 맞는 답은 `dealOdds`의
+  // 임대 잠금이 낸다("임대 중"), "우리 선수가 아니다"가 아니다 (transfer.md §2)
+  const pick = pickSignedPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
-  if (player.teamId !== state.userTeamId) {
-    return { ok: false, message: `${josa(player.name, "은/는")} 우리 선수가 아닙니다` };
-  }
   /**
    * **이미 남과 약속한 선수는 못 잡는다** (transfer.md §1-4). 재계약을 열어 두면 한
    * 선수에게 다음 시즌의 계약이 둘이 된다 — 그를 붙잡을 길은 예약이 서기 전에 있었다.
@@ -2171,7 +2161,8 @@ export function openRelease(
   state: GameState,
   input: { playerId: string; severance: number; paymentYears?: number },
 ): MarketCommandResult {
-  const pick = pickAnyPlayer(state, input.playerId);
+  // 재계약과 같은 자격이다 — 계약이 우리 것이면 문을 지나고, 임대 잠금은 `dealOdds`가 낸다
+  const pick = pickSignedPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
   const paymentYears = paymentYearsOf(input.paymentYears);

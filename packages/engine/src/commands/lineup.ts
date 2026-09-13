@@ -109,14 +109,14 @@ import {
   type GameState,
   type CommandBriefItem,
 } from "../core/state";
-import { pickAnyPlayer, pickOurPlayer } from "../core/player-ref";
+import { pickOurPlayer, pickRivalPlayer } from "../core/player-ref";
 import { briefNames, item } from "./brief";
 import type { CommandResult } from "./result";
 
 // ── 선수 지목 ───────────────────────────────────────────
 //
-// 이름 해석은 코어가 한 벌만 갖는다 (`pickOurPlayer`·`pickAnyPlayer`, core/state.ts) —
-// 이적·교체 명령도 같은 것을 쓴다.
+// 이름 해석은 코어가 한 벌만 갖는다 (`pickOurPlayer`·`pickRivalPlayer`, core/player-ref.ts) —
+// 이적·교체 명령도 같은 것을 쓴다. 명령이 고를 수 있는 자격이 문을 고른다.
 
 /** 라인업 한 자리 — 풀리면 id로 바뀐 자리, 아니면 그 이유 */
 function ourSlot(state: GameState, slot: LineupSlotInput): LineupSlotInput | string {
@@ -2097,7 +2097,9 @@ export function setPlayerInstruction(
   if (input.kind) {
     const needsTarget = input.kind === "man_mark" || input.kind === "press_target";
     if (needsTarget) {
-      const found = input.targetId ? pickAnyPlayer(state, input.targetId) : null;
+      const found = input.targetId
+        ? pickRivalPlayer(state, input.targetId, "상대를 겨냥하세요")
+        : null;
       if (!found) {
         return {
           ok: false,
@@ -2106,12 +2108,6 @@ export function setPlayerInstruction(
       }
       if (!found.ok) return found;
       target = found.player;
-      if (target.teamId === state.userTeamId) {
-        return {
-          ok: false,
-          message: `${josa(target.name, "은/는")} 우리 선수입니다 — 상대를 겨냥하세요`,
-        };
-      }
       targetNote = ` → ${target.name}`;
     }
     assignment.directive = {

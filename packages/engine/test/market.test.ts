@@ -668,10 +668,16 @@ describe("에이전트 원형이 시장의 숫자에 걸린다", () => {
     expect(seen.size).toBeGreaterThan(1);
   });
 
+  /**
+   * ⚠️ **표본은 세계 전체다.** 앞 600명만 보면 명단 순서가 몇 구단에 쏠려 원형별
+   * 표본이 이백 명씩밖에 안 서고, 배수의 차이(5.2 대 5.8)가 사람마다 다른 값의
+   * 흩어짐에 묻힌다 — 세계 생성이 사람을 한 칸 미는 날 0.004 차이로 빨개진다.
+   * 전원을 세면 원형마다 이천 명이라 순서가 배수의 것이 된다.
+   */
   it("응답 지연이 원형의 배수만큼 갈린다 — 표본의 합으로", () => {
     const state = createTestGame(42);
     const total = new Map<string, { sum: number; n: number }>();
-    for (const player of state.players.slice(0, 600)) {
+    for (const player of state.players) {
       const agent = agentOfPlayer(state, player.id);
       if (!agent) continue;
       const days = responseDelayDays(
