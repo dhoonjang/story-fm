@@ -699,15 +699,42 @@ describe("액수는 감독이 부른 것만 실린다", () => {
   });
 
   /**
+   * 재계약과 해지도 같은 규약이다 — 협상을 여는 셋이 한 절 아래 있다 (transfer.md §1).
+   * 여기서 기대치를 대신 싣는 것이 특히 조용한 것은, 첫 제시액이 되부르기 상한과 선수
+   * 관문을 함께 정하기 때문이다: 지어낸 값 하나가 협상 전체의 폭이 된다.
+   */
+  it("재계약의 주급과 해지의 정산금도 빠지면 협상이 열리지 않는다", () => {
+    const before = STATE.negotiations.length;
+    for (const [name, input] of [
+      ["open_renewal", { playerId: ours.name }],
+      ["open_renewal", { playerId: ours.name, years: 3 }],
+      ["open_release", { playerId: ours.name }],
+    ] as const) {
+      const result = call(name, input);
+      expect(result.ok, JSON.stringify(input)).toBe(false);
+      expect(result.message).toContain("부르지 않았습니다");
+      // 그 갈래의 자가 함께 온다 — 감독이 값을 부르려 확률 조회를 한 번 더 거치지 않게
+      expect(result.message).toMatch(/£/);
+    }
+    expect(STATE.negotiations, "액수 없는 제안은 협상을 남기지 않는다").toHaveLength(before);
+  });
+
+  /**
    * 반려는 **코어의 판단**이어야 한다 — 스키마가 필수로 걸면 해석기는 액수를 비운
    * 채로는 명령을 부를 수조차 없어, 「감독이 말하지 않았다」가 어디에도 남지 않는다.
    */
   it("액수 자리를 스키마가 필수로 걸지 않는다", () => {
-    const spec = SKILL_TOOLS.find((t) => t.name === "send_offer")!;
-    const required = ((spec.inputSchema as Record<string, unknown>).required ?? []) as string[];
-    expect(required).toContain("playerId");
-    expect(required).not.toContain("fee");
-    expect(required).not.toContain("weeklyWage");
+    for (const [name, amounts] of [
+      ["send_offer", ["fee", "weeklyWage"]],
+      // 연수도 비울 수 있다 — 코어가 아는 기대 연수가 실린다
+      ["open_renewal", ["weeklyWage", "years"]],
+      ["open_release", ["severance"]],
+    ] as const) {
+      const spec = SKILL_TOOLS.find((t) => t.name === name)!;
+      const required = ((spec.inputSchema as Record<string, unknown>).required ?? []) as string[];
+      expect(required, name).toContain("playerId");
+      for (const amount of amounts) expect(required, `${name}.${amount}`).not.toContain(amount);
+    }
   });
 });
 
