@@ -316,6 +316,9 @@ export function checkSeedInvariants(
     }
   }
 
+  // ── ①-2 완장은 구단당 하나씩이고, 한 사람이 둘을 차지 않는다 (people.md §5-1)
+  problems.push(...checkArmbandSeeds(SQUAD_SEEDS, teamName));
+
   // ── ② 지정 선발의 슬러그가 그 클럽 시드에 실재하는가 (team.md §6)
   for (const [teamId, slugs] of Object.entries(DEFAULT_XI)) {
     const label = teamName.get(teamId) ?? teamId;
@@ -347,6 +350,49 @@ export function checkSeedInvariants(
   for (const derby of DERBIES) {
     if (derby.teams[0] === derby.teams[1]) {
       problems.push(`${derby.name}: 한 팀이 자기 자신과 더비를 이룹니다`);
+    }
+  }
+  return problems;
+}
+
+/** 완장 검사가 시드 한 줄에서 읽는 것 — 이름과 표식 둘 */
+export interface ArmbandSeed {
+  nameEn: string;
+  isCaptain?: boolean;
+  isViceCaptain?: boolean;
+}
+
+/**
+ * **완장은 구단당 하나씩이고, 한 사람이 둘을 차지 않는다** (→ ../../../../docs/data/people.md §5-1).
+ *
+ * 어긋나도 새 게임은 터지지 않는다 — 앞사람을 조용히 고르고 만다. 그래서 라커룸
+ * 서사의 축이 누구인지가 시드 갱신 한 번에 바뀌고, 바뀐 줄을 아무도 못 본다.
+ */
+export function checkArmbandSeeds(
+  squads: Record<string, readonly ArmbandSeed[]>,
+  teamName: ReadonlyMap<string, string> = new Map(TEAM_CATALOG_SEED.map((t) => [t.id, t.name])),
+): string[] {
+  const problems: string[] = [];
+  for (const [teamId, squad] of Object.entries(squads)) {
+    const label = `${teamName.get(teamId) ?? teamId}(${teamId})`;
+    const captains = squad.filter((s) => s.isCaptain);
+    const vices = squad.filter((s) => s.isViceCaptain);
+    if (captains.length > 1) {
+      problems.push(
+        `${label}: 시드에 주장이 ${captains.length}명입니다 — ${captains
+          .map((s) => s.nameEn)
+          .join(" · ")}`,
+      );
+    }
+    if (vices.length > 1) {
+      problems.push(
+        `${label}: 시드에 부주장이 ${vices.length}명입니다 — ${vices
+          .map((s) => s.nameEn)
+          .join(" · ")}`,
+      );
+    }
+    for (const s of squad.filter((x) => x.isCaptain && x.isViceCaptain)) {
+      problems.push(`${label}: ${s.nameEn}이(가) 주장이면서 부주장입니다`);
     }
   }
   return problems;
