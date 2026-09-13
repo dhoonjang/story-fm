@@ -18,7 +18,13 @@ import {
   RECOVERY_BASE,
   recoveryFactor,
 } from "@story-fm/sim";
-import { DEFAULT_TACTICS, isReserveMatch, naturalPositionOf, weightSlotOf } from "@story-fm/domain";
+import {
+  DEFAULT_TACTICS,
+  TACTIC_SCALE_MAX,
+  isReserveMatch,
+  naturalPositionOf,
+  weightSlotOf,
+} from "@story-fm/domain";
 import {
   advanceDays,
   advanceToMatchday,
@@ -427,6 +433,36 @@ describe("경기 체력 — 후반에 무너지는 사람", () => {
     }
     // 지구력이 좋으면 여유까지 남는다 — 문턱에 겨우 걸치는 게 아니다
     expect(conditionAt(of(90, 100), "RCM", 90)).toBeGreaterThan(GAP_CONDITION + 10);
+  });
+
+  /**
+   * **전술을 끝까지 올려도 온전한 중원은 90분을 선다.** 감독이 가장 먼저 하는 말이
+   * 「앞에서부터 잡아라」인데, 그 한 마디가 체력 100으로 나선 선발을 통째로 구멍에
+   * 보내면 대가를 무는 선택이 아니라 스위치다 — 벤치 다섯으로는 일곱 개의 구멍에
+   * 답할 수 없다 (match.md §3.2).
+   *
+   * 눈금은 지구력 축이다: 소모에 닿는 셋을 끝까지 올린 대가가 **지구력 스무 칸**이라,
+   * 고압박의 지구력 70이 기본 전술의 지구력 50과 같은 자리에 선다. 여기가 무너지면
+   * `DRAIN_PER_STEP`이나 `positionalTacticWeight`가 그 눈금을 벗어난 것이다.
+   */
+  it("압박·템포·라인을 끝까지 올려도 온전한 중원은 문턱 밖에 선다 — 대가는 지구력이 문다", () => {
+    const maxed = {
+      ...DEFAULT_TACTICS,
+      pressing: TACTIC_SCALE_MAX,
+      tempo: TACTIC_SCALE_MAX,
+      defensiveLine: TACTIC_SCALE_MAX,
+    };
+    const left = (stamina: number) =>
+      100 - conditionDrain(of(stamina, 100), "RCM", maxed, 90, 1, 1, 0.5, 100);
+
+    // 체력 100으로 나선 평범한 중원은 끝까지 선다 — 잘 뛰는 중원은 여유까지 남는다
+    expect(left(70)).toBeGreaterThan(GAP_CONDITION);
+    expect(left(90)).toBeGreaterThan(GAP_CONDITION + 5);
+    // 그래도 공짜는 아니다 — 지구력이 받쳐 주지 않으면 90분을 못 채운다
+    expect(left(50)).toBeLessThan(GAP_CONDITION);
+    // 그 대가의 크기가 지구력 스무 칸이다 (기본 전술의 지구력 50과 같은 자리)
+    const plain50 = 100 - conditionDrain(of(50, 100), "RCM", DEFAULT_TACTICS, 90, 1, 1, 0.5, 100);
+    expect(left(70)).toBeCloseTo(plain50, 0);
   });
 
   it("덜 회복된 채 나오면 후반에 구멍이 난다 — 사흘 만에 다시 세운 다리", () => {
