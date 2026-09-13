@@ -455,6 +455,56 @@ button.mv-marker:focus-visible {
   line-height: 1.6;
   color: var(--text-2);
 }
+/**
+ * 개인 지시 — **걸린 줄과 닿지 않은 줄이 한눈에 갈린다.**
+ *
+ * 갈리는 것은 색이 아니라 **밝기**다: 걸린 지시가 본문 밝기로 서고 닿지 않은 지시는
+ * 물러선다. 유불리가 아니라 "지금 서 있나"의 문제라 승패 색을 쓰지 않는다 —
+ * 공략·노트와 같은 규칙이다.
+ */
+.mv-directives {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mv-dir-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-sm);
+}
+.mv-dir-head b {
+  color: var(--text-2);
+  font-weight: 600;
+}
+/* 쓴 자리 — 한도는 코어가 세어 보낸 값이라 화면이 적어 두지 않는다 */
+.mv-dir-head span {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.mv-dir {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+.mv-dir.live {
+  color: var(--text);
+}
+.mv-dir-who {
+  font-weight: 600;
+}
+.mv-dir-kind {
+  color: var(--text-2);
+}
+/* 닿지 않은 까닭 — 사실 한 줄이라 줄글로 선다 */
+.mv-dir-why {
+  color: var(--warn);
+}
+
 .mv-tac-notes {
   display: flex;
   flex-direction: column;

@@ -76,6 +76,7 @@ export * from "./competition/draw-schedule";
 export * from "./competition/reschedule";
 
 // match — 경기 진행·간이 시뮬·평점·징계
+export * from "./match/directive-standing";
 export * from "./match/match-flow";
 export * from "./match/packet-digest";
 export * from "./match/preview";

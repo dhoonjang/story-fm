@@ -59,6 +59,11 @@ export interface DirectiveInput {
   targetId?: string;
   /** 얼마나 세게 — 없으면 `normal`이라 세기를 보내지 않는 호출이 예전 수를 그대로 낸다 */
   intensity?: DirectiveIntensity;
+  /**
+   * **감독이 내린 차례** — 클수록 최근. 자리를 다툴 때 이기는 쪽이고(`foldDirectives`),
+   * 없으면 0이라 차례를 싣지 않는 호출·옛 세이브는 배치 순서 그대로 갈린다.
+   */
+  order?: number;
 }
 
 /** 지시가 이득·대가를 얹는 줄 — 격자의 밴드와 같은 낱말이다 */
@@ -278,10 +283,11 @@ export type DirectiveFoldEntry =
 /**
  * 감독이 내린 목록 → **어느 지시가 걸리는가.** 판정이 여기 하나인 것이 계약이다:
  * 존 전력(`applyDirectives`)과 판 밖에서 지시를 읽는 곳(다리·카드,
- * `match-engine.ts`)이 서로 다른 셋을 보면 노트가 "안 걸렸다"고 말한 지시가 조용히
- * 값을 한다 — `kind` 없는 지시를 성공으로 답하던 것과 같은 거짓 성공이다.
+ * `match-engine.ts`), 그리고 감독에게 되돌려 주는 곳(화면·스냅샷·지시 결과)이 서로
+ * 다른 셋을 보면 노트가 "안 걸렸다"고 말한 지시가 조용히 값을 한다 — `kind` 없는
+ * 지시를 성공으로 답하던 것과 같은 거짓 성공이다.
  *
- * **한 선수에게 하나까지, 팀 전체로 `MAX_EFFECTIVE`까지, 감독이 내린 순서대로.**
+ * **한 선수에게 하나까지, 팀 전체로 `MAX_EFFECTIVE`까지.**
  * 배치(`TacticAssignment.directive`)가 단수라 엔진은 한 선수에게 둘을 만들 수 없지만,
  * 같은 지시를 세 번 적어 세 배로 먹이는 길을 열어 두지 않는다. **중복은 판정 없이
  * 빠진다** — 감독이 한 번만 내린 지시를 두고 "둘째는 안 걸렸다"고 설명하면 있지도
@@ -289,8 +295,13 @@ export type DirectiveFoldEntry =
  *
  * **셋을 세는 것은 실재를 확인한 뒤다.** 벤치에 앉은 선수의 지시, 교체로 사라진
  * 표적을 향한 지시는 애초에 걸릴 수 없으므로 자리를 먹지 않는다 — 먹으면 감독이 내린
- * 셋 중 하나가 이유 없이 사라지고, 노트는 그것을 "넷째라 안 걸렸다"고 엉뚱한 이유로
- * 설명한다.
+ * 셋 중 하나가 이유 없이 사라지고, 노트는 그것을 "밀려났다"고 엉뚱한 이유로 설명한다.
+ *
+ * **자리를 다투면 나중에 내린 지시가 이긴다** (밀어내기 · match.md §2). 앞의 셋이
+ * 자리를 잠그면 "한 경기에 셋까지"가 실제로는 "**먼저** 말한 셋까지"가 되어, 판이
+ * 바뀌어 필요해진 후반의 지시일수록 구조적으로 버려진다. 차례는 `order`가 들고 있고
+ * 없는 것끼리는 배열 순서로 갈린다 — 차례를 모르는 옛 세이브에서 판정이 움직이지
+ * 않는다.
  */
 export function foldDirectives(
   directives: readonly DirectiveInput[] | undefined,
@@ -299,7 +310,8 @@ export function foldDirectives(
 ): DirectiveFoldEntry[] {
   const out: DirectiveFoldEntry[] = [];
   const seen = new Set<string>();
-  let effective = 0;
+  /** 자리를 다툴 자격을 얻은 지시 — 실재를 확인한 것만 여기 선다 */
+  const contenders: Array<{ index: number; order: number }> = [];
   for (const d of directives ?? []) {
     if (seen.has(d.by)) continue;
     seen.add(d.by);
@@ -311,12 +323,19 @@ export function foldDirectives(
       out.push({ d, taken: false, code: "gone-target" });
       continue;
     }
-    if (effective >= DIRECTIVE_TUNING.MAX_EFFECTIVE) {
-      out.push({ d, taken: false, code: "overflow" });
-      continue;
-    }
-    effective += 1;
+    // 자리는 아래에서 한 번에 나눈다 — 여기서 선착순으로 주면 나중 지시가 못 이긴다
+    contenders.push({ index: out.length, order: d.order ?? 0 });
     out.push({ d, taken: true });
+  }
+  /**
+   * 나중에 내린 셋이 선다. 차례가 같으면 **앞선 것이 남는다** — 차례를 모를 때의
+   * 순서는 지금까지와 같은 배치 순서다.
+   */
+  const evicted = [...contenders]
+    .sort((a, b) => b.order - a.order || a.index - b.index)
+    .slice(DIRECTIVE_TUNING.MAX_EFFECTIVE);
+  for (const { index } of evicted) {
+    out[index] = { d: out[index]!.d, taken: false, code: "overflow" };
   }
   return out;
 }
@@ -511,7 +530,7 @@ export function applyDirectives(
   const steps: Array<
     { note: PacketTag } | { d: DirectiveInput; me: LineupSlot; target?: LineupSlot }
   > = [];
-  /** 넘쳐서 못 걸린 지시의 노트 — 뒤에 붙여 노트가 감독이 내린 순서대로 읽히게 한다 */
+  /** 자리를 얻지 못한 지시의 노트 — 뒤에 붙여 걸린 지시의 결과가 먼저 읽히게 한다 */
   const overflow: PacketTag[] = [];
   for (const entry of foldDirectives(
     directives,
