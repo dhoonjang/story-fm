@@ -1,11 +1,4 @@
-import type {
-  ArcKind,
-  ArcStage,
-  Negotiation,
-  NarrativeArc,
-  PlayerIssue,
-  TickSink,
-} from "@story-fm/domain";
+import type { ArcKind, ArcStage, Negotiation, NarrativeArc, PlayerIssue } from "@story-fm/domain";
 import {
   ARC_STAGE_KO,
   MANAGER_EXIT_KO,
@@ -557,14 +550,19 @@ export function describeActiveArcs(state: GameState): string | null {
 // ── 매일 tick ───────────────────────────────────────────
 
 /**
- * 열고·올리고·닫는다. 단계가 움직인 아크만 다이제스트에 한 줄 남긴다 —
- * 그대로인 이야기는 소식이 아니다.
+ * 열고·올리고·닫는다.
+ *
+ * ⚠️ **사건 카드를 세우지 않는다** (people.md §9). 아크는 이야기의 골격이지 그날
+ * 벌어진 일이 아니다 — 아크를 움직인 사실은 그 사실을 낸 패스가 이미 제 문장으로
+ * 냈고, 지금 어느 단계인지는 스냅샷의 아크 줄이 닫힐 때까지 매 턴 들고 있다.
+ * `arcFactLine`은 그 줄의 어휘라(`- [발단] 제목 — 사실`) 카드로 세우면 주어도
+ * 서술어도 없는 줄이 감독의 화면 맨 위에 선다.
  *
  * ⚠️ **단계는 뒤로 가지 않는다.** 사실이 잠깐 물러났다고(불만이 하루 식는다,
  * 다가옴 계단이 내려간다) 되감기면 GM이 지난 턴과 다른 흐름을 읽는다. 물러난
  * 사실이 아크를 움직이는 길은 **닫히는 것** 하나뿐이다.
  */
-export function tickArcs(state: GameState, digest: TickSink): void {
+export function tickArcs(state: GameState): void {
   const arcs = (state.arcs ??= []);
   const teamId = managedTeamId(state);
 
@@ -572,7 +570,6 @@ export function tickArcs(state: GameState, digest: TickSink): void {
     arc.stage = stage;
     arc.updatedOn = state.date;
     if (stage === "resolved") arc.resolvedOn = state.date;
-    digest.push(`${arcFactLine(state, arc)} — ${ARC_STAGE_KO[stage]}`);
   };
 
   /**
@@ -625,7 +622,6 @@ export function tickArcs(state: GameState, digest: TickSink): void {
     arcs.push(opened);
     active++;
     activeOfKind.set(candidate.kind, (activeOfKind.get(candidate.kind) ?? 0) + 1);
-    digest.push(`${arcFactLine(state, opened)} — ${ARC_STAGE_KO[candidate.stage]}`);
   }
 
   pruneResolved(state, arcs);

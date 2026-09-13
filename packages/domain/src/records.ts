@@ -768,6 +768,14 @@ export const NegotiationRoundSchema = z.object({
   contractYears: z.number().int().min(0).max(6),
   /** 상대 응답 예정일 — 우리 오퍼만 가진다 (상황에서 나온 지연) */
   respondsOn: DateString.nullable(),
+  /**
+   * **이 오퍼의 답을 감독에게 알린 날** — 만료 경고의 `Contract.expiryWarnedStage`와
+   * 같은 결이다 (season.md §5). 도착한 답은 감독이 답할 때까지 그 자리에 서 있으므로
+   * (`arrivedResponses`), 표식이 없으면 tick이 지나는 날마다 같은 카드를 한 장씩 민다.
+   * 되받은 뒤 우리가 넣는 새 오퍼는 새 라운드라 표식 없이 시작한다.
+   * 옛 세이브엔 없다(optional).
+   */
+  announcedOn: DateString.optional(),
   /** 이 오퍼 시점에 코어가 계산한 확률 — 사후에 LLM 판정의 분포를 볼 수 있다 */
   probability: z.number().min(0).max(100),
   /** 상대의 판정 (them 라운드) */

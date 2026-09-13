@@ -281,6 +281,44 @@ function TickEventCard({ event }: { event: TickEvent }) {
 }
 
 /**
+ * 접기 전에 서는 카드 수 — **스태거 상한과 같은 다섯**이다(design-system.md §6).
+ */
+const TICK_EVENTS_SHOWN = 5;
+
+/**
+ * 한 턴의 사건 카드 목록 — **수를 줄이는 것은 화면의 일이다**(design-system.md §6).
+ *
+ * 일주일을 넘긴 턴은 카드를 열몇 장 낸다. 그것이 다 서면 장면이 스크롤 아래로 밀려,
+ * 카드를 맨 위에 세운 이유가 없어진다. 코어는 사실을 다 내고 — 사실을 지우면 기록도
+ * 같이 없어진다 — 화면이 다섯 장 뒤를 손잡이 하나로 접는다.
+ *
+ * 한 번 펼치면 손잡이는 사라진다. 다시 접는 길은 두지 않는다.
+ */
+function TickEvents({ events }: { events: readonly TickEvent[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? events : events.slice(0, TICK_EVENTS_SHOWN);
+  const rest = events.length - shown.length;
+  return (
+    <div className="tick-events">
+      {shown.map((event, i) => (
+        <TickEventCard event={event} key={i} />
+      ))}
+      {/* 손잡이는 **목록의 마지막 자식**이다 — 카드의 `nth-child` 스태거가 그대로 성립한다 */}
+      {rest > 0 && (
+        <button
+          className="tick-more"
+          data-testid="tick-more"
+          onClick={() => setExpanded(true)}
+          type="button"
+        >
+          나머지 {rest}건
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
  * 능력치 막대의 바닥 — 프로 선수의 축은 여기 아래로 잘 내려가지 않는다.
  * 0에서 시작하면 열여섯 줄이 모두 반쯤 차 보여 강점과 약점이 뭉갠다.
  */
@@ -626,13 +664,7 @@ export function ChatTurnView({
        * 턴」)에서는 `lines`가 비고 `pieces`가 스탬프뿐인데, 카드를 그 안에 끼우면
        * 그때 함께 사라진다. 카드는 장면이 있든 없든 사실이므로 장면과 무관하게 선다.
        */}
-      {turn.events && turn.events.length > 0 && (
-        <div className="tick-events">
-          {turn.events.map((event, i) => (
-            <TickEventCard event={event} key={i} />
-          ))}
-        </div>
-      )}
+      {turn.events && turn.events.length > 0 && <TickEvents events={turn.events} />}
       {pieces.map((piece, i) => {
         if (!piece.mark) {
           return (

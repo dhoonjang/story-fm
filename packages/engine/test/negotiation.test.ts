@@ -801,6 +801,39 @@ describe("시간이 흐르면", () => {
     expect(arrivedResponses(state)).toHaveLength(1);
     expect(stopped === "attention" || stopped === "reached").toBe(true);
   });
+
+  /**
+   * 도착한 답은 감독이 답할 때까지 그 자리에 서 있다(`arrivedResponses`) — 알렸다는
+   * 표식이 없으면 tick이 지나는 날마다 같은 카드가 한 장씩 쌓인다 (season.md §5).
+   * 갈래로 갈린 문장도 같은 자리에서 잰다: 재계약에는 파는 구단도 이적료도 없다.
+   */
+  it("도착한 답은 한 번만 알린다 — 며칠을 더 넘겨도 줄은 하나", () => {
+    const state = createTestGame(42);
+    const player = playersOf(state, state.userTeamId)[0]!;
+    // 만료가 다가와야 재계약을 열 수 있다
+    activeContract(state, player.id)!.until = addDays(state.date, 120);
+    const wage = renewalExpectation(state, player);
+    const opened = openRenewal(state, { playerId: player.id, weeklyWage: wage, years: 3 });
+    expect(opened.ok, opened.message).toBe(true);
+    const negotiation = state.negotiations.find((n) => n.kind === "renew")!;
+    const offer = pendingOffer(negotiation)!;
+    // 답이 **언제** 오는지가 아니라 온 뒤에 무엇이 되풀이되는지를 재는 자리다
+    offer.respondsOn = addDays(state.date, 1);
+
+    const announced: string[] = [];
+    for (let day = 0; day < 6; day++) {
+      const advanced = advanceTime(state, { days: 1 });
+      announced.push(...eventTexts(advanced.events).filter((t) => t.includes("답이 도착")));
+    }
+
+    expect(announced).toHaveLength(1);
+    expect(offer.announcedOn).not.toBeUndefined();
+    // 재계약의 상대는 선수 본인이고 그 숫자는 주급이다 — 빈 구단 이름도 이적료도 없다
+    expect(announced[0]).toContain(`${player.name} 재계약 제안(주급 `);
+    expect(announced[0]).not.toContain("에서");
+    // 알림만 사라진다 — 답할 자리는 그대로 서 있다
+    expect(arrivedResponses(state)).toHaveLength(1);
+  });
 });
 
 describe("매각 — 들어오는 오퍼", () => {
