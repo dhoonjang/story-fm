@@ -20,6 +20,14 @@ max_retries: 2
 # ⚠️ 눈금을 받는 것은 제공자가 아니라 **모델**이다 — gemini-3.7-flash는 minimal에
 # 400을 낸다. 모델을 올릴 때 이 줄을 함께 본다 (docs/llm/models.md §1-2).
 
+# ⚠️ **해석기 계열(tactic-orders·training-orders·market-orders·training-rater)의 캐시
+# 히트율 0은 프롬프트 탓이 아니다** — 이력 없이 system·도구·이번 턴 입력만 보내는 한 벌
+# 요청이라 매번 같은 프리픽스가 5.7k뿐인데, Gemini의 암묵 캐시는 그 프리픽스가
+# 3.6-flash 10.5k · 3.5-flash-lite 17.6k를 넘어야 걸리기 시작한다(2026-09 실측).
+# 고정 블록을 contents 맨 앞으로 옮겨도, 요청을 글자까지 같게 되풀이해도 0이다. 이 자리의
+# 고정분을 캐시에 얹는 길은 명시 캐시(`cachedContents`) 하나뿐이다
+# (docs/llm/models.md §3 「Gemini」).
+
 agents:
   gm:
     provider: google
