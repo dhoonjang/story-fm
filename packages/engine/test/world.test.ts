@@ -62,6 +62,7 @@ import {
   START_MIN_AXIS,
   START_MAX_AXIS,
   playerCatalog,
+  checkArmbandSeeds,
   buildTeamSquad,
   generateYouthPlayer,
   syntheticNamePoolOf,
@@ -100,6 +101,23 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
     expect(new Set(catalog.map((e) => e.teamId)).size).toBe(SQUAD_TEAMS.length);
     expect(catalog.length).toBeGreaterThanOrEqual(3800);
     expect(new Set(catalog.map((e) => e.id)).size).toBe(catalog.length);
+  });
+
+  /**
+   * 완장이 어긋나도 새 게임은 터지지 않고 앞사람을 고른다 — 그래서 시드를 갱신한
+   * 사람이 알아채는 자리가 불변식뿐이다 (people.md §5-1).
+   */
+  it("완장 불변식 — 구단당 주장 하나·부주장 하나, 겸직 없음", () => {
+    const cap = { nameEn: "A", isCaptain: true };
+    const vice = { nameEn: "B", isViceCaptain: true };
+    expect(checkArmbandSeeds({ arsenal: [cap, vice] })).toEqual([]);
+    expect(checkArmbandSeeds({ arsenal: [cap, { nameEn: "B", isCaptain: true }] })).toHaveLength(1);
+    expect(
+      checkArmbandSeeds({ arsenal: [vice, { nameEn: "A", isViceCaptain: true }] }),
+    ).toHaveLength(1);
+    expect(
+      checkArmbandSeeds({ arsenal: [{ nameEn: "A", isCaptain: true, isViceCaptain: true }] }),
+    ).toHaveLength(1);
   });
 
   it("실선수 시드에 표기만 다른 같은 선수가 둘 다 남지 않는다", () => {
@@ -663,18 +681,53 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
     expect(checked).toBeGreaterThan(20);
   });
 
-  it("주장이 정확히 1명이고, 개막전에 나서는 선발 중에서 나온다", () => {
-    const captains = playersOf(state, state.userTeamId).filter((p) => p.isCaptain);
+  /**
+   * **완장은 카탈로그가 먼저 든다** (people.md §5-1) — 실제 그 구단의 주장·부주장이다.
+   * 파생이 실제와 다른 사람을 세우면 감독의 상식과 장부가 매 턴 부딪힌다.
+   */
+  it("주장·부주장이 시드가 지목한 사람이다", () => {
+    const seeded = playerCatalog().filter((e) => e.teamId === state.userTeamId);
+    const captain = seeded.find((e) => e.isCaptain);
+    const vice = seeded.find((e) => e.isViceCaptain);
+    expect(captain).toBeDefined();
+    expect(vice).toBeDefined();
+    const squad = playersOf(state, state.userTeamId);
+    expect(squad.filter((p) => p.isCaptain).map((p) => p.catalogId)).toEqual([captain!.id]);
+    expect(squad.filter((p) => p.isViceCaptain).map((p) => p.catalogId)).toEqual([vice!.id]);
+  });
+
+  /**
+   * 시드가 완장을 비운 클럽(위키 표가 달지 않은 자리 — sources.md §4.1.2)은 지금의
+   * 배치 파생이 그대로 선다. **부주장은 파생으로 만들지 않는다** — 감독이 처음
+   * 채우는 완장 하나는 남아 있어야 한다.
+   */
+  it("시드에 완장이 없는 구단은 배치 파생이 주장을 세우고 부주장은 빈다", () => {
+    const teamId = "nottingham";
+    expect(playerCatalog().some((e) => e.teamId === teamId && e.isCaptain)).toBe(false);
+    const derived = createTestGame(42, teamId);
+    const squad = playersOf(derived, teamId);
+    const captains = squad.filter((p) => p.isCaptain);
     expect(captains).toHaveLength(1);
-    /**
-     * 완장은 **경기에 나서는 사람**의 것이다 (people.md §5-1). 리더십과 나이만 보면
-     * 한 경기도 뛰지 않는 백업 골키퍼가 완장을 차고, 경기마다 `matchCaptainOf`가
-     * 그 완장을 다른 사람에게 넘긴다 — 라커룸의 축이 그라운드에 서지 않는다.
-     */
-    const starters = tacticsOf(state, state.userTeamId)
+    const starters = tacticsOf(derived, teamId)
       .assignments.filter((a) => a.role === "starting")
       .map((a) => a.playerId);
     expect(starters).toContain(captains[0]!.id);
+    expect(squad.some((p) => p.isViceCaptain)).toBe(false);
+  });
+
+  /**
+   * 초기 계약의 지위는 **시드가 적은 선수만** 든다 (people.md §5-2). 없는 자리에
+   * 칸을 만들면 `squadStatusOf`가 파생으로 가지 못해 없던 기대가 선다.
+   */
+  it("초기 계약이 시드의 계약 지위를 적고, 없는 선수는 칸을 비운다", () => {
+    const entries = new Map(playerCatalog().map((e) => [e.id, e] as const));
+    let written = 0;
+    for (const p of playersOf(state, state.userTeamId)) {
+      const seeded = p.catalogId === null ? undefined : entries.get(p.catalogId)?.squadStatus;
+      expect(activeContract(state, p.id)?.squadStatus).toBe(seeded);
+      if (seeded !== undefined) written += 1;
+    }
+    expect(written).toBeGreaterThan(5); // 지위를 받은 구단은 여섯에서 열둘 (sources.md §4.1.2)
   });
 
   /**

@@ -729,6 +729,8 @@ export function startMatch(state: GameState): FlowResult {
     ledger: createLedger(
       userIsHome ? userSideLedger : aiSideLedger,
       userIsHome ? aiSideLedger : userSideLedger,
+      // 친선은 교체가 아홉 장까지 열린다 — 대회를 아는 것은 경기 기록뿐이다 (match.md §5)
+      { friendly: isFriendly(match) },
     ),
     /**
      * **첫 휘슬에 선 열한 명** — 장부의 `onPitch`는 교체를 따라 움직이므로 여기서

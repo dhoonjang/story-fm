@@ -728,6 +728,8 @@ describe("시즌 전환 (season.md §6)", () => {
   it("부주장이 없으면 서열 최상위가 완장을 받는다", () => {
     const state = createTestGame(5);
     const captain = userPlayers(state).find((p) => p.isCaptain)!;
+    // 새 게임은 시드의 부주장을 세운다 (people.md §5-1) — 비운 자리를 재는 케이스다
+    for (const p of userPlayers(state)) p.isViceCaptain = undefined;
     captain.birthdate = "1988-01-01"; // 강제 은퇴
     transitionSeason(state);
     const next = userPlayers(state).find((p) => p.isCaptain)!;

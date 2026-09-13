@@ -67,6 +67,22 @@ function tieLegs(state: GameState, match: MatchRecord): MatchRecord[] {
 }
 
 /**
+ * **이 경기가 연장까지 갈 수 있는 자리인가** — 스코어를 보기 전의 절반.
+ *
+ * 리그·친선·대항전 리그 페이즈는 무승부로 끝나고, 2차전제의 1차전도 마찬가지다 —
+ * 승부는 마지막 다리가 가린다. 남은 절반(합계가 같은가)은 `needsExtraTime`이 얹는다.
+ *
+ * 경기 전에 묻는 자리가 있어서 갈라 둔다: 감독의 교체 계획은 킥오프 전에 서고, 그때는
+ * 아직 스코어가 없으므로 "연장에 들면 한 장 더"를 말할 수 있는 조건이 이것뿐이다
+ * (GM 스냅샷 `<now>`의 교체 한도 줄 — llm/agents.md §6).
+ */
+export function canReachExtraTime(state: GameState, match: MatchRecord): boolean {
+  if ((match.stage ?? "league") === "league") return false;
+  const legs = tieLegs(state, match);
+  return legs.length === 0 || legs[legs.length - 1]!.id === match.id;
+}
+
+/**
  * **이 경기 뒤에 연장이 붙는가** — 연장 판정의 단일 지점.
  *
  * 리그·친선·대항전 리그 페이즈는 무승부로 그냥 끝난다(`stage`가 없거나 `league`).
@@ -81,12 +97,8 @@ export function needsExtraTime(
   match: MatchRecord,
   score?: { home: number; away: number },
 ): boolean {
-  const stage = match.stage ?? "league";
-  if (stage === "league") return false;
-
+  if (!canReachExtraTime(state, match)) return false;
   const legs = tieLegs(state, match);
-  // 2차전제의 1차전은 비겨도 연장이 없다 — 승부는 마지막 다리가 가린다
-  if (legs.length > 0 && legs[legs.length - 1]!.id !== match.id) return false;
 
   const now =
     score ?? (match.result ? { home: match.result.homeGoals, away: match.result.awayGoals } : null);

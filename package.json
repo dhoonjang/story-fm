@@ -19,6 +19,7 @@
     "log": "tsx scripts/log.ts",
     "pseudonymize": "tsx scripts/pseudonymize.ts",
     "fill-nationality": "tsx scripts/fill-nationality.ts",
+    "fill-squad-roles": "tsx scripts/fill-squad-roles.ts",
     "e2e": "playwright test",
     "dev": "pnpm --filter @story-fm/web dev"
   },

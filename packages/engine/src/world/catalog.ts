@@ -350,6 +350,11 @@ function entryFromSeed(teamId: string, s: RealPlayerSeed): CatalogDraft {
     ...(nationality === undefined ? {} : { nationality }),
     ...(s.secondNationality === undefined ? {} : { secondNationality: s.secondNationality }),
     ...(s.weeklyWage === undefined ? {} : { weeklyWage: s.weeklyWage }),
+    // 완장과 계약 지위 — 시드에 있을 때만 실린다 (data/people.md §5-1·§5-2).
+    // 절차 생성 선수에겐 없고, 없는 자리는 새 게임이 파생으로 채운다.
+    ...(s.isCaptain === undefined ? {} : { isCaptain: s.isCaptain }),
+    ...(s.isViceCaptain === undefined ? {} : { isViceCaptain: s.isViceCaptain }),
+    ...(s.squadStatus === undefined ? {} : { squadStatus: s.squadStatus }),
   };
 }
 

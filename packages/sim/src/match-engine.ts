@@ -1363,6 +1363,8 @@ export interface BenchView {
   atBreak: boolean;
   /** 장부의 국면 — 교체 한도가 여기서 선다 (`subLimitsOf`, 연장이면 한 장 더) */
   phase: MatchPhase;
+  /** 친선인가 — 한도의 나머지 절반이다 (9인). 두 시뮬이 같은 함수에 넘긴다 */
+  friendly: boolean;
   /** 내 득점 − 상대 득점 */
   diff: number;
   subsUsed: number;
@@ -1393,7 +1395,7 @@ export interface BenchSub {
  * 시뮬에만 있어서 호출부(`planAiSubstitution`)가 앞서 처리한다.
  */
 export function planBenchSubs(view: BenchView, rng: () => number): BenchSub[] {
-  const limits = subLimitsOf(view.phase);
+  const limits = subLimitsOf(view.phase, view.friendly);
   let room = Math.min(limits.maxSubs - view.subsUsed, SUB_WINDOW_MAX);
   if (room <= 0) return [];
   // 휴식 정지점의 교체는 창을 소모하지 않는다 — 창이 소진돼도 라커룸에선 움직인다 (§5)
@@ -1461,8 +1463,8 @@ export function planAiSubstitution(
   worn: Record<string, number> = {},
 ): MatchEvent[] {
   const team = side === "home" ? ledger.home : ledger.away;
-  // 연장이면 한 장이 더 있다 — 장부와 **같은 함수**를 본다 (6인/4회)
-  const limits = subLimitsOf(ledger.phase);
+  // 연장이면 한 장이 더 있고 친선이면 아홉 장이다 — 장부와 **같은 함수**를 본다
+  const limits = subLimitsOf(ledger.phase, ledger.friendly);
   const atBreak = BREAK_STOPS.has(plan.stop);
   if (team.subsUsed >= limits.maxSubs) return [];
   // 부상 교체도 휴식 밖에서는 창을 연다 — 창이 없으면 장부가 반려하므로 여기서 접는다
@@ -1537,6 +1539,7 @@ export function planAiSubstitution(
       minute: plan.minute,
       atBreak,
       phase: ledger.phase,
+      friendly: ledger.friendly === true,
       diff: mine - theirs,
       subsUsed: team.subsUsed,
       subWindows: team.subWindows,
