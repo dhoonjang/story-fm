@@ -13,6 +13,7 @@ const FINANCE = "docs/simulation/finance.md §10";
 const HISTORY = "docs/llm/agents.md §5-1";
 const PROMPTS = "docs/llm/prompts.md §7";
 const TOOL_CONTRACT = "docs/llm/prompts.md §2";
+const CAREER = "docs/simulation/career.md §4";
 
 export const WORLD_SEASON = defineHarness({
   id: "world-season",
@@ -518,6 +519,34 @@ export const DEMOTION_GRIEVANCE = defineHarness({
 });
 
 /**
+ * 한 시즌을 한 말투로 보낸 감독을 세계가 어떻게 보는가 (`docs/simulation/career.md` §4).
+ *
+ * 회견 하나의 폭은 코드를 읽으면 나오지만, **시즌 마흔여덟 번의 누계가 성적 옆에서
+ * 어느 크기인가**는 굴려야 나온다. 목줄이 없던 동안 그 답은 「스무 배」였고, 리그
+ * 2위·21승 감독의 언론 평판이 0이었다. 여기가 재는 것은 목줄이 그 독점을 끊으면서도
+ * 스탠스를 무료로 만들지는 않았는가다.
+ */
+export const PRESS_REPUTATION = defineHarness({
+  id: "press-reputation",
+  what: "한 시즌 회견을 한 말투로 보낸 감독의 평판 3축 — 성적의 몫과 스탠스의 몫",
+  doc: CAREER,
+  cost: "축소 세계 한 시즌 + 손으로 세운 1부 규모 한 시즌 · 약 15초",
+  // prettier-ignore
+  bands: [
+    { metric: "축소 세계 시즌 회견 수", role: "measure", unit: "count", why: "축소 세계는 리그전이 열넷이라 1부의 마흔여덟에 닿지 않는다 — 아래 「1부 규모」 팔이 그 자리를 맡고, 이 줄은 회견이 실제로 열리기는 하는지의 표본이다" },
+    { metric: "축소 세계 경기당 회견 수", role: "reference", min: 0.8, max: 2, unit: "ratio", why: "실측 세이브는 시즌 48회 · 대회 경기 50경기 남짓이라 경기당 1 언저리다. 축소 세계는 부임·시즌 마디 회견이 같은 분자에 얹혀 조금 위에 선다 — 여기가 0.8 아래면 감싸는 감독이 회견을 만나지 못한 것이라 아래 줄들이 공허하다" },
+    { metric: "축소 세계 시즌 끝 언론", role: "measure", unit: "score", why: "1부 규모 쪽과 나란히 읽는다 — 회견 수가 다르므로 값이 아니라 방향이 같아야 한다" },
+    { metric: "축소 세계 시즌 중 세 축의 바닥", role: "guard", min: 20, unit: "score", why: "끝값만 보면 중간에 바닥을 지나온 것을 놓친다. **「관망」 문턱은 여기가 아니라 아래 1부 규모 팔의 것이다** — 축소 세계는 리그전이 열넷이라 성적이 옮기는 값도 1부의 3분의 1뿐이고, 그 판에서 부진한 구간의 감독이 「싸늘」을 지나는 것은 눈금이 아니라 설계다. 이 줄이 막는 것은 이슈 #787의 실패 모양 그 자체다: 회견 열여섯 번이 축을 0 언저리로 못박는가. 목줄이 없던 눈금이면 여기가 한 자리로 내려온다" },
+    { metric: "축소 세계 스탠스가 옮긴 최대 폭", role: "guard", max: 20, unit: "score", why: "`STANCE_SEASON_CAP`. 목줄은 축마다 따로 걸리므로 세 축 중 가장 멀리 간 축도 이 안이어야 한다 — 넘으면 누계가 새거나 시즌 경계에서 초기화가 어긋난 것이다" },
+    { metric: "1부 규모 스탠스가 옮긴 최대 폭", role: "guard", max: 20, unit: "score", why: "위와 같은 목줄을 마흔여덟 번으로 민 자리 — 회견 수를 세 배로 늘려도 같은 값에서 서야 목줄이 목줄이다" },
+    { metric: "1부 규모 스탠스 몫 — 언론", role: "guard", min: -20, max: -8, unit: "score", why: "**스탠스가 무료가 되면 안 된다.** 감싸기 마흔여덟 번이 언론에 아무 값도 남기지 않으면 「공짜인 스탠스는 없다」가 표에만 남는다. 위끝 −8은 회견 하나의 폭(무게 2에서 −3)의 세 걸음쯤 — 그보다 얕으면 목줄이 첫 회견부터 조인 것이다" },
+    { metric: "1부 규모 성적 몫 — 축당", role: "guard", min: 30, unit: "score", why: "2위 다툼(26승 7무 5패)이 한 축에 남기는 값. 언론 축이 성적을 놓치면 이 줄이 아니라 아래 두 줄이 무너지지만, 여기가 먼저 눈금을 보여 준다 — `MATCH_REPUTATION_SWING`을 좁히면 스탠스의 몫이 상대적으로 커진다" },
+    { metric: "1부 규모 시즌 끝 언론", role: "guard", min: 45, unit: "score", why: "**이 하네스의 본론이자 이슈 #787의 완료 조건.** 우승을 다투며 선수를 감싼 감독의 언론 평판이 「관망」(45) 위에 서야 한다. 여기가 0이었던 것이 이슈이고, 여기가 다시 45 아래로 내려오면 목줄이 성적을 이긴 것이다" },
+    { metric: "1부 규모 시즌 끝 세 축의 바닥", role: "guard", min: 45, unit: "score", why: "언론만 구제하면 보드가 대신 앉는다 — 셋 다 「관망」 위여야 영입 협상 `(언론+보드)/2`와 재계약 `(언론+선수단)/2`가 성적을 읽는다 (career.md §4)" },
+  ],
+});
+
+/**
  * 다가옴의 건수 — **세계가 얼마나 자주 먼저 말을 거는가** (`docs/data/people.md` §8).
  *
  * 임계·증가량은 코드를 읽어서는 정할 수 없는 값이다. 낮으면 감독이 매주 감독실 문을
@@ -771,6 +800,7 @@ export const HARNESSES: readonly Harness[] = [
   YOUTH_DEVELOPMENT,
   DEMOTION_GRIEVANCE,
   APPROACH_RATE,
+  PRESS_REPUTATION,
   OVERALL_SCALE,
   ATTRIBUTE_MODEL,
   HISTORY_WINDOW,

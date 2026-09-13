@@ -1740,10 +1740,28 @@ export function digestLines(digest: MatchDigest): string[] {
 }
 
 /**
- * 한 경기가 감독 평판을 움직이는 폭 — 보드·선수단에 같은 값으로 걸린다.
+ * 한 경기가 감독 평판을 움직이는 폭 — **세 축 모두에 같은 값으로 걸린다.**
  * 승리 `+`, 패배 `-`, 무승부는 0. 프리시즌은 이 계산 자체를 지나간다.
  */
 export const MATCH_REPUTATION_SWING = 2;
+
+/**
+ * 경기 하나가 평판 3축에 남기는 값 (career.md §4).
+ *
+ * **언론 축도 순위표를 읽는다.** 성적이 보드·선수단에만 닿던 동안 언론을 움직이는
+ * 것은 회견의 스탠스뿐이었고, 시즌 마흔 번의 누계가 그 축을 통째로 쥐었다 — 리그
+ * 2위로 시즌을 마친 감독의 언론 평판이 「뭇매」에 앉는 경로다. 평판은 세계가 감독을
+ * 보는 눈인데 눈 하나가 성적을 보지 않고 있었던 것이다.
+ *
+ * 하네스(`press-reputation`)가 이 함수를 시즌 규모로 읽으므로 값은 여기 한 벌이다.
+ */
+export function matchReputationDelta(
+  outcome: "win" | "draw" | "loss",
+): Record<"board" | "media" | "squad", number> {
+  const swing =
+    outcome === "win" ? MATCH_REPUTATION_SWING : outcome === "loss" ? -MATCH_REPUTATION_SWING : 0;
+  return { board: swing, media: swing, squad: swing };
+}
 /** 승리 하나가 주는 리더십 XP */
 export const WIN_LEADERSHIP_XP = 10;
 /** 원인 태그가 달린 골 하나가 주는 전술 XP */
@@ -2207,10 +2225,11 @@ export function finalizeMatch(state: GameState): MatchDigest {
    */
   const messages: string[] = [];
   if (!friendly) {
-    const repDelta =
-      outcome === "win" ? MATCH_REPUTATION_SWING : outcome === "loss" ? -MATCH_REPUTATION_SWING : 0;
-    state.manager.reputation.board = clampReputation(state.manager.reputation.board + repDelta);
-    state.manager.reputation.squad = clampReputation(state.manager.reputation.squad + repDelta);
+    const repDelta = matchReputationDelta(outcome);
+    const rep = state.manager.reputation;
+    rep.board = clampReputation(rep.board + repDelta.board);
+    rep.media = clampReputation(rep.media + repDelta.media);
+    rep.squad = clampReputation(rep.squad + repDelta.squad);
 
     if (outcome === "win") {
       const msg = grantManagerXP(state, "leadership", WIN_LEADERSHIP_XP);
