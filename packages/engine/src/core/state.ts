@@ -3241,20 +3241,33 @@ export function createGame(input: CreateGameInput): GameState {
     });
 
   /**
-   * 주장 — **서열 최상위, 다만 후보는 개막전에 나설 열한 명이다** (people.md §5-1).
+   * 완장 — **카탈로그가 먼저 들고, 없는 자리만 파생이 선다** (people.md §5-1).
+   * 실제 그 구단의 주장·부주장이 시드에 있으면 그 사람이 찬다.
+   *
+   * 시드에 주장이 없으면 **서열 최상위, 다만 후보는 개막전에 나설 열한 명이다**.
    * 규칙은 도메인(`initialCaptainOf`)이 갖는다 — 세계를 보지 않는 순수 규칙이고,
    * 개막 뒤의 서열(`squad/hierarchy.ts`)과 같은 자를 써야 두 서열이 갈리지 않는다.
    *
    * 후보를 위에서 세운 배치가 정하는 것은, 개막 전의 출전 수를 대신할 수 있는 사실이
    * 그것 하나뿐이어서다: 리더십과 나이만 보면 한 경기도 나서지 않는 백업 골키퍼가
    * 완장을 차고, 경기마다 `matchCaptainOf`가 그 완장을 다른 사람에게 넘긴다.
+   *
+   * ⚠️ **부주장은 시드에 있을 때만 선다** — 파생으로 만들지 않는다.
    */
+  const catalogById = new Map(playerCatalog().map((entry) => [entry.id, entry] as const));
+  const catalogOf = (p: GamePlayer) =>
+    p.catalogId === null ? undefined : catalogById.get(p.catalogId);
   const userSquad = players.filter((p) => p.teamId === input.userTeamId);
   const userStartingXi = (tactics.find((t) => t.teamId === input.userTeamId)?.assignments ?? [])
     .filter((a) => a.role === "starting")
     .map((a) => a.playerId);
-  const captain = initialCaptainOf(userSquad, userStartingXi, calendar.preseasonStart);
+  const captain =
+    userSquad.find((p) => catalogOf(p)?.isCaptain === true) ??
+    initialCaptainOf(userSquad, userStartingXi, calendar.preseasonStart);
   if (captain) captain.isCaptain = true;
+  // 파생 주장이 시드의 부주장이면 부주장 자리는 빈다 — 한 사람이 완장 둘을 찰 수 없다
+  const vice = userSquad.find((p) => catalogOf(p)?.isViceCaptain === true);
+  if (vice && vice.id !== captain?.id) vice.isViceCaptain = true;
 
   // 재정 + 계약(주급의 원본) — 무소속은 장부를 갖지 않는다 (team.md §4)
   const finances: TeamFinance[] = catalogTeams
@@ -3272,16 +3285,22 @@ export function createGame(input: CreateGameInput): GameState {
       };
     });
   const wages = initialWages(players, calendar.preseasonStart);
-  const contracts: Contract[] = players.map((p, i) => ({
-    id: `c-${p.id}`,
-    gamePlayerId: p.id,
-    teamId: p.teamId,
-    weeklyWage: wages.get(p.id) ?? 0,
-    since: calendar.preseasonStart,
-    // 계약 만료를 1~4년 뒤로 분산 (재계약 서사의 씨앗)
-    until: contractUntil(calendar.preseasonStart, 1 + (i % 4)),
-    status: "active",
-  }));
+  const contracts: Contract[] = players.map((p, i) => {
+    // 계약 지위 — 시드가 적은 선수만 든다. 칸이 비어야 `squadStatusOf`가 서열에서
+    // 파생하므로, 없는 자리에 칸을 만들어선 안 된다 (people.md §5-2)
+    const squadStatus = catalogOf(p)?.squadStatus;
+    return {
+      id: `c-${p.id}`,
+      gamePlayerId: p.id,
+      teamId: p.teamId,
+      weeklyWage: wages.get(p.id) ?? 0,
+      since: calendar.preseasonStart,
+      // 계약 만료를 1~4년 뒤로 분산 (재계약 서사의 씨앗)
+      until: contractUntil(calendar.preseasonStart, 1 + (i % 4)),
+      status: "active",
+      ...(squadStatus === undefined ? {} : { squadStatus }),
+    };
+  });
 
   // 일정 — 전 리그 + 유럽 대항전 경기 + 이적창 개장/폐장
   const windows = buildTransferWindows(season);

@@ -475,7 +475,8 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
      * 한가운데에 묻혀 GM이 장부 대신 축구 상식의 주장을 세운다 (agents.md §6).
      */
     const captain = squad.find((p) => p.isCaptain)!;
-    expect(note).toContain(`완장: 주장 ${captain.name} · 부주장 없음`);
+    const vice = squad.find((p) => p.isViceCaptain === true);
+    expect(note).toContain(`완장: 주장 ${captain.name} · 부주장 ${vice?.name ?? "없음"}`);
     expect(note).not.toContain(`${captain.name}(주장)`);
     // 완장 줄이 선수단 줄 위다 — 이름을 읽기 전에 누가 완장을 찼는지가 선다
     expect(note.indexOf("완장: 주장 ")).toBeLessThan(note.indexOf(`선수단 ${squad.length}명`));

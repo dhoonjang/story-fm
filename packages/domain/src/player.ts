@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
+import { SQUAD_STATUSES, type SquadStatus } from "./squad-rules";
 
 /** 등번호의 위끝 — 능력치 눈금과 같은 99지만 다른 축이다 */
 export const SQUAD_NUMBER_MAX = 99;
@@ -2280,6 +2281,20 @@ export interface PlayerCatalogMeta {
    * 이후 재계약·이적은 `CONTRACT` 원장이 갖는다.
    */
   weeklyWage?: number;
+  /**
+   * **주장 완장** — 그 구단이 공표한 주장(`RealPlayerSeed.isCaptain`).
+   * 구단당 한 명까지이고, 같은 사람이 부주장일 수 없다
+   * (`engine/world/catalog-invariants.ts`). 없으면 새 게임이 배치에서
+   * 파생한다 (`initialCaptainOf` — data/people.md §5-1).
+   */
+  isCaptain?: boolean;
+  /** 부주장 완장 — 같은 규칙. **파생으로 세우지 않는다**: 없으면 비운 채로 둔다 */
+  isViceCaptain?: boolean;
+  /**
+   * **계약 지위** — 새 게임의 초기 계약에 그대로 적힌다 (data/people.md §5-2).
+   * 없으면 계약에 칸을 두지 않아 `squadStatusOf`가 서열에서 파생한다.
+   */
+  squadStatus?: SquadStatus;
 }
 export type PlayerCatalogEntry = PlayerCatalogMeta & AxisValues;
 
@@ -2309,6 +2324,9 @@ export const PlayerCatalogEntrySchema = z.object({
   height: HeightSchema.optional(),
   weight: WeightSchema.optional(),
   weeklyWage: z.number().min(0).optional(),
+  isCaptain: z.boolean().optional(),
+  isViceCaptain: z.boolean().optional(),
+  squadStatus: z.enum(SQUAD_STATUSES).optional(),
   ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, RatingSchema])) as Record<
     AttributeAxis,
     typeof RatingSchema
