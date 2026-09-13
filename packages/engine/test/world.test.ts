@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLUB_HI_MIN_CONTRAST,
+  CLUB_TONE_SURFACE,
+  contrastRatio,
   type GamePlayer,
   type ManagerAttributes,
   FORMATIONS,
@@ -30,6 +33,8 @@ import {
   isTopFlight,
   tacticsOf,
   teamsOfLeague,
+  leagueTones,
+  topLeagues,
   buildMatches,
   buildTransferWindows,
   windowOpenOn,
@@ -359,6 +364,24 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
  * 되는데, 그 어긋남은 열다섯 시즌을 굴려야 보인다(`squad-longevity`) — 공식 자체는
  * 여기서 표본으로 잰다.
  */
+describe("리그 색 — 카탈로그가 내는 다섯 (ui/design-system.md §2-1)", () => {
+  const tones = leagueTones();
+
+  it("플레이 가능 리그마다 하나씩, 다섯이 서로 다른 색을 받는다", () => {
+    const ids = topLeagues().map((l) => l.id);
+    expect([...tones.keys()].sort()).toEqual([...ids].sort());
+    expect(new Set(tones.values()).size).toBe(ids.length);
+  });
+
+  it("가는 자리의 하한 — 전부 `--panel-2` 위 3:1을 넘는다", () => {
+    for (const [id, tone] of tones) {
+      expect(contrastRatio(tone, CLUB_TONE_SURFACE.panel2), id).toBeGreaterThanOrEqual(
+        CLUB_HI_MIN_CONTRAST,
+      );
+    }
+  });
+});
+
 describe("유스 인테이크 — 천장이 먼저 선다 (season.md §6)", () => {
   /** 표본 — 세계를 세우지 않고 공식만 부르므로 넉넉히 든다 */
   const SAMPLE = 1500;

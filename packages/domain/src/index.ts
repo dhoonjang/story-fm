@@ -20,3 +20,4 @@ export * from "./turn-operation";
 export * from "./money";
 export * from "./crest";
 export * from "./tick-event";
+export * from "./league-tone";

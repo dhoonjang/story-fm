@@ -5,6 +5,7 @@ import {
   catalogTierOf,
   createGame,
   interpretBackgroundHeuristic,
+  leagueTones,
   listGameSummaries,
   saveGame,
   teamCatalog,
@@ -60,9 +61,11 @@ export function GET(request: Request) {
   const ids = new Set(leagues.map((l) => l.id));
   // 기대 순위는 리그 인원에서 나온다 (career.md §5) — 세이브가 없으니 카탈로그가 센다
   const sizeOf = new Map(leagues.map((l) => [l.id, teamsOfLeague(l.id).length]));
+  // 리그 색은 다섯을 함께 봐야 나온다 (ui/design-system.md §2-1) — 한 번 세어 행마다 싣는다
+  const tones = leagueTones();
   return NextResponse.json({
     // 리그 행이 「20팀」을 세우는 그 수 — 화면이 팀 배열을 따로 세지 않는다
-    leagues: leagues.map((l) => ({ ...l, size: sizeOf.get(l.id) ?? 0 })),
+    leagues: leagues.map((l) => ({ ...l, size: sizeOf.get(l.id) ?? 0, tone: tones.get(l.id) })),
     teams: teamCatalog()
       .filter((t) => ids.has(t.leagueId))
       .map((t) => ({
