@@ -449,7 +449,8 @@ export interface ClubTones {
   readonly lifted: boolean;
 }
 
-function isChromatic(hex: string): boolean {
+/** 유채색인가 — 밝힘의 후보를 고르는 문이자, 리그 색이 셀 구단 색을 고르는 문이다 */
+export function isChromatic(hex: string): boolean {
   const { saturation, lightness } = hslOf(hex);
   return (
     saturation >= CHROMATIC_MIN_SATURATION &&
@@ -505,15 +506,32 @@ export function clubTonesOf(
  * 색상·채도를 지키고 명도만 올려 바닥 위 최소 대비에 닿는 첫 값.
  * 밝아지며 색역을 벗어나는 채도는 접는다 — 접지 않으면 채널이 잘려 색상이 돈다.
  */
-function liftedTone(hex: string, surface: string): string {
-  const { lightness, a, b } = oklabOf(hex);
-  const chroma = Math.hypot(a, b);
-  const hue = Math.atan2(b, a);
+export function liftedTone(
+  hex: string,
+  surface: string,
+  minContrast: number = CLUB_HI_MIN_CONTRAST,
+): string {
+  const { lightness, chroma, hue } = oklchOf(hex);
   for (let l = lightness + LIFT_STEP; l < 1; l += LIFT_STEP) {
-    const candidate = inGamut(l, chroma, hue);
-    if (contrastRatio(candidate, surface) >= CLUB_HI_MIN_CONTRAST) return candidate;
+    const candidate = oklchHex(l, chroma, hue);
+    if (contrastRatio(candidate, surface) >= minContrast) return candidate;
   }
   return INK_LIGHT;
+}
+
+/** #rrggbb → OKLCH(명도 0~1 · 채도 · 색상 0~360°) */
+export function oklchOf(hex: string): { lightness: number; chroma: number; hue: number } {
+  const { lightness, a, b } = oklabOf(hex);
+  return {
+    lightness,
+    chroma: Math.hypot(a, b),
+    hue: ((Math.atan2(b, a) * HUE_TURN) / (2 * Math.PI) + HUE_TURN) % HUE_TURN,
+  };
+}
+
+/** OKLCH → #rrggbb. 색역 밖 채도는 접힌다 — 접지 않으면 채널이 잘려 색상이 돈다 */
+export function oklchHex(lightness: number, chroma: number, hue: number): string {
+  return inGamut(lightness, chroma, (hue * 2 * Math.PI) / HUE_TURN);
 }
 
 /** 색역 안에서 가장 채도가 높은 값 — 채도를 이분 탐색으로 접는다 */

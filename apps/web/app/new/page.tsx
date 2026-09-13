@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { LeagueListSkeleton } from "@/components/skeleton";
@@ -26,6 +26,11 @@ interface LeagueEntry {
   country: string;
   /** 1부 팀 수 — 카탈로그가 센 것을 그대로 받는다. 화면이 팀 배열을 따로 세지 않는다 */
   size: number;
+  /**
+   * 리그 정체성 색 — 그 리그 구단들의 공식 색에서 파생한 값을 카탈로그가 실어 보낸다
+   * (ui/design-system.md §2-1). 답이 리그 집합의 함수라 화면이 행마다 셀 수 없다.
+   */
+  tone?: string;
 }
 
 /**
@@ -41,6 +46,13 @@ type Step = (typeof STEPS)[number]["key"];
 
 /** 강팀부터 — 보드 기대가 곧 난이도의 지형이다. 묶지는 않는다, 순서가 말한다 */
 const byTier = (a: TeamEntry, b: TeamEntry) => a.tier - b.tier;
+
+/**
+ * 리그 띠의 색 한 칸 — 행 요소가 인라인으로 세운다 (ui/design-system.md §2 「주입」).
+ * 카탈로그가 색을 주지 못하면 `:root`의 기본값이 그대로 선다.
+ */
+const leagueStyle = (tone: string | undefined): CSSProperties | undefined =>
+  tone === undefined ? undefined : ({ "--league-hi": tone } as CSSProperties);
 
 export default function NewGamePage() {
   const router = useRouter();
@@ -181,21 +193,23 @@ export default function NewGamePage() {
             <LeagueListSkeleton />
           ) : (
             /**
-             * 리그는 **세로 목록**이다 — 행 하나가 리그 하나고, 대회 톤 점·이름·
-             * 국가·팀 수가 한 줄에 선다. 리그가 늘면 줄이 늘 뿐이라 개수가 배치를
-             * 바꾸지 않는다 (ui/design-system.md §7).
+             * 리그는 **세로 목록**이다 — 행 하나가 리그 하나고, 리그 띠·이름·국가·
+             * 팀 수가 한 줄에 선다. 리그가 늘면 줄이 늘 뿐이라 개수가 배치를 바꾸지
+             * 않는다 (ui/design-system.md §7).
              */
             <div className="league-list" data-testid="league-list">
               {leagues.map((l) => (
                 <button
                   key={l.id}
                   className={`league-row${leagueId === l.id ? " selected" : ""}`}
+                  // 행마다 제 리그의 띠가 선다 — 팀 카드의 구단 띠와 같은 꼴이고,
+                  // 색은 「누구인가」만 말한다 (ui/design-system.md §2-1)
+                  style={leagueStyle(l.tone)}
                   // 고른 리그는 워시·링만이 아니라 이것으로도 전해진다 (overview.md §5)
                   aria-current={leagueId === l.id ? "true" : undefined}
                   onClick={() => selectLeague(l.id)}
                   data-testid={`league-${l.id}`}
                 >
-                  <span className="league-tone" aria-hidden />
                   <span className="league-name">{l.name}</span>
                   <span className="league-country">{l.country}</span>
                   {/* 팀이 아직 없는 리그는 「0팀」이라 적지 않는다 — 셀이 빈다 */}
