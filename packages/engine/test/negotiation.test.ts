@@ -101,6 +101,7 @@ import {
   SELL_ON_MIN_RATE,
   SELL_ON_PEAK_AGE,
   clausesForSale,
+  formatMoney,
   isPlayerDeal,
   sellOnAmountOf,
   sellOnRateForAge,
@@ -1184,6 +1185,33 @@ describe("재계약 — 상대가 선수 본인이다", () => {
     expect(negotiation.counterpartTeamId).toBeNull();
     expect(negotiation.windowId).toBeNull();
     expect(negotiation.rounds[0]!.fee).toBe(0);
+  });
+
+  /**
+   * 결과 줄은 감독이 아니라 **모델이 읽는 면**이라 어긋나도 화면에는 아무것도 나타나지
+   * 않는다 — 오퍼가 나간 턴을 계약이 맺어진 턴으로 서술한 시즌이 그렇게 지나갔다
+   * (prompts.md §3).
+   */
+  it("제안과 수락의 결과 줄이 서명 전 상태를 말한다", () => {
+    const state = createTestGame(42);
+    const player = expiringPlayer(state);
+    const wage = renewalExpectation(state, player);
+
+    const opened = openRenewal(state, { playerId: player.id, weeklyWage: wage, years: 3 });
+    expect(opened.ok, opened.message).toBe(true);
+    // 답은 아직 오지 않았다 — 완료형이 서면 그 자리가 곧 「계약 확정」으로 읽힌다
+    expect(opened.message).not.toContain("왔습니다");
+    expect(opened.message).toContain("accept_deal");
+
+    const negotiation = state.negotiations.find((n) => n.kind === "renew")!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const letter = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(letter.ok, letter.message).toBe(true);
+    // 수락은 합의일 뿐이고, 재계약에는 이적료가 없어 오간 축은 주급과 연수다
+    expect(letter.message).toContain("accept_deal");
+    expect(letter.message).toContain("3년");
+    expect(letter.message).not.toContain(formatMoney(0));
+    expect(negotiation.status).toBe("agreed");
   });
 
   it("주급을 올리면 확률이 오르고, 만료가 가까우면 기대치가 높아진다", () => {
