@@ -36,6 +36,7 @@ import {
   leagueOfTeamIn,
   MINI_WORLD,
   OWNER_ARCHETYPE_LABELS,
+  playerCatalog,
   playersOf,
   preseasonPrediction,
   quickSimulate,
@@ -1497,6 +1498,33 @@ describe("유스 인테이크 (season.md §6)", () => {
       (t) => t.type === "youth" && t.toTeamId !== READ.userTeamId,
     );
     expect(others.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * **인테이크가 이름을 고르는 범위도 세계다** (people.md §2). 제 팀 명단만 피하면
+   * 여름마다 들어오는 293명 중 백 명 가까이가 남의 팀 선수와 동명이인으로 서고,
+   * 감독이 그 아이의 이름을 부르는 순간 명령이 후보 둘로 갈려 죽는다. 후보 줄은
+   * 아직 세계 밖이지만 소집일에 들어오므로 같은 집합을 봐야 한다.
+   */
+  it("여름을 넘겨도 세계에 동명이인이 늘지 않는다 — 후보 줄까지", () => {
+    const clashing: string[] = [];
+    const seen = new Map<string, string>();
+    const rows = [
+      ...READ.players.map((p) => ({ name: p.name, where: p.teamId })),
+      ...(READ.youthCandidates ?? []).map((row) => ({ name: row.player.name, where: "후보" })),
+    ];
+    for (const { name, where } of rows) {
+      const first = seen.get(name);
+      if (first !== undefined) clashing.push(`${name}: ${first} / ${where}`);
+      else seen.set(name, where);
+    }
+    // 시드가 적은 실존 동명이인(니코 곤살레스·비티냐 등)은 카탈로그가 내는 몫이다
+    const seeded = new Set(
+      playerCatalog()
+        .filter((e) => e.synthetic !== true)
+        .map((e) => e.nameKo),
+    );
+    expect(clashing.filter((line) => !seeded.has(line.split(":")[0]!))).toEqual([]);
   });
 
   it("기한은 선수단 소집일이고, 코어가 채울 자리가 앞에 선다", () => {

@@ -312,7 +312,10 @@ function syncPlayerCatalog(team: TeamCatalogEntry, action: "add" | "remove"): vo
     return;
   }
   const taken = new Set(current.map((e) => e.id));
-  saveCatalog([...current, ...buildTeamSquad(team, taken)]);
+  // 이름도 카탈로그 전체에서 유일해야 한다 — 새 클럽 명단이 남의 동명이인을 만들면
+  // 감독이 부른 이름 하나가 후보 둘로 갈린다 (people.md §2)
+  const takenNames = new Set(current.map((e) => e.nameKo));
+  saveCatalog([...current, ...buildTeamSquad(team, taken, takenNames)]);
 }
 
 /** 팀 편집 전체를 시드로 되돌린다 (전술 성향·구단 프로필 포함) */

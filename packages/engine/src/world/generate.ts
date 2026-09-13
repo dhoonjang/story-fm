@@ -165,8 +165,9 @@ export function generateYouthPlayer(
   /** 합류 연도 (유스는 시즌 개막 연도 기준 17~19세) */
   refYear = seasonYear(season) + 1,
   /**
-   * 이 팀에 이미 있는 이름 — 새 이름을 여기에 등록하며 고른다. 안 넘기면
-   * 콜업된 유스가 1군 선수와 동명이인으로 설 수 있다 (people.md §2).
+   * **세계에 이미 있는 이름** — 새 이름을 여기에 등록하며 고른다. 팀 안에서만
+   * 피하면 콜업된 유스가 남의 팀 선수와 동명이인으로 서고, 감독이 그 이름을 부른
+   * 순간 명령이 후보 둘로 갈린다 (people.md §2).
    */
   takenNames: Set<string> = new Set(),
   /**
@@ -279,7 +280,7 @@ export function generatePromotionSigning(
   taken: Set<string>,
   /** 합류 연도 (새 시즌 개막 연도) */
   refYear: number,
-  /** 이 팀에 이미 있는 이름 — 동명이인을 막는다 (people.md §2) */
+  /** 세계에 이미 있는 이름 — 동명이인을 막는다 (people.md §2) */
   takenNames: Set<string>,
 ): GamePlayer {
   const rng = makeRng(seed, `promotion-signing:${teamId}:${season}:${index}`);
