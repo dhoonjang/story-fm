@@ -50,6 +50,8 @@ import {
   type PressFact,
   type PressStance,
   type TickSink,
+  josa,
+  josaOf,
 } from "@story-fm/domain";
 import {
   activeContract,
@@ -1942,8 +1944,8 @@ export function applyForManagerJob(state: GameState, teamRef: string): CommandRe
       ok: false,
       message:
         open.length > 0
-          ? `"${teamRef}"은(는) 최근 공석이 아닙니다 — 지금 공석: ${open.join(", ")}`
-          : `"${teamRef}"은(는) 최근 공석이 아닙니다 — 지금 지원할 수 있는 공석이 없습니다`,
+          ? `"${teamRef}"${josaOf(teamRef, "은/는")} 최근 공석이 아닙니다 — 지금 공석: ${open.join(", ")}`
+          : `"${teamRef}"${josaOf(teamRef, "은/는")} 최근 공석이 아닙니다 — 지금 지원할 수 있는 공석이 없습니다`,
     };
   }
   const since = spellStart(state);
@@ -2009,8 +2011,8 @@ export function applyForManagerJob(state: GameState, teamRef: string): CommandRe
     ok: true,
     tone: "good",
     message:
-      `${teamNameIn(state, vacancy.teamId)}가 면접 자리를 열었습니다 —` +
-      ` ${owner.name}(${APPROACH_CHANNEL_LABEL.owner})이(가) 마주 앉습니다 (${line}).` +
+      `${josa(teamNameIn(state, vacancy.teamId), "이/가")} 면접 자리를 열었습니다 —` +
+      ` ${josa(`${owner.name}(${APPROACH_CHANNEL_LABEL.owner})`, "이/가")} 마주 앉습니다 (${line}).` +
       ` 감독의 답이 제안 조건을 정하고, ${APPROACH_PATIENCE_DAYS}일 안에 답하지 않으면 자리는 닫힙니다` +
       (inPost
         ? `. 재직 중에 두드린 자리라 보드가 알게 됐습니다 (보드 평판 −${KNOCK_BOARD_HIT}) — 기자도 곧 묻습니다`

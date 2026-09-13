@@ -8,6 +8,7 @@ import {
   numberWishOf,
   pressFactText,
   TRANSFER_REQUEST_REASON_KO,
+  josa,
 } from "@story-fm/domain";
 import { formLabel } from "./form";
 import { isSettling } from "./settling";
@@ -318,7 +319,7 @@ function factOf(
   const mentoring = mentoringReadOf(state, player.id);
   if (mentoring && mentoring.pair.until === undefined && mentoring.other) {
     return mentoring.side === "mentor"
-      ? `${mentoring.other.name}을(를) 데리고 있다 (멘토 · ${mentoring.days}일째` +
+      ? `${josa(mentoring.other.name, "을/를")} 데리고 있다 (멘토 · ${mentoring.days}일째` +
           `${mentoring.count > 1 ? ` · ${mentoring.count}명` : ""})`
       : `${mentoring.other.name}에게 붙어 있다 (멘티 · ${mentoring.days}일째)`;
   }

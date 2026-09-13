@@ -1,5 +1,5 @@
 import type { GamePlayer, PitchClaim, PitchClaimKind } from "@story-fm/domain";
-import { PITCH_CLAIM_KO, ageOf } from "@story-fm/domain";
+import { josa, PITCH_CLAIM_KO, ageOf } from "@story-fm/domain";
 import { euroCompetitionOf } from "../competition/europe";
 import { countryOfTeam, isClubTeam } from "../data/team-catalog";
 import { computeStandings } from "../competition/season";
@@ -174,7 +174,7 @@ function verifyOne(
     case "compatriot": {
       const mate = compatriotIn(state, player);
       return mate
-        ? { verified: true, why: `라커룸에 ${mate.name}이(가) 있다` }
+        ? { verified: true, why: `라커룸에 ${josa(mate.name, "이/가")} 있다` }
         : { verified: false, why: "라커룸에 그의 나라 사람이 없다" };
     }
     case "trophy_push": {

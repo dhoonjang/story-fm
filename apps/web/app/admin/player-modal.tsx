@@ -7,6 +7,7 @@ import {
   AXIS_GROUP_KO,
   AXIS_KO,
   POSITION_CODES,
+  josa,
   type AttributeAxis,
 } from "@story-fm/domain";
 import { Modal } from "./modal";
@@ -198,7 +199,7 @@ export function PlayerModal({
   async function remove() {
     if (!player) return;
     const ok = window.confirm(
-      `카탈로그에서 ${player.teamName}의 ${player.nameKo}을(를) 삭제할까요?\n(새 게임부터 반영됩니다)`,
+      `카탈로그에서 ${player.teamName}의 ${josa(player.nameKo, "을/를")} 삭제할까요?\n(새 게임부터 반영됩니다)`,
     );
     if (!ok) return;
     setSaving(true);

@@ -25,6 +25,7 @@ import {
   approachTopStep,
   isIssueTopic,
   pressFactText,
+  josa,
 } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import {
@@ -1292,9 +1293,9 @@ function openApproach(state: GameState, digest: TickSink): boolean {
       ...(scene.about === null ? {} : { subject: playerById(state, scene.about)?.name ?? "" }),
       ...(scene.formLabel === undefined ? {} : { form: scene.formLabel }),
     });
-    digest.push(
-      `${scene.speakerId}(${APPROACH_CHANNEL_LABEL[scene.channel]})이(가) 감독을 찾아왔다 — ${sceneLine}`,
-    );
+    // 조사는 괄호 안의 채널 이름이 고른다 — 사람이 읽는 대로 (domain/josa.ts)
+    const speaker = `${scene.speakerId}(${APPROACH_CHANNEL_LABEL[scene.channel]})`;
+    digest.push(`${josa(speaker, "이/가")} 감독을 찾아왔다 — ${sceneLine}`);
     pushNarrative(state, `${scene.speakerId} 면담 요청 (${sceneLine})`, step >= 3 ? 4 : 3);
     /**
      * **자리가 열리는 순간 요청이 선다.** 감독의 답은 압력만 되돌릴 뿐 요청을 지우지
@@ -1498,9 +1499,8 @@ function openSeasonReview(state: GameState, digest: TickSink): boolean {
   };
   pushApproach(state, approach);
   const line = approachContextText(contextCard);
-  digest.push(
-    `${owner.characterId}(${APPROACH_CHANNEL_LABEL.owner})이(가) 감독을 찾아왔다 — ${line}`,
-  );
+  const speaker = `${owner.characterId}(${APPROACH_CHANNEL_LABEL.owner})`;
+  digest.push(`${josa(speaker, "이/가")} 감독을 찾아왔다 — ${line}`);
   // 계단 2 — 다른 자리가 같은 계단에서 남기는 눈금과 같다
   pushNarrative(state, `${owner.characterId} 면담 요청 (${line})`, 3);
   return true;

@@ -19,6 +19,7 @@ import {
   numberWishOf,
   squadStatusRank,
   type NumberWish,
+  josa,
 } from "@story-fm/domain";
 import { buildSeasonCalendar, diffDays, windowOpenOn } from "../competition/calendar";
 import { claimLabel, evaluatePitch } from "./persuasion";
@@ -613,7 +614,7 @@ function splitNote(terms: DealTerms, effective: number): string {
 export function loanLockOf(player: GamePlayer): string | null {
   if (!player.loan) return null;
   return (
-    `${player.name}은(는) 임대 중입니다 — 계약은 ${teamName(player.loan.fromTeamId)}에 있어 ` +
+    `${josa(player.name, "은/는")} 임대 중입니다 — 계약은 ${teamName(player.loan.fromTeamId)}에 있어 ` +
     "그쪽이 먼저 불러들여야 움직입니다"
   );
 }
@@ -703,7 +704,7 @@ function agentFactor(
     label: "에이전트",
     delta: Math.round(raw - neutral()),
     why:
-      `${agentLabelOf(agent)}이(가) 그를 대리한다 — ` +
+      `${josa(agentLabelOf(agent), "이/가")} 그를 대리한다 — ` +
       `부르는 값이 ${Math.round((lift - 1) * 100)}% 다르다`,
   };
 }
@@ -771,10 +772,10 @@ export function precontractBlockerOf(state: GameState, player: GamePlayer): stri
   if (pending) {
     return pending.teamId === state.userTeamId
       ? `${player.name}과는 이미 사전 계약을 맺었습니다`
-      : `${player.name}은(는) 이미 ${teamName(pending.teamId)}와 사전 계약을 맺었습니다`;
+      : `${josa(player.name, "은/는")} 이미 ${josa(teamName(pending.teamId), "과/와")} 사전 계약을 맺었습니다`;
   }
   if (player.state.retiringAfterSeason) {
-    return `${player.name}은(는) 이번 시즌 뒤 은퇴를 예고했습니다`;
+    return `${josa(player.name, "은/는")} 이번 시즌 뒤 은퇴를 예고했습니다`;
   }
   return null;
 }
@@ -815,7 +816,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
 
   if (terms.kind === "sell" || terms.kind === "loan_out") {
     if (player.teamId !== state.userTeamId) {
-      blockers.push(`${player.name}은(는) 우리 선수가 아닙니다`);
+      blockers.push(`${josa(player.name, "은/는")} 우리 선수가 아닙니다`);
     }
     /**
      * 매각은 **사는 쪽 협회의 창**을 본다. 우리 창이 닫혀도 사우디·MLS 창이
@@ -831,12 +832,12 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   } else if (terms.kind === "renew" || terms.kind === "release") {
     // 재계약·해지는 이적창과 무관하다 — 상대가 선수 본인이기 때문이다
     if (player.teamId !== state.userTeamId) {
-      blockers.push(`${player.name}은(는) 우리 선수가 아닙니다`);
+      blockers.push(`${josa(player.name, "은/는")} 우리 선수가 아닙니다`);
     }
     if (terms.kind === "release") {
       // 계약이 없으면 해지할 것이 없다 — 그날로 끝난 계약은 이미 무소속으로 간다
       if (!activeContract(state, player.id)) {
-        blockers.push(`${player.name}은(는) 해지할 계약이 없습니다`);
+        blockers.push(`${josa(player.name, "은/는")} 해지할 계약이 없습니다`);
       }
       // 나가는 문은 다 같은 하한을 지킨다 — 다 내보내고 경기를 못 뛰는 일이 없게
       const short = squadShortfall(state, state.userTeamId, player);
@@ -850,7 +851,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     }
   } else {
     if (player.teamId === state.userTeamId) {
-      blockers.push(`${player.name}은(는) 이미 우리 선수입니다`);
+      blockers.push(`${josa(player.name, "은/는")} 이미 우리 선수입니다`);
     }
     /**
      * **사전 계약은 돈이 나가지 않는 영입이다** (§1-4). 그래서 나갈 돈을 재는 문이
@@ -870,7 +871,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
        * 세계 밖으로 나간다 — 아무도 쓰지 않는 잔고로 사라진다.
        */
       if (!isClubTeam(player.teamId) && terms.fee > 0) {
-        blockers.push(`${player.name}은(는) 무소속이라 이적료가 붙지 않습니다`);
+        blockers.push(`${josa(player.name, "은/는")} 무소속이라 이적료가 붙지 않습니다`);
       }
       const ourFinance = financeOf(state, state.userTeamId);
       if (ourFinance.budgetFrozen && terms.fee > 0) {
@@ -1880,7 +1881,7 @@ function squadNumberContribution(
     score: holder ? -SQUAD_NUMBER_SCORE : SQUAD_NUMBER_SCORE,
     label: "등번호",
     why: holder
-      ? `그가 원하는 ${wanted}번은 ${holder.name}이(가) 달고 있다`
+      ? `그가 원하는 ${wanted}번은 ${josa(holder.name, "이/가")} 달고 있다`
       : `그가 원하는 ${wanted}번이 우리 팀에서 비어 있다`,
   };
 }

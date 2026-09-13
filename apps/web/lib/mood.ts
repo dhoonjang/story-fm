@@ -1,4 +1,4 @@
-import { milestonePhrase, PLAYER_ARCHETYPE_LABEL, SQUAD_STATUS_KO } from "@story-fm/domain";
+import { josa, milestonePhrase, PLAYER_ARCHETYPE_LABEL, SQUAD_STATUS_KO } from "@story-fm/domain";
 import type { MentoringEnd, MilestoneCode } from "@story-fm/domain";
 import type { MoodFact, MoodRead } from "@story-fm/engine";
 
@@ -163,13 +163,13 @@ const MENTORING_END_SENTENCE: Record<MentoringEnd, Record<"mentor" | "mentee", s
 /** 감독이 붙여 준 사이 — 선 자리와 끝났는지가 넷으로 갈린다 (people.md §5-3) */
 function mentoringSentence(fact: Extract<MoodFact, { cause: "mentoring" }>): string {
   if (fact.ended !== undefined) {
-    return `${dayWord(fact.days)} ${fact.name}과(와)의 사이가 끝났다 — ${MENTORING_END_SENTENCE[fact.ended][fact.side]}`;
+    return `${dayWord(fact.days)} ${josa(fact.name, "과/와")}의 사이가 끝났다 — ${MENTORING_END_SENTENCE[fact.ended][fact.side]}`;
   }
   if (fact.side === "mentee") return `${fact.name}에게 붙어 배우는 중이다 (${fact.days}일째)`;
   // 몇을 데리고 있는지는 하나를 넘을 때만 — 한 명이면 이름이 이미 그 수다
   return fact.count !== undefined && fact.count > 1
-    ? `${fact.name}을(를) 비롯해 ${fact.count}명을 뒤에서 챙기고 있다`
-    : `${fact.name}을(를) 뒤에서 챙기고 있다 (${fact.days}일째)`;
+    ? `${josa(fact.name, "을/를")} 비롯해 ${fact.count}명을 뒤에서 챙기고 있다`
+    : `${josa(fact.name, "을/를")} 뒤에서 챙기고 있다 (${fact.days}일째)`;
 }
 
 /** 카드 한 장 → 한 마디 */
@@ -266,10 +266,10 @@ function sentenceOf(fact: MoodFact): string {
        * 전야는 그 사람의 일이다. 어떻게 떠났는지는 회견 카드의 것이라 여기 오지 않는다.
        */
       return fact.days === 0
-        ? `오늘 옛 소속 ${fact.club}을(를) 상대한다`
+        ? `오늘 옛 소속 ${josa(fact.club, "을/를")} 상대한다`
         : fact.days === 1
-          ? `내일 옛 소속 ${fact.club}과(와) 만난다`
-          : `${fact.days}일 뒤 옛 소속 ${fact.club}과(와)의 경기가 잡혀 있다`;
+          ? `내일 옛 소속 ${josa(fact.club, "과/와")} 만난다`
+          : `${fact.days}일 뒤 옛 소속 ${josa(fact.club, "과/와")}의 경기가 잡혀 있다`;
     case "contract-ending":
       return "계약이 반년 안에 끝난다";
     case "leader":
@@ -288,7 +288,7 @@ function sentenceOf(fact: MoodFact): string {
       if (fact.event === "lost") return `${fact.number}번을 내주고 새 번호를 받았다`;
       return fact.after === undefined
         ? `${fact.number}번을 새로 달았다`
-        : `${fact.after.name}이(가) ${fact.after.seasons}시즌 달던 ${fact.number}번을 ` +
+        : `${josa(fact.after.name, "이/가")} ${fact.after.seasons}시즌 달던 ${fact.number}번을 ` +
             `${fact.after.since}시즌 만에 물려받았다`;
     case "mentoring":
       return mentoringSentence(fact);
