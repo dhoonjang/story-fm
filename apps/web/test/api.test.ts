@@ -1094,7 +1094,7 @@ describe("계측 라우트 — 히트율의 문턱", () => {
   it("문턱 아래 입력은 비율 대신 null이고, 넘으면 비를 낸다", async () => {
     resetLlmUsage();
     beginGameUsage("usage-test");
-    // gm은 Google — 최소 캐시 프리픽스 4,096 토큰. 그 아래로 한 번 부른다
+    // gm은 Google — 최소 캐시 프리픽스 17,600 토큰. 그 아래로 한 번 부른다
     await call("gm", {
       inputTokens: 1000,
       outputTokens: 100,
@@ -1103,9 +1103,9 @@ describe("계측 라우트 — 히트율의 문턱", () => {
     });
     // training-rater도 Google이지만 이쪽은 문턱을 넘겨 부른다
     await call("training-rater", {
-      inputTokens: 10_000,
+      inputTokens: 20_000,
       outputTokens: 200,
-      cacheReadTokens: 4_000,
+      cacheReadTokens: 8_000,
       cacheWriteTokens: 0,
     });
 
@@ -1118,7 +1118,7 @@ describe("계측 라우트 — 히트율의 문턱", () => {
     expect(rater.cacheHitRate).toBeCloseTo(0.4, 6);
     // 부르지 않은 자리는 「캐시가 안 걸렸다」가 아니라 잰 것이 없다
     expect(body.agents.find((a) => a.agent === "history-compactor")!.cacheHitRate).toBeNull();
-    expect(body.totals.billed).toBe(11_300);
+    expect(body.totals.billed).toBe(21_300);
     resetLlmUsage();
   });
 });

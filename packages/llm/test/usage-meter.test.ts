@@ -148,10 +148,12 @@ describe("캐시 히트율 — 프리픽스가 살아 있는가", () => {
     expect(cacheHitRate(usageOf({ inputTokens: 5000, cacheReadTokens: 5000 }))).toBe(1);
   });
 
+  // 입력은 gm이 실제로 보내는 크기(40k대)다 — Gemini의 발화점(17,600)을 넘겨야
+  // 0%가 "깨졌다"로 읽힌다 (models.md §4)
   it("캐시가 걸릴 만한 입력을 여러 번 보냈는데 히트율이 0이면 신호로 잡는다", () => {
     let ledger = emptyLedger();
     for (let i = 0; i < 3; i++) {
-      ledger = recordUsage(ledger, "gm", usageOf({ inputTokens: 8000, outputTokens: 100 }));
+      ledger = recordUsage(ledger, "gm", usageOf({ inputTokens: 40000, outputTokens: 100 }));
     }
     expect(cacheAlerts(ledger)).toEqual(["gm"]);
   });
@@ -169,7 +171,7 @@ describe("캐시 히트율 — 프리픽스가 살아 있는가", () => {
   });
 
   it("첫 호출은 원래 쓰기만 한다 — 한 번으로 단정하지 않는다", () => {
-    const ledger = recordUsage(emptyLedger(), "gm", usageOf({ inputTokens: 9000 }));
+    const ledger = recordUsage(emptyLedger(), "gm", usageOf({ inputTokens: 40000 }));
     expect(cacheAlerts(ledger)).toEqual([]);
   });
 
@@ -183,8 +185,8 @@ describe("캐시 히트율 — 프리픽스가 살아 있는가", () => {
     for (let i = 0; i < 3; i++) {
       ledger = recordUsage(ledger, "history-compactor", usageOf({ inputTokens: 2000 }));
     }
-    // 4,096 하나로 재면 안 보인다
-    expect(cacheAlerts(ledger, () => 4096)).toEqual([]);
+    // Google의 문턱(17,600) 하나로 재면 안 보인다
+    expect(cacheAlerts(ledger, () => 17_600)).toEqual([]);
     expect(cacheAlerts(ledger, () => 1024)).toEqual(["history-compactor"]);
   });
 });
