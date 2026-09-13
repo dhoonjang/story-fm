@@ -568,15 +568,24 @@ logit(죽은 공 xG) = logit(CORNER_XG_BASE)
 
 **누가 차고 누가 마무리하나.**
 
-| 자리          | 지정이 있으면                       | 없으면                                |
-| ------------- | ----------------------------------- | ------------------------------------- |
-| 코너 · 프리킥 | `setPieceTakers.corner`/`.freeKick` | 그라운드 위 XI 중 `kicking` 최고      |
-| 페널티        | `setPieceTakers.penalty`            | 그라운드 위 XI 중 `penaltySkill` 최고 |
+| 자리          | 지정이 있으면                       | 없으면                                            |
+| ------------- | ----------------------------------- | ------------------------------------------------- |
+| 코너 · 프리킥 | `setPieceTakers.corner`/`.freeKick` | 그라운드 위 **필드 플레이어** `kicking` 최고      |
+| 페널티        | `setPieceTakers.penalty`            | 그라운드 위 **필드 플레이어** `penaltySkill` 최고 |
 
 지정한 선수가 그라운드에 없으면(교체·퇴장) 그 자리는 곧바로 기본값으로 돌아간다 —
 없는 사람이 차는 일도, 감독이 모르는 채 비는 일도 없다. **그 명단이 2군 리그의 열한
 명이어도 같다** — 지정은 두 시뮬 모두 팀 전술에서 실려 오고(§7), 명단 하나가 감독의
 지시를 지우지는 않는다.
+
+**골키퍼는 기본값의 후보가 아니고, 지정하면 선다.** 골킥·펀트를 재는 `kicking`은
+골키퍼가 거의 언제나 팀 최고라, 필드 플레이어를 걸러 내지 않으면 **모든 팀의 코너를
+골키퍼가 올린다.** 반대로 자기 골문을 비우고 올라가는 일 자체는 감독이 지정으로
+시킬 수 있다 — 그래서 지정은 XI 전원과 견주고 기본값만 필드 플레이어에서 고른다.
+
+⚠️ **이 규칙은 한 함수뿐이다** (`sim/set-piece-taker.ts`). 구간 시뮬·간이 시뮬·
+전력 패킷·스쿼드 화면·키포인트가 전부 그 함수를 지난다. 어느 한 곳이 스스로
+「킥력 최고」를 다시 재면 감독이 읽는 키커와 90분이 세우는 키커가 갈린다.
 
 표의 왼쪽 칸과 오른쪽 칸을 **감독이 화면에서 나란히 본다** — 스쿼드 화면의 세트피스
 줄이 지정과 지금 실제로 설 사람을 함께 세운다 (§2의 「키커 지정」).
@@ -692,7 +701,10 @@ AI 벤치가 고른 공략의 26%였다). 눈금을 그만큼 따라 내리면 �
 공격이 몰린다.
 
 **세트피스는 공략이 아니라 서 있는 축이다.** 「저 팀 키커의 킥력이 좋다」는 키포인트
-`set-piece`는 그대로 서지만(감독이 읽는 사실이다) **표적 목록에는 오르지 않는다** —
+`set-piece`가 세우는 이름은 **그 경기에서 실제로 차는 사람**이다 — 위 표와 같은 함수를
+지나므로 지정이 먼저고, 지정이 없을 때만 필드 플레이어 중 킥력 최고다. 코너와 프리킥을
+다른 사람이 차면 **둘 중 킥력이 높은 쪽**이 선다: 그 팀 죽은 공의 위협은 더 잘 차는
+발이 정한다. 이 축은 그대로 서지만(감독이 읽는 사실이다) **표적 목록에는 오르지 않는다** —
 `AXIS_EFFECT`에 항목이 없는 유일한 축이다. 공략은 언제나 상대 쪽 지점을 노리는
 것인데 좋은 키커는 **가진 쪽의 강점**이라, 표적으로 두면 자기 키커는 제 지점이라 고를
 수 없고(`own-side`) 상대만 그것을 「노려」 자기 공격 존을 올리는 자리가 됐다. 죽은
@@ -2073,23 +2085,23 @@ DF +1.4 · MF +1.1 · FW +0.9 · 도움 +0.6 · 무실점 GK +0.8/DF +0.5 · 실
 규칙으로 돈다 — 우리 경기만 카드를 받고, 감독의 연장만 조용해진다. 아래는 전부
 `packages/sim`이 원본을 갖고 `engine/match/quick-sim.ts`가 import한다.
 
-| 눈금                                                         | 원본                                           | 무엇이 갈렸었나                                          |
-| ------------------------------------------------------------ | ---------------------------------------------- | -------------------------------------------------------- |
-| `teamCardRate(intensity)`                                    | `sim/match-engine.ts`                          | 나누는 수와 강도 곱이 양쪽에 따로 적혀 있었다            |
-| `teamInjuryRate(intensity, prone)`                           | `sim/match-engine.ts`                          | 간이 쪽만 강도를 빼고 굴렸다                             |
-| `CARDS_PER_MATCH` · `INJURY_PER_MATCH`                       | `sim/match-engine.ts`                          | 손잡이는 이미 공통 — 위 두 함수가 그 손잡이를 읽는다     |
-| `STRAIGHT_RED_CHANCE` · `bookingWeight` · `injuryWeight`     | `sim/match-engine.ts`                          | —                                                        |
-| `ASSIST_RATE`                                                | `sim/match-engine.ts`                          | —                                                        |
-| `EXTRA_TIME_SHOT_SHARE`                                      | `sim/match-engine.ts`                          | —                                                        |
-| `EXTRA_TIME_MINUTES` · `EXTRA_TIME_DENSITY`                  | `sim/match-engine.ts`                          | 같은 0.84를 두 식으로 냈다 (`PHASE_END` 차 vs 상수 30)   |
-| `EVEN_POSSESSION`                                            | `sim/stamina.ts`                               | 0.5가 두 벌이었다                                        |
-| 교체 정책 `planBenchSubs` · `SUB_*` 문턱 · 창 규칙           | `sim/match-engine.ts`                          | 간이 쪽만 시간표(46·60·68·76·82)로 스코어를 안 읽었다    |
-| `conditionDrain` · `chaseFactor`                             | `sim/stamina.ts`                               | —                                                        |
-| 선수×경로 슈팅 프로필 · xG · 결정력                          | `sim/strength-packet.ts` · `shot-model.ts`     | —                                                        |
-| 죽은 공 프로필 `guide.setPieces` · 키커 선택 · `spreadCount` | `sim/strength-packet.ts` · `match-engine.ts`   | 새 채널 — 한쪽만 굴리면 리그의 95%에 세트피스가 없다     |
-| 세트피스 지시 `setPieceRoutine` (가담 · 수비)                | `domain/tactics.ts` · `sim/strength-packet.ts` | 패킷 입력이라 두 시뮬이 같은 `buildSetPiece`를 지난다    |
-| 키커 지정 `setPieceTakers` (코너 · 프리킥 · 페널티)          | `domain/tactics.ts` · `sim/strength-packet.ts` | 라인업을 짜는 자리가 실어야 두 시뮬이 같은 사람을 세운다 |
-| `penaltyRate` · `penaltySkill` · `keeperSkill`               | `sim/shot-model.ts`                            | 승부차기에만 있던 식 — 경기 중 페널티가 같은 문을 쓴다   |
+| 눈금                                                         | 원본                                                                | 무엇이 갈렸었나                                          |
+| ------------------------------------------------------------ | ------------------------------------------------------------------- | -------------------------------------------------------- |
+| `teamCardRate(intensity)`                                    | `sim/match-engine.ts`                                               | 나누는 수와 강도 곱이 양쪽에 따로 적혀 있었다            |
+| `teamInjuryRate(intensity, prone)`                           | `sim/match-engine.ts`                                               | 간이 쪽만 강도를 빼고 굴렸다                             |
+| `CARDS_PER_MATCH` · `INJURY_PER_MATCH`                       | `sim/match-engine.ts`                                               | 손잡이는 이미 공통 — 위 두 함수가 그 손잡이를 읽는다     |
+| `STRAIGHT_RED_CHANCE` · `bookingWeight` · `injuryWeight`     | `sim/match-engine.ts`                                               | —                                                        |
+| `ASSIST_RATE`                                                | `sim/match-engine.ts`                                               | —                                                        |
+| `EXTRA_TIME_SHOT_SHARE`                                      | `sim/match-engine.ts`                                               | —                                                        |
+| `EXTRA_TIME_MINUTES` · `EXTRA_TIME_DENSITY`                  | `sim/match-engine.ts`                                               | 같은 0.84를 두 식으로 냈다 (`PHASE_END` 차 vs 상수 30)   |
+| `EVEN_POSSESSION`                                            | `sim/stamina.ts`                                                    | 0.5가 두 벌이었다                                        |
+| 교체 정책 `planBenchSubs` · `SUB_*` 문턱 · 창 규칙           | `sim/match-engine.ts`                                               | 간이 쪽만 시간표(46·60·68·76·82)로 스코어를 안 읽었다    |
+| `conditionDrain` · `chaseFactor`                             | `sim/stamina.ts`                                                    | —                                                        |
+| 선수×경로 슈팅 프로필 · xG · 결정력                          | `sim/strength-packet.ts` · `shot-model.ts`                          | —                                                        |
+| 죽은 공 프로필 `guide.setPieces` · 키커 선택 · `spreadCount` | `sim/strength-packet.ts` · `set-piece-taker.ts` · `match-engine.ts` | 새 채널 — 한쪽만 굴리면 리그의 95%에 세트피스가 없다     |
+| 세트피스 지시 `setPieceRoutine` (가담 · 수비)                | `domain/tactics.ts` · `sim/strength-packet.ts`                      | 패킷 입력이라 두 시뮬이 같은 `buildSetPiece`를 지난다    |
+| 키커 지정 `setPieceTakers` (코너 · 프리킥 · 페널티)          | `domain/tactics.ts` · `sim/strength-packet.ts`                      | 라인업을 짜는 자리가 실어야 두 시뮬이 같은 사람을 세운다 |
+| `penaltyRate` · `penaltySkill` · `keeperSkill`               | `sim/shot-model.ts`                                                 | 승부차기에만 있던 식 — 경기 중 페널티가 같은 문을 쓴다   |
 
 **강도(`matchIntensity`, 0.80\~1.22)는 카드와 부상에 양쪽 모두 곱한다.** 압박·템포를
 올린 팀이 자기 카드와 자기 부상을 더 받는 것은 6축의 대가(§1.2)이고, 간이 시뮬이
@@ -2598,20 +2610,20 @@ OVR(`CompetitionMatchView.strength` → [../data/team.md](../data/team.md) §2.2
 
 ## 코드 위치
 
-| 무엇                             | 어디                                                                       |
-| -------------------------------- | -------------------------------------------------------------------------- |
-| 시드 난수 (`makeRng`·`shuffled`) | `packages/sim/src/rng.ts` — 엔진(`core/rng.ts`)과 match-cli가 같이 부른다  |
-| 구간 사건 정렬·누적 피로         | `packages/sim/src/segment.ts` — 엔진의 진행 루프와 match-cli가 같이 부른다 |
-| 전력 패킷·키포인트·공략          | `packages/sim/src/strength-packet.ts` · `key-points.ts` · `exploits.ts`    |
-| 슈팅 xG·결정력·표집 분포         | `packages/sim/src/shot-model.ts`                                           |
-| 개인 지시·판세 격자              | `packages/sim/src/directives.ts` · `zone-grid.ts`                          |
-| 구간 시뮬레이터·장부             | `packages/sim/src/match-engine.ts` · `match-ledger.ts`                     |
-| 전술 상성·체력                   | `packages/sim/src/tactical-counters.ts` · `stamina.ts`                     |
-| 경기 흐름·정지점·마감            | `packages/engine/src/match/match-flow.ts`                                  |
-| 경기 전 상대 분석 리포트         | `packages/engine/src/match/preview.ts` (`buildOpponentReport`)             |
-| 경기 리포트 뷰·MOTM              | `packages/engine/src/views/views.ts` (`buildMatchReport`·`motmOf`)         |
-| 판세의 xG 계단선·옆 구장 스코어  | `packages/engine/src/views/views.ts` (`xgTimelineOf`·`liveScoresOf`)       |
-| 연장 판정·타 팀 연장·승부차기    | `packages/engine/src/competition/extra-time.ts` · `shootout.ts`            |
-| 간이 시뮬·평점·징계              | `packages/engine/src/match/quick-sim.ts` · `ratings.ts` · `discipline.ts`  |
-| 더비 표 · 더비의 문              | `packages/engine/src/data/derbies.ts` · `club/derby.ts` (`derbyForMatch`)  |
-| 경기 화면                        | `apps/web/components/match-view.tsx`                                       |
+| 무엇                             | 어디                                                                                           |
+| -------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 시드 난수 (`makeRng`·`shuffled`) | `packages/sim/src/rng.ts` — 엔진(`core/rng.ts`)과 match-cli가 같이 부른다                      |
+| 구간 사건 정렬·누적 피로         | `packages/sim/src/segment.ts` — 엔진의 진행 루프와 match-cli가 같이 부른다                     |
+| 전력 패킷·키포인트·공략          | `packages/sim/src/strength-packet.ts` · `key-points.ts` · `exploits.ts` · `set-piece-taker.ts` |
+| 슈팅 xG·결정력·표집 분포         | `packages/sim/src/shot-model.ts`                                                               |
+| 개인 지시·판세 격자              | `packages/sim/src/directives.ts` · `zone-grid.ts`                                              |
+| 구간 시뮬레이터·장부             | `packages/sim/src/match-engine.ts` · `match-ledger.ts`                                         |
+| 전술 상성·체력                   | `packages/sim/src/tactical-counters.ts` · `stamina.ts`                                         |
+| 경기 흐름·정지점·마감            | `packages/engine/src/match/match-flow.ts`                                                      |
+| 경기 전 상대 분석 리포트         | `packages/engine/src/match/preview.ts` (`buildOpponentReport`)                                 |
+| 경기 리포트 뷰·MOTM              | `packages/engine/src/views/views.ts` (`buildMatchReport`·`motmOf`)                             |
+| 판세의 xG 계단선·옆 구장 스코어  | `packages/engine/src/views/views.ts` (`xgTimelineOf`·`liveScoresOf`)                           |
+| 연장 판정·타 팀 연장·승부차기    | `packages/engine/src/competition/extra-time.ts` · `shootout.ts`                                |
+| 간이 시뮬·평점·징계              | `packages/engine/src/match/quick-sim.ts` · `ratings.ts` · `discipline.ts`                      |
+| 더비 표 · 더비의 문              | `packages/engine/src/data/derbies.ts` · `club/derby.ts` (`derbyForMatch`)                      |
+| 경기 화면                        | `apps/web/components/match-view.tsx`                                                           |
