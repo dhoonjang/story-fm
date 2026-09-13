@@ -165,7 +165,6 @@ import {
   arrivedScoutReport,
   observedOverall,
   observedRating,
-  knowledgeNote,
   missionBrief,
   missionScope,
   observationMargin,
@@ -4437,7 +4436,6 @@ export function scoutReportCard(state: GameState, playerId: string): ScoutReport
     askingPrice: askingPriceFor(state, p),
     wageExpectation: wageExpectationOf(state, p),
     contractUntil: activeContract(state, p.id)?.until ?? null,
-    note: knowledgeNote(state, p.id),
     verdict: arrivedScoutReport(state, p.id)?.verdict ?? null,
   };
 }
@@ -5080,11 +5078,6 @@ export interface PlayerCardView {
    * 때문이고(`observedFit`), 카드에는 다시 낼 자리가 없다.
    */
   overallMargin: number;
-  /**
-   * 무엇까지 알아냈나 한 줄 — **코어가 낸다**(`knowledgeNote`). 조회 도구의 카드와
-   * 같은 문장이라 GM이 채팅에서 하는 말과 화면이 갈리지 않는다.
-   */
-  note: string;
   /** **관측** 종합 — 참값이 아니다 (`observedOverall`) */
   overall: number;
   /** 16축 — 축마다의 관측값과 오차폭 */
@@ -5209,7 +5202,6 @@ export function buildPlayerCard(state: GameState, playerId: string): PlayerCardV
     weight: p.weight ?? null,
     knowledge,
     knowledgeLabel: KNOWLEDGE_KO[knowledge],
-    note: knowledgeNote(state, p.id),
     overallMargin: observation.margin,
     overall: observedOverall(p.attributes.overall, observation),
     attributes: ATTRIBUTE_AXES.map((key) => ({

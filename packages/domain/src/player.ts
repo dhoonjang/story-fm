@@ -2540,8 +2540,6 @@ export interface ScoutReportCard {
   askingPrice: number;
   wageExpectation: number;
   contractUntil: string | null;
-  /** 무엇까지 알아냈나 — 안개의 수준을 문장으로 */
-  note: string;
   /**
    * 스카우트가 쓴 **한 줄 평** — 판정이 실패했거나 mock이면 null이고, 그때는
    * 안개 줄만 선다 (docs/llm/agents.md §4-4).
