@@ -1192,10 +1192,11 @@ describe("주장·전술·개인 지시", () => {
   it("라커룸 서열은 리더십이 절반을 넘게 가르고, 완장은 서열을 이긴다", () => {
     const state = createTestGame();
     const squad = userPlayers(state).filter((p) => squadLevelOf(p) === "first");
-    // 완장을 비운 라커룸 — 순수한 서열만 남긴다 (시드 주장은 OVR이 세운 자리다)
+    // 완장을 비운 라커룸 — 순수한 서열만 남긴다 (완장은 서열을 이겨 그룹을 늘린다)
     for (const p of squad) {
       p.attributes.leadership = 20;
       p.isCaptain = false;
+      p.isViceCaptain = undefined;
     }
     const top = squad[0]!;
     top.attributes.leadership = 90;
