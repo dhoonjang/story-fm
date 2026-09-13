@@ -44,6 +44,7 @@ import {
   PROMISE_DAYS_MAX,
   PROMISE_DAYS_MIN,
   pickAnyPlayer,
+  pickSignedPlayer,
   pickTeam,
   playerCard,
   playerName,
@@ -1567,7 +1568,7 @@ export function buildToolSpecs(
         squadStatus: squadStatusArg,
       }),
       (input) => {
-        const picked = pickAnyPlayer(state, input.playerId);
+        const picked = pickSignedPlayer(state, input.playerId);
         if (!picked.ok) return { ok: false, message: picked.message };
         const player = picked.player;
         /**
@@ -1608,7 +1609,7 @@ export function buildToolSpecs(
           ),
       }),
       (input) => {
-        const picked = pickAnyPlayer(state, input.playerId);
+        const picked = pickSignedPlayer(state, input.playerId);
         if (!picked.ok) return { ok: false, message: picked.message };
         const player = picked.player;
         /**
