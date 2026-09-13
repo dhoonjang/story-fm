@@ -2583,6 +2583,93 @@ function executeRenewal(
 }
 
 /**
+ * 상대가 되불러 **세워 둔 조정** — 감독의 차례가 돌아온 자리다.
+ *
+ * 마지막 라운드 하나가 셋을 가른다: 답을 기다리는 우리 오퍼(`pendingOffer` — 우리
+ * 라운드에 판정이 없다), 감독이 판정할 상대 오퍼(`incomingOffer` — 상대 라운드에
+ * 판정이 없다), 그리고 이것(상대 라운드의 판정이 `counter`다). 메디컬 소견으로
+ * 깎아 다시 부른 값은 `verdict`가 비어 있어 여기 걸리지 않는다 — 그것은 감독이
+ * `respond_offer`로 답할 오퍼다.
+ */
+function standingCounter(negotiation: Negotiation): Negotiation["rounds"][number] | null {
+  if (negotiation.status !== "open") return null;
+  const last = negotiation.rounds[negotiation.rounds.length - 1];
+  return last && last.by === "them" && last.verdict === "counter" ? last : null;
+}
+
+/**
+ * 조정을 그대로 받는다 — **그 조건으로 우리 오퍼를 다시 세운다** (transfer.md §1).
+ *
+ * 「받아들이겠다」는 말이 옮겨 갈 명령이 `accept_deal` 하나여서다: 조정이 선 협상은
+ * 아직 `agreed`가 아니라 서명할 것이 없고, `respond_offer`는 우리 오퍼에 온 답을
+ * 받지 않는다. 그 사이를 비워 두면 감독이 같은 값을 `send_offer`로 다시 부르는 법을
+ * 스스로 알아야만 협상이 이어진다.
+ *
+ * ⚠️ **갈래마다 제 문을 다시 지난다.** 라운드만 얹으면 예산·스쿼드 하한·창·라운드
+ * 수를 아무도 재지 않은 오퍼가 테이블에 선다 — 그 관문들은 여는 함수에 있다.
+ */
+function acceptCounterTerms(
+  state: GameState,
+  negotiation: Negotiation,
+  counter: Negotiation["rounds"][number],
+): CommandResult {
+  const player = playerById(state, negotiation.gamePlayerId);
+  if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
+  const playerId = negotiation.gamePlayerId;
+  const paymentYears = counter.paymentYears;
+  const status = counter.squadStatus;
+  const resent: MarketCommandResult =
+    negotiation.kind === "renew"
+      ? openRenewal(state, {
+          playerId,
+          weeklyWage: counter.weeklyWage,
+          years: counter.contractYears,
+          ...(status === undefined ? {} : { squadStatus: status }),
+        })
+      : negotiation.kind === "release"
+        ? openRelease(state, {
+            playerId,
+            severance: counter.fee,
+            ...(paymentYears === undefined ? {} : { paymentYears }),
+          })
+        : negotiation.kind === "sell" || negotiation.kind === "loan_out"
+          ? offerPlayerOut(state, {
+              playerId,
+              // 내보내는 갈래의 상대는 선수의 소속이 아니라 거래 상대다 (§1)
+              teamId: negotiation.counterpartTeamId ?? "",
+              fee: counter.fee,
+              weeklyWage: counter.weeklyWage,
+              years: counter.contractYears,
+              ...(negotiation.kind === "loan_out" ? { loan: true } : {}),
+              ...(paymentYears === undefined ? {} : { paymentYears }),
+            })
+          : sendOffer(state, {
+              playerId,
+              fee: counter.fee,
+              weeklyWage: counter.weeklyWage,
+              years: counter.contractYears,
+              kind: negotiation.kind === "loan" ? "loan" : "buy",
+              ...(paymentYears === undefined ? {} : { paymentYears }),
+              ...(status === undefined ? {} : { squadStatus: status }),
+            });
+  const counterpart = counterpartOf(negotiation, player);
+  if (!resent.ok) {
+    return {
+      ok: false,
+      message: `${counterpart}의 조정을 그대로 받지 못했습니다 — ${resent.message}`,
+    };
+  }
+  /**
+   * 성사가 아니라 **다시 나간 오퍼**라고 적는다. 받은 조건이 그대로라 상대가 물릴
+   * 이유는 없지만, 판정은 여전히 상대의 것이다 (market.ts `describePending`).
+   */
+  return {
+    ok: true,
+    message: `${counterpart}의 조정을 그대로 받아 다시 넣었습니다. ${resent.message}`,
+  };
+}
+
+/**
  * 합의를 실행한다 — 여기서 장부가 움직인다.
  *
  * 합의(`agreed`)와 완료(`completed`)를 나눈 이유: 구단 합의 뒤에도 감독이 물러설
@@ -2597,6 +2684,12 @@ function executeRenewal(
 export function acceptDeal(state: GameState, negotiationId: string): CommandResult {
   const negotiation = state.negotiations.find((n) => n.id === negotiationId);
   if (!negotiation) return { ok: false, message: `협상 "${negotiationId}"을 찾지 못했습니다` };
+  /**
+   * **상대의 조정이 서 있으면 그것을 받는 말이다** (transfer.md §1) — 합의 전의
+   * `accept_deal`이 언제나 반려면 감독은 조정을 받아들일 길을 갖지 못한다.
+   */
+  const counter = standingCounter(negotiation);
+  if (counter) return acceptCounterTerms(state, negotiation, counter);
   if (negotiation.status !== "agreed") {
     return { ok: false, message: `아직 합의된 협상이 아닙니다 (${negotiation.status})` };
   }
