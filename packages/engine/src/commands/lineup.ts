@@ -28,6 +28,7 @@ import {
   type PlayerDirectiveKind,
   MATCHDAY_SQUAD,
   POSITION_CODES,
+  STARTING_XI,
   SET_PIECE_KO,
   SET_PIECE_ROLES,
   SET_PIECE_ROLE_KO,
@@ -345,9 +346,6 @@ export function setSquadLevels(
   if (items.length === 0) return { ok: true, unchanged: true, message };
   return { ok: true, message, brief: { head: "1·2군 이동", items } };
 }
-
-/** 그라운드에 서는 수 — 매치데이 명단에서 벤치를 뺀 것이다 (squad-rules.ts) */
-const STARTING_XI = MATCHDAY_SQUAD - MATCHDAY_BENCH;
 
 /** 1군 인원 하한을 말하는 한 문장 — 두 명령이 같은 말을 해야 감독이 같은 규칙으로 읽는다 */
 function matchdaySquadFloor(): string {
