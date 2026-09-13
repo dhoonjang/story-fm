@@ -247,6 +247,14 @@ interface TurnOpening {
   carried: ArrivedCards;
   /** 손잡이가 굴려 도착한 보고서 — 그 값은 「그 사이 벌어진 일」이 이미 싣는다 */
   skippedCards: ArrivedCards;
+  /**
+   * 이번 턴에 조립이 안 된 보고서 id — 줄에는 그대로 남아 있다.
+   *
+   * 턴 앞과 턴 뒤가 **같은 집합을 이어 쓴다**: 장면 헤더 뒤의 세 번째 호출이 이것을
+   * 못 받으면 같은 자리에서 다시 멎어, 그 뒤에 서 있던 카드가 이번 턴에도 못 선다
+   * (player.md §9.4-1).
+   */
+  stuckCards: Set<string>;
   /** 시간 이동 중 새로 생긴 오퍼 — 이번 장면에서 보고만 하고 감독의 답을 기다린다 */
   deferNegotiationIds: Set<string>;
   /** 손잡이 턴에 코어가 먼저 굴린 구간 — GM은 그 대본을 받아 중계만 쓴다 */
@@ -308,16 +316,17 @@ async function openTurn(
   const from = state.date;
   const clockFrom = clockOf(state);
   /**
-   * 이번 턴에 조립이 안 된 보고서 — 줄에는 그대로 남아 있다. 아래에서 줄을 한 번 더
-   * 보므로(손잡이가 시계를 옮긴 턴) 적어 두지 않으면 두 번째 호출이 같은 자리에서
-   * 다시 멎어, 그 뒤에 서 있던 카드가 이번 턴에도 못 선다.
+   * 이번 턴에 조립이 안 된 보고서 — 줄을 보는 자리 셋이 이 집합을 이어 쓴다
+   * (`TurnOpening.stuckCards`).
    */
   const stuckCards = new Set<string>();
   /**
    * ⚠️ 손잡이가 시계를 옮기기 **전에** 꺼낸다: 그 뒤에 도착하는 것은 「그 사이 벌어진
    * 일」이 따로 실으므로, 여기 섞이면 한 프롬프트에 같은 값이 두 번 실린다 (agents.md §6).
    */
-  const carried = inMatch ? NO_CARDS : takeArrivedReports(state, MAX_REPORT_CARDS, stuckCards);
+  const carried = inMatch
+    ? NO_CARDS
+    : await takeArrivedReports(state, MAX_REPORT_CARDS, stuckCards);
   // 손잡이로 넘긴 시간은 모델보다 먼저 흐른다 — 코어가 먼저 굴리고 "그 사이
   // 벌어진 일"을 상태에 실어, 모델은 도착한 자리에서 보고한다
   const pendingBeforeSkip = new Set(pendingVerdicts(state).map((v) => v.negotiation.id));
@@ -331,7 +340,7 @@ async function openTurn(
     noteTraining(state, ledger, skipped, from);
   }
   const skippedCards = skipped
-    ? takeArrivedReports(
+    ? await takeArrivedReports(
         state,
         MAX_REPORT_CARDS - carried.reports.length - carried.missions.length,
         stuckCards,
@@ -367,6 +376,7 @@ async function openTurn(
     letters,
     carried,
     skippedCards,
+    stuckCards,
     deferNegotiationIds,
     applied,
     // 구간이 굴러간 뒤이자 `finalizeMatch`가 장부를 지우기 전인 지금이 읽을 수 있는 유일한 자리다
@@ -683,6 +693,26 @@ async function closeTurn(
     noteTraining(state, ledger, moved, opening.from);
   }
   /**
+   * **헤더가 민 시계에 도착한 보고서** — 시계가 움직인 세 번째 자리다. 여기서 꺼내지
+   * 않으면 그 도착은 다음 턴까지 줄에 남아, 일주일을 기다려 산 보고서 대신 코치의
+   * 지문 한 문단만 남는다 (player.md §9.4-1).
+   *
+   * 앞의 두 자리가 이미 쓴 만큼을 상한에서 빼고, 조립이 막힌 id(`stuckCards`)는 그대로
+   * 이어받아 이번 턴에 다시 집지 않는다.
+   */
+  const headerCards =
+    !inMatch && scenePoint
+      ? await takeArrivedReports(
+          state,
+          MAX_REPORT_CARDS -
+            opening.carried.reports.length -
+            opening.carried.missions.length -
+            opening.skippedCards.reports.length -
+            opening.skippedCards.missions.length,
+          opening.stuckCards,
+        )
+      : NO_CARDS;
+  /**
    * 훈련 결산 — 코어 앵커 위에 LLM이 맥락을 더한다 (실패해도 앵커가 남는다).
    *
    * 내부 판정이라 칩으로 세우지 않는다. 결과는 **장부의 결산 카드**가 갖는다
@@ -748,12 +778,21 @@ async function closeTurn(
         ? `${header}\n${body}`
         : body;
   /**
-   * 카드는 **모델이 값을 읽은 것만** 선다. 장면 헤더가 시계를 옮긴 턴은 코어가 방금
-   * 굴렀으므로 그 도착은 줄에 남아 다음 턴에 선다 (`pendingReportCards`) — 이번 턴에
-   * 조립이 안 된 것도 마찬가지로 줄에 남는다 (player.md §9.4-1).
+   * 카드는 **도착한 그 턴에** 선다 — 시계가 움직인 자리 셋에서 꺼낸 것이 여기 모인다.
+   * 모델이 그 값을 읽는 자리는 갈린다: 손잡이로 도착한 것은 「그 사이 벌어진 일」이,
+   * 헤더 뒤에 도착한 것은 **다음 턴의 도착 블록**이 싣는다 (agents.md §6). 이번 턴에
+   * 조립이 안 된 것만 줄에 남는다 (player.md §9.4-1).
    */
-  const reports = [...opening.carried.reports, ...opening.skippedCards.reports];
-  const missions = [...opening.carried.missions, ...opening.skippedCards.missions];
+  const reports = [
+    ...opening.carried.reports,
+    ...opening.skippedCards.reports,
+    ...headerCards.reports,
+  ];
+  const missions = [
+    ...opening.carried.missions,
+    ...opening.skippedCards.missions,
+    ...headerCards.missions,
+  ];
   // 실은 카드를 그 턴에 기록한다 — 다음 턴부터 이력이 같은 카드를 다시 그린다.
   // 턴이 실패하면 상태가 통째로 버려지므로 기록도 함께 없던 일이 된다
   recordCharacterInjection(state, call.characters);

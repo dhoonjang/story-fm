@@ -2017,6 +2017,44 @@ describe("도착한 카드 — 한 줄에서 지목과 임무를 가른다", () 
     }
     expect(state.pendingReportCards ?? []).toEqual([]);
   });
+
+  /**
+   * 이슈 #845 — **시계를 미는 자리는 손잡이만이 아니다.** 모델의 장면 헤더가 일주일을
+   * 밀면 그 진행의 tick이 보고서를 줄에 넣는데, 줄을 보는 자리가 손잡이 앞뒤 둘뿐이면
+   * 카드는 그 턴에 서지 못한다 — 일주일을 기다려 산 정보 대신 지문 한 문단이 남는다
+   * (player.md §9.4-1).
+   */
+  it("장면 헤더가 민 시계에 도착한 보고서도 그 턴에 선다", async () => {
+    const state = game();
+    const target = playersOf(state, "chelsea")[0]!;
+    scoutPlayer(state, target.id);
+    // 손잡이를 쓰지 않는다 — 이 턴에 시계를 미는 것은 모델의 헤더 하나다
+    const due = addDays(state.date, SCOUT_DAYS);
+    expect(state.pendingReportCards ?? []).toEqual([]);
+    state.chat.push({ role: "user", text: "한 주 지켜보지", toolCalls: [], at: state.date });
+
+    stubRunTurn.mockImplementation(async (): Promise<TurnResult> => ({
+      text: `[${due} AM 10:00]\n@스티브 홀랜드: 한 주가 지났습니다.`,
+      history: { version: 1, provider: "google", model: "test", messages: [] },
+      historyBase: 0,
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      toolCallCount: 0,
+      stopReason: "completed",
+    }));
+    const previousMode = process.env.LLM_MODE;
+    process.env.LLM_MODE = "real";
+    try {
+      const turn = await runGmTurn(state, "한 주 지켜보지");
+      // 헤더가 시계를 밀었고, 그 진행이 낳은 도착이 같은 턴의 카드가 된다
+      expect(state.date).toBe(due);
+      expect(turn.reports?.map((r) => r.playerId)).toEqual([target.id]);
+    } finally {
+      if (previousMode === undefined) delete process.env.LLM_MODE;
+      else process.env.LLM_MODE = previousMode;
+    }
+    // 선 것은 줄에서 빠진다 — 다음 턴이 같은 카드를 다시 세우지 않는다
+    expect(state.pendingReportCards ?? []).toEqual([]);
+  });
 });
 
 /**
