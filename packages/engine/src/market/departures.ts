@@ -25,7 +25,7 @@ import { admitOnLoan, arrivingSquadLevel } from "../squad/registration";
 import type { CommandResult } from "../commands";
 import { forgetRoles } from "../commands/role-memory";
 import { item, signed } from "../commands/brief";
-import { pickAnyPlayer } from "../core/player-ref";
+import { pickOurPlayer, pickPlayerAmong, pickSignedPlayer } from "../core/player-ref";
 import {
   activeContract,
   benchRunOf,
@@ -328,16 +328,13 @@ export function releasePlayer(
   state: GameState,
   input: { playerId: string; severance?: number; paymentYears?: number },
 ): CommandResult {
-  const pick = pickAnyPlayer(state, input.playerId);
+  const pick = pickSignedPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
-  // 임대 나간 선수는 `teamId`가 상대 팀이고 빌려 온 선수는 계약이 남의 것이다 —
-  // 어느 쪽이든 소속 판정보다 이 안내가 먼저다 (transfer.md §2)
+  // 임대 나간 선수도 계약은 우리 것이라 문을 지난다 — 임대 안내가 그에게 맞는 답이다
+  // (transfer.md §2)
   const locked = loanLockOf(player);
   if (locked) return { ok: false, message: locked };
-  if (player.teamId !== state.userTeamId) {
-    return { ok: false, message: `${josa(player.name, "은/는")} 우리 선수가 아닙니다` };
-  }
   const short = squadShortfall(state, state.userTeamId, player);
   if (short) return { ok: false, message: `우리 ${squadShortfallText(short, "release")}` };
 
@@ -453,12 +450,9 @@ export function loanPlayer(
   state: GameState,
   input: { playerId: string; teamId: string; until?: string; wageShare?: number },
 ): CommandResult {
-  const pick = pickAnyPlayer(state, input.playerId);
+  const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
-  if (player.teamId !== state.userTeamId) {
-    return { ok: false, message: `${josa(player.name, "은/는")} 우리 선수가 아닙니다` };
-  }
   if (player.loan)
     return { ok: false, message: `${josa(player.name, "은/는")} 이미 임대 중입니다` };
   const destination = state.teams.find((t) => t.id === input.teamId);
@@ -536,17 +530,21 @@ export function loanPlayer(
   };
 }
 
+const LOAN_ROSTER = "임대 명단";
+
 /**
  * 임대 조기 종료 — 감독이 불러들인다(`recall_loan`).
  * 실제 임대에도 리콜 조항이 흔하다(부상 공백·성장 정체).
+ *
+ * 부를 수 있는 사람이 **임대 보낸 선수뿐**이라 이름도 그 안에서만 푼다. 우리
+ * 선수지만 `teamId`는 빌려 간 구단의 것이라 `pickOurPlayer`로는 닿지 않는다
+ * (transfer.md §2).
  */
 export function recallLoan(state: GameState, input: { playerId: string }): CommandResult {
-  const pick = pickAnyPlayer(state, input.playerId);
+  const out = state.players.filter((p) => onLoanFromUs(state, p));
+  const pick = pickPlayerAmong(state, out, input.playerId, LOAN_ROSTER);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
-  if (!player.loan || player.loan.fromTeamId !== state.userTeamId) {
-    return { ok: false, message: `${josa(player.name, "은/는")} 우리가 임대 보낸 선수가 아닙니다` };
-  }
   const from = player.teamId;
   returnFromLoan(state, player);
   return {

@@ -259,8 +259,10 @@ export function reinforcePromotedSquads(
   promoted: readonly string[],
   digest: TickSink,
 ): void {
-  // id는 세계 전체에서 유일해야 한다 — 한 번 쥐고 팀을 돌며 등록한다
+  // id도 이름도 세계 전체에서 유일해야 한다 — 한 번 쥐고 팀을 돌며 등록한다
+  // (이름의 기준이 팀이 아니라 세계인 이유는 people.md §2)
   const takenIds = new Set(state.players.map((p) => p.id));
+  const takenNames = new Set(state.players.map((p) => p.name));
   for (const teamId of promoted) {
     const squad = playersOf(state, teamId);
     /**
@@ -274,8 +276,6 @@ export function reinforcePromotedSquads(
     const base = Math.round(squadRating(state, teamId)) - REINFORCEMENT_DROP;
     const have: Record<PositionGroup, number> = { GK: 0, DF: 0, MF: 0, FW: 0 };
     for (const player of firstTeam) have[groupOf(player)] += 1;
-    // 이름은 **팀 전체**에서 유일해야 한다 — 2군까지 쥐고 뽑는다 (people.md §2)
-    const takenNames = new Set(squad.map((p) => p.name));
     for (let i = 0; i < short; i++) {
       const group = neediestGroup(have);
       have[group] += 1;

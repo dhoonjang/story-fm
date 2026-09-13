@@ -2469,8 +2469,11 @@ function buildInitialSquads(
   teams: readonly TeamCatalogEntry[] = teamCatalog(),
 ): void {
   const seasonStartYear = seasonYear(FIRST_SEASON);
-  // 2군을 메울 유스가 여기서 태어난다 — id는 세계 전체에서 유일해야 한다
+  // 2군을 메울 유스가 여기서 태어난다 — id도 이름도 세계 전체에서 유일해야 한다
   const takenIds = new Set(players.map((p) => p.id));
+  // 이름 집합을 팀마다 새로 쥐면 남의 팀 동명이인이 서고, 그 하나가 감독이 부른
+  // 이름을 후보 둘로 갈라 지시를 죽인다 (people.md §2)
+  const takenNames = new Set(players.map((p) => p.name));
   for (const team of teams) {
     const squad = players
       .filter((p) => p.teamId === team.id)
@@ -2591,8 +2594,6 @@ function buildInitialSquads(
       }
     }
     const reserveCount = squad.filter((p) => p.squadLevel === "reserve").length;
-    // 이름도 팀 안에서 유일해야 한다 — 1군 명단을 쥐고 시작한다 (people.md §2)
-    const takenNames = new Set(squad.map((p) => p.name));
     for (let i = reserveCount; i < RESERVE_TEAM_SIZE; i++) {
       const youth = generateYouthPlayer(
         seed + 17,

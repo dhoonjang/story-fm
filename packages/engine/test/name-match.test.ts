@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   groupOf,
   openRenewal,
+  pickRivalPlayer,
   playerCard,
   playersOf,
   rankByName,
+  scoutPlayer,
   setCaptain,
   setTransferList,
   startMatch,
@@ -235,10 +237,65 @@ describe("카탈로그 — 실제 세계에서", () => {
 
   it("갈리는 이름은 상태를 바꾸지 않고 후보를 돌려준다", () => {
     const game = createTestGame(7);
-    const res = setTransferList(game, { playerId: "마르티네스", listed: true });
+    // 마르티네스는 세계에 둘이고, 스카우트가 고를 수 있는 사람은 둘 다 남의 팀이다
+    const res = scoutPlayer(game, "마르티네스");
     expect(res.ok).toBe(false);
     expect(res.message).toContain("여러 선수와 맞습니다");
-    expect(game.transferList).toHaveLength(0);
+    expect(game.scoutReports).toHaveLength(0);
+  });
+});
+
+/**
+ * **자격이 문을 고른다** — 명령은 고를 수 있는 사람 안에서만 이름을 푼다
+ * (`pickOurPlayer`·`pickRivalPlayer` · core/player-ref.ts). 세계를 다 훑은 뒤
+ * 소속으로 되돌리면, 우리 유스와 남의 2군이 같은 이름을 쓰는 날 고를 사람이 하나뿐인
+ * 지시까지 후보가 갈려 문 앞에서 죽는다.
+ */
+describe("이름이 겹칠 때 — 자격이 문을 고른다", () => {
+  const game = createTestGame(7);
+  const ours = userPlayers(game).filter((p) => p.name.includes(" "));
+  const mine = ours[0]!;
+  const strangers = playersOf(game, "chelsea");
+  const twin = strangers[0]!;
+  // 세계에 같은 이름 셋을 세운다 — 우리 하나, 남 하나(twin), 그리고 남끼리 갈리는 한 쌍
+  twin.name = mine.name;
+  const [namesake, alias] = [strangers[1]!, strangers[2]!];
+  alias.name = namesake.name;
+  const [ourOne, ourTwin] = [ours[1]!, ours[2]!];
+  ourTwin.name = ourOne.name;
+  // 세계에 하나뿐인 우리 이름 — 밖을 겨눈 문이 "없는 이름"으로 돌려보내면 안 되는 자리
+  const onlyOurs = ours[3]!;
+
+  it("우리 선수 전용 명령은 남의 동명이인을 후보로 세지 않는다", () => {
+    const res = setTransferList(game, { playerId: mine.name, listed: true });
+    expect(res.ok, res.message).toBe(true);
+    expect(game.transferList.map((l) => l.gamePlayerId)).toContain(mine.id);
+  });
+
+  it("남의 선수 전용 명령은 우리 동명이인을 후보로 세지 않는다", () => {
+    const res = pickRivalPlayer(game, mine.name);
+    expect(res.ok && res.player.id).toBe(twin.id);
+  });
+
+  it("정확한 id가 우리 선수면 이름으로 다시 짐작하지 않는다", () => {
+    const res = pickRivalPlayer(game, mine.id);
+    expect(res.ok).toBe(false);
+    expect(res.ok ? "" : res.message).toContain("우리 선수입니다");
+  });
+
+  it("우리 선수를 이름으로 불러도 그 사실이 답이다 — 없는 이름이 되지 않는다", () => {
+    const res = scoutPlayer(game, onlyOurs.name);
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("이미 다 알고 있습니다");
+  });
+
+  it("자격 안에서 갈리면 고르지 않고 후보를 돌려준다", () => {
+    const outside = pickRivalPlayer(game, namesake.name);
+    expect(outside.ok).toBe(false);
+    expect(outside.ok ? "" : outside.message).toContain("여러 선수와 맞습니다");
+    const inside = setTransferList(game, { playerId: ourOne.name, listed: true });
+    expect(inside.ok).toBe(false);
+    expect(inside.message).toContain("여러 선수와 맞습니다");
   });
 });
 

@@ -314,6 +314,32 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
   });
 
   /**
+   * **갈려야 하는 범위는 세계다** (people.md §2). 감독이 부르는 것은 이름 하나뿐이라
+   * (agents.md §5) 남의 팀에 동명이인이 서면 우리 선수를 가리킨 말이 후보 둘로 갈려
+   * 명령이 실행되지 않는다. 남아도 되는 동명이인은 **실존 인물끼리**뿐이다 —
+   * 니코 곤살레스도 비티냐도 실제로 두 사람이고, 시드가 그 사실을 적은 것이다.
+   */
+  it("세계 전체에서 합성 이름이 겹치지 않는다 — 남는 동명이인은 실선수끼리다", () => {
+    const byName = new Map<string, typeof catalog>();
+    for (const entry of catalog)
+      byName.set(entry.nameKo, [...(byName.get(entry.nameKo) ?? []), entry]);
+    const clashing = [...byName]
+      .filter(([, rows]) => rows.length > 1 && rows.some((e) => e.synthetic === true))
+      .map(([name, rows]) => `${name}: ${rows.map((e) => e.teamId).join(" / ")}`);
+    expect(clashing).toEqual([]);
+  });
+
+  /**
+   * 조합이 동나면 이름 뒤에 번호가 붙는다(`claimSyntheticName`) — 사람 이름이 아닌
+   * 것이 명단에 서는 마지막 갈래다. 여기가 빨강이면 풀을 넓힐 때다: 세계가 한
+   * 집합을 쥐므로 한 나라의 수요는 그 나라 리그 인원 전체다.
+   */
+  it("합성 이름에 번호가 붙지 않는다 — 조합이 인원보다 넓다", () => {
+    const numbered = catalog.filter((e) => e.synthetic === true && / \d+$/.test(e.nameKo));
+    expect(numbered.map((e) => `${e.teamId}: ${e.nameKo}`)).toEqual([]);
+  });
+
+  /**
    * 합성 선수가 실선수와 같은 이름이면 유일성을 지켜도 사람이 안 갈린다.
    * 뽑힌 조합이 아니라 **뽑힐 수 있는 조합 전부**를 보는 이유다 — 풀을 고칠 때
    * 걸려야 하지, 시드가 그 조합을 뽑는 날 걸려서는 늦다.
@@ -486,6 +512,21 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
       const squad = playersOf(state, team.id);
       expect(new Set(squad.map((p) => p.name)).size).toBe(squad.length);
     }
+  });
+
+  /**
+   * 2군 필러도 세계 하나를 쥐고 뽑는다 (people.md §2) — 팀마다 새 집합을 쥐면
+   * 96클럽 × 열몇 명이 서로를 못 보고 태어나 동명이인이 무더기로 선다. 카탈로그가
+   * 내는 실존 동명이인만 남아야 하므로, 거기서 늘지 않았는지로 잰다.
+   */
+  it("게임이 서도 동명이인이 카탈로그가 내는 것에서 늘지 않는다", () => {
+    const pairs = (names: readonly string[]): number => {
+      const count = new Map<string, number>();
+      for (const name of names) count.set(name, (count.get(name) ?? 0) + 1);
+      return [...count.values()].reduce((sum, n) => sum + (n * (n - 1)) / 2, 0);
+    };
+    const seeded = pairs(playerCatalog().map((e) => e.nameKo));
+    expect(pairs(state.players.map((p) => p.name))).toBe(seeded);
   });
 
   it("모든 클럽 소속 선수는 팀 안에서 고유한 등번호를 갖는다", () => {

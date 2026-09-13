@@ -37,7 +37,7 @@ import { resolveCompetition } from "../world/player-pool";
 // 잔향 — 그 대화를 쥔 호출이 심경 한 문장을 남긴다 (people.md §5)
 // 판정은 수용성 앵커 ± 한 단계 안에서만 선다 (career.md §2)
 import { teamName, type GameState } from "../core/state";
-import { pickAnyPlayer } from "../core/player-ref";
+import { pickRivalPlayer } from "../core/player-ref";
 import type { MarketCommandResult } from "./result";
 
 // ---- 스카우팅 (정보 비대칭 해제) ----
@@ -51,16 +51,10 @@ import type { MarketCommandResult } from "./result";
  * (SCOUT_REPEAT_LIMIT까지 · scouting.ts 규약).
  */
 export function scoutPlayer(state: GameState, ref: string): MarketCommandResult {
-  const pick = pickAnyPlayer(state, ref);
+  const pick = pickRivalPlayer(state, ref, "이미 다 알고 있습니다");
   if (!pick.ok) return pick;
   const player = pick.player;
   const playerId = player.id;
-  if (player.teamId === state.userTeamId) {
-    return {
-      ok: false,
-      message: `${josa(player.name, "은/는")} 우리 선수입니다 — 이미 다 알고 있습니다`,
-    };
-  }
   const pending = state.scoutReports.find(
     (r) => r.gamePlayerId === playerId && r.completedOn === null,
   );

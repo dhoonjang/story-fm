@@ -1872,6 +1872,14 @@ function applyTransition(state: GameState): string[] {
     ...state.players.map((p) => p.id),
     ...state.transfers.map((t) => t.gamePlayerId),
   ]);
+  /**
+   * 새 유스가 쓸 수 없는 이름 — **세계 전체**다 (people.md §2). 팀 안에서만 피하면
+   * 인테이크 293명 중 97명이 남의 팀 선수와 동명이인으로 서고, 감독이 그 이름을
+   * 부르는 순간 명령은 후보 둘로 갈려 실행되지 않는다. id와 달리 **떠난 사람 것은
+   * 포함하지 않는다** — 이름이 갈라야 하는 것은 지금 세계에 선 사람들이고, 은퇴한
+   * 선수의 이름까지 영원히 묶어 두면 풀이 시즌마다 줄어든다.
+   */
+  const takenNames = new Set(state.players.map((p) => p.name));
 
   /**
    * 후보 줄은 **전환마다 새로 선다** — 지난 여름의 미결이 남아 있을 자리는 없다
@@ -2028,8 +2036,6 @@ function applyTransition(state: GameState): string[] {
       ours ? academyUseOf(state, team.id, state.season) : 0,
     );
     const born = ours ? intake.candidates : intake.fills;
-    // 이름도 팀 안에서 유일해야 한다 — 남은 명단을 쥐고 뽑는다 (people.md §2)
-    const takenNames = new Set(squad.map((p) => p.name));
     const candidates: YouthCandidate[] = [];
     for (let i = 0; i < born; i++) {
       const youth = generateYouthPlayer(
