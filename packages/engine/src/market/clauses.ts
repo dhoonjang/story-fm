@@ -174,7 +174,7 @@ export function liveBuyBacks(state: GameState): BuyBackRight[] {
 function buyBackBlock(state: GameState, right: BuyBackRight): string | null {
   const holderTeamId = right.holderTeamId;
   if (!windowOpenForTeam(state, holderTeamId)) {
-    return `${transferWindowLabel(state, holderTeamId)}이 닫혀 있어 되사기를 행사할 수 없습니다`;
+    return `${josa(transferWindowLabel(state, holderTeamId), "이/가")} 닫혀 있어 되사기를 행사할 수 없습니다`;
   }
   const sellerTeamId = right.transfer.toTeamId;
   if (!sellerTeamId) return "되사기의 상대 구단을 알 수 없습니다";
@@ -313,7 +313,7 @@ export function exerciseBuyBack(state: GameState, input: { playerId: string }): 
   if (right.clause.fee > finance.transferBudget) {
     return {
       ok: false,
-      message: `되사기 값 ${formatMoney(right.clause.fee)}가 이적 예산 ${formatMoney(finance.transferBudget)}를 넘습니다`,
+      message: `되사기 값 ${josa(formatMoney(right.clause.fee), "이/가")} 이적 예산 ${josa(formatMoney(finance.transferBudget), "을/를")} 넘습니다`,
     };
   }
   const done = performBuyBack(state, right);

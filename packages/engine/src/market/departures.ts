@@ -356,7 +356,7 @@ export function releasePlayer(
   if (finance && dueNow > finance.balance) {
     return {
       ok: false,
-      message: `${agreed ? "정산금" : "위약금"} ${formatMoney(dueNow)}을 감당할 잔고가 없습니다`,
+      message: `${agreed ? "정산금" : "위약금"} ${josa(formatMoney(dueNow), "을/를")} 감당할 잔고가 없습니다`,
     };
   }
 
@@ -475,7 +475,7 @@ export function loanPlayer(
   if (!window) {
     return {
       ok: false,
-      message: `${transferWindowLabel(state, destination.id)}이 닫혀 있어 임대를 보낼 수 없습니다`,
+      message: `${josa(transferWindowLabel(state, destination.id), "이/가")} 닫혀 있어 임대를 보낼 수 없습니다`,
     };
   }
   const short = squadShortfall(state, state.userTeamId, player);

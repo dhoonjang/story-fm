@@ -598,7 +598,7 @@ export function firstInstallmentOf(total: number, paymentYears?: number): number
 /** 확률 근거에 붙는 분할 표기 — 깎여 보인 값을 함께 적지 않으면 %가 설명되지 않는다 */
 function splitNote(terms: DealTerms, effective: number): string {
   const n = paymentYearsOf(terms.paymentYears);
-  return n === undefined ? "" : ` · ${n}년 분할이라 ${formatMoney(effective)}으로 친다`;
+  return n === undefined ? "" : ` · ${n}년 분할이라 ${josa(formatMoney(effective), "으로/로")} 친다`;
 }
 
 /**
@@ -771,7 +771,7 @@ export function precontractBlockerOf(state: GameState, player: GamePlayer): stri
   const pending = pendingContractOf(state, player.id);
   if (pending) {
     return pending.teamId === state.userTeamId
-      ? `${player.name}과는 이미 사전 계약을 맺었습니다`
+      ? `${josa(player.name, "과/와")}는 이미 사전 계약을 맺었습니다`
       : `${josa(player.name, "은/는")} 이미 ${josa(teamName(pending.teamId), "과/와")} 사전 계약을 맺었습니다`;
   }
   if (player.state.retiringAfterSeason) {
@@ -826,7 +826,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     const buyerWindow = buyerTeamId ? windowOpenForTeam(state, buyerTeamId) : window;
     if (!buyerWindow) {
       blockers.push(
-        `${buyerTeamId ? transferWindowLabel(state, buyerTeamId) : "이적시장"}이 닫혀 있습니다`,
+        `${josa(buyerTeamId ? transferWindowLabel(state, buyerTeamId) : "이적시장", "이/가")} 닫혀 있습니다`,
       );
     }
   } else if (terms.kind === "renew" || terms.kind === "release") {
@@ -846,7 +846,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
       // 분할이면 오늘 나갈 것은 첫 회분뿐이다 (transfer.md §5-2)
       const dueNow = firstInstallmentOf(terms.fee, terms.paymentYears);
       if (dueNow > financeOf(state, state.userTeamId).balance) {
-        blockers.push(`정산금 ${formatMoney(dueNow)}을 감당할 잔고가 없습니다`);
+        blockers.push(`정산금 ${josa(formatMoney(dueNow), "을/를")} 감당할 잔고가 없습니다`);
       }
     }
   } else {
@@ -958,7 +958,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
       label: "제시 이적료",
       why:
         askingPrice > 0
-          ? `상대는 ${formatMoney(askingPrice)}을 기대한다 (제시액은 그 ${Math.round(feeRatio * 100)}%${splitNote(terms, offeredFee)})`
+          ? `상대는 ${josa(formatMoney(askingPrice), "을/를")} 기대한다 (제시액은 그 ${Math.round(feeRatio * 100)}%${splitNote(terms, offeredFee)})`
           : "계약이 만료돼 이적료가 필요 없다",
     });
     for (const reason of stance.reasons) {
@@ -1059,7 +1059,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
       score: byLoyalty(RIVAL_INTEREST_SCORE - RIVAL_BIDDING_SCORE * bidding, loyalty, "stay"),
       label: "다른 구단의 관심",
       why:
-        `${teamName(rivals[0]!.teamId)}가 그를 두고 움직이고 있다` +
+        `${josa(teamName(rivals[0]!.teamId), "이/가")} 그를 두고 움직이고 있다` +
         (rivals.length > 1 ? ` (외 ${rivals.length - 1}곳)` : "") +
         (bidding > 0 ? " — 값을 부를 참이다" : " — 우리만 보고 있는 것이 아니다"),
     });
@@ -1667,8 +1667,8 @@ export function stageContribution(
     score: gap * STAGE_SCORE_PER_STEP,
     why:
       gap > 0
-        ? `${teamName(buyerTeamId)}는 우리보다 큰 무대다 — 그 자체가 갈 이유다`
-        : `${teamName(buyerTeamId)}는 우리보다 작은 무대다 — 내려갈 이유가 없다`,
+        ? `${josa(teamName(buyerTeamId), "은/는")} 우리보다 큰 무대다 — 그 자체가 갈 이유다`
+        : `${josa(teamName(buyerTeamId), "은/는")} 우리보다 작은 무대다 — 내려갈 이유가 없다`,
   };
 }
 
