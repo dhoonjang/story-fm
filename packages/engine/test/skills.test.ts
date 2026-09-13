@@ -1961,7 +1961,7 @@ describe("수용성 — 판정은 앵커 ± 한 단계 안에서만 선다 (care
     });
     expect(result.ok).toBe(true);
     expect(player.state.form).toBe(0);
-    expect(result.message).toContain("inspired은 neutral으로");
+    expect(result.message).toContain("inspired는 neutral로");
     expect(result.brief?.items.find((i) => i.label === "수용성")?.text).toBe("닫힘");
   });
 
@@ -1977,7 +1977,7 @@ describe("수용성 — 판정은 앵커 ± 한 단계 안에서만 선다 (care
       intensity: 3,
     });
     expect(player.state.form).toBe(0);
-    expect(result.message).toContain("backfired은 neutral으로");
+    expect(result.message).toContain("backfired는 neutral로");
     // 잘리지 않은 판정에는 그 조각이 없다 — 사실 줄만 남는다
     const plain = applyTalk(state, {
       occasion: "daily",

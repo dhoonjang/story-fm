@@ -1,5 +1,5 @@
 import type { PaymentSchedule } from "@story-fm/domain";
-import { ageOf, formatMoney, FINANCE_CATEGORY_KO, PRECONTRACT_DAYS } from "@story-fm/domain";
+import { ageOf, formatMoney, josa, FINANCE_CATEGORY_KO, PRECONTRACT_DAYS } from "@story-fm/domain";
 import {
   financeOf,
   pendingContractOf,
@@ -250,7 +250,7 @@ function expiringLines(rows: ExpiringContractView[]): string[] {
     `계약 만료 예정 ${rows.length}명 (1년 안):`,
     ...rows.map((r) => {
       const mark = r.leavingTo
-        ? ` · ${r.leavingTo}와 사전 계약 (떠납니다)`
+        ? ` · ${josa(r.leavingTo, "과/와")} 사전 계약 (떠납니다)`
         : r.openToPrecontract
           ? " · 타 구단 사전 계약 가능"
           : "";

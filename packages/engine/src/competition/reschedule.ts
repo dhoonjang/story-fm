@@ -1,6 +1,6 @@
 import type { MatchRecord, TickSink } from "@story-fm/domain";
 import { pushEvent } from "@story-fm/domain";
-import { isReserveMatch } from "@story-fm/domain";
+import { isReserveMatch, josa } from "@story-fm/domain";
 import { addDays, dayOfWeek, tooClose } from "./calendar";
 import { competitionShortName, isCup } from "../data/cup-catalog";
 import { isCupOnlyLeague, isTopLeague } from "../data/league-catalog";
@@ -219,7 +219,7 @@ export function clearForCup(
     pushEvent(
       digest,
       "matchday",
-      `${competitionShortName(m.competitionId)} ${m.round}R vs ${teamName(opponent)} 경기가 ${m.date}로 연기됐다 — 컵 일정과 겹쳤다`,
+      `${competitionShortName(m.competitionId)} ${m.round}R vs ${teamName(opponent)} 경기가 ${josa(m.date, "으로/로")} 연기됐다 — 컵 일정과 겹쳤다`,
     );
   }
   return true;

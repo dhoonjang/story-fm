@@ -18,7 +18,7 @@ import type {
   YouthCandidate,
   TickSink,
 } from "@story-fm/domain";
-import { isReserveMatch } from "@story-fm/domain";
+import { isReserveMatch, josa } from "@story-fm/domain";
 import {
   CONDITION_BASE,
   DEFAULT_FORMATION,
@@ -1408,7 +1408,7 @@ export function declareRetirements(state: GameState, digest: TickSink): void {
      */
     const voided = voidPendingContract(state, player.id);
     if (voided && voided.teamId === managed) {
-      digest.push(`사전 계약 무산: ${player.name}이 이번 시즌 뒤 은퇴를 예고했다`);
+      digest.push(`사전 계약 무산: ${josa(player.name, "이/가")} 이번 시즌 뒤 은퇴를 예고했다`);
     }
     if (managed !== null && player.teamId === managed) ours.push(player);
   }
@@ -1778,7 +1778,7 @@ function settlePrecontracts(state: GameState, on: string, digest: TickSink): voi
       pending.status = "ended";
       if (pending.teamId === managed) {
         digest.push(
-          `사전 계약 무산: ${player.name} — 발효 전에 ${teamNameIn(state, current.teamId)}과 새 계약이 섰다`,
+          `사전 계약 무산: ${player.name} — 발효 전에 ${josa(teamNameIn(state, current.teamId), "과/와")} 새 계약이 섰다`,
         );
       }
       continue;
@@ -1808,7 +1808,9 @@ function settlePrecontracts(state: GameState, on: string, digest: TickSink): voi
     if (pending.teamId === managed) {
       digest.push(`${player.name} 합류 — ${teamNameIn(state, from)}에서 사전 계약`);
     } else if (from === managed) {
-      digest.push(`${player.name} 떠남 — ${teamNameIn(state, pending.teamId)}과 사전 계약`);
+      digest.push(
+        `${player.name} 떠남 — ${josa(teamNameIn(state, pending.teamId), "과/와")} 사전 계약`,
+      );
     }
   }
 }

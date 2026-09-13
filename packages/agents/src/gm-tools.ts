@@ -115,6 +115,7 @@ import {
   FIRST_TEAM_LIMIT,
   type GamePlayer,
   INCIDENT_KINDS,
+  josa,
   KEEPER_DISTRIBUTIONS,
   LEADERBOARD_KEYS,
   type MatchEvent,
@@ -340,7 +341,7 @@ function missingFeeNote(
   const scale = loan ? "기준 임대료" : kind === "sell" ? "이 선수의 호가" : "요구가";
   return (
     `${player.name} ${KIND_KO[kind ?? "buy"]} 오퍼에 실을 ${loan ? "임대료" : "이적료"}를 ` +
-    `감독이 부르지 않았습니다 — ${scale}는 ${quoted}입니다`
+    `감독이 부르지 않았습니다 — ${josa(scale, "은/는")} ${quoted}입니다`
   );
 }
 

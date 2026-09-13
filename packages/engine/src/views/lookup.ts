@@ -27,6 +27,7 @@ import {
   leaderboardTitle,
   VISION_CODE_KO,
   injuryHistoryText,
+  josa,
   yellowBanMatches,
   isReserveMatch,
   MatchStageSchema,
@@ -1971,7 +1972,7 @@ function cupBracketView(state: GameState, cupId: string): LookupResult {
     }
   }
   if (lines.length === 0) {
-    return { ok: true, message: `${competitionName(cupId)}는 아직 추첨 전입니다` };
+    return { ok: true, message: `${josa(competitionName(cupId), "은/는")} 아직 추첨 전입니다` };
   }
   return {
     ok: true,
@@ -3230,7 +3231,7 @@ export function historyView(state: GameState, input: HistoryViewInput = {}): Loo
       return {
         ok: true,
         message:
-          `시즌 ${season}은 아직 지나가지 않았습니다 — 결산 스냅샷은 시즌이 넘어갈 때 남습니다.` +
+          `시즌 ${josa(String(season), "은/는")} 아직 지나가지 않았습니다 — 결산 스냅샷은 시즌이 넘어갈 때 남습니다.` +
           ` 진행 중인 시즌은 순위표와 일정이 답합니다`,
       };
     }
@@ -3290,7 +3291,7 @@ export function historyView(state: GameState, input: HistoryViewInput = {}): Loo
   if (seasons.length === 0) {
     return {
       ok: true,
-      message: `[역대] 장부에 지나간 시즌이 없습니다 — ${seasonLabel(state.season)}이 첫 시즌입니다`,
+      message: `[역대] 장부에 지나간 시즌이 없습니다 — ${josa(seasonLabel(state.season), "이/가")} 첫 시즌입니다`,
     };
   }
   const shown = seasons.slice(0, limit);
@@ -3673,7 +3674,8 @@ function pickUpcomingMatch(state: GameState, input: OpponentReportInput): Picked
   if (input.matchId) {
     const m = state.matches.find((x) => x.id === input.matchId);
     if (!m) return { ok: false, message: `${input.matchId} 경기를 찾지 못했습니다` };
-    if (m.result) return { ok: false, message: `${input.matchId}는 이미 끝난 경기입니다` };
+    if (m.result)
+      return { ok: false, message: `${josa(input.matchId, "은/는")} 이미 끝난 경기입니다` };
     return { ok: true, matchId: m.id };
   }
   let list = upcomingOurMatches(state);

@@ -1,5 +1,5 @@
 import type { GamePlayer, Interest, TickSink } from "@story-fm/domain";
-import { INTEREST_STAGE_KO } from "@story-fm/domain";
+import { INTEREST_STAGE_KO, josa } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { makeRng, pickWeighted } from "../core/rng";
 import { squadDepthOf, betterAtPosition, type SquadDepth } from "../squad/depth";
@@ -162,7 +162,7 @@ function announce(state: GameState, row: Interest, player: GamePlayer, digest: T
   const line = ours
     ? row.stage === "enquired"
       ? `${club}에서 ${player.name}에 대해 문의가 왔습니다`
-      : `${club}가 ${player.name} 영입을 준비하고 있습니다`
+      : `${josa(club, "이/가")} ${player.name} 영입을 준비하고 있습니다`
     : `${club}도 ${player.name}에게 ${INTEREST_STAGE_KO[row.stage]} 단계입니다 — 우리 협상과 겹칩니다`;
   digest.push(line);
   // 문의는 알아 둘 일이고 입찰 임박은 오늘 움직일 일이다 (오퍼 도착이 3 · people.md §9)
@@ -312,7 +312,7 @@ export function tickCompetingBids(
       lift: COMPETING_BID_LIFT,
     });
     const club = teamNameIn(state, rival.teamId);
-    digest.push(`${club}가 ${player.name}에게 값을 불렀습니다 — 호가가 올랐습니다`);
+    digest.push(`${josa(club, "이/가")} ${player.name}에게 값을 불렀습니다 — 호가가 올랐습니다`);
     // 오늘 움직일 일이다 — 오퍼 도착과 같은 눈금 (people.md §9)
     pushNarrative(state, `${club} — ${player.name} 경쟁 입찰`, 3);
   }

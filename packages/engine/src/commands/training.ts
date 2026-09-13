@@ -623,7 +623,7 @@ export function setTraining(state: GameState, input: TrainingPlanInput): Command
     if (s.date < state.date) {
       return {
         ok: false,
-        message: `${s.date}은 이미 지난 날입니다 — 훈련은 오늘(${state.date})부터 잡을 수 있습니다`,
+        message: `${josa(s.date, "은/는")} 이미 지난 날입니다 — 훈련은 오늘(${state.date})부터 잡을 수 있습니다`,
       };
     }
     if (!s.label?.trim()) return { ok: false, message: "훈련 설명(label)이 필요합니다" };
@@ -664,7 +664,7 @@ export function setTraining(state: GameState, input: TrainingPlanInput): Command
       return {
         ok: false,
         message:
-          `${s.date}은 선수단 여름 휴가 기간입니다 — 훈련은 소집일(${effectiveReturn})부터 잡을 수 있습니다. ` +
+          `${josa(s.date, "은/는")} 선수단 여름 휴가 기간입니다 — 훈련은 소집일(${effectiveReturn})부터 잡을 수 있습니다. ` +
           `감독이 휴가를 접고 조기 소집하겠다고 했다면 recallSquad를 함께 보내세요 (선수단이 반발합니다).`,
       };
     }
@@ -943,7 +943,7 @@ export function setPlayerTraining(
     if (restUntil < state.date) {
       return {
         ok: false,
-        message: `${restUntil}은 이미 지난 날입니다 — 휴식은 오늘(${state.date})까지로만 끊을 수 있습니다`,
+        message: `${josa(restUntil, "은/는")} 이미 지난 날입니다 — 휴식은 오늘(${state.date})까지로만 끊을 수 있습니다`,
       };
     }
     const days = diffDays(state.date, restUntil) + 1;

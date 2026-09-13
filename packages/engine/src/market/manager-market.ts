@@ -646,7 +646,7 @@ function poachInPost(
     },
   ];
   digest.push(
-    `${teamShortNameIn(state, teamId)}가 재직 중인 감독에게 손을 뻗었다 —` +
+    `${josa(teamShortNameIn(state, teamId), "이/가")} 재직 중인 감독에게 손을 뻗었다 —` +
       ` 기대는 ${boardExpectationText(expectation.code, expectation.target)}` +
       ` · 연봉 ${formatMoney(terms.salary)}·${terms.years}년` +
       (compensation > 0 ? ` · 우리 구단에 보상금 ${formatMoney(compensation)}` : "") +
@@ -704,7 +704,7 @@ function offerToUnemployed(
     },
   ];
   digest.push(
-    `${teamShortNameIn(state, teamId)}가 감독직을 제안했다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)}` +
+    `${josa(teamShortNameIn(state, teamId), "이/가")} 감독직을 제안했다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)}` +
       ` · 연봉 ${formatMoney(terms.salary)}·${terms.years}년 · ${OFFER_DAYS}일 안에 답해야 한다`,
   );
   pushNarrative(state, `${teamNameIn(state, teamId)} 감독직 제안`, 5);
@@ -777,7 +777,7 @@ export function runManagerMarket(state: GameState, digest: TickSink): boolean {
     // 우리 리그의 일만 브리핑한다 — 5대 리그 전체를 올리면 소음이다
     if (leagueOfTeamIn(state, team.id) === ourLeague) {
       digest.push(
-        `${teamShortName(team.id)}가 감독을 경질했다 — 후임은 ${team.managerName}` +
+        `${josa(teamShortName(team.id), "이/가")} 감독을 경질했다 — 후임은 ${team.managerName}` +
           // 풀에서 온 사람이면 어디서 왔는지가 곧 그 선임의 뜻이다 (transfer.md §7)
           (hired === null ? "" : ` (전 ${teamShortNameIn(state, hired.lastTeamId)} 감독)`),
       );
@@ -933,7 +933,7 @@ export function resignPost(state: GameState): CommandResult {
     if (!spend.ok) {
       return {
         ok: false,
-        message: `${teamNameIn(state, teamId)}와의 계약을 물려면 ${formatMoney(buyout)}가 필요합니다 — 지갑엔 ${formatMoney(walletOf(state))}뿐입니다`,
+        message: `${josa(teamNameIn(state, teamId), "과/와")}의 계약을 물려면 ${josa(formatMoney(buyout), "이/가")} 필요합니다 — 지갑엔 ${formatMoney(walletOf(state))}뿐입니다`,
       };
     }
     recordFinance(state, teamId, {
@@ -962,7 +962,7 @@ export function resignPost(state: GameState): CommandResult {
     "user-resigned",
   );
 
-  const line = `사임 — ${teamNameIn(state, teamId)}를 떠났다${buyout > 0 ? ` · 위약금 ${formatMoney(buyout)}` : ""}`;
+  const line = `사임 — ${josa(teamNameIn(state, teamId), "을/를")} 떠났다${buyout > 0 ? ` · 위약금 ${formatMoney(buyout)}` : ""}`;
   pushNarrative(state, line, 5);
   return {
     ok: true,
@@ -1054,7 +1054,9 @@ export function reviewManagerContract(
       },
       "contract-expired",
     );
-    digest.push(`계약 만료 — ${teamNameIn(state, teamId)}와의 계약이 ${contract.until}로 끝났다`);
+    digest.push(
+      `계약 만료 — ${josa(teamNameIn(state, teamId), "과/와")}의 계약이 ${josa(contract.until, "으로/로")} 끝났다`,
+    );
     pushNarrative(state, `${teamNameIn(state, teamId)} 계약 만료`, 5);
     return "expired";
   }
@@ -1166,7 +1168,7 @@ export function reviewUserSeat(state: GameState, digest: TickSink): boolean {
     "user-sacked",
   );
 
-  digest.push(`경질 — ${teamNameIn(state, sackedTeamId)}가 감독 계약을 해지했다`);
+  digest.push(`경질 — ${josa(teamNameIn(state, sackedTeamId), "이/가")} 감독 계약을 해지했다`);
   pushNarrative(state, `${teamNameIn(state, sackedTeamId)} 경질`, 5);
   return true;
 }
@@ -1221,8 +1223,10 @@ function acceptRenewal(state: GameState, offer: ManagerOffer): CommandResult {
     ok: true,
     tone: "good",
     message:
-      `${name}와 재계약했습니다 — 연봉 ${formatMoney(salary)}에 ${state.manager.contract.until}까지` +
-      (pledge > 0 ? `, 이적 예산 ${formatMoney(pledge)}이 약속대로 더해졌습니다` : `입니다`),
+      `${josa(name, "과/와")} 재계약했습니다 — 연봉 ${formatMoney(salary)}에 ${state.manager.contract.until}까지` +
+      (pledge > 0
+        ? `, 이적 예산 ${josa(formatMoney(pledge), "이/가")} 약속대로 더해졌습니다`
+        : `입니다`),
     brief: {
       head: "재계약",
       items: [
@@ -1461,9 +1465,11 @@ export function acceptManagerOffer(state: GameState, ref: string): CommandResult
       `${name} 감독으로 부임했습니다 (${state.date}) — 보드의 기대는 ${offerExpectation(offer)},` +
       ` 지금 순위는 ${offer.position ?? "-"}위입니다.` +
       ` 계약은 연봉 ${formatMoney(salary)}에 ${contract.until}까지` +
-      (pledge > 0 ? `, 이적 예산 ${formatMoney(pledge)}이 약속대로 더해졌습니다` : `입니다`) +
+      (pledge > 0
+        ? `, 이적 예산 ${josa(formatMoney(pledge), "이/가")} 약속대로 더해졌습니다`
+        : `입니다`) +
       (compensation > 0
-        ? `. 보상금 ${formatMoney(compensation)}는 ${teamNameIn(state, fromTeamId)}의 장부로 갔습니다 — 감독의 지갑은 그대로입니다`
+        ? `. 보상금 ${josa(formatMoney(compensation), "은/는")} ${teamNameIn(state, fromTeamId)}의 장부로 갔습니다 — 감독의 지갑은 그대로입니다`
         : ""),
     tone: "good",
     brief: {
@@ -1479,7 +1485,7 @@ export function acceptManagerOffer(state: GameState, ref: string): CommandResult
               item({
                 label: "보상금",
                 text: formatMoney(compensation),
-                note: `${teamShortNameIn(state, fromTeamId)}로`,
+                note: josa(teamShortNameIn(state, fromTeamId), "으로/로"),
               }),
             ]
           : []),
@@ -1521,7 +1527,7 @@ export function counterManagerOffer(
   if (offer.counteredOn) {
     return {
       ok: false,
-      message: `${teamNameIn(state, offer.teamId)}와의 흥정은 이미 한 차례 끝났습니다 — 남은 것은 수락 여부뿐입니다`,
+      message: `${josa(teamNameIn(state, offer.teamId), "과/와")}의 흥정은 이미 한 차례 끝났습니다 — 남은 것은 수락 여부뿐입니다`,
     };
   }
   if (ask.salary === undefined && ask.transferBudget === undefined) {
@@ -1570,7 +1576,7 @@ export function counterManagerOffer(
   return {
     ok: true,
     message:
-      `${teamNameIn(state, offer.teamId)}가 답했습니다 — ${parts.join(" · ")}.` +
+      `${josa(teamNameIn(state, offer.teamId), "이/가")} 답했습니다 — ${parts.join(" · ")}.` +
       ` 흥정은 여기까지입니다 — 남은 것은 수락 여부입니다 (${offer.expiresOn}까지)`,
     brief: {
       head: `${teamNameIn(state, offer.teamId)} 조건 흥정`,
@@ -1779,7 +1785,7 @@ function expireInterview(state: GameState, digest: TickSink): boolean {
   if (!open || diffDays(open.date, state.date) < APPROACH_PATIENCE_DAYS) return false;
   open.status = "expired";
   const name = teamNameIn(state, open.teamId ?? "");
-  digest.push(`${name}와의 면접이 답 없이 지나갔다 — 그 자리는 닫혔다`);
+  digest.push(`${josa(name, "과/와")}의 면접이 답 없이 지나갔다 — 그 자리는 닫혔다`);
   pushNarrative(state, `${name} 감독직 면접 무응답`, 4);
   return true;
 }
@@ -1801,7 +1807,7 @@ export function settleInterview(
     return {
       ok: true,
       tone: "bad",
-      message: `${name}는 제안 없이 자리를 닫았습니다 — 보드는 확신을 얻지 못했습니다`,
+      message: `${josa(name, "은/는")} 제안 없이 자리를 닫았습니다 — 보드는 확신을 얻지 못했습니다`,
       brief: { head: "감독직 면접", items: [item({ label: name, text: "제안 없음" })] },
     };
   }
@@ -1851,10 +1857,10 @@ export function settleInterview(
     ok: true,
     tone: "good",
     message:
-      `${name}가 제안으로 답했습니다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)},` +
+      `${josa(name, "이/가")} 제안으로 답했습니다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)},` +
       ` 연봉 ${formatMoney(salary)}·${base.years}년·이적 예산 약속 ${formatMoney(budgetPledge)}.` +
       (compensation > 0
-        ? ` 수락하면 ${teamNameIn(state, state.userTeamId)}에 보상금 ${formatMoney(compensation)}를 뭅니다.`
+        ? ` 수락하면 ${teamNameIn(state, state.userTeamId)}에 보상금 ${josa(formatMoney(compensation), "을/를")} 뭅니다.`
         : "") +
       (terms === "raised"
         ? ` 자리에서 조건을 불렀으므로 흥정은 여기까지입니다 — 남은 것은 수락 여부입니다.`
@@ -1879,7 +1885,7 @@ export function settleInterview(
               item({
                 label: "보상금",
                 text: formatMoney(compensation),
-                note: `${teamShortNameIn(state, state.userTeamId)}로`,
+                note: josa(teamShortNameIn(state, state.userTeamId), "으로/로"),
               }),
             ]
           : []),
@@ -1926,7 +1932,7 @@ export function applyForManagerJob(state: GameState, teamRef: string): CommandRe
       ok: false,
       message:
         sitting.topic === "interview"
-          ? `${teamNameIn(state, sitting.teamId ?? "")}와의 면접이 아직 열려 있습니다 — 답할 자리는 한 번에 하나입니다`
+          ? `${josa(teamNameIn(state, sitting.teamId ?? ""), "과/와")}의 면접이 아직 열려 있습니다 — 답할 자리는 한 번에 하나입니다`
           : `감독실 앞에 아직 답을 기다리는 사람이 있습니다 — 답할 자리는 한 번에 하나입니다`,
     };
   }
@@ -1956,7 +1962,7 @@ export function applyForManagerJob(state: GameState, teamRef: string): CommandRe
     return {
       ok: false,
       message:
-        `${teamNameIn(state, vacancy.teamId)}와는 이번 ${inPost ? "임기" : "무직 기간"}에` +
+        `${josa(teamNameIn(state, vacancy.teamId), "과/와")}는 이번 ${inPost ? "임기" : "무직 기간"}에` +
         ` 이미 이야기가 오갔습니다`,
     };
   }
@@ -1971,8 +1977,8 @@ export function applyForManagerJob(state: GameState, teamRef: string): CommandRe
       ok: true,
       tone: "bad",
       message:
-        `${teamNameIn(state, vacancy.teamId)}가 정중히 거절했습니다 —` +
-        ` 평판 ${Math.round(reputation)}이 ${tier}티어의 문턱 ${gate}에 미치지 못합니다`,
+        `${josa(teamNameIn(state, vacancy.teamId), "이/가")} 정중히 거절했습니다 —` +
+        ` 평판 ${josa(`${Math.round(reputation)}`, "이/가")} ${tier}티어의 문턱 ${gate}에 미치지 못합니다`,
       brief: {
         head: "감독직 지원",
         items: [

@@ -13,6 +13,7 @@ import {
   fatigueOf,
   internationalGoalsOf,
   isAssociation,
+  josa,
 } from "@story-fm/domain";
 import { fatigueFromMinutes } from "@story-fm/sim";
 import { addDays, diffDays, INTERNATIONAL_BREAKS, seasonYear } from "./calendar";
@@ -470,7 +471,7 @@ export function applySummerTournament(
   }
   if (late > 0) {
     const ko = tournament === "world-cup" ? "월드컵" : "대륙선수권";
-    digest.push(`${ko}을 뛴 우리 선수 ${late}명은 소집일보다 늦게 합류한다`);
+    digest.push(`${josa(ko, "을/를")} 뛴 우리 선수 ${late}명은 소집일보다 늦게 합류한다`);
   }
 }
 

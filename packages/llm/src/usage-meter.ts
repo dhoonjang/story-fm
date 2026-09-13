@@ -289,7 +289,7 @@ export function meterLlm(llm: GameLLM, agent: AgentName, env: LlmEnv = process.e
       if (verdict.over) {
         warnOnce(
           `budget-pass:${agent}`,
-          `[llm] 토큰 예산 상한(${verdict.limit}) 초과 — ${agent}는 계속 실행합니다 (누적 ${verdict.used}).`,
+          `[llm] 토큰 예산 상한(${verdict.limit}) 초과 — 계속 실행합니다: ${agent} (누적 ${verdict.used}).`,
         );
       }
 
