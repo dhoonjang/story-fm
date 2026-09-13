@@ -93,7 +93,6 @@ import {
   MATCHDAY_BENCH,
   MATCHDAY_SQUAD,
   SET_PIECE_ROLES,
-  ageOf,
   bestOverall,
   isFinanceDemand,
   opensOwnerSeat,
@@ -110,7 +109,7 @@ import {
   positionProficiency,
   weightSlotOf,
   roleFit,
-  standingScore,
+  initialCaptainOf,
   sumSeasonStats,
 } from "@story-fm/domain";
 import { profFactor, type MatchLedgerState } from "@story-fm/sim";
@@ -3242,23 +3241,19 @@ export function createGame(input: CreateGameInput): GameState {
     });
 
   /**
-   * 주장 — **서열 최상위** (people.md §5-1). 개막 전에는 출전도 재적도 0이라
-   * 리더십과 나이가 그 자리를 정한다. OVR로 세우던 자리였는데, 그러면 리더십 20인
-   * 최고 선수가 완장을 차고 감독이 첫 팀토크부터 가장 나쁜 라커룸 계수를 받는다.
-   * 골키퍼를 거르지 않는다 — 누가 라커룸을 이끄는가는 포지션이 아니라 리더십이 답한다.
+   * 주장 — **서열 최상위, 다만 후보는 개막전에 나설 열한 명이다** (people.md §5-1).
+   * 규칙은 도메인(`initialCaptainOf`)이 갖는다 — 세계를 보지 않는 순수 규칙이고,
+   * 개막 뒤의 서열(`squad/hierarchy.ts`)과 같은 자를 써야 두 서열이 갈리지 않는다.
+   *
+   * 후보를 위에서 세운 배치가 정하는 것은, 개막 전의 출전 수를 대신할 수 있는 사실이
+   * 그것 하나뿐이어서다: 리더십과 나이만 보면 한 경기도 나서지 않는 백업 골키퍼가
+   * 완장을 차고, 경기마다 `matchCaptainOf`가 그 완장을 다른 사람에게 넘긴다.
    */
   const userSquad = players.filter((p) => p.teamId === input.userTeamId);
-  const captain = [...userSquad]
-    .map((p) => ({
-      player: p,
-      standing: standingScore({
-        leadership: p.attributes.leadership,
-        age: ageOf(p.birthdate, calendar.preseasonStart),
-        apps: 0,
-        seasons: 0,
-      }),
-    }))
-    .sort((a, b) => b.standing - a.standing || (a.player.id < b.player.id ? -1 : 1))[0]?.player;
+  const userStartingXi = (tactics.find((t) => t.teamId === input.userTeamId)?.assignments ?? [])
+    .filter((a) => a.role === "starting")
+    .map((a) => a.playerId);
+  const captain = initialCaptainOf(userSquad, userStartingXi, calendar.preseasonStart);
   if (captain) captain.isCaptain = true;
 
   // 재정 + 계약(주급의 원본) — 무소속은 장부를 갖지 않는다 (team.md §4)
