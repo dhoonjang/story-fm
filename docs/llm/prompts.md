@@ -177,6 +177,10 @@ GM이 **경기 도구 셋**(`tactic_orders` · `advance_match` · `finalize_matc
   ([../simulation/career.md](../simulation/career.md) §2). 경기 중 해석기
   (`tactic-orders`)의 대화 절이 **같은 문장**을 든다 — 경기 중에는 도구 설명이 실리지
   않으므로 그 겹침은 중복이 아니다(§5).
+  **약속도 같다** — `promise`는 이번 턴에 감독이 못 박은 것만이고, 지난 턴의 약속과
+  자리를 빼는 말에는 실리지 않는다. 도구 설명·해석기의 대화 절·인자의 describe 셋이 한
+  문장을 들고, 다가옴의 응대(`respond_to_approach`)는 같은 인자를 쓰므로 describe로
+  같은 규약을 받는다 ([../data/people.md](../data/people.md) §5-2).
 
 - **심경 한 줄은 판정형·사건형이 함께 남긴다** — `team_talk.moods` ·
   `respond_to_media.mood` · `respond_to_approach.mood` · `record_incident.moods`. 그 대화를
