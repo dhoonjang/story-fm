@@ -50,6 +50,8 @@ import {
   quotedFee,
   recallLoan,
   recordIncident,
+  renewalExpectation,
+  renewalYearsExpectation,
   exerciseBuyBack,
   releasePlayer,
   releaseStaff,
@@ -67,6 +69,7 @@ import {
   scoutPlayer,
   searchPlayers,
   sendOffer,
+  severanceOf,
   setCaptain,
   setDevelopmentFocus,
   setMentor,
@@ -92,6 +95,7 @@ import {
   TEAM_TALK_MOODS,
   teamName,
   teamProfile,
+  unilateralSeveranceOf,
   wageExpectationOf,
   userSide,
   withdrawOffer,
@@ -336,6 +340,34 @@ function missingFeeNote(
   return (
     `${player.name} ${KIND_KO[kind ?? "buy"]} 오퍼에 실을 ${loan ? "임대료" : "이적료"}를 ` +
     `감독이 부르지 않았습니다 — ${scale}는 ${quoted}입니다`
+  );
+}
+
+/**
+ * **감독이 주급을 부르지 않은 재계약 제안이 되돌아오는 한 줄** (transfer.md §1).
+ *
+ * 재계약의 자는 이적 주급이 아니라 `renewalExpectation`이다 — 남아 달라는 쪽이 우리라
+ * 기준이 높고 만료가 가까울수록 오른다. 연수는 코어가 아는 값이 있어 빠져도 제안이
+ * 나가므로 이 줄은 주급만 묻는다.
+ */
+function missingRenewalWageNote(state: GameState, player: GamePlayer): string {
+  return (
+    `${player.name} 재계약 제안에 실을 주급을 감독이 부르지 않았습니다 — ` +
+    `재계약 기대 주급은 ${formatMoney(renewalExpectation(state, player))}/주입니다`
+  );
+}
+
+/**
+ * **감독이 정산금을 부르지 않은 해지 제안이 되돌아오는 한 줄** (transfer.md §1).
+ *
+ * 자가 둘이다 — 합의의 앵커(`severanceOf`)와, 합의가 깨졌을 때 무는 전액
+ * (`unilateralSeveranceOf`). 흥정의 폭이 그 사이라 한쪽만으로는 값을 부를 수 없다.
+ */
+function missingSeveranceNote(state: GameState, player: GamePlayer): string {
+  return (
+    `${player.name} 계약 해지 제안에 실을 정산금을 감독이 부르지 않았습니다 — ` +
+    `기대 정산금은 ${formatMoney(severanceOf(state, player.id))}이고 ` +
+    `합의가 안 되면 일방 해지는 ${formatMoney(unilateralSeveranceOf(state, player.id))}입니다`
   );
 }
 
@@ -1520,20 +1552,51 @@ export function buildToolSpecs(
       CORE_COMMAND_LABELS.open_renewal!,
       z.object({
         playerId: playerRef,
-        weeklyWage: money(WAGE_MAX),
-        years: z.number().int().min(1).max(6),
+        weeklyWage: money(WAGE_MAX)
+          .optional()
+          .describe(
+            "감독이 부른 재계약 주급 (£/주). **감독이 액수를 말하지 않았으면 비운다** — 첫 제시액이 흥정의 폭을 정하므로 지어낸 값은 그대로 협상의 출발점이 된다",
+          ),
+        years: z
+          .number()
+          .int()
+          .min(1)
+          .max(6)
+          .optional()
+          .describe("감독이 부른 계약 연수 — 말하지 않았으면 비운다. 코어가 기대 연수를 싣는다"),
         squadStatus: squadStatusArg,
       }),
-      (input) => openRenewal(state, input),
+      (input) => {
+        const picked = pickAnyPlayer(state, input.playerId);
+        if (!picked.ok) return { ok: false, message: picked.message };
+        const player = picked.player;
+        /**
+         * **감독이 부르지 않은 주급은 재계약 제안이 되지 않는다** (transfer.md §1).
+         * £0은 제안이 아니고, 기대치를 대신 넣는 것은 감독이 하지 않은 결정을 협상의
+         * 출발점으로 세우는 것이다 — 되부르기 상한도 선수 관문도 그 값에서 잰다.
+         */
+        if (input.weeklyWage === undefined) {
+          return { ok: false, message: missingRenewalWageNote(state, player) };
+        }
+        return openRenewal(state, {
+          playerId: player.id,
+          weeklyWage: input.weeklyWage,
+          // 연수는 선수가 부르는 값이 있다 — 빠지면 기대 연수가 실리고 제안 줄에 선다
+          years: input.years ?? renewalYearsExpectation(state, player),
+          ...(input.squadStatus === undefined ? {} : { squadStatus: input.squadStatus }),
+        });
+      },
     ),
     wrap(
       "open_release",
       CORE_COMMAND_LABELS.open_release!,
       z.object({
         playerId: playerRef,
-        severance: money(MONEY_MAX).describe(
-          "제시 정산금 — 잔여 주급 전액이 아니라 합의로 깎아 부르는 값이다",
-        ),
+        severance: money(MONEY_MAX)
+          .optional()
+          .describe(
+            "감독이 부른 제시 정산금 — 잔여 주급 전액이 아니라 합의로 깎아 부르는 값이다. **감독이 액수를 말하지 않았으면 비운다**",
+          ),
         paymentYears: z
           .number()
           .int()
@@ -1544,7 +1607,24 @@ export function buildToolSpecs(
             "이적료·정산금 분할 연수 — 없거나 1이면 일시금. 파는 쪽은 늦은 돈을 깎아 보므로 분할은 총액을 올려 부르는 흥정이다",
           ),
       }),
-      (input) => openRelease(state, input),
+      (input) => {
+        const picked = pickAnyPlayer(state, input.playerId);
+        if (!picked.ok) return { ok: false, message: picked.message };
+        const player = picked.player;
+        /**
+         * **감독이 부르지 않은 정산금은 해지 제안이 되지 않는다** (transfer.md §1).
+         * 잔여 주급을 대신 넣으면 깎아 부를 자리가 사라져 흥정 자체가 없어진다 —
+         * 그것은 합의가 깨졌을 때 무는 값(`unilateralSeveranceOf`)이다.
+         */
+        if (input.severance === undefined) {
+          return { ok: false, message: missingSeveranceNote(state, player) };
+        }
+        return openRelease(state, {
+          playerId: player.id,
+          severance: input.severance,
+          ...(input.paymentYears === undefined ? {} : { paymentYears: input.paymentYears }),
+        });
+      },
     ),
     wrap(
       "set_transfer_list",
