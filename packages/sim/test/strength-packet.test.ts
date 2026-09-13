@@ -4,6 +4,7 @@ import {
   matchupText,
   packetTagContext,
   packetTagText,
+  type Matchup,
   type TacticsSpec,
 } from "@story-fm/domain";
 import {
@@ -26,6 +27,7 @@ import {
   readKeyPoints,
   stateModifier,
   TACKLING_INTENSITY_STEP,
+  TACTIC_SWING,
   tacticalFit,
   zeroCells,
   zoneMeanOf,
@@ -1071,10 +1073,15 @@ describe("판세 밴드 (edgeOf) — 문턱은 이 함수 하나뿐이다", () =
     expect(edgeOf(1)).toEqual({ edge: "even", size: "slight" });
     expect(edgeOf(1.034)).toEqual({ edge: "even", size: "slight" });
     expect(edgeOf(1.035)).toEqual({ edge: "home", size: "slight" });
-    expect(edgeOf(1.069)).toEqual({ edge: "home", size: "slight" });
-    expect(edgeOf(1.07)).toEqual({ edge: "home", size: "clear" });
-    expect(edgeOf(1.149)).toEqual({ edge: "home", size: "clear" });
-    expect(edgeOf(1.15)).toEqual({ edge: "home", size: "big" });
+    expect(edgeOf(1.099)).toEqual({ edge: "home", size: "slight" });
+    expect(edgeOf(1.1)).toEqual({ edge: "home", size: "clear" });
+    expect(edgeOf(1.199)).toEqual({ edge: "home", size: "clear" });
+    expect(edgeOf(1.2)).toEqual({ edge: "home", size: "big" });
+  });
+
+  it("압도적은 전술 한 판이 흔들 수 있는 폭의 바깥이다", () => {
+    // 지시로 뒤집을 수 있는 격차에 이 이름이 붙으면 「압도적」이 매 경기 나온다
+    expect(edgeOf(1 + TACTIC_SWING).size).not.toBe("big");
   });
 
   it("좌우가 대칭이다 — 뒤집으면 편만 바뀌고 크기는 그대로다", () => {
@@ -1084,6 +1091,36 @@ describe("판세 밴드 (edgeOf) — 문턱은 이 함수 하나뿐이다", () =
       expect(away.size, `비율 ${ratio}`).toBe(home.size);
       expect(away.edge, `비율 ${ratio}`).toBe(home.edge === "home" ? "away" : "even");
     }
+  });
+});
+
+describe("존 기준선 (ZONE_BASELINE)", () => {
+  /**
+   * 층을 하나도 걸지 않은 거울 매치 — 공략 없음(벤치 등급이 `autoExploits`의 문턱
+   * 아래)·중립 전술·모든 축이 같은 선수. 세 존의 능력 항이 같아 존 값에 기준선이
+   * 그대로 드러난다. 리그 평균의 층은 여기 없으므로 「팽팽」은 이 자리의 불변식이
+   * 아니다 — 그것은 `zone-baseline` 하네스가 리그 편성 전체로 잰다 (match.md §1.1).
+   */
+  const mirror = () =>
+    buildStrengthPacket(
+      makeSide("home", 75, { managerTactics: 50 }),
+      makeSide("away", 75, { managerTactics: 50 }),
+    );
+
+  it("공격과 수비에 절반씩 건다 — 두 값의 곱이 1이다", () => {
+    const { attack, midfield, defense } = mirror().home.zones;
+    // 한쪽만 옮기면 화면의 막대가 그쪽 줄로만 눌린다
+    expect((attack / midfield) * (defense / midfield)).toBeCloseTo(1, 2);
+  });
+
+  it("거울 매치는 좌우 대칭이다 — 공격 존 판정은 수비 존 판정의 거울이고 중원은 팽팽하다", () => {
+    const packet = mirror();
+    const of = (zone: Matchup["zone"]) => packet.matchups.find((m) => m.zone === zone)!;
+    expect(packet.home.zones).toEqual(packet.away.zones);
+    expect(of("midfield").edge).toBe("even");
+    const flip = { home: "away", away: "home", even: "even" } as const;
+    expect(of("defense").edge).toBe(flip[of("attack").edge]);
+    expect(of("defense").size).toBe(of("attack").size);
   });
 });
 

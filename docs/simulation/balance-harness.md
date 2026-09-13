@@ -52,6 +52,7 @@ pnpm balance --report out  # 전부 돌리고 측정값을 out/에 남긴다 (�
 | `assist-rate`          | 골에 도움이 붙는 비율                                                          | [match](match.md) §7                                  |
 | `segment-shots`        | 구간 시뮬의 경기당 슈팅이 패킷 기대 슈팅과 같은가                              | [match](match.md) §1.4                                |
 | `match-stamina`        | 풀타임 소모가 구멍 문턱에서 얼마나 떨어져 서는가 — 기본 전술과 고압박          | [match](match.md) §3.2                                |
+| `zone-baseline`        | 킥오프 패킷의 매치업 비율이 1에 서는가 — 층별 분해 · 네 등급의 몫              | [match](match.md) §1.1                                |
 | `injury-rate`          | 두 시뮬의 경기당 부상·카드가 같은 눈금인가 · 성향 · 누적 피로                  | [match](match.md) §7                                  |
 | `finance-tier1`        | tier1 한 시즌 장부 손익 · 현금 · 급여 비중 · 수입                              | [finance](finance.md) §10.1                           |
 | `finance-leagues`      | 리그별 잔고 — 어느 리그도 구조적 적자가 아니다                                 | [finance](finance.md) §10.3                           |

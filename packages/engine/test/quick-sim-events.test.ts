@@ -443,18 +443,24 @@ describe("카드·퇴장", () => {
   });
 
   it("정지된 선수는 그 대회 라인업에서 빠진다 — AI 팀도", () => {
-    const state = seasonOf(7);
+    /**
+     * 시즌 끝에 아직 소화 중인 정지가 남아 있는가는 시드가 쥔 값이다 — 밸런스 손잡이
+     * 하나가 난수 줄기를 옮기면 사라진다. 재는 것은 정지가 명단을 막는 규칙이지 마지막
+     * 라운드에 누가 걸렸는가가 아니라, 리그 정지 하나를 **복제본에서 다시 활성으로** 세운다.
+     */
+    const state = structuredClone(seasonOf(7));
     // 리그 정지를 하나 고른다 — 컵 정지는 리그 명단을 막지 않는다 (match.md §6)
     const banned = state.suspensions.find((s) => {
       const owner = state.players.find((p) => p.id === s.gamePlayerId);
       return (
-        s.status === "active" &&
         owner !== undefined &&
         owner.teamId !== state.userTeamId &&
         s.competitionId === leagueOfTeamIn(state, owner.teamId)
       );
     });
     expect(banned).toBeTruthy();
+    banned!.status = "active";
+    banned!.served = 0;
     const player = state.players.find((p) => p.id === banned!.gamePlayerId)!;
     const league = leagueOfTeamIn(state, player.teamId);
     expect(isSuspendedFor(state, player.id, league)).toBe(true);
