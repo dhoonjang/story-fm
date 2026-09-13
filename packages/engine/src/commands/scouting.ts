@@ -11,6 +11,7 @@ import {
   MISSION_DAYS,
   SCOUT_CONCURRENT_LIMIT,
   SCOUT_DAYS,
+  josa,
 } from "@story-fm/domain";
 import { addDays } from "../competition/calendar";
 
@@ -55,7 +56,10 @@ export function scoutPlayer(state: GameState, ref: string): MarketCommandResult 
   const player = pick.player;
   const playerId = player.id;
   if (player.teamId === state.userTeamId) {
-    return { ok: false, message: `${player.name}은(는) 우리 선수입니다 — 이미 다 알고 있습니다` };
+    return {
+      ok: false,
+      message: `${josa(player.name, "은/는")} 우리 선수입니다 — 이미 다 알고 있습니다`,
+    };
   }
   const pending = state.scoutReports.find(
     (r) => r.gamePlayerId === playerId && r.completedOn === null,
@@ -70,7 +74,7 @@ export function scoutPlayer(state: GameState, ref: string): MarketCommandResult 
   if (done >= SCOUT_REPEAT_LIMIT) {
     return {
       ok: false,
-      message: `${player.name}은(는) ${done}번 살펴봤습니다 — 더 보내도 새로 알 게 없습니다`,
+      message: `${josa(player.name, "은/는")} ${done}번 살펴봤습니다 — 더 보내도 새로 알 게 없습니다`,
     };
   }
   /**
@@ -90,8 +94,8 @@ export function scoutPlayer(state: GameState, ref: string): MarketCommandResult 
     return {
       ok: false,
       message:
-        `${player.name}(${teamName(player.teamId)})은(는) 보내지 못했습니다 — 동시 파견 한도 ` +
-        `${SCOUT_CONCURRENT_LIMIT}이 차 있습니다 (파견 중: ${inFlightScoutLabels(state).join(", ")}). ` +
+        `${josa(`${player.name}(${teamName(player.teamId)})`, "은/는")} 보내지 못했습니다 — 동시 파견 한도 ` +
+        `${josa(String(SCOUT_CONCURRENT_LIMIT), "이/가")} 차 있습니다 (파견 중: ${inFlightScoutLabels(state).join(", ")}). ` +
         `${earliestScoutReturn(state)} 보고가 들어오면 자리가 납니다. ` +
         `${player.name} 요청은 대기로 남습니다 — 자리가 난 뒤 다시 불러야 나갑니다`,
     };

@@ -630,7 +630,7 @@ async function main(): Promise<void> {
       if (first === undefined) continue;
       const seed = matchSeed(rows, first);
       if (seed === undefined) {
-        problems.push(`${teamId}: ${role} "${first.name}"을(를) 시드에서 못 찾았다`);
+        problems.push(`${teamId}: ${role} "${first.name}" — 시드에서 못 찾았다`);
         continue;
       }
       const key = `${seed.file}:${seed.index}`;

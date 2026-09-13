@@ -1,5 +1,5 @@
 import type { GamePlayer, Injury, TransferReason, TickSink } from "@story-fm/domain";
-import { ageOf, buildPaymentInstallments, seasonRating } from "@story-fm/domain";
+import { josa, ageOf, buildPaymentInstallments, seasonRating } from "@story-fm/domain";
 import { contractUntil, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { formatMoney, recordFinance, settleDuePayments } from "../club/finance";
@@ -336,7 +336,7 @@ export function releasePlayer(
   const locked = loanLockOf(player);
   if (locked) return { ok: false, message: locked };
   if (player.teamId !== state.userTeamId) {
-    return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
+    return { ok: false, message: `${josa(player.name, "은/는")} 우리 선수가 아닙니다` };
   }
   const short = squadShortfall(state, state.userTeamId, player);
   if (short) return { ok: false, message: `우리 ${squadShortfallText(short, "release")}` };
@@ -429,7 +429,7 @@ export function releasePlayer(
       ],
     },
     message:
-      `${player.name}과(와) 계약을 해지했습니다 — ${agreed ? "정산금" : "위약금 전액"} ${formatMoney(severance)}` +
+      `${josa(player.name, "과/와")} 계약을 해지했습니다 — ${agreed ? "정산금" : "위약금 전액"} ${formatMoney(severance)}` +
       (paymentYears === undefined
         ? "."
         : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)}).`) +
@@ -457,9 +457,10 @@ export function loanPlayer(
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
   if (player.teamId !== state.userTeamId) {
-    return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
+    return { ok: false, message: `${josa(player.name, "은/는")} 우리 선수가 아닙니다` };
   }
-  if (player.loan) return { ok: false, message: `${player.name}은(는) 이미 임대 중입니다` };
+  if (player.loan)
+    return { ok: false, message: `${josa(player.name, "은/는")} 이미 임대 중입니다` };
   const destination = state.teams.find((t) => t.id === input.teamId);
   if (!destination) return { ok: false, message: `"${input.teamId}"라는 구단을 찾지 못했습니다` };
   if (destination.id === state.userTeamId) {
@@ -467,7 +468,7 @@ export function loanPlayer(
   }
   // 무소속은 구단이 아니라 구단이 없는 상태다 — 빌려 갈 스쿼드가 없다 (transfer.md §2)
   if (!isClubTeam(destination.id)) {
-    return { ok: false, message: `${teamName(destination.id)}은(는) 구단이 아닙니다` };
+    return { ok: false, message: `${josa(teamName(destination.id), "은/는")} 구단이 아닙니다` };
   }
   // 임대 송출의 창도 **받는 쪽 협회**의 것이다 — 등록을 그쪽이 한다 (transfer.md §3)
   const window = windowOpenForTeam(state, destination.id);
@@ -480,7 +481,7 @@ export function loanPlayer(
   const short = squadShortfall(state, state.userTeamId, player);
   if (short) return { ok: false, message: `우리 ${squadShortfallText(short, "loan-out")}` };
   const contract = activeContract(state, player.id);
-  if (!contract) return { ok: false, message: `${player.name}은(는) 계약이 없습니다` };
+  if (!contract) return { ok: false, message: `${josa(player.name, "은/는")} 계약이 없습니다` };
 
   /** 기본 복귀일은 **시즌 마감**이다 — 실제 임대의 기본 형태이기도 하다 */
   const until = input.until ?? `${seasonYear(state.season) + 1}-06-30`;
@@ -519,7 +520,7 @@ export function loanPlayer(
   return {
     ok: true,
     message:
-      `${player.name}을(를) ${teamName(destination.id)}에 임대 보냈습니다 — ${until} 복귀 · ` +
+      `${josa(player.name, "을/를")} ${teamName(destination.id)}에 임대 보냈습니다 — ${until} 복귀 · ` +
       `주급 ${Math.round(wageShare * 100)}%를 그쪽이 부담합니다`,
     brief: {
       head: "임대",
@@ -544,13 +545,13 @@ export function recallLoan(state: GameState, input: { playerId: string }): Comma
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
   if (!player.loan || player.loan.fromTeamId !== state.userTeamId) {
-    return { ok: false, message: `${player.name}은(는) 우리가 임대 보낸 선수가 아닙니다` };
+    return { ok: false, message: `${josa(player.name, "은/는")} 우리가 임대 보낸 선수가 아닙니다` };
   }
   const from = player.teamId;
   returnFromLoan(state, player);
   return {
     ok: true,
-    message: `${player.name}을(를) ${teamName(from)}에서 불러들였습니다 — 2군으로 복귀했습니다`,
+    message: `${josa(player.name, "을/를")} ${teamName(from)}에서 불러들였습니다 — 2군으로 복귀했습니다`,
     brief: {
       head: "임대 복귀",
       items: [item({ label: "복귀", text: player.name, note: `${teamName(from)} · 2군` })],
@@ -598,7 +599,7 @@ export function returnDueLoans(state: GameState, digest: TickSink): void {
     returnFromLoan(state, player);
     if (ours) {
       digest.push(
-        `${player.name}이(가) ${teamName(from)} 임대를 마치고 돌아왔습니다 (2군 · ${ageOf(player.birthdate, state.date)}세)`,
+        `${josa(player.name, "이/가")} ${teamName(from)} 임대를 마치고 돌아왔습니다 (2군 · ${ageOf(player.birthdate, state.date)}세)`,
       );
       pushNarrative(state, `${player.name} 임대 복귀`, 3);
     }
@@ -815,7 +816,9 @@ export function signFreeAgents(state: GameState, digest: TickSink): void {
     if (!suitor) continue;
     signWithClub(state, player, suitor, rng);
     signed += 1;
-    digest.push(`무소속 ${player.name}이(가) ${teamName(suitor)}와 계약했습니다`);
+    digest.push(
+      `무소속 ${josa(player.name, "이/가")} ${josa(teamName(suitor), "과/와")} 계약했습니다`,
+    );
     pushNarrative(state, `${player.name} ${teamName(suitor)} 자유계약`, 2);
   }
 }

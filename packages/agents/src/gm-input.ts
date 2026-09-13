@@ -143,6 +143,7 @@ import {
   type ScoutReportCard,
   type TickEvent,
   injuryHistoryText,
+  josa,
 } from "@story-fm/domain";
 
 /** 경기 브리핑에 그대로 싣는 직전 평시 감독 발화 수 */
@@ -838,7 +839,7 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
       lines(
         `${state.date} (${DOW_KO[dayOfWeek(state.date)]}) ${formatClock(clockOf(state))} · 시즌 ${state.season} · ${describeWindowState(state)}`,
         // 팀의 도구가 막힌다는 말은 싣지 않는다 — 코어가 부르는 자리에서 막는다 (prompts.md §5-3)
-        `감독 ${state.manager.name}은(는) 무직이다 — 맡은 팀이 없다.`,
+        `감독 ${josa(state.manager.name, "은/는")} 무직이다 — 맡은 팀이 없다.`,
         card
           ? `${card.kind === "expired" ? "계약 만료" : "경질"}: ${card.on} ${teamName(card.teamId)}${
               card.expectation && card.position

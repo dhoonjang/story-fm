@@ -8,7 +8,8 @@
  *
  * 규칙은 하나다: **앞말의 마지막 소리에 받침이 있으면 앞쪽, 없으면 뒤쪽.**
  * 한글 음절은 유니코드가 `(초성×21 + 중성)×28 + 종성`으로 쌓여 있으므로
- * `(코드 − 0xAC00) % 28`이 그대로 종성 번호이고, 0이면 받침이 없다.
+ * `(코드 − 0xAC00) % 28`이 그대로 종성 번호이고, 0이면 받침이 없다. 예외는 하나,
+ * **「으로/로」의 ㄹ 받침**이다 — 「서울로」지 「서울으로」가 아니다.
  *
  * 자리가 여기인 이유는 **도메인·시뮬·엔진·화면이 같이 부르기 때문이다**
  * (AGENTS.md §5 「한 규칙, 한 정의」). 두 벌로 두면 한쪽만 고쳐진다.
@@ -18,6 +19,8 @@ const HANGUL_FIRST = 0xac00;
 const HANGUL_LAST = 0xd7a3;
 /** 종성의 가짓수 — 받침 없음(0)을 포함한 28 */
 const TAIL_COUNT = 28;
+/** 종성 표(` ㄱㄲㄳㄴㄵㄶㄷㄹ…`)에서 ㄹ이 앉은 번호 — 「으로/로」만 이 값을 따로 본다 */
+const TAIL_RIEUL = 8;
 
 /**
  * 로마자로 끝나는 이름은 **마지막 글자를 한국어로 읽은 소리**가 정한다 — 알파벳
@@ -39,6 +42,8 @@ const TAILED_LETTERS = new Set(["l", "m", "n"]);
  * (「20」→이십)이라 역시 받침이 있으므로, 끝자리 하나만 봐도 어긋나지 않는다.
  */
 const TAILED_DIGITS = new Set(["0", "1", "3", "6", "7", "8"]);
+/** 그중 ㄹ로 끝나는 끝자리 — 일·칠·팔 */
+const RIEUL_DIGITS = new Set(["1", "7", "8"]);
 
 /** 소리를 갖지 않는 끝 — 괄호·따옴표·문장부호·공백은 그 앞 글자가 읽힌다 */
 const SOUNDLESS = /[^0-9A-Za-z가-힣]/;
@@ -57,32 +62,48 @@ function soundingChar(word: string): string | undefined {
   return undefined;
 }
 
+/** 앞말의 끝소리 — 받침이 없는가, ㄹ인가, 그 밖인가 */
+type FinalSound = "none" | "rieul" | "other";
+
 /**
- * 앞말이 받침으로 끝나는가. 읽을 글자가 없으면(빈 문자열, 부호뿐인 이름) **없음**으로
- * 본다 — 「가」·「는」·「를」은 받침 없는 이름에 붙는 꼴이고, 조사가 하나 빠진 문장보다
- * 덜 튄다.
+ * 읽을 글자가 없으면(빈 문자열, 부호뿐인 이름) **받침 없음**으로 본다 — 「가」·「는」·
+ * 「를」은 받침 없는 이름에 붙는 꼴이고, 조사가 하나 빠진 문장보다 덜 튄다.
  */
-export function hasFinalConsonant(word: string): boolean {
+function finalSound(word: string): FinalSound {
   const ch = soundingChar(word);
-  if (ch === undefined) return false;
+  if (ch === undefined) return "none";
   const code = ch.codePointAt(0) ?? 0;
   if (code >= HANGUL_FIRST && code <= HANGUL_LAST) {
-    return (code - HANGUL_FIRST) % TAIL_COUNT !== 0;
+    const tail = (code - HANGUL_FIRST) % TAIL_COUNT;
+    return tail === 0 ? "none" : tail === TAIL_RIEUL ? "rieul" : "other";
   }
-  if (ch >= "0" && ch <= "9") return TAILED_DIGITS.has(ch);
-  return TAILED_LETTERS.has(ch.toLowerCase());
+  if (ch >= "0" && ch <= "9") {
+    return RIEUL_DIGITS.has(ch) ? "rieul" : TAILED_DIGITS.has(ch) ? "other" : "none";
+  }
+  const letter = ch.toLowerCase();
+  return letter === "l" ? "rieul" : TAILED_LETTERS.has(letter) ? "other" : "none";
+}
+
+/** 앞말이 받침으로 끝나는가 */
+export function hasFinalConsonant(word: string): boolean {
+  return finalSound(word) !== "none";
 }
 
 /**
  * 쓸 수 있는 조사 짝 — **받침이 있을 때가 앞**이다. 표기가 규칙과 같은 순서로 서야
  * 새 짝을 더할 때 어느 쪽이 어느 쪽인지 다시 묻지 않는다.
  */
-export type JosaPair = "이/가" | "은/는" | "을/를" | "과/와";
+export type JosaPair = "이/가" | "은/는" | "을/를" | "과/와" | "으로/로";
+
+/** ㄹ 받침이 뒤쪽을 따르는 유일한 짝 — 「서울로」·「기술로」지 「서울으로」가 아니다 */
+const RIEUL_TAKES_BARE: JosaPair = "으로/로";
 
 /** 조사만 — 앞말이 템플릿에서 떨어져 있어 `josa`로 붙일 수 없는 자리 */
 export function josaOf(word: string, pair: JosaPair): string {
   const [tailed = "", bare = ""] = pair.split("/");
-  return hasFinalConsonant(word) ? tailed : bare;
+  const sound = finalSound(word);
+  if (sound === "none") return bare;
+  return sound === "rieul" && pair === RIEUL_TAKES_BARE ? bare : tailed;
 }
 
 /** 앞말에 조사를 붙인다 — 「달로」+「이/가」 → 「달로가」 */

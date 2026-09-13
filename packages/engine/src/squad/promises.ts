@@ -15,6 +15,7 @@ import {
   startShortfall,
   SQUAD_NUMBER_MAX,
   SQUAD_NUMBER_MIN,
+  josa,
 } from "@story-fm/domain";
 import { buildSeasonCalendar } from "../competition/calendar";
 import { isFriendly } from "../competition/friendly";
@@ -330,17 +331,17 @@ function promiseBlock(
   number?: number,
 ): string | null {
   if (player.teamId !== state.userTeamId || player.loan) {
-    return `${player.name}은(는) 지금 우리가 쓰는 선수가 아닙니다`;
+    return `${josa(player.name, "은/는")} 지금 우리가 쓰는 선수가 아닙니다`;
   }
   if (openPromises(state, player.id).some((p) => p.kind === kind)) {
     return `${player.name}에게 한 ${PROMISE_KIND_KO[kind]} 약속이 아직 기한 전입니다`;
   }
   switch (kind) {
     case "captain":
-      return player.isCaptain ? `${player.name}은(는) 이미 주장입니다` : null;
+      return player.isCaptain ? `${josa(player.name, "은/는")} 이미 주장입니다` : null;
     case "transfer":
       return state.transferList.some((l) => l.gamePlayerId === player.id)
-        ? `${player.name}은(는) 이미 이적 리스트에 있습니다`
+        ? `${josa(player.name, "은/는")} 이미 이적 리스트에 있습니다`
         : null;
     case "renewal": {
       if (!activeContract(state, player.id)) {
@@ -363,7 +364,9 @@ function promiseBlock(
         // 반려 문구는 배정과 한 자리에서 나온다 — 같은 범위를 두 문장으로 말하지 않게
         return numberBlockText({ code: "out-of-range", number });
       }
-      return player.squadNumber === number ? `${player.name}은(는) 이미 ${number}번입니다` : null;
+      return player.squadNumber === number
+        ? `${josa(player.name, "은/는")} 이미 ${number}번입니다`
+        : null;
     }
     case "minutes":
       return null;

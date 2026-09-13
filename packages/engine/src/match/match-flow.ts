@@ -40,6 +40,7 @@ import {
   storedProficiencyFor,
   TacticsSpecSchema,
   tacticsSignature,
+  josa,
 } from "@story-fm/domain";
 import type { CommandResult } from "../commands";
 import {
@@ -491,7 +492,7 @@ export function assembleUserLineup(
         onPitch,
         bench: [],
         replaced,
-        error: `${outgoing}을(를) 대체할 가용 선수가 없습니다 — 스쿼드가 소진되었습니다`,
+        error: `${josa(outgoing, "을/를")} 대체할 가용 선수가 없습니다 — 스쿼드가 소진되었습니다`,
       };
     }
     onPitch.push(candidate.id);
@@ -796,7 +797,7 @@ export function startMatch(state: GameState): FlowResult {
   const captain = userPlayers(state).find((p) => p.isCaptain);
   const inherited =
     wornBy !== null && wornBy !== captain?.id ? (playerById(state, wornBy)?.name ?? null) : null;
-  if (inherited) pushNarrative(state, `${inherited}이(가) 완장을 찼다`, 2);
+  if (inherited) pushNarrative(state, `${josa(inherited, "이/가")} 완장을 찼다`, 2);
   return {
     ok: true,
     message: `킥오프 준비 완료${note}`,
@@ -1295,12 +1296,12 @@ export function substitutePlayer(state: GameState, input: { out: string; in: str
   const outgoing = going.player;
   const incoming = coming.player;
   if (isInjured(state, incoming.id)) {
-    return { ok: false, message: `${incoming.name}은(는) 부상 중이라 투입할 수 없습니다` };
+    return { ok: false, message: `${josa(incoming.name, "은/는")} 부상 중이라 투입할 수 없습니다` };
   }
   // 정지는 **이 경기의 대회**로 묻는다 (match.md §6) — 장부의 경기가 그 사실을 쥔다
   const fixture = state.matches.find((m) => m.id === match.matchId) ?? null;
   if (isSuspendedFor(state, incoming.id, fixture?.competitionId ?? null)) {
-    return { ok: false, message: `${incoming.name}은(는) 이 경기 출장 정지 중입니다` };
+    return { ok: false, message: `${josa(incoming.name, "은/는")} 이 경기 출장 정지 중입니다` };
   }
   const result = applyMatchEvents(state, [
     {
@@ -1378,7 +1379,7 @@ export function setShootoutOrder(state: GameState, input: { playerIds: string[] 
     if (!takers.has(player.id)) {
       return {
         ok: false,
-        message: `${player.name}은(는) 그라운드에 없어 페널티를 찰 수 없습니다 — 경기를 끝낸 열한 명 중에서 고르세요`,
+        message: `${josa(player.name, "은/는")} 그라운드에 없어 페널티를 찰 수 없습니다 — 경기를 끝낸 열한 명 중에서 고르세요`,
       };
     }
     if (order.includes(player.id)) continue; // 같은 사람을 두 번 부르면 앞자리가 그의 자리다

@@ -1,4 +1,5 @@
 import type { PositionGroup, TickSink } from "@story-fm/domain";
+import { josa } from "@story-fm/domain";
 import { isTopLeague, leagueCatalog, leagueCatalogById, leagueName } from "../data/league-catalog";
 import { clubEconomyLevel } from "../data/league-economy";
 import { tierOfTeamIn } from "../core/club-tier";
@@ -189,7 +190,7 @@ export function applyPromotionRelegation(
     );
     if (down.includes(state.userTeamId)) {
       digest.push(
-        `${teamNameIn(state, state.userTeamId)}이(가) 강등됐다 — 다음 시즌은 ${leagueName(second)}다`,
+        `${josa(teamNameIn(state, state.userTeamId), "이/가")} 강등됐다 — 다음 시즌은 ${leagueName(second)}다`,
       );
       pushNarrative(state, `${leagueName(leagueId)} 강등 — ${leagueName(second)}로`, 5);
     } else if (up.includes(state.userTeamId)) {

@@ -64,6 +64,7 @@ import {
   tacticToggleValue,
   tacticToggleWord,
   withCurrentDrilled,
+  josa,
 } from "@story-fm/domain";
 import { directiveStandingOf, nextDirectiveOrder } from "../match/directive-standing";
 import { settleRoleCost, shelveFamiliarity, unshelveFamiliarity } from "./familiarity-memory";
@@ -125,7 +126,7 @@ function ourSlot(state: GameState, slot: LineupSlotInput): LineupSlotInput | str
 
 /** 옮길 것이 없다는 한 문장 — 두 입구가 같은 말을 해야 감독이 같은 답으로 읽는다 */
 const alreadyAtLevel = (player: GamePlayer, level: "first" | "reserve"): string =>
-  `${player.name}은(는) 이미 ${level === "first" ? "1군" : "2군"}입니다`;
+  `${josa(player.name, "은/는")} 이미 ${level === "first" ? "1군" : "2군"}입니다`;
 
 /**
  * 1·2군 이동 — 상한은 임의의 숫자가 아니라 **등록 명단 규칙**이다.
@@ -209,7 +210,7 @@ function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | 
     pushNarrative(state, `${player.name} 1군 승격`, 2);
     const reg = squadRegistrationOf(state, state.userTeamId);
     return (
-      `${player.name}을(를) 1군으로 승격했습니다 — ${registrationLine(reg)}` +
+      `${josa(player.name, "을/를")} 1군으로 승격했습니다 — ${registrationLine(reg)}` +
       (freed ? " · 2군 불만이 풀렸습니다" : "")
     );
   }
@@ -252,7 +253,7 @@ function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | 
     released.length > 0
       ? ` · 멘토링이 풀렸습니다 (${released.map((pair) => playerName(state, pair.menteeId)).join(", ")})`
       : "";
-  return `${player.name}을(를) 2군으로 이동했습니다${note}${releasedNote}${dropPositionTraining(state, player)}`;
+  return `${josa(player.name, "을/를")} 2군으로 이동했습니다${note}${releasedNote}${dropPositionTraining(state, player)}`;
 }
 
 /**
@@ -287,7 +288,10 @@ export function setSquadLevels(
     if (before !== undefined) {
       // 같은 선수를 양쪽으로 부르는 요청은 어느 쪽을 따라도 감독의 뜻이 아니다
       if (before !== move.level) {
-        return { ok: false, message: `${player.name}을(를) 1군과 2군 양쪽으로 옮길 수 없습니다` };
+        return {
+          ok: false,
+          message: `${josa(player.name, "을/를")} 1군과 2군 양쪽으로 옮길 수 없습니다`,
+        };
       }
       continue; // 같은 지시를 두 번 적은 것뿐이다
     }
@@ -1237,7 +1241,7 @@ export function movePlayerSlot(
   if (!assignment || assignment.role !== "starting") {
     return {
       ok: false,
-      message: `${player.name}은(는) 지금 그라운드에 없습니다 — 교체(substitute)로 넣어야 합니다`,
+      message: `${josa(player.name, "은/는")} 지금 그라운드에 없습니다 — 교체(substitute)로 넣어야 합니다`,
     };
   }
   const from = assignment.point ?? anchorOf(assignment.position);
@@ -1256,7 +1260,11 @@ export function movePlayerSlot(
   const currentPoint = from;
   if (assignment.position === code && currentPoint.x === point.x && currentPoint.y === point.y) {
     // 옮길 것이 없었던 것은 실패가 아니다 — 역할·지시만 바꾸는 호출을 막지 않는다
-    return { ok: true, unchanged: true, message: `${player.name}은(는) 이미 ${code}입니다` };
+    return {
+      ok: true,
+      unchanged: true,
+      message: `${josa(player.name, "은/는")} 이미 ${code}입니다`,
+    };
   }
   const before = assignment.position;
   if (
@@ -1572,7 +1580,7 @@ export function setCaptain(
     // 새 영입에게 완장을 채우는 건 라커룸 한가운데 세우는 일이다 (settling.ts)
     const settled = creditSettling(state, player.id, "captain") > 0;
     const settling = settled ? settlingOf(state, player.id) : null;
-    notes.push(`${player.name}을(를) 주장으로 지명했습니다`);
+    notes.push(`${josa(player.name, "을/를")} 주장으로 지명했습니다`);
     items.push(item({ label: "주장", text: player.name, note: armbandNote(state, player) }));
     if (settling) {
       const percent = Math.round(settling.progress * 100);
@@ -1596,7 +1604,7 @@ export function setCaptain(
       if (vice.isCaptain) {
         return {
           ok: false,
-          message: `${vice.name}은(는) 이미 주장입니다 — 완장은 한 사람에 하나입니다`,
+          message: `${josa(vice.name, "은/는")} 이미 주장입니다 — 완장은 한 사람에 하나입니다`,
         };
       }
       for (const p of userPlayers(state)) p.isViceCaptain = undefined;
@@ -1605,7 +1613,7 @@ export function setCaptain(
        * **부주장에는 체력도 정착 크레딧도 붙지 않는다** (career.md §2) — 완장 둘에
        * 같은 값을 매기면 감독이 두 번 받으려고 두 자리를 채운다.
        */
-      notes.push(`${vice.name}을(를) 부주장으로 지명했습니다`);
+      notes.push(`${josa(vice.name, "을/를")} 부주장으로 지명했습니다`);
       items.push(item({ label: "부주장", text: vice.name, note: armbandNote(state, vice) }));
     }
   }
@@ -1658,7 +1666,11 @@ export function setSquadNumber(
 
   if (from === number && displaced === null) {
     // 바뀐 것이 없다는 사실은 **반환값이** 말한다 — 부르는 쪽이 문구를 뒤지지 않게
-    return { ok: true, unchanged: true, message: `${player.name}은(는) 이미 ${number}번입니다` };
+    return {
+      ok: true,
+      unchanged: true,
+      message: `${josa(player.name, "은/는")} 이미 ${number}번입니다`,
+    };
   }
 
   const notes: string[] = [
@@ -1721,7 +1733,7 @@ export function setSquadNumber(
     );
     pushNarrative(
       state,
-      `${other.name}의 ${displaced.lost}번을 ${player.name}에게 — ${other.name}은(는) ${displaced.gained}번`,
+      `${other.name}의 ${displaced.lost}번을 ${player.name}에게 — ${josa(other.name, "은/는")} ${displaced.gained}번`,
       3,
     );
   }
@@ -2074,7 +2086,10 @@ export function setPlayerInstruction(
   const player = pick.player;
   const assignment = userTactics(state).assignments.find((a) => a.playerId === player.id);
   if (!assignment) {
-    return { ok: false, message: `${player.name}은(는) 현재 전술에 배치되어 있지 않습니다` };
+    return {
+      ok: false,
+      message: `${josa(player.name, "은/는")} 현재 전술에 배치되어 있지 않습니다`,
+    };
   }
 
   let targetNote = "";
@@ -2092,7 +2107,10 @@ export function setPlayerInstruction(
       if (!found.ok) return found;
       target = found.player;
       if (target.teamId === state.userTeamId) {
-        return { ok: false, message: `${target.name}은(는) 우리 선수입니다 — 상대를 겨냥하세요` };
+        return {
+          ok: false,
+          message: `${josa(target.name, "은/는")} 우리 선수입니다 — 상대를 겨냥하세요`,
+        };
       }
       targetNote = ` → ${target.name}`;
     }

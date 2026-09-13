@@ -66,6 +66,32 @@ describe("josa — 소리가 없는 끝", () => {
   });
 });
 
+describe("josa — 「으로/로」의 ㄹ 예외", () => {
+  it("ㄹ 받침은 받침 없는 쪽을 따른다", () => {
+    expect(josa("서울", "으로/로")).toBe("서울로");
+    expect(josa("기술", "으로/로")).toBe("기술로");
+    expect(josa("리버풀", "으로/로")).toBe("리버풀로");
+  });
+
+  it("ㄹ이 아닌 받침은 「으로」, 받침이 없으면 「로」", () => {
+    expect(josa("웨스트햄", "으로/로")).toBe("웨스트햄으로");
+    expect(josa("체력", "으로/로")).toBe("체력으로");
+    expect(josa("첼시", "으로/로")).toBe("첼시로");
+    expect(josa("선더랜드", "으로/로")).toBe("선더랜드로");
+  });
+
+  it("로마자·숫자에도 같은 예외가 걸린다 — 엘·일·칠·팔이 ㄹ이다", () => {
+    expect(josa("Arsenal", "으로/로")).toBe("Arsenal로");
+    expect(josa("7", "으로/로")).toBe("7로");
+    expect(josa("3", "으로/로")).toBe("3으로");
+  });
+
+  it("다른 짝은 ㄹ을 가리지 않는다", () => {
+    expect(josa("서울", "이/가")).toBe("서울이");
+    expect(josa("서울", "은/는")).toBe("서울은");
+  });
+});
+
 describe("josaOf — 조사만", () => {
   it("앞말이 떨어져 있는 자리에 쓴다", () => {
     expect(josaOf("손흥민", "이/가")).toBe("이");

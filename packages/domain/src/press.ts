@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
 import { BOARD_DEMAND_CAUSE_LABEL, boardDemandText, type BoardDemandCause } from "./board-demand";
+import { josa, josaOf } from "./josa";
 import { formatMoney } from "./money";
 import { associationName } from "./nationality";
 import {
@@ -789,7 +790,7 @@ export function pressFactText(fact: PressFact): string {
         ? `${name} 계약 해지 (${tags[1] ?? ""})${feeSuffix("위약금", v.severance)}`
         : `${name} 매각 확정 (${tags[1] ?? ""})${feeSuffix("이적료", v.fee)}`;
     case "squeezed":
-      return `${name}이(가) 같은 자리(${sub ?? ""})를 봐 왔다`;
+      return `${josa(name, "이/가")} 같은 자리(${sub ?? ""})를 봐 왔다`;
     case "minutes":
       /**
        * 지위와 창의 수치는 **있을 때만** 선다 (people.md §5·§5-2). 이것이 없으면
@@ -1108,7 +1109,7 @@ export function pressFactText(fact: PressFact): string {
 function lineageTail(name: string, seasons: number | undefined, since: number | undefined): string {
   if (!name) return "";
   return (
-    ` — 앞서 ${name}${seasons === undefined ? "" : `이(가) ${seasons}시즌`}` +
+    ` — 앞서 ${name}${seasons === undefined ? "" : `${josaOf(name, "이/가")} ${seasons}시즌`}` +
     (since === undefined ? "" : ` · ${since}시즌 만에`)
   );
 }

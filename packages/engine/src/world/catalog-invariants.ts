@@ -26,7 +26,7 @@ import { OWNER_NAMES } from "../data/owner-seeds";
 import { CLUB_PROFILES_SEED } from "../data/club-profile";
 import { WORLD_FIGURE_SEEDS } from "../data/world-figures";
 import { EURO_MATCHDAYS } from "../competition/europe";
-import { isAssociation, type PlayerCatalogEntry } from "@story-fm/domain";
+import { isAssociation, type PlayerCatalogEntry, josa } from "@story-fm/domain";
 import { slugifyName } from "./player-id";
 
 /**
@@ -392,7 +392,7 @@ export function checkArmbandSeeds(
       );
     }
     for (const s of squad.filter((x) => x.isCaptain && x.isViceCaptain)) {
-      problems.push(`${label}: ${s.nameEn}이(가) 주장이면서 부주장입니다`);
+      problems.push(`${label}: ${josa(s.nameEn, "이/가")} 주장이면서 부주장입니다`);
     }
   }
   return problems;
