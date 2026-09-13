@@ -226,12 +226,12 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
     expect(buildGmReference(state)).toBe(before);
 
     // 셋 다 매 턴 층은 따라 움직인다 — 레퍼런스에서 뺀 것이지 지운 것이 아니다.
-    // 영입은 인원이, 승격은 1군 수가, 주장은 이름 뒤의 표시가 나른다 (agents.md §6)
+    // 영입은 인원이, 승격은 1군 수가, 주장은 완장 줄이 나른다 (agents.md §6)
     const note = buildGmStateNote(state);
     // 영입 하나 + 승격은 1군 둘을 늘린다
     expect(note).toContain(`선수단 ${size + 1}명`);
     expect(note).toContain(`- 1군 ${firstTeam + 2}: `);
-    expect(note).toContain(`${captain.name}(주장)`);
+    expect(note).toContain(`완장: 주장 ${captain.name} · `);
   });
 
   it("능력치·컨디션을 담지 않는다 — 상세는 조회 도구의 몫", () => {
@@ -468,8 +468,15 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
     const first = squad.filter((p) => p.squadLevel === "first").length;
     expect(note).toContain(`선수단 ${squad.length}명`);
     expect(note).toContain(`- 1군 ${first}: `);
+    /**
+     * 완장은 **명단 줄이 아니라 자기 줄**에 선다 — 이름 뒤의 괄호는 스물다섯 이름
+     * 한가운데에 묻혀 GM이 장부 대신 축구 상식의 주장을 세운다 (agents.md §6).
+     */
     const captain = squad.find((p) => p.isCaptain)!;
-    expect(note).toContain(`${captain.name}(주장)`);
+    expect(note).toContain(`완장: 주장 ${captain.name} · 부주장 없음`);
+    expect(note).not.toContain(`${captain.name}(주장)`);
+    // 완장 줄이 선수단 줄 위다 — 이름을 읽기 전에 누가 완장을 찼는지가 선다
+    expect(note.indexOf("완장: 주장 ")).toBeLessThan(note.indexOf(`선수단 ${squad.length}명`));
 
     // 전원이 선다 — 한 명이라도 빠지면 GM이 그 선수를 모른다
     expect(squad.filter((p) => !note.includes(p.name))).toHaveLength(0);

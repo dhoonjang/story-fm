@@ -2412,6 +2412,51 @@ export function standingScore(input: {
   );
 }
 
+/** 첫 주장을 고를 때 서열에 넣는 출전·재적 — **개막 전이라 둘 다 0이다** */
+const PRESEASON_APPS = 0;
+const PRESEASON_SEASONS = 0;
+
+/**
+ * 새 게임의 첫 주장 — **서열 최상위, 다만 후보는 경기에 나설 사람뿐이다**
+ * (people.md §5-1).
+ *
+ * 개막 전에는 출전도 재적도 0이라 서열이 리더십과 나이로 정해진다. 그 둘만 보면
+ * 한 경기도 나서지 않는 서른다섯의 백업 골키퍼가 완장을 차고, 경기마다
+ * `matchCaptainOf`가 완장을 다른 사람에게 넘긴다 — 라커룸의 축이 그라운드에 서지
+ * 않는 자리다. 개막 전의 출전 수를 대신할 수 있는 사실은 **개막전에 나설 열한 명**
+ * 하나뿐이라, 그 배치가 후보를 정한다.
+ *
+ * 후보가 비면 1군으로, 1군도 비면 선수단 전체로 물러난다 — 완장을 비우지는 않는다.
+ *
+ * ⚠️ **포지션은 거르지 않는다** — 주전 골키퍼가 라커룸을 이끄는 것은 흔한 일이고,
+ * 거르는 것은 자리가 아니라 나서지 않음이다.
+ */
+export function initialCaptainOf<
+  P extends Pick<GamePlayer, "id" | "birthdate" | "squadLevel"> & {
+    attributes: Pick<GamePlayer["attributes"], "leadership">;
+  },
+>(squad: readonly P[], startingXi: readonly string[], asOf: string): P | null {
+  const xi = new Set(startingXi);
+  const starters = squad.filter((p) => xi.has(p.id));
+  const firstTeam = squad.filter((p) => (p.squadLevel ?? "first") === "first");
+  const from = starters.length > 0 ? starters : firstTeam.length > 0 ? firstTeam : squad;
+  // 동점은 id 순 — 같은 시드는 언제나 같은 주장을 세운다 (서열과 같은 규칙)
+  return (
+    [...from]
+      .map((player) => ({
+        player,
+        standing: standingScore({
+          leadership: player.attributes.leadership,
+          age: ageOf(player.birthdate, asOf),
+          apps: PRESEASON_APPS,
+          seasons: PRESEASON_SEASONS,
+        }),
+      }))
+      .sort((a, b) => b.standing - a.standing || (a.player.id < b.player.id ? -1 : 1))[0]?.player ??
+    null
+  );
+}
+
 // ── 스카우팅 보고서 — 채팅이 카드로 그리는 구조체 ──────
 
 /**

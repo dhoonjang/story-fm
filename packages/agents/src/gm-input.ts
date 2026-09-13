@@ -1328,6 +1328,11 @@ export function buildGmStateNote(
           );
         })(),
         /**
+         * 완장 — **선수단 명단 위에 자기 줄로 선다.** 이름 뒤의 괄호로 붙이면 스물다섯
+         * 이름 한가운데에 묻혀 GM이 축구 상식의 주장을 라커룸에 세운다 (agents.md §6).
+         */
+        armbandLine(state),
+        /**
          * 선수단 — **이름 명단이다. 이름뿐이다.** "누가 우리 팀인가"는 매 장면의 전제라
          * 입력에 없으면 GM이 없는 선수를 세우고, 명단은 영입·승격마다 바뀌어 캐시 층에
          * 둘 수도 없다. 그래서 캐시가 걸리지 않는 이 층이 이름을 진다.
@@ -1340,12 +1345,7 @@ export function buildGmStateNote(
           // 구분자는 쉼표가 아니라 가운뎃점이다 — 한국어 성명에 공백이 들어가서
           // 쉼표로 이으면 어디서 한 사람이 끝나는지가 흐려진다
           const named = (level: "first" | "reserve") =>
-            players
-              .filter((p) => squadLevelOf(p) === level)
-              .map(
-                (p) =>
-                  `${p.name}${p.isCaptain ? "(주장)" : p.isViceCaptain === true ? "(부주장)" : ""}`,
-              );
+            players.filter((p) => squadLevelOf(p) === level).map((p) => p.name);
           const first = named("first");
           const reserve = named("reserve");
           /**
@@ -1529,6 +1529,26 @@ export function buildRecentTurnsBlock(state: GameState, count = RECENT_TURNS): s
 }
 
 /**
+ * 완장 한 줄 — **주장과 부주장은 이름 명단 안이 아니라 자기 줄에 선다.**
+ *
+ * 이름 뒤에 괄호로 붙이면 가운뎃점으로 이어진 스물다섯 이름 한가운데에 묻혀, GM이
+ * 장부의 완장 대신 제가 아는 축구 상식의 주장을 라커룸에 세운다. 완장은 팀 토크와
+ * 라커룸 장면이 두고 서는 축이라 자기 줄을 갖는다 (agents.md §6 `<club>`).
+ *
+ * `<club>`과 `<standing>`이 같은 문장을 쓴다 — 두 벌이면 경기 중과 평시의 완장이
+ * 다른 낱말로 서고, 그 차이는 아무것도 뜻하지 않는다 (AGENTS.md §5 "한 규칙, 한 정의").
+ */
+export function armbandLine(state: GameState): string {
+  const squad = playersOf(state, state.userTeamId);
+  const captain = squad.find((p) => p.isCaptain);
+  const vice = squad.find((p) => p.isViceCaptain === true);
+  return (
+    `완장: 주장 ${captain ? playerName(state, captain.id) : "없음"} · ` +
+    `부주장 ${vice ? playerName(state, vice.id) : "없음"}`
+  );
+}
+
+/**
  * `<standing>` — **지금 우리가 걸어 둔 것 전부**: 6축과 갈래·세트피스 인원·지역 전술·
  * 개인 지시와 역할·완장·세트피스 키커. 경기 장부 노트와 평시의 지시 해석이 같은 블록을
  * 읽는다 — 두 벌이면 "압박 올려"의 지금 값이 한쪽에서 지어내진다 (agents.md §1).
@@ -1537,9 +1557,6 @@ export function buildStandingBlock(
   state: GameState,
   regionalPlans?: NonNullable<GameState["pendingMatch"]>["regionalPlans"],
 ): string[] {
-  const squad = playersOf(state, state.userTeamId);
-  const captain = squad.find((p) => p.isCaptain);
-  const vice = squad.find((p) => p.isViceCaptain === true);
   const takers = tacticsOf(state, state.userTeamId).setPieceTakers ?? {};
   const takerName = (id: string | undefined): string => (id ? playerName(state, id) : "지정 없음");
   /**
@@ -1593,7 +1610,7 @@ export function buildStandingBlock(
           )
           .join(", ")}`
       : `개인 지시·역할: 없음`,
-    `주장: ${captain ? playerName(state, captain.id) : "없음"} · 부주장: ${vice ? playerName(state, vice.id) : "없음"}`,
+    armbandLine(state),
     `세트피스 키커: 코너 ${takerName(takers.corner)} · 프리킥 ${takerName(takers.freeKick)} · 페널티 ${takerName(takers.penalty)}`,
     `</standing>`,
   ];
