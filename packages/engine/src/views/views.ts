@@ -162,6 +162,7 @@ import {
   knowledgeOf,
   observationOf,
   observedFit,
+  arrivedScoutReport,
   observedOverall,
   observedRating,
   knowledgeNote,
@@ -4433,9 +4434,11 @@ export function scoutReportCard(state: GameState, playerId: string): ScoutReport
         };
       }),
     marketValue: marketValueOf(state, p),
+    askingPrice: askingPriceFor(state, p),
     wageExpectation: wageExpectationOf(state, p),
     contractUntil: activeContract(state, p.id)?.until ?? null,
     note: knowledgeNote(state, p.id),
+    verdict: arrivedScoutReport(state, p.id)?.verdict ?? null,
   };
 }
 
@@ -4451,8 +4454,7 @@ export function scoutReportCard(state: GameState, playerId: string): ScoutReport
  */
 export function scoutReportLine(state: GameState, playerId: string): string | null {
   const card = scoutReportCard(state, playerId);
-  const player = playerById(state, playerId);
-  if (!card || !player) return null;
+  if (!card) return null;
   const overall =
     `종합 ${card.overall.value}` +
     (card.overall.margin > 0 ? `±${card.overall.margin}` : "") +
@@ -4465,7 +4467,7 @@ export function scoutReportLine(state: GameState, playerId: string): string | nu
       ? `잠재력 ${card.potential.low.value}~${card.potential.high.value}`
       : "잠재력 미지",
     `시장가 ${formatMoney(card.marketValue)}`,
-    `요구액 ${formatMoney(askingPriceFor(state, player))}`,
+    `요구액 ${formatMoney(card.askingPrice)}`,
     `기대 주급 ${formatMoney(card.wageExpectation)}`,
     ...(card.contractUntil ? [`계약 ${card.contractUntil}까지`] : []),
   ].join(" · ");
@@ -5100,6 +5102,20 @@ export interface PlayerCardView {
   contractUntil: string | null;
   /** 이적 리스트 호가 — 올라 있지 않으면 null */
   transferListed: number | null;
+  /**
+   * **도착한 스카우팅 보고서** — 채팅 카드는 한 번 지나가고 사무실에 스카우팅 화면이
+   * 없으므로, 감독이 값을 되찾는 자리가 여기다 (player.md §9.4-1 · §9.5). 금액은
+   * 채팅 카드와 **같은 자**에서 낸다. 우리 계약에는 서지 않는다 — 데려온 뒤의
+   * 요구액은 그 선수에 대한 사실이 아니다.
+   */
+  scoutReport: {
+    /** 보고서가 도착한 날 */
+    on: string;
+    askingPrice: number;
+    wageExpectation: number;
+    /** 스카우트가 쓴 한 줄 — 판정이 실패했거나 옛 보고서면 null */
+    verdict: string | null;
+  } | null;
 
   /** 지금 부상 (없으면 null) — 공개 기록이라 남의 선수도 그대로 선다 */
   injury: { bodyPart: string; severity: string; expectedReturn: string } | null;
@@ -5139,6 +5155,25 @@ export interface PlayerCardView {
  * `potentialBand` · `observedMarketValue`) — 카드가 제 자를 따로 들면 같은 선수의
  * 종합이 명단과 카드에서 두 숫자로 선다.
  */
+/**
+ * 모달에 서는 보고서 칸 — 조회 도구의 한 줄(`lookup.ts`)과 **같은 자에서** 낸다.
+ * 값이 갈리면 감독이 보는 화면과 GM이 읽는 줄이 두 말을 한다.
+ */
+function scoutReportFacts(
+  state: GameState,
+  p: GamePlayer,
+  knowledge: Knowledge,
+): PlayerCardView["scoutReport"] {
+  const report = knowledge === "own" ? null : arrivedScoutReport(state, p.id);
+  if (!report?.completedOn) return null;
+  return {
+    on: report.completedOn,
+    askingPrice: askingPriceFor(state, p),
+    wageExpectation: wageExpectationOf(state, p),
+    verdict: report.verdict ?? null,
+  };
+}
+
 export function buildPlayerCard(state: GameState, playerId: string): PlayerCardView | null {
   const p = playerById(state, playerId);
   if (!p) return null;
@@ -5187,6 +5222,7 @@ export function buildPlayerCard(state: GameState, playerId: string): PlayerCardV
     weeklyWage: contract?.weeklyWage ?? null,
     contractUntil: contract?.until ?? null,
     transferListed: listingOf(state, p.id)?.askingPrice ?? null,
+    scoutReport: scoutReportFacts(state, p, knowledge),
     injury: injury
       ? {
           bodyPart: injury.bodyPart,
