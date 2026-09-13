@@ -39,6 +39,7 @@ import {
   pushNarrative,
   seasonStatOf,
   squadLevelOf,
+  answerTransferRequest,
   standTransferRequest,
   teamNameIn,
   transferRequestOf,
@@ -626,6 +627,32 @@ function playerFacts(
       sharp: false,
     },
   ];
+}
+
+/**
+ * **요청이 서 있는 선수의 자리에는 그 요청이 맨 앞에 선다** (people.md §8). 그 자리에서
+ * 한 답이 요청의 답이 되므로(`respondToApproach`), 그가 아는 가장 큰 사실이 빠진 채로
+ * 답을 받을 수는 없다. 꼭대기 계단의 자리는 이미 들고 있다 — 두 번 세우지 않는다.
+ */
+function withStandingRequest(state: GameState, scene: Scene | null): Scene | null {
+  if (!scene || scene.about === null) return scene;
+  if (scene.channel !== "player" && scene.channel !== "agent") return scene;
+  if (scene.facts.some((f) => f.kind === "transfer-request")) return scene;
+  const request = transferRequestOf(state, scene.about);
+  if (!request || request.answeredOn !== undefined) return scene;
+  const player = playerById(state, scene.about);
+  if (!player) return scene;
+  const fact: PressFact = {
+    kind: "transfer-request",
+    data: {
+      name: player.name,
+      values: { days: diffDays(request.since, state.date) },
+      tags: [request.reason],
+    },
+    about: player.id,
+    sharp: true,
+  };
+  return { ...scene, facts: [fact, ...scene.facts] };
 }
 
 /** 그 압력 줄이 지금 세울 수 있는 자리 — 사람이 없거나 사실이 사라졌으면 `null` */
@@ -1227,7 +1254,7 @@ function openApproach(state: GameState, digest: TickSink): boolean {
       if (leakToPress(state, row, digest)) return false;
       continue;
     }
-    const scene = sceneFor(state, row, step);
+    const scene = withStandingRequest(state, sceneFor(state, row, step));
     if (!scene) continue;
     // 같은 화자 7일 쿨다운 — 계단이 올랐어도 그 사람은 아직 복도에 있다
     const spokeRecently = opened.some(
@@ -1619,6 +1646,18 @@ export function respondToApproach(
   if (input.mood && inTheRoom && approach.about) {
     applyMoodNotes(state, [{ ...input.mood, playerId: approach.about }], new Set([approach.about]));
   }
+  /**
+   * ── 요청을 든 사람이 온 자리에서 한 답은 **요청의 답이다** ── (transfer.md §1-1)
+   *
+   * 책상에서만 내려간다(`answeredOn`) — 팔지·거부할지는 명령의 결정이고, 값은 위의
+   * 스탠스 표가 이미 치렀다. 돌려보낸 자리는 아무것도 답하지 않는다.
+   */
+  const answeredRequest =
+    stance !== null && inTheRoom && approach.about
+      ? transferRequestOf(state, approach.about)?.answeredOn === undefined
+        ? answerTransferRequest(state, approach.about)
+        : null
+      : null;
   // 다가옴의 스탠스는 판정이 아니라 자르지 않는다 — 그 자리에는 사실 줄만 선다 (career.md §2)
   const subject = approach.about ? userPlayerById(state, approach.about) : null;
   const receptivity = subject ? ` · ${receptivityLine(receptivityOf(state, subject.id))}` : "";
@@ -1671,6 +1710,7 @@ export function respondToApproach(
     message:
       `${approach.speakerId} 응대(${label})${effectSuffix(effect)}${promised ? promised.text : ""}` +
       (countered ? ` · ${countered.message}` : "") +
+      (answeredRequest ? " · 이적 요청 답함" : "") +
       receptivity,
     brief: {
       head: `${approach.speakerId} 응대(${label})`,
@@ -1683,6 +1723,9 @@ export function respondToApproach(
         ]),
         ...(promised ? [promised.item] : []),
         ...(countered ? [item({ label: "흥정", text: countered.message })] : []),
+        ...(answeredRequest
+          ? [item({ label: "이적 요청", text: "답함 — 팔지·거부할지는 market_orders" })]
+          : []),
       ],
     },
   };

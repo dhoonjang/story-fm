@@ -70,6 +70,7 @@ import {
   RENEWAL_YEARS_MAX,
   respondOffer,
   standingDeadlineOf,
+  respondToApproach,
   respondTransferRequest,
   responseDelayDays,
   resolveMedical,
@@ -80,6 +81,7 @@ import {
   teamName,
   teamNameIn,
   tickInterests,
+  openTransferRequests,
   transferRequestOf,
   unilateralSeveranceOf,
   USER_WAGE_HEADROOM,
@@ -1085,6 +1087,59 @@ describe("이적 요청 — 막힌 이적이 세우고 감독이 답한다", () 
     expect(request.pressedOn).toBeUndefined();
     // 감독은 한 번만 답한다
     expect(respondTransferRequest(state, { playerId: player.id, answer: "refuse" }).ok).toBe(false);
+  });
+
+  it("요청을 든 사람이 온 자리에서 한 답이 요청의 답이다 — 책상에서 내려가고 결정은 명령에 남는다", () => {
+    const state = shared;
+    const player = ours(state, 3);
+    state.transferRequests = (state.transferRequests ?? []).filter(
+      (r) => r.gamePlayerId !== player.id,
+    );
+    // 자리를 열지 않는 종류의 요청(bigger-club)이 서 있는데, 그 선수가 다른 일로 온다
+    state.transferRequests.push({
+      gamePlayerId: player.id,
+      since: addDays(state.date, -5),
+      reason: "bigger-club",
+      pressedOn: state.date,
+    });
+    const seat = (id: string) => ({
+      id,
+      date: state.date,
+      channel: "player" as const,
+      topic: "minutes" as const,
+      speakerId: player.name,
+      about: player.id,
+      context: `${player.name} · 출전 시간`,
+      facts: [],
+      step: 2,
+      status: "pending" as const,
+    });
+
+    // ── 돌려보낸 자리는 아무것도 답하지 않는다
+    state.approaches = [seat("approach-minutes-declined")];
+    expect(respondToApproach(state, { decline: true }).ok).toBe(true);
+    expect(transferRequestOf(state, player.id)?.answeredOn).toBeUndefined();
+    expect(openTransferRequests(state).some((r) => r.gamePlayerId === player.id)).toBe(true);
+
+    // ── 스탠스로 답하면 요청도 답한 것이다
+    state.approaches = [seat("approach-minutes-answered")];
+    const answered = respondToApproach(state, { stance: "own" });
+    expect(answered.ok, answered.message).toBe(true);
+    expect(answered.message).toContain("이적 요청 답함");
+    const request = transferRequestOf(state, player.id)!;
+    expect(request.answeredOn).toBe(state.date);
+    expect(request.answer, "팔지·거부할지는 명령의 결정이다").toBeUndefined();
+    expect(request.pressedOn, "답한 사실은 다음 회견이 다시 싣는다").toBeUndefined();
+    expect(
+      openTransferRequests(state).some((r) => r.gamePlayerId === player.id),
+      "책상에서 내려간다 — <alerts>의 ❗ 줄이 여기서 나온다",
+    ).toBe(false);
+
+    // ── 결정은 명령이 한 번 내린다
+    const refused = respondTransferRequest(state, { playerId: player.id, answer: "refuse" });
+    expect(refused.ok, refused.message).toBe(true);
+    expect(transferRequestOf(state, player.id)?.answer).toBe("refuse");
+    expect(respondTransferRequest(state, { playerId: player.id, answer: "accept" }).ok).toBe(false);
   });
 });
 
