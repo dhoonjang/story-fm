@@ -25,6 +25,12 @@ import {
   REPORT_ONBOARDING_TOOL,
 } from "./onboarding-judge";
 import { opsToolDeclaration } from "./orders-ops";
+import {
+  REPORT_SCOUT_DESCRIPTION,
+  REPORT_SCOUT_INPUT,
+  REPORT_SCOUT_TOOL,
+  SCOUT_RATER_SYSTEM,
+} from "./scout-rater";
 import { TACTIC_ORDERS_SPEC } from "./tactic-orders";
 import { TRAINING_ORDERS_SPEC } from "./training-orders";
 import {
@@ -58,7 +64,7 @@ export interface ForcedTool {
 }
 
 /**
- * 강제 선언 여덟 — 해석기 셋과 결산·판정 다섯.
+ * 강제 선언 아홉 — 해석기 셋과 결산·판정 여섯.
  *
  * 해석기의 `ops`가 코어 명령의 도구 스키마를 그대로 물어 오므로(agents.md §1) 명령
  * 스펙 맵이 필요하다 — `buildToolSpecs(state, [])`가 그것이다.
@@ -83,6 +89,13 @@ export function forcedTools(specs: ReadonlyMap<string, GameToolSpec>): readonly 
       name: REPORT_TRAINING_TOOL,
       description: REPORT_TRAINING_DESCRIPTION,
       inputSchema: REPORT_TRAINING_INPUT,
+    },
+    {
+      agent: "scout-rater",
+      system: SCOUT_RATER_SYSTEM,
+      name: REPORT_SCOUT_TOOL,
+      description: REPORT_SCOUT_DESCRIPTION,
+      inputSchema: REPORT_SCOUT_INPUT,
     },
     {
       agent: "onboarding-judge",
