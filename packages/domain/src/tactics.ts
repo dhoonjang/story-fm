@@ -1270,6 +1270,44 @@ export const FORMATION_SLOTS: Record<Formation, string[]> = Object.fromEntries(
   ]),
 ) as Record<Formation, string[]>;
 
+/**
+ * **빈 자리 — 사람이 아니라 자리가 먼저다.**
+ *
+ * 자동으로 열한 명을 채우는 길(시즌 전환의 배치 재구성 · 새로 들어온 선발)은 그동안
+ * 선수의 **주 포지션**을 자리로 삼았다. 그러면 오른쪽 윙어 둘이 남은 여름에 둘 다
+ * `RW`의 기본 좌표에 서고 왼쪽 측면은 아무도 없이 남는다 — 감독이 판에서 하지 않은
+ * 일이고, 이름 붙일 수 있는 모양도 아니다.
+ *
+ * 그래서 자리를 먼저 센다: 프리셋 열한 자리에서 **지금 누가 서 있는 자리**를 걷어내고
+ * 남은 자리를 돌려준다. 부르는 쪽은 그 자리에 맞는 선수를 넣기만 하면 된다.
+ *
+ * 짝짓기는 **가까운 쌍부터** 전역으로 짓는다(거리 오름차순, 같으면 선 순서·자리 순서).
+ * 앞에서부터 각자 제일 가까운 자리를 집게 하면, 먼저 선 선수가 뒤 선수의 유일한 자리를
+ * 가져가 멀쩡한 배치에서도 엉뚱한 자리가 비는 것으로 읽힌다.
+ *
+ * ⚠️ **자리를 만들 뿐 좌우를 펴지는 않는다.** 감독이 직접 옮겨 한쪽으로 몰아 둔 판은
+ * 그대로 두고(의도한 과부하는 지원하는 수다), 무너진 줄을 펴는 손질은 킥오프 직전에
+ * 패킷이 한 번만 한다 (`sim/lineup-cover.ts` — match.md §1.7).
+ */
+export function openSeats(
+  taken: readonly BoardPoint[],
+  formation: Formation = DEFAULT_FORMATION,
+): BoardPoint[] {
+  const seats = FORMATION_LAYOUTS[formation];
+  const pairs = taken.flatMap((p, i) =>
+    seats.map((seat, j) => ({ i, j, d: Math.hypot(seat.x - p.x, seat.y - p.y) })),
+  );
+  pairs.sort((a, b) => a.d - b.d || a.i - b.i || a.j - b.j);
+  const seated = new Set<number>();
+  const claimed = new Set<number>();
+  for (const { i, j } of pairs) {
+    if (seated.has(i) || claimed.has(j)) continue;
+    seated.add(i);
+    claimed.add(j);
+  }
+  return seats.filter((_, j) => !claimed.has(j)).map((seat) => ({ ...seat }));
+}
+
 export const AssignmentRoleSchema = z.enum(["starting", "bench"]);
 export type AssignmentRole = z.infer<typeof AssignmentRoleSchema>;
 
