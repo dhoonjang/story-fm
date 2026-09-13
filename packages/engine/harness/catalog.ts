@@ -152,6 +152,28 @@ export const SEGMENT_SHOTS = defineHarness({
   ],
 });
 
+export const MATCH_STAMINA = defineHarness({
+  id: "match-stamina",
+  what: "풀타임 소모가 구멍 문턱에서 얼마나 떨어져 서는가 — 기본 전술과 고압박",
+  doc: "docs/simulation/match.md §3.2",
+  cost: "구간 시뮬 60경기 · 몇 초",
+  // prettier-ignore
+  bands: [
+    { metric: "기준 — 풀타임 뒤 남은 체력 (지구력 50)", role: "guard", min: 22, max: 27, unit: "score", why: "`GAP_THRESHOLD` 주석이 적어 둔 기준 케이스 — 체력 100·기본 전술·중앙 미드필더는 지구력이 낮아도 풀타임 뒤 24가 남아 문턱 밖(`GAP_CONDITION` 22)에 서야 한다. 아래끝이 그 문턱 자체다" },
+    { metric: "기준 — 풀타임 뒤 남은 체력 (지구력 70)", role: "guard", min: 27, max: 33, unit: "score", why: "같은 주석의 30 — 지구력이 소모에 닿는지는 세 값이 벌어져 있는 것으로 읽는다" },
+    { metric: "기준 — 풀타임 뒤 남은 체력 (지구력 90)", role: "guard", min: 34, max: 40, unit: "score", why: "같은 주석의 37" },
+    { metric: "기준 — 구멍에 걸리는 출발 체력 (지구력 70)", role: "guard", max: 75, unit: "score", why: "같은 주석의 73 — **여기가 위로 오르면 문턱이 판단을 그만둔다.** 로테이션 가드(`ai-fitness`)가 상위 14명의 바닥을 70으로 잡으므로, 이 값이 그 언저리를 넘으면 리그의 선발 대부분이 킥오프 전에 이미 걸려 있는 것이다" },
+    { metric: "기본 — 선발 출발 체력", role: "measure", unit: "score", why: "아래 두 값을 읽는 눈금 — 이 팔은 벤치를 쓰지 않아 열한 명이 90분을 다 뛴다" },
+    { metric: "기본 — 풀타임 뒤 남은 체력", role: "measure", unit: "score", why: "기준 케이스와 나란히 읽는다 — 실제는 점유와 그날의 몫(±12%)이 얹힌다" },
+    { metric: "기본 — 풀타임에 구멍 난 선발 비율", role: "guard", max: 0.15, unit: "ratio", why: "구멍은 다리가 멈춘 한둘을 가리키는 예외여야 하고(`GAP_THRESHOLD` §구멍), 감독이 교체로 답할 수 있는 자리여야 한다. 열한 중 한둘(9~18%)이 그 모양이다" },
+    { metric: "기본 — 구멍이 처음 난 분", role: "measure", unit: "score", why: "아래 고압박 쪽과 나란히 읽는다 — 80분대면 교체로 답할 수 있는 사건이고, 60분 아래로 내려오면 전반에 이미 결정돼 있던 것이다" },
+    { metric: "고압박 — 기준 풀타임 뒤 남은 체력 (지구력 70)", role: "guard", min: 22, unit: "score", why: "**이 하네스의 본론.** 압박·템포·라인을 끝까지 올리는 것은 감독이 가장 먼저 하는 지시이고, `tacticalDrain`(≤1.55)과 `positionalTacticWeight`의 압박 가산이 함께 얹히는 유일한 자리다. 그 판에서도 **체력 100으로 출발한 평범한 중원은 문턱 밖에 서야 한다** — 여기가 22 아래면 지시는 대가를 무는 선택이 아니라 전원을 구멍으로 보내는 스위치이고, 감독은 교체로 답할 수 없다" },
+    { metric: "고압박 — 풀타임 뒤 남은 체력", role: "measure", unit: "score", why: "같은 스쿼드·같은 상대의 기본 전술 값과 나란히 읽는다 — 이 차이가 지시의 체력 대가다" },
+    { metric: "고압박 — 풀타임에 구멍 난 선발 비율", role: "guard", max: 0.35, unit: "ratio", why: "지시의 대가는 있어야 하지만 **전원은 아니다.** 열한 중 서넛까지는 감독이 벤치 다섯으로 답할 수 있는 자리이고, 그 위로는 라인마다 `GAP_PENALTY`가 걸려 전력이 통째로 주저앉는다. 동시에 중계가 「다리가 멈췄다」로 채워져 문장이 뜻을 잃는다" },
+    { metric: "고압박 — 구멍이 처음 난 분", role: "guard", min: 60, unit: "score", why: "교체 카드가 남아 있는 자리에서 나야 지시가 판단이 된다 — 전반에 이미 구멍이 나면 감독은 킥오프 전에 진 것이다" },
+  ],
+});
+
 export const INJURY_RATE = defineHarness({
   id: "injury-rate",
   what: "경기당 부상·카드 — 두 시뮬이 같은 눈금에 서는가 · 성향이 빈도에 닿는 폭 · 위험 등급별 실제 부상률 · 누적 피로가 굴림에 닿는 폭",
@@ -711,6 +733,7 @@ export const HARNESSES: readonly Harness[] = [
   LEAGUE_SPREAD,
   ASSIST_RATE,
   SEGMENT_SHOTS,
+  MATCH_STAMINA,
   INJURY_RATE,
   FINANCE_TIER1,
   FINANCE_LEAGUES,
