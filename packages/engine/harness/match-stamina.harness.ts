@@ -45,7 +45,7 @@ const PIVOT = "CM";
  * **감독이 실제로 내리는 지시** — 압박·템포·라인을 끝까지 올린 판.
  *
  * 기본 전술만 재면 이 게임에서 아무도 서지 않는 자리를 재는 것이다. 「앞에서부터
- * 잡아라」는 감독이 가장 먼저 하는 말이고, `tacticalDrain`의 위끝(1.55)과
+ * 잡아라」는 감독이 가장 먼저 하는 말이고, `tacticalDrain`의 위끝(1.16)과
  * `positionalTacticWeight`의 압박 가산이 **함께** 얹히는 유일한 자리다.
  */
 const HIGH_PRESS: TacticsSpec = {
