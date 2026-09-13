@@ -247,6 +247,9 @@ export async function reportTraining(
           user: buildTrainingPrompt(brief),
           tools: [makeReportTool(state, brief, (r) => (report = r))],
           toolChoice: { name: REPORT_TRAINING_TOOL },
+          // 산출은 이 도구 하나다 — 결과를 돌려주는 두 번째 요청은 같은 입력을
+          // 한 번 더 읽고 아무도 읽지 않는 답을 받아 온다 (models.md §3-4)
+          outputOnly: true,
         });
       }),
     // 이미 반영됐으면 다시 부르지 않는다 — 카드가 비어도(소수로만 움직인 구간)

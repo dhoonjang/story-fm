@@ -506,6 +506,13 @@ export class OpenAiGameLLM implements GameLLM {
           output: outcome.ok ? outcome.message : toolError(outcome.message),
         });
       }
+
+      /**
+       * **산출만 받는 호출은 여기서 닫는다** — 결과는 `input`에만 남기고 모델에게
+       * 돌려주지 않는다 (models.md §3-4). 돌려주면 같은 입력을 정가로 한 번 더 읽고,
+       * 아무도 읽지 않는 응답을 받아 온다.
+       */
+      if (req.outputOnly) break;
     }
 
     // 막혀서 아무것도 못 받은 턴은 실패다 — 나온 것이 있으면 그대로 돌려준다

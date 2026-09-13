@@ -444,9 +444,15 @@ export class GeminiGameLLM implements GameLLM {
         });
       }
 
-      // 마지막 왕복은 `NONE`으로 나가 여기 닿지 않는 것이 정상이다 — 제공자가 그
-      // 모드를 무시하고 함수를 부른 경우에만 결과를 합성 content로 닫고 끝낸다
-      if (lastRound) {
+      /**
+       * 여기서 턴을 닫는 두 자리 — 어느 쪽이든 결과를 합성 content로 남기고 끝낸다.
+       *
+       * - **산출만 받는 호출**(`outputOnly`)은 도구가 불린 순간 답이 완성돼 있다
+       *   (models.md §3-4). 결과를 돌려주면 같은 입력을 정가로 한 번 더 읽는다.
+       * - **마지막 왕복**은 `NONE`으로 나가 여기 닿지 않는 것이 정상이다 — 제공자가 그
+       *   모드를 무시하고 함수를 부른 경우에만 걸린다.
+       */
+      if (req.outputOnly || lastRound) {
         danglingResults = results;
         break;
       }
