@@ -376,7 +376,7 @@
 
 | 무엇                       | 보드            | 언론     | 선수단  |
 | -------------------------- | --------------- | -------- | ------- |
-| 경기 승 / 패 (친선 제외)   | +2 / −2         | —        | +2 / −2 |
+| 경기 승 / 패 (친선 제외)   | +2 / −2         | +2 / −2  | +2 / −2 |
 | 시즌 리뷰 (기대 충족/미달) | +8 / −8         | —        | —       |
 | 시즌 더비 전승 / 전패      | +3 / −3         | —        | —       |
 | 유럽 대항전 우승 / 결승    | +10 / —         | +10 / +4 | —       |
@@ -392,6 +392,12 @@
 (`REPUTATION_MIN` 0 \~ `REPUTATION_MAX` 100, `core/state.ts`) — 호출부가 각자 상한을
 적으면 스키마를 옮긴 날 한쪽만 남는다.
 
+**성적은 세 축 모두에 닿는다** — 한 경기의 승패가 옮기는 값은 축마다 같고, 그 한 줄이
+`matchReputationDelta` 하나다 (`match/match-flow.ts`). 언론 축만 성적을 읽지 못하던
+동안 그 축을 움직이는 것은 회견뿐이었고, 그래서 리그 2위로 시즌을 마친 감독의 언론
+평판이 「뭇매」에 앉았다 — 평판은 세계가 감독을 보는 눈인데, 눈 하나가 순위표를 보지
+않고 있었던 것이다. 유럽·컵 결승만 닿는 표였을 때의 이야기다.
+
 **기자회견이 평판을 움직이는 유일한 판정형 스킬이다** — 대화는 사기만 건드린다.
 폭은 `PRESS_BAND`(4) × 회견 무게(1\~3), 즉 최대 ±12다.
 
@@ -406,6 +412,40 @@
 
 **공짜인 스탠스는 없다.** 무게는 성적 압박(최근 최대 4경기가 전부 무승 — 최소 3경기)이면
 3, 큰 이적이면 2, 그 밖엔 1\~2다. 상세는 [../data/people.md](../data/people.md).
+
+### 스탠스에는 시즌 목줄이 있다 (`STANCE_SEASON_CAP` 20)
+
+회견은 시즌에 마흔 번 넘게 열린다. 대가가 매번 온전히 쌓이면 **말투가 평판을
+독점한다** — 한 스탠스로 일관한 감독은 한 시즌에 언론 −177에 닿고, 그 옆에 서는 것은
+성적 ±2와 시즌 리뷰 ±8뿐이다. 대가가 있어야 한다는 설계와, 그 대가가 성적을 스무 배로
+덮는 눈금은 다른 이야기다.
+
+그래서 **한 시즌 동안 스탠스가 옮긴 평판의 누계에 목줄이 걸린다** — 축마다 따로,
+`STANCE_SEASON_CAP`(20)이다. 상한이 아니라 목줄인 것은 잘라 버리지 않기 때문이다:
+누계가 목줄 끝에 가까울수록 같은 스탠스의 다음 걸음이 짧아진다.
+
+```
+여유  = clamp( 1 − |이번 시즌 누계| / STANCE_SEASON_CAP, 0, 1 )   ← 누계를 더 끌어당길 때만
+변화량 = round( 스탠스 값 × 폭 × 여유 )
+```
+
+- **되돌아오는 걸음에는 목줄이 걸리지 않는다.** 언론 누계가 −17인 감독이 도발하면 그
+  한 걸음은 온전히 선다. 목줄은 쓰고 없어지는 예산이 아니라 **지금 서 있는 자리**라,
+  말을 바꾸면 그만큼 여유가 돌아온다. 예산으로 두면 "이번 시즌 회견은 다 썼다"가 되어
+  남은 서른 번의 회견이 아무 뜻도 갖지 않는다.
+- **닿는 자리는 실제로 목줄보다 조금 안쪽이다** — 걸음이 반올림으로 0이 되는 데서
+  멈추므로, 무게 2의 감싸기(언론 −3.2)는 −17, 보드(−1.6)는 −14, 선수단(+8)은 +19에서
+  선다. 걸음이 큰 축이 목줄 안으로 더 깊이 들어간다.
+- **왜 20인가.** 한 시즌을 한 말투로 일관한 대가가 유럽 우승(+10) 두 번과 같은
+  크기이고, 그 시즌의 성적이 옮기는 값(2위 다툼이면 ±40 남짓)보다는 확실히 작다.
+  말투는 성적을 흔들 수 있어야 하지만 뒤집지는 못해야 한다.
+- **누계는 시즌의 것이다** (`manager.stanceSeason`). 시즌이 바뀌면 0에서 다시 센다 —
+  롤오버가 지우는 것이 아니라 적힌 시즌이 지금 시즌과 다르면 지난 시즌 장부로 읽는다.
+  옛 세이브엔 없다(없으면 0, 세이브 버전 유지).
+- **목줄은 회견만의 것이 아니다.** 다가옴(`approach.ts`)과 이적 요청 답
+  (`negotiation.ts`)도 같은 `applyStanceOutcome`을 지나므로 같은 누계에 실린다 —
+  스탠스 표가 한 벌인 것과 같은 이유다. 반대로 보드 경고(−6)·시즌 리뷰(±8)·대회
+  성적처럼 시즌에 몇 번뿐인 사건은 목줄 밖이다: 반복되지 않는 것은 독점하지 않는다.
 
 평판을 **읽는** 자리는 셋이다 — 영입 협상에서 `(언론+보드)/2`, 재계약에서
 `(언론+선수단)/2`, 설득 논거 `manager_reputation`에서 세 축 평균(60 이상이어야 통한다).
@@ -1544,25 +1584,26 @@ board: {
 
 ## 코드 위치
 
-| 무엇                               | 어디                                                                                               |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------- |
-| 배경 해석·기준선·전문 분야         | `packages/engine/src/world/onboarding.ts`                                                          |
-| 시작 지갑 앵커·판정 한도           | `packages/engine/src/world/onboarding.ts` · `packages/agents/src/onboarding-judge.ts`              |
-| 지갑 입출금·지출 갈래              | `packages/engine/src/club/manager-wallet.ts`                                                       |
-| 능력치·평판·계약·조건 표           | `packages/domain/src/manager.ts`                                                                   |
-| XP·대화 계수·합계 상한             | `packages/engine/src/commands/talk.ts`                                                             |
-| 소화율·`tacticalFit`               | `packages/sim/src/strength-packet.ts`                                                              |
-| 훈련 결산 흡수율·인원 상한         | `packages/engine/src/squad/training-report.ts`                                                     |
-| 키포인트 개수·정밀도               | `packages/sim/src/key-points.ts`                                                                   |
-| 체력 안개 (`ANALYSIS_FLOOR`)       | `packages/engine/src/squad/scouting.ts`                                                            |
-| 딜 확률 기여                       | `packages/engine/src/market/market.ts`                                                             |
-| 기자회견 스탠스·평판 폭            | `packages/engine/src/club/press.ts`                                                                |
-| 다가옴 압력·임계·응답              | `packages/engine/src/club/approach.ts`                                                             |
-| 보드 요청 발생·판정                | `packages/engine/src/club/board-demand.ts` (+ `packages/domain/src/board-demand.ts`)               |
-| 감독의 보드 요청 접수·판정         | `packages/engine/src/club/board-request.ts` (+ `packages/domain/src/board-request.ts`)             |
-| 클럽 비전 — 원형별 항목·진행도     | `packages/engine/src/club/vision.ts`                                                               |
-| 보드 기대·시즌 리뷰·업적           | `packages/engine/src/competition/season.ts`                                                        |
-| 경고·경질·제안·흥정·노크·부임·계약 | `packages/engine/src/market/manager-market.ts`                                                     |
-| 무직의 tick (`managedTeamId`)      | `packages/engine/src/core/tick.ts` · `core/state.ts`                                               |
-| 커리어 기록 타입                   | `packages/domain/src/records.ts`                                                                   |
-| 커리어 뷰·조회 도구                | `packages/engine/src/views/views.ts` · `views/lookup.ts` · `apps/web/components/office/career.tsx` |
+| 무엇                                     | 어디                                                                                               |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 배경 해석·기준선·전문 분야               | `packages/engine/src/world/onboarding.ts`                                                          |
+| 시작 지갑 앵커·판정 한도                 | `packages/engine/src/world/onboarding.ts` · `packages/agents/src/onboarding-judge.ts`              |
+| 지갑 입출금·지출 갈래                    | `packages/engine/src/club/manager-wallet.ts`                                                       |
+| 능력치·평판·계약·조건 표                 | `packages/domain/src/manager.ts`                                                                   |
+| XP·대화 계수·합계 상한                   | `packages/engine/src/commands/talk.ts`                                                             |
+| 소화율·`tacticalFit`                     | `packages/sim/src/strength-packet.ts`                                                              |
+| 훈련 결산 흡수율·인원 상한               | `packages/engine/src/squad/training-report.ts`                                                     |
+| 키포인트 개수·정밀도                     | `packages/sim/src/key-points.ts`                                                                   |
+| 체력 안개 (`ANALYSIS_FLOOR`)             | `packages/engine/src/squad/scouting.ts`                                                            |
+| 딜 확률 기여                             | `packages/engine/src/market/market.ts`                                                             |
+| 기자회견 스탠스·평판 폭·시즌 목줄        | `packages/engine/src/club/press.ts`                                                                |
+| 경기 승/패 평판 (`matchReputationDelta`) | `packages/engine/src/match/match-flow.ts`                                                          |
+| 다가옴 압력·임계·응답                    | `packages/engine/src/club/approach.ts`                                                             |
+| 보드 요청 발생·판정                      | `packages/engine/src/club/board-demand.ts` (+ `packages/domain/src/board-demand.ts`)               |
+| 감독의 보드 요청 접수·판정               | `packages/engine/src/club/board-request.ts` (+ `packages/domain/src/board-request.ts`)             |
+| 클럽 비전 — 원형별 항목·진행도           | `packages/engine/src/club/vision.ts`                                                               |
+| 보드 기대·시즌 리뷰·업적                 | `packages/engine/src/competition/season.ts`                                                        |
+| 경고·경질·제안·흥정·노크·부임·계약       | `packages/engine/src/market/manager-market.ts`                                                     |
+| 무직의 tick (`managedTeamId`)            | `packages/engine/src/core/tick.ts` · `core/state.ts`                                               |
+| 커리어 기록 타입                         | `packages/domain/src/records.ts`                                                                   |
+| 커리어 뷰·조회 도구                      | `packages/engine/src/views/views.ts` · `views/lookup.ts` · `apps/web/components/office/career.tsx` |

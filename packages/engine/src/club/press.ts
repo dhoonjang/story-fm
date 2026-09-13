@@ -15,6 +15,7 @@ import type {
   PressStance,
   PressTrigger,
   RivalVoice,
+  StanceSeason,
   TickSink,
 } from "@story-fm/domain";
 import {
@@ -101,6 +102,51 @@ const KEPT_CONFERENCES = 20;
 
 /** 회견 하나가 옮길 수 있는 기본 폭 — `weight`(1~3)에 비례한다 (overview §7) */
 export const PRESS_BAND = 4;
+
+/**
+ * **한 시즌 동안 스탠스가 옮길 수 있는 평판 누계의 목줄** — 축마다 따로다
+ * (career.md §4 「스탠스에는 시즌 목줄이 있다」).
+ *
+ * 회견은 시즌에 마흔 번 넘게 열린다. 대가가 매번 온전히 쌓이면 **말투가 평판을
+ * 독점한다** — 한 스탠스로 일관한 감독은 한 시즌에 언론 −177에 닿고, 그 옆에 서는
+ * 것은 성적 ±2와 시즌 리뷰 ±8뿐이다. 스탠스에 대가가 있는 것은 설계지만, 그 대가가
+ * 성적을 스무 배로 덮는 눈금은 다른 이야기다.
+ *
+ * 20인 이유는 눈금이다 — 한 시즌을 한 말투로 일관한 대가가 유럽 우승(+10) 두 번과
+ * 같은 크기이고, 그 시즌의 성적이 옮기는 값(2위 다툼이면 ±40 남짓)보다는 확실히
+ * 작다. 말투는 성적을 흔들 수 있어야 하지만 뒤집지는 못해야 한다.
+ */
+export const STANCE_SEASON_CAP = 20;
+
+/** 목줄이 세는 축 — 평판 3축뿐이다. 사기는 매일 풀리므로 누적하지 않는다 */
+type LeashedAxis = "board" | "media" | "squad";
+
+/**
+ * 이번 시즌 누계 — 적힌 시즌이 지금과 다르면 지난 시즌 장부라 0에서 다시 센다.
+ * 롤오버가 지울 것이 없는 것이 요점이다: 시즌을 건너뛰는 경로가 하나라도 있으면
+ * 지우는 쪽은 언젠가 새는데, 적힌 시즌을 읽는 쪽은 새지 않는다.
+ */
+function stanceSeasonOf(state: GameState): StanceSeason {
+  const kept = state.manager.stanceSeason;
+  if (kept && kept.season === state.season) return kept;
+  const fresh: StanceSeason = { season: state.season, board: 0, media: 0, squad: 0 };
+  state.manager.stanceSeason = fresh;
+  return fresh;
+}
+
+/**
+ * 목줄이 남긴 여유 — **끌어당기는 걸음에만 걸린다.**
+ *
+ * 누계가 목줄 끝에 가까울수록 같은 방향의 다음 걸음이 짧아지고, 되돌아오는 걸음은
+ * 온전히 선다. 목줄이 쓰고 없어지는 예산이면 "이번 시즌 회견은 다 썼다"가 되어 남은
+ * 서른 번의 회견이 아무 뜻도 갖지 않는다 — 지금 서 있는 자리라야 말을 바꾼 만큼
+ * 여유가 돌아온다.
+ */
+function leashRoom(accumulated: number, raw: number): number {
+  if (raw === 0 || accumulated === 0) return 1;
+  if (Math.sign(raw) !== Math.sign(accumulated)) return 1;
+  return Math.max(0, Math.min(1, 1 - Math.abs(accumulated) / STANCE_SEASON_CAP));
+}
 
 /**
  * 스탠스별 방향 — 평판 3축과 사기.
@@ -1984,9 +2030,23 @@ export function applyStanceOutcome(
   const band = input.band;
   const lead = leadershipFactor(state);
 
-  const board = Math.round(on("board") * band);
-  const media = Math.round(on("media") * band);
-  const squad = Math.round(on("squad") * band);
+  /**
+   * 평판 3축은 **시즌 목줄을 지난다** (career.md §4). 사기(팀·지목·상대)는 지나지
+   * 않는다 — 매일 풀리는 값이라 누적이 독점을 만들지 않는다.
+   *
+   * 누계에 더하는 것은 **실제로 옮긴 정수**다. 반올림 전 값을 쌓으면 장부가 화면과
+   * 갈리고, 걸음이 0으로 반올림된 뒤에도 목줄이 계속 조여진다.
+   */
+  const season = stanceSeasonOf(state);
+  const stepOf = (axis: LeashedAxis) => {
+    const raw = on(axis) * band;
+    const step = Math.round(raw * leashRoom(season[axis], raw));
+    season[axis] += step;
+    return step;
+  };
+  const board = stepOf("board");
+  const media = stepOf("media");
+  const squad = stepOf("squad");
   const rep = state.manager.reputation;
   rep.board = clampRep(rep.board + board);
   rep.media = clampRep(rep.media + media);
