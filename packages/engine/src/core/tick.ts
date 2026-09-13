@@ -1105,7 +1105,9 @@ function loanDigestLine(state: GameState, report: LoanReport): string {
     report.reserveApps > 0 ? `2군 ${report.reserveApps}경기` : null,
     report.growth > 0 ? `능력치 +${report.growth}` : null,
     // 근거 코드는 코드가 아니라 그것이 **뜻하는 사실**로 적는다 (departures.ts `LoanConcern`)
-    report.concerns.includes("no-minutes") ? `최근 ${report.benchRun}경기 명단 밖` : null,
+    // 세는 것은 **못 뛴 경기 수**다 — 빌린 구단의 벤치는 우리 장부에 없어 자리를
+    // 말할 수 없다 (people.md §7 · `benchRunOf`)
+    report.concerns.includes("no-minutes") ? `최근 ${report.benchRun}경기 출전 0` : null,
     report.injury ? `부상 ${report.injury.bodyPart}~${report.injury.expectedReturn}` : null,
   ].filter((x): x is string => x !== null);
   return `임대 리포트 · ${report.name} (${teamNameIn(state, report.teamId)}) ${record}${
@@ -1325,7 +1327,7 @@ function loanFirstThen(
 }
 
 /**
- * **연속 미출전 상한** — 그 구단 1군 경기 `LOAN_REST_LIMIT`회 연속 명단 밖이던 임대
+ * **연속 미출전 상한** — 그 구단 1군 경기 `LOAN_REST_LIMIT`회 연속 못 뛴 임대
  * 자원을 선발에 세운다 (season.md §2 임대).
  *
  * 자리는 **같은 포지션군에서 가장 약한 선발**의 것이고, 그와의 기량 차가
@@ -1637,6 +1639,17 @@ export function simulateOtherMatches(state: GameState, digest: TickSink): void {
       homeOnPitch: finished("home"),
       awayOnPitch: finished("away"),
       /**
+       * **벤치는 우리 경기에만 적는다** (schedule.ts `homeBench` · people.md §7).
+       * 여기로 오는 우리 경기는 무직일 때의 옛 구단 경기뿐이지만, 조건을 팀으로
+       * 두면 감독이 돌아왔을 때 같은 칸이 끊기지 않는다.
+       */
+      ...(match.homeTeamId === state.userTeamId || match.awayTeamId === state.userTeamId
+        ? {
+            homeBench: (squads.home.bench ?? []).map((p) => p.id),
+            awayBench: (squads.away.bench ?? []).map((p) => p.id),
+          }
+        : {}),
+      /**
        * 점유는 **결과에 남는다** — 간이 시뮬이 구간마다 가중해 이미 내놓은 값이고
        * (바로 아래 체력 정산이 그 값을 읽는다) 여기서 버리면 우리 경기에만 있는
        * 칸이 된다. 사건·선수별 기록과 달리 장부 없이도 나오는 값이다 (match.md §4).
@@ -1911,6 +1924,9 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
     awayStarters: squads.away.starters.map((p) => p.id),
     homeOnPitch: squads.home.starters.map((p) => p.id),
     awayOnPitch: squads.away.starters.map((p) => p.id),
+    // 벤치 없이 굴린 경기다 — 빈 목록도 사실이라 적는다 (schedule.ts `homeBench`)
+    homeBench: [],
+    awayBench: [],
     possession: result.possession,
   };
   journal({
