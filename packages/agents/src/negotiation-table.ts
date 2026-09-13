@@ -201,6 +201,10 @@ export async function runTableReply(
             user,
             tools: [makeReplyTool((value) => (reply = value))],
             toolChoice: { name: REPLY_TOOL },
+            // 산출은 이 도구 하나다 — 상대의 대사까지 인자로 오므로 도구 뒤의 문장을
+            // 읽는 자리가 없다. 결과를 돌려주는 두 번째 요청은 같은 입력을 한 번 더
+            // 읽고 아무도 읽지 않는 답을 받아 온다 (models.md §3-4)
+            outputOnly: true,
           });
         }),
       () => reply !== null,
