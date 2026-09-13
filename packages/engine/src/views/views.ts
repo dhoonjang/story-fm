@@ -32,7 +32,9 @@ import type {
 import {
   BOARD_CONDITION_LABEL,
   BOARD_REQUEST_LABEL,
+  DIRECTIVE_INTENSITY_KO,
   PHASE_END,
+  PLAYER_DIRECTIVE_KO,
   SET_PIECE_ROLES,
   SET_PIECE_ROUTINE_KEYS,
   STAFF_ROLES,
@@ -143,6 +145,7 @@ import { squadRatingsOf } from "../squad/depth";
 import { leaderGroupOf } from "../squad/hierarchy";
 import { ratingTone, type RatingTone } from "../match/ratings";
 import { buildOpponentReport, type AbsentReason } from "../match/preview";
+import { DIRECTIVE_DROP_KO, directiveStandingOf } from "../match/directive-standing";
 import {
   GAP_CONDITION,
   edgeOf,
@@ -1658,6 +1661,29 @@ export interface MatchView {
    */
   exploiting: string[];
   /**
+   * **개인 지시의 지금** — 걸린 것과 닿지 않은 것을 사유까지 갈라 세운다
+   * (match.md §2·§8). 노트 줄에 섞어 두면 걸린 지시와 버려진 지시가 같은 생김새로
+   * 서서, 감독은 넷을 다 걸린 것으로 읽고 다음 판단을 그 위에 쌓는다.
+   *
+   * 쓴 자리와 한도까지 코어가 세어 넘긴다 — 화면이 한도를 다시 적어 두면 코어가
+   * 셋을 넷으로 바꾼 날 화면만 셋으로 남는다.
+   */
+  directives: {
+    used: number;
+    limit: number;
+    rows: {
+      player: string;
+      /** 갈래 + 세기 — 보통 세기는 적지 않는다 */
+      kind: string;
+      /** 겨냥한 상대 — 겨냥하지 않는 갈래는 `null` */
+      target: string | null;
+      /** 지금 판에 닿고 있는가 */
+      live: boolean;
+      /** 닿지 않은 까닭 한 줄 — 걸린 지시는 `null` */
+      why: string | null;
+    }[];
+  };
+  /**
    * 양팀 전술 6축 + 소화율. `shift`는 그 팀 벤치가 **이 경기에서 마지막으로 판을
    * 옮긴 정지점** — 장부의 `tactical_shift` 사건에서 파생한다 (match.md §4·§8).
    */
@@ -2381,6 +2407,29 @@ function strengthPairOf(
   return home === null || away === null ? null : { home, away };
 }
 
+/**
+ * 판세 탭의 「개인 지시」 칸 — **판정은 코어의 것**(`directiveStandingOf`)이고
+ * 여기는 이름과 낱말로 옮긴다 (match.md §8). 화면이 세 자리를 다시 세면, 코어가
+ * 밀어낸 지시를 화면만 걸린 것으로 그린다.
+ */
+function directiveRowsOf(state: GameState): MatchView["directives"] {
+  const slots = directiveStandingOf(state, state.userTeamId);
+  return {
+    used: slots.used,
+    limit: slots.limit,
+    rows: slots.rows.map((d) => ({
+      player: playerName(state, d.playerId),
+      kind:
+        PLAYER_DIRECTIVE_KO[d.kind] +
+        // 세기는 보통이 아닐 때만 — 기본값을 매번 적으면 그게 선택으로 읽힌다
+        (d.intensity && d.intensity !== "normal" ? ` ${DIRECTIVE_INTENSITY_KO[d.intensity]}` : ""),
+      target: d.targetId ? playerName(state, d.targetId) : null,
+      live: d.taken,
+      why: d.code ? DIRECTIVE_DROP_KO[d.code] : null,
+    })),
+  };
+}
+
 function buildMatchView(state: GameState): MatchView | null {
   const pending = state.pendingMatch;
   if (!pending || state.phase !== "match") return null;
@@ -2642,6 +2691,7 @@ function buildMatchView(state: GameState): MatchView | null {
       .map((id) => packet.targets.find((t) => t.id === id))
       .filter((t): t is NonNullable<typeof t> => t !== undefined)
       .map((t) => packetTagText(t.tag, tagCtx)),
+    directives: directiveRowsOf(state),
     tactics: {
       home: tacticsOfSide(match.homeTeamId, packet.home.tactical),
       away: tacticsOfSide(match.awayTeamId, packet.away.tactical),

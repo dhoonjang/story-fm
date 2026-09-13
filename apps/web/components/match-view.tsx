@@ -52,6 +52,7 @@ export function MatchOverview({ match }: { match: Match }) {
       <ZoneBars match={match} />
       <KeyPoints points={match.keyPoints} />
       <TacticOrders exploiting={match.exploiting} notes={match.tactics[ours].notes} />
+      <Directives directives={match.directives} />
     </div>
   );
 }
@@ -535,6 +536,41 @@ function TacticOrders({ exploiting, notes }: { exploiting: string[]; notes: stri
       {notes.map((note, i) => (
         <div className="mv-note" key={i}>
           {note}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 개인 지시 — **걸린 것과 닿지 않은 것이 갈려 선다** (match.md §8).
+ *
+ * 공략과 같은 자리의 물음("내가 시킨 것이 지금 걸려 있나")인데 답이 둘로 갈린다:
+ * 한 경기에 걸리는 지시는 셋까지라 감독이 내린 넷째는 판에 닿지 않는다. 노트 줄에
+ * 섞어 두면 걸린 지시와 밀려난 지시가 같은 생김새로 서서, 감독은 넷을 다 걸린
+ * 것으로 읽고 다음 판단을 그 위에 쌓는다.
+ *
+ * 쓴 자리(`2/3`)도 까닭도 코어가 센 값이다 — 화면은 한도를 갖지 않는다.
+ */
+function Directives({ directives }: { directives: Match["directives"] }) {
+  if (directives.rows.length === 0) return null;
+  return (
+    <div className="mv-directives" data-testid="match-directives">
+      <div className="mv-dir-head">
+        <b>개인 지시</b>
+        <span>
+          {directives.used}/{directives.limit}
+        </span>
+      </div>
+      {directives.rows.map((d, i) => (
+        <div className={`mv-dir${d.live ? " live" : ""}`} key={i}>
+          <span className="mv-dir-who">{d.player}</span>
+          <span className="mv-dir-kind">
+            {d.kind}
+            {d.target ? ` → ${d.target}` : ""}
+          </span>
+          {/* 닿지 않은 까닭 — 걸린 지시에는 설 자리가 없다 */}
+          {d.why && <span className="mv-dir-why">{d.why}</span>}
         </div>
       ))}
     </div>

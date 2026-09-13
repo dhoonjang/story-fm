@@ -62,7 +62,7 @@ import {
   tacticToggleWord,
   withCurrentDrilled,
 } from "@story-fm/domain";
-import { DIRECTIVE_TUNING } from "@story-fm/sim";
+import { directiveStandingOf, nextDirectiveOrder } from "../match/directive-standing";
 import { settleRoleCost, shelveFamiliarity, unshelveFamiliarity } from "./familiarity-memory";
 import { recallRole, rememberRole } from "./role-memory";
 import { diffLineup, type LineupSide, type LineupSlotRef } from "./lineup-diff";
@@ -2040,6 +2040,12 @@ export function setPlayerInstruction(
       kind: input.kind,
       ...(target ? { targetId: target.id } : {}),
       ...(input.intensity ? { intensity: input.intensity } : {}),
+      /**
+       * **방금 내린 지시가 가장 최근이다** — 자리를 다투면 이긴다 (match.md §2
+       * 밀어내기). 차례를 적지 않으면 자리는 배치 순서가 나누고, 판을 읽고 내린
+       * 후반의 지시가 킥오프 전에 세워 둔 지시에게 진다.
+       */
+      order: nextDirectiveOrder(userTactics(state).assignments),
     };
   }
 
@@ -2074,33 +2080,47 @@ export function setPlayerInstruction(
       : "";
   const kindKo = `${PLAYER_DIRECTIVE_KO[input.kind]}${intensityKo}`;
   /**
-   * **`kind`가 있어도 판에 닿지 않는 두 갈래** — 그것도 말해야 한다.
+   * **`kind`가 있어도 판에 닿지 않는 갈래가 있다** — 그것도 말해야 한다.
    *
-   * 시뮬로 가는 것은 그라운드 위 선수의 지시뿐이고(`directivesOnPitch`) 그중에서도
-   * 앞선 `MAX_EFFECTIVE`개까지다(`applyDirectives`). 저장은 되니 **거절이 아니라
-   * 고지다** — 교체로 들어가거나 다른 지시를 거두면 그대로 걸린다. 조용히 버리면
-   * `kind` 없는 지시를 성공으로 답하던 것과 같은 거짓 성공이 된다.
+   * 판정은 `directiveStandingOf` 하나가 하고(match.md §2) 여기는 그 답을 문장으로
+   * 옮긴다. 저장은 되니 **거절이 아니라 고지다** — 교체로 들어가거나 다시 내리면
+   * 그대로 걸린다. 조용히 버리면 `kind` 없는 지시를 성공으로 답하던 것과 같은
+   * 거짓 성공이 된다.
    */
-  const withDirective = userTactics(state).assignments.filter(
-    (a) => a.role === "starting" && a.directive,
-  );
-  const order = withDirective.findIndex((a) => a.playerId === player.id);
+  const slots = directiveStandingOf(state, state.userTeamId);
+  const mine = slots.rows.find((d) => d.playerId === player.id);
   const unreached =
-    assignment.role !== "starting"
-      ? { text: "벤치", why: "벤치라 지금은 판에 닿지 않습니다 — 교체로 들어가면 걸립니다" }
-      : order >= DIRECTIVE_TUNING.MAX_EFFECTIVE
-        ? {
-            text: `지시 ${order + 1}번째`,
-            why:
-              `이미 지시 ${DIRECTIVE_TUNING.MAX_EFFECTIVE}개가 걸려 판에 닿지 않습니다 — ` +
-              `하나를 거두면 걸립니다`,
-          }
-        : null;
+    mine === undefined || mine.taken
+      ? null
+      : mine.code === "off-pitch"
+        ? { text: "벤치", why: "벤치라 지금은 판에 닿지 않습니다 — 교체로 들어가면 걸립니다" }
+        : mine.code === "gone-target"
+          ? {
+              text: "표적 없음",
+              why: "겨냥한 상대가 그라운드에 없어 걸리지 않습니다 — 다른 상대를 겨냥하세요",
+            }
+          : {
+              text: `지시 ${slots.used}/${slots.limit}`,
+              why: `이미 지시 ${slots.limit}개가 걸려 판에 닿지 않습니다`,
+            };
+  /**
+   * **밀려난 지시는 그 자리에서 이름으로 말한다.** 새 지시가 자리를 가져왔다는 것은
+   * 다른 지시 하나가 판에서 내려왔다는 뜻이고, 그 사실을 알려 주지 않으면 감독은
+   * 자기가 아까 내린 지시가 아직 걸려 있는 줄 알고 다음 판단을 그 위에 쌓는다.
+   */
+  const pushedOut = slots.rows
+    .filter((d) => !d.taken && d.code === "overflow" && d.playerId !== player.id)
+    .map((d) => `${playerName(state, d.playerId)}(${PLAYER_DIRECTIVE_KO[d.kind]})`);
+  const pushed =
+    unreached === null && pushedOut.length > 0
+      ? `지시 ${slots.used}/${slots.limit} — 밀려난 지시: ${pushedOut.join(" · ")} ` +
+        `(다시 내리면 그 자리를 가져옵니다)`
+      : null;
   return {
     ok: true,
     message:
       `${player.name} 개인 지시 — "${input.note}" [${kindKo}${targetNote}]` +
-      (unreached ? ` · ${unreached.why}` : ""),
+      (unreached ? ` · ${unreached.why}` : pushed ? ` · ${pushed}` : ""),
     /**
      * 항목에는 **지시의 갈래와 대상만** 싣는다. `note`는 감독의 말 그대로라
      * 길이에 상한이 없다 — 그 문장은 `message`를 타고 장면으로 간다.
@@ -2113,6 +2133,14 @@ export function setPlayerInstruction(
           ...(target ? { note: `겨냥 ${target.name}` } : {}),
         }),
         ...(unreached ? [item({ text: unreached.text, note: "판에 반영되지 않음" })] : []),
+        ...(pushed
+          ? [
+              item({
+                text: `${slots.used}/${slots.limit}`,
+                note: `${pushedOut.join(" · ")} 밀려남`,
+              }),
+            ]
+          : []),
       ],
     },
   };
