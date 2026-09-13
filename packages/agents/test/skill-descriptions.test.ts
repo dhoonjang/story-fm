@@ -148,8 +148,13 @@ describe("규칙이 사는 자리", () => {
      * 해석기는 다르다: **자기가 채울 명령의 이름은 적어야 한다**(`ops`의 열쇠다).
      * 그래서 여기서 막는 것은 «그 해석기가 부를 수 없는 이름»뿐이다 — 적혀 있으면
      * 모델은 낼 수 없는 자리를 배운다.
+     *
+     * **코어 명령의 이름도 센다.** GM은 `accept_deal`·`send_offer`를 도구로 갖지
+     * 않고 `market_orders`에 감독의 말을 넘길 뿐이다 — 코어의 결과 줄이 그 이름으로
+     * 다음에 할 일을 적으므로(`describePending`) 규칙을 적는 자리에도 같은 이름을
+     * 적고 싶어지는데, 그러면 GM이 부를 수 없는 도구를 아는 것이 된다.
      */
-    for (const name of SKILL_NAMES) {
+    for (const name of [...SKILL_NAMES, ...CORE_COMMANDS]) {
       expect(mentions(GM_SYSTEM, name), `GM_SYSTEM: ${name}`).toBe(false);
       if (TACTIC_OPS.includes(name)) continue;
       expect(mentions(TACTIC_ORDERS_SYSTEM, name), `TACTIC_ORDERS_SYSTEM: ${name}`).toBe(false);
