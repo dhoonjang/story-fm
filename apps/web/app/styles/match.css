@@ -358,20 +358,18 @@ button.mv-marker:focus-visible {
   outline-offset: -1px;
 }
 /**
- * 기대 득점 — **판세의 결론.** 아홉 칸이 말하는 것이 결국 몇 대 몇으로 끝날
- * 판인가이므로, 격자 아래 각주가 아니라 그 위에 큰 숫자로 선다.
+ * 쌓인 xG의 머리 — **아홉 칸이 말하는 판이 지금까지 무엇을 만들었나.** 격자 아래
+ * 각주가 아니라 그 위에 큰 숫자로 서고, 라벨과 아래 계단선 사이에는 선을 두지
+ * 않는다 — 헤어라인은 블록(`.mv-xg-race`) 아래 한 줄이다.
  */
 .mv-xg {
   display: flex;
   align-items: baseline;
   justify-content: center;
   gap: 10px;
-  margin-bottom: 12px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
 }
-.mv-xg-label,
-.mv-xg-side {
+.mv-xg-label {
   font-size: var(--fs-xs);
   color: var(--text-3);
 }
@@ -386,10 +384,6 @@ button.mv-marker:focus-visible {
   line-height: var(--lh-fig);
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
-}
-/* 앞선 쪽만 밝힌다 — 둘 다 밝으면 어느 쪽이 큰지 다시 세어야 한다 */
-.mv-xg-score b.lead {
-  color: var(--text);
 }
 .mv-xg-score i {
   font-size: var(--fs-md);
@@ -872,21 +866,15 @@ button.pitch-slot.theirs {
 }
 
 /**
- * 누적 xG 계단선 — **기대 득점 두 숫자 아래, 격자 위** (match.md §8).
+ * 누적 xG 계단선 — **격자 위, 판세의 머리** (match.md §8).
  *
- * 머리의 숫자는 90분의 투영이고 이 선은 실제로 만든 장면의 누적이라, 같은 0–1이
- * 어떻게 만들어진 0–1인지가 여기서 갈린다. 두 줄이 같은 꼴(`mv-xg`)을 쓰되 라벨과
- * 그것이 가리키는 그림 사이에는 선을 두지 않는다 — 헤어라인은 블록 아래 한 줄이다.
+ * 끝값 두 숫자는 지금까지의 합이고 이 선은 그 합의 시간이라, 같은 0–1이 어떻게
+ * 만들어진 0–1인지가 여기서 갈린다.
  */
 .mv-xg-race {
   margin-bottom: 12px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--line);
-}
-.mv-xg-race .mv-xg {
-  margin-bottom: 4px;
-  padding-bottom: 0;
-  border-bottom: none;
 }
 /**
  * 끝값 두 숫자가 곧 범례다 — 아래 두 선과 **같은 두 잉크**로 선다. 구단 색은 이 판에서

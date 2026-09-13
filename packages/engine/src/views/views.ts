@@ -1614,10 +1614,12 @@ export interface MatchView {
     /** 우리 골인가 — 색으로 가른다 */
     ours: boolean;
   }[];
-  /** 90분 기대 득점 — 지금 판세의 요약 숫자 */
-  expectedGoals: { home: number; away: number };
   /**
-   * **누적 xG의 계단선** — 요약 숫자 둘이 못 말하는 「언제 기울었나」 (match.md §8).
+   * **누적 xG의 계단선** — 90분 안에서 감독이 읽는 유일한 xG (match.md §8).
+   *
+   * 패킷의 90분 투영(`guide.expectedGoals`)은 뷰에 싣지 않는다 — 예보와 누적은
+   * 성질이 달라 한 화면에 나란히 서면 어느 쪽이 이 경기의 사실인지 매번 다시
+   * 가려야 한다. 투영은 코어가 슛을 굴리는 원본이지 감독이 읽는 숫자가 아니다.
    *
    * 슛 하나마다 한 점이고 값은 그 시각까지의 **누적**이다. 장부의 슛·골 사건이 이미
    * 그 장면의 xG를 싣고 있어(§4) 여기서 시간순으로 접기만 한다 — 구간마다 배열을
@@ -2612,7 +2614,6 @@ function buildMatchView(state: GameState): MatchView | null {
           ours: teamId === state.userTeamId,
         };
       }),
-    expectedGoals: { ...packet.guide.expectedGoals },
     xgTimeline: xgTimelineOf(ledger.events),
     /**
      * 자리는 홈 기준 그대로 두고 **값만 우리 편으로 접는다.**

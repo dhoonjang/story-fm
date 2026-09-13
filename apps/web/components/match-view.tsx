@@ -316,14 +316,17 @@ function placeBothSides(match: Match): {
  * (sim `zone-grid.ts`) — 화면에만 있고 결과에 닿지 않는 숫자는 감독을 속인다.
  */
 /**
- * 누적 xG 계단선 — **머리의 두 숫자가 못 말하는 「언제 기울었나」**
+ * 누적 xG 계단선 — **판세의 머리.** 지금까지 실제로 만든 장면이 얼마인가
  * (docs/simulation/match.md §8).
  *
- * 기대 득점은 90분의 투영이고 이 선은 **실제로 만든 장면**의 누적이라, 같은 0–1이
- * 「막판까지 밀어붙였는데 안 들어간 경기」인지 「전반에 다 내주고 후반에만 살아난
- * 경기」인지가 여기서 갈린다. 선의 평평한 구간이 곧 아무 일도 없던 시간이다.
+ * 패킷의 90분 투영(`guide.expectedGoals`)은 이 판에 서지 않는다 — 예보는 전술을
+ * 따라 오르내리고 누적은 내려가지 않아, 나란히 두면 감독이 볼 때마다 어느 쪽이 이
+ * 경기의 사실인지 다시 가려야 한다. 끝값 두 숫자는 지금까지의 합이고 선이 그 합의
+ * 시간이라, 같은 0–1이 「막판까지 밀어붙였는데 안 들어간 경기」인지 「전반에 다
+ * 내주고 후반에만 살아난 경기」인지가 여기서 갈린다. 선의 평평한 구간이 곧 아무 일도
+ * 없던 시간이다.
  *
- * 색은 스코어보드와 같은 구단색이라 범례를 세우지 않는다. 다만 **색만으로 말하지
+ * 선의 잉크 둘이 곧 범례라 범례를 따로 세우지 않는다. 다만 **색만으로 말하지
  * 않는다** — 선 끝의 두 숫자와 `aria-label`이 같은 사실을 글자로 다시 적는다.
  */
 function XgRaceLine({ match }: { match: Match }) {
@@ -373,19 +376,6 @@ function ZoneBars({ match }: { match: Match }) {
   const zoneOf = (band: string) => match.zones.find((z) => z.zone === band);
   return (
     <div className="mv-zones" data-testid="match-zones">
-      {/* 기대 득점 — 판세의 결론이라 판 위에 크게 선다. 순서는 스코어와 같은 홈 : 원정 */}
-      <div className="mv-xg">
-        <span className="mv-xg-label">기대 득점</span>
-        <span className="mv-xg-score">
-          <b className={match.expectedGoals.home >= match.expectedGoals.away ? "lead" : ""}>
-            {match.expectedGoals.home.toFixed(2)}
-          </b>
-          <i>:</i>
-          <b className={match.expectedGoals.away > match.expectedGoals.home ? "lead" : ""}>
-            {match.expectedGoals.away.toFixed(2)}
-          </b>
-        </span>
-      </div>
       <XgRaceLine match={match} />
       <div className="mv-pitch">
         {/* 줄 이름과 그 줄의 우열 — 격자를 읽는 눈금이라 그림 쪽이다 */}
