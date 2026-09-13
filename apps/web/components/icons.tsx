@@ -466,6 +466,23 @@ export function IconClose({ size = 14 }: IconProps) {
   );
 }
 
+/**
+ * 도움말 — **테두리 원 안의 물음표.**
+ *
+ * `?` 글자를 그대로 쓰면 폰트마다 굽이가 달라 라벨 옆에서 혼자 튄다(닫기의 `✕`와
+ * 같은 이유). 획은 다른 아이콘과 같은 1.7이고, 점은 `strokeLinecap="round"`가
+ * 내는 둥근 끝 하나다 — 작게 그린 원은 15px에서 뭉갠다.
+ */
+export function IconHelp({ size = 15 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <circle cx="12" cy="12" r="8.4" />
+      <path d="M9.56 9.48a2.52 2.52 0 0 1 4.9.84c0 1.68-2.52 2.52-2.52 2.52" />
+      <path d="M12 16.2h.01" />
+    </svg>
+  );
+}
+
 /** 오른쪽 화살표 — 들어간 것(input)·이동의 방향 */
 export function IconArrowRight({ size = 14 }: IconProps) {
   return (
