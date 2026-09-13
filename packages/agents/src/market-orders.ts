@@ -35,8 +35,8 @@ export const MARKET_ORDERS_SYSTEM = `당신은 감독의 말을 이적·재정 �
 
 # 명령
 - send_offer — 오퍼. kind: buy(기본)·sell·loan·loan_out. sell·loan_out은 teamId가 필요하다. 임대는 fee가 임대료. pitch는 감독이 실제로 든 논거만 — 목록에 없는 이야기는 other. paymentYears는 분할을 말했을 때만. 계약이 반년 이하 남은 타 구단 선수에게 fee=0이면 사전 계약이다.
-- respond_offer — 상대가 넣은 오퍼에 감독의 답(accept·counter·reject). counter는 받은 값 위로 되부르는 것. negotiationId는 <negotiations>의 id. 우리 오퍼에 온 상대의 답은 여기 오지 않는다.
-- accept_deal — 합의된 협상을 메디컬로 넘긴다. 감독이 확정하라고 했을 때만.
+- respond_offer — 상대가 넣은 오퍼에 감독의 답(accept·counter·reject). counter는 받은 값 위로 되부르는 것. negotiationId는 <negotiations>의 id. 우리 제안 위로 상대가 되부른 조정을 받아들이는 말은 accept_deal이다.
+- accept_deal — 감독이 받아들이겠다고 한 협상. 합의된 협상은 확정하고, 상대의 조정이 서 있으면 그 조건 그대로 다시 제안한다.
 - withdraw_offer — 협상을 접는다.
 - open_renewal — 재계약 제안. open_release — 합의 해지 제안. release_player — 일방 해지(잔여 주급 전액) — 감독이 그것을 알고 말했을 때만.
 - set_transfer_list — 팔겠다·리스트에서 뺀다. askingPrice는 말했을 때만. respond_transfer_request — 선수의 이적 요청에 accept·refuse.
