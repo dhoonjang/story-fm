@@ -303,6 +303,14 @@ export function SquadView({
   const benchSet = new Set(board.bench.filter((id) => !onPitch.has(id)));
   const benchDesignated = benchPlayers.filter((p) => benchSet.has(p.id));
   /**
+   * 벤치 정원이 찼는가 — **계기판과 손잡이를 함께 움직이는 한 값이다.**
+   *
+   * 계기판이 `9/9`라고 말하는 순간 「매치데이 벤치로」가 잠기고, 그 반대도 없다. 세는
+   * 몫이 갈리면 8/9인데 잠긴 손잡이가 생기고, 화면이 무엇을 세고 있는지 알 수 없다
+   * (team.md §6 매치데이 명단).
+   */
+  const benchFull = benchDesignated.length >= MATCHDAY_BENCH;
+  /**
    * 화면의 죽은 공 키커 — **지정은 아직 저장되지 않은 선택까지, 서는 사람은 서버 값.**
    *
    * 기본값 규칙(그라운드 위 킥력 최고)은 코어 한 자리에만 산다(match.md §2 키커 지정) —
@@ -417,11 +425,14 @@ export function SquadView({
   /** 비선발 선수를 매치데이 벤치(최대 9)로 지정/해제 — 나머지는 예비 스쿼드 */
   function toggleBench(id: string) {
     if (!live || onLoan.has(id)) return;
-    const next = benchSet.has(id)
-      ? board.bench.filter((x) => x !== id)
-      : benchSet.size >= MATCHDAY_BENCH
-        ? board.bench
-        : [...board.bench, id];
+    const leaving = benchSet.has(id);
+    /*
+     * 정원이 찼으면 넣을 자리가 없다 — **저장까지 가지 않는다.** 바뀐 것 없는 판을
+     * 그대로 커밋하던 때는 저장 상태만 `saved`로 넘어가, 감독이 누른 것이 먹었는지
+     * 아닌지 화면 어디에도 남지 않았다. 이 자리에 오기 전에 버튼이 이미 잠겨 있다.
+     */
+    if (!leaving && benchFull) return;
+    const next = leaving ? board.bench.filter((x) => x !== id) : [...board.bench, id];
     commit({ ...board, bench: next });
   }
 
@@ -788,7 +799,14 @@ export function SquadView({
                 {live && !onLoan.has(p.id) && !onPitch.has(p.id) && !localReserve.has(p.id) && (
                   <button
                     className="ghost-btn"
-                    disabled={saving}
+                    /* 정원이 차면 넣는 길만 잠긴다 — **빼는 길은 늘 열려 있다** */
+                    disabled={saving || (benchFull && !benchSet.has(p.id))}
+                    /* 잠긴 이유는 **사실로만** — 옆의 1·2군 이동과 같은 결이다 */
+                    title={
+                      benchFull && !benchSet.has(p.id)
+                        ? `매치데이 벤치 ${MATCHDAY_BENCH}자리가 찼다`
+                        : undefined
+                    }
                     data-testid={`benchtoggle-${p.id}`}
                     onClick={() => onToggleBenchRow(p.id)}
                   >
@@ -844,6 +862,7 @@ export function SquadView({
       selectedPlayer?.id,
       selectedSlotCode,
       benchKey,
+      benchFull,
       onPitchKey,
       setPieceKey,
       live,
@@ -973,10 +992,14 @@ export function SquadView({
               </button>
             ))}
           </div>
-          {/* 조작법 대신 숫자만 — 벤치 정원이 몇 자리 남았는지가 유일하게 필요한 정보다 */}
+          {/* 조작법 대신 숫자만 — 벤치 정원이 몇 자리 남았는지가 유일하게 필요한 정보다.
+              찬 자리는 글자 한 층 올라선다 — 그 순간 명단의 「매치데이 벤치로」가
+              잠기므로, 이 숫자가 잠긴 이유다 (design-system.md §1 조작) */}
           <span className="roster-counts" data-testid="bench-count">
-            벤치 {benchDesignated.length}/{MATCHDAY_BENCH} · 예비{" "}
-            {benchPlayers.length - benchDesignated.length}
+            <span className={`roster-count-bench${benchFull ? " full" : ""}`}>
+              벤치 {benchDesignated.length}/{MATCHDAY_BENCH}
+            </span>{" "}
+            · 예비 {benchPlayers.length - benchDesignated.length}
           </span>
         </div>
         {/* 무직 잠금은 버튼이 아니다 — 돌아갈 경기가 없고, 판의 잠긴 모양이 이미 말한다 */}
