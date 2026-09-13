@@ -21,6 +21,7 @@ import {
   SLOT_TIME,
   slotOfTime,
   positionGroupOf,
+  josa,
 } from "@story-fm/domain";
 import { addDays, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
 import {
@@ -80,7 +81,7 @@ export function setDevelopmentFocus(
     if (squadLevelOf(player) !== "reserve") {
       return {
         ok: false,
-        message: `${player.name}은(는) 1군입니다 — 집중 육성은 2군 유망주에게 겁니다`,
+        message: `${josa(player.name, "은/는")} 1군입니다 — 집중 육성은 2군 유망주에게 겁니다`,
       };
     }
     if (!players.some((p) => p.id === player.id)) players.push(player);
@@ -166,7 +167,7 @@ export function setMentor(
     if (!pick.ok) return pick;
     const mentee = pick.player;
     if (mentee.id === mentor.id) {
-      return { ok: false, message: `${mentor.name}을(를) 자기 자신에게 맡길 수 없습니다` };
+      return { ok: false, message: `${josa(mentor.name, "을/를")} 자기 자신에게 맡길 수 없습니다` };
     }
     const block = menteeBlock(state, mentee);
     if (block) return { ok: false, message: block };
@@ -179,7 +180,7 @@ export function setMentor(
       return {
         ok: false,
         message:
-          `${mentee.name}은(는) 이미 ${playerName(state, held.mentorId)}에게 맡겨져 있습니다 — ` +
+          `${josa(mentee.name, "은/는")} 이미 ${playerName(state, held.mentorId)}에게 맡겨져 있습니다 — ` +
           `한 선수는 한 멘토입니다`,
       };
     }
@@ -200,7 +201,7 @@ export function setMentor(
       unchanged: true,
       message:
         mentees.length === 0
-          ? `${mentor.name}이(가) 맡은 유망주가 없습니다`
+          ? `${josa(mentor.name, "이/가")} 맡은 유망주가 없습니다`
           : `이미 그 명단입니다 — ${mentor.name}: ${briefNames(mentees.map((p) => p.name))}`,
     };
   }
@@ -226,7 +227,7 @@ export function setMentor(
     pushNarrative(state, `멘토링 해제 — ${mentor.name}`, 1);
     return {
       ok: true,
-      message: `${mentor.name}이(가) 맡고 있던 유망주를 모두 풀었습니다 — ${releasedNames.join(", ")}`,
+      message: `${josa(mentor.name, "이/가")} 맡고 있던 유망주를 모두 풀었습니다 — ${releasedNames.join(", ")}`,
       brief: {
         head: "멘토링",
         items: [
@@ -251,8 +252,8 @@ export function setMentor(
   return {
     ok: true,
     message:
-      `${mentor.name}에게 ${names}을(를) 맡겼습니다 — 멘티의 정신 6축 성장이 빨라집니다` +
-      (releasedNames.length > 0 ? ` · ${releasedNames.join(", ")}은(는) 풀렸습니다` : ""),
+      `${mentor.name}에게 ${josa(names, "을/를")} 맡겼습니다 — 멘티의 정신 6축 성장이 빨라집니다` +
+      (releasedNames.length > 0 ? ` · ${josa(releasedNames.join(", "), "은/는")} 풀렸습니다` : ""),
     brief: { head: "멘토링", items },
   };
 }
@@ -299,7 +300,7 @@ export function setReserveTraining(
   pushNarrative(state, `2군 훈련 방침 — ${title}`, 1);
   return {
     ok: true,
-    message: `2군 훈련 방침을 ${title}으로 잡았습니다 — ${aimed}이(가) 빨리 자라는 대신 나머지 필드 축은 그만큼 느려집니다`,
+    message: `2군 훈련 방침을 ${josa(title, "으로/로")} 잡았습니다 — ${josa(aimed, "이/가")} 빨리 자라는 대신 나머지 필드 축은 그만큼 느려집니다`,
     brief: {
       head: "2군 훈련 방침",
       items: [
@@ -391,7 +392,7 @@ export function signYouth(state: GameState, input: { playerIds?: string[] }): Co
     message:
       `${names([...joined, ...filled])} — 첫 프로 계약을 맺고 2군 개발 스쿼드에 들어왔습니다` +
       (filled.length > 0
-        ? ` (${names(filled)}은(는) 포지션군 최소 인원이 무너져 구단이 함께 올렸습니다)`
+        ? ` (${josa(names(filled), "은/는")} 포지션군 최소 인원이 무너져 구단이 함께 올렸습니다)`
         : "") +
       (letGo > 0
         ? ` · 나머지 ${letGo}명은 돌려보냈습니다` +
@@ -931,7 +932,7 @@ export function setPlayerTraining(
   if (position && squadLevelOf(player) === "reserve") {
     return {
       ok: false,
-      message: `${player.name}은(는) 2군이라 자리를 배울 수 없습니다 — 자리는 훈련 결산이 올리고 2군은 결산을 받지 않습니다. 1군으로 올린 뒤에 거세요`,
+      message: `${josa(player.name, "은/는")} 2군이라 자리를 배울 수 없습니다 — 자리는 훈련 결산이 올리고 2군은 결산을 받지 않습니다. 1군으로 올린 뒤에 거세요`,
     };
   }
   const restUntil = input.rest?.until;

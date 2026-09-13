@@ -4,6 +4,7 @@ import {
   SQUAD_NUMBER_MAX,
   SQUAD_NUMBER_MIN,
   SYMBOLIC_NUMBERS,
+  josa,
 } from "@story-fm/domain";
 import { playerName, type GameState } from "../core/state";
 
@@ -210,9 +211,9 @@ export function numberBlockText(block: SquadNumberBlock): string {
     case "out-of-range":
       return `등번호는 ${SQUAD_NUMBER_MIN}~${SQUAD_NUMBER_MAX}입니다 (${block.number})`;
     case "number-taken":
-      return `${block.number}번은 ${block.holder.name}이(가) 달고 있습니다`;
+      return `${block.number}번은 ${josa(block.holder.name, "이/가")} 달고 있습니다`;
     case "not-ours":
-      return `${block.name}은(는) 지금 우리가 쓰는 선수가 아닙니다`;
+      return `${josa(block.name, "은/는")} 지금 우리가 쓰는 선수가 아닙니다`;
   }
 }
 

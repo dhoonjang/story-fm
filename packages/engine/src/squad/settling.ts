@@ -5,7 +5,7 @@ import type {
   TrainingSession,
   Transfer,
 } from "@story-fm/domain";
-import { ageOf, isReserveMatch, PLAYER_ARCHETYPE_LABEL } from "@story-fm/domain";
+import { josa, ageOf, isReserveMatch, PLAYER_ARCHETYPE_LABEL } from "@story-fm/domain";
 import type { PlayerArchetypeKey } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { countryOfTeam } from "../data/team-catalog";
@@ -310,11 +310,11 @@ export function settlingFactorText(state: GameState, factor: SettlingFactor): st
       return factor.from ? `${factor.from}에서 건너왔다` : null;
     case "compatriot": {
       const mate = factor.playerId ? playerById(state, factor.playerId) : null;
-      return mate ? `라커룸에 ${mate.name}이(가) 있다` : null;
+      return mate ? `라커룸에 ${josa(mate.name, "이/가")} 있다` : null;
     }
     case "mentor": {
       const mentor = factor.playerId ? playerById(state, factor.playerId) : null;
-      return mentor ? `${mentor.name}이(가) 멘토로 붙어 있다` : null;
+      return mentor ? `${josa(mentor.name, "이/가")} 멘토로 붙어 있다` : null;
     }
     case "young":
       return factor.age === undefined ? null : `${factor.age}세 — 처음 겪는 무대다`;

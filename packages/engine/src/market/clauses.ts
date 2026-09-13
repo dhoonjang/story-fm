@@ -5,6 +5,7 @@ import {
   buildPaymentInstallments,
   clausesForSale,
   sellOnAmountOf,
+  josa,
 } from "@story-fm/domain";
 import { contractUntil } from "../competition/calendar";
 import { AGENT_FEE_RATE, formatMoney, recordFinance, settleDuePayments } from "../club/finance";
@@ -358,7 +359,7 @@ export function runBuyBacks(
      * 날의 남의 거래를 다 올리면 브리핑이 이적 공시로 덮인다 (§6).
      */
     if (done.fromTeamId !== state.userTeamId) continue;
-    const line = `${right.player.name}이(가) 되사기 조항으로 ${teamName(right.holderTeamId)}에 돌아갔습니다 — ${formatMoney(done.fee)}`;
+    const line = `${josa(right.player.name, "이/가")} 되사기 조항으로 ${teamName(right.holderTeamId)}에 돌아갔습니다 — ${formatMoney(done.fee)}`;
     digest.push(`${line}`);
     pushNarrative(state, line, 4);
   }

@@ -1,5 +1,5 @@
 import type { AttributeAxis, GamePlayer, Mentoring, MentoringEnd } from "@story-fm/domain";
-import { ageOf, AXIS_GROUPS, naturalPositionOf, weightSlotOf } from "@story-fm/domain";
+import { josa, ageOf, AXIS_GROUPS, naturalPositionOf, weightSlotOf } from "@story-fm/domain";
 import { VETERAN_AGE_MIN } from "../world/player-persona";
 import { diffDays } from "../competition/calendar";
 import { playerById, squadLevelOf, type GameState } from "../core/state";
@@ -156,17 +156,17 @@ function ourPlayer(state: GameState, player: GamePlayer): boolean {
  * 반려는 무엇이 모자란지를 말해야 감독이 다음 수를 둔다.
  */
 export function mentorBlock(state: GameState, player: GamePlayer, on = state.date): string | null {
-  if (!ourPlayer(state, player)) return `${player.name}은(는) 우리 선수가 아닙니다`;
+  if (!ourPlayer(state, player)) return `${josa(player.name, "은/는")} 우리 선수가 아닙니다`;
   if (squadLevelOf(player) !== "first") {
-    return `${player.name}은(는) 2군입니다 — 멘토는 1군 라커룸에 서 있어야 합니다`;
+    return `${josa(player.name, "은/는")} 2군입니다 — 멘토는 1군 라커룸에 서 있어야 합니다`;
   }
   const age = ageOf(player.birthdate, on);
   if (age < MENTOR_AGE_MIN) {
-    return `${player.name}은(는) ${age}세입니다 — 멘토는 ${MENTOR_AGE_MIN}세 이상입니다`;
+    return `${josa(player.name, "은/는")} ${age}세입니다 — 멘토는 ${MENTOR_AGE_MIN}세 이상입니다`;
   }
   if (player.attributes.leadership < MENTOR_LEADERSHIP_MIN) {
     return (
-      `${player.name}은(는) 리더십 ${player.attributes.leadership}입니다 — ` +
+      `${josa(player.name, "은/는")} 리더십 ${player.attributes.leadership}입니다 — ` +
       `멘토는 ${MENTOR_LEADERSHIP_MIN} 이상입니다`
     );
   }
@@ -175,10 +175,10 @@ export function mentorBlock(state: GameState, player: GamePlayer, on = state.dat
 
 /** 멘티가 될 수 있는가 — 막는 이유 한 문장, 자격이 되면 null */
 export function menteeBlock(state: GameState, player: GamePlayer, on = state.date): string | null {
-  if (!ourPlayer(state, player)) return `${player.name}은(는) 우리 선수가 아닙니다`;
+  if (!ourPlayer(state, player)) return `${josa(player.name, "은/는")} 우리 선수가 아닙니다`;
   const age = ageOf(player.birthdate, on);
   if (age > MENTEE_AGE_MAX) {
-    return `${player.name}은(는) ${age}세입니다 — 멘티는 ${MENTEE_AGE_MAX}세 이하입니다`;
+    return `${josa(player.name, "은/는")} ${age}세입니다 — 멘티는 ${MENTEE_AGE_MAX}세 이하입니다`;
   }
   return null;
 }

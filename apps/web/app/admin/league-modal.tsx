@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { josa } from "@story-fm/domain";
 import { Modal } from "./modal";
 import {
   LEAGUE_KINDS,
@@ -147,7 +148,11 @@ export function LeagueModal({
       );
       return;
     }
-    if (!window.confirm(`카탈로그에서 ${league.name}을(를) 삭제할까요?\n(새 게임부터 반영됩니다)`))
+    if (
+      !window.confirm(
+        `카탈로그에서 ${josa(league.name, "을/를")} 삭제할까요?\n(새 게임부터 반영됩니다)`,
+      )
+    )
       return;
     setSaving(true);
     try {

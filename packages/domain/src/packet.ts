@@ -10,6 +10,7 @@
  * 하나(`packetTagText`)가 만든다** — 화면·중계·CLI·테스트가 같은 함수를 부른다.
  */
 
+import { josa } from "./josa";
 import { legacyTag, otherSide, type MatchSide, type PacketTagSource, type SubCause } from "./match";
 import { AXIS_KO } from "./player";
 import {
@@ -416,13 +417,14 @@ const duelRead = (rate: number): string =>
 
 /** 지시가 그라운드에서 무엇으로 보이는가 — 이득과 대가가 한 줄에 함께 선다 */
 const DIRECTIVE_KO: Record<string, (by: string, target: string) => string> = {
-  man_mark: (n, t) => `${n}이(가) ${t}을(를) ${PLAYER_DIRECTIVE_KO.man_mark}, 본업을 던다`,
+  man_mark: (n, t) =>
+    `${josa(n, "이/가")} ${josa(t, "을/를")} ${PLAYER_DIRECTIVE_KO.man_mark}, 본업을 던다`,
   press_target: (n, t) =>
-    `${n}이(가) ${t}을(를) ${PLAYER_DIRECTIVE_KO.press_target}, 자리를 비운다`,
+    `${josa(n, "이/가")} ${josa(t, "을/를")} ${PLAYER_DIRECTIVE_KO.press_target}, 자리를 비운다`,
   focus_play: (n) => `${n}에게 공격을 몰아준다, 다른 길이 줄어든다`,
-  stay_back: (n) => `${n}은(는) 뒤에 남는다, 앞의 인원이 준다`,
-  join_attack: (n) => `${n}이(가) 적극적으로 올라간다, 뒷공간을 내준다`,
-  careful: (n) => `${n}이(가) 발을 뺀다, 그 자리의 압박이 준다`,
+  stay_back: (n) => `${josa(n, "은/는")} 뒤에 남는다, 앞의 인원이 준다`,
+  join_attack: (n) => `${josa(n, "이/가")} 적극적으로 올라간다, 뒷공간을 내준다`,
+  careful: (n) => `${josa(n, "이/가")} 발을 뺀다, 그 자리의 압박이 준다`,
 };
 
 /** 공략이 그라운드에서 무엇으로 보이는가 — 축 하나가 한 낱말이다 */
@@ -501,7 +503,7 @@ const COUNTER_KO: Record<
     blames: true,
     text: (r) =>
       r.has("long-ball")
-        ? `${r.rival}이(가) 압박을 롱볼로 넘겨 버린다 — ${r.subject}의 전방 압박이 허공을 뛴다`
+        ? `${josa(r.rival, "이/가")} 압박을 롱볼로 넘겨 버린다 — ${r.subject}의 전방 압박이 허공을 뛴다`
         : `${r.rival} 중원이 압박을 견딘다 (압박 저항 ${Math.round(r.v("pressResist"))})`,
   },
   buildup_collapse: {
@@ -511,31 +513,31 @@ const COUNTER_KO: Record<
   },
   midfield_overload: {
     text: (r) =>
-      `중원 숫자에서 ${r.subject}이(가) ${r.v("edge")}명 앞선다 (${r.v("mf")} vs ${r.v("rivalMf")})` +
+      `중원 숫자에서 ${josa(r.subject, "이/가")} ${r.v("edge")}명 앞선다 (${r.v("mf")} vs ${r.v("rivalMf")})` +
       (r.has("stretched") ? " — 다만 폭을 넓게 써 중앙이 얇아진다" : ""),
   },
   wing_space: {
     text: (r) =>
-      `${r.rival}이(가) 중앙에 몰려 측면이 비었다 — ${r.subject} 측면 자원 ${Math.round(r.v("wideQuality"))}`,
+      `${josa(r.rival, "이/가")} 중앙에 몰려 측면이 비었다 — ${r.subject} 측면 자원 ${Math.round(r.v("wideQuality"))}`,
   },
   crossing_barrage: {
     text: (r) =>
-      `${r.subject}이(가) 측면에서 올려 제공권으로 해결한다 (전방 공중볼 ${Math.round(r.v("aerialAtk"))} vs 수비 ${Math.round(r.v("aerialDef"))})`,
+      `${josa(r.subject, "이/가")} 측면에서 올려 제공권으로 해결한다 (전방 공중볼 ${Math.round(r.v("aerialAtk"))} vs 수비 ${Math.round(r.v("aerialDef"))})`,
   },
   sterile_possession: {
     blames: true,
     text: (r) =>
-      `${r.rival}의 밀집 수비를 ${r.subject}이(가) 느리고 좁게 두드린다 — 공은 갖되 길이 없다`,
+      `${r.rival}의 밀집 수비를 ${josa(r.subject, "이/가")} 느리고 좁게 두드린다 — 공은 갖되 길이 없다`,
   },
   stretch_block: {
-    text: (r) => `${r.subject}이(가) 빠르고 넓게 움직여 ${r.rival}의 블록을 좌우로 흔든다`,
+    text: (r) => `${josa(r.subject, "이/가")} 빠르고 넓게 움직여 ${r.rival}의 블록을 좌우로 흔든다`,
   },
   counter_attack: {
     text: (r) =>
       (r.has("ordered")
-        ? `${r.subject}이(가) 역습을 지시했다`
-        : `${r.subject}이(가) 내려서서 역습을 노린다`) +
-      ` — ${r.rival}이(가) 올라온 뒤가 넓다 (전방 스피드 ${Math.round(r.v("fwPace"))})`,
+        ? `${josa(r.subject, "이/가")} 역습을 지시했다`
+        : `${josa(r.subject, "이/가")} 내려서서 역습을 노린다`) +
+      ` — ${josa(r.rival, "이/가")} 올라온 뒤가 넓다 (전방 스피드 ${Math.round(r.v("fwPace"))})`,
   },
   stretched_shape: {
     blames: true,
@@ -545,7 +547,7 @@ const COUNTER_KO: Record<
   rushed_errors: {
     blames: true,
     text: (r) =>
-      `${r.subject}이(가) 서두르다 ${r.rival}의 압박에 흘린다 (중원 침착성 ${Math.round(r.v("pressResist"))})`,
+      `${josa(r.subject, "이/가")} 서두르다 ${r.rival}의 압박에 흘린다 (중원 침착성 ${Math.round(r.v("pressResist"))})`,
   },
   backline_numbers: {
     // 남으면 이득, 모자라면 대가 — 주어는 언제나 그 수비진을 세운 팀이다
@@ -557,7 +559,7 @@ const COUNTER_KO: Record<
   },
   flank_mismatch: {
     text: (r) =>
-      `측면 속도에서 ${r.subject}이(가) 앞선다 (${Math.round(r.v("wideAttack"))} vs ${Math.round(r.v("wideDefend"))}) — 폭을 쓰는 만큼 살아난다`,
+      `측면 속도에서 ${josa(r.subject, "이/가")} 앞선다 (${Math.round(r.v("wideAttack"))} vs ${Math.round(r.v("wideDefend"))}) — 폭을 쓰는 만큼 살아난다`,
   },
 };
 
@@ -715,11 +717,13 @@ const CONTEXT_KO: Record<string, (tag: PacketTag) => string> = {
 const DROPPED_KO: Record<string, (r: Render) => string> = {
   "off-pitch": (r) =>
     r.named(0)
-      ? `${r.who(0)}은(는) 그라운드에 없어 지시가 걸리지 않았다`
+      ? `${josa(r.who(0), "은/는")} 그라운드에 없어 지시가 걸리지 않았다`
       : "그라운드에 없는 선수에게 내린 지시라 걸리지 않았다",
   "gone-target": (r) =>
     `${r.who(0)}의 지시가 걸리지 않았다 — ` +
-    (r.named(1) ? `${r.who(1)}은(는) 이미 그라운드를 떠났다` : "겨냥한 상대가 그라운드에 없다"),
+    (r.named(1)
+      ? `${josa(r.who(1), "은/는")} 이미 그라운드를 떠났다`
+      : "겨냥한 상대가 그라운드에 없다"),
   /**
    * 자리를 못 얻은 지시 — **다시 내리면 걸린다**가 이 줄이 말해야 하는 것이다
    * (밀어내기 · match.md §2). "한 경기에 셋까지"로만 적으면 감독은 이 경기에서

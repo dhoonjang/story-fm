@@ -6,6 +6,7 @@ import {
   type Persona,
   type StaffPoolEntry,
   type StaffRole,
+  josa,
 } from "@story-fm/domain";
 import { contractUntil } from "../core/dates";
 import { makeRng, randInt, shuffled } from "../core/rng";
@@ -181,7 +182,7 @@ export function hireStaff(
   if (salary < entry.ask) {
     return {
       ok: false,
-      message: `${entry.name}은(는) 연봉 ${formatMoney(entry.ask)}를 부릅니다 — 제안은 ${formatMoney(salary)}였습니다`,
+      message: `${josa(entry.name, "은/는")} 연봉 ${josa(formatMoney(entry.ask), "을/를")} 부릅니다 — 제안은 ${formatMoney(salary)}였습니다`,
     };
   }
   const limit = STAFF_LIMIT[entry.role];
