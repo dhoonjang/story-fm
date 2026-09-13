@@ -146,15 +146,27 @@ export function userSide(state: GameState): "home" | "away" {
 type Seat = Pick<TacticAssignment, "position"> &
   Partial<Pick<TacticAssignment, "point" | "roleId">>;
 
-/** 배치 + 선수 → 패킷 입력 슬롯. 온필드 id 목록으로 필터해 교체·퇴장을 반영한다 */
-export function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[] {
+/**
+ * 배치 + 선수 → 패킷 입력 슬롯. 온필드 id 목록으로 필터해 교체·퇴장을 반영한다.
+ *
+ * ⚠️ **자리를 잇는 것은 그라운드에 선 사람들뿐이다**(`onPitch`). 벤치 명단을 같은 문으로
+ * 보내면 열한 자리가 통째로 「주인이 떠난 자리」로 보여, 벤치 아홉이 적응도 순으로 선발의
+ * 좌표에 그대로 앉는다 — 명단 화면이 한 점에 둘을 그리던 자리가 거기다. 벤치는 전술판에
+ * 자리를 갖지 않으므로(`setLineup`) 좌표 없이 제 포지션만 들고 선다.
+ */
+export function slotsFor(
+  state: GameState,
+  teamId: string,
+  ids: string[],
+  onPitch = true,
+): LineupSlot[] {
   const assignments = new Map(assignmentsOf(state, teamId).map((a) => [a.playerId, a] as const));
   const squad = new Map(playersOf(state, teamId).map((p) => [p.id, p] as const));
   const worn = state.pendingMatch?.matchFatigue ?? {};
   const idSet = new Set(ids);
   /** 주인이 그라운드를 떠난 선발 자리 — 선발 id → 그 자리 */
   const vacated = new Map<string, Seat>();
-  for (const assignment of assignmentsOf(state, teamId, "starting")) {
+  for (const assignment of onPitch ? assignmentsOf(state, teamId, "starting") : []) {
     if (idSet.has(assignment.playerId)) continue;
     vacated.set(assignment.playerId, {
       position: assignment.position,
@@ -358,7 +370,7 @@ function buildPacketFor(
       teamId,
       teamName: teamNameIn(state, teamId),
       starters,
-      bench: slotsFor(state, teamId, ledgerSide.bench),
+      bench: slotsFor(state, teamId, ledgerSide.bench, false),
       // 상대가 경기 중 바꾼 전술이 있으면 그것으로 — 저장된 팀 전술은 그대로 둔다
       tactics:
         teamId !== state.userTeamId && pending.aiTactics

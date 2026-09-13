@@ -85,6 +85,30 @@ function atMatchday(seed = 42, opts?: { afterPreseason?: boolean }): GameState {
   return copy;
 }
 
+describe("벤치는 전술판에 자리를 갖지 않는다", () => {
+  /**
+   * 패킷을 세울 때 벤치 명단을 선발과 **같은 문**으로 보내면, 열한 자리가 통째로
+   * 「주인이 떠난 자리」로 보여 벤치 아홉이 적응도 순으로 선발의 좌표에 그대로 앉았다 —
+   * 명단 화면이 한 점에 두 사람을 그리던 자리다 (→ docs/data/team.md §6).
+   */
+  it("경기 중에도 벤치 좌표는 없고, 선발과 한 점에 포개지지 않는다", () => {
+    const state = atMatchday();
+    expect(startMatch(state).ok).toBe(true);
+    const packet = state.pendingMatch!.packet;
+    const ours = packet.home.teamId === state.userTeamId ? packet.home : packet.away;
+    expect(ours.bench.length).toBeGreaterThan(0);
+    expect(ours.bench.some((p) => p.point !== undefined)).toBe(false);
+
+    const rows = buildOfficeViews(state).squad.players;
+    expect(rows.filter((r) => r.role === "벤치").length).toBeGreaterThan(0);
+    expect(rows.filter((r) => r.role === "벤치").every((r) => r.assignedPoint === null)).toBe(true);
+    const seats = rows
+      .filter((r) => r.assignedPoint !== null)
+      .map((r) => `${r.assignedPoint!.x},${r.assignedPoint!.y}`);
+    expect(new Set(seats).size).toBe(seats.length);
+  });
+});
+
 describe("경기 흐름 (overview §4)", () => {
   it("경기일이 아니면 시작할 수 없다", () => {
     const state = createTestGame();
