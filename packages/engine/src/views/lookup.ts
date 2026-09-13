@@ -158,6 +158,7 @@ import { openManagerOffers, USER_WARNINGS_BEFORE_SACK } from "../market/manager-
 import { askingPriceFor, observedMarketValue, wageExpectationOf } from "../market/market";
 import { interestLine } from "../market/interest";
 import {
+  arrivedScoutReport,
   attributeLine,
   KNOWLEDGE_RANK,
   knowledgeNote,
@@ -1186,16 +1187,15 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
    * 두 말을 한다. 우리 선수에게는 세우지 않는다: 데려온 뒤의 요구액·기대 주급은
    * 그 선수에 대한 사실이 아니다.
    */
-  const arrivedReport = state.scoutReports.filter(
-    (r) => r.gamePlayerId === p.id && r.completedOn !== null,
-  );
-  const lastReport = arrivedReport[arrivedReport.length - 1];
-  if (knowledge !== "own" && lastReport?.completedOn) {
+  const lastReport = knowledge === "own" ? null : arrivedScoutReport(state, p.id);
+  if (lastReport?.completedOn) {
     lines.push(
       `스카우트 보고서: ${lastReport.completedOn} 도착 · ` +
         `시장가 ${formatMoney(observedMarketValue(state, p))} · ` +
         `요구액 ${formatMoney(askingPriceFor(state, p))} · ` +
-        `기대 주급 ${formatMoney(wageExpectationOf(state, p))}`,
+        `기대 주급 ${formatMoney(wageExpectationOf(state, p))}` +
+        // 스카우트가 남긴 한 줄 — 감독의 모달이 읽는 그 문장이다 (agents.md §4-4)
+        (lastReport.verdict ? ` · “${lastReport.verdict}”` : ""),
     );
   }
 

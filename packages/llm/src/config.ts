@@ -14,6 +14,7 @@ export const AGENT_NAMES = [
   "finalize-match",
   "negotiation-table",
   "training-rater",
+  "scout-rater",
   "history-compactor",
   "onboarding-judge",
 ] as const;
@@ -171,6 +172,7 @@ const LlmConfigFileSchema = z
         "finalize-match": RawAgentConfigSchema,
         "negotiation-table": RawAgentConfigSchema,
         "training-rater": RawAgentConfigSchema,
+        "scout-rater": RawAgentConfigSchema,
         "history-compactor": RawAgentConfigSchema,
         "onboarding-judge": RawAgentConfigSchema,
       })

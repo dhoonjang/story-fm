@@ -128,6 +128,16 @@ agents:
     timeout_ms: 30000
     thinking_level: minimal
 
+  # 도착한 스카우팅 보고서 한 묶음에 한 줄 평을 붙인다 (docs/llm/agents.md §4-4). 코어가
+  # 낸 사실만 읽고 문장 하나를 내는 자리라 훈련 결산과 같은 싼 자리다. 실패하면 사실 줄만
+  # 남으므로 시한도 짧다.
+  scout-rater:
+    provider: google
+    model: gemini-3.5-flash-lite
+    max_tokens: 8000
+    timeout_ms: 30000
+    thinking_level: minimal
+
   # 새 게임의 배경을 읽고 지갑·능력치의 결·시작 사건을 판정한 뒤, 그 위에서 부임 첫날의
   # 첫 장면까지 쓴다 (docs/llm/agents.md §4-2). **싼 자리로 보내지 않는다** — 판정만 낼
   # 때는 앵커가 답을 받쳐 줬지만 첫 장면에는 앵커가 없고, 그것이 이 게임의 첫인상이다.

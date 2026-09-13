@@ -13,6 +13,7 @@ export * from "./table-situation";
 export * from "./ruling-schema";
 export * from "./history-compactor";
 export * from "./training-rater";
+export * from "./scout-rater";
 export * from "./gm-types";
 export * from "./mock-gm";
 export * from "./gm";

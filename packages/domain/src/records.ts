@@ -1560,8 +1560,18 @@ export const ScoutReportSchema = z.object({
   dueOn: DateString,
   /** null = 파견 중 */
   completedOn: DateString.nullable(),
+  /**
+   * 스카우트가 남긴 **한 줄 평** — 코어의 사실 위에 판정자가 쓴 문장이다
+   * (docs/llm/agents.md §4-4). 카드는 한 번 지나가고 모달은 언제든 다시 열리므로,
+   * 여기 남겨야 같은 선수에게 두 번 물어도 두 문장이 갈리지 않는다.
+   * 판정이 실패했거나 옛 세이브면 없다 — 그때는 안개 줄만 선다.
+   */
+  verdict: z.string().optional(),
 });
 export type ScoutReport = z.infer<typeof ScoutReportSchema>;
+
+/** 한 줄 평의 길이 상한 — 카드 아래 한 줄이라 넘치면 서류가 문단이 된다 */
+export const SCOUT_VERDICT_MAX = 120;
 
 /** 스카우트 파견 소요 일수 · 동시 파견 한도 (잠정 수치) */
 export const SCOUT_DAYS = 7;

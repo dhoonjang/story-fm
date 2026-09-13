@@ -2532,10 +2532,19 @@ export interface ScoutReportCard {
   attributes: ScoutAttributeView[];
   /** 지금 이 선수를 데려오려면 — 코어가 계산한 값 */
   marketValue: number;
+  /**
+   * 상대가 **부를 값**(`askingPriceFor`). 몸값과 갈라 싣는 이유는 판단이 걸리는
+   * 숫자가 이쪽이어서다 — 코치가 말하는 액수도 이것이라, 카드가 몸값만 적으면
+   * 한 화면이 두 말을 한다 (player.md §9.4-1).
+   */
+  askingPrice: number;
   wageExpectation: number;
   contractUntil: string | null;
-  /** 무엇까지 알아냈나 — 안개의 수준을 문장으로 */
-  note: string;
+  /**
+   * 스카우트가 쓴 **한 줄 평** — 판정이 실패했거나 mock이면 null이고, 그때는
+   * 안개 줄만 선다 (docs/llm/agents.md §4-4).
+   */
+  verdict: string | null;
 }
 
 /**

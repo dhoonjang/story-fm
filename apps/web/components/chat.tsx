@@ -397,6 +397,12 @@ function ScoutReport({ report: r }: { report: ScoutReportCard }) {
           <em>시장가</em>
           <b>{formatMoney(r.marketValue)}</b>
         </span>
+        {/* 상대가 **부를 값** — 코치의 대사가 말하는 액수도 이것이라, 카드가 몸값만
+            적으면 한 화면이 두 말을 한다 (player.md §9.4-1) */}
+        <span>
+          <em>요구액</em>
+          <b>{formatMoney(r.askingPrice)}</b>
+        </span>
         <span>
           <em>기대 주급</em>
           <b>{formatMoney(r.wageExpectation)}</b>
@@ -454,6 +460,9 @@ function ScoutReport({ report: r }: { report: ScoutReportCard }) {
           </div>
         ))}
       </div>
+
+      {/* 보고서를 닫는 한 줄 — 스카우트가 쓴 평. 판정이 실패했거나 mock이면 없다 */}
+      {r.verdict && <div className="sr-note">{r.verdict}</div>}
     </div>
   );
 }

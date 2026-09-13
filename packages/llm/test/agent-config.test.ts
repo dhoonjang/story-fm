@@ -25,6 +25,7 @@ const AGENT_YAML = `  gm: &agent
   training-orders: *agent
   match-gm: *agent
   training-rater: *agent
+  scout-rater: *agent
   history-compactor: *agent
   onboarding-judge: *agent
 `;
@@ -103,6 +104,11 @@ describe("에이전트별 LLM 설정", () => {
     max_tokens: 400
     timeout_ms: 4000
     thinking_level: low
+  scout-rater:
+    provider: google
+    model: gemini-scout
+    max_tokens: 300
+    timeout_ms: 3000
   history-compactor:
     provider: google
     model: gemini-compactor
@@ -146,6 +152,7 @@ describe("에이전트별 LLM 설정", () => {
   training-orders: *google
   match-gm: *google
   training-rater: *google
+  scout-rater: *google
   history-compactor: *google
   onboarding-judge: *google
 `),
@@ -166,6 +173,7 @@ describe("에이전트별 LLM 설정", () => {
   training-orders: *agent
   match-gm: *agent
   training-rater: *agent
+  scout-rater: *agent
   history-compactor: *agent
   onboarding-judge: *agent
 `);
