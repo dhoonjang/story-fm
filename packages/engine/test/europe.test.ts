@@ -7,6 +7,7 @@ import {
   buildSeasonFixtures,
   entrantsOf,
   computeStandings,
+  countryOfTeam,
   cupCatalogById,
   diffDays,
   euroCompetitionOf,
@@ -175,24 +176,25 @@ describe("대항전 리그 페이즈 편성", () => {
     }
   });
 
-  it("같은 리그끼리는 거의 만나지 않는다 (실제 대회의 협회 회피)", () => {
+  it("같은 협회끼리는 만나지 않는다 (실제 대회의 협회 회피)", () => {
+    // 회피의 단위는 리그가 아니라 나라다 — 리그로 물으면 같은 나라의 1·2부 대결이
+    // "다른 리그"로 통과한다. 자리 배치가 제약을 먼저 풀므로 0이 나온다 (europe.ts
+    // `countrySeats`). 시즌을 바꾸는 것은 참가 명단을 바꾸는 것이다.
     for (const seed of [42, 7, 1007]) {
-      const entrants = buildEuroEntrants(1, seed);
-      const all = buildAllEuroMatches(1, seed, entrants);
-      for (const cup of cupCatalog()) {
-        const mine = all.filter((m) => m.competitionId === cup.id);
-        const same = mine.filter((m) => leagueOfTeam(m.homeTeamId) === leagueOfTeam(m.awayTeamId));
-        // 우리 규모(한 나라에서 최대 여덟 팀)에선 0이 항상 가능하지 않아
-        // 무거운 벌점으로 누른다 — 실측 최악이 대회당 1건이라 상한을 2로 잡는다
-        expect(same.length, `seed ${seed} ${cup.id}`).toBeLessThanOrEqual(2);
-        const perTeam = new Map<string, number>();
-        for (const m of same) {
-          for (const t of [m.homeTeamId, m.awayTeamId]) perTeam.set(t, (perTeam.get(t) ?? 0) + 1);
+      for (const season of [1, 2]) {
+        const entrants = buildEuroEntrants(season, seed);
+        const all = buildAllEuroMatches(season, seed, entrants);
+        for (const cup of cupCatalog()) {
+          const same = all.filter(
+            (m) =>
+              m.competitionId === cup.id &&
+              countryOfTeam(m.homeTeamId) === countryOfTeam(m.awayTeamId),
+          );
+          expect(
+            same.map((m) => `${m.homeTeamId}-${m.awayTeamId}`),
+            `seed ${seed} ${cup.id}`,
+          ).toEqual([]);
         }
-        expect(
-          Math.max(0, ...perTeam.values()),
-          `seed ${seed} ${cup.id} 한 팀 반복`,
-        ).toBeLessThanOrEqual(1);
       }
     }
   });
