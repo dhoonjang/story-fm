@@ -60,7 +60,7 @@ max_retries: 2
 agents:
   gm:
     provider: google
-    model: gemini-3.7-flash
+    model: gemini-3.8-flash
     max_tokens: 64000
     timeout_ms: 180000
     thinking_level: low
@@ -97,7 +97,7 @@ agents:
   # 시한은 도구 뒤의 해석·마감 호출까지 덮는다.
   match-gm:
     provider: google
-    model: gemini-3.7-flash
+    model: gemini-3.8-flash
     max_tokens: 64000
     timeout_ms: 180000
     thinking_level: low
@@ -106,7 +106,7 @@ agents:
   # 않는다. 경기당 한 번이고 매치 GM의 도구 뒤에서 돈다.
   finalize-match:
     provider: google
-    model: gemini-3.6-flash
+    model: gemini-3.8-flash
     max_tokens: 16000
     timeout_ms: 90000
     thinking_level: minimal
@@ -116,7 +116,7 @@ agents:
   # 싼 자리로 보내지 않는다. 실패하면 앵커가 그대로 판정이라 시한은 짧다.
   negotiation-table:
     provider: google
-    model: gemini-3.7-flash
+    model: gemini-3.8-flash
     max_tokens: 8000
     timeout_ms: 60000
     thinking_level: low
@@ -144,7 +144,7 @@ agents:
   # 게임당 한 번뿐이라 이 자리의 값은 장부에 거의 서지 않는다.
   onboarding-judge:
     provider: google
-    model: gemini-3.7-flash
+    model: gemini-3.8-flash
     max_tokens: 16000
     timeout_ms: 90000
     thinking_level: low
@@ -155,7 +155,7 @@ agents:
   # 넘을 때만이라 드물게 돈다.
   history-compactor:
     provider: google
-    model: gemini-3.7-flash
+    model: gemini-3.8-flash
     max_tokens: 8000
     timeout_ms: 60000
     thinking_level: low
