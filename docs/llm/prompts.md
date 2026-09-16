@@ -145,8 +145,8 @@
 
 도구는 **24개**이고 **전부 평시 GM의 것**이다. 받아쓰기 명령 38개(판 11 · 훈련·육성 6 ·
 이적·재정·감독직 21)는 GM에게 보이지 않는다 — `tactic_orders`·`training_orders`·
-`market_orders` 뒤의 세 해석기가 감독의 말 원문을 받아 그 명령의 인자를 채운다
-(agents.md §1). 매치 GM이 쥐는 해석기는 `tactic-orders` 하나다. 경기 중에는 매치
+`market_orders` 뒤의 세 해석기가 이번 턴 감독의 말을 받아 그 명령의 인자를 채운다. 그
+말은 코어가 넘긴다 — 손잡이 셋은 인자가 없고, 부르는 것이 곧 라우팅이다 (agents.md §1). 매치 GM이 쥐는 해석기는 `tactic-orders` 하나다. 경기 중에는 매치
 GM이 **경기 도구 셋**(`tactic_orders` · `advance_match` · `finalize_match`)만 쥔다 — 지시는
 그 도구 뒤의 해석이 JSON 하나로 옮기고 코어가 같은 명령 함수를 부른다
 ([agents.md](./agents.md) §3). 경기 도구 셋은 이 카탈로그에 없다(`buildMatchTools` —
@@ -174,7 +174,7 @@ GM이 **경기 도구 셋**(`tactic_orders` · `advance_match` · `finalize_matc
 | 설정형 | 검증 후 그대로 기록 — 라인업·전술·훈련·이적 리스트                                                                                                                                                                |
 | 판정형 | LLM이 `{outcome, intensity}`·`stance`를 판정, **변화량은 코어 공식** — outcome은 코어의 수용성 앵커 ± 한 단계 안에서만 선다 ([../simulation/career.md](../simulation/career.md) §2)                               |
 | 거래형 | 감독의 뜻은 GM이 도구로(`send_offer`·`respond_offer`), 상대의 판정은 도구 뒤·턴 앞의 별도 호출이 앵커 ± 한도 안에서(`speak_at_table` · 편지 — [../simulation/transfer.md](../simulation/transfer.md) §12-1·§12-2) |
-| 전술형 | `tactic_orders`·`training_orders` — 감독의 말 원문을 넘기면 도구 뒤의 해석이 JSON으로 옮기고 코어가 명령으로 적용 (agents.md §1)                                                                                  |
+| 전술형 | `tactic_orders`·`training_orders` — 인자 없이 부르면 코어가 이번 턴 감독의 말을 도구 뒤의 해석에 넘기고, 해석이 JSON으로 옮기고 코어가 명령으로 적용 (agents.md §1)                                               |
 | 사건형 | `record_incident` — 코어 밖의 사건(벌금·포상·병문안·공개 칭찬과 질책·사과·중재·규칙·회식)을 **효과의 모양**으로 받고, 효과표·한도는 코어 ([../data/people.md](../data/people.md) §6)                              |
 
 - **위임은 지시가 아니다.** "알아서 짜세요"·"당신이 판단해서 돌리세요"에는 감독이 정한
@@ -507,7 +507,7 @@ Zod와 다른 JSON 스키마를 갖지 않는다.** 그 아홉의 선언은 `for
 | 시스템 프롬프트 (`GM_SYSTEM`)                | 도구와 무관하게 매 턴 서는 것 — 입력의 지도 · 권한 경계와 인물 · 장면의 속도 · 지시를 받았을 때 · 출력 문법 · 말                                                                              |
 | 도구 설명 (`SKILL_CATALOG`)                  | 그 도구를 **언제 부르고, 인자를 어떻게 채우고, 결과를 장면에 어떻게 옮기는가** — 인자의 낱말은 코어 표에서 만든다                                                                             |
 | 매치 GM 프롬프트 (`MATCH_GM_SYSTEM`)         | 입력의 지도 · 사건을 옮기는 법(골의 꼴 · 문형을 갈라 쓴다) · 한 턴 · 출력 문법 · 말. 어느 도구를 언제 부르는지는 경기 도구 셋의 설명이 갖는다                                                 |
-| 경기 도구 셋 (`buildMatchTools`)             | `tactic_orders`(지시 → 판·패킷) · `advance_match`(구간 하나 — 상대 벤치가 먼저 움직인다) · `finalize_match` — 언제 부르고 무엇이 돌아오는가. 감독의 말은 `orders`에 원문 그대로               |
+| 경기 도구 셋 (`buildMatchTools`)             | `tactic_orders`(지시 → 판·패킷 — 인자 없음, 감독의 말은 코어가 넘긴다) · `advance_match`(구간 하나 — 상대 벤치가 먼저 움직인다) · `finalize_match` — 언제 부르고 무엇이 돌아오는가            |
 | 마감 프롬프트 (`FINALIZE_MATCH_SYSTEM`)      | 결산의 화자 · `<commentary>`·`<settlement>`를 읽는 법 · 마무리 중계의 길이                                                                                                                    |
 | 해석 프롬프트 (`TACTIC_ORDERS_SYSTEM`)       | 경기 중 필요한 판정·해석 근거 전부 — 전술 6축과 갈래 넷, 세트피스 두 축, 자리별 역할 50종의 낱말까지. 도구 표면이 0이라(§2) 도구 설명이 실리지 않는다                                         |
 | 테이블 해석 프롬프트 (`TABLE_ORDERS_SYSTEM`) | 테이블의 한 줄에서 값·연수·지위·조건·요구의 답·수락·철회를 어느 명령으로 옮기는가 — 이 협상 하나만 읽는다. 조건 갈래의 뜻과 값의 자리는 코어 표(`DEAL_TERM_MEANING`)가 스키마 설명으로 싣는다 |
