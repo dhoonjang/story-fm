@@ -122,99 +122,6 @@ type InputItem = {
 const inputOf = (sent: Record<string, unknown> | undefined) => (sent?.input ?? []) as InputItem[];
 
 describe("OpenAI 어댑터", () => {
-  it("강제 도구는 첫 요청에만 실린다 — 계속 걸면 턴이 끝나지 않는다", async () => {
-    const { client, sent } = makeStubClient([
-      response([functionCall("c1", "report_training", "{}")]),
-      response([message("끝.")]),
-    ]);
-    const tool: GameToolSpec = {
-      name: "report_training",
-      description: "테스트 도구",
-      inputSchema: { type: "object" as const, properties: {} },
-      handle: () => ({ ok: true, message: "반영" }),
-    };
-
-    const llm = new OpenAiGameLLM(testConfig, client);
-    await llm.runTurn({
-      system: "시스템",
-      history: [],
-      user: "결산",
-      tools: [tool],
-      toolChoice: { name: "report_training" },
-    });
-
-    expect(sent).toHaveLength(2);
-    // Responses의 강제는 내부 태깅이다 — `function: { name }` 중첩이 아니다
-    expect(sent[0]!.tool_choice).toEqual({ type: "function", name: "report_training" });
-    /**
-     * 도구 결과를 돌려준 뒤에도 강제가 남아 있으면 모델이 턴을 끝낼 길이 없어
-     * 왕복 상한까지 같은 도구를 다시 부른다 — 그 회귀를 이 줄이 잡는다.
-     */
-    expect(sent[1]!.tool_choice).toBeUndefined();
-  });
-
-  /**
-   * **산출만 받는 호출은 도구가 불린 자리에서 끝난다** (models.md §3-4). 재는 것은 둘이다:
-   * **요청 수** — 두 번째 요청은 같은 입력을 정가로 한 번 더 읽고 아무도 읽지 않는 답을
-   * 받아 온다 — 과 **이력의 모양** — `function_call`이 `function_call_output` 짝을 잃으면
-   * 그 이력을 재사용하는 다음 요청이 통째로 거부된다.
-   */
-  it("outputOnly는 요청 한 번으로 끝나고 도구 결과를 이력에 남긴다", async () => {
-    const { client, sent } = makeStubClient([
-      response([functionCall("c1", "report_training", "{}")]),
-      // 이 답은 나가지 않는다 — 두 번째 요청이 있으면 스텁이 이것을 소비한다
-      response([message("아무도 읽지 않는 답")]),
-    ]);
-    const handled: unknown[] = [];
-    const tool: GameToolSpec = {
-      name: "report_training",
-      description: "테스트 도구",
-      inputSchema: { type: "object" as const, properties: {} },
-      handle(input: unknown) {
-        handled.push(input);
-        return { ok: true, message: "반영" };
-      },
-    };
-
-    const llm = new OpenAiGameLLM(testConfig, client);
-    const result = await llm.runTurn({
-      system: "시스템",
-      history: [],
-      user: "결산",
-      tools: [tool],
-      toolChoice: { name: "report_training" },
-      outputOnly: true,
-    });
-
-    expect(sent).toHaveLength(1);
-    // 도구는 평소대로 돈다 — 닫는 것은 왕복이지 실행이 아니다
-    expect(handled).toEqual([{}]);
-    expect(result.toolCallCount).toBe(1);
-    expect(result.stopReason).toBe("tool_use");
-
-    const items = result.history.messages as InputItem[];
-    expect(items.map((item) => item.type ?? item.role)).toEqual([
-      "user",
-      "function_call",
-      "function_call_output",
-    ]);
-    expect(items[2]).toMatchObject({ call_id: "c1", output: "반영" });
-  });
-
-  it("toolChoice가 없으면 tool_choice를 싣지 않는다", async () => {
-    const { client, sent } = makeStubClient([response([message("됐다")])]);
-    const tool: GameToolSpec = {
-      name: "noop",
-      description: "테스트 도구",
-      inputSchema: { type: "object" as const, properties: {} },
-      handle: () => ({ ok: true, message: "ok" }),
-    };
-    const llm = new OpenAiGameLLM(testConfig, client);
-    await llm.runTurn({ system: "시스템", history: [], user: "안녕", tools: [tool] });
-
-    expect(sent[0]!.tool_choice).toBeUndefined();
-  });
-
   /**
    * 추론을 모르는 모델은 `reasoning`이 실린 요청 자체를 400으로 거부한다 —
    * 값을 박아 두면 `config/llm.yml`이 모델을 못 바꾼다 (models.md §1-2).
@@ -829,4 +736,74 @@ describe("OpenAiGameLLM 오류 종류", () => {
       .catch((e: unknown) => e);
     expect(llmErrorKind(error)).toBe("filtered");
   });
+});
+
+/**
+ * **산출이 JSON 하나인 호출은 도구 없이 `text.format`으로 간다** (models.md §3-2). 도구
+ * 호출·결과라는 형식은 산출 하나에 군더더기다 — 요청은 하나고 답은 본문이다.
+ */
+describe("OpenAiGameLLM 출력 스키마", () => {
+  const schema = {
+    type: "object" as const,
+    properties: { rating: { type: "integer", minimum: 1, maximum: 5 } },
+    required: ["rating"],
+  };
+
+  it("outputSchema는 text.format으로 실리고 도구 정의 없이 요청 한 번으로 끝난다", async () => {
+    const { client, sent } = makeStubClient([response([message('{"rating":3}')])]);
+    const result = await new OpenAiGameLLM(testConfig, client).runTurn({
+      system: "시스템",
+      history: [],
+      user: "결산",
+      outputSchema: schema,
+    });
+
+    expect(sent).toHaveLength(1);
+    // `strict: false`는 도구와 같은 이유다 — 중립 스키마는 strict 부분집합이 아니다.
+    // 이름 칸은 에이전트다: 캐시 키와 같은 단위
+    expect(sent[0]?.text).toEqual({
+      format: { type: "json_schema", name: "training-rater", schema, strict: false },
+    });
+    expect(sent[0]).not.toHaveProperty("tools");
+    expect(sent[0]).not.toHaveProperty("tool_choice");
+    expect(result.output).toEqual({ rating: 3 });
+    expect(result.text).toBe('{"rating":3}');
+    expect(result.toolCallCount).toBe(0);
+  });
+
+  it("outputSchema가 없으면 text도 output도 없다", async () => {
+    const { client, sent } = makeStubClient([response([message("됐다")])]);
+    const result = await new OpenAiGameLLM(testConfig, client).runTurn({
+      system: "시스템",
+      history: [],
+      user: "안녕",
+    });
+    expect(sent[0]).not.toHaveProperty("text");
+    expect(result.output).toBeUndefined();
+  });
+
+  /** 읽을 수 없는 본문은 `null`이지 예외가 아니다 — 실패로 세우는 것은 부르는 쪽이다 (agents.md §8) */
+  const unreadable: Array<[string, string, Record<string, unknown>]> = [
+    ["산문", "훈련은 잘 됐습니다.", {}],
+    [
+      "잘린 JSON",
+      '{"rating":',
+      { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } },
+    ],
+  ];
+
+  it.each(unreadable)(
+    "%s으로 답한 턴은 output이 null이고 던지지 않는다",
+    async (_label, text, extra) => {
+      const { client } = makeStubClient([response([message(text)], extra)]);
+      const result = await new OpenAiGameLLM(testConfig, client).runTurn({
+        system: "시스템",
+        history: [],
+        user: "결산",
+        outputSchema: schema,
+      });
+      expect(result.output).toBeNull();
+      expect(result.text).toBe(text);
+    },
+  );
 });

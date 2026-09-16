@@ -83,156 +83,7 @@ function makeStubClient(responses: GenerateContentResponse[]) {
 }
 
 describe("GeminiGameLLM", () => {
-  it("강제 도구는 첫 요청에만, chat 설정을 통째로 실은 per-request config로 간다", async () => {
-    const stub = makeStubClient([
-      response({
-        role: "model",
-        parts: [{ functionCall: { id: "call-1", name: "report_mood", args: {} } }],
-      }),
-      response({ role: "model", parts: [{ text: "끝." }] }),
-    ]);
-    const tool: GameToolSpec = {
-      name: "report_mood",
-      description: "테스트 도구",
-      inputSchema: { type: "object", properties: {} },
-      handle: () => ({ ok: true, message: "반영" }),
-    };
-
-    const llm = new GeminiGameLLM(testConfig, stub.client as never);
-    await llm.runTurn({
-      system: "고정 프롬프트",
-      history: [],
-      user: "결산",
-      tools: [tool],
-      toolChoice: { name: "report_mood" },
-    });
-
-    const first = stub.sentConfigs[0] as {
-      toolConfig?: { functionCallingConfig?: { mode?: string; allowedFunctionNames?: string[] } };
-      systemInstruction?: string;
-      maxOutputTokens?: number;
-      tools?: unknown[];
-    };
-    expect(first.toolConfig?.functionCallingConfig?.mode).toBe("ANY");
-    expect(first.toolConfig?.functionCallingConfig?.allowedFunctionNames).toEqual(["report_mood"]);
-    /**
-     * per-request config는 chat 설정을 상속하지 않고 대체한다(SDK 계약) — 모드만
-     * 얹으면 systemInstruction·도구·출력 상한이 첫 요청에서 통째로 사라진다.
-     */
-    expect(first.systemInstruction).toBe("고정 프롬프트");
-    expect(first.maxOutputTokens).toBe(testConfig.maxTokens);
-    expect(first.tools).toHaveLength(1);
-    /**
-     * 도구 결과를 돌려준 뒤에도 강제가 남아 있으면 모델이 턴을 끝낼 길이 없어
-     * 왕복 상한까지 같은 도구를 다시 부른다 — 그래서 두 번째 요청은 chat 설정(AUTO)이다.
-     */
-    expect(stub.sentConfigs[1]).toBeUndefined();
-  });
-
-  /**
-   * 강제 모드에서 Gemini는 스키마를 **펼쳐** 디코딩 문법을 만든다 — `maxItems: n`은 항목
-   * 스키마를 n벌 복제한 문법이 되어, 항목이 조금만 복잡해도 요청 전체가 400으로 떨어진다
-   * (models.md §3-2). `auto`로는 지나던 스키마가 강제에서만 걸리고 오류 본문은 어느 칸이
-   * 문제인지 말하지 않으므로, 걷어 냈다는 사실을 재는 자리는 여기뿐이다.
-   */
-  it("강제 도구의 스키마에서는 maxItems를 걷는다 — 중첩된 것까지", async () => {
-    const stub = makeStubClient([
-      response({
-        role: "model",
-        parts: [{ functionCall: { id: "call-1", name: "report_mood", args: {} } }],
-      }),
-      response({ role: "model", parts: [{ text: "끝." }] }),
-    ]);
-    const tool: GameToolSpec = {
-      name: "report_mood",
-      description: "테스트 도구",
-      inputSchema: {
-        type: "object",
-        properties: {
-          rows: {
-            type: "array",
-            maxItems: 30,
-            items: {
-              type: "object",
-              properties: { tags: { type: "array", maxItems: 4, items: { type: "string" } } },
-            },
-          },
-        },
-      },
-      handle: () => ({ ok: true, message: "반영" }),
-    };
-    const llm = new GeminiGameLLM(testConfig, stub.client as never);
-    await llm.runTurn({
-      system: "고정 프롬프트",
-      history: [],
-      user: "결산",
-      tools: [tool],
-      toolChoice: { name: "report_mood" },
-    });
-
-    const sentSchemas = JSON.stringify(
-      (stub.create.mock.calls[0]![0] as { config: { tools?: unknown } }).config.tools,
-    );
-    expect(sentSchemas).not.toContain("maxItems");
-    // 걷는 것은 그 한 낱말뿐이다 — 나머지 스키마는 그대로 간다
-    expect(sentSchemas).toContain("tags");
-    expect(JSON.stringify(stub.sentConfigs[0])).not.toContain("maxItems");
-    // 부르는 쪽의 스키마는 건드리지 않는다 — Zod가 지키는 상한이 여기서 사라지면 안 된다
-    expect(JSON.stringify(tool.inputSchema)).toContain("maxItems");
-  });
-
-  /**
-   * **산출만 받는 호출은 도구가 불린 자리에서 끝난다** (models.md §3-4). 재는 것은 둘이다:
-   * **요청 수** — 두 번째 요청은 같은 입력을 정가로 한 번 더 읽고 아무도 읽지 않는 답을
-   * 받아 온다 — 과 **이력의 모양** — 함수 호출이 짝을 잃으면 그 이력을 재사용하는 다음
-   * 요청이 통째로 거부된다.
-   */
-  it("outputOnly는 요청 한 번으로 끝나고 도구 결과를 합성 content로 남긴다", async () => {
-    const stub = makeStubClient([
-      response({
-        role: "model",
-        parts: [{ functionCall: { id: "call-1", name: "report_mood", args: {} } }],
-      }),
-      // 이 답은 나가지 않는다 — 두 번째 요청이 있으면 스텁이 이것을 소비한다
-      response({ role: "model", parts: [{ text: "아무도 읽지 않는 답" }] }),
-    ]);
-    const handled: unknown[] = [];
-    const tool: GameToolSpec = {
-      name: "report_mood",
-      description: "테스트 도구",
-      inputSchema: { type: "object", properties: {} },
-      handle(input: unknown) {
-        handled.push(input);
-        return { ok: true, message: "반영" };
-      },
-    };
-
-    const llm = new GeminiGameLLM(testConfig, stub.client as never);
-    const result = await llm.runTurn({
-      system: "고정 프롬프트",
-      history: [],
-      user: "결산",
-      tools: [tool],
-      toolChoice: { name: "report_mood" },
-      outputOnly: true,
-    });
-
-    expect(stub.sent).toHaveLength(1);
-    // 도구는 평소대로 돈다 — 닫는 것은 왕복이지 실행이 아니다
-    expect(handled).toEqual([{}]);
-    expect(result.toolCallCount).toBe(1);
-    expect(result.stopReason).toBe("tool_use");
-
-    const messages = result.history.messages as Content[];
-    expect(messages.map((m) => m.role)).toEqual(["user", "model", "user"]);
-    expect(messages[2]!.parts?.[0]?.functionResponse).toEqual({
-      id: "call-1",
-      name: "report_mood",
-      response: { output: "반영" },
-    });
-  });
-
-  it("toolChoice가 없으면 per-request config 없이 chat 설정의 AUTO로 간다", async () => {
+  it("도구는 chat 설정의 AUTO로 가고 per-request config는 없다", async () => {
     const stub = makeStubClient([response({ role: "model", parts: [{ text: "네." }] })]);
     const tool: GameToolSpec = {
       name: "noop",
@@ -666,5 +517,125 @@ describe("GeminiGameLLM 재시도", () => {
     );
     expect(stub.sendMessage).toHaveBeenCalledTimes(3);
     expect((result as { text: string }).text).toBe("@수석코치: 네.");
+  });
+});
+
+/**
+ * **산출이 JSON 하나인 호출은 도구 없이 `responseJsonSchema`로 간다** (models.md §3-2).
+ * 강제 도구(`ANY`)가 스키마를 펼쳐 문법을 만들다 400을 내던 자리다 — 요청은 하나고
+ * 답은 본문이다.
+ */
+describe("GeminiGameLLM 출력 스키마", () => {
+  const schema = {
+    type: "object" as const,
+    properties: { mood: { type: "string", maxLength: 20 } },
+    required: ["mood"],
+  };
+  const text = (body: string, finishReason = FinishReason.STOP) =>
+    response({ role: "model", parts: [{ text: body }] }, finishReason);
+  const chatConfig = (stub: ReturnType<typeof makeStubClient>) =>
+    (stub.create.mock.calls[0]![0] as { config: Record<string, unknown> }).config;
+
+  it("outputSchema는 chat 설정의 responseMimeType·responseJsonSchema로 실리고 도구는 없다", async () => {
+    const stub = makeStubClient([text('{"mood":"좋음"}')]);
+    const result = await new GeminiGameLLM(testConfig, stub.client as never).runTurn({
+      system: "고정 프롬프트",
+      history: [],
+      user: "결산",
+      outputSchema: schema,
+    });
+
+    const config = chatConfig(stub);
+    expect(config.responseMimeType).toBe("application/json");
+    // 걷는 열쇠는 `maxItems`뿐이다 — 이 스키마엔 없어 그대로 나간다
+    expect(config.responseJsonSchema).toEqual(schema);
+    expect(config.tools).toBeUndefined();
+    expect(config.toolConfig).toBeUndefined();
+    // per-request config 없이 chat 설정 그대로, 요청은 한 번이다
+    expect(stub.sentConfigs).toEqual([undefined]);
+    expect(result.output).toEqual({ mood: "좋음" });
+    expect(result.text).toBe('{"mood":"좋음"}');
+    expect(result.toolCallCount).toBe(0);
+  });
+
+  it("outputSchema가 없으면 그 칸도 output도 없다", async () => {
+    const stub = makeStubClient([text("@수석코치: 네.")]);
+    const result = await new GeminiGameLLM(testConfig, stub.client as never).runTurn({
+      system: "고정 프롬프트",
+      history: [],
+      user: "안녕",
+    });
+    const config = chatConfig(stub);
+    expect(config).not.toHaveProperty("responseMimeType");
+    expect(config).not.toHaveProperty("responseJsonSchema");
+    expect(result.output).toBeUndefined();
+  });
+
+  /** 읽을 수 없는 본문은 `null`이지 예외가 아니다 — 실패로 세우는 것은 부르는 쪽이다 (agents.md §8) */
+  it.each([
+    ["산문", "결산은 이렇습니다.", FinishReason.STOP],
+    ["잘린 JSON", '{"mood":', FinishReason.MAX_TOKENS],
+  ] as const)(
+    "%s으로 답한 턴은 output이 null이고 던지지 않는다",
+    async (_label, body, finishReason) => {
+      const stub = makeStubClient([text(body, finishReason)]);
+      const result = await new GeminiGameLLM(testConfig, stub.client as never).runTurn({
+        system: "고정 프롬프트",
+        history: [],
+        user: "결산",
+        outputSchema: schema,
+      });
+      expect(result.output).toBeNull();
+      expect(result.text).toBe(body);
+    },
+  );
+  /**
+   * Gemini는 구조화 출력에서도 스키마를 문법으로 펼쳐 `maxItems: n`이 항목 스키마 n벌이 된다 —
+   * 요청 전체가 400이고 본문은 어느 칸인지 말하지 않는다. 2026-09 실측: 걷을 것은 `maxItems`
+   * 하나뿐이다. 재는 것은 그 경계다 — 중첩까지 걷고, 나머지 제약은 그대로 나간다.
+   */
+  it("responseJsonSchema에서 maxItems만 걷는다 — 중첩까지, 나머지 제약은 그대로", async () => {
+    const given = {
+      type: "object" as const,
+      properties: {
+        name: { type: "string", minLength: 1, maxLength: 40, pattern: "^[가-힣]+$" },
+        rows: {
+          type: "array",
+          minItems: 1,
+          maxItems: 30,
+          items: {
+            type: "object",
+            properties: { tags: { type: "array", maxItems: 4, items: { type: "string" } } },
+          },
+        },
+      },
+      required: ["rows"],
+    };
+    const snapshot = structuredClone(given);
+    const stub = makeStubClient([text("{}")]);
+    await new GeminiGameLLM(testConfig, stub.client as never).runTurn({
+      system: "고정 프롬프트",
+      history: [],
+      user: "결산",
+      outputSchema: given,
+    });
+
+    expect(chatConfig(stub).responseJsonSchema).toEqual({
+      type: "object",
+      properties: {
+        name: { type: "string", minLength: 1, maxLength: 40, pattern: "^[가-힣]+$" },
+        rows: {
+          type: "array",
+          minItems: 1,
+          items: {
+            type: "object",
+            properties: { tags: { type: "array", items: { type: "string" } } },
+          },
+        },
+      },
+      required: ["rows"],
+    });
+    // 부르는 쪽의 스키마는 그대로다 — Zod가 지키는 상한이 여기서 사라지면 안 된다
+    expect(given).toEqual(snapshot);
   });
 });
