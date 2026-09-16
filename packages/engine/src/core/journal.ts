@@ -156,8 +156,8 @@ export type JournalEntry =
     }
   | {
       kind: "orders.intent";
+      /** 설정·기록·재시도가 함께 쓰는 하나의 이름 — 도구 이름은 없다 (models.md §3-2) */
       agent: string;
-      tool: string;
       /** 감독의 말 원문 — 해석기에 들어간 그것 */
       raw: string | null;
       ok: boolean;

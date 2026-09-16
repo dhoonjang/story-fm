@@ -5,10 +5,10 @@ import {
   type AgentName,
   type GameLLM,
   type GameToolSpec,
+  type JsonObjectSchema,
 } from "@story-fm/llm";
 import { journal } from "@story-fm/engine";
-import { ModelOutputError, requireToolCall, retryOnce } from "./retry";
-import { inputError } from "./tool-schema";
+import { ModelOutputError, readOutput, retryOnce } from "./retry";
 
 /**
  * **받아쓰기 명령의 묶음 산출** — 해석기가 코어 명령의 인자를 대신 채운다 (agents.md §1).
@@ -50,16 +50,12 @@ export type OpsCaps = Readonly<Record<string, number>>;
 /**
  * `ops`의 JSON 스키마 — 호출 이름마다 그 도구의 입력 스키마를 배열로.
  *
- * ⚠️ **상한은 `maxItems`가 아니라 설명 문장으로 간다** (models.md §3-2). 해석기는
- * 강제 도구로 부르는데(`toolChoice`), Gemini는 그 모드에서 스키마를 **펼쳐** 디코딩
- * 문법을 만든다 — `maxItems: n`은 항목 스키마를 n벌 복제한 문법이 되어, 명령 열셋에
- * 4를 걸면 문법이 한도를 넘어 요청 전체가 400 `INVALID_ARGUMENT`으로 떨어진다.
- * 오류 본문은 `Request contains an invalid argument.` 한 줄뿐이라 어느 칸이 문제인지
- * 말하지 않고, §1-1의 표에서 `unknown`이라 화면에는 "응답을 받지 못해"만 선다.
- *
- * 상한 자체는 `caps`(`TACTIC_CAPS`)가 여전히 한 벌로 쥐고, 지키는 것은 `parseOps`다 —
- * 모델은 문장으로 알고 코어가 잘라 낸다. 스키마에 못 적는 제약은 이 자리가 처음이
- * 아니다(`.nullable()`·`.default()` — tool-schema.ts).
+ * ⚠️ **상한은 `maxItems`가 아니라 설명 문장으로 간다** (models.md §3-2). 제공자가 받는
+ * 스키마 부분집합이 갈려 배열 크기 제약을 아예 받지 않는 자리가 있고(Anthropic), 스키마를
+ * 문법으로 펼치는 자리는 `maxItems: n`이 항목 스키마 n벌이 되어 명령 열셋에 4를 걸면
+ * 요청 전체가 400으로 떨어진다. 상한 자체는 `caps`(`TACTIC_CAPS`)가 여전히 한 벌로 쥐고,
+ * 지키는 것은 `parseOps`다 — 모델은 문장으로 알고 코어가 잘라 낸다. 스키마에 못 적는
+ * 제약은 이 자리가 처음이 아니다(`.nullable()`·`.default()` — tool-schema.ts).
  */
 export function buildOpsSchema(
   specs: ReadonlyMap<string, GameToolSpec>,
@@ -81,28 +77,24 @@ export function buildOpsSchema(
 }
 
 /**
- * 해석기 하나가 **강제로 거는 산출 도구의 선언** — 이름·설명·입력 스키마.
+ * 해석기 하나가 요청에 싣는 **출력 스키마** — `{ ops, unresolved }` (models.md §3-2).
  *
- * `runOpsOrders`가 여기에 핸들러를 붙여 쓰고, 강제 선언 목록(`forcedTools`)이 같은
- * 함수를 부른다. 선언을 두 벌로 적으면 재는 자가 실제로 나가는 것과 다른 것을 잰다.
+ * `runOpsOrders`가 이것으로 답을 받고, 출력 스키마 선언 열(`outputAgents`)이 같은 함수를
+ * 부른다. 선언을 두 벌로 적으면 재는 자가 실제로 나가는 것과 다른 것을 잰다.
  */
-export function opsToolDeclaration(
+export function opsOutputSchema(
   spec: OpsAgentSpec,
   specs: ReadonlyMap<string, GameToolSpec>,
-): Pick<GameToolSpec, "name" | "description" | "inputSchema"> {
+): JsonObjectSchema {
   return {
-    name: spec.tool,
-    description: "감독의 말을 명령의 인자로 제출한다. 이 도구로만 답한다.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        ops: buildOpsSchema(specs, spec.ops, spec.opsHint, spec.caps),
-        unresolved: {
-          type: "string",
-          minLength: 1,
-          maxLength: 200,
-          description: spec.unresolvedHint,
-        },
+    type: "object",
+    properties: {
+      ops: buildOpsSchema(specs, spec.ops, spec.opsHint, spec.caps),
+      unresolved: {
+        type: "string",
+        minLength: 1,
+        maxLength: 200,
+        description: spec.unresolvedHint,
       },
     },
   };
@@ -197,16 +189,19 @@ export interface OpsOrders {
   unresolved?: string;
 }
 
-const ReportSchema = z.object({
+/**
+ * 해석기의 산출 — `ops`는 모양만 보고(`parseOps`가 목록의 이름과 배열만 남긴다) `unresolved`는
+ * 여기서 잰다. 명령 인자의 검증은 적용 때 그 명령의 Zod가 한다.
+ */
+const OpsReportSchema = z.object({
+  ops: z.record(z.unknown()).optional(),
   unresolved: z.string().min(1).max(200).optional(),
 });
 
 /** 한 해석기를 세우는 데 필요한 전부 — 프롬프트·명령 목록·문구 */
 export interface OpsAgentSpec {
-  /** `config/llm.yml`의 키이자 재시도 로그의 이름 */
+  /** `config/llm.yml`의 키이자 재시도 로그의 이름 — 기록·설정·재시도가 전부 이 이름으로 돈다 */
   agent: AgentName;
-  /** 출력 스키마의 이름 — 요청에 강제로 실린다 */
-  tool: string;
   system: string;
   /** 채울 명령과 그 순서 */
   ops: readonly string[];
@@ -221,9 +216,10 @@ export interface OpsAgentSpec {
 /**
  * **받아쓰기 해석기의 한 벌** — 훈련과 시장이 같은 함수를 지난다 (agents.md §1).
  *
- * 산출이 나온 뒤의 실패는 실패가 아니고(이미 완성된 산출을 버리지 않는다), 산출 없이
- * 두 번 실패하면 도구가 반려로 답한다. 빈 산출도 반려다 — 아무것도 부르지 않은 채
- * "걸었습니다"가 돌아가면 감독은 걸리지 않은 지시 위에 다음 판단을 쌓는다.
+ * 도구 없이 출력 스키마로 답을 받으므로 요청은 하나다(models.md §3-2). 산출이 안 오거나
+ * 스키마를 못 지나면 한 번 더 부르고, 그래도 없으면 도구가 반려로 답한다. 빈 산출도
+ * 반려다 — 아무것도 부르지 않은 채 "걸었습니다"가 돌아가면 감독은 걸리지 않은 지시 위에
+ * 다음 판단을 쌓는다.
  */
 export async function runOpsOrders(
   spec: OpsAgentSpec,
@@ -241,45 +237,32 @@ export async function runOpsOrders(
     journal({
       kind: "orders.intent",
       agent: spec.agent,
-      tool: spec.tool,
       raw: raw ?? null,
       retried: attempts > 1,
       ok: false,
       ...rest,
     } as Parameters<typeof journal>[0]);
-  const tool: GameToolSpec = {
-    ...opsToolDeclaration(spec, specs),
-    handle: (input: unknown) => {
-      const parsed = ReportSchema.safeParse(input);
-      // 무엇이 틀렸는지 자리까지 돌려줘야 재시도가 같은 실수를 반복하지 않는다
-      if (!parsed.success) return inputError(parsed.error);
-      const { ops, truncated } = parseOps((input as { ops?: unknown }).ops, spec.ops, spec.caps);
-      orders = {
-        ops,
-        ...(Object.keys(truncated).length > 0 ? { truncated } : {}),
-        ...(parsed.data.unresolved ? { unresolved: parsed.data.unresolved } : {}),
-      };
-      return { ok: true, message: "지시를 받았습니다" };
-    },
-  };
+  const schema = opsOutputSchema(spec, specs);
   try {
     await retryOnce(
       spec.agent,
-      () =>
-        requireToolCall(spec.tool, () => {
-          attempts += 1;
-          client ??= createGameLLM(agentConfig(spec.agent));
-          return client.runTurn({
-            system: spec.system,
-            history: [],
-            user,
-            tools: [tool],
-            toolChoice: { name: spec.tool },
-            // 산출은 이 도구 하나다 — 결과를 돌려주는 두 번째 요청은 같은 입력을
-            // 한 번 더 읽고 아무도 읽지 않는 답을 받아 온다 (models.md §3-4)
-            outputOnly: true,
-          });
-        }),
+      async () => {
+        attempts += 1;
+        client ??= createGameLLM(agentConfig(spec.agent));
+        const result = await client.runTurn({
+          system: spec.system,
+          history: [],
+          user,
+          outputSchema: schema,
+        });
+        const report = readOutput(spec.agent, OpsReportSchema, result);
+        const { ops, truncated } = parseOps(report.ops, spec.ops, spec.caps);
+        orders = {
+          ops,
+          ...(Object.keys(truncated).length > 0 ? { truncated } : {}),
+          ...(report.unresolved ? { unresolved: report.unresolved } : {}),
+        };
+      },
       () => orders !== null,
     );
   } catch (error) {

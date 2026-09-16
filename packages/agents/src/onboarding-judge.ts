@@ -31,13 +31,7 @@ import {
   tierOfTeamIn,
   type GameState,
 } from "@story-fm/engine";
-import {
-  agentConfig,
-  createGameLLM,
-  resolveLlmMode,
-  type GameLLM,
-  type GameToolSpec,
-} from "@story-fm/llm";
+import { agentConfig, createGameLLM, resolveLlmMode, type GameLLM } from "@story-fm/llm";
 import {
   buildGmStateNote,
   describeCharacters,
@@ -46,8 +40,8 @@ import {
 } from "./gm-input";
 import type { GmTurnResult } from "./gm-types";
 import { buildOnboardingTurn } from "./mock-gm";
-import { retryOnce, requireToolCall, ModelOutputError } from "./retry";
-import { inputError, toToolSchema } from "./tool-schema";
+import { ModelOutputError, readOutput, retryOnce } from "./retry";
+import { toToolSchema } from "./tool-schema";
 
 /**
  * **온보딩** — 새 게임이 서기 전에 딱 한 번 도는 호출 (career.md §1 · agents.md §4-2).
@@ -55,7 +49,8 @@ import { inputError, toToolSchema } from "./tool-schema";
  * **판정과 첫 장면을 한 호출이 낸다.** 갈라 두면 장면을 쓰는 쪽은 방금 정해진 결이
  * 무엇인지 스냅샷으로만 알고, 시작 사건을 고른 쪽은 그것이 어떤 장면으로 열릴지 모른다 —
  * 같은 머리가 실마리를 고르고 그 실마리를 심는 장면을 쓰는 것이 온보딩의 자연스러운 꼴이다.
- * 순서는 경기 마감과 같다(§3): 산출 도구를 먼저 부르고, 그 뒤 본문으로 장면을 쓴다.
+ * 꼴은 경기 마감과 같다(§3): 판정 셋과 첫 장면이 한 JSON이고, 장면은 `scene` 칸이다
+ * (models.md §3-2).
  *
  * 세 가지를 낸다 — 시작 지갑 · 능력치의 결(앵커에서 축당 ±8, 합 ±10) · 시작 사건(셋까지,
  * 그 줄이 이름을 부르는 실재하는 사람에게만 걸어서). 능력치의 총량은 앵커가 쥔다 — 판정이 옮기는 것은
@@ -72,8 +67,8 @@ export const ONBOARDING_JUDGE_SYSTEM = `당신은 새로 부임하는 축구 감
 <characters> — 첫 장면에 세울 수석코치의 카드: 성격·말투·관계.
 <snapshot> — 오늘 날짜와 선수단·일정의 사실. 첫 장면이 짚을 것이 여기 있다.
 
-# 순서
-판정 도구를 먼저 부르고, 그다음 첫 장면을 쓴다.
+# 산출
+판정 셋과 첫 장면을 JSON 하나로 낸다 — wallet · reason · attributes · openings · scene.
 
 # 지갑
 - 돈이 도는 일을 했으면 위로 — 에이전트, 단장, 사업, 광고, 방송, 스타 선수의 계약. 오래 벌었으면 위로.
@@ -91,15 +86,15 @@ export const ONBOARDING_JUDGE_SYSTEM = `당신은 새로 부임하는 축구 감
 - title은 이름 하나, line은 사실의 꼴로 — 무엇이 걸려 있고 누가 지켜보는가. 결말을 적지 않는다. 문장은 GM이 쓴다.
 - subjectId는 <club>에 적힌 id만, 그리고 그 사람의 이름을 title이나 line에 실제로 쓴 실마리에만 건다. 줄이 아무도 부르지 않으면 비운다 — 언론·보드는 사람 없이 서는 것이 자연스럽다.
 
-# 첫 장면
+# 첫 장면 (scene)
 오늘은 감독의 부임 첫날이다. **수석코치의 말로 연다** — 감독을 맞이하고, 오늘 감독이 정할 것을 앞에 놓는다.
 - 방금 세운 시작 사건이 이 장면의 재료다. 실마리를 결말 없이 심는다 — 누가 기다리고 있고 무엇이 걸려 있는지까지.
 - <snapshot>의 사실을 짚는다 — 소집일, 다음 일정, 몸이 성치 않은 선수. 없는 사실을 지어내지 않는다.
 - 감독은 유저가 연기한다 — **감독의 말을 대신 쓰지 마라.** 장면은 감독이 답할 자리에서 닫는다.
 - 4~10줄. 판정의 근거나 수치는 장면에 적지 않는다 — 능력치·지갑 액수·확률.
 
-# 출력 문법
-장면은 @로 연다 — 시각 줄은 코어가 붙인다.
+# 출력 문법 (scene)
+장면은 @로 연다 — 줄은 줄바꿈으로 가르고, 시각 줄은 코어가 붙인다.
 - @이름: 사람의 말 — 수석코치는 <characters>의 id로 태그를 단다.
 - @: 화자 없는 내레이션. *별표 하나*로 감싼 것이 행동·연출이다.
 - 같은 화자가 이어 말하면 태그를 다시 적지 않는다.
@@ -110,6 +105,9 @@ export const ONBOARDING_JUDGE_SYSTEM = `당신은 새로 부임하는 축구 감
 - 앵커에서 크게 벗어나도 코어가 잘라내므로 결을 정직하게 반영하는 것이 낫다.`;
 
 const attribute = z.number().int().min(0).max(100);
+
+/** 첫 장면의 길이 상한 — 프롬프트는 4~10줄을 요구하고, 여기는 그 여유다 */
+const SCENE_MAX = 3000;
 
 const ReportInputSchema = z.object({
   wallet: z
@@ -145,16 +143,15 @@ const ReportInputSchema = z.object({
     )
     .max(MAX_OPENINGS)
     .optional(),
+  /** 첫 장면 — 판정과 한 JSON이라 같은 머리가 실마리를 고르고 심는다 (agents.md §4-2) */
+  scene: z
+    .string()
+    .min(1)
+    .max(SCENE_MAX)
+    .describe("부임 첫날의 첫 장면 — 4~10줄, 출력 문법 그대로, 줄은 줄바꿈으로"),
 });
-type ReportInput = z.infer<typeof ReportInputSchema>;
 
-/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
-export const REPORT_ONBOARDING_TOOL = "report_onboarding";
-
-export const REPORT_ONBOARDING_DESCRIPTION =
-  "이 감독의 시작 자산·능력치의 결·시작 사건을 제출한다. 폭을 벗어난 값은 코어가 잘라낸다.";
-
-/** 모델이 보는 입력 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
+/** 모델이 보는 출력 스키마 — 위 Zod 한 벌에서 파생한다 (prompts.md §2 · models.md §3-2) */
 export const REPORT_ONBOARDING_INPUT = toToolSchema(ReportInputSchema);
 
 /** 핵심 선수 수 — 시작 사건이 걸 수 있는 이름의 수이지 스쿼드 목록이 아니다 */
@@ -252,20 +249,6 @@ function isValidOnboardingText(state: GameState, text: string): boolean {
   );
 }
 
-function makeReportTool(onReport: (report: ReportInput) => void): GameToolSpec {
-  return {
-    name: REPORT_ONBOARDING_TOOL,
-    description: REPORT_ONBOARDING_DESCRIPTION,
-    inputSchema: REPORT_ONBOARDING_INPUT,
-    handle: (input: unknown) => {
-      const parsed = ReportInputSchema.safeParse(input);
-      if (!parsed.success) return inputError(parsed.error);
-      onReport(parsed.data);
-      return { ok: true, message: "판정 접수" };
-    },
-  };
-}
-
 /**
  * **새 게임 한 호출** — 배경 → 지갑 · 능력치의 결 · 시작 사건, 그리고 부임 첫날의 첫
  * 장면. 상태를 직접 고치고 장면을 돌려준다 (career.md §1 · agents.md §4-2).
@@ -275,7 +258,7 @@ function makeReportTool(onReport: (report: ReportInput) => void): GameToolSpec {
  * 이 게임의 첫 장면인 줄 알고 다시 시작할 기회를 잃는다. 호출 실패·잘린 응답·문법 위반은
  * 한 번 다시 시도하고, 그래도 안 되면 오류를 올린다.
  *
- * 다시 불러도 남는 자국이 없다 — 도구는 지역 변수에 담기만 하고, 장부는 호출이 끝난
+ * 다시 불러도 남는 자국이 없다 — 산출은 지역 변수에 담기만 하고, 장부는 호출이 끝난
  * 뒤에 한 번 움직인다. `buildOnboardingTurn`은 mock 모드 전용이다.
  */
 export async function runOnboarding(
@@ -291,36 +274,34 @@ export async function runOnboarding(
     return buildOnboardingTurn(state);
   }
 
-  let judged: ReportInput | undefined;
   let client = llm;
-  const turn = await retryOnce("onboarding", () =>
-    requireToolCall(REPORT_ONBOARDING_TOOL, async () => {
-      client ??= createGameLLM(agentConfig("onboarding-judge"));
-      const result = await client.runTurn({
-        system: ONBOARDING_JUDGE_SYSTEM,
-        history: [],
-        user: buildOnboardingJudgePrompt(state, background, walletAnchor),
-        tools: [makeReportTool((r) => (judged = r))],
-        toolChoice: { name: REPORT_ONBOARDING_TOOL },
-        // ⚠️ maxTokens를 좁히지 않는다 — 상한은 사고(thinking)+본문 합산이라
-        // 장면 길이만 보고 잡으면 본문이 문장 한복판에서 잘린다
-      });
-      // 상한에 걸린 응답은 문장이 끊겨 있다 — 문법 검사를 통과해도 걸러낸다
-      if (result.stopReason === "truncated") {
-        throw new ModelOutputError("첫 장면이 출력 상한에 걸려 문장이 잘렸습니다");
-      }
-      const text = humanizePlayerIds(state, sanitizeSceneText(result.text).trim());
-      if (!isValidOnboardingText(state, text)) {
-        throw new ModelOutputError(`첫 장면이 출력 문법을 어겼습니다:\n${text}`);
-      }
-      return { ...result, text };
-    }),
-  );
+  const turn = await retryOnce("onboarding", async () => {
+    client ??= createGameLLM(agentConfig("onboarding-judge"));
+    const result = await client.runTurn({
+      system: ONBOARDING_JUDGE_SYSTEM,
+      history: [],
+      user: buildOnboardingJudgePrompt(state, background, walletAnchor),
+      // 판정 셋과 첫 장면이 JSON 하나다 — 도구 왕복이 없다 (models.md §3-2)
+      outputSchema: REPORT_ONBOARDING_INPUT,
+      // ⚠️ maxTokens를 좁히지 않는다 — 상한은 사고(thinking)+본문 합산이라
+      // 장면 길이만 보고 잡으면 본문이 문장 한복판에서 잘린다
+    });
+    // 상한에 걸린 응답은 JSON이 끊겨 있다 — 산출이 없는 것과 같은 실패지만 이유를 남긴다
+    if (result.stopReason === "truncated") {
+      throw new ModelOutputError("첫 장면이 출력 상한에 걸려 문장이 잘렸습니다");
+    }
+    const report = readOutput("onboarding", ReportInputSchema, result);
+    const text = humanizePlayerIds(state, sanitizeSceneText(report.scene).trim());
+    if (!isValidOnboardingText(state, text)) {
+      throw new ModelOutputError(`첫 장면이 출력 문법을 어겼습니다:\n${text}`);
+    }
+    return { report, text, usage: result.usage };
+  });
 
-  const report: ReportInput | undefined = judged;
-  state.manager.wallet = clampStartingWallet(report?.wallet, walletAnchor);
-  state.manager.attributes = clampJudgedAttributes(report?.attributes, attributeAnchor);
-  if (report?.openings && report.openings.length > 0) seedOpenings(state, report.openings);
+  const { report } = turn;
+  state.manager.wallet = clampStartingWallet(report.wallet, walletAnchor);
+  state.manager.attributes = clampJudgedAttributes(report.attributes, attributeAnchor);
+  if (report.openings && report.openings.length > 0) seedOpenings(state, report.openings);
 
   // 첫 장면은 시계를 옮기지 않는다 — 헤더가 없으면 세워 준다
   const stamped = parseSceneHeader(turn.text).point

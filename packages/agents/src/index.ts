@@ -21,4 +21,4 @@ export * from "./gm";
 export * from "./onboarding-judge";
 export * from "./skill-descriptions";
 export * from "./tool-schema";
-export * from "./forced-tools";
+export * from "./output-agents";

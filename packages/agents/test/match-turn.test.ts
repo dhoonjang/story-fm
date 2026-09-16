@@ -25,6 +25,7 @@ import {
   buildLedgerNote,
   buildMatchTools,
   buildSegmentMessage,
+  FINALIZE_MATCH_SYSTEM,
   GmTurnFailure,
   MATCH_ADVANCED,
   TACTIC_CAPS,
@@ -35,6 +36,7 @@ import {
   STALLED_CLOCK_TURNS,
   stampMatchScene,
   stampMatchStream,
+  TACTIC_ORDERS_SYSTEM,
   truncatedNote,
   type GmToolCall,
   type TacticOrders,
@@ -132,9 +134,16 @@ function turn(
 /** 진행하는 턴 — 굴릴지는 매치 GM이 부른 도구가 정한다 (agents.md §3) */
 const GO: TacticOrders = { ops: {} };
 
-/** 요청이 강제한 도구 — 어느 에이전트의 호출인지는 이것이 가른다 */
-const forced = (req: TurnRequest): string | undefined =>
-  typeof req.toolChoice === "object" ? req.toolChoice.name : undefined;
+/**
+ * 출력 스키마를 실은 요청이 어느 에이전트의 것인가 — 도구 이름이 없으므로 시스템
+ * 프롬프트가 가른다 (models.md §3-2). 도구를 쥔 GM 요청은 `undefined`다.
+ */
+const outputAgentOf = (req: TurnRequest): "tactic-orders" | "finalize-match" | undefined => {
+  if (req.outputSchema === undefined) return undefined;
+  if (req.system === TACTIC_ORDERS_SYSTEM) return "tactic-orders";
+  if (req.system === FINALIZE_MATCH_SYSTEM) return "finalize-match";
+  return undefined;
+};
 
 describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
   it("진행 의도가 없으면 경기가 한 발도 나가지 않는다", () => {
@@ -372,11 +381,11 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     return state;
   }
 
-  /** 해석기 흉내 — 지시 하나를 낸다 (advance는 의도의 것이 아니다) */
+  /** 해석기 흉내 — 지시 하나를 산출 JSON으로 낸다 (advance는 의도의 것이 아니다) */
   const interpreter = async (req: TurnRequest, intent: TacticOrders = { ops: {} }) => {
-    const tool = req.tools?.find((t) => t.name === "report_tactic_orders");
-    if (tool) await tool.handle(intent);
-    return answered("", tool ? 1 : 0);
+    expect(req.outputSchema).toBeDefined();
+    expect(req.tools).toBeUndefined();
+    return { ...answered(""), output: { ...intent } };
   };
 
   /**
@@ -412,7 +421,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     const out = state.pendingMatch!.ledger[side].onPitch[10]!;
     const incoming = state.pendingMatch!.ledger[side].bench[0]!;
     runTurn.mockImplementation(async (req: TurnRequest) => {
-      if (forced(req) === "report_tactic_orders") {
+      if (outputAgentOf(req) === "tactic-orders") {
         return interpreter(req, { ops: { substitute: [{ out, in: incoming }] } });
       }
       const orders = req.tools?.find((t) => t.name === "tactic_orders");
@@ -465,8 +474,10 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     const minute = state.pendingMatch!.ledger.minute;
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     runTurn.mockImplementation(async (req: TurnRequest) => {
-      // 해석기가 도구 없이 본문만 낸다 — 두 번 다
-      if (forced(req) === "report_tactic_orders") return answered("해석해 보겠습니다.");
+      // 해석기가 산출 없이 본문만 낸다 — 두 번 다
+      if (outputAgentOf(req) === "tactic-orders") {
+        return { ...answered("해석해 보겠습니다."), output: null };
+      }
       const orders = req.tools?.find((t) => t.name === "tactic_orders");
       const reply = await orders!.handle({ orders: "압박 올려" });
       expect(reply.ok).toBe(false);
@@ -490,7 +501,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     const minute = state.pendingMatch!.ledger.minute;
     const thrown = new LlmTimeoutError("tactic-orders", 60_000);
     runTurn.mockImplementation(async (req: TurnRequest) => {
-      if (forced(req) === "report_tactic_orders") throw thrown;
+      if (outputAgentOf(req) === "tactic-orders") throw thrown;
       const orders = req.tools?.find((t) => t.name === "tactic_orders");
       await orders!.handle({ orders: "압박 올려" });
       return answered("닿지 않는다", 1);
@@ -515,7 +526,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     runTurn.mockReset();
     const minute = state.pendingMatch!.ledger.minute;
     runTurn.mockImplementation(async (req: TurnRequest) => {
-      if (forced(req) === "report_tactic_orders") return interpreter(req);
+      if (outputAgentOf(req) === "tactic-orders") return interpreter(req);
       await req.tools!.find((t) => t.name === "advance_match")!.handle({});
       throw new ModelOutputError("중계가 잘렸습니다");
     });
@@ -543,8 +554,8 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
 /**
  * **경기 마감 — 도구 뒤의 에이전트가 결산과 마무리 중계를 쓴다** (agents.md §3 「경기 마감」).
  *
- * 마감 핸들러가 `finalizeMatch`로 앵커를 먼저 박고 마감 에이전트를 부른다 — 첫 왕복은
- * `settle_match`가 강제된다. GM이 마감을 부르지 않은 턴은 코어가 대신 부른다.
+ * 마감 핸들러가 `finalizeMatch`로 앵커를 먼저 박고 마감 에이전트를 부른다 — 결산과
+ * 마무리 중계가 산출 JSON 하나로 온다. GM이 마감을 부르지 않은 턴은 코어가 대신 부른다.
  */
 describe("경기 마감 — 결산은 도구 뒤의 에이전트가, 마무리는 장면의 끝에", () => {
   const previousMode = process.env.LLM_MODE;
@@ -581,24 +592,27 @@ describe("경기 마감 — 결산은 도구 뒤의 에이전트가, 마무리�
     seen: { anchors: Record<string, number>; mood: string | null; commentary: string },
   ) {
     return async (req: TurnRequest) => {
-      const tool = req.tools?.find((t) => t.name === "settle_match");
-      expect(tool).toBeDefined();
+      // 산출은 JSON 하나다 — 도구는 없다 (models.md §3-2)
+      expect(req.outputSchema).toBeDefined();
+      expect(req.tools).toBeUndefined();
       expect(req.user).toContain("<commentary>");
       seen.commentary = req.user;
       seen.anchors = { ...(state.matches.find((m) => m.id === matchId)?.result?.ratings ?? {}) };
       const ids = idsOfSettlement(req.user);
       expect(ids.length).toBeGreaterThan(0);
       seen.mood = ids[0]!;
-      const reply = await tool!.handle({
-        ratings: ids.map((playerId) => ({
-          playerId,
-          rating: (seen.anchors[playerId] ?? 6) + 0.5,
-          note: "흐름을 쥐었다",
-        })),
-        moods: [{ playerId: seen.mood, text: "오늘은 발이 가벼웠다", acknowledgesIssue: true }],
-      });
-      expect(reply.ok).toBe(true);
-      return answered("@중계: 마지막 휘슬. 홈 팬들이 일어섭니다.", 1);
+      return {
+        ...answered(""),
+        output: {
+          ratings: ids.map((playerId) => ({
+            playerId,
+            rating: (seen.anchors[playerId] ?? 6) + 0.5,
+            note: "흐름을 쥐었다",
+          })),
+          moods: [{ playerId: seen.mood, text: "오늘은 발이 가벼웠다", acknowledgesIssue: true }],
+          closing: "@중계: 마지막 휘슬. 홈 팬들이 일어섭니다.",
+        },
+      };
     };
   }
 
@@ -613,7 +627,7 @@ describe("경기 마감 — 결산은 도구 뒤의 에이전트가, 마무리�
     const settle = settler(state, matchId, seen);
     let finalizeReply = "";
     runTurn.mockImplementation(async (req: TurnRequest) => {
-      if (forced(req) === "settle_match") return settle(req);
+      if (outputAgentOf(req) === "finalize-match") return settle(req);
       const finalize = req.tools!.find((t) => t.name === "finalize_match")!;
       // 장부가 끝났으면 마감, 아니면 중계만
       if (state.pendingMatch?.ledger.phase === "finished") {
@@ -679,7 +693,7 @@ describe("경기 마감 — 결산은 도구 뒤의 에이전트가, 마무리�
     };
     const settle = settler(state, matchId, seen);
     runTurn.mockImplementation(async (req: TurnRequest) => {
-      if (forced(req) === "settle_match") return settle(req);
+      if (outputAgentOf(req) === "finalize-match") return settle(req);
       return answered("[90']\n@중계: 휘슬이 울립니다.");
     });
 
@@ -1009,7 +1023,7 @@ describe("시계 — 출처가 날짜의 주인을 정한다", () => {
    * 그쪽은 앵커가 남으므로 이 판의 시계와는 상관이 없다.
    */
   const scene = (text: string) => async (req: TurnRequest) =>
-    forced(req) ? answered("") : answered(text);
+    outputAgentOf(req) === undefined ? answered(text) : { ...answered(""), output: { ops: {} } };
 
   /** 시점 헤더 한 줄 — 읽히는 형식은 `[날짜 시간대 시:분]`이다 (prompts.md §1) */
   const header = (date: string, clock = "오후 3:20") => `[${date} ${clock}]`;

@@ -13,7 +13,6 @@ import {
   GM_SYSTEM,
   MATCH_GM_SYSTEM,
   MATCH_TOOL_DEFINITIONS,
-  SETTLE_MATCH_DESCRIPTION,
   SETTLE_MATCH_INPUT,
   SKILL_CATALOG,
   buildGmReference,
@@ -109,11 +108,12 @@ function gmSystemParts(): { map: number; guide: number; example: number } {
 }
 
 /**
- * 경기 마감의 고정층 — 마감 에이전트가 받는 결산 도구 하나(설명 + 스키마).
- * 경기당 한 번 실리므로 고정층 예산과는 다른 눈금이다 (agents.md §3).
+ * 경기 마감의 고정층 — 마감 에이전트가 요청에 싣는 출력 스키마(결산 규칙은 시스템
+ * 프롬프트로 옮겨 갔다 — models.md §3-2). 경기당 한 번 실리므로 고정층 예산과는 다른
+ * 눈금이다 (agents.md §3).
  */
 function settlementLayer(): number {
-  return SETTLE_MATCH_DESCRIPTION.length + JSON.stringify(SETTLE_MATCH_INPUT).length;
+  return JSON.stringify(SETTLE_MATCH_INPUT).length;
 }
 
 /**

@@ -55,10 +55,9 @@ export const TABLE_OPS: readonly string[] = [
   "propose_personal",
 ];
 
-/** 이 해석기의 한 벌 — 강제 선언 목록(`forcedTools`)도 이것을 읽는다 */
+/** 이 해석기의 한 벌 — 출력 스키마 선언 열(`outputAgents`)도 이것을 읽는다 */
 export const TABLE_ORDERS_SPEC: OpsAgentSpec = {
   agent: "table-orders",
-  tool: "report_table_move",
   system: TABLE_ORDERS_SYSTEM,
   ops: TABLE_OPS,
   opsHint: "이 협상에 걸 명령과 그 인자 — 감독이 이 말에서 정한 것만",

@@ -20,52 +20,44 @@ import {
   type GameState,
   type MatchRatingBrief,
 } from "@story-fm/engine";
-import {
-  agentConfig,
-  createGameLLM,
-  resolveLlmMode,
-  type GameLLM,
-  type GameToolSpec,
-} from "@story-fm/llm";
+import { agentConfig, createGameLLM, resolveLlmMode, type GameLLM } from "@story-fm/llm";
 import { agingDeclineLine } from "./aging-line";
 import { TURN_EXCERPT_CHARS, sanitizeCasterText } from "./gm-input";
 import type { GmToolCall } from "./gm-types";
-import { anchorStands, requireToolCall, retryOnce } from "./retry";
-import { inputError, toToolSchema } from "./tool-schema";
+import { anchorStands, ModelOutputError, readOutput, retryOnce } from "./retry";
+import { toToolSchema } from "./tool-schema";
 
 /**
  * 경기 마감 — **매치 GM의 `finalize_match` 도구 뒤에서 도는 에이전트** (agents.md §3
  * 「경기 마감」). 이 경기의 중계 전부(`<commentary>`)와 기준 평점 표(`<settlement>`)를
- * 읽고, 첫 왕복에 강제된 `settle_match`로 평점·적응도·능력치·심경을 낸 뒤 마무리
- * 중계를 쓴다. 앵커는 코어가 `finalizeMatch`로 먼저 박아 두고 한도로 자른다 —
- * 실패하면 앵커가 남고 마무리는 매치 GM이 쓴다.
+ * 읽고, 결산(평점·적응도·능력치·심경)과 마무리 중계를 **JSON 하나로** 낸다 — 도구 없이
+ * 출력 스키마로 받는다 (models.md §3-2). 앵커는 코어가 `finalizeMatch`로 먼저 박아 두고
+ * 한도로 자른다 — 실패하면 앵커가 남고 마무리는 매치 GM이 쓴다.
  */
 export const FINALIZE_MATCH_SYSTEM = `당신은 방금 끝난 축구 경기를 결산하고 마무리 중계를 쓰는 분석가다.
 
 # 입력
 - <commentary> — 이 경기의 중계 전부. 흐름·라커룸·벤치의 말이 여기 있다.
-- <settlement> — 출전 선수의 기준 평점 표. 결산 도구의 입력이다.
+- <settlement> — 출전 선수의 기준 평점 표. 결산의 입력이다.
 
-# 순서
-결산 도구를 먼저 부르고, 그다음 마무리 중계를 쓴다.
+# 산출
+결산과 마무리 중계를 JSON 하나로 낸다 — ratings · moods · closing.
 
-# 마무리 중계
-- 경기의 결과와 흐름을 4~8줄로 닫는다 — 결정적인 장면, 경기를 가른 사람, 마지막 휘슬.
-- 장면은 @로 연다. @중계: 중계. @: 화자 없는 내레이션, *별표 하나*가 연출. 시각 줄은 쓰지 않는다.
-- 한국어. 국내 축구 중계의 관용 표현으로.
-- 화자는 게임 내부의 수치를 입에 담지 않는다 — 능력치·전력 점수·확률·평점.`;
-
-/** 이 호출의 산출 — 첫 왕복이 강제한다 (agents.md §3) */
-export const SETTLE_MATCH_TOOL = "settle_match";
-
-export const SETTLE_MATCH_DESCRIPTION = `출전한 선수 전원의 경기 결산을 한 번에 제출한다 — 평점과 한 줄 근거, 전술 적응도, 능력치, 심경.
+# 결산
+출전한 선수 전원의 경기 결산을 한 번에 낸다 — 평점과 한 줄 근거, 전술 적응도, 능력치, 심경.
 - 기록(골·도움·슛·선방·카드)은 이미 기준 평점에 반영돼 있다. 더할 것은 기록에 안 남는 것이다 — 중계가 그린 지배력, 위기 관리, 실점 장면에서의 책임, 교체 투입 후의 영향, 짧게 뛰고도 흐름을 바꾼 순간.
 - 출전 시간을 감안한다. 15분 뛴 교체 선수를 90분 뛴 선수와 같은 잣대로 재지 않는다. 자리를 감안한다. 수비수의 무실점과 공격수의 무득점은 같은 무게가 아니다. 팀 결과에 휩쓸리지 않는다.
 - rating — ${RATING_MIN}~${RATING_MAX}, 기준 평점에서 ±${josa(String(RATING_BAND), "을/를")} 넘지 않는다. note는 한 문장 40자 안팎 — “무난했다” 같은 빈 말 대신 그 경기의 사실을 적는다.
 - drill — 이 경기로 전술 적응도가 얼마나 올랐는가, ${MATCH_FAMILIARITY_MIN}~${MATCH_FAMILIARITY_MAX}. 빠뜨린 선수는 변화가 없는 것으로 본다.
 - attribute · attributeStep — 이 경기로 한 축이 움직인 선수만, 0~${MATCH_ATTR_CAP}명, 각 한 축 +${ATTR_STEP_MAX} 또는 −${-ATTR_STEP_MIN}. ${agingDeclineLine()}
 - moods — 그 경기가 남긴 심경 한 문장(60자 안팎), ${MOOD_BATCH}명까지. 불만이 걸린 선수는 그 사실을 문장에 담고 acknowledgesIssue를 true로 적는다. 수치(평점·체력·퍼센트)는 문장에 적지 않는다.
-- 선수 id는 표의 것을 그대로 돌려준다. 두 번째 제출은 반영되지 않는다.`;
+- 선수 id는 표의 것을 그대로 돌려준다.
+
+# 마무리 중계 (closing)
+- 경기의 결과와 흐름을 4~8줄로 닫는다 — 결정적인 장면, 경기를 가른 사람, 마지막 휘슬.
+- 장면은 @로 연다. @중계: 중계. @: 화자 없는 내레이션, *별표 하나*가 연출. 시각 줄은 쓰지 않는다.
+- 한국어. 국내 축구 중계의 관용 표현으로.
+- 화자는 게임 내부의 수치를 입에 담지 않는다 — 능력치·전력 점수·확률·평점.`;
 
 /**
  * 스키마가 받아들이는 폭 — 코어 밴드(`RATING_MIN`~`RATING_MAX`,
@@ -81,6 +73,9 @@ const MAX_RATED_PLAYERS = 30;
 
 /** 근거 한 줄의 길이 상한 — 설명은 40자 안팎을 요구하고, 여기는 그 여유다 */
 const NOTE_MAX = 200;
+
+/** 마무리 중계의 길이 상한 — 프롬프트는 4~8줄을 요구하고, 여기는 그 여유다 */
+const CLOSING_MAX = 1500;
 
 const RatingEntrySchema = z.object({
   playerId: z.string().min(1).describe("<settlement> 표의 id 그대로"),
@@ -113,13 +108,23 @@ const MoodEntrySchema = z.object({
   /** 그 문장이 불만을 담았는가 — 코어는 낱말을 세지 않는다 (people.md §5) */
   acknowledgesIssue: z.boolean().optional().describe("그 문장이 이 선수의 불만을 담았는가"),
 });
-const SettleInputSchema = z.object({
+/**
+ * 이 호출의 산출 — 결산과 마무리 중계가 한 JSON이다. 마무리는 GM이 대신 쓸 수 있어
+ * 비워도 되지만, 결산 없는 산출은 없다.
+ */
+export const SettleMatchSchema = z.object({
   ratings: z.array(RatingEntrySchema).min(1).max(MAX_RATED_PLAYERS),
   moods: z.array(MoodEntrySchema).max(MOOD_BATCH).optional(),
+  closing: z
+    .string()
+    .max(CLOSING_MAX)
+    .optional()
+    .describe("마무리 중계 4~8줄 — 장면 문법 그대로, 줄은 줄바꿈으로"),
 });
+export type SettleMatchArgs = z.infer<typeof SettleMatchSchema>;
 
-/** 모델이 보는 입력 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
-export const SETTLE_MATCH_INPUT = toToolSchema(SettleInputSchema);
+/** 모델이 보는 출력 스키마 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
+export const SETTLE_MATCH_INPUT = toToolSchema(SettleMatchSchema);
 
 /**
  * 결산 표 — 기준 평점과 기록, 그리고 장부의 사건 줄. 중계는 `<commentary>`가 갖지만
@@ -177,45 +182,27 @@ export function buildCommentaryBlock(state: GameState, matchId: string): string 
 }
 
 /**
- * 결산 도구 — 평점·적응도·능력치는 `settleMatchRating`이 한 표식 아래 한 번만 받고,
- * 심경은 출전 선수로 좁혀 `applyMoodNotes`가 검사한다 (agents.md §4-3).
+ * 결산을 장부에 옮긴다 — 평점·적응도·능력치는 `settleMatchRating`이 한 표식 아래 한 번만
+ * 받고, 심경은 출전 선수로 좁혀 `applyMoodNotes`가 검사한다 (agents.md §4-3). 반영한 평점
+ * 수를 돌려준다.
+ *
+ * 표의 id를 하나도 맞추지 못한 산출은 **쓸 수 없는 산출**이다 — 다시 부르면 달라질 수
+ * 있으므로 `ModelOutputError`로 세워 한 번의 재시도를 탄다 (agents.md §8).
  */
-export function makeSettleTool(
+export function applySettlement(
   state: GameState,
   brief: MatchRatingBrief,
-  onApplied: (applied: number) => void,
-): GameToolSpec {
+  data: SettleMatchArgs,
+): number {
   const allowed = new Set(brief.players.map((p) => p.playerId));
-  return {
-    name: SETTLE_MATCH_TOOL,
-    description: SETTLE_MATCH_DESCRIPTION,
-    inputSchema: SETTLE_MATCH_INPUT,
-    handle(input: unknown) {
-      const parsed = SettleInputSchema.safeParse(input);
-      if (!parsed.success) return inputError(parsed.error);
-      // 평점·전술 적응도·능력치는 한 표식 아래 한 번만 — 코어가 두 번째 호출을 막는다
-      const { applied, skipped, already } = settleMatchRating(
-        state,
-        brief.matchId,
-        parsed.data.ratings,
-      );
-      if (already) {
-        // ok: false로 답하면 모델이 도구 루프를 한 바퀴 더 돈다
-        return { ok: true, message: "이 경기의 결산은 이미 반영됐습니다 — 다시 제출하지 마세요" };
-      }
-      if (applied === 0) {
-        return { ok: false, message: "반영된 평점이 없습니다 — 표의 id를 그대로 쓰세요" };
-      }
-      const moods = applyMoodNotes(state, parsed.data.moods ?? [], allowed);
-      onApplied(applied);
-      return {
-        ok: true,
-        message:
-          `평점 ${applied}명 반영${skipped > 0 ? ` (${skipped}명은 대상이 아니라 무시)` : ""}` +
-          (moods > 0 ? ` · 심경 ${moods}명` : ""),
-      };
-    },
-  };
+  const { applied, already } = settleMatchRating(state, brief.matchId, data.ratings);
+  // 이미 반영된 경기 — 코어가 두 번째를 막았고, 다시 쌓을 것도 없다
+  if (already) return 0;
+  if (applied === 0) {
+    throw new ModelOutputError("반영된 평점이 없습니다 — 표의 id를 그대로 쓰세요");
+  }
+  applyMoodNotes(state, data.moods ?? [], allowed);
+  return applied;
 }
 
 /** 마감 에이전트가 돌려주는 것 — 반영한 인원과 마무리 중계(비면 매치 GM이 쓴다) */
@@ -241,23 +228,21 @@ export async function runFinalizeMatch(
   let client = llm;
   await retryOnce(
     "finalize:match",
-    () =>
-      requireToolCall(SETTLE_MATCH_TOOL, async () => {
-        client ??= createGameLLM(agentConfig("finalize-match"));
-        const result = await client.runTurn({
-          system: FINALIZE_MATCH_SYSTEM,
-          history: [],
-          user: [
-            buildCommentaryBlock(state, brief.matchId),
-            ``,
-            buildSettlementMessage(brief),
-          ].join("\n"),
-          tools: [makeSettleTool(state, brief, (n) => (settled = n))],
-          toolChoice: { name: SETTLE_MATCH_TOOL },
-        });
-        closing = sanitizeCasterText(result.text).trim();
-        return result;
-      }),
+    async () => {
+      client ??= createGameLLM(agentConfig("finalize-match"));
+      const result = await client.runTurn({
+        system: FINALIZE_MATCH_SYSTEM,
+        history: [],
+        user: [buildCommentaryBlock(state, brief.matchId), ``, buildSettlementMessage(brief)].join(
+          "\n",
+        ),
+        // 산출은 결산과 마무리 중계가 든 JSON 하나다 — 도구 왕복이 없다 (models.md §3-2)
+        outputSchema: SETTLE_MATCH_INPUT,
+      });
+      const data = readOutput("finalize:match", SettleMatchSchema, result);
+      settled = applySettlement(state, brief, data);
+      closing = sanitizeCasterText(data.closing ?? "").trim();
+    },
     // 장부에 표식이 섰으면 다시 부르지 않는다 — 두 번째 호출은 결산을 두 번 쌓는다
     () => matchRated(state, brief.matchId),
   ).catch(anchorStands("finalize:match"));
@@ -296,7 +281,8 @@ export async function finalizeMatchTurn(
   const outcome = await runFinalizeMatch(state, brief, llm);
   if (outcome.settled > 0) {
     calls.push({
-      name: SETTLE_MATCH_TOOL,
+      // 기록의 이름 — 코어 걸음(`settleMatchRating`)의 이름이지 모델이 보는 도구가 아니다
+      name: "settle_match",
       summary: `경기 결산 ${outcome.settled}명`,
       silent: true,
     });
