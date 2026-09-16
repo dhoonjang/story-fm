@@ -99,6 +99,13 @@ pnpm balance --report out  # 전부 돌리고 측정값을 out/에 남긴다 (�
 제공자의 스키마 부분집합은 손으로 외울 수 있는 것이 아니다
 ([prompts](../llm/prompts.md) §2).
 
+설정대로 걸면 `config/llm.yml`이 보내는 제공자 하나만 잰다.
+**`LIVE_SCHEMA_TARGET=<provider>:<model>`**을 주면 열 선언 전부를 그 제공자·그 모델로 건다 —
+모델 ID는 저장소에 적지 않으므로 운영자가 그 자리에서 준다. 그 제공자의 선택 속성 한도
+(`PROVIDER_TRAITS.outputOptionalLimit` — [models](../llm/models.md) §3-2)를 넘는 선언은
+걸지 않고 「한도 밖」으로 센다: 400을 맞아 알아내는 자리가 아니라 오프라인 테스트가 잡는
+자리다.
+
 - **어느 키가 필요한지는 에이전트가 정한다.** 선언마다 부르는 에이전트가 다르고
   제공자도 `config/llm.yml`이 따로 적으므로, 하네스는 **그 자리의 키가 있는 선언만**
   건다. 키를 읽는 자리는 코드 한 곳이다(`resolveApiKey`) — 하네스가 환경변수 이름을
