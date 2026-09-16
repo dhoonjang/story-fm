@@ -1555,9 +1555,19 @@ export function renderTurns(turns: readonly ChatTurn[]): string[] {
   });
 }
 
-/** `<recent_turns>`의 본문 — 평시의 지난 턴들 */
+/**
+ * **이번 턴에 밀어 넣은 꼬리를 뺀 지난 턴들** — 해석기의 `<recent_turns>`·`<match_log>`가
+ * 읽는다. 턴 러너는 감독의 말을 모델 호출 전에 채팅에 넣으므로(`historyEnd`) 꼬리를
+ * 그대로 실으면 같은 말이 `@감독:` 줄과 두 벌이 된다 (agents.md §3).
+ */
+export function pastTurns(turns: GameState["chat"]): GameState["chat"] {
+  return turns.slice(0, historyEnd(turns));
+}
+
+/** `<recent_turns>`의 본문 — 평시의 지난 턴들. 이번 턴의 것은 `@감독:` 줄이 싣는다 */
 export function buildRecentTurnsBlock(state: GameState, count = RECENT_TURNS): string {
-  return renderTurns(state.chat.filter((t) => t.inMatch !== true).slice(-count)).join("\n");
+  const peace = pastTurns(state.chat.filter((t) => t.inMatch !== true));
+  return renderTurns(peace.slice(-count)).join("\n");
 }
 
 /**

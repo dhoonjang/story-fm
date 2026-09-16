@@ -18,6 +18,7 @@ import {
   buildLedgerNote,
   buildRecentTurnsBlock,
   buildStandingBlock,
+  pastTurns,
   renderTurns,
 } from "./gm-input";
 import { mockOrdersLlm } from "./mock-gm";
@@ -144,7 +145,8 @@ ops에 부를 명령 이름을 적고 그 인자를 배열로 싣는다. 감독�
 ${roleVocabularyText()}
 
 # unresolved
-어느 명령에도 담기지 않은 말은 감독의 표현 그대로 unresolved에 남긴다.`;
+이 해석기의 몫인데 어느 명령에도 담기지 않은 말은 감독의 표현 그대로 unresolved에 남긴다.
+훈련·육성·이적·재정의 말은 남기지 않는다 — 같은 말을 받은 다른 해석기가 옮긴다. 이 해석기의 몫이 하나도 없으면 ops도 unresolved도 비운다.`;
 
 /**
  * 평시의 판 — `<standing>`(지금 걸려 있는 것 전부: 6축·갈래·개인 지시·역할·지역 전술·
@@ -167,12 +169,15 @@ function buildPeaceContext(state: GameState): string[] {
  * `<match_log>` — **이 경기의 지난 턴 전부** (agents.md §3). 감독의 지시는 앞 턴의
  * 대화를 잇는 말일 때가 많다 — "걔 빼", "아까 말한 대로", "그 자리로 다시". 직전
  * 한두 턴만 실으면 세 턴 전에 부른 선수를 가리키는 말이 `unresolved`로 떨어진다.
+ * 이번 턴에 밀어 넣은 꼬리는 뺀다(`pastTurns`) — 감독의 말은 `@감독:` 줄 하나로만 선다.
  * 없으면 빈 문자열.
  */
 export function buildMatchLogBlock(state: GameState): string {
   const matchId = state.pendingMatch?.matchId;
-  const turns = state.chat.filter(
-    (t) => t.inMatch === true && (t.matchId === undefined || t.matchId === matchId),
+  const turns = pastTurns(
+    state.chat.filter(
+      (t) => t.inMatch === true && (t.matchId === undefined || t.matchId === matchId),
+    ),
   );
   if (turns.length === 0) return "";
   return ["<match_log>", ...renderTurns(turns), "</match_log>"].join("\n");
@@ -186,8 +191,9 @@ export const TACTIC_ORDERS_SPEC: OpsAgentSpec = {
   ops: TACTIC_OPS,
   caps: TACTIC_CAPS,
   opsHint: "부를 명령과 그 인자 — 감독이 말한 것만",
-  unresolvedHint: "어느 명령에도 담기지 않은 말",
-  emptyHint: "옮길 지시가 없습니다 — 무엇을 바꿀지 감독에게 물어보세요",
+  unresolvedHint:
+    "이 해석기의 몫인데 어느 명령에도 담기지 않은 말 — 훈련·이적의 말은 남기지 않는다",
+  emptyHint: "이 말에는 옮길 전술 지시가 없습니다",
 };
 
 /**

@@ -8,6 +8,7 @@ import {
   GM_SYSTEM,
   CORE_COMMANDS,
   MARKET_OPS,
+  MATCH_TOOL_DEFINITIONS,
   TACTIC_CAPS,
   TACTIC_OPS,
   TABLE_OPS,
@@ -179,6 +180,23 @@ describe("규칙이 사는 자리", () => {
       expect(skill.description.length, skill.name).toBeLessThanOrEqual(600);
     }
     expect(total).toBeLessThanOrEqual(7_400);
+  });
+
+  /**
+   * **손잡이 셋은 인자가 없다** (agents.md §1). 인자가 하나라도 서면 GM이 감독의 말을
+   * 옮겨 적을 자리가 생기고, 그 문장이 해석기의 근거가 된다 — 화면에는 걸린 지시만 보여
+   * 갈린 말은 아무도 보지 못한다. 경기 도구의 지시 손잡이도 같다.
+   */
+  it("손잡이 셋은 인자가 없다 — 감독의 말은 코어가 넘긴다", () => {
+    for (const name of ["tactic_orders", "training_orders", "market_orders"]) {
+      const tool = TOOLS.find((t) => t.name === name)!;
+      expect(Object.keys(tool.inputSchema.properties ?? {}), name).toEqual([]);
+    }
+    const match = MATCH_TOOL_DEFINITIONS.find((t) => t.name === "tactic_orders")!;
+    expect(Object.keys(match.inputSchema.properties ?? {})).toEqual([]);
+    // 테이블의 말은 남는다 — 상대에게 그대로 건네지는 발화라 턴 발화 전체와 같지 않다
+    const table = TOOLS.find((t) => t.name === "speak_at_table")!;
+    expect(Object.keys(table.inputSchema.properties ?? {})).toContain("line");
   });
 
   /**

@@ -32,7 +32,8 @@ export const TRAINING_ORDERS_SYSTEM = `당신은 감독의 훈련·육성 지시
 - sign_youth — 유스 후보 중 첫 계약을 줄 이름. **한 번의 확정이다** — 감독이 정했을 때만 싣는다. playerIds 생략은 전원 방출.
 
 # unresolved
-어느 명령에도 담기지 않은 말, 대상이 빠진 지시는 감독의 표현 그대로 unresolved에 남긴다.`;
+이 해석기의 몫인데 어느 명령에도 담기지 않은 말, 대상이 빠진 지시는 감독의 표현 그대로 unresolved에 남긴다.
+전술·라인업·이적·재정의 말은 남기지 않는다 — 같은 말을 받은 다른 해석기가 옮긴다. 이 해석기의 몫이 하나도 없으면 ops도 unresolved도 비운다.`;
 
 /**
  * 해석기가 채우는 **선수단 운영 명령** — **적용 순서다.** 층·번호를 먼저 정하고 그 위에
@@ -54,8 +55,9 @@ export const TRAINING_ORDERS_SPEC: OpsAgentSpec = {
   system: TRAINING_ORDERS_SYSTEM,
   ops: TRAINING_OPS,
   opsHint: "부를 명령과 그 인자 — 감독이 정한 것만",
-  unresolvedHint: "어느 명령에도 담기지 않은 말, 대상이 빠진 지시",
-  emptyHint: "옮길 지시가 없습니다 — 무엇을 훈련할지 감독에게 물어보세요",
+  unresolvedHint:
+    "이 해석기의 몫인데 어느 명령에도 담기지 않은 말, 대상이 빠진 지시 — 전술·이적의 말은 남기지 않는다",
+  emptyHint: "이 말에는 옮길 훈련·육성 지시가 없습니다",
 };
 
 export type TrainingOrders = OpsOrders;

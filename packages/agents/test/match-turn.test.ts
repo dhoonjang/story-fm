@@ -423,7 +423,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
         "tactic_orders",
       ]);
       // 지시는 판만 바꾸고 새 패킷을 돌려준다 — 구간은 아직이다
-      const ordered = await orders!.handle({ orders: `${incoming} 넣고 계속 가자` });
+      const ordered = await orders!.handle({});
       expect(ordered.ok).toBe(true);
       expect(ordered.message).not.toContain("<segment>");
       expect(ordered.message).toContain("<packet>");
@@ -457,6 +457,68 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
   });
 
   /**
+   * **해석기 입력에 감독의 말은 한 번만 선다** (agents.md §1·§3). 턴 러너는 감독의 말을
+   * 모델 호출 전에 채팅에 넣으므로 `<match_log>`가 그 꼬리를 그대로 실으면 같은 말이
+   * 두 벌이 되고, 손잡이가 인자를 들면 GM이 옮겨 적은 세 번째 벌이 `@감독:`에 선다 —
+   * 그때 해석기가 읽는 것은 감독이 하지 않은 말이다. 같은 손잡이의 두 번째 호출은
+   * 같은 말을 다시 옮기므로 문이 닫는다.
+   */
+  it("해석기는 감독의 말을 @감독: 줄 하나로만 받고, 같은 손잡이의 두 번째 호출은 닫힌다", async () => {
+    const state = rolling();
+    const side = userSide(state);
+    const out = state.pendingMatch!.ledger[side].onPitch[10]!;
+    const incoming = state.pendingMatch!.ledger[side].bench[0]!;
+    const said = `${incoming} 넣어`;
+    // 턴 러너가 하는 일 — 감독의 말은 모델 호출 전에 채팅에 선다
+    state.chat.push({
+      role: "user",
+      text: said,
+      toolCalls: [],
+      at: state.date,
+      inMatch: true,
+      matchId: state.pendingMatch!.matchId,
+    });
+    const heard: string[] = [];
+    runTurn.mockImplementation(async (req: TurnRequest) => {
+      if (forced(req) === "report_tactic_orders") {
+        heard.push(req.user);
+        return interpreter(req, { ops: { substitute: [{ out, in: incoming }] } });
+      }
+      const orders = req.tools!.find((t) => t.name === "tactic_orders")!;
+      // 인자가 없다 — GM이 옮겨 적을 자리가 없다
+      expect(Object.keys(orders.inputSchema.properties ?? {})).toEqual([]);
+      expect((await orders.handle({})).ok).toBe(true);
+      const again = await orders.handle({});
+      expect(again.ok).toBe(false);
+      expect(again.message).toContain("이미 옮겼습니다");
+      return answered("[0']\n@중계: 교체가 들어갑니다.", 2);
+    });
+
+    await runGmTurn(state, said);
+
+    // 해석기는 한 번만 돌았고, 감독의 말은 그 입력의 꼬리에 한 번 선다
+    expect(heard).toHaveLength(1);
+    const user = heard[0]!;
+    expect(user.split("\n").filter((line) => line === `@감독: ${said}`)).toHaveLength(1);
+    expect(user.trimEnd().endsWith(`@감독: ${said}`)).toBe(true);
+    expect(state.pendingMatch!.ledger[side].onPitch).toContain(incoming);
+  });
+
+  /** 감독의 말이 없는 턴에는 손잡이가 열리지 않는다 — 옮길 말이 없다 (agents.md §1) */
+  it("감독의 말이 없으면 지시 도구는 해석기를 부르지 않고 반려한다", async () => {
+    const state = rolling();
+    const minute = state.pendingMatch!.ledger.minute;
+    const orders = buildMatchTools(state, { calls: [], goals: [], cards: [] }).find(
+      (t) => t.name === "tactic_orders",
+    )!;
+    const reply = await orders.handle({});
+    expect(reply.ok).toBe(false);
+    expect(reply.message).toContain("감독의 말이 없습니다");
+    expect(runTurn).not.toHaveBeenCalled();
+    expect(state.pendingMatch!.ledger.minute).toBe(minute);
+  });
+
+  /**
    * **해석이 두 번 실패하면 도구가 반려로 답한다** — 턴은 이어지고 판은 그대로다
    * (agents.md §3). 짐작해 적용하면 감독이 내리지 않은 지시가 판에 오른다.
    */
@@ -468,7 +530,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
       // 해석기가 도구 없이 본문만 낸다 — 두 번 다
       if (forced(req) === "report_tactic_orders") return answered("해석해 보겠습니다.");
       const orders = req.tools?.find((t) => t.name === "tactic_orders");
-      const reply = await orders!.handle({ orders: "압박 올려" });
+      const reply = await orders!.handle({});
       expect(reply.ok).toBe(false);
       return answered("@레오 카스텔라노: 무슨 말씀이신지 다시 한번 짚어 주시겠습니까.", 1);
     });
@@ -492,7 +554,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     runTurn.mockImplementation(async (req: TurnRequest) => {
       if (forced(req) === "report_tactic_orders") throw thrown;
       const orders = req.tools?.find((t) => t.name === "tactic_orders");
-      await orders!.handle({ orders: "압박 올려" });
+      await orders!.handle({});
       return answered("닿지 않는다", 1);
     });
 

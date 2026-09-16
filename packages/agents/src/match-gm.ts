@@ -13,7 +13,7 @@ import { buildLedgerNote } from "./gm-input";
 import type { GmToolCall } from "./gm-types";
 import { applyTacticOrders } from "./tactic-apply";
 import { buildToolSpecs } from "./gm-tools";
-import { OrdersArgsSchema, hasOps } from "./orders-ops";
+import { hasOps, ordersGate } from "./orders-ops";
 import { runTacticOrders } from "./tactic-orders";
 import { toToolSchema } from "./tool-schema";
 
@@ -42,7 +42,7 @@ export const MATCH_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 �
 - 도구 결과 — <segment> 코어가 확정한 사건 목록, <stop> 구간이 멈춘 이유, <core_replies> 지시가 판에 걸렸는지, 그리고 구간 뒤의 <ledger>·<packet>.
 
 # 진행
-- 감독의 지시는 나올 때마다 판에 건다 — 감독의 말은 도구에 원문 그대로 넘긴다. 결과에 오는 판을 읽고 코치가 짚을 것이 있으면 짚는다.
+- 감독의 지시는 판에 건다 — 이번 턴의 말 전체가 한 번에 옮겨진다. 결과에 오는 판을 읽고 코치가 짚을 것이 있으면 짚는다.
 - 판을 굴리는 것은 지시가 마무리됐을 때다 — 감독이 진행하라고 했거나(“계속”, “봅시다”), 정지점에서 할 말이 끝나 경기가 이어질 자리일 때. 감독이 아직 묻고 답하는 중이면 굴리지 않는다.
 - 선수나 코치를 부르기만 했거나 말만 건 턴은 도구 없이 장면만 쓴다 — 시간은 한 순간도 흐르지 않았고 슛도 찬스도 없다.
 - 경기가 끝났으면 마감한다. 마감 결과에 실린 마무리 중계를 장면의 끝으로 옮기고 벤치 한 줄로 닫는다.
@@ -123,8 +123,8 @@ export const MATCH_TOOL_DEFINITIONS: ReadonlyArray<{
   {
     name: TACTIC_ORDERS_TOOL,
     description:
-      "감독의 지시를 판에 건다 — 교체·전술·개인 지시·지역 플랜·공략·세트피스·대화. 시계는 그대로다. 지시가 나올 때마다 부른다. 결과로 무엇이 걸렸고 무엇이 반려됐는지와, 그 지시로 다시 계산한 판(패킷)이 온다 — 다음 구간은 이 판으로 구른다.",
-    inputSchema: toToolSchema(OrdersArgsSchema),
+      "감독의 지시를 판에 건다 — 교체·전술·개인 지시·지역 플랜·공략·세트피스·대화. 시계는 그대로다. 인자가 없다 — 이번 턴 감독의 말은 코어가 해석기에 넘긴다. 감독이 지시한 턴에 한 번 부르고, 분을 말한 지시는 그 분까지 굴린 뒤에 부른다. 결과로 무엇이 걸렸고 무엇이 반려됐는지와, 그 지시로 다시 계산한 판(패킷)이 온다 — 다음 구간은 이 판으로 구른다.",
+    inputSchema: toToolSchema(EmptySchema),
   },
   {
     name: ADVANCE_MATCH_TOOL,
@@ -145,6 +145,11 @@ export interface MatchToolContext {
   calls: GmToolCall[];
   goals: GoalMark[];
   cards: CardMark[];
+  /**
+   * 이번 턴 감독의 말 — `tactic_orders`가 해석기에 넘기는 원문이다 (agents.md §3). 턴
+   * 러너가 채팅에 넣은 그 문자열이고, 손잡이 턴에는 없다(그 턴에는 도구도 마감뿐이다).
+   */
+  said?: string;
   /** 이번 턴 전술판이 이미 움직인 것 — 해석기가 되풀이를 가릴 근거다 (agents.md §3) */
   boardMoves?: readonly BoardMove[];
   /** 마감 에이전트를 부를 때 쓸 클라이언트 — 테스트가 갈아 끼운다 */
@@ -165,10 +170,10 @@ function ledgerAfter(state: GameState, rolled: boolean): string {
 async function runTacticOrdersTool(
   state: GameState,
   ctx: MatchToolContext,
-  orders: string,
+  said: string,
 ): Promise<{ ok: boolean; message: string }> {
   const specs = new Map(buildToolSpecs(state, ctx.calls).map((t) => [t.name, t] as const));
-  const parsed = await runTacticOrders(state, specs, orders, {
+  const parsed = await runTacticOrders(state, specs, said, {
     ...(ctx.boardMoves ? { boardMoves: ctx.boardMoves } : {}),
   });
   if (!parsed.ok) return { ok: false, message: parsed.message };
@@ -203,13 +208,18 @@ export function buildMatchTools(
   const [orders, advance, finalize] = MATCH_TOOL_DEFINITIONS;
   const tools: GameToolSpec[] = [];
   if (!options.operator) {
+    /**
+     * 지시 도구는 인자가 없다 — 이번 턴 감독의 말은 `ctx.said`가 쥔다 (agents.md §3).
+     * 같은 턴의 두 번째 호출은 같은 말을 다시 옮기므로 문이 닫는다.
+     */
+    const gate = ordersGate(ctx.said);
     tools.push(
       {
         ...orders!,
-        handle: async (input: unknown) => {
-          const p = OrdersArgsSchema.safeParse(input);
-          if (!p.success) return { ok: false, message: "orders에 감독의 말을 그대로 적으세요" };
-          return runTacticOrdersTool(state, ctx, p.data.orders);
+        handle: async () => {
+          const opened = gate(TACTIC_ORDERS_TOOL);
+          if (!opened.ok) return opened;
+          return runTacticOrdersTool(state, ctx, opened.said);
         },
       },
       {
