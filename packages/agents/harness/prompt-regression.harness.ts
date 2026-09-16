@@ -13,12 +13,10 @@ import {
   GM_SYSTEM,
   MATCH_GM_SYSTEM,
   MATCH_TOOL_DEFINITIONS,
-  SETTLE_MATCH_DESCRIPTION,
   SETTLE_MATCH_INPUT,
   SKILL_CATALOG,
   buildGmReference,
   buildGmStateNote,
-  buildGmTools,
   buildTrainingPrompt,
   parseSceneHeader,
   runGmTurn,
@@ -33,6 +31,7 @@ import {
   userPlayers,
   type GameState,
 } from "@story-fm/engine";
+import { gmFixedLayer } from "./gm-fixed-layer";
 import { PROMPT_REGRESSION } from "../../engine/harness/catalog";
 import { outOfBand, reportOf, type Readings } from "../../engine/harness/harness";
 
@@ -71,20 +70,6 @@ function build(seed: number, manager: string, background: string): GameState {
 }
 
 /**
- * 고정층 — **매 턴 캐시 프리픽스로 나가는 것 전부.** 시스템 프롬프트와 도구 스펙
- * (설명 + Zod에서 파생된 JSON 스키마)이고, 여기 한 글자라도 세이브마다 달라지면
- * 그 뒤가 통째로 정가로 읽힌다 (models.md §4).
- */
-function fixedLayer(state: GameState): string {
-  const tools = buildGmTools(state, []).map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    inputSchema: tool.inputSchema,
-  }));
-  return `${GM_SYSTEM}\n${JSON.stringify(tools)}`;
-}
-
-/**
  * 시스템 프롬프트를 **지도 · 지침 · 예시** 셋으로 가른다.
  *
  * 밴드가 누르려는 것은 **규칙의 수**인데(prompts.md §7), 프롬프트가 싣는 것 가운데 규칙이
@@ -109,11 +94,12 @@ function gmSystemParts(): { map: number; guide: number; example: number } {
 }
 
 /**
- * 경기 마감의 고정층 — 마감 에이전트가 받는 결산 도구 하나(설명 + 스키마).
- * 경기당 한 번 실리므로 고정층 예산과는 다른 눈금이다 (agents.md §3).
+ * 경기 마감의 고정층 — 마감 에이전트가 요청에 싣는 출력 스키마(결산 규칙은 시스템
+ * 프롬프트로 옮겨 갔다 — models.md §3-2). 경기당 한 번 실리므로 고정층 예산과는 다른
+ * 눈금이다 (agents.md §3).
  */
 function settlementLayer(): number {
-  return SETTLE_MATCH_DESCRIPTION.length + JSON.stringify(SETTLE_MATCH_INPUT).length;
+  return JSON.stringify(SETTLE_MATCH_INPUT).length;
 }
 
 /**
@@ -231,7 +217,7 @@ describe("프롬프트 회귀", () => {
     const state = build(7, "김감독", BACKGROUND);
     const other = build(21, "박감독", OTHER_BACKGROUND);
 
-    const fixed = fixedLayer(state);
+    const fixed = gmFixedLayer(state);
     const reference = buildGmReference(state);
     const stateNote = buildGmStateNote(state);
 
@@ -302,7 +288,7 @@ describe("프롬프트 회귀", () => {
       "레퍼런스층 글자": reference.length,
       "매 턴 층 글자": stateNote.length,
       "고정층 비중": fixed.length / layers,
-      "고정층 프리픽스 안정성": identical(fixed, fixedLayer(other)),
+      "고정층 프리픽스 안정성": identical(fixed, gmFixedLayer(other)),
       "레퍼런스층 프리픽스 안정성": identical(reference, buildGmReference(later)),
       "장면 문법 준수율": grammatical / Math.max(1, bodied),
       "본문이 선 장면 비율": bodied / corpus.length,

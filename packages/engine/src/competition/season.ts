@@ -24,6 +24,7 @@ import {
   CONDITION_BASE,
   DEFAULT_FORMATION,
   FATIGUE_BASE,
+  GOALKEEPER_MIN,
   MATCHDAY_SQUAD,
   RETIRE_AGE,
   RETIRE_AGE_MARGINAL,
@@ -1635,12 +1636,29 @@ function admitYouth(
  * 전환과 인테이크 정리가 같은 함수를 부른다: 신인이 소집일에 들어와도 1군의 하한이
  * 그날 다시 서야, 그 사이에 명단이 얕은 채로 프리시즌이 열리지 않는다.
  */
-function promoteToMatchdaySquad(squad: GamePlayer[]): void {
-  const firstCount = () => squad.filter((p) => p.squadLevel !== "reserve").length;
-  for (const player of [...squad]
-    .filter((p) => p.squadLevel === "reserve")
-    .sort((a, b) => b.attributes.overall - a.attributes.overall)) {
-    if (firstCount() >= MATCHDAY_SQUAD) break;
+/**
+ * 1군이 매치데이 명단(`MATCHDAY_SQUAD`)을 못 채우면 2군 상위 자원을 올린다 (season.md §6).
+ *
+ * **골문은 AI 구단에서만 함께 센다** (`keeper`). 감독 팀은 골키퍼 없는 1군을 등록 현황이
+ * 「골키퍼 부족」으로 세우고 킥오프의 자동 대체가 2군을 부르므로, 누구를 올릴지는 감독의
+ * 결정으로 남긴다 (team.md §5). AI 구단에는 그 경고를 읽을 사람이 없고, 간이 시뮬은 1군을
+ * 종합 순으로 채우므로(`simSquadOf`) 골키퍼가 전부 은퇴한 여름에 아무도 올리지 않으면
+ * 골문 없는 열한 명이 한 시즌을 뛴다 — 인원 수로 올리는 문이 종합 순이라 젊은 골키퍼는
+ * 그 문을 거의 지나지 못한다.
+ */
+function promoteToMatchdaySquad(squad: GamePlayer[], keeper: boolean): void {
+  const first = () => squad.filter((p) => p.squadLevel !== "reserve");
+  const byOverall = (a: GamePlayer, b: GamePlayer) => b.attributes.overall - a.attributes.overall;
+  for (const player of [...squad].filter((p) => p.squadLevel === "reserve").sort(byOverall)) {
+    if (first().length >= MATCHDAY_SQUAD) break;
+    player.squadLevel = "first";
+  }
+  if (!keeper) return;
+  const keepers = (players: GamePlayer[]) => players.filter((p) => groupOf(p) === "GK");
+  for (const player of keepers([...squad].filter((p) => p.squadLevel === "reserve")).sort(
+    byOverall,
+  )) {
+    if (keepers(first()).length >= GOALKEEPER_MIN) break;
     player.squadLevel = "first";
   }
 }
@@ -1708,7 +1726,10 @@ export function signYouthCandidates(
   }
 
   state.youthCandidates = [];
-  if (signed.length > 0 || filled.length > 0) promoteToMatchdaySquad(playersOf(state, teamId));
+  // 감독 팀의 소집일 — 골문은 감독의 결정이라 인원 수만 채운다 (team.md §5)
+  if (signed.length > 0 || filled.length > 0) {
+    promoteToMatchdaySquad(playersOf(state, teamId), false);
+  }
   /**
    * **감독이 놓은 아이는 세계로 나간다** (season.md §6). 계약을 받지 못한 후보가
    * 여기서 버려지면 감독이 다시 부를 자리도, 다른 구단이 주울 자리도 없다.
@@ -2124,7 +2145,7 @@ function applyTransition(state: GameState): string[] {
       pushNarrative(state, line, 3);
     }
 
-    promoteToMatchdaySquad(squad);
+    promoteToMatchdaySquad(squad, !ours);
 
     // 만료 계약 자동 갱신 — **AI 팀만.** 우리 팀은 위에서 이미 내보냈다
     for (const contract of contractsByTeam.get(team.id) ?? []) {

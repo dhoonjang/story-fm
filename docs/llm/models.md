@@ -420,17 +420,16 @@ script)` 둘이고, `script`는 요청 하나를 받아 「부를 도구 이름�
 ## 3. 어댑터 — 제공자 중립 계약 하나 (`GameLLM`)
 
 ```
-runTurn({ system, history, user, stateNote?, tools?, toolChoice?, outputOnly?, maxTokens?, onText?, signal?, onUsage? })
-  → { text, history: StoredLlmHistory, historyBase, usage, toolCallCount, stopReason }
+runTurn({ system, history, user, stateNote?, tools?, outputSchema?, maxTokens?, onText?, signal?, onUsage? })
+  → { text, output?, history: StoredLlmHistory, historyBase, usage, toolCallCount, stopReason }
 ```
 
 - `system`은 **블록 배열**이다 — 앞이 더 안정적인 순서로 배치해 캐시 프리픽스를 만든다.
 - 도구는 `GameToolSpec` — 제공자 중립 JSON Schema + `handle()`. 검증 실패·규칙 위반은
   한국어 메시지로 돌아가 모델이 고쳐 다시 부른다.
-- `toolChoice`는 도구 호출을 강제할지다 — `"auto"`(기본) 또는 `{ name }` (§3-2).
-- **`outputOnly`는 도구가 불린 자리에서 턴을 닫는다** (§3-4) — 산출이 그 도구 하나뿐이고
-  뒤에 올 문장을 아무도 읽지 않는 호출이 쓴다. 어댑터는 이번 왕복의 도구를 실행한 뒤
-  **결과를 돌려보내지 않고** 끝낸다 — 두 번째 요청이 없다.
+- **`outputSchema`는 도구 없이 JSON 하나로 답을 강제한다** (§3-2) — 산출이 JSON 하나인
+  호출 열이 쓴다. 어댑터는 자기 제공자의 구조화 출력으로 옮기고, 돌아온 본문을 읽어
+  `output`에 객체로 세운다 — 읽을 수 없으면 `null`이다. 요청은 하나고 왕복이 없다.
 - 한 턴의 도구 왕복 상한은 셋 다 **8회**(`MAX_TOOL_ITERATIONS`)이고, **마지막 한 번은
   도구를 못 부르게 걸어 보낸다** — 상한에 닿은 턴도 문장으로 끝나야 하기 때문이다
   (agents.md §2). 거는 자리는 제공자마다 다르다: Anthropic은 `tool_choice`의 `none`,
@@ -487,11 +486,14 @@ Chat 이력을 원형으로 저장한다. 스트리밍은 chunk마다 model cont
 4.1k~5.6k뿐이라 걸릴 수 없다.** 입력 합계가 19k여도 걸리지 않는다: 문턱이 재는 것은 합계가 아니라 같은
 프리픽스의 길이다.
 
-⚠️ **systemInstruction도 도구 선언도 그 프리픽스를 만들지 못한다.** 7.8k짜리 같은
-systemInstruction에 매번 다른 짧은 contents를 붙여도 0이고, 고정 system을 contents 맨
-앞으로 옮겨도 0이다 — 블록 순서로 고칠 수 있는 문제가 아니다. 그 고정분을 캐시에 얹는
-길은 **명시 캐시**(`cachedContents`)뿐이고, 그쪽은 `systemInstruction`·`tools`·
-`toolConfig`를 요청이 아니라 캐시가 들어야 한다 — 요청에 함께 싣으면 400이다.
+⚠️ **systemInstruction과 도구 선언은 프리픽스에 들지만, 그것만으로도 발화점을 넘어야
+한다.** GM의 고정층(시스템 프롬프트 + 도구 스펙, 23k자 ≈ 16.2k 토큰)은 그 자체로 발화점
+위라, 이력이 갈린 턴에도 캐시 읽기가 정확히 그 길이에 선다(2026-09 실측). 해석기의
+고정분은 그 아래다 — 7.8k짜리 같은 systemInstruction에 매번 다른 짧은 contents를
+붙여도 0이고, 고정 system을 contents 맨 앞으로 옮겨도 0이다. 블록 순서로 고칠 수 있는
+문제가 아니다. 그 고정분을 캐시에 얹는 길은 **명시 캐시**(`cachedContents`)뿐이고,
+그쪽은 `systemInstruction`·`tools`·`toolConfig`를 요청이 아니라 캐시가 들어야 한다 —
+요청에 함께 싣으면 400이다.
 
 **그 길은 쓰지 않는다.** 걸리지 않아서가 아니라 **이 게임의 호출 밀도에서 적자라서**다 —
 명시 캐시는 수명을 가진 자원이고 저장이 시간당 과금이므로, 캐시 하나가 사는 동안 그
@@ -569,36 +571,58 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
 - **`truncated`가 잘린 턴의 유일한 신호다** — 첫 장면은 그 자리에서 실패하고
   (agents.md §1), 이미 스트리밍으로 나간 진행 턴은 원인만 로그에 남는다.
 
-## 3-2. `toolChoice` — 도구를 반드시 부르게 하기
+## 3-2. `outputSchema` — 도구 없이 JSON 하나로 답을 받기
 
-산출이 도구 하나뿐인 호출(지시 해석·훈련 결산·압축 — agents.md §3·§4)과 경기 마감의
-첫 왕복(`settle_match` — agents.md §3)은 "이 도구로만 답한다"는
-**프롬프트 문장이 아니라 요청 파라미터로** 강제한다. 문장에만 기대면 모델이 본문으로
-답해도 호출은 정상으로 끝나고, 산출이 빈 채 해석은 턴 취소로 결산은 앵커로 떨어진다.
+산출이 JSON 하나인 호출 열 — 해석기 넷 · 경기 마감 · 훈련 결산 · 스카우팅 평 · 협상 상대 ·
+이력 압축 · 온보딩 (agents.md §1) — 은 **도구를 들지 않는다.** 답의 꼴은 "이 꼴로만
+답한다"는 **프롬프트 문장이 아니라 요청 파라미터로** 강제한다: 요청에 `outputSchema`
+(제공자 중립 JSON Schema — 최상위는 객체)를 싣고, 어댑터가 자기 제공자의 구조화 출력으로
+옮긴다. 문장에만 기대면 모델이 본문으로 답해도 호출은 정상으로 끝나고, 산출이 빈 채
+해석은 턴 취소로 결산은 앵커로 떨어진다.
 
-| 중립 값         | Anthropic                            | Google                                       | OpenAI                                   |
-| --------------- | ------------------------------------ | -------------------------------------------- | ---------------------------------------- |
-| `"auto"` (기본) | `tool_choice` 없음                   | `functionCallingConfig.mode: AUTO`           | `tool_choice` 없음                       |
-| `{ name }`      | `tool_choice: { type:"tool", name }` | `mode: ANY` + `allowedFunctionNames: [name]` | `tool_choice: { type:"function", name }` |
+| 중립 값                | Anthropic                                              | Google                                                        | OpenAI                                                                         |
+| ---------------------- | ------------------------------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `outputSchema: schema` | `output_config.format: { type:"json_schema", schema }` | `responseMimeType: "application/json"` + `responseJsonSchema` | `text.format: { type:"json_schema", name: <에이전트>, schema, strict: false }` |
 
-- ⚠️ **강제는 그 턴의 첫 요청에만 실린다.** 도구 결과를 돌려준 뒤에도 걸어 두면 모델이
-  턴을 끝낼 길이 없어 왕복 상한(8회)까지 같은 도구를 다시 부른다. 이후 반복은 `"auto"`다.
-- ⚠️ **Gemini의 강제는 per-request config로 간다.** 그 config는 chat 설정을 상속하지 않고
-  **통째로 대체**하므로(SDK 계약) 모드만 얹지 않고 chat 설정을 그대로 펼쳐 넘긴다 — 안
-  그러면 systemInstruction·도구·출력 상한·시한이 첫 요청에서 사라진다.
-- **강제해도 안 부를 수 있다** — 호출이 실패하거나 제공자가 무시하면 `toolCallCount`가 0인
-  응답이 온다. 그것을 실패로 보고 한 번 더 부르는 것은 호출 쪽의 몫이다
-  ([agents.md](./agents.md) §8).
-- ⚠️ **강제하면 스키마 검사가 달라진다 — `maxItems`를 걸지 않는다.** Gemini는 이 모드에서
-  스키마를 **펼쳐** 디코딩 문법을 만들어, `maxItems: n`은 항목 스키마를 n벌 복제한 문법이
-  된다. `auto`로는 통과하던 스키마가 `{ name }`에서만 400 `INVALID_ARGUMENT`으로
-  떨어지고, 본문은 `Request contains an invalid argument.` 한 줄뿐이라 어느 칸이 문제인지
-  말하지 않는다(§1-1의 표에서 `invalid_request` — 화면은 요청이 틀렸다고 말하고 「다시
-  시도」를 세우지 않는다). 지시
-  해석의 `ops`가 그 자리다 — 명령 열셋에 4를 걸면 넘고, 셋이면 지난다. **개수 상한은
-  코어가 쥐고 모델에는 설명 문장으로 간다**(`buildOpsSchema` · `parseOps`). 문장은
-  디코더가 아니라 준수에 기대므로 넘겨 오는 일이 있고, **넘겨 온 것을 자른 수는 한 줄로
+- **답은 본문이다.** 셋 다 스키마에 맞춘 JSON을 텍스트로 돌려준다. 어댑터가 그것을 읽어
+  `result.output`에 객체로 세우고, 읽을 수 없으면(잘림 · 거절 · 산문으로 답함) `null`이다.
+  `text`에는 원문이 그대로 남아 기록이 무엇이 왔는지 보인다.
+- **산출이 오지 않은 응답은 실패다.** `output`이 `null`이거나 그 산출의 Zod를 못 지나면
+  호출하는 쪽이 `ModelOutputError`로 세워 한 번 더 부르고([agents.md](./agents.md) §8),
+  그다음은 자리마다 갈린다 — 해석기는 반려, 결산·테이블은 앵커, 압축은 접지 않음,
+  온보딩은 오류.
+- **왕복이 없다.** 도구 호출·도구 결과라는 형식이 없으므로 요청은 하나고 저장 이력은
+  `[발화, 답]`이다. 도구 결과를 이력에 남겨 짝을 맞추던 자리도 함께 없다.
+- **검증은 부르는 쪽의 Zod가 한다.** 어댑터는 JSON으로 읽기까지고, 그 객체가 스키마를
+  지키는지는 그 스키마를 낸 Zod 한 벌이 본다 — 제공자가 스키마를 얼마나 강제하는지가
+  다르기 때문이다(OpenAI는 `strict: false`라 스키마가 안내일 뿐이다).
+- **제공자가 받는 스키마 부분집합이 다르고, 흡수하는 자리는 어댑터다** (AGENTS.md §6).
+  산출을 세우는 쪽은 제공자를 모른다 — 걷은 제약은 그 산출의 Zod가 그대로 지킨다.
+  - **Anthropic** — 수치 제약(`minimum` · `maximum` · `multipleOf`), 문자열 길이
+    (`minLength` · `maxLength`), 배열 크기(`maxItems`, 1을 넘는 `minItems`)를 받지 않고
+    400을 낸다. 어댑터가 그 열쇠를 걷고, **모든 객체에 `additionalProperties: false`를
+    세운다**(요구 사항). ⚠️ **그리고 스키마의 크기에 한도가 있다** — 선택 속성(`required`에
+    없는 `properties`)이 **24개**를 넘으면 문법을 만들지 않고 400이다(2026-09 실측,
+    "too many optional parameters … limit: 24"). 선택 속성을 required + `null` 합집합으로
+    옮겨도 합집합 속성 **16개** 한도에 걸린다. 그래서 **해석기 넷은 Anthropic 구조화 출력에
+    들어가지 않는다** — `ops`가 명령 여럿의 인자 스키마를 묶어 선택 속성이 27~81개다.
+    나머지 여섯은 지난다. 이 한도는 `PROVIDER_TRAITS.outputOptionalLimit`이 적고, 설정이
+    해석기를 그리로 옮기면 오프라인 테스트가 먼저 잡는다 (prompts.md §2).
+  - **Google** — `maxItems`를 받지 않는다(2026-09 실측: 400 `INVALID_ARGUMENT`, 본문은
+    `Request contains an invalid argument.` 한 줄). 구조화 출력에서도 스키마를 문법으로
+    펼쳐 `maxItems: n`이 항목 스키마 n벌이 되기 때문이다 — 강제 도구 시절과 같은 벽이다.
+    어댑터가 그 열쇠만 걷는다. `minLength` · `maxLength` · `pattern` · `minItems` ·
+    `minimum` · `maximum`은 그대로 받는다.
+  - **OpenAI** — `strict: false`로 보내므로 어떤 열쇠도 거절하지 않는다 (키가 없어 실측은
+    아직이다).
+- **무엇이 실제로 지나는지는 외우지 않는다.** `pnpm balance live-schema`가 선언 열을
+  실호출로 걸어 받는지·산출이 돌아오는지를 본다 ([prompts.md](./prompts.md) §2).
+- **개수 상한은 코어가 쥐고 모델에는 설명 문장으로 간다**(`buildOpsSchema` · `parseOps`) —
+  Anthropic도 Google도 `maxItems`를 받지 않으므로 그 열쇠는 두 제공자에서 아예 나가지
+  않는다. 문장은 준수에 기대므로 넘겨 오는 일이 있고, **넘겨 온 것을 자른 수는 한 줄로
   감독에게 돌아간다**([agents.md](./agents.md) §1).
+- **GM 둘(`gm` · `match-gm`)은 그대로 도구를 쥔다** — 거기서는 **무엇을 부를지 고르는
+  것**이 일이다. 한 요청에 `tools`와 `outputSchema`를 함께 싣는 자리는 없다.
 
 ## 3-3. `operator_channel` — 상태 스냅샷을 어디에 넣는가
 
@@ -634,60 +658,6 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   메시지는 유저 턴 뒤에 와야 하고 `messages[0]`일 수 없다(현행 레퍼런스). OpenAI의
   `developer` 항목도 같은 자리다. 캐시로도 그 자리가 맞다: 고정 프리픽스(도구·시스템·
   이력·이번 턴 발화)가 앞이고, 매 턴 바뀌는 것은 뒤다 (§4).
-
-## 3-4. `outputOnly` — 산출만 받는 호출은 도구가 불린 순간 끝난다
-
-산출이 도구 하나뿐인 호출은 **그 도구가 불린 자리에서 답이 완성된다.** 인자는 도구의
-Zod가 검증하고 핸들러가 장부에 옮겼으니, 그 뒤에 모델이 쓸 문장은 아무 데도 쓰이지
-않는다. 이 길로 부르는 자리는 여덟이다:
-
-| 호출                                                                            | 산출 도구                               | 부르는 쪽이 읽는 것                              |
-| ------------------------------------------------------------------------------- | --------------------------------------- | ------------------------------------------------ |
-| 지시 해석 넷 (`tactic-orders`·`training-orders`·`market-orders`·`table-orders`) | `report_*_orders` · `report_table_move` | 핸들러가 채운 명령 목록                          |
-| 훈련 결산 (`training-rater`)                                                    | `report_training`                       | 핸들러가 코어에 옮긴 결산                        |
-| 스카우팅 평 (`scout-rater`)                                                     | `report_scout_verdicts`                 | 핸들러가 보고서에 남긴 한 줄 평                  |
-| 협상 상대 (`negotiation-table`)                                                 | `reply_at_table`                        | 핸들러가 채운 답 — **상대의 대사도 도구 인자다** |
-| 이력 압축 (`history-compactor`)                                                 | `report_digest`                         | 핸들러가 코어에 옮긴 요약·기억·인물·사이         |
-
-**조건은 하나다 — 부르는 쪽이 `result.text`를 읽지 않는다.** 협상 상대의 대사마저
-인자로 오므로(agents.md §4-1), 일곱 중 도구 뒤의 본문을 읽는 자리는 하나도 없다.
-
-그런데 어댑터의 왕복 루프는 도구 결과를 **돌려줘야** 턴이 끝나는 구조다. 그래서 그
-자리마다 두 번째 요청이 나가고, 그 요청은 system·도구 선언·이번 턴 입력을 한 번 더
-싣는다 — 입력이 정확히 두 배가 되고, 돌아오는 것은 빈 응답이다. 기록된 호출 하나의
-이력이 그대로 보여 준다:
-
-```
-0 user   [text]
-1 model  [fnCall:report_tactic_orders]
-2 user   [fnResp:report_tactic_orders]
-3 model  []                ← 빈 응답. 아무도 읽지 않는다
-```
-
-**`outputOnly: true`면 그 두 번째 요청이 없다.** 어댑터는 이번 왕복의 도구를 평소대로
-실행하고, 그 결과를 **이력에만 남긴 채** 턴을 닫는다.
-
-- **이력의 모양이 계약이다** — 실행한 결과는 실행하지 않은 호출을 닫을 때와 같은 자리에
-  합성 content로 선다(§3). 이력은 `[발화, 도구 호출, 도구 결과]`로 끝나 **함수 호출이
-  짝을 잃지 않는다**: 짝 없는 호출이 남으면 그 이력을 재사용하는 다음 요청이 거부된다.
-- `stopReason`은 `tool_use`, `toolCallCount`는 실행한 수, `text`는 도구 앞까지 모델이 쓴
-  본문(대개 빈 문자열)이다.
-- **도구를 부르지 않고 본문으로 답한 응답은 이 길과 무관하게 그대로 끝난다** — 강제해도
-  안 부를 수 있고, 그것을 실패로 보고 다시 부르는 것은 호출하는 쪽의 몫이다
-  (agents.md §8).
-- **잘린 응답(`truncated`)의 호출은 여기서도 실행하지 않는다** — 합성 오류 결과로 닫는
-  길이 먼저다(§3).
-
-| 어댑터    | 결과를 남기는 자리                                                                       |
-| --------- | ---------------------------------------------------------------------------------------- |
-| Anthropic | `messages`에 붙인 `tool_result` user 메시지 하나가 그대로 저장 이력이 된다               |
-| Gemini    | `functionResponse` parts를 합성 user content로 저장 이력에 붙인다 — chat에 보내지 않는다 |
-| OpenAI    | `function_call_output` 아이템을 `input`에 붙인 채 끝낸다                                 |
-
-⚠️ **도구 뒤의 문장을 읽는 호출은 이 길로 보내지 않는다.** 경기 마감
-(`finalize-match`)은 `settle_match`를 강제로 부르게 하지만 **그 뒤의 마무리 중계가
-산출이고**(agents.md §3), 첫 장면(`onboarding-judge`)은 본문 자체가 장면이다. 갈래는
-**부르는 쪽이 정한다** — 어댑터는 도구가 무엇을 위한 것인지 묻지 않는다.
 
 ## 4. 계측과 예산 (`usage-meter.ts`)
 
@@ -1110,13 +1080,12 @@ pnpm log --board --game game-f0o7              전술판 선반만 — 전술판
   읽는 값은 전부 중립이다 — 종료 사유(§3-1), 사용량(§4), 이력 태그.
 - **설정이 적어 둔 것은 반드시 요청에 실린다.** 실을 수 없으면 무시하는 대신 시작할
   때 실패한다 (§1-2).
-- **구조화 출력은 프롬프트 문장이 아니라 요청 파라미터로 강제한다.** 산출이 도구
-  하나뿐인 호출은 `toolChoice: { name }`을 싣는다 — "이 도구로만 답한다"는 문장만으로는
-  본문으로 답한 응답이 정상 종료로 지나간다 (§3-2).
-- **읽지 않을 답을 받으려고 요청을 한 번 더 보내지 않는다.** 산출이 도구 하나뿐인 호출은
-  `outputOnly`로 그 자리에서 닫는다 — 두 번째 요청은 같은 입력을 정가로 한 번 더 읽는다
-  (§3-4). ⚠️ **닫을 때도 도구 결과는 이력에 남긴다**: 짝 없는 함수 호출이 남으면 그
-  이력을 재사용하는 다음 요청이 통째로 거부된다.
+- **구조화 출력은 프롬프트 문장이 아니라 요청 파라미터로 강제한다.** 산출이 JSON
+  하나인 호출은 `outputSchema`를 싣고 도구를 들지 않는다 — "이 꼴로만 답한다"는
+  문장만으로는 본문으로 답한 응답이 정상 종료로 지나간다 (§3-2).
+- **산출 하나를 받는 데 도구 왕복을 쓰지 않는다.** 도구 호출·도구 결과는 GM 둘의
+  형식이다 — 산출만 내는 자리에 그 형식을 흉내 내면 두 번째 요청과 짝 맞추기가 따라온다
+  (§3-2).
 - **설정 파싱은 순수 함수로 남긴다**(`parseLlmConfig`) — 환경을 읽는 자리가 늘면 설정 검증 테스트가 깨진다.
 - **출력 상한은 사고와 본문을 함께 덮는다.** "장면이 몇 줄이니 이만큼"으로 좁히면 본문이
   문장 한복판에서 잘린다. 상한은 상한일 뿐 — 과금은 실제 생성분이다.
@@ -1149,33 +1118,34 @@ pnpm log --board --game game-f0o7              전술판 선반만 — 전술판
 
 ## 코드 위치
 
-| 무엇                               | 어디                                                                                           |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------- |
-| 에이전트별 배치                    | `config/llm.yml`                                                                               |
-| 설정 로드·검증                     | `packages/llm/src/config.ts`                                                                   |
-| 제공자 중립 계약                   | `packages/llm/src/game-llm.ts`                                                                 |
-| 어댑터 3종                         | `packages/llm/src/anthropic-adapter.ts` · `gemini-adapter.ts` · `openai-adapter.ts`            |
-| 제공자 선택 + 계측·시한 부착       | `packages/llm/src/factory.ts` (에이전트별 어댑터 캐시)                                         |
-| 종료 사유 중립 enum                | `packages/llm/src/game-llm.ts` (`StopReason`) · 매핑은 어댑터 셋                               |
-| 제공자 특성 표(사고·캐시)          | `packages/llm/src/config.ts` (`PROVIDER_TRAITS`)                                               |
-| 시한 래퍼                          | `packages/llm/src/deadline.ts`                                                                 |
-| 오류 종류·재시도 판정              | `packages/llm/src/llm-error.ts` (`kindOfStatus` · `isRetryableStatus`)                         |
-| 키 해석 (제공자별 환경변수)        | `packages/llm/src/config.ts` (`resolveApiKey`)                                                 |
-| 게임 잠금 (대기 상한·409)          | `apps/web/lib/turn-runner.ts` (`withGameLock`)                                                 |
-| 세이브 파일 락                     | `packages/engine/src/core/save-lock.ts`                                                        |
-| 스트리밍 턴의 하트비트             | `apps/web/app/api/games/[id]/turn/stream/route.ts`                                             |
-| 설정 검증 테스트                   | `packages/llm/test/agent-config.test.ts`                                                       |
-| 토큰 계측·예산 상한                | `packages/llm/src/usage-meter.ts`                                                              |
-| 기록 창고 — 타임라인·원문·`tapLlm` | `packages/llm/src/turn-trace.ts` (`traceTurn` · `noteFact` · `noteTurn`)                       |
-| 사실의 문·갈래·상태 요약           | `packages/engine/src/core/journal.ts` · 패킷 요약 `packages/engine/src/match/packet-digest.ts` |
-| 게임 버전 (§5-2)                   | `config/game-version.yml` · 읽는 자리 `packages/llm/src/game-version.ts`                       |
-| 버전 판단 규칙 (§5-2)              | `.claude/skills/game-version/SKILL.md`                                                         |
-| 턴 인덱스에 묶는 자리              | `apps/web/lib/turn-runner.ts` · `apps/web/app/api/games/route.ts`                              |
-| 기록 라우트(dev 전용)              | `apps/web/app/api/games/[id]/trace/[index]/route.ts`                                           |
-| 타임라인 팝업·롱프레스             | `apps/web/components/turn-trace.tsx` · `components/chat.tsx`                                   |
-| 기록 CLI (`pnpm log`)              | `scripts/log.ts` (창고 자리는 `logDir()`)                                                      |
-| 계측 라우트 (§5-1)                 | `apps/web/app/api/admin/usage/route.ts`                                                        |
-| 계측 화면 (§5-1)                   | `apps/web/app/admin/usage-panel.tsx`                                                           |
-| 모드 해석 (`LLM_MODE`)             | `packages/llm/src/config.ts` (`resolveLlmMode`)                                                |
-| 대본 어댑터 (§2-1)                 | `packages/llm/src/scripted-adapter.ts`                                                         |
-| mock 대본 (발화 → 도구 표)         | `packages/agents/src/mock-script.ts` · 어댑터 선택은 `mock-gm.ts`                              |
+| 무엇                                | 어디                                                                                                |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 에이전트별 배치                     | `config/llm.yml`                                                                                    |
+| 설정 로드·검증                      | `packages/llm/src/config.ts`                                                                        |
+| 제공자 중립 계약                    | `packages/llm/src/game-llm.ts`                                                                      |
+| 출력 스키마의 답을 읽는 자리 (§3-2) | `packages/llm/src/structured-output.ts` (`parseOutput`) · 제공자 부분집합으로 옮기는 것은 어댑터 셋 |
+| 어댑터 3종                          | `packages/llm/src/anthropic-adapter.ts` · `gemini-adapter.ts` · `openai-adapter.ts`                 |
+| 제공자 선택 + 계측·시한 부착        | `packages/llm/src/factory.ts` (에이전트별 어댑터 캐시)                                              |
+| 종료 사유 중립 enum                 | `packages/llm/src/game-llm.ts` (`StopReason`) · 매핑은 어댑터 셋                                    |
+| 제공자 특성 표(사고·캐시)           | `packages/llm/src/config.ts` (`PROVIDER_TRAITS`)                                                    |
+| 시한 래퍼                           | `packages/llm/src/deadline.ts`                                                                      |
+| 오류 종류·재시도 판정               | `packages/llm/src/llm-error.ts` (`kindOfStatus` · `isRetryableStatus`)                              |
+| 키 해석 (제공자별 환경변수)         | `packages/llm/src/config.ts` (`resolveApiKey`)                                                      |
+| 게임 잠금 (대기 상한·409)           | `apps/web/lib/turn-runner.ts` (`withGameLock`)                                                      |
+| 세이브 파일 락                      | `packages/engine/src/core/save-lock.ts`                                                             |
+| 스트리밍 턴의 하트비트              | `apps/web/app/api/games/[id]/turn/stream/route.ts`                                                  |
+| 설정 검증 테스트                    | `packages/llm/test/agent-config.test.ts`                                                            |
+| 토큰 계측·예산 상한                 | `packages/llm/src/usage-meter.ts`                                                                   |
+| 기록 창고 — 타임라인·원문·`tapLlm`  | `packages/llm/src/turn-trace.ts` (`traceTurn` · `noteFact` · `noteTurn`)                            |
+| 사실의 문·갈래·상태 요약            | `packages/engine/src/core/journal.ts` · 패킷 요약 `packages/engine/src/match/packet-digest.ts`      |
+| 게임 버전 (§5-2)                    | `config/game-version.yml` · 읽는 자리 `packages/llm/src/game-version.ts`                            |
+| 버전 판단 규칙 (§5-2)               | `.claude/skills/game-version/SKILL.md`                                                              |
+| 턴 인덱스에 묶는 자리               | `apps/web/lib/turn-runner.ts` · `apps/web/app/api/games/route.ts`                                   |
+| 기록 라우트(dev 전용)               | `apps/web/app/api/games/[id]/trace/[index]/route.ts`                                                |
+| 타임라인 팝업·롱프레스              | `apps/web/components/turn-trace.tsx` · `components/chat.tsx`                                        |
+| 기록 CLI (`pnpm log`)               | `scripts/log.ts` (창고 자리는 `logDir()`)                                                           |
+| 계측 라우트 (§5-1)                  | `apps/web/app/api/admin/usage/route.ts`                                                             |
+| 계측 화면 (§5-1)                    | `apps/web/app/admin/usage-panel.tsx`                                                                |
+| 모드 해석 (`LLM_MODE`)              | `packages/llm/src/config.ts` (`resolveLlmMode`)                                                     |
+| 대본 어댑터 (§2-1)                  | `packages/llm/src/scripted-adapter.ts`                                                              |
+| mock 대본 (발화 → 도구 표)          | `packages/agents/src/mock-script.ts` · 어댑터 선택은 `mock-gm.ts`                                   |

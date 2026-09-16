@@ -417,6 +417,7 @@ export const SQUAD_LONGEVITY = defineHarness({
     { metric: "우리 인테이크 계약 — 여름 평균", role: "measure", unit: "count", why: "그중 실제로 계약한 수. 이 하네스는 답하지 않는 감독이라 곧 **기본값**이고, 위 줄과의 차가 감독이 고를 수 있었던 폭이다" },
     { metric: "무소속 유스 명부 — 15시즌 뒤", role: "guard", max: 40, unit: "count", why: "`FREE_AGENT_YOUTH_CAP` — 계약을 받지 못한 아이가 서는 명부가 **여름마다 부풀지 않는가** (season.md §6). 상한과 「한 시즌」 규칙 둘 다 여기서만 보인다: 한 여름은 단위 테스트가 지키지만 열다섯 여름을 쌓아 자라는 것은 그 케이스에 보이지 않고, 자라면 세이브도 매일 도는 무소속 순회도 함께 무거워진다" },
     { metric: "무소속 유스 — 여름 평균", role: "measure", unit: "count", why: "여름마다 명부에 선 수 — 상한에 눌린 값인지 세계가 낸 값인지를 위 줄과 함께 읽는다" },
+    { metric: "대역이 골문을 채운 여름", role: "measure", unit: "count", why: "감독 팀 1군에 골키퍼가 없어 감독 대역이 2군 골키퍼를 올린 여름 — 코어는 감독 팀의 골문을 대신 채우지 않으므로(team.md §5) 그 결정은 하네스가 감독의 명령으로 한다. AI 구단은 전환이 스스로 올린다(season.md §6)" },
   ],
 });
 
@@ -441,7 +442,9 @@ export const YOUTH_DEVELOPMENT = defineHarness({
     { metric: "임대 표본", role: "guard", min: 2, unit: "count", why: "같은 리그로 보내 시즌 끝까지 임대로 남은 U21 — 표본이 줄면 아래 세 줄이 격차가 아니라 잡음이다" },
     { metric: "임대 U21 성장", role: "measure", unit: "score", why: "임대처 1군 출전 × 수준 계수만 받은 유망주의 종합 상승 (season.md §2 임대)" },
     { metric: "임대처 평균 출전", role: "guard", min: 2, max: 25, unit: "count", why: "그 구단 1군 경기를 실제로 몇 번 뛰었나 — **성장 배율에 곱할 분(分)이 있는가.** 빌린 구단이 임대 자원에게 치르는 값(로테이션 우선권 · 연속 미출전 상한 `LOAN_REST_LIMIT`)이 닫히면 이 줄이 0 언저리로 내려간다(문이 없던 시절 0.20이었다). 표본이 다섯이고 그중 기량 창 밖으로 나간 아이는 0이라, 하한은 '문이 닫혔다'와 '한둘이 자리를 못 얻었다'를 가르는 자리에 둔다. 상한 25는 그 반대편 — 아카데미 유망주가 1부 클럽의 주전이 되면 그건 임대가 아니라 이적이고 AI 순위표가 임대로 흔들린다" },
-    { metric: "경보 전에 뛴 임대", role: "guard", min: 0.4, unit: "ratio", why: "그 구단 경기에서 **가장 긴 연속 미출전**이 `LOAN_BENCH_RUN_ALERT`(4) 미만인 임대의 몫 — 리콜 근거 `no-minutes`가 배경음인지 사건인지를 가른다. 연속 미출전 상한(`LOAN_REST_LIMIT` 3)이 경보 문턱보다 한 칸 앞이므로, 자리를 얻은 임대는 경보가 켜지기 전에 뛴다. **1.0을 요구하지 않는다**: 기량 창(`LOAN_ROTATION_OVR_DROP`) 밖으로 보낸 유망주는 한 경기도 못 뛰어야 하고, 그때 켜지는 경보가 곧 리콜 판단이다 — 다섯 중 둘이 하한이다" },
+    { metric: "기량 창 안의 임대", role: "guard", min: 2, unit: "count", why: "보낼 때 그 구단의 같은 포지션군 **가장 약한 선발**과의 차가 `LOAN_ROTATION_OVR_DROP`(10) 안이던 임대 — 감독이 「뛸 수 있는 곳」을 골라 보낸 아이다 (season.md §2 임대). 아래 줄의 분모라 둘 아래면 그 줄이 판정이 아니라 한 사람의 잡음이다. 우리 리그 안에서 그런 구단이 둘도 없다면 창이 닫힌 것이다" },
+    { metric: "기량 창 밖의 임대", role: "measure", unit: "count", why: "창이 열린 구단이 없어 가장 약한 구단으로 보낸 아이 — 한 경기도 못 뛰어야 하고, 그때 켜지는 경보가 곧 리콜 판단이다. 재려는 값이지 지키려는 값이 아니다" },
+    { metric: "창 안 임대 중 경보 전에 뛴 몫", role: "guard", min: 0.5, unit: "ratio", why: "창 안의 임대 중 그 구단 경기에서 **가장 긴 연속 미출전**이 `LOAN_BENCH_RUN_ALERT`(4) 미만인 몫 — 리콜 근거 `no-minutes`가 배경음인지 사건인지를 가른다. 연속 미출전 상한(`LOAN_REST_LIMIT` 3)이 경보 문턱보다 한 칸 앞이라 자리가 있는 임대는 경보가 켜지기 전에 뛴다. **1.0을 요구하지 않는다**: 부상·정지·로테이션으로 그 주의 가장 약한 선발이 창 밖으로 올라가면 자리가 잠시 닫히고 경보가 켜진다 — 그것은 사건이고 리포트가 그렇게 읽는다. 0이면 상한이 세계에 닿지 않은 것이다" },
     { metric: "임대 격차", role: "reference", unit: "score", why: "임대 − 타 팀 기준선. ⚠️ **밴드를 두지 않는다 — 눈금 아래의 값이다.** 한 시즌 U21의 종합 상승이 0.2인데 임대 배율이 1.2~1.3이라 격차의 참값은 0.05 안쪽이고, 종합은 정수라 한 사람의 잡음이 0.45다(표본 다섯이면 부호가 동전이다). 배율 자체가 사는지는 `growth-curve` 단위 테스트가 같은 시드·같은 난수열에서 지키고, **세계가 그 배율에 곱할 분을 주는가**는 위의 `임대처 평균 출전`이 지킨다" },
     { metric: "멘토 자격자", role: "guard", min: 1, unit: "count", why: "우리 1군에서 `mentorBlock`을 통과하는 사람 수 — 서른 넘고 리더십 `MENTOR_LEADERSHIP_MIN` 이상. **0이면 손잡이가 세계에 존재하지 않는다**: 리더십 축은 꼭대기가 70대 중반이라(people.md §5-3) 하한을 몇 칸만 올려도 자격자가 사라진다. 이 줄이 그 선을 지킨다" },
     { metric: "멘토링 표본", role: "guard", min: 2, unit: "count", why: "시즌 끝까지 사이가 서 있던 우리 2군 U21 — 자격자 하나가 `MENTEES_PER_MENTOR`(3)까지 데리므로 상한이 셋이다. 둘 아래면 아래 두 줄이 격차가 아니라 한 사람의 잡음이다" },
@@ -751,7 +754,7 @@ export const HISTORY_WINDOW = defineHarness({
     { metric: "압축 뒤 이력 글자", role: "guard", max: HISTORY_CHAR_KEEP, unit: "count", why: "잔량 그것 — 넘으면 압축이 제 일을 하지 못한 것이다" },
     { metric: "창이 미끄러진 턴 비율", role: "guard", max: 0.2, unit: "ratio", why: "6턴 스텝이라 정상은 1/6 — 매 턴 미끄러지면 이력 캐시가 한 번도 적중하지 않는다" },
     { metric: "렌더 배율", role: "reference", min: 1, max: 1.3, unit: "ratio", why: "코어가 세는 turn.text와 프롬프트에 실리는 형태의 비 — 이보다 벌어지면 글자 상한이 뜻을 잃는다" },
-    { metric: "잔량의 최소 캐시 프리픽스 배수", role: "guard", min: 1, unit: "ratio", why: "그 아래면 압축 직후 이력 캐시가 아예 안 걸린다 (models.md §1)" },
+    { metric: "압축 직후 프리픽스의 최소 캐시 프리픽스 배수", role: "guard", min: 1, unit: "ratio", why: "고정층 + 레퍼런스 + 요약 두 칸 상한 + 잔량의 토큰 ÷ GM 제공자의 최소 캐시 프리픽스 (pipeline.md §2-2 · models.md §3) — 1 아래면 압축 직후에는 캐시가 아예 안 걸린다. 잔량 하나로 재지 않는다: 프리픽스는 고정층에서 시작하고, 실호출의 캐시 읽기가 그 길이에 선다" },
     { metric: "요약 두 칸 상한 글자", role: "measure", unit: "count", why: "지난 일 + 열린 일의 상한 — 압축된 세이브가 이력 앞에 매 턴 싣는 최대치 (agents.md §5-1)" },
     { metric: "요약 두 칸의 잔량 대비 비율", role: "reference", max: 0.25, unit: "ratio", why: "요약이 잔량의 1/4을 넘으면 접은 뒤에도 프롬프트가 별로 줄지 않는다" },
   ],
@@ -797,16 +800,17 @@ export const PROMPT_REGRESSION = defineHarness({
 
 export const LIVE_SCHEMA = defineHarness({
   id: "live-schema",
-  what: "강제 도구로 나가는 산출 선언 여덟을 제공자가 실제로 받는가",
+  what: "출력 스키마로 나가는 산출 선언 열을 제공자가 실제로 받는가",
   doc: TOOL_CONTRACT,
-  cost: "선언 여덟에 실호출 한 번씩 — 30초쯤 (키가 없으면 건너뛴다)",
+  cost: "선언 열에 실호출 한 번씩 — 30초쯤 (키가 없으면 건너뛴다)",
   // prettier-ignore
   bands: [
-    { metric: "제공자가 받은 비율", role: "guard", min: 1, unit: "ratio", why: "받음 ÷ (받음 + 거절) — 강제 모드의 스키마 부분집합을 벗어난 선언 하나가 그 호출을 통째로 400으로 떨군다 (models.md §3-2). 돌지 못한 호출은 분모에서 빠진다 — 러너의 네트워크는 판정이 아니다" },
-    { metric: "건 선언", role: "measure", unit: "count", why: "그 자리의 키가 있어 실제로 건 선언 수 — 아래 비율들의 분모다. 여덟보다 적으면 제공자 일부에 키가 없었다" },
+    { metric: "제공자가 받은 비율", role: "guard", min: 1, unit: "ratio", why: "받음 ÷ (받음 + 거절) — 제공자가 받는 스키마 부분집합을 벗어난 선언 하나가 그 호출을 400으로 떨군다 (models.md §3-2). 돌지 못한 호출은 분모에서 빠진다 — 러너의 네트워크는 판정이 아니다" },
+    { metric: "건 선언", role: "measure", unit: "count", why: "그 자리의 키가 있어 실제로 건 선언 수 — 아래 비율들의 분모다. 열보다 적으면 제공자 일부에 키가 없었거나 한도 밖이었다" },
     { metric: "돌지 못한 선언", role: "measure", unit: "count", why: "혼잡·한도·시한으로 두 번 다 실패한 선언 — 이탈이 아니지만 그만큼은 이번 실행이 아무것도 묻지 못한 것이다" },
-    { metric: "도구 호출이 돌아온 비율", role: "measure", unit: "ratio", why: "요청을 받은 뒤 실제로 강제한 도구가 불려 왔는가 — 스키마는 지났는데 모델이 인자를 못 채우는 자리를 여기서 읽는다. 판정의 내용은 보지 않는다" },
-    { metric: "가장 큰 선언 글자", role: "measure", unit: "count", why: "선언 여덟 중 가장 긴 것의 JSON 글자 — 강제 모드에서 스키마가 디코딩 문법으로 펼쳐지므로 한도에 가장 먼저 닿는 값이다 (models.md §3-2)" },
+    { metric: "한도 밖 선언", role: "measure", unit: "count", why: "그 제공자의 구조화 출력이 받는 선택 속성 한도(PROVIDER_TRAITS.outputOptionalLimit)를 넘어 걸지 않은 선언 — 해석기 넷은 Anthropic에 이렇게 선다. 설정이 그리로 옮겨지면 오프라인 테스트가 먼저 잡는다" },
+    { metric: "산출이 돌아온 비율", role: "measure", unit: "ratio", why: "요청을 받은 뒤 본문이 JSON 객체로 읽혔는가 — 스키마는 지났는데 산문으로 답하거나 잘린 자리를 여기서 읽는다. 판정의 내용은 보지 않는다" },
+    { metric: "가장 큰 선언 글자", role: "measure", unit: "count", why: "선언 열 중 가장 긴 것의 JSON 글자 — 구조화 출력도 스키마를 문법으로 펼치는 제공자가 있어 한도에 가장 먼저 닿는 값이다 (models.md §3-2)" },
   ],
 });
 

@@ -104,6 +104,15 @@ export interface ProviderTraits {
    * 정한다.
    */
   operatorChannel: boolean;
+  /**
+   * 구조화 출력(`outputSchema`)이 받는 **선택 속성 수의 한도** — 없으면 `null` (models.md §3-2).
+   *
+   * 스키마를 문법으로 펼치는 제공자는 `required`에 없는 속성마다 갈래가 늘어 한도를 둔다 —
+   * Anthropic은 24개를 넘으면 문법을 만들지 않고 400이다(2026-09 실측). 어댑터가 걷어서 넘어
+   * 줄 수 있는 열쇠가 아니라 **선언의 크기**라, 그 선언을 그 제공자로 보낼 수 있는지는 부르는
+   * 쪽이 미리 안다(`countOptionalProperties`). 해석기 넷의 `ops`가 그 밖에 선다.
+   */
+  outputOptionalLimit: number | null;
 }
 
 /**
@@ -113,7 +122,12 @@ export interface ProviderTraits {
  * 갈라지는 자리는 이 밖에 없다.
  */
 const PROVIDER_TRAITS: Record<LlmProvider, ProviderTraits> = {
-  anthropic: { thinkingLevel: true, minCacheableInput: 1024, operatorChannel: true },
+  anthropic: {
+    thinkingLevel: true,
+    minCacheableInput: 1024,
+    operatorChannel: true,
+    outputOptionalLimit: 24,
+  },
   /**
    * Gemini 3.x Flash — **17,600은 제공자가 적어 둔 최소 요청 크기(4,096)가 아니라 실측한
    * 발화점이다.** 암묵 캐시는 요청이 그만큼 큰지가 아니라 **매번 같은 프리픽스가 얼마나
@@ -121,8 +135,18 @@ const PROVIDER_TRAITS: Record<LlmProvider, ProviderTraits> = {
    * 17.6k부터다(2026-09 실측, models.md §3). 큰 쪽을 쓰는 이유는 작은 쪽으로 두면 lite
    * 자리에서 영영 거짓인 경고가 서기 때문이다 (§4).
    */
-  google: { thinkingLevel: true, minCacheableInput: 17_600, operatorChannel: false },
-  openai: { thinkingLevel: true, minCacheableInput: 1024, operatorChannel: true },
+  google: {
+    thinkingLevel: true,
+    minCacheableInput: 17_600,
+    operatorChannel: false,
+    outputOptionalLimit: null,
+  },
+  openai: {
+    thinkingLevel: true,
+    minCacheableInput: 1024,
+    operatorChannel: true,
+    outputOptionalLimit: null,
+  },
 };
 
 export function providerTraits(provider: LlmProvider): ProviderTraits {

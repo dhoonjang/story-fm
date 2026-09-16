@@ -224,7 +224,7 @@ const USAGE = `pnpm log [턴 id | 호출 id] [손잡이]
 
 호출 하나 (gm-… 같은 이름):
   --full           모든 블록을 전문으로
-  --part <이름>    그 블록만 — system · system:1 · history · user · state · tools · text · messages
+  --part <이름>    그 블록만 — system · system:1 · history · user · state · tools · schema · text · output · messages
   --json | --path  저장된 JSON 그대로 | 원문 파일 경로만
 
 집계:
@@ -668,7 +668,19 @@ function requestBlocks(call: TurnTraceCall): Block[] {
         .join("\n"),
     });
   }
+  if (call.request.outputSchema !== undefined) {
+    // 도구 없이 JSON 하나로 답을 강제한 자리 — 산출 호출 열이 싣는다 (models.md §3-2)
+    const schema = JSON.stringify(call.request.outputSchema, null, 2);
+    blocks.push({ name: "schema", meta: `${schema.length.toLocaleString()}자`, body: schema });
+  }
   return blocks;
+}
+
+/** 출력 스키마로 받은 산출 — `null`은 요청은 지났는데 본문이 JSON으로 읽히지 않은 자리다 */
+function outputBlock(output: Record<string, unknown> | null): Block {
+  if (output === null) return { name: "output", meta: "없음", body: "(없음 — 산출이 오지 않았다)" };
+  const body = JSON.stringify(output, null, 2);
+  return { name: "output", meta: `${body.length.toLocaleString()}자`, body };
 }
 
 function responseBlocks(call: TurnTraceCall): Block[] {
@@ -676,6 +688,7 @@ function responseBlocks(call: TurnTraceCall): Block[] {
   if (response === null) return [];
   return [
     { name: "text", meta: `${response.text.length.toLocaleString()}자`, body: response.text },
+    ...(response.output === undefined ? [] : [outputBlock(response.output)]),
     {
       name: "messages",
       meta: `${response.messages.length}개 · ${countChars(response.messages).toLocaleString()}자`,
@@ -693,8 +706,9 @@ function printCallHead(call: TurnTraceCall, game: string, turn: CallLine | null)
   if (call.parentId !== null) {
     console.log(`부모 ${call.parentId} 의 ${call.viaTool ?? "도구"} 안에서 돌았다`);
   }
+  const output = call.response?.output;
   console.log(
-    `${call.agent} · 모델 ${call.model ?? "—"} · 종료 ${call.response?.stopReason ?? "—"} · 도구 ${call.response?.toolCallCount ?? 0}${call.request.streaming ? " · 스트리밍" : ""}`,
+    `${call.agent} · 모델 ${call.model ?? "—"} · 종료 ${call.response?.stopReason ?? "—"} · 도구 ${call.response?.toolCallCount ?? 0}${output === undefined ? "" : ` · 산출 ${output === null ? "없음" : "있음"}`}${call.request.streaming ? " · 스트리밍" : ""}`,
   );
   if (usage !== null) {
     console.log(

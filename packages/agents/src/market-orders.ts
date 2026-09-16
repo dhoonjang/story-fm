@@ -19,7 +19,7 @@ import { runOpsOrders, tagged, type OpsAgentSpec, type OpsOrders } from "./order
  * 판 지시의 해석(`tactic-orders`)과 같은 자리다: 장면을 쓰는 GM은 `market_orders(orders)`
  * 하나만 부르고, 오퍼·답·재계약·해지·리스트·되사기·임대 복귀·예산·보드 요청·사재·표값·
  * 스태프 고용·해지·감독직 오퍼의 인자는 여기서 채운다. 이 호출은 장면도 판정도 쓰지
- * 않는다 — 낼 것은 `report_market_orders` 하나다. 확률(`deal_odds`)을 보고 값을 정하는
+ * 않는다 — 낼 것은 `{ ops, unresolved }` 하나다. 확률(`deal_odds`)을 보고 값을 정하는
  * 것은 GM과 감독의 일이고, 여기 오는 것은 이미 정해진 말이다.
  *
  * **도구 설명이 갖던 판정 근거는 이 프롬프트가 가져야 한다** — 이 명령들은 GM에게
@@ -82,10 +82,9 @@ export const MARKET_OPS: readonly string[] = [
   "apply_manager_job",
 ];
 
-/** 이 해석기의 한 벌 — 강제 선언 목록(`forcedTools`)도 이것을 읽는다 */
+/** 이 해석기의 한 벌 — 출력 스키마 선언 열(`outputAgents`)도 이것을 읽는다 */
 export const MARKET_ORDERS_SPEC: OpsAgentSpec = {
   agent: "market-orders",
-  tool: "report_market_orders",
   system: MARKET_ORDERS_SYSTEM,
   ops: MARKET_OPS,
   opsHint: "부를 명령과 그 인자 — 감독이 정한 것만",

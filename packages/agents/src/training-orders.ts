@@ -47,10 +47,9 @@ export const TRAINING_OPS: readonly string[] = [
   "set_training",
 ];
 
-/** 이 해석기의 한 벌 — 강제 선언 목록(`forcedTools`)도 이것을 읽는다 */
+/** 이 해석기의 한 벌 — 출력 스키마 선언 열(`outputAgents`)도 이것을 읽는다 */
 export const TRAINING_ORDERS_SPEC: OpsAgentSpec = {
   agent: "training-orders",
-  tool: "report_training_orders",
   system: TRAINING_ORDERS_SYSTEM,
   ops: TRAINING_OPS,
   opsHint: "부를 명령과 그 인자 — 감독이 정한 것만",
