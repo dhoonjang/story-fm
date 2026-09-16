@@ -135,6 +135,8 @@ export interface TurnTraceRequest {
   user: string;
   stateNote?: string;
   tools: TurnTraceTool[];
+  /** 도구 없이 JSON 하나로 답을 강제한 스키마 — 산출 호출 열이 싣는다 (models.md §3-2) */
+  outputSchema?: JsonObjectSchema;
   maxTokens?: number;
   /** 스트리밍으로 불렀는가 — 화면에 흘려보낸 턴인지 가른다 */
   streaming: boolean;
@@ -151,6 +153,11 @@ export interface TurnTraceResponse {
   usage: TurnUsage;
   toolCallCount: number;
   stopReason: StopReason | null;
+  /**
+   * 출력 스키마로 받은 산출 — 어댑터가 본문에서 읽은 객체, 못 읽었으면 `null`. 스키마를
+   * 실은 호출에만 있다. `text`가 원문이고 이것이 코어가 받은 것이다 (models.md §3-2).
+   */
+  output?: Record<string, unknown> | null;
 }
 
 export interface TurnTraceCall {
@@ -347,6 +354,7 @@ function traceRequest(req: TurnRequest): TurnTraceRequest {
       inputSchema: tool.inputSchema,
       ...(tool.readOnly === undefined ? {} : { readOnly: tool.readOnly }),
     })),
+    ...(req.outputSchema === undefined ? {} : { outputSchema: req.outputSchema }),
     ...(req.maxTokens === undefined ? {} : { maxTokens: req.maxTokens }),
     streaming: req.onText !== undefined,
   };
@@ -833,6 +841,7 @@ export function tapLlm(llm: GameLLM, agent: AgentName, env: LlmEnv = process.env
           usage: result.usage,
           toolCallCount: result.toolCallCount,
           stopReason: result.stopReason,
+          ...(result.output === undefined ? {} : { output: result.output }),
         };
         return result;
       } catch (error) {

@@ -28,10 +28,16 @@ export interface ScriptedCall {
   input?: unknown;
 }
 
-/** 대본이 낸 한 턴 — 부를 도구와 본문. 둘 다 비어도 된다 */
+/** 대본이 낸 한 턴 — 부를 도구·본문·산출. 전부 비어도 된다 */
 export interface ScriptedTurn {
   calls?: readonly ScriptedCall[];
   text?: string;
+  /**
+   * 출력 스키마를 실은 요청에 내는 산출 — 실모드에서 모델이 JSON으로 답하는 그 자리다
+   * (models.md §3-2). 요청에 스키마가 있는데 대본이 이 칸을 비우면 `output`은 `null`이다 —
+   * 산출이 오지 않은 응답과 같은 모양이라, 부르는 쪽의 실패 계약이 mock에서도 같은 문을 지난다.
+   */
+  output?: Record<string, unknown>;
 }
 
 /** 요청 하나를 받아 그 턴의 대본을 낸다 — 게임을 아는 쪽이 만든다 */
@@ -105,6 +111,7 @@ export class ScriptedGameLLM implements GameLLM {
       usage: NO_USAGE,
       toolCallCount: called,
       stopReason: "completed",
+      ...(req.outputSchema === undefined ? {} : { output: plan.output ?? null }),
     };
   }
 }

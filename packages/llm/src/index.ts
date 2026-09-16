@@ -8,5 +8,6 @@ export * from "./openai-adapter";
 export * from "./factory";
 export * from "./game-version";
 export * from "./scripted-adapter";
+export * from "./structured-output";
 export * from "./turn-trace";
 export * from "./usage-meter";
