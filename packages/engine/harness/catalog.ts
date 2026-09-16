@@ -797,16 +797,17 @@ export const PROMPT_REGRESSION = defineHarness({
 
 export const LIVE_SCHEMA = defineHarness({
   id: "live-schema",
-  what: "강제 도구로 나가는 산출 선언 여덟을 제공자가 실제로 받는가",
+  what: "출력 스키마로 나가는 산출 선언 열을 제공자가 실제로 받는가",
   doc: TOOL_CONTRACT,
-  cost: "선언 여덟에 실호출 한 번씩 — 30초쯤 (키가 없으면 건너뛴다)",
+  cost: "선언 열에 실호출 한 번씩 — 30초쯤 (키가 없으면 건너뛴다)",
   // prettier-ignore
   bands: [
-    { metric: "제공자가 받은 비율", role: "guard", min: 1, unit: "ratio", why: "받음 ÷ (받음 + 거절) — 강제 모드의 스키마 부분집합을 벗어난 선언 하나가 그 호출을 통째로 400으로 떨군다 (models.md §3-2). 돌지 못한 호출은 분모에서 빠진다 — 러너의 네트워크는 판정이 아니다" },
-    { metric: "건 선언", role: "measure", unit: "count", why: "그 자리의 키가 있어 실제로 건 선언 수 — 아래 비율들의 분모다. 여덟보다 적으면 제공자 일부에 키가 없었다" },
+    { metric: "제공자가 받은 비율", role: "guard", min: 1, unit: "ratio", why: "받음 ÷ (받음 + 거절) — 제공자가 받는 스키마 부분집합을 벗어난 선언 하나가 그 호출을 400으로 떨군다 (models.md §3-2). 돌지 못한 호출은 분모에서 빠진다 — 러너의 네트워크는 판정이 아니다" },
+    { metric: "건 선언", role: "measure", unit: "count", why: "그 자리의 키가 있어 실제로 건 선언 수 — 아래 비율들의 분모다. 열보다 적으면 제공자 일부에 키가 없었거나 한도 밖이었다" },
     { metric: "돌지 못한 선언", role: "measure", unit: "count", why: "혼잡·한도·시한으로 두 번 다 실패한 선언 — 이탈이 아니지만 그만큼은 이번 실행이 아무것도 묻지 못한 것이다" },
-    { metric: "도구 호출이 돌아온 비율", role: "measure", unit: "ratio", why: "요청을 받은 뒤 실제로 강제한 도구가 불려 왔는가 — 스키마는 지났는데 모델이 인자를 못 채우는 자리를 여기서 읽는다. 판정의 내용은 보지 않는다" },
-    { metric: "가장 큰 선언 글자", role: "measure", unit: "count", why: "선언 여덟 중 가장 긴 것의 JSON 글자 — 강제 모드에서 스키마가 디코딩 문법으로 펼쳐지므로 한도에 가장 먼저 닿는 값이다 (models.md §3-2)" },
+    { metric: "한도 밖 선언", role: "measure", unit: "count", why: "그 제공자의 구조화 출력이 받는 선택 속성 한도(PROVIDER_TRAITS.outputOptionalLimit)를 넘어 걸지 않은 선언 — 해석기 넷은 Anthropic에 이렇게 선다. 설정이 그리로 옮겨지면 오프라인 테스트가 먼저 잡는다" },
+    { metric: "산출이 돌아온 비율", role: "measure", unit: "ratio", why: "요청을 받은 뒤 본문이 JSON 객체로 읽혔는가 — 스키마는 지났는데 산문으로 답하거나 잘린 자리를 여기서 읽는다. 판정의 내용은 보지 않는다" },
+    { metric: "가장 큰 선언 글자", role: "measure", unit: "count", why: "선언 열 중 가장 긴 것의 JSON 글자 — 구조화 출력도 스키마를 문법으로 펼치는 제공자가 있어 한도에 가장 먼저 닿는 값이다 (models.md §3-2)" },
   ],
 });
 
