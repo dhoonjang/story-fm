@@ -14,10 +14,11 @@ import {
   planHistoryFold,
   type GameState,
 } from "@story-fm/engine";
-import { buildGmHistory } from "@story-fm/agents";
+import { buildGmHistory, buildGmReference } from "@story-fm/agents";
 // 최소 캐시 프리픽스 — 눈금의 주인은 설정이다. 여기 숫자를 다시 적으면 둘이 갈린다.
-// 잔량을 다시 읽는 것은 `gm`이므로 문턱도 그 자리의 제공자에게 묻는다 (models.md §4)
+// 프리픽스를 읽는 것은 `gm`이므로 문턱도 그 자리의 제공자에게 묻는다 (models.md §4)
 import { agentMinCacheableInput } from "@story-fm/llm";
+import { gmFixedLayer } from "./gm-fixed-layer";
 import { HISTORY_WINDOW } from "../../engine/harness/catalog";
 import { outOfBand, reportOf, type Readings } from "../../engine/harness/harness";
 
@@ -44,7 +45,11 @@ const MODEL_TURN_CHARS = 412;
 const USER_TURN_CHARS = 24;
 
 /**
- * 한국어 산문의 글자↔토큰 — 같은 트레이스에서 원문 글자와 `inputTokens`를 대조해 얻었다.
+ * 글자↔토큰 — 같은 트레이스에서 원문 글자와 `inputTokens`를 대조해 얻었다.
+ *
+ * 한국어 산문에서 잰 값이지만 고정층(시스템 프롬프트 + 도구 스펙 JSON)에도 그대로 선다 —
+ * 이력이 갈린 턴의 GM 호출은 캐시 읽기가 정확히 고정층 길이에 서는데, 그 토큰 수가
+ * 고정층 글자 ÷ 이 값이다 (models.md §3 「Gemini」).
  *
  * ⚠️ 도구 왕복마다 프롬프트 전체가 다시 세어지므로 **왕복 1회 호출만 골라** 재야 한다.
  * 섞어서 재면 왕복 수만큼 나뉜 값이 나온다.
@@ -173,8 +178,21 @@ describe("평시 이력의 창", () => {
       "압축 뒤 이력 글자": keptChars,
       "창이 미끄러진 턴 비율": slid / TURNS,
       "렌더 배율": ratios.reduce((a, b) => a + b, 0) / Math.max(1, ratios.length),
-      "잔량의 최소 캐시 프리픽스 배수":
-        HISTORY_CHAR_KEEP / CHARS_PER_TOKEN / agentMinCacheableInput("gm"),
+      /**
+       * 압축 직후 프롬프트의 캐시 프리픽스 — 고정 → 레퍼런스 → 요약 → 이력, 이번 턴
+       * 앞까지 (pipeline.md §2-2). 요약은 두 칸의 상한으로, 이력은 잔량으로 센다 — 압축이
+       * 남길 수 있는 최대이자, 그 아래로는 이 배수가 더 작아질 수 없는 자리다. 잔량
+       * 하나로 재지 않는다: 고정층이 프리픽스의 앞을 이루고 실호출의 캐시 읽기가 그
+       * 길이에 선다 (models.md §3).
+       */
+      "압축 직후 프리픽스의 최소 캐시 프리픽스 배수":
+        (gmFixedLayer(state).length +
+          buildGmReference(state).length +
+          HISTORY_DIGEST_CHARS +
+          HISTORY_OPEN_CHARS +
+          HISTORY_CHAR_KEEP) /
+        CHARS_PER_TOKEN /
+        agentMinCacheableInput("gm"),
       // 요약 블록은 이력 앞에 서서 매 턴 읽힌다 — 두 칸이 차면 이만큼이 캐시 뒤에 붙는다
       "요약 두 칸 상한 글자": HISTORY_DIGEST_CHARS + HISTORY_OPEN_CHARS,
       "요약 두 칸의 잔량 대비 비율":

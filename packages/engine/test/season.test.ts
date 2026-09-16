@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ageOf,
   disciplinePoints,
+  GOALKEEPER_MIN,
   outcomeFor,
   RED_CARD_POINTS,
   type ManagerOffer,
@@ -1642,6 +1643,36 @@ describe("유스 인테이크 (season.md §6)", () => {
     expect(userPlayers(state).filter((p) => rows.some((r) => r.player.id === p.id)).length).toBe(
       1 + userPlayers(state).filter((p) => groupOf(p) === "GK").length,
     );
+  });
+
+  /**
+   * **AI 구단의 골문은 전환이 채운다** (season.md §6). 인원 수로 올리는 문이 종합 순이라
+   * 골키퍼가 전부 은퇴한 여름에 젊은 골키퍼는 그 문을 거의 지나지 못하고, 그러면 간이
+   * 시뮬이 골문 없는 열한 명을 세운다. 감독 팀은 그대로다 — 경고를 읽을 사람이 있다
+   * (team.md §5).
+   */
+  it("골키퍼가 전부 은퇴한 여름, AI 구단은 전환이 2군 골키퍼를 올리고 감독 팀은 올리지 않는다", () => {
+    const state = createTestGame(5);
+    for (const p of state.players) {
+      // 세계 전체의 1군 골키퍼를 은퇴 나이로 — 2군 골키퍼는 남는다. 우리 팀은 2군까지 —
+      // 남기면 인원 하한의 승격이 종합 순으로 그를 올릴 수 있어 두 문이 구별되지 않는다
+      const ours = p.teamId === state.userTeamId;
+      if (groupOf(p) === "GK" && (ours || p.squadLevel !== "reserve")) p.birthdate = "1988-01-01";
+    }
+    transitionSeason(state);
+    for (const team of state.teams.filter((t) => isClubTeam(t.id))) {
+      const first = playersOf(state, team.id).filter((p) => p.squadLevel !== "reserve");
+      const keepers = first.filter((p) => groupOf(p) === "GK").length;
+      const starting = assignmentsOf(state, team.id, "starting");
+      if (team.id === state.userTeamId) {
+        // 후보 줄에 선 골키퍼는 계약 전이고, 코어는 대신 고르지 않는다 — 골문을 비운 열 명
+        expect(keepers, "감독 팀 1군 골키퍼").toBe(0);
+        expect(starting, "감독 팀 선발").toHaveLength(10);
+        continue;
+      }
+      expect(keepers, `${team.id} 1군 골키퍼`).toBeGreaterThanOrEqual(GOALKEEPER_MIN);
+      expect(starting, `${team.id} 선발`).toHaveLength(11);
+    }
   });
 
   it("후보 수와 천장은 체급과 아카데미 활용도의 결정적 함수다", () => {
