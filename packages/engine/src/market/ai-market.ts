@@ -3,6 +3,7 @@ import {
   josa,
   normalizedLogCurve,
   FIRST_TEAM_LIMIT,
+  type Contract,
   type GamePlayer,
   type Transfer,
   type TickSink,
@@ -44,6 +45,7 @@ import { assignSquadNumber } from "../squad/numbers";
 import { admitOnLoan } from "../squad/registration";
 import { clearDepartedState } from "./departures";
 import { attachClauses, runBuyBacks, settleSellOn } from "./clauses";
+import { attachAiBuyout } from "./buyout";
 
 /**
  * 남의 팀끼리의 이적 시장 — **세계가 감독 없이도 돈다.**
@@ -274,7 +276,7 @@ function moveClub(
     ) * marketBiasOf(state, toTeamId).wage,
   );
   const years = 2 + Math.floor(input.rng() * 3);
-  state.contracts.push({
+  const signed: Contract = {
     id: `c-ai-${player.id}-${state.date}`,
     gamePlayerId: player.id,
     teamId: toTeamId,
@@ -282,7 +284,10 @@ function moveClub(
     since: state.date,
     until: contractUntil(state.date, years),
     status: "active",
-  });
+  };
+  state.contracts.push(signed);
+  // 새 계약에는 조항이 붙을 수 있다 — 유저의 딜과 같은 세계다 (transfer.md §12-3)
+  attachAiBuyout(state, signed, player);
   /**
    * **새 계약이 다음 시즌을 덮으므로 예약은 설 자리가 없다** (transfer.md §1-4).
    * 우리 예약이 걷히는 자리라 그날 일지에 오른다 — 반년을 기다린 영입이 남의

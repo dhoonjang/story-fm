@@ -18,6 +18,7 @@ import {
   physiqueLabel,
 } from "@story-fm/domain";
 import type { PlayerCardView } from "@story-fm/engine";
+import { useProposal } from "@/components/proposal-form";
 import { moodSentence } from "@/lib/mood";
 import { contractUntil, humanDate } from "@/lib/dateline";
 import { AxisGrid, CareerBlock, FootMarks } from "@/components/player-facts";
@@ -186,6 +187,8 @@ function PlayerCardOverlay({
     cachedCard(gameId, playerId, stamp),
   );
   const [error, setError] = useState<string | null>(null);
+  /** 제안 폼을 여는 자리 — 감싸는 무대가 없으면(테스트·관리자 화면) 손잡이도 없다 */
+  const proposal = useProposal();
 
   useEffect(() => {
     const hit = cachedCard(gameId, playerId, stamp);
@@ -239,14 +242,33 @@ function PlayerCardOverlay({
         ) : (
           <PlayerCardBody card={card} />
         )}
-        <button
-          className="pc-close"
-          type="button"
-          onClick={onClose}
-          data-testid="player-card-close"
-        >
-          닫기
-        </button>
+        {/**
+         * **제안** — 부를 명령이 있는 선수에게만 선다 (transfer.md §12-3). 조작이 뜻을 갖지
+         * 않는 선수(무소속·빌려 온 선수)에게는 잠긴 버튼조차 두지 않는다 (design-system.md §1).
+         */}
+        <div className="pc-actions">
+          {proposal !== null && card?.proposal != null && (
+            <button
+              className="pc-propose"
+              type="button"
+              onClick={() => {
+                onClose();
+                proposal.open(card.id);
+              }}
+              data-testid="player-card-propose"
+            >
+              제안
+            </button>
+          )}
+          <button
+            className="pc-close"
+            type="button"
+            onClick={onClose}
+            data-testid="player-card-close"
+          >
+            닫기
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -350,6 +372,21 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
         {card.contractUntil !== null && (
           <Fact label="계약">{contractUntil(card.contractUntil)}</Fact>
         )}
+        {/**
+         * 계약의 나머지 칸 — 지위·바이아웃·조건은 **계약 정보**라 주급·만료 옆에 선다
+         * (people.md §5-2 · transfer.md §12-3). 코드는 장부의 것이고 표기는 도메인이,
+         * 조건 줄은 코어가 낸 문장 그대로다. 우리 계약에만 있는 칸이라 남의 선수에겐
+         * 서지 않는다.
+         */}
+        {ours && <Fact label="지위">{SQUAD_STATUS_KO[ours.squadStatus]}</Fact>}
+        {ours && ours.buyoutClause !== null && (
+          <Fact label="바이아웃" title="이 금액 이상의 오퍼는 구단이 막지 못한다">
+            {formatMoney(ours.buyoutClause)}
+          </Fact>
+        )}
+        {ours && ours.contractTerms.length > 0 && (
+          <Fact label="계약 조건">{ours.contractTerms.join(" · ")}</Fact>
+        )}
         {card.transferListed !== null && (
           <Fact label="이적 리스트">{formatMoney(card.transferListed)}</Fact>
         )}
@@ -368,8 +405,6 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
                 <span className={`load ${ours.fatigueBand}`}>{ours.fatigueLabel}</span>
               </Fact>
             )}
-            {/* 계약에 적힌 자리 — 코드는 장부의 것이고 표기는 도메인이 갖는다 */}
-            <Fact label="지위">{SQUAD_STATUS_KO[ours.squadStatus]}</Fact>
           </>
         )}
         {card.caps > 0 && (

@@ -418,8 +418,13 @@ function causesToday(state: GameState): Cause[] {
 
 /** 지금 열려 있는 재계약 협상이 있는가 — 계약의 압력을 멈추는 유일한 사실 */
 function renewalOpenFor(state: GameState, playerId: string): boolean {
+  // 앉기만 한 자리는 압력을 멈추지 못한다 — 오퍼가 실려야 협상이다 (transfer.md §12-2)
   return state.negotiations.some(
-    (n) => n.gamePlayerId === playerId && n.kind === "renew" && n.status === "open",
+    (n) =>
+      n.gamePlayerId === playerId &&
+      n.kind === "renew" &&
+      n.status === "open" &&
+      n.rounds.length > 0,
   );
 }
 

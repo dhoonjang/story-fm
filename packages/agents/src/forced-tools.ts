@@ -31,6 +31,7 @@ import {
   REPORT_SCOUT_TOOL,
   SCOUT_RATER_SYSTEM,
 } from "./scout-rater";
+import { TABLE_ORDERS_SPEC } from "./table-orders";
 import { TACTIC_ORDERS_SPEC } from "./tactic-orders";
 import { TRAINING_ORDERS_SPEC } from "./training-orders";
 import {
@@ -50,7 +51,7 @@ import {
  * **같은 목록을 읽어야** 재는 것과 나가는 것이 갈리지 않는다.
  *
  * ⚠️ 선언을 여기에 **다시 적지 않는다.** 이름·설명·스키마는 그 호출이 실제로 싣는
- * 상수 그대로이고, 해석기 셋은 `runOpsOrders`와 같은 함수로 조립한다. 손으로 옮겨
+ * 상수 그대로이고, 해석기 넷은 `runOpsOrders`와 같은 함수로 조립한다. 손으로 옮겨
  * 적으면 두 벌이 갈리는 날 재는 자가 나가지 않는 스키마를 재게 된다.
  */
 export interface ForcedTool {
@@ -64,18 +65,20 @@ export interface ForcedTool {
 }
 
 /**
- * 강제 선언 아홉 — 해석기 셋과 결산·판정 여섯.
+ * 강제 선언 열 — 해석기 넷과 결산·판정 여섯.
  *
  * 해석기의 `ops`가 코어 명령의 도구 스키마를 그대로 물어 오므로(agents.md §1) 명령
  * 스펙 맵이 필요하다 — `buildToolSpecs(state, [])`가 그것이다.
  */
 export function forcedTools(specs: ReadonlyMap<string, GameToolSpec>): readonly ForcedTool[] {
   return [
-    ...[TACTIC_ORDERS_SPEC, TRAINING_ORDERS_SPEC, MARKET_ORDERS_SPEC].map((spec) => ({
-      agent: spec.agent,
-      system: spec.system,
-      ...opsToolDeclaration(spec, specs),
-    })),
+    ...[TACTIC_ORDERS_SPEC, TRAINING_ORDERS_SPEC, MARKET_ORDERS_SPEC, TABLE_ORDERS_SPEC].map(
+      (spec) => ({
+        agent: spec.agent,
+        system: spec.system,
+        ...opsToolDeclaration(spec, specs),
+      }),
+    ),
     {
       agent: "finalize-match",
       system: FINALIZE_MATCH_SYSTEM,

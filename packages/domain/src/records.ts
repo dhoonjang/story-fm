@@ -10,6 +10,7 @@ import {
   type PositionGroup,
 } from "./player";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
+import { ContractTermSchema, DealTermSchema, TabledTermSchema } from "./deal-terms";
 import { SQUAD_STATUSES } from "./squad-rules";
 import { RESERVE_COMPETITION_PREFIX, stageDepth, type MatchStage } from "./schedule";
 import {
@@ -301,6 +302,20 @@ export const ContractSchema = z.object({
    * optional이고, 없으면 **지금 서열에서 파생한다**(`squadStatusOf` — SAVE_VERSION 유지).
    */
   squadStatus: z.enum(SQUAD_STATUSES).optional(),
+  /**
+   * **바이아웃 조항** — 이 금액 이상의 오퍼가 오면 구단이 막지 못한다
+   * (→ docs/simulation/transfer.md §12-3). 감독이 흥정한 계약은 조건서에서 오고, AI
+   * 구단의 계약은 서는 날 코어가 시장가에서 정한다(`aiBuyoutClauseOf`) — 우리 구단만
+   * 조항을 갖고 살면 세계에서 조항으로 살 수 있는 선수가 하나도 없다.
+   * 옛 세이브엔 없어 optional이다 — 없는 계약은 조항이 없는 계약이다.
+   */
+  buyoutClause: z.number().min(0).optional(),
+  /**
+   * **합의된 조건서의 사본** — 무엇을 약속했는가의 기록이다 (transfer.md §12-3). 이행은
+   * 약속 장부와 조항 필드가 판정하고, 여기 줄은 감독과 건너편이 그 계약을 읽을 때 본다.
+   * 표에 없는 조건(`other`)은 문장 그대로 여기서만 산다. 옛 세이브엔 없다(optional).
+   */
+  terms: z.array(ContractTermSchema).optional(),
   /**
    * 이 계약에 대해 이미 낸 만료 경고 중 **가장 낮은 문턱**(일). 없으면 아직 안 냈다.
    * 문턱을 하루로 재면 tick이 지나지 않은 날의 경고는 영영 오지 않으므로,
@@ -811,6 +826,13 @@ export const NegotiationRoundSchema = z.object({
    */
   squadNumber: z.number().int().min(1).max(SQUAD_NUMBER_MAX).optional(),
   /**
+   * 이 오퍼에 실린 **조건서** — 그 시점에 감독이 건 조건과 들어준 요구의 사본이다
+   * (transfer.md §12-3). 조건서 자체는 협상이 들고(`Negotiation.terms`), 라운드는 그
+   * 오퍼가 무엇을 싣고 나갔는지를 남긴다 — 합의 라운드의 조건이 서명 때 계약으로 간다.
+   * 구 세이브엔 없어 optional.
+   */
+  terms: z.array(DealTermSchema).optional(),
+  /**
    * **상대가 이 라운드에 건 기한** — 최후통첩 (transfer.md §12-1).
    *
    * 협상의 `expiresOn`을 이 날로 **당긴다**(뒤로는 못 민다). 협상이 쥔 기한과 따로
@@ -988,6 +1010,34 @@ export const NegotiationTableSchema = z.object({
 });
 export type NegotiationTable = z.infer<typeof NegotiationTableSchema>;
 
+/**
+ * **개인 조건 선합의** — 영입·임대에서 이적료 없이 먼저 굳히는 개인 조건
+ * (→ docs/simulation/transfer.md §12-3). 에이전트와 마주 앉아 주급·연수·지위를 먼저
+ * 맞추고, 구단 값은 그 뒤 오퍼로 간다. 라운드가 아니다 — 이적료 없는 라운드는 관문
+ * 하나가 빈 오퍼라, 여기 따로 선다.
+ */
+export const PersonalTermsSchema = z.object({
+  weeklyWage: z.number().min(0),
+  contractYears: z.number().int().min(1).max(6),
+  squadStatus: z.enum(SQUAD_STATUSES).optional(),
+  proposedOn: DateString,
+  /** 선수 쪽이 답할 날 — 마주 앉으면 오늘로 당겨진다 (§12-2) */
+  respondsOn: DateString,
+  /** 선수 쪽이 받아들인 날 — 그 뒤의 오퍼는 이 값을 그대로 싣고 선수 관문은 합의로 굳는다 */
+  agreedOn: DateString.optional(),
+  /** 선수 쪽이 되부른 개인 조건 — 감독이 그대로 받으면 그 값으로 다시 제안된다 */
+  counter: z
+    .object({
+      weeklyWage: z.number().min(0),
+      contractYears: z.number().int().min(1).max(6),
+      squadStatus: z.enum(SQUAD_STATUSES).optional(),
+      on: DateString,
+      note: z.string().optional(),
+    })
+    .optional(),
+});
+export type PersonalTerms = z.infer<typeof PersonalTermsSchema>;
+
 export const NegotiationSchema = z.object({
   id: z.string().min(1),
   gamePlayerId: z.string().min(1),
@@ -1022,6 +1072,20 @@ export const NegotiationSchema = z.object({
   precontract: z.boolean().optional(),
   /** 마주 앉은 대화 — 앉은 협상에만 선다 (transfer.md §12-2). 옛 세이브엔 없다 */
   table: NegotiationTableSchema.optional(),
+  /**
+   * **조건서** — 이 협상에서 오간 조건 전부 (transfer.md §12-3). 감독이 올린 것, 상대가
+   * 부른 것, 그 답이 한 장부에 선다. 확인된 논거(`pitched`)와 같은 결이라 협상이 끝나면
+   * 함께 사라지고, 합의되는 순간 계약과 약속 장부로 흩어진다. 옛 세이브엔 없다.
+   */
+  terms: z.array(TabledTermSchema).optional(),
+  /**
+   * **바이아웃 조항이 발동한 협상인가** — 조항 금액 이상의 오퍼가 들어와 구단이 답할 자리가
+   * 없는 매각이다 (transfer.md §12-3). 감독이 거절도 철회도 못 하고, 남은 것은 선수의
+   * 결정과 메디컬뿐이다. 옛 세이브엔 없다.
+   */
+  buyout: z.boolean().optional(),
+  /** 개인 조건 선합의 — 영입·임대에서만 선다 (transfer.md §12-3). 옛 세이브엔 없다 */
+  personal: PersonalTermsSchema.optional(),
 });
 export type Negotiation = z.infer<typeof NegotiationSchema>;
 
@@ -1711,7 +1775,14 @@ export type PlayerIssue = z.infer<typeof PlayerIssueSchema>;
  * 무슨 말로 약속했는지는 장면의 것이다. 코어가 드는 것은 갈래·기한·상태뿐이고,
  * 이행 판정도 전부 장부에서 나온다 — 어느 자리에서도 문장을 읽지 않는다.
  */
-export const PROMISE_KINDS = ["minutes", "transfer", "renewal", "captain", "number"] as const;
+export const PROMISE_KINDS = [
+  "minutes",
+  "transfer",
+  "renewal",
+  "captain",
+  "number",
+  "signing",
+] as const;
 export type PromiseKind = (typeof PROMISE_KINDS)[number];
 
 export const PROMISE_KIND_KO: Record<PromiseKind, string> = {
@@ -1720,6 +1791,7 @@ export const PROMISE_KIND_KO: Record<PromiseKind, string> = {
   renewal: "재계약",
   captain: "주장",
   number: "등번호",
+  signing: "추가 영입",
 };
 
 /**
@@ -1740,6 +1812,7 @@ export const PROMISE_KIND_MEANING: Record<PromiseKind, string> = {
   renewal: "재계약 협상을 열겠다",
   captain: "주장을 맡기겠다",
   number: "그 등번호를 주겠다",
+  signing: "그 포지션에 선수를 하나 더 데려오겠다",
 };
 
 /**
@@ -1763,6 +1836,11 @@ export const ManagerPromiseSchema = z.object({
    * 옛 세이브엔 없다(optional) — `number` 갈래 자체가 그때는 없었다.
    */
   number: z.number().int().min(1).max(SQUAD_NUMBER_MAX).optional(),
+  /**
+   * **`signing` 약속만 든다** — 어느 자리에 선수를 데려오기로 했는가 (포지션 코드).
+   * 번호와 같은 이유로 갈래 이름만으로는 이행을 판정할 자가 없다. 옛 세이브엔 없다.
+   */
+  position: z.string().min(1).optional(),
 });
 export type ManagerPromise = z.infer<typeof ManagerPromiseSchema>;
 
@@ -1978,6 +2056,7 @@ export const FINANCE_EXPENSE_CATEGORIES = [
   "severance",
   "capex",
   "depreciation",
+  "signing_bonus",
 ] as const;
 
 export const FinanceCategorySchema = z.enum([
@@ -2025,6 +2104,8 @@ export const FINANCE_CATEGORY_KO: Record<FinanceCategory, string> = {
   capex: "구장·시설 투자",
   /** 그 자산을 내용연수에 나눠 무는 몫 — 선수 쪽의 `amortisation`과 같은 자리 */
   depreciation: "자산 상각",
+  /** 서명하는 날 선수에게 한 번 주는 돈 — 조건서의 `bonus`가 여기로 나간다 (transfer.md §12-3) */
+  signing_bonus: "사이닝 보너스",
   other: "기타",
 };
 

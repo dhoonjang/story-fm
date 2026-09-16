@@ -1,4 +1,5 @@
 import type {
+  DealTerm,
   Negotiation,
   NegotiationTable,
   PitchClaim,
@@ -6,19 +7,30 @@ import type {
   TableSpeaker,
   TableStance,
 } from "@story-fm/domain";
-import { PITCH_CLAIM_KO, TABLE_LINE_MAX, TABLE_STANCE_KO, josaOf } from "@story-fm/domain";
+import {
+  PITCH_CLAIM_KO,
+  TABLE_LINE_MAX,
+  TABLE_STANCE_KO,
+  dealTermLabel,
+  josaOf,
+} from "@story-fm/domain";
 import type { MarketCard } from "@story-fm/domain";
 import { playerById, pushNarrative, type GameState } from "../core/state";
 import { agentProfileOf } from "./agent-profile";
 import {
+  clampAsks,
   counterpartyAnchor,
+  personalAnchor,
   settleCounterparty,
   tableVoicesOf,
+  termAsksOf,
   type CounterpartyAnchor,
   type CounterpartyRulingInput,
   type CounterpartyVoice,
+  type TermAsk,
 } from "./counterparty";
-import { pendingOffer } from "./negotiation";
+import { pendingOffer, personalAwaiting } from "./negotiation";
+import { askTerms, askableKindsOf } from "./terms";
 import { LATITUDE_PER_CLAIM, evaluatePitch } from "./persuasion";
 
 /**
@@ -69,15 +81,22 @@ export interface TableReply {
   heard: TableHeard;
   /** 테이블에 오퍼가 올라 있을 때만 — 앵커 ± 한도로 잘린다 (counterparty.ts) */
   ruling?: CounterpartyRulingInput;
+  /**
+   * **상대가 부르는 조건** — 서류가 적은 갈래와 구간 안에서, 한 답에 둘까지
+   * (transfer.md §12-3). 오퍼가 없는 답에서도 부를 수 있다.
+   */
+  asks?: readonly DealTerm[];
 }
 
 export interface TableSeat {
   negotiation: Negotiation;
   table: NegotiationTable;
-  /** 답할 오퍼가 올라 있으면 그 앵커 — 없으면 말만 오간다 */
+  /** 답할 오퍼가 올라 있으면 그 앵커 — 개인 조건 제안이면 그 앵커, 없으면 말만 오간다 */
   anchor: CounterpartyAnchor | null;
   /** 이 테이블에서 답하는 목소리 — 하나이거나 둘이다 (`tableVoicesOf`) */
   voices: CounterpartyVoice[];
+  /** 상대가 지금 부를 수 있는 조건 — 갈래와 구간 (`termAsksOf`) */
+  asks: TermAsk[];
 }
 
 export interface TableOutcome {
@@ -125,6 +144,9 @@ export function sitAtTable(
   if (offer && offer.respondsOn !== null && offer.respondsOn > state.date) {
     offer.respondsOn = state.date;
   }
+  // 개인 조건 제안의 답도 마주 앉은 자리에서는 오늘이다 (§12-3)
+  const personal = personalAwaiting(negotiation);
+  if (personal && personal.respondsOn > state.date) personal.respondsOn = state.date;
   return { ok: true, seat: seatOf(state, negotiation) };
 }
 
@@ -133,8 +155,10 @@ function seatOf(state: GameState, negotiation: Negotiation): TableSeat {
   return {
     negotiation,
     table: negotiation.table!,
-    anchor: counterpartyAnchor(state, negotiation),
+    // 오퍼가 없고 개인 조건 제안이 답을 기다리면 그 앵커가 선다 (§12-3)
+    anchor: counterpartyAnchor(state, negotiation) ?? personalAnchor(state, negotiation),
     voices: tableVoicesOf(state, negotiation),
+    asks: termAsksOf(state, negotiation),
   };
 }
 
@@ -158,12 +182,22 @@ export function openLetter(
     return { ok: false, message: `이미 끝난 협상입니다 (${negotiation.status})` };
   }
   const offer = pendingOffer(negotiation);
-  if (!offer || offer.respondsOn === null || offer.respondsOn > state.date) {
+  const personal = personalAwaiting(negotiation);
+  const offerDue = offer !== null && offer.respondsOn !== null && offer.respondsOn <= state.date;
+  const personalDue = offer === null && personal !== null && personal.respondsOn <= state.date;
+  if (!offerDue && !personalDue) {
     return { ok: false, message: "답할 날이 된 오퍼가 없습니다" };
   }
   const patience = tablePatienceOf(state, negotiation.gamePlayerId);
   negotiation.table ??= { openedOn: state.date, patience, patienceMax: patience, lines: [] };
-  negotiation.table.lines.push(ledgerLine(state, "감독의 오퍼가 서면으로 왔다 — 마주 앉지 않았다"));
+  negotiation.table.lines.push(
+    ledgerLine(
+      state,
+      offerDue
+        ? "감독의 오퍼가 서면으로 왔다 — 마주 앉지 않았다"
+        : "감독의 개인 조건 제안이 서면으로 왔다 — 마주 앉지 않았다",
+    ),
+  );
   return { ok: true, seat: seatOf(state, negotiation) };
 }
 
@@ -232,6 +266,16 @@ export function settleTableReply(
     table.patience = Math.max(0, table.patience - 1);
     ledger.push("말투가 상대를 상하게 했다");
   }
+
+  // ── 상대가 부른 조건 — 갈래와 구간 안으로 잘라 조건서에 올린다 (§12-3) ──
+  const asked = askTerms(
+    state,
+    negotiation,
+    clampAsks(reply?.asks, seat.asks),
+    askableKindsOf(negotiation),
+  );
+  for (const term of asked)
+    ledger.push(`상대의 요구 — ${dealTermLabel(term)} (들어주거나 거절해야 한다)`);
 
   // ── 오퍼가 올라 있었으면 판정 — 앵커 ± 한도 ──
   let payload: MarketCard | undefined;

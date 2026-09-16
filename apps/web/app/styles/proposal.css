@@ -1,0 +1,327 @@
+/**
+ * 제안 폼 — **값과 조건을 정확히 내는 자리** (transfer.md §12-3).
+ *
+ * 선수 카드와 같은 베일 위에 떠 있는 `--pop` 표면 3단이다. 칸은 온보딩의 입력과 같은
+ * 규약(`--panel-2` 면 · `--r-md` · 포커스 `--ring`)이고, 갈래 고르기는 라디오 묶음이라
+ * 고른 것이 색이 아니라 `aria-checked`로도 전해진다 (overview.md §5). 테두리는 없다.
+ */
+.proposal-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 46;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+  background: var(--scrim);
+  animation: fulltime-in 160ms var(--ease-panel) both;
+}
+.proposal {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: min(760px, calc(100dvh - 48px));
+  overflow-y: auto;
+  padding: var(--sp-5);
+  background: var(--pop);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--fs-sm);
+}
+.pf {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.pf-blank {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+}
+.pf-skel {
+  width: 100%;
+  height: 72px;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  animation: none;
+}
+
+.pf-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.pf-name {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+.pf-meta {
+  color: var(--text-2);
+}
+
+/* 갈래 — 라디오 묶음. 고른 것은 키 컬러 채움이다 */
+.pf-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.pf-kinds [role="radio"] {
+  height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background var(--ease);
+}
+.pf-kinds [role="radio"]:hover {
+  background: var(--pop);
+}
+.pf-kinds [role="radio"].on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.pf-kinds [role="radio"]:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.pf-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: var(--sp-2);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.pf-toggle input {
+  accent-color: var(--accent);
+}
+
+/* 칸 — 라벨 · 입력 · 코어가 낸 자 한 줄 */
+.pf-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3) var(--sp-4);
+}
+.pf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.pf-message {
+  grid-column: 1 / -1;
+}
+.pf-label,
+.pf-section {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+.pf-hint {
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
+.pf input[type="number"],
+.pf input[type="text"],
+.pf select,
+.pf textarea {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.pf textarea {
+  resize: vertical;
+}
+.pf input:focus-visible,
+.pf select:focus-visible,
+.pf textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+.pf input:disabled,
+.pf select:disabled,
+.pf textarea:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 조건서 — 줄마다 갈래 이름과 그 갈래의 값 */
+.pf-terms {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.pf-term {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--panel);
+  border-left: 2px solid var(--accent-2);
+  border-radius: var(--r-sm);
+}
+.pf-term-kind {
+  min-width: 96px;
+  font-weight: 600;
+}
+.pf-term input,
+.pf-term select {
+  flex: 1 1 140px;
+  width: auto;
+}
+.pf-add {
+  align-self: flex-start;
+  width: auto;
+}
+.pf-remove {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+.pf-remove:hover {
+  background: var(--pop);
+  color: var(--text);
+}
+.pf-remove:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+/* 발 — 코어가 낸 사실 셋과 손잡이 둘 */
+.pf-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-2xs);
+}
+.pf-fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.pf-fact em {
+  color: var(--dim);
+  font-style: normal;
+}
+.pf-fact b {
+  color: var(--text-2);
+  font-weight: 600;
+}
+.pf-error {
+  margin: 0;
+  color: var(--loss);
+}
+.pf-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+.pf-close,
+.pf-submit {
+  height: 36px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: var(--r-sm);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background var(--ease);
+}
+.pf-close {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.pf-close:hover {
+  background: var(--pop);
+}
+.pf-submit {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.pf-submit:disabled,
+.pf-close:disabled,
+.pf-kinds [role="radio"]:disabled,
+.pf-remove:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.pf-close:focus-visible,
+.pf-submit:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.proposal .pf-close {
+  align-self: center;
+}
+.pf .pf-close {
+  align-self: auto;
+}
+
+/* 선수 카드·시장 카드에서 폼을 여는 손잡이 */
+.pc-propose,
+.mc-propose {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: inherit;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.pc-propose {
+  height: 36px;
+  font-size: var(--fs-sm);
+}
+.pc-propose:focus-visible,
+.mc-propose:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.pc-propose:disabled,
+.mc-propose:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.pc-actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+}
+.pc-actions .pc-close {
+  margin-top: 0;
+}
+
+@media (max-width: 480px) {
+  .pf-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

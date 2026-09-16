@@ -134,6 +134,7 @@ import { suspensionApplies } from "../data/discipline-catalog";
 import { worldFigureManagerOf } from "../data/world-figures";
 import { generateYouthPlayer } from "../world/generate";
 import { ensureSquadNumbers } from "../squad/numbers";
+import { attachAiBuyout } from "../market/buyout";
 import { hasCups, scopedTeams, type WorldScope } from "../world/scope";
 import {
   TEAM_CATALOG_SEED,
@@ -2419,15 +2420,19 @@ export function addMissingClubs(state: GameState): number {
     for (const player of squad) player.squadLevel = "first";
     state.players.push(...squad);
     state.contracts.push(
-      ...squad.map((p) => ({
-        id: `c-${p.id}`,
-        gamePlayerId: p.id,
-        teamId: team.id,
-        weeklyWage: wages.get(p.id) ?? 0,
-        since: state.date,
-        until: `${seasonYear(state.season) + 1 + (squad.indexOf(p) % 3)}-06-30`,
-        status: "active" as const,
-      })),
+      ...squad.map((p) => {
+        const contract: Contract = {
+          id: `c-${p.id}`,
+          gamePlayerId: p.id,
+          teamId: team.id,
+          weeklyWage: wages.get(p.id) ?? 0,
+          since: state.date,
+          until: `${seasonYear(state.season) + 1 + (squad.indexOf(p) % 3)}-06-30`,
+          status: "active" as const,
+        };
+        attachAiBuyout(state, contract, p);
+        return contract;
+      }),
     );
     const finance = initialFinanceOf(team.id, team.tier);
     state.finances.push({
@@ -3295,7 +3300,7 @@ export function createGame(input: CreateGameInput): GameState {
     // 계약 지위 — 시드가 적은 선수만 든다. 칸이 비어야 `squadStatusOf`가 서열에서
     // 파생하므로, 없는 자리에 칸을 만들어선 안 된다 (people.md §5-2)
     const squadStatus = catalogOf(p)?.squadStatus;
-    return {
+    const contract: Contract = {
       id: `c-${p.id}`,
       gamePlayerId: p.id,
       teamId: p.teamId,
@@ -3306,6 +3311,13 @@ export function createGame(input: CreateGameInput): GameState {
       status: "active",
       ...(squadStatus === undefined ? {} : { squadStatus }),
     };
+    // 남의 구단 계약에는 바이아웃 조항이 붙을 수 있다 — 세계가 시작하는 날부터 (transfer.md §12-3)
+    attachAiBuyout(
+      { seed, date: calendar.preseasonStart, userTeamId: input.userTeamId },
+      contract,
+      p,
+    );
+    return contract;
   });
 
   // 일정 — 전 리그 + 유럽 대항전 경기 + 이적창 개장/폐장

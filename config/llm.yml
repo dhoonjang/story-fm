@@ -93,6 +93,15 @@ agents:
     timeout_ms: 60000
     thinking_level: minimal
 
+  # 테이블의 감독 말 한 줄을 **이 협상 하나**의 명령 인자로 옮긴다 — 값·조건·답·수락·철회
+  # (docs/llm/agents.md §4-1 · transfer.md §12-3). 시장 해석과 같은 분류라 같은 자리다.
+  table-orders:
+    provider: google
+    model: gemini-3.5-flash-lite
+    max_tokens: 16000
+    timeout_ms: 60000
+    thinking_level: minimal
+
   # 경기의 GM — 이 경기의 이력 전부를 쥐고 도구 셋으로 경기를 진행한다 (docs/llm/agents.md §3).
   # 시한은 도구 뒤의 해석·마감 호출까지 덮는다.
   match-gm:

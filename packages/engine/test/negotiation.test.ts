@@ -91,6 +91,17 @@ import {
   windowStartFor,
   withdrawOffer,
   eventTexts,
+  answerPersonal,
+  applyProposal,
+  counterBoundsOf,
+  openPromise,
+  proposalViewOf,
+  openTalks,
+  offerTerms,
+  proposePersonal,
+  settleEscalators,
+  TALKS_DAYS,
+  tickPromises,
 } from "@story-fm/engine";
 import {
   ageOf,
@@ -105,6 +116,8 @@ import {
   isPlayerDeal,
   sellOnAmountOf,
   sellOnRateForAge,
+  naturalPositionOf,
+  positionGroupOf,
   type MarketCard,
   type Negotiation,
   type NegotiationVerdict,
@@ -2126,6 +2139,38 @@ describe("임대 중인 선수는 소유 구단만 움직인다", () => {
     expect(activeContract(state, player.id)!.teamId).toBe(OWNER);
   });
 
+  it("빌려 온 선수는 원소속에서 완전 영입할 수 있다 — 배치·번호는 그대로, 계약과 돈은 옮긴다", () => {
+    const state = createTestGame(42);
+    const player = borrowed(state);
+    const number = player.squadNumber;
+    const level = player.squadLevel;
+    const ownerBudget = financeOf(state, OWNER).transferBudget;
+    const fee = askingPriceFor(state, player);
+    const sent = sendOffer(state, {
+      playerId: player.id,
+      fee,
+      weeklyWage: wageExpectationOf(state, player),
+      years: 3,
+    });
+    expect(sent.ok, sent.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    // 상대는 우리 스쿼드가 아니라 계약을 가진 구단이다
+    expect(negotiation.counterpartTeamId).toBe(OWNER);
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const accepted = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(accepted.ok, accepted.message).toBe(true);
+    const done = completeDeal(state, negotiation.id);
+    expect(done.ok, done.message).toBe(true);
+    const after = playerById(state, player.id)!;
+    expect(after.loan).toBeUndefined();
+    expect(after.teamId).toBe(state.userTeamId);
+    expect(activeContract(state, player.id)!.teamId).toBe(state.userTeamId);
+    expect(after.squadNumber).toBe(number);
+    expect(after.squadLevel).toBe(level);
+    expect(financeOf(state, OWNER).transferBudget).toBe(ownerBudget + fee);
+    expect(done.message).toContain("임대에서 완전 영입");
+  });
+
   it("빌려 온 선수를 팔면 이적료가 소유 구단을 지나쳐 온다 — 확정이 막는다", () => {
     const state = createTestGame(42);
     const player = borrowed(state);
@@ -2720,6 +2765,7 @@ describe("협상 상대의 앵커와 한도", () => {
   /** 클램프는 앵커 객체 하나만 보는 순수 함수라 손으로 세운다 */
   const anchorOf = (over: Partial<CounterpartyAnchor> = {}): CounterpartyAnchor => ({
     negotiationId: "n1",
+    asks: [],
     probability: 34,
     clubOdds: 58,
     playerOdds: 59,
@@ -3468,5 +3514,378 @@ describe("테이블 — 마주 앉으면 그 자리에서 답한다 (transfer.md
     expect(them[them.length - 1]!.stance).toBe("leaving");
     // 끝난 협상에는 다시 앉을 수 없다
     expect(sitAtTable(state, negotiation.id, "잠깐만").ok).toBe(false);
+  });
+});
+
+/**
+ * 조건서 — **돈 말고 오가는 것** (transfer.md §12-3).
+ *
+ * 문장은 모델의 것이고 여기서 고정하는 것은 장부다: 조건이 몇 개까지 서는가, 믿을 만한
+ * 조건이 확률에 얼마를 얹는가, 서명하면 어디로 흩어지는가, 조항이 발동하면 감독이 무엇을
+ * 못 하는가, 마주 앉은 자리가 언제 닫히는가.
+ */
+describe("조건서 — 돈 말고 오가는 것", () => {
+  function ourPlayer(state: GameState) {
+    const player = playersOf(state, state.userTeamId).find((p) => !p.isCaptain)!;
+    activeContract(state, player.id)!.until = addDays(state.date, 120);
+    return player;
+  }
+
+  it("감독의 조건은 셋까지, 같은 갈래는 고쳐 부르고, 갈래 밖 값은 서지 않는다", () => {
+    const state = createTestGame(42);
+    const player = ourPlayer(state);
+    const talks = openTalks(state, { playerId: player.id });
+    if (!talks.ok) throw new Error(talks.message);
+    const id = talks.negotiation.id;
+    const first = offerTerms(state, {
+      negotiationId: id,
+      terms: [
+        { kind: "captain" },
+        { kind: "buyout", fee: 40_000_000 },
+        { kind: "escalator", trigger: "europe", pct: 20 },
+        { kind: "signing", position: "st" },
+        { kind: "other", note: "가족 숙소를 구단이 마련한다" },
+      ],
+    });
+    expect(first.ok, first.message).toBe(true);
+    const sheet = talks.negotiation.terms!;
+    // 넷째 조건은 상한에 걸리고, 문장은 상한 밖이다
+    expect(sheet.filter((row) => row.term.kind !== "other")).toHaveLength(3);
+    expect(sheet.some((row) => row.term.kind === "other")).toBe(true);
+    expect(first.message).toContain("3개까지");
+    // 같은 갈래를 다시 올리면 값이 바뀔 뿐 둘이 되지 않는다
+    offerTerms(state, { negotiationId: id, terms: [{ kind: "buyout", fee: 60_000_000 }] });
+    const buyouts = talks.negotiation.terms!.filter((row) => row.term.kind === "buyout");
+    expect(buyouts).toHaveLength(1);
+    expect(buyouts[0]!.term.fee).toBe(60_000_000);
+    // 값이 빈 조건은 서지 않는다
+    const empty = offerTerms(state, { negotiationId: id, terms: [{ kind: "number" }] });
+    expect(empty.ok).toBe(false);
+  });
+
+  it("믿을 만한 조건은 지위 한 칸씩 둘까지 세고, 거절한 요구는 한 칸 뺀다", () => {
+    const state = createTestGame(42);
+    const player = ourPlayer(state);
+    const base = {
+      playerId: player.id,
+      fee: 0,
+      weeklyWage: renewalExpectation(state, player),
+      years: 3,
+      kind: "renew" as const,
+    };
+    const none = dealOdds(state, base).gates.player;
+    const two = dealOdds(state, {
+      ...base,
+      terms: [
+        { kind: "buyout", fee: 40_000_000 },
+        { kind: "escalator", trigger: "title", pct: 15 },
+      ],
+    }).gates.player;
+    const three = dealOdds(state, {
+      ...base,
+      terms: [
+        { kind: "buyout", fee: 40_000_000 },
+        { kind: "escalator", trigger: "title", pct: 15 },
+        { kind: "signing", position: "ST" },
+      ],
+    }).gates.player;
+    expect(two).toBeGreaterThan(none);
+    // 셋째 조건은 세지 않는다 — 조건 넷을 걸면 백업에게 핵심을 약속한 것보다 크게 통하는 판이 된다
+    expect(three).toBe(two);
+    const refused = dealOdds(state, { ...base, refusedTerms: 1 }).gates.player;
+    expect(refused).toBeLessThan(none);
+    // 문장은 어느 쪽도 아니다
+    expect(
+      dealOdds(state, { ...base, terms: [{ kind: "other", note: "숙소" }] }).gates.player,
+    ).toBe(none);
+  });
+
+  it("서명하면 조건이 제자리로 흩어진다 — 약속 장부·조항·보너스·사본", () => {
+    const state = createTestGame(42);
+    const player = ourPlayer(state);
+    const budgetBefore = financeOf(state, state.userTeamId).transferBudget;
+    const opened = openRenewal(state, {
+      playerId: player.id,
+      weeklyWage: Math.round(renewalExpectation(state, player) * 1.2),
+      years: 3,
+      terms: [
+        { kind: "captain" },
+        { kind: "buyout", fee: 50_000_000 },
+        { kind: "bonus", fee: 1_000_000 },
+        { kind: "other", note: "겨울 휴가 이레를 보장한다" },
+      ],
+    });
+    expect(opened.ok, opened.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    expect(pendingOffer(negotiation)!.terms).toHaveLength(4);
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const accepted = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(accepted.ok, accepted.message).toBe(true);
+    const done = acceptDeal(state, negotiation.id);
+    expect(done.ok, done.message).toBe(true);
+    const contract = activeContract(state, player.id)!;
+    expect(contract.buyoutClause).toBe(50_000_000);
+    expect(contract.terms?.map((t) => t.kind)).toEqual(["captain", "buyout", "bonus", "other"]);
+    expect(contract.terms?.find((t) => t.kind === "bonus")?.settledOn).toBe(state.date);
+    expect(state.promises.some((p) => p.gamePlayerId === player.id && p.kind === "captain")).toBe(
+      true,
+    );
+    const finance = financeOf(state, state.userTeamId);
+    expect(finance.transferBudget).toBe(budgetBefore - 1_000_000);
+    expect(
+      finance.ledger.some((e) => e.category === "signing_bonus" && e.amount === 1_000_000),
+    ).toBe(true);
+  });
+
+  it("바이아웃 조항 값 이상을 부르면 이적료를 되부를 수 없고 구단 관문이 열린다", () => {
+    const state = createTestGame(42);
+    const player = target(state);
+    const offer = offerFor(state, player.id, 0.9);
+    activeContract(state, player.id)!.buyoutClause = offer.fee;
+    const odds = dealOdds(state, offer);
+    expect(odds.factors.some((f) => f.label === "바이아웃 조항")).toBe(true);
+    expect(odds.gates.club).toBeGreaterThanOrEqual(95);
+    const sent = sendOffer(state, offer);
+    expect(sent.ok, sent.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    const bounds = counterBoundsOf(state, negotiation, pendingOffer(negotiation)!);
+    expect(bounds.fee).toBeNull();
+    expect(bounds.wage).not.toBeNull();
+  });
+
+  it("우리 선수의 조항 값 이상이 들어오면 감독이 막을 수 없다", () => {
+    const state = createTestGame(42);
+    const player = playersOf(state, state.userTeamId)[3]!;
+    activeContract(state, player.id)!.buyoutClause = 100_000;
+    setTransferList(state, {
+      playerId: player.id,
+      listed: true,
+      askingPrice: marketValueOf(state, player),
+    });
+    const digest: string[] = [];
+    let guard = 120;
+    while (guard-- > 0 && !state.negotiations.some((n) => n.buyout === true)) {
+      state.date = addDays(state.date, 1);
+      marketDay(state, digest);
+    }
+    const negotiation = state.negotiations.find((n) => n.buyout === true);
+    expect(negotiation, "조항 오퍼가 서지 않았다").toBeDefined();
+    expect(negotiation!.rounds[0]!.fee).toBe(100_000);
+    // 감독의 답은 없다 — 선수가 정했고, 갔든 남았든 협상은 감독의 손 밖이다
+    expect(["agreed", "rejected"]).toContain(negotiation!.status);
+    expect(
+      answerIncomingOffer(state, { negotiationId: negotiation!.id, verdict: "reject" }).ok,
+    ).toBe(false);
+    expect(withdrawOffer(state, negotiation!.id).ok).toBe(false);
+    // 막힌 이적의 불만은 서지 않는다 — 막은 사람이 없다
+    expect(
+      state.issues.some((i) => i.gamePlayerId === player.id && i.reason === "blocked-move"),
+    ).toBe(false);
+  });
+
+  it("AI 구단의 계약에는 조항이 서고 우리 계약에는 서지 않는다", () => {
+    const state = createTestGame(42);
+    const ours = state.contracts.filter((c) => c.teamId === state.userTeamId);
+    expect(ours.every((c) => c.buyoutClause === undefined)).toBe(true);
+    const spanish = state.contracts.filter(
+      (c) => c.status === "active" && leagueOfTeamIn(state, c.teamId) === "laliga",
+    );
+    expect(spanish.length).toBeGreaterThan(0);
+    // 스페인은 법이 조항을 요구한다 — 값이 붙는 선수라면 전부다
+    for (const contract of spanish) {
+      const player = playerById(state, contract.gamePlayerId)!;
+      if (marketValueOf(state, player) <= 0) continue;
+      expect(contract.buyoutClause, player.name).toBeGreaterThan(0);
+    }
+    const others = state.contracts.filter(
+      (c) => c.teamId !== state.userTeamId && leagueOfTeamIn(state, c.teamId) !== "laliga",
+    );
+    const withClause = others.filter((c) => c.buyoutClause !== undefined).length;
+    // 그 밖의 리그에서는 드문 조항이다 — 있지만 전부는 아니다
+    expect(withClause).toBeGreaterThan(0);
+    expect(withClause).toBeLessThan(others.length / 2);
+  });
+
+  it("마주 앉은 자리는 이레면 닫히고, 오퍼가 오르면 협상의 기한으로 산다", () => {
+    const state = createTestGame(42);
+    state.date = "2026-07-10";
+    const player = target(state);
+    const talks = openTalks(state, { playerId: player.id, kind: "buy" });
+    if (!talks.ok) throw new Error(talks.message);
+    expect(talks.opened).toBe(true);
+    expect(talks.negotiation.rounds).toHaveLength(0);
+    expect(talks.negotiation.expiresOn).toBe(addDays(state.date, TALKS_DAYS));
+    // 같은 선수에게 다시 앉으면 그 자리다
+    const again = openTalks(state, { playerId: player.id });
+    expect(again.ok && !again.opened).toBe(true);
+    const idle = createTestGame(42);
+    idle.date = "2026-07-10";
+    const idleTalks = openTalks(idle, { playerId: target(idle).id, kind: "buy" });
+    if (!idleTalks.ok) throw new Error(idleTalks.message);
+    idle.date = addDays(idle.date, TALKS_DAYS + 1);
+    const digest: string[] = [];
+    expireNegotiations(idle, digest);
+    expect(idleTalks.negotiation.status).toBe("expired");
+    expect(digest.some((line) => line.includes("오퍼 없이"))).toBe(true);
+    // 오퍼가 오르면 이레짜리 자리가 협상의 기한으로 산다
+    const sent = sendOffer(state, offerFor(state, player.id));
+    expect(sent.ok, sent.message).toBe(true);
+    expect(talks.negotiation.expiresOn > addDays("2026-07-10", TALKS_DAYS)).toBe(true);
+  });
+
+  it("개인 조건을 먼저 굳히면 그 값의 오퍼는 선수 관문이 합의로 선다", () => {
+    const state = createTestGame(42);
+    state.date = "2026-07-10";
+    const player = target(state);
+    const wage = Math.round(wageExpectationOf(state, player) * 1.3);
+    const proposed = proposePersonal(state, { playerId: player.id, weeklyWage: wage, years: 4 });
+    expect(proposed.ok, proposed.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    expect(negotiation.personal?.weeklyWage).toBe(wage);
+    negotiation.personal!.respondsOn = state.date;
+    const answered = answerPersonal(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(answered.ok, answered.message).toBe(true);
+    expect(negotiation.personal?.agreedOn).toBe(state.date);
+    const offer = { ...offerFor(state, player.id), weeklyWage: wage, years: 4 };
+    const sent = sendOffer(state, offer);
+    expect(sent.ok, sent.message).toBe(true);
+    const pending = pendingOffer(negotiation)!;
+    expect(
+      dealOdds(state, { ...offer, personalAgreed: true }).factors.some(
+        (f) => f.label === "개인 조건 합의",
+      ),
+    ).toBe(true);
+    // 굳은 값을 그대로 실었으므로 선수 쪽 축은 닫혀 있다
+    expect(counterBoundsOf(state, negotiation, pending).wage).toBeNull();
+    // 굳은 값 아래로 부르면 합의는 무른다
+    expect(
+      counterBoundsOf(state, negotiation, { ...pending, weeklyWage: wage - 1 }).wage,
+    ).not.toBeNull();
+  });
+
+  it("추가 영입 약속은 그 자리의 선수가 오면 지켜진다", () => {
+    const state = createTestGame(42);
+    const player = ourPlayer(state);
+    const opened = openPromise(state, player.id, "signing", undefined, undefined, "st");
+    expect(opened.ok, opened.message).toBe(true);
+    expect(opened.promise!.position).toBe("ST");
+    const arriving = state.players.find(
+      (p) =>
+        p.teamId !== state.userTeamId && positionGroupOf(naturalPositionOf(p).position) === "FW",
+    )!;
+    state.transfers.push({
+      id: "tr-test-signing",
+      gamePlayerId: arriving.id,
+      windowId: null,
+      fromTeamId: arriving.teamId,
+      toTeamId: state.userTeamId,
+      date: addDays(state.date, 3),
+      type: "transfer",
+      fee: 1_000_000,
+    });
+    state.date = opened.promise!.dueOn;
+    tickPromises(state, []);
+    expect(state.promises.find((p) => p.id === opened.promise!.id)!.status).toBe("kept");
+    // 데려온 사람이 없으면 어긴 것이다
+    const other = createTestGame(42);
+    const another = ourPlayer(other);
+    const broken = openPromise(other, another.id, "signing", undefined, undefined, "GK");
+    other.date = broken.promise!.dueOn;
+    tickPromises(other, []);
+    expect(other.promises.find((p) => p.id === broken.promise!.id)!.status).toBe("broken");
+  });
+
+  it("주급 인상 조항은 사건이 오면 한 번만 오른다", () => {
+    const state = createTestGame(42);
+    const player = ourPlayer(state);
+    const contract = activeContract(state, player.id)!;
+    const before = contract.weeklyWage;
+    contract.terms = [{ kind: "escalator", trigger: "europe", pct: 20 }];
+    settleEscalators(state, { europe: false, title: false, promotion: false }, []);
+    expect(contract.weeklyWage).toBe(before);
+    const digest: string[] = [];
+    settleEscalators(state, { europe: true, title: false, promotion: false }, digest);
+    expect(contract.weeklyWage).toBe(Math.round(before * 1.2));
+    expect(digest.some((line) => line.includes("주급 인상 조항"))).toBe(true);
+    settleEscalators(state, { europe: true, title: false, promotion: false }, []);
+    expect(contract.weeklyWage).toBe(Math.round(before * 1.2));
+  });
+});
+
+/**
+ * 제안 폼 — **화면이 정확한 값으로 낸 제안은 채팅으로 낸 것과 같은 문을 지난다**
+ * (transfer.md §12-3). 고정하는 것은 갈래가 어느 명령으로 가는가와, 폼이 미리 채우는 자가
+ * 코어의 자와 같은가다.
+ */
+describe("제안 폼 — 구조체가 명령이 된다", () => {
+  it("영입 제안은 오퍼가 되고 조건서까지 싣는다", () => {
+    const state = createTestGame(42);
+    state.date = "2026-07-10";
+    const player = target(state);
+    const view = proposalViewOf(state, player.id)!;
+    expect(view.kinds).toEqual(["buy", "loan"]);
+    expect(view.fee.buy).toBe(askingPriceFor(state, player));
+    expect(view.weeklyWage).toBe(wageExpectationOf(state, player));
+    const sent = applyProposal(state, {
+      playerId: player.id,
+      kind: "buy",
+      fee: view.fee.buy,
+      weeklyWage: view.weeklyWage,
+      years: 4,
+      squadStatus: "starter",
+      terms: [{ kind: "buyout", fee: 60_000_000 }],
+    });
+    expect(sent.ok, sent.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    expect(negotiation.kind).toBe("buy");
+    expect(pendingOffer(negotiation)!.terms?.map((t) => t.kind)).toEqual(["buyout"]);
+    // 열린 협상이 있으면 폼의 갈래는 그 하나로 고정된다
+    expect(proposalViewOf(state, player.id)!.kinds).toEqual(["buy"]);
+    // 이적료가 비면 오퍼가 아니다 — 지어낼 값이 없다
+    expect(applyProposal(state, { playerId: player.id, kind: "buy" }).ok).toBe(false);
+  });
+
+  it("우리 선수의 제안은 재계약이고, 조건만 올리면 자리부터 연다", () => {
+    const state = createTestGame(42);
+    const player = playersOf(state, state.userTeamId).find((p) => !p.isCaptain)!;
+    const view = proposalViewOf(state, player.id)!;
+    expect(view.kinds).toEqual(["renew"]);
+    expect(view.renewalWage).toBe(renewalExpectation(state, player));
+    const tabled = applyProposal(state, {
+      playerId: player.id,
+      kind: "terms",
+      terms: [{ kind: "captain" }],
+    });
+    expect(tabled.ok, tabled.message).toBe(true);
+    const talks = openNegotiationFor(state, player.id)!;
+    expect(talks.kind).toBe("renew");
+    expect(talks.rounds).toHaveLength(0);
+    expect(talks.terms?.map((row) => row.term.kind)).toEqual(["captain"]);
+    // 빌려 온 선수에게 부를 제안은 원소속과의 영입 하나다 — 재계약은 남의 계약 위의 일이다
+    const loanee = playersOf(state, state.userTeamId)[1]!;
+    loanee.loan = { fromTeamId: "chelsea", until: "2027-06-30", wageShare: 1 };
+    const borrowed = proposalViewOf(state, loanee.id)!;
+    expect(borrowed.kinds).toEqual(["buy"]);
+    expect(borrowed.loanedFrom).not.toBeNull();
+  });
+
+  it("무소속은 자유계약 하나다 — 이적료 없이, 창이 닫혀 있어도", () => {
+    const state = createTestGame(42);
+    // 창 밖의 날 — 자유계약은 창을 보지 않는다
+    state.date = "2026-10-15";
+    const player = playersOf(state, state.userTeamId)[5]!;
+    releasePlayer(state, { playerId: player.id });
+    const view = proposalViewOf(state, player.id)!;
+    expect(view.freeAgent).toBe(true);
+    expect(view.kinds).toEqual(["buy"]);
+    expect(view.fee.buy).toBe(0);
+    const signed = applyProposal(state, {
+      playerId: player.id,
+      kind: "buy",
+      weeklyWage: view.weeklyWage,
+      years: 2,
+    });
+    expect(signed.ok, signed.message).toBe(true);
+    expect(openNegotiationFor(state, player.id)!.rounds[0]!.fee).toBe(0);
   });
 });

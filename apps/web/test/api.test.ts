@@ -254,6 +254,51 @@ describe("API — 온보딩부터 경기까지", () => {
     expect(current.views.competitions.recentResults.length).toBeGreaterThan(0);
   });
 
+  it("제안 폼 — 구조체로 낸 오퍼가 그 턴의 카드로 서고, 반려는 턴 없이 돌아온다", async () => {
+    const created = await createGame(
+      json({ teamId: "arsenal", managerName: "폼", background: "분석가", seed: 31 }),
+    );
+    const game = (await created.json()) as GamePayload;
+    const state = loadGame(game.id)!;
+    const budget = state.finances.find((f) => f.teamId === state.userTeamId)!.transferBudget;
+    // 예산 안에서 살 수 있는 남의 선수 하나 — 시드가 고른다
+    const wanted = state.players.find(
+      (p) => p.teamId !== state.userTeamId && p.teamId !== "free" && p.attributes.overall < 70,
+    )!;
+    const fee = Math.min(budget, 3_000_000);
+    const events = async (res: Response) =>
+      (await res.text())
+        .split("\n")
+        .filter(Boolean)
+        .map(
+          (line) =>
+            JSON.parse(line) as {
+              type: string;
+              payload?: GamePayload;
+              error?: string;
+              detail?: string;
+            },
+        );
+    const proposal = { playerId: wanted.id, kind: "buy", fee, weeklyWage: 40_000, years: 4 };
+    const res = await postTurn(json({ proposal }), params(game.id));
+    expect(res.status).toBe(200);
+    const first = await events(res);
+    const payload = first.find((e) => e.type === "done")?.payload;
+    expect(payload, first.find((e) => e.type === "error")?.error).toBeDefined();
+    const last = payload!.chat[payload!.chat.length - 1]!;
+    // 코어가 턴 앞에서 건 오퍼가 이 턴의 호출 장부에 카드로 선다
+    const offer = last.toolCalls.find((c) => c.name === "send_offer");
+    expect(offer?.payload).toMatchObject({ kind: "offer", playerId: wanted.id });
+
+    // 반려 — 답을 기다리는 오퍼 위에 또 넣을 수 없다. 턴은 돌지 않고 이유가 돌아온다
+    const failure = (await events(await postTurn(json({ proposal }), params(game.id)))).find(
+      (e) => e.type === "error",
+    );
+    expect(failure?.error).toBe("제안을 넣지 못했습니다");
+    expect(failure?.detail).toContain("기다리는");
+    expect(loadGame(game.id)!.chat.length).toBe(payload!.chat.length);
+  });
+
   it("달력 뷰가 유저 팀 일정(친선 + 리그 38 + 대항전)을 담는다", async () => {
     const created = await createGame(
       json({ teamId: "liverpool", managerName: "정", background: "분석가", seed: 5 }),

@@ -46,6 +46,14 @@ agents:
       timeout_ms: 60000,
       thinking_level: minimal,
     }
+  table-orders:
+    {
+      provider: google,
+      model: gemini-3.5-flash-lite,
+      max_tokens: 16000,
+      timeout_ms: 60000,
+      thinking_level: minimal,
+    }
   match-gm:
     {
       provider: google,
@@ -102,6 +110,7 @@ agents:
 | `tactic-orders`     | 감독의 판 지시 → 명령 인자 (경기·평시)                                | 16,000    | 60초  |
 | `training-orders`   | 감독의 훈련·육성 지시 → 명령 인자                                     | 16,000    | 60초  |
 | `market-orders`     | 감독의 이적·재정 지시 → 명령 인자                                     | 16,000    | 60초  |
+| `table-orders`      | 협상 테이블의 한 줄 → 값·조건·답의 명령 인자                          | 16,000    | 60초  |
 | `match-gm`          | 경기 중계 · 벤치 대화 · 도구로 경기 진행                              | 64,000    | 180초 |
 | `finalize-match`    | 끝난 경기의 결산 · 마무리 중계                                        | 16,000    | 90초  |
 | `negotiation-table` | 협상 테이블 건너편 — 감독의 말에 답 하나                              | 8,000     | 60초  |
@@ -630,15 +639,15 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
 
 산출이 도구 하나뿐인 호출은 **그 도구가 불린 자리에서 답이 완성된다.** 인자는 도구의
 Zod가 검증하고 핸들러가 장부에 옮겼으니, 그 뒤에 모델이 쓸 문장은 아무 데도 쓰이지
-않는다. 이 길로 부르는 자리는 일곱이다:
+않는다. 이 길로 부르는 자리는 여덟이다:
 
-| 호출                                                             | 산출 도구               | 부르는 쪽이 읽는 것                              |
-| ---------------------------------------------------------------- | ----------------------- | ------------------------------------------------ |
-| 지시 해석 셋 (`tactic-orders`·`training-orders`·`market-orders`) | `report_*_orders`       | 핸들러가 채운 명령 목록                          |
-| 훈련 결산 (`training-rater`)                                     | `report_training`       | 핸들러가 코어에 옮긴 결산                        |
-| 스카우팅 평 (`scout-rater`)                                      | `report_scout_verdicts` | 핸들러가 보고서에 남긴 한 줄 평                  |
-| 협상 상대 (`negotiation-table`)                                  | `reply_at_table`        | 핸들러가 채운 답 — **상대의 대사도 도구 인자다** |
-| 이력 압축 (`history-compactor`)                                  | `report_digest`         | 핸들러가 코어에 옮긴 요약·기억·인물·사이         |
+| 호출                                                                            | 산출 도구                               | 부르는 쪽이 읽는 것                              |
+| ------------------------------------------------------------------------------- | --------------------------------------- | ------------------------------------------------ |
+| 지시 해석 넷 (`tactic-orders`·`training-orders`·`market-orders`·`table-orders`) | `report_*_orders` · `report_table_move` | 핸들러가 채운 명령 목록                          |
+| 훈련 결산 (`training-rater`)                                                    | `report_training`                       | 핸들러가 코어에 옮긴 결산                        |
+| 스카우팅 평 (`scout-rater`)                                                     | `report_scout_verdicts`                 | 핸들러가 보고서에 남긴 한 줄 평                  |
+| 협상 상대 (`negotiation-table`)                                                 | `reply_at_table`                        | 핸들러가 채운 답 — **상대의 대사도 도구 인자다** |
+| 이력 압축 (`history-compactor`)                                                 | `report_digest`                         | 핸들러가 코어에 옮긴 요약·기억·인물·사이         |
 
 **조건은 하나다 — 부르는 쪽이 `result.text`를 읽지 않는다.** 협상 상대의 대사마저
 인자로 오므로(agents.md §4-1), 일곱 중 도구 뒤의 본문을 읽는 자리는 하나도 없다.

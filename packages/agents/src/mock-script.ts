@@ -164,6 +164,13 @@ const SCRIPT: readonly ScriptLine[] = [
     },
   },
   {
+    // 마주 앉기 — 갈래는 코어가 소속으로 고른다 (transfer.md §12-2). 값 없는 말이라 ops는 없다
+    say: `${NAME_SLOT} 에이전트 만나자`,
+    gm: ({ named }) => [
+      { tool: "speak_at_table", input: { playerId: named, line: `${named} 에이전트 만나자` } },
+    ],
+  },
+  {
     say: "이적 건 마무리하자",
     gm: () => orders("market_orders", "이적 건 마무리하자"),
     ops: ({ state }): OpsInput => {

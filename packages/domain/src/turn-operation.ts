@@ -23,7 +23,14 @@ export type TurnOperation =
    */
   | { kind: "skip_to_next_match"; date: string }
   /** 경기 진행 — 한 구간 더. 경기 중에는 시간을 달력이 아니라 경기가 민다 */
-  | { kind: "advance_match" };
+  | { kind: "advance_match" }
+  /**
+   * **제안 폼** — 화면이 정확한 값으로 낸 제안 (proposal.ts). 감독의 말이 없는 제안 턴은
+   * 이 손잡이로 선다: 서버가 코어 명령을 먼저 걸고 그 문장을 `label`에 담는다. 화면은
+   * 이 갈래를 보내지 않는다 — 요청에는 `proposal`이 따로 실리고 서버가 여기로 옮긴다
+   * (`TurnOperationSchema`에 없는 이유).
+   */
+  | { kind: "propose"; label: string };
 
 /**
  * 한 번의 조작이 넘길 수 있는 최대 일수 — 한 시즌.
@@ -59,5 +66,7 @@ export function operationLabel(operation: TurnOperation): string {
       return `시간 진행 — 다음 경기 (${operation.date})`;
     case "advance_match":
       return "경기 진행";
+    case "propose":
+      return operation.label;
   }
 }

@@ -194,6 +194,8 @@ import type {
 } from "@story-fm/domain";
 import { headCoachOf, staffOf } from "../world/persona";
 import { arrivedResponses, listingOf, pendingVerdicts } from "../market/negotiation";
+import { contractTermLines } from "../market/terms";
+import { proposalViewOf, type ProposalView } from "../market/proposal";
 import { pendingPress } from "../club/press";
 import { openManagerOffers } from "../market/manager-market";
 import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../commands";
@@ -5003,7 +5005,18 @@ export interface PlayerCardOursView {
   fatigueLabel: string;
   fatigueBand: FatigueBand;
   mood: MoodRead;
+  /**
+   * 계약에 적힌 지위 — **계약 정보의 한 칸**이다 (people.md §5-2). 카드는 주급·만료
+   * 옆에 세우고 명단에는 세우지 않는다: 명단은 지금 뛰는 자리와 전력을 읽는 표다.
+   */
   squadStatus: SquadStatus;
+  /** 바이아웃 조항 — 없으면 null (transfer.md §12-3) */
+  buyoutClause: number | null;
+  /**
+   * 계약에 적힌 조건 — 코어가 낸 줄 그대로다(`contractTermLines`). 화면은 엔진을 값으로
+   * 읽지 못하므로 문장이 여기 실려 간다. 없으면 빈 배열이다.
+   */
+  contractTerms: string[];
   /** 아직 기한 전인 감독의 약속 — 갈래와 기한뿐이다 (people.md §5-2) */
   promises: Array<{ kind: PromiseKind; dueOn: string }>;
   isCaptain: boolean;
@@ -5095,6 +5108,11 @@ export interface PlayerCardView {
   contractUntil: string | null;
   /** 이적 리스트 호가 — 올라 있지 않으면 null */
   transferListed: number | null;
+  /**
+   * **제안 폼이 미리 채우는 자** — 이 선수에게 부를 수 있는 갈래와 코어가 아는 값
+   * (transfer.md §12-3). 부를 명령이 없는 선수(무소속·빌려 온 선수)는 null이고 그때 폼도 없다.
+   */
+  proposal: ProposalView | null;
   /**
    * **도착한 스카우팅 보고서** — 채팅 카드는 한 번 지나가고 사무실에 스카우팅 화면이
    * 없으므로, 감독이 값을 되찾는 자리가 여기다 (player.md §9.4-1 · §9.5). 금액은
@@ -5214,6 +5232,7 @@ export function buildPlayerCard(state: GameState, playerId: string): PlayerCardV
     weeklyWage: contract?.weeklyWage ?? null,
     contractUntil: contract?.until ?? null,
     transferListed: listingOf(state, p.id)?.askingPrice ?? null,
+    proposal: proposalViewOf(state, p.id),
     scoutReport: scoutReportFacts(state, p, knowledge),
     injury: injury
       ? {
@@ -5271,6 +5290,7 @@ export function buildPlayerCard(state: GameState, playerId: string): PlayerCardV
 function oursCardOf(state: GameState, p: GamePlayer): PlayerCardOursView {
   const assignment = assignmentFor(state, p.id);
   const loan = loanReportOf(state, p.id);
+  const contract = activeContract(state, p.id);
   const slotted = assignment?.role === "starting";
   /** 자리가 있어야 역할이 있다 — 벤치 배치의 `position`은 주 포지션이 채운 값이다 */
   const role =
@@ -5291,6 +5311,8 @@ function oursCardOf(state: GameState, p: GamePlayer): PlayerCardOursView {
     fatigueBand: fatigueBand(fatigueOf(p.state)),
     mood: moodOf(state, p),
     squadStatus: squadStatusOf(state, p),
+    buyoutClause: contract?.buyoutClause ?? null,
+    contractTerms: contract ? contractTermLines(contract) : [],
     promises: openPromises(state, p.id).map((x) => ({ kind: x.kind, dueOn: x.dueOn })),
     isCaptain: p.isCaptain,
     isViceCaptain: p.isViceCaptain === true,

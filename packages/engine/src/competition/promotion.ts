@@ -1,4 +1,5 @@
-import type { PositionGroup, TickSink } from "@story-fm/domain";
+import type { Contract, PositionGroup, TickSink } from "@story-fm/domain";
+import { attachAiBuyout } from "../market/buyout";
 import { josa } from "@story-fm/domain";
 import { isTopLeague, leagueCatalog, leagueCatalogById, leagueName } from "../data/league-catalog";
 import { clubEconomyLevel } from "../data/league-economy";
@@ -307,7 +308,7 @@ export function reinforcePromotedSquads(
         type: "free",
         fee: 0,
       });
-      state.contracts.push({
+      const signed: Contract = {
         id: `c-${signing.id}`,
         gamePlayerId: signing.id,
         teamId,
@@ -320,7 +321,10 @@ export function reinforcePromotedSquads(
         since: state.date,
         until: contractUntil(state.date, REINFORCEMENT_YEARS),
         status: "active",
-      });
+      };
+      state.contracts.push(signed);
+      // 보강 계약에도 조항이 붙을 수 있다 (transfer.md §12-3)
+      attachAiBuyout(state, signed, signing);
     }
     if (teamId === state.userTeamId) {
       digest.push(`승격 보강: 자유계약으로 ${short}명을 더해 1군이 ${PROMOTED_SQUAD_FLOOR}명이다`);

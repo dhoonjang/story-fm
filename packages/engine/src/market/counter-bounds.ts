@@ -12,8 +12,9 @@ import {
   wageExpectationOf,
 } from "./market";
 import { latitudeOf } from "./persuasion";
+import { buyoutMet } from "./buyout";
 import { derivedSquadStatus } from "../squad/promises";
-import { playerById, type GameState } from "../core/state";
+import { activeContract, playerById, type GameState } from "../core/state";
 
 /**
  * **조정이 부를 수 있는 범위 — 한 벌이다** (docs/simulation/transfer.md §1·§12-1).
@@ -26,6 +27,28 @@ import { playerById, type GameState } from "../core/state";
 
 /** 이 확률 아래로는 상대가 수락할 수 없다 — "그 값에 팔 구단은 없다" */
 export const MIN_ACCEPT_PROBABILITY = 5;
+/**
+ * **교섭 상대의 사다리** (transfer.md §12-1) — 이 확률 위면 상대가 받아들인다.
+ * `counterparty.ts`가 읽고 되수출한다; 여기 사는 이유는 바이아웃이 발동한 오퍼에 선수가
+ * 갈지를 `negotiation.ts`도 같은 문턱으로 가르기 때문이다 (§12-3).
+ */
+export const COUNTERPARTY_ACCEPT_AT = 50;
+/** 이 확률 위면 상대가 되부른다 — 그 아래는 결렬 */
+export const COUNTERPARTY_COUNTER_AT = 25;
+/**
+ * **사다리의 바닥** — 이 확률에 못 미치면 되부를 칸이 없다 (transfer.md §12-1).
+ *
+ * 사다리가 ±한 칸인 탓에 결렬의 이웃은 조정뿐이고, 테이블 호출은 언제나 그 이웃으로
+ * 내려왔다 — 결렬 앵커 일곱이 전부 조정이 됐다. 그래서 감독이 정중하기만 하면 가망
+ * 없는 로볼이 창이 닫힐 때까지 살아 있었다. 바닥 아래에서 한 칸을 닫아 코어의 판정이
+ * 서게 한다.
+ *
+ * 값이 조정 문턱의 **절반**인 것은 그 아래가 흥정이 아니라 거절인 자리이기 때문이다:
+ * 잰 네 판에서 호가의 절반을 부른 오퍼가 0%·5%·9%·16%였고, 조정 문턱은 호가의
+ * 6~8할에 걸렸다. 바닥과 조정 문턱 사이(12.5~25%)는 앵커가 결렬이되 상대가 정가를
+ * 되부를 수 있는 구간으로 남는다 — 아슬아슬한 오퍼 하나로 문이 닫히지 않는다.
+ */
+export const COUNTERPARTY_HOPELESS_AT = COUNTERPARTY_COUNTER_AT / 2;
 /** 조정 요구 주급 상한 — 기대치의 이 배수 (상대도 무리한 요구는 하지 않는다) */
 export const COUNTER_WAGE_CEILING = 1.4;
 /** 사는 쪽이 깎아 부를 수 있는 하한 — 기대치의 이 비율 아래로는 못 부른다 */
@@ -151,7 +174,7 @@ function incomingAsking(state: GameState, kind: Negotiation["kind"], player: Gam
 export function counterBoundsOf(
   state: GameState,
   negotiation: Negotiation,
-  offer: { fee: number; weeklyWage: number; squadStatus?: SquadStatus },
+  offer: { fee: number; weeklyWage: number; contractYears?: number; squadStatus?: SquadStatus },
 ): CounterBounds {
   const latitude = latitudeOf(negotiation.pitched);
   const acceptFloor = Math.max(0, MIN_ACCEPT_PROBABILITY - latitude);
@@ -233,6 +256,17 @@ export function counterBoundsOf(
    */
   const wageAnchor = Math.max(offer.weeklyWage, wageExpectationOf(state, player));
   /**
+   * **개인 조건이 먼저 굳었으면 선수 쪽 축은 닫혀 있다** (transfer.md §12-3) — 오퍼가 그
+   * 값을 그대로 실었을 때다. 감독이 굳은 값을 깎아 부르면 합의는 그 자리에서 무른다
+   * (`personalHolds`).
+   */
+  const personalClosed = personalHolds(negotiation, offer);
+  /**
+   * **바이아웃 조항을 채운 오퍼에는 이적료 축이 없다** (§12-3) — 파는 구단은 그 값에
+   * 답할 자리가 없다. 남는 축은 선수 쪽뿐이다.
+   */
+  const buyoutClosed = buyoutMet(activeContract(state, player.id), offer.fee);
+  /**
    * **사전 계약에는 이적료 축이 없다** (transfer.md §1-4) — 이적료가 0인 것이 이
    * 갈래의 정의라, 상대가 값을 올려 부를 수 있으면 그 조정에 합의하는 순간
    * 이적료가 붙은 협상이 `pending` 계약 하나로 확정된다: 코어가 받지도 않을 돈이
@@ -242,13 +276,15 @@ export function counterBoundsOf(
     return {
       ...base,
       fee: null,
-      wage: {
-        expectation: Math.round(wageExpectationOf(state, player)),
-        min: offer.weeklyWage,
-        max: Math.round(wageAnchor * COUNTER_WAGE_CEILING),
-      },
+      wage: personalClosed
+        ? null
+        : {
+            expectation: Math.round(wageExpectationOf(state, player)),
+            min: offer.weeklyWage,
+            max: Math.round(wageAnchor * COUNTER_WAGE_CEILING),
+          },
       years: null,
-      status: statusBandOf(state, player, offer.squadStatus),
+      status: personalClosed ? null : statusBandOf(state, player, offer.squadStatus),
       // 나눌 이적료가 없다 (§5-2)
       splittable: false,
     };
@@ -257,19 +293,41 @@ export function counterBoundsOf(
   const asking = incomingAsking(state, kind, player);
   return {
     ...base,
-    fee: {
-      expectation: asking,
-      min: offer.fee,
-      max: Math.round(asking * COUNTER_CEILING),
-    },
-    wage: {
-      expectation: Math.round(wageExpectationOf(state, player)),
-      min: offer.weeklyWage,
-      max: Math.round(wageAnchor * COUNTER_WAGE_CEILING),
-    },
+    fee: buyoutClosed
+      ? null
+      : {
+          expectation: asking,
+          min: offer.fee,
+          max: Math.round(asking * COUNTER_CEILING),
+        },
+    wage: personalClosed
+      ? null
+      : {
+          expectation: Math.round(wageExpectationOf(state, player)),
+          min: offer.weeklyWage,
+          max: Math.round(wageAnchor * COUNTER_WAGE_CEILING),
+        },
     years: null,
     // 임대 영입에는 지위가 없다 — 빌려 온 선수의 계약은 남의 것이다 (transfer.md §2)
-    status: kind === "buy" ? statusBandOf(state, player, offer.squadStatus) : null,
+    status:
+      kind === "buy" && !personalClosed ? statusBandOf(state, player, offer.squadStatus) : null,
     splittable: kind === "buy",
   };
+}
+
+/**
+ * **굳은 개인 조건이 이 오퍼에 그대로 실렸는가** (transfer.md §12-3). 주급은 굳은 값
+ * 이상이면 되고(더 주는 것은 합의를 무르지 않는다), 연수와 지위는 같아야 한다.
+ */
+export function personalHolds(
+  negotiation: Pick<Negotiation, "personal">,
+  offer: { weeklyWage: number; contractYears?: number; squadStatus?: SquadStatus },
+): boolean {
+  const personal = negotiation.personal;
+  if (!personal || personal.agreedOn === undefined) return false;
+  if (offer.weeklyWage < personal.weeklyWage) return false;
+  if (offer.contractYears !== undefined && offer.contractYears !== personal.contractYears) {
+    return false;
+  }
+  return (offer.squadStatus ?? undefined) === (personal.squadStatus ?? undefined);
 }

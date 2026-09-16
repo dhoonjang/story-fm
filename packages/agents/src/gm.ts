@@ -848,6 +848,11 @@ export async function runGmTurn(
    * 문장이라면 이쪽은 어느 축이 어디서 어디로 갔는가다 (agents.md §3 지시 해석).
    */
   boardMoves?: readonly BoardMove[],
+  /**
+   * 턴 앞에서 코어가 이미 건 명령의 기록 — 제안 폼이 넣은 오퍼가 여기로 온다
+   * (transfer.md §12-3). 이 턴의 도구 호출과 한 장부에 서야 그 카드가 이 턴에 그려진다.
+   */
+  seedCalls?: readonly GmToolCall[],
 ): Promise<GmTurnResult> {
   const inMatch = state.phase === "match";
   const shape: TurnShape = {
@@ -856,7 +861,7 @@ export async function runGmTurn(
     operator: operation != null,
   };
   const ledger: TurnLedger = {
-    calls: [],
+    calls: [...(seedCalls ?? [])],
     goals: [],
     cards: [],
     training: [],

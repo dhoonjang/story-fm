@@ -8,6 +8,8 @@ import {
   type MissionReportCard,
 } from "@story-fm/domain";
 import { IconFinance, IconInsight, IconPerson, IconTrash } from "@/components/icons";
+import { useProposal } from "@/components/proposal-form";
+import type { ProposalPrefill } from "@story-fm/domain";
 import { humanDate, humanMonthYear } from "@/lib/dateline";
 import { ratingTone } from "@/lib/scout-report-display";
 
@@ -139,8 +141,27 @@ function Terms({ terms, loan = false }: { terms: MarketTerms; loan?: boolean }) 
   );
 }
 
+/**
+ * 카드가 폼에 미리 채우는 값 — 상대의 조정안이 있으면 그것, 없으면 우리 조건이다. 같은
+ * 숫자를 감독이 다시 치지 않는다 (transfer.md §12-3).
+ */
+function prefillOf(card: MarketCard): ProposalPrefill {
+  const terms = card.counterTerms ?? card.terms;
+  return {
+    kind: card.kind === "renewal" ? "renew" : card.loan === true ? "loan" : "buy",
+    ...(terms?.fee === undefined ? {} : { fee: terms.fee }),
+    ...(terms?.paymentYears === undefined ? {} : { paymentYears: terms.paymentYears }),
+    ...(terms?.weeklyWage === undefined ? {} : { weeklyWage: terms.weeklyWage }),
+    ...(terms?.years === undefined ? {} : { years: terms.years }),
+  };
+}
+
+/** 폼으로 이어지는 카드 — 오퍼·답·재계약. 해지·철회·스카우트에는 다시 부를 값이 없다 */
+const PROPOSABLE: ReadonlySet<MarketCard["kind"]> = new Set(["offer", "verdict", "renewal"]);
+
 export function MarketCardView({ card }: { card: MarketCard }) {
   const Icon = KIND_ICON[card.kind];
+  const proposal = useProposal();
   /**
    * 답의 결이 카드의 색을 정한다 — 수락은 강조색, 거절은 경고색, 조정은 그 사이.
    * 금액을 읽기 전에 잘 됐는지가 보여야 스크롤을 훑을 때 눈이 걸린다.
@@ -221,6 +242,17 @@ export function MarketCardView({ card }: { card: MarketCard }) {
           ) : (
             <span className="mc-note">{card.note}</span>
           ))}
+        {/* 이 카드의 조건을 폼에 그대로 앉혀 다시 부른다 — 조정안이면 그 값이 출발점이다 */}
+        {proposal !== null && PROPOSABLE.has(card.kind) && (
+          <button
+            type="button"
+            className="mc-propose"
+            onClick={() => proposal.open(card.playerId, prefillOf(card))}
+            data-testid="market-card-propose"
+          >
+            제안
+          </button>
+        )}
       </div>
     </div>
   );

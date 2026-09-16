@@ -7,6 +7,7 @@ export * from "./tactic-apply";
 export * from "./counterparty-brief";
 export * from "./negotiation-table";
 export * from "./market-orders";
+export * from "./table-orders";
 export * from "./training-orders";
 export * from "./orders-ops";
 export * from "./table-situation";

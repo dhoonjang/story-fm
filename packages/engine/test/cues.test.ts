@@ -830,6 +830,7 @@ describe("계약과 관심 — 에이전트가 계단 1부터 온다", () => {
     gripe(state, target.id, "contract");
     pressDays(state, 10); // 50
 
+    // 압력을 멈추는 것은 **오퍼가 실린** 재계약 협상이다 — 앉기만 한 자리는 아니다 (transfer.md §12-2)
     state.negotiations.push({
       id: `neg-renew-${target.id}`,
       gamePlayerId: target.id,
@@ -839,7 +840,18 @@ describe("계약과 관심 — 에이전트가 계단 1부터 온다", () => {
       openedOn: state.date,
       expiresOn: addDays(state.date, 14),
       status: "open",
-      rounds: [],
+      rounds: [
+        {
+          date: state.date,
+          by: "us",
+          fee: 0,
+          weeklyWage: 50_000,
+          contractYears: 3,
+          respondsOn: addDays(state.date, 3),
+          probability: 50,
+          verdict: null,
+        },
+      ],
     });
 
     // 원인이 서지 않으니 하루 12씩 식는다

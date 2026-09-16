@@ -1,8 +1,11 @@
 import {
   acquireSaveLock,
+  applyProposal,
   bindJournal,
   journal,
   loadGame,
+  playerName,
+  proposalCommandName,
   refreshPacket,
   saveGame,
   setPlayerTactic,
@@ -32,7 +35,9 @@ import {
   traceTurn,
   type LlmErrorKind,
 } from "@story-fm/llm";
-import type { BoardMove } from "@story-fm/domain";
+import type { BoardMove, ProposalInput } from "@story-fm/domain";
+import { proposalLabel } from "@story-fm/domain";
+import { recordCall, type GmToolCall } from "@story-fm/agents";
 import { NextResponse } from "next/server";
 import { toPayload, type GamePayload } from "./store";
 import type { MatchBoardOrder } from "./match-orders";
@@ -328,6 +333,12 @@ export function runTurnLocked(
    * 경기를 진행할 때 한 묶음으로 전달된다 — 그래서 **한 번의 LLM 호출**로 끝난다.
    */
   orders?: readonly MatchBoardOrder[],
+  /**
+   * **제안 폼** — 화면이 정확한 값으로 낸 제안 (transfer.md §12-3). 전술판 조작과 같은
+   * 길이다: 코어 명령을 턴 앞에서 걸고, 모델에는 이미 반영된 사실을 넘기며, 그 카드는
+   * 이 턴에 선다. 감독의 말이 함께 오면 그 말이 턴이고, 없으면 제안 자체가 손잡이 턴이다.
+   */
+  proposal?: ProposalInput,
 ): Promise<TurnOutcome> {
   // 원문은 호출이 끝나는 즉시 이 게임의 사이드카에 앉고(models.md §5), 그 이름들이
   // model 턴을 채팅에 밀어 넣는 자리에서 턴 인덱스에 묶인다 — 턴이 실패해 묶이지
@@ -360,6 +371,7 @@ export function runTurnLocked(
           kind: operation ? "operation" : "message",
           ...(message === undefined ? {} : { text: message }),
           ...(operation === undefined ? {} : { operation }),
+          ...(proposal === undefined ? {} : { proposal }),
           orders: orders ?? [],
           pendingEdits: state.pendingEdits ?? [],
           date: state.date,
@@ -421,19 +433,85 @@ export function runTurnLocked(
         });
       }
       /**
+       * **제안 폼** — 코어 명령을 턴 앞에서 건다 (transfer.md §12-3). 반려되면 턴은 없었던
+       * 일이고 그 이유가 화면으로 돌아간다 — 폼이 그 줄을 세우고 감독이 값을 고친다.
+       * 걸리면 그 명령은 이 턴의 호출 장부에 앉아 카드로 서고, 모델에는 오퍼레이터 봉투로
+       * 「이미 넣었다」가 간다.
+       */
+      const seedCalls: GmToolCall[] = [];
+      let proposed: TurnOperation | undefined;
+      if (proposal !== undefined) {
+        const name = proposalCommandName(proposal.kind);
+        const result = applyProposal(state, proposal);
+        journal({
+          kind: "command",
+          name,
+          input: proposal,
+          ok: result.ok,
+          message: result.message,
+          source: "board",
+          ...(result.brief === undefined ? {} : { brief: result.brief }),
+        });
+        if (!result.ok) {
+          noteTurn({
+            outcome: {
+              ok: false,
+              saved: false,
+              error: "제안을 넣지 못했습니다",
+              detail: result.message,
+            },
+            after: turnDigestOf(state),
+          });
+          return {
+            ok: false as const,
+            status: 400,
+            error: "제안을 넣지 못했습니다",
+            // 같은 값을 다시 보내면 같은 자리에서 막힌다 — 값을 고쳐야 한다
+            retry: false,
+            detail: result.message,
+          };
+        }
+        recordCall(seedCalls, name, result, { input: proposal });
+        // 모델이 읽는 줄 — 무엇을 넣었고 코어가 무어라 답했는가. 되읽는 코드는 없다
+        const label =
+          `${proposalLabel(proposal, playerName(state, proposal.playerId))} — ${result.message} ` +
+          "(이미 넣었다 — 다시 넣지 말 것)";
+        appliedOrders.push(label);
+        proposed = { kind: "propose", label };
+        // 감독의 말이 함께 오면 그 말이 턴이다 — 제안은 앞에 선 손잡이 줄로 남는다
+        if (message !== undefined) {
+          state.chat.push({
+            role: "operator",
+            text: label,
+            toolCalls: [],
+            at: state.date,
+            ...mark,
+          });
+        }
+      }
+      /**
        * 모델이 읽을 한 줄 — 조작이면 **구조체에서 만든다.** 감독이 친 말이 아니라
        * 손잡이라, 이 문장은 표시일 뿐이고 되읽는 코드가 없다 (agents.md §2).
        */
-      const said = operation ? operationLabel(operation) : (message ?? "");
+      const handle = operation ?? (message === undefined ? proposed : undefined);
+      const said = handle ? operationLabel(handle) : (message ?? "");
       state.chat.push({
-        role: operation ? "operator" : "user",
+        role: handle ? "operator" : "user",
         text: said,
         toolCalls: [],
         at: state.date,
         ...mark,
       });
       try {
-        const turn = await runGmTurn(state, said, onDelta, operation, appliedOrders, boardMoves);
+        const turn = await runGmTurn(
+          state,
+          said,
+          onDelta,
+          handle,
+          appliedOrders,
+          boardMoves,
+          seedCalls,
+        );
         state.chat.push({
           role: "model",
           text: turn.text,

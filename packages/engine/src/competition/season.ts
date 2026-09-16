@@ -1,6 +1,7 @@
 import type {
   Achievement,
   AchievementCode,
+  Contract,
   BoardExpectationCode,
   GamePlayer,
   MatchRecord,
@@ -66,6 +67,8 @@ import {
   toFreeAgency,
 } from "../market/departures";
 import { refreshStaffPool, renewStaffContracts } from "../market/staff-market";
+import { attachAiBuyout } from "../market/buyout";
+import { openPromisesFromContract, settleEscalators } from "../market/terms";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import {
   TOP_EURO_CUP_ID,
@@ -104,7 +107,7 @@ import {
 } from "../club/finance";
 import { derbyMatchesOf, derbyRecordFrom } from "../club/derby";
 import { standClubVision, visionReadings } from "../club/vision";
-import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
+import { buildEuroEntrants, entrantsOf, euroCompetitionOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import type { SuperCupSource } from "./super-cup";
 import {
@@ -1794,6 +1797,8 @@ function settlePrecontracts(state: GameState, on: string, digest: TickSink): voi
     assignSquadNumber(state.players, player);
     player.squadLevel = "first";
     player.loan = undefined;
+    // 사전 계약에 적힌 약속은 합류하는 날 장부에 선다 (transfer.md §12-3)
+    if (pending.teamId === managed) openPromisesFromContract(state, pending, player);
     state.transfers.push({
       id: `tr-pre-${player.id}-${nextSeason}`,
       gamePlayerId: player.id,
@@ -2131,7 +2136,7 @@ function applyTransition(state: GameState): string[] {
         continue;
       }
       contract.status = "ended";
-      state.contracts.push({
+      const renewed: Contract = {
         id: `c-${player.id}-${nextSeason}`,
         gamePlayerId: player.id,
         teamId: team.id,
@@ -2144,7 +2149,10 @@ function applyTransition(state: GameState): string[] {
         since: nextCalendar.preseasonStart,
         until: contractUntil(nextCalendar.preseasonStart, randInt(rng, 2, 4)),
         status: "active",
-      });
+      };
+      state.contracts.push(renewed);
+      // 자동 갱신에도 조항이 붙을 수 있다 — 서는 계약마다 같은 규칙이다 (transfer.md §12-3)
+      attachAiBuyout({ ...state, date: nextCalendar.preseasonStart }, renewed, player);
     }
 
     // 배치 재구성 — 새 스쿼드로 선발·벤치를 다시 짠다 (적응도는 기준선으로 리셋)
@@ -2255,6 +2263,20 @@ function applyTransition(state: GameState): string[] {
    * 순서가 뒤집히면 강등된 팀이 그 리그의 다음 시즌 일정에 그대로 남는다.
    */
   const promoted = applyPromotionRelegation(state, finalTables, digest);
+  /**
+   * **주급 인상 조항** — 지금 끝난 시즌의 사실로 한 번 집행한다 (transfer.md §12-3). 순위표와
+   * 승강은 위에서 읽었고, 대항전 진출은 아래 `euroEntrants`가 새로 서기 전의 **이번 시즌**
+   * 진출권이라 여기서 읽는다 — 새 시즌의 티켓은 다음 해의 조항이 읽을 사실이다.
+   */
+  settleEscalators(
+    state,
+    {
+      europe: euroCompetitionOf(state.euroEntrants, state.userTeamId) !== null,
+      title: Object.values(finalTables).some((table) => table[0] === state.userTeamId),
+      promotion: promoted.includes(state.userTeamId),
+    },
+    digest,
+  );
   /**
    * 체급 재산정 — 승강 **뒤**여야 한다. 승격·강등한 팀은 리그가 바뀌면서 다른 풀에
    * 들어가고, 그게 곧 완전 재산정이다 (team.md §2.1). 아래 이적 예산 보충도 새

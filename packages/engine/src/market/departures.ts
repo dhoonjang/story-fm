@@ -1,4 +1,5 @@
-import type { GamePlayer, Injury, TransferReason, TickSink } from "@story-fm/domain";
+import type { Contract, GamePlayer, Injury, TransferReason, TickSink } from "@story-fm/domain";
+import { attachAiBuyout } from "./buyout";
 import { josa, josaOf, ageOf, buildPaymentInstallments, seasonRating } from "@story-fm/domain";
 import { contractUntil, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
@@ -894,7 +895,7 @@ function signWithClub(
   // 남은 활성 계약을 끝내고 쓴다 — 안 끝내면 한 선수의 주급이 두 구단에서 세어진다
   const previous = activeContract(state, player.id);
   if (previous) previous.status = "ended";
-  state.contracts.push({
+  const signed: Contract = {
     id: `c-fa-${player.id}-${state.date}`,
     gamePlayerId: player.id,
     teamId,
@@ -902,7 +903,10 @@ function signWithClub(
     since: state.date,
     until: contractUntil(state.date, years),
     status: "active",
-  });
+  };
+  state.contracts.push(signed);
+  // 무소속 영입에도 조항이 붙을 수 있다 — 서는 계약마다 같은 규칙이다 (transfer.md §12-3)
+  attachAiBuyout(state, signed, player);
   player.teamId = teamId;
   player.squadNumber = undefined;
   assignSquadNumber(state.players, player);

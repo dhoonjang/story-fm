@@ -169,26 +169,26 @@
 
 ### 3.2 팀 · 선수
 
-| 엔티티                           | 무엇                                                                                                         | 정의                |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------- |
-| `teams` `GameTeam`               | AI 전술 역량치 · 현 감독 이름/부임일/지난 재임 + 카탈로그에서 복사한 정체성(이름·약칭·소속·체급·구장·브랜드) | `domain/team.ts`    |
-| `players` `GamePlayer`           | 16축·상태·포지션 목록·주장·부주장·임대·성장 캐리 + 국적(협회 코드)·홈그로운 협회                             | `domain/player.ts`  |
-| ↳ `PlayerAttributes`             | 16축 + `overall`(파생 캐시) + `potential`                                                                    | `domain/player.ts`  |
-| ↳ `PlayerState`                  | 폼(−1\~1) · 체력(0\~100) · 부상 성향 · 심경 한 줄                                                            | `domain/player.ts`  |
-| ↳ `PlayerPosition`               | 가능 포지션 + 적응도 + `isNatural`(하나 이상)                                                                | `domain/player.ts`  |
-| `tactics` `TeamTactics`          | 팀당 1개 — `spec` + `assignments` + `shelved` + `setPieceTakers` + `setPieceRoutine` + 팀 기억               | `domain/tactics.ts` |
-| ↳ `TacticsSpec`                  | 모양 이름(파생 — 프리셋 밖도 담는다) + 전술 6축(각 1\~5) + 토글 넷(전환·트랩·태클·GK 배급, 옛 세이브엔 없다) | `domain/tactics.ts` |
-| ↳ `TacticAssignment`             | **라인업의 원본** — 자리·좌표·역할·적응도·개인 지시·개인 기억                                                | `domain/tactics.ts` |
-| ↳ `PlayerDirective`              | 결과에 닿는 개인 지시 5종 (`instruction`은 사람이 읽는 말)                                                   | `domain/tactics.ts` |
-| ↳ `DrilledTactics`               | 전술 지문 → 그때 도달한 적응도 (선수별)                                                                      | `domain/tactics.ts` |
-| ↳ `ShelvedFamiliarity`           | **배치가 없는 동안 적응도·기억이 머무는 자리** (2군·예비)                                                    | `domain/tactics.ts` |
-| ↳ `SetPieceTakers`               | 세트피스를 차는 사람 — `corner`·`freeKick`·`penalty` 각각 선수 id(옛 세이브엔 없다)                          | `domain/tactics.ts` |
-| ↳ `SetPieceRoutine`              | 세트피스에 세우는 인원 — 가담 `commit` · 수비 `guard`, 각 `few`/`normal`/`many`(옛 세이브엔 없다)            | `domain/tactics.ts` |
-| `contracts` `Contract`           | **주급의 원본** — 선수당 `active` 정확히 1건                                                                 | `domain/records.ts` |
-| `finances` `TeamFinance`         | 팀당 1개 — 잔고·이적 예산·원장·낙하산                                                                        | `domain/records.ts` |
-| ↳ `LedgerEntry`                  | 원장 한 줄 — 유저 팀만 상세, 최근 3개월 롤링                                                                 | `domain/records.ts` |
-| `financeReports` `FinanceReport` | 월간 보고서 — 영구 보존, 매월 1일 발행                                                                       | `domain/records.ts` |
-| ↳ `highlights`                   | 그달의 큰 비정기 항목 — 원장이 잘려도 남는 날짜·금액                                                         | `domain/records.ts` |
+| 엔티티                           | 무엇                                                                                                            | 정의                |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------- |
+| `teams` `GameTeam`               | AI 전술 역량치 · 현 감독 이름/부임일/지난 재임 + 카탈로그에서 복사한 정체성(이름·약칭·소속·체급·구장·브랜드)    | `domain/team.ts`    |
+| `players` `GamePlayer`           | 16축·상태·포지션 목록·주장·부주장·임대·성장 캐리 + 국적(협회 코드)·홈그로운 협회                                | `domain/player.ts`  |
+| ↳ `PlayerAttributes`             | 16축 + `overall`(파생 캐시) + `potential`                                                                       | `domain/player.ts`  |
+| ↳ `PlayerState`                  | 폼(−1\~1) · 체력(0\~100) · 부상 성향 · 심경 한 줄                                                               | `domain/player.ts`  |
+| ↳ `PlayerPosition`               | 가능 포지션 + 적응도 + `isNatural`(하나 이상)                                                                   | `domain/player.ts`  |
+| `tactics` `TeamTactics`          | 팀당 1개 — `spec` + `assignments` + `shelved` + `setPieceTakers` + `setPieceRoutine` + 팀 기억                  | `domain/tactics.ts` |
+| ↳ `TacticsSpec`                  | 모양 이름(파생 — 프리셋 밖도 담는다) + 전술 6축(각 1\~5) + 토글 넷(전환·트랩·태클·GK 배급, 옛 세이브엔 없다)    | `domain/tactics.ts` |
+| ↳ `TacticAssignment`             | **라인업의 원본** — 자리·좌표·역할·적응도·개인 지시·개인 기억                                                   | `domain/tactics.ts` |
+| ↳ `PlayerDirective`              | 결과에 닿는 개인 지시 5종 (`instruction`은 사람이 읽는 말)                                                      | `domain/tactics.ts` |
+| ↳ `DrilledTactics`               | 전술 지문 → 그때 도달한 적응도 (선수별)                                                                         | `domain/tactics.ts` |
+| ↳ `ShelvedFamiliarity`           | **배치가 없는 동안 적응도·기억이 머무는 자리** (2군·예비)                                                       | `domain/tactics.ts` |
+| ↳ `SetPieceTakers`               | 세트피스를 차는 사람 — `corner`·`freeKick`·`penalty` 각각 선수 id(옛 세이브엔 없다)                             | `domain/tactics.ts` |
+| ↳ `SetPieceRoutine`              | 세트피스에 세우는 인원 — 가담 `commit` · 수비 `guard`, 각 `few`/`normal`/`many`(옛 세이브엔 없다)               | `domain/tactics.ts` |
+| `contracts` `Contract`           | **주급의 원본** — 선수당 `active` 정확히 1건 · 지위 · 바이아웃 조항 · 조건서의 사본(`terms`, transfer.md §12-3) | `domain/records.ts` |
+| `finances` `TeamFinance`         | 팀당 1개 — 잔고·이적 예산·원장·낙하산                                                                           | `domain/records.ts` |
+| ↳ `LedgerEntry`                  | 원장 한 줄 — 유저 팀만 상세, 최근 3개월 롤링                                                                    | `domain/records.ts` |
+| `financeReports` `FinanceReport` | 월간 보고서 — 영구 보존, 매월 1일 발행                                                                          | `domain/records.ts` |
+| ↳ `highlights`                   | 그달의 큰 비정기 항목 — 원장이 잘려도 남는 날짜·금액                                                            | `domain/records.ts` |
 
 ### 3.3 일정 · 대회
 
@@ -308,22 +308,23 @@ row, 지난 일 = 그대로 이력.**
 
 ### 3.5 진행 중인 흥정 · 세계의 부름
 
-| 엔티티                                | 무엇                                                                                                          | 정의                   |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `negotiations` `Negotiation`          | 진행 중 협상 — 영입·매각·재계약·임대(양방향)                                                                  | `domain/records.ts`    |
-| ↳ `NegotiationRound`                  | 오퍼 한 번 — 조건·응답 예정일·코어 확률·판정·`pitch`                                                          | `domain/records.ts`    |
-| ↳ `Medical`                           | 합의와 계약 사이의 검진 — `scheduled`/`passed`/`flagged`                                                      | `domain/records.ts`    |
-| ↳ `PitchClaim`                        | 설득 논거 10종 — 코어가 사실 대조한다                                                                         | `domain/persuasion.ts` |
-| `pressConferences` `PressConference`  | 기자회견 — 열린 시점과 답한 시점이 갈린다                                                                     | `domain/press.ts`      |
-| ↳ `PressFact`                         | **사실 카드** (질문 문장이 아니다) — 기자는 이 밖을 못 묻는다                                                 | `domain/press.ts`      |
-| `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리, 그리고 감독이 두드려 연 면접 (people.md §8)                       | `domain/press.ts`      |
-| `approachPressure` `ApproachPressure` | 압력 눈금 — 주제별 누적과 계단. 파생할 수 없는 유일한 값                                                      | `domain/press.ts`      |
-| `pressLeaks` `PressLeak`              | 언론 유출 — 다음 회견이 실어 갈 때까지만 남는다 (§8 계단 4)                                                   | `domain/press.ts`      |
-| `pressSackings` `PressSacking`        | 라이벌 구단의 경질 — 다음 회견이 실어 갈 때까지만 남는다                                                      | `domain/press.ts`      |
-| `clubVision` `ClubVision`             | **클럽 비전** — 구단주 원형이 건 다년 계획. 코드·목표·가중치·기한만 남고 진행도는 파생이다 (career.md §5)     | `domain/records.ts`    |
-| `youthCandidates` `YouthCandidate`    | 여름의 유스 후보 — 소집일까지 감독의 답을 기다린다 (season.md §6)                                             | `domain/records.ts`    |
-| `callUps` `CallUp`                    | **A매치 소집** — `returnedOn === null`이 소집 중. 정산 뒤엔 감독 팀 것만 두 시즌 남는다 (competition.md §5-1) | `domain/records.ts`    |
-| `aiDeals` `AiDeal`                    | 이번 주에 정해진, 날짜가 흩어진 AI 이적                                                                       | `market/ai-market.ts`  |
+| 엔티티                                | 무엇                                                                                                              | 정의                   |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `negotiations` `Negotiation`          | 진행 중 협상 — 영입·매각·재계약·임대(양방향) · 조건서(`terms`) · 개인 조건 합의(`personal`) · 조항 발동(`buyout`) | `domain/records.ts`    |
+| ↳ `NegotiationRound`                  | 오퍼 한 번 — 조건·응답 예정일·코어 확률·판정·`pitch`                                                              | `domain/records.ts`    |
+| ↳ `Medical`                           | 합의와 계약 사이의 검진 — `scheduled`/`passed`/`flagged`                                                          | `domain/records.ts`    |
+| ↳ `PitchClaim`                        | 설득 논거 10종 — 코어가 사실 대조한다                                                                             | `domain/persuasion.ts` |
+| ↳ `TabledTerm` · `DealTerm`           | 조건서 한 줄 — 조건 8갈래 · 누가 · 답. 서명 때 계약·약속 장부로 흩어진다 (transfer.md §12-3)                      | `domain/deal-terms.ts` |
+| `pressConferences` `PressConference`  | 기자회견 — 열린 시점과 답한 시점이 갈린다                                                                         | `domain/press.ts`      |
+| ↳ `PressFact`                         | **사실 카드** (질문 문장이 아니다) — 기자는 이 밖을 못 묻는다                                                     | `domain/press.ts`      |
+| `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리, 그리고 감독이 두드려 연 면접 (people.md §8)                           | `domain/press.ts`      |
+| `approachPressure` `ApproachPressure` | 압력 눈금 — 주제별 누적과 계단. 파생할 수 없는 유일한 값                                                          | `domain/press.ts`      |
+| `pressLeaks` `PressLeak`              | 언론 유출 — 다음 회견이 실어 갈 때까지만 남는다 (§8 계단 4)                                                       | `domain/press.ts`      |
+| `pressSackings` `PressSacking`        | 라이벌 구단의 경질 — 다음 회견이 실어 갈 때까지만 남는다                                                          | `domain/press.ts`      |
+| `clubVision` `ClubVision`             | **클럽 비전** — 구단주 원형이 건 다년 계획. 코드·목표·가중치·기한만 남고 진행도는 파생이다 (career.md §5)         | `domain/records.ts`    |
+| `youthCandidates` `YouthCandidate`    | 여름의 유스 후보 — 소집일까지 감독의 답을 기다린다 (season.md §6)                                                 | `domain/records.ts`    |
+| `callUps` `CallUp`                    | **A매치 소집** — `returnedOn === null`이 소집 중. 정산 뒤엔 감독 팀 것만 두 시즌 남는다 (competition.md §5-1)     | `domain/records.ts`    |
+| `aiDeals` `AiDeal`                    | 이번 주에 정해진, 날짜가 흩어진 AI 이적                                                                           | `market/ai-market.ts`  |
 
 이것들이 세이브에 남는 이유는 같다 — **두 시점 사이에 걸쳐 있어** 파생으로 되돌릴
 수 없다. 협상은 며칠에 걸쳐 오퍼가 오가고, 회견과 다가옴은 열린 뒤 감독이 다음 날

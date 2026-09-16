@@ -3,6 +3,8 @@ export * from "./log-curves";
 export * from "./squad-rules";
 export * from "./nationality";
 export * from "./persuasion";
+export * from "./deal-terms";
+export * from "./proposal";
 export * from "./press";
 export * from "./board-demand";
 export * from "./board-request";

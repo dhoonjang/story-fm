@@ -22,6 +22,7 @@ const AGENT_YAML = `  gm: &agent
   finalize-match: *agent
   negotiation-table: *agent
   market-orders: *agent
+  table-orders: *agent
   training-orders: *agent
   match-gm: *agent
   training-rater: *agent
@@ -93,6 +94,11 @@ describe("에이전트별 LLM 설정", () => {
     model: gemini-market
     max_tokens: 250
     timeout_ms: 2500
+  table-orders:
+    provider: google
+    model: gemini-table-orders
+    max_tokens: 250
+    timeout_ms: 2500
   training-orders:
     provider: google
     model: gemini-training-orders
@@ -149,6 +155,7 @@ describe("에이전트별 LLM 설정", () => {
   finalize-match: *google
   negotiation-table: *google
   market-orders: *google
+  table-orders: *google
   training-orders: *google
   match-gm: *google
   training-rater: *google
@@ -170,6 +177,7 @@ describe("에이전트별 LLM 설정", () => {
   finalize-match: *agent
   negotiation-table: *agent
   market-orders: *agent
+  table-orders: *agent
   training-orders: *agent
   match-gm: *agent
   training-rater: *agent

@@ -1,5 +1,6 @@
 import type {
   AgentArchetype,
+  DealTerm,
   GamePlayer,
   NegotiationKind,
   Persona,
@@ -14,6 +15,7 @@ import {
   SYMBOLIC_NUMBERS,
   ageOf,
   byLoyalty,
+  dealTermLabel,
   effectiveFeeOf,
   naturalPositionOf,
   numberWishOf,
@@ -24,6 +26,16 @@ import {
 } from "@story-fm/domain";
 import { buildSeasonCalendar, diffDays, windowOpenOn } from "../competition/calendar";
 import { claimLabel, evaluatePitch } from "./persuasion";
+import { playerValueOf } from "../world/valuation";
+import { buyoutMet } from "./buyout";
+import { checkTerms } from "./terms";
+// 곡선의 상수는 세계 생성과 나눠 쓰는 자리로 내려갔다 — 부르던 쪽은 그대로다 (AGENTS.md §5)
+export {
+  LEAGUE_FACTOR_AT_TOP,
+  LEAGUE_FACTOR_EXPONENT,
+  MARKET_VALUE_AT_PEAK,
+  baseValueOf,
+} from "../world/valuation";
 import { isMarketOnlyLeague, leagueCatalogById } from "../data/league-catalog";
 import { leagueEconomyLevel } from "../data/league-economy";
 import { isClubTeam, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
@@ -70,26 +82,6 @@ import {
  *
  * 모든 함수는 순수 함수다 — 상태를 읽고 숫자를 낸다. 조회 도구가 그대로 쓴다.
  */
-
-/**
- * **80 OVR 정점기(24~27세) 선수의 시장가.** ⚠️ 밸런스 값.
- * 곡선 전체가 이 한 값에 비례하므로 조정은 여기서 끝난다.
- *
- * 이적료를 주급에 비례시키지 않는 이유: 실제 축구에서 주급은 완만하고 이적료는
- * 급하다 (80 OVR과 60 OVR의 주급 차이는 3.5배지만 이적료 차이는 수십 배다).
- * 그래서 등급에서 55를 뺀 값의 거듭제곱으로 따로 휘게 만든다.
- *
- * ⚠️ **기준 등급은 84가 아니라 80이다.** 종합이 되편 값에서 축 가중 평균이 되며
- * 눈금이 좁아졌고(player.md §4), 옛 84와 같은 인원 비율에 서는 값이 80이다.
- * 84로 두면 세계 시장가 총액이 £74.0B에서 £49.4B로 3분의 1 빠진다.
- */
-export const MARKET_VALUE_AT_PEAK = 65_000_000;
-/** 그 금액이 붙는 등급 — 이 값과 `VALUE_FLOOR_RATING` 사이가 곡선의 허리다 */
-const VALUE_PEAK_RATING = 80;
-/** 곡선의 급함 — 클수록 최상급과 스쿼드 자원의 격차가 벌어진다 */
-const VALUE_EXPONENT = 2.6;
-/** 이 등급 아래는 이적료가 거의 붙지 않는다 */
-const VALUE_FLOOR_RATING = 55;
 
 /** 인내심 감쇠 — 같은 조건을 반복할 때마다 확률에 곱해진다 */
 export const PATIENCE_DECAY = 0.72;
@@ -226,6 +218,19 @@ export const SQUAD_STATUS_SCORE_PER_STEP = 0.45;
  */
 const SQUAD_STATUS_STEP_CAP = 2;
 /**
+ * 조건을 세는 폭 — 믿을 만한 조건 둘까지, 거절한 요구도 둘까지. 지위와 같은 눈금
+ * (`SQUAD_STATUS_STEP_CAP`)이다: 조건 하나가 지위 한 칸이라, 넷을 걸면 백업에게 핵심을
+ * 약속한 것보다 크게 통하는 판이 된다 (transfer.md §12-3).
+ */
+const DEAL_TERM_STEP_CAP = 2;
+/**
+ * **바이아웃 조항이 채워진 구단 관문** — 그 값 이상을 부르면 파는 구단은 답할 자리가
+ * 없다. σ(5)≈99%라 관문이 사실상 열리고, 남는 것은 선수 관문뿐이다 (transfer.md §12-3).
+ */
+const BUYOUT_MET_SCORE = 5;
+/** **개인 조건이 굳은 선수 관문** — 바이아웃과 같은 눈금이다. 선수 쪽은 이미 답했다 */
+const PERSONAL_AGREED_SCORE = 5;
+/**
  * **원하는 등번호가 비어 있는가** — 첫 지망이 비면 +, 남이 달고 있으면 −다.
  * ⚠️ 밸런스 값 (transfer.md §3 「등번호」).
  *
@@ -240,76 +245,17 @@ function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
 }
 
-/** 나이·잠재력 곡선 — 피크는 24~27, 어린 유망주는 잠재력만큼 프리미엄 */
-function ageCurve(age: number, overall: number, potential: number): number {
-  const upside = Math.max(0, potential - overall);
-  // 어릴수록 "지금"보다 "될 것"에 값을 매긴다 — 유망주 프리미엄
-  if (age <= 21) return 1 + Math.min(0.6, upside / 25);
-  if (age <= 23) return 1 + Math.min(0.3, upside / 45);
-  if (age <= 27) return 1;
-  if (age <= 29) return 0.82;
-  if (age <= 31) return 0.6;
-  if (age <= 33) return 0.38;
-  return 0.2;
-}
-
-function contractFactor(yearsLeft: number): number {
-  if (yearsLeft <= 0) return 0; // 계약 만료 = 자유계약, 이적료 없음
-  if (yearsLeft < 1) return 0.45;
-  if (yearsLeft < 2) return 0.7;
-  if (yearsLeft < 3) return 0.9;
-  return 1;
-}
-
-/** EPL(경제 수준 1.00)에서 뛰는 선수의 리그 보정 — 곡선 전체가 여기에 걸린다 */
-export const LEAGUE_FACTOR_AT_TOP = 1.1;
-/**
- * 리그 격차를 얼마나 눌러 쓰는가. 경제 수준을 날것으로 곱하면 챔피언십 선수가 EPL의
- * 15%가 된다 — 2부의 살림은 실제로 그만큼 작지만 **선수의 값은 리그가 아니라 주로
- * 능력에서 온다.** 0.15면 어느 리그에서 강등해도 ×0.75다 (=0.15^0.15).
- */
-export const LEAGUE_FACTOR_EXPONENT = 0.15;
-/**
- * 경제 수준의 하한 — 리그 2(0.063)보다 아래를 두지 않는다.
- *
- * 어드민은 중계권 0인 리그를 만들 수 있고(`admin-competition.ts`는 0 이상만 본다),
- * 그러면 경제 수준이 0이 되어 **그 리그 선수 전원의 몸값이 £0**이 된다.
- */
-const LEAGUE_ECONOMY_FLOOR = 0.05;
-
-/**
- * 지금 뛰는 리그의 보정 — 강등되면 그 시즌부터 값이 따라 내려간다.
- *
- * ⚠️ 눈금은 **경제 수준**이지 리그 계수가 아니다. `coefficient`는 UEFA 어림 순위라
- * 나라 축이고 2부가 그 나라 1부와 같은 값을 갖는다 — 승강은 언제나 한 나라 안에서
- * 일어나므로 계수로는 강등이 몸값에 닿지 않는다 (transfer.md §3).
- */
-function leagueFactor(state: GameState, teamId: string): number {
-  const economy = leagueEconomyLevel(leagueOfTeamIn(state, teamId));
-  return (
-    LEAGUE_FACTOR_AT_TOP * Math.pow(Math.max(LEAGUE_ECONOMY_FLOOR, economy), LEAGUE_FACTOR_EXPONENT)
-  );
-}
-
-/** 등급 → 기본 시장가. 80 OVR이 기준점이고 아래로 급하게 떨어진다 */
-export function baseValueOf(overall: number): number {
-  const over = Math.max(0, overall - VALUE_FLOOR_RATING);
-  return (
-    MARKET_VALUE_AT_PEAK * Math.pow(over / (VALUE_PEAK_RATING - VALUE_FLOOR_RATING), VALUE_EXPONENT)
-  );
-}
-
 /** 이 선수의 시장가 (£) — 안개 없는 진짜 값 */
 export function marketValueOf(state: GameState, player: GamePlayer): number {
-  const base = baseValueOf(player.attributes.overall);
-  const age = ageOf(player.birthdate, state.date);
-  const value =
-    base *
-    ageCurve(age, player.attributes.overall, player.attributes.potential) *
-    (1 + player.state.form * 0.12) *
-    contractFactor(contractYearsLeft(state, player.id)) *
-    leagueFactor(state, player.teamId);
-  return Math.round(value / 100_000) * 100_000;
+  return playerValueOf({
+    overall: player.attributes.overall,
+    potential: player.attributes.potential,
+    age: ageOf(player.birthdate, state.date),
+    form: player.state.form,
+    yearsLeft: contractYearsLeft(state, player.id),
+    // 지금 뛰는 리그로 잰다 — 강등되면 그 시즌부터 값이 따라 내려간다 (transfer.md §3)
+    economy: leagueEconomyLevel(leagueOfTeamIn(state, player.teamId)),
+  });
 }
 
 /**
@@ -415,7 +361,9 @@ function sellerStance(
 ): { multiple: number; reasons: SellerReason[] } {
   const reasons: SellerReason[] = [];
   let multiple = 1.1; // 기본적으로 시장가보다 조금 높게 부른다
-  const better = betterAtPosition(state, player.teamId, player);
+  // 파는 쪽은 **계약을 가진 구단**이다 — 빌려 온 선수의 원소속이 갈라지는 자리다 (transfer.md §2)
+  const seller = contractOwnerOf(state, player);
+  const better = betterAtPosition(state, seller, player);
   if (better === 0) {
     multiple += 0.25;
     reasons.push({ kind: "irreplaceable", why: "팀의 대체 불가 자원이다" });
@@ -429,8 +377,8 @@ function sellerStance(
     reasons.push({ kind: "contract-short", why: "계약이 1년도 남지 않았다" });
   }
   // 무소속엔 파는 구단이 없다 — 장부도 없다 (team.md §4)
-  const finance = isClubTeam(player.teamId) ? financeOf(state, player.teamId) : null;
-  if (finance && finance.balance < weeklyWagesOf(state, player.teamId) * 20) {
+  const finance = isClubTeam(seller) ? financeOf(state, seller) : null;
+  if (finance && finance.balance < weeklyWagesOf(state, seller) * 20) {
     multiple -= 0.15;
     reasons.push({ kind: "cash-tight", why: "상대 구단의 재정이 빠듯하다" });
   }
@@ -450,7 +398,8 @@ function sellerStance(
  * **우리 선수 전부**에, 지목 요청(`sell-player`)은 **그 선수에게만** 붙는다.
  */
 function boardDemandsSale(state: GameState, player: GamePlayer): string | null {
-  if (player.teamId !== state.userTeamId) return null;
+  // 빌려 온 선수는 우리 스쿼드에 있어도 팔 계약이 없다 — 보드의 요구가 닿지 않는다
+  if (contractOwnerOf(state, player) !== state.userTeamId) return null;
   const demand = openFinanceDemand(state);
   if (!demand) return null;
   if (demand.kind === "sell-player") {
@@ -570,6 +519,23 @@ export interface DealTerms {
    * 약속이 아니다.
    */
   squadStatus?: SquadStatus;
+  /**
+   * 감독이 건 **조건** — 조건서에서 온다 (transfer.md §12-3). 코어가 믿을 만하다고
+   * 확인한 것마다 선수 관문에 지위 한 칸이 얹힌다. 없으면 항이 서지 않는다.
+   */
+  terms?: readonly DealTerm[];
+  /** 감독이 거절한 상대의 요구 수 — 한 칸씩 뺀다 */
+  refusedTerms?: number;
+  /**
+   * **개인 조건이 먼저 굳은 오퍼인가** (transfer.md §12-3) — 선수 쪽은 이미 답했으므로
+   * 선수 관문이 합의로 열린다. 오퍼가 굳은 값을 그대로 실었을 때만 부르는 쪽이 켠다.
+   */
+  personalAgreed?: boolean;
+}
+
+/** 조건서의 사이닝 보너스 — 서명하는 날 이적 예산에서 나가는 돈 (transfer.md §12-3) */
+export function signingBonusOf(terms: readonly DealTerm[] | undefined): number {
+  return terms?.find((t) => t.kind === "bonus")?.fee ?? 0;
 }
 
 /**
@@ -614,6 +580,14 @@ function splitNote(terms: DealTerms, effective: number): string {
  *
  * @returns 잠겨 있으면 감독에게 돌려줄 이유, 아니면 null
  */
+/**
+ * **우리에게 빌려 온 선수인가** — 임대 잠금에 열린 유일한 문이 여기다 (transfer.md §2).
+ * 원소속 구단에 영입 오퍼를 넣어 완전 영입할 수 있다; 빌려 준 선수와 남의 임대는 그대로 잠긴다.
+ */
+export function loanedInBy(state: GameState, player: GamePlayer): boolean {
+  return player.loan !== undefined && player.loan !== null && player.teamId === state.userTeamId;
+}
+
 export function loanLockOf(player: GamePlayer): string | null {
   if (!player.loan) return null;
   return (
@@ -815,9 +789,15 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
    */
   const precontract = isPrecontractTerms(state, terms);
 
-  // 임대는 갈래를 가리지 않고 막힌다 — 영입·매각·임대·재계약이 모두 남의 계약을 건드린다
+  /**
+   * 임대는 갈래를 가리지 않고 막힌다 — 영입·매각·임대·재계약이 모두 남의 계약을 건드린다.
+   * **열린 문은 하나다**: 우리에게 빌려 온 선수를 원소속에서 데려오는 영입 (transfer.md §2).
+   * 그 오퍼의 상대는 계약을 가진 구단이라 남의 계약을 건드리는 것이 아니라 사는 것이다.
+   */
+  const buyingLoanee =
+    (terms.kind === undefined || terms.kind === "buy") && loanedInBy(state, player);
   const loanLock = loanLockOf(player);
-  if (loanLock) blockers.push(loanLock);
+  if (loanLock && !buyingLoanee) blockers.push(loanLock);
 
   if (terms.kind === "sell" || terms.kind === "loan_out") {
     if (player.teamId !== state.userTeamId) {
@@ -855,7 +835,8 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
       }
     }
   } else {
-    if (player.teamId === state.userTeamId) {
+    // 빌려 온 선수는 우리 스쿼드에 있지만 우리 선수가 아니다 — 데려올 수 있다
+    if (player.teamId === state.userTeamId && !buyingLoanee) {
       blockers.push(`${josa(player.name, "은/는")} 이미 우리 선수입니다`);
     }
     /**
@@ -894,8 +875,12 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
        */
       const signingBudget =
         terms.kind === "loan" ? ourFinance.transferBudget : signingBudgetOf(state, player.id);
-      // 분할이면 이번 창에 나갈 것은 첫 회분뿐이다 (transfer.md §5-2)
-      if (firstInstallmentOf(terms.fee, terms.paymentYears) > signingBudget) {
+      // 분할이면 이번 창에 나갈 것은 첫 회분뿐이다 (transfer.md §5-2).
+      // 사이닝 보너스는 서명하는 날 같은 주머니에서 나간다 (transfer.md §12-3)
+      if (
+        firstInstallmentOf(terms.fee, terms.paymentYears) + signingBonusOf(terms.terms) >
+        signingBudget
+      ) {
         blockers.push(`이적 예산을 넘습니다 — 가용 ${formatMoney(signingBudget)}`);
       }
     }
@@ -1127,6 +1112,32 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
 
   const offeredStatus = squadStatusContribution(state, player, terms.squadStatus, state.userTeamId);
   if (offeredStatus) contributions.push({ gate: "player", ...offeredStatus });
+
+  const offeredTerms = termsContribution(state, player, terms.terms, terms.refusedTerms ?? 0);
+  if (offeredTerms) contributions.push({ gate: "player", ...offeredTerms });
+
+  // 개인 조건이 먼저 굳었으면 선수 쪽은 이미 답한 사람이다 (transfer.md §12-3)
+  if (terms.personalAgreed) {
+    contributions.push({
+      gate: "player",
+      score: PERSONAL_AGREED_SCORE,
+      label: "개인 조건 합의",
+      why: "선수 쪽과 개인 조건을 먼저 맞췄다 — 남은 것은 구단의 답이다",
+    });
+  }
+
+  /**
+   * **바이아웃 조항** — 그 값 이상을 불렀으면 파는 구단은 답할 자리가 없다
+   * (transfer.md §12-3). 유효 이적료로 잰다: 분할로 조항을 채우는 길은 없다.
+   */
+  if (!precontract && buyoutMet(activeContract(state, player.id), offeredFee)) {
+    contributions.push({
+      gate: "club",
+      score: BUYOUT_MET_SCORE,
+      label: "바이아웃 조항",
+      why: `조항 ${formatMoney(activeContract(state, player.id)?.buyoutClause ?? 0)} 이상을 불렀다 — 구단은 막지 못한다`,
+    });
+  }
 
   const wantedNumber = squadNumberContribution(state, player);
   if (wantedNumber) contributions.push({ gate: "player", ...wantedNumber });
@@ -1373,6 +1384,18 @@ function loanOdds(
         ? "우리 쪽 그 자리가 비어 있다 — 바로 뛴다"
         : `우리에게 이미 더 나은 선수가 ${blockedHere}명 있다 — 벤치를 각오해야 한다`,
   });
+
+  // 임대의 조건은 출전 보장 하나다 — 그것도 지위 한 칸의 눈금으로 센다 (transfer.md §12-3)
+  const offeredTerms = termsContribution(state, player, terms.terms, terms.refusedTerms ?? 0);
+  if (offeredTerms) contributions.push({ gate: "player", ...offeredTerms });
+  if (terms.personalAgreed) {
+    contributions.push({
+      gate: "player",
+      score: PERSONAL_AGREED_SCORE,
+      label: "개인 조건 합의",
+      why: "선수 쪽과 개인 조건을 먼저 맞췄다 — 남은 것은 구단의 답이다",
+    });
+  }
 
   const negotiation = state.manager.attributes.negotiation;
   if (Math.abs(negotiation - 50) >= 5) {
@@ -1846,6 +1869,39 @@ function squadStatusContribution(
 }
 
 /**
+ * "조건" 축 — **감독이 건 조건 중 코어가 믿을 만하다고 확인한 것의 수**다
+ * (transfer.md §12-3). 조건 하나는 지위 한 칸(`SQUAD_STATUS_SCORE_PER_STEP`)이고 둘까지
+ * 센다. 감독이 거절한 상대의 요구는 한 칸씩 뺀다 — 요구를 물리친 값이 그것이다.
+ *
+ * 무게 표는 없다: 「여름에 윙어를 데려오겠다」가 이 사람에게 얼마나 큰지는 상대를
+ * 연기하는 호출이 서류의 사실을 읽고 정한다. 코어가 세는 것은 믿을 만한가뿐이다.
+ * `other`는 어느 쪽도 아니라 세지 않는다.
+ */
+function termsContribution(
+  state: GameState,
+  player: GamePlayer,
+  terms: readonly DealTerm[] | undefined,
+  refused: number,
+): { score: number; label: "조건"; why: string } | null {
+  const checks = terms && terms.length > 0 ? checkTerms(state, player, terms) : [];
+  const credible = checks.filter((c) => c.verdict === "credible");
+  const doubtful = checks.filter((c) => c.verdict === "doubtful");
+  const up = Math.min(DEAL_TERM_STEP_CAP, credible.length);
+  const down = Math.min(DEAL_TERM_STEP_CAP, Math.max(0, refused));
+  if (up === 0 && down === 0 && doubtful.length === 0) return null;
+  const parts = [
+    ...credible.map((c) => `${dealTermLabel(c.term)} — 믿을 만하다`),
+    ...doubtful.map((c) => `${dealTermLabel(c.term)} — ${c.why}`),
+    ...(down > 0 ? [`거절한 요구 ${down}건`] : []),
+  ];
+  return {
+    score: (up - down) * SQUAD_STATUS_SCORE_PER_STEP,
+    label: "조건",
+    why: parts.join(" · "),
+  };
+}
+
+/**
  * 이 선수가 **우리 팀에서** 두는 번호의 뜻 — 원형이 정한다 (people.md §6).
  *
  * 계보를 우리 팀에서 뽑는 것은 `idol`(불안한 유망주) 때문이다: 물려받는 셔츠는
@@ -1999,6 +2055,9 @@ function renewOdds(
 
   const offeredStatus = squadStatusContribution(state, player, terms.squadStatus, state.userTeamId);
   if (offeredStatus) contributions.push(offeredStatus);
+
+  const offeredTerms = termsContribution(state, player, terms.terms, terms.refusedTerms ?? 0);
+  if (offeredTerms) contributions.push(offeredTerms);
   /**
    * 재계약도 마찬가지다 — **불만과 경기력**이 마음을 말한다.
    * 체력을 쓰던 때는 경기 다음 날 재계약 확률이 통째로 내려앉았다.

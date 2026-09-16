@@ -17,6 +17,7 @@ import {
   betterAtPosition,
   competitionName,
   computeStandings,
+  contractTermsOf,
   describeWindowState,
   diffDays,
   euroCompetitionOf,
@@ -121,6 +122,8 @@ function playerBlock(state: GameState, negotiation: Negotiation, player: GamePla
   const injury = openInjury(state, player.id);
   const mood = moodOf(state, player).note;
   const promises = ours ? openPromises(state, player.id) : [];
+  // 계약에 적힌 조건 — 재계약 테이블의 선수 쪽이 지난 약속을 읽는 자리다 (transfer.md §12-3)
+  const contractTerms = ours ? contractTermsOf(state, player.id) : [];
   const awards = lastSeasonAwardsOf(state, player.id).slice(0, SITUATION_AWARDS);
   const milestones = seasonMilestonesOf(state, player.id, state.season).slice(
     0,
@@ -142,6 +145,7 @@ function playerBlock(state: GameState, negotiation: Negotiation, player: GamePla
           `감독의 약속: ${promises.map((p) => `${PROMISE_KIND_KO[p.kind]} (${p.dueOn}까지)`).join(" · ")}`,
         ]
       : []),
+    ...(contractTerms.length > 0 ? [`계약 조건: ${contractTerms.join(" · ")}`] : []),
     ...(ours || isPlayerDeal(negotiation.kind)
       ? [`감독과의 관계: ${RELATION_TIER_KO[relationTierOf(state, MANAGER_SUBJECT, player.id)]}`]
       : []),
@@ -217,7 +221,10 @@ function pressBlock(state: GameState): string[] {
 function answeringClubOf(negotiation: Negotiation, player: GamePlayer): string | null {
   if (isPlayerDeal(negotiation.kind) || negotiation.precontract === true) return null;
   const selling = negotiation.kind === "sell" || negotiation.kind === "loan_out";
-  return selling ? (negotiation.counterpartTeamId ?? null) : player.teamId;
+  // 데려오는 갈래의 답하는 구단도 협상의 상대다 — 빌려 온 선수는 우리 팀에서 뛰고 있다
+  return selling
+    ? (negotiation.counterpartTeamId ?? null)
+    : (negotiation.counterpartTeamId ?? player.teamId);
 }
 
 export function buildSituationBlock(state: GameState, negotiation: Negotiation): string | null {

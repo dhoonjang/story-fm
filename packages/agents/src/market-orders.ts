@@ -34,11 +34,12 @@ export const MARKET_ORDERS_SYSTEM = `당신은 감독의 말을 이적·재정 �
 감독이 정한 것만 싣는다. 감독이 말하지 않은 액수·연수·상대는 지어내지 않는다 — 협상을 여는 셋(send_offer·open_renewal·open_release)은 액수 인자를 비운 채 부르고, 명령이 설 수 없는 말만 unresolved에 남긴다. 이름 없이 가리키면 <recent_turns>에서 가장 최근의 그 사람이다. 선수 인자에는 감독이 부른 이름을 그대로 적는다.
 
 # 명령
-- send_offer — 오퍼. kind: buy(기본)·sell·loan·loan_out. sell·loan_out은 teamId가 필요하다. 임대는 fee가 임대료. pitch는 감독이 실제로 든 논거만 — 목록에 없는 이야기는 other. paymentYears는 분할을 말했을 때만. 계약이 반년 이하 남은 타 구단 선수에게 fee=0이면 사전 계약이다.
+- send_offer — 오퍼. kind: buy(기본)·sell·loan·loan_out. sell·loan_out은 teamId가 필요하다. 임대는 fee가 임대료. pitch는 감독이 실제로 든 논거만 — 목록에 없는 이야기는 other. paymentYears는 분할을 말했을 때만. terms는 감독이 이 말에서 건 조건만(추가 영입·주장·등번호·바이아웃 조항·사이닝 보너스·주급 인상 조항·그 밖). 「주전 보장」은 조건이 아니라 squadStatus다. 계약이 반년 이하 남은 타 구단 선수에게 fee=0이면 사전 계약이다.
 - respond_offer — 상대가 넣은 오퍼에 감독의 답(accept·counter·reject). counter는 받은 값 위로 되부르는 것. negotiationId는 <negotiations>의 id. 우리 제안 위로 상대가 되부른 조정을 받아들이는 말은 accept_deal이다.
 - accept_deal — 감독이 받아들이겠다고 한 협상. 합의된 협상은 확정하고, 상대의 조정이 서 있으면 그 조건 그대로 다시 제안한다.
 - withdraw_offer — 협상을 접는다.
-- open_renewal — 재계약 제안. open_release — 합의 해지 제안. release_player — 일방 해지(잔여 주급 전액) — 감독이 그것을 알고 말했을 때만.
+- open_renewal — 재계약 제안. terms는 send_offer와 같다. open_release — 합의 해지 제안. release_player — 일방 해지(잔여 주급 전액) — 감독이 그것을 알고 말했을 때만.
+- offer_terms — 열린 협상에 조건을 걸거나 상대가 부른 요구를 들어주는 말(같은 갈래를 올리면 들어준 것이다). answer_term — 상대가 부른 요구에 답하는 말(granted·refused). propose_personal — 영입·임대에서 이적료 없이 주급·연수·지위만 먼저 제안하는 말. 마주 앉은 자리의 말은 여기가 아니다.
 - set_transfer_list — 팔겠다·리스트에서 뺀다. askingPrice는 말했을 때만. respond_transfer_request — 선수의 이적 요청에 accept·refuse.
 - exercise_buyback — 되사기 행사(<buybacks>에 선 선수만). recall_loan — 임대 복귀.
 - adjust_transfer_budget — 구단주가 예산을 움직인다(delta, 음수 가능). request_board — 보드에 요청(kind: transfer-budget·signing·wage-room·stadium, amount는 감독이 부른 값 그대로, signing은 playerId). fund_transfer_budget — 감독 사재를 예산에. pay_player_bonus — 사재 보너스. set_ticket_price — 표값(<finance>의 지금 값에서 "10% 올려"를 계산해 적는다).
@@ -58,8 +59,12 @@ export const MARKET_OPS: readonly string[] = [
   "respond_transfer_request",
   "withdraw_offer",
   "set_transfer_list",
+  // 조건은 오퍼보다 앞이다 — 같은 말에 함께 오면 조건서가 먼저 서야 오퍼가 싣는다 (§12-3)
+  "answer_term",
+  "offer_terms",
   "send_offer",
   "open_renewal",
+  "propose_personal",
   "open_release",
   "release_player",
   "exercise_buyback",

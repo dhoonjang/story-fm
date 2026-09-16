@@ -11,6 +11,7 @@ import {
   type CounterpartyAnchor,
   type CounterpartyVoice,
   type GameState,
+  type TermAsk,
 } from "@story-fm/engine";
 import { describeCharacters } from "./gm-input";
 
@@ -31,19 +32,49 @@ const VERDICT_KO: Record<string, string> = {
   reject: "결렬",
 };
 
+/**
+ * **상대가 부를 수 있는 조건** — 갈래와, 값이 있는 갈래는 기준과 구간 (transfer.md §12-3).
+ * 편지·테이블의 앵커와, 오퍼가 없는 테이블의 앵커 자리가 같은 줄을 읽는다 — 줄의 첫
+ * 낱말이 곧 모델이 `asks`의 `kind`에 적는 토큰이다.
+ */
+export function describeAsks(asks: readonly TermAsk[]): string[] {
+  if (asks.length === 0) return [];
+  return [
+    `부를 수 있는 조건 (한 답에 둘까지, 이 갈래 안에서만):`,
+    ...asks.map((ask) => {
+      const head = `- ${ask.kind}(${ask.label})`;
+      if (ask.anchor === undefined || !ask.room) return head;
+      return ask.kind === "escalator"
+        ? `${head}: 기준 ${ask.anchor}% — ${ask.room.min}~${ask.room.max}% 안에서만`
+        : `${head}: 기준 ${formatMoney(ask.anchor)} — ${formatMoney(ask.room.min)} ~ ${formatMoney(ask.room.max)} 안에서만`;
+    }),
+  ];
+}
+
 /** 코어가 박은 자리 — 확률·기준 판정·움직일 수 있는 폭 */
 export function describeAnchor(anchor: CounterpartyAnchor): string {
   return [
     `<anchor>`,
-    `성사 확률 ${anchor.probability}%` +
-      (anchor.latitude > 0 ? ` · 확인된 논거가 연 여유 +${anchor.latitude}%p` : ""),
     /**
-     * **관문별 확률** — 성사 확률 하나를 만든 두 조각이다 (transfer.md §12-1). 목소리가
-     * 둘인 테이블에서 각자 자기 관문을 근거로 말하라고 싣는다. 판정을 가르는 것은
-     * 여전히 위의 하나다.
+     * **개인 조건 제안의 앵커**는 관문이 하나다 (transfer.md §12-3) — 이적료·분할·기한이
+     * 없고, 판정의 축은 주급·지위뿐이다. 첫 줄이 그 사실을 말한다.
      */
-    (anchor.clubOdds === undefined ? "" : `구단 관문 ${anchor.clubOdds}% · `) +
-      `선수 관문 ${anchor.playerOdds}%`,
+    ...(anchor.personal
+      ? [
+          `개인 조건 제안에 답한다 — 선수 관문 ${anchor.playerOdds}%` +
+            (anchor.latitude > 0 ? ` · 확인된 논거가 연 여유 +${anchor.latitude}%p` : ""),
+        ]
+      : [
+          `성사 확률 ${anchor.probability}%` +
+            (anchor.latitude > 0 ? ` · 확인된 논거가 연 여유 +${anchor.latitude}%p` : ""),
+          /**
+           * **관문별 확률** — 성사 확률 하나를 만든 두 조각이다 (transfer.md §12-1). 목소리가
+           * 둘인 테이블에서 각자 자기 관문을 근거로 말하라고 싣는다. 판정을 가르는 것은
+           * 여전히 위의 하나다.
+           */
+          (anchor.clubOdds === undefined ? "" : `구단 관문 ${anchor.clubOdds}% · `) +
+            `선수 관문 ${anchor.playerOdds}%`,
+        ]),
     `기준 판정: ${VERDICT_KO[anchor.verdict]}`,
     `고를 수 있는 판정: ${anchor.allowed.map((v) => VERDICT_KO[v]).join(" · ")}`,
     ...(anchor.fee !== undefined && anchor.feeRoom
@@ -78,6 +109,7 @@ export function describeAnchor(anchor: CounterpartyAnchor): string {
           `조정에 걸 수 있는 기한: ${anchor.ultimatumOn} — 걸면 협상이 그날 끝난다. ` +
             `걸지 않으려면 ultimatum: false`,
         ]),
+    ...describeAsks(anchor.asks),
     `</anchor>`,
   ].join("\n");
 }

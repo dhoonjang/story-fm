@@ -16,6 +16,8 @@ import {
   SQUAD_NUMBER_MAX,
   SQUAD_NUMBER_MIN,
   josa,
+  normalizePositionCode,
+  positionGroupOf,
 } from "@story-fm/domain";
 import { buildSeasonCalendar } from "../competition/calendar";
 import { isFriendly } from "../competition/friendly";
@@ -69,6 +71,8 @@ const PROMISE_DEFAULT_DAYS: Record<PromiseKind, number> = {
   renewal: 30,
   captain: 90,
   number: 365,
+  // 추가 영입도 다음 창 마감이 기한이다 — 표의 값은 창을 찾지 못했을 때의 폴백뿐이다
+  signing: 180,
 };
 
 /** 감독이 기한을 좁힐 수 있는 폭 */
@@ -309,7 +313,8 @@ function dueDateOf(state: GameState, kind: PromiseKind, days?: number): string {
    * 시즌 전환이다 — 날수로 재면 개막을 며칠 앞두고 판정이 떨어진다.
    */
   if (kind === "number") return buildSeasonCalendar(state.season + 1).start;
-  if (kind === "transfer") {
+  // 내보내는 약속도 데려오는 약속도 창이 닫히는 날 판정한다 — 그날까지가 시장이다
+  if (kind === "transfer" || kind === "signing") {
     const next = state.windows
       .filter((w) => w.leagueId === undefined && w.closesOn > state.date)
       .map((w) => w.closesOn)
@@ -327,11 +332,20 @@ function promiseBlock(
   state: GameState,
   player: GamePlayer,
   kind: PromiseKind,
-  /** `number` 갈래가 약속한 번호 — 다른 넷은 갈래가 곧 약속이라 쓰지 않는다 */
+  /** `number` 갈래가 약속한 번호 — 다른 갈래는 갈래가 곧 약속이라 쓰지 않는다 */
   number?: number,
+  /** `signing` 갈래가 약속한 자리 — 포지션 코드 */
+  position?: string,
 ): string | null {
-  if (player.teamId !== state.userTeamId || player.loan) {
+  if (player.teamId !== state.userTeamId) {
     return `${josa(player.name, "은/는")} 지금 우리가 쓰는 선수가 아닙니다`;
+  }
+  /**
+   * 빌려 온 선수에게 할 수 있는 약속은 **출전**뿐이다 — 임대의 조건서가 그것을 든다
+   * (transfer.md §12-3). 완장·번호·이적·재계약은 남의 계약 위에 서는 약속이다.
+   */
+  if (player.loan && kind !== "minutes") {
+    return `${josa(player.name, "은/는")} 빌려 온 선수라 ${PROMISE_KIND_KO[kind]} 약속을 할 수 없습니다`;
   }
   if (openPromises(state, player.id).some((p) => p.kind === kind)) {
     return `${player.name}에게 한 ${PROMISE_KIND_KO[kind]} 약속이 아직 기한 전입니다`;
@@ -370,6 +384,13 @@ function promiseBlock(
     }
     case "minutes":
       return null;
+    case "signing": {
+      // 자리 없이는 지킬 것도 없다 — 번호 약속과 같은 규약이다
+      if (position === undefined || normalizePositionCode(position) === null) {
+        return `${player.name}에게 약속할 자리가 없습니다 — 포지션 코드로 말해야 합니다`;
+      }
+      return null;
+    }
   }
 }
 
@@ -395,12 +416,16 @@ export function openPromise(
   days?: number,
   /** `number` 갈래가 약속한 등번호 — 그 갈래에만 뜻이 있고 장부가 그대로 든다 */
   number?: number,
+  /** `signing` 갈래가 약속한 자리 — 포지션 코드, 별칭은 여기서 정규화한다 */
+  position?: string,
 ): PromiseOpened {
   const player = playerById(state, playerId);
   if (!player) return { ok: false, message: "그런 선수가 없습니다" };
-  const blocked = promiseBlock(state, player, kind, number);
+  const blocked = promiseBlock(state, player, kind, number, position);
   if (blocked) return { ok: false, message: blocked };
   const dueOn = dueDateOf(state, kind, days);
+  const code =
+    kind === "signing" && position !== undefined ? normalizePositionCode(position) : null;
   const promise: ManagerPromise = {
     id: `pr-${kind}-${player.id}-${state.date}`,
     gamePlayerId: player.id,
@@ -409,10 +434,14 @@ export function openPromise(
     dueOn,
     status: "open",
     ...(number === undefined ? {} : { number }),
+    ...(code === null ? {} : { position: code }),
   };
   (state.promises ??= []).push(promise);
-  // 번호는 갈래 이름에 담기지 않는다 — 서사에서 어느 번호였는지가 사라지지 않게
-  const what = PROMISE_KIND_KO[kind] + (number === undefined ? "" : ` ${number}번`);
+  // 번호·자리는 갈래 이름에 담기지 않는다 — 서사에서 무엇이었는지가 사라지지 않게
+  const what =
+    PROMISE_KIND_KO[kind] +
+    (number === undefined ? "" : ` ${number}번`) +
+    (code === null ? "" : ` ${code}`);
   pushNarrative(state, `${player.name}에게 ${what} 약속 (${dueOn}까지)`, 3);
   return { ok: true, promise };
 }
@@ -447,7 +476,35 @@ function verdictOf(state: GameState, promise: ManagerPromise, player: GamePlayer
       // 기한 날 그가 그 번호를 달고 있는가 — 어떻게 받았는지는 묻지 않는다.
       // 번호 없는 약속은 지킬 것이 없다: 둘 다 `undefined`인 것을 이행으로 읽지 않는다
       return promise.number !== undefined && player.squadNumber === promise.number;
+    case "signing": {
+      /**
+       * 약속한 날 뒤에 **그 자리의 선수가 우리로 온 이적 행**이 있는가 — 완전 이적이든
+       * 임대든 자유계약이든 같다. 유스 승격은 데려온 것이 아니다 (transfer.md §12-3).
+       */
+      const code = promise.position;
+      if (code === undefined) return false;
+      return state.transfers.some((t) => {
+        if (t.toTeamId !== state.userTeamId || t.date < promise.madeOn || t.type === "youth") {
+          return false;
+        }
+        const arrived = playerById(state, t.gamePlayerId);
+        return arrived !== null && arrived.id !== player.id && playsPosition(arrived, code);
+      });
+    }
   }
+}
+
+/**
+ * 그 자리의 선수인가 — 코드가 같거나, 주 포지션의 **그룹**이 같다. "윙어 하나 데려오겠다"는
+ * 말은 LW·RW를 가리지 않고, "스트라이커"는 CF·ST를 가리지 않는다.
+ */
+export function playsPosition(player: Pick<GamePlayer, "positions">, code: string): boolean {
+  const group = positionGroupOf(code);
+  return player.positions.some(
+    (pos) =>
+      pos.position === code ||
+      (pos.isNatural && group !== null && positionGroupOf(pos.position) === group),
+  );
 }
 
 /**

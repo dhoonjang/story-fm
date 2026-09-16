@@ -165,6 +165,7 @@ GM 스킬 `apply_finance_event`가 서사에서 벌어진 매출·비용을 원�
       severance            계약 위약금 (감독 경질 · 재직 감독 보상금 · 스태프 계약 해지 — people.md §2-2)
       capex                구장·시설 투자 (현금 · 손익 밖)
       depreciation         자산 상각 (noncash)
+      signing_bonus        사이닝 보너스 (조건서 — 서명일에 이적 예산에서, transfer.md §12-3)
 ```
 
 `transfer_out`과 `amortisation`은 같은 영입의 두 얼굴이라 **이름만으로 갈려야 한다** —

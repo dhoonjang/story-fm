@@ -98,6 +98,7 @@ import { ABSENT_REASON_KO, buildOpponentReport } from "../match/preview";
 import { issueReasonText, moodAnchor, moodOf } from "../squad/mood";
 import { numberLineageOf } from "../squad/numbers";
 import { openPromises, squadStatusOf } from "../squad/promises";
+import { contractTermsOf } from "../market/terms";
 import {
   isHomegrownFor,
   occupiesSquadList,
@@ -1264,20 +1265,23 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
   }
 
   /**
-   * 계약 줄이 **장부를 함께 든다** — 지위와 열린 약속 (people.md §5-2).
+   * 계약 줄이 **장부를 함께 든다** — 지위·조항·조건과 열린 약속 (people.md §5-2 ·
+   * transfer.md §12-3).
    *
-   * 지위는 우리 계약의 칸이라 남의 선수에게는 적지 않는다 — 안개 밖에서 지어낸
+   * 지위와 조건은 우리 계약의 칸이라 남의 선수에게는 적지 않는다 — 안개 밖에서 지어낸
    * 사실이 된다. 약속도 마찬가지로 우리가 한 말만 장부에 선다.
-   * ⚠️ 문장이 아니라 사실이다: 갈래와 기한, 그뿐이다.
+   * ⚠️ 문장이 아니라 사실이다: 갈래와 기한·금액, 그뿐이다. 표 밖의 조건(`other`)만은
+   * 감독이 한 말 그대로가 사실이라 그 줄이 그대로 선다.
    */
+  const contractFacts =
+    knowledge === "own"
+      ? [`${SQUAD_STATUS_KO[squadStatusOf(state, p)]} 지위`, ...contractTermsOf(state, p.id)]
+      : [];
   const ledger =
     knowledge === "own"
-      ? [
-          `${SQUAD_STATUS_KO[squadStatusOf(state, p)]} 지위`,
-          ...openPromises(state, p.id).map(
-            (promise) => `${PROMISE_KIND_KO[promise.kind]} 약속 ${promise.dueOn}까지`,
-          ),
-        ]
+      ? openPromises(state, p.id).map(
+          (promise) => `${PROMISE_KIND_KO[promise.kind]} 약속 ${promise.dueOn}까지`,
+        )
       : [];
   /**
    * 등번호와 그 번호의 **계보** — 지위·약속과 같은 결의 장부 줄이다 (player.md §1.1).
@@ -1327,7 +1331,10 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
     ...(international === null ? [] : [international]),
     [
       contract
-        ? `계약: 주급 ${formatMoney(contract.weeklyWage)} · 만료 ${contract.until}`
+        ? [
+            `계약: 주급 ${formatMoney(contract.weeklyWage)} · 만료 ${contract.until}`,
+            ...contractFacts,
+          ].join(" · ")
         : youthOrigin
           ? `계약: 없음 — 유스 출신 · ${
               youthOrigin.teamId === null ? "아카데미" : teamShortNameIn(state, youthOrigin.teamId)

@@ -1,5 +1,7 @@
 import type { MarketCommandResult } from "../commands";
 import type {
+  DealTerm,
+  DealTermKind,
   GamePlayer,
   Negotiation,
   NegotiationVerdict,
@@ -7,8 +9,10 @@ import type {
   TableSpeaker,
 } from "@story-fm/domain";
 import {
+  DEAL_TERM_KO,
   MAX_PAYMENT_YEARS,
   PITCH_CLAIM_KO,
+  normalizeDealTerm,
   PLAYER_ARCHETYPE_LABEL,
   SQUAD_STATUS_KO,
   ageOf,
@@ -19,6 +23,7 @@ import {
 } from "@story-fm/domain";
 import {
   askingPriceFor,
+  contractOwnerOf,
   dealOdds,
   marketValueOf,
   numberWishHere,
@@ -26,19 +31,41 @@ import {
   wageExpectationOf,
 } from "./market";
 import {
+  COUNTERPARTY_ACCEPT_AT,
+  COUNTERPARTY_COUNTER_AT,
+  COUNTERPARTY_HOPELESS_AT,
   bandOpen,
   clampToBand,
   counterBoundsOf,
+  personalHolds,
   renewalYearsExpectation,
   type CounterBand,
   type CounterBounds,
 } from "./counter-bounds";
+import { buyoutAskOf } from "./buyout";
+import {
+  BONUS_ASK_WEEKS,
+  BONUS_ASK_WEEKS_MAX,
+  BONUS_ASK_WEEKS_MIN,
+  ESCALATOR_ASK_MAX,
+  ESCALATOR_ASK_MIN,
+  ESCALATOR_ASK_PCT,
+  askableKindsOf,
+  checkTerms,
+  offeredTermsOf,
+  refusedTermsOf,
+  tabledTermLine,
+  termKindsOf,
+  termSheetOf,
+} from "./terms";
 import { addDays } from "../competition/calendar";
 import { squadStatusOf } from "../squad/promises";
 import {
+  answerPersonal,
   counterpartOf,
   negotiationKindKo,
   pendingOffer,
+  personalAwaiting,
   respondOffer,
   splitLabel,
 } from "./negotiation";
@@ -60,24 +87,12 @@ import { formatMoney } from "../club/finance";
  * LLM이 죽어도 앵커가 반영된다.
  */
 
-/** 이 확률 위면 상대가 받아들인다 */
-export const COUNTERPARTY_ACCEPT_AT = 50;
-/** 이 확률 위면 상대가 되부른다 — 그 아래는 결렬 */
-export const COUNTERPARTY_COUNTER_AT = 25;
 /**
- * **사다리의 바닥** — 이 확률에 못 미치면 되부를 칸이 없다 (transfer.md §12-1).
- *
- * 사다리가 ±한 칸인 탓에 결렬의 이웃은 조정뿐이고, 테이블 호출은 언제나 그 이웃으로
- * 내려왔다 — 결렬 앵커 일곱이 전부 조정이 됐다. 그래서 감독이 정중하기만 하면 가망
- * 없는 로볼이 창이 닫힐 때까지 살아 있었다. 바닥 아래에서 한 칸을 닫아 코어의 판정이
- * 서게 한다.
- *
- * 값이 조정 문턱의 **절반**인 것은 그 아래가 흥정이 아니라 거절인 자리이기 때문이다:
- * 잰 네 판에서 호가의 절반을 부른 오퍼가 0%·5%·9%·16%였고, 조정 문턱은 호가의
- * 6~8할에 걸렸다. 바닥과 조정 문턱 사이(12.5~25%)는 앵커가 결렬이되 상대가 정가를
- * 되부를 수 있는 구간으로 남는다 — 아슬아슬한 오퍼 하나로 문이 닫히지 않는다.
+ * 사다리의 세 문턱은 `counter-bounds.ts`에 산다 — 바이아웃이 발동한 오퍼에 선수가 갈지를
+ * `negotiation.ts`도 같은 문턱으로 가르기 때문이다 (§12-3). 부르던 쪽은 그대로다.
  */
-export const COUNTERPARTY_HOPELESS_AT = COUNTERPARTY_COUNTER_AT / 2;
+export { COUNTERPARTY_ACCEPT_AT, COUNTERPARTY_COUNTER_AT, COUNTERPARTY_HOPELESS_AT };
+
 /**
  * 상대가 앵커 금액에서 움직일 수 있는 폭.
  *
@@ -177,6 +192,25 @@ export interface CounterpartyAnchor {
    */
   ultimatumOn?: string;
   bounds: CounterBounds;
+  /**
+   * **상대가 부를 수 있는 조건** — 갈래와, 값이 있는 갈래는 기준과 구간 (transfer.md §12-3).
+   * 조건서에 아직 없는 갈래만이고, 오퍼가 없는 답에서도 부를 수 있다.
+   */
+  asks: TermAsk[];
+  /**
+   * **개인 조건의 앵커인가** — 오퍼가 아니라 개인 조건 제안에 답하는 자리다 (§12-3).
+   * 확률은 선수 관문 하나이고, 판정은 `answerPersonal`로 반영된다.
+   */
+  personal?: true;
+}
+
+/** 상대가 부를 수 있는 조건 하나 — 값이 있는 갈래는 기준과 구간을 함께 든다 */
+export interface TermAsk {
+  kind: DealTermKind;
+  label: string;
+  /** `buyout`·`bonus`는 금액(£), `escalator`는 인상 폭(%) */
+  anchor?: number;
+  room?: TermsRoom;
 }
 
 /** 모델이 낸 판정 — 어느 값도 믿지 않는다 */
@@ -236,6 +270,10 @@ export function counterpartyAnchor(
     kind: negotiation.kind,
     ...(offer.paymentYears === undefined ? {} : { paymentYears: offer.paymentYears }),
     ...(negotiation.counterpartTeamId ? { counterpartTeamId: negotiation.counterpartTeamId } : {}),
+    // 조건서는 협상이 든다 — 라운드의 사본이 아니라 지금 장부다 (transfer.md §12-3)
+    terms: offeredTermsOf(negotiation),
+    refusedTerms: refusedTermsOf(negotiation),
+    ...(personalHolds(negotiation, offer) ? { personalAgreed: true } : {}),
   });
   const bounds = counterBoundsOf(state, negotiation, offer);
   const probability = odds.probability;
@@ -316,6 +354,150 @@ export function counterpartyAnchor(
         }),
     splittable: canOffer && bounds.splittable,
     bounds,
+    asks: termAsksOf(state, negotiation),
+  };
+}
+
+/**
+ * **상대가 지금 부를 수 있는 조건** — 협상의 갈래 중 조건서에 없는 것, 값이 있는 갈래는
+ * 기준과 구간까지 (transfer.md §12-3). 조항은 시장가에, 보너스는 제시 주급에, 인상
+ * 조항은 정해진 폭에 건다. 구간 밖은 코어가 자른다(`clampAsks`).
+ */
+export function termAsksOf(state: GameState, negotiation: Negotiation): TermAsk[] {
+  const player = playerById(state, negotiation.gamePlayerId);
+  if (!player || negotiation.status !== "open") return [];
+  const value = marketValueOf(state, player);
+  const wage =
+    pendingOffer(negotiation)?.weeklyWage ??
+    negotiation.personal?.weeklyWage ??
+    wageExpectationOf(state, player);
+  return askableKindsOf(negotiation)
+    .filter((kind) => kind !== "other")
+    .map((kind): TermAsk => {
+      if (kind === "buyout") {
+        const ask = buyoutAskOf(value);
+        return {
+          kind,
+          label: DEAL_TERM_KO[kind],
+          anchor: ask.anchor,
+          room: { min: ask.min, max: ask.max },
+        };
+      }
+      if (kind === "bonus") {
+        return {
+          kind,
+          label: DEAL_TERM_KO[kind],
+          anchor: Math.round(wage * BONUS_ASK_WEEKS),
+          room: {
+            min: Math.round(wage * BONUS_ASK_WEEKS_MIN),
+            max: Math.round(wage * BONUS_ASK_WEEKS_MAX),
+          },
+        };
+      }
+      if (kind === "escalator") {
+        return {
+          kind,
+          label: DEAL_TERM_KO[kind],
+          anchor: ESCALATOR_ASK_PCT,
+          room: { min: ESCALATOR_ASK_MIN, max: ESCALATOR_ASK_MAX },
+        };
+      }
+      return { kind, label: DEAL_TERM_KO[kind] };
+    });
+}
+
+/**
+ * 상대가 부른 조건을 **부를 수 있는 갈래와 구간 안으로** 자른다 — 그 밖은 버린다.
+ * 값이 있는 갈래에서 값을 비우면 기준값이 선다: 모델이 갈래만 골라도 조건이 선다.
+ */
+export function clampAsks(
+  asks: readonly DealTerm[] | undefined,
+  allowed: readonly TermAsk[],
+): DealTerm[] {
+  const out: DealTerm[] = [];
+  for (const raw of asks ?? []) {
+    const rule = allowed.find((a) => a.kind === raw.kind);
+    if (!rule) continue;
+    const term: DealTerm = { ...raw };
+    if (rule.room && rule.anchor !== undefined) {
+      const asked = raw.kind === "escalator" ? raw.pct : raw.fee;
+      const clamped = clampInto(rule.room, asked ?? rule.anchor);
+      if (raw.kind === "escalator") {
+        term.pct = clamped;
+        term.trigger ??= "europe";
+      } else {
+        term.fee = clamped;
+      }
+    }
+    const normalized = normalizeDealTerm(term);
+    if (normalized) out.push(normalized);
+  }
+  return out;
+}
+
+/**
+ * **개인 조건 제안의 앵커** — 오퍼가 없고 개인 조건이 답을 기다릴 때 (transfer.md §12-3).
+ * 확률은 선수 관문 하나라 사다리도 그 값 위에 선다. 부를 수 있는 것은 주급·연수·지위뿐이고
+ * 구간은 오퍼의 조정과 같은 함수가 낸다.
+ */
+export function personalAnchor(
+  state: GameState,
+  negotiation: Negotiation,
+): CounterpartyAnchor | null {
+  const personal = personalAwaiting(negotiation);
+  if (!personal || negotiation.status !== "open") return null;
+  const offer = {
+    fee: 0,
+    weeklyWage: personal.weeklyWage,
+    contractYears: personal.contractYears,
+    ...(personal.squadStatus === undefined ? {} : { squadStatus: personal.squadStatus }),
+  };
+  const odds = dealOdds(state, {
+    playerId: negotiation.gamePlayerId,
+    fee: 0,
+    weeklyWage: personal.weeklyWage,
+    years: personal.contractYears,
+    kind: negotiation.kind,
+    ...(negotiation.counterpartTeamId ? { counterpartTeamId: negotiation.counterpartTeamId } : {}),
+    ...(personal.squadStatus === undefined ? {} : { squadStatus: personal.squadStatus }),
+    terms: offeredTermsOf(negotiation),
+    refusedTerms: refusedTermsOf(negotiation),
+  });
+  const bounds = counterBoundsOf(state, negotiation, offer);
+  const probability = odds.gates.player;
+  const ladder: NegotiationVerdict =
+    probability >= COUNTERPARTY_ACCEPT_AT - bounds.latitude
+      ? "accept"
+      : probability >= COUNTERPARTY_COUNTER_AT - bounds.latitude
+        ? "counter"
+        : "reject";
+  const canCounter = axisOpen(bounds.wage) || axisOpen(bounds.status);
+  const verdict: NegotiationVerdict = ladder === "counter" && !canCounter ? "accept" : ladder;
+  const hopeless = verdict === "reject" && probability < COUNTERPARTY_HOPELESS_AT - bounds.latitude;
+  const index = LADDER.indexOf(verdict);
+  const allowed = LADDER.filter(
+    (v, i) => Math.abs(i - index) <= 1 && (v !== "counter" || (canCounter && !hopeless)),
+  );
+  const canOffer = allowed.includes("counter");
+  const wage = bounds.wage ? clampToBand(bounds.wage, bounds.wage.expectation) : null;
+  const status = bounds.status ? clampToBand(bounds.status, bounds.status.expectation) : null;
+  return {
+    negotiationId: negotiation.id,
+    probability,
+    playerOdds: probability,
+    latitude: bounds.latitude,
+    verdict,
+    allowed,
+    ...(wage === null || !bounds.wage || !canOffer
+      ? {}
+      : { weeklyWage: wage, wageRoom: roomOf(wage, bounds.wage) }),
+    ...(status === null || !bounds.status || !canOffer
+      ? {}
+      : { squadStatus: statusAtRank(status), statusRoom: statusRoomOf(status, bounds.status) }),
+    splittable: false,
+    bounds,
+    asks: termAsksOf(state, negotiation),
+    personal: true,
   };
 }
 
@@ -398,6 +580,20 @@ export function settleCounterparty(
   ruling?: CounterpartyRulingInput,
 ): { input: CounterpartyRuling; result: MarketCommandResult } {
   const input = clampCounterpartyRuling(anchor, ruling);
+  if (anchor.personal) {
+    return {
+      input,
+      result: answerPersonal(state, {
+        negotiationId: input.negotiationId,
+        verdict: input.verdict,
+        ...(input.weeklyWage === undefined ? {} : { weeklyWage: input.weeklyWage }),
+        ...(input.contractYears === undefined ? {} : { contractYears: input.contractYears }),
+        ...(input.squadStatus === undefined ? {} : { squadStatus: input.squadStatus }),
+        ...(input.note ? { note: input.note } : {}),
+        hopeless: !anchor.allowed.includes("counter") && anchor.verdict === "reject",
+      }),
+    };
+  }
   return { input, result: respondOffer(state, input) };
 }
 
@@ -446,9 +642,13 @@ export function tableVoicesOf(state: GameState, negotiation: Negotiation): Count
     ? [moneyAxisKo(kind), ...(splittable ? ["분할 연수"] : []), "기한"]
     : [];
 
-  /** 개인 조건의 축 — 우리가 주급을 내는 갈래에서만 열린다 (`counterBoundsOf`) */
+  /**
+   * 개인 조건의 축 — 우리가 주급을 내는 갈래에서만 열린다 (`counterBoundsOf`). 개인 조건이
+   * 먼저 굳었으면 그 축은 닫혀 있고 남는 것은 조건의 답뿐이다 (transfer.md §12-3).
+   */
+  const personalAgreed = negotiation.personal?.agreedOn !== undefined;
   const personal =
-    outgoing || kind === "release"
+    outgoing || kind === "release" || personalAgreed
       ? []
       : [
           "주급",
@@ -456,13 +656,16 @@ export function tableVoicesOf(state: GameState, negotiation: Negotiation): Count
           ...(kind === "buy" || kind === "renew" ? ["계약 지위"] : []),
           ...(kind === "buy" ? ["등번호"] : []),
         ];
+  // 조건은 언제나 선수 쪽이 부르고 답한다 — 조항도 보너스도 그의 계약서에 적히는 것이다
+  if (termKindsOf(negotiation).length > 0) personal.push("조건");
 
   const agent = agentForPlayer(state, player.id);
   const voices: CounterpartyVoice[] = [];
   if (clubTakesMoney) {
     voices.push({
       speaker: "club",
-      name: teamName(outgoing ? (negotiation.counterpartTeamId ?? player.teamId) : player.teamId),
+      // 값을 답하는 것은 거래 상대다 — 빌려 온 선수의 원소속이 우리 팀과 갈라지는 자리다 (§2)
+      name: teamName(negotiation.counterpartTeamId ?? player.teamId),
       answers: moneyAnswers,
     });
   }
@@ -568,6 +771,55 @@ function dossierOf(state: GameState, negotiation: Negotiation, player: GamePlaye
      */
     ...(bids === null ? [] : [`[경쟁 입찰] ${bids}`]),
     ...(numberLine === null ? [] : [`[등번호] ${numberLine}`]),
+    ...termSheetLinesOf(state, negotiation, player, us, them),
+    ...personalLinesOf(negotiation, us),
+  ];
+}
+
+/**
+ * **조건서** — 누가 무엇을 걸었고 어떻게 됐나, 그리고 감독이 건 조건을 장부가 어떻게
+ * 보는가 (transfer.md §12-3). 「10번은 지금 주장이 달고 있다」가 여기 서야 에이전트가
+ * 그 약속을 의심할 수 있다. 표 밖의 조건(`other`)은 문장 그대로 선다 — 무게는 읽는 쪽이 정한다.
+ */
+function termSheetLinesOf(
+  state: GameState,
+  negotiation: Negotiation,
+  player: GamePlayer,
+  us: string,
+  them: string,
+): string[] {
+  const sheet = termSheetOf(negotiation);
+  if (sheet.length === 0) return [];
+  const checks = checkTerms(state, player, offeredTermsOf(negotiation));
+  return [
+    `[조건서]`,
+    ...sheet.map((row) => {
+      const binding = row.by === "us" || row.answer === "granted";
+      const check = binding
+        ? checks.find((c) => c.term.kind === row.term.kind && c.term.note === row.term.note)
+        : undefined;
+      const fact =
+        check && check.verdict !== "unverifiable"
+          ? ` — ${check.verdict === "credible" ? "믿을 만하다" : "의심스럽다"}: ${check.why}`
+          : "";
+      return `    ${tabledTermLine(row, us, them)}${fact}`;
+    }),
+  ];
+}
+
+/** 개인 조건 선합의의 지금 — 제안·되부름·합의 (transfer.md §12-3) */
+function personalLinesOf(negotiation: Negotiation, us: string): string[] {
+  const personal = negotiation.personal;
+  if (!personal) return [];
+  const terms = (t: { weeklyWage: number; contractYears: number; squadStatus?: SquadStatus }) =>
+    `주급 ${formatMoney(t.weeklyWage)} · ${t.contractYears}년` +
+    (t.squadStatus ? ` · ${SQUAD_STATUS_KO[t.squadStatus]} 지위` : "");
+  if (personal.agreedOn) {
+    return [`[개인 조건] ${personal.agreedOn} 합의 — ${terms(personal)}. 남은 것은 구단의 값이다`];
+  }
+  return [
+    `[개인 조건] ${personal.proposedOn} ${us}의 제안 — ${terms(personal)}` +
+      (personal.counter ? ` → 선수 쪽 되부름 ${terms(personal.counter)}` : " (답을 기다린다)"),
   ];
 }
 
@@ -615,7 +867,10 @@ export function buildCounterpartyBrief(
     ourClub: teamName(state.userTeamId),
     playerFacts: [
       `${player.name} · ${ageOf(player.birthdate, state.date)}세 · ${naturalPositionOf(player).position}`,
-      `소속 ${teamName(player.teamId)} · 계약 잔여 ${years.toFixed(1)}년`,
+      `소속 ${teamName(contractOwnerOf(state, player))} · 계약 잔여 ${years.toFixed(1)}년` +
+        (player.loan && player.teamId === state.userTeamId
+          ? ` · ${teamName(state.userTeamId)}에 임대 중 (${player.loan.until}까지)`
+          : ""),
       ...(hasIssue(state, player.id) ? ["라커룸에 불만이 서 있다"] : []),
     ],
     dossier: dossierOf(state, negotiation, player),

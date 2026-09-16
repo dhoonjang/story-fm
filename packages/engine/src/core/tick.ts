@@ -2370,6 +2370,8 @@ export function advanceForOperation(
 ): AdvanceOutcome | null {
   if (state.phase !== "idle") return null;
   if (operation.kind === "advance_match") return null;
+  // 제안은 시계를 밀지 않는다 — 코어 명령은 이미 턴 앞에서 걸렸다 (proposal.ts)
+  if (operation.kind === "propose") return null;
   if (operation.kind === "skip_days") return advanceTime(state, { days: operation.days });
   const days = diffDays(state.date, operation.date);
   return days > 0 ? advanceTime(state, { days }) : null;

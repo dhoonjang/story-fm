@@ -38,9 +38,13 @@ import {
   NARRATIVE_FINANCE_MIN_AMOUNT,
   NARRATIVE_INCOME_CATEGORIES,
   offerPlayerOut,
+  offerTerms,
+  answerTerm,
   openNegotiationFor,
   openRelease,
   openRenewal,
+  openTalks,
+  proposePersonal,
   PROMISE_DAYS_MAX,
   PROMISE_DAYS_MIN,
   pickAnyPlayer,
@@ -111,6 +115,8 @@ import {
   ATTRIBUTE_AXES,
   BOARD_REQUEST_KINDS,
   DateString,
+  DEAL_TERM_KINDS,
+  DealTermSchema,
   DIRECTIVE_INTENSITIES,
   FIRST_TEAM_LIMIT,
   type GamePlayer,
@@ -121,6 +127,7 @@ import {
   type MatchEvent,
   MAX_PAYMENT_YEARS,
   MAX_PITCH_CLAIMS,
+  MAX_TABLED_TERMS,
   PitchClaimSchema,
   PLAYER_DIRECTIVE_KINDS,
   POSITION_CODES,
@@ -147,6 +154,7 @@ import { skillDescriptions } from "./skill-descriptions";
 import { runTacticOrders } from "./tactic-orders";
 import { runTableReply } from "./negotiation-table";
 import { MARKET_OPS, runMarketOrders } from "./market-orders";
+import { TABLE_OPS, runTableOrders } from "./table-orders";
 import { TRAINING_OPS, runTrainingOrders } from "./training-orders";
 import { OrdersArgsSchema, applyOps, hasOps } from "./orders-ops";
 import { MONEY_MAX, SQUAD_STATUS_LINE, WAGE_MAX, money } from "./ruling-schema";
@@ -155,7 +163,7 @@ import { inputError, toToolSchema } from "./tool-schema";
 import { recordCall, type GmToolCall, type CommandReturn } from "./gm-types";
 
 /**
- * **GM에게 보이지 않는 코어 명령** — 판을 세우는 열과 훈련 여섯, 시장 스물하나. 감독의 전술 지시는
+ * **GM에게 보이지 않는 코어 명령** — 판을 세우는 열과 훈련 여섯, 시장 스물넷. 감독의 전술 지시는
  * `tactic_orders`(평시·경기)·`training_orders`·`market_orders` 뒤의 해석이 JSON으로 옮기고 코어가 이 명령들을
  * 부른다 (agents.md §1). 설명은 모델에게 가지 않으므로 이름만 든다 — 판정 근거는
  * `TACTIC_ORDERS_SYSTEM`의 것이다.
@@ -187,6 +195,10 @@ export const CORE_COMMANDS: ReadonlySet<string> = new Set([
   "set_transfer_list",
   "send_offer",
   "open_renewal",
+  // 조건서·개인 조건 — 시장 해석과 테이블 해석이 채운다 (transfer.md §12-3)
+  "offer_terms",
+  "answer_term",
+  "propose_personal",
   "open_release",
   "release_player",
   "exercise_buyback",
@@ -227,6 +239,9 @@ const CORE_COMMAND_LABELS: Record<string, string> = {
   set_transfer_list: "이적 리스트",
   send_offer: "오퍼",
   open_renewal: "재계약 제안",
+  offer_terms: "조건 올리기 · 요구 들어주기",
+  answer_term: "상대의 요구에 답한다",
+  propose_personal: "개인 조건 제안",
   open_release: "해지 제안",
   release_player: "일방 해지",
   exercise_buyback: "되사기 행사",
@@ -421,6 +436,19 @@ const squadStatusArg = z
   .enum(SQUAD_STATUSES)
   .optional()
   .describe(`${SQUAD_STATUS_LINE}. 감독이 자리를 약속했을 때만 싣는다`);
+
+/**
+ * 오퍼·재계약 제안에 실리는 **조건** — 조건서에 오른다 (transfer.md §12-3). 갈래의 뜻과
+ * 값의 자리는 `DealTermSchema`의 `kind` 설명이 든다(코어의 표에서 온다). 상한은 조건서의
+ * 상한에 `other` 둘을 더한 폭이다 — 넘긴 것은 코어가 반려 문장으로 돌려준다.
+ */
+const termsArg = z
+  .array(DealTermSchema)
+  .max(MAX_TABLED_TERMS + 2)
+  .optional()
+  .describe(
+    "감독이 이 말에서 실제로 건 조건만 — 갈래별 값의 자리는 kind 설명에 있다. 말하지 않은 조건을 넣지 않는다. 주전 보장은 조건이 아니라 squadStatus다",
+  );
 
 // 훈련 세션 스키마 (set_training) — 자유 label + focus 대상
 const TRAIN_FOCUS = [...ATTRIBUTE_AXES, "tactical", "recovery"] as const;
@@ -1459,6 +1487,7 @@ export function buildToolSpecs(
             "감독이 실제로 든 설득 논거. 감독이 말하지 않은 논거를 지어내지 마라 — 코어가 사실 대조해 거짓이면 확률이 떨어진다",
           ),
         squadStatus: squadStatusArg,
+        terms: termsArg,
       }),
       (input) => {
         const picked = pickAnyPlayer(state, input.playerId);
@@ -1489,16 +1518,25 @@ export function buildToolSpecs(
             ...(input.paymentYears === undefined ? {} : { paymentYears: input.paymentYears }),
           });
         }
+        /**
+         * **먼저 굳은 개인 조건이 오퍼의 기본값이다** (transfer.md §12-3) — 감독이 말하지
+         * 않은 주급·연수·지위는 선수 쪽과 이미 맞춘 값으로 실린다. 그래야 그 오퍼의 선수
+         * 관문이 합의로 선다; 기대치를 다시 실으면 굳은 합의를 오퍼가 스스로 무른다.
+         */
+        const agreed = openNegotiationFor(state, player.id)?.personal;
+        const personal = agreed?.agreedOn !== undefined ? agreed : undefined;
+        const squadStatus = input.squadStatus ?? personal?.squadStatus;
         return sendOffer(state, {
           playerId: player.id,
           fee: input.fee,
           // 주급은 선수가 부르는 값이다 — 감독이 말하지 않으면 기대치가 실리고 오퍼 줄에 선다
-          weeklyWage: input.weeklyWage ?? wageExpectationOf(state, player),
-          years: input.years ?? 4,
+          weeklyWage: input.weeklyWage ?? personal?.weeklyWage ?? wageExpectationOf(state, player),
+          years: input.years ?? personal?.contractYears ?? 4,
           ...(input.kind === "loan" ? { kind: "loan" as const } : {}),
           ...(input.paymentYears === undefined ? {} : { paymentYears: input.paymentYears }),
           ...(input.pitch ? { pitch: input.pitch } : {}),
-          ...(input.squadStatus === undefined ? {} : { squadStatus: input.squadStatus }),
+          ...(squadStatus === undefined ? {} : { squadStatus }),
+          ...(input.terms && input.terms.length > 0 ? { terms: input.terms } : {}),
         });
       },
     ),
@@ -1567,6 +1605,7 @@ export function buildToolSpecs(
           .optional()
           .describe("감독이 부른 계약 연수 — 말하지 않았으면 비운다. 코어가 기대 연수를 싣는다"),
         squadStatus: squadStatusArg,
+        terms: termsArg,
       }),
       (input) => {
         const picked = pickSignedPlayer(state, input.playerId);
@@ -1586,6 +1625,7 @@ export function buildToolSpecs(
           // 연수는 선수가 부르는 값이 있다 — 빠지면 기대 연수가 실리고 제안 줄에 선다
           years: input.years ?? renewalYearsExpectation(state, player),
           ...(input.squadStatus === undefined ? {} : { squadStatus: input.squadStatus }),
+          ...(input.terms && input.terms.length > 0 ? { terms: input.terms } : {}),
         });
       },
     ),
@@ -1678,6 +1718,63 @@ export function buildToolSpecs(
       CORE_COMMAND_LABELS.withdraw_offer!,
       z.object({ negotiationId: z.string().min(1) }),
       (input) => withdrawOffer(state, input.negotiationId),
+    ),
+    /**
+     * **조건서** — 감독이 조건을 걸거나 상대의 요구에 답한다 (transfer.md §12-3). 시장
+     * 해석과 테이블 해석이 채우고, 코어가 갈래·값·상한을 가린다.
+     */
+    wrap(
+      "offer_terms",
+      CORE_COMMAND_LABELS.offer_terms!,
+      z.object({
+        negotiationId: z.string().min(1).describe("list_negotiations의 id"),
+        terms: z
+          .array(DealTermSchema)
+          .min(1)
+          .max(MAX_TABLED_TERMS + 2)
+          .describe("감독이 이 말에서 건 조건 — 상대가 부른 갈래를 올리면 그 요구를 들어준 것이다"),
+      }),
+      (input) => offerTerms(state, input),
+    ),
+    wrap(
+      "answer_term",
+      CORE_COMMAND_LABELS.answer_term!,
+      z.object({
+        negotiationId: z.string().min(1).describe("list_negotiations의 id"),
+        kind: z.enum(DEAL_TERM_KINDS).describe("상대가 부른 조건의 갈래"),
+        answer: z
+          .enum(["granted", "refused"])
+          .describe("granted=들어준다 · refused=거절한다. 값을 바꿔 들어주는 말은 offer_terms다"),
+      }),
+      (input) => answerTerm(state, input),
+    ),
+    wrap(
+      "propose_personal",
+      CORE_COMMAND_LABELS.propose_personal!,
+      z.object({
+        negotiationId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("열린 협상의 id — 없으면 playerId로 자리를 연다"),
+        playerId: playerRef.optional().describe("영입·임대 대상 — 감독이 부른 이름 그대로"),
+        weeklyWage: money(WAGE_MAX).describe("감독이 부른 주급 (£/주)"),
+        years: z.number().int().min(1).max(6).describe("감독이 부른 계약 연수"),
+        squadStatus: squadStatusArg,
+        terms: termsArg,
+      }),
+      (input) => {
+        const picked = input.playerId === undefined ? null : pickAnyPlayer(state, input.playerId);
+        if (picked && !picked.ok) return { ok: false, message: picked.message };
+        return proposePersonal(state, {
+          ...(input.negotiationId === undefined ? {} : { negotiationId: input.negotiationId }),
+          ...(picked?.ok ? { playerId: picked.player.id } : {}),
+          weeklyWage: input.weeklyWage,
+          years: input.years,
+          ...(input.squadStatus === undefined ? {} : { squadStatus: input.squadStatus }),
+          ...(input.terms && input.terms.length > 0 ? { terms: input.terms } : {}),
+        });
+      },
     ),
   ];
 }
@@ -1831,14 +1928,72 @@ export function buildGmTools(
       if (!parsed.success) return inputError(parsed.error);
       const blocked = dismissed(state, true);
       if (blocked) return blocked;
-      const seated = sitAtTable(state, parsed.data.negotiationId, parsed.data.line);
+      const { line } = parsed.data;
+      /**
+       * ① **협상이 없으면 마주 앉는다** — 오퍼 없는 빈 협상 (transfer.md §12-2). 이레 안에
+       * 오퍼가 오르지 않으면 조용히 닫힌다.
+       */
+      const notes: string[] = [];
+      let negotiationId = parsed.data.negotiationId;
+      if (negotiationId === undefined) {
+        if (parsed.data.playerId === undefined) {
+          return {
+            ok: false,
+            message: "누구와 마주 앉는지 알 수 없습니다 — negotiationId나 playerId가 필요합니다",
+          };
+        }
+        const talks = openTalks(state, {
+          playerId: parsed.data.playerId,
+          ...(parsed.data.kind === undefined ? {} : { kind: parsed.data.kind }),
+        });
+        if (!talks.ok) return { ok: false, message: talks.message };
+        negotiationId = talks.negotiation.id;
+        if (talks.opened) {
+          notes.push(
+            `${playerName(state, talks.negotiation.gamePlayerId)}와 마주 앉았다 — 오퍼는 없다 (${talks.negotiation.id})`,
+          );
+        }
+      }
+      const negotiation = state.negotiations.find((n) => n.id === negotiationId);
+      if (!negotiation) return { ok: false, message: `협상 "${negotiationId}"을 찾지 못했습니다` };
+      /**
+       * ② **감독의 말에 실린 값·조건·답을 먼저 장부에 건다** (§12-3) — 그래야 상대가 그
+       * 오퍼에 답한다. 옮길 것이 없으면(반려) 말만 건너간다 — 값 없는 말도 테이블의 일이다.
+       */
+      const moved = await runTableOrders(state, specs, negotiation, line).catch(
+        (error: unknown) => {
+          // 해석기가 죽어도 테이블은 선다 — 그 말은 옮기지 못한 채 상대에게 간다 (agents.md §1)
+          console.warn("[table-orders] 감독의 말을 옮기지 못했습니다 — 말만 건넵니다:", error);
+          return {
+            ok: false as const,
+            message: "감독의 말에서 값·조건을 옮기지 못했습니다 — 말만 건넸습니다",
+          };
+        },
+      );
+      if (moved.ok) applyOps(specs, moved.orders, TABLE_OPS, notes);
+      if (negotiation.status !== "open") {
+        // 접거나 확정한 말이었다 — 앉을 자리가 없다
+        return recordCall(
+          calls,
+          "speak_at_table",
+          { ok: true, message: notes.join("\n") || `협상이 끝났습니다 (${negotiation.status})` },
+          { input: parsed.data, ...(context ? { line: writtenLines(context.text) } : {}) },
+        );
+      }
+      // ③ 마주 앉는다 — 답을 기다리던 것은 오늘로 당겨지고 상대가 그 자리에서 답한다
+      const seated = sitAtTable(state, negotiation.id, line);
       if (!seated.ok) return seated;
-      const reply = await runTableReply(state, seated.seat, parsed.data.line);
+      const reply = await runTableReply(state, seated.seat, line);
       const outcome = settleTableReply(state, seated.seat, reply ?? undefined);
-      return recordCall(calls, "speak_at_table", outcome, {
-        input: parsed.data,
-        ...(context ? { line: writtenLines(context.text) } : {}),
-      });
+      // ④ 코어 명령이 돌려준 줄이 앞에, 상대의 답이 뒤에 — 감독이 무엇을 걸었는지 먼저 읽는다
+      const message =
+        notes.length > 0 ? `${notes.join("\n")}\n${outcome.message}` : outcome.message;
+      return recordCall(
+        calls,
+        "speak_at_table",
+        { ...outcome, message },
+        { input: parsed.data, ...(context ? { line: writtenLines(context.text) } : {}) },
+      );
     },
   };
   /**
@@ -1867,8 +2022,24 @@ export function buildGmTools(
   return [...visible, tactics, training, table, market];
 }
 
-/** 테이블에 건네는 감독의 말 — 원문 그대로다 */
+/**
+ * 테이블에 건네는 감독의 말 — 원문 그대로다. 협상이 없으면 `playerId`(와 갈래)로 자리를
+ * 연다 (transfer.md §12-2).
+ */
 const TableLineArgsSchema = z.object({
-  negotiationId: z.string().min(1).describe("list_negotiations의 id"),
+  negotiationId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("list_negotiations의 id — 열린 협상이 있을 때"),
+  playerId: playerRef
+    .optional()
+    .describe("협상이 없을 때 마주 앉을 선수 — 감독이 부른 이름 그대로"),
+  kind: z
+    .enum(["buy", "renew", "loan"])
+    .optional()
+    .describe(
+      "자리를 새로 열 때의 갈래 — buy=영입 · renew=재계약 · loan=임대 영입. 비우면 소속으로 고른다",
+    ),
   line: z.string().min(1).max(TABLE_LINE_MAX).describe("감독의 말 원문"),
 });

@@ -222,11 +222,12 @@ flowchart LR
     SK["판정형 · 진행형 스킬 9"]
     HD["손잡이 4<br/>tactic_orders · training_orders<br/>market_orders · speak_at_table"]
   end
-  subgraph INTERP["해석기 3 — 강제 산출 스키마"]
+  subgraph INTERP["해석기 4 — 강제 산출 스키마"]
     direction TB
     TO["tactic-orders<br/>report_tactic_orders"]
     TRO["training-orders<br/>report_training_orders"]
     MO["market-orders<br/>report_market_orders"]
+    TBO["table-orders<br/>report_table_move"]
   end
   subgraph CMD["GM에게 보이지 않는 코어 명령 38"]
     direction TB
@@ -238,7 +239,8 @@ flowchart LR
   HD -->|"orders 원문"| TO --> C1
   HD -->|"orders 원문"| TRO --> C2
   HD -->|"orders 원문"| MO --> C3
-  HD -->|"line 원문"| NT
+  HD -->|"line 원문"| TBO --> C3
+  TBO -->|"옮기고 남은 말"| NT
   TO -.->|"team_talk도 채운다"| SK
 ```
 
@@ -270,9 +272,9 @@ unresolved }`), `parseOps`가 명령별 상한(`TACTIC_CAPS` 또는 `OPS_PER_COM
 지나고, 무직의 문은 해석기가 낸 명령마다 코어 명령 쪽(`wrap` · `OUT_OF_WORK_TOOLS`)이
 판정한다 — 거취 셋만 통과한다. 조회는 그대로 열려 있다.
 
-### 4-2. 해석기 셋이 읽는 것
+### 4-2. 해석기 넷이 읽는 것
 
-세 해석기는 한 벌(`runOpsOrders`)이다 — 시스템 프롬프트 하나, 이력 없음, 맥락 블록 뒤에
+네 해석기는 한 벌(`runOpsOrders`)이다 — 시스템 프롬프트 하나, 이력 없음, 맥락 블록 뒤에
 `@감독: <원문>`, 도구 하나를 `toolChoice`로 강제.
 
 | 해석기            | 맥락 블록                                                                                                                                                                              | 채우는 명령      | 적용                                         |
@@ -280,6 +282,7 @@ unresolved }`), `parseOps`가 명령별 상한(`TACTIC_CAPS` 또는 `OPS_PER_COM
 | `tactic-orders`   | 경기: `<ledger>`(장부·`<standing>`·`<targets>`) + `<match_log>`(이 경기의 턴 전부) · 평시: `<standing>` `<squad>` `<recent_turns>` · 양쪽: `<board_moves>`(이번 턴 전술판이 움직인 것) | `TACTIC_OPS` 12  | `applyTacticOrders` — 경기면 패킷 재계산까지 |
 | `training-orders` | `<schedule>`(주간 일정) · `<squad_ops>`(지금 걸린 육성·멘토·방침) · `<squad>` · `<recent_turns>`                                                                                       | `TRAINING_OPS` 6 | `applyOps`                                   |
 | `market-orders`   | `<negotiations>` · `<finance>` · `<interest>` · `<board>` · `<buybacks>` · `<seat>`(감독직) · `<recent_turns>`                                                                         | `MARKET_OPS` 21  | `applyOps`                                   |
+| `table-orders`    | `<negotiation>`(이 협상 하나 — 오퍼 이력·서 있는 조정·조건서·개인 조건·값의 자) · `<recent_turns>`                                                                                     | `TABLE_OPS` 8    | `applyOps` — 옮기고 남은 말은 상대에게 간다  |
 
 ## 5. 경기 턴 — 매치 GM이 도구로 경기를 진행한다
 
@@ -403,6 +406,7 @@ flowchart TB
 | 호출               | 설정 키             | 언제                                                   | 읽는 것                                                                                                    | 실패하면                  |
 | ------------------ | ------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- | ------------------------- |
 | 교섭 상대 (편지)   | `negotiation-table` | 평시 턴 앞, 답할 날이 된 협상마다                      | `<counterparty>`(안에 `<voices>` — 누가 무엇을 답하나) `<situation>` `<table_log>` `<anchor>` + `<letter>` | 앵커 판정이 그대로 반영   |
+| 테이블 해석        | `table-orders`      | GM이 `speak_at_table`을 부른 자리, 상대가 답하기 전    | `<negotiation>`(이 협상 하나) + `@감독: <line>`                                                            | 말만 상대에게 간다        |
 | 교섭 상대 (테이블) | `negotiation-table` | GM이 `speak_at_table`을 부른 자리                      | 같은 넷 + `@감독: <line>`                                                                                  | 앵커 판정, 상대는 말없이  |
 | 훈련 결산          | `training-rater`    | 장면 뒤, 시계가 흘러 훈련 세션을 지났으면 구간 한 묶음 | 훈련 일지 · 대화(마지막 결산 카드 이후의 턴 — 감독/장면 + `[장부]` 줄) · 대상 표                           | 앵커(변화 없음) + 빈 카드 |
 | 이력 압축          | `history-compactor` | 저장 직전, 평시 이력 글자 수가 상한을 넘었을 때        | 이전 요약 · 이미 선 사람 · 지금 관계 등급 표 · 이름 없는 아크 · 접히는 원문 + `[장부]`                     | 접지 않음                 |

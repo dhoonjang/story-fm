@@ -10,6 +10,8 @@ import {
   MARKET_OPS,
   TACTIC_CAPS,
   TACTIC_OPS,
+  TABLE_OPS,
+  TABLE_ORDERS_SYSTEM,
   TRAINING_OPS,
   buildOpsSchema,
   parseOps,
@@ -156,6 +158,10 @@ describe("규칙이 사는 자리", () => {
      */
     for (const name of [...SKILL_NAMES, ...CORE_COMMANDS]) {
       expect(mentions(GM_SYSTEM, name), `GM_SYSTEM: ${name}`).toBe(false);
+      // 테이블 해석기도 자기 목록 밖의 이름은 적지 않는다 (transfer.md §12-2)
+      if (!TABLE_OPS.includes(name)) {
+        expect(mentions(TABLE_ORDERS_SYSTEM, name), `TABLE_ORDERS_SYSTEM: ${name}`).toBe(false);
+      }
       if (TACTIC_OPS.includes(name)) continue;
       expect(mentions(TACTIC_ORDERS_SYSTEM, name), `TACTIC_ORDERS_SYSTEM: ${name}`).toBe(false);
     }
@@ -542,6 +548,8 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
         name,
       ).toHaveLength(1);
     }
+    // 테이블 해석기는 시장 해석의 부분집합을 이 협상의 문맥으로 다시 채운다 — 새 이름은 없다 (§12-2)
+    for (const name of TABLE_OPS) expect(MARKET_OPS.includes(name), name).toBe(true);
     // 거꾸로, 목록에 있는데 코어 명령도 카탈로그 스킬도 아닌 이름은 없다
     const known = new Set([...CORE_COMMANDS, ...SKILL_CATALOG.map((s) => s.name)]);
     for (const name of lists) expect(known.has(name), name).toBe(true);

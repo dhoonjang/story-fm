@@ -1,4 +1,5 @@
 import type { TurnOperation } from "@story-fm/agents";
+import type { ProposalInput } from "@story-fm/domain";
 import type { GamePayload } from "@/lib/store";
 import type { MatchBoardOrder } from "@/lib/match-orders";
 
@@ -30,6 +31,8 @@ export type TurnStreamBody = {
    */
   operation?: TurnOperation;
   orders?: readonly MatchBoardOrder[];
+  /** 제안 폼이 낸 정확한 조건 — 감독의 말과 함께 갈 수도, 혼자 갈 수도 있다 */
+  proposal?: ProposalInput;
 };
 
 /**
@@ -110,6 +113,7 @@ export async function streamTurn(
         ...(body.message !== undefined ? { message: body.message } : {}),
         ...(body.operation !== undefined ? { operation: body.operation } : {}),
         ...(body.orders && body.orders.length > 0 ? { orders: body.orders } : {}),
+        ...(body.proposal !== undefined ? { proposal: body.proposal } : {}),
       }),
       signal: abort.signal,
     });
