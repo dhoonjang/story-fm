@@ -777,7 +777,16 @@ describe("출력 스키마는 제공자의 문을 지난다", () => {
    */
   const FORBIDDEN: Record<LlmProvider, readonly string[]> = {
     // 수치·길이·배열 크기 제약은 400이다 — 어댑터가 걷는다 (models.md §3-2)
-    anthropic: ["minimum", "maximum", "multipleOf", "minLength", "maxLength", "maxItems"],
+    anthropic: [
+      "minimum",
+      "maximum",
+      "exclusiveMinimum",
+      "exclusiveMaximum",
+      "multipleOf",
+      "minLength",
+      "maxLength",
+      "maxItems",
+    ],
     // 구조화 출력에서도 스키마를 문법으로 펼쳐 `maxItems: n`이 항목 스키마 n벌이 된다 —
     // 2026-09 실측: 이 열쇠 하나만 걷으면 열 선언이 전부 지난다 (models.md §3-2)
     google: ["maxItems"],
