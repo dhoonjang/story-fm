@@ -11,7 +11,9 @@ import {
   isClubTeam,
   leagueOfTeamIn,
   playersOf,
+  setLineup,
   settleYouthIntake,
+  squadLevelOf,
   transitionSeason,
   youthFreeAgents,
 } from "@story-fm/engine";
@@ -60,6 +62,43 @@ function leagueTopMean(state: GameState): { overall: number; potential: number }
   return { overall: mean(overall), potential: mean(potential) };
 }
 
+/**
+ * **감독 대역 — 골문은 감독의 결정이다** (team.md §5). 코어는 감독 팀의 골키퍼를 올리지
+ * 않고 배치 재구성이 골문을 비운 채 열 명을 세우며 등록 현황이 「골키퍼 부족」을 세우는데,
+ * 이 하네스는 답하지 않는 감독이라 그 경고를 읽는 사람이 없다. 그래서 여름마다 여기서
+ * 감독이 전술판에서 할 일을 감독의 요청 하나로 한다 — 1군에 골키퍼가 없으면 2군의 가장
+ * 강한 골키퍼를 올려 골문에 세우고(`setLineup`의 `squadLevels` + 선발), 명단 규정에
+ * 걸리면 선발 밖의 가장 약한 필드 선수를 같은 요청으로 내린다. 코어의 규칙을 하네스가
+ * 따로 들지 않고 감독의 문을 그대로 지나는 것이 대역의 조건이다 (balance-harness.md §4).
+ * AI 구단은 전환이 스스로 올리므로 여기 오지 않는다 (season.md §6).
+ */
+function fillOurGoal(state: GameState): boolean {
+  const first = firstTeamPlayers(state, state.userTeamId);
+  if (first.some((p) => groupOf(p) === "GK")) return false;
+  const keeper = playersOf(state, state.userTeamId)
+    .filter((p) => squadLevelOf(p) === "reserve" && groupOf(p) === "GK")
+    .sort((a, b) => b.attributes.overall - a.attributes.overall)[0];
+  // 명부에 골키퍼가 한 명도 없는 것은 대역이 아니라 「GK 없는 구단」 가드의 몫이다
+  if (keeper === undefined) return false;
+  const starting = assignmentsOf(state, state.userTeamId, "starting").map((a) => a.playerId);
+  const board = (moves: Array<{ playerId: string; level: "first" | "reserve" }>) =>
+    setLineup(state, {
+      // 지금 선 열 명은 그 자리 그대로, 골키퍼만 골문에 — 감독이 판에서 하는 그 조작
+      starting: [...starting, { playerId: keeper.id, position: "GK" }],
+      squadLevels: moves,
+    });
+  if (board([{ playerId: keeper.id, level: "first" }]).ok) return true;
+  const weakest = first
+    .filter((p) => !starting.includes(p.id) && groupOf(p) !== "GK")
+    .sort((a, b) => a.attributes.overall - b.attributes.overall)[0]!;
+  const swapped = board([
+    { playerId: keeper.id, level: "first" },
+    { playerId: weakest.id, level: "reserve" },
+  ]);
+  if (!swapped.ok) throw new Error(`감독 대역이 골문을 채우지 못했다 — ${swapped.message}`);
+  return true;
+}
+
 describe("15시즌을 전환한 뒤의 스쿼드", () => {
   it("시드 42", () => {
     const state = createTestGame(42);
@@ -70,6 +109,8 @@ describe("15시즌을 전환한 뒤의 스쿼드", () => {
     /** 여름마다 무소속 명부에 선 미계약 유스 — 상한이 실제로 지켜지는가 */
     const youthPoolPerSummer: number[] = [];
     let summersWithoutCandidates = 0;
+    /** 감독 대역이 골문을 채운 여름 — 코어가 아니라 감독의 결정이 세운 골키퍼 */
+    let summersWithKeeperCall = 0;
     for (let s = 0; s < SEASONS; s++) {
       /**
        * **자라고 늙는 열두 달을 함께 굴린다** — 전환만 되풀이하면 능력치가 한 칸도
@@ -101,6 +142,7 @@ describe("15시즌을 전환한 뒤의 스쿼드", () => {
       signedPerSummer.push(playersOf(state, state.userTeamId).length - sizeBefore);
       // 계약을 받지 못한 아이가 서는 명부 — 여름마다 부풀지 않는가 (season.md §6)
       youthPoolPerSummer.push(youthFreeAgents(state).length);
+      if (fillOurGoal(state)) summersWithKeeperCall += 1;
     }
     const after = leagueTopMean(state);
 
@@ -152,6 +194,7 @@ describe("15시즌을 전환한 뒤의 스쿼드", () => {
       "우리 인테이크 계약 — 여름 평균": mean(signedPerSummer),
       "무소속 유스 명부 — 15시즌 뒤": youthPoolPerSummer[youthPoolPerSummer.length - 1] ?? 0,
       "무소속 유스 — 여름 평균": mean(youthPoolPerSummer),
+      "대역이 골문을 채운 여름": summersWithKeeperCall,
     };
     console.log(reportOf(SQUAD_LONGEVITY, readings, `시드 42 · ${SEASONS}시즌 · ${state.date}`));
     expect(outOfBand(SQUAD_LONGEVITY, readings)).toEqual([]);
