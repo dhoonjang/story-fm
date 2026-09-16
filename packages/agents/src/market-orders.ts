@@ -25,7 +25,7 @@ import { runOpsOrders, tagged, type OpsAgentSpec, type OpsOrders } from "./order
  * **도구 설명이 갖던 판정 근거는 이 프롬프트가 가져야 한다** — 이 명령들은 GM에게
  * 보이지 않아 카탈로그 설명이 실리지 않는다 (prompts.md §5).
  */
-export const MARKET_ORDERS_SYSTEM = `당신은 감독의 말을 이적·재정 명령의 인자로 옮기는 해석기다. 장면도 대사도 판정도 쓰지 않는다. 전술·라인업·훈련·육성은 다른 해석기의 몫이다.
+export const MARKET_ORDERS_SYSTEM = `당신은 감독의 말을 이적·재정 명령의 인자로 옮기는 해석기다. 장면도 대사도 판정도 쓰지 않는다.
 
 # 입력
 <negotiations>(진행 중인 협상 — id·상대·마지막 오퍼·답할 차례) · <interest>(우리 선수를 보는 구단과 우리가 노리는 선수의 경쟁 구단) · <buybacks>(행사할 수 있는 되사기) · <board>(보드에 건 요청) · <seat>(감독직 제안·공석) · <finance>(잔고·예산·주급 여력·표값) · <staff_pool>(자리를 찾는 코치·의료진·스카우트 — 이름·직책·원형·요구 연봉) · <recent_turns>(지난 다섯 턴) 뒤에 이번 턴 감독의 말이 @감독: 으로 온다.
@@ -47,8 +47,7 @@ export const MARKET_ORDERS_SYSTEM = `당신은 감독의 말을 이적·재정 �
 - accept_manager_offer · counter_manager_offer · apply_manager_job — 감독직 제안의 수락·흥정·지원. offer는 <seat>의 id 또는 구단 이름. 감독이 분명히 말했을 때만.
 
 # unresolved
-이 해석기의 몫인데 어느 명령에도 담기지 않은 말을 감독의 표현 그대로 남긴다.
-전술·라인업·훈련·육성의 말은 남기지 않는다 — 같은 말을 받은 다른 해석기가 옮긴다. 이 해석기의 몫이 하나도 없으면 ops도 unresolved도 비운다.`;
+어느 명령에도 담기지 않은 말을 감독의 표현 그대로 남긴다. 전술·훈련의 말은 남기지 않는다.`;
 
 /**
  * 해석기가 채우는 시장·장부 명령 — **적용 순서다.** 답할 것과 접을 것을 먼저, 새로
@@ -90,8 +89,7 @@ export const MARKET_ORDERS_SPEC: OpsAgentSpec = {
   system: MARKET_ORDERS_SYSTEM,
   ops: MARKET_OPS,
   opsHint: "부를 명령과 그 인자 — 감독이 정한 것만",
-  unresolvedHint:
-    "이 해석기의 몫인데 어느 명령에도 담기지 않은 말 — 전술·훈련의 말은 남기지 않는다",
+  unresolvedHint: "어느 명령에도 담기지 않은 말",
   emptyHint: "이 말에는 옮길 이적·재정 지시가 없습니다",
 };
 

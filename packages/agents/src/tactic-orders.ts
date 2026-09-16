@@ -145,8 +145,7 @@ ops에 부를 명령 이름을 적고 그 인자를 배열로 싣는다. 감독�
 ${roleVocabularyText()}
 
 # unresolved
-이 해석기의 몫인데 어느 명령에도 담기지 않은 말은 감독의 표현 그대로 unresolved에 남긴다.
-훈련·육성·이적·재정의 말은 남기지 않는다 — 같은 말을 받은 다른 해석기가 옮긴다. 이 해석기의 몫이 하나도 없으면 ops도 unresolved도 비운다.`;
+어느 명령에도 담기지 않은 말은 감독의 표현 그대로 unresolved에 남긴다. 훈련·육성·이적의 말은 남기지 않는다.`;
 
 /**
  * 평시의 판 — `<standing>`(지금 걸려 있는 것 전부: 6축·갈래·개인 지시·역할·지역 전술·
@@ -191,8 +190,7 @@ export const TACTIC_ORDERS_SPEC: OpsAgentSpec = {
   ops: TACTIC_OPS,
   caps: TACTIC_CAPS,
   opsHint: "부를 명령과 그 인자 — 감독이 말한 것만",
-  unresolvedHint:
-    "이 해석기의 몫인데 어느 명령에도 담기지 않은 말 — 훈련·이적의 말은 남기지 않는다",
+  unresolvedHint: "어느 명령에도 담기지 않은 말",
   emptyHint: "이 말에는 옮길 전술 지시가 없습니다",
 };
 
