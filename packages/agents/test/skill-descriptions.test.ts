@@ -40,6 +40,8 @@ import {
   GeminiGameLLM,
   OpenAiGameLLM,
   agentConfig,
+  countOptionalProperties,
+  providerTraits,
   type GameToolSpec,
   type LlmProvider,
 } from "@story-fm/llm";
@@ -777,8 +779,9 @@ describe("출력 스키마는 제공자의 문을 지난다", () => {
   const FORBIDDEN: Record<LlmProvider, readonly string[]> = {
     // 수치·길이·배열 크기 제약은 400이다 — 어댑터가 걷는다 (models.md §3-2)
     anthropic: ["minimum", "maximum", "multipleOf", "minLength", "maxLength", "maxItems"],
-    // 문서의 지원 목록 밖 열쇠를 거절하는지는 `live-schema` 하네스가 잰다 — 확인되면 여기 선다
-    google: [],
+    // 구조화 출력에서도 스키마를 문법으로 펼쳐 `maxItems: n`이 항목 스키마 n벌이 된다 —
+    // 2026-09 실측: 이 열쇠 하나만 걷으면 열 선언이 전부 지난다 (models.md §3-2)
+    google: ["maxItems"],
     // `strict: false`로 나간다 — 무엇도 거절하지 않는다
     openai: [],
   };
@@ -791,6 +794,50 @@ describe("출력 스키마는 제공자의 문을 지난다", () => {
     const expected = AGENT_NAMES.filter((name) => name !== "gm" && name !== "match-gm");
     expect(DECLARED.map((entry) => entry.agent).sort()).toEqual([...expected].sort());
     for (const entry of DECLARED) expect(entry.schema.type, entry.agent).toBe("object");
+  });
+
+  /**
+   * **크기의 문은 어댑터가 넘어 줄 수 없다** — 선택 속성이 한도를 넘는 선언은 걷어서 지날
+   * 수 없고, 그 선언을 그 제공자로 보내는 설정은 실호출로 400을 맞기 전에 여기서 빨개진다
+   * (models.md §3-2). 해석기 넷이 Anthropic으로 옮겨지는 날의 자다.
+   */
+  it("설정이 보내는 제공자의 선택 속성 한도 안에 선언이 든다", () => {
+    for (const entry of DECLARED) {
+      const { provider } = agentConfig(entry.agent);
+      const limit = providerTraits(provider).outputOptionalLimit;
+      if (limit === null) continue;
+      expect(
+        countOptionalProperties(entry.schema),
+        `${entry.agent} → ${provider}: 선택 속성 한도 ${limit}`,
+      ).toBeLessThanOrEqual(limit);
+    }
+  });
+
+  /** 한도가 재는 것이 정확히 「required에 없는 properties」다 — 세는 자가 어긋나면 위 자도 어긋난다 */
+  it("선택 속성은 required에 없는 properties를 스키마 전체에서 센다", () => {
+    expect(
+      countOptionalProperties({
+        type: "object",
+        properties: {
+          a: { type: "string" },
+          b: {
+            type: "array",
+            items: { type: "object", properties: { c: {}, d: {} }, required: ["c"] },
+          },
+        },
+        required: ["a"],
+      }),
+    ).toBe(2);
+    // 해석기 넷은 한도 밖이고 나머지 여섯은 안이다 — 실측(2026-09)과 같은 그림이어야 한다
+    const over = DECLARED.filter((entry) => countOptionalProperties(entry.schema) > 24).map(
+      (entry) => entry.agent,
+    );
+    expect(over.sort()).toEqual([
+      "market-orders",
+      "table-orders",
+      "tactic-orders",
+      "training-orders",
+    ]);
   });
 
   /** 어댑터의 설정 — 제공자만 갈아 끼운다. 모델 문자열은 스텁이 읽지 않는다 */

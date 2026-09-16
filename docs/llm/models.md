@@ -598,16 +598,24 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   - **Anthropic** — 수치 제약(`minimum` · `maximum` · `multipleOf`), 문자열 길이
     (`minLength` · `maxLength`), 배열 크기(`maxItems`, 1을 넘는 `minItems`)를 받지 않고
     400을 낸다. 어댑터가 그 열쇠를 걷고, **모든 객체에 `additionalProperties: false`를
-    세운다**(요구 사항).
-  - **Google** — 지원 목록은 `type` · `enum` · `format` · `description` · `items` ·
-    `minItems` · `maxItems` · `minimum` · `maximum` · `anyOf` · `properties` · `required` ·
-    `additionalProperties`다. 목록 밖의 열쇠(`minLength` · `maxLength` · `pattern` · `const`)를
-    어떻게 받는지는 하네스가 잰다 — 거절하면 어댑터가 걷는다.
-  - **OpenAI** — `strict: false`로 보내므로 어떤 열쇠도 거절하지 않는다.
+    세운다**(요구 사항). ⚠️ **그리고 스키마의 크기에 한도가 있다** — 선택 속성(`required`에
+    없는 `properties`)이 **24개**를 넘으면 문법을 만들지 않고 400이다(2026-09 실측,
+    "too many optional parameters … limit: 24"). 선택 속성을 required + `null` 합집합으로
+    옮겨도 합집합 속성 **16개** 한도에 걸린다. 그래서 **해석기 넷은 Anthropic 구조화 출력에
+    들어가지 않는다** — `ops`가 명령 여럿의 인자 스키마를 묶어 선택 속성이 27~81개다.
+    나머지 여섯은 지난다. 이 한도는 `PROVIDER_TRAITS.outputOptionalLimit`이 적고, 설정이
+    해석기를 그리로 옮기면 오프라인 테스트가 먼저 잡는다 (prompts.md §2).
+  - **Google** — `maxItems`를 받지 않는다(2026-09 실측: 400 `INVALID_ARGUMENT`, 본문은
+    `Request contains an invalid argument.` 한 줄). 구조화 출력에서도 스키마를 문법으로
+    펼쳐 `maxItems: n`이 항목 스키마 n벌이 되기 때문이다 — 강제 도구 시절과 같은 벽이다.
+    어댑터가 그 열쇠만 걷는다. `minLength` · `maxLength` · `pattern` · `minItems` ·
+    `minimum` · `maximum`은 그대로 받는다.
+  - **OpenAI** — `strict: false`로 보내므로 어떤 열쇠도 거절하지 않는다 (키가 없어 실측은
+    아직이다).
 - **무엇이 실제로 지나는지는 외우지 않는다.** `pnpm balance live-schema`가 선언 열을
   실호출로 걸어 받는지·산출이 돌아오는지를 본다 ([prompts.md](./prompts.md) §2).
 - **개수 상한은 코어가 쥐고 모델에는 설명 문장으로 간다**(`buildOpsSchema` · `parseOps`) —
-  Anthropic이 배열 크기 제약을 받지 않으므로 `maxItems`는 제공자 하나에서 아예 나가지
+  Anthropic도 Google도 `maxItems`를 받지 않으므로 그 열쇠는 두 제공자에서 아예 나가지
   않는다. 문장은 준수에 기대므로 넘겨 오는 일이 있고, **넘겨 온 것을 자른 수는 한 줄로
   감독에게 돌아간다**([agents.md](./agents.md) §1).
 - **GM 둘(`gm` · `match-gm`)은 그대로 도구를 쥔다** — 거기서는 **무엇을 부를지 고르는

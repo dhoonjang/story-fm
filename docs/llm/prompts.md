@@ -227,10 +227,16 @@ Zod와 다른 JSON 스키마를 갖지 않는다.** 그 열의 선언(설정 이
 테스트가 잡는다 — 목록에 없는 선언은 아래 두 자가 재지 못한다.
 
 **제공자가 받는 스키마 부분집합은 셋이 다르다.** Anthropic은 수치·길이·배열 크기 제약을
-400으로 거절하고 모든 객체에 `additionalProperties: false`를 요구하며, Google은 지원 열쇠의
-목록이 따로 있고, OpenAI는 `strict: false`라 무엇이든 받는다 ([models.md](./models.md) §3-2).
+400으로 거절하고 모든 객체에 `additionalProperties: false`를 요구하며, Google은 `maxItems`를
+거절하고, OpenAI는 `strict: false`라 무엇이든 받는다 ([models.md](./models.md) §3-2).
 그래서 **제공자에게 가는 선언은 어댑터가 그 제공자의 부분집합으로 옮긴다** — 산출을
 세우는 쪽은 제공자를 모른다 (AGENTS.md §6-1). 걷은 제약은 그 산출의 Zod가 그대로 지킨다.
+
+⚠️ **크기의 문은 어댑터가 넘어 줄 수 없다.** Anthropic은 선택 속성이 24개를 넘는 스키마에
+문법을 만들지 않는다 — 해석기 넷의 `ops`(27~81개)가 그 자리다. 그 한도는
+`PROVIDER_TRAITS.outputOptionalLimit`이 적고, `config/llm.yml`이 그 선언을 그 제공자로
+보내면 아래 오프라인 자가 먼저 빨개진다. 실호출 하네스는 그런 선언을 걸지 않고 「한도 밖」으로
+센다.
 
 ⚠️ **선언 쪽에 `maxItems`·`maxLength`가 있는 것은 잘못이 아니다.** 열 중 여덟이 Zod의
 `.max()`에서 온 그것을 들고 있고(`SETTLE_MATCH_INPUT`의 `ratings` · `REPLY_INPUT`의
