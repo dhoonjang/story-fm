@@ -74,7 +74,7 @@ pnpm balance --report out  # 전부 돌리고 측정값을 out/에 남긴다 (�
 | `overall-scale`        | 종합을 읽는 눈금 — 리그별·연령별 분포                                          | [match](match.md) §7                                  |
 | `history-window`       | 평시 이력의 창 — 몇 턴이 남는가 · 압축 주기 · 렌더 배율                        | [agents](../llm/agents.md) §5-1                       |
 | `prompt-regression`    | 프롬프트 층의 글자·프리픽스 안정성 · 장면 문법·도구                            | [prompts](../llm/prompts.md) §7                       |
-| `live-schema`          | 강제 도구로 나가는 산출 선언 여덟을 제공자가 실제로 받는가                     | [prompts](../llm/prompts.md) §2                       |
+| `live-schema`          | 출력 스키마로 나가는 산출 선언 열을 제공자가 실제로 받는가                     | [prompts](../llm/prompts.md) §2                       |
 
 ### 평균을 보는 가드와 꼬리를 보는 가드는 따로 선다
 
@@ -94,10 +94,17 @@ pnpm balance --report out  # 전부 돌리고 측정값을 out/에 남긴다 (�
 ### 키가 필요한 하네스
 
 `live-schema` 하나뿐이다. 나머지는 전부 세계를 세워 코어만 굴리므로 키가 없어도 같은
-값을 낸다. 이 하네스가 묻는 것은 **강제 도구로 나가는 산출 선언을 제공자가 받는가**라,
+값을 낸다. 이 하네스가 묻는 것은 **출력 스키마로 나가는 산출 선언을 제공자가 받는가**라,
 제공자를 부르지 않고는 답이 나오지 않는다 — 목 LLM은 자기가 만든 스키마를 언제나 받고,
 제공자의 스키마 부분집합은 손으로 외울 수 있는 것이 아니다
 ([prompts](../llm/prompts.md) §2).
+
+설정대로 걸면 `config/llm.yml`이 보내는 제공자 하나만 잰다.
+**`LIVE_SCHEMA_TARGET=<provider>:<model>`**을 주면 열 선언 전부를 그 제공자·그 모델로 건다 —
+모델 ID는 저장소에 적지 않으므로 운영자가 그 자리에서 준다. 그 제공자의 선택 속성 한도
+(`PROVIDER_TRAITS.outputOptionalLimit` — [models](../llm/models.md) §3-2)를 넘는 선언은
+걸지 않고 「한도 밖」으로 센다: 400을 맞아 알아내는 자리가 아니라 오프라인 테스트가 잡는
+자리다.
 
 - **어느 키가 필요한지는 에이전트가 정한다.** 선언마다 부르는 에이전트가 다르고
   제공자도 `config/llm.yml`이 따로 적으므로, 하네스는 **그 자리의 키가 있는 선언만**

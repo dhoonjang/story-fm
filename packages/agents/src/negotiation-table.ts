@@ -15,15 +15,9 @@ import {
   josaOf,
 } from "@story-fm/domain";
 import type { CounterpartyVoice, GameState, TableReply, TableSeat } from "@story-fm/engine";
-import {
-  agentConfig,
-  createGameLLM,
-  resolveLlmMode,
-  type GameLLM,
-  type GameToolSpec,
-} from "@story-fm/llm";
+import { agentConfig, createGameLLM, resolveLlmMode, type GameLLM } from "@story-fm/llm";
 import { buildCounterpartyBlock, describeAnchor, describeAsks } from "./counterparty-brief";
-import { retryOnce, requireToolCall } from "./retry";
+import { readOutput, retryOnce } from "./retry";
 import { CounterpartyRulingFieldsSchema } from "./ruling-schema";
 import { buildSituationBlock } from "./table-situation";
 import { toToolSchema } from "./tool-schema";
@@ -42,7 +36,7 @@ const SPEAKER_LINE = TABLE_SPEAKERS.map((s) => `${s}(${TABLE_SPEAKER_KO[s]})`).j
  *
  * GM의 `speak_at_table` 뒤에서 돈다. 이 호출이 읽는 것은 서류 · 주변 상황 · 이 테이블의
  * 대화 · 앵커뿐이고 **메인 채팅은 읽지 않는다** — 상대는 감독이 다른 데서 한 말을
- * 모른다. 그래서 GM 턴 안에 두지 않고 따로 세웠다. 산출은 `reply_at_table` 하나이고,
+ * 모른다. 그래서 GM 턴 안에 두지 않고 따로 세웠다. 산출은 JSON 하나이고(models.md §3-2),
  * 그 안의 판정·말투·논거는 코어가 사실 대조하고 앵커 ± 한도로 자른다 (table.ts).
  */
 export const NEGOTIATION_TABLE_SYSTEM = `당신은 협상 테이블 건너편이다 — 감독의 편이 아니다. <counterparty>의 <voices>에 선 사람이 이 자리에 앉은 전부이고, 줄마다 그가 답하는 칸이 적혀 있다. 그 사람들의 인물지는 <characters>에 있다.
@@ -61,7 +55,7 @@ export const NEGOTIATION_TABLE_SYSTEM = `당신은 협상 테이블 건너편이
 - 조건을 부르는 것은 <anchor>의 「부를 수 있는 조건」에 적힌 갈래·구간 안에서만, 한 답에 둘까지다. 오퍼가 없어도 부를 수 있다. 감독이 이미 건 갈래는 부르지 않는다.
 - <anchor>가 개인 조건 제안에 답하는 자리면 ruling의 축은 주급·지위뿐이다 — 이적료·연수·분할·기한을 적지 않는다.
 
-# 산출 — reply_at_table
+# 산출
 - heard.tone — 감독의 말투. 모욕·협박·위협이면 hostile, 그 밖은 civil. 세게 밀어붙이는 것은 hostile이 아니다.
 - heard.claims — 감독이 이번 말에서 실제로 든 설득 논거만. 목록에 없는 이야기는 other. 말하지 않은 논거를 넣지 않는다.
 - ruling — <anchor>에 오퍼나 개인 조건 제안이 올라 있을 때만. 판정은 <anchor>가 적은 것 중에서, 금액·연수·지위는 구간 안에서. 둘 다 없으면 비운다.
@@ -69,11 +63,7 @@ export const NEGOTIATION_TABLE_SYSTEM = `당신은 협상 테이블 건너편이
 - stance — 이 답의 태도 하나: ${STANCE_LINE}. 두 사람이 말해도 테이블은 하나다.
 - lines — 상대의 말. 줄마다 speaker에 <voices>의 토큰(${SPEAKER_LINE})${josaOf(SPEAKER_LINE, "을/를")} 적는다. 이번에 할 말이 있는 화자만 줄을 내되, ruling이 되부른 칸은 그 칸을 답하는 쪽이 말한다. 각 줄은 그 인물의 말투로 2~5문장, ruling에 적은 수치와 어긋나지 않게. 지문은 *별표*로.`;
 
-/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 */
-export const REPLY_TOOL = "reply_at_table";
-
-export const REPLY_DESCRIPTION = "상대의 답을 제출한다. 이 도구로만 답한다.";
-
+/** 이 호출의 산출 — 도구 없이 출력 스키마로 받는다 (models.md §3-2) */
 export const TableReplySchema = z.object({
   heard: z.object({
     tone: z.enum(["civil", "hostile"]).describe("감독의 말투 — 모욕·협박·위협이면 hostile"),
@@ -106,6 +96,7 @@ export const TableReplySchema = z.object({
 });
 export type TableReplyArgs = z.infer<typeof TableReplySchema>;
 
+/** 모델이 보는 출력 스키마 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
 export const REPLY_INPUT = toToolSchema(TableReplySchema);
 
 /**
@@ -181,22 +172,6 @@ export function buildTableInput(
   ].join("\n");
 }
 
-function makeReplyTool(onReply: (reply: TableReplyArgs) => void): GameToolSpec {
-  return {
-    name: REPLY_TOOL,
-    description: REPLY_DESCRIPTION,
-    inputSchema: REPLY_INPUT,
-    handle: (input: unknown) => {
-      const parsed = TableReplySchema.safeParse(input);
-      if (!parsed.success) {
-        return { ok: false, message: `형식이 맞지 않습니다 — ${parsed.error.issues[0]?.message}` };
-      }
-      onReply(parsed.data);
-      return { ok: true, message: "답을 받았습니다" };
-    },
-  };
-}
-
 /**
  * 감독의 말 → 상대의 답 하나. **실패는 삼킨다** — 답이 없으면 상대는 말없이 서류대로
  * 움직이고(`settleTableReply`), 협상은 멈추지 않는다. 결산과 같은 계약이다 (agents.md §1).
@@ -216,21 +191,17 @@ export async function runTableReply(
   try {
     await retryOnce(
       "negotiation:table",
-      () =>
-        requireToolCall(REPLY_TOOL, () => {
-          client ??= createGameLLM(agentConfig("negotiation-table"));
-          return client.runTurn({
-            system: NEGOTIATION_TABLE_SYSTEM,
-            history: [],
-            user,
-            tools: [makeReplyTool((value) => (reply = value))],
-            toolChoice: { name: REPLY_TOOL },
-            // 산출은 이 도구 하나다 — 상대의 대사까지 인자로 오므로 도구 뒤의 문장을
-            // 읽는 자리가 없다. 결과를 돌려주는 두 번째 요청은 같은 입력을 한 번 더
-            // 읽고 아무도 읽지 않는 답을 받아 온다 (models.md §3-4)
-            outputOnly: true,
-          });
-        }),
+      async () => {
+        client ??= createGameLLM(agentConfig("negotiation-table"));
+        const result = await client.runTurn({
+          system: NEGOTIATION_TABLE_SYSTEM,
+          history: [],
+          user,
+          // 산출은 JSON 하나다 — 상대의 대사까지 그 안에 오므로 본문을 읽는 자리가 없다 (models.md §3-2)
+          outputSchema: REPLY_INPUT,
+        });
+        reply = readOutput("negotiation:table", TableReplySchema, result);
+      },
       () => reply !== null,
     );
   } catch (error) {

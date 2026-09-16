@@ -88,15 +88,6 @@ export interface ToolCallContext {
 }
 
 /**
- * 이 호출이 도구를 부르는 방식 — **제공자 중립 계약**이다 (models.md §3-2).
- *
- * `"auto"`는 모델이 고른다. `{ name }`은 **그 도구를 반드시 부르게** 한다 —
- * 산출이 도구 하나뿐인 자리(지시 해석·결산 셋)가 쓰고, 어댑터가 자기 SDK의
- * 파라미터로 옮긴다.
- */
-export type ToolChoice = "auto" | { name: string };
-
-/**
  * 게임 도구 — LLM의 tool call을 받아 검증(Zod)·실행하는 계약.
  * handle()은 파싱 실패·규칙 위반을 한국어 메시지로 돌려주고,
  * 어댑터가 이를 tool_result(is_error)로 되돌려 LLM이 수정 재시도하게
@@ -171,30 +162,20 @@ export interface TurnRequest {
    * 발화 앞에 서면 다음 턴의 캐시 프리픽스가 그 발화 앞에서 끊긴다.
    */
   stateNote?: string;
+  /** GM 둘이 쥐는 도구 — 무엇을 부를지 모델이 고른다. `outputSchema`와 함께 싣는 자리는 없다 */
   tools?: GameToolSpec[];
   /**
-   * 도구 호출을 강제할지 — 기본은 `"auto"`.
+   * **도구 없이 JSON 하나로 답을 강제한다** — **제공자 중립 계약**이다 (models.md §3-2).
    *
-   * ⚠️ **첫 요청에만 건다.** 도구 결과를 돌려준 뒤에도 계속 강제하면 모델이
-   * 턴을 끝낼 길이 없어 왕복 상한까지 같은 도구를 다시 부른다. 그래서 강제는
-   * 이 턴의 **첫 요청** 하나에만 실리고, 이후 반복은 `"auto"`로 돈다.
+   * 산출이 JSON 하나인 호출 열(해석기 넷 · 결산·판정 여섯)이 쓴다. 어댑터는 이 스키마를
+   * 자기 제공자의 구조화 출력으로 옮기고(Anthropic `output_config.format` · Google
+   * `responseJsonSchema` · OpenAI `text.format`), 돌아온 본문을 JSON으로 읽어 `output`에
+   * 세운다. 요청은 하나고 도구 왕복이 없다.
+   *
+   * ⚠️ **제공자가 받는 스키마 부분집합이 다르다** — 여기 오는 것은 그 산출의 Zod에서 파생한
+   * 그대로이고, 못 받는 열쇠를 걷는 자리는 어댑터다. 걷은 제약은 부르는 쪽의 Zod가 지킨다.
    */
-  toolChoice?: ToolChoice;
-  /**
-   * **산출만 받는 호출** — 도구가 불린 자리에서 턴을 닫는다 (models.md §3-4).
-   *
-   * 참이면 어댑터는 이번 왕복의 도구를 평소대로 실행한 뒤 **그 결과를 모델에게
-   * 돌려보내지 않고** 끝낸다. 산출이 도구 하나뿐인 호출(지시 해석 셋·훈련 결산)은 그
-   * 도구가 불린 순간 답이 완성돼 있어, 결과를 돌려주는 두 번째 요청은 같은 입력을
-   * 정가로 한 번 더 읽고 아무도 읽지 않는 빈 응답을 받아 온다.
-   *
-   * ⚠️ **닫을 때도 도구 결과는 이력에 남는다** — 실행하지 않은 호출을 닫는 자리와 같은
-   * 길이다. 짝 없는 함수 호출이 이력에 남으면 그 이력을 재사용하는 다음 요청이 거부된다.
-   *
-   * ⚠️ **도구 뒤의 문장을 읽는 호출은 이 갈래가 아니다** — 경기 마감은 `settle_match`
-   * 뒤의 마무리 중계가 산출이다. 갈래는 부르는 쪽이 정한다.
-   */
-  outputOnly?: boolean;
+  outputSchema?: JsonObjectSchema;
   maxTokens?: number;
   /**
    * 텍스트 델타 콜백 — 지정하면 어댑터가 스트리밍 모드로 응답을 받아
@@ -250,6 +231,13 @@ export interface TurnResult {
   toolCallCount: number;
   /** 제공자가 사유를 보고하지 않았으면 `null`이다 */
   stopReason: StopReason | null;
+  /**
+   * `outputSchema`를 실은 호출의 산출 — 본문을 JSON으로 읽은 객체 (`parseOutput`).
+   * **읽을 수 없으면 `null`**(잘림 · 거절 · 산문으로 답함) — 그것이 "산출이 오지 않았다"의
+   * 유일한 신호고, 실패로 세우는 것은 부르는 쪽의 몫이다(agents.md §8). 스키마를 지켰는지도
+   * 부르는 쪽의 Zod가 본다. 스키마를 싣지 않은 호출에는 없다.
+   */
+  output?: Record<string, unknown> | null;
 }
 
 export interface GameLLM {

@@ -16,29 +16,34 @@ import {
   buildOpsSchema,
   parseOps,
   TACTIC_ORDERS_SYSTEM,
+  FINALIZE_MATCH_SYSTEM,
+  REPLY_INPUT,
   REPORT_DIGEST_INPUT,
-  REPORT_DIGEST_TOOL,
   REPORT_TRAINING_INPUT,
   REPORT_ONBOARDING_INPUT,
-  REPORT_ONBOARDING_TOOL,
-  REPORT_TRAINING_TOOL,
-  SETTLE_MATCH_DESCRIPTION,
   SETTLE_MATCH_INPUT,
-  SETTLE_MATCH_TOOL,
   NEGOTIATION_TABLE_SYSTEM,
   ONBOARDING_JUDGE_SYSTEM,
   SKILL_CATALOG,
   SKILL_NAMES,
-  TableReplySchema,
   TRAINING_RATER_SYSTEM,
   agingDeclineLine,
   buildGmTools,
   buildToolSpecs,
-  forcedTools,
+  outputAgents,
   toToolSchema,
-  type ForcedTool,
+  type OutputAgent,
 } from "@story-fm/agents";
-import { GeminiGameLLM, agentConfig, type GameToolSpec, type LlmProvider } from "@story-fm/llm";
+import {
+  AGENT_NAMES,
+  AnthropicGameLLM,
+  GeminiGameLLM,
+  OpenAiGameLLM,
+  agentConfig,
+  countOptionalProperties,
+  providerTraits,
+  type LlmProvider,
+} from "@story-fm/llm";
 import {
   ATTRIBUTE_AXES,
   AXIS_KO,
@@ -225,7 +230,7 @@ describe("규칙이 사는 자리", () => {
     expect(early.every((axis) => agingDelta(axis, age) < 0)).toBe(true);
     expect(early.every((axis) => agingDelta(axis, age - 1) < 0)).toBe(false);
 
-    expect(SETTLE_MATCH_DESCRIPTION).toContain(line);
+    expect(FINALIZE_MATCH_SYSTEM).toContain(line);
     expect(TRAINING_RATER_SYSTEM).toContain(line);
   });
 
@@ -242,7 +247,7 @@ describe("규칙이 사는 자리", () => {
    * 늘어도 모델은 옛 표를 믿고, 표에 없는 갈래는 부를 길이 없다.
    */
   it("코어가 갈래표를 든 열거는 그 표가 모델에게 닿는다", () => {
-    const reply = { name: "reply_at_table", inputSchema: toToolSchema(TableReplySchema) };
+    const reply = { name: "negotiation-table", inputSchema: REPLY_INPUT };
     const rows = [
       {
         where: "record_incident.kind",
@@ -252,14 +257,14 @@ describe("규칙이 사는 자리", () => {
         reads: TOOLS.find((t) => t.name === "record_incident")!.description,
       },
       {
-        where: "report_onboarding.openings[].kind",
-        node: enumArg(RATER_TOOLS, REPORT_ONBOARDING_TOOL, "kind"),
+        where: "onboarding-judge.openings[].kind",
+        node: enumArg(OUTPUT_SCHEMAS, "onboarding-judge", "kind"),
         kinds: OPENING_KINDS as readonly string[],
         tables: [OPENING_KIND_KO as Record<string, string>],
         reads: ONBOARDING_JUDGE_SYSTEM,
       },
       {
-        where: "reply_at_table.heard.claims[].kind",
+        where: "negotiation-table.heard.claims[].kind",
         node: enumArg([reply], reply.name, "kind"),
         kinds: PITCH_CLAIM_KINDS as readonly string[],
         /**
@@ -271,7 +276,7 @@ describe("규칙이 사는 자리", () => {
         reads: "",
       },
       {
-        where: "reply_at_table.stance",
+        where: "negotiation-table.stance",
         node: enumArg([reply], reply.name, "stance"),
         kinds: TABLE_STANCES as readonly string[],
         tables: [TABLE_STANCE_KO as Record<string, string>],
@@ -291,8 +296,8 @@ describe("규칙이 사는 자리", () => {
         reads: "",
       },
       {
-        where: "report_training.results[].mark",
-        node: enumArg(RATER_TOOLS, REPORT_TRAINING_TOOL, "mark"),
+        where: "training-rater.results[].mark",
+        node: enumArg(OUTPUT_SCHEMAS, "training-rater", "mark"),
         kinds: TRAINING_MARKS as readonly string[],
         tables: [TRAINING_MARK_KO as Record<string, string>],
         reads: TRAINING_RATER_SYSTEM,
@@ -309,7 +314,7 @@ describe("규칙이 사는 자리", () => {
         reads: "",
       },
       {
-        where: "reply_at_table.ruling.squadStatus",
+        where: "negotiation-table.ruling.squadStatus",
         node: enumArg([reply], reply.name, "squadStatus"),
         kinds: SQUAD_STATUSES as readonly string[],
         tables: [SQUAD_STATUS_KO as Record<string, string>],
@@ -611,18 +616,18 @@ function enumArg(
 }
 
 /**
- * 출력 스키마 넷은 GM 도구가 아니라 저마다의 호출이 강제하는 도구 하나다 — 카탈로그에도
- * `buildGmTools`에도 서지 않는다. 그래도 모델이 받는 입력이라 계약은 같다.
+ * 출력 스키마 넷은 GM 도구가 아니라 저마다의 호출이 요청에 싣는 산출의 꼴이다 — 카탈로그에도
+ * `buildGmTools`에도 서지 않고 이름은 에이전트의 것이다. 그래도 모델이 받는 입력이라 계약은 같다.
  */
-const RATER_TOOLS = [
-  { name: SETTLE_MATCH_TOOL, inputSchema: SETTLE_MATCH_INPUT },
-  { name: REPORT_ONBOARDING_TOOL, inputSchema: REPORT_ONBOARDING_INPUT },
-  { name: REPORT_TRAINING_TOOL, inputSchema: REPORT_TRAINING_INPUT },
-  { name: REPORT_DIGEST_TOOL, inputSchema: REPORT_DIGEST_INPUT },
+const OUTPUT_SCHEMAS = [
+  { name: "finalize-match", inputSchema: SETTLE_MATCH_INPUT },
+  { name: "onboarding-judge", inputSchema: REPORT_ONBOARDING_INPUT },
+  { name: "training-rater", inputSchema: REPORT_TRAINING_INPUT },
+  { name: "history-compactor", inputSchema: REPORT_DIGEST_INPUT },
 ];
 
 describe("같은 종류의 인자는 같은 검증을 지난다", () => {
-  const args = [...TOOLS, ...RATER_TOOLS].flatMap((tool) =>
+  const args = [...TOOLS, ...OUTPUT_SCHEMAS].flatMap((tool) =>
     walk(tool.inputSchema).map(([name, node]) => ({ tool: tool.name, name, node })),
   );
   const only = (names: readonly string[]) => args.filter((a) => names.includes(a.name));
@@ -658,7 +663,7 @@ describe("같은 종류의 인자는 같은 검증을 지난다", () => {
   });
 
   it("필수 인자는 전부 선언된 인자다", () => {
-    for (const tool of [...TOOLS, ...RATER_TOOLS]) {
+    for (const tool of [...TOOLS, ...OUTPUT_SCHEMAS]) {
       for (const [, node] of [["", tool.inputSchema] as const, ...walk(tool.inputSchema)]) {
         const declared = Object.keys((node.properties ?? {}) as Record<string, unknown>);
         for (const key of (node.required ?? []) as string[]) {
@@ -747,40 +752,148 @@ describe("액수는 감독이 부른 것만 실린다", () => {
 });
 
 /**
- * **강제 도구로 나가는 산출 스키마** — docs/llm/models.md §3-2.
+ * **출력 스키마로 나가는 산출 선언** — docs/llm/models.md §3-2.
  *
- * 강제 모드(`toolChoice: { name }`)에서 제공자가 받아 주는 스키마는 한 겹 더 좁다.
- * Gemini는 그 모드에서 스키마를 **펼쳐** 디코딩 문법을 만들어 `maxItems: n`이 항목
- * 스키마 n벌이 되고, 자유 모드로는 지나던 선언이 400 하나로 떨어진다 — 본문은 어느
- * 칸이 문제인지 말하지 않아(§1-1의 표에서 `unknown`) 화면에는 턴 취소나 침묵으로만
- * 선다. 스위트의 LLM은 전부 목이라 스키마가 제공자의 문을 지나는지 묻는 자리는
- * 여기뿐이다.
+ * 제공자가 받는 스키마 부분집합은 셋이 다르다 — Anthropic은 수치·길이·배열 크기 제약을
+ * 400으로 거절하고 모든 객체에 `additionalProperties: false`를 요구한다. 스위트의 LLM은
+ * 전부 목이라 스키마가 제공자의 문을 지나는지 묻는 자리는 여기뿐이다.
  *
  * **자는 어댑터를 지난 뒤의 선언이다.** 제공자의 부분집합을 흡수하는 자리가 어댑터라
- * (AGENTS.md §6-1) 도구를 세우는 쪽은 제공자를 몰라도 된다 — `reply_at_table`의 Zod는
- * `.max()`를 들고 있어 **소스 선언에는 `maxItems`가 서 있다.** 소스에 자를 대면 합법인
+ * (AGENTS.md §6-1) 산출을 세우는 쪽은 제공자를 몰라도 된다 — 소스의 Zod는 `.max()`를
+ * 들고 있어 **소스 선언에는 `maxLength`·`maxItems`가 서 있다.** 소스에 자를 대면 합법인
  * 것을 금지하면서 정작 나가는 것은 못 본다.
+ *
+ * **열 선언 × 어댑터 셋을 전부 잰다.** `config/llm.yml`의 한 줄이 어느 자리든 다른
+ * 제공자로 옮길 수 있으므로, 지금 어디로 나가는가가 아니라 어디로 나가도 지나는가를 본다.
  */
-describe("강제 산출 스키마는 제공자의 문을 지난다", () => {
-  const FORCED = forcedTools(new Map(SKILL_TOOLS.map((tool) => [tool.name, tool] as const)));
+describe("출력 스키마는 제공자의 문을 지난다", () => {
+  const DECLARED = outputAgents(new Map(SKILL_TOOLS.map((tool) => [tool.name, tool] as const)));
 
   /**
-   * 제공자가 **강제 모드에서 받지 못하는 스키마 열쇠** — 한 줄이 한 제공자다.
+   * 제공자가 **구조화 출력에서 받지 못하는 스키마 열쇠** — 한 줄이 한 제공자다.
    *
-   * 비어 있다는 것은 "이 제공자에서 좁아지는 열쇠를 아직 만나지 않았다"이지 "무엇이든
-   * 받는다"가 아니다. 제공자가 하나 늘면 이 표가 컴파일에서 먼저 걸린다.
+   * 비어 있다는 것은 "좁아지는 열쇠를 아직 만나지 않았다"이지 "무엇이든 받는다"가 아니다.
+   * 제공자가 하나 늘면 이 표가 컴파일에서 먼저 걸린다.
    */
   const FORBIDDEN: Record<LlmProvider, readonly string[]> = {
-    // 강제 모드가 스키마를 펼쳐 디코딩 문법을 만든다 — `maxItems: n`이 항목 스키마
-    // n벌이 되어 요청 전체가 400 `INVALID_ARGUMENT`으로 떨어진다 (models.md §3-2).
-    // 어댑터가 강제 턴 전체에서 걷어 낸다(`withoutMaxItems`).
+    // 수치·길이·배열 크기 제약은 400이다 — 어댑터가 걷는다 (models.md §3-2)
+    anthropic: [
+      "minimum",
+      "maximum",
+      "exclusiveMinimum",
+      "exclusiveMaximum",
+      "multipleOf",
+      "minLength",
+      "maxLength",
+      "maxItems",
+    ],
+    // 구조화 출력에서도 스키마를 문법으로 펼쳐 `maxItems: n`이 항목 스키마 n벌이 된다 —
+    // 2026-09 실측: 이 열쇠 하나만 걷으면 열 선언이 전부 지난다 (models.md §3-2)
     google: ["maxItems"],
-    // 스키마는 `input_schema`로 그대로 가고, 강제(`tool_choice: { type:"tool" }`)가
-    // 검사를 좁힌다고 알려진 열쇠가 없다
-    anthropic: [],
-    // 도구가 `strict: false`로 나간다 — strict 모드의 좁은 부분집합을 지나지 않는다
+    // `strict: false`로 나간다 — 무엇도 거절하지 않는다
     openai: [],
   };
+
+  /**
+   * 열은 전부 도구 없이 답한다 — GM 둘을 뺀 에이전트 이름과 목록이 하나씩 맞는다.
+   * 에이전트가 하나 늘면 설정(`AGENT_NAMES`)과 이 목록 중 하나가 먼저 빨개진다.
+   */
+  it("GM 둘을 뺀 에이전트 전부가 출력 스키마로 답한다 — 도구 이름은 없다", () => {
+    const expected = AGENT_NAMES.filter((name) => name !== "gm" && name !== "match-gm");
+    expect(DECLARED.map((entry) => entry.agent).sort()).toEqual([...expected].sort());
+    for (const entry of DECLARED) expect(entry.schema.type, entry.agent).toBe("object");
+  });
+
+  /**
+   * **크기의 문은 어댑터가 넘어 줄 수 없다** — 선택 속성이 한도를 넘는 선언은 걷어서 지날
+   * 수 없고, 그 선언을 그 제공자로 보내는 설정은 실호출로 400을 맞기 전에 여기서 빨개진다
+   * (models.md §3-2). 해석기 넷이 Anthropic으로 옮겨지는 날의 자다.
+   */
+  it("설정이 보내는 제공자의 선택 속성 한도 안에 선언이 든다", () => {
+    for (const entry of DECLARED) {
+      const { provider } = agentConfig(entry.agent);
+      const limit = providerTraits(provider).outputOptionalLimit;
+      if (limit === null) continue;
+      expect(
+        countOptionalProperties(entry.schema),
+        `${entry.agent} → ${provider}: 선택 속성 한도 ${limit}`,
+      ).toBeLessThanOrEqual(limit);
+    }
+  });
+
+  /** 한도가 재는 것이 정확히 「required에 없는 properties」다 — 세는 자가 어긋나면 위 자도 어긋난다 */
+  it("선택 속성은 required에 없는 properties를 스키마 전체에서 센다", () => {
+    expect(
+      countOptionalProperties({
+        type: "object",
+        properties: {
+          a: { type: "string" },
+          b: {
+            type: "array",
+            items: { type: "object", properties: { c: {}, d: {} }, required: ["c"] },
+          },
+        },
+        required: ["a"],
+      }),
+    ).toBe(2);
+    // 해석기 넷은 한도 밖이고 나머지 여섯은 안이다 — 실측(2026-09)과 같은 그림이어야 한다
+    const over = DECLARED.filter((entry) => countOptionalProperties(entry.schema) > 24).map(
+      (entry) => entry.agent,
+    );
+    expect(over.sort()).toEqual([
+      "market-orders",
+      "table-orders",
+      "tactic-orders",
+      "training-orders",
+    ]);
+  });
+
+  /** 어댑터의 설정 — 제공자만 갈아 끼운다. 모델 문자열은 스텁이 읽지 않는다 */
+  function baseOf(agent: OutputAgent["agent"]) {
+    const { agent: name, model, maxTokens, timeoutMs, maxRetries } = agentConfig(agent);
+    // 오퍼레이터 채널은 이 자리와 무관하다 — 스냅샷이 없는 호출이다
+    return { agent: name, model, maxTokens, timeoutMs, maxRetries, operatorChannel: false };
+  }
+
+  const request = (entry: OutputAgent) => ({
+    system: entry.system,
+    history: [],
+    user: "감독의 말",
+    outputSchema: entry.schema,
+  });
+
+  /** Anthropic — `messages.stream`에 넘어간 `output_config.format.schema` */
+  async function anthropicSchemas(entry: OutputAgent): Promise<unknown[]> {
+    const sent: unknown[] = [];
+    const client = {
+      messages: {
+        stream: (params: { output_config?: { format?: { schema?: unknown } } }) => {
+          sent.push(params.output_config?.format?.schema);
+          return {
+            on() {
+              return this;
+            },
+            finalMessage: () =>
+              Promise.resolve({
+                stop_reason: "end_turn",
+                content: [{ type: "text", text: "{}" }],
+                usage: {
+                  input_tokens: 1,
+                  output_tokens: 1,
+                  cache_read_input_tokens: 0,
+                  cache_creation_input_tokens: 0,
+                },
+              }),
+          };
+        },
+      },
+    };
+    await new AnthropicGameLLM(
+      { ...baseOf(entry.agent), provider: "anthropic" },
+      client as never,
+    ).runTurn(request(entry));
+    return sent;
+  }
 
   /** 어댑터가 읽는 자리만 세운 Gemini 응답 — `@google/genai`는 여기서 부르지 않는다 */
   function geminiReply(parts: unknown[]): unknown {
@@ -790,179 +903,167 @@ describe("강제 산출 스키마는 제공자의 문을 지난다", () => {
     };
   }
 
-  /** SDK로 넘어간 payload 어디에 있든 함수 선언의 스키마를 전부 모은다 */
-  function declaredSchemas(node: unknown, into: unknown[] = []): unknown[] {
-    if (Array.isArray(node)) {
-      for (const item of node) declaredSchemas(item, into);
-      return into;
-    }
-    if (node === null || typeof node !== "object") return into;
-    for (const [key, value] of Object.entries(node)) {
-      if (key === "parametersJsonSchema") into.push(value);
-      else declaredSchemas(value, into);
-    }
-    return into;
-  }
-
-  /**
-   * 그 선언을 강제로 걸고 어댑터를 stub 클라이언트로 한 턴 돌린 뒤, **SDK에 실제로
-   * 넘어간 함수 선언**을 꺼낸다 — chat 설정과 첫 요청의 per-request config 둘 다 도구를
-   * 실으므로 둘 다 모은다.
-   */
-  async function geminiDeclarations(entry: ForcedTool): Promise<unknown[]> {
-    const config = agentConfig(entry.agent);
-    // 아래 표가 제공자로 골라 부르므로 걸릴 일이 없다 — 설정을 좁히는 자리다
-    if (config.provider !== "google") throw new Error(`${entry.agent}는 google이 아니다`);
-    const payloads: unknown[] = [];
+  /** Google — `chats.create`의 config에 넘어간 `responseJsonSchema` */
+  async function geminiSchemas(entry: OutputAgent): Promise<unknown[]> {
+    const sent: unknown[] = [];
     const history: unknown[] = [];
-    let round = 0;
     const chat = {
-      sendMessage: (params: { config?: unknown }) => {
-        payloads.push(params.config);
-        // 첫 왕복은 그 도구를 부르고, 결과를 받은 다음 왕복이 문장으로 턴을 닫는다
-        const parts =
-          round++ === 0
-            ? [{ functionCall: { id: "call-1", name: entry.name, args: {} } }]
-            : [{ text: "확인했습니다." }];
-        history.push({ role: "user", parts: [{ text: "감독의 말" }] }, { role: "model", parts });
-        return Promise.resolve(geminiReply(parts));
+      sendMessage: () => {
+        history.push(
+          { role: "user", parts: [{ text: "감독의 말" }] },
+          { role: "model", parts: [{ text: "{}" }] },
+        );
+        return Promise.resolve(geminiReply([{ text: "{}" }]));
       },
       sendMessageStream: () => Promise.reject(new Error("이 자리는 스트리밍하지 않는다")),
       getHistory: () => history,
     };
     const client = {
       chats: {
-        create: (params: { config?: unknown }) => {
-          payloads.push(params.config);
+        create: (params: { config?: { responseJsonSchema?: unknown } }) => {
+          sent.push(params.config?.responseJsonSchema);
           return chat;
         },
       },
     };
-    const tool: GameToolSpec = {
-      name: entry.name,
-      description: entry.description,
-      inputSchema: entry.inputSchema,
-      handle: () => ({ ok: true, message: "받았습니다" }),
-    };
-    await new GeminiGameLLM(config, client as never).runTurn({
-      system: entry.system,
-      history: [],
-      user: "감독의 말",
-      tools: [tool],
-      toolChoice: { name: entry.name },
-    });
-    return declaredSchemas(payloads);
+    await new GeminiGameLLM(
+      { ...baseOf(entry.agent), provider: "google", thinkingLevel: "minimal" },
+      client as never,
+    ).runTurn(request(entry));
+    return sent;
   }
 
-  /**
-   * 선언을 꺼내는 자 — **제공자마다 그 어댑터의 stub이 필요하다.** 여기 없는 제공자로
-   * 강제 호출이 옮겨 가면 재는 자가 없다는 뜻이고, 그 사실은 아래 케이스가 말한다.
-   */
-  const PROBES: Partial<Record<LlmProvider, (entry: ForcedTool) => Promise<unknown[]>>> = {
-    google: geminiDeclarations,
+  /** OpenAI — `responses.create`에 넘어간 `text.format.schema` */
+  async function openaiSchemas(entry: OutputAgent): Promise<unknown[]> {
+    const sent: unknown[] = [];
+    const client = {
+      responses: {
+        create: (body: { text?: { format?: { schema?: unknown } } }) => {
+          sent.push(body.text?.format?.schema);
+          return Promise.resolve({
+            id: "resp",
+            object: "response",
+            status: "completed",
+            error: null,
+            incomplete_details: null,
+            output: [
+              {
+                id: "msg",
+                type: "message",
+                role: "assistant",
+                status: "completed",
+                content: [{ type: "output_text", text: "{}", annotations: [] }],
+              },
+            ],
+            usage: {
+              input_tokens: 1,
+              output_tokens: 1,
+              total_tokens: 2,
+              input_tokens_details: { cached_tokens: 0 },
+              output_tokens_details: { reasoning_tokens: 0 },
+            },
+          });
+        },
+      },
+    };
+    await new OpenAiGameLLM(
+      { ...baseOf(entry.agent), provider: "openai" },
+      client as never,
+    ).runTurn(request(entry));
+    return sent;
+  }
+
+  /** 선언을 꺼내는 자 — **제공자마다 그 어댑터의 stub이다.** 제공자가 늘면 여기가 컴파일에서 걸린다 */
+  const PROBES: Record<LlmProvider, (entry: OutputAgent) => Promise<unknown[]>> = {
+    anthropic: anthropicSchemas,
+    google: geminiSchemas,
+    openai: openaiSchemas,
   };
 
-  it("어댑터를 지나 나가는 선언에 그 제공자가 못 받는 열쇠가 없다", async () => {
-    const offenders: string[] = [];
-    for (const entry of FORCED) {
-      const { provider } = agentConfig(entry.agent);
-      const probe = PROBES[provider];
-      // 자가 없는 제공자는 아래 케이스가 잡는다 — 여기서 조용히 지나가지 않는다
-      if (!probe) continue;
-      const schemas = await probe(entry);
-      // 꺼낸 것이 없으면 아무것도 재지 않은 채 초록이 된다
-      expect(schemas.length, entry.name).toBeGreaterThan(0);
-      for (const schema of schemas) {
-        const nodes: Array<[string, Record<string, unknown>]> = [
-          ["(뿌리)", schema as Record<string, unknown>],
-          ...walk(schema),
-        ];
-        for (const [where, node] of nodes) {
-          for (const key of FORBIDDEN[provider]) {
-            if (key in node) offenders.push(`${entry.name}.${where}: ${key}`);
+  /** 뿌리까지 포함한 (자리, 노드) 쌍 — `walk`는 뿌리를 세우지 않는다 */
+  function nodesOf(schema: unknown): Array<[string, Record<string, unknown>]> {
+    return [["(뿌리)", schema as Record<string, unknown>], ...walk(schema)];
+  }
+
+  it.each(Object.keys(PROBES) as LlmProvider[])(
+    "%s 어댑터를 지나 나가는 선언에 그 제공자가 못 받는 열쇠가 없다",
+    async (provider) => {
+      const offenders: string[] = [];
+      for (const entry of DECLARED) {
+        const schemas = (await PROBES[provider](entry)).filter((schema) => schema !== undefined);
+        // 꺼낸 것이 없으면 아무것도 재지 않은 채 초록이 된다
+        expect(schemas.length, `${provider}: ${entry.agent}`).toBeGreaterThan(0);
+        for (const schema of schemas) {
+          for (const [where, node] of nodesOf(schema)) {
+            for (const key of FORBIDDEN[provider]) {
+              if (key in node) offenders.push(`${entry.agent}.${where}: ${key}`);
+            }
           }
         }
       }
-    }
-    // 같은 스키마가 두 자리로 나가므로 이름을 접는다 — 세는 것이 아니라 있고 없고다
-    expect([...new Set(offenders)]).toEqual([]);
-  });
+      expect([...new Set(offenders)]).toEqual([]);
+    },
+  );
 
   /**
-   * **자를 댈 수 없는 제공자로 옮기면 빨개진다.** 지금 강제 호출 여덟은 전부 google이라
-   * 위 케이스가 여덟을 다 재지만, `config/llm.yml`의 한 줄이 바뀌는 순간 그 선언은
-   * 아무도 재지 않는 채로 나간다 — 옮기는 사람이 여기에 그 제공자의 자를 세우게 한다.
+   * Anthropic만의 요구 둘 — 모든 객체에 `additionalProperties: false`, `minItems`는 0과 1만
+   * (models.md §3-2). 걷기만으로는 안 되는 자리라 따로 잰다.
    */
-  it("강제 호출이 나가는 제공자마다 선언을 꺼낼 자가 서 있다", () => {
-    for (const entry of FORCED) {
-      const { provider } = agentConfig(entry.agent);
-      expect(PROBES[provider], `${entry.name}: ${entry.agent} → ${provider}`).toBeTypeOf(
-        "function",
-      );
-    }
-  });
-
-  /**
-   * **목록에 서지 않은 강제 호출은 위의 자가 재지 못한다.** 그래서 소스를 읽어 짝을 못
-   * 박는다(선례: `packages/engine/test/harness-catalog.test.ts`). 양방향이다 — 소스에만
-   * 있는 이름은 아무도 재지 않은 채 실호출로 나가고, 목록에만 있는 선언은 나가지 않는
-   * 것을 재게 한다.
-   */
-  const SRC = join(import.meta.dirname, "..", "src");
-  const FORCED_AT = /toolChoice:\s*\{\s*name:\s*([\w$.]+)\s*[,}]/g;
-  const EXPORTED = new Map<string, unknown>(Object.entries(agents));
-
-  /** 해석기 스펙 — 강제 이름을 파라미터로 받는 자리(`runOpsOrders`)가 도는 것들 */
-  function isOpsSpec(value: unknown): value is Record<string, unknown> {
-    if (typeof value !== "object" || value === null) return false;
-    const spec = value as { agent?: unknown; tool?: unknown; ops?: unknown };
-    return (
-      typeof spec.agent === "string" && typeof spec.tool === "string" && Array.isArray(spec.ops)
-    );
-  }
-
-  /**
-   * 소스에 적힌 이름 식이 실제로 거는 도구 이름들 — 읽지 못하면 `null`이다.
-   *
-   * 상수면 그 값 하나다. `spec.tool`처럼 파라미터를 타고 오는 자리는 **그 함수를 지나는
-   * 스펙 전부**로 편다 — 해석기 셋이 한 함수를 지나므로, 스펙이 하나 늘면 그 이름도
-   * 여기서 함께 늘어 목록과 대조된다.
-   */
-  function forcedNames(expression: string): string[] | null {
-    const constant = EXPORTED.get(expression);
-    if (typeof constant === "string") return [constant];
-    if (!expression.includes(".")) return null;
-    const property = expression.slice(expression.lastIndexOf(".") + 1);
-    const names = [...EXPORTED.values()]
-      .filter(isOpsSpec)
-      .map((spec) => spec[property])
-      .filter((name): name is string => typeof name === "string");
-    return names.length > 0 ? names : null;
-  }
-
-  it("소스가 강제로 거는 이름과 목록이 같다", () => {
-    const listed = new Set(FORCED.map((entry) => entry.name));
-    const seen = new Set<string>();
-    const unread: string[] = [];
-    const unlisted: string[] = [];
-    for (const file of readdirSync(SRC, { recursive: true, encoding: "utf8" })) {
-      if (!file.endsWith(".ts")) continue;
-      for (const match of readFileSync(join(SRC, file), "utf8").matchAll(FORCED_AT)) {
-        const expression = match[1];
-        const names = expression ? forcedNames(expression) : null;
-        // 못 읽은 자리는 목록에 있는지조차 말할 수 없다 — 재지 못한 자리다
-        if (!names) {
-          unread.push(`${basename(file)}: ${expression ?? match[0]}`);
-          continue;
-        }
-        for (const name of names) {
-          seen.add(name);
-          if (!listed.has(name)) unlisted.push(`${basename(file)}: ${name}`);
+  it("anthropic 어댑터는 모든 객체를 닫고 minItems를 1 아래로 둔다", async () => {
+    for (const entry of DECLARED) {
+      for (const schema of await anthropicSchemas(entry)) {
+        for (const [where, node] of nodesOf(schema)) {
+          const at = `${entry.agent}.${where}`;
+          if (node.type === "object") expect(node.additionalProperties, at).toBe(false);
+          if (node.minItems !== undefined) expect(Number(node.minItems), at).toBeLessThanOrEqual(1);
         }
       }
     }
+  });
+
+  /** 어댑터는 부르는 쪽의 스키마를 고치지 않는다 — 소스의 Zod가 지키는 상한이 여기서 사라지면 안 된다 */
+  it("어댑터가 걷어도 소스 선언은 그대로다", async () => {
+    for (const entry of DECLARED) {
+      const before = JSON.stringify(entry.schema);
+      for (const probe of Object.values(PROBES)) await probe(entry);
+      expect(JSON.stringify(entry.schema), entry.agent).toBe(before);
+    }
+  });
+
+  /**
+   * **목록에 서지 않은 출력 스키마 요청은 위의 자가 재지 못한다.** 그래서 소스를 읽어 짝을
+   * 못 박는다(선례: `packages/engine/test/harness-catalog.test.ts`). 양방향이다 — 소스에만
+   * 있는 자리는 아무도 재지 않은 채 실호출로 나가고, 목록에만 있는 선언은 나가지 않는 것을
+   * 재게 한다. 이름이 없으므로 짝은 **에이전트 이름**이다 — `agentConfig("…")`가 그 자리다.
+   */
+  const SRC = join(import.meta.dirname, "..", "src");
+  const EXPORTED = new Map<string, unknown>(Object.entries(agents));
+
+  /** 해석기 스펙 — 에이전트 이름을 파라미터로 받는 자리(`runOpsOrders`)가 도는 것들 */
+  function isOpsSpec(value: unknown): value is { agent: string } {
+    if (typeof value !== "object" || value === null) return false;
+    const spec = value as { agent?: unknown; ops?: unknown };
+    return typeof spec.agent === "string" && Array.isArray(spec.ops);
+  }
+  const OPS_AGENTS = [...EXPORTED.values()].filter(isOpsSpec).map((spec) => spec.agent);
+
+  it("출력 스키마를 요청하는 자리마다 그 에이전트가 목록에 있고, 목록의 에이전트는 전부 요청한다", () => {
+    const listed = new Set<string>(DECLARED.map((entry) => entry.agent));
+    const seen = new Set<string>();
+    const unread: string[] = [];
+    for (const file of readdirSync(SRC, { recursive: true, encoding: "utf8" })) {
+      if (!file.endsWith(".ts")) continue;
+      const source = readFileSync(join(SRC, file), "utf8");
+      if (!source.includes("outputSchema:")) continue;
+      const names = [...source.matchAll(/agentConfig\("([a-z-]+)"\)/g)].map((m) => m[1]!);
+      // 해석기 넷은 한 함수를 지난다 — 스펙이 하나 늘면 그 이름도 여기서 함께 늘어 목록과 대조된다
+      if (/agentConfig\(spec\.agent\)/.test(source)) names.push(...OPS_AGENTS);
+      // 못 읽은 자리는 목록에 있는지조차 말할 수 없다 — 재지 못한 자리다
+      if (names.length === 0) unread.push(basename(file));
+      for (const name of names) seen.add(name);
+    }
     expect(unread).toEqual([]);
-    expect(unlisted).toEqual([]);
-    expect([...listed].filter((name) => !seen.has(name))).toEqual([]);
+    expect([...seen].filter((name) => !listed.has(name)).sort()).toEqual([]);
+    expect([...listed].filter((name) => !seen.has(name)).sort()).toEqual([]);
   });
 });

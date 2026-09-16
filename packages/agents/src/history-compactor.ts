@@ -27,15 +27,9 @@ import {
   type HistoryFoldBrief,
   type RelationTierProposal,
 } from "@story-fm/engine";
-import {
-  agentConfig,
-  createGameLLM,
-  resolveLlmMode,
-  type GameLLM,
-  type GameToolSpec,
-} from "@story-fm/llm";
-import { retryOnce, requireToolCall } from "./retry";
-import { inputError, toToolSchema } from "./tool-schema";
+import { agentConfig, createGameLLM, resolveLlmMode, type GameLLM } from "@story-fm/llm";
+import { ModelOutputError, readOutput, retryOnce } from "./retry";
+import { toToolSchema } from "./tool-schema";
 
 /**
  * 이력 압축 — 창 밖으로 밀려나는 평시 구간을 요약 한 벌로 옮기고, 그 김에
@@ -196,7 +190,12 @@ const ReportInputSchema = z.object({
     .describe("이름 없는 이야기에 제안하는 제목 — 목록이 없으면 비운다"),
 });
 
-/** 모델이 보는 입력 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
+/**
+ * 모델이 보는 출력 스키마 — 위 Zod 한 벌에서 파생한다 (prompts.md §2 · models.md §3-2).
+ *
+ * 인물 사전 갱신을 따로 떼지 않은 이유가 여기 있다: 한 호출의 산출은 JSON 하나이므로,
+ * 둘로 나누면 나머지 하나는 모델이 낼 수도 안 낼 수도 있는 자리가 된다.
+ */
 export const REPORT_DIGEST_INPUT = toToolSchema(ReportInputSchema);
 
 /** 접히는 구간의 화자 — 세이브의 역할을 사람이 읽는 말로 */
@@ -277,18 +276,6 @@ export function untitledArcs(state: GameState): { id: string; line: string }[] {
     }));
 }
 
-/**
- * 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3).
- *
- * 인물 사전 갱신을 별도 도구로 두지 않은 이유가 그것이다: `toolChoice`는 도구
- * **하나**를 강제하고 그것도 첫 요청에만 걸리므로, 둘로 나누면 나머지 하나는
- * 모델이 부를 수도 안 부를 수도 있는 자리가 된다.
- */
-export const REPORT_DIGEST_TOOL = "report_digest";
-
-export const REPORT_DIGEST_DESCRIPTION =
-  "접히는 구간의 요약 두 칸(지난 일·열린 일)과 인물 사전 갱신을 함께 제출한다. 검사에 걸린 항목은 코어가 버린다.";
-
 interface CompactionResult {
   folded: boolean;
   memories: number;
@@ -296,46 +283,32 @@ interface CompactionResult {
   relations: number;
 }
 
-function makeReportTool(
+/**
+ * 산출을 세이브에 옮긴다 — 검사는 전부 코어의 몫이다.
+ *
+ * 요약이 먼저다 — 거절당하면 이 턴은 접지 않으므로 인물 사전도 건드리지 않는다. 길이는
+ * 스키마가 먼저 거르므로 여기 남는 것은 빈 문장이고, 그것은 다시 부르면 달라질 수 있는
+ * 실패라 `ModelOutputError`로 세운다 (agents.md §8).
+ */
+function applyCompaction(
   state: GameState,
   brief: HistoryFoldBrief,
-  onApplied: (result: CompactionResult) => void,
-): GameToolSpec {
-  return {
-    name: REPORT_DIGEST_TOOL,
-    description: REPORT_DIGEST_DESCRIPTION,
-    inputSchema: REPORT_DIGEST_INPUT,
-    handle: (input: unknown) => {
-      const parsed = ReportInputSchema.safeParse(input);
-      if (!parsed.success) return inputError(parsed.error);
-      /**
-       * 요약이 먼저다 — 거절당하면 이 턴은 접지 않으므로 인물 사전도 건드리지 않는다.
-       * 길이는 위 스키마가 먼저 거르므로 여기 남는 것은 빈 문장과 낡은 브리프다.
-       */
-      const draft = {
-        past: parsed.data.past,
-        ...(parsed.data.open ? { open: parsed.data.open } : {}),
-      };
-      if (!applyHistoryDigest(state, brief, draft)) {
-        return {
-          ok: false,
-          message: "요약을 반영하지 못했습니다 — 지난 일이 비었거나 이미 접힌 구간입니다",
-        };
-      }
-      // 등록이 기억보다 먼저다 — 새로 선 사람은 등록된 뒤에야 이 세계의 화자가 된다
-      const characters = registerCharacters(state, parsed.data.characters ?? []);
-      const memories = applyCharacterMemories(state, parsed.data.memories ?? []);
-      // 사이도 코어가 검증한다 — 모르는 화자는 반려, 한 칸 초과는 한 칸, 한 쌍은 한 번
-      const relations = applyRelationTiers(state, parsed.data.relations ?? []);
-      // 제목은 코어가 검증한다 — 아크가 있고·활성이고·아직 이름이 없을 때만 (people.md §9)
-      const titles = applyArcTitles(state, parsed.data.arcTitles ?? []);
-      onApplied({ folded: true, memories, characters, relations });
-      return {
-        ok: true,
-        message: `요약 갱신 · 기억 ${memories} · 인물 ${characters} · 아크 제목 ${titles} · 사이 ${relations}`,
-      };
-    },
-  };
+  data: z.infer<typeof ReportInputSchema>,
+): CompactionResult {
+  const draft = { past: data.past, ...(data.open ? { open: data.open } : {}) };
+  if (!applyHistoryDigest(state, brief, draft)) {
+    throw new ModelOutputError(
+      "요약을 반영하지 못했습니다 — 지난 일이 비었거나 이미 접힌 구간입니다",
+    );
+  }
+  // 등록이 기억보다 먼저다 — 새로 선 사람은 등록된 뒤에야 이 세계의 화자가 된다
+  const characters = registerCharacters(state, data.characters ?? []);
+  const memories = applyCharacterMemories(state, data.memories ?? []);
+  // 사이도 코어가 검증한다 — 모르는 화자는 반려, 한 칸 초과는 한 칸, 한 쌍은 한 번
+  const relations = applyRelationTiers(state, data.relations ?? []);
+  // 제목은 코어가 검증한다 — 아크가 있고·활성이고·아직 이름이 없을 때만 (people.md §9)
+  applyArcTitles(state, data.arcTitles ?? []);
+  return { folded: true, memories, characters, relations };
 }
 
 /**
@@ -355,21 +328,21 @@ export async function compactHistory(state: GameState, llm?: GameLLM): Promise<C
   let client = llm;
   await retryOnce(
     "compactor:history",
-    () =>
-      requireToolCall(REPORT_DIGEST_TOOL, () => {
-        client ??= createGameLLM(agentConfig("history-compactor"));
-        return client.runTurn({
-          system: HISTORY_COMPACTOR_SYSTEM,
-          history: [],
-          user: buildCompactionPrompt(state, brief, untitledArcs(state), relationTierBrief(state)),
-          tools: [makeReportTool(state, brief, (r) => (result = r))],
-          toolChoice: { name: REPORT_DIGEST_TOOL },
-          // 산출은 이 도구 하나다 — 요약도 인물도 핸들러가 코어에 옮긴다. 결과를
-          // 돌려주는 두 번째 요청은 고정분이 큰 이 입력을 한 번 더 읽고 아무도 읽지
-          // 않는 답을 받아 온다 (models.md §3-4)
-          outputOnly: true,
-        });
-      }),
+    async () => {
+      client ??= createGameLLM(agentConfig("history-compactor"));
+      const answer = await client.runTurn({
+        system: HISTORY_COMPACTOR_SYSTEM,
+        history: [],
+        user: buildCompactionPrompt(state, brief, untitledArcs(state), relationTierBrief(state)),
+        // 산출은 요약·기억·인물·사이가 든 JSON 하나다 — 도구 왕복이 없다 (models.md §3-2)
+        outputSchema: REPORT_DIGEST_INPUT,
+      });
+      result = applyCompaction(
+        state,
+        brief,
+        readOutput("compactor:history", ReportInputSchema, answer),
+      );
+    },
     () => result.folded, // 이미 접혔으면 다시 부르지 않는다
   ).catch((error: unknown) => {
     // 결산 셋과 같은 계약이되 남는 것이 다르다 — 앵커가 아니라 접히지 않은 이력이다

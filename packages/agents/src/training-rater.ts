@@ -22,16 +22,10 @@ import {
   TrainingMarkSchema,
   type TrainingReport,
 } from "@story-fm/domain";
-import {
-  agentConfig,
-  createGameLLM,
-  resolveLlmMode,
-  type GameLLM,
-  type GameToolSpec,
-} from "@story-fm/llm";
+import { agentConfig, createGameLLM, resolveLlmMode, type GameLLM } from "@story-fm/llm";
 import { agingDeclineLine } from "./aging-line";
-import { retryOnce, requireToolCall, anchorStands } from "./retry";
-import { inputError, toToolSchema } from "./tool-schema";
+import { anchorStands, readOutput, retryOnce } from "./retry";
+import { toToolSchema } from "./tool-schema";
 
 /**
  * 훈련 결산 — advance_time이 넘긴 구간의 훈련을 한 묶음으로 판정한다.
@@ -113,16 +107,13 @@ const OutcomeSchema = z.object({
     `훈련 태도 — ${TRAINING_MARKS.map((m) => `${m}(${TRAINING_MARK_KO[m]})`).join(" · ")} 중 하나 (해당 없으면 비운다)`,
   ),
 });
-const ReportInputSchema = z.object({ results: z.array(OutcomeSchema).max(MAX_TRAINED_PLAYERS) });
+/** 이 호출의 산출 — 도구 없이 출력 스키마로 받는다 (models.md §3-2) */
+export const TrainingReportSchema = z.object({
+  results: z.array(OutcomeSchema).max(MAX_TRAINED_PLAYERS),
+});
 
-/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
-export const REPORT_TRAINING_TOOL = "report_training";
-
-export const REPORT_TRAINING_DESCRIPTION =
-  "이 기간 훈련의 결과를 제출한다. 기준에서 크게 벗어나거나 훈련하지 않은 축은 코어가 잘라 낸다.";
-
-/** 모델이 보는 입력 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
-export const REPORT_TRAINING_INPUT = toToolSchema(ReportInputSchema);
+/** 모델이 보는 출력 스키마 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
+export const REPORT_TRAINING_INPUT = toToolSchema(TrainingReportSchema);
 
 /** 브리프를 프롬프트 본문으로 — 훈련 일지 + 대화 + 대상 표 */
 export function buildTrainingPrompt(brief: TrainingBrief): string {
@@ -169,49 +160,6 @@ export function buildTrainingPrompt(brief: TrainingBrief): string {
   ].join("\n");
 }
 
-function makeReportTool(
-  state: GameState,
-  brief: TrainingBrief,
-  onApplied: (report: TrainingReport | null) => void,
-): GameToolSpec {
-  return {
-    name: REPORT_TRAINING_TOOL,
-    description: REPORT_TRAINING_DESCRIPTION,
-    inputSchema: REPORT_TRAINING_INPUT,
-    handle(input: unknown) {
-      /**
-       * **한 구간은 한 번만 결산된다** — 도구 루프는 같은 도구를 여러 번 부를 수
-       * 있다 (docs/llm/agents.md §4). `ok: false`로 답하면 모델이 명단을 고쳐 또
-       * 부르므로, 성공으로 답하고 장부는 건드리지 않는다.
-       */
-      if (trainingSettled(state, brief)) {
-        return {
-          ok: true,
-          message: "이 구간의 훈련 결산은 이미 반영됐습니다 — 다시 제출하지 마세요",
-        };
-      }
-      const parsed = ReportInputSchema.safeParse(input);
-      if (!parsed.success) return inputError(parsed.error);
-      const report = applyTrainingOutcomes(
-        state,
-        brief,
-        parsed.data.results.map((r) => ({
-          playerId: r.playerId,
-          tacticGain: r.tacticGain ?? 0,
-          positionGain: r.positionGain ?? null,
-          attribute: r.attribute ?? null,
-          attributeStep: r.attributeStep ?? 1,
-          note: r.note ?? "",
-          mark: r.mark ?? null,
-          ...(r.date ? { date: r.date } : {}),
-        })),
-      );
-      onApplied(report);
-      return { ok: true, message: `훈련 결산 반영 (${parsed.data.results.length}건 검토)` };
-    },
-  };
-}
-
 /**
  * 지나간 훈련을 결산한다 — `advanceTime` **뒤에** 부른다.
  * 한 번 다시 시도하되 **실패는 삼킨다** — 그 구간의 훈련 성과는 없던 일이 된다
@@ -239,20 +187,33 @@ export async function reportTraining(
   let client = llm;
   await retryOnce(
     "rater:training",
-    () =>
-      requireToolCall(REPORT_TRAINING_TOOL, () => {
-        client ??= createGameLLM(agentConfig("training-rater"));
-        return client.runTurn({
-          system: TRAINING_RATER_SYSTEM,
-          history: [],
-          user: buildTrainingPrompt(brief),
-          tools: [makeReportTool(state, brief, (r) => (report = r))],
-          toolChoice: { name: REPORT_TRAINING_TOOL },
-          // 산출은 이 도구 하나다 — 결과를 돌려주는 두 번째 요청은 같은 입력을
-          // 한 번 더 읽고 아무도 읽지 않는 답을 받아 온다 (models.md §3-4)
-          outputOnly: true,
-        });
-      }),
+    async () => {
+      client ??= createGameLLM(agentConfig("training-rater"));
+      const result = await client.runTurn({
+        system: TRAINING_RATER_SYSTEM,
+        history: [],
+        user: buildTrainingPrompt(brief),
+        // 산출은 JSON 하나다 — 도구 왕복이 없다 (models.md §3-2)
+        outputSchema: REPORT_TRAINING_INPUT,
+      });
+      const data = readOutput("rater:training", TrainingReportSchema, result);
+      // 한 구간은 한 번만 결산된다 — 재시도 가드도 같은 표식을 보지만 여기서 두 번 쌓지 않는다
+      if (trainingSettled(state, brief)) return;
+      report = applyTrainingOutcomes(
+        state,
+        brief,
+        data.results.map((r) => ({
+          playerId: r.playerId,
+          tacticGain: r.tacticGain ?? 0,
+          positionGain: r.positionGain ?? null,
+          attribute: r.attribute ?? null,
+          attributeStep: r.attributeStep ?? 1,
+          note: r.note ?? "",
+          mark: r.mark ?? null,
+          ...(r.date ? { date: r.date } : {}),
+        })),
+      );
+    },
     // 이미 반영됐으면 다시 부르지 않는다 — 카드가 비어도(소수로만 움직인 구간)
     // 장부는 이미 움직였으므로 반환값이 아니라 상태의 표식을 본다
     () => trainingSettled(state, brief),

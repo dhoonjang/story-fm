@@ -8,16 +8,15 @@ import {
   TACTIC_GAIN_MAX,
   TACTIC_GAIN_MIN,
   type GameState,
-  type MatchRatingBrief,
-  type TrainingBrief,
 } from "@story-fm/engine";
 import { ARC_TITLE_MAX, CharacterMemorySchema } from "@story-fm/domain";
-import type { GameLLM, GameToolSpec, JsonObjectSchema, ToolOutcome } from "@story-fm/llm";
+import type { GameLLM, GameToolSpec, JsonObjectSchema, TurnResult } from "@story-fm/llm";
 import { LlmCallError, LlmTimeoutError, TokenBudgetExceededError } from "@story-fm/llm";
-import { retryOnce, anchorStands, ModelOutputError } from "../src/retry";
+import { z } from "zod";
+import { retryOnce, anchorStands, ModelOutputError, readOutput } from "../src/retry";
 import { runTacticOrders } from "../src/tactic-orders";
-import { makeSettleTool, SETTLE_MATCH_INPUT } from "../src/finalize-match";
-import { REPORT_TRAINING_INPUT, reportTraining } from "../src/training-rater";
+import { SettleMatchSchema, SETTLE_MATCH_INPUT } from "../src/finalize-match";
+import { REPORT_TRAINING_INPUT, TrainingReportSchema } from "../src/training-rater";
 import { REPORT_DIGEST_INPUT } from "../src/history-compactor";
 
 /**
@@ -77,13 +76,45 @@ describe("retryOnce — 폴백 대신 한 번의 재시도", () => {
 });
 
 /**
- * 산출이 나온 뒤의 실패는 실패가 아니다 (agents.md §3 ②) — 도구가 의도를 낸 다음
- * 이어지는 요청이 깨져도 그 걸음의 산출은 이미 완성돼 있다.
+ * 산출을 읽는 문 — **없거나 스키마를 못 지나면 `ModelOutputError`다** (agents.md §8).
+ * 그 예외 하나가 `retryOnce`의 한 번을 여는 열쇠라, 여기서 새지 않아야 재시도가 선다.
+ */
+describe("readOutput — 산출이 왔는가", () => {
+  const schema = z.object({ n: z.number().int().min(0) });
+  const answered = (output: TurnResult["output"]): TurnResult => ({
+    text: "",
+    history: { version: 1, provider: "google", model: "test", messages: [] },
+    historyBase: 0,
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    toolCallCount: 0,
+    stopReason: "completed",
+    output,
+  });
+
+  it("스키마를 지난 산출은 그대로 돌려준다", () => {
+    expect(readOutput("t", schema, answered({ n: 3 }))).toEqual({ n: 3 });
+  });
+
+  it.each([
+    ["산출이 없다 (null)", null],
+    ["스키마를 싣지 않은 호출 (undefined)", undefined],
+  ])("%s — ModelOutputError", (_label, output) => {
+    expect(() => readOutput("t", schema, answered(output))).toThrow(ModelOutputError);
+  });
+
+  it("스키마를 못 지난 산출도 ModelOutputError이고, 어디가 틀렸는지 적는다", () => {
+    expect(() => readOutput("t", schema, answered({ n: -1 }))).toThrow(/n: /);
+  });
+});
+
+/**
+ * 해석기의 실패 계약 — 산출은 JSON 하나로 오므로 "산출 뒤의 실패"라는 자리는 없다.
+ * 남는 갈래는 셋이다: 산출이 왔다 · 산출이 없다(한 번 더) · 호출 자체가 실패했다(그대로).
  *
  * 경기 중 명단·패킷이 없는 상태라 `buildLedgerNote`가 빈 줄을 낸다 — 이 테스트가 보는
  * 것은 프롬프트가 아니라 실패와 산출이 만나는 자리다.
  */
-describe("runTacticOrders — 의도를 받은 뒤의 실패", () => {
+describe("runTacticOrders — 산출과 실패", () => {
   /** 이 경기의 지난 중계 턴 하나 — 해석기가 `<match_log>`로 읽는다 (agents.md §3) */
   // 장부 없는 경기 상태 — 해석기의 입력 조립이 경기 갈래로 가되 실을 것이 없다
   const emptyState = {
@@ -112,62 +143,68 @@ describe("runTacticOrders — 의도를 받은 뒤의 실패", () => {
     ],
   ]);
 
-  /** 첫 호출에서 `report_tactic_orders`를 부른 뒤 깨지는 모델 */
-  const failsAfterReporting = (): GameLLM => ({
-    runTurn: (req) => {
-      req.tools
-        ?.find((t) => t.name === "report_tactic_orders")
-        ?.handle({ ops: { set_tactics: [{ pressing: 4 }] } });
-      return Promise.reject(new Error("Connection error"));
-    },
-  });
+  /** 산출 JSON 하나로 답하는 모델 — 실모드에서 어댑터가 `output`에 세우는 그 모양이다 */
+  const answering =
+    (output: TurnResult["output"], text = ""): GameLLM["runTurn"] =>
+    () =>
+      Promise.resolve({
+        text,
+        history: { version: 1, provider: "google", model: "test", messages: [] },
+        historyBase: 0,
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        toolCallCount: 0,
+        stopReason: "completed",
+        output,
+      });
 
-  it("받은 의도로 진행한다 — 뒤이은 실패가 그것을 버리지 않는다", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const llm = failsAfterReporting();
+  it("산출이 오면 그것으로 진행한다 — 요청은 도구 없이 출력 스키마 하나다", async () => {
+    const llm: GameLLM = { runTurn: answering({ ops: { set_tactics: [{ pressing: 4 }] } }) };
     const spy = vi.spyOn(llm, "runTurn");
 
-    const result = await runTacticOrders(emptyState, SPECS, "계속 갑시다", { llm });
+    const result = await runTacticOrders(emptyState, SPECS, "압박 올려", { llm });
 
     expect(result.ok).toBe(true);
     expect(result.ok && result.intent.ops.set_tactics).toEqual([{ pressing: 4 }]);
-    // 자국이 남은 뒤라 다시 부르지 않는다 — 두 번 부르면 의도가 두 번 적용된다
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalled(); // 무슨 일이 있었는지는 사라지지 않는다
-    warn.mockRestore();
+    const request = spy.mock.calls[0]![0];
+    expect(request.outputSchema).toBeDefined();
+    expect(request.tools).toBeUndefined();
   });
 
   /**
-   * 강제 도구를 실었는데도 본문만 돌아오는 경우 — 예외가 없어 `retryOnce`가 그냥
+   * 출력 스키마를 실었는데도 산문으로 답하는 경우 — 예외가 없어 `retryOnce`가 그냥
    * 지나가면, 해석은 **한 번** 실패에 턴이 취소되고 결산은 로그 한 줄 없이 앵커로
    * 떨어진다 (agents.md §8).
    */
-  it("도구 없이 본문만 답하면 다시 부르고, 그래도 없으면 ok:false다", async () => {
+  it("산출 없이 본문만 답하면 다시 부르고, 그래도 없으면 ok:false다", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const llm: GameLLM = {
-      runTurn: () =>
-        Promise.resolve({
-          text: "왼쪽을 두껍게 하겠습니다.",
-          history: { version: 1, provider: "google", model: "test", messages: [] },
-          historyBase: 0,
-          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
-          toolCallCount: 0,
-          stopReason: "completed",
-        }),
-    };
+    const llm: GameLLM = { runTurn: answering(null, "왼쪽을 두껍게 하겠습니다.") };
     const spy = vi.spyOn(llm, "runTurn");
 
     const result = await runTacticOrders(emptyState, SPECS, "왼쪽을 두껍게", { llm });
 
     expect(result.ok).toBe(false);
     expect(spy).toHaveBeenCalledTimes(2);
-    // 요청에 강제 도구가 실렸는지 — 프롬프트 문장만으로는 이 자리가 비어 있었다
-    expect(spy.mock.calls[0]![0].toolChoice).toEqual({ name: "report_tactic_orders" });
+    // 요청이 산출의 꼴을 강제했는지 — 프롬프트 문장만으로는 이 자리가 비어 있었다
+    expect(spy.mock.calls[0]![0].outputSchema).toBeDefined();
     // 이 경기의 지난 턴이 장부 뒤·감독 발화 앞에 선다 — "걔 빼"가 가리킬 대상이 여기 있다
     const user = spy.mock.calls[0]![0].user;
     expect(user).toContain("<match_log>\n@중계: 브루노가 절뚝이며");
     expect(user.indexOf("</match_log>")).toBeLessThan(user.indexOf("@감독: 왼쪽을 두껍게"));
     expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  /** 모양이 틀린 산출도 쓸 수 없는 산출이다 — `ops`가 배열이면 명령 이름이 없다 */
+  it("스키마를 못 지난 산출도 다시 부르고, 그래도 어긋나면 ok:false다", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const llm: GameLLM = { runTurn: answering({ ops: [] }) };
+    const spy = vi.spyOn(llm, "runTurn");
+
+    const result = await runTacticOrders(emptyState, SPECS, "왼쪽을 두껍게", { llm });
+
+    expect(result.ok).toBe(false);
+    expect(spy).toHaveBeenCalledTimes(2);
     warn.mockRestore();
   });
 
@@ -202,41 +239,19 @@ describe("anchorStands — 결산 실패는 삼키고 앵커를 남긴다", () =
 });
 
 /**
- * 결산 도구가 받아들이는 폭 — **넘친 값 하나가 결산 전체를 버리지 않는다** (agents.md §4).
+ * 결산 산출이 받아들이는 폭 — **넘친 값 하나가 결산 전체를 버리지 않는다** (agents.md §4).
  *
  * 스키마는 코어 밴드보다 넓게 열어 두고, 밴드 밖의 값은 파싱을 깨뜨리는 대신 코어가
  * 자른다. 그러나 그 **폭 밖**은 코어에 닿기 전에 반려된다 — 여기가 조여지면 한 선수의
  * 과한 숫자 하나로 경기 판정 전체가 앵커로 떨어지고, 반대로 풀리면 검증되지 않은 값이
- * 코어의 문 앞까지 온다.
+ * 코어의 문 앞까지 온다. 재는 것은 그 산출의 Zod 한 벌이다 — 모델이 보는 JSON 스키마가
+ * 거기서 파생되므로(prompts.md §2) 한 벌을 재면 둘을 잰다.
  */
 describe("결산 스키마의 수용 폭", () => {
-  /** 도구가 상태를 만지기 전에 반려되는 입력만 넣는다 — 세이브가 필요 없는 자리다 */
-  const stubState = { schedule: [] } as unknown as GameState;
-
-  /** 도구를 부른 응답 — `requireToolCall`이 재시도로 돌리지 않게 한 번은 불렀다고 답한다 */
-  const answered = {
-    text: "",
-    history: { version: 1 as const, provider: "anthropic" as const, model: "test", messages: [] },
-    historyBase: 0,
-    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
-    toolCallCount: 1,
-    stopReason: "completed" as const,
-  };
-
-  /** 에이전트가 요청에 실은 도구를 붙잡아 입력 하나를 그대로 넣어 본다 */
-  async function submit(
-    call: (llm: GameLLM) => Promise<unknown>,
-    input: unknown,
-  ): Promise<{ ok: boolean; message: string }> {
-    let answer: ToolOutcome | Promise<ToolOutcome> | undefined;
-    await call({
-      runTurn: (req) => {
-        answer = req.tools?.[0]?.handle(input);
-        return Promise.resolve(answered);
-      },
-    });
-    if (answer === undefined) throw new Error("요청에 도구가 실리지 않았습니다");
-    return await answer;
+  /** 반려된 자리들 — 지났으면 빈 문자열이다 */
+  function rejects(schema: z.ZodTypeAny, input: unknown): string {
+    const parsed = schema.safeParse(input);
+    return parsed.success ? "" : parsed.error.issues.map((i) => i.path.join(".")).join(" / ");
   }
 
   /** 도구 스키마의 한 자리 — `properties`가 unknown이라 여기서 한 번만 좁힌다 */
@@ -253,32 +268,7 @@ describe("결산 스키마의 수용 폭", () => {
     return node;
   }
 
-  const ratingBrief: MatchRatingBrief = {
-    matchId: "m1",
-    scoreline: "우리 1 : 0 상대",
-    outcome: "win",
-    timeline: [],
-    players: [
-      {
-        playerId: "p1",
-        name: "선수",
-        position: "ST",
-        started: true,
-        minutes: 90,
-        goals: 1,
-        assists: 0,
-        shots: 2,
-        saves: 0,
-        yellows: 0,
-        reds: 0,
-        anchor: 7,
-      },
-    ],
-  };
-
-  /** 경기를 마감하는 자리의 결산 호출 — 상태를 만지기 전에 반려되는 입력만 넣는다 */
-  const settle = async (input: unknown) =>
-    makeSettleTool(stubState, ratingBrief, () => undefined).handle(input);
+  const settle = (input: unknown) => rejects(SettleMatchSchema, input);
 
   it("평점은 코어 밴드보다 넓게 받고, 그 폭 밖은 코어에 닿기 전에 반려한다", async () => {
     const rating = schemaAt(SETTLE_MATCH_INPUT, "ratings.[].rating");
@@ -286,15 +276,15 @@ describe("결산 스키마의 수용 폭", () => {
     expect(rating.maximum).toBeGreaterThan(RATING_MAX);
     expect(rating.minimum).toBe(0);
 
-    const over = await settle({
-      ratings: [{ playerId: "p1", rating: Number(rating.maximum) + 1 }],
-    });
-    expect(over.ok).toBe(false);
-    expect(over.message).toContain("rating");
+    expect(settle({ ratings: [{ playerId: "p1", rating: Number(rating.maximum) + 1 }] })).toContain(
+      "rating",
+    );
     // 빈 제출도, 한 경기 명단을 넘는 제출도 여기서 걸린다
-    expect((await settle({ ratings: [] })).ok).toBe(false);
+    expect(settle({ ratings: [] })).not.toBe("");
     const flood = Array.from({ length: 31 }, (_, i) => ({ playerId: `p${i}`, rating: 7 }));
-    expect((await settle({ ratings: flood })).ok).toBe(false);
+    expect(settle({ ratings: flood })).not.toBe("");
+    // 마무리 중계는 비워도 된다 — GM이 대신 닫는다 (agents.md §3)
+    expect(settle({ ratings: [{ playerId: "p1", rating: 7 }] })).toBe("");
   });
 
   it("심경 한 줄은 세이브의 상한에서 끊기고, 한 번에 세는 인원도 물려 있다", async () => {
@@ -307,65 +297,22 @@ describe("결산 스키마의 수용 폭", () => {
       text: "말".repeat(chars),
       acknowledgesIssue: false,
     });
-    const long = await settle({ ratings, moods: [note(MOOD_NOTE_MAX + 1)] });
-    expect(long.ok).toBe(false);
-    expect(long.message).toContain("text");
+    expect(settle({ ratings, moods: [note(MOOD_NOTE_MAX + 1)] })).toContain("text");
     const flood = Array.from({ length: MOOD_BATCH + 1 }, () => note(10));
-    expect((await settle({ ratings, moods: flood })).ok).toBe(false);
+    expect(settle({ ratings, moods: flood })).not.toBe("");
   });
 
-  const trainingBrief: TrainingBrief = {
-    teamName: "우리 팀",
-    from: "2026-01-01",
-    to: "2026-01-07",
-    sessions: [
-      {
-        entryId: "e1",
-        date: "2026-01-02",
-        slot: "am",
-        label: "전술 훈련",
-        focus: [],
-        ordered: false,
-      },
-    ],
-    subjects: [
-      {
-        playerId: "p1",
-        name: "선수",
-        age: 24,
-        position: "CM",
-        mentor: null,
-        familiarity: 60,
-        condition: 80,
-        form: 0,
-        room: 5,
-        overall: 70,
-        apps: 3,
-        rating: 6.8,
-        instruction: null,
-        program: null,
-      },
-    ],
-    chat: [],
-    trainedAxes: [],
-  };
-
-  it("훈련 결산의 폭도 코어 밴드보다 넓다 — 날짜는 형식이 여기서 걸린다", async () => {
+  it("훈련 결산의 폭도 코어 밴드보다 넓다 — 날짜는 형식이 여기서 걸린다", () => {
     const gain = schemaAt(REPORT_TRAINING_INPUT, "results.[].tacticGain");
     expect(gain.maximum).toBeGreaterThan(TACTIC_GAIN_MAX);
     expect(gain.minimum).toBeLessThan(TACTIC_GAIN_MIN);
 
-    const report = (input: unknown) =>
-      submit((llm) => reportTraining(stubState, trainingBrief, llm), input);
-    const over = await report({
-      results: [{ playerId: "p1", tacticGain: Number(gain.maximum) + 1 }],
-    });
-    expect(over.ok).toBe(false);
-    expect(over.message).toContain("tacticGain");
+    const report = (input: unknown) => rejects(TrainingReportSchema, input);
+    expect(
+      report({ results: [{ playerId: "p1", tacticGain: Number(gain.maximum) + 1 }] }),
+    ).toContain("tacticGain");
     // 어느 훈련에서 나온 변화인지는 날짜로 가리킨다 — 형식이 어긋난 값은 코어까지 가지 않는다
-    const badDate = await report({ results: [{ playerId: "p1", date: "2026/01/02" }] });
-    expect(badDate.ok).toBe(false);
-    expect(badDate.message).toContain("date");
+    expect(report({ results: [{ playerId: "p1", date: "2026/01/02" }] })).toContain("date");
   });
 
   /**

@@ -5,9 +5,10 @@
  * 앵커를 남긴다 — 결산 하나 때문에 경기 결과나 시간 진행이 막히면 안 된다.
  */
 
-import { josa } from "@story-fm/domain";
 import { journal } from "@story-fm/engine";
 import type { TurnResult } from "@story-fm/llm";
+import type { z } from "zod";
+import { inputError } from "./tool-schema";
 
 /**
  * 쓸 수 없는 산출 — **다시 부르면 달라질 수 있는 실패다** (agents.md §8).
@@ -23,22 +24,29 @@ export class ModelOutputError extends Error {
 }
 
 /**
- * 도구를 부르지 않은 응답 — **실패다** (agents.md §8).
+ * 산출을 읽는다 — **없거나 스키마를 못 지나면 실패다** (agents.md §8).
  *
- * 강제 도구를 실었는데도 본문만 돌아오면 `runTurn`은 정상 resolve하고 산출은
- * 비어 있다. 예외가 없으면 아래 `retryOnce`가 다시 부르지 않아, 해석은 턴
- * 취소로 결산은 앵커로 **로그 한 줄 없이** 떨어진다. 그래서 여기서 실패로
- * 바꾼다 — 그러면 재시도 한 번과 실패 로그가 평소의 길을 그대로 탄다.
+ * 출력 스키마를 실었는데도 산문으로 답하거나 잘린 응답은 `output`이 `null`인 채 정상
+ * resolve한다(models.md §3-2). 예외가 없으면 아래 `retryOnce`가 다시 부르지 않아, 해석은
+ * 턴 취소로 결산은 앵커로 **로그 한 줄 없이** 떨어진다. 그래서 여기서 실패로 바꾼다 —
+ * 그러면 재시도 한 번과 실패 로그가 평소의 길을 그대로 탄다. 스키마를 못 지난 산출도
+ * 같은 문이다: 다시 부르면 달라질 수 있는 실패고, 무엇이 틀렸는지는 로그에 남는다.
  */
-export async function requireToolCall(
-  tool: string,
-  run: () => Promise<TurnResult>,
-): Promise<TurnResult> {
-  const result = await run();
-  if (result.toolCallCount === 0) {
-    throw new ModelOutputError(`모델이 ${josa(tool, "을/를")} 부르지 않고 본문으로 답했습니다`);
+export function readOutput<T>(
+  label: string,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+  result: TurnResult,
+): T {
+  if (result.output === undefined || result.output === null) {
+    throw new ModelOutputError(`${label}: 모델이 산출 없이 본문으로 답했습니다`);
   }
-  return result;
+  const parsed = schema.safeParse(result.output);
+  if (!parsed.success) {
+    throw new ModelOutputError(
+      `${label}: 산출이 스키마를 지나지 못했습니다 — ${inputError(parsed.error).message}`,
+    );
+  }
+  return parsed.data;
 }
 
 /**

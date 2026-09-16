@@ -118,7 +118,8 @@ agents:
     model: gemini-3.8-flash
     max_tokens: 16000
     timeout_ms: 90000
-    thinking_level: minimal
+    # 3.8-flash는 minimal에 400을 낸다 — 이 자리만 minimal로 남아 있었다 (live-schema 실측)
+    thinking_level: low
 
   # 협상 테이블 건너편 — GM의 도구 뒤에서 감독의 말 하나에 상대의 답 하나를 낸다
   # (docs/llm/agents.md §4-1). 서류·주변 상황·테이블의 대화 전부를 읽고 인물로 말하므로

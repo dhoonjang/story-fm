@@ -58,13 +58,6 @@ function lastParams(client: Anthropic): Anthropic.MessageCreateParamsNonStreamin
   return calls[calls.length - 1]![0] as Anthropic.MessageCreateParamsNonStreaming;
 }
 
-/** 요청 순서대로의 파라미터 — 강제 도구가 첫 요청에만 실리는지 검증용 */
-function allParams(client: Anthropic): Anthropic.MessageCreateParamsNonStreaming[] {
-  const stream = (client.messages as unknown as { stream: { mock: { calls: unknown[][] } } })
-    .stream;
-  return stream.mock.calls.map((c) => c[0] as Anthropic.MessageCreateParamsNonStreaming);
-}
-
 /** 마지막 요청 옵션 — 시한·중단 신호 검증용 */
 function lastOptions(client: Anthropic): { timeout?: number; signal?: AbortSignal } {
   const stream = (client.messages as unknown as { stream: { mock: { calls: unknown[][] } } })
@@ -208,112 +201,6 @@ describe("AnthropicGameLLM 요청 파라미터", () => {
 });
 
 describe("AnthropicGameLLM tool 루프", () => {
-  it("강제 도구는 첫 요청에만 실린다 — 계속 걸면 턴이 끝나지 않는다", async () => {
-    const stub = makeStubClient([
-      {
-        stop_reason: "tool_use",
-        content: [
-          { type: "tool_use", id: "t1", name: "report_mood", input: {} },
-        ] as Anthropic.ContentBlock[],
-      },
-      {
-        stop_reason: "end_turn",
-        content: [{ type: "text", text: "끝." }] as Anthropic.ContentBlock[],
-      },
-    ]);
-    const tool: GameToolSpec = {
-      name: "report_mood",
-      description: "테스트 도구",
-      inputSchema: { type: "object" as const, properties: {} },
-      handle: () => ({ ok: true, message: "반영" }),
-    };
-
-    const llm = new AnthropicGameLLM(testConfig, stub);
-    await llm.runTurn({
-      system: "sys",
-      history: [],
-      user: "결산",
-      tools: [tool],
-      toolChoice: { name: "report_mood" },
-    });
-
-    const params = allParams(stub);
-    expect(params).toHaveLength(2);
-    expect(params[0]!.tool_choice).toEqual({ type: "tool", name: "report_mood" });
-    /**
-     * 도구 결과를 돌려준 뒤에도 강제가 남아 있으면 모델이 턴을 끝낼 길이 없어
-     * 왕복 상한까지 같은 도구를 다시 부른다 — 그 회귀를 이 줄이 잡는다.
-     */
-    expect(params[1]!.tool_choice).toBeUndefined();
-  });
-
-  /**
-   * **산출만 받는 호출은 도구가 불린 자리에서 끝난다** (models.md §3-4). 재는 것은 둘이다:
-   * **요청 수** — 두 번째 요청은 같은 입력을 정가로 한 번 더 읽고 아무도 읽지 않는 답을
-   * 받아 온다 — 과 **이력의 모양** — 결과를 남기지 않으면 짝 잃은 `tool_use`가 이력에
-   * 남아, 그 이력을 재사용하는 다음 요청이 통째로 거부된다.
-   */
-  it("outputOnly는 요청 한 번으로 끝나고 도구 결과를 이력에 남긴다", async () => {
-    const stub = makeStubClient([
-      {
-        stop_reason: "tool_use",
-        content: [
-          { type: "tool_use", id: "t1", name: "report_mood", input: {} },
-        ] as Anthropic.ContentBlock[],
-      },
-      // 이 답은 나가지 않는다 — 두 번째 요청이 있으면 스텁이 이것을 소비한다
-      {
-        stop_reason: "end_turn",
-        content: [{ type: "text", text: "아무도 읽지 않는 답" }] as Anthropic.ContentBlock[],
-      },
-    ]);
-    const handled: unknown[] = [];
-    const tool: GameToolSpec = {
-      name: "report_mood",
-      description: "테스트 도구",
-      inputSchema: { type: "object" as const, properties: {} },
-      handle(input: unknown) {
-        handled.push(input);
-        return { ok: true, message: "반영" };
-      },
-    };
-
-    const llm = new AnthropicGameLLM(testConfig, stub);
-    const result = await llm.runTurn({
-      system: "sys",
-      history: [],
-      user: "결산",
-      tools: [tool],
-      toolChoice: { name: "report_mood" },
-      outputOnly: true,
-    });
-
-    expect(allParams(stub)).toHaveLength(1);
-    // 도구는 평소대로 돈다 — 닫는 것은 왕복이지 실행이 아니다
-    expect(handled).toEqual([{}]);
-    expect(result.toolCallCount).toBe(1);
-    expect(result.stopReason).toBe("tool_use");
-
-    const messages = storedMessages(result.history);
-    expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
-    expect(messages[2]!.content).toEqual([
-      { type: "tool_result", tool_use_id: "t1", content: "반영", is_error: false },
-    ]);
-  });
-
-  it("toolChoice가 없으면 tool_choice를 싣지 않는다", async () => {
-    const stub = makeStubClient([endTurn]);
-    const tool: GameToolSpec = {
-      name: "noop",
-      description: "테스트 도구",
-      inputSchema: { type: "object" as const, properties: {} },
-      handle: () => ({ ok: true, message: "ok" }),
-    };
-    const llm = new AnthropicGameLLM(testConfig, stub);
-    await llm.runTurn({ system: "sys", history: [], user: "안녕", tools: [tool] });
-
-    expect(lastParams(stub).tool_choice).toBeUndefined();
-  });
   it("검증 실패 시 is_error를 돌려주고, 수정 재기록을 받아들인다", async () => {
     const stub = makeStubClient([
       {
@@ -595,5 +482,164 @@ describe("AnthropicGameLLM 오류 종류", () => {
     });
     expect(result.stopReason).toBe("filtered");
     expect(result.text).toContain("알겠습니다");
+  });
+});
+
+/**
+ * **산출이 JSON 하나인 호출은 도구 없이 `output_config.format`으로 간다** (models.md §3-2).
+ * 이 모델 계열은 강제 도구를 400으로 거부하고, 산출 하나에 도구 호출·결과라는 형식은
+ * 군더더기다 — 요청은 하나고 답은 본문이다.
+ */
+describe("AnthropicGameLLM 출력 스키마", () => {
+  const schema = {
+    type: "object" as const,
+    properties: { mood: { type: "string" } },
+    required: ["mood"],
+  };
+  const jsonTurn = (
+    text: string,
+    raw: Anthropic.StopReason = "end_turn",
+  ): Partial<Anthropic.Message> => ({
+    stop_reason: raw,
+    content: [{ type: "text", text }] as Anthropic.ContentBlock[],
+  });
+
+  it("outputSchema는 output_config.format으로 실리고 도구 정의 없이 요청 한 번으로 끝난다", async () => {
+    const stub = makeStubClient([jsonTurn('{"mood":"좋음"}')]);
+    const result = await new AnthropicGameLLM(testConfig, stub).runTurn({
+      system: "sys",
+      history: [],
+      user: "결산",
+      outputSchema: schema,
+    });
+
+    const params = lastParams(stub);
+    expect(params.output_config).toEqual({
+      format: {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { mood: { type: "string" } },
+          required: ["mood"],
+        },
+      },
+    });
+    expect(params.tools).toBeUndefined();
+    expect(params.tool_choice).toBeUndefined();
+    // 답은 본문이다 — 읽은 객체는 output에, 원문은 text에 그대로 남는다
+    expect(result.output).toEqual({ mood: "좋음" });
+    expect(result.text).toBe('{"mood":"좋음"}');
+    expect(result.toolCallCount).toBe(0);
+    expect(storedMessages(result.history).map((m) => m.role)).toEqual(["user", "assistant"]);
+  });
+
+  /** effort와 format은 한 객체다 — 열쇠를 두 번 펼치면 뒤가 앞을 지운다 */
+  it("사고 깊이와 출력 스키마는 output_config 한 객체에 함께 실린다", async () => {
+    const stub = makeStubClient([jsonTurn("{}")]);
+    await new AnthropicGameLLM({ ...testConfig, thinkingLevel: "medium" }, stub).runTurn({
+      system: "sys",
+      history: [],
+      user: "결산",
+      outputSchema: schema,
+    });
+
+    const params = lastParams(stub);
+    expect(params.thinking).toEqual({ type: "adaptive" });
+    expect(params.output_config?.effort).toBe("medium");
+    expect(params.output_config?.format?.type).toBe("json_schema");
+  });
+
+  it("outputSchema가 없으면 format도 output도 없다", async () => {
+    const stub = makeStubClient([endTurn]);
+    const result = await new AnthropicGameLLM(testConfig, stub).runTurn({
+      system: "sys",
+      history: [],
+      user: "안녕",
+    });
+    expect(lastParams(stub).output_config).toBeUndefined();
+    expect(result.output).toBeUndefined();
+  });
+
+  /**
+   * 읽을 수 없는 본문은 `null`이지 예외가 아니다 — 실패로 세우는 것은 부르는 쪽이다
+   * (agents.md §8). 잘린 응답의 반쪽 JSON이 그 경계다.
+   */
+  it.each([
+    ["산문", "결산은 이렇습니다.", "end_turn"],
+    ["잘린 JSON", '{"mood":', "max_tokens"],
+  ] as const)("%s으로 답한 턴은 output이 null이고 던지지 않는다", async (_label, text, raw) => {
+    const stub = makeStubClient([jsonTurn(text, raw)]);
+    const result = await new AnthropicGameLLM(testConfig, stub).runTurn({
+      system: "sys",
+      history: [],
+      user: "결산",
+      outputSchema: schema,
+    });
+    expect(result.output).toBeNull();
+    expect(result.text).toBe(text);
+  });
+
+  /**
+   * Anthropic이 받지 않는 열쇠는 요청 전체가 400이다 (models.md §3-2). 걷은 제약은 이
+   * 스키마를 낸 Zod가 지키므로 잃는 것이 없다 — 재는 것은 "무엇을 걷고 무엇을 남기는가"의
+   * 경계다: `minItems`는 0·1만 남고, 필드 이름이 제약 낱말과 같아도 필드는 남는다.
+   */
+  it("받지 않는 제약을 걷고 모든 객체에 additionalProperties: false를 세운다", async () => {
+    const given = {
+      type: "object" as const,
+      description: "결산",
+      properties: {
+        score: { type: "integer", minimum: 0, maximum: 10, description: "점수" },
+        name: { type: "string", minLength: 1, maxLength: 40 },
+        mood: { type: "string", enum: ["good", "bad"] },
+        tags: { type: "array", minItems: 1, maxItems: 4, items: { type: "string" } },
+        rows: {
+          type: "array",
+          minItems: 3,
+          items: { type: "object", properties: { id: { type: "string" } } },
+        },
+        nested: { type: "object", properties: { ratio: { type: "number", multipleOf: 0.5 } } },
+        maximum: { type: "number" },
+      },
+      required: ["score", "maximum"],
+    };
+    const snapshot = structuredClone(given);
+    const stub = makeStubClient([jsonTurn("{}")]);
+    await new AnthropicGameLLM(testConfig, stub).runTurn({
+      system: "sys",
+      history: [],
+      user: "결산",
+      outputSchema: given,
+    });
+
+    expect(lastParams(stub).output_config?.format?.schema).toEqual({
+      type: "object",
+      description: "결산",
+      additionalProperties: false,
+      properties: {
+        score: { type: "integer", description: "점수" },
+        name: { type: "string" },
+        mood: { type: "string", enum: ["good", "bad"] },
+        tags: { type: "array", minItems: 1, items: { type: "string" } },
+        rows: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: { id: { type: "string" } },
+          },
+        },
+        nested: {
+          type: "object",
+          additionalProperties: false,
+          properties: { ratio: { type: "number" } },
+        },
+        maximum: { type: "number" },
+      },
+      required: ["score", "maximum"],
+    });
+    // 부르는 쪽의 스키마는 그대로다 — Zod가 지키는 제약이 여기서 사라지면 안 된다
+    expect(given).toEqual(snapshot);
   });
 });

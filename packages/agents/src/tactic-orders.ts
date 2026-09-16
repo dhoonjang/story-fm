@@ -33,10 +33,10 @@ import type { OpsCaps, OpsOrders } from "./orders-ops";
  *
  * ## 도구를 들지 않는다
  *
- * 산출은 `report_tactic_orders` 하나로만 나온다. 그것은 도구가 아니라 **이 호출의 출력
- * 스키마**다(경기 마감의 `settle_match`와 같은 자리). 상태를 바꾸는 것은 이
- * 객체를 받은 코어이고, 실재 확인(없는 선수·떠난 표적·우리 쪽 지점)도 거기서 한다.
- * 그래서 프롬프트는 코어가 이미 막는 것을 다시 지시하지 않는다.
+ * 산출은 `{ ops, unresolved }` JSON 하나다 — 도구가 아니라 **이 호출의 출력 스키마**다
+ * (경기 마감의 결산 JSON과 같은 자리, models.md §3-2). 상태를 바꾸는 것은 이 객체를
+ * 받은 코어이고, 실재 확인(없는 선수·떠난 표적·우리 쪽 지점)도 거기서 한다. 그래서
+ * 프롬프트는 코어가 이미 막는 것을 다시 지시하지 않는다.
  *
  * 반대로 **평시 도구 설명이 갖는 판정 근거는 이 프롬프트가 직접 가져야 한다** — 경기
  * 중에는 도구 표면이 0이라 `SKILL_CATALOG`의 설명이 실리지 않는다. 없으면 같은 판정이
@@ -178,10 +178,9 @@ export function buildMatchLogBlock(state: GameState): string {
   return ["<match_log>", ...renderTurns(turns), "</match_log>"].join("\n");
 }
 
-/** 이 해석기의 한 벌 — 강제 선언 목록(`forcedTools`)도 이것을 읽는다 */
+/** 이 해석기의 한 벌 — 출력 스키마 선언 열(`outputAgents`)도 이것을 읽는다 */
 export const TACTIC_ORDERS_SPEC: OpsAgentSpec = {
   agent: "tactic-orders",
-  tool: "report_tactic_orders",
   system: TACTIC_ORDERS_SYSTEM,
   ops: TACTIC_OPS,
   caps: TACTIC_CAPS,

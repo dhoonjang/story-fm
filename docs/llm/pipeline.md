@@ -86,7 +86,7 @@ sequenceDiagram
     TL->>TL: Zod safeParse
     alt tactic_orders · training_orders · market_orders
       TL->>OP: 감독의 말 원문 + 맥락 블록
-      OP-->>TL: ops JSON (강제 도구)
+      OP-->>TL: ops JSON (출력 스키마)
       TL->>CORE: applyOps / applyTacticOrders
     else 스킬 · 조회
       TL->>CORE: 코어 명령 / 뷰
@@ -152,7 +152,7 @@ flowchart LR
   C["historyStart<br/>글자 상한 안에 드는<br/>가장 앞의 6턴 경계"]
   D["프롬프트에 실리는 이력"]
   E["planHistoryFold<br/>상한을 넘었나?"]
-  F["history-compactor<br/>report_digest"]
+  F["history-compactor"]
   G["applyHistoryDigest<br/>요약 두 칸 · foldedTurns"]
   A --> B --> C --> D
   A --> E -->|넘었다| F --> G -->|다음 턴 ③ 요약 블록| D
@@ -222,12 +222,12 @@ flowchart LR
     SK["판정형 · 진행형 스킬 9"]
     HD["손잡이 4<br/>tactic_orders · training_orders<br/>market_orders · speak_at_table"]
   end
-  subgraph INTERP["해석기 4 — 강제 산출 스키마"]
+  subgraph INTERP["해석기 4 — 출력 스키마 {ops, unresolved}"]
     direction TB
-    TO["tactic-orders<br/>report_tactic_orders"]
-    TRO["training-orders<br/>report_training_orders"]
-    MO["market-orders<br/>report_market_orders"]
-    TBO["table-orders<br/>report_table_move"]
+    TO["tactic-orders"]
+    TRO["training-orders"]
+    MO["market-orders"]
+    TBO["table-orders"]
   end
   subgraph CMD["GM에게 보이지 않는 코어 명령 38"]
     direction TB
@@ -235,7 +235,7 @@ flowchart LR
     C2["훈련·육성 6"]
     C3["이적·재정·스태프·감독직 21"]
   end
-  NT["negotiation-table<br/>reply_at_table"]
+  NT["negotiation-table"]
   HD -->|"orders 원문"| TO --> C1
   HD -->|"orders 원문"| TRO --> C2
   HD -->|"orders 원문"| MO --> C3
@@ -264,7 +264,7 @@ unresolved }`), `parseOps`가 명령별 상한(`TACTIC_CAPS` 또는 `OPS_PER_COM
 | 코어 명령 — 훈련·육성 (6) | `sign_youth` · `set_squad_number` · `set_reserve_training` · `set_development_focus` · `set_mentor` · `set_training` (`TRAINING_OPS`)                                                                                                                                                                                                                                                                                                                   |
 | 코어 명령 — 시장 (21)     | `respond_offer` · `accept_deal` · `respond_transfer_request` · `withdraw_offer` · `set_transfer_list` · `send_offer` · `open_renewal` · `open_release` · `release_player` · `exercise_buyback` · `recall_loan` · `adjust_transfer_budget` · `request_board` · `fund_transfer_budget` · `pay_player_bonus` · `set_ticket_price` · `release_staff` · `hire_staff` · `accept_manager_offer` · `counter_manager_offer` · `apply_manager_job` (`MARKET_OPS`) |
 | 경기 도구 (3, 매치 GM)    | `tactic_orders` · `advance_match` · `finalize_match` (`MATCH_TOOL_DEFINITIONS`)                                                                                                                                                                                                                                                                                                                                                                         |
-| 강제 산출 스키마 (8)      | `report_tactic_orders` · `report_training_orders` · `report_market_orders` · `settle_match` · `report_training` · `report_digest` · `reply_at_table` · `report_onboarding` (`forcedTools()`)                                                                                                                                                                                                                                                            |
+| 출력 스키마 (10)          | 해석기 넷 `{ ops, unresolved }` · 경기 마감 `SETTLE_MATCH_INPUT` · 훈련 결산 `REPORT_TRAINING_INPUT` · 스카우팅 평 `REPORT_SCOUT_INPUT` · 온보딩 `REPORT_ONBOARDING_INPUT` · 압축 `REPORT_DIGEST_INPUT` · 테이블 `REPLY_INPUT` (`outputAgents()`) — 도구 이름은 없다                                                                                                                                                                                    |
 
 수는 `packages/agents/test/skill-descriptions.test.ts`가 고정한다(24 · 그룹별). 무직인
 감독에게는 스킬 중 `accept_manager_offer` · `counter_manager_offer` · `apply_manager_job` ·
@@ -275,7 +275,7 @@ unresolved }`), `parseOps`가 명령별 상한(`TACTIC_CAPS` 또는 `OPS_PER_COM
 ### 4-2. 해석기 넷이 읽는 것
 
 네 해석기는 한 벌(`runOpsOrders`)이다 — 시스템 프롬프트 하나, 이력 없음, 맥락 블록 뒤에
-`@감독: <원문>`, 도구 하나를 `toolChoice`로 강제.
+`@감독: <원문>`, 답은 `outputSchema`로 강제한 JSON 하나 (models.md §3-2).
 
 | 해석기            | 맥락 블록                                                                                                                                                                              | 채우는 명령      | 적용                                         |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------- |
@@ -308,7 +308,7 @@ sequenceDiagram
   loop 지시가 나올 때마다
     AD->>T1: tactic_orders({orders: 원문})
     T1->>TO: #lt;ledger#gt; #lt;match_log#gt; @감독:
-    TO-->>T1: report_tactic_orders {ops, unresolved}
+    TO-->>T1: {ops, unresolved}
     T1->>CORE: 명령 적용 → refreshPacket
     T1-->>AD: #lt;core_replies#gt; + 구간 뒤 #lt;ledger#gt; + #lt;packet#gt;
   end
@@ -321,7 +321,7 @@ sequenceDiagram
     AD->>T3: finalize_match()
     T3->>CORE: buildRatingBrief → finalizeMatch (앵커)
     T3->>FM: #lt;commentary#gt; + #lt;settlement#gt;
-    FM-->>T3: settle_match (평점·적응도·능력치·심경) + 마무리 중계
+    FM-->>T3: {ratings, moods, closing} — 결산 + 마무리 중계
     T3->>CORE: settleMatchRating · applyMoodNotes
     T3-->>AD: 결산 요약 + #lt;closing#gt;
   end
@@ -354,8 +354,8 @@ sequenceDiagram
 flowchart LR
   A["코어: 앵커 계산<br/>(기준 평점 · 성사 확률 · 지갑 앵커 …)"]
   B["브리프 조립<br/>사실 블록 + 앵커 블록 (이력 없음)"]
-  C["LLM 호출<br/>toolChoice: {name} 강제 · 첫 요청에만"]
-  D{"도구가 불렸나?<br/>Zod를 지났나?"}
+  C["LLM 호출<br/>outputSchema — 도구 없이 JSON 하나"]
+  D{"산출이 왔나?<br/>Zod를 지났나?"}
   E["코어: 한도로 자름<br/>앵커 ± 밴드 · 대상 좁힘 · 첫 줄만"]
   F["한 번 반영 표식<br/>rated · settled · foldedTurns"]
   G["앵커 그대로 반영<br/>+ 로그 (anchorStands)"]
@@ -366,12 +366,12 @@ flowchart LR
 
 | 자리      | 앵커 (코어)                                        | 산출 스키마                                    | 한도 (코어)                                                                                                              | 실패하면                 |
 | --------- | -------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
-| 경기 결산 | `finalizeMatch` 기준 평점                          | `settle_match`                                 | 평점 ±`RATING_BAND`(1.2) · 적응도 −2~+8 · 능력치 ≤`MATCH_ATTR_CAP`(11)명 · 심경 ≤`MOOD_BATCH`(8) · `rated`               | 앵커 평점, 마무리는 GM   |
-| 훈련 결산 | 코어는 적응도를 움직이지 않음                      | `report_training`                              | 적응도 −1~+3 · 자리 0~~2 · 능력치 3~~6명(감독 훈련 축) — 전부 × 세션 수 ÷ `SESSIONS_PER_WEEK`(5) · 세션 엔트리 `settled` | 빈 결산 카드             |
-| 교섭 상대 | `counterpartyAnchor` — 확률 사다리 50 / 25 / 12.5% | `reply_at_table`                               | 판정 ±한 칸 · 금액 ±15% · 연수 ±1 · 합법 범위(`counterBoundsOf`) · 인내                                                  | 앵커 판정, 상대는 말없이 |
+| 경기 결산 | `finalizeMatch` 기준 평점                          | `SETTLE_MATCH_INPUT`                           | 평점 ±`RATING_BAND`(1.2) · 적응도 −2~+8 · 능력치 ≤`MATCH_ATTR_CAP`(11)명 · 심경 ≤`MOOD_BATCH`(8) · `rated`               | 앵커 평점, 마무리는 GM   |
+| 훈련 결산 | 코어는 적응도를 움직이지 않음                      | `REPORT_TRAINING_INPUT`                        | 적응도 −1~+3 · 자리 0~~2 · 능력치 3~~6명(감독 훈련 축) — 전부 × 세션 수 ÷ `SESSIONS_PER_WEEK`(5) · 세션 엔트리 `settled` | 빈 결산 카드             |
+| 교섭 상대 | `counterpartyAnchor` — 확률 사다리 50 / 25 / 12.5% | `REPLY_INPUT`                                  | 판정 ±한 칸 · 금액 ±15% · 연수 ±1 · 합법 범위(`counterBoundsOf`) · 인내                                                  | 앵커 판정, 상대는 말없이 |
 | 대화 판정 | 수용성 앵커(`receptivityOf`)                       | `team_talk`(`players`)의 `outcome`·`intensity` | outcome은 앵커 ± 한 단계 · 델타는 코어 표 · 선수별 사기 합계 하루 ±8 · 이레 ±20                                          | 도구 반려                |
-| 온보딩    | `startingWalletAnchor` · 휴리스틱 능력치           | `report_onboarding`                            | 지갑 ±40% · 축 ±8 · 합 ±10 · 시작 사건 ≤3 (`<club>`의 id만)                                                              | **게임을 만들지 않는다** |
-| 이력 압축 | 접을 지점(`planHistoryFold`)                       | `report_digest`                                | 지난 일 ≤1,500자 · 열린 일 ≤600자 · 넘으면 **거절**(자르지 않음) · 관계 등급은 아는 쌍만 한 칸(`applyRelationTiers`)     | 접지 않음                |
+| 온보딩    | `startingWalletAnchor` · 휴리스틱 능력치           | `REPORT_ONBOARDING_INPUT`                      | 지갑 ±40% · 축 ±8 · 합 ±10 · 시작 사건 ≤3 (`<club>`의 id만)                                                              | **게임을 만들지 않는다** |
+| 이력 압축 | 접을 지점(`planHistoryFold`)                       | `REPORT_DIGEST_INPUT`                          | 지난 일 ≤1,500자 · 열린 일 ≤600자 · 넘으면 **거절**(자르지 않음) · 관계 등급은 아는 쌍만 한 칸(`applyRelationTiers`)     | 접지 않음                |
 
 - **반영 표식은 상태에 둔다.** 도구 루프가 같은 도구를 두 번 부를 수 있으므로 두 번째
   호출은 "이미 반영"으로 답하고 아무것도 하지 않는다. 재시도 가드(`retryOnce`의
@@ -466,8 +466,8 @@ flowchart TB
 | 도구 카탈로그 · 배선 (`buildToolSpecs` · `buildGmTools` · `CORE_COMMANDS`)   | `packages/agents/src/gm-tools.ts` · `skill-descriptions.ts`                                          |
 | 해석기 한 벌 (`runOpsOrders` · `parseOps` · `applyOps`)                      | `packages/agents/src/orders-ops.ts` · `tactic-orders.ts` · `training-orders.ts` · `market-orders.ts` |
 | 경기 도구 셋 (`buildMatchTools`) · 의도 적용                                 | `packages/agents/src/match-gm.ts` · `tactic-apply.ts`                                                |
-| 강제 산출 선언 여덟 (`forcedTools`)                                          | `packages/agents/src/forced-tools.ts`                                                                |
-| 재시도 규약 (`retryOnce` · `requireToolCall`)                                | `packages/agents/src/retry.ts`                                                                       |
+| 출력 스키마 선언 열 (`outputAgents`)                                         | `packages/agents/src/output-agents.ts`                                                               |
+| 재시도 규약 (`retryOnce` · `readOutput`)                                     | `packages/agents/src/retry.ts`                                                                       |
 | mock 경로 — 대본 어댑터 · 발화 → 도구 표                                     | `packages/llm/src/scripted-adapter.ts` · `packages/agents/src/mock-script.ts`                        |
 | 제공자 중립 계약 (`GameLLM` · `TurnRequest` · `StopReason`)                  | `packages/llm/src/game-llm.ts`                                                                       |
 | 어댑터 · 도구 루프 (`MAX_TOOL_ITERATIONS` 8)                                 | `packages/llm/src/anthropic-adapter.ts` · `gemini-adapter.ts` · `openai-adapter.ts`                  |

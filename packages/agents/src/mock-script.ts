@@ -268,10 +268,11 @@ export function peaceScript(
 }
 
 /** 해석기의 대본 — 같은 말이 같은 표의 같은 줄에서 명령의 인자를 받는다 */
-export function ordersScript(state: GameState, tool: string, said: string): ScriptedTurn {
+export function ordersScript(state: GameState, said: string): ScriptedTurn {
   const hit = findLine(said);
   const ops = hit?.line.ops?.({ state, named: hit.named }) ?? {};
-  return { calls: [{ tool, input: { ops } }] };
+  // 실모드의 해석기와 같은 산출 — 도구가 아니라 `{ ops }` JSON 하나다 (models.md §3-2)
+  return { output: { ops } };
 }
 
 // ── 중계 ───────────────────────────────────────────────

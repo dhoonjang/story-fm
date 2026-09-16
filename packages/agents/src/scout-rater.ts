@@ -7,15 +7,9 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { formatMoney, SCOUT_VERDICT_MAX, type ScoutReportCard } from "@story-fm/domain";
-import {
-  agentConfig,
-  createGameLLM,
-  resolveLlmMode,
-  type GameLLM,
-  type GameToolSpec,
-} from "@story-fm/llm";
-import { retryOnce, requireToolCall, anchorStands } from "./retry";
-import { inputError, toToolSchema } from "./tool-schema";
+import { agentConfig, createGameLLM, resolveLlmMode, type GameLLM } from "@story-fm/llm";
+import { anchorStands, readOutput, retryOnce } from "./retry";
+import { toToolSchema } from "./tool-schema";
 
 /**
  * 스카우팅 평 — 도착한 보고서 한 장에 **한 줄 평**을 붙인다.
@@ -62,13 +56,7 @@ const VerdictSchema = z.object({
  */
 const VerdictInputSchema = z.object({ verdicts: z.array(VerdictSchema) });
 
-/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
-export const REPORT_SCOUT_TOOL = "report_scout_verdicts";
-
-export const REPORT_SCOUT_DESCRIPTION =
-  "도착한 보고서마다 한 줄 평을 제출한다. 상한을 넘긴 문장은 코어가 자른다.";
-
-/** 모델이 보는 입력 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
+/** 모델이 보는 출력 스키마 — 위 Zod 한 벌에서 파생한다 (prompts.md §2 · models.md §3-2) */
 export const REPORT_SCOUT_INPUT = toToolSchema(VerdictInputSchema);
 
 /** 보고서 한 장을 사실 줄로 — 카드가 이미 조립한 값에 강점·약점만 더한다 */
@@ -101,35 +89,26 @@ export function buildScoutPrompt(state: GameState, cards: readonly ScoutReportCa
   ].join("\n");
 }
 
-function makeVerdictTool(
+/** 평을 서류에 남긴다 — 목록 밖의 id는 버리고, 남은 수를 돌려준다 */
+function recordVerdicts(
   state: GameState,
   subjects: readonly ScoutReportCard[],
-  onRated: () => void,
-): GameToolSpec {
+  verdicts: readonly { playerId: string; verdict: string }[],
+): number {
   const byId = new Map(subjects.map((card) => [card.playerId, card]));
-  return {
-    name: REPORT_SCOUT_TOOL,
-    description: REPORT_SCOUT_DESCRIPTION,
-    inputSchema: REPORT_SCOUT_INPUT,
-    handle(input: unknown) {
-      const parsed = VerdictInputSchema.safeParse(input);
-      if (!parsed.success) return inputError(parsed.error);
-      let stood = 0;
-      for (const { playerId, verdict } of parsed.data.verdicts) {
-        const card = byId.get(playerId);
-        // 이번 턴에 도착하지 않은 id — 모델이 지어냈거나 옛 보고서다
-        if (!card) continue;
-        // 덮어쓰지 않는다 — 이미 평이 있으면 코어가 거절한다 (scouting.ts)
-        if (!recordScoutVerdict(state, playerId, verdict)) continue;
-        // ⚠️ 화면에 서는 문장은 **서류에 남은 것**이다 — 길이를 자른 것은 코어라,
-        // 모델이 보낸 원문을 카드에 실으면 모달과 카드가 다른 문장을 말한다
-        card.verdict = arrivedScoutReport(state, playerId)?.verdict ?? null;
-        stood += 1;
-      }
-      if (stood > 0) onRated();
-      return { ok: true, message: `한 줄 평 ${stood}건을 보고서에 남겼습니다` };
-    },
-  };
+  let stood = 0;
+  for (const { playerId, verdict } of verdicts) {
+    const card = byId.get(playerId);
+    // 이번 턴에 도착하지 않은 id — 모델이 지어냈거나 옛 보고서다
+    if (!card) continue;
+    // 덮어쓰지 않는다 — 이미 평이 있으면 코어가 거절한다 (scouting.ts)
+    if (!recordScoutVerdict(state, playerId, verdict)) continue;
+    // ⚠️ 화면에 서는 문장은 **서류에 남은 것**이다 — 길이를 자른 것은 코어라,
+    // 모델이 보낸 원문을 카드에 실으면 모달과 카드가 다른 문장을 말한다
+    card.verdict = arrivedScoutReport(state, playerId)?.verdict ?? null;
+    stood += 1;
+  }
+  return stood;
 }
 
 /**
@@ -156,20 +135,18 @@ export async function rateScoutReports(
   let client = llm;
   await retryOnce(
     "rater:scout",
-    () =>
-      requireToolCall(REPORT_SCOUT_TOOL, () => {
-        client ??= createGameLLM(agentConfig("scout-rater"));
-        return client.runTurn({
-          system: SCOUT_RATER_SYSTEM,
-          history: [],
-          user: buildScoutPrompt(state, subjects),
-          tools: [makeVerdictTool(state, subjects, () => (rated = true))],
-          toolChoice: { name: REPORT_SCOUT_TOOL },
-          // 산출은 이 도구 하나다 — 결과를 돌려주는 두 번째 요청은 같은 입력을
-          // 한 번 더 읽고 아무도 읽지 않는 답을 받아 온다 (models.md §3-4)
-          outputOnly: true,
-        });
-      }),
+    async () => {
+      client ??= createGameLLM(agentConfig("scout-rater"));
+      const result = await client.runTurn({
+        system: SCOUT_RATER_SYSTEM,
+        history: [],
+        user: buildScoutPrompt(state, subjects),
+        // 산출은 JSON 하나다 — 도구 왕복이 없다 (models.md §3-2)
+        outputSchema: REPORT_SCOUT_INPUT,
+      });
+      const data = readOutput("rater:scout", VerdictInputSchema, result);
+      if (recordVerdicts(state, subjects, data.verdicts) > 0) rated = true;
+    },
     // 평이 하나라도 서류에 남았으면 다시 부르지 않는다 — 코어가 덮어쓰기를 거절하므로
     // 두 번째 호출은 남은 자리에도 같은 결과를 낸다
     () => rated,

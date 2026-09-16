@@ -4,6 +4,7 @@ import {
   isStoredLlmHistory,
   isTextHistoryMessage,
   type GameLLM,
+  type JsonObjectSchema,
   type ToolOutcome,
   type StopReason,
   type TurnHistory,
@@ -19,6 +20,7 @@ import {
   withErrorKind,
   type LlmErrorKind,
 } from "./llm-error";
+import { parseOutput } from "./structured-output";
 
 /** 한 턴 안에서 tool call 왕복 허용 횟수 — 조회 + 실행이 같이 도므로 여유를 둔다 */
 const MAX_TOOL_ITERATIONS = 8;
@@ -43,6 +45,79 @@ const EFFORT: Record<ThinkingLevel, "low" | "medium" | "high"> = {
 };
 
 const CACHE: Anthropic.CacheControlEphemeral = { type: "ephemeral" };
+
+/**
+ * 구조화 출력이 받지 않는 스키마 열쇠 — 실리면 요청 전체가 400이다 (models.md §3-2).
+ * 수치 제약 · 문자열 길이 · 배열 상한. `minItems`는 0과 1만 받아 따로 가른다.
+ */
+const ANTHROPIC_UNSUPPORTED_KEYS: ReadonlySet<string> = new Set([
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+  "minLength",
+  "maxLength",
+  "maxItems",
+]);
+
+/** 값이 스키마(또는 스키마 목록)인 열쇠 — 그 아래로 내려가며 걷는다 */
+const SCHEMA_VALUE_KEYS: ReadonlySet<string> = new Set([
+  "items",
+  "prefixItems",
+  "anyOf",
+  "allOf",
+  "oneOf",
+  "not",
+]);
+
+/** 값이 "이름 → 스키마" 맵인 열쇠 — 이름은 필드명이라 걷지 않고 값만 내려간다 */
+const SCHEMA_MAP_KEYS: ReadonlySet<string> = new Set(["properties", "$defs", "definitions"]);
+
+function isObjectType(type: unknown): boolean {
+  return type === "object" || (Array.isArray(type) && type.includes("object"));
+}
+
+function adaptSchemaNode(node: unknown): unknown {
+  if (node === null || typeof node !== "object" || Array.isArray(node)) return node;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (ANTHROPIC_UNSUPPORTED_KEYS.has(key)) continue;
+    if (key === "minItems") {
+      if (typeof value === "number" && value <= 1) out[key] = value;
+      continue;
+    }
+    if (SCHEMA_VALUE_KEYS.has(key)) {
+      out[key] = Array.isArray(value) ? value.map(adaptSchemaNode) : adaptSchemaNode(value);
+    } else if (SCHEMA_MAP_KEYS.has(key) && value !== null && typeof value === "object") {
+      out[key] = Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([name, schema]) => [
+          name,
+          adaptSchemaNode(schema),
+        ]),
+      );
+    } else {
+      // enum 값·description·required 같은 데이터 — 사본으로 남긴다
+      out[key] = structuredClone(value);
+    }
+  }
+  if (isObjectType(out.type)) out.additionalProperties = false;
+  return out;
+}
+
+/**
+ * 출력 스키마를 Anthropic의 구조화 출력이 받는 부분집합으로 옮긴다 (models.md §3-2).
+ *
+ * 받지 않는 열쇠(`ANTHROPIC_UNSUPPORTED_KEYS`, 1을 넘는 `minItems`)를 걷고, **모든 객체에
+ * `additionalProperties: false`를 세운다** — 없으면 요청이 거부된다. 걷어도 잃는 것이
+ * 없다: 그 제약은 이 스키마를 낸 Zod가 그대로 지킨다.
+ *
+ * 걷는 것은 **스키마 낱말이 서는 자리**뿐이다 — `properties` 아래의 이름은 필드명이라,
+ * 필드가 `maximum`이라 불려도 그대로 남는다. 부르는 쪽의 객체는 건드리지 않는다.
+ */
+function anthropicOutputSchema(schema: JsonObjectSchema): Record<string, unknown> {
+  return adaptSchemaNode(schema) as Record<string, unknown>;
+}
 
 /**
  * SDK 클라이언트는 프로세스에 하나다 — 에이전트마다 새로 만들면 연결 풀과 재시도
@@ -255,8 +330,17 @@ export class AnthropicGameLLM implements GameLLM {
       description: t.description,
       input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
     }));
-    const forcedTool: Anthropic.ToolChoiceTool | undefined =
-      typeof req.toolChoice === "object" ? { type: "tool", name: req.toolChoice.name } : undefined;
+    /**
+     * 출력 스키마는 `output_config.format`으로 간다 (models.md §3-2) — 사고 깊이(`effort`)와
+     * **같은 객체**라 둘 다 있으면 한 객체에 합쳐 싣는다. 열쇠를 두 번 펼치면 뒤가 앞을 지운다.
+     */
+    const format: Anthropic.JSONOutputFormat | undefined = req.outputSchema
+      ? { type: "json_schema", schema: anthropicOutputSchema(req.outputSchema) }
+      : undefined;
+    const outputConfig: Anthropic.OutputConfig | undefined =
+      effort || format
+        ? { ...(effort ? { effort } : {}), ...(format ? { format } : {}) }
+        : undefined;
 
     // 시스템 블록 — 앞이 더 안정적. 이력 마커 몫으로 1개를 남긴다
     const systemTexts = (Array.isArray(req.system) ? req.system : [req.system]).filter(
@@ -306,23 +390,16 @@ export class AnthropicGameLLM implements GameLLM {
        */
       const lastRound = iter === MAX_TOOL_ITERATIONS - 1;
       const toolChoice: Anthropic.ToolChoice | undefined =
-        toolDefs.length === 0
-          ? undefined
-          : lastRound
-            ? { type: "none" }
-            : // 강제는 첫 요청에만 — 도구 결과를 돌려준 뒤에도 걸어 두면 모델이 턴을
-              // 끝낼 수 없어 왕복 상한까지 같은 도구를 다시 부른다 (TurnRequest.toolChoice)
-              iter === 0
-              ? forcedTool
-              : undefined;
+        toolDefs.length > 0 && lastRound ? { type: "none" } : undefined;
       // 증분 캐시 — 첫 요청은 이력 끝까지, 이후 반복은 직전 메시지까지 캐시한다
       const markUpto = iter === 0 ? baseHistory.length - 1 : messages.length - 1;
       const params: Anthropic.MessageCreateParamsNonStreaming = {
         model: this.config.model,
         max_tokens: req.maxTokens ?? this.config.maxTokens,
-        // 사고는 **설정이 적었을 때만** 건다 — 적지 않으면 두 파라미터가 다 빠져
+        // 사고는 **설정이 적었을 때만** 건다 — 적지 않으면 그 파라미터가 빠져
         // 모델의 기본 사고가 그대로 돈다 (models.md §1-2)
-        ...(effort && { thinking: { type: "adaptive" as const }, output_config: { effort } }),
+        ...(effort ? { thinking: { type: "adaptive" as const } } : {}),
+        ...(outputConfig ? { output_config: outputConfig } : {}),
         system,
         ...(toolDefs.length > 0 ? { tools: toolDefs } : {}),
         ...(toolChoice ? { tool_choice: toolChoice } : {}),
@@ -386,13 +463,6 @@ export class AnthropicGameLLM implements GameLLM {
         });
       }
       messages.push({ role: "user", content: results });
-
-      /**
-       * **산출만 받는 호출은 여기서 닫는다** — 결과는 이력에만 남기고 모델에게 돌려주지
-       * 않는다 (models.md §3-4). 돌려주면 같은 입력을 정가로 한 번 더 읽고, 아무도 읽지
-       * 않는 응답을 받아 온다.
-       */
-      if (req.outputOnly) break;
     }
 
     // 이력 위생 — 마지막 assistant 턴에 미해결 tool_use가 남아 있으면
@@ -440,6 +510,8 @@ export class AnthropicGameLLM implements GameLLM {
       usage,
       toolCallCount,
       stopReason,
+      // 스키마를 실은 호출에만 있다 — 본문이 JSON이 아니면 `null`이고 던지지 않는다
+      ...(req.outputSchema ? { output: parseOutput(text) } : {}),
     };
   }
 }

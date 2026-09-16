@@ -1935,7 +1935,7 @@ DF +1.4 · MF +1.1 · FW +0.9 · 도움 +0.6 · 무실점 GK +0.8/DF +0.5 · 실
 
 **경기 후 LLM 채점** — 코어가 앵커를 박고(`buildRatingBrief`), 경기 마감 에이전트가
 이 경기의 중계 전부(`<commentary>`)와 결산 표(`<settlement>` — 기준 평점·기록·사건 줄)를
-읽어 앵커 ±`RATING_BAND`(1.2) 안에서 재채점 + 근거 한 줄을 `settle_match`로 낸다
+읽어 앵커 ±`RATING_BAND`(1.2) 안에서 재채점 + 근거 한 줄을 결산 JSON으로 낸다
 (→ [../llm/pipeline.md](../llm/pipeline.md) §5·§7). 실패하면 앵커가 남는다(경기 결과를
 막지 않는다). mock 모드는 건너뛴다.
 

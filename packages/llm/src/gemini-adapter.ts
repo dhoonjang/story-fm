@@ -15,6 +15,7 @@ import {
   isStoredLlmHistory,
   isTextHistoryMessage,
   type GameLLM,
+  type JsonObjectSchema,
   type ToolOutcome,
   type StopReason,
   type TurnHistory,
@@ -31,6 +32,7 @@ import {
   withErrorKind,
   type LlmErrorKind,
 } from "./llm-error";
+import { parseOutput } from "./structured-output";
 
 /** 한 턴 안에서 함수 호출 왕복 허용 횟수. */
 const MAX_TOOL_ITERATIONS = 8;
@@ -85,27 +87,29 @@ async function sendWithRetry<T>(maxRetries: number, send: () => Promise<T>): Pro
   }
 }
 
-/**
- * 강제 도구(`mode: ANY`)로 보낼 스키마에서 **`maxItems`를 걷는다** (models.md §3-2).
- *
- * Gemini는 그 모드에서 스키마를 **펼쳐** 디코딩 문법을 만들어, `maxItems: n`은 항목
- * 스키마를 n벌 복제한 문법이 된다. 항목이 조금만 복잡해도 그 문법이 한도를 넘어 요청
- * 전체가 400 `INVALID_ARGUMENT`으로 떨어지는데, 본문은 `Request contains an invalid
- * argument.` 한 줄뿐이라 어느 칸이 문제인지 말하지 않는다 — `auto`로는 지나던 같은
- * 스키마가 강제에서만 걸리므로 부르는 쪽에서는 원인이 보이지 않는다.
- *
- * 걷어도 잃는 것이 없다: 개수 상한은 **Zod가 지키고**(도구 핸들러), 모델이 알아야 하는
- * 수는 그 인자의 설명 문장에 있다. 제공자 하나의 스키마 부분집합을 흡수하는 자리는
- * 어댑터다 (AGENTS.md §6-1) — 도구를 세우는 쪽이 제공자를 알면 안 된다.
- */
-function withoutMaxItems<T>(schema: T): T {
-  if (Array.isArray(schema)) return schema.map((item) => withoutMaxItems(item)) as T;
-  if (schema === null || typeof schema !== "object") return schema;
+function withoutMaxItems(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(withoutMaxItems);
+  if (node === null || typeof node !== "object") return node;
   return Object.fromEntries(
-    Object.entries(schema as Record<string, unknown>)
+    Object.entries(node as Record<string, unknown>)
       .filter(([key]) => key !== "maxItems")
       .map(([key, value]) => [key, withoutMaxItems(value)]),
-  ) as T;
+  );
+}
+
+/**
+ * 출력 스키마를 Gemini의 `responseJsonSchema`로 옮긴다 — **`maxItems`를 걷는다** (models.md §3-2).
+ *
+ * Gemini는 구조화 출력에서도 스키마를 문법으로 펼쳐, `maxItems: n`은 항목 스키마 n벌이
+ * 된다 — 항목이 조금만 복잡해도 그 문법이 한도를 넘어 요청 전체가 400 `INVALID_ARGUMENT`이고,
+ * 본문은 어느 칸이 문제인지 말하지 않는다. 2026-09 실측(`pnpm balance live-schema`):
+ * `maxItems` 하나만 걷으면 열 선언이 전부 지나고, `minLength` · `maxLength` · `pattern` ·
+ * `minimum` · `maximum` · `minItems`는 그대로 받는다. 걷어도 잃는 것이 없다 — 개수 상한은
+ * 그 산출의 Zod가 지킨다. 부르는 쪽의 객체는 건드리지 않는다 (AGENTS.md §6 — 제공자의
+ * 부분집합은 어댑터가 흡수한다).
+ */
+function geminiOutputSchema(schema: JsonObjectSchema): JsonObjectSchema {
+  return withoutMaxItems(schema) as JsonObjectSchema;
 }
 
 /** 제공자가 내용을 막은 사유 — 텍스트 생성에서 올 수 있는 것만 센다 */
@@ -252,12 +256,6 @@ export class GeminiGameLLM implements GameLLM {
     const systemInstruction = (Array.isArray(req.system) ? req.system : [req.system])
       .filter((block) => block.trim().length > 0)
       .join("\n\n");
-    /**
-     * 이 턴이 강제로 열리는가 — 그러면 스키마에서 `maxItems`를 걷는다
-     * (`withoutMaxItems`). 첫 요청만이 아니라 **턴 전체**에서 걷는 이유는 뒤의 왕복이
-     * 같은 도구를 다른 모양으로 보게 두지 않기 위해서다.
-     */
-    const forced = typeof req.toolChoice === "object";
 
     const generationConfig: GenerateContentConfig = {
       systemInstruction,
@@ -265,6 +263,16 @@ export class GeminiGameLLM implements GameLLM {
       thinkingConfig: {
         thinkingLevel: thinkingLevel(this.config.thinkingLevel),
       },
+      /**
+       * 출력 스키마 — JSON 본문을 강제한다 (models.md §3-2). MIME 타입을 함께 세워야
+       * 스키마가 읽힌다. chat 설정에 두므로 per-request config가 없는 요청에 그대로 실린다.
+       */
+      ...(req.outputSchema
+        ? {
+            responseMimeType: "application/json",
+            responseJsonSchema: geminiOutputSchema(req.outputSchema),
+          }
+        : {}),
       /**
        * 시한 — **chat 레벨 config에 넣는다.** `sendMessage`의 per-request config는
        * chat config를 상속하지 않고 통째로 대체하므로(SDK 계약), 거기에 넣으면
@@ -280,9 +288,7 @@ export class GeminiGameLLM implements GameLLM {
                 functionDeclarations: tools.map((tool) => ({
                   name: tool.name,
                   description: tool.description,
-                  parametersJsonSchema: forced
-                    ? withoutMaxItems(tool.inputSchema)
-                    : tool.inputSchema,
+                  parametersJsonSchema: tool.inputSchema,
                 })),
               },
             ],
@@ -302,31 +308,13 @@ export class GeminiGameLLM implements GameLLM {
     });
 
     /**
-     * 강제 도구 — 첫 요청에만 건다 (TurnRequest.toolChoice). 계속 걸어 두면
-     * 모델이 턴을 끝낼 길이 없어 왕복 상한까지 같은 도구를 다시 부른다.
+     * **마지막 왕복은 도구를 못 부르게 걸어 보낸다** — 상한에 닿은 턴도 문장으로
+     * 끝나야 한다 (models.md §3). 도구 **선언**은 그대로 둔 채 모드만 `NONE`이다:
+     * 선언을 빼면 이력에 남은 함수 호출이 짝을 잃는다.
      *
      * ⚠️ per-request config는 chat 설정을 **통째로 대체**하므로(SDK 계약,
      * `sendMessage`) 모드만 얹지 않고 `generationConfig`를 그대로 펼쳐 넘긴다 —
-     * 안 그러면 systemInstruction·도구·출력 상한·시한이 첫 요청에서 사라진다.
-     */
-    const forcedConfig: GenerateContentConfig | undefined =
-      typeof req.toolChoice === "object" && tools.length > 0
-        ? {
-            ...generationConfig,
-            toolConfig: {
-              functionCallingConfig: {
-                mode: FunctionCallingConfigMode.ANY,
-                allowedFunctionNames: [req.toolChoice.name],
-              },
-            },
-          }
-        : undefined;
-
-    /**
-     * **마지막 왕복은 도구를 못 부르게 걸어 보낸다** — 상한에 닿은 턴도 문장으로
-     * 끝나야 한다 (models.md §3). 도구 **선언**은 그대로 둔 채 모드만 `NONE`이다:
-     * 선언을 빼면 이력에 남은 함수 호출이 짝을 잃는다. 위 강제와 같은 이유로
-     * `generationConfig`를 통째로 펼쳐 넘긴다.
+     * 안 그러면 systemInstruction·도구·출력 상한·시한이 그 요청에서 사라진다.
      */
     const noToolsConfig: GenerateContentConfig | undefined =
       tools.length > 0
@@ -358,13 +346,7 @@ export class GeminiGameLLM implements GameLLM {
       let response: GenerateContentResponse | undefined;
       let responseText = "";
 
-      const perRequest = lastRound
-        ? noToolsConfig
-          ? { config: noToolsConfig }
-          : {}
-        : iter === 0 && forcedConfig
-          ? { config: forcedConfig }
-          : {};
+      const perRequest = lastRound && noToolsConfig ? { config: noToolsConfig } : {};
 
       if (req.onText) {
         const stream = await sendWithRetry(this.config.maxRetries, () =>
@@ -445,14 +427,10 @@ export class GeminiGameLLM implements GameLLM {
       }
 
       /**
-       * 여기서 턴을 닫는 두 자리 — 어느 쪽이든 결과를 합성 content로 남기고 끝낸다.
-       *
-       * - **산출만 받는 호출**(`outputOnly`)은 도구가 불린 순간 답이 완성돼 있다
-       *   (models.md §3-4). 결과를 돌려주면 같은 입력을 정가로 한 번 더 읽는다.
-       * - **마지막 왕복**은 `NONE`으로 나가 여기 닿지 않는 것이 정상이다 — 제공자가 그
-       *   모드를 무시하고 함수를 부른 경우에만 걸린다.
+       * **마지막 왕복**은 `NONE`으로 나가 여기 닿지 않는 것이 정상이다 — 제공자가 그
+       * 모드를 무시하고 함수를 부른 경우에만 걸린다. 결과는 합성 content로 남기고 끝낸다.
        */
-      if (req.outputOnly || lastRound) {
+      if (lastRound) {
         danglingResults = results;
         break;
       }
@@ -495,6 +473,8 @@ export class GeminiGameLLM implements GameLLM {
       usage,
       toolCallCount,
       stopReason,
+      // 스키마를 실은 호출에만 있다 — 본문이 JSON이 아니면 `null`이고 던지지 않는다
+      ...(req.outputSchema ? { output: parseOutput(text) } : {}),
     };
   }
 }

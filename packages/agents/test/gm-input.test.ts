@@ -69,6 +69,7 @@ import {
   buildGmTools,
   buildBoardMovesBlock,
   buildToolSpecs,
+  REPORT_ONBOARDING_INPUT,
   buildMatchReference,
   describeCharacters,
   describeClub,
@@ -721,7 +722,7 @@ describe("새 게임 온보딩 — 판정과 첫 장면이 한 호출이다", ()
       `@${headCoachOf(state).characterId}: ${tail}`,
     ].join("\n");
 
-  /** 판정 하나 — 강제 도구가 받는 인자의 모양 */
+  /** 판정 하나 — 출력 스키마가 받는 산출의 모양 (첫 장면 `scene`은 `reply`가 붙인다) */
   const report = {
     wallet: 2_000_000,
     reason: "에이전트로 오래 벌었다",
@@ -732,15 +733,14 @@ describe("새 게임 온보딩 — 판정과 첫 장면이 한 호출이다", ()
   };
 
   /**
-   * 산출 도구를 부르고 본문으로 장면을 쓰는 응답 — 실제 호출의 두 왕복을 한 자리에서
-   * 흉내낸다. `tools`에 실린 핸들러를 그대로 부르므로 Zod 검증도 같은 문을 지난다.
+   * 판정 셋과 첫 장면을 JSON 하나로 낸 응답 — 실모드에서 어댑터가 읽어 `output`에 세우는
+   * 그 모양이다 (models.md §3-2). `skipOutput`은 산문으로 답해 산출이 없는 응답이다.
    */
   const reply = (
-    input: TurnRequest,
+    _input: TurnRequest,
     text: string,
-    options: { stopReason?: StopReason; ops?: unknown; skipTool?: boolean } = {},
+    options: { stopReason?: StopReason; skipOutput?: boolean } = {},
   ) => {
-    if (!options.skipTool) input.tools?.[0]?.handle(options.ops ?? report);
     return {
       text,
       history: {
@@ -751,8 +751,9 @@ describe("새 게임 온보딩 — 판정과 첫 장면이 한 호출이다", ()
       },
       historyBase: 0,
       usage: { inputTokens: 100, outputTokens: 80, cacheReadTokens: 0, cacheWriteTokens: 0 },
-      toolCallCount: options.skipTool ? 0 : 1,
+      toolCallCount: 0,
       stopReason: options.stopReason ?? ("completed" as const),
+      output: options.skipOutput ? null : { ...report, scene: text },
     };
   };
 
@@ -770,9 +771,9 @@ describe("새 게임 온보딩 — 판정과 첫 장면이 한 호출이다", ()
 
   /**
    * **한 호출이 둘을 낸다** — 갈라 두면 장면을 쓰는 쪽이 방금 정해진 실마리를 모른다.
-   * 도구가 장부를 움직이고 본문이 장면이 되는 것을 한 자리에서 잰다 (agents.md §4-2).
+   * 판정이 장부를 움직이고 `scene` 칸이 장면이 되는 것을 한 자리에서 잰다 (agents.md §4-2).
    */
-  it("도구의 판정이 장부에 서고 본문이 첫 장면이 된다", async () => {
+  it("판정이 장부에 서고 scene 칸이 첫 장면이 된다", async () => {
     const state = game();
     const llm: GameLLM = {
       runTurn: async (input) => reply(input, scene(state, "선수단부터 보시겠습니까.")),
@@ -789,14 +790,14 @@ describe("새 게임 온보딩 — 판정과 첫 장면이 한 호출이다", ()
     expect(state.openings?.map((o) => o.title)).toEqual(["언론의 의문"]);
   });
 
-  /** 산출은 도구 하나로 강제한다 — 본문만 돌아온 응답은 실패다 (agents.md §8) */
-  it("도구를 부르지 않은 응답은 다시 시도한다", async () => {
+  /** 산출의 꼴은 출력 스키마가 강제한다 — 산출 없이 돌아온 응답은 실패다 (agents.md §8) */
+  it("산출 없이 답한 응답은 다시 시도한다", async () => {
     const state = game();
     let call = 0;
     const llm: GameLLM = {
       runTurn: async (input) =>
         ++call === 1
-          ? reply(input, scene(state, "무엇부터 볼까요."), { skipTool: true })
+          ? reply(input, scene(state, "무엇부터 볼까요."), { skipOutput: true })
           : reply(input, scene(state, "선수단부터 보시겠습니까.")),
     };
 
@@ -827,8 +828,9 @@ describe("새 게임 온보딩 — 판정과 첫 장면이 한 호출이다", ()
     // 시스템은 이 호출의 프롬프트 하나다 — 날짜가 섞이면 캐시 프리픽스가 매 게임 갈린다
     const system = request?.system;
     expect(Array.isArray(system) ? system.join("\n") : (system ?? "")).not.toContain(state.date);
-    // 산출은 강제된 도구 하나다
-    expect(request?.toolChoice).toEqual({ name: "report_onboarding" });
+    // 산출은 출력 스키마 하나다 — 도구는 없다 (models.md §3-2)
+    expect(request?.outputSchema).toBe(REPORT_ONBOARDING_INPUT);
+    expect(request?.tools).toBeUndefined();
     // 출력 상한을 따로 좁히지 않는다 — 상한은 사고와 본문을 함께 덮으므로
     // 장면 길이로 잡으면 첫 문장이 한복판에서 잘린다 (실제로 그렇게 잘렸다)
     expect(request?.maxTokens).toBeUndefined();
@@ -2197,14 +2199,14 @@ describe("<board_moves> — 이번 턴 판이 움직인 것", () => {
     const llm: GameLLM = {
       runTurn: (req) => {
         sent = req;
-        req.tools?.find((t) => t.name === "report_tactic_orders")?.handle({ ops: {} });
         return Promise.resolve({
           text: "",
           history: { version: 1, provider: "google", model: "test", messages: [] },
           historyBase: 0,
           usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
-          toolCallCount: 1,
+          toolCallCount: 0,
           stopReason: "completed" as StopReason,
+          output: { ops: {} },
         });
       },
     };

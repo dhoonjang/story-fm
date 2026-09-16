@@ -161,13 +161,14 @@ const WROTE_IT_KO: Record<"in" | "out" | "unknown", string> = {
 
 /** 이 호출이 보낸 글자 수 — "다 왔나"를 눈으로 확인하는 눈금이다 */
 function requestChars(call: TurnTraceCall): number {
-  const { system, user, stateNote, history, tools } = call.request;
+  const { system, user, stateNote, history, tools, outputSchema } = call.request;
   return (
     system.reduce((sum, block) => sum + block.length, 0) +
     user.length +
     (stateNote?.length ?? 0) +
     pretty(history).length +
-    pretty(tools).length
+    pretty(tools).length +
+    (outputSchema === undefined ? 0 : pretty(outputSchema).length)
   );
 }
 
@@ -524,6 +525,9 @@ function TraceCallView({
         `${num(response.text.length)}자`,
         `메시지 ${response.messages.length}개`,
         `tool_use ${response.toolCallCount}`,
+        ...(response.output === undefined
+          ? []
+          : [`산출 ${response.output === null ? "없음" : "있음"}`]),
         ...(folded > 0 ? [`위에 선 것 ${folded}덩어리 접음`] : []),
         ...(usage ? [`out ${num(usage.outputTokens)}토큰`] : []),
         response.stopReason ?? "종료 사유 미보고",
@@ -594,6 +598,17 @@ function TraceCallView({
             {pretty(request.tools)}
           </TraceBlock>
         )}
+        {/* 도구 없이 JSON 하나로 답을 강제한 자리 — 산출 호출 열이 싣는다 (models.md §3-2) */}
+        {request.outputSchema !== undefined && (
+          <TraceBlock
+            label="output schema"
+            meta={`${num(pretty(request.outputSchema).length)}자`}
+            open={expandAll}
+            json
+          >
+            {pretty(request.outputSchema)}
+          </TraceBlock>
+        )}
       </TraceSide>
 
       <TraceSide dir="out" facts={outFacts}>
@@ -601,6 +616,20 @@ function TraceCallView({
         {response && (
           <TraceBlock label="응답 텍스트" meta={`${num(response.text.length)}자`} open>
             {response.text}
+          </TraceBlock>
+        )}
+        {/**
+         * 출력 스키마로 받은 산출 — 위의 텍스트가 원문이고 이것이 코어가 받은 것이다.
+         * `null`은 요청은 지났는데 본문이 JSON으로 읽히지 않은 자리라, 그 줄만 접지 않는다.
+         */}
+        {response && response.output !== undefined && (
+          <TraceBlock
+            label="output"
+            meta={response.output === null ? "없음" : `${num(pretty(response.output).length)}자`}
+            open={expandAll || response.output === null}
+            json={response.output !== null}
+          >
+            {response.output === null ? "(없음 — 산출이 오지 않았다)" : pretty(response.output)}
           </TraceBlock>
         )}
         {/**

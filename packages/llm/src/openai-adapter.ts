@@ -20,6 +20,7 @@ import {
   withErrorKind,
   type LlmErrorKind,
 } from "./llm-error";
+import { parseOutput } from "./structured-output";
 
 /** 한 턴 안에서 함수 호출 왕복 허용 횟수 (다른 어댑터와 같은 값) */
 const MAX_TOOL_ITERATIONS = 8;
@@ -361,10 +362,6 @@ export class OpenAiGameLLM implements GameLLM {
        */
       strict: false,
     }));
-    const forcedTool =
-      typeof req.toolChoice === "object"
-        ? ({ type: "function", name: req.toolChoice.name } as const)
-        : undefined;
 
     const usage: TurnUsage = {
       inputTokens: 0,
@@ -390,13 +387,7 @@ export class OpenAiGameLLM implements GameLLM {
        * `function_call`이 짝 잃은 채 실려 요청 자체가 거부된다.
        */
       const lastRound = iter === MAX_TOOL_ITERATIONS - 1;
-      const toolChoice = lastRound
-        ? ("none" as const)
-        : // 강제는 첫 요청에만 — 도구 결과를 돌려준 뒤에도 걸어 두면 모델이 턴을
-          // 끝낼 수 없어 왕복 상한까지 같은 도구를 다시 부른다 (TurnRequest.toolChoice)
-          iter === 0
-          ? forcedTool
-          : undefined;
+      const toolChoice = lastRound ? ("none" as const) : undefined;
       const body = {
         model: this.config.model,
         max_output_tokens: req.maxTokens ?? this.config.maxTokens,
@@ -418,6 +409,23 @@ export class OpenAiGameLLM implements GameLLM {
         prompt_cache_key: this.config.agent,
         ...(toolDefs.length > 0
           ? { tools: toolDefs, ...(toolChoice ? { tool_choice: toolChoice } : {}) }
+          : {}),
+        /**
+         * 출력 스키마 — `text.format`으로 간다 (models.md §3-2). `strict: false`인 이유는
+         * 도구와 같다: 게임의 중립 스키마는 strict 부분집합이 아니다. 이름 칸은 에이전트
+         * 이름이다 — `[a-z-]`만 쓰므로 그 칸의 규칙(`[A-Za-z0-9_-]`, 64자)에 든다.
+         */
+        ...(req.outputSchema
+          ? {
+              text: {
+                format: {
+                  type: "json_schema" as const,
+                  name: this.config.agent,
+                  schema: req.outputSchema,
+                  strict: false,
+                },
+              },
+            }
           : {}),
       };
 
@@ -506,13 +514,6 @@ export class OpenAiGameLLM implements GameLLM {
           output: outcome.ok ? outcome.message : toolError(outcome.message),
         });
       }
-
-      /**
-       * **산출만 받는 호출은 여기서 닫는다** — 결과는 `input`에만 남기고 모델에게
-       * 돌려주지 않는다 (models.md §3-4). 돌려주면 같은 입력을 정가로 한 번 더 읽고,
-       * 아무도 읽지 않는 응답을 받아 온다.
-       */
-      if (req.outputOnly) break;
     }
 
     // 막혀서 아무것도 못 받은 턴은 실패다 — 나온 것이 있으면 그대로 돌려준다
@@ -551,6 +552,8 @@ export class OpenAiGameLLM implements GameLLM {
       usage,
       toolCallCount,
       stopReason,
+      // 스키마를 실은 호출에만 있다 — 본문이 JSON이 아니면 `null`이고 던지지 않는다
+      ...(req.outputSchema ? { output: parseOutput(text) } : {}),
     };
   }
 }
