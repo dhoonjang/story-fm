@@ -42,7 +42,6 @@ import {
   agentConfig,
   countOptionalProperties,
   providerTraits,
-  type GameToolSpec,
   type LlmProvider,
 } from "@story-fm/llm";
 import {
