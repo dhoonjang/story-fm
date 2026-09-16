@@ -184,6 +184,15 @@ describe("96팀 불변식 — 공식 색 위에서 글자가 읽히고 가는 �
     }
   });
 
+  it("대표색은 팀마다 유일하다 — 두 팀이 같은 밑색을 갖지 않는다", () => {
+    const seen = new Map<string, string>();
+    for (const [id, colours] of clubs) {
+      const other = seen.get(colours.primary);
+      expect(other, `${id} · ${other ?? ""} → ${colours.primary}`).toBeUndefined();
+      seen.set(colours.primary, id);
+    }
+  });
+
   it("잉크는 밑색 위 4.5 — 순수한 빨강처럼 닿지 못하는 색은 닿을 수 있는 최대다", () => {
     for (const [id, colours] of clubs) {
       const crest = crestOf({ id, colours });
