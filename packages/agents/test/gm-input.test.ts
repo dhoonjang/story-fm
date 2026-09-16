@@ -60,6 +60,7 @@ import {
   STALLED_CLOCK_TURNS,
   TurnOperationSchema,
   buildGmDigest,
+  buildRecentTurnsBlock,
   buildGmHistory,
   buildTableInput,
   buildGmTurnMessage,
@@ -2217,5 +2218,27 @@ describe("<board_moves> — 이번 턴 판이 움직인 것", () => {
     const user = sent!.user;
     expect(user).toContain("<board_moves>");
     expect(user.indexOf("<board_moves>")).toBeLessThan(user.indexOf("@감독:"));
+  });
+});
+
+describe("해석기가 읽는 지난 턴 — 이번 턴의 꼬리는 @감독: 줄이 싣는다", () => {
+  /**
+   * 턴 러너는 감독의 말을 모델 호출 전에 채팅에 넣는다. `<recent_turns>`가 그 꼬리를
+   * 그대로 실으면 해석기 입력에 같은 말이 두 벌 선다 (agents.md §3) — 화면에는 아무
+   * 증상이 없다.
+   */
+  it("<recent_turns>는 마지막 모델 턴 뒤의 꼬리를 싣지 않는다", () => {
+    const state = game();
+    state.chat.push(
+      { role: "user", text: "지난 턴의 말", toolCalls: [], at: state.date },
+      { role: "model", text: "@: 지난 장면", toolCalls: [], at: state.date },
+      { role: "operator", text: "전술판에서 라인을 내렸다", toolCalls: [], at: state.date },
+      { role: "user", text: "이번 턴의 말", toolCalls: [], at: state.date },
+    );
+    const block = buildRecentTurnsBlock(state);
+    expect(block).toContain("@감독: 지난 턴의 말");
+    expect(block).toContain("@: 지난 장면");
+    expect(block).not.toContain("이번 턴의 말");
+    expect(block).not.toContain("전술판에서 라인을 내렸다");
   });
 });

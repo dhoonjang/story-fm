@@ -433,6 +433,8 @@ async function callGm(
       ? []
       : buildMatchTools(state, matchCtx, { operator })
     : buildGmTools(state, ledger.calls, {
+        // 손잡이 셋이 해석기에 넘길 원문 — 감독이 친 말일 때만이다 (agents.md §1)
+        ...(operator ? {} : { said: message }),
         deferNegotiationIds: opening.deferNegotiationIds,
         ...(boardMoves && boardMoves.length > 0 ? { boardMoves } : {}),
       });
@@ -872,6 +874,8 @@ export async function runGmTurn(
     calls: ledger.calls,
     goals: ledger.goals,
     cards: ledger.cards,
+    // 지시 도구가 해석기에 넘길 원문 — 감독이 친 말일 때만이다 (agents.md §3)
+    ...(shape.operator ? {} : { said: message }),
     ...(boardMoves && boardMoves.length > 0 ? { boardMoves } : {}),
     onFinalized: (minute) => (ledger.finalMinute = minute),
   };

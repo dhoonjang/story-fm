@@ -23,18 +23,32 @@ import { ModelOutputError, readOutput, retryOnce } from "./retry";
  */
 
 /**
- * 손잡이가 받는 인자 — **감독의 말 원문 하나뿐이다.** 네 손잡이(전술·훈련·시장)와 매치
- * GM의 지시 도구가 같은 스키마를 쓴다. 상한은 오타를 막는 폭이지 요약을 시키는 자리가
- * 아니다 — 요약하면 해석기가 감독이 하지 않은 말을 옮긴다.
+ * **손잡이의 문** — 이번 턴 감독의 말을 쥐고, 손잡이 하나를 한 턴에 **한 번만** 연다
+ * (agents.md §1).
+ *
+ * 손잡이는 인자가 없다: 부르는 것이 곧 라우팅이고 원문은 코어가 넘긴다 — GM이 옮겨 적은
+ * 문장이 근거가 되면 받아쓰기 왕복에서 말이 갈린다. 그래서 같은 손잡이의 두 번째 호출은
+ * 같은 말을 다시 옮기는 것이라 닫는다(오퍼가 두 번 나가고 「한 칸 올려」가 두 칸
+ * 움직인다). 감독의 말이 없는 턴(손잡이 턴)에는 열리지 않는다. 문구 둘은 여기 하나다.
  */
-export const ORDERS_MAX = 2000;
-export const OrdersArgsSchema = z.object({
-  orders: z
-    .string()
-    .min(1)
-    .max(ORDERS_MAX)
-    .describe("감독이 이번 턴에 한 말 — 요약하지 않고 원문 그대로"),
-});
+export function ordersGate(
+  said: string | undefined,
+): (tool: string) => { ok: true; said: string } | { ok: false; message: string } {
+  const routed = new Set<string>();
+  return (tool) => {
+    if (said === undefined || said.trim().length === 0) {
+      return { ok: false, message: "이번 턴에 감독의 말이 없습니다 — 옮길 지시가 없습니다" };
+    }
+    if (routed.has(tool)) {
+      return {
+        ok: false,
+        message: "이번 턴 감독의 말은 이미 옮겼습니다 — 결과는 앞의 호출에 있습니다",
+      };
+    }
+    routed.add(tool);
+    return { ok: true, said };
+  };
+}
 
 /** 한 명령을 한 턴에 부를 수 있는 수 — 오퍼 셋은 있어도 여덟은 없다 */
 export const OPS_PER_COMMAND = 4;
