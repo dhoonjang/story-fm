@@ -460,6 +460,39 @@ OKLCH에서 색상·채도를 지키고 명도만 올린 첫 값 (3) 검정처�
 대기 자리는 섹션 라벨 하나(「리그 불러오는 중」)와 `--line` 헤어라인 세 줄이다. 리그가 몇
 개 올지는 카탈로그가 정하므로 개수를 미리 그리지 않고, 목록이 온다는 것만 말한다.
 
+## 7-1. 협상 방 — 무대가 갈리는 두 번째 자리
+
+경기가 판세와 중계로 갈리듯 협상 방도 채팅 옆에 한 칸을 세운다
+([../simulation/transfer.md](../simulation/transfer.md) §12-2). 세우는 것은 **조건서 · 인내 ·
+건너편** 셋이고, 값은 전부 뷰(`views.negotiation`)가 접어 온 것이다 — 화면이 새로 만드는
+사실은 없다.
+
+**게이트**(`.negotiation-gate`)는 킥오프 게이트와 한 쌍이다 — 같은 베일, 같은 `--pop` 카드,
+같은 등장. 한 장에 서는 것은 데이트라인(갈래 · 상대 · 날짜) · 건너편에 앉을 사람들(문장 또는
+이름 · 무엇을 답하나) · 지금의 조건서(우리 마지막 오퍼 · 상대의 조정안 · 걸린 조건) ·
+성사 가능성 · 남은 인내다. 주 버튼은 하나, 「자리에 앉는다」 — 닫는 손잡이는 없다. 열린
+방은 앉거나 일어서는 길뿐이다.
+
+**방의 칸**(`.negotiation-room`)은 경기 판의 자리에 선다(`with-board`). 위에서 아래로:
+
+| 자리   | 값                                                                                                                                                                                 |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 건너편 | 목소리마다 한 줄 — 화자 토큰의 이름(`club`이면 문장 + 구단, `agent`면 이름) · 답하는 칸. 마지막 답의 태도는 `TABLE_STANCE_KO`의 낱말 그대로 한 칩으로, `data-stance`가 색을 고른다 |
+| 인내   | 칸 `patienceMax`개의 눈금, 남은 만큼 키 컬러 채움 — 숫자는 `.fig`로 옆에 (`2/4`). 0에 가까울수록 `--warn`으로 갈린다 — 문턱은 뷰가 `tone`으로 낸다                                 |
+| 조건서 | 시장 카드의 표와 같은 격자 — 「제시」 한 줄과 「조정」 한 줄, 그 아래 걸린 조건 목록(누가 · 갈래 · 답). 값의 자는 `formatMoney`                                                    |
+| 성사   | 성사 가능성(코어가 낸 표기 그대로) · 기한. 없으면 서지 않는다                                                                                                                      |
+| 손잡이 | 「제안」(제안 폼 — 방의 협상으로 미리 채운다) · 「일어선다」(`leave_negotiation` 조작). 둘 다 방에서만 산다                                                                        |
+
+- **채팅은 그 협상의 턴만 흐른다** — 경기와 같은 갈림(`chatForActiveNegotiation`). 끝난
+  협상의 턴은 메인 채팅에서 결과 한 줄로 접히고(`.negotiation-log`), 펼치면 그때의 대화가
+  그대로 나온다 — 머리는 선수 이름 · 갈래 · 결과다.
+- **상단 띠의 안건은 서지 않는다** — 방 안의 안건은 건너편 한 사람이다. 날짜는 그대로 선다
+  — 방 안에서 날짜는 흐르지 않는다.
+- **입력창의 시간 손잡이는 잠긴다** — 방 안에서 넘길 시간이 없다. 일어서는 손잡이는
+  입력창이 아니라 방의 칸에 선다 — 빈 입력에 눌리는 버튼이 자리를 뜨는 문이면 실수가
+  협상을 끊는다.
+- `data-phase="negotiation"`이 앱 루트에 선다 — e2e가 읽는 자리다.
+
 ## 8. 리뷰 체크리스트
 
 - [ ] `border: 1px solid` 컨테이너 0곳. 조작은 면과 키 컬러로.
@@ -500,19 +533,20 @@ OKLCH에서 색상·채도를 지키고 명도만 올린 첫 값 (3) 검정처�
 
 ## 코드 위치
 
-| 무엇                                            | 어디                                                       |
-| ----------------------------------------------- | ---------------------------------------------------------- |
-| 토큰 (`:root`)                                  | `apps/web/app/styles/shell.css`                            |
-| 화면 눈금                                       | `apps/web/app/styles/breakpoints.css`                      |
-| 서체 선언 · 폴백 메트릭                         | `apps/web/app/styles/fonts.css` · `apps/web/public/fonts/` |
-| 공용 조작 요소 (버튼·탭·세그먼트·시트)          | `apps/web/app/styles/shared.css`                           |
-| 도움말 표식 · 팝오버                            | `apps/web/components/help-popover.tsx`                     |
-| 열 접힘 순서                                    | `apps/web/app/styles/responsive.css`                       |
-| 경기장 비율 · 판 위 간격                        | `packages/domain/src/tactics.ts`                           |
-| 구단 색 (카탈로그 `colours`)                    | `packages/engine/src/data/club-colours.ts`                 |
-| 문장 · `clubTonesOf`                            | `packages/domain/src/crest.ts`                             |
-| 리그 색 파생 (`leagueTonesOf`)                  | `packages/domain/src/league-tone.ts`                       |
-| `formatScore` · `formatRating` · `formatPounds` | `packages/domain/src/money.ts`                             |
-| 문장 컴포넌트 `<Crest>`                         | `apps/web/components/crest.tsx`                            |
-| 구단 토큰 주입                                  | `apps/web/components/game-screen.tsx` · `app/new/page.tsx` |
-| 팔레트 시트 (96팀 검수)                         | `apps/web/app/admin/palette-panel.tsx`                     |
+| 무엇                                            | 어디                                                                                               |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 토큰 (`:root`)                                  | `apps/web/app/styles/shell.css`                                                                    |
+| 화면 눈금                                       | `apps/web/app/styles/breakpoints.css`                                                              |
+| 서체 선언 · 폴백 메트릭                         | `apps/web/app/styles/fonts.css` · `apps/web/public/fonts/`                                         |
+| 공용 조작 요소 (버튼·탭·세그먼트·시트)          | `apps/web/app/styles/shared.css`                                                                   |
+| 도움말 표식 · 팝오버                            | `apps/web/components/help-popover.tsx`                                                             |
+| 열 접힘 순서                                    | `apps/web/app/styles/responsive.css`                                                               |
+| 경기장 비율 · 판 위 간격                        | `packages/domain/src/tactics.ts`                                                                   |
+| 구단 색 (카탈로그 `colours`)                    | `packages/engine/src/data/club-colours.ts`                                                         |
+| 문장 · `clubTonesOf`                            | `packages/domain/src/crest.ts`                                                                     |
+| 리그 색 파생 (`leagueTonesOf`)                  | `packages/domain/src/league-tone.ts`                                                               |
+| `formatScore` · `formatRating` · `formatPounds` | `packages/domain/src/money.ts`                                                                     |
+| 문장 컴포넌트 `<Crest>`                         | `apps/web/components/crest.tsx`                                                                    |
+| 구단 토큰 주입                                  | `apps/web/components/game-screen.tsx` · `app/new/page.tsx`                                         |
+| 협상 방 · 게이트                                | `apps/web/components/negotiation-room.tsx` · `negotiation-gate.tsx` · `app/styles/negotiation.css` |
+| 팔레트 시트 (96팀 검수)                         | `apps/web/app/admin/palette-panel.tsx`                                                             |

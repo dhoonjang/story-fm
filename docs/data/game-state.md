@@ -152,20 +152,21 @@
 
 ### 3.1 메타
 
-| 필드                         | 무엇                                                                                                          | 정의                       |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------- |
-| `id` `seed` `createdAt`      | 세이브 식별 · 모든 난수의 뿌리                                                                                | `core/state.ts`            |
-| `season` `date` `clock?`     | 시즌 번호 · 날짜 · 하루 안의 시각(`HH:MM`)                                                                    | `core/state.ts`            |
-| `calendar`                   | `SeasonCalendar` — 프리시즌 시작·소집일·개막일                                                                | `competition/calendar.ts`  |
-| `userTeamId` `phase`         | 감독의 팀 · `idle`/`matchday`/`match` (라우팅 전용)                                                           | `core/state.ts`            |
-| `pendingMatch`               | 진행 중인 경기 — 패킷·장부·캐스터 이력·킥오프 전술·입장 여부(`entered`)·구간 시뮬의 연속 시계(`segmentClock`) | `core/state.ts`            |
-| `world?`                     | 이 세계의 범위 (테스트용 축소 세계)                                                                           | `world/scope.ts`           |
-| `leagueOf?`                  | 승강 결과 — 팀 → 지금 속한 리그                                                                               | `competition/promotion.ts` |
-| `dismissal?`                 | 경질 사실 카드 — 있으면 감독은 무직이다 (career.md §5.1)                                                      | `domain/manager.ts`        |
-| `managerOffers?`             | 감독직 제안 — 공석 구단이 무직 감독을 부른 기록                                                               | `domain/manager.ts`        |
-| `managerPool?`               | 무직 감독 풀 — 잘린 사람의 이름·역량·재임 이력 (transfer.md §7)                                               | `domain/manager.ts`        |
-| `formUnitScale?`             | 폼 눈금 마이그레이션 마커 (§6)                                                                                | `core/state.ts`            |
-| `mirrorProficiencyStripped?` | 미러 자리 주발 보정 벗기기 마커 (§6)                                                                          | `core/state.ts`            |
+| 필드                         | 무엇                                                                                                                                                                | 정의                       |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| `id` `seed` `createdAt`      | 세이브 식별 · 모든 난수의 뿌리                                                                                                                                      | `core/state.ts`            |
+| `season` `date` `clock?`     | 시즌 번호 · 날짜 · 하루 안의 시각(`HH:MM`)                                                                                                                          | `core/state.ts`            |
+| `calendar`                   | `SeasonCalendar` — 프리시즌 시작·소집일·개막일                                                                                                                      | `competition/calendar.ts`  |
+| `userTeamId` `phase`         | 감독의 팀 · `idle`/`matchday`/`match`/`negotiation` (라우팅 전용)                                                                                                   | `core/state.ts`            |
+| `pendingMatch`               | 진행 중인 경기 — 패킷·장부·캐스터 이력·킥오프 전술·입장 여부(`entered`)·구간 시뮬의 연속 시계(`segmentClock`)                                                       | `core/state.ts`            |
+| `pendingNegotiation?`        | 열린 협상 방 — 어느 협상인가(`negotiationId`)·자리에 앉았는가(`seated`)·들어서기 전의 국면(`phaseBefore`). 방이 닫히면 `null`. 옛 세이브엔 없다 (transfer.md §12-2) | `core/state.ts`            |
+| `world?`                     | 이 세계의 범위 (테스트용 축소 세계)                                                                                                                                 | `world/scope.ts`           |
+| `leagueOf?`                  | 승강 결과 — 팀 → 지금 속한 리그                                                                                                                                     | `competition/promotion.ts` |
+| `dismissal?`                 | 경질 사실 카드 — 있으면 감독은 무직이다 (career.md §5.1)                                                                                                            | `domain/manager.ts`        |
+| `managerOffers?`             | 감독직 제안 — 공석 구단이 무직 감독을 부른 기록                                                                                                                     | `domain/manager.ts`        |
+| `managerPool?`               | 무직 감독 풀 — 잘린 사람의 이름·역량·재임 이력 (transfer.md §7)                                                                                                     | `domain/manager.ts`        |
+| `formUnitScale?`             | 폼 눈금 마이그레이션 마커 (§6)                                                                                                                                      | `core/state.ts`            |
+| `mirrorProficiencyStripped?` | 미러 자리 주발 보정 벗기기 마커 (§6)                                                                                                                                | `core/state.ts`            |
 
 ### 3.2 팀 · 선수
 
@@ -839,6 +840,8 @@ tmp 쓰기가 실패하면 그 tmp는 **그 자리에서 거둔다**. 이름이 
 - **`ScheduleEntry`와 그 대상은 함께 지운다.** 엔트리만 남으면 tick이 존재하지
   않는 대상을 매일 찾고, 대상만 남으면 달력에서 사라진 채 상태가 굴러간다.
 - **`state.phase`는 라우팅 전용** — 모델 입력에 넣지 않는다.
+- **협상 방은 한 번에 하나다** — `phase`가 `negotiation`이면 `pendingNegotiation`이 서고,
+  그 협상은 `open`이다. 협상이 `open`을 벗어나면 방은 같은 턴에 닫힌다 (transfer.md §12-2).
 - **`aiDeals`·`negotiations`처럼 날짜를 품은 계획은 실행 시점에 다시 검사한다.**
   그사이 다치거나 이미 옮긴 선수의 딜은 조용히 무산되는 것이 맞다.
 - **`ChatTurn.role`의 `operator`는 감독 발화가 아니다.** 화면에 그리지 않고,
