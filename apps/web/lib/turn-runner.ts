@@ -361,7 +361,18 @@ export function runTurnLocked(
        */
       const inMatch = state.phase === "match";
       const matchId = state.pendingMatch?.matchId;
-      const mark = inMatch ? { inMatch: true as const, ...(matchId ? { matchId } : {}) } : {};
+      /**
+       * 협상 방의 턴도 같은 규칙이다 (transfer.md §12-2) — 자리에 앉는 손잡이 턴부터
+       * 일어서는 턴까지가 그 협상의 이력이고, 방을 세운 `start_negotiation` 턴은 평시다.
+       * 방 안에서 낸 제안 폼의 줄도 이 표식을 달아 한 협상의 두 줄이 갈리지 않는다.
+       */
+      const inNegotiation = state.phase === "negotiation";
+      const negotiationId = state.pendingNegotiation?.negotiationId;
+      const mark = inMatch
+        ? { inMatch: true as const, ...(matchId ? { matchId } : {}) }
+        : inNegotiation
+          ? { inNegotiation: true as const, ...(negotiationId ? { negotiationId } : {}) }
+          : {};
       /**
        * 턴 기록의 겉 — 감독이 무엇을 보냈고 그때 세계가 어디 있었나 (models.md §5-3).
        * 실패한 턴도 이 겉은 갖는다: 되짚을 때 「무엇을 보냈길래」가 먼저다.
@@ -435,8 +446,10 @@ export function runTurnLocked(
       /**
        * **제안 폼** — 코어 명령을 턴 앞에서 건다 (transfer.md §12-3). 반려되면 턴은 없었던
        * 일이고 그 이유가 화면으로 돌아간다 — 폼이 그 줄을 세우고 감독이 값을 고친다.
-       * 걸리면 그 명령은 이 턴의 호출 장부에 앉아 카드로 서고, 모델에는 오퍼레이터 봉투로
-       * 「이미 넣었다」가 간다.
+       * 걸리면 그 명령은 이 턴의 호출 장부에 앉고, 모델에는 오퍼레이터 봉투로 「이미
+       * 넣었다」가 간다. 카드가 있는 명령(오퍼·재계약)은 카드로 서고, 카드가 없는 명령
+       * (개인 조건 선제안·조건만)은 `silent`다 — 제안 줄이 이미 그 사실이라, 명령 이름이
+       * 칩으로 한 번 더 서면 감독이 읽을 것이 없는 표식이 남는다.
        */
       const seedCalls: GmToolCall[] = [];
       let proposed: TurnOperation | undefined;
@@ -471,7 +484,10 @@ export function runTurnLocked(
             detail: result.message,
           };
         }
-        recordCall(seedCalls, name, result, { input: proposal });
+        recordCall(seedCalls, name, result, {
+          input: proposal,
+          ...(result.payload === undefined ? { silent: true } : {}),
+        });
         // 모델이 읽는 줄 — 무엇을 넣었고 코어가 무어라 답했는가. 되읽는 코드는 없다
         const label =
           `${proposalLabel(proposal, playerName(state, proposal.playerId))} — ${result.message} ` +

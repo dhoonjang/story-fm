@@ -41,6 +41,7 @@ import {
   internationalBreaksOf,
   isAvailableFor,
   isFriendly,
+  isPeaceTurn,
   canReachExtraTime,
   nextMatchFor,
   isInjured,
@@ -349,7 +350,7 @@ export function buildMatchReference(state: GameState): string {
  */
 export function buildMatchBrief(state: GameState): string {
   const said = state.chat
-    .filter((t) => t.inMatch !== true && t.role === "user")
+    .filter((t) => isPeaceTurn(t) && t.role === "user")
     .slice(-MATCH_BRIEF_TURNS)
     .map((t) => `- “${t.text}”`);
   if (said.length === 0) return "";
@@ -1566,7 +1567,7 @@ export function pastTurns(turns: GameState["chat"]): GameState["chat"] {
 
 /** `<recent_turns>`의 본문 — 평시의 지난 턴들. 이번 턴의 것은 `@감독:` 줄이 싣는다 */
 export function buildRecentTurnsBlock(state: GameState, count = RECENT_TURNS): string {
-  const peace = pastTurns(state.chat.filter((t) => t.inMatch !== true));
+  const peace = pastTurns(state.chat.filter(isPeaceTurn));
   return renderTurns(peace.slice(-count)).join("\n");
 }
 
@@ -2238,18 +2239,32 @@ function inMatchNow(state: GameState): boolean {
 }
 
 /**
- * 평시와 경기의 이력을 가른다 — 섞이면 토큰만이 아니라 맥락이 오염된다
- * (경기 중 이력의 이적 이야기를 중계가 끌어온다). 두 국면은
- * buildMatchBrief·matchDigest가 잇는다.
+ * 지금 열린 협상 방 — 이력을 가르는 셋째 기준이다. 방이 닫힌 뒤 마지막 장면을 쓰는 턴
+ * (일어서는 손잡이 턴)은 `phase`가 이미 돌아가 있어, 부르는 쪽이 턴 앞에서 잡아 둔 id를
+ * 넘긴다 (`buildGmHistory`의 `negotiationId`).
  */
-function relevantTurns(state: GameState): typeof state.chat {
+function roomIdNow(state: GameState): string | undefined {
+  return state.phase === "negotiation" ? state.pendingNegotiation?.negotiationId : undefined;
+}
+
+/**
+ * 평시·경기·협상 방의 이력을 가른다 — 섞이면 토큰만이 아니라 맥락이 오염된다
+ * (경기 중 이력의 이적 이야기를 중계가 끌어오고, 평시 GM이 협상 스무 턴을 읽는다 —
+ * agents.md §5). 평시 → 경기는 buildMatchBrief·matchDigest가, 평시 → 방은 서류와
+ * `<situation>`이, 방 → 평시는 장부가 잇는다. 평시 턴의 정의는 코어의 것이다(`isPeaceTurn`).
+ */
+function relevantTurns(state: GameState, room = roomIdNow(state)): typeof state.chat {
+  if (room !== undefined) {
+    // 방 안 — 이 협상의 턴만. 방을 나갔다 다시 앉아도 같은 협상이면 지난 자리의 대화가 이력이다
+    return state.chat.filter((t) => t.inNegotiation === true && t.negotiationId === room);
+  }
   const inMatch = inMatchNow(state);
   const here = state.pendingMatch?.matchId;
   return state.chat.filter((t) =>
     inMatch
       ? // 경기 중 — 이 경기의 턴만. 다른 경기의 중계도 남의 이야기다
         t.inMatch === true && (here === undefined || t.matchId === undefined || t.matchId === here)
-      : t.inMatch !== true,
+      : isPeaceTurn(t),
   );
 }
 
@@ -2310,14 +2325,14 @@ export function recordCharacterInjection(
  * 이력 창 — 어디서부터 어디까지가 이번 호출의 이력인가. **평시의 시작점은 코어가
  * 정한다** (`historyStart` → agents.md §5-1: 글자 상한 안에 드는 가장 앞의 6턴 경계).
  * 코어가 고르는 평시 턴(`peaceTurns`)과 `relevantTurns`의 평시 갈래가 같은 필터
- * (`inMatch !== true`)라 접힌 지점의 인덱스가 이 목록에 그대로 맞는다.
+ * (`isPeaceTurn`)라 접힌 지점의 인덱스가 이 목록에 그대로 맞는다.
  */
-function windowOf(state: GameState): { turns: GameState["chat"] } {
-  const chat = relevantTurns(state);
+function windowOf(state: GameState, room = roomIdNow(state)): { turns: GameState["chat"] } {
+  const chat = relevantTurns(state, room);
   const upto = historyEnd(chat);
-  // 경기 이력은 접히지 않는다 — 경기마다 리셋돼 자라지 않는다 (agents.md §5-1).
+  // 경기와 방의 이력은 접히지 않는다 — 경기마다·협상마다 갈려 자라지 않는다 (agents.md §5-1).
   // 접은 지점은 평시의 것이라 이 목록에 먹이면 엉뚱한 자리를 자른다
-  const start = inMatchNow(state) ? 0 : historyStart(state);
+  const start = inMatchNow(state) || room !== undefined ? 0 : historyStart(state);
   return { turns: chat.slice(start, upto) };
 }
 
@@ -2362,30 +2377,38 @@ export function renderTurnGroup(
  * 발화를 채팅에 먼저 밀어 넣는 것이 이 함수의 전제이고, `historyEnd`·
  * `recordCharacterInjection`도 같은 전제 위에 선다.
  */
-export function buildGmTurnMessage(state: GameState, cards: readonly CharacterEntry[]): string {
-  const chat = relevantTurns(state);
+export function buildGmTurnMessage(
+  state: GameState,
+  cards: readonly CharacterEntry[],
+  /** 협상 방의 턴 — 그 협상의 꼬리를 그린다. 방이 이미 닫힌 턴도 id를 넘기면 방의 것이다 */
+  options: { negotiationId?: string } = {},
+): string {
+  const chat = relevantTurns(state, options.negotiationId ?? roomIdNow(state));
   return renderTurnGroup(state, chat.slice(historyEnd(chat)), cards);
 }
 
 export function buildGmHistory(
   state: GameState,
+  /** 협상 방의 턴 — 그 협상의 채팅 턴이 이력이다 (agents.md §5) */
+  options: { negotiationId?: string } = {},
 ): Array<{ role: "user" | "assistant"; content: string }> {
-  return groupTurns(windowOf(state).turns).map((group) =>
-    group[0]?.role === "model"
-      ? { role: "assistant" as const, content: group.map((turn) => turn.text).join("\n\n") }
-      : {
-          role: "user" as const,
-          // 그 턴에 실었던 카드를 같은 자리에 다시 붙인다 — 세이브에는 기록만 있고
-          // 문장은 매번 여기서 만들어진다 (people.md §6)
-          content: renderTurnGroup(
-            state,
-            group,
-            entriesOf(
+  return groupTurns(windowOf(state, options.negotiationId ?? roomIdNow(state)).turns).map(
+    (group) =>
+      group[0]?.role === "model"
+        ? { role: "assistant" as const, content: group.map((turn) => turn.text).join("\n\n") }
+        : {
+            role: "user" as const,
+            // 그 턴에 실었던 카드를 같은 자리에 다시 붙인다 — 세이브에는 기록만 있고
+            // 문장은 매번 여기서 만들어진다 (people.md §6)
+            content: renderTurnGroup(
               state,
-              group.flatMap((turn) => turn.characters ?? []),
+              group,
+              entriesOf(
+                state,
+                group.flatMap((turn) => turn.characters ?? []),
+              ),
             ),
-          ),
-        },
+          },
   );
 }
 

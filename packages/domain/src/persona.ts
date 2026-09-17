@@ -45,8 +45,13 @@ export const PersonaRoleSchema = z.enum([
    * 우리 구단의 수석코치, 감독(유저)이 매일 옆에 두는 사람이다 (people.md §2-1).
    */
   "manager",
-  /** 에이전트 — 협상 테이블 건너편 */
+  /** 에이전트 — 협상 테이블 건너편, 선수 쪽 */
   "agent",
+  /**
+   * 단장 — 협상 테이블 건너편, 구단 쪽 (people.md §2). 이적료·분할·기한을 답하는 사람이다.
+   * 구단마다 한 사람이고 세이브에 넣지 않는다 — (시드, 구단)에서 파생한다.
+   */
+  "director",
   /** 해설 — 중계석과 스튜디오. 축구계에 남은 은퇴 인물이 대개 여기 선다 */
   "pundit",
 ]);
@@ -176,6 +181,7 @@ export const PERSONA_ROLE_LABEL: Partial<Record<PersonaRole, string>> = {
   scout: "스카우트",
   manager: "감독",
   agent: "에이전트",
+  director: "단장",
   pundit: "해설위원",
 };
 

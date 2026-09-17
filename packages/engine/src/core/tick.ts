@@ -2277,7 +2277,7 @@ export type ClockSource =
   | "header"
   /** 손잡이가 이 턴 앞에서 이미 굴렸다 — 헤더는 그 날 안의 시각만 따라간다 */
   | "operator"
-  /** 경기·경기일 — 날짜의 주인은 장부다 */
+  /** 경기·경기일·협상 방 — 날짜의 주인은 장부다. 방의 헤더는 그 날 안의 시각만 옮긴다 */
   | "ledger";
 
 /** 날짜가 흐르지 않는 턴 — 주인이 헤더가 아니거나, 판이 열려 있다 */
@@ -2295,8 +2295,12 @@ function reportsHeldDate(source: ClockSource): boolean {
   return source !== "operator";
 }
 
-/** 경기가 열린 채 날짜를 밀어 달라고 한 턴에 남는 사실 */
-const DATE_HELD = "경기 중에는 날짜가 흐르지 않습니다";
+/** 판이 열린 채 날짜를 밀어 달라고 한 턴에 남는 사실 — 경기든 협상 방이든 */
+function dateHeldText(state: GameState): string {
+  return state.phase === "negotiation"
+    ? "협상 자리에서는 날짜가 흐르지 않습니다"
+    : "경기 중에는 날짜가 흐르지 않습니다";
+}
 
 /**
  * 장면이 선언한 시점까지 장부를 옮긴다 — **모델 뒤에 시계가 움직이는 유일한 경로**
@@ -2331,7 +2335,7 @@ export function applyScenePoint(
     const held = target.date !== state.date && reportsHeldDate(source);
     return {
       ok: !held,
-      events: held ? [{ kind: "news" as const, text: DATE_HELD }] : [],
+      events: held ? [{ kind: "news" as const, text: dateHeldText(state) }] : [],
       stopped: held ? "blocked" : "reached",
       reached: here(),
       short: held,
@@ -2370,6 +2374,8 @@ export function advanceForOperation(
 ): AdvanceOutcome | null {
   if (state.phase !== "idle") return null;
   if (operation.kind === "advance_match") return null;
+  // 방에 앉고 일어서는 손잡이도 시계를 밀지 않는다 — 방의 시계는 인내다 (transfer.md §12-2)
+  if (operation.kind === "enter_negotiation" || operation.kind === "leave_negotiation") return null;
   // 제안은 시계를 밀지 않는다 — 코어 명령은 이미 턴 앞에서 걸렸다 (proposal.ts)
   if (operation.kind === "propose") return null;
   if (operation.kind === "skip_days") return advanceTime(state, { days: operation.days });

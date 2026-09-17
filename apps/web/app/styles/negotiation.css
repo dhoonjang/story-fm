@@ -1,0 +1,429 @@
+/**
+ * ── 협상 방 — 게이트 · 방의 칸 · 접힌 기록 (transfer.md §12-2 · design-system.md §7-1) ──
+ *
+ * 킥오프 게이트와 한 쌍이다 — 같은 베일(`--scrim`), 같은 `--pop` 카드, 같은 등장
+ * (`fulltime-in`은 shell.css가, 물러남 `kickoff-gate-out`은 match-gate.css가 갖는다 —
+ * 한 값에 이름 하나). 방의 칸은 경기 판의 자리(`.stage-board`)에 선다.
+ *
+ * ⚠️ 이 파일은 `globals.css`에서 **`responsive.css`보다 먼저** 불린다 — 700 아래의
+ * 바닥 시트가 여기 값을 덮는 쪽이지 그 반대가 아니다. 좁은 화면의 규칙은 여기 없다.
+ */
+
+/* ── 게이트 — 자리에 앉는 문 ─────────────────────────────────────────────── */
+.negotiation-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-6);
+  background: var(--scrim);
+  animation: fulltime-in 160ms var(--ease-panel) both;
+}
+/**
+ * 한 장에 방의 지금이 든다 — 데이트라인 · 선수 · 건너편 · 조건서 · 성사와 인내 · 입장.
+ * 팀시트 두 열이 없어 킥오프 카드보다 좁다. 읽는 부분만 스크롤하고 주 버튼은 밖에 선다
+ * (`autoFocus`가 카드를 끝까지 밀어 내리지 않게 — match-gate.css와 같은 이유).
+ */
+.negotiation-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  width: min(560px, 100%);
+  max-height: calc(100dvh - var(--sp-6) * 2);
+  padding: var(--sp-6);
+  background: var(--pop);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+}
+.ng-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* 갈래 · 상대 · 날짜 — 킥오프의 데이트라인과 같은 줄 */
+.ng-dateline {
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+/* 이름이 곧 이 면의 주어다 — 700 (design-system §3) */
+.ng-who {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: var(--lh-ui);
+  word-break: keep-all;
+}
+.ng-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+/* 성사와 인내는 나란히 — 둘 다 한 줄짜리 값이라 세로로 쌓으면 카드만 길어진다 */
+.ng-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4);
+}
+.ng-label,
+.nr-label {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.negotiation-card .primary-btn {
+  flex: none;
+  height: 40px;
+  padding: 0 var(--sp-5);
+}
+/* 문이 열린다 — 누르는 순간 물러난다. 160은 `GATE_LEAVE_MS`와 같은 값이다 */
+.negotiation-gate.leaving {
+  animation: kickoff-gate-out 160ms var(--ease-panel) both;
+  pointer-events: none;
+}
+
+/* ── 방의 칸 — 채팅 옆 ───────────────────────────────────────────────────── */
+.negotiation-room {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+.nr-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+.nr-kind {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.nr-who {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  word-break: keep-all;
+}
+.nr-counterpart {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.nr-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+
+/**
+ * 건너편 — 목소리마다 한 줄. 문장(또는 사람 픽토그램) · 이름 · 답하는 칸.
+ * 문장은 밑선 정렬에서 빠진다 (design-system §3) — 줄 안에서 가운데에 선다.
+ */
+.nr-voices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  align-self: stretch;
+  list-style: none;
+}
+.nr-voice {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-md);
+  line-height: var(--lh-table);
+}
+.nr-voice .crest,
+.nr-voice-mark {
+  align-self: center;
+  color: var(--text-3);
+  line-height: 0;
+}
+.nr-voice-mark {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+}
+.nr-voice-who {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.nr-voice-name {
+  font-weight: 600;
+  word-break: keep-all;
+}
+/* 직책과 구단 — 누구인지 다음에 어디 사람인지 */
+.nr-voice-title {
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
+/* 무엇을 답하나 — 이적료 · 분할 · 기한. 가운뎃점으로 이어 한 줄 */
+.nr-voice-answers {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0 var(--sp-1);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+.nr-voice-answers span + span::before {
+  content: "·";
+  margin-right: var(--sp-1);
+}
+
+/**
+ * 태도 칩 — `TABLE_STANCE_KO`의 낱말 그대로. 색은 `data-stance`가 고른다: 누그러지면 승색,
+ * 그대로면 잉크 2층, 굳으면 주의, 일어서려 하면 패색. 장부를 움직이지 않는 눈금이라 칩이다.
+ */
+.stance-chip {
+  --stance: var(--text-2);
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--stance) 16%, transparent);
+  color: var(--stance);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.stance-chip[data-stance="warming"] {
+  --stance: var(--win);
+}
+.stance-chip[data-stance="cooling"] {
+  --stance: var(--warn);
+}
+.stance-chip[data-stance="leaving"] {
+  --stance: var(--loss);
+}
+
+/**
+ * 인내 — 방의 시계. 칸 `max`개가 트랙이고 남은 만큼 키 컬러로 찬다. 결은 뷰가 낸
+ * `data-tone`이 고른다 — `low`면 주의, `out`이면 꺼짐. 숫자는 `.fig`로 옆에 (`2/4`).
+ */
+.patience {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  align-self: stretch;
+}
+.patience-cells {
+  display: flex;
+  flex: 1;
+  gap: var(--sp-1);
+  max-width: 200px;
+}
+.patience-cells i {
+  flex: 1;
+  height: 8px;
+  border-radius: var(--r-xs);
+  background: var(--border);
+  transition: background var(--ease);
+}
+.patience-cells i.on {
+  background: var(--accent);
+}
+.patience[data-tone="low"] .patience-cells i.on {
+  background: var(--warn);
+}
+.patience b {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+}
+.patience[data-tone="low"] b {
+  color: var(--warn);
+}
+.patience[data-tone="out"] b {
+  color: var(--dim);
+}
+
+/* ── 조건서 — 시장 카드의 격자(`.mc-table`)를 그대로 쓴다 ──────────────────── */
+.nr-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  align-self: stretch;
+}
+.nr-sheet .mc-table {
+  margin-top: 0;
+}
+/* 개인 조건 선합의 — 격자 아래 한 줄. 합의됐으면 값이 승색으로 선다 */
+.nr-personal {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  font-size: var(--fs-xs);
+}
+.nr-personal[data-agreed] .mc-vals b {
+  color: var(--win);
+}
+/* 걸린 조건 — 누가 · 갈래 · 답. 수락은 승색, 거절은 패색, 답이 없으면 잉크 3층 */
+.nr-terms {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  list-style: none;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-table);
+}
+.nr-terms li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.nr-term-by {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.06em;
+}
+.nr-term-label {
+  font-weight: 500;
+  word-break: keep-all;
+}
+.nr-term-answer {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.nr-terms li[data-answer="granted"] .nr-term-answer {
+  color: var(--win);
+}
+.nr-terms li[data-answer="refused"] .nr-term-answer {
+  color: var(--loss);
+}
+/* 답을 기다리는 오퍼가 올라 있다 — 꼬리표 하나 */
+.nr-awaiting {
+  color: var(--warn);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+/* ── 성사 — 가능성과 기한 ────────────────────────────────────────────────── */
+.nr-odds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-4);
+  font-size: var(--fs-xs);
+}
+.nr-odds span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.nr-odds em {
+  color: var(--dim);
+  white-space: nowrap;
+}
+.nr-odds b {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.nr-odds-val b {
+  color: var(--accent-2);
+}
+/* 상대가 건 기한은 주의다 — 지나면 문이 닫힌다 */
+.nr-deadline[data-ultimatum] b {
+  color: var(--warn);
+}
+
+/* ── 손잡이 — 방에서만 산다 ───────────────────────────────────────────────── */
+.nr-handles {
+  display: flex;
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.nr-btn {
+  height: 36px;
+  padding: 0 var(--sp-4);
+  border: none;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  transition:
+    background var(--ease),
+    color var(--ease),
+    opacity var(--ease),
+    transform 120ms var(--ease);
+}
+.nr-btn:hover:not(:disabled) {
+  background: var(--pop);
+}
+.nr-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+/* 제안은 주 손잡이 — 키 컬러 채움 */
+.nr-btn.propose {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.nr-btn.propose:hover:not(:disabled) {
+  background: var(--accent);
+}
+/* 일어서는 손잡이는 오른쪽 끝 — 제안과 붙어 서면 손이 헷갈린다 */
+.nr-btn.leave {
+  margin-left: auto;
+}
+
+/* 방 안의 입력창 — 중계의 금과 같은 자리에 딜의 톤이 선다 */
+.chat-pane.at-table .chat-input:focus-within {
+  border-color: var(--accent-2);
+}
+
+/* ── 접힌 협상 기록 — `.match-log`와 같은 카드, 레일은 딜의 톤 ───────────── */
+.negotiation-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.negotiation-log-head {
+  border-left-color: var(--accent-2);
+}
+.negotiation-log-status {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.negotiation-log-head[data-status="agreed"] .negotiation-log-status,
+.negotiation-log-head[data-status="completed"] .negotiation-log-status {
+  color: var(--win);
+}
+.negotiation-log-head[data-status="rejected"] .negotiation-log-status {
+  color: var(--loss);
+}
+.negotiation-log-head[data-status="expired"] .negotiation-log-status {
+  color: var(--text-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .negotiation-gate,
+  .negotiation-gate.leaving {
+    animation: none;
+  }
+  .nr-btn:active {
+    transform: none;
+  }
+}

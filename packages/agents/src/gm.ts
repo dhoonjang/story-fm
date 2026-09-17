@@ -1,5 +1,6 @@
 /**
- * GM 오케스트레이터 — 단일 GM, 장면 라우팅 (agents.md §1·§2).
+ * GM 오케스트레이터 — 장면 라우팅 (agents.md §1·§2). 국면은 `state.phase` 하나로 갈린다 —
+ * `match`면 매치 GM, `negotiation`이면 협상 GM, 아니면 평시 GM이고 셋 다 호출 하나다.
  *
  * **모드로 갈리지 않는다.** 실모드는 설정된 제공자의 tool loop이고, `LLM_MODE=mock`은
  * 그 모델 자리에 대본 어댑터를 세운다(`mock-gm.ts` — agents.md §8) — 도구도 입력 조립도
@@ -16,14 +17,21 @@ import {
   awaitingShootout,
   buildTrainingBrief,
   clockOf,
+  closeNegotiation,
   formatClock,
   humanizePlayerIds,
   journal,
   markEntered,
+  markSeated,
   minutesOfClock,
   arrivedResponses,
+  openLetter,
   pendingVerdicts,
+  roomNegotiationOf,
+  roomPartyOf,
   selectCharacters,
+  settleTableReply,
+  sitAtTable,
   takeMedia,
   takeNews,
   toolCallFactLine,
@@ -42,7 +50,14 @@ import { reportTraining } from "./training-rater";
 import { buildMatchTools, KICKOFF_BLOCK, MATCH_GM_SYSTEM, type MatchToolContext } from "./match-gm";
 import { finalizeMatchTurn } from "./finalize-match";
 import { runTableReply } from "./negotiation-table";
-import { openLetter, settleTableReply } from "@story-fm/engine";
+import {
+  buildNegotiationReference,
+  buildNegotiationTools,
+  buildTableNote,
+  NEGOTIATION_GM_SYSTEM,
+  SEATING_BLOCK,
+  type NegotiationToolContext,
+} from "./negotiation-gm";
 import { mockGmLlm } from "./mock-gm";
 import { retryOnce } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
@@ -70,6 +85,7 @@ import {
 } from "./gm-input";
 import {
   GmTurnFailure,
+  TABLE_LEFT,
   TIME_PASSED,
   noteSceneHeader,
   recordCall,
@@ -169,7 +185,7 @@ async function answerLetters(state: GameState, calls: GmToolCall[]): Promise<str
      * `from`은 그 사람들을 이름으로 부른다.
      */
     const from = opened.seat.voices.map((v) => v.name).join(" · ") || "상대";
-    const reply = await runTableReply(state, opened.seat, null);
+    const reply = await runTableReply(state, opened.seat);
     const outcome = settleTableReply(state, opened.seat, reply ?? undefined);
     // 감독이 부른 적 없는 명령이라 `wrap`을 지나지 않는다 — 기록은 여기서 남긴다
     journal({
@@ -199,6 +215,20 @@ interface TurnShape {
    * 그대로 넘겨(`relevantTurns`) 라커룸에서 이어지는 목소리로 첫 휘슬만 연다.
    */
   kickoff: boolean;
+  /** 협상 방의 장면인가 — 라우팅이 `negotiation-gm`으로 갈린다 (transfer.md §12-2) */
+  inNegotiation: boolean;
+  /**
+   * 자리에 앉는 턴 — **방의 첫 호흡.** 감독이 게이트를 지나 앉은 그 한 턴이다. 킥오프와
+   * 같은 자리라 도구가 없다 — 방과 건너편 사람들, 상대의 첫 말까지다.
+   */
+  seating: boolean;
+  /** 일어서는 손잡이 턴 — 코어가 턴 앞에서 방을 닫고, GM은 자리를 뜨는 장면만 쓴다 */
+  leaving: boolean;
+  /**
+   * 이 턴이 속한 협상 — **턴이 열릴 때** 잡는다. 일어서는 턴은 방이 닫힌 뒤에 장면을
+   * 쓰므로 `state`에서 다시 읽을 수 없고, 그 장면은 그래도 방의 마지막 턴이다 (agents.md §5).
+   */
+  negotiationId: string | null;
   /** 손잡이 턴인가 — 감독이 친 말이 아니다 (`message`는 표시 문구다) */
   operator: boolean;
 }
@@ -308,13 +338,30 @@ function minuteNow(state: GameState, ledger: TurnLedger, opening: TurnOpening): 
  */
 async function openTurn(
   state: GameState,
+  message: string,
   shape: TurnShape,
   operation: TurnOperation | null | undefined,
   ledger: TurnLedger,
 ): Promise<TurnOpening> {
-  const { inMatch, kickoff, operator } = shape;
+  const { inMatch, kickoff, inNegotiation, seating, leaving, operator } = shape;
+  /** 평시 턴만 하는 일 — 편지·시간 이동·보고서 카드는 방 안에도 경기 중에도 없다 */
+  const peace = !inMatch && !inNegotiation;
   const from = state.date;
   const clockFrom = clockOf(state);
+  /**
+   * **방 안의 턴 앞** (transfer.md §12-2) — 감독의 말은 코어가 테이블의 `us` 줄로 적고 답을
+   * 기다리던 오퍼를 오늘로 당긴다(`sitAtTable`). 일어서는 손잡이는 모델보다 먼저 방을
+   * 닫는다 — GM은 닫힌 방에서 자리를 뜨는 마지막 장면을 쓴다.
+   */
+  if (inNegotiation && shape.negotiationId !== null) {
+    if (leaving) {
+      const left = closeNegotiation(state, "left");
+      if (left.ok) ledger.calls.push({ name: TABLE_LEFT, summary: left.message, silent: true });
+    } else if (!seating && !operator) {
+      const sat = sitAtTable(state, shape.negotiationId, message, roomPartyOf(state) ?? undefined);
+      if (!sat.ok) console.warn(`[gm] 감독의 말을 테이블에 적지 못했습니다 — ${sat.message}`);
+    }
+  }
   /**
    * 이번 턴에 조립이 안 된 보고서 — 줄을 보는 자리 셋이 이 집합을 이어 쓴다
    * (`TurnOpening.stuckCards`).
@@ -324,13 +371,11 @@ async function openTurn(
    * ⚠️ 손잡이가 시계를 옮기기 **전에** 꺼낸다: 그 뒤에 도착하는 것은 「그 사이 벌어진
    * 일」이 따로 실으므로, 여기 섞이면 한 프롬프트에 같은 값이 두 번 실린다 (agents.md §6).
    */
-  const carried = inMatch
-    ? NO_CARDS
-    : await takeArrivedReports(state, MAX_REPORT_CARDS, stuckCards);
+  const carried = peace ? await takeArrivedReports(state, MAX_REPORT_CARDS, stuckCards) : NO_CARDS;
   // 손잡이로 넘긴 시간은 모델보다 먼저 흐른다 — 코어가 먼저 굴리고 "그 사이
   // 벌어진 일"을 상태에 실어, 모델은 도착한 자리에서 보고한다
   const pendingBeforeSkip = new Set(pendingVerdicts(state).map((v) => v.negotiation.id));
-  const skipped = !inMatch && operation ? advanceForOperation(state, operation) : null;
+  const skipped = peace && operation ? advanceForOperation(state, operation) : null;
   if (skipped) {
     noteTimePassed(
       ledger,
@@ -354,7 +399,7 @@ async function openTurn(
       : [],
   );
   // 답할 날이 된 편지는 상대가 먼저 답한다 — 이번 턴의 장면은 그 답 뒤에 선다 (agents.md §4-1)
-  const letters = inMatch ? [] : await answerLetters(state, ledger.calls);
+  const letters = peace ? await answerLetters(state, ledger.calls) : [];
   /**
    * **손잡이로 온 경기 턴은 모델이 결정할 것이 없다** — 화면의 대기 중 교체·좌표·역할·
    * 전술 축은 코어가 이미 적용했고(match.md §2), `계속`이 뜻하는 것은 진행 하나뿐이다.
@@ -404,12 +449,14 @@ async function callGm(
   opening: TurnOpening,
   ledger: TurnLedger,
   matchCtx: MatchToolContext,
+  negotiationCtx: NegotiationToolContext,
   onText: ((delta: string) => void) | undefined,
   operatorOrders: readonly string[] | undefined,
   boardMoves: readonly BoardMove[] | undefined,
 ): Promise<GmCall> {
-  const { inMatch, kickoff, operator } = shape;
-  const config = agentConfig(inMatch ? "match-gm" : "gm");
+  const { inMatch, kickoff, inNegotiation, seating, leaving, operator } = shape;
+  const peace = !inMatch && !inNegotiation;
+  const config = agentConfig(inMatch ? "match-gm" : inNegotiation ? "negotiation-gm" : "gm");
   /**
    * **모델 자리에 서는 것** — mock 모드면 대본 어댑터다 (agents.md §8). 턴 앞이 이미
    * 남긴 기록(손잡이의 시간 이동·도착한 편지)이 있으면 대본은 장면을 비워 낸다:
@@ -420,25 +467,40 @@ async function callGm(
       message,
       inMatch,
       kickoff,
+      inNegotiation,
+      seating,
       operator,
+      negotiationId: shape.negotiationId,
       recorded: () => ledger.calls.length > 0,
     }) ?? createGameLLM(config);
   /**
    * 경기 중 도구는 **경기 도구 셋**뿐이다 — 코어를 부르는 손잡이이고 경기를 바꾸지
    * 못한다 (agents.md §3). 손잡이 턴은 마감 하나, 킥오프 턴은 없다. 도구 정의는
    * 고정층이지만 셋뿐이라 평시의 56개와는 눈금이 다르다 (agents.md §5).
+   *
+   * 방 안의 도구도 **협상 도구 셋**뿐이다 — 장부를 바꾸는 것은 코어고 셋은 손잡이다
+   * (agents.md §4-1). 자리에 앉는 턴과 일어서는 손잡이 턴은 없다. 제안 폼으로만 온 손잡이
+   * 턴은 셋을 쥔다 — 상대가 그 오퍼에 답할 자리다 (손잡이는 감독의 말이 없어 열리지 않는다).
    */
   const tools = inMatch
     ? kickoff
       ? []
       : buildMatchTools(state, matchCtx, { operator })
-    : buildGmTools(state, ledger.calls, {
-        // 손잡이 셋이 해석기에 넘길 원문 — 감독이 친 말일 때만이다 (agents.md §1)
-        ...(operator ? {} : { said: message }),
-        deferNegotiationIds: opening.deferNegotiationIds,
-        ...(boardMoves && boardMoves.length > 0 ? { boardMoves } : {}),
-      });
-  const system = inMatch ? [MATCH_GM_SYSTEM, buildMatchReference(state)] : peaceSystem(state);
+    : inNegotiation
+      ? seating || leaving
+        ? []
+        : buildNegotiationTools(state, negotiationCtx)
+      : buildGmTools(state, ledger.calls, {
+          // 손잡이 셋이 해석기에 넘길 원문 — 감독이 친 말일 때만이다 (agents.md §1)
+          ...(operator ? {} : { said: message }),
+          deferNegotiationIds: opening.deferNegotiationIds,
+          ...(boardMoves && boardMoves.length > 0 ? { boardMoves } : {}),
+        });
+  const system = inMatch
+    ? [MATCH_GM_SYSTEM, buildMatchReference(state)]
+    : inNegotiation
+      ? [NEGOTIATION_GM_SYSTEM, buildNegotiationReference(state, shape.negotiationId ?? "")]
+      : peaceSystem(state);
   /**
    * **패킷은 구간이 굴러간 뒤에만 싣는다.** 선수를 부른 한 마디에 패킷 전체를 실으면
    * GM이 읽지도 않을 판세를 매 턴 정가로 읽는다 (agents.md §5). GM이 굴린 구간의
@@ -448,21 +510,24 @@ async function callGm(
    */
   const stateNote = inMatch
     ? buildLedgerNote(state, { withPacket: opening.applied?.segment != null })
-    : buildGmStateNote(
-        state,
-        opening.skipped
-          ? {
-              from: opening.from,
-              stopped: ADVANCE_STOP_KO[opening.skipped.stopped] ?? "진행했다",
-              events: opening.skipped.events,
-            }
-          : null,
-        opening.carried.reports,
-        opening.carried.missions,
-      ) +
-      (opening.letters.length > 0
-        ? `\n\n<letters>\n${opening.letters.join("\n")}\n</letters>`
-        : "");
+    : inNegotiation
+      ? // 방의 스냅샷은 테이블이다 — 오퍼 이력·조건서·인내·앵커 (agents.md §4-1)
+        buildTableNote(state, shape.negotiationId ?? "")
+      : buildGmStateNote(
+          state,
+          opening.skipped
+            ? {
+                from: opening.from,
+                stopped: ADVANCE_STOP_KO[opening.skipped.stopped] ?? "진행했다",
+                events: opening.skipped.events,
+              }
+            : null,
+          opening.carried.reports,
+          opening.carried.missions,
+        ) +
+        (opening.letters.length > 0
+          ? `\n\n<letters>\n${opening.letters.join("\n")}\n</letters>`
+          : "");
   /**
    * 이번 장면에 설 인물 — **평시만이다.** 경기 중에는 벤치의 코치 한 사람이
    * 레퍼런스에 상주하고(`buildMatchReference`), 중계가 읽을 것은 판이지 인물지가 아니다.
@@ -471,9 +536,9 @@ async function callGm(
    * 같은 자리에 다시 선다 — 그래서 레퍼런스(캐시 프리픽스)가 흔들리지 않는다
    * (people.md §6 · agents.md §5).
    */
-  const characters = inMatch
-    ? []
-    : selectCharacters(state, { message, injected: injectedCharacters(state) });
+  const characters = peace
+    ? selectCharacters(state, { message, injected: injectedCharacters(state) })
+    : [];
   /**
    * 이번 턴의 유저 메시지 — **평시는 채팅 꼬리에서 그린다.** 다음 턴 이력이 같은 꼬리를
    * 같은 함수로 다시 그리므로 둘이 글자까지 같고, 캐시 프리픽스가 이 발화를 지나
@@ -481,30 +546,46 @@ async function callGm(
    * 어댑터가 보낸 것을 그대로 남기므로 여기서 만든다 — 킥오프 턴의 발화는 경기
    * 이력으로 갈려 평시 꼬리에 없기도 하다. 전술판 조작은 채팅에 선 그 문장 그대로다.
    */
+  const turnLines = [
+    ...(operatorOrders && operatorOrders.length > 0
+      ? [{ role: "operator" as const, text: operatorOrders.join("\n") }]
+      : []),
+    { role: operator ? ("operator" as const) : ("user" as const), text: message },
+  ];
+  /**
+   * 방의 턴은 평시처럼 채팅 꼬리에서 그린다 — 이 협상의 턴만 읽되, 일어서는 턴은 방이 이미
+   * 닫혀 있어 턴 앞에서 잡아 둔 id로 읽는다. 꼬리가 비었으면(이번 턴의 줄이 방의 표식을
+   * 받지 못했다) 경기처럼 이번 턴의 줄에서 만든다 — 빈 발화로 모델을 부르지 않는다.
+   */
+  const roomMessage = (): string => {
+    const fromChat =
+      shape.negotiationId === null
+        ? ""
+        : buildGmTurnMessage(state, [], { negotiationId: shape.negotiationId });
+    return fromChat.length > 0 ? fromChat : renderTurnGroup(state, turnLines, []);
+  };
   const turnMessage = inMatch
-    ? renderTurnGroup(
-        state,
-        [
-          ...(operatorOrders && operatorOrders.length > 0
-            ? [{ role: "operator" as const, text: operatorOrders.join("\n") }]
-            : []),
-          { role: operator ? ("operator" as const) : ("user" as const), text: message },
-        ],
-        [],
-      )
-    : buildGmTurnMessage(state, characters);
+    ? renderTurnGroup(state, turnLines, [])
+    : inNegotiation
+      ? roomMessage()
+      : buildGmTurnMessage(state, characters);
   /**
    * 소식은 **스냅샷에 실린 그 턴에 비워진다** — `pendingEdits`와 같은 규약이다.
    * 경기 중 스냅샷은 장부(`buildLedgerNote`)라 소식을 읽지 않으므로 그때는 남겨 둔다.
    */
-  if (!inMatch) {
+  if (peace) {
     takeNews(state);
     // 기사도 같은 규약이다 — 스냅샷과 인물 사전이 둘 다 읽은 뒤에 비운다 (people.md §4-1)
     takeMedia(state);
   }
-  // 킥오프 턴의 이력은 경기 전 대화다 — `relevantTurns`가 그 한 턴만 평시로 읽는다
+  // 킥오프 턴의 이력은 경기 전 대화다 — `relevantTurns`가 그 한 턴만 평시로 읽는다.
+  // 방의 이력은 이 협상의 채팅 턴이다 — 평시와 같은 함수가 같은 꼴로 그린다 (agents.md §5)
   const history =
-    inMatch && !kickoff ? (state.pendingMatch?.casterHistory ?? []) : buildGmHistory(state);
+    inMatch && !kickoff
+      ? (state.pendingMatch?.casterHistory ?? [])
+      : inNegotiation && shape.negotiationId !== null
+        ? buildGmHistory(state, { negotiationId: shape.negotiationId })
+        : buildGmHistory(state);
   /**
    * 재시도의 조건 — **이 호출이 아직 아무 자국도 남기지 않았을 때만.** 도구가
    * 돌았으면 상태가 이미 바뀌었고(이중 반영), 글자가 나갔으면 화면에 장면이 두 번
@@ -533,7 +614,7 @@ async function callGm(
   /** 이 호출이 남긴 자국 — 그 전에 코어가 남긴 기록(손잡이의 구간)은 세지 않는다 */
   const callsBefore = ledger.calls.length;
   const result = await retryOnce(
-    inMatch ? "gm:match" : "gm:turn",
+    inMatch ? "gm:match" : inNegotiation ? "gm:table" : "gm:turn",
     () =>
       llm.runTurn({
         system,
@@ -542,6 +623,8 @@ async function callGm(
           turnMessage,
           // 킥오프 턴의 표식 — 도구도 대본도 없는 턴이 첫 휘슬이라는 것을 입력이 말한다
           ...(inMatch && kickoff ? [``, KICKOFF_BLOCK] : []),
+          // 자리에 앉는 턴의 표식 — 같은 자리다. 방과 상대의 첫 말까지만 쓴다
+          ...(inNegotiation && seating ? [``, SEATING_BLOCK] : []),
           // 손잡이가 먼저 굴린 구간 — GM은 이 대본을 받아 중계만 쓴다
           ...(inMatch && !kickoff && operator
             ? [
@@ -582,7 +665,8 @@ async function callGm(
  * (agents.md §2 「시계」). 규칙 자체는 `applyScenePoint`가 갖는다.
  */
 function clockSourceOf(shape: TurnShape, opening: TurnOpening): ClockSource {
-  if (shape.inMatch) return "ledger";
+  // 방 안에서 날짜는 흐르지 않는다 — 헤더는 그 날 안의 시각만 옮긴다 (transfer.md §12-2)
+  if (shape.inMatch || shape.inNegotiation) return "ledger";
   return opening.skipped ? "operator" : "header";
 }
 
@@ -598,7 +682,8 @@ async function closeTurn(
   ledger: TurnLedger,
   call: GmCall,
 ): Promise<GmTurnResult> {
-  const { inMatch, kickoff } = shape;
+  const { inMatch, kickoff, inNegotiation, seating } = shape;
+  const peace = !inMatch && !inNegotiation;
   const { result } = call;
   /**
    * **GM이 마감을 부르지 않았으면 코어가 대신 부른다** (agents.md §3 「경기 마감」) —
@@ -703,7 +788,7 @@ async function closeTurn(
    * 이어받아 이번 턴에 다시 집지 않는다.
    */
   const headerCards =
-    !inMatch && scenePoint
+    peace && scenePoint
       ? await takeArrivedReports(
           state,
           MAX_REPORT_CARDS -
@@ -731,6 +816,16 @@ async function closeTurn(
     state.pendingMatch.casterHistory = result.history;
     // 첫 휘슬을 불었다 — 이 뒤로는 경기 도구 셋을 쥔 보통의 진행 턴이다
     if (kickoff) markEntered(state);
+  }
+  /**
+   * **방의 턴 뒤** (transfer.md §12-2) — 자리에 앉았으면 게이트가 닫히고, 협상이 `open`을
+   * 벗어났는데 방이 열려 있으면 코어가 닫는다: 합의·결렬이 도구 뒤에서 일어난 턴이다
+   * (`accept_deal`·`withdraw_offer`는 해석기가 옮긴 명령이라 방을 스스로 닫지 않는다).
+   */
+  if (inNegotiation) {
+    if (seating) markSeated(state);
+    const room = roomNegotiationOf(state);
+    if (room && room.status !== "open") closeNegotiation(state);
   }
   // 선수 id를 이름으로 바꾸고 헤더를 되붙여 저장한다 — ⚠️ 헤더를 떼면 화면
   // (scene-stamp)의 시각이 스트리밍이 끝나는 순간 사라진다.
@@ -828,7 +923,8 @@ async function closeTurn(
 }
 
 /**
- * **GM 턴 실행** — 일상은 `gm`, 경기 장면은 `match-gm` 설정으로 라우팅한다.
+ * **GM 턴 실행** — 일상은 `gm`, 경기 장면은 `match-gm`, 협상 방은 `negotiation-gm` 설정으로
+ * 라우팅한다.
  *
  * 모드로 갈리지 않는다: `LLM_MODE=mock`이면 모델 자리에 대본 어댑터가 서고 나머지는
  * 그대로다 (agents.md §8). `onText`를 주면 서사 텍스트가 스트리밍으로 흐른다 —
@@ -857,9 +953,14 @@ export async function runGmTurn(
   seedCalls?: readonly GmToolCall[],
 ): Promise<GmTurnResult> {
   const inMatch = state.phase === "match";
+  const room = state.phase === "negotiation" ? (state.pendingNegotiation ?? null) : null;
   const shape: TurnShape = {
     inMatch,
     kickoff: inMatch && state.pendingMatch?.entered !== true,
+    inNegotiation: room !== null,
+    seating: room !== null && room.seated !== true,
+    leaving: room !== null && operation?.kind === "leave_negotiation",
+    negotiationId: room?.negotiationId ?? null,
     operator: operation != null,
   };
   const ledger: TurnLedger = {
@@ -879,7 +980,12 @@ export async function runGmTurn(
     ...(boardMoves && boardMoves.length > 0 ? { boardMoves } : {}),
     onFinalized: (minute) => (ledger.finalMinute = minute),
   };
-  const opening = await openTurn(state, shape, operation, ledger);
+  const negotiationCtx: NegotiationToolContext = {
+    calls: ledger.calls,
+    // 방의 손잡이가 해석기에 넘길 원문 — 감독이 친 말일 때만이다 (agents.md §1)
+    ...(shape.operator ? {} : { said: message }),
+  };
+  const opening = await openTurn(state, message, shape, operation, ledger);
   const call = await callGm(
     state,
     message,
@@ -887,6 +993,7 @@ export async function runGmTurn(
     opening,
     ledger,
     matchCtx,
+    negotiationCtx,
     onText,
     operatorOrders,
     boardMoves,

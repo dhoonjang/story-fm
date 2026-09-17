@@ -12,6 +12,7 @@ import type { TurnOperation } from "@story-fm/agents";
 import type { ProposalInput } from "@story-fm/domain";
 import { ChatTurnView, turnStamp } from "./chat";
 import { chatForActiveMatch } from "@/lib/match-chat";
+import { NEGOTIATION_STATUS_KO, chatForActiveNegotiation } from "@/lib/negotiation-chat";
 import { buildTraceIndex } from "@/lib/turn-trace-index";
 import { TurnTracePopup } from "./turn-trace";
 import { mergeMatchOrders, type MatchBoardOrder } from "@/lib/match-orders";
@@ -26,8 +27,10 @@ import { MatchClock, MatchHeadline, MatchOpponent, MatchOverview } from "./match
 import { StageSplitHandle } from "./stage-split-handle";
 import { Crest, clubStyle } from "./crest";
 import { KickoffGate } from "./kickoff-gate";
+import { NegotiationGate } from "./negotiation-gate";
+import { NegotiationRoom } from "./negotiation-room";
 import { PlayerCardProvider } from "./player-card";
-import { ProposalProvider } from "./proposal-form";
+import { ProposalProvider, type ProposalDraft } from "./proposal-form";
 import {
   IconBoard,
   IconBroadcast,
@@ -35,6 +38,7 @@ import {
   IconCareer,
   IconChat,
   IconChevron,
+  IconContract,
   IconFinance,
   IconMark,
   IconMatch,
@@ -112,30 +116,41 @@ const MATCH_PANELS = [
 type MatchTab = (typeof MATCH_PANELS)[number]["key"];
 
 /**
- * 경기 구간을 한 덩어리로 묶는다 — **끝난 경기는 메인 채팅에서 접힌다.**
+ * 경기·협상 구간을 한 덩어리로 묶는다 — **끝난 것은 메인 채팅에서 접힌다.**
  *
  * 경기 하나가 중계 수십 턴을 남기는데 그게 평시 대화 사이에 그대로 흐르면,
  * 한 시즌을 보낸 뒤 "지난주에 뭘 지시했더라"를 찾을 수 없다. 경기는 그 자체로
  * 하나의 사건이므로 결과 한 줄로 접고, 펼치면 그때의 중계와 지시가 그대로 나온다.
+ * 협상 방의 턴도 같다 (transfer.md §12-2) — 끝난 협상은 선수 · 갈래 · 결과 한 줄이다.
  *
- * `matchId`가 없는 옛 이력의 경기 턴은 묶지 않고 그대로 흐른다 — 어느 경기의
- * 기록인지 모르는 채로 접으면 무엇을 펼치는지 알 수 없다.
+ * `matchId`·`negotiationId`가 없는 옛 이력의 턴은 묶지 않고 그대로 흐른다 — 어느
+ * 것의 기록인지 모르는 채로 접으면 무엇을 펼치는지 알 수 없다.
  */
+type BlockKind = "match" | "negotiation";
 type ChatBlock =
   | { kind: "turn"; turn: ChatTurn; at: number }
-  | { kind: "match"; matchId: string; turns: Array<{ turn: ChatTurn; at: number }> };
+  | { kind: BlockKind; id: string; turns: Array<{ turn: ChatTurn; at: number }> };
 
-function groupMatchTurns(chat: readonly ChatTurn[]): ChatBlock[] {
+/** 이 턴이 속한 구간 — 경기인가 협상인가, 그리고 어느 것인가. 둘 다 아니면 null */
+function blockOf(turn: ChatTurn): { kind: BlockKind; id: string } | null {
+  if (turn.inMatch === true && turn.matchId !== undefined)
+    return { kind: "match", id: turn.matchId };
+  if (turn.inNegotiation === true && turn.negotiationId !== undefined)
+    return { kind: "negotiation", id: turn.negotiationId };
+  return null;
+}
+
+function groupChatTurns(chat: readonly ChatTurn[]): ChatBlock[] {
   const blocks: ChatBlock[] = [];
   for (const [at, turn] of chat.entries()) {
-    const id = turn.inMatch === true ? turn.matchId : undefined;
-    if (id === undefined) {
+    const block = blockOf(turn);
+    if (block === null) {
       blocks.push({ kind: "turn", turn, at });
       continue;
     }
     const last = blocks[blocks.length - 1];
-    if (last?.kind === "match" && last.matchId === id) last.turns.push({ turn, at });
-    else blocks.push({ kind: "match", matchId: id, turns: [{ turn, at }] });
+    if (last && last.kind === block.kind && last.id === block.id) last.turns.push({ turn, at });
+    else blocks.push({ ...block, turns: [{ turn, at }] });
   }
   return blocks;
 }
@@ -213,6 +228,20 @@ export function GameScreen({ gameId }: { gameId: string }) {
     (pendingMatch.beforeKickoff === true && !(busy && entering === pendingMatch.matchId))
       ? null
       : pendingMatch;
+  /**
+   * 협상 방 — 경기와 같은 두 걸음이다 (transfer.md §12-2). `start_negotiation`은 방을
+   * 세울 뿐이고 감독이 자리에 앉는 게이트를 지나야 무대가 방으로 바뀐다. 앉는 손잡이를
+   * 누른 순간을 `enteringNegotiation`이 적어 두고, 코어가 `seated`를 돌려주기 전에도
+   * 무대는 이미 방이다 — 그 턴이 실패하면 `fail`이 이 값을 지워 게이트로 돌아간다.
+   */
+  const pendingNegotiation = game?.views.negotiation ?? null;
+  const [enteringNegotiation, setEnteringNegotiation] = useState<string | null>(null);
+  const liveNegotiation =
+    pendingNegotiation === null ||
+    (pendingNegotiation.beforeSeating &&
+      !(busy && enteringNegotiation === pendingNegotiation.negotiationId))
+      ? null
+      : pendingNegotiation;
   /** 열린 장부 뷰 — null이면 무대(채팅 / 경기+채팅)가 보인다 */
   const [panel, setPanel] = useState<Panel | null>(null);
   /**
@@ -357,6 +386,11 @@ export function GameScreen({ gameId }: { gameId: string }) {
   }, [game?.chat]);
   const [input, setInput] = useState("");
   /**
+   * **첨부된 제안서** — 폼이 써 낸 구조체가 입력창에 붙어 다음 전송에 함께 나간다
+   * (overview.md §5). 코어가 반려하면 그대로 남아 감독이 칩을 눌러 값을 고친다.
+   */
+  const [draft, setDraft] = useState<ProposalDraft | null>(null);
+  /**
    * 원문 창이 열린 턴의 자리 (`game.chat`의 절대 인덱스) — 개발 모드에서만 찬다.
    * 게임의 일부가 아니라 개발 도구라 세이브에도 URL에도 남기지 않는다.
    */
@@ -442,6 +476,18 @@ export function GameScreen({ gameId }: { gameId: string }) {
     if (wasInMatch.current === null && now !== null) setPanel(null);
     wasInMatch.current = now;
   }, [liveMatch?.matchId, matchGone]);
+  /**
+   * 자리에 앉는 순간 — 열어 두었던 장부를 닫는다. 오른쪽 칸의 주인은 방이고, 장부는
+   * 레일이 그대로 서 있어 감독이 다시 열 수 있다(채팅 탭이 방으로 돌아오는 문이다).
+   * 종료 화면은 없다 — 방을 나온 뒤의 장부는 방이 없던 때와 같고, 결과는 카드가 이미
+   * 채팅에 세웠다 (transfer.md §12-2).
+   */
+  const wasAtTable = useRef<string | null>(null);
+  useEffect(() => {
+    const now = liveNegotiation?.negotiationId ?? null;
+    if (wasAtTable.current === null && now !== null) setPanel(null);
+    wasAtTable.current = now;
+  }, [liveNegotiation?.negotiationId]);
 
   /**
    * 턴 전송 — `text`를 주면 입력창 대신 그 문장을 보낸다 (시간 이동 버튼).
@@ -462,7 +508,10 @@ export function GameScreen({ gameId }: { gameId: string }) {
       proposal?: ProposalInput,
     ): Promise<TurnStreamFailure | null> => {
       const message = operation ? "" : (text ?? input).trim();
-      if ((!message && !operation && !proposal) || busy || !game) return null;
+      // 첨부된 제안서는 감독의 말과 함께 나간다 — 손잡이 턴에는 붙지 않는다
+      const attached = proposal ?? (operation ? undefined : draft?.input);
+      const sentDraft = attached !== undefined && attached === draft?.input;
+      if ((!message && !operation && !attached) || busy || !game) return null;
       const seq = ++turnSeqRef.current;
       setBusy(true);
       setError(null);
@@ -511,6 +560,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
        * `phase`가 `match`이면 경기 이력이다(lib/turn-runner.ts).
        */
       const activeMatchId = liveMatch?.matchId;
+      // 협상 방도 같은 규칙이다 — 방 안에서 친 말은 그 협상의 이력이다 (lib/turn-runner.ts)
+      const activeNegotiationId = liveNegotiation?.negotiationId;
       const optimistic =
         operation || !message
           ? null
@@ -520,6 +571,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
               toolCalls: [],
               at: game.date,
               ...(activeMatchId ? { inMatch: true as const, matchId: activeMatchId } : {}),
+              ...(activeNegotiationId
+                ? { inNegotiation: true as const, negotiationId: activeNegotiationId }
+                : {}),
             };
       if (optimistic) setGame((g) => (g ? { ...g, chat: [...g.chat, optimistic] } : g));
 
@@ -548,6 +602,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
          * 지시·입력과 달리 이 낙관은 서버에 두 번 실릴 것이 없다.
          */
         setEntering(null);
+        // 협상의 문도 같다 — 앉는 턴이 실패하면 무대는 게이트로 돌아간다
+        setEnteringNegotiation(null);
         setError(failure.reason);
         setErrorDetail(failure.detail ?? null);
         setErrorRetry(failure.retry);
@@ -597,6 +653,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
         stopPump();
         // 지난 알림의 "읽음"은 새 GM 턴이 들어오는 렌더에서 함께 풀린다 (`hintTurn`)
         if (payload) setGame(payload);
+        // 제안서는 턴이 서면 떼어진다 — 반려된 턴은 첨부를 그대로 둔다
+        if (payload && sentDraft) setDraft(null);
         setStreamText("");
         setBusy(false);
         /**
@@ -653,7 +711,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
         {
           ...(operation ? { operation } : message ? { message } : {}),
           orders,
-          ...(proposal ? { proposal } : {}),
+          ...(attached ? { proposal: attached } : {}),
         },
         {
           onDelta: (text) => {
@@ -672,7 +730,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       if (!pendingPayloadRef.current) commit(null);
       return failure ?? null;
     },
-    [input, busy, game, liveMatch?.matchId, gameId, saver],
+    [input, busy, game, liveMatch?.matchId, liveNegotiation?.negotiationId, gameId, saver, draft],
   );
 
   /**
@@ -697,6 +755,26 @@ export function GameScreen({ gameId }: { gameId: string }) {
     }
     void send(undefined, { kind: "advance_match" });
   }, [pendingMatch?.matchId, send]);
+  /**
+   * 협상의 문을 지난다 — 경기의 문과 같은 순서다 (transfer.md §12-2). 자리에 앉는 것은
+   * 감독이므로 방은 누름과 함께 서고, 코어가 `seated`를 세우는 것은 그다음이다. 게이트가
+   * 물러나는 시간도 한 벌이다 — 두 문이 한 화면에 함께 서는 일은 없다.
+   */
+  const enterNegotiation = useCallback(() => {
+    const id = pendingNegotiation?.negotiationId;
+    if (id === undefined) return;
+    setEnteringNegotiation(id);
+    if (!reducedMotion()) {
+      setGateLeaving(true);
+      if (gateLeaveTimer.current) clearTimeout(gateLeaveTimer.current);
+      gateLeaveTimer.current = setTimeout(() => setGateLeaving(false), GATE_LEAVE_MS);
+    }
+    void send(undefined, { kind: "enter_negotiation" });
+  }, [pendingNegotiation?.negotiationId, send]);
+  /** 자리에서 일어선다 — 협상은 열린 채 방만 닫힌다. 손잡이는 방의 칸에 선다 */
+  const leaveNegotiation = useCallback(() => {
+    void send(undefined, { kind: "leave_negotiation" });
+  }, [send]);
 
   /**
    * 마지막으로 화면에 선 시각 — 흘러오는 턴이 같은 시각을 다시 적지 않게 한다.
@@ -705,13 +783,16 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * during the previous render"로 화면이 통째로 죽는다 (실제로 그랬다).
    */
   const lastStamp = useMemo(() => {
-    const visible = chatForActiveMatch(game?.chat ?? [], liveMatch?.matchId ?? null);
+    const visible = chatForActiveNegotiation(
+      chatForActiveMatch(game?.chat ?? [], liveMatch?.matchId ?? null),
+      liveNegotiation?.negotiationId ?? null,
+    );
     for (let i = visible.length - 1; i >= 0; i--) {
       const stamp = turnStamp(visible[i]!);
       if (stamp) return stamp;
     }
     return null;
-  }, [game, liveMatch?.matchId]);
+  }, [game, liveMatch?.matchId, liveNegotiation?.negotiationId]);
   /**
    * 턴 → 원문 기록의 자리. ⚠️ **걸러지지 않은 `game.chat`**으로 만든다 —
    * 화면이 그리는 목록은 경기 중 턴을 걸러내므로 그 자리를 쓰면 남의 턴이 열린다.
@@ -745,8 +826,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 달력 뷰가 이미 표시해 둔 값이라(`isNext`) 따로 계산하지 않는다.
    */
   const nextMatchDate = game?.views.calendar.entries.find((e) => e.isNext)?.date ?? null;
-  /** 경기 중에는 시간을 경기가 민다 — 손잡이를 쥐어 주지 않는다 */
-  const canSkip = game?.phase !== "match";
+  /** 경기 중에는 시간을 경기가 밀고, 협상 방 안에서는 날짜가 흐르지 않는다 — 손잡이를 쥐어 주지 않는다 */
+  const canSkip = game?.phase !== "match" && game?.phase !== "negotiation";
 
   /**
    * 경기 중인가 — **채팅의 주인이 바뀐다.**
@@ -756,16 +837,26 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 화면에 없다. 배너로 적지 않고 **창의 결**로 알린다.
    */
   const inMatch = liveMatch !== null;
-  /** 중계 화면은 코어의 별도 `casterHistory`와 같은 경계로 현재 경기만 보여 준다. */
-  const visibleChat = chatForActiveMatch(game.chat, liveMatch?.matchId ?? null);
+  /** 협상 방 안인가 — 채팅의 주인은 협상 GM이고 옆 칸은 조건서다 (transfer.md §12-2) */
+  const inNegotiation = liveNegotiation !== null;
+  /**
+   * 중계 화면은 코어의 별도 `casterHistory`와 같은 경계로 현재 경기만 보여 준다.
+   * 협상 방도 같은 갈림이다 — 둘은 함께 설 수 없으므로 한쪽은 늘 그대로 지난다.
+   */
+  const visibleChat = chatForActiveNegotiation(
+    chatForActiveMatch(game.chat, liveMatch?.matchId ?? null),
+    liveNegotiation?.negotiationId ?? null,
+  );
   /**
    * 오른쪽 칸에 무엇이 서는가 — **경기 판이 우선이고 장부가 그것을 덮는다.**
    * 경기 중에 장부를 열면(달력·재정) 판 대신 장부가 선다: 그때 감독이 보려는 건
    * 그쪽이고, 판세는 상단의 경기 머리가 계속 이고 있다.
    */
   const showBoard = inMatch && panel === null;
+  /** 협상 방의 칸 — 경기 판과 같은 자리에 선다 (`with-board`) */
+  const showRoom = inNegotiation && panel === null;
   /** 오른쪽 칸이 열려 있는가 — 폭이 0인지 반쪽인지를 가른다 */
-  const rightOpen = showBoard || panel !== null;
+  const rightOpen = showBoard || showRoom || panel !== null;
   /**
    * 전술판이 **채팅 자리까지 받아야 하는가** — 판이 서 있는 화면에서만 참이다.
    *
@@ -774,7 +865,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 결과도 같아야 한다 — 다른 탭(판세·대회·달력)에서는 켜 둔 상태여도 아무 일이
    * 없어야 하므로 지금 무엇이 서 있는지를 함께 본다.
    */
-  const boardOnStage = showBoard ? matchTab === "팀" : shownPanel === "스쿼드";
+  const boardOnStage = showBoard ? matchTab === "팀" : !showRoom && shownPanel === "스쿼드";
   /** 나가는 중에도 서랍은 그려져 있어야 한다 — 그동안 오른쪽으로 미끄러진다 */
   const boardTakesStage = (boardOpen || boardClosing) && boardOnStage;
   /**
@@ -824,7 +915,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 파일이 아니다.
    */
   const chatPane = (
-    <section className={`chat-pane${inMatch ? " broadcasting" : ""}`}>
+    <section
+      className={`chat-pane${inMatch ? " broadcasting" : ""}${inNegotiation ? " at-table" : ""}`}
+    >
       <div className="chat-scroll" ref={scrollRef} data-testid="chat-scroll">
         {/* 화면 조작은 그리지 않는다 — 감독이 한 말이 아니다. 모델 이력에는
             **오퍼레이터 지시**로 남아 GM은 왜 시간이 흘렀는지 알되 그것을
@@ -862,18 +955,66 @@ export function GameScreen({ gameId }: { gameId: string }) {
             prevStamp = turnStamp(turn) ?? prevStamp;
             return node;
           };
-          return groupMatchTurns(visibleChat).map((block, bi) => {
+          const blocks = groupChatTurns(visibleChat);
+          return blocks.map((block, bi) => {
             if (block.kind === "turn") return render(block.turn, block.at);
-            const log = game.matchLogs[block.matchId];
+            if (block.kind === "negotiation") {
+              const log = game.negotiationLogs[block.id];
+              /**
+               * 열린 협상(방을 나왔어도 `open`)은 접지 않는다 — 편지가 그 뒤를 잇고
+               * 다시 앉을 수 있는 자리다. 끝난 협상만 접힌다 — **자리마다 한 덩어리**로,
+               * 머리는 선수 · 갈래 · 그 자리의 날짜이고 결과는 **마지막 자리**의 머리에만
+               * 선다: 한 협상에 세 번 앉았으면 「합의」가 세 번 서지 않는다.
+               */
+              const head = log !== undefined && log.status !== "open" ? log : null;
+              const lastSeat = !blocks.some(
+                (b, j) => j > bi && b.kind === "negotiation" && b.id === block.id,
+              );
+              const seatDate = block.turns[0]?.turn.at ?? head?.date;
+              const open = head === null || openLogs.has(block.id);
+              return (
+                <div
+                  className="negotiation-log"
+                  key={`n${bi}`}
+                  data-testid={`negotiation-log-${block.id}`}
+                >
+                  {head && (
+                    <button
+                      className={`match-log-head negotiation-log-head${open ? " open" : ""}`}
+                      onClick={() => toggleLog(block.id)}
+                      aria-expanded={open}
+                      {...(lastSeat ? { "data-status": head.status } : {})}
+                    >
+                      <IconContract size={14} />
+                      <b>{head.playerName}</b>
+                      <span className="match-log-title">{head.kindLabel}</span>
+                      {lastSeat && (
+                        <span className="negotiation-log-status">
+                          {NEGOTIATION_STATUS_KO[head.status]}
+                        </span>
+                      )}
+                      <span className="match-log-date">{humanDate(seatDate ?? head.date)}</span>
+                      <IconChevron size={14} />
+                    </button>
+                  )}
+                  {open && (
+                    <div className="match-log-body">
+                      {block.turns.map(({ turn, at }) => render(turn, at))}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+            const log = game.matchLogs[block.id];
             // 진행 중인 경기(결과가 아직 없다)는 접지 않는다 — 지금 보고 있는 것이다
             const done = log?.score != null;
-            const open = !done || openLogs.has(block.matchId);
+            const open = !done || openLogs.has(block.id);
             return (
-              <div className="match-log" key={`m${bi}`} data-testid={`match-log-${block.matchId}`}>
+              <div className="match-log" key={`m${bi}`} data-testid={`match-log-${block.id}`}>
                 {done && (
                   <button
                     className={`match-log-head${open ? " open" : ""}`}
-                    onClick={() => toggleLog(block.matchId)}
+                    onClick={() => toggleLog(block.id)}
                     aria-expanded={open}
                   >
                     <IconBroadcast size={14} />
@@ -957,9 +1098,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
         onOperate={(operation) => void send(undefined, operation)}
         busy={busy}
         inMatch={inMatch}
+        inNegotiation={inNegotiation}
         canSkip={canSkip}
         nextMatchDate={nextMatchDate}
         inputRef={inputRef}
+        draft={draft}
+        onRemoveDraft={() => setDraft(null)}
       />
     </section>
   );
@@ -974,14 +1118,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
      * 그리는 자리가 폼의 문을 볼 수 있어야 한다. 보내는 길은 턴 하나다(`send`): 코어가
      * 먼저 걸고 GM이 읽는다 (transfer.md §12-3).
      */
-    <ProposalProvider
-      gameId={gameId}
-      busy={busy}
-      onSubmit={async (proposal, message) => {
-        const failure = await send(message, undefined, proposal);
-        return failure ? (failure.detail ?? failure.reason) : null;
-      }}
-    >
+    <ProposalProvider gameId={gameId} busy={busy} onDraft={setDraft}>
       <PlayerCardProvider
         gameId={gameId}
         playerNames={game.playerNames}
@@ -992,7 +1129,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
         {/* 구단 색은 여기서 선다 — 세이브 팀의 `--club*` 한 벌이다 (ui/design-system.md
           §2 「주입」). 아래 어디서든 `var(--club-wash)`가 이 값이다 */}
         <div
-          className={`app${liveMatch ? " in-match" : ""}`}
+          className={`app${liveMatch ? " in-match" : ""}${liveNegotiation ? " in-negotiation" : ""}`}
           data-phase={game.phase}
           style={clubStyle(game.team.colours, game.team.id, game.team.shortName)}
         >
@@ -1124,6 +1261,17 @@ export function GameScreen({ gameId }: { gameId: string }) {
               onEnter={enterMatch}
             />
           )}
+          {/* 자리에 앉는 문 — 협상의 게이트. 킥오프 게이트와 한 쌍이라 같은 때 서고 같은
+          때 물러난다 (transfer.md §12-2 · design-system.md §7-1) */}
+          {pendingNegotiation !== null && (liveNegotiation === null || gateLeaving) && (
+            <NegotiationGate
+              room={pendingNegotiation}
+              date={game.date}
+              busy={busy}
+              leaving={liveNegotiation !== null}
+              onEnter={enterNegotiation}
+            />
+          )}
           {/**
            * 종료 화면 — **휘슬과 평시 사이의 한 걸음.**
            *
@@ -1177,7 +1325,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
              */}
             <div
               className={`stage-split panel-split${rightOpen ? " open" : ""}${
-                showBoard ? " with-board" : " with-ledger"
+                showBoard || showRoom ? " with-board" : " with-ledger"
               }${boardTakesStage ? " board-open" : ""}${boardClosing ? " board-closing" : ""}`}
             >
               {chatPane}
@@ -1242,6 +1390,20 @@ export function GameScreen({ gameId }: { gameId: string }) {
                         </>
                       )}
                       {matchTab === "대회" && competitionsView}
+                    </div>
+                  </div>
+                ) : showRoom && liveNegotiation ? (
+                  /**
+                   * 협상 방 — 경기 판의 자리에 선다 (design-system.md §7-1). 조건서 ·
+                   * 인내 · 건너편이 채팅 옆에 서고, 손잡이 둘도 여기 있다.
+                   */
+                  <div className="stage-board" data-testid="stage-room">
+                    <div className="board-tab ledger-body">
+                      <NegotiationRoom
+                        room={liveNegotiation}
+                        busy={busy}
+                        onLeave={leaveNegotiation}
+                      />
                     </div>
                   </div>
                 ) : (

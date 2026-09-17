@@ -145,6 +145,15 @@ export const TIME_PASSED = "시간 경과";
 export const MATCH_ADVANCED = "경기 진행";
 
 /**
+ * 감독이 화면의 손잡이로 협상 자리에서 일어섰다는 기록의 이름 — **시계 이동과 같은 자리**다.
+ *
+ * 방을 닫은 것은 모델이 부른 도구가 아니라 코어가 턴 앞에서 한 일이라(`closeNegotiation` —
+ * transfer.md §12-2) 카탈로그에 이름이 없다. 같은 규약으로 한글 이름을 쓰고 `silent`로
+ * 세운다 — 장면이 비어 돌아온 턴에 코어가 세우는 기록이 이 한 줄이다.
+ */
+export const TABLE_LEFT = "자리 뜨기";
+
+/**
  * 시간 이동 손잡이가 보내는 조작 — `{ kind: "skip_days", days: 1 }`
  * (→ `TurnOperation`, packages/domain).
  *

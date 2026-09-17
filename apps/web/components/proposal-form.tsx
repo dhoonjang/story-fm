@@ -28,13 +28,14 @@ import {
   dealTermLabel,
   formatMoney,
   type DealTerm,
+  type ProposalKind,
   type DealTermKind,
   type ProposalInput,
-  type ProposalKind,
   type ProposalPrefill,
   type SquadStatus,
 } from "@story-fm/domain";
 import type { PlayerCardView, ProposalView } from "@story-fm/engine";
+import { IconClose } from "@/components/icons";
 
 /**
  * **제안 폼** — 값과 조건을 정확한 숫자로 내는 자리 (transfer.md §12-3).
@@ -54,19 +55,33 @@ export interface ProposalHandle {
 
 const ProposalContext = createContext<ProposalHandle | null>(null);
 
-/** 폼을 보내는 자리 — 실패면 코어가 돌려준 이유 한 줄, 성공이면 null */
-export type ProposalSubmit = (proposal: ProposalInput, message?: string) => Promise<string | null>;
+/**
+ * **제안서** — 폼이 써 낸 구조체와 입력창의 칩이 읽는 요약. 폼은 보내지 않는다: 제안서가
+ * 입력창에 첨부되고, 감독의 말과 함께(또는 말 없이) 턴 하나로 나간다 (overview.md §5).
+ */
+export interface ProposalDraft {
+  input: ProposalInput;
+  playerId: string;
+  playerName: string;
+  /** 칩에 서는 한 줄 — 갈래와 값. 문장은 화면의 것이라 여기서 만든다 */
+  summary: string;
+  /** 칩을 눌러 다시 열 때 폼에 앉힐 값 */
+  prefill: ProposalPrefill;
+}
+
+/** 폼이 제안서를 써 냈다 — 부르는 쪽이 입력창에 첨부한다 */
+export type ProposalDrafted = (draft: ProposalDraft) => void;
 
 export function ProposalProvider({
   gameId,
   busy,
-  onSubmit,
+  onDraft,
   children,
 }: {
   gameId: string;
-  /** 턴이 도는 동안은 보낼 수 없다 — 전송 버튼과 같은 잠금 */
+  /** 턴이 도는 동안은 쓸 수 없다 — 전송 버튼과 같은 잠금 */
   busy: boolean;
-  onSubmit: ProposalSubmit;
+  onDraft: ProposalDrafted;
   children: ReactNode;
 }) {
   const [target, setTarget] = useState<{ playerId: string; prefill?: ProposalPrefill } | null>(
@@ -87,7 +102,7 @@ export function ProposalProvider({
           playerId={target.playerId}
           prefill={target.prefill}
           busy={busy}
-          onSubmit={onSubmit}
+          onDraft={onDraft}
           onClose={() => setTarget(null)}
         />
       )}
@@ -105,20 +120,26 @@ type OfferKind = "buy" | "loan" | "renew";
 /** 값이 딸린 갈래의 자 — 입력 칸의 눈금이다 */
 const FEE_STEP = 100_000;
 const WAGE_STEP = 1_000;
+/**
+ * 빠른 조정 칩의 눈금 — 값을 자판으로 치는 대신 한 번에 한 칸씩 옮긴다. 이적료는 백만
+ * 단위, 주급은 천 단위 — 협상 자리에서 실제로 오가는 단위다.
+ */
+const FEE_CHIPS = [-1_000_000, 1_000_000, 5_000_000] as const;
+const WAGE_CHIPS = [-5_000, 5_000, 20_000] as const;
 
 function ProposalDialog({
   gameId,
   playerId,
   prefill,
   busy,
-  onSubmit,
+  onDraft,
   onClose,
 }: {
   gameId: string;
   playerId: string;
   prefill?: ProposalPrefill;
   busy: boolean;
-  onSubmit: ProposalSubmit;
+  onDraft: ProposalDrafted;
   onClose: () => void;
 }) {
   const [card, setCard] = useState<PlayerCardView | null>(null);
@@ -159,29 +180,36 @@ function ProposalDialog({
     >
       <div className="proposal" onClick={(e) => e.stopPropagation()}>
         {error !== null ? (
-          <div className="pf-blank">선수 정보를 불러오지 못했습니다</div>
+          <Blank onClose={onClose}>선수 정보를 불러오지 못했습니다</Blank>
         ) : card === null ? (
           <div className="pf-blank" role="status" aria-label="선수 정보 불러오는 중">
             <span className="skel pf-skel" aria-hidden />
           </div>
         ) : card.proposal === null ? (
-          <div className="pf-blank">{card.name}에게 부를 제안이 없습니다</div>
+          <Blank onClose={onClose}>{card.name}에게 부를 제안이 없습니다</Blank>
         ) : (
           <ProposalBody
             card={card}
             view={card.proposal}
             prefill={prefill}
             busy={busy}
-            onSubmit={onSubmit}
+            onDraft={onDraft}
             onClose={onClose}
           />
         )}
-        {(card === null || card.proposal === null || error !== null) && (
-          <button className="pf-close" type="button" onClick={onClose}>
-            닫기
-          </button>
-        )}
       </div>
+    </div>
+  );
+}
+
+/** 폼이 서지 못하는 자리 — 사실 한 줄과 닫는 손잡이 */
+function Blank({ children, onClose }: { children: ReactNode; onClose: () => void }) {
+  return (
+    <div className="pf-blank">
+      <span>{children}</span>
+      <button type="button" className="pf-ghost" onClick={onClose}>
+        닫기
+      </button>
     </div>
   );
 }
@@ -189,19 +217,226 @@ function ProposalDialog({
 /** 조건 한 줄의 편집 상태 — 갈래와 그 갈래의 값 */
 type TermDraft = DealTerm & { id: number };
 
+/** 조정 칩의 글자 — 부호와 자 (`+£1.0M` · `−£5k`) */
+function deltaLabel(delta: number): string {
+  return `${delta < 0 ? "−" : "+"}${formatMoney(Math.abs(delta))}`;
+}
+
+/**
+ * 금액의 자 — 화면이 적는 단위다. 이적료는 백만 파운드(`£ 24.2 M`), 주급은 천 파운드
+ * (`£ 114 k`) — `formatMoney`가 눈금을 고르는 것과 같은 자리라 카드의 `£24.2M`과 칸의
+ * `24.2`가 같은 수다. 상태는 그대로 파운드로 들고, 칸이 읽고 쓸 때만 나눈다.
+ */
+interface MoneyUnit {
+  /** 숫자 뒤에 붙는 눈금 글자 */
+  mark: string;
+  scale: number;
+  /** 칸이 받는 자릿수 — 그 아래는 코어의 눈금(`step`)으로 되돌린다 */
+  decimals: number;
+}
+const MILLIONS: MoneyUnit = { mark: "M", scale: 1_000_000, decimals: 1 };
+const THOUSANDS: MoneyUnit = { mark: "k", scale: 1_000, decimals: 1 };
+const CURRENCY = "£";
+
+/** 파운드 → 칸에 적는 수 · 칸의 수 → 코어의 눈금으로 되돌린 파운드 */
+function shownOf(value: number, unit: MoneyUnit): number {
+  return Number((value / unit.scale).toFixed(unit.decimals));
+}
+function poundsOf(raw: string, unit: MoneyUnit, step: number): number | null {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.round((n * unit.scale) / step) * step);
+}
+
+/**
+ * 돈 칸 하나 — `£ 24.2 M` 꼴로 화폐가 앞에, 눈금이 뒤에 선다. 큰 칸(`hero`)은 금액 카드의
+ * 주인이고, 작은 칸은 조건 줄 안에 선다. 폭은 숫자만큼이라 눈금 글자가 숫자에 붙는다.
+ */
+function MoneyInput({
+  value,
+  unit,
+  step,
+  onChange,
+  locked,
+  label,
+  hero = false,
+  tail,
+  testId,
+}: {
+  value: number;
+  unit: MoneyUnit;
+  step: number;
+  onChange: (value: number) => void;
+  locked: boolean;
+  label: string;
+  hero?: boolean;
+  /** 눈금 뒤에 더 붙는 꼬리 — 주급의 `/주` */
+  tail?: string;
+  testId?: string;
+}) {
+  const shown = shownOf(value, unit);
+  return (
+    <span className={hero ? "pf-money hero" : "pf-money"}>
+      <b className="pf-money-cur">{CURRENCY}</b>
+      <input
+        className="pf-money-input fig"
+        type="number"
+        inputMode="decimal"
+        min={0}
+        step={step / unit.scale}
+        value={shown}
+        // 숫자만큼만 — 눈금 글자가 숫자 옆에 붙어 선다 (소수점은 한 자보다 좁다)
+        style={{ width: `calc(${Math.max(1, String(shown).length)}ch + 3px)` }}
+        onChange={(e) => {
+          const next = poundsOf(e.target.value, unit, step);
+          if (next !== null) onChange(next);
+        }}
+        disabled={locked}
+        aria-label={`${label} (${CURRENCY}${unit.mark})`}
+        data-testid={testId}
+      />
+      <b className="pf-money-mark">{unit.mark}</b>
+      {tail && <span className="pf-money-tail">{tail}</span>}
+    </span>
+  );
+}
+
+/**
+ * 고르는 칩 묶음 — 라디오 묶음이라 고른 것이 색이 아니라 `aria-checked`로도 전해진다.
+ * 연수·지위·지급처럼 선택지가 손에 꼽히는 자리는 접힌 목록 대신 전부 펼쳐 둔다 — 지금
+ * 값과 옆의 값이 한눈에 견주어진다.
+ */
+function Chips<T extends string | number>({
+  label,
+  value,
+  options,
+  onPick,
+  locked,
+}: {
+  label: string;
+  value: T;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  onPick: (value: T) => void;
+  locked: boolean;
+}) {
+  return (
+    <div className="pf-options" role="radiogroup" aria-label={label}>
+      {options.map((option) => (
+        <button
+          key={String(option.value)}
+          type="button"
+          role="radio"
+          aria-checked={option.value === value}
+          className={option.value === value ? "on" : ""}
+          onClick={() => onPick(option.value)}
+          disabled={locked}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 금액 칸 — **큰 숫자 하나가 칸의 주인이다.** 자판으로 고칠 수 있지만 보통은 아래 칩으로
+ * 한 칸씩 옮기고, 코어가 낸 자(요구가·기대 주급)로 한 번에 되돌린다.
+ */
+function AmountField({
+  label,
+  value,
+  step,
+  unit,
+  chips,
+  anchor,
+  anchorLabel,
+  tail,
+  hint,
+  onChange,
+  locked,
+  testId,
+}: {
+  label: string;
+  /** 파운드 — 상태의 값 그대로 */
+  value: number;
+  /** 코어의 눈금 — 칸에 적은 값은 이 눈금으로 되돌린다 */
+  step: number;
+  unit: MoneyUnit;
+  chips: readonly number[];
+  /** 코어가 낸 자 — 칩 하나가 이 값으로 되돌린다 */
+  anchor: number;
+  anchorLabel: string;
+  tail?: string;
+  hint?: string;
+  onChange: (value: number) => void;
+  locked: boolean;
+  testId: string;
+}) {
+  return (
+    <div className="pf-amount">
+      <span className="pf-label">{label}</span>
+      <MoneyInput
+        value={value}
+        unit={unit}
+        step={step}
+        onChange={onChange}
+        locked={locked}
+        label={label}
+        hero
+        {...(tail === undefined ? {} : { tail })}
+        testId={testId}
+      />
+      <div className="pf-chips">
+        {chips.map((delta) => (
+          <button
+            key={delta}
+            type="button"
+            onClick={() => onChange(Math.max(0, value + delta))}
+            disabled={locked || (delta < 0 && value <= 0)}
+          >
+            {deltaLabel(delta)}
+          </button>
+        ))}
+        <button
+          type="button"
+          className={value === anchor ? "on" : ""}
+          onClick={() => onChange(anchor)}
+          disabled={locked}
+        >
+          {anchorLabel} {formatMoney(anchor)}
+        </button>
+      </div>
+      {hint && <span className="pf-hint">{hint}</span>}
+    </div>
+  );
+}
+
+/** 절의 머리 — 이 절이 누구에게 가는가 */
+function Recipient({ name, note }: { name: string; note?: string }) {
+  return (
+    <div className="pf-card-head">
+      <span className="pf-to">
+        <em>받는 쪽</em>
+        <b>{name}</b>
+      </span>
+      {note && <span className="pf-count">{note}</span>}
+    </div>
+  );
+}
+
 function ProposalBody({
   card,
   view,
   prefill,
   busy,
-  onSubmit,
+  onDraft,
   onClose,
 }: {
   card: PlayerCardView;
   view: ProposalView;
   prefill?: ProposalPrefill;
   busy: boolean;
-  onSubmit: ProposalSubmit;
+  onDraft: ProposalDrafted;
   onClose: () => void;
 }) {
   const kinds = view.kinds;
@@ -210,10 +445,6 @@ function ProposalBody({
       ? (prefill.kind as OfferKind)
       : kinds[0]!;
   const [kind, setKind] = useState<OfferKind>(initialKind);
-  /** 이적료 없이 개인 조건만 먼저 — 영입·임대에서만 (transfer.md §12-3) */
-  const [personalOnly, setPersonalOnly] = useState(prefill?.kind === "personal");
-  /** 값은 그대로 두고 조건만 올린다 — 열린 협상이 있을 때만 */
-  const [termsOnly, setTermsOnly] = useState(prefill?.kind === "terms");
   const [fee, setFee] = useState<number>(
     prefill?.fee ?? view.fee[kind === "loan" ? "loan" : "buy"],
   );
@@ -235,9 +466,6 @@ function ProposalBody({
     (prefill?.terms ?? []).map((term, i) => ({ ...term, id: i + 1 })),
   );
   const [nextId, setNextId] = useState((prefill?.terms?.length ?? 0) + 1);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
 
   /** 갈래를 바꾸면 자도 바뀐다 — 코어가 낸 그 갈래의 값으로 되돌린다 */
   const pickKind = (next: OfferKind) => {
@@ -245,20 +473,48 @@ function ProposalBody({
     setFee(view.fee[next === "loan" ? "loan" : "buy"]);
     setWeeklyWage(next === "renew" ? (view.renewalWage ?? view.weeklyWage) : view.weeklyWage);
     setYears(next === "renew" ? view.years.renew : view.years.buy);
-    if (next === "renew" || next === "loan") setPersonalOnly(false);
   };
 
-  const effective: ProposalKind = termsOnly ? "terms" : personalOnly ? "personal" : kind;
-  const precontract = kind === "buy" && view.precontract && fee === 0 && !personalOnly;
+  /**
+   * **폼의 구성은 건너편이 정한다** (transfer.md §12-1). 구단이 앉아 있으면 이적료·분할의
+   * 절이 서고, 선수 쪽이 앉아 있으면 주급·연수·지위·조건의 절이 선다. 무소속은 자유계약이라
+   * 구단 절이 없고 값은 0이다. 개인 조건이 이미 합의됐으면 그 절은 굳은 값으로 읽기만 한다 —
+   * 합의는 그 값 그대로 실릴 때만 산다 (§12-3).
+   */
+  const precontract = kind === "buy" && view.precontract && fee === 0;
+  const agreed = view.personal?.agreedOn !== null && view.personal !== null ? view.personal : null;
+  /**
+   * **방의 상대가 절을 가른다** (transfer.md §12-2). 단장 방(`club`)에서는 이적료의 절만,
+   * 에이전트 방(`agent`)에서는 개인 조건의 절만 선다 — 다른 쪽의 값은 그 방의 일이 아니다.
+   * 방 밖(서면)이면 둘 다 선다: 서면 오퍼는 양쪽에 함께 간다.
+   */
+  const party = view.party;
+  const clubSide =
+    kind !== "renew" &&
+    !view.freeAgent &&
+    view.counterparts.club !== null &&
+    party !== "agent" &&
+    view.feeAgreed === null;
+  const agentSide = party !== "club";
+  const agentName = view.counterparts.agent?.name ?? card.name;
+  /**
+   * 에이전트 방에서 내는 영입·임대 제안은 **개인 조건 선제안**이다(`propose_personal`) — 이적료는
+   * 단장의 방에서 따로 한다. 재계약은 그 자체가 개인 조건이라 갈래 그대로다.
+   */
+  const effective: ProposalKind =
+    party === "agent" && (kind === "buy" || kind === "loan") ? "personal" : kind;
   const termKinds = view.termKinds[kind === "buy" ? (precontract ? "precontract" : "buy") : kind];
-  const usedKinds = new Set(terms.filter((t) => t.kind !== "other").map((t) => t.kind));
-  const addable = termKinds.filter((k) => k === "other" || !usedKinds.has(k));
   const countable = terms.filter((t) => t.kind !== "other").length;
-  // 무소속은 자유계약이다 — 이적료 칸이 없고 0이 실린다
-  const hasFee = (effective === "buy" || effective === "loan") && !termsOnly && !view.freeAgent;
-  const hasPersonal = effective !== "terms";
+  const feeAnchor = view.fee[kind === "loan" ? "loan" : "buy"];
+  const wageAnchor = kind === "renew" ? (view.renewalWage ?? view.weeklyWage) : view.weeklyWage;
 
-  const addTerm = (termKind: DealTermKind) => {
+  const tabled = (termKind: DealTermKind) => terms.find((t) => t.kind === termKind);
+  const toggleTerm = (termKind: DealTermKind) => {
+    const standing = tabled(termKind);
+    if (standing) {
+      setTerms(terms.filter((t) => t.id !== standing.id));
+      return;
+    }
     if (termKind !== "other" && countable >= MAX_TABLED_TERMS) return;
     const base: TermDraft = { kind: termKind, id: nextId };
     setNextId(nextId + 1);
@@ -268,6 +524,9 @@ function ProposalBody({
         break;
       case "bonus":
         base.fee = Math.round((weeklyWage * 12) / WAGE_STEP) * WAGE_STEP;
+        break;
+      case "points":
+        base.fee = Math.max(WAGE_STEP, Math.round((weeklyWage * 0.1) / WAGE_STEP) * WAGE_STEP);
         break;
       case "escalator":
         base.trigger = "europe";
@@ -289,238 +548,93 @@ function ProposalBody({
   };
   const updateTerm = (id: number, patch: Partial<DealTerm>) =>
     setTerms(terms.map((t) => (t.id === id ? { ...t, ...patch } : t)));
-  const removeTerm = (id: number) => setTerms(terms.filter((t) => t.id !== id));
 
-  const submit = async () => {
-    if (busy || sending) return;
-    const cleaned: DealTerm[] = terms.map((draft) => {
-      const term: DealTerm & { id?: number } = { ...draft };
+  const draft = () => {
+    if (busy) return;
+    const cleaned: DealTerm[] = terms.map((row) => {
+      const term: DealTerm & { id?: number } = { ...row };
       delete term.id;
       return term;
     });
+    // 합의된 개인 조건은 그 값 그대로 실린다 — 폼이 다른 값을 부르면 합의가 죽는다 (§12-3)
+    const personal = agreed
+      ? {
+          weeklyWage: agreed.weeklyWage,
+          years: agreed.contractYears,
+          ...(agreed.squadStatus ? { squadStatus: agreed.squadStatus } : {}),
+        }
+      : {
+          weeklyWage: Math.max(0, Math.round(weeklyWage)),
+          years,
+          ...(kind !== "loan" ? { squadStatus } : {}),
+        };
     const input: ProposalInput = {
       playerId: card.id,
       kind: effective,
-      ...(hasFee ? { fee: Math.max(0, Math.round(fee)) } : {}),
-      ...(view.freeAgent && effective === "buy" ? { fee: 0 } : {}),
-      ...(hasFee && kind === "buy" && paymentYears > 1 ? { paymentYears } : {}),
-      ...(hasPersonal ? { weeklyWage: Math.max(0, Math.round(weeklyWage)), years } : {}),
-      ...(hasPersonal && kind !== "loan" ? { squadStatus } : {}),
+      ...(clubSide ? { fee: Math.max(0, Math.round(fee)) } : {}),
+      // 이적료가 이미 합의된 협상의 오퍼는 그 값 그대로 실린다
+      ...(view.feeAgreed && effective !== "personal" ? { fee: view.feeAgreed.fee } : {}),
+      ...(view.freeAgent && kind === "buy" ? { fee: 0 } : {}),
+      ...(clubSide && kind === "buy" && paymentYears > 1 ? { paymentYears } : {}),
+      ...personal,
       ...(cleaned.length > 0 ? { terms: cleaned } : {}),
     };
-    setSending(true);
-    setError(null);
-    const failed = await onSubmit(input, message.trim() || undefined);
-    setSending(false);
-    if (failed === null) onClose();
-    else setError(failed);
+    /** 칩의 요약 — 갈래와 값. 값이 없는 칸은 적지 않는다 */
+    const summary = [
+      `${card.name} ${PROPOSAL_KIND_KO[effective]}`,
+      ...(input.fee !== undefined && !view.freeAgent
+        ? [
+            `${kind === "loan" ? "임대료" : "이적료"} ${formatMoney(input.fee)}` +
+              (input.paymentYears !== undefined ? ` ${input.paymentYears}년 분할` : ""),
+          ]
+        : []),
+      `주급 ${formatMoney(personal.weeklyWage)}`,
+      `${personal.years}년`,
+      ...(cleaned.length > 0 ? [`조건 ${cleaned.length}`] : []),
+    ].join(" · ");
+    onDraft({
+      input,
+      playerId: card.id,
+      playerName: card.name,
+      summary,
+      prefill: {
+        kind,
+        ...(clubSide ? { fee, paymentYears } : {}),
+        weeklyWage,
+        years,
+        squadStatus,
+        terms: cleaned,
+      },
+    });
+    onClose();
   };
 
-  const locked = busy || sending;
+  const locked = busy;
   return (
     <form
       className="pf"
       data-testid="proposal-body"
       onSubmit={(e) => {
         e.preventDefault();
-        void submit();
+        draft();
       }}
     >
       <header className="pf-head">
-        <b className="pf-name">{card.name}</b>
-        <span className="pf-meta">
-          {card.team} · {card.age}세 · {card.position}
-          {view.freeAgent && " · 자유계약"}
-          {view.loanedFrom !== null && ` · ${view.loanedFrom}에서 임대 중`}
-        </span>
+        <div className="pf-title">
+          <b className="pf-name">{card.name}</b>
+          <span className="pf-meta">
+            {card.team} · {card.age}세 · {card.position}
+            {view.freeAgent && " · 자유계약"}
+            {view.loanedFrom !== null && ` · ${view.loanedFrom}에서 임대 중`}
+          </span>
+        </div>
+        <button type="button" className="pf-x" onClick={onClose} aria-label="닫기">
+          <IconClose size={16} />
+        </button>
       </header>
 
-      {/* 갈래 — 열린 협상이 있으면 그 갈래 하나뿐이다 */}
-      <div className="pf-kinds" role="radiogroup" aria-label="갈래">
-        {kinds.map((k) => (
-          <button
-            key={k}
-            type="button"
-            role="radio"
-            aria-checked={kind === k}
-            className={kind === k ? "on" : ""}
-            onClick={() => pickKind(k)}
-            disabled={locked}
-          >
-            {PROPOSAL_KIND_KO[k]}
-          </button>
-        ))}
-        {kind !== "renew" && !view.freeAgent && (
-          <label className="pf-toggle">
-            <input
-              type="checkbox"
-              checked={personalOnly}
-              onChange={(e) => {
-                setPersonalOnly(e.target.checked);
-                if (e.target.checked) setTermsOnly(false);
-              }}
-              disabled={locked || termsOnly}
-            />
-            개인 조건만 먼저
-          </label>
-        )}
-        {view.negotiationId !== null && (
-          <label className="pf-toggle">
-            <input
-              type="checkbox"
-              checked={termsOnly}
-              onChange={(e) => {
-                setTermsOnly(e.target.checked);
-                if (e.target.checked) setPersonalOnly(false);
-              }}
-              disabled={locked}
-            />
-            조건만 올린다
-          </label>
-        )}
-      </div>
-
-      <div className="pf-grid">
-        {hasFee && (
-          <label className="pf-field">
-            <span className="pf-label">{kind === "loan" ? "임대료" : "이적료"}</span>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={0}
-              step={FEE_STEP}
-              value={fee}
-              onChange={(e) => setFee(Number(e.target.value))}
-              disabled={locked}
-              data-testid="proposal-fee"
-            />
-            <span className="pf-hint">
-              {formatMoney(fee)} · {kind === "loan" ? "임대료 자" : "요구가"}{" "}
-              {formatMoney(view.fee[kind === "loan" ? "loan" : "buy"])}
-              {precontract && " · 사전 계약"}
-            </span>
-          </label>
-        )}
-        {hasFee && kind === "buy" && (
-          <label className="pf-field">
-            <span className="pf-label">지급</span>
-            <select
-              value={paymentYears}
-              onChange={(e) => setPaymentYears(Number(e.target.value))}
-              disabled={locked}
-            >
-              {Array.from({ length: MAX_PAYMENT_YEARS }, (_, i) => i + 1).map((n) => (
-                <option key={n} value={n}>
-                  {n === 1 ? "일시금" : `${n}년 분할`}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {hasPersonal && (
-          <label className="pf-field">
-            <span className="pf-label">주급</span>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={0}
-              step={WAGE_STEP}
-              value={weeklyWage}
-              onChange={(e) => setWeeklyWage(Number(e.target.value))}
-              disabled={locked}
-              data-testid="proposal-wage"
-            />
-            <span className="pf-hint">
-              {formatMoney(weeklyWage)}/주 · 기대{" "}
-              {formatMoney(
-                kind === "renew" ? (view.renewalWage ?? view.weeklyWage) : view.weeklyWage,
-              )}
-              {view.personal?.agreedOn && " · 개인 조건 합의"}
-            </span>
-          </label>
-        )}
-        {hasPersonal && (
-          <label className="pf-field">
-            <span className="pf-label">계약 연수</span>
-            <select
-              value={years}
-              onChange={(e) => setYears(Number(e.target.value))}
-              disabled={locked}
-            >
-              {Array.from({ length: PROPOSAL_YEARS_MAX }, (_, i) => i + 1).map((n) => (
-                <option key={n} value={n}>
-                  {n}년
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {hasPersonal && kind !== "loan" && (
-          <label className="pf-field">
-            <span className="pf-label">계약 지위</span>
-            <select
-              value={squadStatus}
-              onChange={(e) => setSquadStatus(e.target.value as SquadStatus)}
-              disabled={locked}
-            >
-              {SQUAD_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {SQUAD_STATUS_KO[s]}
-                </option>
-              ))}
-            </select>
-            <span className="pf-hint">지금 자리 {SQUAD_STATUS_KO[view.squadStatus]}</span>
-          </label>
-        )}
-      </div>
-
-      {/* 조건서 — 갈래를 고르고 그 갈래의 값을 적는다 */}
-      <div className="pf-terms">
-        <span className="pf-section">
-          조건 {countable}/{MAX_TABLED_TERMS}
-        </span>
-        {terms.map((term) => (
-          <TermRow
-            key={term.id}
-            term={term}
-            locked={locked}
-            onChange={(patch) => updateTerm(term.id, patch)}
-            onRemove={() => removeTerm(term.id)}
-          />
-        ))}
-        {addable.length > 0 && (
-          <select
-            className="pf-add"
-            value=""
-            onChange={(e) => {
-              if (e.target.value) addTerm(e.target.value as DealTermKind);
-            }}
-            disabled={locked}
-            aria-label="조건 추가"
-            data-testid="proposal-add-term"
-          >
-            <option value="">조건 추가</option>
-            {addable.map((k) => (
-              <option key={k} value={k} disabled={k !== "other" && countable >= MAX_TABLED_TERMS}>
-                {DEAL_TERM_KO[k]}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-
-      <label className="pf-field pf-message">
-        <span className="pf-label">한마디</span>
-        <textarea
-          rows={2}
-          maxLength={1000}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          disabled={locked}
-        />
-      </label>
-
-      <div className="pf-foot">
+      {/* 코어가 낸 사실 셋 — 값을 정하기 전에 읽는 자 */}
+      <div className="pf-facts">
         <span className="pf-fact">
           <em>이적 예산</em>
           <b>{formatMoney(view.transferBudget)}</b>
@@ -534,24 +648,214 @@ function ProposalBody({
           <b>{formatMoney(view.marketValue)}</b>
         </span>
       </div>
-      {error !== null && (
-        <p className="pf-error" role="alert" data-testid="proposal-error">
-          {error}
-        </p>
-      )}
-      <div className="pf-actions">
-        <button type="button" className="pf-close" onClick={onClose} disabled={sending}>
-          닫기
-        </button>
-        <button type="submit" className="pf-submit" disabled={locked} data-testid="proposal-submit">
-          제안
-        </button>
+
+      <div className="pf-body">
+        {/* 갈래 — 열린 협상이 있으면 그 갈래 하나뿐이다 */}
+        {kinds.length > 1 && (
+          <div className="pf-seg" role="radiogroup" aria-label="갈래">
+            {kinds.map((k) => (
+              <button
+                key={k}
+                type="button"
+                role="radio"
+                aria-checked={kind === k}
+                className={kind === k ? "on" : ""}
+                onClick={() => pickKind(k)}
+                disabled={locked}
+              >
+                {PROPOSAL_KIND_KO[k]}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* 이미 합의된 이적료 — 굳은 값이다 */}
+        {view.feeAgreed !== null && party !== "agent" && (
+          <section className="pf-card" data-testid="proposal-club">
+            <Recipient
+              name={view.counterparts.club?.name ?? ""}
+              note={`${view.counterparts.club?.clubName ?? ""} 단장 · 이적료 합의`}
+            />
+            <div className="pf-agreed">
+              <span>
+                <em>이적료</em>
+                <b>{formatMoney(view.feeAgreed.fee)}</b>
+              </span>
+              {view.feeAgreed.paymentYears !== null && (
+                <span>
+                  <em>지급</em>
+                  <b>{view.feeAgreed.paymentYears}년 분할</b>
+                </span>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* 구단의 절 — 이적료와 지급. 건너편은 그 구단의 단장이다 */}
+        {clubSide && (
+          <section className="pf-card" data-testid="proposal-club">
+            <Recipient
+              name={view.counterparts.club!.name}
+              note={`${view.counterparts.club!.clubName} 단장`}
+            />
+            <AmountField
+              label={kind === "loan" ? "임대료" : "이적료"}
+              value={fee}
+              step={FEE_STEP}
+              unit={MILLIONS}
+              chips={FEE_CHIPS}
+              anchor={feeAnchor}
+              anchorLabel={kind === "loan" ? "임대료 자" : "요구가"}
+              {...(precontract ? { hint: "사전 계약 — 이적료 없이 여름에 합류한다" } : {})}
+              onChange={setFee}
+              locked={locked}
+              testId="proposal-fee"
+            />
+            {kind === "buy" && (
+              <div className="pf-row">
+                <span className="pf-row-label">지급</span>
+                <Chips
+                  label="지급"
+                  value={paymentYears}
+                  options={Array.from({ length: MAX_PAYMENT_YEARS }, (_, i) => ({
+                    value: i + 1,
+                    label: i === 0 ? "일시금" : `${i + 1}년 분할`,
+                  }))}
+                  onPick={setPaymentYears}
+                  locked={locked}
+                />
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* 선수 쪽의 절 — 주급·연수·지위, 그리고 조건. 합의됐으면 굳은 값이다 */}
+        {(agentSide || agreed) && (
+          <section className="pf-card" data-testid="proposal-agent">
+            <Recipient name={agentName} note={agreed ? "에이전트 · 개인 조건 합의" : "에이전트"} />
+            {agreed ? (
+              <div className="pf-agreed">
+                <span>
+                  <em>주급</em>
+                  <b>{formatMoney(agreed.weeklyWage)}/주</b>
+                </span>
+                <span>
+                  <em>계약</em>
+                  <b>{agreed.contractYears}년</b>
+                </span>
+                {agreed.squadStatus && (
+                  <span>
+                    <em>지위</em>
+                    <b>{SQUAD_STATUS_KO[agreed.squadStatus]}</b>
+                  </span>
+                )}
+              </div>
+            ) : (
+              <>
+                <AmountField
+                  label="주급"
+                  value={weeklyWage}
+                  step={WAGE_STEP}
+                  unit={THOUSANDS}
+                  chips={WAGE_CHIPS}
+                  anchor={wageAnchor}
+                  anchorLabel="기대 주급"
+                  tail="/주"
+                  onChange={setWeeklyWage}
+                  locked={locked}
+                  testId="proposal-wage"
+                />
+                <div className="pf-row">
+                  <span className="pf-row-label">계약</span>
+                  <Chips
+                    label="계약 연수"
+                    value={years}
+                    options={Array.from({ length: PROPOSAL_YEARS_MAX }, (_, i) => ({
+                      value: i + 1,
+                      label: `${i + 1}년`,
+                    }))}
+                    onPick={setYears}
+                    locked={locked}
+                  />
+                </div>
+                {kind !== "loan" && (
+                  <div className="pf-row">
+                    <span className="pf-row-label">
+                      지위
+                      <em>지금 {SQUAD_STATUS_KO[view.squadStatus]}</em>
+                    </span>
+                    <Chips
+                      label="계약 지위"
+                      value={squadStatus}
+                      options={SQUAD_STATUSES.map((s) => ({ value: s, label: SQUAD_STATUS_KO[s] }))}
+                      onPick={setSquadStatus}
+                      locked={locked}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* 조건 — 갈래 칩을 켜면 그 줄이 서고, 다시 누르면 내려간다 */}
+            {termKinds.length > 0 && (
+              <div className="pf-row pf-terms">
+                <span className="pf-row-label">
+                  조건
+                  <b className="pf-count fig">
+                    {countable}/{MAX_TABLED_TERMS}
+                  </b>
+                </span>
+                <div
+                  className="pf-options"
+                  role="group"
+                  aria-label="조건"
+                  data-testid="proposal-add-term"
+                >
+                  {termKinds.map((k) => {
+                    const on = tabled(k) !== undefined;
+                    return (
+                      <button
+                        key={k}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={on}
+                        className={on ? "on" : ""}
+                        onClick={() => toggleTerm(k)}
+                        disabled={locked || (!on && k !== "other" && countable >= MAX_TABLED_TERMS)}
+                      >
+                        {DEAL_TERM_KO[k]}
+                      </button>
+                    );
+                  })}
+                </div>
+                {terms.map((term) => (
+                  <TermRow
+                    key={term.id}
+                    term={term}
+                    locked={locked}
+                    onChange={(patch) => updateTerm(term.id, patch)}
+                    onRemove={() => toggleTerm(term.kind)}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        )}
       </div>
+
+      <footer className="pf-foot">
+        <button type="submit" className="pf-submit" disabled={locked} data-testid="proposal-submit">
+          제안서 작성
+        </button>
+      </footer>
     </form>
   );
 }
 
-/** 조건 한 줄 — 갈래의 이름과 그 갈래가 요구하는 값의 칸 */
+/**
+ * 조건 한 줄 — 값이 있는 갈래만 줄이 선다 (주장은 칩이 켜진 것으로 끝이다). 갈래 이름과
+ * 그 갈래가 요구하는 값의 칸, 오른쪽에 내리는 손잡이.
+ */
 function TermRow({
   term,
   locked,
@@ -563,80 +867,96 @@ function TermRow({
   onChange: (patch: Partial<DealTerm>) => void;
   onRemove: () => void;
 }) {
+  const money = term.kind === "buyout" || term.kind === "bonus" || term.kind === "points";
+  const valued =
+    money ||
+    term.kind === "escalator" ||
+    term.kind === "signing" ||
+    term.kind === "number" ||
+    term.kind === "other";
+  if (!valued) return null;
   return (
     <div className="pf-term" data-testid={`proposal-term-${term.kind}`}>
-      <span className="pf-term-kind">{DEAL_TERM_KO[term.kind]}</span>
-      {(term.kind === "buyout" || term.kind === "bonus") && (
-        <>
-          <input
-            type="number"
-            inputMode="numeric"
-            min={0}
-            step={term.kind === "buyout" ? FEE_STEP : WAGE_STEP}
-            value={term.fee ?? 0}
-            onChange={(e) => onChange({ fee: Number(e.target.value) })}
-            disabled={locked}
-            aria-label={`${DEAL_TERM_KO[term.kind]} 금액`}
-          />
-          <span className="pf-hint">{formatMoney(term.fee ?? 0)}</span>
-        </>
+      <div className="pf-term-head">
+        <span className="pf-term-kind">{DEAL_TERM_KO[term.kind]}</span>
+        <button
+          type="button"
+          className="pf-remove"
+          onClick={onRemove}
+          disabled={locked}
+          aria-label={`${DEAL_TERM_KO[term.kind]} 조건 지우기`}
+        >
+          <IconClose size={14} />
+        </button>
+      </div>
+      {money && (
+        <MoneyInput
+          value={term.fee ?? 0}
+          unit={term.kind === "buyout" ? MILLIONS : THOUSANDS}
+          step={term.kind === "buyout" ? FEE_STEP : WAGE_STEP}
+          onChange={(fee) => onChange({ fee })}
+          locked={locked}
+          label={`${DEAL_TERM_KO[term.kind]} 금액`}
+          {...(term.kind === "points" ? { tail: "/P" } : {})}
+        />
       )}
       {term.kind === "escalator" && (
         <>
-          <select
+          <Chips
+            label="인상 조건"
             value={term.trigger ?? "europe"}
-            onChange={(e) => onChange({ trigger: e.target.value as DealTerm["trigger"] })}
-            disabled={locked}
-            aria-label="인상 조건"
-          >
-            {ESCALATOR_TRIGGERS.map((t) => (
-              <option key={t} value={t}>
-                {ESCALATOR_TRIGGER_KO[t]}
-              </option>
-            ))}
-          </select>
-          <input
-            type="number"
-            inputMode="numeric"
-            min={ESCALATOR_PCT_MIN}
-            max={ESCALATOR_PCT_MAX}
-            step={5}
-            value={term.pct ?? 20}
-            onChange={(e) => onChange({ pct: Number(e.target.value) })}
-            disabled={locked}
-            aria-label="인상 폭"
+            options={ESCALATOR_TRIGGERS.map((t) => ({ value: t, label: ESCALATOR_TRIGGER_KO[t] }))}
+            onPick={(trigger) => onChange({ trigger })}
+            locked={locked}
           />
-          <span className="pf-hint">%</span>
+          <span className="pf-money">
+            <b className="pf-money-cur">+</b>
+            <input
+              className="pf-money-input fig"
+              type="number"
+              inputMode="numeric"
+              min={ESCALATOR_PCT_MIN}
+              max={ESCALATOR_PCT_MAX}
+              step={5}
+              value={term.pct ?? 20}
+              style={{ width: `calc(${String(term.pct ?? 20).length}ch + 3px)` }}
+              onChange={(e) => onChange({ pct: Number(e.target.value) })}
+              disabled={locked}
+              aria-label="인상 폭 (%)"
+            />
+            <b className="pf-money-mark">%</b>
+          </span>
         </>
       )}
       {term.kind === "signing" && (
-        <select
+        <Chips
+          label="데려올 자리"
           value={term.position ?? ""}
-          onChange={(e) => onChange({ position: e.target.value })}
-          disabled={locked}
-          aria-label="데려올 자리"
-        >
-          {POSITION_CODES.map((code) => (
-            <option key={code} value={code}>
-              {code}
-            </option>
-          ))}
-        </select>
+          options={POSITION_CODES.map((code) => ({ value: code, label: code }))}
+          onPick={(position) => onChange({ position })}
+          locked={locked}
+        />
       )}
       {term.kind === "number" && (
-        <input
-          type="number"
-          inputMode="numeric"
-          min={SQUAD_NUMBER_MIN}
-          max={SQUAD_NUMBER_MAX}
-          value={term.number ?? 10}
-          onChange={(e) => onChange({ number: Number(e.target.value) })}
-          disabled={locked}
-          aria-label="등번호"
-        />
+        <span className="pf-money">
+          <input
+            className="pf-money-input fig"
+            type="number"
+            inputMode="numeric"
+            min={SQUAD_NUMBER_MIN}
+            max={SQUAD_NUMBER_MAX}
+            value={term.number ?? 10}
+            style={{ width: `calc(${String(term.number ?? 10).length}ch + 3px)` }}
+            onChange={(e) => onChange({ number: Number(e.target.value) })}
+            disabled={locked}
+            aria-label="등번호"
+          />
+          <b className="pf-money-mark">번</b>
+        </span>
       )}
       {term.kind === "other" && (
         <input
+          className="pf-term-text"
           type="text"
           maxLength={DEAL_TERM_NOTE_MAX}
           value={term.note ?? ""}
@@ -646,15 +966,6 @@ function TermRow({
           placeholder={dealTermLabel({ kind: "other", note: "…" }).replace(/ — .*$/, "")}
         />
       )}
-      <button
-        type="button"
-        className="pf-remove"
-        onClick={onRemove}
-        disabled={locked}
-        aria-label={`${DEAL_TERM_KO[term.kind]} 조건 지우기`}
-      >
-        ×
-      </button>
     </div>
   );
 }

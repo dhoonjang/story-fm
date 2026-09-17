@@ -111,6 +111,16 @@ agents:
     timeout_ms: 180000
     thinking_level: low
 
+  # 협상 방의 GM — 이 협상의 서류·상황·방의 대화만 읽고 상대가 되어 장면과 대사를 쓴다
+  # (docs/llm/agents.md §4-1). 도구 루프를 돌며 장면을 쓰는 머리라 매치 GM과 같은 자리다.
+  # 시한은 도구 뒤의 테이블 해석 호출까지 덮는다.
+  negotiation-gm:
+    provider: google
+    model: gemini-3.8-flash
+    max_tokens: 64000
+    timeout_ms: 180000
+    thinking_level: low
+
   # 끝난 경기의 결산과 마무리 중계 — 이 경기의 중계 전부를 읽으므로 싼 자리로 보내지
   # 않는다. 경기당 한 번이고 매치 GM의 도구 뒤에서 돈다.
   finalize-match:
@@ -121,8 +131,8 @@ agents:
     # 3.8-flash는 minimal에 400을 낸다 — 이 자리만 minimal로 남아 있었다 (live-schema 실측)
     thinking_level: low
 
-  # 협상 테이블 건너편 — GM의 도구 뒤에서 감독의 말 하나에 상대의 답 하나를 낸다
-  # (docs/llm/agents.md §4-1). 서류·주변 상황·테이블의 대화 전부를 읽고 인물로 말하므로
+  # 편지 — 방 밖에서 답할 날이 된 오퍼에 협상 상대가 되어 답 하나를 낸다
+  # (docs/llm/agents.md §4-1). 서류·주변 상황·테이블의 줄 전부를 읽고 인물로 말하므로
   # 싼 자리로 보내지 않는다. 실패하면 앵커가 그대로 판정이라 시한은 짧다.
   negotiation-table:
     provider: google

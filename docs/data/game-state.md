@@ -152,20 +152,21 @@
 
 ### 3.1 메타
 
-| 필드                         | 무엇                                                                                                          | 정의                       |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------- |
-| `id` `seed` `createdAt`      | 세이브 식별 · 모든 난수의 뿌리                                                                                | `core/state.ts`            |
-| `season` `date` `clock?`     | 시즌 번호 · 날짜 · 하루 안의 시각(`HH:MM`)                                                                    | `core/state.ts`            |
-| `calendar`                   | `SeasonCalendar` — 프리시즌 시작·소집일·개막일                                                                | `competition/calendar.ts`  |
-| `userTeamId` `phase`         | 감독의 팀 · `idle`/`matchday`/`match` (라우팅 전용)                                                           | `core/state.ts`            |
-| `pendingMatch`               | 진행 중인 경기 — 패킷·장부·캐스터 이력·킥오프 전술·입장 여부(`entered`)·구간 시뮬의 연속 시계(`segmentClock`) | `core/state.ts`            |
-| `world?`                     | 이 세계의 범위 (테스트용 축소 세계)                                                                           | `world/scope.ts`           |
-| `leagueOf?`                  | 승강 결과 — 팀 → 지금 속한 리그                                                                               | `competition/promotion.ts` |
-| `dismissal?`                 | 경질 사실 카드 — 있으면 감독은 무직이다 (career.md §5.1)                                                      | `domain/manager.ts`        |
-| `managerOffers?`             | 감독직 제안 — 공석 구단이 무직 감독을 부른 기록                                                               | `domain/manager.ts`        |
-| `managerPool?`               | 무직 감독 풀 — 잘린 사람의 이름·역량·재임 이력 (transfer.md §7)                                               | `domain/manager.ts`        |
-| `formUnitScale?`             | 폼 눈금 마이그레이션 마커 (§6)                                                                                | `core/state.ts`            |
-| `mirrorProficiencyStripped?` | 미러 자리 주발 보정 벗기기 마커 (§6)                                                                          | `core/state.ts`            |
+| 필드                         | 무엇                                                                                                                                                                                                                               | 정의                       |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| `id` `seed` `createdAt`      | 세이브 식별 · 모든 난수의 뿌리                                                                                                                                                                                                     | `core/state.ts`            |
+| `season` `date` `clock?`     | 시즌 번호 · 날짜 · 하루 안의 시각(`HH:MM`)                                                                                                                                                                                         | `core/state.ts`            |
+| `calendar`                   | `SeasonCalendar` — 프리시즌 시작·소집일·개막일                                                                                                                                                                                     | `competition/calendar.ts`  |
+| `userTeamId` `phase`         | 감독의 팀 · `idle`/`matchday`/`match`/`negotiation` (라우팅 전용)                                                                                                                                                                  | `core/state.ts`            |
+| `pendingMatch`               | 진행 중인 경기 — 패킷·장부·캐스터 이력·킥오프 전술·입장 여부(`entered`)·구간 시뮬의 연속 시계(`segmentClock`)                                                                                                                      | `core/state.ts`            |
+| `pendingNegotiation?`        | 열린 협상 방 — 어느 협상인가(`negotiationId`)·건너편에 앉은 사람(`party` — 구단 쪽 `club` · 선수 쪽 `agent`)·자리에 앉았는가(`seated`)·들어서기 전의 국면(`phaseBefore`). 방이 닫히면 `null`. 옛 세이브엔 없다 (transfer.md §12-2) | `core/state.ts`            |
+| `world?`                     | 이 세계의 범위 (테스트용 축소 세계)                                                                                                                                                                                                | `world/scope.ts`           |
+| `leagueOf?`                  | 승강 결과 — 팀 → 지금 속한 리그                                                                                                                                                                                                    | `competition/promotion.ts` |
+| `dismissal?`                 | 경질 사실 카드 — 있으면 감독은 무직이다 (career.md §5.1)                                                                                                                                                                           | `domain/manager.ts`        |
+| `managerOffers?`             | 감독직 제안 — 공석 구단이 무직 감독을 부른 기록                                                                                                                                                                                    | `domain/manager.ts`        |
+| `managerPool?`               | 무직 감독 풀 — 잘린 사람의 이름·역량·재임 이력 (transfer.md §7)                                                                                                                                                                    | `domain/manager.ts`        |
+| `formUnitScale?`             | 폼 눈금 마이그레이션 마커 (§6)                                                                                                                                                                                                     | `core/state.ts`            |
+| `mirrorProficiencyStripped?` | 미러 자리 주발 보정 벗기기 마커 (§6)                                                                                                                                                                                               | `core/state.ts`            |
 
 ### 3.2 팀 · 선수
 
@@ -308,23 +309,23 @@ row, 지난 일 = 그대로 이력.**
 
 ### 3.5 진행 중인 흥정 · 세계의 부름
 
-| 엔티티                                | 무엇                                                                                                              | 정의                   |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `negotiations` `Negotiation`          | 진행 중 협상 — 영입·매각·재계약·임대(양방향) · 조건서(`terms`) · 개인 조건 합의(`personal`) · 조항 발동(`buyout`) | `domain/records.ts`    |
-| ↳ `NegotiationRound`                  | 오퍼 한 번 — 조건·응답 예정일·코어 확률·판정·`pitch`                                                              | `domain/records.ts`    |
-| ↳ `Medical`                           | 합의와 계약 사이의 검진 — `scheduled`/`passed`/`flagged`                                                          | `domain/records.ts`    |
-| ↳ `PitchClaim`                        | 설득 논거 10종 — 코어가 사실 대조한다                                                                             | `domain/persuasion.ts` |
-| ↳ `TabledTerm` · `DealTerm`           | 조건서 한 줄 — 조건 8갈래 · 누가 · 답. 서명 때 계약·약속 장부로 흩어진다 (transfer.md §12-3)                      | `domain/deal-terms.ts` |
-| `pressConferences` `PressConference`  | 기자회견 — 열린 시점과 답한 시점이 갈린다                                                                         | `domain/press.ts`      |
-| ↳ `PressFact`                         | **사실 카드** (질문 문장이 아니다) — 기자는 이 밖을 못 묻는다                                                     | `domain/press.ts`      |
-| `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리, 그리고 감독이 두드려 연 면접 (people.md §8)                           | `domain/press.ts`      |
-| `approachPressure` `ApproachPressure` | 압력 눈금 — 주제별 누적과 계단. 파생할 수 없는 유일한 값                                                          | `domain/press.ts`      |
-| `pressLeaks` `PressLeak`              | 언론 유출 — 다음 회견이 실어 갈 때까지만 남는다 (§8 계단 4)                                                       | `domain/press.ts`      |
-| `pressSackings` `PressSacking`        | 라이벌 구단의 경질 — 다음 회견이 실어 갈 때까지만 남는다                                                          | `domain/press.ts`      |
-| `clubVision` `ClubVision`             | **클럽 비전** — 구단주 원형이 건 다년 계획. 코드·목표·가중치·기한만 남고 진행도는 파생이다 (career.md §5)         | `domain/records.ts`    |
-| `youthCandidates` `YouthCandidate`    | 여름의 유스 후보 — 소집일까지 감독의 답을 기다린다 (season.md §6)                                                 | `domain/records.ts`    |
-| `callUps` `CallUp`                    | **A매치 소집** — `returnedOn === null`이 소집 중. 정산 뒤엔 감독 팀 것만 두 시즌 남는다 (competition.md §5-1)     | `domain/records.ts`    |
-| `aiDeals` `AiDeal`                    | 이번 주에 정해진, 날짜가 흩어진 AI 이적                                                                           | `market/ai-market.ts`  |
+| 엔티티                                | 무엇                                                                                                                                                                                                     | 정의                   |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `negotiations` `Negotiation`          | 진행 중 협상 — 영입·매각·재계약·임대(양방향) · 조건서(`terms`) · 개인 조건 합의(`personal`) · 이적료 합의(`feeAgreed`) · 자리마다의 테이블(`tables.club`·`tables.agent` — 인내·줄) · 조항 발동(`buyout`) | `domain/records.ts`    |
+| ↳ `NegotiationRound`                  | 오퍼 한 번 — 조건·응답 예정일·코어 확률·판정·`pitch`                                                                                                                                                     | `domain/records.ts`    |
+| ↳ `Medical`                           | 합의와 계약 사이의 검진 — `scheduled`/`passed`/`flagged`                                                                                                                                                 | `domain/records.ts`    |
+| ↳ `PitchClaim`                        | 설득 논거 10종 — 코어가 사실 대조한다                                                                                                                                                                    | `domain/persuasion.ts` |
+| ↳ `TabledTerm` · `DealTerm`           | 조건서 한 줄 — 조건 9갈래 · 누가 · 답. 서명 때 계약·약속 장부로 흩어진다 (transfer.md §12-3)                                                                                                             | `domain/deal-terms.ts` |
+| `pressConferences` `PressConference`  | 기자회견 — 열린 시점과 답한 시점이 갈린다                                                                                                                                                                | `domain/press.ts`      |
+| ↳ `PressFact`                         | **사실 카드** (질문 문장이 아니다) — 기자는 이 밖을 못 묻는다                                                                                                                                            | `domain/press.ts`      |
+| `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리, 그리고 감독이 두드려 연 면접 (people.md §8)                                                                                                                  | `domain/press.ts`      |
+| `approachPressure` `ApproachPressure` | 압력 눈금 — 주제별 누적과 계단. 파생할 수 없는 유일한 값                                                                                                                                                 | `domain/press.ts`      |
+| `pressLeaks` `PressLeak`              | 언론 유출 — 다음 회견이 실어 갈 때까지만 남는다 (§8 계단 4)                                                                                                                                              | `domain/press.ts`      |
+| `pressSackings` `PressSacking`        | 라이벌 구단의 경질 — 다음 회견이 실어 갈 때까지만 남는다                                                                                                                                                 | `domain/press.ts`      |
+| `clubVision` `ClubVision`             | **클럽 비전** — 구단주 원형이 건 다년 계획. 코드·목표·가중치·기한만 남고 진행도는 파생이다 (career.md §5)                                                                                                | `domain/records.ts`    |
+| `youthCandidates` `YouthCandidate`    | 여름의 유스 후보 — 소집일까지 감독의 답을 기다린다 (season.md §6)                                                                                                                                        | `domain/records.ts`    |
+| `callUps` `CallUp`                    | **A매치 소집** — `returnedOn === null`이 소집 중. 정산 뒤엔 감독 팀 것만 두 시즌 남는다 (competition.md §5-1)                                                                                            | `domain/records.ts`    |
+| `aiDeals` `AiDeal`                    | 이번 주에 정해진, 날짜가 흩어진 AI 이적                                                                                                                                                                  | `market/ai-market.ts`  |
 
 이것들이 세이브에 남는 이유는 같다 — **두 시점 사이에 걸쳐 있어** 파생으로 되돌릴
 수 없다. 협상은 며칠에 걸쳐 오퍼가 오가고, 회견과 다가옴은 열린 뒤 감독이 다음 날
@@ -839,6 +840,8 @@ tmp 쓰기가 실패하면 그 tmp는 **그 자리에서 거둔다**. 이름이 
 - **`ScheduleEntry`와 그 대상은 함께 지운다.** 엔트리만 남으면 tick이 존재하지
   않는 대상을 매일 찾고, 대상만 남으면 달력에서 사라진 채 상태가 굴러간다.
 - **`state.phase`는 라우팅 전용** — 모델 입력에 넣지 않는다.
+- **협상 방은 한 번에 하나다** — `phase`가 `negotiation`이면 `pendingNegotiation`이 서고,
+  그 협상은 `open`이다. 협상이 `open`을 벗어나면 방은 같은 턴에 닫힌다 (transfer.md §12-2).
 - **`aiDeals`·`negotiations`처럼 날짜를 품은 계획은 실행 시점에 다시 검사한다.**
   그사이 다치거나 이미 옮긴 선수의 딜은 조용히 무산되는 것이 맞다.
 - **`ChatTurn.role`의 `operator`는 감독 발화가 아니다.** 화면에 그리지 않고,

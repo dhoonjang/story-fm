@@ -102,8 +102,11 @@ function badgeOf(card: MarketCard): string {
   }
 }
 
-/** 조건 한 벌 — 정산금·이적료·분할·주급·연수 중 있는 것만 (임대료는 이적료 자리를 쓴다) */
-function Terms({ terms, loan = false }: { terms: MarketTerms; loan?: boolean }) {
+/**
+ * 조건 한 벌 — 정산금·이적료·분할·주급·연수 중 있는 것만 (임대료는 이적료 자리를 쓴다).
+ * 협상 방의 조건서도 이 줄을 쓴다 — 카드와 방이 같은 숫자를 다른 자로 세우지 않는다.
+ */
+export function Terms({ terms, loan = false }: { terms: MarketTerms; loan?: boolean }) {
   return (
     <>
       {terms.fee !== undefined && (
@@ -159,7 +162,12 @@ function prefillOf(card: MarketCard): ProposalPrefill {
 /** 폼으로 이어지는 카드 — 오퍼·답·재계약. 해지·철회·스카우트에는 다시 부를 값이 없다 */
 const PROPOSABLE: ReadonlySet<MarketCard["kind"]> = new Set(["offer", "verdict", "renewal"]);
 
-export function MarketCardView({ card }: { card: MarketCard }) {
+/**
+ * `propose` — 카드에서 폼을 여는 손잡이를 세우는가. 협상 방의 턴에 선 카드는 세우지 않는다:
+ * 그 방의 폼은 방의 손잡이(「제안서 작성」) 하나로 열리고, 끝난 협상의 카드에서 다시 부를
+ * 값은 없다 (design-system.md §7-1).
+ */
+export function MarketCardView({ card, propose = true }: { card: MarketCard; propose?: boolean }) {
   const Icon = KIND_ICON[card.kind];
   const proposal = useProposal();
   /**
@@ -243,7 +251,7 @@ export function MarketCardView({ card }: { card: MarketCard }) {
             <span className="mc-note">{card.note}</span>
           ))}
         {/* 이 카드의 조건을 폼에 그대로 앉혀 다시 부른다 — 조정안이면 그 값이 출발점이다 */}
-        {proposal !== null && PROPOSABLE.has(card.kind) && (
+        {proposal !== null && propose && PROPOSABLE.has(card.kind) && (
           <button
             type="button"
             className="mc-propose"

@@ -1,5 +1,11 @@
-import type { DealTermKind, ProposalInput, ProposalKind, SquadStatus } from "@story-fm/domain";
-import { dealTermKindsFor } from "@story-fm/domain";
+import type {
+  DealTermKind,
+  ProposalInput,
+  ProposalKind,
+  SquadStatus,
+  TableSpeaker,
+} from "@story-fm/domain";
+import { dealTermKindsFor, naturalPositionOf, pointsBonusEligible } from "@story-fm/domain";
 import type { CommandResult } from "../commands";
 import { userWageRoom } from "../club/board-request";
 import { activeContract, financeOf, playerById, teamName, type GameState } from "../core/state";
@@ -24,6 +30,9 @@ import {
 } from "./negotiation";
 import { derivedSquadStatus } from "../squad/promises";
 import { isFreeAgent } from "./departures";
+import { tableVoicesOf } from "./counterparty";
+import { agentForPlayer, directorOf } from "../world/persona";
+import { roomNegotiationOf, roomPartyOf } from "./table";
 
 /**
  * **제안 폼의 코어 쪽** (docs/simulation/transfer.md §12-3).
@@ -141,10 +150,44 @@ export interface ProposalView {
   } | null;
   /** 갈래별로 걸 수 있는 조건 — 화면이 목록에서 고른다 */
   termKinds: Record<"buy" | "loan" | "renew" | "precontract", readonly DealTermKind[]>;
+  /**
+   * **건너편에 누가 앉는가** — 폼이 칸을 가르는 자다 (transfer.md §12-1 · design-system.md §6).
+   * 구단 쪽(단장)은 이적료·분할을 답하고 선수 쪽(에이전트)은 주급·연수·지위·조건을 답하므로,
+   * 폼은 앉은 사람의 칸만 세운다. 열린 협상이 있으면 그 테이블의 목소리(`tableVoicesOf`)
+   * 그대로고, 없으면 갈래가 정한다 — 남의 선수는 둘, 우리 선수와 무소속은 선수 쪽 하나.
+   */
+  counterparts: {
+    club: { name: string; clubName: string } | null;
+    agent: { name: string } | null;
+  };
+  /**
+   * **지금 앉아 있는 방의 상대** — 이 선수의 협상 방이 열려 있으면 그 자리다 (transfer.md
+   * §12-2). 방 안의 폼은 그 상대의 절만 세운다: 단장 방이면 이적료, 에이전트 방이면 개인 조건.
+   * 방 밖(서면)이면 `null` — 오퍼는 양쪽에 함께 간다.
+   */
+  party: TableSpeaker | null;
+  /** 구단이 이미 이적료에 합의했으면 그 값 — 폼이 이적료 칸을 굳은 값으로 읽는다 */
+  feeAgreed: { fee: number; paymentYears: number | null } | null;
   /** 우리 이적 예산과 주급 여력 — 폼 아래에 서는 사실 */
   transferBudget: number;
   wageRoom: number;
   marketValue: number;
+}
+
+/**
+ * 폼이 세울 조건 칩 — 갈래가 정한 것에서 이 선수에게 서지 않는 것을 뺀다. 공격 포인트
+ * 보너스는 미드필더·공격수에게만이고(`pointsBonusEligible`), 표 밖의 조건(`other`)은 폼이
+ * 아니라 말의 것이다 (transfer.md §12-3).
+ */
+function termKindsFor(
+  player: Parameters<typeof naturalPositionOf>[0],
+  kind: "buy" | "loan" | "renew",
+  precontract = false,
+): readonly DealTermKind[] {
+  const eligible = pointsBonusEligible(naturalPositionOf(player).position);
+  return dealTermKindsFor(kind, precontract).filter(
+    (k) => k !== "other" && (k !== "points" || eligible),
+  );
 }
 
 /**
@@ -175,7 +218,31 @@ export function proposalViewOf(state: GameState, playerId: string): ProposalView
       : ["buy", "loan"];
   const finance = financeOf(state, state.userTeamId);
   const personal = open?.personal;
+  const voices = open ? tableVoicesOf(state, open) : null;
+  const agentName = agentForPlayer(state, player.id)?.name ?? player.name;
+  // 빌려 온 선수의 영입은 원소속과 한다 (transfer.md §2)
+  const clubId = loanedIn && player.loan ? player.loan.fromTeamId : player.teamId;
+  const clubVoice = voices?.find((v) => v.speaker === "club");
+  const counterparts = voices
+    ? {
+        club: clubVoice
+          ? { name: clubVoice.name, clubName: teamName(clubVoice.teamId ?? clubId) }
+          : null,
+        agent: ((v) => (v ? { name: v.name } : null))(voices.find((v) => v.speaker === "agent")),
+      }
+    : ours || free
+      ? { club: null, agent: { name: agentName } }
+      : {
+          club: { name: directorOf(state, clubId).name, clubName: teamName(clubId) },
+          agent: { name: agentName },
+        };
+  const room = roomNegotiationOf(state);
   return {
+    counterparts,
+    party: room && open && room.id === open.id ? roomPartyOf(state) : null,
+    feeAgreed: open?.feeAgreed
+      ? { fee: open.feeAgreed.fee, paymentYears: open.feeAgreed.paymentYears ?? null }
+      : null,
     kinds: negotiationKind ? [negotiationKind] : loanedIn ? ["buy"] : kinds,
     freeAgent: free,
     loanedFrom: loanedIn && player.loan ? teamName(player.loan.fromTeamId) : null,
@@ -201,10 +268,10 @@ export function proposalViewOf(state: GameState, playerId: string): ProposalView
         }
       : null,
     termKinds: {
-      buy: dealTermKindsFor("buy"),
-      precontract: dealTermKindsFor("buy", true),
-      loan: dealTermKindsFor("loan"),
-      renew: dealTermKindsFor("renew"),
+      buy: termKindsFor(player, "buy"),
+      precontract: termKindsFor(player, "buy", true),
+      loan: termKindsFor(player, "loan"),
+      renew: termKindsFor(player, "renew"),
     },
     transferBudget: finance.transferBudget,
     wageRoom: userWageRoom(state),

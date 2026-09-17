@@ -16,8 +16,12 @@ export const CALL_LABEL: Record<string, string> = {
   apply_manager_job: "감독직 지원",
   tactic_orders: "전술 지시",
   training_orders: "훈련 지시",
-  speak_at_table: "테이블",
   market_orders: "이적·재정 지시",
+  // 협상 방 — 여는 스킬 하나와 방 안의 도구 셋 (transfer.md §12-2)
+  start_negotiation: "협상 시작",
+  table_orders: "협상 지시",
+  reply_at_table: "상대의 답",
+  leave_table: "자리 뜨기",
   set_lineup: "라인업",
   set_squad_level: "1·2군 이동",
   set_captain: "완장 지정",

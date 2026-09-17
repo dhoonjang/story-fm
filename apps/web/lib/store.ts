@@ -1,5 +1,7 @@
 import {
   buildOfficeViews,
+  negotiationKindKo,
+  playerName,
   speakerRoles,
   type SpeakerRole,
   teamName,
@@ -12,7 +14,7 @@ import {
   type ChatTurn,
 } from "@story-fm/engine";
 import { STALLED_CLOCK_TURNS } from "@story-fm/agents";
-import { type ClubColours } from "@story-fm/domain";
+import { type ClubColours, type Negotiation } from "@story-fm/domain";
 import { buildPlayerNameIndex, playerIdsIn } from "./player-names";
 
 /** 응답에 실을 장부 — 라우트가 **자기가 바꾼 것만** 고른다 */
@@ -78,6 +80,25 @@ export interface GamePayload {
    * 것은 리포트가 갖는다 (match.md §8).
    */
   matchLogs: Record<string, MatchLogHead>;
+  /**
+   * 접힌 협상 기록의 머리글 — `negotiationId` → 선수 · 갈래 · 결과 · 날짜
+   * (transfer.md §12-2 · design-system.md §7-1). 경기 기록과 같은 자리다: 방 안의 턴이
+   * 끝난 뒤 메인 채팅에서 한 장으로 접히고, 그 머리가 무엇의 기록인지 말한다.
+   */
+  negotiationLogs: Record<string, NegotiationLogHead>;
+}
+
+/**
+ * 접힌 협상 하나의 **머리 사실** — 문장이 아니라 값이다. 결과의 낱말(합의·결렬)은
+ * 화면의 어휘고, 여기 실리는 것은 장부의 `status`다.
+ */
+export interface NegotiationLogHead {
+  playerName: string;
+  /** 갈래의 이름 — 방 뷰의 `kindLabel`과 같은 함수에서 온다 (`negotiationKindKo`) */
+  kindLabel: string;
+  status: Negotiation["status"];
+  /** 협상이 열린 날 */
+  date: string;
 }
 
 /** 접힌 경기 머리가 아는 한 팀 — 문장과 구단 색의 열쇠까지 (design-system.md §2) */
@@ -215,6 +236,30 @@ function matchLogsOf(state: GameState): GamePayload["matchLogs"] {
 }
 
 /**
+ * 채팅에 접혀 있는 협상들의 머리글 — 이력에 등장한 `negotiationId`만 만든다.
+ * 경기 머리(`matchLogsOf`)와 같은 규약이다: 값만 싣고 문장은 화면이 조립한다.
+ */
+function negotiationLogsOf(state: GameState): GamePayload["negotiationLogs"] {
+  const ids = new Set(
+    state.chat.map((t) => t.negotiationId).filter((id): id is string => typeof id === "string"),
+  );
+  const logs: GamePayload["negotiationLogs"] = {};
+  if (ids.size === 0) return logs;
+  const byId = new Map(state.negotiations.map((n) => [n.id, n] as const));
+  for (const id of ids) {
+    const n = byId.get(id);
+    if (!n) continue;
+    logs[id] = {
+      playerName: playerName(state, n.gamePlayerId),
+      kindLabel: negotiationKindKo(n),
+      status: n.status,
+      date: n.openedOn,
+    };
+  }
+  return logs;
+}
+
+/**
  * 상태를 응답으로 — **뷰를 고르면 그 뷰만 실은 조각이 나간다.**
  *
  * 고르지 않으면 전부다. 시간이 흐르는 길(턴)은 무엇이든 바꿀 수 있어 통째로 보내야
@@ -252,5 +297,6 @@ export function toPayload(state: GameState, only?: readonly ViewKey[]): GamePayl
       ? { clockStalled: state.sceneHeaderMisses }
       : {}),
     matchLogs: matchLogsOf(state),
+    negotiationLogs: negotiationLogsOf(state),
   };
 }

@@ -285,6 +285,8 @@ export interface TurnDigest {
   phase: string;
   season: number;
   match: { matchId: string; minute: number; score: { home: number; away: number } } | null;
+  /** 열린 협상 방 — 어느 협상인가·앉았는가. 없으면 null */
+  negotiation: { negotiationId: string; seated: boolean } | null;
   board: {
     spec: TacticsSpec;
     starting: Array<{
@@ -311,6 +313,12 @@ export function turnDigestOf(state: GameState): TurnDigest {
           matchId: pending.matchId,
           minute: pending.ledger.minute,
           score: { ...pending.ledger.score },
+        }
+      : null,
+    negotiation: state.pendingNegotiation
+      ? {
+          negotiationId: state.pendingNegotiation.negotiationId,
+          seated: state.pendingNegotiation.seated === true,
         }
       : null,
     board: tactics

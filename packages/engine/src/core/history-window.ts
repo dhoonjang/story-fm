@@ -72,11 +72,18 @@ export interface HistoryDigestDraft {
 }
 
 /**
- * 평시 턴 — `inMatch !== true`. 경기 이력은 경기마다 리셋되므로 자라지 않는다.
- * `gm-input.ts`의 `relevantTurns`가 평시 쪽에서 고르는 것과 같은 규칙이다.
+ * 평시 턴인가 — 경기의 턴도 협상 방의 턴도 아니다 (docs/llm/agents.md §5).
+ * 세 국면을 가르는 자는 이 하나다 — `gm-input.ts`의 `relevantTurns`도 여기서 읽는다.
+ */
+export function isPeaceTurn(turn: Pick<ChatTurn, "inMatch" | "inNegotiation">): boolean {
+  return turn.inMatch !== true && turn.inNegotiation !== true;
+}
+
+/**
+ * 평시 턴 — 경기 이력은 경기마다, 방의 이력은 협상마다 갈리므로 여기서 자라지 않는다.
  */
 export function peaceTurns(chat: readonly ChatTurn[]): ChatTurn[] {
-  return chat.filter((t) => t.inMatch !== true);
+  return chat.filter(isPeaceTurn);
 }
 
 /**

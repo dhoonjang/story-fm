@@ -25,6 +25,7 @@ const AGENT_YAML = `  gm: &agent
   table-orders: *agent
   training-orders: *agent
   match-gm: *agent
+  negotiation-gm: *agent
   training-rater: *agent
   scout-rater: *agent
   history-compactor: *agent
@@ -77,6 +78,11 @@ describe("에이전트별 LLM 설정", () => {
   match-gm:
     provider: openai
     model: gpt-custom
+    max_tokens: 200
+    timeout_ms: 2000
+  negotiation-gm:
+    provider: openai
+    model: gpt-room
     max_tokens: 200
     timeout_ms: 2000
   finalize-match:
@@ -158,6 +164,7 @@ describe("에이전트별 LLM 설정", () => {
   table-orders: *google
   training-orders: *google
   match-gm: *google
+  negotiation-gm: *google
   training-rater: *google
   scout-rater: *google
   history-compactor: *google
@@ -180,6 +187,7 @@ describe("에이전트별 LLM 설정", () => {
   table-orders: *agent
   training-orders: *agent
   match-gm: *agent
+  negotiation-gm: *agent
   training-rater: *agent
   scout-rater: *agent
   history-compactor: *agent

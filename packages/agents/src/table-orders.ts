@@ -1,18 +1,25 @@
-import { describeNegotiation, type GameState } from "@story-fm/engine";
+import {
+  defaultPartyOf,
+  describeNegotiation,
+  roomPartyOf,
+  tableOf,
+  type GameState,
+} from "@story-fm/engine";
 import type { Negotiation } from "@story-fm/domain";
 import type { GameLLM, GameToolSpec } from "@story-fm/llm";
 import { mockOrdersLlm } from "./mock-gm";
 import { runOpsOrders, tagged, type OpsAgentSpec, type OpsOrders } from "./orders-ops";
 
 /**
- * 테이블 해석 — **마주 앉은 자리에서 감독이 한 말 한 줄을 이 협상의 명령 인자로 옮긴다**
- * (agents.md §4-1 · transfer.md §12-2 · §12-3).
+ * 테이블 해석 — **협상 방에서 감독이 한 말 한 마디를 이 협상의 명령 인자로 옮긴다**
+ * (agents.md §1 · transfer.md §12-2 · §12-3). 협상 GM의 `table_orders` 뒤에서 돈다 — 손잡이는
+ * 인자가 없고, 이번 턴 감독의 말은 코어가 넘긴다(`negotiation-gm.ts`).
  *
  * 시장 해석(`market-orders.ts`)과 같은 뼈대지만 좁다: 읽는 것은 이 협상 하나와 테이블의
  * 최근 말뿐이고, 채우는 명령도 이 테이블에서 오갈 수 있는 것뿐이다. 감독이 값을 말하면
  * 오퍼가 되고, 조건을 걸면 조건서에 오르며, 상대의 요구에 답하면 그 답이 장부에 선다 —
- * 그다음에 상대가 답한다. 옮기지 못한 말은 그대로 상대에게 간다: 값이 없는 말은 흥정이
- * 아니라 대화이고, 그것도 테이블의 일이다.
+ * 그다음에 상대가 답한다(`reply_at_table`). 옮기지 못한 말은 그대로 상대에게 간다: 값이
+ * 없는 말은 흥정이 아니라 대화이고, 그것도 테이블의 일이다.
  *
  * **모델이 다른 협상을 가리키지 못한다** — 돌아온 명령의 `negotiationId`·`playerId`는 이
  * 테이블의 것으로 덮어쓴다 (`runTableOrders`).
@@ -29,7 +36,7 @@ export const TABLE_ORDERS_SYSTEM = `당신은 협상 테이블에서 감독이 �
 - send_offer — 이적료(임대는 임대료)를 말했을 때. 주급·연수·지위·조건(terms)은 함께 말한 것만. 액수를 말하지 않은 오퍼도 fee를 비운 채 부른다 — 코어가 자를 돌려준다.
 - open_renewal — 재계약 협상에서 주급을 말했을 때. 연수·지위·조건은 함께 말한 것만. 주급을 말하지 않았어도 부른다.
 - propose_personal — 영입·임대 협상에서 이적료 없이 주급·연수·지위만 말했을 때. 조건이 함께 있으면 terms에.
-- offer_terms — 감독이 조건을 걸었을 때(추가 영입·주장·등번호·출전 보장·바이아웃 조항·사이닝 보너스·주급 인상 조항·그 밖). 상대가 부른 요구를 들어주는 말도 그 갈래를 올리는 것이다. 값이 딸린 갈래는 감독이 부른 값으로.
+- offer_terms — 감독이 조건을 걸었을 때(추가 영입·주장·등번호·출전 보장·바이아웃 조항·사이닝 보너스·공격 포인트 보너스·주급 인상 조항·그 밖). 상대가 부른 요구를 들어주는 말도 그 갈래를 올리는 것이다. 값이 딸린 갈래는 감독이 부른 값으로.
 - answer_term — 상대가 부른 요구를 거절하는 말(refused). 들어주되 값을 말하지 않았으면 granted.
 - respond_offer — 상대가 넣은 오퍼(매각·임대 송출)에 감독의 답(accept·counter·reject).
 - accept_deal — 상대의 조정이나 되부른 개인 조건을 그대로 받는 말. 합의된 협상을 확정하는 말.
@@ -70,12 +77,18 @@ export type TableOrders = OpsOrders;
 /** 테이블의 최근 말 — 이만큼이면 흐름이 읽힌다 */
 const TABLE_LOG_TAIL = 6;
 
-/** 해석기의 입력 — 이 협상 하나와 테이블의 최근 말 */
+/**
+ * 해석기의 입력 — 이 협상 하나와 테이블의 최근 말. 방의 테이블에는 감독의 말과 장부 줄만
+ * 남고(상대의 대사는 방의 채팅 턴에 있다), 편지가 남긴 답에는 `them` 줄이 선다.
+ */
 export function buildTableOrdersContext(state: GameState, negotiation: Negotiation): string[] {
-  const log = (negotiation.table?.lines ?? []).slice(-TABLE_LOG_TAIL).map((line) => {
-    const who = line.by === "us" ? "@감독" : line.by === "ledger" ? "[장부]" : "@상대";
-    return `${line.date} ${who}: ${line.text}`;
-  });
+  const party = roomPartyOf(state) ?? defaultPartyOf(state, negotiation);
+  const log = (tableOf(state, negotiation, party)?.lines ?? [])
+    .slice(-TABLE_LOG_TAIL)
+    .map((line) => {
+      const who = line.by === "us" ? "@감독" : line.by === "ledger" ? "[장부]" : "@상대";
+      return `${line.date} ${who}: ${line.text}`;
+    });
   return [
     ...tagged("negotiation", describeNegotiation(state, negotiation.id)),
     ...tagged("table_log", log.join("\n")),

@@ -17,8 +17,10 @@ import {
   dealTermLabel,
   formatMoney,
   josa,
+  naturalPositionOf,
   normalizeDealTerm,
   normalizePositionCode,
+  pointsBonusEligible,
   sameTermKind,
 } from "@story-fm/domain";
 import { recordFinance } from "../club/finance";
@@ -57,6 +59,13 @@ export const ESCALATOR_ASK_MAX = 30;
 export const BONUS_ASK_WEEKS = 12;
 export const BONUS_ASK_WEEKS_MIN = 4;
 export const BONUS_ASK_WEEKS_MAX = 26;
+/**
+ * 상대가 부르는 공격 포인트 보너스 — 제시 주급의 몫이다. 골 하나가 주급의 열에 하나면
+ * 한 시즌 열 포인트가 한 주급이라, 계약을 흔들지 않는 크기다 (transfer.md §12-3).
+ */
+export const POINTS_ASK_WAGE_SHARE = 0.1;
+export const POINTS_ASK_WAGE_SHARE_MIN = 0.05;
+export const POINTS_ASK_WAGE_SHARE_MAX = 0.2;
 
 /** 이 협상에서 걸 수 있는 조건의 갈래 — 협상의 종류가 정한다 */
 export function termKindsOf(
@@ -190,6 +199,10 @@ export function verifyTerm(state: GameState, player: GamePlayer, term: DealTerm)
         verdict: "credible",
         why: "조항은 계약서의 숫자다 — 사건이 오면 코어가 올린다",
       };
+    case "points":
+      return pointsBonusEligible(naturalPositionOf(player).position)
+        ? { term, verdict: "credible", why: "조항은 계약서의 숫자다 — 포인트마다 코어가 낸다" }
+        : { term, verdict: "doubtful", why: "골·도움을 재는 자리가 아니다" };
     case "other":
       return { term, verdict: "unverifiable", why: "코어가 확인할 수 없는 조건이다 — 말로만 선다" };
   }
@@ -242,6 +255,14 @@ export function tableTerms(
         continue;
       }
       term.position = code;
+    }
+    // 골·도움을 재는 조항은 그 자리의 선수에게만 선다 — 수비수·골키퍼에게는 걸 수 없다 (§12-3)
+    if (term.kind === "points") {
+      const player = playerById(state, negotiation.gamePlayerId);
+      if (player && !pointsBonusEligible(naturalPositionOf(player).position)) {
+        notes.push(`${dealTermLabel(term)} — 수비수·골키퍼에게는 걸 수 없는 조건입니다`);
+        continue;
+      }
     }
     // 상대가 부른 갈래를 감독이 올리면 그 요구를 들어준 것이다 — 값은 감독이 부른 것으로
     const asked = sheet.find(
@@ -430,6 +451,7 @@ export function settleTermsOnSigning(
         );
         break;
       }
+      case "points":
       case "escalator":
       case "other":
         break;
@@ -536,6 +558,31 @@ export function settleEscalators(state: GameState, facts: EscalatorFacts, digest
       pushNarrative(state, `${name} 주급 인상 조항 발동 (+${term.pct}%)`, 3);
     }
   }
+}
+
+/**
+ * **공격 포인트 보너스의 집행** — 우리 팀의 경기가 마감될 때마다 (transfer.md §12-3).
+ *
+ * 그 선수의 활성 계약에 조항이 있으면 이 경기의 골과 도움을 더한 포인트 × 금액을
+ * `bonus`(성적 보너스)로 낸다. 서명 때 나가는 `signing_bonus`와 갈리는 이유는 이것이
+ * 시즌 내내 되풀이되는 성적의 값이기 때문이다. 포인트가 없으면 아무것도 적지 않는다.
+ * 낸 금액을 돌려주고, 조항이 없거나 포인트가 없으면 0이다.
+ */
+export function settlePointsBonus(state: GameState, player: GamePlayer, points: number): number {
+  if (points <= 0) return 0;
+  const contract = activeContract(state, player.id);
+  if (!contract || contract.teamId !== state.userTeamId) return 0;
+  const term = (contract.terms ?? []).find((t) => t.kind === "points");
+  if (!term || term.fee === undefined || term.fee <= 0) return 0;
+  const amount = term.fee * points;
+  recordFinance(state, state.userTeamId, {
+    kind: "expense",
+    category: "bonus",
+    label: `공격 포인트 보너스 — ${player.name} (${points}P)`,
+    amount,
+    ref: { type: "player", id: player.id },
+  });
+  return amount;
 }
 
 /** 계약에 적힌 조건의 줄 — 카드·조회가 같은 문형을 쓴다. 조항 칸이 있으면 함께 든다 */

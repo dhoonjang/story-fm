@@ -94,19 +94,26 @@
    * 둥글고, 화면의 92%까지 오른다 (match.md §8 「700 아래 — 바닥 시트」).
    */
   .kickoff-gate,
+  .negotiation-gate,
   .fulltime {
     place-items: end center;
     padding: 0;
   }
   .kickoff-card,
+  .negotiation-card,
   .fulltime-card {
     width: 100%;
     max-height: 92dvh;
     border-radius: var(--r-md) var(--r-md) 0 0;
     padding: var(--sp-5) var(--sp-4) var(--sp-4);
   }
-  .kickoff-card {
+  .kickoff-card,
+  .negotiation-card {
     overflow-y: auto;
+  }
+  /* 성사와 인내도 한 열로 — 두 열이 설 폭이 아니다 */
+  .ng-row {
+    grid-template-columns: 1fr;
   }
   /**
    * 팀시트는 「선발 11명」 한 행으로 접힌다 — 두 열이 설 폭이 아니다.
