@@ -24,6 +24,8 @@ import {
 } from "./negotiation";
 import { derivedSquadStatus } from "../squad/promises";
 import { isFreeAgent } from "./departures";
+import { tableVoicesOf } from "./counterparty";
+import { agentForPlayer } from "../world/persona";
 
 /**
  * **제안 폼의 코어 쪽** (docs/simulation/transfer.md §12-3).
@@ -141,6 +143,13 @@ export interface ProposalView {
   } | null;
   /** 갈래별로 걸 수 있는 조건 — 화면이 목록에서 고른다 */
   termKinds: Record<"buy" | "loan" | "renew" | "precontract", readonly DealTermKind[]>;
+  /**
+   * **건너편에 누가 앉는가** — 폼이 칸을 가르는 자다 (transfer.md §12-1 · design-system.md §6).
+   * 구단은 이적료·분할을 답하고 선수 쪽은 주급·연수·지위·조건을 답하므로, 폼은 앉은 사람의
+   * 칸만 세운다. 열린 협상이 있으면 그 테이블의 목소리(`tableVoicesOf`) 그대로고, 없으면 갈래가
+   * 정한다 — 남의 선수는 둘, 우리 선수와 무소속은 선수 쪽 하나. 이름은 화면이 절 머리에 세운다.
+   */
+  counterparts: { club: string | null; agent: string | null };
   /** 우리 이적 예산과 주급 여력 — 폼 아래에 서는 사실 */
   transferBudget: number;
   wageRoom: number;
@@ -175,7 +184,22 @@ export function proposalViewOf(state: GameState, playerId: string): ProposalView
       : ["buy", "loan"];
   const finance = financeOf(state, state.userTeamId);
   const personal = open?.personal;
+  const voices = open ? tableVoicesOf(state, open) : null;
+  const agentName = agentForPlayer(state, player.id)?.name ?? player.name;
+  const counterparts = voices
+    ? {
+        club: voices.find((v) => v.speaker === "club")?.name ?? null,
+        agent: voices.find((v) => v.speaker === "agent")?.name ?? null,
+      }
+    : ours || free
+      ? { club: null, agent: agentName }
+      : {
+          // 빌려 온 선수의 영입은 원소속과 한다 (transfer.md §2)
+          club: teamName(loanedIn && player.loan ? player.loan.fromTeamId : player.teamId),
+          agent: agentName,
+        };
   return {
+    counterparts,
     kinds: negotiationKind ? [negotiationKind] : loanedIn ? ["buy"] : kinds,
     freeAgent: free,
     loanedFrom: loanedIn && player.loan ? teamName(player.loan.fromTeamId) : null,

@@ -189,58 +189,106 @@
   color: var(--accent-ink);
 }
 
-/* 금액 — 큰 숫자 하나와 조정 칩 */
-.pf-amount-line {
+/* 금액 — `£ 24.2 M` 꼴. 화폐가 앞, 눈금이 뒤, 큰 칸은 카드의 주인이다 */
+.pf-amount {
   display: flex;
-  align-items: baseline;
+  flex-direction: column;
   gap: var(--sp-2);
 }
-.pf-amount-input {
-  /* 숫자만큼만 — 단위와 꼬리(`/주`)가 숫자 옆에 붙어 선다 */
-  flex: 0 1 auto;
-  width: 7ch;
+.pf-money {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  max-width: 100%;
+}
+.pf-money-cur,
+.pf-money-mark {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.pf-money-tail {
+  margin-left: 4px;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+.pf-money-input {
   min-width: 0;
   padding: 0;
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--text);
-  font-size: var(--fs-2xl);
+  font-size: var(--fs-lg);
   font-weight: 700;
   appearance: textfield;
   -moz-appearance: textfield;
   transition: border-color var(--ease);
 }
-.pf-amount-input::-webkit-inner-spin-button,
-.pf-amount-input::-webkit-outer-spin-button {
+.pf-money.hero .pf-money-input {
+  font-size: var(--fs-2xl);
+}
+.pf-money.hero .pf-money-cur,
+.pf-money.hero .pf-money-mark {
+  font-size: var(--fs-lg);
+}
+.pf-money.hero .pf-money-cur {
+  color: var(--accent);
+}
+.pf-money-input::-webkit-inner-spin-button,
+.pf-money-input::-webkit-outer-spin-button {
   appearance: none;
   margin: 0;
 }
-.pf-amount-input:focus-visible {
+.pf-money-input:focus-visible {
   outline: none;
   border-bottom-color: var(--accent);
 }
-.pf-amount-unit,
-.pf-amount-suffix {
-  flex: 0 0 auto;
-  font-size: var(--fs-lg);
+/* 절의 머리 — 누구에게 가는 절인가 */
+.pf-to {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.pf-to em {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+.pf-to b {
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-2);
-  white-space: nowrap;
 }
-.pf-amount-unit {
-  color: var(--accent);
+/* 합의된 개인 조건 — 읽기만 한다 */
+.pf-agreed {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
+}
+.pf-agreed span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.pf-agreed em {
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.pf-agreed b {
+  font-size: var(--fs-md);
+  font-weight: 600;
 }
 .pf-chips,
-.pf-options,
-.pf-add {
+.pf-options {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-2);
 }
 .pf-chips button,
 .pf-options [role="radio"],
-.pf-add button {
+.pf-options [role="checkbox"] {
   height: 32px;
   padding: 0 var(--sp-3);
   border: 0;
@@ -257,19 +305,17 @@
 }
 .pf-chips button:hover,
 .pf-options [role="radio"]:hover,
-.pf-add button:hover {
+.pf-options [role="checkbox"]:hover {
   color: var(--text);
 }
 .pf-chips button.on,
-.pf-options [role="radio"].on {
+.pf-options [role="radio"].on,
+.pf-options [role="checkbox"].on {
   background: var(--key-wash);
   color: var(--accent);
 }
 
 /* 줄 — 이름 아래 선택지가 전부 펼쳐진다 */
-.pf-rows {
-  gap: var(--sp-3);
-}
 .pf-row {
   display: flex;
   flex-direction: column;
@@ -287,85 +333,40 @@
   color: var(--dim);
 }
 
-/* 스위치 — 이름은 왼쪽, 손잡이는 오른쪽 */
-.pf-switches {
-  gap: 0;
-  padding: var(--sp-1) var(--sp-4);
+/* 조건 — 갈래 칩이 켜지면 값 줄이 선다. 줄은 갈래 이름 · 값 칸 · 내리는 손잡이 */
+.pf-terms .pf-count {
+  color: var(--dim);
 }
-.pf-switch {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  min-height: 44px;
-  cursor: pointer;
-}
-.pf-switch input {
-  appearance: none;
-  position: relative;
-  flex: 0 0 auto;
-  width: 44px;
-  height: 26px;
-  margin: 0;
-  border-radius: var(--r-pill);
-  background: var(--panel);
-  cursor: pointer;
-  transition: background var(--ease);
-}
-.pf-switch input::before {
-  content: "";
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 20px;
-  height: 20px;
-  border-radius: var(--r-pill);
-  background: var(--text-2);
-  transition:
-    transform 160ms var(--ease-panel),
-    background var(--ease);
-}
-.pf-switch input:checked {
-  background: var(--accent);
-}
-.pf-switch input:checked::before {
-  background: var(--accent-ink);
-  transform: translateX(18px);
-}
-.pf-switch input:focus-visible {
-  outline: none;
-  box-shadow: var(--ring);
-}
-
-/* 조건서 — 줄마다 갈래 이름과 그 갈래의 값, 그리고 더할 수 있는 갈래 */
 .pf-term {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3);
   background: var(--pop);
   border-radius: var(--r-sm);
 }
+.pf-term-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
 .pf-term-kind {
-  flex: 0 0 auto;
-  min-width: 72px;
   font-size: var(--fs-sm);
   font-weight: 600;
 }
-.pf-term-vals {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2);
+.pf-term .pf-options [role="radio"] {
+  height: 28px;
+  padding: 0 10px;
+  background: var(--panel-2);
 }
-.pf-term-vals input,
-.pf-term-vals select {
-  flex: 1 1 120px;
-  min-width: 0;
-  min-height: 32px;
-  padding: 6px 10px;
+.pf-term .pf-options [role="radio"].on {
+  background: var(--key-wash);
+}
+.pf-term-text {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
   border: 0;
   border-radius: var(--r-sm);
   background: var(--panel-2);
@@ -373,10 +374,8 @@
   font-family: inherit;
   /* 16px 아래로 내리면 모바일 브라우저가 포커스마다 화면을 키운다 */
   font-size: 16px;
-  font-variant-numeric: tabular-nums;
 }
-.pf-term-vals input:focus-visible,
-.pf-term-vals select:focus-visible {
+.pf-term-text:focus-visible {
   outline: none;
   box-shadow: var(--ring);
 }
@@ -466,7 +465,7 @@
 .pf-seg [role="radio"]:focus-visible,
 .pf-chips button:focus-visible,
 .pf-options [role="radio"]:focus-visible,
-.pf-add button:focus-visible,
+.pf-options [role="checkbox"]:focus-visible,
 .pf-remove:focus-visible,
 .pf-submit:focus-visible,
 .pf-ghost:focus-visible {
