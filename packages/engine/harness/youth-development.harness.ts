@@ -3,7 +3,10 @@ import { ageOf, AXIS_GROUPS, isReserveMatch, PLAYER_ARCHETYPE_TRAITS } from "@st
 import type { GamePlayer } from "@story-fm/domain";
 import {
   academyUseOf,
+  assignmentsOf,
+  groupOf,
   LOAN_BENCH_RUN_ALERT,
+  LOAN_ROTATION_OVR_DROP,
   MENTEES_PER_MENTOR,
   leagueOfTeamIn,
   loanPlayer,
@@ -68,10 +71,13 @@ describe("한 시즌의 유스 육성", () => {
      * **임대 팔** — 집중 육성과 겹치지 않는 U21 몇을 같은 리그의 다른 클럽으로
      * 보낸다(수준 계수 1.0). 창은 프리시즌 첫날(7/1)에 이미 열려 있다.
      *
-     * 받는 쪽은 **1군이 가장 약한 클럽부터, 한 구단에 한 명씩** 훑는다. 창
-     * (`LOAN_ROTATION_OVR_DROP`)이 약체일수록 넓으므로 이 순서가 곧 "뛸 수 있는
-     * 곳부터"이고, 한 명씩인 것은 감독이 할 법한 선택이기도 하다 — 다섯을 한 구단에
-     * 몰면 재는 것이 임대의 문이 아니라 그 구단 명단의 혼잡이 된다.
+     * 받는 쪽은 감독이 고르듯 **그 아이가 뛸 수 있는 곳부터** 고른다 — 그 구단의 같은
+     * 포지션군 가장 약한 선발과의 차가 기량 창(`LOAN_ROTATION_OVR_DROP`) 안인 클럽을
+     * 1군이 약한 순으로, **한 구단에 한 명씩**. 임대처 선택이 게임플레이가 되는 자리가
+     * 그 창이라(season.md §2 임대) 창을 안 보고 보내면 재는 것이 상한의 문이 아니라
+     * 그 시드가 뽑아 준 유망주의 종합이 된다. 창이 열린 구단이 하나도 없는 아이는
+     * 가장 약한 구단으로 보낸다 — 한 경기도 못 뛰어야 하는 쪽의 표본이다. 한 명씩인
+     * 것은 다섯을 한 구단에 몰면 재는 것이 그 구단 명단의 혼잡이 되기 때문이다.
      */
     const ourLeague = leagueOfTeamIn(state, state.userTeamId);
     const meanOverall = (squad: readonly { attributes: { overall: number } }[]) =>
@@ -101,16 +107,33 @@ describe("한 시즌의 유스 육성", () => {
       )
       .filter((_, index) => index % 2 === 0)
       .slice(0, LOAN_ARM_SIZE);
+    /** 그 구단 선발 중 같은 포지션군에서 가장 약한 종합 — 자리가 없으면 창도 없다 */
+    const weakestSeatOf = (teamId: string, player: GamePlayer): number | null => {
+      const seats = assignmentsOf(state, teamId, "starting")
+        .map((a) => state.players.find((p) => p.id === a.playerId))
+        .filter((p): p is GamePlayer => p !== undefined && groupOf(p) === groupOf(player))
+        .map((p) => p.attributes.overall);
+      return seats.length === 0 ? null : Math.min(...seats);
+    };
+    const windowOpen = (teamId: string, player: GamePlayer) => {
+      const weakest = weakestSeatOf(teamId, player);
+      return weakest !== null && player.attributes.overall >= weakest - LOAN_ROTATION_OVR_DROP;
+    };
     const loanedIds: string[] = [];
-    let nextHost = 0;
+    /** 창이 열린 구단으로 보낸 아이 — 아래 「경보 전에 뛴 몫」의 분모다 */
+    const inWindowIds = new Set<string>();
+    const usedHosts = new Set<string>();
     for (const player of loanCandidates) {
       const rejected: string[] = [];
-      while (nextHost < hosts.length) {
-        const teamId = hosts[nextHost]!;
-        nextHost += 1;
+      const open = hosts.filter((teamId) => windowOpen(teamId, player));
+      const closed = hosts.filter((teamId) => !open.includes(teamId));
+      for (const teamId of [...open, ...closed]) {
+        if (usedHosts.has(teamId)) continue;
         const sent = loanPlayer(state, { playerId: player.id, teamId });
         if (sent.ok) {
           loanedIds.push(player.id);
+          usedHosts.add(teamId);
+          if (open.includes(teamId)) inWindowIds.add(player.id);
           break;
         }
         rejected.push(`${teamShortNameIn(state, teamId)}: ${sent.message}`);
@@ -238,7 +261,8 @@ describe("한 시즌의 유스 육성", () => {
         )
         .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     const loanApps: number[] = [];
-    const loanBenchRuns: number[] = [];
+    /** 창 안 임대의 최장 연속 미출전 — 창 밖은 한 경기도 못 뛰어야 하는 쪽이라 세지 않는다 */
+    const inWindowBenchRuns: number[] = [];
     for (const id of stillOnLoan) {
       const player = state.players.find((p) => p.id === id)!;
       let apps = 0;
@@ -256,10 +280,10 @@ describe("한 시즌의 유스 육성", () => {
         }
       }
       loanApps.push(apps);
-      loanBenchRuns.push(longest);
+      if (inWindowIds.has(id)) inWindowBenchRuns.push(longest);
       console.log(
-        `임대 ${player.name}(${player.attributes.overall}) → ${teamShortNameIn(state, player.teamId)}: ` +
-          `${apps}경기 · 최장 미출전 ${longest}`,
+        `임대 ${player.name}(${player.attributes.overall}) → ${teamShortNameIn(state, player.teamId)}` +
+          `${inWindowIds.has(id) ? "" : " (창 밖)"}: ${apps}경기 · 최장 미출전 ${longest}`,
       );
     }
 
@@ -314,8 +338,11 @@ describe("한 시즌의 유스 육성", () => {
       "임대 표본": stillOnLoan.length,
       "임대 U21 성장": loanGrowth,
       "임대처 평균 출전": mean(loanApps),
-      "경보 전에 뛴 임대": stillOnLoan.length
-        ? loanBenchRuns.filter((run) => run < LOAN_BENCH_RUN_ALERT).length / stillOnLoan.length
+      "기량 창 안의 임대": inWindowBenchRuns.length,
+      "기량 창 밖의 임대": stillOnLoan.length - inWindowBenchRuns.length,
+      "창 안 임대 중 경보 전에 뛴 몫": inWindowBenchRuns.length
+        ? inWindowBenchRuns.filter((run) => run < LOAN_BENCH_RUN_ALERT).length /
+          inWindowBenchRuns.length
         : 0,
       "임대 격차": loanGrowth - baselineGrowth,
       "성실한 U21 표본": diligent.length,

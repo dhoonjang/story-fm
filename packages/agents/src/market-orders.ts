@@ -47,7 +47,7 @@ export const MARKET_ORDERS_SYSTEM = `당신은 감독의 말을 이적·재정 �
 - accept_manager_offer · counter_manager_offer · apply_manager_job — 감독직 제안의 수락·흥정·지원. offer는 <seat>의 id 또는 구단 이름. 감독이 분명히 말했을 때만.
 
 # unresolved
-어느 명령에도 담기지 않은 말을 감독의 표현 그대로 남긴다.`;
+어느 명령에도 담기지 않은 말을 감독의 표현 그대로 남긴다. 전술·훈련의 말은 남기지 않는다.`;
 
 /**
  * 해석기가 채우는 시장·장부 명령 — **적용 순서다.** 답할 것과 접을 것을 먼저, 새로
@@ -89,7 +89,7 @@ export const MARKET_ORDERS_SPEC: OpsAgentSpec = {
   ops: MARKET_OPS,
   opsHint: "부를 명령과 그 인자 — 감독이 정한 것만",
   unresolvedHint: "어느 명령에도 담기지 않은 말",
-  emptyHint: "옮길 지시가 없습니다 — 무엇을 할지 감독에게 물어보세요",
+  emptyHint: "이 말에는 옮길 이적·재정 지시가 없습니다",
 };
 
 export type MarketOrders = OpsOrders;

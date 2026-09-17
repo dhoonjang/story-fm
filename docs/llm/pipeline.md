@@ -84,8 +84,8 @@ sequenceDiagram
   loop 도구 왕복 (최대 8)
     AD->>TL: handle(input)
     TL->>TL: Zod safeParse
-    alt tactic_orders · training_orders · market_orders
-      TL->>OP: 감독의 말 원문 + 맥락 블록
+    alt tactic_orders · training_orders · market_orders (인자 없음 · 한 턴에 한 번)
+      TL->>OP: 이번 턴 감독의 말(코어가 쥔 said) + 맥락 블록
       OP-->>TL: ops JSON (출력 스키마)
       TL->>CORE: applyOps / applyTacticOrders
     else 스킬 · 조회
@@ -236,15 +236,19 @@ flowchart LR
     C3["이적·재정·스태프·감독직 21"]
   end
   NT["negotiation-table"]
-  HD -->|"orders 원문"| TO --> C1
-  HD -->|"orders 원문"| TRO --> C2
-  HD -->|"orders 원문"| MO --> C3
+  HD -->|"고르기만 — 원문은 코어가"| TO --> C1
+  HD -->|"고르기만 — 원문은 코어가"| TRO --> C2
+  HD -->|"고르기만 — 원문은 코어가"| MO --> C3
   HD -->|"line 원문"| TBO --> C3
   TBO -->|"옮기고 남은 말"| NT
   TO -.->|"team_talk도 채운다"| SK
 ```
 
-- **손잡이 넷은 감독의 말을 원문 그대로 넘긴다**(`OrdersArgsSchema.orders`, 2,000자).
+- **손잡이 셋은 인자가 없다** — 부르는 것이 곧 라우팅이고, 이번 턴 감독의 말은 코어가
+  넘긴다(턴 러너가 채팅에 넣은 `said` → `buildGmTools` 옵션 · `MatchToolContext`). 같은
+  손잡이의 두 번째 호출은 반려다 — 같은 말을 다시 옮긴다(`ordersGate`). `speak_at_table`만
+  `line`을 든다: 그 말은 상대에게 건네지는 발화라 턴 발화 전체와 같지 않다
+  ([agents.md](./agents.md) §1).
   뒤의 해석기가 명령 이름 아래 인자 배열을 채우고(`{ ops: { send_offer: [{…}] },
 unresolved }`), `parseOps`가 명령별 상한(`TACTIC_CAPS` 또는 `OPS_PER_COMMAND` 4)으로
   자르고, `applyOps`/`applyTacticOrders`가 **그 명령의 도구 spec을 직접 불러** 적용한다.
@@ -276,6 +280,9 @@ unresolved }`), `parseOps`가 명령별 상한(`TACTIC_CAPS` 또는 `OPS_PER_COM
 
 네 해석기는 한 벌(`runOpsOrders`)이다 — 시스템 프롬프트 하나, 이력 없음, 맥락 블록 뒤에
 `@감독: <원문>`, 답은 `outputSchema`로 강제한 JSON 하나 (models.md §3-2).
+`<recent_turns>`·`<match_log>`는 이번 턴에 밀어 넣은 꼬리를 빼고 선다(`pastTurns`) —
+감독의 말은 `@감독:` 줄 하나로만 선다. 셋이 한 턴에 함께 불리면 같은 원문을 받되 각자
+제 영역만 옮기고, 남의 영역인 말은 `unresolved`에 남기지 않는다.
 
 | 해석기            | 맥락 블록                                                                                                                                                                              | 채우는 명령      | 적용                                         |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------- |
@@ -305,8 +312,8 @@ sequenceDiagram
     Note over GM: 대본 #lt;segment#gt;가 이번 턴 층에 · 도구는 finalize_match만
   end
   GM->>AD: runTurn(MATCH_GM_SYSTEM + 레퍼런스, casterHistory, @감독 + #lt;ledger#gt;#lt;standing#gt;#lt;targets#gt;)
-  loop 지시가 나올 때마다
-    AD->>T1: tactic_orders({orders: 원문})
+  opt 감독이 지시한 턴 — 한 번
+    AD->>T1: tactic_orders() — 원문은 코어가 쥔 said
     T1->>TO: #lt;ledger#gt; #lt;match_log#gt; @감독:
     TO-->>T1: {ops, unresolved}
     T1->>CORE: 명령 적용 → refreshPacket
