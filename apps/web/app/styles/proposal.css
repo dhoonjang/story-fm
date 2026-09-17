@@ -1,9 +1,11 @@
 /**
- * 제안 폼 — **값과 조건을 정확히 내는 자리** (transfer.md §12-3).
+ * 제안 폼 — **값과 조건을 정확히 내는 자리** (transfer.md §12-3 · design-system.md §6).
  *
- * 선수 카드와 같은 베일 위에 떠 있는 `--pop` 표면 3단이다. 칸은 온보딩의 입력과 같은
- * 규약(`--panel-2` 면 · `--r-md` · 포커스 `--ring`)이고, 갈래 고르기는 라디오 묶음이라
- * 고른 것이 색이 아니라 `aria-checked`로도 전해진다 (overview.md §5). 테두리는 없다.
+ * 선수 카드와 같은 베일 위에 떠 있는 `--pop` 시트다. 머리(이름 · 닫기) · 사실 셋 · 스크롤하는
+ * 본문 · 붙어 있는 발(제안 손잡이) 넷으로 서고, 본문의 덩어리는 전부 `--panel-2` 카드다.
+ * 금액 칸은 **큰 숫자 하나**가 주인이고 그 아래 조정 칩이 선다 — 자릿수를 세지 않는다.
+ * 선택지가 손에 꼽히는 자리(연수·지위·지급)는 접힌 목록 대신 칩으로 전부 펼친다. 테두리는
+ * 없고, 고른 것은 색만이 아니라 `aria-checked`로도 전해진다 (overview.md §5).
  */
 .proposal-veil {
   position: fixed;
@@ -18,25 +20,27 @@
 .proposal {
   display: flex;
   flex-direction: column;
-  width: min(560px, 100%);
-  max-height: min(760px, calc(100dvh - 48px));
-  overflow-y: auto;
-  padding: var(--sp-5);
+  width: min(520px, 100%);
+  max-height: min(800px, calc(100dvh - 48px));
+  overflow: hidden;
   background: var(--pop);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-pop);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-base);
 }
 .pf {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4);
+  min-height: 0;
 }
 .pf-blank {
-  min-height: 120px;
+  min-height: 160px;
   display: grid;
   place-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-5);
   color: var(--text-2);
+  text-align: center;
 }
 .pf-skel {
   width: 100%;
@@ -46,30 +50,410 @@
   animation: none;
 }
 
+/* ── 머리 — 이름과 닫기 ─────────────────────────────────────────────────── */
 .pf-head {
   display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 10px;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-5) var(--sp-5) var(--sp-3);
+}
+.pf-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .pf-name {
-  font-size: var(--fs-lg);
+  font-size: var(--fs-xl);
   font-weight: 700;
+  line-height: 1.25;
 }
 .pf-meta {
   color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.pf-x {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--panel-2);
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    background var(--ease),
+    color var(--ease);
+}
+.pf-x:hover {
+  background: var(--panel);
+  color: var(--text);
 }
 
-/* 갈래 — 라디오 묶음. 고른 것은 키 컬러 채움이다 */
-.pf-kinds {
+/* 코어가 낸 사실 셋 — 값을 정하기 전에 읽는 자 */
+.pf-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-5);
+  padding: 0 var(--sp-5) var(--sp-4);
+}
+.pf-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pf-fact em {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.pf-fact b {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 본문 — 스크롤하는 것은 여기뿐이다 ────────────────────────────────────── */
+.pf-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-5) var(--sp-4);
+}
+.pf-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  background: var(--panel-2);
+  border-radius: var(--r-md);
+}
+.pf-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.pf-label {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+.pf-hint {
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.pf-count {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+/* 갈래 — 한 줄 세그먼트. 고른 것은 키 컬러 채움이다 */
+.pf-seg {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 3px;
+  padding: 3px;
+  background: var(--panel-2);
+  border-radius: var(--r-md);
+}
+.pf-seg [role="radio"] {
+  height: 36px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--ease),
+    color var(--ease);
+}
+.pf-seg [role="radio"]:hover {
+  color: var(--text);
+}
+.pf-seg [role="radio"].on {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* 금액 — 큰 숫자 하나와 조정 칩 */
+.pf-amount-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.pf-amount-input {
+  /* 숫자만큼만 — 단위와 꼬리(`/주`)가 숫자 옆에 붙어 선다 */
+  flex: 0 1 auto;
+  width: 7ch;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  appearance: textfield;
+  -moz-appearance: textfield;
+  transition: border-color var(--ease);
+}
+.pf-amount-input::-webkit-inner-spin-button,
+.pf-amount-input::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+.pf-amount-input:focus-visible {
+  outline: none;
+  border-bottom-color: var(--accent);
+}
+.pf-amount-unit,
+.pf-amount-suffix {
+  flex: 0 0 auto;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.pf-amount-unit {
+  color: var(--accent);
+}
+.pf-chips,
+.pf-options,
+.pf-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.pf-chips button,
+.pf-options [role="radio"],
+.pf-add button {
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--pop);
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--ease),
+    color var(--ease);
+}
+.pf-chips button:hover,
+.pf-options [role="radio"]:hover,
+.pf-add button:hover {
+  color: var(--text);
+}
+.pf-chips button.on,
+.pf-options [role="radio"].on {
+  background: var(--key-wash);
+  color: var(--accent);
+}
+
+/* 줄 — 이름 아래 선택지가 전부 펼쳐진다 */
+.pf-rows {
+  gap: var(--sp-3);
+}
+.pf-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.pf-row-label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.pf-row-label em {
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+
+/* 스위치 — 이름은 왼쪽, 손잡이는 오른쪽 */
+.pf-switches {
+  gap: 0;
+  padding: var(--sp-1) var(--sp-4);
+}
+.pf-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 44px;
+  cursor: pointer;
+}
+.pf-switch input {
+  appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 26px;
+  margin: 0;
+  border-radius: var(--r-pill);
+  background: var(--panel);
+  cursor: pointer;
+  transition: background var(--ease);
+}
+.pf-switch input::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-pill);
+  background: var(--text-2);
+  transition:
+    transform 160ms var(--ease-panel),
+    background var(--ease);
+}
+.pf-switch input:checked {
+  background: var(--accent);
+}
+.pf-switch input:checked::before {
+  background: var(--accent-ink);
+  transform: translateX(18px);
+}
+.pf-switch input:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+/* 조건서 — 줄마다 갈래 이름과 그 갈래의 값, 그리고 더할 수 있는 갈래 */
+.pf-term {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--pop);
+  border-radius: var(--r-sm);
+}
+.pf-term-kind {
+  flex: 0 0 auto;
+  min-width: 72px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.pf-term-vals {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-2);
 }
-.pf-kinds [role="radio"] {
+.pf-term-vals input,
+.pf-term-vals select {
+  flex: 1 1 120px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: inherit;
+  /* 16px 아래로 내리면 모바일 브라우저가 포커스마다 화면을 키운다 */
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.pf-term-vals input:focus-visible,
+.pf-term-vals select:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+.pf-remove {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition:
+    background var(--ease),
+    color var(--ease);
+}
+.pf-remove:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+/* 한마디 */
+.pf-message textarea {
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--pop);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 16px;
+  resize: vertical;
+}
+.pf-message textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+/* ── 발 — 붙어 있는 제안 손잡이 ───────────────────────────────────────────── */
+.pf-foot {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-5) var(--sp-5);
+  background: var(--pop);
+  box-shadow: 0 -1px 0 var(--line);
+}
+.pf-error {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--loss);
+}
+.pf-submit {
+  width: 100%;
+  height: 48px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: inherit;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--ease),
+    transform 0.12s;
+}
+.pf-submit:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.pf-ghost {
   height: 36px;
-  padding: 0 14px;
+  padding: 0 var(--sp-4);
   border: 0;
   border-radius: var(--r-sm);
   background: var(--panel-2);
@@ -77,82 +461,19 @@
   font-family: inherit;
   font-size: var(--fs-sm);
   cursor: pointer;
-  transition: background var(--ease);
 }
-.pf-kinds [role="radio"]:hover {
-  background: var(--pop);
-}
-.pf-kinds [role="radio"].on {
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-weight: 600;
-}
-.pf-kinds [role="radio"]:focus-visible {
+.pf-x:focus-visible,
+.pf-seg [role="radio"]:focus-visible,
+.pf-chips button:focus-visible,
+.pf-options [role="radio"]:focus-visible,
+.pf-add button:focus-visible,
+.pf-remove:focus-visible,
+.pf-submit:focus-visible,
+.pf-ghost:focus-visible {
   outline: none;
   box-shadow: var(--ring);
 }
-.pf-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: var(--sp-2);
-  color: var(--text-2);
-  cursor: pointer;
-}
-.pf-toggle input {
-  accent-color: var(--accent);
-}
-
-/* 칸 — 라벨 · 입력 · 코어가 낸 자 한 줄 */
-.pf-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-3) var(--sp-4);
-}
-.pf-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-.pf-message {
-  grid-column: 1 / -1;
-}
-.pf-label,
-.pf-section {
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--text-3);
-}
-.pf-hint {
-  font-size: var(--fs-2xs);
-  color: var(--dim);
-}
-.pf input[type="number"],
-.pf input[type="text"],
-.pf select,
-.pf textarea {
-  width: 100%;
-  min-height: 36px;
-  padding: 8px 10px;
-  background: var(--panel-2);
-  border: 1px solid transparent;
-  border-radius: var(--r-md);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 16px;
-  font-variant-numeric: tabular-nums;
-}
-.pf textarea {
-  resize: vertical;
-}
-.pf input:focus-visible,
-.pf select:focus-visible,
-.pf textarea:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-}
+.pf button:disabled,
 .pf input:disabled,
 .pf select:disabled,
 .pf textarea:disabled {
@@ -160,126 +481,20 @@
   cursor: not-allowed;
 }
 
-/* 조건서 — 줄마다 갈래 이름과 그 갈래의 값 */
-.pf-terms {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-.pf-term {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--panel);
-  border-left: 2px solid var(--accent-2);
-  border-radius: var(--r-sm);
-}
-.pf-term-kind {
-  min-width: 96px;
-  font-weight: 600;
-}
-.pf-term input,
-.pf-term select {
-  flex: 1 1 140px;
-  width: auto;
-}
-.pf-add {
-  align-self: flex-start;
-  width: auto;
-}
-.pf-remove {
-  margin-left: auto;
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: var(--panel-2);
-  color: var(--text-2);
-  font-size: var(--fs-md);
-  cursor: pointer;
-}
-.pf-remove:hover {
-  background: var(--pop);
-  color: var(--text);
-}
-.pf-remove:focus-visible {
-  outline: none;
-  box-shadow: var(--ring);
-}
-
-/* 발 — 코어가 낸 사실 셋과 손잡이 둘 */
-.pf-foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  padding-top: var(--sp-2);
-  border-top: 1px solid var(--line);
-  font-size: var(--fs-2xs);
-}
-.pf-fact {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
-}
-.pf-fact em {
-  color: var(--dim);
-  font-style: normal;
-}
-.pf-fact b {
-  color: var(--text-2);
-  font-weight: 600;
-}
-.pf-error {
-  margin: 0;
-  color: var(--loss);
-}
-.pf-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--sp-2);
-}
-.pf-close,
-.pf-submit {
-  height: 36px;
-  padding: 0 22px;
-  border: 0;
-  border-radius: var(--r-sm);
-  font-family: inherit;
-  font-size: var(--fs-sm);
-  cursor: pointer;
-  transition: background var(--ease);
-}
-.pf-close {
-  background: var(--panel-2);
-  color: var(--text);
-}
-.pf-close:hover {
-  background: var(--pop);
-}
-.pf-submit {
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-weight: 600;
-}
-.pf-submit:disabled,
-.pf-close:disabled,
-.pf-kinds [role="radio"]:disabled,
-.pf-remove:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.pf-close:focus-visible,
-.pf-submit:focus-visible {
-  outline: none;
-  box-shadow: var(--ring);
-}
-.proposal .pf-close {
-  align-self: center;
-}
-.pf .pf-close {
-  align-self: auto;
+/* 700 아래 — 바닥 시트. 킥오프 게이트와 같은 규약이다 (design-system.md §7-1) */
+@media (max-width: 700px) {
+  .proposal-veil {
+    place-items: end center;
+    padding: 0;
+  }
+  .proposal {
+    width: 100%;
+    max-height: 92dvh;
+    border-radius: var(--r-md) var(--r-md) 0 0;
+  }
+  .pf-head {
+    padding-top: var(--sp-4);
+  }
 }
 
 /* 선수 카드·시장 카드에서 폼을 여는 손잡이 */
@@ -318,10 +533,4 @@
 }
 .pc-actions .pc-close {
   margin-top: 0;
-}
-
-@media (max-width: 480px) {
-  .pf-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
