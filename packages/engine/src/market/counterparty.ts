@@ -73,7 +73,7 @@ import {
   respondOffer,
   splitLabel,
 } from "./negotiation";
-import { agentForPlayer } from "../world/persona";
+import { agentForPlayer, directorOf } from "../world/persona";
 import { playerArchetypeOf } from "../world/player-persona";
 import { numberLineageOf } from "../squad/numbers";
 import { competingBidLine, interestLine } from "./interest";
@@ -151,7 +151,12 @@ export function statusRoomOf(anchor: number, band: CounterBand): TermsRoom {
 
 export interface CounterpartyAnchor {
   negotiationId: string;
-  /** 코어가 잰 성사 확률 */
+  /**
+   * 어느 관문으로 판정했는가 — 구단 테이블·선수 쪽 테이블. 편지에는 없다 (transfer.md §12-2).
+   * `probability`는 그 관문의 확률이다.
+   */
+  gate?: "club" | "player";
+  /** 코어가 잰 성사 확률 — 관문이 적혀 있으면 그 관문의 것 */
   probability: number;
   /**
    * **구단 관문의 확률** — 파는·사는 구단이 이 값에 응할까 (`DealGates`).
@@ -263,6 +268,12 @@ function axisOpen(band: CounterBand | null): boolean {
 export function counterpartyAnchor(
   state: GameState,
   negotiation: Negotiation,
+  /**
+   * **어느 관문으로 판정하는가** (transfer.md §12-2). 구단 테이블은 구단 관문으로, 선수 쪽
+   * 테이블은 선수 관문으로 사다리를 가른다 — 단장이 주급을 놓고 판정하지 않는다. 비우면
+   * 편지다: 서면 오퍼는 양쪽에 함께 가므로 확률 하나(두 관문의 곱)로 판정한다.
+   */
+  gate?: "club" | "player",
 ): CounterpartyAnchor | null {
   const offer = pendingOffer(negotiation);
   if (!offer || negotiation.status !== "open") return null;
@@ -280,7 +291,12 @@ export function counterpartyAnchor(
     ...(personalHolds(negotiation, offer) ? { personalAgreed: true } : {}),
   });
   const bounds = counterBoundsOf(state, negotiation, offer);
-  const probability = odds.probability;
+  const probability =
+    gate === "club"
+      ? (odds.gates.club ?? odds.probability)
+      : gate === "player"
+        ? odds.gates.player
+        : odds.probability;
   const canAccept = probability >= bounds.acceptFloor;
   /**
    * **구간이 비면 흥정할 것이 없다.** 그 자리는 우리가 이미 상대가 부를 수 있는
@@ -334,9 +350,15 @@ export function counterpartyAnchor(
   const deadline = ultimatumDays > 0 ? addDays(state.date, ultimatumDays) : null;
   const ultimatumOn =
     deadline !== null && canOffer && deadline < negotiation.expiresOn ? deadline : undefined;
+  /**
+   * **구단 테이블에서는 개인 조건의 축이 닫힌다** — 단장은 주급·연수·지위를 되부르지 않는다.
+   * 그 축은 선수 쪽 테이블의 것이다 (transfer.md §12-2).
+   */
+  const clubOnly = gate === "club";
   return {
     negotiationId: negotiation.id,
     probability,
+    ...(gate === undefined ? {} : { gate }),
     ...(odds.gates.club === null ? {} : { clubOdds: odds.gates.club }),
     playerOdds: odds.gates.player,
     latitude: bounds.latitude,
@@ -344,13 +366,13 @@ export function counterpartyAnchor(
     allowed,
     ...(ultimatumOn === undefined ? {} : { ultimatumOn }),
     ...(fee === null || !bounds.fee || !canOffer ? {} : { fee, feeRoom: roomOf(fee, bounds.fee) }),
-    ...(wage === null || !bounds.wage || !canOffer
+    ...(wage === null || !bounds.wage || !canOffer || clubOnly
       ? {}
       : { weeklyWage: wage, wageRoom: roomOf(wage, bounds.wage) }),
-    ...(years === null || !bounds.years || !canOffer
+    ...(years === null || !bounds.years || !canOffer || clubOnly
       ? {}
       : { contractYears: years, yearsRoom: yearsRoomOf(years, bounds.years) }),
-    ...(status === null || !bounds.status || !canOffer
+    ...(status === null || !bounds.status || !canOffer || clubOnly
       ? {}
       : {
           squadStatus: statusAtRank(status),
@@ -611,7 +633,23 @@ export function settleCounterparty(
       }),
     };
   }
-  return { input, result: respondOffer(state, input) };
+  /**
+   * **구단 테이블의 수락은 이적료의 합의다** (transfer.md §12-2) — 개인 조건이 아직 굳지
+   * 않았으면 협상은 열린 채 `feeAgreed`가 서고, 선수 쪽 테이블이 개인 조건을 굳히는 날
+   * `agreed`가 된다. 개인 조건이 먼저 굳었으면 수락이 곧 합의다.
+   */
+  const negotiation = state.negotiations.find((n) => n.id === anchor.negotiationId);
+  const offer = negotiation ? pendingOffer(negotiation) : null;
+  const feeOnly =
+    anchor.gate === "club" &&
+    negotiation !== undefined &&
+    offer !== null &&
+    (negotiation.kind === "buy" || negotiation.kind === "loan") &&
+    !personalHolds(negotiation, offer);
+  return {
+    input,
+    result: respondOffer(state, { ...input, ...(feeOnly ? { feeOnly: true } : {}) }),
+  };
 }
 
 /**
@@ -620,8 +658,12 @@ export function settleCounterparty(
 export interface CounterpartyVoice {
   /** 모델이 답의 줄에 적는 토큰 그대로다 */
   speaker: TableSpeaker;
-  /** 그 목소리의 이름 — 구단 이름, 또는 대리 에이전트(명부에 없으면 선수 본인) */
+  /** 그 목소리의 이름 — 구단 쪽은 그 구단의 단장, 선수 쪽은 대리 에이전트(명부에 없으면 선수 본인) */
   name: string;
+  /** 직책 — 단장 · 에이전트. 선수 본인이 앉으면 `선수` */
+  title: string;
+  /** 구단 쪽이면 그 구단 — 화면이 문장을 세우고 서류가 구단 이름을 부르는 열쇠 */
+  teamId?: string;
   /** 그가 답하는 칸 — 열린 축이 정한다 (`counterBoundsOf`가 그 폭을 잰다) */
   answers: readonly string[];
 }
@@ -679,10 +721,14 @@ export function tableVoicesOf(state: GameState, negotiation: Negotiation): Count
   const agent = agentForPlayer(state, player.id);
   const voices: CounterpartyVoice[] = [];
   if (clubTakesMoney) {
+    // 값을 답하는 것은 거래 상대 구단의 **단장**이다 — 빌려 온 선수의 원소속이 우리 팀과
+    // 갈라지는 자리다 (§2). 구단이 아니라 사람이 앉는다 (people.md §2)
+    const teamId = negotiation.counterpartTeamId ?? player.teamId;
     voices.push({
       speaker: "club",
-      // 값을 답하는 것은 거래 상대다 — 빌려 온 선수의 원소속이 우리 팀과 갈라지는 자리다 (§2)
-      name: teamName(negotiation.counterpartTeamId ?? player.teamId),
+      name: directorOf(state, teamId).name,
+      title: "단장",
+      teamId,
       answers: moneyAnswers,
     });
   }
@@ -692,6 +738,7 @@ export function tableVoicesOf(state: GameState, negotiation: Negotiation): Count
       speaker: "agent",
       // 명부에 에이전트가 없으면 선수 본인이 그 자리에 선다 — 화자를 지우지 않는다
       name: agent?.name ?? player.name,
+      title: agent ? "에이전트" : "선수",
       answers: playerSide,
     });
   }
@@ -891,7 +938,14 @@ export function buildCounterpartyBrief(
       ...(hasIssue(state, player.id) ? ["라커룸에 불만이 서 있다"] : []),
     ],
     dossier: dossierOf(state, negotiation, player),
-    characterIds: [player.name, ...(agent ? [agent.characterId] : [])],
+    // 그 자리의 사람들 — 선수 · 대리인 · 상대 구단의 단장 (people.md §2)
+    characterIds: [
+      player.name,
+      ...(agent ? [agent.characterId] : []),
+      ...tableVoicesOf(state, negotiation)
+        .filter((v) => v.speaker === "club")
+        .map((v) => v.name),
+    ],
     anchor,
   };
 }

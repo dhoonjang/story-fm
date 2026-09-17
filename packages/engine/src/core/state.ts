@@ -80,6 +80,7 @@ import type {
   Transfer,
   TransferWindow,
   Trophy,
+  TableSpeaker,
 } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
@@ -589,6 +590,11 @@ export interface PendingNegotiation {
    * 갖는다. 값이 오가는 것은 그다음부터다.
    */
   seated?: boolean;
+  /**
+   * **건너편에 누가 앉는가** — 구단 쪽(단장)인가 선수 쪽(에이전트)인가 (transfer.md §12-2).
+   * 방 하나에 한 사람이다. 앉지 않은 쪽과는 다른 방에서 따로 만난다.
+   */
+  party: TableSpeaker;
   /** 들어서기 전의 국면 — 방을 나오면 여기로 돌아간다 (`idle` · `matchday`) */
   phaseBefore: "idle" | "matchday";
   openedOn: string;

@@ -955,15 +955,22 @@ export function GameScreen({ gameId }: { gameId: string }) {
             prevStamp = turnStamp(turn) ?? prevStamp;
             return node;
           };
-          return groupChatTurns(visibleChat).map((block, bi) => {
+          const blocks = groupChatTurns(visibleChat);
+          return blocks.map((block, bi) => {
             if (block.kind === "turn") return render(block.turn, block.at);
             if (block.kind === "negotiation") {
               const log = game.negotiationLogs[block.id];
               /**
                * 열린 협상(방을 나왔어도 `open`)은 접지 않는다 — 편지가 그 뒤를 잇고
-               * 다시 앉을 수 있는 자리다. 끝난 협상만 선수 · 갈래 · 결과 한 줄로 접힌다.
+               * 다시 앉을 수 있는 자리다. 끝난 협상만 접힌다 — **자리마다 한 덩어리**로,
+               * 머리는 선수 · 갈래 · 그 자리의 날짜이고 결과는 **마지막 자리**의 머리에만
+               * 선다: 한 협상에 세 번 앉았으면 「합의」가 세 번 서지 않는다.
                */
               const head = log !== undefined && log.status !== "open" ? log : null;
+              const lastSeat = !blocks.some(
+                (b, j) => j > bi && b.kind === "negotiation" && b.id === block.id,
+              );
+              const seatDate = block.turns[0]?.turn.at ?? head?.date;
               const open = head === null || openLogs.has(block.id);
               return (
                 <div
@@ -976,15 +983,17 @@ export function GameScreen({ gameId }: { gameId: string }) {
                       className={`match-log-head negotiation-log-head${open ? " open" : ""}`}
                       onClick={() => toggleLog(block.id)}
                       aria-expanded={open}
-                      data-status={head.status}
+                      {...(lastSeat ? { "data-status": head.status } : {})}
                     >
                       <IconContract size={14} />
                       <b>{head.playerName}</b>
                       <span className="match-log-title">{head.kindLabel}</span>
-                      <span className="negotiation-log-status">
-                        {NEGOTIATION_STATUS_KO[head.status]}
-                      </span>
-                      <span className="match-log-date">{humanDate(head.date)}</span>
+                      {lastSeat && (
+                        <span className="negotiation-log-status">
+                          {NEGOTIATION_STATUS_KO[head.status]}
+                        </span>
+                      )}
+                      <span className="match-log-date">{humanDate(seatDate ?? head.date)}</span>
                       <IconChevron size={14} />
                     </button>
                   )}

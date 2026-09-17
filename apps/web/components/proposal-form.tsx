@@ -28,6 +28,7 @@ import {
   dealTermLabel,
   formatMoney,
   type DealTerm,
+  type ProposalKind,
   type DealTermKind,
   type ProposalInput,
   type ProposalPrefill,
@@ -481,9 +482,27 @@ function ProposalBody({
    * 합의는 그 값 그대로 실릴 때만 산다 (§12-3).
    */
   const precontract = kind === "buy" && view.precontract && fee === 0;
-  const clubSide = kind !== "renew" && !view.freeAgent && view.counterparts.club !== null;
-  const agentName = view.counterparts.agent ?? card.name;
   const agreed = view.personal?.agreedOn !== null && view.personal !== null ? view.personal : null;
+  /**
+   * **방의 상대가 절을 가른다** (transfer.md §12-2). 단장 방(`club`)에서는 이적료의 절만,
+   * 에이전트 방(`agent`)에서는 개인 조건의 절만 선다 — 다른 쪽의 값은 그 방의 일이 아니다.
+   * 방 밖(서면)이면 둘 다 선다: 서면 오퍼는 양쪽에 함께 간다.
+   */
+  const party = view.party;
+  const clubSide =
+    kind !== "renew" &&
+    !view.freeAgent &&
+    view.counterparts.club !== null &&
+    party !== "agent" &&
+    view.feeAgreed === null;
+  const agentSide = party !== "club";
+  const agentName = view.counterparts.agent?.name ?? card.name;
+  /**
+   * 에이전트 방에서 내는 영입·임대 제안은 **개인 조건 선제안**이다(`propose_personal`) — 이적료는
+   * 단장의 방에서 따로 한다. 재계약은 그 자체가 개인 조건이라 갈래 그대로다.
+   */
+  const effective: ProposalKind =
+    party === "agent" && (kind === "buy" || kind === "loan") ? "personal" : kind;
   const termKinds = view.termKinds[kind === "buy" ? (precontract ? "precontract" : "buy") : kind];
   const countable = terms.filter((t) => t.kind !== "other").length;
   const feeAnchor = view.fee[kind === "loan" ? "loan" : "buy"];
@@ -551,8 +570,10 @@ function ProposalBody({
         };
     const input: ProposalInput = {
       playerId: card.id,
-      kind,
+      kind: effective,
       ...(clubSide ? { fee: Math.max(0, Math.round(fee)) } : {}),
+      // 이적료가 이미 합의된 협상의 오퍼는 그 값 그대로 실린다
+      ...(view.feeAgreed && effective !== "personal" ? { fee: view.feeAgreed.fee } : {}),
       ...(view.freeAgent && kind === "buy" ? { fee: 0 } : {}),
       ...(clubSide && kind === "buy" && paymentYears > 1 ? { paymentYears } : {}),
       ...personal,
@@ -560,7 +581,7 @@ function ProposalBody({
     };
     /** 칩의 요약 — 갈래와 값. 값이 없는 칸은 적지 않는다 */
     const summary = [
-      `${card.name} ${PROPOSAL_KIND_KO[kind]}`,
+      `${card.name} ${PROPOSAL_KIND_KO[effective]}`,
       ...(input.fee !== undefined && !view.freeAgent
         ? [
             `${kind === "loan" ? "임대료" : "이적료"} ${formatMoney(input.fee)}` +
@@ -648,10 +669,35 @@ function ProposalBody({
           </div>
         )}
 
-        {/* 구단의 절 — 이적료와 지급 */}
+        {/* 이미 합의된 이적료 — 굳은 값이다 */}
+        {view.feeAgreed !== null && party !== "agent" && (
+          <section className="pf-card" data-testid="proposal-club">
+            <Recipient
+              name={view.counterparts.club?.name ?? ""}
+              note={`${view.counterparts.club?.clubName ?? ""} 단장 · 이적료 합의`}
+            />
+            <div className="pf-agreed">
+              <span>
+                <em>이적료</em>
+                <b>{formatMoney(view.feeAgreed.fee)}</b>
+              </span>
+              {view.feeAgreed.paymentYears !== null && (
+                <span>
+                  <em>지급</em>
+                  <b>{view.feeAgreed.paymentYears}년 분할</b>
+                </span>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* 구단의 절 — 이적료와 지급. 건너편은 그 구단의 단장이다 */}
         {clubSide && (
           <section className="pf-card" data-testid="proposal-club">
-            <Recipient name={view.counterparts.club!} />
+            <Recipient
+              name={view.counterparts.club!.name}
+              note={`${view.counterparts.club!.clubName} 단장`}
+            />
             <AmountField
               label={kind === "loan" ? "임대료" : "이적료"}
               value={fee}
@@ -684,115 +730,117 @@ function ProposalBody({
         )}
 
         {/* 선수 쪽의 절 — 주급·연수·지위, 그리고 조건. 합의됐으면 굳은 값이다 */}
-        <section className="pf-card" data-testid="proposal-agent">
-          <Recipient name={agentName} {...(agreed ? { note: "개인 조건 합의" } : {})} />
-          {agreed ? (
-            <div className="pf-agreed">
-              <span>
-                <em>주급</em>
-                <b>{formatMoney(agreed.weeklyWage)}/주</b>
-              </span>
-              <span>
-                <em>계약</em>
-                <b>{agreed.contractYears}년</b>
-              </span>
-              {agreed.squadStatus && (
+        {(agentSide || agreed) && (
+          <section className="pf-card" data-testid="proposal-agent">
+            <Recipient name={agentName} note={agreed ? "에이전트 · 개인 조건 합의" : "에이전트"} />
+            {agreed ? (
+              <div className="pf-agreed">
                 <span>
-                  <em>지위</em>
-                  <b>{SQUAD_STATUS_KO[agreed.squadStatus]}</b>
+                  <em>주급</em>
+                  <b>{formatMoney(agreed.weeklyWage)}/주</b>
                 </span>
-              )}
-            </div>
-          ) : (
-            <>
-              <AmountField
-                label="주급"
-                value={weeklyWage}
-                step={WAGE_STEP}
-                unit={THOUSANDS}
-                chips={WAGE_CHIPS}
-                anchor={wageAnchor}
-                anchorLabel="기대 주급"
-                tail="/주"
-                onChange={setWeeklyWage}
-                locked={locked}
-                testId="proposal-wage"
-              />
-              <div className="pf-row">
-                <span className="pf-row-label">계약</span>
-                <Chips
-                  label="계약 연수"
-                  value={years}
-                  options={Array.from({ length: PROPOSAL_YEARS_MAX }, (_, i) => ({
-                    value: i + 1,
-                    label: `${i + 1}년`,
-                  }))}
-                  onPick={setYears}
-                  locked={locked}
-                />
-              </div>
-              {kind !== "loan" && (
-                <div className="pf-row">
-                  <span className="pf-row-label">
-                    지위
-                    <em>지금 {SQUAD_STATUS_KO[view.squadStatus]}</em>
+                <span>
+                  <em>계약</em>
+                  <b>{agreed.contractYears}년</b>
+                </span>
+                {agreed.squadStatus && (
+                  <span>
+                    <em>지위</em>
+                    <b>{SQUAD_STATUS_KO[agreed.squadStatus]}</b>
                   </span>
+                )}
+              </div>
+            ) : (
+              <>
+                <AmountField
+                  label="주급"
+                  value={weeklyWage}
+                  step={WAGE_STEP}
+                  unit={THOUSANDS}
+                  chips={WAGE_CHIPS}
+                  anchor={wageAnchor}
+                  anchorLabel="기대 주급"
+                  tail="/주"
+                  onChange={setWeeklyWage}
+                  locked={locked}
+                  testId="proposal-wage"
+                />
+                <div className="pf-row">
+                  <span className="pf-row-label">계약</span>
                   <Chips
-                    label="계약 지위"
-                    value={squadStatus}
-                    options={SQUAD_STATUSES.map((s) => ({ value: s, label: SQUAD_STATUS_KO[s] }))}
-                    onPick={setSquadStatus}
+                    label="계약 연수"
+                    value={years}
+                    options={Array.from({ length: PROPOSAL_YEARS_MAX }, (_, i) => ({
+                      value: i + 1,
+                      label: `${i + 1}년`,
+                    }))}
+                    onPick={setYears}
                     locked={locked}
                   />
                 </div>
-              )}
-            </>
-          )}
+                {kind !== "loan" && (
+                  <div className="pf-row">
+                    <span className="pf-row-label">
+                      지위
+                      <em>지금 {SQUAD_STATUS_KO[view.squadStatus]}</em>
+                    </span>
+                    <Chips
+                      label="계약 지위"
+                      value={squadStatus}
+                      options={SQUAD_STATUSES.map((s) => ({ value: s, label: SQUAD_STATUS_KO[s] }))}
+                      onPick={setSquadStatus}
+                      locked={locked}
+                    />
+                  </div>
+                )}
+              </>
+            )}
 
-          {/* 조건 — 갈래 칩을 켜면 그 줄이 서고, 다시 누르면 내려간다 */}
-          {termKinds.length > 0 && (
-            <div className="pf-row pf-terms">
-              <span className="pf-row-label">
-                조건
-                <b className="pf-count fig">
-                  {countable}/{MAX_TABLED_TERMS}
-                </b>
-              </span>
-              <div
-                className="pf-options"
-                role="group"
-                aria-label="조건"
-                data-testid="proposal-add-term"
-              >
-                {termKinds.map((k) => {
-                  const on = tabled(k) !== undefined;
-                  return (
-                    <button
-                      key={k}
-                      type="button"
-                      role="checkbox"
-                      aria-checked={on}
-                      className={on ? "on" : ""}
-                      onClick={() => toggleTerm(k)}
-                      disabled={locked || (!on && k !== "other" && countable >= MAX_TABLED_TERMS)}
-                    >
-                      {DEAL_TERM_KO[k]}
-                    </button>
-                  );
-                })}
+            {/* 조건 — 갈래 칩을 켜면 그 줄이 서고, 다시 누르면 내려간다 */}
+            {termKinds.length > 0 && (
+              <div className="pf-row pf-terms">
+                <span className="pf-row-label">
+                  조건
+                  <b className="pf-count fig">
+                    {countable}/{MAX_TABLED_TERMS}
+                  </b>
+                </span>
+                <div
+                  className="pf-options"
+                  role="group"
+                  aria-label="조건"
+                  data-testid="proposal-add-term"
+                >
+                  {termKinds.map((k) => {
+                    const on = tabled(k) !== undefined;
+                    return (
+                      <button
+                        key={k}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={on}
+                        className={on ? "on" : ""}
+                        onClick={() => toggleTerm(k)}
+                        disabled={locked || (!on && k !== "other" && countable >= MAX_TABLED_TERMS)}
+                      >
+                        {DEAL_TERM_KO[k]}
+                      </button>
+                    );
+                  })}
+                </div>
+                {terms.map((term) => (
+                  <TermRow
+                    key={term.id}
+                    term={term}
+                    locked={locked}
+                    onChange={(patch) => updateTerm(term.id, patch)}
+                    onRemove={() => toggleTerm(term.kind)}
+                  />
+                ))}
               </div>
-              {terms.map((term) => (
-                <TermRow
-                  key={term.id}
-                  term={term}
-                  locked={locked}
-                  onChange={(patch) => updateTerm(term.id, patch)}
-                  onRemove={() => toggleTerm(term.kind)}
-                />
-              ))}
-            </div>
-          )}
-        </section>
+            )}
+          </section>
+        )}
       </div>
 
       <footer className="pf-foot">

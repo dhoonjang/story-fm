@@ -8,12 +8,14 @@ import {
   buildCounterpartyBrief,
   characterEntryOf,
   formatMoney,
+  teamName,
   type CounterpartyAnchor,
   type CounterpartyVoice,
   type GameState,
   type TableSeat,
   type TermAsk,
 } from "@story-fm/engine";
+import type { TableSpeaker } from "@story-fm/domain";
 import { describeCharacters } from "./gm-input";
 
 /**
@@ -127,7 +129,10 @@ function describeVoices(voices: readonly CounterpartyVoice[]): string[] {
   if (voices.length === 0) return [];
   return [
     `<voices>`,
-    ...voices.map((v) => `${v.speaker} “${v.name}” — ${v.answers.join(" · ")}`),
+    ...voices.map(
+      (v) =>
+        `${v.speaker} “${v.name}” (${v.teamId ? `${teamName(v.teamId)} ` : ""}${v.title}) — ${v.answers.join(" · ")}`,
+    ),
     `</voices>`,
   ];
 }
@@ -142,20 +147,32 @@ function describeVoices(voices: readonly CounterpartyVoice[]): string[] {
 export function buildCounterpartyBlock(
   state: GameState,
   negotiation: Negotiation,
-  options: { dossier?: boolean } = {},
+  options: { dossier?: boolean; party?: TableSpeaker } = {},
 ): string | null {
   const brief = buildCounterpartyBrief(state, negotiation);
   if (!brief) return null;
+  /**
+   * **방에는 한 사람이 앉는다** (transfer.md §12-2) — 자리를 적으면 그 목소리와 그 사람의
+   * 카드만 싣는다. 선수의 카드는 어느 자리든 선다: 이야기의 대상이다. 편지는 전부다.
+   */
+  const voices =
+    options.party === undefined
+      ? brief.voices
+      : brief.voices.filter((v) => v.speaker === options.party);
+  const seated = new Set(voices.map((v) => v.name));
+  const player = state.players.find((p) => p.id === negotiation.gamePlayerId);
+  const characterIds =
+    options.party === undefined
+      ? brief.characterIds
+      : brief.characterIds.filter((id) => seated.has(id) || id === player?.name);
   // 데이터 블록은 영어 태그로 싼다 (prompts.md §5) — 서류의 줄 안 레이블은 그대로다
   const cards = describeCharacters(
-    brief.characterIds
-      .map((id) => characterEntryOf(state, id, "full"))
-      .filter((entry) => entry !== null),
+    characterIds.map((id) => characterEntryOf(state, id, "full")).filter((entry) => entry !== null),
   );
   return [
     `<counterparty id="${negotiation.id}">`,
     `<negotiation>${brief.kindKo} · 건너편: ${brief.counterpart} · 감독의 구단: ${brief.ourClub}</negotiation>`,
-    ...describeVoices(brief.voices),
+    ...describeVoices(voices),
     `<player>`,
     ...brief.playerFacts,
     `</player>`,

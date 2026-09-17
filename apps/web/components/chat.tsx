@@ -715,7 +715,7 @@ export function ChatTurnView({
               </div>
             )}
             {cards.map((card, j) => (
-              <MarketCardView card={card} key={j} />
+              <MarketCardView card={card} key={j} propose={turn.inNegotiation !== true} />
             ))}
           </Fragment>
         );

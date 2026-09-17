@@ -1070,8 +1070,33 @@ export const NegotiationSchema = z.object({
    * 중간부터 다른 갈래가 된다. 구 세이브엔 없어 optional.
    */
   precontract: z.boolean().optional(),
-  /** 마주 앉은 대화 — 앉은 협상에만 선다 (transfer.md §12-2). 옛 세이브엔 없다 */
+  /**
+   * 옛 세이브의 테이블 — 상대가 갈리기 전의 한 자리. 읽는 쪽이 `tables`로 옮긴다
+   * (`tableOf` — transfer.md §12-2). 새 세이브에는 서지 않는다.
+   */
   table: NegotiationTableSchema.optional(),
+  /**
+   * **테이블 둘** — 구단 쪽(단장)과 선수 쪽(에이전트)이 따로 앉는다 (transfer.md §12-2).
+   * 인내도 줄도 자리마다 따로다. 앉은 자리만 선다. 옛 세이브엔 없다.
+   */
+  tables: z
+    .object({
+      club: NegotiationTableSchema.optional(),
+      agent: NegotiationTableSchema.optional(),
+    })
+    .optional(),
+  /**
+   * **구단이 이적료에 합의한 자리** — 개인 조건이 아직 굳지 않은 채 구단 테이블에서
+   * 수락이 났을 때 선다 (transfer.md §12-2). 개인 조건이 굳는 날 협상이 `agreed`가 된다.
+   * 개인 조건이 먼저 굳은 협상에는 서지 않는다 — 수락이 곧 합의다. 옛 세이브엔 없다.
+   */
+  feeAgreed: z
+    .object({
+      fee: z.number().min(0),
+      paymentYears: z.number().int().min(1).optional(),
+      on: DateString,
+    })
+    .optional(),
   /**
    * **조건서** — 이 협상에서 오간 조건 전부 (transfer.md §12-3). 감독이 올린 것, 상대가
    * 부른 것, 그 답이 한 장부에 선다. 확인된 논거(`pitched`)와 같은 결이라 협상이 끝나면

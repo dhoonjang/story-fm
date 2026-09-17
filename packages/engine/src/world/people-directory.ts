@@ -13,6 +13,7 @@ import { pendingPress } from "../club/press";
 import { knowledgeOf, type Knowledge } from "../squad/scouting";
 import {
   generateOwner,
+  generateDirector,
   generateVirtualManager,
   headCoachOf,
   isFamousPlayer,
@@ -67,13 +68,21 @@ const MIN_KEYWORD_LENGTH = 2;
 const RANK_POINTED = 0;
 const RANK_MESSAGE = 1;
 /**
+ * **발화에 성만 걸린 사람** — 이름 전체가 불린 사람 **뒤**다 (people.md §6).
+ *
+ * 인물 풀의 성은 나라마다 열여섯이라 한 세계에 같은 성이 여럿이다 — 감독이 「코너 라이언」을
+ * 부른 턴에 「루크 라이언」·「애덤 라이언」이 같은 자리에 서면 상한 셋을 성이 먹고 정작
+ * 불린 사람이 밀려난다.
+ */
+const RANK_MESSAGE_PART = 2;
+/**
  * **기사에 이름이 걸린 사람** — 감독의 이번 발화 **뒤**다 (people.md §4-1).
  *
  * 마이크 앞에 앉은 기자와 달리 이 사람은 지면 저쪽에 있다. 감독이 방금 이름을 부른
  * 우리 선수보다 앞세우면, 신문이 온 날마다 라커룸이 카드에서 밀려난다.
  */
-const RANK_MEDIA = 2;
-const RANK_HISTORY = 3;
+const RANK_MEDIA = 3;
+const RANK_HISTORY = 4;
 
 /**
  * 한 턴에 카드가 서는 기사 화자 — **한 사람뿐이다.**
@@ -256,6 +265,12 @@ function personaOf(state: GameState, characterId: string): Persona | null {
   if (bench?.managerName !== undefined) {
     return generateVirtualManager(state.seed, bench.managerName, bench.managerPersonaSeat);
   }
+  // 타 구단의 단장 — 협상 테이블 건너편의 구단 쪽 (people.md §2)
+  for (const team of state.teams) {
+    if (team.id === state.userTeamId) continue;
+    const director = generateDirector(state.seed, team.id);
+    if (director.characterId === characterId) return director;
+  }
   /**
    * **무직 감독** — 어느 벤치에도 없지만 세계에는 있다 (transfer.md §7 「감독 풀」).
    *
@@ -380,7 +395,9 @@ function rankOf(
   media: ReadonlySet<string>,
 ): number | null {
   if (pointed.has(persona.characterId)) return RANK_POINTED;
-  if (mentions(message, persona)) return RANK_MESSAGE;
+  const spoken = mentionOf(message, persona);
+  if (spoken === "name") return RANK_MESSAGE;
+  if (spoken === "part") return RANK_MESSAGE_PART;
   if (media.has(persona.characterId)) return RANK_MEDIA;
   if (mentions(history, persona)) return RANK_HISTORY;
   return null;
@@ -466,6 +483,11 @@ function candidatesOf(state: GameState): Candidate[] {
       always("full"),
     );
   }
+  // ── 단장 ── 타 구단마다 한 사람 — 협상 테이블 건너편의 구단 쪽 (people.md §2)
+  for (const team of state.teams) {
+    if (team.id === state.userTeamId) continue;
+    add(generateDirector(state.seed, team.id), NEAR_WORLD, always("full"));
+  }
 
   return [...byId.values()];
 }
@@ -478,11 +500,28 @@ function candidatesOf(state: GameState): Candidate[] {
  * 키워드로 적는다. 키워드가 없는 페르소나는 이름으로만 걸린다.
  */
 function mentions(text: string, persona: Persona): boolean {
-  if (text === "") return false;
+  return mentionOf(text, persona) !== null;
+}
+
+/**
+ * 어떻게 불렸나 — 이름 전체(또는 명부의 애칭)면 `name`, 이름의 조각(성)만이면 `part`.
+ * 조각은 이름 안에 든 더 짧은 키워드다 — 명부가 적은 애칭은 이름 밖의 낱말이라 `name`이다.
+ */
+function mentionOf(text: string, persona: Persona): "name" | "part" | null {
+  if (text === "") return null;
   const haystack = text.toLowerCase();
   const listed = (persona.keywords ?? []).filter((k) => k.length >= MIN_KEYWORD_LENGTH);
   const terms = listed.length > 0 ? listed : [persona.name];
-  return terms.some((t) => t.length >= MIN_KEYWORD_LENGTH && haystack.includes(t.toLowerCase()));
+  const hit = terms.filter(
+    (t) => t.length >= MIN_KEYWORD_LENGTH && haystack.includes(t.toLowerCase()),
+  );
+  if (hit.length === 0) return null;
+  const name = persona.name.toLowerCase();
+  const whole = hit.some((t) => {
+    const term = t.toLowerCase();
+    return term === name || !name.includes(term);
+  });
+  return whole ? "name" : "part";
 }
 
 /**

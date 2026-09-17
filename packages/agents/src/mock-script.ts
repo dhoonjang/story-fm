@@ -12,6 +12,7 @@ import {
   playerName,
   renewalExpectation,
   roomNegotiationOf,
+  roomPartyOf,
   suggestTerms,
   tableVoicesOf,
   teamName,
@@ -166,9 +167,18 @@ const SCRIPT: readonly ScriptLine[] = [
     },
   },
   {
-    // 방을 세운다 — 오퍼 없는 영입 자리 (transfer.md §12-2). 앉은 뒤는 방의 대본이다
+    // 방을 세운다 — 오퍼 없는 영입 자리, 상대는 구단 쪽(단장) (transfer.md §12-2)
     say: `${NAME_SLOT} 협상하자`,
-    gm: ({ named }) => [{ tool: "start_negotiation", input: { playerId: named, kind: "buy" } }],
+    gm: ({ named }) => [
+      { tool: "start_negotiation", input: { playerId: named, kind: "buy", party: "club" } },
+    ],
+  },
+  {
+    // 선수 쪽(에이전트)과 앉는다 — 개인 조건의 자리
+    say: `${NAME_SLOT} 에이전트 만나자`,
+    gm: ({ named }) => [
+      { tool: "start_negotiation", input: { playerId: named, kind: "buy", party: "agent" } },
+    ],
   },
   {
     /**
@@ -180,7 +190,11 @@ const SCRIPT: readonly ScriptLine[] = [
     ops: ({ state }): OpsInput => {
       const room = roomNegotiationOf(state);
       const terms = room ? suggestTerms(state, room.gamePlayerId) : null;
-      if (!terms) return {};
+      if (!room || !terms) return {};
+      // 에이전트의 방에서 낸 영입 값은 개인 조건 선제안이다 — 이적료는 단장의 방의 것
+      if (roomPartyOf(state) === "agent" && (room.kind === "buy" || room.kind === "loan")) {
+        return { propose_personal: [{ weeklyWage: terms.weeklyWage, years: terms.years }] };
+      }
       return { send_offer: [{ fee: terms.fee, weeklyWage: terms.weeklyWage, years: terms.years }] };
     },
   },
@@ -335,7 +349,12 @@ export function negotiationScript(
     state.negotiations.find((n) => n.id === options.negotiationId) ??
     null;
   // 상대의 화자 태그는 서류의 첫 목소리다 — 영입이면 파는 구단, 재계약이면 선수 쪽
-  const who = negotiation ? (tableVoicesOf(state, negotiation)[0]?.name ?? "상대") : "상대";
+  // 이 방에 앉은 사람 — 방이 이미 닫힌 마지막 턴은 첫 목소리로
+  const party = roomPartyOf(state);
+  const who = negotiation
+    ? (tableVoicesOf(state, negotiation).find((v) => party === null || v.speaker === party)?.name ??
+      "상대")
+    : "상대";
   if (options.seating) {
     return {
       text: [header, `@: *${ROOM_PLACE}*`, `@${who}: 앉으시죠. 무엇을 가져오셨습니까.`].join("\n"),

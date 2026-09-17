@@ -212,7 +212,13 @@ import {
 import { contractTermLines, termSheetOf } from "../market/terms";
 import { tableVoicesOf } from "../market/counterparty";
 import { dealOdds, oddsText } from "../market/market";
-import { TABLE_PATIENCE_LOW, roomNegotiationOf, tablePatienceOf } from "../market/table";
+import {
+  TABLE_PATIENCE_LOW,
+  roomNegotiationOf,
+  roomPartyOf,
+  tableOf,
+  tablePatienceOf,
+} from "../market/table";
 import { proposalViewOf, type ProposalView } from "../market/proposal";
 import { pendingPress } from "../club/press";
 import { openManagerOffers } from "../market/manager-market";
@@ -1787,12 +1793,14 @@ export interface AttentionItemView {
   daysLeft: number | null;
 }
 
-/** 건너편의 목소리 하나 — 화자 토큰 · 이름 · 답하는 칸 (transfer.md §12-1) */
+/** 건너편의 목소리 하나 — 화자 토큰 · 이름 · 직책 · 답하는 칸 (transfer.md §12-1) */
 export interface NegotiationRoomVoiceView {
   speaker: TableSpeaker;
   name: string;
-  /** 구단 목소리에만 — 화면이 문장과 구단 색을 세우는 열쇠 */
-  team?: { id: string; short: string; colours?: ClubColours };
+  /** 직책 — 단장 · 에이전트 · 선수 */
+  title: string;
+  /** 구단 쪽에만 — 화면이 문장과 구단 색을 세우는 열쇠 */
+  team?: { id: string; name: string; short: string; colours?: ClubColours };
   answers: string[];
 }
 
@@ -1817,9 +1825,14 @@ export interface NegotiationRoomView {
   kind: NegotiationKind;
   /** 갈래의 이름 — 영입 · 매각 · 재계약 · 임대 영입 · 임대 송출 · 해지 · 사전 계약 */
   kindLabel: string;
-  /** 건너편 — 구단의 이름, 상대가 선수 본인인 갈래는 그 이름 */
+  /** 건너편 — 이 방에 앉은 사람의 이름 */
   counterpart: string;
+  /** 이 방의 상대 — 구단 쪽(단장)인가 선수 쪽(에이전트)인가 (transfer.md §12-2) */
+  party: TableSpeaker;
+  /** 이 방에 앉은 목소리 — 하나다 */
   voices: NegotiationRoomVoiceView[];
+  /** 구단이 이미 이적료에 합의했으면 그 값 — 남은 것은 개인 조건이다 */
+  feeAgreed: { fee: number; on: string } | null;
   /** 아직 자리에 앉기 전인가 — 게이트가 선다 */
   beforeSeating: boolean;
   /**
@@ -3584,25 +3597,30 @@ function buildNegotiationView(state: GameState): NegotiationRoomView | null {
   if (!negotiation || !room) return null;
   const player = playerById(state, negotiation.gamePlayerId);
   if (!player) return null;
-  const voices = tableVoicesOf(state, negotiation).map((v): NegotiationRoomVoiceView => {
-    const teamId = v.speaker === "club" ? negotiation.counterpartTeamId : null;
-    return {
-      speaker: v.speaker,
-      name: v.name,
-      ...(teamId
-        ? {
-            team: {
-              id: teamId,
-              short: teamShortNameIn(state, teamId),
-              colours: clubColoursOf(teamId),
-            },
-          }
-        : {}),
-      answers: [...v.answers],
-    };
-  });
-  const table = negotiation.table;
-  const max = table?.patienceMax ?? tablePatienceOf(state, negotiation.gamePlayerId);
+  const party = roomPartyOf(state) ?? "agent";
+  const voices = tableVoicesOf(state, negotiation)
+    .filter((v) => v.speaker === party)
+    .map((v): NegotiationRoomVoiceView => {
+      const teamId = v.teamId ?? null;
+      return {
+        speaker: v.speaker,
+        name: v.name,
+        title: v.title,
+        ...(teamId
+          ? {
+              team: {
+                id: teamId,
+                name: teamNameIn(state, teamId),
+                short: teamShortNameIn(state, teamId),
+                colours: clubColoursOf(teamId),
+              },
+            }
+          : {}),
+        answers: [...v.answers],
+      };
+    });
+  const table = tableOf(state, negotiation, party);
+  const max = table?.patienceMax ?? tablePatienceOf(state, negotiation, party);
   const left = table?.patience ?? max;
   const lastThem = [...(table?.lines ?? [])].reverse().find((l) => l.by === "them" && l.stance);
   const rounds = negotiation.rounds;
@@ -3630,8 +3648,12 @@ function buildNegotiationView(state: GameState): NegotiationRoomView | null {
     playerName: player.name,
     kind: negotiation.kind,
     kindLabel: negotiationKindKo(negotiation),
-    counterpart: counterpartOf(negotiation, player),
+    counterpart: voices[0]?.name ?? counterpartOf(negotiation, player),
+    party,
     voices,
+    feeAgreed: negotiation.feeAgreed
+      ? { fee: negotiation.feeAgreed.fee, on: negotiation.feeAgreed.on }
+      : null,
     beforeSeating: room.seated !== true,
     patience: {
       left,

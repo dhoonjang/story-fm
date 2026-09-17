@@ -7,6 +7,7 @@ import {
   openNegotiationFor,
   pendingOffer,
   suggestTerms,
+  tableOf,
   tacticsOf,
   userPlayers,
   type GameState,
@@ -247,9 +248,9 @@ describe("mock 대본 — 협상 방", () => {
     return target;
   }
 
-  /** 방을 세우고 자리에 앉는 두 걸음 — 케이스마다 같다 */
-  async function seatWith(state: GameState, name: string) {
-    const opened = await runGmTurn(state, `${name} 협상하자`);
+  /** 방을 세우고 자리에 앉는 두 걸음 — 케이스마다 같다. 여는 말이 건너편을 정한다 */
+  async function seatWith(state: GameState, name: string, say = "협상하자") {
+    const opened = await runGmTurn(state, `${name} ${say}`);
     expectGmGrammar(opened.text);
     expect(namesOf(opened)).toContain("start_negotiation");
     expect(state.phase).toBe("negotiation");
@@ -265,23 +266,40 @@ describe("mock 대본 — 협상 방", () => {
     return openNegotiationFor(state, acceptableTarget(state).id) ?? state.negotiations.at(-1)!;
   }
 
-  it("방을 열고 앉아 값을 말하면 손잡이 → 오퍼 → 상대의 답이 서고, 합의가 방을 닫는다", async () => {
+  it("단장의 방에서 값을 말하면 이적료가 굳고, 에이전트의 방에서 조건을 말하면 합의가 방을 닫는다", async () => {
     const state = newGame();
     const target = acceptableTarget(state);
     const from = state.date;
     const negotiation = await seatWith(state, target.name);
     expect(negotiation.gamePlayerId).toBe(target.id);
     expect(negotiation.rounds).toHaveLength(0);
+    expect(state.pendingNegotiation?.party).toBe("club");
 
     const spoke = await runGmTurn(state, "제안한 조건으로 갑시다");
     expectGmGrammar(spoke.text);
-    // 감독의 말은 코어가 테이블의 us 줄로 적었다
-    expect(negotiation.table?.lines.some((l) => l.by === "us")).toBe(true);
-    // 값이 실린 말 — 해석기가 오퍼로 옮기고, 상대가 그 자리에서 답한다
+    // 감독의 말은 코어가 단장의 테이블에 us 줄로 적었다
+    expect(tableOf(state, negotiation, "club")?.lines.some((l) => l.by === "us")).toBe(true);
+    // 값이 실린 말 — 해석기가 오퍼로 옮기고, 단장이 그 자리에서 답한다
     expect(namesOf(spoke)).toContain("send_offer");
     expect(namesOf(spoke)).toContain("reply_at_table");
     expect(negotiation.rounds.length).toBeGreaterThanOrEqual(1);
-    // 앵커가 수락이라 협상은 합의로 끝나고, 끝난 협상 위에 열린 방은 없다
+    // 앵커가 수락이되 단장의 수락은 이적료의 합의다 — 협상도 방도 열려 있다 (transfer.md §12-1)
+    expect(negotiation.feeAgreed?.fee).toBe(negotiation.rounds[0]!.fee);
+    expect(negotiation.status).toBe("open");
+    expect(state.phase).toBe("negotiation");
+
+    // 일어나 에이전트의 방을 연다 — 그 방의 값은 개인 조건 선제안이다
+    await runGmTurn(state, "오늘은 여기까지 하죠");
+    expect(state.phase).toBe("idle");
+    const same = await seatWith(state, target.name, "에이전트 만나자");
+    expect(same.id).toBe(negotiation.id);
+    expect(state.pendingNegotiation?.party).toBe("agent");
+    const personal = await runGmTurn(state, "제안한 조건으로 갑시다");
+    expectGmGrammar(personal.text);
+    expect(namesOf(personal)).toContain("propose_personal");
+    expect(namesOf(personal)).not.toContain("send_offer");
+    // 둘이 다 굳었다 — 협상은 합의로 끝나고, 끝난 협상 위에 열린 방은 없다
+    expect(negotiation.personal?.agreedOn).toBe(from);
     expect(negotiation.status).toBe("agreed");
     expect(state.phase).toBe("idle");
     expect(state.pendingNegotiation ?? null).toBeNull();
@@ -308,7 +326,7 @@ describe("mock 대본 — 협상 방", () => {
     expect(left.toolCalls.find((c) => c.name === TABLE_LEFT)?.silent).toBe(true);
     expect(state.phase).toBe("idle");
     expect(negotiation.status).toBe("open");
-    expect(negotiation.table?.lines.at(-1)?.by).toBe("ledger");
+    expect(tableOf(state, negotiation, "club")?.lines.at(-1)?.by).toBe("ledger");
   });
 
   it("자리를 뜨는 말은 leave_table로 방을 닫는다", async () => {

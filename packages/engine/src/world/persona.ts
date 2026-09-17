@@ -219,6 +219,8 @@ function personaNames(
   owner: string;
   /** 자리 열쇠(`${역할}:${번호}`) → 이름 */
   staff: Record<string, string>;
+  /** 단장 — 협상 테이블 건너편의 구단 쪽 (people.md §2) */
+  director: string;
 } {
   const pool = personaNamePoolOf(countryOfTeam(teamId));
   const realCoach = realCoachNameOf(teamId);
@@ -246,7 +248,9 @@ function personaNames(
       );
     }
   }
-  return { reporters, headCoach, owner, staff };
+  // 단장은 맨 뒤다 — 나중에 생긴 자리라 앞으로 끼우면 진행 중인 세이브의 스태프 이름이 갈린다
+  const director = claimPersonaName(makeRng(seed, `persona:name:director:${teamId}`), pool, taken);
+  return { reporters, headCoach, owner, staff, director };
 }
 
 /**
@@ -792,6 +796,110 @@ const OWNER_ARCHETYPES: readonly CoachArchetype[] = [
 ];
 
 /**
+ * 단장 원형 넷 — **협상 테이블 건너편에서 무엇을 먼저 보는가**로 갈린다 (people.md §2).
+ * `patience`는 그 사람이 앉아 있을 인내의 배율이다 — 에이전트 원형의 `patience`와 같은 자리
+ * (transfer.md §12-2).
+ */
+interface DirectorArchetype {
+  key: string;
+  label: string;
+  traits: string[];
+  motivation: string;
+  speech: { note: string; samples: string[] };
+  patience: number;
+}
+
+const DIRECTOR_ARCHETYPES: readonly DirectorArchetype[] = [
+  {
+    key: "ledger",
+    label: "재무형",
+    traits: ["숫자 우선", "냉정", "상각과 분할을 먼저 본다"],
+    motivation: "장부가 깨끗해야 다음 여름에도 살 수 있다.",
+    speech: {
+      note: "짧은 존댓말. 금액을 연수와 분할로 쪼개 말하고, 감정을 값에 섞지 않는다.",
+      samples: [
+        "숫자부터 봅시다. 3년 분할이면 첫 회분이 얼마죠?",
+        "그 값은 장부에 안 맞습니다. 상각을 생각하면 저희가 손해예요.",
+      ],
+    },
+    patience: 1.25,
+  },
+  {
+    key: "scout",
+    label: "스카우팅형",
+    traits: ["선수 가치에 확신", "데이터 인용", "대체 선수를 이미 봐 뒀다"],
+    motivation: "이 선수의 값을 시장이 제대로 매기게 한다.",
+    speech: {
+      note: "차분한 존댓말. 선수의 기록과 나이·잠재력을 근거로 값을 지킨다.",
+      samples: [
+        "스물세 살에 그 기록이면 시장가는 이미 그 위입니다.",
+        "저희가 이 선수를 어떻게 키웠는지 아시면 그 값은 안 부르실 겁니다.",
+      ],
+    },
+    patience: 1.0,
+  },
+  {
+    key: "proxy",
+    label: "회장 대리인형",
+    traits: ["윗선의 뜻을 옮긴다", "결정을 미룬다", "체면을 본다"],
+    motivation: "회장이 원하는 결과를 회장이 원하는 모양으로 가져간다.",
+    speech: {
+      note: "정중하지만 확답을 피하는 존댓말. 「위에서」·「구단의 뜻」을 자주 든다.",
+      samples: [
+        "저 혼자 정할 수 있는 숫자가 아닙니다. 위에 올려 보겠습니다.",
+        "구단의 뜻은 분명합니다 — 이 값 아래로는 팔지 않겠다는 겁니다.",
+      ],
+    },
+    patience: 0.75,
+  },
+  {
+    key: "dealmaker",
+    label: "딜메이커형",
+    traits: ["빠르게 닫는다", "직설적", "조건을 먼저 던진다"],
+    motivation: "마감 전에 딜을 닫고 다음 딜로 간다.",
+    speech: {
+      note: "빠르고 직설적인 존댓말. 상대의 값을 바로 되받아 자기 값을 던진다.",
+      samples: [
+        "좋아요, 그 값에 분할 없이 일시금이면 오늘 닫습니다.",
+        "돌려 말할 시간이 없습니다. 얼마까지 가능하십니까?",
+      ],
+    },
+    patience: 1.0,
+  },
+];
+
+/** 단장의 원형 — 인내 배율을 읽는 자리가 페르소나 밖에서 같은 원형을 물어야 한다 */
+export function directorArchetypeOf(seed: number, teamId: string): DirectorArchetype {
+  return pick(makeRng(seed, `persona:director:${teamId}`), DIRECTOR_ARCHETYPES);
+}
+
+/**
+ * 단장을 만든다 — 구단마다 한 사람, **저장하지 않고 (시드, 구단)에서 파생한다**
+ * (people.md §2). 이름은 그 구단의 인물 이름 풀에서(`personaNames`), 사람됨은 원형 넷에서.
+ * 협상 테이블의 구단 쪽 목소리가 이 사람이다 (transfer.md §12-1).
+ */
+export function generateDirector(seed: number, teamId: string): Persona {
+  const archetype = directorArchetypeOf(seed, teamId);
+  const name = personaNames(seed, teamId).director;
+  return {
+    characterId: name,
+    name,
+    role: "director",
+    archetype: archetype.label,
+    traits: [...archetype.traits],
+    motivation: archetype.motivation,
+    speechStyle: { note: archetype.speech.note, samples: [...archetype.speech.samples] },
+    keywords: personaKeywords({ name, role: "director" }),
+    seed,
+  };
+}
+
+/** 그 구단의 단장 — 상대 구단이면 협상 테이블 건너편에 앉는 사람이다 */
+export function directorOf(state: { seed: number }, teamId: string): Persona {
+  return generateDirector(state.seed, teamId);
+}
+
+/**
  * 구단주를 만든다 — 수석코치와 같은 규칙이다.
  *
  * 이름은 구단이(`owner-seeds.ts`), 사람됨은 시드가 정한다. 시드 채널이 코치와
@@ -1273,6 +1381,17 @@ function collectSpeakers(state: SpeakerSource): Map<string, SpeakerRole | null> 
   for (const team of state.teams ?? []) {
     if (team.id === state.userTeamId || team.managerName === undefined) continue;
     claim(team.managerName, { kind: "manager", label: personaRoleLabel("manager") });
+  }
+  // 타 구단의 단장 — 협상 테이블 건너편의 구단 쪽 (people.md §2). 우리 구단에는 없다:
+  // 그 자리의 결정은 감독과 구단주의 것이다
+  if (state.seed !== undefined) {
+    for (const team of state.teams ?? []) {
+      if (team.id === state.userTeamId) continue;
+      claim(generateDirector(state.seed, team.id).name, {
+        kind: "director",
+        label: personaRoleLabel("director"),
+      });
+    }
   }
 
   return seen;

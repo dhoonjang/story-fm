@@ -661,6 +661,7 @@ export function buildToolSpecs(
         ...(input.negotiationId === undefined ? {} : { negotiationId: input.negotiationId }),
         ...(input.playerId === undefined ? {} : { playerId: input.playerId }),
         ...(input.kind === undefined ? {} : { kind: input.kind }),
+        ...(input.party === undefined ? {} : { party: input.party }),
       }),
     ),
     wrap(
@@ -1978,5 +1979,11 @@ const StartNegotiationArgsSchema = z.object({
     .optional()
     .describe(
       "자리를 새로 열 때의 갈래 — buy=영입 · renew=재계약 · loan=임대 영입. 비우면 소속으로 고른다",
+    ),
+  party: z
+    .enum(["club", "agent"])
+    .optional()
+    .describe(
+      "누구와 앉는가 — club=상대 구단의 단장(이적료·분할·기한) · agent=선수의 에이전트(주급·연수·지위·조건). 영입·임대는 둘 다 가능하고 감독의 말이 정한다. 비우면 구단 쪽이 먼저다. 재계약은 에이전트뿐이다",
     ),
 });

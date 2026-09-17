@@ -848,6 +848,12 @@ export function respondOffer(
     squadStatus?: SquadStatus;
     paymentYears?: number;
     /**
+     * **구단 테이블의 수락** — 이적료의 합의일 뿐 계약의 합의가 아니다 (transfer.md §12-2).
+     * 개인 조건이 아직 굳지 않았으면 `feeAgreed`가 서고 협상은 열린 채 선수 쪽 테이블을
+     * 기다린다. 수락의 문턱도 구단 관문으로 잰다.
+     */
+    feeOnly?: boolean;
+    /**
      * **상대가 조정에 거는 기한** — 최후통첩 (transfer.md §12-1). 날짜는 코어가 박은
      * 것이고(`CounterpartyAnchor.ultimatumOn`), 여기서는 협상의 기한을 그날로
      * **당기기만** 한다. 뒤로 미는 값은 조용히 버려진다.
@@ -901,11 +907,12 @@ export function respondOffer(
    * 하한(`MIN_ACCEPT_PROBABILITY` 5%)보다 커서 하나만 확인돼도 문은 끝까지 열리지만,
    * 감독에게 보이는 `+%p`가 실제로 걸리는 값이어야 그 숫자를 대조할 수 있다.
    */
-  if (input.verdict === "accept" && odds.probability < bounds.acceptFloor) {
+  const acceptOdds = input.feeOnly ? (odds.gates.club ?? odds.probability) : odds.probability;
+  if (input.verdict === "accept" && acceptOdds < bounds.acceptFloor) {
     return {
       ok: false,
       message:
-        `그 조건에 응할 구단은 없습니다 (성사 확률 ${odds.probability}%` +
+        `그 조건에 응할 구단은 없습니다 (성사 확률 ${acceptOdds}%` +
         (bounds.latitude > 0 ? ` · 설득으로 열린 여유 ${bounds.latitude}%p` : "") +
         `) — 조정이나 결렬만 가능합니다`,
     };
@@ -1070,6 +1077,30 @@ export function respondOffer(
     ...rest,
   });
 
+  if (input.verdict === "accept" && input.feeOnly && !releasing && !renewing) {
+    /**
+     * **이적료 합의 — 계약 합의가 아니다** (transfer.md §12-2). 구단 테이블에서 단장이
+     * 값을 받아들였고, 남은 것은 선수 쪽 테이블의 개인 조건이다. 협상은 열린 채 남고
+     * 개인 조건이 굳는 날(`answerPersonal`) `agreed`가 된다.
+     */
+    negotiation.feeAgreed = {
+      fee: offer.fee,
+      ...(offer.paymentYears === undefined ? {} : { paymentYears: offer.paymentYears }),
+      on: state.date,
+    };
+    pushNarrative(
+      state,
+      `${player.name} 이적료 합의 (${formatMoney(offer.fee)}) — 개인 조건 남음`,
+      3,
+    );
+    return {
+      ok: true,
+      payload: verdictCard({}),
+      message:
+        `${josa(counterpart, "이/가")} 이적료 ${formatMoney(offer.fee)}${splitLabel(offer.paymentYears)}에 합의했습니다 — ` +
+        `${player.name} 쪽과 개인 조건을 맞춰야 계약이 섭니다`,
+    };
+  }
   if (input.verdict === "accept") {
     negotiation.status = "agreed";
     if (releasing) {
@@ -4154,7 +4185,13 @@ export function describeNegotiations(state: GameState): string {
         (deadline === null ? "" : ` · 상대가 건 기한 ${deadline}`) +
         (bids === 0 ? "" : ` · 경쟁 입찰 ${bids}건`) +
         // 앉은 협상은 인내가 판의 사실이다 (transfer.md §12-2)
-        (n.table ? ` · 테이블 인내 ${n.table.patience}/${n.table.patienceMax}` : "");
+        (n.tables?.club
+          ? ` · 단장 인내 ${n.tables.club.patience}/${n.tables.club.patienceMax}`
+          : "") +
+        (n.tables?.agent
+          ? ` · 선수 쪽 인내 ${n.tables.agent.patience}/${n.tables.agent.patienceMax}`
+          : "") +
+        (n.feeAgreed ? ` · 이적료 합의 ${formatMoney(n.feeAgreed.fee)}` : "");
       if (n.status === "agreed") {
         const medical = describeMedical(state, n);
         return `${n.id} ${who} ${direction}${marks} — 합의됨, ${medical ?? "확정 대기"}`;
@@ -4861,6 +4898,32 @@ export function answerPersonal(
   if (input.verdict === "accept") {
     personal.agreedOn = state.date;
     delete personal.counter;
+    /**
+     * **이적료가 먼저 합의돼 있었으면 이것으로 합의다** (transfer.md §12-2). 구단 테이블이
+     * 받아들인 오퍼 라운드에 굳은 개인 조건을 적어 계약이 그 값으로 서게 한다.
+     */
+    if (negotiation.feeAgreed) {
+      const accepted = [...negotiation.rounds]
+        .reverse()
+        .find((r) => r.by === "us" && r.verdict === "accept");
+      if (accepted) {
+        accepted.weeklyWage = personal.weeklyWage;
+        accepted.contractYears = personal.contractYears;
+      }
+      negotiation.status = "agreed";
+      pushNarrative(
+        state,
+        `${player.name} 이적 합의 (${formatMoney(negotiation.feeAgreed.fee)})`,
+        4,
+      );
+      return {
+        ok: true,
+        payload: card("accept"),
+        message:
+          `${player.name} 쪽이 개인 조건을 받아들였습니다 — ${line(personal)}. 이적료는 이미 합의돼 있습니다. ` +
+          "accept_deal로 검진을 잡아야 계약이 섭니다",
+      };
+    }
     return {
       ok: true,
       payload: card("accept"),

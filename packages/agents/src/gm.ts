@@ -28,6 +28,7 @@ import {
   openLetter,
   pendingVerdicts,
   roomNegotiationOf,
+  roomPartyOf,
   selectCharacters,
   settleTableReply,
   sitAtTable,
@@ -357,7 +358,7 @@ async function openTurn(
       const left = closeNegotiation(state, "left");
       if (left.ok) ledger.calls.push({ name: TABLE_LEFT, summary: left.message, silent: true });
     } else if (!seating && !operator) {
-      const sat = sitAtTable(state, shape.negotiationId, message);
+      const sat = sitAtTable(state, shape.negotiationId, message, roomPartyOf(state) ?? undefined);
       if (!sat.ok) console.warn(`[gm] 감독의 말을 테이블에 적지 못했습니다 — ${sat.message}`);
     }
   }

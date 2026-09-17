@@ -1,4 +1,10 @@
-import { describeNegotiation, type GameState } from "@story-fm/engine";
+import {
+  defaultPartyOf,
+  describeNegotiation,
+  roomPartyOf,
+  tableOf,
+  type GameState,
+} from "@story-fm/engine";
 import type { Negotiation } from "@story-fm/domain";
 import type { GameLLM, GameToolSpec } from "@story-fm/llm";
 import { mockOrdersLlm } from "./mock-gm";
@@ -76,10 +82,13 @@ const TABLE_LOG_TAIL = 6;
  * 남고(상대의 대사는 방의 채팅 턴에 있다), 편지가 남긴 답에는 `them` 줄이 선다.
  */
 export function buildTableOrdersContext(state: GameState, negotiation: Negotiation): string[] {
-  const log = (negotiation.table?.lines ?? []).slice(-TABLE_LOG_TAIL).map((line) => {
-    const who = line.by === "us" ? "@감독" : line.by === "ledger" ? "[장부]" : "@상대";
-    return `${line.date} ${who}: ${line.text}`;
-  });
+  const party = roomPartyOf(state) ?? defaultPartyOf(state, negotiation);
+  const log = (tableOf(state, negotiation, party)?.lines ?? [])
+    .slice(-TABLE_LOG_TAIL)
+    .map((line) => {
+      const who = line.by === "us" ? "@감독" : line.by === "ledger" ? "[장부]" : "@상대";
+      return `${line.date} ${who}: ${line.text}`;
+    });
   return [
     ...tagged("negotiation", describeNegotiation(state, negotiation.id)),
     ...tagged("table_log", log.join("\n")),

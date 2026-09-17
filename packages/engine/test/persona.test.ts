@@ -803,8 +803,10 @@ describe("가상 감독 — 명부 밖 벤치의 사람 (people.md §2)", () => 
     const name = bench.managerName!;
     // 화면이 붙일 직책 — 명부 감독과 같은 자리다
     expect(speakerRoles(state)[normalizeSpeaker(name)]).toEqual({ kind: "manager", label: "감독" });
-    // 이름이 불리면 카드가 선다 — 파생이라 세이브에 없어도 같은 사람이 복원된다
+    // 이름이 불리면 카드가 선다 — 파생이라 세이브에 없어도 같은 사람이 복원된다.
+    // 성이 같은 단장·감독이 여럿이어도 이름 전체가 불린 사람이 먼저다 (people.md §6)
     const cards = selectCharacters(state, { message: name });
+    expect(cards[0]?.characterId).toBe(name);
     const card = cards.find((c) => c.characterId === name)!;
     expect(card.role).toBe("manager");
     expect(card.depth).toBe("full");

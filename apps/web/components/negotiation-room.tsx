@@ -15,9 +15,10 @@ import { humanDate } from "@/lib/dateline";
  * (`views.negotiation`)가 접어 온 것이고 여기서 새로 만드는 사실은 없다 — 인내의
  * 결(`tone`)도 뷰가 낸다. 화면이 숫자를 다시 자르지 않는다.
  *
- * 손잡이는 둘이고 둘 다 방에서만 산다: 「제안」은 폼을 방의 협상으로 미리 채워 열고,
- * 「일어선다」는 협상을 열어 둔 채 방만 닫는다. 빈 입력에 눌리는 버튼이 자리를 뜨는
- * 문이면 실수가 협상을 끊는다 — 그래서 입력창이 아니라 여기 선다.
+ * 손잡이는 둘이고 둘 다 방에서만 산다: 「제안서 작성」은 폼을 방의 협상으로 미리 채워 열고,
+ * 「협상 끝내기」는 협상을 열어 둔 채 방만 닫는다 — 오늘의 자리를 끝내는 것이고, 협상은
+ * 편지로 이어지며 다시 앉을 수 있다. 빈 입력에 눌리는 버튼이 자리를 뜨는 문이면 실수가
+ * 협상을 끊는다 — 그래서 입력창이 아니라 여기 선다.
  */
 export function NegotiationRoom({
   room,
@@ -76,7 +77,7 @@ export function NegotiationRoom({
             onClick={() => proposal.open(room.playerId, prefillOf(room))}
             data-testid="negotiation-propose"
           >
-            제안
+            제안서 작성
           </button>
         )}
         <button
@@ -86,7 +87,7 @@ export function NegotiationRoom({
           onClick={onLeave}
           data-testid="negotiation-leave"
         >
-          일어선다
+          협상 끝내기
         </button>
       </div>
     </div>
@@ -114,7 +115,12 @@ export function Voices({ voices }: { voices: NegotiationRoomView["voices"] }) {
               <IconPerson size={16} />
             </span>
           )}
-          <b className="nr-voice-name">{voice.name}</b>
+          <span className="nr-voice-who">
+            <b className="nr-voice-name">{voice.name}</b>
+            <em className="nr-voice-title">
+              {voice.team ? `${voice.team.name} ${voice.title}` : voice.title}
+            </em>
+          </span>
           {voice.answers.length > 0 && (
             <span className="nr-voice-answers">
               {voice.answers.map((answer) => (
@@ -164,6 +170,7 @@ export function hasTermSheet(room: NegotiationRoomView): boolean {
     room.theirs !== null ||
     room.terms.length > 0 ||
     room.personal !== null ||
+    room.feeAgreed !== null ||
     room.pitched.length > 0
   );
 }
@@ -193,6 +200,17 @@ export function TermSheet({ room }: { room: NegotiationRoomView }) {
               </div>
             </div>
           )}
+        </div>
+      )}
+      {room.feeAgreed && (
+        <div className="nr-personal" data-agreed>
+          <em className="mc-side">이적료 합의</em>
+          <div className="mc-vals">
+            <span>
+              <em>이적료</em>
+              <b>{formatMoney(room.feeAgreed.fee)}</b>
+            </span>
+          </div>
         </div>
       )}
       {room.personal && (

@@ -10,17 +10,14 @@ import {
 import {
   buildCounterpartyBrief,
   closeNegotiation,
-  counterpartyAnchor,
-  personalAnchor,
+  defaultPartyOf,
   roomNegotiationOf,
+  roomPartyOf,
   seatAt,
+  seatViewOf,
   settleTableReply,
-  tablePatienceOf,
-  tableVoicesOf,
-  termAsksOf,
   type GameState,
   type TableReply,
-  type TableSeat,
 } from "@story-fm/engine";
 import type { GameToolSpec, JsonObjectSchema } from "@story-fm/llm";
 import { buildCounterpartyBlock, describeSeatAnchor } from "./counterparty-brief";
@@ -49,7 +46,7 @@ export const NEGOTIATION_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니�
 # 입력
 매 턴 이런 블록이 이 순서로 온다.
 - <club name> — 감독의 구단. <manager name tag> — 감독의 이름·화자 태그·배경.
-- <counterparty> — 이 협상의 서류. <negotiation> 갈래와 양쪽, <voices> 건너편에 앉은 사람과 그가 답하는 칸, <player> 선수의 사실, <characters> 그 자리 사람들의 카드.
+- <counterparty> — 이 협상의 서류. <negotiation> 갈래와 양쪽, <voices> 이 방에 앉은 사람과 그가 답하는 칸, <player> 선수의 사실, <characters> 그 사람의 카드.
 - <situation> — 주변 상황. 시계(이적창·기한) · 답하는 구단의 처지 · 선수의 지금 · 감독의 구단이 밖에서 보이는 모습 · 기사.
 - 이력 — 이 방의 지난 턴들. 감독의 말은 @감독이름: 으로, 감독의 화면 조작은 <operator>로 온다.
 - @감독이름: — 이번 턴 감독의 말. <operator> — 감독이 화면에서 누른 손잡이. 제안 폼으로 넣은 오퍼는 이미 장부에 걸린 사실이다.
@@ -66,7 +63,7 @@ export const NEGOTIATION_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니�
 - 일어서는 손잡이가 온 턴은 자리를 뜨는 장면 하나로 닫는다.
 
 # 상대
-- 건너편에서 말하는 사람은 <voices>에 선 사람들뿐이다. 구단은 이적료·분할·기한을, 선수 쪽은 주급·연수·지위·등번호·조건을 답한다 — 남의 칸을 대신 답하지 않는다. 감독의 말이 누구에게 건네는 것인지는 그 내용이 정한다.
+- 건너편에는 <voices>의 한 사람이 앉아 있다. 구단 쪽이면 단장이 이적료·분할·기한을, 선수 쪽이면 에이전트가 주급·연수·지위·등번호·조건을 답한다. 다른 쪽의 칸은 이 방의 일이 아니다 — 감독이 그 이야기를 꺼내면 그 자리는 따로라고 답하고 값을 부르지 않는다.
 - 인물은 카드대로 말하고 자기 처지에서 안다. 마감이 가까우면 급한 쪽이 누구인지 알고, 그 자리에 선수가 많으면 팔 이유가 있고 적으면 붙잡을 이유가 있다. 잔고와 예산은 그 구단의 것이다.
 - 장면은 도구 결과 위에 선다. 상대의 말은 장부가 적은 판정·값·인내와 어긋나지 않는다 — 장부가 조정이라 적었으면 상대는 조정을 말하고, 결렬이면 일어선다.
 - 한 번에 한 걸음만 움직인다. 감독이 준 것 없이 내리지 않는다.
@@ -246,7 +243,7 @@ export function buildNegotiationTools(
         const room = roomNegotiationOf(state);
         if (!room) return NO_ROOM;
         // 감독의 말은 턴이 열릴 때 코어가 적었다 — 여기서는 줄 없이 앉아 앵커만 읽는다
-        const seated = seatAt(state, room.id);
+        const seated = seatAt(state, room.id, roomPartyOf(state) ?? undefined);
         if (!seated.ok) return seated;
         replied = true;
         const got = parsed.data;
@@ -293,33 +290,16 @@ export function buildNegotiationReference(state: GameState, negotiationId: strin
     buildGmReference(state),
     ...(negotiation
       ? [
-          buildCounterpartyBlock(state, negotiation, { dossier: false }),
+          buildCounterpartyBlock(state, negotiation, {
+            dossier: false,
+            party: roomPartyOf(state) ?? defaultPartyOf(state, negotiation),
+          }),
           buildSituationBlock(state, negotiation),
         ]
       : []),
   ]
     .filter((block): block is string => block !== null && block.length > 0)
     .join("\n\n");
-}
-
-/**
- * 자리 하나를 **상태를 건드리지 않고** 읽는다 — 스냅샷 빌더는 장부를 움직이지 않는다.
- * 테이블이 아직 없으면(첫 말 전) 앉을 때의 인내가 선다.
- */
-function seatView(state: GameState, negotiation: Negotiation): TableSeat {
-  const patience = tablePatienceOf(state, negotiation.gamePlayerId);
-  return {
-    negotiation,
-    table: negotiation.table ?? {
-      openedOn: state.date,
-      patience,
-      patienceMax: patience,
-      lines: [],
-    },
-    anchor: counterpartyAnchor(state, negotiation) ?? personalAnchor(state, negotiation),
-    voices: tableVoicesOf(state, negotiation),
-    asks: termAsksOf(state, negotiation),
-  };
 }
 
 /**
@@ -336,7 +316,9 @@ export function buildTableNote(state: GameState, negotiationId: string): string 
   return [
     `<table>`,
     ...(brief?.dossier ?? []),
-    describeSeatAnchor(seatView(state, negotiation)),
+    describeSeatAnchor(
+      seatViewOf(state, negotiation, roomPartyOf(state) ?? defaultPartyOf(state, negotiation)),
+    ),
     `</table>`,
   ].join("\n");
 }

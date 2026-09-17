@@ -14,7 +14,7 @@ import { COLD_MS } from "./timeouts";
  * 하나만 달라도 그 턴은 아무 도구도 부르지 않는다. 상대는 픽스처가 고른다 —
  * `seedTransferTarget`이 코어에게 물어 성사 확률이 문턱을 넘는 이름을 준다.
  */
-test("협상 방 — 자리에 앉고, 제안하고, 일어선다", async ({ page }) => {
+test("협상 방 — 단장과 앉아 값을, 에이전트와 앉아 조건을 맞춘다", async ({ page }) => {
   const { gameId, targetName } = seedTransferTarget();
   await page.goto(`/game/${gameId}`);
 
@@ -70,24 +70,64 @@ test("협상 방 — 자리에 앉고, 제안하고, 일어선다", async ({ pag
   await expect(page.getByTestId("time-skip-toggle")).toBeEnabled();
 
   /**
-   * ⑤ 다시 앉아 제안한다 — 같은 협상이라 같은 방이다. 값이 실린 말은 손잡이를 부르고
-   * 상대가 답한다. 픽스처가 고른 상대는 확률이 문턱을 넘어 앵커가 **수락**이고, 합의된
-   * 협상에 앉아 있는 방은 없다 — 코어가 같은 턴에 방을 닫는다 (transfer.md §12-2).
+   * ⑤ 다시 단장과 앉아 값을 부른다 — 같은 협상이라 같은 테이블이다. 값이 실린 말은
+   * 손잡이를 부르고 단장이 답한다. 픽스처가 고른 상대는 확률이 문턱을 넘어 앵커가
+   * **수락**인데, 단장의 수락은 **이적료의 합의**다 — 개인 조건은 에이전트의 방에서
+   * 따로 굳혀야 하므로 협상도 방도 열려 있다 (transfer.md §12-1 「두 테이블, 두 사람」).
    */
   await input.fill(`${targetName} 협상하자`);
   await page.getByTestId("chat-send").click();
   await expect(gate).toBeVisible();
+  await expect(gate).toContainText("단장");
   await page.getByTestId("negotiation-enter").click();
   await expect(room).toBeVisible();
+  await expect(room).toContainText("단장");
+  // 폼의 구성은 건너편이 정한다 — 단장 앞에서는 이적료의 절만 선다 (design-system.md §6)
+  await page.getByTestId("negotiation-propose").click();
+  const form = page.getByTestId("proposal-form");
+  await expect(form).toBeVisible();
+  await expect(form.getByTestId("proposal-club")).toBeVisible();
+  await expect(form.getByTestId("proposal-agent")).toHaveCount(0);
+  await form.getByRole("button", { name: "닫기" }).click();
+  await expect(form).toHaveCount(0);
   await input.fill("제안한 조건으로 갑시다");
   await page.getByTestId("chat-send").click();
   await expect(page.locator(".market-card").first()).toBeVisible();
   await expect(input).toBeEnabled();
+  await expect(page.locator(".app")).toHaveAttribute("data-phase", "negotiation");
+  await expect(room).toContainText("이적료 합의");
+  await expect(page.locator(".negotiation-log-head")).toHaveCount(0);
+
+  /**
+   * ⑥ 일어나 에이전트의 방을 연다 — 건너편이 갈리고, 이 방의 값은 개인 조건이다. 굳은
+   * 이적료는 조건서에 그대로 서 있다. 에이전트가 받아들이면 둘이 다 굳어 **합의**고,
+   * 합의된 협상에 앉아 있는 방은 없다 — 코어가 같은 턴에 방을 닫는다.
+   */
+  await page.getByTestId("negotiation-leave").click();
+  await expect(room).toHaveCount(0);
+  await input.fill(`${targetName} 에이전트 만나자`);
+  await page.getByTestId("chat-send").click();
+  await expect(gate).toBeVisible();
+  await expect(gate).not.toContainText("단장");
+  await page.getByTestId("negotiation-enter").click();
+  await expect(room).toBeVisible();
+  await expect(room).toContainText("이적료 합의");
+  // 에이전트 앞에서는 개인 조건의 절만 선다 — 이적료는 단장의 방의 것이다
+  await page.getByTestId("negotiation-propose").click();
+  await expect(form).toBeVisible();
+  await expect(form.getByTestId("proposal-agent")).toBeVisible();
+  await expect(form.getByTestId("proposal-club")).toHaveCount(0);
+  await form.getByRole("button", { name: "닫기" }).click();
+  await expect(form).toHaveCount(0);
+  await input.fill("제안한 조건으로 갑시다");
+  await page.getByTestId("chat-send").click();
+  await expect(input).toBeEnabled();
   await expect(page.locator(".app")).toHaveAttribute("data-phase", "idle");
   await expect(room).toHaveCount(0);
-  // 끝난 협상은 선수 · 갈래 · 결과 한 줄로 접힌다
-  const head = page.locator(".negotiation-log-head");
-  await expect(head).toHaveCount(1);
-  await expect(head).toHaveAttribute("data-status", "agreed");
-  await expect(head).toContainText(targetName);
+  // 끝난 협상은 자리마다 한 덩어리로 접힌다 — 세 번 앉았으니 셋, 결과는 마지막 자리의 머리에만
+  const heads = page.locator(".negotiation-log-head");
+  await expect(heads).toHaveCount(3);
+  await expect(heads.last()).toHaveAttribute("data-status", "agreed");
+  await expect(heads.first()).not.toHaveAttribute("data-status", /.+/);
+  for (const head of await heads.all()) await expect(head).toContainText(targetName);
 });

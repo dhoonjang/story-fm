@@ -159,9 +159,20 @@
   align-items: center;
   justify-content: center;
 }
+.nr-voice-who {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
 .nr-voice-name {
   font-weight: 600;
   word-break: keep-all;
+}
+/* 직책과 구단 — 누구인지 다음에 어디 사람인지 */
+.nr-voice-title {
+  font-size: var(--fs-2xs);
+  color: var(--dim);
 }
 /* 무엇을 답하나 — 이적료 · 분할 · 기한. 가운뎃점으로 이어 한 줄 */
 .nr-voice-answers {
