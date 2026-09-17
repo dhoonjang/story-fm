@@ -15,7 +15,8 @@ import {
   josaOf,
 } from "@story-fm/domain";
 import type { MarketCard } from "@story-fm/domain";
-import { playerById, pushNarrative, type GameState } from "../core/state";
+import { playerById, pushNarrative, type GameState, type PendingNegotiation } from "../core/state";
+import { journal } from "../core/journal";
 import { agentProfileOf } from "./agent-profile";
 import {
   clampAsks,
@@ -29,23 +30,26 @@ import {
   type CounterpartyVoice,
   type TermAsk,
 } from "./counterparty";
-import { pendingOffer, personalAwaiting } from "./negotiation";
+import { openTalks, pendingOffer, personalAwaiting, type TalksKind } from "./negotiation";
 import { askTerms, askableKindsOf } from "./terms";
 import { LATITUDE_PER_CLAIM, evaluatePitch } from "./persuasion";
 
 /**
- * **테이블 — 협상 위에 서는 마주 앉은 대화**
+ * **협상 방 — 협상 위에 서는 마주 앉은 자리, 그리고 그 자리가 여는 모드**
  * (docs/simulation/transfer.md §12-2 · docs/llm/agents.md §4-1).
  *
  * 오퍼와 답은 그대로 협상의 라운드다. 테이블이 더하는 것은 셋이다 — 그 사이의 **말**,
  * 상대가 앉아 있을 **인내**, 그리고 답을 기다리는 오퍼가 **오늘** 답을 받는다는 것.
- * 상대의 대사는 모델이 쓰고, 여기 있는 것은 그 대사가 장부에 남길 수 있는 전부다.
+ * 방이 더하는 것은 라우팅 하나다 — `phase: "negotiation"` · `pendingNegotiation`. 상대의
+ * 대사는 방의 GM이 쓰고, 여기 있는 것은 그 대사가 장부에 남길 수 있는 전부다.
  */
 
 /** 앉을 때의 인내 — 대리인 원형의 `patience`가 곱해진다 (법률가형 5 · 제국형 4 · 승부사형 3) */
 export const TABLE_PATIENCE_BASE = 4;
 /** 인내의 하한 — 한 마디에 일어나는 상대는 없다 */
 export const TABLE_PATIENCE_MIN = 2;
+/** 이만큼 남으면 다음 한 마디에 일어날 수 있다 — 화면이 색을 갈고 프롬프트가 말에 비친다 */
+export const TABLE_PATIENCE_LOW = 1;
 
 /** 이 선수의 상대가 테이블에 앉아 있을 인내 */
 export function tablePatienceOf(state: GameState, playerId: string): number {
@@ -74,11 +78,15 @@ export interface TableReplyLine {
 
 /** 모델의 답 — 어느 값도 그대로 믿지 않는다 */
 export interface TableReply {
-  /** 화자가 붙은 말 — 서 있는 목소리마다 한 줄, 없는 화자는 코어가 접는다 */
-  lines: readonly TableReplyLine[];
+  /**
+   * 화자가 붙은 말 — 서 있는 목소리마다 한 줄, 없는 화자는 코어가 접는다. **편지만
+   * 싣는다** — 방에서는 상대의 대사가 장면이라 줄이 없다 (agents.md §4-1).
+   */
+  lines?: readonly TableReplyLine[];
   /** **답 하나에 태도 하나** — 화자가 둘이어도 테이블의 온도는 한 자리에서 잰다 */
   stance: TableStance;
-  heard: TableHeard;
+  /** 들은 것 — 감독의 말이 있는 자리(방)에만 있다. 편지에는 들을 말이 없다 */
+  heard?: TableHeard;
   /** 테이블에 오퍼가 올라 있을 때만 — 앵커 ± 한도로 잘린다 (counterparty.ts) */
   ruling?: CounterpartyRulingInput;
   /**
@@ -145,6 +153,35 @@ export function sitAtTable(
     offer.respondsOn = state.date;
   }
   // 개인 조건 제안의 답도 마주 앉은 자리에서는 오늘이다 (§12-3)
+  const personal = personalAwaiting(negotiation);
+  if (personal && personal.respondsOn > state.date) personal.respondsOn = state.date;
+  return { ok: true, seat: seatOf(state, negotiation) };
+}
+
+/**
+ * **말 없이 앉은 자리** — 방의 GM이 상대의 답을 판정할 때 읽는 자리다 (`reply_at_table`).
+ * 감독의 말은 턴이 열릴 때 코어가 이미 적었으므로(`sitAtTable`) 여기서는 줄을 더하지
+ * 않고, 테이블이 아직 없으면(제안 폼으로만 오퍼를 넣고 앉은 자리) 인내만 세운다.
+ */
+export function seatAt(
+  state: GameState,
+  negotiationId: string,
+): { ok: false; message: string } | { ok: true; seat: TableSeat } {
+  const negotiation = state.negotiations.find((n) => n.id === negotiationId);
+  if (!negotiation)
+    return {
+      ok: false,
+      message: `협상 "${negotiationId}"${josaOf(negotiationId, "을/를")} 찾지 못했습니다`,
+    };
+  if (negotiation.status !== "open") {
+    return { ok: false, message: `이미 끝난 협상입니다 (${negotiation.status})` };
+  }
+  const patience = tablePatienceOf(state, negotiation.gamePlayerId);
+  negotiation.table ??= { openedOn: state.date, patience, patienceMax: patience, lines: [] };
+  const offer = pendingOffer(negotiation);
+  if (offer && offer.respondsOn !== null && offer.respondsOn > state.date) {
+    offer.respondsOn = state.date;
+  }
   const personal = personalAwaiting(negotiation);
   if (personal && personal.respondsOn > state.date) personal.respondsOn = state.date;
   return { ok: true, seat: seatOf(state, negotiation) };
@@ -237,7 +274,7 @@ export function settleTableReply(
   }));
 
   // ── 논거 — 사실만 가린다 (persuasion.ts) ──
-  const claims = reply?.heard.claims ?? [];
+  const claims = reply?.heard?.claims ?? [];
   if (claims.length > 0) {
     const outcome = evaluatePitch(
       state,
@@ -262,7 +299,7 @@ export function settleTableReply(
     if (lies > 0) table.patience = Math.max(0, table.patience - 1);
     if (fresh > 0) table.patience = Math.min(table.patienceMax, table.patience + 1);
   }
-  if (reply?.heard.tone === "hostile") {
+  if (reply?.heard?.tone === "hostile") {
     table.patience = Math.max(0, table.patience - 1);
     ledger.push("말투가 상대를 상하게 했다");
   }
@@ -306,6 +343,10 @@ export function settleTableReply(
     pushNarrative(state, `${name} 협상 결렬 — 테이블에서 상대가 일어났다`, 4);
   }
   const closed = negotiation.status !== "open";
+  // 협상이 끝났으면 열려 있던 방도 같은 자리에서 닫힌다 — 끝난 협상에 앉아 있는 방은 없다
+  if (closed && state.pendingNegotiation?.negotiationId === negotiation.id) {
+    closeNegotiation(state);
+  }
 
   // ── 줄을 적는다 — 일어나는 것은 장부가 정했다 ──
   const stance: TableStance | undefined = reply
@@ -346,4 +387,140 @@ export function settleTableReply(
 /** 그 화자의 이름 — 서류가 부르는 이름 그대로다 (`tableVoicesOf`) */
 export function speakerName(seat: TableSeat, speaker: TableSpeaker): string {
   return seat.voices.find((v) => v.speaker === speaker)?.name ?? "상대";
+}
+
+// ── 협상 방 — 모드의 문 (transfer.md §12-2) ─────────────────────────
+
+export interface RoomResult {
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * **방을 세운다** — 경기의 `startMatch`와 같은 자리다. 협상이 없으면 선수와 갈래로 오퍼
+ * 없는 빈 협상을 연다(`openTalks`). 판을 세울 뿐이고 감독은 게이트를 지나 앉는다
+ * (`markSeated`). 경기 중에는 열리지 않고, 방은 한 번에 하나다.
+ */
+export function startNegotiation(
+  state: GameState,
+  input: { negotiationId?: string; playerId?: string; kind?: TalksKind },
+): RoomResult & { negotiationId?: string } {
+  if (state.phase === "match") {
+    return { ok: false, message: "경기 중에는 협상 자리에 앉을 수 없습니다" };
+  }
+  if (state.phase === "negotiation" && state.pendingNegotiation) {
+    const open = state.pendingNegotiation.negotiationId;
+    return {
+      ok: false,
+      message: `이미 협상 자리가 열려 있습니다 (${open}) — 먼저 일어서야 합니다`,
+    };
+  }
+  let negotiation: Negotiation | undefined;
+  let opened = false;
+  if (input.negotiationId !== undefined) {
+    negotiation = state.negotiations.find((n) => n.id === input.negotiationId);
+    if (!negotiation) {
+      return {
+        ok: false,
+        message: `협상 "${input.negotiationId}"${josaOf(input.negotiationId, "을/를")} 찾지 못했습니다`,
+      };
+    }
+  } else if (input.playerId !== undefined) {
+    const talks = openTalks(state, {
+      playerId: input.playerId,
+      ...(input.kind === undefined ? {} : { kind: input.kind }),
+    });
+    if (!talks.ok) return talks;
+    negotiation = talks.negotiation;
+    opened = talks.opened;
+  } else {
+    return {
+      ok: false,
+      message: "누구와 마주 앉는지 알 수 없습니다 — negotiationId나 playerId가 필요합니다",
+    };
+  }
+  if (negotiation.status !== "open") {
+    return { ok: false, message: `이미 끝난 협상입니다 (${negotiation.status})` };
+  }
+  const phaseBefore: PendingNegotiation["phaseBefore"] =
+    state.phase === "matchday" ? "matchday" : "idle";
+  state.pendingNegotiation = {
+    negotiationId: negotiation.id,
+    seated: false,
+    phaseBefore,
+    openedOn: state.date,
+  };
+  state.phase = "negotiation";
+  const name = playerById(state, negotiation.gamePlayerId)?.name ?? negotiation.gamePlayerId;
+  journal({
+    kind: "command",
+    name: "start_negotiation",
+    input,
+    ok: true,
+    message: `${name} — 협상 자리를 마련했다 (${negotiation.id})`,
+    source: "tool",
+  });
+  return {
+    ok: true,
+    negotiationId: negotiation.id,
+    message:
+      `${name}${josaOf(name, "과/와")} 마주 앉을 자리를 마련했다` +
+      (opened ? " — 오퍼는 없다" : "") +
+      ` (${negotiation.id}). 감독에게 입장 확인 창이 뜬다`,
+  };
+}
+
+/**
+ * 감독이 자리에 앉았다 — 게이트가 닫히고 **자리에 앉는 턴**이 열린다. 그 턴에는
+ * 도구가 없다: 방과 건너편 사람들, 상대의 첫 말까지다.
+ */
+export function markSeated(state: GameState): void {
+  if (state.pendingNegotiation) state.pendingNegotiation.seated = true;
+}
+
+/** 지금 열린 방의 협상 — 방이 없으면 null */
+export function roomNegotiationOf(state: GameState): Negotiation | null {
+  const id = state.pendingNegotiation?.negotiationId;
+  if (state.phase !== "negotiation" || id === undefined) return null;
+  return state.negotiations.find((n) => n.id === id) ?? null;
+}
+
+/**
+ * **방을 닫는다** — `phase`는 들어서기 전의 것으로 돌아간다. 협상 자체는 건드리지 않는다:
+ * 합의·결렬은 이미 장부가 적었고, 자리 뜨기(`left`)는 협상을 `open`으로 둔다 — 편지가
+ * 그 뒤를 잇고, 다시 앉으면 남은 인내 그대로다.
+ */
+export function closeNegotiation(
+  state: GameState,
+  reason: "left" | "closed" = "closed",
+): RoomResult {
+  const room = state.pendingNegotiation;
+  if (!room || state.phase !== "negotiation") {
+    return { ok: false, message: "열린 협상 자리가 없습니다" };
+  }
+  const negotiation = state.negotiations.find((n) => n.id === room.negotiationId);
+  if (reason === "left" && negotiation && negotiation.status === "open" && negotiation.table) {
+    negotiation.table.lines.push(ledgerLine(state, "감독이 자리에서 일어났다 — 협상은 열려 있다"));
+  }
+  state.phase = room.phaseBefore;
+  state.pendingNegotiation = null;
+  const name = negotiation
+    ? (playerById(state, negotiation.gamePlayerId)?.name ?? negotiation.gamePlayerId)
+    : room.negotiationId;
+  const status = negotiation?.status ?? "open";
+  journal({
+    kind: "command",
+    name: "close_negotiation",
+    input: { negotiationId: room.negotiationId, reason },
+    ok: true,
+    message: `${name} — 자리를 닫았다 (${reason === "left" ? "일어섰다" : status})`,
+    source: "tool",
+  });
+  return {
+    ok: true,
+    message:
+      reason === "left"
+        ? `${name}${josaOf(name, "과/와")}의 자리에서 일어났다 — 협상은 열려 있다`
+        : `${name} 협상이 끝나 자리가 닫혔다 (${status})`,
+  };
 }

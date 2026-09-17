@@ -5,8 +5,14 @@ import {
   acceptDeal,
   activeContract,
   sitAtTable,
+  seatAt,
   settleTableReply,
   tablePatienceOf,
+  startNegotiation,
+  markSeated,
+  closeNegotiation,
+  roomNegotiationOf,
+  buildOfficeViews,
   addDays,
   advanceTime,
   answerIncomingOffer,
@@ -3514,6 +3520,134 @@ describe("테이블 — 마주 앉으면 그 자리에서 답한다 (transfer.md
     expect(them[them.length - 1]!.stance).toBe("leaving");
     // 끝난 협상에는 다시 앉을 수 없다
     expect(sitAtTable(state, negotiation.id, "잠깐만").ok).toBe(false);
+  });
+});
+
+/**
+ * 협상 방 — **마주 앉는 일은 모드다** (transfer.md §12-2). 여기서 고정하는 것은 상태 전이다:
+ * 방이 열리고 닫힐 때 `phase`가 어디로 가는가, 앉는 두 걸음, 자리 뜨기가 협상을 살려 두는가,
+ * 인내가 바닥나면 방도 함께 닫히는가. 장면은 모델의 것이다.
+ */
+describe("협상 방 — 열림 → 자리 → 합의·결렬·자리 뜨기 (transfer.md §12-2)", () => {
+  function withOffer(state: GameState) {
+    state.date = "2026-08-01";
+    const player = target(state);
+    const sent = sendOffer(state, offerFor(state, player.id, 0.5));
+    expect(sent.ok, sent.message).toBe(true);
+    return openNegotiationFor(state, player.id)!;
+  }
+
+  it("방을 세우면 phase가 협상으로 갈리고, 한 번에 하나만 열리며, 경기 중에는 열리지 않는다", () => {
+    const state = structuredClone(createTestGame());
+    const negotiation = withOffer(state);
+    const opened = startNegotiation(state, { negotiationId: negotiation.id });
+    expect(opened.ok, opened.message).toBe(true);
+    expect(state.phase).toBe("negotiation");
+    expect(state.pendingNegotiation).toMatchObject({
+      negotiationId: negotiation.id,
+      seated: false,
+      phaseBefore: "idle",
+    });
+    expect(roomNegotiationOf(state)?.id).toBe(negotiation.id);
+    // 방은 하나다 — 같은 협상이라도 다시 열지 못한다
+    expect(startNegotiation(state, { negotiationId: negotiation.id }).ok).toBe(false);
+    // 앉는 두 걸음 — 게이트를 지나면 앉은 것이다
+    markSeated(state);
+    expect(state.pendingNegotiation?.seated).toBe(true);
+    expect(seatAt(state, negotiation.id).ok).toBe(true);
+    // 자리 뜨기 — 협상은 열린 채 방만 닫히고 phase는 들어서기 전으로
+    const left = closeNegotiation(state, "left");
+    expect(left.ok).toBe(true);
+    expect(state.phase).toBe("idle");
+    expect(state.pendingNegotiation).toBeNull();
+    expect(negotiation.status).toBe("open");
+    expect(
+      negotiation.table?.lines.some((l) => l.by === "ledger" && l.text.includes("일어났다")),
+    ).toBe(true);
+    // 열린 방이 없으면 닫을 것도 없다
+    expect(closeNegotiation(state).ok).toBe(false);
+    // 경기 중에는 열리지 않는다
+    state.phase = "match";
+    expect(startNegotiation(state, { negotiationId: negotiation.id }).ok).toBe(false);
+    state.phase = "idle";
+  });
+
+  it("협상이 없으면 선수와 갈래로 빈 협상을 열고, 경기일에서 들어섰으면 경기일로 돌아간다", () => {
+    const state = structuredClone(createTestGame());
+    state.date = "2026-08-01";
+    state.phase = "matchday";
+    const player = target(state);
+    const opened = startNegotiation(state, { playerId: player.id, kind: "buy" });
+    expect(opened.ok, opened.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id);
+    expect(negotiation?.rounds).toHaveLength(0);
+    expect(state.pendingNegotiation?.phaseBefore).toBe("matchday");
+    closeNegotiation(state, "left");
+    expect(state.phase).toBe("matchday");
+    // 누구와 앉는지 없으면 반려
+    state.phase = "idle";
+    expect(startNegotiation(state, {}).ok).toBe(false);
+  });
+
+  it("말 없이 앉은 자리도 기다리던 오퍼를 오늘로 당기되 감독의 줄은 더하지 않는다", () => {
+    const state = structuredClone(createTestGame());
+    const negotiation = withOffer(state);
+    expect(pendingOffer(negotiation)!.respondsOn! > state.date).toBe(true);
+    const seat = seatAt(state, negotiation.id);
+    if (!seat.ok) throw new Error(seat.message);
+    expect(pendingOffer(negotiation)!.respondsOn).toBe(state.date);
+    expect(seat.seat.table.lines).toHaveLength(0);
+    expect(seat.seat.table.patience).toBe(tablePatienceOf(state, negotiation.gamePlayerId));
+    // 인내는 방을 나갔다 다시 앉아도 그대로다 — 되돌아오지 않는 자원
+    seat.seat.table.patience = 2;
+    const again = seatAt(state, negotiation.id);
+    if (!again.ok) throw new Error(again.message);
+    expect(again.seat.table.patience).toBe(2);
+  });
+
+  it("인내가 바닥나면 협상이 결렬되고 열려 있던 방도 같은 자리에서 닫힌다", () => {
+    const state = structuredClone(createTestGame());
+    const negotiation = withOffer(state);
+    negotiation.rounds.pop();
+    startNegotiation(state, { negotiationId: negotiation.id });
+    markSeated(state);
+    const seat = sitAtTable(state, negotiation.id, "됐고, 그냥 내놔");
+    if (!seat.ok) throw new Error(seat.message);
+    seat.seat.table.patience = 1;
+    // 방의 답 — 대사 줄 없이 들은 것과 태도만 (agents.md §4-1)
+    const outcome = settleTableReply(state, seat.seat, {
+      stance: "leaving",
+      heard: { tone: "hostile", claims: [] },
+    });
+    expect(outcome.closed).toBe(true);
+    expect(negotiation.status).toBe("rejected");
+    expect(state.phase).toBe("idle");
+    expect(state.pendingNegotiation).toBeNull();
+    // 대사 줄이 없으니 them 줄도 없다 — 장부 줄만 남는다
+    expect(negotiation.table!.lines.filter((l) => l.by === "them")).toHaveLength(0);
+    expect(negotiation.table!.lines.some((l) => l.by === "ledger")).toBe(true);
+  });
+
+  it("방이 열려 있으면 화면이 읽는 뷰가 서고 안건은 서지 않는다 — 닫히면 사라진다", () => {
+    const state = structuredClone(createTestGame());
+    const negotiation = withOffer(state);
+    expect(buildOfficeViews(state).negotiation).toBeNull();
+    startNegotiation(state, { negotiationId: negotiation.id });
+    const before = buildOfficeViews(state);
+    expect(before.negotiation).toMatchObject({
+      negotiationId: negotiation.id,
+      beforeSeating: true,
+      awaiting: true,
+      kind: "buy",
+    });
+    expect(before.attention).toEqual([]);
+    expect(before.negotiation!.ours?.fee).toBe(negotiation.rounds[0]!.fee);
+    expect(before.negotiation!.voices.map((v) => v.speaker)).toEqual(["club", "agent"]);
+    expect(before.negotiation!.patience.left).toBe(before.negotiation!.patience.max);
+    markSeated(state);
+    expect(buildOfficeViews(state).negotiation?.beforeSeating).toBe(false);
+    closeNegotiation(state, "left");
+    expect(buildOfficeViews(state).negotiation).toBeNull();
   });
 });
 

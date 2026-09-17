@@ -349,6 +349,14 @@ export interface ChatTurn {
    */
   inMatch?: boolean;
   /**
+   * **협상 방의 턴인가** — 방 안에서 감독이 하고 협상 GM이 답한 턴은 평시 이력에서
+   * 갈린다 (docs/llm/agents.md §5). 방을 여는 `start_negotiation` 턴은 평시다 —
+   * 방의 이력은 자리에 앉는 턴부터다. 옛 세이브엔 없다 (optional).
+   */
+  inNegotiation?: boolean;
+  /** 어느 협상인가 (`Negotiation.id`) — `inNegotiation`인 턴에만 있다 */
+  negotiationId?: string;
+  /**
    * 어느 경기인가 (`MATCH.id`) — `inMatch`인 턴에만 있다.
    *
    * 경기가 끝나면 그 구간을 **한 장으로 접어** 결과만 남기는데, 어느 경기의
@@ -564,7 +572,27 @@ export interface PendingMatch {
   };
 }
 
-export type GamePhase = "idle" | "matchday" | "match";
+export type GamePhase = "idle" | "matchday" | "match" | "negotiation";
+
+/**
+ * **열린 협상 방** — 경기의 `pendingMatch`와 같은 자리다 (docs/simulation/transfer.md §12-2).
+ *
+ * 방이 여는 것은 라우팅뿐이다 — 협상의 장부(오퍼·조건서·인내·줄)는 그대로
+ * `Negotiation`이 든다. 방이 닫히면 `null`이 되고 `phase`는 들어서기 전의 것으로 돌아간다.
+ * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+ */
+export interface PendingNegotiation {
+  negotiationId: string;
+  /**
+   * 감독이 자리에 앉았는가 — **들어서는 것은 두 걸음이다.** `start_negotiation`은 방을
+   * 세울 뿐이고(게이트가 선다), 감독이 앉으면 협상 GM이 도구 없이 자리에 앉는 턴 하나를
+   * 갖는다. 값이 오가는 것은 그다음부터다.
+   */
+  seated?: boolean;
+  /** 들어서기 전의 국면 — 방을 나오면 여기로 돌아간다 (`idle` · `matchday`) */
+  phaseBefore: "idle" | "matchday";
+  openedOn: string;
+}
 
 /** 하루가 열리는 시각 — 아무 선언도 없으면 여기서 시작한다 */
 export const DAY_START = "09:00";
@@ -628,6 +656,8 @@ export interface GameState {
   userTeamId: string;
   phase: GamePhase;
   pendingMatch: PendingMatch | null;
+  /** 열린 협상 방 — `phase`가 `negotiation`일 때만 선다. 옛 세이브엔 없다 (optional) */
+  pendingNegotiation?: PendingNegotiation | null;
   /**
    * 이 세계의 범위 — 없으면 카탈로그 전체다(실게임·옛 세이브).
    * 테스트가 리그·팀 수를 줄인 작은 세계를 만들 때만 채워진다 (`world/scope.ts`).
@@ -3359,6 +3389,7 @@ export function createGame(input: CreateGameInput): GameState {
     userTeamId: input.userTeamId,
     phase: "idle",
     pendingMatch: null,
+    pendingNegotiation: null,
     ...(world ? { world } : {}),
 
     teams,

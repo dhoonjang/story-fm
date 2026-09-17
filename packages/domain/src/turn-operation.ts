@@ -25,6 +25,13 @@ export type TurnOperation =
   /** 경기 진행 — 한 구간 더. 경기 중에는 시간을 달력이 아니라 경기가 민다 */
   | { kind: "advance_match" }
   /**
+   * 협상 방에 앉는다 — `start_negotiation`이 세운 방의 게이트를 지난다. 그 턴은 자리에
+   * 앉는 첫 턴이고 도구가 없다 (docs/simulation/transfer.md §12-2).
+   */
+  | { kind: "enter_negotiation" }
+  /** 협상 방에서 일어선다 — 협상은 열린 채 방만 닫힌다 */
+  | { kind: "leave_negotiation" }
+  /**
    * **제안 폼** — 화면이 정확한 값으로 낸 제안 (proposal.ts). 감독의 말이 없는 제안 턴은
    * 이 손잡이로 선다: 서버가 코어 명령을 먼저 걸고 그 문장을 `label`에 담는다. 화면은
    * 이 갈래를 보내지 않는다 — 요청에는 `proposal`이 따로 실리고 서버가 여기로 옮긴다
@@ -49,6 +56,8 @@ export const TurnOperationSchema = z.discriminatedUnion("kind", [
   }),
   z.object({ kind: z.literal("skip_to_next_match"), date: DateString }),
   z.object({ kind: z.literal("advance_match") }),
+  z.object({ kind: z.literal("enter_negotiation") }),
+  z.object({ kind: z.literal("leave_negotiation") }),
 ]);
 
 /**
@@ -66,6 +75,10 @@ export function operationLabel(operation: TurnOperation): string {
       return `시간 진행 — 다음 경기 (${operation.date})`;
     case "advance_match":
       return "경기 진행";
+    case "enter_negotiation":
+      return "협상 자리에 앉는다";
+    case "leave_negotiation":
+      return "협상 자리에서 일어선다";
     case "propose":
       return operation.label;
   }
