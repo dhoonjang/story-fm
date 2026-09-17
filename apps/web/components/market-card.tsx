@@ -102,8 +102,11 @@ function badgeOf(card: MarketCard): string {
   }
 }
 
-/** 조건 한 벌 — 정산금·이적료·분할·주급·연수 중 있는 것만 (임대료는 이적료 자리를 쓴다) */
-function Terms({ terms, loan = false }: { terms: MarketTerms; loan?: boolean }) {
+/**
+ * 조건 한 벌 — 정산금·이적료·분할·주급·연수 중 있는 것만 (임대료는 이적료 자리를 쓴다).
+ * 협상 방의 조건서도 이 줄을 쓴다 — 카드와 방이 같은 숫자를 다른 자로 세우지 않는다.
+ */
+export function Terms({ terms, loan = false }: { terms: MarketTerms; loan?: boolean }) {
   return (
     <>
       {terms.fee !== undefined && (

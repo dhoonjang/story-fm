@@ -46,6 +46,7 @@ export function Composer({
   onOperate,
   busy,
   inMatch,
+  inNegotiation,
   canSkip,
   nextMatchDate,
   inputRef,
@@ -58,7 +59,12 @@ export function Composer({
   onOperate: (operation: TurnOperation) => void;
   busy: boolean;
   inMatch: boolean;
-  /** 시간을 넘길 수 있는가 — 경기 중에는 시간을 경기가 민다 */
+  /**
+   * 협상 방 안인가 — 빈 입력의 버튼이 **잠긴다.** 방 안에서는 넘길 시간이 없고 진행할
+   * 구간도 없다. 일어서는 손잡이는 입력창이 아니라 방의 칸에 선다 (design-system §7-1).
+   */
+  inNegotiation: boolean;
+  /** 시간을 넘길 수 있는가 — 경기 중에도 협상 방 안에서도 시간은 달력이 밀지 않는다 */
   canSkip: boolean;
   /** 다음 경기 날짜 — 없으면(시즌 끝) "다음 경기" 눈금을 그리지 않는다 */
   nextMatchDate: string | null;
@@ -161,9 +167,11 @@ export function Composer({
             if (inMatch) return void onOperate({ kind: "advance_match" });
             setSkipOpen((v) => !v);
           }}
-          disabled={busy || (!hasInput && !inMatch && !canSkip)}
+          disabled={busy || (!hasInput && (inNegotiation || (!inMatch && !canSkip)))}
           data-testid={hasInput ? "chat-send" : inMatch ? "match-advance" : "time-skip-toggle"}
           aria-label={hasInput ? "전송" : inMatch ? "경기 진행" : "시간 보내기"}
+          /* 잠긴 이유는 사실 한 줄 — 방 안에서 날짜는 흐르지 않는다 (transfer.md §12-2) */
+          title={!hasInput && inNegotiation ? "협상 방 안에서는 날짜가 흐르지 않습니다" : undefined}
           aria-expanded={hasInput || inMatch ? undefined : skipOpen}
         >
           {hasInput ? <IconSend /> : inMatch ? <IconPlay /> : <IconSkip />}

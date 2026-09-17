@@ -28,10 +28,14 @@ export const PANEL_OF: Record<string, PanelKey> = {
   set_lineup: "스쿼드",
   set_squad_level: "스쿼드",
   set_tactics: "스쿼드",
-  // 손잡이 셋은 기록되지 않는다 — 뒤의 명령들이 칩·말풍선·카드를 세운다
+  // 손잡이 넷은 기록되지 않는다 — 뒤의 명령들이 칩·말풍선·카드를 세운다
   tactic_orders: "스쿼드",
   training_orders: "달력",
   market_orders: "재정",
+  table_orders: "재정",
+  // 방을 세우는 스킬 — 경기의 `start_match`와 같은 자리다. 방 자체는 게이트가 세우고,
+  // 협상이 실리는 장부는 이적 예산이 선 재정이다
+  start_negotiation: "재정",
   set_player_tactic: "스쿼드",
   // 세트피스는 판의 사실이다 — 키커도 인원도 확인하러 갈 화면은 전술판이 선 스쿼드다
   set_set_piece_takers: "스쿼드",
@@ -97,8 +101,8 @@ export const PANEL_OF: Record<string, PanelKey> = {
 export const CARD_CALLS: ReadonlySet<string> = new Set([
   "send_offer",
   "respond_offer",
-  // 테이블의 답이 오퍼를 판정하면 그 카드가 선다 — 말만 오간 턴은 카드 없이 지나간다
-  "speak_at_table",
+  // 방 안의 상대의 답이 오퍼를 판정하면 그 카드가 선다 — 말만 오간 턴은 카드 없이 지나간다
+  "reply_at_table",
   "open_renewal",
   "open_release",
   "withdraw_offer",

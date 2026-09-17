@@ -24,11 +24,23 @@ import { CALL_LABEL } from "../lib/call-label";
  */
 const MATCH_ONLY = new Set(["exploit_point", "set_match_plan"]);
 
+/**
+ * 협상 방에서만 부를 수 있고 **장부에 흔적을 남기지 않는** 호출 — 자리를 뜨는 것은
+ * 방이 닫히는 것으로 보이고(`silent`로 기록된다), 채팅에는 아무것도 서지 않는다.
+ * 방 안의 다른 둘은 길이 있다: `table_orders`는 손잡이라 뒤의 명령이 서고,
+ * `reply_at_table`은 오퍼를 판정한 턴에 카드가 선다 (transfer.md §12-2).
+ */
+const ROOM_ONLY = new Set(["leave_table"]);
+
 describe("호출이 화면에 서는 길", () => {
   it("조작형 호출은 모두 말풍선 아니면 카드다", () => {
     const orphans = SKILL_CATALOG.filter(
       (s) =>
-        !s.readOnly && !hasRailHint(s.name) && !CARD_CALLS.has(s.name) && !MATCH_ONLY.has(s.name),
+        !s.readOnly &&
+        !hasRailHint(s.name) &&
+        !CARD_CALLS.has(s.name) &&
+        !MATCH_ONLY.has(s.name) &&
+        !ROOM_ONLY.has(s.name),
     ).map((s) => s.name);
     expect(orphans, "말풍선(PANEL_OF)이나 카드(CARD_CALLS) 중 하나로 보내야 한다").toEqual([]);
   });
