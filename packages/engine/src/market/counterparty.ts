@@ -18,6 +18,7 @@ import {
   ageOf,
   isPlayerDeal,
   naturalPositionOf,
+  pointsBonusEligible,
   squadStatusRank,
   statusAtRank,
 } from "@story-fm/domain";
@@ -50,6 +51,9 @@ import {
   ESCALATOR_ASK_MAX,
   ESCALATOR_ASK_MIN,
   ESCALATOR_ASK_PCT,
+  POINTS_ASK_WAGE_SHARE,
+  POINTS_ASK_WAGE_SHARE_MAX,
+  POINTS_ASK_WAGE_SHARE_MIN,
   askableKindsOf,
   checkTerms,
   offeredTermsOf,
@@ -371,8 +375,10 @@ export function termAsksOf(state: GameState, negotiation: Negotiation): TermAsk[
     pendingOffer(negotiation)?.weeklyWage ??
     negotiation.personal?.weeklyWage ??
     wageExpectationOf(state, player);
+  // 골·도움을 재는 조항은 그 자리의 선수에게만 — 부르는 쪽도 같은 자를 읽는다 (transfer.md §12-3)
+  const eligible = pointsBonusEligible(naturalPositionOf(player).position);
   return askableKindsOf(negotiation)
-    .filter((kind) => kind !== "other")
+    .filter((kind) => kind !== "other" && (kind !== "points" || eligible))
     .map((kind): TermAsk => {
       if (kind === "buyout") {
         const ask = buyoutAskOf(value);
@@ -400,6 +406,17 @@ export function termAsksOf(state: GameState, negotiation: Negotiation): TermAsk[
           label: DEAL_TERM_KO[kind],
           anchor: ESCALATOR_ASK_PCT,
           room: { min: ESCALATOR_ASK_MIN, max: ESCALATOR_ASK_MAX },
+        };
+      }
+      if (kind === "points") {
+        return {
+          kind,
+          label: DEAL_TERM_KO[kind],
+          anchor: Math.round(wage * POINTS_ASK_WAGE_SHARE),
+          room: {
+            min: Math.round(wage * POINTS_ASK_WAGE_SHARE_MIN),
+            max: Math.round(wage * POINTS_ASK_WAGE_SHARE_MAX),
+          },
         };
       }
       return { kind, label: DEAL_TERM_KO[kind] };

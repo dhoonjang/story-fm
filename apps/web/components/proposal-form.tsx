@@ -54,19 +54,33 @@ export interface ProposalHandle {
 
 const ProposalContext = createContext<ProposalHandle | null>(null);
 
-/** 폼을 보내는 자리 — 실패면 코어가 돌려준 이유 한 줄, 성공이면 null */
-export type ProposalSubmit = (proposal: ProposalInput, message?: string) => Promise<string | null>;
+/**
+ * **제안서** — 폼이 써 낸 구조체와 입력창의 칩이 읽는 요약. 폼은 보내지 않는다: 제안서가
+ * 입력창에 첨부되고, 감독의 말과 함께(또는 말 없이) 턴 하나로 나간다 (overview.md §5).
+ */
+export interface ProposalDraft {
+  input: ProposalInput;
+  playerId: string;
+  playerName: string;
+  /** 칩에 서는 한 줄 — 갈래와 값. 문장은 화면의 것이라 여기서 만든다 */
+  summary: string;
+  /** 칩을 눌러 다시 열 때 폼에 앉힐 값 */
+  prefill: ProposalPrefill;
+}
+
+/** 폼이 제안서를 써 냈다 — 부르는 쪽이 입력창에 첨부한다 */
+export type ProposalDrafted = (draft: ProposalDraft) => void;
 
 export function ProposalProvider({
   gameId,
   busy,
-  onSubmit,
+  onDraft,
   children,
 }: {
   gameId: string;
-  /** 턴이 도는 동안은 보낼 수 없다 — 전송 버튼과 같은 잠금 */
+  /** 턴이 도는 동안은 쓸 수 없다 — 전송 버튼과 같은 잠금 */
   busy: boolean;
-  onSubmit: ProposalSubmit;
+  onDraft: ProposalDrafted;
   children: ReactNode;
 }) {
   const [target, setTarget] = useState<{ playerId: string; prefill?: ProposalPrefill } | null>(
@@ -87,7 +101,7 @@ export function ProposalProvider({
           playerId={target.playerId}
           prefill={target.prefill}
           busy={busy}
-          onSubmit={onSubmit}
+          onDraft={onDraft}
           onClose={() => setTarget(null)}
         />
       )}
@@ -117,14 +131,14 @@ function ProposalDialog({
   playerId,
   prefill,
   busy,
-  onSubmit,
+  onDraft,
   onClose,
 }: {
   gameId: string;
   playerId: string;
   prefill?: ProposalPrefill;
   busy: boolean;
-  onSubmit: ProposalSubmit;
+  onDraft: ProposalDrafted;
   onClose: () => void;
 }) {
   const [card, setCard] = useState<PlayerCardView | null>(null);
@@ -178,7 +192,7 @@ function ProposalDialog({
             view={card.proposal}
             prefill={prefill}
             busy={busy}
-            onSubmit={onSubmit}
+            onDraft={onDraft}
             onClose={onClose}
           />
         )}
@@ -414,14 +428,14 @@ function ProposalBody({
   view,
   prefill,
   busy,
-  onSubmit,
+  onDraft,
   onClose,
 }: {
   card: PlayerCardView;
   view: ProposalView;
   prefill?: ProposalPrefill;
   busy: boolean;
-  onSubmit: ProposalSubmit;
+  onDraft: ProposalDrafted;
   onClose: () => void;
 }) {
   const kinds = view.kinds;
@@ -451,9 +465,6 @@ function ProposalBody({
     (prefill?.terms ?? []).map((term, i) => ({ ...term, id: i + 1 })),
   );
   const [nextId, setNextId] = useState((prefill?.terms?.length ?? 0) + 1);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
 
   /** 갈래를 바꾸면 자도 바뀐다 — 코어가 낸 그 갈래의 값으로 되돌린다 */
   const pickKind = (next: OfferKind) => {
@@ -495,6 +506,9 @@ function ProposalBody({
       case "bonus":
         base.fee = Math.round((weeklyWage * 12) / WAGE_STEP) * WAGE_STEP;
         break;
+      case "points":
+        base.fee = Math.max(WAGE_STEP, Math.round((weeklyWage * 0.1) / WAGE_STEP) * WAGE_STEP);
+        break;
       case "escalator":
         base.trigger = "europe";
         base.pct = 20;
@@ -516,10 +530,10 @@ function ProposalBody({
   const updateTerm = (id: number, patch: Partial<DealTerm>) =>
     setTerms(terms.map((t) => (t.id === id ? { ...t, ...patch } : t)));
 
-  const submit = async () => {
-    if (busy || sending) return;
-    const cleaned: DealTerm[] = terms.map((draft) => {
-      const term: DealTerm & { id?: number } = { ...draft };
+  const draft = () => {
+    if (busy) return;
+    const cleaned: DealTerm[] = terms.map((row) => {
+      const term: DealTerm & { id?: number } = { ...row };
       delete term.id;
       return term;
     });
@@ -544,22 +558,44 @@ function ProposalBody({
       ...personal,
       ...(cleaned.length > 0 ? { terms: cleaned } : {}),
     };
-    setSending(true);
-    setError(null);
-    const failed = await onSubmit(input, message.trim() || undefined);
-    setSending(false);
-    if (failed === null) onClose();
-    else setError(failed);
+    /** 칩의 요약 — 갈래와 값. 값이 없는 칸은 적지 않는다 */
+    const summary = [
+      `${card.name} ${PROPOSAL_KIND_KO[kind]}`,
+      ...(input.fee !== undefined && !view.freeAgent
+        ? [
+            `${kind === "loan" ? "임대료" : "이적료"} ${formatMoney(input.fee)}` +
+              (input.paymentYears !== undefined ? ` ${input.paymentYears}년 분할` : ""),
+          ]
+        : []),
+      `주급 ${formatMoney(personal.weeklyWage)}`,
+      `${personal.years}년`,
+      ...(cleaned.length > 0 ? [`조건 ${cleaned.length}`] : []),
+    ].join(" · ");
+    onDraft({
+      input,
+      playerId: card.id,
+      playerName: card.name,
+      summary,
+      prefill: {
+        kind,
+        ...(clubSide ? { fee, paymentYears } : {}),
+        weeklyWage,
+        years,
+        squadStatus,
+        terms: cleaned,
+      },
+    });
+    onClose();
   };
 
-  const locked = busy || sending;
+  const locked = busy;
   return (
     <form
       className="pf"
       data-testid="proposal-body"
       onSubmit={(e) => {
         e.preventDefault();
-        void submit();
+        draft();
       }}
     >
       <header className="pf-head">
@@ -757,27 +793,11 @@ function ProposalBody({
             </div>
           )}
         </section>
-
-        <label className="pf-card pf-message">
-          <span className="pf-label">한마디</span>
-          <textarea
-            rows={2}
-            maxLength={1000}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            disabled={locked}
-          />
-        </label>
       </div>
 
       <footer className="pf-foot">
-        {error !== null && (
-          <p className="pf-error" role="alert" data-testid="proposal-error">
-            {error}
-          </p>
-        )}
         <button type="submit" className="pf-submit" disabled={locked} data-testid="proposal-submit">
-          {PROPOSAL_KIND_KO[kind]} 제안
+          제안서 작성
         </button>
       </footer>
     </form>
@@ -799,7 +819,7 @@ function TermRow({
   onChange: (patch: Partial<DealTerm>) => void;
   onRemove: () => void;
 }) {
-  const money = term.kind === "buyout" || term.kind === "bonus";
+  const money = term.kind === "buyout" || term.kind === "bonus" || term.kind === "points";
   const valued =
     money ||
     term.kind === "escalator" ||
@@ -829,6 +849,7 @@ function TermRow({
           onChange={(fee) => onChange({ fee })}
           locked={locked}
           label={`${DEAL_TERM_KO[term.kind]} 금액`}
+          {...(term.kind === "points" ? { tail: "/P" } : {})}
         />
       )}
       {term.kind === "escalator" && (

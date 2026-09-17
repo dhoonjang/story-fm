@@ -106,6 +106,7 @@ import {
   offerTerms,
   proposePersonal,
   settleEscalators,
+  settlePointsBonus,
   TALKS_DAYS,
   tickPromises,
 } from "@story-fm/engine";
@@ -123,6 +124,7 @@ import {
   sellOnAmountOf,
   sellOnRateForAge,
   naturalPositionOf,
+  pointsBonusEligible,
   positionGroupOf,
   type MarketCard,
   type Negotiation,
@@ -3665,7 +3667,7 @@ describe("조건서 — 돈 말고 오가는 것", () => {
     return player;
   }
 
-  it("감독의 조건은 셋까지, 같은 갈래는 고쳐 부르고, 갈래 밖 값은 서지 않는다", () => {
+  it("감독의 조건은 다섯까지, 같은 갈래는 고쳐 부르고, 갈래 밖 값은 서지 않는다", () => {
     const state = createTestGame(42);
     const player = ourPlayer(state);
     const talks = openTalks(state, { playerId: player.id });
@@ -3678,15 +3680,17 @@ describe("조건서 — 돈 말고 오가는 것", () => {
         { kind: "buyout", fee: 40_000_000 },
         { kind: "escalator", trigger: "europe", pct: 20 },
         { kind: "signing", position: "st" },
+        { kind: "number", number: 7 },
+        { kind: "bonus", fee: 500_000 },
         { kind: "other", note: "가족 숙소를 구단이 마련한다" },
       ],
     });
     expect(first.ok, first.message).toBe(true);
     const sheet = talks.negotiation.terms!;
-    // 넷째 조건은 상한에 걸리고, 문장은 상한 밖이다
-    expect(sheet.filter((row) => row.term.kind !== "other")).toHaveLength(3);
+    // 여섯째 조건은 상한에 걸리고, 문장은 상한 밖이다
+    expect(sheet.filter((row) => row.term.kind !== "other")).toHaveLength(5);
     expect(sheet.some((row) => row.term.kind === "other")).toBe(true);
-    expect(first.message).toContain("3개까지");
+    expect(first.message).toContain("5개까지");
     // 같은 갈래를 다시 올리면 값이 바뀔 뿐 둘이 되지 않는다
     offerTerms(state, { negotiationId: id, terms: [{ kind: "buyout", fee: 60_000_000 }] });
     const buyouts = talks.negotiation.terms!.filter((row) => row.term.kind === "buyout");
@@ -3695,6 +3699,47 @@ describe("조건서 — 돈 말고 오가는 것", () => {
     // 값이 빈 조건은 서지 않는다
     const empty = offerTerms(state, { negotiationId: id, terms: [{ kind: "number" }] });
     expect(empty.ok).toBe(false);
+  });
+
+  /**
+   * 공격 포인트 보너스 — 자리가 정하는 조항이고, 이행은 경기마다 코어가 센다 (§12-3).
+   * 수비수에게는 서지 않고, 미드필더·공격수의 계약에 서면 골+도움 × 금액이 성적 보너스로 나간다.
+   */
+  it("공격 포인트 보너스는 미드필더·공격수에게만 서고, 포인트 × 금액이 경기마다 나간다", () => {
+    const state = createTestGame(42);
+    const ours = playersOf(state, state.userTeamId).filter((p) => !p.isCaptain);
+    const defender = ours.find((p) => positionGroupOf(naturalPositionOf(p).position) === "DF")!;
+    const forward = ours.find((p) => {
+      const group = positionGroupOf(naturalPositionOf(p).position);
+      return group === "FW" || group === "MF";
+    })!;
+    expect(pointsBonusEligible(naturalPositionOf(defender).position)).toBe(false);
+    expect(pointsBonusEligible(naturalPositionOf(forward).position)).toBe(true);
+    // 폼도 같은 자를 읽는다 — 수비수의 칩 목록에는 없고, 표 밖의 조건은 어느 쪽에도 없다
+    expect(proposalViewOf(state, defender.id)!.termKinds.renew).not.toContain("points");
+    expect(proposalViewOf(state, forward.id)!.termKinds.renew).toContain("points");
+    expect(proposalViewOf(state, forward.id)!.termKinds.renew).not.toContain("other");
+    // 수비수에게 걸면 코어가 반려한다
+    activeContract(state, defender.id)!.until = addDays(state.date, 120);
+    const talks = openTalks(state, { playerId: defender.id });
+    if (!talks.ok) throw new Error(talks.message);
+    const refused = offerTerms(state, {
+      negotiationId: talks.negotiation.id,
+      terms: [{ kind: "points", fee: 10_000 }],
+    });
+    expect(refused.ok).toBe(false);
+    expect(refused.message).toContain("수비수·골키퍼");
+    // 계약에 선 조항은 포인트 × 금액이다 — 포인트가 없으면 아무것도 나가지 않는다
+    const contract = activeContract(state, forward.id)!;
+    contract.terms = [{ kind: "points", fee: 10_000 }];
+    const finance = financeOf(state, state.userTeamId);
+    const balance = finance.balance;
+    expect(settlePointsBonus(state, forward, 0)).toBe(0);
+    expect(settlePointsBonus(state, forward, 3)).toBe(30_000);
+    expect(finance.balance).toBe(balance - 30_000);
+    const entry = finance.ledger.at(-1)!;
+    expect(entry.category).toBe("bonus");
+    expect(entry.amount).toBe(30_000);
   });
 
   it("믿을 만한 조건은 지위 한 칸씩 둘까지 세고, 거절한 요구는 한 칸 뺀다", () => {

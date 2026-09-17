@@ -30,7 +30,7 @@ import { KickoffGate } from "./kickoff-gate";
 import { NegotiationGate } from "./negotiation-gate";
 import { NegotiationRoom } from "./negotiation-room";
 import { PlayerCardProvider } from "./player-card";
-import { ProposalProvider } from "./proposal-form";
+import { ProposalProvider, type ProposalDraft } from "./proposal-form";
 import {
   IconBoard,
   IconBroadcast,
@@ -386,6 +386,11 @@ export function GameScreen({ gameId }: { gameId: string }) {
   }, [game?.chat]);
   const [input, setInput] = useState("");
   /**
+   * **첨부된 제안서** — 폼이 써 낸 구조체가 입력창에 붙어 다음 전송에 함께 나간다
+   * (overview.md §5). 코어가 반려하면 그대로 남아 감독이 칩을 눌러 값을 고친다.
+   */
+  const [draft, setDraft] = useState<ProposalDraft | null>(null);
+  /**
    * 원문 창이 열린 턴의 자리 (`game.chat`의 절대 인덱스) — 개발 모드에서만 찬다.
    * 게임의 일부가 아니라 개발 도구라 세이브에도 URL에도 남기지 않는다.
    */
@@ -503,7 +508,10 @@ export function GameScreen({ gameId }: { gameId: string }) {
       proposal?: ProposalInput,
     ): Promise<TurnStreamFailure | null> => {
       const message = operation ? "" : (text ?? input).trim();
-      if ((!message && !operation && !proposal) || busy || !game) return null;
+      // 첨부된 제안서는 감독의 말과 함께 나간다 — 손잡이 턴에는 붙지 않는다
+      const attached = proposal ?? (operation ? undefined : draft?.input);
+      const sentDraft = attached !== undefined && attached === draft?.input;
+      if ((!message && !operation && !attached) || busy || !game) return null;
       const seq = ++turnSeqRef.current;
       setBusy(true);
       setError(null);
@@ -645,6 +653,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
         stopPump();
         // 지난 알림의 "읽음"은 새 GM 턴이 들어오는 렌더에서 함께 풀린다 (`hintTurn`)
         if (payload) setGame(payload);
+        // 제안서는 턴이 서면 떼어진다 — 반려된 턴은 첨부를 그대로 둔다
+        if (payload && sentDraft) setDraft(null);
         setStreamText("");
         setBusy(false);
         /**
@@ -701,7 +711,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
         {
           ...(operation ? { operation } : message ? { message } : {}),
           orders,
-          ...(proposal ? { proposal } : {}),
+          ...(attached ? { proposal: attached } : {}),
         },
         {
           onDelta: (text) => {
@@ -720,7 +730,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       if (!pendingPayloadRef.current) commit(null);
       return failure ?? null;
     },
-    [input, busy, game, liveMatch?.matchId, liveNegotiation?.negotiationId, gameId, saver],
+    [input, busy, game, liveMatch?.matchId, liveNegotiation?.negotiationId, gameId, saver, draft],
   );
 
   /**
@@ -1083,6 +1093,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
         canSkip={canSkip}
         nextMatchDate={nextMatchDate}
         inputRef={inputRef}
+        draft={draft}
+        onRemoveDraft={() => setDraft(null)}
       />
     </section>
   );
@@ -1097,14 +1109,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
      * 그리는 자리가 폼의 문을 볼 수 있어야 한다. 보내는 길은 턴 하나다(`send`): 코어가
      * 먼저 걸고 GM이 읽는다 (transfer.md §12-3).
      */
-    <ProposalProvider
-      gameId={gameId}
-      busy={busy}
-      onSubmit={async (proposal, message) => {
-        const failure = await send(message, undefined, proposal);
-        return failure ? (failure.detail ?? failure.reason) : null;
-      }}
-    >
+    <ProposalProvider gameId={gameId} busy={busy} onDraft={setDraft}>
       <PlayerCardProvider
         gameId={gameId}
         playerNames={game.playerNames}

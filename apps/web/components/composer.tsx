@@ -3,7 +3,17 @@
 import { useState } from "react";
 import type { RefObject } from "react";
 import type { TurnOperation } from "@story-fm/agents";
-import { IconDay, IconMatch, IconPlay, IconSend, IconSkip, IconWeek } from "./icons";
+import {
+  IconClose,
+  IconContract,
+  IconDay,
+  IconMatch,
+  IconPlay,
+  IconSend,
+  IconSkip,
+  IconWeek,
+} from "./icons";
+import { useProposal, type ProposalDraft } from "./proposal-form";
 
 /**
  * 시간을 넘기는 손잡이 — **버튼이 곧 조작이다.**
@@ -50,6 +60,8 @@ export function Composer({
   canSkip,
   nextMatchDate,
   inputRef,
+  draft = null,
+  onRemoveDraft,
 }: {
   input: string;
   onInput: (value: string) => void;
@@ -73,11 +85,18 @@ export function Composer({
    * 포커스는 턴이 끝나는 시점의 일이라 입력줄 혼자 알 수 없다.
    */
   inputRef: RefObject<HTMLTextAreaElement | null>;
+  /**
+   * **첨부된 제안서** — 폼이 써 낸 구조체가 입력창 위에 칩으로 선다 (overview.md §5). 말과
+   * 함께 나가고, 말이 없어도 나간다. 칩을 누르면 같은 값으로 폼이 다시 열린다.
+   */
+  draft?: ProposalDraft | null;
+  onRemoveDraft?: () => void;
 }) {
+  const proposal = useProposal();
   /** 시간 손잡이의 선택지가 펼쳐져 있는가 — 입력이 비었을 때만 열 수 있다 */
   const [skipOpen, setSkipOpen] = useState(false);
-  /** 쓸 말이 있으면 보내기, 없으면 시간 손잡이 — 버튼 하나가 두 뜻을 갖는다 */
-  const hasInput = input.trim().length > 0;
+  /** 쓸 말이 있으면 보내기, 없으면 시간 손잡이 — 버튼 하나가 두 뜻을 갖는다. 제안서가 붙어 있으면 보내기다 */
+  const hasInput = input.trim().length > 0 || draft !== null;
 
   /**
    * 시간 이동 — **자주 하는 지시라 손이 아니라 눈에 둔다.**
@@ -128,6 +147,31 @@ export function Composer({
             })}
           </div>
         </>
+      )}
+      {draft !== null && (
+        <div className="draft-chip" data-testid="proposal-draft">
+          <button
+            type="button"
+            className="draft-body"
+            onClick={() => proposal?.open(draft.playerId, draft.prefill)}
+            disabled={busy}
+            aria-label={`제안서 — ${draft.summary}`}
+          >
+            <IconContract size={14} />
+            <span className="draft-kind">제안서</span>
+            <span className="draft-summary">{draft.summary}</span>
+          </button>
+          <button
+            type="button"
+            className="draft-remove"
+            onClick={onRemoveDraft}
+            disabled={busy}
+            aria-label="제안서 떼기"
+            data-testid="proposal-draft-remove"
+          >
+            <IconClose size={14} />
+          </button>
+        </div>
       )}
       <div className="chat-input">
         <textarea

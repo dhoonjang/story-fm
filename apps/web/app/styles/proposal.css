@@ -399,24 +399,6 @@
   color: var(--text);
 }
 
-/* 한마디 */
-.pf-message textarea {
-  width: 100%;
-  min-height: 56px;
-  padding: 10px 12px;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: var(--pop);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 16px;
-  resize: vertical;
-}
-.pf-message textarea:focus-visible {
-  outline: none;
-  box-shadow: var(--ring);
-}
-
 /* ── 발 — 붙어 있는 제안 손잡이 ───────────────────────────────────────────── */
 .pf-foot {
   flex: 0 0 auto;
@@ -426,11 +408,6 @@
   padding: var(--sp-3) var(--sp-5) var(--sp-5);
   background: var(--pop);
   box-shadow: 0 -1px 0 var(--line);
-}
-.pf-error {
-  margin: 0;
-  font-size: var(--fs-sm);
-  color: var(--loss);
 }
 .pf-submit {
   width: 100%;
@@ -494,6 +471,79 @@
   .pf-head {
     padding-top: var(--sp-4);
   }
+}
+
+/**
+ * 첨부된 제안서 — 입력창 위의 칩 하나 (overview.md §5). 말과 함께 나가는 구조체라 입력창의
+ * 일부다: `--panel-2` 알약, 문서 아이콘, 갈래와 값의 요약, 오른쪽 ×. 칩 본문은 손잡이다 —
+ * 누르면 같은 값으로 폼이 다시 열린다.
+ */
+.draft-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 0 0 var(--sp-2);
+  padding: 0 var(--sp-1) 0 0;
+  background: var(--panel-2);
+  border-radius: var(--r-pill);
+}
+.draft-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 36px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--ease);
+}
+.draft-body:hover {
+  color: var(--accent);
+}
+.draft-kind {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--accent);
+}
+.draft-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.draft-remove {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition:
+    background var(--ease),
+    color var(--ease);
+}
+.draft-remove:hover {
+  background: var(--pop);
+  color: var(--text);
+}
+.draft-body:focus-visible,
+.draft-remove:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 
 /* 선수 카드·시장 카드에서 폼을 여는 손잡이 */

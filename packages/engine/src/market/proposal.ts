@@ -1,5 +1,5 @@
 import type { DealTermKind, ProposalInput, ProposalKind, SquadStatus } from "@story-fm/domain";
-import { dealTermKindsFor } from "@story-fm/domain";
+import { dealTermKindsFor, naturalPositionOf, pointsBonusEligible } from "@story-fm/domain";
 import type { CommandResult } from "../commands";
 import { userWageRoom } from "../club/board-request";
 import { activeContract, financeOf, playerById, teamName, type GameState } from "../core/state";
@@ -157,6 +157,22 @@ export interface ProposalView {
 }
 
 /**
+ * 폼이 세울 조건 칩 — 갈래가 정한 것에서 이 선수에게 서지 않는 것을 뺀다. 공격 포인트
+ * 보너스는 미드필더·공격수에게만이고(`pointsBonusEligible`), 표 밖의 조건(`other`)은 폼이
+ * 아니라 말의 것이다 (transfer.md §12-3).
+ */
+function termKindsFor(
+  player: Parameters<typeof naturalPositionOf>[0],
+  kind: "buy" | "loan" | "renew",
+  precontract = false,
+): readonly DealTermKind[] {
+  const eligible = pointsBonusEligible(naturalPositionOf(player).position);
+  return dealTermKindsFor(kind, precontract).filter(
+    (k) => k !== "other" && (k !== "points" || eligible),
+  );
+}
+
+/**
  * 이 선수에게 제안 폼을 열 수 있으면 그 자, 아니면 `null` — 무소속·빌려 온 선수·계약 없는
  * 우리 선수처럼 부를 명령이 없는 자리는 폼도 없다.
  */
@@ -225,10 +241,10 @@ export function proposalViewOf(state: GameState, playerId: string): ProposalView
         }
       : null,
     termKinds: {
-      buy: dealTermKindsFor("buy"),
-      precontract: dealTermKindsFor("buy", true),
-      loan: dealTermKindsFor("loan"),
-      renew: dealTermKindsFor("renew"),
+      buy: termKindsFor(player, "buy"),
+      precontract: termKindsFor(player, "buy", true),
+      loan: termKindsFor(player, "loan"),
+      renew: termKindsFor(player, "renew"),
     },
     transferBudget: finance.transferBudget,
     wageRoom: userWageRoom(state),

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
 import { formatMoney } from "./money";
-import { SQUAD_NUMBER_MAX } from "./player";
+import { POSITION_GROUPS, SQUAD_NUMBER_MAX } from "./player";
 import { SQUAD_NUMBER_MIN } from "./squad-rules";
 
 /**
@@ -23,6 +23,7 @@ export const DEAL_TERM_KINDS = [
   "minutes",
   "buyout",
   "bonus",
+  "points",
   "escalator",
   "other",
 ] as const;
@@ -36,6 +37,7 @@ export const DEAL_TERM_KO: Record<DealTermKind, string> = {
   minutes: "출전 보장",
   buyout: "바이아웃 조항",
   bonus: "사이닝 보너스",
+  points: "공격 포인트 보너스",
   escalator: "주급 인상 조항",
   other: "그 밖의 조건",
 };
@@ -70,6 +72,7 @@ export const DEAL_TERM_MEANING: Record<DealTermKind, string> = {
     "임대 기간에 주전으로 세우겠다 — 임대에서만 조건이다. 영입·재계약의 주전 보장은 조건이 아니라 squadStatus다",
   buyout: "이 금액 이상의 오퍼가 오면 구단이 막지 않는다 — fee에 금액(£)",
   bonus: "서명하는 날 한 번 주는 돈 — fee에 금액(£)",
+  points: "골이나 도움 하나마다 주는 돈 — fee에 포인트당 금액(£). 미드필더·공격수에게만 조건이다",
   escalator: "그 일이 이뤄지면 주급을 올린다 — trigger(europe·title·promotion)와 pct(%)",
   other:
     "표에 없는 조건 — note에 그 말 그대로. 코어는 확인도 이행 판정도 못 하고, 건너편이 읽는 사실로만 남는다",
@@ -96,7 +99,12 @@ export const DealTermSchema = z.object({
     .max(SQUAD_NUMBER_MAX)
     .optional()
     .describe("number — 약속한 등번호"),
-  fee: z.number().int().min(0).optional().describe("buyout·bonus — 금액(£)"),
+  fee: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("buyout·bonus — 금액(£) · points — 포인트당 금액(£)"),
   pct: z
     .number()
     .int()
@@ -139,7 +147,17 @@ export const ContractTermSchema = DealTermSchema.extend({ settledOn: DateString.
 export type ContractTerm = z.infer<typeof ContractTermSchema>;
 
 /** 감독이 한 협상에 올릴 수 있는 조건 수 — 전부 걸면 흥정이 아니라 나열이다 (`other`는 따로 센다) */
-export const MAX_TABLED_TERMS = 3;
+export const MAX_TABLED_TERMS = 5;
+
+/**
+ * **공격 포인트 보너스가 서는 자리** — 골·도움을 재는 조항이라 미드필더·공격수에게만이다
+ * (docs/simulation/transfer.md §12-3). 수비수·골키퍼에게 걸면 코어가 반려하고 폼은 칩을 세우지
+ * 않는다 — 같은 자를 둘이 읽는다.
+ */
+export function pointsBonusEligible(position: string): boolean {
+  const group = POSITION_GROUPS[position.toUpperCase()];
+  return group === "MF" || group === "FW";
+}
 /** 상대가 한 답에서 부를 수 있는 조건 수 */
 export const MAX_TERM_ASKS = 2;
 
@@ -151,10 +169,10 @@ export function dealTermKindsFor(
   switch (kind) {
     case "buy":
       return precontract
-        ? ["signing", "captain", "number", "buyout", "escalator", "other"]
-        : ["signing", "captain", "number", "buyout", "bonus", "escalator", "other"];
+        ? ["signing", "captain", "number", "buyout", "points", "escalator", "other"]
+        : ["signing", "captain", "number", "buyout", "bonus", "points", "escalator", "other"];
     case "renew":
-      return ["signing", "captain", "number", "buyout", "bonus", "escalator", "other"];
+      return ["signing", "captain", "number", "buyout", "bonus", "points", "escalator", "other"];
     case "loan":
       return ["minutes", "other"];
     default:
@@ -176,6 +194,7 @@ export function normalizeDealTerm(term: DealTerm): DealTerm | null {
       return term.number === undefined ? null : { ...base, number: term.number };
     case "buyout":
     case "bonus":
+    case "points":
       return term.fee === undefined || term.fee <= 0 ? null : { ...base, fee: term.fee };
     case "escalator":
       return term.trigger === undefined || term.pct === undefined
@@ -199,6 +218,8 @@ export function dealTermLabel(term: DealTerm): string {
     case "buyout":
     case "bonus":
       return `${DEAL_TERM_KO[term.kind]} ${formatMoney(term.fee ?? 0)}`;
+    case "points":
+      return `${DEAL_TERM_KO.points} 포인트당 ${formatMoney(term.fee ?? 0)}`;
     case "escalator":
       return `${DEAL_TERM_KO.escalator} — ${term.trigger ? ESCALATOR_TRIGGER_KO[term.trigger] : "?"} 시 +${term.pct ?? 0}%`;
     case "other":

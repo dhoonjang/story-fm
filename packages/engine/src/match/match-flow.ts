@@ -1,3 +1,4 @@
+import { settlePointsBonus } from "../market/terms";
 import type {
   Formation,
   GamePlayer,
@@ -2089,6 +2090,9 @@ export function finalizeMatch(state: GameState): MatchDigest {
             ? 1
             : 0,
         });
+        // 공격 포인트 보너스 — 우리 계약의 조항이면 이 경기의 골+도움 × 금액이 나간다 (transfer.md §12-3)
+        if (player.teamId === state.userTeamId)
+          settlePointsBonus(state, player, scoredBy + assists);
         if (before) {
           const rows = settleMilestones(state, {
             playerId: id,
