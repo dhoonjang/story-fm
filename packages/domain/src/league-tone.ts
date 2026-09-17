@@ -38,7 +38,7 @@ export interface LeagueColourSource {
 }
 
 /**
- * 구단이 리그에 보태는 색 — `clubTonesOf`가 밝힘의 후보를 고르는 그 순서다.
+ * 구단이 리그에 보태는 색 — 강조색부터 본다. 흰·검 구단의 유채색은 `accent`에 있고,
  * 유채색이 없는 구단(흑백)은 계열을 갖지 않으므로 세지 않는다.
  */
 function signalOf(colours: ClubColours): string | undefined {

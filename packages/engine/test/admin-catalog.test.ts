@@ -1,4 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  BAND_MIN_DISTANCE,
+  CLUB_HI_MIN_CONTRAST,
+  CLUB_TONE_SURFACE,
+  bandDistance,
+  contrastRatio,
+} from "@story-fm/domain";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -654,5 +661,32 @@ describe("오버라이드 파일 로드", () => {
     );
     adminResetLeagueCatalog(); // 편집 세대를 올려 캐시를 비운다
     expect(teamCatalog()).toHaveLength(seed.length);
+  });
+});
+
+describe("1부 리그의 띠 — 리그 안에서 서로 갈린다 (ui/design-system.md §2)", () => {
+  it("어느 두 구단의 띠도 최소 거리보다 가깝지 않고, 어느 띠든 바닥 위 3:1이다", () => {
+    const byLeague = new Map<string, Array<{ id: string; band: string }>>();
+    for (const team of adminTeamCatalog()) {
+      const band = team.colours?.band;
+      if (band === undefined) continue;
+      const list = byLeague.get(team.leagueId) ?? [];
+      list.push({ id: team.id, band });
+      byLeague.set(team.leagueId, list);
+    }
+    expect(byLeague.size).toBe(5);
+    for (const [leagueId, teams] of byLeague) {
+      for (const [i, a] of teams.entries()) {
+        expect(contrastRatio(a.band, CLUB_TONE_SURFACE.panel2), a.id).toBeGreaterThanOrEqual(
+          CLUB_HI_MIN_CONTRAST,
+        );
+        for (const b of teams.slice(i + 1)) {
+          expect(
+            bandDistance(a.band, b.band),
+            `${leagueId} ${a.id} · ${b.id}`,
+          ).toBeGreaterThanOrEqual(BAND_MIN_DISTANCE);
+        }
+      }
+    }
   });
 });

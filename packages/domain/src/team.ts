@@ -108,6 +108,11 @@ export const ClubColoursSchema = z.object({
   primary: HexColourSchema,
   secondary: HexColourSchema,
   accent: z.union([HexColourSchema, z.literal("")]),
+  /**
+   * 띠(`--club-hi`) — 카탈로그가 1부 리그 안에서 서로 갈리도록 재어 붙인 **파생값**이다
+   * (`separatedBandsOf` · ui/design-system.md §2). 공식 값이 아니고 색 표에도 없다.
+   */
+  band: HexColourSchema.optional(),
 });
 export type ClubColours = z.infer<typeof ClubColoursSchema>;
 

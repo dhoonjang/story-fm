@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  BAND_MIN_DISTANCE,
   CLUB_HI_MIN_CONTRAST,
   CLUB_TONE_SURFACE,
   CREST_INKS,
   CREST_MIN_INK_CONTRAST,
   type ClubColours,
+  bandDistance,
   clubTonesOf,
   contrastRatio,
   crestOf,
   leagueTonesOf,
+  separatedBandsOf,
 } from "@story-fm/domain";
 /**
  * 96팀의 공식 색 — 엔진의 데이터 파일이지만 domain 타입만 가져오는 잎 모듈이라 엔진
@@ -129,12 +132,14 @@ const bestInkContrast = (fill: string, inks: readonly string[]): number =>
 
 /** 어두운 남색 — 어두운 바닥에 묻혀 밝혀야 하는 쪽 */
 const NAVY: ClubColours = { primary: "#001489", secondary: "#ffffff", accent: "#001489" };
-/** 하늘색 — 강조색 그대로 선다 */
+/** 하늘색 — 첫 색 그대로 선다 */
 const SKY: ClubColours = { primary: "#6cadde", secondary: "#00285d", accent: "#6cadde" };
-/** 클라렛·하늘색 — 강조색은 묻히고 두 번째 공식색이 선다 */
+/** 클라렛·하늘색 — 첫 색이 묻혀도 둘째 색이 아니라 첫 색을 밝힌다 */
 const CLARET: ClubColours = { primary: "#480024", secondary: "#94bee5", accent: "#480024" };
 /** 흑백 — 유채색이 없다 */
 const MONO: ClubColours = { primary: "#000000", secondary: "#ffffff", accent: "" };
+/** 흰·검에 엠블럼 빨강 — 띠는 흰이다 */
+const WHITE_BLACK: ClubColours = { primary: "#ffffff", secondary: "#000000", accent: "#e5231b" };
 /** 리그 색이 셀 계열 — 붉은 쪽·초록·호박 (ui/design-system.md §2-1) */
 const RED: ClubColours = { primary: "#e30613", secondary: "#ffffff", accent: "#e30613" };
 const GREEN: ClubColours = { primary: "#008835", secondary: "#ffffff", accent: "#008835" };
@@ -184,12 +189,13 @@ describe("96팀 불변식 — 공식 색 위에서 글자가 읽히고 가는 �
     }
   });
 
-  it("대표색은 팀마다 유일하다 — 두 팀이 같은 밑색을 갖지 않는다", () => {
+  it("세 값을 전부 같이 갖는 구단은 둘이 없다 — 같은 구성의 구단은 강조색으로 갈린다", () => {
     const seen = new Map<string, string>();
     for (const [id, colours] of clubs) {
-      const other = seen.get(colours.primary);
-      expect(other, `${id} · ${other ?? ""} → ${colours.primary}`).toBeUndefined();
-      seen.set(colours.primary, id);
+      const key = `${colours.primary} ${colours.secondary} ${colours.accent}`;
+      const other = seen.get(key);
+      expect(other, `${id} · ${other ?? ""} → ${key}`).toBeUndefined();
+      seen.set(key, id);
     }
   });
 
@@ -219,18 +225,26 @@ describe("96팀 불변식 — 공식 색 위에서 글자가 읽히고 가는 �
 });
 
 describe("clubTonesOf — 후보 순서 (ui/design-system.md §2 「--club-hi의 규칙」)", () => {
-  it("강조색이 그대로 3:1을 넘으면 그 값이다", () => {
+  it("첫 색이 그대로 3:1을 넘으면 그 값이다", () => {
     const tones = clubTonesOf(crestOf({ id: "x", colours: SKY }), SKY);
-    expect(tones).toEqual({ hi: SKY.accent, hiInk: BG, lifted: false });
+    expect(tones).toEqual({ hi: SKY.primary, hiInk: BG, lifted: false });
   });
 
-  it("강조색이 묻히면 두 번째 공식 유채색이 선다", () => {
+  it("흰·검 구단의 띠는 흰이다 — 엠블럼의 유채색이 아니다", () => {
+    const tones = clubTonesOf(crestOf({ id: "x", colours: WHITE_BLACK }), WHITE_BLACK);
+    expect(tones).toEqual({ hi: "#ffffff", hiInk: BG, lifted: false });
+  });
+
+  it("첫 색이 유채색인데 묻히면 둘째 색이 서더라도 첫 색을 밝힌다", () => {
     const tones = clubTonesOf(crestOf({ id: "x", colours: CLARET }), CLARET);
-    expect(tones.hi).toBe(CLARET.secondary);
-    expect(tones.lifted).toBe(false);
+    expect(tones.lifted).toBe(true);
+    expect(tones.hi).not.toBe(CLARET.secondary);
+    expect(contrastRatio(tones.hi, PANEL_2)).toBeGreaterThanOrEqual(CLUB_HI_MIN_CONTRAST);
+    const [r, , b] = [1, 3, 5].map((at) => parseInt(tones.hi.slice(at, at + 2), 16));
+    expect(r).toBeGreaterThan(b!);
   });
 
-  it("둘 다 묻히면 명도만 올린다 — 색상은 남고 3:1에 닿는다", () => {
+  it("남색은 명도만 올린다 — 색상은 남고 3:1에 닿는다", () => {
     const tones = clubTonesOf(crestOf({ id: "x", colours: NAVY }), NAVY);
     expect(tones.lifted).toBe(true);
     expect(tones.hi).not.toBe(NAVY.primary);
@@ -242,8 +256,14 @@ describe("clubTonesOf — 후보 순서 (ui/design-system.md §2 「--club-hi의
     expect(b).toBeGreaterThan(g!);
   });
 
-  it("유채색이 하나도 없으면 은색이다", () => {
+  it("첫 색이 검정이면 둘째 색이 선다 — 흑백 구단은 흰", () => {
     const tones = clubTonesOf(crestOf({ id: "x", colours: MONO }), MONO);
+    expect(tones).toEqual({ hi: "#ffffff", hiInk: BG, lifted: false });
+  });
+
+  it("세 색이 다 어두운 무채색이면 은색이다", () => {
+    const dark: ClubColours = { primary: "#000000", secondary: "#141414", accent: "" };
+    const tones = clubTonesOf(crestOf({ id: "x", colours: dark }), dark);
     expect(tones).toEqual({ hi: "#c9d1c8", hiInk: BG, lifted: false });
   });
 
@@ -252,6 +272,70 @@ describe("clubTonesOf — 후보 순서 (ui/design-system.md §2 「--club-hi의
       const tones = clubTonesOf(crestOf({ id }));
       expect(contrastRatio(tones.hi, PANEL_2), id).toBeGreaterThanOrEqual(CLUB_HI_MIN_CONTRAST);
     }
+  });
+});
+
+describe("separatedBandsOf — 리그 안에서 띠는 서로 갈린다 (ui/design-system.md §2)", () => {
+  const WHITE_NAVY: ClubColours = { primary: "#ffffff", secondary: "#000a3c", accent: "#000a3c" };
+  const league = [
+    ...Array.from({ length: 6 }, (_, i) => ({ id: `red${i}`, colours: RED })),
+    { id: "white-black", colours: WHITE_BLACK },
+    { id: "white-navy", colours: WHITE_NAVY },
+    { id: "mono", colours: MONO },
+    { id: "green", colours: GREEN },
+  ];
+  const bands = separatedBandsOf(league);
+
+  it("앞선 구단은 제 색을 갖고, 어느 두 띠도 최소 거리보다 가깝지 않다", () => {
+    expect(bands.get("red0")).toBe(RED.primary);
+    expect(bands.get("green")).toBe(GREEN.primary);
+    const placed = [...bands.entries()];
+    for (const [i, [idA, a]] of placed.entries()) {
+      for (const [idB, b] of placed.slice(i + 1)) {
+        expect(bandDistance(a, b), `${idA} · ${idB}`).toBeGreaterThanOrEqual(BAND_MIN_DISTANCE);
+      }
+    }
+  });
+
+  it("옮긴 띠도 바닥 위 3:1을 지킨다", () => {
+    for (const [id, band] of bands) {
+      expect(contrastRatio(band, PANEL_2), id).toBeGreaterThanOrEqual(CLUB_HI_MIN_CONTRAST);
+    }
+  });
+
+  it("빨강은 빨강으로 남는다 — 가장 적게 옮기므로 색상이 반 바퀴 돌지 않는다", () => {
+    for (let i = 1; i < 6; i++) {
+      const band = bands.get(`red${i}`)!;
+      const [r, g, b] = [1, 3, 5].map((at) => parseInt(band.slice(at, at + 2), 16));
+      expect(r, band).toBeGreaterThan(g!);
+      expect(r, band).toBeGreaterThan(b!);
+    }
+  });
+
+  it("흰 구단이 여럿이면 뒤의 흰은 제 둘째 색 쪽으로 물든다", () => {
+    const white = bands.get("white-black")!;
+    const navyWhite = bands.get("white-navy")!;
+    expect(white).toBe("#ffffff");
+    expect(navyWhite).not.toBe("#ffffff");
+    const [r, , b] = [1, 3, 5].map((at) => parseInt(navyWhite.slice(at, at + 2), 16));
+    expect(b).toBeGreaterThanOrEqual(r!);
+  });
+
+  it("이미 떨어진 색은 옮기지 않고, 같은 입력은 같은 답이다", () => {
+    const apart = separatedBandsOf([
+      { id: "a", colours: RED },
+      { id: "b", colours: GREEN },
+    ]);
+    expect(apart.get("a")).toBe(RED.primary);
+    expect(apart.get("b")).toBe(GREEN.primary);
+    expect([...separatedBandsOf(league)]).toEqual([...bands]);
+  });
+
+  it("clubTonesOf는 카탈로그가 붙인 띠를 그대로 쓴다 — 어느 화면이든 같은 띠", () => {
+    const colours: ClubColours = { ...RED, band: "#ff7a70" };
+    const tones = clubTonesOf(crestOf({ id: "x", colours }), colours);
+    expect(tones.hi).toBe("#ff7a70");
+    expect(tones.lifted).toBe(true);
   });
 });
 

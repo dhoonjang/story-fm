@@ -17,7 +17,7 @@
  * 분데스리가 공식 약어에는 숫자가 들어간다 (B04·M05·S04).
  */
 import type { ClubColours, Formation } from "@story-fm/domain";
-import { DEFAULT_FORMATION, leagueTonesOf } from "@story-fm/domain";
+import { DEFAULT_FORMATION, leagueTonesOf, separatedBandsOf } from "@story-fm/domain";
 import { CLUB_COLOURS } from "./club-colours";
 import {
   leagueCatalog,
@@ -1349,16 +1349,43 @@ const TEAM_SEED_BASE: readonly TeamCatalogEntry[] = [
  * 팀 카탈로그 시드 — 정체성 표에 역대 우승을 얹은 것. 어드민이 편집하면 합쳐진 이
  * 모양이 오버라이드 파일에 그대로 저장된다 (team.md §1).
  */
-export const TEAM_CATALOG_SEED: readonly TeamCatalogEntry[] = TEAM_SEED_BASE.map((team) => {
-  const honours = CLUB_HONOURS_SEED[team.id];
-  return withColours(honours ? { ...team, honours } : team);
-});
+export const TEAM_CATALOG_SEED: readonly TeamCatalogEntry[] = withBands(
+  TEAM_SEED_BASE.map((team) => {
+    const honours = CLUB_HONOURS_SEED[team.id];
+    return withColours(honours ? { ...team, honours } : team);
+  }),
+);
 
 /** 공식 색을 붙인다 — 표에 없는 클럽은 그대로 (문장이 해시로 답한다) */
 function withColours(team: TeamCatalogEntry): TeamCatalogEntry {
   if (team.colours !== undefined) return team;
   const colours = CLUB_COLOURS[team.id];
   return colours === undefined ? team : { ...team, colours };
+}
+
+/**
+ * 띠를 붙인다 — 리그마다 색 있는 팀을 목록 순서로 한 번에 재어, 한 리그 안에서 띠가
+ * 서로 갈리게 한다 (`separatedBandsOf` · ui/design-system.md §2). 오버라이드 파일에
+ * 옛 띠가 실려 있어도 다시 잰다 — 띠는 편집 대상이 아니라 파생값이다.
+ */
+function withBands(teams: readonly TeamCatalogEntry[]): TeamCatalogEntry[] {
+  const byLeague = new Map<string, Array<TeamCatalogEntry & { colours: ClubColours }>>();
+  for (const team of teams) {
+    if (team.colours === undefined) continue;
+    const list = byLeague.get(team.leagueId) ?? [];
+    list.push({ ...team, colours: team.colours });
+    byLeague.set(team.leagueId, list);
+  }
+  const bands = new Map<string, string>();
+  for (const list of byLeague.values()) {
+    for (const [id, band] of separatedBandsOf(list)) bands.set(id, band);
+  }
+  return teams.map((team) => {
+    const band = bands.get(team.id);
+    return band === undefined || team.colours === undefined
+      ? team
+      : { ...team, colours: { ...team.colours, band } };
+  });
 }
 
 /**
@@ -1385,9 +1412,10 @@ export const TIER_BASE: Record<1 | 2 | 3 | 4, number> = {
 export const SECOND_DIVISION_PENALTY = 9;
 
 // 색이 없던 시절의 오버라이드 파일도 같은 색을 얻는다 — 색은 편집 대상이 아니다
-const teams = catalogSource<readonly TeamCatalogEntry[]>(
-  () => readTeamOverride()?.teams.map(withColours) ?? TEAM_CATALOG_SEED,
-);
+const teams = catalogSource<readonly TeamCatalogEntry[]>(() => {
+  const override = readTeamOverride();
+  return override ? withBands(override.teams.map(withColours)) : TEAM_CATALOG_SEED;
+});
 
 /** 지금 유효한 팀 카탈로그 — 오버라이드가 있으면 그것, 없으면 시드 */
 export function teamCatalog(): readonly TeamCatalogEntry[] {

@@ -423,12 +423,12 @@ export interface ClubToneSurface {
 /** ui/design-system.md §1의 값. 화면이 토큰을 바꾸면 여기도 따라와야 한다 */
 export const CLUB_TONE_SURFACE: ClubToneSurface = { panel2: "#1a211c", bg: "#0a0d0b" };
 
-/** 유채색이 하나도 없는 구단(흑백)의 가는 자리 — `--silver` */
+/** 세 색이 다 어두운 무채색이거나 비었을 때의 가는 자리 — `--silver` */
 const ACHROMATIC_HI = "#c9d1c8";
 
 /**
  * 유채색 판정 — 채도가 이 아래면 회색이고, 명도가 양끝이면 검정·흰이다.
- * 흰·검 구단의 `secondary`가 후보에서 빠지는 문이다.
+ * 밝힐 색상이 있는가의 문이고, 리그 색이 셀 구단 색을 고르는 문이다.
  */
 const CHROMATIC_MIN_SATURATION = 18;
 const CHROMATIC_LIGHTNESS = [8, 92] as const;
@@ -462,9 +462,10 @@ export function isChromatic(hex: string): boolean {
 /**
  * 가는 자리의 색 (ui/design-system.md §2 「`--club-hi`의 규칙」).
  *
- * 후보 순서: (1) 공식 강조색이 유채색이고 바닥 위 3:1을 넘으면 그 값 (2) 두 번째
- * 공식색이 그러면 그 값 (3) 그래도 없으면 강조색(없으면 밑색)을 OKLCH에서 색상·채도를
- * 지키고 명도만 올린 첫 값 (4) 유채색이 하나도 없으면 은색.
+ * **띠는 구단의 첫 색이다.** `primary`가 바닥 위 3:1을 그대로 넘으면 그 값 — 흰·빨강·
+ * 하늘색·노랑. 유채색인데 어두우면(남색·클라렛) 색상·채도를 지키고 명도만 올린 첫 값.
+ * 검정처럼 밝힐 색상이 없으면 `secondary`로, 그래도 없으면 `accent`로 같은 순서를 밟고,
+ * 셋 다 없으면 은색이다. 흰·검 구단의 띠는 그래서 흰이지 엠블럼의 유채색이 아니다.
  *
  * `colours`가 없으면 문장의 해시 색이 공식 색 자리에 선다 — 어드민이 만든 클럽도
  * 같은 규칙으로 밝힌다.
@@ -479,27 +480,173 @@ export function clubTonesOf(
     secondary: crest.secondary,
     accent: crest.primary,
   };
-  const accent = palette.accent.toLowerCase();
-  const secondary = palette.secondary.toLowerCase();
-  const primary = palette.primary.toLowerCase();
   const standsAsIs = (hex: string): boolean =>
-    hex !== "" && isChromatic(hex) && contrastRatio(hex, surface.panel2) >= CLUB_HI_MIN_CONTRAST;
+    contrastRatio(hex, surface.panel2) >= CLUB_HI_MIN_CONTRAST;
 
-  let hi: string;
+  let hi = ACHROMATIC_HI;
   let lifted = false;
-  if (standsAsIs(accent)) hi = accent;
-  else if (standsAsIs(secondary)) hi = secondary;
-  else {
-    const source = [accent, primary, secondary].find((hex) => hex !== "" && isChromatic(hex));
-    if (source === undefined) hi = ACHROMATIC_HI;
-    else {
-      hi = liftedTone(source, surface.panel2);
-      lifted = true;
+  for (const raw of [palette.primary, palette.secondary, palette.accent]) {
+    const hex = raw.toLowerCase();
+    if (hex === "") continue;
+    if (standsAsIs(hex)) {
+      hi = hex;
+      break;
     }
+    if (isChromatic(hex)) {
+      hi = liftedTone(hex, surface.panel2);
+      lifted = true;
+      break;
+    }
+    // 어두운 무채색 — 밝힐 색상이 없으니 다음 색으로
+  }
+  // 카탈로그가 리그 안에서 갈라 붙인 띠가 있으면 그 값이다 — 어느 화면이든 같은 띠
+  if (colours?.band !== undefined) {
+    const band = colours.band.toLowerCase();
+    lifted = lifted || band !== hi;
+    hi = band;
   }
   const hiInk =
     contrastRatio(surface.bg, hi) >= contrastRatio(INK_LIGHT, hi) ? surface.bg : INK_LIGHT;
   return { hi, hiInk, lifted };
+}
+
+/**
+ * 한 리그 안에서 두 띠가 갈려 보이는 최소 거리 — OKLab ΔE. 겨우 다른 정도(0.02)의
+ * 세 배쯤이라 나란히 선 띠 여섯이 한눈에 다르다.
+ */
+export const BAND_MIN_DISTANCE = 0.07;
+/** 띠를 옮기는 걸음 — 둘째 색·강조색·흰·검 쪽으로 섞는 비율 */
+const BAND_MIX_STEPS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6] as const;
+/** 띠를 옮기는 걸음 — 색상을 돌리는 각(°). 빨강이 주황·자홍이 되지 않는 한도다 */
+const BAND_HUE_STEPS = [6, 12, 18] as const;
+/** 띠를 옮기는 걸음 — 명도 */
+const BAND_LIGHT_STEPS = [0.03, 0.06, 0.09, 0.12, 0.15, 0.18] as const;
+/** 띠를 옮기는 걸음 — 채도를 접는 비율 */
+const BAND_CHROMA_STEPS = [0.8, 0.6, 0.4] as const;
+/**
+ * 옮긴 거리를 잴 때 색상 변화에 얹는 무게 — 같은 거리면 색상을 돌린 후보보다 명도·채도를
+ * 옮긴 후보가 먼저다. 18°를 돌리면 0.1만큼 더 멀리 간 것으로 센다.
+ */
+const BAND_HUE_COST_PER_TURN = 2;
+
+/** 두 색의 거리 — OKLab 유클리드 */
+export function bandDistance(a: string, b: string): number {
+  const p = oklabOf(a);
+  const q = oklabOf(b);
+  return Math.hypot(p.lightness - q.lightness, p.a - q.a, p.b - q.b);
+}
+
+export interface BandSubject {
+  readonly id: string;
+  readonly shortName?: string;
+  readonly colours: ClubColours;
+}
+
+/**
+ * **리그 안에서 띠는 서로 갈린다** (ui/design-system.md §2).
+ *
+ * 같은 빨강·흰 구단이 여섯인 리그에서 띠 여섯이 한 값이면 띠는 아무도 가리지 못한다.
+ * 주어진 순서(카탈로그 순서)로 앞선 구단이 제 색을 갖고, 뒤의 구단은 앞선 띠 전부와
+ * `BAND_MIN_DISTANCE` 이상 떨어질 때까지 **가장 적게** 옮긴다 — 둘째 색·강조색·흰·검
+ * 쪽으로 섞거나, 색상을 돌리거나, 명도를 옮긴 후보 가운데 원색에서 가장 가까운 것.
+ * 옮긴 값도 바닥 위 3:1은 지킨다. 어느 후보로도 못 떨어지면 가장 멀리 가는 후보다.
+ * 이미 붙은 `band`는 무시하고 처음부터 다시 잰다.
+ */
+export function separatedBandsOf(
+  clubs: readonly BandSubject[],
+  surface: ClubToneSurface = CLUB_TONE_SURFACE,
+): Map<string, string> {
+  const placed: string[] = [];
+  const out = new Map<string, string>();
+  const apart = (hex: string): boolean =>
+    placed.every((other) => bandDistance(hex, other) >= BAND_MIN_DISTANCE);
+  for (const club of clubs) {
+    const colours: ClubColours = {
+      primary: club.colours.primary,
+      secondary: club.colours.secondary,
+      accent: club.colours.accent,
+    };
+    const crest = crestOf({ id: club.id, shortName: club.shortName, colours });
+    const base = clubTonesOf(crest, colours, surface).hi;
+    let band = base;
+    if (!apart(base)) {
+      const candidates = bandCandidates(base, colours, surface).sort(
+        (x, y) => bandMoveCost(x, base) - bandMoveCost(y, base),
+      );
+      band = candidates.find(apart) ?? farthestFrom(candidates, placed) ?? base;
+    }
+    placed.push(band);
+    out.set(club.id, band);
+  }
+  return out;
+}
+
+/** 원색에서 옮긴 거리 — OKLab 거리에 색상 변화의 무게를 얹는다 */
+function bandMoveCost(candidate: string, base: string): number {
+  const from = oklchOf(base);
+  if (!isChromatic(base)) return bandDistance(candidate, base);
+  const to = oklchOf(candidate);
+  const turn = Math.abs(((to.hue - from.hue + HUE_TURN / 2) % HUE_TURN) - HUE_TURN / 2) / HUE_TURN;
+  return bandDistance(candidate, base) + BAND_HUE_COST_PER_TURN * turn;
+}
+
+/** 원색에서 옮겨 볼 후보 전부 — 바닥 위 3:1을 지키는 것만 */
+function bandCandidates(base: string, colours: ClubColours, surface: ClubToneSurface): string[] {
+  const { lightness, chroma, hue } = oklchOf(base);
+  const out = new Set<string>();
+  const targets = [colours.secondary, colours.accent, colours.primary, INK_LIGHT, "#000000"]
+    .map((hex) => hex.toLowerCase())
+    .filter((hex) => hex !== "" && hex !== base);
+  for (const target of targets) {
+    for (const step of BAND_MIX_STEPS) out.add(mixedTone(base, target, step));
+  }
+  const hues = isChromatic(base)
+    ? [
+        hue,
+        ...BAND_HUE_STEPS.flatMap((step) => [
+          (hue + step) % HUE_TURN,
+          (hue - step + HUE_TURN) % HUE_TURN,
+        ]),
+      ]
+    : [hue];
+  const lights = [
+    lightness,
+    ...BAND_LIGHT_STEPS.flatMap((step) => [
+      Math.min(1, lightness + step),
+      Math.max(0, lightness - step),
+    ]),
+  ];
+  const chromas = [chroma, ...BAND_CHROMA_STEPS.map((ratio) => chroma * ratio)];
+  for (const h of hues) for (const l of lights) for (const c of chromas) out.add(oklchHex(l, c, h));
+  out.delete(base);
+  return [...out].filter((hex) => contrastRatio(hex, surface.panel2) >= CLUB_HI_MIN_CONTRAST);
+}
+
+/** 두 색을 OKLab에서 섞은 값 — 색역 밖이면 채도를 접는다 */
+function mixedTone(from: string, to: string, ratio: number): string {
+  const p = oklabOf(from);
+  const q = oklabOf(to);
+  const lightness = p.lightness + (q.lightness - p.lightness) * ratio;
+  const a = p.a + (q.a - p.a) * ratio;
+  const b = p.b + (q.b - p.b) * ratio;
+  return inGamut(lightness, Math.hypot(a, b), Math.atan2(b, a));
+}
+
+/** 놓인 띠들에서 가장 멀리 떨어지는 후보 — 최소 거리가 가장 큰 것 */
+function farthestFrom(
+  candidates: readonly string[],
+  placed: readonly string[],
+): string | undefined {
+  let best: string | undefined;
+  let bestGap = -1;
+  for (const hex of candidates) {
+    const gap = Math.min(...placed.map((other) => bandDistance(hex, other)));
+    if (gap > bestGap) {
+      best = hex;
+      bestGap = gap;
+    }
+  }
+  return best;
 }
 
 /**
