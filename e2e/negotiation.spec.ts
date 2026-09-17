@@ -51,20 +51,43 @@ test("협상 방 — 자리에 앉고, 제안하고, 일어선다", async ({ pag
   await expect(input).toBeEnabled();
   await expect(page.getByTestId("time-skip-toggle")).toBeDisabled();
 
-  // ③ 제안 — 값이 실린 말은 손잡이를 부르고 상대가 답한다. 그 판정은 카드로 선다
-  await input.fill("제안한 조건으로 갑시다");
+  // ③ 값 없는 말 — 상대가 답만 한다. 방은 그대로 열려 있고 인내의 칸이 선다
+  await input.fill("조건을 먼저 들어 보고 싶습니다");
   await page.getByTestId("chat-send").click();
-  await expect(page.locator(".market-card").first()).toBeVisible();
   await expect(input).toBeEnabled();
   await expect(page.locator(".app")).toHaveAttribute("data-phase", "negotiation");
+  await expect(room.getByTestId("negotiation-patience")).toBeVisible();
 
   // ④ 일어선다 — 협상은 열린 채 방만 닫히고 단계는 들어오기 전으로 돌아간다
   await page.getByTestId("negotiation-leave").click();
   await expect(page.locator(".app")).toHaveAttribute("data-phase", "idle");
   await expect(room).toHaveCount(0);
   expect(await page.locator(".app.in-negotiation").count()).toBe(0);
-  // 방 안의 턴은 메인 채팅에서 한 덩어리로 묶인다 — 경기 이력이 접히는 것과 같은 자리
+  // 방 안의 턴은 메인 채팅에서 한 덩어리로 묶인다 — 열린 협상이라 접히지는 않는다
   await expect(page.locator('[data-testid^="negotiation-log-"]')).toHaveCount(1);
+  await expect(page.locator(".negotiation-log-head")).toHaveCount(0);
   // 시간 손잡이가 돌아온다
   await expect(page.getByTestId("time-skip-toggle")).toBeEnabled();
+
+  /**
+   * ⑤ 다시 앉아 제안한다 — 같은 협상이라 같은 방이다. 값이 실린 말은 손잡이를 부르고
+   * 상대가 답한다. 픽스처가 고른 상대는 확률이 문턱을 넘어 앵커가 **수락**이고, 합의된
+   * 협상에 앉아 있는 방은 없다 — 코어가 같은 턴에 방을 닫는다 (transfer.md §12-2).
+   */
+  await input.fill(`${targetName} 협상하자`);
+  await page.getByTestId("chat-send").click();
+  await expect(gate).toBeVisible();
+  await page.getByTestId("negotiation-enter").click();
+  await expect(room).toBeVisible();
+  await input.fill("제안한 조건으로 갑시다");
+  await page.getByTestId("chat-send").click();
+  await expect(page.locator(".market-card").first()).toBeVisible();
+  await expect(input).toBeEnabled();
+  await expect(page.locator(".app")).toHaveAttribute("data-phase", "idle");
+  await expect(room).toHaveCount(0);
+  // 끝난 협상은 선수 · 갈래 · 결과 한 줄로 접힌다
+  const head = page.locator(".negotiation-log-head");
+  await expect(head).toHaveCount(1);
+  await expect(head).toHaveAttribute("data-status", "agreed");
+  await expect(head).toContainText(targetName);
 });

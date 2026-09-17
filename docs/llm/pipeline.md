@@ -374,7 +374,7 @@ sequenceDiagram
   participant CORE as 코어
 
   UI->>GM: 감독의 말 (또는 손잡이 '자리에 앉는다' · '일어선다')
-  GM->>CORE: speakAtTable(said) — us 줄 · 답을 기다리던 오퍼는 오늘로
+  GM->>CORE: sitAtTable(said) — us 줄 · 답을 기다리던 오퍼는 오늘로
   opt 손잡이 '일어선다'
     GM->>CORE: closeNegotiation("left") — 방이 닫힌 채 마지막 장면
   end

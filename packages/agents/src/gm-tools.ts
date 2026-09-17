@@ -43,7 +43,6 @@ import {
   openNegotiationFor,
   openRelease,
   openRenewal,
-  openTalks,
   proposePersonal,
   PROMISE_DAYS_MAX,
   PROMISE_DAYS_MIN,
@@ -94,6 +93,7 @@ import {
   setTransferList,
   squadView,
   startMatch,
+  startNegotiation,
   substitutePlayer,
   suggestTerms,
   TALK_OUTCOMES,
@@ -108,8 +108,6 @@ import {
   type GameState,
   type GoalMark,
   setShootoutOrder,
-  sitAtTable,
-  settleTableReply,
 } from "@story-fm/engine";
 import {
   ATTRIBUTE_AXES,
@@ -144,7 +142,6 @@ import {
   TACKLING_LEVELS,
   TEAM_TALK_OCCASIONS,
   TRANSITION_MODES,
-  TABLE_LINE_MAX,
   type BoardMove,
 } from "@story-fm/domain";
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
@@ -152,9 +149,7 @@ import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
 import { buildTrainingSchedule } from "./gm-input";
 import { skillDescriptions } from "./skill-descriptions";
 import { runTacticOrders } from "./tactic-orders";
-import { runTableReply } from "./negotiation-table";
 import { MARKET_OPS, runMarketOrders } from "./market-orders";
-import { TABLE_OPS, runTableOrders } from "./table-orders";
 import { TRAINING_OPS, runTrainingOrders } from "./training-orders";
 import { applyOps, hasOps, ordersGate } from "./orders-ops";
 import { MONEY_MAX, SQUAD_STATUS_LINE, WAGE_MAX, money } from "./ruling-schema";
@@ -657,6 +652,17 @@ export function buildToolSpecs(
 
   return [
     wrap("start_match", descriptions.start_match, z.object({}), () => startMatch(state)),
+    /**
+     * **협상 방을 세운다** — 경기의 `start_match`와 같은 자리다 (transfer.md §12-2). 문을 열
+     * 뿐이고, 자리에 앉은 뒤의 턴은 협상 GM의 것이다(`negotiation-gm.ts`).
+     */
+    wrap("start_negotiation", descriptions.start_negotiation, StartNegotiationArgsSchema, (input) =>
+      startNegotiation(state, {
+        ...(input.negotiationId === undefined ? {} : { negotiationId: input.negotiationId }),
+        ...(input.playerId === undefined ? {} : { playerId: input.playerId }),
+        ...(input.kind === undefined ? {} : { kind: input.kind }),
+      }),
+    ),
     wrap(
       "set_lineup",
       CORE_COMMAND_LABELS.set_lineup!,
@@ -1929,88 +1935,6 @@ export function buildGmTools(
     },
   };
   /**
-   * **테이블** — 감독의 말 하나에 상대의 답 하나 (agents.md §4-1 · transfer.md §12-2).
-   * 도구 뒤에서 교섭 상대 호출이 돌고, 그 답은 코어가 앵커 ± 한도로 잘라 장부에 남긴다.
-   * 호출이 실패하면 상대는 말없이 서류대로 움직인다 — 협상은 멈추지 않는다.
-   */
-  const table: GameToolSpec = {
-    name: "speak_at_table",
-    description: descriptions.speak_at_table,
-    inputSchema: toToolSchema(TableLineArgsSchema),
-    async handle(input: unknown, context?: ToolCallContext) {
-      const parsed = TableLineArgsSchema.safeParse(input);
-      if (!parsed.success) return inputError(parsed.error);
-      const blocked = dismissed(state, true);
-      if (blocked) return blocked;
-      const { line } = parsed.data;
-      /**
-       * ① **협상이 없으면 마주 앉는다** — 오퍼 없는 빈 협상 (transfer.md §12-2). 이레 안에
-       * 오퍼가 오르지 않으면 조용히 닫힌다.
-       */
-      const notes: string[] = [];
-      let negotiationId = parsed.data.negotiationId;
-      if (negotiationId === undefined) {
-        if (parsed.data.playerId === undefined) {
-          return {
-            ok: false,
-            message: "누구와 마주 앉는지 알 수 없습니다 — negotiationId나 playerId가 필요합니다",
-          };
-        }
-        const talks = openTalks(state, {
-          playerId: parsed.data.playerId,
-          ...(parsed.data.kind === undefined ? {} : { kind: parsed.data.kind }),
-        });
-        if (!talks.ok) return { ok: false, message: talks.message };
-        negotiationId = talks.negotiation.id;
-        if (talks.opened) {
-          notes.push(
-            `${playerName(state, talks.negotiation.gamePlayerId)}와 마주 앉았다 — 오퍼는 없다 (${talks.negotiation.id})`,
-          );
-        }
-      }
-      const negotiation = state.negotiations.find((n) => n.id === negotiationId);
-      if (!negotiation) return { ok: false, message: `협상 "${negotiationId}"을 찾지 못했습니다` };
-      /**
-       * ② **감독의 말에 실린 값·조건·답을 먼저 장부에 건다** (§12-3) — 그래야 상대가 그
-       * 오퍼에 답한다. 옮길 것이 없으면(반려) 말만 건너간다 — 값 없는 말도 테이블의 일이다.
-       */
-      const moved = await runTableOrders(state, specs, negotiation, line).catch(
-        (error: unknown) => {
-          // 해석기가 죽어도 테이블은 선다 — 그 말은 옮기지 못한 채 상대에게 간다 (agents.md §1)
-          console.warn("[table-orders] 감독의 말을 옮기지 못했습니다 — 말만 건넵니다:", error);
-          return {
-            ok: false as const,
-            message: "감독의 말에서 값·조건을 옮기지 못했습니다 — 말만 건넸습니다",
-          };
-        },
-      );
-      if (moved.ok) applyOps(specs, moved.orders, TABLE_OPS, notes);
-      if (negotiation.status !== "open") {
-        // 접거나 확정한 말이었다 — 앉을 자리가 없다
-        return recordCall(
-          calls,
-          "speak_at_table",
-          { ok: true, message: notes.join("\n") || `협상이 끝났습니다 (${negotiation.status})` },
-          { input: parsed.data, ...(context ? { line: writtenLines(context.text) } : {}) },
-        );
-      }
-      // ③ 마주 앉는다 — 답을 기다리던 것은 오늘로 당겨지고 상대가 그 자리에서 답한다
-      const seated = sitAtTable(state, negotiation.id, line);
-      if (!seated.ok) return seated;
-      const reply = await runTableReply(state, seated.seat, line);
-      const outcome = settleTableReply(state, seated.seat, reply ?? undefined);
-      // ④ 코어 명령이 돌려준 줄이 앞에, 상대의 답이 뒤에 — 감독이 무엇을 걸었는지 먼저 읽는다
-      const message =
-        notes.length > 0 ? `${notes.join("\n")}\n${outcome.message}` : outcome.message;
-      return recordCall(
-        calls,
-        "speak_at_table",
-        { ...outcome, message },
-        { input: parsed.data, ...(context ? { line: writtenLines(context.text) } : {}) },
-      );
-    },
-  };
-  /**
    * **이적·재정 지시** — 판 지시와 같은 무늬다 (agents.md §1). 코어가 쥔 감독의 말이 넘어가고
    * 도구 뒤의 해석기가 시장·장부 명령의 인자를 채운다. 명령 자체는 GM에게 보이지 않는다.
    */
@@ -2033,14 +1957,14 @@ export function buildGmTools(
       return { ok: true, message: notes.length > 0 ? notes.join("\n") : "장부에 걸었습니다" };
     },
   };
-  return [...visible, tactics, training, table, market];
+  return [...visible, tactics, training, market];
 }
 
 /**
- * 테이블에 건네는 감독의 말 — 원문 그대로다. 협상이 없으면 `playerId`(와 갈래)로 자리를
- * 연다 (transfer.md §12-2).
+ * 마주 앉을 자리 — 열린 협상이 있으면 그 id로, 없으면 선수(와 갈래)로 오퍼 없는 자리를 연다
+ * (transfer.md §12-2). 감독의 말은 싣지 않는다 — 방 안의 말은 코어가 협상 GM에게 넘긴다.
  */
-const TableLineArgsSchema = z.object({
+const StartNegotiationArgsSchema = z.object({
   negotiationId: z
     .string()
     .min(1)
@@ -2055,5 +1979,4 @@ const TableLineArgsSchema = z.object({
     .describe(
       "자리를 새로 열 때의 갈래 — buy=영입 · renew=재계약 · loan=임대 영입. 비우면 소속으로 고른다",
     ),
-  line: z.string().min(1).max(TABLE_LINE_MAX).describe("감독의 말 원문"),
 });

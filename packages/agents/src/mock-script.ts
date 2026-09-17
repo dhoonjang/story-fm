@@ -11,7 +11,9 @@ import {
   nextMatchFor,
   playerName,
   renewalExpectation,
+  roomNegotiationOf,
   suggestTerms,
+  tableVoicesOf,
   teamName,
   type GameState,
 } from "@story-fm/engine";
@@ -164,11 +166,28 @@ const SCRIPT: readonly ScriptLine[] = [
     },
   },
   {
-    // 마주 앉기 — 갈래는 코어가 소속으로 고른다 (transfer.md §12-2). 값 없는 말이라 ops는 없다
-    say: `${NAME_SLOT} 에이전트 만나자`,
-    gm: ({ named }) => [
-      { tool: "speak_at_table", input: { playerId: named, line: `${named} 에이전트 만나자` } },
-    ],
+    // 방을 세운다 — 오퍼 없는 영입 자리 (transfer.md §12-2). 앉은 뒤는 방의 대본이다
+    say: `${NAME_SLOT} 협상하자`,
+    gm: ({ named }) => [{ tool: "start_negotiation", input: { playerId: named, kind: "buy" } }],
+  },
+  {
+    /**
+     * 방 안의 말 — 값이 실렸으니 손잡이가 열리고(`table_orders`) 그 뒤에 상대가 답한다
+     * (`reply_at_table`). 값은 코어가 부르는 자다(`suggestTerms`) — 선수와 갈래는 해석기가
+     * 이 협상의 것으로 고정하므로 여기 적지 않는다.
+     */
+    say: "제안한 조건으로 갑시다",
+    ops: ({ state }): OpsInput => {
+      const room = roomNegotiationOf(state);
+      const terms = room ? suggestTerms(state, room.gamePlayerId) : null;
+      if (!terms) return {};
+      return { send_offer: [{ fee: terms.fee, weeklyWage: terms.weeklyWage, years: terms.years }] };
+    },
+  },
+  {
+    // 방 안의 말 — 자리를 뜬다. 협상은 열린 채 방만 닫힌다
+    say: "오늘은 여기까지 하죠",
+    gm: () => [{ tool: "leave_table" }],
   },
   {
     say: "이적 건 마무리하자",
@@ -223,10 +242,21 @@ function clockOfMinutes(total: number): string {
  * 고르지만 대본에는 고를 사실이 없으므로 한 자리를 지킨다 (prompts.md §1).
  */
 const SCRIPT_PLACE = "감독실";
+/** 협상 방의 자리 — 방 안의 장면은 전부 여기서 열린다 */
+const ROOM_PLACE = "협상실";
 
 /** 실모드와 같은 모양의 시점 헤더 — 이 한 줄이 코어의 시계를 민다 (agents.md §2) */
-function sceneHeader(date: string, clock: string): string {
-  return `[${date} ${formatClock(clock)} · ${SCRIPT_PLACE}]`;
+function sceneHeader(date: string, clock: string, place = SCRIPT_PLACE): string {
+  return `[${date} ${formatClock(clock)} · ${place}]`;
+}
+
+/** 오늘의 한 걸음 뒤 — 장면 하나가 흘려보내는 시각 */
+function steppedClock(state: GameState): string {
+  const stepped = Math.min(
+    minutesOfClock(clockOf(state)) + SCENE_STEP_MINUTES,
+    minutesOfClock(LAST_CLOCK),
+  );
+  return clockOfMinutes(stepped);
 }
 
 /** 이 줄이 가리키는 시점 — 넘기는 말이면 그 날짜, 아니면 오늘의 한 걸음 뒤 */
@@ -238,11 +268,7 @@ function pointOf(state: GameState, line: ScriptLine | null): string {
   if (typeof line?.skip === "number") {
     return sceneHeader(addDays(state.date, line.skip), "09:00");
   }
-  const stepped = Math.min(
-    minutesOfClock(clockOf(state)) + SCENE_STEP_MINUTES,
-    minutesOfClock(LAST_CLOCK),
-  );
-  return sceneHeader(state.date, clockOfMinutes(stepped));
+  return sceneHeader(state.date, steppedClock(state));
 }
 
 /**
@@ -273,6 +299,64 @@ export function ordersScript(state: GameState, said: string): ScriptedTurn {
   const ops = hit?.line.ops?.({ state, named: hit.named }) ?? {};
   // 실모드의 해석기와 같은 산출 — 도구가 아니라 `{ ops }` JSON 하나다 (models.md §3-2)
   return { output: { ops } };
+}
+
+// ── 협상 방 ─────────────────────────────────────────────
+//
+// **대본이 상대의 말을 쓰는 자리다.** 판정은 비워 내므로 코어가 앵커 그대로 자른다 —
+// 편지와 같은 함수(`settleTableReply`)를 지나 두 모드가 확률을 다른 사다리로 가르지 않는다
+// (agents.md §4-1의 mock). 방 안의 헤더는 그 날 안의 시각만 옮긴다.
+
+/** 상대의 답 — 판정과 요구는 비운다. 코어가 앵커로 자른다 */
+const ROOM_REPLY: ScriptedCall = {
+  tool: "reply_at_table",
+  input: { stance: "steady", heard: { tone: "civil", claims: [] } },
+};
+
+/**
+ * **협상 방 턴의 대본.** 자리에 앉는 턴은 방과 상대의 첫 말, 손잡이 턴은 한 줄, 감독이
+ * 말을 건 턴은 표의 줄이 정한 도구(값이 실렸으면 손잡이 → 상대의 답, 아니면 답만) 뒤에
+ * 상대의 한 마디다. 부르는 것은 이번 요청에 실려 온 도구만이다.
+ */
+export function negotiationScript(
+  state: GameState,
+  options: {
+    seating: boolean;
+    operator: boolean;
+    message: string;
+    negotiationId: string | null;
+    /** 이번 요청에 실려 온 도구의 이름 — 없는 도구는 부르지 않는다 */
+    tools: readonly string[];
+  },
+): ScriptedTurn {
+  const header = sceneHeader(state.date, steppedClock(state), ROOM_PLACE);
+  const negotiation =
+    roomNegotiationOf(state) ??
+    state.negotiations.find((n) => n.id === options.negotiationId) ??
+    null;
+  // 상대의 화자 태그는 서류의 첫 목소리다 — 영입이면 파는 구단, 재계약이면 선수 쪽
+  const who = negotiation ? (tableVoicesOf(state, negotiation)[0]?.name ?? "상대") : "상대";
+  if (options.seating) {
+    return {
+      text: [header, `@: *${ROOM_PLACE}*`, `@${who}: 앉으시죠. 무엇을 가져오셨습니까.`].join("\n"),
+    };
+  }
+  const has = (tool: string) => options.tools.includes(tool);
+  if (options.operator) {
+    // 일어서는 손잡이 턴에는 도구가 없다 — 제안 폼의 턴에는 상대가 답한다
+    return {
+      calls: has(ROOM_REPLY.tool) ? [ROOM_REPLY] : [],
+      text: [header, `@${who}: 검토해 보겠습니다.`].join("\n"),
+    };
+  }
+  const hit = findLine(options.message);
+  const planned =
+    hit?.line.gm?.({ state, named: hit.named }) ??
+    (hit?.line.ops ? [{ tool: "table_orders" }, ROOM_REPLY] : [ROOM_REPLY]);
+  return {
+    calls: planned.filter((call) => has(call.tool)),
+    text: [header, `@${who}: 검토해 보겠습니다.`].join("\n"),
+  };
 }
 
 // ── 중계 ───────────────────────────────────────────────

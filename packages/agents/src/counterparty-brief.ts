@@ -11,13 +11,16 @@ import {
   type CounterpartyAnchor,
   type CounterpartyVoice,
   type GameState,
+  type TableSeat,
   type TermAsk,
 } from "@story-fm/engine";
 import { describeCharacters } from "./gm-input";
 
 /**
- * 교섭 서류 — **협상 상대 호출(`negotiation-table.ts`)의 입력**
- * (docs/llm/agents.md §4-1 · docs/simulation/transfer.md §12-1).
+ * 교섭 서류 — **협상 상대가 읽는 입력** (docs/llm/agents.md §4-1 · docs/simulation/transfer.md
+ * §12-1). 편지(`negotiation-table.ts`)는 한 요청에 서류 전부를 싣고, 협상 방
+ * (`negotiation-gm.ts`)은 협상이 사는 동안 그대로인 부분을 레퍼런스에, 라운드마다 바뀌는
+ * 부분을 `<table>` 스냅샷에 나눠 싣는다 — 같은 서류를 두 자리가 나눠 읽는다.
  *
  * 코어가 서류와 앵커를 내고, 그 호출이 답하며, 코어가 앵커 ± 한도로 자른다. 여기 있는
  * 것은 사실을 문장으로 옮기는 것뿐이다 — 지시문은 시스템 프롬프트가 갖는다 (prompts.md §5-2).
@@ -131,9 +134,16 @@ function describeVoices(voices: readonly CounterpartyVoice[]): string[] {
 
 /**
  * `<counterparty>` 블록 — 협상 하나의 서류. 앵커는 싣지 않는다 — 그것은 대화 뒤에 따로
- * 선다(`negotiation-table.ts`). 열린 협상이 아니면 `null`.
+ * 선다(`describeSeatAnchor`). 열린 협상이 아니면 `null`.
+ *
+ * `dossier: false`면 라운드마다 바뀌는 `<dossier>`(오퍼 이력·값의 자·조건서·개인 조건)를
+ * 뺀다 — 협상 방의 레퍼런스가 그 꼴이고, 뺀 것은 `<table>` 스냅샷이 싣는다 (agents.md §5).
  */
-export function buildCounterpartyBlock(state: GameState, negotiation: Negotiation): string | null {
+export function buildCounterpartyBlock(
+  state: GameState,
+  negotiation: Negotiation,
+  options: { dossier?: boolean } = {},
+): string | null {
   const brief = buildCounterpartyBrief(state, negotiation);
   if (!brief) return null;
   // 데이터 블록은 영어 태그로 싼다 (prompts.md §5) — 서류의 줄 안 레이블은 그대로다
@@ -149,10 +159,27 @@ export function buildCounterpartyBlock(state: GameState, negotiation: Negotiatio
     `<player>`,
     ...brief.playerFacts,
     `</player>`,
-    `<dossier>`,
-    ...brief.dossier,
-    `</dossier>`,
+    ...(options.dossier === false ? [] : [`<dossier>`, ...brief.dossier, `</dossier>`]),
     ...(cards !== null ? [cards] : []),
     `</counterparty>`,
   ].join("\n");
+}
+
+/**
+ * `<anchor>` — 남은 인내와, 오퍼가 올라 있으면 코어가 박은 판정과 구간. 오퍼가 없어도
+ * 「부를 수 있는 조건」은 선다 — 조건은 오퍼 없이도 부를 수 있다 (transfer.md §12-3).
+ * 편지의 요청 끝과 방의 `<table>` 스냅샷이 같은 블록을 읽는다.
+ */
+export function describeSeatAnchor(seat: TableSeat): string {
+  const patience = `남은 인내 ${seat.table.patience}/${seat.table.patienceMax}`;
+  if (!seat.anchor) {
+    return [
+      `<anchor>`,
+      patience,
+      `테이블에 오퍼가 없다 — 판정할 것이 없다`,
+      ...describeAsks(seat.asks),
+      `</anchor>`,
+    ].join("\n");
+  }
+  return describeAnchor(seat.anchor).replace(`<anchor>`, `<anchor>\n${patience}`);
 }

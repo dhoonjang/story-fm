@@ -2081,7 +2081,7 @@ describe("교섭 테이블의 입력 — 화자와 그가 답하는 칸", () => 
     return { player, negotiation: state.negotiations.find((n) => n.kind === "renew")! };
   }
 
-  it("입력은 서류·상황·대화·앵커 순이고, 감독이 다른 데서 한 말은 없다", () => {
+  it("편지의 입력은 서류·상황·대화·앵커·편지 순이고, 감독이 다른 데서 한 말은 없다", () => {
     const state = game();
     const { negotiation } = renewal(state);
     // 오퍼 없이 말만 오가는 자리 — 판정이 협상을 닫지 않는다
@@ -2100,14 +2100,8 @@ describe("교섭 테이블의 입력 — 화자와 그가 답하는 칸", () => 
     });
     const second = sitAtTable(state, negotiation.id, "주급은 그대로, 연수는 4년");
     if (!second.ok) throw new Error(second.message);
-    const input = buildTableInput(state, second.seat, "주급은 그대로, 연수는 4년")!;
-    const order = [
-      "<counterparty",
-      "<situation",
-      "<table_log>",
-      "<anchor>",
-      "@감독: 주급은 그대로",
-    ];
+    const input = buildTableInput(state, second.seat)!;
+    const order = ["<counterparty", "<situation", "<table_log>", "<anchor>", "<letter>"];
     const positions = order.map((tag) => input.indexOf(tag));
     expect(
       positions.every((p) => p >= 0),
@@ -2115,13 +2109,11 @@ describe("교섭 테이블의 입력 — 화자와 그가 답하는 칸", () => 
     ).toBe(true);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
     expect(input).not.toContain(secret);
-    // 지난 답과 장부 줄은 대화에 서고, 이번 말은 대화에 없다
+    // 감독의 말·지난 답·장부 줄은 대화에 선다 — 편지는 테이블의 줄 전부를 읽는다
+    expect(input).toContain("@감독: 주급은 그대로, 연수는 4년");
     expect(input).toContain("조건을 들어 보고요.");
     expect(input).toContain("[장부]");
     expect(input).toContain("남은 인내");
-    expect(input.indexOf("주급은 그대로, 연수는 4년")).toBe(
-      input.lastIndexOf("주급은 그대로, 연수는 4년"),
-    );
   });
 
   it("재계약의 서류에는 목소리가 하나 선다 — 이적료를 받을 구단이 없다", () => {
@@ -2130,9 +2122,7 @@ describe("교섭 테이블의 입력 — 화자와 그가 답하는 칸", () => 
     const seat = sitAtTable(state, negotiation.id, "남아 주십시오");
     if (!seat.ok) throw new Error(seat.message);
     expect(seat.seat.voices.map((v) => v.speaker)).toEqual(["agent"]);
-    expect(buildTableInput(state, seat.seat, "남아 주십시오")!).toContain(
-      `agent “${seat.seat.voices[0]!.name}” —`,
-    );
+    expect(buildTableInput(state, seat.seat)!).toContain(`agent “${seat.seat.voices[0]!.name}” —`);
   });
 
   it("영입의 서류는 화자를 둘 적고, 화자 없는 옛 줄은 구단으로 읽힌다", () => {
@@ -2154,7 +2144,7 @@ describe("교섭 테이블의 입력 — 화자와 그가 답하는 칸", () => 
 
     // 화자 칸이 없는 줄 — 목소리가 둘이 되기 전의 세이브가 남긴 답이다
     buy.table!.lines.push({ date: state.date, by: "them", text: "옛 세이브의 답이다" });
-    const input = buildTableInput(state, seat.seat, "값부터 맞춥시다")!;
+    const input = buildTableInput(state, seat.seat)!;
     expect(input).toContain(`club “${club!.name}” —`);
     expect(input).toContain(`agent “${agent!.name}” —`);
     // 그 답은 서류가 부르는 상대 하나, 곧 파는 구단의 말로 읽힌다

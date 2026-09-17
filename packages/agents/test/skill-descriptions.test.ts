@@ -9,6 +9,8 @@ import {
   CORE_COMMANDS,
   MARKET_OPS,
   MATCH_TOOL_DEFINITIONS,
+  NEGOTIATION_GM_SYSTEM,
+  NEGOTIATION_TOOL_DEFINITIONS,
   TACTIC_CAPS,
   TACTIC_OPS,
   TABLE_OPS,
@@ -123,10 +125,10 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
     const perGroup: Record<string, number> = {};
     for (const skill of SKILL_CATALOG) perGroup[skill.group] = (perGroup[skill.group] ?? 0) + 1;
     expect(perGroup).toEqual({
-      진행: 2,
+      진행: 3,
       "전술·훈련": 2,
       "대화·서사": 4,
-      이적: 4,
+      이적: 3,
       재정: 1,
       조회: 11,
     });
@@ -162,8 +164,12 @@ describe("규칙이 사는 자리", () => {
      * 다음에 할 일을 적으므로(`describePending`) 규칙을 적는 자리에도 같은 이름을
      * 적고 싶어지는데, 그러면 GM이 부를 수 없는 도구를 아는 것이 된다.
      */
-    for (const name of [...SKILL_NAMES, ...CORE_COMMANDS]) {
+    // 협상 GM의 도구 셋 — 그 사용법도 도구 설명의 것이라 프롬프트에는 이름이 서지 않는다
+    const roomTools = NEGOTIATION_TOOL_DEFINITIONS.map((t) => t.name);
+    for (const name of [...SKILL_NAMES, ...CORE_COMMANDS, ...roomTools]) {
       expect(mentions(GM_SYSTEM, name), `GM_SYSTEM: ${name}`).toBe(false);
+      expect(mentions(NEGOTIATION_GM_SYSTEM, name), `NEGOTIATION_GM_SYSTEM: ${name}`).toBe(false);
+      if (roomTools.includes(name)) continue;
       // 테이블 해석기도 자기 목록 밖의 이름은 적지 않는다 (transfer.md §12-2)
       if (!TABLE_OPS.includes(name)) {
         expect(mentions(TABLE_ORDERS_SYSTEM, name), `TABLE_ORDERS_SYSTEM: ${name}`).toBe(false);
@@ -199,9 +205,9 @@ describe("규칙이 사는 자리", () => {
     }
     const match = MATCH_TOOL_DEFINITIONS.find((t) => t.name === "tactic_orders")!;
     expect(Object.keys(match.inputSchema.properties ?? {})).toEqual([]);
-    // 테이블의 말은 남는다 — 상대에게 그대로 건네지는 발화라 턴 발화 전체와 같지 않다
-    const table = TOOLS.find((t) => t.name === "speak_at_table")!;
-    expect(Object.keys(table.inputSchema.properties ?? {})).toContain("line");
+    // 협상 방의 손잡이도 같다 — 방 안의 말은 전부 건너편에게 하는 말이라 가를 것이 없다
+    const table = NEGOTIATION_TOOL_DEFINITIONS.find((t) => t.name === "table_orders")!;
+    expect(Object.keys(table.inputSchema.properties ?? {})).toEqual([]);
   });
 
   /**
@@ -266,6 +272,7 @@ describe("규칙이 사는 자리", () => {
    */
   it("코어가 갈래표를 든 열거는 그 표가 모델에게 닿는다", () => {
     const reply = { name: "negotiation-table", inputSchema: REPLY_INPUT };
+    const room = NEGOTIATION_TOOL_DEFINITIONS.find((t) => t.name === "reply_at_table")!;
     const rows = [
       {
         where: "record_incident.kind",
@@ -282,12 +289,13 @@ describe("규칙이 사는 자리", () => {
         reads: ONBOARDING_JUDGE_SYSTEM,
       },
       {
-        where: "negotiation-table.heard.claims[].kind",
-        node: enumArg([reply], reply.name, "kind"),
+        /** 들은 것은 방의 답에만 있다 — 편지에는 들을 말이 없다 (agents.md §4-1) */
+        where: "reply_at_table.heard.claims[].kind",
+        node: enumArg([room], room.name, "kind"),
         kinds: PITCH_CLAIM_KINDS as readonly string[],
         /**
          * 여기만 표가 둘이다. 낱말은 장부 줄이 쓰는 것과 같아야 하고(다음 답을 쓰는
-         * 모델이 `<table_log>`에서 그 낱말을 다시 읽는다), **뜻**은 갈래를 가르는
+         * 모델이 `[장부]` 줄에서 그 낱말을 다시 읽는다), **뜻**은 갈래를 가르는
          * 문장이라 낱말만으로는 「마지막 기회」가 누구의 것인지 서지 않는다.
          */
         tables: [PITCH_CLAIM_KO, PITCH_CLAIM_MEANING] as Array<Record<string, string>>,
@@ -299,6 +307,14 @@ describe("규칙이 사는 자리", () => {
         kinds: TABLE_STANCES as readonly string[],
         tables: [TABLE_STANCE_KO as Record<string, string>],
         reads: NEGOTIATION_TABLE_SYSTEM,
+      },
+      {
+        /** 방의 태도는 인자 설명이 표를 든다 — 협상 GM 프롬프트는 도구의 사용법을 적지 않는다 */
+        where: "reply_at_table.stance",
+        node: enumArg([room], room.name, "stance"),
+        kinds: TABLE_STANCES as readonly string[],
+        tables: [TABLE_STANCE_KO as Record<string, string>],
+        reads: "",
       },
       {
         /** 대화와 다가옴의 응대가 **같은 인자 하나**를 쓴다 — 한 자리를 재면 둘 다 잰다 */
@@ -334,6 +350,13 @@ describe("규칙이 사는 자리", () => {
       {
         where: "negotiation-table.ruling.squadStatus",
         node: enumArg([reply], reply.name, "squadStatus"),
+        kinds: SQUAD_STATUSES as readonly string[],
+        tables: [SQUAD_STATUS_KO as Record<string, string>],
+        reads: "",
+      },
+      {
+        where: "reply_at_table.ruling.squadStatus",
+        node: enumArg([room], room.name, "squadStatus"),
         kinds: SQUAD_STATUSES as readonly string[],
         tables: [SQUAD_STATUS_KO as Record<string, string>],
         reads: "",
@@ -681,7 +704,7 @@ describe("같은 종류의 인자는 같은 검증을 지난다", () => {
   });
 
   it("필수 인자는 전부 선언된 인자다", () => {
-    for (const tool of [...TOOLS, ...OUTPUT_SCHEMAS]) {
+    for (const tool of [...TOOLS, ...NEGOTIATION_TOOL_DEFINITIONS, ...OUTPUT_SCHEMAS]) {
       for (const [, node] of [["", tool.inputSchema] as const, ...walk(tool.inputSchema)]) {
         const declared = Object.keys((node.properties ?? {}) as Record<string, unknown>);
         for (const key of (node.required ?? []) as string[]) {
@@ -813,11 +836,12 @@ describe("출력 스키마는 제공자의 문을 지난다", () => {
   };
 
   /**
-   * 열은 전부 도구 없이 답한다 — GM 둘을 뺀 에이전트 이름과 목록이 하나씩 맞는다.
+   * 열은 전부 도구 없이 답한다 — GM 셋을 뺀 에이전트 이름과 목록이 하나씩 맞는다.
    * 에이전트가 하나 늘면 설정(`AGENT_NAMES`)과 이 목록 중 하나가 먼저 빨개진다.
    */
-  it("GM 둘을 뺀 에이전트 전부가 출력 스키마로 답한다 — 도구 이름은 없다", () => {
-    const expected = AGENT_NAMES.filter((name) => name !== "gm" && name !== "match-gm");
+  it("GM 셋을 뺀 에이전트 전부가 출력 스키마로 답한다 — 도구 이름은 없다", () => {
+    const GMS = new Set(["gm", "match-gm", "negotiation-gm"]);
+    const expected = AGENT_NAMES.filter((name) => !GMS.has(name));
     expect(DECLARED.map((entry) => entry.agent).sort()).toEqual([...expected].sort());
     for (const entry of DECLARED) expect(entry.schema.type, entry.agent).toBe("object");
   });

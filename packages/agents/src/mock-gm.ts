@@ -20,7 +20,7 @@ import {
   type GameLLM,
 } from "@story-fm/llm";
 import type { GmTurnResult } from "./gm-types";
-import { matchScript, ordersScript, peaceScript } from "./mock-script";
+import { matchScript, negotiationScript, ordersScript, peaceScript } from "./mock-script";
 
 /**
  * **mock 모드가 어느 어댑터를 세우는가** — 그것뿐인 층이다 (docs/llm/agents.md §8).
@@ -37,23 +37,38 @@ export interface MockTurnFacts {
   inMatch: boolean;
   /** 첫 휘슬만 여는 턴 */
   kickoff: boolean;
+  /** 협상 방의 턴 — 대본이 상대가 되어 답한다 (transfer.md §12-2) */
+  inNegotiation: boolean;
+  /** 자리에 앉는 첫 턴 — 도구가 없다 */
+  seating: boolean;
+  /** 이 턴이 속한 협상 — 방이 닫힌 뒤의 마지막 턴도 이 id의 것이다 */
+  negotiationId: string | null;
   /** 손잡이가 보낸 턴 — 구간은 코어가 이미 굴렸다 */
   operator: boolean;
   /** 이 턴에 코어가 이미 남긴 기록이 있는가 — 그러면 장면은 그 기록이 세운다 */
   recorded: () => boolean;
 }
 
-/** GM·매치 GM 자리의 대본 어댑터 — 실모드면 `undefined` */
+/** GM 셋(평시·경기·협상 방) 자리의 대본 어댑터 — 실모드면 `undefined` */
 export function mockGmLlm(
   config: AgentConfig,
   state: GameState,
   turn: MockTurnFacts,
 ): GameLLM | undefined {
   if (resolveLlmMode() !== "mock") return undefined;
-  return new ScriptedGameLLM(config, () =>
+  return new ScriptedGameLLM(config, (req) =>
     turn.inMatch
       ? matchScript(state, { kickoff: turn.kickoff, operator: turn.operator })
-      : peaceScript(state, turn.message, { recorded: turn.recorded() }),
+      : turn.inNegotiation
+        ? negotiationScript(state, {
+            seating: turn.seating,
+            operator: turn.operator,
+            message: turn.message,
+            negotiationId: turn.negotiationId,
+            // 이번 요청에 실려 온 도구만 부른다 — 자리에 앉는 턴·일어서는 턴에는 도구가 없다
+            tools: (req.tools ?? []).map((tool) => tool.name),
+          })
+        : peaceScript(state, turn.message, { recorded: turn.recorded() }),
   );
 }
 

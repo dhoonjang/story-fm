@@ -5,14 +5,15 @@ import { mockOrdersLlm } from "./mock-gm";
 import { runOpsOrders, tagged, type OpsAgentSpec, type OpsOrders } from "./orders-ops";
 
 /**
- * 테이블 해석 — **마주 앉은 자리에서 감독이 한 말 한 줄을 이 협상의 명령 인자로 옮긴다**
- * (agents.md §4-1 · transfer.md §12-2 · §12-3).
+ * 테이블 해석 — **협상 방에서 감독이 한 말 한 마디를 이 협상의 명령 인자로 옮긴다**
+ * (agents.md §1 · transfer.md §12-2 · §12-3). 협상 GM의 `table_orders` 뒤에서 돈다 — 손잡이는
+ * 인자가 없고, 이번 턴 감독의 말은 코어가 넘긴다(`negotiation-gm.ts`).
  *
  * 시장 해석(`market-orders.ts`)과 같은 뼈대지만 좁다: 읽는 것은 이 협상 하나와 테이블의
  * 최근 말뿐이고, 채우는 명령도 이 테이블에서 오갈 수 있는 것뿐이다. 감독이 값을 말하면
  * 오퍼가 되고, 조건을 걸면 조건서에 오르며, 상대의 요구에 답하면 그 답이 장부에 선다 —
- * 그다음에 상대가 답한다. 옮기지 못한 말은 그대로 상대에게 간다: 값이 없는 말은 흥정이
- * 아니라 대화이고, 그것도 테이블의 일이다.
+ * 그다음에 상대가 답한다(`reply_at_table`). 옮기지 못한 말은 그대로 상대에게 간다: 값이
+ * 없는 말은 흥정이 아니라 대화이고, 그것도 테이블의 일이다.
  *
  * **모델이 다른 협상을 가리키지 못한다** — 돌아온 명령의 `negotiationId`·`playerId`는 이
  * 테이블의 것으로 덮어쓴다 (`runTableOrders`).
@@ -70,7 +71,10 @@ export type TableOrders = OpsOrders;
 /** 테이블의 최근 말 — 이만큼이면 흐름이 읽힌다 */
 const TABLE_LOG_TAIL = 6;
 
-/** 해석기의 입력 — 이 협상 하나와 테이블의 최근 말 */
+/**
+ * 해석기의 입력 — 이 협상 하나와 테이블의 최근 말. 방의 테이블에는 감독의 말과 장부 줄만
+ * 남고(상대의 대사는 방의 채팅 턴에 있다), 편지가 남긴 답에는 `them` 줄이 선다.
+ */
 export function buildTableOrdersContext(state: GameState, negotiation: Negotiation): string[] {
   const log = (negotiation.table?.lines ?? []).slice(-TABLE_LOG_TAIL).map((line) => {
     const who = line.by === "us" ? "@감독" : line.by === "ledger" ? "[장부]" : "@상대";

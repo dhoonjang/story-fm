@@ -11,7 +11,7 @@ import {
   userPlayers,
   type GameState,
 } from "@story-fm/engine";
-import { TIME_PASSED, buildOnboardingTurn, runGmTurn } from "@story-fm/agents";
+import { TABLE_LEFT, TIME_PASSED, buildOnboardingTurn, runGmTurn } from "@story-fm/agents";
 
 /**
  * **mock 모드가 실 경로를 지나는가** (docs/llm/agents.md §8).
@@ -224,5 +224,102 @@ describe("mock 대본 — 이적", () => {
     expect(namesOf(answered)).toContain("respond_offer");
     expect(pendingOffer(negotiation!)).toBeNull();
     expect(namesOf(answered)).toContain("accept_deal");
+  });
+});
+
+/**
+ * **협상 방** — 경기와 같은 골격의 모드다 (transfer.md §12-2). 문을 여는 것은 평시 GM의
+ * 도구(`start_negotiation`), 앉는 것은 손잡이, 그 뒤의 턴은 협상 GM의 것이다. 재는 것은
+ * 여기서도 **기록**이다 — 방 안의 말이 손잡이를 지나 코어 명령으로 남고, 상대의 답이
+ * 앵커대로 장부에 서고, 방이 국면을 되돌려 놓는가.
+ */
+describe("mock 대본 — 협상 방", () => {
+  /** 성사 확률이 문턱을 넘는 영입 상대 — 답이 수락으로 갈려야 방이 스스로 닫힌다 */
+  function acceptableTarget(state: GameState) {
+    const target = state.players.find((p) => {
+      if (p.teamId === state.userTeamId) return false;
+      const terms = suggestTerms(state, p.id);
+      if (!terms) return false;
+      if (state.players.filter((q) => q.name === p.name).length > 1) return false;
+      return dealOdds(state, terms).probability >= ACCEPT_ODDS_FLOOR;
+    });
+    if (!target) throw new Error("성사 확률이 문턱을 넘는 영입 상대가 없다");
+    return target;
+  }
+
+  /** 방을 세우고 자리에 앉는 두 걸음 — 케이스마다 같다 */
+  async function seatWith(state: GameState, name: string) {
+    const opened = await runGmTurn(state, `${name} 협상하자`);
+    expectGmGrammar(opened.text);
+    expect(namesOf(opened)).toContain("start_negotiation");
+    expect(state.phase).toBe("negotiation");
+    expect(state.pendingNegotiation?.seated).toBe(false);
+
+    // 자리에 앉는 턴 — 도구가 없고, 방과 상대의 첫 말까지다
+    const seated = await runGmTurn(state, "협상 자리에 앉는다", undefined, {
+      kind: "enter_negotiation",
+    });
+    expectGmGrammar(seated.text);
+    expect(seated.toolCalls).toHaveLength(0);
+    expect(state.pendingNegotiation?.seated).toBe(true);
+    return openNegotiationFor(state, acceptableTarget(state).id) ?? state.negotiations.at(-1)!;
+  }
+
+  it("방을 열고 앉아 값을 말하면 손잡이 → 오퍼 → 상대의 답이 서고, 합의가 방을 닫는다", async () => {
+    const state = newGame();
+    const target = acceptableTarget(state);
+    const from = state.date;
+    const negotiation = await seatWith(state, target.name);
+    expect(negotiation.gamePlayerId).toBe(target.id);
+    expect(negotiation.rounds).toHaveLength(0);
+
+    const spoke = await runGmTurn(state, "제안한 조건으로 갑시다");
+    expectGmGrammar(spoke.text);
+    // 감독의 말은 코어가 테이블의 us 줄로 적었다
+    expect(negotiation.table?.lines.some((l) => l.by === "us")).toBe(true);
+    // 값이 실린 말 — 해석기가 오퍼로 옮기고, 상대가 그 자리에서 답한다
+    expect(namesOf(spoke)).toContain("send_offer");
+    expect(namesOf(spoke)).toContain("reply_at_table");
+    expect(negotiation.rounds.length).toBeGreaterThanOrEqual(1);
+    // 앵커가 수락이라 협상은 합의로 끝나고, 끝난 협상 위에 열린 방은 없다
+    expect(negotiation.status).toBe("agreed");
+    expect(state.phase).toBe("idle");
+    expect(state.pendingNegotiation ?? null).toBeNull();
+    // 방 안에서 날짜는 흐르지 않는다
+    expect(state.date).toBe(from);
+  });
+
+  it("값 없는 말에는 상대의 답만 서고, 일어서는 손잡이가 방을 닫되 협상은 열어 둔다", async () => {
+    const state = newGame();
+    const target = acceptableTarget(state);
+    const negotiation = await seatWith(state, target.name);
+
+    const talked = await runGmTurn(state, "음...");
+    expect(namesOf(talked)).toContain("reply_at_table");
+    expect(namesOf(talked)).not.toContain("table_orders");
+    expect(negotiation.rounds).toHaveLength(0);
+    expect(state.phase).toBe("negotiation");
+
+    const left = await runGmTurn(state, "협상 자리에서 일어선다", undefined, {
+      kind: "leave_negotiation",
+    });
+    expectGmGrammar(left.text);
+    // 코어가 턴 앞에서 방을 닫았다 — 기록은 남되 칩으로 서지 않는다
+    expect(left.toolCalls.find((c) => c.name === TABLE_LEFT)?.silent).toBe(true);
+    expect(state.phase).toBe("idle");
+    expect(negotiation.status).toBe("open");
+    expect(negotiation.table?.lines.at(-1)?.by).toBe("ledger");
+  });
+
+  it("자리를 뜨는 말은 leave_table로 방을 닫는다", async () => {
+    const state = newGame();
+    const target = acceptableTarget(state);
+    const negotiation = await seatWith(state, target.name);
+
+    const left = await runGmTurn(state, "오늘은 여기까지 하죠");
+    expectGmGrammar(left.text);
+    expect(namesOf(left)).toContain("leave_table");
+    expect(state.phase).toBe("idle");
+    expect(negotiation.status).toBe("open");
   });
 });
