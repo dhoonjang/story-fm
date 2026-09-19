@@ -227,21 +227,23 @@ flowchart LR
     NH["table_orders (손잡이)"]
     NR["reply_at_table · leave_table"]
   end
-  subgraph INTERP["해석기 4 — 출력 스키마 {ops, unresolved}"]
+  subgraph INTERP["해석기 4 — 출력 스키마 {ops, unresolved} · 판독기 — {ops, points, sheet, unresolved}"]
     direction TB
-    TO["tactic-orders"]
+    TO["tactic-orders (평시)"]
+    MR["match-reader (경기)"]
     TRO["training-orders"]
     MO["market-orders"]
     TBO["table-orders"]
   end
-  subgraph CMD["GM에게 보이지 않는 코어 명령 38"]
+  subgraph CMD["GM에게 보이지 않는 코어 명령 36"]
     direction TB
-    C1["판 11"]
+    C1["판 9"]
     C2["훈련·육성 6"]
     C3["이적·재정·스태프·감독직 21"]
   end
   NT["negotiation-table (편지)"]
   HD -->|"고르기만 — 원문은 코어가"| TO --> C1
+  MR --> C1
   HD -->|"고르기만 — 원문은 코어가"| TRO --> C2
   HD -->|"고르기만 — 원문은 코어가"| MO --> C3
   NH -->|"고르기만 — 원문은 코어가"| TBO --> C3
@@ -270,12 +272,12 @@ unresolved }`), `parseOps`가 명령별 상한(`TACTIC_CAPS` 또는 `OPS_PER_COM
 | 조회 (11, readOnly)       | `search_players` · `get_squad` · `get_team` · `get_league` · `get_match_report` · `get_opponent_report` · `get_career` · `get_history` · `get_finance` · `deal_odds` · `list_negotiations`                                                                                                                                                                                                                                                              |
 | 스킬 (10)                 | `start_match` · `start_negotiation` · `resign` · `team_talk` · `respond_to_media` · `respond_to_approach` · `record_incident` · `apply_finance_event` · `scout_player` · `scout_mission`                                                                                                                                                                                                                                                                |
 | 손잡이 (3)                | `tactic_orders` · `training_orders` · `market_orders`                                                                                                                                                                                                                                                                                                                                                                                                   |
-| 코어 명령 — 판 (11)       | `set_lineup` · `set_squad_level` · `set_captain` · `substitute` · `set_tactics` · `set_player_tactic` · `set_match_plan` · `exploit_point` · `set_set_piece_takers` · `set_set_piece_routine` · `set_shootout_order` (+ 해석기는 `team_talk`도 채운다 — `TACTIC_OPS` 12, 그 순서가 적용 순서)                                                                                                                                                           |
+| 코어 명령 — 판 (9)        | `set_lineup` · `set_squad_level` · `set_captain` · `substitute` · `set_tactics` · `set_player_tactic` · `set_set_piece_takers` · `set_set_piece_routine` · `set_shootout_order` (+ 해석기와 판독기는 `team_talk`도 채운다 — `TACTIC_OPS` 10, 그 순서가 적용 순서)                                                                                                                                                                                       |
 | 코어 명령 — 훈련·육성 (6) | `sign_youth` · `set_squad_number` · `set_reserve_training` · `set_development_focus` · `set_mentor` · `set_training` (`TRAINING_OPS`)                                                                                                                                                                                                                                                                                                                   |
 | 코어 명령 — 시장 (21)     | `respond_offer` · `accept_deal` · `respond_transfer_request` · `withdraw_offer` · `set_transfer_list` · `send_offer` · `open_renewal` · `open_release` · `release_player` · `exercise_buyback` · `recall_loan` · `adjust_transfer_budget` · `request_board` · `fund_transfer_budget` · `pay_player_bonus` · `set_ticket_price` · `release_staff` · `hire_staff` · `accept_manager_offer` · `counter_manager_offer` · `apply_manager_job` (`MARKET_OPS`) |
 | 경기 도구 (3, 매치 GM)    | `tactic_orders` · `advance_match` · `finalize_match` (`MATCH_TOOL_DEFINITIONS`)                                                                                                                                                                                                                                                                                                                                                                         |
 | 협상 도구 (3, 협상 GM)    | `table_orders` · `reply_at_table` · `leave_table` (`NEGOTIATION_TOOL_DEFINITIONS`)                                                                                                                                                                                                                                                                                                                                                                      |
-| 출력 스키마 (10)          | 해석기 넷 `{ ops, unresolved }` · 경기 마감 `SETTLE_MATCH_INPUT` · 훈련 결산 `REPORT_TRAINING_INPUT` · 스카우팅 평 `REPORT_SCOUT_INPUT` · 온보딩 `REPORT_ONBOARDING_INPUT` · 압축 `REPORT_DIGEST_INPUT` · 편지 `REPLY_INPUT` (`outputAgents()`) — 도구 이름은 없다                                                                                                                                                                                      |
+| 출력 스키마 (11)          | 해석기 넷 `{ ops, unresolved }` · 판독기 `{ ops, points, sheet, unresolved }` · 경기 마감 `SETTLE_MATCH_INPUT` · 훈련 결산 `REPORT_TRAINING_INPUT` · 스카우팅 평 `REPORT_SCOUT_INPUT` · 온보딩 `REPORT_ONBOARDING_INPUT` · 압축 `REPORT_DIGEST_INPUT` · 편지 `REPLY_INPUT` (`outputAgents()`) — 도구 이름은 없다                                                                                                                                        |
 
 수는 `packages/agents/test/skill-descriptions.test.ts`가 고정한다(24 · 그룹별). 무직인
 감독에게는 스킬 중 `accept_manager_offer` · `counter_manager_offer` · `apply_manager_job` ·
@@ -291,12 +293,13 @@ unresolved }`), `parseOps`가 명령별 상한(`TACTIC_CAPS` 또는 `OPS_PER_COM
 감독의 말은 `@감독:` 줄 하나로만 선다. 셋이 한 턴에 함께 불리면 같은 원문을 받되 각자
 제 영역만 옮기고, 남의 영역인 말은 `unresolved`에 남기지 않는다.
 
-| 해석기            | 맥락 블록                                                                                                                                                                              | 채우는 명령      | 적용                                         |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------- |
-| `tactic-orders`   | 경기: `<ledger>`(장부·`<standing>`·`<targets>`) + `<match_log>`(이 경기의 턴 전부) · 평시: `<standing>` `<squad>` `<recent_turns>` · 양쪽: `<board_moves>`(이번 턴 전술판이 움직인 것) | `TACTIC_OPS` 12  | `applyTacticOrders` — 경기면 패킷 재계산까지 |
-| `training-orders` | `<schedule>`(주간 일정) · `<squad_ops>`(지금 걸린 육성·멘토·방침) · `<squad>` · `<recent_turns>`                                                                                       | `TRAINING_OPS` 6 | `applyOps`                                   |
-| `market-orders`   | `<negotiations>` · `<finance>` · `<interest>` · `<board>` · `<buybacks>` · `<seat>`(감독직) · `<recent_turns>`                                                                         | `MARKET_OPS` 21  | `applyOps`                                   |
-| `table-orders`    | `<negotiation>`(이 협상 하나 — 오퍼 이력·서 있는 조정·조건서·개인 조건·값의 자) · `<table_log>`(테이블의 최근 줄 — 감독의 말 · 장부)                                                   | `TABLE_OPS` 8    | `applyOps` — 옮기고 남은 말은 상대에게 간다  |
+| 해석기            | 맥락 블록                                                                                                                                                                      | 채우는 명령                 | 적용                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- | -------------------------------------------------- |
+| `tactic-orders`   | 평시: `<standing>` `<squad>` `<recent_turns>` · `<board_moves>`(이번 턴 전술판이 움직인 것)                                                                                    | `TACTIC_OPS` 10             | `applyTacticOrders`                                |
+| `match-reader`    | 경기: `<ledger>`(장부·`<standing>`) · `<points>`(지금 전술 포인트 전부) · `<facts>`(양 팀 능력치·격자·상성·피로·카드) · `<segment>`(구간 뒤) · `<match_log>` · `<board_moves>` | 경기 부분집합 + 포인트·시트 | `applyMatchReading` — 시트 검증·한도 → 패킷 재계산 |
+| `training-orders` | `<schedule>`(주간 일정) · `<squad_ops>`(지금 걸린 육성·멘토·방침) · `<squad>` · `<recent_turns>`                                                                               | `TRAINING_OPS` 6            | `applyOps`                                         |
+| `market-orders`   | `<negotiations>` · `<finance>` · `<interest>` · `<board>` · `<buybacks>` · `<seat>`(감독직) · `<recent_turns>`                                                                 | `MARKET_OPS` 21             | `applyOps`                                         |
+| `table-orders`    | `<negotiation>`(이 협상 하나 — 오퍼 이력·서 있는 조정·조건서·개인 조건·값의 자) · `<table_log>`(테이블의 최근 줄 — 감독의 말 · 장부)                                           | `TABLE_OPS` 8               | `applyOps` — 옮기고 남은 말은 상대에게 간다        |
 
 ## 5. 경기 턴 — 매치 GM이 도구로 경기를 진행한다
 
@@ -307,7 +310,7 @@ sequenceDiagram
   participant GM as gm.ts
   participant AD as 어댑터 (match-gm)
   participant T1 as tactic_orders
-  participant TO as tactic-orders (LLM)
+  participant TO as match-reader (LLM)
   participant T2 as advance_match
   participant T3 as finalize_match
   participant FM as finalize-match (LLM)
@@ -318,18 +321,21 @@ sequenceDiagram
     GM->>CORE: applyTacticOrders(roll) — 코어가 먼저 구간을 굴린다
     Note over GM: 대본 #lt;segment#gt;가 이번 턴 층에 · 도구는 finalize_match만
   end
-  GM->>AD: runTurn(MATCH_GM_SYSTEM + 레퍼런스, casterHistory, @감독 + #lt;ledger#gt;#lt;standing#gt;#lt;targets#gt;)
+  GM->>AD: runTurn(MATCH_GM_SYSTEM + 레퍼런스, casterHistory, @감독 + #lt;ledger#gt;#lt;standing#gt;#lt;points#gt;)
   opt 감독이 지시한 턴 — 한 번
     AD->>T1: tactic_orders() — 원문은 코어가 쥔 said
-    T1->>TO: #lt;ledger#gt; #lt;match_log#gt; @감독:
-    TO-->>T1: {ops, unresolved}
-    T1->>CORE: 명령 적용 → refreshPacket
+    T1->>TO: #lt;ledger#gt; #lt;points#gt; #lt;facts#gt; #lt;match_log#gt; @감독:
+    TO-->>T1: {ops, points, sheet, unresolved}
+    T1->>CORE: 명령 적용 · 시트 실재·한도 → refreshPacket
     T1-->>AD: #lt;core_replies#gt; + 구간 뒤 #lt;ledger#gt; + #lt;packet#gt;
   end
   opt 경기가 이어질 자리
     AD->>T2: advance_match({untilMinute?})
     T2->>CORE: 상대 벤치 이동 → simulateSegment(다음 정지점까지 · 감독이 분을 말했으면 그 분, 사유 requested) → 장부 검증 → 기록 → 피로 → 패킷 재계산
-    T2-->>AD: #lt;segment#gt; 사건 목록 · #lt;stop#gt; · #lt;ledger#gt; · #lt;packet#gt;
+    T2->>TO: #lt;segment#gt; #lt;points#gt; #lt;facts#gt; — 구간 뒤의 판독
+    TO-->>T2: {points, sheet}
+    T2->>CORE: 시트 실재·한도 → 패킷 재계산
+    T2-->>AD: #lt;segment#gt; 사건 목록 · #lt;stop#gt; · #lt;ledger#gt; · #lt;packet#gt; · #lt;points#gt;
   end
   opt 장부가 finished
     AD->>T3: finalize_match()
@@ -350,10 +356,10 @@ sequenceDiagram
 | 레퍼런스 | `<club name>` · `<manager name tag>` · `<characters>`(수석코치 상주) · `<pre_match>`(직전 평시 발화 셋 그대로) — `buildMatchReference` |
 | 이력     | 이 경기의 제공자 원형 이력(`pendingMatch.casterHistory`) — 킥오프 턴만 평시 이력                                                       |
 | 이번 턴  | `@감독:` 또는 `<operator>` · 킥오프 턴은 `<kickoff>` · 손잡이 턴은 `<segment>` + `<core_replies>`                                      |
-| 스냅샷   | `buildLedgerNote` — `<ledger>` · `<standing>` · `<targets max>` (패킷은 구간이 굴렀을 때만)                                            |
+| 스냅샷   | `buildLedgerNote` — `<ledger>` · `<standing>` · `<points>`(허락된 줄) (패킷은 구간이 굴렀을 때만)                                      |
 
 - **경기를 바꾸는 도구는 없다.** 세 도구는 코어를 부르는 손잡이다 — 사건은 xG 구간
-  시뮬이 정하고, 지시는 해석이 옮긴 JSON을 코어가 실재 확인 뒤 적용한다
+  시뮬이 정하고, 지시는 판독기가 옮긴 JSON을 코어가 실재 확인과 한도 뒤 적용한다
   (→ [../simulation/match.md](../simulation/match.md) §2).
 - **대화만 건 턴은 시계가 멈춘다** — 도구를 부르지 않으면 구간이 굴러가지 않는다.
 - **경기 → 평시의 다리는 코어가 놓는다** — `matchDigest`가 결과·라커룸 결과·나간 사람을
