@@ -426,9 +426,11 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
       }
       const orders = req.tools?.find((t) => t.name === "tactic_orders");
       const advance = req.tools?.find((t) => t.name === "advance_match");
+      // 경기 도구 셋 옆에 다음 말 제안이 함께 선다 (agents.md §2)
       expect(req.tools?.map((t) => t.name).sort()).toEqual([
         "advance_match",
         "finalize_match",
+        "suggest_reply",
         "tactic_orders",
       ]);
       // 지시는 판만 바꾸고 새 패킷을 돌려준다 — 구간은 아직이다
@@ -602,7 +604,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
   it("손잡이 턴은 모델 없이 구간을 굴리고, GM은 대본을 이번 턴 층에서 읽는다", async () => {
     const state = rolling();
     runTurn.mockImplementation(async (req: TurnRequest) => {
-      expect(req.tools?.map((t) => t.name)).toEqual(["finalize_match"]);
+      expect(req.tools?.map((t) => t.name)).toEqual(["finalize_match", "suggest_reply"]);
       expect(req.user).toContain("<segment>");
       return answered("[8']\n@중계: 경기가 이어집니다.");
     });

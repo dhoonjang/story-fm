@@ -3913,6 +3913,11 @@ textarea {
   line-height: var(--lh-ui);
   font-family: inherit;
 }
+/* placeholder는 GM의 제안이다 — 안내 문구가 아니라 감독이 받을 문장이라 글자만 흐리다 (design-system.md §6) */
+.chat-input textarea::placeholder {
+  color: var(--text-3);
+  opacity: 1;
+}
 /* 링은 입력창 전체(`:focus-within`)가 갖는다 — 안쪽 칸에 한 번 더 두르지 않는다 */
 .chat-input textarea:focus,
 .chat-input textarea:focus-visible {

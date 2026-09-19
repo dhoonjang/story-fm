@@ -386,6 +386,15 @@ export function GameScreen({ gameId }: { gameId: string }) {
   }, [game?.chat]);
   const [input, setInput] = useState("");
   /**
+   * **GM이 제안한 감독의 다음 말** — 마지막 턴이 model 턴일 때 그 `suggestion`이다
+   * (agents.md §2). 감독이 보내면 낙관적 유저 턴이 꼬리에 앉아 비고, 다음 model 턴이 오면
+   * 다시 선다 — 「보내면 비운다」를 따로 들 상태가 없다.
+   */
+  const suggestion = useMemo(() => {
+    const last = game?.chat.at(-1);
+    return last?.role === "model" ? (last.suggestion ?? null) : null;
+  }, [game?.chat]);
+  /**
    * **첨부된 제안서** — 폼이 써 낸 구조체가 입력창에 붙어 다음 전송에 함께 나간다
    * (overview.md §5). 코어가 반려하면 그대로 남아 감독이 칩을 눌러 값을 고친다.
    */
@@ -1104,6 +1113,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
         inputRef={inputRef}
         draft={draft}
         onRemoveDraft={() => setDraft(null)}
+        suggestion={suggestion}
       />
     </section>
   );

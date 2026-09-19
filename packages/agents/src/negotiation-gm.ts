@@ -26,6 +26,7 @@ import { buildToolSpecs } from "./gm-tools";
 import { recordCall, type GmToolCall } from "./gm-types";
 import { applyOps, hasOps, ordersGate } from "./orders-ops";
 import { CounterpartyRulingFieldsSchema, STANCE_LINE } from "./ruling-schema";
+import { suggestReplyTool } from "./suggest-reply";
 import { TABLE_OPS, runTableOrders } from "./table-orders";
 import { buildSituationBlock } from "./table-situation";
 import { inputError, toToolSchema } from "./tool-schema";
@@ -50,7 +51,7 @@ export const NEGOTIATION_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니�
 - <situation> — 주변 상황. 시계(이적창·기한) · 답하는 구단의 처지 · 선수의 지금 · 감독의 구단이 밖에서 보이는 모습 · 기사.
 - 이력 — 이 방의 지난 턴들. 감독의 말은 @감독이름: 으로, 감독의 화면 조작은 <operator>로 온다.
 - @감독이름: — 이번 턴 감독의 말. <operator> — 감독이 화면에서 누른 손잡이. 제안 폼으로 넣은 오퍼는 이미 장부에 걸린 사실이다.
-- <seating> — 감독이 자리에 앉은 첫 턴에만. 도구가 없다.
+- <seating> — 감독이 자리에 앉은 첫 턴에만. 방의 도구가 없다.
 - <table> — 오퍼 이력 · 값의 자 · 조건서 · 개인 조건 · 남은 인내 · <anchor>(판정·구간·기한·부를 수 있는 조건). 매 턴 새 값이다.
 - 도구 결과 — 감독의 말이 장부에 걸렸는지, 상대의 답이 장부에 어떻게 남았는지, 협상의 상태.
 서류·상황·<table>에 없는 사실은 없는 것이다. 다른 구단의 관심이나 오퍼, 선수의 뜻을 지어내지 않는다 — [경쟁 입찰] 줄이 없으면 다른 구단은 없다.
@@ -72,6 +73,7 @@ export const NEGOTIATION_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니�
 
 # 한 턴
 - 한 턴은 방 안의 한 호흡이다. 감독의 대사·판단·결정은 유저가 쓴다 — 상대의 답에서 멈추고 감독의 차례를 남긴다.
+- 감독이 이어 할 법한 말 하나는 장면이 아니라 도구로 제안한다 — 감독의 말투로, 한 문장.
 - 장면은 도구를 다 부른 뒤 한 번에 쓴다. 분량은 4~10줄.
 
 # 출력 문법
@@ -204,12 +206,16 @@ async function runTableOrdersTool(
 }
 
 /**
- * 이 턴의 협상 도구 — 진행 턴은 셋. 자리에 앉는 턴과 일어서는 손잡이 턴은 부르지 않는다.
+ * 이 턴의 협상 도구 — 진행 턴은 셋. 어느 턴에도 제안 하나가 함께 선다(agents.md §2) — 자리에
+ * 앉는 턴과 일어서는 손잡이 턴은 그것뿐이다: 방의 도구가 움직일 장부가 그 턴에는 없다.
  */
 export function buildNegotiationTools(
   state: GameState,
   ctx: NegotiationToolContext,
+  options: { seating?: boolean; leaving?: boolean } = {},
 ): GameToolSpec[] {
+  const suggest = suggestReplyTool(ctx.calls);
+  if (options.seating || options.leaving) return [suggest];
   const [orders, reply, leave] = NEGOTIATION_TOOL_DEFINITIONS;
   /**
    * 손잡이는 인자가 없다 — 이번 턴 감독의 말은 `ctx.said`가 쥔다 (agents.md §1). 같은 턴의
@@ -274,6 +280,7 @@ export function buildNegotiationTools(
         return recordCall(ctx.calls, LEAVE_TABLE_TOOL, left, { silent: true });
       },
     },
+    suggest,
   ];
 }
 

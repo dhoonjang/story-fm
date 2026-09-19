@@ -56,20 +56,21 @@ export function mockGmLlm(
   turn: MockTurnFacts,
 ): GameLLM | undefined {
   if (resolveLlmMode() !== "mock") return undefined;
-  return new ScriptedGameLLM(config, (req) =>
-    turn.inMatch
-      ? matchScript(state, { kickoff: turn.kickoff, operator: turn.operator })
+  return new ScriptedGameLLM(config, (req) => {
+    // 이번 요청에 실려 온 도구만 부른다 — 킥오프·앉는 턴·일어서는 턴에는 제안 하나뿐이다
+    const tools = (req.tools ?? []).map((tool) => tool.name);
+    return turn.inMatch
+      ? matchScript(state, { kickoff: turn.kickoff, operator: turn.operator, tools })
       : turn.inNegotiation
         ? negotiationScript(state, {
             seating: turn.seating,
             operator: turn.operator,
             message: turn.message,
             negotiationId: turn.negotiationId,
-            // 이번 요청에 실려 온 도구만 부른다 — 자리에 앉는 턴·일어서는 턴에는 도구가 없다
-            tools: (req.tools ?? []).map((tool) => tool.name),
+            tools,
           })
-        : peaceScript(state, turn.message, { recorded: turn.recorded() }),
-  );
+        : peaceScript(state, turn.message, { recorded: turn.recorded(), tools });
+  });
 }
 
 /**

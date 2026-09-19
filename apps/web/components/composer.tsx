@@ -62,6 +62,7 @@ export function Composer({
   inputRef,
   draft = null,
   onRemoveDraft,
+  suggestion = null,
 }: {
   input: string;
   onInput: (value: string) => void;
@@ -91,6 +92,12 @@ export function Composer({
    */
   draft?: ProposalDraft | null;
   onRemoveDraft?: () => void;
+  /**
+   * **GM이 제안한 감독의 다음 말** — 마지막 model 턴의 `suggestion`이다 (agents.md §2). 입력이
+   * 비어 있을 때 placeholder로 서고, Tab 또는 →가 그 문장을 입력에 채운다. 안내 문구는 없다 —
+   * 보이는 문장이 곧 손잡이다 (design-system.md §6).
+   */
+  suggestion?: string | null;
 }) {
   const proposal = useProposal();
   /** 시간 손잡이의 선택지가 펼쳐져 있는가 — 입력이 비었을 때만 열 수 있다 */
@@ -184,12 +191,28 @@ export function Composer({
             if (e.target.value.trim()) setSkipOpen(false);
           }}
           onKeyDown={(e) => {
-            // Enter = 전송, Shift+Enter = 줄바꿈 (IME 조합 중에는 무시)
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (e.nativeEvent.isComposing) return;
+            // Enter = 전송, Shift+Enter = 줄바꿈
+            if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               onSend();
+              return;
+            }
+            /**
+             * 빈 입력에서 Tab·→는 제안을 받는다 — 그 순간 버튼은 보내기다. 제안이 없거나
+             * 한 글자라도 쓴 뒤에는 브라우저의 것이다(Tab은 포커스 이동, →는 커서 이동).
+             */
+            if (
+              (e.key === "Tab" || e.key === "ArrowRight") &&
+              !e.shiftKey &&
+              suggestion &&
+              input.length === 0
+            ) {
+              e.preventDefault();
+              onInput(suggestion);
             }
           }}
+          placeholder={suggestion ?? undefined}
           disabled={busy}
           data-testid="chat-input"
         />

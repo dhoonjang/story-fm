@@ -20,6 +20,7 @@ import {
 } from "@story-fm/engine";
 import type { ScriptedCall, ScriptedTurn } from "@story-fm/llm";
 import type { OpsInput } from "./orders-ops";
+import { SUGGEST_REPLY_TOOL } from "./suggest-reply";
 
 /**
  * **mock 모드의 대본** — 감독의 말 하나가 어느 도구를 어느 인자로 부르는지의 표다
@@ -61,6 +62,21 @@ interface ScriptLine {
 
 /** 손잡이 하나 — 인자가 없다. 감독의 말은 코어가 해석기에 넘긴다 (실모드와 같다) */
 const orders = (tool: string): ScriptedCall[] => [{ tool }];
+
+/**
+ * **감독의 다음 말 하나** — 실모드의 GM이 장면 직전에 내는 것을 대본도 매 턴 낸다
+ * (agents.md §8). 글은 전부 표의 키다: Tab으로 받아 그대로 보내면 그 줄이 걸리므로
+ * e2e가 자동완성을 그 길로 잰다. 이번 요청에 그 도구가 실려 왔을 때만 부른다.
+ */
+const suggest = (tools: readonly string[], text: string): ScriptedCall[] =>
+  tools.includes(SUGGEST_REPLY_TOOL) ? [{ tool: SUGGEST_REPLY_TOOL, input: { text } }] : [];
+
+/** 평시의 제안 — 경기일에 닿았거나 닿을 턴이면 킥오프로, 아니면 하루를 넘기는 말 */
+function peaceSuggestion(state: GameState, line: ScriptLine | null): string {
+  return state.phase === "matchday" || line?.skip === "next_match"
+    ? "경기 시작하자"
+    : "하루 넘기자";
+}
 
 /** 요일 반복 훈련 한 벌 — 달력에 걸릴 제목과 효과 축은 표가 고른다 */
 const weekly = (dows: readonly number[], label: string, focus: readonly string[]): OpsInput => ({
@@ -295,16 +311,23 @@ function pointOf(state: GameState, line: ScriptLine | null): string {
 export function peaceScript(
   state: GameState,
   said: string,
-  /** 이 턴에 코어가 이미 남긴 기록이 있는가 — 손잡이의 시간 이동·도착한 편지 */
-  options: { recorded: boolean },
+  options: {
+    /** 이 턴에 코어가 이미 남긴 기록이 있는가 — 손잡이의 시간 이동·도착한 편지 */
+    recorded: boolean;
+    /** 이번 요청에 실려 온 도구의 이름 — 없는 도구는 부르지 않는다 */
+    tools: readonly string[];
+  },
 ): ScriptedTurn {
   const hit = findLine(said);
-  const header = pointOf(state, hit?.line ?? null);
+  const line = hit?.line ?? null;
+  const header = pointOf(state, line);
   const calls = hit?.line.gm?.({ state, named: hit.named }) ?? [];
-  const stands = options.recorded || calls.length > 0 || hit?.line.skip !== undefined;
+  // 제안은 장면을 세우는 기록이 아니다 — 턴 뒤가 꺼내 가므로 서는지 여부를 여기서 세지 않는다
+  const stands = options.recorded || calls.length > 0 || line?.skip !== undefined;
+  const suggested = suggest(options.tools, peaceSuggestion(state, line));
   return stands
-    ? { calls, text: header }
-    : { text: `${header}\n@: *${describeNextFixture(state)}*` };
+    ? { calls: [...calls, ...suggested], text: header }
+    : { calls: suggested, text: `${header}\n@: *${describeNextFixture(state)}*` };
 }
 
 /** 해석기의 대본 — 같은 말이 같은 표의 같은 줄에서 명령의 인자를 받는다 */
@@ -326,6 +349,12 @@ const ROOM_REPLY: ScriptedCall = {
   tool: "reply_at_table",
   input: { stance: "steady", heard: { tone: "civil", claims: [] } },
 };
+
+/** 방 안의 다음 말 — 표의 키다: 값이 실려 손잡이와 상대의 답이 함께 선다 */
+const ROOM_SUGGESTION = "제안한 조건으로 갑시다";
+
+/** 벤치의 다음 말 — 표에 없는 말이라 장면만 선다. 경기를 굴리는 것은 손잡이다 */
+const MATCH_SUGGESTION = "계속 가자";
 
 /**
  * **협상 방 턴의 대본.** 자리에 앉는 턴은 방과 상대의 첫 말, 손잡이 턴은 한 줄, 감독이
@@ -357,14 +386,20 @@ export function negotiationScript(
     : "상대";
   if (options.seating) {
     return {
+      calls: suggest(options.tools, ROOM_SUGGESTION),
       text: [header, `@: *${ROOM_PLACE}*`, `@${who}: 앉으시죠. 무엇을 가져오셨습니까.`].join("\n"),
     };
   }
   const has = (tool: string) => options.tools.includes(tool);
   if (options.operator) {
-    // 일어서는 손잡이 턴에는 도구가 없다 — 제안 폼의 턴에는 상대가 답한다
+    // 일어서는 손잡이 턴에는 방의 도구가 없다 — 제안 폼의 턴에는 상대가 답한다
+    const atTable = has(ROOM_REPLY.tool);
     return {
-      calls: has(ROOM_REPLY.tool) ? [ROOM_REPLY] : [],
+      calls: [
+        ...(atTable ? [ROOM_REPLY] : []),
+        // 일어선 턴의 다음 말은 방 밖의 것이다
+        ...suggest(options.tools, atTable ? ROOM_SUGGESTION : "하루 넘기자"),
+      ],
       text: [header, `@${who}: 검토해 보겠습니다.`].join("\n"),
     };
   }
@@ -373,7 +408,10 @@ export function negotiationScript(
     hit?.line.gm?.({ state, named: hit.named }) ??
     (hit?.line.ops ? [{ tool: "table_orders" }, ROOM_REPLY] : [ROOM_REPLY]);
   return {
-    calls: planned.filter((call) => has(call.tool)),
+    calls: [
+      ...planned.filter((call) => has(call.tool)),
+      ...suggest(options.tools, ROOM_SUGGESTION),
+    ],
     text: [header, `@${who}: 검토해 보겠습니다.`].join("\n"),
   };
 }
@@ -551,14 +589,21 @@ function shootoutLines(state: GameState): string[] {
  */
 export function matchScript(
   state: GameState,
-  options: { kickoff: boolean; operator: boolean },
+  options: {
+    kickoff: boolean;
+    operator: boolean;
+    /** 이번 요청에 실려 온 도구의 이름 — 없는 도구는 부르지 않는다 */
+    tools: readonly string[];
+  },
 ): ScriptedTurn {
+  const calls = suggest(options.tools, MATCH_SUGGESTION);
   if (options.kickoff) {
     const record = state.matches.find((m) => m.id === state.pendingMatch?.matchId);
     const fixture = record
       ? `${teamName(record.homeTeamId)} 대 ${teamName(record.awayTeamId)}`
       : "양 팀";
     return {
+      calls,
       text: [
         `@: *터널을 나선 스물두 명이 자리를 잡는다*`,
         `@중계: ${fixture}, 곧 킥오프입니다.`,
@@ -569,11 +614,12 @@ export function matchScript(
   // 굴린 것이 없는 턴 — 감독이 말만 건 자리다. 장부의 지금만 읽어 준다
   if (!options.operator) {
     return {
+      calls,
       text: `@중계: ${state.pendingMatch?.ledger.minute ?? 0}′ — ${scoreLine(state, now)}.`,
     };
   }
   const segment = state.pendingMatch?.lastSegment;
-  if (!segment) return { text: shootoutLines(state).join("\n") };
+  if (!segment) return { calls, text: shootoutLines(state).join("\n") };
   const running = scoreAtSegmentStart(state, segment.events);
   const told = savesToldByShots(segment.events);
   const turnOf = shapeTurns();
@@ -588,5 +634,5 @@ export function matchScript(
   if (lines.length === 0) {
     lines.push(`@중계: ${state.pendingMatch?.ledger.minute ?? 0}′ — ${scoreLine(state, now)}.`);
   }
-  return { text: lines.join("\n") };
+  return { calls, text: lines.join("\n") };
 }

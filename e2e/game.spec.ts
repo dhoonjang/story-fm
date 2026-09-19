@@ -160,6 +160,16 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   // 답이 끝나면 커서가 입력칸으로 돌아온다 — 감독은 대개 이어서 말한다
   await expect(page.getByTestId("chat-input")).toBeEnabled();
   await expect(page.getByTestId("chat-input")).toBeFocused();
+  /**
+   * GM의 제안이 placeholder로 서고, 빈 입력에서 Tab이 그것을 채운다 — 안내 문구는 없다
+   * (design-system.md §6). 채워지는 순간 손잡이는 보내기다. mock의 제안은 표의 키라
+   * 그대로 보내도 한 줄이 걸린다 (agents.md §8).
+   */
+  await expect(input).toHaveAttribute("placeholder", /.+/);
+  const suggested = (await input.getAttribute("placeholder")) ?? "";
+  await input.press("Tab");
+  await expect(input).toHaveValue(suggested);
+  await expect(page.getByTestId("chat-send")).toBeVisible();
   // 다른 쪽을 누르면 알림은 닫히고, 칩을 누르면 그 말풍선이 다시 선다
   await page.getByTestId("chat-scroll").click({ position: { x: 4, y: 4 } });
   await expect(page.getByTestId("hint-달력")).toHaveCount(0);

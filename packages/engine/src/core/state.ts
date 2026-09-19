@@ -358,6 +358,15 @@ export interface ChatTurn {
   /** 어느 협상인가 (`Negotiation.id`) — `inNegotiation`인 턴에만 있다 */
   negotiationId?: string;
   /**
+   * GM이 이 턴 끝에 낸 **감독의 다음 말 한 줄** — 입력창의 placeholder가 된다
+   * (docs/llm/agents.md §2 · docs/ui/design-system.md §6).
+   *
+   * 감독이 한 말이 아니다. 그래서 `model` 턴에만 있고, 이력·압축 브리프·해석기 입력
+   * 어디에서도 읽지 않는다 — 읽는 것은 화면 하나다. 세이브에 남는 이유는 재개한 화면이
+   * 같은 자리에서 같은 문장을 세워야 하기 때문이다. 옛 세이브엔 없다 (optional).
+   */
+  suggestion?: string;
+  /**
    * 어느 경기인가 (`MATCH.id`) — `inMatch`인 턴에만 있다.
    *
    * 경기가 끝나면 그 구간을 **한 장으로 접어** 결과만 남기는데, 어느 경기의

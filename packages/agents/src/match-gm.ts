@@ -14,6 +14,7 @@ import type { GmToolCall } from "./gm-types";
 import { applyTacticOrders } from "./tactic-apply";
 import { buildToolSpecs } from "./gm-tools";
 import { hasOps, ordersGate } from "./orders-ops";
+import { suggestReplyTool } from "./suggest-reply";
 import { runTacticOrders } from "./tactic-orders";
 import { toToolSchema } from "./tool-schema";
 
@@ -37,7 +38,7 @@ export const MATCH_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 �
 - <club name> — 구단. <manager name tag> — 감독의 이름·화자 태그·배경. <characters> — 벤치에 앉은 수석코치의 카드. <pre_match> — 경기 전 감독이 한 말.
 - 이력 — 이 경기의 지난 턴들.
 - @감독이름: — 이번 턴 감독의 말. <operator> — 감독이 화면에서 누른 손잡이. 손잡이 턴에는 코어가 이미 굴린 <segment>가 함께 온다.
-- <kickoff> — 감독이 경기장에 들어선 첫 턴에만. 도구가 없다.
+- <kickoff> — 감독이 경기장에 들어선 첫 턴에만. 판을 움직일 도구가 없다.
 - <ledger> — 스코어·시각·국면·온필드와 벤치·교체 횟수. <standing> — 우리 전술과 개인 지시. <targets> — 노릴 수 있는 곳. 장부가 유일한 진실이다 — 스코어는 계산하지 않고 읽는다.
 - 도구 결과 — <segment> 코어가 확정한 사건 목록, <stop> 구간이 멈춘 이유, <core_replies> 지시가 판에 걸렸는지, 그리고 구간 뒤의 <ledger>·<packet>.
 
@@ -62,6 +63,7 @@ export const MATCH_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 �
 - 감독이 선수를 부르기만 했으면 그 선수를 데려오는 데까지가 당신 몫이고, 선수의 대답까지만 쓴다. 대화의 말과 강도는 감독이 고른다.
 - 감독은 수석코치·벤치 선수와 대화한다. 그라운드 위 선수에게 한 말은 연출로만 닿는다.
 - 수석코치의 조언은 판세와 장부를 근거로 하고, 전술 지시의 대가를 필요하면 짚는다. 카드가 있는 화자는 그 카드의 성격·말투로 말한다.
+- 감독이 이어 할 법한 말 하나는 장면이 아니라 도구로 제안한다 — 감독의 말투로, 한 문장.
 - 장면은 도구를 다 부른 뒤 한 번에 쓴다. 실제 축구의 리듬이다 — 사건 하나를 몇 줄로 늘리지 않는다. 분량은 4~10줄.
 
 # 출력 문법
@@ -198,13 +200,16 @@ async function runTacticOrdersTool(
 
 /**
  * 이 턴의 경기 도구 — 진행 턴은 셋, 손잡이 턴은 마감 하나(구간은 코어가 이미 굴렸다).
- * 킥오프 턴은 부르지 않는다.
+ * 어느 턴에도 제안 하나가 함께 선다(agents.md §2) — 킥오프 턴은 그것뿐이다: 첫 휘슬까지만
+ * 쓰는 턴에 판을 움직일 도구는 없다.
  */
 export function buildMatchTools(
   state: GameState,
   ctx: MatchToolContext,
-  options: { operator?: boolean } = {},
+  options: { operator?: boolean; kickoff?: boolean } = {},
 ): GameToolSpec[] {
+  const suggest = suggestReplyTool(ctx.calls);
+  if (options.kickoff) return [suggest];
   const [orders, advance, finalize] = MATCH_TOOL_DEFINITIONS;
   const tools: GameToolSpec[] = [];
   if (!options.operator) {
@@ -274,5 +279,6 @@ export function buildMatchTools(
       };
     },
   });
+  tools.push(suggest);
   return tools;
 }
