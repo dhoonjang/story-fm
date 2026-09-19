@@ -290,14 +290,13 @@ export function drainVariance(key: string): number {
 
 /**
  * 이 선수가 `minutes`분 동안 잃는 체력.
- * 자리 × 전술 × 자리별 전술 무게 × 지구력 × 그날의 몫 × **개인 지시**.
+ * 자리 × 전술 × 자리별 전술 무게 × 지구력 × 그날의 몫 × **시트의 `legs`**.
  *
  * @param variance `drainVariance(키)`가 낸 배수. 생략하면 계수만으로 계산한다
  *   (분포 검증·밸런스 테이블처럼 운을 빼고 봐야 하는 자리).
- * @param directive `directiveDrain(kind)`가 낸 배수 (`directives.ts`). 전술이 팀
+ * @param legs 시트의 `legs`가 낸 배수 (`SidePacket.legs` — sim `sheet.ts`). 전술이 팀
  *   전체의 소모를 정한다면 이건 **그 한 명의 몫**이다 — 상대 시작점을 전담 압박하는
- *   선수만 먼저 다리가 멈추고, 뒤에 남으라는 지시를 받은 풀백은 덜 지친다.
- *   지시가 없으면 1이라 **아무것도 바뀌지 않는다.**
+ *   선수만 먼저 다리가 멈춘다. 시트가 없으면 1이라 **아무것도 바뀌지 않는다.**
  */
 /**
  * **공을 쫓는 팀이 더 뛴다** — 점유의 대가이자 중원 우위의 보상.
@@ -325,7 +324,7 @@ export function conditionDrain(
   spec: TacticsSpec,
   minutes: number,
   variance = 1,
-  directive = 1,
+  legs = 1,
   possession = EVEN_POSSESSION,
   availableCondition = player.state.condition,
 ): number {
@@ -336,7 +335,7 @@ export function conditionDrain(
     positionalTacticWeight(position, spec) *
     staminaFactor(player) *
     variance *
-    directive *
+    legs *
     chaseFactor(possession);
   const available = Math.max(0, Math.min(CONDITION_MAX, availableCondition));
   return available * (1 - Math.exp(-load / CONDITION_DECAY_SCALE));

@@ -137,7 +137,6 @@ export function buildTrainingPrompt(brief: TrainingBrief): string {
       `컨디션 ${p.condition} · 폼 ${p.form > 0.2 ? "좋음" : p.form < -0.2 ? "나쁨" : "보통"}`,
       p.apps > 0 ? `시즌 ${p.apps}경기 평점 ${p.rating?.toFixed(1) ?? "—"}` : "출전 없음",
     ];
-    if (p.instruction) parts.push(`개인지시 “${p.instruction}”`);
     if (p.program?.position) parts.push(`전향 ${p.program.position} 훈련 중`);
     if (p.program?.axis)
       parts.push(`개인훈련 ${AXIS_KO[p.program.axis as never] ?? p.program.axis}`);

@@ -2,6 +2,7 @@ import type { AgentName, GameToolSpec, JsonObjectSchema } from "@story-fm/llm";
 import { FINALIZE_MATCH_SYSTEM, SETTLE_MATCH_INPUT } from "./finalize-match";
 import { HISTORY_COMPACTOR_SYSTEM, REPORT_DIGEST_INPUT } from "./history-compactor";
 import { MARKET_ORDERS_SPEC } from "./market-orders";
+import { MATCH_READER_SPEC } from "./match-reader";
 import { NEGOTIATION_TABLE_SYSTEM, REPLY_INPUT } from "./negotiation-table";
 import { ONBOARDING_JUDGE_SYSTEM, REPORT_ONBOARDING_INPUT } from "./onboarding-judge";
 import { opsOutputSchema } from "./orders-ops";
@@ -12,7 +13,7 @@ import { TRAINING_ORDERS_SPEC } from "./training-orders";
 import { REPORT_TRAINING_INPUT, TRAINING_RATER_SYSTEM } from "./training-rater";
 
 /**
- * **도구 없이 출력 스키마로 답을 받는 호출 전부** — 해석기 넷과 결산·판정 여섯
+ * **도구 없이 출력 스키마로 답을 받는 호출 전부** — 해석기 넷·판독기와 결산·판정 여섯
  * (docs/llm/prompts.md §2 · models.md §3-2).
  *
  * 제공자가 받는 스키마 부분집합은 셋이 다르고, 옮기는 자리는 어댑터다. 그 폭이 지켜지는지
@@ -36,16 +37,21 @@ export interface OutputAgent {
 }
 
 /**
- * 출력 스키마 선언 열 — 해석기 넷과 결산·판정 여섯.
+ * 출력 스키마 선언 열 — 해석기 넷·판독기와 결산·판정 여섯.
  *
- * 해석기의 `ops`가 코어 명령의 도구 스키마를 그대로 물어 오므로(agents.md §1) 명령
- * 스펙 맵이 필요하다 — `buildToolSpecs(state, [])`가 그것이다.
+ * 해석기와 판독기의 `ops`가 코어 명령의 도구 스키마를 그대로 물어 오므로(agents.md §1)
+ * 명령 스펙 맵이 필요하다 — `buildToolSpecs(state, [])`가 그것이다.
  */
 export function outputAgents(specs: ReadonlyMap<string, GameToolSpec>): readonly OutputAgent[] {
   return [
     ...[TACTIC_ORDERS_SPEC, TRAINING_ORDERS_SPEC, MARKET_ORDERS_SPEC, TABLE_ORDERS_SPEC].map(
       (spec) => ({ agent: spec.agent, system: spec.system, schema: opsOutputSchema(spec, specs) }),
     ),
+    {
+      agent: MATCH_READER_SPEC.agent,
+      system: MATCH_READER_SPEC.system,
+      schema: MATCH_READER_SPEC.schema(specs),
+    },
     { agent: "finalize-match", system: FINALIZE_MATCH_SYSTEM, schema: SETTLE_MATCH_INPUT },
     { agent: "training-rater", system: TRAINING_RATER_SYSTEM, schema: REPORT_TRAINING_INPUT },
     { agent: "scout-rater", system: SCOUT_RATER_SYSTEM, schema: REPORT_SCOUT_INPUT },

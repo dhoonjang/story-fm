@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildStrengthPacket, zoneGrid, GRID_BANDS, GRID_LANES } from "@story-fm/sim";
-import { DEFAULT_TACTICS, type DirectiveIntensity, type TacticsSpec } from "@story-fm/domain";
+import { DEFAULT_TACTICS, type SheetStep, type TacticsSpec } from "@story-fm/domain";
 import { makeSide } from "./helpers";
 import type { SideInput } from "@story-fm/sim";
 
@@ -88,20 +88,32 @@ describe("판세 격자 — 존을 좌·중·우로 쪼갠다", () => {
   });
 
   /**
-   * 지역 플랜의 첫 걸음 — 목표 칸이 두꺼워지고 **같은 줄의 나머지가 얇아진다.**
+   * 칸을 겨냥한 시트의 첫 걸음 — 목표 칸이 두꺼워지고 **같은 줄의 나머지가 얇아진다.**
    * 줄 합이 보존되므로 이것만으로는 기대 득점이 움직이지 않는다. 그다음이
-   * 슈팅 배분이다 (strength-packet.test.ts).
+   * 슈팅 배분이다 (sheet.test.ts).
    */
-  it("지역 플랜은 목표 칸을 두껍게 하고 같은 줄의 나머지를 얇게 한다", () => {
+  it("칸을 겨냥한 edge는 목표 칸을 두껍게 하고 같은 줄의 나머지를 얇게 한다", () => {
     const flat = zoneGrid(
       buildStrengthPacket(makeSide("us", 78), makeSide("them", 78)),
       "creation",
     );
-    const planned = makeSide("us", 78);
-    planned.regional = [
-      { band: "attack", lane: "left", intent: "overload", note: "왼쪽을 파고들어라" },
-    ];
-    const grid = zoneGrid(buildStrengthPacket(planned, makeSide("them", 78)), "creation");
+    const grid = zoneGrid(
+      buildStrengthPacket(makeSide("us", 78), makeSide("them", 78), {
+        reading: {
+          points: [{ id: "p1", text: "왼쪽을 파고든다", about: ["home"], importance: 2 }],
+          sheet: [
+            {
+              pointId: "p1",
+              target: { side: "home", band: "attack", lane: "left" },
+              shape: "edge",
+              sign: 1,
+              step: 2,
+            },
+          ],
+        },
+      }),
+      "creation",
+    );
     expect(cellOf(grid, "attack", "left").home).toBeGreaterThan(
       cellOf(flat, "attack", "left").home,
     );
@@ -114,19 +126,19 @@ describe("판세 격자 — 존을 좌·중·우로 쪼갠다", () => {
 });
 
 /**
- * 개인 지시·공략이 칸으로 오는 길 (match.md §1.7). 지키는 것은 둘이다 —
- * **줄 합이 보존된다**(지시의 존 델타가 격자에서 두 번 세어지지 않는다)와
- * **겨냥한 레인이 결과에 남는다**(오른쪽을 마크하면 오른쪽이 깎인다).
+ * 시트가 칸으로 오는 길 (match.md §1.7). 지키는 것은 둘이다 —
+ * **줄 합이 보존된다**(시트의 존 델타가 격자에서 두 번 세어지지 않는다)와
+ * **겨냥한 레인이 결과에 남는다**(오른쪽 풀백을 지우면 오른쪽이 깎인다).
  */
-describe("지시가 칸으로 실린다", () => {
-  /** 상대의 한 선수를 전담 마크한 판 — 겨냥한 자리는 인자로 고른다 */
-  const markingPacket = (targetId: string, intensity?: DirectiveIntensity) => {
-    const us = makeSide("us", 78);
-    us.directives = [
-      { by: "us-mf2", kind: "man_mark", targetId, ...(intensity ? { intensity } : {}) },
-    ];
-    return buildStrengthPacket(us, makeSide("them", 78));
-  };
+describe("시트가 칸으로 실린다", () => {
+  /** 상대의 한 선수를 지우는 판 — 겨냥한 자리는 인자로 고른다 */
+  const markingPacket = (targetId: string, step: SheetStep = 2) =>
+    buildStrengthPacket(makeSide("us", 78), makeSide("them", 78), {
+      reading: {
+        points: [{ id: "mark", text: "따라붙어 지운다", about: [targetId], importance: 2 }],
+        sheet: [{ pointId: "mark", target: { player: targetId }, shape: "edge", sign: -1, step }],
+      },
+    });
 
   /**
    * 이것이 이슈 #87이 지키라고 한 불변식이다 — 칸을 존과 함께 밀면 그 전력이 두 번
@@ -134,7 +146,7 @@ describe("지시가 칸으로 실린다", () => {
    */
   it("지시가 걸려도 각 줄 세 칸의 평균은 그 줄의 존 전력과 같다", () => {
     // them-df4 = LB(x 11), them-df1 = RB(x 89) — 왼쪽 풀백을 지운다
-    const packet = markingPacket("them-df4", "heavy");
+    const packet = markingPacket("them-df4", 3);
     const grid = zoneGrid(packet);
     for (const band of GRID_BANDS) {
       const meanOf = (side: "home" | "away") =>
@@ -151,10 +163,10 @@ describe("지시가 칸으로 실린다", () => {
   });
 
   /**
-   * 완료 조건 1 — 같은 지시라도 겨냥한 선수가 선 레인에 따라 다른 칸이 움직인다.
-   * 예전에는 존 델타 하나였으므로 두 판이 완전히 같은 격자를 냈다.
+   * 같은 줄이라도 겨냥한 선수가 선 레인에 따라 다른 칸이 움직인다 — 존 델타 하나로
+   * 접으면 두 판이 완전히 같은 격자를 낸다.
    */
-  it("같은 마크라도 겨냥한 풀백이 선 레인이 깎인다", () => {
+  it("같은 줄이라도 겨냥한 풀백이 선 레인이 깎인다", () => {
     const left = zoneGrid(markingPacket("them-df4"));
     const right = zoneGrid(markingPacket("them-df1"));
     /**
@@ -168,11 +180,11 @@ describe("지시가 칸으로 실린다", () => {
     expect(theirDefense(right, "right")).toBeLessThan(theirDefense(left, "right"));
   });
 
-  it("세기가 세면 그 칸이 더 깎인다", () => {
+  it("step이 크면 그 칸이 더 깎인다", () => {
     const theirLeft = (packet: ReturnType<typeof buildStrengthPacket>) =>
       cellOf(zoneGrid(packet), "attack", "right").away;
-    expect(theirLeft(markingPacket("them-df4", "heavy"))).toBeLessThan(
-      theirLeft(markingPacket("them-df4", "light")),
+    expect(theirLeft(markingPacket("them-df4", 3))).toBeLessThan(
+      theirLeft(markingPacket("them-df4", 1)),
     );
   });
 });

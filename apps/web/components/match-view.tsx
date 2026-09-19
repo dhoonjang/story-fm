@@ -38,7 +38,7 @@ type Shootout = NonNullable<Match["shootout"]>;
  * 판세 — **어디가 밀리나 · 왜 · 내 지시가 먹혔나.**
  *
  * 셋은 한 질문의 세 면이다: 격자가 "왼쪽 중원이 밀린다"를 말하고, 키포인트가 "왜"를
- * 말하고, 공략·노트가 "그래서 내가 시킨 것이 지금 걸려 있나"를 말한다. 탭을 갈라
+ * 말하고, 시트가 "그래서 내가 시킨 것이 지금 걸려 있나"를 말한다. 탭을 갈라
  * 뒀을 때는 감독이 밀리는 걸 보고 이유를 찾으러 옆 탭으로 건너가 다시 읽어야 했다 —
  * 정지점마다 그러기엔 길이 멀다.
  *
@@ -51,8 +51,7 @@ export function MatchOverview({ match }: { match: Match }) {
     <div className="match-view" data-testid="view-match">
       <ZoneBars match={match} />
       <KeyPoints points={match.keyPoints} />
-      <TacticOrders exploiting={match.exploiting} notes={match.tactics[ours].notes} />
-      <Directives directives={match.directives} />
+      <Sheet lines={match.sheet} notes={match.tactics[ours].notes} />
     </div>
   );
 }
@@ -511,66 +510,33 @@ function KeyPoints({ points }: { points: Match["keyPoints"] }) {
 }
 
 /**
- * 지시가 판에 닿았나 — **공략 중과 전술 노트.**
+ * 시트 — **지시가 판에 닿았나** (match.md §8 「시트가 지시의 증거다」).
  *
- * 공략(match.md §1.6)과 지역 플랜(§1.7)은 경기 중에만 부를 수 있고 장부에 흔적을
- * 남기지 않아 레일 말풍선이 없다(overview §5). 그래서 이 자리가 유일한 증거다:
- * 걸린 공략은 감독이 읽은 그 표적 이름 그대로 서고, 걸리지 않았거나 버려진 것과
- * 개인 지시의 결과는 노트 한 줄로 선다 — 노트가 없으면 감독은 걸리지 않은 공략을
- * 걸린 줄 안다.
+ * 시트는 경기 중에만 서고 장부에 흔적을 남기지 않아 레일 말풍선이 없다(overview §5).
+ * 그래서 이 자리가 유일한 증거다: 걸린 줄은 그 포인트의 문장 그대로 서고, 버려진 줄은
+ * 노트 한 줄로 선다 — 노트가 없으면 감독은 걸리지 않은 지시를 걸린 줄 안다.
+ *
+ * **서는 것은 감독의 분석이 허락한 포인트의 줄뿐이다**(§1.6). 격자의 색은 시트 전부를
+ * 반영하므로, 이유 없이 기운 칸이 곧 아직 읽지 못한 판독이다.
+ *
+ * 색 규칙은 키포인트와 같다 — 이로운 줄 파랑, 불리한 줄 빨강. 두 패널이 한 판을
+ * 두 층으로 읽는 것이라 잉크가 갈리면 같은 유불리가 두 눈금으로 읽힌다.
  */
-function TacticOrders({ exploiting, notes }: { exploiting: string[]; notes: string[] }) {
-  if (exploiting.length === 0 && notes.length === 0) return null;
+function Sheet({ lines, notes }: { lines: Match["sheet"]; notes: string[] }) {
+  if (lines.length === 0 && notes.length === 0) return null;
   return (
-    <div className="mv-orders" data-testid="match-orders">
-      {exploiting.length > 0 && (
-        <div className="mv-exploits" data-testid="match-exploiting">
-          <b>공략 중</b>
-          {exploiting.map((target, i) => (
-            <span className="mv-exploit" key={i}>
-              {target}
-            </span>
-          ))}
+    <div className="mv-sheet" data-testid="match-sheet">
+      {lines.map((line, i) => (
+        <div
+          className={`mv-sheet-line${line.ours === null ? "" : line.ours ? " good" : " bad"}`}
+          key={i}
+        >
+          {line.text}
         </div>
-      )}
+      ))}
       {notes.map((note, i) => (
         <div className="mv-note" key={i}>
           {note}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/**
- * 개인 지시 — **걸린 것과 닿지 않은 것이 갈려 선다** (match.md §8).
- *
- * 공략과 같은 자리의 물음("내가 시킨 것이 지금 걸려 있나")인데 답이 둘로 갈린다:
- * 한 경기에 걸리는 지시는 셋까지라 감독이 내린 넷째는 판에 닿지 않는다. 노트 줄에
- * 섞어 두면 걸린 지시와 밀려난 지시가 같은 생김새로 서서, 감독은 넷을 다 걸린
- * 것으로 읽고 다음 판단을 그 위에 쌓는다.
- *
- * 쓴 자리(`2/3`)도 까닭도 코어가 센 값이다 — 화면은 한도를 갖지 않는다.
- */
-function Directives({ directives }: { directives: Match["directives"] }) {
-  if (directives.rows.length === 0) return null;
-  return (
-    <div className="mv-directives" data-testid="match-directives">
-      <div className="mv-dir-head">
-        <b>개인 지시</b>
-        <span>
-          {directives.used}/{directives.limit}
-        </span>
-      </div>
-      {directives.rows.map((d, i) => (
-        <div className={`mv-dir${d.live ? " live" : ""}`} key={i}>
-          <span className="mv-dir-who">{d.player}</span>
-          <span className="mv-dir-kind">
-            {d.kind}
-            {d.target ? ` → ${d.target}` : ""}
-          </span>
-          {/* 닿지 않은 까닭 — 걸린 지시에는 설 자리가 없다 */}
-          {d.why && <span className="mv-dir-why">{d.why}</span>}
         </div>
       ))}
     </div>
@@ -629,7 +595,7 @@ function SideTactics({ tactics }: { tactics: Match["tactics"]["home"] }) {
           </div>
         );
       })}
-      {/* 상대 벤치가 지금 하고 있는 일 — 6축이 말하지 않는 것(공략·개인 지시)이 여기
+      {/* 상대 벤치가 지금 하고 있는 일 — 6축이 말하지 않는 것(전술 포인트·시트)이 여기
           남는다. 문장이 흐린 것은 그가 못 본 수치가 노트로 새지 않게 코어가 그렇게
           쓴 것이다 (match.md §1.6) */}
       {tactics.notes.length > 0 && (

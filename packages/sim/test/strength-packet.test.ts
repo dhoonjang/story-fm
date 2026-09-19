@@ -24,14 +24,12 @@ import {
   matchIntensity,
   PENALTY_PER_MATCH,
   profFactor,
-  readKeyPoints,
   stateModifier,
   TACKLING_INTENSITY_STEP,
   TACTIC_SWING,
   tacticalFit,
   zeroCells,
   zoneMeanOf,
-  type KeyPoint,
   type SideInput,
 } from "@story-fm/sim";
 import { makeSide, tactics } from "./helpers";
@@ -227,19 +225,11 @@ describe("buildStrengthPacket", () => {
   it("결정력은 슈팅 접근에 작게 이롭고, 기회 xG 자체는 바꾸지 않는다", () => {
     const side = (finishing: number) => {
       const input = makeSide("a", 75);
-      // 자동 공략은 높은 결정력을 전술 표적으로 삼을 수 있다. 여기서는 그 간접
-      // 효과를 끄고 슈팅 모델의 명시적인 결정력 항만 비교한다.
-      input.managerAnalysis = 65;
-      input.exploits = [];
       const striker = input.starters.find((slot) => slot.position === "ST")!;
       striker.player.attributes.finishing = finishing;
       return input;
     };
-    const opponent = () => {
-      const input = makeSide("b", 75);
-      input.exploits = [];
-      return input;
-    };
+    const opponent = () => makeSide("b", 75);
     const low = buildStrengthPacket(side(40), opponent(), { neutral: true });
     const high = buildStrengthPacket(side(90), opponent(), { neutral: true });
     const strikerId = high.home.lineup.find((player) => player.position === "ST")!.id;
@@ -681,165 +671,6 @@ describe("buildStrengthPacket", () => {
 });
 
 /**
- * 개인 지시 — 감독의 구체적인 말이 결과에 닿는 유일한 경로.
- * LLM이 무엇을 지시했는지 옮기고, **얼마나 먹히는지는 여기 공식이 정한다.**
- */
-describe("개인 지시", () => {
-  const home = (directives?: SideInput["directives"]) => {
-    const side = makeSide("us", 78);
-    return directives ? { ...side, directives } : side;
-  };
-  const away = () => makeSide("them", 78);
-
-  it("전담 마크는 상대를 지우고 마크맨의 본업을 던다", () => {
-    const target = away().starters.find((s) => s.position !== "GK")!.player.id;
-    const marker = home().starters.find((s) => s.position !== "GK")!.player.id;
-    const before = buildStrengthPacket(home(), away());
-    const after = buildStrengthPacket(
-      home([{ by: marker, kind: "man_mark", targetId: target }]),
-      away(),
-    );
-    // 상대의 그 자리가 깎인다
-    const zone = ["attack", "midfield", "defense"] as const;
-    const themDropped = zone.some((z) => after.away.zones[z] < before.away.zones[z]);
-    const usDropped = zone.some((z) => after.home.zones[z] < before.home.zones[z]);
-    expect(themDropped, "상대를 지우지 못했다").toBe(true);
-    expect(usDropped, "본업을 던 대가가 없다").toBe(true);
-  });
-
-  it("핵심을 마크하면 상대 기대 득점이 내려간다 (공급을 끊으면 마무리도 준다)", () => {
-    const target = away().starters.find((s) => s.position !== "GK")!.player.id;
-    const marker = home().starters.find((s) => s.position !== "GK")!.player.id;
-    const before = buildStrengthPacket(home(), away());
-    const after = buildStrengthPacket(
-      home([{ by: marker, kind: "man_mark", targetId: target }]),
-      away(),
-    );
-    // 중원을 지웠는데 상대 xg가 오르면 지시가 손해가 된다 (실제로 그렇게 나온 적 있다)
-    expect(after.guide.expectedGoals.away).toBeLessThanOrEqual(before.guide.expectedGoals.away);
-  });
-
-  it("그라운드에 없는 상대를 겨냥한 지시는 버려진다", () => {
-    const marker = home().starters[1]!.player.id;
-    const before = buildStrengthPacket(home(), away());
-    const after = buildStrengthPacket(
-      home([{ by: marker, kind: "man_mark", targetId: "없는-선수" }]),
-      away(),
-    );
-    expect(after.home.zones).toEqual(before.home.zones);
-    expect(after.away.zones).toEqual(before.away.zones);
-  });
-
-  it("이득에만 소화율이 곱해진다 — 소화 못 하는 팀은 대가만 치른다", () => {
-    const marker = home().starters[1]!.player.id;
-    const target = away().starters[1]!.player.id;
-    const directive = [{ by: marker, kind: "man_mark" as const, targetId: target }];
-    const skilled = buildStrengthPacket(
-      { ...makeSide("us", 78, { managerTactics: 95 }), directives: directive },
-      away(),
-    );
-    const raw = buildStrengthPacket(
-      { ...makeSide("us", 78, { managerTactics: 20, familiarity: 30 }), directives: directive },
-      away(),
-    );
-    // 잘 소화하는 팀이 상대를 더 크게 지운다
-    expect(skilled.away.zones.attack).toBeLessThan(raw.away.zones.attack);
-  });
-});
-
-/**
- * 지역 플랜 — 자연어 세부 전술("왼쪽을 파고들어라")이 결과에 닿는 경로.
- *
- * 도구가 성공 메시지만 남기고 수치는 그대로였던 자리다. 격자는 줄 안에서
- * 제로섬이라 칸을 두껍게 하는 것만으로는 아무 일도 일어나지 않는다 —
- * **슈팅 배분이 그 레인으로 몰려야** 그 레인의 수익률이 기대 득점에 실린다.
- */
-describe("지역 플랜", () => {
-  const withPlans = (plans: SideInput["regional"]) => {
-    const side = makeSide("us", 75);
-    return plans ? { ...side, regional: plans } : side;
-  };
-  const overload = (lane: "left" | "center" | "right"): SideInput["regional"] => [
-    { band: "attack", lane, intent: "overload", note: `${lane}을 파고들어라` },
-  ];
-  /** 상대의 한 자리만 갈아 끼운다 — 노릴 값이 있는 판을 만든다 */
-  const opponent = (position: string, to: number) => {
-    const side = makeSide("them", 75);
-    side.starters = side.starters.map((slot) =>
-      slot.position === position
-        ? {
-            ...slot,
-            player: {
-              ...slot.player,
-              attributes: Object.fromEntries(
-                ATTRIBUTE_AXES.map((axis) => [axis, to]),
-              ) as unknown as (typeof slot.player)["attributes"],
-            },
-          }
-        : slot,
-    );
-    return side;
-  };
-
-  it("플랜 하나가 기대 득점을 눈에 띄게 움직인다 — 개인 지시 한 장보다는 작게", () => {
-    const flat = buildStrengthPacket(withPlans(undefined), makeSide("them", 75));
-    const planned = buildStrengthPacket(withPlans(overload("center")), makeSide("them", 75));
-    const gain = planned.guide.expectedGoals.home / flat.guide.expectedGoals.home - 1;
-    /**
-     * 상한은 숫자가 아니라 **개인 지시 한 장**이다 — 둘 다 경로 우위를 타고 오르므로
-     * (`ROUTE_SHOT_LOG_WEIGHT`) 밸런스가 움직이면 나란히 움직인다. 고정 숫자로 걸면
-     * 지키려던 순서가 아니라 그때의 눈금을 다시 적게 된다.
-     */
-    const directed = withPlans(undefined);
-    directed.directives = [{ by: "us-df1", kind: "join_attack", intensity: "heavy" }];
-    const oneOrder =
-      buildStrengthPacket(directed, makeSide("them", 75)).guide.expectedGoals.home /
-        flat.guide.expectedGoals.home -
-      1;
-    expect(gain).toBeGreaterThan(0.015);
-    expect(gain).toBeLessThan(oneOrder);
-  });
-
-  it("두 곳을 걸면 한 곳보다 더 움직인다", () => {
-    const one = buildStrengthPacket(withPlans(overload("left")), makeSide("them", 75));
-    const two = buildStrengthPacket(
-      withPlans([
-        ...overload("left")!,
-        { band: "midfield", lane: "left", intent: "press", note: "왼쪽 중원을 물어라" },
-      ]),
-      makeSide("them", 75),
-    );
-    expect(two.guide.expectedGoals.home).toBeGreaterThan(one.guide.expectedGoals.home);
-  });
-
-  /** 요구사항 4 — 유저의 결정은 나쁜 쪽으로도 결과를 움직여야 한다 */
-  it("양방향이다 — 약한 측면을 노리면 이득, 두꺼운 측면을 노리면 손해", () => {
-    // 상대 오른쪽 풀백(= 우리 왼쪽 공격이 만나는 자리)만 세게
-    const strongRight = () => opponent("RB", 92);
-    const flat = buildStrengthPacket(withPlans(undefined), strongRight());
-    const intoStrength = buildStrengthPacket(withPlans(overload("left")), strongRight());
-    const intoWeakness = buildStrengthPacket(withPlans(overload("right")), strongRight());
-    // `expectedGoals`는 소수 둘째 자리까지라 두꺼운 쪽을 노린 손해(0.005 미만)가
-    // 반올림에 먹힌다 — 방향을 보는 자리이므로 원값(`shotProfiles`)에서 잰다
-    const xg = (p: typeof flat) =>
-      (p.guide.shotProfiles?.home ?? []).reduce((sum, s) => sum + s.expectedGoals, 0);
-    expect(xg(intoStrength)).toBeLessThan(xg(flat));
-    expect(xg(intoWeakness)).toBeGreaterThan(xg(flat));
-  });
-
-  it("보호는 상대가 실제로 다니는 레인을 골라야 값을 한다", () => {
-    const them = () => makeSide("them", 75);
-    const flat = buildStrengthPacket(withPlans(undefined), them());
-    const guarded = buildStrengthPacket(
-      withPlans([{ band: "defense", lane: "center", intent: "protect", note: "가운데를 잠가라" }]),
-      them(),
-    );
-    // 상대 최전방이 중앙에 서 있으므로 가운데를 두껍게 하면 상대 기대 득점이 준다
-    expect(guarded.guide.expectedGoals.away).toBeLessThan(flat.guide.expectedGoals.away);
-  });
-});
-
-/**
  * 전력차와 총 득점 — **강팀이 더 넣는 만큼 약팀이 덜 넣는다.**
  *
  * 같은 경로 우위가 슈팅량(exp)과 슈팅 질(logit)에 이중으로 곱해지던 때는
@@ -1156,7 +987,7 @@ describe("상태 계수 (stateModifier)", () => {
  * 되는가"만 본다.
  */
 describe("사실 태그는 전부 문장이 된다", () => {
-  it("키포인트·전술 노트·표적·매치업 어느 코드도 빈 줄이 되지 않는다", () => {
+  it("태그·전술 노트·시트·매치업 어느 코드도 빈 줄이 되지 않는다", () => {
     const us = makeSide("us", 80, {
       tactics: tactics({
         pressing: 5,
@@ -1172,17 +1003,6 @@ describe("사실 태그는 전부 문장이 된다", () => {
         keeperDistribution: "short",
       }),
     });
-    us.managerAnalysis = 99;
-    us.directives = [
-      { by: "us-df1", kind: "join_attack", intensity: "heavy" },
-      { by: "us-mf1", kind: "man_mark", targetId: "them-fw1" },
-      { by: "us-mf2", kind: "man_mark", targetId: "없는-선수" },
-      { by: "us-mf3", kind: "stay_back" },
-      { by: "us-mf4", kind: "press_target", targetId: "them-mf1" },
-    ];
-    us.regional = [
-      { band: "attack", lane: "left", intent: "overload", note: "왼쪽에 사람을 모은다" },
-    ];
     // 구멍 한 자리 — 다리가 멈춘 선수가 있어야 `gap` 코드가 선다
     us.starters = us.starters.map((s) => (s.position === "LB" ? { ...s, matchFatigue: 80 } : s));
     const packet = buildStrengthPacket(
@@ -1199,6 +1019,26 @@ describe("사실 태그는 전부 문장이 된다", () => {
           keeperDistribution: "long",
         }),
       }),
+      {
+        // 시트 — 걸리는 줄과 걸리지 못하는 줄이 함께 서야 두 갈래가 다 문장이 된다
+        reading: {
+          points: [{ id: "p1", text: "왼쪽 풀백 뒤가 열린다", about: ["them-df4"], importance: 3 }],
+          sheet: [
+            { pointId: "p1", target: { player: "them-df4" }, shape: "edge", sign: -1, step: 2 },
+            { pointId: "p1", target: { player: "us-mf1" }, shape: "temper", sign: -1, step: 1 },
+            { pointId: "p1", target: { player: "us-fw1" }, shape: "legs", sign: 1, step: 1 },
+            { pointId: "p1", target: { side: "home" }, shape: "cohesion", sign: 1, step: 1 },
+            { pointId: "p1", target: { player: "없는-선수" }, shape: "edge", sign: 1, step: 1 },
+            {
+              pointId: "없는-포인트",
+              target: { player: "us-mf2" },
+              shape: "edge",
+              sign: 1,
+              step: 1,
+            },
+          ],
+        },
+      },
     );
 
     const ctx = packetTagContext(packet);
@@ -1206,10 +1046,9 @@ describe("사실 태그는 전부 문장이 된다", () => {
       ...packet.keyPoints,
       ...packet.home.tactical.notes,
       ...packet.away.tactical.notes,
-      ...packet.targets.map((t) => t.tag),
     ];
     // 갈래가 한둘만 선 판으로는 이 검사가 아무것도 못 지킨다
-    expect(new Set(tags.map((t) => t.source)).size).toBeGreaterThanOrEqual(5);
+    expect(new Set(tags.map((t) => t.source)).size).toBeGreaterThanOrEqual(3);
     for (const tag of tags) {
       // 안개가 낀 쪽도 문장이 있어야 한다 — 해상도만 다른 같은 사실이다
       for (const sharp of [true, false]) {
@@ -1217,55 +1056,6 @@ describe("사실 태그는 전부 문장이 된다", () => {
       }
     }
     for (const m of packet.matchups) expect(matchupText(m), m.zone).not.toBe("");
-  });
-});
-
-/**
- * 감독의 눈 — **분석이 개수를, 전술이 정밀도를 정한다** (match.md §1.6). 패킷의
- * `keyPoints`가 이 함수의 산출이라, 두 문턱이 흔들리면 감독의 두 능력치가 화면에서
- * 아무 뜻도 갖지 않게 된다.
- */
-describe("감독이 읽는 키포인트 (readKeyPoints)", () => {
-  /** 축과 편은 여기서 상관없다 — 보는 것은 개수와 안개뿐이다 */
-  const point = (code: string, weight: number): KeyPoint => ({
-    id: `${code}:someone`,
-    side: "home",
-    favours: "home",
-    zone: "midfield",
-    playerIds: [],
-    values: {},
-    weight,
-  });
-  const many = Array.from({ length: 20 }, (_, i) => point(`axis-${i}`, 1));
-
-  it("분석이 개수를 정한다 — 0이어도 둘은 보이고 최고여도 열을 넘지 않는다", () => {
-    const count = (analysis: number) => readKeyPoints(many, analysis, 0).length;
-    expect(count(0)).toBe(2);
-    expect(count(30)).toBe(4);
-    expect(count(85)).toBe(9);
-    expect(count(99)).toBe(10);
-    // 눈금 밖의 값이 문을 밀지 못한다
-    expect(count(-50)).toBe(2);
-    expect(count(200)).toBe(10);
-  });
-
-  it("자르는 것은 앞에서부터다 — 눈이 어두워도 가장 큰 구멍은 보인다", () => {
-    const seen = readKeyPoints([point("a", 40), point("b", 20), point("c", 5)], 0, 0);
-    expect(seen.map((tag) => tag.code)).toEqual(["a", "b"]);
-  });
-
-  it("전술이 정밀도를 정한다 — 문턱을 넘어야 이름과 수치가 드러난다", () => {
-    const sharpAt = (weight: number, tactics: number) =>
-      readKeyPoints([point("a", weight)], 99, tactics)[0]!.sharp;
-    // 능력만으로 문턱을 넘으려면 전술이 73은 돼야 한다
-    expect(sharpAt(0, 72)).toBe(false);
-    expect(sharpAt(0, 73)).toBe(true);
-    // 크게 벌어진 짝은 낮은 전술로도 또렷하다
-    expect(sharpAt(60, 39)).toBe(false);
-    expect(sharpAt(60, 40)).toBe(true);
-    // 그 몫은 상한에서 멎는다 — 열 배로 벌어져도 더 또렷해지지 않는다
-    expect(sharpAt(600, 39)).toBe(false);
-    expect(sharpAt(600, 40)).toBe(true);
   });
 });
 

@@ -1,4 +1,4 @@
-import type { MatchEvent, ShootoutOutcome } from "@story-fm/domain";
+import type { MatchEvent, Point, SheetLine, ShootoutOutcome } from "@story-fm/domain";
 import { formatScore, packetTagText, shootoutTally } from "@story-fm/domain";
 import {
   addDays,
@@ -16,7 +16,9 @@ import {
   suggestTerms,
   tableVoicesOf,
   teamName,
+  userSide,
   type GameState,
+  type ReadingOccasion,
 } from "@story-fm/engine";
 import type { ScriptedCall, ScriptedTurn } from "@story-fm/llm";
 import type { OpsInput } from "./orders-ops";
@@ -332,6 +334,70 @@ export function ordersScript(state: GameState, said: string): ScriptedTurn {
   const ops = hit?.line.ops?.({ state, named: hit.named }) ?? {};
   // 실모드의 해석기와 같은 산출 — 도구가 아니라 `{ ops }` JSON 하나다 (models.md §3-2)
   return { output: { ops } };
+}
+
+/** 대본의 판독이 쓰는 포인트 id — 세 자리(킥오프·지시·구간 뒤)가 같은 줄을 이어 쓴다 */
+const MOCK_POINT_EDGE = "mock-edge";
+const MOCK_POINT_COHESION = "mock-cohesion";
+
+/**
+ * **대본이 쓰는 전술 포인트와 시트** — 실모드의 판독기가 서는 자리다 (agents.md §3 mock).
+ *
+ * 겨냥하는 사람은 지어내지 않는다: 지금 그라운드에 선 우리 최고 전력과 상대 최저
+ * 전력을 패킷의 명단에서 꺼내 쓰므로, 코어의 실재 확인을 그대로 지나 판세에 시트가
+ * 선다. 실모드와 다른 것은 저자뿐이다.
+ */
+function mockReading(state: GameState): { points: Point[]; sheet: SheetLine[] } {
+  const pending = state.pendingMatch;
+  if (!pending?.packet) return { points: [], sheet: [] };
+  const ours = userSide(state);
+  const theirs = ours === "home" ? "away" : "home";
+  const strongest = [...pending.packet[ours].lineup]
+    .filter((p) => p.position !== "GK")
+    .sort((a, b) => b.effective - a.effective)[0];
+  const weakest = [...pending.packet[theirs].lineup]
+    .filter((p) => p.position !== "GK")
+    .sort((a, b) => a.effective - b.effective)[0];
+  if (!strongest || !weakest) return { points: [], sheet: [] };
+  return {
+    points: [
+      {
+        id: MOCK_POINT_EDGE,
+        text: `${playerName(state, strongest.id)}가 ${playerName(state, weakest.id)}의 뒤를 노린다`,
+        about: [strongest.id, weakest.id],
+        importance: 2,
+      },
+      {
+        id: MOCK_POINT_COHESION,
+        text: `벤치의 주문이 그라운드에 또렷이 닿는다`,
+        about: [ours],
+        importance: 1,
+      },
+    ],
+    sheet: [
+      {
+        pointId: MOCK_POINT_EDGE,
+        target: { player: weakest.id },
+        shape: "edge",
+        sign: -1,
+        step: 2,
+      },
+      { pointId: MOCK_POINT_COHESION, target: { side: ours }, shape: "cohesion", sign: 1, step: 1 },
+    ],
+  };
+}
+
+/**
+ * **판독기의 대본.** 감독이 말한 턴이면 표의 같은 줄이 `ops`를 주고, 포인트와 시트는
+ * 세 자리 모두 같은 한 벌이다 — 실모드와 같이 산출 JSON 하나로 답한다.
+ */
+export function readerScript(
+  state: GameState,
+  options: { occasion: ReadingOccasion; said?: string },
+): ScriptedTurn {
+  const hit = options.said === undefined ? null : findLine(options.said);
+  const ops = hit?.line.ops?.({ state, named: hit.named }) ?? {};
+  return { output: { ops, ...mockReading(state) } };
 }
 
 // ── 협상 방 ─────────────────────────────────────────────

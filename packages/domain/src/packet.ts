@@ -11,11 +11,17 @@
  */
 
 import { josa } from "./josa";
-import { legacyTag, otherSide, type MatchSide, type PacketTagSource, type SubCause } from "./match";
-import { AXIS_KO } from "./player";
 import {
-  DIRECTIVE_INTENSITY_KO,
-  PLAYER_DIRECTIVE_KO,
+  legacyTag,
+  normalizeTag,
+  otherSide,
+  type MatchSide,
+  type PacketTagSource,
+  type SubCause,
+} from "./match";
+import { AXIS_KO } from "./player";
+import { SHEET_SHAPE_KO, type Point, type SheetLine, type SheetShape } from "./sheet";
+import {
   SET_PIECE_KO,
   SET_PIECE_ROLE_KO,
   TACTIC_AXES,
@@ -31,8 +37,8 @@ export interface ZoneStrength {
 }
 
 /**
- * 세 전선 — **패킷 전체가 쓰는 한 낱말.** 존 전력·매치업·지역 전술의 밴드·공략이
- * 닿는 존이 모두 이 셋이고, 한 곳만 다른 이름으로 두면 같은 자리가 두 값이 된다.
+ * 세 전선 — **패킷 전체가 쓰는 한 낱말.** 존 전력·매치업·시트의 밴드가 모두 이
+ * 셋이고, 한 곳만 다른 이름으로 두면 같은 자리가 두 값이 된다.
  */
 export type MatchupZone = "attack" | "midfield" | "defense";
 export type EdgeSide = MatchSide | "even";
@@ -51,8 +57,8 @@ export interface Matchup {
 }
 
 /**
- * 패킷이 싣는 **사실 태그** — 키포인트·상성·구멍·개인 지시·공략·지역 플랜이 전부
- * 이 한 모양이다 (match.md §1).
+ * 패킷이 싣는 **사실 태그** — 상성·구멍·컨텍스트·시트가 전부 이 한 모양이다
+ * (match.md §1).
  *
  * 코어가 한국어 문장을 만들어 실으면 그 문장이 원인 태그로 골에 복사되고 진행 중인
  * 세이브에 굳는다 — 그러면 문구를 고치는 순간 전술 XP의 근거가 달라진다. 태그를
@@ -61,31 +67,31 @@ export interface Matchup {
 export interface PacketTag {
   /** 어느 갈래에서 나왔나 — 목록은 `PACKET_TAG_SOURCES`(match.ts) 한 벌이다 */
   source: PacketTagSource;
-  /** 축·상성·지시의 코드 — 판정과 집계의 열쇠 ("space_behind" · "backline-pace") */
+  /** 상성·구멍·시트 모양의 코드 — 판정과 집계의 열쇠 ("space_behind" · "edge") */
   code: string;
   /** 이 사실이 **이로운 편** — 약점을 가진 쪽이 아니다. 편이 없는 사실이면 null */
   favours: MatchSide | null;
   /**
-   * 이 사실을 **가진 쪽** — 이름이 서는 선수들의 팀이자 미스매치 문장의 주어다.
+   * 이 사실을 **가진 쪽** — 이름이 서는 선수들의 팀이자 문장의 주어다.
    *
-   * `favours`와 갈리는 것은 강점 축이다: 창조자·마무리·골키퍼 배급·세트피스 키커는
-   * 가진 쪽이 곧 이로운 쪽이고, 나머지 축은 반대다 (sim `key-points.ts`). 없으면
-   * (구멍·옛 세이브처럼 가진 쪽이 언제나 잃는 갈래) 이로운 편의 반대로 본다.
+   * 시트 태그는 표적이 선 편이다 — 상대 선수의 −는 그 상대가 가진 사실이되 우리에게
+   * 이롭다. 없으면(구멍·옛 세이브처럼 가진 쪽이 언제나 잃는 갈래) 이로운 편의 반대로 본다.
    */
   holder?: MatchSide;
   /**
-   * 수치를 드러내도 되는가 — 감독의 눈(분석)이 정한다. `false`면 렌더러가 흐린
-   * 문장을 낸다 (match.md §1.6 — 못 본 수치가 노트로 새어 들어오지 않게 하는 칸).
+   * 수치를 드러내도 되는가 — `false`면 렌더러가 흐린 문장을 낸다. 지금 새 패킷이
+   * 싣는 태그는 전부 `true`다 — 안개는 태그가 아니라 어느 포인트를 보여 주는가에 걸린다
+   * (match.md §1.6).
    */
   sharp: boolean;
   /** 이름이 서는 선수들 — 팀 단위 사실이면 빈 배열 */
   playerIds: string[];
-  /** 라벨 붙은 수치 — `{ pace: 88, defencePace: 61 }` */
+  /** 라벨 붙은 수치 — `{ fwPace: 88, cbPace: 61 }` */
   values: Record<string, number>;
-  /** 문장 안에 숨어 있던 조건부 축 — "sweeper" · "trap-unfamiliar" */
+  /** 문장 안에 숨어 있던 조건부 축 — "sweeper" · "trap-unfamiliar" · "band:attack" */
   flags: string[];
   /**
-   * 구조로 못 옮기는 자유 문장 — 지역 플랜의 모델 원문, 옛 세이브의 줄, 그리고
+   * 구조로 못 옮기는 자유 문장 — 시트 태그의 포인트 문장, 옛 세이브의 줄, 그리고
    * 카탈로그가 가진 고유 명사(컨텍스트 태그의 더비 이름).
    */
   text?: string;
@@ -95,37 +101,24 @@ export interface PacketTag {
  * 전술 지시가 존 전력에 남긴 흔적 — **감독의 결정이 어떻게 수치가 됐는가**.
  *
  * 이득과 대가를 함께 적는다. 지시는 공짜가 아니고(라인을 올리면 뒷공간이 열린다),
- * 소화율(`uptake`)은 **이득에 온전히, 대가에는 층마다 다르게** 걸린다 — 전술 6축과
- * 공략은 대가도 절반을 태우고 개인 지시·전술 상성은 대가를 온전히 문다
- * (match.md §1.2의 표).
+ * 소화율(`uptake`)은 **이득에 온전히, 대가에는 층마다 다르게** 걸린다 — 전술 6축은
+ * 대가도 절반을 태우고 시트·전술 상성은 대가를 온전히 문다 (match.md §1.2의 표).
  */
 export interface TacticalRead {
-  /** 지시 적용률 0.45~1.0 — 감독 전술 능력 + 팀 전술 적응도 */
+  /** 지시 적용률 0.45~1.0 — 감독 전술 능력 + 팀 전술 적응도 (+ 시트의 `cohesion`) */
   uptake: number;
-  /** 이득·대가의 사실 태그 (지시가 수치를 움직였을 때만) */
+  /** 이득·대가의 사실 태그와 시트가 남긴 노트 (지시가 수치를 움직였거나 걸리지 못했을 때) */
   notes: PacketTag[];
 }
 
 export type RegionalBand = MatchupZone;
-/** 좌·중·우 — 지역 전술·판세 격자·공격 경로가 나눠 쓰는 눈금 */
+/** 좌·중·우 — 시트·판세 격자·공격 경로가 나눠 쓰는 눈금 */
 export type RegionalLane = "left" | "center" | "right";
-export type RegionalIntent = "overload" | "press" | "protect" | "transition";
-
-/** 자연어 세부 전술을 코어가 검증해 경기 패킷에 남긴 지역 플랜. */
-export interface RegionalInstruction {
-  id: string;
-  band: RegionalBand;
-  lane: RegionalLane;
-  intent: RegionalIntent;
-  note: string;
-  /** 팀 전술 소화율이 적용된 실제 강도. */
-  uptake: number;
-}
 
 /**
- * 개인 지시·공략이 판세 격자의 한 줄 안에서 기울인 몫 — **줄 합은 0이다.**
+ * 시트가 판세 격자의 한 줄 안에서 기울인 몫 — **줄 합은 0이다.**
  *
- * 지시의 산출은 밴드×레인 아홉 칸이고, 그 줄 평균은 존 전력에 실린다. 여기 오는
+ * 시트의 산출은 밴드×레인 아홉 칸이고, 그 줄 평균은 존 전력에 실린다. 여기 오는
  * 것은 평균을 뺀 나머지뿐이라 격자는 **배분만** 받는다 — 같은 전력이 존과 칸에
  * 두 번 세어지지 않게 하는 자리다 (match.md §1.7, sim `zone-grid.ts`).
  */
@@ -134,6 +127,16 @@ export interface LaneBias {
   lane: RegionalLane;
   /** 존 전력 대비 비율 — 양수면 그 칸이 두꺼워지고 같은 줄 나머지가 얇아진다 */
   share: number;
+}
+
+/**
+ * 시트의 `edge +`가 공격 배분을 그 레인으로 끌어오는 몫 (match.md §1.7).
+ * 선수의 자리 가중치에 곱해지므로 레인을 통째로 바꾸지는 못한다.
+ */
+export interface RouteFocus {
+  lane: RegionalLane;
+  /** `SHEET_ROUTE_FOCUS[band] × step × uptake`의 합 */
+  weight: number;
 }
 
 export interface PacketPlayer {
@@ -220,13 +223,20 @@ export interface SidePacket {
   tacticalFit: number;
   /** 전술 지시의 반영 — 적용률과 이득·대가 (설명 가능성) */
   tactical: TacticalRead;
-  /** 이 경기에만 유효한 지역별 세부 전술. */
-  regional?: RegionalInstruction[];
   /**
-   * 개인 지시·공략이 격자의 배분을 기울인 몫. 지시가 없거나 레인을 겨냥하지 않은
-   * 경기에는 없고, **옛 세이브에도 없다** — 그때는 격자가 배치와 지역 플랜만 읽는다.
+   * 시트가 격자의 배분을 기울인 몫. 시트가 없거나 레인을 겨냥하지 않은 경기에는
+   * 없고, **옛 세이브에도 없다** — 그때는 격자가 배치만 읽는다.
    */
   laneBias?: LaneBias[];
+  /** 시트의 `edge +`가 공격 배분을 끌어오는 레인 — 없으면 배치가 정한 배분 그대로다 */
+  routeFocus?: RouteFocus[];
+  /**
+   * 선수 id → 카드·파울 가중에 거는 배수 — 시트의 `temper` (match.md §1.6). 1인
+   * 선수는 담지 않는다. 구간 시뮬이 `bookingWeight`·곧장 퇴장·파울 배분에서 읽는다.
+   */
+  temper?: Record<string, number>;
+  /** 선수 id → 체력 소모 배수 — 시트의 `legs`. 구간 시뮬이 `conditionDrain`에서 읽는다 */
+  legs?: Record<string, number>;
   /**
    * 그라운드 위 선수 명단 — id·이름·자리에 **그 선수가 지금 내는 전력**까지.
    *
@@ -238,40 +248,14 @@ export interface SidePacket {
   bench: PacketPlayer[];
 }
 
-/**
- * 공략 표적 — 키포인트 하나를 지시로 겨냥할 수 있게 만든 형태.
- *
- * `id`는 **경기 안에서 안정적**이어야 한다(라인업이 그대로면 같은 id). 모델이
- * 이 목록에서 골라 부르고, 코어는 그 id가 지금도 실재하는지만 확인한다 —
- * 교체로 그 선수가 나가면 표적이 사라지고 공략도 함께 끝난다.
- */
-export interface ExploitTarget {
-  id: string;
-  /** 어느 팀의 약점인가 — 우리가 노리는 쪽 */
-  side: MatchSide;
-  /** 그 지점의 사실 태그 — 감독이 본 해상도가 `sharp`에 실린다 */
-  tag: PacketTag;
-  /** 공략이 닿는 존 */
-  zone: MatchupZone;
-  /**
-   * 그 짝이 얼마나 벌어졌나 (`KeyPoint.weight`) — **공략의 이득이 이 값을 탄다.**
-   * 크게 벌어진 약점이 문턱을 겨우 넘은 약점보다 크게 값을 해야 감독이 무엇을
-   * 읽었는지가 결과에 남는다. 진행 중인 옛 세이브에는 없고, 그때는 기준 눈금으로
-   * 본다(sim `exploits.ts`).
-   */
-  weight?: number;
-  /**
-   * 그 약점이 선 레인 — **약점을 가진 쪽의 방향**이다. 표적이 팀 전체인 지점
-   * (백라인 조직·중원 활동량)에는 없고, 그때 공략은 세 레인에 고르게 실린다.
-   */
-  lane?: RegionalLane;
-}
-
 export interface StrengthPacket {
   home: SidePacket;
   away: SidePacket;
   matchups: Matchup[];
-  /** 위협/약점 포인트 — 사실 태그. 이로운 편은 태그의 `favours`가 갖는다 */
+  /**
+   * 이 경기의 태그 — 컨텍스트 · 상성 · 구멍 · **시트의 걸린 줄** (match.md §1.6).
+   * 이로운 편은 태그의 `favours`가 갖는다.
+   */
   keyPoints: PacketTag[];
   /**
    * 각 키포인트가 **누구에게 이로운가** — `keyPoints`와 같은 순서.
@@ -280,14 +264,14 @@ export interface StrengthPacket {
    */
   keyPointSides?: MatchSide[];
   /**
-   * **공략할 수 있는 지점** — 감독이 겨냥해 지시할 수 있는 키포인트.
+   * 이 패킷이 읽은 **전술 포인트와 시트** — 판독기가 쓴 그대로 (match.md §1.6).
    *
-   * 위 `keyPoints`가 화면에 그대로 서는 문장(상성·구멍 포함)이라면 이쪽은
-   * **표적**이다. id로 지목하면 코어가 실재를 대조하고 존 조정을 얹는다
-   * (sim `key-points.ts` · `exploits.ts`). 남의 팀 약점도 들어 있다 —
-   * 감독은 우리 약점을 메우는 쪽으로도 지시할 수 있어야 한다.
+   * 원본은 `pendingMatch.points`·`sheet`이고 여기 실리는 것은 그 복사다 — 기록
+   * (`packetDigest`)과 화면이 "이 판이 무엇을 읽고 섰는가"를 패킷 하나로 답하게.
+   * 판독이 없는 경기(간이 시뮬·옛 세이브·킥오프 실패)에는 없다.
    */
-  targets: ExploitTarget[];
+  points?: Point[];
+  sheet?: SheetLine[];
   guide: {
     /** 선수별 프로필의 결정력 반영 기대 득점을 합친 90분 판독값. */
     expectedGoals: { home: number; away: number };
@@ -407,44 +391,6 @@ export function matchupText(m: Matchup): string {
   return packetTagText(matchupTag(m));
 }
 
-/** 지시를 얼마나 감당하나 — 소화력 한 눈금을 감독이 읽는 말로 */
-const aptitudeRead = (apt: number): string =>
-  apt >= 1.15 ? "여유가 있다" : apt >= 0.95 ? "감당할 만하다" : "버거워 보인다";
-
-/** 겨눈 상대와의 싸움 — 듀얼 성공률을 말로 */
-const duelRead = (rate: number): string =>
-  rate >= 0.6 ? "따라붙을 만하다" : rate >= 0.4 ? "버거운 싸움이다" : "상대가 한 수 위다";
-
-/** 지시가 그라운드에서 무엇으로 보이는가 — 이득과 대가가 한 줄에 함께 선다 */
-const DIRECTIVE_KO: Record<string, (by: string, target: string) => string> = {
-  man_mark: (n, t) =>
-    `${josa(n, "이/가")} ${josa(t, "을/를")} ${PLAYER_DIRECTIVE_KO.man_mark}, 본업을 던다`,
-  press_target: (n, t) =>
-    `${josa(n, "이/가")} ${josa(t, "을/를")} ${PLAYER_DIRECTIVE_KO.press_target}, 자리를 비운다`,
-  focus_play: (n) => `${n}에게 공격을 몰아준다, 다른 길이 줄어든다`,
-  stay_back: (n) => `${josa(n, "은/는")} 뒤에 남는다, 앞의 인원이 준다`,
-  join_attack: (n) => `${josa(n, "이/가")} 적극적으로 올라간다, 뒷공간을 내준다`,
-  careful: (n) => `${josa(n, "이/가")} 발을 뺀다, 그 자리의 압박이 준다`,
-};
-
-/** 공략이 그라운드에서 무엇으로 보이는가 — 축 하나가 한 낱말이다 */
-const EXPLOIT_KO: Record<string, string> = {
-  "backline-pace": "뒷공간으로 계속 넘긴다",
-  "wing-duel": "측면에서 계속 걸어 들어간다",
-  aerial: "크로스를 계속 올린다",
-  "press-resistance": "상대 중원을 물고 늘어진다",
-  keeper: "먼 거리에서도 때린다",
-  "keeper-distribution": "골문까지 압박을 올린다",
-  "backline-shape": "라인 사이로 파고든다",
-  "backline-leader": "라인 사이로 파고든다",
-  physical: "최전방에 붙여 두고 걷어 올린다",
-  "set-piece": "세트피스에 사람을 올린다",
-  discipline: "그 선수 앞으로 계속 몰고 간다",
-  creator: "중원 배급을 끊는다",
-  finisher: "최전방을 가둔다",
-  stamina: "속도를 올려 체력을 갉는다",
-};
-
 /**
  * 벤치가 판을 옮긴 **갈래** — 축이 어느 쪽으로 갔는지는 이 낱말이 이미 말한다
  * (`chase`는 전부 위로, `hold`는 전부 아래로 — match.md §2).
@@ -455,18 +401,15 @@ const AI_SHIFT_KO: Record<string, string> = {
   counter: "벤치가 우리 전술을 읽고 맞섰다",
 };
 
-/** `축:값` 꼴 flag의 값 — 세기·축처럼 낱말 하나가 실리는 자리 */
+/** `축:값` 꼴 flag의 값 — 밴드·레인·포인트처럼 낱말 하나가 실리는 자리 */
 function flagValue(tag: PacketTag, key: string): string | undefined {
   const at = tag.flags.find((f) => f.startsWith(`${key}:`));
   return at?.slice(key.length + 1);
 }
 
-/** 세기의 한국어 — flag가 실어 온 낱말은 검증 밖이라 표에서 찾는다 */
-const DIRECTIVE_INTENSITY_KO_BY_CODE: Record<string, string | undefined> = DIRECTIVE_INTENSITY_KO;
-
 /** 태그가 문장으로 설 때 필요한 것 — 이름·수치·조건 */
 interface Render {
-  /** 이 사실이 **선 팀** — 상성은 그 수를 둔 쪽, 미스매치는 그 지점을 가진 쪽 */
+  /** 이 사실이 **선 팀** — 상성은 그 수를 둔 쪽, 시트는 표적이 선 쪽 */
   subject: string;
   /** 그 반대편 */
   rival: string;
@@ -563,85 +506,6 @@ const COUNTER_KO: Record<
   },
 };
 
-/**
- * 미스매치 열넷 — **정밀한 문장과 흐린 문장은 같은 사실의 두 해상도다.**
- *
- * 어느 쪽을 낼지는 태그의 `sharp`가 가른다(match.md §1.6). 주어(`subject`)는 그
- * 지점을 **가진 쪽**이고 상대(`rival`)가 그것으로 득을 보는 쪽이다.
- */
-const MISMATCH_KO: Record<string, { sharp: (r: Render) => string; vague: (r: Render) => string }> =
-  {
-    "backline-pace": {
-      sharp: (r) =>
-        `${r.rival} 뒷공간 공략: ${r.who(0)}(${AXIS_KO.pace} ${r.v("pace")}) vs ${r.who(1)}(${AXIS_KO.pace} ${r.v("defencePace")})`,
-      vague: (r) => `${r.subject} 최종 수비가 발이 느리다 — 뒷공간이 열린다`,
-    },
-    "wing-duel": {
-      sharp: (r) =>
-        `${r.rival} 1대1 우위: ${r.who(0)}(${AXIS_KO.dribbling} ${r.v("dribbling")}) vs ${r.who(1)}(${AXIS_KO.tackling} ${r.v("tackling")})`,
-      vague: (r) => `${josa(r.rival, "은/는")} 측면에서 사람을 벗겨낼 수 있다`,
-    },
-    aerial: {
-      sharp: (r) =>
-        `${r.rival} 제공권 우위: ${r.who(0)}(${AXIS_KO.aerial} ${r.v("aerial")}) vs ${r.who(1)}(${r.v("defenceAerial")})`,
-      vague: (r) => `${josa(r.rival, "이/가")} 공중에서 앞선다 — 크로스와 세트피스가 통한다`,
-    },
-    "press-resistance": {
-      sharp: (r) =>
-        `${r.subject} 빌드업 약점: ${r.who(0)}(${AXIS_KO.composure} ${r.v("composure")} · ${AXIS_KO.passing} ${r.v("passing")}) — 압박하면 흔들린다`,
-      vague: (r) => `${r.subject} 중원은 압박에 약하다`,
-    },
-    creator: {
-      sharp: (r) =>
-        `${r.subject} 창조의 축: ${r.who(0)}(${AXIS_KO.vision} ${r.v("vision")}) — 이 선수를 지우면 공격이 멎는다`,
-      vague: (r) => `${r.subject}의 공격은 중원 한 명에게서 시작된다`,
-    },
-    finisher: {
-      sharp: (r) =>
-        `${r.subject} 결정력: ${r.who(0)}(${AXIS_KO.finishing} ${r.v("finishing")}) — 한 번의 기회로 끝낸다`,
-      vague: (r) => `${r.subject} 최전방은 기회를 놓치지 않는다`,
-    },
-    keeper: {
-      sharp: (r) =>
-        `${r.subject} 골문 불안: ${r.who(0)}(${AXIS_KO.goalkeeping} ${r.v("goalkeeping")})`,
-      vague: (r) => `${r.subject} 골키퍼가 미덥지 않다`,
-    },
-    "keeper-distribution": {
-      sharp: (r) =>
-        `${r.subject} 골키퍼 배급: ${r.who(0)}(${AXIS_KO.passing} ${r.v("passing")}) — 뒤에서부터 풀어 나온다`,
-      vague: (r) => `${josa(r.subject, "은/는")} 골키퍼부터 빌드업한다`,
-    },
-    "backline-shape": {
-      sharp: (r) =>
-        `${r.subject} 수비 조직: 백라인 평균 ${AXIS_KO.positioning} ${Math.round(r.v("positioning"))} — 라인이 자주 어긋난다`,
-      vague: (r) => `${r.subject} 수비는 짜임새가 헐겁다`,
-    },
-    "backline-leader": {
-      sharp: (r) =>
-        `${r.subject} 백라인에 조율자가 없다 (최고 ${AXIS_KO.leadership} ${r.v("leadership")})`,
-      vague: (r) => `${r.subject} 수비는 서로를 부르지 않는다`,
-    },
-    physical: {
-      sharp: (r) =>
-        `${r.rival} 몸싸움 우위: ${r.who(0)}(${AXIS_KO.strength} ${r.v("strength")}) vs ${r.who(1)}(${r.v("defenceStrength")})`,
-      vague: (r) => `${r.rival} 최전방이 등지고 버틴다`,
-    },
-    stamina: {
-      sharp: (r) =>
-        `${r.subject} 중원 활동량 부족: 평균 ${AXIS_KO.stamina} ${Math.round(r.v("stamina"))} — 후반에 밀린다`,
-      vague: (r) => `${r.subject} 중원은 후반에 다리가 무거워진다`,
-    },
-    "set-piece": {
-      sharp: (r) => `${r.subject} 세트피스 키커: ${r.who(0)}(${AXIS_KO.kicking} ${r.v("kicking")})`,
-      vague: (r) => `${josa(r.subject, "은/는")} ${SET_PIECE_KO}가 위협적이다`,
-    },
-    discipline: {
-      sharp: (r) =>
-        `${r.subject} 카드 위험: ${r.who(0)}(${AXIS_KO.aggression} ${r.v("aggression")} · ${AXIS_KO.composure} ${r.v("composure")})`,
-      vague: (r) => `${r.subject}에 발끈하는 선수가 있다`,
-    },
-  };
-
 /** 전술 6축이 존에 남긴 이득과 대가 — 눈금 하나가 한 줄이다 */
 const TACTICAL_KO: Record<string, (r: Render) => string> = {
   mentality: (r) =>
@@ -710,35 +574,51 @@ const CONTEXT_KO: Record<string, (tag: PacketTag) => string> = {
   },
 };
 
-/**
- * **판에 닿지 못한 지시·공략** — 조용히 버리면 거짓 성공이 된다.
- * 꼴은 하나다: `무엇이 안 걸렸는가 — 왜`. 한 줄만 읽어도 다시 내릴지가 정해져야 한다.
- */
-const DROPPED_KO: Record<string, (r: Render) => string> = {
-  "off-pitch": (r) =>
-    r.named(0)
-      ? `${josa(r.who(0), "은/는")} 그라운드에 없어 지시가 걸리지 않았다`
-      : "그라운드에 없는 선수에게 내린 지시라 걸리지 않았다",
-  "gone-target": (r) =>
-    `${r.who(0)}의 지시가 걸리지 않았다 — ` +
-    (r.named(1)
-      ? `${josa(r.who(1), "은/는")} 이미 그라운드를 떠났다`
-      : "겨냥한 상대가 그라운드에 없다"),
-  /**
-   * 자리를 못 얻은 지시 — **다시 내리면 걸린다**가 이 줄이 말해야 하는 것이다
-   * (밀어내기 · match.md §2). "한 경기에 셋까지"로만 적으면 감독은 이 경기에서
-   * 다시 시도할 길이 없다고 읽는다.
-   */
-  overflow: (r) =>
-    `${r.named(0) ? `${r.who(0)}에게 내린 지시가` : "지시 하나가"} 판에 닿지 않았다 — ` +
-    `다른 지시 ${r.v("limit")}개가 자리를 쥐고 있다 (다시 내리면 그 자리를 가져온다)`,
+/** 시트의 밴드·레인 낱말 — 판세 격자와 같은 자리를 가리킨다 */
+const BAND_KO: Record<string, string> = {
+  defense: "우리 진영",
+  midfield: "중원",
+  attack: "상대 진영",
 };
+const LANE_KO: Record<string, string> = { left: "왼쪽", center: "가운데", right: "오른쪽" };
 
-/** 공략이 걸리지 않은 까닭 */
-const EXPLOIT_DROPPED_KO: Record<string, (r: Render) => string> = {
-  missing: () => "그 지점이 그라운드에 없어 걸리지 않았다",
-  "own-side": () => "우리 쪽 약점이라 노릴 수 없다",
-  overflow: (r) => `동시에 ${r.v("limit")}곳까지라 이 공략은 걸리지 않았다`,
+/**
+ * 시트 줄의 **표적** 한 마디 — 선수면 이름, 칸이면 편과 자리다.
+ * 밴드는 그 팀의 방향으로 적혀 있어(sim `sheet.ts`) 주어가 그 팀이다.
+ */
+function sheetTargetText(tag: PacketTag, r: Render): string {
+  if (r.named(0) || tag.playerIds.length > 0) return r.who(0);
+  const band = flagValue(tag, "band");
+  const lane = flagValue(tag, "lane");
+  const at = [lane ? LANE_KO[lane] : undefined, band ? BAND_KO[band] : undefined]
+    .filter((s): s is string => s !== undefined)
+    .join(" ");
+  return at.length > 0 ? `${r.subject} ${at}`.trim() : r.subject;
+}
+
+/**
+ * 시트 줄의 **방향과 눈금** — 수치가 아니라 화살표다. 시트는 GM에게 가지 않고
+ * 판세에는 문장으로 서므로, 감독이 읽는 것은 "어느 쪽으로 얼마나"까지다.
+ */
+function sheetStepText(tag: PacketTag): string {
+  const step = Math.max(1, Math.min(3, Math.round(tag.values.step ?? 1)));
+  const arrow = (tag.values.sign ?? 1) < 0 ? "↓" : "↑";
+  return arrow.repeat(step);
+}
+
+/**
+ * **판에 닿지 못한 시트 줄** — 조용히 버리면 거짓 성공이 된다 (match.md §2).
+ * 꼴은 하나다: `무엇이 안 걸렸는가 — 왜`. 코드는 까닭이고 sim `sheet.ts`가 낸다.
+ */
+const SHEET_DROPPED_KO: Record<string, (r: Render) => string> = {
+  "no-point": () => "가리킨 포인트가 판에 없다",
+  "off-pitch": (r) =>
+    r.named(0) ? `${josa(r.who(0), "은/는")} 그라운드에 없다` : "겨냥한 선수가 그라운드에 없다",
+  "bad-target": () => "모양과 표적이 맞지 않는다",
+  duplicate: () => "같은 표적에 이미 한 줄이 걸려 있다",
+  "target-cap": () => "그 표적이 받을 수 있는 폭을 넘었다",
+  budget: () => "한 팀의 시트 폭을 다 썼다",
+  "net-cap": () => "이득만 있는 시트는 없다 — 대가 줄이 없어 잘렸다",
 };
 
 /**
@@ -773,8 +653,6 @@ export function packetTagText(tag: PacketTag, ctx?: PacketTagContext): string {
       return tag.text ?? "";
     case "context":
       return CONTEXT_KO[tag.code]?.(tag) ?? tag.text ?? "";
-    case "zone-plan":
-      return `${tag.favours ? nameOf(tag.favours) : ""} 지역 플랜: ${tag.text ?? ""}`.trim();
     case "gap": {
       // 구멍은 그 팀의 것이다 — 이로운 쪽은 반대편이라 주어를 되짚는다
       const holder = tag.favours ? otherSide(tag.favours) : null;
@@ -789,14 +667,9 @@ export function packetTagText(tag: PacketTag, ctx?: PacketTagContext): string {
       // 대가의 주어는 이로운 편의 반대다
       return entry.text(sides(blames ? otherSide(tag.favours) : tag.favours));
     }
-    case "mismatch": {
-      if (tag.code.startsWith("zone-")) return zoneMatchupText(tag);
-      const entry = MISMATCH_KO[tag.code];
-      if (!entry || !tag.favours) return tag.text ?? "";
-      // 미스매치의 주어는 그 지점을 **가진** 쪽 — 강점 축은 그게 이로운 편 자신이다
-      const s = sides(tag.holder ?? otherSide(tag.favours));
-      return tag.sharp ? entry.sharp(s) : entry.vague(s);
-    }
+    case "mismatch":
+      // 존 매치업만 이 갈래에 남았다 — 다른 코드는 옛 기록의 것이다
+      return tag.code.startsWith("zone-") ? zoneMatchupText(tag) : (tag.text ?? "");
     case "tactical":
       return TACTICAL_KO[tag.code]?.(r) ?? tag.text ?? "";
     case "set-piece": {
@@ -818,17 +691,6 @@ export function packetTagText(tag: PacketTag, ctx?: PacketTagContext): string {
         `${josa(`${finisher}${head_}`, "이/가")} 마무리했다`
       );
     }
-    case "directive": {
-      const line = DIRECTIVE_KO[tag.code]?.(r.who(0), r.who(1));
-      if (line === undefined) return tag.text ?? "";
-      const read =
-        tag.values.duel !== undefined
-          ? duelRead(tag.values.duel)
-          : aptitudeRead(r.v("aptitude", 1));
-      const intensity = flagValue(tag, "intensity");
-      const ko = intensity === undefined ? undefined : DIRECTIVE_INTENSITY_KO_BY_CODE[intensity];
-      return `${line} — ${read}${ko ? ` (${ko})` : ""}`;
-    }
     case "ai-shift": {
       const head = AI_SHIFT_KO[tag.code] ?? "벤치가 판을 다시 깔았다";
       // 옮긴 축만 낱말로 — 눈금 숫자는 화면의 점이 이미 그린다
@@ -839,18 +701,21 @@ export function packetTagText(tag: PacketTag, ctx?: PacketTagContext): string {
       const parts = [...moved, ...(shape ? [`${shape} 모양으로 갈아 꼈다`] : [])];
       return parts.length > 0 ? `${head} — ${parts.join(" · ")}` : head;
     }
-    case "directive-dropped":
-      return DROPPED_KO[tag.code]?.(r) ?? tag.text ?? "";
-    case "exploit": {
-      const note = EXPLOIT_KO[tag.code];
-      if (!note) return tag.text ?? "";
-      return `${note} (${packetTagText({ ...tag, source: "mismatch" }, ctx)})`;
+    case "sheet": {
+      /**
+       * 걸린 줄은 **그 포인트의 문장**을 말한다 — 골의 원인·중계·판세가 같은 문장을
+       * 인용한다 (match.md §1.6). 뒤에 표적과 모양·방향을 붙여 같은 포인트의 두 줄이
+       * 갈리게 한다.
+       */
+      const s = sides(tag.holder ?? (tag.favours ? otherSide(tag.favours) : null));
+      const shape = SHEET_SHAPE_KO[tag.code as SheetShape] ?? tag.code;
+      const head = tag.text ?? "판독";
+      return `${head} — ${sheetTargetText(tag, s)} ${shape} ${sheetStepText(tag)}`.trim();
     }
-    case "exploit-dropped": {
-      const axis = flagValue(tag, "axis");
-      const note = axis === undefined ? undefined : EXPLOIT_KO[axis];
-      const why = EXPLOIT_DROPPED_KO[tag.code]?.(r) ?? tag.text ?? "";
-      return `${note ?? "노린 지점을 찾지 못했다"} — ${why}`;
+    case "sheet-dropped": {
+      const why = SHEET_DROPPED_KO[tag.code]?.(r) ?? tag.text ?? "";
+      const head = tag.text ? `“${tag.text}”` : "시트 한 줄";
+      return `${head}이 걸리지 않았다 — ${why}`;
     }
   }
 }
@@ -871,49 +736,53 @@ function zoneMatchupText(tag: PacketTag): string {
 }
 
 // ── 옛 세이브 읽기 ────────────────────────────────────
-/** 진행 중이던 옛 세이브의 패킷 — 문장이 서 있던 칸들 */
+/** 진행 중이던 옛 세이브의 패킷 — 문장이 서 있던 칸들과 사라진 층 */
 interface LegacyPacket {
   keyPoints: Array<PacketTag | string>;
   keyPointSides?: MatchSide[];
-  targets: Array<ExploitTarget & { label?: string }>;
-  home: { tactical: { notes: Array<PacketTag | string> } };
-  away: { tactical: { notes: Array<PacketTag | string> } };
+  /** 공략 표적 — 사라진 층. 있으면 걷는다 */
+  targets?: unknown;
+  home: { tactical: { notes: Array<PacketTag | string> }; regional?: unknown };
+  away: { tactical: { notes: Array<PacketTag | string> }; regional?: unknown };
 }
 
 /**
  * 진행 중이던 경기의 옛 패킷을 태그로 — **읽는 자리에서 한 번만** 지난다.
  *
  * `PendingMatch.packet`은 세이브 스키마의 검사 밖(passthrough)이라 옛 세이브는
- * `keyPoints: string[]`·`tactical.notes: string[]`·`targets[].label`을 들고 온다.
+ * `keyPoints: string[]`·`tactical.notes: string[]`·공략 표적·지역 플랜을 들고 온다.
  * 판정은 이 폴백을 보지 않는다 — 옛 문장으로 다시 갈래를 가르면 이 구조가 뜻을
- * 잃으므로, 옮겨진 태그는 `code: "legacy"` 하나다 (match.md §4).
+ * 잃으므로, 옮겨진 태그는 `code: "legacy"` 하나다 (match.md §4). 사라진 층은 걷는다.
  */
 export function normalizePacket(packet: StrengthPacket): StrengthPacket {
   const raw = packet as unknown as LegacyPacket;
-  const notes = (list: Array<PacketTag | string>) =>
-    list.map((n) => (typeof n === "string" ? legacyTag(n) : n));
+  const isLegacy = (tag: PacketTag | string) =>
+    typeof tag === "string" || normalizeTag(tag) !== tag;
+  const notes = (list: Array<PacketTag | string>) => list.map((n) => normalizeTag(n) as PacketTag);
   const stale =
-    raw.keyPoints.some((k) => typeof k === "string") ||
-    raw.home.tactical.notes.some((n) => typeof n === "string") ||
-    raw.away.tactical.notes.some((n) => typeof n === "string") ||
-    raw.targets.some((t) => t.tag === undefined);
+    raw.keyPoints.some(isLegacy) ||
+    raw.home.tactical.notes.some(isLegacy) ||
+    raw.away.tactical.notes.some(isLegacy) ||
+    raw.targets !== undefined ||
+    raw.home.regional !== undefined ||
+    raw.away.regional !== undefined;
   if (!stale) return packet;
+  const { targets: _targets, ...rest } = raw as LegacyPacket & StrengthPacket;
+  void _targets;
+  const { regional: _homePlans, ...home } = rest.home as SidePacket & { regional?: unknown };
+  const { regional: _awayPlans, ...away } = rest.away as SidePacket & { regional?: unknown };
+  void _homePlans;
+  void _awayPlans;
   return {
-    ...packet,
+    ...(rest as StrengthPacket),
     keyPoints: raw.keyPoints.map((k, i) => {
-      if (typeof k !== "string") return k;
+      if (typeof k !== "string") return normalizeTag(k) as PacketTag;
+      // 문장 하나를 든 옛 키포인트 — 편만 알면 태그가 된다
       const tag = legacyTag(k);
       const favours = raw.keyPointSides?.[i];
       return favours ? { ...tag, favours } : tag;
     }),
-    targets: raw.targets.map((t) => (t.tag ? t : { ...t, tag: legacyTag(t.label ?? t.id) })),
-    home: {
-      ...packet.home,
-      tactical: { ...packet.home.tactical, notes: notes(raw.home.tactical.notes) },
-    },
-    away: {
-      ...packet.away,
-      tactical: { ...packet.away.tactical, notes: notes(raw.away.tactical.notes) },
-    },
+    home: { ...home, tactical: { ...home.tactical, notes: notes(raw.home.tactical.notes) } },
+    away: { ...away, tactical: { ...away.tactical, notes: notes(raw.away.tactical.notes) } },
   };
 }

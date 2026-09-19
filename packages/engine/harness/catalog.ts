@@ -155,17 +155,15 @@ export const SEGMENT_SHOTS = defineHarness({
 
 export const ZONE_BASELINE = defineHarness({
   id: "zone-baseline",
-  what: "킥오프 패킷의 매치업 비율이 1에 서는가 — 우리 공격/상대 수비 · 층별 분해 · 네 등급의 몫",
+  what: "킥오프 패킷의 매치업 비율이 1에 서는가 — 우리 공격/상대 수비 · 전술 층의 크기 · 네 등급의 몫",
   doc: "docs/simulation/match.md §1.1",
-  cost: "세계 둘 · 리그 편성 3,500경기 × 패킷 넷 · 40초쯤",
+  cost: "세계 둘 · 리그 편성 3,500경기 × 패킷 둘 · 20초쯤",
   // prettier-ignore
   bands: [
     { metric: "편성 경기 수", role: "measure", unit: "count", why: "두 세계의 리그 편성 전부 — 표본의 크기" },
     { metric: "공격/상대 수비 기하평균", role: "guard", min: 0.98, max: 1.02, why: "매치업 비율의 기준선 — `ZONE_BASELINE`이 지키는 자리. 벗어나면 그 비율의 제곱근만큼 두 값을 반대로 옮긴다. 기하평균이어야 두 방향이 서로의 역수다" },
     { metric: "홈 중원/어웨이 중원 기하평균", role: "guard", min: 0.98, max: 1.02, why: "홈과 어웨이는 같은 눈금이다 — 홈 이점은 존이 아니라 슈팅 노출에만 붙는다 (§1.4)" },
-    { metric: "층 없이 — 공격/상대 수비", role: "measure", why: "공략과 전술을 둘 다 끈 값 — 남는 것은 기준선과 능력 항이라, 기준선을 걷어내면 역할 적합도의 기울기가 보인다" },
-    { metric: "공략 없이 — 공격/상대 수비", role: "measure", why: "AI 벤치의 공략만 끈 값 — 위 기준선과의 간격이 공략 층의 크기다" },
-    { metric: "전술 없이 — 공격/상대 수비", role: "measure", why: "프리셋을 전부 중립으로 놓은 값 — 위 기준선과의 간격이 전술 층의 크기다" },
+    { metric: "전술 없이 — 공격/상대 수비", role: "measure", why: "프리셋을 전부 중립으로 놓은 값 — 남는 것은 기준선과 능력 항이라, 위 기준선과의 간격이 전술 층의 크기이고 기준선을 걷어내면 역할 적합도의 기울기가 보인다" },
     { metric: "공격하는 쪽이 우위인 비율", role: "guard", min: 0.45, max: 0.55, unit: "ratio", why: "편이 갈린 공격·수비 매치업 중 공격하는 쪽이 이긴 몫 — 기준선이 기울면 어느 팀이든 여기가 한쪽으로 쏠린다. 「같은 전력이면 팽팽하다」의 리그 단위 불변식이다" },
     { metric: "팽팽한 매치업 비율", role: "reference", min: 0.15, max: 0.3, unit: "ratio", why: "`EDGE_EVEN_RATIO` 안쪽 — 리그의 다섯에 하나쯤. 여기가 부풀면 격자가 회색이고, 사라지면 지시 한 칸이 편을 가른다" },
     { metric: "근소한 우위 비율", role: "reference", min: 0.25, max: 0.4, unit: "ratio", why: "세 크기가 각각 몫을 가져야 문턱이 단계를 가른다" },
@@ -776,6 +774,7 @@ export const PROMPT_REGRESSION = defineHarness({
     { metric: "가장 긴 도구 설명 글자", role: "measure", unit: "count", why: "한 도구가 설명 예산을 혼자 먹고 있는가" },
     { metric: "경기 고정층 글자", role: "reference", max: 12000, unit: "count", why: "매치 GM 프롬프트 + 경기 도구 셋 — 평시 고정층과 다른 눈금이고, 셋을 넘어 늘면 경기 턴마다 그만큼 캐시 뒤에 붙는다 (agents.md §3)" },
     { metric: "전술 해석 고정층 글자", role: "measure", unit: "count", why: "시스템 프롬프트 + ops 인자 스키마 — 명령의 설명이 길어지면 이 요청이 그만큼 길어진다 (agents.md §1)" },
+    { metric: "판독기 고정층 글자", role: "measure", unit: "count", why: "시스템 프롬프트 + 산출 스키마(명령 인자 · 포인트 · 시트) — 경기의 세 자리에서 매번 실린다 (agents.md §3). 구간마다 도는 호출이라 평시 해석기보다 자주 나간다" },
     { metric: "훈련 해석 고정층 글자", role: "measure", unit: "count", why: "같은 눈금 — 훈련·육성 명령 여섯" },
     { metric: "시장 해석 고정층 글자", role: "measure", unit: "count", why: "같은 눈금 — 이적·재정·감독직 명령 열아홉" },
     { metric: "경기 마감 고정층 글자", role: "measure", unit: "count", why: "경기 결산 도구 하나(설명 + 스키마) — 경기당 한 번 마감 에이전트에 실린다 (agents.md §3)" },

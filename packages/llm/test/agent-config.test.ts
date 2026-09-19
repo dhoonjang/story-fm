@@ -12,25 +12,25 @@ import {
 
 const yamlWith = (agents: string): string => `version: 1\nagents:\n${agents}`;
 
-/** 에이전트 일곱이 같은 한 벌을 쓰는 최소 표 — 파일 머리(`max_retries`)를 재는 자리용 */
+/**
+ * 나머지 에이전트를 **같은 한 벌로** 잇는다 — 이름을 손으로 적지 않는다.
+ *
+ * 설정은 열 전부를 요구하므로(`LlmConfigFileSchema`) 표에 손으로 적어 두면 에이전트가
+ * 하나 늘 때마다 이 파일의 표 셋이 함께 빨개지고, 그 빨강은 설정이 아니라 목록이 낡은
+ * 것을 말한다. `AGENT_NAMES`에서 파생하면 새 에이전트는 기본 한 벌로 선다.
+ */
+const restAs = (anchor: string, ...named: readonly string[]): string =>
+  AGENT_NAMES.filter((name) => !named.includes(name))
+    .map((name) => `  ${name}: *${anchor}`)
+    .join("\n") + "\n";
+
+/** 열 전부가 같은 한 벌을 쓰는 최소 표 — 파일 머리(`max_retries`)를 재는 자리용 */
 const AGENT_YAML = `  gm: &agent
     provider: google
     model: gemini-test
     max_tokens: 100
     timeout_ms: 1000
-  tactic-orders: *agent
-  finalize-match: *agent
-  negotiation-table: *agent
-  market-orders: *agent
-  table-orders: *agent
-  training-orders: *agent
-  match-gm: *agent
-  negotiation-gm: *agent
-  training-rater: *agent
-  scout-rater: *agent
-  history-compactor: *agent
-  onboarding-judge: *agent
-`;
+${restAs("agent", "gm")}`;
 
 /** 온전한 한 벌 — 갈래마다 이 표에서 한 자리만 무너뜨려 무엇이 거부를 부르는지 가른다 */
 const AGENT_BLOCK: Record<string, unknown> = {
@@ -73,6 +73,11 @@ describe("에이전트별 LLM 설정", () => {
   tactic-orders:
     provider: google
     model: gemini-custom
+    max_tokens: 150
+    timeout_ms: 1500
+  match-reader:
+    provider: google
+    model: gemini-reader
     max_tokens: 150
     timeout_ms: 1500
   match-gm:
@@ -157,19 +162,7 @@ describe("에이전트별 LLM 설정", () => {
     model: gemini-test
     max_tokens: 100
     timeout_ms: 1000
-  tactic-orders: *google
-  finalize-match: *google
-  negotiation-table: *google
-  market-orders: *google
-  table-orders: *google
-  training-orders: *google
-  match-gm: *google
-  negotiation-gm: *google
-  training-rater: *google
-  scout-rater: *google
-  history-compactor: *google
-  onboarding-judge: *google
-`),
+${restAs("google", "gm")}`),
     );
     expect(config.agents.gm).toMatchObject({ thinkingLevel: "minimal" });
   });
@@ -180,19 +173,7 @@ describe("에이전트별 LLM 설정", () => {
     model: test-model
     max_tokens: 100
     timeout_ms: 1000${extra}
-  tactic-orders: *agent
-  finalize-match: *agent
-  negotiation-table: *agent
-  market-orders: *agent
-  table-orders: *agent
-  training-orders: *agent
-  match-gm: *agent
-  negotiation-gm: *agent
-  training-rater: *agent
-  scout-rater: *agent
-  history-compactor: *agent
-  onboarding-judge: *agent
-`);
+${restAs("agent", "gm")}`);
 
   /**
    * `thinking_level`은 제공자 중립 눈금이라 셋 다 싣는다 (models.md §1-2) — 어댑터가

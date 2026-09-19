@@ -14,7 +14,7 @@ import type { GameLLM, GameToolSpec, JsonObjectSchema, TurnResult } from "@story
 import { LlmCallError, LlmTimeoutError, TokenBudgetExceededError } from "@story-fm/llm";
 import { z } from "zod";
 import { retryOnce, anchorStands, ModelOutputError, readOutput } from "../src/retry";
-import { runTacticOrders } from "../src/tactic-orders";
+import { runMatchReader } from "../src/match-reader";
 import { SettleMatchSchema, SETTLE_MATCH_INPUT } from "../src/finalize-match";
 import { REPORT_TRAINING_INPUT, TrainingReportSchema } from "../src/training-rater";
 import { REPORT_DIGEST_INPUT } from "../src/history-compactor";
@@ -108,15 +108,15 @@ describe("readOutput — 산출이 왔는가", () => {
 });
 
 /**
- * 해석기의 실패 계약 — 산출은 JSON 하나로 오므로 "산출 뒤의 실패"라는 자리는 없다.
+ * 판독기의 실패 계약 — 산출은 JSON 하나로 오므로 "산출 뒤의 실패"라는 자리는 없다.
  * 남는 갈래는 셋이다: 산출이 왔다 · 산출이 없다(한 번 더) · 호출 자체가 실패했다(그대로).
  *
- * 경기 중 명단·패킷이 없는 상태라 `buildLedgerNote`가 빈 줄을 낸다 — 이 테스트가 보는
- * 것은 프롬프트가 아니라 실패와 산출이 만나는 자리다.
+ * 경기 중 명단·패킷이 없는 상태라 `buildLedgerNote`도 `<facts>`도 빈 줄을 낸다 — 이
+ * 테스트가 보는 것은 프롬프트가 아니라 실패와 산출이 만나는 자리다.
  */
-describe("runTacticOrders — 산출과 실패", () => {
-  /** 이 경기의 지난 중계 턴 하나 — 해석기가 `<match_log>`로 읽는다 (agents.md §3) */
-  // 장부 없는 경기 상태 — 해석기의 입력 조립이 경기 갈래로 가되 실을 것이 없다
+describe("runMatchReader — 산출과 실패", () => {
+  /** 이 경기의 지난 중계 턴 하나 — 판독기가 `<match_log>`로 읽는다 (agents.md §3) */
+  // 장부 없는 경기 상태 — 입력 조립이 경기 갈래로 가되 실을 것이 없다
   const emptyState = {
     pendingMatch: { matchId: "m" },
     chat: [
@@ -130,7 +130,7 @@ describe("runTacticOrders — 산출과 실패", () => {
     ],
   } as unknown as GameState;
 
-  /** 해석기가 인자를 옮길 명령의 스펙 — 이 갈래의 시험에는 스키마만 있으면 된다 */
+  /** 판독기가 인자를 옮길 명령의 스펙 — 이 갈래의 시험에는 스키마만 있으면 된다 */
   const SPECS = new Map<string, GameToolSpec>([
     [
       "set_tactics",
@@ -161,10 +161,14 @@ describe("runTacticOrders — 산출과 실패", () => {
     const llm: GameLLM = { runTurn: answering({ ops: { set_tactics: [{ pressing: 4 }] } }) };
     const spy = vi.spyOn(llm, "runTurn");
 
-    const result = await runTacticOrders(emptyState, SPECS, "압박 올려", { llm });
+    const result = await runMatchReader(emptyState, SPECS, {
+      occasion: "orders",
+      said: "압박 올려",
+      llm,
+    });
 
     expect(result.ok).toBe(true);
-    expect(result.ok && result.intent.ops.set_tactics).toEqual([{ pressing: 4 }]);
+    expect(result.ok && result.reading.ops.set_tactics).toEqual([{ pressing: 4 }]);
     expect(spy).toHaveBeenCalledTimes(1);
     const request = spy.mock.calls[0]![0];
     expect(request.outputSchema).toBeDefined();
@@ -181,7 +185,11 @@ describe("runTacticOrders — 산출과 실패", () => {
     const llm: GameLLM = { runTurn: answering(null, "왼쪽을 두껍게 하겠습니다.") };
     const spy = vi.spyOn(llm, "runTurn");
 
-    const result = await runTacticOrders(emptyState, SPECS, "왼쪽을 두껍게", { llm });
+    const result = await runMatchReader(emptyState, SPECS, {
+      occasion: "orders",
+      said: "왼쪽을 두껍게",
+      llm,
+    });
 
     expect(result.ok).toBe(false);
     expect(spy).toHaveBeenCalledTimes(2);
@@ -201,7 +209,11 @@ describe("runTacticOrders — 산출과 실패", () => {
     const llm: GameLLM = { runTurn: answering({ ops: [] }) };
     const spy = vi.spyOn(llm, "runTurn");
 
-    const result = await runTacticOrders(emptyState, SPECS, "왼쪽을 두껍게", { llm });
+    const result = await runMatchReader(emptyState, SPECS, {
+      occasion: "orders",
+      said: "왼쪽을 두껍게",
+      llm,
+    });
 
     expect(result.ok).toBe(false);
     expect(spy).toHaveBeenCalledTimes(2);
@@ -218,7 +230,9 @@ describe("runTacticOrders — 산출과 실패", () => {
     const llm: GameLLM = { runTurn: () => Promise.reject(thrown) };
     const spy = vi.spyOn(llm, "runTurn");
 
-    await expect(runTacticOrders(emptyState, SPECS, "왼쪽을 두껍게", { llm })).rejects.toBe(thrown);
+    await expect(
+      runMatchReader(emptyState, SPECS, { occasion: "orders", said: "왼쪽을 두껍게", llm }),
+    ).rejects.toBe(thrown);
     expect(spy).toHaveBeenCalledTimes(1);
   });
 });

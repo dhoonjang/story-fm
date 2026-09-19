@@ -6,9 +6,8 @@ import type {
   MatchRecord,
   MatchSide,
   MilestoneCode,
-  RegionalBand,
-  RegionalIntent,
-  RegionalLane,
+  Point,
+  SheetLine,
   ShootoutKick,
   StrengthPacket,
   TacticAssignment,
@@ -27,9 +26,6 @@ import {
   milestonePhrase,
   naturalPositionOf,
   normalizeCauses,
-  normalizePacket,
-  packetTagContext,
-  packetTagText,
   PHASE_END,
   positionGroupOf,
   positionGroupOfPlayer,
@@ -42,11 +38,11 @@ import {
   TacticsSpecSchema,
   tacticsSignature,
   josa,
-  josaOf,
 } from "@story-fm/domain";
-import type { CommandResult } from "../commands";
 import {
-  MAX_EXPLOITS,
+  POINTS_MAX,
+  pointsSeen,
+  readPoints,
   accumulateFatigue,
   advanceClock,
   addStats,
@@ -111,7 +107,6 @@ import {
   type CommandBrief,
 } from "../core/state";
 import { pickOurPlayer } from "../core/player-ref";
-import { directivesOnPitch } from "./directive-standing";
 import { briefNames, item } from "../commands/brief";
 import { competitionLabel } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
@@ -394,19 +389,6 @@ function buildPacketFor(
       ...(tacticsOf(state, teamId).setPieceRoutine
         ? { setPieceRoutine: tacticsOf(state, teamId).setPieceRoutine }
         : {}),
-      /**
-       * 감독의 **분석 능력** — 키포인트를 몇 개나 발견하는가 (key-points.ts).
-       * 우리 팀에만 준다: 이 패킷은 감독이 보는 화면이고, 상대 벤치의 눈은 여기 없다.
-       */
-      ...(teamId === state.userTeamId
-        ? {
-            managerAnalysis: state.manager.attributes.analysis,
-            // 감독이 겨냥한 지점 — 없는 id는 패킷이 조용히 버린다 (exploits.ts)
-            ...(pending.exploits ? { exploits: pending.exploits } : {}),
-            ...(pending.regionalPlans ? { regional: pending.regionalPlans } : {}),
-          }
-        : {}),
-      directives: directivesOnPitch(state, teamId, ledgerSide.onPitch),
     };
   };
   /**
@@ -423,6 +405,14 @@ function buildPacketFor(
       // 구간마다 다시 세우므로 지금 스코어가 곧 다음 구간의 노출이다 (match.md §1.4)
       lead: pending.ledger.score.home - pending.ledger.score.away,
       ...(derby ? { derby: { name: derby.name, heat: derby.heat } } : {}),
+      /**
+       * 판독기의 포인트와 시트 — 경기의 위층 (match.md §1.6). 실재·한도는 패킷이
+       * 세워질 때마다 다시 걸리므로 여기서는 앉혀 둔 그대로 넘긴다. 판독이 없는
+       * 경기(옛 세이브·킥오프 실패)는 코어 로직만으로 구른다.
+       */
+      ...(pending.points
+        ? { reading: { points: pending.points, sheet: pending.sheet ?? [] } }
+        : {}),
     },
   );
 }
@@ -587,8 +577,6 @@ function snapshotTactics(state: GameState): NonNullable<PendingMatch["tacticsBef
       familiarity: a.familiarity,
       ...(a.point ? { point: { ...a.point } } : {}),
       ...(a.roleId ? { roleId: a.roleId } : {}),
-      ...(a.instruction ? { instruction: a.instruction } : {}),
-      ...(a.directive ? { directive: { ...a.directive } } : {}),
       ...(a.roleMemo ? { roleMemo: { ...a.roleMemo } } : {}),
     })),
   };
@@ -597,9 +585,10 @@ function snapshotTactics(state: GameState): NonNullable<PendingMatch["tacticsBef
 /**
  * 경기 중 조정을 킥오프 상태로 되돌린다 — **그 경기의 대응은 그 경기에서 끝난다.**
  *
- * 되돌리는 것은 감독이 경기 중 만질 수 있는 것뿐이다: 전술 6축·포메이션, 자리·역할,
- * 개인 지시. 배치 목록 자체(누가 선발인가)는 손대지 않는다 — 교체는 장부의 사실이고,
- * 경기 중 새로 들어온 배치가 있다면 그것도 감독이 만든 것이다.
+ * 되돌리는 것은 감독이 경기 중 만질 수 있는 것뿐이다: 전술 6축·포메이션, 자리·역할.
+ * 배치 목록 자체(누가 선발인가)는 손대지 않는다 — 교체는 장부의 사실이고,
+ * 경기 중 새로 들어온 배치가 있다면 그것도 감독이 만든 것이다. 전술 포인트와 시트는
+ * `pendingMatch`와 함께 사라진다 — 되돌릴 자리가 없다 (match.md §1.6).
  */
 function restoreTactics(state: GameState): string | null {
   const snap = state.pendingMatch?.tacticsBefore;
@@ -613,9 +602,6 @@ function restoreTactics(state: GameState): string | null {
     const was = before.get(a.playerId);
     if (!was) continue; // 경기 중 새로 배치된 선수는 그대로 둔다
     if (a.position !== was.position || a.roleId !== was.roleId) changed = true;
-    if (a.instruction !== was.instruction || a.directive?.kind !== was.directive?.kind) {
-      changed = true;
-    }
     // 경기 중 전술 변경이 깎은 적응도를 되돌린다 — 그 경기의 대응은 훈련이 아니다
     if (a.familiarity !== was.familiarity) changed = true;
     a.familiarity = was.familiarity;
@@ -624,16 +610,12 @@ function restoreTactics(state: GameState): string | null {
     else delete a.point;
     if (was.roleId) a.roleId = was.roleId;
     else delete a.roleId;
-    if (was.instruction) a.instruction = was.instruction;
-    else delete a.instruction;
-    if (was.directive) a.directive = { ...was.directive };
-    else delete a.directive;
     // 적응도를 킥오프로 되돌리면 장부도 함께 되돌아가야 한다 — `paid`만 남으면
     // 경기 뒤 첫 역할 변경이 낸 적 없는 값을 환불받는다 (player.md §7.2)
     if (was.roleMemo) a.roleMemo = { ...was.roleMemo };
     else delete a.roleMemo;
   }
-  return changed ? "경기 중 조정한 전술·개인 지시를 킥오프 전으로 되돌렸습니다" : null;
+  return changed ? "경기 중 조정한 전술을 킥오프 전으로 되돌렸습니다" : null;
 }
 
 /**
@@ -1053,11 +1035,6 @@ export function advanceSegment(
         ...squads.away.bench,
       ].map((p) => p.id),
     ),
-    // 개인 지시 — 존 전력 밖에서 다리(무리한 지시는 더 지치게)와 카드(`careful`)가 탄다
-    directives: {
-      home: directivesOnPitch(state, match.homeTeamId, pending.ledger.home.onPitch),
-      away: directivesOnPitch(state, match.awayTeamId, pending.ledger.away.onPitch),
-    },
     // 체력 소모의 그날의 몫 — 구간이 아니라 **경기** 단위로 고정된다 (stamina.ts)
     staminaKey,
     accumulatedFatigue: pending.matchFatigue ?? {},
@@ -1282,6 +1259,21 @@ export function applyMatchEvents(
   const result = applyEvents(match.ledger, events);
   if (!result.ok) return { ok: false, message: result.errors.join("\n") };
   match.ledger = result.state;
+  /**
+   * **나간 선수의 시트 줄은 그 자리에서 걷는다** (match.md §1.6) — 판독기를 기다리지
+   * 않는다. 다음 구간의 시트가 없는 사람을 겨냥하지 않게. 포인트는 남는다 — 판독은
+   * 판독기가 구간 뒤에 다시 쓴다.
+   */
+  const gone = new Set(
+    events.flatMap((e) =>
+      (e.type === "substitution" || e.type === "red_card") && e.actors[0] ? [e.actors[0]] : [],
+    ),
+  );
+  if (gone.size > 0 && match.sheet) {
+    match.sheet = match.sheet.filter(
+      (line) => !line.target.player || !gone.has(line.target.player),
+    );
+  }
   return {
     ok: true,
     message: `기록 완료 — ${match.ledger.score.home}:${match.ledger.score.away}, ${match.ledger.minute}′`,
@@ -1466,53 +1458,6 @@ export function advanceShootout(state: GameState): {
     message: done
       ? `${shootoutKickLine(state, kick, tally)} — 승부차기 종료`
       : shootoutKickLine(state, kick, tally),
-  };
-}
-
-/** 동시에 걸 수 있는 지역 플랜 수 — 공략(`MAX_EXPLOITS`)과 같은 이유의 상한이다 */
-export const MAX_REGIONAL_PLANS = 2;
-
-/** 자연어 세부 전술을 경기 전용 지역 플랜으로 기록한다. */
-export function setRegionalPlan(
-  state: GameState,
-  input: {
-    band: RegionalBand;
-    lane: RegionalLane;
-    intent: RegionalIntent;
-    note: string;
-  },
-): FlowResult {
-  const pending = state.pendingMatch;
-  if (!pending || state.phase !== "match") {
-    return { ok: false, message: "지역 전술은 경기 중에만 지정할 수 있습니다" };
-  }
-  const note = input.note.trim();
-  if (note.length === 0 || note.length > 120) {
-    return { ok: false, message: "지역 전술 설명은 1~120자로 적어야 합니다" };
-  }
-  const plans = [...(pending.regionalPlans ?? [])];
-  const same = plans.findIndex((plan) => plan.band === input.band && plan.lane === input.lane);
-  const next = { ...input, note };
-  /**
-   * 자리가 모자라면 가장 오래된 것이 밀린다 — **밀린 사실을 말한다.**
-   * 조용히 버리면 감독은 아까 내린 지시가 아직 걸려 있는 줄 알고, GM은 그것을
-   * 전제로 다음 장면을 쓴다. 공략(`setExploits`)은 잘릴 때 그 사실을 밝힌다.
-   */
-  let dropped: (typeof plans)[number] | undefined;
-  if (same >= 0) plans[same] = next;
-  else {
-    if (plans.length >= MAX_REGIONAL_PLANS) dropped = plans.shift();
-    plans.push(next);
-  }
-  pending.regionalPlans = plans;
-  refreshPacket(state);
-  return {
-    ok: true,
-    message:
-      `지역 전술 적용 — ${note}` +
-      (dropped
-        ? ` (동시에 ${MAX_REGIONAL_PLANS}곳까지 — "${dropped.note}"${josaOf(dropped.note, "이/가")} 밀려났습니다)`
-        : ""),
   };
 }
 
@@ -2379,42 +2324,56 @@ export function finalizeMatch(state: GameState): MatchDigest {
 
 export { activeSuspension, type TacticAssignment };
 
-/** 동시에 노릴 수 있는 지점 수 · 국면별 교체 한도 — sim의 규칙을 그대로 다시 내보낸다 */
-export { MAX_EXPLOITS, subLimitsOf };
+/** 국면별 교체 한도 · 전술 포인트의 상한과 감독이 보는 줄 수 — sim의 규칙을 그대로 다시 내보낸다 */
+export { subLimitsOf, POINTS_MAX, pointsSeen, readPoints };
+/** 벤치의 등급 — AI 감독은 등급 하나가 전술과 분석을 겸한다. 판독기 입력에 사실로 실린다 (§1.6) */
+export { managerTacticsOf };
+
+/** 판독기가 판을 읽는 때 — 킥오프 · 지시 턴 · 구간 뒤 (match.md §1.6) */
+export type ReadingOccasion = "kickoff" | "orders" | "segment";
+
+/** 판에 앉힌 판독 — 무엇이 남았고 몇 줄이 걷혔는가 */
+export interface AppliedReading {
+  points: Point[];
+  sheet: SheetLine[];
+  /** 포인트 상한(`POINTS_MAX`)과 겹친 id로 걷힌 포인트 수 */
+  droppedPoints: number;
+}
 
 /**
- * 공략 지정 — **감독이 읽은 약점을 겨냥한다** (sim `exploits.ts`).
+ * 판독기의 산출을 판에 앉힌다 — **전체를 다시 쓴다** (match.md §1.6).
  *
- * 코어가 하는 일은 둘뿐이다: **실재하는 지점인가**(패킷의 표적 목록에 있는가)와
- * **몇 개까지인가**(동시에 둘). 얼마나 먹히는지는 패킷이 정하고, 무엇을 노렸는지는
- * 모델이 옮긴다 — 이적 협상의 설득과 같은 분업이다.
+ * 코어가 여기서 하는 것은 그릇의 규칙뿐이다: 포인트는 `POINTS_MAX`까지, id는 하나씩.
+ * 실재(그라운드의 선수·칸·가리킨 포인트)와 한도·예산·소화율은 패킷을 세울 때
+ * `applySheet`가 걸고 노트로 남긴다 — 교체로 사람이 바뀌어도 매 패킷마다 다시
+ * 확인되어야 하는 사실이라, 저장할 때 한 번 거른 값을 남기지 않는다.
  *
- * 없는 id를 주면 실패로 돌려준다. 조용히 버리지 않는 이유는 모델이 그 사실을
- * 알아야 다음 턴에 다시 시도하지 않기 때문이다.
+ * 포인트가 비면 시트도 비고 코어는 중립이다 — 판독기의 실패가 그 자리다.
  */
-export function setExploits(state: GameState, input: { targetIds: string[] }): CommandResult {
+export function applyMatchReading(
+  state: GameState,
+  reading: { points: readonly Point[]; sheet: readonly SheetLine[] },
+): AppliedReading | null {
   const pending = state.pendingMatch;
-  if (!pending) return { ok: false, message: "경기 중이 아닙니다" };
-  const packet = pending.packet ? normalizePacket(pending.packet) : null;
-  const live = new Map((packet?.targets ?? []).map((t) => [t.id, t] as const));
-  const kept = input.targetIds.filter((id) => live.has(id));
-  const missing = input.targetIds.filter((id) => !live.has(id));
-  if (kept.length === 0) {
-    return {
-      ok: false,
-      message: `그 지점은 지금 판에 없습니다${missing.length > 0 ? ` (${missing.join(", ")})` : ""}`,
-    };
-  }
-  const chosen = kept.slice(0, MAX_EXPLOITS);
-  pending.exploits = chosen;
+  if (!pending) return null;
+  const seen = new Set<string>();
+  const points = reading.points
+    .filter((point) => (seen.has(point.id) ? false : (seen.add(point.id), true)))
+    .slice(0, POINTS_MAX)
+    .map((point) => ({ ...point, about: [...point.about] }));
+  const sheet = reading.sheet.map((line) => ({ ...line, target: { ...line.target } }));
+  pending.points = points;
+  pending.sheet = sheet;
+  // 시트가 바뀌었으니 판이 다시 선다 — 다음 구간은 이 판으로 구르고 GM은 그것을 미리 읽는다
   refreshPacket(state);
-  return {
-    ok: true,
-    message: `공략 지정 — ${chosen
-      .map((id) => {
-        const target = live.get(id);
-        return target && packet ? packetTagText(target.tag, packetTagContext(packet)) : id;
-      })
-      .join(" / ")}${kept.length > MAX_EXPLOITS ? ` (동시에 ${MAX_EXPLOITS}곳까지)` : ""}`,
-  };
+  return { points, sheet, droppedPoints: reading.points.length - points.length };
+}
+
+/**
+ * 감독의 분석이 허락한 전술 포인트 — 매치 GM의 `<points>`와 판세의 시트 줄이 같은 문을
+ * 지난다 (match.md §1.6 · career.md §2). 판독이 없으면 빈 목록이다.
+ */
+export function pointsSeenBy(state: GameState): Point[] {
+  const points = state.pendingMatch?.points ?? [];
+  return readPoints(points, state.manager.attributes.analysis);
 }

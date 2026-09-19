@@ -196,8 +196,6 @@ export interface TrainingSubject {
   /** 이번 시즌 출전·평점 — 훈련장 밖에서 무엇을 겪고 있나 */
   apps: number;
   rating: number | null;
-  /** 감독이 걸어 둔 개인 지시 (없으면 null) */
-  instruction: string | null;
   /**
    * 감독이 이 선수에게 건 **개인 훈련** (없으면 null).
    *
@@ -375,7 +373,6 @@ export function buildTrainingBrief(
       overall: player.attributes.overall,
       apps: statOf(state, player.id)?.apps ?? 0,
       rating: ratingOf(state, player.id),
-      instruction: assignment?.instruction ?? null,
     });
   }
   if (subjects.length === 0) return null;

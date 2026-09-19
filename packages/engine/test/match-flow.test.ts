@@ -27,8 +27,7 @@ import {
   saveGame,
   setLineup,
   settleYouthIntake,
-  setRegionalPlan,
-  setPlayerInstruction,
+  applyMatchReading,
   setPlayerTactic,
   setTactics,
   tacticsOf,
@@ -385,7 +384,7 @@ describe("경기 흐름 (overview §4)", () => {
     expect(state.phase).toBe("idle");
   });
 
-  it("자연어 지역 전술은 패킷 키포인트와 9칸 판세에 함께 반영된다", () => {
+  it("판독기의 시트는 패킷의 태그와 9칸 판세에 함께 반영되고 나간 선수의 줄은 걷힌다", () => {
     const state = atMatchday();
     startMatch(state);
     const side = userSide(state);
@@ -394,31 +393,49 @@ describe("경기 흐름 (overview §4)", () => {
     // 격자는 홈 시점 좌표라 원정의 왼쪽 공격은 홈의 오른쪽 수비 칸에 나타난다.
     const gridBand = side === "home" ? "attack" : "defense";
     const gridLane = side === "home" ? "left" : "right";
-    const beforeLeft = zoneGrid(state.pendingMatch!.packet).find(
-      (cell) => cell.band === gridBand && cell.lane === gridLane,
-    )![side];
-
-    expect(
-      setRegionalPlan(state, {
-        band: "attack",
-        lane: "left",
-        intent: "overload",
-        note: "왼쪽 하프스페이스에 수적 우위를 만든다",
-      }).ok,
-    ).toBe(true);
-
-    const after = packetSide();
-    expect(after.regional?.[0]?.note).toContain("하프스페이스");
-    expect(
-      state.pendingMatch!.packet.keyPoints.some(
-        (tag) => tag.source === "zone-plan" && tag.text?.includes("하프스페이스"),
-      ),
-    ).toBe(true);
-    expect(
+    const cellNow = () =>
       zoneGrid(state.pendingMatch!.packet).find(
         (cell) => cell.band === gridBand && cell.lane === gridLane,
-      )![side],
-    ).toBeGreaterThan(beforeLeft);
+      )![side];
+    const beforeLeft = cellNow();
+    const marker = packetSide().lineup.find((p) => p.position !== "GK")!.id;
+
+    const applied = applyMatchReading(state, {
+      points: [
+        {
+          id: "left",
+          text: "왼쪽 하프스페이스에 수적 우위를 만든다",
+          about: [side],
+          importance: 3,
+        },
+      ],
+      sheet: [
+        {
+          pointId: "left",
+          target: { side, band: "attack", lane: "left" },
+          shape: "edge",
+          sign: 1,
+          step: 2,
+        },
+        { pointId: "left", target: { player: marker }, shape: "temper", sign: -1, step: 1 },
+      ],
+    });
+    expect(applied?.points).toHaveLength(1);
+    expect(packetSide().temper?.[marker]).toBeLessThan(1);
+    expect(
+      state.pendingMatch!.packet.keyPoints.some(
+        (tag) => tag.source === "sheet" && tag.text?.includes("하프스페이스"),
+      ),
+    ).toBe(true);
+    expect(cellNow()).toBeGreaterThan(beforeLeft);
+
+    // 그 선수가 교체로 나가면 그의 줄은 코어가 그 자리에서 걷는다 — 포인트는 남는다
+    const bench = (
+      side === "home" ? state.pendingMatch!.ledger.home : state.pendingMatch!.ledger.away
+    ).bench[0]!;
+    expect(substitutePlayer(state, { out: marker, in: bench }).ok).toBe(true);
+    expect(state.pendingMatch!.sheet?.some((line) => line.target.player === marker)).toBe(false);
+    expect(state.pendingMatch!.points).toHaveLength(1);
   });
 
   it("저장/로드를 거쳐도 경기를 이어가고 결과가 남는다", () => {
@@ -781,26 +798,17 @@ describe("자리 밖 기용의 눈금 (people.md §5)", () => {
 });
 
 describe("경기 후 전술 복원", () => {
-  it("경기 중 바꾼 전술·개인 지시가 킥오프 전으로 돌아온다", () => {
+  it("경기 중 바꾼 전술이 킥오프 전으로 돌아오고 판독은 경기와 함께 사라진다", () => {
     const state = atMatchday(5);
     startMatch(state);
     const tactics = () => tacticsOf(state, state.userTeamId);
     const before = { ...tactics().spec };
 
     setTactics(state, { mentality: 5, defensiveLine: 5, pressing: 5 });
-    const marker = assignmentsOf(state, state.userTeamId, "starting")[3]!.playerId;
-    const opponent = state.players.find(
-      (p) =>
-        p.teamId !== state.userTeamId && state.pendingMatch!.ledger.away.onPitch.includes(p.id),
-    );
-    if (opponent) {
-      setPlayerInstruction(state, {
-        playerId: marker,
-        note: "달고 다녀",
-        kind: "man_mark",
-        targetId: opponent.id,
-      });
-    }
+    applyMatchReading(state, {
+      points: [{ id: "p", text: "달고 다닌다", about: [], importance: 2 }],
+      sheet: [],
+    });
     expect(tactics().spec.mentality).toBe(5);
 
     let guard = 30;
@@ -810,7 +818,8 @@ describe("경기 후 전술 복원", () => {
     const digest = finalizeMatch(state);
 
     expect(tactics().spec).toEqual(before);
-    expect(tactics().assignments.some((a) => a.directive)).toBe(false);
+    // 전술 포인트와 시트는 경기와 함께 사라진다 — 저장 전술에는 아무것도 남지 않는다
+    expect(state.pendingMatch).toBeNull();
     // 전술 복구는 우리 경기 사건이다 — 말풍선에 서는 갈래에 있어야 한다
     expect(digest.ours.some((d) => d.includes("되돌"))).toBe(true);
   });
@@ -1371,41 +1380,6 @@ describe("감독 경기 마감의 대칭 (match.md §6)", () => {
  */
 describe("지시가 판에 닿는 길", () => {
   /**
-   * `kind` 없는 개인 지시는 시뮬로 가지 않는다(`directivesOnPitch`가 `directive`만
-   * 읽는다). 예전엔 그래도 성공으로 답해 GM이 "먹혔다"로 서사를 썼다 — 거짓 성공이다.
-   */
-  it("kind 없는 개인 지시는 판에 반영되지 않는다고 밝힌다", () => {
-    const state = atMatchday();
-    startMatch(state);
-    const starter = assignmentsOf(state, state.userTeamId, "starting")[0]!;
-
-    const vague = setPlayerInstruction(state, {
-      playerId: starter.playerId,
-      note: "상황 봐서 알아서 움직여",
-    });
-    expect(vague.ok).toBe(true);
-    expect(vague.message).toContain("반영되지 않습니다");
-    expect(
-      assignmentsOf(state, state.userTeamId).find((a) => a.playerId === starter.playerId)
-        ?.directive,
-      "판으로 가는 지시는 만들어지지 않는다",
-    ).toBeUndefined();
-
-    // kind가 붙으면 그 말이 판으로 간다
-    const sharp = setPlayerInstruction(state, {
-      playerId: starter.playerId,
-      note: "앞으로 나가라",
-      kind: "join_attack",
-    });
-    expect(sharp.ok).toBe(true);
-    expect(sharp.message).not.toContain("반영되지 않습니다");
-    expect(
-      assignmentsOf(state, state.userTeamId).find((a) => a.playerId === starter.playerId)?.directive
-        ?.kind,
-    ).toBe("join_attack");
-  });
-
-  /**
    * **좌표를 지어내지 않고 자리를 옮긴다.** 지정하지 않은 축은 지금 자리를 그대로
    * 쓴다 — "왼쪽으로 벌려"가 앞뒤까지 바꾸면 감독이 하지 않은 지시가 된다.
    */
@@ -1449,22 +1423,6 @@ describe("지시가 판에 닿는 길", () => {
     };
     // 수동 갱신을 한 쪽과 안 한 쪽이 **같아야** 한다 — 안 그러면 굴리기 전 갱신이 없는 것이다
     expect(play(false)).toBe(play(true));
-  });
-
-  /** 자리가 모자라 밀려난 지역 전술은 그 사실을 말한다 */
-  it("세 번째 지역 전술은 무엇이 밀렸는지 밝힌다", () => {
-    const state = atMatchday();
-    startMatch(state);
-    const plan = (lane: "left" | "center" | "right", note: string) =>
-      setRegionalPlan(state, { band: "attack", lane, intent: "overload", note });
-
-    expect(plan("left", "왼쪽에 사람을 더 붙여라").ok).toBe(true);
-    expect(plan("right", "오른쪽도 밀어라").ok).toBe(true);
-    const third = plan("center", "가운데로 모아라");
-    expect(third.ok).toBe(true);
-    expect(third.message).toContain("밀려났습니다");
-    expect(third.message).toContain("왼쪽에 사람을 더 붙여라");
-    expect(state.pendingMatch!.regionalPlans).toHaveLength(2);
   });
 });
 
@@ -1649,11 +1607,11 @@ describe("경기 전 상대 분석 (match.md §1.8)", () => {
   });
 
   /**
-   * **경기 전에 노린 지점을 경기 중에 그대로 부를 수 있어야 한다** — 표적 id가
-   * `축:선수id`라(§1.6) 이 등식이 곧 그 뜻이다. 라인업이 갈리면 성립할 이유가
-   * 없으므로 XI가 같은지를 먼저 세운다.
+   * **라인업이 그대로면 리포트의 상성과 킥오프 패킷의 상성이 같다** (§1.8) — 리포트는
+   * 같은 `buildStrengthPacket`을 미리 지난 것뿐이고, 판독(시트)은 킥오프 뒤의 것이라
+   * 리포트에는 없다.
    */
-  it("라인업이 그대로면 리포트의 표적 id가 킥오프 패킷의 표적 id다", () => {
+  it("라인업이 그대로면 리포트의 상성이 킥오프 패킷의 상성이고 판독은 없다", () => {
     const state = atMatchday();
     const report = buildOpponentReport(state);
     if (!report) throw new Error("상대 분석을 세우지 못했다");
@@ -1666,8 +1624,13 @@ describe("경기 전 상대 분석 (match.md §1.8)", () => {
     // 전제 — 상대가 예상대로 나왔다 (로테이션이 없으면 매치데이 1은 늘 이 자리다)
     expect([...theirXI].sort()).toEqual(report.expectedXI.map((p) => p.id).sort());
 
-    const idsOf = (targets: readonly { id: string }[]) => targets.map((t) => t.id).sort();
-    expect(idsOf(report.targets)).toEqual(idsOf(pending.packet.targets));
+    const codesOf = (tags: readonly PacketTag[]) =>
+      tags
+        .filter((t) => t.source === "counter")
+        .map((t) => `${t.code}:${t.favours}`)
+        .sort();
+    expect(codesOf(report.notes)).toEqual(codesOf(pending.packet.keyPoints));
+    expect(report.notes.some((t) => t.source === "sheet")).toBe(false);
   });
 
   it("경기 중에는 다음 상대의 분석을 세우지 않는다", () => {

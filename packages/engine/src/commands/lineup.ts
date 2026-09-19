@@ -1,7 +1,7 @@
 /**
  * **설정형 — 판을 세우는 명령** (player.md §3 · match.md §1).
  *
- * 1·2군 배치, 라인업과 팀 전술 6축, 선수의 자리·역할·개인 지시, 세트피스, 완장,
+ * 1·2군 배치, 라인업과 팀 전술 6축, 선수의 자리·역할, 세트피스, 완장,
  * 등번호. 검증을 지나면 그대로 장부에 적히고 판정은 끼지 않는다.
  */
 import { numberGrievanceStands, registrationBlockText } from "@story-fm/domain";
@@ -22,10 +22,6 @@ import type {
 import {
   clampCondition,
   tacticalUptake as uptakeOf,
-  DIRECTIVE_INTENSITY_KO,
-  type DirectiveIntensity,
-  PLAYER_DIRECTIVE_KO,
-  type PlayerDirectiveKind,
   MATCHDAY_SQUAD,
   POSITION_CODES,
   STARTING_XI,
@@ -67,7 +63,6 @@ import {
   josa,
   josaOf,
 } from "@story-fm/domain";
-import { directiveStandingOf, nextDirectiveOrder } from "../match/directive-standing";
 import { settleRoleCost, shelveFamiliarity, unshelveFamiliarity } from "./familiarity-memory";
 import { recallRole, rememberRole } from "./role-memory";
 import { diffLineup, type LineupSide, type LineupSlotRef } from "./lineup-diff";
@@ -110,7 +105,7 @@ import {
   type GameState,
   type CommandBriefItem,
 } from "../core/state";
-import { pickOurPlayer, pickRivalPlayer } from "../core/player-ref";
+import { pickOurPlayer } from "../core/player-ref";
 import { briefNames, item } from "./brief";
 import type { CommandResult } from "./result";
 
@@ -947,8 +942,6 @@ export function setLineup(
       familiarity: old?.familiarity ?? newcomerFamiliarity,
       // 개인 기억은 배치보다 오래 산다 — 여기서 흘리면 저장 한 번에 통째로 사라진다
       ...(old?.drilled ? { drilled: old.drilled } : {}),
-      ...(old?.instruction ? { instruction: old.instruction } : {}),
-      ...(old?.directive ? { directive: old.directive } : {}),
       ...(roleId ? { roleId } : {}),
       ...(old?.roleMemo ? { roleMemo: old.roleMemo } : {}),
     };
@@ -1121,11 +1114,12 @@ export function lineupChangeNote(
 }
 
 /**
- * 한 선수의 **전술 설정**을 한 번에 — 자리·역할·개인 지시.
+ * 한 선수의 **전술 설정**을 한 번에 — 자리·역할.
  *
- * 셋은 늘 함께 판단되는 것들인데(누구를 어디에 어떤 역할로 세우고 무엇을
- * 시키나) 도구가 셋으로 갈려 있었다. 감독의 한마디("6번을 레지스타로 내려")가
- * 도구 두세 번이 되면 GM이 하나를 빠뜨린다.
+ * 둘은 늘 함께 판단되는 것들인데(누구를 어디에 어떤 역할로 세우나) 도구가 갈려
+ * 있었다. 감독의 한마디("6번을 레지스타로 내려")가 도구 두세 번이 되면 GM이 하나를
+ * 빠뜨린다. 판을 움직이는 자연어("붙어서 지워")는 여기 없다 — 판독기가 전술 포인트와
+ * 시트로 옮긴다 (match.md §1.6).
  */
 export function setPlayerTactic(
   state: GameState,
@@ -1135,13 +1129,6 @@ export function setPlayerTactic(
     point?: BoardPoint;
     move?: { lane?: "left" | "center" | "right"; band?: "defense" | "midfield" | "attack" };
     role?: string;
-    /** 개인 지시 — 자유 서술 + 선택적 종류·대상·세기 */
-    instruction?: {
-      note: string;
-      kind?: PlayerDirectiveKind;
-      targetId?: string;
-      intensity?: DirectiveIntensity;
-    };
   },
 ): CommandResult {
   const notes: string[] = [];
@@ -1182,13 +1169,6 @@ export function setPlayerTactic(
   }
   if (input.role !== undefined) {
     const res = setPlayerRole(state, { playerId: input.playerId, role: input.role });
-    if (!res.ok) {
-      const stop = reject(res);
-      if (stop) return stop;
-    } else take(res);
-  }
-  if (input.instruction !== undefined) {
-    const res = setPlayerInstruction(state, { playerId: input.playerId, ...input.instruction });
     if (!res.ok) {
       const stop = reject(res);
       if (stop) return stop;
@@ -2069,163 +2049,6 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): Comman
           note: delta < 0 ? "재적응 필요" : delta > 0 ? "익혀 둔 전술" : "그대로",
           delta,
         }),
-      ],
-    },
-  };
-}
-
-/**
- * 개인 지시 — 자연어(`note`)는 서사로, 구조화된 `directive`는 장부로 간다.
- *
- * 코어가 하는 일은 **사실 확인**뿐이다: 우리 선수인가, 배치돼 있는가, 겨냥한
- * 상대가 실재하는가. 얼마나 먹히는지는 시뮬이 정하고(`applyDirectives`), 무슨
- * 말을 어떤 지시로 옮길지는 LLM이 정한다 — 이적 설득과 같은 분업이다.
- */
-export function setPlayerInstruction(
-  state: GameState,
-  input: {
-    playerId: string;
-    note: string;
-    kind?: PlayerDirectiveKind;
-    targetId?: string;
-    /** 얼마나 세게 — 없으면 `normal`이라 세기를 안 보내는 호출이 그대로 선다 */
-    intensity?: DirectiveIntensity;
-  },
-): CommandResult {
-  const pick = pickOurPlayer(state, input.playerId);
-  if (!pick.ok) return pick;
-  const player = pick.player;
-  const assignment = userTactics(state).assignments.find((a) => a.playerId === player.id);
-  if (!assignment) {
-    return {
-      ok: false,
-      message: `${josa(player.name, "은/는")} 현재 전술에 배치되어 있지 않습니다`,
-    };
-  }
-
-  let targetNote = "";
-  let target: Player | null = null;
-  if (input.kind) {
-    const needsTarget = input.kind === "man_mark" || input.kind === "press_target";
-    if (needsTarget) {
-      const found = input.targetId
-        ? pickRivalPlayer(state, input.targetId, "상대를 겨냥하세요")
-        : null;
-      if (!found) {
-        return {
-          ok: false,
-          message: `${josa(PLAYER_DIRECTIVE_KO[input.kind], "은/는")} 겨냥할 상대 선수가 필요합니다 — targetId를 주세요`,
-        };
-      }
-      if (!found.ok) return found;
-      target = found.player;
-      targetNote = ` → ${target.name}`;
-    }
-    assignment.directive = {
-      kind: input.kind,
-      ...(target ? { targetId: target.id } : {}),
-      ...(input.intensity ? { intensity: input.intensity } : {}),
-      /**
-       * **방금 내린 지시가 가장 최근이다** — 자리를 다투면 이긴다 (match.md §2
-       * 밀어내기). 차례를 적지 않으면 자리는 배치 순서가 나누고, 판을 읽고 내린
-       * 후반의 지시가 킥오프 전에 세워 둔 지시에게 진다.
-       */
-      order: nextDirectiveOrder(userTactics(state).assignments),
-    };
-  }
-
-  assignment.instruction = input.note;
-  if (!input.kind) {
-    /**
-     * **`kind` 없는 지시는 판에 닿지 않는다** — 그러면 그렇다고 말해야 한다.
-     *
-     * 시뮬로 가는 것은 `directive.kind`뿐이고(`match-flow.ts`의 `directivesOnPitch`)
-     * `instruction`은 화면과 스냅샷에만 남는다. 이 갈래를 그냥 성공으로 답하면
-     * GM이 "지시가 먹혔다"로 서사를 쓰고 판은 아무것도 안 하는 **거짓 성공**이
-     * 된다 — 감독이 원인을 알 수 없는 종류의 어긋남이다.
-     */
-    return {
-      ok: true,
-      message:
-        `${player.name}에게 "${input.note}" — 말로 전했습니다. ` +
-        `이 지시는 판에 반영되지 않습니다: 판을 움직이려면 kind를 함께 보내세요 ` +
-        `(${Object.values(PLAYER_DIRECTIVE_KO).join(" · ")}). ` +
-        `자리를 옮기는 지시라면 move, 지역을 겨냥한 지시라면 set_match_plan입니다`,
-      // 긴 안내는 모델 몫이다 — 감독이 알아야 할 것은 "판에 안 닿았다" 하나
-      brief: {
-        head: `${player.name} 개인 지시`,
-        items: [item({ text: "말로만 전함", note: "판에 반영되지 않음" })],
-      },
-    };
-  }
-  /** 세기는 **보통이 아닐 때만** 적는다 — 기본값을 매번 적으면 그게 선택으로 읽힌다 */
-  const intensityKo =
-    input.intensity && input.intensity !== "normal"
-      ? ` ${DIRECTIVE_INTENSITY_KO[input.intensity]}`
-      : "";
-  const kindKo = `${PLAYER_DIRECTIVE_KO[input.kind]}${intensityKo}`;
-  /**
-   * **`kind`가 있어도 판에 닿지 않는 갈래가 있다** — 그것도 말해야 한다.
-   *
-   * 판정은 `directiveStandingOf` 하나가 하고(match.md §2) 여기는 그 답을 문장으로
-   * 옮긴다. 저장은 되니 **거절이 아니라 고지다** — 교체로 들어가거나 다시 내리면
-   * 그대로 걸린다. 조용히 버리면 `kind` 없는 지시를 성공으로 답하던 것과 같은
-   * 거짓 성공이 된다.
-   */
-  const slots = directiveStandingOf(state, state.userTeamId);
-  const mine = slots.rows.find((d) => d.playerId === player.id);
-  const unreached =
-    mine === undefined || mine.taken
-      ? null
-      : mine.code === "off-pitch"
-        ? { text: "벤치", why: "벤치라 지금은 판에 닿지 않습니다 — 교체로 들어가면 걸립니다" }
-        : mine.code === "gone-target"
-          ? {
-              text: "표적 없음",
-              why: "겨냥한 상대가 그라운드에 없어 걸리지 않습니다 — 다른 상대를 겨냥하세요",
-            }
-          : {
-              text: `지시 ${slots.used}/${slots.limit}`,
-              why: `이미 지시 ${slots.limit}개가 걸려 판에 닿지 않습니다`,
-            };
-  /**
-   * **밀려난 지시는 그 자리에서 이름으로 말한다.** 새 지시가 자리를 가져왔다는 것은
-   * 다른 지시 하나가 판에서 내려왔다는 뜻이고, 그 사실을 알려 주지 않으면 감독은
-   * 자기가 아까 내린 지시가 아직 걸려 있는 줄 알고 다음 판단을 그 위에 쌓는다.
-   */
-  const pushedOut = slots.rows
-    .filter((d) => !d.taken && d.code === "overflow" && d.playerId !== player.id)
-    .map((d) => `${playerName(state, d.playerId)}(${PLAYER_DIRECTIVE_KO[d.kind]})`);
-  const pushed =
-    unreached === null && pushedOut.length > 0
-      ? `지시 ${slots.used}/${slots.limit} — 밀려난 지시: ${pushedOut.join(" · ")} ` +
-        `(다시 내리면 그 자리를 가져옵니다)`
-      : null;
-  return {
-    ok: true,
-    message:
-      `${player.name} 개인 지시 — "${input.note}" [${kindKo}${targetNote}]` +
-      (unreached ? ` · ${unreached.why}` : pushed ? ` · ${pushed}` : ""),
-    /**
-     * 항목에는 **지시의 갈래와 대상만** 싣는다. `note`는 감독의 말 그대로라
-     * 길이에 상한이 없다 — 그 문장은 `message`를 타고 장면으로 간다.
-     */
-    brief: {
-      head: `${player.name} 개인 지시`,
-      items: [
-        item({
-          text: kindKo,
-          ...(target ? { note: `겨냥 ${target.name}` } : {}),
-        }),
-        ...(unreached ? [item({ text: unreached.text, note: "판에 반영되지 않음" })] : []),
-        ...(pushed
-          ? [
-              item({
-                text: `${slots.used}/${slots.limit}`,
-                note: `${pushedOut.join(" · ")} 밀려남`,
-              }),
-            ]
-          : []),
       ],
     },
   };

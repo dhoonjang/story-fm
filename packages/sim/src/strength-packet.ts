@@ -8,14 +8,12 @@ import type {
   PacketTag,
   PlayerShotProfile,
   Player,
+  Point,
   PositionGroup,
   SetPieceProfile,
   SetPieceRoutine,
   SetPieceTakers,
-  RegionalBand,
-  RegionalInstruction,
-  RegionalIntent,
-  RegionalLane,
+  SheetLine,
   SidePacket,
   ShotRoute,
   StrengthPacket,
@@ -39,11 +37,9 @@ import {
   tacticalSensitivityOf,
   tacticToggleValue,
 } from "@story-fm/domain";
-import { applyDirectives, type DirectiveInput } from "./directives";
 import { setPieceTakersOf, slotGroup } from "./set-piece-taker";
-import { applyExploits, autoExploits, exploitTargets } from "./exploits";
-import { buildKeyPoints, readKeyPoints } from "./key-points";
 import { coverLineup } from "./lineup-cover";
+import { applySheet, type SheetSideOutcome } from "./sheet";
 import { stateModifier } from "./state-modifier";
 import { buildCounterContext, evaluateCounters, type CounterResult } from "./tactical-counters";
 import { GAP_PENALTY, GAP_THRESHOLD } from "./stamina";
@@ -53,16 +49,7 @@ import {
   FINISHING_SCALE,
   penaltyRate,
 } from "./shot-model";
-import {
-  addCells,
-  GRID_LANES,
-  LANE_X,
-  laneBiasOf,
-  mirrorLane,
-  zoneGrid,
-  zoneMeanOf,
-  zeroCells,
-} from "./zone-grid";
+import { GRID_LANES, LANE_X, laneBiasOf, mirrorLane, zoneGrid, zoneMeanOf } from "./zone-grid";
 
 /** 배치된 선수 — 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
 export interface LineupSlot {
@@ -97,27 +84,6 @@ export interface SideInput {
   tactics: TacticsSpec;
   /** 감독 전술 능력치 (0~99) → 전술 소화율 (career.md §2) */
   managerTactics: number;
-  /**
-   * 감독 분석 능력치 (0~99) — **키포인트를 몇 개나 발견하는가.**
-   * 없으면 전부 보인다(AI 팀 경기·테스트).
-   */
-  managerAnalysis?: number;
-  /**
-   * 지금 노리고 있는 지점 (`ExploitTarget.id`) — 감독이 지시로 겨냥한 것.
-   * 없는 id는 코어가 버리되 그 사실을 노트로 남긴다 (`exploits.ts`).
-   */
-  exploits?: readonly string[];
-  /**
-   * 개인 지시 — 감독이 특정 선수·특정 상대를 겨눠 내린 것.
-   * 전술 6축이 팀의 성향이라면 이쪽은 **이 경기, 저 사람**을 향한 지시다.
-   */
-  directives?: DirectiveInput[];
-  regional?: Array<{
-    band: RegionalBand;
-    lane: RegionalLane;
-    intent: RegionalIntent;
-    note: string;
-  }>;
   /**
    * 감독이 지정한 죽은 공 키커 (`TeamTactics.setPieceTakers`) — 없거나 그 선수가
    * 선발에 없으면 코어의 기본값이 선다 (match.md §1.4).
@@ -692,33 +658,30 @@ const ZONE_CONTRIBUTION: Record<
  *
  * **매치업 비율의 기준선은 1이어야 한다.** 리그 편성 전체에서 `home.attack /
  * away.defense`의 기하평균이 1이어야 "우리 진영이 밀린다"가 신호가 된다. 그런데
- * 존 값에 얹히는 층이 **구조적으로 공격 쪽으로만 실린다**:
+ * 존 값에 얹히는 층이 **구조적으로 공격 쪽으로 실린다**:
  *
- * - **공략**(exploits.ts) — 키포인트가 드러내는 약점은 대개 상대 수비 쪽이라
- *   13축 중 8축의 이득이 공격 존으로 들어온다. 이득을 "상대 수비를 깎는다"로
- *   옮겨도 `공격/상대 수비` 비율은 똑같이 오르므로 **재분배로는 닫히지 않는다.**
  * - **전술 6축**(`tacticalDeltas`) — 프리셋을 3에 맞추고 갈래를 대칭으로 만든
  *   뒤에도 리그 평균이 공격 쪽에 남는다.
  * - **능력 항** — 실제 스쿼드의 역할 적합도가 공격 자리에서 조금 높다.
  *
- * 세 층을 합친 리그 평균이 보정 없이 1.10 안팎이다(`zone-baseline` 하네스가
+ * 두 층을 합친 리그 평균이 보정 없이 1에서 벗어난다(`zone-baseline` 하네스가
  * 층마다 잰다). 보정은 가중치가 아니라 **여기, 존이 완성된 자리**에 두고, 공격과
  * 수비에 절반씩 나눠 건다(두 값의 곱이 1) — 한쪽에만 걸면 화면의 막대 길이가
  * 그쪽으로만 눌린다.
  *
- * ⚠️ **리그 평균의 상수이지 쌍마다의 것이 아니다.** 층을 하나도 걸지 않은 두 팀
- * (공략 없음·중립 전술)은 그 층만큼 수비 쪽으로 읽힌다 — 리그의 보통보다 덜 노린
- * 경기라는 뜻이다.
+ * ⚠️ **리그 평균의 상수이지 쌍마다의 것이 아니다.** 간이 시뮬에는 시트가 없으므로
+ * (match.md §9) 이 기준선은 **시트 없이** 잰 값이다 — 감독의 경기에 얹히는 시트는
+ * 부호가 양쪽으로 열려 평균은 중립이지만 분산이 다르다.
  *
  * **다시 재는 법**: `pnpm balance zone-baseline`. `공격/상대 수비 기하평균`이 1에서
- * 벗어나면 그 비율의 제곱근만큼 이 두 값을 반대로 움직인다. 전술 프리셋·공략 크기·
+ * 벗어나면 그 비율의 제곱근만큼 이 두 값을 반대로 움직인다. 전술 프리셋·시트 눈금·
  * 역할 가중치를 만졌으면 반드시 다시 잰다 — 재지 않은 채 산 값은 판세를 어느
  * 팀이든 공격하는 쪽으로 기울인다.
  */
 const ZONE_BASELINE: Record<"attack" | "midfield" | "defense", number> = {
-  attack: 0.952,
+  attack: 0.967,
   midfield: 1,
-  defense: 1.05,
+  defense: 1.034,
 };
 
 /** 실제 전후 좌표를 기존 네 라인의 기여도로 연속 변환한다. */
@@ -972,6 +935,12 @@ export interface PacketOptions {
    * `keyPoints` 첫 줄의 컨텍스트 태그와 양 팀 강도 배수가 여기서 선다.
    */
   derby?: { name: string; heat: number };
+  /**
+   * 판독기가 쓴 **전술 포인트와 시트** — 경기의 위층 (match.md §1.6, `sheet.ts`).
+   * 실재·한도·소화율은 여기서 걸리고, 걸린 줄은 `keyPoints`의 태그로, 닿지 못한 줄은
+   * `tactical.notes`로 남는다. 간이 시뮬·경기 전 리포트·시험은 비워 둔다.
+   */
+  reading?: { points: readonly Point[]; sheet: readonly SheetLine[] };
 }
 
 /** 경기 중 지시의 소화율 보정 — 남은 거리의 절반을 메운다 (0.82 → 0.91) */
@@ -1033,21 +1002,6 @@ function derbyTag(derby: { name: string; heat: number }): PacketTag {
     text: derby.name,
   };
 }
-
-/**
- * 지역 플랜이 공격 배분을 그 레인으로 끌어오는 세기 — 의도가 무게를 정한다.
- * 소화율을 타고(`plan.uptake`) 선수의 자리 가중치에 곱해지므로, 레인을 통째로
- * 바꾸지는 못한다 — 반대편 윙어는 여전히 자기 쪽에서 더 많이 찬다.
- */
-export const PLAN_ROUTE_FOCUS: Record<RegionalIntent, number> = {
-  overload: 3,
-  transition: 2.1,
-  press: 1.5,
-  // 보호는 우리 공격을 옮기지 않는다 — 그 칸을 두껍게 할 뿐이다
-  protect: 0,
-};
-/** 그 줄의 플랜이 공격 경로를 정하는 정도 — 뒷선 플랜은 우리 슈팅을 옮기지 않는다. */
-const PLAN_BAND_FOCUS: Record<RegionalBand, number> = { attack: 1, midfield: 0.5, defense: 0 };
 
 /**
  * 이득 쪽만 포화하는 경로 우위 — **양과 질에 다른 폭을 쓴다.**
@@ -1112,22 +1066,17 @@ function buildPlayerShotProfiles(
   };
   const possessionShift = possessionShotShift(possession);
   /**
-   * **지역 플랜은 공격이 어디로 흐르는지를 바꾼다.**
+   * **시트의 `edge +`는 공격이 어디로 흐르는지를 바꾼다** (match.md §1.7).
    *
    * "왼쪽을 파고들어라"의 실제 뜻이 그것이다 — 그 레인의 칸이 두꺼워지는 것만으로는
    * 배분이 그대로라 이득도 손해도 나지 않는다(격자는 줄 안에서 제로섬이다).
    * 슈팅이 그 레인으로 몰려야 그 레인의 수익률이 팀 기대 득점에 실린다: 상대가
-   * 얇은 쪽을 골랐으면 이득이고, 이미 두꺼운 쪽을 골랐으면 손해다.
+   * 얇은 쪽을 골랐으면 이득이고, 이미 두꺼운 쪽을 골랐으면 손해다. 무게는 `applySheet`가
+   * 이미 밴드·step·소화율로 접어 두었다(`SHEET_ROUTE_FOCUS`).
    */
-  const plans = packet[side].regional ?? [];
+  const pulls = packet[side].routeFocus ?? [];
   const focus = (route: ShotRoute): number =>
-    plans.reduce(
-      (sum, plan) =>
-        plan.lane === route
-          ? sum + PLAN_ROUTE_FOCUS[plan.intent] * PLAN_BAND_FOCUS[plan.band] * plan.uptake
-          : sum,
-      0,
-    );
+    pulls.reduce((sum, pull) => (pull.lane === route ? sum + pull.weight : sum), 0);
 
   return slots
     .filter((slot) => slotGroup(slot) !== "GK")
@@ -1435,6 +1384,18 @@ function scaleProfiles(profiles: PlayerShotProfile[], share: number): PlayerShot
 }
 
 /**
+ * 시트가 팀에 남긴 **판 밖의 손잡이** — 슈팅 배분의 레인, 사람의 거칠기와 다리.
+ * 비어 있으면 칸을 만들지 않는다 (패킷이 늘 빈 칸을 달고 다니지 않게).
+ */
+function sheetHandles(side: SheetSideOutcome): Pick<SidePacket, "routeFocus" | "temper" | "legs"> {
+  return {
+    ...(side.routeFocus.length > 0 ? { routeFocus: side.routeFocus } : {}),
+    ...(Object.keys(side.temper).length > 0 ? { temper: side.temper } : {}),
+    ...(Object.keys(side.legs).length > 0 ? { legs: side.legs } : {}),
+  };
+}
+
+/**
  * 전력 분석 패킷 생성 — 결정적 순수 함수. 같은 입력이면 항상 같은 패킷.
  *
  * `guide.shotProfiles`가 구간·간이 시뮬레이터의 공통 발생률 원본이다. 즉 감독의
@@ -1448,17 +1409,6 @@ export function buildStrengthPacket(
 ): StrengthPacket {
   const homeFit = tacticalFit(homeIn.managerTactics);
   const awayFit = tacticalFit(awayIn.managerTactics);
-  /**
-   * 키포인트를 읽는 눈은 **감독의 것**이다 — 이 패킷은 감독이 보는 화면이자
-   * 중계가 읽는 자료다. 분석 능력이 주어지지 않으면(AI 팀 경기·테스트) 전부 보인다.
-   */
-  const ourAnalysis = homeIn.managerAnalysis ?? awayIn.managerAnalysis ?? 99;
-  const ourTactics =
-    homeIn.managerAnalysis !== undefined
-      ? homeIn.managerTactics
-      : awayIn.managerAnalysis !== undefined
-        ? awayIn.managerTactics
-        : 99;
 
   /**
    * 전술 적응도는 이제 **개인 계수**라 존 곱에는 감독 소화율만 남는다.
@@ -1475,14 +1425,20 @@ export function buildStrengthPacket(
       : mean(slots.map((s) => s.familiarity ?? FAMILIARITY_BASELINE));
 
   const live = options.inMatch === true;
-  const homeUptake = inMatchUptake(
-    instructionUptake(homeIn.managerTactics, squadFam(homeXI)),
-    live,
+  /**
+   * **시트** — 판독기의 수치 독해가 코어의 손잡이에 닿는 자리 (sheet.ts, match.md §1.6).
+   * `cohesion`이 먼저 소화율을 옮기므로 소화율을 읽는 모든 층이 그 뒤에 선다.
+   */
+  const read = applySheet(
+    options.reading,
+    { home: homeXI, away: awayXI },
+    {
+      home: inMatchUptake(instructionUptake(homeIn.managerTactics, squadFam(homeXI)), live),
+      away: inMatchUptake(instructionUptake(awayIn.managerTactics, squadFam(awayXI)), live),
+    },
   );
-  const awayUptake = inMatchUptake(
-    instructionUptake(awayIn.managerTactics, squadFam(awayXI)),
-    live,
-  );
+  const homeUptake = read.uptake.home;
+  const awayUptake = read.uptake.away;
   const homeDelta = tacticalDeltas(
     homeXI,
     homeIn.tactics,
@@ -1499,71 +1455,14 @@ export function buildStrengthPacket(
   );
 
   /**
-   * 개인 지시·공략이 쌓이는 **아홉 칸** — 두 갈래로 접혀 존과 격자에 나뉘어 실린다
-   * (match.md §1.7). 둘을 한 통에 모으는 것은 상한(`LANE_BIAS_CAP`)이 합계에 한 번만
-   * 걸려야 하기 때문이다.
+   * 시트가 쌓인 **아홉 칸** — 두 갈래로 접혀 존과 격자에 나뉘어 실린다 (match.md §1.7).
+   * 겨냥당한 쪽의 칸은 그 팀의 격자에 그 팀의 방향으로 적혀 있다.
    */
-  const homeCells = zeroCells();
-  const awayCells = zeroCells();
-
-  /**
-   * 개인 지시 — **양쪽 판을 함께 건드린다.** 마크는 내 본업을 덜게 하는 동시에
-   * 상대의 그 자리를 지우므로, 한쪽 델타만으로는 표현할 수 없다.
-   */
-  const homeDirect = applyDirectives(homeIn.directives, homeXI, awayXI, homeUptake);
-  const awayDirect = applyDirectives(awayIn.directives, awayXI, homeXI, awayUptake);
-  addCells(homeCells, homeDirect.us);
-  addCells(homeCells, awayDirect.them);
-  addCells(awayCells, awayDirect.us);
-  addCells(awayCells, homeDirect.them);
-  homeDelta.notes.push(...homeDirect.notes);
-  awayDelta.notes.push(...awayDirect.notes);
-
-  /**
-   * 키포인트 — **한 번만 계산해 두 곳이 나눠 쓴다.** 화면에 서는 문장과 공략의
-   * 표적 목록이 갈리면, 감독이 못 본 지점을 노리거나 본 지점을 못 노리게 된다.
-   */
-  const rawPoints = buildKeyPoints(homeXI, awayXI, {
-    home: homeIn.setPieceTakers,
-    away: awayIn.setPieceTakers,
-  });
-  const shownPoints = readKeyPoints(rawPoints, ourAnalysis, ourTactics);
-
-  /**
-   * **공략** — 감독이 읽은 약점을 겨냥한 지시 (exploits.ts, match.md §1.6).
-   *
-   * 목록이 두 벌인 것은 **안개와 실재가 다른 문이기 때문**이다. 패킷에 실리는
-   * `targets`는 감독이 실제로 본 것뿐이라 그가 고를 수 있는 전부이고(`exploit_point`가
-   * 이 목록으로 반려한다), 여기서 대조하는 `liveTargets`는 그라운드에 실재하는
-   * 전부다. 걸어 둔 공략은 **그 지점이 사라졌을 때만** 끊긴다 — 교체로 키포인트가
-   * 다시 정렬돼 목록에서 밀려났다는 이유로 끊기면, 감독이 내린 적 없는 취소가 된다.
-   *
-   * AI 벤치도 `liveTargets`에서 고른다. 우리 감독이 어둡다고 상대까지 눈이 멀면
-   * 우리 약점이 드러나는 유일한 경로가 닫힌다.
-   */
-  const { live: liveTargets, seen: targets } = exploitTargets(rawPoints, shownPoints);
-  /**
-   * 한쪽 벤치의 공략. AI 벤치의 눈은 **분석 축**이지만(match.md §1.6) AI 감독은
-   * 등급이 하나뿐이라(`Team.aiManagerTacticsRating`) 그 하나가 두 축을 겸한다.
-   */
-  const exploitsOf = (side: SideInput, ourSide: "home" | "away", uptake: number) =>
-    applyExploits(
-      side.exploits ??
-        (side.managerAnalysis === undefined
-          ? autoExploits(liveTargets, side.managerTactics, ourSide)
-          : undefined),
-      liveTargets,
-      uptake,
-      ourSide,
-    );
-  const homeExploit = exploitsOf(homeIn, "home", homeUptake);
-  const awayExploit = exploitsOf(awayIn, "away", awayUptake);
-  addCells(homeCells, homeExploit.us);
-  addCells(homeCells, awayExploit.them);
-  addCells(awayCells, awayExploit.us);
-  addCells(awayCells, homeExploit.them);
-  homeDelta.notes.push(...homeExploit.notes);
-  awayDelta.notes.push(...awayExploit.notes);
+  const homeCells = read.home.cells;
+  const awayCells = read.away.cells;
+  // 닿지 못한 줄은 그 팀의 노트로 — 조용히 버리면 걸리지 않은 지시가 걸린 줄 안다 (§2)
+  homeDelta.notes.push(...read.home.notes);
+  awayDelta.notes.push(...read.away.notes);
 
   /**
    * 칸을 접는다 — **줄 평균은 존으로, 줄 안의 편차는 격자로.** 평균을 양쪽에 다
@@ -1599,16 +1498,8 @@ export function buildStrengthPacket(
     creationZones: buildZones(homeXI, homeFit, homeDelta, counters.home, creationEffectiveOf),
     tacticalFit: homeFit,
     tactical: readOf(homeUptake, homeDelta),
-    ...(homeIn.regional && homeIn.regional.length > 0
-      ? {
-          regional: homeIn.regional.map((plan) => ({
-            ...plan,
-            id: `${plan.band}:${plan.lane}`,
-            uptake: homeUptake,
-          })),
-        }
-      : {}),
     ...(homeLaneBias.length > 0 ? { laneBias: homeLaneBias } : {}),
+    ...sheetHandles(read.home),
     lineup: roster(homeXI),
     bench: roster(homeIn.bench),
   };
@@ -1619,16 +1510,8 @@ export function buildStrengthPacket(
     creationZones: buildZones(awayXI, awayFit, awayDelta, counters.away, creationEffectiveOf),
     tacticalFit: awayFit,
     tactical: readOf(awayUptake, awayDelta),
-    ...(awayIn.regional && awayIn.regional.length > 0
-      ? {
-          regional: awayIn.regional.map((plan) => ({
-            ...plan,
-            id: `${plan.band}:${plan.lane}`,
-            uptake: awayUptake,
-          })),
-        }
-      : {}),
     ...(awayLaneBias.length > 0 ? { laneBias: awayLaneBias } : {}),
+    ...sheetHandles(read.away),
     lineup: roster(awayXI),
     bench: roster(awayIn.bench),
   };
@@ -1769,24 +1652,11 @@ export function buildStrengthPacket(
   };
 
   /**
-   * 키포인트 = **발동한 상성**(전술이 만난 결과) + 구멍(교체 신호) + 전술 미스매치.
-   * 상성이 앞에 온다 — 감독이 지금 무엇을 바꿔야 하는지가 먼저다. 상성과 구멍은
-   * **눈에 보이는 사실**이라 그대로 서고, 미스매치는 감독이 분석해서 찾아내는
-   * 것이라 그의 눈만큼만 보인다 (`readKeyPoints`).
-   *
-   * 실리는 것은 태그뿐이고 문장은 읽는 쪽이 만든다 — 편은 태그의 `favours`가 갖는다.
+   * 이 경기의 태그 = 컨텍스트 + **발동한 상성**(전술이 만난 결과) + 구멍(교체 신호) +
+   * **시트의 걸린 줄**. 상성이 앞에 온다 — 감독이 지금 무엇을 바꿔야 하는지가 먼저다.
+   * 시트 태그는 판독기의 포인트 문장을 들고 있어 골의 원인·중계·판세가 같은 문장을
+   * 인용한다 (match.md §1.6). 실리는 것은 태그뿐이고 문장은 읽는 쪽이 만든다.
    */
-  const planTag = (side: MatchSide, plan: RegionalInstruction): PacketTag => ({
-    source: "zone-plan",
-    code: `${plan.band}:${plan.lane}:${plan.intent}`,
-    favours: side,
-    sharp: true,
-    playerIds: [],
-    values: {},
-    flags: [],
-    // 모델이 쓴 자유 문장 — 구조로 옮길 수 없는 유일한 칸이다
-    text: plan.note,
-  });
   const keyPoints: PacketTag[] = [
     /**
      * **컨텍스트가 첫 줄이다** — 전력에서 나오지 않았지만 판을 읽는 사람이 가장
@@ -1797,10 +1667,7 @@ export function buildStrengthPacket(
     ...counters.notes,
     ...gapNotes(homeXI, "home"),
     ...gapNotes(awayXI, "away"),
-    // 미스매치 태그의 `favours`는 이미 **이로운 편**이다 (key-points.ts)
-    ...shownPoints,
-    ...(home.regional ?? []).map((plan) => planTag("home", plan)),
-    ...(away.regional ?? []).map((plan) => planTag("away", plan)),
+    ...read.tags,
   ];
 
   return {
@@ -1808,7 +1675,16 @@ export function buildStrengthPacket(
     away,
     matchups,
     keyPoints,
-    targets,
+    /**
+     * 이 판이 읽은 포인트와 시트 — 원본(`pendingMatch`)의 복사다. 기록과 화면이
+     * "무엇을 읽고 선 판인가"를 패킷 하나로 답한다 (match.md §1.6).
+     */
+    ...(options.reading
+      ? {
+          points: options.reading.points.map((point) => ({ ...point, about: [...point.about] })),
+          sheet: options.reading.sheet.map((line) => ({ ...line, target: { ...line.target } })),
+        }
+      : {}),
     guide: {
       expectedGoals,
       expectedShots,

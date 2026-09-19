@@ -16,15 +16,6 @@ import { CALL_LABEL } from "../lib/call-label";
  */
 
 /**
- * 경기 중에만 부를 수 있고 **장부에 흔적을 남기지 않는** 호출 — 그때는 장부
- * 레일이 아예 서지 않고(`game-screen`은 경기 중 `PANELS`를 그리지 않는다) 지시는
- * 경기가 끝나면 사라진다. 그래서 갈 말풍선이 없다. 대신 증거는 **판세 뷰**가
- * 세운다 — 공략은 "공략 중"으로, 지역 플랜은 패킷의 새 키포인트로 선다
- * (`strength-packet.ts` — "지역 플랜: …"). 채팅에는 칩만 남는다.
- */
-const MATCH_ONLY = new Set(["exploit_point", "set_match_plan"]);
-
-/**
  * 협상 방에서만 부를 수 있고 **장부에 흔적을 남기지 않는** 호출 — 자리를 뜨는 것은
  * 방이 닫히는 것으로 보이고(`silent`로 기록된다), 채팅에는 아무것도 서지 않는다.
  * 방 안의 다른 둘은 길이 있다: `table_orders`는 손잡이라 뒤의 명령이 서고,
@@ -36,11 +27,7 @@ describe("호출이 화면에 서는 길", () => {
   it("조작형 호출은 모두 말풍선 아니면 카드다", () => {
     const orphans = SKILL_CATALOG.filter(
       (s) =>
-        !s.readOnly &&
-        !hasRailHint(s.name) &&
-        !CARD_CALLS.has(s.name) &&
-        !MATCH_ONLY.has(s.name) &&
-        !ROOM_ONLY.has(s.name),
+        !s.readOnly && !hasRailHint(s.name) && !CARD_CALLS.has(s.name) && !ROOM_ONLY.has(s.name),
     ).map((s) => s.name);
     expect(orphans, "말풍선(PANEL_OF)이나 카드(CARD_CALLS) 중 하나로 보내야 한다").toEqual([]);
   });

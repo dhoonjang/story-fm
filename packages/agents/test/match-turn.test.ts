@@ -36,7 +36,7 @@ import {
   STALLED_CLOCK_TURNS,
   stampMatchScene,
   stampMatchStream,
-  TACTIC_ORDERS_SYSTEM,
+  MATCH_READER_SYSTEM,
   truncatedNote,
   type GmToolCall,
   type TacticOrders,
@@ -138,9 +138,9 @@ const GO: TacticOrders = { ops: {} };
  * 출력 스키마를 실은 요청이 어느 에이전트의 것인가 — 도구 이름이 없으므로 시스템
  * 프롬프트가 가른다 (models.md §3-2). 도구를 쥔 GM 요청은 `undefined`다.
  */
-const outputAgentOf = (req: TurnRequest): "tactic-orders" | "finalize-match" | undefined => {
+const outputAgentOf = (req: TurnRequest): "match-reader" | "finalize-match" | undefined => {
   if (req.outputSchema === undefined) return undefined;
-  if (req.system === TACTIC_ORDERS_SYSTEM) return "tactic-orders";
+  if (req.system === MATCH_READER_SYSTEM) return "match-reader";
   if (req.system === FINALIZE_MATCH_SYSTEM) return "finalize-match";
   return undefined;
 };
@@ -421,7 +421,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     const out = state.pendingMatch!.ledger[side].onPitch[10]!;
     const incoming = state.pendingMatch!.ledger[side].bench[0]!;
     runTurn.mockImplementation(async (req: TurnRequest) => {
-      if (outputAgentOf(req) === "tactic-orders") {
+      if (outputAgentOf(req) === "match-reader") {
         return interpreter(req, { ops: { substitute: [{ out, in: incoming }] } });
       }
       const orders = req.tools?.find((t) => t.name === "tactic_orders");
@@ -446,7 +446,8 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
 
     const turn = await runGmTurn(state, `${incoming} 넣고 계속 가자`);
 
-    expect(runTurn).toHaveBeenCalledTimes(2);
+    // GM 한 번 · 지시 턴의 판독 한 번 · 구간 뒤의 판독 한 번
+    expect(runTurn).toHaveBeenCalledTimes(3);
     expect(turn.text).toContain("교체 뒤 첫 공격");
     expect(turn.toolCalls.filter((c) => c.name === MATCH_ADVANCED)).toHaveLength(1);
     expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(0);
@@ -489,7 +490,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     });
     const heard: string[] = [];
     runTurn.mockImplementation(async (req: TurnRequest) => {
-      if (outputAgentOf(req) === "tactic-orders") {
+      if (outputAgentOf(req) === "match-reader") {
         heard.push(req.user);
         return interpreter(req, { ops: { substitute: [{ out, in: incoming }] } });
       }
@@ -537,7 +538,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     runTurn.mockImplementation(async (req: TurnRequest) => {
       // 해석기가 산출 없이 본문만 낸다 — 두 번 다
-      if (outputAgentOf(req) === "tactic-orders") {
+      if (outputAgentOf(req) === "match-reader") {
         return { ...answered("해석해 보겠습니다."), output: null };
       }
       const orders = req.tools?.find((t) => t.name === "tactic_orders");
@@ -555,15 +556,51 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
   });
 
   /**
+   * **판독은 판에 앉고, 아무것도 움직이지 않은 지시 턴은 반려다** (agents.md §3).
+   *
+   * 명령도 시트 변화도 없는데 "걸었습니다"가 돌아가면 감독은 걸리지 않은 지시 위에 다음
+   * 판단을 쌓는다. 판독이 판에 앉았는지는 화면 어디에도 드러나지 않는 자리라 여기서 잰다.
+   */
+  it("포인트·시트가 판에 앉고, 판독도 명령도 없는 지시 턴은 반려다", async () => {
+    const state = rolling();
+    const who = state.pendingMatch!.ledger[userSide(state)].onPitch[9]!;
+    const reading = {
+      ops: {},
+      points: [{ id: "p1", text: "왼쪽이 비어 있다", about: [who], importance: 2 }],
+      sheet: [{ pointId: "p1", target: { player: who }, shape: "edge", sign: 1, step: 2 }],
+    };
+    const ordersTool = (): GameToolSpec =>
+      buildMatchTools(state, { calls: [], goals: [], cards: [], said: "왼쪽을 두껍게" }).find(
+        (t) => t.name === "tactic_orders",
+      )!;
+
+    runTurn.mockResolvedValue({ ...answered(""), output: reading });
+    const first = await ordersTool().handle({});
+    expect(first.ok).toBe(true);
+    expect(state.pendingMatch!.points).toEqual(reading.points);
+    expect(state.pendingMatch!.sheet).toEqual(reading.sheet);
+
+    // 같은 판독을 그대로 다시 낸 턴 — 명령도 없고 시트도 그대로다
+    const again = await ordersTool().handle({});
+    expect(again.ok).toBe(false);
+
+    // 빈 판독은 판을 비운다 — 포인트가 없으면 시트도 없고 코어는 중립이다
+    runTurn.mockResolvedValue({ ...answered(""), output: { ops: {}, points: [], sheet: [] } });
+    const cleared = await ordersTool().handle({});
+    expect(cleared.ok).toBe(true);
+    expect(state.pendingMatch!.points).toEqual([]);
+  });
+
+  /**
    * **호출 실패는 안내로 둔갑하지 않는다** (models.md §1-1). 도구 뒤의 시한도 그대로
    * 올라간다 — 화면은 종류를 보고 무슨 일인지 안내한다.
    */
   it("도구 뒤의 해석이 시한을 넘기면 그 오류가 종류를 든 채 올라간다", async () => {
     const state = rolling();
     const minute = state.pendingMatch!.ledger.minute;
-    const thrown = new LlmTimeoutError("tactic-orders", 60_000);
+    const thrown = new LlmTimeoutError("match-reader", 60_000);
     runTurn.mockImplementation(async (req: TurnRequest) => {
-      if (outputAgentOf(req) === "tactic-orders") throw thrown;
+      if (outputAgentOf(req) === "match-reader") throw thrown;
       const orders = req.tools?.find((t) => t.name === "tactic_orders");
       await orders!.handle({});
       return answered("닿지 않는다", 1);
@@ -588,13 +625,13 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     runTurn.mockReset();
     const minute = state.pendingMatch!.ledger.minute;
     runTurn.mockImplementation(async (req: TurnRequest) => {
-      if (outputAgentOf(req) === "tactic-orders") return interpreter(req);
+      if (outputAgentOf(req) === "match-reader") return interpreter(req);
       await req.tools!.find((t) => t.name === "advance_match")!.handle({});
       throw new ModelOutputError("중계가 잘렸습니다");
     });
     await expect(runGmTurn(state, "계속")).rejects.toBeInstanceOf(ModelOutputError);
-    // GM 한 번뿐 — 구간은 한 번 굴렀고 다시 굴리지 않았다
-    expect(runTurn).toHaveBeenCalledTimes(1);
+    // GM 한 번과 구간 뒤 판독 한 번 — 구간은 한 번 굴렀고 다시 굴리지 않았다
+    expect(runTurn).toHaveBeenCalledTimes(2);
     expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(minute);
   });
 
@@ -775,7 +812,7 @@ describe("경기 마감 — 결산은 도구 뒤의 에이전트가, 마무리�
 /**
  * 중계가 되받아 쓴 **꺾쇠 블록**은 화면에도 저장에도 서지 않는다 (issue #649).
  *
- * `<targets>`는 코어가 읽으라고 넣어 준 입력 구조인데, 경기 턴만 위생의 문이 없어
+ * `<points>`는 코어가 읽으라고 넣어 준 입력 구조인데, 경기 턴만 위생의 문이 없어
  * 그대로 감독이 읽는 자리에 섰다. 프롬프트로 눌러도 모델이 다시 뱉는 날이 오므로
  * **문은 코어에 선다** — 그리고 화면과 저장 양쪽에 같은 것이 선다
  * (docs/llm/prompts.md §1).
@@ -806,11 +843,10 @@ describe("중계 위생 — 꺾쇠 블록은 화면에도 저장에도 서지 �
     markEntered(state);
     const scene = [
       "[12']",
-      '<targets max="2">',
-      "1. 공간 노리기 (공격진 침투)",
-      "2. 라인 올리기 (압박 강화)",
-      "지금 노리는 곳 없음",
-      "</targets>",
+      "<points>",
+      "- 왼쪽으로 몰리는 상대의 공격",
+      "- 거친 플레이에 흔들리는 미드필더",
+      "</points>",
       "@중계: 브루노가 중거리 슛을 때립니다!",
       "골키퍼가 가까스로 쳐냅니다.",
     ].join("\n");
@@ -828,9 +864,9 @@ describe("중계 위생 — 꺾쇠 블록은 화면에도 저장에도 서지 �
     });
 
     for (const text of [turn.text ?? "", streamed.join("")]) {
-      expect(text).not.toContain("<targets");
-      expect(text).not.toContain("</targets>");
-      expect(text).not.toContain("공간 노리기");
+      expect(text).not.toContain("<points");
+      expect(text).not.toContain("</points>");
+      expect(text).not.toContain("왼쪽으로 몰리는");
       expect(text).toContain("@중계: 브루노가 중거리 슛을 때립니다!");
       // 구간마다 새로 찍는 시각 헤더와 이어쓰기 줄은 그대로 남는다 (prompts.md §1)
       expect(text).toContain("골키퍼가 가까스로 쳐냅니다.");
@@ -1157,7 +1193,7 @@ describe("시계 — 출처가 날짜의 주인을 정한다", () => {
  * 해석의 산출은 **부를 명령과 그 인자**다 (agents.md §3). 인자의 스키마는 그 명령의
  * 도구 정의에서 그대로 오므로 여기서 지킬 것은 둘뿐이다 — **목록에 없는 이름은 버린다**
  * (모델이 낼 수 없는 명령을 지어내도 판이 움직이지 않는다), **명령마다 정해진 수까지만
- * 싣는다**(교체 다섯·개인 지시 열한 자리·지역 플랜 둘 — 규칙이 정한 수다).
+ * 싣는다**(교체 다섯·자리와 역할 열한 자리·대화 셋 — 규칙이 정한 수다).
  */
 describe("받아쓰기 산출의 경계", () => {
   const many = (n: number) => Array.from({ length: n }, (_, i) => ({ i }));
@@ -1169,16 +1205,16 @@ describe("받아쓰기 산출의 경계", () => {
 
   it("명령마다 정해진 수까지만 싣는다 — 나머지는 잘린다", () => {
     const { ops, truncated } = parseOps(
-      { substitute: many(7), set_match_plan: many(4), set_tactics: many(9) },
+      { substitute: many(7), team_talk: many(4), set_tactics: many(9) },
       TACTIC_OPS,
       TACTIC_CAPS,
     );
     expect(ops.substitute).toHaveLength(TACTIC_CAPS.substitute!);
-    expect(ops.set_match_plan).toHaveLength(TACTIC_CAPS.set_match_plan!);
+    expect(ops.team_talk).toHaveLength(TACTIC_CAPS.team_talk!);
     // 상한을 적지 않은 명령은 기본값이 선다
     expect(ops.set_tactics).toHaveLength(OPS_PER_COMMAND);
-    // 잘린 수는 명령마다 따로 센다 — 7-5 · 4-2 · 9-4
-    expect(truncated).toEqual({ substitute: 2, set_match_plan: 2, set_tactics: 5 });
+    // 잘린 수는 명령마다 따로 센다 — 7-5 · 4-3 · 9-4
+    expect(truncated).toEqual({ substitute: 2, team_talk: 1, set_tactics: 5 });
   });
 
   it("빈 배열은 부르지 않은 것이다 — 자리를 만들지 않는다", () => {
@@ -1221,14 +1257,12 @@ describe("받아쓰기 산출의 경계", () => {
 
     // 자른 줄은 그 명령의 답 뒤다 — 두 명령이 넘치면 각자의 자리에 하나씩
     it("명령마다 제 자리에 선다", () => {
-      const notes = applied({ substitute: many(6), set_match_plan: many(3) });
+      const notes = applied({ substitute: many(6), team_talk: many(4) });
       expect(notes.filter((n) => n === truncatedNote(TACTIC_CAPS.substitute!, 1))).toHaveLength(1);
-      expect(notes.filter((n) => n === truncatedNote(TACTIC_CAPS.set_match_plan!, 1))).toHaveLength(
-        1,
-      );
-      // 순서는 `TACTIC_OPS`가 정한다 — 교체가 먼저, 지역 플랜이 뒤
+      expect(notes.filter((n) => n === truncatedNote(TACTIC_CAPS.team_talk!, 1))).toHaveLength(1);
+      // 순서는 `TACTIC_OPS`가 정한다 — 교체가 먼저, 대화가 뒤
       expect(notes.indexOf(truncatedNote(TACTIC_CAPS.substitute!, 1))).toBeLessThan(
-        notes.indexOf(truncatedNote(TACTIC_CAPS.set_match_plan!, 1)),
+        notes.indexOf(truncatedNote(TACTIC_CAPS.team_talk!, 1)),
       );
     });
   });

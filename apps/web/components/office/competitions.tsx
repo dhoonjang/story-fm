@@ -494,9 +494,12 @@ function NextFixture({ next }: { next: NextMatch }) {
  * 경기 전 상대 분석 — **다음 경기 카드 아래에 접혀 있다** (match.md §1.8 · §8).
  *
  * 접혀 있는 이유는 이 화면에 온 이유가 순위표이기 때문이고, 그래도 **결장 수와
- * 지점 수는 접힌 줄에 선다** — 펼칠 이유가 카드 밖에 있으면 감독은 펼치지 않는다.
+ * 상성 수는 접힌 줄에 선다** — 펼칠 이유가 카드 밖에 있으면 감독은 펼치지 않는다.
  *
- * 문장은 전부 코어가 만든 것을 그대로 세운다. 지점의 유불리는 뷰가 이미 우리 편
+ * 세우는 것은 대진의 조건과 상성까지다 — **판독은 없다**(match.md §1.8): 전술 포인트는
+ * 킥오프에 처음 서고, 여기 미리 세우면 읽지 않은 판을 읽은 것으로 만든다.
+ *
+ * 문장은 전부 코어가 만든 것을 그대로 세운다. 줄의 유불리는 뷰가 이미 우리 편
  * 기준으로 접어(`ours`) 오므로 화면이 편을 다시 따지지 않는다.
  */
 function MatchPreviewPanel({ preview }: { preview: MatchPreview }) {
@@ -512,7 +515,7 @@ function MatchPreviewPanel({ preview }: { preview: MatchPreview }) {
       >
         <span>상대 분석</span>
         {preview.absent.length > 0 && <i className="mp-chip">결장 {preview.absent.length}</i>}
-        {preview.keyPoints.length > 0 && <i className="mp-chip">지점 {preview.keyPoints.length}</i>}
+        {preview.keyPoints.length > 0 && <i className="mp-chip">상성 {preview.keyPoints.length}</i>}
         <IconChevron size={12} />
       </button>
       {open && (
@@ -574,7 +577,7 @@ function MatchPreviewPanel({ preview }: { preview: MatchPreview }) {
 
           {preview.keyPoints.length > 0 && (
             <div className="mp-section">
-              <div className="mp-title">읽어 낸 지점</div>
+              <div className="mp-title">조건과 상성</div>
               <div className="mp-points">
                 {preview.keyPoints.map((k, i) => (
                   <div

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MARKET_OPS,
   MARKET_ORDERS_SYSTEM,
+  MATCH_READER_SPEC,
   TACTIC_CAPS,
   TACTIC_OPS,
   TACTIC_ORDERS_SYSTEM,
@@ -113,6 +114,18 @@ function interpreterLayer(ops: readonly string[], system: string, caps: OpsCaps 
   const state = build(7, "최감독", BACKGROUND);
   const specs = new Map(buildToolSpecs(state, []).map((t) => [t.name, t] as const));
   return system.length + JSON.stringify(buildOpsSchema(specs, ops, "인자", caps)).length;
+}
+
+/**
+ * 판독기의 고정층 — 시스템 프롬프트 + 산출 스키마(명령 인자 · 포인트 · 시트).
+ *
+ * 해석기와 눈금이 같지만 자리가 다르다: 경기의 세 자리(킥오프·지시 턴·구간 뒤)에서
+ * 매번 실리므로 구간마다 한 번씩 나간다 (agents.md §3).
+ */
+function readerLayer(): number {
+  const state = build(7, "최감독", BACKGROUND);
+  const specs = new Map(buildToolSpecs(state, []).map((t) => [t.name, t] as const));
+  return MATCH_READER_SPEC.system.length + JSON.stringify(MATCH_READER_SPEC.schema(specs)).length;
 }
 
 /** 경기의 고정층 — 매치 GM 프롬프트 + 경기 도구 셋. 매 경기 턴의 캐시 프리픽스다 */
@@ -282,6 +295,7 @@ describe("프롬프트 회귀", () => {
       "경기 고정층 글자": matchLayer(),
       "경기 마감 고정층 글자": settlementLayer(),
       "전술 해석 고정층 글자": interpreterLayer(TACTIC_OPS, TACTIC_ORDERS_SYSTEM, TACTIC_CAPS),
+      "판독기 고정층 글자": readerLayer(),
       "훈련 해석 고정층 글자": interpreterLayer(TRAINING_OPS, TRAINING_ORDERS_SYSTEM),
       "시장 해석 고정층 글자": interpreterLayer(MARKET_OPS, MARKET_ORDERS_SYSTEM),
       "훈련 브리프 글자": trainingBriefChars(13),
