@@ -2165,30 +2165,6 @@ textarea {
   }
 }
 
-/**
- * 지금 노리는 지점 — 키포인트 탭 맨 위.
- * 감독이 내린 지시가 판에 반영되고 있다는 유일한 표시라 눈에 띄어야 한다.
- */
-.mv-exploits {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-3);
-  margin-bottom: var(--sp-3);
-  /* 감독의 지시가 반영된 자리 — 감독 말풍선과 같은 키 워시 */
-  background: var(--key-wash);
-  border-radius: var(--r-sm);
-}
-.mv-exploit-tag {
-  font-size: var(--fs-xs);
-  letter-spacing: 0.06em;
-  color: var(--accent);
-}
-.mv-exploit {
-  font-size: var(--fs-sm);
-}
-
 /* 경기 시계 — 상단 띠에서 날짜가 쓰던 자리 */
 .match-clock {
   font-size: var(--fs-md);
