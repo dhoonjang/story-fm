@@ -318,24 +318,23 @@ export function applySheet(
       drop("budget");
       continue;
     }
-    const tilts = at.playerId !== undefined || at.cell.lane === undefined;
-    if (tilts && signed > 0 && sideNet[at.side] + signed > SHEET_NET_CAP + EPS) {
-      drop("net-cap");
-      continue;
-    }
     /**
      * **칸을 직접 겨냥한 줄은 줄 안의 재배분이다** — "왼쪽으로 몰아"는 사람을 더하는 것이
      * 아니라 옮기는 것이라 존 전력은 그대로고 배분만 기운다(`addLaneShift`). 그래서 부호
      * 합에도 들지 않는다: 팀이 얻은 것이 없다. 선수를 겨냥한 줄과 줄 전체를 겨냥한 줄은
      * 그 자리의 전력이 실제로 움직이는 것이라 평균이 존으로 간다 (match.md §1.7).
      */
-    const shift = at.playerId === undefined && at.cell.lane !== undefined;
+    const lane = at.playerId === undefined ? at.cell.lane : undefined;
+    if (lane === undefined && signed > 0 && sideNet[at.side] + signed > SHEET_NET_CAP + EPS) {
+      drop("net-cap");
+      continue;
+    }
     targetAbs.set(at.key, (targetAbs.get(at.key) ?? 0) + size);
     sideAbs[at.side] += size;
-    if (!shift) sideNet[at.side] += signed;
+    if (lane === undefined) sideNet[at.side] += signed;
 
     const digest = signed > 0 ? out.uptake[at.side] : 1;
-    if (shift) addLaneShift(out[at.side].cells, at.cell.band, at.cell.lane!, signed * digest);
+    if (lane !== undefined) addLaneShift(out[at.side].cells, at.cell.band, lane, signed * digest);
     else addFocused(out[at.side].cells, at.cell.band, at.cell.lane, signed * digest);
     /**
      * 공을 그쪽으로 더 보내야 "그쪽을 파고들어라"가 성립한다 (match.md §1.7) —
