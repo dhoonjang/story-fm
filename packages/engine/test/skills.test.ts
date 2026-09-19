@@ -57,7 +57,6 @@ import {
   leaderGroupOf,
   LEADER_GROUP_SIZE,
   setLineup,
-  setPlayerInstruction,
   setPlayerPosition,
   setPlayerRole,
   setPlayerTactic,
@@ -1698,17 +1697,6 @@ describe("주장·전술·개인 지시", () => {
     const keeper = tactics.assignments.find((a) => a.playerId === keeperId)!;
     expect(keeper.position).toBe("GK");
     expect(tactics.assignments.map((a) => ({ id: a.playerId, point: a.point }))).toEqual(before);
-  });
-
-  it("개인 지시는 배치에 저장된다", () => {
-    const state = createTestGame();
-    const target = assignmentsOf(state, state.userTeamId, "starting")[7]!;
-    const res = setPlayerInstruction(state, { playerId: target.playerId, note: "더 높게" });
-    expect(res.ok).toBe(true);
-    expect(
-      assignmentsOf(state, state.userTeamId).find((a) => a.playerId === target.playerId)
-        ?.instruction,
-    ).toBe("더 높게");
   });
 });
 

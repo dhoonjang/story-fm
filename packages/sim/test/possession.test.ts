@@ -55,12 +55,9 @@ describe("점유 — 중원 우위가 공을 쥔다", () => {
   });
 });
 
-/** 자동 공략은 능력치 변화에 반응해 존을 흔든다 — 점유만 보려면 꺼 둔다 */
-const noExploits = (side: SideInput): SideInput => ({ ...side, exploits: [] });
-
 /** 중원의 창조력만 낮춘 상대 — 존 전력이 아니라 점유가 갈리는 자리다 */
 function weakMidfield(base: number): SideInput {
-  const side = noExploits(makeSide("them", base));
+  const side = makeSide("them", base);
   for (const slot of side.starters) {
     if (["RM", "LM", "RCM", "LCM"].includes(slot.position)) {
       slot.player.attributes = {
@@ -102,16 +99,12 @@ describe("점유가 슈팅에 실리는 몫 — possessionShotShift", () => {
   });
 
   it("패킷의 슈팅 프로필이 이 몫을 태운다 — 점유가 갈리면 슈팅이 옮겨 간다", () => {
-    const level = buildStrengthPacket(
-      noExploits(makeSide("us", 75)),
-      noExploits(makeSide("them", 75)),
-      { neutral: true },
-    );
+    const level = buildStrengthPacket(makeSide("us", 75), makeSide("them", 75), { neutral: true });
     // 같은 팀·중립 구장이면 어느 쪽도 공짜 슈팅을 갖지 않는다
     expect(level.guide.possession).toEqual({ home: 0.5, away: 0.5 });
     expect(level.guide.expectedShots?.home).toBe(level.guide.expectedShots?.away);
 
-    const tilted = buildStrengthPacket(noExploits(makeSide("us", 75)), weakMidfield(75), {
+    const tilted = buildStrengthPacket(makeSide("us", 75), weakMidfield(75), {
       neutral: true,
     });
     expect(tilted.guide.possession.home).toBeGreaterThan(0.5);

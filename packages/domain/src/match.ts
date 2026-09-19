@@ -96,12 +96,15 @@ export type SubCause = z.infer<typeof SubCauseSchema>;
 export const PACKET_TAG_SOURCES = [
   "counter",
   "gap",
+  /** 존 매치업 — 코드는 `zone-attack`처럼 존 이름이다 (`matchupTag`) */
   "mismatch",
-  "zone-plan",
-  "directive",
-  "directive-dropped",
-  "exploit",
-  "exploit-dropped",
+  /**
+   * **시트의 걸린 줄** — 판독기가 쓴 전술 포인트의 수치 독해 하나 (match.md §1.6).
+   * `code`는 모양(`edge`·`temper`·`legs`·`cohesion`), `text`는 그 포인트의 문장이다.
+   */
+  "sheet",
+  /** 판에 닿지 못한 시트 줄 — `code`는 까닭이다 (sim `sheet.ts`) */
+  "sheet-dropped",
   "tactical",
   /** 죽은 공에서 나온 골 — 키커와 마무리한 선수를 함께 싣는다 (match.md §1.4) */
   "set-piece",
@@ -163,15 +166,46 @@ export function legacyTag(text: string): PacketTag {
  * 갈린다) 문장을 만드는 렌더러가 태그를 기대하므로 읽는 자리에서 한 번 옮긴다.
  */
 export function normalizeCauses(causes: (PacketTag | string)[]): PacketTag[] {
-  if (!causes.some((c) => typeof c === "string")) return causes as PacketTag[];
-  return causes.map((c) => (typeof c === "string" ? legacyTag(c) : c));
+  const moved = causes.map((c) => normalizeTag(c) as PacketTag);
+  return moved.every((c, i) => c === causes[i]) ? (causes as PacketTag[]) : moved;
 }
 
-/** 문자열 한 줄로 적힌 옛 원인 태그를 읽을 때만 태그로 옮긴다 */
-const CauseSchema = z.preprocess(
-  (raw) => (typeof raw === "string" ? legacyTag(raw) : raw),
-  PacketTagSchema,
-);
+/**
+ * 옛 세이브의 원인 태그가 들고 오는 **사라진 갈래** — 개인 지시·공략·지역 플랜.
+ *
+ * 그 층은 판독기의 포인트와 시트로 갈렸다 (match.md §1.6). 끝난 경기의 골에 남은
+ * 태그는 뜻을 잃었지만 장부는 그대로 읽혀야 하므로, 읽을 때 `legacy`로 옮긴다 —
+ * 판정은 이 폴백을 보지 않는다.
+ */
+const RETIRED_TAG_SOURCES: ReadonlySet<string> = new Set([
+  "zone-plan",
+  "directive",
+  "directive-dropped",
+  "exploit",
+  "exploit-dropped",
+]);
+
+/** 사라진 갈래의 태그가 문장으로 설 때 — 무엇이었는지는 기록에만 남는다 */
+export const RETIRED_TAG_TEXT = "지난 판의 지시 근거";
+
+/**
+ * 원인 태그 하나를 지금 목록의 것으로 — 문자열이면 태그로, 사라진 갈래면 `legacy`로.
+ * 진행 중이던 옛 세이브의 패킷(`normalizePacket`)과 장부의 사건이 같은 문을 지난다.
+ */
+export function normalizeTag(raw: unknown): unknown {
+  if (typeof raw === "string") return legacyTag(raw);
+  if (typeof raw === "object" && raw !== null && "source" in raw) {
+    const source = (raw as { source: unknown }).source;
+    if (typeof source === "string" && RETIRED_TAG_SOURCES.has(source)) {
+      const text = (raw as { text?: unknown }).text;
+      return legacyTag(typeof text === "string" && text.length > 0 ? text : RETIRED_TAG_TEXT);
+    }
+  }
+  return raw;
+}
+
+/** 문자열 한 줄로 적힌 옛 원인 태그·사라진 갈래의 태그를 읽을 때만 태그로 옮긴다 */
+const CauseSchema = z.preprocess(normalizeTag, PacketTagSchema);
 
 export const MatchEventSchema = z.object({
   minute: z.number().int().min(0).max(MATCH_MINUTE_MAX),

@@ -2,6 +2,8 @@ import type {
   BoardPoint,
   MatchEvent,
   MatchStatLine,
+  Point,
+  SheetLine,
   ShootoutKick,
   TacticsSpec,
   TickEvent,
@@ -168,6 +170,21 @@ export type JournalEntry =
       retried: boolean;
       /** 반려로 답한 이유 · 호출 자체의 실패 */
       message?: string;
+      failure?: string;
+    }
+  | {
+      /**
+       * **판독기가 판을 읽었다** — 킥오프 · 지시 턴 · 구간 뒤 (match.md §1.6).
+       * 포인트와 시트는 앉힌 그대로다 — 두 경기가 왜 달랐는지는 여기와 호출 원문이 답한다.
+       */
+      kind: "match.reading";
+      occasion: "kickoff" | "orders" | "segment";
+      ok: boolean;
+      points: Point[];
+      sheet: SheetLine[];
+      /** 산출을 쓸 수 없어 한 번 더 불렀는가 */
+      retried: boolean;
+      /** 삼킨 실패 · 반려 — 판은 지난 판독 그대로다 */
       failure?: string;
     }
   | {

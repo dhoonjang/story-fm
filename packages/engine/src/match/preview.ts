@@ -1,5 +1,4 @@
 import type {
-  ExploitTarget,
   GamePlayer,
   MatchRecord,
   MatchSide,
@@ -31,16 +30,16 @@ import {
   type GameState,
 } from "../core/state";
 import { assembleUserLineup, slotsFor } from "./match-flow";
-import { directivesOnPitch } from "./directive-standing";
 import { managerTacticsOf } from "./manager-tactics";
 
 /**
  * 경기 전 상대 분석 — **패킷을 미리 한 번 굴린다** (match.md §1.8).
  *
- * 감독이 라인업과 6축을 정하는 시점은 경기 전인데 판세·키포인트·상성이 첫 진행
- * 턴부터만 실리면, 그의 **분석**과 **전술** 능력은 이미 정해진 판 위에서만 뜻을
- * 갖는다. 그래서 예정된 경기 하나를 골라 킥오프와 **같은 문**(`buildStrengthPacket`
- * → `readKeyPoints`)을 미리 지난다 — 다른 계산이 아니라 같은 계산을 일찍 하는 것뿐이다.
+ * 감독이 라인업과 6축을 정하는 시점은 경기 전인데 판세·상성이 첫 진행
+ * 턴부터만 실리면, 그의 **전술** 능력은 이미 정해진 판 위에서만 뜻을 갖는다. 그래서
+ * 예정된 경기 하나를 골라 킥오프와 **같은 문**(`buildStrengthPacket`)을 미리 지난다 —
+ * 다른 계산이 아니라 같은 계산을 일찍 하는 것뿐이다. 판독은 없다 — 전술 포인트는
+ * 킥오프에 판독기가 처음 쓴다 (match.md §1.8).
  */
 
 /** 예상 XI 한 명 */
@@ -108,30 +107,19 @@ export interface OpponentReport {
   /** 상대가 세워 둔 모양과 6축 — 90분 동안 보이는 사실이라 흐리지 않는다 (match.md §8) */
   shape: TacticsSpec;
   /**
-   * 감독의 눈을 지난 사실 — **상성과 키포인트뿐이다** (match.md §1.8).
+   * 대진의 조건과 상성 — **코어의 사실만이다** (match.md §1.8). 판독은 없다.
    * 문장은 읽는 쪽이 `packetTagText`로 만든다.
    */
   notes: PacketTag[];
-  /**
-   * 겨냥할 수 있는 지점 — **라인업이 그대로면 킥오프 패킷의 표적과 같은 id다.**
-   * 표적 id가 `축:선수id`라(match.md §1.6) 이 등식이 곧 "경기 전에 노린 지점을
-   * 경기 중에 그대로 부를 수 있다"는 뜻이다.
-   */
-  targets: ExploitTarget[];
   /** 태그가 이름을 대는 자리 — 미리 굴린 그 패킷이 원본이다 */
   tagContext: PacketTagContext;
 }
 
 /**
- * 리포트가 세우는 사실 — 대진의 조건(더비)·상성·키포인트. 나머지 갈래는 경기
- * 중의 것이다 (match.md §1.8): 구멍은 그라운드에서 보이는 사실이고, 공략과 지역
- * 플랜은 킥오프 뒤에만 걸 수 있다.
+ * 리포트가 세우는 사실 — 대진의 조건(더비)·상성. 나머지 갈래는 경기 중의 것이다
+ * (match.md §1.8): 구멍은 그라운드에서 보이는 사실이고, 시트는 킥오프 뒤 판독기가 쓴다.
  */
-const REPORT_SOURCES: ReadonlySet<PacketTag["source"]> = new Set([
-  "context",
-  "counter",
-  "mismatch",
-]);
+const REPORT_SOURCES: ReadonlySet<PacketTag["source"]> = new Set(["context", "counter"]);
 
 /** 상대의 직전 1군 경기 — 그 경기가 이미 벌어졌다는 것이 투영의 유일한 근거다 */
 function lastPlayedBefore(
@@ -331,7 +319,7 @@ export function buildOpponentReport(
       starters,
       /**
        * **벤치는 세우지 않는다** — 상대 벤치는 관측할 수 없고, 리포트가 읽는 것
-       * (키포인트·상성)은 선발 열한 명만 본다.
+       * (상성)은 선발 열한 명만 본다.
        */
       bench: [],
       tactics: tactics.spec,
@@ -339,13 +327,6 @@ export function buildOpponentReport(
       ...(tactics.setPieceTakers ? { setPieceTakers: tactics.setPieceTakers } : {}),
       // 세트피스 지시도 함께 — 리포트가 읽는 죽은 공 수가 킥오프 패킷과 갈리지 않는다
       ...(tactics.setPieceRoutine ? { setPieceRoutine: tactics.setPieceRoutine } : {}),
-      // 감독의 눈은 우리 쪽에만 — 킥오프 패킷과 같은 규약 (match-flow의 `buildPacketFor`)
-      ...(ours ? { managerAnalysis: state.manager.attributes.analysis } : {}),
-      directives: directivesOnPitch(
-        state,
-        teamId,
-        starters.map((s) => s.player.id),
-      ),
     };
   };
 
@@ -398,7 +379,6 @@ export function buildOpponentReport(
     absent: absentOf(state, opponentId, match.competitionId),
     shape: { ...theirTactics.spec },
     notes: packet.keyPoints.filter((tag) => REPORT_SOURCES.has(tag.source)),
-    targets: packet.targets,
     tagContext: packetTagContext(packet),
   };
 }

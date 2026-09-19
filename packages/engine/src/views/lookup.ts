@@ -1224,8 +1224,7 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
         : assignment
           ? `전술: ${assignment.role === "starting" ? "선발" : "벤치"} ${assignment.position}` +
             ` (${roleLabel(assignment.position, assignment.roleId)})` +
-            ` · 전술적응 ${assignment.familiarity}` +
-            (assignment.instruction ? ` · 개인지시 "${assignment.instruction}"` : "")
+            ` · 전술적응 ${assignment.familiarity}`
           : "전술: 배치 없음 (예비 스쿼드)",
     );
     if (loan) {
@@ -1624,14 +1623,6 @@ export function squadView(state: GameState, input: SquadViewInput = {}): LookupR
       // 유스 절이 `sign_youth`를 대는 것과 같은 규약 — 이 목록으로 무엇을 할 수 있는가
       lines.push(`── 자리를 찾는 스태프 ${pool.length}명 (hire_staff) ──`, ...pool);
     }
-  }
-  const personal = tactics.assignments.filter((a) => a.instruction);
-  if (personal.length > 0 && !input.role) {
-    lines.push(
-      `개인 지시: ${personal
-        .map((a) => `${playerName(state, a.playerId)} "${a.instruction}"`)
-        .join(" / ")}`,
-    );
   }
   return { ok: true, message: lines.join("\n") };
 }
