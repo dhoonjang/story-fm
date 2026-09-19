@@ -163,12 +163,6 @@ export function addLaneShift(
   }
 }
 
-/** 두 산출을 합친다 — 시트의 줄 여럿이 같은 칸에 겹칠 수 있다 */
-export function addCells(into: LaneCells, from: LaneCells): void {
-  for (const band of GRID_BANDS)
-    for (const lane of GRID_LANES) into[band][lane] += from[band][lane];
-}
-
 /** 존 델타로 접히는 몫 — **줄 평균**이다. 격자의 계약이 "세 칸의 평균 = 존 전력"이다 */
 export function zoneMeanOf(cells: LaneCells): Record<GridBand, number> {
   const out = {} as Record<GridBand, number>;

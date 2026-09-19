@@ -39,7 +39,6 @@ import {
   tacticsSignature,
   josa,
 } from "@story-fm/domain";
-import type { CommandResult } from "../commands";
 import {
   POINTS_MAX,
   pointsSeen,

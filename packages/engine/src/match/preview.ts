@@ -310,7 +310,6 @@ export function buildOpponentReport(
   const sideOf = (
     teamId: string,
     starters: LineupSlot[],
-    ours: boolean,
   ): Parameters<typeof buildStrengthPacket>[0] => {
     const tactics = tacticsOf(state, teamId);
     return {
@@ -340,8 +339,8 @@ export function buildOpponentReport(
    */
   const derby = derbyForMatch(match);
   const packet: StrengthPacket = buildStrengthPacket(
-    userIsHome ? sideOf(match.homeTeamId, us, true) : sideOf(match.homeTeamId, theirSlots, false),
-    userIsHome ? sideOf(match.awayTeamId, theirSlots, false) : sideOf(match.awayTeamId, us, true),
+    userIsHome ? sideOf(match.homeTeamId, us) : sideOf(match.homeTeamId, theirSlots),
+    userIsHome ? sideOf(match.awayTeamId, theirSlots) : sideOf(match.awayTeamId, us),
     {
       neutral: match.neutral === true,
       inMatch: false,

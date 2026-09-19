@@ -49,16 +49,7 @@ import {
   FINISHING_SCALE,
   penaltyRate,
 } from "./shot-model";
-import {
-  addCells,
-  GRID_LANES,
-  LANE_X,
-  laneBiasOf,
-  mirrorLane,
-  zoneGrid,
-  zoneMeanOf,
-  zeroCells,
-} from "./zone-grid";
+import { GRID_LANES, LANE_X, laneBiasOf, mirrorLane, zoneGrid, zoneMeanOf } from "./zone-grid";
 
 /** 배치된 선수 — 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
 export interface LineupSlot {
