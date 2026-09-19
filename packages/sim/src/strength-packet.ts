@@ -688,9 +688,9 @@ const ZONE_CONTRIBUTION: Record<
  * 팀이든 공격하는 쪽으로 기울인다.
  */
 const ZONE_BASELINE: Record<"attack" | "midfield" | "defense", number> = {
-  attack: 0.952,
+  attack: 0.967,
   midfield: 1,
-  defense: 1.05,
+  defense: 1.034,
 };
 
 /** 실제 전후 좌표를 기존 네 라인의 기여도로 연속 변환한다. */
