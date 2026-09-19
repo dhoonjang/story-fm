@@ -11,11 +11,7 @@ import type { RegionalBand, RegionalLane } from "./packet";
  * 것은 코어다(sim `sheet.ts`). 여기 있는 것은 그 둘이 오가는 **그릇의 모양**뿐이다.
  */
 
-/** 한 줄이 어느 편의 것인가 — 선수 id이거나 팀 편이다 */
-export const POINT_ABOUT_SIDES = ["home", "away"] as const;
-
 /** 포인트의 중요도 — 감독의 분석이 허락한 줄 수(`POINTS_SEEN`)는 이 순서로 넘어간다 */
-export const POINT_IMPORTANCES = [1, 2, 3] as const;
 export const PointImportanceSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]);
 export type PointImportance = z.infer<typeof PointImportanceSchema>;
 
@@ -100,12 +96,6 @@ export const SheetLineSchema = z.object({
   step: SheetStepSchema,
 });
 export type SheetLine = z.infer<typeof SheetLineSchema>;
-
-/** 판독기가 내는 판독 한 벌 — 포인트 전체와 그 시트 */
-export interface MatchReading {
-  points: Point[];
-  sheet: SheetLine[];
-}
 
 /** 어느 편이 이로운가 — **표적 편의 이득이 되는 부호**인가 (match.md §1.6) */
 export function sheetLineBenefits(line: Pick<SheetLine, "shape" | "sign">): boolean {
