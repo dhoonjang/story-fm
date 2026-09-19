@@ -114,7 +114,7 @@ sequenceDiagram
 flowchart TB
   subgraph CACHED["캐시 프리픽스 — 앞이 안정적일수록 뒤가 산다"]
     direction TB
-    S0["① 고정 — 도구 정의 24개 + GM_SYSTEM<br/>세이브 무관 · 불변"]
+    S0["① 고정 — 도구 정의 25개 + GM_SYSTEM<br/>세이브 무관 · 불변"]
     S1["② 레퍼런스 — #lt;club name#gt; · #lt;manager name tag#gt;<br/>세이브당 고정 (경질·부임·우승에만 바뀜)"]
     S2["③ 요약 — #lt;summary at#gt; 지난 일 · 열린 일<br/>압축된 세이브에만 · 압축될 때만 바뀜"]
     S3["④ 이력 — 창 안의 지난 턴들<br/>user: #lt;characters#gt; #lt;operator#gt; @감독: / assistant: 장면<br/>시작점은 6턴 단위로만 이동"]
@@ -346,7 +346,7 @@ sequenceDiagram
 
 | 층       | 경기 턴                                                                                                                                |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| 고정     | `MATCH_GM_SYSTEM` + 경기 도구 셋(진행 턴 3 · 손잡이 턴 1 · 킥오프 턴 0)                                                                |
+| 고정     | `MATCH_GM_SYSTEM` + 경기 도구 셋과 `suggest_reply`(진행 턴 4 · 손잡이 턴 2 · 킥오프 턴 1 — 제안만)                                     |
 | 레퍼런스 | `<club name>` · `<manager name tag>` · `<characters>`(수석코치 상주) · `<pre_match>`(직전 평시 발화 셋 그대로) — `buildMatchReference` |
 | 이력     | 이 경기의 제공자 원형 이력(`pendingMatch.casterHistory`) — 킥오프 턴만 평시 이력                                                       |
 | 이번 턴  | `@감독:` 또는 `<operator>` · 킥오프 턴은 `<kickoff>` · 손잡이 턴은 `<segment>` + `<core_replies>`                                      |
@@ -402,7 +402,7 @@ sequenceDiagram
 
 | 층       | 협상 턴                                                                                                                                 |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| 고정     | `NEGOTIATION_GM_SYSTEM` + 협상 도구 셋(진행 턴 3 · 자리에 앉는 턴 0 · 일어서는 손잡이 턴 0)                                             |
+| 고정     | `NEGOTIATION_GM_SYSTEM` + 협상 도구 셋과 `suggest_reply`(진행 턴 4 · 자리에 앉는 턴 1 · 일어서는 손잡이 턴 1 — 제안만)                  |
 | 레퍼런스 | `<club name>` · `<manager name tag>` · `<counterparty>`(갈래·양쪽·`<voices>`·선수·인물지) · `<situation>` — `buildNegotiationReference` |
 | 이력     | 이 협상의 채팅 턴(`inNegotiation` · `negotiationId`) — `renderTurnGroup`으로 평시와 같은 꼴                                             |
 | 이번 턴  | `@감독:` 또는 `<operator>` · 자리에 앉는 턴은 `<seating>`                                                                               |
