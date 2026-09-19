@@ -1,5 +1,6 @@
 export * from "./aging-line";
 export * from "./match-gm";
+export * from "./match-reader";
 export * from "./match-script";
 export * from "./finalize-match";
 export * from "./tactic-orders";

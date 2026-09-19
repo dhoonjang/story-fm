@@ -1824,16 +1824,16 @@ describe("filterSceneStream — 화면에도 같은 위생", () => {
 });
 
 /**
- * 꺾쇠 블록 — **코어가 읽으라고 넣어 준 입력 구조**다(`<targets>`·`<ledger>`).
+ * 꺾쇠 블록 — **코어가 읽으라고 넣어 준 입력 구조**다(`<points>`·`<ledger>`).
  * 모델이 그것을 되받아 쓰면 프롬프트 내부 배선이 감독이 읽는 자리에 그대로 섰다.
  * 평시와 중계가 **같은 규칙 하나**를 읽는다 (prompts.md §1).
  */
 describe("꺾쇠 블록 — 평시와 중계가 같은 규칙을 읽는다", () => {
   const BLOCK = [
-    '<targets max="2">',
-    "1. 공간 노리기 (공격진 침투)",
-    "2. 라인 올리기 (압박 강화)",
-    "</targets>",
+    "<points>",
+    "- 왼쪽으로 몰리는 상대의 공격",
+    "- 거친 플레이에 흔들리는 미드필더",
+    "</points>",
   ];
 
   it("중계 위생은 블록을 걷고 구간 헤더와 이어쓰기는 남긴다", () => {
@@ -1881,12 +1881,7 @@ describe("꺾쇠 블록 — 평시와 중계가 같은 규칙을 읽는다", () 
   it("스트리밍에도 같은 규칙 — 블록은 화면에 잠깐도 뜨지 않는다", () => {
     const out: string[] = [];
     const feed = filterCasterStream((d) => out.push(d));
-    for (const d of [
-      "[43']\n<targ",
-      'ets max="2">\n1. 공간 ',
-      "노리기\n</targets>\n@중계: ",
-      "슛!",
-    ])
+    for (const d of ["[43']\n<poi", "nts>\n- 왼쪽으로 ", "몰리는 공격\n</points>\n@중계: ", "슛!"])
       feed(d);
     expect(out.join("")).toBe("[43']\n@중계: 슛!");
   });
@@ -2202,8 +2197,7 @@ describe("<board_moves> — 이번 턴 판이 움직인 것", () => {
   });
 
   it("해석기가 보낸 입력에 그 블록이 감독의 말 앞에 선다", async () => {
-    // 장부 없는 경기 상태 — 입력 조립이 경기 갈래로 가되 실을 것이 없다
-    const state = { pendingMatch: { matchId: "m" }, chat: [] } as unknown as GameState;
+    const state = game();
     let sent: TurnRequest | undefined;
     const llm: GameLLM = {
       runTurn: (req) => {

@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { PHASE_END, type BoardMove } from "@story-fm/domain";
+import { PHASE_END, type BoardMove, type Point, type SheetLine } from "@story-fm/domain";
 import {
+  applyMatchReading,
   awaitingShootout,
   refreshPacket,
   type CardMark,
@@ -14,7 +15,7 @@ import type { GmToolCall } from "./gm-types";
 import { applyTacticOrders } from "./tactic-apply";
 import { buildToolSpecs } from "./gm-tools";
 import { hasOps, ordersGate } from "./orders-ops";
-import { runTacticOrders } from "./tactic-orders";
+import { runMatchReader } from "./match-reader";
 import { toToolSchema } from "./tool-schema";
 
 export { buildSegmentMessage, buildShootoutMessage } from "./match-script";
@@ -38,7 +39,7 @@ export const MATCH_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 �
 - 이력 — 이 경기의 지난 턴들.
 - @감독이름: — 이번 턴 감독의 말. <operator> — 감독이 화면에서 누른 손잡이. 손잡이 턴에는 코어가 이미 굴린 <segment>가 함께 온다.
 - <kickoff> — 감독이 경기장에 들어선 첫 턴에만. 도구가 없다.
-- <ledger> — 스코어·시각·국면·온필드와 벤치·교체 횟수. <standing> — 우리 전술과 개인 지시. <targets> — 노릴 수 있는 곳. 장부가 유일한 진실이다 — 스코어는 계산하지 않고 읽는다.
+- <ledger> — 스코어·시각·국면·온필드와 벤치·교체 횟수. <standing> — 우리 전술. <points> — 지금 이 경기가 어떻게 읽히는가. 장부가 유일한 진실이다 — 스코어는 계산하지 않고 읽는다.
 - 도구 결과 — <segment> 코어가 확정한 사건 목록, <stop> 구간이 멈춘 이유, <core_replies> 지시가 판에 걸렸는지, 그리고 구간 뒤의 <ledger>·<packet>.
 
 # 진행
@@ -53,6 +54,7 @@ export const MATCH_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 �
 - 사건마다 문장의 꼴을 달리 잡는다 — 같은 문형은 한 장면에 한 번이다. 갈래는 대본이 슛마다 적은 것(어디서 · 큰 기회 · 결과)이 가른다.
 - 같은 분의 슛과 선방은 한 순간이다 — 한 문장으로 옮긴다.
 - 감독이 방금 내린 지시는 판에 올라 있다 — 걸린 지시도 걸리지 않은 지시도 그대로 중계의 근거다. 이번 구간의 결과는 지시로 바뀌지 않는다. “지시대로 곧바로 골이 터졌다”는 없다.
+- <points>는 코치와 중계의 말로만 감독에게 닿는다 — 목록으로 늘어놓지 않고, 수석코치가 짚거나 중계가 장면 속에서 말한다.
 - (사건 없음)이면 짧게 흐름만 전한다.
 - 킥오프 턴은 경기장·대진·선발을 훑고 첫 휘슬까지만 쓴다. 이력에 경기 전 대화가 있으면 그 목소리에서 이어 연다.
 
@@ -125,7 +127,7 @@ export const MATCH_TOOL_DEFINITIONS: ReadonlyArray<{
   {
     name: TACTIC_ORDERS_TOOL,
     description:
-      "감독의 지시를 판에 건다 — 교체·전술·개인 지시·지역 플랜·공략·세트피스·대화. 시계는 그대로다. 감독이 지시한 턴에 한 번 부르고, 분을 말한 지시는 그 분까지 굴린 뒤에 부른다. 결과로 무엇이 걸렸고 무엇이 반려됐는지와, 그 지시로 다시 계산한 판(패킷)이 온다 — 다음 구간은 이 판으로 구른다.",
+      "감독의 지시를 판에 건다 — 교체·전술·자리와 역할·세트피스·대화, 그리고 말로 판을 움직이는 주문. 시계는 그대로다. 감독이 지시한 턴에 한 번 부르고, 분을 말한 지시는 그 분까지 굴린 뒤에 부른다. 결과로 무엇이 걸렸고 무엇이 반려됐는지와, 그 지시로 다시 계산한 판(패킷)이 온다 — 다음 구간은 이 판으로 구른다.",
     inputSchema: toToolSchema(EmptySchema),
   },
   {
@@ -165,37 +167,81 @@ function ledgerAfter(state: GameState, rolled: boolean): string {
   return buildLedgerNote(state, { withPacket: rolled });
 }
 
+/** 판독 한 벌의 지문 — 포인트·시트가 이번 호출에서 움직였는가를 이것으로 잰다 */
+function readingPrint(points: readonly Point[], sheet: readonly SheetLine[]): string {
+  return JSON.stringify([points, sheet]);
+}
+
 /**
- * 지시 → 판. 해석기가 두 번 실패하면 **반려로 답한다** — 턴은 이어지고 GM은 반려된
+ * 지시 → 판. 판독기가 두 번 실패하면 **반려로 답한다** — 턴은 이어지고 GM은 반려된
  * 대로 쓴다 (agents.md §3). 호출 실패(시한·혼잡)는 그대로 올라간다.
+ *
+ * **아무 명령도 시트 변화도 없는 지시 턴은 성공이 아니다** — 판이 그대로인데 "걸었다"가
+ * 돌아가면 감독은 걸리지 않은 지시 위에 다음 판단을 쌓는다.
  */
-async function runTacticOrdersTool(
+async function runMatchReaderTool(
   state: GameState,
   ctx: MatchToolContext,
   said: string,
 ): Promise<{ ok: boolean; message: string }> {
   const specs = new Map(buildToolSpecs(state, ctx.calls).map((t) => [t.name, t] as const));
-  const parsed = await runTacticOrders(state, specs, said, {
+  const before = readingPrint(state.pendingMatch?.points ?? [], state.pendingMatch?.sheet ?? []);
+  const read = await runMatchReader(state, specs, {
+    occasion: "orders",
+    said,
     ...(ctx.boardMoves ? { boardMoves: ctx.boardMoves } : {}),
   });
-  if (!parsed.ok) return { ok: false, message: parsed.message };
+  if (!read.ok) return { ok: false, message: read.message };
+  const reading = read.reading;
   // 시계를 미는 것은 `advance_match` 하나다 — 지시는 판만 바꾼다 (agents.md §3)
-  const applied = applyTacticOrders(state, parsed.intent, ctx.calls, ctx.goals, ctx.cards);
-  // 굴리지 않은 지시도 판을 다시 계산한다 — 다음 구간이 이 패킷으로 구르고, GM은 그것을 미리 읽는다
-  refreshPacket(state);
+  const applied = applyTacticOrders(
+    state,
+    {
+      ops: reading.ops,
+      ...(reading.truncated ? { truncated: reading.truncated } : {}),
+      ...(reading.unresolved ? { unresolved: reading.unresolved } : {}),
+    },
+    ctx.calls,
+    ctx.goals,
+    ctx.cards,
+  );
+  /**
+   * 판독을 앉히는 자리가 곧 패킷을 다시 세우는 자리다 — 다음 구간이 이 판으로 구르고,
+   * GM은 그것을 미리 읽는다. 판독이 앉지 못한 자리(경기가 없는 자리)만 직접 부른다.
+   */
+  const stored = applyMatchReading(state, reading);
+  if (!stored) refreshPacket(state);
+  const changed = readingPrint(stored?.points ?? [], stored?.sheet ?? []) !== before;
   const replies =
     applied.notes.length > 0
       ? ["<core_replies>", ...applied.notes.map((n) => `- ${n}`), "</core_replies>"]
       : [];
   return {
-    // 아무 명령도 걸리지 않은 턴은 성공이 아니다 — 판은 그대로이고 GM은 반려된 대로 쓴다
-    ok: hasOps(parsed.intent.ops),
+    ok: hasOps(reading.ops) || changed,
     message: [
       ...(applied.segment ? [applied.segment] : []),
       ...replies,
       ledgerAfter(state, true),
     ].join("\n"),
   };
+}
+
+/**
+ * 구간 뒤의 판독 — 구간이 구르고 장부가 선 뒤, GM이 중계를 쓰기 전에 돈다 (agents.md §3).
+ *
+ * **여기서의 실패는 삼킨다** — 지난 포인트·시트가 그대로 다음 구간의 입력이고, 그
+ * 사실은 기록에 남는다. 판독 하나 때문에 굴러간 구간이 되돌아가면 안 된다.
+ */
+async function readAfterSegment(state: GameState, ctx: MatchToolContext): Promise<void> {
+  const pending = state.pendingMatch;
+  if (!pending || pending.ledger.phase === "finished") return;
+  const specs = new Map(buildToolSpecs(state, ctx.calls).map((t) => [t.name, t] as const));
+  try {
+    const read = await runMatchReader(state, specs, { occasion: "segment" });
+    if (read.ok) applyMatchReading(state, read.reading);
+  } catch (error) {
+    console.warn("[match-reader] 구간 뒤 판독을 건너뜁니다 — 지난 시트가 남습니다:", error);
+  }
 }
 
 /**
@@ -221,7 +267,7 @@ export function buildMatchTools(
         handle: async () => {
           const opened = gate(TACTIC_ORDERS_TOOL);
           if (!opened.ok) return opened;
-          return runTacticOrdersTool(state, ctx, opened.said);
+          return runMatchReaderTool(state, ctx, opened.said);
         },
       },
       {
@@ -242,6 +288,8 @@ export function buildMatchTools(
               ? { untilMinute: parsed.data.untilMinute }
               : {}),
           });
+          // 판이 사건으로 바뀌었다 — 중계가 서기 전에 판독을 다시 쓴다 (agents.md §3)
+          if (applied.segment) await readAfterSegment(state, ctx);
           return {
             ok: true,
             message: [
