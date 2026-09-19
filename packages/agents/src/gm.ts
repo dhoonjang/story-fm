@@ -62,6 +62,7 @@ import { mockGmLlm } from "./mock-gm";
 import { retryOnce } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
 import { buildGmTools } from "./gm-tools";
+import { takeSuggestion } from "./suggest-reply";
 import { applyTacticOrders, type AppliedTacticOrders } from "./tactic-apply";
 import {
   buildGmDigest,
@@ -686,6 +687,12 @@ async function closeTurn(
   const peace = !inMatch && !inNegotiation;
   const { result } = call;
   /**
+   * **감독의 다음 말은 본문 마지막 줄의 태그에서 꺼낸다** — 위생이 그 줄을 걷기 전에
+   * (agents.md §2 · prompts.md §1). 태그 줄은 꺾쇠 블록이라 아래의 위생과 스트리밍 필터가
+   * 화면과 저장에서 함께 걷고, 값은 `ChatTurn.suggestion` 하나에만 남는다.
+   */
+  const { text: rawText, suggestion } = takeSuggestion(result.text);
+  /**
    * **GM이 마감을 부르지 않았으면 코어가 대신 부른다** (agents.md §3 「경기 마감」) —
    * 경기가 끝났는데 열려 있는 세이브는 없다. 마무리 중계는 장면 끝에 붙는다.
    */
@@ -704,7 +711,7 @@ async function closeTurn(
   // 도구 앞에 흘린 작업 서술과 값이 같은 반복 헤더를 걷어낸다 — 중계에는 헤더 규칙을
   // 걸지 않는다(구간마다 헤더를 새로 찍는 것이 정상이다 — prompts.md §1). 남는 것은
   // 두 국면이 함께 읽는 꺾쇠 규칙 하나다
-  const sceneText = inMatch ? sanitizeCasterText(result.text) : sanitizeSceneText(result.text);
+  const sceneText = inMatch ? sanitizeCasterText(rawText) : sanitizeSceneText(rawText);
   // 첫 줄 헤더가 본문과 갈린다 — 저장할 때 되붙일 것이고, 경기 턴은 분을 여기서 읽는다
   const scene = parseSceneHeader(sceneText);
   /**
@@ -906,6 +913,7 @@ async function closeTurn(
     stalled: clockStalled,
     emptyScene,
     closedByCore: closingTail.length > 0,
+    suggested: suggestion !== undefined,
     textChars: text.length,
   });
   return {
@@ -918,6 +926,7 @@ async function closeTurn(
     // 손잡이가 굴린 구간과 헤더가 민 구간의 사건이 민 순서대로 함께 온다
     ...(ledger.events.length > 0 ? { events: ledger.events } : {}),
     ...(clockStalled !== null ? { clockStalled } : {}),
+    ...(suggestion === undefined ? {} : { suggestion }),
     usage: result.usage,
   };
 }

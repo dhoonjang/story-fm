@@ -12,7 +12,15 @@ import {
   userPlayers,
   type GameState,
 } from "@story-fm/engine";
-import { TABLE_LEFT, TIME_PASSED, buildOnboardingTurn, runGmTurn } from "@story-fm/agents";
+import {
+  SUGGESTION_MAX_CHARS,
+  TABLE_LEFT,
+  TIME_PASSED,
+  buildOnboardingTurn,
+  runGmTurn,
+  takeSuggestion,
+} from "@story-fm/agents";
+import { turnFactLines } from "@story-fm/engine";
 
 /**
  * **mock 모드가 실 경로를 지나는가** (docs/llm/agents.md §8).
@@ -155,6 +163,60 @@ describe("mock 대본 — 표의 한 줄이 코어 명령까지 닿는다", () =
     expect(namesOf(turn)).toContain(TIME_PASSED);
     expect(state.date).not.toBe(from);
   });
+
+  /**
+   * 감독의 다음 말은 **턴 결과에만** 실린다 (agents.md §2) — 본문에 남으면 화면에 태그가
+   * 서고 다음 턴 이력이 그 문장을 감독의 말처럼 읽는다. 기록에도 없어야 압축 브리프의
+   * `[장부]` 줄이 그것을 싣지 않는다.
+   */
+  it("매 턴 감독의 다음 말 하나가 제안으로 실리고, 본문과 기록에는 남지 않는다", async () => {
+    const state = newGame();
+    const turn = await runGmTurn(state, "음...");
+    expect(turn.suggestion).toBe("하루 넘기자");
+    expect(turn.text).not.toContain("suggest_reply");
+    expect(turn.toolCalls).toHaveLength(0);
+    expect(turnFactLines({ toolCalls: turn.toolCalls })).toEqual([]);
+    // 경기일에는 킥오프를 여는 말이다
+    for (let guard = 0; guard < 40 && state.phase !== "matchday"; guard += 1) {
+      advanceTime(state, "next_match");
+    }
+    const matchday = await runGmTurn(state, "음...");
+    expect(matchday.suggestion).toBe("경기 시작하자");
+  });
+});
+
+/**
+ * 마지막 줄의 태그는 **코어가 읽는 자유 텍스트**다 (prompts.md §1) — 시점 헤더와 같은 급이라
+ * 경계가 조용히 어긋난다: 값을 못 꺼내면 placeholder만 비지만, 본문에서 못 지우면 태그가
+ * 화면과 다음 턴의 이력에 선다.
+ */
+describe("다음 말 제안 — 마지막 줄의 태그에서 꺼낸다", () => {
+  const SCENE = ["[2026-07-01 AM 9:45 · 감독실]", "@코치: 첫 주는 체력입니다."].join("\n");
+
+  it("태그의 값을 꺼내고 본문에서는 지운다 — 감싼 따옴표와 안쪽 줄바꿈은 걷는다", () => {
+    const taken = takeSuggestion(`${SCENE}\n<suggest_reply>“훈련\n잡아줘”</suggest_reply>`);
+    expect(taken).toEqual({ text: SCENE, suggestion: "훈련 잡아줘" });
+    // 줄 한복판의 태그도 지운다 — 위생은 줄 앞머리의 꺾쇠만 본다
+    const inline = takeSuggestion(`@코치: 갑시다. <suggest_reply>가자</suggest_reply>`);
+    expect(inline).toEqual({ text: "@코치: 갑시다. ", suggestion: "가자" });
+  });
+
+  it("태그가 없으면 본문 그대로, 값이 없거나 상한을 넘으면 제안 없이 태그만 지운다", () => {
+    expect(takeSuggestion(SCENE)).toEqual({ text: SCENE });
+    expect(takeSuggestion(`${SCENE}\n<suggest_reply>  </suggest_reply>`)).toEqual({ text: SCENE });
+    const long = "가".repeat(SUGGESTION_MAX_CHARS + 1);
+    expect(takeSuggestion(`${SCENE}\n<suggest_reply>${long}</suggest_reply>`)).toEqual({
+      text: SCENE,
+    });
+    const fits = "가".repeat(SUGGESTION_MAX_CHARS);
+    expect(takeSuggestion(`${SCENE}\n<suggest_reply>${fits}</suggest_reply>`).suggestion).toBe(
+      fits,
+    );
+  });
+
+  it("닫히지 않은 태그는 잘린 응답이다 — 꼬리를 지우고 제안은 없다", () => {
+    expect(takeSuggestion(`${SCENE}\n<suggest_reply>하루 넘기`)).toEqual({ text: SCENE });
+  });
 });
 
 describe("mock 대본 — 경기", () => {
@@ -174,9 +236,10 @@ describe("mock 대본 — 경기", () => {
     expect(namesOf(opened)).toContain("start_match");
     expect(state.pendingMatch?.entered).not.toBe(true);
 
-    // 입장 턴은 첫 휘슬만 — 사건은 아직 없다
+    // 입장 턴은 첫 휘슬만 — 사건은 아직 없다. 도구 없는 턴에도 다음 말은 선다
     const entered = await runGmTurn(state, "진행", undefined, { kind: "advance_match" });
     expect(entered.text).toContain("@중계:");
+    expect(entered.suggestion).toBe("계속 가자");
     expect(state.pendingMatch?.entered).toBe(true);
     expect(entered.goals ?? []).toHaveLength(0);
 
@@ -256,12 +319,13 @@ describe("mock 대본 — 협상 방", () => {
     expect(state.phase).toBe("negotiation");
     expect(state.pendingNegotiation?.seated).toBe(false);
 
-    // 자리에 앉는 턴 — 도구가 없고, 방과 상대의 첫 말까지다
+    // 자리에 앉는 턴 — 방의 도구가 없고, 방과 상대의 첫 말까지다. 다음 말은 그래도 선다
     const seated = await runGmTurn(state, "협상 자리에 앉는다", undefined, {
       kind: "enter_negotiation",
     });
     expectGmGrammar(seated.text);
     expect(seated.toolCalls).toHaveLength(0);
+    expect(seated.suggestion).toBe("제안한 조건으로 갑시다");
     expect(state.pendingNegotiation?.seated).toBe(true);
     return openNegotiationFor(state, acceptableTarget(state).id) ?? state.negotiations.at(-1)!;
   }

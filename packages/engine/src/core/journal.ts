@@ -206,6 +206,8 @@ export type JournalEntry =
       emptyScene: boolean;
       /** 코어가 대신 마감해 마무리 중계를 붙였는가 */
       closedByCore: boolean;
+      /** 마지막 줄의 `<suggest_reply>`가 값을 냈는가 — 없거나 상한을 넘은 턴은 false */
+      suggested: boolean;
       textChars: number;
     }
   | {

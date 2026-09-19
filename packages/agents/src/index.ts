@@ -21,5 +21,6 @@ export * from "./mock-gm";
 export * from "./gm";
 export * from "./onboarding-judge";
 export * from "./skill-descriptions";
+export * from "./suggest-reply";
 export * from "./tool-schema";
 export * from "./output-agents";

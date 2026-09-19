@@ -95,6 +95,11 @@ export interface GmTurnResult {
    */
   clockStalled?: number;
   /**
+   * GM이 장면 직전에 제안한 **감독의 다음 말 한 줄** (`suggest_reply` — agents.md §2).
+   * 턴 뒤가 장부에서 꺼내 여기 싣고, 턴 러너가 `ChatTurn.suggestion`으로 남긴다.
+   */
+  suggestion?: string;
+  /**
    * 토큰 사용량 (실모드만). Anthropic은 명시적 캐시 read/write를, Gemini는
    * implicit cached content를 cacheRead에 매핑한다. 제공자별 캐시 적중 조건과
    * 최소 프리픽스가 다르므로 같은 수치를 직접 비교하지 않는다.
