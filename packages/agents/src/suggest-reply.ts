@@ -1,97 +1,43 @@
-import { z } from "zod";
-import { journal } from "@story-fm/engine";
-import type { GameToolSpec } from "@story-fm/llm";
-import { recordCall, type GmToolCall } from "./gm-types";
-import { skillDescriptions } from "./skill-descriptions";
-import { inputError, toToolSchema } from "./tool-schema";
-
 /**
- * **감독의 다음 말 하나** — GM 셋(평시·경기·협상 방)이 함께 쥐는 도구다 (agents.md §2).
+ * **감독의 다음 말 하나** — GM 셋(평시·경기·협상 방)이 장면의 마지막 줄에
+ * `<suggest_reply>…</suggest_reply>`로 낸다 (agents.md §2 · prompts.md §1).
  *
- * 장면 밖에서 구조로 받는다: 본문 끝에 문장을 적게 하고 코드가 파싱하는 길은 AGENTS.md §4가
- * 막는다. 핸들러는 상태를 바꾸지 않고 장부에 `silent`로만 남기며, 턴 뒤가 그 값을
- * **꺼내**(`takeSuggestion`) `GmTurnResult.suggestion`으로 올린다 — 기록에 남기지 않는 것은
- * 그 문장이 감독이 한 말이 아니어서다. 이력·압축 브리프·해석기 입력 어디에도 실리지 않는다.
+ * 도구가 아니라 **출력 문법**인 이유는 왕복이다. 도구로 받으면 턴마다 모델 호출이 하나
+ * 늘고, GM이 쓰는 제공자에서는 그 호출의 입력이 캐시 없이 정가로 다시 읽힌다 — 대화만
+ * 건 턴의 입력이 두 배가 된다. 태그 줄은 꺾쇠 블록이라 위생이 화면과 저장에서 함께
+ * 걷는다(`sanitizeSceneText` · `filterSceneStream`). 여기서 하는 일은 걷히기 전에 **값을
+ * 꺼내는 것**이고, 줄 한복판에 섞여 위생이 못 보는 태그도 함께 지운다. 값의 자리는
+ * `GmTurnResult.suggestion` → `ChatTurn.suggestion` 하나다.
  */
-export const SUGGEST_REPLY_TOOL = "suggest_reply";
+export const SUGGEST_REPLY_TAG = "suggest_reply";
 
-/** 한 문장의 상한 — 입력창 한 줄에 서는 길이다 */
+/** 한 문장의 상한 — 입력창 한 줄에 서는 길이다. 넘으면 그 턴엔 제안이 없다 */
 export const SUGGESTION_MAX_CHARS = 80;
 
-export const SuggestReplySchema = z.object({
-  text: z
-    .string()
-    .trim()
-    .min(1)
-    .max(SUGGESTION_MAX_CHARS)
-    .describe(
-      "감독이 이어 할 법한 말 한 문장 — 이력에 선 감독의 말투로, 감독이 손대지 않고 그대로 보낼 수 있게. 선택지·질문·안내가 아니다",
-    ),
-});
-
-/** 이 턴의 제안 도구 — 기록은 턴의 장부(`calls`)에 남고, 한 턴에 하나다 */
-export function suggestReplyTool(calls: GmToolCall[]): GameToolSpec {
-  /** 한 턴에 하나 — 두 번째 호출은 같은 자리를 두 번 채운다 */
-  let suggested = false;
-  return {
-    name: SUGGEST_REPLY_TOOL,
-    description: skillDescriptions().suggest_reply,
-    inputSchema: toToolSchema(SuggestReplySchema),
-    handle(input: unknown) {
-      const parsed = SuggestReplySchema.safeParse(input);
-      if (!parsed.success) {
-        const rejected = inputError(parsed.error);
-        journal({
-          kind: "command",
-          name: SUGGEST_REPLY_TOOL,
-          input,
-          ok: false,
-          message: rejected.message,
-          source: "tool",
-          blocked: "input",
-        });
-        return rejected;
-      }
-      if (suggested) {
-        const refused = {
-          ok: false as const,
-          message: "이번 턴의 제안은 이미 받았습니다 — 한 턴에 하나입니다",
-        };
-        journal({
-          kind: "command",
-          name: SUGGEST_REPLY_TOOL,
-          input: parsed.data,
-          ok: false,
-          message: refused.message,
-          source: "tool",
-        });
-        return refused;
-      }
-      suggested = true;
-      const result = { ok: true, message: parsed.data.text };
-      journal({
-        kind: "command",
-        name: SUGGEST_REPLY_TOOL,
-        input: parsed.data,
-        ok: true,
-        message: result.message,
-        source: "tool",
-      });
-      return recordCall(calls, SUGGEST_REPLY_TOOL, result, { input: parsed.data, silent: true });
-    },
-  };
-}
+const TAG_RE = /<suggest_reply>([\s\S]*?)<\/suggest_reply>/gu;
+/** 닫히지 않은 채 끝난 태그 — 잘린 응답이다. 값은 없고 꼬리만 지운다 */
+const OPEN_TAIL_RE = /<suggest_reply>[\s\S]*$/u;
+/** 모델이 문장을 인용 부호로 감쌀 때 — 감독이 보낼 말에 따옴표는 없다 */
+const WRAPPING_QUOTES_RE = /^[“"'‘]+|[”"'’]+$/gu;
 
 /**
- * 장부에서 제안을 **꺼낸다** — 값을 돌려주고 기록은 뺀다.
- *
- * 남겨 두면 세 자리가 그 문장을 감독의 말처럼 읽는다: 장면이 비어 돌아온 턴의 코어 기록
- * (`sceneFromToolCalls`)이 `@:` 지문으로 세우고, 압축 브리프의 `[장부]` 줄(`turnFactLines`)에
- * 오르고, 세이브의 `toolCalls`에 앉는다. 제안의 자리는 `ChatTurn.suggestion` 하나다.
+ * 본문에서 제안을 **꺼낸다** — 첫 태그의 값을 돌려주고, 태그는 전부 지운 본문을 함께 낸다.
+ * 값이 비었거나 상한을 넘으면 제안 없이 본문만 돌아온다.
  */
-export function takeSuggestion(calls: GmToolCall[]): string | undefined {
-  const at = calls.findIndex((call) => call.name === SUGGEST_REPLY_TOOL);
-  if (at < 0) return undefined;
-  const [taken] = calls.splice(at, 1);
-  return taken?.summary;
+export function takeSuggestion(text: string): { text: string; suggestion?: string } {
+  let first: string | undefined;
+  const stripped = text
+    .replace(TAG_RE, (_match, inner: string) => {
+      first ??= inner;
+      return "";
+    })
+    .replace(OPEN_TAIL_RE, "")
+    .replace(/\n+$/u, "");
+  const suggestion = first === undefined ? undefined : normalizeSuggestion(first);
+  return { text: stripped, ...(suggestion === undefined ? {} : { suggestion }) };
+}
+
+function normalizeSuggestion(raw: string): string | undefined {
+  const line = raw.replace(/\s+/gu, " ").trim().replace(WRAPPING_QUOTES_RE, "").trim();
+  return line.length === 0 || line.length > SUGGESTION_MAX_CHARS ? undefined : line;
 }

@@ -13,15 +13,12 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import {
-  SUGGEST_REPLY_TOOL,
   SUGGESTION_MAX_CHARS,
   TABLE_LEFT,
   TIME_PASSED,
   buildOnboardingTurn,
   runGmTurn,
-  suggestReplyTool,
   takeSuggestion,
-  type GmToolCall,
 } from "@story-fm/agents";
 import { turnFactLines } from "@story-fm/engine";
 
@@ -168,14 +165,16 @@ describe("mock 대본 — 표의 한 줄이 코어 명령까지 닿는다", () =
   });
 
   /**
-   * 감독의 다음 말은 **턴 결과에만** 실린다 (agents.md §2) — 기록에 남으면 압축 브리프의
-   * `[장부]` 줄과 빈 장면의 코어 기록이 그 문장을 감독의 말처럼 읽는다.
+   * 감독의 다음 말은 **턴 결과에만** 실린다 (agents.md §2) — 본문에 남으면 화면에 태그가
+   * 서고 다음 턴 이력이 그 문장을 감독의 말처럼 읽는다. 기록에도 없어야 압축 브리프의
+   * `[장부]` 줄이 그것을 싣지 않는다.
    */
-  it("매 턴 감독의 다음 말 하나가 제안으로 실리고, 기록에는 남지 않는다", async () => {
+  it("매 턴 감독의 다음 말 하나가 제안으로 실리고, 본문과 기록에는 남지 않는다", async () => {
     const state = newGame();
     const turn = await runGmTurn(state, "음...");
     expect(turn.suggestion).toBe("하루 넘기자");
-    expect(namesOf(turn)).not.toContain(SUGGEST_REPLY_TOOL);
+    expect(turn.text).not.toContain("suggest_reply");
+    expect(turn.toolCalls).toHaveLength(0);
     expect(turnFactLines({ toolCalls: turn.toolCalls })).toEqual([]);
     // 경기일에는 킥오프를 여는 말이다
     for (let guard = 0; guard < 40 && state.phase !== "matchday"; guard += 1) {
@@ -186,24 +185,37 @@ describe("mock 대본 — 표의 한 줄이 코어 명령까지 닿는다", () =
   });
 });
 
-describe("다음 말 제안 — 한 턴에 하나, 장부에서 꺼낸다", () => {
-  it("첫 호출만 서고 두 번째는 반려되며, 꺼내면 기록에서 빠진다", async () => {
-    const calls: GmToolCall[] = [];
-    const tool = suggestReplyTool(calls);
-    expect((await tool.handle({ text: " 훈련 잡아줘 " })).ok).toBe(true);
-    expect((await tool.handle({ text: "다시" })).ok).toBe(false);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.silent).toBe(true);
-    expect(takeSuggestion(calls)).toBe("훈련 잡아줘");
-    expect(calls).toHaveLength(0);
-    expect(takeSuggestion(calls)).toBeUndefined();
+/**
+ * 마지막 줄의 태그는 **코어가 읽는 자유 텍스트**다 (prompts.md §1) — 시점 헤더와 같은 급이라
+ * 경계가 조용히 어긋난다: 값을 못 꺼내면 placeholder만 비지만, 본문에서 못 지우면 태그가
+ * 화면과 다음 턴의 이력에 선다.
+ */
+describe("다음 말 제안 — 마지막 줄의 태그에서 꺼낸다", () => {
+  const SCENE = ["[2026-07-01 AM 9:45 · 감독실]", "@코치: 첫 주는 체력입니다."].join("\n");
+
+  it("태그의 값을 꺼내고 본문에서는 지운다 — 감싼 따옴표와 안쪽 줄바꿈은 걷는다", () => {
+    const taken = takeSuggestion(`${SCENE}\n<suggest_reply>“훈련\n잡아줘”</suggest_reply>`);
+    expect(taken).toEqual({ text: SCENE, suggestion: "훈련 잡아줘" });
+    // 줄 한복판의 태그도 지운다 — 위생은 줄 앞머리의 꺾쇠만 본다
+    const inline = takeSuggestion(`@코치: 갑시다. <suggest_reply>가자</suggest_reply>`);
+    expect(inline).toEqual({ text: "@코치: 갑시다. ", suggestion: "가자" });
   });
 
-  it("빈 문장과 상한을 넘는 문장은 받지 않는다", async () => {
-    const tool = suggestReplyTool([]);
-    expect((await tool.handle({ text: "   " })).ok).toBe(false);
-    expect((await tool.handle({ text: "가".repeat(SUGGESTION_MAX_CHARS + 1) })).ok).toBe(false);
-    expect((await tool.handle({ text: "가".repeat(SUGGESTION_MAX_CHARS) })).ok).toBe(true);
+  it("태그가 없으면 본문 그대로, 값이 없거나 상한을 넘으면 제안 없이 태그만 지운다", () => {
+    expect(takeSuggestion(SCENE)).toEqual({ text: SCENE });
+    expect(takeSuggestion(`${SCENE}\n<suggest_reply>  </suggest_reply>`)).toEqual({ text: SCENE });
+    const long = "가".repeat(SUGGESTION_MAX_CHARS + 1);
+    expect(takeSuggestion(`${SCENE}\n<suggest_reply>${long}</suggest_reply>`)).toEqual({
+      text: SCENE,
+    });
+    const fits = "가".repeat(SUGGESTION_MAX_CHARS);
+    expect(takeSuggestion(`${SCENE}\n<suggest_reply>${fits}</suggest_reply>`).suggestion).toBe(
+      fits,
+    );
+  });
+
+  it("닫히지 않은 태그는 잘린 응답이다 — 꼬리를 지우고 제안은 없다", () => {
+    expect(takeSuggestion(`${SCENE}\n<suggest_reply>하루 넘기`)).toEqual({ text: SCENE });
   });
 });
 

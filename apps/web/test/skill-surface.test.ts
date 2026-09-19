@@ -32,13 +32,6 @@ const MATCH_ONLY = new Set(["exploit_point", "set_match_plan"]);
  */
 const ROOM_ONLY = new Set(["leave_table"]);
 
-/**
- * 화면에 **다른 자리로** 서는 호출 — 감독의 다음 말 제안은 칩도 카드도 아니고 입력창의
- * placeholder다(`ChatTurn.suggestion` — design-system.md §6). 턴 뒤가 기록에서 꺼내 가므로
- * 채팅의 `toolCalls`에는 남지도 않는다 (agents.md §2).
- */
-const PLACEHOLDER_ONLY = new Set(["suggest_reply"]);
-
 describe("호출이 화면에 서는 길", () => {
   it("조작형 호출은 모두 말풍선 아니면 카드다", () => {
     const orphans = SKILL_CATALOG.filter(
@@ -47,8 +40,7 @@ describe("호출이 화면에 서는 길", () => {
         !hasRailHint(s.name) &&
         !CARD_CALLS.has(s.name) &&
         !MATCH_ONLY.has(s.name) &&
-        !ROOM_ONLY.has(s.name) &&
-        !PLACEHOLDER_ONLY.has(s.name),
+        !ROOM_ONLY.has(s.name),
     ).map((s) => s.name);
     expect(orphans, "말풍선(PANEL_OF)이나 카드(CARD_CALLS) 중 하나로 보내야 한다").toEqual([]);
   });

@@ -123,16 +123,6 @@ export const SKILL_CATALOG = [
       `사기만 움직이고 능력치·컨디션은 그대로다. 하루 ${MAX_INCIDENTS_PER_DAY}건까지. 당사자의 심경은 moods에.`,
   },
   {
-    name: "suggest_reply",
-    label: "다음 말 제안",
-    group: "대화·서사",
-    readOnly: false,
-    description:
-      "매 턴 한 번, 다른 도구를 다 부른 뒤 장면을 쓰기 직전에 부른다. " +
-      "이 장면 뒤에 감독이 이어 할 법한 말 하나를 text에 적는다 — 장면이 여는 화제에 답하는 말을, 이력에 선 감독의 말투로, 감독이 손대지 않고 그대로 보낼 수 있는 한 문장. " +
-      "선택지·질문·안내가 아니고 장면에는 적지 않는다. 입력창의 제안으로 선다.",
-  },
-  {
     name: "apply_finance_event",
     label: "재정 이벤트",
     group: "재정",

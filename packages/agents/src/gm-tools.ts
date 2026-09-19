@@ -148,7 +148,6 @@ import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
 
 import { buildTrainingSchedule } from "./gm-input";
 import { skillDescriptions } from "./skill-descriptions";
-import { suggestReplyTool } from "./suggest-reply";
 import { runTacticOrders } from "./tactic-orders";
 import { MARKET_OPS, runMarketOrders } from "./market-orders";
 import { TRAINING_OPS, runTrainingOrders } from "./training-orders";
@@ -1848,10 +1847,9 @@ const NoArgsSchema = z.object({});
 
 /**
  * **평시 GM이 받는 도구** — 코어 명령 전부에서 판을 세우는 것들(`CORE_COMMANDS`)을
- * 빼고 손잡이 셋과 제안 하나를 얹는다 (agents.md §1·§2). 손잡이의 핸들러 뒤에서 지시
+ * 빼고 `tactic_orders` 하나를 얹는다 (agents.md §1·§2). 그 하나의 핸들러 뒤에서 지시
  * 해석이 감독의 말을 JSON으로 옮기고 코어가 코어 명령을 부른다 — 기록은 코어 명령의
- * 이름으로 남아 칩과 말풍선이 그대로 선다. 제안은 GM 셋이 함께 쥐는 도구라 경기·협상 방의
- * 도구 셋 옆에도 선다(`suggestReplyTool`).
+ * 이름으로 남아 칩과 말풍선이 그대로 선다.
  */
 export function buildGmTools(
   state: GameState,
@@ -1960,7 +1958,7 @@ export function buildGmTools(
       return { ok: true, message: notes.length > 0 ? notes.join("\n") : "장부에 걸었습니다" };
     },
   };
-  return [...visible, tactics, training, market, suggestReplyTool(calls)];
+  return [...visible, tactics, training, market];
 }
 
 /**

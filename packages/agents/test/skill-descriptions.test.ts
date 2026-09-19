@@ -127,12 +127,12 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
     expect(perGroup).toEqual({
       진행: 3,
       "전술·훈련": 2,
-      "대화·서사": 5,
+      "대화·서사": 4,
       이적: 3,
       재정: 1,
       조회: 11,
     });
-    expect(SKILL_CATALOG.length).toBe(25);
+    expect(SKILL_CATALOG.length).toBe(24);
     expect(SKILL_CATALOG.filter((s) => s.readOnly).length).toBe(11);
   });
 });
@@ -181,7 +181,7 @@ describe("규칙이 사는 자리", () => {
 
   /**
    * 설명은 고정층에 매 턴 실린다 — 길이 예산이 없으면 규칙 하나를 지울 때마다 설명
-   * 두 줄이 붙어도 아무 데서도 드러나지 않는다. 상한은 지금 총량(≈7,450자)에 한 도구
+   * 두 줄이 붙어도 아무 데서도 드러나지 않는다. 상한은 지금 총량(≈6,770자)에 한 도구
    * 몫(600자)의 여유를 얹은 값이다 — **도구가 늘 때만** 그만큼 올린다. **도구가 줄면
    * 함께 내린다**: 상한이 총량의 두 배로 남으면 설명이 한 벌씩 더 붙어도 걸리지 않는다.
    */
@@ -190,7 +190,7 @@ describe("규칙이 사는 자리", () => {
     for (const skill of SKILL_CATALOG) {
       expect(skill.description.length, skill.name).toBeLessThanOrEqual(600);
     }
-    expect(total).toBeLessThanOrEqual(8_000);
+    expect(total).toBeLessThanOrEqual(7_400);
   });
 
   /**

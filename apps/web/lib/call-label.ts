@@ -43,8 +43,6 @@ export const CALL_LABEL: Record<string, string> = {
   respond_to_approach: "찾아온 사람 응대",
   substitute: "선수 교체",
   record_incident: "사건 기록",
-  // 칩으로 서지 않는다(턴 뒤가 기록에서 꺼낸다) — 카탈로그와 이름을 맞추는 표라 여기 있다
-  suggest_reply: "다음 말 제안",
   apply_finance_event: "재정 이벤트",
   adjust_transfer_budget: "이적 예산 조정",
   request_board: "보드에 요청",

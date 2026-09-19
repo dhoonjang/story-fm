@@ -62,7 +62,7 @@ import { mockGmLlm } from "./mock-gm";
 import { retryOnce } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
 import { buildGmTools } from "./gm-tools";
-import { SUGGEST_REPLY_TOOL, takeSuggestion } from "./suggest-reply";
+import { takeSuggestion } from "./suggest-reply";
 import { applyTacticOrders, type AppliedTacticOrders } from "./tactic-apply";
 import {
   buildGmDigest,
@@ -127,9 +127,7 @@ function sceneFromToolCalls(calls: readonly GmToolCall[]): string | null {
     // ⚠️ **시간 경과는 여기 서지 않는다.** 그 사실은 이번 턴의 사건 카드가 이미 진다
     // (`GmTurnResult.events` → `ChatTurn.events`) — 지문으로도 펴면 같은 사건이 카드
     // N장과 문장 N줄로 두 번 선다. 한 사실은 한 자리에만 (overview.md §2)
-    // 제안도 서지 않는다 — 감독의 말이 아니라 감독이 할 법한 말이다. 턴 뒤가 먼저 꺼내
-    // 가지만(`takeSuggestion`), 이 함수가 그 순서에 기대지 않게 여기서도 거른다
-    .filter((call) => call.name !== TIME_PASSED && call.name !== SUGGEST_REPLY_TOOL)
+    .filter((call) => call.name !== TIME_PASSED)
     .flatMap((call) =>
       // 항목을 가진 기록은 **항목 하나가 한 줄**이다 — 한 문단으로 접으면 화면이
       // 사건 하나를 한 줄로 세우지 못한다 (overview.md §2). 항목이 없던 옛 기록은
@@ -478,21 +476,21 @@ async function callGm(
     }) ?? createGameLLM(config);
   /**
    * 경기 중 도구는 **경기 도구 셋**뿐이다 — 코어를 부르는 손잡이이고 경기를 바꾸지
-   * 못한다 (agents.md §3). 손잡이 턴은 마감 하나, 킥오프 턴은 판을 움직일 도구가 없다.
-   * 도구 정의는 고정층이지만 셋뿐이라 평시의 56개와는 눈금이 다르다 (agents.md §5).
+   * 못한다 (agents.md §3). 손잡이 턴은 마감 하나, 킥오프 턴은 없다. 도구 정의는
+   * 고정층이지만 셋뿐이라 평시의 56개와는 눈금이 다르다 (agents.md §5).
    *
    * 방 안의 도구도 **협상 도구 셋**뿐이다 — 장부를 바꾸는 것은 코어고 셋은 손잡이다
-   * (agents.md §4-1). 자리에 앉는 턴과 일어서는 손잡이 턴에는 방의 도구가 없다. 제안 폼으로만
-   * 온 손잡이 턴은 셋을 쥔다 — 상대가 그 오퍼에 답할 자리다 (손잡이는 감독의 말이 없어
-   * 열리지 않는다).
-   *
-   * 어느 턴에도 **감독의 다음 말을 제안하는 도구 하나**는 함께 선다 — 셋의 빌더가 각자
-   * 얹는다 (agents.md §2). 도구가 없는 턴(킥오프·앉는 턴·일어서는 턴)에는 그것만 선다.
+   * (agents.md §4-1). 자리에 앉는 턴과 일어서는 손잡이 턴은 없다. 제안 폼으로만 온 손잡이
+   * 턴은 셋을 쥔다 — 상대가 그 오퍼에 답할 자리다 (손잡이는 감독의 말이 없어 열리지 않는다).
    */
   const tools = inMatch
-    ? buildMatchTools(state, matchCtx, { operator, kickoff })
+    ? kickoff
+      ? []
+      : buildMatchTools(state, matchCtx, { operator })
     : inNegotiation
-      ? buildNegotiationTools(state, negotiationCtx, { seating, leaving })
+      ? seating || leaving
+        ? []
+        : buildNegotiationTools(state, negotiationCtx)
       : buildGmTools(state, ledger.calls, {
           // 손잡이 셋이 해석기에 넘길 원문 — 감독이 친 말일 때만이다 (agents.md §1)
           ...(operator ? {} : { said: message }),
@@ -689,11 +687,11 @@ async function closeTurn(
   const peace = !inMatch && !inNegotiation;
   const { result } = call;
   /**
-   * **감독의 다음 말은 장부에서 꺼낸다** — 기록에서 빠져야 아래의 어느 자리도(빈 장면의
-   * 코어 기록 · 저장되는 `toolCalls` · 압축 브리프) 그 문장을 감독의 말처럼 읽지 않는다
-   * (agents.md §2). 그래서 이 한 줄이 턴 뒤의 첫 일이다.
+   * **감독의 다음 말은 본문 마지막 줄의 태그에서 꺼낸다** — 위생이 그 줄을 걷기 전에
+   * (agents.md §2 · prompts.md §1). 태그 줄은 꺾쇠 블록이라 아래의 위생과 스트리밍 필터가
+   * 화면과 저장에서 함께 걷고, 값은 `ChatTurn.suggestion` 하나에만 남는다.
    */
-  const suggestion = takeSuggestion(ledger.calls);
+  const { text: rawText, suggestion } = takeSuggestion(result.text);
   /**
    * **GM이 마감을 부르지 않았으면 코어가 대신 부른다** (agents.md §3 「경기 마감」) —
    * 경기가 끝났는데 열려 있는 세이브는 없다. 마무리 중계는 장면 끝에 붙는다.
@@ -713,7 +711,7 @@ async function closeTurn(
   // 도구 앞에 흘린 작업 서술과 값이 같은 반복 헤더를 걷어낸다 — 중계에는 헤더 규칙을
   // 걸지 않는다(구간마다 헤더를 새로 찍는 것이 정상이다 — prompts.md §1). 남는 것은
   // 두 국면이 함께 읽는 꺾쇠 규칙 하나다
-  const sceneText = inMatch ? sanitizeCasterText(result.text) : sanitizeSceneText(result.text);
+  const sceneText = inMatch ? sanitizeCasterText(rawText) : sanitizeSceneText(rawText);
   // 첫 줄 헤더가 본문과 갈린다 — 저장할 때 되붙일 것이고, 경기 턴은 분을 여기서 읽는다
   const scene = parseSceneHeader(sceneText);
   /**
@@ -915,6 +913,7 @@ async function closeTurn(
     stalled: clockStalled,
     emptyScene,
     closedByCore: closingTail.length > 0,
+    suggested: suggestion !== undefined,
     textChars: text.length,
   });
   return {
