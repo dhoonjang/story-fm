@@ -38,6 +38,7 @@ export const MARKET_ORDERS_SYSTEM = `당신은 감독의 말을 이적·재정 �
 - respond_offer — 상대가 넣은 오퍼에 감독의 답(accept·counter·reject). counter는 받은 값 위로 되부르는 것. negotiationId는 <negotiations>의 id. 우리 제안 위로 상대가 되부른 조정을 받아들이는 말은 accept_deal이다.
 - accept_deal — 감독이 받아들이겠다고 한 협상. 합의된 협상은 확정하고, 상대의 조정이 서 있으면 그 조건 그대로 다시 제안한다.
 - withdraw_offer — 협상을 접는다.
+- delegate_negotiation — 협상을 담당자에게 맡기는 말("재계약은 코치한테 맡겨, 주급은 £150k까지"). to는 감독이 부른 이름 또는 직책(수석코치·코치·스카우트). 한도는 감독이 부른 값만 — fee(이적료·임대료·정산금 · 내보내는 딜은 하한)·weeklyWage·years. 열린 협상은 negotiationId, 없으면 playerId(와 kind)로 — 이 명령이 협상을 열므로 send_offer·open_renewal을 함께 부르지 않는다. 한도 없는 말도 그대로 싣는다 — 코어가 자를 돌려준다. revoke_mandate — 맡긴 협상을 감독이 되가져오는 말.
 - open_renewal — 재계약 제안. terms는 send_offer와 같다. open_release — 합의 해지 제안. release_player — 일방 해지(잔여 주급 전액) — 감독이 그것을 알고 말했을 때만.
 - offer_terms — 열린 협상에 조건을 걸거나 상대가 부른 요구를 들어주는 말(같은 갈래를 올리면 들어준 것이다). answer_term — 상대가 부른 요구에 답하는 말(granted·refused). propose_personal — 영입·임대에서 이적료 없이 주급·연수·지위만 먼저 제안하는 말. 마주 앉은 자리의 말은 여기가 아니다.
 - set_transfer_list — 팔겠다·리스트에서 뺀다. askingPrice는 말했을 때만. respond_transfer_request — 선수의 이적 요청에 accept·refuse.
@@ -58,6 +59,8 @@ export const MARKET_OPS: readonly string[] = [
   "accept_deal",
   "respond_transfer_request",
   "withdraw_offer",
+  // 걷는 것은 답할 것·접을 것과 같은 앞자리다 — 걷고 나서 감독이 답하는 말이 한 턴에 온다
+  "revoke_mandate",
   "set_transfer_list",
   // 조건은 오퍼보다 앞이다 — 같은 말에 함께 오면 조건서가 먼저 서야 오퍼가 싣는다 (§12-3)
   "answer_term",
@@ -66,6 +69,8 @@ export const MARKET_OPS: readonly string[] = [
   "open_renewal",
   "propose_personal",
   "open_release",
+  // 위임은 협상을 열 수도 있어 여는 셋 뒤다 — 같은 말에 접고 다시 맡기는 순서가 선다 (§12-4)
+  "delegate_negotiation",
   "release_player",
   "exercise_buyback",
   "recall_loan",
