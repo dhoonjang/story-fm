@@ -31,6 +31,8 @@ const KIND_ICON = {
   release: IconPerson,
   withdraw: IconTrash,
   scout: IconInsight,
+  // 위임 — 테이블에 앉는 것은 사람이라 담당자의 아이콘이다
+  mandate: IconPerson,
 } as const;
 
 /**
@@ -99,6 +101,10 @@ function badgeOf(card: MarketCard): string {
       return way ? `${way} 철회` : "협상 철회";
     case "scout":
       return "스카우트 파견";
+    case "mandate":
+      // 걷은 카드는 방향이 필요 없다 — 감독이 다시 앉는다는 사실 하나다
+      if (card.mandate?.revoked) return "위임 회수";
+      return way ? `${way} 위임` : "위임";
   }
 }
 
@@ -200,6 +206,31 @@ export function MarketCardView({ card, propose = true }: { card: MarketCard; pro
           </span>
         )}
       </div>
+
+      {/* 위임장 — 누가 · 어디까지. 조건의 격자와 같은 자리에 서서 카드마다 값이 같은 열에서 읽힌다 */}
+      {card.mandate && (
+        <div className="mc-table">
+          <div className="mc-terms">
+            <em className="mc-side">담당</em>
+            <div className="mc-vals">
+              <span>
+                <b>{card.mandate.to}</b>
+                {card.mandate.title && <em>{card.mandate.title}</em>}
+              </span>
+            </div>
+          </div>
+          {card.mandate.limit && (
+            <div className="mc-terms">
+              <em className="mc-side">한도</em>
+              <div className="mc-vals">
+                <span>
+                  <b>{card.mandate.limit}</b>
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 두 줄이 한 그리드다 — 이름표 열이 가장 긴 이름표에 맞춰 늘어나 값이 같은 자리에서 시작한다 */}
       {(card.terms || card.counterTerms) && (

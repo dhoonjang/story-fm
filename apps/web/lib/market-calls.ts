@@ -7,6 +7,7 @@ const MARKET_CARD_KINDS: ReadonlySet<MarketCardKind> = new Set([
   "renewal",
   "withdraw",
   "scout",
+  "mandate",
 ]);
 
 /**

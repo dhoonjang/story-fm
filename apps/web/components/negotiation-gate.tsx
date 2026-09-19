@@ -62,6 +62,20 @@ export function NegotiationGate({
             <Voices voices={room.voices} />
           </div>
 
+          {/* 위임장 — 앉는 순간 걷힌다 (transfer.md §12-4). 앉기 전의 마지막 한 장이 그 사실을 든다 */}
+          {room.mandate && (
+            <div className="ng-block" data-testid="negotiation-mandate">
+              <span className="ng-label">위임</span>
+              <span className="ng-mandate">
+                <b>{room.mandate.to}</b>
+                {[room.mandate.title, room.mandate.limit].filter(Boolean).map((part) => (
+                  <span key={part}>{part}</span>
+                ))}
+                <i>앉으면 걷힌다</i>
+              </span>
+            </div>
+          )}
+
           {/* 빈 협상(오퍼 없이 떠보는 자리)은 조건서가 없다 — 절 자체가 서지 않는다 */}
           {hasTermSheet(room) && (
             <div className="ng-block">

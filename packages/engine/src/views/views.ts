@@ -34,7 +34,13 @@ import type {
   TableSpeaker,
   TableStance,
 } from "@story-fm/domain";
-import { PITCH_CLAIM_KO, TABLE_STANCE_KO, dealTermLabel } from "@story-fm/domain";
+import {
+  PITCH_CLAIM_KO,
+  TABLE_STANCE_KO,
+  dealTermLabel,
+  isMandated,
+  mandateLimitText,
+} from "@story-fm/domain";
 import {
   BOARD_CONDITION_LABEL,
   BOARD_REQUEST_LABEL,
@@ -198,7 +204,7 @@ import type {
   StaffRole,
   TacticAssignment,
 } from "@story-fm/domain";
-import { headCoachOf, staffOf } from "../world/persona";
+import { delegateById, headCoachOf, staffOf } from "../world/persona";
 import {
   arrivedResponses,
   counterpartOf,
@@ -1859,6 +1865,12 @@ export interface NegotiationRoomView {
   loan: boolean;
   precontract: boolean;
   status: Negotiation["status"];
+  /**
+   * **위임장** — 이 협상을 쥔 담당자와 한도 (transfer.md §12-4). 게이트가 세운다: 감독이
+   * 자리에 앉는 순간 걷히므로(`markSeated`) 앉기 전의 마지막 한 장이 그 사실을 든다.
+   * 위임이 살아 있지 않으면 null.
+   */
+  mandate: { to: string; title: string; limit: string } | null;
 }
 
 /** 오피스 뷰 — 상태의 읽기 전용 프로젝션 (overview §5) */
@@ -3642,6 +3654,11 @@ function buildNegotiationView(state: GameState): NegotiationRoomView | null {
     : null;
   const personal = negotiation.personal;
   const ultimatum = standingDeadlineOf(negotiation);
+  // 담당자가 구단을 떠났으면 수석코치가 그 자리에 선다 (people.md §3)
+  const delegate =
+    negotiation.mandate && isMandated(negotiation)
+      ? (delegateById(state, negotiation.mandate.to) ?? headCoachOf(state))
+      : null;
   return {
     negotiationId: negotiation.id,
     playerId: player.id,
@@ -3685,6 +3702,14 @@ function buildNegotiationView(state: GameState): NegotiationRoomView | null {
     loan: negotiation.kind === "loan" || negotiation.kind === "loan_out",
     precontract: negotiation.precontract === true,
     status: negotiation.status,
+    mandate:
+      delegate && negotiation.mandate
+        ? {
+            to: delegate.name,
+            title: delegate.employment?.title ?? personaRoleLabel(delegate.role) ?? "",
+            limit: mandateLimitText(negotiation.mandate, negotiation.kind),
+          }
+        : null,
   };
 }
 
