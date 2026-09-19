@@ -123,6 +123,7 @@ import {
   pendingVerdicts,
   runMedicals,
 } from "../market/negotiation";
+import { runMandates } from "../market/mandate";
 // 서열대로 받고 있는가를 묻는 곡선 — 재계약·이적이 읽는 것과 같은 자다
 import { wageByRating } from "../market/market";
 import { tickInterests } from "../market/interest";
@@ -979,6 +980,12 @@ function dailyTick(
   // 협상 — 기한 경과 처리 + 들어오는 오퍼 + 상대의 답 도착.
   // 무직이면 흥정할 구단이 없다 — 경질과 함께 진행 중이던 협상은 이미 사라졌다
   if (managed) expireNegotiations(state, kind.interest);
+  /**
+   * 담당자에게 맡긴 협상 — 감독 턴 없이 여기서 굴러 합의·결렬·되돌림으로 간다
+   * (transfer.md §12-4). **기한 처리 뒤**다: 오늘 무산된 협상의 날을 위임장이 먼저 받아야
+   * 담당자의 사실이 「무산」으로 서고, 없는 협상에 첫 제시를 넣지 않는다.
+   */
+  if (managed) runMandates(state, digest);
   /**
    * 메디컬 — 합의한 딜은 검진일에 계약이 된다. **통과는 시계를 세우지 않는다**:
    * 감독이 이미 결정한 일이라 확인만 남았다. 소견이 붙어도 오늘 답할 필요는

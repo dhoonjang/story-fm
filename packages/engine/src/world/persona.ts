@@ -1486,6 +1486,14 @@ export function delegateByName(
 }
 
 /**
+ * 담당자의 직책 — **스태프의 칩과 같은 규약이다** (people.md §3): 고용 정보가 든 직책
+ * (「피지컬 코치」)이 먼저고, 없으면 역할 라벨이다. 카드·게이트·사건이 같은 낱말을 쓴다.
+ */
+export function delegateTitleOf(person: Pick<Persona, "role" | "employment">): string {
+  return person.employment?.title ?? personaRoleLabel(person.role) ?? "";
+}
+
+/**
  * 위임장이 든 담당자 — `characterId`로 찾는다. 그 사람이 구단을 떠났으면 `null`이고,
  * 부르는 쪽은 수석코치를 대신 세운다 (people.md §3 「자리가 비면 수석코치가 대신 선다」).
  */

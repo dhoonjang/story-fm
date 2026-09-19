@@ -204,7 +204,7 @@ import type {
   StaffRole,
   TacticAssignment,
 } from "@story-fm/domain";
-import { delegateById, headCoachOf, staffOf } from "../world/persona";
+import { delegateById, delegateTitleOf, headCoachOf, staffOf } from "../world/persona";
 import {
   arrivedResponses,
   counterpartOf,
@@ -3706,7 +3706,7 @@ function buildNegotiationView(state: GameState): NegotiationRoomView | null {
       delegate && negotiation.mandate
         ? {
             to: delegate.name,
-            title: delegate.employment?.title ?? personaRoleLabel(delegate.role) ?? "",
+            title: delegateTitleOf(delegate),
             limit: mandateLimitText(negotiation.mandate, negotiation.kind),
           }
         : null,

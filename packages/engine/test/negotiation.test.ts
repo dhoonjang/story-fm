@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { GameState } from "@story-fm/engine";
+import { isMandated } from "@story-fm/domain";
 import type { Interest } from "@story-fm/domain";
 import {
   acceptDeal,
   activeContract,
+  delegateByName,
+  delegateNegotiation,
+  MANDATE_HAND_BACK_AT,
+  MANDATE_MONEY_STEP,
+  mandateFacts,
+  revokeMandate,
+  runMandates,
+  stepToward,
   sitAtTable,
   seatAt,
   settleTableReply,
@@ -4184,5 +4193,246 @@ describe("제안 폼 — 구조체가 명령이 된다", () => {
     });
     expect(signed.ok, signed.message).toBe(true);
     expect(openNegotiationFor(state, player.id)!.rounds[0]!.fee).toBe(0);
+  });
+});
+
+/**
+ * **위임 — 담당자가 대신 앉는 협상** (transfer.md §12-4).
+ *
+ * 재는 것은 담당자의 수가 결정적인가다: 되부르기 공식과 그 경계(한도를 정확히 맞춘 요구 ·
+ * 매각의 하한 · 더 부를 칸), 되돌리는 조건, 그리고 위임된 협상이 감독의 자리에서 빠지는가.
+ * 장면도 문장도 재지 않는다 — 그것은 화면과 GM의 몫이다.
+ */
+describe("위임 — 담당자가 대신 앉는 협상", () => {
+  /** 계약이 곧 끝나는 우리 선수 — 재계약을 열 수 있는 자리 */
+  function renewable(state: GameState) {
+    const player = playersOf(state, state.userTeamId)[0]!;
+    activeContract(state, player.id)!.until = addDays(state.date, 120);
+    return player;
+  }
+
+  /** 주급 상한을 주고 맡긴 재계약 — 첫 제시는 담당자가 넣는다 */
+  function delegatedRenewal(state: GameState, ceiling: number) {
+    const player = renewable(state);
+    const done = delegateNegotiation(state, {
+      to: "수석코치",
+      playerId: player.id,
+      kind: "renew",
+      weeklyWage: ceiling,
+    });
+    expect(done.ok, done.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    return { player, negotiation };
+  }
+
+  /** 답할 날을 오늘로 당겨 상대가 그 값을 되부르게 한다 — 재는 것은 답의 날이 아니다 */
+  function counterWith(state: GameState, negotiation: Negotiation, weeklyWage: number) {
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const countered = respondOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "counter",
+      weeklyWage,
+    });
+    expect(countered.ok, countered.message).toBe(true);
+  }
+
+  describe("되부르기 공식 — 한도 쪽으로 반씩", () => {
+    it("지금 값과 한도의 중간을 단위로 맞추고, 한도를 넘지 않는다", () => {
+      // 100k에서 상한 150k로 — 중간은 125k
+      expect(stepToward(100_000, 150_000)).toBe(125_000);
+      // 단위로 맞춘다 — 중간이 1,500이면 2,000이 아니라 단위의 배수다
+      expect(stepToward(0, 3_000) % MANDATE_MONEY_STEP).toBe(0);
+      // 하한 쪽으로도 같은 폭이다 — 내보내는 딜은 깎아 다가간다
+      expect(stepToward(100_000, 50_000)).toBe(75_000);
+    });
+
+    it("이미 한도면 움직이지 않는다 — 더 부를 칸이 없는 자리다", () => {
+      expect(stepToward(150_000, 150_000)).toBe(150_000);
+      // 한도를 지나치지 않는다 — 중간이 한도 밖으로 튈 수 있는 작은 폭에서도
+      expect(stepToward(149_900, 150_000)).toBeLessThanOrEqual(150_000);
+      expect(stepToward(50_100, 50_000)).toBeGreaterThanOrEqual(50_000);
+    });
+
+    it("연수는 단위가 1이다 — 정수 사다리라 천 단위로 맞출 것이 없다", () => {
+      expect(stepToward(2, 4, 1)).toBe(3);
+      expect(stepToward(4, 4, 1)).toBe(4);
+    });
+  });
+
+  it("한도 없는 위임은 열리지 않고 코어가 그 갈래의 자를 돌려준다", () => {
+    const state = createTestGame(42);
+    const player = renewable(state);
+    const refused = delegateNegotiation(state, {
+      to: "수석코치",
+      playerId: player.id,
+      kind: "renew",
+    });
+    expect(refused.ok).toBe(false);
+    expect(refused.message).toContain(formatMoney(renewalExpectation(state, player)));
+    // 협상도 서지 않는다 — 한도 없는 위임은 첫 제시도 넣지 않는다
+    expect(openNegotiationFor(state, player.id)).toBeNull();
+  });
+
+  it("맡기면 담당자가 코어의 자로 첫 제시를 넣고, 그 자는 한도 안이다", () => {
+    const state = createTestGame(42);
+    const player = renewable(state);
+    const ceiling = Math.round(renewalExpectation(state, player) * 0.7);
+    const done = delegateNegotiation(state, {
+      to: "수석코치",
+      playerId: player.id,
+      kind: "renew",
+      weeklyWage: ceiling,
+    });
+    expect(done.ok, done.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    expect(negotiation.mandate?.to).toBe(delegateByName(state, "수석코치")!.characterId);
+    // 기대 주급이 상한 위라 상한이 그대로 첫 제시다 — 지어낸 값이 아니다
+    expect(pendingOffer(negotiation)!.weeklyWage).toBe(ceiling);
+  });
+
+  it("한도를 정확히 맞춘 요구는 그대로 받는다 — 상한은 이하가 안이다", () => {
+    const state = createTestGame(42);
+    const expectation = renewalExpectation(state, playersOf(state, state.userTeamId)[0]!);
+    const demanded = Math.round(expectation * 1.15);
+    const { negotiation } = delegatedRenewal(state, demanded);
+    counterWith(state, negotiation, demanded);
+
+    runMandates(state, []);
+    // 받은 값 그대로 다시 제안됐다 — 위임은 살아 있고 되돌아오지 않았다
+    const last = [...negotiation.rounds].reverse().find((r) => r.by === "us")!;
+    expect(last.weeklyWage).toBe(demanded);
+    expect(negotiation.mandate?.handedBack).toBeUndefined();
+    expect(isMandated(negotiation)).toBe(true);
+  });
+
+  it("한도를 넘는 요구에는 한도 쪽으로 반씩 다가가 되부르고, 거듭되면 감독에게 되돌린다", () => {
+    const state = createTestGame(42);
+    const expectation = renewalExpectation(state, playersOf(state, state.userTeamId)[0]!);
+    // 상한이 기대 주급 위라 첫 제시(기대 주급)와 상한 사이에 되부를 칸이 남는다 —
+    // 첫 제시가 이미 상한이면 담당자는 그 자리에서 되돌린다(아래 케이스가 그 자리다)
+    const ceiling = Math.round(expectation * 1.1);
+    const demanded = Math.round(expectation * 1.3);
+    const { negotiation } = delegatedRenewal(state, ceiling);
+    const opening = pendingOffer(negotiation)!.weeklyWage;
+
+    // 같은 요구를 되풀이한다 — 되돌리는 눈금은 코어의 것이라 그 수를 여기 적지 않는다
+    const steps: number[] = [];
+    for (let i = 0; i < MANDATE_HAND_BACK_AT; i++) {
+      counterWith(state, negotiation, demanded);
+      runMandates(state, []);
+      steps.push([...negotiation.rounds].reverse().find((r) => r.by === "us")!.weeklyWage);
+      if (i === 0) expect(negotiation.mandate?.handedBack).toBeUndefined();
+    }
+    // 첫 요구에는 한도 쪽으로 반씩 다가가 되불렀다
+    expect(steps[0]).toBe(stepToward(opening, ceiling));
+    expect(steps[0]).toBeLessThanOrEqual(ceiling);
+    // 거듭된 요구는 감독의 판단이다
+    expect(negotiation.mandate?.handedBack?.reason).toContain("한도");
+    expect(isMandated(negotiation)).toBe(false);
+  });
+
+  it("첫 제시가 이미 한도면 되부를 칸이 없어 그 자리에서 되돌린다", () => {
+    const state = createTestGame(42);
+    const expectation = renewalExpectation(state, playersOf(state, state.userTeamId)[0]!);
+    // 상한이 기대 주급 아래라 첫 제시가 곧 상한이다 — 다가갈 칸이 없다
+    const ceiling = Math.round(expectation * 0.9);
+    const { negotiation } = delegatedRenewal(state, ceiling);
+    expect(pendingOffer(negotiation)!.weeklyWage).toBe(ceiling);
+    counterWith(state, negotiation, Math.round(expectation * 1.15));
+
+    runMandates(state, []);
+    expect(negotiation.mandate?.handedBack?.reason).toContain("더 부를 칸이 없습니다");
+  });
+
+  it("되돌아온 협상은 주의 줄에 담당자와 사유로 다시 선다", () => {
+    const state = createTestGame(42);
+    const expectation = renewalExpectation(state, playersOf(state, state.userTeamId)[0]!);
+    const { negotiation } = delegatedRenewal(state, Math.round(expectation * 0.9));
+    counterWith(state, negotiation, Math.round(expectation * 1.15));
+
+    // 위임이 살아 있는 동안은 감독의 차례가 아니다 — 편지도 주의 줄도 서지 않는다
+    expect(arrivedResponses(state).map((n) => n.id)).not.toContain(negotiation.id);
+    expect(pendingVerdicts(state).map((v) => v.negotiation.id)).not.toContain(negotiation.id);
+
+    negotiation.mandate!.handedBack = { on: state.date, reason: "한도를 넘는 요구가 거듭됐습니다" };
+    const verdict = pendingVerdicts(state).find((v) => v.negotiation.id === negotiation.id);
+    expect(verdict).toBeDefined();
+    expect(verdict!.label).toContain("되돌렸습니다");
+    expect(verdict!.label).toContain("한도를 넘는 요구");
+  });
+
+  it("매각의 하한 — 그 아래 조정에는 하한 위로 되부르고, 하한을 맞춘 값은 받는다", () => {
+    const state = createTestGame(42);
+    for (const w of state.windows) w.closesOn = addDays(state.date, 30);
+    const player = playersOf(state, state.userTeamId)[0]!;
+    const asking = askingPriceFor(state, player);
+    const opened = offerPlayerOut(state, { playerId: player.id, teamId: "chelsea", fee: asking });
+    expect(opened.ok, opened.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    const floor = Math.round(asking * 0.9);
+    const delegated = delegateNegotiation(state, {
+      to: "수석코치",
+      negotiationId: negotiation.id,
+      fee: floor,
+    });
+    expect(delegated.ok, delegated.message).toBe(true);
+
+    // 사는 쪽이 하한 아래로 깎아 부른다
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const low = respondOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "counter",
+      fee: Math.round(asking * 0.7),
+    });
+    expect(low.ok, low.message).toBe(true);
+
+    runMandates(state, []);
+    const resent = [...negotiation.rounds].reverse().find((r) => r.by === "us")!;
+    expect(resent.fee).toBeGreaterThanOrEqual(floor);
+    expect(resent.fee).toBeLessThan(asking);
+    expect(negotiation.mandate?.handedBack).toBeUndefined();
+  });
+
+  it("상대가 기한을 당기면 되돌린다 — 시계를 세울 일은 감독의 것이다", () => {
+    const state = createTestGame(42);
+    const expectation = renewalExpectation(state, playersOf(state, state.userTeamId)[0]!);
+    const { negotiation } = delegatedRenewal(state, Math.round(expectation * 1.4));
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const ultimatum = addDays(state.date, 2);
+    const countered = respondOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "counter",
+      weeklyWage: Math.round(expectation * 1.1),
+      deadlineOn: ultimatum,
+    });
+    expect(countered.ok, countered.message).toBe(true);
+    expect(negotiation.expiresOn).toBe(ultimatum);
+
+    runMandates(state, []);
+    expect(negotiation.mandate?.handedBack?.reason).toContain(ultimatum);
+  });
+
+  it("감독이 마주 앉으면 위임은 걷히고, 말로도 걷을 수 있다", () => {
+    const state = createTestGame(42);
+    const expectation = renewalExpectation(state, playersOf(state, state.userTeamId)[0]!);
+    const { negotiation } = delegatedRenewal(state, Math.round(expectation * 1.2));
+    expect(mandateFacts(state)).toHaveLength(1);
+
+    const revoked = revokeMandate(state, negotiation.id);
+    expect(revoked.ok, revoked.message).toBe(true);
+    expect(negotiation.mandate).toBeUndefined();
+    // 걷힌 협상은 위임 전과 같은 장부다 — 두 번 걷을 것은 없다
+    expect(revokeMandate(state, negotiation.id).ok).toBe(false);
+
+    const again = delegateNegotiation(state, {
+      to: "수석코치",
+      negotiationId: negotiation.id,
+      weeklyWage: Math.round(expectation * 1.2),
+    });
+    expect(again.ok, again.message).toBe(true);
+    const seated = startNegotiation(state, { negotiationId: negotiation.id });
+    expect(seated.ok, seated.message).toBe(true);
+    markSeated(state);
+    expect(negotiation.mandate).toBeUndefined();
   });
 });

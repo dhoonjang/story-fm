@@ -26,7 +26,9 @@ import {
   ageOf,
   dealTermLabel,
   buildPaymentInstallments,
+  isMandated,
   isPlayerDeal,
+  mandateLimitText,
   marketDirectionKo,
   naturalPositionOf,
   registrationBlockText,
@@ -81,6 +83,7 @@ import {
   wageExpectationOf,
   type DealTerms,
 } from "./market";
+import { delegateById, delegateTitleOf, headCoachOf } from "../world/persona";
 import { betterAtPosition, squadDepthOf } from "../squad/depth";
 import { clearDepartedState, isFreeAgent, loanPlayer, releasePlayer } from "./departures";
 import {
@@ -269,7 +272,7 @@ function directionOfKind(kind: Negotiation["kind"]): MarketDirection | null {
 }
 
 /** 카드에 실을 방향 — 방향이 없는 갈래에는 필드 자체가 서지 않는다 */
-function directionField(kind: Negotiation["kind"]): { direction?: MarketDirection } {
+export function directionField(kind: Negotiation["kind"]): { direction?: MarketDirection } {
   const direction = directionOfKind(kind);
   return direction ? { direction } : {};
 }
@@ -402,10 +405,15 @@ export function pendingOffer(negotiation: Negotiation) {
   return last && last.by === "us" && last.verdict === null ? last : null;
 }
 
-/** 오늘 답이 도착한 협상 — tick이 감독에게 알린다. 개인 조건 제안의 답도 같은 자리다 (§12-3) */
+/**
+ * 오늘 답이 도착한 협상 — tick이 감독에게 알린다. 개인 조건 제안의 답도 같은 자리다 (§12-3).
+ *
+ * **담당자에게 맡긴 협상은 빠진다** (§12-4) — 그 답은 편지가 아니라 `runMandates`가 앵커로
+ * 굳힌다. 되돌아온 협상은 위임이 죽은 협상이라 여기 다시 선다.
+ */
 export function arrivedResponses(state: GameState): Negotiation[] {
   return state.negotiations.filter((n) => {
-    if (n.status !== "open") return false;
+    if (n.status !== "open" || isMandated(n)) return false;
     const offer = pendingOffer(n);
     if (offer !== null) return offer.respondsOn !== null && offer.respondsOn <= state.date;
     const personal = personalAwaiting(n);
@@ -2865,7 +2873,7 @@ function agreedTermsOf(
  * 깎아 다시 부른 값은 `verdict`가 비어 있어 여기 걸리지 않는다 — 그것은 감독이
  * `respond_offer`로 답할 오퍼다.
  */
-function standingCounter(negotiation: Negotiation): Negotiation["rounds"][number] | null {
+export function standingCounter(negotiation: Negotiation): Negotiation["rounds"][number] | null {
   if (negotiation.status !== "open") return null;
   const last = negotiation.rounds[negotiation.rounds.length - 1];
   return last && last.by === "them" && last.verdict === "counter" ? last : null;
@@ -4016,8 +4024,15 @@ export function expireNegotiations(state: GameState, digest: TickSink): void {
       continue;
     }
     const deadline = standingDeadlineOf(negotiation);
-    // 기한 하루 전 — 결정하지 못한 채 사라지는 일이 없게 한 번 더 세운다 (앉기만 한 자리는 빼고)
-    if (negotiation.rounds.length > 0 && negotiation.expiresOn === addDays(state.date, 1)) {
+    /**
+     * 기한 하루 전 — 결정하지 못한 채 사라지는 일이 없게 한 번 더 세운다 (앉기만 한 자리는 빼고).
+     * **맡긴 협상은 서지 않는다** (§12-4) — 오늘 결정할 사람이 감독이 아니다.
+     */
+    if (
+      !isMandated(negotiation) &&
+      negotiation.rounds.length > 0 &&
+      negotiation.expiresOn === addDays(state.date, 1)
+    ) {
       const player = playerById(state, negotiation.gamePlayerId);
       digest.push(
         deadline
@@ -4083,6 +4098,11 @@ export function pendingVerdicts(state: GameState): Array<{
     subject: string;
   }> = [];
   for (const negotiation of state.negotiations) {
+    /**
+     * **맡긴 협상은 감독의 차례가 아니다** (§12-4) — 답도 조정도 담당자가 쥐고 있어 여기
+     * 세우면 감독이 맡긴 일에 매 턴 불려 나온다. 되돌아온 것만 아래에서 다시 선다.
+     */
+    if (isMandated(negotiation)) continue;
     const player = playerById(state, negotiation.gamePlayerId);
     // 라벨은 방향을 함께 싣는다 — 이름만 서면 GM이 사는 건지 파는 건지 뒤집는다
     const deadline = standingDeadlineOf(negotiation);
@@ -4119,6 +4139,25 @@ export function pendingVerdicts(state: GameState): Array<{
       continue;
     }
     if (negotiation.status !== "open") continue;
+    /**
+     * **담당자가 되돌린 협상** (§12-4) — 한도 밖의 요구가 감독의 판단으로 올라온 자리다.
+     * 아래 갈래보다 앞에 서는 이유는 사유가 그 자리에서 가장 중요한 사실이기 때문이다:
+     * 「답이 왔습니다」로만 서면 감독은 왜 되돌아왔는지 모른 채 같은 한도를 다시 부른다.
+     */
+    const back = negotiation.mandate?.handedBack;
+    if (back) {
+      const person = delegateById(state, negotiation.mandate!.to) ?? headCoachOf(state);
+      const title = delegateTitleOf(person);
+      out.push({
+        negotiation,
+        action: "accept_deal",
+        subject: who,
+        label:
+          `${who} — ${title.length > 0 ? `${title} ` : ""}${person.name}${josa(person.name, "이/가")} ` +
+          `감독에게 되돌렸습니다: ${back.reason}. 조정을 받으려면 accept_deal, 아니면 다시 제안하거나 withdraw_offer`,
+      });
+      continue;
+    }
     if (incomingOffer(negotiation)) {
       out.push({
         negotiation,
@@ -4149,6 +4188,46 @@ export function pendingVerdicts(state: GameState): Array<{
     }
   }
   return out;
+}
+
+/**
+ * **위임장의 한 줄** — 누가 쥐고 어디까지인가, 되돌아왔으면 그 사유 (§12-4).
+ *
+ * 담당자의 이름과 직책은 인물 명부에서 오고(`delegateById`), 그 사람이 구단을 떠났으면
+ * 수석코치가 그 자리에 선다 (people.md §3). 한도의 낱말은 카드·게이트와 한 벌이다.
+ */
+function mandateOf(
+  state: GameState,
+  negotiation: Negotiation,
+): { label: string; limit: string; back?: string } | null {
+  const mandate = negotiation.mandate;
+  if (!mandate || mandate.settledOn !== undefined) return null;
+  const person = delegateById(state, mandate.to) ?? headCoachOf(state);
+  const title = delegateTitleOf(person);
+  return {
+    label: title.length > 0 ? `${title} ${person.name}` : person.name,
+    limit: mandateLimitText(mandate, negotiation.kind),
+    ...(mandate.handedBack ? { back: mandate.handedBack.reason } : {}),
+  };
+}
+
+/** 요약 줄의 꼬리 — 방향·기한과 같은 자리에 선다 */
+function mandateMark(state: GameState, negotiation: Negotiation): string {
+  const mandate = mandateOf(state, negotiation);
+  if (!mandate) return "";
+  return mandate.back === undefined
+    ? ` · 위임 ${mandate.label}${mandate.limit === "" ? "" : ` · ${mandate.limit}`}`
+    : ` · 위임 되돌아옴 (${mandate.label}: ${mandate.back})`;
+}
+
+/** 자세히 보는 자리의 한 줄 */
+function describeMandate(state: GameState, negotiation: Negotiation): string | null {
+  const mandate = mandateOf(state, negotiation);
+  if (!mandate) return null;
+  const head = `위임: ${mandate.label}${mandate.limit === "" ? "" : ` · 한도 ${mandate.limit}`}`;
+  return mandate.back === undefined
+    ? `${head} (${negotiation.mandate!.until}까지)`
+    : `${head} — ${negotiation.mandate!.handedBack!.on} 감독에게 되돌림: ${mandate.back}`;
 }
 
 /** 진행 중 협상 요약 — 조회 도구·상태 스냅샷용 (짧게) */
@@ -4191,7 +4270,9 @@ export function describeNegotiations(state: GameState): string {
         (n.tables?.agent
           ? ` · 선수 쪽 인내 ${n.tables.agent.patience}/${n.tables.agent.patienceMax}`
           : "") +
-        (n.feeAgreed ? ` · 이적료 합의 ${formatMoney(n.feeAgreed.fee)}` : "");
+        (n.feeAgreed ? ` · 이적료 합의 ${formatMoney(n.feeAgreed.fee)}` : "") +
+        // 맡긴 협상은 감독이 답할 자리가 아니다 — 누가 쥐고 어디까지인지가 그 줄의 사실이다 (§12-4)
+        mandateMark(state, n);
       if (n.status === "agreed") {
         const medical = describeMedical(state, n);
         return `${n.id} ${who} ${direction}${marks} — 합의됨, ${medical ?? "확정 대기"}`;
@@ -4265,6 +4346,8 @@ export function describeNegotiation(state: GameState, negotiationId: string): st
   ];
   const medical = describeMedical(state, negotiation);
   if (medical) lines.push(`메디컬: ${medical}`);
+  const mandateLine = describeMandate(state, negotiation);
+  if (mandateLine) lines.push(mandateLine);
   lines.push(...describeTermSheet(state, negotiation));
   lines.push(...describePersonal(negotiation, state.date));
   if ((negotiation.pitched?.length ?? 0) > 0) {
