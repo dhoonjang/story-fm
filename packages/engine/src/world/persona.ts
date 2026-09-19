@@ -1441,6 +1441,69 @@ export function factSpeakerOf(
   return (role === null ? undefined : staffOf(state, role)[0]) ?? headCoachOf(state);
 }
 
+/**
+ * **협상을 맡을 수 있는 사람들** — 수석코치 · 코치 · 스카우트 (transfer.md §12-4 ·
+ * people.md §2-2). 의료진은 협상 자리에 앉지 않는다. 수석코치가 먼저다 — 직책만 부른
+ * 말에서 그 자리가 비면 그가 대신 선다.
+ */
+export function delegatesOf(state: {
+  seed: number;
+  userTeamId: string;
+  personas?: Persona[];
+}): Persona[] {
+  return [headCoachOf(state), ...staffOf(state, "coach"), ...staffOf(state, "scout")];
+}
+
+/**
+ * 감독이 부른 담당자 — **이름이 먹고, 직책 낱말이면 그 자리의 첫 사람이다.**
+ *
+ * 「코치한테 맡겨」는 코치 자리의 첫 사람이고, 코치가 없으면 수석코치다. 이름은 화자 태그와
+ * 같은 규칙으로 맞춘다(`normalizeSpeaker` — 공백만 걷고 부분 일치는 하지 않는다, people.md
+ * §3): 성만 부른 말을 짐작해 붙이면 다른 사람이 협상을 쥔다. 스태프의 직책(「피지컬 코치」)도
+ * 그 사람을 부르는 말이다.
+ */
+export function delegateByName(
+  state: { seed: number; userTeamId: string; personas?: Persona[] },
+  said: string,
+): Persona | null {
+  const key = normalizeSpeaker(said);
+  if (key.length === 0) return null;
+  const people = delegatesOf(state);
+  const named = people.find((p) => normalizeSpeaker(p.name) === key);
+  if (named) return named;
+  const titled = people.find(
+    (p) => p.employment !== undefined && normalizeSpeaker(p.employment.title) === key,
+  );
+  if (titled) return titled;
+  const roleOf: Record<string, PersonaRole> = {
+    [normalizeSpeaker(HEAD_COACH_ROLE_LABEL)]: "head_coach",
+    [normalizeSpeaker(personaRoleLabel("coach") ?? "코치")]: "coach",
+    [normalizeSpeaker(personaRoleLabel("scout") ?? "스카우트")]: "scout",
+  };
+  const role = roleOf[key];
+  if (role === undefined) return null;
+  return people.find((p) => p.role === role) ?? headCoachOf(state);
+}
+
+/**
+ * 담당자의 직책 — **스태프의 칩과 같은 규약이다** (people.md §3): 고용 정보가 든 직책
+ * (「피지컬 코치」)이 먼저고, 없으면 역할 라벨이다. 카드·게이트·사건이 같은 낱말을 쓴다.
+ */
+export function delegateTitleOf(person: Pick<Persona, "role" | "employment">): string {
+  return person.employment?.title ?? personaRoleLabel(person.role) ?? "";
+}
+
+/**
+ * 위임장이 든 담당자 — `characterId`로 찾는다. 그 사람이 구단을 떠났으면 `null`이고,
+ * 부르는 쪽은 수석코치를 대신 세운다 (people.md §3 「자리가 비면 수석코치가 대신 선다」).
+ */
+export function delegateById(
+  state: { seed: number; userTeamId: string; personas?: Persona[] },
+  characterId: string,
+): Persona | null {
+  return delegatesOf(state).find((p) => p.characterId === characterId) ?? null;
+}
+
 /** 이 세이브의 구단주 — 옛 세이브라 비어 있으면 시드로 그 자리에서 만든다 */
 export function ownerOf(state: {
   seed: number;

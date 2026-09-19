@@ -88,6 +88,11 @@ const WEEKDAYS = [1, 2, 3, 4, 5] as const;
 /** 재계약을 여는 자 — 대본이 「계약 만료 다가오는 선수」로 고르는 폭 */
 const RENEWAL_HORIZON_DAYS = 365;
 const RENEWAL_YEARS = 3;
+/**
+ * 맡기는 말의 주급 상한 — 재계약 기대 주급의 이 배수. 실모드라면 감독이 부른 숫자가 서는
+ * 자리라(transfer.md §12-4) 대본이 그 자리를 대신 채운다 — 영입 줄의 `suggestTerms`와 같다.
+ */
+const MANDATE_CEILING_LIFT = 1.2;
 
 /**
  * **표** — 위에서 아래로 훑어 처음 걸린 줄이 그 턴의 대본이다.
@@ -159,6 +164,26 @@ const SCRIPT: readonly ScriptLine[] = [
       return {
         open_renewal: [
           { playerId: who.id, weeklyWage: renewalExpectation(state, who), years: RENEWAL_YEARS },
+        ],
+      };
+    },
+  },
+  {
+    // 담당자에게 맡긴다 — 협상이 없으면 이 명령이 연다. 직책 낱말은 코어가 그 자리의 사람으로 푼다
+    say: `${NAME_SLOT} 재계약은 코치한테 맡겨`,
+    gm: () => orders("market_orders"),
+    ops: ({ state, named }): OpsInput => {
+      const who = state.players.find((p) => p.name === named && p.teamId === state.userTeamId);
+      if (!who) return {};
+      return {
+        delegate_negotiation: [
+          {
+            to: "코치",
+            playerId: who.id,
+            kind: "renew",
+            weeklyWage: Math.round(renewalExpectation(state, who) * MANDATE_CEILING_LIFT),
+            years: RENEWAL_YEARS,
+          },
         ],
       };
     },

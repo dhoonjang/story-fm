@@ -67,6 +67,27 @@
   gap: var(--sp-2);
   min-width: 0;
 }
+/* 위임장 한 줄 — 이름이 주어, 직책·한도는 그 옆, 「걷힌다」는 한 톤 낮춰 끝에 */
+.ng-mandate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-ui);
+}
+.ng-mandate b {
+  font-weight: 600;
+}
+.ng-mandate span {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.ng-mandate i {
+  color: var(--text-3);
+  font-style: normal;
+  font-size: var(--fs-xs);
+}
 /* 성사와 인내는 나란히 — 둘 다 한 줄짜리 값이라 세로로 쌓으면 카드만 길어진다 */
 .ng-row {
   display: grid;

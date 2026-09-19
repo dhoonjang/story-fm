@@ -36,7 +36,9 @@ export type MarketCardKind =
   /** 협상을 접었다 */
   | "withdraw"
   /** 스카우트 파견 — 보고서는 며칠 뒤에 온다 */
-  | "scout";
+  | "scout"
+  /** 협상을 담당자에게 맡겼다 · 걷었다 (transfer.md §12-4) */
+  | "mandate";
 
 /** 조건 한 벌 — 없는 값은 싣지 않는다 (임대는 이적료가 임대료다) */
 export interface MarketTerms {
@@ -103,4 +105,10 @@ export interface MarketCard {
    * "지금 오는 게 아니라 여름에 온다"는 것이다 — 배지가 그 낱말을 든다.
    */
   precontract?: boolean;
+  /**
+   * **위임장** — 이 협상을 맡은 담당자와 한도 (→ docs/simulation/transfer.md §12-4).
+   * 맡긴 날과 걷은 날의 카드(`mandate`)가 든다. `limit`은 코어가 이미 읽을 수 있게 적은
+   * 한 줄(`mandateLimitText`)이고, `revoked`는 걷은 카드다.
+   */
+  mandate?: { to: string; title: string; limit: string; revoked?: boolean };
 }

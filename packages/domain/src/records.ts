@@ -12,6 +12,7 @@ import {
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 import { ContractTermSchema, DealTermSchema, TabledTermSchema } from "./deal-terms";
 import { SQUAD_STATUSES } from "./squad-rules";
+import { formatMoney } from "./money";
 import { RESERVE_COMPETITION_PREFIX, stageDepth, type MatchStage } from "./schedule";
 import {
   TACTIC_SCALE_MAX,
@@ -1038,6 +1039,43 @@ export const PersonalTermsSchema = z.object({
 });
 export type PersonalTerms = z.infer<typeof PersonalTermsSchema>;
 
+/**
+ * **위임장의 한도** — 담당자가 넘지 않는 값 (→ docs/simulation/transfer.md §12-4).
+ *
+ * 그 갈래의 돈(이적료·임대료·정산금)은 `fee`에, 주급과 계약 연수는 제 칸에 선다. 비운
+ * 축은 한도가 없는 축이다 — 갈래마다 서야 하는 한도 하나(영입의 이적료 · 재계약의 주급 ·
+ * 해지의 정산금 · 내보내는 딜의 이적료)는 위임을 여는 명령이 가린다.
+ */
+export const MandateLimitSchema = z.object({
+  fee: z.number().min(0).optional(),
+  weeklyWage: z.number().min(0).optional(),
+  contractYears: z.number().int().min(1).max(6).optional(),
+});
+export type MandateLimit = z.infer<typeof MandateLimitSchema>;
+
+/**
+ * **위임장** — 감독이 이 협상을 담당자에게 한도를 주고 맡겼다 (transfer.md §12-4).
+ *
+ * 담당자의 수는 코어의 결정적 규칙이라 여기 남는 것은 누가 · 어디까지 · 언제까지, 그리고
+ * 어떻게 끝났는가뿐이다. 옛 세이브엔 없다 (optional — 세이브 버전 그대로).
+ */
+export const NegotiationMandateSchema = z.object({
+  /** 담당자 — 수석코치·코치·스카우트의 `characterId`(= 이름, people.md §3) */
+  to: z.string().min(1),
+  /** 데려오는 딜·재계약·해지의 **상한** — 담당자가 이 위를 부르지 않는다 */
+  ceiling: MandateLimitSchema.optional(),
+  /** 내보내는 딜의 **하한** — 담당자가 이 아래를 받지 않는다 */
+  floor: MandateLimitSchema.optional(),
+  since: DateString,
+  /** 위임이 사는 마지막 날 — 맡긴 날의 협상 기한이다 */
+  until: DateString,
+  /** 담당자가 감독에게 되돌린 날과 사유 — 그 뒤 협상은 감독의 것이고 `❗`에 선다 */
+  handedBack: z.object({ on: DateString, reason: z.string().min(1) }).optional(),
+  /** 담당자가 매듭지었거나 협상이 닫힌 날 — 며칠 동안 결과가 담당자의 사실로 선다 */
+  settledOn: DateString.optional(),
+});
+export type NegotiationMandate = z.infer<typeof NegotiationMandateSchema>;
+
 export const NegotiationSchema = z.object({
   id: z.string().min(1),
   gamePlayerId: z.string().min(1),
@@ -1111,8 +1149,51 @@ export const NegotiationSchema = z.object({
   buyout: z.boolean().optional(),
   /** 개인 조건 선합의 — 영입·임대에서만 선다 (transfer.md §12-3). 옛 세이브엔 없다 */
   personal: PersonalTermsSchema.optional(),
+  /**
+   * **위임장** — 담당자가 대신 앉는 협상 (transfer.md §12-4). 살아 있는 동안 편지·주의 줄·
+   * 기한 당일의 멈춤에서 빠지고, 되돌아오면(`handedBack`) 감독의 것으로 돌아온다. 옛 세이브엔 없다.
+   */
+  mandate: NegotiationMandateSchema.optional(),
 });
 export type Negotiation = z.infer<typeof NegotiationSchema>;
+
+/**
+ * **위임이 살아 있는 협상인가** — 담당자가 쥐고 있어 감독이 답할 자리가 아니다.
+ *
+ * 열려 있거나 합의 뒤 메디컬을 기다리는 동안이고, 되돌리지도(`handedBack`) 매듭짓지도
+ * (`settledOn`) 않았다. `arrivedResponses`·`pendingVerdicts`·기한 당일의 멈춤이 이 하나를
+ * 읽는다 — 셋이 각자 재면 편지는 서고 주의 줄은 비는 협상이 생긴다 (transfer.md §12-4).
+ */
+export function isMandated(negotiation: Pick<Negotiation, "status" | "mandate">): boolean {
+  const mandate = negotiation.mandate;
+  return (
+    mandate !== undefined &&
+    mandate.handedBack === undefined &&
+    mandate.settledOn === undefined &&
+    (negotiation.status === "open" || negotiation.status === "agreed")
+  );
+}
+
+/**
+ * 위임장의 한도 한 줄 — 요약 줄·카드·스냅샷이 같은 말을 쓴다 (transfer.md §12-4).
+ * 「이적료 £40.0M · 주급 £150k까지」 · 「이적료 £20.0M 이상」. 한도가 하나도 없으면 빈 문자열이다.
+ */
+export function mandateLimitText(
+  mandate: Pick<NegotiationMandate, "ceiling" | "floor">,
+  kind: NegotiationKind,
+): string {
+  const money =
+    kind === "release" ? "정산금" : kind === "loan" || kind === "loan_out" ? "임대료" : "이적료";
+  if (mandate.floor?.fee !== undefined) return `${money} ${formatMoney(mandate.floor.fee)} 이상`;
+  const ceiling = mandate.ceiling;
+  if (!ceiling) return "";
+  const parts = [
+    ...(ceiling.fee === undefined ? [] : [`${money} ${formatMoney(ceiling.fee)}`]),
+    ...(ceiling.weeklyWage === undefined ? [] : [`주급 ${formatMoney(ceiling.weeklyWage)}`]),
+    ...(ceiling.contractYears === undefined ? [] : [`${ceiling.contractYears}년`]),
+  ];
+  return parts.length === 0 ? "" : `${parts.join(" · ")}까지`;
+}
 
 // ── 성장 로그 ─────────────────────────────────────────
 /**

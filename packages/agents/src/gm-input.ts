@@ -49,6 +49,7 @@ import {
   suspensionScopeName,
   loanedOut,
   managedTeamId,
+  mandateFacts,
   MAX_EXPLOITS,
   missionReportLine,
   onSummerBreak,
@@ -623,6 +624,17 @@ function coachBlocks(state: GameState, cues: readonly CoachCue[]): (string | nul
     byName.set(name, [...(byName.get(name) ?? []), `- ${cue.fact}`]);
   }
   return [...byName].map(([name, facts]) => block("coach", facts.join("\n"), ` name="${name}"`));
+}
+
+/**
+ * **맡긴 협상 — 담당자의 것이다** (people.md §3 화자 표 · transfer.md §12-4). 코치의 눈과
+ * 같은 규약이다: 이름은 태그의 속성이고 안쪽은 코어가 낸 사실뿐이다. 그 사람이 쥔 협상의
+ * 지금과 며칠 안의 매듭·결렬·되돌림이 한 덩어리로 서고, 담당자가 둘이면 덩어리도 둘이다.
+ */
+function mandateBlocks(state: GameState): (string | null)[] {
+  return mandateFacts(state).map(({ name, facts }) =>
+    block("mandates", facts.map((f) => `- ${f}`).join("\n"), ` name="${name}"`),
+  );
 }
 
 /**
@@ -1447,6 +1459,8 @@ export function buildGmStateNote(
      * 이름만 달리해 한 번 더 선다 (people.md §3 화자 표).
      */
     ...coachBlocks(state, coach),
+    // 맡긴 협상 — 담당자마다 한 덩어리. 편지도 주의 줄도 서지 않는 협상의 진행은 여기서만 온다
+    ...mandateBlocks(state),
     /**
      * 경기 전날·당일의 상대 분석 — 감독이 라인업과 6축을 정하는 자리다.
      * 조회 도구·다음 경기 카드와 **같은 리포트**를 읽는다 (match.md §1.8).
