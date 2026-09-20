@@ -76,6 +76,13 @@ export const CALL_LABEL: Record<string, string> = {
   exercise_buyback: "되사기 행사",
   open_renewal: "재계약 제안",
   open_release: "해지 제안",
+  // 조건서 — 감독이 조건을 걸거나 상대의 요구에 답한다 (transfer.md §12-3)
+  offer_terms: "조건 제시",
+  answer_term: "요구 응답",
+  propose_personal: "개인 조건 제안",
+  // 위임 — 단장에게 맡기고 도로 가져온다 (transfer.md §12-4)
+  delegate_negotiation: "협상 위임",
+  revoke_mandate: "위임 취소",
   // 도구가 아니라 코어가 남기는 기록 — 카탈로그에 없지만 칩으로 선다
   finalize_match: "경기 종료",
 };

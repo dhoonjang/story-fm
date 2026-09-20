@@ -1,11 +1,20 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { isMandated } from "@story-fm/domain";
 import {
+  activeContract,
+  addDays,
   advanceTime,
+  arrivedResponses,
+  clubDirector,
   createGame,
   dealOdds,
+  eventTexts,
   interpretBackgroundHeuristic,
   openNegotiationFor,
   pendingOffer,
+  pendingVerdicts,
+  renewalExpectation,
+  renewalYearsExpectation,
   suggestTerms,
   tableOf,
   tacticsOf,
@@ -288,6 +297,64 @@ describe("mock 대본 — 이적", () => {
     expect(namesOf(answered)).toContain("respond_offer");
     expect(pendingOffer(negotiation!)).toBeNull();
     expect(namesOf(answered)).toContain("accept_deal");
+  });
+});
+
+describe("mock 대본 — 위임", () => {
+  /**
+   * **맡긴 재계약은 감독 턴 없이 tick만으로 계약에 닿는다** (transfer.md §12-4).
+   *
+   * 재는 것은 상태 전이다: 대본의 한 줄이 `delegate_negotiation`으로 남고 위임이 서면, 그
+   * 뒤로는 어떤 턴도 열지 않은 채 하루씩 굴려도 협상이 편지·주의 줄 어디에도 서지 않고
+   * 단장이 앵커로 답을 굳혀 서명한다. 첫 제시가 수락 문턱을 넘는 선수를 **코어에게 물어서**
+   * 고른다 — 아무나 지목하면 결말이 카탈로그에 달린다.
+   */
+  it("「재계약은 맡겨」 한마디 뒤로 감독 턴 없이 계약이 선다", async () => {
+    const state = newGame();
+    const days = 120;
+    const player = userPlayers(state).find((p) => {
+      if (state.players.filter((q) => q.name === p.name).length > 1) return false;
+      const contract = activeContract(state, p.id);
+      if (!contract) return false;
+      const until = contract.until;
+      contract.until = addDays(state.date, days);
+      const odds = dealOdds(state, {
+        playerId: p.id,
+        fee: 0,
+        weeklyWage: renewalExpectation(state, p),
+        years: renewalYearsExpectation(state, p),
+        kind: "renew",
+      });
+      contract.until = until;
+      return odds.blockers.length === 0 && odds.probability >= ACCEPT_ODDS_FLOOR;
+    });
+    if (!player) throw new Error("첫 제시가 수락 문턱을 넘는 재계약 상대가 없다");
+    activeContract(state, player.id)!.until = addDays(state.date, days);
+
+    const delegated = await runGmTurn(state, `${player.name} 재계약은 맡겨`);
+    expectGmGrammar(delegated.text);
+    expect(namesOf(delegated)).toContain("delegate_negotiation");
+    const negotiation = openNegotiationFor(state, player.id)!;
+    expect(isMandated(negotiation)).toBe(true);
+    // 첫 제시는 단장이 넣었다 — 감독이 부른 액수가 없어도 코어의 자가 섰다
+    expect(pendingOffer(negotiation)!.weeklyWage).toBe(renewalExpectation(state, player));
+
+    // 답이 **언제** 오는지가 아니라 온 뒤 누가 답하는지를 재는 자리다
+    pendingOffer(negotiation)!.respondsOn = addDays(state.date, 1);
+    const events: string[] = [];
+    let guard = 5;
+    while (guard-- > 0 && negotiation.status !== "completed") {
+      const advanced = advanceTime(state, { days: 1 });
+      expect(advanced.ok).toBe(true);
+      events.push(...eventTexts(advanced.events));
+      // 감독 턴은 한 번도 없다 — 답할 편지도 주의 줄도 이 협상에는 서지 않는다
+      expect(arrivedResponses(state).map((n) => n.id)).not.toContain(negotiation.id);
+      expect(pendingVerdicts(state).map((v) => v.negotiation.id)).not.toContain(negotiation.id);
+    }
+    expect(negotiation.status).toBe("completed");
+    // 결과는 단장의 사실로 선다
+    const director = clubDirector(state).name;
+    expect(events.some((t) => t.includes(director) && t.includes(player.name))).toBe(true);
   });
 });
 

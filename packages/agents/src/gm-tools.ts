@@ -19,6 +19,7 @@ import {
   counterManagerOffer,
   dealOdds,
   declinePress,
+  delegateNegotiation,
   describeNegotiation,
   describeNegotiations,
   describeOdds,
@@ -103,6 +104,7 @@ import {
   unilateralSeveranceOf,
   wageExpectationOf,
   userSide,
+  revokeMandate,
   withdrawOffer,
   type CardMark,
   type GameState,
@@ -158,7 +160,7 @@ import { inputError, toToolSchema } from "./tool-schema";
 import { recordCall, type GmToolCall, type CommandReturn } from "./gm-types";
 
 /**
- * **GM에게 보이지 않는 코어 명령** — 판을 세우는 열과 훈련 여섯, 시장 스물넷. 감독의 전술 지시는
+ * **GM에게 보이지 않는 코어 명령** — 판을 세우는 열과 훈련 여섯, 시장 스물여섯. 감독의 전술 지시는
  * `tactic_orders`(평시·경기)·`training_orders`·`market_orders` 뒤의 해석이 JSON으로 옮기고 코어가 이 명령들을
  * 부른다 (agents.md §1). 설명은 모델에게 가지 않으므로 이름만 든다 — 판정 근거는
  * `TACTIC_ORDERS_SYSTEM`의 것이다.
@@ -187,6 +189,9 @@ export const CORE_COMMANDS: ReadonlySet<string> = new Set([
   "accept_deal",
   "respond_transfer_request",
   "withdraw_offer",
+  // 위임 — 협상·갈래를 단장에게 맡기고 도로 가져온다 (transfer.md §12-4)
+  "delegate_negotiation",
+  "revoke_mandate",
   "set_transfer_list",
   "send_offer",
   "open_renewal",
@@ -231,6 +236,8 @@ const CORE_COMMAND_LABELS: Record<string, string> = {
   accept_deal: "합의 확정 · 상대 조정 수락",
   respond_transfer_request: "이적 요청 응답",
   withdraw_offer: "오퍼 철회",
+  delegate_negotiation: "협상을 단장에게 맡긴다",
+  revoke_mandate: "맡긴 일을 도로 가져온다",
   set_transfer_list: "이적 리스트",
   send_offer: "오퍼",
   open_renewal: "재계약 제안",
@@ -1725,6 +1732,53 @@ export function buildToolSpecs(
       CORE_COMMAND_LABELS.withdraw_offer!,
       z.object({ negotiationId: z.string().min(1) }),
       (input) => withdrawOffer(state, input.negotiationId),
+    ),
+    /**
+     * **위임** — 이름을 부르면 그 협상 하나, 비우면 그 갈래의 방침이다 (transfer.md §12-4).
+     * 한도는 감독이 부른 값만이고, 비면 코어의 합법 범위가 그대로 한도다.
+     */
+    wrap(
+      "delegate_negotiation",
+      CORE_COMMAND_LABELS.delegate_negotiation!,
+      z.object({
+        playerId: playerRef
+          .optional()
+          .describe(
+            "맡길 선수 — 감독이 부른 이름 그대로. 비우면 그 갈래에 앞으로 열리는 자리까지 전부 맡기는 방침이다",
+          ),
+        kind: z
+          .enum(["buy", "sell", "renew", "loan", "loan_out", "release"])
+          .optional()
+          .describe(
+            "갈래 — 방침에서 비우면 여섯 갈래 전부. 선수를 부른 자리에서 비우면 우리 선수는 renew, 남의 선수는 buy. 재계약이 아닌 갈래는 이미 열린 협상만 맡길 수 있다",
+          ),
+        fee: money(MONEY_MAX)
+          .optional()
+          .describe(
+            "이적료·임대료·정산금의 한도 (£) — 내보내는 딜은 하한, 그 밖은 상한. 감독이 부른 값만, 없으면 비운다",
+          ),
+        weeklyWage: money(WAGE_MAX).optional().describe("주급 상한 (£/주) — 감독이 부른 값만"),
+        years: z
+          .number()
+          .int()
+          .min(1)
+          .max(6)
+          .optional()
+          .describe("계약 연수 상한 — 감독이 부른 값만"),
+      }),
+      (input) => delegateNegotiation(state, input),
+    ),
+    wrap(
+      "revoke_mandate",
+      CORE_COMMAND_LABELS.revoke_mandate!,
+      z.object({
+        playerId: playerRef.optional().describe("도로 가져올 협상의 선수 — 비우면 갈래의 방침"),
+        kind: z
+          .enum(["buy", "sell", "renew", "loan", "loan_out", "release"])
+          .optional()
+          .describe("거둘 방침의 갈래 — 비우면 맡긴 것 전부"),
+      }),
+      (input) => revokeMandate(state, input),
     ),
     /**
      * **조건서** — 감독이 조건을 걸거나 상대의 요구에 답한다 (transfer.md §12-3). 시장
