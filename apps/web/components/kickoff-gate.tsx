@@ -84,7 +84,7 @@ export function KickoffGate({
             <TeamSheet team={match.home} players={match.onPitch.home} />
             <TeamSheet team={match.away} players={match.onPitch.away} />
           </div>
-          <ManagerNotes tactics={match.tactics[ours]} exploiting={match.exploiting} />
+          <ManagerNotes tactics={match.tactics[ours]} />
         </div>
         <button
           className="primary-btn"
@@ -159,9 +159,10 @@ interface NoteRow {
  *
  * 전부 판세·전술판이 이미 세우는 값이라 게이트가 따로 만드는 문장이 없다.
  * **중립인 축과 갈래는 서지 않는다**: 지시하지 않은 것까지 세우면 무엇을 건 판인지
- * 읽히지 않는다 (match.md §1.2). 걸어 둔 것이 하나도 없으면 절 자체가 서지 않는다.
+ * 읽히지 않는다 (match.md §1.2). **전술 포인트는 킥오프에 처음 서므로 여기엔 없다**
+ * (match.md §8). 걸어 둔 것이 하나도 없으면 절 자체가 서지 않는다.
  */
-function ManagerNotes({ tactics, exploiting }: { tactics: GateTactics; exploiting: string[] }) {
+function ManagerNotes({ tactics }: { tactics: GateTactics }) {
   const rows: NoteRow[] = [];
   if (tactics.formation) rows.push({ key: "포메이션", values: [tactics.formation] });
   for (const axis of TACTIC_AXES) {
@@ -174,7 +175,6 @@ function ManagerNotes({ tactics, exploiting }: { tactics: GateTactics; exploitin
     if (value === null) continue;
     rows.push({ key: toggle.label, values: [tacticToggleWord(toggle.key, value)] });
   }
-  if (exploiting.length > 0) rows.push({ key: "공략 중", values: exploiting });
   if (tactics.notes.length > 0) rows.push({ key: "전술 노트", values: tactics.notes });
   if (rows.length === 0) return null;
   return (

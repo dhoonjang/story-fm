@@ -179,8 +179,7 @@
 | ↳ `PlayerPosition`               | 가능 포지션 + 적응도 + `isNatural`(하나 이상)                                                                   | `domain/player.ts`  |
 | `tactics` `TeamTactics`          | 팀당 1개 — `spec` + `assignments` + `shelved` + `setPieceTakers` + `setPieceRoutine` + 팀 기억                  | `domain/tactics.ts` |
 | ↳ `TacticsSpec`                  | 모양 이름(파생 — 프리셋 밖도 담는다) + 전술 6축(각 1\~5) + 토글 넷(전환·트랩·태클·GK 배급, 옛 세이브엔 없다)    | `domain/tactics.ts` |
-| ↳ `TacticAssignment`             | **라인업의 원본** — 자리·좌표·역할·적응도·개인 지시·개인 기억                                                   | `domain/tactics.ts` |
-| ↳ `PlayerDirective`              | 결과에 닿는 개인 지시 5종 (`instruction`은 사람이 읽는 말)                                                      | `domain/tactics.ts` |
+| ↳ `TacticAssignment`             | **라인업의 원본** — 자리·좌표·역할·적응도·개인 기억                                                             | `domain/tactics.ts` |
 | ↳ `DrilledTactics`               | 전술 지문 → 그때 도달한 적응도 (선수별)                                                                         | `domain/tactics.ts` |
 | ↳ `ShelvedFamiliarity`           | **배치가 없는 동안 적응도·기억이 머무는 자리** (2군·예비)                                                       | `domain/tactics.ts` |
 | ↳ `SetPieceTakers`               | 세트피스를 차는 사람 — `corner`·`freeKick`·`penalty` 각각 선수 id(옛 세이브엔 없다)                             | `domain/tactics.ts` |
@@ -505,20 +504,20 @@ erDiagram
 optional로 넓혀 두고 읽는 쪽이 `카드 ?? 옛 문장` 순으로 본다.** 새로 쓰는 값에는
 카드만 적는다 — 두 칸을 함께 채우면 어느 쪽이 원본인지 갈린다.
 
-| 표·필드                                | 새 칸 (카드)                     | 옛 칸 (읽기 폴백)    |
-| -------------------------------------- | -------------------------------- | -------------------- |
-| `TRANSFER`                             | `reason`                         | `note`               |
-| `INJURY`                               | `cause` (`pre_appointment` 포함) | `note`               |
-| `GROWTH_ENTRY`                         | `origin`                         | `note`               |
-| `NEGOTIATION.medical` · `OFFER`        | `concern` · `origin`             | `note`               |
-| `FINANCE_REPORT`                       | `noteCards`                      | `notes`              |
-| `PRESS_FACT` (회견 · 다가옴)           | `data`                           | `text`               |
-| `APPROACH`                             | `contextCard`                    | `context`            |
-| `TROPHY`                               | `competitionId`                  | `competition`        |
-| `SEASON_RECORD.board` · `DISMISSAL`    | `expectationCode`                | `expectation`        |
-| `NARRATIVE_NOTE`                       | `kind`                           | `[서사]` 접두 문장   |
-| `TRAINING_SESSION`                     | `menuId`                         | `label`              |
-| `PENDING_MATCH.packet` · `MATCH_EVENT` | 패킷 태그 · `subCause`           | 문자열 키포인트·근거 |
+| 표·필드                                | 새 칸 (카드)                     | 옛 칸 (읽기 폴백)  |
+| -------------------------------------- | -------------------------------- | ------------------ |
+| `TRANSFER`                             | `reason`                         | `note`             |
+| `INJURY`                               | `cause` (`pre_appointment` 포함) | `note`             |
+| `GROWTH_ENTRY`                         | `origin`                         | `note`             |
+| `NEGOTIATION.medical` · `OFFER`        | `concern` · `origin`             | `note`             |
+| `FINANCE_REPORT`                       | `noteCards`                      | `notes`            |
+| `PRESS_FACT` (회견 · 다가옴)           | `data`                           | `text`             |
+| `APPROACH`                             | `contextCard`                    | `context`          |
+| `TROPHY`                               | `competitionId`                  | `competition`      |
+| `SEASON_RECORD.board` · `DISMISSAL`    | `expectationCode`                | `expectation`      |
+| `NARRATIVE_NOTE`                       | `kind`                           | `[서사]` 접두 문장 |
+| `TRAINING_SESSION`                     | `menuId`                         | `label`            |
+| `PENDING_MATCH.packet` · `MATCH_EVENT` | 패킷 태그 · `subCause`           | 문자열 태그·근거   |
 
 ⚠️ **판정하는 자리에는 폴백을 두지 않는다.** 읽어서 **보여 주는** 값만 옛 문장으로
 떨어지고, 갈래를 가르는 자리(해지인가·승부수인가·기본 훈련인가)는 카드가 없으면

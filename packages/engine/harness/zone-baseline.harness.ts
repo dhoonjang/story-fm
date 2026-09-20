@@ -10,18 +10,23 @@ import { outOfBand, reportOf, type Readings } from "./harness";
  * **매치업 비율의 기준선이 1에 서 있는가** — 세계 하나의 리그 편성을 전부 킥오프
  * 패킷으로 세워 `우리 공격 / 상대 수비`를 잰다 (match.md §1.1).
  *
- * 세 존은 서로 다른 가중치(`ZONE_CONTRIBUTION`)로 만든 값이고, 그 위에 전술 6축과
- * 공략이 **구조적으로 공격 쪽에** 얹힌다. `ZONE_BASELINE`이 그 층의 리그 평균을
- * 상쇄해 비율이 1에 서게 하는데, 그 값은 실측에 묶여 있어 프리셋·공략 크기·역할
- * 가중치를 만질 때마다 다시 재야 한다. 재는 자리가 없으면 한 번 어긋난 채로 살고,
- * 그동안 판세는 어느 팀이든 「공격하는 쪽이 우위」로 기운다.
+ * 세 존은 서로 다른 가중치(`ZONE_CONTRIBUTION`)로 만든 값이고, 그 위에 전술 6축이
+ * **구조적으로 공격 쪽에** 얹힌다. `ZONE_BASELINE`이 그 층의 리그 평균을 상쇄해
+ * 비율이 1에 서게 하는데, 그 값은 실측에 묶여 있어 프리셋·역할 가중치를 만질 때마다
+ * 다시 재야 한다. 재는 자리가 없으면 한 번 어긋난 채로 살고, 그동안 판세는 어느
+ * 팀이든 「공격하는 쪽이 우위」로 기운다.
+ *
+ * ⚠️ **시트는 여기 없다** (match.md §1.6·§9) — 판독기는 감독의 경기에서만 돌고, 리그
+ * 편성 3,500경기를 세우는 이 자리는 간이 시뮬과 같은 판이다. 그래서 이 기준선은
+ * **시트 없이** 잰 값이고, 감독 경기에 얹히는 시트는 부호가 양쪽이라 평균을 옮기지
+ * 않는다(분산은 `world-season`이 본다).
  *
  * **기하평균으로 읽는다.** 보정은 곱으로 얹히므로(`ZONE_BASELINE` 두 값의 곱이 1)
  * 산술평균은 비율의 꼬리에 끌려 1 위로 뜬다 — `a/b`와 `b/a`의 산술평균은 둘 다 1을
  * 넘는다. 기하평균은 두 방향이 정확히 서로의 역수라 기준선 1이 뜻을 갖는다.
  *
- * 같은 편성을 **층을 하나씩 끄고** 세 번 더 세운다 — 공략만, 전술만, 둘 다. 기준선과의
- * 간격이 곧 그 층의 크기라, 다음에 이 값을 옮길 사람이 무엇이 자랐는지 읽을 수 있다.
+ * 같은 편성을 **프리셋을 전부 중립으로 놓고** 한 번 더 세운다. 기준선과의 간격이 곧
+ * 전술 층의 크기라, 다음에 이 값을 옮길 사람이 무엇이 자랐는지 읽을 수 있다.
  *
  * 같은 패킷의 세 매치업 등급도 함께 센다 — 기준선이 기울면 「압도적」의 문턱이
  * 기본값 코앞에 서서 세 단계가 한 단계로 무너진다.
@@ -31,22 +36,15 @@ import { outOfBand, reportOf, type Readings } from "./harness";
 
 const SEEDS = [7, 11];
 
-/** AI 벤치가 공략을 걸지 않는 등급 — `autoExploits`의 아래 문턱(58) 밑이면 된다 */
-const NO_EXPLOIT_RATING = 50;
-
-interface Layers {
-  exploits: boolean;
-  tactics: boolean;
-}
-
-function sideOf(squad: SimSquad, layers: Layers): SideInput {
+/** 프리셋을 그대로 쓰는가, 전부 중립으로 놓는가 — 전술 층의 크기를 재는 손잡이 */
+function sideOf(squad: SimSquad, tactics: boolean): SideInput {
   return {
     teamId: squad.teamId,
     teamName: squad.teamId,
     starters: squad.slots ?? [],
     bench: [],
-    tactics: layers.tactics ? (squad.tactics ?? DEFAULT_TACTICS) : DEFAULT_TACTICS,
-    managerTactics: layers.exploits ? (squad.managerTactics ?? 65) : NO_EXPLOIT_RATING,
+    tactics: tactics ? (squad.tactics ?? DEFAULT_TACTICS) : DEFAULT_TACTICS,
+    managerTactics: squad.managerTactics ?? 65,
   };
 }
 
@@ -62,9 +60,7 @@ interface Tally {
   fixtures: number;
   attack: LogMean;
   midfield: LogMean;
-  noExploits: LogMean;
   noTactics: LogMean;
-  bare: LogMean;
   /** 세 존 매치업의 등급 — 팽팽은 `edge === "even"`, 나머지는 `size`로 센다 */
   even: number;
   sized: Record<EdgeSize, number>;
@@ -100,10 +96,10 @@ function measure(seed: number, tally: Tally): void {
     if (!isTopLeague(match.competitionId)) continue;
     const home = simSquadOf(state, match.homeTeamId, match.competitionId);
     const away = simSquadOf(state, match.awayTeamId, match.competitionId);
-    const build = (layers: Layers) => [sideOf(home, layers), sideOf(away, layers)] as const;
+    const build = (tactics: boolean) => [sideOf(home, tactics), sideOf(away, tactics)] as const;
     tally.fixtures += 1;
 
-    const full = build({ exploits: true, tactics: true });
+    const full = build(true);
     const packet = buildStrengthPacket(full[0], full[1]);
     tally.attack.sum +=
       Math.log(packet.home.zones.attack / packet.away.zones.defense) +
@@ -113,9 +109,7 @@ function measure(seed: number, tally: Tally): void {
     tally.midfield.n += 1;
     countGrades(tally, packet.matchups);
 
-    addRatios(tally.noExploits, ...build({ exploits: false, tactics: true }));
-    addRatios(tally.noTactics, ...build({ exploits: true, tactics: false }));
-    addRatios(tally.bare, ...build({ exploits: false, tactics: false }));
+    addRatios(tally.noTactics, ...build(false));
   }
 }
 
@@ -125,9 +119,7 @@ describe("존 기준선 — 매치업 비율은 1에 선다", () => {
       fixtures: 0,
       attack: { sum: 0, n: 0 },
       midfield: { sum: 0, n: 0 },
-      noExploits: { sum: 0, n: 0 },
       noTactics: { sum: 0, n: 0 },
-      bare: { sum: 0, n: 0 },
       even: 0,
       sized: { slight: 0, clear: 0, big: 0 },
       attackerFavoured: 0,
@@ -141,8 +133,6 @@ describe("존 기준선 — 매치업 비율은 1에 선다", () => {
       "편성 경기 수": tally.fixtures,
       "공격/상대 수비 기하평균": geo(tally.attack),
       "홈 중원/어웨이 중원 기하평균": geo(tally.midfield),
-      "층 없이 — 공격/상대 수비": geo(tally.bare),
-      "공략 없이 — 공격/상대 수비": geo(tally.noExploits),
       "전술 없이 — 공격/상대 수비": geo(tally.noTactics),
       "공격하는 쪽이 우위인 비율": tally.attackerFavoured / decided,
       "팽팽한 매치업 비율": tally.even / matchups,

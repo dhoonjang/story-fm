@@ -38,9 +38,7 @@ import { PITCH_CLAIM_KO, TABLE_STANCE_KO, dealTermLabel } from "@story-fm/domain
 import {
   BOARD_CONDITION_LABEL,
   BOARD_REQUEST_LABEL,
-  DIRECTIVE_INTENSITY_KO,
   PHASE_END,
-  PLAYER_DIRECTIVE_KO,
   SET_PIECE_ROLES,
   SET_PIECE_ROUTINE_KEYS,
   STAFF_ROLES,
@@ -151,11 +149,12 @@ import { squadRatingsOf } from "../squad/depth";
 import { leaderGroupOf } from "../squad/hierarchy";
 import { ratingTone, type RatingTone } from "../match/ratings";
 import { buildOpponentReport, type AbsentReason } from "../match/preview";
-import { DIRECTIVE_DROP_KO, directiveStandingOf } from "../match/directive-standing";
 import {
   GAP_CONDITION,
   edgeOf,
+  readPoints,
   setPieceTakersOf,
+  sheetTagPointId,
   subLimitsOf,
   zoneGrid,
   type TakerSlot,
@@ -901,7 +900,6 @@ interface SquadViewRowMeta {
    * 명단은 칸이 하나뿐이라 둘 중 하나만 보이면 "왜 낮은지"를 늘 절반만 안다.
    */
   adaptation: number;
-  instruction: string | null;
   isCaptain: boolean;
   isViceCaptain: boolean;
   /**
@@ -1677,38 +1675,22 @@ export interface MatchView {
     size: EdgeSize;
   }[];
   /**
-   * 발동한 상성·구멍·미스매치 — 감독이 지금 손볼 자리.
+   * 발동한 상성·구멍·컨텍스트 — 감독이 지금 손볼 자리. 시트의 줄은 아래 `sheet`다.
    * `ours`는 **우리 편에 이로운 줄인가**다 (모르면 `null` — 옛 세이브의 진행 중 경기).
    */
   keyPoints: { text: string; ours: boolean | null }[];
   /**
-   * 지금 노리고 있는 지점의 설명 — 화면이 "공략 중"으로 표시한다.
-   * 감독이 지시한 것이 판에 반영되고 있다는 유일한 증거다.
+   * **시트의 걸린 줄** — 감독의 분석이 허락한 전술 포인트의 것만 문장으로 선다
+   * (match.md §1.6·§8). 격자의 색은 시트 전부를 반영하되 이유가 붙는 것은 여기까지다 —
+   * 이유 없이 기운 칸이 곧 감독이 아직 읽지 못한 판독이다. 시트가 지시의 증거다:
+   * 경기 중에만 서고 장부에 흔적을 남기지 않아 레일 말풍선이 없다.
    */
-  exploiting: string[];
+  sheet: { text: string; ours: boolean | null }[];
   /**
-   * **개인 지시의 지금** — 걸린 것과 닿지 않은 것을 사유까지 갈라 세운다
-   * (match.md §2·§8). 노트 줄에 섞어 두면 걸린 지시와 버려진 지시가 같은 생김새로
-   * 서서, 감독은 넷을 다 걸린 것으로 읽고 다음 판단을 그 위에 쌓는다.
-   *
-   * 쓴 자리와 한도까지 코어가 세어 넘긴다 — 화면이 한도를 다시 적어 두면 코어가
-   * 셋을 넷으로 바꾼 날 화면만 셋으로 남는다.
+   * **판에 닿지 못한 시트 줄과 그 까닭** — 걸린 줄과 같은 자리에 선다 (match.md §8).
+   * 화면에 서지 않으면 감독은 걸리지 않은 지시를 걸린 줄 안다. 허락된 포인트의 줄만이다.
    */
-  directives: {
-    used: number;
-    limit: number;
-    rows: {
-      player: string;
-      /** 갈래 + 세기 — 보통 세기는 적지 않는다 */
-      kind: string;
-      /** 겨냥한 상대 — 겨냥하지 않는 갈래는 `null` */
-      target: string | null;
-      /** 지금 판에 닿고 있는가 */
-      live: boolean;
-      /** 닿지 않은 까닭 한 줄 — 걸린 지시는 `null` */
-      why: string | null;
-    }[];
-  };
+  sheetDropped: string[];
   /**
    * 양팀 전술 6축 + 소화율. `shift`는 그 팀 벤치가 **이 경기에서 마지막으로 판을
    * 옮긴 정지점** — 장부의 `tactical_shift` 사건에서 파생한다 (match.md §4·§8).
@@ -2504,29 +2486,6 @@ function strengthPairOf(
   return home === null || away === null ? null : { home, away };
 }
 
-/**
- * 판세 탭의 「개인 지시」 칸 — **판정은 코어의 것**(`directiveStandingOf`)이고
- * 여기는 이름과 낱말로 옮긴다 (match.md §8). 화면이 세 자리를 다시 세면, 코어가
- * 밀어낸 지시를 화면만 걸린 것으로 그린다.
- */
-function directiveRowsOf(state: GameState): MatchView["directives"] {
-  const slots = directiveStandingOf(state, state.userTeamId);
-  return {
-    used: slots.used,
-    limit: slots.limit,
-    rows: slots.rows.map((d) => ({
-      player: playerName(state, d.playerId),
-      kind:
-        PLAYER_DIRECTIVE_KO[d.kind] +
-        // 세기는 보통이 아닐 때만 — 기본값을 매번 적으면 그게 선택으로 읽힌다
-        (d.intensity && d.intensity !== "normal" ? ` ${DIRECTIVE_INTENSITY_KO[d.intensity]}` : ""),
-      target: d.targetId ? playerName(state, d.targetId) : null,
-      live: d.taken,
-      why: d.code ? DIRECTIVE_DROP_KO[d.code] : null,
-    })),
-  };
-}
-
 function buildMatchView(state: GameState): MatchView | null {
   const pending = state.pendingMatch;
   if (!pending || state.phase !== "match") return null;
@@ -2676,12 +2635,26 @@ function buildMatchView(state: GameState): MatchView | null {
     return found && tag ? { minute: found.minute, note: packetTagText(tag, tagCtx) } : null;
   };
 
+  const ourSide = match.homeTeamId === state.userTeamId ? "home" : "away";
+  /** 감독의 분석이 허락한 포인트 — GM의 `<points>`와 같은 문이다 (`readPoints`) */
+  const seenPoints = new Set(
+    readPoints(packet.points ?? [], state.manager.attributes.analysis).map((p) => p.id),
+  );
+
+  /**
+   * 전술 카드의 노트 — **6축과 갈래가 존에 남긴 이득과 대가뿐이다** (match.md §8).
+   *
+   * 같은 통에 실려 오는 시트의 버려진 줄은 여기 서지 않는다: 우리 것은 걸린 줄 옆이
+   * 자리이고, 상대 것은 감독이 읽지 못한 판독이라 아예 새어 나가면 안 된다.
+   */
   const tacticsOfSide = (teamId: string, tactical: TacticalRead) => ({
     ...(teamId !== state.userTeamId && pending.aiTactics
       ? pending.aiTactics
       : tacticsOf(state, teamId).spec),
     uptake: tactical.uptake,
-    notes: tactical.notes.map((tag) => packetTagText(tag, tagCtx)),
+    notes: tactical.notes
+      .filter((tag) => tag.source === "tactical")
+      .map((tag) => packetTagText(tag, tagCtx)),
     shift: shiftOfSide(teamId === match.homeTeamId ? "home" : "away"),
   });
 
@@ -2777,18 +2750,26 @@ function buildMatchView(state: GameState): MatchView | null {
      * 유불리는 **우리 편 기준**으로 접어서 넘긴다 — 화면이 홈/원정 중 어느 쪽이
      * 우리인지 다시 따지지 않아도 되게. 편을 모르는 옛 세이브는 `null`이다.
      */
-    keyPoints: packet.keyPoints.map((tag) => {
-      const ourSide = match.homeTeamId === state.userTeamId ? "home" : "away";
-      return {
+    keyPoints: packet.keyPoints
+      .filter((tag) => tag.source !== "sheet")
+      .map((tag) => ({
         text: packetTagText(tag, tagCtx),
         ours: tag.favours === null ? null : tag.favours === ourSide,
-      };
-    }),
-    exploiting: (pending.exploits ?? [])
-      .map((id) => packet.targets.find((t) => t.id === id))
-      .filter((t): t is NonNullable<typeof t> => t !== undefined)
-      .map((t) => packetTagText(t.tag, tagCtx)),
-    directives: directiveRowsOf(state),
+      })),
+    /**
+     * 시트 줄은 **허락된 포인트의 것만** 문장으로 선다 (match.md §1.6) — 판독기는 전부를
+     * 읽고 감독은 분석이 넘긴 줄까지만 읽는다. 걷힌 줄의 노트는 `tactics[*].notes`에 있다.
+     */
+    sheet: packet.keyPoints
+      .filter((tag) => tag.source === "sheet" && seenPoints.has(sheetTagPointId(tag) ?? ""))
+      .map((tag) => ({
+        text: packetTagText(tag, tagCtx),
+        ours: tag.favours === null ? null : tag.favours === ourSide,
+      })),
+    /** 양 팀의 버려진 줄 — 판독은 경기의 것이라 우리 쪽만 세면 절반이 사라진다 */
+    sheetDropped: [...packet.home.tactical.notes, ...packet.away.tactical.notes]
+      .filter((tag) => tag.source === "sheet-dropped" && seenPoints.has(sheetTagPointId(tag) ?? ""))
+      .map((tag) => packetTagText(tag, tagCtx)),
     tactics: {
       home: tacticsOfSide(match.homeTeamId, packet.home.tactical),
       away: tacticsOfSide(match.awayTeamId, packet.away.tactical),
@@ -4006,7 +3987,6 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           assignment?.familiarity ?? FAMILIARITY_BASELINE,
           assignedSlot ?? natural.position,
         ),
-        instruction: assignment?.instruction ?? null,
         isCaptain: p.isCaptain,
         isViceCaptain: p.isViceCaptain === true,
         leaderRank: leaderRank.get(p.id) ?? null,
@@ -5259,7 +5239,6 @@ export interface PlayerCardOursView {
     /** 그 자리의 세부 역할 — 자리가 없는 벤치 배치는 null */
     role: { id: string; ko: string } | null;
     familiarity: number;
-    instruction: string | null;
   } | null;
   loan: SquadViewRow["loan"];
   away: SquadViewRow["away"];
@@ -5545,7 +5524,6 @@ function oursCardOf(state: GameState, p: GamePlayer): PlayerCardOursView {
           position: assignment.position,
           role: role ? { id: role.id, ko: role.ko } : null,
           familiarity: assignment.familiarity,
-          instruction: assignment.instruction ?? null,
         }
       : null,
     loan: loan

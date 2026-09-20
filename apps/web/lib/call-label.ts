@@ -35,8 +35,6 @@ export const CALL_LABEL: Record<string, string> = {
   set_set_piece_takers: "세트피스 키커",
   set_set_piece_routine: "세트피스 인원",
   set_training: "훈련 지정",
-  exploit_point: "약점 공략",
-  set_match_plan: "지역 전술",
   set_shootout_order: "승부차기 순서",
   team_talk: "대화",
   respond_to_media: "기자회견 대응",

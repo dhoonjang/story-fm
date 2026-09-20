@@ -80,9 +80,7 @@ import {
   setMentor,
   signYouth,
   setReserveTraining,
-  setExploits,
   setLineup,
-  setRegionalPlan,
   setPlayerTactic,
   setPlayerTraining,
   setSquadLevels,
@@ -95,6 +93,7 @@ import {
   squadView,
   startMatch,
   startNegotiation,
+  applyMatchReading,
   substitutePlayer,
   suggestTerms,
   TALK_OUTCOMES,
@@ -117,7 +116,6 @@ import {
   DateString,
   DEAL_TERM_KINDS,
   DealTermSchema,
-  DIRECTIVE_INTENSITIES,
   FIRST_TEAM_LIMIT,
   type GamePlayer,
   INCIDENT_KINDS,
@@ -129,7 +127,6 @@ import {
   MAX_PITCH_CLAIMS,
   MAX_TABLED_TERMS,
   PitchClaimSchema,
-  PLAYER_DIRECTIVE_KINDS,
   POSITION_CODES,
   PRESS_STANCES,
   PROMISE_KINDS,
@@ -149,6 +146,7 @@ import {
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
 
 import { buildTrainingSchedule } from "./gm-input";
+import { runMatchReader } from "./match-reader";
 import { skillDescriptions } from "./skill-descriptions";
 import { runTacticOrders } from "./tactic-orders";
 import { MARKET_OPS, runMarketOrders } from "./market-orders";
@@ -172,8 +170,6 @@ export const CORE_COMMANDS: ReadonlySet<string> = new Set([
   "set_player_tactic",
   "set_set_piece_takers",
   "set_set_piece_routine",
-  "exploit_point",
-  "set_match_plan",
   "substitute",
   "set_captain",
   "set_shootout_order",
@@ -218,11 +214,9 @@ const CORE_COMMAND_LABELS: Record<string, string> = {
   set_lineup: "선발 11명과 벤치, 1·2군 이동",
   set_squad_level: "1·2군 이동",
   set_tactics: "팀 전술 6축과 갈래",
-  set_player_tactic: "한 선수의 자리·역할·개인 지시",
+  set_player_tactic: "한 선수의 자리와 역할",
   set_set_piece_takers: "세트피스 키커",
   set_set_piece_routine: "세트피스 인원",
-  exploit_point: "약점 공략",
-  set_match_plan: "지역 전술",
   substitute: "교체",
   set_captain: "완장 — 주장과 부주장",
   set_shootout_order: "승부차기 키커 순서",
@@ -657,8 +651,34 @@ export function buildToolSpecs(
     },
   });
 
+  /**
+   * 문이 열린 자리에서 **판독기가 이 경기의 첫 포인트와 시트를 쓴다** (match.md §2 ①).
+   *
+   * 실패는 빈 판독이다 — 아무것도 저장하지 않고 코어 로직만으로 굴러가는 경기가 된다.
+   * 문이 열린 것은 이미 일어난 일이라 되돌리지 않는다.
+   */
+  const readAtKickoff = async (): Promise<void> => {
+    const specs = new Map(buildToolSpecs(state, calls).map((t) => [t.name, t] as const));
+    try {
+      const read = await runMatchReader(state, specs, { occasion: "kickoff" });
+      if (read.ok) applyMatchReading(state, read.reading);
+    } catch (error) {
+      console.warn("[match-reader] 킥오프 판독을 건너뜁니다 — 빈 포인트로 시작합니다:", error);
+    }
+  };
+  const startMatchTool = wrap("start_match", descriptions.start_match, z.object({}), () =>
+    startMatch(state),
+  );
+
   return [
-    wrap("start_match", descriptions.start_match, z.object({}), () => startMatch(state)),
+    {
+      ...startMatchTool,
+      async handle(input: unknown, context?: ToolCallContext) {
+        const opened = await startMatchTool.handle(input, context);
+        if (opened.ok) await readAtKickoff();
+        return opened;
+      },
+    },
     /**
      * **협상 방을 세운다** — 경기의 `start_match`와 같은 자리다 (transfer.md §12-2). 문을 열
      * 뿐이고, 자리에 앉은 뒤의 턴은 협상 GM의 것이다(`negotiation-gm.ts`).
@@ -835,18 +855,6 @@ export function buildToolSpecs(
           .min(1)
           .optional()
           .describe("그 자리의 세부 역할 — 역할 표의 이름·id·약어 중 하나"),
-        instruction: z
-          .object({
-            // 상한이 없던 때는 감독 발언이 통째로 인용돼 지시 한 줄이 단락이 됐다
-            note: z.string().min(1).max(160).describe("감독의 말 그대로 — 한 마디로 (160자까지)"),
-            kind: z.enum(PLAYER_DIRECTIVE_KINDS).optional(),
-            targetId: playerRef.optional().describe("man_mark·press_target의 대상 선수 id"),
-            intensity: z
-              .enum(DIRECTIVE_INTENSITIES)
-              .optional()
-              .describe("감독이 말한 세기 — 생략하면 normal"),
-          })
-          .optional(),
       }),
       (input) => setPlayerTactic(state, input),
     ),
@@ -885,29 +893,6 @@ export function buildToolSpecs(
         })
         .partial(),
       (input) => setSetPieceRoutine(state, input),
-    ),
-    wrap(
-      "exploit_point",
-      CORE_COMMAND_LABELS.exploit_point!,
-      z.object({
-        targetIds: z
-          .array(z.string().min(1))
-          .min(1)
-          .max(4)
-          .describe("노릴 지점의 id — <targets>에서 그대로 고른다"),
-      }),
-      (input) => setExploits(state, input),
-    ),
-    wrap(
-      "set_match_plan",
-      CORE_COMMAND_LABELS.set_match_plan!,
-      z.object({
-        band: z.enum(["defense", "midfield", "attack"]),
-        lane: z.enum(["left", "center", "right"]),
-        intent: z.enum(["overload", "press", "protect", "transition"]),
-        note: z.string().min(1).max(120).describe("감독의 세부 전술을 한 줄로 보존"),
-      }),
-      (input) => setRegionalPlan(state, input),
     ),
     /**
      * 훈련 지정 — **기록이 둘로 나뉜다.**

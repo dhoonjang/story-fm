@@ -859,7 +859,7 @@ export function anchorOf(position: string): BoardPoint {
  * 우리 진영·중원·상대 진영. 지정하지 않은 축은 **지금 자리를 그대로 쓴다**:
  * "왼쪽으로 벌려"는 앞뒤를 건드리지 않는다.
  *
- * 눈금은 지역 전술(`RegionalLane`·`RegionalBand`)과 같은 낱말이다 — 한 경기
+ * 눈금은 시트의 밴드·레인(`RegionalLane`·`RegionalBand`)과 같은 낱말이다 — 한 경기
  * 안에서 두 도구가 다른 말로 같은 자리를 가리키면 감독도 모델도 헷갈린다.
  */
 const MOVE_LANE_X: Record<"left" | "center" | "right", number> = {
@@ -1312,91 +1312,6 @@ export const AssignmentRoleSchema = z.enum(["starting", "bench"]);
 export type AssignmentRole = z.infer<typeof AssignmentRoleSchema>;
 
 /**
- * 개인 지시의 종류 — **자연어를 옮길 그릇**이다.
- *
- * 감독은 무슨 말이든 할 수 있고 그것을 여기에 옮기는 것은 LLM의 몫이지만,
- * 무게는 코어가 정한다 (이적 설득 `PitchClaimKind`와 같은 구조). 전술 6축이
- * 팀 전체의 성향이라면 이쪽은 **특정 상대·특정 선수를 겨눈 지시**다.
- *
- * 이득·대가·체력 소모의 계수는 전부 `packages/sim/src/directives.ts`의
- * `DIRECTIVE_TUNING` 한 표에 있다.
- *
- * **자연어를 옮길 그릇이 부족할 때만 늘린다.** 이 목록은 감독이 말할 법한 것의
- * 목록이지 효과의 목록이 아니라서, 표현의 다양함은 `instruction`이 받고 장부는 여기로
- * 접힌다 — 같은 뜻의 말에 갈래를 하나 더 파는 것은 접는 일을 그만두는 것이다.
- * 갈래가 서는 것은 **접을 곳이 아예 없을 때**뿐이고, 그때는 그 갈래가 판에서 움직이는
- * 자리가 다른 넷과 달라야 한다 (`careful`은 존 전력이 아니라 카드 가중을 움직인다).
- */
-export const PLAYER_DIRECTIVE_KINDS = [
-  /** 상대 한 명을 전담 마크 — 그를 지우는 대신 본업을 덜 한다 */
-  "man_mark",
-  /** 상대 빌드업의 시작점을 집중 압박 */
-  "press_target",
-  /** 공격을 이 선수 쪽으로 몰아준다 */
-  "focus_play",
-  /** 오버래핑 자제, 수비 위치 유지 */
-  "stay_back",
-  /** 적극적으로 공격 가담 */
-  "join_attack",
-  /** 발을 뺀다 — 카드 위험을 낮추는 대신 그 자리의 수비가 얇아진다 */
-  "careful",
-] as const;
-export const PlayerDirectiveKindSchema = z.enum(PLAYER_DIRECTIVE_KINDS);
-export type PlayerDirectiveKind = z.infer<typeof PlayerDirectiveKindSchema>;
-
-export const PLAYER_DIRECTIVE_KO: Record<PlayerDirectiveKind, string> = {
-  man_mark: "전담 마크",
-  press_target: "집중 압박",
-  focus_play: "공격 집중",
-  stay_back: "수비 위치 유지",
-  join_attack: "공격 가담",
-  careful: "태클 자제",
-};
-
-/**
- * 지시의 **세기** — 종류가 접는 것은 *무엇을*이고, 이 축이 남기는 것은 *얼마나*다.
- *
- * "붙어서 아예 지워버려"와 "따라가진 말고 견제만"은 같은 `man_mark`지만 같은 지시가
- * 아니다. 종류가 몇으로 접히는 것은 설계지만(자연어의 다양함은 `instruction`이
- * 받는다) 정도까지 접히면 언어가 인터페이스인 게임에서 **감독이 고른 세기가 결과에
- * 남지 않는다.** 이득·대가·체력 소모가 함께 이 배수를 탄다 — 세게 걸수록 얻는 것만
- * 크는 것이 아니다 (`packages/sim/src/directives.ts`의 `DIRECTIVE_TUNING`).
- */
-export const DIRECTIVE_INTENSITIES = ["light", "normal", "heavy"] as const;
-export const DirectiveIntensitySchema = z.enum(DIRECTIVE_INTENSITIES);
-export type DirectiveIntensity = z.infer<typeof DirectiveIntensitySchema>;
-
-export const DIRECTIVE_INTENSITY_KO: Record<DirectiveIntensity, string> = {
-  light: "가볍게",
-  normal: "보통",
-  heavy: "강하게",
-};
-
-export const PlayerDirectiveSchema = z.object({
-  kind: PlayerDirectiveKindSchema,
-  /**
-   * 겨냥한 상대 선수 id — man_mark·press_target은 대상이 있어야 성립한다.
-   * 코어가 "그 선수가 오늘 그라운드에 있는가"를 검증한다.
-   */
-  targetId: z.string().min(1).optional(),
-  /** 얼마나 세게 — 없으면 `normal`이라 옛 세이브와 세기를 안 보낸 호출이 그대로 선다 */
-  intensity: DirectiveIntensitySchema.optional(),
-  /**
-   * **감독이 내린 차례** — 클수록 최근이고, 자리를 다툴 때 이기는 쪽이다
-   * (→ docs/simulation/match.md §2 밀어내기).
-   *
-   * 세 자리를 배열 순서로 채우면 그 순서는 감독이 말한 차례가 아니라 **배치
-   * 순서**라, 후반에 내린 지시가 킥오프 전에 세워 둔 지시에게 진다. 차례를 값으로
-   * 들고 있어야 "나중에 내린 것이 이긴다"가 성립한다.
-   *
-   * 옛 세이브엔 없다 (optional — 없는 것끼리는 배치 순서로 갈리므로 판정이
-   * 움직이지 않는다).
-   */
-  order: z.number().int().nonnegative().optional(),
-});
-export type PlayerDirective = z.infer<typeof PlayerDirectiveSchema>;
-
-/**
  * 드릴해 둔 전술 하나 — 그 설정으로 팀이 쌓았던 숙련도의 기억.
  * 되돌아가면 이 값을 되찾으므로 "실험했다가 원래대로" 가 공짜에 가까워진다.
  */
@@ -1467,17 +1382,6 @@ export const TacticAssignmentSchema = z.object({
    * 정수로 자르면 90 위에서 아무리 훈련해도 값이 멈춘다. 화면은 반올림해 보여 준다.
    */
   familiarity: FamiliaritySchema,
-  /** 개인 전술 지시 (자연어) — 서사에 그대로 실린다 */
-  instruction: z.string().optional(),
-  /**
-   * **결과에 닿는 개인 지시** — 자연어를 옮긴 구조화된 형태.
-   *
-   * `instruction`은 사람이 읽는 말이고 이쪽이 장부다. 둘을 가른 이유가 있다:
-   * 자연어만 두면 "케인을 달고 다녀"가 저장은 되지만 수치엔 없는 말이 된다
-   * (AGENTS §4 — "말했는데 수치엔 없는" 경로를 남기지 않는다).
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
-   */
-  directive: PlayerDirectiveSchema.optional(),
   /**
    * **이 선수가 이 전술들에 대해 쌓아 둔 숙련도** — 최근 것부터.
    *

@@ -313,8 +313,6 @@ export function PlayerDetail({
         milestones={p.milestones}
         showTable={showCareer}
       />
-
-      {p.instruction && <p className="pd-foot">개인 지시 “{p.instruction}”</p>}
     </div>
   );
 }

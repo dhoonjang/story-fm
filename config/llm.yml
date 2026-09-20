@@ -65,9 +65,9 @@ agents:
     timeout_ms: 180000
     thinking_level: low
 
-  # 감독의 말을 구조화된 의도 하나로 옮긴다 — 판단이 아니라 분류라 가벼운 모델로 둔다.
-  # 경기 한 턴이 두 호출이 됐으므로(docs/llm/agents.md §3) 여기서 지연을 갚아야 한다.
-  # 한 턴에 교체·전술·지시가 함께 올 수 있어 훈련 결산보다는 넉넉하다.
+  # 평시 감독의 판 지시(라인업·1·2군·6축·세트피스·완장)를 명령의 인자로 옮긴다 —
+  # 판단이 아니라 분류라 가벼운 모델로 둔다. 경기 중의 판은 판독기가 쓴다.
+  # 한 턴에 교체·전술·대화가 함께 올 수 있어 훈련 결산보다는 넉넉하다.
   tactic-orders:
     provider: google
     model: gemini-3.5-flash-lite
@@ -96,6 +96,16 @@ agents:
   # 테이블의 감독 말 한 줄을 **이 협상 하나**의 명령 인자로 옮긴다 — 값·조건·답·수락·철회
   # (docs/llm/agents.md §4-1 · transfer.md §12-3). 시장 해석과 같은 분류라 같은 자리다.
   table-orders:
+    provider: google
+    model: gemini-3.5-flash-lite
+    max_tokens: 16000
+    timeout_ms: 60000
+    thinking_level: minimal
+
+  # 경기를 읽어 전술 포인트와 시트를 쓰고, 지시 턴이면 감독의 말을 그 판독 위에서 명령
+  # 인자로 옮긴다 (docs/llm/agents.md §3). 킥오프·지시 턴·구간 뒤 세 자리에서 돌아 해석기
+  # 넷보다 자주 불리고, 산출이 짧은 구조 호출이라 매치 GM과 다른 빠른 모델을 붙인다.
+  match-reader:
     provider: google
     model: gemini-3.5-flash-lite
     max_tokens: 16000

@@ -439,13 +439,23 @@ export interface PendingMatch {
    */
   entered?: boolean;
   /**
-   * 지금 노리고 있는 지점 (`ExploitTarget.id`) — 감독이 지시로 겨냥한 약점.
+   * **전술 포인트** — 판독기가 쓴 이 경기의 판독 (match.md §1.6).
    *
-   * 전술 6축이 "팀의 성향"이라면 이쪽은 **이 경기, 저 지점**이다. 교체로 그
-   * 선수가 나가면 표적이 사라지고 공략도 조용히 끝난다 (코어가 대조한다).
-   * 옛 세이브엔 없다 — optional이라 세이브 버전을 올리지 않는다.
+   * 어느 팀의 메모가 아니라 양 팀에 걸친 경기의 판독이고, 저자는 판독기 하나다.
+   * 킥오프·지시 턴·구간 뒤마다 **전체를 다시 쓴다**(`applyMatchReading`). 코어는
+   * 문장을 읽지 않는다 — 결과에 닿는 것은 아래 `sheet`뿐이다. 경기가 끝나면
+   * `pendingMatch`와 함께 사라진다 — 저장 전술에도 이력에도 남지 않는다.
+   * 옛 세이브엔 없다 (optional — 없으면 판독 없이 코어 로직만으로 구른다).
    */
-  exploits?: string[];
+  points?: import("@story-fm/domain").Point[];
+  /**
+   * **시트** — 포인트의 수치 독해. 코어가 읽는 것은 이것뿐이다 (sim `sheet.ts`).
+   *
+   * 실재·한도·소화율은 패킷을 세울 때마다 다시 걸린다 — 교체로 사람이 바뀌어도
+   * 저장할 때 한 번 거른 값이 남지 않게. 교체·퇴장으로 나간 선수의 줄은 그 자리에서
+   * 걷는다(`applyMatchEvents`). 옛 세이브엔 없다 (optional).
+   */
+  sheet?: import("@story-fm/domain").SheetLine[];
   /**
    * **이 경기에서 쓴 외침의 수** — 정지점에서 팀 전체에 던진 짧은 말
    * (`occasion: "shout"`, → docs/simulation/career.md §2).
@@ -456,13 +466,6 @@ export interface PendingMatch {
    * 옛 세이브엔 없다 — 없으면 아직 한 번도 외치지 않은 것으로 읽는다 (optional).
    */
   shouts?: number;
-  /** 자연어로 지정한 경기 전용 지역 플랜 — 같은 지역은 마지막 지시가 이긴다. */
-  regionalPlans?: Array<{
-    band: import("@story-fm/domain").RegionalBand;
-    lane: import("@story-fm/domain").RegionalLane;
-    intent: import("@story-fm/domain").RegionalIntent;
-    note: string;
-  }>;
   /**
    * 경기 중 소모한 체력 (선수 id → 0~100). 경기 중에는 저장된 `state.condition`에서
    * 빼서 보고, **경기가 끝나면 이 값 그대로 정산된다**(`finalizeMatch`) — 화면에서
@@ -498,7 +501,7 @@ export interface PendingMatch {
   /**
    * **킥오프 시점의 전술** — 경기가 끝나면 여기로 되돌린다.
    *
-   * 하프타임에 올린 라인, 후반에 붙인 대인 마크는 **그 경기의 대응**이지 팀의
+   * 하프타임에 올린 라인, 후반에 옮긴 자리는 **그 경기의 대응**이지 팀의
    * 전술이 아니다. 되돌리지 않으면 다음 경기와 그 사이 훈련이 임시 조정을
    * 물려받고, 감독은 자기가 바꾼 적 없는 전술로 경기에 들어간다.
    *
@@ -514,8 +517,6 @@ export interface PendingMatch {
       position: string;
       point?: import("@story-fm/domain").BoardPoint;
       roleId?: string;
-      instruction?: string;
-      directive?: import("@story-fm/domain").PlayerDirective;
       familiarity: number;
       /**
        * 오늘 낸 역할 대가의 장부도 함께 담는다 — 적응도만 되돌리고 `paid`를 두면

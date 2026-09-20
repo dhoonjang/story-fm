@@ -421,88 +421,103 @@ button.mv-marker:focus-visible {
 }
 
 /**
- * 지시의 증거 — **공략 중과 전술 노트.**
- *
- * 키포인트가 "판에서 벌어지는 일"이면 이쪽은 "내가 시킨 일"이라, 키포인트 아래에
- * 붙되 색을 쓰지 않는다. 유불리를 말하는 자리가 아니기 때문이다.
+ * 시트 — **지시가 판에 닿았나.** 키포인트가 "판에서 벌어지는 일"이면 이쪽은 "내가
+ * 시킨 일"이라 바로 아래에 붙는다. 두 패널이 한 판을 두 층으로 읽는 것이므로
+ * 레일·잉크 규칙은 키포인트(`.mv-keys`)와 같고, 줄만 한 단 크다 — 시트 줄은 감독이
+ * 방금 말로 만든 것이라 먼저 읽힌다.
  */
-.mv-orders {
+.mv-sheet {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
 }
-.mv-exploits {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-sm);
+.mv-sheet-line {
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  padding: 8px 12px;
+  border-left: 3px solid var(--border);
 }
-.mv-exploits b {
-  color: var(--text-2);
-  font-weight: 600;
+.mv-sheet-line + .mv-sheet-line {
+  border-top: 1px solid var(--line);
 }
-/* 걸려 있는 표적 — 지금 실제로 판에 얹혀 있는 것이라 칩으로 또렷하게 선다 */
-.mv-exploit {
-  padding: 3px 9px;
-  border-radius: var(--r-xs);
-  background: var(--panel-2);
-  color: var(--text);
+.mv-sheet-line.good {
+  border-left-color: var(--win);
 }
-/* 노트 — 걸리지 않은 것과 개인 지시의 결과. 읽는 줄글이라 칩이 아니다 */
-.mv-note {
-  font-size: var(--fs-xs);
-  line-height: 1.6;
-  color: var(--text-2);
+.mv-sheet-line.bad {
+  border-left-color: var(--loss);
 }
 /**
- * 개인 지시 — **걸린 줄과 닿지 않은 줄이 한눈에 갈린다.**
- *
- * 갈리는 것은 색이 아니라 **밝기**다: 걸린 지시가 본문 밝기로 서고 닿지 않은 지시는
- * 물러선다. 유불리가 아니라 "지금 서 있나"의 문제라 승패 색을 쓰지 않는다 —
- * 공략·노트와 같은 규칙이다.
+ * 판에 닿지 못한 줄 — **일어나지 않은 일이라 편이 없다.** 레일은 트랙 색으로 서고
+ * 잉크가 한 층 물러난다. 걸린 줄과 같은 크기인 것은 같은 물음의 답이기 때문이다 —
+ * 작게 눕히면 감독이 훑다가 지나치고, 그러면 걸리지 않은 지시를 걸린 줄 안다.
  */
-.mv-directives {
+.mv-sheet-line.dropped {
+  color: var(--text-2);
+}
+
+/**
+ * 전술 노트 손잡이 — 읽는 줄 사이에 서는 **유일한 조작**이라 면으로 갈린다
+ * (design-system.md §1 조작). 줄 수는 접힌 채로도 서고, 펼치면 홑화살이 돈다.
+ */
+.mv-note-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  margin: 6px 0 0 12px;
+  padding: 2px 10px;
+  background: var(--panel-2);
+  border: 0;
+  border-radius: var(--r-pill);
+  color: var(--text-2);
+  font-size: var(--fs-2xs);
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    color var(--ease),
+    background var(--ease);
+}
+.mv-note-btn:hover {
+  color: var(--text);
+  background: var(--pop);
+}
+.mv-note-btn svg:last-child {
+  transition: transform var(--ease);
+}
+.mv-note-btn.open svg:last-child {
+  transform: rotate(180deg);
+}
+
+/**
+ * 펴진 노트 — **면이 한 단 밝고 줄 사이가 헤어라인이다.** 종이 질감은 이 시스템에
+ * 없으므로(design-system.md §4) 노트로 읽히게 하는 것은 높이와 줄뿐이다.
+ */
+.mv-notes {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  margin: 6px 12px 2px;
+  background: var(--panel-2);
+  border-radius: var(--r-sm);
+  animation: note-in 160ms var(--ease) both;
 }
-.mv-dir-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
+.mv-notes .mv-note + .mv-note {
+  border-top: 1px solid var(--line);
+}
+@keyframes note-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+/* 노트 한 줄 — 읽는 줄글이라 레일도 칩도 없다 */
+.mv-note {
   font-size: var(--fs-sm);
-}
-.mv-dir-head b {
-  color: var(--text-2);
-  font-weight: 600;
-}
-/* 쓴 자리 — 한도는 코어가 세어 보낸 값이라 화면이 적어 두지 않는다 */
-.mv-dir-head span {
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
-}
-.mv-dir {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-  font-size: var(--fs-xs);
   line-height: 1.6;
-  color: var(--text-3);
-}
-.mv-dir.live {
-  color: var(--text);
-}
-.mv-dir-who {
-  font-weight: 600;
-}
-.mv-dir-kind {
   color: var(--text-2);
 }
-/* 닿지 않은 까닭 — 사실 한 줄이라 줄글로 선다 */
-.mv-dir-why {
-  color: var(--warn);
+.mv-notes .mv-note {
+  padding: 8px 12px;
 }
 
 .mv-tac-notes {
@@ -910,7 +925,8 @@ button.pitch-slot.theirs {
 }
 @media (prefers-reduced-motion: reduce) {
   .match-headline,
-  .match-headline.closing {
+  .match-headline.closing,
+  .mv-notes {
     animation: none;
   }
 }

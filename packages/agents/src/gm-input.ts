@@ -8,8 +8,6 @@ import {
   ABSENT_REASON_KO,
   boardExpectation,
   buildOpponentReport,
-  DIRECTIVE_DROP_KO,
-  directiveStandingOf,
   callUpsOfBreak,
   careerTotalsOf,
   characterEntry,
@@ -49,7 +47,6 @@ import {
   suspensionScopeName,
   loanedOut,
   managedTeamId,
-  MAX_EXPLOITS,
   missionReportLine,
   onSummerBreak,
   openCallUp,
@@ -63,6 +60,7 @@ import {
   pendingVerdicts,
   ourYouthCandidates,
   playerName,
+  pointsSeenBy,
   recordBreakLine,
   recordBreaksOf,
   savedClubProfile,
@@ -140,6 +138,7 @@ import {
   type ManagerOffer,
   type ManagerPromise,
   type MissionReportCard,
+  type PacketTag,
   type PersonaRelation,
   type ScoutReportCard,
   type TickEvent,
@@ -1592,36 +1591,13 @@ export function armbandLine(state: GameState): string {
 }
 
 /**
- * 「개인 지시 자리」 — **걸어 둔 것이 아니라 걸린 것.**
+ * `<standing>` — **지금 우리가 걸어 둔 것 전부**: 6축과 갈래·세트피스 인원·자리별
+ * 역할·완장·세트피스 키커. 경기 장부 노트와 평시의 지시 해석이 같은 블록을 읽는다 —
+ * 두 벌이면 "압박 올려"의 지금 값이 한쪽에서 지어내진다 (agents.md §1).
  *
- * 지시는 한 경기에 셋까지고 넷째는 가장 오래된 것을 밀어낸다(match.md §2). 걸어 둔
- * 목록만 주면 GM은 넷을 다 걸린 것으로 읽고 그 전제로 장면을 쓴다 — 남은 자리를
- * 아는 GM은 감독이 넷째를 말하기 전에 **먼저** 말할 수 있고, 표적이 교체로 사라진
- * 지시도 그 자리에서 감독에게 되돌려 준다.
- *
- * 판정은 코어의 것이다(`directiveStandingOf`) — 사실만 싣고 무엇을 하라는 말은
- * 여기 적지 않는다.
+ * 판독은 여기 서지 않는다 — 포인트는 `<points>`가, 시트는 코어가 갖는다 (match.md §1.6).
  */
-function directiveSlotLine(state: GameState): string {
-  const slots = directiveStandingOf(state, state.userTeamId);
-  const rows = slots.rows.map((d) => {
-    const target = d.targetId ? `→${playerName(state, d.targetId)}` : "";
-    const how = d.code ? DIRECTIVE_DROP_KO[d.code] : "걸림";
-    return `${playerName(state, d.playerId)} [${d.kind}${target}] ${how}`;
-  });
-  const head = `개인 지시 자리: ${slots.used}/${slots.limit}`;
-  return rows.length === 0 ? head : `${head} — ${rows.join(" · ")}`;
-}
-
-/**
- * `<standing>` — **지금 우리가 걸어 둔 것 전부**: 6축과 갈래·세트피스 인원·지역 전술·
- * 개인 지시와 역할·완장·세트피스 키커. 경기 장부 노트와 평시의 지시 해석이 같은 블록을
- * 읽는다 — 두 벌이면 "압박 올려"의 지금 값이 한쪽에서 지어내진다 (agents.md §1).
- */
-export function buildStandingBlock(
-  state: GameState,
-  regionalPlans?: NonNullable<GameState["pendingMatch"]>["regionalPlans"],
-): string[] {
+export function buildStandingBlock(state: GameState): string[] {
   const takers = tacticsOf(state, state.userTeamId).setPieceTakers ?? {};
   const takerName = (id: string | undefined): string => (id ? playerName(state, id) : "지정 없음");
   /**
@@ -1630,9 +1606,7 @@ export function buildStandingBlock(
    */
   const ourTeamTactics = tacticsOf(state, state.userTeamId);
   const ourTactics = ourTeamTactics.spec;
-  const assignments = ourTeamTactics.assignments.filter(
-    (a) => a.role === "starting" && (a.directive || a.instruction || a.roleId),
-  );
+  const assignments = ourTeamTactics.assignments.filter((a) => a.role === "starting" && a.roleId);
   /**
    * 걸어 둔 갈래 — **중립인 것은 세우지 않는다** (`tacticsBrief`와 같은 규칙).
    * 낱말은 `TACTIC_TOGGLES` 하나에서 온다 — 손으로 적으면 해석 프롬프트가 가르치는
@@ -1659,23 +1633,11 @@ export function buildStandingBlock(
       `압박${ourTactics.pressing} 템포${ourTactics.tempo} 폭${ourTactics.width} 패스${ourTactics.passStyle}` +
       (ourToggles.length > 0 ? ` · ${ourToggles.join(" · ")}` : ``) +
       (ourRoutine.length > 0 ? ` · ${SET_PIECE_KO} ${ourRoutine.join(" · ")}` : ``),
-    regionalPlans && regionalPlans.length > 0
-      ? `지역 전술: ${regionalPlans
-          .map((r) => `${r.band}/${r.lane} ${r.intent} "${r.note}"`)
-          .join(" · ")} (동시에 2곳까지 — 셋째를 걸면 가장 오래된 것이 밀린다)`
-      : `지역 전술: 없음`,
     assignments.length > 0
-      ? `개인 지시·역할: ${assignments
-          .map(
-            (a) =>
-              `${playerName(state, a.playerId)}(${a.position}` +
-              `${a.roleId ? ` ${a.roleId}` : ""}` +
-              `${a.directive ? ` [${a.directive.kind}]` : ""}` +
-              `${a.instruction && !a.directive ? ` “말로만: ${a.instruction}”` : ""})`,
-          )
+      ? `자리별 역할: ${assignments
+          .map((a) => `${playerName(state, a.playerId)}(${a.position} ${a.roleId})`)
           .join(", ")}`
-      : `개인 지시·역할: 없음`,
-    directiveSlotLine(state),
+      : `자리별 역할: 없음`,
     armbandLine(state),
     `세트피스 키커: 코너 ${takerName(takers.corner)} · 프리킥 ${takerName(takers.freeKick)} · 페널티 ${takerName(takers.penalty)}`,
     `</standing>`,
@@ -1718,15 +1680,45 @@ export function buildBoardMovesBlock(state: GameState, moves: readonly BoardMove
 }
 
 /**
+ * `<match_log>` — **이 경기의 지난 턴 전부** (agents.md §3). 감독의 지시는 앞 턴의
+ * 대화를 잇는 말일 때가 많다 — "걔 빼", "아까 말한 대로", "그 자리로 다시". 직전
+ * 한두 턴만 실으면 세 턴 전에 부른 선수를 가리키는 말이 `unresolved`로 떨어진다.
+ * 이번 턴에 밀어 넣은 꼬리는 뺀다(`pastTurns`) — 감독의 말은 `@감독:` 줄 하나로만 선다.
+ * 없으면 빈 문자열.
+ */
+export function buildMatchLogBlock(state: GameState): string {
+  const matchId = state.pendingMatch?.matchId;
+  const turns = pastTurns(
+    state.chat.filter(
+      (t) => t.inMatch === true && (t.matchId === undefined || t.matchId === matchId),
+    ),
+  );
+  if (turns.length === 0) return "";
+  return ["<match_log>", ...renderTurns(turns), "</match_log>"].join("\n");
+}
+
+/**
+ * 패킷의 태그에서 **GM이 읽을 줄**만 — 시트가 건 줄은 빠진다 (match.md §1.6).
+ *
+ * 시트의 줄마다 태그가 서지만 그것은 판독의 수치 독해라 감독 쪽 화자에게 가지 않는다.
+ * 판독이 감독에게 닿는 통로는 `<points>`의 허락된 줄 하나뿐이고, 여기서 새어 나가면
+ * 분석 능력이 아무것도 가리지 않는다.
+ */
+function spoken(notes: readonly PacketTag[]): PacketTag[] {
+  return notes.filter((note) => note.source !== "sheet" && note.source !== "sheet-dropped");
+}
+
+/**
  * 경기 장부 + 현재 판세 — 매 턴 갱신되는 휘발성 블록. 패킷도 여기(캐시 밖)에
  * 담되 JSON을 통째로 붓지 않고 읽는 쪽이 실제로 쓰는 것만 요약한다.
  *
- * 읽는 쪽이 둘이라 `withPacket`이 세 갈래다.
- * - `true` — 중계가 판을 읽는 턴. 판세와 공략 표적을 함께 싣는다.
- * - `false` — 킥오프·대화만 건 턴. 아직 아무 일도 일어나지 않았는데 판세를 쥐여 주면
- *   첫 마디부터 우열을 읊는다. 그때 필요한 것은 대진과 선발뿐이다.
- * - 생략 — 지시 해석기. 감독의 말을 갈래로 나누는 데 기대 득점·상성·소화율은 쓰이지
- *   않는다. 명단·6축·공략 표적만 읽는다 (`exploits`는 그 표적의 id로만 채워진다).
+ * 읽는 쪽이 둘이라 `withPacket`이 갈린다.
+ * - `true` — 중계가 판을 읽는 턴. 판세를 함께 싣는다.
+ * - `false`·생략 — 킥오프·대화만 건 턴. 아직 아무 일도 일어나지 않았는데 판세를
+ *   쥐여 주면 첫 마디부터 우열을 읊는다. 그때 필요한 것은 대진과 선발뿐이다.
+ *
+ * **시트는 어느 쪽에도 서지 않는다** — 판독이 감독 쪽에 닿는 통로는 `<points>`의
+ * 허락된 줄과 코치·중계의 말뿐이다 (match.md §1.6).
  */
 export function buildLedgerNote(state: GameState, options: { withPacket?: boolean } = {}): string {
   const pending = state.pendingMatch;
@@ -1734,15 +1726,8 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
   if (!ledger || !pending) return "";
   const packet =
     options.withPacket === true && pending.packet ? normalizePacket(pending.packet) : null;
-  /** 태그가 이름을 대는 자리 — 표적 목록은 패킷이 없는 턴에도 선다 */
+  /** 태그가 이름을 대는 자리 — 패킷이 있으면 이름으로, 없으면 태그 그대로 */
   const tagCtx = pending.packet ? packetTagContext(normalizePacket(pending.packet)) : undefined;
-  /** 표적 목록은 판세와 갈린다 — 해석기는 수치 없이 이 목록만 읽는다 */
-  const targets =
-    options.withPacket === false
-      ? []
-      : pending.packet
-        ? normalizePacket(pending.packet).targets
-        : [];
   // 온필드 명단에 개인 전력(패킷의 effective)을 붙인다 — 존 평균만으론 "누가 안 도는가"가 안 보인다
   const effective = new Map(
     [...(packet?.home.lineup ?? []), ...(packet?.away.lineup ?? [])].map((p) => [p.id, p] as const),
@@ -1769,35 +1754,32 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
         // 판세를 읽는 것은 모델의 일이다 — 코어는 이름·수치·상성 근거만 싣는다
         `${packet.home.teamName}(홈) vs ${packet.away.teamName} — 기대 득점 ${packet.guide.expectedGoals.home} : ${packet.guide.expectedGoals.away}`,
         packet.matchups.map((m) => matchupText(m)).join(" / "),
-        ...packet.keyPoints.map((k) => `· ${packetTagText(k, tagCtx)}`),
+        ...spoken(packet.keyPoints).map((k) => `· ${packetTagText(k, tagCtx)}`),
         `홈 전술 소화: ${Math.round(packet.home.tactical.uptake * 100)}%${
-          packet.home.tactical.notes.length > 0
-            ? ` — ${packet.home.tactical.notes.map((n) => packetTagText(n, tagCtx)).join(" / ")}`
+          spoken(packet.home.tactical.notes).length > 0
+            ? ` — ${spoken(packet.home.tactical.notes)
+                .map((n) => packetTagText(n, tagCtx))
+                .join(" / ")}`
             : ""
         }`,
         `어웨이 전술 소화: ${Math.round(packet.away.tactical.uptake * 100)}%${
-          packet.away.tactical.notes.length > 0
-            ? ` — ${packet.away.tactical.notes.map((n) => packetTagText(n, tagCtx)).join(" / ")}`
+          spoken(packet.away.tactical.notes).length > 0
+            ? ` — ${spoken(packet.away.tactical.notes)
+                .map((n) => packetTagText(n, tagCtx))
+                .join(" / ")}`
             : ""
         }`,
         `</packet>`,
       ]
     : [];
-  // 공략 후보 — 노릴 수 있는 지점은 이 목록이 전부다 (없는 지점은 코어가 반려)
-  const targetLines =
-    targets.length > 0
-      ? [
-          // max — 동시에 노릴 수 있는 수. 고르는 쪽은 스키마의 maxItems로 읽고(prompts.md §2),
-          // 넘겨 와도 코어가 자른다 (`setExploits`)
-          `<targets max="${MAX_EXPLOITS}">`,
-          ...targets.map((t) => `  ${t.id} — ${packetTagText(t.tag, tagCtx)}`),
-          pending.exploits && pending.exploits.length > 0
-            ? `지금 노리는 중: ${pending.exploits.join(", ")}`
-            : `지금 노리는 곳 없음`,
-          `</targets>`,
-        ]
-      : [];
-  const standingLines = ["", ...buildStandingBlock(state, pending.regionalPlans)];
+  /**
+   * `<points>` — **감독의 분석이 허락한 판독**뿐이다 (career.md §2 · match.md §1.6).
+   * 문장만 싣는다: 수치도 시트도 없고, 이 줄들은 코치와 중계의 말로만 감독에게 닿는다.
+   */
+  const seen = pointsSeenBy(state);
+  const pointLines =
+    seen.length > 0 ? [`<points>`, ...seen.map((p) => `- ${p.text}`), `</points>`] : [];
+  const standingLines = ["", ...buildStandingBlock(state)];
   // 사건은 싣지 않는다 — 코어가 이미 굴린 구간은 <segment>로 따로
   // 실린다. 이 블록은 그 구간이 끝난 자리의 장부다 (agents.md §3)
   /**
@@ -1818,7 +1800,7 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
     `</ledger>`,
     ...standingLines,
     ...packetLines,
-    ...targetLines,
+    ...pointLines,
   ]
     .filter(Boolean)
     .join("\n");
@@ -1900,7 +1882,7 @@ function headerKey(line: string): string {
 }
 
 /**
- * 줄 앞머리의 여는 태그 이름 — `<targets max="2">` · `<ledger>` (`</…>`·`<…/>`는 아니다).
+ * 줄 앞머리의 여는 태그 이름 — `<points>` · `<ledger>` (`</…>`·`<…/>`는 아니다).
  *
  * ⚠️ 이름은 **글자로 열린다**(`\p{L}`) — 코어의 블록은 영어지만 모델이 지어내는
  * 태그는 한글일 수 있고(`<생각>`), 숫자로 여는 것은 태그가 아니라 부등호다(`3 < 4`).
@@ -1922,7 +1904,7 @@ function opensScene(trimmed: string): boolean {
 /**
  * 꺾쇠로 여닫는 블록은 **읽는 것**이고 장면이 아니다 (prompts.md §1).
  *
- * `<targets>`·`<ledger>`는 코어가 읽으라고 넣어 준 입력 구조인데, 모델이 그것을
+ * `<points>`·`<ledger>`는 코어가 읽으라고 넣어 준 입력 구조인데, 모델이 그것을
  * 되받아 쓰면 프롬프트 내부 구조가 감독이 읽는 자리에 그대로 선다. 평시도 중계도
  * 이 한 규칙을 함께 읽는다.
  *
@@ -2031,7 +2013,7 @@ export function sanitizeSceneText(text: string): string {
  *
  * 평시 규칙을 그대로 갖다 붙일 수 없다: 구간마다 헤더를 새로 찍는 것이 중계에서는
  * 정상이고, 이어쓰기의 경계도 다르다. 남는 것은 두 국면이 함께 읽는 좁은 규칙
- * 하나 — 모델이 `<targets>`를 되받아 써도 화면에도 저장에도 서지 않는다.
+ * 하나 — 모델이 `<points>`를 되받아 써도 화면에도 저장에도 서지 않는다.
  */
 export function sanitizeCasterText(text: string): string {
   return sieve(text, false);

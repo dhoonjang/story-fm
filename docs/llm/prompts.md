@@ -106,7 +106,7 @@
 
 #### 꺾쇠 블록 — 평시와 중계가 같은 규칙을 읽는다
 
-읽는 것(꺾쇠)과 쓰는 것(`@` 줄)은 생김새가 갈리는데(§4), 모델이 `<targets>`·`<ledger>`
+읽는 것(꺾쇠)과 쓰는 것(`@` 줄)은 생김새가 갈리는데(§4), 모델이 `<points>`·`<ledger>`
 같은 **입력 블록을 되받아 쓰면** 프롬프트 내부 구조가 감독이 읽는 자리에 그대로 선다.
 프롬프트로 더 누르는 것은 프롬프트의 몫이고, **문은 코어에 선다** — 모델이 흘려도 화면은
 깨지지 않는다. 프롬프트 쪽의 대비는 **평시도 중계도 「출력 문법」의 첫 줄**이 갖는다 —
@@ -149,12 +149,12 @@
 
 ## 2. 도구 표면 — 한 판단은 한 도구
 
-도구는 **24개**이고 **전부 평시 GM의 것**이다. 받아쓰기 명령 43개(판 11 · 훈련·육성 6 ·
+도구는 **24개**이고 **전부 평시 GM의 것**이다. 받아쓰기 명령 41개(판 9 · 훈련·육성 6 ·
 이적·재정·감독직 26)는 GM에게 보이지 않는다 — `tactic_orders`·`training_orders`·
 `market_orders` 뒤의 세 해석기가 이번 턴 감독의 말을 받아 그 명령의 인자를 채운다. 그
-말은 코어가 넘긴다 — 손잡이 셋은 인자가 없고, 부르는 것이 곧 라우팅이다 (agents.md §1). 매치 GM이 쥐는 해석기는 `tactic-orders` 하나다. 경기 중에는 매치
+말은 코어가 넘긴다 — 손잡이 셋은 인자가 없고, 부르는 것이 곧 라우팅이다 (agents.md §1). 매치 GM이 쥐는 것은 판독기(`match-reader`) 하나다. 경기 중에는 매치
 GM이 **경기 도구 셋**(`tactic_orders` · `advance_match` · `finalize_match`)만 쥔다 — 지시는
-그 도구 뒤의 해석이 JSON 하나로 옮기고 코어가 같은 명령 함수를 부른다
+그 도구 뒤의 판독기가 JSON 하나로 옮기고 코어가 같은 명령 함수를 부른다
 ([agents.md](./agents.md) §3). 경기 도구 셋은 이 카탈로그에 없다(`buildMatchTools` —
 `match-gm.ts`). 같은 순간에 함께 정해지는 것들이 갈려 있으면 해석기가 하나를 빠뜨린다 —
 라인업은 1·2군 이동까지 한 요청(`set_lineup`의 `squadLevels`), 한 선수의 자리·역할·개인
@@ -166,7 +166,7 @@ GM이 **경기 도구 셋**(`tactic_orders` · `advance_match` · `finalize_matc
 | 그룹      | 수  | 도구                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | --------- | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 진행      | 3   | `start_match` · `start_negotiation` · `resign`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| 전술·훈련 | 2   | `tactic_orders`(→ 해석이 `set_lineup` · `set_squad_level` · `set_tactics` · `set_player_tactic` · `set_set_piece_takers` · `set_set_piece_routine` · `set_match_plan` · `exploit_point` · `set_captain`으로) · `training_orders`(→ 해석이 `set_training` · `set_development_focus` · `set_mentor` · `set_reserve_training` · `set_squad_number` · `sign_youth`로)                                                                                                                                                                                                                                         |
+| 전술·훈련 | 2   | `tactic_orders`(→ 해석이 `set_lineup` · `set_squad_level` · `set_tactics` · `set_player_tactic` · `set_set_piece_takers` · `set_set_piece_routine` · `set_captain`으로) · `training_orders`(→ 해석이 `set_training` · `set_development_focus` · `set_mentor` · `set_reserve_training` · `set_squad_number` · `sign_youth`로)                                                                                                                                                                                                                                                                              |
 | 대화·서사 | 4   | `team_talk` · `respond_to_media` · `respond_to_approach` · `record_incident`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 이적      | 3   | `deal_odds` · `list_negotiations` · `market_orders`(→ 해석이 `send_offer` · `respond_offer` · `accept_deal` · `withdraw_offer` · `open_renewal` · `open_release` · `release_player` · `set_transfer_list` · `respond_transfer_request` · `exercise_buyback` · `recall_loan` · `adjust_transfer_budget` · `request_board` · `fund_transfer_budget` · `pay_player_bonus` · `set_ticket_price` · `hire_staff` · `release_staff` · `offer_terms` · `answer_term` · `propose_personal` · `delegate_negotiation` · `revoke_mandate` · `accept_manager_offer` · `counter_manager_offer` · `apply_manager_job`로) |
 | 재정      | 1   | `apply_finance_event`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -294,8 +294,8 @@ Zod와 다른 JSON 스키마를 갖지 않는다.** 그 열의 선언(설정 이
   프롬프트에 싣는다 — 사건 기록(`INCIDENT_KIND_KO`) · 시작 사건(`OPENING_KIND_KO`) · 설득
   논거(`PITCH_CLAIM_KO`) · 테이블의 태도(`TABLE_STANCE_KO`)와 화자(`TABLE_SPEAKER_KO`) ·
   감독의 약속(`PROMISE_KIND_KO`) ·
-  훈련 표식(`TRAINING_MARK_KO`) · 계약 지위(`SQUAD_STATUS_KO`) · 개인 지시와 그 세기
-  (`PLAYER_DIRECTIVE_KO` · `DIRECTIVE_INTENSITY_KO`) · 자리 코드(`POSITION_CODES`). 손으로 한 벌 더 적으면 표를 고쳐도
+  훈련 표식(`TRAINING_MARK_KO`) · 계약 지위(`SQUAD_STATUS_KO`) · 시트의 모양
+  (`SHEET_SHAPE_KO`) · 자리 코드(`POSITION_CODES`). 손으로 한 벌 더 적으면 표를 고쳐도
   모델은 옛 뜻을 계속 받고, 한 갈래만 낱말이 빠지면 모델은 그 값을 **「나머지」**로 읽는다.
   **낱말이 곧 토큰인 갈래는 예외다** — `corner`·`freeKick`·`penalty`처럼 토큰 자체가 뜻인
   자리에 낱말을 얹는 것은 벌어질 어긋남이 없는 글자 수다.
@@ -737,7 +737,6 @@ Zod와 다른 JSON 스키마를 갖지 않는다.** 그 열의 선언(설정 이
 | 결산·해석·마감의 "그 도구로만 답하라. 그 밖의 텍스트는 쓰지 않는다"                                | 산출의 꼴은 `outputSchema`가 강제한다(models.md §3-2). 산출이 안 온 응답은 `readOutput`이 실패로 센다.                                                                                                                                                                                                                                                                                               |
 | 중계의 "시각 줄을 쓰지 마라"                                                                       | 모델이 적은 시각 줄은 코어가 걷어내고 장부의 분을 세운다. "장면은 @로 연다 — 시각 줄은 코어가 붙인다"로 적는다(원칙 3).                                                                                                                                                                                                                                                                              |
 | 「입력」 지도의 출력 규칙 — "당신이 쓰는 장면은 @로 연다"                                          | 「출력 문법」의 첫 줄이 원본이다(§1). 지도에 얹으면 같은 규칙이 두 자리에 살고, 그 아래로 이어지는 태그 이름 열 개가 규칙보다 뒤에 서서 모델이 마지막으로 읽는 형식이 된다.                                                                                                                                                                                                                          |
-| `<targets>`의 `max`를 읽는 법 — "max는 동시에 노릴 수 있는 수"                                     | 중계는 도구가 없어 그 수로 할 일이 없고, 고르는 해석기는 같은 상한을 `ops` 항목의 설명 문장으로 읽는다(models.md §3-2). 넘겨 와도 코어가 자른다(원칙 11).                                                                                                                                                                                                                                            |
 | "완성된 장면만 쓴다 — 사고 과정·`<thinking>` 같은 내부 태그는 출력에 없다"                         | 막을 것을 이름으로 부르면 더 샌다(원칙 4). 새어 나온 줄은 코어의 위생이 걷는다(§1).                                                                                                                                                                                                                                                                                                                  |
 | 실명 인물을 위한 별도 프롬프트·섹션                                                                | 실명이든 가명이든 카드의 모양은 하나다. 이름으로 갈리는 규칙을 두면 모델이 이름을 보고 사람을 다르게 그린다.                                                                                                                                                                                                                                                                                         |
 | `<media>`의 "감독이 답할 자리가 아니다"                                                            | 답하는 자리는 `<press>` 하나이고, 그 자리를 여는 도구의 설명이 "스냅샷에 `<press>`가 없으면 쓰지 마라"로 이미 막는다(§5-2). 시스템 프롬프트가 다시 적으면 같은 규칙이 두 자리에 산다.                                                                                                                                                                                                                |
@@ -858,6 +857,7 @@ prompt-regression`, 밴드는 서술자가 쥔다
 | ---------------------------------------------------------------------------- | -------------------------------------------------------- |
 | 평시 시스템 프롬프트 (`GM_SYSTEM`)                                           | `packages/agents/src/gm-prompt.ts`                       |
 | 지시 해석 프롬프트·명령 목록 (`TACTIC_ORDERS_SYSTEM`)                        | `packages/agents/src/tactic-orders.ts` · `orders-ops.ts` |
+| 판독기 프롬프트·출력 스키마 (`MATCH_READER_SYSTEM`)                          | `packages/agents/src/match-reader.ts`                    |
 | 테이블 해석 프롬프트·명령 목록 (`TABLE_ORDERS_SYSTEM`)                       | `packages/agents/src/table-orders.ts` · `orders-ops.ts`  |
 | 매치 GM 프롬프트·경기 도구 셋 (`MATCH_GM_SYSTEM` · `buildMatchTools`)        | `packages/agents/src/match-gm.ts`                        |
 | 마감 프롬프트 (`FINALIZE_MATCH_SYSTEM`)                                      | `packages/agents/src/finalize-match.ts`                  |

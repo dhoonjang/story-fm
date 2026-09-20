@@ -9,6 +9,7 @@ import {
   pick,
   teamName,
   type GameState,
+  type ReadingOccasion,
 } from "@story-fm/engine";
 import { josa, josaOf, MANAGER_ATTRIBUTE_KO } from "@story-fm/domain";
 import {
@@ -20,7 +21,13 @@ import {
   type GameLLM,
 } from "@story-fm/llm";
 import type { GmTurnResult } from "./gm-types";
-import { matchScript, negotiationScript, ordersScript, peaceScript } from "./mock-script";
+import {
+  matchScript,
+  negotiationScript,
+  ordersScript,
+  peaceScript,
+  readerScript,
+} from "./mock-script";
 
 /**
  * **mock 모드가 어느 어댑터를 세우는가** — 그것뿐인 층이다 (docs/llm/agents.md §8).
@@ -86,6 +93,20 @@ export function mockOrdersLlm(
 ): GameLLM | undefined {
   if (resolveLlmMode() !== "mock") return undefined;
   return new ScriptedGameLLM(agentConfig(spec.agent), () => ordersScript(state, said));
+}
+
+/**
+ * 판독기 자리의 대본 어댑터 — 실모드면 `undefined`.
+ *
+ * 감독의 말이 표의 **같은 줄**에서 명령의 인자를 받고, 포인트와 시트는 지금 그라운드에
+ * 선 사람들로 대본이 쓴다 (agents.md §3). 실모드와 다른 것은 저자뿐이다.
+ */
+export function mockReaderLlm(
+  state: GameState,
+  options: { occasion: ReadingOccasion; said?: string },
+): GameLLM | undefined {
+  if (resolveLlmMode() !== "mock") return undefined;
+  return new ScriptedGameLLM(agentConfig("match-reader"), () => readerScript(state, options));
 }
 
 /** 수석코치 화자 태그 — 직책이 아니라 그 사람의 이름이다 (people.md §3) */

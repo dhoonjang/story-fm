@@ -8,6 +8,8 @@ import {
   GM_SYSTEM,
   CORE_COMMANDS,
   MARKET_OPS,
+  MATCH_OPS,
+  MATCH_READER_SYSTEM,
   MATCH_TOOL_DEFINITIONS,
   NEGOTIATION_GM_SYSTEM,
   NEGOTIATION_TOOL_DEFINITIONS,
@@ -57,10 +59,6 @@ import {
   PITCH_CLAIM_KINDS,
   PITCH_CLAIM_KO,
   PITCH_CLAIM_MEANING,
-  DIRECTIVE_INTENSITIES,
-  DIRECTIVE_INTENSITY_KO,
-  PLAYER_DIRECTIVE_KINDS,
-  PLAYER_DIRECTIVE_KO,
   POSITION_CODES,
   PROMISE_KIND_KO,
   PROMISE_KIND_MEANING,
@@ -173,6 +171,10 @@ describe("규칙이 사는 자리", () => {
       // 테이블 해석기도 자기 목록 밖의 이름은 적지 않는다 (transfer.md §12-2)
       if (!TABLE_OPS.includes(name)) {
         expect(mentions(TABLE_ORDERS_SYSTEM, name), `TABLE_ORDERS_SYSTEM: ${name}`).toBe(false);
+      }
+      // 판독기도 자기 목록 밖의 이름은 적지 않는다 (agents.md §3)
+      if (!MATCH_OPS.includes(name)) {
+        expect(mentions(MATCH_READER_SYSTEM, name), `MATCH_READER_SYSTEM: ${name}`).toBe(false);
       }
       if (TACTIC_OPS.includes(name)) continue;
       expect(mentions(TACTIC_ORDERS_SYSTEM, name), `TACTIC_ORDERS_SYSTEM: ${name}`).toBe(false);
@@ -360,21 +362,6 @@ describe("규칙이 사는 자리", () => {
         kinds: SQUAD_STATUSES as readonly string[],
         tables: [SQUAD_STATUS_KO as Record<string, string>],
         reads: "",
-      },
-      {
-        /** 개인 지시는 해석기가 고른다 — 뜻은 그 호출의 시스템 프롬프트에 선다 */
-        where: "set_player_tactic.instruction.kind",
-        node: enumArg(SKILL_TOOLS, "set_player_tactic", "kind"),
-        kinds: PLAYER_DIRECTIVE_KINDS as readonly string[],
-        tables: [PLAYER_DIRECTIVE_KO as Record<string, string>],
-        reads: TACTIC_ORDERS_SYSTEM,
-      },
-      {
-        where: "set_player_tactic.instruction.intensity",
-        node: enumArg(SKILL_TOOLS, "set_player_tactic", "intensity"),
-        kinds: DIRECTIVE_INTENSITIES as readonly string[],
-        tables: [DIRECTIVE_INTENSITY_KO as Record<string, string>],
-        reads: TACTIC_ORDERS_SYSTEM,
       },
     ];
     for (const row of rows) {
@@ -596,6 +583,11 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
     }
     // 테이블 해석기는 시장 해석의 부분집합을 이 협상의 문맥으로 다시 채운다 — 새 이름은 없다 (§12-2)
     for (const name of TABLE_OPS) expect(MARKET_OPS.includes(name), name).toBe(true);
+    /**
+     * 판독기도 판 해석의 부분집합이다 — 적용은 `TACTIC_OPS`의 순서를 지나므로
+     * (`applyTacticOrders`), 그 목록에 없는 이름은 판독기가 채워도 조용히 버려진다.
+     */
+    for (const name of MATCH_OPS) expect(TACTIC_OPS.includes(name), name).toBe(true);
     // 거꾸로, 목록에 있는데 코어 명령도 카탈로그 스킬도 아닌 이름은 없다
     const known = new Set([...CORE_COMMANDS, ...SKILL_CATALOG.map((s) => s.name)]);
     for (const name of lists) expect(known.has(name), name).toBe(true);
@@ -878,12 +870,13 @@ describe("출력 스키마는 제공자의 문을 지난다", () => {
         required: ["a"],
       }),
     ).toBe(2);
-    // 해석기 넷은 한도 밖이고 나머지 여섯은 안이다 — 실측(2026-09)과 같은 그림이어야 한다
+    // 해석기 넷과 판독기는 한도 밖이고 나머지 여섯은 안이다 — 실측(2026-09)과 같은 그림이어야 한다
     const over = DECLARED.filter((entry) => countOptionalProperties(entry.schema) > 24).map(
       (entry) => entry.agent,
     );
     expect(over.sort()).toEqual([
       "market-orders",
+      "match-reader",
       "table-orders",
       "tactic-orders",
       "training-orders",
