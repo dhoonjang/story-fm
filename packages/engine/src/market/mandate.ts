@@ -2,7 +2,6 @@ import type {
   Delegation,
   GamePlayer,
   MandateLimit,
-  MarketCard,
   Negotiation,
   NegotiationKind,
   TickSink,
@@ -19,8 +18,6 @@ import { renewalExpectation, severanceOf } from "./market";
 import {
   acceptDeal,
   answerIncomingOffer,
-  counterpartOf,
-  directionField,
   expiringContracts,
   incomingOffer,
   negotiationKindKo,
@@ -141,35 +138,6 @@ function openingOffer(
   });
 }
 
-/** 맡긴 날과 도로 가져온 날의 카드 — 방침도 같은 꼴이다 */
-function mandateCard(input: {
-  state: GameState;
-  limit: MandateLimit;
-  kind: NegotiationKind;
-  scope: "one" | "policy";
-  revoked?: boolean;
-  negotiation?: Negotiation;
-  player?: GamePlayer;
-}): MarketCard {
-  const { state, limit, kind, scope, negotiation, player } = input;
-  return {
-    kind: "mandate",
-    // 방침 카드에는 선수가 없다 — 임무 카드가 조건을 그 자리에 세우는 것과 같다
-    playerId: player?.id ?? `delegation:${kind}`,
-    playerName: player?.name ?? kindKo(kind),
-    counterpart:
-      negotiation && player ? counterpartOf(negotiation, player) : clubDirector(state).name,
-    ...directionField(kind),
-    ...(kind === "loan" || kind === "loan_out" ? { loan: true } : {}),
-    mandate: {
-      to: clubDirector(state).name,
-      limit: mandateLimitText(limit, kind),
-      scope,
-      ...(input.revoked ? { revoked: true } : {}),
-    },
-  };
-}
-
 /** 맡길 수 없는 자리 — 조항이 발동한 매각과 감독이 마주 앉은 협상 */
 function unavailable(state: GameState, negotiation: Negotiation, who: string): string | null {
   if (negotiation.buyout === true) {
@@ -197,7 +165,7 @@ export interface DelegateInput {
  * 협상을 단장에게 맡긴다 — 이름을 부르면 그 건 하나, 비우면 그 갈래의 방침이다.
  * `team_talk`이 대상을 비우면 선수단 전체인 것과 같은 규약이다 (prompts.md §2).
  */
-export function delegateNegotiation(state: GameState, input: DelegateInput): MarketCommandResult {
+export function delegateNegotiation(state: GameState, input: DelegateInput): CommandResult {
   const limit = limitOf(input);
   const director = clubDirector(state);
   if (input.playerId === undefined) {
@@ -212,7 +180,6 @@ export function delegateNegotiation(state: GameState, input: DelegateInput): Mar
     const label = kinds.length === 1 ? kindKo(kinds[0]!) : "이적·재계약";
     return {
       ok: true,
-      payload: mandateCard({ state, limit, kind: kinds[0]!, scope: "policy" }),
       message:
         `${label}${josaOf(label, "을/를")} ${director.name} 단장에게 맡겼습니다 — ` +
         `${mandateLimitText(limit, kinds[0]!)}. 앞으로 열리는 자리는 단장이 봅니다`,
@@ -243,14 +210,6 @@ export function delegateNegotiation(state: GameState, input: DelegateInput): Mar
   runMandate(state, target, lines);
   return {
     ok: true,
-    payload: mandateCard({
-      state,
-      limit,
-      kind: target.kind,
-      scope: "one",
-      negotiation: target,
-      player,
-    }),
     message:
       `${player.name} ${negotiationKindKo(target)} 협상을 ${director.name} 단장에게 맡겼습니다 — ` +
       `${mandateLimitText(limit, target.kind)}.` +
@@ -266,7 +225,7 @@ export function delegateNegotiation(state: GameState, input: DelegateInput): Mar
 export function revokeMandate(
   state: GameState,
   input: { playerId?: string; kind?: NegotiationKind },
-): MarketCommandResult {
+): CommandResult {
   if (input.playerId !== undefined) {
     const pick = pickAnyPlayer(state, input.playerId);
     if (!pick.ok) return { ok: false, message: pick.message };
@@ -275,19 +234,9 @@ export function revokeMandate(
     if (!negotiation || !isMandated(negotiation)) {
       return { ok: false, message: `${player.name} 협상은 지금 단장이 쥔 협상이 아닙니다` };
     }
-    const limit = negotiation.mandate ?? {};
     negotiation.mandate = null;
     return {
       ok: true,
-      payload: mandateCard({
-        state,
-        limit,
-        kind: negotiation.kind,
-        scope: "one",
-        revoked: true,
-        negotiation,
-        player,
-      }),
       message: `${player.name} ${negotiationKindKo(negotiation)} 협상을 도로 가져왔습니다 — 이제 감독의 테이블입니다`,
     };
   }
@@ -301,7 +250,6 @@ export function revokeMandate(
   const label = kinds.length === 1 ? kindKo(kinds[0]!) : "이적·재계약";
   return {
     ok: true,
-    payload: mandateCard({ state, limit: {}, kind: kinds[0]!, scope: "policy", revoked: true }),
     message: `${label} 위임을 거뒀습니다 — 진행 중이던 자리도 감독에게 돌아옵니다`,
   };
 }

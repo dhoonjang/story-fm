@@ -31,8 +31,6 @@ const KIND_ICON = {
   release: IconPerson,
   withdraw: IconTrash,
   scout: IconInsight,
-  // 맡는 것은 사람이다 — 단장의 아이콘
-  mandate: IconPerson,
 } as const;
 
 /**
@@ -101,10 +99,6 @@ function badgeOf(card: MarketCard): string {
       return way ? `${way} 철회` : "협상 철회";
     case "scout":
       return "스카우트 파견";
-    case "mandate": {
-      const what = card.mandate?.scope === "policy" ? "위임 방침" : "위임";
-      return card.mandate?.revoked ? `${what} 회수` : what;
-    }
   }
 }
 
@@ -206,29 +200,6 @@ export function MarketCardView({ card, propose = true }: { card: MarketCard; pro
           </span>
         )}
       </div>
-
-      {/* 맡은 사람과 한도 — 조건의 격자와 같은 자리라 카드마다 값이 같은 열에서 읽힌다 */}
-      {card.mandate && (
-        <div className="mc-table">
-          <div className="mc-terms">
-            <em className="mc-side">담당</em>
-            <div className="mc-vals">
-              <span>
-                <b>{card.mandate.to}</b>
-                <em>단장</em>
-              </span>
-            </div>
-          </div>
-          <div className="mc-terms">
-            <em className="mc-side">한도</em>
-            <div className="mc-vals">
-              <span>
-                <b>{card.mandate.limit}</b>
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 두 줄이 한 그리드다 — 이름표 열이 가장 긴 이름표에 맞춰 늘어나 값이 같은 자리에서 시작한다 */}
       {(card.terms || card.counterTerms) && (
