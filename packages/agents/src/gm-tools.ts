@@ -1750,13 +1750,8 @@ export function buildToolSpecs(
           .enum(["buy", "sell", "renew", "loan", "loan_out", "release"])
           .optional()
           .describe(
-            "갈래 — 방침에서 비우면 여섯 갈래 전부. 선수를 부른 자리에서 비우면 우리 선수는 renew, 남의 선수는 buy",
+            "갈래 — 방침에서 비우면 여섯 갈래 전부. 선수를 부른 자리에서 비우면 우리 선수는 renew, 남의 선수는 buy. 재계약이 아닌 갈래는 이미 열린 협상만 맡길 수 있다",
           ),
-        teamId: z
-          .string()
-          .min(1)
-          .optional()
-          .describe("sell·loan_out 협상을 새로 열 때의 상대 구단 — 감독이 부른 이름 그대로"),
         fee: money(MONEY_MAX)
           .optional()
           .describe(
