@@ -113,6 +113,7 @@ export * from "./market/interest";
 export * from "./market/negotiation";
 export * from "./market/counter-bounds";
 export * from "./market/counterparty";
+export * from "./market/mandate";
 export * from "./market/table";
 export * from "./world/openings";
 export * from "./market/clauses";

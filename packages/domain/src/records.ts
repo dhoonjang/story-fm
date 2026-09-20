@@ -12,6 +12,7 @@ import {
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 import { ContractTermSchema, DealTermSchema, TabledTermSchema } from "./deal-terms";
 import { SQUAD_STATUSES } from "./squad-rules";
+import { formatMoney } from "./money";
 import { RESERVE_COMPETITION_PREFIX, stageDepth, type MatchStage } from "./schedule";
 import {
   TACTIC_SCALE_MAX,
@@ -1038,6 +1039,34 @@ export const PersonalTermsSchema = z.object({
 });
 export type PersonalTerms = z.infer<typeof PersonalTermsSchema>;
 
+/**
+ * **위임의 한도** — 감독이 부른 값만 선다 (→ docs/simulation/transfer.md §12-4).
+ *
+ * 비운 축은 한도가 없는 축이고, 전부 비면 코어의 합법 범위가 그대로 한도다
+ * (`counterBoundsOf`). 상한인가 하한인가는 갈래가 정한다 — 내보내는 딜의 값은 하한이고
+ * 그 밖은 상한이다. 방침과 건별이 같은 꼴을 쓴다.
+ */
+export const MandateLimitSchema = z.object({
+  /** 이적료·임대료·정산금 */
+  fee: z.number().min(0).optional(),
+  weeklyWage: z.number().min(0).optional(),
+  contractYears: z.number().int().min(1).max(6).optional(),
+});
+export type MandateLimit = z.infer<typeof MandateLimitSchema>;
+
+/**
+ * **갈래 하나의 위임 방침** — 「재계약은 앞으로 단장이 알아서」 (transfer.md §12-4).
+ *
+ * 갈래마다 한 줄이고, 다시 말하면 덮어쓴다. 방침이 있으면 그 갈래의 열린 협상을 단장이
+ * 맡고, 재계약은 만료가 다가온 선수의 자리를 **열기까지** 한다.
+ */
+export const DelegationSchema = z.object({
+  kind: NegotiationKindSchema,
+  limit: MandateLimitSchema.optional(),
+  since: DateString,
+});
+export type Delegation = z.infer<typeof DelegationSchema>;
+
 export const NegotiationSchema = z.object({
   id: z.string().min(1),
   gamePlayerId: z.string().min(1),
@@ -1111,8 +1140,53 @@ export const NegotiationSchema = z.object({
   buyout: z.boolean().optional(),
   /** 개인 조건 선합의 — 영입·임대에서만 선다 (transfer.md §12-3). 옛 세이브엔 없다 */
   personal: PersonalTermsSchema.optional(),
+  /**
+   * **단장이 대신 앉는 협상인가** — 세 상태다 (transfer.md §12-4).
+   *
+   * | 값     | 뜻                                                        |
+   * | ------ | --------------------------------------------------------- |
+   * | 없음   | 방침을 따른다 — 그 갈래에 방침이 있으면 단장이 맡는다      |
+   * | 값     | 이 건은 단장이 쥔다. 객체가 곧 한도이고, 비면 한도가 없다 |
+   * | `null` | 감독이 직접 한다 — 방침이 있어도 이 건만 빠진다            |
+   *
+   * `null`이 따로 있는 이유는 방침 때문이다. 단장이 손을 뗀 자리를 비워 두면 다음 날
+   * 방침이 같은 협상을 다시 맡아 영원히 같은 자리를 돈다. 옛 세이브엔 없다.
+   */
+  mandate: MandateLimitSchema.nullable().optional(),
 });
 export type Negotiation = z.infer<typeof NegotiationSchema>;
+
+/**
+ * **지금 단장이 쥐고 있는 협상인가** — 편지도 주의 줄도 기한 당일의 멈춤도 이 하나를 읽는다
+ * (transfer.md §12-4). 셋이 각자 재면 편지는 서고 주의 줄은 비는 협상이 생긴다.
+ *
+ * 방침은 여기 없다 — tick이 방침으로 맡을 때 협상의 칸에 적어 두므로(`runMandates`),
+ * 읽는 자리는 언제나 칸 하나만 본다.
+ */
+export function isMandated(negotiation: Pick<Negotiation, "status" | "mandate">): boolean {
+  return (
+    negotiation.mandate !== undefined &&
+    negotiation.mandate !== null &&
+    (negotiation.status === "open" || negotiation.status === "agreed")
+  );
+}
+
+/**
+ * 한도 한 줄 — 카드와 요약 줄이 같은 말을 쓴다 (transfer.md §12-4).
+ * 「이적료 £40.0M · 주급 £150k까지」 · 「이적료 £20.0M 이상」. 한도가 없으면 「한도 없이」다.
+ */
+export function mandateLimitText(limit: MandateLimit, kind: NegotiationKind): string {
+  const outgoing = kind === "sell" || kind === "loan_out";
+  const money =
+    kind === "release" ? "정산금" : kind === "loan" || kind === "loan_out" ? "임대료" : "이적료";
+  const parts = [
+    ...(limit.fee === undefined ? [] : [`${money} ${formatMoney(limit.fee)}`]),
+    ...(limit.weeklyWage === undefined ? [] : [`주급 ${formatMoney(limit.weeklyWage)}`]),
+    ...(limit.contractYears === undefined ? [] : [`${limit.contractYears}년`]),
+  ];
+  if (parts.length === 0) return "한도 없이";
+  return `${parts.join(" · ")}${outgoing ? " 이상" : "까지"}`;
+}
 
 // ── 성장 로그 ─────────────────────────────────────────
 /**

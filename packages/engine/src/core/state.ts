@@ -52,6 +52,7 @@ import type {
   ReserveTrainingPolicy,
   RoleMemory,
   ScheduleEntry,
+  Delegation,
   Negotiation,
   PressConference,
   Relation,
@@ -953,6 +954,11 @@ export interface GameState {
   scoutMissions?: ScoutMission[];
   /** 진행 중 협상 — 며칠에 걸쳐 오퍼가 오가므로 파생으로 되돌릴 수 없다 */
   negotiations: Negotiation[];
+  /**
+   * **위임 방침** — 감독이 갈래째 단장에게 맡긴 일 (transfer.md §12-4). 갈래마다 한 줄이고,
+   * 감독이 한 말이라 파생할 수 없다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  delegations?: Delegation[];
   /**
    * 기자회견 — 열린 시점과 답한 시점이 갈리므로(감독이 다음 날 답할 수도 있다)
    * 협상처럼 세이브가 들고 있어야 한다. 옛 세이브엔 없다(로드 시 빈 배열).

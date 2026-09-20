@@ -166,6 +166,15 @@ const SCRIPT: readonly ScriptLine[] = [
     },
   },
   {
+    // 단장에게 맡긴다 — 협상이 없으면 이 명령이 코어의 자로 연다 (transfer.md §12-4)
+    say: `${NAME_SLOT} 재계약은 맡겨`,
+    gm: () => orders("market_orders"),
+    ops: ({ state, named }): OpsInput => {
+      const who = state.players.find((p) => p.name === named && p.teamId === state.userTeamId);
+      return who ? { delegate_negotiation: [{ playerId: who.id, kind: "renew" }] } : {};
+    },
+  },
+  {
     say: `${NAME_SLOT} 영입하자`,
     gm: () => orders("market_orders"),
     /**

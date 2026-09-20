@@ -32,6 +32,7 @@ import {
   type CounterpartyVoice,
   type TermAsk,
 } from "./counterparty";
+import { isMandated } from "@story-fm/domain";
 import { openTalks, pendingOffer, personalAwaiting, type TalksKind } from "./negotiation";
 import { askTerms, askableKindsOf } from "./terms";
 import { LATITUDE_PER_CLAIM, evaluatePitch } from "./persuasion";
@@ -601,7 +602,19 @@ export function startNegotiation(
  * 도구가 없다: 방과 건너편 사람들, 상대의 첫 말까지다.
  */
 export function markSeated(state: GameState): void {
-  if (state.pendingNegotiation) state.pendingNegotiation.seated = true;
+  const room = state.pendingNegotiation;
+  if (!room) return;
+  room.seated = true;
+  /**
+   * **감독이 마주 앉으면 위임은 걷힌다** (transfer.md §12-4) — 단장과 감독이 한 테이블에
+   * 함께 앉지 않는다. 방침이 그 자리를 다시 맡지 않도록 감독의 것으로 표시하고, 그 사실이
+   * 테이블의 줄로 남는다.
+   */
+  const negotiation = state.negotiations.find((n) => n.id === room.negotiationId);
+  if (!negotiation || !isMandated(negotiation)) return;
+  negotiation.mandate = null;
+  const table = tableOf(state, negotiation, room.party ?? defaultPartyOf(state, negotiation));
+  table?.lines.push(ledgerLine(state, "감독이 마주 앉아 위임을 걷었다"));
 }
 
 /** 지금 열린 방의 협상 — 방이 없으면 null */

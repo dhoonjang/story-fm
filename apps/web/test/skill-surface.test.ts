@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SKILL_CATALOG } from "@story-fm/agents";
+import { CORE_COMMANDS, NEGOTIATION_TOOL_DEFINITIONS, SKILL_CATALOG } from "@story-fm/agents";
 import { CARD_CALLS, hasRailHint } from "../lib/panel-hints";
 import { CALL_LABEL } from "../lib/call-label";
 
@@ -53,5 +53,16 @@ describe("호출 표시 이름", () => {
     for (const skill of SKILL_CATALOG) {
       expect(CALL_LABEL[skill.name], skill.name).toBe(skill.label);
     }
+  });
+
+  /**
+   * **칩으로 서는 이름은 카탈로그의 것만이 아니다.** 코어 명령은 GM에게 보이지 않지만
+   * 해석기가 부르면 기록이 남아 칩이 되고, 협상 방의 도구도 그렇다. 칩은
+   * `CALL_LABEL[이름] ?? 이름`으로 읽으므로 표에서 빠진 이름은 **감독의 채팅에 영문
+   * 식별자로 뜬다** — 화면도 테스트도 아무 말을 하지 않던 자리라 여기서 막는다.
+   */
+  it("코어 명령과 협상 방의 도구도 빠짐없이 이름을 갖는다", () => {
+    const named = [...CORE_COMMANDS, ...NEGOTIATION_TOOL_DEFINITIONS.map((t) => t.name)];
+    expect(named.filter((name) => CALL_LABEL[name] === undefined)).toEqual([]);
   });
 });

@@ -22,6 +22,7 @@ import {
   NarrativeArcSchema,
   OpeningSchema,
   NarrativeNoteSchema,
+  DelegationSchema,
   NegotiationSchema,
   PaymentScheduleSchema,
   PersonaSchema,
@@ -130,6 +131,8 @@ export const SaveSchema = z
     history: z.array(SeasonHistorySchema),
     // 없을 수 있는 것 — 로드가 채우지 않는다(없는 것이 곧 뜻이다)
     personas: z.array(PersonaSchema).optional(),
+    /** 위임 방침 — 갈래째 단장에게 맡긴 일 (transfer.md §12-4). 옛 세이브엔 없다 */
+    delegations: z.array(DelegationSchema).optional(),
     /** 무직 스태프 풀 (people.md §2-2). 옛 세이브엔 없다 */
     staffPool: z.array(StaffPoolEntrySchema).optional(),
     deferredScouts: z.array(DeferredScoutSchema).optional(),
