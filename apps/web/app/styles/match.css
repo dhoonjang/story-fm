@@ -446,15 +446,78 @@ button.mv-marker:focus-visible {
 .mv-sheet-line.bad {
   border-left-color: var(--loss);
 }
-/* 노트 — 걸리지 않고 버려진 줄과 그 까닭. 읽는 줄글이라 레일도 칩도 없다 */
+/**
+ * 판에 닿지 못한 줄 — **일어나지 않은 일이라 편이 없다.** 레일은 트랙 색으로 서고
+ * 잉크가 한 층 물러난다. 걸린 줄과 같은 크기인 것은 같은 물음의 답이기 때문이다 —
+ * 작게 눕히면 감독이 훑다가 지나치고, 그러면 걸리지 않은 지시를 걸린 줄 안다.
+ */
+.mv-sheet-line.dropped {
+  color: var(--text-2);
+}
+
+/**
+ * 전술 노트 손잡이 — 읽는 줄 사이에 서는 **유일한 조작**이라 면으로 갈린다
+ * (design-system.md §1 조작). 줄 수는 접힌 채로도 서고, 펼치면 홑화살이 돈다.
+ */
+.mv-note-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  margin: 6px 0 0 12px;
+  padding: 2px 10px;
+  background: var(--panel-2);
+  border: 0;
+  border-radius: var(--r-pill);
+  color: var(--text-2);
+  font-size: var(--fs-2xs);
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    color var(--ease),
+    background var(--ease);
+}
+.mv-note-btn:hover {
+  color: var(--text);
+  background: var(--pop);
+}
+.mv-note-btn svg:last-child {
+  transition: transform var(--ease);
+}
+.mv-note-btn.open svg:last-child {
+  transform: rotate(180deg);
+}
+
+/**
+ * 펴진 노트 — **면이 한 단 밝고 줄 사이가 헤어라인이다.** 종이 질감은 이 시스템에
+ * 없으므로(design-system.md §4) 노트로 읽히게 하는 것은 높이와 줄뿐이다.
+ */
+.mv-notes {
+  display: flex;
+  flex-direction: column;
+  margin: 6px 12px 2px;
+  background: var(--panel-2);
+  border-radius: var(--r-sm);
+  animation: note-in 160ms var(--ease) both;
+}
+.mv-notes .mv-note + .mv-note {
+  border-top: 1px solid var(--line);
+}
+@keyframes note-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+/* 노트 한 줄 — 읽는 줄글이라 레일도 칩도 없다 */
 .mv-note {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   line-height: 1.6;
   color: var(--text-2);
 }
-/* 시트 안에서는 줄들과 왼쪽 끝이 맞아야 한다 — 상대 전술 카드의 노트는 제 여백을 쓴다 */
-.mv-sheet .mv-note {
-  padding: 4px 12px;
+.mv-notes .mv-note {
+  padding: 8px 12px;
 }
 
 .mv-tac-notes {
@@ -862,7 +925,8 @@ button.pitch-slot.theirs {
 }
 @media (prefers-reduced-motion: reduce) {
   .match-headline,
-  .match-headline.closing {
+  .match-headline.closing,
+  .mv-notes {
     animation: none;
   }
 }

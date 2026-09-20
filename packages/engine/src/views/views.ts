@@ -1687,6 +1687,11 @@ export interface MatchView {
    */
   sheet: { text: string; ours: boolean | null }[];
   /**
+   * **판에 닿지 못한 시트 줄과 그 까닭** — 걸린 줄과 같은 자리에 선다 (match.md §8).
+   * 화면에 서지 않으면 감독은 걸리지 않은 지시를 걸린 줄 안다. 허락된 포인트의 줄만이다.
+   */
+  sheetDropped: string[];
+  /**
    * 양팀 전술 6축 + 소화율. `shift`는 그 팀 벤치가 **이 경기에서 마지막으로 판을
    * 옮긴 정지점** — 장부의 `tactical_shift` 사건에서 파생한다 (match.md §4·§8).
    */
@@ -2636,12 +2641,20 @@ function buildMatchView(state: GameState): MatchView | null {
     readPoints(packet.points ?? [], state.manager.attributes.analysis).map((p) => p.id),
   );
 
+  /**
+   * 전술 카드의 노트 — **6축과 갈래가 존에 남긴 이득과 대가뿐이다** (match.md §8).
+   *
+   * 같은 통에 실려 오는 시트의 버려진 줄은 여기 서지 않는다: 우리 것은 걸린 줄 옆이
+   * 자리이고, 상대 것은 감독이 읽지 못한 판독이라 아예 새어 나가면 안 된다.
+   */
   const tacticsOfSide = (teamId: string, tactical: TacticalRead) => ({
     ...(teamId !== state.userTeamId && pending.aiTactics
       ? pending.aiTactics
       : tacticsOf(state, teamId).spec),
     uptake: tactical.uptake,
-    notes: tactical.notes.map((tag) => packetTagText(tag, tagCtx)),
+    notes: tactical.notes
+      .filter((tag) => tag.source === "tactical")
+      .map((tag) => packetTagText(tag, tagCtx)),
     shift: shiftOfSide(teamId === match.homeTeamId ? "home" : "away"),
   });
 
@@ -2753,6 +2766,10 @@ function buildMatchView(state: GameState): MatchView | null {
         text: packetTagText(tag, tagCtx),
         ours: tag.favours === null ? null : tag.favours === ourSide,
       })),
+    /** 양 팀의 버려진 줄 — 판독은 경기의 것이라 우리 쪽만 세면 절반이 사라진다 */
+    sheetDropped: [...packet.home.tactical.notes, ...packet.away.tactical.notes]
+      .filter((tag) => tag.source === "sheet-dropped" && seenPoints.has(sheetTagPointId(tag) ?? ""))
+      .map((tag) => packetTagText(tag, tagCtx)),
     tactics: {
       home: tacticsOfSide(match.homeTeamId, packet.home.tactical),
       away: tacticsOfSide(match.awayTeamId, packet.away.tactical),
