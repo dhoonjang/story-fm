@@ -4318,6 +4318,78 @@ describe("위임 — 단장이 대신 앉는 협상", () => {
     expect(state.negotiations.every((n) => n.mandate === null)).toBe(true);
   });
 
+  /**
+   * **단장은 감독이 이미 가리킨 사람 안에서만 먼저 건다** (§12-4). 매각은 이적 리스트,
+   * 영입은 스카우트 임무의 후보이고, 구단은 관심 사다리가 고른다 — 단장이 선수도 구단도
+   * 지어내지 않는다. 가리킨 목록이 비어 있으면 아무 자리도 열리지 않는 것이 규칙이다.
+   */
+  it("매각 방침은 이적 리스트에 오른 선수를, 관심이 선 구단에만 먼저 건다", () => {
+    const state = createTestGame(42);
+    for (const w of state.windows) w.closesOn = addDays(state.date, 30);
+    const player = playersOf(state, state.userTeamId)[0]!;
+    const asking = Math.round(askingPriceFor(state, player) * 1.1);
+    expect(
+      setTransferList(state, { playerId: player.id, listed: true, askingPrice: asking }).ok,
+    ).toBe(true);
+    expect(delegateNegotiation(state, { kind: "sell" }).ok).toBe(true);
+
+    // 등재는 했지만 나선 구단이 없다 — 단장이 구단을 지어내지 않는다
+    runMandates(state, []);
+    expect(state.negotiations).toHaveLength(0);
+
+    state.interests = [
+      {
+        teamId: "chelsea",
+        gamePlayerId: player.id,
+        since: state.date,
+        stage: "enquired",
+        lastMovedOn: state.date,
+      },
+    ];
+    runMandates(state, []);
+    const negotiation = state.negotiations[0]!;
+    expect(negotiation.kind).toBe("sell");
+    expect(negotiation.counterpartTeamId).toBe("chelsea");
+    // 값은 감독이 등재하며 부른 호가다
+    expect(negotiation.rounds[0]!.fee).toBe(asking);
+    expect(isMandated(negotiation)).toBe(true);
+  });
+
+  it("영입 방침은 스카우트 임무가 데려온 후보에게만 먼저 건다", () => {
+    const state = createTestGame(42);
+    for (const w of state.windows) w.closesOn = addDays(state.date, 30);
+    expect(delegateNegotiation(state, { kind: "buy" }).ok).toBe(true);
+
+    // 임무가 없으면 후보도 없다 — 감독이 가리킨 사람이 없으면 아무것도 열리지 않는다
+    runMandates(state, []);
+    expect(state.negotiations).toHaveLength(0);
+
+    // 예산·주급 여력을 지날 수 있는 후보를 코어에게 물어서 고른다 — 관문에 막히면
+    // 단장이 아무것도 못 여는 것이 옳고, 여기서 재는 것은 그 앞이 아니다
+    const wanted = state.players.find((p) => {
+      if (p.teamId === state.userTeamId) return false;
+      const terms = suggestTerms(state, p.id);
+      return terms !== null && dealOdds(state, terms).blockers.length === 0;
+    })!;
+    state.scoutMissions = [
+      {
+        id: "mission-1",
+        requestedOn: state.date,
+        dueOn: state.date,
+        completedOn: state.date,
+        candidates: [wanted.id],
+      },
+    ];
+    // 값은 단장이 열기 전에 재 둔다 — 같은 날 합의까지 가면 협상이 `open`을 벗어난다
+    const asking = askingPriceFor(state, wanted);
+    runMandates(state, []);
+    const negotiation = state.negotiations.find((n) => n.gamePlayerId === wanted.id)!;
+    expect(negotiation.kind).toBe("buy");
+    // 코어의 요구가다 — 단장이 지어낸 숫자가 아니다
+    expect(negotiation.rounds[0]!.fee).toBe(asking);
+    expect(negotiation.mandate).not.toBeUndefined();
+  });
+
   it("맡긴 협상은 편지와 주의 줄에서 빠지고, 위임이 끝나면 그 자리로 돌아온다", () => {
     const state = createTestGame(42);
     const { negotiation } = delegatedRenewal(state);

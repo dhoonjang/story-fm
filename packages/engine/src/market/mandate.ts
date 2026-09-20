@@ -6,7 +6,14 @@ import type {
   NegotiationKind,
   TickSink,
 } from "@story-fm/domain";
-import { isMandated, isPlayerDeal, josaOf, mandateLimitText, pushEvent } from "@story-fm/domain";
+import {
+  interestStageRank,
+  isMandated,
+  isPlayerDeal,
+  josaOf,
+  mandateLimitText,
+  pushEvent,
+} from "@story-fm/domain";
 import type { CommandResult } from "../commands";
 import { formatMoney } from "../club/finance";
 import { pickAnyPlayer } from "../core/player-ref";
@@ -19,13 +26,18 @@ import {
   acceptDeal,
   answerIncomingOffer,
   expiringContracts,
+  listingOf,
+  offerPlayerOut,
   incomingOffer,
   negotiationKindKo,
   openNegotiationFor,
   openRenewal,
   pendingOffer,
   personalAwaiting,
+  quotedFee,
+  sendOffer,
   standingCounter,
+  suggestTerms,
 } from "./negotiation";
 
 /**
@@ -84,11 +96,8 @@ function delegationFor(state: GameState, kind: NegotiationKind): Delegation | un
 }
 
 /**
- * **단장의 첫 제시 — 재계약뿐이다.** 상대가 선수 본인이라 코어의 자 하나(`renewalExpectation`)로
- * 자리가 서기 때문이다 (transfer.md §12-4).
- *
- * 영입·매각·해지는 상대 구단과 값이 있어야 열리고, 누구를 데려오고 내보낼지는 감독의
- * 결정이다 — 그 갈래는 **이미 열린 협상만** 맡는다.
+ * **단장의 첫 제시** — 갈래마다 코어의 자를 한도 안으로 자른 값이다 (transfer.md §12-4).
+ * 자는 코어가 아는 값이고 한도는 감독이 부른 숫자라, 지어낸 결정이 장부에 오르지 않는다.
  */
 function openRenewalFor(state: GameState, player: GamePlayer, limit: MandateLimit): CommandResult {
   return openRenewal(state, {
@@ -96,6 +105,59 @@ function openRenewalFor(state: GameState, player: GamePlayer, limit: MandateLimi
     weeklyWage: capAt(renewalExpectation(state, player), limit.weeklyWage),
     years: limit.contractYears ?? renewalYearsExpectation(state, player),
   });
+}
+
+function openSigningFor(state: GameState, player: GamePlayer, limit: MandateLimit): CommandResult {
+  const base = suggestTerms(state, player.id);
+  if (!base) return { ok: false, message: "선수를 찾지 못했습니다" };
+  return sendOffer(state, {
+    playerId: player.id,
+    fee: capAt(quotedFee(state, player, "buy"), limit.fee),
+    weeklyWage: capAt(base.weeklyWage, limit.weeklyWage),
+    years: limit.contractYears ?? base.years,
+    kind: "buy",
+  });
+}
+
+/**
+ * **매각의 상대는 관심 사다리가 고른다** (§1-2) — 그 선수를 보고 있다고 장부에 선 구단 중
+ * 가장 높이 오른 쪽이다. 단장이 구단을 지어내지 않고, 값은 감독이 등재하며 부른 호가다.
+ */
+function openSaleFor(state: GameState, player: GamePlayer, limit: MandateLimit): CommandResult {
+  const suitor = (state.interests ?? [])
+    .filter((i) => i.gamePlayerId === player.id && i.stage !== "watching")
+    .sort(
+      (a, b) =>
+        interestStageRank(b.stage) - interestStageRank(a.stage) || a.teamId.localeCompare(b.teamId),
+    )[0];
+  if (!suitor) {
+    return { ok: false, message: `${player.name}을 사겠다고 나선 구단이 아직 없습니다` };
+  }
+  return offerPlayerOut(state, {
+    playerId: player.id,
+    teamId: suitor.teamId,
+    // 하한 위에서 부른다 — 등재 호가가 있으면 그것이 감독이 부른 값이다
+    fee: Math.max(
+      listingOf(state, player.id)?.askingPrice ?? quotedFee(state, player, "sell"),
+      limit.fee ?? 0,
+    ),
+  });
+}
+
+/** 이 갈래를 단장이 먼저 열 수 있는가 — 열면 그 결과다 */
+function openFor(
+  state: GameState,
+  player: GamePlayer,
+  kind: NegotiationKind,
+  limit: MandateLimit,
+): CommandResult {
+  if (kind === "renew") return openRenewalFor(state, player, limit);
+  if (kind === "buy") return openSigningFor(state, player, limit);
+  if (kind === "sell") return openSaleFor(state, player, limit);
+  return {
+    ok: false,
+    message: `${kindKo(kind)}의 첫 제시는 감독의 결정입니다 — 협상을 연 뒤에 맡기세요`,
+  };
 }
 
 /** 맡길 수 없는 자리 — 조항이 발동한 매각과 감독이 마주 앉은 협상 */
@@ -156,15 +218,7 @@ export function delegateNegotiation(state: GameState, input: DelegateInput): Com
     if (blocked) return { ok: false, message: blocked };
   } else {
     const kind = input.kind ?? (player.teamId === state.userTeamId ? "renew" : "buy");
-    if (kind !== "renew") {
-      return {
-        ok: false,
-        message:
-          `${player.name} ${kindKo(kind)} 협상이 아직 없습니다 — 첫 제시는 감독의 결정입니다. ` +
-          `오퍼를 넣은 뒤에 맡기세요`,
-      };
-    }
-    const first = openRenewalFor(state, player, limit);
+    const first = openFor(state, player, kind, limit);
     if (!first.ok) return first;
     opened = first.message;
     target = openNegotiationFor(state, player.id);
@@ -372,8 +426,7 @@ function runMandate(state: GameState, negotiation: Negotiation, digest: TickSink
 
   // ⑤ 값이 오간 적 없는 자리 — 재계약만 단장이 첫 제시를 넣는다
   if (negotiation.rounds.length === 0 && !negotiation.personal) {
-    if (negotiation.kind !== "renew") return handOff("첫 제시는 감독의 결정입니다");
-    const first = openRenewalFor(state, player, negotiation.mandate ?? {});
+    const first = openFor(state, player, negotiation.kind, negotiation.mandate ?? {});
     if (!first.ok) return handOff(first.message);
     say(`${player.name} ${kindKoName} — 첫 제시를 넣었습니다. ${first.message}`);
   }
@@ -392,30 +445,69 @@ function adoptByPolicy(state: GameState): void {
 }
 
 /**
- * **재계약 방침은 자리를 연다** — 만료가 다가온 선수의 재계약을 감독이 열지 않아도 된다.
+ * **방침이 자리를 여는 대상 — 감독이 이미 가리킨 사람뿐이다** (transfer.md §12-4).
  *
- * 자리를 여는 방침은 재계약뿐이다. 누구를 데려오고 누구를 내보낼지는 감독의 결정이라,
- * 영입·매각 방침이 맡는 것은 이미 열린 협상과 들어온 오퍼까지다.
+ * 단장은 선수를 고르지 않는다. 재계약은 만료가 다가온 우리 선수, 매각은 **감독이 이적
+ * 리스트에 올린 선수**(§1), 영입은 **감독이 낸 스카우트 임무가 데려온 후보**(player.md §9.4)다.
+ * 셋 다 감독이 먼저 말한 목록이고, 단장이 하는 일은 그 위에 값을 붙여 자리를 여는 것이다.
+ *
+ * **협상 기록이 한 번이라도 있는 선수는 건너뛴다.** 시장을 거르는 자리가 아니라 **단장이
+ * 먼저 거는 자리**라서다 — 무산된 자리를 날마다 다시 열면 같은 오퍼가 달력을 채운다.
+ * 감독이 직접 다시 여는 길은 그대로 열려 있다.
+ */
+function targetsFor(state: GameState, kind: NegotiationKind): GamePlayer[] {
+  const fresh = (player: GamePlayer | null): player is GamePlayer =>
+    player !== null && !state.negotiations.some((n) => n.gamePlayerId === player.id);
+  if (kind === "renew") {
+    return expiringContracts(state)
+      .map(({ player }) => player)
+      .filter(fresh);
+  }
+  if (kind === "sell") {
+    return (state.transferList ?? [])
+      .map((listing) => playerById(state, listing.gamePlayerId))
+      .filter(fresh)
+      .filter((player) => player.teamId === state.userTeamId);
+  }
+  if (kind === "buy") {
+    // 임무가 세운 차례 그대로다 — 다시 줄을 세우면 카드가 보여 준 순서와 어긋난다
+    return (state.scoutMissions ?? [])
+      .filter((mission) => mission.completedOn !== null)
+      .flatMap((mission) => mission.candidates ?? [])
+      .map((id) => playerById(state, id))
+      .filter(fresh)
+      .filter((player) => player.teamId !== state.userTeamId);
+  }
+  return [];
+}
+
+/**
+ * **방침이 하루에 여는 자리** — 갈래를 통틀어 한 건이다 (`MANDATE_OPENS_PER_DAY`).
+ *
+ * 순서는 급한 차례다: 재계약을 놓치면 자유계약으로 잃고, 등재한 선수는 창이 닫히면 남으며,
+ * 영입은 그다음이다. 반려된 대상은 건너뛴다 — 예산이 없으면 그날은 아무것도 열리지 않는다.
  */
 function openByPolicy(state: GameState, digest: TickSink): void {
-  const policy = delegationFor(state, "renew");
-  if (!policy) return;
-  const limit = policy.limit ?? {};
   let opened = 0;
-  for (const { player } of expiringContracts(state)) {
+  for (const kind of ["renew", "sell", "buy"] as const) {
     if (opened >= MANDATE_OPENS_PER_DAY) return;
-    if (openNegotiationFor(state, player.id)) continue;
-    const first = openRenewalFor(state, player, limit);
-    if (!first.ok) continue;
-    const negotiation = openNegotiationFor(state, player.id);
-    if (!negotiation) continue;
-    negotiation.mandate = limit;
-    opened += 1;
-    pushEvent(
-      digest,
-      "contract",
-      `${clubDirector(state).name} 단장 — ${player.name} 재계약 자리를 열었습니다. ${first.message}`,
-    );
+    const policy = delegationFor(state, kind);
+    if (!policy) continue;
+    const limit = policy.limit ?? {};
+    for (const player of targetsFor(state, kind)) {
+      const first = openFor(state, player, kind, limit);
+      if (!first.ok) continue;
+      const negotiation = openNegotiationFor(state, player.id);
+      if (!negotiation) continue;
+      negotiation.mandate = limit;
+      opened += 1;
+      pushEvent(
+        digest,
+        isPlayerDeal(kind) ? "contract" : "interest",
+        `${clubDirector(state).name} 단장 — ${player.name} ${kindKo(kind)} 자리를 열었습니다. ${first.message}`,
+      );
+      break;
+    }
   }
 }
 
