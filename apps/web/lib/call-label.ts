@@ -76,6 +76,9 @@ export const CALL_LABEL: Record<string, string> = {
   exercise_buyback: "되사기 행사",
   open_renewal: "재계약 제안",
   open_release: "해지 제안",
+  // 위임 — 단장에게 맡기고 도로 가져온다 (transfer.md §12-4)
+  delegate_negotiation: "단장에게 맡김",
+  revoke_mandate: "위임 회수",
   // 도구가 아니라 코어가 남기는 기록 — 카탈로그에 없지만 칩으로 선다
   finalize_match: "경기 종료",
 };

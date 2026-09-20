@@ -106,6 +106,9 @@ export const CARD_CALLS: ReadonlySet<string> = new Set([
   "open_renewal",
   "open_release",
   "withdraw_offer",
+  // 위임장은 어느 장부에도 실리지 않는다 — 맡긴 날과 거둔 날의 카드가 그 화면이다 (§12-4)
+  "delegate_negotiation",
+  "revoke_mandate",
   "scout_player",
   "scout_mission",
 ]);
