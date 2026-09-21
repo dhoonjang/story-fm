@@ -1,7 +1,6 @@
 import type {
   GamePlayer,
   MatchRecord,
-  Negotiation,
   ScheduleEntry,
   TrainingSession,
   TurnOperation,
@@ -9,7 +8,7 @@ import type {
   TickEvent,
   TickEventKind,
 } from "@story-fm/domain";
-import { isPlayerDeal, pushEvent, scopeEvents, tickEvents } from "@story-fm/domain";
+import { pushEvent, scopeEvents, tickEvents } from "@story-fm/domain";
 import {
   FAMILIARITY_BASELINE,
   FATIGUE_BAND_FLOOR,
@@ -76,7 +75,6 @@ import {
 import {
   applyAiMatchFinance,
   ensureMonthlyPosted,
-  formatMoney,
   payWeeklyWages,
   runMonthlyFinance,
   settleDuePayments,
@@ -111,18 +109,16 @@ import {
   trainingExposure,
 } from "../squad/injury";
 import {
-  arrivedResponses,
   expiringContracts,
   expireNegotiations,
   generateIncomingOffers,
   listingOf,
-  negotiationKindKo,
   runAiPrecontracts,
   runAiRenewals,
-  pendingOffer,
   pendingVerdicts,
   runMedicals,
 } from "../market/negotiation";
+import { settleArrivedResponses } from "../market/counterparty";
 import { runMandates } from "../market/mandate";
 // 서열대로 받고 있는가를 묻는 곡선 — 재계약·이적이 읽는 것과 같은 자다
 import { wageByRating } from "../market/market";
@@ -977,9 +973,15 @@ function dailyTick(
     }
   }
 
-  // 협상 — 기한 경과 처리 + 들어오는 오퍼 + 상대의 답 도착.
+  // 협상 — 기한 경과 처리 + 답할 날이 된 라운드 + 들어오는 오퍼.
   // 무직이면 흥정할 구단이 없다 — 경질과 함께 진행 중이던 협상은 이미 사라졌다
   if (managed) expireNegotiations(state, kind.interest);
+  /**
+   * 답할 날이 된 라운드 — 감독이 그 자리에 나서지 않았으면 코어가 앵커로 굳힌다
+   * (transfer.md §12-1). **기한 처리 뒤, 위임이 구르기 전**이다: 맡긴 협상과 감독이 쥔
+   * 협상이 같은 자리에서 같은 함수를 지나야 같은 오퍼가 누가 쥐었는지에 따라 갈리지 않는다.
+   */
+  if (managed) settleArrivedResponses(state, digest);
   /**
    * 단장에게 맡긴 협상 — 감독 턴 없이 여기서 굴러 합의까지 간다 (transfer.md §12-4).
    * **기한 처리 뒤**다: 오늘 무산된 자리의 결과를 먼저 알리고, 없는 협상에 첫 제시를 넣지
@@ -1013,48 +1015,6 @@ function dailyTick(
      */
     tickInterests(state, kind.interest);
     generateIncomingOffers(state, kind.interest);
-    for (const negotiation of arrivedResponses(state)) {
-      const player = playerById(state, negotiation.gamePlayerId);
-      const offer = pendingOffer(negotiation);
-      if (!player || !offer) continue;
-      /**
-       * **알린 답은 다시 알리지 않는다** — 만료 문턱과 같은 결이다 (season.md §5).
-       * 도착한 답은 감독이 답할 때까지 그 자리에 서 있으므로(`arrivedResponses`),
-       * 표식이 없으면 tick이 지나는 날마다 같은 카드가 한 장씩 쌓인다. 되받은 뒤
-       * 우리가 넣는 새 오퍼는 새 라운드라 표식 없이 시작해 다시 한 번 알린다.
-       * **사라지는 것은 알림뿐이다** — 편지도 주의 줄도 답할 때까지 그대로 선다.
-       */
-      if (offer.announcedOn !== undefined) continue;
-      offer.announcedOn = state.date;
-      const kindKo = negotiationKindKo(negotiation);
-      const money = offerMoneyLine(negotiation, offer);
-      /**
-       * **상대가 선수 본인인 갈래에는 파는 구단도 이적료도 없다** (season.md §5).
-       * 구단 칸과 이적료를 그대로 끼우면 재계약이 「에서 … 오퍼(£0k)」로 선다.
-       */
-      const fromPlayer = isPlayerDeal(negotiation.kind) || negotiation.precontract === true;
-      const club = teamNameIn(state, negotiation.counterpartTeamId ?? "");
-      pushEvent(
-        digest,
-        // 재계약·해지는 이적이 아니다 — 그 답은 우리 선수의 계약 이야기다
-        isPlayerDeal(negotiation.kind) ? "contract" : "interest",
-        fromPlayer
-          ? `${player.name} ${kindKo} 제안(${money})에 대한 답이 도착했습니다`
-          : `${club}에서 ${player.name} ${kindKo} 오퍼(${money})에 대한 답이 도착했습니다`,
-      );
-      /**
-       * 다이제스트는 그 턴에만 서고 사라진다 — 되짚을 자리는 서사 표뿐이다.
-       * 무게 3은 **오늘 답해야 하는 일**의 눈금이다 (people.md §9 — `계약 만료
-       * 30일 남음` 4, `타 구단 이적` 2 사이). 표의 문장에는 이모지를 넣지 않는다.
-       */
-      pushNarrative(
-        state,
-        fromPlayer
-          ? `${player.name} ${kindKo} 답 도착 (${money})`
-          : `${club} — ${player.name} ${kindKo} 답 도착 (${money})`,
-        3,
-      );
-    }
     warnExpiringContracts(state, digest);
   }
 
@@ -1117,22 +1077,6 @@ function dailyTick(
    * 시간이 그 위를 지나가면 남는 것은 평판이 깎였다는 다이제스트 한 줄뿐이다.
    */
   return approached || offered || (managed !== null && standsToday(state, kind.interest));
-}
-
-/**
- * 그 오퍼의 숫자가 **무엇인가** — 갈래마다 다른 돈이다 (season.md §5).
- *
- * 이름을 붙이는 이유는 빈 칸이 서지 않게 하기 위해서다: 재계약의 `fee`는 0이고
- * 해지의 숫자는 이적료가 아니라 정산금이라, 값만 끼우면 「£0k」가 그 자리를 채운다.
- */
-function offerMoneyLine(negotiation: Negotiation, offer: Negotiation["rounds"][number]): string {
-  if (negotiation.kind === "release") return `정산금 ${formatMoney(offer.fee)}`;
-  // 사전 계약도 선수 본인과의 흥정이라 값은 주급이다 — 이적료가 0인 갈래다
-  if (isPlayerDeal(negotiation.kind) || negotiation.precontract === true)
-    return `주급 ${formatMoney(offer.weeklyWage)}`;
-  if (negotiation.kind === "loan" || negotiation.kind === "loan_out")
-    return `임대료 ${formatMoney(offer.fee)}`;
-  return `이적료 ${formatMoney(offer.fee)}`;
 }
 
 /**

@@ -7,6 +7,7 @@ import type {
   NegotiationVerdict,
   SquadStatus,
   TableSpeaker,
+  TickSink,
 } from "@story-fm/domain";
 import {
   DEAL_TERM_KO,
@@ -19,6 +20,7 @@ import {
   isPlayerDeal,
   naturalPositionOf,
   pointsBonusEligible,
+  pushEvent,
   squadStatusRank,
   statusAtRank,
 } from "@story-fm/domain";
@@ -66,6 +68,7 @@ import { addDays } from "../competition/calendar";
 import { squadStatusOf } from "../squad/promises";
 import {
   answerPersonal,
+  arrivedResponses,
   counterpartOf,
   negotiationKindKo,
   pendingOffer,
@@ -78,7 +81,15 @@ import { playerArchetypeOf } from "../world/player-persona";
 import { numberLineageOf } from "../squad/numbers";
 import { competingBidLine, interestLine } from "./interest";
 import { agentProfileOf } from "./agent-profile";
-import { contractYearsLeft, hasIssue, playerById, teamName, type GameState } from "../core/state";
+import {
+  contractYearsLeft,
+  hasIssue,
+  playerById,
+  pushNarrative,
+  teamName,
+  teamNameIn,
+  type GameState,
+} from "../core/state";
 import { formatMoney } from "../club/finance";
 
 /**
@@ -152,8 +163,8 @@ export function statusRoomOf(anchor: number, band: CounterBand): TermsRoom {
 export interface CounterpartyAnchor {
   negotiationId: string;
   /**
-   * 어느 관문으로 판정했는가 — 구단 테이블·선수 쪽 테이블. 편지에는 없다 (transfer.md §12-2).
-   * `probability`는 그 관문의 확률이다.
+   * 어느 관문으로 판정했는가 — 구단 테이블·선수 쪽 테이블. 감독이 없는 라운드에는 없다
+   * (transfer.md §12-2). `probability`는 그 관문의 확률이다.
    */
   gate?: "club" | "player";
   /** 코어가 잰 성사 확률 — 관문이 적혀 있으면 그 관문의 것 */
@@ -271,7 +282,8 @@ export function counterpartyAnchor(
   /**
    * **어느 관문으로 판정하는가** (transfer.md §12-2). 구단 테이블은 구단 관문으로, 선수 쪽
    * 테이블은 선수 관문으로 사다리를 가른다 — 단장이 주급을 놓고 판정하지 않는다. 비우면
-   * 편지다: 서면 오퍼는 양쪽에 함께 가므로 확률 하나(두 관문의 곱)로 판정한다.
+   * 감독이 없는 라운드다: 그 오퍼는 양쪽에 함께 가 있으므로 확률 하나(두 관문의 곱)로
+   * 판정한다.
    */
   gate?: "club" | "player",
 ): CounterpartyAnchor | null {
@@ -650,6 +662,125 @@ export function settleCounterparty(
     input,
     result: respondOffer(state, { ...input, ...(feeOnly ? { feeOnly: true } : {}) }),
   };
+}
+
+/**
+ * **답할 날이 된 라운드를 앵커로 굳힌다** — 감독이 그 자리에 없는 모든 라운드가 지나는 문
+ * (transfer.md §12-1 · agents.md §4-1).
+ *
+ * 서 있는 오퍼(없으면 개인 조건 제안)의 응답일이 오늘이거나 지났으면 앵커 그대로 판정하고
+ * 그 결과를 돌려준다. 답할 날이 아니면 `null`이다.
+ *
+ * **위임과 감독이 비운 자리가 같은 함수를 지난다** — 둘이 각자 굳히면 같은 오퍼가 누가
+ * 쥐었는지에 따라 다른 사다리로 갈린다.
+ */
+export function settleDueResponse(
+  state: GameState,
+  negotiation: Negotiation,
+): { input: CounterpartyRuling; result: MarketCommandResult } | null {
+  if (negotiation.status !== "open") return null;
+  const offer = pendingOffer(negotiation);
+  const personal = offer === null ? personalAwaiting(negotiation) : null;
+  const due =
+    (offer !== null && offer.respondsOn !== null && offer.respondsOn <= state.date) ||
+    (personal !== null && personal.respondsOn <= state.date);
+  if (!due) return null;
+  const anchor = counterpartyAnchor(state, negotiation) ?? personalAnchor(state, negotiation);
+  if (!anchor) return null;
+  return settleCounterparty(state, anchor);
+}
+
+/** 상대가 무엇으로 답했는가 — **매체가 아니라 판정이다** (transfer.md §12-1) */
+const COUNTERPARTY_VERDICT_KO: Record<NegotiationVerdict, string> = {
+  accept: "받아들였습니다",
+  counter: "되불렀습니다",
+  reject: "거절했습니다",
+};
+
+/**
+ * 그 오퍼의 숫자가 **무엇인가** — 갈래마다 다른 돈이다 (season.md §5).
+ *
+ * 이름을 붙이는 이유는 빈 칸이 서지 않게 하기 위해서다: 재계약의 `fee`는 0이고
+ * 해지의 숫자는 이적료가 아니라 정산금이라, 값만 끼우면 「£0k」가 그 자리를 채운다.
+ */
+function offerMoneyLine(negotiation: Negotiation, offer: Negotiation["rounds"][number]): string {
+  if (negotiation.kind === "release") return `정산금 ${formatMoney(offer.fee)}`;
+  // 사전 계약도 선수 본인과의 흥정이라 값은 주급이다 — 이적료가 0인 갈래다
+  if (isPlayerDeal(negotiation.kind) || negotiation.precontract === true)
+    return `주급 ${formatMoney(offer.weeklyWage)}`;
+  if (negotiation.kind === "loan" || negotiation.kind === "loan_out")
+    return `임대료 ${formatMoney(offer.fee)}`;
+  return `이적료 ${formatMoney(offer.fee)}`;
+}
+
+/** 굳은 뒤 **서 있는 숫자** — 되불렀으면 상대가 부른 값, 아니면 우리가 부른 값 */
+function settledMoneyLine(
+  negotiation: Negotiation,
+  offer: Negotiation["rounds"][number],
+  verdict: NegotiationVerdict,
+): string {
+  if (verdict !== "counter") return offerMoneyLine(negotiation, offer);
+  const back = [...negotiation.rounds].reverse().find((r) => r.by === "them");
+  return offerMoneyLine(negotiation, back ?? offer);
+}
+
+/**
+ * **답할 날이 된 라운드를 그날의 tick이 굳힌다** — 기한 처리 뒤, 위임이 구르기 전
+ * (season.md 「tick이 하루에 굴리는 것」 · transfer.md §12-1).
+ *
+ * 결과는 그날의 **사건 한 줄**이고, GM이 그것을 장면으로 옮긴다. 줄에는 **매체가 없다** —
+ * 사무실에서 마주 앉았는지 전화였는지 하루 동안 오간 메일이었는지는 장면의 것이지 장부의
+ * 칸이 아니다. 장부가 적는 것은 상대가 무엇으로 답했고 어떤 숫자가 섰는가뿐이다.
+ */
+export function settleArrivedResponses(state: GameState, digest: TickSink): void {
+  for (const negotiation of arrivedResponses(state)) {
+    const player = playerById(state, negotiation.gamePlayerId);
+    if (!player) continue;
+    /** 굳히면 사라지는 라운드라 먼저 든다 — 알림의 숫자도 표식도 이 라운드의 것이다 */
+    const offer = pendingOffer(negotiation);
+    const settled = settleDueResponse(state, negotiation);
+    if (!settled) continue;
+    /**
+     * **알린 답은 다시 알리지 않는다** — 만료 문턱과 같은 결이다 (season.md 「굳은 답도
+     * 문턱과 같다」). 코어가 판정을 반영하지 못한 자리에서만 오퍼가 그대로 남으므로,
+     * 표식이 없으면 tick이 지나는 날마다 같은 줄이 한 번씩 선다. 되받은 뒤 우리가 넣는
+     * 새 오퍼는 새 라운드라 표식 없이 시작해 다시 한 번 선다.
+     *
+     * 개인 조건 제안에는 표식을 둘 라운드가 없다 — 그 자리는 줄 없이 굳기만 한다.
+     */
+    if (offer === null) continue;
+    if (offer.announcedOn !== undefined) continue;
+    offer.announcedOn = state.date;
+    /**
+     * **상대가 선수 본인인 갈래에는 파는 구단도 이적료도 없다** (season.md §5).
+     * 구단 칸과 이적료를 그대로 끼우면 재계약이 「에서 … 오퍼(£0k)」로 선다.
+     */
+    const fromPlayer = isPlayerDeal(negotiation.kind) || negotiation.precontract === true;
+    const kindKo = negotiationKindKo(negotiation);
+    const head = fromPlayer
+      ? `${player.name} ${kindKo} 제안`
+      : `${teamNameIn(state, negotiation.counterpartTeamId ?? "")}에서 ${player.name} ${kindKo} 오퍼`;
+    const tail = settled.result.ok
+      ? `상대가 ${COUNTERPARTY_VERDICT_KO[settled.input.verdict]} (${settledMoneyLine(
+          negotiation,
+          offer,
+          settled.input.verdict,
+        )})`
+      : `상대의 답을 장부에 반영하지 못했습니다 — ${settled.result.message}`;
+    const line = `${head} — ${tail}`;
+    pushEvent(
+      digest,
+      // 재계약·해지는 이적이 아니다 — 그 답은 우리 선수의 계약 이야기다
+      isPlayerDeal(negotiation.kind) ? "contract" : "interest",
+      line,
+    );
+    /**
+     * 다이제스트는 그 턴에만 서고 사라진다 — 되짚을 자리는 서사 표뿐이다.
+     * 무게 3은 **오늘 답해야 하는 일**의 눈금이다 (people.md §9 — `계약 만료 30일 남음` 4,
+     * `타 구단 이적` 2 사이). 표의 문장에는 이모지를 넣지 않는다.
+     */
+    pushNarrative(state, line, 3);
+  }
 }
 
 /**

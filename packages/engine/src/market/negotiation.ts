@@ -405,14 +405,15 @@ export function pendingOffer(negotiation: Negotiation) {
 }
 
 /**
- * 오늘 답이 도착한 협상 — tick이 감독에게 알린다. 개인 조건 제안의 답도 같은 자리다 (§12-3).
+ * **답할 날이 된 협상** — 그날의 tick이 앵커로 굳히는 것을 고르는 자리다
+ * (`settleArrivedResponses` — §12-1). 개인 조건 제안의 답도 같은 자리다 (§12-3).
  *
- * **단장이 쥔 협상은 빠진다** (§12-4) — 그 답은 편지가 아니라 `runMandates`가 앵커로
- * 굳힌다. 위임이 끝난 협상은 그 자리에서 다시 선다.
+ * **위임을 가르지 않는다** — 맡겼든 아니든 감독이 그 자리에 나서지 않은 라운드는 같은
+ * 함수를 지난다(§12-4). 감독이 직접 앉은 자리의 답은 그 턴에 이미 굳어 여기 서지 않는다.
  */
 export function arrivedResponses(state: GameState): Negotiation[] {
   return state.negotiations.filter((n) => {
-    if (n.status !== "open" || isMandated(n)) return false;
+    if (n.status !== "open") return false;
     const offer = pendingOffer(n);
     if (offer !== null) return offer.respondsOn !== null && offer.respondsOn <= state.date;
     const personal = personalAwaiting(n);
@@ -1122,9 +1123,9 @@ export function respondOffer(
     }
     /**
      * **재계약의 수락은 이적이 아니다** — 이적료가 없어 `offer.fee`는 0이고, 오간
-     * 두 축은 주급과 연수다. 영입의 문장을 그대로 쓰면 편지가 「£0에 합의」라고
-     * 말하고, 합의와 서명 사이(`accept_deal`)도 문장에 서지 않는다 — 그 자리가
-     * 수락한 편지를 맺어진 계약으로 읽히게 한 틈이다 (transfer.md §5).
+     * 두 축은 주급과 연수다. 영입의 문장을 그대로 쓰면 「£0에 합의」라고 말하고,
+     * 합의와 서명 사이(`accept_deal`)도 문장에 서지 않는다 — 그 자리가 수락한 답을
+     * 맺어진 계약으로 읽히게 한 틈이다 (transfer.md §5).
      */
     if (renewing) {
       pushNarrative(state, `${player.name} 재계약 합의 (주급 ${formatMoney(offer.weeklyWage)})`, 4);
