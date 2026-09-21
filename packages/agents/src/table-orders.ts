@@ -78,8 +78,8 @@ export type TableOrders = OpsOrders;
 const TABLE_LOG_TAIL = 6;
 
 /**
- * 해석기의 입력 — 이 협상 하나와 테이블의 최근 말. 방의 테이블에는 감독의 말과 장부 줄만
- * 남고(상대의 대사는 방의 채팅 턴에 있다), 편지가 남긴 답에는 `them` 줄이 선다.
+ * 해석기의 입력 — 이 협상 하나와 테이블의 최근 말. 테이블에는 감독의 말과 장부 줄만 남는다
+ * — 상대의 대사는 방의 채팅 턴에 있다. `them` 줄은 옛 세이브에만 서 있다.
  */
 export function buildTableOrdersContext(state: GameState, negotiation: Negotiation): string[] {
   const party = roomPartyOf(state) ?? defaultPartyOf(state, negotiation);

@@ -3,7 +3,6 @@ import { FINALIZE_MATCH_SYSTEM, SETTLE_MATCH_INPUT } from "./finalize-match";
 import { HISTORY_COMPACTOR_SYSTEM, REPORT_DIGEST_INPUT } from "./history-compactor";
 import { MARKET_ORDERS_SPEC } from "./market-orders";
 import { MATCH_READER_SPEC } from "./match-reader";
-import { NEGOTIATION_TABLE_SYSTEM, REPLY_INPUT } from "./negotiation-table";
 import { ONBOARDING_JUDGE_SYSTEM, REPORT_ONBOARDING_INPUT } from "./onboarding-judge";
 import { opsOutputSchema } from "./orders-ops";
 import { REPORT_SCOUT_INPUT, SCOUT_RATER_SYSTEM } from "./scout-rater";
@@ -13,7 +12,7 @@ import { TRAINING_ORDERS_SPEC } from "./training-orders";
 import { REPORT_TRAINING_INPUT, TRAINING_RATER_SYSTEM } from "./training-rater";
 
 /**
- * **도구 없이 출력 스키마로 답을 받는 호출 전부** — 해석기 넷·판독기와 결산·판정 여섯
+ * **도구 없이 출력 스키마로 답을 받는 호출 전부** — 해석기 넷·판독기와 결산·판정 다섯
  * (docs/llm/prompts.md §2 · models.md §3-2).
  *
  * 제공자가 받는 스키마 부분집합은 셋이 다르고, 옮기는 자리는 어댑터다. 그 폭이 지켜지는지
@@ -37,7 +36,7 @@ export interface OutputAgent {
 }
 
 /**
- * 출력 스키마 선언 열 — 해석기 넷·판독기와 결산·판정 여섯.
+ * 출력 스키마 선언 열 — 해석기 넷·판독기와 결산·판정 다섯.
  *
  * 해석기와 판독기의 `ops`가 코어 명령의 도구 스키마를 그대로 물어 오므로(agents.md §1)
  * 명령 스펙 맵이 필요하다 — `buildToolSpecs(state, [])`가 그것이다.
@@ -57,6 +56,5 @@ export function outputAgents(specs: ReadonlyMap<string, GameToolSpec>): readonly
     { agent: "scout-rater", system: SCOUT_RATER_SYSTEM, schema: REPORT_SCOUT_INPUT },
     { agent: "onboarding-judge", system: ONBOARDING_JUDGE_SYSTEM, schema: REPORT_ONBOARDING_INPUT },
     { agent: "history-compactor", system: HISTORY_COMPACTOR_SYSTEM, schema: REPORT_DIGEST_INPUT },
-    { agent: "negotiation-table", system: NEGOTIATION_TABLE_SYSTEM, schema: REPLY_INPUT },
   ];
 }

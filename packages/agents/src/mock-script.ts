@@ -322,7 +322,7 @@ function pointOf(state: GameState, line: ScriptLine | null): string {
 export function peaceScript(
   state: GameState,
   said: string,
-  /** 이 턴에 코어가 이미 남긴 기록이 있는가 — 손잡이의 시간 이동·도착한 편지 */
+  /** 이 턴에 코어가 이미 남긴 기록이 있는가 — 손잡이의 시간 이동 */
   options: { recorded: boolean },
 ): ScriptedTurn {
   const hit = findLine(said);
@@ -412,7 +412,7 @@ export function readerScript(
 // ── 협상 방 ─────────────────────────────────────────────
 //
 // **대본이 상대의 말을 쓰는 자리다.** 판정은 비워 내므로 코어가 앵커 그대로 자른다 —
-// 편지와 같은 함수(`settleTableReply`)를 지나 두 모드가 확률을 다른 사다리로 가르지 않는다
+// 감독이 나서지 않은 라운드와 같은 사다리라 두 모드가 확률을 다르게 가르지 않는다
 // (agents.md §4-1의 mock). 방 안의 헤더는 그 날 안의 시각만 옮긴다.
 
 /** 상대의 답 — 판정과 요구는 비운다. 코어가 앵커로 자른다 */

@@ -269,13 +269,13 @@ describe("mock 대본 — 경기", () => {
 
 describe("mock 대본 — 이적", () => {
   /**
-   * 대본이 오퍼를 넣고, **상대의 답은 코어 앵커가 낸다** — mock은 교섭 상대를 부르지
-   * 않으므로 `answerLetters`가 서류대로 마감한다 (agents.md §4-1의 mock).
+   * 대본이 오퍼를 넣고, **감독이 나서지 않은 라운드는 그날의 tick이 앵커로 굳힌다**
+   * (agents.md §4-1 「감독이 없는 라운드」). 호출이 없으므로 mock과 실모드가 같다.
    *
    * 성사 확률이 문턱을 넘는 상대를 **코어에게 물어서** 고른다 — 아무나 지목하면 답이
    * 수락일지 조정일지가 카탈로그에 달리고, 그러면 케이스가 `if (수락이면)`을 쓴다.
    */
-  it("오퍼 → 도착한 답(respond_offer) → 확정(accept_deal)", async () => {
+  it("오퍼 → 감독 턴 없이 tick이 굳힌 답 → 확정(accept_deal)", async () => {
     const state = newGame();
     const target = state.players.find((p) => {
       if (p.teamId === state.userTeamId) return false;
@@ -291,12 +291,19 @@ describe("mock 대본 — 이적", () => {
     const negotiation = openNegotiationFor(state, target.id);
     expect(negotiation).toBeDefined();
 
-    // 답할 날이 되면 턴이 열리기 전에 상대가 답한다 — 그 기록이 `respond_offer`다
-    state.date = pendingOffer(negotiation!)!.respondsOn!;
-    const answered = await runGmTurn(state, "이적 건 마무리하자");
-    expect(namesOf(answered)).toContain("respond_offer");
+    // 답할 날이 오면 감독 턴 없이 tick이 굳힌다 — 굳은 결과는 사건 한 줄로 선다
+    const events: string[] = [];
+    let guard = 40;
+    while (guard-- > 0 && pendingOffer(negotiation!) !== null) {
+      const advanced = advanceTime(state, { days: 1 });
+      expect(advanced.ok).toBe(true);
+      events.push(...eventTexts(advanced.events));
+    }
     expect(pendingOffer(negotiation!)).toBeNull();
-    expect(namesOf(answered)).toContain("accept_deal");
+    expect(events.some((t) => t.includes(target.name))).toBe(true);
+
+    const closed = await runGmTurn(state, "이적 건 마무리하자");
+    expect(namesOf(closed)).toContain("accept_deal");
   });
 });
 
@@ -305,7 +312,7 @@ describe("mock 대본 — 위임", () => {
    * **맡긴 재계약은 감독 턴 없이 tick만으로 계약에 닿는다** (transfer.md §12-4).
    *
    * 재는 것은 상태 전이다: 대본의 한 줄이 `delegate_negotiation`으로 남고 위임이 서면, 그
-   * 뒤로는 어떤 턴도 열지 않은 채 하루씩 굴려도 협상이 편지·주의 줄 어디에도 서지 않고
+   * 뒤로는 어떤 턴도 열지 않은 채 하루씩 굴려도 협상이 답할 라운드에도 주의 줄에도 서지 않고
    * 단장이 앵커로 답을 굳혀 서명한다. 첫 제시가 수락 문턱을 넘는 선수를 **코어에게 물어서**
    * 고른다 — 아무나 지목하면 결말이 카탈로그에 달린다.
    */
@@ -347,7 +354,7 @@ describe("mock 대본 — 위임", () => {
       const advanced = advanceTime(state, { days: 1 });
       expect(advanced.ok).toBe(true);
       events.push(...eventTexts(advanced.events));
-      // 감독 턴은 한 번도 없다 — 답할 편지도 주의 줄도 이 협상에는 서지 않는다
+      // 감독 턴은 한 번도 없다 — 답할 라운드도 주의 줄도 이 협상에는 서지 않는다
       expect(arrivedResponses(state).map((n) => n.id)).not.toContain(negotiation.id);
       expect(pendingVerdicts(state).map((v) => v.negotiation.id)).not.toContain(negotiation.id);
     }

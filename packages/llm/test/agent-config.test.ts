@@ -95,11 +95,6 @@ describe("에이전트별 LLM 설정", () => {
     model: gemini-final
     max_tokens: 250
     timeout_ms: 2500
-  negotiation-table:
-    provider: google
-    model: gemini-table
-    max_tokens: 250
-    timeout_ms: 2500
   market-orders:
     provider: google
     model: gemini-market
