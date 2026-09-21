@@ -54,7 +54,7 @@ test("시즌 마지막 경기 뒤 하루를 넘기면 새 시즌이 선다", asy
   await expect(page.locator('[data-testid^="cal-fixture-"]').first()).toBeVisible();
 });
 
-test("이적 오퍼 — 넣고, 답이 오고, 수락으로 합의한다", async ({ page }) => {
+test("이적 오퍼 — 넣고, 코어가 답을 굳히고, 서명으로 합의한다", async ({ page }) => {
   const { gameId, targetName } = seedTransferTarget();
   await page.goto(`/game/${gameId}`);
 
@@ -72,16 +72,21 @@ test("이적 오퍼 — 넣고, 답이 오고, 수락으로 합의한다", async
   await expect(offer).toContainText("성사 가능성");
   await expect(offer).toContainText("답");
 
-  // ② 답이 도착한다 — 픽스처가 **내일 답이 오는 상대**를 골랐으므로 하루면 된다
+  /*
+   * ② 답이 굳는다 — **감독이 나서지 않은 라운드는 그날의 tick이 앵커로 굳히고**, 결과가
+   * 사건 한 줄로 선다 (transfer.md §12-1). 카드가 아니라 줄인 이유가 그것이다: 감독이
+   * 판정할 자리가 없다. 픽스처가 **내일 답이 오는 상대**를 골랐으므로 하루면 된다.
+   */
   await page.getByTestId("time-skip-toggle").click();
   await page.getByTestId("skip-day").click();
   await expect(input).toBeEnabled();
+  const settled = page.getByTestId("tick-event").filter({ hasText: targetName }).first();
+  await expect(settled).toBeVisible();
+  // 줄이 말하는 것은 답이 왔다는 사실이 아니라 **상대가 무엇으로 답했는가**다 — 매체는 없다
+  await expect(settled).toContainText("상대가 받아들였습니다");
 
-  // ③ 수락 — 답의 결이 카드의 색이 된다 (수락은 강조색)
+  // ③ 서명 — 받아들인 자리를 닫는 것은 감독이다. 영입이라 그다음은 메디컬이다
   await input.fill("이적 건 마무리하자");
   await page.getByTestId("chat-send").click();
-  const verdict = page.getByTestId("market-verdict").first();
-  await expect(verdict).toBeVisible();
-  await expect(verdict).toContainText(targetName);
-  await expect(verdict).toHaveClass(/\baccept\b/);
+  await expect(page.getByTestId("tool-accept_deal")).toBeVisible();
 });

@@ -6,7 +6,7 @@ import { COLD_MS } from "./timeouts";
 /**
  * 협상 방 한 판 — **여닫는 경로** (transfer.md §12-2 · design-system.md §7-1).
  *
- * 경기와 같은 골격이다: `start_negotiation`이 방을 세우면 게이트가 서고, 자리에 앉으면
+ * 경기와 같은 골격이다: `start_negotiation`이 방을 세우면 게이트가 서고, 감독이 나서면
  * 무대가 방으로 갈리고(조건서 · 인내 · 건너편), 일어서면 평시로 돌아온다. 그 사이의
  * 턴은 메인 채팅에서 한 덩어리로 묶인다.
  *
@@ -35,7 +35,7 @@ test("협상 방 — 단장과 앉아 값을, 에이전트와 앉아 조건을 �
   await expect(page.getByTestId("negotiation-room")).toHaveCount(0);
 
   /**
-   * ② 자리에 앉는다 — **문을 연 것은 감독이고 그 사실은 화면이 먼저 안다.** 킥오프와
+   * ② 직접 나선다 — **문을 연 것은 감독이고 그 사실은 화면이 먼저 안다.** 킥오프와
    * 같은 규칙이라 누른 직후의 지금을 그대로 센다: 무대는 서버의 답이 오기 전에 이미
    * 방이다.
    */
@@ -58,7 +58,7 @@ test("협상 방 — 단장과 앉아 값을, 에이전트와 앉아 조건을 �
   await expect(page.locator(".app")).toHaveAttribute("data-phase", "negotiation");
   await expect(room.getByTestId("negotiation-patience")).toBeVisible();
 
-  // ④ 일어선다 — 협상은 열린 채 방만 닫히고 단계는 들어오기 전으로 돌아간다
+  // ④ 물러난다 — 협상은 열린 채 방만 닫히고 단계는 들어오기 전으로 돌아간다
   await page.getByTestId("negotiation-leave").click();
   await expect(page.locator(".app")).toHaveAttribute("data-phase", "idle");
   await expect(room).toHaveCount(0);
