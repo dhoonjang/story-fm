@@ -55,7 +55,7 @@ import {
   buildNegotiationTools,
   buildTableNote,
   NEGOTIATION_GM_SYSTEM,
-  SEATING_BLOCK,
+  OPENING_BLOCK,
   type NegotiationToolContext,
 } from "./negotiation-gm";
 import { mockGmLlm } from "./mock-gm";
@@ -625,7 +625,7 @@ async function callGm(
           // 킥오프 턴의 표식 — 도구도 대본도 없는 턴이 첫 휘슬이라는 것을 입력이 말한다
           ...(inMatch && kickoff ? [``, KICKOFF_BLOCK] : []),
           // 자리에 앉는 턴의 표식 — 같은 자리다. 방과 상대의 첫 말까지만 쓴다
-          ...(inNegotiation && seating ? [``, SEATING_BLOCK] : []),
+          ...(inNegotiation && seating ? [``, OPENING_BLOCK] : []),
           // 손잡이가 먼저 굴린 구간 — GM은 이 대본을 받아 중계만 쓴다
           ...(inMatch && !kickoff && operator
             ? [

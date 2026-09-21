@@ -209,8 +209,8 @@ const SCRIPT: readonly ScriptLine[] = [
   },
   {
     /**
-     * 방 안의 말 — 값이 실렸으니 손잡이가 열리고(`table_orders`) 그 뒤에 상대가 답한다
-     * (`reply_at_table`). 값은 코어가 부르는 자다(`suggestTerms`) — 선수와 갈래는 해석기가
+     * 방 안의 말 — 값이 실렸으니 손잡이가 열리고(`negotiation_orders`) 그 뒤에 상대가 답한다
+     * (`counterparty_reply`). 값은 코어가 부르는 자다(`suggestTerms`) — 선수와 갈래는 해석기가
      * 이 협상의 것으로 고정하므로 여기 적지 않는다.
      */
     say: "제안한 조건으로 갑시다",
@@ -228,7 +228,7 @@ const SCRIPT: readonly ScriptLine[] = [
   {
     // 방 안의 말 — 자리를 뜬다. 협상은 열린 채 방만 닫힌다
     say: "오늘은 여기까지 하죠",
-    gm: () => [{ tool: "leave_table" }],
+    gm: () => [{ tool: "leave_negotiation" }],
   },
   {
     say: "이적 건 마무리하자",
@@ -417,7 +417,7 @@ export function readerScript(
 
 /** 상대의 답 — 판정과 요구는 비운다. 코어가 앵커로 자른다 */
 const ROOM_REPLY: ScriptedCall = {
-  tool: "reply_at_table",
+  tool: "counterparty_reply",
   input: { stance: "steady", heard: { tone: "civil", claims: [] } },
 };
 
@@ -482,7 +482,7 @@ export function negotiationScript(
   const hit = findLine(options.message);
   const planned =
     hit?.line.gm?.({ state, named: hit.named }) ??
-    (hit?.line.ops ? [{ tool: "table_orders" }, ROOM_REPLY] : [ROOM_REPLY]);
+    (hit?.line.ops ? [{ tool: "negotiation_orders" }, ROOM_REPLY] : [ROOM_REPLY]);
   return {
     calls: planned.filter((call) => has(call.tool)),
     text: [header, `@${who}: 검토해 보겠습니다.`, suggestLine(ROOM_SUGGESTION)].join("\n"),

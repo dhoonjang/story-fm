@@ -32,7 +32,7 @@ export const PANEL_OF: Record<string, PanelKey> = {
   tactic_orders: "스쿼드",
   training_orders: "달력",
   market_orders: "재정",
-  table_orders: "재정",
+  negotiation_orders: "재정",
   // 방을 세우는 스킬 — 경기의 `start_match`와 같은 자리다. 방 자체는 게이트가 세우고,
   // 협상이 실리는 장부는 이적 예산이 선 재정이다
   start_negotiation: "재정",
@@ -102,7 +102,7 @@ export const CARD_CALLS: ReadonlySet<string> = new Set([
   "send_offer",
   "respond_offer",
   // 방 안의 상대의 답이 오퍼를 판정하면 그 카드가 선다 — 말만 오간 턴은 카드 없이 지나간다
-  "reply_at_table",
+  "counterparty_reply",
   "open_renewal",
   "open_release",
   "withdraw_offer",

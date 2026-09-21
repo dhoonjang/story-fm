@@ -29,7 +29,7 @@ export type TurnOperation =
    * 앉는 첫 턴이고 도구가 없다 (docs/simulation/transfer.md §12-2).
    */
   | { kind: "enter_negotiation" }
-  /** 협상 방에서 일어선다 — 협상은 열린 채 방만 닫힌다 */
+  /** 협상에서 물러난다 — 협상은 열린 채 그 자리만 닫힌다 */
   | { kind: "leave_negotiation" }
   /**
    * **제안 폼** — 화면이 정확한 값으로 낸 제안 (proposal.ts). 감독의 말이 없는 제안 턴은
@@ -76,9 +76,9 @@ export function operationLabel(operation: TurnOperation): string {
     case "advance_match":
       return "경기 진행";
     case "enter_negotiation":
-      return "협상 자리에 앉는다";
+      return "협상에 직접 나선다";
     case "leave_negotiation":
-      return "협상 자리에서 일어선다";
+      return "협상에서 물러난다";
     case "propose":
       return operation.label;
   }

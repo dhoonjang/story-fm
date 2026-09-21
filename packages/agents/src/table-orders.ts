@@ -12,13 +12,13 @@ import { runOpsOrders, tagged, type OpsAgentSpec, type OpsOrders } from "./order
 
 /**
  * 테이블 해석 — **협상 방에서 감독이 한 말 한 마디를 이 협상의 명령 인자로 옮긴다**
- * (agents.md §1 · transfer.md §12-2 · §12-3). 협상 GM의 `table_orders` 뒤에서 돈다 — 손잡이는
+ * (agents.md §1 · transfer.md §12-2 · §12-3). 협상 GM의 `negotiation_orders` 뒤에서 돈다 — 손잡이는
  * 인자가 없고, 이번 턴 감독의 말은 코어가 넘긴다(`negotiation-gm.ts`).
  *
  * 시장 해석(`market-orders.ts`)과 같은 뼈대지만 좁다: 읽는 것은 이 협상 하나와 테이블의
  * 최근 말뿐이고, 채우는 명령도 이 테이블에서 오갈 수 있는 것뿐이다. 감독이 값을 말하면
  * 오퍼가 되고, 조건을 걸면 조건서에 오르며, 상대의 요구에 답하면 그 답이 장부에 선다 —
- * 그다음에 상대가 답한다(`reply_at_table`). 옮기지 못한 말은 그대로 상대에게 간다: 값이
+ * 그다음에 상대가 답한다(`counterparty_reply`). 옮기지 못한 말은 그대로 상대에게 간다: 값이
  * 없는 말은 흥정이 아니라 대화이고, 그것도 테이블의 일이다.
  *
  * **모델이 다른 협상을 가리키지 못한다** — 돌아온 명령의 `negotiationId`·`playerId`는 이

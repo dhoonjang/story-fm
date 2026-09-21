@@ -10,7 +10,7 @@ import { RENEWAL_YEARS_MAX } from "@story-fm/engine";
 
 /**
  * 교섭 상대의 판정 스키마 (agents.md §4-1) — 편지(`negotiation-table.ts`)와 협상 방의
- * `reply_at_table`(`negotiation-gm.ts`)이 같은 필드로 판정한다. 코어가 앵커 ± 한도로 자르는
+ * `counterparty_reply`(`negotiation-gm.ts`)이 같은 필드로 판정한다. 코어가 앵커 ± 한도로 자르는
  * 것도 한 함수다(`clampCounterpartyRuling`). 금액 상한은 도구 인자들이 함께 쓴다 (gm-tools.ts).
  */
 

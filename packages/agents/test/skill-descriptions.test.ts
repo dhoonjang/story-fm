@@ -208,7 +208,7 @@ describe("규칙이 사는 자리", () => {
     const match = MATCH_TOOL_DEFINITIONS.find((t) => t.name === "tactic_orders")!;
     expect(Object.keys(match.inputSchema.properties ?? {})).toEqual([]);
     // 협상 방의 손잡이도 같다 — 방 안의 말은 전부 건너편에게 하는 말이라 가를 것이 없다
-    const table = NEGOTIATION_TOOL_DEFINITIONS.find((t) => t.name === "table_orders")!;
+    const table = NEGOTIATION_TOOL_DEFINITIONS.find((t) => t.name === "negotiation_orders")!;
     expect(Object.keys(table.inputSchema.properties ?? {})).toEqual([]);
   });
 
@@ -274,7 +274,7 @@ describe("규칙이 사는 자리", () => {
    */
   it("코어가 갈래표를 든 열거는 그 표가 모델에게 닿는다", () => {
     const reply = { name: "negotiation-table", inputSchema: REPLY_INPUT };
-    const room = NEGOTIATION_TOOL_DEFINITIONS.find((t) => t.name === "reply_at_table")!;
+    const room = NEGOTIATION_TOOL_DEFINITIONS.find((t) => t.name === "counterparty_reply")!;
     const rows = [
       {
         where: "record_incident.kind",
@@ -292,7 +292,7 @@ describe("규칙이 사는 자리", () => {
       },
       {
         /** 들은 것은 방의 답에만 있다 — 편지에는 들을 말이 없다 (agents.md §4-1) */
-        where: "reply_at_table.heard.claims[].kind",
+        where: "counterparty_reply.heard.claims[].kind",
         node: enumArg([room], room.name, "kind"),
         kinds: PITCH_CLAIM_KINDS as readonly string[],
         /**
@@ -312,7 +312,7 @@ describe("규칙이 사는 자리", () => {
       },
       {
         /** 방의 태도는 인자 설명이 표를 든다 — 협상 GM 프롬프트는 도구의 사용법을 적지 않는다 */
-        where: "reply_at_table.stance",
+        where: "counterparty_reply.stance",
         node: enumArg([room], room.name, "stance"),
         kinds: TABLE_STANCES as readonly string[],
         tables: [TABLE_STANCE_KO as Record<string, string>],
@@ -357,7 +357,7 @@ describe("규칙이 사는 자리", () => {
         reads: "",
       },
       {
-        where: "reply_at_table.ruling.squadStatus",
+        where: "counterparty_reply.ruling.squadStatus",
         node: enumArg([room], room.name, "squadStatus"),
         kinds: SQUAD_STATUSES as readonly string[],
         tables: [SQUAD_STATUS_KO as Record<string, string>],

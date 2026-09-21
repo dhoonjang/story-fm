@@ -412,7 +412,7 @@ describe("mock 대본 — 협상 방", () => {
     expect(tableOf(state, negotiation, "club")?.lines.some((l) => l.by === "us")).toBe(true);
     // 값이 실린 말 — 해석기가 오퍼로 옮기고, 단장이 그 자리에서 답한다
     expect(namesOf(spoke)).toContain("send_offer");
-    expect(namesOf(spoke)).toContain("reply_at_table");
+    expect(namesOf(spoke)).toContain("counterparty_reply");
     expect(negotiation.rounds.length).toBeGreaterThanOrEqual(1);
     // 앵커가 수락이되 단장의 수락은 이적료의 합의다 — 협상도 방도 열려 있다 (transfer.md §12-1)
     expect(negotiation.feeAgreed?.fee).toBe(negotiation.rounds[0]!.fee);
@@ -444,8 +444,8 @@ describe("mock 대본 — 협상 방", () => {
     const negotiation = await seatWith(state, target.name);
 
     const talked = await runGmTurn(state, "음...");
-    expect(namesOf(talked)).toContain("reply_at_table");
-    expect(namesOf(talked)).not.toContain("table_orders");
+    expect(namesOf(talked)).toContain("counterparty_reply");
+    expect(namesOf(talked)).not.toContain("negotiation_orders");
     expect(negotiation.rounds).toHaveLength(0);
     expect(state.phase).toBe("negotiation");
 
@@ -460,14 +460,14 @@ describe("mock 대본 — 협상 방", () => {
     expect(tableOf(state, negotiation, "club")?.lines.at(-1)?.by).toBe("ledger");
   });
 
-  it("자리를 뜨는 말은 leave_table로 방을 닫는다", async () => {
+  it("자리를 뜨는 말은 leave_negotiation로 방을 닫는다", async () => {
     const state = newGame();
     const target = acceptableTarget(state);
     const negotiation = await seatWith(state, target.name);
 
     const left = await runGmTurn(state, "오늘은 여기까지 하죠");
     expectGmGrammar(left.text);
-    expect(namesOf(left)).toContain("leave_table");
+    expect(namesOf(left)).toContain("leave_negotiation");
     expect(state.phase).toBe("idle");
     expect(negotiation.status).toBe("open");
   });

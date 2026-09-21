@@ -97,14 +97,14 @@ export const NEGOTIATION_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니�
 </example>`;
 
 /** 자리에 앉는 턴의 표식 — 도구 없는 첫 턴이다 (transfer.md §12-2) */
-export const SEATING_BLOCK =
+export const OPENING_BLOCK =
   "<seating>감독이 자리에 앉았다 — 방과 건너편 사람들, 상대의 첫 말까지만 쓴다</seating>";
 
 // ── 협상 도구 셋 — 코어를 부르는 손잡이 ──────────────────────
 
-export const TABLE_ORDERS_TOOL = "table_orders";
-export const REPLY_AT_TABLE_TOOL = "reply_at_table";
-export const LEAVE_TABLE_TOOL = "leave_table";
+export const NEGOTIATION_ORDERS_TOOL = "negotiation_orders";
+export const COUNTERPARTY_REPLY_TOOL = "counterparty_reply";
+export const LEAVE_NEGOTIATION_TOOL = "leave_negotiation";
 
 const EmptySchema = z.object({});
 
@@ -115,7 +115,7 @@ const EmptySchema = z.object({});
  * `heard`가 첫 자리다 — 스키마를 훑어 열거를 찾는 자(`skill-descriptions.test.ts`)가 `kind`
  * 이름으로 처음 만나는 것이 설득 논거의 갈래여야 한다.
  */
-export const ReplyAtTableSchema = z.object({
+export const CounterpartyReplySchema = z.object({
   heard: z.object({
     tone: z
       .enum(["civil", "hostile"])
@@ -137,7 +137,7 @@ export const ReplyAtTableSchema = z.object({
       "이번 답에서 부르는 조건 — <anchor>의 「부를 수 있는 조건」에 적힌 갈래만, 구간 안에서, 한 답에 둘까지. 감독이 이미 건 갈래는 부르지 않는다. 없으면 비운다",
     ),
 });
-export type ReplyAtTableArgs = z.infer<typeof ReplyAtTableSchema>;
+export type CounterpartyReplyArgs = z.infer<typeof CounterpartyReplySchema>;
 
 /**
  * 도구 정의 — 이름·설명·스키마. 핸들러는 턴마다 상태를 닫아 만든다(`buildNegotiationTools`).
@@ -149,19 +149,19 @@ export const NEGOTIATION_TOOL_DEFINITIONS: ReadonlyArray<{
   inputSchema: JsonObjectSchema;
 }> = [
   {
-    name: TABLE_ORDERS_TOOL,
+    name: NEGOTIATION_ORDERS_TOOL,
     description:
-      "감독의 말에 값·연수·지위·조건·상대 요구의 답·수락·철회가 실렸을 때 한 번 부른다 — 이 협상의 명령으로 옮겨 장부에 건다. 결과로 무엇이 걸렸고 무엇이 반려됐는지와 새 <table>이 온다. 값도 조건도 답도 없는 말에는 부르지 않는다 — 그 말은 그대로 상대에게 간다. 상대의 답은 이 뒤에 reply_at_table로 판정한다.",
+      "감독의 말에 값·연수·지위·조건·상대 요구의 답·수락·철회가 실렸을 때 한 번 부른다 — 이 협상의 명령으로 옮겨 장부에 건다. 결과로 무엇이 걸렸고 무엇이 반려됐는지와 새 <table>이 온다. 값도 조건도 답도 없는 말에는 부르지 않는다 — 그 말은 그대로 상대에게 간다. 상대의 답은 이 뒤에 counterparty_reply로 판정한다.",
     inputSchema: toToolSchema(EmptySchema),
   },
   {
-    name: REPLY_AT_TABLE_TOOL,
+    name: COUNTERPARTY_REPLY_TOOL,
     description:
-      "상대의 답을 판정한다 — 감독이 말을 건 턴마다 한 번, table_orders 뒤·장면을 쓰기 전에. heard에 감독의 말투와 실제로 든 설득 논거만, stance에 이 답의 태도 하나. <table>의 <anchor>에 오퍼나 개인 조건 제안이 올라 있으면 ruling이 이 답에 실려야 한다 — 비우면 코어가 기준 판정으로 굳힌다. 부르는 조건은 asks에. 코어가 논거를 사실 대조하고 말투와 거짓으로 인내를 깎고 판정을 앵커 ± 한도로 잘라 반영한다. 결과로 [장부] 줄(논거의 참·거짓 · 상대의 요구 · 굳은 판정과 값), 인내 N/M과 태도, 협상이 끝났으면 그 상태가 온다 — 장면은 그 위에 선다. 상대의 말이 [장부]의 값·판정과 어긋나지 않게 쓴다.",
-    inputSchema: toToolSchema(ReplyAtTableSchema),
+      "상대의 답을 판정한다 — 감독이 말을 건 턴마다 한 번, negotiation_orders 뒤·장면을 쓰기 전에. heard에 감독의 말투와 실제로 든 설득 논거만, stance에 이 답의 태도 하나. <table>의 <anchor>에 오퍼나 개인 조건 제안이 올라 있으면 ruling이 이 답에 실려야 한다 — 비우면 코어가 기준 판정으로 굳힌다. 부르는 조건은 asks에. 코어가 논거를 사실 대조하고 말투와 거짓으로 인내를 깎고 판정을 앵커 ± 한도로 잘라 반영한다. 결과로 [장부] 줄(논거의 참·거짓 · 상대의 요구 · 굳은 판정과 값), 인내 N/M과 태도, 협상이 끝났으면 그 상태가 온다 — 장면은 그 위에 선다. 상대의 말이 [장부]의 값·판정과 어긋나지 않게 쓴다.",
+    inputSchema: toToolSchema(CounterpartyReplySchema),
   },
   {
-    name: LEAVE_TABLE_TOOL,
+    name: LEAVE_NEGOTIATION_TOOL,
     description:
       "감독이 자리를 뜨겠다고 했을 때 부른다. 협상은 열린 채 방만 닫힌다 — 답은 서면으로 이어지고, 다시 앉으면 남은 인내 그대로다. 이 턴에는 자리를 뜨는 장면까지 쓴다.",
     inputSchema: toToolSchema(EmptySchema),
@@ -172,7 +172,7 @@ export const NEGOTIATION_TOOL_DEFINITIONS: ReadonlyArray<{
 export interface NegotiationToolContext {
   calls: GmToolCall[];
   /**
-   * 이번 턴 감독의 말 — `table_orders`가 해석기에 넘기는 원문이다 (agents.md §1). 턴 러너가
+   * 이번 턴 감독의 말 — `negotiation_orders`가 해석기에 넘기는 원문이다 (agents.md §1). 턴 러너가
    * 채팅에 넣은 그 문자열이고, 손잡이 턴에는 없다.
    */
   said?: string;
@@ -224,7 +224,7 @@ export function buildNegotiationTools(
     {
       ...orders!,
       handle: async () => {
-        const opened = gate(TABLE_ORDERS_TOOL);
+        const opened = gate(NEGOTIATION_ORDERS_TOOL);
         if (!opened.ok) return opened;
         const room = roomNegotiationOf(state);
         if (!room) return NO_ROOM;
@@ -234,7 +234,7 @@ export function buildNegotiationTools(
     {
       ...reply!,
       handle: async (input: unknown) => {
-        const parsed = ReplyAtTableSchema.safeParse(input ?? {});
+        const parsed = CounterpartyReplySchema.safeParse(input ?? {});
         if (!parsed.success) return inputError(parsed.error);
         if (replied) {
           return {
@@ -261,7 +261,7 @@ export function buildNegotiationTools(
          * 그것을 깨진 카드로 읽는다 (`market-calls.ts`).
          */
         const outcome = settleTableReply(state, seated.seat, heard);
-        return recordCall(ctx.calls, REPLY_AT_TABLE_TOOL, outcome, {
+        return recordCall(ctx.calls, COUNTERPARTY_REPLY_TOOL, outcome, {
           input: got,
           ...(outcome.payload ? {} : { silent: true }),
         });
@@ -273,7 +273,7 @@ export function buildNegotiationTools(
         const left = closeNegotiation(state, "left");
         if (!left.ok) return left;
         // 방을 닫은 것은 코어의 처리 결과다 — 칩으로 세우지 않는다
-        return recordCall(ctx.calls, LEAVE_TABLE_TOOL, left, { silent: true });
+        return recordCall(ctx.calls, LEAVE_NEGOTIATION_TOOL, left, { silent: true });
       },
     },
   ];
