@@ -269,13 +269,13 @@ describe("mock 대본 — 경기", () => {
 
 describe("mock 대본 — 이적", () => {
   /**
-   * 대본이 오퍼를 넣고, **상대의 답은 코어 앵커가 낸다** — mock은 교섭 상대를 부르지
-   * 않으므로 `answerLetters`가 서류대로 마감한다 (agents.md §4-1의 mock).
+   * 대본이 오퍼를 넣고, **감독이 나서지 않은 라운드는 그날의 tick이 앵커로 굳힌다**
+   * (agents.md §4-1 「감독이 없는 라운드」). 호출이 없으므로 mock과 실모드가 같다.
    *
    * 성사 확률이 문턱을 넘는 상대를 **코어에게 물어서** 고른다 — 아무나 지목하면 답이
    * 수락일지 조정일지가 카탈로그에 달리고, 그러면 케이스가 `if (수락이면)`을 쓴다.
    */
-  it("오퍼 → 도착한 답(respond_offer) → 확정(accept_deal)", async () => {
+  it("오퍼 → 감독 턴 없이 tick이 굳힌 답 → 확정(accept_deal)", async () => {
     const state = newGame();
     const target = state.players.find((p) => {
       if (p.teamId === state.userTeamId) return false;
@@ -291,12 +291,19 @@ describe("mock 대본 — 이적", () => {
     const negotiation = openNegotiationFor(state, target.id);
     expect(negotiation).toBeDefined();
 
-    // 답할 날이 되면 턴이 열리기 전에 상대가 답한다 — 그 기록이 `respond_offer`다
-    state.date = pendingOffer(negotiation!)!.respondsOn!;
-    const answered = await runGmTurn(state, "이적 건 마무리하자");
-    expect(namesOf(answered)).toContain("respond_offer");
+    // 답할 날이 오면 감독 턴 없이 tick이 굳힌다 — 굳은 결과는 사건 한 줄로 선다
+    const events: string[] = [];
+    let guard = 40;
+    while (guard-- > 0 && pendingOffer(negotiation!) !== null) {
+      const advanced = advanceTime(state, { days: 1 });
+      expect(advanced.ok).toBe(true);
+      events.push(...eventTexts(advanced.events));
+    }
     expect(pendingOffer(negotiation!)).toBeNull();
-    expect(namesOf(answered)).toContain("accept_deal");
+    expect(events.some((t) => t.includes(target.name))).toBe(true);
+
+    const closed = await runGmTurn(state, "이적 건 마무리하자");
+    expect(namesOf(closed)).toContain("accept_deal");
   });
 });
 
@@ -305,7 +312,7 @@ describe("mock 대본 — 위임", () => {
    * **맡긴 재계약은 감독 턴 없이 tick만으로 계약에 닿는다** (transfer.md §12-4).
    *
    * 재는 것은 상태 전이다: 대본의 한 줄이 `delegate_negotiation`으로 남고 위임이 서면, 그
-   * 뒤로는 어떤 턴도 열지 않은 채 하루씩 굴려도 협상이 편지·주의 줄 어디에도 서지 않고
+   * 뒤로는 어떤 턴도 열지 않은 채 하루씩 굴려도 협상이 답할 라운드에도 주의 줄에도 서지 않고
    * 단장이 앵커로 답을 굳혀 서명한다. 첫 제시가 수락 문턱을 넘는 선수를 **코어에게 물어서**
    * 고른다 — 아무나 지목하면 결말이 카탈로그에 달린다.
    */
@@ -347,7 +354,7 @@ describe("mock 대본 — 위임", () => {
       const advanced = advanceTime(state, { days: 1 });
       expect(advanced.ok).toBe(true);
       events.push(...eventTexts(advanced.events));
-      // 감독 턴은 한 번도 없다 — 답할 편지도 주의 줄도 이 협상에는 서지 않는다
+      // 감독 턴은 한 번도 없다 — 답할 라운드도 주의 줄도 이 협상에는 서지 않는다
       expect(arrivedResponses(state).map((n) => n.id)).not.toContain(negotiation.id);
       expect(pendingVerdicts(state).map((v) => v.negotiation.id)).not.toContain(negotiation.id);
     }
@@ -412,7 +419,7 @@ describe("mock 대본 — 협상 방", () => {
     expect(tableOf(state, negotiation, "club")?.lines.some((l) => l.by === "us")).toBe(true);
     // 값이 실린 말 — 해석기가 오퍼로 옮기고, 단장이 그 자리에서 답한다
     expect(namesOf(spoke)).toContain("send_offer");
-    expect(namesOf(spoke)).toContain("reply_at_table");
+    expect(namesOf(spoke)).toContain("counterparty_reply");
     expect(negotiation.rounds.length).toBeGreaterThanOrEqual(1);
     // 앵커가 수락이되 단장의 수락은 이적료의 합의다 — 협상도 방도 열려 있다 (transfer.md §12-1)
     expect(negotiation.feeAgreed?.fee).toBe(negotiation.rounds[0]!.fee);
@@ -444,8 +451,8 @@ describe("mock 대본 — 협상 방", () => {
     const negotiation = await seatWith(state, target.name);
 
     const talked = await runGmTurn(state, "음...");
-    expect(namesOf(talked)).toContain("reply_at_table");
-    expect(namesOf(talked)).not.toContain("table_orders");
+    expect(namesOf(talked)).toContain("counterparty_reply");
+    expect(namesOf(talked)).not.toContain("negotiation_orders");
     expect(negotiation.rounds).toHaveLength(0);
     expect(state.phase).toBe("negotiation");
 
@@ -460,14 +467,14 @@ describe("mock 대본 — 협상 방", () => {
     expect(tableOf(state, negotiation, "club")?.lines.at(-1)?.by).toBe("ledger");
   });
 
-  it("자리를 뜨는 말은 leave_table로 방을 닫는다", async () => {
+  it("자리를 뜨는 말은 leave_negotiation로 방을 닫는다", async () => {
     const state = newGame();
     const target = acceptableTarget(state);
     const negotiation = await seatWith(state, target.name);
 
     const left = await runGmTurn(state, "오늘은 여기까지 하죠");
     expectGmGrammar(left.text);
-    expect(namesOf(left)).toContain("leave_table");
+    expect(namesOf(left)).toContain("leave_negotiation");
     expect(state.phase).toBe("idle");
     expect(negotiation.status).toBe("open");
   });

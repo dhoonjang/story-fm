@@ -38,8 +38,12 @@ import { askTerms, askableKindsOf } from "./terms";
 import { LATITUDE_PER_CLAIM, evaluatePitch } from "./persuasion";
 
 /**
- * **협상 방 — 협상 위에 서는 마주 앉은 자리, 그리고 그 자리가 여는 모드**
+ * **협상 방 — 감독이 그 자리에 있는 것이 여는 모드**
  * (docs/simulation/transfer.md §12-2 · docs/llm/agents.md §4-1).
+ *
+ * 가르는 것은 매체가 아니다 — 사무실인지 전화인지 하루 동안 오간 메일인지는 장면의
+ * 것이고, 방이 여는 것은 **감독이 그 라운드에 직접 나선다**는 사실 하나다. 감독이 나서지
+ * 않은 라운드는 코어가 앵커로 굳힌다(`settleArrivedResponses` — §12-1).
  *
  * 오퍼와 답은 그대로 협상의 라운드다. 테이블이 더하는 것은 셋이다 — 그 사이의 **말**,
  * 상대가 앉아 있을 **인내**, 그리고 답을 기다리는 오퍼가 **오늘** 답을 받는다는 것.
@@ -152,25 +156,11 @@ export interface TableHeard {
   claims: PitchClaim[];
 }
 
-/**
- * 상대가 말한 한 줄 — **화자가 붙는다** (transfer.md §12-1). 영입의 테이블에는 값을
- * 답하는 구단과 개인 조건을 답하는 선수 쪽이 함께 앉으므로, 한 답이 두 줄일 수 있다.
- */
-export interface TableReplyLine {
-  speaker: TableSpeaker;
-  text: string;
-}
-
 /** 모델의 답 — 어느 값도 그대로 믿지 않는다 */
 export interface TableReply {
-  /**
-   * 화자가 붙은 말 — 서 있는 목소리마다 한 줄, 없는 화자는 코어가 접는다. **편지만
-   * 싣는다** — 방에서는 상대의 대사가 장면이라 줄이 없다 (agents.md §4-1).
-   */
-  lines?: readonly TableReplyLine[];
-  /** **답 하나에 태도 하나** — 화자가 둘이어도 테이블의 온도는 한 자리에서 잰다 */
+  /** **답 하나에 태도 하나** — 건너편이 한 사람이라 테이블의 온도도 한 자리에서 잰다 */
   stance: TableStance;
-  /** 들은 것 — 감독의 말이 있는 자리(방)에만 있다. 편지에는 들을 말이 없다 */
+  /** 들은 것 — 감독이 그 자리에 있으므로 언제나 들을 말이 있다 */
   heard?: TableHeard;
   /** 테이블에 오퍼가 올라 있을 때만 — 앵커 ± 한도로 잘린다 (counterparty.ts) */
   ruling?: CounterpartyRulingInput;
@@ -183,7 +173,7 @@ export interface TableReply {
 
 export interface TableSeat {
   negotiation: Negotiation;
-  /** 건너편 — 이 자리에 앉은 상대. 편지는 기본 자리다 */
+  /** 건너편 — 이 자리에 앉은 상대 */
   party: TableParty;
   table: NegotiationTable;
   /** 답할 오퍼가 올라 있으면 그 앵커 — 개인 조건 제안이면 그 앵커, 없으면 말만 오간다 */
@@ -207,9 +197,9 @@ export interface TableOutcome {
 /**
  * 앉는다 — 협상 위에 테이블을 세우고 감독의 말을 적는다.
  *
- * **답을 기다리던 오퍼는 오늘로 당겨진다.** 편지로 보낸 오퍼는 며칠 뒤에 답이 오지만
- * 마주 앉으면 그 자리에서 답한다 — 그것이 테이블에 앉는 값이다. 그 답은 이어지는
- * `settleTableReply`가 같은 턴에 낸다.
+ * **답을 기다리던 오퍼는 오늘로 당겨진다.** 감독 없이 넣어 둔 오퍼는 며칠 뒤에 답이 오지만
+ * 감독이 그 자리에 붙으면 상대는 그 자리에서 답한다 — 그것이 테이블에 앉는 값이다. 그
+ * 답은 이어지는 `settleTableReply`가 같은 턴에 낸다.
  */
 export function sitAtTable(
   state: GameState,
@@ -235,7 +225,7 @@ export function sitAtTable(
 }
 
 /**
- * **말 없이 앉은 자리** — 방의 GM이 상대의 답을 판정할 때 읽는 자리다 (`reply_at_table`).
+ * **말 없이 앉은 자리** — 방의 GM이 상대의 답을 판정할 때 읽는 자리다 (`counterparty_reply`).
  * 감독의 말은 턴이 열릴 때 코어가 이미 적었으므로(`sitAtTable`) 여기서는 줄을 더하지
  * 않고, 테이블이 아직 없으면(제안 폼으로만 오퍼를 넣고 앉은 자리) 인내만 세운다.
  */
@@ -297,58 +287,6 @@ function seatOf(state: GameState, negotiation: Negotiation, party: TableParty): 
   };
 }
 
-/**
- * 편지 — **마주 앉지 않고 온 답**. 감독이 보낸 오퍼에 답할 날이 됐을 때(`arrivedResponses`)
- * 코어가 여는 자리다. 감독의 말이 없으므로 `us` 줄 대신 장부 줄이 서고, 답은 같은
- * 상대(`negotiation-table`)가 같은 서류로 낸다 — 편지와 테이블이 다른 머리로 답하면
- * 같은 대리인이 자리마다 다른 것을 아는 사람이 된다.
- */
-export function openLetter(
-  state: GameState,
-  negotiationId: string,
-): { ok: false; message: string } | { ok: true; seat: TableSeat } {
-  const negotiation = state.negotiations.find((n) => n.id === negotiationId);
-  if (!negotiation)
-    return {
-      ok: false,
-      message: `협상 "${negotiationId}"${josaOf(negotiationId, "을/를")} 찾지 못했습니다`,
-    };
-  if (negotiation.status !== "open") {
-    return { ok: false, message: `이미 끝난 협상입니다 (${negotiation.status})` };
-  }
-  const offer = pendingOffer(negotiation);
-  const personal = personalAwaiting(negotiation);
-  const offerDue = offer !== null && offer.respondsOn !== null && offer.respondsOn <= state.date;
-  const personalDue = offer === null && personal !== null && personal.respondsOn <= state.date;
-  if (!offerDue && !personalDue) {
-    return { ok: false, message: "답할 날이 된 오퍼가 없습니다" };
-  }
-  /**
-   * 편지는 양쪽에 함께 간다 — 서면 오퍼의 답은 확률 하나(두 관문의 곱)로 판정하고 앉은
-   * 목소리 전부가 답한다. 줄은 기본 자리의 테이블에 남는다.
-   */
-  const party = defaultPartyOf(state, negotiation);
-  ensureTable(state, negotiation, party).lines.push(
-    ledgerLine(
-      state,
-      offerDue
-        ? "감독의 오퍼가 서면으로 왔다 — 마주 앉지 않았다"
-        : "감독의 개인 조건 제안이 서면으로 왔다 — 마주 앉지 않았다",
-    ),
-  );
-  return {
-    ok: true,
-    seat: {
-      negotiation,
-      party,
-      table: tableOf(state, negotiation, party)!,
-      anchor: counterpartyAnchor(state, negotiation) ?? personalAnchor(state, negotiation),
-      voices: tableVoicesOf(state, negotiation),
-      asks: termAsksOf(state, negotiation),
-    },
-  };
-}
-
 function ledgerLine(state: GameState, text: string): TableLine {
   return { date: state.date, by: "ledger", text };
 }
@@ -372,17 +310,6 @@ export function settleTableReply(
   const player = playerById(state, negotiation.gamePlayerId);
   const name = player?.name ?? negotiation.gamePlayerId;
   const ledger: string[] = [];
-  /**
-   * **화자를 서 있는 목소리로 접는다** — 모델이 이 테이블에 없는 사람을 적어도 장부에는
-   * 앉아 있는 사람만 남는다 (transfer.md §12-1). 목소리가 하나인 갈래는 그 하나로 접히고,
-   * 그래서 재계약·매각의 줄은 지금까지와 똑같이 읽힌다.
-   */
-  const spoken = (reply?.lines ?? []).map((line) => ({
-    speaker: seat.voices.some((v) => v.speaker === line.speaker)
-      ? line.speaker
-      : (seat.voices[0]?.speaker ?? line.speaker),
-    text: line.text.trim().slice(0, TABLE_LINE_MAX),
-  }));
 
   // ── 논거 — 사실만 가린다 (persuasion.ts) ──
   const claims = reply?.heard?.claims ?? [];
@@ -428,15 +355,14 @@ export function settleTableReply(
   // ── 오퍼가 올라 있었으면 판정 — 앵커 ± 한도 ──
   let payload: MarketCard | undefined;
   if (seat.anchor) {
-    // 두 목소리가 왔으면 메모도 둘의 말을 잇는다 — 라운드에 적히는 것은 한 줄이다
-    const note = spoken
-      .map((l) => l.text)
-      .join(" ")
-      .slice(0, 200);
+    /**
+     * 라운드의 메모는 비어 있다 — 상대의 대사는 방의 장면이라 장부로 오는 줄이 없다
+     * (transfer.md §12-2). 라운드에 남는 것은 판정과 값뿐이다.
+     */
     const ruling: CounterpartyRulingInput | undefined = reply?.ruling
-      ? { ...reply.ruling, ...(note ? { note } : {}) }
+      ? reply.ruling
       : reply
-        ? { verdict: seat.anchor.verdict, ...(note ? { note } : {}) }
+        ? { verdict: seat.anchor.verdict }
         : undefined;
     const settled = settleCounterparty(state, seat.anchor, ruling);
     if (settled.result.ok) {
@@ -465,39 +391,16 @@ export function settleTableReply(
       ? "cooling"
       : reply.stance
     : undefined;
-  /**
-   * **한 답의 태도는 모든 줄에 같이 선다** — 답 하나에 태도가 하나라서다. 줄마다 다른
-   * 온도를 적으면 인내를 재는 자리가 둘이 된다 (transfer.md §12-2).
-   */
-  for (const line of spoken) {
-    table.lines.push({
-      date: state.date,
-      by: "them",
-      text: line.text,
-      speaker: line.speaker,
-      ...(stance ? { stance } : {}),
-    });
-  }
   if (!reply) ledger.unshift("상대는 말없이 서류대로 움직였다");
   for (const text of ledger) table.lines.push(ledgerLine(state, text));
 
   const message = [
-    ...spoken.map(
-      (line) =>
-        `<reply speaker="${line.speaker}" name="${speakerName(seat, line.speaker)}" ` +
-        `stance="${stance ?? "steady"}">\n${line.text}\n</reply>`,
-    ),
     ...ledger.map((l) => `[장부] ${l}`),
     `인내 ${table.patience}/${table.patienceMax}` +
       (stance ? ` · ${TABLE_STANCE_KO[stance]}` : "") +
       (closed ? ` · 협상 ${negotiation.status}` : ""),
   ].join("\n");
   return { ok: true, message, ...(payload ? { payload } : {}), closed };
-}
-
-/** 그 화자의 이름 — 서류가 부르는 이름 그대로다 (`tableVoicesOf`) */
-export function speakerName(seat: TableSeat, speaker: TableSpeaker): string {
-  return seat.voices.find((v) => v.speaker === speaker)?.name ?? "상대";
 }
 
 // ── 협상 방 — 모드의 문 (transfer.md §12-2) ─────────────────────────
@@ -633,8 +536,8 @@ export function roomPartyOf(state: GameState): TableParty | null {
 
 /**
  * **방을 닫는다** — `phase`는 들어서기 전의 것으로 돌아간다. 협상 자체는 건드리지 않는다:
- * 합의·결렬은 이미 장부가 적었고, 자리 뜨기(`left`)는 협상을 `open`으로 둔다 — 편지가
- * 그 뒤를 잇고, 다시 앉으면 남은 인내 그대로다.
+ * 합의·결렬은 이미 장부가 적었고, 자리 뜨기(`left`)는 협상을 `open`으로 둔다 — 그 뒤의
+ * 라운드는 코어가 앵커로 굳히고, 다시 앉으면 남은 인내 그대로다.
  */
 export function closeNegotiation(
   state: GameState,

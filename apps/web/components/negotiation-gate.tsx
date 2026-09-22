@@ -11,14 +11,14 @@ import {
 } from "@/components/negotiation-room";
 
 /**
- * ── 협상 게이트 — 자리에 앉는 문 (transfer.md §12-2 · design-system.md §7-1) ────
+ * ── 협상 게이트 — 감독이 직접 나서는 문 (transfer.md §12-2 · design-system.md §7-1) ────
  *
- * 킥오프 게이트와 한 쌍이다. `start_negotiation`은 방을 세울 뿐이고 자리에 앉는 것은
+ * 킥오프 게이트와 한 쌍이다. `start_negotiation`은 방을 세울 뿐이고 나서는 것은
  * 감독이다 — 그 턴부터 채팅의 주인이 협상 GM으로 바뀐다. 닫는 손잡이는 없다: 열린
- * 방은 앉거나 일어서는 길뿐이고, 일어서는 손잡이는 방 안에 선다.
+ * 방은 나서거나 물러나는 길뿐이고, 물러나는 손잡이는 방 안에 선다.
  *
- * 앉기 전 마지막으로 읽는 한 장이라 방의 지금이 통째로 선다 — 데이트라인 · 건너편에
- * 앉을 사람들 · 지금의 조건서 · 성사 가능성 · 남은 인내. 값은 전부 뷰가 접어 온 것이다.
+ * 나서기 전 마지막으로 읽는 한 장이라 방의 지금이 통째로 선다 — 데이트라인 · 건너편의
+ * 사람들 · 지금의 조건서 · 성사 가능성 · 남은 인내. 값은 전부 뷰가 접어 온 것이다.
  */
 export function NegotiationGate({
   room,
@@ -85,12 +85,12 @@ export function NegotiationGate({
           className="primary-btn"
           autoFocus
           disabled={busy}
-          /* 협상의 문도 손잡이다 — 무대는 누름과 함께 바뀌고, 그 턴이 앉는 턴인지는
+          /* 협상의 문도 손잡이다 — 무대는 누름과 함께 바뀌고, 그 턴이 여는 턴인지는
              코어가 안다(`seated`) */
           onClick={onEnter}
           data-testid="negotiation-enter"
         >
-          자리에 앉는다
+          직접 나선다
         </button>
       </div>
     </div>

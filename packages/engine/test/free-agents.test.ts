@@ -7,7 +7,7 @@ import {
   activeContract,
   addDays,
   admitUnsignedYouth,
-  answerOffer,
+  respondOffer,
   dealOdds,
   freeAgents,
   isClubTeam,
@@ -153,7 +153,7 @@ describe("무소속 — 클럽이 아니라 클럽이 없는 상태", () => {
     expect(offered.ok, offered.message).toBe(true);
     const negotiation = openNegotiationFor(state, target.id)!;
     state.date = negotiation.rounds[0]!.respondsOn!;
-    const verdict = answerOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    const verdict = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
     expect(verdict.ok, verdict.message).toBe(true);
 
     const done = completeDeal(state, negotiation.id);
@@ -224,7 +224,7 @@ describe("임대 영입 — 사는 게 아니라 빌리는 것", () => {
     expect(negotiation.kind).toBe("loan");
 
     state.date = negotiation.rounds[0]!.respondsOn!;
-    const verdict = answerOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    const verdict = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
     expect(verdict.ok, verdict.message).toBe(true);
 
     const done = completeDeal(state, negotiation.id);
@@ -311,7 +311,7 @@ describe("임대 내보내기도 흥정이다 — 상대가 받아 줘야 한다
     expect(negotiation.kind).toBe("loan_out");
 
     state.date = negotiation.rounds[0]!.respondsOn!;
-    const verdict = answerOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    const verdict = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
     expect(verdict.ok, verdict.message).toBe(true);
     const done = completeDeal(state, negotiation.id);
     expect(done.ok, done.message).toBe(true);
@@ -324,7 +324,13 @@ describe("임대 내보내기도 흥정이다 — 상대가 받아 줘야 한다
 });
 
 describe("판정을 기다리는 협상은 눈에 띈다", () => {
-  it("답이 도착하면 pendingVerdicts에 선다", () => {
+  /**
+   * **감독을 세우는 것은 답이 온 것이 아니라 굳은 뒤에 서 있는 조정이다**
+   * (transfer.md §12-1). 답할 날이 된 라운드는 감독이 나섰으면 협상 GM이, 아니면
+   * 그날의 tick이 앵커로 굳히므로, 답을 기다리는 동안에도 굳는 그 순간에도 감독이
+   * 할 일은 없다. 차례가 오는 것은 상대가 되불렀을 때뿐이고 받는 문은 `accept_deal`이다.
+   */
+  it("상대가 되부르면 pendingVerdicts에 서고, 답을 기다리는 동안은 서지 않는다", () => {
     const state = createTestGame(11);
     state.date = "2026-08-01";
     const target = playersOf(state, "chelsea").find((p) => p.teamId !== state.userTeamId)!;
@@ -332,15 +338,20 @@ describe("판정을 기다리는 협상은 눈에 띈다", () => {
     const negotiation = openNegotiationFor(state, target.id)!;
     /**
      * 답신 지연 0일은 설계다(`responseDelayDays`) — 그 선수가 걸리면 "기다리는
-     * 동안"을 잴 수 없으므로 답신일을 이틀 뒤로 못 박고 두 상태를 다 본다.
+     * 동안"을 잴 수 없으므로 답신일을 이틀 뒤로 못 박는다.
      */
     const respondsOn = addDays(state.date, 2);
     negotiation.rounds[0]!.respondsOn = respondsOn;
     expect(pendingVerdicts(state), "답이 오기 전엔 서지 않는다").toHaveLength(0);
     state.date = respondsOn;
+    expect(pendingVerdicts(state), "굳기 전에도 감독의 차례는 아니다").toHaveLength(0);
+
+    const countered = respondOffer(state, { negotiationId: negotiation.id, verdict: "counter" });
+    expect(countered.ok, countered.message).toBe(true);
     const waiting = pendingVerdicts(state);
     expect(waiting).toHaveLength(1);
-    expect(waiting[0]!.action).toBe("respond_offer");
+    expect(waiting[0]!.action).toBe("accept_deal");
+    expect(waiting[0]!.label).toContain("되불렀습니다");
   });
 
   it("합의된 협상은 확정을 기다린다", () => {
@@ -350,7 +361,7 @@ describe("판정을 기다리는 협상은 눈에 띈다", () => {
     offerPlayerOut(state, { playerId: target.id, teamId: "chelsea", fee });
     const negotiation = openNegotiationFor(state, target.id)!;
     state.date = negotiation.rounds[0]!.respondsOn!;
-    const answered = answerOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    const answered = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
     expect(answered.ok, answered.message).toBe(true);
     const waiting = pendingVerdicts(state);
     expect(waiting[0]!.action).toBe("accept_deal");

@@ -21,15 +21,12 @@ import { LlmCallError } from "./llm-error";
  * 앵커가 그대로 남으며, 자주 도는 만큼 예산도 여기서 가장 빨리 샌다. 경기 마감은
  * 매치 GM의 도구 뒤에서 돌고 마무리는 GM이 대신 쓸 수 있어 끊는다(agents.md §3). 압축은
  * 실패하면 접지 않고 다음 기회에 다시 시도하는 계약이라(agents.md §5-1) 건너뛰어도
- * 이력이 사라지지 않는다. 교섭 상대도 같은 계약이다 — 건너뛰면 코어 앵커가 그대로
- * 협상에 반영된다(agents.md §4-1).
+ * 이력이 사라지지 않는다.
  */
 const SKIPPABLE_AGENTS: ReadonlySet<AgentName> = new Set<AgentName>([
   "training-rater",
   // 경기 마감도 같은 계약이다 — 건너뛰면 앵커가 평점이고 마무리는 매치 GM이 쓴다 (agents.md §3)
   "finalize-match",
-  // 테이블의 답도 같은 계약이다 — 건너뛰면 상대는 말없이 앵커대로 움직인다 (agents.md §4-1)
-  "negotiation-table",
   "history-compactor",
   // 온보딩 판정도 같은 계약이다 — 건너뛰면 앵커가 그대로 시작 지갑이 된다 (agents.md §4-2)
   "onboarding-judge",

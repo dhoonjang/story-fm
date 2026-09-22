@@ -20,7 +20,7 @@ import { pickAnyPlayer } from "../core/player-ref";
 import { playerById, pushNarrative, type GameState } from "../core/state";
 import { directorOf } from "../world/persona";
 import { outgoingCounterFloor, renewalYearsExpectation } from "./counter-bounds";
-import { counterpartyAnchor, personalAnchor, settleCounterparty } from "./counterparty";
+import { settleDueResponse } from "./counterparty";
 import { renewalExpectation } from "./market";
 import {
   acceptDeal,
@@ -33,7 +33,6 @@ import {
   openNegotiationFor,
   openRenewal,
   pendingOffer,
-  personalAwaiting,
   quotedFee,
   sendOffer,
   standingCounter,
@@ -363,21 +362,15 @@ function runMandate(state: GameState, negotiation: Negotiation, digest: TickSink
     pushNarrative(state, `${player.name} ${kindKoName} 위임이 감독에게 돌아옴 — ${why}`, 3);
   };
 
-  // ① 답할 날이 된 답은 앵커로 굳는다 — 편지를 열지 않는다
-  if (negotiation.status === "open") {
-    const offer = pendingOffer(negotiation);
-    const personal = offer === null ? personalAwaiting(negotiation) : null;
-    const due =
-      (offer !== null && offer.respondsOn !== null && offer.respondsOn <= state.date) ||
-      (personal !== null && personal.respondsOn <= state.date);
-    const anchor = due
-      ? (counterpartyAnchor(state, negotiation) ?? personalAnchor(state, negotiation))
-      : null;
-    if (anchor) {
-      const settled = settleCounterparty(state, anchor);
-      if (!settled.result.ok) return handOff(settled.result.message);
-    }
-  }
+  /**
+   * ① 답할 날이 된 답은 앵커로 굳는다 — 판정 호출이 없다.
+   *
+   * **감독이 나서지 않은 모든 협상이 지나는 그 문이다**(`settleDueResponse` — §12-1).
+   * tick은 위임이 구르기 전에 이미 그 문을 한 번 지나므로, 여기 남는 것은 맡기는 그날
+   * 답이 서 있던 자리다.
+   */
+  const settled = settleDueResponse(state, negotiation);
+  if (settled && !settled.result.ok) return handOff(settled.result.message);
 
   // ② 닫힌 협상 — 결과를 알리고 위임을 접는다
   if (negotiation.status !== "open" && negotiation.status !== "agreed") {

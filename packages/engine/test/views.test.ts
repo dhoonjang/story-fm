@@ -3,6 +3,7 @@ import {
   activeContract,
   applyFinanceEvent,
   arrivedResponses,
+  respondOffer,
   buildOfficeViews,
   buildPlayerCard,
   marketValueOf,
@@ -1076,26 +1077,29 @@ describe("안건 띠 — views.attention", () => {
   });
 
   /**
-   * `arrivedResponses`는 `pendingVerdicts`의 부분집합이다 — 도착한 답은 판정 대기이기도
-   * 하다. 그대로 세우면 협상 하나가 편지 칩과 협상 칩으로 두 번 선다.
+   * **협상은 갈래 하나로만 접힌다** (overview.md §5). 답할 날이 된 라운드는 그날의 tick이
+   * 앵커로 굳히므로(transfer.md §12-1) 띠가 드는 것은 감독의 차례로 남은 자리뿐이고,
+   * 그 자리가 칩 둘로 갈리면 화면은 멀쩡해 보이는 채로 같은 협상을 두 번 센다.
    */
-  it("도착한 편지는 협상 칩으로 두 번 서지 않는다", () => {
+  it("답할 차례의 협상은 칩 하나로 선다 — 굳기 전에는 서지 않는다", () => {
     const state = createTestGame();
     const target = playersOf(state, "chelsea").find((p) => p.teamId !== state.userTeamId)!;
     expect(
       sendOffer(state, { playerId: target.id, fee: 20_000_000, weeklyWage: 90_000, years: 4 }).ok,
     ).toBe(true);
     const negotiation = openNegotiationFor(state, target.id)!;
-    // 답이 오늘 도착했다
+    // 답할 날이 됐다 — 굳히는 것은 코어이고 감독이 할 일은 아직 없다
     negotiation.rounds[negotiation.rounds.length - 1]!.respondsOn = state.date;
     expect(arrivedResponses(state)).toHaveLength(1);
-    expect(pendingVerdicts(state).map((v) => v.negotiation.id)).toContain(negotiation.id);
+    expect(buildOfficeViews(state).attention.filter((i) => i.kind === "verdicts")).toHaveLength(0);
 
-    const attention = buildOfficeViews(state).attention;
-    expect(attention.find((i) => i.kind === "letters")).toMatchObject({
-      count: 1,
-      name: target.name,
-    });
-    expect(attention.find((i) => i.kind === "verdicts")).toBeUndefined();
+    // 상대가 되불러야 감독의 차례다
+    expect(respondOffer(state, { negotiationId: negotiation.id, verdict: "counter" }).ok).toBe(
+      true,
+    );
+    expect(pendingVerdicts(state).map((v) => v.negotiation.id)).toContain(negotiation.id);
+    expect(buildOfficeViews(state).attention.filter((i) => i.kind === "verdicts")).toMatchObject([
+      { count: 1, name: target.name },
+    ]);
   });
 });

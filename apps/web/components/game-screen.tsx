@@ -221,7 +221,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       : pendingMatch;
   /**
    * 협상 방 — 경기와 같은 두 걸음이다 (transfer.md §12-2). `start_negotiation`은 방을
-   * 세울 뿐이고 감독이 자리에 앉는 게이트를 지나야 무대가 방으로 바뀐다. 앉는 손잡이를
+   * 세울 뿐이고 감독이 나서는 게이트를 지나야 무대가 방으로 바뀐다. 나서는 손잡이를
    * 누른 순간을 `enteringNegotiation`이 적어 두고, 코어가 `seated`를 돌려주기 전에도
    * 무대는 이미 방이다 — 그 턴이 실패하면 `fail`이 이 값을 지워 게이트로 돌아간다.
    */
@@ -504,7 +504,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
     wasInMatch.current = now;
   }, [liveMatch?.matchId, matchGone]);
   /**
-   * 자리에 앉는 순간 — 열어 두었던 장부를 닫는다. 오른쪽 칸의 주인은 방이고, 장부는
+   * 감독이 나서는 순간 — 열어 두었던 장부를 닫는다. 오른쪽 칸의 주인은 방이고, 장부는
    * 레일이 그대로 서 있어 감독이 다시 열 수 있다(채팅 탭이 방으로 돌아오는 문이다).
    * 종료 화면은 없다 — 방을 나온 뒤의 장부는 방이 없던 때와 같고, 결과는 카드가 이미
    * 채팅에 세웠다 (transfer.md §12-2).
@@ -818,7 +818,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
     void send(undefined, { kind: "advance_match" });
   }, [pendingMatch?.matchId, send]);
   /**
-   * 협상의 문을 지난다 — 경기의 문과 같은 순서다 (transfer.md §12-2). 자리에 앉는 것은
+   * 협상의 문을 지난다 — 경기의 문과 같은 순서다 (transfer.md §12-2). 나서는 것은
    * 감독이므로 방은 누름과 함께 서고, 코어가 `seated`를 세우는 것은 그다음이다. 게이트가
    * 물러나는 시간도 한 벌이다 — 두 문이 한 화면에 함께 서는 일은 없다.
    */
@@ -833,7 +833,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
     }
     void send(undefined, { kind: "enter_negotiation" });
   }, [pendingNegotiation?.negotiationId, send]);
-  /** 자리에서 일어선다 — 협상은 열린 채 방만 닫힌다. 손잡이는 방의 칸에 선다 */
+  /** 협상에서 물러난다 — 협상은 열린 채 방만 닫힌다. 손잡이는 방의 칸에 선다 */
   const leaveNegotiation = useCallback(() => {
     void send(undefined, { kind: "leave_negotiation" });
   }, [send]);
@@ -1360,7 +1360,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
               onEnter={enterMatch}
             />
           )}
-          {/* 자리에 앉는 문 — 협상의 게이트. 킥오프 게이트와 한 쌍이라 같은 때 서고 같은
+          {/* 감독이 나서는 문 — 협상의 게이트. 킥오프 게이트와 한 쌍이라 같은 때 서고 같은
           때 물러난다 (transfer.md §12-2 · design-system.md §7-1) */}
           {pendingNegotiation !== null && (liveNegotiation === null || gateLeaving) && (
             <NegotiationGate

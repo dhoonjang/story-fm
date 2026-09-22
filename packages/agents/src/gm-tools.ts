@@ -11,8 +11,7 @@ import {
   acceptManagerOffer,
   adjustTransferBudget,
   applyForManagerJob,
-  answerOffer,
-  arrivedResponses,
+  answerIncomingOffer,
   applyFinanceEvent,
   applyTalk,
   careerView,
@@ -226,7 +225,7 @@ const CORE_COMMAND_LABELS: Record<string, string> = {
   set_reserve_training: "2군 훈련 방침",
   set_squad_number: "등번호",
   sign_youth: "유스 첫 계약",
-  respond_offer: "오퍼에 감독이 답한다",
+  respond_offer: "들어온 오퍼에 감독이 답한다",
   accept_deal: "합의 확정 · 상대 조정 수락",
   respond_transfer_request: "이적 요청 응답",
   withdraw_offer: "오퍼 철회",
@@ -1558,6 +1557,12 @@ export function buildToolSpecs(
           ),
         note: z.string().min(1).max(200).optional(),
       }),
+      /**
+       * **들어온 오퍼에만 답한다** (agents.md §4-1). 우리가 넣은 오퍼에 상대가 답하는
+       * 문은 코어 안에만 있다 — 감독이 나선 자리면 협상 GM이, 아니면 그날의 tick이
+       * 앵커로 굳힌다. 평시 GM은 감독이 한 말을 전부 읽는 머리라 그 자리에 세우면
+       * 감독의 속을 다 본 사람이 상대의 값을 부른다.
+       */
       (input) => {
         if (options?.deferNegotiationIds?.has(input.negotiationId)) {
           return {
@@ -1565,19 +1570,7 @@ export function buildToolSpecs(
             message: "방금 도착한 오퍼는 감독에게 조건을 먼저 보고하고 다음 지시를 기다리세요",
           };
         }
-        /**
-         * **우리 오퍼에 대한 답은 감독이 판정하지 않는다** (agents.md §4-1).
-         * 그 자리는 장면보다 먼저 교섭 상대가 끝내 두므로 여기 남을 일이 없지만,
-         * 남는다면 그것은 그 호출이 협상을 건너뛰었다는 뜻이다 — GM이 대신 판정하면
-         * 갈라 둔 자리가 조용히 되돌아온다.
-         */
-        if (arrivedResponses(state).some((n) => n.id === input.negotiationId)) {
-          return {
-            ok: false,
-            message: "우리 오퍼에 대한 상대의 답은 이미 나왔습니다 — 감독이 판정할 자리가 아닙니다",
-          };
-        }
-        return answerOffer(state, input);
+        return answerIncomingOffer(state, input);
       },
     ),
     wrap(

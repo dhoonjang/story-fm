@@ -20,9 +20,8 @@ import { describeCharacters } from "./gm-input";
 
 /**
  * 교섭 서류 — **협상 상대가 읽는 입력** (docs/llm/agents.md §4-1 · docs/simulation/transfer.md
- * §12-1). 편지(`negotiation-table.ts`)는 한 요청에 서류 전부를 싣고, 협상 방
- * (`negotiation-gm.ts`)은 협상이 사는 동안 그대로인 부분을 레퍼런스에, 라운드마다 바뀌는
- * 부분을 `<table>` 스냅샷에 나눠 싣는다 — 같은 서류를 두 자리가 나눠 읽는다.
+ * §12-1). 협상 방(`negotiation-gm.ts`)은 협상이 사는 동안 그대로인 부분을 레퍼런스에,
+ * 라운드마다 바뀌는 부분을 `<table>` 스냅샷에 나눠 싣는다 — 변경 빈도가 층을 가른다.
  *
  * 코어가 서류와 앵커를 내고, 그 호출이 답하며, 코어가 앵커 ± 한도로 자른다. 여기 있는
  * 것은 사실을 문장으로 옮기는 것뿐이다 — 지시문은 시스템 프롬프트가 갖는다 (prompts.md §5-2).
@@ -39,8 +38,8 @@ const VERDICT_KO: Record<string, string> = {
 
 /**
  * **상대가 부를 수 있는 조건** — 갈래와, 값이 있는 갈래는 기준과 구간 (transfer.md §12-3).
- * 편지·테이블의 앵커와, 오퍼가 없는 테이블의 앵커 자리가 같은 줄을 읽는다 — 줄의 첫
- * 낱말이 곧 모델이 `asks`의 `kind`에 적는 토큰이다.
+ * 오퍼가 올라 있는 앵커와 없는 앵커가 같은 줄을 읽는다 — 줄의 첫 낱말이 곧 모델이
+ * `asks`의 `kind`에 적는 토큰이다.
  */
 export function describeAsks(asks: readonly TermAsk[]): string[] {
   if (asks.length === 0) return [];
@@ -153,7 +152,7 @@ export function buildCounterpartyBlock(
   if (!brief) return null;
   /**
    * **방에는 한 사람이 앉는다** (transfer.md §12-2) — 자리를 적으면 그 목소리와 그 사람의
-   * 카드만 싣는다. 선수의 카드는 어느 자리든 선다: 이야기의 대상이다. 편지는 전부다.
+   * 카드만 싣는다. 선수의 카드는 어느 자리든 선다: 이야기의 대상이다.
    */
   const voices =
     options.party === undefined
@@ -185,7 +184,7 @@ export function buildCounterpartyBlock(
 /**
  * `<anchor>` — 남은 인내와, 오퍼가 올라 있으면 코어가 박은 판정과 구간. 오퍼가 없어도
  * 「부를 수 있는 조건」은 선다 — 조건은 오퍼 없이도 부를 수 있다 (transfer.md §12-3).
- * 편지의 요청 끝과 방의 `<table>` 스냅샷이 같은 블록을 읽는다.
+ * 방의 `<table>` 스냅샷이 이 블록을 읽는다.
  */
 export function describeSeatAnchor(seat: TableSeat): string {
   const patience = `남은 인내 ${seat.table.patience}/${seat.table.patienceMax}`;

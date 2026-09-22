@@ -76,7 +76,7 @@ export function Composer({
   inMatch: boolean;
   /**
    * 협상 방 안인가 — 빈 입력의 버튼이 **잠긴다.** 방 안에서는 넘길 시간이 없고 진행할
-   * 구간도 없다. 일어서는 손잡이는 입력창이 아니라 방의 칸에 선다 (design-system §7-1).
+   * 구간도 없다. 물러나는 손잡이는 입력창이 아니라 방의 칸에 선다 (design-system §7-1).
    */
   inNegotiation: boolean;
   /** 시간을 넘길 수 있는가 — 경기 중에도 협상 방 안에서도 시간은 달력이 밀지 않는다 */

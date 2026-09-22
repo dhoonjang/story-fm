@@ -65,19 +65,19 @@ When one change spans two digits, take the **higher** one — and only once.
 
 ## Where model input comes from
 
-| Path                                                                                                                                                              | What of it reaches the model                                            |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `packages/agents/src/*-prompt.ts`, `gm.ts`                                                                                                                        | system prompts (`GM_SYSTEM`, `MATCH_GM_SYSTEM`, …)                      |
-| `packages/agents/src/gm-input.ts`                                                                                                                                 | reference cards · state snapshot · this turn's message · history window |
-| `packages/agents/src/gm-tools.ts`, `skill-descriptions.ts`, `tool-schema.ts`                                                                                      | tool names, descriptions, input schemas                                 |
-| `packages/agents/src/match-gm.ts`, `*-orders.ts`, `finalize-match.ts`, `training-rater.ts`, `negotiation-table.ts`, `onboarding-judge.ts`, `history-compactor.ts` | each agent's prompt and its tools                                       |
-| `packages/agents/src/output-agents.ts`                                                                                                                            | which calls answer with an output schema instead of tools               |
-| `config/llm.yml`                                                                                                                                                  | model id, thinking level, max tokens, operator channel                  |
-| `packages/engine/src/views/**`                                                                                                                                    | the values the snapshot and cards are built from                        |
-| `packages/engine/src/club/press.ts`, `approach.ts`                                                                                                                | legend blocks inside the snapshot                                       |
-| `packages/engine/src/core/turn-facts.ts`, `history-window.ts`                                                                                                     | the ledger lines and how much history is carried                        |
-| `packages/engine/src/commands/**` (`brief.ts`)                                                                                                                    | what a tool call answers back to the model                              |
-| `packages/domain/src/manager.ts`, `tactics.ts`                                                                                                                    | the band→word tables the prompt speaks in                               |
+| Path                                                                                                                                                           | What of it reaches the model                                            |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `packages/agents/src/*-prompt.ts`, `gm.ts`                                                                                                                     | system prompts (`GM_SYSTEM`, `MATCH_GM_SYSTEM`, …)                      |
+| `packages/agents/src/gm-input.ts`                                                                                                                              | reference cards · state snapshot · this turn's message · history window |
+| `packages/agents/src/gm-tools.ts`, `skill-descriptions.ts`, `tool-schema.ts`                                                                                   | tool names, descriptions, input schemas                                 |
+| `packages/agents/src/match-gm.ts`, `*-orders.ts`, `finalize-match.ts`, `training-rater.ts`, `negotiation-gm.ts`, `onboarding-judge.ts`, `history-compactor.ts` | each agent's prompt and its tools                                       |
+| `packages/agents/src/output-agents.ts`                                                                                                                         | which calls answer with an output schema instead of tools               |
+| `config/llm.yml`                                                                                                                                               | model id, thinking level, max tokens, operator channel                  |
+| `packages/engine/src/views/**`                                                                                                                                 | the values the snapshot and cards are built from                        |
+| `packages/engine/src/club/press.ts`, `approach.ts`                                                                                                             | legend blocks inside the snapshot                                       |
+| `packages/engine/src/core/turn-facts.ts`, `history-window.ts`                                                                                                  | the ledger lines and how much history is carried                        |
+| `packages/engine/src/commands/**` (`brief.ts`)                                                                                                                 | what a tool call answers back to the model                              |
+| `packages/domain/src/manager.ts`, `tactics.ts`                                                                                                                 | the band→word tables the prompt speaks in                               |
 
 `packages/agents/harness/prompt-regression.harness.ts` renders the real input —
 run it (`pnpm balance prompt-regression`) when you cannot tell from the diff

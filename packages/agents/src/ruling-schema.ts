@@ -9,15 +9,14 @@ import {
 import { RENEWAL_YEARS_MAX } from "@story-fm/engine";
 
 /**
- * 교섭 상대의 판정 스키마 (agents.md §4-1) — 편지(`negotiation-table.ts`)와 협상 방의
- * `reply_at_table`(`negotiation-gm.ts`)이 같은 필드로 판정한다. 코어가 앵커 ± 한도로 자르는
- * 것도 한 함수다(`clampCounterpartyRuling`). 금액 상한은 도구 인자들이 함께 쓴다 (gm-tools.ts).
+ * 교섭 상대의 판정 스키마 (agents.md §4-1) — 협상 방의 `counterparty_reply`
+ * (`negotiation-gm.ts`)가 이 필드로 판정하고, 코어가 앵커 ± 한도로 자른다
+ * (`clampCounterpartyRuling`). 금액 상한은 도구 인자들이 함께 쓴다 (gm-tools.ts).
  */
 
 /**
  * 태도 넷의 낱말 — **코어의 표에서 온다** (prompts.md §2). 손으로 적으면 표를 고쳐도
- * 옛 낱말이 가고, 한 갈래만 빠지면 모델은 그 값을 「나머지」로 읽는다. 편지의 프롬프트와
- * 방의 `stance` 인자 설명이 같은 줄을 읽는다.
+ * 옛 낱말이 가고, 한 갈래만 빠지면 모델은 그 값을 「나머지」로 읽는다.
  */
 export const STANCE_LINE = TABLE_STANCES.map((s) => `${s}(${TABLE_STANCE_KO[s]})`).join(" · ");
 

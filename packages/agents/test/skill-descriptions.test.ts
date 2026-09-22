@@ -22,12 +22,10 @@ import {
   parseOps,
   TACTIC_ORDERS_SYSTEM,
   FINALIZE_MATCH_SYSTEM,
-  REPLY_INPUT,
   REPORT_DIGEST_INPUT,
   REPORT_TRAINING_INPUT,
   REPORT_ONBOARDING_INPUT,
   SETTLE_MATCH_INPUT,
-  NEGOTIATION_TABLE_SYSTEM,
   ONBOARDING_JUDGE_SYSTEM,
   SKILL_CATALOG,
   SKILL_NAMES,
@@ -208,7 +206,7 @@ describe("규칙이 사는 자리", () => {
     const match = MATCH_TOOL_DEFINITIONS.find((t) => t.name === "tactic_orders")!;
     expect(Object.keys(match.inputSchema.properties ?? {})).toEqual([]);
     // 협상 방의 손잡이도 같다 — 방 안의 말은 전부 건너편에게 하는 말이라 가를 것이 없다
-    const table = NEGOTIATION_TOOL_DEFINITIONS.find((t) => t.name === "table_orders")!;
+    const table = NEGOTIATION_TOOL_DEFINITIONS.find((t) => t.name === "negotiation_orders")!;
     expect(Object.keys(table.inputSchema.properties ?? {})).toEqual([]);
   });
 
@@ -273,8 +271,7 @@ describe("규칙이 사는 자리", () => {
    * 늘어도 모델은 옛 표를 믿고, 표에 없는 갈래는 부를 길이 없다.
    */
   it("코어가 갈래표를 든 열거는 그 표가 모델에게 닿는다", () => {
-    const reply = { name: "negotiation-table", inputSchema: REPLY_INPUT };
-    const room = NEGOTIATION_TOOL_DEFINITIONS.find((t) => t.name === "reply_at_table")!;
+    const room = NEGOTIATION_TOOL_DEFINITIONS.find((t) => t.name === "counterparty_reply")!;
     const rows = [
       {
         where: "record_incident.kind",
@@ -291,8 +288,7 @@ describe("규칙이 사는 자리", () => {
         reads: ONBOARDING_JUDGE_SYSTEM,
       },
       {
-        /** 들은 것은 방의 답에만 있다 — 편지에는 들을 말이 없다 (agents.md §4-1) */
-        where: "reply_at_table.heard.claims[].kind",
+        where: "counterparty_reply.heard.claims[].kind",
         node: enumArg([room], room.name, "kind"),
         kinds: PITCH_CLAIM_KINDS as readonly string[],
         /**
@@ -304,15 +300,8 @@ describe("규칙이 사는 자리", () => {
         reads: "",
       },
       {
-        where: "negotiation-table.stance",
-        node: enumArg([reply], reply.name, "stance"),
-        kinds: TABLE_STANCES as readonly string[],
-        tables: [TABLE_STANCE_KO as Record<string, string>],
-        reads: NEGOTIATION_TABLE_SYSTEM,
-      },
-      {
         /** 방의 태도는 인자 설명이 표를 든다 — 협상 GM 프롬프트는 도구의 사용법을 적지 않는다 */
-        where: "reply_at_table.stance",
+        where: "counterparty_reply.stance",
         node: enumArg([room], room.name, "stance"),
         kinds: TABLE_STANCES as readonly string[],
         tables: [TABLE_STANCE_KO as Record<string, string>],
@@ -350,14 +339,7 @@ describe("규칙이 사는 자리", () => {
         reads: "",
       },
       {
-        where: "negotiation-table.ruling.squadStatus",
-        node: enumArg([reply], reply.name, "squadStatus"),
-        kinds: SQUAD_STATUSES as readonly string[],
-        tables: [SQUAD_STATUS_KO as Record<string, string>],
-        reads: "",
-      },
-      {
-        where: "reply_at_table.ruling.squadStatus",
+        where: "counterparty_reply.ruling.squadStatus",
         node: enumArg([room], room.name, "squadStatus"),
         kinds: SQUAD_STATUSES as readonly string[],
         tables: [SQUAD_STATUS_KO as Record<string, string>],
@@ -870,7 +852,7 @@ describe("출력 스키마는 제공자의 문을 지난다", () => {
         required: ["a"],
       }),
     ).toBe(2);
-    // 해석기 넷과 판독기는 한도 밖이고 나머지 여섯은 안이다 — 실측(2026-09)과 같은 그림이어야 한다
+    // 해석기 넷과 판독기는 한도 밖이고 나머지 다섯은 안이다 — 실측(2026-09)과 같은 그림이어야 한다
     const over = DECLARED.filter((entry) => countOptionalProperties(entry.schema) > 24).map(
       (entry) => entry.agent,
     );
