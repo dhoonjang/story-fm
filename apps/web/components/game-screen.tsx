@@ -18,6 +18,9 @@ import { TurnTracePopup } from "./turn-trace";
 import { mergeMatchOrders, type MatchBoardOrder } from "@/lib/match-orders";
 import { streamTurn, type TurnStreamFailure } from "@/lib/turn-stream";
 import { Composer } from "./composer";
+import { useMatchViewport } from "@/lib/use-match-viewport";
+import { useLiveMatch } from "@/lib/use-live-match";
+import { LivePitch } from "./live-pitch";
 import { RailHints, useRailHints } from "./rail-hints";
 import { Loading } from "./loading";
 import { SquadView, CalendarView, FinanceView, CompetitionsView, CareerView } from "./office";
@@ -41,7 +44,6 @@ import {
   IconContract,
   IconFinance,
   IconMark,
-  IconMatch,
   IconSquad,
   IconTrophy,
   IconClose,
@@ -96,22 +98,11 @@ const GATE_LEAVE_MS = 160;
  */
 const RESYNC_TRIES = 3;
 
-/**
- * 경기 중 탭 — **화면이 통째로 바뀐다.**
- *
- * 경기 90분 안에 볼 것만 남긴다: 재정·커리어는 그때 갈 곳이 아니다. 감독이
- * 정지점에서 묻는 것은 셋뿐이라 탭도 셋이다.
- *
- * | 탭 | 질문 |
- * | --- | --- |
- * | **판세** | 어디가 밀리나, 그리고 왜 (존 막대 + 키포인트) |
- * | **팀** | 누구를 빼고 무엇을 지시하나 (전술판 + 명단 — 우리/상대) |
- * | **대회** | 이 결과가 어디로 가나 (순위표 + 다음 경기) |
- */
+/** 경기 중 탭은 터치라인 영역을 바꾸고 경기장은 유지한다. */
 const MATCH_PANELS = [
-  { key: "판세", Icon: IconMatch },
-  { key: "팀", Icon: IconBoard },
-  { key: "대회", Icon: IconTrophy },
+  { key: "판세", label: "대화", Icon: IconChat },
+  { key: "팀", label: "전술·교체", Icon: IconBoard },
+  { key: "대회", label: "대회", Icon: IconTrophy },
 ] as const;
 type MatchTab = (typeof MATCH_PANELS)[number]["key"];
 
@@ -428,6 +419,33 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const [errorRetry, setErrorRetry] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const matchViewport = useMatchViewport(Boolean(liveMatch), inputRef);
+  const editingMatch =
+    liveMatch !== null &&
+    ((panel === null && matchTab === "팀" && squadSide === "ours") || panel === "스쿼드");
+  const liveBlocked =
+    input.length > 0 || matchViewport.focused || busy || editingMatch || error !== null;
+  const live = useLiveMatch({
+    gameId,
+    matchId: liveMatch && !liveMatch.beforeKickoff ? liveMatch.matchId : null,
+    blocked: liveBlocked,
+    onView: (view) =>
+      setGame((current) =>
+        !current || current.views.match?.matchId !== view?.matchId
+          ? current
+          : { ...current, views: { ...current.views, match: view } },
+      ),
+    prepare: async () => {
+      const result = await saver.flush();
+      if (result && !result.ok) throw new Error(result.error);
+      return ordersRef.current;
+    },
+    applied: (orders) => {
+      ordersRef.current = ordersRef.current.filter((order) => !orders.includes(order));
+    },
+    onSlice: applyLineupSave,
+  });
+  const pauseLive = live.pause;
 
   // 타이핑 리빌 — 수신 버퍼(acc)를 시간 기반으로 글자 단위 공개한다.
   // rAF(부드러움) + 인터벌(백그라운드 탭 보험) 이중 틱, 진행량은 경과 시간 기준.
@@ -526,6 +544,16 @@ export function GameScreen({ gameId }: { gameId: string }) {
       setError(null);
       setErrorDetail(null);
       setErrorRetry(true);
+      if (liveMatch?.live) {
+        try {
+          await pauseLive();
+        } catch (cause) {
+          const reason = cause instanceof Error ? cause.message : "경기를 정지하지 못했습니다";
+          setBusy(false);
+          setError(reason);
+          return { reason, settled: true, retry: true };
+        }
+      }
       /**
        * 미저장 전술판 편집을 **먼저 서버에 밀어 넣는다** — 턴은 그다음이다.
        *
@@ -739,8 +767,33 @@ export function GameScreen({ gameId }: { gameId: string }) {
       if (!pendingPayloadRef.current) commit(null);
       return failure ?? null;
     },
-    [input, busy, game, liveMatch?.matchId, liveNegotiation?.negotiationId, gameId, saver, draft],
+    [
+      input,
+      busy,
+      game,
+      liveMatch?.matchId,
+      liveMatch?.live,
+      liveNegotiation?.negotiationId,
+      gameId,
+      saver,
+      draft,
+      pauseLive,
+    ],
   );
+
+  const closingLiveMatch = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      !liveMatch?.live?.finished ||
+      liveMatch.shootout ||
+      liveBlocked ||
+      live.error ||
+      closingLiveMatch.current === liveMatch.matchId
+    )
+      return;
+    closingLiveMatch.current = liveMatch.matchId;
+    void send(undefined, { kind: "advance_match" });
+  }, [liveMatch, liveBlocked, live.error, send]);
 
   /**
    * 경기의 문을 지난다 — **무대를 먼저 바꾸고 턴을 보낸다.**
@@ -862,6 +915,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 그쪽이고, 판세는 상단의 경기 머리가 계속 이고 있다.
    */
   const showBoard = inMatch && panel === null;
+  const matchPanelOpen = showBoard && matchTab !== "판세";
   /** 협상 방의 칸 — 경기 판과 같은 자리에 선다 (`with-board`) */
   const showRoom = inNegotiation && panel === null;
   /** 오른쪽 칸이 열려 있는가 — 폭이 0인지 반쪽인지를 가른다 */
@@ -876,7 +930,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
    */
   const boardOnStage = showBoard ? matchTab === "팀" : !showRoom && shownPanel === "스쿼드";
   /** 나가는 중에도 서랍은 그려져 있어야 한다 — 그동안 오른쪽으로 미끄러진다 */
-  const boardTakesStage = (boardOpen || boardClosing) && boardOnStage;
+  const boardTakesStage = !inMatch && (boardOpen || boardClosing) && boardOnStage;
   /**
    * ── 같은 화면은 **한 번만 적는다** ─────────────────────────
    *
@@ -917,7 +971,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
   );
 
   /**
-   * 채팅 — 무대의 주인. 경기 중에는 오른쪽 절반으로 좁아질 뿐 사라지지 않는다.
+   * 탭을 바꿔도 채팅을 마운트한 채 숨겨 입력 초안과 스크롤을 보존한다.
    * ⚠️ **여기 안에서 컴포넌트를 정의하지 않는다.** 렌더마다 새 타입이 되어 React가
    * 그 아래를 통째로 다시 세우고, 입력창이 포커스를 잃는다. 파일 밖으로 뺀 것
    * (`Composer`)은 타입이 고정이라 그 함정이 없다 — 갈라지는 것은 **자리**지
@@ -926,7 +980,22 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const chatPane = (
     <section
       className={`chat-pane${inMatch ? " broadcasting" : ""}${inNegotiation ? " at-table" : ""}`}
+      aria-hidden={matchPanelOpen || undefined}
+      inert={matchPanelOpen}
     >
+      {inMatch && (
+        <header className="match-chat-heading">
+          <div>
+            <b>터치라인</b>
+            <span>
+              {matchViewport.focused ? "지시 입력 · 경기 일시정지" : "코치와 대화 · 감독 지시"}
+            </span>
+          </div>
+          {matchViewport.focused && (
+            <button onClick={() => inputRef.current?.blur()}>경기장 보기</button>
+          )}
+        </header>
+      )}
       <div className="chat-scroll" ref={scrollRef} data-testid="chat-scroll">
         {/* 화면 조작은 그리지 않는다 — 감독이 한 말이 아니다. 모델 이력에는
             **오퍼레이터 지시**로 남아 GM은 왜 시간이 흘렀는지 알되 그것을
@@ -1114,6 +1183,15 @@ export function GameScreen({ gameId }: { gameId: string }) {
         draft={draft}
         onRemoveDraft={() => setDraft(null)}
         suggestion={suggestion}
+        liveControl={
+          liveMatch?.live && !liveMatch.live.finished
+            ? {
+                paused: live.paused,
+                blocked: editingMatch || Boolean(live.error),
+                toggle: live.toggle,
+              }
+            : undefined
+        }
       />
     </section>
   );
@@ -1139,9 +1217,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
         {/* 구단 색은 여기서 선다 — 세이브 팀의 `--club*` 한 벌이다 (ui/design-system.md
           §2 「주입」). 아래 어디서든 `var(--club-wash)`가 이 값이다 */}
         <div
-          className={`app${liveMatch ? " in-match" : ""}${liveNegotiation ? " in-negotiation" : ""}`}
+          className={`app${liveMatch ? " in-match in-live-match" : ""}${matchViewport.focused ? " match-input-focus" : ""}${liveNegotiation ? " in-negotiation" : ""}`}
           data-phase={game.phase}
-          style={clubStyle(game.team.colours, game.team.id, game.team.shortName)}
+          style={{
+            ...clubStyle(game.team.colours, game.team.id, game.team.shortName),
+            ...(matchViewport.height ? { height: matchViewport.height } : {}),
+          }}
         >
           <header className="topbar">
             {/* 로고 = 게임 목록으로 나가는 문 (진행 중 턴은 서버가 마무리해 저장한다) */}
@@ -1181,7 +1262,14 @@ export function GameScreen({ gameId }: { gameId: string }) {
                 언제인가**뿐이고, 몇 번째 시즌인지는 커리어·대회 화면이 갖는다 */}
                 {/* 경기 중에는 **경기 시계**가 이 자리를 쓴다 — 그때 필요한 시각은 그것이다 */}
                 {liveMatch ? (
-                  <MatchClock match={liveMatch} />
+                  <>
+                    <MatchClock match={liveMatch} />
+                    {liveMatch.live && (
+                      <span className="meta" role="status">
+                        {live.paused ? "일시정지" : "진행 중"}
+                      </span>
+                    )}
+                  </>
                 ) : (
                   <span className="meta" data-testid="game-date">
                     {/* 연도는 좁아지면 접힌다 — 한 시즌 안에서 바뀌는 건 월·일이다 */}
@@ -1201,14 +1289,15 @@ export function GameScreen({ gameId }: { gameId: string }) {
              */}
             {liveMatch !== null && (
               <nav className="rail match-rail" aria-label="경기 화면 이동">
-                {MATCH_PANELS.map(({ key, Icon }) => (
+                {MATCH_PANELS.map(({ key, label, Icon }) => (
                   <button
                     key={key}
                     className={matchTab === key ? "active" : ""}
                     onClick={() => setMatchTab(key)}
                     data-testid={`mtab-${key}`}
-                    title={key}
-                    aria-label={key}
+                    title={label}
+                    aria-label={label}
+                    aria-pressed={matchTab === key}
                   >
                     <Icon />
                   </button>
@@ -1322,23 +1411,65 @@ export function GameScreen({ gameId }: { gameId: string }) {
           )}
 
           <main className="stage">
-            {/**
-             * ── 무대는 **하나의 갈림**이다 ──────────────────────────
-             *
-             * 왼쪽은 언제나 채팅, 오른쪽은 그때 필요한 것(경기 판 / 장부)이고, 닫혀
-             * 있을 땐 폭이 0이다. 경기 무대와 장부 무대의 마크업이 갈리면 킥오프·탭
-             * 조작마다 채팅이 통째로 다시 그려지며 **툭** 튀고, 격자 트랙이 없다
-             * 생겼다 하면 폭을 이어서 애니메이션할 수도 없다.
-             *
-             * 오른쪽에 무엇이 들었는지는 `with-board`/`with-ledger`가 CSS에 알린다:
-             * 경기 판은 좁은 화면에서도 채팅 **옆에 서고**, 장부만 채팅을 **덮는다**.
-             */}
+            {/* 같은 채팅 노드를 유지하고 경기 중에는 경기장 왼쪽·대화 오른쪽으로 배치한다. */}
             <div
-              className={`stage-split panel-split${rightOpen ? " open" : ""}${
+              className={`stage-split panel-split${inMatch ? " live-match-layout" : ""}${matchPanelOpen ? " match-detail-open" : ""}${rightOpen ? " open" : ""}${
                 showBoard || showRoom ? " with-board" : " with-ledger"
               }${boardTakesStage ? " board-open" : ""}${boardClosing ? " board-closing" : ""}`}
             >
               {chatPane}
+              {matchPanelOpen && liveMatch && (
+                <section className="match-side-panel" aria-labelledby="match-panel-title">
+                  <header className="match-detail-heading">
+                    <div>
+                      <b id="match-panel-title">
+                        {matchTab === "팀" ? "전술 · 선수 교체" : "대회 현황"}
+                      </b>
+                      <span>
+                        {matchTab === "팀" && squadSide === "ours"
+                          ? "편집 중 · 경기 일시정지"
+                          : "터치라인"}
+                      </span>
+                    </div>
+                    <button onClick={() => setMatchTab("판세")}>대화로</button>
+                  </header>
+                  <div className="match-panel-scroll ledger-body" key={matchTab}>
+                    {matchTab === "팀" && (
+                      <>
+                        {/**
+                         * **구성은 같고 정확도만 다르다** — 양쪽 다 판 → 전술 → 명단
+                         * 순으로 읽힌다. 배치를 맞춰 둬야 감독이 오갈 때 눈이 매번
+                         * 자리를 다시 찾지 않는다. 상대 쪽은 안개를 지나고 조작이 없다.
+                         */}
+                        <div className="side-tabs" role="tablist">
+                          {(["ours", "theirs"] as const).map((s2) => (
+                            <button
+                              key={s2}
+                              role="tab"
+                              aria-selected={squadSide === s2}
+                              className={`side-tab${squadSide === s2 ? " on" : ""}`}
+                              onClick={() => setSquadSide(s2)}
+                              data-testid={`side-${s2}`}
+                            >
+                              {s2 === "ours" ? "우리 팀" : "상대 팀"}
+                            </button>
+                          ))}
+                        </div>
+                        {squadSide === "ours" ? (
+                          squadView(() => setMatchTab("판세"))
+                        ) : (
+                          <MatchOpponent
+                            match={liveMatch}
+                            boardOpen={boardOpen || boardClosing}
+                            onToggleBoard={toggleBoard}
+                          />
+                        )}
+                      </>
+                    )}
+                    {matchTab === "대회" && competitionsView}
+                  </div>
+                </section>
+              )}
               {/* 가라앉은 대화를 덮는 판 — 누르면 서랍이 닫힌다. 서랍이 설 수 없는
               폭에서는 CSS가 걷어 낸다(`--drawer`) — 채팅을 가로막을 뿐이므로 */}
               {boardTakesStage && !boardClosing && (
@@ -1357,49 +1488,21 @@ export function GameScreen({ gameId }: { gameId: string }) {
               >
                 {showBoard && liveMatch ? (
                   <div className="stage-board" data-testid="stage-board">
-                    {/* 탭이 바뀌면 이 덩어리가 새로 서며 흐려졌다 든다 — 판세와 명단은
-                    생김새가 아주 달라서 즉시 갈리면 무엇이 바뀐 건지 읽히지 않는다 */}
-                    <div className="board-tab ledger-body" key={matchTab}>
-                      {matchTab === "판세" && <MatchOverview match={liveMatch} />}
-                      {matchTab === "팀" && (
-                        <>
-                          {/**
-                           * **구성은 같고 정확도만 다르다** — 양쪽 다 판 → 전술 → 명단
-                           * 순으로 읽힌다. 배치를 맞춰 둬야 감독이 오갈 때 눈이 매번
-                           * 자리를 다시 찾지 않는다. 상대 쪽은 안개를 지나고 조작이 없다.
-                           */}
-                          <div className="side-tabs" role="tablist">
-                            {(["ours", "theirs"] as const).map((s2) => (
-                              <button
-                                key={s2}
-                                role="tab"
-                                aria-selected={squadSide === s2}
-                                className={`side-tab${squadSide === s2 ? " on" : ""}`}
-                                onClick={() => setSquadSide(s2)}
-                                data-testid={`side-${s2}`}
-                              >
-                                {s2 === "ours" ? "우리 팀" : "상대 팀"}
-                              </button>
-                            ))}
-                          </div>
-                          {squadSide === "ours" ? (
-                            /*
-                             * 경기 중에도 **명단이 먼저**다 — 오피스의 스쿼드 탭과 같은
-                             * 손잡이를 쓴다. 무대의 반쪽에 판을 밀어 넣으면 명단 표가
-                             * 눌려 누구를 뺄지 읽을 수가 없고, 정지점마다 급한 건 대개
-                             * 체력과 평점이다. 판은 필요할 때 펼친다.
-                             */
-                            squadView(() => setMatchTab("판세"))
-                          ) : (
-                            <MatchOpponent
-                              match={liveMatch}
-                              boardOpen={boardOpen || boardClosing}
-                              onToggleBoard={toggleBoard}
-                            />
-                          )}
-                        </>
-                      )}
-                      {matchTab === "대회" && competitionsView}
+                    <LivePitch
+                      frame={live.frame}
+                      match={liveMatch}
+                      paused={live.paused}
+                      blocked={liveBlocked}
+                      error={live.error}
+                      onToggle={live.toggle}
+                    />
+                    <div className="board-tab ledger-body">
+                      <details className="live-analysis">
+                        <summary>
+                          경기 분석 <span>판세 · 전술 포인트</span>
+                        </summary>
+                        <MatchOverview match={liveMatch} showPitch={false} />
+                      </details>
                     </div>
                   </div>
                 ) : showRoom && liveNegotiation ? (
@@ -1451,7 +1554,10 @@ export function GameScreen({ gameId }: { gameId: string }) {
               {/* 두 칸의 경계 — 끄는 대로 무대의 `--split`이 바뀌고 거기 붙은 것들
               (덮개·전술판 서랍)이 함께 따라온다. 나란히 설 수 없는 폭에서는 CSS가
               걷어 낸다(`--split-live`) — 오른쪽 칸 **뒤에** 서야 그 위에 얹힌다 */}
-              <StageSplitHandle />
+              <StageSplitHandle
+                key={inMatch ? "match" : "office"}
+                mode={inMatch ? "match" : "office"}
+              />
             </div>
           </main>
           {/* 턴 원문 — 개발 모드에서 턴을 길게 눌렀을 때만 선다 (models.md §5) */}

@@ -9,6 +9,14 @@ import {
 } from "@story-fm/llm";
 import { journal } from "@story-fm/engine";
 import { ModelOutputError, readOutput, retryOnce } from "./retry";
+import { toToolSchema } from "./tool-schema";
+
+export const UnresolvedSchema = z.string().max(200).trim();
+
+export function unresolvedProperty(description: string) {
+  return toToolSchema(z.object({ unresolved: UnresolvedSchema.optional().describe(description) }))
+    .properties!.unresolved;
+}
 
 /**
  * **받아쓰기 명령의 묶음 산출** — 해석기가 코어 명령의 인자를 대신 채운다 (agents.md §1).
@@ -104,12 +112,7 @@ export function opsOutputSchema(
     type: "object",
     properties: {
       ops: buildOpsSchema(specs, spec.ops, spec.opsHint, spec.caps),
-      unresolved: {
-        type: "string",
-        minLength: 1,
-        maxLength: 200,
-        description: spec.unresolvedHint,
-      },
+      unresolved: unresolvedProperty(spec.unresolvedHint),
     },
   };
 }
@@ -209,7 +212,7 @@ export interface OpsOrders {
  */
 const OpsReportSchema = z.object({
   ops: z.record(z.unknown()).optional(),
-  unresolved: z.string().min(1).max(200).optional(),
+  unresolved: UnresolvedSchema.optional(),
 });
 
 /** 한 해석기를 세우는 데 필요한 전부 — 프롬프트·명령 목록·문구 */

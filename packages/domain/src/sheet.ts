@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MatchSideSchema } from "./match";
+import { SpatialBehaviorSchema } from "./spatial-match";
 import type { RegionalBand, RegionalLane } from "./packet";
 
 /**
@@ -29,6 +30,7 @@ export const PointSchema = z.object({
   text: z.string().min(1).max(POINT_TEXT_MAX),
   about: z.array(z.string().min(1)).default([]),
   importance: PointImportanceSchema,
+  behavior: SpatialBehaviorSchema.optional(),
 });
 export type Point = z.infer<typeof PointSchema>;
 

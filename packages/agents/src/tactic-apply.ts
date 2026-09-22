@@ -90,7 +90,7 @@ export function applyTacticOrders(
       untilMinute: options.untilMinute ?? null,
       shootout,
     });
-  if (!pending || !wants || shapeChanged) {
+  if (!pending || !wants || shapeChanged || (pending.spatial && !awaitingShootout(state))) {
     if (wants && shapeChanged) notes.push(SHAPE_CHANGED_NOTE);
     applied(false, awaitingShootout(state));
     /**

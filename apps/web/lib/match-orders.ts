@@ -1,4 +1,26 @@
 import type { BoardPoint, SetPieceRole } from "@story-fm/domain";
+import { z } from "zod";
+
+export const MatchBoardOrderSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("position"),
+    playerId: z.string().min(1),
+    position: z.string(),
+    point: z.object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100) }),
+  }),
+  z.object({ kind: z.literal("role"), playerId: z.string().min(1), role: z.string() }),
+  z.object({ kind: z.literal("substitution"), out: z.string().min(1), in: z.string().min(1) }),
+  z.object({
+    kind: z.literal("tactic"),
+    axis: z.enum(["mentality", "defensiveLine", "pressing", "tempo", "width", "passStyle"]),
+    value: z.number().int().min(1).max(5),
+  }),
+  z.object({
+    kind: z.literal("setPiece"),
+    role: z.enum(["corner", "freeKick", "penalty"]),
+    playerId: z.string().min(1).nullable(),
+  }),
+]);
 
 export type MatchBoardOrder =
   | { kind: "position"; playerId: string; position: string; point: BoardPoint }

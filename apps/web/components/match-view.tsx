@@ -45,11 +45,11 @@ type Shootout = NonNullable<Match["shootout"]>;
  * **전술 6축은 여기 두지 않는다** — 판을 만지는 자리(전술판)에 이미 있고, 거기서는
  * 읽는 김에 고칠 수도 있다. 두 곳에 같은 값을 세우면 어느 쪽이 진짜인지 흐려진다.
  */
-export function MatchOverview({ match }: { match: Match }) {
+export function MatchOverview({ match, showPitch = true }: { match: Match; showPitch?: boolean }) {
   const ours = match.home.ours ? "home" : "away";
   return (
     <div className="match-view" data-testid="view-match">
-      <ZoneBars match={match} />
+      {showPitch ? <ZoneBars match={match} /> : <XgRaceLine match={match} />}
       <KeyPoints points={match.keyPoints} />
       <Sheet lines={match.sheet} dropped={match.sheetDropped} notes={match.tactics[ours].notes} />
     </div>

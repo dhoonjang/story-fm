@@ -3,6 +3,10 @@ import type { MatchEvent } from "@story-fm/domain";
 import { formatScore } from "@story-fm/domain";
 import {
   addDays,
+  enableLiveMatch,
+  advanceLiveMatch,
+  setPlayerTactic,
+  buildMatchView,
   advanceTime,
   BIG_CHANCE_XG,
   bindJournal,
@@ -387,6 +391,69 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     expect(req.tools).toBeUndefined();
     return { ...answered(""), output: { ...intent } };
   };
+
+  it("빈 unresolved를 포함한 위치 교환은 배치·패킷·경기판과 재개 후 이동에 반영된다", async () => {
+    const state = rolling();
+    const side = userSide(state);
+    const [first, second] = state.pendingMatch!.ledger[side].onPitch.slice(1, 3) as [
+      string,
+      string,
+    ];
+    setPlayerTactic(state, { playerId: first, position: "CAM" });
+    setPlayerTactic(state, { playerId: second, position: "ST" });
+    enableLiveMatch(state);
+    const spatial = state.pendingMatch!.spatial!;
+    const keeperId = state.pendingMatch!.packet[side].lineup.find((p) => p.position === "GK")!.id;
+    const keeper = spatial.players.find((p) => p.id === keeperId)!;
+    spatial.restart = null;
+    spatial.possession = side;
+    spatial.ball = { x: keeper.x, y: keeper.y, z: 0, owner: keeperId, flight: null };
+    keeper.readyAt = spatial.tick + 100;
+    const untouched = structuredClone(state);
+    const before = structuredClone(state.pendingMatch!.spatial);
+    runTurn.mockImplementation(async (req: TurnRequest) =>
+      interpreter(req, {
+        ops: {
+          set_player_tactic: [
+            { playerId: first, position: "ST" },
+            { playerId: second, position: "CAM" },
+          ],
+        },
+        unresolved: "",
+      }),
+    );
+    const orders = buildMatchTools(state, {
+      calls: [],
+      goals: [],
+      cards: [],
+      said: "두 선수의 포지션을 맞바꿔",
+    }).find((t) => t.name === "tactic_orders")!;
+    expect((await orders.handle({})).ok).toBe(true);
+    expect(runTurn).toHaveBeenCalledTimes(1);
+    for (const [id, position] of [
+      [first, "ST"],
+      [second, "CAM"],
+    ]) {
+      expect(userTactics(state).assignments.find((a) => a.playerId === id)?.position).toBe(
+        position,
+      );
+      expect(state.pendingMatch!.packet[side].lineup.find((p) => p.id === id)?.position).toBe(
+        position,
+      );
+      expect(buildMatchView(state)!.onPitch[side].find((p) => p.id === id)?.position).toBe(
+        position,
+      );
+    }
+    expect(state.pendingMatch!.spatial).toEqual(before);
+    advanceLiveMatch(state, 20);
+    advanceLiveMatch(untouched, 20);
+    for (const id of [first, second]) {
+      const moved = state.pendingMatch!.spatial!.players.find((p) => p.id === id)!;
+      const original = untouched.pendingMatch!.spatial!.players.find((p) => p.id === id)!;
+      expect(moved.target).not.toEqual(original.target);
+      expect({ x: moved.x, y: moved.y }).not.toEqual({ x: original.x, y: original.y });
+    }
+  });
 
   /**
    * 목표 분은 **도구의 인자**로 온다 — 스키마가 그 칸을 안 내면 GM은 분을 말할 길이

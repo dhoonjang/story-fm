@@ -1387,8 +1387,11 @@ function scaleProfiles(profiles: PlayerShotProfile[], share: number): PlayerShot
  * 시트가 팀에 남긴 **판 밖의 손잡이** — 슈팅 배분의 레인, 사람의 거칠기와 다리.
  * 비어 있으면 칸을 만들지 않는다 (패킷이 늘 빈 칸을 달고 다니지 않게).
  */
-function sheetHandles(side: SheetSideOutcome): Pick<SidePacket, "routeFocus" | "temper" | "legs"> {
+function sheetHandles(
+  side: SheetSideOutcome,
+): Pick<SidePacket, "routeFocus" | "temper" | "legs" | "spatialEdge"> {
   return {
+    spatialEdge: side.cells,
     ...(side.routeFocus.length > 0 ? { routeFocus: side.routeFocus } : {}),
     ...(Object.keys(side.temper).length > 0 ? { temper: side.temper } : {}),
     ...(Object.keys(side.legs).length > 0 ? { legs: side.legs } : {}),

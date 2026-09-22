@@ -75,6 +75,7 @@ flowchart LR
 | 대회 규정을 만진다               | [data/competition.md](data/competition.md)                                                                 |
 | 대사·화자·인물·회견을 만진다     | [data/people.md](data/people.md)                                                                           |
 | 세이브 구조·호환을 만진다        | [data/game-state.md](data/game-state.md)                                                                   |
+| 실시간 경기·정지·전술판을 만진다 | [simulation/live-match.md](simulation/live-match.md)                                                       |
 | 경기 결과·밸런스를 만진다        | [simulation/match.md](simulation/match.md)                                                                 |
 | 밸런스 눈금을 재고 옮긴다        | [simulation/balance-harness.md](simulation/balance-harness.md)                                             |
 | 일정·tick·시즌 전환을 만진다     | [simulation/season.md](simulation/season.md)                                                               |

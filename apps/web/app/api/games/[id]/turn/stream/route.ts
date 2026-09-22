@@ -4,6 +4,8 @@ import { TurnOperationSchema } from "@story-fm/agents";
 import { llmErrorKind } from "@story-fm/llm";
 import { errorDetail, runTurnLocked, turnErrorMessage, turnErrorRetry } from "@/lib/turn-runner";
 import { invalidGameId } from "@/app/api/games/game-id";
+import { withLiveGamePaused } from "@/lib/live-match-runtime";
+import { MatchBoardOrderSchema } from "@/lib/match-orders";
 
 const TurnSchema = z
   .object({
@@ -23,34 +25,7 @@ const TurnSchema = z
      * 감독의 말과 갈라서 오퍼레이터 턴으로 먼저 들어간다.
      */
     // 선발 11명의 자리와 역할을 한 번에 다시 짜면 최대 22개가 자연스럽게 생긴다.
-    orders: z
-      .array(
-        z.discriminatedUnion("kind", [
-          z.object({
-            kind: z.literal("position"),
-            playerId: z.string().min(1),
-            position: z.string(),
-            point: z.object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100) }),
-          }),
-          z.object({
-            kind: z.literal("role"),
-            playerId: z.string().min(1),
-            role: z.string().min(1),
-          }),
-          z.object({
-            kind: z.literal("substitution"),
-            out: z.string().min(1),
-            in: z.string().min(1),
-          }),
-          z.object({
-            kind: z.literal("tactic"),
-            axis: z.enum(["mentality", "defensiveLine", "pressing", "tempo", "width", "passStyle"]),
-            value: z.number().int().min(1).max(5),
-          }),
-        ]),
-      )
-      .max(64)
-      .optional(),
+    orders: z.array(MatchBoardOrderSchema).max(64).optional(),
     /**
      * **제안 폼** — 정확한 값으로 낸 제안 (transfer.md §12-3). 감독의 말과 함께 올 수 있고,
      * 혼자 오면 제안 자체가 손잡이 턴이다. 구조체라 문구가 계약이 아니다.
@@ -136,13 +111,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
        */
       const heartbeat = setInterval(() => send({ type: "ping" }), HEARTBEAT_MS);
       try {
-        const outcome = await runTurnLocked(
-          id,
-          body.data.message,
-          (text) => send({ type: "delta", text }),
-          body.data.operation,
-          body.data.orders,
-          body.data.proposal,
+        const outcome = await withLiveGamePaused(id, () =>
+          runTurnLocked(
+            id,
+            body.data.message,
+            (text) => send({ type: "delta", text }),
+            body.data.operation,
+            body.data.orders,
+            body.data.proposal,
+          ),
         );
         if (outcome.ok) send({ type: "done", payload: outcome.payload });
         // `detail`은 개발 모드에서만 실려 온다 (turn-runner의 `errorDetail`)

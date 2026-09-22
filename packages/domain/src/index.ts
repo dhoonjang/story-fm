@@ -25,3 +25,4 @@ export * from "./crest";
 export * from "./tick-event";
 export * from "./league-tone";
 export * from "./josa";
+export * from "./spatial-match";

@@ -50,7 +50,7 @@ import type { MatchBoardOrder } from "./match-orders";
  */
 bindJournal(({ kind, ...data }) => noteFact(kind, data));
 
-function applyMatchBoardOrder(state: GameState, order: MatchBoardOrder) {
+export function applyMatchBoardOrder(state: GameState, order: MatchBoardOrder) {
   switch (order.kind) {
     case "position":
       return setPlayerTactic(state, {

@@ -47,7 +47,13 @@ import type { BoardMove, CharacterEntry, TickEvent } from "@story-fm/domain";
 import { agentConfig, createGameLLM, resolveLlmMode, type TurnResult } from "@story-fm/llm";
 import { MAX_REPORT_CARDS, NO_CARDS, takeArrivedReports, type ArrivedCards } from "./report-cards";
 import { reportTraining } from "./training-rater";
-import { buildMatchTools, KICKOFF_BLOCK, MATCH_GM_SYSTEM, type MatchToolContext } from "./match-gm";
+import {
+  buildMatchTools,
+  KICKOFF_BLOCK,
+  MATCH_GM_SYSTEM,
+  LIVE_MATCH_GM_SYSTEM,
+  type MatchToolContext,
+} from "./match-gm";
 import { finalizeMatchTurn } from "./finalize-match";
 import { runTableReply } from "./negotiation-table";
 import {
@@ -498,7 +504,10 @@ async function callGm(
           ...(boardMoves && boardMoves.length > 0 ? { boardMoves } : {}),
         });
   const system = inMatch
-    ? [MATCH_GM_SYSTEM, buildMatchReference(state)]
+    ? [
+        state.pendingMatch?.spatial ? LIVE_MATCH_GM_SYSTEM : MATCH_GM_SYSTEM,
+        buildMatchReference(state),
+      ]
     : inNegotiation
       ? [NEGOTIATION_GM_SYSTEM, buildNegotiationReference(state, shape.negotiationId ?? "")]
       : peaceSystem(state);

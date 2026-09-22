@@ -64,6 +64,9 @@ export const TACTIC_CAPS: OpsCaps = {
 
 export type TacticOrders = OpsOrders;
 
+export const PLAYER_POSITION_INSTRUCTION =
+  "포지션 지정·맞교환은 position 코드로 옮긴다. 맞교환은 현재 두 선수의 position을 서로 바꾼 두 명령이다. 방향만 지정한 이동은 move(lane: left·center·right, band: defense·midfield·attack)를 쓰고 나머지 축은 유지한다. position과 move는 함께 보내지 않는다.";
+
 export const TACTIC_ORDERS_SYSTEM = `당신은 감독의 전술 지시를 명령의 인자로 옮기는 해석기다. 중계도 대사도 쓰지 않는다. 훈련·육성·이적은 다른 해석기의 몫이다.
 
 # 무엇을 내나
@@ -100,7 +103,7 @@ ops에 부를 명령 이름을 적고 그 인자를 배열로 싣는다. 감독�
 - substitute — 교체 한 건. out/in은 선수 id. 여럿이면 배열에 여럿.
 - set_tactics — 6축(1~5)과 갈래 넷 중 감독이 말한 것만. 갈래는 눈금이 없다 — ${TACTIC_TOGGLES.map(tacticToggleChoiceText).join(" · ")}.
 - set_player_tactic — 한 선수의 자리와 역할.
-  - 자리는 move로만 옮긴다: lane(left·center·right) × band(defense=우리 진영, midfield, attack=상대 진영). 지정하지 않은 축은 그대로 둔다. 좌표를 지어내지 않는다.
+  - ${PLAYER_POSITION_INSTRUCTION}
   - role은 그 자리의 역할이다 — 감독이 시키는 일이 「자리별 역할」의 한 종이면 그것을 적는다. 이름·id·약어 어느 표기든 걸린다. 표에 없는 말은 unresolved에 남긴다.
 - set_set_piece_takers — 세트피스 키커. corner·freeKick·penalty 중 감독이 말한 자리만 싣고, 지정을 풀라는 말이면 그 자리에 null을 넣는다.
 - set_set_piece_routine — 세트피스에 몇 명이 서는가: ${SET_PIECE_ROUTINE_AXES.map(setPieceRoutineChoiceText).join(" · ")}. 감독이 말한 축만 싣고, 지시를 푸는 말이면 ${SET_PIECE_ROUTINE_NEUTRAL}을 넣는다.

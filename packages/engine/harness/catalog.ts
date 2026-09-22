@@ -820,7 +820,48 @@ export const LIVE_SCHEMA = defineHarness({
  * 보고했다」 분모에서 빠지고, 여기만 있는 서술자는 목록에 서면서 돌지 않는다. 둘 다
  * 조용해서 오래 사니 `harness-catalog.test.ts`가 그 짝을 못 박는다.
  */
+export const SPATIAL_MATCH = defineHarness({
+  id: "spatial-match",
+  what: "공간 경기의 득점·슈팅·패스·이동 범위",
+  doc: "docs/simulation/live-match.md",
+  cost: "동일 전력 4경기 · LLM 없음",
+  bands: [
+    {
+      metric: "경기당 골",
+      role: "reference",
+      min: 1,
+      max: 5,
+      unit: "count",
+      why: "첫 공간 모델의 보정 기준",
+    },
+    {
+      metric: "경기당 슛",
+      role: "reference",
+      min: 15,
+      max: 40,
+      unit: "count",
+      why: "기회가 움직임에서 충분히 생성되는가",
+    },
+    {
+      metric: "경기당 패스",
+      role: "reference",
+      min: 500,
+      max: 1300,
+      unit: "count",
+      why: "소유 전개와 차단의 빈도",
+    },
+    {
+      metric: "범위 이탈",
+      role: "guard",
+      max: 0,
+      unit: "count",
+      why: "선수의 물리 좌표는 경기장 안에 남는다",
+    },
+  ],
+});
+
 export const HARNESSES: readonly Harness[] = [
+  SPATIAL_MATCH,
   WORLD_SEASON,
   AI_ROTATION,
   LEAGUE_SPREAD,

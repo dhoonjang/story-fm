@@ -577,3 +577,11 @@ export function IconPlay({ size = 18 }: IconProps) {
     </svg>
   );
 }
+
+export function IconPause({ size = 18 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M8 5v14M16 5v14" />
+    </svg>
+  );
+}
