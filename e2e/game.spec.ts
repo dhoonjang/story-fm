@@ -57,6 +57,20 @@ async function openBoard(page: Page) {
  * 상세는 열어 보고 **닫아 두고** 돌려준다 — 부르는 쪽은 아무도 손대지 않은 명단을
  * 받는다.
  */
+/**
+ * 실시간 경기판 아래의 **「경기 분석」을 편다** — 판세·전술 포인트·판 위의 마커가 그
+ * 안에 있다 (live-match.md). 90분 동안 무대가 이고 있는 것은 공이 있는 자리이고 분석은
+ * 감독이 찾을 때 펴는 것이라 기본이 접힘이다. 탭을 옮겼다 돌아오면 판이 새로 서므로
+ * 그때마다 다시 편다.
+ */
+async function openMatchAnalysis(page: Page) {
+  const analysis = page.locator(".live-analysis");
+  if (!(await analysis.evaluate((n: HTMLDetailsElement) => n.open))) {
+    await analysis.locator("summary").click();
+  }
+  await expect(page.getByTestId("view-match")).toBeVisible();
+}
+
 async function pickPlayableBenchRow(page: Page): Promise<string> {
   const ids = await page
     .locator(
@@ -117,6 +131,13 @@ async function expectOvrConsistent(page: Page) {
 }
 
 test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page }) => {
+  /**
+   * **이 케이스만 상한이 더 관대하다** — 완주가 서버의 실시간 시뮬레이션을 기다리는
+   * 일이기 때문이다(live-match.md). 배속을 올려도 90분은 벽시계 시간으로 남고, 그
+   * 위에 온보딩과 경기 중 조작이 얹힌다. 기본 상한(`playwright.config.ts`의 90초)은
+   * 나머지 케이스의 것이다.
+   */
+  test.setTimeout(240_000);
   // ── 랜딩(게임 목록) → 새 게임 ──
   await page.goto("/");
   await expect(page.getByTestId("new-game")).toBeVisible({ timeout: COLD_MS });
@@ -238,10 +259,17 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.getByTestId("match-clock").locator("b")).toHaveText("0′");
 
   /**
-   * 중계 판세 — 스코어는 **화면에 붙어 있고**, 선수 기록은 실시간으로 붙는다.
-   * 아래로 훑어 내려가도 지금 몇 대 몇인지가 시야에서 사라지면 안 된다.
+   * 킥오프를 지나면 무대에 **실시간 경기판**이 선다 (live-match.md) — 서버가 계산한
+   * 선수와 공의 실제 위치를 그리는 자리다. 판세와 전술 포인트는 그 아래 「경기 분석」
+   * 손잡이 뒤로 접히고, 펴야 선다.
    */
-  await expect(page.getByTestId("view-match")).toBeVisible();
+  await expect(page.getByTestId("live-pitch")).toBeVisible();
+  await expect(page.getByTestId("view-match")).toBeHidden();
+  await openMatchAnalysis(page);
+  /**
+   * 스코어는 **화면에 붙어 있다** — 아래로 훑어 내려가도 지금 몇 대 몇인지가
+   * 시야에서 사라지면 안 된다.
+   */
   const score = page.getByTestId("match-score");
   await expect(score).toBeVisible();
   /**
@@ -274,30 +302,25 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.locator('.ledger-body [data-testid="standings"]')).toHaveCount(1);
 
   /**
-   * 판세 = 존 + 키포인트 한 화면. 전술 6축은 여기 없다 — 전술판이 갖는다
-   * (두 곳에 같은 값을 세우면 어느 쪽이 진짜인지 흐려진다)
+   * 판세 = 실시간 경기판 + 접힌 분석. **배치 격자는 여기 없다** — 선수가 지금 어디에
+   * 서 있는지는 경기판이 실제 위치로 그리므로, 같은 것을 두 곳에 세우지 않는다
+   * (live-match.md). 분석이 이고 있는 것은 키포인트·시트와, 슛이 나온 뒤의 쌓인 xG다.
+   * 전술 6축은 여기 없다 — 전술판이 갖는다.
    */
   await page.getByTestId("mtab-판세").click();
-  await expect(page.getByTestId("match-zones")).toBeVisible();
+  await openMatchAnalysis(page);
+  await expect(page.getByTestId("match-zones")).toHaveCount(0);
   await expect(page.getByTestId("match-tactics")).toHaveCount(0);
 
   /**
-   * 판 위의 마커는 **손잡이다** — 누르면 그 선수의 카드가 선다 (player.md §9.5).
-   * 스물두 손잡이가 각자 탭 정지점이면 판 하나를 지나는 데 스물두 번이므로,
-   * 묶음이 정지점 하나를 갖는다 (overview.md §5).
+   * 경기판의 선수는 **찾는 것이지 여는 것이 아니다** — 캔버스를 누르거나 목록에서
+   * 고르면 그 선수가 판 위에서 강조된다. 스물두 명이 각자 탭 정지점이 되지 않도록
+   * 손잡이는 목록 하나이고, 선수의 카드를 여는 자리는 전술판이다(아래 팀 탭).
    */
-  const markers = page.locator(".mv-pitch-players");
-  await expect(markers.locator('[tabindex="0"]')).toHaveCount(1);
-  await markers.locator("button.mv-marker.ours").first().click();
-  await expect(page.getByTestId("player-card-body")).toBeVisible();
-  // 우리 선수라 우리 훈련장만 아는 칸이 선다 — 심경 한 줄
-  await expect(page.locator(".player-card .pc-mood")).toHaveCount(1);
-  await page.getByTestId("player-card-close").click();
-  // 상대 마커도 같은 길로 열린다. 안개는 코어가 씌우므로 우리만 아는 칸이 아예 없다
-  await markers.locator("button.mv-marker:not(.ours)").first().click();
-  await expect(page.getByTestId("player-card-body")).toBeVisible();
-  await expect(page.locator(".player-card .pc-mood")).toHaveCount(0);
-  await page.getByTestId("player-card-close").click();
+  const picker = page.getByLabel("경기장에서 선수 선택");
+  await expect(picker).toBeVisible();
+  // 빈 항목 하나 + 그라운드의 스물두 명
+  await expect(picker.locator("option")).toHaveCount(23);
 
   /**
    * 팀 탭 — **우리와 상대가 같은 구성, 다른 정확도.**
@@ -331,21 +354,23 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.locator('.pitch-markers [tabindex="0"]')).toHaveCount(1);
   await page.locator("button.pitch-slot.theirs").first().click();
   await expect(page.getByTestId("player-card-body")).toBeVisible();
+  // 안개는 코어가 씌운다 — 상대 카드에는 우리 훈련장만 아는 칸(심경)이 아예 없다
+  await expect(page.locator(".player-card .pc-mood")).toHaveCount(0);
   await page.getByTestId("player-card-close").click();
   // 상대 전술은 읽기 전용 — 우리 쪽에만 있는 조작 버튼이 여기엔 없다
   await expect(page.getByTestId("match-tactics")).toBeVisible();
   await expect(page.getByTestId("tactic-pressing-5")).toHaveCount(0);
   /**
-   * 판을 펼치면 **채팅 자리 위에 한 장이 얹힌다** — 대화는 지워지지 않고 가라앉는다.
-   * 그 자리가 돌아갈 곳이라는 게 보여야 하므로 화면에 **남아 있고**, 손은 그 위의
-   * 덮개(`board-scrim`)가 받는다. 덮개를 누르면 서랍이 닫히므로 안내 문구가 없다.
+   * 팀·대회 탭은 **대화 자리에 선다** — 경기장은 제자리를 지키고 터치라인 쪽만 갈린다
+   * (live-match.md). 경기 중에 서랍이 채팅 위를 덮던 자리다: 이제 판은 그 패널 안에
+   * 서고, 돌아가는 길은 패널 머리의 「대화로」 하나다.
    */
-  await expect(page.getByTestId("chat-scroll")).toBeVisible();
-  await expect(page.getByTestId("board-scrim")).toBeVisible();
-  await page.getByTestId("board-scrim").click({ position: { x: 40, y: 300 } });
+  await expect(page.getByTestId("chat-scroll")).toBeHidden();
+  await expect(page.getByTestId("live-pitch")).toBeVisible();
   await expect(page.getByTestId("board-scrim")).toHaveCount(0);
+  await page.getByRole("button", { name: "대화로" }).click();
   await expect(page.getByTestId("chat-scroll")).toBeVisible();
-  await expect(page.getByTestId("opp-board-toggle")).toHaveAttribute("aria-pressed", "false");
+  await page.getByTestId("mtab-팀").click();
   await pressBoardToggle(page, "opp-board-toggle");
 
   /*
@@ -364,14 +389,22 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.locator(".squad-table .swap-btn").first()).toBeVisible();
   await page.getByTestId("mtab-판세").click();
 
-  // ── 진행 버튼으로 경기 완주 — 경기 중에는 빈 입력의 손잡이가 **진행**이다 ──
-  for (let i = 0; i < 15; i++) {
-    const phase = await page.locator(".app").getAttribute("data-phase");
-    if (phase === "idle") break;
-    await page.getByTestId("match-advance").click();
-    await expect(input).toBeEnabled();
+  /**
+   * ── 경기 완주 — **시계를 미는 것은 서버다** (live-match.md). 빈 입력의 손잡이는
+   * 진행이 아니라 일시정지·재개이고, 감독이 손을 떼면 경기는 알아서 흐른다. 하프타임과
+   * 연장 개시는 감독이 재개하는 자리라 멈춘 것을 보면 눌러 준다.
+   */
+  const advance = page.getByTestId("match-advance");
+  for (let i = 0; i < 240; i++) {
+    if ((await page.locator(".app").getAttribute("data-phase")) === "idle") break;
+    // 멈춰 선 자리(하프타임·정지)만 다시 민다 — 흐르는 중에 누르면 세우는 손이 된다
+    if (await advance.isEnabled()) {
+      const label = await advance.getAttribute("aria-label");
+      if (label === "경기 재개") await advance.click();
+    }
+    await page.waitForTimeout(500);
   }
-  await expect(page.locator(".app")).toHaveAttribute("data-phase", "idle");
+  await expect(page.locator(".app")).toHaveAttribute("data-phase", "idle", { timeout: COLD_MS });
   /*
    * 종료 화면 — 휘슬과 평시 사이의 한 걸음. 스코어·득점·잘한 선수까지만 짧게.
    */

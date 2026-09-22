@@ -15,7 +15,12 @@ import type { LiveMatchMessage } from "./live-match-protocol";
 import { toPayload, type GameSlice } from "./store";
 
 const FRAME_MS = 100;
-const SPEED = 6;
+/**
+ * 배속 — **벽시계와 경기 시계의 비율이다.** 계산 간격(`SPATIAL_STEP`)도 난수도 판정
+ * 규칙도 바꾸지 않으므로(live-match.md) 값을 올려도 같은 경기가 빨리 지나갈 뿐이다.
+ * e2e가 90분을 벽시계 15분으로 기다릴 수는 없어 그 자리에서만 환경으로 올린다.
+ */
+const SPEED = Number(process.env.LIVE_MATCH_SPEED) || 6;
 const FRAMES_PER_CHECKPOINT = 10;
 interface Client {
   send: (message: LiveMatchMessage) => void;
