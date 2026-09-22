@@ -1,3 +1,10 @@
+import {
+  createSpatialMatch,
+  stepSpatialMatch,
+  spatialShotXg,
+  isSpatialOffside,
+  type SpatialInput,
+} from "@story-fm/sim";
 import { describe, expect, it } from "vitest";
 import {
   AI_SHIFT_BOUND,
@@ -1362,5 +1369,99 @@ describe("골이 되지 못한 슛의 분해", () => {
     expect(shotWithRolls(0.5, [0.9, saved + 1e-6, 0.3801]).outcome).toBe("off_target");
     // 문턱 아래로 굴리면 골이고, 그때는 분해 자체가 없다
     expect(shotWithRolls(0.5, [0.49]).outcome).toBe("goal");
+  });
+});
+
+describe("공간 시뮬레이션의 상태 전이", () => {
+  const home = makeSide("spatial-home", 70);
+  const away = makeSide("spatial-away", 70);
+  const input: SpatialInput = {
+    seed: 71,
+    matchId: "spatial-contract",
+    packet: buildStrengthPacket(home, away),
+    players: new Map([...home.starters, ...away.starters].map((s) => [s.player.id, s.player])),
+    tactics: { home: home.tactics, away: away.tactics },
+    behaviors: [],
+    yellows: {},
+  };
+  it("저장한 틱에서 이어도 동일하고 입력 상태를 변경하지 않는다", () => {
+    const origin = createSpatialMatch(input);
+    const frozen = structuredClone(origin);
+    let first = origin;
+    for (let i = 0; i < 100; i++) first = stepSpatialMatch(first, input).state;
+    let resumed = JSON.parse(JSON.stringify(first)) as typeof first;
+    for (let i = 0; i < 100; i++) resumed = stepSpatialMatch(resumed, input).state;
+    let continuous = origin;
+    for (let i = 0; i < 200; i++) continuous = stepSpatialMatch(continuous, input).state;
+    expect(resumed).toEqual(continuous);
+    expect(origin).toEqual(frozen);
+    expect(continuous.seconds).toBe(10);
+  });
+  it("휴식 중에는 시계·선수·공·난수가 진행하지 않는다", () => {
+    const paused = { ...createSpatialMatch(input), interval: true };
+    const result = stepSpatialMatch(paused, input);
+    expect(result.state).toBe(paused);
+    expect(result.events).toEqual([]);
+  });
+  it("표시가 아닌 거리·각도·압박이 슈팅 질을 바꾼다", () => {
+    const close = spatialShotXg({ x: 94, y: 34 }, "home", 0);
+    expect(close).toBeGreaterThan(spatialShotXg({ x: 79, y: 34 }, "home", 0));
+    expect(close).toBeGreaterThan(spatialShotXg({ x: 94, y: 9 }, "home", 0));
+    expect(close).toBeGreaterThan(spatialShotXg({ x: 94, y: 34 }, "home", 2));
+    expect(close).toBe(spatialShotXg({ x: 11, y: 34 }, "away", 0));
+  });
+  it("오프사이드는 공·두 번째 수비수·자기 진영 경계를 함께 따른다", () => {
+    const defenders = [
+      { x: 103, y: 34 },
+      { x: 80, y: 20 },
+    ];
+    expect(isSpatialOffside({ x: 85, y: 15 }, { x: 75, y: 20 }, defenders, "home")).toBe(true);
+    expect(isSpatialOffside({ x: 85, y: 15 }, { x: 90, y: 20 }, defenders, "home")).toBe(false);
+    expect(isSpatialOffside({ x: 80, y: 15 }, { x: 75, y: 20 }, defenders, "home")).toBe(false);
+    expect(
+      isSpatialOffside(
+        { x: 40, y: 15 },
+        { x: 20, y: 20 },
+        [
+          { x: 103, y: 34 },
+          { x: 35, y: 20 },
+        ],
+        "home",
+      ),
+    ).toBe(false);
+  });
+  it("퇴장자는 다음 틱의 공간 상태와 공 소유에서 제거된다", () => {
+    const state = createSpatialMatch(input);
+    const player = state.players[0]!;
+    state.ball.owner = player.id;
+    state.restart = null;
+    const packet = {
+      ...input.packet,
+      home: {
+        ...input.packet.home,
+        lineup: input.packet.home.lineup.filter((p) => p.id !== player.id),
+      },
+    };
+    const result = stepSpatialMatch(state, { ...input, packet });
+    expect(result.state.players.some((p) => p.id === player.id)).toBe(false);
+    expect(result.state.ball.owner).not.toBe(player.id);
+  });
+  it("전술 변경은 목표를 바꾸고 현재 위치를 순간이동시키지 않는다", () => {
+    const state = createSpatialMatch(input);
+    state.restart = null;
+    const player = state.players.find((p) => p.id.endsWith("mf2"))!;
+    const behavior = {
+      player: player.id,
+      action: "run",
+      when: "always",
+      band: "attack",
+      lane: "left",
+    } as const;
+    const changed = stepSpatialMatch(state, { ...input, behaviors: [behavior] }).state.players.find(
+      (p) => p.id === player.id,
+    )!;
+    expect(changed.action).toBe("run");
+    expect(changed.target.x).toBeGreaterThan(player.x);
+    expect(Math.hypot(changed.x - player.x, changed.y - player.y)).toBeLessThan(0.1);
   });
 });

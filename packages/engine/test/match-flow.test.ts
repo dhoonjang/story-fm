@@ -1,3 +1,4 @@
+import { enableLiveMatch, advanceLiveMatch, resumeLiveInterval } from "@story-fm/engine";
 import { describe, expect, it } from "vitest";
 import {
   markEntered,
@@ -1727,5 +1728,78 @@ describe("같은 시각 타 경기의 라이브 스코어 (match.md §7)", () =>
     // 전제 — 프리시즌의 첫 경기일은 친선이다
     expect(ours.competitionId).toBeNull();
     expect(state.pendingMatch!.otherScores).toEqual([]);
+  });
+});
+
+describe("공간 경기와 장부 연결", () => {
+  it("네트워크 배치 크기와 저장 복원이 경기 결과를 바꾸지 않는다", () => {
+    const game = atMatchday();
+    expect(startMatch(game).ok).toBe(true);
+    markEntered(game);
+    expect(enableLiveMatch(game)).toBe(true);
+    const other = structuredClone(game);
+    advanceLiveMatch(game, 120);
+    for (let i = 0; i < 4; i++) advanceLiveMatch(other, 30);
+    expect(other.pendingMatch?.spatial).toEqual(game.pendingMatch?.spatial);
+    expect(other.pendingMatch?.ledger).toEqual(game.pendingMatch?.ledger);
+    expect(other.pendingMatch?.matchFatigue).toEqual(game.pendingMatch?.matchFatigue);
+    expect(advanceSegment(game).ok).toBe(false);
+    const snapshot = structuredClone(game.pendingMatch?.spatial);
+    game.pendingMatch!.spatial!.interval = true;
+    advanceLiveMatch(game, 40);
+    expect(game.pendingMatch?.spatial?.tick).toBe(snapshot?.tick);
+    resumeLiveInterval(game);
+    advanceLiveMatch(game, 20);
+    expect(game.pendingMatch?.spatial?.tick).toBe(snapshot!.tick + 20);
+  });
+  it("상대 선수에게 행동을 지시하거나 동료를 상대처럼 마크할 수 없다", () => {
+    const game = atMatchday();
+    startMatch(game);
+    markEntered(game);
+    enableLiveMatch(game);
+    const side = userSide(game);
+    const ours = game.pendingMatch!.ledger[side].onPitch;
+    const theirs = game.pendingMatch!.ledger[side === "home" ? "away" : "home"].onPitch;
+    const result = applyMatchReading(game, {
+      points: [
+        {
+          id: "enemy",
+          text: "상대 조작",
+          about: [],
+          importance: 1,
+          behavior: { player: theirs[0]!, action: "hold", when: "always" },
+        },
+        {
+          id: "own",
+          text: "동료 마크",
+          about: [],
+          importance: 1,
+          behavior: { player: ours[0]!, action: "mark", targetPlayer: ours[1]!, when: "defend" },
+        },
+        {
+          id: "valid",
+          text: "상대 마크",
+          about: [],
+          importance: 1,
+          behavior: { player: ours[1]!, action: "mark", targetPlayer: theirs[1]!, when: "defend" },
+        },
+      ],
+      sheet: [],
+    });
+    expect(result?.points.map((p) => p.id)).toEqual(["valid"]);
+  });
+  it("하프타임을 한 번만 기록하고 재개 전에는 시간을 보존한다", () => {
+    const game = atMatchday();
+    startMatch(game);
+    markEntered(game);
+    enableLiveMatch(game);
+    const pending = game.pendingMatch!;
+    pending.spatial!.seconds = 2699.9;
+    advanceLiveMatch(game, 10);
+    expect(pending.ledger.phase).toBe("second_half");
+    expect(pending.spatial!.seconds).toBe(2700);
+    expect(pending.spatial!.interval).toBe(true);
+    advanceLiveMatch(game, 10);
+    expect(pending.ledger.events.filter((e) => e.type === "half_time")).toHaveLength(1);
   });
 });

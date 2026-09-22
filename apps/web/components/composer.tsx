@@ -9,6 +9,7 @@ import {
   IconDay,
   IconMatch,
   IconPlay,
+  IconPause,
   IconSend,
   IconSkip,
   IconWeek,
@@ -63,6 +64,7 @@ export function Composer({
   draft = null,
   onRemoveDraft,
   suggestion = null,
+  liveControl,
 }: {
   input: string;
   onInput: (value: string) => void;
@@ -98,6 +100,7 @@ export function Composer({
    * 보이는 문장이 곧 손잡이다 (design-system.md §6).
    */
   suggestion?: string | null;
+  liveControl?: { paused: boolean; blocked: boolean; toggle: () => void };
 }) {
   const proposal = useProposal();
   /** 시간 손잡이의 선택지가 펼쳐져 있는가 — 입력이 비었을 때만 열 수 있다 */
@@ -212,7 +215,9 @@ export function Composer({
               onInput(suggestion);
             }
           }}
-          placeholder={suggestion ?? undefined}
+          placeholder={
+            suggestion ?? (inMatch ? "전술을 지시하거나 코치에게 물어보세요" : undefined)
+          }
           disabled={busy}
           data-testid="chat-input"
         />
@@ -231,17 +236,40 @@ export function Composer({
           className={hasInput ? "send" : inMatch ? "send" : "skip"}
           onClick={() => {
             if (hasInput) return void onSend();
+            if (inMatch && liveControl) return liveControl.toggle();
             if (inMatch) return void onOperate({ kind: "advance_match" });
             setSkipOpen((v) => !v);
           }}
-          disabled={busy || (!hasInput && (inNegotiation || (!inMatch && !canSkip)))}
+          disabled={
+            busy || (!hasInput && (liveControl?.blocked || inNegotiation || (!inMatch && !canSkip)))
+          }
           data-testid={hasInput ? "chat-send" : inMatch ? "match-advance" : "time-skip-toggle"}
-          aria-label={hasInput ? "전송" : inMatch ? "경기 진행" : "시간 보내기"}
+          aria-label={
+            hasInput
+              ? "전송"
+              : liveControl
+                ? liveControl.paused
+                  ? "경기 재개"
+                  : "경기 일시정지"
+                : inMatch
+                  ? "경기 진행"
+                  : "시간 보내기"
+          }
           /* 잠긴 이유는 사실 한 줄 — 방 안에서 날짜는 흐르지 않는다 (transfer.md §12-2) */
           title={!hasInput && inNegotiation ? "협상 방 안에서는 날짜가 흐르지 않습니다" : undefined}
           aria-expanded={hasInput || inMatch ? undefined : skipOpen}
         >
-          {hasInput ? <IconSend /> : inMatch ? <IconPlay /> : <IconSkip />}
+          {hasInput ? (
+            <IconSend />
+          ) : inMatch ? (
+            liveControl && !liveControl.paused ? (
+              <IconPause />
+            ) : (
+              <IconPlay />
+            )
+          ) : (
+            <IconSkip />
+          )}
         </button>
       </div>
     </div>

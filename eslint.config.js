@@ -84,7 +84,14 @@ export default tseslint.config(
           ],
           patterns: [
             {
-              group: ["**/lib/store", "**/lib/turn-runner", "./store", "./turn-runner"],
+              group: [
+                "**/lib/store",
+                "**/lib/turn-runner",
+                "./store",
+                "./turn-runner",
+                "**/live-match-runtime",
+                "./live-match-runtime",
+              ],
               allowTypeImports: true,
               message:
                 "store.ts·turn-runner.ts는 서버에서만 돈다 — 값으로 부르면 엔진이 딸려 들어와 next build가 죽는다. 화면은 타입만 가져오고, 값이 필요하면 API 라우트를 거쳐라.",
@@ -104,6 +111,7 @@ export default tseslint.config(
       "apps/web/app/api/**/*.ts",
       "apps/web/lib/store.ts",
       "apps/web/lib/turn-runner.ts",
+      "apps/web/lib/live-match-runtime.ts",
       "apps/web/test/**/*.ts",
       "apps/web/next.config.ts",
     ],

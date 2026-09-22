@@ -214,6 +214,7 @@ export interface SetPieceProfile {
 }
 
 export interface SidePacket {
+  spatialEdge?: Record<RegionalBand, Record<RegionalLane, number>>;
   teamId: string;
   teamName: string;
   zones: ZoneStrength;

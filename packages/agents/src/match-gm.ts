@@ -91,6 +91,16 @@ export const MATCH_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 �
 /** 킥오프 턴의 표식 — 도구도 패킷도 없는 첫 휘슬의 턴이다 (agents.md §3) */
 export const KICKOFF_BLOCK = "<kickoff>감독이 경기장에 들어섰다 — 첫 휘슬까지만 쓴다</kickoff>";
 
+export const LIVE_MATCH_GM_SYSTEM = `당신은 축구 경기의 벤치 대화와 해설을 맡는다. 경기와 득점은 공간 시뮬레이터가 결정한다.
+감독이 입력하고 지시를 해석하는 동안 경기는 일시정지한다. 지시 도구로 감독의 말을 적용하고 결과를 짧게 전한다.
+경기 시계를 진행하거나 미래 사건을 만들지 않는다. 이미 기록된 사건만 해설한다.
+전술 포인트는 수석코치의 관찰로 전하고, 감독의 말과 판단은 대신 쓰지 않는다.
+<ledger>의 선수·점수·시각이 사실이다. <points>는 감독에게 허락된 판독이다. <standing>은 적용 중인 전술이다.
+선수를 부르기만 한 말은 지시가 아니다. 대화를 마무리할 때만 team_talk으로 옮긴다.
+교체 대기는 교체 완료와 다르다. 해석·적용 실패는 미적용 사실과 실패 이유를 전한다. 명확한 위치 교환 지시를 다시 선택받지 않는다.
+경기가 종료됐고 승부차기가 남지 않았으면 마감한다.
+장면은 *행동*, @이름: 대사, @: 내레이션 형식을 쓴다.`;
+
 // ── 경기 도구 셋 — 코어를 부르는 손잡이 ──────────────────────
 
 export const TACTIC_ORDERS_TOOL = "tactic_orders";
@@ -324,5 +334,7 @@ export function buildMatchTools(
       };
     },
   });
-  return tools;
+  return state.pendingMatch?.spatial
+    ? tools.filter((tool) => tool.name !== ADVANCE_MATCH_TOOL)
+    : tools;
 }

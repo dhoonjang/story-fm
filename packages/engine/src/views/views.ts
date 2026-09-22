@@ -1584,6 +1584,7 @@ function edgeFor(ours: number, theirs: number): { edge: MatchEdge; size: EdgeSiz
  * 화면이 읽을 모양으로만 옮긴다.
  */
 export interface MatchView {
+  live?: { seconds: number; interval: boolean; finished: boolean; pendingSubs: number };
   /** 어느 경기인가 (`MATCH.id`) — 화면이 종료 시점을 잡고 기록을 찾는 데 쓴다 */
   matchId: string;
   competition: string;
@@ -2485,7 +2486,7 @@ function strengthPairOf(
   return home === null || away === null ? null : { home, away };
 }
 
-function buildMatchView(state: GameState): MatchView | null {
+export function buildMatchView(state: GameState): MatchView | null {
   const pending = state.pendingMatch;
   if (!pending || state.phase !== "match") return null;
   const match = state.matches.find((m) => m.id === pending.matchId);
@@ -2658,6 +2659,16 @@ function buildMatchView(state: GameState): MatchView | null {
   });
 
   return {
+    ...(pending.spatial
+      ? {
+          live: {
+            seconds: pending.spatial.seconds,
+            interval: pending.spatial.interval,
+            finished: ledger.phase === "finished",
+            pendingSubs: pending.pendingSubs?.length ?? 0,
+          },
+        }
+      : {}),
     matchId: match.id,
     competition: competitionShortName(match.competitionId),
     stage: competitionStageLabel(match.competitionId, match.stage ?? "league", match.round),

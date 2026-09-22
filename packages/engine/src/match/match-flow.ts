@@ -1,4 +1,11 @@
 import { settlePointsBonus } from "../market/terms";
+import { SPATIAL_STEP, type LiveMatchFrame, type SpatialBehavior } from "@story-fm/domain";
+import {
+  createSpatialMatch,
+  stepSpatialMatch,
+  conditionDrain,
+  type SpatialInput,
+} from "@story-fm/sim";
 import type {
   Formation,
   GamePlayer,
@@ -411,7 +418,22 @@ function buildPacketFor(
        * 경기(옛 세이브·킥오프 실패)는 코어 로직만으로 구른다.
        */
       ...(pending.points
-        ? { reading: { points: pending.points, sheet: pending.sheet ?? [] } }
+        ? {
+            reading: {
+              points: pending.points,
+              sheet: (pending.sheet ?? []).filter(
+                (line) =>
+                  !pending.spatial ||
+                  line.shape !== "edge" ||
+                  !pending.points?.some(
+                    (p) =>
+                      p.id === line.pointId &&
+                      p.behavior &&
+                      validLiveBehavior(pending, p.behavior, userSide(state)),
+                  ),
+              ),
+            },
+          }
         : {}),
     },
   );
@@ -947,6 +969,8 @@ export function advanceSegment(
   message: string;
 } {
   const pending = state.pendingMatch;
+  if (pending?.spatial)
+    return { ok: false, plan: null, message: "실시간 경기는 경기 시계에서 진행합니다" };
   if (!pending || state.phase !== "match") {
     return { ok: false, plan: null, message: "진행 중인 경기가 없습니다" };
   }
@@ -1300,6 +1324,25 @@ export function substitutePlayer(state: GameState, input: { out: string; in: str
   const fixture = state.matches.find((m) => m.id === match.matchId) ?? null;
   if (isSuspendedFor(state, incoming.id, fixture?.competitionId ?? null)) {
     return { ok: false, message: `${josa(incoming.name, "은/는")} 이 경기 출장 정지 중입니다` };
+  }
+  if (match.spatial && !match.spatial.restart && !match.spatial.interval) {
+    const queue = match.pendingSubs ?? [];
+    if (queue.some((s) => s.out === outgoing.id || s.in === incoming.id))
+      return { ok: false, message: "이미 교체를 대기 중인 선수입니다" };
+    const side = match.ledger[userSide(state)];
+    const limits = subLimitsOf(match.ledger.phase, match.ledger.friendly);
+    if (
+      !side.onPitch.includes(outgoing.id) ||
+      !side.bench.includes(incoming.id) ||
+      side.subsUsed + queue.length >= limits.maxSubs ||
+      side.subWindows >= limits.maxSubWindows
+    )
+      return { ok: false, message: "교체 명단 또는 교체 한도를 확인하세요" };
+    match.pendingSubs = [...queue, { out: outgoing.id, in: incoming.id }];
+    return {
+      ok: true,
+      message: `교체 대기 — 다음 경기 중단에 ${outgoing.name} OUT, ${incoming.name} IN`,
+    };
   }
   const result = applyMatchEvents(state, [
     {
@@ -2359,6 +2402,9 @@ export function applyMatchReading(
   const seen = new Set<string>();
   const points = reading.points
     .filter((point) => (seen.has(point.id) ? false : (seen.add(point.id), true)))
+    .filter(
+      (point) => !point.behavior || validLiveBehavior(pending, point.behavior, userSide(state)),
+    )
     .slice(0, POINTS_MAX)
     .map((point) => ({ ...point, about: [...point.about] }));
   const sheet = reading.sheet.map((line) => ({ ...line, target: { ...line.target } }));
@@ -2376,4 +2422,267 @@ export function applyMatchReading(
 export function pointsSeenBy(state: GameState): Point[] {
   const points = state.pendingMatch?.points ?? [];
   return readPoints(points, state.manager.attributes.analysis);
+}
+
+/** The live runner and headless verification use the same fixed-step commands. */
+function liveInput(state: GameState): SpatialInput {
+  const pending = state.pendingMatch!;
+  const fixture = currentMatch(state);
+  const aiSide = otherLiveSide(state);
+  const players = new Map<string, GamePlayer>();
+  for (const side of ["home", "away"] as const)
+    for (const id of pending.ledger[side].onPitch) {
+      const p = playerById(state, id);
+      if (p)
+        players.set(id, {
+          ...p,
+          state: {
+            ...p.state,
+            condition: Math.max(0, p.state.condition - (pending.matchFatigue?.[id] ?? 0)),
+          },
+        });
+    }
+  const behaviors: SpatialBehavior[] = [];
+  const seen = new Set<string>();
+  for (const point of pending.points ?? []) {
+    const b = point.behavior;
+    if (!b || !validLiveBehavior(pending, b, userSide(state)) || seen.has(b.player)) continue;
+    seen.add(b.player);
+    behaviors.push(b);
+  }
+  return {
+    seed: state.seed,
+    matchId: pending.matchId,
+    packet: pending.packet,
+    players,
+    behaviors,
+    tactics: {
+      home:
+        aiSide === "home" && pending.aiTactics
+          ? pending.aiTactics
+          : tacticsOf(state, fixture.homeTeamId).spec,
+      away:
+        aiSide === "away" && pending.aiTactics
+          ? pending.aiTactics
+          : tacticsOf(state, fixture.awayTeamId).spec,
+    },
+    yellows: { ...pending.ledger.home.yellows, ...pending.ledger.away.yellows },
+    injured: new Set(
+      pending.ledger.events.filter((e) => e.type === "injury").flatMap((e) => e.actors),
+    ),
+  };
+}
+
+function otherLiveSide(state: GameState): MatchSide {
+  return userSide(state) === "home" ? "away" : "home";
+}
+
+function validLiveBehavior(
+  pending: Pick<PendingMatch, "ledger">,
+  behavior: SpatialBehavior,
+  side: MatchSide,
+): boolean {
+  const active = [...pending.ledger.home.onPitch, ...pending.ledger.away.onPitch];
+  return (
+    pending.ledger[side].onPitch.includes(behavior.player) &&
+    (!behavior.targetPlayer || active.includes(behavior.targetPlayer)) &&
+    (behavior.action !== "mark" ||
+      Boolean(
+        behavior.targetPlayer &&
+        pending.ledger[side === "home" ? "away" : "home"].onPitch.includes(behavior.targetPlayer),
+      ))
+  );
+}
+
+export function enableLiveMatch(state: GameState): boolean {
+  const pending = state.pendingMatch;
+  if (!pending?.entered || state.phase !== "match" || pending.ledger.phase === "finished")
+    return false;
+  if (!pending.spatial) {
+    refreshPacket(state);
+    pending.spatial = createSpatialMatch(
+      liveInput(state),
+      (pending.segmentClock ?? pending.ledger.minute) * 60,
+    );
+    refreshPacket(state);
+    if (!pending.ledger.events.some((e) => e.type === "kickoff")) {
+      const applied = applyMatchEvents(state, [
+        { minute: pending.ledger.minute, type: "kickoff", actors: [], causes: [] },
+      ]);
+      if (!applied.ok) throw new Error(applied.message);
+    }
+  }
+  return true;
+}
+
+export function resumeLiveInterval(state: GameState): void {
+  const spatial = state.pendingMatch?.spatial;
+  if (spatial) spatial.interval = false;
+}
+
+export function liveMatchFrame(state: GameState): LiveMatchFrame | null {
+  const p = state.pendingMatch;
+  if (!p?.spatial) return null;
+  const s = p.spatial;
+  return {
+    matchId: p.matchId,
+    tick: s.tick,
+    seconds: s.seconds,
+    players: s.players.map(({ id, side, x, y, vx, vy, action }) => ({
+      id,
+      side,
+      x,
+      y,
+      vx,
+      vy,
+      action,
+    })),
+    ball: { x: s.ball.x, y: s.ball.y, z: s.ball.z },
+    score: { ...p.ledger.score },
+    interval: s.interval,
+    finished: p.ledger.phase === "finished",
+    events: p.ledger.events.slice(-12),
+  };
+}
+
+function applyLiveEvents(state: GameState, events: MatchEvent[]): void {
+  if (!events.length) return;
+  const applied = applyMatchEvents(state, events);
+  if (!applied.ok) throw new Error(applied.message);
+}
+
+/** Bounded work: callers schedule batches but cannot alter the simulation time step. */
+export function advanceLiveMatch(state: GameState, ticks: number): LiveMatchFrame | null {
+  const pending = state.pendingMatch;
+  if (!pending?.spatial || pending.spatial.interval || pending.ledger.phase === "finished")
+    return liveMatchFrame(state);
+  if (!Number.isInteger(ticks) || ticks < 0 || ticks > 400)
+    throw new Error("실시간 계산 범위를 벗어났습니다");
+  const fixture = currentMatch(state);
+  const aiSide = otherLiveSide(state);
+  for (let i = 0; i < ticks; i++) {
+    const before = pending.spatial;
+    if (before.interval || pending.ledger.phase === "finished") break;
+    if (before.tick % Math.round(1 / SPATIAL_STEP) === 0) refreshPacket(state);
+    const input = liveInput(state);
+    const result = stepSpatialMatch(before, input);
+    pending.spatial = result.state;
+    applyLiveEvents(state, result.events);
+    if (Object.keys(result.stats).length) pending.ledger = addStats(pending.ledger, result.stats);
+    const elapsed = (result.state.seconds - before.seconds) / 60;
+    const fatigue = (pending.matchFatigue ??= {});
+    for (const side of ["home", "away"] as const)
+      for (const slot of input.packet[side].lineup) {
+        const player = playerById(state, slot.id);
+        if (!player) continue;
+        fatigue[player.id] =
+          (fatigue[player.id] ?? 0) +
+          conditionDrain(
+            player,
+            slot.position,
+            input.tactics[side],
+            elapsed,
+            1,
+            input.packet[side].legs?.[slot.id] ?? 1,
+            result.state.possession === side ? 0.65 : 0.35,
+            Math.max(0, player.state.condition - (fatigue[player.id] ?? 0)),
+          );
+      }
+    pending.segmentClock = result.state.seconds / 60;
+    pending.ledger = advanceClock(pending.ledger, Math.floor(pending.segmentClock));
+    if (result.events.length) {
+      pending.lastSegment = {
+        events: result.events,
+        stop: result.events.some((e) => e.type === "goal") ? "goal" : "flow",
+      };
+    }
+    if (result.state.restart && pending.pendingSubs?.length) {
+      const queue = pending.pendingSubs;
+      pending.pendingSubs = [];
+      for (const order of queue) substitutePlayer(state, order);
+    }
+    if (result.events.some((e) => e.type === "goal" || e.type === "red_card"))
+      result.state.nextBenchAt = result.state.seconds;
+    if (result.state.seconds >= result.state.nextBenchAt) {
+      result.state.nextBenchAt = result.state.seconds + 60;
+      const rng = makeRng(state.seed, `live-bench:${fixture.id}:${result.state.tick}`);
+      const shift = planAiShift(state, pending, {
+        aiSide,
+        aiKickoff: tacticsOf(state, aiSide === "home" ? fixture.homeTeamId : fixture.awayTeamId)
+          .spec,
+        opponent: input.tactics[userSide(state)],
+        atBreak: false,
+        rng,
+      });
+      if (shift) applyLiveEvents(state, [shift]);
+      refreshPacket(state);
+    }
+    if (
+      result.state.restart &&
+      (result.events.some((e) => e.type === "injury") ||
+        result.state.seconds >= (result.state.nextSubAt ?? 60))
+    ) {
+      result.state.nextSubAt = result.state.seconds + 60;
+      const rng = makeRng(state.seed, `live-subs:${fixture.id}:${result.state.tick}`);
+      const side = pending.ledger[aiSide];
+      const resolve = (ids: string[]) =>
+        ids.map((id) => playerById(state, id)).filter((p): p is GamePlayer => p !== null);
+      const plan: SegmentPlan = {
+        events: pending.ledger.events.filter(
+          (e) => e.type === "injury" && e.actors.some((id) => side.onPitch.includes(id)),
+        ),
+        stop: "flow",
+        minute: pending.ledger.minute,
+        clock: pending.segmentClock,
+        fatigue: {},
+        sentOff: [],
+        stats: {},
+      };
+      applyLiveEvents(
+        state,
+        planAiSubstitution(
+          aiSide,
+          { onPitch: resolve(side.onPitch), bench: resolve(side.bench) },
+          pending.ledger,
+          plan,
+          rng,
+          fatigue,
+        ),
+      );
+      refreshPacket(state);
+    }
+    if (
+      result.events.some((e) => e.type === "red_card") ||
+      result.state.players.length !==
+        pending.ledger.home.onPitch.length + pending.ledger.away.onPitch.length
+    ) {
+      refreshPacket(state);
+    }
+    const phase = pending.ledger.phase;
+    if (phase === "finished") break;
+    if (result.state.seconds + 0.001 >= PHASE_END[phase] * 60) {
+      const closing: MatchEvent["type"] =
+        phase === "first_half"
+          ? "half_time"
+          : phase === "extra_first"
+            ? "extra_half_time"
+            : phase === "second_half" && needsExtraTime(state, fixture, pending.ledger.score)
+              ? "extra_time_start"
+              : "full_time";
+      const event: MatchEvent = { minute: PHASE_END[phase], type: closing, actors: [], causes: [] };
+      applyLiveEvents(state, [event]);
+      result.state.interval = closing !== "full_time";
+      result.state.restart = {
+        kind: "kickoff",
+        side: phase === "first_half" ? "away" : "home",
+        at: { x: 52.5, y: 34 },
+        until: result.state.tick + Math.round(2 / SPATIAL_STEP),
+      };
+      result.state.ball = { x: 52.5, y: 34, z: 0, owner: null, flight: null };
+      pending.lastSegment = { events: [event], stop: closing };
+      openShootout(state, pending);
+      break;
+    }
+  }
+  return liveMatchFrame(state);
 }

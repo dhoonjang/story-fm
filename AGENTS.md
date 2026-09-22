@@ -35,7 +35,8 @@ and the story — dressing-room conflict, a prospect's arc, a rivalry that feste
 **The whole game is one chat.** The user plays the manager and the GM (an LLM)
 plays the world. State changes travel exactly one path — skill (tool call) → Zod
 validation → deterministic transition — and **match results are decided by the
-core's xG-interval simulator**; the LLM only commentates, stages and adjudicates.
+core's spatial simulator in the live web match and xG simulator elsewhere**; the
+LLM only commentates, stages and adjudicates.
 A season starts on July 1 and runs preseason → league/cup/European competition →
 season rollover → next season. Data has two layers: catalog (immutable seed) and
 save (mutable state), model v6.
@@ -63,7 +64,7 @@ apps/
   match-cli/       # match prototype — strength packet → caster → ledger, one cycle
 packages/
   domain/          # domain models + Zod schemas (player, tactics, records, schedule, persona)
-  sim/             # match sim core — seeded rng · strength packet · xG-interval sim · matchups · stamina
+  sim/             # match sim core — seeded rng · spatial live sim · strength packet · xG sim · stamina
   engine/          # game engine — each folder is a domain:
                    #   core/(state, save, tick, dates, rng) world/(catalog, generation, wages)
                    #   competition/(calendar, league, cup, europe) match/(match flow, quick sim)
@@ -80,8 +81,9 @@ e2e/               # Playwright specs — onboarding · game · admin · turn er
 - **The core rules and keeps the books; the LLM tells the story.** State
   transitions, formulas and validation are deterministic pure functions, tested
   without an LLM. The core decides match results, and the manager's instructions
-  reach those results only through the strength packet
-  (→ [docs/simulation/match.md](./docs/simulation/match.md)).
+  reach those results through validated spatial behaviors and bounded strength-packet effects
+  (→ [docs/simulation/live-match.md](./docs/simulation/live-match.md) ·
+  [docs/simulation/match.md](./docs/simulation/match.md)).
 - **Structured output first.** Never make the LLM emit free text for the code to
   parse — force tool calls with Zod schemas, and keep free text for prose humans
   read.

@@ -175,6 +175,37 @@ describe("runMatchReader — 산출과 실패", () => {
     expect(request.tools).toBeUndefined();
   });
 
+  it.each(["", "   "])("미해석 내용이 %j여도 함께 온 명령을 버리지 않는다", async (unresolved) => {
+    const runTurn = vi.fn(answering({ ops: { set_tactics: [{ pressing: 4 }] }, unresolved }));
+    const result = await runMatchReader(emptyState, SPECS, {
+      occasion: "orders",
+      said: "압박 올려",
+      llm: { runTurn },
+    });
+    expect(result.ok && result.reading.ops.set_tactics).toEqual([{ pressing: 4 }]);
+    expect(result.ok && result.reading.unresolved).toBeUndefined();
+    expect(runTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, 3, "a".repeat(201)])(
+    "미해석 내용의 잘못된 타입과 길이는 계속 반려한다",
+    async (unresolved) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        const runTurn = vi.fn(answering({ ops: { set_tactics: [{ pressing: 4 }] }, unresolved }));
+        const result = await runMatchReader(emptyState, SPECS, {
+          occasion: "orders",
+          said: "압박 올려",
+          llm: { runTurn },
+        });
+        expect(result.ok).toBe(false);
+        expect(runTurn).toHaveBeenCalledTimes(2);
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
   /**
    * 출력 스키마를 실었는데도 산문으로 답하는 경우 — 예외가 없어 `retryOnce`가 그냥
    * 지나가면, 해석은 **한 번** 실패에 턴이 취소되고 결산은 로그 한 줄 없이 앵커로

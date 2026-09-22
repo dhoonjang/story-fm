@@ -17,7 +17,20 @@ import { useCallback, useEffect, useRef } from "react";
  * 무대 전체가 다시 그려져 손보다 늦게 따라온다.
  */
 
-const STORE_KEY = "story-fm:stage-split";
+const SPLIT_MODES = {
+  office: {
+    storageKey: "story-fm:stage-split",
+    property: "--split-user",
+    initial: 0.5,
+    label: "채팅과 오른쪽 칸의 경계",
+  },
+  match: {
+    storageKey: "story-fm:match-split",
+    property: "--match-split-user",
+    initial: 0.34,
+    label: "경기장과 터치라인의 경계",
+  },
+} as const;
 
 /** 화살표 한 번에 옮기는 몫 — 스무 번이면 끝에서 끝이다 */
 const KEY_STEP = 0.02;
@@ -41,49 +54,64 @@ function clampSplit(fraction: number, stage: HTMLElement): number {
 }
 
 /** 브라우저가 저장을 막아 둔 창(사생활 보호 모드)에서도 끄는 것 자체는 되어야 한다 */
-function remember(fraction: number): void {
+function remember(key: string, fraction: number): void {
   try {
-    window.localStorage.setItem(STORE_KEY, fraction.toFixed(4));
+    window.localStorage.setItem(key, fraction.toFixed(4));
   } catch {
     /* 기억하지 못할 뿐이다 */
   }
 }
 
-function recall(): number | null {
+function recall(key: string): number | null {
   try {
-    const saved = Number(window.localStorage.getItem(STORE_KEY));
+    const saved = Number(window.localStorage.getItem(key));
     return Number.isFinite(saved) && saved > 0 && saved < 1 ? saved : null;
   } catch {
     return null;
   }
 }
 
-export function StageSplitHandle() {
+export function StageSplitHandle({ mode = "office" }: { mode?: keyof typeof SPLIT_MODES }) {
+  const config = SPLIT_MODES[mode];
   const ref = useRef<HTMLDivElement>(null);
   /** 지금 서 있는 몫 — 끄는 동안의 원본이고, 손을 떼면 이 값이 저장된다 */
-  const split = useRef(0.5);
+  const split = useRef<number>(config.initial);
   const dragging = useRef(false);
 
   /** 무대는 이 손잡이의 부모다 — 격자가 자리를 정하므로 참조를 따로 받을 게 없다 */
-  const apply = useCallback((fraction: number) => {
-    const stage = ref.current?.parentElement;
-    if (!stage) return;
-    split.current = fraction;
-    stage.style.setProperty("--split-user", `${(fraction * 100).toFixed(3)}%`);
-    ref.current?.setAttribute("aria-valuenow", String(Math.round(fraction * 100)));
-  }, []);
+  const apply = useCallback(
+    (fraction: number) => {
+      const stage = ref.current?.parentElement;
+      if (!stage) return;
+      split.current = fraction;
+      stage.style.setProperty(config.property, `${(fraction * 100).toFixed(3)}%`);
+      ref.current?.setAttribute(
+        "aria-valuenow",
+        String(Math.round(clampSplit(fraction, stage) * 100)),
+      );
+    },
+    [config.property],
+  );
 
-  /**
-   * 기억해 둔 비율은 **마운트 뒤에** 얹는다. 서버는 모르는 값이라 첫 렌더에 넣으면
-   * 하이드레이션이 어긋난다 — 그 순간 오른쪽 칸은 어차피 닫혀 있어(폭 0) 얹히는
-   * 것이 화면에 보이지 않는다.
-   */
   useEffect(() => {
     const stage = ref.current?.parentElement;
-    const saved = recall();
-    if (!stage || saved === null) return;
-    apply(clampSplit(saved, stage));
-  }, [apply]);
+    if (!stage) return;
+    const saved = recall(config.storageKey);
+    if (mode === "office") {
+      if (saved !== null) apply(clampSplit(saved, stage));
+      return;
+    }
+    // Keep the preference through mobile layouts; CSS clamps only the displayed width.
+    apply(saved ?? config.initial);
+    const observer = new ResizeObserver(() => {
+      ref.current?.setAttribute(
+        "aria-valuenow",
+        String(Math.round(clampSplit(split.current, stage) * 100)),
+      );
+    });
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [apply, config, mode]);
 
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const stage = ref.current?.parentElement;
@@ -112,8 +140,8 @@ export function StageSplitHandle() {
     if (!dragging.current || !stage) return;
     dragging.current = false;
     stage.style.transition = "";
-    remember(split.current);
-  }, []);
+    remember(config.storageKey, split.current);
+  }, [config.storageKey]);
 
   /**
    * 끌 수 있는 것은 **탭으로도 닿는다.** 왼쪽 화살표는 경계를 왼쪽으로 — 오른쪽
@@ -125,11 +153,17 @@ export function StageSplitHandle() {
       const stage = ref.current?.parentElement;
       if (!step || !stage) return;
       e.preventDefault();
-      const next = clampSplit(split.current + step, stage);
+      // Start at the visible boundary when a narrower window has clamped the preference.
+      const rightWidth = parseFloat(
+        getComputedStyle(stage).gridTemplateColumns.split(" ")[1] ?? "",
+      );
+      const width = stage.getBoundingClientRect().width;
+      const current = width > 0 && Number.isFinite(rightWidth) ? rightWidth / width : split.current;
+      const next = clampSplit(current + step, stage);
       apply(next);
-      remember(next);
+      remember(config.storageKey, next);
     },
-    [apply],
+    [apply, config.storageKey],
   );
 
   return (
@@ -138,10 +172,11 @@ export function StageSplitHandle() {
       className="split-handle"
       role="separator"
       aria-orientation="vertical"
-      aria-label="채팅과 오른쪽 칸의 경계"
+      aria-label={config.label}
+      title="드래그하거나 좌우 화살표로 너비 조절"
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-valuenow={50}
+      aria-valuenow={Math.round(config.initial * 100)}
       tabIndex={0}
       data-testid="split-handle"
       onPointerDown={onPointerDown}

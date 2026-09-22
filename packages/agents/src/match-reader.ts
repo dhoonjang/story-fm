@@ -41,8 +41,15 @@ import {
 } from "./gm-input";
 import { buildSegmentMessage } from "./match-script";
 import { mockReaderLlm } from "./mock-gm";
-import { buildOpsSchema, parseOps, tagged, type OpsInput } from "./orders-ops";
-import { TACTIC_CAPS } from "./tactic-orders";
+import {
+  buildOpsSchema,
+  parseOps,
+  tagged,
+  UnresolvedSchema,
+  unresolvedProperty,
+  type OpsInput,
+} from "./orders-ops";
+import { TACTIC_CAPS, PLAYER_POSITION_INSTRUCTION } from "./tactic-orders";
 import { ModelOutputError, readOutput, retryOnce } from "./retry";
 import { toToolSchema } from "./tool-schema";
 
@@ -117,9 +124,16 @@ export const MATCH_READER_SYSTEM = `당신은 경기를 읽는 판독기다. 이
 - **이득만 있는 판독은 없다.** 마킹은 마커의 본업을 비우고, 오버랩은 뒤를 연다 — 이득 줄을 쓴 포인트에는 그 대가 줄도 쓴다.
 - 포인트가 없으면 시트도 없다.
 
+# 공간 행동
+공간 경기에서는 포인트에 behavior를 붙일 수 있다. player는 감독 팀에서 행동할 선수 id, when은 attack(우리 소유)·defend(상대 소유)·always다.
+action은 press(공 또는 targetPlayer 압박), mark(targetPlayer 추적), cover(표적 뒤 공간), support(공 주변 지원), run(지역 침투), hold(기본 자리 유지)다.
+지역은 lane(left·center·right)과 band(defense·midfield·attack)로 고른다. 좌표나 성공 확률을 만들지 않는다.
+행동으로 표현한 공간 효과에는 같은 포인트의 edge 시트를 중복해서 붙이지 않는다. legs·temper·cohesion은 별도 효과다.
+감독이 해제하거나 대상이 나가지 않은 행동 지시는 같은 id와 behavior로 유지한다. 표적 없는 mark는 보내지 않는다.
+
 # 감독의 말
-- 판을 움직이는 말은 명령이 아니다. "붙어서 지워" · "그 뒤를 덮어" · "왼쪽으로 몰아"는 새 포인트와 시트다 — 지시가 판독의 한 줄을 공략하거나 보완하면 그 줄이 바뀌고 시트가 따라간다.
-- 자리·역할·교체·6축·키커·대화처럼 장부가 세는 것은 ops다. 감독이 정한 것만 — 말하지 않은 축·자리·역할은 보내지 않는다.
+- "붙어서 지워" · "그 뒤를 덮어" · "왼쪽으로 몰아"는 행동·포인트·시트로 옮긴다.
+- 자리·역할·교체·6축·키커·대화는 ops로 실행한다. 말하지 않은 축·역할은 보내지 않는다.
 - 옮길 수 있는 것은 다 싣고 막힌 말만 unresolved에 남긴다. 감독이 정하지 않고 맡긴 말("알아서 하세요")에는 채울 것이 없다 — 지어내지 않고 unresolved에 남긴다.
 - 훈련·육성·이적의 말은 여기서 옮기지 않고 unresolved에도 남기지 않는다.
 
@@ -142,7 +156,7 @@ export const MATCH_READER_SYSTEM = `당신은 경기를 읽는 판독기다. 이
 - substitute — 교체 한 건. out/in은 <ledger>의 id. 여럿이면 배열에 여럿.
 - set_tactics — 6축(1~5)과 갈래 중 감독이 말한 것만.
 - set_player_tactic — 그라운드에 있는 한 선수의 자리와 역할.
-  - 자리는 move로만 옮긴다: lane(left·center·right) × band(defense=우리 진영, midfield, attack=상대 진영). 지정하지 않은 축은 그대로 둔다. 좌표를 지어내지 않는다.
+  - ${PLAYER_POSITION_INSTRUCTION}
   - role은 그 자리의 역할이다 — 감독이 시키는 일이 「자리별 역할」의 한 종이면 그것을 적는다. 이름·id·약어 어느 표기든 걸린다. 표에 없는 말은 포인트와 시트로 옮긴다.
 - set_set_piece_takers — 세트피스 키커. corner·freeKick·penalty 중 감독이 말한 자리만 싣고, 지정을 풀라는 말이면 그 자리에 null을 넣는다.
 - set_set_piece_routine — 세트피스에 몇 명이 서는가. 감독이 말한 축만.
@@ -190,12 +204,9 @@ export function matchReaderOutputSchema(
         items: toToolSchema(SheetLineSchema),
         description: `포인트마다의 시트 줄 — 한 포인트에 ${SHEET_LINES_PER_POINT}줄까지, 모두 합쳐 ${SHEET_MAX}줄까지`,
       },
-      unresolved: {
-        type: "string",
-        minLength: 1,
-        maxLength: 200,
-        description: "어느 명령에도, 어느 포인트에도 담기지 않은 감독의 말",
-      },
+      unresolved: unresolvedProperty(
+        "어느 명령에도, 어느 포인트에도 담기지 않은 감독의 말. 남은 말이 없으면 생략하거나 빈 문자열",
+      ),
     },
   };
 }
@@ -212,7 +223,7 @@ const ReaderReportSchema = z.object({
   ops: z.record(z.unknown()).optional(),
   points: z.array(PointSchema).optional(),
   sheet: z.array(SheetLineSchema).optional(),
-  unresolved: z.string().min(1).max(200).optional(),
+  unresolved: UnresolvedSchema.optional(),
 });
 
 // ── 입력 블록 ─────────────────────────────────────────────
@@ -294,6 +305,15 @@ export function buildFactsBlock(state: GameState): string[] {
     packet[side].bench.map((p) => `${p.id}(${playerName(state, p.id)} ${p.position})`).join(", ");
   return [
     `<facts>`,
+    ...(pending.spatial
+      ? [
+          `공간 경기 ${pending.spatial.seconds.toFixed(1)}초 · 소유 ${pending.spatial.possession} · 공 소유자 ${pending.spatial.ball.owner ?? "없음"}`,
+          `공 위치(미터, 홈 골문 x=0) ${pending.spatial.ball.x.toFixed(1)},${pending.spatial.ball.y.toFixed(1)}`,
+          ...pending.spatial.players.map(
+            (p) => `${p.id}: 위치 ${p.x.toFixed(1)},${p.y.toFixed(1)} · 행동 ${p.action}`,
+          ),
+        ]
+      : []),
     ...bench,
     `기대 득점 ${digest.expectedGoals.home} : ${digest.expectedGoals.away} · 점유 ${digest.possession.home} : ${digest.possession.away}`,
     `존 — ${zones("home")} / ${zones("away")}`,
@@ -341,7 +361,7 @@ export function buildPointsBlock(state: GameState): string[] {
     `<points>`,
     ...points.map(
       (p) =>
-        `- ${p.id} [중요도 ${p.importance}${p.about.length > 0 ? ` · ${p.about.join(", ")}` : ""}] ${p.text}`,
+        `- ${p.id} [중요도 ${p.importance}${p.about.length > 0 ? ` · ${p.about.join(", ")}` : ""}] ${p.text}${p.behavior ? `\n  behavior: ${JSON.stringify(p.behavior)}` : ""}`,
     ),
     `</points>`,
   ];

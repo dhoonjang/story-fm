@@ -11,3 +11,4 @@ export * from "./match-engine";
 export * from "./zone-grid";
 export * from "./lineup-cover";
 export * from "./shot-model";
+export * from "./spatial-match";

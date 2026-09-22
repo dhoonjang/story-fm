@@ -418,6 +418,9 @@ export interface StoredCasterHistory {
 }
 
 export interface PendingMatch {
+  spatial?: import("@story-fm/domain").SpatialMatchState;
+  pendingSubs?: Array<{ out: string; in: string }>;
+  liveCommandIds?: string[];
   matchId: string;
   packet: StrengthPacket;
   ledger: MatchLedgerState;
