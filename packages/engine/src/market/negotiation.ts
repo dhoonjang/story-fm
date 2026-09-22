@@ -806,43 +806,15 @@ function pushOurRound(
 }
 
 /**
- * 오퍼에 답한다 — **누가 답할 차례인지는 협상이 안다.**
+ * **우리 오퍼에 상대가 답하는 문** — 코어 안에서만 열린다 (transfer.md §12-1).
  *
- * 우리가 넣은 오퍼면 GM이 상대 구단·선수가 되어 판정하고, 들어온 오퍼면 감독의
- * 뜻대로 답한다. 도구는 하나다 — 방향별로 갈라 두면 GM이 방향을 헷갈렸을 때
- * "답할 오퍼가 없습니다"만 돌려받고 협상이 멈춘다.
- *
- * 아래 두 갈래는 **방향만 다르다** — 관문·판정 카드·라운드 쌓기는 위의 세 헬퍼가
- * 함께 갖는다. 각자 적어 두면 한쪽만 고칠 때마다 같은 협상이 어느 쪽에서
- * 답했느냐에 따라 다르게 구른다.
+ * 부르는 자리는 둘뿐이다: 감독이 나선 자리의 협상 GM(`settleTableReply`)과, 감독이
+ * 나서지 않은 라운드를 굳히는 tick(`settleArrivedResponses`). 둘 다
+ * `settleCounterparty`를 지나 앵커 ± 한도로 잘린 값만 넣는다. **감독의 도구에는 이 문이
+ * 없다** — 평시 GM은 감독이 한 말을 전부 읽는 머리라 상대가 되면 감독의 속을 다 본
+ * 사람이 값을 부른다 (agents.md §4-1). 감독이 답하는 것은 들어온 오퍼뿐이고 그 문은
+ * `answerIncomingOffer`다.
  */
-export function answerOffer(
-  state: GameState,
-  input: {
-    negotiationId: string;
-    verdict: NegotiationVerdict;
-    fee?: number;
-    weeklyWage?: number;
-    /** 재계약의 조정에서 선수가 되부르는 계약 연수 (transfer.md §1) */
-    contractYears?: number;
-    /** 상대가 되부르는 분할 연수 — 조정에만 뜻이 있다 (transfer.md §5-2) */
-    paymentYears?: number;
-    note?: string;
-  },
-): MarketCommandResult {
-  const negotiation = state.negotiations.find((n) => n.id === input.negotiationId);
-  if (!negotiation) {
-    return {
-      ok: false,
-      message: `협상 "${input.negotiationId}"${josaOf(input.negotiationId, "을/를")} 찾지 못했습니다`,
-    };
-  }
-  // 마지막 라운드를 상대가 넣었으면 답할 사람은 **감독**이다
-  return incomingOffer(negotiation) !== null
-    ? answerIncomingOffer(state, input)
-    : respondOffer(state, input);
-}
-
 export function respondOffer(
   state: GameState,
   input: {
@@ -2121,9 +2093,10 @@ function resentBlockedMove(
 /**
  * 감독이 들어온 오퍼에 답한다 — 수락·거절·조정(더 부르기).
  *
- * `answerOffer`의 **반대 방향 갈래**다. 관문·판정 카드·라운드 쌓기는 `respondOffer`와
- * 같은 헬퍼를 쓰고, 다른 것은 방향뿐이다: 답하는 사람이 감독이라 답할 날을 기다리지
- * 않고, 되부른 조건이 `by: "us"` 라운드로 쌓여 **사는 쪽이 판정할 차례**가 된다.
+ * `respondOffer`의 **반대 방향 갈래**이자 **감독이 오퍼에 답하는 유일한 문**이다.
+ * 관문·판정 카드·라운드 쌓기는 `respondOffer`와 같은 헬퍼를 쓰고, 다른 것은 방향뿐이다:
+ * 답하는 사람이 감독이라 답할 날을 기다리지 않고, 되부른 조건이 `by: "us"` 라운드로
+ * 쌓여 **사는 쪽이 판정할 차례**가 된다.
  */
 export function answerIncomingOffer(
   state: GameState,
@@ -4148,18 +4121,29 @@ export function pendingVerdicts(state: GameState): Array<{
       });
       continue;
     }
-    const waiting = pendingOffer(negotiation);
-    if (waiting && waiting.respondsOn !== null && waiting.respondsOn <= state.date) {
+    /**
+     * **상대가 되부른 조정 — 감독의 차례다** (transfer.md §12-1).
+     *
+     * 답할 날이 된 라운드는 감독이 나섰으면 협상 GM이, 아니면 그날의 tick이 굳히므로
+     * (`settleArrivedResponses`) 감독을 세우는 것은 **굳은 뒤에 서 있는 조정**이다.
+     * 받는 문은 `accept_deal` 하나이고(그 값으로 우리 오퍼를 다시 세운다), 깎아 부르는
+     * 것은 새 오퍼다. 이 자리를 비워 두면 굳은 협상이 기한까지 조용히 흘러 무산된다.
+     */
+    if (standingCounter(negotiation)) {
       out.push({
         negotiation,
-        action: "respond_offer",
+        action: "accept_deal",
         subject: who,
-        label: `${who} 우리 오퍼에 답이 왔습니다 — respond_offer로 판정해야 합니다`,
+        label: `${who} 상대가 조정을 되불렀습니다 — 그대로 받으려면 accept_deal, 아니면 다시 제안`,
       });
       continue;
     }
     // 선수 쪽이 되부른 개인 조건 — 감독의 차례다 (§12-3)
-    if (!waiting && negotiation.personal?.counter && negotiation.personal.agreedOn === undefined) {
+    if (
+      !pendingOffer(negotiation) &&
+      negotiation.personal?.counter &&
+      negotiation.personal.agreedOn === undefined
+    ) {
       out.push({
         negotiation,
         action: "accept_deal",

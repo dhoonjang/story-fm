@@ -2522,7 +2522,7 @@ describe("방향은 모든 줄에 실린다", () => {
   function stage(
     kind: Negotiation["kind"],
     by: "us" | "them",
-    opts: { id?: string; answered?: boolean; status?: Negotiation["status"] } = {},
+    opts: { id?: string; countered?: boolean; status?: Negotiation["status"] } = {},
   ): Negotiation {
     const incoming = kind === "buy" || kind === "loan";
     const player = incoming ? theirs : ours;
@@ -2545,10 +2545,11 @@ describe("방향은 모든 줄에 실린다", () => {
           fee: 20_000_000,
           weeklyWage: 40_000,
           contractYears: 3,
-          // 우리 차례는 답을 기다리는 중이거나(미래) 답이 도착했거나(오늘)다
-          respondsOn: by === "us" ? (opts.answered ? state.date : addDays(state.date, 3)) : null,
+          // 우리가 넣은 오퍼는 답을 기다린다 — 답할 날이 되면 코어가 굳히므로 그 상태로 세울 자리가 없다
+          respondsOn: by === "us" ? addDays(state.date, 3) : null,
           probability: 50,
-          verdict: null,
+          // 상대의 차례에 `counter`를 적으면 **되부른 조정**, 비우면 상대가 넣은 오퍼다
+          verdict: opts.countered ? "counter" : null,
         },
       ],
     };
@@ -2586,23 +2587,23 @@ describe("방향은 모든 줄에 실린다", () => {
     expect(lineOf(stage("buy", "them"))).toContain(`${theirs.name}(${teamName(theirs.teamId)})`);
   });
 
-  it("주의 줄 라벨에도 갈래가 선다 — 상대 오퍼·우리 오퍼·합의", () => {
+  it("주의 줄 라벨에도 갈래가 선다 — 상대 오퍼·되부른 조정·합의", () => {
     const cases = [
       {
         id: stage("sell", "them", { id: "warn-sell" }).id,
         want: `${ours.name} 매각 상대 오퍼 도착`,
       },
       {
-        id: stage("buy", "us", { id: "warn-buy", answered: true }).id,
-        want: `${theirs.name} 영입 우리 오퍼에 답이`,
+        id: stage("buy", "them", { id: "warn-buy", countered: true }).id,
+        want: `${theirs.name} 영입 상대가 조정을 되불렀습니다`,
       },
       {
         id: stage("loan_out", "us", { id: "warn-loanout", status: "agreed" }).id,
         want: `${ours.name} 임대 송출 합의됨`,
       },
       {
-        id: stage("renew", "us", { id: "warn-renew", answered: true }).id,
-        want: `${ours.name} 재계약 우리 오퍼에 답이`,
+        id: stage("renew", "them", { id: "warn-renew", countered: true }).id,
+        want: `${ours.name} 재계약 상대가 조정을 되불렀습니다`,
       },
     ];
     const labels = new Map(pendingVerdicts(state).map((v) => [v.negotiation.id, v.label]));
@@ -4402,8 +4403,14 @@ describe("위임 — 단장이 대신 앉는 협상", () => {
     const { negotiation } = delegatedRenewal(state);
     // 답할 날 — 맡겼든 아니든 그날의 tick이 굳히는 자리다
     state.date = pendingOffer(negotiation)!.respondsOn!;
-
     expect(arrivedResponses(state).map((n) => n.id)).toContain(negotiation.id);
+
+    /**
+     * 감독을 세우는 것은 **굳은 뒤에 서 있는 조정**이다 — 굳기 전에는 맡겼든 아니든
+     * 아무도 서지 않는다. 굳히고 나서도 맡긴 자리는 빠진다.
+     */
+    const countered = respondOffer(state, { negotiationId: negotiation.id, verdict: "counter" });
+    expect(countered.ok, countered.message).toBe(true);
     expect(pendingVerdicts(state).map((v) => v.negotiation.id)).not.toContain(negotiation.id);
 
     /**
