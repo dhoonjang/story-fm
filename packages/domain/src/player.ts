@@ -11,12 +11,7 @@ export const RATING_MAX = 99;
 /** 체력 눈금의 위끝 — 0~100, 높을수록 좋다 */
 export const CONDITION_MAX = 100;
 
-/**
- * **누적 피로 눈금의 위끝 — 기준점은 0이다** (player.md §5.5).
- *
- * 값이 없으면 0으로 읽으므로(`FATIGUE_BASE`) 옛 세이브의 셈이 한 칸도 달라지지 않는다 —
- * **잔고**라 빈 통이 곧 기준점이고, 그래서 스키마를 열어 두는 것으로 족하다.
- */
+/** **누적 피로 눈금의 위끝 — 기준점은 0이다** (player.md §5.5). 잔고라 빈 통이 곧 기준점이다 */
 export const FATIGUE_MAX = 100;
 
 /** 0~99 능력치 스케일 — 선수·감독 공통 (player.md §1) */
@@ -190,6 +185,13 @@ export const WeightSchema = z.number().int().min(50).max(120);
  */
 export const INJURY_PRONENESS_MIN = 0.55;
 export const INJURY_PRONENESS_MAX = 2.2;
+/**
+ * 부상 성향의 기준값 — 평균 선수. 새 선수는 여기서 출발한다.
+ *
+ * 다치면 오르고 뛰면 내려가는 균형이 이 값에 고정된다(`squad/injury.ts`) — 하강 폭을
+ * 상승의 기댓값에서 유도하므로 리그 평균이 여기 머문다.
+ */
+export const PRONENESS_BASE = 1;
 
 /** 체격 한 줄 — "188cm · 82kg" */
 export function physiqueLabel(height?: number, weight?: number): string {
@@ -403,10 +405,10 @@ export function weightSlotOf(position: string): WeightSlot {
  * **자리의 공격 지분** — 그 자리에서 "어디에 서는가"와 "어디로 가는가"가 나뉘는 비율
  * (player.md §13.5). 센터백은 대부분 서는 일이고 9번은 대부분 가는 일이다.
  *
- * 두 자리에서 읽는다. ① `POSITION_WEIGHTS`의 `positioning`·`offTheBall` 무게가 옛
- * 한 몫을 이 비율로 나눈 것이고, ② 시드 파생(`deriveAxes`)과 옛 세이브
- * (`splitPositioningAxis`)이 옛 한 값을 같은 비율로 기울여 두 축을 세운다.
- * **같은 수를 두 곳이 읽어야** 두 축의 가중합이 나누기 전과 같다.
+ * 두 자리에서 읽는다. ① `POSITION_WEIGHTS`의 `positioning`·`offTheBall` 무게가 한
+ * 몫을 이 비율로 나눈 것이고, ② 시드 파생(`deriveAxes`)이 `positioning` 한 값을 같은
+ * 비율로 기울여 두 축을 세운다. **같은 수를 두 곳이 읽어야** 두 축의 가중합이
+ * 나누기 전과 같다.
  */
 export const SLOT_ATTACK_SHARE: Record<WeightSlot, number> = {
   GK: 0.1,
@@ -421,11 +423,11 @@ export const SLOT_ATTACK_SHARE: Record<WeightSlot, number> = {
 };
 
 /**
- * 옛 `positioning` 한 값을 두 축으로 — **기울임은 값을 만들지 않고 나눠 가진다.**
+ * 시드의 `positioning` 한 값을 두 축으로 — **기울임은 값을 만들지 않고 나눠 가진다.**
  * 두 축의 가중합이 `w × base`, 곧 나누기 전과 같다 (player.md §13.5).
  *
  * `SPLIT_TILT`가 1이면 두 축이 태클·결정력의 복사본이 되고 0이면 나눈 적이 없는
- * 것이 된다. 시드 파생과 옛 세이브가 **같은 이 함수**를 부른다.
+ * 것이 된다.
  */
 export const SPLIT_TILT = 0.55;
 
@@ -1396,7 +1398,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
  * 개인 기술로 해낸다. 수비는 라인·커버가 곧 조직이라 중원 다음으로 민감하다.
  *
  * 1.0이 기준이고, 이 배율만큼 전술 적응도의 **감점 폭**이 커지거나 줄어든다
- * (`famFactor` — sim/strength-packet.ts). 초안 값이다.
+ * (`famFactor` — sim/match-ability.ts). 초안 값이다.
  */
 export const TACTICAL_SENSITIVITY: Record<WeightSlot, number> = {
   GK: 0.8, // 라인 높이에 따라 스위퍼 역할이 갈리는 정도
@@ -1816,8 +1818,7 @@ export function retiresAtSeasonEnd(age: number, overall: number): boolean {
 export const PlayerStateSchema = z.object({
   /**
    * 폼 **−1.0 ‥ +1.0** (실수) — 1이 곧 절정, −1이 곧 바닥이라 값 자체가 비율로
-   * 읽힌다. 규칙은 `engine/form.ts` 한곳에 있다
-   * (옛 −3~3 세이브는 로드할 때 3으로 나눠 옮긴다 — `persistence.ts`).
+   * 읽힌다. 규칙은 `engine/form.ts` 한곳에 있다.
    */
   form: z.number().min(-1).max(1),
   /**
@@ -1827,7 +1828,6 @@ export const PlayerStateSchema = z.object({
    * "잘 쉬었지만 폼이 꺾인 선수"와 "지쳤지만 기세가 오른 선수"가 함께 성립한다.
    *
    * 경기·훈련이 깎고 휴식·회복이 채운다. 왜 낮은지는 `moodOf`가 말한다.
-   * 옛 세이브는 로드할 때 두 값을 합쳐 옮긴다 (`persistence.ts`).
    */
   condition: z.number().int().min(0).max(CONDITION_MAX),
   /**
@@ -1840,10 +1840,8 @@ export const PlayerStateSchema = z.object({
    * ⚠️ **이력 테이블에서 파생하지 않고 저장한다.** INJURY 표에는 다친 기록만
    * 있고 "안 다치고 몇 경기를 뛰었나"가 없어서, 스캔으로는 오르는 쪽만 셀 수 있다.
    * 그러면 값이 1 아래로 못 내려가 리그 평균이 시즌마다 위로 밀린다.
-   *
-   * 옛 세이브엔 없다 — 없으면 1.0(`PRONENESS_BASE`)으로 읽고 버전을 올리지 않는다.
    */
-  injuryProneness: z.number().min(INJURY_PRONENESS_MIN).max(INJURY_PRONENESS_MAX).optional(),
+  injuryProneness: z.number().min(INJURY_PRONENESS_MIN).max(INJURY_PRONENESS_MAX),
   /**
    * **맥락을 읽고 다시 쓴 심경 한 줄** — 코어 앵커(`moodAnchor`) 위에 얹힌다.
    *
@@ -1853,40 +1851,27 @@ export const PlayerStateSchema = z.object({
    *
    * `on`은 쓰인 날이다 — 며칠이 지나면 코어 앵커로 돌아간다. 지난주의 결이
    * 오늘의 심경인 척하지 않게 하려는 것이고, 부상·정지처럼 **사실이 바뀌면**
-   * 날짜와 무관하게 코어가 이긴다 (mood.ts).
-   *
-   * 옛 세이브엔 없다 — 없으면 앵커를 쓰고 버전을 올리지 않는다.
+   * 날짜와 무관하게 코어가 이긴다 (mood.ts). 없으면 앵커가 곧 심경이다.
    */
   moodNote: z.object({ text: z.string().min(1).max(MOOD_NOTE_MAX), on: DateString }).optional(),
-  /**
-   * ⚠️ **날짜 게이트가 있던 시절의 자리** — 지금은 아무 데서도 읽지 않는다.
-   *
-   * 대화는 하루에 몇 번이든 판정이 서고, 되풀이를 자르는 것은 게이트가 아니라
-   * `talkMorale`의 합계 상한이다 (career.md §2). 옛 세이브가 들고 오는 값을 반려하지
-   * 않으려고 스키마에만 남는다 — 새로 쓰이지 않는다.
-   */
-  talkedOn: DateString.optional(),
   /**
    * **최근 이레의 날짜별 대화 사기 합계** — 하루 ±8 · 이레 ±20을 세우는 장부
    * (career.md §2).
    *
    * 파생하지 않고 저장하는 이유는 `moodNote`·`SETTLING_EVENT`와 같다: 원본이 그
-   * 구간의 대화인데 그건 어디에도 표로 남지 않는다. 게이트를 걷은 자리에 이것이
-   * 들어섰다 — 대화를 **막지 않고** 그 대화가 판에 남기는 몫만 자른다.
+   * 구간의 대화인데 그건 어디에도 표로 남지 않는다. 대화를 **막지 않고** 그 대화가
+   * 판에 남기는 몫만 자른다.
    *
    * 이레를 지난 줄은 쓸 때마다 걷히므로 장부가 자라지 않는다.
-   * 옛 세이브엔 없다 — 없으면 빈 장부로 읽고 버전을 올리지 않는다.
    */
-  talkMorale: z.array(z.object({ on: DateString, sum: z.number() })).optional(),
+  talkMorale: z.array(z.object({ on: DateString, sum: z.number() })),
   /**
    * **처음 완장을 찬 날** — 주장 지명의 체력 보너스를 선수당 한 번으로 자르는 문
    * (career.md §2). 완장은 몇 번이고 오가지만 처음 채워지는 순간의 무게는 한 번뿐이라,
    * 두 선수를 번갈아 지명하는 것만으로 둘 다 체력이 차던 자리다.
    *
    * 지금 누가 주장인지는 `isCaptain`이 답한다 — 이 값은 지난 사실이라 완장을 넘겨도
-   * 지워지지 않는다.
-   *
-   * 옛 세이브엔 없다 — 없으면 아직 완장을 찬 적 없는 것으로 읽고 버전을 올리지 않는다.
+   * 지워지지 않는다. 없으면 아직 완장을 찬 적 없다.
    */
   captainedOn: DateString.optional(),
   /**
@@ -1898,22 +1883,8 @@ export const PlayerStateSchema = z.object({
    *
    * 1군으로 올리면 지워진다 — 다시 내리면 그날부터 새로 센다. 시드가 2군에 세워 둔
    * 선수에겐 없다: 감독이 내린 적 없는 선수는 방치의 대상도 아니다.
-   *
-   * 옛 세이브엔 없다 — 없으면 감독이 내린 적 없는 것으로 읽고 버전을 올리지 않는다.
    */
   demotedOn: DateString.optional(),
-  /**
-   * **이적 요청이 선 날** — 다가옴 사다리의 꼭대기(계단 5)에서 에이전트가 세운다
-   * (people.md §8). 서 있는 동안 AI 시장이 이 선수를 노리기 쉬워지고, 그 선수의
-   * 다가옴 압력은 더 쌓이지 않는다.
-   *
-   * 걷히는 길은 둘뿐이다: 불만이 전부 풀리면 거둬들이고(`tickApproaches`), 팀을
-   * 떠나면 다른 상태와 함께 지워진다(`clearDepartedState`). 감독의 스탠스는 요청을
-   * 지우지 못한다.
-   *
-   * 옛 세이브엔 없다 — 없으면 요청한 적 없는 것으로 읽고 버전을 올리지 않는다.
-   */
-  transferRequestedOn: DateString.optional(),
   /**
    * **주 포지션 묶음 밖 선발이 이어진 경기 수** — 자리 밖 기용 불만의 유일한 원본
    * (people.md §5).
@@ -1924,10 +1895,8 @@ export const PlayerStateSchema = z.object({
    *
    * 제자리에 서거나 선발에서 빠지면 0으로 돌아간다. 날이 아니라 경기로 세는 이유는
    * 그것이 선수가 실제로 겪는 단위여서다.
-   *
-   * 옛 세이브엔 없다 — 없으면 0으로 읽고 버전을 올리지 않는다.
    */
-  outOfPositionRun: z.number().int().min(0).optional(),
+  outOfPositionRun: z.number().int().min(0),
   /**
    * **지금 번호를 받은 날** — 등번호가 움직인 사실의 유일한 원본 (player.md §1.1).
    *
@@ -1936,14 +1905,14 @@ export const PlayerStateSchema = z.object({
    * 이유로 시작점을 저장한다.
    *
    * 감독이 옮긴 번호에만 선다 — 세계가 배정한 번호(입단·이적의 자리 관례)는 사건이
-   * 아니라 기본값이다. 옛 세이브엔 없다(optional, SAVE_VERSION 유지).
+   * 아니라 기본값이다.
    */
   squadNumberOn: DateString.optional(),
   /**
    * **감독이 옮기기 전에 달던 번호** — 뺏김의 사실이다 (people.md §5).
    *
    * `squadNumberOn`과 짝이다: 언제 바뀌었는지만으로는 무엇을 잃었는지가 서지 않는다.
-   * 새 번호를 받을 때마다 덮어쓰고, 옛 세이브엔 없다(optional).
+   * 새 번호를 받을 때마다 덮어쓴다. 없으면 잃은 번호가 없다.
    */
   formerSquadNumber: z.number().int().min(1).max(SQUAD_NUMBER_MAX).optional(),
   /**
@@ -1957,8 +1926,6 @@ export const PlayerStateSchema = z.object({
    *
    * 감독의 재계약 성사가 거둘 수 있다 — 나이 상한 안에서만(`withdrawRetirement`).
    * `on`이 예고한 날이다 — 회견·근황·심경이 "예고한 지 며칠째"를 여기서 센다.
-   *
-   * 옛 세이브엔 없다 — 없으면 예고가 선 적 없는 것으로 읽고 버전을 올리지 않는다.
    */
   retiringAfterSeason: z.object({ on: DateString, reason: RetirementReasonSchema }).optional(),
   /**
@@ -1975,10 +1942,8 @@ export const PlayerStateSchema = z.object({
    * ⚠️ **정수가 아니다** — 전술 적응도와 같은 이유로 실수로 둔다 (player.md §7.1).
    * 하루치 감쇠가 평형 근처에서 1 아래라, 반올림해 저장하면 그 구간에서 값이
    * 통째로 멈춘다.
-   *
-   * 옛 세이브엔 없다 — 없으면 0(`FATIGUE_BASE`)으로 읽고 버전을 올리지 않는다.
    */
-  fatigue: z.number().min(0).max(FATIGUE_MAX).optional(),
+  fatigue: z.number().min(0).max(FATIGUE_MAX),
   /**
    * **누적 피로가 「과부하」를 넘어선 날** — "며칠째 과부하인가"를 답하는 유일한 자리
    * (people.md §5).
@@ -1988,7 +1953,6 @@ export const PlayerStateSchema = z.object({
    * 시작점 없이는 기간을 파생할 표가 어디에도 없다.
    *
    * 문턱 아래로 내려가면 지워진다 — 다시 넘으면 그날부터 새로 센다.
-   * 옛 세이브엔 없다 — 없으면 넘은 적 없는 것으로 읽고 버전을 올리지 않는다.
    */
   overloadedOn: DateString.optional(),
   /**
@@ -1998,12 +1962,9 @@ export const PlayerStateSchema = z.object({
    * 시즌만** 남기 때문이다 — 합쳐서 세면 통산이 세 시즌 뒤에 사라진다. 새 게임의
    * 선수는 0이 아니다: 세계 생성이 나이·서열로 통산을 미리 세운다
    * (`seedInternationalCaps`). 그러지 않으면 서른 살 주전이 첫 소집에서 데뷔한다.
-   *
-   * 옛 세이브엔 없다 — 없으면 0으로 읽고 버전을 올리지 않는다. 0인 선수에게는
-   * 칸을 적지 않는다(세계의 대다수가 그렇다).
    */
-  caps: z.number().int().min(0).optional(),
-  internationalGoals: z.number().int().min(0).optional(),
+  caps: z.number().int().min(0),
+  internationalGoals: z.number().int().min(0),
   /**
    * **여름 대회를 뛰고 늦게 합류하는 날** (→ docs/data/competition.md §5-1).
    *
@@ -2012,31 +1973,47 @@ export const PlayerStateSchema = z.object({
    * 않는다(나라 서열은 그해 전환 시점의 것이다). 그날까지 훈련장에도 프리시즌
    * 친선에도 서지 않는다.
    *
-   * 대회가 없는 해엔 지워진다. 옛 세이브엔 없다(optional — SAVE_VERSION 유지).
+   * 대회가 없는 해엔 지워진다 — 없으면 늦게 오는 사람이 아니다.
    */
   summerReturn: DateString.optional(),
 });
 export type PlayerState = z.infer<typeof PlayerStateSchema>;
 
-/** 통산 A매치 출전 — 없으면 0. 읽는 자리마다 `?? 0`을 적지 않게 하는 문 */
+/** 통산 A매치 출전 */
 export function capsOf(state: Pick<PlayerState, "caps">): number {
-  return state.caps ?? 0;
+  return state.caps;
 }
 
-/** 통산 A매치 골 — 없으면 0 */
+/** 통산 A매치 골 */
 export function internationalGoalsOf(state: Pick<PlayerState, "internationalGoals">): number {
-  return state.internationalGoals ?? 0;
+  return state.internationalGoals;
 }
 
 /** 새 선수·새 시즌이 출발하는 누적 피로 — 여름이 통을 비웠다 (player.md §5.5) */
 export const FATIGUE_BASE = 0;
 
-/**
- * 저장된 누적 피로를 읽는 **유일한 문** — 없으면 빈 통이다.
- * 읽는 자리가 저마다 `?? 0`을 적으면 기본값이 코드베이스에 흩어진다.
- */
+/** 저장된 누적 피로를 읽는 **유일한 문** — 기본값이 코드베이스에 흩어지지 않게 한다 */
 export function fatigueOf(state: Pick<PlayerState, "fatigue">): number {
-  return state.fatigue ?? FATIGUE_BASE;
+  return state.fatigue;
+}
+
+/**
+ * **새 선수의 상태** — 시드 인스턴스·유스·보강 영입이 같은 함수로 출발한다.
+ *
+ * 폼·체력만 부르는 쪽이 정한다. 나머지는 아직 아무 일도 겪지 않은 몸의 장부라
+ * 기준값에서 시작한다 — 새 선수를 만드는 자리가 셋이라 각자 적으면 조용히 갈린다.
+ */
+export function freshPlayerState(input: { form: number; condition: number }): PlayerState {
+  return {
+    form: input.form,
+    condition: input.condition,
+    injuryProneness: PRONENESS_BASE,
+    talkMorale: [],
+    outOfPositionRun: 0,
+    fatigue: FATIGUE_BASE,
+    caps: 0,
+    internationalGoals: 0,
+  };
 }
 
 /** 누적 피로를 0~100 안으로 — 모든 변화가 이 문을 지난다 */
@@ -2153,13 +2130,10 @@ export const GamePlayerSchema = z.object({
   catalogId: z.string().min(1).nullable(),
   /** 소속 팀 — 이적 = 이 값 변경 (반드시 TRANSFER 기록과 원자적) */
   teamId: z.string().min(1),
-  /**
-   * 구단 내부 스쿼드. 구 세이브에는 없을 수 있으며 엔진은 전술 배치·전력순으로
-   * 보정한다. reserve는 별도 경기를 만들지 않는 개발 스쿼드다.
-   */
-  squadLevel: z.enum(["first", "reserve"]).optional(),
+  /** 구단 내부 스쿼드. reserve는 별도 경기를 만들지 않는 개발 스쿼드다 */
+  squadLevel: z.enum(["first", "reserve"]),
   name: z.string().min(1),
-  /** 현재 소속팀의 등번호. 미배정·구 세이브·자유계약 선수는 없음 */
+  /** 현재 소속팀의 등번호. 미배정·자유계약 선수는 없음 */
   squadNumber: z.number().int().min(1).max(SQUAD_NUMBER_MAX).optional(),
   /** 출생년월일 (YYYY-MM-DD). 나이는 플레이 날짜 기준으로 계산 (ageOf) */
   birthdate: DateString,
@@ -2168,14 +2142,14 @@ export const GamePlayerSchema = z.object({
    * 홈그로운 자격을 가진 **협회(나라)**. 등록 명단의 홈그로운 판정은 이 값과
    * 소속 클럽의 리그 국가를 비교한다 — 잉글랜드에서 자란 선수는 잉글랜드 안에서
    * 이적해도 홈그로운이지만, 라리가로 가면 아니다 (squad-rules.ts).
-   * 구 세이브엔 없어 optional (SAVE_VERSION 유지).
+   * 없으면 어느 리그에서도 홈그로운이 아니다.
    */
   homegrownCountry: z.string().optional(),
   /**
    * **국적 — 그 선수가 대표하는 협회** (FIFA 3자 코드 · `nationality.ts`).
    * 홈그로운과 다른 축이다: 홈그로운은 어디서 자랐는가이고 이것은 누구인가라,
    * 비EU 쿼터·대표팀 소집·워크퍼밋이 전부 이 값에 걸린다.
-   * 구 세이브엔 없어 optional — 로드 보정이 카탈로그·리그 협회에서 채운다.
+   * 없으면 소속 구단의 나라가 협회에 닿지 않는 선수다 — 소집 표에 서지 않는다.
    */
   nationality: z.string().optional(),
   /**
@@ -2183,9 +2157,9 @@ export const GamePlayerSchema = z.object({
    * 여권의 개수가 아니라서, 셋째 칸은 판정에 아무것도 더하지 않는다.
    */
   secondNationality: z.string().optional(),
-  /** 주발 — 구 세이브엔 없어 optional (없으면 양발로 다뤄 보정 0) */
+  /** 주발 — 카탈로그 항목이 들지 않았으면(어드민 생성) 없고, 양발로 다뤄 보정 0 */
   foot: FootSchema.optional(),
-  /** 키(cm) · 체중(kg) — 묘사용. 구 세이브엔 없어 optional */
+  /** 키(cm) · 체중(kg) — 묘사용. 카탈로그 항목이 들지 않았으면 없다 */
   height: HeightSchema.optional(),
   weight: WeightSchema.optional(),
   attributes: PlayerAttributesSchema,
@@ -2199,15 +2173,13 @@ export const GamePlayerSchema = z.object({
    *
    * 서열(리더 그룹)은 저장하지 않고 파생하는데 이 값만 저장하는 것은 **감독의
    * 결정**이라서다 — 장부 어디에서도 파생되지 않는 유일한 라커룸 사실이다.
-   *
-   * 옛 세이브엔 없다 — 없으면 부주장이 없는 것으로 읽고 버전을 올리지 않는다.
    */
-  isViceCaptain: z.boolean().optional(),
+  isViceCaptain: z.boolean(),
   /**
    * 임대 중이면 원소속과 복귀일 — `teamId`는 **지금 뛰는 팀**이라 임대를 나가면
    * 그쪽으로 바뀐다. 되돌릴 근거가 여기 있어야 복귀가 파생된다.
    * `wageShare`는 **임대 팀이 내는 주급 비율**(0~1) — 주급 총액이 계약 합계에서
-   * 파생되므로 분담도 파생으로 반영된다. 옛 세이브엔 없다(optional).
+   * 파생되므로 분담도 파생으로 반영된다. 없으면 임대 중이 아니다.
    */
   loan: z
     .object({
@@ -2223,10 +2195,8 @@ export const GamePlayerSchema = z.object({
    * 판정이 낸 값을 곡선으로 깎아 여기 쌓고(`applyAttributeStep`), 1을 넘는 순간
    * 능력치가 1 오른다. 이 그릇이 없으면 스물아홉 살 85짜리 선수는 아무리 훈련해도
    * 영영 그대로다 — 곡선이 그의 몫을 언제나 1보다 작게 만들기 때문이다.
-   *
-   * 구 세이브엔 없어 optional (SAVE_VERSION 유지).
    */
-  growthCarry: z.record(z.string(), z.number()).optional(),
+  growthCarry: z.record(z.string(), z.number()),
 });
 export type GamePlayer = z.infer<typeof GamePlayerSchema>;
 /** 관례상 짧은 별칭 — 코드 전반에서 Player로 쓴다 */
@@ -2456,7 +2426,7 @@ export function initialCaptainOf<
 >(squad: readonly P[], startingXi: readonly string[], asOf: string): P | null {
   const xi = new Set(startingXi);
   const starters = squad.filter((p) => xi.has(p.id));
-  const firstTeam = squad.filter((p) => (p.squadLevel ?? "first") === "first");
+  const firstTeam = squad.filter((p) => p.squadLevel === "first");
   const from = starters.length > 0 ? starters : firstTeam.length > 0 ? firstTeam : squad;
   // 동점은 id 순 — 같은 시드는 언제나 같은 주장을 세운다 (서열과 같은 규칙)
   return (

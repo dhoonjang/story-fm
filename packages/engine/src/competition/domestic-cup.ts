@@ -30,7 +30,7 @@ import { clubsOfCountry, leagueOfTeam } from "../data/team-catalog";
 import { tierOfTeamIn } from "../core/club-tier";
 import { isTopFlightIn } from "./promotion";
 import { reservedEuroDatesFor } from "./euro-knockout";
-import { migratePrizeKeys, payPrize, prizeKey, prizeLabel, type PrizeKind } from "./prize";
+import { payPrize, type PrizeKind } from "./prize";
 import { registerUserEntries, reportOurTie, stageMatchesOf, tieLegsOf } from "./knockout";
 import { clearForCup } from "./reschedule";
 import { shuffled } from "../core/rng";
@@ -535,31 +535,6 @@ function createTie(
   return legs;
 }
 
-/**
- * 옛 세이브 호환 — 표시 라벨을 그대로 멱등 키로 쓰던 시절의 `prizesPaid`를 안정
- * 키로 옮긴다. 옮기지 않으면 로드가 곧바로 부르는 `advanceDomesticCups`의 라운드
- * 정산이 옛 키를 못 알아보고 같은 상금을 한 번 더 지급한다.
- *
- * 라벨이 시즌을 달고 있어 지난 시즌 기록까지 그대로 옮겨온다. 새 키는 이 표에
- * 없으므로 두 번 돌려도 결과가 같다.
- */
-export function migrateDomesticPrizeKeys(state: GameState): void {
-  const moved = new Map<string, string>();
-  for (const cup of domesticCupCatalog()) {
-    for (let season = 1; season <= state.season; season++) {
-      moved.set(prizeLabel(cup, season, "우승"), prizeKey(cup.id, "winner", season));
-      moved.set(prizeLabel(cup, season, "준우승"), prizeKey(cup.id, "runner-up", season));
-      for (const stage of DOMESTIC_STAGES) {
-        moved.set(
-          prizeLabel(cup, season, `${domesticStageLabel(cup, stage)} 진출`),
-          prizeKey(cup.id, `stage:${stage}`, season),
-        );
-      }
-    }
-  }
-  migratePrizeKeys(state, moved);
-}
-
 /** 라운드 진출 상금 — 그 단계에 오른 모든 팀에게 (중복 지급은 원장 키가 막는다) */
 function payRoundPrize(
   state: GameState,
@@ -727,7 +702,7 @@ function createStage(
   }
   if (created.length === 0) return;
 
-  registerUserEntries(state, created, CUP_MIDWEEK_KICKOFF);
+  registerUserEntries(state, created);
   payRoundPrize(state, cup, stage, teams, digest);
   scheduleNextDraw(state, cup, stage, created, digest);
 
@@ -864,8 +839,8 @@ const LATE_ADOPTION_GRACE_DAYS = 21;
  * 매 tick의 게이트로 쓰면 시즌 중반에 대회가 통째로 멈춘다.
  *
  * 시작 조건 둘:
- * ① 참가 클럽 32팀이 **세이브에 실제로 있어야** 한다. 2부 클럽이 없던 옛 세이브를
- *    마이그레이션 없이 열면 존재하지 않는 팀으로 대진을 짜게 된다.
+ * ① 참가 클럽 32팀이 **세이브에 실제로 있어야** 한다 — 축소 세계(`world`)는 2부를
+ *    통째로 빼놓을 수 있고, 없는 팀으로 대진을 짤 수는 없다.
  * ② 1라운드 추첨일이 아직 크게 지나지 않았어야 한다. 시즌 중반에 컵이 새로 붙는
  *    세이브에 다섯 라운드를 남은 몇 주에 욱여넣으면 일정이 무너진다 — 그런 시즌은
  *    조용히 건너뛰고 다음 시즌부터 정상으로 돈다.

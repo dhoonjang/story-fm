@@ -2,6 +2,7 @@ import type { MatchEvent, MatchPhase, MatchSide, MatchStatLine } from "@story-fm
 import {
   MATCHDAY_BENCH,
   PHASE_END,
+  PHASE_START,
   TEAM_EVENT_TYPES,
   isExtraTime,
   josa,
@@ -11,9 +12,8 @@ import {
 /**
  * 경기 장부 — 사건을 검증해 기록하는 결정적 코어 (match.md §5).
  *
- * **사건을 만드는 쪽도 코어다**(`match-engine.ts` 구간 시뮬 · 엔진의 간이 시뮬).
- * 그래서 여기 검증은 LLM 방어가 아니라 **시뮬레이터의 계약 검사**이고, 반려는
- * 시뮬레이터의 버그를 뜻한다. LLM은 이 장부가 기록한 것을 중계·연출할 뿐이다.
+ * **사건을 만드는 쪽도 코어다**(실시간 경기의 말 · 엔진의 간이 시뮬). 그래서 여기 검증은
+ * LLM 방어가 아니라 **시뮬레이터의 계약 검사**이고, 반려는 시뮬레이터의 버그를 뜻한다.
  */
 
 export interface TeamLedger {
@@ -28,7 +28,10 @@ export interface TeamLedger {
 }
 
 export interface MatchLedgerState {
+  /** 규정분 — 그 하프의 끝을 넘지 않는다 */
   minute: number;
+  /** 추가시간의 분 — 규정분이 하프의 끝일 때만 0보다 크다 */
+  added: number;
   phase: MatchPhase;
   score: { home: number; away: number };
   events: MatchEvent[];
@@ -37,68 +40,97 @@ export interface MatchLedgerState {
   sentOff: string[];
   /**
    * 이 경기가 친선인가 — **교체 한도가 여기서 갈린다** (`subLimitsOf`, 9인).
-   *
-   * 장부가 이 사실을 쥐는 것은 한도를 검증하는 자리가 장부이기 때문이다. 대회 id는
-   * 경기 기록의 것이고 장부는 대진도 대회도 모르므로, 갈래 하나만 받아 둔다.
-   * 옛 세이브엔 없다(optional) — 없으면 공식전 한도로 읽는다 (SAVE_VERSION 유지).
+   * 장부가 이 사실을 쥐는 것은 한도를 검증하는 자리가 장부이기 때문이다.
    */
-  friendly?: boolean;
+  friendly: boolean;
   /**
-   * 선수별 누적 기록 — **사건이 아닌 것들**(패스·전진 패스·슛·xg·선방).
-   *
+   * 선수별 누적 기록 — **사건이 아닌 것들**(패스·태클·거리·슛·xg·선방).
    * 골·도움·카드는 여기 없다: 사건 목록이 원본이고 두 벌로 두면 조용히 갈린다.
-   * 옛 세이브엔 없다(optional) — 없으면 빈 것으로 읽는다.
    */
-  stats?: Record<string, MatchStatLine>;
+  stats: Record<string, MatchStatLine>;
 }
 
 /** 빈 기록 한 줄 — 누적 기록의 출발점이 한 곳이어야 칸이 늘 때 갈리지 않는다 */
 export function emptyStatLine(): MatchStatLine {
   return {
     passes: 0,
+    passesCompleted: 0,
     progressive: 0,
     shots: 0,
+    shotsOnTarget: 0,
     xg: 0,
     scoringExpectation: 0,
     saves: 0,
     corners: 0,
     fouls: 0,
+    tackles: 0,
+    tacklesWon: 0,
+    interceptions: 0,
+    dribbles: 0,
+    dribblesWon: 0,
+    crosses: 0,
+    aerialsWon: 0,
+    offsides: 0,
+    distance: 0,
+    highSpeed: 0,
+    sprint: 0,
+    sprints: 0,
   };
 }
 
-/** 구간이 만든 증가분을 장부에 더한다 — 패스는 사건이 아니므로 이 경로로만 쌓인다 */
+/** 두 줄을 더한다 — 칸이 늘 때 한 곳만 고치면 된다 */
+export function addStatLine(a: MatchStatLine, b: MatchStatLine): MatchStatLine {
+  const out = emptyStatLine();
+  for (const key of Object.keys(out) as (keyof MatchStatLine)[]) {
+    out[key] = a[key] + b[key];
+  }
+  out.xg = round2(out.xg);
+  out.scoringExpectation = round2(out.scoringExpectation);
+  return out;
+}
+
+/** 틱이 만든 증가분을 장부에 더한다 — 패스·거리는 사건이 아니므로 이 경로로만 쌓인다 */
 export function addStats(
   state: MatchLedgerState,
   add: Record<string, MatchStatLine>,
 ): MatchLedgerState {
-  const stats = { ...(state.stats ?? {}) };
+  const stats = { ...state.stats };
   for (const [id, line] of Object.entries(add)) {
-    const before = stats[id] ?? emptyStatLine();
-    stats[id] = {
-      passes: before.passes + line.passes,
-      progressive: before.progressive + line.progressive,
-      shots: before.shots + line.shots,
-      xg: round2(before.xg + line.xg),
-      scoringExpectation: round2((before.scoringExpectation ?? 0) + line.scoringExpectation),
-      saves: before.saves + line.saves,
-      // 옛 세이브의 줄에는 없는 칸이라 0으로 읽는다 (SAVE_VERSION 유지)
-      corners: (before.corners ?? 0) + line.corners,
-      fouls: (before.fouls ?? 0) + line.fouls,
-    };
+    stats[id] = addStatLine(stats[id] ?? emptyStatLine(), line);
   }
   return { ...state, stats };
 }
 
 /**
- * 시계만 앞으로 민다 — **사건 없이 흐른 구간의 유일한 경로.**
- *
- * 사건 배치는 빈 배열을 반려한다(`applyEvents`): 기록 없이 시계를 미는 길이 열려
- * 있으면 한 턴에 경기 전체를 밀어붙일 수 있다. 그래서 정말로 아무 일도 없는
- * 구간 — 감독이 말만 건 1분 — 만 여기로 지난다. 스코어·명단·국면·사건은 그대로고
- * 시각만 올라가며, 역행은 무시한다(장부의 시간은 되감기지 않는다).
+ * 한 편이 이 경기에 낸 통계의 합 — 지금 그라운드의 선수와 교체·퇴장으로 나간 선수까지.
+ * 화면의 팀 통계, 화면 없는 실행기, 하네스가 같은 합을 읽는다.
  */
-export function advanceClock(state: MatchLedgerState, minute: number): MatchLedgerState {
-  return minute <= state.minute ? state : { ...state, minute };
+export function sideStatLine(state: MatchLedgerState, side: MatchSide): MatchStatLine {
+  const ids = new Set<string>(state[side].onPitch);
+  for (const e of state.events) {
+    if (e.team !== side) continue;
+    if (e.type === "substitution" || e.type === "red_card") for (const id of e.actors) ids.add(id);
+  }
+  let total = emptyStatLine();
+  for (const id of ids) {
+    const line = state.stats[id];
+    if (line) total = addStatLine(total, line);
+  }
+  return total;
+}
+
+/**
+ * 시계만 앞으로 민다 — 사건 없이 흐른 시간의 유일한 경로. 역행은 무시한다.
+ * (규정분, 추가분)의 순서로 비교한다 — `45+2`는 `45`보다 뒤다.
+ */
+export function advanceClock(state: MatchLedgerState, minute: number, added = 0): MatchLedgerState {
+  if (!laterThan(minute, added, state.minute, state.added)) return state;
+  return { ...state, minute, added };
+}
+
+/** (규정분, 추가분)이 (규정분, 추가분)보다 뒤인가 */
+function laterThan(minute: number, added: number, thanMinute: number, thanAdded: number): boolean {
+  return minute > thanMinute || (minute === thanMinute && added > thanAdded);
 }
 
 export type ApplyResult = { ok: true; state: MatchLedgerState } | { ok: false; errors: string[] };
@@ -142,7 +174,7 @@ const round2 = (v: number) => Math.round(v * 100) / 100;
 /**
  * 이 경기의 교체 한도 — 90분은 5인/3회, 연장은 6인/4회, 친선은 9인/3회.
  *
- * 장부 검증과 AI 판단(`planAiSubstitution`)이 **같은 함수**를 본다. 두 곳이 각자
+ * 장부 검증과 AI 판단(`planBenchSubs`)이 **같은 함수**를 본다. 두 곳이 각자
  * 상수를 읽으면 AI가 쓸 수 있다고 여긴 교체를 장부가 반려해 경기가 멈춘다. 감독에게
  * 한도를 말해 주는 자리(뷰·GM 스냅샷)도 여기를 지난다 — 그래야 모델이 동의한 계획과
  * 장부가 받는 계획이 같다.
@@ -182,14 +214,15 @@ export function createLedger(
   });
   return {
     minute: 0,
+    added: 0,
     phase: "first_half",
     score: { home: 0, away: 0 },
     events: [],
     home: side(home),
     away: side(away),
     sentOff: [],
-    // 공식전에는 칸을 세우지 않는다 — 옛 세이브와 같은 모양으로 남는다
-    ...(opts.friendly === true ? { friendly: true } : {}),
+    friendly: opts.friendly === true,
+    stats: {},
   };
 }
 
@@ -198,7 +231,7 @@ function deepClone(state: MatchLedgerState): MatchLedgerState {
 }
 
 function label(i: number, ev: MatchEvent): string {
-  return `이벤트 #${i + 1}(${ev.minute}′ ${ev.type})`;
+  return `이벤트 #${i + 1}(${ev.minute}${ev.added ? `+${ev.added}` : ""}′ ${ev.type})`;
 }
 
 /**
@@ -230,8 +263,8 @@ const BENCH_STOP_EVENTS: ReadonlySet<MatchEvent["type"]> = new Set([
  * 움직여도 "45′·46′면 면제"가 통째로 사라진다. 정지점 자체를 본다.
  *
  * 자리는 정지 사건의 **앞뒤 양쪽**이다 — 다음 배치에서 감독이 부르는 교체는 뒤에
- * 오고, 구간 시뮬이 정지 사건과 함께 올리는 AI 교체·전술 전환은 같은 배치의 앞에 온다
- * (`insertBeforeStop`). 경기가 재개되면 — 정지 사건 뒤에 벤치의 줄이 아닌 사건이
+ * 오고, 벤치가 정지 사건과 함께 올리는 AI 교체·전술 전환은 같은 배치의 앞에 온다.
+ * 경기가 재개되면 — 정지 사건 뒤에 벤치의 줄이 아닌 사건이
  * 기록되거나 시계가 그 분을 지나면 — 다시 보통의 교체다.
  */
 function atBreakStop(state: MatchLedgerState, incoming: MatchEvent[], i: number): boolean {
@@ -294,7 +327,14 @@ export function applyEvents(state: MatchLedgerState, incoming: MatchEvent[]): Ap
     const err = applyOne(next, ev, i, atBreakStop(next, incoming, i));
     if (err) return { ok: false, errors: [err] };
     next.events.push(ev);
-    next.minute = Math.max(next.minute, ev.minute);
+    if (BREAK_EVENTS.has(ev.type) && next.phase !== "finished") {
+      // 새 하프 — 시계는 그 하프의 시작에 서고 추가분은 0이다
+      next.minute = PHASE_START[next.phase];
+      next.added = 0;
+    } else if (laterThan(ev.minute, ev.added ?? 0, next.minute, next.added)) {
+      next.minute = ev.minute;
+      next.added = ev.added ?? 0;
+    }
   }
   return { ok: true, state: next };
 }
@@ -337,8 +377,12 @@ function applyOne(
   if (state.phase === "finished") {
     return `${label(i, ev)}: 경기 종료(full_time) 이후의 이벤트는 기록할 수 없습니다`;
   }
-  if (ev.minute < state.minute) {
-    return `${label(i, ev)}: 시간 역행 — 현재 ${state.minute}′보다 이른 시각입니다`;
+  if (laterThan(state.minute, state.added, ev.minute, ev.added ?? 0)) {
+    return `${label(i, ev)}: 시간 역행 — 현재 ${state.minute}${state.added ? `+${state.added}` : ""}′보다 이른 시각입니다`;
+  }
+  // 추가분은 규정분이 그 하프의 끝일 때만 선다
+  if (ev.added !== undefined && ev.minute !== PHASE_END[state.phase]) {
+    return `${label(i, ev)}: 추가시간은 하프의 끝(${PHASE_END[state.phase]}′)에만 붙습니다`;
   }
 
   // 팀 귀속 요구
@@ -532,7 +576,7 @@ export function describeLedger(
   const phaseKo = PHASE_KO[state.phase] ?? "경기 종료";
   const limits = subLimitsOf(state.phase, state.friendly);
   const lines = [
-    `[경기 장부] ${names.home} ${state.score.home} : ${state.score.away} ${names.away} — ${state.minute}′ (${phaseKo})`,
+    `[경기 장부] ${names.home} ${state.score.home} : ${state.score.away} ${names.away} — ${state.minute}${state.added ? `+${state.added}` : ""}′ (${phaseKo})`,
     `교체: 홈 ${state.home.subsUsed}/${limits.maxSubs}, 어웨이 ${state.away.subsUsed}/${limits.maxSubs}` +
       (state.sentOff.length > 0 ? ` · 퇴장: ${state.sentOff.join(", ")}` : ""),
   ];
@@ -541,7 +585,10 @@ export function describeLedger(
     lines.push(
       "최근 이벤트: " +
         recent
-          .map((e) => `${e.minute}′ ${e.type}${e.actors.length ? `(${e.actors.join("→")})` : ""}`)
+          .map(
+            (e) =>
+              `${e.minute}${e.added ? `+${e.added}` : ""}′ ${e.type}${e.actors.length ? `(${e.actors.join("→")})` : ""}`,
+          )
           .join(", "),
     );
   }

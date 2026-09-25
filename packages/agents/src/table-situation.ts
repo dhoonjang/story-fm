@@ -209,7 +209,7 @@ function clockLine(state: GameState, negotiation: Negotiation): string {
 
 /** 회견 밖의 기사 — 그날의 배경 */
 function pressBlock(state: GameState): string[] {
-  const facts = (state.media ?? []).slice(-SITUATION_MEDIA_LINES);
+  const facts = state.media.slice(-SITUATION_MEDIA_LINES);
   if (facts.length === 0) return [];
   return [`<press>`, ...facts.map((f) => `- ${f.date} · ${mediaFactText(f)}`), `</press>`];
 }

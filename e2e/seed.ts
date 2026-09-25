@@ -1,15 +1,15 @@
 import {
   addDays,
-  advanceSegment,
   advanceTime,
   allMatchesDone,
   createGame,
   dealOdds,
-  finalizeMatch,
   interpretBackgroundHeuristic,
+  isReserveMatch,
+  settleQuickMatch,
+  simulateOtherMatches,
   saveGame,
   sendOffer,
-  startMatch,
   suggestTerms,
   type GameState,
   type WorldScope,
@@ -70,19 +70,24 @@ function appoint(opts: {
   return state;
 }
 
-/** 경기일 상태에서 구간 시뮬로 한 경기를 끝낸다 — 실모드·mock과 같은 코어 함수다 */
+/**
+ * 경기일의 우리 경기를 **간이 시뮬로** 치른다 — 이 픽스처가 재려는 것은 지난 경기의 내용이
+ * 아니라 시즌을 다 치른 상태다. 서른여덟 경기를 실시간 물리로 굴리면 스펙 하나의 시한을
+ * 넘긴다. 정산은 남의 팀 경기와 같은 코어 함수다 (`settleQuickMatch`).
+ */
 function playMatch(state: GameState): void {
-  const started = startMatch(state);
-  if (!started.ok) throw new Error(started.message);
-  for (let guard = 0; guard < 60 && state.phase === "match"; guard++) {
-    const step = advanceSegment(state);
-    if (!step.ok) throw new Error(step.message);
-    if (step.plan?.stop === "full_time") {
-      finalizeMatch(state);
-      return;
-    }
-  }
-  throw new Error("경기가 끝나지 않았습니다");
+  const today = state.matches.find(
+    (m) =>
+      m.date === state.date &&
+      !m.result &&
+      !isReserveMatch(m) &&
+      (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+  );
+  if (!today) throw new Error("오늘 우리 경기가 없다");
+  settleQuickMatch(state, today);
+  // 우리 경기보다 늦게 킥오프하는 그날의 나머지 경기 — 마감(`finalizeMatch`)이 하던 몫이다
+  simulateOtherMatches(state, { push: () => undefined });
+  state.phase = "idle";
 }
 
 /**

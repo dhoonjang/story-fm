@@ -24,7 +24,6 @@ import {
   adminUpdateLeague,
   adminUpdateTeam,
   boardExpectation,
-  boardExpectationOfTier,
   catalogPath,
   catalogTierOf,
   checkDomesticCupInvariants,
@@ -40,13 +39,10 @@ import {
   domesticCupCatalog,
   isCupCatalogEdited,
   isLeagueCatalogEdited,
-  leagueSizeIn,
   isTeamCatalogEdited,
   leagueCatalog,
   leagueCatalogPath,
-  loadGame,
   playerCatalog,
-  saveGame,
   tacticalStyleOf,
   teamCatalog,
   teamCatalogPath,
@@ -176,21 +172,6 @@ describe("체급 편집과 진행 중인 세이브", () => {
      * 그 표는 모듈 밖으로 나오지 않으므로 입력인 체급으로 확인한다.
      */
     expect(tierOfTeamIn(state, state.userTeamId)).not.toBe(catalogTierOf("arsenal"));
-  });
-
-  it("체급이 없는 옛 세이브는 그대로 로드되고 카탈로그로 폴백한다", () => {
-    const state = createTestGame(7, "arsenal");
-    // 옛 세이브 — GAME_TEAM에 체급이 없다 (SAVE_VERSION은 그대로)
-    for (const team of state.teams) delete team.tier;
-    saveGame(state);
-
-    const loaded = loadGame(state.id);
-    expect(loaded).not.toBeNull();
-    expect(loaded!.teams.every((t) => t.tier === undefined)).toBe(true);
-    expect(tierOfTeamIn(loaded!, "arsenal")).toBe(catalogTierOf("arsenal"));
-    expect(boardExpectation(loaded!, "arsenal")).toEqual(
-      boardExpectationOfTier(catalogTierOf("arsenal"), leagueSizeIn(loaded!, "arsenal")),
-    );
   });
 });
 

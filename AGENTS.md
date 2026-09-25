@@ -61,10 +61,10 @@ docs/              # design spec — how the game works today (README.md is the 
 config/            # llm.yml — provider and model per agent
 apps/
   web/             # Next.js — chat UI · office views · API · /admin
-  match-cli/       # match prototype — strength packet → caster → ledger, one cycle
+  match-cli/       # headless live match — runs a full match without a screen, prints the ledger
 packages/
   domain/          # domain models + Zod schemas (player, tactics, records, schedule, persona)
-  sim/             # match sim core — seeded rng · spatial live sim · strength packet · xG sim · stamina
+  sim/             # match sim core — seeded rng · live match (piece rules, browser-safe) · match ability · load · ledger · bench
   engine/          # game engine — each folder is a domain:
                    #   core/(state, save, tick, dates, rng) world/(catalog, generation, wages)
                    #   competition/(calendar, league, cup, europe) match/(match flow, quick sim)
@@ -80,10 +80,16 @@ e2e/               # Playwright specs — onboarding · game · admin · turn er
 
 - **The core rules and keeps the books; the LLM tells the story.** State
   transitions, formulas and validation are deterministic pure functions, tested
-  without an LLM. The core decides match results, and the manager's instructions
-  reach those results through validated spatial behaviors and bounded strength-packet effects
+  without an LLM. The core decides match results — the manager's match runs as 22
+  pieces on the client and is verified by the server checkpoint by checkpoint; the
+  manager's instructions reach it only through validated commands and a bounded sheet
   (→ [docs/simulation/live-match.md](./docs/simulation/live-match.md) ·
   [docs/simulation/match.md](./docs/simulation/match.md)).
+- **The live match is deterministic across engines.** `packages/sim/src/live/` uses
+  only arithmetic, `Math.sqrt` and its own `dmath` — never `Math.exp/log/sin/cos/atan2/
+hypot/pow`, which differ in the last bit between JavaScript engines and would make the
+  client and the server play different matches. `packages/sim` and `packages/domain`
+  import nothing from `node:`; the browser runs them as values.
 - **Structured output first.** Never make the LLM emit free text for the code to
   parse — force tool calls with Zod schemas, and keep free text for prose humans
   read.
@@ -242,7 +248,7 @@ red change merged green. How the gate is sharded and what it runs on is
 - Isolate verification saves with `STORY_FM_DATA_DIR=<tmp>`; never touch
   `apps/web/.data`. The LLM trace store is a separate directory (`apps/web/.log`)
   and it is the user's material for improving the game — read it
-  (`pnpm log` — one timeline per turn: calls, commands, segments, ticks), never clear it.
+  (`pnpm log` — one timeline per turn: calls, commands, checkpoints, ticks), never clear it.
 - A pre-existing failure that does not name a file you touched is not yours to
   fix — report it as-is.
 
@@ -294,10 +300,11 @@ non-deterministic LLM.
 
 ## Status
 
-🚧 **Playable prototype (data model v6, SAVE_VERSION 6).** Onboarding → chat
+🚧 **Playable prototype (data model v7, SAVE_VERSION 7).** Onboarding → chat
 instructions → match → season rollover → multi-season runs end to end. What is
 built and what is not is listed in [overview.md](./docs/overview.md) §7.
 
-- **Save compatibility** — new tables load as empty arrays and new fields are
-  optional; not bumping the save version is the default. If a structural change
-  requires wiping `.data`, ask the user first.
+- **No save migrations.** A save of another version is refused; there is no code
+  that adapts an old shape. New fields are required in the schema unless absence
+  carries meaning. When a change moves the shape or the meaning of stored values,
+  bump `SAVE_VERSION` (docs/data/game-state.md §6).

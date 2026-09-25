@@ -1,4 +1,4 @@
-import type { Player, PlayerShotRoute } from "@story-fm/domain";
+import type { Player } from "@story-fm/domain";
 
 /** 슈팅 가중 리그 평균 75가 기회 xG를 그대로 실현하는 기준점. */
 export const FINISHING_PIVOT = 75;
@@ -56,7 +56,7 @@ function sampleGamma(rng: () => number, shape: number): number {
   }
 }
 
-/** 경로 평균을 보존하는 연속 베타분포에서 실제 슈팅 xG를 뽑는다. */
+/** 평균을 보존하는 연속 베타분포에서 실제 슈팅 xG를 뽑는다. */
 export function sampleShotXg(
   rng: () => number,
   meanXg: number,
@@ -100,7 +100,7 @@ export interface SampledShot {
 /** 한 슈팅의 기회 질 → 결정력 → 실제 결과를 순서대로 굴린다. */
 export function sampleShot(
   rng: () => number,
-  route: Pick<PlayerShotRoute, "meanXg">,
+  route: { meanXg: number },
   finishing: number,
 ): SampledShot {
   const xg = sampleShotXg(rng, route.meanXg);
@@ -121,10 +121,8 @@ export function sampleShot(
 
 // ── 페널티 — 승부차기와 경기 중이 같은 식을 쓴다 ────────────────
 //
-// 이 절은 승부차기(`engine/competition/shootout.ts`)만의 것이었다. 경기 중
-// 페널티가 생기면서 두 자리가 같은 식을 봐야 하므로 **아래로 내려왔다** — 코어와
-// 간이 시뮬이 모두 지나는 `packages/sim`이 원본이고, 승부차기는 여기서 import한다
-// (AGENTS.md §5 "한 규칙, 한 정의" · match.md §7 공유 눈금 표).
+// 경기 중 페널티·승부차기·간이 시뮬이 모두 지나는 `packages/sim`이 원본이고,
+// 승부차기(`engine/competition/shootout.ts`)는 여기서 import한다 (match.md §3.4).
 
 /** 성공률의 바닥 — 아무리 약한 키커도 이 아래로 내려가지 않는다 */
 export const PENALTY_FLOOR = 0.62;
@@ -140,7 +138,7 @@ const PENALTY_WEIGHTS = { finishing: 0.5, composure: 0.3, kicking: 0.2 } as cons
 /** 골키퍼의 페널티 기량 — 골키핑·침착성의 가중 평균 */
 const KEEPER_WEIGHTS = { goalkeeping: 0.7, composure: 0.3 } as const;
 /**
- * 골키퍼가 없을 때 서는 기량 — 명단에 GK가 없는 옛 세이브에서만 쓰인다.
+ * 골키퍼가 없을 때 서는 기량 — 골키퍼가 퇴장당해 필드 선수가 골문에 선 경기.
  * `PENALTY_BASE`가 그대로 서도록 평균적인 키커와 같은 자리에 둔다.
  */
 const KEEPER_FALLBACK_SKILL = 60;

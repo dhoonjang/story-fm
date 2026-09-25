@@ -17,8 +17,3 @@ export const SQUAD_SEEDS: Record<string, readonly RealPlayerSeed[]> = {
   ...EU_SQUADS,
   ...MARKET_LEAGUE_SQUADS,
 };
-
-/** 이 클럽의 시드 명단 — 없으면 빈 배열 */
-export function squadSeedOf(teamId: string): readonly RealPlayerSeed[] {
-  return SQUAD_SEEDS[teamId] ?? [];
-}

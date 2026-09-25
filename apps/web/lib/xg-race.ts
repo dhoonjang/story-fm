@@ -54,7 +54,7 @@ export function xgRaceOf(timeline: readonly XgPoint[], minute: number): XgRace |
   const last = timeline[timeline.length - 1];
   if (!last) return null;
   const peak = Math.max(last.home, last.away);
-  // xG가 전부 0인 장부(옛 세이브의 0짜리 슛)는 높이가 없다 — 평평한 선 둘은 값이 아니다
+  // xG가 전부 0인 장부는 높이가 없다 — 평평한 선 둘은 값이 아니다
   if (peak <= 0) return null;
 
   const span = Math.max(FULL_TIME, last.minute, minute);

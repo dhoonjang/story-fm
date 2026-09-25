@@ -74,9 +74,9 @@ export function termKindsOf(
   return dealTermKindsFor(negotiation.kind, negotiation.precontract === true);
 }
 
-/** 조건서 — 없으면 빈 장부 */
+/** 조건서 */
 export function termSheetOf(negotiation: Pick<Negotiation, "terms">): TabledTerm[] {
-  return negotiation.terms ?? [];
+  return negotiation.terms;
 }
 
 /**
@@ -235,7 +235,7 @@ export function tableTerms(
   terms: readonly DealTerm[],
 ): TermsTabled {
   const allowed = termKindsOf(negotiation);
-  const sheet = (negotiation.terms ??= []);
+  const sheet = negotiation.terms;
   const tabled: DealTerm[] = [];
   const notes: string[] = [];
   for (const raw of terms) {
@@ -316,7 +316,7 @@ export function askTerms(
   asks: readonly DealTerm[],
   askable: readonly DealTermKind[],
 ): DealTerm[] {
-  const sheet = (negotiation.terms ??= []);
+  const sheet = negotiation.terms;
   const accepted: DealTerm[] = [];
   for (const raw of asks) {
     if (accepted.length >= MAX_TERM_ASKS) break;

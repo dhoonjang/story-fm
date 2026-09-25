@@ -109,7 +109,7 @@ export function recordCard(
     const total = seasonYellowsOf(state, input.playerId, state.season, competitionId);
     const length = yellowBanMatches(rule, total, {
       round: match.round,
-      stage: match.stage ?? "league",
+      stage: match.stage,
     });
     if (length === null) return NOTHING;
     const issued = yellowsSuspensionId(input.playerId, match.id);

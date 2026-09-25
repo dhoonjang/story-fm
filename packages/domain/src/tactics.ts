@@ -14,10 +14,7 @@ import {
 } from "./player";
 import { normalizedLogCurve, reflectedLogCurve } from "./log-curves";
 
-/**
- * 적응도의 저장 형태 — **소수를 담는다** (`RatingSchema`는 정수라 여기 쓸 수 없다).
- * 옛 세이브의 정수 값도 그대로 통과하므로 SAVE_VERSION을 올리지 않는다.
- */
+/** 적응도의 저장 형태 — **소수를 담는다** (`RatingSchema`는 정수라 여기 쓸 수 없다) */
 export const FamiliaritySchema = z.number().min(0).max(100);
 
 /**
@@ -105,12 +102,12 @@ export const TacticsSpecSchema = z.object({
    * ── 토글 넷 — **축이 아니라 갈래다** (→ docs/simulation/match.md §1.2).
    *
    * 여섯 축은 늘리지 않는다(대칭·프리셋 리그 평균 3·`TACTIC_SWING` 예산이 전부 다시
-   * 서야 한다). 넷 모두 optional이고 **없으면 중립**이라 옛 세이브는 셈이 한 칸도
-   * 달라지지 않는다 — SAVE_VERSION 유지.
+   * 서야 한다). 넷 모두 optional이고 **없으면 중립**이다 — 지시하지 않은 갈래는
+   * 적지 않는다.
    *
    * 감독이 지시를 푸는 값은 갈래마다 따로 있다(`none`·`false`·`normal` —
-   * `TACTIC_TOGGLES.neutralValue`). `.nullable()`은 **관용**이라 남는다 — `null`이
-   * 적힌 옛 세이브와, 없음을 `null`로 적는 모델을 함께 받는다.
+   * `TACTIC_TOGGLES.neutralValue`). `.nullable()`은 **관용**이다 — 없음을 `null`로
+   * 적는 모델을 받는다.
    */
   transition: z.enum(TRANSITION_MODES).nullable().optional(),
   offsideTrap: z.boolean().optional(),
@@ -198,7 +195,7 @@ export interface TacticToggle {
   words: Readonly<Record<string, string>>;
   /**
    * 중립으로 읽는 값 — 이 값이면 **지시하지 않은 것과 같다**(델타 0, 지문에 안 붙는다).
-   * 값이 없는 옛 세이브도, `null`이 적힌 옛 세이브도 여기로 접힌다.
+   * 값이 없어도, `null`이 적혀도 여기로 접힌다.
    *
    * ⚠️ **스키마가 실제로 받는 토큰이어야 한다.** 감독이 걸린 갈래를 푸는 길이 이 값
    * 하나뿐이라, 열거에 없는 값을 여기 적으면 낱말표는 「지시 없음」을 가르치는데
@@ -289,18 +286,11 @@ export function tacticAxisOf(key: TacticAxisKey): TacticAxis {
   return TACTIC_AXIS_BY_KEY.get(key)!;
 }
 
-/** 눈금 하나의 낱말 — 눈금 밖의 값은 양 끝으로 접는다(옛 세이브의 값도 낱말을 갖는다) */
+/** 눈금 하나의 낱말 — 눈금 밖의 값은 양 끝으로 접는다 */
 export function tacticWord(key: TacticAxisKey, value: number): string {
   const axis = tacticAxisOf(key);
   const step = Math.min(TACTIC_SCALE_MAX, Math.max(TACTIC_SCALE_MIN, Math.round(value)));
   return axis.words[step - TACTIC_SCALE_MIN]!;
-}
-
-/** 모델에게 눈금을 설명하는 한 조각 — `멘탈리티(1 매우 수비적~5 매우 공격적)` */
-export function tacticAxisScaleText(axis: TacticAxis): string {
-  const low = axis.words[0];
-  const high = axis.words[axis.words.length - 1]!;
-  return `${axis.label}(${TACTIC_SCALE_MIN} ${low}~${TACTIC_SCALE_MAX} ${high})`;
 }
 
 /**
@@ -349,41 +339,6 @@ export const DEFAULT_TACTICS: TacticsSpec = {
   passStyle: TACTIC_SCALE_NEUTRAL,
 };
 
-/**
- * 옛 세이브의 패스 스타일(`"short" | "mixed" | "direct"`)을 1~5로 옮긴다.
- *
- * 세 갈래로는 "지금보다 조금만 짧게"를 말할 수 없어 다른 축과 같은 눈금으로 폈다.
- * 옮긴 값은 가운데(`mixed`)와 그 양옆 한 칸이다. 이미 숫자면 그대로 통과시킨다.
- */
-const LEGACY_PASS_STYLE = {
-  short: TACTIC_SCALE_NEUTRAL - 1,
-  mixed: TACTIC_SCALE_NEUTRAL,
-  direct: TACTIC_SCALE_NEUTRAL + 1,
-} as const;
-
-export function migratePassStyle(value: unknown): number {
-  if (typeof value === "number") return value;
-  if (value === "short") return LEGACY_PASS_STYLE.short;
-  if (value === "direct") return LEGACY_PASS_STYLE.direct;
-  return LEGACY_PASS_STYLE.mixed;
-}
-
-/**
- * 옛 지문의 마지막 칸(패스 스타일)을 같은 눈금으로 옮긴다.
- *
- * 지문은 적응도 기억(`drilled`)의 키다. 옮기지 않으면 예전에 익혀 둔 전술로
- * 되돌아가도 지문이 어긋나 "처음 보는 전술" 취급을 받아 적응도를 잃는다.
- */
-export function migrateSignature(signature: string): string {
-  const parts = signature.split("|");
-  // 마지막 칸이 아니라 **여섯째 축의 자리**다 — 뒤에 켜 둔 갈래가 붙을 수 있다
-  const at = TACTIC_AXES.length;
-  const passStyle = parts[at];
-  if (passStyle === undefined || !Number.isNaN(Number(passStyle))) return signature;
-  parts[at] = String(migratePassStyle(passStyle));
-  return parts.join("|");
-}
-
 // ── 전술 설정의 동일성·거리 (적응도 기억의 기준) ──────────
 
 /**
@@ -423,8 +378,8 @@ export const TacticAxisKeySchema = z.enum([TACTIC_AXIS_KEYS[0]!, ...TACTIC_AXIS_
  * 익숙한 축구고, 짧게 주고받던 기술자에게는 낯선 주문이다. 그 차이가 적응도에
  * 안 실리면 전술은 그냥 팀 전체에 걸리는 세금이 된다.
  *
- * 짝은 **시뮬이 그 축에서 이득을 재는 능력과 같은 계열**로 골랐다 — 롱볼의 제공권,
- * 짧은 패스의 연결, 압박의 지구력(`tacticalDeltas`). 그 축으로 이득을 보는 능력이
+ * 짝은 **그 축에서 이득을 보는 능력과 같은 계열**로 골랐다 — 롱볼의 제공권,
+ * 짧은 패스의 연결, 압박의 지구력. 그 축으로 이득을 보는 능력이
  * 곧 그 축에 익숙한 능력이다.
  */
 const AXIS_AFFINITY: Record<TacticAxisKey, { high: AttributeAxis[]; low: AttributeAxis[] }> = {
@@ -477,9 +432,9 @@ export function tacticsAffinityShift(
  */
 export function tacticsSignature(spec: TacticsSpec): string {
   /**
-   * **중립이 아닌 갈래만 뒤에 붙인다.** 아무 데도 서지 않은 전술의 지문은 갈래가
-   * 생기기 전과 바이트까지 같아, 옛 세이브의 기억이 그대로 이어진다 — 늘 붙이면
-   * 모든 기억이 한 번에 "처음 보는 전술"이 되고 `drilled`가 두 벌로 불어난다.
+   * **중립이 아닌 갈래만 뒤에 붙인다.** 갈래 하나를 새로 열어도 아무 데도 서지 않은
+   * 전술의 지문은 바이트까지 같다 — 늘 붙이면 갈래를 여는 날 모든 기억이 한 번에
+   * "처음 보는 전술"이 되고 `drilled`가 두 벌로 불어난다.
    */
   const toggles = TACTIC_TOGGLE_KEYS.flatMap((key) => {
     const value = tacticToggleValue(spec, key);
@@ -643,8 +598,7 @@ export const PITCH_METRES = { length: 105, width: 68 } as const;
 
 /**
  * 눕힌 판의 가로:세로 (≈1.544). 세로 1%가 가로 1%의 몇 분의 일인지이기도 해서,
- * 화면이 두 축의 거리를 같은 자로 재려면 한쪽을 이 값으로 되짚는다
- * (`MARKER_GAP` — `apps/web/lib/pitch-layout.ts`).
+ * 두 축의 거리를 같은 자로 재려면 한쪽을 이 값으로 되짚는다.
  */
 export const PITCH_ASPECT = PITCH_METRES.length / PITCH_METRES.width;
 
@@ -665,7 +619,7 @@ const SEPARATE_PASSES = 30;
 /**
  * 겹친 좌표를 밀어낸다 — 카드가 서로를 가리지 않게 만드는 마지막 관문.
  *
- * 좌표 없는 배치(구 세이브·채팅 지시)는 코드의 기본 좌표로 그려지는데, 같은 코드가
+ * 좌표 없는 배치(채팅 지시·벤치)는 코드의 기본 좌표로 그려지는데, 같은 코드가
  * 둘이면(센터백 둘이 다 `CB`, 스트라이커 둘이 다 `ST`) **정확히 같은 점**이 되어
  * 카드가 완전히 겹쳐 버린다. 자유 드래그도 남의 자리 위에 놓을 수 있다.
  *
@@ -732,9 +686,8 @@ export function separateBoardPoints(points: readonly BoardPoint[], pinned = -1):
 /**
  * 전선 셋의 자리 — **전술판 y 기준**(자기 골문이 100, 상대 골문이 0).
  *
- * 판세 격자가 칸을 놓는 자리(`center`)이자, 경기 화면이 선수를 그 칸 안에
- * 앉히는 근거(`edge`)다. 두 곳이 다른 경계를 쓰면 공격수가 중원 칸에 서는
- * 그림이 나온다 — 값은 여기 하나뿐이다.
+ * `center`는 줄 이름으로 옮긴 선수가 서는 y이고, `edge`는 이웃한 두 줄이 갈리는
+ * 경계다.
  */
 export const PITCH_BANDS = {
   center: { defense: 77, midfield: 47, attack: 20 },
@@ -743,8 +696,8 @@ export const PITCH_BANDS = {
 } as const;
 
 /**
- * 코드의 기본 좌표 — 좌표 없는 배치(채팅으로 지시한 라인업, 이전 세이브)를
- * 전술판에 올릴 때 쓴다. 각 칸의 중심이라 `positionAtPoint`로 되접으면 제자리다.
+ * 코드의 기본 좌표 — 좌표 없는 배치(채팅으로 지시한 라인업)를 전술판에 올릴 때
+ * 쓴다. 각 칸의 중심이라 `positionAtPoint`로 되접으면 제자리다.
  */
 export const POSITION_ANCHORS: Record<string, BoardPoint> = {
   GK: { x: 50, y: 92 },
@@ -1223,12 +1176,9 @@ const LINE_GAP = 13;
 const MAX_LINE_SPAN = 16;
 
 /**
- * 뒤에서 앞으로 **줄로 묶는다** — 포메이션 이름을 세는 자이자, 킥오프 직전의 배치
- * 손질이 「한 줄」로 볼 범위(`sim/lineup-cover.ts`)다. 두 곳이 다른 기준으로 끊으면
- * 판이 4-2-3-1이라 말하는 동안 손질은 다른 줄을 편다.
+ * 뒤에서 앞으로 **줄로 묶는다** — 포메이션 이름을 세는 자다.
  *
- * 골키퍼를 거르는 것은 **부르는 쪽의 몫**이다 — 모양 이름은 필드 열 명을 세지만
- * 손질은 골키퍼도 자리를 가진 선수로 함께 읽는다.
+ * 골키퍼를 거르는 것은 **부르는 쪽의 몫**이다 — 모양 이름은 필드 열 명을 센다.
  */
 export function pitchLines<T>(items: readonly T[], yOf: (item: T) => number): T[][] {
   const sorted = [...items].sort((a, b) => yOf(b) - yOf(a));
@@ -1286,8 +1236,7 @@ export const FORMATION_SLOTS: Record<Formation, string[]> = Object.fromEntries(
  * 가져가 멀쩡한 배치에서도 엉뚱한 자리가 비는 것으로 읽힌다.
  *
  * ⚠️ **자리를 만들 뿐 좌우를 펴지는 않는다.** 감독이 직접 옮겨 한쪽으로 몰아 둔 판은
- * 그대로 두고(의도한 과부하는 지원하는 수다), 무너진 줄을 펴는 손질은 킥오프 직전에
- * 패킷이 한 번만 한다 (`sim/lineup-cover.ts` — match.md §1.7).
+ * 그대로 둔다 — 의도한 과부하는 지원하는 수다.
  */
 export function openSeats(
   taken: readonly BoardPoint[],
@@ -1345,8 +1294,8 @@ export type DrilledTactics = z.infer<typeof DrilledTacticsSchema>;
  */
 export const RoleMemoSchema = z.object({
   date: DateString,
-  /** 그날 아침에 서 있던 자리 — 옛 세이브엔 없다 (없으면 지금 자리로 읽는다) */
-  position: z.string().min(1).optional(),
+  /** 그날 아침에 서 있던 자리 */
+  position: z.string().min(1),
   /** 그날 아침에 맡고 있던 역할 */
   role: z.string().min(1),
   /** 오늘 역할 변경으로 이 선수의 적응도에서 이미 깎은 총량 */
@@ -1364,15 +1313,15 @@ export const TacticAssignmentSchema = z.object({
   /** 이 전술에서 맡는 포지션 — 주 포지션과 다를 수 있다. 좌표가 있으면 그 파생 */
   position: z.string().min(1),
   /**
-   * 전술판 좌표 (자유 배치) — 없으면 `anchorOf(position)`으로 그린다.
-   * optional이라 이전 세이브도 그대로 로드된다 (SAVE_VERSION 유지).
+   * 전술판 좌표 (자유 배치) — 없으면 `anchorOf(position)`으로 그린다. 채팅으로
+   * 지시한 라인업과 벤치에는 좌표가 없다.
    */
   point: BoardPointSchema.optional(),
   /**
    * 이 자리에서 맡는 **세부 역할** (`ROLE_DEFS`의 id — 볼 플레잉 디펜더, 레지스타…).
    *
-   * 없으면 그 자리의 기본 역할이다. optional이라 이전 세이브도 그대로 로드된다
-   * (SAVE_VERSION 유지). 자리를 옮기면 그 자리에 없는 역할이 되므로 코어가 지운다.
+   * 없으면 그 자리의 기본 역할이다. 자리를 옮기면 그 자리에 없는 역할이 되므로
+   * 코어가 지운다.
    */
   roleId: z.string().min(1).optional(),
   /**
@@ -1394,10 +1343,10 @@ export const TacticAssignmentSchema = z.object({
    * 도달했던 값을 되찾으므로 왕복은 기억이 닫아 주고, 보정은 남과 무관한
    * 절대 평가가 된다. 팀 적응도는 이 값들의 평균(파생)이다.
    *
-   * 옛 세이브엔 없다 (optional — 없으면 팀 기억을 승계한다).
+   * 없으면 아직 기억이 없다 — 첫 전술 변경이 지금 값을 적어 넣는다.
    */
   drilled: z.array(DrilledTacticsSchema).optional(),
-  /** 오늘 역할을 손댄 흔적 (`RoleMemo`). 옛 세이브엔 없다 — SAVE_VERSION 유지 */
+  /** 오늘 역할을 손댄 흔적 (`RoleMemo`) — 없으면 오늘 손대지 않았다 */
   roleMemo: RoleMemoSchema.optional(),
 });
 export type TacticAssignment = z.infer<typeof TacticAssignmentSchema>;
@@ -1722,8 +1671,7 @@ function specOfSignature(signature: string): TacticsSpec | null {
     pressing: Number(pressing),
     tempo: Number(tempo),
     width: Number(width),
-    // 옛 지문은 여섯째 칸이 `mixed` 같은 문자열이다
-    passStyle: migratePassStyle(Number.isNaN(Number(passStyle)) ? passStyle : Number(passStyle)),
+    passStyle: Number(passStyle),
     ...toggles,
   });
   return parsed.success ? parsed.data : null;
@@ -1818,8 +1766,6 @@ export function familiarityForSetup(
  * 페널티를 넣는 배짱은 다른 능력이고(`kicking` vs `penaltySkill`) 한 사람이 셋을
  * 다 맡는 팀도 있다. 비어 있는 자리는 코어의 기본값(그라운드 위 최고)이 채운다 —
  * 지정하지 않은 감독이 손해 보지 않는다.
- *
- * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
  */
 export const SetPieceTakersSchema = z.object({
   corner: z.string().min(1).optional(),
@@ -1833,7 +1779,7 @@ export const SET_PIECE_ROLES = ["corner", "freeKick", "penalty"] as const;
 export type SetPieceRole = (typeof SET_PIECE_ROLES)[number];
 
 /**
- * **감독 눈에 닿는 묶음 이름 하나** — 화면·패킷 문장·명령이 되돌리는 말이 모두
+ * **감독 눈에 닿는 묶음 이름 하나** — 화면·스냅샷 문장·명령이 되돌리는 말이 모두
  * 이것을 읽는다. 자리 이름이 한 벌인 것과 같은 이유로 묶음 이름도 한 벌이다:
  * 채팅이 "세트피스 키커"라 답하는데 전술판이 다른 낱말을 쓰면 감독은 같은 줄을
  * 두 이름으로 배우고, 채팅에서 배운 말로는 그 줄을 찾지 못한다.
@@ -1890,8 +1836,8 @@ export type BoardMove =
  * 루틴을 그 지문에 넣으면 코너에 한 명 더 올리라고 말한 팀이 전술 적응도를 처음부터
  * 다시 쌓는다. 세트피스는 판의 모양과 따로 훈련하는 것이라 자리도 따로다.
  *
- * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지). `.nullable()`은 **관용**이다 —
- * 지시를 푸는 값이 `normal`이지만, `null`이 적힌 세이브도 중립으로 읽는다.
+ * `.nullable()`은 **관용**이다 — 지시를 푸는 값이 `normal`이지만, 없음을 `null`로
+ * 적는 모델도 중립으로 읽는다.
  */
 export const SET_PIECE_ROUTINE_LEVELS = ["few", "normal", "many"] as const;
 export type SetPieceRoutineLevel = (typeof SET_PIECE_ROUTINE_LEVELS)[number];
@@ -1931,7 +1877,7 @@ export interface SetPieceRoutineAxis {
   /**
    * 값 → **박스에 서는 사람 수.** 이 축이 정하는 것이 곧 이 수다 — 「많이」가 얼마나
    * 많은지는 낱말이 말하지 못하고, 화면에서 그것을 모르면 세 칸이 이름만 다른 셋이 된다.
-   * 죽은 공의 질을 재는 것도 이 수이므로(`sim/strength-packet.ts`) **표는 여기 하나다.**
+   * 경기가 박스에 세우는 것도 이 수이므로 **표는 여기 하나다.**
    */
   counts: Readonly<Record<SetPieceRoutineLevel, number>>;
 }
@@ -2000,16 +1946,6 @@ export function setPieceRoutineChoiceText(axis: SetPieceRoutineAxis): string {
   return `${axis.key} ${axis.label} — ${axis.hint}(${choices.join(" · ")})`;
 }
 
-/**
- * 중립에서 몇 칸 — `few` −1 · `normal` 0 · `many` +1.
- *
- * **패킷도 화면도 이 함수를 부른다** (AGENTS.md §5). 눈금을 각자 적으면 화면이
- * 「많이」로 세운 칸과 코어가 세는 칸이 갈리는 날이 온다.
- */
-export function setPieceRoutineStep(level: SetPieceRoutineLevel): number {
-  return level === "many" ? 1 : level === "few" ? -1 : 0;
-}
-
 /** 팀의 현재 전술 + 배치 — GAME_TEAM당 1개 (프리셋 확장 여지) */
 export const TeamTacticsSchema = z.object({
   teamId: z.string().min(1),
@@ -2018,27 +1954,17 @@ export const TeamTacticsSchema = z.object({
   /**
    * **선반** — 지금 배치가 없는 선수의 적응도·기억이 머무는 자리.
    * 배치가 사라질 때 채우고 다시 배치될 때 비운다 (`ShelvedFamiliarity`).
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 없으면 빈 선반이다.
    */
   shelved: z.array(ShelvedFamiliaritySchema).optional(),
   /**
-   * 지금까지 드릴한 전술들의 기억 — 최근 것부터. optional이라 이전 세이브도 그대로
-   * 로드된다(SAVE_VERSION 유지). 없으면 "아직 기억이 없다"로 읽는다.
-   */
-  /**
-   * 팀 눈금의 기억 — **이제 갱신하지 않는다.** 개인 기억
-   * (`TacticAssignment.drilled`)으로 옮겼고, 이 값은 그 기억이 없는 옛 세이브가
-   * 각자에게 승계할 출발점으로만 남는다.
-   */
-  drilled: z.array(DrilledTacticsSchema).optional(),
-  /**
-   * **세트피스 키커** — 코너·프리킥·페널티. 옛 세이브엔 없다 (SAVE_VERSION 유지).
+   * **세트피스 키커** — 코너·프리킥·페널티. 감독이 지정한 자리만 적힌다.
    * 없거나 그 선수가 그라운드에 없으면 코어의 기본값이 선다 (match.md §1.4).
    */
   setPieceTakers: SetPieceTakersSchema.optional(),
   /**
-   * **세트피스 지시** — 가담·수비 두 축. 옛 세이브엔 없다 (SAVE_VERSION 유지).
-   * 없으면 둘 다 `normal`이라 축이 서기 전과 셈이 같다 (match.md §1.4).
+   * **세트피스 지시** — 가담·수비 두 축. 중립은 적지 않으므로 없으면 둘 다 `normal`이다
+   * (match.md §1.4).
    */
   setPieceRoutine: SetPieceRoutineSchema.optional(),
 });

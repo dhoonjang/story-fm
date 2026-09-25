@@ -599,6 +599,8 @@ describe("대상은 그 구간을 팀과 함께 보낸 선수다", () => {
       id: "sus-training-report",
       gamePlayerId: banned,
       cause: "red",
+      competitionId: "epl",
+      scope: "jurisdiction",
       issuedOn: state.date,
       lengthMatches: 2,
       served: 0,

@@ -3,8 +3,9 @@ import type { MatchEvent } from "@story-fm/domain";
 import { formatScore } from "@story-fm/domain";
 import {
   addDays,
-  enableLiveMatch,
   advanceLiveMatch,
+  advanceShootout,
+  awaitingShootout,
   setPlayerTactic,
   buildMatchView,
   advanceTime,
@@ -15,28 +16,36 @@ import {
   createGame,
   interpretBackgroundHeuristic,
   markEntered,
+  markEventsSeen,
   RATING_BAND,
+  resumeLiveInterval,
   startMatch,
+  unseenEvents,
   userSide,
   userTactics,
   type CardMark,
   type GameState,
   type GoalMark,
+  liveFinished,
 } from "@story-fm/engine";
 import {
   applyOps,
   applyTacticOrders,
+  buildEventsBlock,
   buildLedgerNote,
   buildMatchTools,
-  buildSegmentMessage,
+  buildShootoutMessage,
+  collectMatchMarks,
+  eventsBlockOf,
   FINALIZE_MATCH_SYSTEM,
   GmTurnFailure,
-  MATCH_ADVANCED,
   TACTIC_CAPS,
   TACTIC_OPS,
   OPS_PER_COMMAND,
   parseOps,
+  readMatchAfterStop,
   runGmTurn,
+  scoreBeforeEvents,
   STALLED_CLOCK_TURNS,
   stampMatchScene,
   stampMatchStream,
@@ -48,7 +57,7 @@ import {
 import { LlmTimeoutError, type GameToolSpec, type TurnRequest } from "@story-fm/llm";
 import { ModelOutputError } from "../src/retry";
 
-/** 실모드 경기 턴이 부르는 모델 — 해석도 중계도 이 하나를 거친다 */
+/** 실모드 경기 턴이 부르는 모델 — 매치 GM도 판독기도 마감 에이전트도 이 하나를 거친다 */
 const { runTurn } = vi.hoisted(() => ({ runTurn: vi.fn() }));
 vi.mock("@story-fm/llm", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@story-fm/llm")>();
@@ -56,12 +65,12 @@ vi.mock("@story-fm/llm", async (importOriginal) => {
 });
 
 /**
- * 경기 턴의 **순서** — 감독의 지시가 그 구간에 닿는가.
+ * 경기 턴 — 감독의 지시는 판에 걸리고, 시계는 턴 밖에서 구른다 (docs/llm/agents.md §3).
  *
- * 예전엔 캐스터가 도구를 쥐고 해석·진행·중계를 한 호출에서 했고, "지시 먼저 그다음
- * 진행"은 프롬프트 한 줄이 지켰다. 이제 해석이 앞 호출로 나가고 코어가 명령을 옮긴
- * 뒤 구간을 굴리므로 **순서가 구조다** (docs/llm/agents.md §3). 여기서 지키는 것은
- * 그 구조가 실제로 그 순서를 내는가다.
+ * 시계를 미는 것은 클라이언트의 실행기(여기서는 `advanceLiveMatch`)이고, 턴은 그 사이
+ * 장부에 앉은 사건을 `<events>`로 읽는다. 여기서 지키는 것은 턴이 시계를 한 틱도
+ * 옮기지 않는다는 것, 지시가 실시간 경기의 판에 실린다는 것, 사건이 한 번씩만 읽힌다는
+ * 것이다.
  */
 function buildMatchState(seed: number): GameState {
   const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
@@ -103,6 +112,69 @@ const IDLE = ((): GameState => {
   });
 })();
 
+/** 경기 시간 1분의 틱 — `LIVE_TICKS_PER_SECOND`(20)다. agents는 sim을 직접 읽지 않는다 */
+const TICKS_PER_MINUTE = 60 * 20;
+
+/** 경기 시간 `minutes`분을 화면 없이 민다 — 휴식은 곧바로 푼다 */
+function play(state: GameState, minutes: number): void {
+  if (state.pendingMatch!.live.state.interval) resumeLiveInterval(state);
+  advanceLiveMatch(state, minutes * TICKS_PER_MINUTE);
+}
+
+/** 종료 휘슬까지 민다 — 승부차기가 남으면 한 발씩. 마감은 하지 않는다 */
+function playToEnd(state: GameState): void {
+  for (let guard = 0; guard < 60; guard++) {
+    if (liveFinished(state.pendingMatch!.live)) {
+      if (!awaitingShootout(state)) return;
+      expect(advanceShootout(state).ok).toBe(true);
+      continue;
+    }
+    play(state, 5);
+  }
+  throw new Error("경기가 끝나지 않았습니다");
+}
+
+/**
+ * 장부에 사건을 손으로 앉힌다 — 굴려서 골을 기다리면 난수이고 느리다. 골은 스코어도
+ * 함께 옮긴다(장부의 규칙은 sim의 몫이고, 여기서 재는 것은 턴이 그것을 읽는 방식이다).
+ */
+function seat(state: GameState, events: MatchEvent[]): void {
+  const ledger = state.pendingMatch!.live.ledger;
+  for (const ev of events) {
+    ledger.events.push(ev);
+    if (ev.type === "goal" && ev.team) ledger.score[ev.team] += 1;
+  }
+}
+
+/** 한 턴이 읽는 자리 — 지난 턴 뒤 장부에 앉은 사건에서 표식을 세우고 읽었다고 적는다 */
+function readTurn(state: GameState, goals: GoalMark[], cards: CardMark[]): void {
+  const events = unseenEvents(state);
+  const score = state.pendingMatch!.live.ledger.score;
+  collectMatchMarks(state, events, scoreBeforeEvents(score, events), goals, cards);
+  markEventsSeen(state);
+}
+
+/**
+ * 80′ 너머까지 실시간으로 굴려 둔 판과 그 사이 턴들이 세운 표식 — 경기 한 판을 굴리는
+ * 값은 수 초라 **한 번만** 굴리고 케이스마다 복제한다. 경기 시간 5분마다 한 턴이 읽는다.
+ */
+let lateOrigin: { state: GameState; goals: GoalMark[]; cards: CardMark[] } | null = null;
+function late(): { state: GameState; goals: GoalMark[]; cards: CardMark[] } {
+  if (!lateOrigin) {
+    const state = matchState();
+    markEntered(state);
+    const goals: GoalMark[] = [];
+    const cards: CardMark[] = [];
+    for (let guard = 0; guard < 40 && state.pendingMatch!.live.ledger.minute < 80; guard++) {
+      play(state, 5);
+      readTurn(state, goals, cards);
+    }
+    expect(state.pendingMatch!.live.ledger.phase).not.toBe("finished");
+    lateOrigin = { state, goals, cards };
+  }
+  return structuredClone(lateOrigin);
+}
+
 /** 모델의 응답 — 문장과 도구 호출 수 */
 const answered = (text: string, toolCallCount = 0) => ({
   text,
@@ -114,29 +186,9 @@ const answered = (text: string, toolCallCount = 0) => ({
 });
 
 /** 한 턴 — 해석이 냈을 의도를 그대로 코어에 넣는다 (LLM은 이 경로에 없다) */
-function turn(
-  state: GameState,
-  intent: TacticOrders,
-  goals: GoalMark[] = [],
-  cards: CardMark[] = [],
-  calls: GmToolCall[] = [],
-  roll = false,
-  /** 감독이 말한 목표 분 — 진행 도구가 싣는 자리 (match.md §2) */
-  untilMinute?: number,
-) {
-  return {
-    applied: applyTacticOrders(state, intent, calls, goals, cards, {
-      roll,
-      ...(untilMinute !== undefined ? { untilMinute } : {}),
-    }),
-    calls,
-    goals,
-    cards,
-  };
+function turn(state: GameState, intent: TacticOrders, calls: GmToolCall[] = []) {
+  return { applied: applyTacticOrders(state, intent, calls), calls };
 }
-
-/** 진행하는 턴 — 굴릴지는 매치 GM이 부른 도구가 정한다 (agents.md §3) */
-const GO: TacticOrders = { ops: {} };
 
 /**
  * 출력 스키마를 실은 요청이 어느 에이전트의 것인가 — 도구 이름이 없으므로 시스템
@@ -149,61 +201,62 @@ const outputAgentOf = (req: TurnRequest): "match-reader" | "finalize-match" | un
   return undefined;
 };
 
-describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
-  it("진행 의도가 없으면 경기가 한 발도 나가지 않는다", () => {
-    const state = matchState();
-    const minute = state.pendingMatch!.ledger.minute;
-    const { applied } = turn(state, { ops: {} });
-    expect(applied.segment).toBeNull();
-    expect(state.pendingMatch!.ledger.minute).toBe(minute);
-    expect(state.pendingMatch!.ledger.events).toHaveLength(0);
+/** 실모드로 돌리는 describe의 앞뒤 — 모델 자리는 `runTurn` 흉내다 */
+function realMode(): void {
+  const previousMode = process.env.LLM_MODE;
+  beforeEach(() => {
+    process.env.LLM_MODE = "real";
+    runTurn.mockReset();
   });
+  afterEach(() => {
+    if (previousMode === undefined) delete process.env.LLM_MODE;
+    else process.env.LLM_MODE = previousMode;
+  });
+}
 
+describe("경기 턴 — 지시는 판에 걸리고 시계는 턴 밖에서 구른다", () => {
   /**
-   * 선수와 말만 나눈 턴은 시계를 옮기지 않는다 — 조금이라도 흘려 주면 이기고 있을 때
-   * 말을 걸어 시간을 끄는 길이 열린다 (agents.md §3).
+   * 선수와 말만 나눈 턴도, 아무것도 없는 턴도 시계를 옮기지 않는다 — 조금이라도 흘려
+   * 주면 이기고 있을 때 말을 걸어 시간을 끄는 길이 열린다 (agents.md §3).
    */
-  it("대화만 건 턴은 판을 건드리지 않는다", () => {
+  it("지시를 거는 것만으로는 시계가 한 틱도 나가지 않는다 — 대화만 건 턴도 같다", () => {
     const state = matchState();
-    const side = userSide(state);
-    const who = state.pendingMatch!.ledger[side].onPitch[7]!;
-    const minute = state.pendingMatch!.ledger.minute;
+    const live = state.pendingMatch!.live;
+    const tick = live.state.tick;
+    const events = live.ledger.events.length;
+    const who = live.ledger[userSide(state)].onPitch[7]!;
 
-    const { applied } = turn(state, {
+    turn(state, { ops: {} });
+    turn(state, {
       ops: {
         team_talk: [{ occasion: "daily", players: [who], outcome: "encouraged", intensity: 2 }],
       },
     });
-    expect(applied.segment).toBeNull();
-    expect(state.pendingMatch!.ledger.minute).toBe(minute);
+    expect(state.pendingMatch!.live.state.tick).toBe(tick);
+    expect(state.pendingMatch!.live.committedTick).toBe(tick);
+    expect(state.pendingMatch!.live.ledger.events).toHaveLength(events);
   });
 
-  it("교체가 구간보다 먼저 반영된다 — 들어간 선수가 그 구간을 뛴다", () => {
+  it("공이 멈춘 자리의 교체는 그 자리에서 들어가고, 들어간 선수가 이어지는 구간을 뛴다", () => {
     const state = matchState();
     const side = userSide(state);
-    const ledger = state.pendingMatch!.ledger;
-    const out = ledger[side].onPitch[10]!;
-    const incoming = ledger[side].bench[1]!;
+    const ledger = () => state.pendingMatch!.live.ledger;
+    const out = ledger()[side].onPitch[10]!;
+    const incoming = ledger()[side].bench[1]!;
 
-    const { applied } = turn(
-      state,
-      { ops: { substitute: [{ out, in: incoming }] } },
-      [],
-      [],
-      [],
-      true,
-    );
-    expect(applied.segment).not.toBeNull();
+    const { applied } = turn(state, { ops: { substitute: [{ out, in: incoming }] } });
+    expect(applied.notes.join(" ")).toContain("교체 완료");
+    expect(ledger()[side].onPitch).toContain(incoming);
+    expect(ledger()[side].onPitch).not.toContain(out);
+    expect(state.pendingMatch!.live.slots[side].map((s) => s.playerId)).toContain(incoming);
+    const subAt = ledger().events.find((e) => e.type === "substitution")!.minute;
 
-    const after = state.pendingMatch!.ledger;
-    expect(after.minute).toBeGreaterThan(0);
-    // 굴러간 구간 내내 새 선수가 그라운드에 있었다 — 나간 선수는 없다
-    expect(after[side].onPitch).toContain(incoming);
-    expect(after[side].onPitch).not.toContain(out);
-    // 교체는 구간 사건들보다 이른 시각에 찍혀 있다
-    const subEvent = after.events.find((e) => e.type === "substitution")!;
-    const rolled = after.events.filter((e) => e.type !== "substitution");
-    for (const event of rolled) expect(event.minute).toBeGreaterThanOrEqual(subEvent.minute);
+    play(state, 3);
+    expect(ledger()[side].onPitch).toContain(incoming);
+    // 교체는 뒤에 구른 사건들보다 이른 시각에 찍혀 있다
+    for (const event of ledger().events.filter((e) => e.type !== "substitution")) {
+      expect(event.minute).toBeGreaterThanOrEqual(subAt);
+    }
   });
 
   /**
@@ -211,85 +264,55 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
    * 평시와 같은 명령을 지나는 자리라, 이름이 어긋나면 `applyTacticOrders`의 `call`이
    * 조용히 아무것도 하지 않는다 — 감독에게는 지시가 걸린 것처럼 보이는 거짓 성공이다.
    */
-  it("세트피스 인원 지시가 그 턴에 팀 전술로 들어간다", () => {
+  it("세트피스 인원 지시가 그 턴에 팀 전술과 실시간 경기의 우리 편에 들어간다", () => {
     const state = matchState();
+    const side = userSide(state);
     turn(state, { ops: { set_set_piece_routine: [{ commit: "many" }] } });
     expect(userTactics(state).setPieceRoutine?.commit).toBe("many");
+    expect(state.pendingMatch!.live.setPieceRoutine[side]?.commit).toBe("many");
 
     // 중립은 지시를 푼다 — 칸이 비어야 「지시하지 않음」이 한 모양으로 적힌다
     turn(state, { ops: { set_set_piece_routine: [{ commit: "normal" }] } });
     expect(userTactics(state).setPieceRoutine?.commit).toBeUndefined();
   });
 
-  it("포메이션을 바꾼 턴은 전술판 검토를 위해 진행하지 않는다", () => {
+  it("포메이션을 바꾼 턴은 그 사실을 알리고, 바뀐 자리가 실시간 경기에 실린다", () => {
     const state = matchState();
-    const minute = state.pendingMatch!.ledger.minute;
     const side = userSide(state);
-    const mover = state.pendingMatch!.ledger[side].onPitch[10]!;
+    const tick = state.pendingMatch!.live.state.tick;
+    const mover = state.pendingMatch!.live.ledger[side].onPitch[10]!;
 
-    const { applied } = turn(
-      state,
-      { ops: { set_player_tactic: [{ playerId: mover, position: "CB" }] } },
-      [],
-      [],
-      [],
-      true,
+    const { applied } = turn(state, {
+      ops: { set_player_tactic: [{ playerId: mover, position: "CB" }] },
+    });
+    expect(applied.shapeChanged).toBe(true);
+    expect(state.pendingMatch!.live.slots[side].find((s) => s.playerId === mover)?.position).toBe(
+      "CB",
     );
-    expect(applied.segment).toBeNull();
-    expect(applied.notes.join(" ")).toContain("전술판");
-    expect(state.pendingMatch!.ledger.minute).toBe(minute);
+    expect(state.pendingMatch!.live.state.tick).toBe(tick);
 
-    // 검토 뒤 다음 턴에는 바뀐 포메이션으로 정상 진행한다.
-    expect(turn(state, GO, [], [], [], true).applied.segment).not.toBeNull();
-    expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(minute);
+    // 판을 건드리지 않은 턴은 그 표식이 서지 않는다
+    expect(turn(state, { ops: {} }).applied.shapeChanged).toBe(false);
   });
 
   /**
-   * **감독이 말한 분이 정지점이 된다** (match.md §2). 조용한 경기에서 감독이 개입할
-   * 자리가 하프타임 하나로 줄지 않으려면 "30분까지"가 그 분에서 서야 하고, 그 자리는
-   * 휴식 정지점이 아니므로 거기서 부른 교체는 교체 창을 문다 (§5).
+   * **외침은 경기당 셋이다** (career.md §2) — 넷째부터는 판정이 서지 않고 그 사실이
+   * 감독에게 돌아간다. 셈은 `PendingMatch.shouts` 하나가 갖는다.
    */
-  it("말한 분에서 멈추고, 그 정지점의 교체는 창을 소모한다", () => {
+  it("외침은 경기당 셋까지 세고, 넷째는 판정 없이 되돌아간다", () => {
     const state = matchState();
-    const side = userSide(state);
-    let stop = "";
-    // 골·부상이 먼저 오면 그 자리가 더 이르다 — 어느 쪽이든 30′을 넘어서지 않는다
-    for (let guard = 0; guard < 8 && stop !== "requested"; guard++) {
-      turn(state, GO, [], [], [], true, 30);
-      stop = state.pendingMatch!.lastSegment?.stop ?? "";
-      expect(state.pendingMatch!.ledger.minute, stop).toBeLessThanOrEqual(30);
-    }
-    expect(stop).toBe("requested");
-    expect(state.pendingMatch!.ledger.minute).toBe(30);
-    expect(state.pendingMatch!.ledger[side].subWindows).toBe(0);
-
-    const ledger = state.pendingMatch!.ledger;
-    const out = ledger[side].onPitch[10]!;
-    const incoming = ledger[side].bench[1]!;
-    turn(state, { ops: { substitute: [{ out, in: incoming }] } });
-    // 휴식 정지점이 아니다 — 하프타임이었다면 창이 그대로 0이다
-    expect(state.pendingMatch!.ledger[side].subWindows).toBe(1);
-    expect(state.pendingMatch!.ledger.minute).toBe(30);
+    const shout = {
+      ops: {
+        team_talk: [{ occasion: "shout", players: [], outcome: "encouraged", intensity: 1 }],
+      },
+    };
+    for (let i = 0; i < 3; i++) turn(state, shout);
+    expect(state.pendingMatch!.shouts).toBe(3);
+    const { applied } = turn(state, shout);
+    expect(state.pendingMatch!.shouts).toBe(3);
+    expect(applied.notes.join(" ")).toContain("다 썼습니다");
   });
 
-  /**
-   * 범위 밖의 분은 **한 발도 굴리지 않고** 반려한다 — 굴려 놓고 다른 자리에서 멈추면
-   * 감독은 자기가 말한 분에 선 줄 알고 다음 판단을 쌓는다.
-   */
-  it("이 국면 밖의 분은 반려하고 시계는 그대로다", () => {
-    const state = matchState();
-    for (const minute of [90, 0]) {
-      const { applied } = turn(state, GO, [], [], [], true, minute);
-      expect(applied.segment, `${minute}′`).toBeNull();
-      expect(state.pendingMatch!.ledger.minute, `${minute}′`).toBe(0);
-      expect(state.pendingMatch!.ledger.events, `${minute}′`).toHaveLength(0);
-    }
-  });
-
-  /**
-   * 옮기지 못한 말은 조용히 사라지지 않는다 — 감독이 지시가 걸린 줄 알고 다음 판단을
-   * 그 위에 쌓는 것이 이 저장소가 여러 번 고친 거짓 성공이다.
-   */
   /**
    * 반려된 명령은 화면의 칩(`recordCall`)에 서지 않는다 — 기록에는 선다 (models.md §5-3).
    * 되짚을 때 "해석이 낸 명령이 왜 안 걸렸나"의 답이 여기뿐이다.
@@ -307,27 +330,36 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
       expect(rejected).toHaveLength(1);
       expect(rejected[0]?.kind === "command" && rejected[0].name).toBe("substitute");
       expect(calls.some((call) => call.name === "substitute")).toBe(false);
-      // 의도를 판에 건 결과가 마지막에 선다 — 굴리지 않은 턴이다
+      // 의도를 판에 건 결과가 마지막에 선다 — 판의 모양은 그대로다
       const last = entries.at(-1);
-      expect(last?.kind === "orders.applied" && last.rolled).toBe(false);
+      expect(last?.kind).toBe("orders.applied");
+      expect(last?.kind === "orders.applied" && last.shapeChanged).toBe(false);
     } finally {
       bindJournal(null);
     }
   });
 
+  /**
+   * 옮기지 못한 말은 조용히 사라지지 않는다 — 감독이 지시가 걸린 줄 알고 다음 판단을
+   * 그 위에 쌓는 것이 이 저장소가 여러 번 고친 거짓 성공이다.
+   */
   it("해석하지 못한 말은 감독에게 되돌아간다", () => {
     const state = matchState();
     const { applied } = turn(state, { ops: {}, unresolved: "골키퍼를 공격수로 올려" });
     expect(applied.notes.join(" ")).toContain("골키퍼를 공격수로 올려");
   });
 
-  it("장부 블록은 사건을 싣지 않는다 — 사건은 구간이 돌려준다", () => {
+  it("장부 블록은 사건을 싣지 않는다 — 사건은 <events>가 따로 싣는다", () => {
     const state = matchState();
-    const { applied } = turn(state, GO, [], [], [], true);
-    expect(applied.segment).toContain("<segment>");
-    // 상태 스냅샷은 구간이 굴러간 **뒤**의 장부이고, 사건 목록은 따로 실린다
-    expect(buildLedgerNote(state)).not.toContain("<segment>");
-    expect(buildLedgerNote(state)).toContain("<ledger>");
+    const side = userSide(state);
+    const scorer = state.pendingMatch!.live.ledger[side].onPitch[10]!;
+    seat(state, [{ minute: 7, type: "goal", team: side, actors: [scorer], causes: [] }]);
+    const note = buildLedgerNote(state);
+    expect(note).toContain("<ledger>");
+    expect(note).not.toContain("<events>");
+    const block = eventsBlockOf(state, unseenEvents(state));
+    expect(block).toContain("<events>");
+    expect(block).toContain("- 7′");
   });
 });
 
@@ -363,20 +395,12 @@ describe("경기 장면의 시각 — 장부가 붙인다", () => {
 });
 
 /**
- * 경기 턴의 **실패** — 한 턴이 두 호출이라(agents.md §3) 어느 걸음이 흔들렸는지에
- * 따라 갈린다. 해석이 못 나오면 턴 전체가 없던 일이 되고, 중계만 흔들린 것은 코어가
- * 이미 굴린 구간을 되감을 이유가 없다.
+ * 매치 GM 턴 — 도구 둘(지시·마감)이 코어를 부르는 손잡이다 (agents.md §3). 한 턴이 여러
+ * 호출이라 어느 걸음이 흔들렸는지에 따라 갈린다: 판독이 못 나오면 도구가 반려로 답하고,
+ * 호출 실패(시한)는 종류를 든 채 올라간다.
  */
-describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
-  const previousMode = process.env.LLM_MODE;
-  beforeEach(() => {
-    process.env.LLM_MODE = "real";
-    runTurn.mockReset();
-  });
-  afterEach(() => {
-    if (previousMode === undefined) delete process.env.LLM_MODE;
-    else process.env.LLM_MODE = previousMode;
-  });
+describe("경기 턴 — 매치 GM이 도구로 지시를 판에 건다", () => {
+  realMode();
 
   /** 첫 휘슬은 지나간 판 */
   function rolling(): GameState {
@@ -385,32 +409,24 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     return state;
   }
 
-  /** 해석기 흉내 — 지시 하나를 산출 JSON으로 낸다 (advance는 의도의 것이 아니다) */
+  /** 판독기 흉내 — 지시 하나를 산출 JSON으로 낸다 */
   const interpreter = async (req: TurnRequest, intent: TacticOrders = { ops: {} }) => {
     expect(req.outputSchema).toBeDefined();
     expect(req.tools).toBeUndefined();
     return { ...answered(""), output: { ...intent } };
   };
 
-  it("빈 unresolved를 포함한 위치 교환은 배치·패킷·경기판과 재개 후 이동에 반영된다", async () => {
+  it("빈 unresolved를 포함한 위치 교환은 배치·경기판·실시간 자리와 재개 후 이동에 반영된다", async () => {
     const state = rolling();
     const side = userSide(state);
-    const [first, second] = state.pendingMatch!.ledger[side].onPitch.slice(1, 3) as [
+    const [first, second] = state.pendingMatch!.live.ledger[side].onPitch.slice(1, 3) as [
       string,
       string,
     ];
     setPlayerTactic(state, { playerId: first, position: "CAM" });
     setPlayerTactic(state, { playerId: second, position: "ST" });
-    enableLiveMatch(state);
-    const spatial = state.pendingMatch!.spatial!;
-    const keeperId = state.pendingMatch!.packet[side].lineup.find((p) => p.position === "GK")!.id;
-    const keeper = spatial.players.find((p) => p.id === keeperId)!;
-    spatial.restart = null;
-    spatial.possession = side;
-    spatial.ball = { x: keeper.x, y: keeper.y, z: 0, owner: keeperId, flight: null };
-    keeper.readyAt = spatial.tick + 100;
     const untouched = structuredClone(state);
-    const before = structuredClone(state.pendingMatch!.spatial);
+    const tick = state.pendingMatch!.live.state.tick;
     runTurn.mockImplementation(async (req: TurnRequest) =>
       interpreter(req, {
         ops: {
@@ -428,109 +444,85 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
       cards: [],
       said: "두 선수의 포지션을 맞바꿔",
     }).find((t) => t.name === "tactic_orders")!;
-    expect((await orders.handle({})).ok).toBe(true);
+    const reply = await orders.handle({});
+    expect(reply.ok).toBe(true);
+    // 빈 unresolved는 옮기지 못한 말이 아니다
+    expect(reply.message).not.toContain("옮기지 못한 지시");
     expect(runTurn).toHaveBeenCalledTimes(1);
     for (const [id, position] of [
       [first, "ST"],
       [second, "CAM"],
-    ]) {
+    ] as const) {
       expect(userTactics(state).assignments.find((a) => a.playerId === id)?.position).toBe(
         position,
       );
-      expect(state.pendingMatch!.packet[side].lineup.find((p) => p.id === id)?.position).toBe(
+      expect(state.pendingMatch!.live.slots[side].find((s) => s.playerId === id)?.position).toBe(
         position,
       );
       expect(buildMatchView(state)!.onPitch[side].find((p) => p.id === id)?.position).toBe(
         position,
       );
     }
-    expect(state.pendingMatch!.spatial).toEqual(before);
-    advanceLiveMatch(state, 20);
-    advanceLiveMatch(untouched, 20);
-    for (const id of [first, second]) {
-      const moved = state.pendingMatch!.spatial!.players.find((p) => p.id === id)!;
-      const original = untouched.pendingMatch!.spatial!.players.find((p) => p.id === id)!;
-      expect(moved.target).not.toEqual(original.target);
-      expect({ x: moved.x, y: moved.y }).not.toEqual({ x: original.x, y: original.y });
-    }
+    // 지시는 시계를 옮기지 않는다 — 판은 다음 틱부터 바뀐 자리로 구른다
+    expect(state.pendingMatch!.live.state.tick).toBe(tick);
+    play(state, 0.5);
+    play(untouched, 0.5);
+    const at = (s: GameState, id: string) => {
+      const piece = s.pendingMatch!.live.state.players.find((p) => p.id === id)!;
+      return { x: piece.x, y: piece.y };
+    };
+    expect([at(state, first), at(state, second)]).not.toEqual([
+      at(untouched, first),
+      at(untouched, second),
+    ]);
   });
 
   /**
-   * 목표 분은 **도구의 인자**로 온다 — 스키마가 그 칸을 안 내면 GM은 분을 말할 길이
-   * 없고, 핸들러가 안 넘기면 코어는 언제나 정지점까지 간다 (agents.md §3).
+   * **지시 → 판독 → 판이 한 호출 안이다** (agents.md §3). GM이 `tactic_orders`를 부르면
+   * 핸들러 안에서 판독기가 돌고 코어가 명령을 건 뒤의 장부가 도구 결과로 돌아온다 — 그
+   * 결과를 읽고 쓴 장면이 같은 턴의 것이다. 시계는 여전히 서 있다.
    */
-  it("진행 도구가 목표 분을 받아 그 분을 넘지 않는다", async () => {
-    const state = rolling();
-    const advance = buildMatchTools(state, { calls: [], goals: [], cards: [] }).find(
-      (t) => t.name === "advance_match",
-    )!;
-
-    const rolled = await advance.handle({ untilMinute: 20 });
-    expect(rolled.ok).toBe(true);
-    const minute = state.pendingMatch!.ledger.minute;
-    expect(minute).toBeGreaterThan(0);
-    expect(minute).toBeLessThanOrEqual(20);
-
-    // 이 국면 밖의 분은 반려되고 시계는 그대로다 — 전반에 90′은 없다
-    const rejected = await advance.handle({ untilMinute: 90 });
-    expect(rejected.message).toContain("45′");
-    expect(state.pendingMatch!.ledger.minute).toBe(minute);
-  });
-
-  /**
-   * **지시 → 도구 → 구간 → 중계가 한 호출이다** (agents.md §3). GM이 `advance_match`를
-   * 부르면 핸들러 안에서 해석기가 돌고 코어가 굴린 대본이 도구 결과로 돌아온다 — 그
-   * 대본을 읽고 쓴 중계가 같은 턴의 장면이다.
-   */
-  it("GM이 advance_match를 부르면 해석 → 구간이 돌고, 대본이 도구 결과로 돌아온다", async () => {
+  it("GM이 tactic_orders를 부르면 판독 → 명령이 돌고, 바뀐 장부가 도구 결과로 돌아온다", async () => {
     const state = rolling();
     const side = userSide(state);
-    const out = state.pendingMatch!.ledger[side].onPitch[10]!;
-    const incoming = state.pendingMatch!.ledger[side].bench[0]!;
+    const out = state.pendingMatch!.live.ledger[side].onPitch[10]!;
+    const incoming = state.pendingMatch!.live.ledger[side].bench[0]!;
+    const tick = state.pendingMatch!.live.state.tick;
     runTurn.mockImplementation(async (req: TurnRequest) => {
       if (outputAgentOf(req) === "match-reader") {
         return interpreter(req, { ops: { substitute: [{ out, in: incoming }] } });
       }
-      const orders = req.tools?.find((t) => t.name === "tactic_orders");
-      const advance = req.tools?.find((t) => t.name === "advance_match");
-      expect(req.tools?.map((t) => t.name).sort()).toEqual([
-        "advance_match",
-        "finalize_match",
-        "tactic_orders",
-      ]);
-      // 지시는 판만 바꾸고 새 패킷을 돌려준다 — 구간은 아직이다
-      const ordered = await orders!.handle({});
+      expect(req.tools?.map((t) => t.name).sort()).toEqual(["finalize_match", "tactic_orders"]);
+      const ordered = await req.tools!.find((t) => t.name === "tactic_orders")!.handle({});
       expect(ordered.ok).toBe(true);
-      expect(ordered.message).not.toContain("<segment>");
-      expect(ordered.message).toContain("<packet>");
-      expect(state.pendingMatch!.ledger.minute).toBe(0);
-      const reply = await advance!.handle({});
-      expect(reply.ok).toBe(true);
-      expect(reply.message).toContain("<segment>");
-      expect(reply.message).toContain("<packet>");
-      return answered("[12']\n@중계: 교체 뒤 첫 공격입니다.", 1);
+      expect(ordered.message).toContain("<core_replies>");
+      expect(ordered.message).toContain("<ledger>");
+      expect(ordered.message).not.toContain("<events>");
+      return answered("[0']\n@중계: 교체 뒤 첫 공격입니다.", 1);
     });
 
-    const turn = await runGmTurn(state, `${incoming} 넣고 계속 가자`);
+    const result = await runGmTurn(state, `${incoming} 넣고 계속 가자`);
 
-    // GM 한 번 · 지시 턴의 판독 한 번 · 구간 뒤의 판독 한 번
-    expect(runTurn).toHaveBeenCalledTimes(3);
-    expect(turn.text).toContain("교체 뒤 첫 공격");
-    expect(turn.toolCalls.filter((c) => c.name === MATCH_ADVANCED)).toHaveLength(1);
-    expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(0);
-    expect(state.pendingMatch!.ledger[side].onPitch).toContain(incoming);
+    // GM 한 번 · 지시 턴의 판독 한 번
+    expect(runTurn).toHaveBeenCalledTimes(2);
+    expect(result.text).toContain("교체 뒤 첫 공격");
+    expect(result.toolCalls.map((c) => c.name)).toContain("substitute");
+    expect(state.pendingMatch!.live.state.tick).toBe(tick);
+    expect(state.pendingMatch!.live.ledger[side].onPitch).toContain(incoming);
   });
 
-  it("말만 건 턴은 도구 없이 장면만 — 시계가 서 있다", async () => {
+  it("말만 건 턴은 도구 없이 장면만 — 시계가 서 있고 중계 이력이 남는다", async () => {
     const state = rolling();
-    const minute = state.pendingMatch!.ledger.minute;
-    runTurn.mockResolvedValue(answered("@레오 카스텔라노: 감독님, 부르셨습니까."));
+    const tick = state.pendingMatch!.live.state.tick;
+    const reply = answered("@레오 카스텔라노: 감독님, 부르셨습니까.");
+    runTurn.mockResolvedValue(reply);
 
-    const turn = await runGmTurn(state, "레오, 잠깐");
+    const result = await runGmTurn(state, "레오, 잠깐");
 
     expect(runTurn).toHaveBeenCalledTimes(1);
-    expect(turn.toolCalls).toHaveLength(0);
-    expect(state.pendingMatch!.ledger.minute).toBe(minute);
+    expect(result.toolCalls).toHaveLength(0);
+    expect(state.pendingMatch!.live.state.tick).toBe(tick);
+    expect(state.pendingMatch!.casterHistory).toEqual(reply.history);
   });
 
   /**
@@ -543,8 +535,8 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
   it("해석기는 감독의 말을 @감독: 줄 하나로만 받고, 같은 손잡이의 두 번째 호출은 닫힌다", async () => {
     const state = rolling();
     const side = userSide(state);
-    const out = state.pendingMatch!.ledger[side].onPitch[10]!;
-    const incoming = state.pendingMatch!.ledger[side].bench[0]!;
+    const out = state.pendingMatch!.live.ledger[side].onPitch[10]!;
+    const incoming = state.pendingMatch!.live.ledger[side].bench[0]!;
     const said = `${incoming} 넣어`;
     // 턴 러너가 하는 일 — 감독의 말은 모델 호출 전에 채팅에 선다
     state.chat.push({
@@ -578,13 +570,12 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     const user = heard[0]!;
     expect(user.split("\n").filter((line) => line === `@감독: ${said}`)).toHaveLength(1);
     expect(user.trimEnd().endsWith(`@감독: ${said}`)).toBe(true);
-    expect(state.pendingMatch!.ledger[side].onPitch).toContain(incoming);
+    expect(state.pendingMatch!.live.ledger[side].onPitch).toContain(incoming);
   });
 
   /** 감독의 말이 없는 턴에는 손잡이가 열리지 않는다 — 옮길 말이 없다 (agents.md §1) */
   it("감독의 말이 없으면 지시 도구는 해석기를 부르지 않고 반려한다", async () => {
     const state = rolling();
-    const minute = state.pendingMatch!.ledger.minute;
     const orders = buildMatchTools(state, { calls: [], goals: [], cards: [] }).find(
       (t) => t.name === "tactic_orders",
     )!;
@@ -592,7 +583,6 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     expect(reply.ok).toBe(false);
     expect(reply.message).toContain("감독의 말이 없습니다");
     expect(runTurn).not.toHaveBeenCalled();
-    expect(state.pendingMatch!.ledger.minute).toBe(minute);
   });
 
   /**
@@ -601,22 +591,21 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
    */
   it("해석이 두 번 실패하면 도구가 반려로 답하고 판은 그대로다", async () => {
     const state = rolling();
-    const minute = state.pendingMatch!.ledger.minute;
+    const tacticsBefore = structuredClone(state.pendingMatch!.live.tactics);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     runTurn.mockImplementation(async (req: TurnRequest) => {
       // 해석기가 산출 없이 본문만 낸다 — 두 번 다
       if (outputAgentOf(req) === "match-reader") {
         return { ...answered("해석해 보겠습니다."), output: null };
       }
-      const orders = req.tools?.find((t) => t.name === "tactic_orders");
-      const reply = await orders!.handle({});
+      const reply = await req.tools!.find((t) => t.name === "tactic_orders")!.handle({});
       expect(reply.ok).toBe(false);
       return answered("@레오 카스텔라노: 무슨 말씀이신지 다시 한번 짚어 주시겠습니까.", 1);
     });
 
-    const turn = await runGmTurn(state, "압박 올려");
-    expect(turn.text).toContain("다시 한번");
-    expect(state.pendingMatch!.ledger.minute).toBe(minute);
+    const result = await runGmTurn(state, "압박 올려");
+    expect(result.text).toContain("다시 한번");
+    expect(state.pendingMatch!.live.tactics).toEqual(tacticsBefore);
     // GM 하나 + 해석기 둘
     expect(runTurn).toHaveBeenCalledTimes(3);
     warn.mockRestore();
@@ -630,7 +619,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
    */
   it("포인트·시트가 판에 앉고, 판독도 명령도 없는 지시 턴은 반려다", async () => {
     const state = rolling();
-    const who = state.pendingMatch!.ledger[userSide(state)].onPitch[9]!;
+    const who = state.pendingMatch!.live.ledger[userSide(state)].onPitch[9]!;
     const reading = {
       ops: {},
       points: [{ id: "p1", text: "왼쪽이 비어 있다", about: [who], importance: 2 }],
@@ -644,8 +633,8 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     runTurn.mockResolvedValue({ ...answered(""), output: reading });
     const first = await ordersTool().handle({});
     expect(first.ok).toBe(true);
-    expect(state.pendingMatch!.points).toEqual(reading.points);
-    expect(state.pendingMatch!.sheet).toEqual(reading.sheet);
+    expect(state.pendingMatch!.live.points).toEqual(reading.points);
+    expect(state.pendingMatch!.live.sheet).toEqual(reading.sheet);
 
     // 같은 판독을 그대로 다시 낸 턴 — 명령도 없고 시트도 그대로다
     const again = await ordersTool().handle({});
@@ -655,7 +644,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     runTurn.mockResolvedValue({ ...answered(""), output: { ops: {}, points: [], sheet: [] } });
     const cleared = await ordersTool().handle({});
     expect(cleared.ok).toBe(true);
-    expect(state.pendingMatch!.points).toEqual([]);
+    expect(state.pendingMatch!.live.points).toEqual([]);
   });
 
   /**
@@ -664,23 +653,20 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
    */
   it("도구 뒤의 해석이 시한을 넘기면 그 오류가 종류를 든 채 올라간다", async () => {
     const state = rolling();
-    const minute = state.pendingMatch!.ledger.minute;
     const thrown = new LlmTimeoutError("match-reader", 60_000);
     runTurn.mockImplementation(async (req: TurnRequest) => {
       if (outputAgentOf(req) === "match-reader") throw thrown;
-      const orders = req.tools?.find((t) => t.name === "tactic_orders");
-      await orders!.handle({});
+      await req.tools!.find((t) => t.name === "tactic_orders")!.handle({});
       return answered("닿지 않는다", 1);
     });
 
     await expect(runGmTurn(state, "압박 올려")).rejects.toBe(thrown);
     expect(runTurn).toHaveBeenCalledTimes(2);
-    expect(state.pendingMatch!.ledger.minute).toBe(minute);
   });
 
   /**
    * 재시도의 자국 — 도구가 돌기 **전에** 깨진 응답은 한 번 더 부르고, 도구가 돈 뒤에
-   * 깨진 응답은 다시 부르지 않는다 (agents.md §8). 뒤쪽을 다시 부르면 구간이 두 번 구른다.
+   * 깨진 응답은 다시 부르지 않는다 (agents.md §8). 뒤쪽을 다시 부르면 명령이 두 번 걸린다.
    */
   it("도구 전의 실패는 한 번 더 부르고, 도구 뒤의 실패는 다시 부르지 않는다", async () => {
     const state = rolling();
@@ -690,30 +676,136 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
     expect(runTurn).toHaveBeenCalledTimes(2);
 
     runTurn.mockReset();
-    const minute = state.pendingMatch!.ledger.minute;
+    const side = userSide(state);
+    const out = state.pendingMatch!.live.ledger[side].onPitch[10]!;
+    const incoming = state.pendingMatch!.live.ledger[side].bench[0]!;
     runTurn.mockImplementation(async (req: TurnRequest) => {
-      if (outputAgentOf(req) === "match-reader") return interpreter(req);
-      await req.tools!.find((t) => t.name === "advance_match")!.handle({});
+      if (outputAgentOf(req) === "match-reader") {
+        return interpreter(req, { ops: { substitute: [{ out, in: incoming }] } });
+      }
+      await req.tools!.find((t) => t.name === "tactic_orders")!.handle({});
       throw new ModelOutputError("중계가 잘렸습니다");
     });
-    await expect(runGmTurn(state, "계속")).rejects.toBeInstanceOf(ModelOutputError);
-    // GM 한 번과 구간 뒤 판독 한 번 — 구간은 한 번 굴렀고 다시 굴리지 않았다
+    await expect(runGmTurn(state, `${incoming} 넣어`)).rejects.toBeInstanceOf(ModelOutputError);
+    // GM 한 번과 판독 한 번 — 교체는 한 번 걸렸고 다시 걸지 않았다
     expect(runTurn).toHaveBeenCalledTimes(2);
-    expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(minute);
+    expect(state.pendingMatch!.live.ledger[side].onPitch).toContain(incoming);
   });
 
-  /** 손잡이 턴은 코어가 먼저 굴린다 — GM은 대본을 받아 중계만 쓰고 마감 도구만 쥔다 */
-  it("손잡이 턴은 모델 없이 구간을 굴리고, GM은 대본을 이번 턴 층에서 읽는다", async () => {
+  /**
+   * **정지점 턴은 판독기가 판을 먼저 다시 읽고, 마감 도구만 쥔 GM이 그 사이 장부에 앉은
+   * 사건을 `<events>`로 중계한다** (agents.md §3). 시계는 실행기가 민다 — 턴은 굴리지
+   * 않는다. 사건은 한 번씩만 읽힌다 — 다음 턴의 `<events>`는 그 뒤부터다.
+   */
+  it("정지점 턴은 판을 다시 읽고, 마감만 쥐고 지난 턴 뒤의 사건을 <events>로 중계하며, 골 표식을 세운다", async () => {
     const state = rolling();
+    const side = userSide(state);
+    const scorer = state.pendingMatch!.live.ledger[side].onPitch[10]!;
+    const heard: string[] = [];
+    let readerCalls = 0;
     runTurn.mockImplementation(async (req: TurnRequest) => {
+      if (outputAgentOf(req) === "match-reader") {
+        readerCalls += 1;
+        return interpreter(req);
+      }
       expect(req.tools?.map((t) => t.name)).toEqual(["finalize_match"]);
-      expect(req.user).toContain("<segment>");
-      return answered("[8']\n@중계: 경기가 이어집니다.");
+      heard.push(req.user);
+      return answered("[8']\n@중계: 골이 들어갑니다!");
     });
-    const turn = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
+    seat(state, [{ minute: 8, type: "goal", team: side, actors: [scorer], causes: [] }]);
+    const tick = state.pendingMatch!.live.state.tick;
+
+    const first = await runGmTurn(state, "경기 중단", undefined, { kind: "match_stop" });
+    // 판독기가 먼저 돌았다 — 골은 판을 바꾼다
+    expect(readerCalls).toBe(1);
+    expect(heard[0]).toContain("<events>");
+    expect(heard[0]).toContain("- 8′");
+    expect(first.goals!.some((g) => g.ours)).toBe(true);
+    // 시계는 턴이 밀지 않는다
+    expect(state.pendingMatch!.live.state.tick).toBe(tick);
+    expect(state.pendingMatch!.eventsSeen).toBe(state.pendingMatch!.live.ledger.events.length);
+
+    // 다음 턴 — 같은 골을 다시 읽지 않고, 읽을 사건이 없으면 판독기도 돌지 않는다
+    await runGmTurn(state, "경기 중단", undefined, { kind: "match_stop" });
+    expect(heard[1]).toContain("(사건 없음)");
+    expect(readerCalls).toBe(1);
+  });
+});
+
+/**
+ * **정지점 뒤의 판독** — 골·퇴장 뒤와 하프타임에 체크포인트가 확정된 자리에서 돈다
+ * (agents.md §3). 그 밖의 사건 뒤에는 돌지 않고, 실패는 삼켜 지난 시트가 남는다.
+ */
+describe("정지점 뒤의 판독", () => {
+  realMode();
+
+  const reading = (who: string) => ({
+    ...answered(""),
+    output: {
+      ops: {},
+      points: [{ id: "p1", text: "선제골 뒤 라인이 내려섰다", about: [who], importance: 2 }],
+      sheet: [],
+    },
+  });
+
+  it("골 뒤에는 그 사건을 읽고 포인트를 다시 쓴다", async () => {
+    const state = matchState();
+    markEntered(state);
+    const side = userSide(state);
+    const scorer = state.pendingMatch!.live.ledger[side].onPitch[10]!;
+    const goal: MatchEvent = { minute: 12, type: "goal", team: side, actors: [scorer], causes: [] };
+    seat(state, [goal]);
+    runTurn.mockImplementation(async (req: TurnRequest) => {
+      expect(outputAgentOf(req)).toBe("match-reader");
+      expect(req.user).toContain("<events>");
+      expect(req.user).toContain("- 12′");
+      return reading(scorer);
+    });
+
+    await readMatchAfterStop(state, [goal]);
     expect(runTurn).toHaveBeenCalledTimes(1);
-    expect(turn.toolCalls.filter((c) => c.name === MATCH_ADVANCED)).toHaveLength(1);
-    expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(0);
+    expect(state.pendingMatch!.live.points.map((p) => p.id)).toEqual(["p1"]);
+  });
+
+  it("경고·하프타임에는 돌고, 정지점이 아닌 사건 뒤에는 돌지 않는다", async () => {
+    const state = matchState();
+    markEntered(state);
+    const side = userSide(state);
+    const shooter = state.pendingMatch!.live.ledger[side].onPitch[10]!;
+    runTurn.mockResolvedValue(reading(shooter));
+
+    await readMatchAfterStop(state, [
+      { minute: 20, type: "shot", team: side, actors: [shooter], causes: [] },
+    ]);
+    expect(runTurn).not.toHaveBeenCalled();
+
+    await readMatchAfterStop(state, [{ minute: 45, type: "half_time", actors: [], causes: [] }]);
+    expect(runTurn).toHaveBeenCalledTimes(1);
+
+    // 경고는 판을 바꾼다 — 카드를 안고 뛰는 선수가 생겼다
+    await readMatchAfterStop(state, [
+      { minute: 52, type: "yellow_card", team: side, actors: [shooter], causes: [] },
+    ]);
+    expect(runTurn).toHaveBeenCalledTimes(2);
+  });
+
+  it("판독이 실패하면 삼키고 지난 포인트가 그대로 남는다", async () => {
+    const state = matchState();
+    markEntered(state);
+    const side = userSide(state);
+    const scorer = state.pendingMatch!.live.ledger[side].onPitch[10]!;
+    runTurn.mockResolvedValueOnce(reading(scorer));
+    await readMatchAfterStop(state, [{ minute: 45, type: "half_time", actors: [], causes: [] }]);
+    const kept = structuredClone(state.pendingMatch!.live.points);
+    expect(kept).toHaveLength(1);
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    runTurn.mockRejectedValue(new LlmTimeoutError("match-reader", 60_000));
+    const goal: MatchEvent = { minute: 50, type: "goal", team: side, actors: [scorer], causes: [] };
+    seat(state, [goal]);
+    await expect(readMatchAfterStop(state, [goal])).resolves.toBeUndefined();
+    expect(state.pendingMatch!.live.points).toEqual(kept);
+    warn.mockRestore();
   });
 });
 
@@ -724,15 +816,7 @@ describe("경기 턴 — 매치 GM이 도구로 경기를 진행한다", () => {
  * 마무리 중계가 산출 JSON 하나로 온다. GM이 마감을 부르지 않은 턴은 코어가 대신 부른다.
  */
 describe("경기 마감 — 결산은 도구 뒤의 에이전트가, 마무리는 장면의 끝에", () => {
-  const previousMode = process.env.LLM_MODE;
-  beforeEach(() => {
-    process.env.LLM_MODE = "real";
-    runTurn.mockReset();
-  });
-  afterEach(() => {
-    if (previousMode === undefined) delete process.env.LLM_MODE;
-    else process.env.LLM_MODE = previousMode;
-  });
+  realMode();
 
   /** `<settlement>` 표의 행에서 id를 읽는다 — 모델이 돌려줘야 할 그 id다 */
   const idsOfSettlement = (user: string): string[] => {
@@ -740,16 +824,7 @@ describe("경기 마감 — 결산은 도구 뒤의 에이전트가, 마무리�
     return [...block.matchAll(/^- (\S+) \| /gmu)].map((m) => m[1]!);
   };
 
-  /** 종료 직전까지 코어로 굴려 둔다 — 마지막 구간들만 실모드 턴으로 간다 */
-  function nearlyDone(): GameState {
-    const state = matchState();
-    markEntered(state);
-    for (let guard = 0; guard < 60 && state.pendingMatch!.ledger.minute < 60; guard++) {
-      turn(state, GO, [], [], [], true);
-    }
-    expect(state.pendingMatch!.ledger.phase).not.toBe("finished");
-    return state;
-  }
+  const nearlyDone = (): GameState => late().state;
 
   /** 마감 에이전트 흉내 — 앵커 위에 +0.5, 첫 선수에게 심경 한 줄 */
   function settler(
@@ -796,7 +871,7 @@ describe("경기 마감 — 결산은 도구 뒤의 에이전트가, 마무리�
       if (outputAgentOf(req) === "finalize-match") return settle(req);
       const finalize = req.tools!.find((t) => t.name === "finalize_match")!;
       // 장부가 끝났으면 마감, 아니면 중계만
-      if (state.pendingMatch?.ledger.phase === "finished") {
+      if (state.pendingMatch?.live.ledger.phase === "finished") {
         const reply = await finalize.handle({});
         expect(reply.ok).toBe(true);
         finalizeReply = reply.message;
@@ -806,7 +881,7 @@ describe("경기 마감 — 결산은 도구 뒤의 에이전트가, 마무리�
         );
       }
       expect((await finalize.handle({})).ok).toBe(false); // 아직 안 끝난 경기는 반려
-      return answered("[75']\n@중계: 경기가 이어집니다.");
+      return answered("[85']\n@중계: 경기가 이어집니다.");
     });
 
     /** 턴 러너처럼 장면을 채팅에 남긴다 — 마감 에이전트가 읽는 중계의 원본이다 */
@@ -819,14 +894,11 @@ describe("경기 마감 — 결산은 도구 뒤의 에이전트가, 마무리�
         inMatch: true,
         matchId,
       });
-    // 이 경기의 지난 중계 — 마감 에이전트가 읽어야 할 것이 하나는 있어야 한다
-    keep("[55']\n@중계: 경기가 이어집니다.");
-    let last = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
+    let last = await runGmTurn(state, "경기 중단", undefined, { kind: "match_stop" });
+    expect(state.pendingMatch).toBeTruthy();
     keep(last.text);
-    for (let guard = 0; guard < 20 && state.pendingMatch; guard++) {
-      last = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
-      keep(last.text);
-    }
+    playToEnd(state);
+    last = await runGmTurn(state, "경기 중단", undefined, { kind: "match_stop" });
     expect(state.pendingMatch).toBeFalsy();
     expect(finalizeReply).toContain("<closing>");
     expect(finalizeReply).toContain("마지막 휘슬");
@@ -863,10 +935,8 @@ describe("경기 마감 — 결산은 도구 뒤의 에이전트가, 마무리�
       return answered("[90']\n@중계: 휘슬이 울립니다.");
     });
 
-    let last = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
-    for (let guard = 0; guard < 20 && state.pendingMatch; guard++) {
-      last = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
-    }
+    playToEnd(state);
+    const last = await runGmTurn(state, "경기 중단", undefined, { kind: "match_stop" });
     expect(state.pendingMatch).toBeFalsy();
     expect(state.matches.find((m) => m.id === matchId)!.result!.rated).toBe(true);
     expect(last.toolCalls.map((c) => c.name)).toContain("finalize_match");
@@ -885,27 +955,9 @@ describe("경기 마감 — 결산은 도구 뒤의 에이전트가, 마무리�
  * (docs/llm/prompts.md §1).
  */
 describe("중계 위생 — 꺾쇠 블록은 화면에도 저장에도 서지 않는다", () => {
-  const previousMode = process.env.LLM_MODE;
-  beforeEach(() => {
-    process.env.LLM_MODE = "real";
-    runTurn.mockReset();
-  });
-  afterEach(() => {
-    if (previousMode === undefined) delete process.env.LLM_MODE;
-    else process.env.LLM_MODE = previousMode;
-  });
+  realMode();
 
-  /** 캐스터의 응답 — 도구는 없고 문장만 온다 */
-  const casted = (text: string) => ({
-    text,
-    history: { version: 1 as const, provider: "anthropic" as const, model: "test", messages: [] },
-    historyBase: 0,
-    usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
-    toolCallCount: 0,
-    stopReason: "completed" as const,
-  });
-
-  it("블록은 걷히고 구간 헤더와 이어쓰기는 남는다 — 스트리밍도 같다", async () => {
+  it("블록은 걷히고 시각 헤더와 이어쓰기는 남는다 — 스트리밍도 같다", async () => {
     const state = matchState();
     markEntered(state);
     const scene = [
@@ -921,21 +973,21 @@ describe("중계 위생 — 꺾쇠 블록은 화면에도 저장에도 서지 �
       async (req: { onText?: (delta: string) => void }): Promise<unknown> => {
         // 실모드와 같은 모양으로 조각내 흘려보낸다 — 델타 경계가 블록 한복판에 걸린다
         for (const delta of scene.match(/[\s\S]{1,7}/gu) ?? []) req.onText?.(delta);
-        return casted(scene);
+        return answered(scene);
       },
     );
 
     const streamed: string[] = [];
-    const turn = await runGmTurn(state, "경기 진행", (d) => streamed.push(d), {
-      kind: "advance_match",
+    const result = await runGmTurn(state, "경기 중단", (d) => streamed.push(d), {
+      kind: "match_stop",
     });
 
-    for (const text of [turn.text ?? "", streamed.join("")]) {
+    for (const text of [result.text ?? "", streamed.join("")]) {
       expect(text).not.toContain("<points");
       expect(text).not.toContain("</points>");
       expect(text).not.toContain("왼쪽으로 몰리는");
       expect(text).toContain("@중계: 브루노가 중거리 슛을 때립니다!");
-      // 구간마다 새로 찍는 시각 헤더와 이어쓰기 줄은 그대로 남는다 (prompts.md §1)
+      // 턴마다 새로 찍는 시각 헤더와 이어쓰기 줄은 그대로 남는다 (prompts.md §1)
       expect(text).toContain("골키퍼가 가까스로 쳐냅니다.");
       expect(text).toMatch(/^\[\d+'\]\n/u);
     }
@@ -944,33 +996,33 @@ describe("중계 위생 — 꺾쇠 블록은 화면에도 저장에도 서지 �
 
 /**
  * 골 표식 — 화면이 골을 세우는 근거다. 한 경기를 완주시키는 값비싼 셋업이라
- * **한 판으로 표식의 모든 성질을 잰다**(수·스코어·득점자·우리 편 여부).
+ * **한 판으로 표식의 모든 성질을 잰다**(수·스코어·득점자·우리 편 여부). 턴마다 그 사이의
+ * 사건을 한 번씩 읽는 경계(`unseenEvents` → `markEventsSeen`)가 골을 빠뜨리거나 두 번
+ * 세지 않는가가 여기서 드러난다.
  */
 describe("골 표식", () => {
   it("경기가 끝나면 표식이 스코어와 정확히 맞물린다 — 지어낸 골도, 빠진 골도 없다", () => {
-    const state = buildMatchState(11);
-    const goals: GoalMark[] = [];
-    // 턴마다 한 구간 — 실모드의 한 턴과 같다
-    for (let t = 0; t < 60; t++) {
-      if (state.pendingMatch?.ledger.phase === "finished") break;
-      turn(state, GO, goals, [], [], true);
+    // 80′까지는 턴마다 경기 시간 5분 — 그 뒤도 같은 박자로 종료 휘슬까지 읽는다
+    const { state, goals, cards } = late();
+    const ledger = () => state.pendingMatch!.live.ledger;
+    for (let t = 0; t < 20 && ledger().phase !== "finished"; t++) {
+      play(state, 5);
+      readTurn(state, goals, cards);
     }
-    const ledger = state.pendingMatch!.ledger;
     const ours = userSide(state);
-    const total = ledger.score.home + ledger.score.away;
+    const score = ledger().score;
+    const total = score.home + score.away;
 
-    expect(ledger.phase).toBe("finished");
-    // 0-0으로 끝난 판이면 아래가 전부 공회전한다 — 시드 11은 골이 나는 판이다
+    expect(ledger().phase).toBe("finished");
+    // 0-0으로 끝난 판이면 아래가 전부 공회전한다 — 이 시드는 골이 나는 판이다
     expect(total).toBeGreaterThan(0);
     expect(goals).toHaveLength(total);
     // 마지막 표식의 스코어가 곧 최종 스코어다 (골마다 그 직후의 스코어를 싣는다)
-    expect(goals[goals.length - 1]!.score).toEqual(ledger.score);
+    expect(goals[goals.length - 1]!.score).toEqual(score);
     for (const goal of goals) expect(goal.scorer).not.toBe("");
     // 우리 골 표식의 수 = 우리 쪽 스코어 (색을 가르는 근거가 장부와 같다)
-    expect(goals.filter((g) => g.ours)).toHaveLength(ledger.score[ours]);
-    expect(goals.filter((g) => !g.ours)).toHaveLength(
-      ledger.score[ours === "home" ? "away" : "home"],
-    );
+    expect(goals.filter((g) => g.ours)).toHaveLength(score[ours]);
+    expect(goals.filter((g) => !g.ours)).toHaveLength(score[ours === "home" ? "away" : "home"]);
   });
 });
 
@@ -982,10 +1034,10 @@ const nameOf = (id: string) => NAMES[id] ?? id;
 const sideName = (side: "home" | "away") => (side === "home" ? "토트넘" : "아스널");
 
 function script(ev: MatchEvent, scoreBefore = { home: 0, away: 0 }): string {
-  return buildSegmentMessage([ev], "flow", nameOf, sideName, scoreBefore);
+  return buildEventsBlock([ev], nameOf, sideName, scoreBefore);
 }
 
-describe("구간 대본 — 배우 표기", () => {
+describe("사건 대본 — 배우 표기", () => {
   it("골은 득점자와 도움을 역할로 갈라 적는다", () => {
     const line = script({
       minute: 44,
@@ -1034,6 +1086,16 @@ describe("구간 대본 — 배우 표기", () => {
       "- 45′ 하프타임",
     );
   });
+
+  it("킥오프는 싣지 않고, 사건이 없으면 없다고 적는다", () => {
+    const block = buildEventsBlock(
+      [{ minute: 0, type: "kickoff", actors: [], causes: [] }],
+      nameOf,
+      sideName,
+      { home: 0, away: 0 },
+    );
+    expect(block).toBe("<events>\n- (사건 없음)\n</events>");
+  });
 });
 
 /**
@@ -1042,23 +1104,21 @@ describe("구간 대본 — 배우 표기", () => {
  * 장부는 슛마다 결과와 xG를, 골마다 그 뒤의 스코어를 들고 있다. 대본이 그것을
  * 빠뜨리면 캐스터에게 가는 사실이 「슛」 하나뿐이라 일곱 개가 한 문장으로 나온다.
  */
-describe("구간 대본 — 골의 스코어와 슛의 갈래", () => {
+describe("사건 대본 — 골의 스코어와 슛의 갈래", () => {
   it("골 줄은 그 골이 들어간 뒤의 스코어를 두 이름과 함께 적는다", () => {
     const line = script({ minute: 44, type: "goal", team: "away", actors: ["p1"], causes: [] });
     expect(line).toContain(`토트넘 ${formatScore(0, 1)} 아스널`);
   });
 
-  it("한 구간의 두 골은 각자 자기 시점의 스코어를 갖는다 — 중계가 세지 않는다", () => {
-    const message = buildSegmentMessage(
-      [
-        { minute: 12, type: "goal", team: "home", actors: ["p1"], causes: [] },
-        { minute: 40, type: "goal", team: "away", actors: ["p2"], causes: [] },
-      ],
-      "goal",
-      nameOf,
-      sideName,
-      { home: 1, away: 0 },
-    );
+  it("한 블록의 두 골은 각자 자기 시점의 스코어를 갖는다 — 중계가 세지 않는다", () => {
+    const events: MatchEvent[] = [
+      { minute: 12, type: "goal", team: "home", actors: ["p1"], causes: [] },
+      { minute: 40, type: "goal", team: "away", actors: ["p2"], causes: [] },
+    ];
+    // 지금 장부가 2-1이면 두 골 앞은 1-0이다
+    const before = scoreBeforeEvents({ home: 2, away: 1 }, events);
+    expect(before).toEqual({ home: 1, away: 0 });
+    const message = buildEventsBlock(events, nameOf, sideName, before);
     expect(message).toContain(`토트넘 ${formatScore(2, 0)} 아스널`);
     expect(message).toContain(`토트넘 ${formatScore(2, 1)} 아스널`);
   });
@@ -1088,10 +1148,45 @@ describe("구간 대본 — 골의 스코어와 슛의 갈래", () => {
     expect(saved).not.toContain(String(BIG_CHANCE_XG));
   });
 
-  it("갈래를 모르는 옛 세이브의 슛은 슛까지만 적는다", () => {
+  it("갈래를 모르는 슛은 슛까지만 적는다", () => {
     expect(
       script({ minute: 20, type: "shot", team: "home", actors: ["p1"], causes: [] }),
     ).toContain("- 20′ 토트넘 슛: 손흥민");
+  });
+});
+
+/**
+ * 승부차기 대본 — 킥을 굴리는 것은 코어이고 대본은 확정된 한 발을 옮긴다. 아직 찬 발이
+ * 없는 자리는 감독이 키커 순서를 정할 자리라는 것이 대본에 서야 캐스터가 그 자리를 안다.
+ */
+describe("승부차기 대본", () => {
+  it("찬 발이 없으면 키커 순서를 정할 자리로, 찬 발은 키커·골키퍼·결과·합계로 적는다", () => {
+    const opening = buildShootoutMessage(null, { home: 0, away: 0 }, false, nameOf, sideName);
+    expect(opening).toContain("감독이 키커 순서를 정할 자리다");
+    expect(opening).toContain("승부차기로 간다");
+
+    const kick = buildShootoutMessage(
+      { round: 1, team: "home", taker: "p1", keeper: "p2", outcome: "saved", probability: 0.7 },
+      { home: 0, away: 0 },
+      false,
+      nameOf,
+      sideName,
+    );
+    expect(kick).toContain(
+      "1번째 키커 · 토트넘 손흥민 ↔ 골키퍼 페드로 포로 · 골키퍼 선방 · 합계 토트넘 0 : 0 아스널",
+    );
+    expect(kick).toContain("다음 키커가 준비한다");
+    // 확률은 화자가 입에 담을 수 없는 수치다
+    expect(kick).not.toContain("0.7");
+
+    const done = buildShootoutMessage(
+      { round: 5, team: "away", taker: "p2", outcome: "scored", probability: 0.8 },
+      { home: 3, away: 4 },
+      true,
+      nameOf,
+      sideName,
+    );
+    expect(done).toContain("승부가 갈렸다");
   });
 });
 

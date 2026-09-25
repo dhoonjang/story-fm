@@ -41,8 +41,7 @@ export { stageMatchesOf as euroStageMatches } from "./knockout";
 /** 리그 페이즈 완주 여부 — 녹아웃 편성의 전제 */
 export function euroLeaguePhaseDone(state: GameState, cupId: string): boolean {
   const phase = state.matches.filter(
-    (m) =>
-      m.season === state.season && m.competitionId === cupId && (m.stage ?? "league") === "league",
+    (m) => m.season === state.season && m.competitionId === cupId && m.stage === "league",
   );
   return phase.length > 0 && phase.every((m) => m.result !== null);
 }
@@ -165,7 +164,7 @@ function createStage(
     created.push(...createTie(state, cup, stage, pair, better, worse));
   });
   state.matches.push(...created);
-  registerUserEntries(state, created, EURO_NIGHT_KICKOFF);
+  registerUserEntries(state, created);
   payStagePrizes(state, cup.id, stage, pairs.flat(), digest);
 
   const short = competitionShortName(cup.id);

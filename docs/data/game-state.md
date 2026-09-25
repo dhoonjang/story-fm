@@ -26,8 +26,8 @@
 어드민의 카탈로그 편집이 **새 게임에만** 반영되는 것도 이 구조의 결과다.
 
 팀은 카탈로그 id를 그대로 재사용하고, **카탈로그가 초기치를 주는 값은 게임 시작에
-`GAME_TEAM`으로 복사된다** — 이름·약칭·소속 리그·체급·구장·브랜드. 전부 optional
-이라 옛 세이브엔 없고, 없으면 카탈로그가 답한다([team.md](team.md) §1).
+`GAME_TEAM`으로 복사된다** — 이름·약칭·소속 리그·체급·구장·브랜드. 구장·브랜드는
+프로필이 등재된 클럽만 갖는다([team.md](team.md) §1).
 
 ⚠️ **카탈로그가 갖는 값은 세이브에서 바꿀 수 없다.** 승강이 `state.leagueOf`
 (팀 → 지금 속한 리그)로 표현되는 것이 그 예다 — 카탈로그의 `leagueId`는 불변이므로
@@ -152,21 +152,19 @@
 
 ### 3.1 메타
 
-| 필드                         | 무엇                                                                                                                                                                                                                               | 정의                       |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
-| `id` `seed` `createdAt`      | 세이브 식별 · 모든 난수의 뿌리                                                                                                                                                                                                     | `core/state.ts`            |
-| `season` `date` `clock?`     | 시즌 번호 · 날짜 · 하루 안의 시각(`HH:MM`)                                                                                                                                                                                         | `core/state.ts`            |
-| `calendar`                   | `SeasonCalendar` — 프리시즌 시작·소집일·개막일                                                                                                                                                                                     | `competition/calendar.ts`  |
-| `userTeamId` `phase`         | 감독의 팀 · `idle`/`matchday`/`match`/`negotiation` (라우팅 전용)                                                                                                                                                                  | `core/state.ts`            |
-| `pendingMatch`               | 진행 중인 경기 — 패킷·장부·캐스터 이력·킥오프 전술·입장 여부(`entered`)·구간 시뮬의 연속 시계(`segmentClock`)                                                                                                                      | `core/state.ts`            |
-| `pendingNegotiation?`        | 열린 협상 방 — 어느 협상인가(`negotiationId`)·건너편에 앉은 사람(`party` — 구단 쪽 `club` · 선수 쪽 `agent`)·자리에 앉았는가(`seated`)·들어서기 전의 국면(`phaseBefore`). 방이 닫히면 `null`. 옛 세이브엔 없다 (transfer.md §12-2) | `core/state.ts`            |
-| `world?`                     | 이 세계의 범위 (테스트용 축소 세계)                                                                                                                                                                                                | `world/scope.ts`           |
-| `leagueOf?`                  | 승강 결과 — 팀 → 지금 속한 리그                                                                                                                                                                                                    | `competition/promotion.ts` |
-| `dismissal?`                 | 경질 사실 카드 — 있으면 감독은 무직이다 (career.md §5.1)                                                                                                                                                                           | `domain/manager.ts`        |
-| `managerOffers?`             | 감독직 제안 — 공석 구단이 무직 감독을 부른 기록                                                                                                                                                                                    | `domain/manager.ts`        |
-| `managerPool?`               | 무직 감독 풀 — 잘린 사람의 이름·역량·재임 이력 (transfer.md §7)                                                                                                                                                                    | `domain/manager.ts`        |
-| `formUnitScale?`             | 폼 눈금 마이그레이션 마커 (§6)                                                                                                                                                                                                     | `core/state.ts`            |
-| `mirrorProficiencyStripped?` | 미러 자리 주발 보정 벗기기 마커 (§6)                                                                                                                                                                                               | `core/state.ts`            |
+| 필드                     | 무엇                                                                                                                                                                                                             | 정의                       |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| `id` `seed` `createdAt`  | 세이브 식별 · 모든 난수의 뿌리                                                                                                                                                                                   | `core/state.ts`            |
+| `season` `date` `clock?` | 시즌 번호 · 날짜 · 하루 안의 시각(`HH:MM`)                                                                                                                                                                       | `core/state.ts`            |
+| `calendar`               | `SeasonCalendar` — 프리시즌 시작·소집일·개막일                                                                                                                                                                   | `competition/calendar.ts`  |
+| `userTeamId` `phase`     | 감독의 팀 · `idle`/`matchday`/`match`/`negotiation` (라우팅 전용)                                                                                                                                                | `core/state.ts`            |
+| `pendingMatch`           | 진행 중인 경기 — 장부·캐스터 이력·킥오프 전술·입장 여부(`entered`)·마지막으로 확정된 실시간 상태(`live`)와 입력 로그·전술 포인트와 시트                                                                          | `core/state.ts`            |
+| `pendingNegotiation?`    | 열린 협상 방 — 어느 협상인가(`negotiationId`)·건너편에 앉은 사람(`party` — 구단 쪽 `club` · 선수 쪽 `agent`)·자리에 앉았는가(`seated`)·들어서기 전의 국면(`phaseBefore`). 방이 닫히면 `null` (transfer.md §12-2) | `core/state.ts`            |
+| `world?`                 | 이 세계의 범위 (테스트용 축소 세계)                                                                                                                                                                              | `world/scope.ts`           |
+| `leagueOf?`              | 승강 결과 — 팀 → 지금 속한 리그                                                                                                                                                                                  | `competition/promotion.ts` |
+| `dismissal?`             | 경질 사실 카드 — 있으면 감독은 무직이다 (career.md §5.1)                                                                                                                                                         | `domain/manager.ts`        |
+| `managerOffers?`         | 감독직 제안 — 공석 구단이 무직 감독을 부른 기록                                                                                                                                                                  | `domain/manager.ts`        |
+| `managerPool?`           | 무직 감독 풀 — 잘린 사람의 이름·역량·재임 이력 (transfer.md §7)                                                                                                                                                  | `domain/manager.ts`        |
 
 ### 3.2 팀 · 선수
 
@@ -178,12 +176,12 @@
 | ↳ `PlayerState`                  | 폼(−1\~1) · 체력(0\~100) · 부상 성향 · 심경 한 줄                                                               | `domain/player.ts`  |
 | ↳ `PlayerPosition`               | 가능 포지션 + 적응도 + `isNatural`(하나 이상)                                                                   | `domain/player.ts`  |
 | `tactics` `TeamTactics`          | 팀당 1개 — `spec` + `assignments` + `shelved` + `setPieceTakers` + `setPieceRoutine` + 팀 기억                  | `domain/tactics.ts` |
-| ↳ `TacticsSpec`                  | 모양 이름(파생 — 프리셋 밖도 담는다) + 전술 6축(각 1\~5) + 토글 넷(전환·트랩·태클·GK 배급, 옛 세이브엔 없다)    | `domain/tactics.ts` |
+| ↳ `TacticsSpec`                  | 모양 이름(파생 — 프리셋 밖도 담는다) + 전술 6축(각 1\~5) + 토글 넷(전환·트랩·태클·GK 배급, 없으면 중립)         | `domain/tactics.ts` |
 | ↳ `TacticAssignment`             | **라인업의 원본** — 자리·좌표·역할·적응도·개인 기억                                                             | `domain/tactics.ts` |
 | ↳ `DrilledTactics`               | 전술 지문 → 그때 도달한 적응도 (선수별)                                                                         | `domain/tactics.ts` |
 | ↳ `ShelvedFamiliarity`           | **배치가 없는 동안 적응도·기억이 머무는 자리** (2군·예비)                                                       | `domain/tactics.ts` |
-| ↳ `SetPieceTakers`               | 세트피스를 차는 사람 — `corner`·`freeKick`·`penalty` 각각 선수 id(옛 세이브엔 없다)                             | `domain/tactics.ts` |
-| ↳ `SetPieceRoutine`              | 세트피스에 세우는 인원 — 가담 `commit` · 수비 `guard`, 각 `few`/`normal`/`many`(옛 세이브엔 없다)               | `domain/tactics.ts` |
+| ↳ `SetPieceTakers`               | 세트피스를 차는 사람 — `corner`·`freeKick`·`penalty` 각각 선수 id(지정한 자리만 적힌다)                         | `domain/tactics.ts` |
+| ↳ `SetPieceRoutine`              | 세트피스에 세우는 인원 — 가담 `commit` · 수비 `guard`, 각 `few`/`normal`/`many`(없으면 `normal`)                | `domain/tactics.ts` |
 | `contracts` `Contract`           | **주급의 원본** — 선수당 `active` 정확히 1건 · 지위 · 바이아웃 조항 · 조건서의 사본(`terms`, transfer.md §12-3) | `domain/records.ts` |
 | `finances` `TeamFinance`         | 팀당 1개 — 잔고·이적 예산·원장·낙하산                                                                           | `domain/records.ts` |
 | ↳ `LedgerEntry`                  | 원장 한 줄 — 유저 팀만 상세, 최근 3개월 롤링                                                                    | `domain/records.ts` |
@@ -208,9 +206,8 @@
 
 ⚠️ **끝난 경기의 사건과 기록은 결과에 남는다** — `MatchResult.events`(장부의
 `ledger.events` 그대로) · `playerStats`(양 팀, `MatchStatLine`) · `possession`.
-셋 다 optional이라 옛 세이브는 그대로 열리고 `SAVE_VERSION`은 6 그대로다. 사건과
-선수별 기록은 **감독의 경기에만** 남고(간이 시뮬에는 장부가 없다) 점유는 모든
-경기에 남는다. 크기는 잰 값으로 경기당 10.3KB · 한 시즌 60경기 ≈600KB이며, 시즌
+셋 다 optional이다 — 사건과 선수별 기록은 **감독의 경기에만** 남고(간이 시뮬에는
+장부가 없다) 점유는 모든 경기에 남는다. 크기는 잰 값으로 경기당 10.3KB · 한 시즌 60경기 ≈600KB이며, 시즌
 롤오버가 `matches`를 통째로 갈아 끼우므로 쌓이지 않는다
 (→ [match](../simulation/match.md) §4).
 
@@ -282,8 +279,8 @@ row, 지난 일 = 그대로 이력.**
 `seasonStats`에서 파생한다.
 
 **`seasonStats`의 칸은 두 시뮬이 같은 문으로 얹는다** (`addToSeasonStat` →
-[match.md](../simulation/match.md) §6). 출전 분·슛·xG·선방·클린시트·카드는 옛 세이브에
-없어 전부 optional이고, 세는 것은 **1군 대회 경기**뿐이다 — 친선은 장부에 닿지 않고
+[match.md](../simulation/match.md) §6). 출전 분·슛·xG·선방·클린시트·카드는 그 경기가
+남긴 것만 서고(optional), 세는 것은 **1군 대회 경기**뿐이다 — 친선은 장부에 닿지 않고
 ([season.md](../simulation/season.md) §2) 2군 리그는 `reserve*` 칸으로 갈린다. 카드는
 `BOOKING`이 원본이라 시즌 합계도 그 문(`match/discipline.ts`)이 함께 적는다: 세는 자리를
 마감 쪽에 따로 두면 연장의 카드가 한쪽에만 남는다.
@@ -298,13 +295,6 @@ row, 지난 일 = 그대로 이력.**
 `seasonStatOf(state, playerId, { competition })`이 그 행 하나를 준다. **접어 낸 행은
 읽기 전용이다**: 쌓는 자리는 언제나 `ensureSeasonStat(state, id, teamId, competitionId)`
 하나이고, 파생 행에 값을 얹으면 다음 파생에서 사라진다.
-
-⚠️ **옛 세이브의 행은 `competitionId`를 갖지 않는다** — 그 한 행이 그 시즌 전 대회의
-합계다. 없는 축을 지어내지 않으므로 마이그레이션도 없다: **합계를 더하는 쪽은 그 행을
-그대로 세고**(합이 맞는다), 대회를 묻는 쪽은 그 행을 **그 팀이 속한 리그의 것으로**
-읽는다(옛 규칙이 정확히 그것이었다 — [season.md](../simulation/season.md) §6). 옛
-세이브를 시즌 중에 이어서 열면 그 시즌만 「축 없는 앞부분 + 대회별 뒷부분」으로 남는데,
-합계는 그대로 맞고 리그 순위만 그 시즌 한 해 컵 골을 함께 센다. SAVE_VERSION은 그대로다.
 
 ### 3.5 진행 중인 흥정 · 세계의 부름
 
@@ -338,29 +328,29 @@ row, 지난 일 = 그대로 이력.**
 
 ### 3.6 감독 · 서사
 
-| 엔티티                                             | 무엇                                                                                                                        | 정의                |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------- |
-| `manager` `Manager`                                | 이름·배경 · 능력치 5축 · 평판 3축 · 보드 경고 · 계약 · **지갑·지출 이력**                                                   | `domain/manager.ts` |
-| `managerXP`                                        | 축별 누적 경험치                                                                                                            | `core/state.ts`     |
-| `seasonRecords` `SeasonRecord`                     | 시즌 성적 — 감독에 소속(팀을 옮겨도 남는다)                                                                                 | `domain/records.ts` |
-| `trophies` `Trophy` · `achievements` `Achievement` | 우승 · 업적                                                                                                                 | `domain/records.ts` |
-| `awards` `SeasonAward`                             | 시상 — 코드·**대회**·수상자·근거 수치. 리그도 컵·대항전도, **세계 전체**에 쌓인다 ([season.md](../simulation/season.md) §6) | `domain/records.ts` |
-| `personas` `Persona`                               | 인물 — 수석코치·구단주·기자, 그리고 고용 정보를 든 코치·의료진·스카우트 (people.md §2-2)                                    | `domain/persona.ts` |
-| `staffPool` `StaffPoolEntry`                       | 자리를 찾는 코치·의료진·스카우트 — 이름·자리·원형·요구 연봉. 여름마다 다시 선다 (people.md §2-2). 옛 세이브엔 없다          | `domain/persona.ts` |
-| `narrative` `NarrativeNote`                        | GM 기억 — 날짜·문장·중요도(1\~5)·갈래                                                                                       | `domain/records.ts` |
-| `incidents` `Incident`                             | 감독이 말로 만든 사건 — 날짜·갈래(효과의 모양)·당사자·세기·요약 (people.md §6). 옛 세이브엔 없다                            | `domain/records.ts` |
-| `arcs` `NarrativeArc`                              | 서사 아크 — 갈래·주인·단계·제목. 개폐는 장부에서 결정적 (people.md §9)                                                      | `domain/records.ts` |
-| `openings` `Opening`                               | 시작 사건 — 온보딩 판정이 열고 **감독이 한 일이** 닫는 첫 몇 주의 실마리. 손대지 않으면 기한이 닫는다 (career.md §1)        | `domain/records.ts` |
-| `chat` `ChatTurn`                                  | 대화 이력 — `user`/`model`/`operator`                                                                                       | `core/state.ts`     |
-| ↳ `ToolCallRecord`                                 | 도구·명령 호출 — 요약·항목(`brief`)·카드 payload·톤·`silent`·장면 안 줄 위치                                                | `core/state.ts`     |
-| ↳ `CommandBrief`                                   | 화면이 세우는 요약 — 머리줄 + 항목. 없는 기록은 말풍선에 서지 않는다                                                        | `core/state.ts`     |
-| ↳ `CommandBriefItem`                               | 항목 하나 — 이름(`label`) · 값(`text`) · 갈래(`note`) · 증감(`delta`)                                                       | `core/state.ts`     |
-| ↳ `GoalMark` `CardMark`                            | 그 턴의 골·카드 — 장부의 사건이지 중계 문장의 파싱이 아니다                                                                 | `core/state.ts`     |
-| `pendingEdits` `PendingEdit`                       | 아직 GM이 읽지 않은 화면 조작 — 같은 키는 마지막 것만                                                                       | `core/state.ts`     |
-| `pendingNews`                                      | 아직 GM이 읽지 않은 경기 밖 소식 — 결산이 함께 굴린 재정·다른 경기                                                          | `core/state.ts`     |
-| `pendingReportCards`                               | 아직 카드로 세우지 않은 스카우트 보고서 — 모델이 그 줄을 읽은 턴에 비워진다                                                 | `core/state.ts`     |
-| `historyDigest` `HistoryDigest`                    | 접힌 평시 이력의 요약 — 접은 지점 · **지난 일**(`text`) · **열린 일**(`open`) · 겹 수 (llm/agents.md §5-1)                  | `domain/records.ts` |
-| `characterMemories` `CharacterMemory`              | 인물이 소유하는 기억 — 압축이 주 저자, 사건 기록이 즉시 적기도 한다 (people.md §9-1)                                        | `domain/records.ts` |
+| 엔티티                                             | 무엇                                                                                                                          | 정의                |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| `manager` `Manager`                                | 이름·배경 · 능력치 5축 · 평판 3축 · 보드 경고 · 계약 · **지갑·지출 이력**                                                     | `domain/manager.ts` |
+| `managerXP`                                        | 축별 누적 경험치                                                                                                              | `core/state.ts`     |
+| `seasonRecords` `SeasonRecord`                     | 시즌 성적 — 감독에 소속(팀을 옮겨도 남는다)                                                                                   | `domain/records.ts` |
+| `trophies` `Trophy` · `achievements` `Achievement` | 우승 · 업적                                                                                                                   | `domain/records.ts` |
+| `awards` `SeasonAward`                             | 시상 — 코드·**대회**·수상자·근거 수치. 리그도 컵·대항전도, **세계 전체**에 쌓인다 ([season.md](../simulation/season.md) §6)   | `domain/records.ts` |
+| `personas` `Persona`                               | 인물 — 수석코치·구단주·기자, 그리고 고용 정보를 든 코치·의료진·스카우트 (people.md §2-2)                                      | `domain/persona.ts` |
+| `staffPool` `StaffPoolEntry`                       | 자리를 찾는 코치·의료진·스카우트 — 이름·자리·원형·요구 연봉. 여름마다 다시 선다 (people.md §2-2). 없으면 그해의 추첨이 답한다 | `domain/persona.ts` |
+| `narrative` `NarrativeNote`                        | GM 기억 — 날짜·문장·중요도(1\~5)·갈래                                                                                         | `domain/records.ts` |
+| `incidents` `Incident`                             | 감독이 말로 만든 사건 — 날짜·갈래(효과의 모양)·당사자·세기·요약 (people.md §6)                                                | `domain/records.ts` |
+| `arcs` `NarrativeArc`                              | 서사 아크 — 갈래·주인·단계·제목. 개폐는 장부에서 결정적 (people.md §9)                                                        | `domain/records.ts` |
+| `openings` `Opening`                               | 시작 사건 — 온보딩 판정이 열고 **감독이 한 일이** 닫는 첫 몇 주의 실마리. 손대지 않으면 기한이 닫는다 (career.md §1)          | `domain/records.ts` |
+| `chat` `ChatTurn`                                  | 대화 이력 — `user`/`model`/`operator`                                                                                         | `core/state.ts`     |
+| ↳ `ToolCallRecord`                                 | 도구·명령 호출 — 요약·항목(`brief`)·카드 payload·톤·`silent`·장면 안 줄 위치                                                  | `core/state.ts`     |
+| ↳ `CommandBrief`                                   | 화면이 세우는 요약 — 머리줄 + 항목. 없는 기록은 말풍선에 서지 않는다                                                          | `core/state.ts`     |
+| ↳ `CommandBriefItem`                               | 항목 하나 — 이름(`label`) · 값(`text`) · 갈래(`note`) · 증감(`delta`)                                                         | `core/state.ts`     |
+| ↳ `GoalMark` `CardMark`                            | 그 턴의 골·카드 — 장부의 사건이지 중계 문장의 파싱이 아니다                                                                   | `core/state.ts`     |
+| `pendingEdits` `PendingEdit`                       | 아직 GM이 읽지 않은 화면 조작 — 같은 키는 마지막 것만                                                                         | `core/state.ts`     |
+| `pendingNews`                                      | 아직 GM이 읽지 않은 경기 밖 소식 — 결산이 함께 굴린 재정·다른 경기                                                            | `core/state.ts`     |
+| `pendingReportCards`                               | 아직 카드로 세우지 않은 스카우트 보고서 — 모델이 그 줄을 읽은 턴에 비워진다                                                   | `core/state.ts`     |
+| `historyDigest` `HistoryDigest`                    | 접힌 평시 이력의 요약 — 접은 지점 · **지난 일**(`text`) · **열린 일**(`open`) · 겹 수 (llm/agents.md §5-1)                    | `domain/records.ts` |
+| `characterMemories` `CharacterMemory`              | 인물이 소유하는 기억 — 압축이 주 저자, 사건 기록이 즉시 적기도 한다 (people.md §9-1)                                          | `domain/records.ts` |
 
 ⚠️ **말풍선 항목의 증감은 숫자로 온다** — `delta`가 있으면 그 항목은 오르내린 값을
 말하는 것이고 화면은 **부호로 색을 준다**. 문자열의 `+`·`−`를 찾아 색을 칠하면 포메이션
@@ -369,7 +359,7 @@ row, 지난 일 = 그대로 이력.**
 ⚠️ **`brief`가 없는 기록은 말풍선에 서지 않는다.** 요약 문자열(`summary`)은 모델에게
 돌려주는 줄이지 화면의 항목이 아니다 — 화면이 그 줄을 갈라 세우면 코어가 쓴 문장의
 첫 줄이 곧 UI가 된다. 말풍선을 갖는 호출(`PANEL_OF`)은 모두 `brief`를 낸다 — 없는 것은
-그 규약보다 오래된 세이브의 기록뿐이고, 그 지시는 채팅의 칩으로 남는다.
+말풍선이 없는 호출이고, 그 지시는 채팅의 칩으로 남는다.
 
 ⚠️ **능력치 5축은 평판의 `media`와 다른 것이다** — 능력치(`leadership` `tactics`
 `training` `negotiation` `analysis`)는 감독이 가진 역량, 평판(`board` `media`
@@ -468,136 +458,48 @@ erDiagram
   어디에도 표로 남지 않아 "이 선수가 이번 주에 대화로 얼마나 움직였나"를 파생할 원본이
   없고, 그 합계가 곧 하루 ±8·이레 ±20 상한을 세우는 자다
   (→ [../simulation/career.md](../simulation/career.md) §2). 이레를 지난 줄은 쓸 때마다
-  걷히므로 장부가 자라지 않는다. 옛 세이브엔 없다 — 없으면 빈 장부로 읽고 버전을
-  올리지 않는다.
-  ⚠️ `PlayerState.talkedOn`·`Manager.teamTalkedOn`은 **날짜 게이트가 있던 시절의 자리**이고
-  지금은 아무 데서도 읽지 않는다. 옛 세이브가 들고 오는 값을 반려하지 않으려고 스키마에만
-  남아 있다 — 새로 쓰이지 않는다.
+  걷히므로 장부가 자라지 않는다. 없으면 빈 장부다.
 - `PlayerState.caps` · `internationalGoals`(통산 A매치 출전·골)도 같다 — 소집 표는
   최근 두 시즌만 남으므로 표에서 파생하면 통산이 세 시즌 뒤에 사라진다
   (→ [competition](competition.md) §5-1). `summerReturn`(여름 대회로 늦어진 합류일)도
-  대회가 남기는 유일한 사실이라 저장한다. 셋 다 옛 세이브엔 없다(optional).
+  대회가 남기는 유일한 사실이라 저장한다. 셋 다 그 일이 있어야 선다(optional).
 - `PlayerState.demotedOn`(2군으로 내린 날)도 같다 — 1·2군 이동은 원장에 남지
-  않아 "며칠째 2군인가"를 물을 표가 없다. 1군으로 올리면 지워진다. 옛 세이브엔
-  없다 — 없으면 감독이 내린 적 없는 것으로 읽고 버전을 올리지 않는다
-  (→ [people](people.md) §5).
+  않아 "며칠째 2군인가"를 물을 표가 없다. 1군으로 올리면 지워진다 — 없으면 감독이
+  내린 적 없는 것이다 (→ [people](people.md) §5).
 - `FinanceReport.highlights`도 그렇다 — 원본인 원장이 3개월 뒤 **잘린다.** 파생할
   원본이 사라지므로 절단 전에 큰 건만 옮겨 적는다
   (→ [finance](../simulation/finance.md) §8.2).
 
-## 6. 세이브 호환
+## 6. 세이브 정책
 
-**`SAVE_VERSION = 6`** (`core/persistence.ts`). 버전이 다른 파일은 로드를 거부한다 —
-부분 마이그레이션이 조용히 깨진 상태를 만드는 것보다 낫다. **거부는 하되 감추지는
-않는다**(→ [열 수 없는 세이브](#열-수-없는-세이브)).
+**`SAVE_VERSION = 7`** (`core/persistence.ts`). 버전이 다른 파일은 로드를 거부한다.
+**거부는 하되 감추지는 않는다**(→ [열 수 없는 세이브](#열-수-없는-세이브)).
 
-원칙은 **버전을 올리지 않는 것**이다:
+**마이그레이션은 없다.** 옛 모양의 세이브를 지금 모양으로 옮기는 코드를 두지 않는다 —
+값의 뜻이나 테이블의 모양이 바뀌면 `SAVE_VERSION`을 올리고, 그 앞의 세이브는 열리지
+않는다. 로드가 통과해야 하는 문은 스키마 하나다.
 
-- 새 테이블은 로드 시 **빈 배열**로 채운다.
-- 새 필드는 **optional**로 두고 읽는 쪽이 기본값을 안다.
-- 생성이 **결정적**이면(시드에서 늘 같은 값이 나오면) 로드 때 조용히 채운다.
-
-#### 문장에서 카드로 — 옛 세이브가 든 문장
-
-코어는 장부에 완성 문장을 적지 않는다(→ [overview.md](../overview.md) §1 철칙 4).
-그 규칙보다 먼저 저장된 세이브는 아직 문장을 들고 있으므로, **문장 칸은 지우지 않고
-optional로 넓혀 두고 읽는 쪽이 `카드 ?? 옛 문장` 순으로 본다.** 새로 쓰는 값에는
-카드만 적는다 — 두 칸을 함께 채우면 어느 쪽이 원본인지 갈린다.
-
-| 표·필드                                | 새 칸 (카드)                     | 옛 칸 (읽기 폴백)  |
-| -------------------------------------- | -------------------------------- | ------------------ |
-| `TRANSFER`                             | `reason`                         | `note`             |
-| `INJURY`                               | `cause` (`pre_appointment` 포함) | `note`             |
-| `GROWTH_ENTRY`                         | `origin`                         | `note`             |
-| `NEGOTIATION.medical` · `OFFER`        | `concern` · `origin`             | `note`             |
-| `FINANCE_REPORT`                       | `noteCards`                      | `notes`            |
-| `PRESS_FACT` (회견 · 다가옴)           | `data`                           | `text`             |
-| `APPROACH`                             | `contextCard`                    | `context`          |
-| `TROPHY`                               | `competitionId`                  | `competition`      |
-| `SEASON_RECORD.board` · `DISMISSAL`    | `expectationCode`                | `expectation`      |
-| `NARRATIVE_NOTE`                       | `kind`                           | `[서사]` 접두 문장 |
-| `TRAINING_SESSION`                     | `menuId`                         | `label`            |
-| `PENDING_MATCH.packet` · `MATCH_EVENT` | 패킷 태그 · `subCause`           | 문자열 태그·근거   |
-
-⚠️ **판정하는 자리에는 폴백을 두지 않는다.** 읽어서 **보여 주는** 값만 옛 문장으로
-떨어지고, 갈래를 가르는 자리(해지인가·승부수인가·기본 훈련인가)는 카드가 없으면
-"모른다"로 본다 — 옛 문구를 다시 대조하기 시작하면 문장을 지운 뜻이 사라진다.
-예외는 하나, `TRANSFER.reason`이다: 라커룸이 계약 해지를 알아보는 유일한 표식이라
-옛 세이브에서도 갈려야 해서, 없을 때만 옛 문장 두 개와 대조한다.
+- 새 테이블·새 필드는 스키마에 **필수**로 선다. optional은 「없음이 뜻을 갖는」 필드에만
+  둔다(`dismissal` — 없으면 재직 중 · `pendingMatch` — 없으면 경기 중이 아니다).
+- 읽는 쪽에 「없을 수 있다」는 폴백을 두지 않는다. 없으면 스키마가 막는다.
+- 파생 캐시(`overall`)는 로드 때 다시 굴린다 — 마이그레이션이 아니라 캐시 재계산이다.
 
 ### 로드가 하는 일 (`validate`)
-
-세 걸음이고, **걸음마다 실패의 뜻이 다르다** — 못 여는 세이브의 `reason`이 그 셋을
-가른다(→ [열 수 없는 세이브](#열-수-없는-세이브)).
 
 | 걸음            | 무엇                                       | 실패하면              |
 | --------------- | ------------------------------------------ | --------------------- |
 | 1. 형태         | 세이브 버전 · 필수 테이블이 있는가         | `version` · `corrupt` |
-| 2. 마이그레이션 | 옛 세이브를 지금 모양으로 (아래 표)        | `migration`           |
-| 3. 스키마 parse | 도메인 Zod 스키마로 테이블 전체를 검사한다 | `schema`              |
+| 2. 스키마 parse | 도메인 Zod 스키마로 테이블 전체를 검사한다 | `schema`              |
 
-파일을 못 읽는 것(`corrupt`)과 코어가 그 파일을 다루다 넘어지는 것(`migration`)은
-다른 사실이다. 하나로 뭉쳐 놓으면 멀쩡한 세이브가 "손상"으로 서고, 고쳐야 할 것이
-파일인지 코드인지 감독도 우리도 알 수 없다.
+파일을 못 읽는 것(`corrupt`)과 코어의 스키마가 그 파일을 막는 것(`schema`)은 다른 사실이다.
+하나로 뭉쳐 놓으면 멀쩡한 세이브가 "손상"으로 서고, 고쳐야 할 것이 파일인지 코드인지 감독도
+우리도 알 수 없다.
 
-#### 2. 마이그레이션 — 채우고 고치는 것
-
-아래 표는 `migrate`(`core/persistence.ts`)가 부르는 순서 그대로다. **순서가 뜻을
-갖는 자리가 있다** — 분류가 끝난 뒤라야 등번호를 채울 수 있고, 빠진 클럽을 채운
-뒤라야 컵이 대진을 짤 수 있다.
-
-| 무엇                       | 어떻게                                                                                                                                                                                                                                                                 |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 필수 테이블 검사           | `players` `teams` `tactics` `finances` `contracts` `schedule` `matches` `windows` `calendar` `manager` — 하나라도 없으면 손상으로 본다                                                                                                                                 |
-| 빈 배열 채우기             | `ARRAY_FIELDS`(`core/migrations.ts`)에 든 배열 **전부** — 순수한 목록·이력이라 "비어 있음"이 곧 유효한 초기 상태인 테이블들이다. `GameState`에 배열을 더하면 그 목록에도 넣는다 (§8)                                                                                   |
-| 감독 능력치 4축 → 5축      | `media → analysis`, `training`은 50(XP는 0)으로 채우고 `media`를 지운다                                                                                                                                                                                                |
-| 위치선정 → 위치선정·침투   | `offTheBall`이 없을 때만 — 세이브의 옛 `positioning`을 그 자리의 공격 지분으로 갈라 두 축을 세운다. 두 축의 가중합은 갈리기 전과 같다 (→ [player](player.md) §13.5)                                                                                                    |
-| `squadLevel` 분류          | 미분류가 있을 때만 — 전술 배치 선수 + OVR 상위로 25명을 1군에                                                                                                                                                                                                          |
-| 패스 스타일                | 세 갈래 문자열 → 1\~5 눈금. **전술 지문**(`drilled.signature`)까지 함께 옮긴다                                                                                                                                                                                         |
-| 폼 눈금                    | `formUnitScale`이 없으면 −3\~3을 3으로 나눠 −1\~1로. 마커를 세워 한 번만                                                                                                                                                                                               |
-| 사기·피로 → 체력           | `condition`이 없을 때만 — 화면이 쓰던 공식 그대로 합친다                                                                                                                                                                                                               |
-| 경기 중 통계 축            | 중단된 경기(`pendingMatch`)의 선수별 기록에 `scoringExpectation`이 없으면 0으로 — 합산이 `NaN`이 되는 자리다 (`match-flow.ts`)                                                                                                                                         |
-| 성장 로그 출처             | `source: "reserve"`(폐기된 2군 개발 프로그램)를 `development`로 옮긴다. 스키마에서 그 갈래를 지우려면 parse 앞에서 값이 사라져 있어야 한다 — 남아 있으면 3걸음에서 `schema`로 막힌다. 옮기고 나면 옮길 것이 없어 멱등이다                                              |
-| 미러 자리 주발 보정        | `mirrorProficiencyStripped`가 없을 때만 — 좌우 미러 묶음(CB↔LCB·RCB…)에 적혀 있던 주발 보정을 주 포지션 값으로 벗기고 마커를 세운다. 다시 돌면 경기·훈련이 그 자리에 쌓은 적응도를 같이 민다 (→ [player](player.md) §8)                                                |
-| 국적                       | 국적이 없는 선수만 — 카탈로그가 아는 선수는 시드가 조사한 값, 모르는 선수는 그 클럽 협회로 세운다. **빈칸을 남기지 않는 것이 이 축의 규칙이다**: 등록 규정도 대표팀도 "국적을 모르는 선수" 갈래를 들 수 없다 (→ [sources.md](sources.md) §4.1)                         |
-| 종합 재계산                | 전 선수 `overall`을 16축에서 다시 굴린다. 파생 캐시라 멱등이고, 저장된 옛 눈금이 새 눈금과 한 표에 서지 않게 한다 (→ [player](player.md) §4)                                                                                                                           |
-| `addMissingClubs`          | 세이브에 없는 **시드 카탈로그** 클럽(2부 등)을 인스턴스화해 채우고, 그 클럽의 이름·소속·체급·프로필도 시드에서 복사한다. 어드민이 추가한 팀은 시드에 없으므로 진행 중인 세이브에 들어가지 않는다                                                                       |
-| 등번호                     | **비어 있는 번호만** — 시드 소속 그대로면 공식 번호를 복원하고, 나머지 빈칸과 팀 안에서 겹친 번호를 결정적으로 채운다. 세이브가 이미 가진 번호는 건드리지 않는다                                                                                                       |
-| `migrateEuroPrizeKeys`     | 대항전 상금의 멱등 키를 표시 라벨에서 안정 키로 옮긴다. 리그 페이즈 정산이 리그 페이즈가 끝난 뒤 **매일** 다시 도는 자리라, 옮기지 않으면 이미 받은 상금을 새 키로 한 번 더 받는다. 새 키는 옮김 표에 없어 두 번 돌아도 결과가 같다 (`competition/euro-prize.ts`)      |
-| `migrateDomesticPrizeKeys` | 국내 컵 상금의 멱등 키를 표시 라벨에서 안정 키로 옮긴다. 바로 뒤의 `advanceDomesticCups`가 라운드 진출 상금을 다시 정산하므로, 옮기지 않으면 이미 받은 상금이 새 키로 한 번 더 나간다. 새 키는 옮김 표에 없어 두 번 돌아도 결과가 같다 (`competition/domestic-cup.ts`) |
-| `advanceDomesticCups`      | 국내 컵 따라잡기 — 결정적·멱등이라 열기만 해도 달력이 채워진다                                                                                                                                                                                                         |
-| `ensurePersonas`           | 수석코치·구단주·기자를 시드로 채우고 옛 화자 태그를 이름으로 고친다                                                                                                                                                                                                    |
-
-빈 배열 채우기·감독 능력치·위치선정 분리·`squadLevel`·패스 스타일·폼 눈금·사기와
-피로·경기 중 통계 축·성장 로그 출처·미러 자리 주발 보정은 **이름 붙은 순수 함수**다
-(`core/migrations.ts`) —
-세계를 세우지 않고 전/후를 고정한 테스트가 그 함수를 직접 부른다. 나머지는 세계를
-따라잡게 하는 엔진 함수라 상태 전체를 읽는다.
-
-#### 3. 스키마 parse — 스키마가 곧 세이브 계약이다
-
-`packages/domain`의 Zod 스키마는 엔티티 정의(`z.infer`)이자 **로드의 검사**다.
-마이그레이션이 끝난 상태를 `SaveSchema`(`core/save-schema.ts`)로 통째로 parse하고
-그 결과를 그대로 상태로 쓴다 — `.default()`가 붙은 축은 여기서 채워지고, 스키마에
-없는 찌꺼기 키는 여기서 떨어진다.
-
-- **테이블만 검사한다.** 스키마가 없는 축(`calendar` · `pendingMatch` · `chat` …)은
-  손대지 않고 통과시킨다 — 검사 밖이지 삭제 대상이 아니다.
-- ⚠️ **스키마를 좁히면 옛 세이브가 막힌다.** 필드를 필수로 올리거나 범위를 좁히는
-  변경은 같은 PR에 마이그레이션을 함께 쓴다. 스키마는 타입 정의만이 아니라
-  **로드가 통과해야 하는 문**이다.
-
-### 버전을 올려야 하는 경우
-
-값의 **뜻**이 바뀌어 옛 값과 새 값을 구분할 수 없을 때다. 경계선은 마커 하나로
-버틸 수 있느냐다 — 폼 눈금이 그 예다. 옛 `1`과 새 `1`이 같은 숫자인데 뜻이 정반대라
-`formUnitScale` 마커가 어느 눈금인지를 가른다. 그런 마커조차 세울 수 없는 변경
-(테이블 통째 개편)은 버전을 올린다. 지금 세이브는 16축의 v6다.
-
-**축을 더하는 것은 그 자체로 버전을 올릴 일이 아니다** — 없던 필드는 **부재가 곧
-마커**라, 세이브가 이미 가진 값에서 새 축을 세울 수 있으면 로드가 한 번만 세운다
-(감독 4축 → 5축 · 위치선정 → 위치선정·침투가 그것이다). 세울 수 없는 축, 곧 옛
-세이브 어디에도 근거가 없는 값을 요구하는 축이라야 버전이 올라간다.
+`packages/domain`의 Zod 스키마는 엔티티 정의(`z.infer`)이자 **로드의 검사**다. 상태를
+`SaveSchema`(`core/save-schema.ts`)로 통째로 parse하고 그 결과를 그대로 상태로 쓴다 —
+`.default()`가 붙은 축은 여기서 채워지고, 스키마에 없는 찌꺼기 키는 여기서 떨어진다.
+테이블만 검사한다 — 스키마가 없는 축(`calendar` · `pendingMatch` · `chat` …)은 손대지
+않고 통과시킨다.
 
 ### 열 수 없는 세이브
 
@@ -612,14 +514,13 @@ optional로 넓혀 두고 읽는 쪽이 `카드 ?? 옛 문장` 순으로 본다.
 | `readable: true`  | 로드 성공 | 기존 `GameSummary` 그대로 (팀·감독·시즌·날짜)              |
 | `readable: false` | 로드 거부 | `id` · `reason` · `saveVersion` · `expected` · `createdAt` |
 
-- `reason` — 어느 걸음에서 멈췄는가. 넷 다 로드를 거부하지만 고칠 자리가 다르다.
+- `reason` — 어느 걸음에서 멈췄는가. 셋 다 로드를 거부하지만 고칠 자리가 다르다.
 
-| `reason`      | 무엇이 일어났나                                    | 고칠 자리 |
-| ------------- | -------------------------------------------------- | --------- |
-| `"version"`   | 세이브 버전이 코어와 다르다                        | —         |
-| `"corrupt"`   | JSON이 깨졌거나 필수 테이블이 없거나 조각을 잃었다 | 파일      |
-| `"migration"` | 마이그레이션이 그 세이브에서 넘어졌다              | 코드      |
-| `"schema"`    | 마이그레이션까지 끝난 상태가 스키마와 어긋난다     | 코드      |
+| `reason`    | 무엇이 일어났나                                    | 고칠 자리 |
+| ----------- | -------------------------------------------------- | --------- |
+| `"version"` | 세이브 버전이 코어와 다르다                        | —         |
+| `"corrupt"` | JSON이 깨졌거나 필수 테이블이 없거나 조각을 잃었다 | 파일      |
+| `"schema"`  | 상태가 스키마와 어긋난다                           | 코드      |
 
 - `saveVersion`은 **그 파일이 스스로 말하는 버전**, `expected`는 지금 코어가 여는
   `SAVE_VERSION`. 감독이 "왜 못 여는가"에 답하는 것은 이 두 숫자다. 문장은 화면이
@@ -631,8 +532,7 @@ optional로 넓혀 두고 읽는 쪽이 `카드 ?? 옛 문장` 순으로 본다.
 아니므로 눌러도 아무 데도 가지 않고, 남는 조작은 삭제뿐이다. 세이브가 그것뿐일
 때 "게임이 없습니다"라고 말하지 않는다.
 
-⚠️ **되살리는 것은 별개다.** 이 목록은 옛 세이브를 마이그레이션하지 않는다.
-지우거나 그대로 두거나, 둘 중 하나다.
+⚠️ **되살리는 길은 없다.** 지우거나 그대로 두거나, 둘 중 하나다 — 그것이 §6의 정책이다.
 
 ### 파일 내구성
 
@@ -756,30 +656,21 @@ tmp 쓰기가 실패하면 그 tmp는 **그 자리에서 거둔다**. 이름이 
 
 두 벌이 함께 죽어야 비로소 손상이고, 그때 읽는 것이 `.bak` 본체다.
 
-#### 옛 세이브
-
-조각 없이 `players`를 본문에 담은 세이브는 그대로 읽힌다 — `shards`가 없으면 본체가
-곧 전부다. 버전은 올리지 않는다(6 그대로). 다음 저장부터 조각으로 갈린다.
-반대 방향은 보장하지 않는다 — 조각으로 갈린 세이브를 옛 빌드가 열면 `players`가
-없어 손상으로 본다.
-
 #### 사이드카는 실패도 적는다
 
 못 여는 세이브는 로드에 성공한 적이 없어 요약 캐시가 생길 자리가 없다 — 실패를
 적지 않으면 목록을 열 때마다 수 MB를 다시 `JSON.parse`한다. 그래서 같은 자리에
 `{ unreadable: { reason, saveVersion, createdAt, loader }, source: <지문> }`을 쓰고,
-**사유 넷을 가리지 않고 전부 적고 전부 읽는다.** 쓰는 사유와 읽는 사유가 갈리면
+**사유 셋을 가리지 않고 전부 적고 전부 읽는다.** 쓰는 사유와 읽는 사유가 갈리면
 그 사유로 실패한 세이브는 캐시가 매번 버려져, 사이드카가 피하려던 전체 파싱을
 목록 요청마다 그대로 치른다.
 
-`loader`는 그 판정을 내린 **코드의 지문**이다. 실패 넷은 파일이 아니라 코드가 내린
-판정이고(`version`은 `SAVE_VERSION`이, `corrupt`는 필수 테이블 목록이,
-`migration`·`schema`는 마이그레이션과 스키마가 정한다), `source` 지문은 **파일이
-바뀐 것**만 잡는다. 마이그레이션 버그를 고쳐도 세이브 파일은 그대로이므로, 코드
-지문이 없으면 고친 코드가 그 세이브를 다시는 보지 못한다. 값은 세이브를 여는
-모듈들(`persistence.ts`·`migrations.ts`·`save-schema.ts`)의 크기+mtime이라 코드가
-바뀌면 저절로 달라지고, 그때 그 세이브는 한 번 다시 판정된다. `loader`가 없는 옛
-사이드카는 믿지 않는다 — 한 번 다시 읽고 새로 적을 뿐이다.
+`loader`는 그 판정을 내린 **코드의 지문**이다. 실패 셋은 파일이 아니라 코드가 내린
+판정이고(`version`은 `SAVE_VERSION`이, `corrupt`는 필수 테이블 목록이, `schema`는
+스키마가 정한다), `source` 지문은 **파일이 바뀐 것**만 잡는다. 스키마를 고쳐도 세이브
+파일은 그대로이므로, 코드 지문이 없으면 고친 코드가 그 세이브를 다시는 보지 못한다. 값은
+세이브를 여는 모듈들(`persistence.ts`·`save-schema.ts`)의 크기+mtime이라 코드가 바뀌면
+저절로 달라지고, 그때 그 세이브는 한 번 다시 판정된다.
 
 성공 요약에는 `saveVersion`도 함께 적는다. 지문은 **파일이 바뀐 것**만 잡으므로,
 파일이 그대로인데 코어가 여는 `SAVE_VERSION`이 올라가면 옛 성공 캐시가 거짓이
@@ -833,10 +724,9 @@ tmp 쓰기가 실패하면 그 tmp는 **그 자리에서 거둔다**. 이름이 
   사유로 선다.
 - **`familiarity`는 소수다.** 정수로 자르면 85 위에서 판정이 0이 되어 값이 멎는다.
   화면만 반올림한다.
-- **새 배열 필드를 `GameState`에 추가하면 `validate`의 `??= []`에 함께 등록한다.**
-  안 하면 옛 세이브에서 `undefined`로 남아 첫 접근에서 터진다.
-- **새 optional 필드는 "없을 때의 뜻"을 읽는 쪽이 정한다.** 예: `foot` 없음 =
-  양발(보정 0), `squadLevel` 없음 = 로드가 분류, `clock` 없음 = `09:00`.
+- **새 필드는 스키마에 필수로 선다** — `createGame`이 채우고 로드는 스키마가 검사한다.
+  optional은 없음이 뜻을 갖는 필드뿐이다: `foot` 없음 = 양발(보정 0), `dismissal` 없음 =
+  재직 중.
 - **`ScheduleEntry`와 그 대상은 함께 지운다.** 엔트리만 남으면 tick이 존재하지
   않는 대상을 매일 찾고, 대상만 남으면 달력에서 사라진 채 상태가 굴러간다.
 - **`state.phase`는 라우팅 전용** — 모델 입력에 넣지 않는다.
@@ -847,8 +737,7 @@ tmp 쓰기가 실패하면 그 tmp는 **그 자리에서 거둔다**. 이름이 
 - **`ChatTurn.role`의 `operator`는 감독 발화가 아니다.** 화면에 그리지 않고,
   모델 이력에도 `@:` 화자 없음으로 들어간다.
 - **무소속(`freeagents`)은 클럽이 아니다.** 팀 엔티티 한 줄만 갖고 재정도 전술도
-  AI 감독도 갖지 않는다 — 새 게임도 로드의 `addMissingClubs`도 같은 모양을 만든다
-  ([team.md](team.md) §4).
+  AI 감독도 갖지 않는다 ([team.md](team.md) §4).
 
 ## 9. 미해결
 
@@ -857,28 +746,11 @@ tmp 쓰기가 실패하면 그 tmp는 **그 자리에서 거둔다**. 이름이 
   (목록만 `writeSummary`의 사이드카 요약으로, **쓰기**만 내용 주소 조각으로
   우회하고 있다 — 직렬화 자체는 여전히 매번 돈다). 턴 단위 diff로 옮기는 설계와
   착수 여부는 [#697](https://github.com/dhoonjang/story-fm/issues/697)이 든다.
-- **옛 세이브를 되살리는 길이 없다.** 버전이 다른 파일은 목록에 서기만 하고
-  (§6 [열 수 없는 세이브](#열-수-없는-세이브)), 지우거나 그대로 두는 것 외에
-  감독이 할 수 있는 일이 없다.
-- **조각 세이브의 역방향 호환은 보장하지 않는다.** 조각(`shards`)을 가리키는
-  본체는 조각을 모르는 옛 코어에서 필수 테이블이 없는 파일로 읽힌다 —
-  같은 `SAVE_VERSION`이어도 코어를 되돌리면 열리지 않는다.
 
-### 폐기 필드 — 걷어낸 것과 남는 것
+### 폐기 필드
 
-읽는 곳이 없는 필드는 **타입과 스키마에서 지우고, 옛 세이브는 마이그레이션이
-받는다.** `SAVE_VERSION`은 그대로다(§6 — 올리지 않는 것이 원칙).
-
-| 필드                                    | 어떻게                                                                                                                                                                                                                                                                                |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PENDING_MATCH.script` · `scriptCursor` | 타입에서 지웠다(`core/state.ts`) — 구간 시뮬레이터가 사건을 그때그때 굴리므로 경기 전체를 미리 만들지 않는다. `pendingMatch`는 스키마 밖(`passthrough`)이라 옛 세이브가 든 두 키는 로드에서 떨어지지 않고, 그 경기가 끝나 `pendingMatch`가 `null`이 될 때 함께 사라진다               |
-| `GROWTH_SOURCE.reserve`                 | 갈래를 지우고 `migrateGrowthSources`가 옛 로그의 그 값을 `development`로 옮긴다(§6). 그 갈래만 따로 읽는 자리가 없어서 — 훈련 결산 요약이 `training`을 거를 뿐이다 — 옮겨도 화면의 성장 일지는 그대로다                                                                               |
-| `GAME_STATE.leagueHistory`              | `state.history`가 같은 순위표를 **행 전체**로 들어 이 표는 그것의 파생이 됐다. `migrateLeagueHistory`가 옛 세 시즌의 팀 id 순서를 `history` 행으로 옮긴다 — 그때 남긴 것이 순서뿐이라 옮겨진 행은 승점·득실을 모른다(`SeasonTableRow.record`가 없다). 없는 수를 0으로 지어내지 않는다 |
-
-⚠️ **`enum`의 갈래는 optional로 넓힐 수 없다.** 없어도 되는 **필드**는 optional로
-두고 읽는 쪽이 기본값을 알면 되지만, **값** 하나를 스키마에서 빼면 그 값을 든 옛
-세이브가 3걸음(`schema`)에서 막힌다. 갈래를 지우는 변경은 그래서 마이그레이션과
-한 PR이다.
+읽는 곳이 없는 필드는 **타입과 스키마에서 지우고 `SAVE_VERSION`을 올린다.** 옛 값을 받아
+옮기는 코드는 두지 않는다(§6).
 
 ## 코드 위치
 
@@ -887,7 +759,6 @@ tmp 쓰기가 실패하면 그 tmp는 **그 자리에서 거둔다**. 이름이 
 | 엔티티 정의 (Zod)                  | `packages/domain/src/` — `player` `team` `tactics` `records` `schedule` `manager` `persona` `press` `persuasion` `match` |
 | `GameState` · 새 게임 생성         | `packages/engine/src/core/state.ts`                                                                                      |
 | 저장·로드 · 실패 사유              | `packages/engine/src/core/persistence.ts`                                                                                |
-| 마이그레이션 (이름 붙은 순수 함수) | `packages/engine/src/core/migrations.ts`                                                                                 |
 | 세이브 스키마 (로드의 검사)        | `packages/engine/src/core/save-schema.ts`                                                                                |
 | 데이터 디렉터리 · 카탈로그 경로    | `packages/engine/src/core/paths.ts`                                                                                      |
 | 카탈로그 빌드·오버라이드           | `packages/engine/src/world/catalog.ts` · `attributes.ts`                                                                 |

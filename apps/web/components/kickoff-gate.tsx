@@ -175,7 +175,6 @@ function ManagerNotes({ tactics }: { tactics: GateTactics }) {
     if (value === null) continue;
     rows.push({ key: toggle.label, values: [tacticToggleWord(toggle.key, value)] });
   }
-  if (tactics.notes.length > 0) rows.push({ key: "전술 노트", values: tactics.notes });
   if (rows.length === 0) return null;
   return (
     <div className="kg-notes">

@@ -12,7 +12,7 @@ import { outOfBand, reportOf, type Readings } from "./harness";
  *
  * 재는 것은 손잡이(`SUB_CHASE_MINUTE`·`SUB_HOLD_MINUTE`·장수 상한)가 실제 경기
  * 분포로 번역됐는가다. 문턱을 여기에 다시 적지 않는다 — 갈래를 가르는 열쇠는
- * 구간 시뮬이 쥔 `subCause` 그것이고, 밴드는 서술자가 쥔다.
+ * 실시간 경기가 쥔 `subCause` 그것이고, 밴드는 서술자가 쥔다.
  *
  *   pnpm balance ai-bench
  */
@@ -42,10 +42,12 @@ function collect(state: GameState, tally: Tally): void {
   const match = state.matches.find((m) => m.id === pending.matchId);
   if (!match) return;
   const aiSide = match.homeTeamId === state.userTeamId ? "away" : "home";
-  const score = pending.ledger.score;
+  const score = pending.live.ledger.score;
   const diff = aiSide === "home" ? score.home - score.away : score.away - score.home;
 
-  const subs = pending.ledger.events.filter((e) => e.type === "substitution" && e.team === aiSide);
+  const subs = pending.live.ledger.events.filter(
+    (e) => e.type === "substitution" && e.team === aiSide,
+  );
   const of = (cause: SubCause) => subs.filter((e) => e.subCause === cause).length;
 
   tally.matches += 1;
@@ -54,7 +56,8 @@ function collect(state: GameState, tally: Tally): void {
   tally.hold += of("hold");
   tally.fatigue += of("fatigue");
   tally.injury += of("injury");
-  if (pending.aiShape) tally.reshaped += 1;
+  if (pending.live.ledger.events.some((e) => e.type === "tactical_shift" && e.team === aiSide))
+    tally.reshaped += 1;
   if (diff < 0) {
     tally.trailed += 1;
     if (of("chase") > 0) tally.trailedChased += 1;

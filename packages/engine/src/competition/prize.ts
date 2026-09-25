@@ -4,7 +4,7 @@ import type { GameState } from "../core/state";
 import { formatMoney, payOnce } from "../club/finance";
 
 /**
- * 대회 상금의 **공통 골격** — 멱등 키·표시 라벨·지급·옛 세이브 이관.
+ * 대회 상금의 **공통 골격** — 멱등 키·표시 라벨·지급.
  *
  * 국내 컵(`domestic-cup.ts`)과 유럽 대항전(`euro-prize.ts`)이 같은 원장에 같은 모양의
  * 항목을 적는다. 금액과 "언제 누구에게"는 각 대회가 갖고, 여기서는 **키와 문장의
@@ -30,14 +30,14 @@ export interface PrizeCup {
  * 라벨은 언제든 고쳐 쓰는 문장이라 키로 쓸 수 없다. 컵 약칭이나 단계 이름 한 글자를
  * 고치는 순간 이미 지급한 상금이 새 키를 얻어 한 번 더 나간다.
  *
- * ⚠️ **이 문자열은 세이브에 남는다.** 모양을 바꾸면 옛 세이브의 지급 기록이 통째로
- * 무효가 되어 전 대회 상금이 다시 나간다.
+ * ⚠️ **이 문자열은 세이브에 남는다.** 모양을 바꾸면 `SAVE_VERSION`을 올린다 — 그대로
+ * 두면 진행 중인 세이브의 지급 기록이 통째로 무효가 되어 전 대회 상금이 다시 나간다.
  */
 export function prizeKey(cupId: string, kind: PrizeKind, season: number): string {
   return `prize:competition:${cupId}:${kind}:S${season}`;
 }
 
-/** 원장에 적히는 문장 — 옛 세이브 이관표(`migratePrizeKeys`)가 이 문장을 키로 찾는다 */
+/** 원장에 적히는 문장 — 키가 아니라 라벨이다 (`prizeKey`가 키다) */
 export function prizeLabel(cup: PrizeCup, season: number, what: string): string {
   return `${cup.short} ${what} 상금 (S${season})`;
 }
@@ -73,22 +73,4 @@ export function payPrize(state: GameState, prize: PrizePayment, digest: TickSink
     pushEvent(digest, "news", `${label} ${formatMoney(prize.amount)} 입금`);
   }
   return paid;
-}
-
-/**
- * 옛 세이브 호환 — 표시 라벨을 그대로 멱등 키로 쓰던 시절의 `prizesPaid`를 안정 키로
- * 제자리 치환한다. 옮기지 않으면 로드 직후 도는 정산이 옛 키를 못 알아보고 같은
- * 상금을 한 번 더 지급한다.
- *
- * @param moved 옛 라벨 → 새 키. 새 키는 이 표에 없으므로 두 번 돌려도 결과가 같다.
- */
-export function migratePrizeKeys(state: GameState, moved: ReadonlyMap<string, string>): void {
-  for (const finance of state.finances) {
-    const keys = finance.prizesPaid;
-    if (!keys) continue;
-    for (let i = 0; i < keys.length; i++) {
-      const next = moved.get(keys[i]!);
-      if (next) keys[i] = next;
-    }
-  }
 }

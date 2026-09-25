@@ -179,15 +179,11 @@ export function disciplineJurisdictionOf(competitionId: string | null): string |
 
 /**
  * 이 정지가 **이 경기에 걸리는가** (match.md §6).
- *
- * 대회를 모르는 줄은 전 대회다 — 옛 세이브가 들고 있는 정지는 대회가 적히기 전의
- * 것이라, 어느 경기든 막고 어느 경기로든 소화된다.
  */
 export function suspensionApplies(
-  suspension: { competitionId?: string; scope?: string },
+  suspension: { competitionId: string; scope?: string },
   competitionId: string | null,
 ): boolean {
-  if (suspension.competitionId === undefined) return true;
   if (suspension.competitionId === competitionId) return true;
   if (suspension.scope !== "jurisdiction") return false;
   const here = disciplineJurisdictionOf(competitionId);
@@ -197,11 +193,10 @@ export function suspensionApplies(
 /**
  * 이 정지가 **막는 것의 이름** — 감독이 "어느 경기를 못 나오나"를 읽는 자리다
  * (match.md §6). 라인업 줄·선수 카드·GM 스냅샷이 같은 낱말을 써야 감독이 같은
- * 사실로 읽는다. 대회를 모르는 옛 줄은 전 대회다.
+ * 사실로 읽는다.
  */
 export function suspensionScopeName(suspension: Suspension): string {
   const { competitionId, scope } = suspension;
-  if (competitionId === undefined) return "전 대회";
   if (scope !== "jurisdiction") return competitionShortName(competitionId);
   const jurisdiction = disciplineJurisdictionOf(competitionId);
   return (

@@ -69,7 +69,7 @@ description: >-
 ```bash
 export SIM_DIR=<scratchpad>/simulation      # 상태 · 저널 · 요청 원문
 export SIM_HOST=http://localhost:3000
-B=.claude/skills/simulation/bin              # 이 스킬의 스크립트 넷
+B=.claude/skills/simulation/bin              # 이 스킬의 스크립트 다섯
 ```
 
 | 스크립트                                   | 무엇                                                                                                                                                                    |
@@ -78,9 +78,10 @@ B=.claude/skills/simulation/bin              # 이 스킬의 스크립트 넷
 | `turn.sh '<json>'`                         | 턴 하나. 끝날 때까지 기다리고 서사 · 도구 줄 · 상태를 찍는다                                                                                                            |
 | `state.sh [--fetch] <갈래> [N]`            | 마지막 페이로드 요약 — `brief` `attention` `first` `reserve` `xi` `calendar` `contracts` `finance` `table` `match` `youth` `windows` `registration` `reputation` `chat` |
 | `lineup.sh --dump` · `lineup.sh body.json` | 전술판 — 지금 선발을 body로 뽑고, 고쳐서 결정적으로 저장                                                                                                                |
+| `match.sh [--resume \| --shootout]`        | 경기 — 다음 정지점까지 굴리고 정지점 턴을 연다 (§5-2)                                                                                                                   |
 
 턴 본문의 모양은 `turn.sh` 머리에 있다: `message`(1,000자 이내) · `operation`
-(`skip_days` · `skip_to_next_match` · `advance_match`) · `orders`(교체 · 전술 ·
+(`skip_days` · `skip_to_next_match` · `enter_match`) · `orders`(교체 · 전술 ·
 자리 · 역할 — 코어가 그대로 집행한다).
 
 ### 2-3. 시나리오
@@ -118,7 +119,7 @@ $B/new-game.sh && export SIM_GAME=$(cat $SIM_DIR/game.txt)
   3초 뒤 409로 물러난다 — 그 409가 보이면 내가 병렬로 보낸 것이다.
 - **백그라운드 없음.** `run_in_background`로 턴을 보내지 않는다.
   서브에이전트에게 경기를 나눠 주지 않는다. `for … turn.sh` 루프로 여러 턴을
-  한 번에 돌리지 않는다 — 「경기 끝까지 N번 advance」도 안 된다. 정지점마다
+  한 번에 돌리지 않는다 — 「경기 끝까지 `match.sh` N번」도 안 된다. 정지점마다
   읽을 것이 있다.
 - **정해진 문장 없음.** "60분입니다. 지친 선수 셋 빼세요" 같은 문장을 매 경기
   같은 자리에 보내는 것은 플레이가 아니다. 말은 그 자리의 상황에서 나온다.
@@ -191,12 +192,16 @@ $B/new-game.sh && export SIM_GAME=$(cat $SIM_DIR/game.txt)
    템포 · 폭)과 패스 스타일도 같은 body에 싣는다 — 상대와 상황이 정한다.
 4. **팀토크** — 한 턴, 상황에서 나온 말. 약속으로 읽힐 말("다음 경기도 네가
    선발이다")은 뜻이 있을 때만.
-5. `{"operation":{"kind":"advance_match"}}` — 킥오프.
+5. `{"operation":{"kind":"enter_match"}}` — 경기장에 들어선다(킥오프의 말). 시계는
+   아직 서 있다.
 
 ### 5-2. 경기 중 (phase `match`)
 
-`advance_match` 한 번이 정지점 하나까지(골 · 퇴장 · 부상 · 하프타임 · 종료, 최대
-25분) 굴린다. 정지점마다:
+경기 시계는 **실행기**가 민다 — 브라우저와 같은 일을 화면 없이 하는 `match.sh`다.
+`match.sh` 한 번이 정지점(골 · 경고 · 퇴장 · 부상 · 교체 · 상대 벤치의 전술 전환 · 하프의 끝) 하나까지 굴리고, 그
+자리에서 정지점 턴을 연다 — 판독기가 판을 다시 읽고 매치 GM이 그 사건을 중계한다.
+휴식(하프타임 · 연장 개시)에서는 라커룸의 말을 한 턴 보내고 `match.sh --resume`,
+승부차기는 `match.sh --shootout`이 한 발이다. 정지점마다:
 
 1. 서사를 읽는다 — 코치가 무엇을 제안했나, 상대가 무엇을 바꿨나.
 2. `state.sh match` — 분 · 스코어 · 교체 창 · 온필드 체력 · `gassed` · 경고 · 벤치.
@@ -217,12 +222,11 @@ $B/new-game.sh && export SIM_GAME=$(cat $SIM_DIR/game.txt)
    $B/turn.sh '{"message":"마이누는 다리가 멈췄다. 산투스로 바꾸고 라인은 한 칸 내린다.","orders":[{"kind":"substitution","out":"kobbie-mainoo","in":"andrey-santos"},{"kind":"tactic","axis":"defensiveLine","value":3}]}'
    ```
 
-   `state.sh match`의 온필드가 바뀌었는지 본다. 특정 분에 멈추고 싶으면 말로
-   한다("62분에 멈춰 달라") — GM이 그 분까지 굴린다.
+   `state.sh match`의 온필드가 바뀌었는지 본다.
 
-4. 바꿀 것이 없으면 `advance_match`.
-5. 종료 휘슬이 오면 마감(결산)이 같은 턴에 이어진다. 결과 · 평점 · 부상 · 경고를
-   읽고 §5-3.
+4. 바꿀 것이 없으면 `match.sh`.
+5. 종료 휘슬이 오면 `match.sh`가 마감 턴을 연다 — 결산이 그 턴에 선다. 결과 · 평점 ·
+   부상 · 경고를 읽고 §5-3.
 
 ### 5-3. 경기 뒤
 

@@ -19,8 +19,8 @@ Vision, architecture and development conventions all live in
   `claude-api` skill or the current reference, never memory.
 - **Something looks wrong in play** — every turn keeps one timeline: the manager's
   input, each LLM call (raw request/response under its name, `gm-m8k2x9q7-4f3a`), the
-  interpreter's ops, every core command incl. rejections, each match segment with its
-  rng channel and packet digest, tick events, outcome and a state digest before/after.
+  interpreter's ops, every core command incl. rejections, each verified match checkpoint
+  with its input log, tick events, outcome and a state digest before/after.
   `pnpm log` lists turns, `pnpm log <turn-id>` opens a timeline, `pnpm log <call-id>`
   opens a call's raw text (`--path` hands you the file), `pnpm log --facts <kind> --game
 <id>` streams one kind as jsonl for aggregation (docs/llm/models.md §5). Failed turns
@@ -49,7 +49,7 @@ pnpm lint             # ESLint
 pnpm format           # Prettier --write · `pnpm format:check` is what CI runs
 pnpm test / pnpm e2e  # full suites — CI runs these; locally only on request
 pnpm dev              # web app dev server (LLM_MODE=mock needs no API key)
-pnpm match --dry      # match CLI prototype: prints the strength packet only
+pnpm match            # headless live match: runs one full match without a screen, prints the ledger
 pnpm log              # dev-mode record: turns · `pnpm log <turn|call id>` opens one · `--facts <kind>` streams jsonl
 ```
 

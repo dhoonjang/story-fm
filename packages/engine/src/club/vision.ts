@@ -8,7 +8,7 @@ import {
 import { managedTeamId, tacticsOf, weeklyWagesOf, type GameState } from "../core/state";
 import { annualRevenueEstimate, debtLimitOf, debtOf } from "./finance";
 import { boardExpectation } from "../competition/season";
-import { ownerArchetypeKeyOf, ownerOf } from "../world/persona";
+import { ownerArchetypeOf, ownerOf, type OwnerArchetypeKey } from "../world/persona";
 
 /**
  * 클럽 비전 — **구단주 원형이 거는 다년 계획** (→ docs/simulation/career.md §5).
@@ -44,7 +44,7 @@ interface OwnerPlan {
 }
 
 // prettier-ignore
-const OWNER_PLANS: Readonly<Record<string, OwnerPlan>> = {
+const OWNER_PLANS: Readonly<Record<OwnerArchetypeKey, OwnerPlan>> = {
   // 효율과 구조를 보는 사람 — 인내심이 짧아 계획도 두 시즌이다
   industrialist: { seasons: 2, positionWeight: 5, rest: [
     { code: "solvency", target: WAGE_RATIO_NORMAL, weight: 3 },
@@ -77,12 +77,6 @@ const OWNER_PLANS: Readonly<Record<string, OwnerPlan>> = {
   ]},
 };
 
-/**
- * 여섯 원형 밖의 카드(옛 세이브의 커스텀 구단주)가 거는 것 — **순위 하나뿐이다.**
- * 보드 요청(§5.2)이 서지 않는 것과 같은 규약이고, 그때의 ±8은 순위만 보던 그대로다.
- */
-const PLAIN_PLAN: OwnerPlan = { seasons: 3, positionWeight: 10, rest: [] };
-
 /** 계획이 서는 시즌 수의 상한 — 표 밖의 값이 들어와도 기한이 폭주하지 않게 */
 const HORIZON_MAX = 6;
 
@@ -95,7 +89,7 @@ const HORIZON_MAX = 6;
  */
 export function buildVision(state: GameState): ClubVision {
   const teamId = managedTeamId(state) ?? state.userTeamId;
-  const plan = OWNER_PLANS[ownerArchetypeKeyOf(ownerOf(state)) ?? ""] ?? PLAIN_PLAN;
+  const plan = OWNER_PLANS[ownerArchetypeOf(ownerOf(state)).key];
   const expectation = boardExpectation(state, teamId);
   return {
     teamId,
@@ -136,9 +130,6 @@ const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
 /**
  * 유스 출신의 1군 출전 분 **비중** — 우리 구단의 유스 콜업 원장이 「유스 출신」을 정한다
  * (career.md §5). 남의 아카데미에서 자란 선수를 사 온 것은 여기 들지 않는다.
- *
- * ⚠️ **출전 분이 없는 옛 세이브는 출전 수 × 90분으로 읽는다** — 없는 칸을 0으로 읽으면
- * 옛 세이브의 유스 항목이 통째로 0으로 굳는다 (game-state.md §3.4).
  */
 function youthShareOf(state: GameState, teamId: string): number {
   const academy = academyPlayerIdsOf(state, teamId);
@@ -146,7 +137,7 @@ function youthShareOf(state: GameState, teamId: string): number {
   let ours = 0;
   for (const stat of state.seasonStats) {
     if (stat.season !== state.season || stat.teamId !== teamId) continue;
-    const minutes = stat.minutes ?? stat.apps * MINUTES_PER_MATCH;
+    const minutes = stat.minutes ?? 0;
     total += minutes;
     if (academy.has(stat.gamePlayerId)) ours += minutes;
   }
@@ -168,9 +159,6 @@ export function academyPlayerIdsOf(state: GameState, teamId: string): ReadonlySe
   );
 }
 
-/** 출전 분이 없는 옛 세이브의 폴백 — 한 경기를 온전히 뛴 것으로 읽는다 */
-const MINUTES_PER_MATCH = 90;
-
 /**
  * 그 시즌 컵·대항전에서 이긴 **녹아웃 경기 수** (career.md §5).
  *
@@ -183,7 +171,7 @@ function knockoutWinsOf(state: GameState, teamId: string): number {
   for (const match of state.matches) {
     if (match.season !== state.season || !match.result) continue;
     if (match.competitionId === null || isReserveMatch(match)) continue;
-    if (match.stage === undefined || match.stage === "league") continue;
+    if (match.stage === "league") continue;
     const home = match.homeTeamId === teamId;
     if (!home && match.awayTeamId !== teamId) continue;
     const { homeGoals, awayGoals, penalties } = match.result;

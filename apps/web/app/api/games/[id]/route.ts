@@ -3,7 +3,6 @@ import { noteTurn, traceBoard } from "@story-fm/llm";
 import { deleteGame, loadGame } from "@story-fm/engine";
 import { toPayload } from "@/lib/store";
 import { LOCK_WAIT_MS, busyResponse, withGameLock } from "@/lib/turn-runner";
-import { withLiveGamePaused } from "@/lib/live-match-runtime";
 import { invalidGameId } from "@/app/api/games/game-id";
 
 /**
@@ -42,15 +41,13 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
    * 지워진 판에서 무엇이 이상했는지가 그 판을 지우는 순간 사라지면 안 된다 — 창고는
    * `.log/`에 그대로 남고 상한이 알아서 오래된 것부터 민다.
    */
-  const ok = await withLiveGamePaused(id, () =>
-    withGameLock(id, LOCK_WAIT_MS.turn, () =>
-      traceBoard(id, async () => {
-        noteTurn({ input: { kind: "delete" } });
-        const deleted = deleteGame(id);
-        noteTurn({ outcome: { ok: deleted, saved: deleted } });
-        return deleted;
-      }),
-    ),
+  const ok = await withGameLock(id, LOCK_WAIT_MS.turn, () =>
+    traceBoard(id, async () => {
+      noteTurn({ input: { kind: "delete" } });
+      const deleted = deleteGame(id);
+      noteTurn({ outcome: { ok: deleted, saved: deleted } });
+      return deleted;
+    }),
   ).catch(busyResponse);
   if (ok instanceof Response) return ok;
   if (!ok) return NextResponse.json({ error: "게임을 찾을 수 없습니다" }, { status: 404 });

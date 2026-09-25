@@ -26,7 +26,7 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { SCOUT_DAYS, isReserveMatch } from "@story-fm/domain";
-import { createTestGame } from "./helpers";
+import { createTestGame, resultOf } from "./helpers";
 
 /**
  * 세계는 **하나만** 세운다 — 조회가 무엇을 보여 주고 무엇을 감추는지는 시드와
@@ -409,11 +409,11 @@ describe("get_league — 일정 검색", () => {
     expect(derbies.length).toBeGreaterThanOrEqual(2);
     const first = derbies.sort((a, b) => (a.date < b.date ? -1 : 1))[0]!;
     const arsenalHome = first.homeTeamId === "arsenal";
-    first.result = {
+    first.result = resultOf({
       homeGoals: arsenalHome ? 3 : 1,
       awayGoals: arsenalHome ? 1 : 2,
       scorers: [`${arsenalHome ? "home" : "away"}:${playersOf(state, "arsenal")[0]!.id}`],
-    };
+    });
 
     const res = leagueView(state, { view: "fixtures", opponent: "토트넘" });
     expect(res.ok).toBe(true);
@@ -427,7 +427,7 @@ describe("get_league — 일정 검색", () => {
   it("when=upcoming은 예정만, past는 지난 경기만 준다", () => {
     const state = createTestGame(21);
     const round1 = state.matches.filter((m) => m.competitionId === "epl" && m.round === 1);
-    for (const m of round1) m.result = { homeGoals: 1, awayGoals: 0, scorers: [] };
+    for (const m of round1) m.result = resultOf({ homeGoals: 1, awayGoals: 0 });
 
     const upcoming = leagueView(state, { view: "fixtures", when: "upcoming", count: 3 });
     expect(fixtureLines(upcoming.message).every((l) => l.startsWith("  예정"))).toBe(true);
@@ -682,10 +682,20 @@ describe("get_career", () => {
  * 조용히 빈 답을 주면 그 자리에서 모델이 지어낸다.
  */
 describe("get_history", () => {
-  /** 시즌 1의 표(전체 행)와 시즌 2의 **이관된 행**(순서만 안다) */
+  /** 시즌 1의 표(전체 행)와 시즌 2의 표(성적 칸은 빈 값 — 순서만 읽는다) */
   function withHistory(): GameState {
     const state = createTestGame(21);
     state.season = 3;
+    // 순위만 읽는 시즌의 행 — 성적 칸은 비워 둔다
+    const blank = {
+      played: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
+      goalsFor: 0,
+      goalsAgainst: 0,
+      points: 0,
+    };
     state.history = [
       {
         season: 1,
@@ -744,7 +754,16 @@ describe("get_history", () => {
       },
       {
         season: 2,
-        leagues: [{ leagueId: "epl", rows: [{ teamId: "liverpool" }, { teamId: "arsenal" }] }],
+        teamId: state.userTeamId,
+        leagues: [
+          {
+            leagueId: "epl",
+            rows: [
+              { teamId: "liverpool", record: blank },
+              { teamId: "arsenal", record: blank },
+            ],
+          },
+        ],
         matches: [],
       },
     ];
@@ -764,23 +783,6 @@ describe("get_history", () => {
     );
   });
 
-  /**
-   * 옛 세이브에서 이관된 행은 팀 id 순서뿐이다 (game-state.md §3.3) — 없는 수를
-   * 0으로 세우면 그 시즌이 그 구단의 최저 승점·최소 득점이 된다.
-   */
-  it("이관된 행은 순위와 이름만 세운다 — 0승 0패를 짓지 않는다", () => {
-    const state = withHistory();
-    for (const message of [
-      historyView(state, { season: 2, competition: "epl" }).message,
-      leagueView(state, { view: "standings", season: 2 }).message,
-    ]) {
-      const row = message.split("\n").find((l) => /^\s*2\s/.test(l))!;
-      expect(row).toContain("아스날");
-      expect(row).not.toContain("경기");
-      expect(row).not.toContain("0승");
-    }
-  });
-
   it("지나간 시즌의 순위표는 그때의 표에서 온다 — 지금 경기가 아니다", () => {
     const res = leagueView(withHistory(), { view: "standings", season: 1 });
     expect(res.message).toContain("최종 순위");
@@ -793,8 +795,22 @@ describe("get_history", () => {
     const state = withHistory();
     const player = userPlayers(state)[0]!;
     state.seasonStats.push(
-      { gamePlayerId: player.id, season: 1, teamId: "chelsea", apps: 30, goals: 10 },
-      { gamePlayerId: player.id, season: 2, teamId: state.userTeamId, apps: 20, goals: 5 },
+      {
+        gamePlayerId: player.id,
+        season: 1,
+        teamId: "chelsea",
+        competitionId: "epl",
+        apps: 30,
+        goals: 10,
+      },
+      {
+        gamePlayerId: player.id,
+        season: 2,
+        teamId: state.userTeamId,
+        competitionId: "epl",
+        apps: 20,
+        goals: 5,
+      },
     );
     expect(historyView(state, { player: player.id }).message).toContain("통산: 50경기 15골");
   });
@@ -962,7 +978,12 @@ describe("scheduleView — 감독의 달력", () => {
   it("지나간 범위를 물으면 그 사이 벌어진 일을 일지로 함께 낸다", () => {
     const state = createTestGame(21);
     const start = state.date;
-    state.narrative.push({ date: start, text: "리버풀에서 오퍼 답 도착", salience: 3 });
+    state.narrative.push({
+      date: start,
+      text: "리버풀에서 오퍼 답 도착",
+      salience: 3,
+      kind: "other",
+    });
     advanceTime(state, { days: 5 });
 
     const past = scheduleView(state, { from: start, to: state.date });
@@ -1026,7 +1047,7 @@ describe("이력·폼", () => {
       .slice(0, 3);
     for (const m of ours) {
       const home = m.homeTeamId === "arsenal";
-      m.result = { homeGoals: home ? 2 : 0, awayGoals: home ? 0 : 2, scorers: [] };
+      m.result = resultOf({ homeGoals: home ? 2 : 0, awayGoals: home ? 0 : 2 });
     }
     const res = leagueView(state, { view: "standings" });
     const ourRow = res.message.split("\n").find((l) => l.includes("←우리"))!;

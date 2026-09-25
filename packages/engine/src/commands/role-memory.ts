@@ -24,7 +24,7 @@ export function recallRole(
   position: string,
 ): string | undefined {
   const code = position.toUpperCase();
-  const memory = state.roleMemory?.find((m) => m.gamePlayerId === playerId && m.position === code);
+  const memory = state.roleMemory.find((m) => m.gamePlayerId === playerId && m.position === code);
   if (!memory) return undefined;
   return rolesFor(code).some((r) => r.id === memory.roleId) ? memory.roleId : undefined;
 }

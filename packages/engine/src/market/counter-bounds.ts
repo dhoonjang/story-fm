@@ -272,7 +272,7 @@ export function counterBoundsOf(
    * 이적료가 붙은 협상이 `pending` 계약 하나로 확정된다: 코어가 받지도 않을 돈이
    * 라운드에 적히고 파는 구단은 그 돈을 영영 못 받는다. 흥정은 주급과 지위로 한다.
    */
-  if (negotiation.precontract === true) {
+  if (negotiation.precontract) {
     return {
       ...base,
       fee: null,

@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   EXTRA_TIME_MINUTES,
-  advanceMatchTo,
-  advanceSegment,
+  advanceLiveMatch,
   advanceShootout,
   assignmentsOf,
   awaitingShootout,
@@ -12,6 +11,7 @@ import {
   finalizeMatch,
   finishingXi,
   keeperSkill,
+  markEntered,
   needsExtraTime,
   penaltyRate,
   penaltySkill,
@@ -21,6 +21,7 @@ import {
   resolveEuroTie,
   resolveExtraTime,
   resolveShootout,
+  resumeLiveInterval,
   rollShootoutKick,
   setShootoutOrder,
   shootoutFirst,
@@ -36,7 +37,6 @@ import {
   userPlayers,
   userSide,
   type GameState,
-  type MatchStop,
 } from "@story-fm/engine";
 import type {
   GamePlayer,
@@ -53,8 +53,8 @@ import {
   shootoutTally,
 } from "@story-fm/domain";
 import { groupOf } from "@story-fm/engine";
-import { setPieceTakersOf } from "@story-fm/sim";
-import { createTestGame, simSquad } from "./helpers";
+import { applyEvents, liveFinished, matchFatigueOf, setPieceTakersOf } from "@story-fm/sim";
+import { createTestGame, simSquad, resultOf } from "./helpers";
 
 /**
  * 전체 세계 하나를 나눠 쓴다 — 컵 구조를 검증하는 테스트라 축소 세계를 쓸 수 없고
@@ -79,6 +79,10 @@ function stageTie(
   pair: number,
   legs: Array<{ home: string; away: string; homeGoals: number; awayGoals: number }>,
 ): MatchRecord[] {
+  const xiOf = (teamId: string) =>
+    playersOf(state, teamId)
+      .slice(0, 11)
+      .map((p) => p.id);
   const created = legs.map((leg, i) => {
     const match: MatchRecord = {
       id: `m-${competitionId}-${state.season}-${stage}-p${pair}-l${i + 1}`,
@@ -87,21 +91,17 @@ function stageTie(
       stage,
       round: i + 1,
       date: state.date,
+      time: "15:00",
       homeTeamId: leg.home,
       awayTeamId: leg.away,
-      result: {
+      result: resultOf({
         homeGoals: leg.homeGoals,
         awayGoals: leg.awayGoals,
-        scorers: [],
-        assists: [],
-        goalMinutes: [],
-        homeLineup: playersOf(state, leg.home)
-          .slice(0, 11)
-          .map((p) => p.id),
-        awayLineup: playersOf(state, leg.away)
-          .slice(0, 11)
-          .map((p) => p.id),
-      },
+        homeLineup: xiOf(leg.home),
+        awayLineup: xiOf(leg.away),
+        homeOnPitch: xiOf(leg.home),
+        awayOnPitch: xiOf(leg.away),
+      }),
     };
     return match;
   });
@@ -446,7 +446,7 @@ describe("연장이 필요한 경기인가 — 단일 판정", () => {
 });
 
 /**
- * 감독이 지휘하는 연장 — 구간 시뮬이 120분까지 간다.
+ * 감독이 지휘하는 연장 — 실시간 경기가 120분까지 간다.
  *
  * 여기서 재는 것은 "코어가 조용히 굴리지 않는가"다: 감독이 그 30분에 교체할 수
  * 있고, 그 경기의 장부에 연장이 남고, 그래서 `resolveExtraTime`이 같은 경기를
@@ -472,22 +472,101 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
     return match;
   }
 
-  /** 그 경기를 끝까지 치른다 — 정지점마다 감독이 끼어들 자리를 준다 */
-  function playUserMatch(state: GameState, atStop?: (stop: string) => void): void {
+  /**
+   * 90분·120분 직전에 스코어를 어떻게 둘 것인가 — 연장·승부차기의 흐름을 재는
+   * 테스트라 무승부를 난수로 찾지 않고 **뒤진 쪽의 골을 장부에 넣어** 세운다.
+   * `natural`은 손대지 않고, `level`은 동점으로, `home`은 동점 뒤 홈 한 골을 더한다.
+   */
+  type Ending = "natural" | "level" | "home";
+  interface PlayPlan {
+    at90?: Ending;
+    at120?: Ending;
+    /** 연장 직전 휴식 — 감독이 끼어드는 자리 */
+    onExtra?: () => void;
+    /** 종료 휘슬 — 마감 전, 승부차기 전의 장부를 읽는 자리 */
+    onFullTime?: () => void;
+    /** 승부차기 정지점에서 멈추고 돌려준다 (마감하지 않는다) */
+    stopAtShootout?: boolean;
+  }
+
+  /** 장부에 골을 넣는다 — 그 편 온필드 첫 필드 선수가 넣은 것으로 */
+  function injectGoal(state: GameState, side: MatchSide): void {
+    const pending = state.pendingMatch!;
+    // 장부의 시계 그대로 — 되감으면 반려된다
+    const { minute, added } = pending.live.ledger;
+    const scorer = pending.live.ledger[side].onPitch.find((id) => {
+      const p = playersOf(state, pending.live.setup.sides[side].teamId).find((x) => x.id === id);
+      return p !== undefined && groupOf(p) !== "GK";
+    })!;
+    const applied = applyEvents(pending.live.ledger, [
+      {
+        minute,
+        ...(added ? { added } : {}),
+        type: "goal",
+        team: side,
+        actors: [scorer],
+        causes: [],
+      },
+    ]);
+    if (!applied.ok) throw new Error(applied.errors.join(" / "));
+    pending.live.ledger = applied.state;
+  }
+
+  /** 목표한 스코어 차(홈 − 원정)가 될 때까지 뒤진 쪽에 골을 넣는다 */
+  function settle(state: GameState, ending: Ending): void {
+    if (ending === "natural") return;
+    const target = ending === "home" ? 1 : 0;
+    const score = () => state.pendingMatch!.live.ledger.score;
+    while (score().home - score().away !== target) {
+      injectGoal(state, score().home - score().away < target ? "home" : "away");
+    }
+  }
+
+  /** 그 경기를 끝까지 치른다 — 연장 앞 휴식에서 감독이 끼어들 자리를 준다 */
+  function playUserMatch(state: GameState, plan: PlayPlan = {}): void {
     const started = startMatch(state);
     if (!started.ok) throw new Error(started.message);
-    let guard = 80;
+    markEntered(state);
+    let extraSeen = false;
+    let whistled = false;
+    let guard = 2000;
     while (state.phase === "match" && guard-- > 0) {
-      const step = advanceSegment(state);
-      if (!step.ok) throw new Error(step.message);
-      if (step.plan) atStop?.(step.plan.stop);
-      if (step.plan?.stop === "full_time") {
+      const live = state.pendingMatch!.live;
+      if (liveFinished(live)) {
+        if (!whistled) {
+          whistled = true;
+          plan.onFullTime?.();
+        }
+        if (awaitingShootout(state)) {
+          if (plan.stopAtShootout) return;
+          const kicked = advanceShootout(state);
+          if (!kicked.ok) throw new Error(kicked.message);
+          continue;
+        }
         finalizeMatch(state);
         return;
       }
+      if (live.state.interval) {
+        if (live.state.phase === "extra_first" && !extraSeen) {
+          extraSeen = true;
+          plan.onExtra?.();
+        }
+        resumeLiveInterval(state);
+      }
+      // 하프가 닫히기 직전 — 휘슬까지 매초 스코어를 다시 맞춘다 (추가시간의 골이 흔든다)
+      const { phase, seconds } = live.state;
+      const closing =
+        (phase === "second_half" && seconds >= 88 * 60) ||
+        (phase === "extra_second" && seconds >= 118 * 60);
+      if (closing) settle(state, (phase === "second_half" ? plan.at90 : plan.at120) ?? "natural");
+      advanceLiveMatch(state, closing ? 20 : 20 * 30);
     }
     throw new Error("경기가 끝나지 않았습니다");
   }
+
+  /** 지금까지의 경기 중 소모 합 */
+  const wornOf = (state: GameState) =>
+    Object.values(matchFatigueOf(state.pendingMatch!.live)).reduce((a, b) => a + b, 0);
 
   interface Played {
     match: MatchRecord;
@@ -517,7 +596,10 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
     const runs: Played[] = [];
     // 연장 정지점의 뷰가 실은 교체 한도 — 한 번이면 충분하다 (국면이 정하는 값이다)
     let subsLimitAtExtra: { subs: number; windows: number } | null = null;
-    for (let pair = 500; pair < 560; pair++) {
+    /** 연장에서 갈린 경기 · 승부차기로 간 경기 · 연장을 그대로 굴린 경기 */
+    const endings: Ending[] = ["home", "level", "natural"];
+    endings.forEach((at120, i) => {
+      const pair = 500 + i;
       // 앞 시도의 소모를 지우고 시작한다 — 한 세계를 여러 경기가 나눠 쓴다
       for (const p of playersOf(state, "arsenal")) p.state.condition = 100;
       for (const p of playersOf(state, "chelsea")) p.state.condition = 100;
@@ -525,35 +607,28 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
       let fatigueAtExtra = 0;
       let fatigueAtEnd = 0;
       let subInExtra = false;
-      playUserMatch(state, (stop) => {
-        const pending = state.pendingMatch;
-        if (!pending) return;
-        const worn = Object.values(pending.matchFatigue ?? {}).reduce((a, b) => a + b, 0);
-        fatigueAtEnd = worn;
-        if (stop !== "extra_time_start") return;
-        fatigueAtExtra = worn;
-        subsLimitAtExtra ??= buildOfficeViews(state).match?.subs.limit ?? null;
-        // **감독이 연장에서 교체한다** — 이 기능의 전부가 여기에 있다
-        const side = userSide(state);
-        const mine = side === "home" ? pending.ledger.home : pending.ledger.away;
-        const out = mine.onPitch.find((id) => {
-          const p = userPlayers(state).find((x) => x.id === id);
-          return p !== undefined && groupOf(p) !== "GK";
-        });
-        const into = mine.bench[0];
-        if (out && into) subInExtra = substitutePlayer(state, { out, in: into }).ok;
+      playUserMatch(state, {
+        at90: "level",
+        at120,
+        onFullTime: () => {
+          fatigueAtEnd = wornOf(state);
+        },
+        onExtra: () => {
+          const pending = state.pendingMatch!;
+          fatigueAtExtra = wornOf(state);
+          subsLimitAtExtra ??= buildOfficeViews(state).match?.subs.limit ?? null;
+          // **감독이 연장에서 교체한다** — 이 기능의 전부가 여기에 있다
+          const mine = pending.live.ledger[userSide(state)];
+          const out = mine.onPitch.find((id) => {
+            const p = userPlayers(state).find((x) => x.id === id);
+            return p !== undefined && groupOf(p) !== "GK";
+          });
+          const into = mine.bench[0];
+          if (out && into) subInExtra = substitutePlayer(state, { out, in: into }).ok;
+        },
       });
-      if (!match.result?.aet) continue;
-      runs.push({ match, pair, fatigueAtExtra, fatigueAtEnd, subInExtra });
-      // 갈린 경기와 승부차기로 간 경기가 둘 다 나올 때까지 결정적 채널을 넓힌다
-      const hasDecided = runs.some(
-        (run) => run.match.result!.homeGoals !== run.match.result!.awayGoals,
-      );
-      const hasDraw = runs.some(
-        (run) => run.match.result!.homeGoals === run.match.result!.awayGoals,
-      );
-      if (runs.length >= 3 && hasDecided && hasDraw) break;
-    }
+      if (match.result?.aet) runs.push({ match, pair, fatigueAtExtra, fatigueAtEnd, subInExtra });
+    });
     // 이 아래 검증들이 아무것도 증명하지 못하는 상태를 그냥 지나치지 않는다
     expect(runs.length, "연장까지 가는 경기를 찾지 못했습니다").toBeGreaterThanOrEqual(3);
     return (collected = { state, runs, subsLimitAtExtra });
@@ -630,27 +705,14 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
    */
   it("120분 무승부는 승부차기 정지점에서 멈추고, 그라운드에 없던 선수는 차지 못한다", () => {
     const state = extraTimeWorld().state;
-    /** 120분 무승부로 끝나 승부차기 정지점에 선 컵 경기 하나 — 갈린 경기는 닫고 넘어간다 */
+    /** 120분 무승부로 끝나 승부차기 정지점에 선 컵 경기 하나 */
     const stageShootout = (): MatchRecord => {
-      // 120분 무승부는 대여섯 판에 하나라 넉넉히 훑는다 — 첫 무승부에서 멈춘다
-      for (let pair = 600; pair < 760; pair++) {
-        for (const teamId of ["arsenal", "chelsea"]) {
-          for (const p of playersOf(state, teamId)) p.state.condition = 100;
-        }
-        const match = stageUserCupMatch(state, pair);
-        const started = startMatch(state);
-        if (!started.ok) throw new Error(started.message);
-        let guard = 90;
-        while (guard-- > 0) {
-          const step = advanceMatchTo(state, 130);
-          if (!step.ok) throw new Error(step.message);
-          const stop: MatchStop | null = step.stop;
-          if (stop === "shootout_start") return match;
-          if (state.pendingMatch?.ledger.phase === "finished") break;
-        }
-        finalizeMatch(state);
+      for (const teamId of ["arsenal", "chelsea"]) {
+        for (const p of playersOf(state, teamId)) p.state.condition = 100;
       }
-      throw new Error("120분 무승부로 끝나는 감독의 컵 경기를 찾지 못했습니다");
+      const match = stageUserCupMatch(state, 600);
+      playUserMatch(state, { at90: "level", at120: "level", stopAtShootout: true });
+      return match;
     };
 
     const match = stageShootout();
@@ -658,11 +720,11 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
     // 장부는 아직 마감되지 않았다 — 승부차기가 오프스크린으로 밀려나면 안 된다
     expect(awaitingShootout(state)).toBe(true);
     expect(match.result).toBeNull();
-    const score = { ...pending.ledger.score };
+    const score = { ...pending.live.ledger.score };
     expect(score.home).toBe(score.away);
 
     const side = userSide(state);
-    const onPitch = new Set(pending.ledger[side].onPitch);
+    const onPitch = new Set(pending.live.ledger[side].onPitch);
     // **그라운드에 없던 선수는 반려된다** — 조용히 버리면 감독은 제 순서로 찬다고 믿는다
     const off = userPlayers(state).find((p) => !onPitch.has(p.id));
     expect(off, "온필드 밖 선수를 찾지 못했습니다").toBeDefined();
@@ -716,34 +778,24 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
 
   it("리그 경기는 비겨도 90분에 끝난다 — 연장 표식이 붙지 않는다", () => {
     const state = createTestGame(23);
-    let draws = 0;
-    for (let round = 900; round < 916; round++) {
-      for (const teamId of ["arsenal", "chelsea"]) {
-        for (const p of playersOf(state, teamId)) {
-          p.state.condition = 100;
-          p.state.form = 0;
-        }
-      }
-      const match: MatchRecord = {
-        id: `m-league-${state.season}-r${round}`,
-        season: state.season,
-        competitionId: "epl",
-        round,
-        date: state.date,
-        time: "15:00",
-        homeTeamId: state.userTeamId,
-        awayTeamId: "chelsea",
-        result: null,
-      };
-      state.matches.push(match);
-      state.phase = "matchday";
-      playUserMatch(state);
-      expect(match.result!.aet).toBeUndefined();
-      for (const minute of match.result!.goalMinutes ?? []) expect(minute).toBeLessThan(100);
-      if (match.result!.homeGoals === match.result!.awayGoals) draws++;
-    }
-    // 무승부가 한 번도 안 나왔다면 이 테스트는 아무것도 증명하지 못한다
-    expect(draws).toBeGreaterThan(0);
+    const match: MatchRecord = {
+      id: `m-league-${state.season}-r900`,
+      season: state.season,
+      competitionId: "epl",
+      stage: "league",
+      round: 900,
+      date: state.date,
+      time: "15:00",
+      homeTeamId: state.userTeamId,
+      awayTeamId: "chelsea",
+      result: null,
+    };
+    state.matches.push(match);
+    state.phase = "matchday";
+    playUserMatch(state, { at90: "level" });
+    expect(match.result!.homeGoals).toBe(match.result!.awayGoals);
+    expect(match.result!.aet).toBeUndefined();
+    for (const minute of match.result!.goalMinutes ?? []) expect(minute).toBeLessThan(100);
   });
 
   /**
@@ -756,45 +808,30 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
    */
   it("120분이 승부를 못 가르면 정지점이 서고, 감독이 키커를 세워 한 발씩 찬다", () => {
     const { state } = extraTimeWorld();
-    let match: MatchRecord | null = null;
-    // 대진 번호가 난수 채널이라 승부차기까지 가는 경기를 찾을 때까지 넓힌다
-    for (let pair = 900; pair < 980; pair++) {
-      for (const teamId of ["arsenal", "chelsea"]) {
-        for (const p of playersOf(state, teamId)) p.state.condition = 100;
-      }
-      const staged = stageUserCupMatch(state, pair);
-      const started = startMatch(state);
-      if (!started.ok) throw new Error(started.message);
-      let guard = 80;
-      while (state.phase === "match" && state.pendingMatch!.ledger.phase !== "finished") {
-        if (guard-- <= 0) throw new Error("경기가 끝나지 않았습니다");
-        const step = advanceSegment(state);
-        if (!step.ok) throw new Error(step.message);
-      }
-      if (awaitingShootout(state)) {
-        match = staged;
-        break;
-      }
-      finalizeMatch(state); // 연장에서 갈린 경기 — 닫고 다음 대진으로
+    for (const teamId of ["arsenal", "chelsea"]) {
+      for (const p of playersOf(state, teamId)) p.state.condition = 100;
     }
-    expect(match, "승부차기까지 가는 경기를 찾지 못했습니다").not.toBeNull();
+    const match: MatchRecord | null = stageUserCupMatch(state, 900);
+    playUserMatch(state, { at90: "level", at120: "level", stopAtShootout: true });
+    expect(awaitingShootout(state)).toBe(true);
 
     const pending = state.pendingMatch!;
     const side = userSide(state);
-    const scoreAt120 = { ...pending.ledger.score };
-    const goalEvents = pending.ledger.events.filter((e) => e.type === "goal").length;
+    const scoreAt120 = { ...pending.live.ledger.score };
+    const goalEvents = pending.live.ledger.events.filter((e) => e.type === "goal").length;
 
-    // ① 장부는 끝났지만 진행 턴은 승부차기 앞에서 멈춘다
-    expect(advanceMatchTo(state, 130).stop).toBe("shootout_start");
+    // ① 장부는 끝났지만 경기는 승부차기 앞에서 멈춘다 — 마감되지 않았다
+    expect(pending.live.ledger.phase).toBe("finished");
+    expect(match!.result).toBeNull();
 
     // ② 그라운드에 없던 선수는 찰 수 없다 — 조용히 버리지 않고 반려한다
-    const bench = pending.ledger[side].bench[0]!;
+    const bench = pending.live.ledger[side].bench[0]!;
     const benched = setShootoutOrder(state, { playerIds: [bench] });
     expect(benched.ok).toBe(false);
     expect(pending.shootout!.order?.[side]).toBeUndefined();
 
     // ③ 감독이 세운 사람이 우리 팀의 첫 키커가 된다
-    const first = pending.ledger[side].onPitch.find(
+    const first = pending.live.ledger[side].onPitch.find(
       (id) => groupOf(userPlayers(state).find((p) => p.id === id)!) !== "GK",
     )!;
     expect(setShootoutOrder(state, { playerIds: [first] }).ok).toBe(true);
@@ -813,7 +850,7 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
      * 이 시점 `match.result`는 아직 없다 — 살아 있는 장부를 읽지 않으면 1군 상위
      * 열한 명으로 밀려나 벤치 선수와 퇴장자가 페널티를 찬다.
      */
-    const onPitch = new Set(pending.ledger[side].onPitch);
+    const onPitch = new Set(pending.live.ledger[side].onPitch);
     for (const kick of rolled.filter((k) => k.team === side)) {
       expect(onPitch.has(kick.taker), `키커 ${kick.taker}`).toBe(true);
     }
@@ -837,7 +874,7 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
  * **연장과 승부차기의 입력은 90분과 같은 원본에서 나온다** (match.md §7).
  *
  * 여기서 재는 것은 결과가 아니라 **입력**이다: 중립 경기장이 시뮬까지 가는가,
- * 연장 패킷이 전술판에서 서는가, 그 30분을 뛰는 사람이 종료 시점 온필드인가,
+ * 연장 입력이 전술판에서 서는가, 그 30분을 뛰는 사람이 종료 시점 온필드인가,
  * 승부차기 성공률이 문서가 적어 둔 대역 안에 있는가. 전부 화면에 안 보이는
  * 자리라 갈려도 아무도 모른다 — 상위 시드가 결승에서 공짜 우위를 얻을 뿐이다.
  */
@@ -869,10 +906,10 @@ describe("연장·승부차기의 입력 (match.md §7)", () => {
     expect(conditionOf(cameOn)).toBeLessThan(100);
   });
 
-  it("연장 패킷은 전술판·전술·적응도에서 선다 — 이름만 넘긴 기본값이 아니다", () => {
+  it("연장 입력은 전술판·전술·적응도에서 선다 — 이름만 넘긴 기본값이 아니다", () => {
     const state = createTestGame(11);
     const board = tacticsOf(state, "arsenal");
-    // 기본값에서 확실히 떼어 놓는다 — 이름만 넘기면 패킷이 여기로 돌아온다
+    // 기본값에서 확실히 떼어 놓는다 — 이름만 넘기면 입력이 여기로 돌아온다
     board.spec = { ...board.spec, mentality: 5, tempo: 5, pressing: 5, defensiveLine: 5 };
     for (const a of assignmentsOf(state, "arsenal")) a.familiarity = 95;
 
@@ -886,7 +923,7 @@ describe("연장·승부차기의 입력 (match.md §7)", () => {
         for (const p of playersOf(state, teamId)) p.state.condition = 100;
       }
       const channel = `facup:r16:${pair}`;
-      // 옛 입력 — 팀 id와 선수 목록만. 패킷은 자연 포지션·기본 전술·적응도 60·감독 65로 선다
+      // 옛 입력 — 팀 id와 선수 목록만. 입력은 자연 포지션·기본 전술·적응도 60·감독 65로 선다
       const bare = simulateExtraTime(
         { teamId: decider.homeTeamId, starters: finishingXi(state, decider, "home") },
         { teamId: decider.awayTeamId, starters: finishingXi(state, decider, "away") },
@@ -917,7 +954,7 @@ describe("연장·승부차기의 입력 (match.md §7)", () => {
       penalty: chosen.id,
     };
 
-    // 패킷이 부르는 바로 그 함수(`setPieceTakersOf`)가 지정을 세운다
+    // 간이 시뮬이 부르는 바로 그 함수(`setPieceTakersOf`)가 지정을 세운다
     const squad = simSquadFor(state, "arsenal", eleven);
     expect(setPieceTakersOf(squad.slots!, squad.setPieceTakers)).toEqual({
       corner: chosen.id,

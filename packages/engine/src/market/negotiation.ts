@@ -295,7 +295,7 @@ export const KIND_KO: Record<Negotiation["kind"], string> = {
  * 하나가 고쳐지지 않는 날이 온다.
  */
 export function negotiationKindKo(negotiation: Negotiation): string {
-  return negotiation.precontract === true ? "사전 계약" : KIND_KO[negotiation.kind];
+  return negotiation.precontract ? "사전 계약" : KIND_KO[negotiation.kind];
 }
 
 /**
@@ -320,7 +320,7 @@ function openNegotiationOfKind(
       (n) =>
         n.gamePlayerId === playerId &&
         n.kind === kind &&
-        (n.precontract ?? false) === precontract &&
+        n.precontract === precontract &&
         n.status === "open",
     ) ?? null
   );
@@ -343,7 +343,7 @@ function conflictingNegotiation(
     state.negotiations.find(
       (n) =>
         n.gamePlayerId === playerId &&
-        (n.kind !== kind || (n.precontract ?? false) !== precontract) &&
+        (n.kind !== kind || n.precontract !== precontract) &&
         (n.status === "open" || n.status === "agreed"),
     ) ?? null
   );
@@ -518,7 +518,10 @@ export function sendOffer(state: GameState, input: DealTerms): MarketCommandResu
         id: `neg-${precontract ? "pre" : kindSlug(kind)}-${terms.playerId}-${state.date}`,
         gamePlayerId: terms.playerId,
         kind,
-        ...(precontract ? { precontract: true } : {}),
+        precontract,
+        buyout: false,
+        pitched: [],
+        terms: [],
         // 상대는 계약을 가진 구단이다 — 빌려 온 선수의 원소속이 갈라지는 자리다 (§2)
         counterpartTeamId: contractOwnerOf(state, player),
         windowId: window?.id ?? null,
@@ -546,9 +549,9 @@ export function sendOffer(state: GameState, input: DealTerms): MarketCommandResu
       state,
       terms.playerId,
       terms.pitch,
-      negotiation.pitched ?? [],
+      negotiation.pitched,
     ).verified;
-    negotiation.pitched = [...new Set([...(negotiation.pitched ?? []), ...accepted])];
+    negotiation.pitched = [...new Set([...negotiation.pitched, ...accepted])];
   }
   // 오퍼에 실린 조건은 조건서에 오른다 — 서지 못한 조건은 결과 줄에 남는다 (§12-3)
   const termNotes = proposedTerms ? tableTerms(state, negotiation, proposedTerms).notes : [];
@@ -644,7 +647,7 @@ function wakeTalks(state: GameState, negotiation: Negotiation): void {
   const window = windowOpenOn(state.windows, state.date);
   const until = addDays(state.date, NEGOTIATION_DAYS);
   negotiation.expiresOn =
-    negotiation.kind === "renew" || negotiation.precontract === true
+    negotiation.kind === "renew" || negotiation.precontract
       ? until
       : minDate(until, window?.closesOn ?? until);
 }
@@ -710,7 +713,7 @@ export function counterpartOf(negotiation: Negotiation, player: GamePlayer): str
    * **사전 계약도 상대가 선수 본인이다** (transfer.md §1-4) — 이적료가 0이라 파는
    * 구단은 판정할 자리가 없다. 관문이 하나로 줄어든 것과 같은 사실이다.
    */
-  if (negotiation.precontract === true) return player.name;
+  if (negotiation.precontract) return player.name;
   const selling = negotiation.kind === "sell" || negotiation.kind === "loan_out";
   return teamName(selling ? (negotiation.counterpartTeamId ?? player.teamId) : player.teamId);
 }
@@ -1586,6 +1589,10 @@ export function offerPlayerOut(
         id: `neg-${kindSlug(kind)}-${player.id}-${state.date}`,
         gamePlayerId: player.id,
         kind,
+        precontract: false,
+        buyout: false,
+        pitched: [],
+        terms: [],
         counterpartTeamId: buyer.id,
         windowId: window?.id ?? null,
         openedOn: state.date,
@@ -1750,7 +1757,7 @@ export function generateIncomingOffers(state: GameState, digest: TickSink): void
    * 사고다: 그 앞에 아무 소리도 없었으므로 준비할 자리도, 회견에서 물을 것도,
    * 재계약 테이블에서 쓸 카드도 없다.
    */
-  const bidding = (state.interests ?? [])
+  const bidding = state.interests
     .map((interest) => ({ interest, player: playerById(state, interest.gamePlayerId) }))
     .filter(
       (x): x is { interest: Interest; player: GamePlayer } =>
@@ -1829,6 +1836,10 @@ function openIncomingSellOffer(
     id: `neg-in-${player.id}-${state.date}`,
     gamePlayerId: player.id,
     kind: "sell",
+    precontract: false,
+    buyout: false,
+    pitched: [],
+    terms: [],
     counterpartTeamId: buyer,
     windowId: window.id,
     openedOn: state.date,
@@ -2127,7 +2138,7 @@ export function answerIncomingOffer(
    * **바이아웃 조항이 발동한 오퍼에는 감독이 답할 자리가 없다** (transfer.md §12-3). 조항은
    * 그가 서명한 계약서의 숫자다 — 갈지 말지는 선수가 정했고, 남은 것은 메디컬이다.
    */
-  if (negotiation.buyout === true) {
+  if (negotiation.buyout) {
     return {
       ok: false,
       message: `${player.name} 건은 바이아웃 조항 금액의 오퍼입니다 — 구단이 막을 수 없습니다`,
@@ -2329,6 +2340,10 @@ export function openRenewal(
         id: `neg-renew-${player.id}-${state.date}`,
         gamePlayerId: player.id,
         kind: "renew",
+        precontract: false,
+        buyout: false,
+        pitched: [],
+        terms: [],
         counterpartTeamId: null, // 상대는 선수 본인이다
         windowId: null, // 이적창과 무관
         openedOn: state.date,
@@ -2432,6 +2447,10 @@ export function openRelease(
         id: `neg-release-${player.id}-${state.date}`,
         gamePlayerId: player.id,
         kind: "release",
+        precontract: false,
+        buyout: false,
+        pitched: [],
+        terms: [],
         counterpartTeamId: null, // 상대는 선수 본인이다
         windowId: null, // 이적창과 무관 — 옮겨 갈 구단이 없다
         openedOn: state.date,
@@ -2708,7 +2727,7 @@ function agreedSquadStatus(
   player: GamePlayer,
 ): SquadStatus {
   if (agreed.squadStatus) return agreed.squadStatus;
-  if (negotiation.pitched?.includes("starting_role")) return "starter";
+  if (negotiation.pitched.includes("starting_role")) return "starter";
   return derivedSquadStatus(state, player, state.userTeamId);
 }
 
@@ -3284,7 +3303,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): CommandResult {
    * 위의 재검사 둘(임대 잠금·이미 옮겨 갔는가)은 예약도 함께 지난다: 며칠 사이에
    * 그가 남의 계약에 묶였으면 예약할 것이 없다.
    */
-  if (negotiation.precontract === true) {
+  if (negotiation.precontract) {
     return executePrecontract(state, negotiation, agreed, player);
   }
   const window = windowOpenOn(state.windows, state.date);
@@ -3401,7 +3420,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): CommandResult {
        * 회분도 몇 년 뒤의 마지막 회분도 같은 함수를 지나야 일정이 전부 지급됐을 때
        * 잔액 변화가 일시금과 같다 (transfer.md §11 · finance.md §6.4).
        */
-      (state.paymentSchedules ??= []).push({
+      state.paymentSchedules.push({
         id: `pay-${transferId}`,
         transferId,
         gamePlayerId: player.id,
@@ -3465,7 +3484,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): CommandResult {
   const numberAfter = numberLineageOf(state, state.userTeamId, squadNumber).past[0];
   if (!loanee) {
     player.isCaptain = false;
-    player.isViceCaptain = undefined;
+    player.isViceCaptain = false;
   }
   /**
    * 등록 명단에 자리가 없으면 **2군으로 들어온다.** 실제로도 명단이 찬 채로
@@ -3761,7 +3780,7 @@ function executeSale(
     const ref = { type: "player" as const, id: player.id };
     if (paymentYears !== undefined) {
       // 받는 쪽이 우리다 — 매각 대금이 여러 시즌의 손익·예산에 나뉘어 닿는다
-      (state.paymentSchedules ??= []).push({
+      state.paymentSchedules.push({
         id: `pay-${transferId}`,
         transferId,
         gamePlayerId: player.id,
@@ -3857,7 +3876,7 @@ export function withdrawOffer(state: GameState, negotiationId: string): MarketCo
   const player = playerById(state, negotiation.gamePlayerId);
   const who = player?.name ?? negotiation.gamePlayerId;
   // 조항이 발동한 매각은 감독이 접을 수 없다 — 계약서가 그를 내보냈다 (transfer.md §12-3)
-  if (negotiation.buyout === true) {
+  if (negotiation.buyout) {
     return {
       ok: false,
       message: `${who} 건은 바이아웃 조항이 발동한 매각입니다 — 철회할 수 없습니다`,
@@ -3878,7 +3897,7 @@ export function withdrawOffer(state: GameState, negotiationId: string): MarketCo
       : teamName(negotiation.counterpartTeamId ?? player?.teamId ?? ""),
     ...directionField(negotiation.kind),
     // 배지가 갈래를 말한다 — 예약을 접은 것과 영입을 접은 것은 다른 일이다 (§1-4)
-    ...(negotiation.precontract === true ? { precontract: true } : {}),
+    ...(negotiation.precontract ? { precontract: true } : {}),
     ...(note ? { note } : {}),
   });
   /**
@@ -4273,9 +4292,9 @@ export function describeNegotiation(state: GameState, negotiationId: string): st
   if (medical) lines.push(`메디컬: ${medical}`);
   lines.push(...describeTermSheet(state, negotiation));
   lines.push(...describePersonal(negotiation, state.date));
-  if ((negotiation.pitched?.length ?? 0) > 0) {
+  if (negotiation.pitched.length > 0) {
     lines.push(
-      `사실로 확인된 논거: ${negotiation.pitched!.map((k) => PITCH_CLAIM_KO[k]).join(" · ")} ` +
+      `사실로 확인된 논거: ${negotiation.pitched.map((k) => PITCH_CLAIM_KO[k]).join(" · ")} ` +
         `(판정 여유 +${latitudeOf(negotiation.pitched)}%p — 확률이 낮아도 당신이 판단할 몫이 있다)`,
     );
   }
@@ -4676,6 +4695,10 @@ export function openTalks(
     id: `neg-${kindSlug(kind)}-${player.id}-${state.date}`,
     gamePlayerId: player.id,
     kind,
+    precontract: false,
+    buyout: false,
+    pitched: [],
+    terms: [],
     counterpartTeamId: kind === "renew" ? null : contractOwnerOf(state, player),
     windowId: kind === "renew" ? null : (windowOpenOn(state.windows, state.date)?.id ?? null),
     openedOn: state.date,
@@ -4810,7 +4833,7 @@ export function proposePersonal(
     kind: negotiation.kind,
     counterpartTeamId: negotiation.counterpartTeamId ?? player.teamId,
     ...(squadStatus === undefined ? {} : { squadStatus }),
-    pitched: negotiation.pitched ?? [],
+    pitched: negotiation.pitched,
     terms: offeredTermsOf(negotiation),
     refusedTerms: refusedTermsOf(negotiation),
   };

@@ -15,6 +15,7 @@ import {
   numberWishOf,
   PLAYER_ARCHETYPE_TRAITS,
   type GamePlayer,
+  freshPlayerState,
 } from "@story-fm/domain";
 import {
   advanceTime,
@@ -492,8 +493,11 @@ function player(id: string, teamId: string, position: string, squadNumber?: numb
     birthdate: "2000-01-01",
     positions: [{ position, proficiency: 90, isNatural: true }],
     attributes: { ...axes, overall: 70, potential: 75 } as GamePlayer["attributes"],
-    state: { form: 0, condition: 75 },
+    state: freshPlayerState({ form: 0, condition: 75 }),
     isCaptain: false,
+    isViceCaptain: false,
+    squadLevel: "first",
+    growthCarry: {},
     squadNumber,
   };
 }

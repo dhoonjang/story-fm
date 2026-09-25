@@ -53,7 +53,7 @@ function intakeOfSummer(state: GameState): { overall: number; potential: number;
   transitionSeason(state);
   const born = [
     ...state.players.filter((p) => !beforeIds.has(p.id)),
-    ...(state.youthCandidates ?? []).map((c) => c.player),
+    ...state.youthCandidates.map((c) => c.player),
     ...youthFreeAgents(state).filter((p) => !beforeFree.has(p.id)),
   ];
   return born.map((p) => ({

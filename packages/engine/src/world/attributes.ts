@@ -84,7 +84,6 @@ export function derivedGoalkeeping(nameEn: string, physical: number): number {
  * 전력 가중치가 바닥(0.05)이라 종합에는 닿지 않는다. 기울임 식(`splitPositioning`)
  * 밖에 있는 이유는 골키퍼의 위치선정이 태클·결정력이 아니라 **골문 커맨드**라,
  * 그 값을 기울이면 태클 낮은 골키퍼의 침투가 천장까지 밀려 올라가기 때문이다.
- * 옛 세이브를 옮기는 자리도 같은 이 함수를 부른다 (`core/migrations.ts`).
  */
 export function keeperOffTheBall(goalkeeping: number): number {
   return goalkeeping * 0.28 + 9.5;

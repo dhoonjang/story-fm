@@ -11,41 +11,13 @@ import {
 import { createHash, randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { advanceDomesticCups, migrateDomesticPrizeKeys } from "../competition/domestic-cup";
-import { migrateEuroPrizeKeys } from "../competition/euro-prize";
 import { catalogPath, cupCatalogPath, dataDir, leagueCatalogPath, teamCatalogPath } from "./paths";
-import {
-  fillEmptyTables,
-  migrateConditions,
-  migrateFormScale,
-  migrateAwardCompetition,
-  migrateGrowthSources,
-  migrateLeagueHistory,
-  migrateManagerAxes,
-  migrateMatchStats,
-  migrateMirrorProficiency,
-  migrateNationalities,
-  migratePassStyles,
-  migrateRelationTiers,
-  migrateSquadLevels,
-  splitPositioningAxis,
-} from "./migrations";
 import { SaveSchema } from "./save-schema";
 import { saveLockPath } from "./save-lock";
 import type { GamePhase, GameState } from "./state";
 import type { ClubColours } from "@story-fm/domain";
-import { ensureManagerPool, ensurePersonas } from "../world/persona";
-import { ensureStaffPool } from "../market/staff-market";
-import { ensureSquadNumbers } from "../squad/numbers";
-import { deriveNationality, playerCatalog } from "../world/catalog";
 import { teamCatalogById } from "../data/team-catalog";
-import {
-  addMissingClubs,
-  ensureSeededManagers,
-  recomputeOverall,
-  teamNameIn,
-  teamShortNameIn,
-} from "./state";
+import { recomputeOverall, teamNameIn, teamShortNameIn } from "./state";
 
 export { dataDir };
 
@@ -58,7 +30,8 @@ export { dataDir };
  * 2. 교체 전 직전 세이브를 `.bak`으로 밀어낸다 — 본 파일이 깨져도 복구 가능.
  * 3. 읽기는 방어적 — 파싱 실패 시 `.bak` 폴백, 그래도 안 되면 null(목록에는
  *    실패 사유와 함께 남는다).
- * 4. 스키마 진화 대비 — 로드 시 누락 필드를 마이그레이션으로 채운다.
+ * 4. 마이그레이션은 없다 — 로드가 통과해야 하는 문은 스키마 하나고, 모양이 바뀌면
+ *    `SAVE_VERSION`이 오르고 그 앞의 세이브는 열리지 않는다 (game-state.md §6).
  * 5. 데이터 디렉터리(.data/)는 gitignore·빌드 산출물 밖 — 재빌드/브랜치 전환
  *    (git clean 포함)에도 세이브가 남는다.
  * 6. 큰 테이블은 조각 파일로 빠지고 **바뀐 조각만** 쓴다 (아래 SHARDED_TABLES).
@@ -297,7 +270,7 @@ function pruneShards(id: string, live: ShardMap): void {
 }
 
 /**
- * 조각을 본체에 붙인다. `shards`가 없으면 옛 단일 파일 세이브라 그대로 쓴다.
+ * 조각을 본체에 붙인다. `shards`가 없으면 테이블이 본체에 그대로 든 것이라 손대지 않는다.
  *
  * 가리키는 조각이 하나라도 **두 벌 다** 없거나 깨졌으면 **반쪽을 읽지 않고** 손상으로
  * 답한다 — 선수 없는 세계를 넘기느니 `.bak`으로 폴백하는 것이 낫다.
@@ -324,23 +297,23 @@ function attachShards(raw: unknown, id: string): unknown {
 /**
  * 세이브 스키마 버전 (→ [docs/data/game-state.md](../../../../docs/data/game-state.md) §6).
  *
- * 버전이 다른 세이브는 로드를 거부한다 — 부분 마이그레이션이 조용히 깨진 상태를
- * 만드는 것보다 낫다. 다만 감추지는 않는다: 목록에는 실패 사유와 함께 선다.
+ * 버전이 다른 세이브는 로드를 거부한다 — 마이그레이션은 없다. 다만 감추지는 않는다:
+ * 목록에는 실패 사유와 함께 선다.
  */
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 
 /**
  * 세이브를 열지 못한 이유 — 문장은 화면이 쓴다, 코어는 사실만 싣는다.
  *
- * 넷은 **로드의 어느 걸음에서 멈췄는가**이고, 그래서 고칠 자리가 저마다 다르다
+ * 셋은 **로드의 어느 걸음에서 멈췼는가**이고, 그래서 고칠 자리가 저마다 다르다
  * (→ [docs/data/game-state.md](../../../../docs/data/game-state.md) §6):
- * 앞의 둘은 파일이 문제고, 뒤의 둘은 **코드가 그 파일을 다루지 못하는 것**이다.
+ * `version`은 고칠 자리가 없고, `corrupt`는 파일이, `schema`는 **코드가** 문제다.
  */
-const UNREADABLE_REASONS = ["version", "corrupt", "migration", "schema"] as const;
+const UNREADABLE_REASONS = ["version", "corrupt", "schema"] as const;
 
 export type UnreadableReason = (typeof UNREADABLE_REASONS)[number];
 
-/** 사이드카가 적어 둔 사유가 지금 코어가 아는 넷 중 하나인가 */
+/** 사이드카가 적어 둔 사유가 지금 코어가 아는 셋 중 하나인가 */
 function isUnreadableReason(value: unknown): value is UnreadableReason {
   return typeof value === "string" && (UNREADABLE_REASONS as readonly string[]).includes(value);
 }
@@ -356,7 +329,7 @@ interface LoadFailure {
 
 type LoadResult = { ok: true; state: GameState } | LoadFailure;
 
-/** v6 필수 테이블 — 하나라도 없으면 세이브가 깨진 것이다 */
+/** 필수 테이블 — 하나라도 없으면 세이브가 깨진 것이다 */
 const REQUIRED_TABLES = [
   "players",
   "teams",
@@ -371,129 +344,13 @@ const REQUIRED_TABLES = [
 ] as const;
 
 /**
- * 옛 세이브를 지금 모양으로 — **로드의 두 번째 걸음.**
- *
- * 앞쪽은 형태를 옮기는 순수 함수들(`core/migrations.ts`)이고, 뒤쪽은 세계를
- * 따라잡게 하는 엔진 함수들이다. 순서가 뜻을 갖는 자리가 있다: 분류가 끝난 뒤라야
- * 등번호를 채울 수 있고, 빠진 클럽을 채운 뒤라야 컵이 대진을 짤 수 있다.
- */
-function migrate(save: Record<string, unknown>, state: GameState): void {
-  fillEmptyTables(save);
-  migrateManagerAxes(save);
-  // 옛 리그 순위표 → 시즌 결산 스냅샷 (game-state.md §3.3)
-  migrateLeagueHistory(save);
-  // 위치선정 한 축 → 위치선정·침투. `offTheBall`의 부재가 마커라 한 번만 돈다
-  // (player.md §13.5) — 아래 종합 재계산이 갈린 두 축을 읽는다
-  splitPositioningAxis(state);
-  migrateSquadLevels(state);
-  migratePassStyles(state);
-  migrateFormScale(state);
-  migrateConditions(state);
-  migrateMatchStats(state);
-  // 폐기된 성장 출처(`reserve`)를 옮긴다 — 스키마에서 그 갈래를 뺐으므로 parse보다
-  // 앞이어야 한다. 남아 있으면 멀쩡한 세이브가 `schema`로 막힌다 (migrations.ts).
-  migrateGrowthSources(state);
-  // 시상의 `leagueId` → `competitionId` — 스키마가 새 칸을 요구하므로 parse보다 앞이다
-  migrateAwardCompetition(save);
-  // 관계 점수 → 등급. 스키마에서 `score`를 빼고 `tier`를 요구하므로 이것도 parse보다 앞이다
-  migrateRelationTiers(state);
-  // 좌우 미러 자리에 얹혀 있던 주발 보정을 벗긴다 — 저장은 원값, 주발은 조회 때
-  // (player.md §8). 마커가 없는 세이브에서만 한 번: 다시 돌면 경기·훈련이 그
-  // 자리에 쌓은 적응도를 같이 민다.
-  migrateMirrorProficiency(state);
-  // 국적 — 카탈로그가 아는 선수는 시드가 조사한 값, 나머지는 그 클럽 협회 (migrations.ts)
-  const catalogById = new Map(playerCatalog().map((e) => [e.id, e]));
-  migrateNationalities(state, (p) => {
-    const entry = p.catalogId === null ? undefined : catalogById.get(p.catalogId);
-    if (entry?.nationality !== undefined) return entry;
-    return { nationality: deriveNationality(p.teamId, undefined) };
-  });
-  /**
-   * **종합은 저장된 값이 아니라 16축의 파생 캐시다** — 로드할 때 다시 계산한다.
-   *
-   * 세이브에 든 `overall`은 저장된 그 순간의 공식으로 찍힌 값이라, 공식이
-   * 움직이면 옛 눈금을 그대로 들고 들어온다 (player.md §4). 그러면 한 세이브
-   * 안에서 옛 선수와 새 선수가 서로 다른 눈금으로 같은 표에 선다.
-   *
-   * 축에서 파생하는 값이므로 멱등이고, 없던 필드를 채우는 것도 아니라 세이브
-   * 버전을 올리지 않는다. 이후 공식이 또 움직여도 여기가 따라온다.
-   */
-  for (const player of state.players) recomputeOverall(player);
-  // 2부 리그 도입 — 세이브에 없는 카탈로그 클럽을 채워 넣는다. 이걸 하지 않으면
-  // 국내 컵이 존재하지 않는 팀으로 대진을 짜거나 아예 돌지 않는다 (state.ts).
-  // 진행 중인 게임에 영향은 없다 — 이 클럽들은 리그전을 돌지 않는다.
-  addMissingClubs(state);
-  restoreSquadNumbers(state);
-  // 대항전 상금 멱등 키가 표시 라벨에서 안정 키로 바뀌었다. 리그 페이즈 정산은
-  // 리그 페이즈가 끝난 뒤 **매일** 다시 불리므로, 옛 키를 옮기지 않으면 진행 중인
-  // 세이브가 이미 받은 상금을 새 키로 한 번 더 받는다.
-  migrateEuroPrizeKeys(state);
-  // 국내 컵 상금도 같은 이유로 옮긴다 — 바로 아래 `advanceDomesticCups`가 라운드
-  // 진출 상금을 다시 정산하므로, 옛 라벨 키를 남겨 두면 그 자리에서 두 번 나간다.
-  migrateDomesticPrizeKeys(state);
-  // 국내 컵 따라잡기 — 컵 편성은 tick에서 도는데, 컵이 없던 세이브를 **열기만**
-  // 해서는 tick이 돌지 않아 달력이 계속 비어 보인다. 새 게임이 생성 시점에
-  // 부르는 것과 같은 함수를 로드에서도 한 번 부른다 (결정적·멱등이라 안전하다).
-  advanceDomesticCups(state, []);
-  // 페르소나 도입 — 수석코치가 없던 세이브를 채운다. 생성이 시드로 결정적이라
-  // 그 세이브의 코치는 늘 같은 사람이고, 그래서 버전을 올리지 않아도 된다.
-  ensurePersonas(state);
-  /**
-   * 감독 풀 도입 — 사람됨 채널이 `(시드, 팀, 이름)`이던 시절의 벤치에 자리 표식을
-   * 심는다 (people.md §2). **`ensureSeededManagers` 앞이어야 한다**: 그 보정이 새로
-   * 채우는 빈 벤치는 사람됨이 없던 자리라 표식을 받으면 안 된다.
-   */
-  ensureManagerPool(state);
-  /**
-   * 스태프 풀 도입 (people.md §2-2) — **`ensurePersonas` 뒤여야 한다**: 풀의 이름은
-   * 이미 선 사람들을 피해서 뽑는다(`occupiedPersonNames`). 앞에서 돌면 방금 채운
-   * 코치와 같은 이름이 풀에 앉는다.
-   */
-  ensureStaffPool(state);
-  // 세계 인물 명부 도입 — 이름 없이 서 있던 AI 구단 벤치에 명부의 감독을 채운다.
-  // 명부가 결정적이라 채워도 그 세이브의 사람은 같다 (people.md §2-1).
-  ensureSeededManagers(state);
-}
-
-/**
- * 등번호 도입 전 세이브는 번호가 전부 비어 있다. 그 상태에서 포지션 관례부터
- * 적용하면 브루누 페르난데스처럼 카탈로그에 공식 8번이 있어도 임의 번호를 받는다.
- * 현재 소속이 시드 소속과 같은 선수는 실측값을 먼저 복원하고, 이적한 선수와
- * 미확인·생성 선수만 결정적 배정(`ensureSquadNumbers`)에 맡긴다.
- *
- * **번호가 있는 선수는 건드리지 않는다.** 세이브가 든 번호를 매번 지우고 다시
- * 배정하면 이적하며 받은 번호가 세이브를 열 때마다 뒤집히고, 배정 대상이 명단
- * 전체가 되어 로드마다 그 비용을 다시 문다.
- */
-function restoreSquadNumbers(state: GameState): void {
-  const unnumbered = state.players.filter(
-    (player) => player.squadNumber === undefined && player.teamId !== "freeagents",
-  );
-  if (unnumbered.length > 0) {
-    const catalogNumber = new Map(
-      playerCatalog().map((player) => [
-        player.id,
-        { teamId: player.teamId, squadNumber: player.squadNumber },
-      ]),
-    );
-    for (const player of unnumbered) {
-      const seed = player.catalogId ? catalogNumber.get(player.catalogId) : undefined;
-      if (seed?.teamId === player.teamId) player.squadNumber = seed.squadNumber;
-    }
-  }
-  // 공식 번호를 먼저 보존하고, 남은 빈칸과 혹시 생긴 중복만 채운다.
-  ensureSquadNumbers(state.players);
-}
-
-/**
- * 로드 — **세 걸음이고, 걸음마다 실패의 뜻이 다르다**
+ * 로드 — **두 걸음이고, 걸음마다 실패의 뜻이 다르다**
  * (→ [docs/data/game-state.md](../../../../docs/data/game-state.md) §6).
  *
- * 1. 형태 — 버전과 필수 테이블. 걸리면 **파일**이 문제다.
- * 2. 마이그레이션 — 옛 세이브를 지금 모양으로. 넘어지면 **코드**가 문제다.
- * 3. 스키마 parse — 도메인 스키마가 곧 세이브 계약이다.
+ * 1. 형태 — 버전과 필수 테이블. 걸리면 **파일**이 문제다(버전은 고칠 자리가 없다).
+ * 2. 스키마 parse — 도메인 스키마가 곧 세이브 계약이다. 걸리면 **코드**가 문제다.
  *
- * 파일을 못 읽는 것과 코어가 그 파일을 다루다 넘어지는 것을 한 사유로 뭉치면
+ * 파일을 못 읽는 것과 코어의 스키마가 그 파일을 막는 것을 한 사유로 뭉치면
  * 멀쩡한 세이브가 "손상"으로 서고, 고칠 것이 파일인지 코드인지 아무도 모른다.
  */
 function validate(raw: unknown): LoadResult {
@@ -512,11 +369,6 @@ function validate(raw: unknown): LoadResult {
     }
   }
   const state = raw as GameState;
-  try {
-    migrate(save, state);
-  } catch {
-    return { ok: false, reason: "migration", saveVersion, createdAt };
-  }
   /**
    * 검사를 통과한 결과를 **그대로 상태로 쓴다** — `.default()`가 붙은 축은 여기서
    * 채워지고, 스키마에 없는 찌꺼기 키는 여기서 떨어진다. 스키마가 없는 축은
@@ -527,6 +379,15 @@ function validate(raw: unknown): LoadResult {
     return { ok: false, reason: "schema", saveVersion, createdAt };
   }
   Object.assign(state, parsed.data);
+  /**
+   * **종합은 저장된 값이 아니라 16축의 파생 캐시다** — 로드할 때 다시 계산한다.
+   *
+   * 세이브에 든 `overall`은 저장된 그 순간의 공식으로 찍힌 값이라, 공식이
+   * 움직이면 옛 눈금을 그대로 들고 들어온다 (player.md §4). 그러면 한 세이브
+   * 안에서 옛 선수와 새 선수가 서로 다른 눈금으로 같은 표에 선다. 축에서
+   * 파생하는 값이므로 마이그레이션이 아니라 캐시 재계산이다 (game-state.md §6).
+   */
+  for (const player of state.players) recomputeOverall(player);
   return { ok: true, state };
 }
 
@@ -637,7 +498,7 @@ export interface GameSummary {
 export interface UnreadableGame {
   readable: false;
   id: string;
-  /** 로드가 멈춘 걸음 — 넷 다 로드를 거부하되 고칠 자리가 다르다 */
+  /** 로드가 멈춘 걸음 — 셋 다 로드를 거부하되 고칠 자리가 다르다 */
   reason: UnreadableReason;
   /** 그 파일이 스스로 말하는 버전. 읽어낼 수 없으면 null */
   saveVersion: number | null;
@@ -683,11 +544,11 @@ function fingerprint(file: string): string | null {
 /**
  * 세이브를 여는 **코드**의 지문 — 실패 캐시가 지금 코드의 판정인지 가리는 값.
  *
- * 실패 넷은 파일이 아니라 코드가 내린 판정이다(`version`은 `SAVE_VERSION`,
- * `corrupt`는 `REQUIRED_TABLES`, `migration`·`schema`는 마이그레이션과 스키마).
- * 파일 지문은 파일이 바뀐 것만 잡으므로, 마이그레이션 버그를 고쳐도 세이브는
- * 그대로여서 실패 캐시가 영영 살아남는다 — 고친 코드가 그 세이브를 다시는 보지
- * 못한다. 그래서 판정을 내린 모듈 셋의 지문을 캐시에 함께 적는다.
+ * 실패 셋은 파일이 아니라 코드가 내린 판정이다(`version`은 `SAVE_VERSION`,
+ * `corrupt`는 `REQUIRED_TABLES`, `schema`는 스키마). 파일 지문은 파일이 바뀐 것만
+ * 잡으므로, 스키마 버그를 고쳐도 세이브는 그대로여서 실패 캐시가 영영 살아남는다 —
+ * 고친 코드가 그 세이브를 다시는 보지 못한다. 그래서 판정을 내린 모듈 둘의 지문을
+ * 캐시에 함께 적는다.
  *
  * 번들 뒤에는 그 자리에 청크 하나만 서므로 값이 빌드마다 달라진다 — 어느 쪽이든
  * 코드가 바뀌면 달라진다는 성질은 같다. 제 자리를 못 찾으면 `SAVE_VERSION`만
@@ -704,7 +565,7 @@ function loaderStamp(): string {
   try {
     const self = fileURLToPath(import.meta.url);
     const dir = path.dirname(self);
-    for (const file of [self, path.join(dir, "migrations.ts"), path.join(dir, "save-schema.ts")]) {
+    for (const file of [self, path.join(dir, "save-schema.ts")]) {
       const stamp = fingerprint(file);
       if (stamp !== null) parts.push(stamp);
     }
@@ -731,10 +592,10 @@ function fileTime(id: string): string {
 /**
  * 사이드카 — 형태가 어긋나거나 세이브가 바뀌었으면 없는 셈 친다.
  *
- * 성공과 실패를 모두 읽고, **실패는 사유 넷을 가리지 않는다** — 쓰는 사유와 읽는
+ * 성공과 실패를 모두 읽고, **실패는 사유 셋을 가리지 않는다** — 쓰는 사유와 읽는
  * 사유가 갈리면 그 사유로 실패한 세이브는 캐시가 매번 버려져, 목록 요청마다 수 MB를
- * 다시 파싱한다. 대신 실패는 `loaderStamp()`까지 맞아야 인정한다(코드가 고쳐지면
- * 그 판정은 다시 내려야 한다). 그 필드가 없는 옛 사이드카는 믿지 않는다.
+ * 다시 파싱한다. 대신 실패는 `loaderStamp()`까지, 성공은 `saveVersion`까지 맞아야
+ * 인정한다 — 코드가 고쳐지거나 코어가 여는 버전이 오르면 그 판정은 다시 내려야 한다.
  */
 function readSummary(id: string): GameListEntry | null {
   const { main, meta } = paths(id);
@@ -759,7 +620,7 @@ function readSummary(id: string): GameListEntry | null {
         createdAt: f.createdAt,
       };
     }
-    // 팀 id·약칭이 없는 옛 사이드카는 버린다 — 한 번 본문에서 다시 지어 채운다
+    // 요약의 모양이 어긋난 사이드카는 버린다 — 한 번 본문에서 다시 지어 채운다
     for (const key of [
       "id",
       "teamId",
@@ -774,9 +635,8 @@ function readSummary(id: string): GameListEntry | null {
     }
     if (typeof s.season !== "number") return null;
     // 지문은 파일이 바뀐 것만 잡는다 — 파일이 그대로여도 코어가 여는 버전이
-    // 올라가면 옛 성공 캐시는 거짓이 된다. 그 필드가 없는 사이드카(이 필드
-    // 도입 전에 쓰인 것)는 지금까지대로 믿는다.
-    if (s.saveVersion !== undefined && s.saveVersion !== SAVE_VERSION) return null;
+    // 올라가면 그 성공 캐시는 거짓이 된다
+    if (s.saveVersion !== SAVE_VERSION) return null;
     return {
       readable: true,
       id: s.id as string,
@@ -824,8 +684,8 @@ function writeSummary(id: string, entry: GameListEntry): void {
  * 게임을 고르기도 전에 리그 전체를 읽는 셈이다. 그래서 저장할 때 요약을
  * 사이드카(`<id>.meta.json`)로 함께 쓰고 여기서 그걸 읽는다.
  *
- * 사이드카가 없거나 깨졌으면(옛 세이브·손으로 넣은 파일) **본문에서 만들어
- * 채워 둔다** — 한 번 느리고 그다음부터 빠르다.
+ * 사이드카가 없거나 깨졌으면(손으로 넣은 파일) **본문에서 만들어 채워 둔다** —
+ * 한 번 느리고 그다음부터 빠르다.
  *
  * 못 여는 세이브도 같은 배열에 선다 — 거부는 하되 감추지 않는다. 실패도
  * 사이드카에 적으므로 목록을 열 때마다 본문을 다시 파싱하지 않는다.

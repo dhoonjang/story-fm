@@ -1,6 +1,5 @@
 import type {
   CallUp,
-  CompetitionSeasonStat,
   Contract,
   GamePlayer,
   GameTeam,
@@ -8,12 +7,14 @@ import type {
   MatchEventType,
   MatchRecord,
   MatchStage,
+  OutcomeBasis,
   Persona,
   ScheduleEntry,
   SeasonHistory,
   SeasonMatchRow,
   SeasonRecord,
   SeasonStat,
+  SeasonStatTotal,
   SeasonTableRow,
   ShootoutOutcome,
   ShotOrigin,
@@ -23,7 +24,6 @@ import type {
   YouthCandidate,
 } from "@story-fm/domain";
 import {
-  DERBY_HEAT_KO,
   leaderboardTitle,
   VISION_CODE_KO,
   injuryHistoryText,
@@ -32,7 +32,6 @@ import {
   yellowBanMatches,
   isReserveMatch,
   MatchStageSchema,
-  packetTagText,
   personaRoleLabel,
   PROMISE_KIND_KO,
   SQUAD_STATUS_KO,
@@ -94,7 +93,13 @@ import { careerOf, careerTotalsOf, type CareerTotals } from "../squad/career";
 import { leaderGroupOf } from "../squad/hierarchy";
 import { formLabel } from "../squad/form";
 import { INJURY_SEVERITY_KO, injuryHistoryOf } from "../squad/injury";
-import { ABSENT_REASON_KO, buildOpponentReport } from "../match/preview";
+import {
+  ABSENT_REASON_KO,
+  DERBY_HEAT_KO,
+  buildOpponentReport,
+  opponentFactFavours,
+  opponentFactText,
+} from "../match/preview";
 import { issueReasonText, moodAnchor, moodOf } from "../squad/mood";
 import { numberLineageOf } from "../squad/numbers";
 import { openPromises, squadStatusOf } from "../squad/promises";
@@ -176,7 +181,6 @@ import {
 import {
   activeContract,
   activeSuspension,
-  bookingCompetitionOf,
   seasonYellowsOf,
   assignmentFor,
   familiarityOf,
@@ -277,7 +281,7 @@ function disciplineFixtureOf(state: GameState, teamId: string): DisciplineFixtur
     if (next === null || m.date < next.date || (m.date === next.date && m.id < next.id)) next = m;
   }
   if (next !== null && next.competitionId !== null) {
-    return { competitionId: next.competitionId, round: next.round, stage: next.stage ?? "league" };
+    return { competitionId: next.competitionId, round: next.round, stage: next.stage };
   }
   /**
    * 폴백은 **던지지 않는다** — 무소속(`freeagents`)도 카탈로그가 모르는 id도 이 함수를
@@ -337,7 +341,7 @@ function ourRow(state: GameState, p: GamePlayer): string {
   const role = loan
     ? `[임대:${teamShortNameIn(state, loan.teamId)} ~${loan.until}]`
     : squadLevelOf(p) === "reserve"
-      ? (state.developmentFocus?.includes(p.id) ?? false)
+      ? state.developmentFocus.includes(p.id)
         ? "[2군·집중 육성]"
         : "[2군]"
       : assignment
@@ -353,7 +357,6 @@ function ourRow(state: GameState, p: GamePlayer): string {
   // 무엇에 대한 불만인지까지 낸다 — 사유가 여덟이라 "불만" 한 마디로는 할 일이 안 보인다
   const grievance = state.issues.find((i) => i.gamePlayerId === p.id);
   const reason = grievance ? issueReasonText(grievance) : null;
-  // 사유 없는 옛 불만은 사유 없이 낸다
   const issue = grievance ? (reason ? ` ⚠불만(${reason})` : " ⚠불만") : "";
   /**
    * **등번호는 이 줄에 선다** — 화면의 명단 행은 이미 번호를 세우는데 GM 조회 줄에만
@@ -378,8 +381,7 @@ function ourRow(state: GameState, p: GamePlayer): string {
  *
  * 위의 「시즌 기록」이 대회 합이라 "리그에서 몇 골"을 말할 자리가 없었다
  * (→ docs/simulation/season.md §6). 많이 뛴 대회부터 서고, 대회가 하나뿐이면
- * 합계 줄이 이미 같은 수를 말했으므로 세우지 않는다. **옛 세이브의 축 없는 행은
- * 어느 대회인지 모르므로 이 줄이 통째로 서지 않는다** (game-state.md §3.4).
+ * 합계 줄이 이미 같은 수를 말했으므로 세우지 않는다 (game-state.md §3.4).
  */
 function competitionStatLine(state: GameState, playerId: string): string | null {
   const rows = seasonStatsByCompetitionOf(state, playerId);
@@ -388,7 +390,7 @@ function competitionStatLine(state: GameState, playerId: string): string | null 
 }
 
 /** 대회별 줄 한 토막 — `리그 12경기 3골 1도움`. 0도움은 적지 않는다 (match.md §6) */
-function competitionStatText(rows: readonly CompetitionSeasonStat[]): string {
+function competitionStatText(rows: readonly SeasonStat[]): string {
   return rows
     .map(
       (r) =>
@@ -402,7 +404,7 @@ function competitionStatText(rows: readonly CompetitionSeasonStat[]): string {
  * 지난 시즌 **대회별** 한 줄 — `리그 30경기 10골 · UCL 8경기 2골`.
  *
  * 이번 시즌 줄과 달리 **대회가 하나여도 선다**: 카드에 지난 시즌 합계 줄이 따로 없어
- * 그 수를 말하는 자리가 여기뿐이다. 행이 없으면(첫 시즌·옛 세이브) 서지 않는다.
+ * 그 수를 말하는 자리가 여기뿐이다. 행이 없으면(첫 시즌) 서지 않는다.
  *
  * ⚠️ **그 시즌 그때의 팀으로 읽는다.** `seasonStatsByCompetitionOf`는 지금 소속의 행만
  * 주므로 여름에 옮겨 온 선수의 지난 시즌이 통째로 빈다. 팀이 둘 이상이면 약칭을 앞에
@@ -425,15 +427,14 @@ function pastCompetitionStatLine(state: GameState, playerId: string): string | n
 }
 
 /** 대회 행을 팀으로 묶는다 — 많이 뛴 팀부터, 같으면 팀 id 사전순 (행 안의 순서는 그대로) */
-function groupByTeam(rows: readonly CompetitionSeasonStat[]): [string, CompetitionSeasonStat[]][] {
-  const byTeam = new Map<string, CompetitionSeasonStat[]>();
+function groupByTeam(rows: readonly SeasonStat[]): [string, SeasonStat[]][] {
+  const byTeam = new Map<string, SeasonStat[]>();
   for (const row of rows) {
     const found = byTeam.get(row.teamId);
     if (found) found.push(row);
     else byTeam.set(row.teamId, [row]);
   }
-  const appsOf = (group: readonly CompetitionSeasonStat[]): number =>
-    group.reduce((n, r) => n + r.apps, 0);
+  const appsOf = (group: readonly SeasonStat[]): number => group.reduce((n, r) => n + r.apps, 0);
   return [...byTeam].sort((a, b) => appsOf(b[1]) - appsOf(a[1]) || (a[0] < b[0] ? -1 : 1));
 }
 
@@ -569,23 +570,18 @@ function sortKeyOf(
    *
    * **대회로 좁힌 물음은 그 대회의 행으로 답한다** ("우리 리그 최다 득점"). 안 좁혔으면
    * 대회 행을 모두 접은 시즌 합계다 — 화면의 "출전 N"과 같은 수여야 한다
-   * (`sumSeasonStats` — game-state.md §3.4). 옛 세이브의 축 없는 행은 리그를 물었을
-   * 때만 걸린다: `talliesOf`가 시상에서 쓰는 그 규약 그대로다.
+   * (`sumSeasonStats` — game-state.md §3.4).
    */
   const rows = new Map<string, SeasonStat[]>();
   for (const s of state.seasonStats) {
     if (s.season !== state.season) continue;
-    if (competitionId !== null) {
-      const legacy =
-        s.competitionId === undefined && leagueOfTeamIn(state, s.teamId) === competitionId;
-      if (s.competitionId !== competitionId && !legacy) continue;
-    }
+    if (competitionId !== null && s.competitionId !== competitionId) continue;
     const k = `${s.gamePlayerId}\u0000${s.teamId}`;
     const found = rows.get(k);
     if (found) found.push(s);
     else rows.set(k, [s]);
   }
-  const stat = new Map<string, SeasonStat>();
+  const stat = new Map<string, SeasonStatTotal>();
   for (const [k, group] of rows) {
     const folded = sumSeasonStats(group);
     if (folded) stat.set(k, folded);
@@ -836,7 +832,7 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
  * 없다 — 그때는 눈금만 남는다 (docs/simulation/season.md §4).
  */
 function trainingNoteFor(state: GameState, playerId: string, date: string): string | null {
-  for (const report of state.trainingReports ?? []) {
+  for (const report of state.trainingReports) {
     if (date < report.from || date > report.to) continue;
     const note = report.marks.find((m) => m.gamePlayerId === playerId)?.note;
     if (note !== undefined && note.length > 0) return note;
@@ -934,7 +930,7 @@ function careerLines(state: GameState, p: GamePlayer): string[] {
     }
   }
   /** 클럽 단위의 사실이라 어느 셔츠로 세웠는지를 함께 적는다 (match.md §6) */
-  const milestones = (state.milestones ?? [])
+  const milestones = state.milestones
     .filter((m) => m.gamePlayerId === p.id)
     .slice(-MILESTONES_SHOWN)
     .map((m) => `${m.date} ${teamShortNameIn(state, m.teamId)} ${milestoneTitle(m.code, m.value)}`);
@@ -981,7 +977,7 @@ function historyLines(state: GameState, p: GamePlayer): string[] {
     const perCompetition = new Map<string | null, number>();
     for (const b of bookings) {
       if (b.card !== "yellow") continue;
-      const c = bookingCompetitionOf(state, b);
+      const c = b.competitionId;
       perCompetition.set(c, (perCompetition.get(c) ?? 0) + 1);
     }
     const split = [...perCompetition.entries()]
@@ -1029,29 +1025,18 @@ function visionRates(items: readonly VisionReading[]): string {
   return items.map((i) => `${VISION_CODE_KO[i.code]} ${Math.round(i.progress * 100)}%`).join("·");
 }
 
-/**
- * 그 시즌의 보드 평가 — 등급과 근거 수치. 옛 세이브는 평가 문장을 들고 있어
- * 그것이 폴백이다 (career.md §6).
- *
- * ⚠️ **기대는 코드가 원본이고 라벨은 옛 세이브의 폴백이다** (§6) — 코드를 두고
- * `expectation`만 읽으면 새 세이브에서는 `undefined`가 문장에 찍힌다.
- */
+/** 그 시즌의 보드 평가 — 등급과 근거 수치 (career.md §6) */
 function boardLine(record: SeasonRecord): string {
   const board = record.board;
-  if (board) {
-    const met = board.grade === "met";
-    // 순위는 바로 앞 `{target}위`가 이미 말한다 — 라벨에까지 달면 "6위(…6위 이내)"다
-    const label = board.expectationCode
-      ? boardExpectationText(board.expectationCode)
-      : board.expectation;
-    // 항목별 진행도 — 평판 폭을 만든 가중합이 무엇으로 이뤄졌는지가 여기 남는다 (§5)
-    const rates = visionRates(board.items ?? []);
-    return (
-      ` — 보드 기대 ${board.target}위${label ? `(${label})` : ""} · ${met ? "달성" : "미달"}` +
-      (rates ? ` · 비전 ${rates}` : "")
-    );
-  }
-  return record.boardVerdict ? ` — 보드: "${record.boardVerdict}"` : "";
+  const met = board.grade === "met";
+  // 순위는 바로 앞 `{target}위`가 이미 말한다 — 라벨에까지 달면 "6위(…6위 이내)"다
+  const label = boardExpectationText(board.expectationCode);
+  // 항목별 진행도 — 평판 폭을 만든 가중합이 무엇으로 이뤄졌는지가 여기 남는다 (§5)
+  const rates = visionRates(board.items);
+  return (
+    ` — 보드 기대 ${board.target}위(${label}) · ${met ? "달성" : "미달"}` +
+    (rates ? ` · 비전 ${rates}` : "")
+  );
 }
 
 /** 그 자리에서 맡고 있는 세부 역할의 한글 이름 (미지정이면 기본 역할) */
@@ -1092,9 +1077,7 @@ function breakOfKey(breakKey: string): InternationalBreak | null {
  * 늘 없다 (competition.md §5-1). 행은 창 순서로 쌓이므로 뒤에서 찾는다.
  */
 function lastReturnedCallUp(state: GameState, playerId: string): CallUp | null {
-  const rows = (state.callUps ?? []).filter(
-    (c) => c.gamePlayerId === playerId && c.returnedOn !== null,
-  );
+  const rows = state.callUps.filter((c) => c.gamePlayerId === playerId && c.returnedOn !== null);
   return rows[rows.length - 1] ?? null;
 }
 
@@ -1428,7 +1411,6 @@ function assignedRow(
     banNext && next !== null
       ? `${competitionShortName(next.competitionId)} 경고 ${yellows}장(정지 임박)`
       : null,
-    // 사유 없는 옛 불만은 사유 없이 낸다
     grievance ? (reason ? `불만(${reason})` : "불만") : null,
     /**
      * **다치기 전에 서는 유일한 줄이다** (player.md §5.3) — 부상 플래그는 이미
@@ -1671,14 +1653,13 @@ const MANAGER_SPELLS_SHOWN = 2;
  * (→ ../../../../docs/simulation/transfer.md §7 「감독 풀」).
  *
  * 감독은 자리가 아니라 사람이라, 상대 벤치를 읽을 때 **얼마나 오래 저기 있었고
- * 어디서 왔는가**가 이름 다음의 사실이다. 부임일이 없는 옛 세이브는 일수를 적지
- * 않는다 — 시즌 시작으로 치면 없는 사실을 지어내는 것이다. 오늘 앉은 사람도 같다:
+ * 어디서 왔는가**가 이름 다음의 사실이다. 오늘 앉은 사람은 일수를 적지 않는다:
  * 0인 칸은 적지 않는다.
  */
 function managerLine(state: GameState, bench: GameTeam): string {
   const since = bench.managerSince;
   const days = since === undefined ? 0 : diffDays(since, state.date);
-  const past = [...(bench.managerSpells ?? [])]
+  const past = [...bench.managerSpells]
     .reverse()
     .slice(0, MANAGER_SPELLS_SHOWN)
     .map((spell) => teamShortNameIn(state, spell.teamId));
@@ -1877,7 +1858,7 @@ function seasonLabel(season: number): string {
 
 /** 대회·단계 태그 — "EPL R7", "UCL 8강 1차전", "친선" */
 function competitionTag(m: MatchRecord): string {
-  return competitionLabel(m.competitionId, m.stage ?? "league", m.round);
+  return competitionLabel(m.competitionId, m.stage, m.round);
 }
 
 /** 기준 팀 시점의 승패 — 정규시간이 같으면 승부차기로 갈린다 */
@@ -1897,20 +1878,11 @@ function scorerNote(state: GameState, m: MatchRecord): string {
 /**
  * 슛·xG 한 마디 — **스코어만 남으면 진 경기가 다 같아 보인다** (match.md §8).
  * 슛 3·xG 0.4로 진 경기와 슛 18·xG 2.3으로 진 경기가 달력에서 같은 "1-2 패"였다.
- * 옛 경기에는 없는 칸이라 없으면 생략한다.
  */
 function shotNote(m: MatchRecord): string {
   const r = m.result;
   if (!r) return "";
-  const parts = [
-    r.homeShots === undefined || r.awayShots === undefined
-      ? null
-      : `슛 ${r.homeShots}-${r.awayShots}`,
-    r.homeXg === undefined || r.awayXg === undefined
-      ? null
-      : `xG ${r.homeXg.toFixed(2)}-${r.awayXg.toFixed(2)}`,
-  ].filter((x): x is string => x !== null);
-  return parts.length === 0 ? "" : ` · ${parts.join(" · ")}`;
+  return ` · 슛 ${r.homeShots}-${r.awayShots} · xG ${r.homeXg.toFixed(2)}-${r.awayXg.toFixed(2)}`;
 }
 
 /**
@@ -1989,8 +1961,7 @@ function leagueOfTeamInSeason(state: GameState, season: number, teamId: string):
 }
 
 /**
- * 지나간 시즌의 순위표 한 행 — **이관된 행은 순위와 이름만 안다** (game-state.md §3.3).
- * 없는 수를 0으로 세우면 그 시즌이 그 구단의 최저 승점으로 읽힌다.
+ * 지나간 시즌의 순위표 한 행 (game-state.md §3.3).
  */
 function historyTableRow(
   state: GameState,
@@ -2001,7 +1972,6 @@ function historyTableRow(
   const mark = row.teamId === mineTeamId ? " ←우리" : "";
   const head = `${String(rank).padStart(2)} ${teamNameIn(state, row.teamId)}`;
   const r = row.record;
-  if (!r) return `${head}${mark}`;
   const diff = r.goalsFor - r.goalsAgainst;
   return (
     `${head} ${r.played}경기 ${r.wins}승 ${r.draws}무 ${r.losses}패 ` +
@@ -2265,7 +2235,7 @@ function pastHeadToHead(state: GameState, teamId: string, opponentId: string): P
     for (const row of [...snapshot.matches].reverse()) {
       if (row.opponentTeamId !== opponentId) continue;
       // 승패는 지금 시즌의 경기와 **같은 자**를 지난다 — 연장·승부차기의 규칙이 하나다
-      const outcome = outcomeFor(asMatchRecord(snapshot.season, row, teamId), teamId);
+      const outcome = outcomeFor(asOutcomeBasis(row, teamId), teamId);
       tally.played += 1;
       tally.scored += row.goalsFor;
       tally.conceded += row.goalsAgainst;
@@ -2303,23 +2273,17 @@ function pastMatchLabel(row: SeasonMatchRow): string {
 }
 
 /**
- * 결산 스냅샷의 경기 한 줄을 **경기 레코드의 모양으로** — 승패 판정이 지금 시즌의
- * 경기와 같은 함수를 지나게 하는 자리다. 스냅샷은 감독 팀 시점으로 적히므로 그 팀을
+ * 결산 스냅샷의 경기 한 줄을 **승패 판정의 모양으로** — 지금 시즌의 경기와 같은
+ * 함수(`outcomeFor`)를 지나게 하는 자리다. 스냅샷은 감독 팀 시점으로 적히므로 그 팀을
  * 홈에 세운다 (실제 홈·원정은 `venue`가 따로 답한다 — 승패는 그것을 보지 않는다).
  */
-function asMatchRecord(season: number, row: SeasonMatchRow, teamId: string): MatchRecord {
+function asOutcomeBasis(row: SeasonMatchRow, teamId: string): OutcomeBasis {
   return {
-    id: `${season}:${row.date}:${row.opponentTeamId}`,
-    season,
-    competitionId: row.competitionId,
-    round: 1,
-    date: row.date,
     homeTeamId: teamId,
     awayTeamId: row.opponentTeamId,
     result: {
       homeGoals: row.goalsFor,
       awayGoals: row.goalsAgainst,
-      scorers: [],
       ...(row.penalties
         ? { penalties: { home: row.penalties.for, away: row.penalties.against } }
         : {}),
@@ -2373,7 +2337,7 @@ function pastFixturesView(
         const pens = row.penalties
           ? ` (승부차기 ${row.penalties.for}-${row.penalties.against})`
           : "";
-        const outcome = outcomeFor(asMatchRecord(season, row, mine), mine);
+        const outcome = outcomeFor(asOutcomeBasis(row, mine), mine);
         return (
           `  ${dateLabel(row.date)} ${pastMatchLabel(row)} ` +
           `${VENUE_KO[row.venue]} ${row.goalsFor}-${row.goalsAgainst}${pens} ` +
@@ -2443,9 +2407,7 @@ function fixturesView(state: GameState, input: LeagueViewInput): LookupResult {
       if (input.to && m.date > input.to) return false;
       return true;
     })
-    .sort((a, b) =>
-      a.date === b.date ? (a.time ?? "").localeCompare(b.time ?? "") : a.date < b.date ? -1 : 1,
-    );
+    .sort((a, b) => (a.date === b.date ? a.time.localeCompare(b.time) : a.date < b.date ? -1 : 1));
 
   const when = input.when ?? "both";
   const played = pool.filter((m) => m.result);
@@ -2750,7 +2712,7 @@ export function careerView(state: GameState): LookupResult {
   const m = state.manager;
 
   // 경고는 세이브가 끝나는 길의 카운터다 — 평판 바로 아래에 세워 압박이 읽히게 한다
-  const warnings = m.boardWarnings ?? 0;
+  const warnings = m.boardWarnings;
 
   /**
    * **무직이면 머리글부터 다르다** (career.md §5.1) — 옛 구단의 순위·경고를 재임
@@ -2764,29 +2726,26 @@ export function careerView(state: GameState): LookupResult {
           card.kind === "expired" ? "계약 만료" : "경질"
         }) · ${seasonLabel(state.season)}`,
         `평판: ${describeReputation(m.reputation)}`,
-        card.expectation && card.position
-          ? `자리를 잃은 자리: 기대 ${card.expectation}(${card.target}위) · 당시 ${card.position}위`
-          : `자리를 잃은 자리: ${card.reason ?? "기록 없음"}`,
+        `자리를 잃은 자리: 기대 ${boardExpectationText(card.expectationCode)}(${card.target}위)` +
+          (card.position === undefined ? "" : ` · 당시 ${card.position}위`),
         ...(card.severance ? [`위약금 ${formatMoney(card.severance)}`] : []),
         ...(openManagerOffers(state).length > 0
           ? [
               `받은 감독직 제안:`,
               ...openManagerOffers(state).map(
                 (o) =>
-                  `  ${o.id} · ${teamNameIn(state, o.teamId)} (${o.tier}티어) · 기대 ${o.expectation}(${o.target}위)` +
+                  `  ${o.id} · ${teamNameIn(state, o.teamId)} (${o.tier}티어) · 기대 ${boardExpectationText(o.expectationCode, o.target)}` +
                   (o.position ? ` · 현재 ${o.position}위` : "") +
-                  (o.salary
-                    ? ` · 연봉 ${formatMoney(o.salary)}·${o.years ?? "-"}년·이적 예산 약속 ${formatMoney(o.budgetPledge ?? 0)}`
-                    : "") +
+                  ` · 연봉 ${formatMoney(o.salary)}·${o.years}년·이적 예산 약속 ${formatMoney(o.budgetPledge)}` +
                   (o.counteredOn ? ` · 흥정 완료` : "") +
                   ` · ${o.expiresOn}까지`,
               ),
             ]
           : [`받은 감독직 제안: 없음`]),
-        ...((state.managerVacancies ?? []).length > 0
+        ...(state.managerVacancies.length > 0
           ? [
               `최근 공석 (지원할 수 있는 자리):`,
-              ...(state.managerVacancies ?? []).map(
+              ...state.managerVacancies.map(
                 (v) =>
                   `  ${teamNameIn(state, v.teamId)} (${tierOfTeamIn(state, v.teamId)}티어)` +
                   (v.position ? ` · 현재 ${v.position}위` : "") +
@@ -2825,23 +2784,21 @@ export function careerView(state: GameState): LookupResult {
                 (m.contract.renewalOffered === false ? ` · 보드는 재계약하지 않기로 했다` : ""),
             ]
           : []),
-        `지갑: ${formatMoney(m.wallet ?? 0)}` +
+        `지갑: ${formatMoney(m.wallet)}` +
           // 지갑은 눈금이 아니라 쓸 수 있는 돈이다 — 남은 문이 그 자리에 함께 선다 (career.md §5.4)
           (managedTeamId(state) === null
             ? ""
             : ` · 이번 시즌 사재 출연 여력 ${formatMoney(transferFundRoom(state))}`),
-        ...((m.spending ?? []).length > 0
-          ? [
-              `최근 사재 지출: ${[...(m.spending ?? [])].reverse().slice(0, 5).map(spendLine).join(" / ")}`,
-            ]
+        ...(m.spending.length > 0
+          ? [`최근 사재 지출: ${[...m.spending].reverse().slice(0, 5).map(spendLine).join(" / ")}`]
           : []),
         // 재직 중에 서는 제안은 재계약 하나다 — 답할 자리라 여기 선다 (career.md §5.4)
         ...openManagerOffers(state)
           .filter((o) => o.via === "renewal")
           .map(
             (o) =>
-              `보드의 재계약 제안: ${o.id} · 연봉 ${formatMoney(o.salary ?? 0)}·${o.years ?? "-"}년` +
-              `·이적 예산 약속 ${formatMoney(o.budgetPledge ?? 0)}` +
+              `보드의 재계약 제안: ${o.id} · 연봉 ${formatMoney(o.salary)}·${o.years}년` +
+              `·이적 예산 약속 ${formatMoney(o.budgetPledge)}` +
               (o.counteredOn ? ` · 흥정 완료` : "") +
               ` · ${o.expiresOn}까지`,
           ),
@@ -2861,7 +2818,7 @@ export function careerView(state: GameState): LookupResult {
    * `SEASON_RECORD`가 없으므로 경질 줄이 그 해를 채운다. 최신 시즌이 앞이고,
    * 같은 시즌 안에서는 시즌 결산(시즌 끝)이 경질(시즌 중)보다 앞이다.
    */
-  const sackings = state.dismissals ?? [];
+  const sackings = state.dismissals;
   const rows = [
     ...state.seasonRecords.map((r) => ({
       season: r.season,
@@ -2879,9 +2836,8 @@ export function careerView(state: GameState): LookupResult {
       text:
         `  시즌 ${d.season} (${seasonLabelOf(d.season)}) ${teamNameIn(state, d.teamId)} — ${d.on} ` +
         `${d.kind === "expired" ? "계약 만료" : "경질"}` +
-        (d.expectation && d.position
-          ? ` (기대 ${d.expectation} ${d.target}위 · 당시 ${d.position}위)`
-          : ""),
+        ` (기대 ${boardExpectationText(d.expectationCode)} ${d.target}위` +
+        (d.position === undefined ? ")" : ` · 당시 ${d.position}위)`),
     })),
   ].sort((a, b) => b.season - a.season || b.atEnd - a.atEnd || b.on.localeCompare(a.on));
   if (rows.length === 0) {
@@ -2907,7 +2863,7 @@ export function careerView(state: GameState): LookupResult {
         `트로피 ${trophies.length}개: ${trophies
           .map(
             (t) =>
-              `${t.competitionId ? competitionName(t.competitionId) : (t.competition ?? "")} ` +
+              `${competitionName(t.competitionId)} ` +
               `(시즌 ${t.season}, ${teamShortNameIn(state, t.teamId)})`,
           )
           .join(" / ")}`
@@ -2921,7 +2877,7 @@ export function careerView(state: GameState): LookupResult {
    */
   // 감독이 그 시즌 그 팀에 있었나 — 트로피 보관함과 **같은 자**로 잰다 (career.md §6)
   const managedThen = managerTenureOf(state);
-  const awards = (state.awards ?? [])
+  const awards = state.awards
     .filter((a) => managedThen(a.season, a.teamId))
     .sort((a, b) => b.season - a.season || a.code.localeCompare(b.code));
   if (awards.length > 0) {
@@ -2944,7 +2900,7 @@ export function careerView(state: GameState): LookupResult {
    * 이름을 되찾을 수 있는 유일한 자리라 통산과 함께 선다 — 통산은 명부가 아니라
    * `seasonStats`에서 온다(`careerTotalsOf`), 한 값을 두 곳에 적지 않는다.
    */
-  const retired = [...(state.retired ?? [])].sort((a, b) => b.season - a.season);
+  const retired = [...state.retired].sort((a, b) => b.season - a.season);
   if (retired.length > 0) {
     lines.push(`은퇴 ${retired.length}명 (우리 팀에서):`);
     for (const r of retired.slice(0, RETIRED_SHOWN)) {
@@ -2987,20 +2943,17 @@ export interface HistoryViewInput {
   count?: number;
 }
 
-/** 그 시즌 감독 팀의 성적 한 줄 — 스냅샷이 어느 팀의 것인지 모르면 서지 않는다 */
+/** 그 시즌 감독 팀의 성적 한 줄 — 그 팀이 리그 표에 없으면 서지 않는다 */
 function ourSeasonLine(state: GameState, snapshot: SeasonHistory): string | null {
   const teamId = snapshot.teamId;
-  if (teamId === undefined) return null;
   for (const league of snapshot.leagues) {
     const index = league.rows.findIndex((r) => r.teamId === teamId);
     if (index < 0) continue;
     const record = league.rows[index]!.record;
     return (
       `우리: ${teamNameIn(state, teamId)} ${competitionShortName(league.leagueId)} ${index + 1}위` +
-      (record
-        ? ` · ${record.played}경기 ${record.wins}승 ${record.draws}무 ${record.losses}패` +
-          ` · 승점 ${record.points} (득 ${record.goalsFor} 실 ${record.goalsAgainst})`
-        : "") +
+      ` · ${record.played}경기 ${record.wins}승 ${record.draws}무 ${record.losses}패` +
+      ` · 승점 ${record.points} (득 ${record.goalsFor} 실 ${record.goalsAgainst})` +
       (snapshot.matches.length > 0 ? ` · 장부에 남은 경기 ${snapshot.matches.length}건` : "")
     );
   }
@@ -3022,13 +2975,8 @@ function championLines(state: GameState, snapshot: SeasonHistory): string[] {
     .filter((line): line is string => line !== null);
   const covered = new Set(snapshot.leagues.map((l) => l.leagueId));
   const fromTrophies = state.trophies
-    .filter(
-      (t) =>
-        t.season === snapshot.season &&
-        t.competitionId !== undefined &&
-        !covered.has(t.competitionId),
-    )
-    .map((t) => `  ${competitionName(t.competitionId ?? null)} — ${championText(state, t)}`)
+    .filter((t) => t.season === snapshot.season && !covered.has(t.competitionId))
+    .map((t) => `  ${competitionName(t.competitionId)} — ${championText(state, t)}`)
     .sort();
   return [...fromTable, ...fromTrophies];
 }
@@ -3036,15 +2984,13 @@ function championLines(state: GameState, snapshot: SeasonHistory): string[] {
 /** 지나간 시즌 한 줄 — 시즌·우리 순위·리그 챔피언 */
 function pastSeasonLine(state: GameState, snapshot: SeasonHistory): string {
   const ourLeague =
-    snapshot.teamId === undefined
-      ? null
-      : (snapshot.leagues.find((l) => l.rows.some((r) => r.teamId === snapshot.teamId)) ?? null);
+    snapshot.leagues.find((l) => l.rows.some((r) => r.teamId === snapshot.teamId)) ?? null;
   const ours =
-    ourLeague === null || snapshot.teamId === undefined
+    ourLeague === null
       ? ""
       : ` ${teamShortNameIn(state, snapshot.teamId)} ${competitionShortName(ourLeague.leagueId)} ` +
         `${ourLeague.rows.findIndex((r) => r.teamId === snapshot.teamId) + 1}위`;
-  // 감독의 리그를 모르는 행(이관된 행)도 표의 1위는 안다 — 그 표의 챔피언을 세운다
+  // 감독의 팀이 리그 표에 없는 시즌(무직·리그 밖)도 표의 1위는 안다 — 그 표의 챔피언을 세운다
   const league = ourLeague ?? snapshot.leagues[0];
   const champion = league?.rows[0];
   const crown =
@@ -3111,7 +3057,7 @@ function resolveHistoryPerson(state: GameState, ref: string): readonly HistoryPe
       name: p.name,
       note: `${naturalPositionOf(p).position} · ${teamShortNameIn(state, p.teamId)}`,
     })),
-    ...(state.retired ?? []).map((r) => ({
+    ...state.retired.map((r) => ({
       id: r.gamePlayerId,
       name: r.name,
       note: `${r.position} · ${r.on} 은퇴`,
@@ -3126,7 +3072,7 @@ function resolveHistoryPerson(state: GameState, ref: string): readonly HistoryPe
 /** 그 선수의 통산과 받은 상 — 통산은 `careerOf` 하나에서 나온다 (game-state.md §5) */
 function playerHistoryView(state: GameState, person: HistoryPerson): LookupResult {
   const career = careerOf(state, person.id);
-  const awards = (state.awards ?? [])
+  const awards = state.awards
     .filter((a) => a.gamePlayerId === person.id)
     .sort((a, b) => b.season - a.season || a.code.localeCompare(b.code));
   const played = (t: CareerTotals) => t.apps > 0 || t.reserveApps > 0;
@@ -3151,7 +3097,7 @@ function playerHistoryView(state: GameState, person: HistoryPerson): LookupResul
      * 훑는다. `seasonStatsByCompetitionOf`는 지금 소속의 행만 주므로 옛 셔츠의 시즌이
      * 통째로 빈다 (game-state.md §3.4).
      */
-    const bySeasonTeam = new Map<string, CompetitionSeasonStat[]>();
+    const bySeasonTeam = new Map<string, SeasonStat[]>();
     for (const row of competitionRowsOf(
       state.seasonStats.filter((s) => s.gamePlayerId === person.id),
     )) {
@@ -3385,9 +3331,7 @@ function finishedOurMatches(state: GameState): MatchRecord[] {
         !isReserveMatch(m) &&
         (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
     )
-    .sort((a, b) =>
-      a.date === b.date ? (a.time ?? "").localeCompare(b.time ?? "") : a.date < b.date ? -1 : 1,
-    );
+    .sort((a, b) => (a.date === b.date ? a.time.localeCompare(b.time) : a.date < b.date ? -1 : 1));
 }
 
 /** 못 찾았을 때 돌려주는 후보 — 조용히 빈 결과를 주면 모델이 지어낸다 (파일 머리 규약) */
@@ -3552,15 +3496,13 @@ export function matchReport(state: GameState, input: MatchReportInput = {}): Loo
   );
   if (!report.hasDetail) {
     lines.push(
-      "※ 사건 기록이 없는 경기다 (타 팀 간이 시뮬 또는 옛 세이브) — 타임라인은 득점 줄뿐이고 " +
+      "※ 사건 기록이 없는 경기다 (타 팀 간이 시뮬) — 타임라인은 득점 줄뿐이고 " +
         "선수별 기록도 없다. 빈 타임라인이 조용했던 경기라는 뜻이 아니다",
     );
   }
 
   const teamStats = [
-    report.home.possession === null || report.away.possession === null
-      ? null
-      : `점유 ${Math.round(report.home.possession * 100)}%-${Math.round(report.away.possession * 100)}%`,
+    `점유 ${Math.round(report.home.possession * 100)}%-${Math.round(report.away.possession * 100)}%`,
     statPair("슛", report.home.shots, report.away.shots),
     statPair("xG", report.home.xg, report.away.xg, 2),
     statPair("기대 득점", report.home.expectedGoals, report.away.expectedGoals, 2),
@@ -3661,9 +3603,7 @@ function upcomingOurMatches(state: GameState): MatchRecord[] {
         m.date >= state.date &&
         (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
     )
-    .sort((a, b) =>
-      a.date === b.date ? (a.time ?? "").localeCompare(b.time ?? "") : a.date < b.date ? -1 : 1,
-    );
+    .sort((a, b) => (a.date === b.date ? a.time.localeCompare(b.time) : a.date < b.date ? -1 : 1));
 }
 
 /** 못 찾았을 때 돌려주는 후보 — 조용히 빈 결과를 주면 모델이 지어낸다 (파일 머리 규약) */
@@ -3724,7 +3664,7 @@ function pickUpcomingMatch(state: GameState, input: OpponentReportInput): Picked
  * (→ docs/simulation/match.md §1.8).
  *
  * **예상 XI에 능력치는 서지 않는다.** 이름과 자리뿐이고, 그 열한 명을 대조해 나온
- * 수치는 이미 감독의 눈(`readKeyPoints`)을 지나 아래 지점 줄에 있다. 여기에 OVR을
+ * 수치는 이미 아래 지점 줄(`facts`)에 있다. 여기에 OVR을
  * 얹으면 안개를 지나지 않은 값이 명단표로 새어 나온다 (player.md §10).
  */
 export function opponentReport(state: GameState, input: OpponentReportInput = {}): LookupResult {
@@ -3777,15 +3717,15 @@ export function opponentReport(state: GameState, input: OpponentReportInput = {}
 
   lines.push(`상대 전술: ${tacticsBrief(report.shape)}`);
 
-  if (report.notes.length === 0) {
+  if (report.facts.length === 0) {
     lines.push("읽어 낸 지점: 없다 — 두 판이 맞물리는 곳이 보이지 않는다");
   } else {
     lines.push("읽어 낸 지점:");
     lines.push(
-      ...report.notes.map((tag) => {
-        const side =
-          tag.favours === null ? "  · " : tag.favours === report.ourSide ? "  + " : "  - ";
-        return side + packetTagText(tag, report.tagContext);
+      ...report.facts.map((fact) => {
+        const favours = opponentFactFavours(fact);
+        const side = favours === null ? "  · " : favours ? "  + " : "  - ";
+        return side + opponentFactText(fact);
       }),
     );
   }

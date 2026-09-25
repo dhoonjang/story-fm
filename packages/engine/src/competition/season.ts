@@ -188,7 +188,7 @@ export interface StandingRow {
   /**
    * 개막 전 언론이 매긴 예상 순위 (→ [prediction.ts](./prediction.ts) · season.md §2).
    *
-   * 예상이 서지 않은 시즌·대회(옛 세이브 · 컵 · 대항전)에는 없다 — **없는 것은 예상
+   * 예상이 서지 않은 대회(컵 · 대항전)에는 없다 — **없는 것은 예상
    * 밖이라는 뜻이 아니라 예상이 없다는 뜻이다.** 순서에는 들어오지 않는다: 표를 세우는
    * 것은 승점이고, 이 칸은 그 옆에 서는 열이다.
    */
@@ -236,7 +236,7 @@ export function countsInStandings(
     match.result !== null &&
     match.season === season &&
     match.competitionId === competitionId &&
-    (match.stage ?? "league") === "league"
+    match.stage === "league"
   );
 }
 
@@ -318,7 +318,7 @@ export function computeStandings(
         else if (outcome === "L") box.losses++;
         else box.draws++;
       }
-      noteForm(row.teamId, { date: match.date, time: match.time ?? "", outcome });
+      noteForm(row.teamId, { date: match.date, time: match.time, outcome });
     }
   }
   const list = [...rows.values()];
@@ -613,7 +613,7 @@ function leaguesPlayedIn(state: GameState): string[] {
   const leagueIds = new Set<string>();
   for (const match of state.matches) {
     if (match.season !== state.season || !match.result) continue;
-    if ((match.stage ?? "league") !== "league") continue;
+    if (match.stage !== "league") continue;
     const id = match.competitionId;
     if (id === null || isCup(id) || isReserveMatch(match)) continue;
     leagueIds.add(id);
@@ -759,23 +759,23 @@ function finalsPlayedIn(state: GameState): Map<string, MatchRecord> {
  * 출전 분은 경기 결과에 남지 않으므로 전원 0으로 두고 앞 세 칸과 id로 끊는다.
  * 근거 수치도 그 경기의 것이라 `apps`는 언제나 1이다.
  *
- * 평점이 없는 결승은 상이 서지 않는다 — 간이 시뮬이 결승만 평점을 남기기 시작하기
- * 전(옛 세이브)의 결승이 그렇다 (match.md §6).
+ * 평점이 없는 결승은 상이 서지 않는다 (match.md §6).
  */
 function finalMotmOf(
   state: GameState,
   decider: MatchRecord,
 ): Omit<SeasonAward, "season" | "competitionId" | "code"> | null {
-  const ratings = decider.result?.ratings;
-  if (!ratings) return null;
+  const result = decider.result;
+  const ratings = result?.ratings;
+  if (!result || !ratings) return null;
   const goalsOf = (tags: readonly string[], playerId: string): number =>
     tags.filter((tag) => parseScorerEntry(tag).playerId === playerId).length;
   const best = pickMotm(
     Object.entries(ratings).map(([id, rating]) => ({
       id,
       rating,
-      goals: goalsOf(decider.result?.scorers ?? [], id),
-      assists: goalsOf(decider.result?.assists ?? [], id),
+      goals: goalsOf(result.scorers, id),
+      assists: goalsOf(result.assists, id),
       minutes: 0,
     })),
   );
@@ -784,10 +784,10 @@ function finalMotmOf(
   if (!player) return null;
   /**
    * 팀은 **그날 어느 쪽에 섰는가**다 — 지금 소속으로 적으면 결승 뒤 이적한 선수의
-   * 상이 새 셔츠로 남는다. 명단이 없는 옛 경기만 지금 소속으로 떨어진다.
+   * 상이 새 셔츠로 남는다.
    */
-  const home = decider.result?.homeLineup?.includes(best.id) ?? false;
-  const away = decider.result?.awayLineup?.includes(best.id) ?? false;
+  const home = result.homeLineup.includes(best.id);
+  const away = result.awayLineup.includes(best.id);
   return {
     gamePlayerId: best.id,
     playerName: player.name,
@@ -819,9 +819,7 @@ export function awardLine(a: SeasonAward): string {
  * 서고 회견엔 서지 않는다.
  */
 export function lastSeasonAwardsOf(state: GameState, playerId: string): readonly SeasonAward[] {
-  return (state.awards ?? []).filter(
-    (a) => a.season === state.season - 1 && a.gamePlayerId === playerId,
-  );
+  return state.awards.filter((a) => a.season === state.season - 1 && a.gamePlayerId === playerId);
 }
 
 /**
@@ -877,7 +875,6 @@ export function recordBreakLine(broken: RecordBreak): string {
  * 다섯 리그 스무 줄은 감독의 화면이 아니다.
  */
 function gradeAwards(state: GameState): string[] {
-  if (!state.awards) state.awards = [];
   const awards = state.awards;
   const lines: string[] = [];
   for (const a of seasonAwards(state)) {
@@ -1024,7 +1021,7 @@ export function reviewSeason(state: GameState): string[] {
   }
 
   /**
-   * **계획 없이 평가받는 시즌은 없다** (career.md §5) — 옛 세이브와 새 게임의 첫
+   * **계획 없이 평가받는 시즌은 없다** (career.md §5) — 새 게임의 첫
    * 시즌은 전환을 아직 한 번도 지나지 않았으므로 여기서 세운다. 기한이 남은 계획은
    * 그대로 다시 앉으므로 두 번 불려도 같다.
    */
@@ -1185,7 +1182,7 @@ export function recordSeasonHistory(state: GameState): void {
     const home = match.homeTeamId === teamId;
     if (!home && match.awayTeamId !== teamId) continue;
     const { homeGoals, awayGoals, penalties } = match.result;
-    const stage = match.stage === undefined || match.stage === "league" ? undefined : match.stage;
+    const stage = match.stage === "league" ? undefined : match.stage;
     matches.push({
       date: match.date,
       competitionId: match.competitionId,
@@ -1209,7 +1206,7 @@ export function recordSeasonHistory(state: GameState): void {
   matches.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
   // 같은 시즌을 두 번 결산해도 행은 하나다 — 그 시즌의 행을 지우고 다시 쓴다
-  const kept = (state.history ?? []).filter((row) => row.season !== state.season);
+  const kept = state.history.filter((row) => row.season !== state.season);
   kept.push({ season: state.season, leagues, teamId, matches });
   kept.sort((a, b) => a.season - b.season);
   state.history = kept;
@@ -1357,7 +1354,7 @@ function declaredThisSeason(state: GameState, player: GamePlayer): boolean {
  * 오늘 이 선수가 은퇴하는가 — **전환이 묻는 자리** (season.md §6).
  *
  * 예고가 선 명단이 원본이고, 나이만 그 밖에서 선다: 1월 뒤에 세계에 들어온 선수와
- * 1월을 지나온 적이 없는 옛 세이브가 그 자리다. `decline`·`idle`은 예고 없이 서지
+ * 1월을 지나오지 않은 첫 시즌이 그 자리다. `decline`·`idle`은 예고 없이 서지
  * 않는다 — 예고 없는 은퇴를 만들지 않는 것이 이 절의 요구다.
  */
 function retiresNow(state: GameState, player: GamePlayer, judgeDate: string): boolean {
@@ -1524,7 +1521,7 @@ const ACADEMY_AGE_MAX = 21;
 
 /**
  * 활용도를 잴 수 있는 최소 표본 — 우리 2군 리그 출전 총합. 이 아래면 잴 것이 없는
- * 해다(첫 시즌 · 옛 세이브 · 2군 일정이 짧았던 해).
+ * 해다(첫 시즌 · 2군 일정이 짧았던 해).
  */
 const ACADEMY_USE_MIN_APPS = 20;
 
@@ -1682,7 +1679,7 @@ export function youthIntakeDeadline(state: GameState): string {
 export function ourYouthCandidates(state: GameState): YouthCandidate[] {
   const managed = managedTeamId(state);
   if (managed === null) return [];
-  return (state.youthCandidates ?? []).filter((row) => row.teamId === managed);
+  return state.youthCandidates.filter((row) => row.teamId === managed);
 }
 
 /**
@@ -1699,7 +1696,7 @@ export function signYouthCandidates(
   state: GameState,
   chosenIds: readonly string[],
 ): { signed: GamePlayer[]; filled: GamePlayer[]; released: GamePlayer[]; turnedAway: number } {
-  const rows = state.youthCandidates ?? [];
+  const rows = state.youthCandidates;
   if (rows.length === 0) return { signed: [], filled: [], released: [], turnedAway: 0 };
   const teamId = rows[0]!.teamId;
   const chosen = new Set(chosenIds);
@@ -1747,7 +1744,7 @@ export function signYouthCandidates(
  * 답이 없으면 옛 규칙의 수만큼(`autoSign`) 앞에서부터 계약하고 나머지는 돌려보낸다.
  */
 export function settleYouthIntake(state: GameState, digest: TickSink): void {
-  const rows = state.youthCandidates ?? [];
+  const rows = state.youthCandidates;
   if (rows.length === 0) return;
   const auto = rows.filter((row) => row.autoSign).map((row) => row.player.id);
   const { signed, filled, released } = signYouthCandidates(state, auto);
@@ -1952,7 +1949,7 @@ function applyTransition(state: GameState): string[] {
        * (`development.ts`). 시즌 전환이 하는 건 은퇴 집행과 명단 정리뿐이다.
        *
        * **집행이지 판정이 아니다** — 명단은 1월의 예고가 이미 정했다 (season.md §6).
-       * 나이만 예고 밖에서 선다: 1월 뒤에 들어온 선수와 옛 세이브의 자리다.
+       * 나이만 예고 밖에서 선다: 1월 뒤에 들어온 선수와 첫 시즌의 자리다.
        */
       if (retiresNow(state, player, judgeDate)) retirees.push(player.id);
       // 새 시즌 리셋
@@ -1985,7 +1982,7 @@ function applyTransition(state: GameState): string[] {
          * 감독 팀에서 은퇴한 선수만 담는 것은 `milestones`와 같은 규약이다.
          */
         state.retired = [
-          ...(state.retired ?? []),
+          ...state.retired,
           ...ours.map((p) => retiredRowOf(state, p, team.id, nextCalendar.preseasonStart)),
         ];
       }
@@ -2184,7 +2181,7 @@ function applyTransition(state: GameState): string[] {
     const layoutSlots = currentLayout.map((a) => a.position);
     const layoutPoints = currentLayout.map((a) => a.point ?? anchorOf(a.position));
     /**
-     * 배치가 11칸 미만이면(옛 세이브 · 얇은 컵 팀) **포메이션의 빈 자리**로 채운다.
+     * 배치가 11칸 미만이면(얇은 컵 팀) **포메이션의 빈 자리**로 채운다.
      *
      * 선수의 주 포지션으로 채우던 때는 왼쪽 윙어가 떠난 여름에 남은 오른쪽 자원 둘이
      * 나란히 `RW`의 기본 좌표에 서고 왼쪽 측면이 빈 채로 새 시즌이 시작됐다 — 자리를
@@ -2248,7 +2245,7 @@ function applyTransition(state: GameState): string[] {
     if (next) {
       const wasVice = next.isViceCaptain === true;
       next.isCaptain = true;
-      next.isViceCaptain = undefined;
+      next.isViceCaptain = false;
       digest.push(
         `새 주장: ${next.name} (${naturalPositionOf(next).position})` +
           (wasVice ? " — 부주장이 완장을 이었다" : ""),

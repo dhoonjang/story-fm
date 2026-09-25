@@ -146,11 +146,9 @@ export type MoodFact =
    * 불만보다 앞에 서는 이유는 그것이 **남은 모든 것을 물들이는 사실**이어서다.
    */
   | { cause: "retiring"; days: number; reason: RetirementReason }
-  /** `note`는 옛 세이브가 들고 있는 사유 문장 — `reason`이 없을 때만 있다 */
   | {
       cause: "grievance";
-      reason: PlayerIssueReason | null;
-      note: string | null;
+      reason: PlayerIssueReason;
       days: number;
       count: number | null;
       /**
@@ -378,7 +376,7 @@ function afterglow(state: GameState, playerId: string, last: LastMatch): MoodFac
   };
 }
 
-/** 라커룸 불만의 사유 코드 — 옛 세이브는 문장을 들고 있어 그것이 폴백이다 */
+/** 라커룸 불만 — 사유 코드와 며칠째인가 */
 function grievanceOf(
   state: GameState,
   player: GamePlayer,
@@ -395,8 +393,7 @@ function grievanceOf(
       : null;
   return {
     cause: "grievance",
-    reason: issue.reason ?? null,
-    note: issue.note ?? null,
+    reason: issue.reason,
     days: Math.max(0, diffDays(issue.since, state.date)),
     count: issue.count ?? null,
     archetype: playerArchetypeOf(state.seed, player),
@@ -408,7 +405,7 @@ function grievanceOf(
  * 감독이 2군으로 내린 지 며칠째인가 — 아니면 null.
  *
  * `demotedOn`이 없으면 **감독이 내린 적이 없다**는 뜻이다 (시드가 2군에 세워 둔
- * 선수·옛 세이브). 방치의 대가는 감독의 결정에만 붙으므로 그때는 카드가 서지 않는다.
+ * 선수). 방치의 대가는 감독의 결정에만 붙으므로 그때는 카드가 서지 않는다.
  */
 function demotionDaysOf(state: GameState, player: GamePlayer): number | null {
   if (player.squadLevel !== "reserve") return null;
@@ -420,8 +417,7 @@ function demotionDaysOf(state: GameState, player: GamePlayer): number | null {
 /**
  * 최근 우리 구단에서 **계약이 해지된** 선수 — 원장에서 파생한다.
  *
- * 계약 만료도 해지도 `type: "free"`라 갈리는 것은 `reason` 코드뿐이다 — 옛 세이브만
- * 문장으로 떨어진다(`isRelease`, game-state.md §6의 유일한 판정 예외).
+ * 계약 만료도 해지도 `type: "free"`라 갈리는 것은 `reason` 코드뿐이다(`isRelease`).
  * 원장은 날짜 순이므로 뒤에서부터 훑고 창을 벗어나면 멈춘다 — 원장이 아무리 커도
  * 보는 줄은 몇 줄이다.
  *
@@ -775,16 +771,12 @@ export const MOOD_NOTE_DAYS = 10;
 
 // ── 사실을 옮겨 적는 자리 — 평가어·연출어를 쓰지 않는다 ────
 
-/**
- * 불만 사유를 **한국어 사실어**로. 문장이 아니라 이름이다.
- * 옛 세이브의 사유 문장(`note`)은 코드가 없을 때의 폴백이다.
- */
+/** 불만 사유를 **한국어 사실어**로. 문장이 아니라 이름이다 */
 export function issueReasonText(issue: {
-  reason?: PlayerIssueReason | null;
-  note?: string | null;
+  reason: PlayerIssueReason;
   count?: number | null;
 }): string | null {
-  return issueReasonKo(issue.reason, issue.count) ?? issue.note ?? null;
+  return issueReasonKo(issue.reason, issue.count);
 }
 
 /** 사유 코드의 한 낱말 — 코드는 장부의 것이고 이 표는 읽는 자리의 것이다 (season.md §6) */

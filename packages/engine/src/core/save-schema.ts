@@ -15,6 +15,7 @@ import {
   HistoryDigestSchema,
   InjurySchema,
   ManagerOfferSchema,
+  ManagerPoolEntrySchema,
   ManagerSchema,
   ManagerVacancySchema,
   MatchRecordSchema,
@@ -69,16 +70,16 @@ import {
 } from "@story-fm/domain";
 
 /**
- * **세이브가 통과해야 하는 문** — 로드의 세 번째 걸음
+ * **세이브가 통과해야 하는 문** — 로드의 두 번째 걸음이자 유일한 검사
  * (→ [docs/data/game-state.md](../../../../docs/data/game-state.md) §6).
  *
  * `packages/domain`의 Zod 스키마는 엔티티 정의(`z.infer`)이면서 여기서 로드의
- * 검사가 된다. 마이그레이션이 끝난 상태를 통째로 parse하고 그 결과를 그대로
- * 상태로 쓰므로, `.default()`가 붙은 축은 여기서 채워지고 스키마에 없는 찌꺼기
- * 키는 여기서 떨어진다.
+ * 검사가 된다. 상태를 통째로 parse하고 그 결과를 그대로 상태로 쓰므로, `.default()`가
+ * 붙은 축은 여기서 채워지고 스키마에 없는 찌꺼기 키는 여기서 떨어진다.
  *
- * ⚠️ **스키마를 좁히면 옛 세이브가 막힌다.** 필드를 필수로 올리거나 범위를 좁히는
- * 변경은 같은 PR에 마이그레이션(`core/migrations.ts`)을 함께 쓴다.
+ * **마이그레이션은 없다.** `createGame`이 세우는 테이블은 전부 필수다 — 새 테이블이
+ * 서면 여기에도 필수로 서고, 그 앞의 세이브는 `SAVE_VERSION`이 막는다. optional은
+ * 「없음이 뜻을 갖는」 필드에만 둔다(아래 주석이 그 뜻이다).
  *
  * `passthrough`인 이유: 스키마가 없는 축(`calendar` · `pendingMatch` · `chat` ·
  * `euroEntrants` …)은 **검사 밖이지 삭제 대상이 아니다.** 여기에 없다고 떨어뜨리면
@@ -101,7 +102,7 @@ export const SaveSchema = z
     matches: z.array(MatchRecordSchema),
     windows: z.array(TransferWindowSchema),
     manager: ManagerSchema,
-    // 마이그레이션이 채우는 목록·이력 (`fillEmptyTables`)
+    // 목록·이력 — `createGame`이 빈 배열로 세우고, 비어 있는 것이 곧 유효한 상태다
     trainingSessions: z.array(TrainingSessionSchema),
     negotiations: z.array(NegotiationSchema),
     injuries: z.array(InjurySchema),
@@ -115,60 +116,61 @@ export const SaveSchema = z
     seasonRecords: z.array(SeasonRecordSchema),
     trophies: z.array(TrophySchema),
     achievements: z.array(AchievementSchema),
+    awards: z.array(SeasonAwardSchema),
+    milestones: z.array(MilestoneSchema),
     narrative: z.array(NarrativeNoteSchema),
     scoutReports: z.array(ScoutReportSchema),
+    deferredScouts: z.array(DeferredScoutSchema),
+    scoutMissions: z.array(ScoutMissionSchema),
     settlingEvents: z.array(SettlingEventSchema),
     transferList: z.array(TransferListingSchema),
     transferRequests: z.array(TransferRequestSchema),
     interests: z.array(InterestSchema),
+    competingBids: z.array(CompetingBidSchema),
+    delegations: z.array(DelegationSchema),
     playerTraining: z.array(PlayerTrainingSchema),
+    trainingReports: z.array(TrainingReportSchema),
+    developmentFocus: z.array(z.string()),
+    mentoring: z.array(MentoringSchema),
     roleMemory: z.array(RoleMemorySchema),
     pressConferences: z.array(PressConferenceSchema),
     approaches: z.array(ApproachSchema),
     approachPressure: z.array(ApproachPressureSchema),
     pressLeaks: z.array(PressLeakSchema),
+    pressSackings: z.array(PressSackingSchema),
+    predictions: z.array(SeasonPredictionSchema),
+    media: z.array(MediaFactSchema),
     financeReports: z.array(FinanceReportSchema),
     history: z.array(SeasonHistorySchema),
-    // 없을 수 있는 것 — 로드가 채우지 않는다(없는 것이 곧 뜻이다)
-    personas: z.array(PersonaSchema).optional(),
-    /** 위임 방침 — 갈래째 단장에게 맡긴 일 (transfer.md §12-4). 옛 세이브엔 없다 */
-    delegations: z.array(DelegationSchema).optional(),
-    /** 무직 스태프 풀 (people.md §2-2). 옛 세이브엔 없다 */
-    staffPool: z.array(StaffPoolEntrySchema).optional(),
-    deferredScouts: z.array(DeferredScoutSchema).optional(),
-    scoutMissions: z.array(ScoutMissionSchema).optional(),
+    retired: z.array(RetiredPlayerSchema),
+    youthCandidates: z.array(YouthCandidateSchema),
+    callUps: z.array(CallUpSchema),
+    personas: z.array(PersonaSchema),
+    characterMemories: z.array(CharacterMemorySchema),
+    incidents: z.array(IncidentSchema),
+    relations: z.array(RelationSchema),
+    arcs: z.array(NarrativeArcSchema),
+    openings: z.array(OpeningSchema),
+    paymentSchedules: z.array(PaymentScheduleSchema),
+    boardDemands: z.array(BoardDemandSchema),
+    boardRequests: z.array(BoardRequestSchema),
+    dismissals: z.array(DismissalSchema),
+    managerOffers: z.array(ManagerOfferSchema),
+    managerVacancies: z.array(ManagerVacancySchema),
+    managerPool: z.array(ManagerPoolEntrySchema),
+    // 없음이 뜻인 것 — 로드가 채우지 않는다
+    /** 경질 카드 — 없으면 감독은 재직 중이다 (career.md §5.1) */
     dismissal: DismissalSchema.optional(),
-    dismissals: z.array(DismissalSchema).optional(),
-    managerOffers: z.array(ManagerOfferSchema).optional(),
-    managerVacancies: z.array(ManagerVacancySchema).optional(),
-    pressSackings: z.array(PressSackingSchema).optional(),
-    /** 언론의 시즌 예상 순위 — 소집일에 리그마다 한 줄 (season.md §2). 옛 세이브엔 없다 */
-    predictions: z.array(SeasonPredictionSchema).optional(),
-    /** 아직 읽지 않은 회견 밖의 기사 (people.md §4-1). 옛 세이브엔 없다 */
-    media: z.array(MediaFactSchema).optional(),
-    /** 클럽 비전 — 구단주 원형이 건 다년 계획 (career.md §5). 옛 세이브엔 없다 */
+    /**
+     * 무직 스태프 풀 — 없으면 그해의 결정적 추첨이 답하고, 빈 배열은 「다 데려갔다」다
+     * (people.md §2-2 · `staffPoolOf`)
+     */
+    staffPool: z.array(StaffPoolEntrySchema).optional(),
+    /** 클럽 비전 — 없으면 구단주가 아직 다년 계획을 걸지 않았다 (career.md §5) */
     clubVision: ClubVisionSchema.optional(),
-    boardDemands: z.array(BoardDemandSchema).optional(),
-    competingBids: z.array(CompetingBidSchema).optional(),
-    boardRequests: z.array(BoardRequestSchema).optional(),
+    /** 이력 압축의 자국 — 없으면 아직 한 번도 접지 않았다 (agents.md §5-1) */
     historyDigest: HistoryDigestSchema.optional(),
-    characterMemories: z.array(CharacterMemorySchema).optional(),
-    /** 감독이 말로 만든 사건 (people.md §6 「사건 기록」). 옛 세이브엔 없다 */
-    incidents: z.array(IncidentSchema).optional(),
-    /** 관계 등급 — 압축이 등급을 매긴 쌍만 앉는다 (people.md §6). 옛 세이브엔 없다 */
-    relations: z.array(RelationSchema).optional(),
-    arcs: z.array(NarrativeArcSchema).optional(),
-    /** 시작 사건 (career.md §1). 옛 세이브엔 없다 */
-    openings: z.array(OpeningSchema).optional(),
-    paymentSchedules: z.array(PaymentScheduleSchema).optional(),
-    developmentFocus: z.array(z.string()).optional(),
-    mentoring: z.array(MentoringSchema).optional(),
-    awards: z.array(SeasonAwardSchema).optional(),
-    milestones: z.array(MilestoneSchema).optional(),
-    retired: z.array(RetiredPlayerSchema).optional(),
-    youthCandidates: z.array(YouthCandidateSchema).optional(),
-    callUps: z.array(CallUpSchema).optional(),
-    trainingReports: z.array(TrainingReportSchema).optional(),
+    /** 2군 훈련 방침 — 없으면 감독이 고르지 않은 것이고 `balanced`로 읽는다 */
     reserveTraining: ReserveTrainingPolicySchema.optional(),
   })
   .passthrough();

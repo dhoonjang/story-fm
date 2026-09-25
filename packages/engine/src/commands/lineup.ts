@@ -194,7 +194,7 @@ function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | 
      */
     player.state.demotedOn = undefined;
     // 집중 육성은 2군의 것이다 — 올라온 선수는 결산 판정(LLM)이 움직인다 (season.md §2)
-    if (state.developmentFocus?.includes(player.id)) {
+    if (state.developmentFocus.includes(player.id)) {
       state.developmentFocus = state.developmentFocus.filter((id) => id !== player.id);
     }
     const freed = state.issues.some((i) => i.gamePlayerId === player.id && i.reason === "demotion");
@@ -224,7 +224,7 @@ function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | 
   tactics.assignments = tactics.assignments.filter((a) => a.playerId !== player.id);
   // 2군에는 완장이 없다 — 라커룸 서열의 후보도 1군뿐이다 (people.md §5-1)
   if (player.isCaptain) player.isCaptain = false;
-  if (player.isViceCaptain === true) player.isViceCaptain = undefined;
+  if (player.isViceCaptain) player.isViceCaptain = false;
   /**
    * **완장이 빠지듯 멘토도 빠진다** (people.md §5-3) — 라커룸의 아침이 갈렸으므로
    * 그가 맡던 아이들은 여기서 놓인다. ⚠️ 멘티로서 든 사이는 닫지 않는다: 멘티는 두
@@ -1489,8 +1489,8 @@ export function setSetPieceTakers(
  * 말한 축만 바뀌고, `null`을 주면 그 축이 중립(`normal`)으로 돌아간다 — 감독이 손을
  * 떼는 길이 있어야 한 번 올린 인원이 영영 서 있지 않는다.
  *
- * 중립은 **저장하지 않는다.** 옛 세이브가 이 칸을 갖지 않는 것과 지시를 푼 판이 같은
- * 모양이어야, 「지시하지 않음」이 장부에 두 가지로 적히지 않는다.
+ * 중립은 **저장하지 않는다.** 지시한 적 없는 판과 지시를 푼 판이 같은 모양이어야,
+ * 「지시하지 않음」이 장부에 두 가지로 적히지 않는다.
  */
 export function setSetPieceRoutine(
   state: GameState,
@@ -1517,7 +1517,7 @@ export function setSetPieceRoutine(
   if (!changed) {
     return { ok: true, message: "바뀐 지시가 없습니다", unchanged: true };
   }
-  // 두 축이 다 중립으로 돌아가면 칸 자체를 걷는다 — 옛 세이브와 같은 모양이 된다
+  // 두 축이 다 중립으로 돌아가면 칸 자체를 걷는다 — 지시한 적 없는 판과 같은 모양이 된다
   if (Object.keys(next).length === 0) delete tactics.setPieceRoutine;
   else tactics.setPieceRoutine = next;
   return {
@@ -1558,7 +1558,7 @@ export function setCaptain(
     // 팀당 1명 — 기존 주장 해제. 부주장이 완장을 올려 받으면 그 자리는 빈다
     for (const p of userPlayers(state)) p.isCaptain = false;
     player.isCaptain = true;
-    if (player.isViceCaptain === true) player.isViceCaptain = undefined;
+    if (player.isViceCaptain) player.isViceCaptain = false;
     /**
      * **체력 보너스는 선수당 첫 지명에만** (career.md §2). 완장은 몇 번이고 오가지만
      * 처음 채워지는 순간의 무게는 한 번뿐이다 — 문이 없으면 두 선수를 번갈아 지명하는
@@ -1584,7 +1584,7 @@ export function setCaptain(
     if (input.vice === null) {
       const before = userPlayers(state).find((p) => p.isViceCaptain === true);
       if (before) {
-        before.isViceCaptain = undefined;
+        before.isViceCaptain = false;
         notes.push("부주장 지정을 해제했습니다");
         items.push(item({ label: "부주장", text: "지정 해제" }));
       }
@@ -1598,7 +1598,7 @@ export function setCaptain(
           message: `${josa(vice.name, "은/는")} 이미 주장입니다 — 완장은 한 사람에 하나입니다`,
         };
       }
-      for (const p of userPlayers(state)) p.isViceCaptain = undefined;
+      for (const p of userPlayers(state)) p.isViceCaptain = false;
       vice.isViceCaptain = true;
       /**
        * **부주장에는 체력도 정착 크레딧도 붙지 않는다** (career.md §2) — 완장 둘에
@@ -1771,15 +1771,12 @@ export function rememberTactics(tactics: TeamTactics, on: string): void {
    * 벗어나면 그 값이 기억돼 왕복마다 적응도가 불어났다. 각자 자기가 도달한 값을
    * 적으면 되돌아왔을 때 **자기 값**을 되찾으므로 그 문제가 원천적으로 없다.
    *
-   * 개인 기억이 없는 옛 세이브는 팀 기억을 출발점으로 승계한다.
    */
   for (const a of tactics.assignments) {
-    a.drilled = withCurrentDrilled(
-      a.drilled ?? tactics.drilled,
-      tactics.spec,
-      a.familiarity,
-      on,
-    ).slice(0, DRILLED_LIMIT);
+    a.drilled = withCurrentDrilled(a.drilled, tactics.spec, a.familiarity, on).slice(
+      0,
+      DRILLED_LIMIT,
+    );
   }
 }
 
@@ -1803,8 +1800,7 @@ function shiftFactor(player: Player | null): number {
 
 /**
  * 경기 중 전술 변경이 치르는 적응도 대가의 비율 — 훈련장에서 바꿀 때의 몇 배인가.
- * ⚠️ 밸런스 값. AI 벤치가 판을 갈아 깔 때의 대가도 여기서 파생한다
- * (`match-flow`의 `AI_SHAPE_FAMILIARITY_COST`) — 두 벤치가 다른 값을 치르지 않는다.
+ * ⚠️ 밸런스 값.
  */
 export const IN_MATCH_FAMILIARITY_LOSS = 0.25;
 
@@ -1889,12 +1885,8 @@ export function memoryRetention(player: Player | null): number {
  * 정착이 끝나면 더는 얹지 않는다 — 그때쯤이면 자기 기억이 쌓여 있고, 우리 축구가
  * 그의 축구가 된다 (settling.ts).
  */
-function memoriesOf(
-  state: GameState,
-  assignment: TacticAssignment,
-  tactics: TeamTactics,
-): readonly DrilledTactics[] {
-  const own = assignment.drilled ?? tactics.drilled ?? [];
+function memoriesOf(state: GameState, assignment: TacticAssignment): readonly DrilledTactics[] {
+  const own = assignment.drilled ?? [];
   const settling = settlingOf(state, assignment.playerId);
   if (!settling || settling.done) return own;
   const from = state.transfers.find(
@@ -1933,7 +1925,7 @@ function retuneFamiliarity(
 ): void {
   for (const a of tactics.assignments) {
     const player = playerById(state, a.playerId);
-    const arrival = familiarityForSetup(memoriesOf(state, a, tactics), after, state.date, {
+    const arrival = familiarityForSetup(memoriesOf(state, a), after, state.date, {
       distanceOf: (memory, next) => personalDistance(player, memory, next),
       retention: memoryRetention(player),
     });

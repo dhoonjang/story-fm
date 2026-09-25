@@ -8,7 +8,6 @@ import {
   buildPlayerCard,
   marketValueOf,
   seasonStatOf,
-  categoryOf,
   cupProgressOf,
   type BracketStageView,
   financeOf,
@@ -33,7 +32,9 @@ import {
   seasonLabelOf,
   type GameState,
 } from "@story-fm/engine";
-import { edgeOf } from "@story-fm/sim";
+import { FINANCE_CATEGORY_KO } from "@story-fm/domain";
+import { matchFatigueOf } from "@story-fm/sim";
+import { observationOf } from "../src/squad/scouting";
 import {
   advanceAndPlay,
   advanceDays,
@@ -264,7 +265,7 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
       .map((l) => l.text);
     const FIXED = new Set(["broadcast_equal", "commercial", "player_wages", "staff_wages"]);
     const fixed = financeOf(state, state.userTeamId).ledger.filter(
-      (e) => FIXED.has(categoryOf(e)) && e.amount >= 1_000_000,
+      (e) => FIXED.has(e.category) && e.amount >= 1_000_000,
     );
     expect(fixed.length).toBeGreaterThan(0); // 문턱을 넘는 정액 항목이 실제로 쌓여 있다
     for (const e of fixed) {
@@ -283,11 +284,9 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
     const state = createTestGame(13);
     const day = state.date;
     state.narrative.push(
-      // 갈래를 모르는 옛 세이브의 줄 — other로 본다
-      { date: day, text: "옛 세이브의 줄", salience: 1 },
-      { date: day, text: "리버풀에서 오퍼 답 도착", salience: 3 },
+      { date: day, text: "리버풀에서 오퍼 답 도착", salience: 3, kind: "transfer" },
       // 같은 날 같은 문장은 한 번만 선다
-      { date: day, text: "리버풀에서 오퍼 답 도착", salience: 2 },
+      { date: day, text: "리버풀에서 오퍼 답 도착", salience: 2, kind: "transfer" },
       { date: day, text: "구단주 요청 — 8강 진출", salience: 5, kind: "other" },
       // 경기 줄은 일정 축이 이미 세운다 — 소식으로 두 번 서지 않는다
       { date: day, text: "프리미어리그 R1 vs 리버풀 2:1 승리", salience: 4, kind: "match" },
@@ -296,11 +295,7 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
     const news = (buildOfficeViews(state).calendar.events[day] ?? []).filter(
       (l) => l.kind === "news",
     );
-    expect(news.map((l) => l.text)).toEqual([
-      "구단주 요청 — 8강 진출",
-      "리버풀에서 오퍼 답 도착",
-      "옛 세이브의 줄",
-    ]);
+    expect(news.map((l) => l.text)).toEqual(["구단주 요청 — 8강 진출", "리버풀에서 오퍼 답 도착"]);
 
     // 일지가 되찾는 창은 서사 표의 상한(200)까지다 — 밀려난 줄은 일지에도 없다
     for (let i = 0; i < 210; i++) pushNarrative(state, `채움 ${i}`, 1);
@@ -381,21 +376,22 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
     }
   });
 
-  /** 라벨 규약 이전 세이브 — `이적료 상각 — 이름`이 접혀도 카테고리를 되풀이하지 않는다 */
+  /** `카테고리 이름 — 이름`으로 적힌 줄이 접혀도 카테고리를 되풀이하지 않는다 */
   it("항목명이 카테고리 이름을 되풀이하면 없는 것으로 읽는다", () => {
     const state = createTestGame();
     advanceDays(state, 10);
     const finance = financeOf(state, state.userTeamId);
+    const head = FINANCE_CATEGORY_KO.amortisation;
     finance.ledger = finance.ledger.map((e) =>
       e.category === "amortisation" && !e.label.includes(" — ")
-        ? { ...e, label: `이적료 상각 — ${e.label}` }
+        ? { ...e, label: `${head} — ${e.label}` }
         : e,
     );
     const row = buildOfficeViews(state)
       .finance.feed.filter((r) => r.category === "amortisation")
       .find((r) => (r.items?.length ?? 0) > 1)!;
     expect(row.label).toBe("");
-    expect(row.items!.every((i) => !i.label.includes("이적료 상각"))).toBe(true);
+    expect(row.items!.every((i) => !i.label.includes(head))).toBe(true);
   });
 
   it("대회 뷰는 우리 리그 + 우리 대항전이고 라운드별 일정을 담는다", () => {
@@ -588,7 +584,7 @@ describe("적응도 — 포지션과 전술을 하나로", () => {
 });
 
 describe("경기 화면 뷰", () => {
-  it("경기 중에만 채워지고, 판세·전술·선수 상태를 함께 담는다", () => {
+  it("경기 중에만 채워지고, 선수 상태를 함께 담는다", () => {
     const state = createTestGame(9, "manutd");
     expect(buildOfficeViews(state).match).toBeNull(); // 킥오프 전
     advanceToMatchday(state);
@@ -597,14 +593,6 @@ describe("경기 화면 뷰", () => {
     const m = buildOfficeViews(state).match!;
     expect(m.onPitch.home).toHaveLength(11);
     expect(m.onPitch.away).toHaveLength(11);
-    expect(m.zones).toHaveLength(3);
-    // 매치업은 맞붙는 두 값을 견준다 — 공격 존의 상대 값은 상대 **수비**다.
-    // 값은 우리 편 기준으로 접혀 온다 (자리만 홈 기준)
-    const attack = m.zones.find((z) => z.zone === "attack")!;
-    const packet = state.pendingMatch!.packet;
-    const weAreHome = m.home.ours;
-    expect(attack.ours).toBe(weAreHome ? packet.home.zones.attack : packet.away.zones.defense);
-    expect(attack.theirs).toBe(weAreHome ? packet.away.zones.defense : packet.home.zones.attack);
     // 선수마다 전력과 남은 다리
     for (const p of [...m.onPitch.home, ...m.onPitch.away]) {
       expect(p.effective).toBeGreaterThan(0);
@@ -615,23 +603,6 @@ describe("경기 화면 뷰", () => {
       expect(p.condition.value).toBeLessThanOrEqual(100);
     }
     expect(m.onPitch.home.some((p) => p.ours) || m.onPitch.away.some((p) => p.ours)).toBe(true);
-
-    /**
-     * 줄 머리(존 매치업)와 그 줄 아홉 칸은 **같은 판정에서 나와야 한다.**
-     * 화면은 색만 칠하므로, 둘이 갈리면 같은 판이 두 색으로 보이고 그때 감독이
-     * 믿는 것은 화면이지 코어의 매치업 문장이 아니다.
-     */
-    for (const zone of m.zones) {
-      const row = m.grid.filter((c) => c.band === zone.zone);
-      expect(row).toHaveLength(3);
-      const ours = row.reduce((sum, c) => sum + c.ours, 0);
-      const theirs = row.reduce((sum, c) => sum + c.theirs, 0);
-      const { edge, size } = edgeOf(ours / theirs);
-      expect(zone.edge, zone.label).toBe(
-        edge === "even" ? "even" : edge === "home" ? "ours" : "theirs",
-      );
-      if (zone.edge !== "even") expect(zone.size, zone.label).toBe(size);
-    }
   });
 
   /**
@@ -651,13 +622,9 @@ describe("경기 화면 뷰", () => {
       else expect(p.margin, p.name).toBeGreaterThan(0);
       expect(p.effective).toBeGreaterThan(0);
     }
-    // 폭만 있고 값이 안 흔들리면 안개가 아니다
-    const packet = state.pendingMatch!.packet;
-    const truthOf = new Map(
-      [...packet.home.lineup, ...packet.away.lineup].map((x) => [x.id, Math.round(x.effective)]),
-    );
+    // 폭만 있고 값이 안 흔들리면 안개가 아니다 — 명단 화면과 같은 채널의 오프셋이 실린다
     const theirs = all.filter((p) => !p.ours);
-    expect(theirs.some((p) => p.effective !== truthOf.get(p.id))).toBe(true);
+    expect(theirs.some((p) => observationOf(state, p.id).overallOffset !== 0)).toBe(true);
   });
 
   /**
@@ -716,7 +683,7 @@ describe("경기 화면 뷰", () => {
 
     const m = buildOfficeViews(state).match!;
     const all = [...m.onPitch.home, ...m.onPitch.away];
-    const worn = state.pendingMatch!.matchFatigue ?? {};
+    const worn = matchFatigueOf(state.pendingMatch!.live);
     const truthOf = (id: string) =>
       Math.round(Math.max(0, (playerById(state, id)?.state.condition ?? 0) - (worn[id] ?? 0)));
 
@@ -867,23 +834,39 @@ describe("대회 뷰 — 역대", () => {
   const leagueId = league.id;
   const others = league.standings.map((r) => r.teamId).filter((id) => id !== state.userTeamId);
   const seeded = league.honours?.count ?? 0;
-  // 우승한 시즌(승점을 안다)과 중위권 시즌(순서만 아는 이관 행)의 순서는 서로 다르다
+  // 우승한 시즌과 중위권 시즌의 순서는 서로 다르다
   const champOrder = [state.userTeamId, ...others];
   const midOrder = [...others.slice(0, 3), state.userTeamId, ...others.slice(3)];
+  /** 순위 i의 표 한 줄 — 승점이 순위를 따라 내려간다 */
+  const rowAt = (teamId: string, i: number) => ({
+    teamId,
+    record: {
+      played: 38,
+      wins: 20 - i,
+      draws: 8,
+      losses: 10 + i,
+      goalsFor: 60 - i,
+      goalsAgainst: 40 + i,
+      points: 68 - 3 * i,
+    },
+  });
   state.history = [
     // 이 대회를 모르는 시즌 — 다른 리그에 있었다. 역대 절에 빈 줄로 서면 안 된다
     {
       season: state.season - 3,
-      leagues: [{ leagueId: "other-league", rows: [{ teamId: others[0]! }] }],
+      teamId: state.userTeamId,
+      leagues: [{ leagueId: "other-league", rows: [rowAt(others[0]!, 0)] }],
       matches: [],
     },
     {
       season: state.season - 2,
-      leagues: [{ leagueId, rows: midOrder.map((teamId) => ({ teamId })) }],
+      teamId: state.userTeamId,
+      leagues: [{ leagueId, rows: midOrder.map(rowAt) }],
       matches: [],
     },
     {
       season: state.season - 1,
+      teamId: state.userTeamId,
       leagues: [
         {
           leagueId,
@@ -925,6 +908,8 @@ describe("대회 뷰 — 역대", () => {
       losses: 4,
       goalsFor: 90,
       goalsAgainst: 30,
+      leagueId,
+      board: { grade: "met", position: 1, target: 4, expectationCode: "europe", items: [] },
     },
   ];
   const view = () => buildOfficeViews(state).competitions.list[0]!;
@@ -945,14 +930,12 @@ describe("대회 뷰 — 역대", () => {
     expect(season.table[0]!.name).not.toBe("");
   });
 
-  it("이관된 행은 순위와 팀만 안다 — 승점 칸에 0을 채우지 않는다", () => {
-    const migrated = view().pastSeasons[1]!;
-    expect(migrated.table).toHaveLength(midOrder.length);
-    expect(migrated.table.every((r) => r.record === null)).toBe(true);
-    // 순위만은 그 행도 안다
-    expect(migrated.ourPosition).toBe(4);
-    expect(migrated.table.find((r) => r.ours)!.position).toBe(4);
-    expect(migrated.champion!.teamId).toBe(midOrder[0]);
+  it("중위권 시즌의 우리 순위는 그 표의 자리다", () => {
+    const mid = view().pastSeasons[1]!;
+    expect(mid.table).toHaveLength(midOrder.length);
+    expect(mid.ourPosition).toBe(4);
+    expect(mid.table.find((r) => r.ours)!.position).toBe(4);
+    expect(mid.champion!.teamId).toBe(midOrder[0]);
   });
 
   it("역대 우승은 카탈로그 시드에 게임 안의 우승을 더한 것이다", () => {

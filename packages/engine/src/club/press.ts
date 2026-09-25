@@ -323,10 +323,10 @@ const REPORTER_AT: Record<PressTrigger, number> = {
   "season-end": 0,
 };
 
-/** 그 자리를 여는 기자의 `characterId` — 기자단이 짧으면 첫 기자가, 없으면 아무도 묻지 않는다 */
-function reporterFor(state: GameState, trigger: PressTrigger): string | undefined {
+/** 그 자리를 여는 기자의 `characterId` — 기자단이 짧으면 첫 기자가 묻는다 (`reportersOf`는 비지 않는다) */
+function reporterFor(state: GameState, trigger: PressTrigger): string {
   const reporters = reportersOf(state);
-  return (reporters[REPORTER_AT[trigger]] ?? reporters[0])?.characterId;
+  return (reporters[REPORTER_AT[trigger]] ?? reporters[0])!.characterId;
 }
 
 /** 우리 시각의 결과 */
@@ -338,7 +338,7 @@ function outcomeOf(state: GameState, m: MatchRecord): "win" | "draw" | "loss" | 
   return us === them ? "draw" : us > them ? "win" : "loss";
 }
 
-/** 그 선수의 불만 사유 코드 — 옛 세이브는 문장만 들고 있어 그때는 없다 */
+/** 그 선수의 불만 사유 코드 — 불만이 없으면 null */
 function issueReasonOf(state: GameState, playerId: string): PlayerIssueReason | null {
   return state.issues.find((i) => i.gamePlayerId === playerId)?.reason ?? null;
 }
@@ -371,7 +371,7 @@ function questionablePlayer(state: GameState, seed: number): GamePlayer | null {
     .sort((a, b) => a.state.form - b.state.form)
     .slice(0, SLUMP_CANDIDATES);
   if (slumping.length > 0) return pick(makeRng(seed, "press"), slumping);
-  // 첫 줄이 아니라 **스쿼드에 있는 첫 불만** — 옛 세이브의 유령이 진짜 불만을 가리지 않게 (people.md §5)
+  // 첫 줄이 아니라 **스쿼드에 있는 첫 불만** — 떠난 선수의 줄이 진짜 불만을 가리지 않게 (people.md §5)
   const issue = state.issues.find((i) => squad.some((p) => p.id === i.gamePlayerId));
   if (issue) return squad.find((p) => p.id === issue.gamePlayerId) ?? null;
   return null;
@@ -937,7 +937,7 @@ export function openAppointmentPress(
   digest?: TickSink,
 ): void {
   const conference = buildAppointmentPress(state, predecessor);
-  if ((state.pressConferences ?? []).some((c) => c.id === conference.id)) return;
+  if (state.pressConferences.some((c) => c.id === conference.id)) return;
   openPress(state, conference, digest);
 }
 
@@ -1040,7 +1040,7 @@ function jobLinkFactOf(state: GameState): PressFact | null {
     sharp: true,
   });
 
-  const approach = (state.managerOffers ?? []).find(
+  const approach = state.managerOffers.find(
     (o) => o.via === "poach" && o.status === "open" && o.expiresOn >= state.date,
   );
   if (approach) return card("approach", approach.teamId);
@@ -1049,7 +1049,7 @@ function jobLinkFactOf(state: GameState): PressFact | null {
    * 재직 중에 선 면접만 남는다 — 부임이 `state.approaches`를 비우므로(career.md §5.1)
    * 여기 남아 있는 면접은 지금 임기에 감독이 두드려 연 자리뿐이다.
    */
-  const knock = (state.approaches ?? [])
+  const knock = state.approaches
     .filter(
       (a) =>
         a.topic === "interview" &&
@@ -1088,7 +1088,7 @@ function loadJobLink(state: GameState, conference: PressConference): void {
  * 곁들여 묻는 사실이다.
  */
 function loadSackings(state: GameState, conference: PressConference): void {
-  const rows = state.pressSackings ?? [];
+  const rows = state.pressSackings;
   if (rows.length === 0) return;
   for (const row of rows) {
     // 이직하면 앞 구단의 라이벌은 라이벌이 아니다 — 남의 더비를 새 구단 기자가 묻지 않는다
@@ -1130,7 +1130,7 @@ function leakReasonOf(topic: ApproachTopic): PlayerIssueReason | null {
  * 열지 않는 것도 같은 이유다 — 회견은 이미 경기마다 열린다.
  */
 function loadLeaks(state: GameState, conference: PressConference): void {
-  const leaks = state.pressLeaks ?? [];
+  const leaks = state.pressLeaks;
   if (leaks.length === 0) return;
   let loaded = false;
   for (const leak of leaks) {
@@ -1168,7 +1168,7 @@ const PRESS_INCIDENT_KINDS: ReadonlySet<IncidentKind> = new Set([
  * 그 회견의 날에서 `days`를 거슬러 사건의 날에 닿으면 그 사건이다.
  */
 function carriedIncident(state: GameState, incident: Incident, playerId: string): boolean {
-  return (state.pressConferences ?? []).some((c) =>
+  return state.pressConferences.some((c) =>
     c.facts.some(
       (f) =>
         f.kind === "incident" &&
@@ -1186,7 +1186,7 @@ function carriedIncident(state: GameState, incident: Incident, playerId: string)
  * `INCIDENT_PRESS_DAYS` 안의 것만, 당사자 한 사람에 카드 한 장이다.
  */
 function loadIncidents(state: GameState, conference: PressConference): void {
-  for (const incident of state.incidents ?? []) {
+  for (const incident of state.incidents) {
     if (!PRESS_INCIDENT_KINDS.has(incident.kind)) continue;
     // 회견의 날로 잰다 — 카드의 `days`를 거슬러 사건의 날에 닿아야 `carriedIncident`가 읽는다
     const days = diffDays(incident.date, conference.date);
@@ -1223,7 +1223,7 @@ function loadIncidents(state: GameState, conference: PressConference): void {
  */
 function loadTransferRequests(state: GameState, conference: PressConference): void {
   let loaded = false;
-  for (const request of state.transferRequests ?? []) {
+  for (const request of state.transferRequests) {
     if (request.pressedOn !== undefined) continue;
     const player = playerById(state, request.gamePlayerId);
     // 떠난 선수의 요청은 조용히 건너뛴다 — 우리 라커룸에 없는 사람에게 물을 자리가 아니다
@@ -1270,7 +1270,7 @@ const RUMOURS_PER_CONFERENCE = 2;
  * 참이다」가 각각 한 번씩 회견에 선다.
  */
 function loadRumours(state: GameState, conference: PressConference): void {
-  const rows = (state.interests ?? [])
+  const rows = state.interests
     .filter((row) => row.stage !== "watching" && row.pressedOn === undefined)
     // 우리 선수의 줄만 회견에 선다 — 떠난 선수도, 우리가 노리는 남의 선수도 물을 자리가 아니다
     .filter((row) => playerById(state, row.gamePlayerId)?.teamId === state.userTeamId)
@@ -1539,7 +1539,7 @@ function buildOpeningPress(
   /**
    * **언론이 매긴 예상** — 보드 기대 카드 바로 옆이다 (people.md §4-1 · season.md §2).
    * 둘이 갈릴 때가 기자가 물을 자리라, 하나만 서면 그 질문이 서지 않는다. 예상이
-   * 서지 않은 세이브(옛 세이브·소집일을 지나지 않은 시즌)에는 카드도 없다.
+   * 서지 않은 시즌(소집일을 지나지 않은 시즌)에는 카드도 없다.
    */
   const predictionRow = predictionOf(state, leagueOfTeamIn(state, state.userTeamId));
   const predicted = predictedPlaceOf(state, state.userTeamId);
@@ -1718,7 +1718,7 @@ export function openEvePress(state: GameState, digest?: TickSink): void {
     if (rivalQuote.sharp) conference.weight = Math.max(conference.weight, 2);
   }
   // 하루에 한 번 — 같은 날을 다시 지나도 자리가 둘이 되지 않는다
-  if ((state.pressConferences ?? []).some((c) => c.id === conference.id)) return;
+  if (state.pressConferences.some((c) => c.id === conference.id)) return;
   openPress(state, conference, digest);
 }
 
@@ -1863,7 +1863,7 @@ function buildFarewellPress(
 
 /** 답을 기다리는 회견 — 언제나 하나뿐이다 */
 export function pendingPress(state: GameState): PressConference | null {
-  return (state.pressConferences ?? []).find((c) => c.status === "pending") ?? null;
+  return state.pressConferences.find((c) => c.status === "pending") ?? null;
 }
 
 /**
@@ -1903,7 +1903,6 @@ export function expirePendingPress(state: GameState): void {
  * 대가도 거절과 같아야 한다 — 무시가 공짜면 아무도 답하지 않는다.
  */
 export function openPress(state: GameState, conference: PressConference, digest?: TickSink): void {
-  state.pressConferences ??= [];
   declinePendingPress(state, digest);
   loadLeaks(state, conference);
   loadIncidents(state, conference);

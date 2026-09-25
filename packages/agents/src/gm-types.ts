@@ -140,16 +140,6 @@ export class GmTurnFailure extends Error {
 export const TIME_PASSED = "시간 경과";
 
 /**
- * 경기가 한 구간 굴렀다는 기록의 이름 — **시계 이동과 같은 자리**다.
- *
- * 구간을 미는 것은 감독이 부른 도구가 아니라 코어가 한 일이라(`advanceSegment`)
- * 스킬 카탈로그에 이름이 없다. `advance_match`라고 적으면 영문 호출 이름들 사이에
- * 섞여 트레이스에 미등록 호출이 불린 것처럼 남으므로, `TIME_PASSED`와 같은 규약으로
- * 한글 이름을 쓴다. 화면에 세우지 않는 것은 이름이 아니라 `silent`가 정한다.
- */
-export const MATCH_ADVANCED = "경기 진행";
-
-/**
  * 감독이 화면의 손잡이로 협상에서 물러났다는 기록의 이름 — **시계 이동과 같은 자리**다.
  *
  * 방을 닫은 것은 모델이 부른 도구가 아니라 코어가 턴 앞에서 한 일이라(`closeNegotiation` —

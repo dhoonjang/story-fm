@@ -91,7 +91,7 @@ function capAt(value: number, ceiling?: number): number {
 
 /** 이 갈래에 선 방침 */
 function delegationFor(state: GameState, kind: NegotiationKind): Delegation | undefined {
-  return state.delegations?.find((d) => d.kind === kind);
+  return state.delegations.find((d) => d.kind === kind);
 }
 
 /**
@@ -123,7 +123,7 @@ function openSigningFor(state: GameState, player: GamePlayer, limit: MandateLimi
  * 가장 높이 오른 쪽이다. 단장이 구단을 지어내지 않고, 값은 감독이 등재하며 부른 호가다.
  */
 function openSaleFor(state: GameState, player: GamePlayer, limit: MandateLimit): CommandResult {
-  const suitor = (state.interests ?? [])
+  const suitor = state.interests
     .filter((i) => i.gamePlayerId === player.id && i.stage !== "watching")
     .sort(
       (a, b) =>
@@ -161,7 +161,7 @@ function openFor(
 
 /** 맡길 수 없는 자리 — 조항이 발동한 매각과 감독이 마주 앉은 협상 */
 function unavailable(state: GameState, negotiation: Negotiation, who: string): string | null {
-  if (negotiation.buyout === true) {
+  if (negotiation.buyout) {
     return `${who} 건은 바이아웃 조항이 발동한 매각입니다 — 맡길 것이 없습니다`;
   }
   if (state.pendingNegotiation?.negotiationId === negotiation.id) {
@@ -191,7 +191,7 @@ export function delegateNegotiation(state: GameState, input: DelegateInput): Com
     const kinds: NegotiationKind[] = input.kind
       ? [input.kind]
       : ["buy", "sell", "renew", "loan", "loan_out", "release"];
-    const rest = (state.delegations ?? []).filter((d) => !kinds.includes(d.kind));
+    const rest = state.delegations.filter((d) => !kinds.includes(d.kind));
     state.delegations = [
       ...rest,
       ...kinds.map((kind): Delegation => ({ kind, limit, since: state.date })),
@@ -259,9 +259,9 @@ export function revokeMandate(
       message: `${player.name} ${negotiationKindKo(negotiation)} 협상을 도로 가져왔습니다 — 이제 감독의 테이블입니다`,
     };
   }
-  const kinds = input.kind ? [input.kind] : (state.delegations ?? []).map((d) => d.kind);
+  const kinds = input.kind ? [input.kind] : state.delegations.map((d) => d.kind);
   if (kinds.length === 0) return { ok: false, message: "단장에게 맡겨 둔 일이 없습니다" };
-  state.delegations = (state.delegations ?? []).filter((d) => !kinds.includes(d.kind));
+  state.delegations = state.delegations.filter((d) => !kinds.includes(d.kind));
   // 방침으로 맡겨 둔 협상도 함께 돌아온다 — 방침만 거두면 굴러가던 자리가 남는다
   for (const negotiation of state.negotiations) {
     if (isMandated(negotiation) && kinds.includes(negotiation.kind)) negotiation.mandate = null;
@@ -457,14 +457,14 @@ function targetsFor(state: GameState, kind: NegotiationKind): GamePlayer[] {
       .filter(fresh);
   }
   if (kind === "sell") {
-    return (state.transferList ?? [])
+    return state.transferList
       .map((listing) => playerById(state, listing.gamePlayerId))
       .filter(fresh)
       .filter((player) => player.teamId === state.userTeamId);
   }
   if (kind === "buy") {
     // 임무가 세운 차례 그대로다 — 다시 줄을 세우면 카드가 보여 준 순서와 어긋난다
-    return (state.scoutMissions ?? [])
+    return state.scoutMissions
       .filter((mission) => mission.completedOn !== null)
       .flatMap((mission) => mission.candidates ?? [])
       .map((id) => playerById(state, id))

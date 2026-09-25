@@ -175,7 +175,7 @@ export function scoutMission(state: GameState, input: ScoutMissionInput): Market
   }
 
   const draft: ScoutMission = {
-    id: `mission-${state.date}-${(state.scoutMissions ?? []).length}`,
+    id: `mission-${state.date}-${state.scoutMissions.length}`,
     ...(competition.competitionId === null ? {} : { competitionId: competition.competitionId }),
     ...(position === undefined ? {} : { position }),
     ...(input.minAge === undefined ? {} : { minAge: input.minAge }),
@@ -199,7 +199,7 @@ export function scoutMission(state: GameState, input: ScoutMissionInput): Market
     };
   }
 
-  const missions = (state.scoutMissions ??= []);
+  const missions = state.scoutMissions;
   if (freeScoutSlots(state) <= 0) {
     /**
      * 못 나갔다는 사실을 **표에 남긴다** — 반려 문구는 이 턴에만 살아 있어, 남기지

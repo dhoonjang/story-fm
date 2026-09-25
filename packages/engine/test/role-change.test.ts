@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { defaultRoleOf, inheritedRole, roleAtSlot, rolesFor } from "@story-fm/domain";
 import {
-  advanceSegment,
+  markEntered,
   assignmentsOf,
   finalizeMatch,
   movePlayerSlot,
@@ -12,7 +12,7 @@ import {
   userTactics,
   type GameState,
 } from "@story-fm/engine";
-import { advanceToMatchday, createTestGame } from "./helpers";
+import { advanceToMatchday, createTestGame, playToFullTime } from "./helpers";
 
 /**
  * 역할 변경의 대가 — **결정 하나에 한 번만.**
@@ -167,11 +167,8 @@ describe("경기 중에 바꾼 역할은 기억에 남지 않는다", () => {
     expect(recallRole(state, id, away)).toBeUndefined();
 
     // 끝까지 치른다 — `restoreTactics`가 도는 자리
-    let guard = 60;
-    while (state.pendingMatch && state.pendingMatch.ledger.phase !== "finished" && guard-- > 0) {
-      const step = advanceSegment(state);
-      expect(step.ok, step.message).toBe(true);
-    }
+    markEntered(state);
+    playToFullTime(state);
     finalizeMatch(state);
 
     expect(slotOf(state, id).position).toBe(position);

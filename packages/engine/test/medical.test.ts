@@ -202,6 +202,10 @@ function handBuiltBuy(state: GameState, player: GamePlayer, base: string, wantFl
     openedOn: state.date,
     expiresOn: addDays(state.date, 14),
     status: "agreed",
+    pitched: [],
+    precontract: false,
+    terms: [],
+    buyout: false,
     // 검진은 **오늘** 끝나도록 손으로 잡는다 — 굴림이 협상 id에만 달리게 된다
     medical: { onDate: state.date, status: "scheduled" },
     rounds: [
@@ -347,6 +351,10 @@ describe("우리가 파는 쪽이면 상대가 값을 깎는다", () => {
       openedOn: state.date,
       expiresOn: addDays(state.date, 14),
       status: "open",
+      pitched: [],
+      precontract: false,
+      terms: [],
+      buyout: false,
       rounds: [
         {
           date: state.date,
@@ -405,6 +413,10 @@ describe("우리가 파는 쪽이면 상대가 값을 깎는다", () => {
       openedOn: state.date,
       expiresOn: addDays(state.date, 14),
       status: "open",
+      pitched: [],
+      precontract: false,
+      terms: [],
+      buyout: false,
       rounds: [
         {
           date: state.date,

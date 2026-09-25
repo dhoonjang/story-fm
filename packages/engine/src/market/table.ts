@@ -90,19 +90,8 @@ export function defaultPartyOf(state: GameState, negotiation: Negotiation): Tabl
   return partiesOf(state, negotiation)[0] ?? "agent";
 }
 
-/**
- * 그 자리의 테이블 — 없으면 `undefined`. 옛 세이브의 한 자리 테이블(`table`)은 처음 읽을 때
- * 기본 자리로 옮긴다: 상대가 갈리기 전의 줄은 그 자리에 앉았던 사람의 것이다.
- */
-export function tableOf(
-  state: GameState,
-  negotiation: Negotiation,
-  party: TableParty,
-): NegotiationTable | undefined {
-  if (negotiation.table && !negotiation.tables) {
-    negotiation.tables = { [defaultPartyOf(state, negotiation)]: negotiation.table };
-    delete negotiation.table;
-  }
+/** 그 자리의 테이블 — 아직 앉지 않았으면 `undefined` */
+export function tableOf(negotiation: Negotiation, party: TableParty): NegotiationTable | undefined {
   return negotiation.tables?.[party];
 }
 
@@ -112,7 +101,7 @@ function ensureTable(
   negotiation: Negotiation,
   party: TableParty,
 ): NegotiationTable {
-  const standing = tableOf(state, negotiation, party);
+  const standing = tableOf(negotiation, party);
   if (standing) return standing;
   const patience = tablePatienceOf(state, negotiation, party);
   const table: NegotiationTable = {
@@ -258,7 +247,7 @@ export function seatViewOf(
   negotiation: Negotiation,
   party: TableParty,
 ): TableSeat {
-  const standing = tableOf(state, negotiation, party);
+  const standing = tableOf(negotiation, party);
   const patience = tablePatienceOf(state, negotiation, party);
   return {
     ...seatOf(state, negotiation, party),
@@ -280,7 +269,7 @@ function seatOf(state: GameState, negotiation: Negotiation, party: TableParty): 
   return {
     negotiation,
     party,
-    table: tableOf(state, negotiation, party)!,
+    table: tableOf(negotiation, party)!,
     anchor,
     voices: tableVoicesOf(state, negotiation).filter((v) => v.speaker === party),
     asks: party === "agent" ? termAsksOf(state, negotiation) : [],
@@ -314,13 +303,8 @@ export function settleTableReply(
   // ── 논거 — 사실만 가린다 (persuasion.ts) ──
   const claims = reply?.heard?.claims ?? [];
   if (claims.length > 0) {
-    const outcome = evaluatePitch(
-      state,
-      negotiation.gamePlayerId,
-      claims,
-      negotiation.pitched ?? [],
-    );
-    negotiation.pitched = [...new Set([...(negotiation.pitched ?? []), ...outcome.verified])];
+    const outcome = evaluatePitch(state, negotiation.gamePlayerId, claims, negotiation.pitched);
+    negotiation.pitched = [...new Set([...negotiation.pitched, ...outcome.verified])];
     for (const v of outcome.verdicts) {
       const label = PITCH_CLAIM_KO[v.kind];
       ledger.push(
@@ -516,7 +500,7 @@ export function markSeated(state: GameState): void {
   const negotiation = state.negotiations.find((n) => n.id === room.negotiationId);
   if (!negotiation || !isMandated(negotiation)) return;
   negotiation.mandate = null;
-  const table = tableOf(state, negotiation, room.party ?? defaultPartyOf(state, negotiation));
+  const table = tableOf(negotiation, room.party);
   table?.lines.push(ledgerLine(state, "감독이 마주 앉아 위임을 걷었다"));
 }
 
@@ -549,7 +533,7 @@ export function closeNegotiation(
   }
   const negotiation = state.negotiations.find((n) => n.id === room.negotiationId);
   if (reason === "left" && negotiation && negotiation.status === "open") {
-    const table = tableOf(state, negotiation, room.party ?? defaultPartyOf(state, negotiation));
+    const table = tableOf(negotiation, room.party);
     table?.lines.push(ledgerLine(state, "감독이 자리에서 일어났다 — 협상은 열려 있다"));
   }
   state.phase = room.phaseBefore;

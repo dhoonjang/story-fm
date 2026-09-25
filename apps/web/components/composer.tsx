@@ -236,12 +236,17 @@ export function Composer({
           className={hasInput ? "send" : inMatch ? "send" : "skip"}
           onClick={() => {
             if (hasInput) return void onSend();
-            if (inMatch && liveControl) return liveControl.toggle();
-            if (inMatch) return void onOperate({ kind: "advance_match" });
+            if (inMatch) return liveControl?.toggle();
             setSkipOpen((v) => !v);
           }}
           disabled={
-            busy || (!hasInput && (liveControl?.blocked || inNegotiation || (!inMatch && !canSkip)))
+            busy ||
+            (!hasInput &&
+              (liveControl?.blocked ||
+                inNegotiation ||
+                // 경기 중인데 굴릴 판이 없다 — 킥오프 게이트 앞이거나 마감을 기다린다
+                (inMatch && !liveControl) ||
+                (!inMatch && !canSkip)))
           }
           data-testid={hasInput ? "chat-send" : inMatch ? "match-advance" : "time-skip-toggle"}
           aria-label={
@@ -252,7 +257,7 @@ export function Composer({
                   ? "경기 재개"
                   : "경기 일시정지"
                 : inMatch
-                  ? "경기 진행"
+                  ? "경기 재개"
                   : "시간 보내기"
           }
           /* 잠긴 이유는 사실 한 줄 — 방 안에서 날짜는 흐르지 않는다 (transfer.md §12-2) */

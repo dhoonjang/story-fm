@@ -29,7 +29,7 @@ import {
 } from "@story-fm/engine";
 import type { MatchRecord } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
-import { advanceAndPlay, createMiniGame, createTestGame } from "./helpers";
+import { advanceAndPlay, createMiniGame, createTestGame, resultOf } from "./helpers";
 
 /**
  * 프리시즌 친선 — 소집일과 개막 사이의 다섯 주에 경기가 선다 (season.md §2).
@@ -103,11 +103,10 @@ describe("편성 — 소집일과 개막 사이, 주 1회 토요일", () => {
     }
   });
 
-  it("대회에 속하지 않는 경기다 — competitionId 널, 단계 없음, 결과 없음", () => {
+  it("대회에 속하지 않는 경기다 — competitionId 널, 결과 없음", () => {
     for (const m of friendlies) {
       expect(isFriendly(m)).toBe(true);
       expect(m.competitionId).toBeNull();
-      expect(m.stage).toBeUndefined();
       expect(m.result).toBeNull();
       expect(m.id.startsWith("m-friendly-")).toBe(true);
     }
@@ -219,7 +218,7 @@ describe("친선은 대회를 세는 자리에 닿지 않는다", () => {
     const state = createMiniGame(42, USER);
     const before = computeStandings(state);
     for (const m of state.matches.filter(isFriendly)) {
-      m.result = { homeGoals: 5, awayGoals: 0, scorers: [] };
+      m.result = resultOf({ homeGoals: 5, awayGoals: 0 });
     }
     const after = computeStandings(state);
     expect(after).toEqual(before);
@@ -231,7 +230,7 @@ describe("친선은 대회를 세는 자리에 닿지 않는다", () => {
     expect(allMatchesDone(state)).toBe(false);
     // 리그만 다 치른 상태 — 친선은 결과 없이 그대로 남는다
     for (const m of state.matches.filter((m) => !isFriendly(m))) {
-      m.result = { homeGoals: 1, awayGoals: 1, scorers: [] };
+      m.result = resultOf({ homeGoals: 1, awayGoals: 1 });
     }
     expect(state.matches.some((m) => isFriendly(m) && m.result === null)).toBe(true);
     expect(allMatchesDone(state)).toBe(true);
@@ -240,7 +239,7 @@ describe("친선은 대회를 세는 자리에 닿지 않는다", () => {
   it("친선만 치른 상태로는 시즌이 끝나지 않는다", () => {
     const state = createMiniGame(42, USER);
     for (const m of state.matches.filter(isFriendly)) {
-      m.result = { homeGoals: 2, awayGoals: 1, scorers: [] };
+      m.result = resultOf({ homeGoals: 2, awayGoals: 1 });
     }
     expect(allMatchesDone(state)).toBe(false);
   });
@@ -261,6 +260,7 @@ function homeMatch(competitionId: string | null): MatchRecord {
     id: `test-${competitionId ?? "friendly"}`,
     season: 1,
     competitionId,
+    stage: "league",
     round: 1,
     date: "2026-08-01",
     time: "15:00",
@@ -306,6 +306,7 @@ describe("친선을 치러도 장부는 움직이지 않는다", () => {
       id: "friendly-ai",
       season: state.season,
       competitionId: null,
+      stage: "league",
       round: 1,
       date: state.date,
       time: "15:00",

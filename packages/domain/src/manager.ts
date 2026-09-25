@@ -9,7 +9,7 @@ import { DateString } from "./date-string";
  * | 축 | 계수가 들어가는 자리 |
  * | --- | --- |
  * | `leadership` 리더십 | 팀토크·면담 변화량 · 주장을 통한 전파 |
- * | `tactics` 전술 | 전술 소화율 — 지시가 전력 패킷에 닿는 강도 |
+ * | `tactics` 전술 | 전술 소화율 — 지시가 경기에 닿는 강도 |
  * | `training` 훈련 | 훈련 결산의 성장 폭 — 같은 세션도 감독에 따라 남는 게 다르다 |
  * | `negotiation` 협상 | 이적·재계약 판정의 수락 문턱·조정 폭 |
  * | `analysis` 분석 | 스카우트·상대 분석 리포트의 해상도(안개가 좁아지는 정도) |
@@ -154,31 +154,12 @@ export function describeManagerSkills(attributes: ManagerAttributes): string {
 }
 
 /**
- * ⚠️ **날짜 게이트가 있던 시절의 자리** — 지금은 아무 데서도 읽지 않는다.
- *
- * 대화는 하루에 몇 번이든 판정이 서고, 되풀이를 자르는 것은 게이트가 아니라 듣는
- * 선수마다의 사기 합계 상한이다(`PlayerState.talkMorale` — career.md §2). 옛 세이브가
- * 들고 오는 값을 반려하지 않으려고 스키마에만 남는다 — 새로 쓰이지 않는다.
- */
-export const TeamTalkLogSchema = z
-  .object({
-    pre: DateString,
-    half: DateString,
-    post: DateString,
-    daily: DateString,
-  })
-  .partial();
-export type TeamTalkLog = z.infer<typeof TeamTalkLogSchema>;
-
-/** 라커룸의 네 자리 — 정지점의 외침(`shout`)을 뺀 나머지이자 `TeamTalkLog`의 키다 */
-export type DailyTeamTalkOccasion = keyof TeamTalkLog;
-
-/**
  * 감독이 말을 꺼낸 **자리**.
  *
  * 넷은 라커룸이다. 다섯째 `shout`은 진행 중 정지점에서 던지는 짧은 말이라 **경기가
  * 센다** — 장부는 `PendingMatch.shouts`(경기당 `SHOUT_PER_MATCH`)이고, 폭도 라커룸의
- * 한마디보다 좁다 (career.md §2).
+ * 한마디보다 좁다 (career.md §2). 대화는 하루에 몇 번이든 판정이 서고, 되풀이를
+ * 자르는 것은 듣는 선수마다의 사기 합계 상한이다(`PlayerState.talkMorale`).
  */
 export const TEAM_TALK_OCCASIONS = ["pre", "half", "post", "daily", "shout"] as const;
 export type TeamTalkOccasion = (typeof TEAM_TALK_OCCASIONS)[number];
@@ -189,7 +170,6 @@ export type TeamTalkOccasion = (typeof TEAM_TALK_OCCASIONS)[number];
  * 새 게임은 부임 구단 등급의 기본 조건(`MANAGER_TERMS_BY_TIER`)으로 시작하고,
  * 부임은 제안의 조건으로 계약을 다시 세운다. 만료일이 지나면 감독은 무직이 되고,
  * 경질은 계약을 지우며 위약금을 남긴다 (career.md §5.4).
- * 옛 세이브엔 없다 (optional — 세이브 버전 유지).
  */
 export const ManagerContractSchema = z.object({
   /** 연봉 (£/년) — 매월 1일 구단 지출에 1/12로 선다 (finance.md §6) */
@@ -199,7 +179,7 @@ export const ManagerContractSchema = z.object({
   /**
    * 보드가 재계약 여부를 판정한 날 — **만료 90일 전에 한 번뿐이다** (career.md §5.4).
    * 서 있으면 다시 판정하지 않는다: 매일 다시 보면 평판이 오르내릴 때마다 통보가
-   * 번복된다. 옛 세이브엔 없다.
+   * 번복된다. 없으면 아직 판정하지 않았다.
    */
   renewalDecidedOn: DateString.optional(),
   /** 그 판정이 재계약 제안으로 이어졌는가 — 아니면 비갱신 통보다 */
@@ -283,44 +263,35 @@ export const ManagerSchema = z.object({
   reputation: ManagerReputationSchema,
   /**
    * 이번 시즌 스탠스가 옮긴 평판 누계 — 시즌 목줄이 읽는 자리 (career.md §4).
-   * 옛 세이브엔 없다 (없으면 0에서 시작 — 세이브 버전 유지).
+   * 적힌 시즌이 지금과 다르면 지난 시즌 장부라 읽는 쪽이 0에서 다시 센다.
    */
-  stanceSeason: StanceSeasonSchema.optional(),
+  stanceSeason: StanceSeasonSchema,
   /**
    * 보드의 경고 횟수 — 세 번째에서 자리가 없어진다 (`manager-market.ts`).
    * 기대 위로 올라서면 하나가 지워진다: 되돌릴 수 있어야 압박이 이야기가 된다.
-   * 옛 세이브엔 없다 (없으면 0 — 세이브 버전 유지).
+   * 이직하면 0으로 돌아간다 — 앞 구단의 경고를 지고 가지 않는다.
    */
-  boardWarnings: z.number().int().min(0).optional(),
-  /** 마지막 경고일 — 같은 말을 매일 반복하지 않기 위한 자리 */
+  boardWarnings: z.number().int().min(0),
+  /** 마지막 경고일 — 같은 말을 매일 반복하지 않기 위한 자리. 없으면 경고받은 적 없다 */
   lastWarnedOn: z.string().optional(),
-  /**
-   * 자리별 마지막 팀토크 날짜 — 같은 말을 하루에 몇 번이고 반복해 사기를 쌓지 못하게
-   * 막는 문 (`TeamTalkLogSchema`).
-   *
-   * 옛 세이브엔 없다 — 없으면 아직 아무 자리에서도 말한 적 없는 것으로 읽고
-   * 세이브 버전을 올리지 않는다.
-   */
-  teamTalkedOn: TeamTalkLogSchema.optional(),
-  /** 감독 계약 — 옛 세이브엔 없다 (없으면 연봉 지출도 없다, 세이브 버전 유지) */
+  /** 감독 계약 — 없으면 무직이다 (경질·만료가 지운다, 연봉 지출도 없다) */
   contract: ManagerContractSchema.optional(),
   /**
    * **개인 지갑** (£) — 구단이 낸 연봉과 경질 위약금이 쌓이는 자리 (career.md §5.4).
    *
    * ⚠️ **구단 잔고와 다른 돈이다.** 지갑은 감독의 것이라 구단을 옮겨도 따라가고,
    * 구단 장부는 `Finance.balance`가 따로 갖는다 — 섞으면 감독의 돈이 구단의 재정을
-   * 흔든다. 옛 세이브엔 없다 (없으면 0 — 세이브 버전 유지).
+   * 흔든다.
    */
-  wallet: z.number().int().min(0).optional(),
+  wallet: z.number().int().min(0),
   /**
    * **감독이 쓴 돈의 이력이자 시즌 상한의 장부** (career.md §5.4).
    *
    * 이번 시즌 항목은 전부 남는다 — 시즌 문(사재 출연 상한 · 보너스 선수당 1회·시즌
    * 3명)이 여기서 누계를 세므로, 절단(`MANAGER_WALLET.KEPT`)은 지난 시즌 항목에만
-   * 걸린다. 화면의 "최근 몇 건"은 뷰가 자른다. 옛 세이브엔 없다 (없으면 빈 배열 —
-   * 세이브 버전 유지).
+   * 걸린다. 화면의 "최근 몇 건"은 뷰가 자른다.
    */
-  spending: z.array(ManagerSpendSchema).optional(),
+  spending: z.array(ManagerSpendSchema),
 });
 export type Manager = z.infer<typeof ManagerSchema>;
 
@@ -341,30 +312,24 @@ export const DismissalSchema = z.object({
    * 나간 사임(`resigned`) · **다른 구단이 보상금을 물고 데려간 이적**(`moved` —
    * career.md §5.1) (career.md §5.4). 무직은 **상태지 사유가 아니라서** 카드 하나가
    * 넷을 다 든다. ⚠️ `moved`만 그 뒤가 무직이 아니다 — 같은 날 새 벤치에 서므로
-   * 이 카드는 `dismissal`에 서지 않고 곧장 이력에 적힌다. 옛 세이브엔 없다 (없으면
-   * 경질 — 만료 판정이 생기기 전의 카드는 전부 경질이다).
+   * 이 카드는 `dismissal`에 서지 않고 곧장 이력에 적힌다.
    */
-  kind: z.enum(["sacked", "expired", "resigned", "moved"]).optional(),
+  kind: z.enum(["sacked", "expired", "resigned", "moved"]),
   /** 어느 구단에서 잘렸나 */
   teamId: z.string().min(1),
   /** 그 구단의 등급 — 같은 순위가 어디서는 성공이고 어디서는 해고인 이유 */
-  tier: z.number().int().min(1).max(4).optional(),
-  /** 경질일의 리그 순위 */
+  tier: z.number().int().min(1).max(4),
+  /** 경질일의 리그 순위 — 아직 리그전을 치르지 않았으면 없다 */
   position: z.number().int().min(1).optional(),
   /** 보드가 걸었던 기대 순위 */
-  target: z.number().int().min(1).optional(),
-  /** 기대의 갈래 — 이름은 화면이 만든다 (career.md §6). 옛 세이브엔 없다(optional) */
-  expectationCode: BoardExpectationCodeSchema.optional(),
-  /** 옛 세이브가 들고 있는 기대의 이름 — 새 카드는 적지 않는다 (`expectationCode`의 폴백) */
-  expectation: z.string().min(1).optional(),
-  /** 옛 세이브가 들고 있는 평가 문장 — 더는 쓰지 않는다 (카드의 폴백) */
-  reason: z.string().optional(),
+  target: z.number().int().min(1),
+  /** 기대의 갈래 — 이름은 화면이 만든다 (career.md §6) */
+  expectationCode: BoardExpectationCodeSchema,
   /**
    * 위약금 (£) — **누가 물었는지는 `kind`가 안다** (career.md §5.4). 경질이면 구단이
    * 물어 지갑에 들어온 돈이고, 사임이면 감독이 지갑에서 물어 옛 구단에 들어간 돈이며,
    * 이적이면 **새 구단이 옛 구단에 문 보상금**이라 지갑을 지나지 않는다 (§5.1).
-   * 만료는 끝까지 간 계약이라 물 것이 없고, 계약이 없던 옛 세이브의 경질도 0이라
-   * 적지 않는다.
+   * 만료는 끝까지 간 계약이라 물 것이 없어 적지 않는다.
    */
   severance: z.number().int().min(0).optional(),
 });
@@ -389,16 +354,11 @@ export const ManagerOfferSchema = z.object({
   position: z.number().int().min(1).optional(),
   /** 그 자리에 걸리는 기대 순위와 그 갈래 — 이름은 화면이 만든다 */
   target: z.number().int().min(1),
-  expectationCode: BoardExpectationCodeSchema.optional(),
-  /** 옛 세이브가 들고 있는 기대의 이름 — 새 제안은 적지 않는다 (`expectationCode`의 폴백) */
-  expectation: z.string().min(1).optional(),
-  /**
-   * 제시 조건 — 연봉·계약 연수·이적 예산 약속 (career.md §5.1).
-   * 옛 세이브의 제안엔 없다 — 수락하는 순간 등급 표의 기본으로 선다.
-   */
-  salary: z.number().int().min(0).optional(),
-  years: z.number().int().min(1).optional(),
-  budgetPledge: z.number().int().min(0).optional(),
+  expectationCode: BoardExpectationCodeSchema,
+  /** 제시 조건 — 연봉·계약 연수·이적 예산 약속 (career.md §5.1) */
+  salary: z.number().int().min(0),
+  years: z.number().int().min(1),
+  budgetPledge: z.number().int().min(0),
   /**
    * 어떻게 섰나 — 공석이 불렀나(`vacancy`), 감독이 두드렸나(`knock`), 지금 구단이
    * 재계약을 걸었나(`renewal` — career.md §5.4), 아니면 다른 구단이 **재직 중인**
@@ -407,7 +367,7 @@ export const ManagerOfferSchema = z.object({
    * 재직 중에 설 수 있는 것은 셋이다 — `renewal`·`poach`, 그리고 재직 중에 두드려
    * 얻은 `knock`. `vacancy`는 무직에게만 붙는다.
    */
-  via: z.enum(["vacancy", "knock", "renewal", "poach"]).optional(),
+  via: z.enum(["vacancy", "knock", "renewal", "poach"]),
   /**
    * **이 자리가 옛 구단에 물 보상금** (£) — 재직 중인 감독을 부르는 제안에만 실린다
    * (career.md §5.1). 금액은 경질 위약금과 같은 식(`managerSeveranceOf`)으로 **부를
@@ -424,8 +384,7 @@ export type ManagerOffer = z.infer<typeof ManagerOfferSchema>;
  * **공석 명부의 한 줄** — AI 구단이 감독을 자른 자리 (career.md §5.1).
  *
  * 재직 중에도 쌓이고 14일 뒤 지워진다. 감독이 먼저 지원(`apply_manager_job`)할 수
- * 있는 문이고, 재직 중에 두드리면 보드 평판이 깎인다. 옛 세이브엔 없다 (optional —
- * 세이브 버전 유지).
+ * 있는 문이고, 재직 중에 두드리면 보드 평판이 깎인다.
  */
 export const ManagerVacancySchema = z.object({
   teamId: z.string().min(1),
@@ -455,8 +414,6 @@ export type ManagerSpell = z.infer<typeof ManagerSpellSchema>;
  * 감독은 자리가 아니라 사람이다. 잘린 사람은 여기 앉아 다른 벤치가 부를 때까지
  * 기다리고, 다시 서면 **이름·사람됨·역량치·이력을 그대로 들고 간다**. 명부의
  * 실명 감독도 같은 줄에 앉는다 (people.md §2-1).
- *
- * 옛 세이브엔 없다 (optional — 세이브 버전 유지).
  */
 export const ManagerPoolEntrySchema = z.object({
   /** 이름이 곧 `characterId`다 (people.md §1) */
@@ -469,12 +426,6 @@ export const ManagerPoolEntrySchema = z.object({
   lastTeamId: z.string().min(1),
   /** 자리를 잃은 날 — 상한이 넘칠 때 오래된 순으로 밀리는 기준이자 식은 기간의 기준 */
   sackedOn: DateString,
-  /**
-   * **사람됨을 읽는 옛 채널의 팀** — 채널이 `(시드, 팀, 이름)`이던 시절의 세이브만
-   * 든다 (people.md §2). 그 사람과 함께 다니므로 옛 세이브의 감독도 벤치를 건너
-   * 같은 사람이다. 새 게임의 감독에게는 없다.
-   */
-  personaSeat: z.string().min(1).optional(),
   /** 지난 재임들 — 오래된 것이 앞이다 */
   spells: z.array(ManagerSpellSchema),
 });

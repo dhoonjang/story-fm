@@ -80,7 +80,7 @@ function opponentIn(state: GameState, match: MatchRecord): string | null {
  */
 export function managerReturnOf(state: GameState, teamId: string): ManagerReturn | null {
   let last: Dismissal | null = null;
-  for (const card of state.dismissals ?? []) {
+  for (const card of state.dismissals) {
     if (card.teamId !== teamId) continue;
     if (!last || card.on > last.on) last = card;
   }
@@ -89,8 +89,7 @@ export function managerReturnOf(state: GameState, teamId: string): ManagerReturn
   if (days === null) return null;
   return {
     teamId,
-    // 갈래가 없는 옛 카드는 전부 경질이다 (`DismissalSchema.kind`)
-    kind: last.kind ?? "sacked",
+    kind: last.kind,
     days,
     seasons: state.seasonRecords.filter((r) => r.teamId === teamId).length,
   };

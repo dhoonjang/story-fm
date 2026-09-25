@@ -219,6 +219,7 @@ export function buildFriendlyMatches(
         id: `m-friendly-${season}-${round}-${homeTeamId}`,
         season,
         competitionId: null,
+        stage: "league",
         round,
         date,
         time: FRIENDLY_KICKOFF,

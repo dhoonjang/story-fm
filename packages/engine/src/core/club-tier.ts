@@ -26,7 +26,7 @@ export function catalogTierOf(teamId: string): 1 | 2 | 3 | 4 {
 }
 
 /**
- * 이 팀의 **지금** 체급 — 세이브가 갖고, 없으면(옛 세이브) 카탈로그가 답한다.
+ * 이 팀의 **지금** 체급 — 세이브가 갖고, 세이브에 없는 팀이면 카탈로그가 답한다.
  * `leagueOfTeamIn`과 같은 모양이다.
  */
 export function tierOfTeamIn(state: GameState, teamId: string): 1 | 2 | 3 | 4 {

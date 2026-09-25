@@ -318,7 +318,7 @@ describe("한 시즌의 유스 육성", () => {
      */
     const academyUse = academyUseOf(state, state.userTeamId, state.season);
     transitionSeason(state);
-    const intake = (state.youthCandidates ?? []).map((row) => row.player);
+    const intake = state.youthCandidates.map((row) => row.player);
     const intakeUpside = intake.map((p) => p.attributes.potential - p.attributes.overall);
 
     const readings: Readings<typeof YOUTH_DEVELOPMENT> = {

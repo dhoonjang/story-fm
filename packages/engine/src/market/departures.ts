@@ -256,14 +256,14 @@ export function clearDepartedState(state: GameState, player: GamePlayer, from: s
   state.playerTraining = state.playerTraining.filter((t) => t.gamePlayerId !== player.id);
   state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
   // 떠난 사람에게 한 약속은 지킬 자리가 없다 (people.md §5-2 — 불만과 같은 결)
-  state.promises = (state.promises ?? []).filter((pr) => pr.gamePlayerId !== player.id);
+  state.promises = state.promises.filter((pr) => pr.gamePlayerId !== player.id);
   // 요청 장부도 같은 문을 지난다 — 떠난 선수의 요청에 감독이 답할 자리가 없다
   withdrawTransferRequest(state, player.id);
   // 관심도 같다 — 우리 라커룸에 없는 사람을 두고 나는 소문은 물을 자리가 없다 (§1-2)
   clearInterests(state, (i) => i.gamePlayerId === player.id);
   forgetRoles(state, player.id);
   player.isCaptain = false;
-  player.isViceCaptain = undefined;
+  player.isViceCaptain = false;
   /**
    * **떠나면 사이도 끝난다** (people.md §5-3) — 멘토로 든 것도 멘티로 든 것도 함께.
    * 지우지 않고 닫으므로 놓인 쪽의 심경이 며칠 그 줄을 읽는다.
@@ -365,7 +365,7 @@ export function releasePlayer(
   if (severance > 0) {
     if (paymentYears !== undefined) {
       // 받는 쪽이 선수 본인이라 표가 payee를 갖지 않는다 — 원장은 우리 지출만 적는다
-      (state.paymentSchedules ??= []).push({
+      state.paymentSchedules.push({
         id: `pay-${transferId}`,
         transferId,
         gamePlayerId: player.id,
@@ -655,8 +655,9 @@ export interface LoanReport {
 }
 
 /**
- * 이 임대가 언제 시작됐나 — 원장의 임대 이적 줄에서 파생한다. 줄이 없는 옛 세이브는
- * 시즌 시작으로 본다(성장 칸 수가 과하게 잡히는 쪽이지, 빠지는 쪽이 아니다).
+ * 이 임대가 언제 시작됐나 — 원장의 임대 이적 줄에서 파생한다. 줄이 없는 임대(게임
+ * 시작 전부터의 임대)는 시즌 시작으로 본다(성장 칸 수가 과하게 잡히는 쪽이지, 빠지는
+ * 쪽이 아니다).
  */
 function loanStartOf(state: GameState, player: GamePlayer): string {
   const rows = state.transfers.filter(

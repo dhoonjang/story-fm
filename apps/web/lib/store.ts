@@ -175,15 +175,12 @@ function namesForChat(state: GameState): Record<string, string> {
  * 스킬 카탈로그의 이름만 남기면 코어가 남기는 기록이 함께 사라진다 — 경기 마감
  * (`finalize_match`)의 "경기 종료"가 그것이라, 90분이 무엇으로 끝났는지가 어느
  * 화면에도 서지 않았다. 무엇이 칩으로 설 만한 일인지는 그것을 남긴 코어가 알므로
- * 화면은 표식만 본다 (agents.md §2).
- *
- * 표식이 없던 시절의 기록은 이름밖에 없어 여기서 걸리지 않는다 — 그 유령 칩은
- * 화면이 이름으로 막는다(`chat.tsx`). 저장된 데이터는 건드리지 않고 **보여줄 때만**
+ * 화면은 표식만 본다 (agents.md §2). 저장된 데이터는 건드리지 않고 **보여줄 때만**
  * 거른다.
  */
 export function visibleChat(chat: readonly ChatTurn[]): ChatTurn[] {
   return chat.map((turn) => {
-    if (turn.toolCalls === undefined || turn.toolCalls.length === 0) return turn;
+    if (turn.toolCalls.length === 0) return turn;
     const kept = turn.toolCalls.filter((c) => c.silent !== true);
     return kept.length === turn.toolCalls.length ? turn : { ...turn, toolCalls: kept };
   });

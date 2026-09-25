@@ -11,7 +11,7 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { positionGroupOfPlayer } from "@story-fm/domain";
-import { createMiniGame, createTestGame } from "./helpers";
+import { createMiniGame, createTestGame, resultOf } from "./helpers";
 
 /**
  * 승강 — 1부 하위 세 팀과 그 나라 2부 상위 세 팀이 자리를 바꾼다.
@@ -39,7 +39,7 @@ function fabricateSeason(state: GameState, leagueId: string, doomed: string[]): 
         : homeDoomed
           ? { homeGoals: 0, awayGoals: 2 }
           : { homeGoals: 2, awayGoals: 0 };
-    match.result = { ...score, scorers: [] };
+    match.result = resultOf({ ...score });
   }
 }
 

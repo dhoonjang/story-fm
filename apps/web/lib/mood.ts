@@ -81,7 +81,7 @@ function afterglowSentence(fact: Extract<MoodFact, { cause: "afterglow" }>): str
   return `${day} 패배가 마음에 남아 있다`;
 }
 
-/** 무엇에 불만인가 — 옛 세이브는 사유 대신 문장을 들고 있다 */
+/** 무엇에 불만인가 — 사유 코드에서 이름을 얻는다 */
 function grievanceSubject(fact: Extract<MoodFact, { cause: "grievance" }>): string {
   switch (fact.reason) {
     case "minutes":
@@ -105,7 +105,7 @@ function grievanceSubject(fact: Extract<MoodFact, { cause: "grievance" }>): stri
       // 어느 갈래의 약속이었는지는 카드가 들지 않는다 — 장부의 일이다
       return "감독이 지키지 않은 약속";
     default:
-      return fact.note ?? "팀 상황";
+      return "팀 상황";
   }
 }
 

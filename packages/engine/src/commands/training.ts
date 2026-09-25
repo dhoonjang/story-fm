@@ -216,7 +216,6 @@ export function setMentor(
     (pair) => pair.mentorId === mentor.id && !after.includes(pair.menteeId),
     "manager",
   );
-  state.mentoring ??= [];
   for (const mentee of mentees) {
     if (before.includes(mentee.id)) continue;
     state.mentoring.push({ mentorId: mentor.id, menteeId: mentee.id, since: state.date });
@@ -264,7 +263,7 @@ export function setMentor(
  * **총량을 옮길 뿐 늘리지 않는다** — 겨냥한 축이 빨라지는 만큼 나머지 필드 축이
  * 느려진다. 그래서 메시지는 얻는 것과 함께 포기하는 것도 말한다: 무엇을
  * 포기했는지가 이 손잡이의 값이다. `balanced`가 기본값이자 해제고, 상태에 남는
- * 것은 코드 하나라 옛 세이브도 그대로 읽힌다.
+ * 것은 코드 하나다.
  */
 export function setReserveTraining(
   state: GameState,

@@ -1,11 +1,16 @@
-import type { ManagerSpend, ManagerSpendKind, PressFact } from "@story-fm/domain";
+import type {
+  ManagerSpend,
+  ManagerSpendKind,
+  OwnerArchetypeLabel,
+  PressFact,
+} from "@story-fm/domain";
 import { formatMoney, josa, MANAGER_SPEND_KIND_KO, MANAGER_TERMS_BY_TIER } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { clampReputation, financeOf, managedTeamId, pushNarrative } from "../core/state";
 import { tierOfTeamIn } from "../core/club-tier";
 import { diffDays } from "../core/dates";
 import { pickOurPlayer } from "../core/player-ref";
-import { ownerOf } from "../world/persona";
+import { ownerArchetypeOf, ownerOf } from "../world/persona";
 import { clampForm, moraleToForm } from "../squad/form";
 import { item } from "../commands/brief";
 import type { CommandResult } from "../commands";
@@ -75,11 +80,8 @@ const FUND_GRADES = ["decisive", "major", "notable"] as const satisfies readonly
  * 지속성과 연고를 보는 사람에게는 구단이 한 사람에게 지는 빚이다. 나머지 셋은 그
  * 돈을 읽을 자가 없다 — 넉넉한 구단은 감독의 돈이 필요 없고, 경기 내용의 사람과
  * 화제성의 사람은 장부를 보지 않는다.
- *
- * **여섯 원형 밖의 카드는 아무 부호도 없다** — 옛 세이브의 커스텀 구단주에게 없는
- * 성격을 지어내지 않는다 (`DEMAND_OF_ARCHETYPE`와 같은 규약이다).
  */
-export const FUND_BOARD_SIGN_BY_OWNER: Record<string, number> = {
+export const FUND_BOARD_SIGN_BY_OWNER: Record<OwnerArchetypeLabel, number> = {
   산업가형: 1,
   투자자형: 1,
   축구광형: 0,
@@ -88,9 +90,9 @@ export const FUND_BOARD_SIGN_BY_OWNER: Record<string, number> = {
   흥행가형: 0,
 };
 
-/** 지갑 잔고 — 옛 세이브엔 필드가 없다 (career.md §5.4) */
+/** 지갑 잔고 (career.md §5.4) */
 export function walletOf(state: GameState): number {
-  return state.manager.wallet ?? 0;
+  return state.manager.wallet;
 }
 
 /**
@@ -108,14 +110,14 @@ export function creditManagerWallet(state: GameState, amount: number): void {
 
 /** 이 시즌에 이 갈래로 나간 돈 — 시즌 상한을 세는 자리 */
 export function seasonSpentOn(state: GameState, kind: ManagerSpendKind): number {
-  return (state.manager.spending ?? [])
+  return state.manager.spending
     .filter((s) => s.kind === kind && s.season === state.season)
     .reduce((sum, s) => sum + s.amount, 0);
 }
 
 /** 그 시즌에 사재 보너스를 받은 선수들 — 기본은 이번 시즌이다 */
 export function bonusPaidThisSeason(state: GameState, season: number = state.season): string[] {
-  return (state.manager.spending ?? [])
+  return state.manager.spending
     .filter((s) => s.kind === "player-bonus" && s.season === season && s.ref !== undefined)
     .map((s) => s.ref as string);
 }
@@ -143,7 +145,7 @@ export function spendFromWallet(
   }
 
   state.manager.wallet = wallet - amount;
-  const spending = (state.manager.spending ??= []);
+  const spending = state.manager.spending;
   const sameDay = spending.filter((s) => s.on === state.date).length;
   const entry: ManagerSpend = {
     id: `spend-${state.date}-${input.kind}-${sameDay + 1}`,
@@ -175,7 +177,7 @@ export function spendFromWallet(
  * 돈이지 구단에 거는 돈이 아니다 — 세계가 읽는 사실이 반대다.
  */
 export function fundedInSeason(state: GameState, season: number = state.season): number {
-  return (state.manager.spending ?? [])
+  return state.manager.spending
     .filter((s) => s.season === season && (s.kind === "transfer-fund" || s.kind === "player-bonus"))
     .reduce((sum, s) => sum + s.amount, 0);
 }
@@ -202,7 +204,7 @@ export function fundGradeOf(ratio: number): FundGrade | null {
 function fundGradeReachedOn(state: GameState, pledge: number, grade: FundGrade): string | null {
   const need = pledge * MANAGER_WALLET.FUND_GRADE_STEPS[grade];
   let sum = 0;
-  for (const spend of state.manager.spending ?? []) {
+  for (const spend of state.manager.spending) {
     if (spend.season !== state.season) continue;
     if (spend.kind !== "transfer-fund" && spend.kind !== "player-bonus") continue;
     sum += spend.amount;
@@ -274,7 +276,7 @@ function creditFundingToBoard(state: GameState, before: number): number {
   if (pledge === null) return 0;
   if (fundGradeOf(before / pledge) !== null) return 0;
   if (fundGradeOf(fundedInSeason(state) / pledge) === null) return 0;
-  const sign = FUND_BOARD_SIGN_BY_OWNER[ownerOf(state).archetype] ?? 0;
+  const sign = FUND_BOARD_SIGN_BY_OWNER[ownerArchetypeOf(ownerOf(state)).label];
   if (sign === 0) return 0;
   const delta = sign * MANAGER_WALLET.FUND_BOARD_SWING;
   const board = state.manager.reputation.board;

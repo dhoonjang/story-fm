@@ -730,6 +730,7 @@ describe("임대 성장 (season.md §2 임대)", () => {
       developmentFocus: ["y1"],
       playerTraining: [],
       transfers: [],
+      mentoring: [],
     } as unknown as GameState;
   }
 

@@ -562,10 +562,10 @@ export function applyTrainingOutcomes(
          * 위끝에 닿은 자리에는 쌓지 않는다: 나갈 곳 없는 몫이 그릇에 남는다.
          */
         const carryKey = positionGrowthTarget(program.position);
-        const carried = (player.growthCarry?.[carryKey] ?? 0) + rated * weeks;
+        const carried = (player.growthCarry[carryKey] ?? 0) + rated * weeks;
         // 한 결산이 넘기는 눈금은 여전히 `POSITION_TRAIN_MAX`까지 — 나머지는 다음으로
         const gain = Math.min(POSITION_TRAIN_MAX, Math.trunc(carried));
-        player.growthCarry = { ...(player.growthCarry ?? {}), [carryKey]: carried - gain };
+        player.growthCarry = { ...player.growthCarry, [carryKey]: carried - gain };
         const after = Math.min(PROFICIENCY_MAX, before + gain);
         /**
          * **실제로 넘어간 만큼만 장부에 적는다.** 위끝에 걸린 자리는 판정이 +2를
@@ -762,7 +762,7 @@ export function applyAttributeStep(
    * 서른의 주전은 아무리 훈련해도 그대로이고(곡선이 늘 1보다 작다) 열여덟은
    * 판정 한 번에 한 칸씩 오른다.
    */
-  const age = player.birthdate !== undefined ? ageOf(player.birthdate, state.date) : 24;
+  const age = ageOf(player.birthdate, state.date);
   /**
    * 사람됨도 한 항이다 — 원형의 `professionalism`이 **상승에만** 곱해진다
    * (people.md §6 · player.md §6.2). 훈련 결산과 경기 결산이 같은 함수를 지나므로
@@ -777,18 +777,18 @@ export function applyAttributeStep(
       : attributeDeclineScale(axis, age);
   if (scale <= 0) return null;
 
-  const carry = (player.growthCarry?.[axis] ?? 0) + move * scale * (opts.weeks ?? 1);
+  const carry = (player.growthCarry[axis] ?? 0) + move * scale * (opts.weeks ?? 1);
   // 한 칸을 채웠나 — 0 쪽으로 자른다(−0.7은 아직 −1이 아니다)
   const whole = Math.trunc(carry);
   if (whole === 0) {
-    player.growthCarry = { ...(player.growthCarry ?? {}), [axis]: carry };
+    player.growthCarry = { ...player.growthCarry, [axis]: carry };
     // 장부는 그대로지만 이 판정은 이 선수를 건드렸다 — 인원 상한의 한 자리를 쓴다
     return { axis, step: 0, value };
   }
 
   // 한 번에 한 칸까지만 — 캐리가 밀려 있어도 장부가 갑자기 두 칸 뛰지 않는다
   const applied = Math.sign(whole);
-  player.growthCarry = { ...(player.growthCarry ?? {}), [axis]: carry - applied };
+  player.growthCarry = { ...player.growthCarry, [axis]: carry - applied };
 
   player.attributes[axis] = value + applied;
   recomputeOverall(player);

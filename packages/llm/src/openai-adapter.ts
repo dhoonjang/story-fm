@@ -2,7 +2,6 @@ import OpenAI from "openai";
 import { resolveApiKey, type OpenAiAgentConfig } from "./config";
 import {
   isStoredLlmHistory,
-  isTextHistoryMessage,
   type GameLLM,
   type ToolOutcome,
   type StopReason,
@@ -161,10 +160,7 @@ function openaiHistory(history: TurnHistory, config: OpenAiAgentConfig): InputIt
     if (!history.messages.every(isResponseInputItem)) return [];
     return history.messages as InputItem[];
   }
-  if (!Array.isArray(history)) return [];
-  const messages: unknown[] = history;
-  if (!messages.every(isTextHistoryMessage)) return [];
-  return messages.map((m) => ({ role: m.role, content: m.content }));
+  return history.map((m) => ({ role: m.role, content: m.content }));
 }
 
 /**

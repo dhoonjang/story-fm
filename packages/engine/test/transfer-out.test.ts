@@ -256,6 +256,10 @@ describe("AI가 먼저 노리는 길도 남아 있다", () => {
       openedOn: state.date,
       expiresOn: addDays(state.date, 10),
       status: "open",
+      pitched: [],
+      precontract: false,
+      terms: [],
+      buyout: false,
       rounds: [
         {
           date: state.date,

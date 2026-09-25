@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AttributeAxis, BoardMove, MatchEvent, Point, SheetLine } from "@story-fm/domain";
 import {
   AXIS_KO,
   ATTRIBUTE_AXES,
@@ -6,23 +7,15 @@ import {
   SHEET_SHAPES,
   SHEET_SHAPE_KO,
   SheetLineSchema,
-  normalizePacket,
-  packetTagContext,
-  packetTagText,
   roleVocabularyText,
-  type AttributeAxis,
-  type BoardMove,
-  type Point,
-  type SheetLine,
 } from "@story-fm/domain";
 import {
   POINTS_MAX,
+  buildMatchView,
   journal,
   managerTacticsOf,
-  packetDigest,
   playerById,
   playerName,
-  teamName,
   type GameState,
   type ReadingOccasion,
 } from "@story-fm/engine";
@@ -39,7 +32,7 @@ import {
   buildMatchBrief,
   buildMatchLogBlock,
 } from "./gm-input";
-import { buildSegmentMessage } from "./match-script";
+import { eventsBlockOf } from "./match-gm";
 import { mockReaderLlm } from "./mock-gm";
 import {
   buildOpsSchema,
@@ -54,24 +47,21 @@ import { ModelOutputError, readOutput, retryOnce } from "./retry";
 import { toToolSchema } from "./tool-schema";
 
 /**
- * 판독기 — **경기의 위층을 쓰는 하나의 저자** (agents.md §3 · match.md §1.6).
+ * 판독기 — **경기의 위층을 쓰는 하나의 저자** (agents.md §3 · live-match.md §6.2).
  *
- * 코어 로직이 역할·능력치·포메이션에서 판을 결정적으로 계산하고, 그 위에서 이 경기가
+ * 말의 규칙이 역할·능력치·전술에서 경기를 결정적으로 굴리고, 그 위에서 이 경기가
  * 지금 어떻게 읽히는가를 문장으로 든 것이 전술 포인트, 그 판독의 수치 독해가 시트다.
  * 이 호출은 그 둘을 매번 전체로 다시 쓰고, 감독이 말한 턴이면 그 말을 판독 위에서
  * 읽어 명령의 인자까지 함께 낸다.
  *
  * 산출은 도구가 아니라 **이 호출의 출력 스키마** 하나다 (models.md §3-2). 값을 매기는
- * 것은 코어다 — 실재 확인·한도·예산·소화율·포화는 패킷을 세울 때 걸리고, 여기서
- * 고르는 것은 누구를·어느 칸을·어느 쪽으로·얼마나까지다.
+ * 것은 코어다 — 실재 확인·한도·예산·소화율은 말의 규칙이 시트를 접을 때 걸리고,
+ * 여기서 고르는 것은 누구를·어느 레인을·어느 쪽으로·얼마나까지다.
  */
 
 /**
  * 판독기가 채우는 **경기의 명령** — `TACTIC_OPS`의 부분집합이고 **적용 순서**다.
- *
- * 교체를 먼저 넣고 그 위의 자리·역할이 온다 — 뒤이은 지시가 방금 들어온 선수를
- * 겨냥할 수 있기 때문이다. 대화는 판이 다 선 뒤에 남긴다. 라인업·1·2군·완장은 경기
- * 중에 설 자리가 없어 여기 없다.
+ * 교체를 먼저 넣고 그 위의 자리·역할이 온다. 대화는 판이 다 선 뒤에 남긴다.
  */
 export const MATCH_OPS: readonly string[] = [
   "substitute",
@@ -86,12 +76,14 @@ export const MATCH_OPS: readonly string[] = [
 /** 한 포인트가 데리고 갈 수 있는 시트 줄 — 넘겨 와도 코어의 한도가 먼저 자른다 */
 const SHEET_LINES_PER_POINT = 3;
 
-/** 시트 줄의 상한 — 포인트 상한 × 포인트당 줄. 설명 문장으로 가고 코어가 자른다 */
+/** 시트 줄의 상한 — 포인트 상한 × 포인트당 줄 */
 const SHEET_MAX = POINTS_MAX * SHEET_LINES_PER_POINT;
 
-/** 모양 넷의 부호가 무엇을 올리는가 — 낱말도 뜻도 `SHEET_SHAPES` 한 벌에서 온다 */
+/** 모양의 부호가 무엇을 올리는가 — 낱말도 뜻도 `SHEET_SHAPES` 한 벌에서 온다 */
 const SHEET_SIGN_KO: Record<(typeof SHEET_SHAPES)[number], string> = {
-  edge: "그 칸이 두꺼워진다",
+  behavior: "그 선수에게 개인 지시가 걸린다",
+  edge: "그 선수가 이 경기에서 더 잘한다",
+  focus: "공격이 그 레인으로 더 기운다",
   temper: "카드·파울이 늘어난다",
   legs: "다리가 빨리 죽는다",
   cohesion: "지시가 잘 스민다",
@@ -114,25 +106,19 @@ export const MATCH_READER_SYSTEM = `당신은 경기를 읽는 판독기다. 이
 - 어느 팀의 메모가 아니라 **양 팀에 걸친 경기의 판독**이다. 상대 벤치의 작은 수 — 상대 센터백이 우리 윙어를 따라붙는 것, 한쪽 측면을 비우고 반대편에 몰리는 것 — 도 여기서 난다.
 - 이어지는 판독은 **같은 id로** 남기고, 사라진 판독은 빼고, 새로 읽은 것은 새 id로 더한다.
 - about에는 그 판독이 겨눈 선수의 id와 편(home·away)을 적는다. importance 1~3 — 이 경기를 가르는 정도.
-- 근거 없는 줄은 쓰지 않는다. <facts>와 <segment>에 선 사실에서 읽는다.
+- 근거 없는 줄은 쓰지 않는다. <facts>와 <events>에 선 사실에서 읽는다.
 
 # 시트
-포인트 하나를 가리키는 줄이고, 코어가 읽는 것은 이것뿐이다. 고르는 것은 누구를·어느 칸을·어느 쪽으로·얼마나까지다.
+포인트 하나를 가리키는 줄이고, 코어가 읽는 것은 이것뿐이다. 고르는 것은 누구를·어느 레인을·어느 쪽으로·얼마나까지다.
 - ${SHEET_SHAPE_LINES}
-- target — edge는 선수 한 명(player)이거나 칸(side + band, 레인을 적지 않으면 그 줄 전체). temper·legs는 선수, cohesion은 팀(side).
+- target — behavior·edge·temper·legs는 선수 한 명(player). focus는 편(side)과 레인(lane). cohesion은 편(side).
+- behavior에는 action이 붙는다 — press(공 또는 targetPlayer 압박) · mark(targetPlayer 추적) · cover(표적 뒤 공간) · support(공 주변 지원) · run(지역 침투) · hold(기본 자리 유지). when은 attack(우리 소유)·defend(상대 소유)·always. 지역은 lane(left·center·right)과 band(defense·midfield·attack)다. 표적 없는 mark는 보내지 않는다.
 - step 1~3은 눈금이지 수치가 아니다. 판독이 경기를 가르는 정도만큼.
 - **이득만 있는 판독은 없다.** 마킹은 마커의 본업을 비우고, 오버랩은 뒤를 연다 — 이득 줄을 쓴 포인트에는 그 대가 줄도 쓴다.
-- 포인트가 없으면 시트도 없다.
-
-# 공간 행동
-공간 경기에서는 포인트에 behavior를 붙일 수 있다. player는 감독 팀에서 행동할 선수 id, when은 attack(우리 소유)·defend(상대 소유)·always다.
-action은 press(공 또는 targetPlayer 압박), mark(targetPlayer 추적), cover(표적 뒤 공간), support(공 주변 지원), run(지역 침투), hold(기본 자리 유지)다.
-지역은 lane(left·center·right)과 band(defense·midfield·attack)로 고른다. 좌표나 성공 확률을 만들지 않는다.
-행동으로 표현한 공간 효과에는 같은 포인트의 edge 시트를 중복해서 붙이지 않는다. legs·temper·cohesion은 별도 효과다.
-감독이 해제하거나 대상이 나가지 않은 행동 지시는 같은 id와 behavior로 유지한다. 표적 없는 mark는 보내지 않는다.
+- 포인트가 없으면 시트도 없다. 좌표나 성공 확률을 만들지 않는다.
 
 # 감독의 말
-- "붙어서 지워" · "그 뒤를 덮어" · "왼쪽으로 몰아"는 행동·포인트·시트로 옮긴다.
+- "붙어서 지워" · "그 뒤를 덮어" · "왼쪽으로 몰아"는 포인트·시트로 옮긴다.
 - 자리·역할·교체·6축·키커·대화는 ops로 실행한다. 말하지 않은 축·역할은 보내지 않는다.
 - 옮길 수 있는 것은 다 싣고 막힌 말만 unresolved에 남긴다. 감독이 정하지 않고 맡긴 말("알아서 하세요")에는 채울 것이 없다 — 지어내지 않고 unresolved에 남긴다.
 - 훈련·육성·이적의 말은 여기서 옮기지 않고 unresolved에도 남기지 않는다.
@@ -163,8 +149,8 @@ action은 press(공 또는 targetPlayer 압박), mark(targetPlayer 추적), cove
 - set_shootout_order — 승부차기 키커 순서. 감독이 이름을 든 사람만.
 
 # 입력
-- <ledger> 스코어·시각·온필드와 벤치·교체 횟수 · <standing> 우리가 걸어 둔 전술 · <facts> 양 팀의 능력치와 격자·상성·피로·카드 · <points> 지금 서 있는 전술 포인트 · <match_log> 이 경기의 지난 턴 · <board_moves> 이번 턴 감독이 전술판에서 움직인 것.
-- <segment> 방금 구른 구간의 사건. <pre_match> 경기 전 감독이 한 말.
+- <ledger> 스코어·시각·온필드와 벤치·교체 횟수 · <standing> 우리가 걸어 둔 전술 · <match_state> 지금까지의 경기 통계 · <facts> 양 팀의 능력치와 선수별 경기 통계·체력·카드 · <points> 지금 서 있는 전술 포인트 · <match_log> 이 경기의 지난 턴 · <board_moves> 이번 턴 감독이 전술판에서 움직인 것.
+- <events> 지난 판독 뒤 일어난 사건. <pre_match> 경기 전 감독이 한 말.
 - @감독: 이번 턴 감독의 말. 없으면 판독만 다시 쓴다.
 
 # 자리별 역할 (set_player_tactic의 role)
@@ -182,10 +168,8 @@ export interface MatchReaderOutput {
 
 /**
  * 이 호출이 요청에 싣는 출력 스키마 — `{ ops, points, sheet, unresolved }`.
- *
- * `ops`의 인자는 **명령의 도구 정의에서 그대로** 오고(`buildOpsSchema`), 포인트와
- * 시트는 도메인의 Zod에서 파생한다. 상한은 `maxItems`가 아니라 설명 문장으로 간다 —
- * 제공자가 받는 스키마 부분집합이 갈리고, 지키는 것은 코어다 (`orders-ops.ts`).
+ * `ops`의 인자는 명령의 도구 정의에서 그대로 오고(`buildOpsSchema`), 포인트와 시트는
+ * 도메인의 Zod에서 파생한다. 상한은 설명 문장으로 간다 — 지키는 것은 코어다.
  */
 export function matchReaderOutputSchema(
   specs: ReadonlyMap<string, GameToolSpec>,
@@ -235,7 +219,7 @@ function axesFor(position: string): readonly AttributeAxis[] {
     : ATTRIBUTE_AXES.filter((axis) => axis !== "goalkeeping");
 }
 
-/** 한 선수의 진짜 능력치 한 줄 — 판독기에는 안개가 없다 (match.md §1.6) */
+/** 한 선수의 진짜 능력치 한 줄 — 판독기에는 안개가 없다 (agents.md §3) */
 function attributeLine(state: GameState, id: string, position: string): string {
   const player = playerById(state, id);
   if (!player) return "";
@@ -244,146 +228,92 @@ function attributeLine(state: GameState, id: string, position: string): string {
     .join(" ");
 }
 
-/** 이 경기에서 그 사람에게 붙은 것 — 카드·파울·피로 */
-function marksOf(
-  state: GameState,
-  id: string,
-): { cards: string[]; fouls: number; fatigue: number | null } {
-  const pending = state.pendingMatch;
-  const events = pending?.ledger.events ?? [];
-  const cards = events
-    .filter((ev) => ev.actors[0] === id && (ev.type === "yellow_card" || ev.type === "red_card"))
-    .map((ev) => (ev.type === "yellow_card" ? "경고" : "퇴장"));
-  const fouls = events.filter((ev) => ev.type === "foul" && ev.actors[0] === id).length;
-  const fatigue = pending?.matchFatigue?.[id];
-  return { cards, fouls, fatigue: fatigue === undefined ? null : Math.round(fatigue) };
-}
-
 /**
- * `<facts>` — **판독기가 읽는 사실 전부.** 양 팀의 진짜 능력치와 유효 전력, 아홉 칸
- * 격자와 존, 발동한 상성과 구멍, 이 경기에서 쌓인 피로·파울·카드, 그리고 양 벤치의
- * 등급. 안개는 감독에게만 걸린다 (match.md §1.6).
+ * `<facts>` — **판독기가 읽는 사실 전부.** 양 팀의 진짜 능력치와 지금 내는 전력, 선수별
+ * 경기 통계(패스·태클·슛·뛴 거리)·체력·카드, 양 팀의 통계, 그리고 양 벤치의 등급.
+ * 안개는 감독에게만 걸린다.
  *
  * 사실만 싣는다 — 무엇을 하라는 말은 시스템 프롬프트의 것이다.
  */
 export function buildFactsBlock(state: GameState): string[] {
   const pending = state.pendingMatch;
-  if (!pending?.packet) return [];
-  const packet = normalizePacket(pending.packet);
-  const digest = packetDigest(packet);
-  const tagCtx = packetTagContext(packet);
-  const home = packet.home.teamName;
-  const away = packet.away.teamName;
+  const view = buildMatchView(state);
+  if (!pending || !view) return [];
+  const live = pending.live;
+  const ledger = live.ledger;
   const record = state.matches.find((m) => m.id === pending.matchId);
-  /** AI 벤치의 등급 — 그 벤치의 수가 얼마나 날카로운지의 근거다 (match.md §1.6) */
+  const teamOf = (side: "home" | "away") => (side === "home" ? view.home.name : view.away.name);
+  /** AI 벤치의 등급 — 그 벤치의 수가 얼마나 날카로운지의 근거다 */
   const bench = record
     ? [
-        `벤치 등급: ${home} ${managerTacticsOf(state, record.homeTeamId)} · ` +
-          `${away} ${managerTacticsOf(state, record.awayTeamId)}`,
+        `벤치 등급: ${teamOf("home")} ${managerTacticsOf(state, record.homeTeamId)} · ` +
+          `${teamOf("away")} ${managerTacticsOf(state, record.awayTeamId)}`,
       ]
     : [];
-  const zones = (side: "home" | "away"): string =>
-    `${side === "home" ? home : away} 공격 ${digest.zones[side].attack} 중원 ${digest.zones[side].midfield} 수비 ${digest.zones[side].defense}`;
-  const grid = digest.grid.map(
-    (cell) => `  ${cell.band}/${cell.lane} — ${home} ${cell.home} : ${cell.away} ${away}`,
-  );
+  const liveCondition = new Map(live.state.players.map((p) => [p.id, p.condition] as const));
   const lineup = (side: "home" | "away"): string[] =>
-    digest.lineup[side].map((p) => {
-      const mark = marksOf(state, p.id);
+    live.slots[side].map((slot) => {
+      const line = ledger.stats[slot.playerId];
+      const yellows = ledger[side].yellows[slot.playerId] ?? 0;
+      const condition = liveCondition.get(slot.playerId);
       const tail = [
-        ...(mark.fatigue !== null ? [`피로 ${mark.fatigue}`] : []),
-        ...(mark.fouls > 0 ? [`파울 ${mark.fouls}`] : []),
-        ...mark.cards,
+        ...(condition !== undefined ? [`체력 ${Math.round(condition)}`] : []),
+        ...(line
+          ? [
+              `패스 ${line.passesCompleted}/${line.passes}`,
+              `태클 ${line.tacklesWon}/${line.tackles}`,
+              `슛 ${line.shots}`,
+              `파울 ${line.fouls}`,
+              `${(line.distance / 1000).toFixed(1)}km`,
+            ]
+          : []),
+        ...(yellows > 0 ? ["경고"] : []),
       ];
+      const row = view.onPitch[side].find((p) => p.id === slot.playerId);
       return (
-        `  ${p.id}(${playerName(state, p.id)} ${p.position}${p.roleId ? ` ${p.roleId}` : ""}) ` +
-        `전력 ${p.effective} · ${attributeLine(state, p.id, p.position)}` +
+        `  ${slot.playerId}(${playerName(state, slot.playerId)} ${slot.position}${slot.roleId ? ` ${slot.roleId}` : ""}) ` +
+        `전력 ${row?.effective ?? "-"} · ${attributeLine(state, slot.playerId, slot.position)}` +
         (tail.length > 0 ? ` · ${tail.join(" · ")}` : "")
       );
     });
   const benchNames = (side: "home" | "away"): string =>
-    packet[side].bench.map((p) => `${p.id}(${playerName(state, p.id)} ${p.position})`).join(", ");
+    view.bench[side].map((p) => `${p.id}(${p.name} ${p.position})`).join(", ");
+  const stats = (side: "home" | "away") => {
+    const s = view.stats[side];
+    return (
+      `${teamOf(side)} — 점유 ${Math.round(s.possession * 100)}% · 슈팅 ${s.shots}(유효 ${s.shotsOnTarget}) · xG ${s.xg.toFixed(2)} · ` +
+      `패스 ${s.passesCompleted}/${s.passes} · 태클 ${s.tacklesWon}/${s.tackles} · 파울 ${s.fouls} · 코너 ${s.corners} · ${s.distanceKm.toFixed(1)}km`
+    );
+  };
   return [
     `<facts>`,
-    ...(pending.spatial
-      ? [
-          `공간 경기 ${pending.spatial.seconds.toFixed(1)}초 · 소유 ${pending.spatial.possession} · 공 소유자 ${pending.spatial.ball.owner ?? "없음"}`,
-          `공 위치(미터, 홈 골문 x=0) ${pending.spatial.ball.x.toFixed(1)},${pending.spatial.ball.y.toFixed(1)}`,
-          ...pending.spatial.players.map(
-            (p) => `${p.id}: 위치 ${p.x.toFixed(1)},${p.y.toFixed(1)} · 행동 ${p.action}`,
-          ),
-        ]
-      : []),
     ...bench,
-    `기대 득점 ${digest.expectedGoals.home} : ${digest.expectedGoals.away} · 점유 ${digest.possession.home} : ${digest.possession.away}`,
-    `존 — ${zones("home")} / ${zones("away")}`,
-    `아홉 칸 (홈 기준 밴드/레인):`,
-    ...grid,
-    ...(digest.matchups.length > 0
-      ? [
-          `매치업: ${digest.matchups
-            .map(
-              (m) =>
-                `${m.zone} ${m.edge} ${m.size}${m.homeValue !== undefined ? ` (${m.homeValue}:${m.awayValue})` : ""}`,
-            )
-            .join(" / ")}`,
-        ]
-      : []),
-    ...digest.keyPoints.map((tag) => `· ${packetTagText(tag, tagCtx)}`),
-    `${home} 전술 소화 ${Math.round(digest.tactical.home.uptake * 100)}%${
-      digest.tactical.home.notes.length > 0
-        ? ` — ${digest.tactical.home.notes.map((n) => packetTagText(n, tagCtx)).join(" / ")}`
-        : ""
-    }`,
-    `${away} 전술 소화 ${Math.round(digest.tactical.away.uptake * 100)}%${
-      digest.tactical.away.notes.length > 0
-        ? ` — ${digest.tactical.away.notes.map((n) => packetTagText(n, tagCtx)).join(" / ")}`
-        : ""
-    }`,
-    `${home} 온필드:`,
+    stats("home"),
+    stats("away"),
+    `${teamOf("home")} 온필드:`,
     ...lineup("home"),
-    `${home} 벤치: ${benchNames("home")}`,
-    `${away} 온필드:`,
+    `${teamOf("home")} 벤치: ${benchNames("home")}`,
+    `${teamOf("away")} 온필드:`,
     ...lineup("away"),
-    `${away} 벤치: ${benchNames("away")}`,
+    `${teamOf("away")} 벤치: ${benchNames("away")}`,
     `</facts>`,
   ];
 }
 
 /**
  * `<points>` — **지금 서 있는 판독 전부.** 감독에게 가는 것과 달리 안개가 없다
- * (`pointsSeenBy`는 매치 GM의 블록이다 — match.md §1.6).
+ * (`pointsSeenBy`는 매치 GM의 블록이다).
  */
 export function buildPointsBlock(state: GameState): string[] {
-  const points = state.pendingMatch?.points ?? [];
+  const points = state.pendingMatch?.live.points ?? [];
   if (points.length === 0) return [];
   return [
     `<points>`,
     ...points.map(
       (p) =>
-        `- ${p.id} [중요도 ${p.importance}${p.about.length > 0 ? ` · ${p.about.join(", ")}` : ""}] ${p.text}${p.behavior ? `\n  behavior: ${JSON.stringify(p.behavior)}` : ""}`,
+        `- ${p.id} [중요도 ${p.importance}${p.about.length > 0 ? ` · ${p.about.join(", ")}` : ""}] ${p.text}`,
     ),
     `</points>`,
-  ];
-}
-
-/** 방금 구른 구간의 대본 — 장부에 남은 마지막 구간 그대로다 */
-function buildSegmentBlock(state: GameState): string[] {
-  const pending = state.pendingMatch;
-  const last = pending?.lastSegment;
-  if (!pending || !last) return [];
-  const packet = pending.packet ? normalizePacket(pending.packet) : null;
-  const record = state.matches.find((m) => m.id === pending.matchId);
-  const sideName = (side: "home" | "away"): string =>
-    packet?.[side].teamName ??
-    (record ? teamName(side === "home" ? record.homeTeamId : record.awayTeamId) : side);
-  /** 구간이 열린 자리의 스코어 — 골 줄이 그 골 뒤의 스코어를 적는다 */
-  const before = { ...pending.ledger.score };
-  for (const ev of last.events) {
-    if (ev.type === "goal" && ev.team) before[ev.team] -= 1;
-  }
-  return [
-    buildSegmentMessage(last.events, last.stop, (id) => playerName(state, id), sideName, before),
   ];
 }
 
@@ -397,14 +327,16 @@ export function buildReaderInput(
     occasion: ReadingOccasion;
     said?: string;
     boardMoves?: readonly BoardMove[];
+    /** 정지점 뒤의 판독이 읽는 사건 — 지난 판독 뒤 장부에 앉은 것 */
+    events?: readonly MatchEvent[];
   },
 ): string {
   const matchLog = buildMatchLogBlock(state);
   return [
-    buildLedgerNote(state),
+    buildLedgerNote(state, { withState: options.occasion !== "kickoff" }),
     ...buildFactsBlock(state),
     ...buildPointsBlock(state),
-    ...(options.occasion === "segment" ? buildSegmentBlock(state) : []),
+    ...(options.events && options.events.length > 0 ? [eventsBlockOf(state, options.events)] : []),
     ...(options.occasion === "kickoff"
       ? tagged("pre_match", stripTag(buildMatchBrief(state)))
       : []),
@@ -427,12 +359,11 @@ function stripTag(block: string): string {
 // ── 호출 ─────────────────────────────────────────────────
 
 /**
- * 경기를 읽는다 — **킥오프 · 지시 턴 · 구간 뒤** (agents.md §3).
+ * 경기를 읽는다 — **킥오프 · 지시 턴 · 골·퇴장 뒤 · 하프타임** (agents.md §3).
  *
  * 산출 없이 두 번 실패하면 `ok: false`다. 그 뒤가 때마다 갈린다: 지시 턴은 도구가
- * 반려로 답하고, 구간 뒤는 삼켜 지난 시트가 남고, 킥오프는 빈 포인트로 시작한다 —
- * 그 판정은 부르는 쪽이 한다. 여기서 하는 일은 한 번 다시 부르고 그 사실을 기록에
- * 남기는 것까지다 (models.md §5).
+ * 반려로 답하고, 정지점 뒤는 삼켜 지난 시트가 남고, 킥오프는 빈 포인트로 시작한다 —
+ * 그 판정은 부르는 쪽이 한다.
  */
 export async function runMatchReader(
   state: GameState,
@@ -443,6 +374,8 @@ export async function runMatchReader(
     said?: string;
     /** 이번 턴 전술판이 이미 움직인 것 — 되풀이를 가릴 근거다 */
     boardMoves?: readonly BoardMove[];
+    /** 정지점 뒤의 판독이 읽는 사건 */
+    events?: readonly MatchEvent[];
     llm?: GameLLM;
   },
 ): Promise<{ ok: true; reading: MatchReaderOutput } | { ok: false; message: string }> {

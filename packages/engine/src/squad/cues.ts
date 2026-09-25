@@ -83,7 +83,7 @@ export function rotationDay(date: string): number {
 interface Matchday {
   /** 그라운드를 밟은 사람 — 교체 투입까지 */
   played: ReadonlySet<string>;
-  /** 킥오프에 벤치에 앉은 사람. `null`은 **모른다**는 뜻이다 (옛 경기) */
+  /** 킥오프에 벤치에 앉은 사람. `null`은 **모른다**는 뜻이다 (벤치를 남기지 않은 남의 경기 — 부임 전) */
   bench: ReadonlySet<string> | null;
 }
 
@@ -127,7 +127,7 @@ interface BenchRun {
  * 세는 것은 출전이 없는 경기 수이고, 자리는 그것과 별개의 사실이다 — 매 경기
  * 벤치에 앉아 있던 선수를 「명단 제외」라고 부르면 GM이 없던 장면을 쓴다. 그래서
  * 자리는 **그 경기들 내내 같았을 때만** 선다: 섞였으면 한 단어로 부를 수 없고,
- * 벤치를 안 남긴 옛 경기가 하나라도 끼면 지어내는 대신 수만 낸다.
+ * 벤치를 안 남긴 경기가 하나라도 끼면 지어내는 대신 수만 낸다.
  */
 function benchRunIn(days: readonly Matchday[], playerId: string): BenchRun {
   let count = 0;
@@ -200,7 +200,7 @@ function openNumberFor(
 /** 그가 가장 최근에 돌아온 소집 — 아직 정산되지 않은 행은 소집 중이라 여기 오지 않는다 */
 function lastCallUpReturn(state: GameState, playerId: string): CallUp | null {
   let latest: { row: CallUp; on: string } | null = null;
-  for (const row of state.callUps ?? []) {
+  for (const row of state.callUps) {
     if (row.gamePlayerId !== playerId || row.returnedOn === null) continue;
     if (latest === null || row.returnedOn > latest.on) latest = { row, on: row.returnedOn };
   }

@@ -191,7 +191,7 @@ export const BoardDemandSchema = z.object({
   cause: BoardDemandCauseSchema.optional(),
   /**
    * 감독이 되물은 날 — **한 차례뿐이라 날짜 하나로 족하다** (career.md §5.2 「흥정」).
-   * 서 있으면 두 번째 `counter`는 거절된다. 옛 세이브엔 없다 (optional).
+   * 서 있으면 두 번째 `counter`는 거절된다. 없으면 아직 되묻지 않았다.
    */
   counteredOn: DateString.optional(),
   status: BoardDemandStatusSchema,

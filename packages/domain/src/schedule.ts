@@ -53,8 +53,7 @@ export const ScheduleEntrySchema = z.object({
    * 결산은 tick보다 뒤에 오고 실패하면 아예 오지 않는다.
    *
    * 결산 도구는 한 턴에 여러 번 불릴 수 있어(agents.md §4) 이 표식이 없으면
-   * 적응도·능력치가 호출 횟수만큼 쌓인다. 훈련 엔트리에만 선다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 적응도·능력치가 호출 횟수만큼 쌓인다. 훈련 엔트리에만, 결산이 지난 뒤에만 선다.
    */
   settled: z.boolean().optional(),
 });
@@ -69,51 +68,43 @@ export const MatchResultSchema = z.object({
   /**
    * 도움 — `scorers`와 **같은 순서·같은 길이·같은 형식**(`"home:playerId"`)이고,
    * 도움이 없는 골은 빈 문자열이다.
-   *
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
-  assists: z.array(z.string()).optional(),
+  assists: z.array(z.string()),
   /**
-   * 골이 들어간 **분** — `scorers`와 같은 순서·같은 길이.
-   *
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
-   */
-  goalMinutes: z.array(z.number().int().min(0)).optional(),
+  /** 골이 들어간 **분** — `scorers`와 같은 순서·같은 길이 */
+  goalMinutes: z.array(z.number().int().min(0)),
   /**
    * 골이 **어디서 나왔나** — `scorers`와 같은 순서·같은 길이 (match.md §1.4).
    *
    * 리그 전체의 세트피스 득점 비율이 이 칸 하나로 세어진다 — 감독의 경기든
-   * 간이 시뮬이든 같은 규약이다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 간이 시뮬이든 같은 규약이다.
    */
-  goalOrigins: z.array(ShotOriginSchema).optional(),
-  /** 실제 슈팅 수 — 옛 경기에는 없다. */
-  homeShots: z.number().int().min(0).optional(),
-  awayShots: z.number().int().min(0).optional(),
-  /** 실제 슈팅의 기회 xG 합 — 옛 경기에는 없다. */
-  homeXg: z.number().min(0).optional(),
-  awayXg: z.number().min(0).optional(),
-  /** 실제 슈터의 결정력을 반영한 골 확률 합. */
-  homeExpectedGoals: z.number().min(0).optional(),
-  awayExpectedGoals: z.number().min(0).optional(),
+  goalOrigins: z.array(ShotOriginSchema),
+  /** 실제 슈팅 수 */
+  homeShots: z.number().int().min(0),
+  awayShots: z.number().int().min(0),
+  /** 실제 슈팅의 기회 xG 합 */
+  homeXg: z.number().min(0),
+  awayXg: z.number().min(0),
+  /** 실제 슈터의 결정력을 반영한 골 확률 합 */
+  homeExpectedGoals: z.number().min(0),
+  awayExpectedGoals: z.number().min(0),
   /**
    * 실제로 그라운드를 밟은 선수 id (교체 투입·퇴장 포함).
    * "감독이 직접 뛰는 걸 본 선수"(스카우팅 지식 L2)의 파생 원본이다.
-   * 구 세이브에는 없을 수 있어 옵셔널 — 없으면 미관전으로 취급한다.
    */
-  homeLineup: z.array(z.string()).optional(),
-  awayLineup: z.array(z.string()).optional(),
+  homeLineup: z.array(z.string()),
+  awayLineup: z.array(z.string()),
   /**
    * **첫 휘슬에 선 열한 명** — 위 명단은 교체 투입·퇴장까지 담은 「뛴 사람 전부」라
    * 선발을 가려낼 수 없고, 순서로도 못 가른다(`extra-time.ts`).
    *
    * 계약 지위가 부르는 출전을 재는 자가 이 칸이다 — 「주전으로 데려와 놓고 여덟
    * 경기에 두 번 세웠다」가 장부에서 갈리는 자리다
-   * (→ docs/data/people.md §5-2). 옛 세이브엔 없어 optional이고, 없으면 읽는 쪽이
-   * `homeLineup`으로 떨어진다 — 뛴 사람 전부는 선발의 상위 집합이라 옛 세이브가
-   * 없던 불만을 만들어 내지 않는다.
+   * (→ docs/data/people.md §5-2).
    */
-  homeStarters: z.array(z.string()).optional(),
-  awayStarters: z.array(z.string()).optional(),
+  homeStarters: z.array(z.string()),
+  awayStarters: z.array(z.string()),
   /**
    * **킥오프에 벤치에 앉은 선수** — 위 세 칸은 전부 「그라운드를 밟은 사람」이라,
    * 못 뛴 선수가 벤치에 있었는지 명단에 아예 없었는지를 가릴 수 없다. 그 둘은
@@ -121,8 +112,7 @@ export const MatchResultSchema = z.object({
    *
    * **우리 경기에만 남는다** — 평점(`ratings`)과 같은 규약이다. 리그 2,100경기의
    * 벤치 아홉 명까지 적으면 아무도 읽지 않는 칸이 한 시즌에 ≈1MB이고, 이 줄을 읽는
-   * 자리는 우리 선수의 근황뿐이다. 옛 세이브엔 없어 optional이고, 없으면 읽는 쪽이
-   * **자리를 말하지 않는다** (SAVE_VERSION 유지).
+   * 자리는 우리 선수의 근황뿐이다. 없으면(남의 경기) 읽는 쪽이 **자리를 말하지 않는다**.
    */
   homeBench: z.array(z.string()).optional(),
   awayBench: z.array(z.string()).optional(),
@@ -132,17 +122,16 @@ export const MatchResultSchema = z.object({
    * 위 명단은 "뛴 사람 전부"라 교체로 나간 선수도 퇴장당한 선수도 들어 있다.
    * 앞 열한 명을 잘라 쓰면 그들이 연장을 뛰고 페널티를 찬다 — 그래서 그 시점의
    * 온필드만 따로 남긴다. 퇴장이 있었으면 열한 명보다 적다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
-  homeOnPitch: z.array(z.string()).optional(),
-  awayOnPitch: z.array(z.string()).optional(),
+  homeOnPitch: z.array(z.string()),
+  awayOnPitch: z.array(z.string()),
   /**
    * **연장을 치렀다** — 90분(2차전제는 합계)이 같아 30분을 더 뛴 경기.
    *
    * 연장 골은 위 goals·scorers에 그대로 합쳐지고 분은 91~120이다. 무득점으로
    * 끝난 연장은 장부에 아무 흔적을 남기지 않으므로 이 표식이 "이미 치렀다"를
-   * 뜻한다 — 없으면 대진 승자를 물을 때마다 연장이 다시 굴러간다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 뜻한다 — 없으면 대진 승자를 물을 때마다 연장이 다시 굴러간다. 연장이 없던
+   * 경기엔 없다.
    */
   aet: z.boolean().optional(),
   /**
@@ -155,11 +144,10 @@ export const MatchResultSchema = z.object({
       home: z.number().int().min(0),
       away: z.number().int().min(0),
       /**
-       * 찬 순서 그대로의 킥 목록 — 중계·화면이 인용하는 원본이다. 합계는 여기서
-       * 세지만(`shootoutTally`) 두 숫자를 함께 두는 이유는 옛 세이브다: 킥 없이
-       * 결과만 적힌 승부차기가 이미 장부에 있다 (optional — SAVE_VERSION 유지).
+       * 찬 순서 그대로의 킥 목록 — 중계·화면이 인용하는 원본이다. 위 합계는 이
+       * 목록을 센 값이다(`shootoutTally`).
        */
-      kicks: z.array(ShootoutKickSchema).optional(),
+      kicks: z.array(ShootoutKickSchema),
     })
     .optional(),
   /**
@@ -179,7 +167,7 @@ export const MatchResultSchema = z.object({
    *
    * **감독의 경기에만** 남는다: 간이 시뮬에는 장부가 없다. 한 시즌 60경기가
    * ≈600KB이고 시즌 롤오버가 `matches`를 갈아 끼우므로 쌓이지 않는다
-   * (→ docs/data/game-state.md §3.3). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * (→ docs/data/game-state.md §3.3). 간이 시뮬 경기엔 없다.
    */
   events: z.array(MatchEventSchema).optional(),
   /**
@@ -191,20 +179,18 @@ export const MatchResultSchema = z.object({
    */
   playerStats: z.record(z.string(), MatchStatLineSchema).optional(),
   /**
-   * **점유** — 두 몫의 합은 1. 감독의 경기는 패킷의 `guide.possession`,
+   * **점유** — 두 몫의 합은 1. 감독의 경기는 실시간 경기가 잰 값(`possessionOf`),
    * 타 팀 경기는 간이 시뮬이 구간마다 가중해 낸 값이다 (match.md §7).
    *
    * 사건·선수별 기록과 달리 **모든 경기**에 남는다 — 간이 시뮬은 이미 계산해 두고
-   * 버리고 있었다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 버리고 있었다.
    */
-  possession: z
-    .object({ home: z.number().min(0).max(1), away: z.number().min(0).max(1) })
-    .optional(),
+  possession: z.object({ home: z.number().min(0).max(1), away: z.number().min(0).max(1) }),
   /**
    * **이 경기의 결산 판정이 이미 반영됐다** — 평점·전술 적응도·능력치 셋 다.
    * 표식이 서 있으면 `ratings`는 더 이상 코어 앵커가 아니므로, 두 번째 호출은
    * 반영하지 않는다(agents.md §4). 앵커는 이 표식이 서기 전의 `ratings`다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 결산 전엔 없다.
    */
   rated: z.boolean().optional(),
 });
@@ -214,7 +200,7 @@ export type MatchResult = z.infer<typeof MatchResultSchema>;
  * 득점자·도움 한 칸의 **형식은 도메인이 갖는다** — `"home:playerId"`.
  *
  * 만드는 곳(경기 장부·간이 시뮬)과 읽는 곳(달력 일지·조회 도구)이 저마다 `split`을
- * 쓰던 동안, 편이 붙지 않은 옛 칸을 한쪽은 우리 편으로 한쪽은 상대로 읽었다.
+ * 쓰면 편이 없는 칸을 한쪽은 우리 편으로 한쪽은 상대로 읽는다.
  * 형식을 아는 함수는 한 쌍이면 된다 (→ docs/data/competition.md §7).
  */
 export function scorerEntry(side: MatchSide, playerId: string): string {
@@ -222,7 +208,7 @@ export function scorerEntry(side: MatchSide, playerId: string): string {
 }
 
 export interface ScorerEntry {
-  /** 어느 편의 골인가 — 편이 붙지 않은 옛 칸은 null이다(기준 팀의 것으로 읽는다) */
+  /** 어느 편의 칸인가 — 편이 없는 칸(도움 없는 골의 빈 문자열)은 null이다 */
   side: MatchSide | null;
   playerId: string;
 }
@@ -260,7 +246,7 @@ export function pairOfMatchId(matchId: string): string {
 }
 
 /**
- * 대회 단계 — 리그(정규 라운드)와 녹아웃. 없으면 리그로 본다(구 세이브 호환).
+ * 대회 단계 — 리그(정규 라운드)와 녹아웃. 리그전·리저브·친선은 `league`다.
  * 녹아웃은 `round`가 차수(1차전/2차전)를 가리킨다 — 결승은 단판이라 항상 1.
  *
  * `r32`는 국내 컵(FA컵·DFB-포칼 등)의 1라운드다 — 그 나라 1·2부 32팀이 한 번에
@@ -286,22 +272,18 @@ export const MatchRecordSchema = z.object({
    * 하나 더 만들어 컵처럼 취급하면 순위표·대진표·시즌 기록·상금이 전부
    * 따라붙는다. 널을 넣을 수 있게 하는 것이 곧 **대회를 세는 자리마다 건너뛰라는
    * 표식**이고, 그 자리들이 타입으로 드러난다(`isFriendly`).
-   * 옛 세이브는 전부 문자열이라 그대로 통과한다 (SAVE_VERSION 유지).
    */
   competitionId: z.string().min(1).nullable(),
-  stage: MatchStageSchema.optional(),
+  stage: MatchStageSchema,
   round: z.number().int().min(1),
   date: DateString,
   /** 중립 경기장 — 결승. 홈 어드밴티지를 주지 않는다 */
   neutral: z.boolean().optional(),
   /**
    * 킥오프 (HH:mm) — 날짜와 **함께** 결정되므로 경기가 직접 갖는다.
-   * SCHEDULE_ENTRY의 time은 이 값을 그대로 비춘다. 구 세이브에는 없어 옵셔널.
+   * SCHEDULE_ENTRY의 time은 이 값을 그대로 비춘다.
    */
-  time: z
-    .string()
-    .regex(/^\d{2}:\d{2}$/)
-    .optional(),
+  time: z.string().regex(/^\d{2}:\d{2}$/),
   homeTeamId: z.string().min(1),
   awayTeamId: z.string().min(1),
   /** null = 미진행 */
@@ -329,6 +311,17 @@ export function isReserveMatch(match: Pick<MatchRecord, "competitionId">): boole
 /** 기준 팀 시점의 한 경기 결말 — 승·무·패. 한글 표기는 `outcomeLabel`이 붙인다 */
 export type Outcome = "W" | "D" | "L";
 
+/** 승패를 가르는 데 쓰는 칸 — 대진과 스코어, 승부차기 합계 */
+export interface OutcomeBasis {
+  homeTeamId: string;
+  awayTeamId: string;
+  result: {
+    homeGoals: number;
+    awayGoals: number;
+    penalties?: { home: number; away: number };
+  } | null;
+}
+
 /**
  * 기준 팀 시점의 승패 — 정규시간이 같으면 승부차기로 갈린다.
  *
@@ -338,7 +331,7 @@ export type Outcome = "W" | "D" | "L";
  *
  * (폼의 연속 기록은 승부차기를 보지 않는다 — `recentOutcomes`, engine/squad/slump.ts.)
  */
-export function outcomeFor(match: MatchRecord, teamId: string): Outcome | null {
+export function outcomeFor(match: OutcomeBasis, teamId: string): Outcome | null {
   const home = match.homeTeamId === teamId;
   if (!match.result || (!home && match.awayTeamId !== teamId)) return null;
   const { homeGoals, awayGoals, penalties } = match.result;
@@ -388,14 +381,13 @@ export const TrainingSessionSchema = z.object({
    *
    * 일정이 움직이면 tick이 기대 배치와 실제 배치를 대조해 어긋난 자리만 다시 깐다
    * (season.md §4). 그 대조를 메뉴의 한국어 이름으로 하면 문구 한 글자를 고치는
-   * 순간 시즌 전체의 기본 훈련이 한 번 다시 깔린다. 옛 세이브의 세션엔 없어
-   * (optional) 그때는 이름으로 대조한다.
+   * 순간 시즌 전체의 기본 훈련이 한 번 다시 깔린다. 감독이 지시한 세션엔 없다.
    */
   menuId: z.string().min(1).optional(),
   /**
    * 코어가 깐 **기본 훈련**인가 — 감독이 지시한 세션과 구분한다.
    * 경기가 새로 편성되면 그 주변의 기본 세션만 걷어내고 다시 깔 수 있어야 하기 때문.
-   * 구 세이브엔 없다(옵셔널) — 없으면 감독 지시로 본다.
+   * 없으면 감독 지시다.
    */
   auto: z.boolean().optional(),
   /**
@@ -408,7 +400,7 @@ export const TrainingSessionSchema = z.object({
    *
    * 이 세션은 달력에 "휴식"으로 서지만 훈련으로 처리되지 않는다 — 성장도 부상
    * 위험도 없고, 피로 회복은 훈련 없는 날과 똑같다 (`tick.ts`의 `idleDay`).
-   * 구 세이브엔 없다(옵셔널 — 세이브 버전을 올리지 않는다).
+   * 쉬는 날로 못 박은 세션에만 선다.
    */
   rest: z.boolean().optional(),
 });

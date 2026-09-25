@@ -3,6 +3,7 @@ import type {
   BoardConditionKind,
   BoardRequest,
   BoardRequestKind,
+  OwnerArchetypeLabel,
   TickSink,
 } from "@story-fm/domain";
 import { josa, BOARD_REQUEST_LABEL, boardRequestAmountText } from "@story-fm/domain";
@@ -18,7 +19,7 @@ import {
 import { addDays, diffDays, seasonYear } from "../core/dates";
 import { pickRivalPlayer } from "../core/player-ref";
 import { touchOpenings } from "../world/openings";
-import { ownerOf } from "../world/persona";
+import { ownerArchetypeOf, ownerOf } from "../world/persona";
 import { USER_WAGE_HEADROOM, clubWageBudget, wageRoomOf } from "../world/wages";
 import {
   formatMoney,
@@ -104,13 +105,12 @@ export const BOARD_REQUEST = {
 } as const;
 
 /**
- * 원형 → 되걸기의 갈래 (people.md §2의 구단주 6종). **여섯 원형 밖의 카드는 되걸지
- * 않는다** — `DEMAND_OF_ARCHETYPE`과 같은 규약이다.
+ * 원형 → 되걸기의 갈래 (people.md §2의 구단주 6종).
  *
  * 여기 없는 셋(축구광형·국부펀드형·흥행가형)은 부분 승인으로 답한다: 감정의 사람과
  * 자원이 넉넉한 사람과 즉흥적인 사람은 조건을 붙이고 기다리지 않는다.
  */
-export const CONDITION_OF_ARCHETYPE: Record<string, BoardConditionKind> = {
+export const CONDITION_OF_ARCHETYPE: Partial<Record<OwnerArchetypeLabel, BoardConditionKind>> = {
   투자자형: "raise",
   "지역 유지형": "raise",
   산업가형: "wage-cut",
@@ -130,15 +130,14 @@ const COUNTERABLE: ReadonlySet<BoardRequestKind> = new Set(["transfer-budget", "
  */
 export function openBoardRequest(state: GameState): BoardRequest | null {
   return (
-    (state.boardRequests ?? []).find((r) => r.status === "pending" || r.status === "conditional") ??
-    null
+    state.boardRequests.find((r) => r.status === "pending" || r.status === "conditional") ?? null
   );
 }
 
 /** 아직 좌석이 서지 않은 승인된 공사 — 있으면 구장을 다시 걸 수 없다 */
 function buildingStadium(state: GameState): BoardRequest | null {
   return (
-    (state.boardRequests ?? []).find(
+    state.boardRequests.find(
       (r) => r.kind === "stadium" && r.status === "approved" && r.deliveredOn === undefined,
     ) ?? null
   );
@@ -247,7 +246,7 @@ export function requestBoard(state: GameState, input: RequestBoardInput): Comman
     };
   }
 
-  const last = [...(state.boardRequests ?? [])]
+  const last = [...state.boardRequests]
     .reverse()
     .find((r) => r.kind === input.kind && r.resolvedOn !== undefined);
   if (last?.resolvedOn) {
@@ -285,7 +284,7 @@ export function requestBoard(state: GameState, input: RequestBoardInput): Comman
     playerId = picked.player.id;
   }
 
-  const requests = (state.boardRequests ??= []);
+  const requests = state.boardRequests;
   const respondOn = addDays(state.date, BOARD_REQUEST.RESPOND_DAYS[input.kind]);
   const request: BoardRequest = {
     id: `board-request-${state.date}-${input.kind}`,
@@ -325,7 +324,7 @@ export function requestBoard(state: GameState, input: RequestBoardInput): Comman
  * 늘어난 수용인원을 읽는다.
  */
 export function tickBoardRequests(state: GameState, digest: TickSink): void {
-  const requests = (state.boardRequests ??= []);
+  const requests = state.boardRequests;
   for (const request of requests) deliverStadium(state, request, digest);
   // 기한이 지난 영입 승인을 먼저 지운다 — 오늘 비는 몫이 오늘 거는 요청의 여력이다
   expireEarmarks(state, digest);
@@ -379,7 +378,7 @@ function counterCondition(
 ): BoardCondition | null {
   if (!COUNTERABLE.has(request.kind)) return null;
   if (ceiling >= request.amount * BOARD_REQUEST.CONDITION_GAP) return null;
-  const kind = CONDITION_OF_ARCHETYPE[ownerOf(state).archetype];
+  const kind = CONDITION_OF_ARCHETYPE[ownerArchetypeOf(ownerOf(state)).label];
   if (!kind) return null;
   const amount =
     kind === "raise"
@@ -484,7 +483,7 @@ function apply(state: GameState, request: BoardRequest, granted: number): void {
        * 이 종류는 답이 빠른 총액 증액일 뿐이다.
        */
       if (!request.playerId) return;
-      (finance.earmarked ??= []).push({
+      finance.earmarked.push({
         requestId: request.id,
         gamePlayerId: request.playerId,
         amount: granted,
@@ -521,7 +520,7 @@ function apply(state: GameState, request: BoardRequest, granted: number): void {
 
 /** 오늘 살아 있는 승인분 — 기한이 지난 줄은 tick이 지우기 전에도 세지 않는다 */
 function liveEarmarks(state: GameState) {
-  return (financeOf(state, state.userTeamId).earmarked ?? []).filter((e) => state.date <= e.until);
+  return financeOf(state, state.userTeamId).earmarked.filter((e) => state.date <= e.until);
 }
 
 /** 지금 걸려 있는 승인분의 합 — `signing` 여력이 이것을 뺀다 */
@@ -559,7 +558,7 @@ export function signingBudgetOf(state: GameState, gamePlayerId: string): number 
 export function consumeEarmark(state: GameState, gamePlayerId: string, dueNow: number): number {
   const finance = financeOf(state, state.userTeamId);
   const rows = finance.earmarked;
-  if (!rows || rows.length === 0) return 0;
+  if (rows.length === 0) return 0;
   const mine = rows.filter((e) => e.gamePlayerId === gamePlayerId);
   if (mine.length === 0) return 0;
   finance.earmarked = rows.filter((e) => e.gamePlayerId !== gamePlayerId);
@@ -573,7 +572,7 @@ export function consumeEarmark(state: GameState, gamePlayerId: string, dueNow: n
 function expireEarmarks(state: GameState, digest: TickSink): void {
   const finance = financeOf(state, state.userTeamId);
   const rows = finance.earmarked;
-  if (!rows || rows.length === 0) return;
+  if (rows.length === 0) return;
   const gone = rows.filter((e) => state.date > e.until);
   if (gone.length === 0) return;
   finance.earmarked = rows.filter((e) => state.date <= e.until);

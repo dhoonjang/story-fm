@@ -125,7 +125,7 @@ function maxBoundary(upto: number): number {
   return Math.floor(Math.max(0, upto - 1) / HISTORY_STEP) * HISTORY_STEP;
 }
 
-/** 접은 지점 — 옛 세이브엔 요약이 없다 */
+/** 접은 지점 — 아직 한 번도 접지 않았으면 0이다 */
 function foldedOf(state: HistorySource): number {
   return state.historyDigest?.foldedTurns ?? 0;
 }

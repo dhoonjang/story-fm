@@ -67,10 +67,9 @@ import type {
   TickEvent,
   Milestone,
   SeasonRecord,
-  CompetitionSeasonStat,
   SeasonStat,
+  SeasonStatTotal,
   ShootoutKick,
-  StrengthPacket,
   Suspension,
   TacticAssignment,
   TeamFinance,
@@ -84,6 +83,7 @@ import type {
   TableSpeaker,
 } from "@story-fm/domain";
 import {
+  freshPlayerState,
   ATTRIBUTE_AXES,
   DEFAULT_FORMATION,
   FAMILIARITY_BASELINE,
@@ -114,7 +114,7 @@ import {
   initialCaptainOf,
   sumSeasonStats,
 } from "@story-fm/domain";
-import { profFactor, type MatchLedgerState } from "@story-fm/sim";
+import { profFactor, type LiveMatch } from "@story-fm/sim";
 import type { AiDeal } from "../market/ai-market";
 import {
   buildScheduleEntries,
@@ -139,7 +139,6 @@ import { ensureSquadNumbers } from "../squad/numbers";
 import { attachAiBuyout } from "../market/buyout";
 import { hasCups, scopedTeams, type WorldScope } from "../world/scope";
 import {
-  TEAM_CATALOG_SEED,
   teamCatalog,
   type TeamCatalogEntry,
   countryOfTeam,
@@ -150,12 +149,7 @@ import {
   teamCatalogById,
   isClubTeam,
 } from "../data/team-catalog";
-import {
-  CLUB_PROFILES_SEED,
-  clubProfile,
-  clubProfiles,
-  type ClubProfile,
-} from "../data/club-profile";
+import { clubProfile, clubProfiles, type ClubProfile } from "../data/club-profile";
 // 순환 참조로 보이지만 안전하다 — domestic-cup은 state의 함수를 **런타임에만** 부르고,
 // 여기서도 모듈 로드가 끝난 뒤(createGame 호출 시점)에만 부른다.
 import { advanceDomesticCups } from "../competition/domestic-cup";
@@ -228,8 +222,7 @@ export interface ToolCallRecord {
   name: string;
   summary: string;
   /**
-   * 화면이 항목으로 세우는 요약 — 없으면 `summary` 문자열로 폴백한다
-   * (옛 세이브의 기록에는 없다).
+   * 화면이 항목으로 세우는 요약 — 없으면 `summary` 문자열로 폴백한다.
    */
   brief?: CommandBrief;
   input?: unknown;
@@ -238,7 +231,7 @@ export interface ToolCallRecord {
    *
    * `summary`(줄글)만으로는 화면이 표를 못 그린다. 그렇다고 문자열을 파싱하면
    * 문구가 바뀔 때마다 조용히 깨진다. 카드를 그리는 호출만 채우고, 없으면 UI는
-   * 지금처럼 칩 + 요약으로 폴백한다. 옛 세이브엔 없다(optional).
+   * 칩 + 요약으로 폴백한다.
    */
   payload?: unknown;
   /**
@@ -269,7 +262,7 @@ export interface ToolCallRecord {
    * 줄 수로 세는 이유는 **본문이 저장 전에 손질되기 때문**이다(선수 id → 이름).
    * 글자 수는 그 손질에 밀리지만 줄은 그대로다. 코어가 스스로 밀어 넣은 기록
    * (시계 이동·경기 마감)에는 자리가 없다 — 모델이 쓴 문장과 짝이 없으므로.
-   * 옛 세이브에도 없다(optional) — 없으면 화면은 지금까지처럼 맨 앞에 세운다.
+   * 없으면 화면은 턴 맨 앞에 세운다.
    */
   line?: number;
 }
@@ -286,8 +279,6 @@ export interface ChatTurn {
    *   GM이 감독의 말투·의도를 그 문장에서 읽는다 — 감독은 그런 말을 한 적이 없다.
    *   지우지 않고 남기는 이유는 따로 있다: 없애면 GM이 왜 갑자기 사흘이 지났는지
    *   모른 채 다음 장면을 쓴다.
-   *
-   * 구 세이브에는 `operator`가 없다 — 값이 늘어난 것뿐이라 로드에 영향이 없다.
    */
   role: "user" | "model" | "operator";
   text: string;
@@ -297,8 +288,7 @@ export interface ChatTurn {
    * 이 턴에 들어간 골 — **장부의 사건**이지 중계 문장에서 읽어낸 것이 아니다.
    *
    * 골은 판을 뒤집는 유일한 사건인데 중계 문단 한복판에 문장으로만 남으면
-   * 스크롤에 묻힌다. 화면이 카드로 세울 수 있게 턴에 함께 남긴다.
-   * 옛 세이브에는 없다 — optional이라 세이브 버전을 올리지 않는다.
+   * 스크롤에 묻힌다. 화면이 카드로 세울 수 있게 턴에 함께 남긴다. 골이 없던 턴엔 없다.
    */
   goals?: GoalMark[];
   /** 이 턴에 나온 경고·퇴장 — 골과 같은 자리에 선다 */
@@ -316,7 +306,7 @@ export interface ChatTurn {
    *
    * 보고서(`reports`)와 같은 이유로 턴에 남는다(tick의 사건이라 호출 칩이 없다).
    * 카드의 모양이 아예 달라 같은 배열에 섞지 않는다 — 한쪽은 선수 하나의 16축이고
-   * 다른 쪽은 다섯 줄의 목록이다. 옛 세이브엔 없다 (optional).
+   * 다른 쪽은 다섯 줄의 목록이다.
    */
   missions?: MissionReportCard[];
   /**
@@ -325,8 +315,7 @@ export interface ChatTurn {
    *
    * 보고서(`reports`)와 같은 이유로 턴에 남는다: tick의 사건이라 호출 칩이 없고, 한
    * 문자열로 이어 붙이면 화면이 되쪼갤 수 없다. 카드가 서는 자리는 장면보다 **앞**이다 —
-   * 돌아온 감독이 먼저 읽을 것이 그 사이 벌어진 일이다.
-   * 옛 세이브엔 없다 — optional이라 세이브 버전을 올리지 않는다.
+   * 돌아온 감독이 먼저 읽을 것이 그 사이 벌어진 일이다. 시간이 구르지 않은 턴엔 없다.
    */
   events?: TickEvent[];
   /**
@@ -335,7 +324,6 @@ export interface ChatTurn {
    * 이력은 매 턴 `state.chat`에서 다시 렌더링되므로 남길 것은 누구를 어느 깊이로
    * 실었는가뿐이고, 카드는 그 턴을 렌더링할 때 다시 붙는다. 텍스트를 저장하면
    * 채팅 화면에 프롬프트가 새고, 이력이 세이브 시점의 문장으로 굳는다.
-   * 옛 세이브엔 없다 — optional이라 세이브 버전을 올리지 않는다.
    */
   characters?: CharacterInjection[];
   /**
@@ -347,13 +335,13 @@ export interface ChatTurn {
    *
    * 화면에서 파생할 수도 있지만(그 턴에 `@중계:` 화자가 있는가) 그러면 킥오프
    * 직전 라인업 확인처럼 **경기 중이지만 중계가 말하지 않은 턴**이 빠진다.
-   * 옛 세이브엔 없다 — optional이라 세이브 버전을 올리지 않는다.
+   * 없으면 평시 턴이다.
    */
   inMatch?: boolean;
   /**
    * **협상 방의 턴인가** — 방 안에서 감독이 하고 협상 GM이 답한 턴은 평시 이력에서
    * 갈린다 (docs/llm/agents.md §5). 방을 여는 `start_negotiation` 턴은 평시다 —
-   * 방의 이력은 자리에 앉는 턴부터다. 옛 세이브엔 없다 (optional).
+   * 방의 이력은 자리에 앉는 턴부터다. 없으면 방 밖의 턴이다.
    */
   inNegotiation?: boolean;
   /** 어느 협상인가 (`Negotiation.id`) — `inNegotiation`인 턴에만 있다 */
@@ -364,7 +352,7 @@ export interface ChatTurn {
    *
    * 감독이 한 말이 아니다. 그래서 `model` 턴에만 있고, 이력·압축 브리프·해석기 입력
    * 어디에서도 읽지 않는다 — 읽는 것은 화면 하나다. 세이브에 남는 이유는 재개한 화면이
-   * 같은 자리에서 같은 문장을 세워야 하기 때문이다. 옛 세이브엔 없다 (optional).
+   * 같은 자리에서 같은 문장을 세워야 하기 때문이다.
    */
   suggestion?: string;
   /**
@@ -418,102 +406,51 @@ export interface StoredCasterHistory {
 }
 
 export interface PendingMatch {
-  spatial?: import("@story-fm/domain").SpatialMatchState;
-  pendingSubs?: Array<{ out: string; in: string }>;
-  liveCommandIds?: string[];
   matchId: string;
-  packet: StrengthPacket;
-  ledger: MatchLedgerState;
+  /**
+   * **실시간 경기의 확정 상태** — 말·공·시계·장부·자리·전술·판독·벤치가 한 묶음이다
+   * (live-match.md §8.4). 클라이언트가 굴린 구간은 체크포인트가 검증한 뒤에야 여기
+   * 앉는다(`commitCheckpoint`) — 세이브에 남는 것은 서버가 같은 답을 낸 상태뿐이다.
+   */
+  live: LiveMatch;
   /**
    * **첫 휘슬에 선 열한 명** (양 팀) — 장부의 `onPitch`는 교체를 따라 움직이므로
    * 킥오프에 한 번 뜬다. 경기가 끝나면 결과의 `homeStarters`로 옮겨져 계약 지위가
    * 부르는 출전을 재는 자가 된다 (→ docs/data/people.md §5-2).
-   * 옛 세이브엔 없다 (optional — 없으면 결과에 선발이 적히지 않는다).
    */
-  startingXI?: { home: string[]; away: string[] };
-  /** 진행한 구간 수 — 난수 채널에 들어가 같은 경기가 재현된다 */
-  segment?: number;
+  startingXI: { home: string[]; away: string[] };
   /**
-   * 감독이 경기장에 들어섰는가 — **킥오프는 두 걸음이다.**
-   *
-   * `start_match`는 판을 세울 뿐이고(입장 확인 창이 선다), 감독이 들어서면 캐스터가
-   * 사건 없이 첫 휘슬만 여는 **킥오프 턴**을 한 번 갖는다. 구간이 굴러가는 것은
-   * 그다음부터다. 옛 세이브엔 없다 — 없으면 아직 안 들어선 것으로 읽는다.
+   * 감독이 경기장에 들어섰는가 — **킥오프는 두 걸음이다** (match.md §3.1).
+   * `start_match`는 판을 세울 뿐이고, 감독이 들어서면 매치 GM이 첫 휘슬만 여는
+   * 킥오프 턴을 한 번 갖는다. 시계가 구르는 것은 그다음부터다.
    */
-  entered?: boolean;
-  /**
-   * **전술 포인트** — 판독기가 쓴 이 경기의 판독 (match.md §1.6).
-   *
-   * 어느 팀의 메모가 아니라 양 팀에 걸친 경기의 판독이고, 저자는 판독기 하나다.
-   * 킥오프·지시 턴·구간 뒤마다 **전체를 다시 쓴다**(`applyMatchReading`). 코어는
-   * 문장을 읽지 않는다 — 결과에 닿는 것은 아래 `sheet`뿐이다. 경기가 끝나면
-   * `pendingMatch`와 함께 사라진다 — 저장 전술에도 이력에도 남지 않는다.
-   * 옛 세이브엔 없다 (optional — 없으면 판독 없이 코어 로직만으로 구른다).
-   */
-  points?: import("@story-fm/domain").Point[];
-  /**
-   * **시트** — 포인트의 수치 독해. 코어가 읽는 것은 이것뿐이다 (sim `sheet.ts`).
-   *
-   * 실재·한도·소화율은 패킷을 세울 때마다 다시 걸린다 — 교체로 사람이 바뀌어도
-   * 저장할 때 한 번 거른 값이 남지 않게. 교체·퇴장으로 나간 선수의 줄은 그 자리에서
-   * 걷는다(`applyMatchEvents`). 옛 세이브엔 없다 (optional).
-   */
-  sheet?: import("@story-fm/domain").SheetLine[];
+  entered: boolean;
   /**
    * **이 경기에서 쓴 외침의 수** — 정지점에서 팀 전체에 던진 짧은 말
-   * (`occasion: "shout"`, → docs/simulation/career.md §2).
-   *
-   * 대화에는 날짜 게이트가 없지만(합계 상한이 자른다) **외침만은 경기가 센다** —
-   * 90분 사이에 던지는 말이라 셋이 넘어가면 판정 자체가 서지 않는다.
-   * `pendingMatch`와 함께 사라지므로 되돌릴 자리도 없다.
-   * 옛 세이브엔 없다 — 없으면 아직 한 번도 외치지 않은 것으로 읽는다 (optional).
+   * (`occasion: "shout"`, → docs/simulation/career.md §2). 90분 사이에 던지는 말이라
+   * 셋이 넘어가면 판정 자체가 서지 않는다.
    */
-  shouts?: number;
+  shouts: number;
   /**
-   * 경기 중 소모한 체력 (선수 id → 0~100). 경기 중에는 저장된 `state.condition`에서
-   * 빼서 보고, **경기가 끝나면 이 값 그대로 정산된다**(`finalizeMatch`) — 화면에서
-   * 보던 소모와 장부에 남는 소모가 같은 숫자여야 한다. 양 팀 것이 함께 쌓인다.
+   * **캐스터가 이미 서술한 사건 수** — 다음 턴의 `<events>`는 장부의 이 자리 뒤부터다.
+   * 시계는 클라이언트가 밀므로 한 턴 사이에 몇 개가 쌓였는지는 이 수가 말한다.
    */
-  matchFatigue?: Record<string, number>;
+  eventsSeen: number;
   /**
-   * **실제로 밟은 자리** (선수 id → 포지션 코드) — 양 팀 것이 함께 쌓인다.
-   *
-   * 자리를 정하는 곳은 패킷을 세우는 `slotsFor` 하나다(교체는 빈 자리를 잇고,
-   * 로테이션은 사람과 함께 자리를 옮긴다). 그래서 그때 남기고, 경기 뒤 포지션
-   * 적응도가 이 값을 읽는다 — 저장된 배치를 읽으면 교체 투입자가 그라운드에서
-   * 서 본 적 없는 벤치 배치의 자리로 오른다 (match.md §6).
-   * 옛 세이브엔 없다 — 없으면 배치·주 포지션으로 읽는다 (optional).
+   * 실모드 캐스터의 대화 이력 — 제공자·모델 태그를 든 원형이다. 킥오프 전에는
+   * 빈 배열이고, 첫 중계 턴이 태그를 단 이력으로 바꾼다 (`gm.ts`).
    */
-  positionsPlayed?: Record<string, string>;
-  /**
-   * **구간 시뮬의 연속 시계** — 앞 구간이 사건을 굴리다 멈춘 소수 시각.
-   *
-   * 장부의 분은 정수라 사건이 실릴 때 소수가 잘린다. 그 잘린 분에서 다음 구간이
-   * 출발하면 정지점마다 최대 1분이 두 번 굴려져 한 경기의 슈팅이 패킷 기대치를
-   * 넘는다(match.md §1.4). 여기 이어 두면 구간이 몇 번으로 끊기든 총량이 같다.
-   * 옛 세이브엔 없다 — 없으면 장부의 분에서 잇는다 (optional).
-   */
-  segmentClock?: number;
-  /**
-   * 실모드 캐스터의 대화 이력. 새 이력은 제공자·모델 태그를 갖는다.
-   * unknown[]은 태그 도입 전 Anthropic 세이브 호환용이다.
-   */
-  casterHistory: StoredCasterHistory | unknown[];
+  casterHistory: StoredCasterHistory | [];
   /** 이번 경기 정지 소화 중인 선수 — 종료 시 served +1 */
   servingSuspension: string[];
   /**
-   * **킥오프 시점의 전술** — 경기가 끝나면 여기로 되돌린다.
+   * **킥오프 시점의 전술** — 경기가 끝나면 여기로 되돌린다 (match.md §3.2).
    *
-   * 하프타임에 올린 라인, 후반에 옮긴 자리는 **그 경기의 대응**이지 팀의
-   * 전술이 아니다. 되돌리지 않으면 다음 경기와 그 사이 훈련이 임시 조정을
-   * 물려받고, 감독은 자기가 바꾼 적 없는 전술로 경기에 들어간다.
-   *
-   * 적응도(`familiarity`)도 함께 담는다. 전술을 바꾸면 코어가 적응도를 깎는데,
-   * 그건 **새 전술을 훈련해야 한다**는 뜻이라 그 경기 한 번의 대응에는 맞지 않는다.
-   * 담지 않으면 하프타임에 라인 한 번 올린 대가로 팀 적응도가 영구히 깎인다.
-   * 적응도가 **쌓이는** 것은 훈련·경기 결산 판정이지 경기 중의 조정이 아니다.
+   * 하프타임에 올린 라인, 후반에 옮긴 자리는 **그 경기의 대응**이지 팀의 전술이
+   * 아니다. 적응도(`familiarity`)와 역할 장부(`roleMemo`)도 함께 담는다 — 경기 중
+   * 조정이 깎은 값을 그 경기 한 번의 대응으로 되돌리기 위해서다.
    */
-  tacticsBefore?: {
+  tacticsBefore: {
     spec: import("@story-fm/domain").TacticsSpec;
     assignments: Array<{
       playerId: string;
@@ -521,41 +458,21 @@ export interface PendingMatch {
       point?: import("@story-fm/domain").BoardPoint;
       roleId?: string;
       familiarity: number;
-      /**
-       * 오늘 낸 역할 대가의 장부도 함께 담는다 — 적응도만 되돌리고 `paid`를 두면
-       * 경기 뒤에 "낸 적 없는 값"을 환불받는다 (player.md §7.2). 옛 세이브엔 없다.
-       */
       roleMemo?: import("@story-fm/domain").RoleMemo;
     }>;
   };
   /**
-   * **이번 턴에 중계할 구간** — 캐스터가 입을 열기 전에 코어가 굴려 채운다.
-   *
-   * 사건을 먼저 확정해 입력에 실어야 캐스터가 무슨 일이 있었는지 알고 첫 줄의
-   * 시각을 적을 수 있다. 반대로 캐스터가 목표를 선언하고 코어가 뒤따라가면,
-   * 골이 60분에 났는데 헤더는 67분인 턴이 나온다 — 선언과 장부가 어긋난다.
-   * 구 세이브엔 없다 (optional — SAVE_VERSION 유지).
-   */
-  lastSegment?: { events: import("@story-fm/domain").MatchEvent[]; stop: string };
-  /**
    * **우리와 같은 시각에 킥오프한 타 경기의 골** — 경기 중 라이브 스코어의 원본
-   * (match.md §7 「같은 시각에 킥오프한 경기」).
-   *
-   * 킥오프에 한 번 굴려(`startMatch`) 골의 분과 편만 남긴다. 매 턴 다시 굴리면 팀마다
-   * 라인업을 다시 짜야 해 진행 턴마다 수십 ms가 붙고, 화면이 값을 쥐면 뷰가 장부가
-   * 된다. 뷰는 우리 장부의 분 이하인 골만 세므로(`CompetitionMatchView.live`) 감독은
-   * 옆 구장의 **진행**만 보고 결과를 미리 알지 않는다. 옛 세이브엔 없다 (optional).
+   * (match.md §8.6). 킥오프에 한 번 굴려 골의 분과 편만 남기고, 뷰는 우리 장부의 분
+   * 이하인 골만 센다 — 감독은 옆 구장의 **진행**만 보고 결과를 미리 알지 않는다.
    */
-  otherScores?: Array<{
+  otherScores: Array<{
     matchId: string;
     goals: Array<{ minute: number; side: MatchSide }>;
   }>;
   /**
    * **승부차기가 남았을 때만** — 장부는 `finished`지만 경기는 끝나지 않았다.
-   *
-   * 120분이 끝났는데 승부가 남은 감독의 경기에서만 선다(`advanceMatchTo`가 세운다).
-   * 킥 목록이 원본이고 합계는 세지 않는다(`shootoutTally`). 옛 세이브엔 없다
-   * (optional — SAVE_VERSION 유지).
+   * 킥 목록이 원본이고 합계는 세지 않는다(`shootoutTally`).
    */
   shootout?: {
     /** 먼저 차는 쪽 — 동전이 정한다 (`shootoutFirst`) */
@@ -563,27 +480,6 @@ export interface PendingMatch {
     kicks: ShootoutKick[];
     /** 감독이 지시한 키커 순서 (선수 id) — 없으면 기본 순서 */
     order?: { home?: string[]; away?: string[] };
-  };
-  /**
-   * **상대가 경기 중 바꾼 전술** — 이 경기에만 유효하다.
-   *
-   * 팀의 저장된 전술(`state.tactics`)은 건드리지 않는다. 리그 전체 AI가 경기마다
-   * 전술을 흘리면 다음 경기의 상대가 왜 그런 모양인지 아무도 설명할 수 없다.
-   * pendingMatch와 함께 사라지므로 되돌릴 것도 없다.
-   */
-  aiTactics?: import("@story-fm/domain").TacticsSpec;
-  /**
-   * **상대가 경기 중 갈아 깐 판의 모양** — 이 경기에만 유효하다 (match.md §2).
-   *
-   * 저장된 배치(`state.tactics`)는 건드리지 않는다. 여기 이름 하나만 남기고
-   * 좌표는 패킷을 세울 때마다 다시 앉히므로(`reseatOnAiShape`), 교체로 사람이
-   * 바뀌어도 판은 갈아 깐 그 모양 그대로다. 되돌릴 자리가 필요 없는 이유이기도
-   * 하다 — pendingMatch와 함께 사라진다. 옛 세이브엔 없다 (optional).
-   */
-  aiShape?: {
-    formation: import("@story-fm/domain").Formation;
-    /** 어느 쪽으로 던진 판인가 — 경기당 한 번이라 이 값이 서면 다시 묻지 않는다 */
-    intent: "chase" | "hold";
   };
 }
 
@@ -594,7 +490,6 @@ export type GamePhase = "idle" | "matchday" | "match" | "negotiation";
  *
  * 방이 여는 것은 라우팅뿐이다 — 협상의 장부(오퍼·조건서·인내·줄)는 그대로
  * `Negotiation`이 든다. 방이 닫히면 `null`이 되고 `phase`는 들어서기 전의 것으로 돌아간다.
- * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
  */
 export interface PendingNegotiation {
   negotiationId: string;
@@ -617,7 +512,7 @@ export interface PendingNegotiation {
 /** 하루가 열리는 시각 — 아무 선언도 없으면 여기서 시작한다 */
 export const DAY_START = "09:00";
 
-/** 구 세이브는 시각이 없다 — 하루의 시작으로 본다 */
+/** 시각 — 선언된 적이 없으면 하루의 시작이다 */
 export function clockOf(state: GameState): string {
   return state.clock ?? DAY_START;
 }
@@ -660,7 +555,7 @@ export interface GameState {
    * 아침이 저녁이 되어도 굴릴 것이 없다. 그래서 이 축은 tick 없이 움직이고,
    * 날짜가 넘어갈 때 하루의 시작으로 돌아온다.
    *
-   * 구 세이브엔 없다 — 읽을 때 09:00으로 본다 (`clockOf`).
+   * 없으면 하루의 시작(09:00)이다 — 읽는 문은 `clockOf` 하나다.
    */
   clock?: string;
   /**
@@ -668,26 +563,25 @@ export interface GameState {
    *
    * 모델이 적은 시점이 시계를 움직이는 유일한 자유 텍스트 경로라(agents.md §2)
    * 그 실패는 조용히 쌓인다. 세이브가 드는 이유는 "연달아"가 턴을 건너 세는
-   * 값이라서다 — 어디에서도 파생할 수 없다. 옛 세이브엔 없다
-   * (optional — SAVE_VERSION 유지).
+   * 값이라서다 — 어디에서도 파생할 수 없다. 없으면 0이다.
    */
   sceneHeaderMisses?: number;
   calendar: SeasonCalendar;
   userTeamId: string;
   phase: GamePhase;
   pendingMatch: PendingMatch | null;
-  /** 열린 협상 방 — `phase`가 `negotiation`일 때만 선다. 옛 세이브엔 없다 (optional) */
-  pendingNegotiation?: PendingNegotiation | null;
+  /** 열린 협상 방 — `phase`가 `negotiation`일 때만 선다 */
+  pendingNegotiation: PendingNegotiation | null;
   /**
-   * 이 세계의 범위 — 없으면 카탈로그 전체다(실게임·옛 세이브).
+   * 이 세계의 범위 — 없으면 카탈로그 전체다(실게임).
    * 테스트가 리그·팀 수를 줄인 작은 세계를 만들 때만 채워진다 (`world/scope.ts`).
    */
   world?: WorldScope;
   /**
    * **승강 결과** — 팀 → 지금 속한 리그. 카탈로그의 `leagueId`는 불변이므로
    * 강등·승격은 세이브 상태로만 표현된다 (`competition/promotion.ts`).
-   * 카탈로그와 같은 리그면 항목을 두지 않는다. 옛 세이브엔 없다 — 없으면
-   * 전 클럽이 카탈로그 그대로다 (optional — SAVE_VERSION 유지).
+   * 카탈로그와 같은 리그면 항목을 두지 않는다. 없으면(아직 승강이 없었다) 전 클럽이
+   * 시작할 때의 리그 그대로다.
    */
   leagueOf?: Record<string, string>;
 
@@ -723,9 +617,8 @@ export interface GameState {
    * 끼우기 **전에** 남긴다: 그해 리그전을 돈 리그의 최종 순위표 행 전체와 감독 팀의
    * 경기 결과다. 새 시즌의 일정이 옛 경기를 밀어내므로 순위표로 되돌릴 수 없다.
    * 구단 체급의 성적 축·역대 조회·기록 경신이 전부 이 한 표를 읽는다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지 · `migrateLeagueHistory`가 옮긴다).
    */
-  history?: SeasonHistory[];
+  history: SeasonHistory[];
 
   // ── 기록 ──
   injuries: Injury[];
@@ -738,30 +631,29 @@ export interface GameState {
    *
    * 낱낱의 성장은 `growthLog`가 갖는다. 여기 남는 것은 **구간**의 것이다 —
    * 세션 수, 그 구간에 움직인 것, 훈련장에서 눈에 띈 선수의 갈래와 근거 한 줄.
-   * 상한 있는 링(`TRAINING_REPORT_LIMIT`). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 상한 있는 링(`TRAINING_REPORT_LIMIT`).
    */
-  trainingReports?: TrainingReport[];
+  trainingReports: TrainingReport[];
   seasonStats: SeasonStat[];
   /**
    * 집중 육성 명단 — 감독이 지정한 우리 2군 유망주(`set_development_focus`).
    * 월간 성장 확률에 배율이 붙는다 (squad/development.ts — season.md §2 2군 리그).
-   * 승격·이적으로 떠나면 걷어낸다. 구 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 승격·이적으로 떠나면 걷어낸다.
    */
-  developmentFocus?: string[];
+  developmentFocus: string[];
   /**
    * **멘토링 쌍** — 감독이 고참에게 맡긴 유망주 (→ docs/data/people.md §5-3).
    *
    * 멘티의 정신 6축 성장·정착 크레딧에 배율로 얹히고, 두 사람의 인물지에 관계 한
    * 줄로 선다. 끝난 사이는 지우지 않고 `until`로 닫는다 — 멘토가 떠난 사실이
    * 멘티의 심경에 서려면 그 줄이 며칠은 남아 있어야 한다.
-   * 옛 세이브엔 없다 (로드 시 빈 배열 — 세이브 버전을 올리지 않는다).
    */
-  mentoring?: Mentoring[];
+  mentoring: Mentoring[];
   /**
    * 2군 훈련 방침 — 감독이 고른 축 갈래(`set_reserve_training`). 우리 2군의 월간
    * 성장에서 **어느 축이 뽑히는지**에 배율로 얹힌다
    * (squad/training-plan.ts · development.ts — season.md §2 2군 리그).
-   * 없으면 `balanced`다 — 옛 세이브도 그대로 읽힌다 (optional — SAVE_VERSION 유지).
+   * 없으면 감독이 고르지 않은 것이고 `balanced`로 읽는다 (optional — 없음이 뜻이다).
    */
   reserveTraining?: ReserveTrainingPolicy;
   issues: PlayerIssue[];
@@ -771,30 +663,25 @@ export interface GameState {
    * 무슨 말로 약속했는지는 장면의 것이고, 이행 판정은 전부 다른 장부에서 나온다
    * (출전 명단 · 이적 리스트 · 열린 협상 · 완장). 여기 남는 것은 **감독이 그것을
    * 약속했다는 사실과 기한**뿐이라, 파생할 원본이 없는 유일한 값이다.
-   * 옛 세이브엔 없다 (로드 시 빈 배열 — 세이브 버전을 올리지 않는다).
    */
   promises: ManagerPromise[];
   /**
    * 정착 이벤트 — 대화·주장 지명이 새 영입의 적응에 남긴 것.
-   * 나중에 추가된 테이블이라 옛 세이브엔 없다(로드 시 빈 배열).
    */
   settlingEvents: SettlingEvent[];
   /**
    * 이적 리스트 — 감독이 내놓은 선수와 호가. 등재 자체가 시장의 관심을 만든다
-   * (`generateIncomingOffers`). 옛 세이브엔 없다(로드 시 빈 배열).
+   * (`generateIncomingOffers`).
    */
   transferList: TransferListing[];
   /**
    * **이적 요청** — 선수가 나가겠다고 말한 사실과 감독의 답
    * (→ docs/simulation/transfer.md §1-1).
    *
-   * 사유가 셋이라(사다리 · 막힌 이적 · 더 큰 무대) `PlayerState.transferRequestedOn`
-   * 하나로는 「왜」도 「감독이 답했는가」도 적을 자리가 없다. 그 필드는 파생의
-   * 폴백으로 남는다 — 장부가 비어 있는 옛 세이브에서 `transferRequestOf`가 그
-   * 날짜에서 `grievance` 한 줄을 만든다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 사유가 셋이라(사다리 · 막힌 이적 · 더 큰 무대) 날짜 하나로는 「왜」도 「감독이
+   * 답했는가」도 적을 자리가 없다 — 요청의 원본은 이 장부 하나다.
    */
-  transferRequests?: TransferRequest[];
+  transferRequests: TransferRequest[];
   /**
    * **타 구단의 관심** — 오퍼 앞에 서는 사다리
    * (→ docs/simulation/transfer.md §1-2).
@@ -802,18 +689,16 @@ export interface GameState {
    * 오퍼는 시장의 첫 사건이 아니라 마지막 사건이다. 어느 구단이 보고 있고, 문의가
    * 왔고, 값을 부를 참이라는 세 칸이 여기 남는다 — 협상이 열리는 순간 그 줄은
    * 걷힌다(사실을 이제 협상이 든다).
-   * 옛 세이브엔 없다 (로드 시 빈 배열 — 세이브 버전을 올리지 않는다).
    */
-  interests?: Interest[];
+  interests: Interest[];
   /**
    * **경쟁 입찰** — 우리가 협상 중인 선수에게 다른 구단이 값을 부른 사실
    * (→ docs/simulation/transfer.md §1-2).
    *
    * 관심(`interests`)이 「보고 있다」라면 이 줄은 「불렀다」다. 호가를 올리고 협상
    * 서류·스냅샷에 실리며, 그 협상이 끝나면 걷힌다.
-   * 옛 세이브엔 없다 (로드가 채우지 않는다 — 없는 것이 곧 뜻이다).
    */
-  competingBids?: CompetingBid[];
+  competingBids: CompetingBid[];
   /** 개인 훈련 프로그램 — 팀 훈련 위에 한 선수만 겨냥해 얹는다 */
   playerTraining: PlayerTraining[];
   /**
@@ -822,44 +707,41 @@ export interface GameState {
    * 배치(`TacticAssignment.roleId`)는 로테이션마다 다시 써지므로, 벤치로 한 번
    * 내려가면 감독의 결정이 지워진다. 배치 바깥에 두어 같은 자리로 돌아왔을 때
    * 기본값 대신 이 값에서 시작한다 (→ docs/data/player.md §3.2).
-   * 옛 세이브엔 없다 (로드 시 빈 배열 — 세이브 버전을 올리지 않는다).
    */
   roleMemory: RoleMemory[];
   /**
    * **아직 성사되지 않은 AI 이적** — 이번 주에 정해진, 날짜가 흩어진 거래
    * (`ai-market.ts`). 계획은 주 1회 세우고 실행은 그 날짜의 tick이 한다.
-   * 옛 세이브엔 없다 (로드 시 빈 배열 — 세이브 버전을 올리지 않는다).
    */
-  aiDeals?: AiDeal[];
+  aiDeals: AiDeal[];
   /**
    * **AI 이적 계획이 덮은 마지막 날.** 이 날에 이르러야 다음 주치를 세운다
    * (`ai-market.ts`) — 큐가 비었는지로 재면 성사가 없는 주에 매일 다시 계획한다.
-   * 옛 세이브엔 없다 (없으면 그날 바로 한 번 계획한다 — 세이브 버전은 그대로).
+   * 없으면(아직 한 번도 세우지 않았다) 그날 바로 한 번 계획한다.
    */
   aiPlannedThrough?: string;
   /**
    * **경질됐다** — 있으면 감독은 더 이상 이 구단의 사람이 아니다. 시계는 그대로
-   * 흐르고(무직), 새 자리에 부임하면 지워진다 (career.md §5.1). 옛 세이브엔 없다.
+   * 흐르고(무직), 새 자리에 부임하면 지워진다 (career.md §5.1). 없으면 재직 중이다.
    */
   dismissal?: Dismissal;
   /**
    * **경질 이력** — 부임이 `dismissal` 카드를 지울 때 여기로 옮겨 남는다 (career.md §6).
    * 잘린 시즌은 `SEASON_RECORD`가 없으므로 커리어 표가 그 해의 경질 줄을 여기서
-   * 읽는다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 읽는다.
    */
-  dismissals?: Dismissal[];
+  dismissals: Dismissal[];
   /**
    * **감독직 제안** — 공석이 된 구단이 무직 감독을 부른 기록 (career.md §5.1).
    * 만료·수락한 것도 남는다 — 같은 무직 기간에 같은 구단이 다시 부르지 않게 하는
-   * 근거다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 근거다.
    */
-  managerOffers?: ManagerOffer[];
+  managerOffers: ManagerOffer[];
   /**
    * **공석 명부** — AI 구단이 감독을 자른 자리 (career.md §5.1). 감독이 먼저
    * 지원하는(`apply_manager_job`) 문이고, 재직 중에도 쌓이며 14일 뒤 지워진다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
-  managerVacancies?: ManagerVacancy[];
+  managerVacancies: ManagerVacancy[];
   /**
    * **무직 감독 풀** — 자리를 잃은 AI 감독들 (transfer.md §7 「감독 풀」).
    *
@@ -867,12 +749,8 @@ export interface GameState {
    * 기다린다. 명부의 실명 감독도 같은 줄에 앉는다. 상한(`MANAGER_POOL_MAX`)을 넘으면
    * 자리를 잃은 지 오래된 순으로 밀린다.
    *
-   * 옛 세이브엔 없다 — **없는 것과 빈 것이 다른 뜻인 유일한 표다**: 로드 보정
-   * (`ensureManagerPool`)이 없는 것을 보고 그 세이브가 옛 사람됨 채널을 쓰던
-   * 시절임을 안다 (people.md §2). 그 보정이 끝나면 빈 배열이다
-   * (optional — SAVE_VERSION 유지).
    */
-  managerPool?: ManagerPoolEntry[];
+  managerPool: ManagerPoolEntry[];
   /**
    * **무직 스태프 풀** — 자리를 찾는 코치·의료진·스카우트 (people.md §2-2).
    *
@@ -884,7 +762,7 @@ export interface GameState {
    * 이름을 피해야 하는데(`occupiedPersonNames`), `createGame`이 스태프 시장을 값으로
    * 부르면 `core/state`와 `market/staff-market`이 서로를 import한다. 풀을 읽는 자리가
    * `ensureStaffPool`을 먼저 부르므로 결과는 같고, **빈 배열은 「다 데려갔다」는
-   * 다른 뜻으로 남는다.** 옛 세이브도 `undefined`다 (optional — SAVE_VERSION 유지).
+   * 다른 뜻으로 남는다** (optional — 없음이 뜻이다).
    */
   staffPool?: StaffPoolEntry[];
   /**
@@ -896,8 +774,7 @@ export interface GameState {
    * 잇는다 — 배치는 컨텍스트에 없고 조회 도구로만 알 수 있기 때문이다.
    *
    * 그래서 **모아 두었다가 다음 발화 때 한 번에** 읽힌다. 같은 대상의 조작은
-   * 접히므로(`recordEdit`) 역할을 세 번 바꿔도 마지막 한 줄이다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 접히므로(`recordEdit`) 역할을 세 번 바꿔도 마지막 한 줄이다. 없으면 빈 줄이다.
    */
   pendingEdits?: PendingEdit[];
   /**
@@ -909,7 +786,7 @@ export interface GameState {
    * 걸 모른 채 다음 장면을 쓰면 세계가 감독의 경기 하나로 멈춘 것처럼 읽힌다.
    *
    * `pendingEdits`와 같은 규약이다 — 모아 두었다가 다음 평시 턴에 한 번 읽히고
-   * 비워진다(`takeNews`). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 비워진다(`takeNews`). 없으면 빈 줄이다.
    */
   pendingNews?: string[];
   /**
@@ -925,8 +802,7 @@ export interface GameState {
    * 이 줄은 **카드가 실제로 선 것만** 비운다(`peekReportCards` → `consumeReportCards`).
    * 조립에 실패한 id는 줄에 남고, 영영 못 세울 것만 `pruneReportCards`가 닫는다 —
    * 사무실에 스카우팅 화면이 없어 이 줄에서 사라진 보고서는 되찾을 자리가 없다
-   * (→ [docs/data/player.md](../../../../docs/data/player.md) §9.4-1).
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * (→ [docs/data/player.md](../../../../docs/data/player.md) §9.4-1). 없으면 빈 줄이다.
    */
   pendingReportCards?: string[];
   /** 스카우트 파견·완료 이력 — 타 팀 선수 안개의 근거 (scouting.ts) */
@@ -941,10 +817,9 @@ export interface GameState {
    *
    * 코어는 자리가 나도 대신 보내지 않는다 — 상태 전이는 명령 한 경로뿐이다.
    * 지우는 것은 `scoutingSummary`를 읽는 쪽이 아니라 파견·만료다
-   * (`dropDeferredScout`·`pruneDeferredScouts`). 옛 세이브엔 없다
-   * (optional — SAVE_VERSION 유지).
+   * (`dropDeferredScout`·`pruneDeferredScouts`).
    */
-  deferredScouts?: DeferredScout[];
+  deferredScouts: DeferredScout[];
   /**
    * **스카우트 임무** — 이름이 아니라 조건 한 벌로 나간 파견
    * (→ [docs/data/player.md](../../../../docs/data/player.md) §9.4).
@@ -952,94 +827,86 @@ export interface GameState {
    * 지목(`scoutReports`)과 같은 동시 한도를 나눠 쓰고, 대기·파견 중·완료가 한 표에
    * 함께 앉는다(`dueOn`·`completedOn`). 후보를 적어 두는 이유는 그 다섯의 지식
    * 수준이 이 표에서 파생하기 때문이다(`pickedByMission`) — 출전 명단이 `seen`을
-   * 만드는 것과 같은 자리다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 만드는 것과 같은 자리다.
    */
-  scoutMissions?: ScoutMission[];
+  scoutMissions: ScoutMission[];
   /** 진행 중 협상 — 며칠에 걸쳐 오퍼가 오가므로 파생으로 되돌릴 수 없다 */
   negotiations: Negotiation[];
   /**
    * **위임 방침** — 감독이 갈래째 단장에게 맡긴 일 (transfer.md §12-4). 갈래마다 한 줄이고,
-   * 감독이 한 말이라 파생할 수 없다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 감독이 한 말이라 파생할 수 없다.
    */
-  delegations?: Delegation[];
+  delegations: Delegation[];
   /**
    * 기자회견 — 열린 시점과 답한 시점이 갈리므로(감독이 다음 날 답할 수도 있다)
-   * 협상처럼 세이브가 들고 있어야 한다. 옛 세이브엔 없다(로드 시 빈 배열).
+   * 협상처럼 세이브가 들고 있어야 한다.
    */
-  pressConferences?: PressConference[];
+  pressConferences: PressConference[];
   /**
    * 다가옴 — 압력이 임계를 넘어 코어가 연 자리 (people.md §8). 회견과 같은 이유로
    * 세이브가 든다: 열린 시점과 감독이 답한 시점이 갈린다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
-  approaches?: Approach[];
+  approaches: Approach[];
   /**
    * **압력 눈금** — 주제별 누적과 계단 (people.md §8).
    *
    * 세이브가 드는 값 중 장부에서 파생할 수 없는 유일한 것이다. 불만도 순위도 폼도
    * 지금의 사실이지만, 감독이 그것을 **며칠째 그대로 두었는가**는 어디에도 원본이
-   * 없다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 없다.
    */
-  approachPressure?: ApproachPressure[];
+  approachPressure: ApproachPressure[];
   /**
    * **관계 등급** — 무순서 쌍 하나에 한 줄 (people.md §6 「관계 등급」).
    *
    * 압력 눈금과 같은 이유로 세이브가 든다: 그간의 일이 쌓인 결과라 장부에서 파생할 수
    * 없다. **압축이 등급을 매긴 쌍만 앉는다** — 아무도 손대지 않은 쌍은 첫인상이
    * 결정적으로 답하므로(`world/relations.ts`) 줄이 없는 것이 곧 첫인상이다.
-   * 옛 세이브엔 없고, 점수를 들던 세이브는 로드가 등급으로 접는다
-   * (`migrateRelationTiers` — optional · SAVE_VERSION 유지).
    */
-  relations?: Relation[];
+  relations: Relation[];
   /**
    * 언론 유출 — 사다리 계단 4의 사건 (people.md §8). **다음 회견이 실어 갈 때까지만**
    * 남는다: `openPress`가 소비해 사실 카드로 옮긴다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
-  pressLeaks?: PressLeak[];
+  pressLeaks: PressLeak[];
   /**
    * 라이벌 구단의 경질 — 유출과 같은 결의 대기열이다 (people.md §4). **다음 회견이
    * 실어 갈 때까지만** 남는다: `openPress`가 소비해 사실 카드로 옮긴다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
-  pressSackings?: PressSacking[];
+  pressSackings: PressSacking[];
   /**
    * **언론의 시즌 예상 순위** — 리그 하나에 한 줄 (season.md §2 「시즌 예상 순위」).
    *
    * 파생처럼 보이지만 되돌릴 수 없다: `preseasonPrediction`은 결정적 순수 함수여도
    * **소집일의** 스쿼드를 읽으므로, 여름 창이 닫히고 나면 같은 답이 나오지 않는다.
    * 그래서 그날 세워 여기 적어 둔다 — **얇은 장부다.**
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
-  predictions?: SeasonPrediction[];
+  predictions: SeasonPrediction[];
   /**
    * **아직 GM이 읽지 않은 기사** — 회견 밖에서 언론이 쓴 것 (people.md §4-1).
    *
    * `pendingNews`와 같은 규약이다: 모아 두었다가 스냅샷에 실린 턴에 비워진다
    * (`takeMedia`). 회견과 달리 두 시점에 걸쳐 있지 않으므로 — 감독이 답할 자리가
    * 아니라 읽을 배경이므로 — 열린 채 기다리는 상태가 없다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
-  media?: MediaFact[];
+  media: MediaFact[];
+  /**
+   * **클럽 비전** — 구단주 원형이 건 다년 계획 (career.md §5). 코드·목표·가중치·기한만
+   * 남고 진행도는 파생이다.
+   */
+  clubVision?: ClubVision;
   /**
    * 보드 요청 — 구단주 원형이 이적창마다 거는 조건 (career.md §5.2). 발행 시점과
    * 판정 시점이 갈리고 발행 순간의 기준값(주급 총액·기준 이적료)을 들므로 세이브가
-   * 든다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 든다.
    */
-  /**
-   * **클럽 비전** — 구단주 원형이 건 다년 계획 (career.md §5). 코드·목표·가중치·기한만
-   * 남고 진행도는 파생이다. 옛 세이브엔 없다 (optional — 세이브 버전 유지).
-   */
-  clubVision?: ClubVision;
-  boardDemands?: BoardDemand[];
+  boardDemands: BoardDemand[];
   /**
    * 감독이 보드에 건 요청 — 예산·주급 한도·구장 (finance.md §9.6). 구단주 요청과
    * **방향이 반대인 별개 상태**다: 저쪽은 보드가 감독에게 걸고 평판이 오가며,
    * 이쪽은 감독이 걸고 평판은 움직이지 않는다. 건 날과 답이 오는 날이 갈리고
    * 구장은 완공일까지 더 갈리므로 세이브가 든다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
-  boardRequests?: BoardRequest[];
+  boardRequests: BoardRequest[];
 
   // ── 감독 ──
   manager: Manager;
@@ -1052,9 +919,8 @@ export interface GameState {
    * 리그가 주는 상이므로 여기 통째로 쌓이고, 커리어 표는 그중 감독이 그 시즌 맡고
    * 있던 팀의 것만 골라 세운다 (season.md §6 · career.md §6).
    * 코드와 근거 수치뿐이다 — 이름도 문장도 없다 (overview.md §1 철칙 4).
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
-  awards?: SeasonAward[];
+  awards: SeasonAward[];
   /**
    * 마일스톤 — 데뷔·첫 골·구단 통산 문턱·해트트릭 (match.md §6).
    *
@@ -1062,9 +928,8 @@ export interface GameState {
    * 읽는 곳이 회견·심경·서사·선수 상세 넷인데 전부 우리 선수의 자리라, 리그 전체를
    * 적으면 시즌마다 수백 행이 들어와 우리 것이 그 안에 묻힌다. 기록 자체는 모든 팀에
    * 쌓이므로 남의 선수 통산도 `careerOf`가 그대로 낸다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
-  milestones?: Milestone[];
+  milestones: Milestone[];
   /**
    * **은퇴 명부** — 그만둔 사람이 남기는 한 줄 (season.md §6).
    *
@@ -1072,18 +937,16 @@ export interface GameState {
    * `retire` 줄만으로는 오프시즌 블록도 인물 사전도 그 사람을 부를 수 없다. 통산은 여기
    * 적지 않는다: `seasonStats`가 그대로 남아 `careerTotalsOf`가 같은 수를 낸다.
    * **감독 팀에서 은퇴한 선수만** 담는다 — `milestones`와 같은 규약이다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
-  retired?: RetiredPlayer[];
+  retired: RetiredPlayer[];
   /**
    * **여름의 유스 후보** — 아직 답하지 않은 인테이크 (season.md §6).
    *
    * 전환이 프리시즌 첫날에 세우고 선수단 소집일에 정리한다. 감독 팀의 것만 담는다 —
    * AI 구단은 전환이 그 자리에서 결정하므로 기다릴 답이 없다. 계약 전이라 후보의
    * 사람이 여기 통째로 들어 있고, 계약이 서면 그대로 `players`로 옮겨 앉는다.
-   * 옛 세이브엔 없다 (빈 배열 — SAVE_VERSION 유지).
    */
-  youthCandidates?: YouthCandidate[];
+  youthCandidates: YouthCandidate[];
   /**
    * **A매치 소집** — 한 선수의 한 휴식기 (→ docs/data/competition.md §5-1).
    *
@@ -1091,29 +954,15 @@ export interface GameState {
    * 세계 전체의 행이 열려 있고(그래야 누가 자리를 비웠는지 코어가 안다), 복귀
    * 정산이 끝나면 **감독 팀 행만 최근 두 시즌** 남는다. 남의 선수의 캡·골은 그때
    * 이미 `PlayerState.caps`로 접혀 들어갔다.
-   * 옛 세이브엔 없다 (빈 배열 — SAVE_VERSION 유지).
    */
-  callUps?: CallUp[];
+  callUps: CallUp[];
 
   // ── 서사 ──
   /**
-   * 인물 — 데이터로 다루는 페르소나 (people.md §1). 수석코치·구단주·기자가 한
-   * 배열에 붙는다. 옛 세이브엔 없어 optional —
-   * 로드 시 시드로 채운다(`ensurePersonas`)므로 세이브 버전을 올리지 않는다.
+   * 인물 — 데이터로 다루는 페르소나 (people.md §1). 수석코치·구단주·기자·스태프가
+   * 한 배열에 붙는다. 생성이 시드로 결정적이라 같은 세이브는 언제 열어도 같은 사람이다.
    */
-  personas?: Persona[];
-  /**
-   * 폼 축이 −1~1로 바뀐 뒤의 세이브인가 — 로드 시 한 번만 옮기기 위한 마커
-   * (`persistence.ts`). 없으면 옛 −3~3 세이브로 보고 3으로 나눈다.
-   */
-  formUnitScale?: boolean;
-  /**
-   * 미러 자리에 적혀 있던 주발 보정을 이미 벗긴 세이브인가 — 로드 시 한 번만
-   * 벗기기 위한 마커 (`core/migrations.ts`). 벗기기는 묶음을 주 포지션 값으로
-   * 평평하게 미는 일이라, 마커 없이 매번 돌면 경기·훈련이 LCB·RCB에 쌓은
-   * 적응도까지 같이 지운다 (player.md §8).
-   */
-  mirrorProficiencyStripped?: boolean;
+  personas: Persona[];
   narrative: NarrativeNote[];
   chat: ChatTurn[];
   /**
@@ -1121,35 +970,32 @@ export interface GameState {
    * (→ [docs/llm/agents.md](../../../../docs/llm/agents.md) §5-1).
    *
    * 접는 것은 프롬프트 조립뿐이라 `chat`은 그대로 남는다. 판정은
-   * `core/history-window.ts`의 순수 함수가 한다. 옛 세이브엔 없다
-   * (optional — SAVE_VERSION 유지).
+   * `core/history-window.ts`의 순수 함수가 한다.
    */
   historyDigest?: HistoryDigest;
   /**
    * 인물이 소유하는 기억 — 압축이 남긴다
    * (→ [docs/data/people.md](../../../../docs/data/people.md) §9-1).
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
-  characterMemories?: CharacterMemory[];
+  characterMemories: CharacterMemory[];
   /**
    * 감독이 말로 만든 사건 — `record_incident`가 남긴다
    * (→ [docs/data/people.md](../../../../docs/data/people.md) §6 「사건 기록」).
-   * 회견 카드와 하루 한도가 읽는다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 회견 카드와 하루 한도가 읽는다.
    */
-  incidents?: Incident[];
+  incidents: Incident[];
   /**
    * 서사 아크 — 기억을 이야기로 엮는 골격 (people.md §9). 개폐는 장부에서
-   * 결정적으로 판정한다(`world/arcs.ts`). 옛 세이브엔 없다
-   * (optional — SAVE_VERSION 유지).
+   * 결정적으로 판정한다(`world/arcs.ts`).
    */
-  arcs?: NarrativeArc[];
-  /** 시작 사건 — 온보딩 판정이 열고 기한이 닫는다 (career.md §1). 옛 세이브엔 없다 */
-  openings?: Opening[];
+  arcs: NarrativeArc[];
+  /** 시작 사건 — 온보딩 판정이 열고 기한이 닫는다 (career.md §1) */
+  openings: Opening[];
   /**
    * 지급 일정 표 — 분할로 합의된 이적료·해지 정산금의 미래 회분
-   * (transfer.md §5-2). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * (transfer.md §5-2).
    */
-  paymentSchedules?: PaymentSchedule[];
+  paymentSchedules: PaymentSchedule[];
 }
 
 /**
@@ -1181,16 +1027,6 @@ export function inTransaction<T>(state: GameState, run: (draft: GameState) => T)
 
 // ── 팀·선수 조회 ────────────────────────────────────────
 
-export function teamById(state: GameState, id: string): GameTeam {
-  const team = state.teams.find((t) => t.id === id);
-  if (!team) throw new Error(`팀 없음: ${id}`);
-  return team;
-}
-
-export function userTeam(state: GameState): GameTeam {
-  return teamById(state, state.userTeamId);
-}
-
 /**
  * 팀 표시 이름 — **세이브가 없는 문맥**에서만 (새 게임 생성·어드민 미리보기·부임 전
  * 팀 목록). 게임이 진행 중이면 `teamNameIn`을 써야 한다.
@@ -1203,7 +1039,7 @@ export function teamShortName(teamId: string): string {
 }
 
 /**
- * 이 팀의 **지금** 이름 — 세이브가 갖고, 없으면(옛 세이브) 카탈로그가 답한다.
+ * 이 팀의 **지금** 이름 — 세이브가 갖고, 세이브에 없는 팀이면 카탈로그가 답한다.
  * `tierOfTeamIn`·`leagueOfTeamIn`과 같은 모양이다 (game-state.md §1).
  *
  * 카탈로그를 직접 읽으면 어드민의 이름 편집이 **진행 중인 세이브**의 화면·피드·
@@ -1217,7 +1053,7 @@ export function teamShortNameIn(state: GameState, teamId: string): string {
 }
 
 /**
- * 이 구단의 **지금** 구장·브랜드 — 세이브가 갖고, 없으면(옛 세이브·미등재 클럽)
+ * 이 구단의 **지금** 구장·브랜드 — 세이브가 갖고, 없으면(미등재 클럽)
  * 카탈로그가 체급 폴백으로 답한다 (team.md §3).
  *
  * 매치데이 수입과 상업 수입의 기준이라, 카탈로그를 직접 읽으면 어드민의 수용인원
@@ -1236,8 +1072,8 @@ export function clubProfileIn(state: GameState, teamId: string): ClubProfile {
 }
 
 /**
- * 이 팀이 **게임이 시작할 때** 속해 있던 리그 — 세이브가 갖고, 없으면(옛 세이브)
- * 카탈로그가 답한다.
+ * 이 팀이 **게임이 시작할 때** 속해 있던 리그 — 세이브가 갖고, 세이브 없이 묻거나
+ * 세이브에 없는 팀이면 카탈로그가 답한다.
  *
  * `leagueOfTeamIn`과 갈리는 것은 승강이다 — 이쪽은 승강 **전**의 원 소속이라,
  * "이 구단이 원래 어느 리그의 클럽인가"를 묻는 자리(브랜드 보정)가 쓴다. 지금
@@ -1301,9 +1137,8 @@ export function playersOf(state: GameState, teamId: string): GamePlayer[] {
 
 export type SquadLevel = "first" | "reserve";
 
-/** 구 세이브의 미지정 선수는 1군으로 읽어 기존 라인업을 깨지 않는다. */
 export function squadLevelOf(player: GamePlayer): SquadLevel {
-  return player.squadLevel ?? "first";
+  return player.squadLevel;
 }
 
 export function firstTeamPlayers(state: GameState, teamId: string): GamePlayer[] {
@@ -1456,7 +1291,7 @@ export function resolvePlayerRef(pool: readonly GamePlayer[], ref: string): Play
 export function playerName(state: GameState, id: string): string {
   return (
     playerById(state, id)?.name ??
-    (state.retired ?? []).find((r) => r.gamePlayerId === id)?.name ??
+    state.retired.find((r) => r.gamePlayerId === id)?.name ??
     state.seasonStats.find((s) => s.gamePlayerId === id && s.playerName !== undefined)
       ?.playerName ??
     id
@@ -1510,7 +1345,7 @@ export function familiarityOf(state: GameState, playerId: string): number {
   return assignmentFor(state, playerId)?.familiarity ?? FAMILIARITY_BASELINE;
 }
 
-/** 팀 평균 전술 적응도 (선발 기준) — 전력 패킷 입력 */
+/** 팀 평균 전술 적응도 (선발 기준) */
 export function squadFamiliarity(state: GameState, teamId: string): number {
   const starters = assignmentsOf(state, teamId, "starting");
   if (starters.length === 0) return FAMILIARITY_BASELINE;
@@ -1522,18 +1357,7 @@ export function squadFamiliarity(state: GameState, teamId: string): number {
  * 계산해야 하는데, 웹은 엔진(`node:fs` 의존)을 값으로 import할 수 없다.
  * 여기서 다시 내보내 엔진 소비자는 경로를 바꾸지 않는다.
  */
-export {
-  ADAPTATION_IMPACT,
-  FAMILIARITY_BASELINE,
-  PROFICIENCY_FACTOR_FLOOR,
-  PROFICIENCY_FLOOR,
-  PROFICIENCY_LOG_SCALE,
-  PROFICIENCY_MAX,
-  PROFICIENCY_MIN,
-  adaptationOf,
-  adaptationWeightsOf,
-  proficiencyReadiness,
-} from "@story-fm/domain";
+export { FAMILIARITY_BASELINE, adaptationOf } from "@story-fm/domain";
 
 /**
  * 이 선수가 그 포지션에서 갖는 적응도. 규칙은 domain의 `positionProficiency` 하나뿐
@@ -1576,23 +1400,14 @@ export function hasIssue(state: GameState, playerId: string): boolean {
   return state.issues.some((i) => i.gamePlayerId === playerId);
 }
 
-/**
- * **이 선수의 이적 요청** — 장부가 원본이고 `transferRequestedOn`이 폴백이다
- * (→ docs/simulation/transfer.md §1-1).
- *
- * 옛 세이브는 날짜만 들고 있으므로 사유를 `grievance`로 읽는다: 그때는 요청이 서는
- * 자리가 다가옴 사다리의 꼭대기뿐이었다.
- */
+/** **이 선수의 이적 요청** — 장부가 원본이다 (→ docs/simulation/transfer.md §1-1) */
 export function transferRequestOf(state: GameState, playerId: string): TransferRequest | null {
-  const row = (state.transferRequests ?? []).find((r) => r.gamePlayerId === playerId);
-  if (row) return row;
-  const since = playerById(state, playerId)?.state.transferRequestedOn;
-  return since === undefined ? null : { gamePlayerId: playerId, since, reason: "grievance" };
+  return state.transferRequests.find((r) => r.gamePlayerId === playerId) ?? null;
 }
 
 /** 아직 감독이 답하지 않은 요청들 — 책상 위에 놓인 것 */
 export function openTransferRequests(state: GameState): TransferRequest[] {
-  return (state.transferRequests ?? []).filter((r) => r.answeredOn === undefined);
+  return state.transferRequests.filter((r) => r.answeredOn === undefined);
 }
 
 /**
@@ -1603,7 +1418,7 @@ export function openTransferRequests(state: GameState): TransferRequest[] {
  * 규칙을 둘 다 이미 딛고 선 자리로 **내린 것**이다 (AGENTS.md §5).
  */
 export function openBoardDemand(state: GameState): BoardDemand | null {
-  return (state.boardDemands ?? []).find((d) => d.status === "open") ?? null;
+  return state.boardDemands.find((d) => d.status === "open") ?? null;
 }
 
 /** 열린 **재정 요청** — 동결·강등이 세운 갈래만. 평소 조건이면 `null`이다 */
@@ -1625,13 +1440,6 @@ export function openSeatDemand(state: GameState): BoardDemand | null {
  * 요청을 세운다 — **한 선수에게 한 줄뿐이다** (transfer.md §11). 이미 서 있으면
  * 아무것도 하지 않고 `false`를 돌려준다: 사유가 셋이라 두 자리에서 같은 날 같은
  * 선수를 세울 수 있는데, 그러면 감독의 답 하나가 다른 줄을 남긴다.
- *
- * ⚠️ **서 있는지는 `transferRequestOf`가 판정한다** — 장부만 보면 옛 세이브
- * (`transferRequestedOn`만 있는 상태)에서 이미 선 요청 위에 오늘 날짜의 새 줄이
- * 서고 다이제스트가 한 번 더 나간다.
- *
- * `PlayerState.transferRequestedOn`도 함께 적는다 — 시장·압력 눈금이 그 필드를
- * 읽고, 옛 세이브와 새 세이브가 같은 값을 들어야 한다.
  */
 export function standTransferRequest(
   state: GameState,
@@ -1639,10 +1447,8 @@ export function standTransferRequest(
   reason: TransferRequestReason,
 ): boolean {
   if (transferRequestOf(state, playerId) !== null) return false;
-  const player = playerById(state, playerId);
-  if (!player) return false;
-  (state.transferRequests ??= []).push({ gamePlayerId: playerId, since: state.date, reason });
-  player.state.transferRequestedOn = state.date;
+  if (!playerById(state, playerId)) return false;
+  state.transferRequests.push({ gamePlayerId: playerId, since: state.date, reason });
   return true;
 }
 
@@ -1650,9 +1456,6 @@ export function standTransferRequest(
  * 요청에 답한다 — **답과 결정은 다른 칸이다** (transfer.md §1-1). `answeredOn`은
  * 책상에서 내려간 날이고 `answer`는 팔지·거부할지의 결정이다. 면담의 답은 날짜만
  * 찍고 결정을 비워 둔다 — 그래야 명령이 그 결정을 한 번 내릴 수 있다.
- *
- * 옛 세이브의 요청은 `PlayerState.transferRequestedOn`에서 파생된 줄이라 장부에
- * 없다 — 밀어 넣지 않으면 감독의 답이 아무 데도 남지 않는다.
  *
  * 요청이 선 날과 감독이 답한 날은 다른 사실이라 회견이 둘 다 싣는다 — 실려 간
  * 자리(`pressedOn`)를 비운다. 요청이 없으면 `null`.
@@ -1662,14 +1465,8 @@ export function answerTransferRequest(
   playerId: string,
   answer?: TransferRequest["answer"],
 ): TransferRequest | null {
-  const found = transferRequestOf(state, playerId);
-  if (!found) return null;
-  const rows = (state.transferRequests ??= []);
-  let request = rows.find((r) => r.gamePlayerId === playerId);
-  if (!request) {
-    request = found;
-    rows.push(request);
-  }
+  const request = transferRequestOf(state, playerId);
+  if (!request) return null;
   request.answeredOn = state.date;
   if (answer !== undefined) request.answer = answer;
   delete request.pressedOn;
@@ -1678,11 +1475,7 @@ export function answerTransferRequest(
 
 /** 요청을 걷는다 — 원인이 사라졌거나 그 선수가 팀을 떠났을 때 */
 export function withdrawTransferRequest(state: GameState, playerId: string): void {
-  state.transferRequests = (state.transferRequests ?? []).filter(
-    (r) => r.gamePlayerId !== playerId,
-  );
-  const player = playerById(state, playerId);
-  if (player) player.state.transferRequestedOn = undefined;
+  state.transferRequests = state.transferRequests.filter((r) => r.gamePlayerId !== playerId);
 }
 
 /**
@@ -1697,7 +1490,7 @@ export function withdrawTransferRequest(state: GameState, playerId: string): voi
  * 한 곳뿐이다.
  */
 export function interestsOn(state: GameState, playerId: string): Interest[] {
-  return (state.interests ?? [])
+  return state.interests
     .filter((i) => i.gamePlayerId === playerId)
     .sort((a, b) =>
       a.stage === b.stage
@@ -1714,7 +1507,7 @@ export function interestOf(
   teamId: string,
   playerId: string,
 ): Interest | undefined {
-  return (state.interests ?? []).find((i) => i.teamId === teamId && i.gamePlayerId === playerId);
+  return state.interests.find((i) => i.teamId === teamId && i.gamePlayerId === playerId);
 }
 
 /**
@@ -1727,7 +1520,7 @@ export function announcedInterestsOn(state: GameState, playerId: string): Intere
 
 /** 관심을 걷는다 — 그 선수가 팀을 떠났거나, 그 줄이 오퍼가 됐을 때 */
 export function clearInterests(state: GameState, match: (interest: Interest) => boolean): void {
-  state.interests = (state.interests ?? []).filter((i) => !match(i));
+  state.interests = state.interests.filter((i) => !match(i));
 }
 
 /**
@@ -1737,7 +1530,7 @@ export function clearInterests(state: GameState, match: (interest: Interest) => 
  * 각자 정렬하면 같은 날 같은 세이브가 자리마다 다른 순서를 낸다.
  */
 export function competingBidsOn(state: GameState, playerId: string): CompetingBid[] {
-  return (state.competingBids ?? [])
+  return state.competingBids
     .filter((b) => b.gamePlayerId === playerId)
     .sort((a, b) =>
       a.date === b.date ? (a.teamId < b.teamId ? -1 : 1) : a.date < b.date ? 1 : -1,
@@ -1746,7 +1539,7 @@ export function competingBidsOn(state: GameState, playerId: string): CompetingBi
 
 /** 경쟁 입찰을 걷는다 — 그 협상이 끝났거나 선수가 우리 손을 떠났을 때 */
 export function clearCompetingBids(state: GameState, match: (bid: CompetingBid) => boolean): void {
-  state.competingBids = (state.competingBids ?? []).filter((b) => !match(b));
+  state.competingBids = state.competingBids.filter((b) => !match(b));
 }
 
 export function isInjured(state: GameState, playerId: string): boolean {
@@ -1942,17 +1735,6 @@ export function weeklyWagesOf(state: GameState, teamId: string): number {
 }
 
 /**
- * 이 카드가 **어느 대회의 것인가** — 누적을 세는 자리가 묻는다 (match.md §6).
- *
- * 새 줄은 자기가 들고 있다. 대회를 안 적던 옛 줄만 경기 원장에서 찾으므로, 새
- * 세이브에서는 이 스캔이 한 번도 돌지 않는다.
- */
-export function bookingCompetitionOf(state: GameState, booking: Booking): string | null {
-  if (booking.competitionId !== undefined) return booking.competitionId;
-  return state.matches.find((m) => m.id === booking.matchId)?.competitionId ?? null;
-}
-
-/**
  * 시즌 누적 경고 — BOOKING에서 파생. **대회를 주면 그 대회의 것만 센다**
  * (match.md §6) — 누적은 대회 안에서만 쌓인다.
  *
@@ -1969,7 +1751,7 @@ export function seasonYellowsOf(
   const perMatch = new Map<string, number>();
   for (const b of state.bookings) {
     if (b.gamePlayerId !== playerId || b.season !== season || b.card !== "yellow") continue;
-    if (competitionId !== undefined && bookingCompetitionOf(state, b) !== competitionId) continue;
+    if (competitionId !== undefined && b.competitionId !== competitionId) continue;
     perMatch.set(b.matchId, (perMatch.get(b.matchId) ?? 0) + 1);
   }
   let counted = 0;
@@ -1995,12 +1777,12 @@ export const KEPT_APPROACHES = 20;
 
 /** 답을 기다리는 다가옴 — 언제나 하나뿐이다 */
 export function pendingApproach(state: GameState): Approach | null {
-  return (state.approaches ?? []).find((a) => a.status === "pending") ?? null;
+  return state.approaches.find((a) => a.status === "pending") ?? null;
 }
 
 /** 자리를 장부에 앉힌다 — 오래된 것부터 밀려난다 */
 export function pushApproach(state: GameState, approach: Approach): void {
-  state.approaches = [...(state.approaches ?? []), approach].slice(-KEPT_APPROACHES);
+  state.approaches = [...state.approaches, approach].slice(-KEPT_APPROACHES);
 }
 
 /**
@@ -2022,14 +1804,13 @@ export function expirePendingApproach(state: GameState): void {
  * ⚠️ **접어 낸 행은 읽기 전용이다** (`sumSeasonStats`) — 얹는 자리는 언제나
  * `ensureSeasonStat` 하나이므로, 여기서 받은 행에 값을 쓰면 다음 파생에서 사라진다.
  *
- * `competition`을 주면 그 대회의 행 하나다. 옛 세이브의 축 없는 행은 그 물음에는
- * 걸리지 않고 합계에만 든다 — 대회를 대신 골라 주면 컵 골이 리그 행으로 새어 든다.
+ * `competition`을 주면 그 대회의 행 하나다.
  */
 export function seasonStatOf(
   state: GameState,
   playerId: string,
   opts: { season?: number; competition?: string } = {},
-): SeasonStat | null {
+): SeasonStatTotal | null {
   const p = playerById(state, playerId);
   if (!p) return null;
   const season = opts.season ?? state.season;
@@ -2053,7 +1834,7 @@ export function seasonStatsByCompetitionOf(
   state: GameState,
   playerId: string,
   season = state.season,
-): CompetitionSeasonStat[] {
+): SeasonStat[] {
   const p = playerById(state, playerId);
   if (!p) return [];
   return competitionRowsOf(
@@ -2068,8 +1849,7 @@ export function seasonStatsByCompetitionOf(
  *
  * `competitionId`가 열쇠의 넷째다 (game-state.md §3.4): 리그 경기는 리그 행에, 컵
  * 경기는 컵 행에 쌓인다. 대회가 없는 경기(친선)는 애초에 이 문을 지나지 않으므로
- * 인자가 널을 받지 않는다 — 널을 허용하면 새 기록이 옛 세이브의 「축 없는 합계 행」에
- * 섞여 들어 그 행이 무엇의 합인지가 사라진다.
+ * 인자가 널을 받지 않는다 — 대회 축이 없는 행은 무엇의 합인지 말할 수 없다.
  *
  * `player`를 넘기면 그 자리에서 등번호를 읽는다. 부르는 자리는 대부분 이미 그 선수를
  * 손에 들고 있고, 여기서 다시 명부를 훑으면 **경기마다 선수 수만큼** 4,000명 배열을
@@ -2128,7 +1908,7 @@ export function recordGrowth(
   target: string,
   delta: number,
   /** 어느 경로로 올랐나 — 문장이 아니라 코드다 (records.ts `GrowthOrigin`) */
-  origin?: GrowthEntry["origin"],
+  origin: GrowthEntry["origin"],
   /** 실제로 그 일이 있었던 날 — 안 주면 오늘. 결산은 **지나간 훈련 날짜**를 준다 */
   on?: string,
 ): void {
@@ -2139,7 +1919,7 @@ export function recordGrowth(
     source,
     target,
     delta,
-    ...(origin ? { origin } : {}),
+    origin,
   });
   if (state.growthLog.length > GROWTH_LOG_LIMIT) {
     state.growthLog.splice(0, state.growthLog.length - GROWTH_LOG_LIMIT);
@@ -2157,7 +1937,7 @@ const TRAINING_REPORT_LIMIT = 40;
 
 /** 한 구간의 결산 카드를 장부에 남긴다 — 오래된 것부터 밀려난다 */
 export function recordTrainingReport(state: GameState, report: TrainingReport): void {
-  const ring = (state.trainingReports ??= []);
+  const ring = state.trainingReports;
   ring.push(report);
   if (ring.length > TRAINING_REPORT_LIMIT) {
     ring.splice(0, ring.length - TRAINING_REPORT_LIMIT);
@@ -2166,7 +1946,7 @@ export function recordTrainingReport(state: GameState, report: TrainingReport): 
 
 /** 가장 최근의 결산 카드 — 없으면 null */
 export function latestTrainingReport(state: GameState): TrainingReport | null {
-  const ring = state.trainingReports ?? [];
+  const ring = state.trainingReports;
   return ring[ring.length - 1] ?? null;
 }
 
@@ -2183,9 +1963,9 @@ export function pushNarrative(
   text: string,
   salience = 2,
   /** 갈래 — 하루 한도를 세는 열쇠다. 접두 문장으로 가르지 않는다 (records.ts `NarrativeKind`) */
-  kind?: NarrativeNote["kind"],
+  kind: NarrativeNote["kind"] = "other",
 ): void {
-  state.narrative.push({ date: state.date, text, salience, ...(kind ? { kind } : {}) });
+  state.narrative.push({ date: state.date, text, salience, kind });
   if (state.narrative.length > NARRATIVE_LIMIT) {
     state.narrative.splice(0, state.narrative.length - NARRATIVE_LIMIT);
   }
@@ -2329,6 +2109,8 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
       catalogId: entry.id,
       teamId: entry.teamId,
       squadLevel: "first",
+      isViceCaptain: false,
+      growthCarry: {},
       name: entry.nameKo,
       ...(entry.squadNumber === undefined ? {} : { squadNumber: entry.squadNumber }),
       birthdate: entry.birthdate,
@@ -2347,16 +2129,15 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
         overall: 50, // 아래 recomputeOverall이 주 포지션 가중치로 채운다
         potential: entry.potential,
       },
-      state: {
+      state: freshPlayerState({
         /**
-         * 프리시즌 시작이라 폼은 0 근처다 — 폼 축이 −1~1이 된 뒤로 `randInt(-1,1)`은
-         * **바닥/절정**을 뜻하게 됐다(예전 −3~3 축에서는 약한 흔들림이었다).
-         * 개인차만 남기고 평소 밴드 안에 둔다.
+         * 프리시즌 시작이라 폼은 0 근처다 — 폼 축은 −1~1이라 `randInt(-1,1)`은
+         * **바닥/절정**이다. 개인차만 남기고 평소 밴드 안에 둔다.
          */
         form: randInt(rng, -1, 1) * 0.15,
         // 프리시즌 시작 — 잘 쉬고 돌아왔다
         condition: randInt(rng, 70, 86),
-      },
+      }),
       isCaptain: false,
     };
     recomputeOverall(player);
@@ -2381,23 +2162,6 @@ const ESSENTIAL_QUOTA: Record<string, number> = { GK: 3, DF: 8, MF: 8, FW: 5 };
 const CORE_GK = 2;
 
 /**
- * 세이브에 없는 카탈로그 클럽을 채워 넣는다 — 진행 중인 게임에 새 클럽이 붙을 때.
- *
- * 2부 리그를 도입하면서 기존 세이브(1부 96팀만 있는)엔 컵 참가 클럽 64개가
- * 없어졌다. 그대로 두면 국내 컵이 존재하지 않는 팀으로 대진을 짜거나(장부가
- * 깨진다) 아예 돌지 않는다. 세이브 버전을 올려 로드를 거부하는 대신, 빠진
- * 클럽만 새로 인스턴스화해 붙인다 — 기존 진행에는 아무 영향이 없다
- * (이 클럽들은 리그전을 돌지 않고 컵에만 나온다).
- *
- * ⚠️ **채워 넣는 것은 코드의 시드 카탈로그에 있는 클럽뿐이고, 값도 시드에서
- * 복사한다.** 지금 유효한 카탈로그는 어드민 오버라이드일 수 있으므로, 그것을 읽으면
- * 어드민이 팀 하나를 추가할 때마다 **열려 있는 모든 옛 세이브**에 그 클럽과 스쿼드가
- * 주입된다 — 편집이 새 게임에만 반영된다는 약속이 로드 경로로 뚫린다
- * (game-state.md §6).
- *
- * @returns 추가된 클럽 수 (0이면 최신 세이브)
- */
-/**
  * 세계 인물 명부가 이 벤치에 세운 감독 — 없으면 빈 객체다 (people.md §2-1).
  *
  * **명부가 이름을 심는 자리는 여기 하나뿐이다.** 심고 나면 그 사람이 어디에 있는지는
@@ -2417,20 +2181,14 @@ function seededManagerName(
 }
 
 /**
- * 이름 없는 벤치를 전부 채운다 — 명부의 감독이 먼저, 나머지는 가상 이름이다
- * (people.md §2). 세계 생성과 로드 보정이 같은 길을 지난다.
+ * 세계 생성 — 이름 없는 벤치를 전부 채운다. 명부의 감독이 먼저, 나머지는 가상
+ * 이름이다 (people.md §2). 가상 이름은 (시드, 팀) 채널로 결정적이라 같은 시드는
+ * 같은 사람을 만난다.
  *
- * 옛 세이브의 AI 구단은 감독 이름이 없을 수 있다(명부 밖 구단은 경질이 한 번 돌기
- * 전까지 없었다). `ensurePersonas`와 같은 결의 보정이라 **세이브 버전을 올리지
- * 않는다** — 없던 필드를 채우는 것이고, 가상 이름이 (시드, 팀) 채널로 결정적이라
- * 채워도 그 세이브의 사람은 같다.
+ * ⚠️ **이미 이름이 있으면 건드리지 않는다** — 명부의 벤치가 그렇다.
  *
- * ⚠️ **이미 이름이 있으면 건드리지 않는다.** 그 벤치는 감독 시장이 한 번 다녀간
- * 자리일 수 있고, 덮으면 경질된 사람이 로드할 때마다 되살아난다.
- *
- * ⚠️ **유저 팀 벤치는 채우지 않는다** — 그 자리는 유저의 것이다. 로드 순서상
- * `ensurePersonas` 뒤에 돌아야 우리 구단 인물의 이름을 피해서 뽑는다
- * (`persistence.ts`).
+ * ⚠️ **유저 팀 벤치는 채우지 않는다** — 그 자리는 유저의 것이다. 우리 구단 인물
+ * (`personas`)이 선 뒤에 돌아야 그 이름들을 피해서 뽑는다.
  */
 export function ensureSeededManagers(state: GameState): void {
   const taken = occupiedPersonNames(state);
@@ -2442,76 +2200,6 @@ export function ensureSeededManagers(state: GameState): void {
     team.managerName = name;
     taken.add(name);
   }
-}
-
-export function addMissingClubs(state: GameState): number {
-  const present = new Set(state.teams.map((t) => t.id));
-  const seed = new Map(TEAM_CATALOG_SEED.map((t) => [t.id, t]));
-  // 축소 세계는 빠진 게 아니라 원래 없는 것이다 — 채워 넣으면 세계가 커진다
-  const missing = scopedTeams(state.world)
-    .map((t) => seed.get(t.id))
-    .filter((t): t is TeamCatalogEntry => t !== undefined && !present.has(t.id));
-  if (missing.length === 0) return 0;
-
-  const rng = makeRng(state.seed, "backfill:ai-managers");
-  // 빠진 클럽만 인스턴스화한다 — 게임 목록은 세이브마다 로드하므로
-  // 전 카탈로그(6,000명+)를 매번 만들면 목록 화면이 눈에 띄게 느려진다
-  const added = instantiatePlayers(state.seed, (teamId) => !present.has(teamId));
-  const wages = initialWages(added, state.date);
-
-  for (const team of missing) {
-    state.teams.push({
-      id: team.id,
-      ...copiedTeamFields(team, CLUB_PROFILES_SEED[team.id]),
-      // 감독은 클럽에만 있다 — 무소속은 클럽이 아니다 (team.md §4)
-      ...(isClubTeam(team.id)
-        ? { aiManagerTacticsRating: randInt(rng, 55, 82), ...seededManagerName(team.id, state) }
-        : {}),
-    });
-    // 무소속은 스쿼드도 배치도 갖지 않는다 — 팀 엔티티만 있으면 된다
-    if (!isClubTeam(team.id)) continue;
-    const squad = added.filter((p) => p.teamId === team.id);
-    ensureSquadNumbers(squad);
-    for (const player of squad) player.squadLevel = "first";
-    state.players.push(...squad);
-    state.contracts.push(
-      ...squad.map((p) => {
-        const contract: Contract = {
-          id: `c-${p.id}`,
-          gamePlayerId: p.id,
-          teamId: team.id,
-          weeklyWage: wages.get(p.id) ?? 0,
-          since: state.date,
-          until: `${seasonYear(state.season) + 1 + (squad.indexOf(p) % 3)}-06-30`,
-          status: "active" as const,
-        };
-        attachAiBuyout(state, contract, p);
-        return contract;
-      }),
-    );
-    const finance = initialFinanceOf(team.id, team.tier);
-    state.finances.push({
-      teamId: team.id,
-      balance: finance.balance,
-      transferBudget: finance.budget,
-      // 첫 시즌의 잉여도 제 값이어야 한다 — 없으면 시즌 2가 통째로 0을 읽는다 (finance.md §9.1)
-      seasonOpeningBalance: finance.balance,
-      ledger: [],
-      prizesPaid: [],
-    });
-    state.tactics.push({
-      teamId: team.id,
-      spec: initialTactics(team.id, pickFormation(squad, team.formation, defaultXiIds(team.id))),
-      assignments: buildAssignments(
-        squad,
-        pickFormation(squad, team.formation, defaultXiIds(team.id)),
-        FAMILIARITY_BASELINE,
-        undefined,
-        defaultXiIds(team.id),
-      ),
-    });
-  }
-  return missing.length;
 }
 
 /**
@@ -2846,10 +2534,9 @@ function memoFit(preferred?: ReadonlySet<string>): (p: GamePlayer, slot: string)
 /**
  * 포메이션이 의도하는 공간 사용과 모순되지 않는 초기 운용값.
  *
- * ⚠️ **여섯 축의 리그 평균이 3에 서야 한다.** 3이 중립이고 전술 델타는 3에서의
- * 편차로 계산되므로(`tacticalDeltas`), 프리셋이 한쪽으로 쏠리면 **리그 전체가
- * 같은 방향의 이득과 대가를 달고 선다** — 판세 3×3이 상대와 무관하게 한 방향만
- * 되풀이한다.
+ * ⚠️ **여섯 축의 리그 평균이 3에 서야 한다.** 3이 중립이고 전술의 효과는 3에서의
+ * 편차로 읽히므로, 프리셋이 한쪽으로 쏠리면 **리그 전체가 같은 방향의 이득과 대가를
+ * 달고 선다.**
  *
  * 그래서 각 스타일은 **올린 축만큼 내린 축을 갖는다** — 점유는 라인과 폭을 올리는
  * 대신 템포와 패스 길이를 내리고, 역습·롱볼은 라인과 압박을 내린다. 프리셋을
@@ -3086,51 +2773,6 @@ export function pickFormation(
   return best;
 }
 
-/**
- * **이 선수들이 가장 잘 서는 모양** — 후보 중에서 고른다 (`pickFormation`과 같은 잣대).
- *
- * 경기 중 상대 벤치가 판을 갈아 깔 때 부른다(match.md §2). 어느 프리셋인지는
- * 구간 시뮬이 정할 수 없다 — 센터백이 둘뿐인 팀을 백3에 세우지 않으려면 명단과
- * 적응도를 봐야 하고, 그건 코어만 안다.
- */
-export function bestShapeFor(
-  players: GamePlayer[],
-  candidates: readonly Formation[],
-): Formation | null {
-  const fit = memoFit();
-  let best: Formation | null = null;
-  let bestScore = -Infinity;
-  for (const formation of candidates) {
-    const score = shapeStrength(players, formation, fit);
-    if (score > bestScore) {
-      bestScore = score;
-      best = formation;
-    }
-  }
-  return best;
-}
-
-/** 그 모양의 한 자리 — 누가 어느 좌표에 서는가 */
-export interface ShapeSeat {
-  playerId: string;
-  position: string;
-  point: import("@story-fm/domain").BoardPoint;
-}
-
-/**
- * 프리셋 좌표에 이 선수들을 앉힌다 — **라인업을 짜는 것과 같은 잣대**(`fillSlots`).
- *
- * 인원이 열한 명보다 적으면(퇴장) 앞선 자리부터 채우고 남는 자리는 비운다.
- * 좌표가 원본이고 모양 이름은 그 파생이다 (`shapeOf`).
- */
-export function seatOnShape(players: GamePlayer[], formation: Formation): ShapeSeat[] {
-  const slots = FORMATION_SLOTS[formation];
-  const layout = FORMATION_LAYOUTS[formation];
-  return fillSlots(players, slots, memoFit()).flatMap((player, index) =>
-    player ? [{ playerId: player.id, position: slots[index]!, point: layout[index]! }] : [],
-  );
-}
-
 /** 지정 선발 가산이 붙는 최소 적응도 — "그 자리를 볼 수는 있다"의 문턱.
  *  기본 배치 가드(적응도 70 미만 금지)와 같은 눈금이다 — 가산이 그 가드를 뚫으면
  *  안 된다 (사우스햄프턴의 마테우스 페르난데스가 적응도 64로 레프트백에 섰다). */
@@ -3257,11 +2899,12 @@ export function createGame(input: CreateGameInput): GameState {
   const profiles = clubProfiles();
   /**
    * **무소속은 클럽이 아니다** — 팀 엔티티 한 줄만 서고 AI 감독도 부임일도 갖지
-   * 않는다 (team.md §4). 로드의 `addMissingClubs`가 만드는 모양과 같다.
+   * 않는다 (team.md §4).
    */
   const teams: GameTeam[] = catalogTeams.map((t) => ({
     id: t.id,
     ...copiedTeamFields(t, profiles[t.id]),
+    managerSpells: [],
     ...(isClubTeam(t.id)
       ? {
           aiManagerTacticsRating: randInt(rng, 55, 82),
@@ -3348,6 +2991,9 @@ export function createGame(input: CreateGameInput): GameState {
         seasonOpeningBalance: f.balance,
         ledger: [],
         prizesPaid: [],
+        budgetFrozen: false,
+        earmarked: [],
+        assets: [],
       };
     });
   const wages = initialWages(players, calendar.preseasonStart);
@@ -3454,18 +3100,40 @@ export function createGame(input: CreateGameInput): GameState {
     approachPressure: [],
     pressLeaks: [],
     pressSackings: [],
-    // 새 게임의 풀은 비어 있다 — 아직 아무도 자리를 잃지 않았다. **빈 배열로 세우는
-    // 것이 곧 표식이다**: 로드 보정이 옛 사람됨 채널을 쓰던 세이브를 이것으로 가른다
+    // 새 게임의 풀은 비어 있다 — 아직 아무도 자리를 잃지 않았다
     managerPool: [],
     boardDemands: [],
     boardRequests: [],
+    predictions: [],
+    media: [],
+    delegations: [],
+    deferredScouts: [],
+    scoutMissions: [],
+    competingBids: [],
+    dismissals: [],
+    managerOffers: [],
+    managerVacancies: [],
+    developmentFocus: [],
+    mentoring: [],
+    retired: [],
+    youthCandidates: [],
+    callUps: [],
+    relations: [],
+    characterMemories: [],
+    incidents: [],
+    arcs: [],
+    openings: [],
+    paymentSchedules: [],
 
     manager: {
       name: input.managerName,
       background: input.background,
       attributes: input.attributes,
       reputation: { board: 50, media: 50, squad: 50 },
-      ...(input.wallet !== undefined && input.wallet > 0 ? { wallet: input.wallet } : {}),
+      stanceSeason: { season, board: 0, media: 0, squad: 0 },
+      boardWarnings: 0,
+      wallet: input.wallet !== undefined && input.wallet > 0 ? input.wallet : 0,
+      spending: [],
     },
     managerXP: { leadership: 0, tactics: 0, training: 0, negotiation: 0, analysis: 0 },
     // 부임하면 사람이 먼저 기다린다 — 수석코치는 시드로 결정되므로
@@ -3481,10 +3149,6 @@ export function createGame(input: CreateGameInput): GameState {
        */
       ...generateStaff(seed, input.userTeamId, calendar.preseasonStart),
     ],
-    formUnitScale: true,
-    // 카탈로그는 읽을 때 이미 벗겨져 들어온다(`world/catalog.ts`) — 새 세이브에
-    // 벗길 것은 없고, 여기서 서는 자리부터 적립이 쌓인다
-    mirrorProficiencyStripped: true,
     history: [],
     seasonRecords: [],
     trophies: [],
@@ -3496,8 +3160,7 @@ export function createGame(input: CreateGameInput): GameState {
     chat: [],
   };
 
-  // 명부 밖 벤치의 가상 감독 — 페르소나 다섯이 선 뒤에 채워야 그 이름들을 피해서
-  // 뽑는다. 로드 보정과 같은 채널이라 새 게임과 옛 세이브가 같은 사람을 만난다
+  // 명부 밖 벤치의 가상 감독 — 페르소나가 선 뒤에 채워야 그 이름들을 피해서 뽑는다
   ensureSeededManagers(state);
   // 감독도 계약으로 서 있다 (career.md §5.1) — 부임 구단 등급의 기본 조건.
   // 체급은 세이브가 가지므로 state가 선 뒤에야 읽을 수 있다
@@ -3668,14 +3331,14 @@ export const MEDIA_LIMIT = 30;
 /** 회견 밖의 기사를 모아 둔다 — 다음 평시 턴의 GM 입력에 실린다 */
 export function pushMedia(state: GameState, facts: readonly MediaFact[]): void {
   if (facts.length === 0) return;
-  const media = (state.media ??= []);
+  const media = state.media;
   media.push(...facts);
   if (media.length > MEDIA_LIMIT) media.splice(0, media.length - MEDIA_LIMIT);
 }
 
 /** 모아 둔 기사를 꺼내 비운다 — `takeNews`와 같은 자리에서 부른다 */
 export function takeMedia(state: GameState): MediaFact[] {
-  const media = state.media ?? [];
+  const media = state.media;
   state.media = [];
   return media;
 }
@@ -3747,9 +3410,7 @@ export function consumeReportCards(state: GameState, ids: readonly string[]): vo
 export function pruneReportCards(state: GameState): string[] {
   const queue = state.pendingReportCards ?? [];
   if (queue.length === 0) return [];
-  const done = new Set(
-    (state.scoutMissions ?? []).filter((m) => m.completedOn !== null).map((m) => m.id),
-  );
+  const done = new Set(state.scoutMissions.filter((m) => m.completedOn !== null).map((m) => m.id));
   // 명단은 한 번만 훑는다 — tick이 하루에 한 번 부르는 자리라 줄 길이만큼 되훑지 않는다
   const alive = new Set(state.players.map((p) => p.id));
   const dead = queue.filter((id) => !done.has(id) && !alive.has(id));

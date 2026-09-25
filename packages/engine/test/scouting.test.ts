@@ -59,7 +59,7 @@ import {
   SCOUT_DAYS,
   SCOUT_DEFER_DAYS,
 } from "@story-fm/domain";
-import { GAP_CONDITION } from "@story-fm/sim";
+import { GASSED_CONDITION } from "@story-fm/sim";
 import { advanceAndPlay, createTestGame, playMockMatch, settleFully } from "./helpers";
 
 /**
@@ -121,6 +121,7 @@ describe("지식 수준 파생", () => {
       gamePlayerId: target.id,
       season: state.season,
       teamId: "chelsea",
+      competitionId: "epl",
       apps: 38,
       goals: 0,
     });
@@ -641,6 +642,7 @@ describe("잠재력 — 누구도 단정하지 못한다 (구간으로만 안다
       gamePlayerId: p.id,
       season: state.season,
       teamId: state.userTeamId,
+      competitionId: "epl",
       apps: 40,
       goals: 0,
     });
@@ -735,11 +737,11 @@ describe("체력 안개", () => {
     for (const id of [mine.id, them.id]) {
       for (let truth = 0; truth <= 100; truth++) {
         const read = readCondition(state, id, truth, 34, "match-1");
-        const gassed = truth <= GAP_CONDITION;
+        const gassed = truth <= GASSED_CONDITION;
         // 화면이 두 말을 하지 않는다: 읽은 값의 구멍 판정 = 참값의 구멍 판정
-        expect(read.value <= GAP_CONDITION, `${id} 체력 ${truth}`).toBe(gassed);
-        expect(read.low <= GAP_CONDITION, `${id} 체력 ${truth}`).toBe(gassed);
-        expect(read.high <= GAP_CONDITION, `${id} 체력 ${truth}`).toBe(gassed);
+        expect(read.value <= GASSED_CONDITION, `${id} 체력 ${truth}`).toBe(gassed);
+        expect(read.low <= GASSED_CONDITION, `${id} 체력 ${truth}`).toBe(gassed);
+        expect(read.high <= GASSED_CONDITION, `${id} 체력 ${truth}`).toBe(gassed);
       }
     }
   });

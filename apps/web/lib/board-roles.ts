@@ -66,7 +66,7 @@ export interface BoardState {
    * 같은 자동 저장, 같은 요청에 **달라진 축만** 실린다.
    *
    * 칸 자체가 없어도 뜻은 온전하다 — **지시하지 않은 것과 중립이 같은 값**이라
-   * (`setPieceRoutineLevel`) 옛 세이브도 이 축을 모르는 사본도 같은 곳을 가리킨다.
+   * (`setPieceRoutineLevel`) 이 축을 모르는 사본도 같은 곳을 가리킨다.
    */
   setPieceRoutine?: Record<SetPieceRoutineKey, SetPieceRoutineLevel>;
 }

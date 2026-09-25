@@ -25,7 +25,7 @@ function roleCostOwed(memo: RoleMemo, at: { position: string; roleId?: string } 
    * 아침의 역할과 견줄 자가 없다 — 역할 목록은 자리마다 다르고(player.md §3.1)
    * `roleDistance`는 그 자리에 없는 역할을 조용히 기본 역할로 읽는다.
    */
-  const morning = memo.position ?? at.position;
+  const morning = memo.position;
   if (morning !== at.position) return 0;
   return roleChangeCost(morning, memo.role, at.roleId ?? defaultRoleOf(morning));
 }

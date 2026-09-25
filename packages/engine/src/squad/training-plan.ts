@@ -361,21 +361,6 @@ export function cancelTrainingOn(state: GameState, date: string): void {
   );
 }
 
-/** 대조에 쓰는 세션의 정체 — id가 있으면 id가, 없으면(옛 세이브) 이름이 그 자리를 대신한다 */
-type MenuRef = { menuId?: string | undefined; label: string };
-
-/**
- * 깔린 세션이 기대한 그 메뉴인가 — **`menuId`로 가른다.**
- *
- * 옛 세이브의 `auto` 세션엔 id가 없어(§6 "문장에서 카드로") 그때만 이름으로 떨어진다.
- * 폴백이 없으면 세이브를 여는 순간 남은 시즌의 기본 훈련이 통째로 한 번 다시 깔린다 —
- * 결과는 같아도 감독의 달력이 이유 없이 전부 새 줄이 된다 (season.md §4).
- */
-function sameMenu(actual: MenuRef | undefined, want: MenuRef): boolean {
-  if (!actual) return false;
-  return actual.menuId === undefined ? actual.label === want.label : actual.menuId === want.menuId;
-}
-
 /**
  * 일정이 바뀌면 기본 훈련을 그에 맞춰 다시 깐다 — 매 tick에서 부른다.
  *
@@ -404,30 +389,31 @@ export function syncDefaultTraining(state: GameState): void {
 
   const sessionById = new Map(state.trainingSessions.map((s) => [s.id, s] as const));
   const blocked = new Set<string>(); // 감독 지시·완료된 세션 — 기본 배치가 못 들어가는 자리
-  const actual = new Map<string, MenuRef>(); // 자리 → 지금 깔린 기본 세션
+  const actual = new Map<string, string | undefined>(); // 자리 → 지금 깔린 기본 세션의 `menuId`
   const mine: ScheduleEntry[] = [];
   for (const e of state.schedule) {
     if (e.type !== "training" || e.date < from || e.date > to) continue;
     const session = sessionById.get(e.refId);
     const key = `${e.date}|${e.time}`;
     if (session?.auto === true && e.status === "scheduled") {
-      actual.set(key, { menuId: session.menuId, label: session.label });
+      actual.set(key, session.menuId);
       mine.push(e);
     } else {
       blocked.add(key);
     }
   }
 
-  const expected = new Map<string, MenuRef>();
+  const expected = new Map<string, string>();
   for (const { date, plan } of planWindow(state, from, to)) {
     const key = `${date}|${SLOT_TIME[plan.slot]}`;
     if (blocked.has(key) || expected.has(key)) continue;
-    expected.set(key, { menuId: plan.menuId, label: plan.label });
+    expected.set(key, plan.menuId);
   }
 
+  // 대조는 메뉴 id로 한다 — 이름으로 가르면 문구를 고친 날 시즌 전체가 다시 깔린다 (season.md §4)
   if (
     expected.size === actual.size &&
-    [...expected].every(([key, want]) => sameMenu(actual.get(key), want))
+    [...expected].every(([key, menuId]) => actual.has(key) && actual.get(key) === menuId)
   ) {
     return;
   }

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,7 +15,6 @@ import {
   traceTurn,
   tracedCalls,
   tracedGames,
-  tracedTurnOf,
   tracedTurns,
   turnRecord,
   turnRecordById,
@@ -261,7 +260,7 @@ describe("이름 — 호출 하나를 가리키는 한 줄", () => {
     // 이름으로 바로 열린다 — 턴을 몰라도 된다
     expect(traceCall("g1", ids[1]!)?.request.user).toBe("둘");
     // 타임라인이 이름을 턴에 이어 준다 — 호출도 타임라인의 항목이다
-    expect(tracedTurnOf("g1").get(ids[0]!)).toBe(2);
+    expect(tracedCalls("g1").find((line) => line.id === ids[0])?.index).toBe(2);
     expect(turnRecord("g1", 2)!.entries.map((entry) => entry.kind)).toEqual([
       "llm.call",
       "llm.call",
@@ -279,7 +278,7 @@ describe("이름 — 호출 하나를 가리키는 한 줄", () => {
     /** 어댑터가 하듯 제 요청의 도구를 자기 안에서 부르는 stub */
     const toolRunner: GameLLM = {
       async runTurn(req: TurnRequest): Promise<TurnResult> {
-        const spec = (req.tools ?? []).find((tool) => tool.name === "advance_match");
+        const spec = (req.tools ?? []).find((tool) => tool.name === "tactic_orders");
         if (spec) await spec.handle({}, { text: "" });
         return {
           text: "@중계: 68분",
@@ -303,7 +302,7 @@ describe("이름 — 호출 하나를 가리키는 한 줄", () => {
           user: "교체",
           tools: [
             {
-              name: "advance_match",
+              name: "tactic_orders",
               description: "경기를 진행한다",
               inputSchema: { type: "object", properties: {} },
               handle: async () => {
@@ -328,7 +327,7 @@ describe("이름 — 호출 하나를 가리키는 한 줄", () => {
     const [matchGm, orders, plain] = calls;
     expect(matchGm!.parentId).toBeNull();
     expect(orders!.parentId).toBe(matchGm!.id);
-    expect(orders!.viaTool).toBe("advance_match");
+    expect(orders!.viaTool).toBe("tactic_orders");
     // 모델을 기다리는 동안에는 문맥이 서지 않는다 — 이웃이 자식으로 묶이지 않는다
     expect(plain!.parentId).toBeNull();
     expect(plain!.viaTool).toBeNull();
@@ -344,12 +343,12 @@ describe("이름 — 호출 하나를 가리키는 한 줄", () => {
       via: entry.via ?? null,
     }));
     expect(entries.map((entry) => entry.id)).toEqual([matchGm!.id, orders!.id, plain!.id]);
-    expect(entries[1]!.via).toEqual({ call: matchGm!.id, tool: "advance_match" });
+    expect(entries[1]!.via).toEqual({ call: matchGm!.id, tool: "tactic_orders" });
     expect(entries[0]!.via).toBeNull();
     expect(entries[2]!.via).toBeNull();
     const byId = new Map(tracedCalls("g1").map((line) => [line.id, line]));
     expect(byId.get(orders!.id)?.parentId).toBe(matchGm!.id);
-    expect(byId.get(orders!.id)?.viaTool).toBe("advance_match");
+    expect(byId.get(orders!.id)?.viaTool).toBe("tactic_orders");
     expect(byId.get(orders!.id)?.turn).toBe(record.id);
     expect(byId.get(plain!.id)?.parentId).toBeNull();
   });
@@ -506,9 +505,9 @@ describe("턴 기록 — 코어의 사실이 턴에 앉는다", () => {
     expect(line.head).toBe("전방 압박");
     expect(line.kinds).toEqual(["command", "llm.call", "scene"]);
     expect(line.callIds).toEqual(record.callIds);
-    // 호출은 타임라인이 이어 준다 — 옛 묶음 파일은 더 쓰지 않는다
+    // 호출은 타임라인이 이어 준다
     expect(turnTrace("g1", 5).map((call) => call.agent)).toEqual(["gm"]);
-    expect(tracedTurnOf("g1").get(record.callIds[0]!)).toBe(5);
+    expect(tracedCalls("g1").find((line) => line.id === record.callIds[0])?.index).toBe(5);
     expect(readdirSync(path.join(logDir, "g1")).some((name) => /^\d+\.json$/.test(name))).toBe(
       false,
     );
@@ -574,7 +573,7 @@ describe("턴 기록 — 코어의 사실이 턴에 앉는다", () => {
     await traceTurn(
       "g1",
       async () => {
-        noteFact("match.segment", data);
+        noteFact("match.checkpoint", data);
         data.events[0]!.minute = 99;
         data.events[0]!.causes.push("b");
         bindTurnTrace("g1", 1);
@@ -668,21 +667,5 @@ describe("턴 기록 — 코어의 사실이 턴에 앉는다", () => {
     expect(record.entries.map((entry) => entry.kind)).toEqual(["command"]);
     expect(readdirSync(path.join(logDir, "g1")).sort()).toEqual(["board", "index.jsonl", "turns"]);
     expect(readdirSync(path.join(logDir, "g1", "board"))).toHaveLength(limits.board);
-  });
-
-  /** 지난 플레이의 창고는 묶음 파일(`<인덱스>.json`)로 서 있다 — 그대로 열려야 한다 */
-  it("옛 묶음 파일로 남은 턴도 그대로 열린다", async () => {
-    const llm = tapLlm(stubLlm(usageOf({ inputTokens: 10 })), "gm", dev);
-    await traceTurn(
-      "g1",
-      async () => {
-        await llm.runTurn({ system: "S", history: [], user: "옛 기록" });
-      },
-      dev,
-    );
-    const id = tracedCalls("g1")[0]!.id;
-    writeFileSync(path.join(logDir, "g1", "7.json"), JSON.stringify({ callIds: [id] }));
-    expect(turnTrace("g1", 7).map((call) => call.request.user)).toEqual(["옛 기록"]);
-    expect(tracedTurnOf("g1").get(id)).toBe(7);
   });
 });

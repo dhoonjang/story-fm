@@ -97,13 +97,12 @@ function percentileIn(values: readonly number[], value: number): number {
  *
  * ⚠️ **창을 자르는 것은 읽는 이 자리다.** 장부는 지나간 시즌을 다 들고 있으므로
  * (역사다 — season.md §6), 여기서 자르지 않으면 열 시즌 전 순위가 오늘의 체급을 민다.
- * 승점을 모르는 이관 행도 **순서는 안다** — 이 축은 순위만 보므로 그대로 든다.
  *
  * 이 축만은 따로 정규화하지 않는다 — 순위를 리그 크기로 나눈 값이 이미 백분위다.
  */
 function recentForm(state: GameState, teamId: string): number {
   const scores: number[] = [];
-  for (const past of state.history ?? []) {
+  for (const past of state.history) {
     if (past.season <= state.season - RECENT_SEASONS) continue;
     for (const league of past.leagues) {
       const index = league.rows.findIndex((r) => r.teamId === teamId);

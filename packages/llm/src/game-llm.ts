@@ -34,11 +34,8 @@ export interface StoredLlmHistory {
   messages: unknown[];
 }
 
-/**
- * `unknown[]`은 태그 도입 전 Anthropic 경기 세이브를 읽기 위한 레거시 입력이다.
- * 새 결과는 항상 StoredLlmHistory로 반환한다.
- */
-export type TurnHistory = TextHistoryMessage[] | StoredLlmHistory | unknown[];
+/** 이력 — 텍스트 이력이거나 제공자 원형 저장 이력이다. 결과는 항상 StoredLlmHistory다 */
+export type TurnHistory = TextHistoryMessage[] | StoredLlmHistory;
 
 export function isStoredLlmHistory(value: unknown): value is StoredLlmHistory {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -50,15 +47,6 @@ export function isStoredLlmHistory(value: unknown): value is StoredLlmHistory {
       candidate.provider === "openai") &&
     typeof candidate.model === "string" &&
     Array.isArray(candidate.messages)
-  );
-}
-
-export function isTextHistoryMessage(value: unknown): value is TextHistoryMessage {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<TextHistoryMessage>;
-  return (
-    (candidate.role === "user" || candidate.role === "assistant") &&
-    typeof candidate.content === "string"
   );
 }
 

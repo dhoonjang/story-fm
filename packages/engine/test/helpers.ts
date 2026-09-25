@@ -1,9 +1,16 @@
+import { liveFinished } from "@story-fm/sim";
 import {
+  advanceLiveMatch,
+  isReserveMatch,
+  settleQuickMatch,
+  simulateOtherMatches,
+  advanceShootout,
+  awaitingShootout,
+  resumeLiveInterval,
   acceptDeal,
   acceptManagerOffer,
   answerIncomingOffer,
   incomingOffer,
-  advanceSegment,
   advanceTime,
   assignmentsOf,
   createGame,
@@ -18,6 +25,7 @@ import {
   playerById,
   playersOf,
   startMatch,
+  markEntered,
   type GameState,
   squadReturnOf,
   FRIENDLY_ROUNDS,
@@ -27,7 +35,7 @@ import {
   assignmentsOf as assignmentsOfTeam,
   eventTexts,
 } from "@story-fm/engine";
-import type { GamePlayer } from "@story-fm/domain";
+import type { GamePlayer, MatchResult } from "@story-fm/domain";
 
 /** 간이 시뮬 입력 조립 — 배치 선발에서 가용 선수를 뽑는다 (테스트용) */
 export function simSquad(state: GameState, teamId: string) {
@@ -104,7 +112,7 @@ export function createMiniGame(seed = 42, teamId = "arsenal"): GameState {
 }
 
 /**
- * 축소 세계에서 시즌 하나를 끝까지 돈다 — 유저 경기는 구간 시뮬로 치른다.
+ * 축소 세계에서 시즌 하나를 끝까지 돈다 — 유저 경기는 실시간 경기로 치른다.
  * @returns 시즌이 끝났으면 true (한도 안에 못 끝내면 false)
  */
 export function playFullSeason(state: GameState, limit = 400): boolean {
@@ -193,7 +201,7 @@ export function advanceToMatchday(state: GameState): void {
 }
 
 /**
- * 경기일 상태에서 코어 구간 시뮬레이터로 경기를 끝까지 치른다.
+ * 경기일 상태에서 코어의 실시간 경기로 경기를 끝까지 치른다.
  * 실모드와 같은 함수를 쓴다 — 차이는 서술을 LLM이 맡는지뿐이다.
  */
 export function playMockMatch(
@@ -206,18 +214,56 @@ export function playMockMatch(
 ): string[] {
   const started = startMatch(state);
   if (!started.ok) throw new Error(started.message);
-  let guard = 60;
+  markEntered(state);
+  playToFullTime(state);
+  onFullTime?.(state);
+  // 갈래를 나눈 결산을 여기선 평탄화해 돌려준다 — 이 반환을 읽는 테스트가 여럿이다
+  return digestLines(finalizeMatch(state));
+}
+
+/**
+ * 경기일의 우리 경기를 **간이 시뮬로** 치른다 — 대회 구조·시즌 흐름을 재는 테스트용이다.
+ * 한 시즌 쉰 경기를 실시간 물리로 굴리면 케이스 하나가 분 단위가 된다. 정산은 남의 팀 경기와
+ * 같은 코어 함수(`settleQuickMatch`)이고, 그날의 나머지 경기도 이어서 치른다. 제품에는 이 길이
+ * 없다 — 감독의 경기는 언제나 감독이 치른다.
+ */
+export function settleMatchdayQuick(state: GameState): void {
+  const today = state.matches.find(
+    (m) =>
+      m.date === state.date &&
+      !m.result &&
+      !isReserveMatch(m) &&
+      (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+  );
+  if (!today) throw new Error("오늘 우리 경기가 없다");
+  settleQuickMatch(state, today);
+  simulateOtherMatches(state, { push: () => undefined });
+  state.phase = "idle";
+}
+
+/**
+ * 열린 경기를 종료 휘슬(승부차기 포함)까지 굴린다 — 결산은 하지 않는다.
+ * 화면 없는 실행기라 경기 시간 5분씩 굴리고, 휴식은 곧바로 푼다 (live-match.md §8.4).
+ */
+export function playToFullTime(state: GameState): void {
+  let guard = 400;
   while (state.phase === "match" && guard-- > 0) {
-    const step = advanceSegment(state);
-    if (!step.ok) throw new Error(step.message);
-    if (step.plan?.stop === "full_time") {
-      onFullTime?.(state);
-      // 갈래를 나눈 결산을 여기선 평탄화해 돌려준다 — 이 반환을 읽는 테스트가 여럿이다
-      return digestLines(finalizeMatch(state));
+    const pending = state.pendingMatch!;
+    if (liveFinished(pending.live)) {
+      // 승부차기가 남았으면 한 발씩 — 감독의 경기라 코어가 굴린다
+      if (!awaitingShootout(state)) return;
+      const kicked = advanceShootout(state);
+      if (!kicked.ok) throw new Error(kicked.message);
+      continue;
     }
+    if (pending.live.state.interval) resumeLiveInterval(state);
+    advanceLiveMatch(state, HEADLESS_CHUNK_TICKS);
   }
   throw new Error("경기가 끝나지 않았습니다");
 }
+
+/** 화면 없는 실행기가 한 번에 미는 틱 — 경기 시간 5분 */
+const HEADLESS_CHUNK_TICKS = 5 * 60 * 20;
 
 /** idle → 다음 경기일까지 전진 후 경기까지 완료 (attention 정지는 계속 진행) */
 export function advanceAndPlay(state: GameState): void {
@@ -280,6 +326,35 @@ function diffDays(a: string, b: string): number {
 }
 
 /**
+ * 경기 결과 픽스처 — 스코어만 정하면 나머지 칸은 빈 장부다(슛·xG 0, 명단 없음, 점유 반반).
+ * 케이스가 보는 칸만 덮어쓴다.
+ */
+export function resultOf(
+  fields: Pick<MatchResult, "homeGoals" | "awayGoals"> & Partial<MatchResult>,
+): MatchResult {
+  return {
+    scorers: [],
+    assists: [],
+    goalMinutes: [],
+    goalOrigins: [],
+    homeShots: 0,
+    awayShots: 0,
+    homeXg: 0,
+    awayXg: 0,
+    homeExpectedGoals: 0,
+    awayExpectedGoals: 0,
+    homeLineup: [],
+    awayLineup: [],
+    homeStarters: [],
+    awayStarters: [],
+    homeOnPitch: [],
+    awayOnPitch: [],
+    possession: { home: 0.5, away: 0.5 },
+    ...fields,
+  };
+}
+
+/**
  * 정착이 끝날 때까지 우리 팀 경기 출전을 쌓는다 — 안개가 걷힌 상태를 만드는 용도.
  * 날짜를 밀어서는 안 끝난다(정착은 달력이 아니라 겪은 양이다).
  */
@@ -293,7 +368,9 @@ export function settleFully(state: GameState, playerId: string): void {
       date: state.date,
       homeTeamId: state.userTeamId,
       awayTeamId: "opponent",
-      result: { homeGoals: 0, awayGoals: 0, scorers: [], homeLineup: [playerId] },
+      stage: "league",
+      time: "15:00",
+      result: resultOf({ homeGoals: 0, awayGoals: 0, homeLineup: [playerId] }),
     });
   }
 }

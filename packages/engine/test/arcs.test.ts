@@ -34,6 +34,8 @@ function stateOf(patch: Partial<GameState> = {}): GameState {
     seasonStats: [],
     manager: {},
     arcs: [],
+    approachPressure: [],
+    boardDemands: [],
     ...patch,
   } as unknown as GameState;
 }
@@ -399,9 +401,7 @@ describe("겹쳐 읽어야 열리는 갈래", () => {
     const standoff = (warnings: number, failed = false): GameState =>
       stateOf({
         manager: { boardWarnings: warnings } as GameState["manager"],
-        boardDemands: failed
-          ? ([{ id: "d1", status: "failed" }] as GameState["boardDemands"])
-          : undefined,
+        boardDemands: failed ? ([{ id: "d1", status: "failed" }] as GameState["boardDemands"]) : [],
       });
 
     const quiet = standoff(0);
@@ -543,6 +543,7 @@ describe("서사 기억의 가중 주입 (topNarrative)", () => {
     date: addDays(TODAY, -daysAgo),
     text: `d${daysAgo}s${salience}`,
     salience,
+    kind: "other" as const,
   });
 
   it("무게 5는 반감기를 세 번 지나도 오늘의 1을 이긴다", () => {

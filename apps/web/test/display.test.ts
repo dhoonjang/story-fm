@@ -105,7 +105,6 @@ describe("안개는 축에만 있고, 합성값은 거기서 파생된다", () =
       date: state.date,
       type: "transfer",
       fee: 1_000_000,
-      note: "테스트 영입",
     });
     expect(settlingOf(state, target.id)?.done).toBe(false);
 

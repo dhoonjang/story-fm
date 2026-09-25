@@ -22,6 +22,7 @@ import {
   humanizePlayerIds,
   journal,
   markEntered,
+  markEventsSeen,
   markSeated,
   minutesOfClock,
   pendingVerdicts,
@@ -32,6 +33,7 @@ import {
   takeMedia,
   takeNews,
   toolCallFactLine,
+  unseenEvents,
   type AdvanceOutcome,
   type CardMark,
   type ClockSource,
@@ -40,15 +42,16 @@ import {
   type GoalMark,
   type TrainingBrief,
 } from "@story-fm/engine";
-import type { BoardMove, CharacterEntry, TickEvent } from "@story-fm/domain";
+import type { BoardMove, CharacterEntry, MatchEvent, TickEvent } from "@story-fm/domain";
 import { agentConfig, createGameLLM, resolveLlmMode, type TurnResult } from "@story-fm/llm";
 import { MAX_REPORT_CARDS, NO_CARDS, takeArrivedReports, type ArrivedCards } from "./report-cards";
 import { reportTraining } from "./training-rater";
 import {
   buildMatchTools,
+  eventsBlockOf,
   KICKOFF_BLOCK,
   MATCH_GM_SYSTEM,
-  LIVE_MATCH_GM_SYSTEM,
+  readMatchAfterStop,
   type MatchToolContext,
 } from "./match-gm";
 import { finalizeMatchTurn } from "./finalize-match";
@@ -63,9 +66,9 @@ import {
 import { mockGmLlm } from "./mock-gm";
 import { retryOnce } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
-import { buildGmTools } from "./gm-tools";
+import { buildGmTools, collectMatchMarks } from "./gm-tools";
 import { takeSuggestion } from "./suggest-reply";
-import { applyTacticOrders, type AppliedTacticOrders } from "./tactic-apply";
+import { scoreBeforeEvents } from "./match-script";
 import {
   buildGmDigest,
   buildGmHistory,
@@ -131,8 +134,7 @@ function sceneFromToolCalls(calls: readonly GmToolCall[]): string | null {
     .filter((call) => call.name !== TIME_PASSED)
     .flatMap((call) =>
       // 항목을 가진 기록은 **항목 하나가 한 줄**이다 — 한 문단으로 접으면 화면이
-      // 사건 하나를 한 줄로 세우지 못한다 (overview.md §2). 항목이 없던 옛 기록은
-      // 지금처럼 요약 한 줄이다
+      // 사건 하나를 한 줄로 세우지 못한다 (overview.md §2). 항목이 없는 기록은 요약 한 줄이다
       call.brief
         ? [call.brief.head, ...call.brief.items.map(briefItemLine)]
         : [toolCallFactLine(call)],
@@ -167,7 +169,7 @@ function peaceSystem(state: GameState): string[] {
  * (models.md §2). 여기서 다시 내보내는 것은 화면·에이전트가 부르던 자리를
  * 그대로 두기 위해서다.
  */
-export { resolveLlmMode, type LlmMode } from "@story-fm/llm";
+export { resolveLlmMode } from "@story-fm/llm";
 
 /** 이 턴이 어떤 턴인가 — 세 단계가 같은 것을 읽는다 */
 interface TurnShape {
@@ -176,7 +178,7 @@ interface TurnShape {
   /**
    * 킥오프 턴 — **경기의 첫 호흡.** 감독이 경기장에 들어선 그 한 턴이다.
    *
-   * 도구를 주지 않아 구간이 굴러갈 수 없고, 패킷도 싣지 않는다. 대신 평시 이력을
+   * 도구를 주지 않는다. 대신 평시 이력을
    * 그대로 넘겨(`relevantTurns`) 라커룸에서 이어지는 목소리로 첫 휘슬만 연다.
    */
   kickoff: boolean;
@@ -251,7 +253,8 @@ interface TurnOpening {
   /** 시간 이동 중 새로 생긴 오퍼 — 이번 장면에서 보고만 하고 감독의 답을 기다린다 */
   deferNegotiationIds: Set<string>;
   /** 손잡이 턴에 코어가 먼저 굴린 구간 — GM은 그 대본을 받아 중계만 쓴다 */
-  applied: AppliedTacticOrders | null;
+  /** 지난 턴 뒤 장부에 앉은 사건 — 이번 턴 층의 `<events>` */
+  events: MatchEvent[];
   /** 호출 직전 장부의 분 — 평시는 null. 경기 장면의 시각이 여기서 온다 (agents.md §3 ④) */
   matchMinute: number | null;
 }
@@ -289,7 +292,7 @@ function noteTraining(
 
 /** 지금 장부의 분 — 도구가 시계를 옮겼으면 옮긴 뒤의 것, 마감 뒤면 마지막 분 */
 function minuteNow(state: GameState, ledger: TurnLedger, opening: TurnOpening): number {
-  return ledger.finalMinute ?? state.pendingMatch?.ledger.minute ?? opening.matchMinute ?? 0;
+  return ledger.finalMinute ?? state.pendingMatch?.live.ledger.minute ?? opening.matchMinute ?? 0;
 }
 
 /**
@@ -361,19 +364,26 @@ async function openTurn(
       : [],
   );
   /**
-   * **손잡이로 온 경기 턴은 모델이 결정할 것이 없다** — 화면의 대기 중 교체·좌표·역할·
-   * 전술 축은 코어가 이미 적용했고(match.md §2), `계속`이 뜻하는 것은 진행 하나뿐이다.
-   * 코어가 먼저 굴려 대본을 이번 턴 층에 싣고, GM은 그 턴에 마감 도구만 쥔다.
-   *
-   * 킥오프 턴은 지나간다 — 감독이 아직 아무것도 지시하지 않았고, 첫 휘슬만 여는
-   * 자리라 구간이 굴러가면 안 된다.
+   * 정지점 턴(`match_stop`) — 판이 사건으로 바뀌었다. 판독기가 그 사건으로 포인트와 시트를
+   * 먼저 다시 쓰고, 매치 GM은 다시 쓴 판 위에서 그 사건을 중계한다 (agents.md §3).
    */
-  const applied =
-    inMatch && !kickoff && operator
-      ? applyTacticOrders(state, { ops: {} }, ledger.calls, ledger.goals, ledger.cards, {
-          roll: true,
-        })
-      : null;
+  if (inMatch && !kickoff && operation?.kind === "match_stop") {
+    const stopped = unseenEvents(state);
+    if (stopped.length > 0) await readMatchAfterStop(state, stopped);
+  }
+  /**
+   * **이 턴이 서술할 사건** — 지난 턴 뒤 장부에 앉은 것 (`<events>`). 킥오프 턴은 아무
+   * 사건도 없다.
+   */
+  const events = inMatch && !kickoff ? unseenEvents(state) : [];
+  if (inMatch && !kickoff)
+    collectMatchMarks(
+      state,
+      events,
+      scoreBeforeEvents(state.pendingMatch?.live.ledger.score ?? { home: 0, away: 0 }, events),
+      ledger.goals,
+      ledger.cards,
+    );
   return {
     from,
     clockFrom,
@@ -382,9 +392,9 @@ async function openTurn(
     skippedCards,
     stuckCards,
     deferNegotiationIds,
-    applied,
+    events,
     // 구간이 굴러간 뒤이자 `finalizeMatch`가 장부를 지우기 전인 지금이 읽을 수 있는 유일한 자리다
-    matchMinute: inMatch ? (state.pendingMatch?.ledger.minute ?? null) : null,
+    matchMinute: inMatch ? (state.pendingMatch?.live.ledger.minute ?? null) : null,
   };
 }
 
@@ -456,22 +466,16 @@ async function callGm(
           ...(boardMoves && boardMoves.length > 0 ? { boardMoves } : {}),
         });
   const system = inMatch
-    ? [
-        state.pendingMatch?.spatial ? LIVE_MATCH_GM_SYSTEM : MATCH_GM_SYSTEM,
-        buildMatchReference(state),
-      ]
+    ? [MATCH_GM_SYSTEM, buildMatchReference(state)]
     : inNegotiation
       ? [NEGOTIATION_GM_SYSTEM, buildNegotiationReference(state, shape.negotiationId ?? "")]
       : peaceSystem(state);
   /**
-   * **패킷은 구간이 굴러간 뒤에만 싣는다.** 선수를 부른 한 마디에 패킷 전체를 실으면
-   * GM이 읽지도 않을 판세를 매 턴 정가로 읽는다 (agents.md §5). GM이 굴린 구간의
-   * 패킷은 도구 결과가 싣고, 여기서 싣는 것은 손잡이가 먼저 굴린 턴의 것이다. 킥오프
-   * 턴도 판이 없다 — 아직 아무 일도 일어나지 않았는데 판세를 쥐여 주면 첫 마디부터
-   * 우열을 읊는다.
+   * **경기 통계는 공이 구른 뒤에만 싣는다** — 킥오프 턴은 아직 아무 일도 일어나지
+   * 않았는데 통계를 쥐여 주면 첫 마디부터 우열을 읊는다 (agents.md §5).
    */
   const stateNote = inMatch
-    ? buildLedgerNote(state, { withPacket: opening.applied?.segment != null })
+    ? buildLedgerNote(state, { withState: !kickoff })
     : inNegotiation
       ? // 방의 스냅샷은 테이블이다 — 오퍼 이력·조건서·인내·앵커 (agents.md §4-1)
         buildTableNote(state, shape.negotiationId ?? "")
@@ -584,20 +588,8 @@ async function callGm(
           ...(inMatch && kickoff ? [``, KICKOFF_BLOCK] : []),
           // 자리에 앉는 턴의 표식 — 같은 자리다. 방과 상대의 첫 말까지만 쓴다
           ...(inNegotiation && seating ? [``, OPENING_BLOCK] : []),
-          // 손잡이가 먼저 굴린 구간 — GM은 이 대본을 받아 중계만 쓴다
-          ...(inMatch && !kickoff && operator
-            ? [
-                ``,
-                opening.applied?.segment ?? "<segment>\n- (진행 없음)\n</segment>",
-                ...(opening.applied && opening.applied.notes.length > 0
-                  ? [
-                      `<core_replies>`,
-                      ...opening.applied.notes.map((n) => `- ${n}`),
-                      `</core_replies>`,
-                    ]
-                  : []),
-              ]
-            : []),
+          // 지난 턴 뒤 그라운드에서 일어난 일 — GM은 이 대본을 받아 중계를 쓴다
+          ...(inMatch && !kickoff ? [``, eventsBlockOf(state, opening.events)] : []),
         ].join("\n"),
         stateNote,
         tools,
@@ -658,16 +650,16 @@ async function closeTurn(
   if (
     inMatch &&
     state.pendingMatch &&
-    state.pendingMatch.ledger.phase === "finished" &&
+    state.pendingMatch.live.ledger.phase === "finished" &&
     !awaitingShootout(state)
   ) {
-    ledger.finalMinute = state.pendingMatch.ledger.minute;
+    ledger.finalMinute = state.pendingMatch.live.ledger.minute;
     const outcome = await finalizeMatchTurn(state, ledger.calls);
     if (outcome && outcome.closing.length > 0) closingTail = outcome.closing;
   }
 
   // 도구 앞에 흘린 작업 서술과 값이 같은 반복 헤더를 걷어낸다 — 중계에는 헤더 규칙을
-  // 걸지 않는다(구간마다 헤더를 새로 찍는 것이 정상이다 — prompts.md §1). 남는 것은
+  // 걸지 않는다(턴마다 헤더를 새로 찍는 것이 정상이다 — prompts.md §1). 남는 것은
   // 두 국면이 함께 읽는 꺾쇠 규칙 하나다
   const sceneText = inMatch ? sanitizeCasterText(rawText) : sanitizeSceneText(rawText);
   // 첫 줄 헤더가 본문과 갈린다 — 저장할 때 되붙일 것이고, 경기 턴은 분을 여기서 읽는다
@@ -779,6 +771,8 @@ async function closeTurn(
   // 마감된 경기는 장부가 지워졌다 — 이 경기의 중계 이력은 더 쓰이지 않는다
   if (inMatch && state.pendingMatch) {
     state.pendingMatch.casterHistory = result.history;
+    // 이 턴이 서술한 사건은 다 읽혔다 — 다음 턴의 <events>는 그 뒤부터다
+    markEventsSeen(state);
     // 첫 휘슬을 불었다 — 이 뒤로는 경기 도구 셋을 쥔 보통의 진행 턴이다
     if (kickoff) markEntered(state);
   }

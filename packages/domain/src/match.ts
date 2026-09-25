@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { PacketTag } from "./packet";
 
 export const MatchSideSchema = z.enum(["home", "away"]);
 export type MatchSide = z.infer<typeof MatchSideSchema>;
@@ -71,11 +70,6 @@ export const SHOT_ORIGINS = ["open", "corner", "free_kick", "penalty"] as const;
 export const ShotOriginSchema = z.enum(SHOT_ORIGINS);
 export type ShotOrigin = z.infer<typeof ShotOriginSchema>;
 
-/** 죽은 공에서 나온 슛인가 — 세트피스 몫을 세는 자리가 하나여야 한다 */
-export function isSetPieceOrigin(origin: ShotOrigin | undefined): boolean {
-  return origin !== undefined && origin !== "open";
-}
-
 /**
  * 벤치가 교체를 낸 이유 — **코드다.** 중계가 인용하는 문장은 이 코드를 읽는 쪽이
  * 만든다 (match.md §4).
@@ -84,143 +78,100 @@ export const SubCauseSchema = z.enum(["injury", "chase", "hold", "fatigue"]);
 export type SubCause = z.infer<typeof SubCauseSchema>;
 
 /**
- * 장부에 실리는 사실 태그의 Zod 판 — 모양은 `PacketTag`(packet.ts)와 같다.
+ * **사건의 원인** — 그 사건을 만든 행동의 사슬 (match.md §4 · live-match.md §9.1).
  *
- * 패킷 자체는 세이브 스키마의 검사 밖이지만(진행 중인 경기 한 덩어리) 장부의
- * 사건은 스키마를 지나므로 여기에 한 벌이 있어야 한다.
+ * 코어가 말의 규칙에서 뽑는 코드다. 문장은 읽는 쪽(중계·리포트·GM)이 렌더러 하나로
+ * 만들고, 감독의 전술 XP는 `marking`(시트의 `behavior`가 걸린 말이 관여했다)에만 걸리므로
+ * 검증 없는 자유 문자열을 두지 않는다. **목록은 한 벌이다** — 실시간 경기와 간이 시뮬이
+ * 같은 코드를 쓴다.
  */
-/**
- * 사실 태그의 갈래 — **목록은 한 벌이다.** Zod 판과 `PacketTag`(packet.ts)가 같은
- * 배열을 읽는다: 두 벌로 두면 갈래를 하나 늘린 날 스키마만 옛 목록으로 남는다.
- */
-export const PACKET_TAG_SOURCES = [
+export const EVENT_CAUSE_CODES = [
+  // ── 골·슛이 나온 길 ──
+  /** 스루패스로 라인 뒤를 뚫었다 — [패서, 침투자] */
+  "through_ball",
+  /** 상대 진영에서 공을 뺏은 뒤 짧은 시간 안에 나왔다 — [뺏은 말] */
+  "high_turnover",
+  /** 공격 전환 중에 나왔다 */
   "counter",
-  "gap",
-  /** 존 매치업 — 코드는 `zone-attack`처럼 존 이름이다 (`matchupTag`) */
-  "mismatch",
-  /**
-   * **시트의 걸린 줄** — 판독기가 쓴 전술 포인트의 수치 독해 하나 (match.md §1.6).
-   * `code`는 모양(`edge`·`temper`·`legs`·`cohesion`), `text`는 그 포인트의 문장이다.
-   */
-  "sheet",
-  /** 판에 닿지 못한 시트 줄 — `code`는 까닭이다 (sim `sheet.ts`) */
-  "sheet-dropped",
-  "tactical",
-  /** 죽은 공에서 나온 골 — 키커와 마무리한 선수를 함께 싣는다 (match.md §1.4) */
-  "set-piece",
-  /**
-   * **AI 벤치가 판을 옮겼다** — `tactical_shift` 사건의 근거 (match.md §2).
-   *
-   * `code`가 갈래(`chase`·`hold`)고, `values`는 **옮긴 뒤의** 축 값이다. 방향은
-   * 갈래가 이미 말하므로 델타를 따로 싣지 않는다. 갈아 낀 모양은 `formation:` flag.
-   */
-  "ai-shift",
-  /**
-   * 전력에서 나오지 않는, **이 경기가 무슨 경기인가** — 더비가 첫 갈래다.
-   * 편이 없고(`favours: null`) 이름은 카탈로그의 것이라 `text`가 든다 (match.md §1).
-   */
-  "context",
-  /** 진행 중인 옛 세이브가 들고 있던 문장 — `text`만 갖는다 */
-  "legacy",
+  /** 크로스에서 나왔다 — [크로서] */
+  "cross",
+  /** 컷백 — 박스 옆에서 뒤로 내준 공 */
+  "cutback",
+  /** 코너·프리킥 전달에서 나왔다 — [키커] */
+  "set_piece",
+  /** 직접 프리킥 */
+  "direct_free_kick",
+  /** 페널티 */
+  "penalty",
+  /** 드리블로 수비를 제쳤다 — [제친 말, 제쳐진 말] */
+  "individual",
+  /** 나쁜 터치·패스 실수로 잃은 공에서 나왔다 — [실수한 말] */
+  "error",
+  /** 나온 골키퍼가 닿지 못했다 — [골키퍼] */
+  "keeper_out",
+  /** 긴 공을 공중볼로 따냈다 — [킥한 말, 따낸 말] */
+  "long_ball",
+  /** 헤더 */
+  "header",
+  /** 흘러나온 공을 다시 찼다 */
+  "rebound",
+  /** 시트의 `behavior`가 걸린 말이 관여했다 — `pointId`가 그 포인트 문장을 가리킨다 */
+  "marking",
+  // ── 파울·카드·부상의 성질 ──
+  /** 역습을 끊은 파울 */
+  "cynical_foul",
+  /** 늦은 태클 */
+  "late_tackle",
+  /** 공중볼 경합에서의 접촉 */
+  "aerial_contact",
+  /** 붙어 선 수비가 잡아채거나 민 파울 */
+  "holding",
+  /** 두 번째 경고 */
+  "second_yellow",
+  /** 명백한 득점 기회 저지 */
+  "dogso",
+  /** 위험한 태클 */
+  "reckless",
+  /** 접촉 부상 — [다친 말, 접촉한 말] */
+  "contact_injury",
+  /** 스프린트 중 근육 부상 */
+  "sprint_injury",
+  // ── 벤치의 판단 (`tactical_shift`) — `values`가 옮긴 뒤의 축 값 ──
+  "bench_chase",
+  "bench_hold",
+  "bench_counter",
+  "bench_press",
 ] as const;
-export type PacketTagSource = (typeof PACKET_TAG_SOURCES)[number];
+export const EventCauseCodeSchema = z.enum(EVENT_CAUSE_CODES);
+export type EventCauseCode = z.infer<typeof EventCauseCodeSchema>;
 
-export const PacketTagSchema = z.object({
-  source: z.enum(PACKET_TAG_SOURCES),
-  code: z.string().min(1),
-  favours: MatchSideSchema.nullable(),
-  /** 그 사실을 가진 쪽 — 미스매치만 싣는다. 없으면 이로운 편의 반대다 */
-  holder: MatchSideSchema.optional(),
-  sharp: z.boolean(),
+export const EventCauseSchema = z.object({
+  code: EventCauseCodeSchema,
+  /** 이름이 서는 말들 — 코드마다 순서가 뜻을 갖는다 (위 주석) */
   playerIds: z.array(z.string()).default([]),
-  values: z.record(z.string(), z.number()).default({}),
-  flags: z.array(z.string()).default([]),
-  text: z.string().optional(),
+  /** 코드에 딸린 수치 — 벤치 전환의 축 값, 스루패스의 거리 같은 것 */
+  values: z.record(z.string(), z.number()).optional(),
+  /** `marking`이 인용하는 전술 포인트 */
+  pointId: z.string().optional(),
+  /** 코드에 딸린 낱말 하나 — 벤치 전환이 갈아 낀 모양(`4-2-3-1`) */
+  note: z.string().optional(),
 });
-
-/**
- * 옛 세이브의 문장 한 줄을 태그로 — **판정에는 쓰이지 않는 자리다.**
- *
- * 진행 중이던 경기의 장부와 패킷은 `causes: string[]`·`keyPoints: string[]`을 들고
- * 온다. 그 문장으로 다시 갈래를 가르면 이 구조가 뜻을 잃으므로, `code`는 통째로
- * `"legacy"` 하나이고 문장은 `text`에만 남는다 (match.md §4).
- */
-export function legacyTag(text: string): PacketTag {
-  return {
-    source: "legacy",
-    code: "legacy",
-    favours: null,
-    sharp: false,
-    playerIds: [],
-    values: {},
-    flags: [],
-    text,
-  };
-}
-
-/**
- * 옛 장부의 원인 태그 — 문자열 배열이면 태그로 옮긴다.
- *
- * 진행 중이던 경기의 장부는 세이브 스키마의 검사 밖(passthrough)이라 옛 문장이
- * 그대로 실려 온다. 판정은 이 폴백을 보지 않지만(`subCause`와 태그의 코드로만
- * 갈린다) 문장을 만드는 렌더러가 태그를 기대하므로 읽는 자리에서 한 번 옮긴다.
- */
-export function normalizeCauses(causes: (PacketTag | string)[]): PacketTag[] {
-  const moved = causes.map((c) => normalizeTag(c) as PacketTag);
-  return moved.every((c, i) => c === causes[i]) ? (causes as PacketTag[]) : moved;
-}
-
-/**
- * 옛 세이브의 원인 태그가 들고 오는 **사라진 갈래** — 개인 지시·공략·지역 플랜.
- *
- * 그 층은 판독기의 포인트와 시트로 갈렸다 (match.md §1.6). 끝난 경기의 골에 남은
- * 태그는 뜻을 잃었지만 장부는 그대로 읽혀야 하므로, 읽을 때 `legacy`로 옮긴다 —
- * 판정은 이 폴백을 보지 않는다.
- */
-const RETIRED_TAG_SOURCES: ReadonlySet<string> = new Set([
-  "zone-plan",
-  "directive",
-  "directive-dropped",
-  "exploit",
-  "exploit-dropped",
-]);
-
-/** 사라진 갈래의 태그가 문장으로 설 때 — 무엇이었는지는 기록에만 남는다 */
-export const RETIRED_TAG_TEXT = "지난 판의 지시 근거";
-
-/**
- * 원인 태그 하나를 지금 목록의 것으로 — 문자열이면 태그로, 사라진 갈래면 `legacy`로.
- * 진행 중이던 옛 세이브의 패킷(`normalizePacket`)과 장부의 사건이 같은 문을 지난다.
- */
-export function normalizeTag(raw: unknown): unknown {
-  if (typeof raw === "string") return legacyTag(raw);
-  if (typeof raw === "object" && raw !== null && "source" in raw) {
-    const source = (raw as { source: unknown }).source;
-    if (typeof source === "string" && RETIRED_TAG_SOURCES.has(source)) {
-      const text = (raw as { text?: unknown }).text;
-      return legacyTag(typeof text === "string" && text.length > 0 ? text : RETIRED_TAG_TEXT);
-    }
-  }
-  return raw;
-}
-
-/** 문자열 한 줄로 적힌 옛 원인 태그·사라진 갈래의 태그를 읽을 때만 태그로 옮긴다 */
-const CauseSchema = z.preprocess(normalizeTag, PacketTagSchema);
+export type EventCause = z.infer<typeof EventCauseSchema>;
 
 export const MatchEventSchema = z.object({
+  /** 규정분 — 그 하프의 끝(45·90·105·120)을 넘지 않는다 */
   minute: z.number().int().min(0).max(MATCH_MINUTE_MAX),
+  /**
+   * **추가시간의 분** — 규정분이 그 하프의 끝일 때만 선다 (`45+2′`의 2).
+   * 각 하프의 추가시간은 그 하프의 중단에서 계산한다 (live-match.md §1).
+   */
+  added: z.number().int().min(1).optional(),
   type: MatchEventTypeSchema,
   team: MatchSideSchema.optional(),
   /** 선수 id — substitution은 [나가는 선수, 들어오는 선수] 순서 */
   actors: z.array(z.string()).default([]),
-  /**
-   * 원인 태그 — 전력 분석 패킷 항목을 **그대로** 싣는다 (match.md §4).
-   *
-   * 감독의 전술 XP가 이 태그에 걸리므로 검증 없는 자유 문자열을 두지 않는다.
-   * 진행 중인 옛 세이브의 장부는 문장 배열을 들고 있어, 읽을 때 `source: "legacy"`
-   * 태그로 옮겨 본다.
-   */
-  causes: z.array(CauseSchema).default([]),
+  /** 원인 — 이 사건을 만든 행동의 사슬 (`EventCause`) */
+  causes: z.array(EventCauseSchema).default([]),
   /**
    * 교체의 **갈래** — 한 경기에 쓸 수 있는 승부수·굳히기 장수를 세고 부상 교체를
    * 먼저 세우는 것이 이 코드다. 근거 문구로 세던 자리라, 문구를 고치면 벤치의
@@ -231,10 +182,9 @@ export const MatchEventSchema = z.object({
   /**
    * **이 슛의 질** — 기대 득점 0~1. `shot`·`goal`에만 붙는다.
    *
-   * 팀 단위 xg(`guide.expectedGoals`)는 경기 전 예측이고, 이건 **실제로 만든 장면**의
+   * 팀 단위 기대 득점(`homeExpectedGoals`)은 선수 기대치의 합이고, 이건 **실제로 만든 장면**의
    * 값이다. 둘을 견주면 "기회를 얼마나 만들었나"와 "그걸 얼마나 넣었나"가 갈린다 —
    * 0.08짜리를 넣은 경기와 0.6을 놓친 경기는 같은 스코어라도 다른 이야기다.
-   * 옛 세이브엔 없다 (optional).
    */
   xg: z.number().min(0).max(1).optional(),
   /** 결정력을 반영한 이 슛의 실제 골 확률. */
@@ -247,7 +197,7 @@ export const MatchEventSchema = z.object({
    * 죽은 공을 사건으로 따로 적지 않는 이유는 §4의 원칙이다: 코너는 경기당
    * 스물한 개고 그것을 한 줄씩 적으면 구간 이벤트 상한에 훨씬 자주 닿아 벤치
    * 정지점과 교체 총량이 조용히 움직인다. 갈래는 **그 슛의 성질**이라 여기 산다.
-   * 옛 세이브엔 없다 — 없으면 `open`으로 읽는다 (optional).
+   * `shot`·`goal`에만 붙고, 없으면 `open`으로 읽는다.
    */
   shotOrigin: ShotOriginSchema.optional(),
 });
@@ -274,7 +224,7 @@ export const ShootoutKickSchema = z.object({
   team: MatchSideSchema,
   /** 찬 선수 id */
   taker: z.string().min(1),
-  /** 막아선 골키퍼 id — 명단에 골키퍼가 없는 옛 세이브에서만 빈다 */
+  /** 막아선 골키퍼 id — 온필드에 골키퍼가 없으면(퇴장) 빈다 */
   keeper: z.string().min(1).optional(),
   outcome: ShootoutOutcomeSchema,
   /**
@@ -352,31 +302,40 @@ export function nextShootoutKick(
  */
 export const MatchStatLineSchema = z.object({
   passes: z.number().int().min(0),
+  /** 성공한 패스 — 성공률의 분자 */
+  passesCompleted: z.number().int().min(0),
   /** 전진 패스 — 상대 골문 쪽으로 라인을 넘긴 패스 */
   progressive: z.number().int().min(0),
   /** 슛 수 (골 포함) — 사건에서도 세지만 여기 두면 한 번에 읽힌다 */
   shots: z.number().int().min(0),
+  shotsOnTarget: z.number().int().min(0),
   /** 그 선수가 만든 기대 득점의 합 */
   xg: z.number().min(0),
-  /** 실제 슈터의 결정력을 반영한 골 확률 합. 옛 세이브는 0으로 읽는다. */
-  scoringExpectation: z.number().min(0).default(0),
+  /** 실제 슈터의 결정력을 반영한 골 확률 합 */
+  scoringExpectation: z.number().min(0),
   saves: z.number().int().min(0),
-  /**
-   * 그 선수가 **찬 코너** — 얻는 것은 팀이지만 차는 것은 한 사람이다.
-   * 사건이 아니라 굴리지 않고 나누는 양이다 (match.md §4). 옛 세이브는 0.
-   */
-  corners: z.number().int().min(0).default(0),
-  /** 그 선수가 **범한 파울** — 같은 자리. 옛 세이브는 0. */
-  fouls: z.number().int().min(0).default(0),
+  /** 그 선수가 **찬 코너** — 얻는 것은 팀이지만 차는 것은 한 사람이다 */
+  corners: z.number().int().min(0),
+  /** 그 선수가 **범한 파울** */
+  fouls: z.number().int().min(0),
+  tackles: z.number().int().min(0),
+  tacklesWon: z.number().int().min(0),
+  interceptions: z.number().int().min(0),
+  dribbles: z.number().int().min(0),
+  dribblesWon: z.number().int().min(0),
+  crosses: z.number().int().min(0),
+  /** 공중볼 경합 승 */
+  aerialsWon: z.number().int().min(0),
+  /** 오프사이드에 걸린 수 */
+  offsides: z.number().int().min(0),
+  /** 뛴 거리 (m) · 고속 주행 19.8~25.2 km/h (m) · 스프린트 >25.2 km/h (m) · 스프린트 횟수 */
+  distance: z.number().min(0),
+  highSpeed: z.number().min(0),
+  sprint: z.number().min(0),
+  sprints: z.number().int().min(0),
 });
 export type MatchStatLine = z.infer<typeof MatchStatLineSchema>;
 
-/**
- * 경기의 국면 — 시계가 어디에 있는가.
- *
- * 연장 두 하프가 뒤에 붙어도 **옛 세이브는 그대로 읽힌다**: enum에 값을 더하는 것은
- * 이미 저장된 값의 유효성을 건드리지 않는다 (SAVE_VERSION 유지).
- */
 /** 정규 경기의 길이 — 출전 시간의 분모다 */
 export const FULL_TIME_MINUTES = 90;
 /** 연장까지 간 경기의 길이 */
@@ -424,7 +383,7 @@ export const MatchPhaseSchema = z.enum([
 ]);
 export type MatchPhase = z.infer<typeof MatchPhaseSchema>;
 
-/** 공이 굴러가는 국면 — 종료를 뺀 넷. 구간 시뮬레이터가 이 표로 시계를 민다 */
+/** 공이 굴러가는 국면 — 종료를 뺀 넷 */
 export type PlayPhase = Exclude<MatchPhase, "finished">;
 
 /** 각 국면이 끝나는 시각(추가시간 전) — 45 · 90 · 105 · 120 */

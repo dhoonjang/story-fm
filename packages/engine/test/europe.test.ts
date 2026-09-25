@@ -22,7 +22,7 @@ import {
   teamsOfLeague,
   transitionSeason,
 } from "@story-fm/engine";
-import { advanceAndPlay, createTestGame } from "./helpers";
+import { advanceAndPlay, createTestGame, resultOf } from "./helpers";
 
 /**
  * 유럽 대항전 — 참가 배정 · 리그 페이즈 편성 · 리그 일정과의 공존.
@@ -56,11 +56,10 @@ describe("대항전 참가 배정", () => {
     // 우리 리그를 인위적으로 끝내고 최종 순위를 만든다 (홈 승으로 전부 채움)
     for (const m of state.matches) {
       if (m.season !== state.season) continue;
-      m.result = {
+      m.result = resultOf({
         homeGoals: m.homeTeamId === state.userTeamId ? 5 : 1,
         awayGoals: 0,
-        scorers: [],
-      };
+      });
     }
     const finalTable = computeStandings(state, "epl").map((r) => r.teamId);
     expect(finalTable[0], "홈 5골이면 우리 팀이 1위").toBe(state.userTeamId);
@@ -377,7 +376,7 @@ describe("게임 연결", () => {
   it("리그 페이즈 순위표도 같은 computeStandings로 계산된다", () => {
     const fresh = createTestGame(42);
     for (const m of fresh.matches.filter((m) => m.competitionId === "ucl" && m.round === 1)) {
-      m.result = { homeGoals: 2, awayGoals: 0, scorers: [] };
+      m.result = resultOf({ homeGoals: 2, awayGoals: 0 });
     }
     const table = computeStandings(fresh, "ucl");
     expect(table).toHaveLength(cupCatalogById("ucl")!.size);

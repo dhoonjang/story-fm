@@ -72,7 +72,7 @@ function friendlyAppsOf(state: GameState): Map<string, number> {
   const apps = new Map<string, number>();
   for (const match of state.matches) {
     if (!isFriendly(match) || !match.result) continue;
-    for (const id of [...(match.result.homeLineup ?? []), ...(match.result.awayLineup ?? [])]) {
+    for (const id of [...match.result.homeLineup, ...match.result.awayLineup]) {
       apps.set(id, (apps.get(id) ?? 0) + 1);
     }
   }

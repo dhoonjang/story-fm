@@ -3,7 +3,7 @@
 # usage: turn.sh '<json body>'
 #   body: {"message":"…"} | {"operation":{"kind":"skip_days","days":1}}
 #         | {"operation":{"kind":"skip_to_next_match","date":"YYYY-MM-DD"}}
-#         | {"operation":{"kind":"advance_match"}}
+#         | {"operation":{"kind":"enter_match"}}   (경기 중의 시계는 match.sh가 민다)
 #   message에 orders를 함께 실을 수 있다: {"message":"…","orders":[{"kind":"substitution","out":"id","in":"id"}]}
 # env: SIM_GAME(게임 id) · SIM_DIR(작업 폴더) · SIM_HOST(기본 http://localhost:3000)
 set -uo pipefail

@@ -138,7 +138,7 @@ function waryWithIssue(state: GameState, skip: ReadonlySet<string> = new Set()):
   state.issues.push({
     gamePlayerId: player.id,
     kind: "unhappy",
-    note: "출전 불만",
+    reason: "minutes",
     since: state.date,
   });
   expect(receptivityOf(state, player.id).tier).toBe("wary");
@@ -530,7 +530,9 @@ describe("정지점의 외침 — 하루가 아니라 경기가 센다 (career.m
   function onSquad(state: GameState): GamePlayer {
     const pending = state.pendingMatch!;
     const side =
-      pending.packet.home.teamId === state.userTeamId ? pending.ledger.home : pending.ledger.away;
+      pending.live.setup.sides.home.teamId === state.userTeamId
+        ? pending.live.ledger.home
+        : pending.live.ledger.away;
     const ids = new Set([...side.onPitch, ...side.bench]);
     return userPlayers(state).find((p) => ids.has(p.id))!;
   }
@@ -1195,7 +1197,7 @@ describe("주장·전술·개인 지시", () => {
     for (const p of squad) {
       p.attributes.leadership = 20;
       p.isCaptain = false;
-      p.isViceCaptain = undefined;
+      p.isViceCaptain = false;
     }
     const top = squad[0]!;
     top.attributes.leadership = 90;
@@ -1854,7 +1856,6 @@ describe("사건 기록 — 감독이 말로 만든 사건이 장부에 선다 (
     expect(line.text, "문구에 표식이 박혔다").toBe("장면");
 
     pushNarrative(state, "리그 3연승", 3, "match");
-    pushNarrative(state, "옛 서사 이벤트", 3, "gm-event");
     pushNarrative(state, "갈래를 모르는 옛 줄", 3);
     expect(fire().ok).toBe(true);
     expect(fire().ok).toBe(true);

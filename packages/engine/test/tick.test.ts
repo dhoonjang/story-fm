@@ -9,6 +9,7 @@ import {
   clampFatigue,
   CONDITION_MAX,
   fatigueOf,
+  freshPlayerState,
   FATIGUE_BASE,
   FATIGUE_BAND_FLOOR,
   FATIGUE_MAX,
@@ -71,6 +72,7 @@ import {
   createTestGame,
   drillUserTactics,
   playMockMatch,
+  resultOf,
 } from "./helpers";
 
 describe("advance_time — 시간은 도구로만 흐른다 (season.md §5)", () => {
@@ -295,7 +297,7 @@ describe("advance_time — 시간은 도구로만 흐른다 (season.md §5)", ()
     state.issues.push({
       gamePlayerId: player.id,
       kind: "unhappy",
-      note: "출전 불만",
+      reason: "minutes",
       since: state.date,
     });
     advanceDays(state, 5);
@@ -392,6 +394,10 @@ describe("시간은 웬만하면 지나간다", () => {
       // 기한이 넉넉하면 오늘 답할 이유가 없다
       expiresOn: "2026-08-20",
       status: "open",
+      pitched: [],
+      precontract: false,
+      terms: [],
+      buyout: false,
       rounds: [
         {
           date: state.date,
@@ -456,6 +462,10 @@ describe("시간은 웬만하면 지나간다", () => {
       openedOn: state.date,
       expiresOn: "2026-07-13",
       status: "open",
+      pitched: [],
+      precontract: false,
+      terms: [],
+      buyout: false,
       rounds: [
         {
           date: state.date,
@@ -545,6 +555,10 @@ describe("불만의 문턱 — 등재와 계약 만료", () => {
       openedOn: state.date,
       expiresOn: addDays(state.date, 14),
       status: "open",
+      pitched: [],
+      precontract: false,
+      terms: [],
+      buyout: false,
       rounds: [],
     });
     expect(contractGrievanceDue(state, target)).toBe(false);
@@ -690,11 +704,13 @@ describe("임대 자원이 서는 자리 (season.md §2 임대)", () => {
         id: `past-${hostId}-${i}`,
         season: state.season,
         competitionId: "test-league",
+        stage: "league",
         round: i + 1,
         date: addDays("2026-08-01", i),
+        time: "15:00",
         homeTeamId: hostId,
         awayTeamId: state.userTeamId,
-        result: { homeGoals: 0, awayGoals: 0, scorers: [], homeLineup: [], awayLineup: [] },
+        result: resultOf({ homeGoals: 0, awayGoals: 0, homeLineup: [], awayLineup: [] }),
       });
     }
   }
@@ -885,8 +901,8 @@ describe("전술 적응도의 결장 감쇠 (player.md §7.4)", () => {
  * 눈금으로 도는가, 시즌 전환이 통을 비우는가, 그리고 개인 휴식이라는 상태 전이.
  */
 describe("누적 피로 (player.md §5.5)", () => {
-  it("값이 없으면 빈 통이고, 전력에는 한 칸도 닿지 않는다", () => {
-    const old: PlayerState = { form: 0, condition: 75 };
+  it("새 선수의 통은 비어 있고, 전력에는 한 칸도 닿지 않는다", () => {
+    const old: PlayerState = freshPlayerState({ form: 0, condition: 75 });
     expect(fatigueOf(old)).toBe(FATIGUE_BASE);
     // ⚠️ 이 축의 계약 — 유효 능력치의 항은 폼·체력 둘뿐이다 (적응도는 `famFactor`가 따로 문다)
     expect(stateModifier({ ...old, fatigue: FATIGUE_MAX })).toBe(stateModifier(old));

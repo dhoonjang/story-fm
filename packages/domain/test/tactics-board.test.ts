@@ -5,8 +5,6 @@ import {
   TACTIC_TOGGLE_KEYS,
   TacticsSpecSchema,
   tacticToggleOf,
-  migratePassStyle,
-  migrateSignature,
   tacticToggleValue,
   tacticsDistance,
   tacticsSignature,
@@ -476,7 +474,7 @@ describe("패스 스타일은 1~5 축이다", () => {
     expect(spec(0).success).toBe(false);
     expect(spec(6).success).toBe(false);
     expect(spec(3.5).success).toBe(false);
-    // 옛 문자열은 더 이상 통과하지 않는다 — 로드할 때 옮긴다
+    // 세 갈래 문자열은 통과하지 않는다
     expect(spec("mixed").success).toBe(false);
   });
 
@@ -591,29 +589,6 @@ describe("전술 갈래 넷 — 축이 아니라 토글이다", () => {
         true,
       );
     }
-  });
-});
-
-describe("옛 세이브 옮기기", () => {
-  it("세 갈래를 눈금의 양 끝과 가운데로 옮긴다", () => {
-    expect(migratePassStyle("short")).toBe(2);
-    expect(migratePassStyle("mixed")).toBe(3);
-    expect(migratePassStyle("direct")).toBe(4);
-    // 이미 숫자면 그대로 (여러 번 불러도 같다)
-    expect(migratePassStyle(5)).toBe(5);
-    expect(migratePassStyle(migratePassStyle("direct"))).toBe(4);
-    // 알 수 없는 값은 가운데로
-    expect(migratePassStyle(undefined)).toBe(3);
-  });
-
-  it("적응도 기억의 지문도 함께 옮긴다 — 안 옮기면 익힌 전술을 처음 보는 전술로 친다", () => {
-    const old = "4-3-3|3|3|3|3|3|direct";
-    expect(migrateSignature(old)).toBe("4-3-3|3|3|3|3|3|4");
-    // 옮긴 지문은 지금 설정의 지문과 맞아떨어진다 (그래야 기억을 되찾는다)
-    expect(migrateSignature(old)).toBe(tacticsSignature({ ...DEFAULT_TACTICS, passStyle: 4 }));
-    // 이미 숫자인 지문은 건드리지 않는다
-    const now = tacticsSignature(DEFAULT_TACTICS);
-    expect(migrateSignature(now)).toBe(now);
   });
 });
 

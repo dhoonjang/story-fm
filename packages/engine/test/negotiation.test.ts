@@ -94,6 +94,7 @@ import {
   teamNameIn,
   tickInterests,
   openTransferRequests,
+  standTransferRequest,
   transferRequestOf,
   unilateralSeveranceOf,
   USER_WAGE_HEADROOM,
@@ -250,7 +251,10 @@ function stagedNegotiation(
     openedOn: state.date,
     expiresOn: input.expiresOn ?? addDays(state.date, 10),
     status: input.status ?? "agreed",
-    ...(input.precontract ? { precontract: true } : {}),
+    pitched: [],
+    terms: [],
+    buyout: false,
+    precontract: input.precontract ?? false,
     ...(input.medical === null
       ? {}
       : { medical: { onDate: state.date, status: input.medical ?? "passed" } }),
@@ -1098,6 +1102,10 @@ describe("이적 요청 — 막힌 이적이 세우고 감독이 답한다", () 
       openedOn: state.date,
       expiresOn: addDays(state.date, 10),
       status: "open",
+      pitched: [],
+      precontract: false,
+      terms: [],
+      buyout: false,
       rounds: [
         {
           date: state.date,
@@ -1161,9 +1169,7 @@ describe("이적 요청 — 막힌 이적이 세우고 감독이 답한다", () 
     expect(request?.reason).toBe("blocked-move");
     expect(request?.answeredOn, "요청은 답을 기다린다").toBeUndefined();
     expect(answered.message).toContain("이적을 요청");
-    // 장부가 원본이고 옛 필드도 같은 값을 든다
-    expect(state.transferRequests?.some((r) => r.gamePlayerId === player.id)).toBe(true);
-    expect(playerById(state, player.id)!.state.transferRequestedOn).toBe(state.date);
+    expect(state.transferRequests.some((r) => r.gamePlayerId === player.id)).toBe(true);
   });
 
   it("수락한 호가는 요청 할인선 위로 서지 못한다", () => {
@@ -1217,7 +1223,7 @@ describe("이적 요청 — 막힌 이적이 세우고 감독이 답한다", () 
       topic: "minutes" as const,
       speakerId: player.name,
       about: player.id,
-      context: `${player.name} · 출전 시간`,
+      contextCard: { code: "grievance" as const, reason: "minutes" as const },
       facts: [],
       step: 2,
       status: "pending" as const,
@@ -2289,7 +2295,7 @@ describe("임대 중인 선수는 소유 구단만 움직인다", () => {
       (a, b) => marketValueOf(state, a) - marketValueOf(state, b),
     );
     const quiet = byValue[Math.floor(byValue.length / 2)]!;
-    quiet.state.transferRequestedOn = state.date;
+    standTransferRequest(state, quiet.id, "grievance");
 
     const digest: string[] = [];
     const offered = () => state.negotiations.some((n) => n.gamePlayerId === quiet.id);
@@ -2538,6 +2544,10 @@ describe("방향은 모든 줄에 실린다", () => {
       openedOn: state.date,
       expiresOn: addDays(state.date, 10),
       status: opts.status ?? "open",
+      pitched: [],
+      precontract: false,
+      terms: [],
+      buyout: false,
       rounds: [
         {
           date: state.date,
@@ -3248,21 +3258,28 @@ describe("무대와 마감 — 누가 오퍼를 내고 언제 몰리는가", () 
   it("체급도 카탈로그도 없는 옛 세이브의 구단이 섞여도 무대는 유한하다", () => {
     const state = createTestGame(42);
     /**
-     * 장부에는 남았는데 카탈로그가 모르는 클럽 — `tier` 칸도 비어 있다.
-     * `tierOfTeamIn`이 세이브 → 카탈로그 → 3으로 떨어지므로 무대 값이 `null`이
-     * 되는 길은 없다: 후보가 사라지지 않는다.
+     * 장부에는 남았는데 카탈로그가 모르는 클럽 — 등급은 세이브의 것이라 무대 값이
+     * `null`이 되는 길은 없다: 후보가 사라지지 않는다.
      */
     const ghostId = "ghost-fc";
     state.teams.push({
       id: ghostId,
+      tier: 3,
       name: "고스트 FC",
+      shortName: "고스트",
       leagueId: leagueOfTeamIn(state, state.userTeamId),
+      managerSpells: [],
     });
     state.finances.push({
       teamId: ghostId,
       balance: 0,
       transferBudget: 1_000_000_000,
       ledger: [],
+      prizesPaid: [],
+      budgetFrozen: false,
+      seasonOpeningBalance: 0,
+      earmarked: [],
+      assets: [],
     });
     expect(tierOfTeamIn(state, ghostId)).toBe(3);
 
@@ -3438,7 +3455,7 @@ describe("테이블 — 마주 앉으면 그 자리에서 답한다 (transfer.md
     const ours = negotiation.rounds.filter((r) => r.by === "us");
     expect(ours[ours.length - 1]!.verdict).toBe(anchorVerdict);
     // 감독의 말 한 줄과 장부 줄이 단장의 테이블에 남는다
-    const table = tableOf(state, negotiation, "club")!;
+    const table = tableOf(negotiation, "club")!;
     expect(table.lines[0]).toMatchObject({ by: "us", text: "오늘 끝내고 싶습니다" });
     expect(table.lines.some((l) => l.by === "ledger")).toBe(true);
   });
@@ -3459,7 +3476,7 @@ describe("테이블 — 마주 앉으면 그 자리에서 답한다 (transfer.md
       heard: { tone: "hostile", claims: [{ kind: "manager_reputation" }] },
     });
     // 적대적 말투 한 칸, 확인되지 않는 논거(감독의 이름) 한 칸 — 그러나 일어날 만큼은 아니다
-    const table = tableOf(state, negotiation, "club")!;
+    const table = tableOf(negotiation, "club")!;
     expect(table.patience).toBe(max - 2);
     expect(negotiation.status).toBe("open");
     // 인내가 남아 있으면 모델의 leaving은 cooling으로 내려간다
@@ -3543,7 +3560,7 @@ describe("협상 방 — 열림 → 자리 → 합의·결렬·자리 뜨기 (tr
     expect(state.pendingNegotiation).toBeNull();
     expect(negotiation.status).toBe("open");
     expect(
-      tableOf(state, negotiation, "club")?.lines.some(
+      tableOf(negotiation, "club")?.lines.some(
         (l) => l.by === "ledger" && l.text.includes("일어났다"),
       ),
     ).toBe(true);
@@ -3606,9 +3623,8 @@ describe("협상 방 — 열림 → 자리 → 합의·결렬·자리 뜨기 (tr
     expect(negotiation.status).toBe("rejected");
     expect(state.phase).toBe("idle");
     expect(state.pendingNegotiation).toBeNull();
-    // 대사 줄이 없으니 them 줄도 없다 — 장부 줄만 남는다
-    const table = tableOf(state, negotiation, "club")!;
-    expect(table.lines.filter((l) => l.by === "them")).toHaveLength(0);
+    // 결렬은 장부 줄로 남는다
+    const table = tableOf(negotiation, "club")!;
     expect(table.lines.some((l) => l.by === "ledger")).toBe(true);
   });
 
@@ -3654,23 +3670,16 @@ describe("협상 방 — 열림 → 자리 → 합의·결렬·자리 뜨기 (tr
       stance: "cooling",
       heard: { tone: "hostile", claims: [] },
     });
-    const clubTable = tableOf(state, negotiation, "club")!;
+    const clubTable = tableOf(negotiation, "club")!;
     expect(clubTable.patience).toBe(clubTable.patienceMax - 1);
     // 에이전트의 테이블은 아직 서지도 않았고, 앉으면 제 인내 그대로다
-    expect(tableOf(state, negotiation, "agent")).toBeUndefined();
+    expect(tableOf(negotiation, "agent")).toBeUndefined();
     const agent = sitAtTable(state, negotiation.id, "주급 이야기를 하죠", "agent");
     if (!agent.ok) throw new Error(agent.message);
     expect(agent.seat.voices.map((v) => v.speaker)).toEqual(["agent"]);
     expect(agent.seat.table.patience).toBe(tablePatienceOf(state, negotiation, "agent"));
     // 단장의 줄은 단장의 테이블에만 있다
     expect(agent.seat.table.lines.some((l) => l.text === "됐고, 값이나 내놔")).toBe(false);
-    // 옛 세이브의 한 자리 테이블은 처음 읽을 때 기본 자리로 옮겨진다
-    const legacy = withOffer(createTestGame());
-    legacy.table = { openedOn: "2026-08-01", patience: 3, patienceMax: 4, lines: [] };
-    delete legacy.tables;
-    const state2 = createTestGame();
-    expect(tableOf(state2, legacy, "club")?.patience).toBe(3);
-    expect(legacy.table).toBeUndefined();
   });
 
   it("단장의 수락은 이적료의 합의고, 에이전트가 개인 조건을 굳히는 날 합의다", () => {

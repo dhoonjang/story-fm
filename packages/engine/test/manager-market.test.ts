@@ -47,8 +47,6 @@ import {
   pendingInterview,
   MANAGER_POOL_MAX,
   characterEntryOf,
-  ensureManagerPool,
-  generateVirtualManager,
   worldFigureByName,
   worldFigures,
   respondToApproach,
@@ -92,8 +90,7 @@ import {
   type ManagerPoolEntry,
   type ManagerSpell,
 } from "@story-fm/domain";
-import { afterSquadReturn, completeDeal, createTestGame } from "./helpers";
-import { isWorldFigureName } from "../src/data/world-figures";
+import { afterSquadReturn, completeDeal, createTestGame, resultOf } from "./helpers";
 
 /**
  * 감독 시장 — **벤치의 사람도 바뀐다.**
@@ -117,8 +114,8 @@ function fabricateBottom(state: GameState, targetId: string, rounds = 10): void 
     const away = match.awayTeamId === targetId;
     match.result =
       home || away
-        ? { homeGoals: home ? 0 : 3, awayGoals: away ? 0 : 3, scorers: [] }
-        : { homeGoals: 1, awayGoals: 1, scorers: [] };
+        ? resultOf({ homeGoals: home ? 0 : 3, awayGoals: away ? 0 : 3 })
+        : resultOf({ homeGoals: 1, awayGoals: 1 });
   }
 }
 
@@ -166,11 +163,10 @@ function fabricateUserSlump(state: GameState): void {
     )
     .slice(0, 12);
   for (const match of ours) {
-    match.result = {
+    match.result = resultOf({
       homeGoals: match.homeTeamId === state.userTeamId ? 0 : 1,
       awayGoals: match.awayTeamId === state.userTeamId ? 0 : 1,
-      scorers: [],
-    };
+    });
   }
 }
 
@@ -188,8 +184,8 @@ function fabricateSlump(state: GameState, targetIds: readonly string[]): void {
     const away = targets.has(match.awayTeamId);
     match.result =
       home === away
-        ? { homeGoals: 1, awayGoals: 1, scorers: [] }
-        : { homeGoals: home ? 0 : 3, awayGoals: away ? 0 : 3, scorers: [] };
+        ? resultOf({ homeGoals: 1, awayGoals: 1 })
+        : resultOf({ homeGoals: home ? 0 : 3, awayGoals: away ? 0 : 3 });
   }
 }
 
@@ -320,9 +316,7 @@ describe("감독 풀 — 잘린 사람은 세계에 남고 다른 벤치에 다�
 
   it("사람됨은 벤치가 아니라 사람에게 붙는다 — 팀을 옮겨도 같은 카드다", () => {
     const state = createTestGame(7);
-    const from = state.teams.find(
-      (t) => t.id !== state.userTeamId && t.managerName !== undefined && !t.managerPersonaSeat,
-    )!;
+    const from = state.teams.find((t) => t.id !== state.userTeamId && t.managerName !== undefined)!;
     const name = from.managerName!;
     const before = characterEntryOf(state, name, "full")!;
 
@@ -371,6 +365,8 @@ describe("감독 풀 — 잘린 사람은 세계에 남고 다른 벤치에 다�
       season: state.season,
       kind: "sacked",
       tier: 1,
+      target: 10,
+      expectationCode: "mid",
     };
     delete state.manager.contract;
     const target = state.teams.find((t) => t.id === "everton")!;
@@ -386,6 +382,7 @@ describe("감독 풀 — 잘린 사람은 세계에 남고 다른 벤치에 다�
         expectationCode: "mid",
         salary: MANAGER_TERMS_BY_TIER[3].salary,
         years: 2,
+        budgetPledge: MANAGER_TERMS_BY_TIER[3].budgetPledge,
         via: "vacancy",
         status: "open",
       },
@@ -397,39 +394,7 @@ describe("감독 풀 — 잘린 사람은 세계에 남고 다른 벤치에 다�
     expect(entry, "전임이 증발했다").toBeDefined();
     expect(entry!.lastTeamId).toBe(target.id);
     // 감독의 벤치에는 앞사람의 이력이 남지 않는다 — 그건 그를 따라 풀로 갔다
-    expect(target.managerSpells).toBeUndefined();
-  });
-
-  it("옛 세이브의 벤치는 자리 표식을 받고 사람됨이 그대로다 — 보정은 멱등이다", () => {
-    const state = createTestGame(7);
-    const bench = state.teams.find(
-      (t) =>
-        t.id !== state.userTeamId &&
-        t.managerName !== undefined &&
-        !isWorldFigureName(t.managerName),
-    )!;
-    // 풀이 없던 시절의 세이브를 흉내 낸다
-    delete state.managerPool;
-    for (const team of state.teams) delete team.managerPersonaSeat;
-
-    ensureManagerPool(state);
-    expect(state.managerPool).toEqual([]);
-    expect(bench.managerPersonaSeat).toBe(bench.id);
-    // 그 표식이 있으면 옛 채널로 읽는다 — 진행 중인 세이브의 사람이 갈리지 않는다
-    const card = characterEntryOf(state, bench.managerName!, "full")!;
-    expect(card.archetype).toBe(
-      generateVirtualManager(state.seed, bench.managerName!, bench.id).archetype,
-    );
-    // 표식이 없었으면 다른 사람이었을 것이다 — 폴백이 실제로 일하고 있다는 뜻이다
-    expect(card.archetype).not.toBe(
-      generateVirtualManager(state.seed, bench.managerName!).archetype,
-    );
-
-    // 두 번 돌아도 같다 — 명부 감독의 벤치에는 표식이 붙지 않는다
-    ensureManagerPool(state);
-    expect(bench.managerPersonaSeat).toBe(bench.id);
-    const figureBench = state.teams.find((t) => t.managerName === "펩 과르디올라")!;
-    expect(figureBench.managerPersonaSeat).toBeUndefined();
+    expect(target.managerSpells).toEqual([]);
   });
 });
 
@@ -804,8 +769,6 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
     expect(card.position).toBeGreaterThan(0);
     expect(card.target).toBeGreaterThan(0);
     expect(card.expectationCode, "기대의 갈래가 없다").toBeTruthy();
-    expect(card.expectation, "장부에 기대의 이름을 적었다").toBeUndefined();
-    expect(card.reason, "장부에 문장을 적었다").toBeUndefined();
 
     // 감독이 없는 구단은 세계에 없다 — 옛 구단은 그날로 후임을 세웠다
     const old = state.teams.find((t) => t.id === sackedFrom)!;
@@ -897,7 +860,7 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
     expect(state.userTeamId).toBe(offer.teamId);
     expect(state.userTeamId, "옛 구단으로 돌아갔다").not.toBe(sackedFrom);
     expect(state.dismissal, "부임했는데 경질장이 남았다").toBeUndefined();
-    expect(state.manager.boardWarnings, "앞 구단의 경고를 지고 갔다").toBeUndefined();
+    expect(state.manager.boardWarnings, "앞 구단의 경고를 지고 갔다").toBe(0);
     expect(state.issues, "옛 구단의 불만을 지고 왔다").toHaveLength(0);
 
     const now = state.teams.find((t) => t.id === offer.teamId)!;
@@ -967,7 +930,15 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
 
     // 두 번째 경질 — 판정 경로는 위에서 쟀으니 카드를 직접 세운다
     state.date = addDays(state.date, 200);
-    state.dismissal = { on: state.date, season: state.season, teamId: previouslyCalled };
+    state.dismissal = {
+      on: state.date,
+      season: state.season,
+      teamId: previouslyCalled,
+      kind: "sacked",
+      tier: tierOfTeamIn(state, previouslyCalled),
+      target: 10,
+      expectationCode: "mid",
+    };
     // 안전판 자리까지 무직으로 흘렀다 — 문턱을 넘는 자리는 확률을 건너뛰고 반드시 부른다
     state.date = addDays(state.date, OFFER_DRY_SPELL_DAYS);
 
@@ -996,6 +967,10 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
       tier: tierOfTeamIn(state, target.id),
       target: 10,
       expectationCode: "mid",
+      salary: MANAGER_TERMS_BY_TIER[3].salary,
+      years: 2,
+      budgetPledge: MANAGER_TERMS_BY_TIER[3].budgetPledge,
+      via: "vacancy",
       status: "open",
     };
     state.managerOffers = [...(state.managerOffers ?? []), offer];
@@ -1027,6 +1002,10 @@ describe("무직 안전판은 마지막 제안에서 다시 선다", () => {
     tier: 3,
     target: 12,
     expectationCode: "mid",
+    salary: MANAGER_TERMS_BY_TIER[3].salary,
+    years: 2,
+    budgetPledge: MANAGER_TERMS_BY_TIER[3].budgetPledge,
+    via: "vacancy",
     status: "expired",
   });
 
@@ -1078,7 +1057,15 @@ describe("감독 계약과 흥정 — 조건이 실리고 한 차례 되부른�
 
   it("조정은 천장 아래면 그대로, 넘으면 천장에서 멈춘다 — 그리고 한 차례뿐이다", () => {
     // 경질 판정 경로는 위 describe가 쟀다 — 카드만 세워 무직으로 만든다
-    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    state.dismissal = {
+      on: state.date,
+      season: state.season,
+      teamId: state.userTeamId,
+      kind: "sacked",
+      tier: tierOfTeamIn(state, state.userTeamId),
+      target: 10,
+      expectationCode: "mid",
+    };
     delete state.manager.contract;
     state.manager.reputation.board = 55;
     state.manager.reputation.media = 55; // 평판 55 — tier 2 문턱 턱걸이, 여유 5%

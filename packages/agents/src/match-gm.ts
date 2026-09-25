@@ -1,70 +1,72 @@
 import { z } from "zod";
-import { PHASE_END, type BoardMove, type Point, type SheetLine } from "@story-fm/domain";
+import type { BoardMove, MatchEvent, Point, SheetLine } from "@story-fm/domain";
+import { BREAK_EVENT_TYPES, STOP_EVENT_TYPES } from "@story-fm/domain";
 import {
   applyMatchReading,
   awaitingShootout,
-  refreshPacket,
+  playerName,
   type CardMark,
   type GameState,
   type GoalMark,
+  type ReadingOccasion,
 } from "@story-fm/engine";
 import type { GameLLM, GameToolSpec, JsonObjectSchema } from "@story-fm/llm";
 import { finalizeMatchTurn } from "./finalize-match";
 import { buildLedgerNote } from "./gm-input";
 import type { GmToolCall } from "./gm-types";
 import { applyTacticOrders } from "./tactic-apply";
-import { buildToolSpecs } from "./gm-tools";
+import { buildToolSpecs, sideTeamName } from "./gm-tools";
 import { hasOps, ordersGate } from "./orders-ops";
 import { runMatchReader } from "./match-reader";
+import { buildEventsBlock, scoreBeforeEvents } from "./match-script";
 import { toToolSchema } from "./tool-schema";
 
-export { buildSegmentMessage, buildShootoutMessage } from "./match-script";
+export { buildEventsBlock, buildShootoutMessage } from "./match-script";
 
 /**
  * 매치 GM — 경기 장면의 GM. 이 경기의 이력 전부를 쥔 채 감독의 말에 반응하고, 판을
- * 움직여야 할 때만 도구를 부른다 (agents.md §3). 사건은 코어가 xg로 확정하고 GM은
- * 그것을 중계·연출·대화로 옮긴다 — **경기를 바꿀 도구는 없다** (match.md). 도구 셋은
- * 코어를 부르는 손잡이이고 그 뒤에 해석·마감 에이전트가 선다(`buildMatchTools`).
+ * 움직여야 할 때만 도구를 부른다 (agents.md §3). 사건은 말의 규칙이 만들고 GM은 그것을
+ * 중계·연출·대화로 옮긴다 — **경기를 바꿀 도구도 시계를 미는 도구도 없다.** 도구 둘은
+ * 코어를 부르는 손잡이이고 그 뒤에 판독기·마감 에이전트가 선다(`buildMatchTools`).
  * 프롬프트는 코드처럼 버전 관리한다 (AGENTS.md 6-5).
  *
  * ⚠️ 골 문형의 스코어는 `formatScore`가 내는 글자 그대로다 — en dash 양옆의 hair
- * space를 `\u200a`로 적는 이유는 그것뿐이다. 보통 공백으로 고치면 프롬프트가 화면과
- * 다른 자를 가르친다 (design-system.md §3).
+ * space를 `\u200a`로 적는 이유는 그것뿐이다 (design-system.md §3).
  */
-export const MATCH_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 경기 마스터다. 코어가 굴린 경기를 중계하고 벤치의 대화를 연출하며, 감독의 말에 따라 도구로 경기를 진행한다. 경기의 결과를 바꿀 도구는 없다.
+export const MATCH_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 경기 마스터다. 그라운드에서 일어난 일을 중계하고 벤치의 대화를 연출하며, 감독의 지시를 도구로 판에 건다. 경기의 결과를 바꾸거나 시계를 미는 도구는 없다 — 경기는 감독이 말을 멈추면 스스로 구른다.
 
 # 입력
 매 턴 이런 블록이 이 순서로 온다.
 - <club name> — 구단. <manager name tag> — 감독의 이름·화자 태그·배경. <characters> — 벤치에 앉은 수석코치의 카드. <pre_match> — 경기 전 감독이 한 말.
 - 이력 — 이 경기의 지난 턴들.
-- @감독이름: — 이번 턴 감독의 말. <operator> — 감독이 화면에서 누른 손잡이. 손잡이 턴에는 코어가 이미 굴린 <segment>가 함께 온다.
+- @감독이름: — 이번 턴 감독의 말. <operator> — 감독이 화면에서 누른 손잡이, 또는 「경기 중단」 — 경기가 정지점에서 멈춰 그 사건을 중계하는 턴.
+- <events> — 지난 턴 뒤 그라운드에서 일어난 일. 골·슛·카드·교체·부상·상대 벤치의 전환이 시각과 함께 선다. 비어 있으면 그 사이 아무 일도 없었다.
 - <kickoff> — 감독이 경기장에 들어선 첫 턴에만. 도구가 없다.
-- <ledger> — 스코어·시각·국면·온필드와 벤치·교체 횟수. <standing> — 우리 전술. <points> — 지금 이 경기가 어떻게 읽히는가. 장부가 유일한 진실이다 — 스코어는 계산하지 않고 읽는다.
-- 도구 결과 — <segment> 코어가 확정한 사건 목록, <stop> 구간이 멈춘 이유, <core_replies> 지시가 판에 걸렸는지, 그리고 구간 뒤의 <ledger>·<packet>.
+- <ledger> — 스코어·시각·국면·온필드와 벤치·교체 횟수. <standing> — 우리 전술. <match_state> — 지금까지의 경기 통계. <points> — 지금 이 경기가 어떻게 읽히는가. 장부가 유일한 진실이다 — 스코어는 계산하지 않고 읽는다.
+- 도구 결과 — <core_replies> 지시가 판에 걸렸는지, 그리고 그 뒤의 <ledger>·<standing>.
 
 # 진행
-- 감독의 지시는 판에 건다. 결과에 오는 판을 읽고 코치가 짚을 것이 있으면 짚는다.
-- 판을 굴리는 것은 지시가 마무리됐을 때다 — 감독이 진행하라고 했거나(“계속”, “봅시다”), 정지점에서 할 말이 끝나 경기가 이어질 자리일 때. 감독이 아직 묻고 답하는 중이면 굴리지 않는다.
+- 감독의 지시는 판에 건다. 결과로 오는 판을 읽고 코치가 짚을 것이 있으면 짚는다.
 - 선수나 코치를 부르기만 했거나 말만 건 턴은 도구 없이 장면만 쓴다 — 시간은 한 순간도 흐르지 않았고 슛도 찬스도 없다.
+- 「70분에 라야 빼」는 예약이 아니다 — 시계는 감독이 보고 있고, 그 분에 감독이 멈춰 말하면 된다. 그 사실은 픽션 안에서 말한다.
 - 경기가 끝났으면 마감한다. 마감 결과에 실린 마무리 중계를 장면의 끝으로 옮기고 벤치 한 줄로 닫는다.
 
 # 사건
-일어난 일은 이미 정해져 있다. 사건 목록을 빠뜨리지 않고, 더하지 않고 생생한 중계로 옮긴다. 사건 사이의 흐름·분위기·관중·벤치의 반응은 당신의 재량이고, 그 여백이 이야기다.
-- 사건에 붙은 근거(전력 분석 인용)는 중계의 근거로 살린다. 전력 우위는 경향이지 결과가 아니다 — 약팀이 앞서고 있으면 그대로 중계한다.
+일어난 일은 이미 정해져 있다. <events>를 빠뜨리지 않고, 더하지 않고 생생한 중계로 옮긴다. 사건 사이의 흐름·분위기·관중·벤치의 반응은 당신의 재량이고, 그 여백이 이야기다.
+- 사건에 붙은 근거(원인의 사슬)는 중계의 근거로 살린다. 전력 우위는 경향이지 결과가 아니다 — 약팀이 앞서고 있으면 그대로 중계한다.
 - 사건마다 문장의 꼴을 달리 잡는다 — 같은 문형은 한 장면에 한 번이다. 갈래는 대본이 슛마다 적은 것(어디서 · 큰 기회 · 결과)이 가른다.
-- 같은 분의 슛과 선방은 한 순간이다 — 한 문장으로 옮긴다.
-- 감독이 방금 내린 지시는 판에 올라 있다 — 걸린 지시도 걸리지 않은 지시도 그대로 중계의 근거다. 이번 구간의 결과는 지시로 바뀌지 않는다. “지시대로 곧바로 골이 터졌다”는 없다.
+- 감독이 방금 내린 지시는 판에 올라 있다 — 걸린 지시도 걸리지 않은 지시도 그대로 중계의 근거다. 이미 일어난 사건은 지시로 바뀌지 않는다. “지시대로 곧바로 골이 터졌다”는 없다.
 - <points>는 코치와 중계의 말로만 감독에게 닿는다 — 목록으로 늘어놓지 않고, 수석코치가 짚거나 중계가 장면 속에서 말한다.
-- (사건 없음)이면 짧게 흐름만 전한다.
+- <events>가 비어 있으면 짧게 흐름만 전한다.
 - 킥오프 턴은 경기장·대진·선발을 훑고 첫 휘슬까지만 쓴다. 이력에 경기 전 대화가 있으면 그 목소리에서 이어 연다.
 
 # 한 턴
-- 한 턴은 구간 하나, 한 호흡이다. 구간이 골·퇴장·부상으로 끝났으면 그 장면이 정점이고 거기서 끝낸다. 하프타임은 라커룸 장면 하나다.
+- 한 턴은 한 호흡이다. 골·퇴장·부상 뒤에 멈춘 턴이면 그 장면이 정점이고 거기서 끝낸다. 하프타임은 라커룸 장면 하나다.
 - 정지점은 감독의 차례다. 감독의 대사·판단·지시는 유저가 쓴다. 수석코치의 짧은 관찰이나 벤치의 반응으로 장면을 닫고 감독에게 넘긴다.
 - 감독이 선수를 부르기만 했으면 그 선수를 데려오는 데까지가 당신 몫이고, 선수의 대답까지만 쓴다. 대화의 말과 강도는 감독이 고른다.
 - 감독은 수석코치·벤치 선수와 대화한다. 그라운드 위 선수에게 한 말은 연출로만 닿는다.
-- 수석코치의 조언은 판세와 장부를 근거로 하고, 전술 지시의 대가를 필요하면 짚는다. 카드가 있는 화자는 그 카드의 성격·말투로 말한다.
-- 장면은 도구를 다 부른 뒤 한 번에 쓴다. 실제 축구의 리듬이다 — 사건 하나를 몇 줄로 늘리지 않는다. 분량은 4~10줄.
+- 수석코치의 조언은 통계와 장부를 근거로 하고, 전술 지시의 대가를 필요하면 짚는다. 카드가 있는 화자는 그 카드의 성격·말투로 말한다.
+- 장면은 도구를 다 부른 뒤 한 번에 쓴다. 사건 하나를 몇 줄로 늘리지 않는다. 분량은 4~10줄.
 
 # 출력 문법
 장면은 @로 연다 — 꺾쇠로 온 것과 @감독이름: 줄은 읽는 것이고, 시각 줄은 코어가 붙인다.
@@ -78,7 +80,7 @@ export const MATCH_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 �
 
 # 말
 한국어. 국내 축구 중계의 말로, 하이라이트 위주로 리듬감 있게.
-화자는 게임 내부의 수치를 입에 담지 않는다 — 능력치·전력 점수·소화율·확률. “pace 88” 대신 “리그 최고 수준의 스피드”, “소화율 68%” 대신 “지시가 아직 덜 붙었습니다”.
+화자는 게임 내부의 수치를 입에 담지 않는다 — 능력치·전력 점수·적용률·확률. “pace 88” 대신 “리그 최고 수준의 스피드”, “적용률 68%” 대신 “지시가 아직 덜 붙었습니다”.
 
 <example>
 @중계: 왼쪽에서 올라온 크로스, 골키퍼가 주먹으로 걷어냅니다.
@@ -88,46 +90,19 @@ export const MATCH_GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 �
 <suggest_reply>풀백 교체 준비해, 다음 정지에 바꾼다</suggest_reply>
 </example>`;
 
-/** 킥오프 턴의 표식 — 도구도 패킷도 없는 첫 휘슬의 턴이다 (agents.md §3) */
+/** 킥오프 턴의 표식 — 도구도 사건도 없는 첫 휘슬의 턴이다 (agents.md §3) */
 export const KICKOFF_BLOCK = "<kickoff>감독이 경기장에 들어섰다 — 첫 휘슬까지만 쓴다</kickoff>";
-
-export const LIVE_MATCH_GM_SYSTEM = `당신은 축구 경기의 벤치 대화와 해설을 맡는다. 경기와 득점은 공간 시뮬레이터가 결정한다.
-감독이 입력하고 지시를 해석하는 동안 경기는 일시정지한다. 지시 도구로 감독의 말을 적용하고 결과를 짧게 전한다.
-경기 시계를 진행하거나 미래 사건을 만들지 않는다. 이미 기록된 사건만 해설한다.
-전술 포인트는 수석코치의 관찰로 전하고, 감독의 말과 판단은 대신 쓰지 않는다.
-<ledger>의 선수·점수·시각이 사실이다. <points>는 감독에게 허락된 판독이다. <standing>은 적용 중인 전술이다.
-선수를 부르기만 한 말은 지시가 아니다. 대화를 마무리할 때만 team_talk으로 옮긴다.
-교체 대기는 교체 완료와 다르다. 해석·적용 실패는 미적용 사실과 실패 이유를 전한다. 명확한 위치 교환 지시를 다시 선택받지 않는다.
-경기가 종료됐고 승부차기가 남지 않았으면 마감한다.
-장면은 *행동*, @이름: 대사, @: 내레이션 형식을 쓴다.`;
 
 // ── 경기 도구 셋 — 코어를 부르는 손잡이 ──────────────────────
 
 export const TACTIC_ORDERS_TOOL = "tactic_orders";
-export const ADVANCE_MATCH_TOOL = "advance_match";
 export const FINALIZE_MATCH_TOOL = "finalize_match";
 
 const EmptySchema = z.object({});
 
 /**
- * 진행 도구의 인자 — **감독이 분을 말했을 때만** 실린다. 범위 판정은 코어가 하고
- * (`advanceSegment`) 여기 상한은 경기가 가질 수 있는 마지막 분이다 (match.md §2).
- */
-const AdvanceArgsSchema = z.object({
-  untilMinute: z
-    .number()
-    .int()
-    .min(1)
-    .max(PHASE_END.extra_second)
-    .optional()
-    .describe(
-      "감독이 「70분까지」처럼 분을 말했을 때만 — 그 분까지 굴리고 거기서 멈춘다. 지금 시각보다 뒤, 이 국면의 끝(45·90·105·120) 이하여야 한다",
-    ),
-});
-
-/**
  * 도구 정의 — 이름·설명·스키마. 핸들러는 턴마다 상태를 닫아 만든다(`buildMatchTools`).
- * 하네스가 고정층의 크기를 잴 때 이 셋을 읽는다.
+ * 하네스가 고정층의 크기를 잴 때 이 둘을 읽는다.
  */
 export const MATCH_TOOL_DEFINITIONS: ReadonlyArray<{
   name: string;
@@ -137,14 +112,8 @@ export const MATCH_TOOL_DEFINITIONS: ReadonlyArray<{
   {
     name: TACTIC_ORDERS_TOOL,
     description:
-      "감독의 지시를 판에 건다 — 교체·전술·자리와 역할·세트피스·대화, 그리고 말로 판을 움직이는 주문. 시계는 그대로다. 감독이 지시한 턴에 한 번 부르고, 분을 말한 지시는 그 분까지 굴린 뒤에 부른다. 결과로 무엇이 걸렸고 무엇이 반려됐는지와, 그 지시로 다시 계산한 판(패킷)이 온다 — 다음 구간은 이 판으로 구른다.",
+      "감독의 지시를 판에 건다 — 교체·전술·자리와 역할·세트피스·대화, 그리고 말로 판을 움직이는 주문. 감독이 지시한 턴에 한 번 부른다. 결과로 무엇이 걸렸고 무엇이 반려됐는지와 그 뒤의 장부가 온다 — 경기는 그 판으로 이어진다.",
     inputSchema: toToolSchema(EmptySchema),
-  },
-  {
-    name: ADVANCE_MATCH_TOOL,
-    description:
-      "경기를 다음 정지점(골·퇴장·부상·하프타임·종료)까지 굴린다. 감독이 분을 말했으면 `untilMinute`에 실어 그 분까지 굴리고, 그 자리에서 걸 지시는 같은 턴에 이어 건다. 지시가 마무리되고 경기가 이어질 자리에서 부른다. 굴리기 전에 상대 벤치도 판을 읽고 움직인다. 결과로 확정된 사건 목록과 구간 뒤의 장부·패킷이 온다.",
-    inputSchema: toToolSchema(AdvanceArgsSchema),
   },
   {
     name: FINALIZE_MATCH_TOOL,
@@ -160,21 +129,16 @@ export interface MatchToolContext {
   goals: GoalMark[];
   cards: CardMark[];
   /**
-   * 이번 턴 감독의 말 — `tactic_orders`가 해석기에 넘기는 원문이다 (agents.md §3). 턴
-   * 러너가 채팅에 넣은 그 문자열이고, 손잡이 턴에는 없다(그 턴에는 도구도 마감뿐이다).
+   * 이번 턴 감독의 말 — `tactic_orders`가 판독기에 넘기는 원문이다 (agents.md §3). 턴
+   * 러너가 채팅에 넣은 그 문자열이고, 손잡이 턴에는 없다.
    */
   said?: string;
-  /** 이번 턴 전술판이 이미 움직인 것 — 해석기가 되풀이를 가릴 근거다 (agents.md §3) */
+  /** 이번 턴 전술판이 이미 움직인 것 — 판독기가 되풀이를 가릴 근거다 (agents.md §3) */
   boardMoves?: readonly BoardMove[];
   /** 마감 에이전트를 부를 때 쓸 클라이언트 — 테스트가 갈아 끼운다 */
   finalizeLlm?: GameLLM;
   /** 마감이 끝난 뒤 장부의 마지막 분 — 장부가 지워진 뒤 화면의 시각 줄이 읽는다 */
   onFinalized?: (minute: number) => void;
-}
-
-/** 구간 뒤 장부 — 도구 결과의 꼬리. 굴리지 않은 턴은 패킷 없이 */
-function ledgerAfter(state: GameState, rolled: boolean): string {
-  return buildLedgerNote(state, { withPacket: rolled });
 }
 
 /** 판독 한 벌의 지문 — 포인트·시트가 이번 호출에서 움직였는가를 이것으로 잰다 */
@@ -195,7 +159,8 @@ async function runMatchReaderTool(
   said: string,
 ): Promise<{ ok: boolean; message: string }> {
   const specs = new Map(buildToolSpecs(state, ctx.calls).map((t) => [t.name, t] as const));
-  const before = readingPrint(state.pendingMatch?.points ?? [], state.pendingMatch?.sheet ?? []);
+  const live = state.pendingMatch?.live;
+  const before = readingPrint(live?.points ?? [], live?.sheet ?? []);
   const read = await runMatchReader(state, specs, {
     occasion: "orders",
     said,
@@ -203,7 +168,6 @@ async function runMatchReaderTool(
   });
   if (!read.ok) return { ok: false, message: read.message };
   const reading = read.reading;
-  // 시계를 미는 것은 `advance_match` 하나다 — 지시는 판만 바꾼다 (agents.md §3)
   const applied = applyTacticOrders(
     state,
     {
@@ -212,15 +176,8 @@ async function runMatchReaderTool(
       ...(reading.unresolved ? { unresolved: reading.unresolved } : {}),
     },
     ctx.calls,
-    ctx.goals,
-    ctx.cards,
   );
-  /**
-   * 판독을 앉히는 자리가 곧 패킷을 다시 세우는 자리다 — 다음 구간이 이 판으로 구르고,
-   * GM은 그것을 미리 읽는다. 판독이 앉지 못한 자리(경기가 없는 자리)만 직접 부른다.
-   */
   const stored = applyMatchReading(state, reading);
-  if (!stored) refreshPacket(state);
   const changed = readingPrint(stored?.points ?? [], stored?.sheet ?? []) !== before;
   const replies =
     applied.notes.length > 0
@@ -229,41 +186,67 @@ async function runMatchReaderTool(
   return {
     ok: hasOps(reading.ops) || changed,
     message: [
-      ...(applied.segment ? [applied.segment] : []),
       ...replies,
-      ledgerAfter(state, true),
+      ...(applied.shootout ? [applied.shootout] : []),
+      buildLedgerNote(state, { withState: true }),
     ].join("\n"),
   };
 }
 
 /**
- * 구간 뒤의 판독 — 구간이 구르고 장부가 선 뒤, GM이 중계를 쓰기 전에 돈다 (agents.md §3).
+ * **정지점 뒤의 판독** — 정지점(`STOP_EVENT_TYPES`)이 확정된 자리의
+ * 정지점 턴에서 매치 GM보다 먼저 돈다 (agents.md §3). 판이 사건으로 바뀌었으므로 GM이
+ * 중계하기 전에 포인트를 다시 쓴다.
  *
- * **여기서의 실패는 삼킨다** — 지난 포인트·시트가 그대로 다음 구간의 입력이고, 그
- * 사실은 기록에 남는다. 판독 하나 때문에 굴러간 구간이 되돌아가면 안 된다.
+ * **여기서의 실패는 삼킨다** — 지난 포인트·시트가 그대로 다음의 입력이고, 그 사실은
+ * 기록에 남는다. 판독 하나 때문에 확정된 구간이 되돌아가면 안 된다.
  */
-async function readAfterSegment(state: GameState, ctx: MatchToolContext): Promise<void> {
+export async function readMatchAfterStop(
+  state: GameState,
+  events: readonly MatchEvent[],
+  options: { llm?: GameLLM } = {},
+): Promise<void> {
   const pending = state.pendingMatch;
-  if (!pending || pending.ledger.phase === "finished") return;
-  const specs = new Map(buildToolSpecs(state, ctx.calls).map((t) => [t.name, t] as const));
+  if (!pending || pending.live.ledger.phase === "finished") return;
+  const occasion: ReadingOccasion | null = events.some((e) => BREAK_EVENT_TYPES.has(e.type))
+    ? "halftime"
+    : events.some((e) => STOP_EVENT_TYPES.has(e.type))
+      ? "event"
+      : null;
+  if (!occasion) return;
+  const specs = new Map(buildToolSpecs(state, []).map((t) => [t.name, t] as const));
   try {
-    const read = await runMatchReader(state, specs, { occasion: "segment" });
+    const read = await runMatchReader(state, specs, {
+      occasion,
+      events,
+      ...(options.llm ? { llm: options.llm } : {}),
+    });
     if (read.ok) applyMatchReading(state, read.reading);
   } catch (error) {
-    console.warn("[match-reader] 구간 뒤 판독을 건너뜁니다 — 지난 시트가 남습니다:", error);
+    console.warn("[match-reader] 정지점 뒤 판독을 건너뜁니다 — 지난 시트가 남습니다:", error);
   }
 }
 
+/** 이번 턴 층의 `<events>` — 지난 턴 뒤 장부에 앉은 사건을 대본으로 */
+export function eventsBlockOf(state: GameState, events: readonly MatchEvent[]): string {
+  const score = state.pendingMatch?.live.ledger.score ?? { home: 0, away: 0 };
+  return buildEventsBlock(
+    events,
+    (id) => playerName(state, id),
+    (side) => sideTeamName(state, side),
+    scoreBeforeEvents(score, events),
+  );
+}
+
 /**
- * 이 턴의 경기 도구 — 진행 턴은 셋, 손잡이 턴은 마감 하나(구간은 코어가 이미 굴렸다).
- * 킥오프 턴은 부르지 않는다.
+ * 이 턴의 경기 도구 — 진행 턴은 둘, 손잡이 턴은 마감 하나. 킥오프 턴은 부르지 않는다.
  */
 export function buildMatchTools(
   state: GameState,
   ctx: MatchToolContext,
   options: { operator?: boolean } = {},
 ): GameToolSpec[] {
-  const [orders, advance, finalize] = MATCH_TOOL_DEFINITIONS;
+  const [orders, finalize] = MATCH_TOOL_DEFINITIONS;
   const tools: GameToolSpec[] = [];
   if (!options.operator) {
     /**
@@ -271,55 +254,24 @@ export function buildMatchTools(
      * 같은 턴의 두 번째 호출은 같은 말을 다시 옮기므로 문이 닫는다.
      */
     const gate = ordersGate(ctx.said);
-    tools.push(
-      {
-        ...orders!,
-        handle: async () => {
-          const opened = gate(TACTIC_ORDERS_TOOL);
-          if (!opened.ok) return opened;
-          return runMatchReaderTool(state, ctx, opened.said);
-        },
+    tools.push({
+      ...orders!,
+      handle: async () => {
+        const opened = gate(TACTIC_ORDERS_TOOL);
+        if (!opened.ok) return opened;
+        return runMatchReaderTool(state, ctx, opened.said);
       },
-      {
-        ...advance!,
-        handle: async (input: unknown) => {
-          const pending = state.pendingMatch;
-          if (!pending) return { ok: false, message: "진행 중인 경기가 없습니다" };
-          if (pending.ledger.phase === "finished" && !awaitingShootout(state)) {
-            return { ok: false, message: "경기가 끝났습니다 — 마감할 차례입니다" };
-          }
-          const parsed = AdvanceArgsSchema.safeParse(input ?? {});
-          if (!parsed.success) {
-            return { ok: false, message: "untilMinute는 이 경기의 분입니다 — 없으면 비워 두세요" };
-          }
-          const applied = applyTacticOrders(state, { ops: {} }, ctx.calls, ctx.goals, ctx.cards, {
-            roll: true,
-            ...(parsed.data.untilMinute !== undefined
-              ? { untilMinute: parsed.data.untilMinute }
-              : {}),
-          });
-          // 판이 사건으로 바뀌었다 — 중계가 서기 전에 판독을 다시 쓴다 (agents.md §3)
-          if (applied.segment) await readAfterSegment(state, ctx);
-          return {
-            ok: true,
-            message: [
-              ...(applied.segment ? [applied.segment] : applied.notes.map((n) => `- ${n}`)),
-              ledgerAfter(state, applied.segment !== null),
-            ].join("\n"),
-          };
-        },
-      },
-    );
+    });
   }
   tools.push({
     ...finalize!,
     handle: async () => {
       const pending = state.pendingMatch;
       if (!pending) return { ok: false, message: "마감할 경기가 없습니다" };
-      if (pending.ledger.phase !== "finished" || awaitingShootout(state)) {
+      if (pending.live.ledger.phase !== "finished" || awaitingShootout(state)) {
         return { ok: false, message: "아직 경기가 끝나지 않았습니다" };
       }
-      const minute = pending.ledger.minute;
+      const minute = pending.live.ledger.minute;
       const outcome = await finalizeMatchTurn(state, ctx.calls, ctx.finalizeLlm);
       if (!outcome) return { ok: false, message: "마감할 경기가 없습니다" };
       ctx.onFinalized?.(minute);
@@ -334,7 +286,5 @@ export function buildMatchTools(
       };
     },
   });
-  return state.pendingMatch?.spatial
-    ? tools.filter((tool) => tool.name !== ADVANCE_MATCH_TOOL)
-    : tools;
+  return tools;
 }

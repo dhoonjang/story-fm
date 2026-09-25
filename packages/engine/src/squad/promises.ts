@@ -103,7 +103,7 @@ const PROSPECT_AGE = 21;
 /**
  * 계약에 지위가 없을 때 **지금 서열에서 파생하는 지위** (people.md §5-2).
  *
- * 파생은 **지금 실제로 서는 순서**라, 지위를 적지 않은 옛 세이브가 로드되며 없던
+ * 파생은 **지금 실제로 서는 순서**라, 지위를 적지 않은 계약(시드·AI 구단)이 없던
  * 불만을 만들어 내지 않는다 — 자기 자리에 맞는 지위를 받으므로 기대와 실제가
  * 처음부터 맞는다.
  */
@@ -162,7 +162,7 @@ function countsForMinutes(state: GameState, match: (typeof state.matches)[number
   return match.homeTeamId === state.userTeamId || match.awayTeamId === state.userTeamId;
 }
 
-/** 그 경기에 선발로 섰는가 — 선발 칸이 없는 옛 장부는 「뛴 사람 전부」로 떨어진다 */
+/** 그 경기에 선발로 섰는가 */
 function startedIn(
   state: GameState,
   match: (typeof state.matches)[number],
@@ -171,17 +171,12 @@ function startedIn(
   const result = match.result;
   if (!result) return false;
   const home = match.homeTeamId === state.userTeamId;
-  const starters = home ? result.homeStarters : result.awayStarters;
-  const list = starters ?? (home ? result.homeLineup : result.awayLineup) ?? [];
-  return list.includes(playerId);
+  return (home ? result.homeStarters : result.awayStarters).includes(playerId);
 }
 
 /**
- * 그 경기에 **그라운드를 밟았는가** — 선발과 교체 투입을 가리지 않는다.
- *
- * 「뛴 사람 전부」 칸(`homeLineup`)이 선발의 상위 집합이므로 그것을 먼저 읽고, 그
- * 칸이 없는 옛 장부에서만 선발 칸으로 떨어진다 — 그때는 출전이 선발과 같은 수가
- * 되어 카드가 오늘 이전과 같은 말을 한다.
+ * 그 경기에 **그라운드를 밟았는가** — 선발과 교체 투입을 가리지 않는다
+ * (「뛴 사람 전부」 칸 `homeLineup`).
  */
 function appearedIn(
   state: GameState,
@@ -191,9 +186,7 @@ function appearedIn(
   const result = match.result;
   if (!result) return false;
   const home = match.homeTeamId === state.userTeamId;
-  const lineup = home ? result.homeLineup : result.awayLineup;
-  const list = lineup ?? (home ? result.homeStarters : result.awayStarters) ?? [];
-  return list.includes(playerId);
+  return (home ? result.homeLineup : result.awayLineup).includes(playerId);
 }
 
 /**
@@ -268,7 +261,7 @@ export function startsInWindow(
 
 /** 열려 있는 약속 — 판정 전인 것만 */
 export function openPromises(state: GameState, playerId?: string): ManagerPromise[] {
-  return (state.promises ?? []).filter(
+  return state.promises.filter(
     (p) => p.status === "open" && (playerId === undefined || p.gamePlayerId === playerId),
   );
 }
@@ -436,7 +429,7 @@ export function openPromise(
     ...(number === undefined ? {} : { number }),
     ...(code === null ? {} : { position: code }),
   };
-  (state.promises ??= []).push(promise);
+  state.promises.push(promise);
   // 번호·자리는 갈래 이름에 담기지 않는다 — 서사에서 무엇이었는지가 사라지지 않게
   const what =
     PROMISE_KIND_KO[kind] +
@@ -520,7 +513,7 @@ export function tickPromises(state: GameState, digest: TickSink): void {
     const player = playerById(state, promise.gamePlayerId);
     if (!player || player.teamId !== state.userTeamId) {
       // 세계에서 사라진 상대의 약속은 판정하지 않고 걷는다 — 지킬 자리가 없다
-      state.promises = (state.promises ?? []).filter((p) => p.id !== promise.id);
+      state.promises = state.promises.filter((p) => p.id !== promise.id);
       continue;
     }
     const kept = verdictOf(state, promise, player);

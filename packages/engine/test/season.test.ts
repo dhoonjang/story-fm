@@ -5,6 +5,7 @@ import {
   GOALKEEPER_MIN,
   outcomeFor,
   RED_CARD_POINTS,
+  MANAGER_TERMS_BY_TIER,
   type ManagerOffer,
   type SeasonStat,
 } from "@story-fm/domain";
@@ -71,13 +72,13 @@ import {
   type ClubVisionItem,
   type GameState,
 } from "@story-fm/engine";
-import { createMiniGame, createTestGame, playFullSeason, simSquad } from "./helpers";
+import { createMiniGame, createTestGame, playFullSeason, simSquad, resultOf } from "./helpers";
 
 describe("순위표", () => {
   it("승점·득실차 정렬이 정확하다", () => {
     const state = createTestGame();
     for (const m of state.matches.filter((m) => m.round === 1)) {
-      m.result = { homeGoals: 2, awayGoals: 0, scorers: [] };
+      m.result = resultOf({ homeGoals: 2, awayGoals: 0 });
     }
     const standings = computeStandings(state);
     expect(standings[0]?.points).toBe(3);
@@ -92,8 +93,8 @@ describe("순위표", () => {
     const round1 = state.matches.filter((m) => m.competitionId === league && m.round === 1);
     expect(round1.length, "1라운드 리그 경기가 둘도 없다").toBeGreaterThan(1);
     // 두 홈팀이 같은 승점(3)·같은 득실(+2)로 끝나고 득점만 다르다
-    round1[0]!.result = { homeGoals: 3, awayGoals: 1, scorers: [] };
-    round1[1]!.result = { homeGoals: 2, awayGoals: 0, scorers: [] };
+    round1[0]!.result = resultOf({ homeGoals: 3, awayGoals: 1 });
+    round1[1]!.result = resultOf({ homeGoals: 2, awayGoals: 0 });
 
     const [first, second] = computeStandings(state);
     expect(first!.points).toBe(second!.points);
@@ -114,11 +115,11 @@ describe("순위표", () => {
 
     /** 리그 전 경기를 0-0으로 깔고, 준 짝만 홈 1-0으로 바꾼다 */
     function leagueOfDraws(wins: readonly (readonly [string, string])[]): void {
-      for (const m of fixtures) m.result = { homeGoals: 0, awayGoals: 0, scorers: [] };
+      for (const m of fixtures) m.result = resultOf({ homeGoals: 0, awayGoals: 0 });
       for (const [home, away] of wins) {
         const m = fixtures.find((m) => m.homeTeamId === home && m.awayTeamId === away);
         expect(m, `${home} 홈 ${away} 경기가 없다`).toBeDefined();
-        m!.result = { homeGoals: 1, awayGoals: 0, scorers: [] };
+        m!.result = resultOf({ homeGoals: 1, awayGoals: 0 });
       }
     }
 
@@ -170,7 +171,7 @@ describe("순위표", () => {
     const state = createTestGame();
     const friendlies = state.matches.filter(isFriendly);
     expect(friendlies.length).toBeGreaterThan(0);
-    for (const m of friendlies) m.result = { homeGoals: 5, awayGoals: 0, scorers: [] };
+    for (const m of friendlies) m.result = resultOf({ homeGoals: 5, awayGoals: 0 });
     const standings = computeStandings(state);
     expect(standings.every((r) => r.played === 0 && r.points === 0)).toBe(true);
     // 폼이 세는 경기는 표가 센 경기와 같다 — 친선 5-0이 "승"으로 남으면 안 된다
@@ -186,12 +187,12 @@ describe("순위표", () => {
     );
     const [a, b] = teamsOfLeagueIn(state, league);
     // 전 경기 0-0 → a는 홈에서만 이기고 b는 원정에서만 이긴다(겹치는 한 경기는 b의 것)
-    for (const m of fixtures) m.result = { homeGoals: 0, awayGoals: 0, scorers: [] };
+    for (const m of fixtures) m.result = resultOf({ homeGoals: 0, awayGoals: 0 });
     for (const m of fixtures.filter((m) => m.homeTeamId === a)) {
-      m.result = { homeGoals: 1, awayGoals: 0, scorers: [] };
+      m.result = resultOf({ homeGoals: 1, awayGoals: 0 });
     }
     for (const m of fixtures.filter((m) => m.awayTeamId === b)) {
-      m.result = { homeGoals: 0, awayGoals: 1, scorers: [] };
+      m.result = resultOf({ homeGoals: 0, awayGoals: 1 });
     }
     const table = computeStandings(state, league);
 
@@ -246,7 +247,7 @@ describe("대회 리더보드 (competition.md §2 「개인 순위」)", () => {
   for (const m of state.matches.filter(
     (m) => m.competitionId === league && m.season === state.season && m.round <= PLAYED,
   )) {
-    m.result = { homeGoals: 1, awayGoals: 1, scorers: [] };
+    m.result = resultOf({ homeGoals: 1, awayGoals: 1 });
   }
   const RATING_FLOOR = Math.ceil(PLAYED / RATING_APPS_DIVISOR);
 
@@ -270,7 +271,7 @@ describe("대회 리더보드 (competition.md §2 「개인 순위」)", () => {
   const CUP_PLAYED = CUP_LEAGUE_PHASE + 2;
   for (const [i, m] of ourCupMatches.slice(0, CUP_PLAYED).entries()) {
     if (i >= CUP_LEAGUE_PHASE) m.stage = i === CUP_PLAYED - 1 ? "final" : "sf";
-    m.result = { homeGoals: 1, awayGoals: 0, scorers: [] };
+    m.result = resultOf({ homeGoals: 1, awayGoals: 0 });
   }
   const CUP_FLOOR = Math.ceil(CUP_PLAYED / RATING_APPS_DIVISOR);
 
@@ -280,6 +281,7 @@ describe("대회 리더보드 (competition.md §2 「개인 순위」)", () => {
       state.seasonStats.push({
         season: state.season,
         teamId: state.userTeamId,
+        competitionId: league,
         apps: 0,
         goals: 0,
         ...row,
@@ -390,7 +392,7 @@ describe("지나간 시즌의 개인 순위 (competition.md §2 「개인 순위
   for (const m of state.matches.filter(
     (m) => m.competitionId === league && m.season === PAST && m.round <= PAST_PLAYED,
   )) {
-    m.result = { homeGoals: 1, awayGoals: 1, scorers: [] };
+    m.result = resultOf({ homeGoals: 1, awayGoals: 1 });
   }
   state.seasonStats = [
     {
@@ -731,7 +733,7 @@ describe("시즌 전환 (season.md §6)", () => {
     const state = createTestGame(5);
     const captain = userPlayers(state).find((p) => p.isCaptain)!;
     // 새 게임은 시드의 부주장을 세운다 (people.md §5-1) — 비운 자리를 재는 케이스다
-    for (const p of userPlayers(state)) p.isViceCaptain = undefined;
+    for (const p of userPlayers(state)) p.isViceCaptain = false;
     captain.birthdate = "1988-01-01"; // 강제 은퇴
     transitionSeason(state);
     const next = userPlayers(state).find((p) => p.isCaptain)!;
@@ -887,7 +889,7 @@ describe("18팀 리그의 시즌 리뷰", () => {
     for (const match of state.matches) {
       if (match.competitionId !== leagueId || (match.stage ?? "league") !== "league") continue;
       const [homeGoals, awayGoals] = score(match.homeTeamId, match.awayTeamId);
-      match.result = { homeGoals, awayGoals, scorers: [] };
+      match.result = resultOf({ homeGoals, awayGoals });
     }
   }
 
@@ -1013,10 +1015,11 @@ describe("18팀 리그의 시즌 리뷰", () => {
       stage: "final",
       round: 1,
       date: state.date,
+      time: "15:00",
       neutral: true,
       homeTeamId: champion,
       awayTeamId: loser,
-      result: { homeGoals: 2, awayGoals: 0, scorers: [] },
+      result: resultOf({ homeGoals: 2, awayGoals: 0 }),
     });
   }
 
@@ -1027,7 +1030,15 @@ describe("18팀 리그의 시즌 리뷰", () => {
     fabricateFinal(state, "dfbpokal", us, loser);
     fabricateFinal(state, "ucl", us, loser);
     // 경질 — 이 시즌은 감독의 것이 아니지만 옛 구단의 장부는 계속 돈다 (career.md §5.1)
-    state.dismissal = { on: state.date, season: state.season, teamId: us };
+    state.dismissal = {
+      on: state.date,
+      season: state.season,
+      teamId: us,
+      kind: "sacked",
+      tier: tierOfTeamIn(state, us),
+      target: 10,
+      expectationCode: "mid",
+    };
     const media = state.manager.reputation.media;
     const board = state.manager.reputation.board;
 
@@ -1178,7 +1189,6 @@ describe("풀 시즌 통합 — 리그 완주 후 커리어 기록·전환", () 
     if (record.position === 1) {
       const trophy = state.trophies.find((t) => t.season === 1);
       expect(trophy?.competitionId).toBe("epl");
-      expect(trophy?.competition, "장부에 표시 이름을 적었다").toBeUndefined();
       expect(trophy?.teamId).toBe("arsenal");
     }
   });
@@ -1203,7 +1213,7 @@ describe("시즌 시상 (season.md §6)", () => {
     id: string;
     birthdate?: string;
     teamId?: string;
-    /** 어느 대회의 행인가 — 생략하면 **대회 축이 없는 옛 세이브의 행**이다 */
+    /** 어느 대회의 행인가 — 생략하면 리그의 행이다 */
     competitionId?: string;
     apps: number;
     goals?: number;
@@ -1233,7 +1243,7 @@ describe("시즌 시상 (season.md §6)", () => {
         gamePlayerId: seed.id,
         season: 1,
         teamId: seed.teamId ?? TEAM_IDS[0]!,
-        ...(seed.competitionId === undefined ? {} : { competitionId: seed.competitionId }),
+        competitionId: seed.competitionId ?? LEAGUE,
         apps: seed.apps,
         goals: seed.goals ?? 0,
         assists: seed.assists ?? 0,
@@ -1244,11 +1254,13 @@ describe("시즌 시상 (season.md §6)", () => {
           id: "m1",
           season: 1,
           competitionId: LEAGUE,
+          stage: "league",
           round: 1,
           date: SEASON_END,
+          time: "15:00",
           homeTeamId: TEAM_IDS[0]!,
           awayTeamId: TEAM_IDS[1]!,
-          result: { homeGoals: 1, awayGoals: 0, scorers: [] },
+          result: resultOf({ homeGoals: 1, awayGoals: 0 }),
         },
         ...extraMatches,
       ],
@@ -1268,14 +1280,13 @@ describe("시즌 시상 (season.md §6)", () => {
       date: SEASON_END,
       homeTeamId: TEAM_IDS[0]!,
       awayTeamId: TEAM_IDS[1]!,
-      result: {
+      result: resultOf({
         homeGoals: 1,
         awayGoals: 0,
         scorers,
-        assists: [],
         ratings,
         homeLineup: Object.keys(ratings),
-      },
+      }),
     };
   }
 
@@ -1289,7 +1300,7 @@ describe("시즌 시상 (season.md §6)", () => {
     date: "2027-05-01",
     homeTeamId: TEAM_IDS[0]!,
     awayTeamId: TEAM_IDS[2]!,
-    result: { homeGoals: 2, awayGoals: 0, scorers: [], assists: [] },
+    result: resultOf({ homeGoals: 2, awayGoals: 0 }),
   };
 
   const winnerOf = (state: GameState, code: string) =>
@@ -1433,35 +1444,17 @@ describe("시즌 시상 (season.md §6)", () => {
     });
 
     /**
-     * 세이브 호환 — 옛 행은 `competitionId`가 없고 그 한 행이 **그 시즌 전 대회의
-     * 합계**다. 대회를 묻는 쪽은 그것을 그 팀이 속한 리그의 행으로 읽고(옛 규칙
-     * 그대로), 컵의 상은 그런 행을 한 줄도 세지 않는다 (game-state.md §3.4).
+     * 합계는 **저장하지 않고 더한다** (game-state.md §5 파생) — 대회 행이 여럿이어도
+     * 시즌 합계는 그 전부의 합이다. 이 불변식이 깨지면 선수 카드의 "출전 N"이
+     * 컵을 치른 시즌에만 조용히 줄어든다.
      */
-    it("옛 세이브의 축 없는 행은 리그의 것으로 읽히고 컵의 상은 서지 않는다", () => {
-      const state = awardState(
-        [{ id: "p-old", apps: 30, goals: 18, ratingSum: 210 }],
-        [cupSemi, cupFinal({})],
-      );
-      const awards = seasonAwards(state);
-      expect(awards.find((a) => a.code === "top-scorer" && a.competitionId === LEAGUE)?.goals).toBe(
-        18,
-      );
-      expect(awards.some((a) => a.competitionId === CUP)).toBe(false);
-    });
-
-    /**
-     * 합계는 **저장하지 않고 더한다** (game-state.md §5 파생) — 옛 행과 새 대회 행이
-     * 한 세이브에 섞여 있어도 시즌 합계는 그 전부의 합이다. 이 불변식이 깨지면
-     * 선수 카드의 "출전 N"이 옛 세이브를 이어 연 시즌에만 조용히 줄어든다.
-     */
-    it("시즌 합계는 옛 행과 대회 행을 함께 더한 값이다", () => {
+    it("시즌 합계는 대회 행을 함께 더한 값이다", () => {
       const state = awardState([
-        { id: "p-mix", apps: 7, goals: 4 }, // 축 없는 옛 행
         { id: "p-mix", competitionId: LEAGUE, apps: 10, goals: 5 },
         { id: "p-mix", competitionId: CUP, apps: 3, goals: 2, assists: 1 },
       ]);
-      expect(seasonStatOf(state, "p-mix")).toMatchObject({ apps: 20, goals: 11, assists: 1 });
-      // 대회 하나를 물으면 그 행 하나다 — 옛 행이 대신 걸리지 않는다
+      expect(seasonStatOf(state, "p-mix")).toMatchObject({ apps: 13, goals: 7, assists: 1 });
+      // 대회 하나를 물으면 그 행 하나다
       expect(seasonStatOf(state, "p-mix", { competition: CUP })).toMatchObject({
         apps: 3,
         goals: 2,
@@ -1724,6 +1717,7 @@ describe("클럽 비전 — 구단주 원형이 거는 다년 계획 (career.md 
       gamePlayerId,
       season: state.season,
       teamId: us,
+      competitionId: leagueOfTeamIn(state, us),
       apps: 10,
       goals: 0,
       minutes: 900,
@@ -1808,7 +1802,15 @@ describe("클럽 비전 — 구단주 원형이 거는 다년 계획 (career.md 
     const next = teamsOfLeagueIn(state, "bundesliga").find(
       (id) => id !== state.userTeamId && generateOwner(state.seed, id).archetype !== OLD_ARCHETYPE,
     )!;
-    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    state.dismissal = {
+      on: state.date,
+      season: state.season,
+      teamId: state.userTeamId,
+      kind: "sacked",
+      tier: tierOfTeamIn(state, state.userTeamId),
+      target: 10,
+      expectationCode: "mid",
+    };
     const offer: ManagerOffer = {
       id: "offer-vision",
       teamId: next,
@@ -1817,6 +1819,10 @@ describe("클럽 비전 — 구단주 원형이 거는 다년 계획 (career.md 
       tier: tierOfTeamIn(state, next),
       target: 10,
       expectationCode: "mid",
+      salary: MANAGER_TERMS_BY_TIER[3].salary,
+      years: 2,
+      budgetPledge: MANAGER_TERMS_BY_TIER[3].budgetPledge,
+      via: "vacancy",
       status: "open",
     };
     state.managerOffers = [offer];

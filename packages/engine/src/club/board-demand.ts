@@ -3,6 +3,7 @@ import type {
   BoardDemandCause,
   BoardDemandKind,
   GamePlayer,
+  OwnerArchetypeLabel,
   PressFact,
   TransferWindow,
   TickSink,
@@ -23,7 +24,7 @@ import {
 import { addDays } from "../core/dates";
 import { academyPlayerIdsOf } from "./vision";
 import { windowOpenForTeam } from "../market/market";
-import { ownerOf } from "../world/persona";
+import { ownerArchetypeOf, ownerOf } from "../world/persona";
 import {
   PROMISE_MIN_MATCHES,
   PROMISE_WINDOW_MATCHES,
@@ -102,10 +103,8 @@ export const BOARD_DEMAND = {
  * 원형 → **흥정의 여유** (career.md §5.2 「흥정」). 계약의 길이(§5.4)와 다년 계획의
  * 길이(§5)를 정하는 그 인내가 여기서도 폭을 정한다 — 큰 그림의 사람은 기다려 주고,
  * 분기로 셈하는 사람은 기다려 주지 않는다.
- *
- * 표 밖의 카드는 아무것도 내주지 않는다 — 조건부 요청을 걸지 않는 것과 같은 규약이다.
  */
-export const OWNER_SLACK: Readonly<Record<string, number>> = {
+export const OWNER_SLACK: Readonly<Record<OwnerArchetypeLabel, number>> = {
   국부펀드형: 1,
   "지역 유지형": 0.8,
   축구광형: 0.6,
@@ -134,15 +133,14 @@ export type SeasonDemandLens =
   | "top-wage";
 
 /**
- * 원형 → 요청의 결 (people.md §2의 구단주 6종). **여섯 원형 밖의 카드는 조건부
- * 요청을 걸지 않는다** — 옛 세이브의 커스텀 구단주에게 없는 성격을 지어내지 않는다.
+ * 원형 → 요청의 결 (people.md §2의 구단주 6종).
  *
  * `window`는 창이 열린 날의 조건이고 `season`은 창 밖에서 그가 지목하는 사람이다.
  * 국부펀드형만 여름 창에 한정하는 것은 인내의 표현이다 — 큰 그림의 사람은 겨울
  * 땜질을 조르지 않는다.
  */
 export const DEMAND_OF_ARCHETYPE: Record<
-  string,
+  OwnerArchetypeLabel,
   { window: BoardDemandKind; summerOnly?: true; season: SeasonDemandLens }
 > = {
   산업가형: { window: "wage-freeze", season: "top-wage" },
@@ -164,7 +162,7 @@ export const DEMAND_OF_ARCHETYPE: Record<
  *
  * 여섯 원형 밖의 카드는 여기서도 아무 요청을 걸지 않는다 — 위 표와 같은 규약이다.
  */
-export const FINANCE_DEMAND_OF_ARCHETYPE: Record<string, BoardDemandKind> = {
+export const FINANCE_DEMAND_OF_ARCHETYPE: Record<OwnerArchetypeLabel, BoardDemandKind> = {
   산업가형: "sell-player",
   투자자형: "sell-player",
   축구광형: "raise-funds",
@@ -181,7 +179,7 @@ export const FINANCE_DEMAND_OF_ARCHETYPE: Record<string, BoardDemandKind> = {
  * 불이행을 찾으면 세 시즌 전의 한 번이 대치를 영원히 절정에 묶어 둔다.
  */
 export function lastJudgedDemand(state: GameState): BoardDemand | null {
-  const judged = (state.boardDemands ?? []).filter((d) => d.status !== "open");
+  const judged = state.boardDemands.filter((d) => d.status !== "open");
   return judged[judged.length - 1] ?? null;
 }
 
@@ -192,7 +190,7 @@ export function lastJudgedDemand(state: GameState): BoardDemand | null {
  * 정산한 뒤라야, 다음 창이 열린 날 새 요청이 그 자리를 이어받는다.
  */
 export function tickBoardDemands(state: GameState, digest: TickSink): void {
-  const demands = (state.boardDemands ??= []);
+  const demands = state.boardDemands;
   const open = demands.find((d) => d.status === "open");
   if (open) judgeDemand(state, open, digest);
   if (!demands.some((d) => d.status === "open")) issueDemand(state, demands, digest);
@@ -227,7 +225,7 @@ function windowDemand(
 ): BoardDemand | null {
   // 창마다 최대 하나 — 일찍 닫힌 요청이 같은 창에 다시 서지 않는다
   if (demands.some((d) => d.windowId === window.id)) return null;
-  const archetype = ownerOf(state).archetype;
+  const archetype = ownerArchetypeOf(ownerOf(state)).label;
   return financeDemand(state, window, archetype) ?? archetypeDemand(state, window, archetype);
 }
 
@@ -241,8 +239,7 @@ function windowDemand(
 function seasonDemand(state: GameState, demands: BoardDemand[]): BoardDemand | null {
   const slot = seasonSlotOf(state);
   if (demands.some((d) => d.windowId === slot.id)) return null;
-  const rule = DEMAND_OF_ARCHETYPE[ownerOf(state).archetype];
-  if (!rule) return null;
+  const rule = DEMAND_OF_ARCHETYPE[ownerArchetypeOf(ownerOf(state)).label];
   const named = underusedBy(state, rule.season);
   if (!named) return null;
   return {
@@ -324,10 +321,9 @@ function feePaidFor(state: GameState, playerId: string): number {
 function archetypeDemand(
   state: GameState,
   window: TransferWindow,
-  archetype: string,
+  archetype: OwnerArchetypeLabel,
 ): BoardDemand | null {
   const rule = DEMAND_OF_ARCHETYPE[archetype];
-  if (!rule) return null;
   if (rule.summerOnly && window.kind !== "summer") return null;
   return buildDemand(state, window, rule.window);
 }
@@ -341,10 +337,9 @@ function archetypeDemand(
 function financeDemand(
   state: GameState,
   window: TransferWindow,
-  archetype: string,
+  archetype: OwnerArchetypeLabel,
 ): BoardDemand | null {
   const kind = FINANCE_DEMAND_OF_ARCHETYPE[archetype];
-  if (!kind) return null;
   const cause = demandCause(state);
   if (!cause) return null;
   const target = fundsTargetOf(state);
@@ -597,10 +592,7 @@ export function counterDemand(
   const demand = openBoardDemand(state);
   if (!demand) return { ok: false, message: "지금 되물을 구단주 요청이 없습니다" };
   if (demand.counteredOn) return { ok: false, message: "이미 한 차례 되물었습니다" };
-  const slack = OWNER_SLACK[ownerOf(state).archetype];
-  if (slack === undefined) {
-    return { ok: false, message: "이 구단주는 조건을 두고 흥정하지 않습니다" };
-  }
+  const slack = OWNER_SLACK[ownerArchetypeOf(ownerOf(state)).label];
   const label = BOARD_DEMAND_LABEL[demand.kind];
   const levers = DEMAND_LEVERS[demand.kind];
   const wantsExtend = (ask.extendDays ?? 0) > 0;

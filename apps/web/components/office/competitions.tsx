@@ -107,7 +107,7 @@ function StandingsTable({ competition }: { competition: Competition }) {
   const zones = split === "all" ? competition.zones : [];
   /**
    * 개막 전 언론이 매긴 예상 순위 (docs/simulation/season.md §2). 예상이 없는 대회·
-   * 시즌(컵·대항전·옛 세이브)에는 **열 자체가 서지 않는다** — 전 행이 빈 열은 표를
+   * 시즌(컵·대항전)에는 **열 자체가 서지 않는다** — 전 행이 빈 열은 표를
    * 넓히기만 한다.
    */
   const predicted = rows.some((row) => row.predicted !== undefined);
@@ -646,30 +646,20 @@ function awardFigure(a: SeasonAwardRow): string {
 /**
  * 그 시즌의 최종 순위표 — **읽는 값이다.** 누를 수 있는 것은 위의 시즌 칩뿐이라
  * 표는 호버도 커서도 갖지 않는다.
- *
- * ⚠️ **이관된 행은 순서와 팀만 안다** (docs/data/game-state.md §3.3). 승점 칸에 0을
- * 채우면 없는 사실이 생기므로, 한 행도 성적을 모르면 숫자 칸 자체를 세우지 않고
- * 섞여 있으면 그 행만 비운다.
  */
 function SeasonTable({ table }: { table: PastSeason["table"] }) {
-  // 승점·득실을 아는 행이 하나라도 있어야 숫자 칸이 뜻을 갖는다
-  const detailed = table.some((r) => r.record !== null);
   return (
     <table data-testid="season-table">
       <thead>
         <tr>
           <th>#</th>
           <th>팀</th>
-          {detailed && (
-            <>
-              <th>경기</th>
-              <th>승</th>
-              <th>무</th>
-              <th>패</th>
-              <th>득실</th>
-              <th>승점</th>
-            </>
-          )}
+          <th>경기</th>
+          <th>승</th>
+          <th>무</th>
+          <th>패</th>
+          <th>득실</th>
+          <th>승점</th>
         </tr>
       </thead>
       <tbody>
@@ -677,19 +667,14 @@ function SeasonTable({ table }: { table: PastSeason["table"] }) {
           <tr key={row.teamId} className={row.ours ? "me" : ""}>
             <td>{row.position}</td>
             <td className="team-cell">{row.name}</td>
-            {detailed && row.record && (
-              <>
-                <td>{row.record.played}</td>
-                <td>{row.record.wins}</td>
-                <td>{row.record.draws}</td>
-                <td>{row.record.losses}</td>
-                <td>{row.record.goalDiff > 0 ? `+${row.record.goalDiff}` : row.record.goalDiff}</td>
-                <td>
-                  <b>{row.record.points}</b>
-                </td>
-              </>
-            )}
-            {detailed && !row.record && <td className="season-unknown" colSpan={6} />}
+            <td>{row.record.played}</td>
+            <td>{row.record.wins}</td>
+            <td>{row.record.draws}</td>
+            <td>{row.record.losses}</td>
+            <td>{row.record.goalDiff > 0 ? `+${row.record.goalDiff}` : row.record.goalDiff}</td>
+            <td>
+              <b>{row.record.points}</b>
+            </td>
           </tr>
         ))}
       </tbody>

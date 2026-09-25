@@ -76,8 +76,6 @@ export type SpeechStyle = z.infer<typeof SpeechStyleSchema>;
  * 아니라 고용하는 쪽이다. 선수의 계약(`Contract`)과 다른 표인 이유는 자리가 다르기
  * 때문이다: 스태프는 등록 명단에도 이적 시장에도 서지 않고, 장부에서 `staff_wages`로
  * 선다 (→ ../../../docs/simulation/finance.md §6.4-1).
- *
- * 옛 세이브엔 없다 (optional — 로드가 채운다, 세이브 버전 유지).
  */
 export const EmploymentSchema = z.object({
   /** 어느 구단의 사람인가 — 감독이 이직해도 이 사람은 옛 구단에 남는다 */
@@ -135,13 +133,12 @@ export const PersonaSchema = z.object({
    * ⚠️ **나열된 것만 본다.** 성만 쓴 "홀란드"를 같은 사람으로 보는 부분 일치는 오탐을
    * 만든다는 `normalizeSpeaker`의 원칙이 여기도 그대로다 — 별칭이 필요하면 여기 적는다.
    * 담기는 것은 **전체 이름과 성**이고 given은 빠진다 (people.md §6 — 이름 풀이 좁아
-   * 같은 given을 가진 셋이 한 턴 상한을 먹는다). 옛 세이브엔 없다 (optional) — 로드가 채운다.
+   * 같은 given을 가진 셋이 한 턴 상한을 먹는다).
    */
-  keywords: z.array(z.string().min(1)).optional(),
+  keywords: z.array(z.string().min(1)),
   /**
    * 소속 매체 — **기자에게만 있다.** 같은 질문도 어디 소속이냐가 결을 정한다:
    * 지역지는 구단의 내일을, 전국지는 리그 판도를, 타블로이드는 라커룸을 묻는다.
-   * 옛 세이브엔 없다 (optional).
    */
   outlet: z.string().min(1).optional(),
   /**
@@ -153,7 +150,7 @@ export const PersonaSchema = z.object({
   real: z.boolean().optional(),
   /**
    * 구단이 이 사람에게 급여를 주는가 — 자리·부임일·계약 (people.md §2-2).
-   * 수석코치·코치·의료진·스카우트에게만 있다. 옛 세이브엔 없다 (optional).
+   * 수석코치·코치·의료진·스카우트에게만 있다 — 구단주·기자·감독 풀의 사람은 없다.
    */
   employment: EmploymentSchema.optional(),
   /** 생성 재현용 — 같은 세이브는 같은 사람을 만난다 */
@@ -199,7 +196,7 @@ export function personaRoleLabel(role: PersonaRole): string | undefined {
  *
  * ⚠️ **사람됨은 줄이 들지 않는다.** 이름·역할·자리·원형만 있으면 원형 표에서 성격·동기·
  * 말투가 결정적으로 파생하므로(`staffPersonaOf`), 카드를 줄에 넣으면 같은 사실이 두 곳에
- * 산다. 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+ * 산다.
  */
 export const StaffPoolEntrySchema = z.object({
   /** 이름이 곧 `characterId`다 (people.md §1) */
@@ -257,10 +254,9 @@ export const CharacterInjectionSchema = z.object({
   depth: CharacterDepthSchema,
   /**
    * 그때 카드에 실린 기억 줄 수 — 기억은 이력의 카드에 서지 않으므로(§6), 늘어난
-   * 것을 재주입으로 나르려면 그때의 수가 있어야 한다. **없으면 재주입하지 않는다** —
-   * 이 자리가 생기기 전의 기록을 0으로 읽으면 옛 세이브의 카드가 한꺼번에 다시 선다.
+   * 것을 재주입으로 나르려면 그때의 수가 있어야 한다.
    */
-  memories: z.number().int().min(0).optional(),
+  memories: z.number().int().min(0),
 });
 export type CharacterInjection = z.infer<typeof CharacterInjectionSchema>;
 
@@ -361,7 +357,7 @@ export function stanceOfTier(tier: RelationTier): PersonaRelation["stance"] | nu
  * 아무도 손대지 않은 쌍의 값은 첫인상이 결정적으로 답하므로 적어 둘 이유가 없다.
  *
  * ⚠️ **점수가 아니다.** 사건마다 정해진 수를 걷어 낸 자리라 옮기는 쪽은 이력 압축
- * 하나뿐이고, 옛 세이브의 `score`는 로드가 등급으로 접는다(`migrateRelationTiers`).
+ * 하나뿐이다.
  */
 export const RelationSchema = z.object({
   /** 쌍의 앞 열쇠 — `a < b`(코드포인트)로 정규화한다. 로케일에 기대면 세이브가 갈린다 */
@@ -438,7 +434,7 @@ export interface CharacterEntry {
   relations?: PersonaRelation[];
 }
 
-/** 태그를 이름으로 옮기기 전 세이브를 알아보는 표식이기도 하다 */
+/** 수석코치의 직책 라벨 — 고용 정보의 `title`이 이 값이다 (people.md §2-2) */
 export const HEAD_COACH_ROLE_LABEL = PERSONA_ROLE_LABEL.head_coach!;
 
 /**
@@ -501,6 +497,26 @@ export function normalizeSpeaker(name: string): string {
 // ── 구단주 원형 — 잉여의 얼마를 스쿼드에 되돌리는가 ────────────────
 
 /**
+ * 구단주 원형의 **라벨** — 세이브에 남는 것이 이 값이다(`Persona.archetype`). 사람됨
+ * (성격·말투)은 엔진의 원형 표(`world/persona.ts`)가 갖고, 원형에 걸린 표는 전부 이
+ * 여섯으로 갈린다.
+ */
+export const OWNER_ARCHETYPE_LABELS = [
+  "산업가형",
+  "투자자형",
+  "축구광형",
+  "국부펀드형",
+  "지역 유지형",
+  "흥행가형",
+] as const;
+export type OwnerArchetypeLabel = (typeof OWNER_ARCHETYPE_LABELS)[number];
+
+/** 구단주 원형 라벨인가 */
+export function isOwnerArchetypeLabel(label: string): label is OwnerArchetypeLabel {
+  return (OWNER_ARCHETYPE_LABELS as readonly string[]).includes(label);
+}
+
+/**
  * 구단주 원형 → **재투자 몫** — 지난 시즌 현금 잉여의 얼마가 다음 시즌 이적 예산으로
  * 돌아오는가 (people.md §2 · simulation/finance.md §9.1).
  *
@@ -513,10 +529,9 @@ export function normalizeSpeaker(name: string): string {
  * 통째로 예산이 되어 이월 상한(§9.1)이 하는 일이 없어진다.
  *
  * 키가 아니라 **라벨**로 적는다 — 세이브에 남는 것이 라벨이고(`Persona.archetype`),
- * `DEMAND_OF_ARCHETYPE`·`CONDITION_OF_ARCHETYPE`이 이미 같은 규약이다. 표에 없는
- * 라벨은 기본값으로 떨어진다.
+ * `DEMAND_OF_ARCHETYPE`·`CONDITION_OF_ARCHETYPE`이 이미 같은 규약이다.
  */
-export const REINVEST_SHARE_OF_ARCHETYPE: Record<string, number> = {
+export const REINVEST_SHARE_OF_ARCHETYPE: Record<OwnerArchetypeLabel, number> = {
   /** "예산은 문제가 아닙니다" — 쌓아 둘 이유가 없는 사람 */
   국부펀드형: 0.8,
   /** 화제를 사는 사람 — 남은 돈은 다음 스타의 값이다 */
@@ -539,10 +554,9 @@ export const REINVEST_SHARE_OF_ARCHETYPE: Record<string, number> = {
  */
 export const REINVEST_SHARE_DEFAULT = 0.5;
 
-/** 이 구단주가 되돌리는 몫 — 카드가 없거나 표 밖의 라벨이면 기본값 */
-export function reinvestShareOf(archetype?: string): number {
-  if (archetype === undefined) return REINVEST_SHARE_DEFAULT;
-  return REINVEST_SHARE_OF_ARCHETYPE[archetype] ?? REINVEST_SHARE_DEFAULT;
+/** 이 구단주가 되돌리는 몫 — 카드가 없으면 기본값 */
+export function reinvestShareOf(archetype?: OwnerArchetypeLabel): number {
+  return archetype === undefined ? REINVEST_SHARE_DEFAULT : REINVEST_SHARE_OF_ARCHETYPE[archetype];
 }
 
 // ── 에이전트 원형 — 협상 테이블 건너편의 세 사람 ────────────────
@@ -625,12 +639,12 @@ export const PLAYER_ARCHETYPE_LABEL: Record<PlayerArchetypeKey, string> = {
  * 원형이 **상태 전이에 거는 계수 다섯** (people.md §6 · 요구사항 3).
  *
  * 페르소나는 시뮬 숫자에 직접 손대지 않는다 — 여기 있는 다섯이 닿는 곳은 불만이 서는
- * 날 · 정착 목표 · 성장 확률 · 선수 관문의 점수까지이고, **전력 패킷과 xG는 원형을
+ * 날 · 정착 목표 · 성장 확률 · 선수 관문의 점수까지이고, **경기 시뮬과 xG는 원형을
  * 읽지 않는다.** 경기 결과가 사람됨을 읽기 시작하면 같은 스쿼드가 같은 전술로 다른
  * 점수를 내고, 그 차이를 감독이 되짚을 자리가 없다.
  *
  * 히든 능력치가 아니다 — 선수에 새 축을 심는 대신 이미 있는 원형을 읽는다
- * (player.md §1). 파생이므로 옛 세이브도 로드만으로 같은 계수를 얻는다.
+ * (player.md §1). 파생이라 세이브에 적히지 않는다.
  */
 export interface PlayerArchetypeTraits {
   /**

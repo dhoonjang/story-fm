@@ -89,8 +89,8 @@ export default tseslint.config(
                 "**/lib/turn-runner",
                 "./store",
                 "./turn-runner",
-                "**/live-match-runtime",
-                "./live-match-runtime",
+                "**/live-match-server",
+                "./live-match-server",
               ],
               allowTypeImports: true,
               message:
@@ -111,10 +111,67 @@ export default tseslint.config(
       "apps/web/app/api/**/*.ts",
       "apps/web/lib/store.ts",
       "apps/web/lib/turn-runner.ts",
-      "apps/web/lib/live-match-runtime.ts",
+      "apps/web/lib/live-match-server.ts",
       "apps/web/test/**/*.ts",
       "apps/web/next.config.ts",
     ],
     rules: { "@typescript-eslint/no-restricted-imports": "off" },
+  },
+  /**
+   * 실시간 경기 엔진(`packages/sim/src/live`)은 브라우저가 굴린 결과를 서버가 **같은 코드로
+   * 다시 굴려** 검증한다 — 두 쪽이 비트까지 같아야 한다 (docs/simulation/live-match.md §8.2).
+   * 초월 `Math.*`는 ECMAScript가 결과를 정하지 않아 JS 엔진마다 마지막 비트가 다를 수 있고,
+   * `**`는 `Math.pow`와 같은 구현이다. 그 자리는 `live/dmath.ts`의 결정적 구현이 맡는다.
+   * `Math.sqrt`·`floor`·`abs`·`min`·`max`·`sign`·`fround`·`imul`은 IEEE가 결과를 정하므로 남긴다.
+   */
+  {
+    files: ["packages/sim/src/live/**/*.ts"],
+    rules: {
+      "no-restricted-properties": [
+        "error",
+        ...[
+          "exp",
+          "expm1",
+          "log",
+          "log1p",
+          "log2",
+          "log10",
+          "sin",
+          "cos",
+          "tan",
+          "asin",
+          "acos",
+          "atan",
+          "atan2",
+          "sinh",
+          "cosh",
+          "tanh",
+          "asinh",
+          "acosh",
+          "atanh",
+          "pow",
+          "hypot",
+          "cbrt",
+          "random",
+        ].map((property) => ({
+          object: "Math",
+          property,
+          message: `Math.${property}은 JS 엔진마다 마지막 비트가 다를 수 있다 — 실시간 경기는 서버가 같은 코드로 다시 굴려 검증하므로 packages/sim/src/live/dmath.ts의 결정적 구현(dexp·dlog·datan2·dtanh·dhypot…)을 쓴다 (docs/simulation/live-match.md §8.2).`,
+        })),
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "BinaryExpression[operator='**']",
+          message:
+            "`**`는 Math.pow와 같은 구현이라 JS 엔진마다 결과가 다를 수 있다 — 정수 거듭제곱은 곱셈으로 풀고, 그 밖은 packages/sim/src/live/dmath.ts(dexp·dlog)로 쓴다 (docs/simulation/live-match.md §8.2).",
+        },
+        {
+          selector: "AssignmentExpression[operator='**=']",
+          message:
+            "`**=`는 Math.pow와 같은 구현이라 JS 엔진마다 결과가 다를 수 있다 — 정수 거듭제곱은 곱셈으로 풀고, 그 밖은 packages/sim/src/live/dmath.ts(dexp·dlog)로 쓴다 (docs/simulation/live-match.md §8.2).",
+        },
+      ],
+    },
   },
 );

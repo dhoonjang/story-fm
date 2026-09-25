@@ -2,7 +2,6 @@ import type { LeaderboardKey } from "@story-fm/domain";
 import { LEADERBOARD_KEYS, ageOf, disciplinePoints, seasonRating } from "@story-fm/domain";
 import { computeStandings, countsInStandings } from "./season";
 import { leagueTableOf } from "./records";
-import { leagueOfTeamIn } from "./promotion";
 import { teamShortNameIn, type GameState } from "../core/state";
 
 /**
@@ -131,13 +130,6 @@ export function pickWinner(
  *
  * 행이 대회 축을 가지므로(→ docs/data/game-state.md §3.4) 리그의 표는 리그 경기만,
  * 컵의 표는 그 컵의 경기만 센다. 시즌 중 이적하면 행이 팀별로도 갈려 여기서 합쳐진다.
- *
- * ⚠️ **옛 세이브의 축 없는 행은 「그 팀이 속한 리그」의 것으로 읽는다** — 그 한 행이
- * 그 시즌 전 대회의 합계이고, 옛 규칙이 정확히 그것이었다(그 리그 소속 선수의 시즌
- * 최다 득점 — season.md §6). 컵 id로는 어느 팀의 리그와도 같지 않으므로 컵의 표는
- * 옛 세이브에서 비어 있다: 없는 사실을 지어내는 대신 그 상이 없는 해로 남는다.
- * 그 읽기는 **이번 시즌에만** 걸린다 — 세이브가 아는 소속은 지금의 것이고, 지나간
- * 시즌의 소속은 그 사이 승강으로 바뀌어 있다.
  */
 export function talliesOf(
   state: GameState,
@@ -151,12 +143,7 @@ export function talliesOf(
   const appsByTeam = new Map<string, Map<string, number>>();
 
   for (const stat of state.seasonStats) {
-    if (stat.season !== season) continue;
-    if (stat.competitionId === undefined) {
-      if (season !== state.season) continue;
-      // 승강은 아직 적용되기 전이다 — 소속의 원본은 카탈로그가 아니라 세이브다 (§8 불변식)
-      if (leagueOfTeamIn(state, stat.teamId) !== competitionId) continue;
-    } else if (stat.competitionId !== competitionId) continue;
+    if (stat.season !== season || stat.competitionId !== competitionId) continue;
     // 은퇴·이적으로 명단에서 빠진 선수는 이름을 채울 수 없다. 결산은 전환보다
     // 앞이라 실제로는 다 있지만, 없으면 후보에서 뺀다 (빈 이름의 상은 사실이 아니다)
     const player = players.get(stat.gamePlayerId);
@@ -353,8 +340,7 @@ function matchesPlayedIn(
   const table = leagueTableOf(state, season, competitionId);
   if (table === null) return null;
   const rows = new Map<string, number>();
-  // 이관된 옛 행은 순위만 안다 — 없는 수를 0으로 세우면 문턱이 통째로 사라진다
-  for (const row of table) if (row.record) rows.set(row.teamId, row.record.played);
+  for (const row of table) rows.set(row.teamId, row.record.played);
   return rows.size > 0 ? rows : null;
 }
 
@@ -364,7 +350,7 @@ function matchesPlayedIn(
  * 대회별 팀 통계 한 줄 — 순위표가 센 경기와 **같은 집합**이다.
  *
  * 개인 순위와 달리 대항전 리그 페이즈에도 선다: 슛·xG는 경기 결과(`MatchResult`)에
- * 대회별로 남아 있기 때문이다. 옛 경기에 없는 칸은 0으로 접힌다.
+ * 대회별로 남아 있기 때문이다.
  */
 export interface TeamStatRow {
   teamId: string;
@@ -394,8 +380,8 @@ export function teamStatsOf(state: GameState, competitionId: string): TeamStatRo
   for (const match of state.matches) {
     const r = match.result;
     if (!r || !countsInStandings(match, state.season, competitionId)) continue;
-    bump(match.homeTeamId, r.awayGoals, r.homeShots ?? 0, r.homeXg ?? 0);
-    bump(match.awayTeamId, r.homeGoals, r.awayShots ?? 0, r.awayXg ?? 0);
+    bump(match.homeTeamId, r.awayGoals, r.homeShots, r.homeXg);
+    bump(match.awayTeamId, r.homeGoals, r.awayShots, r.awayXg);
   }
   return standings.map((row) => {
     const seen = extra.get(row.teamId);

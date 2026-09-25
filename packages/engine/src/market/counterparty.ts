@@ -706,7 +706,7 @@ const COUNTERPARTY_VERDICT_KO: Record<NegotiationVerdict, string> = {
 function offerMoneyLine(negotiation: Negotiation, offer: Negotiation["rounds"][number]): string {
   if (negotiation.kind === "release") return `정산금 ${formatMoney(offer.fee)}`;
   // 사전 계약도 선수 본인과의 흥정이라 값은 주급이다 — 이적료가 0인 갈래다
-  if (isPlayerDeal(negotiation.kind) || negotiation.precontract === true)
+  if (isPlayerDeal(negotiation.kind) || negotiation.precontract)
     return `주급 ${formatMoney(offer.weeklyWage)}`;
   if (negotiation.kind === "loan" || negotiation.kind === "loan_out")
     return `임대료 ${formatMoney(offer.fee)}`;
@@ -755,7 +755,7 @@ export function settleArrivedResponses(state: GameState, digest: TickSink): void
      * **상대가 선수 본인인 갈래에는 파는 구단도 이적료도 없다** (season.md §5).
      * 구단 칸과 이적료를 그대로 끼우면 재계약이 「에서 … 오퍼(£0k)」로 선다.
      */
-    const fromPlayer = isPlayerDeal(negotiation.kind) || negotiation.precontract === true;
+    const fromPlayer = isPlayerDeal(negotiation.kind) || negotiation.precontract;
     const kindKo = negotiationKindKo(negotiation);
     const head = fromPlayer
       ? `${player.name} ${kindKo} 제안`
@@ -820,7 +820,7 @@ export function tableVoicesOf(state: GameState, negotiation: Negotiation): Count
   const player = playerById(state, negotiation.gamePlayerId);
   if (!player) return [];
   const kind = negotiation.kind;
-  const precontract = negotiation.precontract === true;
+  const precontract = negotiation.precontract;
 
   /** 돈의 축이 있는가 — 재계약과 사전 계약에는 없다 (`counterBoundsOf`의 `fee`) */
   const hasMoneyAxis = kind !== "renew" && !precontract;
@@ -945,8 +945,8 @@ function dossierOf(state: GameState, negotiation: Negotiation, player: GamePlaye
         ? ` · 재계약 기대 주급 ${formatMoney(renewalExpectation(state, player))} · 기대 연수 ${renewalYearsExpectation(state, player)}년` +
           ` · 지금 계약 지위 ${SQUAD_STATUS_KO[squadStatusOf(state, player)]}`
         : ""),
-    ...((negotiation.pitched?.length ?? 0) > 0
-      ? [`[사실로 확인된 이야기] ${negotiation.pitched!.map((k) => PITCH_CLAIM_KO[k]).join(" · ")}`]
+    ...(negotiation.pitched.length > 0
+      ? [`[사실로 확인된 이야기] ${negotiation.pitched.map((k) => PITCH_CLAIM_KO[k]).join(" · ")}`]
       : []),
     /**
      * **경쟁 관심** — 이 테이블 밖에서 같은 선수를 두고 움직이는 구단

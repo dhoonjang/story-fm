@@ -218,7 +218,7 @@ describe("카탈로그 — 실제 세계에서", () => {
     const started = startMatch(game);
     expect(started.ok, started.message).toBe(true);
     const match = game.pendingMatch!;
-    const ours = userSide(game) === "home" ? match.ledger.home : match.ledger.away;
+    const ours = userSide(game) === "home" ? match.live.ledger.home : match.live.ledger.away;
     const roster = userPlayers(game);
     const byId = (id: string): GamePlayer | undefined => roster.find((p) => p.id === id);
     const pickable = (ids: readonly string[]): GamePlayer[] =>
@@ -231,7 +231,7 @@ describe("카탈로그 — 실제 세계에서", () => {
 
     const res = substitutePlayer(game, { out: calledBy(out), in: calledBy(incoming) });
     expect(res.ok, res.message).toBe(true);
-    const logged = match.ledger.events.filter((e) => e.type === "substitution").at(-1)!;
+    const logged = match.live.ledger.events.filter((e) => e.type === "substitution").at(-1)!;
     expect(logged.actors).toEqual([out.id, incoming.id]);
   });
 

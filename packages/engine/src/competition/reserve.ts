@@ -60,6 +60,7 @@ export function buildReserveFixtures(
       id: `m-reserve-${season}-${i + 1}-${userTeamId}`,
       season,
       competitionId: reserveCompetitionId(league),
+      stage: "league",
       round: i + 1,
       date: addDays(firstMonday, RESERVE_ROUND_INTERVAL_DAYS * i),
       time: RESERVE_KICKOFF,

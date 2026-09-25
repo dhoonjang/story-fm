@@ -20,11 +20,11 @@ import type { SeasonAward, SeasonHistory, SeasonTableRow, Trophy } from "@story-
 
 /** 지나간 시즌들 — 최근이 앞이다 */
 export function pastSeasonsOf(state: GameState): SeasonHistory[] {
-  return [...(state.history ?? [])].sort((a, b) => b.season - a.season);
+  return [...state.history].sort((a, b) => b.season - a.season);
 }
 
 export function seasonHistoryOf(state: GameState, season: number): SeasonHistory | null {
-  return (state.history ?? []).find((h) => h.season === season) ?? null;
+  return state.history.find((h) => h.season === season) ?? null;
 }
 
 /** 그 시즌 그 리그의 최종 순위표 — 없으면 null (그해 리그전을 돌지 않았다) */
@@ -152,20 +152,14 @@ export interface ClubRecords {
   seasons: number;
 }
 
-/**
- * 그 구단의 역대 기록 — 원장을 한 번씩만 훑는다.
- *
- * ⚠️ **승점·득실을 모르는 행은 세지 않는다.** 옛 세이브에서 이관된 순위표는 팀 id
- * 순서뿐이라(game-state.md §3.3) 0승 0패로 세면 그 시즌이 "구단 최저 승점"이 된다.
- * 순위만은 그 행도 안다 — 최고 순위는 함께 센다.
- */
+/** 그 구단의 역대 기록 — 원장을 한 번씩만 훑는다 */
 export function clubRecordsOf(state: GameState, teamId: string): ClubRecords {
   let bestPoints: ClubSeasonBest | null = null;
   let mostGoals: ClubSeasonBest | null = null;
   let bestPosition: ClubSeasonBest | null = null;
   let seasons = 0;
 
-  for (const season of state.history ?? []) {
+  for (const season of state.history) {
     let counted = false;
     for (const league of season.leagues) {
       const index = league.rows.findIndex((r) => r.teamId === teamId);
@@ -177,7 +171,6 @@ export function clubRecordsOf(state: GameState, teamId: string): ClubRecords {
         bestPosition = { ...at, value: position };
       }
       const record = league.rows[index]!.record;
-      if (!record) continue;
       if (bestPoints === null || record.points > bestPoints.value) {
         bestPoints = { ...at, value: record.points };
       }
@@ -201,8 +194,6 @@ export function clubRecordsOf(state: GameState, teamId: string): ClubRecords {
   for (const trophy of state.trophies) {
     if (trophy.teamId !== teamId) continue;
     const id = trophy.competitionId;
-    // 옛 세이브의 표시 이름만 든 줄은 대회를 가리지 못한다 — 역대 표에 세우지 않는다
-    if (id === undefined) continue;
     const row = titles.get(id) ?? { competitionId: id, count: 0, seeded: 0, seasons: [] };
     row.count += 1;
     row.seasons.push(trophy.season);
@@ -218,7 +209,7 @@ export function clubRecordsOf(state: GameState, teamId: string): ClubRecords {
     bestPoints,
     mostGoals,
     bestPosition,
-    awards: (state.awards ?? [])
+    awards: state.awards
       .filter((a) => a.teamId === teamId)
       .sort((a, b) => b.season - a.season || a.code.localeCompare(b.code)),
     seasons,

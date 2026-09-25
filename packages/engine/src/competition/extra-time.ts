@@ -6,7 +6,7 @@ import {
   naturalPositionOf,
   positionGroupOfPlayer,
 } from "@story-fm/domain";
-import { conditionDrain, drainVariance } from "@story-fm/sim";
+import { conditionAfterLoad, expectedLoadOf } from "@story-fm/sim";
 import { EXTRA_TIME_MINUTES, simulateExtraTime } from "../match/quick-sim";
 import { recordCard } from "../match/discipline";
 import { derbyForMatch } from "../club/derby";
@@ -33,14 +33,14 @@ import {
  * 그 판정은 이 파일의 `needsExtraTime` 하나가 갖는다: 대회마다 따로 판단하면
  * 어느 하나만 고쳐도 두 대회의 규칙이 조용히 갈린다.
  *
- * **감독의 경기는 여기를 지나지 않는다.** 구간 시뮬이 120분까지 가므로
- * (`match-engine.ts`의 `extra_first`·`extra_second`) 연장의 교체·카드·부상이
- * 다 장부에 남고, 그 경기는 `MatchResult.aet` 표식이 붙어 이 함수를 통과한다 —
- * 그게 **이중 적용의 문지기**다. 나머지 2,000여 경기는 여기서 한 번에 굴러간다:
- * 우리 컵 8강도 남의 8강도 같은 규칙을 지난다.
+ * **감독의 경기는 여기를 지나지 않는다.** 실시간 경기가 120분까지 가므로
+ * (`sim/live`의 `extra_first`·`extra_second`) 연장의 교체·카드·부상이 다 장부에 남고,
+ * 그 경기는 `MatchResult.aet` 표식이 붙어 이 함수를 통과한다 — 그게 **이중 적용의
+ * 문지기**다. 나머지 2,000여 경기는 여기서 한 번에 굴러간다: 우리 컵 8강도 남의 8강도
+ * 같은 규칙을 지난다.
  */
 
-/** 한 팀이 그라운드에 세우는 인원 — 옛 세이브의 명단을 자를 때만 쓴다 */
+/** 한 팀이 그라운드에 세우는 인원 — 종료 시점 온필드가 없는 결과에서 명단을 자를 때 */
 const EXTRA_TIME_XI = 11;
 
 /**
@@ -77,7 +77,7 @@ function tieLegs(state: GameState, match: MatchRecord): MatchRecord[] {
  * (GM 스냅샷 `<now>`의 교체 한도 줄 — llm/agents.md §6).
  */
 export function canReachExtraTime(state: GameState, match: MatchRecord): boolean {
-  if ((match.stage ?? "league") === "league") return false;
+  if (match.stage === "league") return false;
   const legs = tieLegs(state, match);
   return legs.length === 0 || legs[legs.length - 1]!.id === match.id;
 }
@@ -110,6 +110,23 @@ export function needsExtraTime(
     match,
   );
   return carry.home + now.home === carry.away + now.away;
+}
+
+/**
+ * **실시간 경기가 드는 연장 규칙** — 90분 뒤 (스코어 + 이 값)이 같으면 연장이다.
+ * 단판은 `{0,0}`, 2차전은 앞 차전의 합계(이 경기의 홈·원정 기준), 리그·친선은 `null`.
+ * 판정은 `needsExtraTime`과 같은 자리에서 나온다 — 시뮬은 대회를 모르고 이 답만 든다.
+ */
+export function extraTimeRuleOf(
+  state: GameState,
+  match: MatchRecord,
+): { home: number; away: number } | null {
+  if (!canReachExtraTime(state, match)) return null;
+  const legs = tieLegs(state, match);
+  return tieAggregate(
+    legs.filter((m) => m.id !== match.id),
+    match,
+  );
 }
 
 /**
@@ -171,8 +188,8 @@ export function tieAggregate(
  *
  * 명단(`homeLineup`)은 **뛴 사람 전부**라 앞 열한 명을 자르면 교체로 나간 선수와
  * 퇴장당한 선수가 연장을 뛴다. 그래서 두 시뮬 다 종료 시점 온필드를 따로 남기고
- * (`homeOnPitch`) 여기가 그것을 읽는다 — 그게 없는 옛 세이브에서만 명단 앞 열한
- * 명으로, 명단조차 없으면 1군 상위로 물러선다 (match.md §7).
+ * (`homeOnPitch`) 여기가 그것을 읽는다. 결과도 장부도 없으면(아직 치르지 않은 경기)
+ * 1군 상위로 물러선다 (match.md §7).
  */
 export function finishingXi(
   state: GameState,
@@ -190,11 +207,10 @@ export function finishingXi(
    * 온필드가 곧 경기를 끝낸 열한 명이고, 마감이 `homeOnPitch`로 적는 것도 이 목록이다.
    */
   const live =
-    state.pendingMatch?.matchId === match.id ? state.pendingMatch.ledger[side].onPitch : null;
-  const onPitch = live ?? (side === "home" ? result?.homeOnPitch : result?.awayOnPitch);
-  const lineup = side === "home" ? result?.homeLineup : result?.awayLineup;
+    state.pendingMatch?.matchId === match.id ? state.pendingMatch.live.ledger[side].onPitch : null;
+  const onPitch = live ?? (side === "home" ? result?.homeOnPitch : result?.awayOnPitch) ?? [];
   /** 같은 id가 두 번 실린 장부가 있다 — 한 사람이 연달아 차지 않도록 접는다 */
-  const unique = [...new Set(onPitch ?? (lineup ?? []).slice(0, EXTRA_TIME_XI))];
+  const unique = [...new Set(onPitch)];
   const listed = unique
     .map((id) => playerById(state, id))
     .filter((p): p is GamePlayer => p !== null && p.teamId === teamId);
@@ -214,21 +230,17 @@ function appendGoals(
     goalOrigins: ShotOrigin[];
   },
 ): void {
-  const count = result.scorers.length;
-  const assists = result.assists ?? new Array<string>(count).fill("");
-  const minutes = result.goalMinutes ?? new Array<number>(count).fill(0);
-  const origins = result.goalOrigins ?? new Array<ShotOrigin>(count).fill("open");
   result.scorers = [...result.scorers, ...added.scorers];
-  result.assists = [...assists, ...added.assists];
-  result.goalMinutes = [...minutes, ...added.goalMinutes];
-  result.goalOrigins = [...origins, ...added.goalOrigins];
+  result.assists = [...result.assists, ...added.assists];
+  result.goalMinutes = [...result.goalMinutes, ...added.goalMinutes];
+  result.goalOrigins = [...result.goalOrigins, ...added.goalOrigins];
 }
 
 /**
  * 연장 30분을 치른다 — 이미 치른 경기면 아무 일도 하지 않는다(`aet`).
  *
  * 대진 승자를 묻는 자리에서 호출되므로 **멱등**이어야 한다: 화면이 브래킷을
- * 그릴 때마다 연장이 다시 굴러가면 스코어가 계속 자란다. 감독이 구간 시뮬로
+ * 그릴 때마다 연장이 다시 굴러가면 스코어가 계속 자란다. 감독이 실시간 경기로
  * 직접 치른 연장에도 `aet`가 붙어 있으므로 여기서 두 번 굴러가지 않는다.
  *
  * @returns 이번 호출에서 연장을 치렀으면 true
@@ -252,7 +264,7 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
   /**
    * **전력 모델은 90분과 같은 원본에서 선다** — 전술판의 자리·좌표·역할, 팀 전술,
    * 개인 적응도, 감독의 전술 눈금까지 `simSquadFor`가 한 벌로 세운다. 팀 id와
-   * 선수 목록만 넘기면 패킷이 자연 포지션·기본 전술·적응도 60·감독 65로 서서
+   * 선수 목록만 넘기면 입력이 자연 포지션·기본 전술·적응도 60·감독 65로 서서
    * 연장에서만 약팀이 살아나거나 죽는다 (match.md §7).
    */
   const extraDerby = derbyForMatch(decider);
@@ -280,12 +292,12 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
   result.aet = true;
   result.homeGoals += extra.homeGoals;
   result.awayGoals += extra.awayGoals;
-  result.homeShots = (result.homeShots ?? 0) + extra.homeShots;
-  result.awayShots = (result.awayShots ?? 0) + extra.awayShots;
-  result.homeXg = (result.homeXg ?? 0) + extra.homeXg;
-  result.awayXg = (result.awayXg ?? 0) + extra.awayXg;
-  result.homeExpectedGoals = (result.homeExpectedGoals ?? 0) + extra.homeExpectedGoals;
-  result.awayExpectedGoals = (result.awayExpectedGoals ?? 0) + extra.awayExpectedGoals;
+  result.homeShots += extra.homeShots;
+  result.awayShots += extra.awayShots;
+  result.homeXg += extra.homeXg;
+  result.awayXg += extra.awayXg;
+  result.homeExpectedGoals += extra.homeExpectedGoals;
+  result.awayExpectedGoals += extra.awayExpectedGoals;
   appendGoals(result, extra);
 
   /**
@@ -315,7 +327,7 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
 
   /**
    * 연장의 실점은 90분에 적힌 클린시트를 **무른다** — 마감이 90분 스코어로 세고
-   * 연장은 그 뒤에 붙기 때문이다 (match.md §6). 구간 시뮬은 120분을 한 장부로
+   * 연장은 그 뒤에 붙기 때문이다 (match.md §6). 실시간 경기는 120분을 한 장부로
    * 마감하므로 애초에 이 자리가 없다.
    *
    * 무르는 대상은 **선발로 나와 90분을 지킨 골키퍼**뿐이다 — 그 사람만 문턱
@@ -326,7 +338,7 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
     const concededIn90 = side === "home" ? goals90.away : goals90.home;
     const concededInEt = side === "home" ? extra.awayGoals : extra.homeGoals;
     if (concededIn90 > 0 || concededInEt === 0) continue;
-    const started = new Set((side === "home" ? result.homeStarters : result.awayStarters) ?? []);
+    const started = new Set(side === "home" ? result.homeStarters : result.awayStarters);
     const keeper = xi[side].find((p) => positionGroupOfPlayer(p) === "GK" && started.has(p.id));
     if (!keeper) continue;
     const teamId = side === "home" ? decider.homeTeamId : decider.awayTeamId;
@@ -351,16 +363,11 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
   }
   /**
    * 연장 퇴장자는 승부차기를 차지 못한다 — 종료 시점 온필드(`homeOnPitch`)가
-   * 승부차기 명단의 원본이므로(§7) 여기서 빼야 퇴장당한 발이 페널티를 차지 않는다.
-   * 그 칸이 없는 옛 세이브에서는 연장을 뛴 명단(xi)이 곧 종료 시점 온필드다.
+   * 승부차기 명단의 원본이므로(§8.6) 여기서 빼야 퇴장당한 발이 페널티를 차지 않는다.
    */
   if (sentOffInEt.size > 0) {
-    result.homeOnPitch = (result.homeOnPitch ?? xi.home.map((p) => p.id)).filter(
-      (id) => !sentOffInEt.has(id),
-    );
-    result.awayOnPitch = (result.awayOnPitch ?? xi.away.map((p) => p.id)).filter(
-      (id) => !sentOffInEt.has(id),
-    );
+    result.homeOnPitch = result.homeOnPitch.filter((id) => !sentOffInEt.has(id));
+    result.awayOnPitch = result.awayOnPitch.filter((id) => !sentOffInEt.has(id));
   }
 
   // 연장의 부상 — 심각도·기간은 90분과 같은 공식(`openInjuryFor`)으로 굴린다
@@ -372,18 +379,22 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
     openInjuryFor(state, player, "match", injuryRng);
   }
 
-  // 30분치 피로 — 자리·전술·지구력은 90분과 같은 함수가 정한다. 퇴장자는 그 분까지만
+  // 30분치 부하 — 자리·전술·지구력은 90분과 같은 함수가 정한다 (match.md §6). 퇴장자는 그 분까지만
   for (const side of ["home", "away"] as const) {
     const teamId = side === "home" ? decider.homeTeamId : decider.awayTeamId;
     const spec = tacticsOf(state, teamId).spec;
     const slotOf = new Map(assignmentsOf(state, teamId).map((a) => [a.playerId, a.position]));
+    const possession = result.possession[side];
     for (const player of xi[side]) {
       const position = slotOf.get(player.id) ?? naturalPositionOf(player).position;
-      const today = drainVariance(`${state.seed}:${decider.id}:${player.id}`);
       const off = sentOffInEt.get(player.id);
       const minutes = off === undefined ? EXTRA_TIME_MINUTES : Math.max(0, off - 90);
       player.state.condition = clampCondition(
-        player.state.condition - conditionDrain(player, position, spec, minutes, today),
+        conditionAfterLoad(
+          player.state.condition,
+          expectedLoadOf(position, spec, minutes, possession),
+          player.attributes.stamina,
+        ),
       );
     }
   }

@@ -173,7 +173,9 @@ function matchSquadIds(state: GameState): ReadonlySet<string> | undefined {
   const pending = state.pendingMatch;
   if (!pending) return undefined;
   const side =
-    pending.packet.home.teamId === state.userTeamId ? pending.ledger.home : pending.ledger.away;
+    pending.live.setup.sides.home.teamId === state.userTeamId
+      ? pending.live.ledger.home
+      : pending.live.ledger.away;
   return new Set([...side.onPitch, ...side.bench]);
 }
 
@@ -275,7 +277,7 @@ function heardReceptivity(state: GameState, heard: readonly GamePlayer[]): Recep
 function creditTalkMorale(state: GameState, player: GamePlayer, delta: number): number {
   if (delta === 0) return 0;
   const from = addDays(state.date, -(TALK_WINDOW_DAYS - 1));
-  const log = (player.state.talkMorale ?? []).filter((row) => row.on >= from);
+  const log = player.state.talkMorale.filter((row) => row.on >= from);
   const today = log.find((row) => row.on === state.date);
   const week = log.reduce((sum, row) => sum + row.sum, 0);
   const dayRoom = (delta > 0 ? TALK_DAILY_BOUND : -TALK_DAILY_BOUND) - (today?.sum ?? 0);
@@ -387,7 +389,7 @@ export function applyTalk(state: GameState, input: TalkInput): CommandResult {
     if (!pending) {
       return { ok: false, message: "외침은 경기 중 정지점에서만 나옵니다" };
     }
-    const used = pending.shouts ?? 0;
+    const used = pending.shouts;
     if (used >= SHOUT_PER_MATCH) {
       return {
         ok: true,
@@ -430,7 +432,7 @@ export function applyTalk(state: GameState, input: TalkInput): CommandResult {
    * 중 하나를 먹으면 감독이 명단에 없는 이름을 부른 대가로 남은 외침을 잃는다.
    */
   if (shout && state.pendingMatch) {
-    state.pendingMatch.shouts = (state.pendingMatch.shouts ?? 0) + 1;
+    state.pendingMatch.shouts += 1;
   }
   /** 이름을 불렀는가 — 불만 해소·약속·정착 앵커가 갈리는 자리다 */
   const alone = heard.length === 1;
@@ -484,7 +486,7 @@ export function applyTalk(state: GameState, input: TalkInput): CommandResult {
     : [];
   if (relieved.length > 0) {
     const ids = new Set(relieved.map((p) => p.id));
-    state.issues = state.issues.filter((i) => !ids.has(i.gamePlayerId ?? ""));
+    state.issues = state.issues.filter((i) => !ids.has(i.gamePlayerId));
   }
 
   /**
@@ -791,7 +793,7 @@ export function recordIncident(
   pushNarrative(state, summary, salience, "incident");
   // 당사자에게 걸린 시작 사건은 그 사건이 닫는다 (career.md §1)
   touchOpenings(state, { subjectIds: parties.map((p) => p.id) });
-  (state.incidents ??= []).push({
+  state.incidents.push({
     date: state.date,
     kind: input.kind,
     playerIds: parties.map((p) => p.id),

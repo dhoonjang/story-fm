@@ -168,18 +168,19 @@ describe("경기가 기록으로 남는다", () => {
     if (!pending) throw new Error("경기 없음");
 
     const side = userSide(state);
-    const onPitch = side === "home" ? pending.ledger.home.onPitch : pending.ledger.away.onPitch;
+    const onPitch =
+      side === "home" ? pending.live.ledger.home.onPitch : pending.live.ledger.away.onPitch;
     const [scorer, assister] = onPitch.filter((id) => userPlayers(state).some((p) => p.id === id));
     if (!scorer || !assister) throw new Error("선수 부족");
 
-    pending.ledger.events.push({
+    pending.live.ledger.events.push({
       minute: 30,
       type: "goal",
       team: side,
       actors: [scorer, assister],
       causes: [],
     });
-    pending.ledger.score[side] += 1;
+    pending.live.ledger.score[side] += 1;
     finalizeMatch(state);
 
     const of = (id: string) => state.seasonStats.find((s) => s.gamePlayerId === id);
@@ -252,13 +253,13 @@ describe("평점 브리프 — LLM 채점의 입력 (코어가 만든다)", () =
     const pending = state.pendingMatch;
     if (!pending) throw new Error("경기 없음");
     const side = userSide(state);
-    const mine = side === "home" ? pending.ledger.home : pending.ledger.away;
+    const mine = side === "home" ? pending.live.ledger.home : pending.live.ledger.away;
     const out = mine.onPitch[5];
     const into = mine.bench[0];
     if (!out || !into) throw new Error("교체 대상 없음");
 
     mine.onPitch = mine.onPitch.filter((id) => id !== out).concat(into);
-    pending.ledger.events.push({
+    pending.live.ledger.events.push({
       minute: 60,
       type: "substitution",
       team: side,

@@ -106,7 +106,7 @@ export function reserveAppsBoost(apps: number): number {
  * 같은 문을 지나므로 어느 쪽이 먼저 와도 명단은 같다.
  */
 export function pruneDevelopmentFocus(state: GameState): string[] {
-  const focus = (state.developmentFocus ?? []).filter((id) => {
+  const focus = state.developmentFocus.filter((id) => {
     const player = state.players.find((p) => p.id === id);
     return (
       player !== undefined &&
@@ -143,7 +143,7 @@ function appsInLastMonth(
     if (!match.result) continue;
     if (match.date < from || match.date >= state.date) continue;
     if (!counts(match)) continue;
-    for (const id of [...(match.result.homeLineup ?? []), ...(match.result.awayLineup ?? [])]) {
+    for (const id of [...match.result.homeLineup, ...match.result.awayLineup]) {
       if (keep && !keep(id)) continue;
       tally.set(id, (tally.get(id) ?? 0) + 1);
     }

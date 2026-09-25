@@ -414,7 +414,7 @@ export function previewLine(text: string, max = 90): string {
 /**
  * 턴 기록의 사실 한 줄 — 갈래마다 **먼저 읽히는 값**을 앞에 세운다 (models.md §5-3).
  *
- * 명령은 이름과 성패, 구간은 분과 정지 사유, 해석은 낸 명령의 이름 — 나머지는 JSON
+ * 명령은 이름과 성패, 해석은 낸 명령의 이름 — 나머지는 JSON
  * 첫 줄이다. 모양은 엔진의 `JournalEntry`가 정하지만 화면은 타입을 들지 않고 칸을
  * 더듬는다: 갈래가 하나 늘어도 이 줄이 막히지 않게.
  */
@@ -439,12 +439,6 @@ export function factPeek(kind: string, data: unknown, max = 110): string {
     case "command":
       line = `${text("name")} ${value.ok === true ? "✓" : "✗"} ${text("message")}`;
       break;
-    case "match.segment": {
-      const from = value.from as { minute?: number } | undefined;
-      const to = value.to as { minute?: number } | undefined;
-      line = `${from?.minute ?? "?"}′ → ${to?.minute ?? "?"}′ · ${text("stop")} · 사건 ${count("events")}`;
-      break;
-    }
     case "orders.intent": {
       const ops = value.ops as Record<string, unknown[]> | undefined;
       const named = ops ? Object.keys(ops).filter((k) => (ops[k]?.length ?? 0) > 0) : [];
@@ -452,7 +446,7 @@ export function factPeek(kind: string, data: unknown, max = 110): string {
       break;
     }
     case "orders.applied":
-      line = `${value.rolled === true ? "굴렀다" : "굴리지 않았다"} · 되돌아간 말 ${count("notes")}`;
+      line = `되돌아간 말 ${count("notes")}${value.shapeChanged === true ? " · 모양이 바뀌었다" : ""}`;
       break;
     case "tick.day":
       line = `${text("date")} · 사건 ${count("events")}${text("stopped") ? ` · ${text("stopped")}` : ""}`;

@@ -82,7 +82,13 @@ describe("징계 — BOOKING + SUSPENSION", () => {
    * 이벤트는 반려되는데 카드만 통과한다.
    */
   it("카드의 분은 MATCH_MINUTE_MAX까지만 받는다", () => {
-    const card = { gamePlayerId: "p1", matchId: "m1", season: 1, card: "yellow" as const };
+    const card = {
+      gamePlayerId: "p1",
+      matchId: "m1",
+      season: 1,
+      competitionId: "epl",
+      card: "yellow" as const,
+    };
     expect(BookingSchema.safeParse({ ...card, minute: MATCH_MINUTE_MAX }).success).toBe(true);
     expect(BookingSchema.safeParse({ ...card, minute: MATCH_MINUTE_MAX + 1 }).success).toBe(false);
     expect(BookingSchema.safeParse({ ...card, minute: -1 }).success).toBe(false);
@@ -97,6 +103,7 @@ describe("징계 — BOOKING + SUSPENSION", () => {
         gamePlayerId: player.id,
         matchId: `m-fake-${i}`,
         season: state.season,
+        competitionId: "epl",
         card: "yellow",
         minute: 30,
       });
@@ -107,6 +114,7 @@ describe("징계 — BOOKING + SUSPENSION", () => {
       gamePlayerId: player.id,
       matchId: "m-old",
       season: state.season - 1,
+      competitionId: "epl",
       card: "yellow",
       minute: 10,
     });
@@ -120,6 +128,8 @@ describe("징계 — BOOKING + SUSPENSION", () => {
       id: "sus-1",
       gamePlayerId: player.id,
       cause: "red",
+      competitionId: "epl",
+      scope: "jurisdiction",
       issuedOn: state.date,
       lengthMatches: 1,
       served: 0,
@@ -188,6 +198,7 @@ describe("징계 — BOOKING + SUSPENSION", () => {
       competitionId,
       stage,
       round: 1,
+      time: "15:00",
       date: state.date,
       homeTeamId: state.userTeamId,
       awayTeamId: "hull",
@@ -263,6 +274,7 @@ describe("징계 — BOOKING + SUSPENSION", () => {
       season: state.season,
       competitionId,
       stage: "r32",
+      time: "15:00",
       round: 1,
       date: state.date,
       homeTeamId: state.userTeamId,
@@ -288,29 +300,6 @@ describe("징계 — BOOKING + SUSPENSION", () => {
     expect(isSuspendedFor(state, spanish.id, "laliga")).toBe(false);
   });
 
-  /**
-   * **옛 세이브의 정지는 전 대회다** — 대회를 적기 전에 걸린 줄이라 어느 경기든
-   * 막고 어느 경기로든 소화된다 (SAVE_VERSION 6 유지).
-   */
-  it("대회 없는 옛 정지는 어느 대회에도 걸리고 어느 대회로도 소화된다", () => {
-    const state = createTestGame();
-    const player = userPlayers(state)[7]!;
-    state.suspensions.push({
-      id: "sus-legacy",
-      gamePlayerId: player.id,
-      cause: "yellows",
-      issuedOn: state.date,
-      lengthMatches: 1,
-      served: 0,
-      status: "active",
-    });
-    for (const competitionId of ["epl", "facup", "ucl", null]) {
-      expect(isSuspendedFor(state, player.id, competitionId)).toBe(true);
-    }
-    serveSuspensions(state, [player.id], "facup");
-    expect(state.suspensions.find((s) => s.id === "sus-legacy")?.status).toBe("done");
-  });
-
   it("정지 선수는 라인업 배치에서 자동 대체된다", () => {
     const state = createTestGame();
     // 정지는 대회 경기로만 소화된다 — 친선을 지나 리그 개막에서 잰다
@@ -321,6 +310,8 @@ describe("징계 — BOOKING + SUSPENSION", () => {
       id: "sus-2",
       gamePlayerId: starter.playerId,
       cause: "yellows",
+      competitionId: "epl",
+      scope: "competition",
       issuedOn: state.date,
       lengthMatches: 1,
       served: 0,
@@ -389,6 +380,7 @@ describe("시즌 기록 적재", () => {
     gamePlayerId: "p1",
     season: 2025,
     teamId: "t1",
+    competitionId: "epl",
     apps: 0,
     goals: 0,
   });
@@ -436,6 +428,7 @@ describe("시즌 기록 적재", () => {
 describe("통산 기록 · 마일스톤", () => {
   const stat = (over: Partial<SeasonStat> & Pick<SeasonStat, "season" | "teamId">): SeasonStat => ({
     gamePlayerId: "p1",
+    competitionId: "epl",
     apps: 0,
     goals: 0,
     ...over,
@@ -542,7 +535,7 @@ describe("구단 역대 기록 · 기록 경신", () => {
   const LEAGUE = "epl";
 
   /** 그 시즌 그 리그의 표 한 장 — 앞이 1위다. `points`가 없으면 **이관된 행**이다 */
-  function table(season: number, order: readonly string[], points?: (teamId: string) => number) {
+  function table(season: number, order: readonly string[], points: (teamId: string) => number) {
     return {
       season,
       leagues: [
@@ -550,19 +543,15 @@ describe("구단 역대 기록 · 기록 경신", () => {
           leagueId: LEAGUE,
           rows: order.map((teamId) => ({
             teamId,
-            ...(points === undefined
-              ? {}
-              : {
-                  record: {
-                    played: 38,
-                    wins: 0,
-                    draws: 0,
-                    losses: 0,
-                    goalsFor: points(teamId),
-                    goalsAgainst: 0,
-                    points: points(teamId),
-                  },
-                }),
+            record: {
+              played: 38,
+              wins: 0,
+              draws: 0,
+              losses: 0,
+              goalsFor: points(teamId),
+              goalsAgainst: 0,
+              points: points(teamId),
+            },
           })),
         },
       ],
@@ -620,34 +609,6 @@ describe("구단 역대 기록 · 기록 경신", () => {
       previous: 2,
       previousSeason: 3,
     });
-  });
-
-  /**
-   * 옛 세이브에서 이관된 행은 팀 id 순서뿐이다 (game-state.md §3.3). 0승 0패로 세면
-   * 그 시즌이 구단 최저 승점이 되므로 승점·득점 축에서는 아예 빠지고, **순위만은**
-   * 그 행도 아는 사실이라 함께 센다.
-   */
-  it("이관된 행은 승점 축에서 빠지고 순위 축에는 든다", () => {
-    const state = recordState([table(3, [us, "chelsea"])]);
-    const records = clubRecordsOf(state, us);
-    expect(records.bestPoints).toBeNull();
-    expect(records.mostGoals).toBeNull();
-    expect(records.bestPosition).toMatchObject({ season: 3, value: 1 });
-    // 그 시즌도 "장부가 아는 시즌"이다 — 순위를 알기 때문이다
-    expect(records.seasons).toBe(1);
-
-    expect(recordBreaksOf(state, us, mark({ points: 999, goalsFor: 999, position: 1 }))).toEqual(
-      [],
-    );
-  });
-
-  it("승점을 아는 시즌과 모르는 시즌이 섞이면 아는 쪽만 견준다", () => {
-    const state = recordState([table(2, [us, "chelsea"], () => 70), table(3, ["chelsea", us])]);
-    const records = clubRecordsOf(state, us);
-    expect(records.bestPoints).toMatchObject({ season: 2, value: 70 });
-    // 최고 순위는 두 시즌을 다 보고 고른다
-    expect(records.bestPosition).toMatchObject({ season: 2, value: 1 });
-    expect(records.seasons).toBe(2);
   });
 
   it("역대 우승은 카탈로그 시드와 게임 안의 우승을 더한 것이다", () => {

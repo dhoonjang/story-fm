@@ -84,7 +84,7 @@ export function isMentoredAxis(axis: AttributeAxis): boolean {
 
 /** 지금 서 있는 사이 — 닫힌 줄은 빠진다 */
 export function activeMentorings(state: GameState): Mentoring[] {
-  return (state.mentoring ?? []).filter((m) => m.until === undefined);
+  return state.mentoring.filter((m) => m.until === undefined);
 }
 
 /** 이 멘티에게 붙어 있는 멘토 — 없으면 null */
@@ -115,7 +115,7 @@ export interface MentoringRead {
 }
 
 export function mentoringReadOf(state: GameState, playerId: string): MentoringRead | null {
-  const rows = state.mentoring ?? [];
+  const rows = state.mentoring;
   const mine = rows.filter((m) => m.mentorId === playerId || m.menteeId === playerId);
   if (mine.length === 0) return null;
   /**
@@ -266,7 +266,7 @@ export function closeMentorings(
   endedBy: MentoringEnd,
 ): Mentoring[] {
   const closed: Mentoring[] = [];
-  for (const pair of state.mentoring ?? []) {
+  for (const pair of state.mentoring) {
     if (pair.until !== undefined || !match(pair)) continue;
     pair.until = state.date;
     pair.endedBy = endedBy;
@@ -293,7 +293,7 @@ export function closeMentoringsFor(
  * 그리고 창을 넘긴 닫힌 줄을 걷는다.
  */
 export function pruneMentoring(state: GameState): void {
-  const rows = state.mentoring ?? [];
+  const rows = state.mentoring;
   if (rows.length === 0) return;
 
   for (const pair of rows) {

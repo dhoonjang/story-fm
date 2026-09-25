@@ -22,8 +22,7 @@ import { headCoachOf, ownerOf, reportersOf } from "./persona";
  * 움직이지 못한다.
  *
  * 세이브가 드는 값이지만 장부에 앉는 것은 **등급이 매겨진 쌍뿐**이다: 줄이 없는 쌍의 값은
- * 원형 축과 원장이 결정적으로 답하는 **첫인상**이다. 그래서 옛 세이브는 빈 배열로 열려도
- * 오늘의 카드가 어제와 같다.
+ * 원형 축과 원장이 결정적으로 답하는 **첫인상**이다.
  *
  * 여기 있는 것은 전부 결정적 순수 함수다. 난수도 시각도 LLM도 들어오지 않는다.
  */
@@ -316,7 +315,7 @@ export function relationTierOf(
 ): RelationTier {
   if (a === b) return "cordial";
   const key = pairOf(a, b);
-  const row = (state.relations ?? []).find((r) => r.a === key.a && r.b === key.b);
+  const row = state.relations.find((r) => r.a === key.a && r.b === key.b);
   return row?.tier ?? initialRelation(state, key.a, key.b, index);
 }
 
@@ -368,7 +367,7 @@ export function setRelationTier(
   const next = relationTierDistance(now, tier) > 1 ? relationTierStep(now, tier) : tier;
   if (next === now) return false;
 
-  const rows = (state.relations ??= []);
+  const rows = state.relations;
   const row = rows.find((r) => r.a === key.a && r.b === key.b);
   if (row) row.tier = next;
   else rows.push({ ...key, tier: next });
@@ -432,7 +431,7 @@ export function relationTierBrief(state: GameState): RelationTierProposal[] {
     });
   }
   // 장부에 선 나머지 쌍 — 선수끼리·페르소나끼리는 여기서만 표에 오른다
-  for (const row of state.relations ?? []) {
+  for (const row of state.relations) {
     if (seen.has(pairKey(row.a, row.b))) continue;
     const a = nameOf.get(row.a);
     const b = nameOf.get(row.b);
@@ -449,7 +448,6 @@ export function relationTierBrief(state: GameState): RelationTierProposal[] {
  * 협회도 원장에 남아 있어 파생이 상하지 않는다 (people.md §6).
  */
 export function clearRelationsOf(state: GameState, subject: string): void {
-  if (state.relations === undefined) return;
   state.relations = state.relations.filter((r) => r.a !== subject && r.b !== subject);
 }
 
@@ -492,19 +490,6 @@ export const RELATION_PRESSURE_WEIGHT: Record<RelationTier, number> = {
 
 export function relationPressureWeight(state: GameState, playerId: string): number {
   return RELATION_PRESSURE_WEIGHT[relationTierOf(state, MANAGER_SUBJECT, playerId)];
-}
-
-/**
- * 떠난 사람과 **`close` 이상**이던 우리 선수들 — 계약 해지의 심경 카드가 걸리는 범위
- * (people.md §5). 라커룸 전원이 같은 무게로 드는 사실이 아니다.
- */
-export function closeTo(state: GameState, subject: string): GamePlayer[] {
-  const index = joinIndexOf(state);
-  return playersOf(state, state.userTeamId).filter(
-    (p) =>
-      p.id !== subject &&
-      RELATION_TIER_RANK[relationTierOf(state, subject, p.id, index)] >= RELATION_TIER_RANK.close,
-  );
 }
 
 // ── 카드에 서는 줄 (people.md §6) ─────────────────────────────

@@ -662,6 +662,7 @@ export function buildEuroLeaguePhase(
         id: `m-${cupId}-${season}-${round}-${homeTeamId}`,
         season,
         competitionId: cupId,
+        stage: "league",
         round,
         date: addDays(anchor, offset),
         time,

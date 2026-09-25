@@ -163,7 +163,7 @@ describe("GeminiGameLLM", () => {
 
     const llm = new GeminiGameLLM(testConfig, stub.client as never);
     const result = await llm.runTurn({
-      system: ["고정 프롬프트", "전력 패킷"],
+      system: ["고정 프롬프트", "레퍼런스"],
       history: [],
       user: "@김감독: 계속 진행해.",
       stateNote: "[경기 장부] 17분 0:0",
@@ -188,7 +188,7 @@ describe("GeminiGameLLM", () => {
         tools: Array<{ functionDeclarations: Array<{ parametersJsonSchema: unknown }> }>;
       };
     };
-    expect(createConfig.config.systemInstruction).toBe("고정 프롬프트\n\n전력 패킷");
+    expect(createConfig.config.systemInstruction).toBe("고정 프롬프트\n\n레퍼런스");
     expect(createConfig.config.tools[0]?.functionDeclarations[0]?.parametersJsonSchema).toEqual(
       tool.inputSchema,
     );

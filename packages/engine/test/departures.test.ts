@@ -103,7 +103,7 @@ describe("일방 해지 — 전액을 물고 자리를 비운다", () => {
    * **죽은 공 지정은 완장과 같은 문을 지난다** (match.md §2 키커 지정) — 배치가
    * 걷히는 자리(`releaseFromTactics`)에서 함께 걷힌다. 이탈 경로가 여럿이라
    * (매각·방출·계약 만료·임대 복귀) 그 문 하나가 새면 떠난 선수가 우리 코너를 차는
-   * 장부가 남고, 그 경기의 패킷만 조용히 기본값으로 되돌린다.
+   * 장부가 남고, 그 경기만 조용히 기본값으로 되돌린다.
    */
   it("떠난 선수의 죽은 공 지정이 걷힌다 — 남은 사람의 자리는 그대로다", () => {
     const state = createTestGame(11);
@@ -157,8 +157,7 @@ describe("방출의 여파 — 회견과 남은 선수단", () => {
     expect(press?.facts[0]?.kind).toBe("departure");
     expect(press?.facts[0]?.about).toBe(target.id);
     // 카드는 장부 한 줄이다 — 문장이 아니라 코드와 수치다
-    expect(press?.facts[0]?.text, "코어가 사실 문장을 저장했다").toBeUndefined();
-    expect(press?.facts[0]?.data?.tags?.[0]).toBe("released");
+    expect(press?.facts[0]?.data.tags?.[0]).toBe("released");
 
     const after = formsById(state);
     expect(after.has(target.id)).toBe(false);

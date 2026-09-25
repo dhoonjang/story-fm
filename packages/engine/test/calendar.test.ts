@@ -782,6 +782,7 @@ describe("컵을 위한 비켜서기 — 하나라도 실패하면 전부 원위
         id: `blocker-${date}`,
         season: 1,
         competitionId: cupId,
+        stage: "r32",
         round: 1,
         date,
         time: "19:45",

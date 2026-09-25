@@ -3,13 +3,16 @@ import {
   LEADER_ROLE_LABEL,
   CharacterMemorySchema,
   HEAD_COACH_ROLE_LABEL,
+  isOwnerArchetypeLabel,
   isStaffRole,
   normalizeSpeaker,
+  OWNER_ARCHETYPE_LABELS,
   personaRoleLabel,
   PersonaSchema,
   STAFF_ROLES,
   type CharacterMemory,
   type Negotiation,
+  type OwnerArchetypeLabel,
   type Persona,
   type PersonaRole,
   type RivalVoice,
@@ -18,7 +21,7 @@ import {
 } from "@story-fm/domain";
 import { realCoachNameOf } from "../data/coach-seeds";
 import { realOwnerNameOf } from "../data/owner-seeds";
-import { WORLD_FIGURE_SEEDS, isWorldFigureName, type WorldFigureSeed } from "../data/world-figures";
+import { WORLD_FIGURE_SEEDS, type WorldFigureSeed } from "../data/world-figures";
 import { MARKET_LEAGUE_SQUADS } from "../data/market-leagues";
 import { claimPersonaName, personaNamePoolOf } from "../data/names";
 import { countryOfTeam } from "../data/team-catalog";
@@ -42,9 +45,8 @@ import { clubEconomyLevel } from "../data/league-economy";
 /**
  * 인물 사전이 훑는 말 — **한 곳에서만 만든다** (people.md §6).
  *
- * 코치·구단주·기자·선수가 같은 헬퍼를 부르고, 옛 세이브를 메우는 `ensurePersonas`도
- * 여기를 부른다. 자리마다 따로 적으면 한쪽만 고쳐져 같은 이름이 어떤 인물에게는
- * 걸리고 어떤 인물에게는 걸리지 않는다.
+ * 코치·구단주·기자·선수가 같은 헬퍼를 부른다. 자리마다 따로 적으면 한쪽만 고쳐져
+ * 같은 이름이 어떤 인물에게는 걸리고 어떤 인물에게는 걸리지 않는다.
  *
  * ⚠️ **나열한 것만 본다** — 성만 쓴 "홀란드"를 같은 사람으로 보는 부분 일치는
  * 오탐을 만든다는 `normalizeSpeaker`의 원칙이 인물 사전에도 그대로다.
@@ -292,12 +294,7 @@ export function occupiedPersonNames(state: {
   ]);
 }
 
-/**
- * 빈 벤치의 가상 감독 이름 — **(시드, 팀) 채널로 결정적**이다 (people.md §2).
- *
- * 세계 생성과 로드 보정(`ensureSeededManagers`)이 같은 채널을 쓰므로, 옛 세이브를
- * 채워도 그 벤치의 사람은 늘 같다 — 세이브 버전을 올리지 않는 근거다.
- */
+/** 빈 벤치의 가상 감독 이름 — **(시드, 팀) 채널로 결정적**이다 (people.md §2) */
 export function seededVirtualManagerName(seed: number, teamId: string, taken: Set<string>): string {
   return inventPersonName(makeRng(seed, `persona:manager-name:${teamId}`), teamId, taken);
 }
@@ -329,8 +326,8 @@ export function generateHeadCoach(seed: number, teamId: string, today?: string):
     keywords: personaKeywords({ name, role: "head_coach" }),
     /**
      * 고용 정보 — 스태프와 같은 칸이다 (people.md §2-2). **날짜를 모르면 서지 않는다**:
-     * 옛 세이브를 되찾는 폴백(`headCoachOf`)은 오늘을 모르는 자리라, 없는 계약을
-     * 지어내느니 비워 두고 로드 보정(`ensurePersonas`)이 채운다.
+     * 세계와 부임(`createGame`·`reseatClubPersonas`)은 오늘을 알고, 사람됨만 묻는 자리는
+     * 계약을 지어내지 않는다.
      */
     employment:
       today === undefined
@@ -696,13 +693,10 @@ export type { StaffArchetype };
 
 /**
  * 이 세이브의 스태프 — 고용 정보를 든 사람들. **수석코치는 여기 없다**
- * (`headCoachOf`가 답한다).
- *
- * 옛 세이브라 비어 있으면 빈 배열이다 — 없는 것이 곧 뜻이고, 로드 보정
- * (`ensureStaff`)이 채운다.
+ * (`headCoachOf`가 답한다). 감독이 다 자른 역할은 빈 배열이다.
  */
-export function staffOf(state: { personas?: Persona[] }, role?: StaffRole): Persona[] {
-  return (state.personas ?? []).filter(
+export function staffOf(state: { personas: readonly Persona[] }, role?: StaffRole): Persona[] {
+  return state.personas.filter(
     (p) => isStaffRole(p.role) && (role === undefined || p.role === role),
   );
 }
@@ -714,7 +708,16 @@ export function staffOf(state: { personas?: Persona[] }, role?: StaffRole): Pers
  * (성적·수익·상징성), 돈을 어떻게 다루며, 인내심이 얼마나 있는가. 같은 "영입해
  * 주십시오"에 누구는 손익계산서를 펴고 누구는 트로피를 묻는다.
  */
-const OWNER_ARCHETYPES: readonly CoachArchetype[] = [
+/** 구단주 원형의 **키** — 클럽 비전의 항목표(career.md §5)가 이것으로 갈린다 */
+export type OwnerArchetypeKey =
+  "industrialist" | "financier" | "fan_owner" | "sovereign" | "local_patron" | "showman";
+
+interface OwnerArchetype extends CoachArchetype {
+  key: OwnerArchetypeKey;
+  label: OwnerArchetypeLabel;
+}
+
+const OWNER_ARCHETYPES: readonly OwnerArchetype[] = [
   {
     key: "industrialist",
     label: "산업가형",
@@ -925,20 +928,28 @@ export function generateOwner(seed: number, teamId: string): Persona {
 }
 
 /** 원형 목록 — 테스트·어드민이 전수를 훑을 때 쓴다 */
-export const OWNER_ARCHETYPE_LABELS = OWNER_ARCHETYPES.map((a) => a.label);
+export { OWNER_ARCHETYPE_LABELS };
 
 /**
- * 저장된 구단주 원형 **라벨 → 키** — `coachArchetypeKeyOf`와 같은 규약이다.
+ * 저장된 구단주 원형 — **라벨과 키** (`coachArchetypeKeyOf`와 같은 규약이다).
  *
  * 세이브에 남는 것은 `"지역 유지형"` 같은 라벨인데(페르소나는 사람이 읽는 데이터라
- * `generateOwner`가 키를 버린다), 클럽 비전의 항목표(career.md §5)와 보드 요청표
- * (§5.2)는 **키**로 갈린다. 그 사이를 되짚는 자리가 여기 하나다.
+ * `generateOwner`가 키를 버린다), 클럽 비전의 항목표(career.md §5)는 **키**로 갈리고
+ * 보드 요청표(§5.2)는 라벨로 갈린다. 그 사이를 되짚는 자리가 여기 하나다.
  *
- * 표에 없는 라벨은 `null`이다 — 옛 세이브의 커스텀 구단주는 조용히 빈손이 되고,
- * 다른 원형의 결이 대신 서지는 않는다.
+ * ⚠️ **여섯 원형 밖의 라벨이면 던진다.** 구단주는 `generateOwner`만 세우고 GM은 그
+ * 자리에 인물을 등록할 수 없다(`REGISTERABLE_ROLES`) — 표 밖의 라벨은 세이브가 깨진 것이다.
  */
-export function ownerArchetypeKeyOf(persona: Pick<Persona, "archetype">): string | null {
-  return OWNER_ARCHETYPES.find((a) => a.label === persona.archetype)?.key ?? null;
+export function ownerArchetypeOf(persona: Pick<Persona, "archetype">): {
+  key: OwnerArchetypeKey;
+  label: OwnerArchetypeLabel;
+} {
+  const label = persona.archetype;
+  const found = isOwnerArchetypeLabel(label)
+    ? OWNER_ARCHETYPES.find((a) => a.label === label)
+    : undefined;
+  if (!found) throw new Error(`구단주 원형 밖의 라벨: ${label}`);
+  return { key: found.key, label: found.label };
 }
 
 /** 원형 목록 — 테스트·어드민이 전수를 훑을 때 쓴다 */
@@ -959,8 +970,8 @@ export const COACH_ARCHETYPE_LABELS: Readonly<Record<string, string>> = Object.f
  * 버리고 라벨만 적는다 — 페르소나는 사람이 읽는 데이터라서다). 그런데 코치가 무엇을
  * 먼저 보는지 가르는 표는 **키**로 갈리므로, 그 사이를 여기서 되짚는다.
  *
- * 표에 없는 라벨은 `null`이다 — 옛 세이브가 사라진 원형을 들고 있어도 조용히 빈손이
- * 되고, 다른 코치의 눈이 대신 서지는 않는다.
+ * 표에 없는 라벨은 `null`이다 — 표 밖의 원형은 조용히 빈손이 되고, 다른 코치의 눈이
+ * 대신 서지는 않는다.
  */
 export function coachArchetypeKeyOf(persona: Pick<Persona, "archetype">): string | null {
   return COACH_ARCHETYPES.find((a) => a.label === persona.archetype)?.key ?? null;
@@ -1109,14 +1120,14 @@ export interface RivalVoiceCard {
  * 그 벤치의 사람이 마이크 앞에서 내는 결 — **명부든 가상이든 같은 문을 지난다**
  * (people.md §2·§4).
  *
- * 이름이 없는 벤치(감독 자신의 구단, 옛 세이브의 빈 벤치)와 표가 되짚지 못하는
- * 원형은 `null`이다 — 없는 사람의 말을 지어내는 것보다 아무도 말하지 않는 편이 낫다.
+ * 이름이 없는 벤치(감독 자신의 구단)와 표가 되짚지 못하는 원형은 `null`이다 —
+ * 없는 사람의 말을 지어내는 것보다 아무도 말하지 않는 편이 낫다.
  */
 export function rivalVoiceOf(
   state: {
     seed: number;
     userTeamId: string;
-    teams: readonly { id: string; managerName?: string; managerPersonaSeat?: string }[];
+    teams: readonly { id: string; managerName?: string }[];
     managerPool?: readonly { name: string }[];
   },
   teamId: string,
@@ -1125,9 +1136,7 @@ export function rivalVoiceOf(
   const bench = state.teams.find((t) => t.id === teamId);
   const name = bench?.managerName;
   if (name === undefined || name === "") return null;
-  const persona =
-    worldFigureByName(state, name) ??
-    generateVirtualManager(state.seed, name, bench?.managerPersonaSeat);
+  const persona = worldFigureByName(state, name) ?? generateVirtualManager(state.seed, name);
   const key = MANAGER_ARCHETYPE_OF_LABEL[persona.archetype];
   const archetype = MANAGER_ARCHETYPES.find((a) => a.key === key);
   return archetype ? { name, code: archetype.voice.code, chance: archetype.voice.chance } : null;
@@ -1144,18 +1153,9 @@ export function rivalVoiceOf(
  *
  * 키워드는 명부 인물의 규칙을 따른다(전체 이름 + 성) — 이름 조각을 전부 담으면
  * 흔한 이름 조각이 남의 문장에 걸려 한 턴 상한 3장을 남의 이름이 먹는다.
- *
- * @param personaSeat 옛 채널의 팀 — 채널이 `(시드, 팀, 이름)`이던 시절의 세이브만
- *                    든다 (`GameTeam.managerPersonaSeat`). 그 표식이 있으면 그때
- *                    서 있던 사람을 그대로 돌려준다.
  */
-export function generateVirtualManager(seed: number, name: string, personaSeat?: string): Persona {
-  const rng = makeRng(
-    seed,
-    personaSeat === undefined
-      ? `persona:manager:${name}`
-      : `persona:manager:${personaSeat}:${name}`,
-  );
+export function generateVirtualManager(seed: number, name: string): Persona {
+  const rng = makeRng(seed, `persona:manager:${name}`);
   const archetype = pick(rng, MANAGER_ARCHETYPES);
   const parts = name.split(/\s+/u);
   const surname = parts[parts.length - 1] ?? "";
@@ -1221,7 +1221,7 @@ export function isFamousPlayer(overall: number, name: string): boolean {
 interface SpeakerSource {
   seed: number;
   userTeamId: string;
-  personas?: Persona[];
+  personas: readonly Persona[];
   players?: Array<{
     id?: string;
     name: string;
@@ -1299,18 +1299,13 @@ function collectSpeakers(state: SpeakerSource): Map<string, SpeakerRole | null> 
     }
   };
 
-  // 페르소나 — 빈 배열도 "없음"으로 본다. `?? `만 쓰면 `personas: []` 세이브에서
-  // 사전이 통째로 비어 직책이 조용히 사라진다 (실제로 그랬다)
-  const personas = state.personas?.length
-    ? state.personas
-    : [headCoachOf(state), ownerOf(state), ...reportersOf(state)];
-  for (const persona of personas) {
+  for (const persona of state.personas) {
     put(persona.characterId, {
       kind: persona.role,
       /**
        * 기자는 **직책보다 매체가 정보다** — "기자"는 마이크 아이콘이 이미 말하고,
        * 감독이 알아야 할 것은 "어디 소속이 묻는가"다(지역지냐 타블로이드냐로
-       * 질문의 결이 갈린다). 매체를 모르는 옛 세이브는 직책으로 돌아간다.
+       * 질문의 결이 갈린다). 매체가 없는 기자는 직책으로 돌아간다.
        */
       label:
         persona.role === "reporter" && persona.outlet
@@ -1318,8 +1313,8 @@ function collectSpeakers(state: SpeakerSource): Map<string, SpeakerRole | null> 
           : /**
              * 스태프는 **직책이 정보다** — 「코치」는 클립보드 아이콘이 이미 말하고,
              * 감독이 알아야 할 것은 훈련장의 어느 자리냐다 (people.md §3). 기자가
-             * 직책 대신 매체를 다는 것과 같은 규약이고, 고용 정보가 없는 옛 세이브는
-             * 역할 라벨로 돌아간다.
+             * 직책 대신 매체를 다는 것과 같은 규약이고, 고용 정보가 없으면 역할
+             * 라벨로 돌아간다.
              */
             isStaffRole(persona.role) && persona.employment
             ? persona.employment.title
@@ -1384,27 +1379,25 @@ function collectSpeakers(state: SpeakerSource): Map<string, SpeakerRole | null> 
   }
   // 타 구단의 단장 — 협상 테이블 건너편의 구단 쪽 (people.md §2). 우리 구단에는 없다:
   // 그 자리의 결정은 감독과 구단주의 것이다
-  if (state.seed !== undefined) {
-    for (const team of state.teams ?? []) {
-      if (team.id === state.userTeamId) continue;
-      claim(generateDirector(state.seed, team.id).name, {
-        kind: "director",
-        label: personaRoleLabel("director"),
-      });
-    }
+  for (const team of state.teams ?? []) {
+    if (team.id === state.userTeamId) continue;
+    claim(generateDirector(state.seed, team.id).name, {
+      kind: "director",
+      label: personaRoleLabel("director"),
+    });
   }
 
   return seen;
 }
 
-/** 이 세이브의 수석코치 — 옛 세이브라 비어 있으면 시드로 그 자리에서 만든다 */
-export function headCoachOf(state: {
-  seed: number;
-  userTeamId: string;
-  personas?: Persona[];
-}): Persona {
-  const found = state.personas?.find((p) => p.role === "head_coach");
-  return found ?? generateHeadCoach(state.seed, state.userTeamId);
+/**
+ * 이 세이브의 수석코치 — `personas`에 언제나 하나 있다 (`createGame`이 세우고
+ * `reseatClubPersonas`가 갈아 세운다). 없으면 세이브가 불변식을 어긴 것이라 던진다.
+ */
+export function headCoachOf(state: { personas: readonly Persona[] }): Persona {
+  const found = state.personas.find((p) => p.role === "head_coach");
+  if (!found) throw new Error("수석코치 없음: personas에 head_coach가 없다");
+  return found;
 }
 
 /**
@@ -1434,31 +1427,23 @@ const FACT_SPEAKER_ROLE: Record<FactChannel, StaffRole | null> = {
 };
 
 export function factSpeakerOf(
-  state: { seed: number; userTeamId: string; personas?: Persona[] },
+  state: { personas: readonly Persona[] },
   channel: FactChannel,
 ): Persona {
   const role = FACT_SPEAKER_ROLE[channel];
   return (role === null ? undefined : staffOf(state, role)[0]) ?? headCoachOf(state);
 }
 
-/** 이 세이브의 구단주 — 옛 세이브라 비어 있으면 시드로 그 자리에서 만든다 */
-export function ownerOf(state: {
-  seed: number;
-  userTeamId: string;
-  personas?: Persona[];
-}): Persona {
-  const found = state.personas?.find((p) => p.role === "owner");
-  return found ?? generateOwner(state.seed, state.userTeamId);
+/** 이 세이브의 구단주 — 수석코치와 같은 불변식이다: `personas`에 언제나 하나 있다 */
+export function ownerOf(state: { personas: readonly Persona[] }): Persona {
+  const found = state.personas.find((p) => p.role === "owner");
+  if (!found) throw new Error("구단주 없음: personas에 owner가 없다");
+  return found;
 }
 
-/** 이 세이브의 기자단 — 옛 세이브라 비어 있으면 시드로 그 자리에서 만든다 */
-export function reportersOf(state: {
-  seed: number;
-  userTeamId: string;
-  personas?: Persona[];
-}): Persona[] {
-  const found = (state.personas ?? []).filter((p) => p.role === "reporter");
-  return found.length > 0 ? found : generateReporters(state.seed, state.userTeamId);
+/** 이 세이브의 기자단 — `personas`의 기자들 */
+export function reportersOf(state: { personas: readonly Persona[] }): Persona[] {
+  return state.personas.filter((p) => p.role === "reporter");
 }
 
 /**
@@ -1692,9 +1677,6 @@ export function worldFigureByName(state: WorldFigureScope, name: string): Person
  * `characterMemories`는 건드리지 않는다 — 기억은 `characterId`에 묶여 있어 옛
  * 코치의 기억은 옛 이름에 남고, 새 코치는 빈 채로 시작한다. GM이 등록한 인물
  * (friend·supporter)도 그대로다 — 구단이 아니라 감독의 사람들이다.
- *
- * 빈자리를 지우기만 하고 `ensurePersonas`에 맡기지 않는 이유: 그 보정은 로드에서
- * 돌므로, 부임한 세션의 남은 턴이 코치 없는 세이브로 흐른다.
  */
 export function reseatClubPersonas(
   state: { seed: number; date: string; personas?: Persona[] },
@@ -1719,112 +1701,6 @@ export function reseatClubPersonas(
     ...generateStaff(state.seed, teamId, state.date),
     ...(options.crossedLeague ? generateReporters(state.seed, teamId) : []),
   ];
-}
-
-/**
- * 로드 보정 — **옛 사람됨 채널을 쓰던 세이브의 벤치에 자리 표식을 심는다**
- * (people.md §2 · transfer.md §7 「감독 풀」).
- *
- * 가상 감독의 사람됨 채널이 `(시드, 팀, 이름)`에서 `(시드, 이름)`으로 바뀌었다.
- * 그대로 두면 진행 중인 세이브의 AI 감독 전원이 하루아침에 다른 원형을 갖는다 —
- * 이름은 그대로인데 사람이 갈리는 것이라, 감독이 시즌 내내 상대한 벤치가 통째로
- * 낯설어진다.
- *
- * **가르는 표식은 `managerPool`의 유무 하나다.** 새 게임은 빈 배열로 서고, 이
- * 보정이 지나간 세이브도 빈 배열이 되므로, `undefined`인 세이브는 풀이 생기기
- * 전에 저장된 것 — 곧 옛 채널의 세계다. 멱등이라 두 번 돌아도 같다.
- *
- * 명부 감독의 벤치는 건너뛴다 — 그들의 사람됨은 추첨이 아니라 표가 적으므로
- * 채널이 바뀌어도 갈릴 것이 없다 (people.md §2-1).
- */
-export function ensureManagerPool(state: {
-  userTeamId: string;
-  managerPool?: unknown[];
-  teams: Array<{ id: string; managerName?: string; managerPersonaSeat?: string }>;
-}): void {
-  if (state.managerPool !== undefined) return;
-  for (const team of state.teams) {
-    if (team.id === state.userTeamId || team.managerName === undefined) continue;
-    if (isWorldFigureName(team.managerName)) continue;
-    team.managerPersonaSeat ??= team.id;
-  }
-  state.managerPool = [];
-}
-
-/**
- * 로드 보정 — 페르소나가 없는 옛 세이브를 채운다.
- *
- * 생성이 시드로 결정적이라 **채워 넣어도 그 세이브의 코치는 늘 같은 사람**이다.
- * 그래서 세이브 버전을 올리지 않고 조용히 메울 수 있다 (AGENTS.md 세이브 호환성).
- */
-export function ensurePersonas(state: {
-  seed: number;
-  date: string;
-  userTeamId: string;
-  personas?: Persona[];
-}): void {
-  const coach = state.personas?.find((p) => p.role === "head_coach");
-  if (!coach) {
-    state.personas = [...(state.personas ?? []), generateHeadCoach(state.seed, state.userTeamId)];
-  } else if (coach.characterId === HEAD_COACH_ROLE_LABEL) {
-    // 태그를 직책에서 이름으로 옮기기 전 세이브 — 그 사람의 이름으로 고쳐 준다.
-    // 이름·성격은 그대로라 감독이 만난 사람은 바뀌지 않는다.
-    coach.characterId = coach.name;
-  }
-  // 구단주가 없던 세이브 — 코치와 같은 이유로 조용히 채운다(생성이 결정적이다).
-  // 이걸 안 하면 GM이 구단주를 즉흥으로 연기해 만날 때마다 다른 사람이 된다.
-  if (!state.personas?.some((p) => p.role === "owner")) {
-    state.personas = [...(state.personas ?? []), generateOwner(state.seed, state.userTeamId)];
-  }
-  // 기자단 — 회견은 세계가 먼저 부르는 자리라, 부를 사람이 없으면 GM이 즉흥으로
-  // 지어내 매번 다른 기자가 된다 (press.ts)
-  if (!state.personas?.some((p) => p.role === "reporter")) {
-    state.personas = [
-      ...(state.personas ?? []),
-      ...generateReporters(state.seed, state.userTeamId),
-    ];
-  }
-  /**
-   * 스태프가 없던 세이브 — 코치·구단주와 같은 이유로 조용히 채운다 (people.md §2-2).
-   *
-   * **역할마다 따로 본다**: 의료진만 자른 세이브에 코치까지 다시 세우면 감독이 자른
-   * 사람이 이튿날 훈련장에 서 있다. 생성이 결정적이라 채워도 그 세이브의 사람은 같고,
-   * 부임일·계약은 **오늘**을 기준으로 뒤로 뻗으므로 옛 세이브도 제 나이의 계약을 얻는다.
-   */
-  for (const role of STAFF_ROLES) {
-    if (state.personas?.some((p) => p.role === role)) continue;
-    state.personas = [
-      ...(state.personas ?? []),
-      ...generateStaff(state.seed, state.userTeamId, state.date).filter((p) => p.role === role),
-    ];
-  }
-  /**
-   * 수석코치의 고용 정보 — 스태프와 같은 칸을 든다 (people.md §2-2). 이 칸이 생기기
-   * 전의 세이브는 없으므로 그때 채운다. **자리는 그대로이고 계약만 선다** — 사람이
-   * 갈리지 않는다.
-   */
-  const head = state.personas?.find((p) => p.role === "head_coach");
-  if (head && head.employment === undefined) {
-    head.employment = {
-      teamId: state.userTeamId,
-      title: HEAD_COACH_ROLE_LABEL,
-      since: state.date,
-      contract: {
-        salary: headCoachSalaryOf(state.userTeamId),
-        until: contractUntil(state.date, HEAD_COACH_CONTRACT_YEARS),
-      },
-    };
-  }
-  // 키워드가 없던 세이브 — 인물 사전이 훑을 말이 없으면 그 인물은 불려도 서지 않는다.
-  // 이름·자리에서 파생하므로 채워도 같은 사람이다 (세이브 버전 유지).
-  //
-  // ⚠️ **선수는 여기서 만들지 않는다.** 선수 페르소나는 파생이라 세이브에 넣지
-  // 않는다 (people.md §6) — 밀어 넣으면 리그 전체가 세이브에 굳는다.
-  for (const persona of state.personas ?? []) {
-    if (persona.keywords === undefined || persona.keywords.length === 0) {
-      persona.keywords = personaKeywords(persona);
-    }
-  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -1969,11 +1845,7 @@ export function registerCharacters(
   drafts: readonly CharacterDraft[],
 ): number {
   const occupied = knownSpeakerKeys(state);
-  // 페르소나가 빈 세이브에 새 인물만 밀어 넣으면 `speakerRoles`의 시드 폴백이 꺼져
-  // 코치·구단주·기자단이 사전에서 통째로 사라진다. 폴백과 같은 사람들을 함께 세운다
-  const personas = state.personas?.length
-    ? state.personas
-    : [headCoachOf(state), ownerOf(state), ...reportersOf(state)];
+  const personas = state.personas;
   const ids = new Set(personas.map((p) => p.characterId));
   const added: Persona[] = [];
   for (const draft of drafts) {

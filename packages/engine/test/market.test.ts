@@ -215,6 +215,10 @@ describe("딜 확률", () => {
       openedOn: state.date,
       expiresOn: state.windows[0]!.closesOn,
       status: "open",
+      pitched: [],
+      precontract: false,
+      terms: [],
+      buyout: false,
       // 답을 **받은** 라운드만 반복으로 잡힌다 (`sameTermsRepeats`)
       rounds: [1, 2].map(() => ({
         date: state.date,
@@ -284,6 +288,10 @@ describe("딜 확률", () => {
         openedOn: state.date,
         expiresOn: state.windows[0]!.closesOn,
         status: "open",
+        pitched: [],
+        precontract: false,
+        terms: [],
+        buyout: false,
         rounds: [1, 2].map(() => ({
           date: state.date,
           by: "us" as const,

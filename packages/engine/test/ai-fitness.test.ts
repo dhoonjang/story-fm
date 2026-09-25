@@ -157,7 +157,7 @@ describe("로테이션으로 뺀 선수는 그 경기에서 빠진다", () => {
     const now = after.slots![index]!;
     expect(now.player.id, "그 자리의 주인이 바뀌지 않았다").not.toBe(victim.id);
     expect(now.position, "전술판의 자리는 사람이 바뀌어도 그대로다").toBe(was.position);
-    // 물려받으면 그라운드에 없는 사람의 숫자로 패킷이 선다
+    // 물려받으면 그라운드에 없는 사람의 숫자로 경기 입력이 선다
     expect(now.proficiency).toBe(proficiencyAt(now.player, now.position));
   });
 

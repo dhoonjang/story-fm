@@ -113,7 +113,7 @@ function affords(state: GameState, teamId: string, value: number): boolean {
  * 구단은 계속 보지만 더는 묻지 않는다: 11월의 소문이 1월의 오퍼가 되는 길이다.
  */
 function pruneInterests(state: GameState): void {
-  const rows = state.interests ?? [];
+  const rows = state.interests;
   if (rows.length === 0) return;
   const ours = new Set(playersOf(state, state.userTeamId).map((p) => p.id));
   const targets = new Set(ourTargets(state).map((p) => p.id));
@@ -124,7 +124,7 @@ function pruneInterests(state: GameState): void {
       (!ours.has(i.gamePlayerId) && !targets.has(i.gamePlayerId)) ||
       diffDays(i.lastMovedOn, state.date) >= INTEREST_STALE_DAYS,
   );
-  for (const row of state.interests ?? []) {
+  for (const row of state.interests) {
     if (row.stage === "watching") continue;
     if (windowOpenForTeam(state, row.teamId) !== null) continue;
     row.stage = "watching";
@@ -135,7 +135,7 @@ function pruneInterests(state: GameState): void {
 
 /** 사다리를 한 칸 올린다 — **창이 열린 구단만.** 오르는 순간이 곧 밖에 나는 순간이다 */
 function climbInterests(state: GameState, digest: TickSink): void {
-  const rows = state.interests ?? [];
+  const rows = state.interests;
   if (rows.length === 0) return;
   const rng = makeRng(state.seed, `interest-step:${state.date}`);
   for (const row of rows) {
@@ -179,7 +179,7 @@ function announce(state: GameState, row: Interest, player: GamePlayer, digest: T
  * (`club/approach.ts`의 `bigger-club`과 같은 자리).
  */
 function standOnOurs(state: GameState, rng: () => number, depthOf: () => SquadDepth): void {
-  const rows = state.interests ?? [];
+  const rows = state.interests;
   const ours = new Set(playersOf(state, state.userTeamId).map((p) => p.id));
   if (rows.filter((i) => ours.has(i.gamePlayerId)).length >= INTEREST_MAX) return;
 
@@ -215,7 +215,7 @@ function standOnOurs(state: GameState, rng: () => number, depthOf: () => SquadDe
   const teamId = pickWeighted(rng, options, (id) =>
     suitorWeightOf(state, id, chosen, scale, blockedHere),
   );
-  (state.interests ??= []).push({
+  state.interests.push({
     teamId,
     gamePlayerId: chosen.id,
     since: state.date,
@@ -260,7 +260,7 @@ function standOnTarget(
     stage: "enquired",
     lastMovedOn: state.date,
   };
-  (state.interests ??= []).push(row);
+  state.interests.push(row);
   announce(state, row, chosen, digest);
 }
 
@@ -269,7 +269,7 @@ function standOnTarget(
  * 붙는 낙인이 아니다 (transfer.md §1-2). 관심의 걷힘과 같은 자를 쓴다.
  */
 function pruneCompetingBids(state: GameState): void {
-  if ((state.competingBids ?? []).length === 0) return;
+  if (state.competingBids.length === 0) return;
   const targets = new Set(ourTargets(state).map((p) => p.id));
   clearCompetingBids(state, (bid) => !targets.has(bid.gamePlayerId));
 }
@@ -305,7 +305,7 @@ export function tickCompetingBids(
     if (suitorsOf(state, player, depthOf()).length < SUITORS_MANY) continue;
     // 상한에 닿은 판에는 새 줄을 세우지 않는다 — 오르지 않는 사실은 사실이 아니다
     if (competingBidLiftOf(state, player.id) >= COUNTER_CEILING) continue;
-    (state.competingBids ??= []).push({
+    state.competingBids.push({
       gamePlayerId: player.id,
       teamId: rival.teamId,
       date: state.date,
@@ -369,7 +369,7 @@ export function competingBidLine(state: GameState, playerId: string): string | n
  */
 export function describeInterests(state: GameState): string[] {
   const seen = new Map<string, GamePlayer>();
-  for (const row of state.interests ?? []) {
+  for (const row of state.interests) {
     const player = playerById(state, row.gamePlayerId);
     if (player) seen.set(player.id, player);
   }

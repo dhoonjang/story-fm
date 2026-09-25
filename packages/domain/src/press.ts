@@ -17,7 +17,6 @@ import {
   INCIDENT_KIND_KO,
   INTEREST_STAGE_KO,
   visionItemText,
-  VISION_CODES,
   milestonePhrase,
   PLAYER_ISSUE_REASONS,
   PROMISE_KIND_KO,
@@ -281,10 +280,8 @@ export type PressFactData = z.infer<typeof PressFactDataSchema>;
 
 export const PressFactSchema = z.object({
   kind: PressFactKindSchema,
-  /** 그 갈래의 수치 — 옛 세이브엔 없다(optional) */
-  data: PressFactDataSchema.optional(),
-  /** 옛 세이브가 들고 있는 사실 문장 — 새 카드는 적지 않는다 (`data`의 폴백) */
-  text: z.string().min(1).optional(),
+  /** 그 갈래의 수치 — 문장은 읽는 쪽이 만든다 (`pressFactText`) */
+  data: PressFactDataSchema,
   /** 이 사실이 걸린 선수 (`GAME_PLAYER.id`) — 없으면 팀·감독에 대한 사실 */
   about: z.string().nullable(),
   /** 날 선 자리인가 — 답변의 파장(한도)을 키운다 */
@@ -315,10 +312,8 @@ export const PressConferenceSchema = z.object({
    * 이름을 말해서 열리는 게 아니라 세계가 부르는 것이므로, 그 기자의 인물지가
    * 실릴 근거도 감독의 말이 아니라 **코어가 지목한 사실**이어야 한다
    * (overview.md §1 철칙 4 — 코어는 사실만 낸다).
-   *
-   * 옛 세이브엔 없다 (optional) — 없다고 로드가 막히면 안 된다.
    */
-  reporterId: z.string().min(1).optional(),
+  reporterId: z.string().min(1),
   status: PressStatusSchema,
   /**
    * 이 자리가 얼마나 큰가 (1~3). 실제로 파장이 다르다 — 평범한 주중 경기 뒤
@@ -504,7 +499,7 @@ export const ApproachContextSchema = z.object({
   limit: z.number().optional(),
   /**
    * 이 자리를 연 사람이 라커룸에서 선 자리 — 같은 불만이라도 주장이 들고 온 것과
-   * 후보 선수가 들고 온 것은 다른 자리다 (people.md §5-1). 옛 세이브엔 없다.
+   * 후보 선수가 들고 온 것은 다른 자리다 (people.md §5-1). 리더 그룹 밖의 사람이면 없다.
    */
   leader: LeaderRoleSchema.optional(),
 });
@@ -533,10 +528,8 @@ export const ApproachSchema = z.object({
    * 구단주라 이 칸이 없으면 인물 사전이 우리 구단주를 되찾는다.
    */
   teamId: z.string().min(1).optional(),
-  /** 한 줄 배경의 카드 — 옛 세이브엔 없다(optional) */
-  contextCard: ApproachContextSchema.optional(),
-  /** 옛 세이브가 들고 있는 배경 문장 — 새 자리는 적지 않는다 (`contextCard`의 폴백) */
-  context: z.string().optional(),
+  /** 한 줄 배경의 카드 — 문장은 읽는 쪽이 만든다 (`approachContextText`) */
+  contextCard: ApproachContextSchema,
   /** 그 사람이 아는 것의 **전부** — 이 밖의 사실은 이 자리에 없다 */
   facts: z.array(PressFactSchema).min(1),
   /** 사다리의 몇 번째 칸인가 — 효과의 폭이 여기 비례한다 */
@@ -549,7 +542,7 @@ export type Approach = z.infer<typeof ApproachSchema>;
  * 언론 유출 — **사다리 계단 4의 사건** (people.md §8). 방치된 불만이 신문에
  * 흘러나왔고, **다음 회견이 실어 갈 때까지만** 여기 남는다 — 회견은 두 시점에
  * 걸쳐 있어 세이브가 들지만, 유출은 소비되는 순간 카드가 되어 회견으로 옮겨
- * 간다. 옛 세이브엔 없다 (빈 배열 로드 — 세이브 버전 유지).
+ * 간다.
  */
 export const PressLeakSchema = z.object({
   /** 불만의 주인 (`GAME_PLAYER.id`) — 유출은 선수 주제에만 있다 */
@@ -567,7 +560,6 @@ export type PressLeak = z.infer<typeof PressLeakSchema>;
  * 자리를 따로 열지 않는 이유도 유출과 같다 — 회견은 이미 경기마다 열린다.
  * 순위를 카드가 아니라 여기 적어 두는 것은 후임이 앉는 순간 그 구단의 자리가
  * 달라지기 때문이다: 그날의 사실은 그날 적어야 한다.
- * 옛 세이브엔 없다 (빈 배열 로드 — 세이브 버전 유지).
  */
 export const PressSackingSchema = z.object({
   /** 잘린 구단 (`GameTeam.id`) */
@@ -731,12 +723,10 @@ function feeSuffix(label: string, amount: number | undefined): string {
  * 사실 카드 한 줄 — **화면·GM·테스트가 같은 함수를 부른다** (people.md §4).
  *
  * 코어가 세이브에 적는 것은 카드뿐이라, 문구를 고치면 지난 회견의 줄까지 함께
- * 고쳐진다. 옛 세이브는 카드 없이 문장만 들고 있어 그때만 `text`로 떨어진다 —
- * **보여 주는 자리의 폴백이지 판정의 폴백이 아니다** (game-state.md §6).
+ * 고쳐진다.
  */
 export function pressFactText(fact: PressFact): string {
   const d = fact.data;
-  if (!d) return fact.text ?? "";
   const v = d.values ?? {};
   const tags = d.tags ?? [];
   const sub = tags[0];
@@ -793,10 +783,9 @@ export function pressFactText(fact: PressFact): string {
       return `${josa(name, "이/가")} 같은 자리(${sub ?? ""})${josaOf(sub ?? "", "을/를")} 봐 왔다`;
     case "minutes":
       /**
-       * 지위와 창의 수치는 **있을 때만** 선다 (people.md §5·§5-2). 이것이 없으면
-       * "출전 기회 불만"이 어느 기대에 대해 모자란 것인지가 서지 않아, 백업의
-       * 침묵과 핵심의 불만을 읽는 쪽이 가르지 못한다. 옛 세이브의 카드에는
-       * 없으므로 그때는 앞의 두 조각만 남는다.
+       * 지위와 창의 수치가 함께 선다 (people.md §5·§5-2). 이것이 없으면 "출전 기회
+       * 불만"이 어느 기대에 대해 모자란 것인지가 서지 않아, 백업의 침묵과 핵심의
+       * 불만을 읽는 쪽이 가르지 못한다.
        *
        * 창의 출전 수(`windowApps`)는 선발 수 **옆에** 선다 — 「선발 0 · 출전 1」과
        * 「선발 0 · 출전 0」은 읽는 쪽이 다른 말을 해야 하는 두 사실이다. 시즌
@@ -805,10 +794,7 @@ export function pressFactText(fact: PressFact): string {
       return (
         `출전 기회 불만 ${v.days ?? 0}일째 · 시즌 출전 ${v.apps ?? 0}경기` +
         (sub ? ` · ${SQUAD_STATUS_KO[sub as SquadStatus] ?? sub} 지위` : "") +
-        (v.played === undefined
-          ? ""
-          : ` · 최근 ${v.played}경기 선발 ${v.starts ?? 0}회` +
-            (v.windowApps === undefined ? "" : ` · 출전 ${v.windowApps}회`))
+        ` · 최근 ${v.played ?? 0}경기 선발 ${v.starts ?? 0}회 · 출전 ${v.windowApps ?? 0}회`
       );
     case "demoted":
       return `2군 ${v.days ?? 0}일째 · 불만 ${v.issueDays ?? 0}일째`;
@@ -852,12 +838,10 @@ export function pressFactText(fact: PressFact): string {
     case "transfer-request":
       /**
        * `tags[0]`이 **요청의 사유**(`TRANSFER_REQUEST_REASONS`), `tags[1]`이 감독의
-       * 답이다 — 결정이거나 면담으로만 답한 `heard` (transfer.md §1-1). 옛 세이브의
-       * 카드는 `tags[0]`에 불만 사유를 들고 있어 표에서 안 잡히고, 그때만 사유
-       * 이름으로 떨어진다.
+       * 답이다 — 결정이거나 면담으로만 답한 `heard` (transfer.md §1-1).
        */
       return (
-        `${name} 이적 요청 (${TRANSFER_REQUEST_REASON_KO[sub as TransferRequestReason] ?? reasonOf(sub)})` +
+        `${name} 이적 요청 (${TRANSFER_REQUEST_REASON_KO[sub as TransferRequestReason] ?? sub ?? "사유 불명"})` +
         ` — ${v.days ?? 0}일째` +
         (tags[1] === "accept"
           ? " · 감독이 받아들였다"
@@ -884,10 +868,7 @@ export function pressFactText(fact: PressFact): string {
       /**
        * 항목 줄은 **비전의 표가 쓴다** (`visionItemText` — career.md §5). 카드가 문장을
        * 따로 만들면 같은 항목이 화면과 구단주의 입에서 다른 이름으로 선다.
-       * 코드가 표 밖이면(옛 세이브) 그릴 것이 없어 이름만 남긴다.
        */
-      if (!(VISION_CODES as readonly string[]).includes(sub ?? ""))
-        return `구단 비전 — ${sub ?? ""}`;
       return `구단 비전 — ${visionItemText({
         code: sub as VisionCode,
         target: v.target ?? 0,

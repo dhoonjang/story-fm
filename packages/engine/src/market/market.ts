@@ -30,12 +30,7 @@ import { playerValueOf } from "../world/valuation";
 import { buyoutMet } from "./buyout";
 import { checkTerms } from "./terms";
 // 곡선의 상수는 세계 생성과 나눠 쓰는 자리로 내려갔다 — 부르던 쪽은 그대로다 (AGENTS.md §5)
-export {
-  LEAGUE_FACTOR_AT_TOP,
-  LEAGUE_FACTOR_EXPONENT,
-  MARKET_VALUE_AT_PEAK,
-  baseValueOf,
-} from "../world/valuation";
+export { LEAGUE_FACTOR_EXPONENT, MARKET_VALUE_AT_PEAK, baseValueOf } from "../world/valuation";
 import { isMarketOnlyLeague, leagueCatalogById } from "../data/league-catalog";
 import { leagueEconomyLevel } from "../data/league-economy";
 import { isClubTeam, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
@@ -585,7 +580,7 @@ function splitNote(terms: DealTerms, effective: number): string {
  * 원소속 구단에 영입 오퍼를 넣어 완전 영입할 수 있다; 빌려 준 선수와 남의 임대는 그대로 잠긴다.
  */
 export function loanedInBy(state: GameState, player: GamePlayer): boolean {
-  return player.loan !== undefined && player.loan !== null && player.teamId === state.userTeamId;
+  return player.loan !== undefined && player.teamId === state.userTeamId;
 }
 
 export function loanLockOf(player: GamePlayer): string | null {

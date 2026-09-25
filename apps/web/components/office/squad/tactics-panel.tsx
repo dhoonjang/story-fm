@@ -30,7 +30,7 @@ import type { SetPieceRoutineView, SetPieceTakersView, TacticsView } from "./typ
  * 머릿속에서 판으로 옮겨야 한다. 그래서 값은 판 위에 선으로도 그어진다 — 선을
  * 긋는 것은 `pitch.tsx`의 그라운드고(우리 판·상대 판이 같이 쓴다) 여기는 그 값을
  * **만지는** 자리다. 그 눈금은 **화면의 감각**일 뿐 시뮬레이션 수치가 아니다 —
- * 경기 판정은 코어가 전력 패킷으로 따로 한다 (match.md §1).
+ * 경기 판정은 코어가 따로 한다 (match.md §1).
  */
 export function TacticsPanel({
   tactics,

@@ -95,7 +95,7 @@ function drawPool(state: GameState, season: number): StaffPoolEntry[] {
 /**
  * 지금 자리를 찾는 사람들 — **읽기만 한다** (people.md §2-2).
  *
- * 표가 없으면(새 게임·옛 세이브) 그해의 추첨을 그 자리에서 돌려준다. 세이브를 건드리지
+ * 표가 없으면(새 게임) 그해의 추첨을 그 자리에서 돌려준다. 세이브를 건드리지
  * 않는 것이 요점이다: 프롬프트 입력을 조립하는 자리(`describeStaffPool`)와 화면이 이
  * 함수를 부르는데, 입력을 만드는 일이 상태를 바꾸면 같은 턴을 두 번 그릴 때 세계가
  * 달라진다. 추첨이 결정적이라 나중에 `ensureStaffPool`이 적어 넣는 값과 같다.
@@ -105,11 +105,9 @@ export function staffPoolOf(state: GameState): readonly StaffPoolEntry[] {
 }
 
 /**
- * 로드 보정 — 풀이 없던 세이브를 **적어 넣는다**. 멱등이다(있으면 손대지 않는다).
- *
- * 생성이 (시드, 시즌)으로 결정적이라 채워도 그 세이브의 사람은 늘 같다 — 세이브
- * 버전을 올리지 않는 근거다 (AGENTS.md 세이브 호환성). 쓰는 자리는 여기와 고용·해고
- * 뿐이다.
+ * 풀을 **적어 넣는다** — 고용·해고가 표를 고쳐 쓰기 전에 부른다. 멱등이다(있으면
+ * 손대지 않는다). 새 게임은 `undefined`로 서므로 첫 고용·해고가 그해의 추첨을 여기서
+ * 굳힌다 — 추첨이 (시드, 시즌)으로 결정적이라 `staffPoolOf`가 보여 준 사람과 같다.
  */
 export function ensureStaffPool(state: GameState): void {
   if (state.staffPool !== undefined) return;
@@ -209,7 +207,7 @@ export function hireStaff(
   if (persona === null) {
     return { ok: false, message: `${entry.name}의 원형을 찾을 수 없습니다` };
   }
-  state.personas = [...(state.personas ?? []), persona];
+  state.personas = [...state.personas, persona];
   state.staffPool = (state.staffPool ?? []).filter((e) => e.name !== entry.name);
   const until = persona.employment!.contract.until;
   return {
@@ -242,7 +240,7 @@ const WEEKS_PER_YEAR = 52;
  * 레퍼런스가 상주시키는 카드도 사라진다 (agents.md §5).
  */
 export function releaseStaff(state: GameState, input: { name: string }): CommandResult {
-  const persona = (state.personas ?? []).find((p) => isStaffRole(p.role) && p.name === input.name);
+  const persona = state.personas.find((p) => isStaffRole(p.role) && p.name === input.name);
   if (persona === undefined || persona.employment === undefined) {
     return { ok: false, message: `${input.name} — 우리 구단의 스태프가 아닙니다` };
   }
@@ -256,7 +254,7 @@ export function releaseStaff(state: GameState, input: { name: string }): Command
       amount: severance,
     });
   }
-  state.personas = (state.personas ?? []).filter((p) => p.characterId !== persona.characterId);
+  state.personas = state.personas.filter((p) => p.characterId !== persona.characterId);
   ensureStaffPool(state);
   state.staffPool = [
     {
@@ -298,7 +296,7 @@ export function releaseStaff(state: GameState, input: { name: string }): Command
  */
 export function renewStaffContracts(state: GameState, on: string): string[] {
   const renewed: string[] = [];
-  for (const persona of state.personas ?? []) {
+  for (const persona of state.personas) {
     const employment = persona.employment;
     if (employment === undefined) continue;
     if (employment.contract.until > on) continue;

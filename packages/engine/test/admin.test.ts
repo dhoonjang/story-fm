@@ -481,30 +481,10 @@ describe("팀 정체성 편집과 진행 중인 세이브", () => {
     expect(clubEconomyLevelIn(state, "wolves")).toBe(economy);
   });
 
-  it("정체성이 없는 옛 세이브는 그대로 로드되고 카탈로그로 폴백한다", () => {
-    const state = createTestGame(52, "arsenal");
-    // 옛 세이브 — GAME_TEAM에 복사본이 없다 (SAVE_VERSION은 그대로)
-    for (const team of state.teams) {
-      delete team.name;
-      delete team.shortName;
-      delete team.leagueId;
-      delete team.stadium;
-      delete team.capacity;
-      delete team.commercialTier;
-    }
-    saveGame(state);
-
-    const loaded = loadGame(state.id);
-    expect(loaded).not.toBeNull();
-    expect(loaded!.teams.every((t) => t.name === undefined)).toBe(true);
-    expect(teamNameIn(loaded!, "arsenal")).toBe(teamCatalogById("arsenal")!.name);
-    expect(leagueOfTeamIn(loaded!, "arsenal")).toBe(teamCatalogById("arsenal")!.leagueId);
-  });
-
   /**
-   * 로드가 세이브에 없는 클럽을 채워 넣는 자리(`addMissingClubs`)는 **시드 카탈로그**만
-   * 본다. 지금 유효한 카탈로그(=오버라이드)를 읽으면 어드민이 팀 하나를 추가할 때마다
-   * 열려 있는 **모든 옛 세이브**에 그 클럽과 스쿼드가 주입된다.
+   * 로드는 세이브에 없는 클럽을 채워 넣지 않는다 — 세계는 생성 때 카탈로그를 복사하고
+   * 그 뒤로는 세이브가 원본이다. 어드민이 팀 하나를 추가해도 열려 있는 세이브에 그
+   * 클럽과 스쿼드가 주입되지 않는다.
    */
   it("어드민이 더한 팀은 이미 열려 있는 세이브에 들어가지 않는다", () => {
     const state = createTestGame(53, "arsenal");

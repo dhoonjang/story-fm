@@ -327,7 +327,7 @@ function seatStatus(
   return positionOf(state, teamId, tableOf);
 }
 
-/** 부임한 지 얼마나 됐나 — 옛 세이브엔 없어 시즌 시작으로 본다 */
+/** 부임한 지 얼마나 됐나 — 무소속(부임일이 없다)은 시즌 시작으로 본다 */
 function daysInCharge(state: GameState, team: { managerSince?: string } | undefined): number {
   const since = team?.managerSince ?? state.calendar.preseasonStart;
   // 부임일이 오늘보다 뒤인 세이브는 없지만, 음수를 그대로 흘리면 유예 판정이 뒤집힌다
@@ -340,7 +340,7 @@ function daysInCharge(state: GameState, team: { managerSince?: string } | undefi
  * 경질도, 유저가 그 자리에 부임하는 것도 그 사람에게는 같은 하루다 — 자리를
  * 잃었다. 그래서 두 자리가 이 함수 하나를 부른다.
  *
- * 벤치에 이름이 없으면(유저 팀·옛 세이브) 앉힐 사람이 없다.
+ * 벤치에 이름이 없으면(유저 팀) 앉힐 사람이 없다.
  */
 function poolSacked(state: GameState, team: GameTeam): void {
   const name = team.managerName;
@@ -351,7 +351,7 @@ function poolSacked(state: GameState, team: GameTeam): void {
    * 그 이름으로 다른 벤치를 채운다 — 감독이 둘이 된다.
    */
   if (name === state.manager.name) return;
-  const pool = state.managerPool ?? [];
+  const pool = state.managerPool;
   // 이름이 곧 `characterId`(전역 유일)라 같은 이름이 두 줄에 앉을 수 없다 (people.md §1)
   if (pool.some((e) => e.name === name)) return;
 
@@ -366,8 +366,7 @@ function poolSacked(state: GameState, team: GameTeam): void {
     rating: team.aiManagerTacticsRating ?? AI_MANAGER_RATING_FALLBACK,
     lastTeamId: team.id,
     sackedOn: state.date,
-    ...(team.managerPersonaSeat === undefined ? {} : { personaSeat: team.managerPersonaSeat }),
-    spells: [...(team.managerSpells ?? []), spell],
+    spells: [...team.managerSpells, spell],
   };
 
   /**
@@ -399,7 +398,7 @@ function hireFromPool(
   target: number,
   rng: () => number,
 ): ManagerPoolEntry | null {
-  const candidates = (state.managerPool ?? []).filter(
+  const candidates = state.managerPool.filter(
     (e) =>
       // 자기가 방금 자른 사람을 다시 부르지는 않는다 — 그건 선임이 아니라 번복이다.
       // 그 앞의 구단은 막지 않는다: 몇 해 뒤의 복귀는 이야기가 되는 자리다
@@ -411,7 +410,7 @@ function hireFromPool(
   const drawn = rng() < POOL_HIRE_CHANCE;
   if (!drawn || candidates.length === 0) return null;
   const picked = candidates[randInt(rng, 0, candidates.length - 1)]!;
-  state.managerPool = (state.managerPool ?? []).filter((e) => e.name !== picked.name);
+  state.managerPool = state.managerPool.filter((e) => e.name !== picked.name);
   return picked;
 }
 
@@ -430,7 +429,7 @@ function installNewManager(
   rng: () => number,
 ): ManagerPoolEntry | null {
   // 순위표가 없는 팀은 부르는 쪽에서 걸러지므로 무소속은 여기 닿지 않는다 —
-  // 폴백은 값 없는 팀(무소속·옛 세이브)을 위한 것이다 (평균 AI 감독)
+  // 폴백은 타입이 요구하는 자리다 (평균 AI 감독)
   const before = team.aiManagerTacticsRating ?? AI_MANAGER_RATING_FALLBACK;
   /** 구단이 원하는 사람 — 직전보다 조금 나은 쪽으로 기운다 */
   const target = Math.min(92, Math.max(50, before + randInt(rng, -4, 10)));
@@ -447,16 +446,13 @@ function installNewManager(
     // 역량치는 사람이 들고 다닌다 — 그래서 아는 얼굴이 아는 축구를 데려온다
     team.aiManagerTacticsRating = hired.rating;
     team.managerSpells = hired.spells;
-    if (hired.personaSeat === undefined) delete team.managerPersonaSeat;
-    else team.managerPersonaSeat = hired.personaSeat;
   } else {
     team.aiManagerTacticsRating = target;
     // 이미 선 사람들의 이름은 피한다 — 전임도 그 집합에 있으므로 후임은 반드시
     // 다른 이름, 곧 다른 사람이다 (사람됨 채널이 이름이다 — people.md §2)
     team.managerName = inventPersonName(rng, team.id, occupiedPersonNames(state));
-    // 전임의 이력·자리 표식이 남으면 지어낸 사람이 남의 과거를 갖는다
-    delete team.managerSpells;
-    delete team.managerPersonaSeat;
+    // 전임의 이력이 남으면 지어낸 사람이 남의 과거를 갖는다
+    team.managerSpells = [];
   }
   team.managerSince = state.date;
   poolSacked(state, outgoing);
@@ -474,24 +470,19 @@ function installNewManager(
 
 /** 지금 열려 있는 제안 — 만료일 순 (가장 먼저 사라질 것이 앞) */
 export function openManagerOffers(state: GameState): ManagerOffer[] {
-  return (state.managerOffers ?? [])
+  return state.managerOffers
     .filter((o) => o.status === "open" && o.expiresOn >= state.date)
     .sort((a, b) => a.expiresOn.localeCompare(b.expiresOn) || a.id.localeCompare(b.id));
 }
 
-/**
- * 제안에 걸린 기대 한 줄 — **코드가 원본이고 문장은 폴백이다** (career.md §5.1).
- * 새 제안은 갈래 코드만 적으므로, 옛 세이브의 문장을 먼저 읽으면 새 제안이 빈칸으로 선다.
- */
+/** 제안에 걸린 기대 한 줄 — 코드에서 만든다 (career.md §5.1) */
 function offerExpectation(offer: ManagerOffer): string {
-  return offer.expectationCode
-    ? boardExpectationText(offer.expectationCode, offer.target)
-    : `${offer.expectation ?? "-"}(${offer.target}위)`;
+  return boardExpectationText(offer.expectationCode, offer.target);
 }
 
 /** 기한이 지난 제안은 사라진다 — 답하지 않은 것도 답이다 */
 function expireStaleOffers(state: GameState, digest: TickSink): void {
-  for (const offer of state.managerOffers ?? []) {
+  for (const offer of state.managerOffers) {
     if (offer.status !== "open" || offer.expiresOn >= state.date) continue;
     offer.status = "expired";
     if (offer.via === "renewal") {
@@ -532,7 +523,7 @@ function spellStart(state: GameState): string {
 
 /** 14일이 지난 공석은 명부에서 내려간다 — 새 벤치가 굳은 자리다 (career.md §5.1) */
 function pruneVacancies(state: GameState): void {
-  if (!state.managerVacancies?.length) return;
+  if (state.managerVacancies.length === 0) return;
   state.managerVacancies = state.managerVacancies.filter(
     (v) => diffDays(v.on, state.date) < VACANCY_KNOCK_DAYS,
   );
@@ -594,7 +585,7 @@ function poachInPost(
   digest: TickSink,
 ): boolean {
   const contract = state.manager.contract;
-  // 물 위약금이 없는 자리는 데려가는 협상이 아니다 (계약을 갖지 않는 옛 세이브)
+  // 무직에게는 손을 뻗을 자리가 없다 — 물 위약금도 없다
   if (!contract) return false;
   // 갓 앉은 벤치는 아직 굳지 않았다 — AI 구단의 유예와 같은 값이다
   const ourTeam = state.teams.find((t) => t.id === state.userTeamId);
@@ -604,7 +595,7 @@ function poachInPost(
   // 내려가는 이직은 세계가 먼저 부를 일이 아니다 — 그건 감독이 두드릴 일이다
   if (tier > tierOfTeamIn(state, state.userTeamId) + POACH_TIER_MARGIN) return false;
 
-  const offers = state.managerOffers ?? [];
+  const offers = state.managerOffers;
   const since = spellStart(state);
   // 한 번 부른 구단은 **이번 재임 안에서는** 다시 부르지 않는다
   if (offers.some((o) => o.madeOn >= since && o.teamId === teamId)) return false;
@@ -664,7 +655,7 @@ function offerToUnemployed(
   position: number,
   digest: TickSink,
 ): boolean {
-  const offers = state.managerOffers ?? [];
+  const offers = state.managerOffers;
   /**
    * 한 번 부른 구단은 다시 부르지 않는다 — 단 **이번 무직 기간** 안에서다.
    * 기록은 세이브 전체에 쌓이므로 전부 세면 경질이 되풀이될수록 부를 수 있는
@@ -755,7 +746,7 @@ export function runManagerMarket(state: GameState, digest: TickSink): boolean {
      */
     if (derbyOf(state.userTeamId, team.id)) {
       state.pressSackings = [
-        ...(state.pressSackings ?? []),
+        ...state.pressSackings,
         { teamId: team.id, date: state.date, position: standing.position },
       ];
     }
@@ -770,7 +761,7 @@ export function runManagerMarket(state: GameState, digest: TickSink): boolean {
      * 것이다. 14일이 지나면 `pruneVacancies`가 내린다.
      */
     state.managerVacancies = [
-      ...(state.managerVacancies ?? []),
+      ...state.managerVacancies,
       { teamId: team.id, on: state.date, position: standing.position },
     ];
 
@@ -850,7 +841,7 @@ function leaveClub(state: GameState, card: Dismissal, channel: string): void {
   const contract = state.manager.contract;
   /**
    * **위약금은 구단이 무는 구단의 지출이다** (career.md §5.4) — 계약을 지우기 전에
-   * 잰다. 만료는 끝까지 간 계약이라 잔여가 0이고, 계약이 없던 옛 세이브도 0이다.
+   * 잰다. 만료는 끝까지 간 계약이라 잔여가 0이다.
    *
    * ⚠️ **사임과 이적은 여기 오지 않는다** — 사임은 감독이 지갑에서 무는 돈이고
    * (`resignPost`), 이적은 새 구단이 옛 구단에 무는 돈이라(`leaveForMove`) 둘 다
@@ -875,9 +866,9 @@ function leaveClub(state: GameState, card: Dismissal, channel: string): void {
    */
   reportSacking(state, {
     teamId,
-    kind: card.kind ?? "sacked",
+    kind: card.kind,
     ...(card.position === undefined ? {} : { position: card.position }),
-    ...(card.target === undefined ? {} : { target: card.target }),
+    target: card.target,
     ...(team?.managerSince === undefined ? {} : { since: team.managerSince }),
   });
   if (team) {
@@ -902,7 +893,7 @@ function leaveClub(state: GameState, card: Dismissal, channel: string): void {
     }
   }
   // 답을 기다리던 재계약 제안도 닫힌다 — 다시 계약할 구단이 없어졌다 (career.md §5.4)
-  for (const offer of state.managerOffers ?? []) {
+  for (const offer of state.managerOffers) {
     if (offer.status === "open") offer.status = "expired";
   }
   /**
@@ -991,7 +982,7 @@ function standRenewalOffer(state: GameState, contract: ManagerContract, digest: 
   const expectation = boardExpectation(state, teamId);
   const salary = Math.max(contract.salary, terms.salary);
   state.managerOffers = [
-    ...(state.managerOffers ?? []),
+    ...state.managerOffers,
     {
       id: `mgr-renewal-${teamId}-${state.date}`,
       teamId,
@@ -1109,7 +1100,7 @@ export function reviewUserSeat(state: GameState, digest: TickSink): boolean {
   if (!standing || standing.played < USER_MIN_MATCHES) return false;
   const seat = seatOf(state, state.userTeamId);
   const manager = state.manager;
-  const warnings = manager.boardWarnings ?? 0;
+  const warnings = manager.boardWarnings;
 
   // 기대 위로 올라섰으면 경고가 하나 지워진다 — 되돌릴 수 있어야 압박이 이야기가 된다
   if (standing.position <= boardExpectation(state, state.userTeamId).target) {
@@ -1205,18 +1196,17 @@ function acceptRenewal(state: GameState, offer: ManagerOffer): CommandResult {
     };
   }
   offer.status = "accepted";
-  const base = MANAGER_TERMS_BY_TIER[offer.tier as 1 | 2 | 3 | 4];
-  const salary = offer.salary ?? base.salary;
-  const years = offer.years ?? base.years;
   // 새 임기의 계약이라 재계약 판정 자국은 지고 가지 않는다 — 다음 만료 90일 전에 다시 선다
   state.manager.contract = {
-    salary,
+    salary: offer.salary,
     signedOn: state.date,
-    until: contractUntil(state.date, years),
+    until: contractUntil(state.date, offer.years),
   };
-  const pledge = offer.budgetPledge ?? 0;
-  if (pledge > 0) financeOf(state, state.userTeamId).transferBudget += pledge;
+  if (offer.budgetPledge > 0)
+    financeOf(state, state.userTeamId).transferBudget += offer.budgetPledge;
 
+  const salary = offer.salary;
+  const pledge = offer.budgetPledge;
   const name = teamNameIn(state, state.userTeamId);
   pushNarrative(state, `${name} 재계약`, 5);
   return {
@@ -1256,13 +1246,11 @@ function acceptRenewal(state: GameState, offer: ManagerOffer): CommandResult {
  */
 function leaveForMove(state: GameState, offer: ManagerOffer): Dismissal {
   const fromTeamId = state.userTeamId;
-  const contract = state.manager.contract;
   /**
    * 금액은 **제안이 들고 온 값**이다 — 부를 때 잰 것이 그 구단이 물기로 한 값이라
-   * 열흘 뒤 수락한다고 달라지지 않는다. 조건이 없는 옛 세이브의 제안만 그날 잰다.
+   * 열흘 뒤 수락한다고 달라지지 않는다. 보상금이 없는 제안은 0이다.
    */
-  const compensation =
-    offer.compensation ?? (contract ? managerSeveranceOf(contract, state.date) : 0);
+  const compensation = offer.compensation ?? 0;
   if (compensation > 0) {
     // `userTeamId`가 아직 옛 구단이라 이 줄이 **옛 구단** 원장에 선다 (`recordFinance`)
     recordFinance(state, fromTeamId, {
@@ -1298,7 +1286,7 @@ function leaveForMove(state: GameState, offer: ManagerOffer): Dismissal {
  * @param ref 제안 id 또는 구단 이름·약칭
  */
 export function acceptManagerOffer(state: GameState, ref: string): CommandResult {
-  const offer = (state.managerOffers ?? []).find((o) => offerMatches(state, o, ref));
+  const offer = state.managerOffers.find((o) => offerMatches(state, o, ref));
   /**
    * **재계약은 부임이 아니다** (career.md §5.4) — 구단도 자리도 그대로라 아래의
    * 전이는 하나도 일어나지 않는다.
@@ -1353,21 +1341,20 @@ export function acceptManagerOffer(state: GameState, ref: string): CommandResult
     poolSacked(state, team);
     team.managerName = state.manager.name;
     team.managerSince = state.date;
-    // 전임의 이력·자리 표식은 그를 따라 풀로 갔다 — 감독의 커리어는 `dismissals`가 든다
-    delete team.managerSpells;
-    delete team.managerPersonaSeat;
+    // 전임의 이력은 그를 따라 풀로 갔다 — 감독의 커리어는 `dismissals`가 든다
+    team.managerSpells = [];
   }
   /**
-   * **감독 계약이 선다** — 제안의 조건으로 (career.md §5.1). 옛 세이브의 제안엔
-   * 조건이 없어 그 순간 등급 표의 기본으로 선다. 이적 예산 약속은 그 자리에서
-   * 새 구단의 예산에 더해진다 — 약속은 부임과 함께 이행되는 사실이다.
+   * **감독 계약이 선다** — 제안의 조건으로 (career.md §5.1). 이적 예산 약속은 그
+   * 자리에서 새 구단의 예산에 더해진다 — 약속은 부임과 함께 이행되는 사실이다.
    */
-  const base = MANAGER_TERMS_BY_TIER[offer.tier as 1 | 2 | 3 | 4];
-  const salary = offer.salary ?? base.salary;
-  const years = offer.years ?? base.years;
-  const contract = { salary, signedOn: state.date, until: contractUntil(state.date, years) };
+  const contract = {
+    salary: offer.salary,
+    signedOn: state.date,
+    until: contractUntil(state.date, offer.years),
+  };
   state.manager.contract = contract;
-  const pledge = offer.budgetPledge ?? 0;
+  const pledge = offer.budgetPledge;
   if (pledge > 0) financeOf(state, offer.teamId).transferBudget += pledge;
   /**
    * **새 구단이 문 보상금** (career.md §5.1 · finance.md §9.7) — `userTeamId`가 이미
@@ -1389,14 +1376,14 @@ export function acceptManagerOffer(state: GameState, ref: string): CommandResult
    * 경질장은 지워지지 않고 **이력으로 옮겨진다** (career.md §6) — 잘린 시즌은
    * `SEASON_RECORD`가 없으므로, 이 줄이 없으면 그 해가 커리어 표에서 통째로 빈다.
    */
-  state.dismissals = [...(state.dismissals ?? []), leaving];
+  state.dismissals = [...state.dismissals, leaving];
   delete state.dismissal;
   // 답할 자리는 하나였으니 남은 것은 이제 답할 필요가 없다
-  for (const other of state.managerOffers ?? []) {
+  for (const other of state.managerOffers) {
     if (other.status === "open") other.status = "expired";
   }
   // 앞 구단의 경고를 지고 가지 않는다
-  delete state.manager.boardWarnings;
+  state.manager.boardWarnings = 0;
   delete state.manager.lastWarnedOn;
   /**
    * 다가옴의 압력도 마찬가지다 (people.md §8) — 앞 구단 선수의 불만이 쌓아 둔 눈금을
@@ -1413,7 +1400,7 @@ export function acceptManagerOffer(state: GameState, ref: string): CommandResult
    * 감독의 그 자리에 대한 것이라, 남겨 두면 60일 안에 돌아온 감독이 남의 임기에
    * 받은 승인으로 선수를 산다.
    */
-  for (const finance of state.finances) delete finance.earmarked;
+  for (const finance of state.finances) finance.earmarked = [];
   // 라커룸 불만도 앞 구단의 것이다 (people.md §5) — 지고 오면 주의 줄이 옛 이름을 나열한다
   state.issues = [];
   // 앞 구단 선수에게 한 약속도 같다 (people.md §5-2) — 지킬 수 없는 약속이 기한마다 판정된다
@@ -1454,7 +1441,7 @@ export function acceptManagerOffer(state: GameState, ref: string): CommandResult
   openAppointmentPress(state, {
     ...(offer.position === undefined ? {} : { position: offer.position }),
     target: offer.target,
-    expectationCode: offer.expectationCode ?? "mid",
+    expectationCode: offer.expectationCode,
   });
 
   const name = teamNameIn(state, offer.teamId);
@@ -1464,7 +1451,7 @@ export function acceptManagerOffer(state: GameState, ref: string): CommandResult
     message:
       `${name} 감독으로 부임했습니다 (${state.date}) — 보드의 기대는 ${offerExpectation(offer)},` +
       ` 지금 순위는 ${offer.position ?? "-"}위입니다.` +
-      ` 계약은 연봉 ${formatMoney(salary)}에 ${contract.until}까지` +
+      ` 계약은 연봉 ${formatMoney(contract.salary)}에 ${contract.until}까지` +
       (pledge > 0
         ? `, 이적 예산 ${josa(formatMoney(pledge), "이/가")} 약속대로 더해졌습니다`
         : `입니다`) +
@@ -1476,7 +1463,7 @@ export function acceptManagerOffer(state: GameState, ref: string): CommandResult
       head: compensation > 0 ? "이적 부임" : "부임",
       items: [
         item({ label: "구단", text: name, note: `기대 ${offerExpectation(offer)}` }),
-        item({ label: "연봉", text: formatMoney(salary), note: `${contract.until}까지` }),
+        item({ label: "연봉", text: formatMoney(contract.salary), note: `${contract.until}까지` }),
         ...(pledge > 0
           ? [item({ label: "이적 예산", text: formatMoney(pledge), delta: pledge })]
           : []),
@@ -1508,7 +1495,7 @@ export function counterManagerOffer(
   ref: string,
   ask: { salary?: number; transferBudget?: number },
 ): CommandResult {
-  const offer = (state.managerOffers ?? []).find((o) => offerMatches(state, o, ref));
+  const offer = state.managerOffers.find((o) => offerMatches(state, o, ref));
   /**
    * 재직 중에 되부를 수 있는 것은 재직 중에 설 수 있는 제안뿐이다 — 보드의 재계약
    * (career.md §5.4)과 이직 제안(§5.1). 흥정의 길은 셋 다 같다.
@@ -1535,7 +1522,6 @@ export function counterManagerOffer(
   }
 
   const tier = offer.tier as 1 | 2 | 3 | 4;
-  const base = MANAGER_TERMS_BY_TIER[tier];
   const reputation = (state.manager.reputation.board + state.manager.reputation.media) / 2;
   const headroom = counterHeadroom(reputation, tier);
   const parts: string[] = [];
@@ -1560,16 +1546,11 @@ export function counterManagerOffer(
     return ceiling;
   };
 
-  // 흥정이 끝난 제안의 조건은 확정 사실로 적힌다 — 옛 세이브의 빈 칸도 여기서 찬다
-  offer.salary =
-    ask.salary === undefined
-      ? (offer.salary ?? base.salary)
-      : settle("연봉", offer.salary ?? base.salary, ask.salary);
-  offer.budgetPledge =
-    ask.transferBudget === undefined
-      ? (offer.budgetPledge ?? base.budgetPledge)
-      : settle("이적 예산 약속", offer.budgetPledge ?? base.budgetPledge, ask.transferBudget);
-  offer.years = offer.years ?? base.years;
+  // 흥정이 끝난 제안의 조건은 확정 사실로 적힌다
+  if (ask.salary !== undefined) offer.salary = settle("연봉", offer.salary, ask.salary);
+  if (ask.transferBudget !== undefined) {
+    offer.budgetPledge = settle("이적 예산 약속", offer.budgetPledge, ask.transferBudget);
+  }
   offer.counteredOn = state.date;
 
   pushNarrative(state, `${teamNameIn(state, offer.teamId)} 조건 흥정`, 4);
@@ -1642,7 +1623,7 @@ export function pendingInterview(state: GameState): Approach | null {
 
 /** 이번 무직 기간에 이미 마주 앉은 구단인가 — 같은 문을 두 번 두드릴 수는 없다 */
 function interviewedSince(state: GameState, teamId: string, since: string): boolean {
-  return (state.approaches ?? []).some(
+  return state.approaches.some(
     (a) => a.topic === "interview" && a.teamId === teamId && a.date >= since,
   );
 }
@@ -1823,7 +1804,7 @@ export function settleInterview(
   const lift = terms === "raised" ? 1 + counterHeadroom(reputation, tier) : 1;
   const salary = Math.round(base.salary * KNOCK_SALARY_RATE * lift);
   const budgetPledge = Math.round(base.budgetPledge * lift);
-  const position = approach.contextCard?.value;
+  const position = approach.contextCard.value;
   /**
    * **재직 중에 두드린 자리면 보상금이 실린다** (career.md §5.1) — 감독이 먼저
    * 두드렸든 구단이 불렀든 옛 구단이 받는 돈은 같은 식이다(`managerSeveranceOf`).
@@ -1832,7 +1813,7 @@ export function settleInterview(
   const compensation = state.dismissal || !contract ? 0 : managerSeveranceOf(contract, state.date);
 
   state.managerOffers = [
-    ...(state.managerOffers ?? []),
+    ...state.managerOffers,
     {
       id: `mgr-offer-${teamId}-${state.date}`,
       teamId,
@@ -1938,14 +1919,14 @@ export function applyForManagerJob(state: GameState, teamRef: string): CommandRe
   }
   pruneVacancies(state);
   const key = norm(teamRef);
-  const vacancy = (state.managerVacancies ?? []).find(
+  const vacancy = state.managerVacancies.find(
     (v) =>
       norm(v.teamId) === key ||
       norm(teamShortNameIn(state, v.teamId)) === key ||
       norm(teamNameIn(state, v.teamId)) === key,
   );
   if (!vacancy) {
-    const open = (state.managerVacancies ?? []).map((v) => teamShortNameIn(state, v.teamId));
+    const open = state.managerVacancies.map((v) => teamShortNameIn(state, v.teamId));
     return {
       ok: false,
       message:
@@ -1956,7 +1937,7 @@ export function applyForManagerJob(state: GameState, teamRef: string): CommandRe
   }
   const since = spellStart(state);
   if (
-    (state.managerOffers ?? []).some((o) => o.madeOn >= since && o.teamId === vacancy.teamId) ||
+    state.managerOffers.some((o) => o.madeOn >= since && o.teamId === vacancy.teamId) ||
     interviewedSince(state, vacancy.teamId, since)
   ) {
     return {
@@ -2000,7 +1981,7 @@ export function applyForManagerJob(state: GameState, teamRef: string): CommandRe
    */
   const approach = openInterview(state, vacancy);
   const owner = generateOwner(state.seed, vacancy.teamId);
-  const line = approachContextText(approach.contextCard!, {
+  const line = approachContextText(approach.contextCard, {
     subject: teamNameIn(state, vacancy.teamId),
   });
   /**

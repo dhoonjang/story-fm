@@ -15,7 +15,6 @@ import {
 import { deriveAxes } from "./attributes";
 import { hashOf } from "./name-hash";
 import { catalogPath, dataDir } from "../core/paths";
-import { stripStoredFootAdjust } from "../core/migrations";
 import { catalogCacheKey } from "../data/catalog-source";
 import { type RealPlayerSeed } from "../data/epl-players";
 import { SQUAD_SEEDS } from "../data/squad-seeds";
@@ -488,7 +487,7 @@ const TOP_UP_QUANTILE = 0.25;
  *
  * tier 상수(`TIER_BASE`)를 쓰면 그 값이 리그 상위권의 눈금이라, 실선수 시드가
  * 얇은 클럽일수록 보충 선수가 스쿼드 최고 선수를 넘어섰다 — 세계 상위 명단에
- * 가명이 서고, 그 가명을 축으로 선발·전력 패킷·이적 시세가 돌았다.
+ * 가명이 서고, 그 가명을 축으로 선발·경기·이적 시세가 돌았다.
  *
  * 두 항의 작은 쪽을 쓴다.
  * - **하위 분위**(`TOP_UP_QUANTILE`) — 보충이 서는 자리.
@@ -802,13 +801,7 @@ export function playerCatalog(): PlayerCatalogEntry[] {
        * 능력치가 없는 선수의 전력을 재는 자리에서 — 터진다.
        */
       const parsed = PlayerCatalogEntrySchema.array().min(1).safeParse(raw);
-      if (parsed.success) {
-        // 어드민이 저장한 옛 카탈로그는 미러 자리에 주발 보정을 얹은 채로 들고
-        // 있다 — 조회가 다시 얹기 전에 벗긴다 (player.md §8). 파일은 건드리지
-        // 않는다: 어드민이 저장할 때 비로소 원값으로 기록된다.
-        for (const entry of parsed.data) stripStoredFootAdjust(entry.positions);
-        entries = parsed.data;
-      }
+      if (parsed.success) entries = parsed.data;
     } catch {
       /* 손상 파일은 무시하고 시드로 폴백 */
     }

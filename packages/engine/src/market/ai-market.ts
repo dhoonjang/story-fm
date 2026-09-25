@@ -705,7 +705,7 @@ function minDate(a: string, b: string): string {
  * 어디로 갔나"이고, 나머지는 조회 도구가 갖는다.
  */
 export function runAiTransfers(state: GameState, digest: TickSink): void {
-  const queue = (state.aiDeals ??= []);
+  const queue = state.aiDeals;
   const rng = makeRng(state.seed, `ai-market:${state.date}`);
 
   // ① 오늘 자리 잡은 딜을 장부로 옮긴다 (지난 날짜는 밀린 것 — 함께 처리한다)

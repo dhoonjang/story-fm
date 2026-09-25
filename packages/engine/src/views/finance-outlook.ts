@@ -134,7 +134,7 @@ export function financeOutlook(state: GameState): FinanceOutlook {
  */
 function sideOf(state: GameState, mine: (s: PaymentSchedule) => boolean): PaymentSideView {
   const rows: PaymentDueView[] = [];
-  for (const schedule of state.paymentSchedules ?? []) {
+  for (const schedule of state.paymentSchedules) {
     if (!mine(schedule)) continue;
     const other =
       schedule.payerTeamId === state.userTeamId ? schedule.payeeTeamId : schedule.payerTeamId;

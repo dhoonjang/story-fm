@@ -229,7 +229,7 @@ function withRelations(state: GameState, entry: CharacterEntry): CharacterEntry 
  * 함께 바꾼다 (agents.md §5).
  */
 function memoriesOf(state: GameState, characterId: string): CharacterMemory[] {
-  return (state.characterMemories ?? []).filter((m) => m.characterId === characterId);
+  return state.characterMemories.filter((m) => m.characterId === characterId);
 }
 
 /**
@@ -241,7 +241,7 @@ function memoriesOf(state: GameState, characterId: string): CharacterMemory[] {
  * 그대로 되찾는다.
  */
 function personaOf(state: GameState, characterId: string): Persona | null {
-  const saved = (state.personas ?? []).find((p) => p.characterId === characterId);
+  const saved = state.personas.find((p) => p.characterId === characterId);
   if (saved) return saved;
   // 순서는 `candidatesOf`가 후보를 모으는 순서 그대로다 — 면접 중인 구단주는 우리
   // 구단주 바로 뒤다 (career.md §5.1)
@@ -256,15 +256,14 @@ function personaOf(state: GameState, characterId: string): Persona | null {
   const player = state.players.find((p) => p.name === characterId);
   if (player) return generatePlayerPersona(state.seed, player);
   // 은퇴한 사람 — 명단에는 없어도 명부가 그를 안다 (season.md §6). 순서는 `candidatesOf`와 같다
-  const retired = (state.retired ?? []).find((r) => r.name === characterId);
+  const retired = state.retired.find((r) => r.name === characterId);
   if (retired) return retiredPersona(state.seed, retired);
   const figure = worldFigureByName(state, characterId);
   if (figure) return figure;
   // 타 팀 벤치의 가상 감독 — 후보를 모으는 순서(candidatesOf)의 마지막 겹 그대로
   const bench = state.teams.find((t) => t.id !== state.userTeamId && t.managerName === characterId);
-  if (bench?.managerName !== undefined) {
-    return generateVirtualManager(state.seed, bench.managerName, bench.managerPersonaSeat);
-  }
+  if (bench?.managerName !== undefined)
+    return generateVirtualManager(state.seed, bench.managerName);
   // 타 구단의 단장 — 협상 테이블 건너편의 구단 쪽 (people.md §2)
   for (const team of state.teams) {
     if (team.id === state.userTeamId) continue;
@@ -279,11 +278,11 @@ function personaOf(state: GameState, characterId: string): Persona | null {
    * 되찾는** 자리라 규약이 다르다 — 지난 시즌 우리와 말을 섞은 상대 감독이 잘린
    * 이튿날 그 이력의 화자가 빈 카드가 되면 안 된다.
    */
-  const unemployed = (state.managerPool ?? []).find((e) => e.name === characterId);
+  const unemployed = state.managerPool.find((e) => e.name === characterId);
   if (unemployed) {
     return (
       worldFigureByName(state, unemployed.name) ??
-      generateVirtualManager(state.seed, unemployed.name, unemployed.personaSeat)
+      generateVirtualManager(state.seed, unemployed.name)
     );
   }
   return null;
@@ -428,7 +427,6 @@ function candidatesOf(state: GameState): Candidate[] {
 
   // ── 우리 사람 ──
   // 자리가 하나뿐인 인물 — 감독이 매일 보는 사람이라 언제나 `full`이다.
-  // 옛 세이브라 비어 있으면 이 함수들이 시드로 그 자리에서 만든다
   add(headCoachOf(state), NEAR_OURS, always("full"));
   add(ownerOf(state), NEAR_OURS, always("full"));
   /**
@@ -438,7 +436,7 @@ function candidatesOf(state: GameState): Candidate[] {
   const interviewer = interviewOwnerOf(state);
   if (interviewer) add(interviewer, NEAR_OURS, always("full"));
   for (const reporter of reportersOf(state)) add(reporter, NEAR_OURS, always("full"));
-  for (const persona of state.personas ?? []) {
+  for (const persona of state.personas) {
     if (persona.role !== "player") add(persona, NEAR_OURS, always("full"));
   }
 
@@ -458,7 +456,7 @@ function candidatesOf(state: GameState): Candidate[] {
    * 지식 눈금은 명단에 있는 선수에게만 답한다. 현역을 먼저 담은 뒤라 이름이 겹치면
    * 현역이 자리를 지킨다.
    */
-  for (const retired of state.retired ?? []) {
+  for (const retired of state.retired) {
     add(retiredPersona(state.seed, retired), NEAR_OURS, always("full"));
   }
 
@@ -477,11 +475,7 @@ function candidatesOf(state: GameState): Candidate[] {
   // 감독은 스카우팅으로 알게 되는 상대가 아니라 깊이는 명부와 같이 `full`이다
   for (const team of state.teams) {
     if (team.id === state.userTeamId || team.managerName === undefined) continue;
-    add(
-      generateVirtualManager(state.seed, team.managerName, team.managerPersonaSeat),
-      NEAR_WORLD,
-      always("full"),
-    );
+    add(generateVirtualManager(state.seed, team.managerName), NEAR_WORLD, always("full"));
   }
   // ── 단장 ── 타 구단마다 한 사람 — 협상 테이블 건너편의 구단 쪽 (people.md §2)
   for (const team of state.teams) {
@@ -510,7 +504,7 @@ function mentions(text: string, persona: Persona): boolean {
 function mentionOf(text: string, persona: Persona): "name" | "part" | null {
   if (text === "") return null;
   const haystack = text.toLowerCase();
-  const listed = (persona.keywords ?? []).filter((k) => k.length >= MIN_KEYWORD_LENGTH);
+  const listed = persona.keywords.filter((k) => k.length >= MIN_KEYWORD_LENGTH);
   const terms = listed.length > 0 ? listed : [persona.name];
   const hit = terms.filter(
     (t) => t.length >= MIN_KEYWORD_LENGTH && haystack.includes(t.toLowerCase()),
@@ -542,9 +536,6 @@ function historyWindow(state: GameState): string {
 /**
  * 이번 턴에 지목된 인물 — 세계가 연 자리(열린 회견의 기자, 찾아온 사람)와 호출자가
  * 연 자리(첫 장면의 수석코치). 셋 다 키워드를 기다리지 않는다.
- *
- * ⚠️ 회견의 지목은 나중에 생긴 필드라 **옛 세이브의 회견엔 없다** — 없으면 아무도
- * 지목하지 않은 것이고, 그 회견의 기자는 일반 키워드 경로로만 선다.
  */
 function pointedIds(
   state: GameState,
@@ -552,8 +543,7 @@ function pointedIds(
 ): ReadonlySet<string> {
   const ids = new Set<string>(byCaller ?? []);
   const conference = pendingPress(state);
-  const reporterId = conference?.reporterId;
-  if (reporterId !== undefined) ids.add(reporterId);
+  if (conference) ids.add(conference.reporterId);
   /**
    * **회견 카드에 오른 상대 감독** — 기자와 같은 자리다 (people.md §4). 그 사람의
    * 말을 인용하라고 카드가 요구해 놓고 인물지를 싣지 않으면, GM이 그 이름으로
@@ -579,7 +569,7 @@ function pointedIds(
  */
 function mediaSpeakers(state: GameState): ReadonlySet<string> {
   const ids = new Set<string>();
-  const facts = state.media ?? [];
+  const facts = state.media;
   for (let i = facts.length - 1; i >= 0 && ids.size < MEDIA_SPEAKERS_SHOWN; i -= 1) {
     const speakerId = facts[i]?.speakerId;
     if (speakerId !== undefined) ids.add(speakerId);

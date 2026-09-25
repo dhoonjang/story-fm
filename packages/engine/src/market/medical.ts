@@ -55,7 +55,7 @@ const OVERRIDE_SEVERITY = "moderate" as const;
  * 몸을 보는 것은 반년 뒤 합류하는 날의 일이다. 지금의 소견은 그날의 몸이 아니다.
  */
 export function needsMedical(negotiation: Negotiation): boolean {
-  return !isPlayerDeal(negotiation.kind) && negotiation.precontract !== true;
+  return !isPlayerDeal(negotiation.kind) && !negotiation.precontract;
 }
 
 /** 이 딜에서 선수를 데려가는 쪽 (소견을 받고 결정하는 주체) */
@@ -151,12 +151,11 @@ export function medicalConcernText(concern: MedicalConcern): string {
 }
 
 /**
- * 검진 소견의 한 줄 — **카드가 먼저, 옛 문장은 폴백이다.**
- * 보여 주는 자리에만 쓴다(game-state.md §6): 갈래를 가르는 자리는 `origin`이 판정한다.
+ * 검진 소견의 한 줄 — 카드에서 문장을 만든다. 보여 주는 자리에만 쓴다: 갈래를
+ * 가르는 자리는 `origin`이 판정한다. 소견 없는 검진은 이름만 남긴다.
  */
 export function medicalNoteText(medical: Medical): string {
-  if (medical.concern) return medicalConcernText(medical.concern);
-  return medical.note ?? "이상 소견";
+  return medical.concern ? medicalConcernText(medical.concern) : "이상 소견";
 }
 
 export interface MedicalOutcome {

@@ -55,7 +55,7 @@ import {
 import { item } from "../commands/brief";
 import { makeRng } from "../core/rng";
 import { catalogTierOf, tierOfTeamIn } from "../core/club-tier";
-import { ownerOf } from "../world/persona";
+import { ownerArchetypeOf, ownerOf } from "../world/persona";
 
 /**
  * 구단 재정 — 실제 구단의 매출·비용 구조 (docs/simulation/finance.md).
@@ -335,8 +335,7 @@ function journalMoneyThreshold(balance: number): number {
  * 서사가 만든 항목(`apply_finance_event`)은 정의상 일회성이라 카테고리를 묻지 않는다.
  */
 export function isJournalMoney(entry: LedgerEntry, balance: number): boolean {
-  const oneOff =
-    entry.source === "narrative" || JOURNAL_MONEY_CATEGORIES.includes(categoryOf(entry));
+  const oneOff = entry.source === "narrative" || JOURNAL_MONEY_CATEGORIES.includes(entry.category);
   return oneOff && entry.amount >= journalMoneyThreshold(balance);
 }
 
@@ -476,11 +475,6 @@ export function monthOf(date: string): string {
   return date.slice(0, 7);
 }
 
-/** 구 세이브의 엔트리는 카테고리가 없다 */
-export function categoryOf(entry: LedgerEntry): FinanceCategory {
-  return entry.category ?? "other";
-}
-
 function isNoncash(entry: LedgerEntry): boolean {
   return entry.accounting === "noncash";
 }
@@ -556,7 +550,6 @@ export function payOnce(
   input: RecordFinanceInput,
 ): boolean {
   const f = financeOf(state, teamId);
-  f.prizesPaid ??= [];
   if (input.amount <= 0 || f.prizesPaid.includes(key)) return false;
   f.prizesPaid.push(key);
   recordFinance(state, teamId, input);
@@ -607,7 +600,7 @@ export function isTelevised(match: MatchRecord): boolean {
   // 친선은 리그 중계 계약 밖의 경기다 — 어느 대회에도 속하지 않으니 배분도 없다
   if (isFriendly(match)) return false;
   if (isCup(match.competitionId)) return false;
-  const time = match.time ?? DEFAULT_KICKOFF;
+  const time = match.time;
   return !(dayOfWeek(match.date) === SATURDAY && time === DEFAULT_KICKOFF);
 }
 
@@ -1137,7 +1130,7 @@ export const PAYMENT_KIND_KO: Record<PaymentSchedule["kind"], string> = {
  * 자리에서 한 번 부른다.
  */
 export function settleDuePayments(state: GameState, digest?: TickSink): void {
-  for (const schedule of state.paymentSchedules ?? []) {
+  for (const schedule of state.paymentSchedules) {
     const total = schedule.installments.length;
     const name =
       state.players.find((p) => p.id === schedule.gamePlayerId)?.name ?? schedule.gamePlayerId;
@@ -1475,7 +1468,7 @@ export function recordCapitalAsset(
     amount: cost,
   });
   const finance = financeOf(state, teamId);
-  (finance.assets ??= []).push({
+  finance.assets.push({
     id: input.id,
     label: input.label,
     cost,
@@ -1598,7 +1591,7 @@ export function closeSeasonBooks(state: GameState, digest: TickSink): void {
 export function ensureMonthlyPosted(state: GameState): void {
   const month = monthOf(state.date);
   const posted = financeOf(state, state.userTeamId).ledger.some(
-    (e) => monthOf(e.date) === month && categoryOf(e) === "facility",
+    (e) => monthOf(e.date) === month && e.category === "facility",
   );
   if (!posted) postMonthlyItems(state);
 }
@@ -1685,7 +1678,7 @@ interface NamedStaffWage {
  * 합과 파생 몫이 잔돈만큼 어긋나 총액이 기준액에서 밀린다.
  */
 function namedStaffWagesOf(state: GameState, teamId: string): NamedStaffWage[] {
-  return (state.personas ?? []).flatMap((persona) => {
+  return state.personas.flatMap((persona) => {
     const job = persona.employment;
     if (!job || job.teamId !== teamId) return [];
     return [
@@ -1885,12 +1878,10 @@ function postMonthlyItems(state: GameState): void {
      * `recordFinance`로 직접 적으므로 여기가 재정이 손댈 수 있는 유일한 지점이다.
      * 현금은 건드리지 않는다(noncash).
      */
-    const written = new Set(financeOf(state, team.id).prizesPaid ?? []);
+    const written = new Set(financeOf(state, team.id).prizesPaid);
     for (const transfer of state.transfers) {
-      // 임대는 계약이 남아 있어 털 잔존가가 없다 — 규약상 임대 행은 fee 0이지만
-      // 옛 세이브에 fee>0 임대 행이 남아 있다 (finance.md §6.1)
-      if (transfer.fromTeamId !== team.id || transfer.fee <= 0 || transfer.type === "loan")
-        continue;
+      // 임대는 계약이 남아 있어 털 잔존가가 없다 — 임대 행은 fee 0이다 (finance.md §6.1)
+      if (transfer.fromTeamId !== team.id || transfer.fee <= 0) continue;
       // 이미 털어 낸 건은 잔존가를 계산하지도 않는다 — 계약 순회가 비싸다
       if (written.has(`sale-writeoff:${transfer.id}`)) continue;
       /**
@@ -2107,18 +2098,15 @@ export function userReports(state: GameState): FinanceReport[] {
 }
 
 /**
- * 한 카테고리의 한 줄 — **방향은 `kind`가 정한다.**
- *
- * 카테고리만으로 접으면 수입·지출 양쪽에 설 수 있는 `other`(카테고리 도입 전 세이브)가
- * 한쪽 줄에서 상계된다 — 옛 수입 엔트리가 지출 합에 음의 몫으로 섞이고 수입 합에서는
- * 통째로 빠져, 잔고는 그대로인데 보고서 합이 원장 합과 갈린다 (finance.md §4.2·§4.4).
+ * 한 카테고리의 한 줄 — **방향은 `kind`가 정한다.** 카테고리만으로 접으면 서사가 양쪽에
+ * 세울 수 있는 항목이 한쪽 줄에서 상계된다 (finance.md §4.2·§4.4).
  */
 function lineOf(
   entries: LedgerEntry[],
   kind: "income" | "expense",
   category: FinanceCategory,
 ): FinanceReportLine | null {
-  const mine = entries.filter((e) => e.kind === kind && categoryOf(e) === category);
+  const mine = entries.filter((e) => e.kind === kind && e.category === category);
   if (mine.length === 0) return null;
   const byLabel = new Map<string, number>();
   for (const e of mine) byLabel.set(e.label, (byLabel.get(e.label) ?? 0) + e.amount);
@@ -2142,12 +2130,12 @@ export function summarise(entries: LedgerEntry[]): {
   pnlNet: number;
   wageRatio: number;
 } {
-  const income = [...FINANCE_INCOME_CATEGORIES, "other" as const]
-    .map((c) => lineOf(entries, "income", c))
-    .filter((x): x is FinanceReportLine => x !== null);
-  const expense = [...FINANCE_EXPENSE_CATEGORIES, "other" as const]
-    .map((c) => lineOf(entries, "expense", c))
-    .filter((x): x is FinanceReportLine => x !== null);
+  const income = FINANCE_INCOME_CATEGORIES.map((c) => lineOf(entries, "income", c)).filter(
+    (x): x is FinanceReportLine => x !== null,
+  );
+  const expense = FINANCE_EXPENSE_CATEGORIES.map((c) => lineOf(entries, "expense", c)).filter(
+    (x): x is FinanceReportLine => x !== null,
+  );
 
   const incomeTotal = income.reduce((s, l) => s + l.amount, 0);
   const expenseTotal = expense.reduce((s, l) => s + l.amount, 0);
@@ -2297,7 +2285,7 @@ function buildReport(state: GameState, month: string, ledger: LedgerEntry[]): Fi
       .map((e) => ({
         date: e.date,
         kind: e.kind,
-        category: categoryOf(e),
+        category: e.category,
         label: e.label,
         amount: e.amount,
       })),
@@ -2337,12 +2325,11 @@ export function financeNoteText(note: FinanceNote): string {
 }
 
 /**
- * 보고서의 노트 줄들 — **카드가 먼저, 옛 문장은 폴백이다** (game-state.md §6).
- * 보여 주는 자리에만 쓴다: 판정은 노트가 아니라 장부와 `budgetFrozen`이 한다.
+ * 보고서의 노트 줄들 — 카드에서 문장을 만든다. 보여 주는 자리에만 쓴다: 판정은
+ * 노트가 아니라 장부와 `budgetFrozen`이 한다.
  */
 export function financeNoteTexts(report: FinanceReport): string[] {
-  if (report.noteCards) return report.noteCards.map(financeNoteText);
-  return report.notes ?? [];
+  return report.noteCards.map(financeNoteText);
 }
 
 /**
@@ -2569,12 +2556,9 @@ const BUDGET_DEFICIT_FLOOR = 0.5;
  * 손익이 본전 근처인 시즌에도 잔고는 시즌마다 £150M쯤 불었다 — 손익에 건 예산은
  * 그 잉여를 영영 돌려주지 않는다. ② 원장을 남기지 않는 AI 구단도(§4.5) 같은 자로
  * 재려면 기준이 보고서가 아니라 통장이어야 한다.
- *
- * 기준점이 없는 옛 세이브는 잉여를 0으로 읽는다 — 그 전환 한 번만 그렇고 다음
- * 시즌부터는 제 값이 선다.
  */
 function seasonCashSurplusOf(finance: TeamFinance): number {
-  return finance.balance - (finance.seasonOpeningBalance ?? finance.balance);
+  return finance.balance - finance.seasonOpeningBalance;
 }
 
 /**
@@ -2617,7 +2601,7 @@ export function topUpTransferBudget(
    * 구단주 카드는 감독의 구단에만 서므로 나머지 구단은 중앙값으로 떨어진다
    * (`reinvestShareOf`) — 세계가 잉여를 쓰지 않으면 이적 시장이 그만큼 마른다.
    */
-  const share = reinvestShareOf(isUser ? ownerOf(state).archetype : undefined);
+  const share = reinvestShareOf(isUser ? ownerArchetypeOf(ownerOf(state)).label : undefined);
   const performance = Math.round(Math.max(-base * BUDGET_DEFICIT_FLOOR, surplus * share));
 
   // 이월은 한 시즌치까지 — 그 위는 보드가 회수한다

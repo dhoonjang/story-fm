@@ -47,8 +47,8 @@ function savedShare(keeper: GamePlayer | null): number {
 /**
  * 그 팀의 골문에 선 골키퍼 — **경기를 끝낸 열한 명 중에서** 고른다.
  *
- * 교체돼 나간 주전 GK도, 퇴장당한 GK도 승부차기를 막지 않는다. GK가 없으면 null —
- * 명단에 골키퍼가 없는 옛 세이브에서만 그렇게 된다.
+ * 교체돼 나간 주전 GK도, 퇴장당한 GK도 승부차기를 막지 않는다. 경기를 끝낸 열한 명에
+ * GK가 없으면(퇴장 뒤 골키퍼를 들이지 못한 경기) null이다.
  */
 export function shootoutKeeper(
   state: GameState,

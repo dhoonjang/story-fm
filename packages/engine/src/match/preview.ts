@@ -1,22 +1,9 @@
-import type {
-  GamePlayer,
-  MatchRecord,
-  MatchSide,
-  PacketTag,
-  PacketTagContext,
-  StrengthPacket,
-  TacticsSpec,
-} from "@story-fm/domain";
-import {
-  associationName,
-  isReserveMatch,
-  naturalPositionOf,
-  packetTagContext,
-} from "@story-fm/domain";
-import { buildStrengthPacket, type LineupSlot } from "@story-fm/sim";
+import type { GamePlayer, MatchRecord, MatchSide, TacticsSpec } from "@story-fm/domain";
+import { associationName, isReserveMatch, naturalPositionOf } from "@story-fm/domain";
+import type { LineupSlot } from "@story-fm/sim";
 import { competitionLabel } from "../data/cup-catalog";
 import { derbyForMatch } from "../club/derby";
-import { DEFAULT_KICKOFF, diffDays, nextMatchFor } from "../competition/calendar";
+import { diffDays, nextMatchFor } from "../competition/calendar";
 import { internationalBreaksOf, openCallUp } from "../competition/international";
 import {
   activeSuspensionFor,
@@ -24,22 +11,19 @@ import {
   firstTeamPlayers,
   isAvailableFor,
   openInjury,
-  tacticsOf,
   teamNameIn,
   teamShortNameIn,
   type GameState,
 } from "../core/state";
-import { assembleUserLineup, slotsFor } from "./match-flow";
-import { managerTacticsOf } from "./manager-tactics";
+import { assembleUserLineup, lineupSlotsOf, slotsFor } from "./match-flow";
+import { teamRatingsOf, type TeamRatings } from "./quick-sim";
 
 /**
- * 경기 전 상대 분석 — **패킷을 미리 한 번 굴린다** (match.md §1.8).
+ * 경기 전 상대 분석 — **코어의 사실만이다** (match.md §3.6).
  *
- * 감독이 라인업과 6축을 정하는 시점은 경기 전인데 판세·상성이 첫 진행
- * 턴부터만 실리면, 그의 **전술** 능력은 이미 정해진 판 위에서만 뜻을 갖는다. 그래서
- * 예정된 경기 하나를 골라 킥오프와 **같은 문**(`buildStrengthPacket`)을 미리 지난다 —
- * 다른 계산이 아니라 같은 계산을 일찍 하는 것뿐이다. 판독은 없다 — 전술 포인트는
- * 킥오프에 판독기가 처음 쓴다 (match.md §1.8).
+ * 감독이 라인업과 6축을 정하는 시점은 경기 전인데, 그때 읽을 수 있는 것은 예상 XI ·
+ * 결장자 · 상대의 전술 · 최근 결과 · 더비 · 두 선발의 평점이다. 판독은 없다 — 전술
+ * 포인트는 킥오프에 판독기가 처음 쓴다.
  */
 
 /** 예상 XI 한 명 */
@@ -82,6 +66,20 @@ export interface AbsentPlayer {
   note: string;
 }
 
+/**
+ * 리포트의 사실 한 조각 — 문장은 `opponentFactText`가 만든다. 화면·조회 도구·GM
+ * 스냅샷이 같은 렌더러를 지나므로 같은 사실이 세 문장으로 갈리지 않는다.
+ */
+export type OpponentFact =
+  /** 더비 — 표의 줄과 열기 */
+  | { kind: "derby"; name: string; heat: number }
+  /** 두 선발의 평점 — 공격·중원·수비 (간이 시뮬과 같은 함수, `teamRatingsOf`) */
+  | { kind: "strength"; ours: TeamRatings; theirs: TeamRatings }
+  /** 상대의 최근 결과 — 그 팀 기준 승·무·패, 최근 것이 앞 */
+  | { kind: "form"; results: Array<"W" | "D" | "L"> }
+  /** 예상 XI의 기둥 — 종합 상위 */
+  | { kind: "key-player"; id: string; name: string; position: string };
+
 export interface OpponentReport {
   matchId: string;
   date: string;
@@ -93,7 +91,7 @@ export interface OpponentReport {
   inDays: number;
   venue: "home" | "away" | "neutral";
   opponent: { id: string; name: string; short: string };
-  /** 우리는 어느 편인가 — 태그의 유불리를 접는 기준 */
+  /** 우리는 어느 편인가 */
   ourSide: MatchSide;
   /** 상대 예상 XI — 직전 경기 선발에서 투영 (`projectXI`) */
   expectedXI: ProjectedPlayer[];
@@ -104,22 +102,53 @@ export interface OpponentReport {
   basis: { matchId: string; date: string; label: string } | null;
   /** 부상·정지로 못 나오는 상대 선수 */
   absent: AbsentPlayer[];
-  /** 상대가 세워 둔 모양과 6축 — 90분 동안 보이는 사실이라 흐리지 않는다 (match.md §8) */
+  /** 상대가 세워 둔 모양과 6축 — 90분 동안 보이는 사실이라 흐리지 않는다 */
   shape: TacticsSpec;
-  /**
-   * 대진의 조건과 상성 — **코어의 사실만이다** (match.md §1.8). 판독은 없다.
-   * 문장은 읽는 쪽이 `packetTagText`로 만든다.
-   */
-  notes: PacketTag[];
-  /** 태그가 이름을 대는 자리 — 미리 굴린 그 패킷이 원본이다 */
-  tagContext: PacketTagContext;
+  /** 대진의 사실 — 더비 · 두 선발의 평점 · 최근 결과 · 기둥 */
+  facts: OpponentFact[];
 }
 
-/**
- * 리포트가 세우는 사실 — 대진의 조건(더비)·상성. 나머지 갈래는 경기 중의 것이다
- * (match.md §1.8): 구멍은 그라운드에서 보이는 사실이고, 시트는 킥오프 뒤 판독기가 쓴다.
- */
-const REPORT_SOURCES: ReadonlySet<PacketTag["source"]> = new Set(["context", "counter"]);
+/** 최근 결과를 몇 경기 읽는가 */
+const FORM_MATCHES = 5;
+/** 기둥으로 세우는 선수 수 */
+const KEY_PLAYERS = 2;
+
+/** 더비의 열기 낱말 — 1~3 */
+export const DERBY_HEAT_KO: Record<number, string> = {
+  1: "라이벌전",
+  2: "더비",
+  3: "숙명의 더비",
+};
+
+/** 사실 한 조각 → 한 문장. 우열은 우리 편 기준이다 */
+export function opponentFactText(fact: OpponentFact): string {
+  switch (fact.kind) {
+    case "derby":
+      return `${fact.name} — ${DERBY_HEAT_KO[fact.heat] ?? DERBY_HEAT_KO[1]!}`;
+    case "strength": {
+      const r = (v: number) => Math.round(v);
+      return (
+        `선발 평점 — 우리 공격 ${r(fact.ours.attack)} · 중원 ${r(fact.ours.midfield)} · 수비 ${r(fact.ours.defence)}` +
+        ` / 상대 공격 ${r(fact.theirs.attack)} · 중원 ${r(fact.theirs.midfield)} · 수비 ${r(fact.theirs.defence)}`
+      );
+    }
+    case "form":
+      return fact.results.length === 0
+        ? "상대의 최근 결과 — 아직 없다"
+        : `상대의 최근 ${fact.results.length}경기 — ${fact.results.map((r) => (r === "W" ? "승" : r === "D" ? "무" : "패")).join(" ")}`;
+    case "key-player":
+      return `상대의 기둥 — ${fact.name} (${fact.position})`;
+  }
+}
+
+/** 이 사실이 우리 편에 이로운가 — 모르면 null */
+export function opponentFactFavours(fact: OpponentFact): boolean | null {
+  if (fact.kind !== "strength") return null;
+  const ours = fact.ours.attack + fact.ours.midfield + fact.ours.defence;
+  const theirs = fact.theirs.attack + fact.theirs.midfield + fact.theirs.defence;
+  if (Math.abs(ours - theirs) < 3) return null;
+  return ours > theirs;
+}
 
 /** 상대의 직전 1군 경기 — 그 경기가 이미 벌어졌다는 것이 투영의 유일한 근거다 */
 function lastPlayedBefore(
@@ -137,8 +166,33 @@ function lastPlayedBefore(
   return best;
 }
 
+/** 상대의 최근 결과 — 그 팀 기준, 최근 것이 앞 */
+function recentFormOf(
+  state: GameState,
+  teamId: string,
+  before: MatchRecord,
+): Array<"W" | "D" | "L"> {
+  return state.matches
+    .filter(
+      (m) =>
+        m.result &&
+        !isReserveMatch(m) &&
+        (m.homeTeamId === teamId || m.awayTeamId === teamId) &&
+        m.date <= before.date &&
+        m.id !== before.id,
+    )
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.id < b.id ? 1 : -1))
+    .slice(0, FORM_MATCHES)
+    .map((m) => {
+      const r = m.result!;
+      const ours = m.homeTeamId === teamId ? r.homeGoals : r.awayGoals;
+      const theirs = m.homeTeamId === teamId ? r.awayGoals : r.homeGoals;
+      return ours > theirs ? "W" : ours === theirs ? "D" : "L";
+    });
+}
+
 /**
- * 상대 예상 XI — **직전 경기 선발 + 가용**으로 투영한다 (match.md §1.8).
+ * 상대 예상 XI — **직전 경기 선발 + 가용**으로 투영한다 (match.md §3.6).
  *
  * `simSquadOf`를 부르지 않는 것이 이 함수의 전부다. 그쪽은 로테이션·임대 빚까지
  * 반영해 **내일 실제로 설 열한 명**을 돌려주므로, 경기 전에 보여 주는 순간 감독은
@@ -186,7 +240,7 @@ const ABSENT_RANK: Record<AbsentReason, number> = { injury: 0, suspension: 1, "c
 
 /**
  * 상대의 결장자 — 부상이 먼저, 그다음 정지·소집. 같은 갈래 안에서는 id 순.
- * **정지는 이 경기의 대회로 잰다** (match.md §6) — 리그 정지 선수는 컵에 선다.
+ * **정지는 이 경기의 대회로 잰다** (match.md §7) — 리그 정지 선수는 컵에 선다.
  */
 function absentOf(state: GameState, teamId: string, competitionId: string | null): AbsentPlayer[] {
   const rows: AbsentPlayer[] = [];
@@ -215,8 +269,7 @@ function absentOf(state: GameState, teamId: string, competitionId: string | null
     }
     /**
      * 소집도 공개 기록이다 (competition.md §5-1) — 명단은 세계가 발표하는 것이라
-     * 상대 구단의 것도 감독이 관측할 수 있다. `projectXI`가 이미 이 선수를 빼므로,
-     * 여기 없으면 결장자 줄만 그를 잃고 화면은 이유 없이 빈자리를 보여 준다.
+     * 상대 구단의 것도 감독이 관측할 수 있다.
      */
     const callUp = openCallUp(state, p.id);
     if (!callUp) continue;
@@ -238,7 +291,7 @@ function absentOf(state: GameState, teamId: string, competitionId: string | null
 function ourSlots(state: GameState, competitionId: string | null): LineupSlot[] | null {
   const lineup = assembleUserLineup(state, competitionId);
   if (lineup.error) return null;
-  return slotsFor(state, state.userTeamId, lineup.onPitch);
+  return lineupSlotsOf(state, slotsFor(state, state.userTeamId, lineup.onPitch));
 }
 
 /**
@@ -257,7 +310,7 @@ function pickPreviewMatch(state: GameState, matchId?: string): MatchRecord | nul
  * 경기 전 상대 분석 리포트 — 예정된 우리 경기 하나. 없으면 `null`.
  *
  * **경기 중에는 서지 않는다.** 90분 안에 다음 상대를 분석하는 자리는 없고, 지금
- * 판은 판세 화면이 이미 들고 있다 (match.md §8). 진행 중인 장부를 읽는
+ * 판은 경기 화면이 이미 들고 있다 (match.md §9). 진행 중인 장부를 읽는
  * `slotsFor`가 다른 경기의 교체를 우리 배치에 얹는 것도 이 문이 막는다.
  */
 export function buildOpponentReport(
@@ -265,10 +318,7 @@ export function buildOpponentReport(
   options: {
     /** 이 경기 하나 — 주지 않으면 우리 다음 경기다 */
     matchId?: string;
-    /**
-     * 며칠 앞까지만 세우는가 — 넘으면 **패킷을 굴리기 전에** 빈손을 낸다.
-     * 경기 전날에만 서는 자리(GM 스냅샷)가 매 턴 패킷 한 벌을 굴릴 이유는 없다.
-     */
+    /** 며칠 앞까지만 세우는가 — 경기 전날에만 서는 자리(GM 스냅샷)가 매 턴 세울 이유는 없다 */
     withinDays?: number;
   } = {},
 ): OpponentReport | null {
@@ -286,73 +336,47 @@ export function buildOpponentReport(
   const us = ourSlots(state, match.competitionId);
   if (!us) return null;
 
-  /**
-   * 전술이 없는 팀은 리포트를 세울 수 없다 — 대조할 판이 없다. 뷰가 매 턴 부르는
-   * 자리라 `tacticsOf`의 예외로 오피스 화면 전체를 떨구지 않는다.
-   */
+  /** 전술이 없는 팀은 리포트를 세울 수 없다 — 대조할 판이 없다 */
   const theirTactics = state.tactics.find((t) => t.teamId === opponentId);
   if (!theirTactics) return null;
 
   const basis = lastPlayedBefore(state, opponentId, match);
   const { xi, carried } = projectXI(state, opponentId, basis, match.competitionId);
   if (xi.length === 0) return null;
-  /**
-   * 자리를 앉히는 것도 **킥오프와 같은 함수**다 (`slotsFor`). 여기서 자연 포지션으로
-   * 대신 세우면, 배치에 없는 선수가 낀 XI에서 리포트와 킥오프가 다른 판을 보고
-   * 표적 id가 갈린다 — 감독이 경기 전에 노린 지점이 킥오프에 사라진다.
-   */
-  const theirSlots: LineupSlot[] = slotsFor(
+  /** 자리를 앉히는 것도 **킥오프와 같은 함수**다 (`slotsFor`) */
+  const theirSlots = lineupSlotsOf(
     state,
-    opponentId,
-    xi.map((p) => p.id),
+    slotsFor(
+      state,
+      opponentId,
+      xi.map((p) => p.id),
+    ),
   );
 
-  const sideOf = (
-    teamId: string,
-    starters: LineupSlot[],
-  ): Parameters<typeof buildStrengthPacket>[0] => {
-    const tactics = tacticsOf(state, teamId);
-    return {
-      teamId,
-      teamName: teamNameIn(state, teamId),
-      starters,
-      /**
-       * **벤치는 세우지 않는다** — 상대 벤치는 관측할 수 없고, 리포트가 읽는 것
-       * (상성)은 선발 열한 명만 본다.
-       */
-      bench: [],
-      tactics: tactics.spec,
-      managerTactics: managerTacticsOf(state, teamId),
-      ...(tactics.setPieceTakers ? { setPieceTakers: tactics.setPieceTakers } : {}),
-      // 세트피스 지시도 함께 — 리포트가 읽는 죽은 공 수가 킥오프 패킷과 갈리지 않는다
-      ...(tactics.setPieceRoutine ? { setPieceRoutine: tactics.setPieceRoutine } : {}),
-    };
-  };
-
-  /**
-   * 더비는 **대진이 갖고 있는 사실**이라 킥오프 패킷과 같은 자리에서 온다
-   * (`derbyForMatch` — team.md §3.2). 경기 전 리포트가 그것을 빠뜨리면 감독은
-   * 킥오프에야 무슨 경기인지 안다.
-   *
-   * `inMatch`는 서지 않는다 — 벤치에서 외치는 조정이 더 잘 먹히는 보정(§1.2)은
-   * 그라운드 위의 것이다. 표적 목록은 이 값을 보지 않으므로 킥오프와 갈리지 않는다.
-   */
   const derby = derbyForMatch(match);
-  const packet: StrengthPacket = buildStrengthPacket(
-    userIsHome ? sideOf(match.homeTeamId, us) : sideOf(match.homeTeamId, theirSlots),
-    userIsHome ? sideOf(match.awayTeamId, theirSlots) : sideOf(match.awayTeamId, us),
-    {
-      neutral: match.neutral === true,
-      inMatch: false,
-      ...(derby ? { derby: { name: derby.name, heat: derby.heat } } : {}),
-    },
-  );
+  const facts: OpponentFact[] = [
+    ...(derby ? [{ kind: "derby", name: derby.name, heat: derby.heat } as const] : []),
+    { kind: "strength", ours: teamRatingsOf(us), theirs: teamRatingsOf(theirSlots) },
+    { kind: "form", results: recentFormOf(state, opponentId, match) },
+    ...[...theirSlots]
+      .sort((a, b) => b.player.attributes.overall - a.player.attributes.overall)
+      .slice(0, KEY_PLAYERS)
+      .map(
+        (slot) =>
+          ({
+            kind: "key-player",
+            id: slot.player.id,
+            name: slot.player.name,
+            position: slot.position,
+          }) as const,
+      ),
+  ];
 
   return {
     matchId: match.id,
     date: match.date,
-    time: match.time ?? DEFAULT_KICKOFF,
-    label: competitionLabel(match.competitionId, match.stage ?? "league", match.round),
+    time: match.time,
+    label: competitionLabel(match.competitionId, match.stage, match.round),
     inDays: Math.max(0, diffDays(state.date, match.date)),
     venue: match.neutral ? "neutral" : userIsHome ? "home" : "away",
     opponent: {
@@ -372,12 +396,11 @@ export function buildOpponentReport(
       ? {
           matchId: basis.id,
           date: basis.date,
-          label: competitionLabel(basis.competitionId, basis.stage ?? "league", basis.round),
+          label: competitionLabel(basis.competitionId, basis.stage, basis.round),
         }
       : null,
     absent: absentOf(state, opponentId, match.competitionId),
     shape: { ...theirTactics.spec },
-    notes: packet.keyPoints.filter((tag) => REPORT_SOURCES.has(tag.source)),
-    tagContext: packetTagContext(packet),
+    facts,
   };
 }

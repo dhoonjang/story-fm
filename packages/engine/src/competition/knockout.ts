@@ -24,16 +24,8 @@ export function tieLegsOf(stageMatches: readonly MatchRecord[], pair: number): M
   return stageMatches.filter((m) => pairOf(m) === pair);
 }
 
-/**
- * 감독의 달력에 우리 팀 경기를 올린다 (남의 경기는 장부에만 남는다).
- *
- * @param defaultKickoff 경기에 시각이 적히지 않았을 때의 자리 — 대회마다 다르다.
- */
-export function registerUserEntries(
-  state: GameState,
-  matches: readonly MatchRecord[],
-  defaultKickoff: string,
-): void {
+/** 감독의 달력에 우리 팀 경기를 올린다 (남의 경기는 장부에만 남는다) */
+export function registerUserEntries(state: GameState, matches: readonly MatchRecord[]): void {
   const ours = matches.filter(
     (m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
   );
@@ -42,7 +34,7 @@ export function registerUserEntries(
     state.schedule.push({
       id: `se-${m.id}`,
       date: m.date,
-      time: m.time ?? defaultKickoff,
+      time: m.time,
       type: "match",
       refId: m.id,
       teamId: state.userTeamId,

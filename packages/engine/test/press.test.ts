@@ -34,7 +34,6 @@ import {
   MANAGER_TERMS_BY_TIER,
   PRESS_STANCES,
   REPUTATION_TIERS,
-  PressConferenceSchema,
   RIVAL_VOICES,
   mediaVerdictOf,
   pressFactText,
@@ -47,7 +46,7 @@ import type {
   PressConference,
   SeasonAward,
 } from "@story-fm/domain";
-import { createTestGame } from "./helpers";
+import { createTestGame, resultOf } from "./helpers";
 import { derbyNameOf } from "../src/data/derbies";
 import { FORMER_CLUB_YEARS } from "../src/club/former-club";
 
@@ -84,11 +83,10 @@ function nextUserMatch(state: GameState, kind: "competitive" | "friendly"): Matc
 /** 경기를 **장부에만** 끝낸다 — 스코어라는 사실 하나면 회견은 성립한다 */
 function settle(state: GameState, match: MatchRecord, score: { us: number; them: number }): void {
   const home = match.homeTeamId === state.userTeamId;
-  match.result = {
+  match.result = resultOf({
     homeGoals: home ? score.us : score.them,
     awayGoals: home ? score.them : score.us,
-    scorers: [],
-  };
+  });
 }
 
 /**
@@ -149,7 +147,15 @@ function moveTo(state: GameState): ManagerOffer {
   const to = state.teams.find(
     (t) => t.id !== state.userTeamId && leagueOfTeamIn(state, t.id) === league,
   )!.id;
-  state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+  state.dismissal = {
+    on: state.date,
+    season: state.season,
+    teamId: state.userTeamId,
+    kind: "sacked",
+    tier: tierOfTeamIn(state, state.userTeamId),
+    target: 10,
+    expectationCode: "mid",
+  };
   const offer: ManagerOffer = {
     id: "offer-move",
     teamId: to,
@@ -157,9 +163,12 @@ function moveTo(state: GameState): ManagerOffer {
     expiresOn: addDays(state.date, 10),
     tier: tierOfTeamIn(state, to),
     target: 10,
-    expectation: "중위권",
     expectationCode: "mid",
     position: 14,
+    salary: MANAGER_TERMS_BY_TIER[3].salary,
+    years: 2,
+    budgetPledge: MANAGER_TERMS_BY_TIER[3].budgetPledge,
+    via: "vacancy",
     status: "open",
   };
   state.managerOffers = [offer];
@@ -179,9 +188,10 @@ function cupTie(state: GameState, stage: MatchStage): MatchRecord {
     stage,
     round: 1,
     date: state.date,
+    time: "15:00",
     homeTeamId: state.userTeamId,
     awayTeamId: other,
-    result: { homeGoals: 2, awayGoals: 1, scorers: [] },
+    result: resultOf({ homeGoals: 2, awayGoals: 1 }),
   };
   state.matches.push(match);
   return match;
@@ -193,7 +203,15 @@ function fakeConference(over: Partial<PressConference> = {}): PressConference {
     date: "2026-08-20",
     trigger: "match",
     context: "테스트",
-    facts: [{ kind: "result", text: "테스트전 0-0 무승부 (홈)", about: null, sharp: false }],
+    facts: [
+      {
+        kind: "result",
+        data: { name: "테스트", values: { for: 0, against: 0 }, tags: ["draw", "home"] },
+        about: null,
+        sharp: false,
+      },
+    ],
+    reporterId: "reporter-fake",
     status: "pending",
     weight: 1,
     ...over,
@@ -208,10 +226,7 @@ describe("기자회견 — 자리 만들기", () => {
     expect(press.facts.length).toBeGreaterThan(0);
     // 코어는 사실만 넘긴다 — 스코어는 실려 있고, 세이브에 남는 것은 문장이 아니라 카드다
     expect(press.context).toMatch(/\d+-\d+/);
-    for (const f of press.facts) {
-      expect(f.text, "코어가 사실 문장을 저장했다").toBeUndefined();
-      expect(f.data, "사실 카드가 없다").toBeDefined();
-    }
+    for (const f of press.facts) expect(f.data, "사실 카드가 없다").toBeDefined();
   });
 
   it("이미 열린 회견이 있으면 새 회견이 앞의 것을 거절로 닫는다", () => {
@@ -300,7 +315,14 @@ describe("기자회견 — 한도와 대가", () => {
     for (const p of others) p.state.form = 0;
 
     const conference = fakeConference({
-      facts: [{ kind: "slump", text: `${target.name} 폼 바닥`, about: target.id, sharp: true }],
+      facts: [
+        {
+          kind: "slump",
+          data: { refId: target.id, name: target.name, tags: ["바닥"] },
+          about: target.id,
+          sharp: true,
+        },
+      ],
       weight: 3,
     });
     openPress(state, conference);
@@ -439,7 +461,14 @@ describe("기자회견 — 지목은 사실 카드 안에서만", () => {
     openPress(
       state,
       fakeConference({
-        facts: [{ kind: "slump", text: `${about.name} 폼 바닥`, about: about.id, sharp: true }],
+        facts: [
+          {
+            kind: "slump",
+            data: { refId: about.id, name: about.name, tags: ["바닥"] },
+            about: about.id,
+            sharp: true,
+          },
+        ],
         weight: 3,
       }),
     );
@@ -481,8 +510,18 @@ describe("기자회견 — 지목은 사실 카드 안에서만", () => {
       state,
       fakeConference({
         facts: [
-          { kind: "slump", text: `${a.name} 폼 바닥`, about: a.id, sharp: true },
-          { kind: "unhappy", text: `${b.name} 라커룸 불만`, about: b.id, sharp: true },
+          {
+            kind: "slump",
+            data: { refId: a.id, name: a.name, tags: ["바닥"] },
+            about: a.id,
+            sharp: true,
+          },
+          {
+            kind: "unhappy",
+            data: { refId: b.id, name: b.name, tags: ["minutes"] },
+            about: b.id,
+            sharp: true,
+          },
         ],
       }),
     );
@@ -772,12 +811,6 @@ describe("기자회견 — 누가 묻는가", () => {
     expect(press.trigger).toBe("pressure");
     expect(press.reporterId).toBe(reportersOf(state)[0]!.characterId);
   });
-
-  it("기자를 모르는 옛 세이브의 회견도 막히지 않는다", () => {
-    const { reporterId, ...old } = fakeConference({ reporterId: "누군가" });
-    expect(reporterId).toBe("누군가");
-    expect(PressConferenceSchema.safeParse(old).success).toBe(true);
-  });
 });
 
 describe("기자회견 — 언론 유출은 다음 자리가 싣는다", () => {
@@ -1018,6 +1051,7 @@ describe("기자회견 — 재직 중인 감독의 거취", () => {
         speakerId: "누군가",
         about: null,
         teamId: other.id,
+        contextCard: { code: "interview" },
         facts: [{ kind: "vacancy", data: { values: { days: 1 } }, about: null, sharp: true }],
         step: 3,
         status: "pending",
@@ -1043,6 +1077,10 @@ describe("기자회견 — 재직 중인 감독의 거취", () => {
         expiresOn: addDays(state.date, 10),
         tier: tierOfTeamIn(state, other.id),
         target: 6,
+        expectationCode: "mid",
+        salary: MANAGER_TERMS_BY_TIER[3].salary,
+        years: 2,
+        budgetPledge: MANAGER_TERMS_BY_TIER[3].budgetPledge,
         via: "poach",
         status: "open",
       },
@@ -1094,7 +1132,6 @@ describe("기자회견 — 전야", () => {
     // 개막의 자리는 무게 1에서 시작한다 — 날 선 카드(상대 감독의 도발·유출)가 서면 2다
     expect(opened[0]!.weight).toBe(opened[0]!.facts.some((f) => f.sharp) ? 2 : 1);
     expect(opened[0]!.status).toBe("pending");
-    for (const f of opened[0]!.facts) expect(f.text).toBeUndefined();
     expect(opened[0]!.facts.some((f) => f.kind === "fixture")).toBe(true);
   });
 
@@ -1208,7 +1245,15 @@ describe("기자회견 — 전야", () => {
   /** 그 구단이 감독을 자른 날을 장부에 세운다 — 경질장 한 장이 복귀전을 만든다 */
   function sacked(state: GameState, teamId: string, daysAgo: number): void {
     state.dismissals = [
-      { on: addDays(state.date, -daysAgo), season: state.season, kind: "sacked", teamId },
+      {
+        on: addDays(state.date, -daysAgo),
+        season: state.season,
+        kind: "sacked",
+        teamId,
+        tier: tierOfTeamIn(state, teamId),
+        target: 10,
+        expectationCode: "mid",
+      },
     ];
   }
 
@@ -1295,6 +1340,8 @@ describe("기자회견 — 부임과 시즌의 마디", () => {
       losses,
       goalsFor: 0,
       goalsAgainst: 0,
+      leagueId: leagueOfTeamIn(state, state.userTeamId),
+      board: { grade: "met", position: 4, target: 6, expectationCode: "europe", items: [] },
     });
   }
 
@@ -1304,7 +1351,6 @@ describe("기자회견 — 부임과 시즌의 마디", () => {
     expect(press.trigger).toBe("appointment");
     expect(press.weight).toBe(2);
     // 사실 카드만 남는다 — 문장은 기자가 쓴다
-    for (const f of press.facts) expect(f.text).toBeUndefined();
     expect(press.facts.some((f) => f.data?.tags?.[0] === "board-target")).toBe(true);
     const key = press.facts.find((f) => f.kind === "key-player")!;
     expect(key.about, "감독이 이름을 부를 수 있는 자리가 없다").not.toBeNull();

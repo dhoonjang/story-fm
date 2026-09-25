@@ -23,7 +23,7 @@ import {
   teamsOfLeagueIn,
   type GameState,
 } from "@story-fm/engine";
-import { createTestGame } from "./helpers";
+import { createTestGame, resultOf } from "./helpers";
 
 /**
  * 승강 뒤의 세계 — 소속은 세이브(`state.leagueOf`)에만 남고, 그 값을 읽는 자리가
@@ -274,7 +274,7 @@ describe("강등된 감독의 조회 도구", () => {
     )!;
     fixture.competitionId = "championship";
     fixture.awayTeamId = teamsOfLeagueIn(state, "championship").find((id) => id !== "arsenal")!;
-    fixture.result = { homeGoals: 3, awayGoals: 0, scorers: [] };
+    fixture.result = resultOf({ homeGoals: 3, awayGoals: 0 });
 
     const career = careerView(state).message;
     expect(career).toContain("챔피언십 1위");
@@ -295,10 +295,10 @@ describe("감독 시장", () => {
       if (match.competitionId !== "epl") continue;
       if (match.homeTeamId === down) {
         match.homeTeamId = up;
-        match.result = { homeGoals: 0, awayGoals: 3, scorers: [] };
+        match.result = resultOf({ homeGoals: 0, awayGoals: 3 });
       } else if (match.awayTeamId === down) {
         match.awayTeamId = up;
-        match.result = { homeGoals: 3, awayGoals: 0, scorers: [] };
+        match.result = resultOf({ homeGoals: 3, awayGoals: 0 });
       }
     }
 

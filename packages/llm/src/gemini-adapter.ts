@@ -13,7 +13,6 @@ import {
 import { resolveApiKey, type GoogleAgentConfig } from "./config";
 import {
   isStoredLlmHistory,
-  isTextHistoryMessage,
   type GameLLM,
   type JsonObjectSchema,
   type ToolOutcome,
@@ -157,17 +156,14 @@ function isGeminiContent(value: unknown): value is Content {
  *
  * Gemini 3의 thoughtSignature는 parts 안에서 위치까지 그대로 유지해야 하므로
  * 저장된 같은 모델의 payload는 변환하지 않는다. 다른 제공자·모델에서 넘어온
- * 경기라면 장부와 전력 패킷을 기준으로 대화 이력만 새로 시작한다.
+ * 경기라면 장부를 기준으로 대화 이력만 새로 시작한다.
  */
 function geminiHistory(history: TurnHistory, config: GoogleAgentConfig): Content[] {
   if (isStoredLlmHistory(history)) {
     if (history.provider !== config.provider || history.model !== config.model) return [];
     return history.messages.filter(isGeminiContent);
   }
-  if (!Array.isArray(history)) return [];
-  const messages: unknown[] = history;
-  if (!messages.every(isTextHistoryMessage)) return [];
-  const contents: Content[] = messages.map((message) => ({
+  const contents: Content[] = history.map((message) => ({
     role: message.role === "assistant" ? "model" : "user",
     parts: [{ text: message.content }],
   }));

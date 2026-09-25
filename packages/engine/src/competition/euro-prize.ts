@@ -1,7 +1,7 @@
 import type { MatchStage, TickSink } from "@story-fm/domain";
-import { cupCatalog, cupCatalogById, knockoutStages, stageLabel } from "../data/cup-catalog";
+import { cupCatalogById, stageLabel } from "../data/cup-catalog";
 import type { GameState } from "../core/state";
-import { migratePrizeKeys, payPrize, prizeKey, prizeLabel } from "./prize";
+import { payPrize } from "./prize";
 
 /**
  * 대항전 상금 — 참가비·리그 페이즈 성적·단계 진출·우승.
@@ -18,31 +18,6 @@ import { migratePrizeKeys, payPrize, prizeKey, prizeLabel } from "./prize";
  */
 
 /**
- * 옛 세이브 호환 — 표시 라벨을 그대로 멱등 키로 쓰던 시절의 `prizesPaid`를 안정
- * 키로 옮긴다. 옮기지 않으면 진행 중이던 대회의 정산이 옛 키를 못 알아보고 같은
- * 상금을 한 번 더 지급한다.
- *
- * 라벨이 시즌을 달고 있어 지난 시즌 기록까지 그대로 옮겨온다. 새 키는 이 표에
- * 없으므로 두 번 돌려도 결과가 같다.
- */
-export function migrateEuroPrizeKeys(state: GameState): void {
-  const moved = new Map<string, string>();
-  for (const cup of cupCatalog()) {
-    for (let season = 1; season <= state.season; season++) {
-      moved.set(prizeLabel(cup, season, "리그 페이즈"), prizeKey(cup.id, "league-phase", season));
-      moved.set(prizeLabel(cup, season, "우승"), prizeKey(cup.id, "winner", season));
-      for (const stage of knockoutStages(cup)) {
-        moved.set(
-          prizeLabel(cup, season, `${stageLabel(stage, 1, false)} 진출`),
-          prizeKey(cup.id, `stage:${stage}`, season),
-        );
-      }
-    }
-  }
-  migratePrizeKeys(state, moved);
-}
-
-/**
  * 리그 페이즈 정산 — 참가비 + 승/무 수당. 리그 페이즈가 끝난 뒤 한 번에 준다.
  * (실제로는 경기마다 들어오지만, 원장을 경기 수만큼 부풀릴 이유가 없다.)
  */
@@ -50,8 +25,7 @@ export function payLeaguePhasePrizes(state: GameState, cupId: string, digest: Ti
   const cup = cupCatalogById(cupId);
   if (!cup) return;
   const phase = state.matches.filter(
-    (m) =>
-      m.season === state.season && m.competitionId === cupId && (m.stage ?? "league") === "league",
+    (m) => m.season === state.season && m.competitionId === cupId && m.stage === "league",
   );
   /**
    * 참가비의 조건은 성적이 아니라 출전이다 — 그래서 **경기에 나선 팀 전원**이

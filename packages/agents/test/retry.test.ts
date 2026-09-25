@@ -7,7 +7,11 @@ import {
   RATING_MAX,
   TACTIC_GAIN_MAX,
   TACTIC_GAIN_MIN,
-  type GameState,
+  advanceTime,
+  createGame,
+  interpretBackgroundHeuristic,
+  markEntered,
+  startMatch,
 } from "@story-fm/engine";
 import { ARC_TITLE_MAX, CharacterMemorySchema } from "@story-fm/domain";
 import type { GameLLM, GameToolSpec, JsonObjectSchema, TurnResult } from "@story-fm/llm";
@@ -111,24 +115,39 @@ describe("readOutput — 산출이 왔는가", () => {
  * 판독기의 실패 계약 — 산출은 JSON 하나로 오므로 "산출 뒤의 실패"라는 자리는 없다.
  * 남는 갈래는 셋이다: 산출이 왔다 · 산출이 없다(한 번 더) · 호출 자체가 실패했다(그대로).
  *
- * 경기 중 명단·패킷이 없는 상태라 `buildLedgerNote`도 `<facts>`도 빈 줄을 낸다 — 이
+ * 경기 중 명단이 없는 상태라 `buildLedgerNote`도 `<facts>`도 빈 줄을 낸다 — 이
  * 테스트가 보는 것은 프롬프트가 아니라 실패와 산출이 만나는 자리다.
  */
 describe("runMatchReader — 산출과 실패", () => {
   /** 이 경기의 지난 중계 턴 하나 — 판독기가 `<match_log>`로 읽는다 (agents.md §3) */
   // 장부 없는 경기 상태 — 입력 조립이 경기 갈래로 가되 실을 것이 없다
-  const emptyState = {
-    pendingMatch: { matchId: "m" },
-    chat: [
-      {
-        role: "model",
-        text: "@중계: 브루노가 절뚝이며 터치라인으로 나옵니다.",
-        toolCalls: [],
-        at: "2026-08-01",
-        inMatch: true,
-      },
-    ],
-  } as unknown as GameState;
+  /**
+   * 킥오프에 선 실제 경기 한 판 — 판독기는 실시간 경기의 장부와 통계를 읽으므로 손으로 세운
+   * 조각으로는 입력이 서지 않는다. 한 번 세워 케이스가 나눠 쓴다(판독은 상태를 바꾸지 않는다).
+   */
+  const emptyState = (() => {
+    const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
+    const state = createGame({
+      seed: 5,
+      userTeamId: "arsenal",
+      managerName: "김감독",
+      background,
+      attributes: interpretBackgroundHeuristic(background),
+    });
+    for (let guard = 0; guard < 40 && state.phase !== "matchday"; guard++) {
+      advanceTime(state, "next_match");
+    }
+    expect(startMatch(state).ok).toBe(true);
+    markEntered(state);
+    state.chat.push({
+      role: "model",
+      text: "@중계: 브루노가 절뚝이며 터치라인으로 나옵니다.",
+      toolCalls: [],
+      at: state.date,
+      inMatch: true,
+    });
+    return state;
+  })();
 
   /** 판독기가 인자를 옮길 명령의 스펙 — 이 갈래의 시험에는 스키마만 있으면 된다 */
   const SPECS = new Map<string, GameToolSpec>([

@@ -24,7 +24,7 @@ import {
   SCOUT_VERDICT_MAX,
   type RatingTier,
 } from "@story-fm/domain";
-import { GAP_CONDITION } from "@story-fm/sim";
+import { GASSED_CONDITION } from "@story-fm/sim";
 import { competitionName } from "../data/cup-catalog";
 import { isSettling, settlingNote, settlingOf } from "./settling";
 import { diffDays } from "../competition/calendar";
@@ -53,7 +53,7 @@ import { isOurPlayer, playerById, teamNameIn, type GameState } from "../core/sta
  * 1. **결정적** — 오차는 (seed, playerId, 능력치) 해시에서 나온다. 같은 질문에
  *    항상 같은 답이 나와야 스카우팅 정보를 신뢰할 수 있다. 호출마다 새로
  *    뽑으면 GM이 어제 한 말과 오늘 한 말이 달라진다.
- * 2. **표현 계층 전용** — 코어(장부·판정·전력 패킷)는 언제나 참값으로 계산한다.
+ * 2. **표현 계층 전용** — 코어(장부·판정·경기 시뮬)는 언제나 참값으로 계산한다.
  *    여기서 만든 관측값이 게임 상태에 반영되는 경로는 없다.
  *
  * 지식 수준은 저장하지 않고 기록(MATCH 출전 명단 · SCOUT_REPORT)에서 파생한다.
@@ -212,7 +212,6 @@ export function isScouted(state: GameState, playerId: string): boolean {
 
 /**
  * 우리와의 경기에서 그라운드를 밟은 걸 봤는가 — MATCH 결과의 출전 명단에서 파생.
- * 명단 기록이 없는 구 세이브의 경기는 미관전으로 취급한다.
  */
 export function hasSeenPlay(state: GameState, playerId: string): boolean {
   const player = playerById(state, playerId);
@@ -225,7 +224,7 @@ export function hasSeenPlay(state: GameState, playerId: string): boolean {
     const userIsAway = match.awayTeamId === state.userTeamId;
     if (!userIsHome && !userIsAway) continue; // 우리가 없던 경기는 못 봤다
     const theirLineup = userIsHome ? match.result.awayLineup : match.result.homeLineup;
-    if (theirLineup?.includes(playerId)) return true;
+    if (theirLineup.includes(playerId)) return true;
   }
   return false;
 }
@@ -237,7 +236,7 @@ export function hasSeenPlay(state: GameState, playerId: string): boolean {
  * 출전 명단이 `seen`을 만드는 것과 같은 자리라, 임무 표를 지우면 눈금도 함께 사라진다.
  */
 export function pickedByMission(state: GameState, playerId: string): boolean {
-  return (state.scoutMissions ?? []).some((m) => m.candidates?.includes(playerId) === true);
+  return state.scoutMissions.some((m) => m.candidates?.includes(playerId) === true);
 }
 
 export function knowledgeOf(state: GameState, playerId: string): Knowledge {
@@ -526,7 +525,7 @@ const SCOUT_SUMMARY_NAMES = 3;
  * 선수인 것만. 우리가 데려온 선수는 스카우트를 보낼 대상이 아니다.
  */
 export function deferredScouts(state: GameState): DeferredScout[] {
-  return (state.deferredScouts ?? []).filter((d) => {
+  return state.deferredScouts.filter((d) => {
     if (diffDays(d.requestedOn, state.date) > SCOUT_DEFER_DAYS) return false;
     const p = playerById(state, d.gamePlayerId);
     return !!p && p.teamId !== state.userTeamId;
@@ -535,20 +534,19 @@ export function deferredScouts(state: GameState): DeferredScout[] {
 
 /** 한도에 막힌 요청을 대기로 남긴다 — 같은 선수는 한 번만, 날짜는 첫 요청 그대로 */
 export function deferScout(state: GameState, playerId: string): void {
-  const queue = (state.deferredScouts ??= []);
+  const queue = state.deferredScouts;
   if (queue.some((d) => d.gamePlayerId === playerId)) return;
   queue.push({ gamePlayerId: playerId, requestedOn: state.date });
 }
 
 /** 나갔거나 더는 대상이 아닌 요청을 지운다 */
 export function dropDeferredScout(state: GameState, playerId: string): void {
-  if (!state.deferredScouts) return;
   state.deferredScouts = state.deferredScouts.filter((d) => d.gamePlayerId !== playerId);
 }
 
 /** 만료·무효 요청 정리 — tick이 하루에 한 번 부른다 */
 export function pruneDeferredScouts(state: GameState): void {
-  if (!state.deferredScouts?.length) return;
+  if (state.deferredScouts.length === 0) return;
   state.deferredScouts = deferredScouts(state);
 }
 
@@ -560,19 +558,19 @@ export function pruneDeferredScouts(state: GameState): void {
  * 세는 쪽은 반드시 이 자를 쓴다 (player.md §9.4).
  */
 export function activeMissions(state: GameState): ScoutMission[] {
-  return (state.scoutMissions ?? []).filter((m) => m.dueOn !== null && m.completedOn === null);
+  return state.scoutMissions.filter((m) => m.dueOn !== null && m.completedOn === null);
 }
 
 /** 아직 살아 있는 대기 임무 — 요청 뒤 `SCOUT_DEFER_DAYS`까지 */
 export function waitingMissions(state: GameState): ScoutMission[] {
-  return (state.scoutMissions ?? []).filter(
+  return state.scoutMissions.filter(
     (m) => m.dueOn === null && diffDays(m.requestedOn, state.date) <= SCOUT_DEFER_DAYS,
   );
 }
 
 /** 만료된 대기 임무를 지운다 — tick이 하루에 한 번 부른다 (지목의 `pruneDeferredScouts`와 같은 자리) */
 export function pruneWaitingMissions(state: GameState): void {
-  if (!state.scoutMissions?.length) return;
+  if (state.scoutMissions.length === 0) return;
   const alive = new Set(waitingMissions(state).map((m) => m.id));
   state.scoutMissions = state.scoutMissions.filter((m) => m.dueOn !== null || alive.has(m.id));
 }
@@ -896,11 +894,11 @@ export function readCondition(
   /**
    * **다리가 멈춘 건 눈에 보인다.** 걷기 시작한 윙어는 스탠드에서도 알아본다 —
    * 안개가 가리는 건 "얼마나 남았나"이지 "갔나 안 갔나"가 아니다. 그래서 추정
-   * 구간은 문턱(`GAP_CONDITION`)을 넘지 않는다: 넘게 두면 키포인트가 "구멍"이라
-   * 적은 선수의 막대가 멀쩡해 보여 같은 화면이 두 말을 한다.
+   * 구간은 문턱(`GASSED_CONDITION`)을 넘지 않는다: 넘게 두면 다리가 멈췄다고
+   * 적힌 선수의 막대가 멀쩡해 보여 같은 화면이 두 말을 한다.
    */
-  if (truth <= GAP_CONDITION) high = Math.min(high, GAP_CONDITION);
-  else low = Math.max(low, GAP_CONDITION + 1);
+  if (truth <= GASSED_CONDITION) high = Math.min(high, GASSED_CONDITION);
+  else low = Math.max(low, GASSED_CONDITION + 1);
   const value = Math.max(low, Math.min(high, center));
   return { value, low, high, margin, label: conditionLabel(value) };
 }

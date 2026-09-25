@@ -776,7 +776,7 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
    * 1군도 없으면 명단 전체로 물러난다 (people.md §5-1).
    */
   it("첫 주장의 후보는 선발 → 1군 → 명단 전체 순으로 물러난다", () => {
-    const p = (id: string, leadership: number, level?: "first" | "reserve") => ({
+    const p = (id: string, leadership: number, level: "first" | "reserve") => ({
       id,
       birthdate: "1996-01-01",
       squadLevel: level,

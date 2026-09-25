@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { MatchEvent } from "@story-fm/domain";
 import {
-  accumulateFatigue,
   applyEvents,
   createLedger,
   FRIENDLY_SUBS,
-  MATCH_FATIGUE_MAX,
-  mergeSubstitutions,
   finishingGoalProbability,
   samplePoisson,
   sampleShotXg,
@@ -270,8 +267,8 @@ describe("경기 장부 검증 (match.md §5)", () => {
   });
 
   /**
-   * 구간 시뮬은 AI 교체를 정지 사건 **앞**에 끼워 한 배치로 올린다
-   * (`insertBeforeStop`) — 같은 정지점의 같은 자리다.
+   * 벤치는 AI 교체를 정지 사건 **앞**에 끼워 한 배치로 올릴 수 있다 — 같은 정지점의
+   * 같은 자리다.
    */
   it("정지 사건 앞에 붙은 교체도 창을 쓰지 않는다", () => {
     const bench = Array.from({ length: 8 }, (_, i) => `b${i}`);
@@ -540,43 +537,5 @@ describe("슈팅 수 — 결과를 자르는 상·하한이 없다", () => {
     const samples = Array.from({ length: 2_000 }, (_, seed) => samplePoisson(rngOf(seed), 18));
     expect(Math.max(...samples)).toBeGreaterThan(22);
     expect(new Set(samples.filter((value) => value > 22)).size).toBeGreaterThan(3);
-  });
-});
-
-/**
- * 엔진과 match-cli가 같이 부르는 자리 — 여기가 갈리면 프로토타입이 다른 경기를
- * 굴리고, 두 호출부 어느 쪽 테스트도 그 사실을 말해 주지 않는다.
- */
-describe("구간 마무리 — 교체를 끼우는 자리와 누적 피로", () => {
-  const sub = (minute: number, cause?: MatchEvent["subCause"]): MatchEvent =>
-    ev({ minute, type: "substitution", ...(cause ? { subCause: cause } : {}) });
-
-  it("부상 교체는 사건 뒤에 선다 — 다치기 전에 뺀 장면이 되면 안 된다", () => {
-    const events = [ev({ minute: 30, type: "injury" }), ev({ minute: 30, type: "goal" })];
-    const merged = mergeSubstitutions(events, [sub(30, "injury")]);
-    expect(merged.map((e) => e.type)).toEqual(["injury", "goal", "substitution"]);
-  });
-
-  it("그 밖의 교체는 정지 사건 앞으로 들어간다 — 뒤는 장부가 반려한다", () => {
-    const events = [ev({ minute: 60, type: "shot" }), ev({ minute: 62, type: "goal" })];
-    const merged = mergeSubstitutions(events, [sub(70, "chase")]);
-    expect(merged.map((e) => e.type)).toEqual(["shot", "substitution", "goal"]);
-    // 정지 사건보다 늦은 분은 그 앞으로 당겨진다
-    expect(merged[1]!.minute).toBe(62);
-  });
-
-  it("정지 사건이 없으면 뒤에 붙고, 교체가 없으면 사건이 그대로다", () => {
-    const events = [ev({ minute: 10, type: "shot" })];
-    expect(mergeSubstitutions(events, [sub(20, "chase")]).map((e) => e.type)).toEqual([
-      "shot",
-      "substitution",
-    ]);
-    expect(mergeSubstitutions(events, [])).toEqual(events);
-  });
-
-  it("누적 피로는 더해지되 천장을 넘지 않는다", () => {
-    const worn: Record<string, number> = { a: 30, b: MATCH_FATIGUE_MAX - 1 };
-    accumulateFatigue(worn, { a: 12, b: 40, c: 5 });
-    expect(worn).toEqual({ a: 42, b: MATCH_FATIGUE_MAX, c: 5 });
   });
 });

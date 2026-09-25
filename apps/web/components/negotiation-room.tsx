@@ -44,11 +44,6 @@ export function NegotiationRoom({
       <section className="nr-section">
         <span className="nr-label">건너편</span>
         <Voices voices={room.voices} />
-        {room.stance && (
-          <span className="stance-chip" data-stance={room.stance.key}>
-            {room.stance.label}
-          </span>
-        )}
       </section>
 
       <section className="nr-section">

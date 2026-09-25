@@ -49,7 +49,15 @@ const conferenceAt = (i: number): PressConference => ({
   date: "2026-08-20",
   trigger: "match",
   context: "1부 규모 팔",
-  facts: [{ kind: "result", text: "리그 2-1 승리 (홈)", about: null, sharp: false }],
+  facts: [
+    {
+      kind: "result",
+      data: { name: "리그", values: { for: 2, against: 1 }, tags: ["win", "home"] },
+      about: null,
+      sharp: false,
+    },
+  ],
+  reporterId: "reporter-scale",
   status: "pending",
   weight: 2,
 });
@@ -99,7 +107,7 @@ describe("한 시즌의 기자회견과 평판", () => {
     }
     expect(finished).toBe(true);
 
-    const stance = state.manager.stanceSeason ?? { board: 0, media: 0, squad: 0 };
+    const stance = state.manager.stanceSeason;
     const mini = state.manager.reputation;
 
     // ── 1부 규모 팔 — 마흔여덟 번의 회견과 서른여덟 경기, 같은 함수로 ──
@@ -109,7 +117,7 @@ describe("한 시즌의 기자회견과 평판", () => {
     for (let i = 0; i < SEASON_CONFERENCES; i++) {
       applyPressOutcome(scale, conferenceAt(i), "defend");
     }
-    const scaleStance = { ...(scale.manager.stanceSeason ?? { board: 0, media: 0, squad: 0 }) };
+    const scaleStance = { ...scale.manager.stanceSeason };
     /**
      * 성적은 `matchReputationDelta`가 낸다 — 값이 두 곳에 적히면 언론 축이 성적을
      * 다시 놓치는 날 이 하네스가 그것을 못 본다.

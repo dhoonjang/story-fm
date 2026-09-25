@@ -29,7 +29,7 @@ import {
   setRelationTier,
   type GameState,
 } from "@story-fm/engine";
-import { createTestGame } from "./helpers";
+import { createTestGame, resultOf } from "./helpers";
 
 /** 질책이 잘리지 않게 사이를 틀어 둔다 — 수용성 앵커가 outcome을 자른다 (career.md §2) */
 function closeOff(state: GameState, playerId: string): void {
@@ -73,11 +73,13 @@ function play(state: GameState, playerId: string, count: number) {
       id: `m-${playerId}-${i}`,
       season: state.season,
       competitionId: "friendly",
+      stage: "league",
       round: 1,
       date: state.date,
+      time: "15:00",
       homeTeamId: state.userTeamId,
       awayTeamId: "opponent",
-      result: { homeGoals: 1, awayGoals: 0, scorers: [], homeLineup: [playerId] },
+      result: resultOf({ homeGoals: 1, awayGoals: 0, homeLineup: [playerId] }),
     });
   }
 }

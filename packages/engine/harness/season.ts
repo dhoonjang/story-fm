@@ -3,7 +3,7 @@ import { diffDays } from "@story-fm/domain";
 import { drillUserTactics, playMockMatch } from "../test/helpers";
 
 /**
- * 하루씩 밀어 한 시즌을 끝까지 돈다 — 유저 경기는 구간 시뮬로 치른다.
+ * 하루씩 밀어 한 시즌을 끝까지 돈다 — 유저 경기는 실시간 경기로 치른다.
  *
  * 하네스 여럿이 같은 진행을 쓴다. 각자 제 루프를 들고 있으면 한쪽만 고쳐진 날
  * 서로 다른 시즌을 재게 된다.

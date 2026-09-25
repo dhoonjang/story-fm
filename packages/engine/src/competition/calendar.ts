@@ -1,5 +1,7 @@
 import type { MatchRecord, MatchStage, ScheduleEntry, TransferWindow } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
+// 2군 경기 판정은 도메인 규칙이다 — 엔진 쪽 호출부(e2e 시드 포함)가 옮기지 않게 다시 내보낸다
+export { isReserveMatch };
 import { scopedLeagues, scopedTeams, scopedTeamsOfLeague, type WorldScope } from "../world/scope";
 import { shuffled } from "../core/rng";
 import { isEuroWeek } from "./europe";
@@ -21,9 +23,8 @@ export interface SeasonCalendar {
    *
    * 기본 훈련 배치와 감독의 훈련 지시(`setTraining`)가 모두 이 날짜를 읽어야
    * 한다 — 휴가 기간을 모르면 아무도 없는 훈련장에 세션이 깔린다.
-   * 옛 세이브엔 없다 — 읽을 때 계산으로 채운다(`squadReturnOf`).
    */
-  squadReturn?: string;
+  squadReturn: string;
   /** 리그 개막일 — 8월 중순 토요일 */
   start: string;
 }
@@ -40,9 +41,9 @@ export function preseasonReturnDate(preseasonStart: string): string {
   return addDays(date, 7); // 둘째 월요일
 }
 
-/** 이 세이브의 소집일 — 저장돼 있으면 그 값, 옛 세이브면 계산 */
+/** 이 세이브의 소집일 */
 export function squadReturnOf(calendar: SeasonCalendar): string {
-  return calendar.squadReturn ?? preseasonReturnDate(calendar.preseasonStart);
+  return calendar.squadReturn;
 }
 
 /** 오늘이 아직 여름 휴가인가 — 훈련을 걸 수 없는 기간 */
@@ -54,28 +55,19 @@ export {
   addDays,
   contractUntil,
   dayOfWeek,
+  DEFAULT_KICKOFF,
   diffDays,
   isWeekend,
   seasonYear,
   MONDAY,
   SATURDAY,
-  SUNDAY,
-  DEFAULT_KICKOFF,
   MIN_REST_HOURS,
   HARD_MIN_REST_HOURS,
   kickoffAt,
   restHours,
   tooClose,
 } from "../core/dates";
-import {
-  addDays,
-  dayOfWeek,
-  DEFAULT_KICKOFF,
-  diffDays,
-  kickoffAt,
-  MIN_REST_HOURS,
-  seasonYear,
-} from "../core/dates";
+import { addDays, dayOfWeek, diffDays, kickoffAt, MIN_REST_HOURS, seasonYear } from "../core/dates";
 import {
   domesticCupsOfCountry,
   DOMESTIC_STAGES,
@@ -725,6 +717,7 @@ export function buildMatches(
         id: `m-${competitionId}-${season}-${week.round}-${homeTeamId}`,
         season,
         competitionId,
+        stage: "league",
         round: week.round,
         date: slot.date,
         time: slot.time,
@@ -820,7 +813,7 @@ export function buildScheduleEntries(
       id: `se-${m.id}`,
       date: m.date,
       // 킥오프는 경기가 갖는다 — 엔트리는 비추기만 한다 (재계산하면 어긋난다)
-      time: m.time ?? DEFAULT_KICKOFF,
+      time: m.time,
       type: "match",
       refId: m.id,
       teamId: involvesUser ? userTeamId : null,

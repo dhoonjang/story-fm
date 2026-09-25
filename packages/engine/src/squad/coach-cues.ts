@@ -131,7 +131,7 @@ function fixtureHead(state: GameState, match: MatchRecord): string {
   const home = match.homeTeamId === state.userTeamId;
   const side = match.neutral === true ? "중립" : home ? "홈" : "원정";
   const opponent = teamShortNameIn(state, home ? match.awayTeamId : match.homeTeamId);
-  return `${competitionLabel(match.competitionId, match.stage ?? "league", match.round)} ${side} vs ${opponent}`;
+  return `${competitionLabel(match.competitionId, match.stage, match.round)} ${side} vs ${opponent}`;
 }
 
 /** 끝난 경기 한 줄 — `EPL R12 3-0 승 vs EVE` (기준 팀 시점) */
@@ -141,7 +141,7 @@ function resultLine(state: GameState, match: MatchRecord, teamId: string): strin
   const theirs = home ? match.result!.awayGoals : match.result!.homeGoals;
   const other = teamShortNameIn(state, home ? match.awayTeamId : match.homeTeamId);
   return (
-    `${competitionLabel(match.competitionId, match.stage ?? "league", match.round)} ` +
+    `${competitionLabel(match.competitionId, match.stage, match.round)} ` +
     `${mine}-${theirs} ${outcomeLabel(outcomeFor(match, teamId))} vs ${other}`
   );
 }
@@ -301,7 +301,7 @@ const opponentForm: CoachEye = (state, sight) => {
   };
 };
 
-/** 여섯 축에서 두 팀이 가장 벌어진 곳 — 전력 패킷이 소화력으로 읽는 그 축이다 */
+/** 여섯 축에서 두 팀이 가장 벌어진 곳 */
 const matchupAxis: CoachEye = (state, sight) => {
   const { opponentId } = sight;
   if (opponentId === null) return null;

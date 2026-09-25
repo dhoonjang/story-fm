@@ -196,10 +196,21 @@ describe("최근 성적 축은 전 클럽이 같은 표를 읽는다", () => {
       .filter((id) => id !== state.userTeamId);
     const club = "wolves";
     const rest = epl.filter((id) => id !== club);
+    // 체급은 순위만 읽는다 — 성적 칸은 비워 둔다
+    const blank = {
+      played: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
+      goalsFor: 0,
+      goalsAgainst: 0,
+      points: 0,
+    };
     const threeSeasons = (order: string[]) =>
       [1, 2, 3].map((season) => ({
         season,
-        leagues: [{ leagueId: "epl", rows: order.map((teamId) => ({ teamId })) }],
+        teamId: club,
+        leagues: [{ leagueId: "epl", rows: order.map((teamId) => ({ teamId, record: blank })) }],
         matches: [],
       }));
 
@@ -222,7 +233,12 @@ describe("최근 성적 축은 전 클럽이 같은 표를 읽는다", () => {
 
     // 우리 리그가 아닌 표만 있으면 EPL 클럽은 어디에도 없다 — 중립 그대로다
     state.history = [
-      { season: state.season, leagues: [{ leagueId: "laliga", rows: [] }], matches: [] },
+      {
+        season: state.season,
+        teamId: state.userTeamId,
+        leagues: [{ leagueId: "laliga", rows: [] }],
+        matches: [],
+      },
     ];
     recomputeClubTiers(state);
 

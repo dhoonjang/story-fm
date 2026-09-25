@@ -119,7 +119,7 @@ export function settleSellOn(
   live.clause.settledAmount = amount;
   if (amount <= 0) return 0;
 
-  (state.paymentSchedules ??= []).push({
+  state.paymentSchedules.push({
     id: `sellon-${input.resaleTransferId}`,
     transferId: input.resaleTransferId,
     gamePlayerId: input.gamePlayerId,

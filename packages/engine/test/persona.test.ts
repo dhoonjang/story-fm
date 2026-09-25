@@ -18,7 +18,6 @@ import {
 import {
   HEAD_COACH_ARCHETYPES,
   HEAD_COACH_NAMES,
-  ensurePersonas,
   generateHeadCoach,
   headCoachOf,
   isFamousPlayer,
@@ -75,8 +74,7 @@ import { createTestGame } from "./helpers";
 
 /**
  * 인물은 **순수 함수가 시드에서 만든다** (`generateHeadCoach` 등). 세계를 세워야
- * 하는 것은 `state.personas`를 읽는 자리(`headCoachOf`·`speakerRoles`·`ensurePersonas`)
- * 뿐이고, 그것도 픽스처 보관을 타는 `createTestGame`으로 충분하다 — 예전엔 이 파일이
+ * 하는 것은 `state.personas`를 읽는 자리(`headCoachOf`·`speakerRoles`)뿐이고, 그것도 픽스처 보관을 타는 `createTestGame`으로 충분하다 — 예전엔 이 파일이
  * `createGame`을 열다섯 번 직접 불러 매번 세계를 새로 세웠다.
  */
 
@@ -102,19 +100,6 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
       generateHeadCoach(42, "arsenal", state.calendar.preseasonStart),
     );
     expect(generateHeadCoach(42, "arsenal")).toEqual(generateHeadCoach(42, "arsenal"));
-  });
-
-  it("화자 태그는 직책이 아니라 이름이다 — 옛 세이브도 로드 때 고쳐진다", () => {
-    const state = createTestGame(42, "manutd");
-    expect(headCoachOf(state).characterId).toBe("스티브 홀랜드");
-
-    // 태그를 직책으로 쓰던 시절의 세이브를 흉내 낸다
-    const coach = state.personas!.find((p) => p.role === "head_coach")!;
-    coach.characterId = HEAD_COACH_ROLE_LABEL;
-    ensurePersonas(state);
-    // 이름으로 고쳐지되 사람 자체는 그대로다 (감독이 만난 사람이 바뀌지 않는다)
-    expect(headCoachOf(state).characterId).toBe(coach.name);
-    expect(headCoachOf(state).archetype).toBe(coach.archetype);
   });
 
   it("실제 수석코치를 아는 구단은 그 사람이 나온다 — 시드가 달라도 이름은 그대로", () => {
@@ -221,6 +206,10 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
       openedOn: state.date,
       expiresOn: state.date,
       status: "open",
+      pitched: [],
+      precontract: false,
+      terms: [],
+      buyout: false,
       rounds: [],
     });
     expect(speakerRoles(state)[normalizeSpeaker(outsider.name)]).toEqual({ kind: "player" });
@@ -238,6 +227,10 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
       openedOn: state.date,
       expiresOn: state.date,
       status: "agreed",
+      pitched: [],
+      precontract: false,
+      terms: [],
+      buyout: false,
       rounds: [],
       medical: { onDate: state.date, status: "scheduled" },
     });
@@ -259,6 +252,10 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
         openedOn: state.date,
         expiresOn: state.date,
         status,
+        pitched: [],
+        precontract: false,
+        terms: [],
+        buyout: false,
         rounds: [],
       });
       expect(speakerRoles(state)[normalizeSpeaker(outsider.name)], status).toBeUndefined();
@@ -275,13 +272,15 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   });
 
   it("세계 인물 명부가 직책 라벨과 함께 선다 — 유저 팀의 명부 감독만 빠진다", () => {
-    const roles = speakerRoles({ seed: 1, userTeamId: "manutd" });
+    const roles = speakerRoles({ seed: 1, userTeamId: "manutd", personas: [] });
     expect(roles[normalizeSpeaker("펩 과르디올라")]).toEqual({ kind: "manager", label: "감독" });
     expect(roles[normalizeSpeaker("조르제 멘데스")]).toEqual({ kind: "agent", label: "에이전트" });
     expect(roles[normalizeSpeaker("게리 네빌")]).toEqual({ kind: "pundit", label: "해설위원" });
     // 유저가 맡은 팀의 명부 감독은 이 세계에 부임한 적이 없다
     expect(
-      speakerRoles({ seed: 1, userTeamId: "mancity" })[normalizeSpeaker("펩 과르디올라")],
+      speakerRoles({ seed: 1, userTeamId: "mancity", personas: [] })[
+        normalizeSpeaker("펩 과르디올라")
+      ],
     ).toBeUndefined();
   });
 
@@ -289,6 +288,7 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
     const roles = speakerRoles({
       seed: 1,
       userTeamId: "manutd",
+      personas: [],
       players: [
         { name: "우리 주장", teamId: "manutd", isCaptain: true },
         // 주장과 동명의 남의 팀 스타 — 뒤 겹은 완장을 밀어내지 못한다
@@ -303,15 +303,6 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
     expect(roles[normalizeSpeaker("리오넬 메시")]).toEqual({ kind: "player" });
     expect(roles[normalizeSpeaker("무명 선수")]).toBeUndefined();
     expect(roles[normalizeSpeaker("우리 주장")]).toEqual({ kind: "captain", label: "주장" });
-  });
-
-  it("personas가 빈 배열이어도 직책이 사라지지 않는다", () => {
-    const state = createTestGame(42, "manutd");
-    // `?? `만 쓰면 빈 배열을 "있음"으로 봐서 사전이 통째로 비었다 (회귀 방지)
-    state.personas = [];
-    expect(speakerRoles(state)[normalizeSpeaker("스티브 홀랜드")]?.label).toBe(
-      HEAD_COACH_ROLE_LABEL,
-    );
   });
 
   it("구단주도 데이터다 — 만날 때마다 같은 사람, 코치와 다른 사람", () => {
@@ -342,39 +333,6 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
       kind: "owner",
       label: "구단주",
     });
-  });
-
-  it("구단주가 없던 세이브는 로드 때 채워진다 (버전을 올리지 않는다)", () => {
-    const state = createTestGame(7, "manutd");
-    const expected = ownerOf(state);
-    // 수석코치만 있던 시절의 세이브
-    state.personas = state.personas!.filter((p) => p.role === "head_coach");
-    ensurePersonas(state);
-    expect(ownerOf(state)).toEqual(expected);
-    // 수석코치 · 구단주 · 기자 셋 · 스태프 넷 (코치 둘 · 의료진 · 스카우트)
-    expect(state.personas).toHaveLength(9);
-  });
-
-  it("페르소나가 없는 옛 세이브는 로드 때 채워진다 (버전을 올리지 않는다)", () => {
-    const state = createTestGame(7);
-    const expected = headCoachOf(state);
-    // 페르소나 도입 전 세이브를 흉내 낸다
-    delete state.personas;
-    ensurePersonas(state);
-    // 시드로 만들었으므로 "그 세이브의 코치"가 그대로 복원된다
-    expect(headCoachOf(state)).toEqual(expected);
-    // 자리를 아는 인물 — 수석코치 · 구단주 · 기자 셋 · 스태프 넷
-    expect(state.personas).toHaveLength(9);
-  });
-
-  it("이미 있으면 덮어쓰지 않는다 (감독이 만난 사람이 바뀌지 않는다)", () => {
-    const state = createTestGame(7);
-    const coach = headCoachOf(state);
-    ensurePersonas(state);
-    ensurePersonas(state);
-    // 여러 번 불러도 인물이 늘지 않는다 (수석코치 · 구단주 · 기자 셋 · 스태프 넷)
-    expect(state.personas).toHaveLength(9);
-    expect(headCoachOf(state)).toEqual(coach);
   });
 });
 
@@ -437,12 +395,9 @@ describe("스태프 — 고용 정보를 든 인물 (people.md §2-2)", () => {
     expect(headCoachSalaryOf("arsenal")).toBe(staffSalaryOf("arsenal", "coach") * 2);
   });
 
-  it("수석코치도 고용 정보를 든다 — 없던 세이브는 로드가 채운다", () => {
+  it("수석코치도 고용 정보를 든다 — 새 게임의 계약은 구단 살림의 연봉이다", () => {
     const state = createTestGame(42);
     expect(headCoachOf(state).employment?.title).toBe(HEAD_COACH_ROLE_LABEL);
-    const coach = state.personas!.find((p) => p.role === "head_coach")!;
-    delete coach.employment;
-    ensurePersonas(state);
     expect(headCoachOf(state).employment?.contract.salary).toBe(
       headCoachSalaryOf(state.userTeamId),
     );
@@ -521,13 +476,6 @@ describe("기자 페르소나", () => {
       expect(seat?.kind).toBe("reporter");
       expect(seat?.label).toBe(r.outlet);
     }
-  });
-
-  it("기자가 없던 세이브도 로드하면 채워진다", () => {
-    const state = createTestGame(5);
-    state.personas = state.personas?.filter((p) => p.role !== "reporter");
-    ensurePersonas(state);
-    expect(reportersOf(state)).toHaveLength(3);
   });
 });
 
@@ -706,7 +654,7 @@ describe("선수 페르소나 — 파생되는 카드", () => {
   });
 
   /**
-   * **전력 패킷과 xG는 원형을 읽지 않는다** (people.md 요구사항 3).
+   * **경기 시뮬과 xG는 원형을 읽지 않는다** (people.md 요구사항 3).
    *
    * 런타임으로는 증명할 수 없는 부재다 — 원형이 선수 id의 파생이라 원형만 바꿔 같은
    * 경기를 두 번 돌릴 수 없다. 그래서 경계를 **읽는 자리가 없다**로 잰다: 이 폴더들이
@@ -756,10 +704,7 @@ describe("가상 감독 — 명부 밖 벤치의 사람 (people.md §2)", () => 
     expect(generateVirtualManager(42, "옌스 바그너")).toEqual(
       generateVirtualManager(42, "옌스 바그너"),
     );
-    // 옛 세이브의 자리 표식이 있으면 그때 서 있던 사람 그대로다 (people.md §2)
-    const seated = generateVirtualManager(42, "옌스 바그너", "dortmund");
-    expect(seated).toEqual(generateVirtualManager(42, "옌스 바그너", "dortmund"));
-    expect(seated.characterId).toBe("옌스 바그너");
+    expect(generateVirtualManager(42, "옌스 바그너").characterId).toBe("옌스 바그너");
   });
 
   it("모든 클럽 벤치에 감독이 선다 — 명부가 먼저, 이름은 겹치지 않고, 유저 팀만 빈다", () => {
@@ -781,12 +726,12 @@ describe("가상 감독 — 명부 밖 벤치의 사람 (people.md §2)", () => 
     for (const name of names) expect(occupied.has(name), name).toBe(false);
   });
 
-  it("빈 벤치는 로드 보정이 채운다 — 채워도 같은 사람이다 (버전을 올리지 않는다)", () => {
+  it("벤치 채우기는 (시드, 팀) 채널로 결정적이다 — 다시 채워도 같은 사람이다", () => {
     const state = createTestGame();
     const before = state.teams.map((t) => t.managerName);
     for (const team of state.teams) if (team.id !== state.userTeamId) delete team.managerName;
     ensureSeededManagers(state);
-    // (시드, 팀) 채널이라 다시 채워도 그 벤치의 사람은 같다
+    // 같은 세계를 다시 세워도 그 벤치의 사람은 같다
     expect(state.teams.map((t) => t.managerName)).toEqual(before);
   });
 
@@ -846,19 +791,6 @@ describe("페르소나 키워드", () => {
     );
     // "이적"처럼 매 턴 나오는 말이 한 턴 상한 3장을 다 채우면 불린 사람이 밀린다
     for (const persona of [coach, owner, reporter]) expect(persona.keywords).not.toContain("이적");
-  });
-
-  it("키워드가 없던 옛 세이브는 로드가 채운다 — 선수는 만들지 않는다", () => {
-    const state = createTestGame(7);
-    for (const persona of state.personas ?? []) delete persona.keywords;
-    ensurePersonas(state);
-    for (const persona of state.personas ?? []) {
-      expect(persona.keywords?.length, persona.name).toBeGreaterThan(0);
-      expect(persona.keywords).toContain(persona.name);
-    }
-    // 선수 페르소나는 파생이라 세이브에 들어가지 않는다
-    expect(state.personas?.some((p) => p.role === "player")).toBe(false);
-    expect(state.personas).toHaveLength(9);
   });
 });
 

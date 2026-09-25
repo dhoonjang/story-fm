@@ -134,7 +134,7 @@ describe("15시즌을 전환한 뒤의 스쿼드", () => {
        * 소집일이 쓴다 (season.md §6). 빼면 감독 팀만 열다섯 여름 동안 신인을 한 명도
        * 받지 못해, 재는 것이 세계의 수지가 아니라 그 한 구단의 고갈이 된다.
        */
-      const stood = (state.youthCandidates ?? []).length;
+      const stood = state.youthCandidates.length;
       if (stood === 0) summersWithoutCandidates += 1;
       candidatesPerSummer.push(stood);
       const sizeBefore = playersOf(state, state.userTeamId).length;

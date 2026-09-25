@@ -14,7 +14,7 @@ LLM 판정은 "무엇이 남았나"까지만 말한다.
 | 전술 적응도   | `TACTIC_ASSIGNMENT.familiarity` | 0\~100       | 이 전술이 몸에 붙었는가 | 훈련·경기 결산 · 전술 변경 (§7) |
 
 경기에서 셋은 곱으로 만난다 — `effective = roleFit × 상태 × 포지션 적응도 ×
-전술 적응도` ([../simulation/match.md](../simulation/match.md) §1.1).
+전술 적응도` ([../simulation/match.md](../simulation/match.md) §2).
 
 ## 1. 16축 — 신체 4 · 기술 5 · 정신 6 · GK 1
 
@@ -31,22 +31,22 @@ LLM 판정은 "무엇이 남았나"까지만 말한다.
 |      | `dribbling`   | 드리블   | 압박 탈출, 1대1 돌파                     | 관측형                         |
 |      | `passing`     | 패스     | 점유·빌드업, 패스 배분                   | 관측형                         |
 |      | `kicking`     | 킥력     | 롱패스·배급·세트피스 킥                  | 관측형                         |
-|      | `tackling`    | 태클     | 볼 탈취, 수비 존 전력                    | 관측형                         |
+|      | `tackling`    | 태클     | 볼 탈취 — 태클 대 드리블의 경합          | 관측형                         |
 | 정신 | `vision`      | 시야     | 찬스 창출, 전진 패스 성향, 전술 습득(§7) | **분석형**                     |
 |      | `positioning` | 위치선정 | 수비 위치 선정 — 라인·커버·차단          | **분석형**                     |
 |      | `offTheBall`  | 침투     | 오프더볼 움직임 — 뒷공간·마킹 이탈       | **분석형**                     |
 |      | `composure`   | 침착성   | 실책·페널티, 폼 기복(§5), 전술 습득      | **분석형**                     |
 |      | `aggression`  | 적극성   | 압박 소화 강도, 파울·카드                | 관측형                         |
 |      | `leadership`  | 리더십   | 주장 적합도, 팀토크 전파, 라커룸         | **분석형**                     |
-| GK   | `goalkeeping` | 골키핑   | GK 존 전력                               | 관측형 (매 경기 표본이 쌓인다) |
+| GK   | `goalkeeping` | 골키핑   | 선방 · 나오기 · 1대1                     | 관측형 (매 경기 표본이 쌓인다) |
 
 - **위치선정과 침투는 다른 일이다.** `positioning`은 공이 상대에게 있을 때
   **어디에 서는가**(라인 유지·커버·차단)이고, `offTheBall`은 공이 우리에게 있을 때
   **어디로 가는가**(뒷공간 침투·마킹 이탈)다. 한 축이던 시절 둘은 자리의 공격
   지분으로 미리 섞여 있었고(§13.5), 그래서 수비를 잘 읽는 9번과 침투가 좋은
   센터백이 표현될 자리가 없었다. 나누고 나면 침투는 기대 득점의 질에
-  (→ [../simulation/match.md](../simulation/match.md) §1.4), 위치선정은 수비 존과
-  라인 조직에 각각 닿는다.
+  (→ [../simulation/live-match.md](../simulation/live-match.md) §5), 위치선정은 수비
+  라인의 정렬과 커버에 각각 닿는다.
 - GK의 개성은 이 한 축이 아니라 공유 축과의 조합이다 — `aerial`(장악) ·
   `kicking`(배급) · `passing`(발밑) · `composure` · `positioning`(커맨드).
   `offTheBall`은 골키퍼에게 뜻이 없는 축이라 낮게 깔리고 가중치도 바닥이다.
@@ -60,13 +60,12 @@ LLM 판정은 "무엇이 남았나"까지만 말한다.
   다시 넣지 않는다. 시드 실측이 우선, 없으면 자리 기준치 + 공중볼(키) ·
   몸싸움−스피드(체중)로 파생한다.
 - **등번호는 현재 소속팀에서의 식별자다.** `GAME_PLAYER.squadNumber`에 1\~99를
-  optional로 저장한다(구 세이브 호환을 위한 optional이며, 클럽 소속 선수는 런타임에
-  항상 번호를 갖는다). 실존 선수는 공식 번호 시드를 우선하고, 미확인·생성 선수는
+  저장한다 — 없으면 자유계약이거나 아직 배정되지 않은 선수이고, 클럽 소속 선수는
+  항상 번호를 갖는다. 실존 선수는 공식 번호 시드를 우선하고, 미확인·생성 선수는
   포지션 관례와 팀의 빈 번호로 결정적 배정한다. 이적·임대·복귀 때는 새 팀에서 다시
   배정하며 같은 팀의 번호는 겹치지 않는다.
-- **한 번 배정된 번호는 세이브가 갖는다.** 로드는 빈 번호와 팀 안에서 겹친 번호만
-  채운다 — 번호를 갖지 않은 세이브가 공식 시드를 복원받는 자리가 그것이다.
-  전원을 다시 배정하면 이적하며 받은 번호가 세이브를 열 때마다 뒤집힌다.
+- **한 번 배정된 번호는 세이브가 갖는다.** 새 게임이 전원에게 한 번 배정하고
+  (`ensureSquadNumbers`), 그 뒤로는 팀을 옮기는 선수와 감독의 결정만 번호를 바꾼다.
 
 ### 1.1 등번호는 감독이 주고, 선수가 뜻을 둔다
 
@@ -89,10 +88,10 @@ LLM 판정은 "무엇이 남았나"까지만 말한다.
   `take: true`가 그 답이다. 되묻지 않고 바로 뺏으면 감독이 모르는 사이에 라커룸이
   움직인다.
 - **뺏긴 선수는 자리 관례로 새 번호를 받는다**(`assignSquadNumber`). 번호 없이
-  남겨 두면 명단·전술판에 번호 없는 줄이 생기고, 다음 로드가 아무 번호나 채운다.
+  남겨 두면 명단·전술판에 번호 없는 줄이 생긴다.
 - **바뀐 사실은 선수가 든다** — `PlayerState.squadNumberOn`(그 번호를 받은 날) ·
-  `formerSquadNumber`(감독이 옮기기 전에 달던 번호). 둘 다 옛 세이브엔 없다
-  (optional, SAVE_VERSION 유지). 심경 카드와 근황이 이 둘에서 「며칠째」를 센다
+  `formerSquadNumber`(감독이 옮기기 전에 달던 번호). 둘 다 감독이 옮긴 번호에만
+  선다. 심경 카드와 근황이 이 둘에서 「며칠째」를 센다
   ([people.md](people.md) §5).
 
 **상징 번호** `SYMBOLIC_NUMBERS` = **1 · 7 · 9 · 10 · 11**
@@ -123,7 +122,7 @@ LLM 판정은 "무엇이 남았나"까지만 말한다.
 ## 2. 포지션 가중치 (`POSITION_WEIGHTS`)
 
 능력치는 **가중치 테이블 하나를 통해서만** 전력이 된다 — `overall`, `roleFit`,
-시뮬 존 점수가 전부 같은 소스의 파생이다. 실 값은 코드가 단일 소스다
+간이 시뮬의 평점 축이 전부 같은 소스의 파생이다. 실 값은 코드가 단일 소스다
 (`packages/domain/src/player.ts` — 문서에 표를 복제하지 않는다).
 
 ```
@@ -269,7 +268,7 @@ CM의 볼 위닝 MF는 다른 정의다. 그래서 규칙은 하나로 떨어진
   벤치·예비로 내려갈 때). §3.1이 버리는 값을 기억이 받아 간다.
 - **되찾는 때** — 그 선수가 **같은 자리**에 다시 설 때(`set_lineup`의 승계 ·
   `movePlayerSlot`), 그리고 경기 중 그 자리로 교체 투입될 때
-  (→ [match.md](../simulation/match.md) §2).
+  (→ [match.md](../simulation/match.md) §3.2).
 - **되찾기 순서는 하나다** — ① 지금 걸린 역할이 새 자리 목록에 있으면 그대로 → ②
   그 자리의 기억 → ③ 그 자리의 기본 역할. 코어가 배치를 다시 쓸 때(`set_lineup`의
   승계 · `movePlayerSlot`) 이 순서로 `roleId`를 적는다. 코어는 ①②까지만 적는다 —
@@ -286,8 +285,7 @@ CM의 볼 위닝 MF는 다른 정의다. 그래서 규칙은 하나로 떨어진
   새 기억이다.
 - **경기 중에 바꾼 역할은 기억에 남지 않는다** — 그 경기의 대응은 그 경기에서
   끝난다(`restoreTactics`와 같은 이유).
-- 새 테이블이라 옛 세이브엔 없다 (로드 시 빈 배열 — SAVE_VERSION 유지). 기억이 없는
-  선수는 지금까지와 똑같이 그 자리의 기본 역할에서 시작한다.
+- 기억이 없는 선수는 그 자리의 기본 역할에서 시작한다.
 
 ## 4. 종합(overall) · 좌우 분화 · 주발
 
@@ -397,7 +395,7 @@ LAM/RAM · LF/RF · LST/RST.
 체력은 몸의 준비 상태만 저장한다. 경기가 깎고 휴식·훈련 강도가 채운다.
 팀토크·면담·기자회견의 사기 효과는 폼을 움직이며, 불만은 별도 이슈와 심경으로
 남는다. 소모·회복·구멍·로테이션 수치는
-[../simulation/match.md](../simulation/match.md) §3.
+[../simulation/match.md](../simulation/match.md) §6.
 
 - ⚠️ **체력에서 감정을 읽지 않는다.** 경기 한 판이 30\~50을 가져가 경기 다음 날은
   누구나 바닥이다 — `condition < N`을 "마음이 떴다"로 읽으면 이긴 다음 날 선수단
@@ -416,8 +414,7 @@ LAM/RAM · LF/RF · LST/RST.
 하나를 골라 복귀일을 말한다.
 
 **부상은 어디서 왔는지를 코드로 적는다** — `INJURY.cause`가 `match` · `training` ·
-`pre_appointment`(부임 전 이력) 셋이고, 문장 메모는 남기지 않는다. 옛 세이브는
-`note`에 그 문장을 들고 있어 읽을 때만 폴백으로 본다.
+`pre_appointment`(부임 전 이력) 셋이고, 문장 메모는 남기지 않는다.
 
 | 심각도     | 라벨 | 결장      | 발생 비중 | 성향 상승 (`RISE`) |
 | ---------- | ---- | --------- | --------- | ------------------ |
@@ -430,7 +427,7 @@ LAM/RAM · LF/RF · LST/RST.
   조용히 어긋난다.
 - **빈도는 실제보다 성기고 모양은 실제를 따른다.** 발생 빈도(`INJURY_PER_MATCH`)는
   감독이 멈춰 서서 결정해야 하는 사건이라 실제의 몇 분의 일로 두지만(→
-  [../simulation/match.md](../simulation/match.md) §7), 심각도의 모양은 실제(UEFA 엘리트
+  [../simulation/match.md](../simulation/match.md) §4.1), 심각도의 모양은 실제(UEFA 엘리트
   클럽 연구 — 결장 4주 넘는 부상이 13\~15%, 석 달 넘는 것이 3\~4%)를 따른다. 장기가
   이보다 드물면 구단 하나가 열다섯 시즌에 한 번 만나는 사건이 되어 "그 자리를 누가
   메우나"가 이야기가 되지 못한다.
@@ -467,9 +464,9 @@ LAM/RAM · LF/RF · LST/RST.
   값을 세이브가 받아들이고, 그때부터 "천장"이 두 값이 된다.
 - 성향은 **누가** 다치는지를 가를 뿐 리그 전체 건수를 늘리지 않는다 — 굴림 횟수는
   `INJURY_PER_MATCH`가 정하고, 그 안에서 체력·몸싸움·성향이 대상을 고른다
-  (→ [../simulation/match.md](../simulation/match.md) §7).
+  (→ [../simulation/match.md](../simulation/match.md) §4.1).
 
-**부상 위험 등급 `injuryRiskOf` — 이제 하니스의 눈금이다** (`packages/sim/src/match-engine.ts`).
+**부상 위험 등급 `injuryRiskOf` — 이제 하니스의 눈금이다** (`packages/sim/src/injury-model.ts`).
 
 ⚠️ **감독에게는 등급이 서지 않는다.** 얼마나 위태로운지는 이력과 오늘의 몸을 함께
 읽어야 나오는 판단이고, 그 판단은 이야기를 쥔 쪽이 문장으로 한다 (overview.md §1
@@ -581,7 +578,7 @@ QID가 없는 선수는 이력을 가질 수 없다 — 조사되지 않은 선�
   잔고 68이면 하루 회복이 71%로 줄어, 사흘 간격에서 되찾는 체력이 43에서 31로
   내려앉고 **만 이레를 쉬어도 92에서 멈춘다.** 이것이 "12월에는 이레를 쉬어도 다
   돌아오지 않는다"가 서는 자리다
-  (→ [../simulation/match.md](../simulation/match.md) §3.1).
+  (→ [../simulation/match.md](../simulation/match.md) §6.1).
 - **부상 저울**에는 `INJURY_LOAD_WEIGHT`(0.30)를 곱해 얹는다 (§5.3) — 잔고 70이면
   바닥(40) 위로 21이 얹혀, 다른 항이 같은 두 선수 사이에서 **1인당 부상률이 1.47배**로
   갈린다(`pnpm balance injury-rate`의 「부상률 — 잔고 70/0」). ⚠️ **건수는 바뀌지
@@ -598,8 +595,7 @@ QID가 없는 선수는 이력을 가질 수 없다 — 조사되지 않은 선�
   (→ [../simulation/season.md](../simulation/season.md) §4). 쉬는 날은 잔고가 가장
   빨리 빠지지만 **전술 적응도는 그동안 무뎌진다**(§7.4) — 두 축이 반대로 움직이는 것이
   이 손잡이를 판단으로 만든다.
-- 값이 없으면 0으로 읽는다(`fatigueOf`) — 옛 세이브는 그대로 열리고 버전을 올리지
-  않는다. 부상 중인 선수는 팀 훈련에서 떨어져 있어 **휴식과 같은 속도로** 빠진다:
+- 부상 중인 선수는 팀 훈련에서 떨어져 있어 **휴식과 같은 속도로** 빠진다:
   장기 부상 복귀 선수의 통은 비어 있고 판은 몸에서 빠져 있다 (§7.4).
 
 ## 6. 성장·쇠퇴
@@ -726,7 +722,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
   캐리가 장부를 두 칸 뛰게 하지 않는다. 그래서 여러 주를 한 번에 넘긴 결산의
   캐리는 한 칸을 넘길 수 있고, 남은 몫은 다음 결산에서 나간다. 전향(`pos:<자리>`)
   도 같은 그릇을 쓴다 — 자리 적응도가 정수라 하루치 결산의 0.2를 담을 곳이 거기밖에
-  없다. (구 세이브엔 없어 optional)
+  없다.
 - **내려가는 건 깎지 않는다** (`attributeDeclineScale`) — 이미 꺾이는 축은 오히려
   더 크게 받고(1 + |노화|×0.25), 젊고 안 꺾이는 축만 조금 눌러 둔다(≤24세 ×0.7).
   서른셋의 스피드가 나빠졌다는 판정은 그대로가 맞다. **결산의 폭만은 하락에도
@@ -895,7 +891,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 "이 전술을 몸이 익혔나". 대상은 포메이션 + 슬라이더 6축 + 켜 둔 토글 **한 덩어리**
 (`tacticsSignature`). 값은 선수 개인의 것이고 팀 적응도는 그 평균(파생)이다.
 지문은 **중립이 아닌 토글만** 뒤에 `키=값`으로 붙이므로, 아무 갈래에도 서지 않은
-전술의 지문은 옛 세이브의 것과 바이트까지 같다 — 기억이 그대로 이어진다.
+전술의 지문은 포메이션과 여섯 축만으로 선다.
 
 **감독 팀의 상승은 전부 LLM 판정, 하락은 전부 코어(결정적).** 판정은 자료(대화·
 지시·사건·출전 시간)를 읽고 훈련 −1\~3 · 경기 −2\~8 안에서 결론을 내고, 하락은
@@ -903,7 +899,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 
 ⚠️ **시간은 감독 팀의 적응도를 올리지 않는다** — 훈련·경기 결산 판정이 유일한
 상승 경로다 (§7.3의 "시간 경로 없음"). 판정을 돌릴 수 없는 AI 팀만 코어가 매일
-드리프트로 대신 올린다 ([match.md](../simulation/match.md) §7 ③ — 천장 80).
+드리프트로 대신 올린다 ([match.md](../simulation/match.md) §8.6 — 천장 80).
 
 ### 7.1 상승 곡선 (`applyFamiliarityGain`)
 
@@ -925,8 +921,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 - ⚠️ **흡수율과 하락 배수(`shiftFactor`)는 같은 함수다** — 빨리 익히는 선수가 잘
   잊으면 앞뒤가 안 맞는다. 계수의 방향은 반대다: 이해가 높을수록 흔들림은 작고
   배움은 크다.
-- ⚠️ **`familiarity`는 소수다** (`FamiliaritySchema` 0\~100 — 옛 세이브의 정수도
-  그대로 통과). 정수로 자르면 85 위에서 판정 +3이 0이 되어 값이 멎는다. 화면은
+- ⚠️ **`familiarity`는 소수다** (`FamiliaritySchema` 0\~100). 정수로 자르면 85 위에서 판정 +3이 0이 되어 값이 멎는다. 화면은
   반올림, 성장 로그는 눈금이 실제로 넘어갔을 때만.
 - ⚠️ **판정 프롬프트에 이 곡선을 적지 않는다** — 모델이 "높으니 조금만"이라고 또
   깎으면 이중으로 줄어든다. 모델은 얼마나 스몄는지만, 얼마가 남는지는 코어가.
@@ -956,8 +951,8 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 - ⚠️ 부호가 뒤집히므로 **왕복은 정확히 제자리** — 오가며 적응도를 불릴 수 없다.
 - ⚠️ 배수·방향 항은 **결과가 아니라 거리에 들어간다**(`personalDistance` = 팀 눈금
   거리 × 습득력 × 방향 보정) — 각자 자기 기억에서 도착 수준을 직접 구하고 팀
-  적응도는 그 평균(파생)이다(§7.3). 팀 전체의 성향 이득은 적응도가 아니라 시뮬의 존
-  이득(`tacticalDeltas`)으로 돌아온다.
+  적응도는 그 평균(파생)이다(§7.3). 팀 전체의 성향 이득은 적응도가 아니라 경기 시뮬의
+  말의 규칙으로 돌아온다.
 - ⚠️ **역할 변경의 대가는 결정 하나에 한 번** (`roleMemo`) — 기준은 그날 아침의
   **자리와 역할**이고 차액만 가감하므로 알약을 눌러 보며 골라도 누적되지 않는다.
   `paid`는 "오늘 이 선수가 낸 값"이라 배치가 다시 써져도 따라간다.
@@ -1101,18 +1096,11 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 
 - **저장값은 원값이다** — 목록에 적히는 `proficiency`에 주발은 들어 있지 않다.
   생성(`derivePositions`)도 훈련·경기의 적립도 원값을 적고, 좌우를 가르는 자리는
-  `positionProficiency` 하나뿐이다(§4). ⚠️ 미러 자리에 보정을 적어 둔 옛 카탈로그·
-  옛 세이브는 벗긴다 (`stripStoredFootAdjust` — SAVE_VERSION 유지).
+  `positionProficiency` 하나뿐이다(§4).
 - **저장값은 조회값에서 되빼서 얻지 않는다** — 새 자리를 목록에 적는
   `storedProficiencyFor`는 주발을 얹기 **전** 값을 클램프한다. 조회값(천장 99)에서
   보정을 빼면 왼발 선수의 98짜리 LCB가 96으로 적혀, 천장 부근에서만 저장값이 조용히
   깎인다.
-- ⚠️ **세이브를 벗기는 것은 딱 한 번이다** — 마커
-  (`mirrorProficiencyStripped` — [game-state](game-state.md) §6)가 없는 세이브에서만
-  돌고, 벗긴 뒤 마커를 세운다. 벗기기는 묶음의 값을 주 포지션으로 평평하게 미는 일이라
-  로드마다 돌면 경기(`gainMatchProficiency`)·포지션 훈련이 LCB·RCB에 쌓아 둔 적립을
-  같이 지운다 — 성장 로그에는 오른 기록만 남고 값은 되감긴다. 카탈로그 파일은 적립이
-  쌓이는 자리가 아니라 읽을 때마다 벗긴다.
 - 폴백이 **전술판 거리**(`positionDistance`)를 쓰는 이유: 라인 경계만 보면
   ST→CAM이 RB→LB보다 생소하게 나오는 역전이 생기고, 자유 배치에서 자리는 코드가
   아니라 좌표라 거리가 유일하게 일관된 척도다.
@@ -1127,7 +1115,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
   `ADAPTATION_IMPACT.tactical` 15%p(sim의 `FAMILIARITY_SPREAD`가 그대로 읽는 값).
   전술은 몇 주면 익히지만 자리는 커리어가 만든다.
   폭을 전술과 비슷하게 좁히면 배치 최적화가 10번을 6번에 세우고도 합이 높다고 센다.
-- ⚠️ 이 팩터는 sim이 단일 소스로 갖고(`strength-packet.ts`) 엔진의 배치 채점
+- ⚠️ 이 팩터는 sim이 단일 소스로 갖고(`match-ability.ts`) 엔진의 배치 채점
   (`slotStrength`)도 같은 함수를 부른다 — 복제하면 "배치가 고른 자리"와 "경기가
   계산하는 자리"가 갈린다.
 - 명단 게이지는 자리×전술을 합친 표시용 `adaptationOf`다. **두 적응도의 저장값을
@@ -1161,7 +1149,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
   정착(`adapting`) 판정은 그대로 지난다.
 - ⚠️ **오차는 결정적** — `(seed, playerId, 축)` 해시. 같은 질문에 같은 답, 참값은
   항상 구간 안.
-- ⚠️ **표현 계층 전용** — 코어(장부·판정·전력 패킷)는 언제나 참값으로 계산한다.
+- ⚠️ **표현 계층 전용** — 코어(장부·판정·경기 능력)는 언제나 참값으로 계산한다.
 - `overall`은 판단 계열을 포함하는 합성값이라 **분석형** 오차를 쓴다. 오차가 큰
   축은 숫자 대신 밴드 라벨로만 노출한다(§10).
 - ⚠️ **안개는 축에만 씌우고 합성값은 파생시킨다** — 관측된 축의 `roleFit` + 관측
@@ -1216,9 +1204,9 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
   지치는 중인지 내 눈이 흔들리는지 구분할 수 없다.
 - ⚠️ **누구도 값 하나로 서지 않는다**(최소 ±1) — 0을 허용하면 화면이 그걸 "잰
   값"으로 읽는다.
-- ⚠️ **다리가 멈춘 건 안개가 못 가린다** — 추정 구간은 구멍 문턱(`GAP_CONDITION`
-  22)을 넘지 않고, 구멍 태그에 소진 수치를 적지 않는다(흐린 값이 문장으로
-  샌다). 화면 표현은 [../simulation/match.md](../simulation/match.md) §8.
+- ⚠️ **다리가 멈춘 건 안개가 못 가린다** — 지친 말은 실제로 느리게 뛰고, 그것은 판에서
+  보인다. 소진 수치는 문장에 적지 않는다(흐린 값이 문장으로 샌다). 화면 표현은
+  [../simulation/match.md](../simulation/match.md) §9.
 - 경기 밖(스쿼드·조회 도구)의 우리 선수 체력은 정확하다. **경기 중에는 그 경기의
   출전 명단(선발·벤치)에 든 선수만 흐려지고, 판세 탭과 팀 탭이 같은 읽은 값을
   쓴다** — 한쪽이 참값이면 두 탭을 견주는 것만으로 안개가 걷힌다.
@@ -1263,8 +1251,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 - **결과가 `neutral`이면 크레딧은 0이다** — 사기가 움직이지 않은 대화를 나쁜 결과로 세면
   적응이 뒤로 밀린다. 앵커의 방향은 사기 델타의 부호를 따르고, 부호가 없으면 남기지 않는다.
 - 거의 다 파생이다(TRANSFER 원장·출전 명단·훈련 일정). **대화만 원장이 필요하다**
-  (`SETTLING_EVENT` — 어디에도 기록이 안 남아 파생할 원본이 없다. 옛 세이브는 빈
-  배열, 버전 유지).
+  (`SETTLING_EVENT` — 어디에도 기록이 안 남아 파생할 원본이 없다).
 - **유스 콜업도 임대 복귀도 정착이 없다** — 이미 이 클럽 사람이다. 임대는
   `type:"loan"` 한 종류로 네 가지 이동을 다 적는다(임대 영입 · 그 선수의 반납 ·
   우리 선수 임대 송출 · 그 선수의 복귀). 어느 쪽인지는 줄 하나로 알 수 없으므로
@@ -1385,7 +1372,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 
 - **열 때 하나씩 가져온다** (`GET /api/games/[id]/player/[playerId]`). 매 턴 오는
   짐에 실으면 감독이 말 한마디 할 때마다 카드가 따라온다 — 끝난 경기의 리포트와
-  같은 길이다 (→ [../simulation/match.md](../simulation/match.md) §8).
+  같은 길이다 (→ [../simulation/match.md](../simulation/match.md) §9).
 - **남의 선수는 안개를 통과한 값만 싣는다** (§9 · §10) — 16축은 축마다의 관측값과
   그 오차폭, 종합은 관측 종합 ±N, 잠재력은 구간, 시장가는 `observedMarketValue`다.
   참값은 카드에 **실리지 않는다**: 흐릴 값을 보내고 화면이 흐리는 것이 아니라
@@ -1404,7 +1391,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
   남의 선수도 참값 그대로다. 흐리는 것은 능력치이지 장부가 아니다.
 - **손잡이는 id를 든 자리에 선다** — 재정 「계약 만료 예정」과 활동 줄 · 대회 개인
   순위·예상 선발·결장 · 경기 리포트 평점표와 MOM · 명단 · **경기 중 판세의 선수
-  마커와 상대 전술판의 칩**(→ [../simulation/match.md](../simulation/match.md) §8).
+  마커와 상대 전술판의 칩**(→ [../simulation/match.md](../simulation/match.md) §9).
   뷰 행이 이름만 들고 있으면 화면이 이름으로 선수를 되찾아야 하므로, **행에 id를
   싣는 것이 손잡이를 다는 일이다**.
 - **채팅 산문은 사전으로 잇는다.** 사전(`namesForChat`)은 우리 선수단과 **이야기가
@@ -1527,7 +1514,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 - **위치선정과 침투는 한 몫을 나눠 갖는다** (§2·§13.5). 가중치도 파생도 같은 공격
   지분으로 갈리므로 두 축의 가중합이 나누기 전과 같다 — 한쪽만 손보면 그 자리의
   눈금이 통째로 움직인다.
-- **가중치 표는 하나다** — `overall`·`roleFit`·시뮬 존 점수가 전부 `POSITION_WEIGHTS`의
+- **가중치 표는 하나다** — `overall`·`roleFit`·간이 시뮬의 평점 축이 전부 `POSITION_WEIGHTS`의
   파생이고 카탈로그·어드민·게임이 같은 함수를 부른다 (§2·§4). 한쪽만 다른 기준으로
   내면 같은 선수의 OVR이 화면마다 갈리고 시장가·희망 주급까지 따라 갈린다.
 - **자리가 있어야 역할이 있다** (§3.1). 벤치·예비에는 좌표가 없으니 역할도 없고,
@@ -1547,7 +1534,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
   적으면 코어만 조여지고 판정자는 옛 밴드를 계속 믿는다.
 - **한 선수에게 열린 부상은 하나다** (§5.3). `returnedOn === null`인 행이 곧 현재
   부상이고, 그 계약은 행을 쓰는 자리(`openInjuryFor`)가 지킨다.
-- **안개는 표현 계층 전용이다** (§9). 코어(장부·판정·전력 패킷)는 언제나 참값으로
+- **안개는 표현 계층 전용이다** (§9). 코어(장부·판정·경기 능력)는 언제나 참값으로
   계산하고, 오차는 `(seed, playerId, 축)` 해시라 같은 질문에 같은 답이 온다.
 - **안개는 축에만 씌우고 합성값은 파생시킨다** (§9). 값마다 따로 굴리면 화면이 같은
   규칙을 재현할 수 없어 같은 선수의 OVR이 두 숫자로 갈린다.
@@ -1658,7 +1645,7 @@ offTheBall  = base − tilt × (1 − a)
 
 **가중치도 같은 지분으로 갈리므로**(§2) 두 축의 가중합은 `w × base`, 곧 나누기
 전과 같다 — 기울임은 값을 만들지 않고 **나눠 가질 뿐이다.** 축을 나눈 뒤에도 종합·
-역할 적합도·전력 패킷의 눈금이 제자리인 이유가 그것이다. 어긋남은 가중치 표를
+역할 적합도·경기 능력의 눈금이 제자리인 이유가 그것이다. 어긋남은 가중치 표를
 0.05 눈금으로 떨어뜨린 만큼뿐이고(가장 큰 CM이 지분 0.5 대 0.45), 그마저 두 축의
 차이에 곱해지므로 한 칸 아래다.
 
@@ -1670,10 +1657,6 @@ offTheBall  = base − tilt × (1 − a)
 
 골키퍼는 이 식 밖이다. 위치선정은 골문 커맨드라 `goalkeeping`에서 곧바로 오고,
 침투는 골키퍼에게 뜻이 없어 낮게 깔린다.
-
-**옛 세이브도 같은 식으로 갈린다.** 세이브가 든 `positioning`이 곧 `base`이므로
-로드가 그 자리에서 두 축을 세운다 (→ [game-state.md](game-state.md) §6) — 세이브
-버전은 올리지 않는다. 갈랐는지는 `offTheBall`의 부재가 말한다.
 
 ## 14. 미해결
 
@@ -1705,7 +1688,7 @@ offTheBall  = base − tilt × (1 − a)
 | 폼 (`formLabel`·`formAngle`)                                                                                                    | `packages/engine/src/squad/form.ts`                                                     |
 | 적응도 결장 감쇠 (`familiarityAwayDayOf`·`familiarityAfterAwayDay`·`FAMILIARITY_AWAY_TARGET`) — §7.4                            | `packages/domain/src/tactics.ts`                                                        |
 | 부상 (`openInjuryFor`·`INJURY_SEVERITY_KO`·성향 `RISE`/`FALL_PER_APPEARANCE`)                                                   | `packages/engine/src/squad/injury.ts`                                                   |
-| 부상 저울과 위험 등급 (`injuryWeight`·`injuryRiskOf`·`INJURY_RISK_FLOOR`) — §5.3                                                | `packages/sim/src/match-engine.ts` (낱말은 `packages/domain/src/records.ts`)            |
+| 부상 저울과 위험 등급 (`injuryWeight`·`injuryRiskOf`·`INJURY_RISK_FLOOR`) — §5.3                                                | `packages/sim/src/injury-model.ts`                                                      |
 | 안개의 크기·잠재력·경기 중 체력 (`observationMargin`·`readCondition`)                                                           | `packages/engine/src/squad/scouting.ts`                                                 |
 | 안개를 얹는 규칙·등급표 (`observedFit`·`observedOverall`·`RATING_TIERS`) — 화면도 같이 부른다                                   | `packages/domain/src/player.ts` (엔진이 재수출)                                         |
 | 파견 한도·대기 (`scoutPlayer`·`deferScout`·`scoutingSummary`)                                                                   | `packages/engine/src/commands/scouting.ts` · `packages/engine/src/squad/scouting.ts`    |
@@ -1717,10 +1700,9 @@ offTheBall  = base − tilt × (1 − a)
 | 결산 반영 (`applyAttributeStep`·`positionGain`)                                                                                 | `packages/engine/src/squad/training-report.ts` · `packages/engine/src/match/ratings.ts` |
 | 심경 (`moodFactsOf`·`MOOD_BATCH`)                                                                                               | `packages/engine/src/squad/mood.ts` ([people.md](people.md))                            |
 | 적응도 영향 폭(`ADAPTATION_IMPACT`)·화면 합산(`adaptationOf`)                                                                   | `packages/domain/src/tactics.ts`                                                        |
-| 전력 팩터 (`profFactor`·`famFactor`)·상태 보정                                                                                  | `packages/sim/src/strength-packet.ts` · `state-modifier.ts`                             |
+| 경기 계수 (`profFactor`·`famFactor`·`stateModifier`)                                                                            | `packages/sim/src/match-ability.ts`                                                     |
 | 합성 주발 표집 (`syntheticFoot`)                                                                                                | `packages/engine/src/world/catalog.ts`                                                  |
 | 자체 산정 모델 (`squadApexOf`·`depthDropAt`·`synthesizeSeed`) — §13                                                             | `packages/engine/src/world/synthesis.ts`                                                |
 | 분포 하네스 (`attribute-model`) — §13.3                                                                                         | `packages/engine/harness/attribute-model.harness.ts`                                    |
-| 저장된 주발 보정 벗기기 (`stripStoredFootAdjust`)                                                                               | `packages/engine/src/core/migrations.ts`                                                |
 | 감독 초기값 (`specialtyAxesOf`)                                                                                                 | `packages/engine/src/world/onboarding.ts`                                               |
 | 화면의 안개 파생 (`slotOverall`)                                                                                                | `apps/web/lib/slot-overall.ts`                                                          |

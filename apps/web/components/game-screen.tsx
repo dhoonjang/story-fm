@@ -425,6 +425,10 @@ export function GameScreen({ gameId }: { gameId: string }) {
     ((panel === null && matchTab === "팀" && squadSide === "ours") || panel === "스쿼드");
   const liveBlocked =
     input.length > 0 || matchViewport.focused || busy || editingMatch || error !== null;
+  /** 실행기가 정지점에서 여는 턴 — `send`는 이 훅보다 뒤에 서므로 ref로 건넨다 */
+  const sendRef = useRef<(text?: string, operation?: TurnOperation) => Promise<unknown>>(
+    async () => null,
+  );
   const live = useLiveMatch({
     gameId,
     matchId: liveMatch && !liveMatch.beforeKickoff ? liveMatch.matchId : null,
@@ -444,6 +448,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
       ordersRef.current = ordersRef.current.filter((order) => !orders.includes(order));
     },
     onSlice: applyLineupSave,
+    // 정지점 — 판독기가 판을 다시 읽고 매치 GM이 그 사건을 중계한다
+    onStop: () => sendRef.current(undefined, { kind: "match_stop" }),
   });
   const pauseLive = live.pause;
 
@@ -780,20 +786,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       pauseLive,
     ],
   );
-
-  const closingLiveMatch = useRef<string | null>(null);
-  useEffect(() => {
-    if (
-      !liveMatch?.live?.finished ||
-      liveMatch.shootout ||
-      liveBlocked ||
-      live.error ||
-      closingLiveMatch.current === liveMatch.matchId
-    )
-      return;
-    closingLiveMatch.current = liveMatch.matchId;
-    void send(undefined, { kind: "advance_match" });
-  }, [liveMatch, liveBlocked, live.error, send]);
+  sendRef.current = send;
 
   /**
    * 경기의 문을 지난다 — **무대를 먼저 바꾸고 턴을 보낸다.**
@@ -815,7 +808,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       if (gateLeaveTimer.current) clearTimeout(gateLeaveTimer.current);
       gateLeaveTimer.current = setTimeout(() => setGateLeaving(false), GATE_LEAVE_MS);
     }
-    void send(undefined, { kind: "advance_match" });
+    void send(undefined, { kind: "enter_match" });
   }, [pendingMatch?.matchId, send]);
   /**
    * 협상의 문을 지난다 — 경기의 문과 같은 순서다 (transfer.md §12-2). 나서는 것은
@@ -1501,7 +1494,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
                         <summary>
                           경기 분석 <span>판세 · 전술 포인트</span>
                         </summary>
-                        <MatchOverview match={liveMatch} showPitch={false} />
+                        <MatchOverview match={liveMatch} />
                       </details>
                     </div>
                   </div>

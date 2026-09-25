@@ -28,10 +28,8 @@ import { toPayload } from "@/lib/store";
 import { LOCK_WAIT_MS, busyResponse, withGameLock as withSaveLock } from "@/lib/turn-runner";
 import { invalidGameId } from "@/app/api/games/game-id";
 
-import { withLiveGamePaused } from "@/lib/live-match-runtime";
-
 const withGameLock = <T>(id: string, wait: number, action: () => Promise<T>) =>
-  withLiveGamePaused(id, () => withSaveLock(id, wait, action));
+  withSaveLock(id, wait, action);
 
 const SlotSchema = z.object({
   playerId: z.string().min(1),

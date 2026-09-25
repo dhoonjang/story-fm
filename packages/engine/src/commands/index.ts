@@ -18,9 +18,8 @@
 // 적응도 클램프도 도메인이 단일 소스 (clampFamiliarity) — 기억을 적는 자리와
 // 되찾는 자리가 같은 천장을 써야 왕복이 닫힌다
 
-export { POSITION_CODES, positionGroupOf } from "@story-fm/domain";
 export { MATCHDAY_BENCH, groupOf, tacticsOf } from "../core/state";
-export { forgetRoles, recallRole, rememberRole } from "./role-memory";
+export { recallRole } from "./role-memory";
 
 export type { CommandResult, MarketCommandResult } from "./result";
 export * from "./talk";

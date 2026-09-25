@@ -57,7 +57,7 @@ function verdictDue(state: GameState): boolean {
 /**
  * 그 라운드의 평가 한 장 — **예상 대비 등급과 그것을 말한 사람** (people.md §4-1).
  *
- * 서지 않는 경우가 셋이다: 그 시즌 예상표가 없거나(옛 세이브), 우리가 그 표에 없거나,
+ * 서지 않는 경우가 셋이다: 그 시즌 예상표가 아직 없거나, 우리가 그 표에 없거나,
  * **명부에 해설이 한 사람도 없거나.** 코어는 화자를 지어내지 않는다.
  */
 export function punditVerdict(state: GameState): MediaFact | null {
@@ -116,7 +116,7 @@ export function predictionReport(state: GameState): MediaFact | null {
  * 원인 코드는 `Dismissal.kind` 그대로다 (career.md §5.4). 코드를 두 벌 두면 한쪽만
  * 늘어나고, 같은 이별이 회견에서와 기사에서 다른 이름으로 선다.
  *
- * `days`는 재임 일수다 — 없으면(부임일을 모르는 옛 세이브) 적지 않는다. 없는 것을
+ * `days`는 재임 일수다 — 없으면(부임일을 모르는 벤치) 적지 않는다. 없는 것을
  * 0으로 적으면 어제 온 감독이 잘린 것으로 읽힌다.
  */
 export function reportSacking(

@@ -3,7 +3,7 @@
  *
  * 계측은 토큰 수만 센다(`usage-meter.ts`). 게임을 고치려면 그 턴에 **무엇이 오갔고 코어가
  * 무엇을 했는가**를 봐야 한다 — 감독의 입력, 모델 호출의 요청과 응답, 해석기가 낸 명령,
- * 코어가 걸고 반려한 것, 판이 구른 패킷과 난수 채널, 굴러간 하루하루. 그 전부가 **한
+ * 코어가 걸고 반려한 것, 경기의 체크포인트와 입력, 굴러간 하루하루. 그 전부가 **한
  * 타임라인에 일어난 순서로** 선다. 모델 호출도 사실도 같은 줄의 항목이다 — 갈라 두면
  * 「해석기가 이렇게 답했는데 코어는 왜 저렇게 했나」를 두 창을 오가며 시각으로 맞춰야 한다.
  *
@@ -66,7 +66,7 @@ export const MAX_TRACED_CALLS = 5_000;
 /**
  * 게임당 남는 **턴 타임라인** 수.
  *
- * 타임라인은 원문이 아니라 사실이라 작다 — 경기 턴이 구간 하나의 패킷 요약을 들고
+ * 타임라인은 원문이 아니라 사실이라 작다 — 경기 턴이 체크포인트의 사건을 들고
  * 10~50KB, 평시 턴은 몇 KB다. 20,000턴이면 스무 시즌이고 그래도 수백 MB에서 멈춘다.
  * 원문보다 넉넉한 이유는 되짚는 질문의 대부분이 원문이 아니라 여기에 답이 있기 때문이다.
  */
@@ -186,8 +186,8 @@ export interface TurnTraceCall {
    * **이 호출을 낳은 호출** — 없으면 턴이 직접 연 호출이다.
    *
    * 한 턴의 호출들은 나란히 도는 것이 아니라 **서로를 부른다**: 매치 GM이
-   * `advance_match`를 부르면 그 도구 안에서 지시 해석과 마감이 돌고, 그 둘은 매치
-   * GM의 응답을 기다리게 만든다(agents.md §3). 평면 목록으로 두면 그 셋이 우연히
+   * `tactic_orders`를 부르면 그 도구 안에서 판독기가 돌고, 그 호출은 매치 GM의 응답을
+   * 기다리게 만든다(agents.md §3). 평면 목록으로 두면 그 셋이 우연히
    * 순서대로 선 것처럼 보여, 느린 턴의 범인이 어느 호출인지 읽을 수 없다.
    */
   parentId: string | null;
@@ -216,7 +216,7 @@ export interface TurnTraceCall {
 /**
  * 타임라인의 항목 하나 — 갈래(`kind`)와 값에 순서·시각을 얹은 것.
  *
- * 갈래는 셋으로 갈린다: 코어의 사실(엔진의 `JournalEntry` — `match.segment`·`command` …),
+ * 갈래는 셋으로 갈린다: 코어의 사실(엔진의 `JournalEntry` — `match.checkpoint`·`command` …),
  * 모델 호출(`llm.call` — 원문은 따로), 그리고 턴의 겉(`turn.open`·`turn.note`·`turn.close`).
  * 읽는 쪽은 겉을 기록의 필드로 접고 나머지를 `entries`로 세운다.
  */
@@ -228,7 +228,7 @@ export interface TurnEntry {
   /**
    * **어느 호출의 어느 도구 안에서 났나** — 도구 밖이면 없다.
    *
-   * 매치 GM이 `advance_match`를 부르면 그 안에서 해석 호출·명령·구간이 돈다. 이 표식이
+   * 매치 GM이 `tactic_orders`를 부르면 그 안에서 판독 호출·명령이 돈다. 이 표식이
    * 있어야 타임라인을 나무로 읽을 수 있다 — 어느 응답이 어느 사실을 낳았는지.
    */
   via?: { call: string; tool: string };
@@ -314,8 +314,9 @@ export interface CallLine extends LlmCallEntry {
   at: string;
   gameVersion: string;
   seq: number;
-  /** 이 호출이 선 턴 — 옛 창고(턴이 없던 시절)의 호출은 null */
-  turn: string | null;
+  /** 이 호출이 선 턴의 이름 */
+  turn: string;
+  /** 그 턴의 채팅 자리 — 실패한 턴의 호출은 null */
   index: number | null;
 }
 
@@ -338,8 +339,7 @@ function systemBlocks(system: string | string[]): string[] {
  * 텍스트 이력이면 그 배열이다.
  */
 function historyMessages(history: TurnHistory): unknown[] {
-  if (isStoredLlmHistory(history)) return [...history.messages];
-  return Array.isArray(history) ? [...history] : [];
+  return isStoredLlmHistory(history) ? [...history.messages] : [...history];
 }
 
 function traceRequest(req: TurnRequest): TurnTraceRequest {
@@ -489,7 +489,6 @@ function tapTools(tools: readonly GameToolSpec[], callerId: string): GameToolSpe
  *     turns/<턴 id>.jsonl   채팅 턴의 타임라인 — 항목 하나가 한 줄, 일어나는 즉시
  *     board/<id>.jsonl      전술판 저장·게임 삭제의 타임라인 — 채팅 턴과 같은 모양
  *     calls/<호출 id>.json  호출 하나의 원문 — 타임라인의 `llm.call`이 가리킨다
- *     calls.jsonl · <턴 인덱스>.json   (옛 창고 — 읽기만 한다)
  *
  * ⚠️ **세이브와 한 디렉터리를 쓰지 않는다.** 둘은 수명도 주인도 다르다 — 세이브는
  * 유저의 게임이고 지우면 끝이지만, 기록은 우리가 게임을 고치는 재료라 그 판이
@@ -538,18 +537,6 @@ export function shelfOf(id: string): TraceShelf {
 /** 타임라인이 사는 파일 — 이름의 앞자리가 선반을 정한다 */
 export function turnRecordFile(gameId: string, id: string): string {
   return path.join(shelfDir(gameId, shelfOf(id)), `${id}.jsonl`);
-}
-
-/** 옛 창고 — 호출 목록 한 줄씩. 더 쓰지 않는다 */
-function legacyCallsFile(gameId: string): string {
-  return path.join(traceDir(gameId), "calls.jsonl");
-}
-
-/** 옛 창고 — `<턴 인덱스>.json` 묶음. 더 쓰지 않는다 */
-const LEGACY_TURN_FILE = /^(\d+)\.json$/;
-
-function legacyTurnFile(gameId: string, index: number): string {
-  return path.join(traceDir(gameId), `${index}.json`);
 }
 
 /** tmp에 완전히 쓴 뒤 rename — 쓰다 죽어도 반쪽 파일이 이름을 갖지 않는다 */
@@ -1028,32 +1015,6 @@ export function turnRecord(gameId: string, index: number): TurnRecord | null {
   return line === undefined ? null : turnRecordById(gameId, line.id);
 }
 
-/** 옛 묶음 파일이 남긴 턴 인덱스들 */
-function legacyIndexes(gameId: string): number[] {
-  try {
-    return readdirSync(traceDir(gameId))
-      .map((name) => LEGACY_TURN_FILE.exec(name)?.[1])
-      .filter((digits): digits is string => digits !== undefined)
-      .map(Number);
-  } catch {
-    return [];
-  }
-}
-
-/** 옛 묶음 파일이 든 호출 이름들 — 없으면 빈 배열이다 */
-function legacyBundle(gameId: string, index: number): string[] {
-  const file = legacyTurnFile(gameId, index);
-  if (!existsSync(file)) return [];
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return [];
-    const ids = (parsed as { callIds?: unknown }).callIds;
-    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
 /**
  * 그 채팅 턴에 오간 호출의 원문들 — 기록이 없으면 빈 배열이다 (상한 밖으로 밀린 턴,
  * 묶이지 못한 턴, 모의 GM의 턴이 그렇다). 원문이 밀린 호출은 **건너뛴다** — 이름만
@@ -1061,63 +1022,18 @@ function legacyBundle(gameId: string, index: number): string[] {
  */
 export function turnTrace(gameId: string, index: number): TurnTraceCall[] {
   const record = turnRecord(gameId, index);
-  const ids = record === null ? legacyBundle(gameId, index) : record.callIds;
+  if (record === null) return [];
   const calls: TurnTraceCall[] = [];
-  for (const id of ids) {
+  for (const id of record.callIds) {
     const call = traceCall(gameId, id);
     if (call !== null) calls.push(call);
   }
   return calls;
 }
 
-/**
- * 호출 이름 → 그 호출이 선 채팅 턴. 묶이지 못한 호출(실패한 턴)은 없다.
- * 옛 묶음이 먼저, 턴 목록이 그 위에 — 같은 호출이 둘 다에 있으면 목록이 이긴다.
- */
-export function tracedTurnOf(gameId: string): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const index of legacyIndexes(gameId)) {
-    for (const id of legacyBundle(gameId, index)) map.set(id, index);
-  }
-  for (const line of tracedTurns(gameId, "turns")) {
-    if (line.index === null) continue;
-    for (const id of line.callIds) map.set(id, line.index);
-  }
-  return map;
-}
-
-/** 옛 창고의 호출 목록 한 줄 — `calls.jsonl`이 들던 모양. 읽기만 한다 */
-interface LegacyCallLine {
-  id: string;
-  at: string;
-  gameVersion: string;
-  seq: number;
-  parentId: string | null;
-  viaTool: string | null;
-  agent: AgentName;
-  model: string | null;
-  durationMs: number;
-  usage: TurnUsage | null;
-  toolCallCount: number;
-  error: string | null;
-}
-
-/**
- * 호출 목록 — 타임라인의 `llm.call` 항목 전부에 턴의 자리를 얹은 것, 시간순.
- * 옛 창고(`calls.jsonl`)의 호출도 함께 선다 — 턴은 모른 채로.
- */
+/** 호출 목록 — 타임라인의 `llm.call` 항목 전부에 턴의 자리를 얹은 것, 시간순 */
 export function tracedCalls(gameId: string): CallLine[] {
   const rows = new Map<string, CallLine>();
-  for (const legacy of readLines<LegacyCallLine>(legacyCallsFile(gameId))) {
-    rows.set(legacy.id, {
-      ...legacy,
-      stopReason: null,
-      request: { chars: 0, systemBlocks: 0, historyMessages: 0, tools: 0 },
-      response: null,
-      turn: null,
-      index: null,
-    });
-  }
   for (const line of tracedTurns(gameId)) {
     const record = turnRecordById(gameId, line.id);
     if (record === null) continue;
@@ -1191,11 +1107,6 @@ function pruneTraces(gameId: string, limits: TraceLimits): void {
         existsSync(turnRecordFile(gameId, line.id)),
       );
       writeAtomic(indexFile(gameId), `${kept.map((line) => JSON.stringify(line)).join("\n")}\n`);
-    }
-    // 옛 묶음 파일 — 더 쓰지는 않지만 남아 있는 것은 같은 상한으로 민다
-    const legacy = legacyIndexes(gameId).sort((a, b) => a - b);
-    for (const index of legacy.slice(0, Math.max(0, legacy.length - limits.turns))) {
-      rmSync(legacyTurnFile(gameId, index), { force: true });
     }
   } catch (error) {
     console.warn(`[turn-trace] ${gameId}의 지난 기록을 정리하지 못했습니다:`, error);

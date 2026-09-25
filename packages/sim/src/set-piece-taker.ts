@@ -1,16 +1,14 @@
 import type { Player, PositionGroup, SetPieceTakers } from "@story-fm/domain";
 import { positionGroupOf, positionGroupOfPlayer } from "@story-fm/domain";
 import { penaltySkill } from "./shot-model";
-import type { LineupSlot } from "./strength-packet";
+import type { LineupSlot } from "./match-ability";
 
 /**
- * 죽은 공을 차는 사람 — **이 규칙의 유일한 자리** (match.md §1.4).
+ * 죽은 공을 차는 사람 — **이 규칙의 유일한 자리** (match.md §3.5).
  *
- * 구간 시뮬(`match-engine.ts`)·간이 시뮬(`engine/match/quick-sim.ts`)·전력 패킷
- * (`strength-packet.ts`)·스쿼드 화면(`engine/views/views.ts`)·키포인트
- * (`key-points.ts`)가 전부 여기를 지난다. 한 곳이 스스로 「킥력 최고」를 다시 재면
- * 감독이 화면에서 읽는 키커와 90분이 실제로 세우는 키커가 갈린다 — 그때 감독이
- * 믿는 것은 화면이지 판정이 아니다.
+ * 실시간 경기(`live/restarts.ts`)·간이 시뮬(`engine/match/quick-sim.ts`)·스쿼드 화면
+ * (`engine/views/views.ts`)이 전부 여기를 지난다. 한 곳이 스스로 「킥력 최고」를 다시
+ * 재면 감독이 화면에서 읽는 키커와 90분이 실제로 세우는 키커가 갈린다.
  */
 
 /** 키커를 고르는 데 필요한 것 — 선수와 그가 선 자리 (`LineupSlot`의 부분집합) */
@@ -67,7 +65,7 @@ const outfieldSlots = <S extends TakerSlot>(slots: readonly S[]): S[] =>
   slots.filter((slot) => slotGroup(slot) !== "GK");
 
 /**
- * 죽은 공 세 자리를 한 번에 — 패킷의 `guide.setPieces[side].takers`가 이것이다.
+ * 죽은 공 세 자리를 한 번에 — 화면의 「지금 차는 사람」과 경기가 세우는 키커가 이것이다.
  *
  * 지정한 선수가 선발에 없으면(교체·퇴장·로테이션) 그 자리는 곧바로 기본값으로
  * 돌아간다. 지정 자체는 전술에 남는다 — 한 경기의 명단이 감독의 지시를 지우지 않는다.
@@ -83,11 +81,8 @@ export function setPieceTakersOf(
 }
 
 /**
- * 그라운드 위에서 그 자리를 실제로 채우는 선수 — 구간 시뮬·간이 시뮬이 부른다.
- *
- * 패킷은 킥오프·교체·구간마다 다시 서므로 대개 이미 온필드 기준이지만, 같은 구간
- * 안에서 퇴장이 나면 패킷보다 장부가 앞선다. 그래서 고르는 자리에서 한 번 더
- * 대조한다 — 나간 사람이 코너를 차는 장부는 §5의 반려다.
+ * 그라운드 위에서 그 자리를 실제로 채우는 선수 — 실시간 경기·간이 시뮬이 재시작마다 부른다.
+ * 퇴장·교체로 나간 사람이 코너를 차는 장부는 §5의 반려다.
  */
 export function takerOnPitch(
   named: string | null | undefined,
@@ -96,25 +91,4 @@ export function takerOnPitch(
 ): Player | null {
   const field = onPitch.filter((p) => positionGroupOfPlayer(p) !== "GK");
   return fill(named, onPitch, field, (p) => p, TAKER_SKILL[role]);
-}
-
-/**
- * 그 팀의 죽은 공을 대표하는 한 사람 — 키포인트 `set-piece`가 세우는 이름이다.
- *
- * 코너와 프리킥을 다른 사람이 차면 **둘 중 킥력이 높은 쪽**이 선다: 감독이 읽는
- * 사실은 「이 팀 죽은 공이 얼마나 위협적인가」이고, 그것을 정하는 것은 더 잘 차는
- * 발이다. 지정이 없으면 두 자리가 같은 사람이라 필드 최고 킥력 하나로 접힌다.
- */
-export function deliveryTakerOf<S extends TakerSlot>(
-  slots: readonly S[],
-  designated?: SetPieceTakers,
-): S | undefined {
-  const takers = setPieceTakersOf(slots, designated);
-  const found = (id: string | null) =>
-    id === null ? undefined : slots.find((slot) => slot.player.id === id);
-  const corner = found(takers.corner);
-  const freeKick = found(takers.freeKick);
-  if (!corner) return freeKick;
-  if (!freeKick) return corner;
-  return freeKick.player.attributes.kicking > corner.player.attributes.kicking ? freeKick : corner;
 }

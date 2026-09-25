@@ -194,7 +194,7 @@ const sameWording = (a: string, b: string) =>
  *
  * 코어가 머리줄과 항목(`brief`)을 내므로 화면은 그것을 받기만 한다. 요약 문자열을
  * 되쪼개 항목을 만들지 않는다 — 문구가 바뀔 때마다 조용히 깨지고, 사실을 내는
- * 것은 코어의 몫이다(AGENTS.md §4). `brief`가 없는 옛 기록은 요약을 그대로 세운다.
+ * 것은 코어의 몫이다(AGENTS.md §4). `brief`가 없는 기록은 요약을 그대로 세운다.
  *
  * 입력(JSON)은 더 이상 그리지 않는다 — 감독이 읽을 것이 아니라 디버깅용이었고,
  * 상세가 정돈된 뒤로는 잡음이다.
@@ -629,17 +629,12 @@ export function ChatTurnView({
    * 선다(`onRevealHint`) — 상세를 칩 아래에 또 펼치지는 않는다.
    *
    * `silent`은 도구 호출이 아니라 코어가 한 일이다(시계 이동).
-   * ⚠️ 이름 비교가 함께 있는 건 **이미 저장된 턴** 때문이다. 표식이 없던 시절의
-   * 기록에는 이름밖에 없어서, 그것만으로는 진행 중인 세이브에서 유령 호출이
-   * 계속 보인다. 새 기록은 `silent`로 걸러지므로 이 목록은 자라지 않는다.
    */
-  const shownCalls = turn.toolCalls.filter(
-    (call) => !call.silent && call.name !== "시간 경과" && call.name !== "advance_time",
-  );
+  const shownCalls = turn.toolCalls.filter((call) => !call.silent);
 
   /**
    * 표시는 **벌어진 자리**에 선다 — 칩은 호출 시점의 줄 수, 골·경고는 분으로.
-   * 자리를 모르는 기록(옛 세이브)은 예전처럼 맨 앞이다.
+   * 자리를 모르는 기록(코어가 스스로 밀어 넣은 기록)은 맨 앞이다.
    * `cuts`는 시각 표시로 떼어 낸 헤더 줄들 — 칩의 줄 수는 그것까지 세고 저장된다.
    */
   const pieces = weaveTurn(lines, {

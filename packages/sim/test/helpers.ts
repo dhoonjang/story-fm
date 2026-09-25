@@ -6,7 +6,14 @@ import type {
   TacticsSpec,
 } from "@story-fm/domain";
 import { ATTRIBUTE_AXES, DEFAULT_TACTICS } from "@story-fm/domain";
-import type { LedgerSide, LineupSlot, SideInput } from "@story-fm/sim";
+import type { LiveSlot } from "@story-fm/domain";
+import {
+  createLedger,
+  createLiveMatch,
+  type LedgerSide,
+  type LiveMatch,
+  type LiveSetup,
+} from "@story-fm/sim";
 
 /** 테스트용 선수 — 16축 전부 보유, positions[], 부상은 상태에 없음 */
 export function makePlayer(
@@ -22,6 +29,7 @@ export function makePlayer(
     id,
     catalogId: null,
     teamId,
+    squadLevel: "first",
     name: id,
     birthdate: "2000-01-01",
     positions: [{ position, proficiency: 90, isNatural: true }],
@@ -33,8 +41,20 @@ export function makePlayer(
       potential: Math.min(99, base + 5),
       ...overrides,
     },
-    state: { form: 0, condition: 75, ...state },
+    state: {
+      form: 0,
+      condition: 75,
+      injuryProneness: 1,
+      talkMorale: [],
+      outOfPositionRun: 0,
+      fatigue: 0,
+      caps: 0,
+      internationalGoals: 0,
+      ...state,
+    },
     isCaptain: false,
+    isViceCaptain: false,
+    growthCarry: {},
   };
 }
 
@@ -79,35 +99,68 @@ export function makeSquad(
   return { teamId, starters, bench };
 }
 
-const slotsOf = (players: GamePlayer[], familiarity = 99): LineupSlot[] =>
-  players.map((p) => ({
-    player: p,
+/** 실시간 경기 한 편의 자리 — 배치 슬롯을 id로 */
+export function makeLiveSlots(players: GamePlayer[], familiarity = 99): LiveSlot[] {
+  return players.map((p) => ({
+    playerId: p.id,
     position: p.positions[0]!.position,
     proficiency: p.positions[0]!.proficiency,
     familiarity,
   }));
+}
 
-/** 전력 패킷 입력 — 배치 슬롯으로 조립 */
-export function makeSide(
-  teamId: string,
-  base: number,
-  opts: {
-    managerTactics?: number;
-    tactics?: Partial<TacticsSpec>;
-    state?: Partial<GamePlayer["state"]>;
-    /** 전술 적응도 0~100 — 선발 전원에 같은 값을 넣는다 (기본 99) */
-    familiarity?: number;
-  } = {},
-): SideInput {
-  const squad = makeSquad(teamId, base, opts.state ?? {});
-  return {
-    teamId,
-    teamName: teamId.toUpperCase(),
-    starters: slotsOf(squad.starters, opts.familiarity),
-    bench: slotsOf(squad.bench, opts.familiarity),
-    tactics: { ...DEFAULT_TACTICS, ...(opts.tactics ?? {}) },
-    managerTactics: opts.managerTactics ?? 60,
+export interface LiveTestOptions {
+  seed?: number;
+  home?: { base?: number; tactics?: Partial<TacticsSpec>; state?: Partial<GamePlayer["state"]> };
+  away?: { base?: number; tactics?: Partial<TacticsSpec>; state?: Partial<GamePlayer["state"]> };
+  friendly?: boolean;
+  extraTime?: { home: number; away: number } | null;
+  ai?: { home?: boolean; away?: boolean };
+}
+
+/** 실시간 경기 묶음 — 두 스쿼드를 세우고 킥오프 상태까지 */
+export function makeLiveMatch(opts: LiveTestOptions = {}): LiveMatch {
+  const home = makeSquad("home", opts.home?.base ?? 70, opts.home?.state ?? {});
+  const away = makeSquad("away", opts.away?.base ?? 70, opts.away?.state ?? {});
+  const players: Record<string, GamePlayer> = {};
+  for (const p of [...home.starters, ...home.bench, ...away.starters, ...away.bench])
+    players[p.id] = p;
+  const homeTactics = { ...DEFAULT_TACTICS, ...(opts.home?.tactics ?? {}) };
+  const awayTactics = { ...DEFAULT_TACTICS, ...(opts.away?.tactics ?? {}) };
+  const setup: LiveSetup = {
+    seed: opts.seed ?? 42,
+    matchId: "m-test-1",
+    friendly: opts.friendly ?? false,
+    extraTime: opts.extraTime ?? null,
+    sides: {
+      home: {
+        teamId: "home",
+        ai: opts.ai?.home ?? true,
+        managerTactics: 65,
+        kickoffTactics: homeTactics,
+        derbyHeat: 0,
+      },
+      away: {
+        teamId: "away",
+        ai: opts.ai?.away ?? true,
+        managerTactics: 65,
+        kickoffTactics: awayTactics,
+        derbyHeat: 0,
+      },
+    },
+    players,
+    proneness: {},
   };
+  const ledger = createLedger(makeLedgerSide(home), makeLedgerSide(away), {
+    friendly: setup.friendly,
+  });
+  return createLiveMatch(
+    setup,
+    ledger,
+    { home: makeLiveSlots(home.starters), away: makeLiveSlots(away.starters) },
+    { home: homeTactics, away: awayTactics },
+    { points: [], sheet: [] },
+  );
 }
 
 /** 장부 시작 명단 */

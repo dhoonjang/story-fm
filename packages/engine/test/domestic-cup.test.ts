@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   domesticCupCatalog,
-  teamCatalog,
   DOMESTIC_CUP_SIZE,
   DOMESTIC_STAGES,
-  addMissingClubs,
   advanceDomesticCups,
   advanceTime,
   allMatchesDone,
@@ -20,16 +18,11 @@ import {
   domesticCupField,
   domesticCupWinners,
   domesticCupsOf,
-  domesticStageLabel,
   domesticStageMatches,
   europeanEntrants,
   isPostponable,
-  isClubTeam,
   isTopFlight,
   leagueOfTeam,
-  migrateDomesticPrizeKeys,
-  payDomesticCupPrizes,
-  playersOf,
   teamName,
   reviewSeason,
   transitionSeason,
@@ -563,50 +556,7 @@ describe("컵은 1부가 들어오는 라운드에서 시작한다", () => {
   });
 });
 
-describe("기존 세이브 — 2부 클럽 채워 넣기", () => {
-  it("클럽이 빠진 세이브를 로드하면 팀·스쿼드·전술·재정이 복구된다", () => {
-    const state = createTestGame(5);
-    // 2부 클럽을 통째로 들어낸 옛 세이브를 흉내낸다
-    // 무소속(`free`)은 클럽이 아니라 스쿼드가 없다 — 2부와 함께 세지 않는다
-    const second = state.teams
-      .filter((t) => !isTopFlight(t.id) && isClubTeam(t.id))
-      .map((t) => t.id);
-    expect(second.length).toBe(
-      teamCatalog().filter((t) => !isTopFlight(t.id) && isClubTeam(t.id)).length,
-    );
-    const drop = new Set(second);
-    state.teams = state.teams.filter((t) => !drop.has(t.id));
-    state.players = state.players.filter((p) => !drop.has(p.teamId));
-    state.tactics = state.tactics.filter((t) => !drop.has(t.teamId));
-    state.finances = state.finances.filter((f) => !drop.has(f.teamId));
-    state.contracts = state.contracts.filter((c) => !drop.has(c.teamId));
-
-    expect(addMissingClubs(state)).toBe(second.length);
-    for (const id of second) {
-      expect(
-        state.teams.some((t) => t.id === id),
-        id,
-      ).toBe(true);
-      expect(playersOf(state, id).length, id).toBeGreaterThanOrEqual(18);
-      expect(
-        state.tactics.some((t) => t.teamId === id),
-        id,
-      ).toBe(true);
-      expect(
-        state.finances.some((f) => f.teamId === id),
-        id,
-      ).toBe(true);
-      for (const p of playersOf(state, id)) {
-        expect(
-          state.contracts.some((c) => c.gamePlayerId === p.id),
-          p.id,
-        ).toBe(true);
-      }
-    }
-    // 두 번 불러도 중복되지 않는다
-    expect(addMissingClubs(state)).toBe(0);
-  });
-
+describe("국내 컵 — 시작의 문턱", () => {
   it("1라운드 추첨일이 크게 지난 뒤 붙은 세이브는 그 시즌 컵을 건너뛴다", () => {
     const state = createTestGame(5);
     state.date = "2027-02-01"; // 전 컵의 1라운드 추첨이 지난 시점
@@ -838,21 +788,6 @@ describe("상금 멱등 키 — 표시 라벨이 아니라 안정 키다", () =>
   // 장부를 고쳐 쓰는 검증이라 공유 세이브를 복제해 쓴다
   const played = structuredClone(seasonOf(23));
 
-  /** 라벨을 그대로 키로 쓰던 시절의 국내 컵 지급 기록 — 안정 키 → 옛 문장 */
-  const legacy = new Map<string, string>();
-  for (const cup of domesticCupCatalog()) {
-    const put = (kind: string, what: string) =>
-      legacy.set(
-        `prize:competition:${cup.id}:${kind}:S${played.season}`,
-        `${cup.short} ${what} 상금 (S${played.season})`,
-      );
-    put("winner", "우승");
-    put("runner-up", "준우승");
-    for (const stage of DOMESTIC_STAGES) {
-      put(`stage:${stage}`, `${domesticStageLabel(cup, stage)} 진출`);
-    }
-  }
-
   it("라운드 진출 상금이 안정 키로 그 라운드 팀 전원에게 남는다", () => {
     // 지급 사실은 prizesPaid 키가 갖는다 — AI 팀은 상세 원장을 쌓지 않는다
     const paidFor = (cupId: string, stage: MatchStage) =>
@@ -865,35 +800,6 @@ describe("상금 멱등 키 — 표시 라벨이 아니라 안정 키다", () =>
       expect(paidFor(cup.id, "r16"), cup.id).toBe(DOMESTIC_CUP_SIZE / 2);
       expect(paidFor(cup.id, "sf"), cup.id).toBe(4);
     }
-  });
-
-  it("옛 라벨 키를 옮긴다 — 라벨을 고쳐도 같은 시즌 상금이 두 번 나가지 않는다", () => {
-    const save = structuredClone(played);
-    payDomesticCupPrizes(save, []); // 우승·준우승 상금
-
-    let downgraded = 0;
-    for (const finance of save.finances) {
-      const keys = finance.prizesPaid;
-      if (!keys) continue;
-      for (let i = 0; i < keys.length; i++) {
-        const old = legacy.get(keys[i]!);
-        if (!old) continue;
-        keys[i] = old;
-        downgraded++;
-      }
-    }
-    expect(downgraded).toBeGreaterThan(0);
-
-    const balances = save.finances.map((f) => f.balance);
-    migrateDomesticPrizeKeys(save);
-    migrateDomesticPrizeKeys(save); // 멱등
-    payDomesticCupPrizes(save, []);
-
-    expect(save.finances.map((f) => f.balance)).toEqual(balances);
-    const legacyKeys = new Set(legacy.values());
-    expect(
-      save.finances.flatMap((f) => f.prizesPaid ?? []).filter((k) => legacyKeys.has(k)),
-    ).toEqual([]);
   });
 });
 

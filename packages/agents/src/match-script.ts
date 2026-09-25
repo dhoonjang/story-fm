@@ -1,10 +1,10 @@
 import type { MatchEvent, ShootoutKick, ShootoutOutcome, ShotOrigin } from "@story-fm/domain";
-import { formatScore, packetTagText, subCauseText } from "@story-fm/domain";
+import { eventCauseText, formatScore, subCauseText } from "@story-fm/domain";
 import { BIG_CHANCE_XG } from "@story-fm/engine";
 
 /**
- * 구간 대본 — 코어가 확정한 사건을 매치 GM이 읽는 문장으로 옮긴다 (agents.md §3).
- * 매치 GM의 도구 결과와 손잡이 턴의 이번 턴 층이 같은 대본을 싣는다.
+ * 사건 대본 — 장부에 앉은 사건을 매치 GM이 읽는 문장으로 옮긴다 (agents.md §3).
+ * 매치 GM의 이번 턴 층(`<events>`)과 판독기의 정지점 입력이 같은 대본을 싣는다.
  */
 const EVENT_KO: Record<MatchEvent["type"], string> = {
   kickoff: "킥오프",
@@ -18,7 +18,7 @@ const EVENT_KO: Record<MatchEvent["type"], string> = {
   red_card: "퇴장",
   substitution: "교체",
   injury: "부상",
-  /** 벤치가 판을 옮겼다 — 팀 이름은 줄 머리가 이미 붙인다 (match.md §2) */
+  /** 벤치가 판을 옮겼다 — 팀 이름은 줄 머리가 이미 붙인다 (match.md §3.3) */
   tactical_shift: "전술 전환",
   half_time: "하프타임",
   extra_time_start: "연장 돌입",
@@ -26,10 +26,7 @@ const EVENT_KO: Record<MatchEvent["type"], string> = {
   full_time: "경기 종료",
 };
 
-/**
- * 슛이 **어디서 나왔나** — 죽은 공은 사건 타입이 아니라 슛의 성질이다
- * (match.md §1.4). 이 한 마디가 없으면 캐스터는 90분 내내 죽은 공을 볼 수 없다.
- */
+/** 슛이 **어디서 나왔나** — 죽은 공은 사건 타입이 아니라 슛의 성질이다 (match.md §4) */
 const SHOT_ORIGIN_KO: Record<ShotOrigin, string> = {
   open: "",
   corner: "코너에서",
@@ -37,34 +34,12 @@ const SHOT_ORIGIN_KO: Record<ShotOrigin, string> = {
   penalty: "페널티킥",
 };
 
-/**
- * **슛이 어떻게 끝났나** — 장부가 슛마다 들고 있는 사실이다(`shotOutcome`).
- *
- * 이 한 마디가 없으면 대본이 캐스터에게 주는 사실은 「슛」 하나뿐이라, 한 구간의 슛
- * 일곱 개가 같은 문장으로 중계된다 (prompts.md §1 「같은 문형은 한 장면에 한 번」).
- */
+/** **슛이 어떻게 끝났나** — 장부가 슛마다 들고 있는 사실이다(`shotOutcome`) */
 const SHOT_OUTCOME_KO: Record<NonNullable<MatchEvent["shotOutcome"]>, string> = {
   goal: "",
   saved: "골키퍼가 막았다",
   blocked: "수비 몸에 맞았다",
   off_target: "골문을 벗어났다",
-};
-
-const STOP_KO: Record<string, string> = {
-  goal: "골이 터져 흐름이 끊겼다",
-  red_card: "퇴장으로 경기가 멈췄다",
-  injury: "부상으로 경기가 멈췄다",
-  half_time: "전반이 끝났다 — 라커룸 장면",
-  extra_time_start: "90분이 승부를 못 가렸다 — 연장으로 간다",
-  extra_half_time: "연장 전반이 끝났다",
-  full_time: "경기가 끝났다 — 마무리 중계",
-  /** 감독이 고른 자리다 — 여기서 지시를 걸고 이어 굴린다 (match.md §2) */
-  requested: "감독이 말한 분까지 왔다",
-  flow: "특별한 사건 없이 시간이 흘렀다",
-  shootout_start: "120분이 승부를 못 가렸다 — 승부차기로 간다",
-  shootout_kick: "승부차기 한 발이 끝났다 — 다음 키커가 준비한다",
-  /** 진행 정지점이 아니라 승부차기의 끝 — 승부가 갈린 자리다 (`shootoutSettled`) */
-  shootout_done: "승부차기가 끝났다 — 승부가 갈렸다",
 };
 
 const SHOOTOUT_OUTCOME_KO: Record<ShootoutOutcome, string> = {
@@ -73,26 +48,26 @@ const SHOOTOUT_OUTCOME_KO: Record<ShootoutOutcome, string> = {
   missed: "골문을 벗어났다",
 };
 
+/** 사건의 시각 — 추가시간은 `45+2′`로 (match.md §5) */
+export function eventMinuteText(ev: Pick<MatchEvent, "minute" | "added">): string {
+  return ev.added ? `${ev.minute}+${ev.added}′` : `${ev.minute}′`;
+}
+
 /**
  * 사건의 배우 표기. `actors` 순서는 사건 종류마다 다른 방향을 뜻하므로(골은
- * [득점자, 도움], 교체는 [아웃, 인] — match.md §4) 순서에 뜻을 맡기지 않고
- * 역할을 이름 옆에 적는다.
+ * [득점자, 도움], 교체는 [아웃, 인] — match.md §4) 역할을 이름 옆에 적는다.
  */
 function actorsNote(ev: MatchEvent, nameOf: (id: string) => string): string {
   const [first, second] = ev.actors.map(nameOf);
   if (!first) return "";
-  // 죽은 공 골의 도움은 그 공을 올린 키커다 — 추첨이 아니라 사실이다 (match.md §1.4)
   if (ev.type === "goal") return second ? `득점 ${first} · 도움 ${second}` : `득점 ${first}`;
   if (ev.type === "substitution") return second ? `OUT ${first} · IN ${second}` : `OUT ${first}`;
   return ev.actors.map(nameOf).join(" → ");
 }
 
 /**
- * **슛의 성질** — 큰 기회였나, 그리고 어떻게 끝났나.
- *
- * 문턱은 경기 리포트가 타임라인에 세우는 것과 **같은 상수**다(`BIG_CHANCE_XG` —
- * match.md §8). xG 자체는 싣지 않는다: 화자가 입에 담을 수 없는 수치이고, 캐스터가
- * 판정할 것도 없다 (agents.md §3).
+ * **슛의 성질** — 큰 기회였나, 그리고 어떻게 끝났나. 문턱은 경기 리포트가 타임라인에
+ * 세우는 것과 **같은 상수**다(`BIG_CHANCE_XG`). xG 자체는 싣지 않는다.
  */
 function shotNote(ev: MatchEvent): string {
   const marks = [
@@ -102,55 +77,69 @@ function shotNote(ev: MatchEvent): string {
   return marks.length > 0 ? ` — ${marks.join(", ")}` : "";
 }
 
-/** 구간 대본 → 캐스터 입력. 선수는 이름으로 준다 — id를 주면 중계에 id가 흘러나온다. */
-export function buildSegmentMessage(
-  events: MatchEvent[],
-  stop: string,
+/** 사건 한 줄 — `<events>`의 한 줄이자 판독기가 읽는 그 줄이다 */
+export function eventLine(
+  ev: MatchEvent,
   nameOf: (id: string) => string,
   sideName: (side: "home" | "away") => string,
-  /** 구간이 열린 자리의 스코어 — 골 줄이 **그 골 뒤의** 스코어를 적는다 */
-  scoreBefore: { home: number; away: number },
+  /** 이 사건 뒤의 스코어 — 골 줄에만 붙는다 */
+  score: { home: number; away: number },
 ): string {
-  const score = { ...scoreBefore };
-  const lines = events.map((ev) => {
-    const who = actorsNote(ev, nameOf);
-    const team = ev.team ? `${sideName(ev.team)} ` : "";
-    /** 교체의 갈래는 `subCause`가, 골의 근거는 패킷 태그가 갖는다 (match.md §4) */
-    const reasons = [
-      ...(ev.subCause ? [subCauseText(ev.subCause)] : []),
-      ...ev.causes.map((tag) => packetTagText(tag)),
-    ];
-    const cause = reasons.length > 0 ? ` · 근거: ${reasons.join(" / ")}` : "";
-    const detail = ev.detail ? ` · ${ev.detail}` : "";
-    const origin = ev.shotOrigin ? SHOT_ORIGIN_KO[ev.shotOrigin] : "";
-    const from = origin ? `${origin} ` : "";
-    // 골 줄은 **그 골이 들어간 뒤의** 스코어를 두 이름과 함께 단다 — 중계의 골 문형이
-    // 이 한 줄에서 나오고(prompts.md §1), 구간에 골이 둘이면 중간 스코어를 중계가
-    // 세지 않아도 된다. 자는 `formatScore` 하나다 (design-system.md §3)
-    if (ev.type === "goal" && ev.team) score[ev.team] += 1;
-    const mark =
-      ev.type === "goal"
-        ? ` (${sideName("home")} ${formatScore(score.home, score.away)} ${sideName("away")})`
-        : shotNote(ev);
-    return `- ${ev.minute}′ ${team}${from}${EVENT_KO[ev.type]}${mark}${who ? `: ${who}` : ""}${cause}${detail}`;
-  });
-  return [
-    "<segment>",
-    lines.length > 0 ? lines.join("\n") : "- (사건 없음)",
-    "</segment>",
-    `<stop>${STOP_KO[stop] ?? stop}</stop>`,
-  ].join("\n");
+  const who = actorsNote(ev, nameOf);
+  const team = ev.team ? `${sideName(ev.team)} ` : "";
+  /** 교체의 갈래는 `subCause`가, 사건의 근거는 원인 코드가 갖는다 (match.md §4) */
+  const reasons = [
+    ...(ev.subCause ? [subCauseText(ev.subCause)] : []),
+    ...ev.causes.map((cause) => eventCauseText(cause, nameOf)),
+  ];
+  const cause = reasons.length > 0 ? ` · 근거: ${reasons.join(" / ")}` : "";
+  const detail = ev.detail ? ` · ${ev.detail}` : "";
+  const origin = ev.shotOrigin ? SHOT_ORIGIN_KO[ev.shotOrigin] : "";
+  const from = origin ? `${origin} ` : "";
+  const mark =
+    ev.type === "goal"
+      ? ` (${sideName("home")} ${formatScore(score.home, score.away)} ${sideName("away")})`
+      : shotNote(ev);
+  return `- ${eventMinuteText(ev)} ${team}${from}${EVENT_KO[ev.type]}${mark}${who ? `: ${who}` : ""}${cause}${detail}`;
 }
 
 /**
- * 승부차기 한 발의 대본 — 선수는 이름으로 준다(id를 주면 중계에 id가 샌다).
- *
- * 킥을 굴리는 것은 코어이고 이 함수가 하는 일은 **확정된 한 발을 문장으로 옮기는
- * 것**뿐이다 — 다른 정지점과 같은 분업이다 (match.md §2). 킥의 성공 확률은 싣지
- * 않는다: 화자가 입에 담지 않는 게임 내부 수치다.
- *
- * 아직 한 발도 굴리지 않은 턴(`kick`이 `null`)은 감독이 **키커 순서를 정할
- * 자리**이므로 대본이 그 사실을 밝힌다.
+ * `<events>` — 지난 턴 뒤 장부에 앉은 사건. 선수는 이름으로 준다 — id를 주면 중계에 id가
+ * 흘러나온다. 골 줄은 **그 골이 들어간 뒤의** 스코어를 두 이름과 함께 단다.
+ */
+export function buildEventsBlock(
+  events: readonly MatchEvent[],
+  nameOf: (id: string) => string,
+  sideName: (side: "home" | "away") => string,
+  /** 이 사건들이 시작되기 전의 스코어 */
+  scoreBefore: { home: number; away: number },
+): string {
+  const score = { ...scoreBefore };
+  const lines = events
+    .filter((ev) => ev.type !== "kickoff")
+    .map((ev) => {
+      if (ev.type === "goal" && ev.team) score[ev.team] += 1;
+      return eventLine(ev, nameOf, sideName, score);
+    });
+  return ["<events>", lines.length > 0 ? lines.join("\n") : "- (사건 없음)", "</events>"].join(
+    "\n",
+  );
+}
+
+/** 사건 목록이 시작되기 전의 스코어 — 지금 장부에서 그 사건들의 골만큼 되감는다 */
+export function scoreBeforeEvents(
+  now: { home: number; away: number },
+  events: readonly MatchEvent[],
+): { home: number; away: number } {
+  const score = { ...now };
+  for (const ev of events) if (ev.type === "goal" && ev.team) score[ev.team] -= 1;
+  return score;
+}
+
+/**
+ * 승부차기 한 발의 대본 — 킥을 굴리는 것은 코어이고 여기서 하는 일은 **확정된 한 발을
+ * 문장으로 옮기는 것**뿐이다. 성공 확률은 싣지 않는다. 아직 한 발도 굴리지 않은
+ * 자리(`kick`이 `null`)는 감독이 키커 순서를 정할 자리다.
  */
 export function buildShootoutMessage(
   kick: ShootoutKick | null,
@@ -166,12 +155,11 @@ export function buildShootoutMessage(
           (kick.keeper ? ` ↔ 골키퍼 ${nameOf(kick.keeper)}` : "") +
           ` · ${SHOOTOUT_OUTCOME_KO[kick.outcome]} · ${tallyLine}`,
       ]
-    : ["- (이번 턴에 찬 발은 없다 — 감독이 키커 순서를 정할 자리다)", `- ${tallyLine}`];
-  const stop = done ? "shootout_done" : kick ? "shootout_kick" : "shootout_start";
-  return [
-    "<segment>",
-    lines.join("\n"),
-    "</segment>",
-    `<stop>${STOP_KO[stop] ?? stop}</stop>`,
-  ].join("\n");
+    : ["- (아직 찬 발이 없다 — 감독이 키커 순서를 정할 자리다)", `- ${tallyLine}`];
+  const state = done
+    ? "승부차기가 끝났다 — 승부가 갈렸다"
+    : kick
+      ? "다음 키커가 준비한다"
+      : "120분이 승부를 못 가렸다 — 승부차기로 간다";
+  return ["<shootout>", lines.join("\n"), `- ${state}`, "</shootout>"].join("\n");
 }

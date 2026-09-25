@@ -7,6 +7,9 @@ import { GET as getCatalog, POST as createGame } from "../app/api/games/route";
 import { GET as getGame, DELETE as deleteGameRoute } from "../app/api/games/[id]/route";
 import { POST as postTurn } from "../app/api/games/[id]/turn/stream/route";
 import { POST as postLineup } from "../app/api/games/[id]/lineup/route";
+import { GET as getLive, POST as postLive } from "../app/api/games/[id]/match/live/route";
+import { CHECKPOINT_TICKS, STOP_EVENT_TYPES } from "@story-fm/domain";
+import { advanceLive, liveDigest, liveFinished, type LiveMatch } from "@story-fm/sim";
 import {
   GET as catalogGet,
   POST as catalogAdd,
@@ -92,7 +95,7 @@ const gameList = () =>
 async function turn(
   id: string,
   message: string,
-  operation?: { kind: "advance_match" },
+  operation?: { kind: "enter_match" } | { kind: "match_stop" },
 ): Promise<GamePayload> {
   const res = await postTurn(json(operation ? { operation } : { message }), params(id));
   expect(res.status).toBe(200);
@@ -238,14 +241,51 @@ describe("API — 온보딩부터 경기까지", () => {
     }
     expect(advanced.phase).toBe("matchday");
 
-    // 킥오프 → 진행 손잡이 → 종료. 경기를 미는 것은 **손잡이 하나**다 (match.md §2)
+    // 킥오프 → 들어서기 → 실행기가 굴리며 정지점마다 중계 턴 → 종료 휘슬 뒤 마감 턴 (match.md §2)
     let current = await turn(game.id, "경기 시작하자");
-    expect(current.phase === "match" || current.phase === "idle").toBe(true);
-    let guard = 20;
-    while (current.phase === "match" && guard-- > 0) {
-      current = await turn(game.id, "", { kind: "advance_match" });
+    expect(current.phase).toBe("match");
+    current = await turn(game.id, "", { kind: "enter_match" });
+    let commentaryTurns = 0;
+    for (let guard = 0; guard < 400; guard++) {
+      const snapshot = (await (
+        await getLive(new Request("http://test.local"), params(game.id))
+      ).json()) as {
+        live: LiveMatch;
+      };
+      const live = snapshot.live;
+      if (liveFinished(live)) {
+        current = await turn(game.id, "", { kind: "match_stop" });
+        break;
+      }
+      if (live.state.interval) {
+        await postLive(json({ kind: "resume" }), params(game.id));
+        continue;
+      }
+      // 브라우저의 실행기와 같다 — 같은 함수로 굴리고 체크포인트를 낸다
+      const { events } = advanceLive(live, CHECKPOINT_TICKS);
+      const verdict = (await (
+        await postLive(
+          json({
+            kind: "checkpoint",
+            checkpoint: {
+              fromTick: live.committedTick,
+              toTick: live.state.tick,
+              digest: liveDigest(live.state, live.ledger),
+            },
+          }),
+          params(game.id),
+        )
+      ).json()) as { verdict: { ok: boolean }; events: Array<{ type: string }> };
+      expect(verdict.verdict.ok).toBe(true);
+      if (events.some((e) => STOP_EVENT_TYPES.has(e.type))) {
+        current = await turn(game.id, "", { kind: "match_stop" });
+        commentaryTurns++;
+        // 종료 휘슬의 정지점 턴이 마감이다 — 경기가 닫혔다
+        if (current.phase !== "match") break;
+      }
     }
     expect(current.phase).toBe("idle");
+    expect(commentaryTurns, "정지점 중계 턴이 한 번도 서지 않았다").toBeGreaterThan(0);
 
     // 시즌 첫 경기는 **프리시즌 친선**이다 — 최근 결과에는 서고 순위표는 그대로다
     const league = current.views.competitions.list[0]!;
@@ -618,7 +658,15 @@ describe("API — 온보딩부터 경기까지", () => {
 
     // 경질 카드를 세운다 — userTeamId는 옛 구단을 그대로 가리킨다 (career.md §5.1)
     const state = loadGame(game.id)!;
-    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    state.dismissal = {
+      kind: "sacked",
+      on: state.date,
+      season: state.season,
+      teamId: state.userTeamId,
+      tier: 3,
+      target: 14,
+      expectationCode: "mid",
+    };
     saveGame(state);
 
     const res = await postLineup(json({ starting, bench: [] }), params(game.id));

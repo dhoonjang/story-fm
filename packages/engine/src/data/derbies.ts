@@ -10,7 +10,7 @@
  */
 
 export interface Derby {
-  /** 회견의 맥락과 패킷 태그에 그대로 실리는 이름 */
+  /** 회견의 맥락과 경기 전 분석에 그대로 실리는 이름 */
   name: string;
   /** 두 팀의 카탈로그 id — **순서에 뜻이 없다** (`derbyOf`가 양쪽으로 맞춘다) */
   teams: readonly [string, string];

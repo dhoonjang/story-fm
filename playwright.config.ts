@@ -105,7 +105,7 @@ export default defineConfig({
       PORT: String(PORT),
       LLM_MODE: "mock",
       // 90분을 벽시계로 기다리지 않는다 — 배속은 판정을 바꾸지 않는다(live-match.md)
-      LIVE_MATCH_SPEED: "180",
+      NEXT_PUBLIC_LIVE_MATCH_SPEED: "180",
       // CI는 `next start`로 도므로 NODE_ENV가 production이다 — 어드민 쓰기 라우트의
       // 기본 문이 닫히는 자리다(game-state.md §2). 어드민 스펙이 카탈로그를 고쳐야
       // 하므로 여기서 명시적으로 연다.

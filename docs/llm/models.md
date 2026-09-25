@@ -100,11 +100,11 @@ agents:
 | ------------------- | --------------------------------------------------------------------- | --------- | ----- |
 | `gm`                | 평시 서사 · 의도 해석 · 판정                                          | 64,000    | 180초 |
 | `tactic-orders`     | 감독의 판 지시 → 명령 인자 (평시)                                     | 16,000    | 60초  |
-| `match-reader`      | 경기의 전술 포인트·시트 — 킥오프·지시 턴·구간 뒤 (경기)               | 16,000    | 60초  |
+| `match-reader`      | 경기의 전술 포인트·시트 — 킥오프·지시 턴·골·퇴장 뒤·하프타임 (경기)   | 16,000    | 60초  |
 | `training-orders`   | 감독의 훈련·육성 지시 → 명령 인자                                     | 16,000    | 60초  |
 | `market-orders`     | 감독의 이적·재정 지시 → 명령 인자                                     | 16,000    | 60초  |
 | `table-orders`      | 협상 방의 한 줄 → 값·조건·답의 명령 인자                              | 16,000    | 60초  |
-| `match-gm`          | 경기 중계 · 벤치 대화 · 도구로 경기 진행                              | 64,000    | 180초 |
+| `match-gm`          | 경기 중계(정지점마다) · 벤치 대화 · 지시와 마감 도구                  | 64,000    | 180초 |
 | `negotiation-gm`    | 협상 방 — 상대의 대사와 장면 · 도구로 값을 옮기고 답을 판정           | 64,000    | 180초 |
 | `finalize-match`    | 끝난 경기의 결산 · 마무리 중계                                        | 16,000    | 90초  |
 | `training-rater`    | 훈련 결산                                                             | 8,000     | 30초  |
@@ -117,7 +117,7 @@ agents:
   경기 한 턴이 두 호출이 됐으므로(agents.md §3) 여기서 지연을 갚아야 한다.
 - **중계가 가벼운 이유는 사건을 코어가 정하기 때문**이다 — 모델은 xg가 굴린 결과를
   문장으로 옮길 뿐인데 90분에 스무 번 도니 지연이 곧 게임 속도다
-  ([../simulation/match.md](../simulation/match.md) §2).
+  ([../simulation/match.md](../simulation/match.md) §3).
 - **훈련 결산이 싼 자리로 가는 이유는 값이 아니라 빈도**다. 출력이 코어 앵커 ± 한도
   안에서만 움직여서 모델이 무뎌도 장부가 흔들리지 않는다 (agents.md §4).
 - **경기 마감이 싼 자리로 가지 않는 이유는 읽는 양**이다 — 이 경기의 중계 전부를
@@ -440,7 +440,7 @@ runTurn({ system, history, user, stateNote?, tools?, outputSchema?, maxTokens?, 
 - `onUsage`도 **팩토리가 계측에서 넣는다**. 어댑터는 응답 하나를 받을 때마다 그 몫을
   부르고, 그래서 턴이 실패로 끝나도 쓴 토큰이 남는다 (§4).
 - 이력은 **제공자·모델로 태깅해 저장**한다(`StoredLlmHistory`). 태그가 다르면 그 이력은
-  버리고 새로 시작한다 — 장부와 패킷이 남아 있어 경기는 이어진다.
+  버리고 새로 시작한다 — 장부와 경기 상태가 남아 있어 경기는 이어진다.
 - `stateNote`(휘발 상태 스냅샷)는 어느 어댑터에서든 **유저 발화 뒤에 서고, 저장 이력에
   남기지 않는다** (§3-3). 저장 이력의 그 자리는 `user`와 글자까지 같다.
 - `historyBase`는 돌려준 이력에서 **이번 턴 전까지의 메시지 수**다. 어댑터마다 이력을
@@ -714,7 +714,7 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
 ## 5. 개발 모드 기록 — 한 턴에 타임라인 하나 (`turn-trace.ts` · `pnpm log`)
 
 **한 게임에 창고 하나, 한 턴에 타임라인 하나.** 감독의 입력, 모델 호출, 해석기가 낸 명령,
-코어가 걸고 반려한 것, 판이 구른 패킷과 난수 채널, 굴러간 하루하루 — 그 턴에 일어난
+코어가 걸고 반려한 것, 확정된 체크포인트와 난수 채널, 굴러간 하루하루 — 그 턴에 일어난
 전부가 **한 줄기에 일어난 순서로** 선다. 모델 호출도 코어의 사실도 같은 타임라인의
 항목이다. 갈라 두면 「해석기가 이렇게 답했는데 코어는 왜 저렇게 했나」를 두 창을 오가며
 시각으로 맞춰야 한다.
@@ -762,8 +762,8 @@ system 블록 · 이력 · 발화 · 상태 스냅샷 · 도구 스펙, 응답�
   세우고(`--agent` · `--version`으로 거른다), `--facts <갈래>`는 항목을 jsonl로 흘린다
   (§5-3). 거르는 손잡이는 `--game` · `--turn` · `--failed` · `--kind` · `--since 2h` · `--limit`.
 
-**턴은 호출들의 목록이 아니라 나무다.** 매치 GM이 `advance_match`를 부르면 그 도구
-안에서 지시 해석과 마감이 돌고, 그 둘이 끝나야 매치 GM의 응답이 돌아온다
+**턴은 호출들의 목록이 아니라 나무다.** 매치 GM이 `tactic_orders`를 부르면 그 도구
+안에서 판독기가 돌고, `finalize_match` 안에서 마감이 돌고, 그것이 끝나야 매치 GM의 응답이 돌아온다
 (agents.md §3). 그래서 호출마다 **자리(`seq`) · 부모(`parentId`) · 경유한
 도구(`viaTool`)**가 함께 남고, 도구 안에서 난 사실도 같은 표식(`via`)을 든다 — 평면
 목록으로 두면 셋이 우연히 순서대로 선 것처럼 보여, 느린 턴의 범인이 어느 호출인지
@@ -785,10 +785,10 @@ turn-mtxy2rrq-91c0
 
 타임라인 6항목
     1     +0ms  llm.call                       match-gm · gemini-3.7-flash · 8.4s · in 41k out 612 캐시 88% · 도구 1  → match-gm-mtxy2rrx-4b8e
-    2   +1.2s  └ llm.call (advance_match)      tactic-orders · gemini-3.5-flash · 0.6s · …  → tactic-orders-mtxy2rsk-a618
-    3   +1.8s  └ orders.intent (advance_match) {"agent":"tactic-orders","ok":true,"ops":{"substitute":[…]}}
-    4   +1.9s  └ command (advance_match)       {"name":"substitute","ok":true,…}
-    5   +2.0s  └ match.segment (advance_match) {"segment":3,"channel":"segment:1:m-epl-1-12-arsenal:3","stop":"goal",…}
+    2   +1.2s  └ llm.call (tactic_orders)      match-reader · gemini-3.5-flash · 0.6s · …  → match-reader-mtxy2rsk-a618
+    3   +1.8s  └ orders.intent (tactic_orders) {"agent":"match-reader","ok":true,"ops":{"substitute":[…]}}
+    4   +1.9s  └ command (tactic_orders)       {"name":"substitute","ok":true,"tick":68400,…}
+    5   +2.0s  └ match.reading (tactic_orders) {"points":5,"sheet":7,"dropped":1,…}
     6   +8.4s  scene                           {"inMatch":true,"ledgerMinute":57,…}
 ```
 
@@ -960,8 +960,8 @@ turn-mtxy2rrq-91c0
 
 **호출 원문은 모델이 무엇을 보고 무엇을 답했는가까지다.** 그 답이 옳았는지를 되짚으려면
 **코어가 그 턴에 무엇을 했는가**가 그 옆에 있어야 한다 — 감독이 무슨 말을 했고, 해석기가
-그것을 어떤 명령으로 옮겼고, 코어가 무엇을 걸고 무엇을 반려했고, 판이 어떤 패킷과 어떤
-난수 채널로 굴렀고, 사건이 무엇이었고, 그 사이 세계가 어떻게 움직였는가. 프롬프트 안의
+그것을 어떤 명령으로 옮겼고, 코어가 무엇을 걸고 무엇을 반려했고, 어떤 체크포인트가 어떤
+입력 로그로 확정됐고, 사건이 무엇이었고, 그 사이 세계가 어떻게 움직였는가. 프롬프트 안의
 한국어 문장을 정규식으로 긁어 세는 것이 이 질문에 답하는 길이어서는 안 된다.
 
 그래서 코어는 **사실(fact)** 을 일어난 자리에서 구조로 내고, 그것이 호출과 같은 타임라인에
@@ -990,9 +990,9 @@ turn-mtxy2rrq-91c0
   "before": { /* 턴 앞의 상태 요약 — 날짜·국면·스코어·전술판·주요 표의 크기 */ },
   "entries": [
     { "seq": 2, "at": "…", "kind": "llm.call", "data": { "id": "match-gm-mtyjvr3j-5873", "agent": "match-gm", … } },
-    { "seq": 3, "at": "…", "kind": "llm.call", "via": { "call": "match-gm-…", "tool": "advance_match" }, "data": { "id": "tactic-orders-…", … } },
+    { "seq": 3, "at": "…", "kind": "llm.call", "via": { "call": "match-gm-…", "tool": "tactic_orders" }, "data": { "id": "match-reader-…", … } },
     { "seq": 4, "at": "…", "kind": "orders.intent", "via": { … }, "data": { "ops": { … } } },
-    { "seq": 5, "at": "…", "kind": "match.segment", "via": { … }, "data": { "channel": "segment:2:m-epl-2-11-manutd:3", … } },
+    { "seq": 5, "at": "…", "kind": "match.reading", "via": { … }, "data": { "points": 5, "sheet": 7, "tick": 68400, … } },
     { "seq": 6, "at": "…", "kind": "scene", "data": { … } }
   ],
   "callIds": ["match-gm-mtyjvr3j-5873", "tactic-orders-mtyjvsd0-5d0d"],
@@ -1007,38 +1007,38 @@ turn-mtxy2rrq-91c0
 
 ### 항목의 갈래
 
-| `kind`                     | 누가                                            | 무엇                                                                                                                   |
-| -------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `llm.call`                 | `tapLlm`                                        | **모델 호출 하나** — 에이전트·모델·부모와 경유 도구·소요·사용량·도구 수·종료 사유·실패. 원문은 `calls/<id>.json`       |
-| `match.kickoff`            | `startMatch`                                    | 대진·양 팀 선발과 벤치·전술·감독 능력·킥오프 패킷 요약                                                                 |
-| `match.segment`            | `advanceSegment`                                | **굴린 구간 하나** — 난수 채널·출발/도착 분과 연속 시계·정지 사유·사건 전부·선수별 기록과 피로 증가분·구른 패킷의 요약 |
-| `match.shootout`           | `advanceShootout`                               | 승부차기 한 발                                                                                                         |
-| `match.ruling`             | `applyMatchRatings`                             | 마감 판정 — 선수마다 모델이 준 평점·코어 앵커·한도로 자른 값. **앵커 ± 한도가 실제로 어디서 잘렸는가**                 |
-| `match.finalized`          | `finalizeMatch`                                 | 결과(스코어·슛·xG·점유·연장·승부차기)·평점 앵커·정산된 피로·다이제스트 세 갈래                                         |
-| `tick.day`                 | `advanceTime`                                   | 하루 — 그 날의 사건 배열·소화된 훈련 수·멈춘 사유                                                                      |
-| `tick.match`               | `simulateOtherMatches` · `simulateReserveMatch` | 남의 경기와 2군 경기의 간이 시뮬 결과 — 스코어·슛·xG·기대 득점·점유·부상·카드·교체 수·난수 키                          |
-| `tick.season_end`          | `advanceTime`                                   | 시즌 전환                                                                                                              |
-| `command`                  | `buildToolSpecs`의 `wrap` · 전술판 조작         | **코어 명령 하나** — 이름·인자·성공/반려·메시지·항목·카드. 반려도 남는다 — 화면의 칩(`recordCall`)은 성공만 세운다     |
-| `orders.intent`            | `runOpsOrders`                                  | 해석기 한 번 — 감독의 말 원문·낸 `ops`·잘린 수·못 옮긴 말·재시도 여부·실패                                             |
-| `orders.applied`           | `applyTacticOrders`                             | 의도를 판에 건 결과 — 되돌아간 문장·굴렀는가·모양이 바뀌었는가                                                         |
-| `llm.retry` · `llm.anchor` | `retryOnce` · `anchorStands`                    | 산출을 쓸 수 없어 다시 부른 자리 · 결산을 건너뛰고 앵커가 남은 자리                                                    |
-| `scene`                    | `closeTurn`                                     | 장면의 시계 — 헤더·시점·출처·실제로 옮긴 곳·멈춘 턴 수·장면이 비어 코어 기록으로 세웠는가                              |
-| `history.compacted`        | `runTurnLocked`                                 | 이력 압축의 결과                                                                                                       |
-| `warn`                     | 턴 경로의 `console.warn` 자리                   | 서버 콘솔로만 흐르던 경고 — 어디서·무엇을                                                                              |
+| `kind`                     | 누가                                            | 무엇                                                                                                                       |
+| -------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `llm.call`                 | `tapLlm`                                        | **모델 호출 하나** — 에이전트·모델·부모와 경유 도구·소요·사용량·도구 수·종료 사유·실패. 원문은 `calls/<id>.json`           |
+| `match.kickoff`            | `startMatch`                                    | 대진·양 팀 선발과 벤치·전술·감독 능력                                                                                      |
+| `match.checkpoint`         | `commitCheckpoint`                              | **확정한 체크포인트 하나** — 시작/끝 tick·입력 로그·검증 결과(일치/불일치)·사건 전부·선수별 기록과 부하 증가분·상태 digest |
+| `match.reading`            | `applyMatchReading`                             | 판독 한 번 — 포인트·시트 줄 수·버린 줄·적용 tick                                                                           |
+| `match.shootout`           | `advanceShootout`                               | 승부차기 한 발                                                                                                             |
+| `match.ruling`             | `applyMatchRatings`                             | 마감 판정 — 선수마다 모델이 준 평점·코어 앵커·한도로 자른 값. **앵커 ± 한도가 실제로 어디서 잘렸는가**                     |
+| `match.finalized`          | `finalizeMatch`                                 | 결과(스코어·슛·xG·점유·연장·승부차기)·평점 앵커·정산된 피로·다이제스트 세 갈래                                             |
+| `tick.day`                 | `advanceTime`                                   | 하루 — 그 날의 사건 배열·소화된 훈련 수·멈춘 사유                                                                          |
+| `tick.match`               | `simulateOtherMatches` · `simulateReserveMatch` | 남의 경기와 2군 경기의 간이 시뮬 결과 — 스코어·슛·xG·기대 득점·점유·부상·카드·교체 수·난수 키                              |
+| `tick.season_end`          | `advanceTime`                                   | 시즌 전환                                                                                                                  |
+| `command`                  | `buildToolSpecs`의 `wrap` · 전술판 조작         | **코어 명령 하나** — 이름·인자·성공/반려·메시지·항목·카드. 반려도 남는다 — 화면의 칩(`recordCall`)은 성공만 세운다         |
+| `orders.intent`            | `runOpsOrders`                                  | 해석기 한 번 — 감독의 말 원문·낸 `ops`·잘린 수·못 옮긴 말·재시도 여부·실패                                                 |
+| `orders.applied`           | `applyTacticOrders`                             | 의도를 판에 건 결과 — 되돌아간 문장·굴렀는가·모양이 바뀌었는가                                                             |
+| `llm.retry` · `llm.anchor` | `retryOnce` · `anchorStands`                    | 산출을 쓸 수 없어 다시 부른 자리 · 결산을 건너뛰고 앵커가 남은 자리                                                        |
+| `scene`                    | `closeTurn`                                     | 장면의 시계 — 헤더·시점·출처·실제로 옮긴 곳·멈춘 턴 수·장면이 비어 코어 기록으로 세웠는가                                  |
+| `history.compacted`        | `runTurnLocked`                                 | 이력 압축의 결과                                                                                                           |
+| `warn`                     | 턴 경로의 `console.warn` 자리                   | 서버 콘솔로만 흐르던 경고 — 어디서·무엇을                                                                                  |
 
-**패킷 요약(`packetDigest`)은 존·9칸 격자·매치업·기대 득점·점유·강도·패킷 태그·
-전술 노트 태그·레인 편향·전술 포인트와 시트·양 팀 명단(자리·좌표·역할·개인 전력)이다.** 슈팅
-프로필처럼 크고 유도되는 것은 싣지 않는다 — 구간 하나가 10KB 안팎이라 두 시즌이 수십
-MB에 든다. 사실은 앉히는 순간 **복제**된다(`structuredClone`) — 장부가 뒤에서 같은
-객체를 고쳐 써도(원인 태그의 정규화가 그렇다) 기록은 그 순간의 값이다.
+**체크포인트 항목은 말의 좌표를 싣지 않는다** — 6,000틱의 좌표는 수 MB다. 싣는 것은 사건·
+선수별 기록·부하·팀 통계와 상태 digest이고, 좌표가 필요하면 세이브의 확정 상태와 입력 로그로
+같은 구간을 다시 굴린다(결정적이라 같은 경기다). 사실은 앉히는 순간 **복제**된다
+(`structuredClone`) — 장부가 뒤에서 같은 객체를 고쳐 써도 기록은 그 순간의 값이다.
 
 - **기록은 읽지 않는다.** `journal`은 쓰기 전용이고 기본값은 아무것도 하지 않는
   함수다 — 게임 로직이 기록에서 값을 읽는 순간 결정성이 기록의 유무에 걸린다.
   묶는 것은 창고이고(`bindJournal`), 잇는 자리는 웹의 `turn-runner`다.
-- **사실은 일어난 자리에서 낸다.** 구간의 난수 채널은 `advanceSegment`가, 판정의
+- **사실은 일어난 자리에서 낸다.** 체크포인트의 검증 결과는 `commitCheckpoint`가, 판정의
   한도는 `applyMatchRatings`가 안다 — 밖에서 되짚어 재구성하면 재구성이 둘째 원본이
   된다.
-- **문장이 아니라 코드다.** 사건은 `MatchEvent` 그대로, 태그는 `PacketTag` 그대로.
+- **문장이 아니라 코드다.** 사건은 `MatchEvent` 그대로, 원인은 `EventCause` 그대로.
   문장은 읽는 쪽이 같은 렌더러로 만든다 — 기록에 문장을 적으면 문구를 고친 날 옛
   기록의 집계가 깨진다.
 - **채팅 턴이 아닌 쓰기는 전술판 선반에 선다.** 전술판 저장(`POST /lineup`)과 게임 삭제는
@@ -1059,13 +1059,13 @@ pnpm log turn-mtyjvr3j-5873                    같은 것을 이름으로
 pnpm log turn-mtyjvr3j-5873 --entry 4          타임라인의 항목 하나의 전문
 pnpm log tactic-orders-mtyjvsd0-5d0d           호출의 원문 — --full · --part user · --json · --path
 pnpm log --calls --agent tactic-orders --failed  호출만 한 줄씩
-pnpm log --facts match.segment --game game-f0o7   그 갈래의 항목을 jsonl로 흘린다 — jq·python이 받는 자리
+pnpm log --facts match.checkpoint --game game-f0o7   그 갈래의 항목을 jsonl로 흘린다 — jq·python이 받는 자리
 pnpm log --facts llm.call,orders.intent --game game-f0o7   여럿을 함께
 pnpm log --board --game game-f0o7              전술판 선반만 — 전술판 저장·게임 삭제 (기본 목록은 두 선반이 일어난 순서로)
 ```
 
-집계는 `--facts`가 전부다 — 한 게임의 `match.segment`를 흘려 `packet.zones`의 비를
-세면 존 편향이, `orders.intent`를 흘려 `ops`가 빈 비율을 세면 해석기의 빈손이, `command`를
+집계는 `--facts`가 전부다 — 한 게임의 `match.checkpoint`를 흘려 팀 통계를 세면 점유·슈팅의
+분포가, `orders.intent`를 흘려 `ops`가 빈 비율을 세면 해석기의 빈손이, `command`를
 흘려 `ok:false`를 세면 반려의 분포가, `llm.call`을 흘려 `error`를 세면 시한과 혼잡이 나온다.
 
 ## 6. ⚠️ 불변식
@@ -1132,7 +1132,7 @@ pnpm log --board --game game-f0o7              전술판 선반만 — 전술판
 | 설정 검증 테스트                    | `packages/llm/test/agent-config.test.ts`                                                            |
 | 토큰 계측·예산 상한                 | `packages/llm/src/usage-meter.ts`                                                                   |
 | 기록 창고 — 타임라인·원문·`tapLlm`  | `packages/llm/src/turn-trace.ts` (`traceTurn` · `noteFact` · `noteTurn`)                            |
-| 사실의 문·갈래·상태 요약            | `packages/engine/src/core/journal.ts` · 패킷 요약 `packages/engine/src/match/packet-digest.ts`      |
+| 사실의 문·갈래·상태 요약            | `packages/engine/src/core/journal.ts` · 체크포인트 검증 `packages/engine/src/match/match-flow.ts`   |
 | 게임 버전 (§5-2)                    | `config/game-version.yml` · 읽는 자리 `packages/llm/src/game-version.ts`                            |
 | 버전 판단 규칙 (§5-2)               | `.claude/skills/game-version/SKILL.md`                                                              |
 | 턴 인덱스에 묶는 자리               | `apps/web/lib/turn-runner.ts` · `apps/web/app/api/games/route.ts`                                   |

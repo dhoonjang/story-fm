@@ -1,5 +1,5 @@
 import type { GamePlayer, PositionGroup } from "@story-fm/domain";
-import { bestOverall } from "@story-fm/domain";
+import { bestOverall, freshPlayerState } from "@story-fm/domain";
 import { claimSyntheticName, syntheticNamePoolOf } from "../data/names";
 import { countryOfTeam, TIER_BASE } from "../data/team-catalog";
 import { deriveAxes } from "./attributes";
@@ -246,11 +246,13 @@ export function generateYouthPlayer(
       // (player.md §6.5). 천장을 고정하고 종합만 흔들면 대역 밖의 사람이 난다.
       potential: clamp99(overall + gap),
     },
-    state: {
+    state: freshPlayerState({
       form: 0,
       condition: randInt(rng, JOINING_CONDITION.min, JOINING_CONDITION.max),
-    },
+    }),
     isCaptain: false,
+    isViceCaptain: false,
+    growthCarry: {},
   };
 }
 
@@ -323,10 +325,12 @@ export function generatePromotionSigning(
     },
     ...(homegrownCountry === undefined ? {} : { homegrownCountry }),
     ...(nationality === undefined ? {} : { nationality }),
-    state: {
+    state: freshPlayerState({
       form: 0,
       condition: randInt(rng, JOINING_CONDITION.min, JOINING_CONDITION.max),
-    },
+    }),
     isCaptain: false,
+    isViceCaptain: false,
+    growthCarry: {},
   };
 }

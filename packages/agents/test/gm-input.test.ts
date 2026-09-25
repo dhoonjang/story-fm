@@ -45,7 +45,6 @@ import {
   type MatchRecord,
 } from "@story-fm/domain";
 import {
-  MATCH_ADVANCED,
   SKILL_CATALOG,
   TIME_PASSED,
   filterCasterStream,
@@ -161,6 +160,9 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
       on: state.date,
       season: state.season,
       teamId: state.userTeamId,
+      tier: 1,
+      target: 2,
+      expectationCode: "title",
     };
     expect(describeClub(state)).toBeNull();
     expect(buildGmReference(state)).toBe(describeManager(state.manager));
@@ -303,7 +305,7 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
       text: `${reporter.characterId} 만나겠다`,
       toolCalls: [],
       at: state.date,
-      characters: [{ characterId: reporter.characterId, depth: "full" }],
+      characters: [{ characterId: reporter.characterId, depth: "full", memories: 0 }],
     });
     expect(buildGmReference(state)).toBe(before);
   });
@@ -316,7 +318,7 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
       text: `${coach.characterId} 불러줘`,
       toolCalls: [],
       at: state.date,
-      characters: [{ characterId: coach.characterId, depth: "full" }],
+      characters: [{ characterId: coach.characterId, depth: "full", memories: 0 }],
     });
     state.chat.push({
       role: "model",
@@ -331,7 +333,9 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
     // 같은 함수가 그리므로 같은 순서다 (`renderTurnGroup`)
     expect(turn.content.indexOf(coach.motivation)).toBeLessThan(turn.content.indexOf("불러줘"));
     // 창 안에 선 카드는 인물 사전이 「이미 실렸다」로 읽는다
-    expect(injectedCharacters(state)).toEqual([{ characterId: coach.characterId, depth: "full" }]);
+    expect(injectedCharacters(state)).toEqual([
+      { characterId: coach.characterId, depth: "full", memories: 0 },
+    ]);
   });
 
   /**
@@ -379,6 +383,9 @@ describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)
       on: state.date,
       season: state.season,
       teamId: state.userTeamId,
+      tier: 1,
+      target: 2,
+      expectationCode: "title",
     };
     expect(buildGmStateNote(state)).not.toContain("보드 기대");
   });
@@ -525,6 +532,22 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
       homeGoals: 1,
       awayGoals: 2,
       scorers: [],
+      assists: [],
+      goalMinutes: [],
+      goalOrigins: [],
+      homeShots: 0,
+      awayShots: 0,
+      homeXg: 0,
+      awayXg: 0,
+      homeExpectedGoals: 0,
+      awayExpectedGoals: 0,
+      homeLineup: [],
+      awayLineup: [],
+      homeStarters: [],
+      awayStarters: [],
+      homeOnPitch: [],
+      awayOnPitch: [],
+      possession: { home: 0.5, away: 0.5 },
       ratings: {},
       events: [
         { minute: 63, type: "red_card", team: side, actors: [sentOff!.id], causes: [] },
@@ -669,8 +692,10 @@ describe("<now>의 교체 한도 — 다음 경기가 정한다", () => {
         id: "fx-p1-l1",
         season: state.season,
         competitionId: "epl",
+        stage: "league",
         round: 1,
         date: "2026-08-08",
+        time: "15:00",
         homeTeamId: state.userTeamId,
         awayTeamId: "chelsea",
         result: null,
@@ -1194,7 +1219,6 @@ describe("도구 구성", () => {
     // 시간 진행은 도구가 아니다 — 모델이 첫 줄 헤더로 선언하고 코어가 받는다
     expect(names).not.toContain("advance_time");
     expect(names).not.toContain(TIME_PASSED);
-    expect(names).not.toContain(MATCH_ADVANCED);
   });
 
   it("get_league는 상대·방향·개수로 특정 경기를 찾아준다", async () => {
@@ -1271,7 +1295,15 @@ describe("도구 구성", () => {
       date: state.date,
       trigger: "match",
       context: "테스트전 0-1 패배",
-      facts: [{ kind: "result", text: "테스트전 0-1 패배 (홈)", about: null, sharp: true }],
+      facts: [
+        {
+          kind: "result",
+          data: { values: { for: 0, against: 1 }, tags: ["match", "loss", "home"] },
+          about: null,
+          sharp: true,
+        },
+      ],
+      reporterId: reportersOf(state)[0]!.characterId,
       status: "pending",
       weight: 1,
     });
@@ -1536,7 +1568,8 @@ describe("시간 이동 손잡이", () => {
     expect(operationLabel({ kind: "skip_to_next_match", date: "2026-08-15" })).toBe(
       "시간 진행 — 다음 경기 (2026-08-15)",
     );
-    expect(operationLabel({ kind: "advance_match" })).toBe("경기 진행");
+    expect(operationLabel({ kind: "enter_match" })).toBe("경기장에 들어선다");
+    expect(operationLabel({ kind: "match_stop" })).toBe("경기 중단");
 
     // 0일·소수·상한 초과는 시계를 뒤로 돌리거나 세계를 통째로 굴린다
     expect(TurnOperationSchema.safeParse({ kind: "skip_days", days: 0 }).success).toBe(false);

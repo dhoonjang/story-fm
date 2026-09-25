@@ -37,7 +37,7 @@ describe("도움이 붙는 비율", () => {
       for (const m of state.matches) {
         if (!m.result) continue;
         goals += m.result.scorers.length;
-        assisted += (m.result.assists ?? []).filter((a) => a !== "").length;
+        assisted += m.result.assists.filter((a) => a !== "").length;
         expect(m.result.assists!.length, `${m.id} 길이`).toBe(m.result.scorers.length);
       }
     }

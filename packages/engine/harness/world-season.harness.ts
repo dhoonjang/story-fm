@@ -113,11 +113,9 @@ interface LeagueCurve {
  */
 function curveOf(state: GameState, season: number, leagueId: string): LeagueCurve {
   const rows = (
-    state.history?.find((h) => h.season === season)?.leagues.find((l) => l.leagueId === leagueId)
+    state.history.find((h) => h.season === season)?.leagues.find((l) => l.leagueId === leagueId)
       ?.rows ?? []
-  )
-    // `record`가 없는 행은 옛 세이브에서 이관된 순서뿐인 줄이다 — 하네스의 세계에는 없다
-    .flatMap((r) => (r.record ? [r.record] : []));
+  ).map((r) => r.record);
   return {
     points: rows.map((r) => r.points),
     // 팀-경기 합의 절반이 경기 수다 — 한 경기가 두 줄에 적힌다
@@ -164,7 +162,7 @@ function seasonReadings(state: GameState): Readings<typeof WORLD_SEASON> {
   const totals = played.map((m) => m.result!.homeGoals + m.result!.awayGoals);
   const mean = totals.reduce((a, b) => a + b, 0) / n;
   const teamGoals = played.flatMap((m) => [m.result!.homeGoals, m.result!.awayGoals]);
-  const shots = played.flatMap((m) => [m.result!.homeShots ?? 0, m.result!.awayShots ?? 0]);
+  const shots = played.flatMap((m) => [m.result!.homeShots, m.result!.awayShots]);
   const shotMean = shots.reduce((a, b) => a + b, 0) / Math.max(1, shots.length);
   const sum = (pick: (m: (typeof played)[number]) => number) =>
     played.reduce((a, m) => a + pick(m), 0);
@@ -178,7 +176,7 @@ function seasonReadings(state: GameState): Readings<typeof WORLD_SEASON> {
   /**
    * **어느 시뮬레이터가 그 경기를 굴렸는가로 카드를 가른다** (match.md §7).
    *
-   * 감독의 경기만 구간 시뮬을 지나고 나머지는 간이 시뮬이다. 두 눈금이 갈리면
+   * 감독의 경기만 실시간 경기를 지나고 나머지는 간이 시뮬이다. 두 눈금이 갈리면
    * 여기가 벌어진다 — 그게 이 갈래를 찍는 이유다. ⚠️ **판정은 여기서 하지
    * 않는다**: 감독의 리그 경기는 38판뿐이라 카드가 130장이고 상대 잡음이 9%다.
    * 강도를 한쪽만 곱하는 정도(10~20%)가 그 잡음에 묻히므로 밴드로 걸면 시드마다
@@ -201,10 +199,10 @@ function seasonReadings(state: GameState): Readings<typeof WORLD_SEASON> {
 
   /**
    * **세트피스 득점 비율** — 골마다 붙는 `goalOrigins`가 원본이다 (match.md §1.4).
-   * 감독의 38경기(구간 시뮬)와 나머지 342경기(간이 시뮬)가 한 눈금에 서야 하므로
+   * 감독의 38경기(실시간 경기)와 나머지 342경기(간이 시뮬)가 한 눈금에 서야 하므로
    * 리그 전체를 통째로 센다 — 두 채널이 갈리면 여기가 밴드 밖으로 나간다.
    */
-  const origins = played.flatMap((m) => m.result!.goalOrigins ?? []);
+  const origins = played.flatMap((m) => m.result!.goalOrigins);
   const originShare = (kinds: readonly string[]) =>
     ratio(origins.filter((o) => kinds.includes(o)).length, origins.length);
   const originPerMatch = (kinds: readonly string[]) =>
@@ -224,9 +222,9 @@ function seasonReadings(state: GameState): Readings<typeof WORLD_SEASON> {
 
   return {
     "리그 평균 슈팅/경기": shotMean * 2,
-    "리그 평균 기회 xG/경기": sum((m) => (m.result!.homeXg ?? 0) + (m.result!.awayXg ?? 0)) / n,
+    "리그 평균 기회 xG/경기": sum((m) => m.result!.homeXg + m.result!.awayXg) / n,
     "결정력 반영 기대 득점/경기":
-      sum((m) => (m.result!.homeExpectedGoals ?? 0) + (m.result!.awayExpectedGoals ?? 0)) / n,
+      sum((m) => m.result!.homeExpectedGoals + m.result!.awayExpectedGoals) / n,
     "리그 평균 득점/경기": mean,
     "총득점 분산": totals.reduce((a, b) => a + (b - mean) ** 2, 0) / n,
     "홈 득점/경기": sum((m) => m.result!.homeGoals) / n,
@@ -263,10 +261,10 @@ function seasonReadings(state: GameState): Readings<typeof WORLD_SEASON> {
     "리그 승점 표준편차": stdev(table.map((r) => r.points)),
     "옐로/경기": ratio(bookings.filter((b) => b.card === "yellow").length, n),
     "레드/경기": ratio(bookings.filter((b) => b.card === "red").length, n),
-    "옐로/경기 (감독 경기 · 구간 시뮬)": ourYellows,
+    "옐로/경기 (감독 경기 · 실시간 경기)": ourYellows,
     "옐로/경기 (타 팀 경기 · 간이 시뮬)": otherYellows,
     "옐로 — 감독/타 팀": ourYellows / Math.max(1e-9, otherYellows),
-    "레드/경기 (감독 경기 · 구간 시뮬)": ratio(cardsIn(true, "red"), ourGames),
+    "레드/경기 (감독 경기 · 실시간 경기)": ratio(cardsIn(true, "red"), ourGames),
     "레드/경기 (타 팀 경기 · 간이 시뮬)": ratio(cardsIn(false, "red"), otherGames),
     "감독 팀 순위": usIndex + 1,
     "감독 팀 승점": table[usIndex]?.points ?? 0,

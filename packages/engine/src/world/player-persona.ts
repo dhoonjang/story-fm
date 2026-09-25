@@ -320,8 +320,7 @@ export function playerArchetypeOf(seed: number, player: GamePlayer): PlayerArche
 /**
  * 이 선수의 **상태 전이 계수** — 원형 표(도메인)의 한 행 (people.md §6).
  *
- * 저장하지 않는다: 원형이 (시드, 선수 id)의 결정적 파생이므로 계수도 파생이고,
- * 옛 세이브는 로드만으로 같은 값을 얻는다.
+ * 저장하지 않는다: 원형이 (시드, 선수 id)의 결정적 파생이므로 계수도 파생이다.
  */
 export function archetypeTraitsOf(seed: number, player: GamePlayer): PlayerArchetypeTraits {
   return PLAYER_ARCHETYPE_TRAITS[playerArchetypeOf(seed, player)];

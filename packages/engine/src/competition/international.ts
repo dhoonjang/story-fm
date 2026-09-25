@@ -18,7 +18,7 @@ import {
 import { fatigueFromMinutes } from "@story-fm/sim";
 import { addDays, diffDays, INTERNATIONAL_BREAKS, seasonYear } from "./calendar";
 import { makeRng } from "../core/rng";
-import { groupOf, isInjured, openInjury, type GameState } from "../core/state";
+import { groupOf, isInjured, type GameState } from "../core/state";
 import { INJURY_CHANCE_PER_APPEARANCE, openInjuryFor, pronenessValue } from "../squad/injury";
 
 /**
@@ -195,16 +195,6 @@ function sortedBoard(state: GameState): Array<[string, GamePlayer[]]> {
   return [...callUpBoard(state).entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
 }
 
-/** 한 나라의 명단 — 여러 나라가 필요하면 `callUpBoard`를 한 번만 부른다 */
-export function callUpSquad(state: GameState, country: string): GamePlayer[] {
-  return callUpBoard(state).get(country) ?? [];
-}
-
-/** 이 세계에서 대표팀을 세울 수 있는 협회 — 코드 사전순(결정적) */
-export function callUpCountries(state: GameState): string[] {
-  return [...callUpBoard(state).keys()].sort();
-}
-
 // ── 추첨 ──────────────────────────────────────────────
 
 /** 한 창의 A매치 수 — FIFA 창 하나에 둘이다 */
@@ -263,14 +253,12 @@ const MINUTES_PER_APP = 90;
 
 /** 지금 클럽을 떠나 있는 소집 — 없으면 null */
 export function openCallUp(state: GameState, playerId: string): CallUp | null {
-  return (
-    (state.callUps ?? []).find((c) => c.gamePlayerId === playerId && c.returnedOn === null) ?? null
-  );
+  return state.callUps.find((c) => c.gamePlayerId === playerId && c.returnedOn === null) ?? null;
 }
 
 /** 그 창의 우리 팀 소집 — 화면·사실 카드가 읽는 자리 */
 export function callUpsOfBreak(state: GameState, breakKey: string): CallUp[] {
-  return (state.callUps ?? []).filter((c) => c.breakKey === breakKey);
+  return state.callUps.filter((c) => c.breakKey === breakKey);
 }
 
 /** 소집 행이 남는 시즌 수 — 사실 카드·낙마 판정이 읽는 창 */
@@ -310,7 +298,7 @@ export function openCallUps(state: GameState, window: InternationalBreak, digest
       });
     }
   }
-  state.callUps = [...(state.callUps ?? []), ...rows];
+  state.callUps = [...state.callUps, ...rows];
 
   const ours = rows.filter(
     (r) => state.players.find((p) => p.id === r.gamePlayerId)?.teamId === state.userTeamId,
@@ -334,7 +322,7 @@ export function settleCallUps(
   window: InternationalBreak,
   digest: TickSink,
 ): void {
-  for (const row of state.callUps ?? []) {
+  for (const row of state.callUps) {
     if (row.breakKey !== window.key || row.returnedOn !== null) continue;
     const player = state.players.find((p) => p.id === row.gamePlayerId);
     row.returnedOn = state.date;
@@ -375,7 +363,7 @@ export function settleCallUps(
   }
   trimCallUps(state);
 
-  const ours = (state.callUps ?? []).filter(
+  const ours = state.callUps.filter(
     (r) =>
       r.breakKey === window.key &&
       state.players.find((p) => p.id === r.gamePlayerId)?.teamId === state.userTeamId,
@@ -404,7 +392,7 @@ function returnStateOf(apps: number, hurt: boolean): CallUpReturnState {
  */
 function trimCallUps(state: GameState): void {
   const floor = state.season - (CALL_UP_SEASONS_KEPT - 1);
-  state.callUps = (state.callUps ?? []).filter((row) => {
+  state.callUps = state.callUps.filter((row) => {
     if (row.returnedOn === null) return true;
     if (seasonOfKey(row.breakKey) < floor) return false;
     return state.players.find((p) => p.id === row.gamePlayerId)?.teamId === state.userTeamId;
@@ -537,7 +525,7 @@ export function isAwayFromClub(state: GameState, player: GamePlayer): boolean {
  */
 export function awayFromClubIds(state: GameState): ReadonlySet<string> {
   const out = new Set<string>();
-  for (const row of state.callUps ?? []) {
+  for (const row of state.callUps) {
     if (row.returnedOn === null) out.add(row.gamePlayerId);
   }
   for (const player of state.players) {
@@ -545,11 +533,6 @@ export function awayFromClubIds(state: GameState): ReadonlySet<string> {
     if (summer !== undefined && state.date < summer) out.add(player.id);
   }
   return out;
-}
-
-/** 그 선수가 다치지 않고 소집 중인가 — 진단 줄이 부상과 소집을 가르는 자리 */
-export function callUpNoteOf(state: GameState, playerId: string): CallUp | null {
-  return openInjury(state, playerId) === null ? openCallUp(state, playerId) : null;
 }
 
 /** 이 창의 명단에 대비해 지난 창에는 있었는데 이번엔 없는 우리 선수 — 낙마 */

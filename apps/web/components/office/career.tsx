@@ -18,8 +18,8 @@ type AwardRow = OfficeViews["career"]["awards"][number];
 
 /**
  * **업적 한 줄을 쓰는 자리** — 코어는 코드와 근거 수치만 넘긴다
- * (docs/overview.md §1 철칙 4 · career.md §6). 옛 세이브의 업적도 여기서 문장을 얻으므로
- * 문구를 고치면 지난 시즌의 업적까지 함께 고쳐진다.
+ * (docs/overview.md §1 철칙 4 · career.md §6). 지난 시즌의 업적도 여기서 문장을 얻으므로
+ * 문구를 고치면 함께 고쳐진다.
  */
 function achievementDetailOf(a: AchievementRow): string {
   if (a.competitionName) return `${a.competitionName} 우승`;
@@ -60,17 +60,15 @@ type CareerView = OfficeViews["career"];
  * (docs/overview.md §1 철칙 4 · career.md §5.1).
  *
  * 같은 17위도 우승을 노리라는 구단에서와 잔류가 기대인 구단에서 다른 사건이라,
- * 순위 혼자로는 왜 잘렸는지가 읽히지 않는다. 옛 세이브는 카드 대신 평가 문장을
- * 들고 있어 그것이 폴백이고, 둘 다 없으면 지어내지 않는다. 무직 카드와 시즌
- * 표의 경질 이력 줄(career.md §6)이 같은 문장을 쓴다.
+ * 순위 혼자로는 왜 잘렸는지가 읽히지 않는다. 순위가 없으면(리그전 전) 지어내지 않는다.
+ * 무직 카드와 시즌 표의 경질 이력 줄(career.md §6)이 같은 문장을 쓴다.
  */
 function dismissalLineOf(d: {
   position: number | null;
-  target: number | null;
-  expectation: string | null;
-  reason?: string | null;
+  target: number;
+  expectation: string;
 }): string {
-  if (d.position === null || d.target === null || d.expectation === null) return d.reason ?? "";
+  if (d.position === null) return "";
   return `${d.expectation} — 기대 ${d.target}위, 당시 ${d.position}위`;
 }
 
@@ -101,13 +99,10 @@ function OfferCard({ offer: o }: { offer: OfferRow }) {
         기대 {o.expectation} ({o.target}위)
         {o.position === null ? "" : ` · 현재 ${o.position}위`}
       </div>
-      {o.salary !== null && (
-        <div className="offer-why">
-          연봉 {formatMoney(o.salary)} · {o.years ?? "-"}년 · 이적 예산 약속{" "}
-          {formatMoney(o.budgetPledge ?? 0)}
-          {o.counteredOn === null ? "" : " · 흥정 완료"}
-        </div>
-      )}
+      <div className="offer-why">
+        연봉 {formatMoney(o.salary)} · {o.years}년 · 이적 예산 약속 {formatMoney(o.budgetPledge)}
+        {o.counteredOn === null ? "" : " · 흥정 완료"}
+      </div>
       {/* 보상금은 감독의 돈이 아니다 — 구단이 구단에 무는 돈이다 (career.md §5.1) */}
       {o.compensation !== null && (
         <div className="offer-why">보상금 {formatMoney(o.compensation)} — 지금 구단이 받는다</div>
@@ -219,16 +214,10 @@ function OutOfWork({ career }: { career: CareerView }) {
 /**
  * **보드 평가 한 줄을 쓰는 자리** — 코어는 등급과 근거 수치만 넘긴다
  * (docs/overview.md §1 철칙 4 · career.md §6).
- *
- * 옛 세이브는 카드 대신 평가 문장을 들고 있어 그것이 폴백이다. 둘 다 없으면
- * 지어내지 않고 빈 칸으로 둔다.
  */
 function boardVerdictOf(s: SeasonRow): string {
-  if (s.board) {
-    const met = s.board.grade === "met";
-    return `${s.board.expectation} — ${met ? "달성" : `미달 (기대 ${s.board.target}위)`}`;
-  }
-  return s.boardVerdict ?? "—";
+  const met = s.board.grade === "met";
+  return `${s.board.expectation} — ${met ? "달성" : `미달 (기대 ${s.board.target}위)`}`;
 }
 
 type VisionItem = NonNullable<SeasonRow["board"]>["items"][number];
@@ -467,7 +456,7 @@ export function CareerView({
             {/**
              * 계약·지갑 — 눈금이 아니라 **읽는 사실 한 줄씩**이라 상자를 쓰지 않는다.
              * 둘이 나란히 서야 연봉과 위약금이 어디로 갔는지가 그 자리에서 읽히고
-             * (career.md §5.1 · §5.4), 옛 세이브엔 계약이 없어 그때는 줄이 하나다.
+             * (career.md §5.1 · §5.4), 무직이면 계약이 없어 줄이 하나다.
              *
              * 지갑은 **잔고만** 말한다 — 사재 출연 여력은 실제로 넣을 수 있는 최대가
              * 아니라(`min(지갑, 여력)`) 잔고 옆에 세우면 못 쓰는 돈을 부른다. 여력이
@@ -601,7 +590,7 @@ export function CareerView({
                   <td className="career-verdict">
                     {boardVerdictOf(r.s)}
                     {/* 순위 한 칸이 말하지 못하는 것 — 구단주가 걸었던 항목들 (career.md §5) */}
-                    <VisionItems items={r.s.board?.items ?? []} />
+                    <VisionItems items={r.s.board.items} />
                   </td>
                 </tr>
               ) : (

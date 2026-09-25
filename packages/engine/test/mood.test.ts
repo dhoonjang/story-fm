@@ -5,7 +5,7 @@ import {
   INJURY_PRONENESS_MIN,
   PlayerStateSchema,
   RELATION_TIER_RANK,
-  RELEASE_NOTE,
+  freshPlayerState,
   pressFactText,
   type GamePlayer,
   type Transfer,
@@ -66,7 +66,7 @@ import {
   startsInWindow,
   tickPromises,
 } from "@story-fm/engine";
-import { createMiniGame, createTestGame, advanceAndPlay, advanceDays } from "./helpers";
+import { createMiniGame, createTestGame, advanceAndPlay, advanceDays, resultOf } from "./helpers";
 
 /**
  * 두 사람을 `close` 위로 올린다 — 계약 해지 카드가 서는 조건이다 (people.md §6).
@@ -148,16 +148,6 @@ describe("라커룸이 계약 해지를 알아보는 표식", () => {
     expect(sawIt(near), "가까웠던 동료가 해지를 못 들었다").toBe(true);
     expect(sawIt(far), "남이나 다름없던 동료에게도 카드가 걸렸다").toBe(false);
   });
-
-  it("옛 세이브는 문장으로 갈린다 — 여기만 남은 폴백이다", () => {
-    const legacy = createTestGame();
-    departed(legacy, { note: RELEASE_NOTE.unilateral });
-    expect(sawDeparture(legacy), "옛 세이브의 해지가 라커룸에서 사라졌다").toBe(true);
-
-    const unknown = createTestGame();
-    departed(unknown, { note: "계약 만료 — 자유계약" });
-    expect(sawDeparture(unknown), "코드도 표식도 없는 줄이 해지로 읽혔다").toBe(false);
-  });
 });
 
 describe("심경 사실 카드 — 코어는 사실만 낸다", () => {
@@ -223,36 +213,23 @@ describe("심경 사실 카드 — 코어는 사실만 낸다", () => {
     ]);
   });
 
-  /** 옛 세이브는 사유 코드 대신 문장을 들고 있다 — `reason ?? note`로 받는다 */
-  it("불만 카드는 사유 코드를 싣고, 옛 세이브의 문장은 폴백이다", () => {
+  it("불만 카드는 사유 코드를 싣는다", () => {
     const state = createTestGame();
-    const [coded, legacy] = [userPlayers(state)[4]!, userPlayers(state)[5]!];
-    state.issues.push(
-      {
-        gamePlayerId: coded.id,
-        kind: "unhappy",
-        reason: "losing-run",
-        count: 4,
-        since: addDays(state.date, -14),
-      },
-      { gamePlayerId: legacy.id, kind: "unhappy", note: "옛 사유 문장", since: state.date },
-    );
+    const coded = userPlayers(state)[4]!;
+    state.issues.push({
+      gamePlayerId: coded.id,
+      kind: "unhappy",
+      reason: "losing-run",
+      count: 4,
+      since: addDays(state.date, -14),
+    });
     expect(moodFactsOf(state, coded)[0]).toEqual({
       cause: "grievance",
       reason: "losing-run",
-      note: null,
       days: 14,
       count: 4,
       // 계수가 읽힌 자리는 원형 코드로 남는다 (people.md §6)
       archetype: playerArchetypeOf(state.seed, coded),
-    });
-    expect(moodFactsOf(state, legacy)[0]).toEqual({
-      cause: "grievance",
-      reason: null,
-      note: "옛 사유 문장",
-      days: 0,
-      count: null,
-      archetype: playerArchetypeOf(state.seed, legacy),
     });
     // 앵커는 사실 줄이다 — 평가어도 연출어도 없다
     expect(moodAnchor(moodFactsOf(state, coded))).toContain("불만 4연패 · 14일째");
@@ -354,7 +331,7 @@ describe("지친 것과 마음이 뜬 것은 다르다", () => {
     state.issues.push({
       gamePlayerId: player.id,
       kind: "unhappy",
-      note: "출전 기회",
+      reason: "minutes",
       since: state.date,
     });
     const after = dealOdds(state, {
@@ -542,11 +519,13 @@ describe("마지막 경기 색인 — 원장을 한 번만 훑는다", () => {
         id,
         season: state.season,
         competitionId: "epl",
+        stage: "league",
+        time: "15:00",
         round: 1,
         date,
         homeTeamId: state.userTeamId,
         awayTeamId: "chelsea",
-        result: { homeGoals: 2, awayGoals: 1, scorers: [], homeLineup: [], ratings },
+        result: resultOf({ homeGoals: 2, awayGoals: 1, homeLineup: [], ratings }),
       });
     record("m-idx-1", addDays(state.date, -6), { [a.id]: 7.5, [b.id]: 5.1 });
     record("m-idx-2", addDays(state.date, -2), { [a.id]: 4.9, [c.id]: 8.2 });
@@ -579,11 +558,13 @@ describe("연패·연승이 라커룸에 남는다", () => {
       id,
       season: state.season,
       competitionId: "epl",
+      stage: "league",
+      time: "15:00",
       round: 1,
       date: addDays(state.date, -day),
       homeTeamId: teamId,
       awayTeamId: "everton",
-      result: { homeGoals: ours, awayGoals: theirs, scorers: [] },
+      result: resultOf({ homeGoals: ours, awayGoals: theirs }),
     });
   }
 
@@ -669,7 +650,6 @@ describe("연패·연승이 라커룸에 남는다", () => {
     // 문장이 아니라 사유 코드와 수치로 남는다 — 읽는 자리가 문구를 짜깁지 않도록
     expect(issue?.reason).toBe("losing-run");
     expect(issue?.count).toBe(SLUMP_ISSUE_LOSSES);
-    expect(issue?.note).toBeUndefined();
   });
 
   it("한 사람이 두 번 지목되지 않는다 — 연패가 이어져도", () => {
@@ -724,12 +704,15 @@ function player(form: number, composure = 70): GamePlayer {
     id: "t",
     catalogId: null,
     teamId: "t",
+    squadLevel: "first",
     name: "테스트",
     birthdate: "2000-01-01",
     positions: [{ position: "CM", proficiency: 90, isNatural: true }],
     attributes: { ...axes, composure, overall: 70, potential: 75 } as GamePlayer["attributes"],
-    state: { form, condition: 75 },
+    state: freshPlayerState({ form, condition: 75 }),
     isCaptain: false,
+    isViceCaptain: false,
+    growthCarry: {},
   };
 }
 
@@ -787,10 +770,14 @@ describe("폼 — 시간 축을 가진 컨디션 (form.ts)", () => {
     expect(clampForm(4.2)).toBe(1);
     expect(clampForm(-9)).toBe(-1);
     expect(clampForm(0.12345)).toBe(0.123);
-    // 스키마가 소수를 통과시켜야 세이브에 남는다 (정수였을 때는 잘렸다)
-    expect(() => PlayerStateSchema.parse({ form: 0.42, condition: 75 })).not.toThrow();
-    // 축 밖의 값은 거부한다 — 옛 −3~3 세이브는 로드에서 옮긴다(persistence.ts)
-    expect(() => PlayerStateSchema.parse({ form: 2, condition: 75 })).toThrow();
+    // 스키마가 소수를 통과시켜야 세이브에 남는다
+    expect(() =>
+      PlayerStateSchema.parse(freshPlayerState({ form: 0.42, condition: 75 })),
+    ).not.toThrow();
+    // 축 밖의 값은 거부한다
+    expect(() =>
+      PlayerStateSchema.parse({ ...freshPlayerState({ form: 0, condition: 75 }), form: 2 }),
+    ).toThrow();
   });
 
   it("각도는 연속이고, 절정에서만 12시를 본다", () => {
@@ -911,7 +898,6 @@ describe("2군 강등 — 내린 결정이 사실로 남는다", () => {
     expect(issue?.kind).toBe("unhappy");
     // 기간은 `demotedOn`이 갖는다 — 같은 값을 두 곳에 적지 않는다
     expect(issue?.count).toBeUndefined();
-    expect(issue?.note).toBeUndefined();
   });
 
   /**
@@ -1004,17 +990,18 @@ describe("약속 — 감독의 말이 장부에 선다", () => {
         id: `m-promise-test-${i}`,
         season: state.season,
         competitionId: "epl",
+        stage: "league",
+        time: "15:00",
         round: i + 1,
         date: addDays(state.date, -(PROMISE_WINDOW_MATCHES - i) * 7),
         homeTeamId: state.userTeamId,
         awayTeamId: "chelsea",
-        result: {
+        result: resultOf({
           homeGoals: 1,
           awayGoals: 0,
-          scorers: [],
           homeStarters: starters,
           homeLineup: lineupOf ? lineupOf(i) : starters,
-        },
+        }),
       });
     }
   }
@@ -1093,8 +1080,6 @@ describe("약속 — 감독의 말이 장부에 선다", () => {
       });
     expect(card({ windowApps: 1 })).toContain("선발 0회 · 출전 1회");
     expect(card({ windowApps: 0 })).toContain("선발 0회 · 출전 0회");
-    // 옛 세이브의 카드에는 그 칸이 없다 — 그때는 선발 조각만 남는다
-    expect(card({})).not.toContain("출전 0회");
   });
 
   it("창이 차기 전에는 서지 않는다 — 비율이 표본이 아니다", () => {
@@ -1106,11 +1091,13 @@ describe("약속 — 감독의 말이 장부에 선다", () => {
       id: "m-promise-short",
       season: state.season,
       competitionId: "epl",
+      stage: "league",
+      time: "15:00",
       round: 1,
       date: addDays(state.date, -7),
       homeTeamId: state.userTeamId,
       awayTeamId: "chelsea",
-      result: { homeGoals: 0, awayGoals: 0, scorers: [], homeStarters: [], homeLineup: [] },
+      result: resultOf({ homeGoals: 0, awayGoals: 0, homeStarters: [], homeLineup: [] }),
     });
     expect(minutesShortfalls(state)).toEqual([]);
   });

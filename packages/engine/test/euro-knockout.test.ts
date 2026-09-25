@@ -26,7 +26,6 @@ import {
   payWinnerPrize,
   payStagePrizes,
   payLeaguePhasePrizes,
-  migrateEuroPrizeKeys,
   euroCompetitionOf,
   isEuroCup,
   entrantsOf,
@@ -36,7 +35,7 @@ import {
   tieAggregate,
   eventTexts,
 } from "@story-fm/engine";
-import { createTestGame, keepSeat, playMockMatch, playPreseason } from "./helpers";
+import { createTestGame, keepSeat, playPreseason, resultOf, settleMatchdayQuick } from "./helpers";
 
 /**
  * 대항전 녹아웃 — 단계 진행·2차전 합계·승부차기·트로피.
@@ -53,7 +52,7 @@ function fillResults(
 ): void {
   for (const m of matches) {
     if (m.result) continue;
-    (m as { result: unknown }).result = { homeGoals, awayGoals, scorers: [] };
+    (m as { result: unknown }).result = resultOf({ homeGoals, awayGoals });
   }
 }
 
@@ -230,8 +229,8 @@ describe("승자 판정", () => {
     advanceKnockouts(state, []);
     const legs = euroStageMatches(state, "ucl", "playoff").filter((m) => /-p0-/.test(m.id));
     // 1차전 원정 2골, 2차전 홈 1-0 → 합계 2-1로 원정팀(=상위 시드)이 통과
-    legs[0]!.result = { homeGoals: 0, awayGoals: 2, scorers: [] };
-    legs[1]!.result = { homeGoals: 1, awayGoals: 0, scorers: [] };
+    legs[0]!.result = resultOf({ homeGoals: 0, awayGoals: 2 });
+    legs[1]!.result = resultOf({ homeGoals: 1, awayGoals: 0 });
     expect(euroTieWinner(state, "ucl", "playoff", 0)).toBe(legs[1]!.homeTeamId);
     expect(legs[1]!.result?.penalties).toBeUndefined();
   });
@@ -250,8 +249,8 @@ describe("승자 판정", () => {
       const legs = euroStageMatches(state, "ucl", "playoff").filter((m) =>
         new RegExp(`-p${pair}-`).test(m.id),
       );
-      legs[0]!.result = { homeGoals: 1, awayGoals: 1, scorers: [] };
-      legs[1]!.result = { homeGoals: 2, awayGoals: 2, scorers: [] };
+      legs[0]!.result = resultOf({ homeGoals: 1, awayGoals: 1 });
+      legs[1]!.result = resultOf({ homeGoals: 2, awayGoals: 2 });
 
       // 굴리는 것은 `resolveEuroTie` 하나다 — 조회 함수는 이미 적힌 결과를 읽을 뿐이다
       const winner = resolveEuroTie(state, "ucl", "playoff", pair);
@@ -393,8 +392,8 @@ describe("오피스 뷰", () => {
     advanceKnockouts(state, []);
     // 합계 동점으로 만들고 승부차기는 아직 기록하지 않은 상태
     const legs = euroStageMatches(state, "ucl", "playoff").filter((m) => /-p0-/.test(m.id));
-    legs[0]!.result = { homeGoals: 1, awayGoals: 1, scorers: [] };
-    legs[1]!.result = { homeGoals: 0, awayGoals: 0, scorers: [] };
+    legs[0]!.result = resultOf({ homeGoals: 1, awayGoals: 1 });
+    legs[1]!.result = resultOf({ homeGoals: 0, awayGoals: 0 });
     const before = JSON.stringify(state);
     buildOfficeViews(state);
     expect(JSON.stringify(state)).toBe(before);
@@ -418,7 +417,8 @@ describe("한 시즌 완주 (mock 경기)", () => {
         break;
       }
       if (advanced.stopped === "matchday") {
-        digest.push(...playMockMatch(state));
+        // 대회 구조를 재는 케이스다 — 경기 내용은 간이 시뮬로 채운다
+        settleMatchdayQuick(state);
         continue;
       }
       if (advanced.stopped === "attention") continue;
@@ -466,10 +466,10 @@ describe("상금", () => {
       const win = i < 3;
       const draw = i >= 3 && i < 5;
       m.result = draw
-        ? { homeGoals: 1, awayGoals: 1, scorers: [] }
+        ? resultOf({ homeGoals: 1, awayGoals: 1 })
         : win === home
-          ? { homeGoals: 2, awayGoals: 0, scorers: [] }
-          : { homeGoals: 0, awayGoals: 2, scorers: [] };
+          ? resultOf({ homeGoals: 2, awayGoals: 0 })
+          : resultOf({ homeGoals: 0, awayGoals: 2 });
     });
     fillResults(leaguePhaseOf(state, "ucl"));
 
@@ -501,8 +501,8 @@ describe("상금", () => {
       const home = m.homeTeamId === winless;
       if (!home && m.awayTeamId !== winless) continue;
       m.result = home
-        ? { homeGoals: 0, awayGoals: 2, scorers: [] }
-        : { homeGoals: 2, awayGoals: 0, scorers: [] };
+        ? resultOf({ homeGoals: 0, awayGoals: 2 })
+        : resultOf({ homeGoals: 2, awayGoals: 0 });
     }
     fillResults(phase);
 
@@ -518,34 +518,6 @@ describe("상금", () => {
     expect(state.finances.filter((f) => (f.prizesPaid ?? []).includes(key))).toHaveLength(
       entrants.size,
     );
-  });
-
-  it("옛 세이브의 라벨 키를 안정 키로 옮긴다 — 같은 상금이 다시 나가지 않는다", () => {
-    const state = createTestGame(42);
-    fillResults(leaguePhaseOf(state, "ucl"));
-    payLeaguePhasePrizes(state, "ucl", []);
-
-    // 라벨을 그대로 키로 쓰던 시절의 세이브로 되돌린다
-    const key = `prize:competition:ucl:league-phase:S${state.season}`;
-    const legacy = `UCL 리그 페이즈 상금 (S${state.season})`;
-    let downgraded = 0;
-    for (const f of state.finances) {
-      const keys = f.prizesPaid;
-      if (!keys) continue;
-      const i = keys.indexOf(key);
-      if (i < 0) continue;
-      keys[i] = legacy;
-      downgraded++;
-    }
-    expect(downgraded).toBeGreaterThan(0);
-
-    const balances = state.finances.map((f) => f.balance);
-    migrateEuroPrizeKeys(state);
-    migrateEuroPrizeKeys(state); // 멱등
-    payLeaguePhasePrizes(state, "ucl", []);
-
-    expect(state.finances.map((f) => f.balance)).toEqual(balances);
-    expect(state.finances.some((f) => (f.prizesPaid ?? []).includes(legacy))).toBe(false);
   });
 
   it("단계마다 진출 상금이 그 단계의 팀 전원에게 들어간다", () => {

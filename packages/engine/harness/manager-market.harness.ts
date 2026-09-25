@@ -49,15 +49,15 @@ function measure(state: GameState): Readings<typeof MANAGER_MARKET> {
    */
   const world = state.teams.filter((t) => isClubTeam(t.id) && t.id !== state.userTeamId);
   const moved = world.filter((t) => t.managerSince !== state.calendar.preseasonStart);
-  const fromPool = moved.filter((t) => (t.managerSpells ?? []).length > 0);
+  const fromPool = moved.filter((t) => t.managerSpells.length > 0);
 
   return {
     "경질 구단 수": changed.length,
     "경질 구단 비중": changed.length / Math.max(1, clubs.length),
-    "풀 인원": (state.managerPool ?? []).length,
+    "풀 인원": state.managerPool.length,
     "풀에서 다시 선 감독 수": fromPool.length,
     "풀 재선임 비중": fromPool.length / Math.max(1, moved.length),
-    "재직 감독에게 온 접근": (state.managerOffers ?? []).filter((o) => o.via === "poach").length,
+    "재직 감독에게 온 접근": state.managerOffers.filter((o) => o.via === "poach").length,
     "시즌말 감독 평판": (state.manager.reputation.board + state.manager.reputation.media) / 2,
   };
 }

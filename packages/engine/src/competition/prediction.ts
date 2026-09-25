@@ -83,7 +83,7 @@ export function preseasonPrediction(state: GameState, leagueId: string): string[
  */
 function lastSeasonPlaces(state: GameState, leagueId: string): Map<string, number> {
   const places = new Map<string, number>();
-  const last = (state.history ?? []).find((row) => row.season === state.season - 1);
+  const last = state.history.find((row) => row.season === state.season - 1);
   const table = last?.leagues.find((l) => l.leagueId === leagueId);
   if (!table || table.rows.length === 0) return places;
   const size = table.rows.length;
@@ -124,7 +124,7 @@ function netTransferScore(state: GameState, teamId: string, rating: number): num
  */
 export function standPredictions(state: GameState): string[] {
   const stood: string[] = [];
-  const rows = (state.predictions ??= []);
+  const rows = state.predictions;
   for (const league of scopedLeagues(state.world)) {
     if (rows.some((r) => r.season === state.season && r.leagueId === league.id)) continue;
     const order = preseasonPrediction(state, league.id);
@@ -138,23 +138,21 @@ export function standPredictions(state: GameState): string[] {
 /**
  * 오늘 예상표를 세울 수 있는가 — **소집일부터 개막 전날까지**다.
  *
- * 소집일 하루가 아니라 창인 것은 그날 tick을 놓친 세이브(옛 세이브·중간에 붙은
- * 세이브)가 프리시즌 안에서 따라잡을 수 있게 하기 위해서다. 개막에서 닫는 것은
+ * 소집일 하루가 아니라 창인 것은 그날 tick을 놓친 세이브(소집일 뒤에 시작한 게임)가
+ * 프리시즌 안에서 따라잡을 수 있게 하기 위해서다. 개막에서 닫는 것은
  * 그 뒤의 스쿼드로 세운 「예상」이 예상이 아니기 때문이다 — 시즌이 이미 시작했다.
  */
 export function predictionsDue(state: GameState): boolean {
   return state.date >= squadReturnOf(state.calendar) && state.date < state.calendar.start;
 }
 
-/** 그 시즌 그 리그의 예상 줄 — 없으면 null (옛 세이브·예상이 서기 전) */
+/** 그 시즌 그 리그의 예상 줄 — 없으면 null (예상이 서기 전) */
 export function predictionOf(
   state: GameState,
   leagueId: string,
   season = state.season,
 ): SeasonPrediction | null {
-  return (
-    (state.predictions ?? []).find((r) => r.season === season && r.leagueId === leagueId) ?? null
-  );
+  return state.predictions.find((r) => r.season === season && r.leagueId === leagueId) ?? null;
 }
 
 /**

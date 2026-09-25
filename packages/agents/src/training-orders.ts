@@ -62,12 +62,12 @@ export type TrainingOrders = OpsOrders;
 /** `<squad_ops>` — 목록 교체 명령이 지금 목록을 알아야 한다 */
 export function buildSquadOpsBlock(state: GameState): string[] {
   const name = (id: string): string => playerName(state, id);
-  const mentoring = (state.mentoring ?? []).filter((m) => m.until === undefined);
+  const mentoring = state.mentoring.filter((m) => m.until === undefined);
   const byMentor = new Map<string, string[]>();
   for (const m of mentoring)
     byMentor.set(m.mentorId, [...(byMentor.get(m.mentorId) ?? []), m.menteeId]);
-  const focus = state.developmentFocus ?? [];
-  const youth = (state.youthCandidates ?? []).filter((c) => c.teamId === state.userTeamId);
+  const focus = state.developmentFocus;
+  const youth = state.youthCandidates.filter((c) => c.teamId === state.userTeamId);
   return tagged(
     "squad_ops",
     [

@@ -1,5 +1,11 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import type { GamePlayer, Negotiation, PressConference, ScoutReport } from "@story-fm/domain";
+import type {
+  CharacterInjection,
+  GamePlayer,
+  Negotiation,
+  PressConference,
+  ScoutReport,
+} from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 import type { GameState } from "../src/core/state";
 import {
@@ -11,11 +17,7 @@ import {
 import { headCoachOf, reportersOf } from "../src/world/persona";
 
 /** 이번 턴에 실린 이름들 — 순서까지 보는 케이스만 배열을 직접 읽는다 */
-function names(
-  state: GameState,
-  message: string,
-  injected: { characterId: string; depth: "full" | "outline" | "rumour" }[] = [],
-) {
+function names(state: GameState, message: string, injected: CharacterInjection[] = []) {
   return selectCharacters(state, { message, injected }).map((e) => e.characterId);
 }
 
@@ -31,6 +33,10 @@ function openNegotiation(state: GameState, playerId: string): void {
     expiresOn: state.date,
     status: "open",
     rounds: [],
+    pitched: [],
+    precontract: false,
+    terms: [],
+    buyout: false,
   };
   state.negotiations.push(negotiation);
 }
@@ -56,7 +62,11 @@ describe("인물 사전 — 이번 턴에 실을 인물지", () => {
     const first = selectCharacters(state, { message: `${target.name} 어떻게 지내나` });
     expect(first.map((e) => e.characterId)).toContain(target.name);
 
-    const standing = first.map((e) => ({ characterId: e.characterId, depth: e.depth }));
+    const standing = first.map((e) => ({
+      characterId: e.characterId,
+      depth: e.depth,
+      memories: e.memories?.length ?? 0,
+    }));
     const again = selectCharacters(state, {
       message: `${target.name} 어떻게 지내나`,
       injected: standing,
@@ -69,7 +79,9 @@ describe("인물 사전 — 이번 턴에 실을 인물지", () => {
     const target = squad[1]!;
     const message = `${target.name} 오늘 훈련은 어땠나`;
     const shown = selectCharacters(state, { message }).find((e) => e.characterId === target.name)!;
-    const standing = [{ characterId: shown.characterId, depth: shown.depth }];
+    const standing = [
+      { characterId: shown.characterId, depth: shown.depth, memories: shown.memories?.length ?? 0 },
+    ];
     expect(selectCharacters(state, { message, injected: standing })).toEqual([]);
     // 이력 창이 미끄러져 기록이 넘어오지 않는 턴 — 만료 규칙 없이 이것만으로 되돌아온다
     expect(names(state, message)).toContain(target.name);
@@ -103,11 +115,6 @@ describe("인물 사전 — 이번 턴에 실을 인물지", () => {
     const again = selectCharacters(state, { message, injected: standing });
     expect(again.map((e) => e.characterId)).toEqual([coach.characterId]);
     expect(again[0]?.memories).toHaveLength(1);
-
-    // 기억 수가 없는 옛 기록은 재주입을 부르지 않는다 — 0으로 읽으면 그 세이브의
-    // 카드가 한꺼번에 다시 선다
-    const old = standing.map(({ characterId, depth }) => ({ characterId, depth }));
-    expect(selectCharacters(state, { message, injected: old })).toEqual([]);
   });
 
   it("훑는 창은 직전 모델 턴 하나다", () => {
@@ -137,7 +144,7 @@ describe("인물 사전 — 이번 턴에 실을 인물지", () => {
     expect(rumoured?.depth).toBe("rumour");
     expect(rumoured?.speechStyle).toBeUndefined();
 
-    const standing = [{ characterId: outsider.name, depth: "rumour" as const }];
+    const standing = [{ characterId: outsider.name, depth: "rumour" as const, memories: 0 }];
     expect(selectCharacters(state, { message, injected: standing })).toEqual([]);
 
     const report: ScoutReport = {
@@ -172,7 +179,14 @@ describe("인물 사전 — 이번 턴에 실을 인물지", () => {
       date: state.date,
       trigger: "match",
       context: "홈 패배 뒤",
-      facts: [{ kind: "result", text: "홈 0-2 패배", about: null, sharp: false }],
+      facts: [
+        {
+          kind: "result",
+          data: { tags: ["loss", "home"], values: { for: 0, against: 2 } },
+          about: null,
+          sharp: false,
+        },
+      ],
       status: "pending",
       weight: 2,
       reporterId: reporter.characterId,
@@ -195,6 +209,7 @@ describe("인물 사전 — 이번 턴에 실을 인물지", () => {
     const quoted: PressConference = {
       id: "press-rival",
       date: state.date,
+      reporterId: reportersOf(state)[0]!.characterId,
       trigger: "derby",
       context: "전야",
       facts: [

@@ -284,9 +284,8 @@ export function approachThreshold(step: number): number {
   return APPROACH_THRESHOLD * (step + 1);
 }
 
-/** 압력 눈금 — 옛 세이브엔 없다 */
+/** 압력 눈금 */
 function pressures(state: GameState): ApproachPressure[] {
-  state.approachPressure ??= [];
   return state.approachPressure;
 }
 
@@ -317,7 +316,7 @@ function startedRecently(state: GameState, playerId: string): boolean {
     const home = m.homeTeamId === state.userTeamId;
     if (!home && m.awayTeamId !== state.userTeamId) return false;
     if (diffDays(m.date, state.date) > STARTED_WINDOW) return false;
-    return (m.result[home ? "homeLineup" : "awayLineup"] ?? []).includes(playerId);
+    return m.result[home ? "homeLineup" : "awayLineup"].includes(playerId);
   });
 }
 
@@ -358,8 +357,6 @@ function causesToday(state: GameState): Cause[] {
     if (!ours.has(issue.gamePlayerId)) continue;
     if (requested.has(issue.gamePlayerId)) continue;
     const topic = issue.reason;
-    // 사유가 없는 옛 불만은 어느 주제로도 옮길 수 없다 — 사실이 없으면 자리도 없다
-    if (topic === undefined) continue;
     /**
      * **재계약을 여는 순간 계약의 압력이 멈춘다** (people.md §8). 불만은 남는다 —
      * 그것을 지우는 것은 성사뿐이다. 협상을 열어 두고 방치하는 것이 답이 되면
@@ -527,9 +524,7 @@ function issueDays(state: GameState, issue: PlayerIssue): number {
  * 깨져 있어도 불만은 하나라, 그 자리가 말하는 것도 하나다.
  */
 function lastBrokenPromise(state: GameState, playerId: string): ManagerPromise | null {
-  const rows = (state.promises ?? []).filter(
-    (p) => p.gamePlayerId === playerId && p.status === "broken",
-  );
+  const rows = state.promises.filter((p) => p.gamePlayerId === playerId && p.status === "broken");
   return rows.reduce<ManagerPromise | null>(
     (latest, row) => (latest === null || row.dueOn >= latest.dueOn ? row : latest),
     null,
@@ -618,9 +613,7 @@ function playerFacts(
           kind: "unhappy",
           data: {
             values: { days, ...(broken ? { promised: diffDays(broken.madeOn, state.date) } : {}) },
-            tags: issue.reason
-              ? ["grievance", issue.reason, ...(broken ? [broken.kind] : [])]
-              : ["grievance"],
+            tags: ["grievance", issue.reason, ...(broken ? [broken.kind] : [])],
           },
           about: player.id,
           sharp,
@@ -696,7 +689,7 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
         data: {
           name: player.name,
           values: { days: issueDays(state, issue) },
-          ...(issue.reason ? { tags: [issue.reason] } : {}),
+          tags: [issue.reason],
         },
         about: player.id,
         sharp: true,
@@ -709,7 +702,7 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
         about: player.id,
         contextCard: {
           code: "transfer-request",
-          ...(issue.reason ? { reason: issue.reason } : {}),
+          reason: issue.reason,
           ...(seat ? { leader: seat } : {}),
         },
         facts: [request, ...playerFacts(state, player, issue, row.topic, sharp)],
@@ -741,7 +734,7 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
       about: player.id,
       contextCard: {
         code: "grievance",
-        ...(issue.reason ? { reason: issue.reason } : {}),
+        reason: issue.reason,
         ...(seat ? { leader: seat } : {}),
         value: issueDays(state, issue),
       },
@@ -826,7 +819,7 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
         sharp: true,
       });
     }
-    // 옛 세이브의 유령 방어 — 떠난 선수의 불만을 주장이 세지 않는다 (people.md §5)
+    // 떠난 선수의 불만을 주장이 세지 않는다 — 은퇴가 줄을 지우지 않는다 (people.md §5)
     const unhappy = state.issues.filter((i) => squad.some((p) => p.id === i.gamePlayerId)).length;
     if (unhappy > 0) {
       facts.push({
@@ -940,7 +933,7 @@ function standingFacts(
       sharp: false,
     },
   ];
-  const warnings = state.manager.boardWarnings ?? 0;
+  const warnings = state.manager.boardWarnings;
   if (warnings > 0) {
     facts.push({
       kind: "standing",
@@ -987,19 +980,16 @@ export function tickApproaches(state: GameState, digest: TickSink): boolean {
 /**
  * 자리의 배경 한 줄 — **카드에서 만든다** (people.md §8).
  *
- * 이름과 폼 라벨은 코어만 아는 것이라 여기서 채워 넘긴다. 옛 세이브는 카드 없이
- * 문장만 들고 있어 그때만 그 문장으로 떨어진다 — **보여 주는 자리의 폴백이다**.
+ * 이름과 폼 라벨은 코어만 아는 것이라 여기서 채워 넘긴다.
  */
 function contextTextOf(
   state: GameState,
   a: {
     about: string | null;
     teamId?: string;
-    contextCard?: ApproachContext;
-    context?: string;
+    contextCard: ApproachContext;
   },
 ): string {
-  if (!a.contextCard) return a.context ?? "";
   /**
    * 자리의 주인 — 대개는 선수지만 **면접에서는 구단**이다 (career.md §5.1). 어느
    * 쪽이든 이름은 코어만 아는 것이라 여기서 채운다.
@@ -1211,7 +1201,7 @@ function leakToPress(state: GameState, row: ApproachPressure, digest: TickSink):
   const issue = state.issues.find((i) => i.gamePlayerId === row.subject && i.reason === row.topic);
   if (!player || player.teamId !== state.userTeamId || !issue) return false;
 
-  const leaks = (state.pressLeaks ??= []);
+  const leaks = state.pressLeaks;
   // 아직 회견이 실어 가지 않은 유출이 있으면 같은 불만이 두 번 새지 않는다
   if (!leaks.some((l) => l.playerId === player.id && l.topic === row.topic)) {
     leaks.push({ playerId: player.id, topic: row.topic, date: state.date });
@@ -1243,7 +1233,7 @@ function openApproach(state: GameState, digest: TickSink): boolean {
    */
   const press = pendingPress(state);
   if (press && diffDays(press.date, state.date) < APPROACH_PATIENCE_DAYS) return false;
-  const opened = state.approaches ?? [];
+  const opened = state.approaches;
   // 하루 한 건 — 답한 날에도 그날 안에 다음 자리가 열리지 않는다
   if (opened.some((a) => a.date === state.date)) return false;
 
@@ -1320,31 +1310,19 @@ function openApproach(state: GameState, digest: TickSink): boolean {
 
 // ── 시즌 리뷰 면담 ─────────────────────────────────────────────
 
-/**
- * 지난 시즌의 보드 평가 — **그 줄이 든 카드가 원본이다** (career.md §6).
- *
- * 카드가 없는 옛 줄에서만 지금의 체급 표로 읽는다: 그 시즌의 기대가 어디에도 남아
- * 있지 않아 최종 순위 하나로는 달성/미달을 가를 수 없다.
- */
-function seasonVerdictOf(
-  state: GameState,
-  record: SeasonRecord,
-): { rank: number; target: number; grade: "met" | "missed"; code?: BoardExpectationCode } {
+/** 지난 시즌의 보드 평가 — **그 줄이 든 카드가 원본이다** (career.md §6) */
+function seasonVerdictOf(record: SeasonRecord): {
+  rank: number;
+  target: number;
+  grade: "met" | "missed";
+  code: BoardExpectationCode;
+} {
   const board = record.board;
-  if (board) {
-    return {
-      rank: board.position,
-      target: board.target,
-      grade: board.grade,
-      ...(board.expectationCode ? { code: board.expectationCode } : {}),
-    };
-  }
-  const expectation = boardExpectation(state, record.teamId);
   return {
-    rank: record.position,
-    target: expectation.target,
-    grade: record.position <= expectation.target ? "met" : "missed",
-    code: expectation.code,
+    rank: board.position,
+    target: board.target,
+    grade: board.grade,
+    code: board.expectationCode,
   };
 }
 
@@ -1358,7 +1336,7 @@ function seasonVerdictOf(
 function demandsKeptFact(state: GameState): PressFact | null {
   const from = buildSeasonCalendar(state.season - 1).preseasonStart;
   const until = state.calendar.preseasonStart;
-  const rows = (state.boardDemands ?? []).filter((d) => d.issuedOn >= from && d.issuedOn < until);
+  const rows = state.boardDemands.filter((d) => d.issuedOn >= from && d.issuedOn < until);
   if (rows.length === 0) return null;
   return {
     kind: "demands-kept",
@@ -1394,7 +1372,7 @@ function openSeasonReview(state: GameState, digest: TickSink): boolean {
   if (!record || record.season !== state.season - 1 || record.teamId !== state.userTeamId) {
     return false;
   }
-  const opened = state.approaches ?? [];
+  const opened = state.approaches;
   // 시즌당 한 번 — 창이 이레라 답한 뒤에도 같은 시즌에 다시 서지 않는다
   const id = `approach-season-review-${state.season}`;
   if (opened.some((a) => a.id === id)) return false;
@@ -1411,13 +1389,13 @@ function openSeasonReview(state: GameState, digest: TickSink): boolean {
   );
   if (spokeRecently) return false;
 
-  const verdict = seasonVerdictOf(state, record);
+  const verdict = seasonVerdictOf(record);
   const facts: PressFact[] = [
     {
       kind: "season-verdict",
       data: {
         values: { season: record.season, rank: verdict.rank, target: verdict.target },
-        tags: verdict.code ? [verdict.grade, verdict.code] : [verdict.grade],
+        tags: [verdict.grade, verdict.code],
       },
       about: null,
       sharp: true,
@@ -1426,9 +1404,9 @@ function openSeasonReview(state: GameState, digest: TickSink): boolean {
   /**
    * 항목별 진행도 — **시즌 리뷰가 굳혀 둔 줄을 읽는다** (career.md §5). 여기서 다시
    * 매기지 않는 이유는 장부가 이미 새 시즌의 것이기 때문이다: 순위표도 출전 분도
-   * 전환이 갈아 끼웠다. 비전이 서기 전의 옛 줄에는 없다(optional).
+   * 전환이 갈아 끼웠다.
    */
-  for (const item of record.board?.items ?? []) {
+  for (const item of record.board.items) {
     facts.push({
       kind: "vision",
       data: {
@@ -1441,7 +1419,7 @@ function openSeasonReview(state: GameState, digest: TickSink): boolean {
   }
   const demands = demandsKeptFact(state);
   if (demands) facts.push(demands);
-  const warnings = state.manager.boardWarnings ?? 0;
+  const warnings = state.manager.boardWarnings;
   if (warnings > 0) {
     facts.push({
       kind: "standing",
@@ -1456,7 +1434,7 @@ function openSeasonReview(state: GameState, digest: TickSink): boolean {
    * 없다 — 같은 6위가 어느 해엔 달성이고 어느 해엔 미달인 이유가 그 줄이다.
    */
   const next = boardExpectation(state, state.userTeamId);
-  const before = verdict.code !== undefined && verdict.code !== next.code ? verdict.code : null;
+  const before = verdict.code !== next.code ? verdict.code : null;
   facts.push({
     kind: "standing",
     data: {
@@ -1475,12 +1453,11 @@ function openSeasonReview(state: GameState, digest: TickSink): boolean {
   /**
    * **지난 시즌 감독이 건 사재** (career.md §5.4). 체급은 그 시즌의 기대 갈래에서
    * 되짚는다 — 승강이 지나간 해에 지금 등급의 약속으로 재면 같은 £1M이 다른 비율로
-   * 읽힌다. 갈래를 남기지 않은 옛 줄은 지금 등급 그대로다.
+   * 읽힌다.
    */
-  const code = record.board?.expectationCode;
   const fund = fundingFactOf(state, {
     season: record.season,
-    ...(code ? { tier: TIER_OF_EXPECTATION[code] } : {}),
+    tier: TIER_OF_EXPECTATION[record.board.expectationCode],
   });
   if (fund) facts.push(fund);
 

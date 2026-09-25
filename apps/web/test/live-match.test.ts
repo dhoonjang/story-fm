@@ -1,10 +1,24 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+/**
+ * 실시간 경기의 서버 쪽 — **체크포인트가 확정 상태를 움직이고, 되풀이된 조작은 한 번만
+ * 적용된다** (live-match.md §8). 엔진은 흉내로 갈아 끼운다 — 여기서 재는 것은 배선이다.
+ */
 const memory = vi.hoisted(() => ({
-  db: { pendingMatch: { spatial: { tick: 0, interval: false } } },
+  db: {
+    phase: "match",
+    pendingMatch: {
+      live: {
+        state: { tick: 0, interval: false },
+        committedTick: 0,
+        ledger: { phase: "first_half" },
+      },
+    },
+  },
   writes: 0,
   rejectOrder: false,
   ordersApplied: 0,
+  synced: 0,
 }));
 type TestState = typeof memory.db;
 vi.mock("@story-fm/engine", () => ({
@@ -13,21 +27,34 @@ vi.mock("@story-fm/engine", () => ({
     memory.db = structuredClone(s);
     memory.writes++;
   },
-  enableLiveMatch: () => true,
-  refreshPacket: () => undefined,
-  advanceLiveMatch: (s: TestState, ticks: number) => {
-    s.pendingMatch.spatial.tick += ticks;
-    return { tick: s.pendingMatch.spatial.tick, interval: false, finished: false };
+  commitCheckpoint: (s: TestState, cp: { fromTick: number; toTick: number; digest: string }) => {
+    if (cp.fromTick !== s.pendingMatch.live.committedTick)
+      return {
+        ok: false,
+        reason: "stale",
+        toTick: s.pendingMatch.live.state.tick,
+        digest: "x",
+        events: [],
+      };
+    s.pendingMatch.live.state.tick = cp.toTick;
+    s.pendingMatch.live.committedTick = cp.toTick;
+    const events = cp.toTick >= 100 ? [{ type: "goal", minute: 5, actors: [], causes: [] }] : [];
+    return cp.digest === "ok"
+      ? { ok: true, toTick: cp.toTick, digest: "ok", events }
+      : { ok: false, reason: "digest", toTick: cp.toTick, digest: "ok", events };
   },
-  liveMatchFrame: (s: TestState) => ({
-    tick: s.pendingMatch.spatial.tick,
-    interval: s.pendingMatch.spatial.interval,
-    finished: false,
-  }),
-  buildMatchView: () => null,
   resumeLiveInterval: (s: TestState) => {
-    s.pendingMatch.spatial.interval = false;
+    s.pendingMatch.live.state.interval = false;
   },
+  advanceShootout: () => ({ ok: true, kick: null, done: true, message: "끝" }),
+  awaitingShootout: () => false,
+  syncLiveTactics: () => {
+    memory.synced++;
+  },
+  buildMatchView: () => null,
+}));
+vi.mock("@story-fm/llm", () => ({
+  traceBoard: async (_id: string, action: () => Promise<unknown>) => action(),
 }));
 vi.mock("@/lib/store", () => ({ toPayload: () => ({ id: "live", views: {}, chatLength: 0 }) }));
 vi.mock("@/lib/turn-runner", () => ({
@@ -38,112 +65,89 @@ vi.mock("@/lib/turn-runner", () => ({
     return memory.rejectOrder ? { ok: false, message: "invalid order" } : { ok: true };
   },
 }));
-import { controlLiveMatch, subscribeLiveMatch, withLiveGamePaused } from "@/lib/live-match-runtime";
+import { handleLiveAction, readLiveMatch } from "@/lib/live-match-server";
 
-const detach: Array<() => void> = [];
 beforeEach(() => {
-  vi.useFakeTimers();
-  memory.db = { pendingMatch: { spatial: { tick: 0, interval: false } } };
+  memory.db = {
+    phase: "match",
+    pendingMatch: {
+      live: {
+        state: { tick: 0, interval: false },
+        committedTick: 0,
+        ledger: { phase: "first_half" },
+      },
+    },
+  };
   memory.writes = 0;
   memory.rejectOrder = false;
   memory.ordersApplied = 0;
+  memory.synced = 0;
 });
-afterEach(async () => {
-  for (const close of detach.splice(0)) close();
-  await vi.runAllTimersAsync();
-  vi.useRealTimers();
-});
-async function connect(clientId: string) {
-  detach.push(await subscribeLiveMatch("live", clientId, () => undefined));
-}
-async function pause(clientId: string, revision: number) {
-  const promise = controlLiveMatch("live", { clientId, revision, paused: true });
-  await vi.advanceTimersByTimeAsync(110);
-  await promise;
-}
-describe("실시간 경기 정지 장벽", () => {
-  it("정지 응답 전 마지막 틱을 저장하고 그 뒤에는 진행하지 않는다", async () => {
-    await connect("first");
-    await controlLiveMatch("live", { clientId: "first", revision: 1, paused: false });
-    await vi.advanceTimersByTimeAsync(150);
-    await pause("first", 2);
-    const saved = memory.db.pendingMatch.spatial.tick;
-    expect(saved).toBeGreaterThan(0);
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(memory.db.pendingMatch.spatial.tick).toBe(saved);
-    await controlLiveMatch("live", { clientId: "first", revision: 3, paused: false });
-    await vi.advanceTimersByTimeAsync(150);
-    await pause("first", 4);
-    expect(memory.db.pendingMatch.spatial.tick).toBeGreaterThan(saved);
+
+describe("실시간 경기 체크포인트", () => {
+  it("확정된 구간이 저장되고 다음 체크포인트는 그 자리에서 잇는다", async () => {
+    const first = await handleLiveAction("live", {
+      kind: "checkpoint",
+      checkpoint: { fromTick: 0, toTick: 40, digest: "ok" },
+    });
+    expect(first.verdict?.ok).toBe(true);
+    expect(memory.db.pendingMatch.live.committedTick).toBe(40);
+    expect(memory.writes).toBe(1);
+    // 옛 자리에서 굴린 구간은 `stale`이다 — 서버의 상태는 그대로다
+    const stale = await handleLiveAction("live", {
+      kind: "checkpoint",
+      checkpoint: { fromTick: 0, toTick: 80, digest: "ok" },
+    });
+    expect(stale.verdict?.ok).toBe(false);
+    expect(memory.db.pendingMatch.live.committedTick).toBe(40);
   });
-  it("겹친 서버 작업은 둘 다 끝나야 재개한다", async () => {
-    await connect("first");
-    await controlLiveMatch("live", { clientId: "first", revision: 1, paused: false });
-    let finishA!: () => void, finishB!: () => void;
-    const a = withLiveGamePaused(
-      "live",
-      () =>
-        new Promise<void>((resolve) => {
-          finishA = resolve;
-        }),
-    );
-    const b = withLiveGamePaused(
-      "live",
-      () =>
-        new Promise<void>((resolve) => {
-          finishB = resolve;
-        }),
-    );
-    await vi.advanceTimersByTimeAsync(1);
-    finishA();
-    await a;
-    await vi.advanceTimersByTimeAsync(1500);
-    expect(memory.db.pendingMatch.spatial.tick).toBe(0);
-    finishB();
-    await b;
-    await vi.advanceTimersByTimeAsync(150);
-    await pause("first", 2);
-    expect(memory.db.pendingMatch.spatial.tick).toBeGreaterThan(0);
+  it("digest가 어긋나도 서버의 상태가 이기고 그대로 저장된다", async () => {
+    const result = await handleLiveAction("live", {
+      kind: "checkpoint",
+      checkpoint: { fromTick: 0, toTick: 40, digest: "wrong" },
+    });
+    expect(result.verdict).toMatchObject({ ok: false, reason: "digest" });
+    expect(memory.db.pendingMatch.live.committedTick).toBe(40);
+    expect(result.live.committedTick).toBe(40);
   });
-  it("다른 창의 정지 사유를 한 창의 재개가 지우지 않는다", async () => {
-    await connect("first");
-    await connect("second");
-    await controlLiveMatch("live", { clientId: "first", revision: 1, paused: false });
-    await vi.advanceTimersByTimeAsync(1200);
-    expect(memory.db.pendingMatch.spatial.tick).toBe(0);
-    await controlLiveMatch("live", { clientId: "second", revision: 1, paused: false });
-    await vi.advanceTimersByTimeAsync(150);
-    await pause("first", 2);
-    expect(memory.db.pendingMatch.spatial.tick).toBeGreaterThan(0);
+  it("체크포인트는 확정한 사건을 돌려준다 — 판독과 중계는 실행기가 여는 정지점 턴의 몫이다", async () => {
+    const result = await handleLiveAction("live", {
+      kind: "checkpoint",
+      checkpoint: { fromTick: 0, toTick: 120, digest: "ok" },
+    });
+    expect(result.events?.map((e) => e.type)).toEqual(["goal"]);
   });
-  it("응답을 잃고 같은 명령을 다시 보내도 교체를 중복 적용하지 않는다", async () => {
-    await connect("first");
-    const order = {
-      clientId: "first",
-      paused: true,
-      commandId: "one-command",
+  it("응답을 잃고 같은 조작을 다시 보내도 한 번만 적용한다", async () => {
+    const action = {
+      kind: "orders" as const,
       orders: [{ kind: "substitution" as const, out: "a", in: "b" }],
+      commandId: "11111111-1111-4111-8111-111111111111",
     };
-    await controlLiveMatch("live", { ...order, revision: 1 });
-    await controlLiveMatch("live", { ...order, revision: 2 });
+    await handleLiveAction("live", action);
+    await handleLiveAction("live", action);
     expect(memory.ordersApplied).toBe(1);
+    expect(memory.synced).toBe(1);
   });
-  it("반려된 편집은 정지를 유지하고 오래된 재개 요청은 무시한다", async () => {
-    await connect("first");
-    await controlLiveMatch("live", { clientId: "first", revision: 3, paused: true });
-    await controlLiveMatch("live", { clientId: "first", revision: 2, paused: false });
-    await vi.advanceTimersByTimeAsync(1200);
-    expect(memory.db.pendingMatch.spatial.tick).toBe(0);
+  it("반려된 조작은 저장되지 않는다", async () => {
     memory.rejectOrder = true;
     await expect(
-      controlLiveMatch("live", {
-        clientId: "first",
-        revision: 4,
-        paused: false,
+      handleLiveAction("live", {
+        kind: "orders",
         orders: [{ kind: "substitution", out: "a", in: "b" }],
+        commandId: "22222222-2222-4222-8222-222222222222",
       }),
     ).rejects.toThrow("invalid order");
-    await vi.advanceTimersByTimeAsync(1200);
-    expect(memory.db.pendingMatch.spatial.tick).toBe(0);
+    expect(memory.writes).toBe(0);
+  });
+  it("재개는 휴식을 풀고 저장한다", async () => {
+    memory.db.pendingMatch.live.state.interval = true;
+    await handleLiveAction("live", { kind: "resume" });
+    expect(memory.db.pendingMatch.live.state.interval).toBe(false);
+    expect(memory.writes).toBe(1);
+  });
+  it("확정 상태 읽기는 아무것도 쓰지 않는다", async () => {
+    const snapshot = await readLiveMatch("live");
+    expect(snapshot.live.committedTick).toBe(0);
+    expect(memory.writes).toBe(0);
   });
 });

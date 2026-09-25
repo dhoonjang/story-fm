@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { applyEvents } from "@story-fm/sim";
 import {
   leagueOfTeamIn,
   AVG_PRONENESS_RISE,
   FALL_PER_APPEARANCE,
   INJURY_CHANCE_PER_APPEARANCE,
   PRONENESS_BASE,
-  advanceSegment,
+  markEntered,
   advanceTime,
   diffDays,
   easeProneness,
@@ -29,7 +30,7 @@ import {
   userSide,
 } from "@story-fm/engine";
 import { INJURY_HISTORY } from "../src/data/injury-history";
-import { advanceToMatchday, createTestGame } from "./helpers";
+import { advanceToMatchday, createTestGame, playToFullTime } from "./helpers";
 
 /**
  * 조사된 선수 수는 **표가 정한다** — `INJURY_HISTORY`의 키(위키데이터 QID) 전부다.
@@ -41,7 +42,8 @@ const RESEARCHED = Object.keys(INJURY_HISTORY);
 describe("부상 성향 — 개인별 확률로 관리된다", () => {
   it("조사된 이력이 없으면 1.0에서 출발한다 — 지어내지 않는다", () => {
     const state = createTestGame(11);
-    const unresearched = state.players.filter((p) => p.state.injuryProneness === undefined);
+    // 이력이 조사되지 않은 선수는 기준값을 든다 — 성향은 모든 선수가 갖는 칸이다
+    const unresearched = state.players.filter((p) => p.state.injuryProneness === PRONENESS_BASE);
     // 조사분보다 훨씬 많다 — 표는 수백 명 중 몇십 명만 덮는다
     expect(unresearched.length).toBeGreaterThan(RESEARCHED.length);
     for (const p of unresearched) expect(pronenessValue(p)).toBe(PRONENESS_BASE);
@@ -168,24 +170,15 @@ describe("부상은 팀을 가리지 않는다", () => {
     expect(startMatch(state).ok).toBe(true);
     const pending = state.pendingMatch!;
     const oppSide = userSide(state) === "home" ? "away" : "home";
-    const victim = pending.ledger[oppSide].onPitch[0]!;
-    pending.ledger.events.push({
-      minute: 20,
-      type: "injury",
-      team: oppSide,
-      actors: [victim],
-      causes: [],
-    });
-
-    let guard = 60;
-    while (state.phase === "match" && guard-- > 0) {
-      const step = advanceSegment(state);
-      expect(step.ok).toBe(true);
-      if (step.plan?.stop === "full_time") {
-        finalizeMatch(state);
-        break;
-      }
-    }
+    const victim = pending.live.ledger[oppSide].onPitch[0]!;
+    const hurt = applyEvents(pending.live.ledger, [
+      { minute: 0, type: "injury", team: oppSide, actors: [victim], causes: [] },
+    ]);
+    expect(hurt.ok).toBe(true);
+    if (hurt.ok) pending.live.ledger = hurt.state;
+    markEntered(state);
+    playToFullTime(state);
+    finalizeMatch(state);
     expect(isInjured(state, victim)).toBe(true);
   });
 });
@@ -207,7 +200,7 @@ describe("부임 전 부상 이력 — 조사된 선수만", () => {
 
   it("표가 게임에 닿는다 — 값을 갖는 선수는 조사분 그들뿐이다", () => {
     expect(researched.length, "표의 이름이 한 명도 게임에 닿지 않았다").toBeGreaterThan(0);
-    const withValue = state.players.filter((p) => p.state.injuryProneness !== undefined);
+    const withValue = state.players.filter((p) => p.state.injuryProneness !== PRONENESS_BASE);
     expect(withValue.map((p) => p.id).sort()).toEqual(researched.map((p) => p.id).sort());
     // 나머지 전부는 평균에서 출발한다 (지어내지 않는다)
     expect(state.players.length - withValue.length).toBeGreaterThan(RESEARCHED.length);
@@ -303,11 +296,15 @@ describe("간이 시뮬 — 성향은 뛴 선수 전원에게 걸린다", () => 
   it("교체로 들어온 선수도 성향이 내려간다 — 벤치에 앉아만 있으면 그대로다", () => {
     const squad = simSquadOf(state, "liverpool", leagueOfTeamIn(state, "liverpool"));
     const starters = new Set(squad.starters.map((p) => p.id));
+    const before = new Map(
+      (squad.bench ?? []).map((p) => [p.id, p.state.injuryProneness] as const),
+    );
     // 유저와 무관한 두 팀의 경기 하나 — 간이 시뮬이 소화하는 경로다
     state.matches.push({
       id: "quick-subs",
       season: state.season,
       competitionId: null,
+      stage: "league",
       round: 1,
       date: state.date,
       time: "15:00",
@@ -328,7 +325,8 @@ describe("간이 시뮬 — 성향은 뛴 선수 전원에게 걸린다", () => 
     // 안 뛴 벤치는 손대지 않는다 — 하강이 출전이 아니라 소집에 걸리면 안 된다
     const idle = (squad.bench ?? []).filter((p) => !lineup.includes(p.id));
     expect(idle.length).toBeGreaterThan(0);
-    for (const p of idle) expect(p.state.injuryProneness).toBeUndefined();
+    for (const p of idle)
+      expect(playerById(state, p.id)!.state.injuryProneness).toBe(before.get(p.id));
   });
 });
 

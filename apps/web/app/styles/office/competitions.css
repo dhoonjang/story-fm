@@ -400,11 +400,6 @@
 .season-slot.ours b {
   color: var(--text);
 }
-/* 승점을 모르는 행 — **빈 칸으로 둔다.** 0을 채우면 없는 사실이 생긴다 */
-.season-unknown {
-  color: var(--text-3);
-}
-
 /* 그 시즌 리그의 시상 — 상 이름 | 수상자 | 팀 | 근거 수치 */
 .season-awards {
   display: grid;

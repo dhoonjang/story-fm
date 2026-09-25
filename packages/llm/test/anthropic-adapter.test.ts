@@ -359,12 +359,17 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
   it("원본 이력에 캐시 마커를 남기지 않는다 (세이브에 누적되면 브레이크포인트 상한 초과)", async () => {
     const stub = makeStubClient([endTurn]);
     const llm = new AnthropicGameLLM(testConfig, stub);
-    const history: Anthropic.MessageParam[] = [
-      { role: "user", content: [{ type: "text", text: "지난 발화" }] },
-    ];
+    const history = {
+      version: 1 as const,
+      provider: "anthropic" as const,
+      model: testConfig.model,
+      messages: [
+        { role: "user", content: [{ type: "text", text: "지난 발화" }] },
+      ] as Anthropic.MessageParam[],
+    };
     const result = await llm.runTurn({ system: "sys", history, user: "이번" });
 
-    expect(hasCacheMarker(history[0]!.content)).toBe(false);
+    expect(hasCacheMarker(storedMessages(history)[0]!.content)).toBe(false);
     expect(hasCacheMarker(storedMessages(result.history)[0]!.content)).toBe(false);
   });
 

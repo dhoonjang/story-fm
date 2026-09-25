@@ -91,7 +91,7 @@ function moveScheduleEntry(state: GameState, match: MatchRecord): void {
   const entry = state.schedule.find((e) => e.type === "match" && e.refId === match.id);
   if (!entry) return;
   entry.date = match.date;
-  entry.time = match.time ?? entry.time;
+  entry.time = match.time;
 }
 
 /** 재편성 경기의 킥오프 — 주중 야간 */

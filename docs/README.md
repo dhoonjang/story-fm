@@ -20,7 +20,9 @@ flowchart LR
   end
   subgraph SIM["simulation/ — 무엇이 일어나는가 (결정적 순수 함수)"]
     direction TB
-    MA["match.md<br/>전력 패킷 · xG 구간 시뮬 · 평점"]
+    LM["live-match.md<br/>실시간 경기 — 말의 규칙 · 체크포인트"]
+    MA["match.md<br/>경기 능력 · 장부 · 간이 시뮬 · 평점"]
+    FR["football-reference.md<br/>실제 축구 통계 — 밸런스의 기준점"]
     SE["season.md<br/>달력 · tick · 훈련 · 시즌 전환"]
     TR["transfer.md<br/>협상 · 설득 · 메디컬 · AI 시장"]
     FI["finance.md<br/>원장 · 보고서 · PSR"]
@@ -29,7 +31,7 @@ flowchart LR
   end
   subgraph DATA["data/ — 무엇이 존재하는가 (카탈로그 + 세이브)"]
     direction TB
-    GS["game-state.md<br/>2-레이어 · 엔티티 지도 · 세이브 호환"]
+    GS["game-state.md<br/>2-레이어 · 엔티티 지도 · 세이브 정책"]
     PY["player.md<br/>16축 · 역할 · 폼 · 성장 · 안개"]
     TE["team.md<br/>체급 · 프로필 · 1·2군"]
     CO["competition.md<br/>리그 · 컵 · 대항전 · 승강"]
@@ -74,7 +76,7 @@ flowchart LR
 | 구단·스쿼드 구성을 만진다        | [data/team.md](data/team.md)                                                                               |
 | 대회 규정을 만진다               | [data/competition.md](data/competition.md)                                                                 |
 | 대사·화자·인물·회견을 만진다     | [data/people.md](data/people.md)                                                                           |
-| 세이브 구조·호환을 만진다        | [data/game-state.md](data/game-state.md)                                                                   |
+| 세이브 구조·버전을 만진다        | [data/game-state.md](data/game-state.md)                                                                   |
 | 실시간 경기·정지·전술판을 만진다 | [simulation/live-match.md](simulation/live-match.md)                                                       |
 | 경기 결과·밸런스를 만진다        | [simulation/match.md](simulation/match.md)                                                                 |
 | 밸런스 눈금을 재고 옮긴다        | [simulation/balance-harness.md](simulation/balance-harness.md)                                             |

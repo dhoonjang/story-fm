@@ -59,7 +59,7 @@ export async function takeArrivedReports(
   limit: number,
   stuck: Set<string> = new Set(),
 ): Promise<ArrivedCards> {
-  const missionIds = new Set((state.scoutMissions ?? []).map((m) => m.id));
+  const missionIds = new Set(state.scoutMissions.map((m) => m.id));
   const cards: ArrivedCards = { reports: [], missions: [] };
   const stood: string[] = [];
   for (const id of peekReportCards(state, limit, stuck)) {

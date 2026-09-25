@@ -6,12 +6,12 @@ import {
   loadGame,
   playerName,
   proposalCommandName,
-  refreshPacket,
   saveGame,
   setPlayerTactic,
   setSetPieceTakers,
   setTactics,
   substitutePlayer,
+  syncLiveTactics,
   tacticsOf,
   takeEdits,
   turnDigestOf,
@@ -434,7 +434,8 @@ export function runTurnLocked(
           appliedOrders.push(`전술판 적용 완료 — ${result.message} (다시 적용하지 말 것)`);
           boardMoves.push(boardMoveOf(order, before));
         }
-        refreshPacket(state);
+        // 바뀐 판을 실시간 경기의 우리 편에 싣는다 — 확정 tick에 적용된다 (live-match.md §8.1)
+        syncLiveTactics(state);
         state.chat.push({
           role: "operator",
           text: appliedOrders.join("\n"),

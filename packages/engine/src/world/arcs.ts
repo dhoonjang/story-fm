@@ -253,9 +253,7 @@ function candidatesToday(state: GameState, teamId: string): Map<string, ArcCandi
   // 곪는 불만 — 남의 라커룸 불만은 우리 이야기가 아니다
   const ours = new Set(squad.map((p) => p.id));
   const pressed = new Set(
-    (state.approachPressure ?? [])
-      .filter((p) => p.step >= GRIEVANCE_CLIMAX_STEP)
-      .map((p) => p.subject),
+    state.approachPressure.filter((p) => p.step >= GRIEVANCE_CLIMAX_STEP).map((p) => p.subject),
   );
   for (const issue of state.issues) {
     if (!ours.has(issue.gamePlayerId)) continue;
@@ -417,7 +415,7 @@ function candidatesToday(state: GameState, teamId: string): Map<string, ArcCandi
    * (`tickArcs`), 이직은 `boardWarnings`를 지우고 팀 id가 바뀌므로 옛 열쇠가 다시
    * 나오지 않는다 (manager-market.ts `leaveClub`·`acceptManagerOffer`).
    */
-  const warnings = state.manager.boardWarnings ?? 0;
+  const warnings = state.manager.boardWarnings;
   if (warnings > 0) {
     const failed = lastJudgedDemand(state)?.status === "failed";
     put({
@@ -517,7 +515,7 @@ export function arcFactLine(state: GameState, arc: NarrativeArc): string {
       );
     }
     case "board-standoff": {
-      const warnings = state.manager.boardWarnings ?? 0;
+      const warnings = state.manager.boardWarnings;
       const failed = lastJudgedDemand(state)?.status === "failed";
       return `보드 경고 ${warnings}/${USER_WARNINGS_BEFORE_SACK}${failed ? " · 구단주 요청 불이행" : ""}`;
     }
@@ -528,7 +526,7 @@ export function arcFactLine(state: GameState, arc: NarrativeArc): string {
 
 /** 아직 닫히지 않은 아크 — 상태 스냅샷에 서는 것들 */
 export function activeArcs(state: GameState): NarrativeArc[] {
-  return (state.arcs ?? []).filter((arc) => arc.resolvedOn === null);
+  return state.arcs.filter((arc) => arc.resolvedOn === null);
 }
 
 /**
@@ -563,7 +561,7 @@ export function describeActiveArcs(state: GameState): string | null {
  * 사실이 아크를 움직이는 길은 **닫히는 것** 하나뿐이다.
  */
 export function tickArcs(state: GameState): void {
-  const arcs = (state.arcs ??= []);
+  const arcs = state.arcs;
   const teamId = managedTeamId(state);
 
   const move = (arc: NarrativeArc, stage: ArcStage): void => {
@@ -656,7 +654,7 @@ export interface ArcTitleDraft {
  * @returns 실제로 이름이 붙은 아크 수
  */
 export function applyArcTitles(state: GameState, drafts: readonly ArcTitleDraft[]): number {
-  const arcs = state.arcs ?? [];
+  const arcs = state.arcs;
   let applied = 0;
   for (const draft of drafts) {
     const arc = arcs.find((a) => a.id === draft.arcId);

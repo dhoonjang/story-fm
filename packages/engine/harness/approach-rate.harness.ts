@@ -87,10 +87,10 @@ describe("한 시즌의 다가옴", () => {
     const requests = new Set<string>();
 
     function sample(): void {
-      for (const leak of state.pressLeaks ?? []) {
+      for (const leak of state.pressLeaks) {
         leaks.add(`${leak.playerId}:${leak.topic}:${leak.date}`);
       }
-      for (const request of state.transferRequests ?? []) {
+      for (const request of state.transferRequests) {
         requests.add(`${request.gamePlayerId}:${request.reason}:${request.since}`);
       }
       const open = pendingApproach(state);
@@ -106,7 +106,7 @@ describe("한 시즌의 다가옴", () => {
         if (press && diffDays(press.date, state.date) < PRESS_FRESH_DAYS) withPress += 1;
       }
       // 열려 있는 자리가 둘이면 `pendingApproach`가 하나만 돌려주므로 장부를 직접 본다
-      const pending = (state.approaches ?? []).filter((a) => a.status === "pending").length;
+      const pending = state.approaches.filter((a) => a.status === "pending").length;
       if (pending > 1) concurrent += 1;
     }
 
@@ -165,7 +165,7 @@ describe("한 시즌의 다가옴", () => {
      * 구단주가 이 시즌에 건 조건 — **발행일로 가른다** (career.md §5.2). 창 갈래는
      * 창마다 하나, 시즌 갈래는 시즌마다 하나이므로 합계가 시즌의 상한을 말한다.
      */
-    const demands = (state.boardDemands ?? []).filter((d) => d.issuedOn >= start);
+    const demands = state.boardDemands.filter((d) => d.issuedOn >= start);
 
     const readings: Readings<typeof APPROACH_RATE> = {
       "시즌 다가옴 건수": opened.length,

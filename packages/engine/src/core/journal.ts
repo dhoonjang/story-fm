@@ -1,7 +1,7 @@
 import type {
   BoardPoint,
+  LiveInputPayload,
   MatchEvent,
-  MatchStatLine,
   Point,
   SheetLine,
   ShootoutKick,
@@ -9,13 +9,12 @@ import type {
   TickEvent,
 } from "@story-fm/domain";
 import { clockOf, type CommandBrief, type GameState } from "./state";
-import type { PacketDigest } from "../match/packet-digest";
 
 /**
  * **사실의 문** — 코어가 한 턴에 한 일을 밖으로 내는 유일한 자리 (models.md §5-3).
  *
  * 세이브는 장부의 **지금**이고, 호출 원문은 모델이 **본 것과 답한 것**이다. 그 사이 —
- * 해석기가 낸 명령, 코어가 건 것과 반려한 것, 판이 구른 패킷과 난수 채널, 사건, 굴러간
+ * 해석기가 낸 명령, 코어가 건 것과 반려한 것, 경기의 체크포인트와 입력, 사건, 굴러간
  * 하루하루 — 는 어디에도 남지 않았다. 프롬프트 안의 문장을 정규식으로 긁어 세는 것이
  * 「왜 그랬나」에 답하는 길이어서는 안 된다. 그래서 일어난 자리에서 **구조로** 낸다.
  *
@@ -29,7 +28,7 @@ import type { PacketDigest } from "../match/packet-digest";
  *
  * ## 사실은 코드다
  *
- * 사건은 `MatchEvent` 그대로, 키포인트는 `PacketTag` 그대로 싣는다. 문장을 적으면 문구를
+ * 사건은 `MatchEvent` 그대로, 원인은 `EventCause` 그대로 싣는다. 문장을 적으면 문구를
  * 고친 날 옛 기록의 집계가 깨진다 — 문장은 읽는 쪽이 같은 렌더러로 만든다.
  */
 
@@ -50,31 +49,37 @@ export type JournalEntry =
       replaced: string[];
       /** 이 경기에 정지를 소화하는 우리 선수 */
       serving: string[];
-      packet: PacketDigest;
+      /** 연장 규칙 — 90분 뒤 (스코어 + 이 값)이 같으면 연장. 리그는 null */
+      extraTime: { home: number; away: number } | null;
+      /** 시드와 함께면 같은 경기가 다시 구른다 */
+      seed: number;
     }
   | {
-      kind: "match.segment";
+      /**
+       * **체크포인트** — 클라이언트가 굴린 구간을 서버가 다시 굴려 견줬다 (live-match.md §8.1).
+       * 사건은 이 구간에 장부에 적힌 것이고, `ok`가 아니면 서버의 상태가 이겼다.
+       */
+      kind: "match.checkpoint";
       matchId: string;
-      /** 몇 번째 구간인가 — 난수 채널에 들어가는 그 수 */
-      segment: number;
-      /** 이 구간을 굴린 난수 채널 — 시드와 함께면 같은 구간이 다시 구른다 */
-      channel: string;
-      staminaKey: string;
-      untilMinute: number | null;
-      from: { minute: number; clock: number | null };
-      to: { minute: number; clock: number };
-      stop: string;
-      score: { before: { home: number; away: number }; after: { home: number; away: number } };
+      fromTick: number;
+      toTick: number;
+      ok: boolean;
+      reason: "digest" | "stale" | "finished" | null;
+      digest: { client: string; server: string };
+      score: { home: number; away: number };
+      minute: number;
       phase: string;
-      /** 상대 벤치가 이 구간 앞에서 판을 옮겼는가 */
-      aiShift: boolean;
-      aiSubs: number;
       events: MatchEvent[];
-      stats: Record<string, MatchStatLine>;
-      /** 선수 id → 이 구간에 쌓인 피로 */
-      fatigue: Record<string, number>;
-      /** 이 구간이 **실제로 구른** 패킷 — 상대의 전환이 반영된 뒤의 것 */
-      packet: PacketDigest;
+      /** 장부가 반려한 사건 — 시뮬레이터의 버그다. 비어 있어야 한다 */
+      rejected: string[];
+    }
+  | {
+      /** 확정 tick에 묶음에 넣은 입력 — 전술·판독·교체·재개 */
+      kind: "match.input";
+      matchId: string;
+      tick: number;
+      payload: LiveInputPayload;
+      rejected: string[];
     }
   | {
       kind: "match.shootout";
@@ -174,11 +179,11 @@ export type JournalEntry =
     }
   | {
       /**
-       * **판독기가 판을 읽었다** — 킥오프 · 지시 턴 · 구간 뒤 (match.md §1.6).
+       * **판독기가 판을 읽었다** — 킥오프 · 지시 턴 · 골·퇴장 뒤 · 하프타임 (match.md §3.2).
        * 포인트와 시트는 앉힌 그대로다 — 두 경기가 왜 달랐는지는 여기와 호출 원문이 답한다.
        */
       kind: "match.reading";
-      occasion: "kickoff" | "orders" | "segment";
+      occasion: "kickoff" | "orders" | "event" | "halftime";
       ok: boolean;
       points: Point[];
       sheet: SheetLine[];
@@ -190,9 +195,8 @@ export type JournalEntry =
   | {
       kind: "orders.applied";
       notes: string[];
-      rolled: boolean;
       shapeChanged: boolean;
-      untilMinute: number | null;
+      /** 승부차기 정지점에서 건 지시인가 */
       shootout: boolean;
     }
   | { kind: "llm.retry"; label: string; error: string }
@@ -245,8 +249,6 @@ export interface KickoffSide {
   managerTactics: number;
 }
 
-export type JournalKind = JournalEntry["kind"];
-
 export type JournalSink = (entry: JournalEntry) => void;
 
 let sink: JournalSink | null = null;
@@ -274,20 +276,6 @@ export function journal(entry: JournalEntry): void {
   } catch (error) {
     console.warn(`[journal] ${entry.kind} 사실을 앉히지 못했습니다:`, error);
   }
-}
-
-/** 경고를 콘솔과 기록에 함께 남긴다 — 서버 콘솔로만 흐르던 줄이 턴에 붙는다 */
-export function journalWarn(where: string, text: string, detail?: unknown): void {
-  if (detail === undefined) console.warn(`[${where}] ${text}`);
-  else console.warn(`[${where}] ${text}`, detail);
-  journal({
-    kind: "warn",
-    where,
-    text,
-    ...(detail === undefined
-      ? {}
-      : { detail: detail instanceof Error ? detail.message : String(detail) }),
-  });
 }
 
 /**
@@ -330,8 +318,8 @@ export function turnDigestOf(state: GameState): TurnDigest {
     match: pending
       ? {
           matchId: pending.matchId,
-          minute: pending.ledger.minute,
-          score: { ...pending.ledger.score },
+          minute: pending.live.ledger.minute,
+          score: { ...pending.live.ledger.score },
         }
       : null,
     negotiation: state.pendingNegotiation
@@ -367,7 +355,7 @@ export function turnDigestOf(state: GameState): TurnDigest {
       scoutReports: state.scoutReports.length,
       pendingEdits: state.pendingEdits?.length ?? 0,
       pendingNews: state.pendingNews?.length ?? 0,
-      incidents: state.incidents?.length ?? 0,
+      incidents: state.incidents.length,
       narrative: state.narrative.length,
     },
   };

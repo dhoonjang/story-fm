@@ -40,7 +40,6 @@ import {
   applyFinanceEvent,
   buildOfficeViews,
   weeklyWagesOf,
-  categoryOf,
   clubProfile,
   currentMonthSummary,
   financeLookup,
@@ -97,7 +96,7 @@ describe("원장", () => {
     const finance = financeOf(state, state.userTeamId);
     expect(finance.ledger.length).toBeGreaterThan(0);
     for (const entry of finance.ledger) {
-      expect(categoryOf(entry)).not.toBe("other");
+      expect(entry.category).toBeTruthy();
       expect(entry.amount).toBeGreaterThan(0);
       expect(entry.id).toBeTruthy();
     }
@@ -118,7 +117,7 @@ describe("원장", () => {
     advanceUntil(state, "2026-09-05");
     const ledger = financeOf(state, state.userTeamId).ledger;
     const monthlyDates = new Set(
-      ledger.filter((e) => categoryOf(e) === "facility").map((e) => e.date),
+      ledger.filter((e) => e.category === "facility").map((e) => e.date),
     );
     // 게임 시작 달만 예외 — 7/1엔 tick이 돌지 않아 첫 tick(7/2)이 보정한다
     for (const date of monthlyDates) {
@@ -126,7 +125,7 @@ describe("원장", () => {
     }
     expect(monthlyDates.has("2026-07-02")).toBe(true);
     // 주급은 월요일마다
-    const wageDates = ledger.filter((e) => categoryOf(e) === "player_wages").map((e) => e.date);
+    const wageDates = ledger.filter((e) => e.category === "player_wages").map((e) => e.date);
     expect(wageDates.length).toBeGreaterThan(2);
     for (const date of wageDates) {
       expect(new Date(`${date}T00:00:00Z`).getUTCDay()).toBe(1);
@@ -212,9 +211,9 @@ describe("매치데이", () => {
     // AI 팀은 원장을 남기지 않으므로(§4.5) 잔고로 확인한다
     expect(financeOf(state, host).balance).toBeGreaterThan(before);
     // 유저 쪽은 원정이라 입장 수입이 없다 — 대신 원정 비용이 나간다
-    expect(
-      financeOf(state, state.userTeamId).ledger.some((e) => categoryOf(e) === "matchday"),
-    ).toBe(false);
+    expect(financeOf(state, state.userTeamId).ledger.some((e) => e.category === "matchday")).toBe(
+      false,
+    );
   });
 
   /**
@@ -245,10 +244,10 @@ describe("매치데이", () => {
 
       const ledger = financeOf(state, state.userTeamId).ledger;
       // 개최지의 게이트는 어느 쪽의 수입도 아니다
-      expect(ledger.some((e) => categoryOf(e) === "matchday")).toBe(false);
+      expect(ledger.some((e) => e.category === "matchday")).toBe(false);
       return {
         user: ledger
-          .filter((e) => categoryOf(e) === "travel_medical")
+          .filter((e) => e.category === "travel_medical")
           .reduce((sum, e) => sum + e.amount, 0),
         // AI 팀은 원장을 남기지 않으므로(§4.5) 잔고로 읽는다
         rival: before - financeOf(state, rival).balance,
@@ -270,14 +269,14 @@ describe("매치데이", () => {
     while (guard-- > 0) {
       advanceAndPlay(state);
       const ledger = financeOf(state, state.userTeamId).ledger;
-      if (ledger.some((e) => categoryOf(e) === "matchday")) break;
+      if (ledger.some((e) => e.category === "matchday")) break;
     }
     const ledger = financeOf(state, state.userTeamId).ledger;
-    const gate = ledger.find((e) => categoryOf(e) === "matchday");
+    const gate = ledger.find((e) => e.category === "matchday");
     expect(gate).toBeTruthy();
     expect(gate!.label).toMatch(/명\)$/); // 관중 수가 항목명에 남는다
     expect(gate!.ref?.type).toBe("match");
-    expect(ledger.some((e) => categoryOf(e) === "matchday_opex")).toBe(true);
+    expect(ledger.some((e) => e.category === "matchday_opex")).toBe(true);
   });
 
   /**
@@ -290,7 +289,7 @@ describe("매치데이", () => {
   it("리그 홈경기 보정은 리그전을 굴리지 않는 리그에만 붙는다", () => {
     const matchdayIncome = (state: GameState) =>
       financeOf(state, state.userTeamId)
-        .ledger.filter((e) => e.kind === "income" && categoryOf(e) === "matchday")
+        .ledger.filter((e) => e.kind === "income" && e.category === "matchday")
         .reduce((sum, e) => sum + e.amount, 0);
 
     const top = createTestGame();
@@ -377,6 +376,7 @@ describe("월간 보고서", () => {
         id: `led-${m}`,
         date: `${m}-05`,
         kind: "expense" as const,
+        category: "matchday_opex" as const,
         label: "테스트 지출",
         amount: 1_000,
       }));
@@ -420,26 +420,6 @@ describe("월간 보고서", () => {
     expect(day.filter((e) => e.kind === "money").map((e) => e.text)).toEqual([`${label} +£2.0M`]);
   });
 
-  /**
-   * 카테고리 도입 전 세이브의 엔트리는 `other`로 읽힌다 — 그 카테고리는 **수입·지출
-   * 양쪽에 설 수 있는 유일한 자리**다. 카테고리만으로 접으면 옛 수입이 지출 줄에
-   * 상계돼, 잔고는 그대로인데 보고서 합이 원장 합과 갈린다 (finance.md §4.2).
-   */
-  it("카테고리 없는 옛 엔트리도 방향대로 선다", () => {
-    const legacy: LedgerEntry[] = [
-      { id: "led-old-1", date: "2026-08-02", kind: "income", label: "옛 수입", amount: 3_000_000 },
-      { id: "led-old-2", date: "2026-08-03", kind: "expense", label: "옛 지출", amount: 1_000_000 },
-    ];
-    const s = summarise(legacy);
-
-    expect(s.incomeTotal).toBe(3_000_000);
-    expect(s.expenseTotal).toBe(1_000_000);
-    expect(s.cashNet).toBe(2_000_000);
-    // 양쪽에 한 줄씩 선다 — 한쪽으로 몰면 3M과 1M이 한 숫자가 된다
-    expect(s.income.find((l) => l.category === "other")?.amount).toBe(3_000_000);
-    expect(s.expense.find((l) => l.category === "other")?.amount).toBe(1_000_000);
-  });
-
   it("급여 비중과 판단 재료가 붙는다 — 노트는 문장이 아니라 카드다", () => {
     const state = createMiniGame();
     advanceUntil(state, "2026-10-03");
@@ -447,7 +427,6 @@ describe("월간 보고서", () => {
     expect(report.wageRatio).toBeGreaterThan(0);
     expect(report.wageRatio).toBeLessThan(2);
     expect(Array.isArray(report.noteCards)).toBe(true);
-    expect(report.notes, "코어가 노트 문장을 저장했다").toBeUndefined();
     expect(report.psr).not.toBeNull();
   });
 });
@@ -465,7 +444,7 @@ describe("스태프 급여", () => {
     const teamId = state.userTeamId;
     runMonthlyFinance(state, []);
 
-    const lines = financeOf(state, teamId).ledger.filter((e) => categoryOf(e) === "staff_wages");
+    const lines = financeOf(state, teamId).ledger.filter((e) => e.category === "staff_wages");
     // 감독은 스태프가 아니다 — 파생 몫 위에 따로 얹힌다
     const total = lines.filter((e) => e.label !== "감독 연봉").reduce((s, e) => s + e.amount, 0);
 
@@ -522,7 +501,7 @@ describe("이적료 — 현금과 장부 두 축", () => {
 
     advanceUntil(state, "2026-09-03");
     const ledger = financeOf(state, state.userTeamId).ledger;
-    const amortisation = ledger.find((e) => categoryOf(e) === "amortisation")!;
+    const amortisation = ledger.find((e) => e.category === "amortisation")!;
     expect(amortisation.accounting).toBe("noncash");
     // 상각은 손익에만 — 현금 흐름 합과 잔고가 여전히 일치한다
     expect(financeOf(state, state.userTeamId).balance).toBeGreaterThan(0);
@@ -532,9 +511,24 @@ describe("이적료 — 현금과 장부 두 축", () => {
 
   it("요약은 이적 지출을 현금에서만, 상각을 손익에서만 뺀다", () => {
     const s = summarise([
-      { date: "2026-08-01", kind: "income", category: "matchday", label: "입장", amount: 10 },
-      { date: "2026-08-02", kind: "expense", category: "transfer_out", label: "이적료", amount: 6 },
       {
+        id: "led-a",
+        date: "2026-08-01",
+        kind: "income",
+        category: "matchday",
+        label: "입장",
+        amount: 10,
+      },
+      {
+        id: "led-b",
+        date: "2026-08-02",
+        kind: "expense",
+        category: "transfer_out",
+        label: "이적료",
+        amount: 6,
+      },
+      {
+        id: "led-c",
         date: "2026-08-03",
         kind: "expense",
         category: "amortisation",
@@ -558,7 +552,7 @@ describe("이적료 — 현금과 장부 두 축", () => {
     advanceUntil(state, "2026-09-03");
 
     const entries = financeOf(state, state.userTeamId).ledger.filter(
-      (e) => categoryOf(e) === "amortisation",
+      (e) => e.category === "amortisation",
     );
     expect(entries.length).toBeGreaterThan(0);
     for (const entry of entries) expect(entry.accounting).toBe("noncash");
@@ -585,7 +579,7 @@ describe("이적료 — 현금과 장부 두 축", () => {
     advanceUntil(state, "2026-09-03");
 
     const entries = financeOf(state, state.userTeamId).ledger.filter(
-      (e) => categoryOf(e) === "amortisation",
+      (e) => e.category === "amortisation",
     );
     expect(entries.length).toBeGreaterThan(0);
     for (const entry of entries) {
@@ -733,42 +727,6 @@ describe("이적료 — 현금과 장부 두 축", () => {
     expect(
       financeOf(state, state.userTeamId).ledger.filter((e) => e.label.startsWith("매각 잔존가")),
     ).toHaveLength(1);
-  });
-
-  /**
-   * 임대는 계약이 보낸 구단에 남으니 털 잔존가가 없다. 규약상 임대 행은 fee 0으로
-   * 적히지만(transfer.md §2) 옛 세이브에는 임대료가 fee로 실린 임대 행이 남아 있어,
-   * 잔존가 훑기가 `type`을 가리지 않으면 임대 보낸 구단의 장부가를 매각처럼 턴다.
-   */
-  it("임대료를 낸 임대 영입 뒤 임대 보낸 구단의 잔존가가 털리지 않는다", () => {
-    const state = createTestGame(42, "arsenal");
-    const target = state.contracts.find(
-      (c) => c.teamId === state.userTeamId && c.status === "active",
-    )!;
-    expect(bookValueOf(state, state.userTeamId, target.gamePlayerId, state.date)).toBeGreaterThan(
-      0,
-    );
-
-    // 옛 세이브 형태의 임대 행 — 임대료가 fee에 실려 있다. 계약은 그대로 우리에게 남는다
-    const borrower = state.teams.find((t) => t.id !== state.userTeamId)!.id;
-    state.transfers.push({
-      id: "tr-loanout",
-      gamePlayerId: target.gamePlayerId,
-      windowId: null,
-      fromTeamId: state.userTeamId,
-      toTeamId: borrower,
-      date: state.date,
-      type: "loan",
-      fee: 5_000_000,
-    });
-    const player = state.players.find((p) => p.id === target.gamePlayerId)!;
-    player.teamId = borrower;
-    player.loan = { fromTeamId: state.userTeamId, until: "2027-06-30", wageShare: 1 };
-
-    runMonthlyFinance(state, []);
-    expect(
-      financeOf(state, state.userTeamId).ledger.filter((e) => e.label.startsWith("매각 잔존가")),
-    ).toHaveLength(0);
   });
 
   it("영입한 선수는 이적 갈래로만 상각한다 — 두 번 잡히지 않는다", () => {
@@ -1113,7 +1071,7 @@ describe("리그별 편차", () => {
     const broadcastOf = (state: GameState) => {
       advanceDays(state, 40); // 8월 1일 정산까지
       return financeOf(state, state.userTeamId)
-        .ledger.filter((e) => categoryOf(e).startsWith("broadcast"))
+        .ledger.filter((e) => e.category.startsWith("broadcast"))
         .reduce((sum, e) => sum + e.amount, 0);
     };
     const eplTotal = broadcastOf(epl);
@@ -1148,7 +1106,8 @@ describe("PSR", () => {
       wageRatio: 0.9,
       seasonToDate: { income: 0, expense: 0, cashNet: 0, pnlNet: 0 },
       psr: null,
-      notes: [],
+      noteCards: [],
+      highlights: [],
     });
     expect(psrStatus(state).headroom).toBeLessThan(0);
 
@@ -1183,7 +1142,8 @@ describe("PSR", () => {
       wageRatio: 0.9,
       seasonToDate: { income: 0, expense: 0, cashNet: 0, pnlNet: 0 },
       psr: null,
-      notes: [],
+      noteCards: [],
+      highlights: [],
     });
     // 앞 구단에서 한도를 통째로 날린 시즌 — 새 구단의 여유는 그대로여야 한다
     state.financeReports.push(report(previous, -(PSR_LOSS_LIMIT + 20_000_000)));
@@ -1230,7 +1190,8 @@ describe("PSR", () => {
       wageRatio: 0.6,
       seasonToDate: { income: 0, expense: 0, cashNet: 0, pnlNet: 0 },
       psr: null,
-      notes: [],
+      noteCards: [],
+      highlights: [],
     });
     state.financeReports.push(
       report(1, -50_000_000),
@@ -1488,7 +1449,7 @@ describe("부채", () => {
     );
     expect(interest.length).toBeGreaterThan(0);
     // 새 카테고리를 만들지 않는다 — 이자·세금과 같은 자리다
-    for (const entry of interest) expect(categoryOf(entry)).toBe("facility");
+    for (const entry of interest) expect(entry.category).toBe("facility");
     // 연 8%의 한 달치 — £50M이면 월 £333k 언저리에서 시작한다
     expect(interest[0]!.amount).toBeGreaterThan(300_000);
     expect(interest[0]!.amount).toBeLessThan(400_000);
@@ -2031,7 +1992,7 @@ describe("지급 일정 — 분할은 표를 타고 나간다", () => {
     settleDuePayments(state);
     const f = financeOf(state, state.userTeamId);
     const paid = f.ledger[f.ledger.length - 1]!;
-    expect(categoryOf(paid)).toBe("player_wages");
+    expect(paid.category).toBe("player_wages");
     expect(paid.kind).toBe("expense");
     expect(paid.amount).toBe(Math.floor(severance / 2));
     expect(f.balance).toBe(before.balance - Math.floor(severance / 2));
@@ -2239,7 +2200,7 @@ describe("조건부 조항 — 셀온 정산은 양쪽에 대칭으로 선다", 
     });
     const f = financeOf(state, state.userTeamId);
     const paid = f.ledger[f.ledger.length - 1]!;
-    expect(categoryOf(paid)).toBe("transfer_out");
+    expect(paid.category).toBe("transfer_out");
     expect(paid.label).toContain("셀온 정산금");
     expect(paid.amount).toBe(DUE);
   });
@@ -2337,6 +2298,7 @@ describe("자본 자산 — capex와 상각", () => {
     amount: number,
     noncash = false,
   ): LedgerEntry => ({
+    id: `led-${category}-${kind}-${amount}`,
     date: DAY,
     kind,
     category,
@@ -2371,7 +2333,7 @@ describe("자본 자산 — capex와 상각", () => {
     });
     // 현금은 그날 한 번 나간다
     expect(financeOf(state, teamId).balance).toBe(before - COST);
-    const spent = financeOf(state, teamId).ledger.filter((e) => categoryOf(e) === "capex");
+    const spent = financeOf(state, teamId).ledger.filter((e) => e.category === "capex");
     expect(spent).toHaveLength(1);
     expect(spent[0]!.accounting).toBeUndefined(); // 현금이다
 

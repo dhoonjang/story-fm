@@ -15,9 +15,9 @@ import {
   disciplineOf,
   isSuspendedFor,
   playersOf,
+  QUICK_FIRST_HALF_SHARE,
   quickMinuteOf,
   quickSimulate,
-  quickStrengthFactor,
   seasonYellowsOf,
   simSquadOf,
   simulateExtraTime,
@@ -83,10 +83,10 @@ function seasonOf(seed: number): GameState {
 }
 
 describe("골의 분", () => {
-  it("정규화 로그 분포라 전반 46% · 후반 54%에 가깝다", () => {
+  it("정규화 로그 분포라 전반의 몫이 `QUICK_FIRST_HALF_SHARE`에 가깝다", () => {
     const samples = Array.from({ length: 10_000 }, (_, i) => quickMinuteOf((i + 0.5) / 10_000));
     const firstHalf = samples.filter((minute) => minute <= 45).length / samples.length;
-    expect(firstHalf).toBeCloseTo(0.46, 2);
+    expect(firstHalf).toBeCloseTo(QUICK_FIRST_HALF_SHARE, 2);
   });
 
   it("득점자와 같은 길이로, 시간 순으로 남는다", () => {
@@ -269,13 +269,6 @@ describe("부상", () => {
   });
 });
 
-describe("간이 시뮬 전력 로그", () => {
-  it("대등하면 1이고 반대 전력비끼리 역수다", () => {
-    expect(quickStrengthFactor(75, 75)).toBe(1);
-    expect(quickStrengthFactor(90, 75) * quickStrengthFactor(75, 90)).toBeCloseTo(1, 10);
-  });
-});
-
 describe("카드·퇴장", () => {
   it("두 번째 경고는 경고 한 장 + 퇴장으로 남는다 (실제 기록과 같다)", () => {
     const state = createTestGame(3);
@@ -317,6 +310,7 @@ describe("카드·퇴장", () => {
       stage: "league",
       round,
       date: state.date,
+      time: "15:00",
       homeTeamId: state.userTeamId,
       awayTeamId: "hull",
       result: null,

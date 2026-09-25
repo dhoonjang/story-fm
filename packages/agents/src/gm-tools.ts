@@ -1924,9 +1924,7 @@ export function buildGmTools(
         ...(options?.boardMoves ? { boardMoves: options.boardMoves } : {}),
       });
       if (!intent.ok) return { ok: false, message: intent.message };
-      // 평시에는 굴릴 판이 없다 — 골·카드 표식도 없다
-      const applied = applyTacticOrders(state, intent.intent, calls, [], [], {
-        roll: false,
+      const applied = applyTacticOrders(state, intent.intent, calls, {
         ...(options?.deferNegotiationIds
           ? { deferNegotiationIds: options.deferNegotiationIds }
           : {}),

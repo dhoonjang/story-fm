@@ -3,7 +3,7 @@
  *
  * 화면의 팝업이 방금 벌어진 턴을 여는 창이라면, 이쪽은 지나간 것 전부를 훑는 자리다.
  * 단위는 **턴**이고 턴 하나가 **타임라인**이다 — 감독의 입력, 모델 호출, 해석기가 낸
- * 명령, 코어가 걸고 반려한 것, 구간이 구른 패킷과 난수 채널, 굴러간 하루하루가 일어난
+ * 명령, 코어가 걸고 반려한 것, 경기의 체크포인트와 입력, 굴러간 하루하루가 일어난
  * 순서로 한 줄씩 선다. 호출의 원문(요청·응답 전문)은 그 항목의 이름으로 연다. 전술판
  * 저장·게임 삭제는 같은 모양의 타임라인이되 **다른 선반**(`board-…`)에 살고, 목록은 하나라
  * 두 선반이 일어난 순서로 함께 선다.
@@ -18,7 +18,7 @@
  *   pnpm log gm-m8k2x9q7-4f3a --full         같은 것을 전문으로 · --part system:1 · --json · --path
  *   pnpm log --board --game <id>             전술판 선반만 — 전술판 저장·게임 삭제 (--turns는 채팅 턴만)
  *   pnpm log --calls --agent gm --failed     호출만 한 줄씩 (에이전트·버전·실패로 거른다)
- *   pnpm log --facts match.segment --game <id>   그 갈래의 항목을 jsonl로 흘린다 — 집계용
+ *   pnpm log --facts match.checkpoint --game <id> 그 갈래의 항목을 jsonl로 흘린다 — 집계용
  *   pnpm log --games                         창고에 무엇이 얼마나 쌓였나
  *
  * ⚠️ **읽기 전용이다.** 창고를 비우는 것은 사람이 `.log`를 지우는 일이다.
@@ -211,7 +211,7 @@ const USAGE = `pnpm log [턴 id | 호출 id] [손잡이]
 목록:
   --game <id>      그 게임만 (기본: 기록이 있는 게임 전부)
   --failed         실패한 턴(호출)만
-  --kind <갈래>    그 갈래의 항목이 선 턴만 (match.segment · command · llm.call · warn …)
+  --kind <갈래>    그 갈래의 항목이 선 턴만 (match.checkpoint · command · llm.call · warn …)
   --since <2h>     최근 그만큼만 (s·m·h·d, 단위 없으면 분)
   --limit <n>      줄 수 (기본 25)
   --turns          채팅 턴만 · --board  전술판 선반만 (전술판 저장 · 게임 삭제). 기본은 둘 다, 일어난 순서로

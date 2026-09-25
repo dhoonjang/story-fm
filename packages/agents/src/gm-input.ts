@@ -61,6 +61,9 @@ import {
   ourYouthCandidates,
   playerName,
   pointsSeenBy,
+  buildMatchView,
+  opponentFactFavours,
+  opponentFactText,
   recordBreakLine,
   recordBreaksOf,
   savedClubProfile,
@@ -105,11 +108,8 @@ import {
   fatigueOf,
   formatMoney,
   formatScore,
-  matchupText,
+  shootoutTally,
   mediaFactText,
-  normalizePacket,
-  packetTagContext,
-  packetTagText,
   personaRoleLabel,
   PROMISE_KIND_KO,
   SET_PIECE_KO,
@@ -138,7 +138,6 @@ import {
   type ManagerOffer,
   type ManagerPromise,
   type MissionReportCard,
-  type PacketTag,
   type PersonaRelation,
   type ScoutReportCard,
   type TickEvent,
@@ -301,7 +300,7 @@ export function buildGmDigest(state: GameState): string | null {
   const digest = state.historyDigest;
   if (!digest) return null;
   // 무엇의 요약인지는 시스템 프롬프트의 「입력」이 말한다 — 블록은 날짜와 두 칸뿐이다.
-  // 옛 세이브의 요약은 열린 일이 없다 — 그때는 지난 일 한 칸이다
+  // 열린 일이 없으면 지난 일 한 칸이다
   return [
     `<summary at="${digest.at}">`,
     `지난 일: ${digest.text}`,
@@ -328,7 +327,7 @@ export function buildOperatorMessage(message: string): string {
 /**
  * 경기 캐시 레퍼런스 — 경기 내내 변하지 않는 것만 담는다. 구단·감독은 평시와 같은
  * 두 블록이다.
- * ⚠️ 패킷은 매 구간 갱신되므로 여기 두면 캐시 프리픽스가 매 턴 깨진다 —
+ * ⚠️ 스코어·시계처럼 매 턴 바뀌는 것은 여기 두면 캐시 프리픽스가 매 턴 깨진다 —
  * 휘발 채널(`buildLedgerNote`)로 내려간다.
  */
 export function buildMatchReference(state: GameState): string {
@@ -367,13 +366,9 @@ const TEAM_TALK_OCCASION_KO: Record<TeamTalkOccasion, string> = {
   shout: "외침",
 };
 
-/** 그 경기의 채팅 턴 — 표식이 있으면 경기 id로, 없으면(옛 세이브) 날짜로 가른다 */
+/** 그 경기의 채팅 턴 — 경기 턴의 표식(`matchId`)으로 가른다 */
 function turnsOfMatch(state: GameState, match: MatchRecord): ChatTurn[] {
-  return state.chat.filter(
-    (t) =>
-      t.inMatch === true &&
-      (t.matchId !== undefined ? t.matchId === match.id : t.at === match.date),
-  );
+  return state.chat.filter((t) => t.inMatch === true && t.matchId === match.id);
 }
 
 /**
@@ -399,8 +394,8 @@ function lockerRoomLine(turns: readonly ChatTurn[]): string | null {
 
 /**
  * 그라운드를 떠난 우리 선수 — 퇴장·부상·교체. 장부의 사건 목록(`result.events`)이
- * 원본이고, 사건이 남지 않은 옛 세이브는 그 턴의 카드·부상 기록·교체 명령 입력으로
- * 떨어진다. 없으면 줄을 세우지 않는다.
+ * 원본이고, 사건이 남지 않은 경기(간이 시뮬로 치른 경기)는 그 턴의 카드·부상 기록·교체
+ * 명령 입력으로 떨어진다. 없으면 줄을 세우지 않는다.
  */
 function departedLine(
   state: GameState,
@@ -473,7 +468,7 @@ function matchDigest(state: GameState): string | null {
   const nameOf = (pid: string) => state.players.find((p) => p.id === pid)?.name ?? pid;
   const scorers = played.result.scorers
     .map((tag, i) => {
-      const minute = played.result?.goalMinutes?.[i];
+      const minute = played.result?.goalMinutes[i];
       return `${minute !== undefined ? `${minute}′ ` : ""}${nameOf(tag.split(":")[1] ?? tag)}`;
     })
     .join(", ");
@@ -687,15 +682,14 @@ function opponentBlock(state: GameState): string | null {
             .map((a) => `${a.name} ${ABSENT_REASON_KO[a.reason]}(${a.note})`)
             .join(" · ")}`,
       `상대 전술: ${tacticsBrief(report.shape)}`,
-      report.notes.length === 0
-        ? "읽어 낸 지점: 없다"
+      report.facts.length === 0
+        ? "대진의 사실: 없다"
         : lines(
-            "읽어 낸 지점:",
-            ...report.notes.map(
-              (tag) =>
-                `- [${tag.favours === report.ourSide ? "우리" : tag.favours === null ? "중립" : "상대"}] ` +
-                packetTagText(tag, report.tagContext),
-            ),
+            "대진의 사실:",
+            ...report.facts.map((fact) => {
+              const favours = opponentFactFavours(fact);
+              return `- [${favours === null ? "중립" : favours ? "우리" : "상대"}] ${opponentFactText(fact)}`;
+            }),
           ),
     ),
   );
@@ -761,7 +755,7 @@ function offerSeat(offer: ManagerOffer): string {
 function offerTerms(offer: ManagerOffer): string {
   return [
     offer.salary
-      ? `연봉 ${formatMoney(offer.salary)}·${offer.years ?? "-"}년·이적 예산 약속 ${formatMoney(offer.budgetPledge ?? 0)}`
+      ? `연봉 ${formatMoney(offer.salary)}·${offer.years}년·이적 예산 약속 ${formatMoney(offer.budgetPledge)}`
       : null,
     // 보상금은 감독의 지갑을 지나지 않는다 — 새 구단이 지금 구단에 무는 돈이다
     offer.compensation ? `지금 구단에 보상금 ${formatMoney(offer.compensation)}` : null,
@@ -782,7 +776,7 @@ const OFFER_VIA_KO: Record<NonNullable<ManagerOffer["via"]>, string> = {
 
 /** 두드릴 수 있는 공석 한 줄씩 — 무직의 명부와 재직 중의 줄이 같은 것을 읽는다 */
 function vacancyRows(state: GameState): string[] {
-  return (state.managerVacancies ?? []).map(
+  return state.managerVacancies.map(
     (v) => `- ${teamName(v.teamId)}${v.position ? ` · 현재 ${v.position}위` : ""} · ${v.on} 공석`,
   );
 }
@@ -802,12 +796,17 @@ export function managerSeatLines(state: GameState): string[] {
   const offers = openManagerOffers(state).map((o) =>
     o.via === "renewal"
       ? `${OFFER_VIA_KO.renewal}: ${o.id} · ${offerTerms(o)}`
-      : `${OFFER_VIA_KO[o.via ?? "vacancy"]}: ${o.id} · ${offerSeat(o)} · ${offerTerms(o)}`,
+      : `${OFFER_VIA_KO[o.via]}: ${o.id} · ${offerSeat(o)} · ${offerTerms(o)}`,
   );
   const vacancies = vacancyRows(state);
   return vacancies.length > 0
     ? [...offers, `공석 (경질 뒤 ${VACANCY_KNOCK_DAYS}일 안):`, ...vacancies]
     : offers;
+}
+
+/** 제안에 걸린 기대 한 줄 — 갈래 코드가 원본이다 (career.md §5.1) */
+function offerExpectation(offer: ManagerOffer): string {
+  return boardExpectationText(offer.expectationCode, offer.target);
 }
 
 /**
@@ -817,20 +816,11 @@ export function managerSeatLines(state: GameState): string[] {
  * 그대로 실으면 모델은 아직 그 구단의 감독인 것처럼 장면을 쓴다. 무직에게 필요한
  * 것은 셋뿐이다 — 왜 무직인가, 무엇이 걸려 있는가, 그 사이 무슨 일이 있었는가.
  */
-/**
- * 제안에 걸린 기대 한 줄 — **코드가 원본이고 문장은 폴백이다** (career.md §5.1).
- * 새 제안은 갈래 코드만 적으므로, 옛 세이브의 문장을 먼저 읽으면 새 제안이 빈칸으로 선다.
- */
-function offerExpectation(offer: ManagerOffer): string {
-  return offer.expectationCode
-    ? boardExpectationText(offer.expectationCode, offer.target)
-    : `${offer.expectation ?? "-"}(${offer.target}위)`;
-}
 
 function buildUnemployedNote(state: GameState, passed?: TimePassed | null): string {
   const card = state.dismissal;
   const offers = openManagerOffers(state);
-  const vacancies = state.managerVacancies ?? [];
+  const vacancies = state.managerVacancies;
   const recent = recentNarrativeLines(state);
   return [
     `<snapshot>`,
@@ -842,11 +832,9 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
         `감독 ${josa(state.manager.name, "은/는")} 무직이다 — 맡은 팀이 없다.`,
         card
           ? `${card.kind === "expired" ? "계약 만료" : "경질"}: ${card.on} ${teamName(card.teamId)}${
-              card.expectation && card.position
-                ? ` — 기대 ${card.expectation}(${card.target}위)에 최종 ${card.position}위`
-                : card.reason
-                  ? ` — ${card.reason}`
-                  : ""
+              card.position !== undefined
+                ? ` — 기대 ${boardExpectationText(card.expectationCode, card.target)}에 최종 ${card.position}위`
+                : ""
             }`
           : null,
       ),
@@ -893,7 +881,7 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
  * 서기 전에는 이 블록이 아무 줄도 내지 못했다.
  */
 function retirementFacts(state: GameState): string[] {
-  return (state.retired ?? [])
+  return state.retired
     .filter((r) => r.teamId === state.userTeamId && r.on === state.calendar.preseasonStart)
     .map((r) => {
       // 우리 팀에서의 기록 — 통산 접기는 한 곳이다(`careerTotalsOf`). 여기서 다시
@@ -944,7 +932,7 @@ function youthCandidateFacts(state: GameState): string[] {
  * 쓰면 같은 상이 다이제스트와 스냅샷에서 다른 문장으로, 또는 한쪽에만 선다.
  */
 function awardFacts(state: GameState): string[] {
-  return (state.awards ?? [])
+  return state.awards
     .filter((a) => a.season === state.season - 1 && awardReachesManager(state, a))
     .map((a) => awardLine(a));
 }
@@ -962,14 +950,13 @@ function recordFacts(state: GameState): string[] {
   const teamId = managedTeamId(state);
   if (teamId === null) return [];
   const last = state.season - 1;
-  const snapshot = (state.history ?? []).find((h) => h.season === last && h.teamId === teamId);
+  const snapshot = state.history.find((h) => h.season === last && h.teamId === teamId);
   const league = snapshot?.leagues.find((l) => l.rows.some((r) => r.teamId === teamId));
   if (!league) return [];
   const index = league.rows.findIndex((r) => r.teamId === teamId);
   const record = league.rows[index]?.record;
-  // 이관된 행은 승점도 득점도 모른다 — 없는 수로는 무엇도 경신할 수 없다
   if (record === undefined) return [];
-  const before = { ...state, history: (state.history ?? []).filter((h) => h.season < last) };
+  const before = { ...state, history: state.history.filter((h) => h.season < last) };
   return recordBreaksOf(before, teamId, {
     season: last,
     leagueId: league.leagueId,
@@ -1011,7 +998,7 @@ function offseasonFacts(state: GameState): string | null {
  * 줄은 도메인이 만든다(`mediaFactText`) — 화면·스냅샷·테스트가 같은 자를 쓴다.
  */
 function mediaBlock(state: GameState): string | null {
-  const facts = state.media ?? [];
+  const facts = state.media;
   if (facts.length === 0) return null;
   return facts.map((f) => `- ${f.date} · ${mediaFactText(f)}`).join("\n");
 }
@@ -1698,100 +1685,73 @@ export function buildMatchLogBlock(state: GameState): string {
 }
 
 /**
- * 패킷의 태그에서 **GM이 읽을 줄**만 — 시트가 건 줄은 빠진다 (match.md §1.6).
+ * 경기 장부 + 지금까지의 통계 — 매 턴 갱신되는 휘발성 블록.
  *
- * 시트의 줄마다 태그가 서지만 그것은 판독의 수치 독해라 감독 쪽 화자에게 가지 않는다.
- * 판독이 감독에게 닿는 통로는 `<points>`의 허락된 줄 하나뿐이고, 여기서 새어 나가면
- * 분석 능력이 아무것도 가리지 않는다.
+ * - `<ledger>` — 스코어·시각·국면·온필드와 벤치·교체 횟수. 온필드 줄에는 자리와 지금
+ *   내는 전력(경기 계수를 곱한 종합)이 붙는다 — 존 평균만으론 "누가 안 도는가"가 안 보인다.
+ * - `<standing>` — 우리가 걸어 둔 전술.
+ * - `<match_state>` — 점유·슈팅·xG·패스·부하의 지금까지 합. `withState`가 참일 때만 —
+ *   킥오프 턴은 아직 아무 일도 일어나지 않았다.
+ * - `<points>` — **감독의 분석이 허락한 판독**뿐이다 (career.md §2 · match.md §3.2). 문장만
+ *   싣는다: 수치도 시트도 없고, 이 줄들은 코치와 중계의 말로만 감독에게 닿는다.
  */
-function spoken(notes: readonly PacketTag[]): PacketTag[] {
-  return notes.filter((note) => note.source !== "sheet" && note.source !== "sheet-dropped");
-}
-
-/**
- * 경기 장부 + 현재 판세 — 매 턴 갱신되는 휘발성 블록. 패킷도 여기(캐시 밖)에
- * 담되 JSON을 통째로 붓지 않고 읽는 쪽이 실제로 쓰는 것만 요약한다.
- *
- * 읽는 쪽이 둘이라 `withPacket`이 갈린다.
- * - `true` — 중계가 판을 읽는 턴. 판세를 함께 싣는다.
- * - `false`·생략 — 킥오프·대화만 건 턴. 아직 아무 일도 일어나지 않았는데 판세를
- *   쥐여 주면 첫 마디부터 우열을 읊는다. 그때 필요한 것은 대진과 선발뿐이다.
- *
- * **시트는 어느 쪽에도 서지 않는다** — 판독이 감독 쪽에 닿는 통로는 `<points>`의
- * 허락된 줄과 코치·중계의 말뿐이다 (match.md §1.6).
- */
-export function buildLedgerNote(state: GameState, options: { withPacket?: boolean } = {}): string {
+export function buildLedgerNote(state: GameState, options: { withState?: boolean } = {}): string {
   const pending = state.pendingMatch;
-  const ledger = pending?.ledger;
-  if (!ledger || !pending) return "";
-  const packet =
-    options.withPacket === true && pending.packet ? normalizePacket(pending.packet) : null;
-  /** 태그가 이름을 대는 자리 — 패킷이 있으면 이름으로, 없으면 태그 그대로 */
-  const tagCtx = pending.packet ? packetTagContext(normalizePacket(pending.packet)) : undefined;
-  // 온필드 명단에 개인 전력(패킷의 effective)을 붙인다 — 존 평균만으론 "누가 안 도는가"가 안 보인다
-  const effective = new Map(
-    [...(packet?.home.lineup ?? []), ...(packet?.away.lineup ?? [])].map((p) => [p.id, p] as const),
-  );
-  /** 킥오프 턴엔 자리만 — 전력 수치는 패킷과 함께 다음 턴에 온다 */
-  const position = new Map(
-    [...(pending.packet?.home.lineup ?? []), ...(pending.packet?.away.lineup ?? [])].map(
-      (p) => [p.id, p.position] as const,
-    ),
+  if (!pending) return "";
+  const live = pending.live;
+  const ledger = live.ledger;
+  const view = buildMatchView(state);
+  const rows = new Map(
+    [
+      ...(view?.onPitch.home ?? []),
+      ...(view?.onPitch.away ?? []),
+      ...(view?.bench.home ?? []),
+      ...(view?.bench.away ?? []),
+    ].map((p) => [p.id, p] as const),
   );
   const withNames = (ids: readonly string[] | undefined): string =>
     (ids ?? [])
       .map((id) => {
-        const p = effective.get(id);
-        if (p) return `${id}(${playerName(state, id)} ${p.position} ${p.effective})`;
-        const at = position.get(id);
-        return at ? `${id}(${playerName(state, id)} ${at})` : `${id}(${playerName(state, id)})`;
+        const row = rows.get(id);
+        return row
+          ? `${id}(${playerName(state, id)} ${row.position} ${row.effective})`
+          : `${id}(${playerName(state, id)})`;
       })
       .join(", ");
-  const packetLines = packet
-    ? [
-        ``,
-        `<packet>`,
-        // 판세를 읽는 것은 모델의 일이다 — 코어는 이름·수치·상성 근거만 싣는다
-        `${packet.home.teamName}(홈) vs ${packet.away.teamName} — 기대 득점 ${packet.guide.expectedGoals.home} : ${packet.guide.expectedGoals.away}`,
-        packet.matchups.map((m) => matchupText(m)).join(" / "),
-        ...spoken(packet.keyPoints).map((k) => `· ${packetTagText(k, tagCtx)}`),
-        `홈 전술 소화: ${Math.round(packet.home.tactical.uptake * 100)}%${
-          spoken(packet.home.tactical.notes).length > 0
-            ? ` — ${spoken(packet.home.tactical.notes)
-                .map((n) => packetTagText(n, tagCtx))
-                .join(" / ")}`
-            : ""
-        }`,
-        `어웨이 전술 소화: ${Math.round(packet.away.tactical.uptake * 100)}%${
-          spoken(packet.away.tactical.notes).length > 0
-            ? ` — ${spoken(packet.away.tactical.notes)
-                .map((n) => packetTagText(n, tagCtx))
-                .join(" / ")}`
-            : ""
-        }`,
-        `</packet>`,
-      ]
-    : [];
-  /**
-   * `<points>` — **감독의 분석이 허락한 판독**뿐이다 (career.md §2 · match.md §1.6).
-   * 문장만 싣는다: 수치도 시트도 없고, 이 줄들은 코치와 중계의 말로만 감독에게 닿는다.
-   */
   const seen = pointsSeenBy(state);
   const pointLines =
     seen.length > 0 ? [`<points>`, ...seen.map((p) => `- ${p.text}`), `</points>`] : [];
   const standingLines = ["", ...buildStandingBlock(state)];
-  // 사건은 싣지 않는다 — 코어가 이미 굴린 구간은 <segment>로 따로
-  // 실린다. 이 블록은 그 구간이 끝난 자리의 장부다 (agents.md §3)
-  /**
-   * 교체 한도는 **그 경기가 정한다** — 연장은 6인/4회, 친선은 9인/3회다 (match.md §5).
-   * 5/3으로 박아 두면 연장에 들어간 모델이 아직 남은 카드를 없는 것으로 읽는다.
-   * 장부 검증과 AI 판단이 보는 것과 같은 함수다.
-   */
+  /** 교체 한도는 **그 경기가 정한다** — 연장은 6인/4회, 친선은 9인/3회다 (match.md §5) */
   const subLimits = subLimitsOf(ledger.phase, ledger.friendly);
+  const minute = ledger.added > 0 ? `${ledger.minute}+${ledger.added}′` : `${ledger.minute}′`;
+  const stateLines =
+    options.withState === true && view
+      ? [
+          ``,
+          `<match_state>`,
+          ...(["home", "away"] as const).map((side) => {
+            const s = view.stats[side];
+            return (
+              `${side === "home" ? view.home.name : view.away.name} — 점유 ${Math.round(s.possession * 100)}% · ` +
+              `슈팅 ${s.shots} (유효 ${s.shotsOnTarget}) · xG ${s.xg.toFixed(2)} · ` +
+              `패스 ${s.passes}(${s.passes > 0 ? Math.round((s.passesCompleted / s.passes) * 100) : 0}%) · ` +
+              `태클 ${s.tackles} · 파울 ${s.fouls} · 코너 ${s.corners} · 뛴 거리 ${s.distanceKm.toFixed(1)}km`
+            );
+          }),
+          `</match_state>`,
+        ]
+      : [];
+  const shootoutLines = pending.shootout
+    ? [
+        `승부차기 ${shootoutTally(pending.shootout.kicks).home}:${shootoutTally(pending.shootout.kicks).away} · ${pending.shootout.kicks.length}발`,
+      ]
+    : [];
   return [
     `<ledger>`,
     // 스코어의 자는 하나다 — 모델이 되받아 쓰는 자리라 화면과 같은 표기로 싣는다
-    `스코어 ${formatScore(ledger.score.home, ledger.score.away)} · ${ledger.minute}′ · ${ledger.phase}`,
+    `스코어 ${formatScore(ledger.score.home, ledger.score.away)} · ${minute} · ${ledger.phase}${live.state.interval ? " · 휴식 중" : ""}`,
+    ...shootoutLines,
     `홈 온필드: ${withNames(ledger.home.onPitch)}`,
     `홈 벤치: ${withNames(ledger.home.bench)} (교체 ${ledger.home.subsUsed}/${subLimits.maxSubs}, 기회 ${ledger.home.subWindows}/${subLimits.maxSubWindows})`,
     `어웨이 온필드: ${withNames(ledger.away.onPitch)}`,
@@ -1799,7 +1759,7 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
     ledger.sentOff.length > 0 ? `퇴장: ${withNames(ledger.sentOff)}` : "",
     `</ledger>`,
     ...standingLines,
-    ...packetLines,
+    ...stateLines,
     ...pointLines,
   ]
     .filter(Boolean)
@@ -2011,7 +1971,7 @@ export function sanitizeSceneText(text: string): string {
 /**
  * 중계 위생 — **꺾쇠 블록만 걷는다** (prompts.md §1).
  *
- * 평시 규칙을 그대로 갖다 붙일 수 없다: 구간마다 헤더를 새로 찍는 것이 중계에서는
+ * 평시 규칙을 그대로 갖다 붙일 수 없다: 턴마다 헤더를 새로 찍는 것이 중계에서는
  * 정상이고, 이어쓰기의 경계도 다르다. 남는 것은 두 국면이 함께 읽는 좁은 규칙
  * 하나 — 모델이 `<points>`를 되받아 써도 화면에도 저장에도 서지 않는다.
  */

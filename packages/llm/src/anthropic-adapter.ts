@@ -2,7 +2,6 @@ import Anthropic from "@anthropic-ai/sdk";
 import { resolveApiKey, type AnthropicAgentConfig, type ThinkingLevel } from "./config";
 import {
   isStoredLlmHistory,
-  isTextHistoryMessage,
   type GameLLM,
   type JsonObjectSchema,
   type ToolOutcome,
@@ -188,7 +187,7 @@ function isAnthropicMessage(value: unknown): value is Anthropic.MessageParam {
  * 공통/저장 이력을 Anthropic 메시지로 복원한다.
  *
  * 다른 제공자·모델의 원형 이력은 섞지 않는다. 설정을 바꾼 채 진행 중 경기를
- * 열어도 장부·패킷으로 안전하게 재개할 수 있도록 그 경우 이력만 새로 시작한다.
+ * 열어도 장부로 안전하게 재개할 수 있도록 그 경우 이력만 새로 시작한다.
  */
 function anthropicHistory(
   history: TurnHistory,
@@ -198,16 +197,7 @@ function anthropicHistory(
     if (history.provider !== config.provider || history.model !== config.model) return [];
     return history.messages.filter(isAnthropicMessage);
   }
-  if (!Array.isArray(history)) return [];
-  const messages: unknown[] = history;
-  if (messages.every(isTextHistoryMessage)) {
-    return messages.map((message) => ({
-      role: message.role,
-      content: message.content,
-    }));
-  }
-  // 태그 도입 전 경기 세이브는 Anthropic MessageParam[] 원형이었다.
-  return messages.filter(isAnthropicMessage);
+  return history.map((message) => ({ role: message.role, content: message.content }));
 }
 
 /**
@@ -293,7 +283,7 @@ function classifyAnthropic(error: unknown): LlmErrorKind {
 }
 
 /**
- * Anthropic 어댑터 — 캐시 계층(도구+시스템 / 명부·패킷 / 이력), 사고 설정,
+ * Anthropic 어댑터 — 캐시 계층(도구+시스템 / 레퍼런스 / 이력), 사고 설정,
  * tool call 루프(검증 실패 시 is_error로 재시도 유도)를 처리한다.
  *
  * 캐시 배치 (실측 기준: 도구+시스템 프리픽스만 5천 토큰 규모):

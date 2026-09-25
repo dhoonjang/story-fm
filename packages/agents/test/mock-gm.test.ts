@@ -1,11 +1,14 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { isMandated } from "@story-fm/domain";
+import { STOP_EVENT_TYPES, isMandated } from "@story-fm/domain";
 import {
   activeContract,
   addDays,
   advanceTime,
   arrivedResponses,
   clubDirector,
+  advanceLiveMatch,
+  advanceShootout,
+  awaitingShootout,
   createGame,
   dealOdds,
   eventTexts,
@@ -13,6 +16,7 @@ import {
   openNegotiationFor,
   pendingOffer,
   pendingVerdicts,
+  resumeLiveInterval,
   renewalExpectation,
   renewalYearsExpectation,
   suggestTerms,
@@ -20,6 +24,7 @@ import {
   tacticsOf,
   userPlayers,
   type GameState,
+  liveFinished,
 } from "@story-fm/engine";
 import {
   SUGGESTION_MAX_CHARS,
@@ -231,10 +236,10 @@ describe("다음 말 제안 — 마지막 줄의 태그에서 꺼낸다", () => 
 describe("mock 대본 — 경기", () => {
   /**
    * 킥오프는 세 걸음이다 — 도구가 문을 열고(`start_match`), 감독이 들어서고(첫 휘슬),
-   * 그다음 손잡이가 구간을 굴린다. 경기일까지는 코어로 걷는다: 브라우저도 감독도
+   * 그다음 실행기가 시계를 밀며 정지점마다 중계 턴을 연다. 경기일까지는 코어로 걷는다: 브라우저도 감독도
    * 없는 자리에서 턴을 서른 번 도는 것은 이 케이스가 재려는 것이 아니다.
    */
-  it("손잡이로 킥오프에서 종료까지 완주하고 중계가 선다", async () => {
+  it("킥오프에서 종료까지 완주하고, 정지점마다 중계가 선다", async () => {
     const state = build(7);
     for (let guard = 0; guard < 40 && state.phase !== "matchday"; guard += 1) {
       advanceTime(state, "next_match");
@@ -246,15 +251,29 @@ describe("mock 대본 — 경기", () => {
     expect(state.pendingMatch?.entered).not.toBe(true);
 
     // 입장 턴은 첫 휘슬만 — 사건은 아직 없다. 도구 없는 턴에도 다음 말은 선다
-    const entered = await runGmTurn(state, "진행", undefined, { kind: "advance_match" });
+    const entered = await runGmTurn(state, "진행", undefined, { kind: "enter_match" });
     expect(entered.text).toContain("@중계:");
     expect(entered.suggestion).toBe("계속 가자");
     expect(state.pendingMatch?.entered).toBe(true);
     expect(entered.goals ?? []).toHaveLength(0);
 
+    // 실행기가 하는 일 — 1분씩 굴리고, 중계할 사건이 확정되면 정지점 턴을 연다
     let broadcasts = 0;
-    for (let guard = 0; guard < 80 && state.phase === "match"; guard += 1) {
-      const turn = await runGmTurn(state, "진행", undefined, { kind: "advance_match" });
+    for (let guard = 0; guard < 400 && state.phase === "match"; guard += 1) {
+      const live = state.pendingMatch!.live;
+      if (liveFinished(live)) {
+        if (awaitingShootout(state)) {
+          advanceShootout(state);
+          continue;
+        }
+        // 종료 휘슬 — 마감 턴
+        await runGmTurn(state, "경기 중단", undefined, { kind: "match_stop" });
+        break;
+      }
+      if (live.state.interval) resumeLiveInterval(state);
+      const { events } = advanceLiveMatch(state, 60 * 20);
+      if (!events.some((e) => STOP_EVENT_TYPES.has(e.type))) continue;
+      const turn = await runGmTurn(state, "경기 중단", undefined, { kind: "match_stop" });
       if (turn.text.includes("@중계:")) broadcasts += 1;
     }
     expect(state.phase).toBe("idle");
@@ -416,7 +435,7 @@ describe("mock 대본 — 협상 방", () => {
     const spoke = await runGmTurn(state, "제안한 조건으로 갑시다");
     expectGmGrammar(spoke.text);
     // 감독의 말은 코어가 단장의 테이블에 us 줄로 적었다
-    expect(tableOf(state, negotiation, "club")?.lines.some((l) => l.by === "us")).toBe(true);
+    expect(tableOf(negotiation, "club")?.lines.some((l) => l.by === "us")).toBe(true);
     // 값이 실린 말 — 해석기가 오퍼로 옮기고, 단장이 그 자리에서 답한다
     expect(namesOf(spoke)).toContain("send_offer");
     expect(namesOf(spoke)).toContain("counterparty_reply");
@@ -464,7 +483,7 @@ describe("mock 대본 — 협상 방", () => {
     expect(left.toolCalls.find((c) => c.name === TABLE_LEFT)?.silent).toBe(true);
     expect(state.phase).toBe("idle");
     expect(negotiation.status).toBe("open");
-    expect(tableOf(state, negotiation, "club")?.lines.at(-1)?.by).toBe("ledger");
+    expect(tableOf(negotiation, "club")?.lines.at(-1)?.by).toBe("ledger");
   });
 
   it("자리를 뜨는 말은 leave_negotiation로 방을 닫는다", async () => {

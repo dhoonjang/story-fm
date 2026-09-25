@@ -1,6 +1,11 @@
 import type { GamePlayer, InjuryHistory, InjurySeverity, TickSink } from "@story-fm/domain";
 // 성향의 바닥·천장은 세이브 스키마와 같은 상수를 읽는다 (player.md §5.3)
-import { INJURY_PRONENESS_MAX, INJURY_PRONENESS_MIN, INJURY_SEVERITY_KO } from "@story-fm/domain";
+import {
+  INJURY_PRONENESS_MAX,
+  INJURY_PRONENESS_MIN,
+  INJURY_SEVERITY_KO,
+  PRONENESS_BASE,
+} from "@story-fm/domain";
 import { INJURY_PER_MATCH, injuryRiskOf, type InjuryRisk } from "@story-fm/sim";
 import { addDays, diffDays } from "../competition/calendar";
 import { playerCatalog } from "../world/catalog";
@@ -101,7 +106,7 @@ export function resolveInjuries(state: GameState, digest: TickSink): void {
  * ⚠️ 내려가는 조건은 **날짜가 아니라 출전**이다. 시간으로 깎으면 부상으로 반년을
  * 쉰 선수가 재활하는 동안 성향이 회복돼, 돌아온 날 멀쩡한 몸이 된다.
  */
-export const PRONENESS_BASE = 1;
+export { PRONENESS_BASE };
 
 /**
  * 심각도별 결장 일수 [최소, 최대] — 굴림과 **되읽는 쪽(`severityOfDays`)이 같은 표를
@@ -170,9 +175,9 @@ function clampProneness(value: number): number {
   return Math.max(INJURY_PRONENESS_MIN, Math.min(INJURY_PRONENESS_MAX, value));
 }
 
-/** 지금 값 — 옛 세이브엔 필드가 없다 */
+/** 지금 값 */
 export function pronenessValue(player: GamePlayer): number {
-  return player.state.injuryProneness ?? PRONENESS_BASE;
+  return player.state.injuryProneness;
 }
 
 /** 다쳤다 — 심각도만큼 오른다 */

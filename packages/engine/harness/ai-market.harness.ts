@@ -46,7 +46,7 @@ describe("한 시즌의 시장 규모", () => {
     let inWindow = 0;
     let snapped = false;
     playSeason(state, undefined, (s) => {
-      for (const row of s.interests ?? []) {
+      for (const row of s.interests) {
         const key = interestKey(row.teamId, row.gamePlayerId, row.since);
         const seen = stood.get(key)?.stage;
         // 가장 높이 오른 칸만 남긴다 — 창이 닫혀 내려간 칸이 오른 사실을 지우지는 않는다

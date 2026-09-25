@@ -229,7 +229,7 @@ export function settleMilestones(
     code: hit.code,
     value: hit.value,
   }));
-  (state.milestones ??= []).push(...rows);
+  state.milestones.push(...rows);
   return rows;
 }
 
@@ -239,14 +239,14 @@ export function milestonesOf(
   playerId: string,
   matchId: string,
 ): readonly Milestone[] {
-  return (state.milestones ?? [])
+  return state.milestones
     .filter((m) => m.gamePlayerId === playerId && m.matchId === matchId)
     .sort(compareMilestones);
 }
 
 /** 그 경기가 우리 선수들에게 남긴 마일스톤 전부 — 드문 것부터 */
 export function matchMilestones(state: GameState, matchId: string): readonly Milestone[] {
-  return (state.milestones ?? []).filter((m) => m.matchId === matchId).sort(compareMilestones);
+  return state.milestones.filter((m) => m.matchId === matchId).sort(compareMilestones);
 }
 
 /**
@@ -261,7 +261,7 @@ export function seasonMilestonesOf(
   playerId: string,
   season: number,
 ): readonly Milestone[] {
-  return (state.milestones ?? [])
+  return state.milestones
     .filter((m) => m.gamePlayerId === playerId && m.season === season)
     .sort(compareMilestones);
 }

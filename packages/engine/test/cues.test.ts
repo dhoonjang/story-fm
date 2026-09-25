@@ -33,6 +33,7 @@ import {
   financeOf,
   internationalBreaksOf,
   leagueOfTeamIn,
+  tierOfTeamIn,
   openBoardDemand,
   OWNER_ARCHETYPE_LABELS,
   pendingApproach,
@@ -51,8 +52,8 @@ import {
   windowOpenForTeam,
   worldFigures,
   type GameState,
-  categoryOf,
   STADIUM_ASSET_MONTHS,
+  transferRequestOf,
 } from "@story-fm/engine";
 import type {
   BoardExpectationCode,
@@ -63,7 +64,7 @@ import type {
   Transfer,
 } from "@story-fm/domain";
 import { BOARD_REQUEST_KINDS, pressFactText } from "@story-fm/domain";
-import { createTestGame } from "./helpers";
+import { createTestGame, resultOf } from "./helpers";
 
 /**
  * 선수 근황 — **세계에 지금 무슨 이야기가 있는가** (cues.ts).
@@ -234,17 +235,18 @@ describe("연속 미출전은 날짜순 직전 세 경기로 센다", () => {
       id,
       season: state.season,
       competitionId: "epl",
+      stage: "league",
+      time: "15:00",
       round: 1,
       date,
       homeTeamId: state.userTeamId,
       awayTeamId: "chelsea",
-      result: {
+      result: resultOf({
         homeGoals: 1,
         awayGoals: 0,
-        scorers: [],
         homeLineup: [...lineup],
         ...(bench ? { homeBench: [...bench] } : {}),
-      },
+      }),
     });
   }
 
@@ -531,8 +533,15 @@ describe("자리는 그 자리에 있던 사람에게만 닿는다", () => {
         topic: "results",
         speakerId: "구단주",
         about: null,
-        context: "리그 15위 · 기대 6위",
-        facts: [{ kind: "standing", text: "리그 15위 · 20경기", about: null, sharp: true }],
+        contextCard: { code: "standing" },
+        facts: [
+          {
+            kind: "standing",
+            data: { values: { rank: 15, played: 20 } },
+            about: null,
+            sharp: true,
+          },
+        ],
         step: 3,
         status: "pending",
       },
@@ -555,7 +564,15 @@ describe("자리는 그 자리에 있던 사람에게만 닿는다", () => {
         date: addDays(state.date, 1),
         trigger: "match",
         context: "웨스트햄전 1-3 패배",
-        facts: [{ kind: "result", text: "웨스트햄전 1-3 패배 (홈)", about: null, sharp: true }],
+        facts: [
+          {
+            kind: "result",
+            data: { name: "웨스트햄", values: { for: 1, against: 3 }, tags: ["loss", "home"] },
+            about: null,
+            sharp: true,
+          },
+        ],
+        reporterId: state.personas!.find((p) => p.role === "reporter")!.characterId,
         status: "pending",
         weight: 2,
       },
@@ -647,7 +664,7 @@ describe("계단 4·5 — 언론 유출과 이적 요청", () => {
     expect(worldFigures(state).some((f) => f.characterId === open?.speakerId)).toBe(true);
     expect(open?.facts[0]?.kind).toBe("transfer-request");
     // 자리가 열리는 순간 요청이 선다 — 감독의 답을 기다리지 않는다
-    expect(target.state.transferRequestedOn).toBe(state.date);
+    expect(transferRequestOf(state, target.id)?.since).toBe(state.date);
   });
 
   it("요청이 서 있는 동안 압력은 더 쌓이지 않고, 불만이 풀리면 걷힌다", () => {
@@ -661,14 +678,14 @@ describe("계단 4·5 — 언론 유출과 이적 요청", () => {
     // 꼭대기 계단에서는 남는 압력이 없다
     expect(rowOf(state, target.id).value).toBe(0);
     // 답은 요청을 지우지 못한다
-    expect(target.state.transferRequestedOn).not.toBeUndefined();
+    expect(transferRequestOf(state, target.id)).not.toBeNull();
 
     pressDays(state, 5);
     expect(rowOf(state, target.id).value).toBe(0);
 
     state.issues = state.issues.filter((i) => i.gamePlayerId !== target.id);
     pressDays(state, 1);
-    expect(target.state.transferRequestedOn).toBeUndefined();
+    expect(transferRequestOf(state, target.id)).toBeNull();
   });
 
   it("주장의 사다리는 3에서 멈춘다 — 유출도 에이전트도 서지 않는다", () => {
@@ -722,6 +739,10 @@ function closedOffer(
     openedOn: on,
     expiresOn: on,
     status: input.status,
+    pitched: [],
+    precontract: false,
+    terms: [],
+    buyout: false,
     rounds: [
       {
         date: on,
@@ -840,6 +861,10 @@ describe("계약과 관심 — 에이전트가 계단 1부터 온다", () => {
       openedOn: state.date,
       expiresOn: addDays(state.date, 14),
       status: "open",
+      pitched: [],
+      precontract: false,
+      terms: [],
+      buyout: false,
       rounds: [
         {
           date: state.date,
@@ -924,8 +949,8 @@ describe("계약과 관심 — 에이전트가 계단 1부터 온다", () => {
     const open = pendingApproach(state);
     expect(open?.topic).toBe("interest");
     expect(open?.step).toBe(3);
-    expect(state.pressLeaks ?? []).toEqual([]);
-    expect(target.state.transferRequestedOn).toBeUndefined();
+    expect(state.pressLeaks).toEqual([]);
+    expect(transferRequestOf(state, target.id)).toBeNull();
   });
 
   it("헐값 오퍼가 흘러간 것은 세지 않는다 — 값의 자는 막힌 이적과 같다 (`isSeriousOffer`)", () => {
@@ -986,11 +1011,13 @@ describe("시즌이 끝나면 구단주가 마주 앉는다", () => {
       losses: 18,
       goalsFor: 40,
       goalsAgainst: 55,
+      leagueId: leagueOfTeamIn(state, state.userTeamId),
       board: {
         grade: board.position <= board.target ? "met" : "missed",
         position: board.position,
         target: board.target,
         expectationCode: board.code,
+        items: [],
       },
     });
   }
@@ -1009,7 +1036,15 @@ describe("시즌이 끝나면 구단주가 마주 앉는다", () => {
     expect(pendingApproach(state)).toBeNull();
 
     // 무직 그 자체도 문이다 — 줄이 지난 시즌의 것이어도 마주 앉을 구단주가 없다
-    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    state.dismissal = {
+      on: state.date,
+      season: state.season,
+      teamId: state.userTeamId,
+      kind: "sacked",
+      tier: tierOfTeamIn(state, state.userTeamId),
+      target: 10,
+      expectationCode: "mid",
+    };
     recordSeason(state, state.season - 1, { position: 9, target: 6, code: "europe" });
     pressDays(state, 1);
     expect(pendingApproach(state)).toBeNull();
@@ -1389,17 +1424,18 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
         id,
         season: state.season,
         competitionId: "epl",
+        stage: "league",
+        time: "15:00",
         round: 1,
         date,
         homeTeamId: state.userTeamId,
         awayTeamId: "chelsea",
-        result: {
+        result: resultOf({
           homeGoals: 1,
           awayGoals: 0,
-          scorers: [],
           homeStarters: starters,
           homeLineup: starters,
-        },
+        }),
       });
     }
 
@@ -1728,7 +1764,7 @@ describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () 
      * 공사비는 **자본 지출**이다 — 현금은 오늘 나가지만 손익은 자산이 내용연수에
      * 나눠 문다 (finance.md §6.1-1). 착공 달 하나가 PSR을 통째로 먹지 않는다.
      */
-    const spent = financeOf(state, teamId).ledger.filter((e) => categoryOf(e) === "capex");
+    const spent = financeOf(state, teamId).ledger.filter((e) => e.category === "capex");
     expect(spent).toHaveLength(1);
     const asset = financeOf(state, teamId).assets?.[0];
     expect(asset?.cost).toBe(seats * BOARD_REQUEST.SEAT_COST);
@@ -1975,7 +2011,15 @@ describe("수석코치의 눈", () => {
 
   it("무직이면 벤치에 앉을 사람이 없다 — 한 장도 서지 않는다", () => {
     const state = asCoach(createTestGame(11), "club_loyalist");
-    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    state.dismissal = {
+      on: state.date,
+      season: state.season,
+      teamId: state.userTeamId,
+      kind: "sacked",
+      tier: tierOfTeamIn(state, state.userTeamId),
+      target: 10,
+      expectationCode: "mid",
+    };
     expect(coachCues(state)).toEqual([]);
   });
 

@@ -35,7 +35,7 @@ export interface OpeningDraft {
 function subjectNameOf(state: GameState, id: string): string | undefined {
   const player = playerById(state, id);
   if (player && player.teamId === state.userTeamId) return player.name;
-  return (state.personas ?? []).find((p) => p.characterId === id)?.name;
+  return state.personas.find((p) => p.characterId === id)?.name;
 }
 
 /**
@@ -101,7 +101,7 @@ export function seedOpenings(state: GameState, drafts: readonly OpeningDraft[]):
 
 /** 아직 열린 시작 사건 */
 export function activeOpenings(state: GameState): Opening[] {
-  return (state.openings ?? []).filter((o) => o.resolvedOn === null);
+  return state.openings.filter((o) => o.resolvedOn === null);
 }
 
 /** 닫힌 실마리가 서사 기억에 남는 무게 — 면담 한 건과 같은 줄이다 */
@@ -112,7 +112,7 @@ const OPENING_CLOSE_SALIENCE = 2;
  * 일지에 남길 줄이고, 그 자리에 열린 실마리가 없으면 null이다.
  */
 export function resolveOpening(state: GameState, id: string, reason: OpeningClose): string | null {
-  const opening = (state.openings ?? []).find((o) => o.id === id && o.resolvedOn === null);
+  const opening = state.openings.find((o) => o.id === id && o.resolvedOn === null);
   if (!opening) return null;
   opening.resolvedOn = state.date;
   opening.resolvedBy = reason;

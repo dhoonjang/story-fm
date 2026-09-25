@@ -1,5 +1,5 @@
 import type { MatchEvent, Point, SheetLine, ShootoutOutcome } from "@story-fm/domain";
-import { formatScore, packetTagText, shootoutTally } from "@story-fm/domain";
+import { eventCauseText, formatScore, shootoutTally } from "@story-fm/domain";
 import {
   addDays,
   BIG_CHANCE_XG,
@@ -9,6 +9,7 @@ import {
   formatClock,
   minutesOfClock,
   nextMatchFor,
+  playerById,
   playerName,
   renewalExpectation,
   roomNegotiationOf,
@@ -16,11 +17,13 @@ import {
   suggestTerms,
   tableVoicesOf,
   teamName,
+  unseenEvents,
   userSide,
   type GameState,
   type ReadingOccasion,
 } from "@story-fm/engine";
 import type { ScriptedCall, ScriptedTurn } from "@story-fm/llm";
+import { eventMinuteText, scoreBeforeEvents } from "./match-script";
 import type { OpsInput } from "./orders-ops";
 import { SUGGEST_REPLY_TAG } from "./suggest-reply";
 
@@ -345,7 +348,7 @@ export function ordersScript(state: GameState, said: string): ScriptedTurn {
   return { output: { ops } };
 }
 
-/** 대본의 판독이 쓰는 포인트 id — 세 자리(킥오프·지시·구간 뒤)가 같은 줄을 이어 쓴다 */
+/** 대본의 판독이 쓰는 포인트 id — 판독하는 자리(킥오프·지시·사건 뒤)가 같은 줄을 이어 쓴다 */
 const MOCK_POINT_EDGE = "mock-edge";
 const MOCK_POINT_COHESION = "mock-cohesion";
 
@@ -353,27 +356,30 @@ const MOCK_POINT_COHESION = "mock-cohesion";
  * **대본이 쓰는 전술 포인트와 시트** — 실모드의 판독기가 서는 자리다 (agents.md §3 mock).
  *
  * 겨냥하는 사람은 지어내지 않는다: 지금 그라운드에 선 우리 최고 전력과 상대 최저
- * 전력을 패킷의 명단에서 꺼내 쓰므로, 코어의 실재 확인을 그대로 지나 판세에 시트가
+ * 전력을 진행 중인 경기의 명단에서 꺼내 쓰므로, 코어의 실재 확인을 그대로 지나 판세에 시트가
  * 선다. 실모드와 다른 것은 저자뿐이다.
  */
 function mockReading(state: GameState): { points: Point[]; sheet: SheetLine[] } {
   const pending = state.pendingMatch;
-  if (!pending?.packet) return { points: [], sheet: [] };
+  if (!pending) return { points: [], sheet: [] };
   const ours = userSide(state);
   const theirs = ours === "home" ? "away" : "home";
-  const strongest = [...pending.packet[ours].lineup]
-    .filter((p) => p.position !== "GK")
-    .sort((a, b) => b.effective - a.effective)[0];
-  const weakest = [...pending.packet[theirs].lineup]
-    .filter((p) => p.position !== "GK")
-    .sort((a, b) => a.effective - b.effective)[0];
+  const overallOf = (id: string) => playerById(state, id)?.attributes.overall ?? 0;
+  const field = (side: "home" | "away") =>
+    pending.live.slots[side].filter((slot) => slot.position !== "GK");
+  const strongest = [...field(ours)].sort(
+    (a, b) => overallOf(b.playerId) - overallOf(a.playerId),
+  )[0];
+  const weakest = [...field(theirs)].sort(
+    (a, b) => overallOf(a.playerId) - overallOf(b.playerId),
+  )[0];
   if (!strongest || !weakest) return { points: [], sheet: [] };
   return {
     points: [
       {
         id: MOCK_POINT_EDGE,
-        text: `${playerName(state, strongest.id)}가 ${playerName(state, weakest.id)}의 뒤를 노린다`,
-        about: [strongest.id, weakest.id],
+        text: `${playerName(state, strongest.playerId)}가 ${playerName(state, weakest.playerId)}의 뒤를 노린다`,
+        about: [strongest.playerId, weakest.playerId],
         importance: 2,
       },
       {
@@ -386,7 +392,7 @@ function mockReading(state: GameState): { points: Point[]; sheet: SheetLine[] } 
     sheet: [
       {
         pointId: MOCK_POINT_EDGE,
-        target: { player: weakest.id },
+        target: { player: weakest.playerId },
         shape: "edge",
         sign: -1,
         step: 2,
@@ -491,7 +497,7 @@ export function negotiationScript(
 
 // ── 중계 ───────────────────────────────────────────────
 //
-// **장면을 대본이 쓰는 유일한 자리다.** 구간의 사건은 장부에 있고(`lastSegment`),
+// **장면을 대본이 쓰는 유일한 자리다.** 지난 턴 뒤의 사건은 장부에 있고(`unseenEvents`),
 // 그것을 문장으로 옮기는 자가 없으면 경기 화면이 빈 채로 돈다. 실모드에서 이 자리를
 // 맡는 것이 캐스터 LLM이다.
 
@@ -504,7 +510,7 @@ function scoreLine(state: GameState, score: { home: number; away: number }): str
   return `${teamName(record.homeTeamId)} ${formatScore(score.home, score.away)} ${teamName(record.awayTeamId)}`;
 }
 
-/** 죽은 공에서 나온 슛인가 — 대본도 그 사실을 문장에 싣는다 (match.md §1.4) */
+/** 죽은 공에서 나온 슛인가 — 대본도 그 사실을 문장에 싣는다 (match.md §4) */
 const SHOT_ORIGIN_KO: Record<string, string> = {
   corner: "코너에서 ",
   free_kick: "프리킥에서 ",
@@ -512,14 +518,11 @@ const SHOT_ORIGIN_KO: Record<string, string> = {
 };
 
 /**
- * **빗나간 슛의 갈래** — 장부가 슛마다 들고 있는 결과다(`shotOutcome`).
- *
- * 한 문형으로 뭉뚱그리면 구간의 슛 일곱 개가 같은 문장으로 선다 (prompts.md §1).
- * 실모드에서 이 갈래를 가르는 것은 구간 대본의 슛 줄이고(`buildSegmentMessage`),
- * 대본에는 고를 재량이 없으므로 **같은 갈래가 다시 오면 다음 꼴로 넘어간다**.
+ * **빗나간 슛의 갈래** — 장부가 슛마다 들고 있는 결과다(`shotOutcome`). 한 문형으로
+ * 뭉뚱그리면 슛 일곱 개가 같은 문장으로 선다 (prompts.md §1) — 같은 갈래가 다시 오면
+ * 다음 꼴로 넘어간다.
  */
 const SHOT_KO: Record<string, ReadonlyArray<(who: string) => string>> = {
-  // 이름 뒤의 조사는 받침을 타므로 쓰지 않는다 — 자리는 「~의」와 쉼표가 연다
   saved: [
     (who) => `${who}의 슈팅, 골키퍼가 몸을 날려 쳐냅니다.`,
     (who) => `${who}의 노림수 — 골키퍼 손끝에 걸립니다.`,
@@ -534,10 +537,7 @@ const SHOT_KO: Record<string, ReadonlyArray<(who: string) => string>> = {
   ],
 };
 
-/**
- * 한 문형이 한 구간에서 되풀이되지 않게 — 같은 갈래가 몇 번째로 오는지를 센다.
- * 구간마다 새로 세므로 같은 세이브는 같은 중계를 낸다(대본은 결정적이다).
- */
+/** 한 문형이 한 턴에서 되풀이되지 않게 — 같은 갈래가 몇 번째로 오는지를 센다 */
 function shapeTurns(): (key: string) => number {
   const used = new Map<string, number>();
   return (key) => {
@@ -552,64 +552,60 @@ function renderEvent(
   ev: MatchEvent,
   /** 이 사건까지의 스코어 — 골 줄이 그 골 뒤의 값을 적는다 */
   score: { home: number; away: number },
-  /** 이 갈래가 이 구간에서 몇 번째인가 — 문형을 돌리는 자리 */
   turnOf: (key: string) => number,
 ): string[] {
-  const name = ev.actors[0] ? playerName(state, ev.actors[0]) : "";
+  const nameOf = (id: string) => playerName(state, id);
+  const name = ev.actors[0] ? nameOf(ev.actors[0]) : "";
   const from = ev.shotOrigin ? (SHOT_ORIGIN_KO[ev.shotOrigin] ?? "") : "";
+  const at = eventMinuteText(ev);
   switch (ev.type) {
     case "kickoff":
       return [`@중계: 킥오프! 경기가 시작됩니다.`];
     case "goal": {
-      // 근거는 괄호 밖에 둔다 — 괄호가 둘이면 득점자와 근거가 같은 무게로 읽힌다
-      const cause = ev.causes[0] ? ` — ${packetTagText(ev.causes[0])}` : "";
-      // 골의 꼴은 하나다 — 「골! 홈 1 – 0 원정 (득점자 34′)」 (prompts.md §1)
-      return [
-        `@중계: 골! ${scoreLine(state, score)} (${from}${name} ${ev.minute}′)${cause}`.trimEnd(),
-      ];
+      const cause = ev.causes[0] ? ` — ${eventCauseText(ev.causes[0], nameOf)}` : "";
+      return [`@중계: 골! ${scoreLine(state, score)} (${from}${name} ${at})${cause}`.trimEnd()];
     }
     case "shot": {
       const big = (ev.xg ?? 0) >= BIG_CHANCE_XG ? "결정적인 장면! " : "";
       const shapes = ev.shotOutcome ? SHOT_KO[ev.shotOutcome] : undefined;
       const shape = shapes?.[turnOf(ev.shotOutcome ?? "shot") % shapes.length];
       return [
-        `@중계: ${ev.minute}′ ${big}${shape ? shape(`${from}${name}`) : `${from}${name}의 슛이 이어집니다.`}`,
+        `@중계: ${at} ${big}${shape ? shape(`${from}${name}`) : `${from}${name}의 슛이 이어집니다.`}`,
       ];
     }
     case "foul":
-      return [`@중계: ${ev.minute}′ ${name}의 반칙 — 주심이 점을 가리킵니다!`];
+      return [`@중계: ${at} ${name}의 반칙 — 주심이 점을 가리킵니다!`];
     case "chance":
-      return [`@중계: ${ev.minute}′ ${name}에게 기회가 왔지만 마무리가 아쉽습니다.`];
+      return [`@중계: ${at} ${name}에게 기회가 왔지만 마무리가 아쉽습니다.`];
     case "save":
-      return [`@중계: ${ev.minute}′ 골키퍼의 선방!`];
+      return [`@중계: ${at} 골키퍼의 선방!`];
     case "yellow_card":
-      return [`@중계: ${ev.minute}′ ${name}에게 옐로카드.`];
+      return [`@중계: ${at} ${name}에게 옐로카드.`];
     case "red_card":
-      return [`@중계: *${ev.minute}′ ${name} 퇴장!*`];
+      return [`@중계: *${at} ${name} 퇴장!*`];
     case "injury":
-      return [`@중계: ${ev.minute}′ ${name}, 그라운드에 쓰러집니다 — 의료진이 들어옵니다.`];
+      return [`@중계: ${at} ${name}, 그라운드에 쓰러집니다 — 의료진이 들어옵니다.`];
+    case "half_time":
+      return [`@중계: *하프타임 — 라커룸으로 향한다* ${scoreLine(state, score)}`];
+    case "extra_time_start":
+      return [`@중계: *90분 종료 — 승부는 연장으로 넘어갑니다.* ${scoreLine(state, score)}`];
+    case "extra_half_time":
+      return [`@중계: *연장 전반 종료.* ${scoreLine(state, score)}`];
     case "full_time":
       return [`@중계: *경기 종료 휘슬* 최종 스코어 ${scoreLine(state, score)}.`];
     case "substitution":
       return [
-        `@: *교체 보드가 올라간다 — ${playerName(state, ev.actors[0] ?? "")} OUT, ${playerName(state, ev.actors[1] ?? "")} IN*`,
+        `@: *교체 보드가 올라간다 — ${nameOf(ev.actors[0] ?? "")} OUT, ${nameOf(ev.actors[1] ?? "")} IN*`,
       ];
-    // 상대 벤치가 판을 옮겼다 — 문장은 근거 태그의 렌더러가 만든다 (match.md §2)
+    // 상대 벤치가 판을 옮겼다 — 문장은 원인 렌더러가 만든다 (match.md §3.3)
     case "tactical_shift":
       return ev.causes[0]
-        ? [`@중계: ${ev.minute}′ 상대 벤치가 움직입니다 — ${packetTagText(ev.causes[0])}.`]
+        ? [`@중계: ${at} 상대 벤치가 움직입니다 — ${eventCauseText(ev.causes[0], nameOf)}.`]
         : [];
     default:
       return [];
   }
 }
-
-/** 구간이 멈춘 자리 — 감독의 차례라는 것을 중계가 밝힌다 */
-const STOP_KO: Record<string, string> = {
-  half_time: "*하프타임 — 라커룸으로 향한다*",
-  extra_time_start: "*90분 종료 — 승부는 연장으로 넘어갑니다.*",
-  extra_half_time: "*연장 전반 종료.*",
-};
 
 const SHOOTOUT_KO: Record<ShootoutOutcome, string> = {
   scored: "성공입니다!",
@@ -618,22 +614,8 @@ const SHOOTOUT_KO: Record<ShootoutOutcome, string> = {
 };
 
 /**
- * 구간이 열린 자리의 스코어 — 장부는 구간이 **끝난 뒤**의 값이라 골만큼 되감는다.
- * 실모드의 대본이 굴리기 전의 스코어를 받는 것과 같은 값이다(`buildSegmentMessage`).
- */
-function scoreAtSegmentStart(
-  state: GameState,
-  events: readonly MatchEvent[],
-): { home: number; away: number } {
-  const score = { ...(state.pendingMatch?.ledger.score ?? { home: 0, away: 0 }) };
-  for (const ev of events) if (ev.type === "goal" && ev.team) score[ev.team] -= 1;
-  return score;
-}
-
-/**
- * **같은 분의 슛과 선방은 한 장면이다** (prompts.md §1) — 코어는 막힌 슛 하나에
- * 슛 줄과 선방 줄을 함께 남기므로(`pushSave`), 둘을 그대로 옮기면 한 순간이 두 문장이
- * 된다. 슛 줄이 이미 「골키퍼가 쳐냅니다」를 말하므로 그 분의 선방 줄은 서지 않는다.
+ * **같은 분의 슛과 선방은 한 장면이다** (prompts.md §1) — 슛 줄이 이미 「골키퍼가
+ * 쳐냅니다」를 말하므로 그 분의 선방 줄은 서지 않는다.
  */
 function savesToldByShots(events: readonly MatchEvent[]): ReadonlySet<number> {
   return new Set(
@@ -641,7 +623,7 @@ function savesToldByShots(events: readonly MatchEvent[]): ReadonlySet<number> {
   );
 }
 
-/** 승부차기 한 발 — 코어가 굴린 그 발을 문장으로 옮긴다 (match.md §2) */
+/** 승부차기 한 발 — 코어가 굴린 그 발을 문장으로 옮긴다 (match.md §3.4) */
 function shootoutLines(state: GameState): string[] {
   const kicks = state.pendingMatch?.shootout?.kicks ?? [];
   const last = kicks.at(-1);
@@ -657,16 +639,17 @@ function shootoutLines(state: GameState): string[] {
 }
 
 /**
- * **경기 턴의 대본.** 구간을 굴리는 것은 코어이고(`applyTacticOrders` — gm.ts) 여기서
- * 하는 일은 그 구간의 사건을 중계로 옮기는 것뿐이다. 마감도 코어가 부른다.
+ * **경기 턴의 대본.** 시계를 미는 것은 클라이언트의 실행기이고 여기서 하는 일은 지난 턴
+ * 뒤의 사건(`unseenEvents`)을 중계로 옮기는 것뿐이다. 마감도 코어가 부른다.
  */
 export function matchScript(
   state: GameState,
   options: { kickoff: boolean; operator: boolean },
 ): ScriptedTurn {
   const suggested = suggestLine(MATCH_SUGGESTION);
+  const pending = state.pendingMatch;
   if (options.kickoff) {
-    const record = state.matches.find((m) => m.id === state.pendingMatch?.matchId);
+    const record = state.matches.find((m) => m.id === pending?.matchId);
     const fixture = record
       ? `${teamName(record.homeTeamId)} 대 ${teamName(record.awayTeamId)}`
       : "양 팀";
@@ -678,32 +661,20 @@ export function matchScript(
       ].join("\n"),
     };
   }
-  const now = state.pendingMatch?.ledger.score ?? { home: 0, away: 0 };
-  // 굴린 것이 없는 턴 — 감독이 말만 건 자리다. 장부의 지금만 읽어 준다
-  if (!options.operator) {
-    return {
-      text: [
-        `@중계: ${state.pendingMatch?.ledger.minute ?? 0}′ — ${scoreLine(state, now)}.`,
-        suggested,
-      ].join("\n"),
-    };
-  }
-  const segment = state.pendingMatch?.lastSegment;
-  if (!segment) return { text: [...shootoutLines(state), suggested].join("\n") };
-  const running = scoreAtSegmentStart(state, segment.events);
-  const told = savesToldByShots(segment.events);
+  const now = pending?.live.ledger.score ?? { home: 0, away: 0 };
+  const minute = pending?.live.ledger.minute ?? 0;
+  if (pending?.shootout) return { text: [...shootoutLines(state), suggested].join("\n") };
+  const events = unseenEvents(state);
+  const running = scoreBeforeEvents(now, events);
+  const told = savesToldByShots(events);
   const turnOf = shapeTurns();
-  const lines = segment.events.flatMap((ev) => {
+  const lines = events.flatMap((ev) => {
     if (ev.type === "save" && told.has(ev.minute)) return [];
     if (ev.type === "goal" && ev.team) running[ev.team] += 1;
     return renderEvent(state, ev, running, turnOf);
   });
-  const stop = STOP_KO[segment.stop];
-  if (stop) lines.push(`@중계: ${stop} ${scoreLine(state, now)}`);
-  // 사건 없이 흐른 구간에도 한 줄은 선다 — 빈 장면은 턴이 취소되는 자리다
-  if (lines.length === 0) {
-    lines.push(`@중계: ${state.pendingMatch?.ledger.minute ?? 0}′ — ${scoreLine(state, now)}.`);
-  }
+  // 사건 없이 멈춘 턴에도 한 줄은 선다 — 빈 장면은 턴이 취소되는 자리다
+  if (lines.length === 0) lines.push(`@중계: ${minute}′ — ${scoreLine(state, now)}.`);
   lines.push(suggested);
   return { text: lines.join("\n") };
 }

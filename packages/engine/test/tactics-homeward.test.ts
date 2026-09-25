@@ -15,7 +15,7 @@ import {
   memoryRetention,
   playerById,
 } from "@story-fm/engine";
-import { createTestGame } from "./helpers";
+import { createTestGame, resultOf } from "./helpers";
 
 /**
  * 전술을 바꿔도 **모두가 똑같이 헤매지는 않는다** (commands/index.ts `familiarityShift`·`memoryRetention`).
@@ -98,11 +98,13 @@ describe("새 영입은 자기 축구를 기준으로 흔들린다", () => {
             id: `m-${i}`,
             season: state.season,
             competitionId: "friendly",
+            stage: "league",
             round: 1,
             date: state.date,
+            time: "15:00",
             homeTeamId: state.userTeamId,
             awayTeamId: "opponent",
-            result: { homeGoals: 1, awayGoals: 0, scorers: [], homeLineup: [target.id] },
+            result: resultOf({ homeGoals: 1, awayGoals: 0, homeLineup: [target.id] }),
           });
         }
       }

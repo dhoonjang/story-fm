@@ -4,7 +4,6 @@ import { TurnOperationSchema } from "@story-fm/agents";
 import { llmErrorKind } from "@story-fm/llm";
 import { errorDetail, runTurnLocked, turnErrorMessage, turnErrorRetry } from "@/lib/turn-runner";
 import { invalidGameId } from "@/app/api/games/game-id";
-import { withLiveGamePaused } from "@/lib/live-match-runtime";
 import { MatchBoardOrderSchema } from "@/lib/match-orders";
 
 const TurnSchema = z
@@ -111,15 +110,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
        */
       const heartbeat = setInterval(() => send({ type: "ping" }), HEARTBEAT_MS);
       try {
-        const outcome = await withLiveGamePaused(id, () =>
-          runTurnLocked(
-            id,
-            body.data.message,
-            (text) => send({ type: "delta", text }),
-            body.data.operation,
-            body.data.orders,
-            body.data.proposal,
-          ),
+        const outcome = await runTurnLocked(
+          id,
+          body.data.message,
+          (text) => send({ type: "delta", text }),
+          body.data.operation,
+          body.data.orders,
+          body.data.proposal,
         );
         if (outcome.ok) send({ type: "done", payload: outcome.payload });
         // `detail`은 개발 모드에서만 실려 온다 (turn-runner의 `errorDetail`)

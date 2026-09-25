@@ -22,8 +22,13 @@ export type TurnOperation =
    * 이미 알고 있고, 모델에게 물어보면 한 번 더 왕복하고 틀릴 여지도 생긴다.
    */
   | { kind: "skip_to_next_match"; date: string }
-  /** 경기 진행 — 한 구간 더. 경기 중에는 시간을 달력이 아니라 경기가 민다 */
-  | { kind: "advance_match" }
+  /** 경기장에 들어선다 — 킥오프 게이트를 지난다. 그 턴은 킥오프의 말이고 시계는 서 있다 */
+  | { kind: "enter_match" }
+  /**
+   * 경기가 멈췄다 — 정지점(`STOP_EVENT_TYPES`)이 체크포인트로 확정된 자리. 판독기가 판을 다시
+   * 읽고 매치 GM이 그 사건을 중계한다. 시계는 실행기가 민다 (live-match.md §8.3)
+   */
+  | { kind: "match_stop" }
   /**
    * 협상 방에 앉는다 — `start_negotiation`이 세운 방의 게이트를 지난다. 그 턴은 자리에
    * 앉는 첫 턴이고 도구가 없다 (docs/simulation/transfer.md §12-2).
@@ -55,7 +60,8 @@ export const TurnOperationSchema = z.discriminatedUnion("kind", [
     days: z.number().int().min(1).max(MAX_SKIP_DAYS),
   }),
   z.object({ kind: z.literal("skip_to_next_match"), date: DateString }),
-  z.object({ kind: z.literal("advance_match") }),
+  z.object({ kind: z.literal("enter_match") }),
+  z.object({ kind: z.literal("match_stop") }),
   z.object({ kind: z.literal("enter_negotiation") }),
   z.object({ kind: z.literal("leave_negotiation") }),
 ]);
@@ -73,8 +79,10 @@ export function operationLabel(operation: TurnOperation): string {
       return `시간 진행 — ${operation.days === 1 ? "하루" : operation.days === 7 ? "일주일" : `${operation.days}일`}`;
     case "skip_to_next_match":
       return `시간 진행 — 다음 경기 (${operation.date})`;
-    case "advance_match":
-      return "경기 진행";
+    case "enter_match":
+      return "경기장에 들어선다";
+    case "match_stop":
+      return "경기 중단";
     case "enter_negotiation":
       return "협상에 직접 나선다";
     case "leave_negotiation":
