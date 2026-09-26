@@ -117,11 +117,19 @@ export interface ShapeProbe {
   goalSide: number[];
   /** 풀백 id → 1초마다의 깊이 */
   fullBackDepths: Map<string, number[]>;
+  /** 풀백 id → 우리가 공을 가졌을 때 달리기(`run`)를 시작한 횟수 — 오버래핑·침투 */
+  fullBackRuns: Map<string, number>;
 }
 
 export function shapeProbe(): ShapeProbe {
-  const probe: ShapeProbe = { onTick: () => {}, goalSide: [], fullBackDepths: new Map() };
+  const probe: ShapeProbe = {
+    onTick: () => {},
+    goalSide: [],
+    fullBackDepths: new Map(),
+    fullBackRuns: new Map(),
+  };
   let lastShot: Record<MatchSide, number> | null = null;
+  const running = new Set<string>();
   probe.onTick = (state, input) => {
     const slotOf = (id: string) =>
       weightSlotOf(
@@ -143,6 +151,14 @@ export function shapeProbe(): ShapeProbe {
       }
     }
     lastShot = { ...state.lastShotAt };
+    for (const p of state.players) {
+      const run = p.action === "run" && p.side === state.possession;
+      if (run && !running.has(p.id) && slotOf(p.id) === "FB") {
+        probe.fullBackRuns.set(p.id, (probe.fullBackRuns.get(p.id) ?? 0) + 1);
+      }
+      if (run) running.add(p.id);
+      else running.delete(p.id);
+    }
     if (state.tick % DEPTH_SAMPLE_TICKS !== 0 || state.restart) return;
     for (const p of state.players) {
       if (slotOf(p.id) !== "FB") continue;

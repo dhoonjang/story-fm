@@ -37,6 +37,7 @@ describe("실시간 경기의 팀 통계", () => {
     const goalSide: number[] = [];
     const fullBackSpans: number[] = [];
     const fullBackReach: number[] = [];
+    const fullBackRuns: number[] = [];
     for (const seed of SEEDS) {
       const state = createTestGame(seed);
       for (const fixture of leagueFixtures(state, MATCHES_PER_SEED)) {
@@ -46,8 +47,10 @@ describe("실시간 경기의 팀 통계", () => {
         matches.push(sampleOf(live));
         goalSide.push(...probe.goalSide);
         // 30분 넘게 뛴 풀백만 — 교체로 들어온 몇 분은 범위를 재지 못한다
-        for (const depths of probe.fullBackDepths.values()) {
+        for (const [id, depths] of probe.fullBackDepths) {
           if (depths.length < 30 * 60) continue;
+          // 90분으로 환산한 달리기 수
+          fullBackRuns.push(((probe.fullBackRuns.get(id) ?? 0) * 90 * 60) / depths.length);
           fullBackSpans.push(quantile(depths, 0.9) - quantile(depths, 0.1));
           fullBackReach.push(quantile(depths, 0.9));
         }
@@ -134,6 +137,8 @@ describe("실시간 경기의 팀 통계", () => {
       "풀백 깊이 폭 (p10~p90, m)": mean(fullBackSpans),
       "풀백 깊이 폭 sd (m)": sd(fullBackSpans),
       "풀백 앞 끝 (p90 깊이, m)": mean(fullBackReach),
+      "풀백 오버래핑·침투 (회/90분)": mean(fullBackRuns),
+      "풀백 오버래핑·침투 sd": sd(fullBackRuns),
     };
     console.log(
       reportOf(

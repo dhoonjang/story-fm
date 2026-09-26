@@ -309,10 +309,10 @@ export function planAiTacticalShift(
     if (desperate && roll(AI_VARIANT_CHANCE)) push.pressing = current.pressing + 1;
     return settled("chase", push);
   }
-  // 앞서면 판을 다시 볼 때부터 한 칸 물러서고, 시간이 없으면 라인·템포까지 잠근다 — 실측의
-  // 앞선 팀 xG는 한 골 앞설 때 동점의 0.85~0.9배다
+  // 두 골 앞서면 판을 다시 볼 때부터 한 칸 물러서고, 시간이 없으면 한 골 차도 라인·템포까지
+  // 잠근다 — 실측의 앞선 팀 xG는 한 골 앞설 때 동점의 0.85~0.9배다
   if (diff > 0) {
-    if (!urgent) return settled("hold", { mentality: current.mentality - 1 });
+    if (!urgent) return diff >= 2 ? settled("hold", { mentality: current.mentality - 1 }) : null;
     return settled("hold", {
       mentality: current.mentality - 1,
       defensiveLine: current.defensiveLine - 1,

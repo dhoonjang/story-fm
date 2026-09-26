@@ -259,6 +259,12 @@ export const LOSS_SHARE = 0.5;
 /** 공 가진 상대를 막으러 나서는 첫 수비수의 반경 (m) — 압박선과 무관하게 한 명은 붙는다 */
 export const ENGAGE_RADIUS = 18;
 
+/** 재시작을 기다리는 키커가 서는 자리 — 공 뒤(제 골 쪽)로 떨어진 거리 (m) */
+export const SET_PIECE_STANCE = 1;
+
+/** 키커가 선 자리에서 공으로 도움닫기하는 시간 (초) — 킥 시각 앞 */
+export const SET_PIECE_RUNUP_SECONDS = 1;
+
 /** 재시작마다 공이 멈춰 있는 시간 (초) */
 export const RESTART_DEAD_SECONDS = {
   kickoff: 3,
@@ -439,8 +445,8 @@ export const OVERLAP_AHEAD = 12;
 
 export const OVERLAP_TOUCHLINE = 5;
 
-/** 오버래핑의 급함 — 고속 주행으로 측면을 올라간다 */
-export const OVERLAP_URGENCY = 0.8;
+/** 오버래핑의 급함 — 고강도 주행(19.8~25.2 km/h)으로 측면을 올라간다. 전력 질주는 드물다 */
+export const OVERLAP_URGENCY = 0.7;
 
 /** 오버래핑을 고르면 이만큼 (초) 다시 판단하지 않고 뛴다 — 한 번의 질주가 측면을 올라간다 */
 export const OVERLAP_COMMIT_SECONDS = 2.5;
@@ -493,7 +499,7 @@ export const SPOT_SHAPE = 0.3;
 export const SPOT_HOLD = 0.3;
 
 /** 역할 가산 — 성향이 중립(0.5)에서 벗어난 만큼 그 후보의 값에 더한다 */
-export const SPOT_ROLE = 0.45;
+export const SPOT_ROLE = 0.55;
 
 /** 빈 공간의 눈금 (m) — 가장 가까운 상대가 이만큼 떨어지면 공간 값이 다 찬다 */
 export const SPOT_SPACE_FULL = 10;
@@ -512,7 +518,7 @@ export const SUPPORT_LANE_BLOCKED = 0.4;
 export const SUPPORT_LANE_WIDTH = 2;
 
 /** 침투 — 라인 뒤 공간의 값과 그 공간이 다 차는 깊이 (m), 위협 값 */
-export const RUN_VALUE = 0.05;
+export const RUN_VALUE = 0.1;
 
 export const RUN_ROOM_FULL = 25;
 
@@ -524,14 +530,14 @@ export const RUN_MIN_BALL_DEPTH = 35;
 export const RUN_MIN_FUEL = 0.35;
 
 /** 박스 진입 — 위협 값과 빈 공간 값 */
-export const BOX_VALUE = 0.3;
+export const BOX_VALUE = 0.4;
 
 export const BOX_SPACE = 0.05;
 
 /** 오버래핑·폭 — 빈 공간 값과 위협 값 */
-export const OVERLAP_VALUE = 0.05;
+export const OVERLAP_VALUE = 0.4;
 
-export const OVERLAP_THREAT = 0.1;
+export const OVERLAP_THREAT = 0.15;
 
 /** 수비 — 자리 후보의 값 */
 export const SPOT_SHAPE_DEFEND = 0.35;
@@ -736,20 +742,32 @@ export const HEATMAP: Record<WeightSlot, { attack: HeatComponent[]; defend: Heat
         back: 10,
         ahead: 8,
         side: 7,
-        weight: 1,
-        ball: -0.3,
+        weight: 0.8,
+        ball: -0.4,
         tendency: { cover: 2 },
       },
-      // 가담 — 측면 높은 곳, 상대 마무리 지역까지
+      // 가담 — 측면 높은 곳
       {
-        depth: 18,
+        depth: 26,
         lateral: 5,
         back: 10,
-        ahead: 14,
+        ahead: 16,
         side: 6,
-        weight: 0.6,
+        weight: 1.1,
         ball: 0.6,
         tendency: { advance: 4, width: 2 },
+        commit: true,
+      },
+      // 측면 끝 — 상대 마무리 지역의 골라인 근처. 윙백이 크로스를 올리는 자리
+      {
+        depth: 38,
+        lateral: 7,
+        back: 8,
+        ahead: 12,
+        side: 5,
+        weight: 0.35,
+        ball: 0.9,
+        tendency: { advance: 5, width: 2 },
         commit: true,
       },
       // 안쪽 — 인버티드 풀백의 중원 자리
@@ -959,7 +977,7 @@ export const SHOT_THRESHOLD_PER_MENTALITY_STEP = 0.024;
  * 멘탈리티 중립에서 슈팅을 고르는 최소 xG — 실측은 팀 슈팅 12.6 · 슈팅당 xG 0.12다. 문턱이
  * 높으면 좋은 기회만 차서 슈팅이 적고 슈팅당 xG가 부푼다
  */
-export const SHOT_THRESHOLD_NEUTRAL = 0.11;
+export const SHOT_THRESHOLD_NEUTRAL = 0.118;
 
 /** 멘탈리티 한 칸이 공격 가담(형태의 전진·침투·박스 진입)에 더하는 배율 */
 export const COMMIT_PER_MENTALITY_STEP = 0.2;
@@ -970,7 +988,7 @@ export const COMMIT_PER_MENTALITY_STEP = 0.2;
  * 기준 — 페널티를 뺀 일반 플레이 슈팅이 실제로 들어가는 비율에 기록의 xG 합이 서는 값.
  * 이 눈금을 옮기면 `params.ts`의 `shotThreshold`도 같은 비로 옮겨야 선수의 슈팅 선택이 그대로다
  */
-export const XG_BASE = 0.38;
+export const XG_BASE = 0.407;
 
 export const XG_DISTANCE_SCALE = 7.5;
 

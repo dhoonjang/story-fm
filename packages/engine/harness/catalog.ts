@@ -184,6 +184,8 @@ export const LIVE_MATCH_STATS = defineHarness({
     { metric: "풀백 깊이 폭 (p10~p90, m)", role: "reference", min: 37, why: "히트맵 이전 35.2m — 풀백의 분포는 자기 박스 근처부터 상대 진영까지다 (live-match.md §3.3)" },
     { metric: "풀백 깊이 폭 sd (m)", role: "measure", why: "풀백마다의 퍼짐 — 윙백과 노-넌센스 풀백이 갈려야 역할이 공간에 선다" },
     { metric: "풀백 앞 끝 (p90 깊이, m)", role: "reference", min: 55, why: "히트맵 이전 52.2m — 공이 전진하면 가담 성분이 무거워진다" },
+    { metric: "풀백 오버래핑·침투 (회/90분)", role: "measure", why: "공을 가졌을 때 풀백이 달리기를 시작한 수 — 히트맵 이전 오버래핑은 판단당 확률 분기였다" },
+    { metric: "풀백 오버래핑·침투 sd", role: "measure", why: "풀백마다의 퍼짐 — 윙백은 자주, 노-넌센스 풀백은 드물게" },
   ],
 });
 
@@ -238,13 +240,13 @@ export const SIM_PARITY = defineHarness({
   id: "sim-parity",
   what: "같은 대진을 실시간 경기와 간이 시뮬로 굴렸을 때 득점·xG·슈팅·홈 이점·전력 기울기가 같은 눈금인가",
   doc: "docs/simulation/match.md §8.5",
-  cost: "시드 세계 둘 × 리그 12경기 = 24경기 + 간이 480판 · 3분",
+  cost: "시드 세계 셋 × 리그 24경기 = 72경기 + 간이 1440판 · 10분",
   // prettier-ignore
   bands: [
     { metric: "대진", role: "measure", unit: "count", why: "실시간 한 판씩 — 아래 비의 잡음은 이 수가 정한다" },
     { metric: "팀 득점 — 실시간", role: "measure", why: "같은 대진의 팀-경기 평균" },
     { metric: "팀 득점 — 간이", role: "measure", why: "같은 대진을 간이 시뮬로 굴린 평균" },
-    { metric: "팀 득점 — 실시간/간이", role: "guard", min: 0.75, max: 1.33, unit: "ratio", why: "감독의 경기만 다른 리그가 되지 않게 — 24경기의 잡음(±15%)에 실제 어긋남을 얹은 폭" },
+    { metric: "팀 득점 — 실시간/간이", role: "guard", min: 0.75, max: 1.33, unit: "ratio", why: "감독의 경기만 다른 리그가 되지 않게 — 표본의 잡음(72경기 ±9%)에 실제 어긋남을 얹은 폭" },
     { metric: "팀 xG — 실시간", role: "measure", why: "같은 대진" },
     { metric: "팀 xG — 간이", role: "measure", why: "같은 대진" },
     { metric: "팀 xG — 실시간/간이", role: "guard", min: 0.75, max: 1.33, unit: "ratio", why: "득점보다 조용한 연속값 — 두 시뮬의 기회 총량이 같은가" },
@@ -253,7 +255,8 @@ export const SIM_PARITY = defineHarness({
     { metric: "홈 xG 우위 — 간이", role: "measure", why: "`QUICK_HOME_FACTOR` — 실측 홈/원정 xG 1.67/1.32" },
     { metric: "전력 기울기 (xG 차/능력치 1) — 실시간", role: "measure", why: "선발 평균 종합 능력치 1의 차가 xG 차를 얼마나 벌리는가" },
     { metric: "전력 기울기 (xG 차/능력치 1) — 간이", role: "measure", why: "같은 기울기 — 간이 시뮬의 `QUICK_RATING_SLOPE`가 정한다" },
-    { metric: "전력 기울기 — 실시간/간이", role: "reference", min: 0.5, max: 2, unit: "ratio", why: "능력 차가 결과로 옮겨지는 정도가 두 시뮬에서 같은 크기인가. 24경기로는 기울기가 거칠어 참고로 둔다" },
+    { metric: "전력 기울기 표준오차 — 실시간", role: "measure", why: "기울기 추정의 잡음 — 이것이 기울기 자체의 절반을 넘으면 아래 비는 읽을 수 없다" },
+    { metric: "전력 기울기 — 실시간/간이", role: "reference", min: 0.5, max: 2, unit: "ratio", why: "능력 차가 결과로 옮겨지는 정도가 두 시뮬에서 같은 크기인가 — 간이 시뮬의 기울기는 리그 팀 간 xG sd 0.40에 서 있다(match.md §8.2). 대진 24개로는 같은 설정에서 20~80%로 흔들려 72개로 잰다" },
   ],
 });
 
