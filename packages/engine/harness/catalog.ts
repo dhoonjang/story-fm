@@ -139,7 +139,7 @@ export const LIVE_MATCH_STATS = defineHarness({
   id: "live-match-stats",
   what: "실시간 경기의 팀 통계 — 득점 분포·슈팅·xG·패스·점유·수비·규율·거리의 평균·중간값·sd",
   doc: "docs/simulation/football-reference.md",
-  cost: "시드 세계 셋 × 리그 12경기 = 36경기 · 3~4분",
+  cost: "시드 세계 셋 × 리그 12경기 = 36경기 · 10분",
   // prettier-ignore
   bands: [
     { metric: "팀-경기 표본", role: "measure", unit: "count", why: "아래 밴드의 폭은 이 표본(72)의 잡음을 넣어 잡았다 — 팀 득점 평균의 표준오차가 0.15다" },
@@ -163,6 +163,7 @@ export const LIVE_MATCH_STATS = defineHarness({
     { metric: "패스 시도 평균", role: "reference", min: 380, max: 580, why: "[SB]·[FM] 467~471" },
     { metric: "패스 시도 sd", role: "reference", min: 60, max: 160, why: "[SB] 120 — 점유형과 내려앉는 팀의 폭" },
     { metric: "패스 성공률", role: "reference", min: 0.78, max: 0.88, unit: "ratio", why: "[FM] Opta 눈금 82.9%" },
+    { metric: "패스 성공률 sd", role: "reference", min: 0.04, max: 0.08, unit: "ratio", why: "[FM] 팀 간 sd 4.9%p (72.3~90.5%) — 팀-경기의 퍼짐은 그 위에 경기의 흔들림이 얹힌다. 평균만 맞고 퍼짐이 좁으면 패서의 능력이 공을 움직이지 못하는 것이다" },
     { metric: "점유율 sd", role: "guard", min: 0.05, max: 0.16, unit: "ratio", why: "[SB] 11%p — 0에 붙으면 전력·전술이 공을 움직이지 못하는 것이다" },
     { metric: "태클 시도", role: "reference", min: 12, max: 24, why: "[SB] 19.7 · Opta 16~18" },
     { metric: "태클 성공률", role: "reference", min: 0.5, max: 0.7, unit: "ratio", why: "[SB] 61% · Opta 팀별 56~62%" },
@@ -178,6 +179,13 @@ export const LIVE_MATCH_STATS = defineHarness({
     { metric: "팀 스프린트 거리 (km)", role: "reference", min: 1.8, max: 4.2, why: "§7-B 포지션별 스프린트 거리의 합 (>25.2 km/h)" },
     { metric: "경기 길이 (분)", role: "reference", min: 95, max: 103, why: "EPL 추가시간 포함 96~101분" },
     { metric: "볼 인플레이 몫", role: "reference", min: 0.5, max: 0.66, unit: "ratio", why: "EPL 55~59% — 재시작의 멈춤이 경기의 리듬을 정한다" },
+    { metric: "슈팅 순간 골 쪽 수비 수", role: "reference", min: 3.2, why: "히트맵 이전의 실시간 경기 2.8 — 슛 길목·존 커버가 골 앞을 채우면 는다 (live-match.md §5.2)" },
+    { metric: "슈팅 순간 골 쪽 수비 수 sd", role: "measure", why: "슛마다의 퍼짐 — 역습의 빈 골문과 내려앉은 블록이 함께 있어야 한다" },
+    { metric: "풀백 깊이 폭 (p10~p90, m)", role: "reference", min: 37, why: "히트맵 이전 35.2m — 풀백의 분포는 자기 박스 근처부터 상대 진영까지다 (live-match.md §3.3)" },
+    { metric: "풀백 깊이 폭 sd (m)", role: "measure", why: "풀백마다의 퍼짐 — 윙백과 노-넌센스 풀백이 갈려야 역할이 공간에 선다" },
+    { metric: "풀백 앞 끝 (p90 깊이, m)", role: "reference", min: 55, why: "히트맵 이전 52.2m — 공이 전진하면 가담 성분이 무거워진다" },
+    { metric: "풀백 오버래핑·침투 (회/90분)", role: "measure", why: "공을 가졌을 때 풀백이 달리기를 시작한 수 — 히트맵 이전 오버래핑은 판단당 확률 분기였다" },
+    { metric: "풀백 오버래핑·침투 sd", role: "measure", why: "풀백마다의 퍼짐 — 윙백은 자주, 노-넌센스 풀백은 드물게" },
   ],
 });
 
@@ -185,7 +193,7 @@ export const LIVE_PLAYER_LOAD = defineHarness({
   id: "live-player-load",
   what: "풀타임 선수의 포지션별 총 거리·고속·스프린트 — 실측과 기대 부하표에 서는가",
   doc: "docs/simulation/football-reference.md §7",
-  cost: "시드 세계 둘 × 리그 8경기 = 16경기 · 2분",
+  cost: "시드 세계 둘 × 리그 8경기 = 16경기 · 5분",
   // prettier-ignore
   bands: [
     { metric: "풀타임 표본", role: "measure", unit: "count", why: "교체·퇴장·부상으로 나간 선수는 뺀다 — 90분을 다 뛴 몸만 잰다" },
@@ -210,7 +218,7 @@ export const LIVE_TACTICS = defineHarness({
   id: "live-tactics",
   what: "홈 팀 전술 하나만 바꿔 굴렸을 때 슈팅·xG·점유·거리가 예상한 방향으로 움직이는가",
   doc: "docs/simulation/live-match.md §6",
-  cost: "시드 둘 × 리그 12경기 × 팔 다섯 = 120경기 · 10분",
+  cost: "시드 둘 × 리그 12경기 × 팔 다섯 = 120경기 · 30분",
   // prettier-ignore
   bands: [
     { metric: "기준 — 우리 슈팅", role: "measure", why: "아래 변화들의 눈금 — 전술을 건드리지 않은 판" },
@@ -232,13 +240,13 @@ export const SIM_PARITY = defineHarness({
   id: "sim-parity",
   what: "같은 대진을 실시간 경기와 간이 시뮬로 굴렸을 때 득점·xG·슈팅·홈 이점·전력 기울기가 같은 눈금인가",
   doc: "docs/simulation/match.md §8.5",
-  cost: "시드 세계 둘 × 리그 12경기 = 24경기 + 간이 480판 · 3분",
+  cost: "시드 세계 셋 × 리그 24경기 = 72경기 + 간이 1440판 · 20분",
   // prettier-ignore
   bands: [
     { metric: "대진", role: "measure", unit: "count", why: "실시간 한 판씩 — 아래 비의 잡음은 이 수가 정한다" },
     { metric: "팀 득점 — 실시간", role: "measure", why: "같은 대진의 팀-경기 평균" },
     { metric: "팀 득점 — 간이", role: "measure", why: "같은 대진을 간이 시뮬로 굴린 평균" },
-    { metric: "팀 득점 — 실시간/간이", role: "guard", min: 0.75, max: 1.33, unit: "ratio", why: "감독의 경기만 다른 리그가 되지 않게 — 24경기의 잡음(±15%)에 실제 어긋남을 얹은 폭" },
+    { metric: "팀 득점 — 실시간/간이", role: "guard", min: 0.75, max: 1.33, unit: "ratio", why: "감독의 경기만 다른 리그가 되지 않게 — 표본의 잡음(72경기 ±9%)에 실제 어긋남을 얹은 폭" },
     { metric: "팀 xG — 실시간", role: "measure", why: "같은 대진" },
     { metric: "팀 xG — 간이", role: "measure", why: "같은 대진" },
     { metric: "팀 xG — 실시간/간이", role: "guard", min: 0.75, max: 1.33, unit: "ratio", why: "득점보다 조용한 연속값 — 두 시뮬의 기회 총량이 같은가" },
@@ -247,7 +255,8 @@ export const SIM_PARITY = defineHarness({
     { metric: "홈 xG 우위 — 간이", role: "measure", why: "`QUICK_HOME_FACTOR` — 실측 홈/원정 xG 1.67/1.32" },
     { metric: "전력 기울기 (xG 차/능력치 1) — 실시간", role: "measure", why: "선발 평균 종합 능력치 1의 차가 xG 차를 얼마나 벌리는가" },
     { metric: "전력 기울기 (xG 차/능력치 1) — 간이", role: "measure", why: "같은 기울기 — 간이 시뮬의 `QUICK_RATING_SLOPE`가 정한다" },
-    { metric: "전력 기울기 — 실시간/간이", role: "reference", min: 0.5, max: 2, unit: "ratio", why: "능력 차가 결과로 옮겨지는 정도가 두 시뮬에서 같은 크기인가. 24경기로는 기울기가 거칠어 참고로 둔다" },
+    { metric: "전력 기울기 표준오차 — 실시간", role: "measure", why: "기울기 추정의 잡음 — 이것이 기울기 자체의 절반을 넘으면 아래 비는 읽을 수 없다" },
+    { metric: "전력 기울기 — 실시간/간이", role: "reference", min: 0.5, max: 2, unit: "ratio", why: "능력 차가 결과로 옮겨지는 정도가 두 시뮬에서 같은 크기인가 — 간이 시뮬의 기울기는 리그 팀 간 xG sd 0.40에 서 있다(match.md §8.2). 대진 24개로는 같은 설정에서 20~80%로 흔들려 72개로 잰다" },
   ],
 });
 

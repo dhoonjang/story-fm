@@ -31,6 +31,7 @@ export function PlayerDetail({
   action,
   onRole,
   roleId,
+  inMatch = false,
 }: {
   p: SquadRow;
   slotCode: string | null;
@@ -44,6 +45,8 @@ export function PlayerDetail({
    * 눌렀는데 아무 일도 일어나지 않은 것처럼 보인다.
    */
   roleId?: string | null;
+  /** 경기 중인가 — 심경 한 줄은 지난 경기까지의 것이라 그동안 서지 않는다 */
+  inMatch?: boolean;
 }) {
   /**
    * 역할이 성립하는 자리 — 고른 칩이면 그 자리, 아니면 이 행이 지금 선 자리.
@@ -101,9 +104,11 @@ export function PlayerDetail({
   return (
     <div className="player-detail" data-testid="player-detail">
       {/* 지금 심경 한 줄 — 아래 숫자들이 왜 그런지 */}
-      <p className="pd-mood" data-testid="player-mood">
-        {moodSentence(p.mood)}
-      </p>
+      {!inMatch && (
+        <p className="pd-mood" data-testid="player-mood">
+          {moodSentence(p.mood)}
+        </p>
+      )}
 
       {/* 상태 요약 — 이름·나이·OVR은 바로 위 행과 겹치므로 표에 없는 것만, 박스로
           쪼개지 않고 한 줄로 훑는다 */}

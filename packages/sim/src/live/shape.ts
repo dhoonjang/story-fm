@@ -7,7 +7,9 @@ import { clamp, inside, xAtDepth, yAtLateral } from "./geometry";
 import {
   ATTACK_FOLLOW_HOLD,
   ATTACK_FRONT_MARGIN,
+  DEFEND_FLOOR_BEHIND_BALL,
   DEFEND_FRONT_MARGIN,
+  DEFEND_LINE_FLOOR,
   DEFEND_SHIFT_BASE,
   DEFEND_SHIFT_PER_COVER,
 } from "./tuning";
@@ -15,7 +17,8 @@ import {
 /**
  * 팀 형태 — 전술판 좌표를 블록 안에 편다 (live-match.md §3).
  *
- * 말의 **자리**는 여기서 나온다. 순간 판단(decide.ts)은 이 자리를 기준으로 벗어난다.
+ * 말의 **자리**는 여기서 나온다. 이 자리가 히트맵(`heatmap.ts`)의 중심이고, 공 없는 말의
+ * 판단(`step.ts`)은 그 분포 위에서 후보점을 고른다.
  */
 
 /** 전술판 좌표 → 우리 골라인 기준 깊이(m)와 가로(m) */
@@ -96,6 +99,7 @@ export function shapePosition(
     depth = p.lineHeight + (anchorDepth - ctx.backLine) * p.compactness + shift;
     // 커버 역할은 수비 때 더 뒤에 선다
     depth -= (tendency.cover - 0.5) * 6;
+    depth = Math.max(depth, defendFloorOf(ctx.ballDepth));
     lateral =
       FIELD.width / 2 +
       (anchorLateral - FIELD.width / 2) * p.defendWidth +
@@ -105,6 +109,14 @@ export function shapePosition(
     x: xAtDepth(clamp(depth, 2, Math.min(FIELD.length - 2, ctx.frontLimit)), ctx.side),
     y: yAtLateral(clamp(lateral, 1, FIELD.width - 1), ctx.side),
   });
+}
+
+/**
+ * 수비의 바닥 깊이 (m) — 라인은 골문 앞까지 내려서지 않는다. 공이 골라인에 가까우면 공을
+ * 따라서만 내려간다. 형태 자리와 수비 라인(센터백·풀백)의 후보점이 같은 바닥을 읽는다
+ */
+export function defendFloorOf(ballDepth: number): number {
+  return Math.min(DEFEND_LINE_FLOOR, ballDepth - DEFEND_FLOOR_BEHIND_BALL);
 }
 
 /** 형태의 앞 한계 — 공격은 상대 수비 라인, 수비는 공의 앞 */

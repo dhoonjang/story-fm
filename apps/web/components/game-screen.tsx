@@ -20,13 +20,13 @@ import { streamTurn, type TurnStreamFailure } from "@/lib/turn-stream";
 import { Composer } from "./composer";
 import { useMatchViewport } from "@/lib/use-match-viewport";
 import { useLiveMatch } from "@/lib/use-live-match";
-import { LivePitch } from "./live-pitch";
+import { LiveEvents, LivePitch, liveClockOf } from "./live-pitch";
 import { RailHints, useRailHints } from "./rail-hints";
 import { Loading } from "./loading";
 import { SquadView, CalendarView, FinanceView, CompetitionsView, CareerView } from "./office";
 import { MatchReportPanel } from "./office/match-report";
 import { createLineupSaver, type LineupSaver } from "./lineup-saver";
-import { MatchClock, MatchHeadline, MatchOpponent, MatchOverview } from "./match-view";
+import { MatchHeadline, MatchOpponent, MatchOverview, MatchTitle } from "./match-view";
 import { StageSplitHandle } from "./stage-split-handle";
 import { Crest, clubStyle } from "./crest";
 import { KickoffGate } from "./kickoff-gate";
@@ -36,6 +36,7 @@ import { PlayerCardProvider } from "./player-card";
 import { ProposalProvider, type ProposalDraft } from "./proposal-form";
 import {
   IconBoard,
+  IconInsight,
   IconBroadcast,
   IconCalendar,
   IconCareer,
@@ -102,6 +103,7 @@ const RESYNC_TRIES = 3;
 const MATCH_PANELS = [
   { key: "판세", label: "대화", Icon: IconChat },
   { key: "팀", label: "전술·교체", Icon: IconBoard },
+  { key: "기록", label: "경기 기록", Icon: IconInsight },
   { key: "대회", label: "대회", Icon: IconTrophy },
 ] as const;
 type MatchTab = (typeof MATCH_PANELS)[number]["key"];
@@ -423,8 +425,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const editingMatch =
     liveMatch !== null &&
     ((panel === null && matchTab === "팀" && squadSide === "ours") || panel === "스쿼드");
-  const liveBlocked =
-    input.length > 0 || matchViewport.focused || busy || editingMatch || error !== null;
+  const liveBlocked = editingMatch || error !== null;
   /** 실행기가 정지점에서 여는 턴 — `send`는 이 훅보다 뒤에 서므로 ref로 건넨다 */
   const sendRef = useRef<(text?: string, operation?: TurnOperation) => Promise<unknown>>(
     async () => null,
@@ -433,6 +434,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
     gameId,
     matchId: liveMatch && !liveMatch.beforeKickoff ? liveMatch.matchId : null,
     blocked: liveBlocked,
+    typing: input.length > 0 || matchViewport.focused,
+    turning: busy,
     onView: (view) =>
       setGame((current) =>
         !current || current.views.match?.matchId !== view?.matchId
@@ -451,6 +454,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
     // 정지점 — 판독기가 판을 다시 읽고 매치 GM이 그 사건을 중계한다
     onStop: () => sendRef.current(undefined, { kind: "match_stop" }),
   });
+  const liveClock = liveMatch
+    ? liveClockOf(live.frame, liveMatch, live.paused, liveBlocked, live.error)
+    : undefined;
   const pauseLive = live.pause;
 
   // 타이핑 리빌 — 수신 버퍼(acc)를 시간 기반으로 글자 단위 공개한다.
@@ -976,19 +982,6 @@ export function GameScreen({ gameId }: { gameId: string }) {
       aria-hidden={matchPanelOpen || undefined}
       inert={matchPanelOpen}
     >
-      {inMatch && (
-        <header className="match-chat-heading">
-          <div>
-            <b>터치라인</b>
-            <span>
-              {matchViewport.focused ? "지시 입력 · 경기 일시정지" : "코치와 대화 · 감독 지시"}
-            </span>
-          </div>
-          {matchViewport.focused && (
-            <button onClick={() => inputRef.current?.blur()}>경기장 보기</button>
-          )}
-        </header>
-      )}
       <div className="chat-scroll" ref={scrollRef} data-testid="chat-scroll">
         {/* 화면 조작은 그리지 않는다 — 감독이 한 말이 아니다. 모델 이력에는
             **오퍼레이터 지시**로 남아 GM은 왜 시간이 흘렀는지 알되 그것을
@@ -1204,6 +1197,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
         gameId={gameId}
         playerNames={game.playerNames}
         stamp={`${game.date}/${game.chat.length}`}
+        inMatch={inMatch}
       >
         {/* `data-phase` — 화면에 단계를 적지 않는 대신 e2e가 읽는 자리. 감독에게는
           달력·채팅이 이미 말해 주므로 배지가 자리를 차지할 이유가 없었다 */}
@@ -1253,16 +1247,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
                 </span>
                 {/* 시즌 번호는 여기 두지 않는다 — 상단 바에서 매 순간 필요한 건 **지금이
                 언제인가**뿐이고, 몇 번째 시즌인지는 커리어·대회 화면이 갖는다 */}
-                {/* 경기 중에는 **경기 시계**가 이 자리를 쓴다 — 그때 필요한 시각은 그것이다 */}
+                {/* 경기 중에는 대회 이름이 이 자리를 쓴다 — 시계는 스코어보드에 선다 */}
                 {liveMatch ? (
-                  <>
-                    <MatchClock match={liveMatch} />
-                    {liveMatch.live && (
-                      <span className="meta" role="status">
-                        {live.paused ? "일시정지" : "진행 중"}
-                      </span>
-                    )}
-                  </>
+                  <MatchTitle match={liveMatch} />
                 ) : (
                   <span className="meta" data-testid="game-date">
                     {/* 연도는 좁아지면 접힌다 — 한 시즌 안에서 바뀌는 건 월·일이다 */}
@@ -1340,7 +1327,10 @@ export function GameScreen({ gameId }: { gameId: string }) {
           </header>
           {/* 경기 머리 — 어느 탭을 보든 스코어·시계·득점자는 사라지지 않는다.
           휘슬 뒤에도 종료 카드가 닫힐 때까지 남아 있다가 위로 걷힌다 */}
-          {whistleView && <MatchHeadline match={whistleView} closing={whistleClosing} />}
+          {/* 경기 중에는 무대 안 경기장 칸 위에 선다 — 여기는 휘슬 뒤 걷히는 동안의 자리다 */}
+          {whistleView && !inMatch && (
+            <MatchHeadline match={whistleView} closing={whistleClosing} />
+          )}
           {/* 입장 확인 — 경기의 문. 매치데이 프로그램 한 장이 그 자리에 선다.
           문이 닫힌 동안(`liveMatch`가 아직 null) 서고, 지나는 160ms 동안 더 그려져
           물러난다 — 그동안 스코어보드는 이미 내려오는 중이다 (match.md §8 모션) */}
@@ -1410,13 +1400,19 @@ export function GameScreen({ gameId }: { gameId: string }) {
                 showBoard || showRoom ? " with-board" : " with-ledger"
               }${boardTakesStage ? " board-open" : ""}${boardClosing ? " board-closing" : ""}`}
             >
+              {/* 스코어보드는 경기장 칸 위에 붙는다 — 대화 칸은 무대 높이를 통째로 쓴다 */}
+              {liveMatch && <MatchHeadline match={liveMatch} clock={liveClock} />}
               {chatPane}
               {matchPanelOpen && liveMatch && (
                 <section className="match-side-panel" aria-labelledby="match-panel-title">
                   <header className="match-detail-heading">
                     <div>
                       <b id="match-panel-title">
-                        {matchTab === "팀" ? "전술 · 선수 교체" : "대회 현황"}
+                        {matchTab === "팀"
+                          ? "전술 · 선수 교체"
+                          : matchTab === "기록"
+                            ? "경기 기록"
+                            : "대회 현황"}
                       </b>
                       <span>
                         {matchTab === "팀" && squadSide === "ours"
@@ -1459,6 +1455,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
                         )}
                       </>
                     )}
+                    {matchTab === "기록" && (
+                      <div className="match-record">
+                        <MatchOverview match={liveMatch} />
+                        <LiveEvents frame={live.frame} match={liveMatch} />
+                      </div>
+                    )}
                     {matchTab === "대회" && competitionsView}
                   </div>
                 </section>
@@ -1484,19 +1486,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
                     <LivePitch
                       frame={live.frame}
                       match={liveMatch}
-                      paused={live.paused}
-                      blocked={liveBlocked}
+                      running={liveClock?.running ?? false}
                       error={live.error}
-                      onToggle={live.toggle}
                     />
-                    <div className="board-tab ledger-body">
-                      <details className="live-analysis">
-                        <summary>
-                          경기 분석 <span>판세 · 전술 포인트</span>
-                        </summary>
-                        <MatchOverview match={liveMatch} />
-                      </details>
-                    </div>
                   </div>
                 ) : showRoom && liveNegotiation ? (
                   /**

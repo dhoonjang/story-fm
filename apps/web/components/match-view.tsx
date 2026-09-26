@@ -144,19 +144,12 @@ export function MatchOpponent({
 }
 
 /**
- * 경기 시계 — **상단 띠의 날짜 자리**에 선다.
- *
- * 경기 중에 감독이 알아야 할 시각은 달력의 날짜가 아니라 **몇 분인가**이고,
- * 그 옆에 대회·라운드가 붙으면 "이게 무슨 경기인지"까지 한 줄로 읽힌다.
+ * 무슨 경기인가 — 상단 띠의 날짜 자리에 대회·라운드가 선다. 시계는 스코어보드가 갖는다.
  */
-export function MatchClock({ match }: { match: Match }) {
+export function MatchTitle({ match }: { match: Match }) {
   return (
-    <span className="match-clock" data-testid="match-clock">
-      {/* 좁아지면 대회·라운드가 접힌다 — 그때 급한 건 **몇 분인가**이고, 무슨
-          경기인지는 바로 아래 스코어보드가 두 팀 이름으로 이미 말한다 */}
-      {/* 단계가 없는 경기(친선)는 이름만 선다 — 빈 단계가 공백으로 남지 않게 */}
-      <span className="abbr">{[match.competition, match.stage].filter(Boolean).join(" ")} · </span>
-      <b>{match.minute}′</b> {match.phase}
+    <span className="meta match-title">
+      {[match.competition, match.stage].filter(Boolean).join(" ")}
     </span>
   );
 }
@@ -173,10 +166,18 @@ export function MatchClock({ match }: { match: Match }) {
  * `closing`은 **휘슬 뒤 걷히는 280ms**다 (design-system.md §5 모션 5). 종료 카드의
  * 「확인」이 켜고, 그동안 판은 화면에 남아 위로 올라간다 — 킥오프에 내려온 길의 역순.
  */
-export function MatchHeadline({ match, closing = false }: { match: Match; closing?: boolean }) {
+export function MatchHeadline({
+  match,
+  clock,
+  closing = false,
+}: {
+  match: Match;
+  clock?: { seconds: number; status: string; running: boolean };
+  closing?: boolean;
+}) {
   return (
     <div className={closing ? "match-headline closing" : "match-headline"}>
-      <Scoreboard match={match} />
+      <Scoreboard match={match} clock={clock} />
       <GoalLog goals={match.goals} />
       <ShootoutLog shootout={match.shootout} />
     </div>
@@ -184,17 +185,21 @@ export function MatchHeadline({ match, closing = false }: { match: Match; closin
 }
 
 /**
- * 스코어보드 — **스코어와 두 팀 이름뿐.**
+ * 스코어보드 — **스코어 · 두 팀 이름 · 시계.**
  *
- * 대회·라운드·시계는 상단 띠(`MatchClock`)로 올라갔다. 셋을 한 덩어리에 쌓으면
- * 정작 커야 할 스코어가 작아지고, 그것들은 "지금 몇 분 몇 대 몇"이라는 한 줄로
- * 상단에서 읽히는 편이 낫다.
+ * 경기의 시각과 상태는 여기 한 곳에만 선다. 대회·라운드는 상단 띠(`MatchTitle`)가 갖는다.
  *
  * 편을 가르는 것은 셋이고 셋 다 이 줄에 이미 서 있다 — **자리**(홈 왼쪽·원정
  * 오른쪽) · **문장**(이 판의 구단 색 한 벌) · **잉크**(우리 1층·상대 3층 —
  * `.mv-team`의 `ours`/`theirs`). 구단 색 면을 하나 더 깔지 않는다 (§2 충돌 규칙 7).
  */
-function Scoreboard({ match }: { match: Match }) {
+function Scoreboard({
+  match,
+  clock,
+}: {
+  match: Match;
+  clock?: { seconds: number; status: string; running: boolean };
+}) {
   return (
     <div className="mv-score" data-testid="match-score">
       <span className={`mv-team ${match.home.ours ? "ours" : "theirs"}`}>
@@ -204,19 +209,31 @@ function Scoreboard({ match }: { match: Match }) {
           colours={match.home.colours}
           size={24}
         />
-        {match.home.name}
+        <span className="mv-name">{match.home.name}</span>
+        <span className="mv-short">{match.home.short}</span>
       </span>
       <b className="mv-goals">
         <span className="fig">{formatScore(match.score.home, match.score.away)}</span>
       </b>
       <span className={`mv-team away ${match.away.ours ? "ours" : "theirs"}`}>
-        {match.away.name}
+        <span className="mv-name">{match.away.name}</span>
+        <span className="mv-short">{match.away.short}</span>
         <Crest
           id={match.away.id}
           shortName={match.away.short}
           colours={match.away.colours}
           size={24}
         />
+      </span>
+      {/* 시계 — 실시간 판이 있으면 초 단위, 휘슬 뒤 걷히는 동안은 장부의 분 */}
+      <span className="mv-clock" data-testid="match-clock" role="status">
+        <i className={clock?.running ? "live-indicator" : "live-indicator paused"} aria-hidden />
+        <b>
+          {clock
+            ? `${Math.floor(clock.seconds / 60)}:${String(clock.seconds % 60).padStart(2, "0")}`
+            : `${match.minute}′`}
+        </b>
+        {clock?.status ?? match.phase}
       </span>
       {/* 퇴장 — 인원이 왜 줄었는지 화면이 설명해야 한다. 표에서 사라진 이름을
           감독이 스스로 추리하게 두면 안 된다 */}
@@ -337,20 +354,6 @@ function Points({ points }: { points: Match["points"] }) {
       {points.map((p) => (
         <div className={`mv-key${p.ours === null ? "" : p.ours ? " good" : " bad"}`} key={p.id}>
           <div>{p.text}</div>
-          {(p.sheet.length > 0 || p.dropped.length > 0) && (
-            <div className="mv-sheet" data-testid="match-sheet">
-              {p.sheet.map((line, i) => (
-                <span className="mv-sheet-line" key={i}>
-                  {line}
-                </span>
-              ))}
-              {p.dropped.map((line, i) => (
-                <span className="mv-sheet-line dropped" key={`d${i}`}>
-                  {line}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
       ))}
     </div>

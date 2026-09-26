@@ -58,16 +58,11 @@ async function openBoard(page: Page) {
  * 받는다.
  */
 /**
- * 실시간 경기판 아래의 **「경기 분석」을 편다** — 쌓인 xG·팀 통계·전술 포인트가 그
- * 안에 있다 (live-match.md §9.2). 90분 동안 무대가 이고 있는 것은 공이 있는 자리이고 분석은
- * 감독이 찾을 때 펴는 것이라 기본이 접힘이다. 탭을 옮겼다 돌아오면 판이 새로 서므로
- * 그때마다 다시 편다.
+ * **「경기 기록」 탭을 연다** — 쌓인 xG·팀 통계·전술 포인트와 경기 사건이 거기 있다
+ * (live-match.md §9.2). 경기장 칸에는 판만 선다.
  */
 async function openMatchAnalysis(page: Page) {
-  const analysis = page.locator(".live-analysis");
-  if (!(await analysis.evaluate((n: HTMLDetailsElement) => n.open))) {
-    await analysis.locator("summary").click();
-  }
+  await page.getByTestId("mtab-기록").click();
   await expect(page.getByTestId("view-match")).toBeVisible();
 }
 
@@ -256,12 +251,11 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.getByTestId("kickoff-gate")).toHaveCount(0);
   await expect(broadcast.first()).toBeVisible();
   // 첫 휘슬 턴은 시계를 움직이지 않는다 — 0분에서 감독의 차례로 돌아온다
-  await expect(page.getByTestId("match-clock").locator("b")).toHaveText("0′");
+  await expect(page.getByTestId("match-clock").locator("b")).toHaveText("0:00");
 
   /**
    * 킥오프를 지나면 무대에 **실시간 경기판**이 선다 (live-match.md) — 서버가 계산한
-   * 선수와 공의 실제 위치를 그리는 자리다. 판세와 전술 포인트는 그 아래 「경기 분석」
-   * 손잡이 뒤로 접히고, 펴야 선다.
+   * 선수와 공의 실제 위치를 그리는 자리다. 판세와 전술 포인트는 「경기 기록」 탭이 갖는다.
    */
   await expect(page.getByTestId("live-pitch")).toBeVisible();
   await expect(page.getByTestId("view-match")).toBeHidden();
@@ -285,7 +279,7 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
    */
   await expect(page.locator(".rail.match-rail")).toBeVisible();
   await expect(page.getByTestId("tab-스쿼드")).toHaveCount(0);
-  for (const tab of ["판세", "팀", "대회"]) {
+  for (const tab of ["판세", "팀", "기록", "대회"]) {
     await page.getByTestId(`mtab-${tab}`).click();
     await expect(page.getByTestId("stage-board")).not.toBeEmpty();
   }
@@ -302,25 +296,14 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.locator('.ledger-body [data-testid="standings"]')).toHaveCount(1);
 
   /**
-   * 판세 = 실시간 경기판 + 접힌 분석. **배치 격자는 여기 없다** — 선수가 지금 어디에
+   * 경기 기록 = 분석 + 사건. **배치 격자는 여기 없다** — 선수가 지금 어디에
    * 서 있는지는 경기판이 실제 위치로 그리므로, 같은 것을 두 곳에 세우지 않는다
    * (live-match.md §9.2). 분석이 이고 있는 것은 쌓인 xG·팀 통계·전술 포인트다.
    * 전술 6축은 여기 없다 — 전술판이 갖는다.
    */
-  await page.getByTestId("mtab-판세").click();
   await openMatchAnalysis(page);
   await expect(page.getByTestId("match-zones")).toHaveCount(0);
   await expect(page.getByTestId("match-tactics")).toHaveCount(0);
-
-  /**
-   * 경기판의 선수는 **찾는 것이지 여는 것이 아니다** — 캔버스를 누르거나 목록에서
-   * 고르면 그 선수가 판 위에서 강조된다. 스물두 명이 각자 탭 정지점이 되지 않도록
-   * 손잡이는 목록 하나이고, 선수의 카드를 여는 자리는 전술판이다(아래 팀 탭).
-   */
-  const picker = page.getByLabel("경기장에서 선수 선택");
-  await expect(picker).toBeVisible();
-  // 빈 항목 하나 + 그라운드의 스물두 명
-  await expect(picker.locator("option")).toHaveCount(23);
 
   /**
    * 팀 탭 — **우리와 상대가 같은 구성, 다른 정확도.**

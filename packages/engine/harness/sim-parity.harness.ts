@@ -16,8 +16,9 @@ import { leagueFixtures, liveMatchWith, mean, playToEnd, sampleOf } from "./live
  *   pnpm balance sim-parity
  */
 
-const SEEDS = [42, 7];
-const MATCHES_PER_SEED = 12;
+const SEEDS = [42, 7, 3];
+/** 기울기는 대진 수의 제곱근으로만 좁혀진다 — 24경기로는 같은 설정에서 비가 20~80%로 흔들렸다 */
+const MATCHES_PER_SEED = 24;
 /** 대진마다 간이 시뮬을 굴리는 횟수 — 실시간 한 판의 잡음보다 한참 작게 */
 const QUICK_DRAWS = 20;
 
@@ -26,6 +27,20 @@ interface Pair {
   gap: number;
   live: { goals: [number, number]; xg: [number, number]; shots: [number, number] };
   quick: { goals: [number, number]; xg: [number, number]; shots: [number, number] };
+}
+
+/** 최소제곱 기울기의 표준오차 — 잔차의 분산 ÷ x의 제곱합 */
+function slopeError(xs: number[], ys: number[], b: number): number {
+  const mx = mean(xs);
+  const my = mean(ys);
+  let rss = 0;
+  let sxx = 0;
+  for (let i = 0; i < xs.length; i++) {
+    const r = ys[i]! - my - b * (xs[i]! - mx);
+    rss += r * r;
+    sxx += (xs[i]! - mx) ** 2;
+  }
+  return xs.length > 2 && sxx > 0 ? Math.sqrt(rss / (xs.length - 2) / sxx) : Number.NaN;
 }
 
 /** 최소제곱 기울기 — y를 x에 */
@@ -117,6 +132,11 @@ describe("두 시뮬의 눈금", () => {
       "홈 xG 우위 — 간이": homeEdge((p) => p.quick.xg),
       "전력 기울기 (xG 차/능력치 1) — 실시간": liveSlope,
       "전력 기울기 (xG 차/능력치 1) — 간이": quickSlope,
+      "전력 기울기 표준오차 — 실시간": slopeError(
+        gaps,
+        pairs.map((p) => p.live.xg[0] - p.live.xg[1]),
+        liveSlope,
+      ),
       "전력 기울기 — 실시간/간이": liveSlope / quickSlope,
     };
     console.log(
@@ -127,5 +147,6 @@ describe("두 시뮬의 눈금", () => {
       ),
     );
     expect(outOfBand(SIM_PARITY, readings)).toEqual([]);
-  });
+    // 72경기 — 전역 상한보다 넉넉하게만 준다
+  }, 1_800_000);
 });

@@ -398,7 +398,7 @@ describe("입력은 확정 tick에 앉는다", () => {
     }
   });
 
-  it("판독의 시트가 말의 규칙에 접히고 화면의 포인트 옆에 선다", () => {
+  it("판독의 시트가 말의 규칙에 접히고 화면의 포인트는 이로운 편만 받는다", () => {
     const state = atMatchday();
     expect(startMatch(state).ok).toBe(true);
     markEntered(state);
@@ -413,16 +413,15 @@ describe("입력은 확정 tick에 앉는다", () => {
     const view = buildOfficeViews(state).match!;
     const point = view.points.find((p) => p.id === "p1");
     expect(point).toBeDefined();
-    expect(point!.sheet.length).toBeGreaterThan(0);
-    expect(point!.dropped).toEqual([]);
-    // 없는 선수를 겨눈 줄은 걷히고 그 까닭이 남는다
+    // 상대 선수의 실행 품질을 깎는 줄 — 우리에게 이롭다
+    expect(point!.ours).toBe(true);
+    // 없는 선수를 겨눈 줄은 걷히고, 걸린 줄이 없는 포인트는 편이 없다
     applyMatchReading(state, {
       points: [{ id: "p2", text: "없는 사람", about: [], importance: 1 }],
       sheet: [{ pointId: "p2", target: { player: "ghost" }, shape: "edge", sign: 1, step: 1 }],
     });
     const again = buildOfficeViews(state).match!.points.find((p) => p.id === "p2")!;
-    expect(again.sheet).toEqual([]);
-    expect(again.dropped.length).toBe(1);
+    expect(again.ours).toBeNull();
   });
 
   it("저장/로드를 거쳐도 경기를 이어가고 결과가 남는다", () => {

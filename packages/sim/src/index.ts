@@ -14,6 +14,8 @@ export * from "./football-rates";
 export * from "./live/dmath";
 export * from "./live/xt";
 export * from "./live/roles";
+export * from "./live/shape";
+export * from "./live/heatmap";
 export * from "./live/params";
 export * from "./live/geometry";
 export * from "./live/types";

@@ -554,16 +554,17 @@ export function IconBoard({ size = 18 }: IconProps) {
 /** 경기 진행 — 재생. 한 구간을 더 굴린다 */
 export function IconPlay({ size = 18 }: IconProps) {
   return (
-    <svg {...base(size)}>
-      <path d="M8 5.5v13l10.5-6.5z" />
+    <svg {...solid(size)}>
+      <path d="M8.2 5.3c0-.9 1-1.5 1.8-1l9 6.1c.7.5.7 1.5 0 2l-9 6.1c-.8.5-1.8-.1-1.8-1Z" />
     </svg>
   );
 }
 
 export function IconPause({ size = 18 }: IconProps) {
   return (
-    <svg {...base(size)}>
-      <path d="M8 5v14M16 5v14" />
+    <svg {...solid(size)}>
+      <rect x="6.5" y="5" width="4" height="14" rx="1.2" />
+      <rect x="13.5" y="5" width="4" height="14" rx="1.2" />
     </svg>
   );
 }

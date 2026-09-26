@@ -74,12 +74,15 @@ export function PlayerCardProvider({
   gameId,
   playerNames,
   stamp,
+  inMatch,
   children,
 }: {
   gameId: string;
   /** 서버가 고른 사전 — 우리 선수단과 이야기가 부른 선수 (`namesForChat`) */
   playerNames: Record<string, string>;
   stamp: string;
+  /** 경기가 굴러가는 중인가 — 심경 한 줄은 지난 경기까지의 것이라 그동안 서지 않는다 */
+  inMatch: boolean;
   children: ReactNode;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
@@ -94,6 +97,7 @@ export function PlayerCardProvider({
           gameId={gameId}
           playerId={openId}
           stamp={stamp}
+          inMatch={inMatch}
           onClose={() => setOpenId(null)}
         />
       )}
@@ -176,11 +180,13 @@ function PlayerCardOverlay({
   gameId,
   playerId,
   stamp,
+  inMatch,
   onClose,
 }: {
   gameId: string;
   playerId: string;
   stamp: string;
+  inMatch: boolean;
   onClose: () => void;
 }) {
   const [card, setCard] = useState<PlayerCardView | null>(() =>
@@ -240,7 +246,7 @@ function PlayerCardOverlay({
             <span className="skel pc-skel short" aria-hidden />
           </div>
         ) : (
-          <PlayerCardBody card={card} />
+          <PlayerCardBody card={card} inMatch={inMatch} />
         )}
         {/**
          * **제안** — 부를 명령이 있는 선수에게만 선다 (transfer.md §12-3). 조작이 뜻을 갖지
@@ -290,7 +296,7 @@ function Fact({ label, title, children }: { label: string; title?: string; child
  * 남의 선수에게 없는 칸은 아예 서지 않는다(`card.ours`가 null이다) — 「모름」으로
  * 채우면 없는 자리를 있는 것처럼 그린다 (player.md §9.5).
  */
-function PlayerCardBody({ card }: { card: PlayerCardView }) {
+function PlayerCardBody({ card, inMatch }: { card: PlayerCardView; inMatch: boolean }) {
   const ours = card.ours;
   const season = card.season;
   /**
@@ -326,8 +332,9 @@ function PlayerCardBody({ card }: { card: PlayerCardView }) {
        * 화면이 없으므로, 감독이 그 문장을 되찾는 자리가 여기다 (player.md §9.5).
        */}
       {card.scoutReport?.verdict && <p className="pc-note">{card.scoutReport.verdict}</p>}
-      {/* 지금 심경 한 줄 — 아래 숫자들이 왜 그런지 (우리 선수만 아는 사실이다) */}
-      {ours && <p className="pc-mood">{moodSentence(ours.mood)}</p>}
+      {/* 지금 심경 한 줄 — 아래 숫자들이 왜 그런지 (우리 선수만 아는 사실이다).
+          경기 중에는 서지 않는다 — 지난 경기까지의 마음이라 지금 경기와 어긋난다 */}
+      {ours && !inMatch && <p className="pc-mood">{moodSentence(ours.mood)}</p>}
 
       <div className="pc-facts">
         <Fact

@@ -10,7 +10,6 @@ import {
   anchorOf,
   defaultRoleOf,
   formatMoney,
-  isUnfamiliarPosition,
   positionAtPoint,
   positionGroupOf,
   positionProficiency,
@@ -39,7 +38,7 @@ import { contractUntil, humanDate } from "@/lib/dateline";
 import { PitchChip, PitchGround } from "../../pitch";
 import { createLineupSaver, type LineupSaveOutcome, type LineupSaver } from "../../lineup-saver";
 import { useBoardDrag } from "./board-drag";
-import { Margin, fitAt } from "./marks";
+import { Margin } from "./marks";
 import { PlayerDetail } from "./player-detail";
 import { SquadTable, type SortKey } from "./squad-table";
 import { SetPiecePanel, TacticsPanel } from "./tactics-panel";
@@ -124,6 +123,8 @@ export function SquadView({
   const advisory = !live && onOrder !== undefined;
   /** 경기 중 우리 쪽 교체 사용량 — 한도는 국면이 정해 뷰가 싣는다 (match.md §8) */
   const liveMatch = game.views.match;
+  /** 킥오프를 지났나 — 그 뒤로 심경 한 줄은 지난 경기의 것이라 서지 않는다 */
+  const matchOn = liveMatch !== null && !liveMatch.beforeKickoff;
   const matchSubs =
     liveMatch && !liveMatch.beforeKickoff
       ? { ...liveMatch.subs[liveMatch.home.ours ? "home" : "away"], limit: liveMatch.subs.limit }
@@ -609,14 +610,9 @@ export function SquadView({
 
   const gkCount = gkCountOf(board);
   const gkIssue = live && gkCount !== 1;
-  const gkSlotIdx = board.points.findIndex((p) => positionAtPoint(p) === "GK");
-  const gkOccupant = gkSlotIdx >= 0 ? byId.get(board.occupants[gkSlotIdx] ?? "") : undefined;
-  const gkWarning = live && gkOccupant && gkOccupant.positionGroup !== "GK";
   const xi = board.occupants
     .map((id) => byId.get(id))
     .filter((p): p is SquadRow => p !== undefined);
-  const unavailableInXI = xi.filter((p) => !p.available);
-  const unavailableOnBench = benchDesignated.filter((p) => !p.available);
   /**
    * 선발 평균 — **각자 그 자리에서 내는 값**의 평균이다 (칩에 쓰인 숫자 그대로).
    * `overall`로 재면 센터백을 윙에 세워도 평균이 꿈쩍하지 않아, 판을 잘못 짠 것이
@@ -637,10 +633,6 @@ export function SquadView({
           }, 0) / xi.length,
         )
       : 0;
-  const misfits = board.points
-    .map((point, i) => ({ p: byId.get(board.occupants[i] ?? ""), code: positionAtPoint(point) }))
-    // 낯선 자리의 경계는 도메인이 갖는다 — 여기 숫자를 두면 판정이 두 곳이 된다
-    .filter((x) => x.p && isUnfamiliarPosition(fitAt(x.p, x.code).value));
 
   const selectedPlayer =
     selection?.kind === "slot"
@@ -786,9 +778,11 @@ export function SquadView({
         tierKey={`${onPitchKey}|${benchKey}|${localReserveKey}`}
         setPieces={takers}
         onSwapIn={onSwapInRow}
+        inMatch={matchOn}
         renderDetail={(p) => (
           <PlayerDetail
             p={p}
+            inMatch={matchOn}
             slotCode={p.id === selectedPlayer?.id ? selectedSlotCode : null}
             onRole={usable ? (role) => onRoleRow(p.id, role) : undefined}
             roleId={board.roles[p.id] ?? p.roleId}
@@ -1010,35 +1004,13 @@ export function SquadView({
         )}
       </div>
 
-      {(gkIssue ||
-        gkWarning ||
-        squad.registration.issues.length > 0 ||
-        unavailableInXI.length > 0 ||
-        unavailableOnBench.length > 0 ||
-        misfits.length > 0 ||
-        saveError) && (
+      {/**
+       * 저장이 멈춘 까닭만 여기 선다 — 선수의 결장·낯선 자리는 명단 행과 전술판 칩이 갖는다.
+       * GK 자리가 하나가 아니면 서버가 반려하므로 고칠 때까지 저장을 보류한다.
+       */}
+      {(gkIssue || saveError) && (
         <div className="lineup-status warn" data-testid="lineup-status">
-          {/* 경고는 사실만 — "교체하세요" 같은 지시나 규칙 설명은 붙이지 않는다.
-              저장이 멈추는 GK 문제만 이유를 밝힌다 (안 그러면 왜 안 되는지 모른다) */}
-          {/* 경고 글리프(⚠)는 달지 않는다 — 이 칸의 색(`--warn`)이 이미 경고다 */}
-          {/* 등록 명단의 사유는 칩의 툴팁에만 있었다 — 골키퍼 없는 1군처럼 킥오프 전에
-              반드시 읽어야 하는 사실이라 여기 그대로 세운다 (team.md §5) */}
-          {squad.registration.issues.map((issue) => (
-            <div key={issue} data-testid="registration-issue">
-              {issue}
-            </div>
-          ))}
-          {gkIssue && <div>GK 자리 {gkCount}곳 — 한 명이 될 때까지 저장이 보류됩니다.</div>}
-          {gkWarning && <div>GK 자리에 필드 플레이어</div>}
-          {unavailableInXI.length > 0 && (
-            <div>선발 불가(부상·정지): {unavailableInXI.map((p) => p.name).join(", ")}</div>
-          )}
-          {unavailableOnBench.length > 0 && (
-            <div>벤치에 출전 불가: {unavailableOnBench.map((p) => p.name).join(", ")}</div>
-          )}
-          {misfits.length > 0 && (
-            <div>낯선 자리: {misfits.map((x) => `${x.p!.name}(${x.code})`).join(", ")}</div>
-          )}
+          {gkIssue && <div>GK 자리 {gkCount}곳 — 한 명이 될 때까지 저장이 보류됩니다</div>}
           {saveError && <div data-testid="lineup-error">{saveError}</div>}
         </div>
       )}

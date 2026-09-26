@@ -113,6 +113,18 @@
   justify-content: flex-start;
   text-align: left;
 }
+/* 좁은 폭에서는 이름이 두 줄로 부러지는 대신 약칭으로 선다 */
+.mv-short {
+  display: none;
+}
+@media (max-width: 479px) {
+  .mv-team .mv-name {
+    display: none;
+  }
+  .mv-team .mv-short {
+    display: inline;
+  }
+}
 /* **잉크의 층이 편을 가른다** — 우리 1층, 상대 3층 (design-system §2 충돌 규칙 7).
    종료 카드의 `.mr-sb-team`과 같은 짝이다 — 두 스코어보드는 같은 해부다 */
 .mv-team.ours {
@@ -198,41 +210,6 @@
 }
 .mv-key.bad {
   border-left-color: var(--loss);
-}
-
-/**
- * 시트 — **지시가 판에 닿았나.** 키포인트가 "판에서 벌어지는 일"이면 이쪽은 "내가
- * 시킨 일"이라 바로 아래에 붙는다. 두 패널이 한 판을 두 층으로 읽는 것이므로
- * 레일·잉크 규칙은 키포인트(`.mv-keys`)와 같고, 줄만 한 단 크다 — 시트 줄은 감독이
- * 방금 말로 만든 것이라 먼저 읽힌다.
- */
-.mv-sheet {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-.mv-sheet-line {
-  font-size: var(--fs-md);
-  line-height: 1.5;
-  padding: 8px 12px;
-  border-left: 3px solid var(--border);
-}
-.mv-sheet-line + .mv-sheet-line {
-  border-top: 1px solid var(--line);
-}
-.mv-sheet-line.good {
-  border-left-color: var(--win);
-}
-.mv-sheet-line.bad {
-  border-left-color: var(--loss);
-}
-/**
- * 판에 닿지 못한 줄 — **일어나지 않은 일이라 편이 없다.** 레일은 트랙 색으로 서고
- * 잉크가 한 층 물러난다. 걸린 줄과 같은 크기인 것은 같은 물음의 답이기 때문이다 —
- * 작게 눕히면 감독이 훑다가 지나치고, 그러면 걸리지 않은 지시를 걸린 줄 안다.
- */
-.mv-sheet-line.dropped {
-  color: var(--text-2);
 }
 
 /* 양팀 전술 — 축마다 양쪽 눈금을 마주 보게 */
@@ -696,25 +673,36 @@ button.pitch-slot.theirs {
   padding: 14px 0;
 }
 .live-pitch canvas {
+  display: block;
   width: 100%;
   aspect-ratio: 105 / 68;
   border: 1px solid var(--line);
   border-radius: 4px;
   cursor: crosshair;
+  transition: filter 160ms ease-out;
 }
-.live-pitch-toolbar {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  font-size: 12px;
+/* 멈춘 판은 가라앉는다 — 상태 글자는 스코어보드가 갖는다 */
+.live-pitch.stopped canvas {
+  filter: brightness(0.72) saturate(0.7);
 }
-.live-pitch-toolbar strong {
-  font-variant-numeric: tabular-nums;
-  font-size: 17px;
+.live-pitch-frame {
+  position: relative;
 }
-.live-pitch-toolbar button {
-  margin-left: auto;
-  padding: 5px 10px;
+/* 골문 주인 — 판 아래 모서리에 얹는다. 선수를 가리지 않게 누르는 것은 캔버스로 흘린다 */
+.live-goal-tag {
+  position: absolute;
+  bottom: 6px;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--live-line);
+  pointer-events: none;
+}
+.live-goal-tag.home {
+  left: 8px;
+}
+.live-goal-tag.away {
+  right: 8px;
 }
 .live-indicator {
   width: 6px;
@@ -724,17 +712,6 @@ button.pitch-slot.theirs {
 }
 .live-indicator.paused {
   background: var(--text-3);
-}
-.live-pitch-teams {
-  display: flex;
-  justify-content: space-between;
-  color: var(--text-3);
-  font-size: 11px;
-}
-.live-pitch select {
-  justify-self: start;
-  max-width: 220px;
-  padding: 5px;
 }
 .live-events {
   list-style: none;
@@ -748,6 +725,9 @@ button.pitch-slot.theirs {
   padding: 7px 0;
   border-bottom: 1px solid var(--line);
 }
+.live-events li:last-child {
+  border-bottom: 0;
+}
 .live-events time {
   color: var(--text-3);
   min-width: 25px;
@@ -755,23 +735,6 @@ button.pitch-slot.theirs {
 .live-pitch-error {
   color: var(--loss);
   font-size: 12px;
-}
-.live-pitch-toolbar button,
-.live-pitch select {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font: inherit;
-}
-.live-pitch-toolbar button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-.live-pitch-toolbar button:focus-visible,
-.live-pitch select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 .live-pitch {
@@ -793,7 +756,7 @@ button.pitch-slot.theirs {
 
 /* The live stadium stays mounted while the bench changes tabs. */
 .in-live-match.app {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 }
 .in-live-match .match-headline {
@@ -817,18 +780,26 @@ button.pitch-slot.theirs {
   );
   max-width: 1800px;
   grid-template-columns: minmax(0, calc(100% - var(--split))) minmax(0, var(--split));
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   transition: none;
+}
+/* 스코어보드는 경기장 칸 머리에, 대화 칸은 두 줄을 다 쓴다 */
+.live-match-layout > .match-headline {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+.live-match-layout > .split-handle {
+  grid-row: 1 / 3;
 }
 .stage-split.panel-split.live-match-layout > .chat-pane,
 .stage-split.panel-split.live-match-layout > .match-side-panel {
-  grid-area: 1 / 2;
+  grid-area: 1 / 2 / 3 / 3;
   border-left: 1px solid var(--border);
   min-width: 0;
   background: var(--bg);
 }
 .live-match-layout > .chat-pane {
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 .live-match-layout.match-detail-open > .chat-pane {
   visibility: hidden;
@@ -848,7 +819,7 @@ button.pitch-slot.theirs {
   padding: var(--sp-4);
 }
 .stage-split.panel-split.live-match-layout > .stage-right {
-  grid-area: 1 / 1;
+  grid-area: 2 / 1;
   border: 0;
   opacity: 1;
   transition: none;
@@ -865,7 +836,7 @@ button.pitch-slot.theirs {
   flex: 1;
   min-height: 0;
   padding: 0;
-  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: var(--sp-2);
 }
 .live-pitch-field {
@@ -874,49 +845,19 @@ button.pitch-slot.theirs {
   place-items: center;
   container-type: size;
 }
-.live-pitch-field canvas {
+.live-pitch-field .live-pitch-frame {
   width: min(100cqw, calc(100cqh * 105 / 68));
-  height: auto;
   max-width: 100%;
 }
-.live-pitch-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  color: var(--text-3);
-  font-size: var(--fs-xs);
+/* 경기 기록 탭 — 분석이 먼저, 사건은 그 아래 최근 것부터 */
+.match-record {
+  display: grid;
+  gap: var(--sp-4);
 }
-.live-pitch-footer select {
-  min-height: 32px;
-}
-.live-match-layout .live-events {
-  max-height: 64px;
-  overflow-y: auto;
-}
-.live-match-layout .live-events li {
+.match-record .live-events li {
   font-size: var(--fs-sm);
-  padding-block: var(--sp-1);
+  padding-block: var(--sp-2);
 }
-.live-match-layout .board-tab {
-  flex: 0 1 auto;
-  min-height: 0;
-  max-height: 35%;
-  overflow: auto;
-  border-top: 1px solid var(--border);
-}
-.live-analysis summary {
-  display: flex;
-  justify-content: space-between;
-  padding-block: var(--sp-3);
-  cursor: pointer;
-  font-size: var(--fs-sm);
-  color: var(--text);
-}
-.live-analysis summary span {
-  color: var(--text-3);
-}
-.match-chat-heading,
 .match-detail-heading {
   display: flex;
   align-items: center;
@@ -926,18 +867,15 @@ button.pitch-slot.theirs {
   border-bottom: 1px solid var(--line);
   font-size: var(--fs-sm);
 }
-.match-chat-heading div,
 .match-detail-heading div {
   display: flex;
   gap: var(--sp-3);
   align-items: baseline;
 }
-.match-chat-heading span,
 .match-detail-heading span {
   color: var(--text-3);
   font-size: var(--fs-xs);
 }
-.match-chat-heading button,
 .match-detail-heading button {
   background: var(--panel-2);
   border: 1px solid var(--border);
@@ -959,16 +897,16 @@ button.pitch-slot.theirs {
   }
   .stage-split.panel-split.live-match-layout {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 46%) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 46%) minmax(0, 1fr);
     overflow: hidden;
     transition: grid-template-rows 200ms ease-out;
   }
   .stage-split.panel-split.live-match-layout > .stage-right {
-    grid-area: 1 / 1;
+    grid-area: 2 / 1;
   }
   .stage-split.panel-split.live-match-layout > .chat-pane,
   .stage-split.panel-split.live-match-layout > .match-side-panel {
-    grid-area: 2 / 1;
+    grid-area: 3 / 1;
     border-left: 0;
     border-top: 1px solid var(--border);
   }
@@ -977,35 +915,12 @@ button.pitch-slot.theirs {
     gap: var(--sp-1);
   }
   .live-match-layout .live-pitch {
-    grid-template-rows: auto minmax(0, 1fr) auto;
     gap: var(--sp-1);
   }
-  .live-match-layout .live-pitch-teams,
-  .live-match-layout .live-pitch-footer {
-    display: none;
-  }
-  .live-match-layout .live-events {
-    max-height: 24px;
-  }
-  .live-match-layout .live-events li:not(:last-child) {
-    display: none;
-  }
-  .live-match-layout .live-events li {
-    border: 0;
-    white-space: normal;
-  }
-  .live-match-layout .board-tab {
-    max-height: 40%;
-  }
-  .live-analysis summary {
-    padding-block: var(--sp-2);
-  }
-  .match-chat-heading,
   .match-detail-heading {
     padding: var(--sp-2) var(--sp-3);
     min-height: 40px;
   }
-  .match-chat-heading div,
   .match-detail-heading div {
     gap: var(--sp-2);
   }
@@ -1015,7 +930,7 @@ button.pitch-slot.theirs {
   }
   .match-input-focus .stage-split.panel-split.live-match-layout,
   .stage-split.panel-split.live-match-layout.match-detail-open {
-    grid-template-rows: minmax(0, 0%) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 0%) minmax(0, 1fr);
   }
   .match-input-focus .live-match-layout > .stage-right,
   .live-match-layout.match-detail-open > .stage-right {
@@ -1074,12 +989,10 @@ button.pitch-slot.theirs {
   flex-shrink: 0;
   min-height: 36px;
 }
-.match-detail-heading button:hover,
-.match-chat-heading button:hover {
+.match-detail-heading button:hover {
   background: var(--pop);
 }
-.match-detail-heading button:focus-visible,
-.match-chat-heading button:focus-visible {
+.match-detail-heading button:focus-visible {
   box-shadow: var(--ring);
 }
 .match-side-panel .squad-head,
