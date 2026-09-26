@@ -139,7 +139,7 @@ export const LIVE_MATCH_STATS = defineHarness({
   id: "live-match-stats",
   what: "실시간 경기의 팀 통계 — 득점 분포·슈팅·xG·패스·점유·수비·규율·거리의 평균·중간값·sd",
   doc: "docs/simulation/football-reference.md",
-  cost: "시드 세계 셋 × 리그 12경기 = 36경기 · 3~4분",
+  cost: "시드 세계 셋 × 리그 12경기 = 36경기 · 10분",
   // prettier-ignore
   bands: [
     { metric: "팀-경기 표본", role: "measure", unit: "count", why: "아래 밴드의 폭은 이 표본(72)의 잡음을 넣어 잡았다 — 팀 득점 평균의 표준오차가 0.15다" },
@@ -193,7 +193,7 @@ export const LIVE_PLAYER_LOAD = defineHarness({
   id: "live-player-load",
   what: "풀타임 선수의 포지션별 총 거리·고속·스프린트 — 실측과 기대 부하표에 서는가",
   doc: "docs/simulation/football-reference.md §7",
-  cost: "시드 세계 둘 × 리그 8경기 = 16경기 · 2분",
+  cost: "시드 세계 둘 × 리그 8경기 = 16경기 · 5분",
   // prettier-ignore
   bands: [
     { metric: "풀타임 표본", role: "measure", unit: "count", why: "교체·퇴장·부상으로 나간 선수는 뺀다 — 90분을 다 뛴 몸만 잰다" },
@@ -218,7 +218,7 @@ export const LIVE_TACTICS = defineHarness({
   id: "live-tactics",
   what: "홈 팀 전술 하나만 바꿔 굴렸을 때 슈팅·xG·점유·거리가 예상한 방향으로 움직이는가",
   doc: "docs/simulation/live-match.md §6",
-  cost: "시드 둘 × 리그 12경기 × 팔 다섯 = 120경기 · 10분",
+  cost: "시드 둘 × 리그 12경기 × 팔 다섯 = 120경기 · 30분",
   // prettier-ignore
   bands: [
     { metric: "기준 — 우리 슈팅", role: "measure", why: "아래 변화들의 눈금 — 전술을 건드리지 않은 판" },
@@ -240,7 +240,7 @@ export const SIM_PARITY = defineHarness({
   id: "sim-parity",
   what: "같은 대진을 실시간 경기와 간이 시뮬로 굴렸을 때 득점·xG·슈팅·홈 이점·전력 기울기가 같은 눈금인가",
   doc: "docs/simulation/match.md §8.5",
-  cost: "시드 세계 셋 × 리그 24경기 = 72경기 + 간이 1440판 · 10분",
+  cost: "시드 세계 셋 × 리그 24경기 = 72경기 + 간이 1440판 · 20분",
   // prettier-ignore
   bands: [
     { metric: "대진", role: "measure", unit: "count", why: "실시간 한 판씩 — 아래 비의 잡음은 이 수가 정한다" },

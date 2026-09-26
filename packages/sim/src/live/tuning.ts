@@ -38,12 +38,6 @@ export const BENCH_INTERVAL_SECONDS = 60;
 /** 공 없는 판단의 간격 (초) — 반응 시간 */
 export const DECIDE_INTERVAL = 0.45;
 
-/** 느슨한 공을 쫓는 반경 (m) — 편마다 가장 가까운 말이 간다 */
-export const CHASE_RADIUS = 40;
-
-/** 두 번째 말도 함께 쫓는 반경 (m) */
-export const CHASE_SECOND_RADIUS = 8;
-
 /** 패스가 떨어진 자리에서 받는 말이 공을 거두는 반경 (m) — 첫 터치의 팔 길이 */
 export const RECEIVE_RADIUS = 2.6;
 
@@ -58,9 +52,6 @@ export const SLOW_CARRY_SECONDS = 0.6;
 
 /** 압박으로 치는 거리 (m) */
 export const PRESSURE_RADIUS = 3.5;
-
-/** 압박에 나서는 거리 (m) — 이 안의 말만 공을 향한다 */
-export const PRESS_RADIUS = 22;
 
 /** 압박하는 말이 공 가진 상대의 골 쪽에서 서는 거리 (m) — 덤비지 않고 길을 막는다 */
 export const PRESS_STANDOFF = 1.8;
@@ -256,9 +247,6 @@ export const KEEP_VALUE = 0.05;
 /** 공을 잃으면 지금 자리의 위협도 잃는다 — 그 몫 */
 export const LOSS_SHARE = 0.5;
 
-/** 공 가진 상대를 막으러 나서는 첫 수비수의 반경 (m) — 압박선과 무관하게 한 명은 붙는다 */
-export const ENGAGE_RADIUS = 18;
-
 /** 재시작을 기다리는 키커가 서는 자리 — 공 뒤(제 골 쪽)로 떨어진 거리 (m) */
 export const SET_PIECE_STANCE = 1;
 
@@ -284,10 +272,8 @@ export const OUT_MARGIN = 4;
 /** 골키퍼가 없을 때의 오프셋 (m) — xG의 골키퍼 항이 상한에 선다 */
 export const KEEPER_ABSENT_OFFSET = 6;
 
-/** 위험 지역 — 우리 골라인에서 이 거리 안의 공에는 둘째 수비가 좁혀 든다 (m)와 그 수비를 찾는 반경 */
+/** 골키퍼의 흔들림 — 공이 우리 골라인에서 이 거리 (m) 밖에 있을 때만 제자리에서 흔들린다 */
 export const DANGER_DEPTH = 30;
-
-export const DANGER_CLOSE_RADIUS = 15;
 
 /**
  * 자리의 느린 흔들림 — 자리별 진폭 (m)과 주기 (초). 실측 선수는 경기 시간의 절반 가까이
@@ -391,9 +377,6 @@ export const PRESS_JOCKEY_URGENCY = 0.66;
 /** 전력 질주 — 최고 속도 그대로 */
 export const URGENCY_FULL = 1;
 
-/** 상대 진영의 공에 첫 수비수가 나서는 반경 (m) — 압박선 밖에서는 가까운 말만 붙는다 */
-export const JOCKEY_ENGAGE_RADIUS = 12;
-
 /** 마크한 상대가 이만큼 달아나면 (m) 따라 뛴다 — 침투를 쫓는 수비 */
 export const MARK_TRACK_GAP = 4;
 
@@ -437,33 +420,143 @@ export const BURST_URGENCY: Record<WeightSlot, number> = {
 /** 치고 나갈 만큼 자리가 앞에 있어야 한다 (m) */
 export const BURST_GAP = 9;
 
-/** 오버래핑의 값이 공과의 가로 거리에 따라 줄어 0이 되는 거리 (m) — 공이 제 측면에 가까울수록 값지다 */
-export const OVERLAP_FLANK = 30;
-
-/** 공 가진 말보다 앞질러 서는 거리 (m)와 터치라인에서의 거리 (m) */
-export const OVERLAP_AHEAD = 12;
-
-export const OVERLAP_TOUCHLINE = 5;
-
 /** 오버래핑의 급함 — 고강도 주행(19.8~25.2 km/h)으로 측면을 올라간다. 전력 질주는 드물다 */
 export const OVERLAP_URGENCY = 0.7;
 
-/** 오버래핑을 고르면 이만큼 (초) 다시 판단하지 않고 뛴다 — 한 번의 질주가 측면을 올라간다 */
-export const OVERLAP_COMMIT_SECONDS = 2.5;
-
-/** 최전방은 조직 수비에서 사람을 잡지 않는다 — 공을 되찾으면 나갈 자리를 지킨다 */
-export const NON_MARKING_SLOTS: ReadonlySet<WeightSlot> = new Set(["CF", "ST"]);
-
-// ── 공 없는 말의 후보점 (`step.ts` · live-match.md §5.2) ────────────────────────────
+// ── 공 없는 말의 가치장 (`step.ts` · live-match.md §5.2) ─────────────────────────────
 //
-// 점수 = 상황 가치 + 역할 가산 + β·ln ρ + 관성, 선택은 온도 T의 softmax. 아래 값은 전부
-// 그 점수의 눈금이다 — 자리 후보의 값이 기준이고, 다른 후보는 그보다 크면 더 자주 뽑힌다.
+// U(x) = 역할의 분포 + a·공격 가치 + (1 − a)·수비 가치 + 추격 + 지시 − 붐빔 − 이동 비용 + 관성.
+// 모든 항은 경계 없는 연속 함수이고, σ는 끊는 선이 아니라 옅어지는 폭이다. 목표는
+// P(x) ∝ exp(U(x) ÷ T)에서 뽑는다 — 제안점을 뽑아 제안 밀도로 나눠 가중하는 방식으로.
+
+/** 공격 무게 a — 공을 가진 편 1, 아닌 편 0. 소유가 바뀐 직후에는 이 몫이 반대쪽에 남아 이 시간 (초)으로 사라진다 */
+export const FIELD_TRANSITION_BLEND = 0.5;
+
+export const FIELD_TRANSITION_SECONDS = 3;
+
+/** 공격 — 패스 받기(열린 길 × 알맞은 거리)·빈 공간·위협·오프사이드 위험의 무게 */
+export const FIELD_RECEIVE = 0.8;
+
+export const FIELD_SPACE = 0.25;
+
+export const FIELD_THREAT = 0.45;
+
+export const FIELD_OFFSIDE = 0.8;
+
+/** 빈 공간이 차는 폭 (m) · 패스 길이 상대가 막는 폭 (m) · 알맞은 패스 거리에서 벗어나 옅어지는 폭 (m) · 오프사이드 선의 부드러움 (m) */
+export const FIELD_SPACE_SIGMA = 8;
+
+export const FIELD_LANE_SIGMA = 2.2;
+
+export const FIELD_PASS_SIGMA = 10;
+
+export const FIELD_OFFSIDE_SIGMA = 1;
+
+/** 수비 — 압박·마크·골 쪽 커버·라인 이탈의 무게 */
+export const FIELD_PRESS = 8;
+
+export const FIELD_MARK = 10;
+
+export const FIELD_COVER = 3;
+
+export const FIELD_LINE_BEHIND = 0.6;
+
+export const FIELD_LINE_AHEAD = 0.15;
+
+/** 압박 자리·마크 자리·커버 선·라인에서 옅어지는 폭 (m) */
+export const FIELD_PRESS_SIGMA = 2.5;
+
+export const FIELD_MARK_SIGMA = 3.5;
+
+export const FIELD_COVER_SIGMA = 4;
+
+export const FIELD_LINE_SIGMA = 4;
+
+/** 공의 위험 — 우리 골문에서의 거리가 이 폭 (m)으로 옅어진다. 압박 몫과 골 쪽 커버에 곱해진다 */
+export const FIELD_DANGER_SIGMA = 28;
 
 /**
- * 온도 — 능력치(공격 `offTheBall` · 수비 `positioning`)가 `OFFBALL_SKILL_TOP` 이상이면
- * `OFFBALL_TEMPERATURE_MIN`, `OFFBALL_SKILL_BOTTOM` 이하면 거기에 `OFFBALL_TEMPERATURE_SPAN`을
- * 더한 값. 선수 분포가 사는 구간에서 가파르게 — 60과 80이 다르게 움직여야 능력이 공간에 선다
+ * 압박의 몫 — 압박 자리에 닿는 시간의 softmax(부드러움 `FIELD_PRESS_TAU`초)로 편 안에서 나눈다.
+ * 몫의 합은 압박 강도 = 1(첫 수비수) + (압박 인원 − 1) × 압박선 안의 정도 + 역압박 + 위험도 × `FIELD_PRESS_DANGER`.
+ * 공보다 앞(상대 쪽)에 선 말은 `FIELD_PRESS_BEHIND`초 늦게 닿는 것으로 친다 — 등 뒤에서는 길을 막지 못한다
  */
+export const FIELD_PRESS_TAU = 0.5;
+
+export const FIELD_PRESS_BEHIND = 1;
+
+export const FIELD_PRESS_ZONE_SIGMA = 6;
+
+export const FIELD_PRESS_DANGER = 0.6;
+
+/**
+ * 마크의 몫 — 상대마다 가까운 수비 `FIELD_MARK_NEAREST`명의 비용(거리 − `MARK_ZONE_METRES` × ln ρ)의
+ * softmax, 부드러움 (m). 한 수비가 읽는 상대 수. 상대의 위협은 바닥 `FIELD_MARK_THREAT_FLOOR`에
+ * xT와 우리 골문에 가까운 정도가 얹힌다 — 중원의 상대도 잡는다
+ */
+export const FIELD_MARK_TAU = 3;
+
+export const FIELD_MARK_TOP = 4;
+
+export const FIELD_MARK_NEAREST = 4;
+
+export const FIELD_MARK_THREAT_FLOOR = 0.3;
+
+/** 골 쪽 커버 선에 동료가 이미 서 있으면 — 그 둘레 폭 (m)에서 이 몫만큼 값이 준다 */
+export const FIELD_OCCUPIED = 0.7;
+
+export const FIELD_OCCUPIED_SIGMA = 3;
+
+/** 추격 — 주인 없는 공·날아가는 공이 떨어질 자리. 닿는 시간의 softmax 부드러움 (초)과 무게, 폭 (m) */
+export const FIELD_CHASE = 1.5;
+
+export const FIELD_CHASE_TAU = 0.6;
+
+export const FIELD_CHASE_SIGMA = 3;
+
+/** 판독기의 개인 지시 — 지시가 가리키는 자리의 무게와 폭 (m) */
+export const FIELD_BEHAVIOR = 1.5;
+
+export const FIELD_BEHAVIOR_SIGMA = 3;
+
+/** 붐빔 — 동료 둘레에서 값이 준다. 무게와 폭 (m) */
+export const FIELD_CROWD = 0.5;
+
+export const FIELD_CROWD_SIGMA = 4;
+
+/** 이동 비용 — 1 m마다 */
+export const FIELD_MOVE_COST = 0.008;
+
+/** 관성 — 지금 목표 둘레의 가산과 폭 (m) */
+export const FIELD_INERTIA = 0.5;
+
+export const FIELD_INERTIA_SIGMA = 3;
+
+/** 제안점 — 분포에서 뽑는 수와, 다른 기준점(지금 위치·목표·공·공 가진 동료·압박 자리·마크 자리·커버 선·상대 라인)마다 뽑는 수 */
+export const FIELD_PROPOSALS_HEATMAP = 4;
+
+export const FIELD_PROPOSALS_EACH = 1;
+
+/**
+ * 제안 밀도의 보정 세기 (0..1) — 1이면 가중치를 제안 밀도로 나눠 P(x) ∝ exp(U ÷ T)를 그대로
+ * 뽑고, 0이면 제안점을 가치장 위의 후보로 보고 exp(U ÷ T)의 비율로만 뽑는다
+ */
+export const FIELD_PROPOSAL_CORRECTION = 0.5;
+
+/** 기준점마다 제안점이 퍼지는 폭 (m) */
+export const FIELD_PROPOSAL_SIGMA = {
+  here: 4,
+  target: 3,
+  ball: 4,
+  owner: 10,
+  press: 3,
+  mark: 3,
+  cover: 4,
+  line: 6,
+} as const;
+
+/** 행동 이름 — 뽑힌 점에서 가장 크게 기여한 항이 행동이 된다. 어느 항도 이만큼 못 되면 자리 */
+export const FIELD_SHAPE_LABEL = 0.15;
+
 export const OFFBALL_TEMPERATURE_MIN = 0.06;
 
 export const OFFBALL_TEMPERATURE_SPAN = 0.24;
@@ -475,84 +568,10 @@ export const OFFBALL_SKILL_BOTTOM = 0;
 /** β — 로그 밀도가 점수에 들어가는 몫. 퍼짐 두 배 밖의 점(ln ρ ≈ −2)이 이 값의 두 배를 잃는다 */
 export const OFFBALL_DENSITY_WEIGHT = 0.2;
 
-/** 판단마다 히트맵에서 뽑아 후보에 넣는 점의 수와, 그 점의 값이 자리 후보보다 낮은 몫 */
-export const OFFBALL_SAMPLES = 1;
-
-export const OFFBALL_SAMPLE_DISCOUNT = 0.12;
-
-/** 분포에서 뽑은 점이 서 있는 창 (초) — 창이 바뀔 때마다 새로 뽑는다 */
-export const OFFBALL_WANDER_SECONDS = 30;
-
-/**
- * 관성 — 지금 목표에서 이 거리 (m) 안의 후보에 더하는 값, 지난 판단과 같은 행동의 후보에
- * 더하는 값. 상황이 바뀌어야 다른 일로 옮긴다 — 판단마다 목표가 뒤집히면 말이 쉬지 않고 뛴다
- */
-export const OFFBALL_INERTIA_RADIUS = 3;
-
-export const OFFBALL_INERTIA = 0.5;
-
-export const OFFBALL_INERTIA_KIND = 0.5;
-
-/** 자리 후보의 값과 `hold` 성향이 더하는 값 */
-export const SPOT_SHAPE = 0.3;
-
-export const SPOT_HOLD = 0.3;
-
-/** 역할 가산 — 성향이 중립(0.5)에서 벗어난 만큼 그 후보의 값에 더한다 */
-export const SPOT_ROLE = 0.55;
-
-/** 빈 공간의 눈금 (m) — 가장 가까운 상대가 이만큼 떨어지면 공간 값이 다 찬다 */
-export const SPOT_SPACE_FULL = 10;
-
 /** 위협(xT)의 눈금 — 이 값의 칸에서 위협 값이 다 찬다 (박스 앞 중앙 칸이 0.1) */
 export const SPOT_THREAT_FULL = 0.1;
 
-/** 지원 — 공 가진 동료에게서 이 거리 안이면 지원 후보를 세운다 (m) · 공간이 준 값 · 경로가 막혔을 때 남는 몫 */
-export const SUPPORT_RANGE = 26;
-
-export const SUPPORT_VALUE = 1;
-
-export const SUPPORT_LANE_BLOCKED = 0.4;
-
-/** 패스 경로가 막혔다고 보는 거리 (m) — 상대가 경로에서 이만큼 안에 있다 */
-export const SUPPORT_LANE_WIDTH = 2;
-
-/** 침투 — 라인 뒤 공간의 값과 그 공간이 다 차는 깊이 (m), 위협 값 */
-export const RUN_VALUE = 0.1;
-
-export const RUN_ROOM_FULL = 25;
-
-export const RUN_THREAT = 0.05;
-
-/** 침투를 세우는 공의 최소 깊이 (m)와 말의 최소 순간 여력 */
-export const RUN_MIN_BALL_DEPTH = 35;
-
-export const RUN_MIN_FUEL = 0.35;
-
-/** 박스 진입 — 위협 값과 빈 공간 값 */
-export const BOX_VALUE = 0.5;
-
-export const BOX_SPACE = 0.05;
-
-/** 오버래핑·폭 — 빈 공간 값과 위협 값 */
-export const OVERLAP_VALUE = 0.6;
-
-export const OVERLAP_THREAT = 0.15;
-
-/** 수비 — 자리 후보의 값 */
-export const SPOT_SHAPE_DEFEND = 0.35;
-
-/** 마크 — 배정받은 상대의 골 쪽에 서는 값과 그 상대의 위협이 더하는 값, 서는 거리 (m) */
-export const MARK_VALUE = 0.75;
-
-export const MARK_THREAT = 0.4;
-
 export const MARK_GOAL_SIDE = 2.2;
-
-/** 마크 배정 — 공이 이 깊이보다 우리 쪽일 때 · 우리 골에서 이 거리 안의 상대만 (m) */
-export const MARK_BALL_DEPTH = 63;
-
-export const MARK_GOAL_RADIUS = 45;
 
 /**
  * 마크 배정의 값 (m) — 거리 + 로그 밀도 1마다 이만큼. 그 값이 `MARK_COST_MAX`를 넘는
@@ -560,35 +579,6 @@ export const MARK_GOAL_RADIUS = 45;
  * 골 쪽 자리에서 `MARK_HOLD_SLACK` 안이면 맡고 있는 것이다
  */
 export const MARK_ZONE_METRES = 3;
-
-export const MARK_COST_MAX = 22;
-
-export const MARK_KEEP_METRES = 4;
-
-export const MARK_HOLD_SLACK = 1.5;
-
-/** 슛 길목 — 공과 우리 골문을 잇는 선 위, 공에서 이 거리들 (m) · 값 */
-export const LANE_STANDOFFS: readonly number[] = [5, 8];
-
-export const LANE_VALUE = 0.7;
-
-/** 길목에 이미 동료가 이 거리 안에 있으면 그 점의 값이 이 몫만 남는다 (m) */
-export const LANE_OCCUPIED = 3;
-
-export const LANE_OCCUPIED_SHARE = 0.2;
-
-/** 존 커버 — 자리에서 우리 골 쪽으로 물러서는 거리 (m) · 공 쪽으로 좁히는 몫 · 값 */
-export const COVER_DROP = 4;
-
-export const COVER_NARROW = 0.3;
-
-export const COVER_VALUE = 0.5;
-
-/** 위험의 눈금 — 공이 우리 골문에서 이 거리 (m) 안이면 길목·커버의 값이 선다. 골문에서 1, 이 거리에서 0 */
-export const DANGER_RANGE = 40;
-
-/** 슛 길목·존 커버의 자리가 이만큼 (m) 넘게 남으면 위험만큼 서두른다 */
-export const DANGER_RECOVERY_GAP = 5;
 
 /** 골키퍼 — 공격 중 공 깊이 1m마다 나오는 거리 (m)와 그 상한 (m). 스위퍼 키퍼는 라인 뒤를 덮는다 */
 export const KEEPER_ATTACK_ADVANCE = 0.25;

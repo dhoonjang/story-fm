@@ -35,7 +35,7 @@ import { INJURY_CONTACT_RISK, INJURY_SPRINT_RISK, injuryWeight } from "../injury
 import { AWAY_CONDITION_PENALTY, emptyLoad } from "../load";
 import { finishingGoalProbability, penaltyRate } from "../shot-model";
 import { takerOnPitch } from "../set-piece-taker";
-import { LN2, dexp, dsigmoid } from "./dmath";
+import { LN2, dexp, dlog, dsigmoid } from "./dmath";
 import {
   clamp,
   depthOf,
@@ -52,65 +52,21 @@ import {
   yAtLateral,
 } from "./geometry";
 import { teamParamsOf, type TeamParams } from "./params";
-import { advanceFlight, movePlayer, reachHeightOf, reachOf } from "./physics";
+import { advanceFlight, maxSpeedOf, movePlayer, reachHeightOf, reachOf } from "./physics";
 import { SLOT_TENDENCY, roleTendencyOf, type RoleTendency } from "./roles";
-import { heatmapLogDensityAt, heatmapOf, sampleHeatmap, type Heatmap } from "./heatmap";
-import { backLineOf, defendFloorOf, frontLimitOf, shapePosition } from "./shape";
+import {
+  heatmapLogDensityAt,
+  heatmapOf,
+  heatmapPdfAt,
+  sampleHeatmap,
+  type Heatmap,
+} from "./heatmap";
+import { backLineOf, frontLimitOf, shapePosition } from "./shape";
 import { sideInputOf, type LiveInput, type LiveStepResult } from "./types";
-import { xThreatAt } from "./xt";
+import { xThreatAt, xThreatSmooth } from "./xt";
 import { onTarget, shotXg } from "./xg";
 import {
   AERIAL_RADIUS,
-  BOX_SPACE,
-  BOX_VALUE,
-  COVER_DROP,
-  COVER_NARROW,
-  COVER_VALUE,
-  DANGER_RANGE,
-  DANGER_RECOVERY_GAP,
-  LANE_OCCUPIED,
-  LINE_STEP_UP,
-  LINE_STEP_UP_SPEED,
-  LANE_OCCUPIED_SHARE,
-  LANE_STANDOFFS,
-  LANE_VALUE,
-  MARK_BALL_DEPTH,
-  MARK_COST_MAX,
-  MARK_GOAL_RADIUS,
-  MARK_GOAL_SIDE,
-  MARK_HOLD_SLACK,
-  MARK_KEEP_METRES,
-  MARK_THREAT,
-  MARK_VALUE,
-  MARK_ZONE_METRES,
-  OFFBALL_DENSITY_WEIGHT,
-  OFFBALL_INERTIA,
-  OFFBALL_INERTIA_KIND,
-  OFFBALL_INERTIA_RADIUS,
-  OFFBALL_SAMPLES,
-  OFFBALL_SKILL_BOTTOM,
-  OFFBALL_SKILL_TOP,
-  OFFBALL_WANDER_SECONDS,
-  OFFBALL_SAMPLE_DISCOUNT,
-  OFFBALL_TEMPERATURE_MIN,
-  OFFBALL_TEMPERATURE_SPAN,
-  OVERLAP_THREAT,
-  OVERLAP_VALUE,
-  RUN_MIN_BALL_DEPTH,
-  RUN_MIN_FUEL,
-  RUN_ROOM_FULL,
-  RUN_THREAT,
-  RUN_VALUE,
-  SPOT_HOLD,
-  SPOT_ROLE,
-  SPOT_SHAPE,
-  SPOT_SHAPE_DEFEND,
-  SPOT_SPACE_FULL,
-  SPOT_THREAT_FULL,
-  SUPPORT_LANE_BLOCKED,
-  SUPPORT_LANE_WIDTH,
-  SUPPORT_RANGE,
-  SUPPORT_VALUE,
   BEATEN_SECONDS,
   BLOCKED_SHOT_CORNER,
   BLOCK_CHANCE,
@@ -125,13 +81,10 @@ import {
   CARD_ON_CYNICAL,
   CARRIER_DECIDE_INTERVAL,
   CARRIER_PRESSED_INTERVAL,
-  CHASE_RADIUS,
-  CHASE_SECOND_RADIUS,
   CLEARANCE_SPREAD,
   CROSS_BLOCK_CORNER,
   CROSS_BLOCK_WINDOW,
   CROSS_RESERVE,
-  DANGER_CLOSE_RADIUS,
   DANGER_DEPTH,
   DECIDE_INTERVAL,
   DIRECT_FREE_KICK_CHANCE,
@@ -142,7 +95,51 @@ import {
   DUEL_RANGE,
   DUEL_SCALE,
   DUEL_TACKLER_EDGE,
-  ENGAGE_RADIUS,
+  FIELD_BEHAVIOR,
+  FIELD_BEHAVIOR_SIGMA,
+  FIELD_CHASE,
+  FIELD_CHASE_SIGMA,
+  FIELD_CHASE_TAU,
+  FIELD_COVER,
+  FIELD_COVER_SIGMA,
+  FIELD_CROWD,
+  FIELD_CROWD_SIGMA,
+  FIELD_DANGER_SIGMA,
+  FIELD_INERTIA,
+  FIELD_INERTIA_SIGMA,
+  FIELD_LANE_SIGMA,
+  FIELD_LINE_AHEAD,
+  FIELD_LINE_BEHIND,
+  FIELD_LINE_SIGMA,
+  FIELD_MARK,
+  FIELD_MARK_SIGMA,
+  FIELD_MARK_NEAREST,
+  FIELD_MARK_TAU,
+  FIELD_MARK_THREAT_FLOOR,
+  FIELD_MARK_TOP,
+  FIELD_MOVE_COST,
+  FIELD_OCCUPIED,
+  FIELD_OCCUPIED_SIGMA,
+  FIELD_OFFSIDE,
+  FIELD_OFFSIDE_SIGMA,
+  FIELD_PASS_SIGMA,
+  FIELD_PRESS,
+  FIELD_PRESS_BEHIND,
+  FIELD_PRESS_DANGER,
+  FIELD_PRESS_SIGMA,
+  FIELD_PRESS_TAU,
+  FIELD_PRESS_ZONE_SIGMA,
+  FIELD_PROPOSALS_EACH,
+  FIELD_PROPOSALS_HEATMAP,
+  FIELD_PROPOSAL_CORRECTION,
+  FIELD_PROPOSAL_SIGMA,
+  FIELD_RECEIVE,
+  FIELD_SHAPE_LABEL,
+  FIELD_SPACE,
+  FIELD_SPACE_SIGMA,
+  FIELD_THREAT,
+  FIELD_TRANSITION_BLEND,
+  FIELD_TRANSITION_SECONDS,
   FIRST_TOUCH_SECONDS,
   FOUL_ON_AERIAL,
   FOUL_ON_FAILED_TACKLE,
@@ -162,37 +159,39 @@ import {
   INTERCEPT_REACH_MIN,
   INTERCEPT_REACH_PER_POINT,
   INTERCEPT_REACH_PIVOT,
-  JOCKEY_ENGAGE_RADIUS,
   KEEPER_ABSENT_OFFSET,
   KEEPER_ATTACK_ADVANCE,
   KEEPER_ATTACK_MAX_OUT,
   KEEPER_REACTION_SECONDS,
   KEEP_VALUE,
+  LINE_STEP_UP,
+  LINE_STEP_UP_SPEED,
   LOSS_SHARE,
+  MARK_GOAL_SIDE,
   MARK_TRACK_GAP,
   MARK_TRACK_URGENCY,
-  NON_MARKING_SLOTS,
+  MARK_ZONE_METRES,
+  OFFBALL_DENSITY_WEIGHT,
+  OFFBALL_SKILL_BOTTOM,
+  OFFBALL_SKILL_TOP,
+  OFFBALL_TEMPERATURE_MIN,
+  OFFBALL_TEMPERATURE_SPAN,
   OUT_MARGIN,
-  OVERLAP_AHEAD,
-  OVERLAP_COMMIT_SECONDS,
-  OVERLAP_FLANK,
-  OVERLAP_TOUCHLINE,
   OVERLAP_URGENCY,
   PASS_ANGLE_ERROR,
+  PASS_LANE_MARGIN,
   PASS_LENGTH_ERROR,
   PASS_LOFT_ERROR,
   PASS_PRESSURE_ERROR,
-  PASS_SPEED_MAX,
   PASS_SKILL_HALVING,
   PASS_SKILL_PIVOT,
   PASS_SLOPPINESS_AT_PIVOT,
+  PASS_SPEED_MAX,
   PASS_SPEED_MIN,
   PASS_THREAD_BASE,
-  PASS_LANE_MARGIN,
   PENALTY_WRONG_WAY_SECONDS,
   PRESSURE_RADIUS,
   PRESS_JOCKEY_URGENCY,
-  PRESS_RADIUS,
   PRESS_STANDOFF,
   RECEIVE_RADIUS,
   RECOVERY_GAP,
@@ -201,8 +200,6 @@ import {
   RED_ON_DOGSO,
   RED_ON_RECKLESS,
   RESTART_DEAD_SECONDS,
-  SET_PIECE_RUNUP_SECONDS,
-  SET_PIECE_STANCE,
   RISK_VALUE,
   ROLL_DECELERATION,
   ROLL_ON_MAX,
@@ -211,6 +208,8 @@ import {
   SAVE_KEEPER_SCALE,
   SAVE_LOGIT_BASE,
   SAVE_PLACEMENT,
+  SET_PIECE_RUNUP_SECONDS,
+  SET_PIECE_STANCE,
   SET_PIECE_WINDOW_SECONDS,
   SHAPE_DRIFT,
   SHAPE_DRIFT_PERIOD,
@@ -224,6 +223,7 @@ import {
   SHOT_SPEED_SPAN,
   SHOT_VALUE,
   SLOW_CARRY_SECONDS,
+  SPOT_THREAT_FULL,
   STOPPAGE_SECONDS,
   TACKLE_ATTEMPT,
   TACKLE_IN_PATH,
@@ -250,6 +250,8 @@ import {
 
 const dead = (seconds: number) => Math.round(seconds / LIVE_STEP);
 
+const sq = (v: number) => v * v;
+
 interface Ctx {
   state: LiveMatchState;
   input: LiveInput;
@@ -262,12 +264,8 @@ interface Ctx {
   slot: Map<string, LineupSlot>;
   factor: Map<string, number>;
   behavior: Map<string, LiveBehavior>;
-  /** 이 틱에 압박에 나서는 말 */
-  pressers: Set<string>;
-  /** 이 틱에 느슨한 공을 쫓거나 패스를 받으러 가는 말 */
-  chasers: Set<string>;
-  /** 이 틱의 마크 배정 — 수비 말 id → 맡은 상대 id */
-  marks: Map<string, string>;
+  /** 이 틱의 가치장 몫 — 편마다, 판단하는 말이 있을 때 한 번 */
+  field: Partial<Record<MatchSide, SideField>>;
   /** 이 틱에 이미 세운 히트맵 — 말 id → 그 말의 지금 국면 히트맵 */
   zones: Map<string, Heatmap>;
   /** 편마다의 수비 라인(뒤에서 두 번째 수비수의 깊이) — 오프사이드와 침투의 기준 */
@@ -512,9 +510,7 @@ function buildContext(state: LiveMatchState, input: LiveInput): Ctx {
     slot,
     factor,
     behavior,
-    pressers: new Set(),
-    chasers: new Set(),
-    marks: new Map(),
+    field: {},
     zones: new Map(),
     defensiveLine: { home: 12, away: 12 },
   };
@@ -590,139 +586,18 @@ function phaseOf(ctx: Ctx, side: MatchSide): LivePhase {
       : "final_third";
 }
 
-/** 공에 가장 가까운 상대들 — 압박 배정 */
-function assignPressers(ctx: Ctx): void {
-  const { state } = ctx;
-  const defending = otherSide(state.possession);
-  const params = ctx.params[defending];
-  const phase = phaseOf(ctx, defending);
-  const ballDepth = depthOf(state.ball.x, defending);
-  const counterpress = phase === "defensive_transition" && params.counterpressSeconds > 0;
-  const ranked = state.players
-    .filter((p) => p.side === defending && !isKeeper(ctx, p))
-    .map((p) => ({ p, d: distance(p, state.ball) }))
-    .sort((a, b) => a.d - b.d);
-  // 첫 수비수 — 공 가진 상대에게는 압박선과 무관하게 한 명이 붙는다. 골 쪽에 선 말이 먼저다:
-  // 뒤에서 쫓는 말은 길을 막지 못한다
-  const first =
-    ranked.find(({ p, d }) => d < ENGAGE_RADIUS && depthOf(p.x, defending) < ballDepth) ??
-    ranked[0];
-  const engage =
-    !counterpress && ballDepth > FIELD.length - params.pressLine
-      ? JOCKEY_ENGAGE_RADIUS
-      : ENGAGE_RADIUS;
-  if (first && first.d < engage) ctx.pressers.add(first.p.id);
-  // 위험 지역 — 공이 우리 골 가까이 오면 둘째 수비도 좁혀 들어간다. 슛 자리까지 혼자 몰고 오게 두지 않는다
-  if (ballDepth < DANGER_DEPTH) {
-    const second = ranked.find(({ p, d }) => p.id !== first?.p.id && d < DANGER_CLOSE_RADIUS);
-    if (second) ctx.pressers.add(second.p.id);
-  }
-  // 공이 우리 압박선보다 우리 쪽에 있으면 여럿이 압박한다 — 압박선은 상대 쪽으로 멀수록 공격적
-  if (!counterpress && ballDepth > FIELD.length - params.pressLine) return;
-  const count = counterpress ? Math.max(2, params.pressers) : params.pressers;
-  const reach = PRESS_RADIUS * params.pressReach;
-  for (const { p, d } of ranked.slice(0, count)) if (d < reach) ctx.pressers.add(p.id);
-}
-
-/** 주인 없는 공 — 편마다 가장 가까운 말이 쫓고, 날아가는 패스는 받을 말이 떨어질 자리로 간다 */
-function assignChasers(ctx: Ctx): void {
-  const { state } = ctx;
-  if (state.ball.owner) return;
-  const flight = state.ball.flight;
-  if (flight) {
-    if (flight.kind === "shot") return;
-    if (flight.kind === "pass" && flight.receiver) ctx.chasers.add(flight.receiver);
-    // 상대도 떨어질 자리를 읽는다 — 남은 비행 시간 안에 닿을 수 있는 가장 가까운 말
-    const remaining = Math.max(0, flight.distance - flight.travelled) / Math.max(1, flight.speed);
-    const receiver = flight.receiver
-      ? state.players.find((p) => p.id === flight.receiver)
-      : undefined;
-    const receiverGap = receiver ? distance(receiver, flight.to) : 99;
-    const defender = state.players
-      .filter((p) => p.side !== flight.side && !isKeeper(ctx, p))
-      .map((p) => ({ p, d: distance(p, flight.to) }))
-      .filter(({ d }) => d < 3 + remaining * 6 && d < receiverGap + 1)
-      .sort((a, b) => a.d - b.d)[0];
-    if (defender) ctx.chasers.add(defender.p.id);
-    return;
-  }
-  for (const side of ["home", "away"] as const) {
-    const near = state.players
-      .filter((p) => p.side === side && !isKeeper(ctx, p))
-      .map((p) => ({ p, d: distance(p, state.ball) }))
-      .sort((a, b) => a.d - b.d);
-    if (near[0] && near[0].d < CHASE_RADIUS) ctx.chasers.add(near[0].p.id);
-    if (near[1] && near[1].d < CHASE_SECOND_RADIUS) ctx.chasers.add(near[1].p.id);
-  }
-}
-
-/**
- * 마크 배정 — 위협이 큰 상대부터, `거리 + 분포의 값`이 가장 작은 수비에게 한 명씩. 분포의
- * 값은 그 상대의 자리가 수비의 히트맵에서 얼마나 옅은가(로그 밀도)다 — 가까우면서 제
- * 분포의 무거운 곳에 선 상대를 맡는다. 지금 맡고 있는 수비는 여유를 받아, 다른 수비가
- * 그만큼 더 나아야 마크가 넘어간다.
- */
-function assignMarkers(ctx: Ctx): void {
-  const { state } = ctx;
-  const defending = otherSide(state.possession);
-  if (depthOf(state.ball.x, defending) >= MARK_BALL_DEPTH) return;
-  const own = ownGoalOf(defending);
-  const threats = state.players
-    .filter(
-      (q) =>
-        q.side !== defending &&
-        q.id !== state.ball.owner &&
-        !isKeeper(ctx, q) &&
-        distance(q, own) < MARK_GOAL_RADIUS,
-    )
-    .map((q) => ({ q, threat: threatAt(q, q.side) }))
-    .sort((a, b) => b.threat - a.threat || (a.q.id < b.q.id ? -1 : 1));
-  const free = state.players.filter(
-    (p) =>
-      p.side === defending &&
-      !isKeeper(ctx, p) &&
-      !NON_MARKING_SLOTS.has(slotOf(ctx, p)) &&
-      !ctx.pressers.has(p.id) &&
-      !ctx.chasers.has(p.id),
-  );
-  for (const { q } of threats) {
-    let best: LivePlayer | undefined;
-    let bestCost = MARK_COST_MAX;
-    for (const p of free) {
-      // 지금 이 상대를 맡고 있는가 — 지난 판단의 목표가 그 상대의 골 쪽이다
-      const holding =
-        p.action === "mark" && distance(p.target, q) < MARK_GOAL_SIDE + MARK_HOLD_SLACK;
-      const cost =
-        distance(p, q) -
-        MARK_ZONE_METRES * heatmapLogDensityAt(zoneOf(ctx, p), q, p.side) -
-        (holding ? MARK_KEEP_METRES : 0);
-      if (cost >= bestCost) continue;
-      best = p;
-      bestCost = cost;
-    }
-    if (!best) continue;
-    ctx.marks.set(best.id, q.id);
-    free.splice(free.indexOf(best), 1);
-  }
-}
-
 // ── 판단 ────────────────────────────────────────────────────────────────────
 
 function decideAll(ctx: Ctx): void {
   const { state } = ctx;
-  assignPressers(ctx);
-  assignChasers(ctx);
-  // 마크는 수비 편의 말이 판단할 때만 읽는다
-  if (state.players.some((p) => p.side !== state.possession && state.tick >= p.decideAt))
-    assignMarkers(ctx);
   const owner = state.players.find((p) => p.id === state.ball.owner);
   for (const p of state.players) {
     if (p.id === owner?.id) continue;
     if (state.tick < p.decideAt) continue;
     const params = ctx.params[p.side];
-    const commit = decideOffBall(ctx, p);
+    decideOffBall(ctx, p);
     const noise = 0.25 + ctx.rng() * 0.5;
-    p.decideAt = state.tick + dead(commit ?? DECIDE_INTERVAL * (0.6 + noise) * params.decisionPace);
+    p.decideAt = state.tick + dead(DECIDE_INTERVAL * (0.6 + noise) * params.decisionPace);
   }
 }
 
@@ -815,311 +690,466 @@ function behaviorTarget(ctx: Ctx, p: LivePlayer, b: LiveBehavior): FieldPoint | 
   const region = { x: xAtDepth(depth, p.side), y: yAtLateral(lane, p.side) };
   switch (b.action) {
     case "press":
-      p.action = "press";
       return marked ?? state.ball;
     case "mark":
       if (!marked) return null;
-      p.action = "mark";
       // 골 쪽 1.5m
       return { x: marked.x - d * 1.5, y: marked.y };
     case "cover":
-      p.action = "cover";
       return marked ? { x: marked.x - d * 8, y: marked.y } : { x: region.x, y: region.y };
     case "support":
-      p.action = "support";
       return marked
         ? { x: marked.x - d * 5, y: region.y }
         : { x: state.ball.x - d * 6, y: region.y };
     case "run":
-      p.action = "run";
       return region;
     case "hold":
-      p.action = "hold";
       return shapeOf(ctx, p, attacking);
   }
 }
 
-/** 공 없는 판단 — 다음 판단까지 이 행동을 지킬 초를 돌려줄 때가 있다(오버래핑) */
-function decideOffBall(ctx: Ctx, p: LivePlayer): number | undefined {
-  const { state } = ctx;
-  const attacking = state.possession === p.side;
-  const keeper = isKeeper(ctx, p);
-  const previous = p.action;
-  p.action = "shape";
+// ── 가치장 — 공 없는 말의 목표 (live-match.md §5.2) ───────────────────────────────
+//
+// 공 없는 말은 판단 시각마다 경기장 위의 점 x에 가치 U(x)를 매기고 P(x) ∝ exp(U ÷ T)에서
+// 목표를 뽑는다. 압박·마크·추격도 따로 배정하지 않는다 — 편마다 틱에 한 번 "누가 얼마만큼
+// 맡는가"의 몫을 softmax로 나누고, 그 몫이 각자의 U에 항으로 들어간다.
 
-  if (keeper) {
+/** 편마다 틱에 한 번 세우는 몫 — 판단하는 말이 있을 때만 */
+interface SideField {
+  /** 공격 무게 a (0..1) */
+  attack: number;
+  /** 공의 위험 (0..1) — 우리 골문에 가까울수록 1 */
+  danger: number;
+  /** 압박 자리와 말마다의 압박 몫 */
+  pressSpot: FieldPoint | null;
+  press: Map<string, number>;
+  /** 말마다 — 맡을 상대의 골 쪽 자리와 그 몫 × 위협 */
+  marks: Map<string, { spot: FieldPoint; weight: number }[]>;
+  /** 추격 자리와 말마다의 추격 몫 */
+  chaseSpot: FieldPoint | null;
+  chase: Map<string, number>;
+  /** 우리 수비 라인의 기준 깊이 — 라인 올리기가 얹힌다 */
+  lineStep: number;
+}
+
+const softmaxInto = (keys: string[], scores: number[], total: number, out: Map<string, number>) => {
+  const top = Math.max(...scores);
+  const e = scores.map((v) => dexp(v - top));
+  const sum = e.reduce((a, b) => a + b, 0) || 1;
+  keys.forEach((k, i) => out.set(k, (total * e[i]!) / sum));
+};
+
+function speedOf(ctx: Ctx, p: LivePlayer): number {
+  return maxSpeedOf(p, playerOf(ctx, p.id).attributes.pace, ctx.input.injured.has(p.id));
+}
+
+/** 그 점의 위협 (0..1) — 칸 사이를 보간한 xT */
+function threatSmooth(point: FieldPoint, side: MatchSide): number {
+  return Math.min(
+    1,
+    xThreatSmooth(depthOf(point.x, side), lateralOf(point.y, side)) / SPOT_THREAT_FULL,
+  );
+}
+
+function sideField(ctx: Ctx, side: MatchSide): SideField {
+  const cached = ctx.field[side];
+  if (cached) return cached;
+  const { state } = ctx;
+  const params = ctx.params[side];
+  const own = ownGoalOf(side);
+  const since = (state.tick - state.possessionSince) * LIVE_STEP;
+  const fade = FIELD_TRANSITION_BLEND * dexp(-since / FIELD_TRANSITION_SECONDS);
+  const attack = state.possession === side ? 1 - fade : fade;
+  const ballToGoal = distance(state.ball, own);
+  const danger = dexp(-sq(ballToGoal / FIELD_DANGER_SIGMA));
+  const mates = state.players.filter((q) => q.side === side && !isKeeper(ctx, q));
+  const opponents = state.players.filter((q) => q.side !== side && !isKeeper(ctx, q));
+  const owner = state.players.find((q) => q.id === state.ball.owner);
+  const field: SideField = {
+    attack,
+    danger,
+    pressSpot: null,
+    press: new Map(),
+    marks: new Map(),
+    chaseSpot: null,
+    chase: new Map(),
+    lineStep: 0,
+  };
+
+  // 압박 — 공 가진 상대와 우리 골문 사이, 움직이면 그 앞
+  if (owner && owner.side !== side && mates.length > 0) {
+    const lead = { x: owner.x + owner.vx * 0.4, y: owner.y + owner.vy * 0.4 };
+    const toGoal = distance(lead, own);
+    const k = toGoal > 0.01 ? Math.min(1, PRESS_STANDOFF / toGoal) : 0;
+    field.pressSpot = inside({
+      x: lead.x + (own.x - lead.x) * k,
+      y: lead.y + (own.y - lead.y) * k,
+    });
+    const ballDepth = depthOf(state.ball.x, side);
+    const inZone = dsigmoid((FIELD.length - params.pressLine - ballDepth) / FIELD_PRESS_ZONE_SIGMA);
+    const counter = (params.counterpressSeconds / 6) * dexp(-since / 2);
+    const intensity =
+      1 +
+      (params.pressers - 1) * inZone * params.pressReach +
+      counter +
+      danger * FIELD_PRESS_DANGER;
+    const spot = field.pressSpot;
+    const times = mates.map(
+      (q) =>
+        distance(q, spot) / Math.max(1, speedOf(ctx, q)) +
+        FIELD_PRESS_BEHIND * dsigmoid((depthOf(q.x, side) - ballDepth) / 2),
+    );
+    softmaxInto(
+      mates.map((q) => q.id),
+      times.map((t) => -t / FIELD_PRESS_TAU),
+      intensity,
+      field.press,
+    );
+    // 라인 올리기 — 공 가진 상대가 우리 골 반대쪽으로 움직이는 만큼 라인이 함께 오른다
+    const away = owner.vx * direction(side);
+    field.lineStep = LINE_STEP_UP * dsigmoid((away - LINE_STEP_UP_SPEED) / 0.5);
+  }
+
+  // 마크 — 상대마다 수비들에게 몫을 나눈다
+  if (state.possession !== side || !owner) {
+    for (const q of opponents) {
+      if (q.id === state.ball.owner) continue;
+      const threat =
+        FIELD_MARK_THREAT_FLOOR +
+        (1 - FIELD_MARK_THREAT_FLOOR) *
+          (0.6 * threatSmooth(q, q.side) + 0.4 * dexp(-sq(distance(q, own) / 35)));
+      // 가까운 수비 몇만 몫을 다툰다 — 순위로 고른다(거리 문턱이 아니다)
+      const near = [...mates]
+        .sort((m1, m2) => distance(m1, q) - distance(m2, q) || (m1.id < m2.id ? -1 : 1))
+        .slice(0, FIELD_MARK_NEAREST);
+      const costs = near.map(
+        (m) => distance(m, q) - MARK_ZONE_METRES * heatmapLogDensityAt(zoneOf(ctx, m), q, m.side),
+      );
+      const shares = new Map<string, number>();
+      softmaxInto(
+        near.map((m) => m.id),
+        costs.map((c) => -c / FIELD_MARK_TAU),
+        1,
+        shares,
+      );
+      const toGoal = distance(q, own);
+      const kk = toGoal > 0.01 ? MARK_GOAL_SIDE / toGoal : 0;
+      const spot = inside({ x: q.x + (own.x - q.x) * kk, y: q.y + (own.y - q.y) * kk });
+      for (const m of near) {
+        const list = field.marks.get(m.id) ?? [];
+        list.push({ spot, weight: (shares.get(m.id) ?? 0) * threat });
+        field.marks.set(m.id, list);
+      }
+    }
+    for (const [id, list] of field.marks) {
+      list.sort((a, b) => b.weight - a.weight);
+      field.marks.set(id, list.slice(0, FIELD_MARK_TOP));
+    }
+  }
+
+  // 추격 — 주인 없는 공, 또는 상대의 패스가 떨어질 자리
+  const flight = state.ball.flight;
+  if (!owner && (!flight || flight.kind !== "shot")) {
+    const spot = flight ? inside(flight.to) : { x: state.ball.x, y: state.ball.y };
+    field.chaseSpot = spot;
+    const times = mates.map((q) => distance(q, spot) / Math.max(1, speedOf(ctx, q)));
+    if (flight && flight.side === side) {
+      // 우리 패스 — 받을 말이 간다
+      if (flight.receiver) field.chase.set(flight.receiver, 1);
+    } else {
+      const receiver = flight?.receiver
+        ? state.players.find((q) => q.id === flight.receiver)
+        : undefined;
+      const theirs = receiver
+        ? distance(receiver, spot) / Math.max(1, speedOf(ctx, receiver))
+        : Infinity;
+      softmaxInto(
+        mates.map((q) => q.id),
+        times.map((t) => -t / FIELD_CHASE_TAU),
+        1,
+        field.chase,
+      );
+      // 상대가 먼저 닿을 공은 덜 쫓는다
+      if (Number.isFinite(theirs)) {
+        mates.forEach((q, i) =>
+          field.chase.set(
+            q.id,
+            (field.chase.get(q.id) ?? 0) * dsigmoid((theirs - times[i]!) / FIELD_CHASE_TAU),
+          ),
+        );
+      }
+    }
+  }
+  ctx.field[side] = field;
+  return field;
+}
+
+/** 판단 한 번 동안 변하지 않는 것 — 제안점마다 다시 셈하지 않는다 */
+interface FieldLocal {
+  f: SideField;
+  zone: Heatmap;
+  line: number | null;
+  behavior: FieldPoint | null;
+  /** 우리 편이 발밑에 둔 공의 주인 */
+  owner: LivePlayer | undefined;
+  /** 오프사이드 선 — 상대 라인과 공 가운데 깊은 쪽 */
+  offsideDepth: number;
+  forward: number;
+  cover: number;
+  own: FieldPoint;
+}
+
+/** 가치의 항들 — 행동 이름을 붙이려고 따로 돌려준다 */
+interface FieldTerms {
+  total: number;
+  press: number;
+  mark: number;
+  cover: number;
+  chase: number;
+  support: number;
+  run: number;
+  behavior: number;
+}
+
+function fieldValue(ctx: Ctx, p: LivePlayer, x: FieldPoint, local: FieldLocal): FieldTerms {
+  const { state } = ctx;
+  const side = p.side;
+  const { f, zone, line, behavior } = local;
+  const params = ctx.params[side];
+  const g = (d2: number, s: number) => dexp(-d2 / (s * s));
+  const d2 = (a: FieldPoint, b: FieldPoint) => sq(a.x - b.x) + sq(a.y - b.y);
+  let nearestOpp = 1e9;
+  let crowd = 0;
+  for (const q of state.players) {
+    if (q.id === p.id) continue;
+    if (q.side !== side) nearestOpp = Math.min(nearestOpp, d2(q, x));
+    else crowd += g(d2(q, x), FIELD_CROWD_SIGMA);
+  }
+  const space = 1 - dexp(-nearestOpp / (FIELD_SPACE_SIGMA * FIELD_SPACE_SIGMA));
+
+  // 공격 — 패스 받기 · 빈 공간 · 위협 · 오프사이드 위험
+  let support = 0;
+  let run = 0;
+  if (f.attack > 0.01) {
+    const owner = local.owner;
+    if (owner) {
+      let open = 1;
+      for (const q of state.players) {
+        if (q.side === side) continue;
+        const lane = segmentDistance(q, owner, x).distance;
+        open *= 1 - dexp(-sq(lane / FIELD_LANE_SIGMA));
+      }
+      const pref = dexp(-sq((distance(owner, x) - params.passLength) / FIELD_PASS_SIGMA));
+      support = FIELD_RECEIVE * open * pref * space;
+    }
+    const forward = local.forward;
+    const offside = dsigmoid((depthOf(x.x, side) - local.offsideDepth) / FIELD_OFFSIDE_SIGMA);
+    run =
+      FIELD_THREAT * threatSmooth(x, side) * (0.5 + forward) * params.commit * space -
+      FIELD_OFFSIDE * offside;
+    support *= f.attack;
+    run *= f.attack;
+  }
+  const attackSpace = f.attack * FIELD_SPACE * space;
+
+  // 수비 — 압박 · 마크 · 골 쪽 커버 · 라인
+  let press = 0;
+  let mark = 0;
+  let cover = 0;
+  let linePenalty = 0;
+  const defend = 1 - f.attack;
+  if (defend > 0.01) {
+    const share = f.press.get(p.id) ?? 0;
+    if (f.pressSpot && share > 0)
+      press = FIELD_PRESS * share * g(d2(x, f.pressSpot), FIELD_PRESS_SIGMA);
+    const willing = 0.2 + 0.8 * local.cover;
+    for (const m of f.marks.get(p.id) ?? []) mark += m.weight * g(d2(x, m.spot), FIELD_MARK_SIGMA);
+    mark *= FIELD_MARK * willing;
+    const seg = segmentDistance(x, state.ball, local.own);
+    let occupied = 1;
+    for (const q of state.players) {
+      if (q.side !== side || q.id === p.id) continue;
+      occupied *= 1 - FIELD_OCCUPIED * g(d2(q, x), FIELD_OCCUPIED_SIGMA);
+    }
+    cover =
+      FIELD_COVER *
+      f.danger *
+      g(seg.distance * seg.distance, FIELD_COVER_SIGMA) *
+      4 *
+      seg.t *
+      (1 - seg.t) *
+      occupied;
+    if (line !== null) {
+      const depth = depthOf(x.x, side);
+      const behind = Math.max(0, line - depth) / FIELD_LINE_SIGMA;
+      const ahead = Math.max(0, depth - line) / FIELD_LINE_SIGMA;
+      linePenalty = FIELD_LINE_BEHIND * behind * behind + FIELD_LINE_AHEAD * ahead * ahead;
+    }
+    press *= defend;
+    mark *= defend;
+    cover *= defend;
+    linePenalty *= defend;
+  }
+
+  // 공통 — 추격 · 지시 · 역할의 분포 · 붐빔 · 이동 비용 · 관성
+  const chaseShare = f.chase.get(p.id) ?? 0;
+  const chase =
+    f.chaseSpot && chaseShare > 0
+      ? FIELD_CHASE * chaseShare * g(d2(x, f.chaseSpot), FIELD_CHASE_SIGMA)
+      : 0;
+  const behaviorTerm = behavior ? FIELD_BEHAVIOR * g(d2(x, behavior), FIELD_BEHAVIOR_SIGMA) : 0;
+  const total =
+    OFFBALL_DENSITY_WEIGHT * heatmapLogDensityAt(zone, x, side) +
+    support +
+    run +
+    attackSpace +
+    press +
+    mark +
+    cover -
+    linePenalty +
+    chase +
+    behaviorTerm -
+    FIELD_CROWD * crowd -
+    FIELD_MOVE_COST * distance(p, x) +
+    FIELD_INERTIA * g(d2(x, p.target), FIELD_INERTIA_SIGMA);
+  return { total, press, mark, cover, chase, support, run, behavior: behaviorTerm };
+}
+
+/** 2차원 정규 밀도 (1/m²) */
+const gaussPdf = (x: FieldPoint, c: FieldPoint, s: number) =>
+  dexp(-(sq(x.x - c.x) + sq(x.y - c.y)) / (2 * s * s)) / (2 * Math.PI * s * s);
+
+/** 공 없는 판단 — 가치장에서 목표를 뽑는다 */
+function decideOffBall(ctx: Ctx, p: LivePlayer): void {
+  const { state } = ctx;
+  if (isKeeper(ctx, p)) {
+    p.action = "shape";
     p.target = keeperTarget(ctx, p);
     return;
   }
-  if (ctx.chasers.has(p.id)) {
-    p.action = "chase";
-    const flight = state.ball.flight;
-    p.target = flight ? inside(flight.to) : { x: state.ball.x, y: state.ball.y };
-    return;
-  }
-  const b = ctx.behavior.get(p.id);
-  if (b) {
-    const t = behaviorTarget(ctx, p, b);
-    if (t) {
-      p.target = inside(t);
-      return;
-    }
-  }
-  if (ctx.pressers.has(p.id) && !attacking) {
-    p.action = "press";
-    const owner = state.players.find((q) => q.id === state.ball.owner);
-    if (!owner) {
-      p.target = { x: state.ball.x, y: state.ball.y };
-      return;
-    }
-    // 골 쪽에서 붙는다 — 공 가진 말과 우리 골문 사이, 움직이면 그 앞을 잡는다
-    const own = ownGoalOf(p.side);
-    const behind = depthOf(p.x, p.side) > depthOf(owner.x, p.side);
-    // 뒤에서 쫓는 처지면 등 뒤에 붙어 봐야 길을 못 막는다 — 앞질러 갈 자리를 잡는다
-    const ahead = behind ? 0.4 + Math.min(1.2, distance(p, owner) / 8) : 0.4;
-    const lead = { x: owner.x + owner.vx * ahead, y: owner.y + owner.vy * ahead };
-    const toGoal = distance(lead, own);
-    const k = toGoal > 0.01 ? Math.min(1, PRESS_STANDOFF / toGoal) : 0;
-    p.target = inside({ x: lead.x + (own.x - lead.x) * k, y: lead.y + (own.y - lead.y) * k });
-    return;
-  }
-  const shape = shapeOf(ctx, p, attacking);
+  const attacking = state.possession === p.side;
+  const f = sideField(ctx, p.side);
   const zone = zoneOf(ctx, p);
-  let spots = attacking ? attackSpots(ctx, p, shape) : defendSpots(ctx, p, shape);
-  // 분포에서 뽑은 점 — 할 일이 없을 때도 말은 제 히트맵 안을 다닌다. 표본은 창마다 한 번
-  // 선다: 창 안에서는 같은 성분·같은 편차라 분포가 움직일 때만 점이 따라 움직인다
-  // 창의 경계는 말마다 어긋난다 — 열한 명이 한꺼번에 새 점으로 떠나지 않는다
-  const offset = makeRng(ctx.input.seed, `drift:${p.id}`)() * OFFBALL_WANDER_SECONDS;
-  const window = Math.floor((state.seconds + offset) / OFFBALL_WANDER_SECONDS);
-  for (let i = 0; i < OFFBALL_SAMPLES; i++) {
-    const wander = makeRng(ctx.input.seed, `wander:${ctx.input.matchId}:${p.id}:${window}:${i}`);
-    const at = sampleHeatmap(zone, wander, () => normalish(wander));
-    spots.push({
-      point: inside({ x: xAtDepth(at.depth, p.side), y: yAtLateral(at.lateral, p.side) }),
-      value: (attacking ? SPOT_SHAPE : SPOT_SHAPE_DEFEND) - OFFBALL_SAMPLE_DISCOUNT,
-      action: "shape",
+  const shape = shapeOf(ctx, p, attacking);
+  const b = ctx.behavior.get(p.id);
+  const behavior = b ? behaviorTarget(ctx, p, b) : null;
+  const slot = slotOf(ctx, p);
+  const line = slot === "CB" || slot === "FB" ? depthOf(shape.x, p.side) + f.lineStep : null;
+
+  // 기준점 — 제안점을 뽑을 곳. 없는 기준점의 몫은 분포로 돌린다
+  const anchors: { at: FieldPoint; sigma: number }[] = [
+    { at: { x: p.x, y: p.y }, sigma: FIELD_PROPOSAL_SIGMA.here },
+    { at: p.target, sigma: FIELD_PROPOSAL_SIGMA.target },
+    { at: shape, sigma: FIELD_PROPOSAL_SIGMA.here },
+  ];
+  if (f.chaseSpot) anchors.push({ at: f.chaseSpot, sigma: FIELD_PROPOSAL_SIGMA.ball });
+  const owner = state.players.find((q) => q.id === state.ball.owner);
+  if (owner && owner.side === p.side) {
+    anchors.push({ at: owner, sigma: FIELD_PROPOSAL_SIGMA.owner });
+    const lineDepth = FIELD.length - ctx.defensiveLine[otherSide(p.side)];
+    anchors.push({
+      at: { x: xAtDepth(lineDepth, p.side), y: p.y },
+      sigma: FIELD_PROPOSAL_SIGMA.line,
     });
   }
-  if (!attacking) spots = floorBackLine(ctx, p, spots);
-  // 점수 = 가치 + β·ln ρ + 관성 → 온도 T의 softmax로 뽑는다. 온도는 능력치다 — 공격은
-  // 오프더볼, 수비는 위치선정이 높을수록 가치가 큰 점을 더 일관되게 고른다
+  if (f.pressSpot && (f.press.get(p.id) ?? 0) > 0.05)
+    anchors.push({ at: f.pressSpot, sigma: FIELD_PROPOSAL_SIGMA.press });
+  const topMark = f.marks.get(p.id)?.[0];
+  if (topMark) anchors.push({ at: topMark.spot, sigma: FIELD_PROPOSAL_SIGMA.mark });
+  if (!attacking) {
+    const own = ownGoalOf(p.side);
+    anchors.push({
+      at: {
+        x: state.ball.x + (own.x - state.ball.x) * 0.35,
+        y: state.ball.y + (own.y - state.ball.y) * 0.35,
+      },
+      sigma: FIELD_PROPOSAL_SIGMA.cover,
+    });
+  }
+  if (behavior) anchors.push({ at: behavior, sigma: FIELD_PROPOSAL_SIGMA.target });
+  const nAnchor = FIELD_PROPOSALS_EACH;
+  const nHeat = FIELD_PROPOSALS_HEATMAP;
+  const n = nHeat + anchors.length * nAnchor;
+  const mix = (x: FieldPoint) => {
+    let q = (nHeat / n) * heatmapPdfAt(zone, x, p.side);
+    for (const a of anchors) q += (nAnchor / n) * gaussPdf(x, a.at, a.sigma);
+    return q;
+  };
+  const points: FieldPoint[] = [];
+  for (let i = 0; i < nHeat; i++) {
+    const at = sampleHeatmap(zone, ctx.rng, () => normalish(ctx.rng));
+    points.push(inside({ x: xAtDepth(at.depth, p.side), y: yAtLateral(at.lateral, p.side) }));
+  }
+  for (const a of anchors) {
+    // 기준점 그 자리 — 압박·마크 자리처럼 좁은 가치는 그 점에서 선다
+    points.push(inside(a.at));
+    for (let i = 0; i < nAnchor; i++) {
+      points.push(
+        inside({
+          x: a.at.x + normalish(ctx.rng) * a.sigma,
+          y: a.at.y + normalish(ctx.rng) * a.sigma,
+        }),
+      );
+    }
+  }
+  points.push(inside(p.target));
+
+  // P(x) ∝ exp(U ÷ T) — 제안 밀도로 나눈 가중치로 하나를 뽑는다
   const skill = attr(ctx, p, attacking ? "offTheBall" : "positioning");
   const temperature =
     OFFBALL_TEMPERATURE_MIN +
     OFFBALL_TEMPERATURE_SPAN *
       clamp((OFFBALL_SKILL_TOP - skill) / (OFFBALL_SKILL_TOP - OFFBALL_SKILL_BOTTOM), 0, 1);
-  const scores = spots.map(
-    (spot) =>
-      spot.value +
-      OFFBALL_DENSITY_WEIGHT * heatmapLogDensityAt(zone, spot.point, p.side) +
-      (distance(spot.point, p.target) < OFFBALL_INERTIA_RADIUS ? OFFBALL_INERTIA : 0) +
-      (spot.action === previous ? OFFBALL_INERTIA_KIND : 0),
+  const tendency = ctx.tendency.get(p.id) ?? SLOT_TENDENCY[slot];
+  const local: FieldLocal = {
+    f,
+    zone,
+    line,
+    behavior,
+    owner: owner && owner.side === p.side ? owner : undefined,
+    offsideDepth: Math.max(
+      FIELD.length - ctx.defensiveLine[otherSide(p.side)],
+      depthOf(state.ball.x, p.side),
+    ),
+    forward: Math.max(tendency.advance, tendency.runBehind, tendency.boxPresence),
+    cover: tendency.cover,
+    own: ownGoalOf(p.side),
+  };
+  const terms = points.map((x) => fieldValue(ctx, p, x, local));
+  const top = Math.max(...terms.map((t) => t.total));
+  // 제안 밀도의 보정 — 1이면 P(x) ∝ exp(U ÷ T)의 중요도 표본, 0이면 제안점을 후보로 보고
+  // exp(U ÷ T)의 비율로만 뽑는다. 제안점이 적을 때 1은 드문 점의 가중치가 부풀어 흔들린다
+  const weights = points.map(
+    (x, i) =>
+      dexp((terms[i]!.total - top) / temperature) *
+      dexp(-FIELD_PROPOSAL_CORRECTION * dlog(Math.max(1e-9, mix(x)))),
   );
-  const top = Math.max(...scores);
-  const weights = scores.map((score) => dexp((score - top) / temperature));
-  let pick = ctx.rng() * weights.reduce((a, b) => a + b, 0);
-  let chosen = spots[spots.length - 1]!;
-  for (let i = 0; i < spots.length; i++) {
+
+  let pick = ctx.rng() * weights.reduce((a, b2) => a + b2, 0);
+  let chosen = points.length - 1;
+  for (let i = 0; i < points.length; i++) {
     pick -= weights[i]!;
     if (pick <= 0) {
-      chosen = spots[i]!;
+      chosen = i;
       break;
     }
   }
-  p.action = chosen.action;
-  p.target = chosen.point;
-  return chosen.commit;
-}
-
-/** 공 없는 말의 후보점 하나 — 가치에는 역할 가산이 이미 얹혀 있다 */
-interface Spot {
-  point: FieldPoint;
-  value: number;
-  action: LiveAction;
-  /** 고르면 이만큼 (초) 다시 판단하지 않고 뛴다 */
-  commit?: number;
-}
-
-/** 그 점에서 가장 가까운 상대까지의 거리를 0..1로 — `SPOT_SPACE_FULL`에서 다 찬다 */
-function spaceAt(ctx: Ctx, point: FieldPoint, side: MatchSide): number {
-  let space = SPOT_SPACE_FULL;
-  for (const q of ctx.state.players)
-    if (q.side !== side) space = Math.min(space, distance(q, point));
-  return space / SPOT_SPACE_FULL;
-}
-
-/** 그 점의 위협을 0..1로 — `SPOT_THREAT_FULL`에서 다 찬다 */
-function threatValue(point: FieldPoint, side: MatchSide): number {
-  return Math.min(1, threatAt(point, side) / SPOT_THREAT_FULL);
-}
-
-/** 공격 중 — 자리 · 지원 · 침투 · 박스 진입 · 오버래핑 */
-function attackSpots(ctx: Ctx, p: LivePlayer, shape: FieldPoint): Spot[] {
-  const { state } = ctx;
-  const tendency = ctx.tendency.get(p.id) ?? SLOT_TENDENCY[slotOf(ctx, p)];
-  const params = ctx.params[p.side];
-  const role = (t: number) => (t - 0.5) * SPOT_ROLE;
-  const spots: Spot[] = [
-    { point: shape, value: SPOT_SHAPE + tendency.hold * SPOT_HOLD, action: "shape" },
+  const t = terms[chosen]!;
+  p.target = points[chosen]!;
+  // 행동 이름 — 가장 크게 기여한 항. 이동의 급함이 이것을 읽는다
+  const labels: [LiveAction, number][] = [
+    ["press", t.press],
+    ["mark", t.mark],
+    ["cover", t.cover],
+    ["chase", t.chase],
+    ["support", t.support],
+    ["run", t.run],
+    ["hold", t.behavior],
+    ["shape", FIELD_SHAPE_LABEL],
   ];
-  const owner = state.players.find((q) => q.id === state.ball.owner);
-  if (!owner || owner.side !== p.side) return spots;
-  const d = direction(p.side);
-  const opponents = state.players.filter((q) => q.side !== p.side);
-  const ballDepth = depthOf(state.ball.x, p.side);
-  const lineDepth = FIELD.length - ctx.defensiveLine[otherSide(p.side)];
-
-  // 지원 — 공 가진 동료의 옆·앞·뒤, 빈 곳이고 경로가 열렸는가
-  if (distance(p, owner) < SUPPORT_RANGE) {
-    const around: FieldPoint[] = [
-      { x: owner.x + d * 9, y: owner.y + 11 },
-      { x: owner.x + d * 9, y: owner.y - 11 },
-      { x: owner.x + d * 14, y: shape.y },
-      { x: owner.x - d * 7, y: shape.y },
-    ];
-    for (const c of around) {
-      const point = inside(c);
-      const open = opponents.every(
-        (q) => segmentDistance(q, owner, point).distance >= SUPPORT_LANE_WIDTH,
-      );
-      const value = SUPPORT_VALUE * spaceAt(ctx, point, p.side) * (open ? 1 : SUPPORT_LANE_BLOCKED);
-      spots.push({ point, value, action: "support" });
-    }
-  }
-
-  // 침투 — 라인 바로 앞에 서서 뒤로 뛸 준비. 오프사이드는 패스 순간 판정된다
-  if (ballDepth > RUN_MIN_BALL_DEPTH && p.fuel > RUN_MIN_FUEL) {
-    const depth = Math.min(lineDepth - 0.8 + ctx.rng() * 1.5, FIELD.length - 6);
-    const point = inside({ x: xAtDepth(depth, p.side), y: shape.y + (ctx.rng() - 0.5) * 6 });
-    const room = Math.min(1, (FIELD.length - lineDepth) / RUN_ROOM_FULL);
-    spots.push({
-      point,
-      value:
-        (RUN_VALUE * room + RUN_THREAT * threatValue(point, p.side)) * params.commit +
-        role(tendency.runBehind),
-      action: "run",
-    });
-  }
-
-  // 박스 진입 — 마무리 국면에 박스 안 세 레인
-  if (ballDepth > FIELD.length * 0.66) {
-    for (const lane of [26, 34, 42]) {
-      const point = inside({
-        x: xAtDepth(FIELD.length - 9 - ctx.rng() * 6, p.side),
-        y: yAtLateral(lane, p.side),
-      });
-      spots.push({
-        point,
-        value:
-          (BOX_VALUE * threatValue(point, p.side) + BOX_SPACE * spaceAt(ctx, point, p.side)) *
-            params.commit +
-          role(tendency.boxPresence),
-        action: "run",
-      });
-    }
-  }
-
-  // 오버래핑 · 폭 — 공 가진 말보다 앞, 제 측면의 터치라인 쪽. 공이 제 측면에 가까울수록 값지다
-  const myLateral = lateralOf(shape.y, p.side);
-  if (p.fuel > RUN_MIN_FUEL) {
-    const depth = Math.min(depthOf(owner.x, p.side) + OVERLAP_AHEAD, FIELD.length - 8);
-    const lateral =
-      myLateral < FIELD.width / 2 ? OVERLAP_TOUCHLINE : FIELD.width - OVERLAP_TOUCHLINE;
-    const point = inside({ x: xAtDepth(depth, p.side), y: yAtLateral(lateral, p.side) });
-    const flank = clamp(1 - Math.abs(lateralOf(owner.y, p.side) - lateral) / OVERLAP_FLANK, 0, 1);
-    spots.push({
-      point,
-      value:
-        (OVERLAP_VALUE * spaceAt(ctx, point, p.side) +
-          OVERLAP_THREAT * threatValue(point, p.side)) *
-          flank *
-          params.commit +
-        role((tendency.advance + tendency.width) / 2),
-      action: "run",
-      commit: slotOf(ctx, p) === "FB" ? OVERLAP_COMMIT_SECONDS : undefined,
-    });
-  }
-  return spots;
-}
-
-/** 수비 중 — 자리(오프사이드 트랩) · 마크 · 슛 길목 · 존 커버 */
-function defendSpots(ctx: Ctx, p: LivePlayer, shape: FieldPoint): Spot[] {
-  const { state } = ctx;
-  const params = ctx.params[p.side];
-  const own = ownGoalOf(p.side);
-  let home = shape;
-  const backLine = slotOf(ctx, p) === "CB" || slotOf(ctx, p) === "FB";
-  // 오프사이드 트랩 — 상대가 전진 패스를 준비하면 라인이 함께 올라선다
-  if (params.offsideTrap && depthOf(shape.x, p.side) < ctx.defensiveLine[p.side] + 2) {
-    const familiarity = ctx.slot.get(p.id)?.familiarity ?? 60;
-    home = inside({ x: shape.x + direction(p.side) * (2 + familiarity / 50), y: shape.y });
-  } else if (backLine) {
-    // 라인 올리기 — 공 가진 상대가 우리 골 반대쪽으로 움직이면 함께 올라서 오프사이드 선을 세운다
-    const owner = state.players.find((q) => q.id === state.ball.owner);
-    const away = owner ? owner.vx * direction(p.side) : 0;
-    if (owner && owner.side !== p.side && away > LINE_STEP_UP_SPEED) {
-      home = inside({ x: shape.x + direction(p.side) * LINE_STEP_UP, y: shape.y });
-    }
-  }
-  const spots: Spot[] = [{ point: home, value: SPOT_SHAPE_DEFEND, action: "shape" }];
-
-  // 마크 — 배정받은 상대의 골 쪽
-  const markedId = ctx.marks.get(p.id);
-  const marked = markedId ? state.players.find((q) => q.id === markedId) : undefined;
-  if (marked) {
-    const toGoal = distance(marked, own);
-    const k = toGoal > 0.01 ? MARK_GOAL_SIDE / toGoal : 0;
-    spots.push({
-      point: inside({ x: marked.x + (own.x - marked.x) * k, y: marked.y + (own.y - marked.y) * k }),
-      value: MARK_VALUE + MARK_THREAT * threatValue(marked, marked.side),
-      action: "mark",
-    });
-  }
-
-  const ballToGoal = distance(state.ball, own);
-  const danger = clamp(1 - ballToGoal / DANGER_RANGE, 0, 1);
-  if (danger <= 0) return spots;
-
-  // 슛 길목 — 공과 우리 골문을 잇는 선 위. 이미 동료가 선 점은 값이 준다
-  for (const standoff of LANE_STANDOFFS) {
-    if (standoff >= ballToGoal - 1) continue;
-    const k = standoff / ballToGoal;
-    const point = {
-      x: state.ball.x + (own.x - state.ball.x) * k,
-      y: state.ball.y + (own.y - state.ball.y) * k,
-    };
-    const occupied = state.players.some(
-      (q) => q.side === p.side && q.id !== p.id && distance(q, point) < LANE_OCCUPIED,
-    );
-    spots.push({
-      point,
-      value: LANE_VALUE * danger * (occupied ? LANE_OCCUPIED_SHARE : 1),
-      action: "cover",
-    });
-  }
-
-  // 존 커버 — 자리에서 우리 골 쪽으로 물러서고 공 쪽으로 좁힌다
-  spots.push({
-    point: inside({
-      x: shape.x + (own.x - shape.x) * clamp(COVER_DROP / Math.max(1, distance(shape, own)), 0, 1),
-      y: shape.y + (state.ball.y - shape.y) * COVER_NARROW,
-    }),
-    value: COVER_VALUE * danger,
-    action: "cover",
-  });
-  return spots;
-}
-
-/** 수비 라인(센터백·풀백)은 바닥 밑으로 내려서지 않는다 — 우리 골 쪽으로 파고드는 상대를 따라가는 마크만 예외다 */
-function floorBackLine(ctx: Ctx, p: LivePlayer, spots: Spot[]): Spot[] {
-  const slot = slotOf(ctx, p);
-  if (slot !== "CB" && slot !== "FB") return spots;
-  const floor = defendFloorOf(depthOf(ctx.state.ball.x, p.side));
-  return spots.map((spot) =>
-    spot.action === "mark" || depthOf(spot.point.x, p.side) >= floor
-      ? spot
-      : { ...spot, point: { x: xAtDepth(floor, p.side), y: spot.point.y } },
-  );
+  let best = labels[labels.length - 1]!;
+  for (const l of labels) if (l[1] > best[1]) best = l;
+  p.action = best[0];
 }
 
 /** 골키퍼 — 공과 골문을 잇는 선 위, 가까우면 나온다; 박스 안의 느슨한 공은 잡으러 간다 */
@@ -1177,47 +1207,52 @@ function urgencyOf(ctx: Ctx, p: LivePlayer): number | undefined {
   if (state.restart || isKeeper(ctx, p)) return undefined;
   const slot = slotOf(ctx, p);
   const gap = distance(p, p.target);
-  const phase = phaseOf(ctx, p.side);
   const myDepth = depthOf(p.x, p.side);
+  const base = URGENCY[p.action];
+  // 급함은 계단이 아니라 연속으로 오른다 — 되돌아갈 거리·위험·국면이 시그모이드로 섞인다
+  let boost = 0;
+  let u = base;
   if (state.possession !== p.side) {
     const ballDepth = depthOf(state.ball.x, p.side);
     if (p.action === "press") {
       const params = ctx.params[p.side];
-      const counterpress = phase === "defensive_transition" && params.counterpressSeconds > 0;
-      const outsidePressLine = ballDepth > FIELD.length - params.pressLine;
+      const since = (state.tick - state.possessionSince) * LIVE_STEP;
+      const counter = params.counterpressSeconds > 0 ? dexp(-since / 2) : 0;
+      const outside = dsigmoid(
+        (ballDepth - (FIELD.length - params.pressLine)) / FIELD_PRESS_ZONE_SIGMA,
+      );
       // 최전방은 등 뒤로 지나간 공을 전력으로 쫓지 않는다
-      const chasingBack = RECOVERY_URGENCY[slot] === 0 && myDepth > ballDepth;
-      return !counterpress && (outsidePressLine || chasingBack) ? PRESS_JOCKEY_URGENCY : undefined;
+      const behind = RECOVERY_URGENCY[slot] === 0 ? dsigmoid((myDepth - ballDepth) / 2) : 0;
+      boost = Math.max(outside, behind) * (1 - counter);
+      return base + (PRESS_JOCKEY_URGENCY - base) * boost;
     }
-    if (p.action === "mark") return gap > MARK_TRACK_GAP ? MARK_TRACK_URGENCY : undefined;
-    if (p.action === "shape" || p.action === "cover") {
-      // 자리가 한참 뒤로 물러났으면 되돌아 뛴다 — 공을 잃었거나 상대가 공을 몰고 들어온다
-      const recover = RECOVERY_URGENCY[slot];
-      const backward = depthOf(p.target.x, p.side) < myDepth;
-      if (recover > 0 && gap > RECOVERY_SPRINT_GAP && backward) return URGENCY_FULL;
-      // 슛 길목·존 커버로 물러서는 말은 공이 우리 골에 가까울수록 급하다 — 슛 전에 닿아야 막는다
-      const danger = clamp(1 - distance(state.ball, ownGoalOf(p.side)) / DANGER_RANGE, 0, 1);
-      if (
-        p.action === "cover" &&
-        recover > 0 &&
-        backward &&
-        gap > DANGER_RECOVERY_GAP &&
-        danger > 0
-      ) {
-        return Math.max(
-          gap > RECOVERY_GAP ? recover : 0,
-          URGENCY[p.action] + (URGENCY_FULL - URGENCY[p.action]) * danger,
-        );
-      }
-      if (recover > 0 && gap > RECOVERY_GAP && backward) return recover;
+    if (p.action === "mark") {
+      boost = dsigmoid((gap - MARK_TRACK_GAP) / 1.5);
+      return base + (MARK_TRACK_URGENCY - base) * boost;
     }
-    return undefined;
+    const recover = RECOVERY_URGENCY[slot];
+    const back = Math.max(0, myDepth - depthOf(p.target.x, p.side));
+    if (recover > 0 && back > 0) {
+      const w = dsigmoid((back - RECOVERY_GAP) / 2);
+      u = base + (Math.max(base, recover) - base) * w;
+      const sprint = dsigmoid((back - RECOVERY_SPRINT_GAP) / 3);
+      u += (URGENCY_FULL - u) * sprint;
+      // 골 쪽으로 물러서는 말은 공이 우리 골에 가까울수록 급하다
+      const danger = dexp(-sq(distance(state.ball, ownGoalOf(p.side)) / FIELD_DANGER_SIGMA));
+      const urgentBack = danger * dsigmoid((back - 2) / 1);
+      u += (URGENCY_FULL - u) * urgentBack;
+      boost = Math.max(w, sprint, urgentBack);
+    }
+    return boost > 1e-3 ? u : undefined;
   }
   if (p.action === "run" && slot === "FB") return OVERLAP_URGENCY;
-  if (p.action === "shape" && phase === "attacking_transition") {
-    const burst = BURST_URGENCY[slot];
-    const forward = depthOf(p.target.x, p.side) > myDepth;
-    if (burst > 0 && gap > BURST_GAP && forward) return burst;
+  const burst = BURST_URGENCY[slot];
+  if (burst > 0) {
+    const since = (state.tick - state.possessionSince) * LIVE_STEP;
+    const fresh = dexp(-since / TRANSITION_SECONDS);
+    const forward = Math.max(0, depthOf(p.target.x, p.side) - myDepth);
+    boost = fresh * dsigmoid((forward - BURST_GAP) / 2);
+    if (boost > 1e-3) return base + (Math.max(base, burst) - base) * boost;
   }
   return undefined;
 }

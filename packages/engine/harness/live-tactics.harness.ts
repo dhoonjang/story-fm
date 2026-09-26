@@ -92,5 +92,6 @@ describe("전술의 방향", () => {
       ),
     );
     expect(outOfBand(LIVE_TACTICS, readings)).toEqual([]);
-  });
+    // 120경기 — 공 없는 말의 가치장이 경기당 계산을 늘렸다. 전역 상한보다 넉넉하게만 준다
+  }, 2_400_000);
 });

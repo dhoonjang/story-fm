@@ -133,6 +133,23 @@ export function heatmapDensityAt(h: Heatmap, point: FieldPoint, side: MatchSide)
   return heatmapDensity(h, depthOf(point.x, side), lateralOf(point.y, side));
 }
 
+/**
+ * 확률 밀도 (1/m²) — 경기장 전체의 적분이 1인 꼴. `sampleHeatmap`이 뽑는 분포와 같다:
+ * 성분 하나의 질량은 무게 × (뒤 + 앞) × 옆 퍼짐이고, 반쪽 정규 둘과 정규 하나를 곱한
+ * 정규화 상수를 모으면 Σ 무게 · g ÷ (π · Σ 질량)이 된다
+ */
+export function heatmapPdfAt(h: Heatmap, point: FieldPoint, side: MatchSide): number {
+  const depth = depthOf(point.x, side);
+  const lateral = lateralOf(point.y, side);
+  let total = 0;
+  let rho = 0;
+  for (const b of h.blobs) {
+    total += b.weight * (b.back + b.ahead) * b.side;
+    rho += b.weight * blobDensity(b, depth, lateral);
+  }
+  return total > 0 ? rho / (Math.PI * total) : 0;
+}
+
 /** 로그 밀도 — 후보점의 점수에 들어가는 꼴. 먼 점은 바닥의 로그에서 멈춘다 */
 export function heatmapLogDensityAt(h: Heatmap, point: FieldPoint, side: MatchSide): number {
   return dlog(heatmapDensityAt(h, point, side) + HEATMAP_DENSITY_FLOOR);

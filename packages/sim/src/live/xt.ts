@@ -113,3 +113,28 @@ export function xThreatAt(x: number, y: number): number {
   // 두 인덱스가 방금 잘렸으므로 칸은 언제나 있다
   return XT_GRID[row]![col]!;
 }
+
+/**
+ * 그 자리의 위협을 칸 중심 사이로 보간한 값 — 공 없는 말의 가치장(`step.ts`)이 쓴다. 가치장은
+ * 연속이어야 해서(한 걸음 차이로 값이 계단처럼 뛰면 말이 칸 경계에 몰린다) 칸 값 그대로인
+ * `xThreatAt`과 따로 둔다. 공을 가진 말의 판단은 칸 값 그대로를 쓴다.
+ */
+export function xThreatSmooth(x: number, y: number): number {
+  const cw = XT_PITCH_LENGTH / XT_COLS;
+  const rh = XT_PITCH_WIDTH / XT_ROWS;
+  const fx = Math.min(XT_COLS - 1, Math.max(0, x / cw - 0.5));
+  const fy = Math.min(XT_ROWS - 1, Math.max(0, y / rh - 0.5));
+  const c0 = Math.floor(fx);
+  const r0 = Math.floor(fy);
+  const c1 = Math.min(XT_COLS - 1, c0 + 1);
+  const r1 = Math.min(XT_ROWS - 1, r0 + 1);
+  const tx = fx - c0;
+  const ty = fy - r0;
+  const at = (r: number, c: number) => XT_GRID[r]![c]!;
+  return (
+    at(r0, c0) * (1 - tx) * (1 - ty) +
+    at(r0, c1) * tx * (1 - ty) +
+    at(r1, c0) * (1 - tx) * ty +
+    at(r1, c1) * tx * ty
+  );
+}
