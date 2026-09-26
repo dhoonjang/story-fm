@@ -530,12 +530,12 @@ export const RUN_MIN_BALL_DEPTH = 35;
 export const RUN_MIN_FUEL = 0.35;
 
 /** 박스 진입 — 위협 값과 빈 공간 값 */
-export const BOX_VALUE = 0.4;
+export const BOX_VALUE = 0.5;
 
 export const BOX_SPACE = 0.05;
 
 /** 오버래핑·폭 — 빈 공간 값과 위협 값 */
-export const OVERLAP_VALUE = 0.4;
+export const OVERLAP_VALUE = 0.6;
 
 export const OVERLAP_THREAT = 0.15;
 
@@ -568,9 +568,9 @@ export const MARK_KEEP_METRES = 4;
 export const MARK_HOLD_SLACK = 1.5;
 
 /** 슛 길목 — 공과 우리 골문을 잇는 선 위, 공에서 이 거리들 (m) · 값 */
-export const LANE_STANDOFFS: readonly number[] = [6, 11];
+export const LANE_STANDOFFS: readonly number[] = [5, 8];
 
-export const LANE_VALUE = 0.9;
+export const LANE_VALUE = 0.7;
 
 /** 길목에 이미 동료가 이 거리 안에 있으면 그 점의 값이 이 몫만 남는다 (m) */
 export const LANE_OCCUPIED = 3;
@@ -578,7 +578,7 @@ export const LANE_OCCUPIED = 3;
 export const LANE_OCCUPIED_SHARE = 0.2;
 
 /** 존 커버 — 자리에서 우리 골 쪽으로 물러서는 거리 (m) · 공 쪽으로 좁히는 몫 · 값 */
-export const COVER_DROP = 8;
+export const COVER_DROP = 4;
 
 export const COVER_NARROW = 0.3;
 
@@ -673,6 +673,23 @@ export const DEFEND_SHIFT_PER_COVER = 0.6;
 /** 수비 형태가 공보다 앞에 서지 않는 여유 (m) — 첫 수비수만 공으로 간다 */
 export const DEFEND_FRONT_MARGIN = 8;
 
+/**
+ * 수비 형태의 바닥 (m) — 라인은 이 깊이(페널티 스폿 근처)보다 깊이 내려서지 않는다. 공이
+ * 그보다 골라인 가까이 가면 공에서 `DEFEND_FLOOR_BEHIND_BALL`만큼 뒤까지만 따라 내려간다 —
+ * 골문 앞에 모여 서면 박스 근처의 공 가진 말을 막지 못하고 오프사이드 선도 사라진다
+ */
+export const DEFEND_LINE_FLOOR = 11;
+
+export const DEFEND_FLOOR_BEHIND_BALL = 2;
+
+/**
+ * 라인 올리기 — 공 가진 상대가 우리 골 반대쪽으로 이만큼 (m/s) 넘게 움직이면 수비 라인(센터백·
+ * 풀백)이 이만큼 (m) 올라서서 오프사이드 선을 세운다
+ */
+export const LINE_STEP_UP_SPEED = 1.5;
+
+export const LINE_STEP_UP = 3;
+
 /** 공격 형태가 상대 라인을 넘지 않는 여유 (m) — 라인과 나란히 선다 */
 export const ATTACK_FRONT_MARGIN = 0.5;
 
@@ -721,9 +738,10 @@ export const HEATMAP: Record<WeightSlot, { attack: HeatComponent[]; defend: Heat
     ],
     defend: [
       { depth: 0, lateral: 0, back: 8, ahead: 6, side: 8, weight: 1 },
+      // 좁히기 — 공이 가까우면 안쪽으로 붙는다. 깊이로는 내려서지 않는다(라인의 바닥은 `shape.ts`)
       {
-        depth: -5,
-        lateral: -3,
+        depth: -1,
+        lateral: -4,
         back: 4,
         ahead: 5,
         side: 6,
@@ -735,48 +753,49 @@ export const HEATMAP: Record<WeightSlot, { attack: HeatComponent[]; defend: Heat
   },
   FB: {
     attack: [
-      // 제자리 — 공이 뒤에 있을수록 무겁다
+      // 제자리 — 수비 쪽. 공이 전진해도 무게가 다 꺼지지 않는다
       {
-        depth: -4,
+        depth: -6,
         lateral: 0,
-        back: 10,
-        ahead: 8,
-        side: 7,
-        weight: 0.8,
-        ball: -0.4,
+        back: 12,
+        ahead: 10,
+        side: 6,
+        weight: 0.7,
+        ball: -0.2,
         tendency: { cover: 2 },
       },
-      // 가담 — 측면 높은 곳
+      // 측면 길게 — 제 측면을 따라 수비 지역부터 상대 진영까지 한 성분이 덮는다
       {
-        depth: 26,
-        lateral: 5,
-        back: 10,
-        ahead: 16,
-        side: 6,
-        weight: 1.1,
-        ball: 0.6,
-        tendency: { advance: 4, width: 2 },
+        depth: 14,
+        lateral: 3,
+        back: 18,
+        ahead: 22,
+        side: 5,
+        weight: 1,
+        ball: 0.5,
+        tendency: { advance: 3, width: 2 },
         commit: true,
       },
       // 측면 끝 — 상대 마무리 지역의 골라인 근처. 윙백이 크로스를 올리는 자리
       {
-        depth: 38,
-        lateral: 7,
+        depth: 34,
+        lateral: 5,
         back: 8,
-        ahead: 12,
-        side: 5,
-        weight: 0.35,
-        ball: 0.9,
+        ahead: 10,
+        side: 4,
+        weight: 0.15,
+        ball: 0.6,
         tendency: { advance: 5, width: 2 },
         commit: true,
       },
       // 안쪽 — 인버티드 풀백의 중원 자리
       { depth: 2, lateral: -16, back: 8, ahead: 10, side: 7, weight: 0.1, tendency: { inside: 6 } },
     ],
+    // 수비 블록은 좁게 모이지만 풀백은 제 측면을 지킨다 — 형태 자리보다 바깥으로 되돌린다
     defend: [
-      { depth: 0, lateral: 0, back: 10, ahead: 8, side: 8, weight: 1 },
-      { depth: -6, lateral: -6, back: 6, ahead: 6, side: 7, weight: 0.2, ball: -0.8 },
-      { depth: 10, lateral: 0, back: 6, ahead: 10, side: 7, weight: 0.15, tendency: { press: 3 } },
+      { depth: 0, lateral: 5, back: 14, ahead: 12, side: 7, weight: 1 },
+      { depth: -1, lateral: 2, back: 5, ahead: 6, side: 7, weight: 0.2, ball: -0.8 },
+      { depth: 10, lateral: 5, back: 6, ahead: 10, side: 7, weight: 0.15, tendency: { press: 3 } },
     ],
   },
   DM: {
@@ -942,6 +961,12 @@ export const HEATMAP: Record<WeightSlot, { attack: HeatComponent[]; defend: Heat
   },
 };
 
+/** 모든 성분의 앞·뒤·옆 퍼짐에 곱하는 배율 — 표의 모양은 두고 범위만 넓히고 좁히는 눈금 */
+export const HEATMAP_SPREAD = 1.3;
+
+/** 성분의 중심이 서는 가로의 여유 (m) — 터치라인에서 이만큼 안. 성분이 경기장 밖에 서지 않는다 */
+export const HEATMAP_LATERAL_MARGIN = 2.5;
+
 /** 옆 퍼짐을 `roam`이 넓히는 몫 — 중립(0.5)에서 1만큼 벗어나면 이만큼 */
 export const HEATMAP_ROAM_REACH = 0.8;
 
@@ -978,6 +1003,17 @@ export const SHOT_THRESHOLD_PER_MENTALITY_STEP = 0.024;
  * 높으면 좋은 기회만 차서 슈팅이 적고 슈팅당 xG가 부푼다
  */
 export const SHOT_THRESHOLD_NEUTRAL = 0.118;
+
+/**
+ * 거리의 문턱 — 골문에서 `SHOT_NEAR_RANGE` (m) 안이면 문턱의 `SHOT_NEAR_SHARE`만 넘어도 슈팅이
+ * 선택지에 서고, `SHOT_FAR_RANGE`부터는 문턱 그대로다. 박스 안에서 공을 잡은 공격수는 길목에
+ * 수비가 있어도 찬다
+ */
+export const SHOT_NEAR_RANGE = 14;
+
+export const SHOT_FAR_RANGE = 22;
+
+export const SHOT_NEAR_SHARE = 0.75;
 
 /** 멘탈리티 한 칸이 공격 가담(형태의 전진·침투·박스 진입)에 더하는 배율 */
 export const COMMIT_PER_MENTALITY_STEP = 0.2;

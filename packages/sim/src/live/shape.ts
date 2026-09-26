@@ -7,7 +7,9 @@ import { clamp, inside, xAtDepth, yAtLateral } from "./geometry";
 import {
   ATTACK_FOLLOW_HOLD,
   ATTACK_FRONT_MARGIN,
+  DEFEND_FLOOR_BEHIND_BALL,
   DEFEND_FRONT_MARGIN,
+  DEFEND_LINE_FLOOR,
   DEFEND_SHIFT_BASE,
   DEFEND_SHIFT_PER_COVER,
 } from "./tuning";
@@ -97,6 +99,7 @@ export function shapePosition(
     depth = p.lineHeight + (anchorDepth - ctx.backLine) * p.compactness + shift;
     // 커버 역할은 수비 때 더 뒤에 선다
     depth -= (tendency.cover - 0.5) * 6;
+    depth = Math.max(depth, defendFloorOf(ctx.ballDepth));
     lateral =
       FIELD.width / 2 +
       (anchorLateral - FIELD.width / 2) * p.defendWidth +
@@ -106,6 +109,14 @@ export function shapePosition(
     x: xAtDepth(clamp(depth, 2, Math.min(FIELD.length - 2, ctx.frontLimit)), ctx.side),
     y: yAtLateral(clamp(lateral, 1, FIELD.width - 1), ctx.side),
   });
+}
+
+/**
+ * 수비의 바닥 깊이 (m) — 라인은 골문 앞까지 내려서지 않는다. 공이 골라인에 가까우면 공을
+ * 따라서만 내려간다. 형태 자리와 수비 라인(센터백·풀백)의 후보점이 같은 바닥을 읽는다
+ */
+export function defendFloorOf(ballDepth: number): number {
+  return Math.min(DEFEND_LINE_FLOOR, ballDepth - DEFEND_FLOOR_BEHIND_BALL);
 }
 
 /** 형태의 앞 한계 — 공격은 상대 수비 라인, 수비는 공의 앞 */

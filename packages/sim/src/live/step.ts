@@ -55,7 +55,7 @@ import { teamParamsOf, type TeamParams } from "./params";
 import { advanceFlight, movePlayer, reachHeightOf, reachOf } from "./physics";
 import { SLOT_TENDENCY, roleTendencyOf, type RoleTendency } from "./roles";
 import { heatmapLogDensityAt, heatmapOf, sampleHeatmap, type Heatmap } from "./heatmap";
-import { backLineOf, frontLimitOf, shapePosition } from "./shape";
+import { backLineOf, defendFloorOf, frontLimitOf, shapePosition } from "./shape";
 import { sideInputOf, type LiveInput, type LiveStepResult } from "./types";
 import { xThreatAt } from "./xt";
 import { onTarget, shotXg } from "./xg";
@@ -69,6 +69,8 @@ import {
   DANGER_RANGE,
   DANGER_RECOVERY_GAP,
   LANE_OCCUPIED,
+  LINE_STEP_UP,
+  LINE_STEP_UP_SPEED,
   LANE_OCCUPIED_SHARE,
   LANE_STANDOFFS,
   LANE_VALUE,
@@ -199,6 +201,8 @@ import {
   RED_ON_DOGSO,
   RED_ON_RECKLESS,
   RESTART_DEAD_SECONDS,
+  SET_PIECE_RUNUP_SECONDS,
+  SET_PIECE_STANCE,
   RISK_VALUE,
   ROLL_DECELERATION,
   ROLL_ON_MAX,
@@ -212,6 +216,9 @@ import {
   SHAPE_DRIFT_PERIOD,
   SHOT_ERROR_BASE,
   SHOT_ERROR_SKILL,
+  SHOT_FAR_RANGE,
+  SHOT_NEAR_RANGE,
+  SHOT_NEAR_SHARE,
   SHOT_RANGE,
   SHOT_SPEED_MIN,
   SHOT_SPEED_SPAN,
@@ -878,7 +885,7 @@ function decideOffBall(ctx: Ctx, p: LivePlayer): number | undefined {
   }
   const shape = shapeOf(ctx, p, attacking);
   const zone = zoneOf(ctx, p);
-  const spots = attacking ? attackSpots(ctx, p, shape) : defendSpots(ctx, p, shape);
+  let spots = attacking ? attackSpots(ctx, p, shape) : defendSpots(ctx, p, shape);
   // 분포에서 뽑은 점 — 할 일이 없을 때도 말은 제 히트맵 안을 다닌다. 표본은 창마다 한 번
   // 선다: 창 안에서는 같은 성분·같은 편차라 분포가 움직일 때만 점이 따라 움직인다
   // 창의 경계는 말마다 어긋난다 — 열한 명이 한꺼번에 새 점으로 떠나지 않는다
@@ -893,6 +900,7 @@ function decideOffBall(ctx: Ctx, p: LivePlayer): number | undefined {
       action: "shape",
     });
   }
+  if (!attacking) spots = floorBackLine(ctx, p, spots);
   // 점수 = 가치 + β·ln ρ + 관성 → 온도 T의 softmax로 뽑는다. 온도는 능력치다 — 공격은
   // 오프더볼, 수비는 위치선정이 높을수록 가치가 큰 점을 더 일관되게 고른다
   const skill = attr(ctx, p, attacking ? "offTheBall" : "positioning");
@@ -1040,10 +1048,18 @@ function defendSpots(ctx: Ctx, p: LivePlayer, shape: FieldPoint): Spot[] {
   const params = ctx.params[p.side];
   const own = ownGoalOf(p.side);
   let home = shape;
+  const backLine = slotOf(ctx, p) === "CB" || slotOf(ctx, p) === "FB";
   // 오프사이드 트랩 — 상대가 전진 패스를 준비하면 라인이 함께 올라선다
   if (params.offsideTrap && depthOf(shape.x, p.side) < ctx.defensiveLine[p.side] + 2) {
     const familiarity = ctx.slot.get(p.id)?.familiarity ?? 60;
     home = inside({ x: shape.x + direction(p.side) * (2 + familiarity / 50), y: shape.y });
+  } else if (backLine) {
+    // 라인 올리기 — 공 가진 상대가 우리 골 반대쪽으로 움직이면 함께 올라서 오프사이드 선을 세운다
+    const owner = state.players.find((q) => q.id === state.ball.owner);
+    const away = owner ? owner.vx * direction(p.side) : 0;
+    if (owner && owner.side !== p.side && away > LINE_STEP_UP_SPEED) {
+      home = inside({ x: shape.x + direction(p.side) * LINE_STEP_UP, y: shape.y });
+    }
   }
   const spots: Spot[] = [{ point: home, value: SPOT_SHAPE_DEFEND, action: "shape" }];
 
@@ -1092,6 +1108,18 @@ function defendSpots(ctx: Ctx, p: LivePlayer, shape: FieldPoint): Spot[] {
     action: "cover",
   });
   return spots;
+}
+
+/** 수비 라인(센터백·풀백)은 바닥 밑으로 내려서지 않는다 — 우리 골 쪽으로 파고드는 상대를 따라가는 마크만 예외다 */
+function floorBackLine(ctx: Ctx, p: LivePlayer, spots: Spot[]): Spot[] {
+  const slot = slotOf(ctx, p);
+  if (slot !== "CB" && slot !== "FB") return spots;
+  const floor = defendFloorOf(depthOf(ctx.state.ball.x, p.side));
+  return spots.map((spot) =>
+    spot.action === "mark" || depthOf(spot.point.x, p.side) >= floor
+      ? spot
+      : { ...spot, point: { x: xAtDepth(floor, p.side), y: spot.point.y } },
+  );
 }
 
 /** 골키퍼 — 공과 골문을 잇는 선 위, 가까우면 나온다; 박스 안의 느슨한 공은 잡으러 간다 */
@@ -1719,7 +1747,12 @@ function decideCarrier(ctx: Ctx, owner: LivePlayer): void {
       keeperOffset: keeperOffsetOf(owner, goal, oppKeeper),
       blockers: blockersOf(ctx, owner, goal),
     });
-    const threshold = params.shotThreshold * (1.4 - (tendency?.shoot ?? 0.5) * 0.8);
+    // 문턱은 거리에 따라 내려간다 — 박스 안에서 골문이 보이면 막힌 길목에서도 찬다
+    const near = clamp((range - SHOT_NEAR_RANGE) / (SHOT_FAR_RANGE - SHOT_NEAR_RANGE), 0, 1);
+    const threshold =
+      params.shotThreshold *
+      (1.4 - (tendency?.shoot ?? 0.5) * 0.8) *
+      (SHOT_NEAR_SHARE + (1 - SHOT_NEAR_SHARE) * near);
     if (xg > threshold) {
       const util =
         xg * SHOT_VALUE * (0.7 + (tendency?.shoot ?? 0.5) * 0.6) -
@@ -2632,12 +2665,19 @@ function stepRestart(ctx: Ctx): void {
     state.restart = null;
     return;
   }
-  // 배치 — 키커는 공으로, 나머지는 재시작의 자리로
+  // 배치 — 키커는 공 뒤에 걸어가 서고, 나머지는 재시작의 자리로
+  const runup = state.tick >= r.untilTick - dead(SET_PIECE_RUNUP_SECONDS);
   for (const p of state.players) {
-    if (state.tick >= p.decideAt) {
+    if (p.id === taker.id) {
+      // 서두르지 않는 걸음으로 간다 — 전력질주로 공을 지나쳐 맴돌지 않게. 도움닫기만 공으로
+      p.target = runup
+        ? r.at
+        : inside({ x: r.at.x - direction(p.side) * SET_PIECE_STANCE, y: r.at.y });
+      p.action = runup ? "chase" : "shape";
+    } else if (state.tick >= p.decideAt) {
       p.decideAt = state.tick + dead(0.5);
       p.target = restartPosition(ctx, p, r, taker.id);
-      p.action = p.id === taker.id ? "chase" : "shape";
+      p.action = "shape";
     }
   }
   if (state.tick < r.untilTick) return;

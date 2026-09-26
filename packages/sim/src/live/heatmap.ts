@@ -2,11 +2,13 @@ import type { FieldPoint, MatchSide, WeightSlot } from "@story-fm/domain";
 import { FIELD } from "@story-fm/domain";
 import type { RoleTendency, TendencyAxis } from "./roles";
 import { dexp, dlog } from "./dmath";
-import { depthOf, lateralOf } from "./geometry";
+import { clamp, depthOf, lateralOf } from "./geometry";
 import {
   HEATMAP,
   HEATMAP_DENSITY_FLOOR,
+  HEATMAP_LATERAL_MARGIN,
   HEATMAP_ROAM_REACH,
+  HEATMAP_SPREAD,
   HEATMAP_SET_PIECE_SPREAD,
   HEATMAP_SET_PIECE_WEIGHT,
 } from "./tuning";
@@ -87,10 +89,14 @@ export function heatmapOf(
   const total = raw.reduce((a, b) => a + b, 0) || 1;
   const blobs: HeatBlob[] = components.map((c, i) => ({
     depth: center.depth + c.depth,
-    lateral: center.lateral + c.lateral * outward,
-    back: c.back,
-    ahead: c.ahead,
-    side: c.side * sideReach,
+    lateral: clamp(
+      center.lateral + c.lateral * outward,
+      HEATMAP_LATERAL_MARGIN,
+      FIELD.width - HEATMAP_LATERAL_MARGIN,
+    ),
+    back: c.back * HEATMAP_SPREAD,
+    ahead: c.ahead * HEATMAP_SPREAD,
+    side: c.side * sideReach * HEATMAP_SPREAD,
     weight: (raw[i] ?? 0) / total,
   }));
   const sp = ctx.setPiece;
