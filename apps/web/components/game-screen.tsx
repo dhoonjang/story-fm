@@ -425,8 +425,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const editingMatch =
     liveMatch !== null &&
     ((panel === null && matchTab === "팀" && squadSide === "ours") || panel === "스쿼드");
-  const liveBlocked =
-    input.length > 0 || matchViewport.focused || busy || editingMatch || error !== null;
+  const liveBlocked = editingMatch || error !== null;
   /** 실행기가 정지점에서 여는 턴 — `send`는 이 훅보다 뒤에 서므로 ref로 건넨다 */
   const sendRef = useRef<(text?: string, operation?: TurnOperation) => Promise<unknown>>(
     async () => null,
@@ -435,6 +434,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
     gameId,
     matchId: liveMatch && !liveMatch.beforeKickoff ? liveMatch.matchId : null,
     blocked: liveBlocked,
+    typing: input.length > 0 || matchViewport.focused,
+    turning: busy,
     onView: (view) =>
       setGame((current) =>
         !current || current.views.match?.matchId !== view?.matchId
