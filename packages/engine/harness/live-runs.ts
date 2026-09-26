@@ -1,5 +1,13 @@
 import type { MatchRecord, MatchSide, MatchStatLine, TacticsSpec } from "@story-fm/domain";
-import { playLiveToEnd, possessionOf, sideStatLine, type LiveMatch } from "@story-fm/sim";
+import { otherSide, weightSlotOf } from "@story-fm/domain";
+import {
+  depthOf,
+  playLiveToEnd,
+  possessionOf,
+  sideStatLine,
+  type LiveMatch,
+  type LiveTickObserver,
+} from "@story-fm/sim";
 import { buildAiLiveMatch, leagueOfTeamIn, type GameState } from "@story-fm/engine";
 
 /**
@@ -89,3 +97,59 @@ export const median = (xs: number[]) => {
 };
 export const share = (xs: number[], test: (x: number) => boolean) =>
   xs.filter(test).length / Math.max(1, xs.length);
+
+/** 정렬한 표본의 분위 — 0..1 */
+export const quantile = (xs: number[], q: number) => {
+  const sorted = [...xs].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? Number.NaN;
+};
+
+/** 풀백의 깊이를 이만큼 틱마다 적는다 — 1초 */
+const DEPTH_SAMPLE_TICKS = 20;
+
+/**
+ * 장부에 없는 배치를 재는 관찰자 — 슈팅 순간 공보다 골 쪽에 선 수비 필드 선수 수와,
+ * 풀백마다 경기 중 선 깊이(우리 골라인에서)의 표본 (live-match.md §3.3 · §5.2).
+ */
+export interface ShapeProbe {
+  onTick: LiveTickObserver;
+  /** 슈팅 한 번마다 — 공보다 골 쪽의 수비 필드 선수 수 */
+  goalSide: number[];
+  /** 풀백 id → 1초마다의 깊이 */
+  fullBackDepths: Map<string, number[]>;
+}
+
+export function shapeProbe(): ShapeProbe {
+  const probe: ShapeProbe = { onTick: () => {}, goalSide: [], fullBackDepths: new Map() };
+  let lastShot: Record<MatchSide, number> | null = null;
+  probe.onTick = (state, input) => {
+    const slotOf = (id: string) =>
+      weightSlotOf(
+        (
+          input.home.slots.find((s) => s.player.id === id) ??
+          input.away.slots.find((s) => s.player.id === id)
+        )?.position ?? "",
+      );
+    for (const side of ["home", "away"] as const) {
+      if (lastShot && state.lastShotAt[side] !== lastShot[side] && !state.restart) {
+        const defending = otherSide(side);
+        const ballDepth = depthOf(state.ball.x, defending);
+        probe.goalSide.push(
+          state.players.filter(
+            (p) =>
+              p.side === defending && slotOf(p.id) !== "GK" && depthOf(p.x, defending) < ballDepth,
+          ).length,
+        );
+      }
+    }
+    lastShot = { ...state.lastShotAt };
+    if (state.tick % DEPTH_SAMPLE_TICKS !== 0 || state.restart) return;
+    for (const p of state.players) {
+      if (slotOf(p.id) !== "FB") continue;
+      const depths = probe.fullBackDepths.get(p.id) ?? [];
+      depths.push(depthOf(p.x, p.side));
+      probe.fullBackDepths.set(p.id, depths);
+    }
+  };
+  return probe;
+}

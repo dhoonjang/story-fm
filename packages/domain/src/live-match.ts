@@ -188,7 +188,16 @@ export interface LiveMatchState {
   /** 공을 잃은 자리 — `high_turnover`의 근거 */
   lastTurnover: { by: string; side: MatchSide; tick: number; at: FieldPoint } | null;
   restart: LiveRestart | null;
-  setPiece: { origin: ShotOrigin; untilTick: number; side: MatchSide } | null;
+  setPiece: {
+    origin: ShotOrigin;
+    untilTick: number;
+    side: MatchSide;
+    /**
+     * 킥 직전의 재시작 — 말마다의 배치 자리를 다시 세우는 근거(세트피스 성분의 중심,
+     * live-match.md §3.3). 쳐낸 슛 뒤의 창처럼 배치 없이 열린 창은 `null`이다
+     */
+    layout: { kind: LiveRestartKind; at: FieldPoint } | null;
+  } | null;
   /** 휴식 중 — 하프타임·연장 개시. 감독이 재개한다 */
   interval: boolean;
   /** 편마다 공을 가졌던 시간 (초) — 점유율의 원본 */

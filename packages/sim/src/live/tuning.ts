@@ -1,4 +1,5 @@
 import type { LiveAction, PlayPhase, WeightSlot } from "@story-fm/domain";
+import type { TendencyAxis } from "./roles";
 import { LIVE_STEP } from "@story-fm/domain";
 import type { ShotContext } from "./xg";
 
@@ -148,6 +149,26 @@ export const PASS_ANGLE_ERROR = 0.07;
 /** 패스 세기 오차 — 거리 1m마다의 세로 표준편차 */
 export const PASS_LENGTH_ERROR = 0.1;
 
+/**
+ * 패스 선택의 길목 판정 — 상대의 인터셉트 반경에 이 여유 (m)를 더하고, 패서의 부정확도에
+ * `PASS_THREAD_BASE`를 더한 배율을 곱한다. 리그 평균의 패서에서 배율이 1 남짓이고 좋은 패서일수록 작다 —
+ * 좋은 패서는 막힐 줄 알던 길목을 열린 길로 본다
+ */
+export const PASS_LANE_MARGIN = 0.35;
+
+export const PASS_THREAD_BASE = 0.4;
+
+/**
+ * 패스의 부정확도 = `PASS_SLOPPINESS_AT_PIVOT` × 2^(−(패스 − `PASS_SKILL_PIVOT`) ÷ `PASS_SKILL_HALVING`).
+ * 리그 평균의 패서(58)에서 0.67이고 15점마다 절반·두 배다 — 실측 팀 패스 성공률의 팀 간 sd 4.9%p
+ * (72.3~90.5%, football-reference.md [FM])가 패서의 능력 차에서 나온다
+ */
+export const PASS_SLOPPINESS_AT_PIVOT = 0.67;
+
+export const PASS_SKILL_PIVOT = 58;
+
+export const PASS_SKILL_HALVING = 15;
+
 /** 3.5m 안의 상대 하나가 오차에 더하는 몫 */
 export const PASS_PRESSURE_ERROR = 0.45;
 
@@ -238,15 +259,6 @@ export const LOSS_SHARE = 0.5;
 /** 공 가진 상대를 막으러 나서는 첫 수비수의 반경 (m) — 압박선과 무관하게 한 명은 붙는다 */
 export const ENGAGE_RADIUS = 18;
 
-/** 침투를 고르는 `runBehind` 성향의 문턱 — 멘탈리티 중립에서 */
-export const RUN_BEHIND_MIN = 0.45;
-
-/** 마무리 국면에 박스로 들어가는 `boxPresence` 성향의 문턱 — 멘탈리티 중립에서 */
-export const BOX_PRESENCE_MIN = 0.55;
-
-/** 가담 배율(`commit`)이 1을 넘은 만큼 위 두 문턱을 내리는 비 — 공격적이면 미드필더도 뛰어든다 */
-export const COMMIT_TENDENCY_REACH = 0.8;
-
 /** 재시작마다 공이 멈춰 있는 시간 (초) */
 export const RESTART_DEAD_SECONDS = {
   kickoff: 3,
@@ -319,6 +331,19 @@ export const BLOCK_LANE = 1.4;
 
 /** 패스가 떨어질 자리에서 이만큼 떨어진 곳에서 끊어야 인터셉트다 (m) — 떨어진 공을 줍는 것은 회복이다 */
 export const INTERCEPT_MIN_GAP = 16;
+
+/**
+ * 인터셉트의 반경 (m) — 수비의 읽기(위치선정 0.6 + 태클 0.4)가 `INTERCEPT_REACH_PIVOT`일 때
+ * `INTERCEPT_REACH_BASE`이고 한 점마다 `INTERCEPT_REACH_PER_POINT`씩 달라진다. 팀 간 수비 수준의
+ * 차이가 공을 끊는 빈도로 선다 — 평균이 아니라 그 퍼짐이 이 눈금의 몫이다
+ */
+export const INTERCEPT_REACH_BASE = 0.85;
+
+export const INTERCEPT_REACH_PIVOT = 55;
+
+export const INTERCEPT_REACH_PER_POINT = 0.012;
+
+export const INTERCEPT_REACH_MIN = 0.45;
 
 /** 튕긴 공이 구르는 속도 (m/s) */
 export const ROLL_SPEED = 7;
@@ -406,14 +431,8 @@ export const BURST_URGENCY: Record<WeightSlot, number> = {
 /** 치고 나갈 만큼 자리가 앞에 있어야 한다 (m) */
 export const BURST_GAP = 9;
 
-/** 풀백의 오버래핑 — 공이 이 깊이 넘어 제 측면에 있을 때 (m) */
-export const OVERLAP_MIN_DEPTH = 38;
-
-/** 공이 제 측면에 있다고 보는 가로 거리 (m) */
-export const OVERLAP_FLANK = 22;
-
-/** 판단 한 번에 오버래핑을 고르는 확률 — 전진 성향을 곱한다 */
-export const OVERLAP_CHANCE = 0.12;
+/** 오버래핑의 값이 공과의 가로 거리에 따라 줄어 0이 되는 거리 (m) — 공이 제 측면에 가까울수록 값지다 */
+export const OVERLAP_FLANK = 30;
 
 /** 공 가진 말보다 앞질러 서는 거리 (m)와 터치라인에서의 거리 (m) */
 export const OVERLAP_AHEAD = 12;
@@ -428,6 +447,142 @@ export const OVERLAP_COMMIT_SECONDS = 2.5;
 
 /** 최전방은 조직 수비에서 사람을 잡지 않는다 — 공을 되찾으면 나갈 자리를 지킨다 */
 export const NON_MARKING_SLOTS: ReadonlySet<WeightSlot> = new Set(["CF", "ST"]);
+
+// ── 공 없는 말의 후보점 (`step.ts` · live-match.md §5.2) ────────────────────────────
+//
+// 점수 = 상황 가치 + 역할 가산 + β·ln ρ + 관성, 선택은 온도 T의 softmax. 아래 값은 전부
+// 그 점수의 눈금이다 — 자리 후보의 값이 기준이고, 다른 후보는 그보다 크면 더 자주 뽑힌다.
+
+/**
+ * 온도 — 능력치(공격 `offTheBall` · 수비 `positioning`)가 `OFFBALL_SKILL_TOP` 이상이면
+ * `OFFBALL_TEMPERATURE_MIN`, `OFFBALL_SKILL_BOTTOM` 이하면 거기에 `OFFBALL_TEMPERATURE_SPAN`을
+ * 더한 값. 선수 분포가 사는 구간에서 가파르게 — 60과 80이 다르게 움직여야 능력이 공간에 선다
+ */
+export const OFFBALL_TEMPERATURE_MIN = 0.06;
+
+export const OFFBALL_TEMPERATURE_SPAN = 0.24;
+
+export const OFFBALL_SKILL_TOP = 99;
+
+export const OFFBALL_SKILL_BOTTOM = 0;
+
+/** β — 로그 밀도가 점수에 들어가는 몫. 퍼짐 두 배 밖의 점(ln ρ ≈ −2)이 이 값의 두 배를 잃는다 */
+export const OFFBALL_DENSITY_WEIGHT = 0.2;
+
+/** 판단마다 히트맵에서 뽑아 후보에 넣는 점의 수와, 그 점의 값이 자리 후보보다 낮은 몫 */
+export const OFFBALL_SAMPLES = 1;
+
+export const OFFBALL_SAMPLE_DISCOUNT = 0.12;
+
+/** 분포에서 뽑은 점이 서 있는 창 (초) — 창이 바뀔 때마다 새로 뽑는다 */
+export const OFFBALL_WANDER_SECONDS = 30;
+
+/**
+ * 관성 — 지금 목표에서 이 거리 (m) 안의 후보에 더하는 값, 지난 판단과 같은 행동의 후보에
+ * 더하는 값. 상황이 바뀌어야 다른 일로 옮긴다 — 판단마다 목표가 뒤집히면 말이 쉬지 않고 뛴다
+ */
+export const OFFBALL_INERTIA_RADIUS = 3;
+
+export const OFFBALL_INERTIA = 0.5;
+
+export const OFFBALL_INERTIA_KIND = 0.5;
+
+/** 자리 후보의 값과 `hold` 성향이 더하는 값 */
+export const SPOT_SHAPE = 0.3;
+
+export const SPOT_HOLD = 0.3;
+
+/** 역할 가산 — 성향이 중립(0.5)에서 벗어난 만큼 그 후보의 값에 더한다 */
+export const SPOT_ROLE = 0.45;
+
+/** 빈 공간의 눈금 (m) — 가장 가까운 상대가 이만큼 떨어지면 공간 값이 다 찬다 */
+export const SPOT_SPACE_FULL = 10;
+
+/** 위협(xT)의 눈금 — 이 값의 칸에서 위협 값이 다 찬다 (박스 앞 중앙 칸이 0.1) */
+export const SPOT_THREAT_FULL = 0.1;
+
+/** 지원 — 공 가진 동료에게서 이 거리 안이면 지원 후보를 세운다 (m) · 공간이 준 값 · 경로가 막혔을 때 남는 몫 */
+export const SUPPORT_RANGE = 26;
+
+export const SUPPORT_VALUE = 1;
+
+export const SUPPORT_LANE_BLOCKED = 0.4;
+
+/** 패스 경로가 막혔다고 보는 거리 (m) — 상대가 경로에서 이만큼 안에 있다 */
+export const SUPPORT_LANE_WIDTH = 2;
+
+/** 침투 — 라인 뒤 공간의 값과 그 공간이 다 차는 깊이 (m), 위협 값 */
+export const RUN_VALUE = 0.05;
+
+export const RUN_ROOM_FULL = 25;
+
+export const RUN_THREAT = 0.05;
+
+/** 침투를 세우는 공의 최소 깊이 (m)와 말의 최소 순간 여력 */
+export const RUN_MIN_BALL_DEPTH = 35;
+
+export const RUN_MIN_FUEL = 0.35;
+
+/** 박스 진입 — 위협 값과 빈 공간 값 */
+export const BOX_VALUE = 0.3;
+
+export const BOX_SPACE = 0.05;
+
+/** 오버래핑·폭 — 빈 공간 값과 위협 값 */
+export const OVERLAP_VALUE = 0.05;
+
+export const OVERLAP_THREAT = 0.1;
+
+/** 수비 — 자리 후보의 값 */
+export const SPOT_SHAPE_DEFEND = 0.35;
+
+/** 마크 — 배정받은 상대의 골 쪽에 서는 값과 그 상대의 위협이 더하는 값, 서는 거리 (m) */
+export const MARK_VALUE = 0.75;
+
+export const MARK_THREAT = 0.4;
+
+export const MARK_GOAL_SIDE = 2.2;
+
+/** 마크 배정 — 공이 이 깊이보다 우리 쪽일 때 · 우리 골에서 이 거리 안의 상대만 (m) */
+export const MARK_BALL_DEPTH = 63;
+
+export const MARK_GOAL_RADIUS = 45;
+
+/**
+ * 마크 배정의 값 (m) — 거리 + 로그 밀도 1마다 이만큼. 그 값이 `MARK_COST_MAX`를 넘는
+ * 수비는 맡지 않는다. 지금 맡은 수비는 `MARK_KEEP_METRES`만큼 덜 친다 — 목표가 상대의
+ * 골 쪽 자리에서 `MARK_HOLD_SLACK` 안이면 맡고 있는 것이다
+ */
+export const MARK_ZONE_METRES = 3;
+
+export const MARK_COST_MAX = 22;
+
+export const MARK_KEEP_METRES = 4;
+
+export const MARK_HOLD_SLACK = 1.5;
+
+/** 슛 길목 — 공과 우리 골문을 잇는 선 위, 공에서 이 거리들 (m) · 값 */
+export const LANE_STANDOFFS: readonly number[] = [6, 11];
+
+export const LANE_VALUE = 0.9;
+
+/** 길목에 이미 동료가 이 거리 안에 있으면 그 점의 값이 이 몫만 남는다 (m) */
+export const LANE_OCCUPIED = 3;
+
+export const LANE_OCCUPIED_SHARE = 0.2;
+
+/** 존 커버 — 자리에서 우리 골 쪽으로 물러서는 거리 (m) · 공 쪽으로 좁히는 몫 · 값 */
+export const COVER_DROP = 8;
+
+export const COVER_NARROW = 0.3;
+
+export const COVER_VALUE = 0.5;
+
+/** 위험의 눈금 — 공이 우리 골문에서 이 거리 (m) 안이면 길목·커버의 값이 선다. 골문에서 1, 이 거리에서 0 */
+export const DANGER_RANGE = 40;
+
+/** 슛 길목·존 커버의 자리가 이만큼 (m) 넘게 남으면 위험만큼 서두른다 */
+export const DANGER_RECOVERY_GAP = 5;
 
 /** 골키퍼 — 공격 중 공 깊이 1m마다 나오는 거리 (m)와 그 상한 (m). 스위퍼 키퍼는 라인 뒤를 덮는다 */
 export const KEEPER_ATTACK_ADVANCE = 0.25;
@@ -515,6 +670,271 @@ export const DEFEND_FRONT_MARGIN = 8;
 /** 공격 형태가 상대 라인을 넘지 않는 여유 (m) — 라인과 나란히 선다 */
 export const ATTACK_FRONT_MARGIN = 0.5;
 
+// ── 히트맵 (`heatmap.ts` · live-match.md §3.3) ──────────────────────────────────────
+
+/**
+ * 히트맵의 성분 하나 — 형태 자리에서의 오프셋과 퍼짐 (m), 기본 가중치, 가중치가 반응하는 입력.
+ *
+ * 가중치 = `weight` × exp(`ball` × (공 깊이 − 52.5) ÷ 10 + Σ `tendency`의 기울기 × (성향 − 0.5))
+ * × (`commit`이면 멘탈리티 배율). 성분들의 가중치는 합이 1이 되게 나눈다.
+ */
+export interface HeatComponent {
+  /** 깊이 오프셋 — 상대 골 쪽이 + */
+  depth: number;
+  /** 가로 오프셋 — 제 측면의 터치라인 쪽이 +. 중앙에 선 말에게는 0이 된다 */
+  lateral: number;
+  back: number;
+  ahead: number;
+  side: number;
+  weight: number;
+  /** 공 깊이 10m마다 가중치의 로짓이 오르는 몫 — 공이 전진할수록 무거워지면 + */
+  ball?: number;
+  tendency?: Partial<Record<TendencyAxis, number>>;
+  /** 멘탈리티의 가담 배율(`commit`)을 가중치에 곱한다 */
+  commit?: boolean;
+}
+
+/** 자리 묶음 × 국면(공격 / 수비)의 성분 — 첫 성분이 형태 자리 그대로의 중심이다 */
+export const HEATMAP: Record<WeightSlot, { attack: HeatComponent[]; defend: HeatComponent[] }> = {
+  GK: {
+    attack: [{ depth: 0, lateral: 0, back: 3, ahead: 4, side: 5, weight: 1 }],
+    defend: [{ depth: 0, lateral: 0, back: 3, ahead: 4, side: 5, weight: 1 }],
+  },
+  CB: {
+    attack: [
+      { depth: 0, lateral: 0, back: 7, ahead: 8, side: 8, weight: 1 },
+      {
+        depth: 12,
+        lateral: 0,
+        back: 4,
+        ahead: 10,
+        side: 8,
+        weight: 0.12,
+        tendency: { advance: 3 },
+      },
+    ],
+    defend: [
+      { depth: 0, lateral: 0, back: 8, ahead: 6, side: 8, weight: 1 },
+      {
+        depth: -5,
+        lateral: -3,
+        back: 4,
+        ahead: 5,
+        side: 6,
+        weight: 0.2,
+        ball: -0.8,
+        tendency: { cover: 2 },
+      },
+    ],
+  },
+  FB: {
+    attack: [
+      // 제자리 — 공이 뒤에 있을수록 무겁다
+      {
+        depth: -4,
+        lateral: 0,
+        back: 10,
+        ahead: 8,
+        side: 7,
+        weight: 1,
+        ball: -0.3,
+        tendency: { cover: 2 },
+      },
+      // 가담 — 측면 높은 곳, 상대 마무리 지역까지
+      {
+        depth: 18,
+        lateral: 5,
+        back: 10,
+        ahead: 14,
+        side: 6,
+        weight: 0.6,
+        ball: 0.6,
+        tendency: { advance: 4, width: 2 },
+        commit: true,
+      },
+      // 안쪽 — 인버티드 풀백의 중원 자리
+      { depth: 2, lateral: -16, back: 8, ahead: 10, side: 7, weight: 0.1, tendency: { inside: 6 } },
+    ],
+    defend: [
+      { depth: 0, lateral: 0, back: 10, ahead: 8, side: 8, weight: 1 },
+      { depth: -6, lateral: -6, back: 6, ahead: 6, side: 7, weight: 0.2, ball: -0.8 },
+      { depth: 10, lateral: 0, back: 6, ahead: 10, side: 7, weight: 0.15, tendency: { press: 3 } },
+    ],
+  },
+  DM: {
+    attack: [
+      { depth: 0, lateral: 0, back: 8, ahead: 10, side: 10, weight: 1 },
+      {
+        depth: 14,
+        lateral: 0,
+        back: 8,
+        ahead: 10,
+        side: 10,
+        weight: 0.2,
+        tendency: { advance: 3 },
+        commit: true,
+      },
+    ],
+    defend: [
+      { depth: 0, lateral: 0, back: 10, ahead: 8, side: 11, weight: 1 },
+      {
+        depth: -8,
+        lateral: 0,
+        back: 6,
+        ahead: 6,
+        side: 10,
+        weight: 0.3,
+        ball: -0.6,
+        tendency: { cover: 3 },
+      },
+    ],
+  },
+  CM: {
+    attack: [
+      { depth: 0, lateral: 0, back: 10, ahead: 10, side: 11, weight: 1 },
+      {
+        depth: 16,
+        lateral: 0,
+        back: 8,
+        ahead: 12,
+        side: 12,
+        weight: 0.35,
+        ball: 0.3,
+        tendency: { advance: 3, boxPresence: 2 },
+        commit: true,
+      },
+    ],
+    defend: [
+      { depth: 0, lateral: 0, back: 10, ahead: 9, side: 12, weight: 1 },
+      {
+        depth: -10,
+        lateral: 0,
+        back: 6,
+        ahead: 6,
+        side: 12,
+        weight: 0.3,
+        ball: -0.6,
+        tendency: { cover: 2 },
+      },
+      { depth: 8, lateral: 0, back: 6, ahead: 8, side: 10, weight: 0.15, tendency: { press: 3 } },
+    ],
+  },
+  AM: {
+    attack: [
+      { depth: 0, lateral: 0, back: 10, ahead: 12, side: 12, weight: 1 },
+      {
+        depth: 12,
+        lateral: 0,
+        back: 6,
+        ahead: 10,
+        side: 10,
+        weight: 0.45,
+        ball: 0.4,
+        tendency: { boxPresence: 3, runBehind: 2 },
+        commit: true,
+      },
+    ],
+    defend: [
+      { depth: 0, lateral: 0, back: 8, ahead: 9, side: 12, weight: 1 },
+      {
+        depth: -12,
+        lateral: 0,
+        back: 6,
+        ahead: 6,
+        side: 12,
+        weight: 0.2,
+        ball: -0.5,
+        tendency: { cover: 3 },
+      },
+    ],
+  },
+  W: {
+    attack: [
+      // 폭 — 터치라인 쪽
+      { depth: 0, lateral: 4, back: 10, ahead: 12, side: 7, weight: 1, tendency: { width: 3 } },
+      // 안쪽 — 하프 스페이스에서 박스로
+      {
+        depth: 8,
+        lateral: -14,
+        back: 8,
+        ahead: 12,
+        side: 8,
+        weight: 0.4,
+        ball: 0.3,
+        tendency: { inside: 5, boxPresence: 2 },
+        commit: true,
+      },
+    ],
+    defend: [
+      { depth: 0, lateral: 0, back: 10, ahead: 9, side: 8, weight: 1 },
+      {
+        depth: -16,
+        lateral: 0,
+        back: 8,
+        ahead: 6,
+        side: 8,
+        weight: 0.3,
+        ball: -0.6,
+        tendency: { cover: 3 },
+      },
+    ],
+  },
+  CF: {
+    attack: [
+      { depth: 0, lateral: 0, back: 12, ahead: 10, side: 11, weight: 1 },
+      {
+        depth: -12,
+        lateral: 0,
+        back: 8,
+        ahead: 8,
+        side: 12,
+        weight: 0.25,
+        tendency: { dropDeep: 4 },
+      },
+      {
+        depth: 10,
+        lateral: 0,
+        back: 5,
+        ahead: 10,
+        side: 9,
+        weight: 0.4,
+        ball: 0.4,
+        tendency: { boxPresence: 3 },
+        commit: true,
+      },
+    ],
+    defend: [{ depth: 0, lateral: 0, back: 6, ahead: 10, side: 11, weight: 1 }],
+  },
+  ST: {
+    attack: [
+      { depth: 0, lateral: 0, back: 8, ahead: 10, side: 10, weight: 1 },
+      {
+        depth: 10,
+        lateral: 0,
+        back: 5,
+        ahead: 10,
+        side: 8,
+        weight: 0.5,
+        ball: 0.5,
+        tendency: { boxPresence: 3, runBehind: 2 },
+        commit: true,
+      },
+    ],
+    defend: [{ depth: 0, lateral: 0, back: 5, ahead: 10, side: 10, weight: 1 }],
+  },
+};
+
+/** 옆 퍼짐을 `roam`이 넓히는 몫 — 중립(0.5)에서 1만큼 벗어나면 이만큼 */
+export const HEATMAP_ROAM_REACH = 0.8;
+
+/** 세트피스 성분 — 배치 자리 둘레의 퍼짐 (m)과 킥 순간의 가중치 (나머지 성분의 합이 1일 때) */
+export const HEATMAP_SET_PIECE_SPREAD = 4;
+
+export const HEATMAP_SET_PIECE_WEIGHT = 3;
+
+/** 밀도의 바닥 — 로그를 잴 때만 더한다. 먼 점의 로그 밀도가 이 값의 로그에서 멈춘다 */
+export const HEATMAP_DENSITY_FLOOR = 1e-4;
+
 // ── 전술 → 말의 파라미터 (`params.ts`) ────────────────────────────────────────────
 
 /** 형태 오차의 기본 (m) — 적응도 100·`cohesion` 1에서 */
@@ -534,6 +954,12 @@ export const AMBITION_PER_MENTALITY_STEP = 0.15;
 
 /** 멘탈리티 한 칸이 슈팅을 고르는 문턱 xG를 내리는 폭 — 공격적인 팀은 반 박자 먼저 찬다 */
 export const SHOT_THRESHOLD_PER_MENTALITY_STEP = 0.024;
+
+/**
+ * 멘탈리티 중립에서 슈팅을 고르는 최소 xG — 실측은 팀 슈팅 12.6 · 슈팅당 xG 0.12다. 문턱이
+ * 높으면 좋은 기회만 차서 슈팅이 적고 슈팅당 xG가 부푼다
+ */
+export const SHOT_THRESHOLD_NEUTRAL = 0.11;
 
 /** 멘탈리티 한 칸이 공격 가담(형태의 전진·침투·박스 진입)에 더하는 배율 */
 export const COMMIT_PER_MENTALITY_STEP = 0.2;

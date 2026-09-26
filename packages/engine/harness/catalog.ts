@@ -163,6 +163,7 @@ export const LIVE_MATCH_STATS = defineHarness({
     { metric: "패스 시도 평균", role: "reference", min: 380, max: 580, why: "[SB]·[FM] 467~471" },
     { metric: "패스 시도 sd", role: "reference", min: 60, max: 160, why: "[SB] 120 — 점유형과 내려앉는 팀의 폭" },
     { metric: "패스 성공률", role: "reference", min: 0.78, max: 0.88, unit: "ratio", why: "[FM] Opta 눈금 82.9%" },
+    { metric: "패스 성공률 sd", role: "reference", min: 0.04, max: 0.08, unit: "ratio", why: "[FM] 팀 간 sd 4.9%p (72.3~90.5%) — 팀-경기의 퍼짐은 그 위에 경기의 흔들림이 얹힌다. 평균만 맞고 퍼짐이 좁으면 패서의 능력이 공을 움직이지 못하는 것이다" },
     { metric: "점유율 sd", role: "guard", min: 0.05, max: 0.16, unit: "ratio", why: "[SB] 11%p — 0에 붙으면 전력·전술이 공을 움직이지 못하는 것이다" },
     { metric: "태클 시도", role: "reference", min: 12, max: 24, why: "[SB] 19.7 · Opta 16~18" },
     { metric: "태클 성공률", role: "reference", min: 0.5, max: 0.7, unit: "ratio", why: "[SB] 61% · Opta 팀별 56~62%" },
@@ -178,6 +179,11 @@ export const LIVE_MATCH_STATS = defineHarness({
     { metric: "팀 스프린트 거리 (km)", role: "reference", min: 1.8, max: 4.2, why: "§7-B 포지션별 스프린트 거리의 합 (>25.2 km/h)" },
     { metric: "경기 길이 (분)", role: "reference", min: 95, max: 103, why: "EPL 추가시간 포함 96~101분" },
     { metric: "볼 인플레이 몫", role: "reference", min: 0.5, max: 0.66, unit: "ratio", why: "EPL 55~59% — 재시작의 멈춤이 경기의 리듬을 정한다" },
+    { metric: "슈팅 순간 골 쪽 수비 수", role: "reference", min: 3.2, why: "히트맵 이전의 실시간 경기 2.8 — 슛 길목·존 커버가 골 앞을 채우면 는다 (live-match.md §5.2)" },
+    { metric: "슈팅 순간 골 쪽 수비 수 sd", role: "measure", why: "슛마다의 퍼짐 — 역습의 빈 골문과 내려앉은 블록이 함께 있어야 한다" },
+    { metric: "풀백 깊이 폭 (p10~p90, m)", role: "reference", min: 37, why: "히트맵 이전 35.2m — 풀백의 분포는 자기 박스 근처부터 상대 진영까지다 (live-match.md §3.3)" },
+    { metric: "풀백 깊이 폭 sd (m)", role: "measure", why: "풀백마다의 퍼짐 — 윙백과 노-넌센스 풀백이 갈려야 역할이 공간에 선다" },
+    { metric: "풀백 앞 끝 (p90 깊이, m)", role: "reference", min: 55, why: "히트맵 이전 52.2m — 공이 전진하면 가담 성분이 무거워진다" },
   ],
 });
 

@@ -300,7 +300,7 @@ non-deterministic LLM.
 
 ## Status
 
-🚧 **Playable prototype (data model v7, SAVE_VERSION 7).** Onboarding → chat
+🚧 **Playable prototype (data model v7, SAVE_VERSION 8).** Onboarding → chat
 instructions → match → season rollover → multi-season runs end to end. What is
 built and what is not is listed in [overview.md](./docs/overview.md) §7.
 

@@ -8,7 +8,9 @@ import {
   mean,
   median,
   playToEnd,
+  quantile,
   sampleOf,
+  shapeProbe,
   sd,
   share,
   type MatchSample,
@@ -32,12 +34,23 @@ const SEEDS = [42, 7, 3];
 describe("실시간 경기의 팀 통계", () => {
   it("득점·슈팅·xG·패스·점유·수비·규율·거리가 실측 밴드에 선다", () => {
     const matches: MatchSample[] = [];
+    const goalSide: number[] = [];
+    const fullBackSpans: number[] = [];
+    const fullBackReach: number[] = [];
     for (const seed of SEEDS) {
       const state = createTestGame(seed);
       for (const fixture of leagueFixtures(state, MATCHES_PER_SEED)) {
         const live = liveMatchWith(state, fixture);
-        playToEnd(live);
+        const probe = shapeProbe();
+        playToEnd(live, probe.onTick);
         matches.push(sampleOf(live));
+        goalSide.push(...probe.goalSide);
+        // 30분 넘게 뛴 풀백만 — 교체로 들어온 몇 분은 범위를 재지 못한다
+        for (const depths of probe.fullBackDepths.values()) {
+          if (depths.length < 30 * 60) continue;
+          fullBackSpans.push(quantile(depths, 0.9) - quantile(depths, 0.1));
+          fullBackReach.push(quantile(depths, 0.9));
+        }
       }
     }
     const teams = matches.flatMap((m) => m.teams);
@@ -95,6 +108,7 @@ describe("실시간 경기의 팀 통계", () => {
           1,
           sum((t) => t.line.passes),
         ),
+      "패스 성공률 sd": sd(of((t) => t.line.passesCompleted / Math.max(1, t.line.passes))),
       "점유율 sd": sd(of((t) => t.possession)),
       "태클 시도": mean(of((t) => t.line.tackles)),
       "태클 성공률":
@@ -115,6 +129,11 @@ describe("실시간 경기의 팀 통계", () => {
       "팀 스프린트 거리 (km)": mean(of((t) => t.line.sprint / 1000)),
       "경기 길이 (분)": mean(matches.map((m) => m.length)),
       "볼 인플레이 몫": mean(matches.map((m) => m.inPlay)),
+      "슈팅 순간 골 쪽 수비 수": mean(goalSide),
+      "슈팅 순간 골 쪽 수비 수 sd": sd(goalSide),
+      "풀백 깊이 폭 (p10~p90, m)": mean(fullBackSpans),
+      "풀백 깊이 폭 sd (m)": sd(fullBackSpans),
+      "풀백 앞 끝 (p90 깊이, m)": mean(fullBackReach),
     };
     console.log(
       reportOf(

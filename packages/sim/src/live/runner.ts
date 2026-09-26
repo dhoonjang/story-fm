@@ -293,9 +293,9 @@ export function checkpointReason(
  * 두 AI 팀의 경기를 종료 휘슬까지 굴린다 — 휴식은 곧바로 푼다. 감독이 없는 경기라
  * 체크포인트도 턴도 없다 (match-cli · 하네스). 장부가 사건을 반려하면 멈추고 알린다.
  */
-export function playLiveToEnd(match: LiveMatch): void {
+export function playLiveToEnd(match: LiveMatch, onTick?: LiveTickObserver): void {
   for (let guard = 0; guard < 400 && !finished(match); guard++) {
-    const { rejected } = advanceLive(match, HEADLESS_CHUNK_TICKS);
+    const { rejected } = advanceLive(match, HEADLESS_CHUNK_TICKS, onTick);
     if (rejected.length > 0) throw new Error(`장부가 반려했습니다: ${rejected.join(" / ")}`);
     if (match.state.interval && !finished(match)) match.state.interval = false;
   }
@@ -589,10 +589,20 @@ function closeHalf(match: LiveMatch, rejected: string[]): void {
 // ── 굴리기 ──────────────────────────────────────────────────────────────────
 
 /**
+ * 한 틱을 굴린 직후의 상태를 읽는 자리 — 하네스가 장부에 없는 것(슈팅 순간의 배치,
+ * 말의 활동 범위)을 잰다. 읽기만 한다: 상태를 고치면 검증이 갈린다.
+ */
+export type LiveTickObserver = (state: Readonly<LiveMatchState>, input: LiveInput) => void;
+
+/**
  * `ticks`틱을 굴린다 — 사건은 장부에 적히고, 하프의 끝·교체·벤치가 이어진다.
  * 휴식 중이거나 끝났으면 아무것도 하지 않는다. 묶음을 제자리에서 고친다.
  */
-export function advanceLive(match: LiveMatch, ticks: number): LiveAdvanceResult {
+export function advanceLive(
+  match: LiveMatch,
+  ticks: number,
+  onTick?: LiveTickObserver,
+): LiveAdvanceResult {
   // 돌려주는 사건은 이 구간에 장부에 앉은 것 전부다 — 말의 한 틱이 낸 것만이 아니라
   // 벤치의 교체·전술 전환과 하프의 끝까지. 정지점은 이 목록에서 읽힌다
   const before = match.ledger.events.length;
@@ -604,6 +614,7 @@ export function advanceLive(match: LiveMatch, ticks: number): LiveAdvanceResult 
     input ??= liveInputOf(match);
     const result = stepLive(match.state, input);
     match.state = result.state;
+    onTick?.(match.state, input);
     if (result.events.length > 0) {
       record(match, result.events, rejected);
       noteLeavers(match);

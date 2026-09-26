@@ -12,6 +12,7 @@ import {
   COMMIT_PER_MENTALITY_STEP,
   PRESS_REACH_PER_STEP,
   SHAPE_NOISE_BASE,
+  SHOT_THRESHOLD_NEUTRAL,
   SHOT_THRESHOLD_PER_MENTALITY_STEP,
 } from "./tuning";
 
@@ -101,7 +102,7 @@ export function teamParamsOf(spec: TacticsSpec, uptake: number, cohesion: number
     ambition: 1 + (mentality - 3) * AMBITION_PER_MENTALITY_STEP,
     directness: (pass - 3) * 0.5 + (tempo - 3) * 0.2,
     crossBias: (width - 3) * 0.25,
-    shotThreshold: 0.1259 - (mentality - 3) * SHOT_THRESHOLD_PER_MENTALITY_STEP,
+    shotThreshold: SHOT_THRESHOLD_NEUTRAL - (mentality - 3) * SHOT_THRESHOLD_PER_MENTALITY_STEP,
     commit: 1 + (mentality - 3) * COMMIT_PER_MENTALITY_STEP,
     transition,
     offsideTrap: spec.offsideTrap === true,
