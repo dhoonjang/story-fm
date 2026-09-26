@@ -49,6 +49,7 @@ export function SquadTable({
   tierKey,
   setPieces,
   onSwapIn,
+  inMatch = false,
 }: {
   players: SquadRow[];
   sort: { key: SortKey; desc: boolean };
@@ -64,6 +65,8 @@ export function SquadTable({
   swapPair?: { id: string; name: string; tier: Tier; slotCode: string | null } | null;
   /** 세트피스 키커 셋 — 이름 옆의 표식이 여기서 나온다 (완장과 같은 자리) */
   setPieces: SetPieceTakersView;
+  /** 경기 중인가 — 심경 한 줄은 지난 경기까지의 것이라 그동안 서지 않는다 */
+  inMatch?: boolean;
   /** 이 선수가 지금 속한 칸 (로컬 편집 반영 — role·squadLevel은 저장 전까지 옛 값이다) */
   tierOf?: (id: string) => Tier;
   /**
@@ -183,7 +186,7 @@ export function SquadTable({
               /* 칸은 **왼쪽 선 색**이 말한다 — 별도 배지 열을 두지 않는다 */
               className={`row-tier t-${tierOf ? TIER_SLUG[tierOf(p.id)] : "squad"}${
                 selectedId === p.id ? " picked" : ""
-              }`}
+              }${!p.available && tierOf && ["선발", "벤치"].includes(tierOf(p.id)) ? " unfit" : ""}`}
               /**
                * 행을 누르면 상세가 펼쳐진다 — 손가락이든 키보드든 같은 조작이다.
                *
@@ -374,7 +377,7 @@ export function SquadTable({
               </td>
               {/* 사기·피로를 하나로 합친 값 — 왜 이 값인지는 행을 펼치면 한 문장으로 나온다.
                   경기 중에는 판세 탭과 같은 읽은 값이라 막대에 모르는 폭이 붙는다 */}
-              <td title={moodSentence(p.mood)}>
+              <td title={inMatch ? undefined : moodSentence(p.mood)}>
                 <ConditionBar c={p.condition} />
               </td>
               {/* 골 대신 평점 — 골 수는 행을 펼치면 시즌 기록에 그대로 있다 */}

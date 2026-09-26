@@ -1100,19 +1100,14 @@
 .ghost-btn:disabled {
   opacity: 0.4;
 }
+/* 저장이 멈춘 까닭 — 명단 위 한 줄 */
 .lineup-status {
   font-size: var(--fs-md);
   padding: 8px 12px;
   border-radius: var(--r-sm);
   margin-bottom: 10px;
-  background: var(--panel-2);
-}
-.lineup-status.ok {
-  color: var(--text-2);
-}
-.lineup-status.warn {
+  background: color-mix(in srgb, var(--warn) 8%, var(--panel));
   color: var(--warn);
-  box-shadow: inset 3px 0 0 var(--warn);
 }
 /* 전술판 */
 .board-toolbar {
@@ -1719,6 +1714,15 @@
 }
 .squad-table tbody tr.picked td {
   background: var(--pop);
+}
+/* 매치데이에 이름을 올렸는데 나설 수 없는 선수 — 행 전체가 결장의 색으로 가라앉는다.
+   무엇 때문인지는 이름 옆 배지(부상·정지)가 말한다 */
+.squad-table tbody tr.unfit td {
+  background: color-mix(in srgb, var(--loss) 20%, transparent);
+}
+.squad-table tbody tr.unfit:hover td,
+.squad-table tbody tr.unfit.picked td {
+  background: color-mix(in srgb, var(--loss) 28%, transparent);
 }
 /**
  * 칸(선발·벤치·예비·2군)은 **행의 왼쪽 선 색**이 말한다.

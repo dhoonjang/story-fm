@@ -1196,6 +1196,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
         gameId={gameId}
         playerNames={game.playerNames}
         stamp={`${game.date}/${game.chat.length}`}
+        inMatch={inMatch}
       >
         {/* `data-phase` — 화면에 단계를 적지 않는 대신 e2e가 읽는 자리. 감독에게는
           달력·채팅이 이미 말해 주므로 배지가 자리를 차지할 이유가 없었다 */}
