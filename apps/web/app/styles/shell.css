@@ -1622,8 +1622,7 @@ textarea {
   overflow-wrap: anywhere;
   min-width: 0;
 }
-.topbar-sub .meta,
-.topbar-sub .match-clock {
+.topbar-sub .meta {
   font-size: inherit;
 }
 /**
@@ -2062,6 +2061,23 @@ textarea {
   justify-content: center;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
 }
+/* 경기 시계 — 스코어 바로 아래 가운데. 시각과 상태가 서는 유일한 자리다 */
+.mv-clock {
+  grid-column: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.mv-clock b {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
 /**
  * 선수 탭의 하위 갈래 — **둘 중 하나를 고르는 세그먼트.**
  *
@@ -2163,17 +2179,6 @@ textarea {
     max-height: calc(100dvh - 32px);
     padding: var(--sp-5);
   }
-}
-
-/* 경기 시계 — 상단 띠에서 날짜가 쓰던 자리 */
-.match-clock {
-  font-size: var(--fs-md);
-  color: var(--text-2);
-  white-space: nowrap;
-}
-.match-clock b {
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
 }
 
 /* 장부 패널 — 무대 위에 덮이는 게 아니라 무대를 나눠 쓴다(같은 자리, 같은 여백) */

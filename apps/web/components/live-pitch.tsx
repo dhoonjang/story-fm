@@ -20,20 +20,37 @@ const EVENT_LABEL: Record<string, string> = {
   extra_half_time: "연장 하프타임",
   full_time: "경기 종료",
 };
+/** 스코어보드에 서는 경기 시계 — 초 단위 시각과 지금 경기가 어떤 상태인지 */
+export function liveClockOf(
+  frame: LiveMatchFrame | null,
+  match: MatchView,
+  paused: boolean,
+  blocked: boolean,
+  error: string | null,
+): { seconds: number; status: string; running: boolean } {
+  const seconds = Math.floor(frame?.seconds ?? match.minute * 60);
+  const status = error
+    ? "연결 확인 필요"
+    : frame?.finished
+      ? "경기 종료"
+      : frame?.interval
+        ? "하프타임"
+        : blocked || (frame && paused)
+          ? "일시정지"
+          : match.phase;
+  return { seconds, status, running: Boolean(frame) && !paused && !blocked && !error };
+}
+
 export function LivePitch({
   frame,
   match,
-  paused,
-  blocked,
+  running,
   error,
-  onToggle,
 }: {
   frame: LiveMatchFrame | null;
   match: MatchView;
-  paused: boolean;
-  blocked: boolean;
+  running: boolean;
   error: string | null;
-  onToggle: () => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const motion = useRef<{
@@ -181,84 +198,58 @@ export function LivePitch({
     return () => cancelAnimationFrame(request);
   }, []);
   const seconds = Math.floor(frame?.seconds ?? match.minute * 60);
-  const players = [...match.onPitch.home, ...match.onPitch.away];
-  const name = (id: string) => players.find((p) => p.id === id)?.name ?? "";
-  const events = (frame?.events ?? []).filter((e) => e.type !== "kickoff").slice(-5);
   return (
-    <section className="live-pitch" aria-label="실시간 경기" data-testid="live-pitch">
-      <div className="live-pitch-toolbar">
-        <span className={`live-indicator${paused ? " paused" : ""}`} />
-        <strong>
-          {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}
-        </strong>
-        <span role="status">
-          {!frame && !error
-            ? "경기장 연결 중"
-            : error
-              ? "연결 확인 필요"
-              : frame?.finished
-                ? "경기 종료"
-                : frame?.interval
-                  ? "하프타임"
-                  : blocked
-                    ? "지시·전술 편집 중"
-                    : paused
-                      ? "일시정지"
-                      : "경기 진행 중"}
-        </span>
-        {!frame?.finished && (
-          <button onClick={onToggle} disabled={blocked || !frame}>
-            {frame?.interval || paused ? "재개" : "일시정지"}
-          </button>
-        )}
-      </div>
+    <section
+      className={`live-pitch${running ? "" : " stopped"}`}
+      aria-label="실시간 경기"
+      data-testid="live-pitch"
+    >
       <div className="live-pitch-field">
-        <canvas
-          ref={canvas}
-          role="img"
-          aria-label={`${match.home.short} 대 ${match.away.short}, ${match.score.home} 대 ${match.score.away}, ${Math.floor(seconds / 60)}분`}
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            const x = ((e.clientX - r.left) / r.width) * 105,
-              y = ((e.clientY - r.top) / r.height) * 68;
-            const hit = frame?.players.find((p) => Math.hypot(p.x - x, p.y - y) < 3);
-            setSelected(hit?.id ?? null);
-          }}
-        />
-      </div>
-      <div className="live-pitch-teams">
-        <span>{match.home.short} 골문</span>
-        <span>{match.away.short} 골문</span>
-      </div>
-      <div className="live-pitch-footer">
-        <select
-          aria-label="경기장에서 선수 선택"
-          value={selected ?? ""}
-          onChange={(e) => setSelected(e.target.value || null)}
-        >
-          <option value="">선수 선택</option>
-          {players.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.squadNumber} · {p.name}
-            </option>
-          ))}
-        </select>
-        <span>선수를 누르면 이름을 볼 수 있습니다</span>
+        <div className="live-pitch-frame">
+          <canvas
+            ref={canvas}
+            role="img"
+            aria-label={`${match.home.short} 대 ${match.away.short}, ${match.score.home} 대 ${match.score.away}, ${Math.floor(seconds / 60)}분`}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              const x = ((e.clientX - r.left) / r.width) * 105,
+                y = ((e.clientY - r.top) / r.height) * 68;
+              const hit = frame?.players.find((p) => Math.hypot(p.x - x, p.y - y) < 3);
+              setSelected(hit?.id ?? null);
+            }}
+          />
+          <span className="live-goal-tag home" aria-hidden>
+            {match.home.short}
+          </span>
+          <span className="live-goal-tag away" aria-hidden>
+            {match.away.short}
+          </span>
+        </div>
       </div>
       {error && (
         <p className="live-pitch-error" role="alert">
           {error}
         </p>
       )}
-      <ol className="live-events" aria-label="최근 경기 사건">
-        {events.map((event, i) => (
-          <li key={`${event.minute}-${event.type}-${i}`}>
-            <time>{event.minute}′</time>
-            <b>{EVENT_LABEL[event.type] ?? event.type}</b>
-            <span>{event.actors.map(name).filter(Boolean).join(" · ")}</span>
-          </li>
-        ))}
-      </ol>
     </section>
+  );
+}
+
+/** 경기 사건 — 최근 것이 위. 경기 기록 탭에 선다 */
+export function LiveEvents({ frame, match }: { frame: LiveMatchFrame | null; match: MatchView }) {
+  const players = [...match.onPitch.home, ...match.onPitch.away];
+  const name = (id: string) => players.find((p) => p.id === id)?.name ?? "";
+  const events = (frame?.events ?? []).filter((e) => e.type !== "kickoff").reverse();
+  if (events.length === 0) return null;
+  return (
+    <ol className="live-events" aria-label="경기 사건">
+      {events.map((event, i) => (
+        <li key={`${event.minute}-${event.type}-${events.length - i}`}>
+          <time>{event.minute}′</time>
+          <b>{EVENT_LABEL[event.type] ?? event.type}</b>
+          <span>{event.actors.map(name).filter(Boolean).join(" · ")}</span>
+        </li>
+      ))}
+    </ol>
   );
 }

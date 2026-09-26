@@ -50,7 +50,6 @@ import {
   eventCausesText,
   matchMinutesOf,
   personaRoleLabel,
-  SHEET_SHAPE_KO,
   setPieceRoutineLevel,
   subCauseText,
 } from "@story-fm/domain";
@@ -162,7 +161,6 @@ import {
   subLimitsOf,
   type LineupSlot,
   type MatchLedgerState,
-  type SheetDropCode,
   type TakerSlot,
 } from "@story-fm/sim";
 import { lineupSlotsOf, pointsSeenBy, slotsFor } from "../match/match-flow";
@@ -1683,10 +1681,6 @@ export interface MatchPointView {
   importance: 1 | 2 | 3;
   /** 우리 편에 이로운 판독인가 — 걸린 시트가 없으면 null */
   ours: boolean | null;
-  /** 걸린 시트 줄의 문장 */
-  sheet: string[];
-  /** 판에 닿지 못한 줄과 그 까닭 */
-  dropped: string[];
 }
 
 /**
@@ -2432,20 +2426,6 @@ function strengthPairOf(
   return home === null || away === null ? null : { home, away };
 }
 
-/** 판에 닿지 못한 시트 줄의 까닭 — 낱말은 여기 하나다 */
-const SHEET_DROP_KO: Record<SheetDropCode, string> = {
-  "no-point": "가리킨 포인트가 없다",
-  "no-player": "그라운드에 없는 선수",
-  "wrong-side": "편이 다르다",
-  "no-side": "편이 없다",
-  "no-lane": "레인이 없다",
-  "no-action": "행동이 없다",
-  duplicate: "같은 표적의 줄이 이미 있다",
-  "target-cap": "표적 한도",
-  "team-budget": "팀 예산",
-  "net-cap": "이득 상한",
-};
-
 /** 한 팀의 통계 — 그 편이 그라운드를 밟은 사람 전원의 줄을 합친다 */
 function matchTeamStatsOf(
   ledger: MatchLedgerState,
@@ -2619,24 +2599,11 @@ export function buildMatchView(state: GameState): MatchView | null {
   });
 
   /**
-   * 전술 포인트 — 감독의 분석이 허락한 줄만(`pointsSeenBy`), 그 포인트의 시트가 옆에 선다.
-   * 시트 줄의 문장은 모양·표적·값의 사실이다 — 판독의 문장은 포인트의 것이다.
+   * 전술 포인트 — 감독의 분석이 허락한 줄만(`pointsSeenBy`). 시트는 화면에 서지 않고,
+   * 어느 편에 이로운 판독인지만 걸린 줄에서 파생한다.
    */
-  const sheetLine = (shape: keyof typeof SHEET_SHAPE_KO, ids: readonly string[], value: number) => {
-    const who = ids.map(nameOf).join(" · ");
-    const sign =
-      value > 1 || (value > 0 && value <= 1 && shape === "edge")
-        ? "+"
-        : value < 1 && shape !== "edge"
-          ? "−"
-          : value < 0
-            ? "−"
-            : "";
-    return `${SHEET_SHAPE_KO[shape]}${who ? ` ${who}` : ""}${shape === "behavior" ? "" : ` ${sign}`}`.trim();
-  };
   const points: MatchPointView[] = pointsSeenBy(state).map((point) => {
     const applied = input.sheet.applied.filter((tag) => tag.pointId === point.id);
-    const dropped = input.sheet.dropped.filter((d) => d.line.pointId === point.id);
     const favours = applied.map((tag) => tag.favours === ourSide);
     return {
       id: point.id,
@@ -2650,8 +2617,6 @@ export function buildMatchView(state: GameState): MatchView | null {
             : favours.every((f) => !f)
               ? false
               : null,
-      sheet: applied.map((tag) => sheetLine(tag.shape, tag.playerIds, tag.value)),
-      dropped: dropped.map((d) => `${SHEET_SHAPE_KO[d.line.shape]} — ${SHEET_DROP_KO[d.code]}`),
     };
   });
 
