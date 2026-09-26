@@ -1003,7 +1003,7 @@ export const SHOT_NEAR_RANGE = 14;
 
 export const SHOT_FAR_RANGE = 22;
 
-export const SHOT_NEAR_SHARE = 0.75;
+export const SHOT_NEAR_SHARE = 0.85;
 
 /** 멘탈리티 한 칸이 공격 가담(형태의 전진·침투·박스 진입)에 더하는 배율 */
 export const COMMIT_PER_MENTALITY_STEP = 0.2;
