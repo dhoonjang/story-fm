@@ -1,3 +1,7 @@
+import {
+  negotiationOpeningSuggestion,
+  negotiationStartedInTurn,
+} from "../../application/lib/negotiation-navigation";
 import { describe, expect, it } from "vitest";
 import type { CardMark, ChatTurn, GoalMark, ToolCallRecord } from "@story-fm/engine";
 import {
@@ -819,5 +823,141 @@ describe("splitPlayerNames", () => {
   it("동명이인은 어느 쪽도 걸지 않는다", () => {
     const twins = buildPlayerNameIndex({ "a-kim": "김민재", "b-kim": "김민재" });
     expect(splitPlayerNames("김민재가 뛴다", twins)).toEqual([{ text: "김민재가 뛴다" }]);
+  });
+});
+
+describe("협상 시작 결과의 화면 이동", () => {
+  const turn = (ids: unknown[], role: ChatTurn["role"] = "model"): ChatTurn => ({
+    role,
+    text: "",
+    at: "2026-07-01",
+    toolCalls: ids.map((payload) => ({ name: "start_negotiation", summary: "", payload })),
+  });
+  const started = (id: string) => ({ kind: "negotiation", negotiationId: id });
+  it("이번 턴의 마지막 유효 결과로 기존 협상도 열고 과거 결과를 재생하지 않는다", () => {
+    const chat = [
+      turn([started("old")]),
+      turn([started("existing"), started("missing"), started("new")]),
+    ];
+    expect(negotiationStartedInTurn(chat, 1, ["old", "existing", "new"], "idle")).toBe("new");
+    expect(negotiationStartedInTurn(chat, 1, ["old", "existing"], "idle")).toBe("existing");
+    expect(negotiationStartedInTurn(chat, 2, ["old", "existing", "new"], "idle")).toBeNull();
+  });
+  it("실패·잘못된 결과·유저턴·다른 명령과 경기 진입은 협상을 열지 않는다", () => {
+    expect(
+      negotiationStartedInTurn(
+        [
+          turn([
+            undefined,
+            { kind: "negotiation", negotiationId: "" },
+            { kind: "negotiation", negotiationId: "case", actor: "world" },
+          ]),
+        ],
+        0,
+        ["case"],
+        "idle",
+      ),
+    ).toBeNull();
+    expect(
+      negotiationStartedInTurn([turn([started("case")], "user")], 0, ["case"], "idle"),
+    ).toBeNull();
+    const different = turn([started("case")]);
+    different.toolCalls[0]!.name = "negotiate";
+    expect(negotiationStartedInTurn([different], 0, ["case"], "idle")).toBeNull();
+    expect(negotiationStartedInTurn([turn([started("case")])], 0, ["case"], "match")).toBeNull();
+  });
+});
+
+describe("협상 첫 제안 문구", () => {
+  const item = { id: "case", kind: "transfer" as const, messages: [], proposals: [] };
+  const turn = (payload: unknown, role: ChatTurn["role"] = "model"): ChatTurn => ({
+    role,
+    text: "",
+    at: "2026-07-01",
+    toolCalls: [{ name: "start_negotiation", summary: "", payload }],
+  });
+  const phrase = {
+    kind: "negotiation",
+    negotiationId: "case",
+    suggestion: "이적 조건을 논의하고 싶습니다.",
+  };
+  it("같은 협상의 최신 문구를 재사용하고 문구 없는 반복 시작은 지우지 않는다", () => {
+    const chat = [turn(phrase), turn({ kind: "negotiation", negotiationId: "case" })];
+    expect(negotiationOpeningSuggestion(chat, item, "club")).toBe(phrase.suggestion);
+    expect(
+      negotiationOpeningSuggestion(
+        [...chat, turn({ ...phrase, suggestion: "새 제안" })],
+        item,
+        "club",
+      ),
+    ).toBe("새 제안");
+    expect(negotiationOpeningSuggestion(chat, item, "player")).toBeNull();
+    expect(negotiationOpeningSuggestion(chat, { ...item, kind: "renewal" }, "player")).toBe(
+      phrase.suggestion,
+    );
+  });
+  it("잘못된 결과와 다른 협상 또는 사용자 호출은 문구를 제공하지 않는다", () => {
+    expect(
+      negotiationOpeningSuggestion(
+        [
+          turn({ ...phrase, negotiationId: "other" }),
+          turn(phrase, "user"),
+          turn({ ...phrase, suggestion: "" }),
+          turn({ ...phrase, extra: true }),
+        ],
+        item,
+        "club",
+      ),
+    ).toBeNull();
+  });
+  it("감독 또는 GM 대화와 발송 제안이 있으면 첫 제안 문구를 숨긴다", () => {
+    type Case = NonNullable<Parameters<typeof negotiationOpeningSuggestion>[1]>;
+    const message: Case["messages"][number] = {
+      id: "m",
+      author: "manager",
+      channel: "club",
+      partyId: null,
+      text: "논의합시다",
+      on: "2026-07-01",
+    };
+    expect(
+      negotiationOpeningSuggestion([turn(phrase)], { ...item, messages: [message] }, "club"),
+    ).toBeNull();
+    expect(
+      negotiationOpeningSuggestion(
+        [turn(phrase)],
+        { ...item, messages: [{ ...message, author: "gm" }] },
+        "club",
+      ),
+    ).toBeNull();
+    const proposal: Case["proposals"][number] = {
+      id: "proposal",
+      author: "buyer",
+      sentOn: "2026-07-01",
+      acceptedBy: [],
+      status: "superseded",
+      reason: "",
+      terms: {
+        scope: "club",
+        fee: 0,
+        installments: [],
+        weeklyWage: 0,
+        signingBonus: 0,
+        since: "2026-07-03",
+        until: "2027-06-30",
+        promises: [],
+        expiresOn: "2026-07-08",
+      },
+    };
+    expect(
+      negotiationOpeningSuggestion([turn(phrase)], { ...item, proposals: [proposal] }, "club"),
+    ).toBeNull();
+    expect(
+      negotiationOpeningSuggestion(
+        [turn(phrase)],
+        { ...item, messages: [{ ...message, author: "system" }] },
+        "club",
+      ),
+    ).toBe(phrase.suggestion);
   });
 });

@@ -1,3 +1,12 @@
+import {
+  NEGOTIATION_OPENING_OUTPUT,
+  NEGOTIATION_OPENING_SYSTEM,
+} from "../negotiation/negotiation-opening";
+import { MARKET_PLANNER_SYSTEM, MARKET_PLAN_INPUT } from "../negotiation/market-planner";
+import {
+  NEGOTIATION_COMPACTOR_SYSTEM,
+  NEGOTIATION_DIGEST_INPUT,
+} from "../negotiation/negotiation-gm";
 import { LOREBOOK_EDITOR_SYSTEM, LOREBOOK_EDITOR_OUTPUT } from "../story/lorebook-editor";
 import type { GenerativeAgentName, JsonObjectSchema } from "@story-fm/llm";
 import { HISTORY_COMPACTOR_SYSTEM, REPORT_DIGEST_INPUT } from "../story/history-compactor";
@@ -15,6 +24,17 @@ export interface OutputAgent {
 
 export function outputAgents(): readonly OutputAgent[] {
   return [
+    {
+      agent: "negotiation-gm",
+      system: NEGOTIATION_OPENING_SYSTEM,
+      schema: NEGOTIATION_OPENING_OUTPUT,
+    },
+    { agent: "market-planner", system: MARKET_PLANNER_SYSTEM, schema: MARKET_PLAN_INPUT },
+    {
+      agent: "negotiation-compactor",
+      system: NEGOTIATION_COMPACTOR_SYSTEM,
+      schema: NEGOTIATION_DIGEST_INPUT,
+    },
     {
       agent: "lorebook-editor",
       system: LOREBOOK_EDITOR_SYSTEM,

@@ -13,7 +13,7 @@ import type { ChatTurn, ToolCallRecord } from "@story-fm/engine";
  */
 
 /** 아이콘 줄의 키 — `PANELS`와 같은 값이어야 한다 */
-export type PanelKey = "스쿼드" | "달력" | "재정" | "대회" | "커리어";
+export type PanelKey = "스쿼드" | "달력" | "재정" | "대회" | "커리어" | "에이전트 센터";
 
 /**
  * 호출이 바꾼 장부 — **호출 하나에 화면 하나.**
@@ -24,6 +24,8 @@ export type PanelKey = "스쿼드" | "달력" | "재정" | "대회" | "커리어
  * 쪽**으로 보낸다.
  */
 export const PANEL_OF: Record<string, PanelKey> = {
+  set_transfer_list: "에이전트 센터",
+  start_negotiation: "에이전트 센터",
   // ── 스쿼드 — 선수단과 판이 바뀐 것 ──
   set_lineup: "스쿼드",
   set_squad_level: "스쿼드",
@@ -33,7 +35,6 @@ export const PANEL_OF: Record<string, PanelKey> = {
   tactic_orders: "스쿼드",
   training_orders: "달력",
   finance_orders: "재정",
-  // 방을 세우는 스킬 — 협상이 실리는 장부는 이적 예산이 선 재정이다
   set_player_tactic: "스쿼드",
   // 세트피스는 판의 사실이다 — 키커도 인원도 확인하러 갈 화면은 전술판이 선 스쿼드다
   set_set_piece_takers: "스쿼드",

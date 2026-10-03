@@ -15,11 +15,17 @@ export const FINANCE_INCOME_CATEGORIES = [
   "commercial",
   "merchandising",
   "prize",
+  "transfer_income",
+  "transfer_gain",
   "manager_buyout",
   "manager_compensation",
 ] as const;
 
 export const FINANCE_EXPENSE_CATEGORIES = [
+  "transfer_fee",
+  "transfer_loss",
+  "transfer_amortization",
+  "signing_bonus",
   "player_wages",
   "staff_wages",
   "bonus",
@@ -39,6 +45,12 @@ export const FinanceCategorySchema = z.enum([
 export type FinanceCategory = z.infer<typeof FinanceCategorySchema>;
 
 export const FINANCE_CATEGORY_KO: Record<FinanceCategory, string> = {
+  transfer_income: "선수 매각 대금",
+  transfer_gain: "선수 매각 이익",
+  transfer_loss: "선수 매각 손실",
+  transfer_amortization: "선수 계약 자산 상각",
+  transfer_fee: "선수 영입 대금",
+  signing_bonus: "선수 계약금",
   manager_buyout: "감독 사임 정산",
   manager_compensation: "감독 이직 보상금",
   severance: "고용 계약 위약금",
@@ -79,7 +91,7 @@ export const LedgerEntrySchema = z.object({
       id: z.string().min(1),
     })
     .optional(),
-  /** 자산 상각만 noncash — 현금흐름과 손익을 가른다. 없으면 cash */
+  /** 자산 상각·매각 손익은 noncash — 현금흐름과 손익을 가른다. 없으면 cash */
   accounting: z.enum(["cash", "noncash"]).optional(),
   /**
    * 서사가 만든 항목 — GM의 apply_finance_event로 들어온 것만 표시된다.

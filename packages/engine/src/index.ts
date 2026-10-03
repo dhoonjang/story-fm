@@ -162,3 +162,6 @@ export * from "./story/people/staff-employment";
 export * from "./common/players/free-agency";
 
 export * from "./app/workflows/story/world/interview";
+
+export * from "./negotiation/negotiation";
+export { repairNegotiationSquads } from "./app/workflows/negotiation-squad";

@@ -16,7 +16,12 @@ import {
 import { type GameState, financeOf, clubProfileIn, weeklyWagesOf } from "../core/state";
 
 import { openBoardRequest } from "../finance/board-request";
-import { type DebtView, type ExpiringContractView, financeOutlook } from "./finance-outlook";
+import {
+  type DebtView,
+  type ExpiringContractView,
+  type FinanceOutlook,
+  financeOutlook,
+} from "./finance-outlook";
 
 /**
  * 원장 한 건이 가리키는 선수 — 아니면 빈 객체다 (전개해 그대로 얹는다).
@@ -219,6 +224,7 @@ export type FinanceView = {
   debt: DebtView | null;
   /** 1년 안에 끝나는 우리 계약 — 전원, 만료일 순 */
   expiringContracts: ExpiringContractView[];
+  transferCommitments: FinanceOutlook["transferCommitments"];
   /** 진행 중인 이번 달 잠정 집계 */
   current: FinanceMonthView;
   /** 마감된 월간 보고서 — 최신 순 */

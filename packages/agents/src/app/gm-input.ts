@@ -1,3 +1,5 @@
+import { managedNegotiationOverview } from "../negotiation/overview";
+import { addDays } from "@story-fm/engine";
 import { offerSeat, offerTerms } from "../story/employment-context";
 import { vacancyRows, managerSeatLines } from "./workflows/story/employment-context";
 import { playerName } from "@story-fm/engine";
@@ -902,6 +904,28 @@ export function buildGmStateNote(state: GameState, passed?: TimePassed | null): 
     ),
     // 한 줄에 하나 — 이어 붙이면 일곱 항목이 가운뎃점 사이에 묻힌다
     block("alerts", alerts.join("\n")),
+    block(
+      "negotiations",
+      JSON.stringify({
+        ours: managedNegotiationOverview(state),
+        world: state.negotiations
+          .filter(
+            (n) =>
+              n.signed &&
+              n.signed.on >= addDays(state.date, -7) &&
+              n.buyerId !== state.userTeamId &&
+              n.sellerId !== state.userTeamId,
+          )
+          .slice(-12)
+          .map((n) => ({
+            player: playerName(state, n.playerId),
+            buyer: n.buyerId,
+            seller: n.sellerId,
+            status: n.status,
+            signedOn: n.signed?.on,
+          })),
+      }),
+    ),
     // 부상·부상 이력·과부하 — 의무실을 맡은 사람의 것. 자리가 비면 수석코치가 선다
     block("medical", medical.join("\n"), ` name="${factSpeakerOf(state, "medical").name}"`),
     ...coachBlocks(state, coach),

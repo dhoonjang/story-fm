@@ -15,6 +15,14 @@ export const ContractSchema = z.object({
   until: DateString,
   /** `active` = 선수당 정확히 1건 · `ended` = 지난 계약 */
   status: z.enum(["active", "ended"]),
+  registrationStatus: z.enum(["pending", "registered"]).optional(),
+  acquisition: z
+    .object({
+      cost: z.number().int().nonnegative(),
+      amortized: z.number().int().nonnegative(),
+      lastAmortizedOn: DateString,
+    })
+    .optional(),
   /**
    * **어떤 자리의 선수인가** — 시드가 적은 계약에만 있다 (→ docs/story/people.md §5-2).
    * 출전 불만이 이 칸을 읽는다. 없으면 **지금 서열에서 파생한다**(`squadStatusOf`).

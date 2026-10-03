@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { formatMoney, formatPounds, formatRating, formatScore } from "@story-fm/domain";
+import {
+  contractEndForYears,
+  formatMoney,
+  formatPounds,
+  formatRating,
+  formatScore,
+} from "@story-fm/domain";
 
 /** 표기의 자 — 하나씩 (money.ts · ui/design-system.md §3 「숫자와 표기」) */
 
@@ -51,5 +57,27 @@ describe("formatPounds — 정수 파운드에 천 단위 구분", () => {
   it("눈금을 접는 formatMoney와 자리가 다르다", () => {
     expect(formatMoney(160_000)).toBe("£160k");
     expect(formatPounds(160_000)).toBe("£160,000");
+  });
+});
+
+describe("proposal contract terms — inclusive UTC calendar years", () => {
+  it("ends on the day before the anniversary across year and DST boundaries", () => {
+    expect(contractEndForYears("2025-07-01", 3)).toBe("2028-06-30");
+    expect(contractEndForYears("2025-01-01", 1)).toBe("2025-12-31");
+    expect(contractEndForYears("2024-03-10", 1)).toBe("2025-03-09");
+    expect(contractEndForYears("2025-12-31", 2)).toBe("2027-12-30");
+  });
+  it("handles leap-day anniversaries inclusively", () => {
+    expect(contractEndForYears("2024-02-29", 1)).toBe("2025-02-28");
+    expect(contractEndForYears("2024-02-29", 4)).toBe("2028-02-28");
+    expect(contractEndForYears("2096-02-29", 4)).toBe("2100-02-28");
+  });
+  it("rejects invalid dates and durations explicitly", () => {
+    for (const date of ["2025-02-29", "2024-13-01", "bad", "2024-01-01T00:00:00Z"])
+      expect(() => contractEndForYears(date, 1)).toThrow(RangeError);
+    for (const years of [0, -1, 1.5, NaN, Infinity])
+      expect(() => contractEndForYears("2024-01-01", years)).toThrow(RangeError);
+    expect(contractEndForYears("9999-01-01", 1)).toBe("9999-12-31");
+    expect(() => contractEndForYears("9999-01-02", 1)).toThrow(RangeError);
   });
 });

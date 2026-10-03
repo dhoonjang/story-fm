@@ -59,6 +59,10 @@ export function Composer({
   inputRef,
   suggestion = null,
   liveControl,
+  sendOnly = false,
+  maxLength,
+  placeholder,
+  testId = "chat-input",
 }: {
   input: string;
   onInput: (value: string) => void;
@@ -84,6 +88,10 @@ export function Composer({
    */
   suggestion?: string | null;
   liveControl?: { paused: boolean; blocked: boolean; toggle: () => void };
+  sendOnly?: boolean;
+  maxLength?: number;
+  placeholder?: string;
+  testId?: string;
 }) {
   /** 시간 손잡이의 선택지가 펼쳐져 있는가 — 입력이 비었을 때만 열 수 있다 */
   const [skipOpen, setSkipOpen] = useState(false);
@@ -173,10 +181,13 @@ export function Composer({
             }
           }}
           placeholder={
-            suggestion ?? (inMatch ? "전술을 지시하거나 코치에게 물어보세요" : undefined)
+            placeholder ??
+            suggestion ??
+            (inMatch ? "전술을 지시하거나 코치에게 물어보세요" : undefined)
           }
           disabled={busy}
-          data-testid="chat-input"
+          maxLength={maxLength}
+          data-testid={testId}
         />
         {/**
          * **손잡이는 하나다.** 쓸 말이 없으면 시간 손잡이, 한 글자라도 쓰면 보내기.
@@ -190,23 +201,27 @@ export function Composer({
          * 밖의 이름은 `aria-label`이 갖는다 — 단축키를 글로 알리지 않는다.
          */}
         <button
-          className={hasInput ? "send" : inMatch ? "send" : "skip"}
+          className={hasInput || sendOnly ? "send" : inMatch ? "send" : "skip"}
           onClick={() => {
-            if (hasInput) return void onSend();
+            if (hasInput || sendOnly) return void onSend();
             if (inMatch) return liveControl?.toggle();
             setSkipOpen((v) => !v);
           }}
           disabled={
             busy ||
+            (!hasInput && sendOnly) ||
             (!hasInput &&
+              !sendOnly &&
               (liveControl?.blocked ||
                 // 경기 중인데 굴릴 판이 없다 — 킥오프 게이트 앞이거나 마감을 기다린다
                 (inMatch && !liveControl) ||
                 (!inMatch && !canSkip)))
           }
-          data-testid={hasInput ? "chat-send" : inMatch ? "match-advance" : "time-skip-toggle"}
+          data-testid={
+            hasInput || sendOnly ? "chat-send" : inMatch ? "match-advance" : "time-skip-toggle"
+          }
           aria-label={
-            hasInput
+            hasInput || sendOnly
               ? "전송"
               : liveControl
                 ? liveControl.paused
@@ -216,9 +231,9 @@ export function Composer({
                   ? "경기 재개"
                   : "시간 보내기"
           }
-          aria-expanded={hasInput || inMatch ? undefined : skipOpen}
+          aria-expanded={hasInput || sendOnly || inMatch ? undefined : skipOpen}
         >
-          {hasInput ? (
+          {hasInput || sendOnly ? (
             <IconSend />
           ) : inMatch ? (
             liveControl && !liveControl.paused ? (

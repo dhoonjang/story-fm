@@ -1,3 +1,4 @@
+import { writeOffPlayerContract } from "../finance/transfer-accounting";
 import type { Contract, GamePlayer } from "@story-fm/domain";
 import { activeContract, type GameState, releaseFromTactics } from "../core/state";
 import { forgetRoles } from "./role-memory";
@@ -39,6 +40,9 @@ export function contractExpiresBy(contract: Contract, on: string): boolean {
  */
 export function clearDepartedState(state: GameState, player: GamePlayer, from: string): void {
   releaseFromTactics(state, from, player.id);
+  state.transferListings = state.transferListings.filter(
+    (listing) => listing.gamePlayerId !== player.id,
+  );
   state.playerTraining = state.playerTraining.filter((t) => t.gamePlayerId !== player.id);
   forgetRoles(state, player.id);
   player.isCaptain = false;
@@ -48,7 +52,10 @@ export function clearDepartedState(state: GameState, player: GamePlayer, from: s
 /** 계약이 끝난 선수를 무소속으로 보낸다 — 계약은 여기서 끊기고 이동 원장에 한 줄이 선다 */
 export function toFreeAgency(state: GameState, player: GamePlayer, on = state.date): void {
   const contract = activeContract(state, player.id);
-  if (contract) contract.status = "ended";
+  if (contract) {
+    writeOffPlayerContract(state, contract, on);
+    contract.status = "ended";
+  }
   const from = player.teamId;
   clearDepartedState(state, player, from);
   player.teamId = FREE_AGENT_TEAM;

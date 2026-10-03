@@ -24,3 +24,5 @@
 @import "../domains/match/styles/match-report.css";
 /* 선수 카드 — 이름이 서는 모든 화면에서 열리므로 역시 뷰 파일 밖이다 */
 @import "../domains/common/styles/player-card.css";
+
+@import "../domains/negotiation/styles/negotiation.css";

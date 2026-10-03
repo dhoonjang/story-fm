@@ -780,6 +780,8 @@ const CAUSE_KO: Record<string, string> = { match: "경기", training: "훈련", 
 const MOVE_KO: Record<PlayerMoveKind, string> = {
   youth: "유스 승격",
   reinforcement: "합류",
+  transfer: "이적",
+  free: "자유계약 합류",
   expiry: "계약 만료",
   retire: "은퇴",
 };

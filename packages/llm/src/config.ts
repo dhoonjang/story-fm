@@ -9,6 +9,9 @@ import type { LlmProvider } from "./game-llm";
 export const AGENT_NAMES = [
   "gm",
   "match-gm",
+  "negotiation-gm",
+  "market-planner",
+  "negotiation-compactor",
   "history-compactor",
   "lorebook-editor",
   "onboarding-judge",
@@ -34,7 +37,6 @@ const RETIRED_AGENT_NAMES = [
   "reader-baseline",
   "match-sheet",
   "scout-rater",
-  "negotiation-gm",
   "market-orders",
   "table-orders",
   "scouting",
@@ -236,6 +238,9 @@ const LlmConfigFileSchema = z
       .object({
         gm: RawAgentConfigSchema,
         "match-gm": RawAgentConfigSchema,
+        "negotiation-gm": RawAgentConfigSchema,
+        "market-planner": RawAgentConfigSchema,
+        "negotiation-compactor": RawAgentConfigSchema,
         "history-compactor": RawAgentConfigSchema,
         "lorebook-editor": RawAgentConfigSchema,
         "onboarding-judge": RawAgentConfigSchema,

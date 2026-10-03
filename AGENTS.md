@@ -19,11 +19,12 @@ story-fm turns that into a **game of language**: you direct the team by talking,
 players and owners and journalists react as characters with their own motives,
 and dressing-room conflict, a prospect's arc and a rivalry continue across matches.
 
-The game serves two experiences:
+The game serves three experiences:
 
 1. **Life as a manager.** The main GM runs training, everyday scenes and press
    conferences; choices accumulate into stories, memories and relationships.
-2. **Live football.** Team building and tactics meet in a spatial match that the
+2. **Negotiation.** The agent center and natural-language conversations connect transfers, renewals and a living market. One GM owns each negotiation.
+3. **Live football.** Team building and tactics meet in a spatial match that the
    manager can interrupt and influence through natural language.
 
 ### Design principles
@@ -42,14 +43,14 @@ The game serves two experiences:
 
 ## 2. The game in one paragraph
 
-**The whole game is one chat.** The user plays the manager and the GM (an LLM)
-plays the world. State changes travel exactly one path — skill (tool call) → Zod
+**Language connects story, negotiation and live football.** The user plays the manager and the GM (an LLM)
+plays the world. State changes travel exactly one path — skill (tool call) or structured UI action → Zod
 validation → deterministic transition — and **match results are decided by the
 core's spatial simulator in the live web match and xG simulator elsewhere**; the
 LLM only commentates, stages and adjudicates.
 A season starts on July 1 and runs preseason → league/cup/European competition →
 season rollover → next season. Data has two layers: catalog (immutable seed) and
-save (mutable state), model v22. Lorebooks and conversation digests preserve
+save (mutable state); `SAVE_VERSION` owns its shape. Lorebooks and conversation digests preserve
 narrative; contracts, employment, finances and match records remain validated ledgers.
 
 ## 3. Stack
@@ -67,6 +68,7 @@ narrative; contracts, employment, finances and match records remain validated le
 ```
 docs/              # present service, grouped by experience
   story/           # everyday life, training, people, press, board and career
+  negotiation/     # agent center, negotiations, transfers, renewals and the world market
   match/           # live match, tactics and competitions
   common/          # shared players, teams, contracts, finance, saves, AI infrastructure and UI
 config/            # providers, models and game version
@@ -74,12 +76,12 @@ apps/
   web/
     app/           # Next routes and API transport
     application/   # whole-game UI and turn orchestration
-    domains/       # story/ · match/ · common/ (ui, lib, styles)
+    domains/       # story/ · negotiation/ · match/ · common/ (ui, lib, styles)
   match-cli/       # headless live match
 packages/
-  domain/src/      # browser-safe Zod models and pure rules, by the three domains
-  engine/src/      # deterministic commands and read models, by the three domains
-  agents/src/      # model calls, by the three domains
+  domain/src/      # browser-safe Zod models and pure rules, by domain
+  engine/src/      # deterministic commands and read models, by domain
+  agents/src/      # model calls, by domain
                    # app/ in each package composes domains; it owns no duplicate rules
   sim/             # match-only deterministic spatial core
   llm/             # shared provider adapters and tracing
@@ -117,7 +119,7 @@ hypot/pow`, which differ in the last bit between JavaScript engines and would ma
 - Functional and immutable by default; isolate side effects at the boundary
   (API/IO).
 - Domain types live in `packages/domain`; other packages import from there.
-- Runtime dependencies flow `common → {story, match} → app`.
+- Runtime dependencies flow `common → {story, negotiation, match} → app`.
   Domains never execute each other or import app values. Cross-domain workflows
   live in `app/workflows`; shared player/team facts and pure queries live in
   common. Type-only references may cross this boundary. ESLint enforces it.
@@ -140,7 +142,7 @@ hypot/pow`, which differ in the last bit between JavaScript engines and would ma
 - **"Skill" names only what the LLM calls directly.** A tool in a GM's catalog is a
   skill; the JSON shape an agent returns is its **output schema**; the deterministic
   function the core invokes from that JSON is a **core command**
-  (`packages/engine/src/{story,match}/commands/`). Mixing the three makes the docs read as if an
+  (`packages/engine/src/{story,negotiation,match}/commands/`). Mixing the three makes the docs read as if an
   interpreter agent held tools of its own (→ [docs/overview.md](docs/overview.md) §0).
 - kebab-case files and directories, PascalCase types and components, camelCase
   values and functions.
@@ -317,12 +319,13 @@ folder is a layer. Read the design doc for the domain you are touching before yo
 start, and do not blur the boundary between the deterministic core and the
 non-deterministic LLM.
 
-| Folder    | What                                                                                      | Start here                                                          |
-| --------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| —         | Whole game and ownership                                                                  | [overview](docs/overview.md) · [architecture](docs/architecture.md) |
-| `story/`  | Main GM, people, daily life, training, press and board                                    | [story](docs/story/README.md)                                       |
-| `match/`  | Match GM, tactics, live simulation and competitions                                       | [match](docs/match/README.md)                                       |
-| `common/` | Shared state, players, teams, contracts, finance, season orchestration and infrastructure | [common](docs/common/README.md)                                     |
+| Folder         | What                                                                                      | Start here                                                          |
+| -------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| —              | Whole game and ownership                                                                  | [overview](docs/overview.md) · [architecture](docs/architecture.md) |
+| `story/`       | Main GM, people, daily life, training, press and board                                    | [story](docs/story/README.md)                                       |
+| `negotiation/` | Negotiation GM, agent center, conditions, medicals, contracts and the world market        | [negotiation](docs/negotiation/README.md)                           |
+| `match/`       | Match GM, tactics, live simulation and competitions                                       | [match](docs/match/README.md)                                       |
+| `common/`      | Shared state, players, teams, contracts, finance, season orchestration and infrastructure | [common](docs/common/README.md)                                     |
 
 ## Status
 

@@ -77,6 +77,21 @@ describe("에이전트별 LLM 설정", () => {
     max_tokens: 400
     timeout_ms: 4000
     thinking_level: low
+  negotiation-gm:
+    provider: google
+    model: negotiation-test
+    max_tokens: 100
+    timeout_ms: 1000
+  market-planner:
+    provider: google
+    model: market-test
+    max_tokens: 100
+    timeout_ms: 1000
+  negotiation-compactor:
+    provider: google
+    model: compact-test
+    max_tokens: 100
+    timeout_ms: 1000
   onboarding-judge:
     provider: google
     model: gemini-judge

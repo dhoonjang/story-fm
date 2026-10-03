@@ -10,6 +10,7 @@ import {
   describeNextFixture,
   formatClock,
   minutesOfClock,
+  managedTeamId,
   nextMatchFor,
   playerName,
   teamName,
@@ -79,6 +80,43 @@ const WEEKDAYS = [1, 2, 3, 4, 5] as const;
  * 말은 이 표의 키와 같게 맞춘다 (`e2e/*.spec.ts`).
  */
 const SCRIPT: readonly ScriptLine[] = [
+  {
+    say: "테스트 이적 명단 등록",
+    gm: ({ state }) => {
+      const player = state.players.find(
+        (p) =>
+          p.teamId === managedTeamId(state) &&
+          state.contracts.some((c) => c.gamePlayerId === p.id && c.status === "active"),
+      );
+      return player
+        ? [
+            {
+              tool: "set_transfer_list",
+              input: { playerId: player.id, listed: true, askingPrice: 10000000 },
+            },
+          ]
+        : [];
+    },
+  },
+  {
+    say: "테스트 재계약 협상",
+    gm: ({ state }) => {
+      const player = state.players.find(
+        (p) =>
+          p.teamId === managedTeamId(state) &&
+          state.contracts.some((c) => c.gamePlayerId === p.id && c.status === "active"),
+      );
+      return player
+        ? [
+            {
+              tool: "start_negotiation",
+              input: { playerId: player.id, kind: "renewal", background: "재계약 논의" },
+            },
+          ]
+        : [];
+    },
+  },
+
   {
     say: "훈련 잡아줘",
     ops: () => weekly(WEEKDAYS, "빌드업", ["passing", "vision"]),

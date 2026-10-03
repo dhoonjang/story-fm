@@ -37,6 +37,27 @@ agents:
     timeout_ms: 180000
     thinking_level: low
 
+  negotiation-gm:
+    provider: google
+    model: gemini-3.8-flash
+    max_tokens: 16000
+    timeout_ms: 120000
+    thinking_level: low
+
+  market-planner:
+    provider: google
+    model: gemini-3.8-flash
+    max_tokens: 12000
+    timeout_ms: 90000
+    thinking_level: low
+
+  negotiation-compactor:
+    provider: google
+    model: gemini-3.8-flash
+    max_tokens: 8000
+    timeout_ms: 60000
+    thinking_level: low
+
   # 새 게임의 배경을 읽고 시작 사건을 판정한 뒤, 그 위에서 부임 첫날의
   # 첫 장면까지 쓴다 (docs/common/llm/agents.md §4-2). **싼 자리로 보내지 않는다** — 판정만 낼
   # 때는 앵커가 답을 받쳐 줬지만 첫 장면에는 앵커가 없고, 그것이 이 게임의 첫인상이다.

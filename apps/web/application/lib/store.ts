@@ -114,7 +114,7 @@ const ID_LIKE = /[a-z][a-z0-9]*(?:-[a-z0-9]+)+/g;
  *
  * 5,725명을 담으면 168KB이고, 그게 매 턴 응답에 실린다. 게다가 클라이언트가
  * 턴마다 사전 전체를 훑으므로 화면이 느려지는 값이기도 하다. 실제로 필요한 건
- * **우리 선수단**(대화의 대부분)과 **이미 대화에 나온 id**뿐이다 — 새 id가
+ * **우리 선수단**(대화의 대부분)과 **메인·보이는 협상 대화에 나온 선수**뿐이다 — 새 id가
  * 스트리밍 중에 튀어나와도 그 턴이 커밋되면 이 사전에 들어와 치환된다.
  *
  * 이 사전은 이제 **손잡이가 설 수 있는 이름의 폭**이기도 하다 (player.md §9.5) —
@@ -123,7 +123,7 @@ const ID_LIKE = /[a-z][a-z0-9]*(?:-[a-z0-9]+)+/g;
  * 토큰 훑기로는 영영 잡히지 않는다.
  *
  * 폭을 넓히되 짐은 그대로다 — 전 리그로 색인을 **한 번** 지어 대화가 부른 id만
- * 골라 담으므로, 나가는 것은 여전히 우리 선수단 + 이야기에 선 몇 명이다.
+ * 골라 담으므로, 나가는 것은 우리 선수단 + 보이는 협상의 대상·이야기에 선 몇 명이다.
  * ⚠️ 색인은 payload 한 번에 한 번 짓는다(문장마다 지으면 5,725명짜리 사전을 한
  * 화면에 수백 번 짓는다), 그리고 **서버에만 남는다** — 클라이언트로 가는 것은
  * 여기서 만드는 id→이름 사전뿐이다.
@@ -138,13 +138,18 @@ let chatNames:
       mentions: Map<string, string[]>;
     }
   | undefined;
-function namesForChat(state: GameState): Record<string, string> {
+function namesForConversations(
+  state: GameState,
+  negotiation: OfficeViews["negotiation"],
+): Record<string, string> {
   const names = Object.fromEntries(state.players.map((p) => [p.id, p.name]));
   const fingerprint = JSON.stringify(names);
   if (chatNames?.fingerprint !== fingerprint)
     chatNames = { fingerprint, index: buildPlayerNameIndex(names, false), mentions: new Map() };
   const mentioned = new Set(Object.keys(state.pendingMatch?.live?.setup.players ?? {}));
-  for (const turn of state.chat) {
+  for (const n of negotiation.cases) mentioned.add(n.playerId);
+  const texts = [...state.chat, ...negotiation.cases.flatMap((n) => n.messages)];
+  for (const turn of texts) {
     let ids = chatNames.mentions.get(turn.text);
     if (!ids) {
       ids = [...(turn.text.match(ID_LIKE) ?? []), ...playerIdsIn(turn.text, chatNames.index)];
@@ -239,6 +244,7 @@ export function toPayload(state: GameState, only?: readonly ViewKey[]): GamePayl
       chatLength: state.chat.length,
     };
   }
+  const views = buildOfficeViews(state);
   return {
     id: state.id,
     date: state.date,
@@ -253,8 +259,8 @@ export function toPayload(state: GameState, only?: readonly ViewKey[]): GamePayl
     },
     managerName: state.manager.name,
     chat: visibleChat(state.chat),
-    views: buildOfficeViews(state),
-    playerNames: namesForChat(state),
+    views,
+    playerNames: namesForConversations(state, views.negotiation),
     speakerRoles: speakerRoles(state),
     ...((state.sceneHeaderMisses ?? 0) >= STALLED_CLOCK_TURNS
       ? { clockStalled: state.sceneHeaderMisses }

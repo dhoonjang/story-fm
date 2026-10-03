@@ -3,8 +3,8 @@
 import { useState } from "react";
 import type { OfficeViews } from "@story-fm/engine";
 import { formatMoney, formatPounds } from "@story-fm/domain";
+import { PlayerName } from "@/domains/common/ui/player-card";
 import { IconChevron } from "@/domains/common/ui/icons";
-import { PlayerName, usePlayerCard } from "@/domains/common/ui/player-card";
 import { humanDate, humanMonthYear } from "@/domains/common/lib/dateline";
 
 // ── 재정 (요약 카드 + 실시간 활동 + 월간 보고서) ─────────────
@@ -25,7 +25,6 @@ const NONCASH_CATEGORIES = new Set(["depreciation"]);
 
 type FinanceFeedRow = OfficeViews["finance"]["feed"][number];
 type FinanceBoard = OfficeViews["finance"]["board"];
-type ExpiringContract = OfficeViews["finance"]["expiringContracts"][number];
 
 /**
  * 보드에 걸려 있는 것 — 답이 끝나지 않은 요청.
@@ -183,56 +182,6 @@ function FinanceMonthCard({ month }: { month: FinanceMonth }) {
   );
 }
 
-/**
- * 「계약 만료 예정」 — 1년 안에 끝나는 우리 계약 **전원**이다. 만료일에 무소속으로
- * 떠난다 (season.md §6). 스냅샷은 이름 셋까지만 싣고 나머지를 `…` 뒤에 감춘다.
- */
-function ExpiringBlock({ rows }: { rows: ExpiringContract[] }) {
-  const card = usePlayerCard();
-  if (rows.length === 0) return null;
-  return (
-    <>
-      <h2 className="section-title">계약 만료 예정</h2>
-      <div className="fin-expiring" data-testid="fin-expiring">
-        <table className="fin-contracts" aria-label="계약 만료 예정">
-          <thead>
-            <tr>
-              <th scope="col">선수</th>
-              <th scope="col">만료일</th>
-              <th scope="col">주급</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr
-                key={row.playerId}
-                className={card ? "clickable" : undefined}
-                onClick={
-                  card
-                    ? (event) => {
-                        event.currentTarget.querySelector("button")?.focus({ preventScroll: true });
-                        card.open(row.playerId);
-                      }
-                    : undefined
-                }
-              >
-                <td>
-                  <PlayerName id={row.playerId} name={row.name} />
-                  <div className="fin-contract-meta">
-                    <span>{row.age}세</span>
-                  </div>
-                </td>
-                <td>{humanMonthYear(row.until)}</td>
-                <td>{formatMoney(row.weeklyWage)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
-  );
-}
-
 export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
   return (
     <div data-testid="view-finance">
@@ -286,8 +235,21 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
         </div>
       </div>
 
-      {/* 앞으로 떠날 사람이 먼저다 — 지나간 활동은 그 뒤에 선다 */}
-      <ExpiringBlock rows={finance.expiringContracts} />
+      {finance.transferCommitments.length > 0 && (
+        <section>
+          <h2 className="section-title">이적 지급 의무</h2>
+          <div className="fin-feed">
+            {finance.transferCommitments.map((payment) => (
+              <div className="fin-feed-line" key={payment.id}>
+                <span>
+                  {payment.dueOn} · {payment.direction === "payable" ? "지급 예정" : "수령 예정"}
+                </span>
+                <strong>{formatMoney(payment.amount)}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <h2 className="section-title">재정 활동</h2>
       {finance.feed.length === 0 && <div className="empty">기록 0건</div>}

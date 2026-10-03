@@ -9,6 +9,8 @@ import {
   type GameState,
   type WorldScope,
   eventTexts,
+  activeContract,
+  addDays,
 } from "@story-fm/engine";
 import { buildOnboardingTurn } from "@story-fm/agents";
 
@@ -107,4 +109,33 @@ export function seedFinishedSeason(teamId = "arsenal", seed = 406): string {
   if (!allMatchesDone(state)) throw new Error("400번 안에 시즌을 끝내지 못했다");
   saveGame(state);
   return state.id;
+}
+
+/** Inquiry and renewal use the same persisted world as the main GM. */
+export function seedAgentCenter() {
+  const state = appoint({
+    teamId: "arsenal",
+    managerName: "협상 감독",
+    seed: 872,
+    world: ONE_LEAGUE,
+  });
+  const own = state.players.find(
+    (player) => player.teamId === state.userTeamId && activeContract(state, player.id),
+  );
+  const target = state.players.find(
+    (player) => player.teamId !== state.userTeamId && activeContract(state, player.id),
+  );
+  if (!own || !target) throw new Error("협상 여정에 필요한 선수가 없습니다");
+  const contract = activeContract(state, own.id)!;
+  contract.until = addDays(state.date, 90);
+  saveGame(state);
+  return {
+    gameId: state.id,
+    teamId: state.userTeamId,
+    ownId: own.id,
+    ownName: own.name,
+    originalContractId: contract.id,
+    targetId: target.id,
+    targetName: target.name,
+  };
 }

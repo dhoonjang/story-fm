@@ -403,8 +403,7 @@ erDiagram
 | 지난 시즌 순위·우승팀 | `state.history` — 리그는 그 표의 1위, 녹아웃은 `TROPHY`           | 결산 스냅샷이 원본이다. 우승자를 따로 적으면 표와 갈린다                                                        |
 | 구단 역대 기록        | `clubRecordsOf(state, teamId)` — `history` + `TROPHY` + `honours` | 최다 승점·최다 득점 시즌·우승 횟수는 전부 남은 표를 접은 것이다                                                 |
 | 최근 세 시즌 성적 축  | `recentForm` — `state.history`의 리그 순위                        | 체급 재산정도 같은 시즌 순위 기록을 읽는다 (§3.3)                                                               |
-| 팀 주급 총액          | `weeklyWagesOf` — 활성 `CONTRACT` 합 + 임대 분담                  | 계약이 원본. 임대 분담(`loan.wageShare`)도 여기서 함께 나온다                                                   |
-| 이적료 상각           | 활성 계약 + `TRANSFER` 원장                                       | 자산 테이블이 없다 — 계약이 끝나면 상각도 저절로 멈춘다                                                         |
+| 팀 주급 총액          | `weeklyWagesOf` — 활성 `CONTRACT` 합                              | 계약의 주급이 원본이다                                                                                          |
 | 관측 정보             | 지식 수준과 구단 내부 관측을 app이 조립                           | 지식 수준별 관측 오차와 실제 선수 상태를 구분                                                                   |
 | 팀 전술 적응도        | `TacticAssignment.familiarity`의 평균                             | 개인 기억이 원본. 팀 값을 저장하면 왕복만으로 값이 불어난다                                                     |
 | 현재 부상 · 잔여 정지 | `returnedOn === null` · `lengthMatches − served`                  | 닫히지 않은 row가 곧 현재다                                                                                     |
@@ -429,7 +428,7 @@ erDiagram
 
 ## 6. 세이브 정책
 
-**`SAVE_VERSION = 22`** (`packages/engine/src/app/persistence.ts`). 버전이 다른 파일은 로드를 거부한다. 모델 입력의 게임 버전은
+**`SAVE_VERSION = 23`** (`packages/engine/src/app/persistence.ts`). 버전이 다른 파일은 로드를 거부한다. 모델 입력의 게임 버전은
 세이브 버전과 별도로 `config/game-version.yml`이 소유한다.
 **거부는 하되 감추지는 않는다**(→ [열 수 없는 세이브](#열-수-없는-세이브)).
 
@@ -742,3 +741,14 @@ tmp 쓰기가 실패하면 그 tmp는 **그 자리에서 거둔다**. 이름이 
 진행 중 인물의 로어북 본문은 `lorebook`이 소유한다. 페르소나와 고용 후보는
 같은 항목을 참조한다. 생성 템플릿의 본문은 최초 등록에만 사용한다.
 로어북 갱신은 이전 항목과 추가 정보, 완료된 버전을 보존해 원문을 되찾을 수 있게 한다.
+
+## 협상 상태
+
+`transferListings`는 현재 이적 명단의 선수·선택적 희망 이적료·등재일·메모를 보존한다.
+명단 등재는 협상이나 계약 동의가 아니며, 에이전트 센터와 GM·세계 시장이 같은 장부를 읽는다.
+선수가 구단을 떠나면 해당 등재를 정리한다.
+
+`negotiations`는 협상별 참여자·원문·요약·초안·불변 제안서·동의·메디컬·서명과 등록 상태를
+보존한다. `transferPayments`는 날짜별 지급 의무와 정산 완료를 보존한다. `marketReview`는
+세계 시장의 구단별 검토 시점과 계획을, `negotiationRequests`는 저장 완료한 조작의
+재전송 방지를 소유한다. 세부 스키마는 `packages/domain/src/negotiation/negotiation.ts`에 있다.

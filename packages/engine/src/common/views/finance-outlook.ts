@@ -21,6 +21,13 @@ export interface FinanceOutlook {
   debt: DebtView | null;
   /** 1년 안에 끝나는 우리 계약 — **전원**. 만료일이 앞선 사람이 앞에 선다 */
   expiringContracts: ExpiringContractView[];
+  transferCommitments: Array<{
+    id: string;
+    playerId: string;
+    dueOn: string;
+    amount: number;
+    direction: "payable" | "receivable";
+  }>;
 }
 
 export interface DebtView {
@@ -64,6 +71,19 @@ export function financeOutlook(state: GameState): FinanceOutlook {
   return {
     debt: debt > 0 ? { amount: debt, annualInterest: debt * DEBT_INTEREST_ANNUAL } : null,
     expiringContracts: expiring,
+    transferCommitments: state.transferPayments
+      .filter(
+        (p) => !p.paidOn && (p.fromTeamId === state.userTeamId || p.toTeamId === state.userTeamId),
+      )
+      .map((p) => ({
+        id: p.id,
+        playerId: p.playerId,
+        dueOn: p.dueOn,
+        amount: p.amount,
+        direction:
+          p.fromTeamId === state.userTeamId ? ("payable" as const) : ("receivable" as const),
+      }))
+      .sort((a, b) => a.dueOn.localeCompare(b.dueOn) || a.id.localeCompare(b.id)),
   };
 }
 
@@ -93,6 +113,14 @@ export function financeLookup(state: GameState, month?: string): { ok: boolean; 
     );
   }
   lines.push(...expiringLines(outlook.expiringContracts));
+  if (outlook.transferCommitments.length)
+    lines.push(
+      "서명한 계약의 미결제 지급 의무:",
+      ...outlook.transferCommitments.map(
+        (p) =>
+          `  ${p.dueOn} ${p.direction === "payable" ? "지급" : "수령"} ${money(p.amount)} (${p.playerId})`,
+      ),
+    );
 
   if (month && !report) {
     lines.push(

@@ -13,6 +13,8 @@ export const PlayerMoveKindSchema = z.enum([
   /** 계약이 끝나 무소속이 됐다 */
   "expiry",
   "retire",
+  "transfer",
+  "free",
 ]);
 
 export type PlayerMoveKind = z.infer<typeof PlayerMoveKindSchema>;

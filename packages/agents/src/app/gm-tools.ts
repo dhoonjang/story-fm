@@ -1,3 +1,5 @@
+import { managedNegotiationOverview } from "../negotiation/overview";
+import { suggestNegotiationOpening } from "./workflows/negotiation/negotiation-opening";
 import { HireStaffInputSchema } from "@story-fm/domain";
 import { applyForManagerJob } from "@story-fm/engine";
 import { ManagerJobOfferSchema, InterviewOutcomeSchema } from "@story-fm/domain";
@@ -13,6 +15,9 @@ import {
 
 import { z } from "zod";
 import {
+  SetTransferListingSchema,
+  OpenNegotiationSchema,
+  NegotiationStartedPayloadSchema,
   CharacterUpdateSchema,
   POSITION_CODES,
   DateString,
@@ -35,6 +40,12 @@ import {
   type BoardMove,
 } from "@story-fm/domain";
 import {
+  pickTeam,
+  pickPlayerAmong,
+  managedTeamId,
+  setTransferListing,
+  openNegotiation,
+  buildNegotiationView,
   requestCharacterUpdate,
   type GameState,
   journal,
@@ -382,6 +393,116 @@ export function buildToolSpecs(state: GameState, calls: GmToolCall[]): GameToolS
 
   const tools: GameToolSpec[] = [
     startMatchTool,
+    wrap(
+      "start_negotiation",
+      descriptions.start_negotiation,
+      OpenNegotiationSchema.extend({
+        playerId: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .describe(
+            "선수 이름 또는 실제 선수 id. 캐릭터북의 player: 접두어가 붙은 항목 id가 아니다. 모호하면 search_players로 확인한다",
+          ),
+        buyerId: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .optional()
+          .describe(
+            "영입 구단 이름·약칭 또는 실제 구단 id. 생략하면 현재 맡은 구단. 명시한 구단을 찾지 못하면 get_team으로 확인한다",
+          ),
+      }),
+      async (input) => {
+        const team =
+          input.buyerId === undefined ? managedTeamId(state) : pickTeam(state, input.buyerId);
+        if (team === null)
+          return {
+            ok: false,
+            message:
+              "현재 맡은 구단이 없습니다. 영입 구단을 명시하고 get_career로 감독의 재직을 확인하세요",
+          };
+        if (typeof team !== "string" && !team.ok)
+          return {
+            ...team,
+            message: `${team.message}. get_team에 구단 이름·약칭을 넣어 확인하거나 정확한 구단을 지정하세요. 생략하면 현재 맡은 구단입니다`,
+          };
+        const buyerId = typeof team === "string" ? team : team.teamId;
+        const picked = pickPlayerAmong(
+          state,
+          input.kind === "renewal"
+            ? state.players.filter((p) => p.teamId === buyerId)
+            : state.players,
+          input.playerId,
+          input.kind === "renewal" ? "재계약 구단 선수 명단" : "이 세계 선수 명단",
+        );
+        if (!picked.ok)
+          return {
+            ...picked,
+            message: `${picked.message}. search_players로 확인하고 player: 접두어 없는 실제 선수 id 또는 정확한 이름을 지정하세요`,
+          };
+        const player = picked.player;
+        const existingIds = new Set(state.negotiations.map((n) => n.id));
+        const opened = openNegotiation(state, { ...input, playerId: player.id, buyerId });
+        let suggestion: string | undefined;
+        if (opened.ok && opened.negotiationId && !existingIds.has(opened.negotiationId)) {
+          try {
+            suggestion = await suggestNegotiationOpening(state, opened.negotiationId);
+          } catch (error: unknown) {
+            console.warn("[start_negotiation] 협상은 보존하고 제안 문구는 생략합니다:", error);
+          }
+        }
+        return opened.ok && opened.negotiationId
+          ? {
+              ...opened,
+              message: `${opened.message}. 이번 요청으로 제안을 발송하거나 상대 답변을 생성하지 않았습니다. 협상 화면에서 감독의 입력을 기다립니다.`,
+              payload: NegotiationStartedPayloadSchema.parse({
+                kind: "negotiation",
+                negotiationId: opened.negotiationId,
+                ...(suggestion === undefined ? {} : { suggestion }),
+              }),
+            }
+          : opened;
+      },
+    ),
+    wrap(
+      "set_transfer_list",
+      descriptions.set_transfer_list,
+      SetTransferListingSchema.extend({
+        playerId: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .describe("우리 구단 선수의 이름 또는 player: 접두어 없는 실제 id"),
+      }),
+      (input) => {
+        const picked = pickPlayerAmong(
+          state,
+          state.players.filter((p) => p.teamId === managedTeamId(state)),
+          input.playerId,
+          "우리 구단 선수 명단",
+        );
+        if (!picked.ok)
+          return {
+            ...picked,
+            message: `${picked.message}. search_players로 우리 구단의 정확한 선수 이름 또는 id를 확인하세요`,
+          };
+        return setTransferListing(state, { ...input, playerId: picked.player.id });
+      },
+    ),
+    read("get_negotiations", descriptions.get_negotiations, z.object({}), () => {
+      const view = buildNegotiationView(state);
+      return {
+        ok: true,
+        message: JSON.stringify({
+          unread: view.unread,
+          ...managedNegotiationOverview(state),
+        }),
+      };
+    }),
     wrap(
       "set_lineup",
       CORE_COMMAND_LABELS.set_lineup!,

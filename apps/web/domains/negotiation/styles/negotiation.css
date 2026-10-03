@@ -1,0 +1,509 @@
+.ledger-body.negotiation-panel-body {
+  padding: 0;
+  height: 100%;
+}
+.chat-pane[hidden] {
+  display: none !important;
+}
+.negotiation-stage {
+  display: block;
+  min-height: 0;
+}
+.negotiation-workspace {
+  height: 100%;
+  min-height: 0;
+  color: var(--text);
+  overflow: hidden;
+}
+.negotiation-workspace.negotiation-list,
+.negotiation-workspace.negotiation-detail {
+  display: block;
+  padding: 0;
+}
+.negotiation-list > .negotiation-detail,
+.negotiation-detail > .negotiation-list {
+  display: none !important;
+}
+.negotiation-list :where(button:not(.player-name)),
+.negotiation-proposals button,
+.negotiation-progress button,
+.negotiation-notice button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+.negotiation-list :where(button:not(.player-name)):disabled,
+.negotiation-proposals button:disabled,
+.negotiation-progress button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.negotiation-list :where(button:not(.player-name)):hover:not(:disabled),
+.negotiation-proposals button:hover:not(:disabled),
+.negotiation-progress button:hover:not(:disabled) {
+  background: var(--pop);
+}
+.negotiation-list-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.negotiation-list-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 19px;
+  margin: 0;
+}
+.negotiation-list-header small {
+  font-size: 12px;
+  line-height: 20px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--key-wash);
+  color: var(--text-2);
+}
+.negotiation-cases {
+  display: grid;
+}
+.negotiation-cases > button {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 18px 2px;
+  text-align: left;
+  display: grid;
+  gap: 7px;
+  width: 100%;
+}
+.negotiation-row-heading > b {
+  font-weight: 500;
+  flex: 1;
+}
+.negotiation-new {
+  font-size: 12px;
+  color: var(--accent);
+}
+.negotiation-next {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.7;
+}
+.negotiation-status {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.negotiation-empty {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-3);
+  padding: 40px 0;
+  text-align: center;
+}
+.negotiation-unread {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--key-wash);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 13px;
+}
+.rail button:has(.negotiation-unread) {
+  position: relative;
+}
+.negotiation-detail > article.negotiation-detail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.negotiation-context-bar select {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 7px 28px 7px 9px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.negotiation-thread.chat-scroll {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+}
+.negotiation-detail > article.negotiation-detail > .composer {
+  flex: none;
+}
+.negotiation-notice {
+  flex: none;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-2);
+  background: var(--panel-2);
+  padding: 12px 14px;
+  margin: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.negotiation-proposals h3,
+.negotiation-progress h3 {
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+.negotiation-proposal {
+  margin: 10px 0;
+  background: var(--panel);
+  padding: 14px 16px;
+  border-radius: 4px;
+}
+.negotiation-proposal > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.negotiation-proposal[open] > summary {
+  margin-bottom: 16px;
+}
+.negotiation-proposal header {
+  display: grid;
+  gap: 7px;
+  font-size: 12px;
+}
+.negotiation-proposal small,
+.negotiation-proposal .muted {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.7;
+}
+.negotiation-proposal p {
+  font-size: 13px;
+  line-height: 1.8;
+}
+.negotiation-terms {
+  display: grid;
+  grid-template-columns: 105px 1fr;
+  gap: 8px;
+  font-size: 13px;
+  margin: 16px 0;
+}
+.negotiation-terms dt {
+  color: var(--text-3);
+}
+.negotiation-terms dd {
+  margin: 0;
+}
+.negotiation-terms > span {
+  grid-column: 1/-1;
+}
+.negotiation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.negotiation-actions button {
+  font-size: 12px;
+}
+
+.negotiation-list > .negotiation-list {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: 24px;
+}
+.negotiation-row-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+.negotiation-row-heading time {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.negotiation-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+  padding: 18px 24px 14px;
+}
+.negotiation-heading > div:first-child {
+  min-width: 0;
+  flex: 1;
+}
+.negotiation-heading h2 {
+  font-size: 19px;
+  margin: 0;
+  line-height: 1.4;
+}
+.negotiation-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.6;
+}
+.negotiation-state-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.negotiation-context-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 24px 14px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.negotiation-context-bar label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.negotiation-thread > .negotiation-proposals,
+.negotiation-thread > .negotiation-progress {
+  width: 100%;
+  max-width: 720px;
+  margin: 8px auto 0;
+  flex: none;
+}
+.negotiation-progress {
+  padding: 18px;
+  background: var(--panel);
+  border-radius: 5px;
+}
+.negotiation-progress p {
+  font-size: 13px;
+  line-height: 1.8;
+  margin: 8px 0;
+  color: var(--text-2);
+}
+
+.negotiation-menu {
+  position: relative;
+  flex: none;
+}
+.negotiation-menu-trigger {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.negotiation-menu-trigger:hover {
+  background: var(--panel);
+}
+.negotiation-menu-pop {
+  position: absolute;
+  right: 0;
+  top: 35px;
+  z-index: 12;
+  background: var(--pop);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px;
+  box-shadow: var(--shadow-pop);
+}
+.negotiation-menu-pop button {
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  border: 0;
+  border-radius: 3px;
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.negotiation-menu-pop button:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+.negotiation-menu-pop button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+@media (max-width: 600px) {
+  .negotiation-list > .negotiation-list {
+    padding: 20px 16px;
+  }
+  .negotiation-heading {
+    padding: 16px 16px 14px;
+  }
+  .negotiation-heading h2 {
+    font-size: 16px;
+  }
+  .negotiation-header-meta {
+    gap: 7px;
+    margin-top: 6px;
+  }
+  .negotiation-row-heading {
+    flex-wrap: wrap;
+  }
+  .negotiation-row-heading time {
+    font-size: 12px;
+  }
+}
+@media (max-width: 600px) {
+  .negotiation-context-bar {
+    padding: 8px 16px 12px;
+    gap: 10px;
+  }
+  .negotiation-context-bar label {
+    gap: 7px;
+  }
+}
+.negotiation-overview-section {
+  margin: 24px 0;
+}
+.negotiation-overview-section h3,
+.negotiation-overview-section > summary {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+.negotiation-overview-section small {
+  color: var(--text-3);
+  font-weight: 400;
+  margin-left: 6px;
+}
+.negotiation-overview-section > summary {
+  cursor: pointer;
+}
+.negotiation-expiring {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.negotiation-expiring > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.negotiation-expiring > div:last-child {
+  align-items: flex-end;
+  white-space: nowrap;
+}
+.negotiation-expiring span {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.negotiation-expiring strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.negotiation-main-return {
+  flex: none;
+  align-self: flex-start;
+  margin: 12px 24px 0;
+  padding: 7px 10px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.negotiation-agreed-terms h4 {
+  color: var(--text-2);
+  font-size: 13px;
+  margin: 16px 0 6px;
+}
+
+.agent-center-search .agent-search-toggle {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-weight: 600;
+}
+.agent-search-fields {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+.agent-search-fields label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+  min-width: 0;
+}
+.agent-search-fields input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 9px;
+  font: inherit;
+  font-size: 14px;
+}
+.agent-search-state {
+  margin: 12px 0;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.agent-search-pages {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin: 16px 0;
+  font-size: 12px;
+}
+.agent-center-search .negotiation-expiring > button {
+  align-self: center;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .agent-search-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+  .agent-search-fields label:first-child {
+    grid-column: 1/-1;
+  }
+}

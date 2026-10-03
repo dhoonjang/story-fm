@@ -10,7 +10,7 @@ import { DateString } from "./date-string";
 export const TransferListingSchema = z.object({
   gamePlayerId: z.string().min(1),
   /** 감독이 명시한 호가. 없으면 가격 없는 등재다. */
-  askingPrice: z.number().min(0).optional(),
+  askingPrice: z.number().int().min(0).max(1_000_000_000).optional(),
   listedOn: DateString,
   note: z.string().max(160).optional(),
 });

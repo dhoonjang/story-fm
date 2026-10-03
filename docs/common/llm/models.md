@@ -490,7 +490,7 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
   실호출로 걸어 받는지·산출이 돌아오는지를 본다 ([prompts.md](prompts.md) §2).
 - **개수와 값의 한도는 코어가 지킨다.** 어댑터가 스키마 표현을 걷어도 Zod·코어 검증은
   남는다. 직접 지시에서 명령 수를 조용히 잘라 부분 적용하지 않고 묶음의 유효성을 본다.
-- **GM 둘(`gm` · `match-gm`)은 그대로 도구를 쥔다** — 거기서는 **무엇을
+- **GM(`gm` · `negotiation-gm` · `match-gm`)은 도구를 쥔다** — 거기서는 **무엇을
   부를지 고르는 것**이 일이다. 한 요청에 `tools`와 `outputSchema`를 함께 싣는 자리는 없다.
 
 ## 3-3. `operator_channel` — 상태 스냅샷을 어디에 넣는가
@@ -1055,8 +1055,7 @@ API가 점수와 확률을 독립 반올림하는 범위는 어댑터가 검증�
 값·키·합계 오류는 재시도 또는 실패다. confidence를 강도에 다시 곱하지 않는다.
 확률과 모델 응답 버전·시도·보고된 토큰은 평가 결과에 남는다. 시트 `step: 0..3`의
 범위는 유지하지만 `Point`가 감독 원문 출처가 되고 `live.flow`가 필수로 저장되므로
-현재 세이브 버전은 19, 모델 입력의 게임 버전은 17이다. 저장과 모델 입력 버전은
-각각 `packages/engine/src/app/persistence.ts`와 `config/game-version.yml`이 소유한다.
+저장과 모델 입력 버전은 각각 `packages/engine/src/app/persistence.ts`와 `config/game-version.yml`이 소유한다.
 
 재생 명령, 확보한 기록의 범위와 채택 상태는
 [판독기 비교](match-reader-evaluation.md)에 있다.

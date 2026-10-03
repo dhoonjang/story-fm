@@ -1210,6 +1210,9 @@ export function applyTransition(state: GameState): string[] {
         if (contract) contract.status = "ended";
       }
       state.players = state.players.filter((p) => !retSet.has(p.id));
+      state.transferListings = state.transferListings.filter(
+        (listing) => !retSet.has(listing.gamePlayerId),
+      );
       for (const id of retirees) playerIndex.delete(id);
       squad = squad.filter((p) => !retSet.has(p.id));
     }

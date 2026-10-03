@@ -1,4 +1,5 @@
 "use client";
+import { NegotiationPanel } from "../../domains/negotiation/ui/negotiation-panel";
 import { PlayerCardProvider } from "../../domains/common/ui/player-card";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -6,6 +7,10 @@ import Link from "next/link";
 import type { GamePayload, GameSlice } from "@/application/lib/store";
 import { humanDate } from "@/domains/common/lib/dateline";
 import { matchHeadFacts, matchScoreOf, matchTitleOf } from "@/domains/match/lib/match-head";
+import {
+  negotiationOpeningSuggestion,
+  negotiationStartedInTurn,
+} from "@/application/lib/negotiation-navigation";
 import { mergeSlice } from "@/application/lib/game-slice";
 import { reducedMotion } from "@/domains/common/lib/motion";
 import type { AttentionItemView, ChatTurn } from "@story-fm/engine";
@@ -41,6 +46,7 @@ import {
   IconCalendar,
   IconCareer,
   IconChat,
+  IconNegotiation,
   IconChevron,
   IconFinance,
   IconMark,
@@ -66,6 +72,7 @@ const PANELS = [
   { key: "재정", Icon: IconFinance },
   { key: "대회", Icon: IconTrophy },
   { key: "커리어", Icon: IconCareer },
+  { key: "에이전트 센터", Icon: IconNegotiation },
 ] as const;
 type Panel = (typeof PANELS)[number]["key"];
 
@@ -204,6 +211,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
    */
   const [entering, setEntering] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [activeNegotiationId, setActiveNegotiationId] = useState<string | null>(null);
+  const storyScrollStamp = useRef("");
+  const [negotiationBusy, setNegotiationBusy] = useState(false);
   const liveMatch =
     pendingMatch === null ||
     (pendingMatch.beforeKickoff === true && !(busy && entering === pendingMatch.matchId))
@@ -459,8 +469,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 이 호출이 아무 일도 하지 않고, `panel`이 의존성에 있어 닫는 순간 다시 붙는다.
    */
   useEffect(() => {
+    if (activeNegotiationId !== null && game?.phase !== "match") return;
+    const stamp = `${game?.chat.length}/${busy}/${streamText}`;
+    if (storyScrollStamp.current === stamp) return;
+    storyScrollStamp.current = stamp;
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [game?.chat.length, busy, streamText, panel]);
+  }, [game?.chat.length, busy, streamText, activeNegotiationId, game?.phase]);
 
   /** 경기가 끝나는 순간을 잡는다 — 판세가 사라지면 그 경기의 종료 화면을 연다 */
   const matchGone = pendingMatch === null;
@@ -490,8 +504,23 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const send = useCallback(
     async (text?: string, operation?: TurnOperation): Promise<TurnStreamFailure | null> => {
       const message = operation ? "" : (text ?? input).trim();
-      if ((!message && !operation) || busy || !game) return null;
+      if ((!message && !operation) || busy || negotiationBusy || !game) return null;
       const seq = ++turnSeqRef.current;
+      const baseChatLength = game.chat.length;
+      const adoptPayload = (payload: GamePayload) => {
+        if (turnSeqRef.current !== seq) return;
+        setGame(payload);
+        const target = negotiationStartedInTurn(
+          payload.chat,
+          baseChatLength,
+          payload.views.negotiation.cases.map((item) => item.id),
+          payload.phase,
+        );
+        if (target) {
+          setActiveNegotiationId(target);
+          setPanel(null);
+        }
+      };
       setBusy(true);
       setError(null);
       setErrorDetail(null);
@@ -610,7 +639,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
             const res = await fetch(`/api/games/${gameId}?settled=1`);
             const data = (await res.json()) as GamePayload | { error: string; retry?: boolean };
             if (!("error" in data)) {
-              if (turnSeqRef.current === seq) setGame(data);
+              if (turnSeqRef.current === seq) adoptPayload(data);
               return;
             }
             if (data.retry !== true) return;
@@ -633,7 +662,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
         finished = true;
         stopPump();
         // 지난 알림의 "읽음"은 새 GM 턴이 들어오는 렌더에서 함께 풀린다 (`hintTurn`)
-        if (payload) setGame(payload);
+        if (payload) adoptPayload(payload);
         setStreamText("");
         setBusy(false);
         /**
@@ -645,7 +674,10 @@ export function GameScreen({ gameId }: { gameId: string }) {
          * 장부 뷰(스쿼드·달력…)를 열어 두었으면 입력칸 자체가 없어 `ref`가 null이다 —
          * 그때는 아무 일도 하지 않는다. 읽고 있는 화면에서 커서를 뺏지 않는다.
          */
-        requestAnimationFrame(() => inputRef.current?.focus());
+        requestAnimationFrame(() => {
+          const input = inputRef.current;
+          if (input && !input.closest("[hidden], [inert]")) input.focus();
+        });
       };
       // 글자 공개 속도: 기본 ~60자/초, 밀린 만큼 가속. 진행량은 경과 시간
       // 기준이라 rAF·인터벌 어느 틱이 와도 총 속도는 같다.
@@ -708,7 +740,17 @@ export function GameScreen({ gameId }: { gameId: string }) {
       if (!pendingPayloadRef.current) commit(null);
       return failure ?? null;
     },
-    [input, busy, game, liveMatch?.matchId, liveMatch?.live, gameId, saver, pauseLive],
+    [
+      input,
+      busy,
+      negotiationBusy,
+      game,
+      liveMatch?.matchId,
+      liveMatch?.live,
+      gameId,
+      saver,
+      pauseLive,
+    ],
   );
   sendRef.current = send;
 
@@ -774,7 +816,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
     );
 
   /** 폭이 곧 가독성인 뷰 — 전술판+명단·열두 달 격자는 900px 안에 넣을 수 없다 */
-  const wide = shownPanel === "스쿼드" || shownPanel === "달력";
+  const wide = shownPanel === "스쿼드" || shownPanel === "달력" || shownPanel === "에이전트 센터";
 
   /**
    * 다음 경기 날짜 — 시간 이동 버튼이 목표 시점을 **그대로 적어 보내려고** 쓴다.
@@ -863,8 +905,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const chatPane = (
     <section
       className={`chat-pane${inMatch ? " broadcasting" : ""}`}
-      aria-hidden={matchPanelOpen || undefined}
-      inert={matchPanelOpen}
+      aria-hidden={matchPanelOpen || (activeNegotiationId !== null && !inMatch) || undefined}
+      inert={matchPanelOpen || (activeNegotiationId !== null && !inMatch)}
+      hidden={activeNegotiationId !== null && !inMatch}
     >
       <div className="chat-scroll" ref={scrollRef} data-testid="chat-scroll">
         {/* 화면 조작은 그리지 않는다 — 감독이 한 말이 아니다. 모델 이력에는
@@ -1003,7 +1046,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
         onInput={setInput}
         onSend={send}
         onOperate={(operation) => void send(undefined, operation)}
-        busy={busy}
+        busy={busy || negotiationBusy}
         inMatch={inMatch}
         canSkip={canSkip}
         nextMatchDate={nextMatchDate}
@@ -1122,8 +1165,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
           {liveMatch === null && (
             <nav className="rail" aria-label="화면 이동">
               <button
-                className={panel === null ? "active" : ""}
-                onClick={() => setPanel(null)}
+                className={panel === null && activeNegotiationId === null ? "active" : ""}
+                disabled={negotiationBusy}
+                onClick={() => {
+                  setActiveNegotiationId(null);
+                  setPanel(null);
+                }}
                 data-testid="tab-채팅"
                 title="채팅"
                 aria-label="채팅"
@@ -1134,7 +1181,11 @@ export function GameScreen({ gameId }: { gameId: string }) {
               {PANELS.map(({ key, Icon }) => (
                 <button
                   key={key}
-                  className={`${panel === key ? "active" : ""}${rail.hints.some((h) => h.panel === key) ? " hinted" : ""}`}
+                  className={`${panel === key || (key === "에이전트 센터" && activeNegotiationId !== null) ? "active" : ""}${rail.hints.some((h) => h.panel === key) ? " hinted" : ""}`}
+                  disabled={
+                    negotiationBusy ||
+                    (key === "에이전트 센터" && (pendingMatch !== null || game.phase === "match"))
+                  }
                   onClick={() => {
                     rail.markSeen(key);
                     setPanel(panel === key ? null : key);
@@ -1144,6 +1195,14 @@ export function GameScreen({ gameId }: { gameId: string }) {
                   aria-label={key}
                 >
                   <Icon />
+                  {key === "에이전트 센터" && game.views.negotiation.unread > 0 && (
+                    <span
+                      className="negotiation-unread"
+                      aria-label={`${game.views.negotiation.unread} 에이전트 센터 새 소식`}
+                    >
+                      {game.views.negotiation.unread}
+                    </span>
+                  )}
                 </button>
               ))}
               {/**
@@ -1221,6 +1280,80 @@ export function GameScreen({ gameId }: { gameId: string }) {
             {/* 스코어보드는 경기장 칸 위에 붙는다 — 대화 칸은 무대 높이를 통째로 쓴다 */}
             {liveMatch && <MatchHeadline match={liveMatch} clock={liveClock} />}
             {chatPane}
+            {activeNegotiationId !== null && !inMatch && (
+              <section className="chat-pane negotiation-stage">
+                <NegotiationPanel
+                  gameId={gameId}
+                  view={game.views.negotiation}
+                  blocked={busy || game.phase === "match" || pendingMatch !== null}
+                  onGame={setGame}
+                  onBusy={setNegotiationBusy}
+                  selectedId={activeNegotiationId}
+                  renderMessages={(messages) => {
+                    let previousStamp: string | null = null;
+                    return messages.map((message) => {
+                      const turn: ChatTurn = {
+                        role: message.author === "manager" ? "user" : "model",
+                        text: message.text,
+                        toolCalls: [],
+                        at: message.on,
+                      };
+                      const node = (
+                        <ChatTurnView
+                          key={message.id}
+                          turn={turn}
+                          playerNames={game.playerNames}
+                          speakerRoles={game.speakerRoles}
+                          prevStamp={previousStamp}
+                        />
+                      );
+                      previousStamp = turnStamp(turn) ?? previousStamp;
+                      return node;
+                    });
+                  }}
+                  onMainChat={() => {
+                    setActiveNegotiationId(null);
+                    setPanel(null);
+                  }}
+                  renderComposer={({
+                    text,
+                    channel,
+                    onText,
+                    onSend,
+                    busy: negotiationPending,
+                    inputRef: negotiationInputRef,
+                  }) => {
+                    const suggestion = negotiationOpeningSuggestion(
+                      game.chat,
+                      game.views.negotiation.cases.find((item) => item.id === activeNegotiationId),
+                      channel,
+                    );
+                    return (
+                      <Composer
+                        input={text}
+                        onInput={onText}
+                        onSend={onSend}
+                        onOperate={() => {}}
+                        busy={negotiationPending}
+                        inMatch={false}
+                        canSkip={false}
+                        nextMatchDate={null}
+                        inputRef={negotiationInputRef}
+                        sendOnly
+                        maxLength={6000}
+                        suggestion={suggestion ?? undefined}
+                        placeholder={suggestion ? undefined : "상대와 조건을 논의하세요."}
+                        testId="negotiation-input"
+                      />
+                    );
+                  }}
+                  onSelect={(id) => {
+                    setActiveNegotiationId(id);
+                    if (id === null) setPanel("에이전트 센터");
+                  }}
+                />
+              </section>
+            )}
             {matchPanelOpen && liveMatch && (
               <section className="match-side-panel" aria-labelledby="match-panel-title">
                 <header className="match-detail-heading">
@@ -1325,7 +1458,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
                     `key`로 장부마다 새로 세운다 — 탭을 옮길 때 흐려졌다 든다 */}
                   <div
                     key={shownPanel ?? "none"}
-                    className={`view-scroll ledger-body${wide ? " wide" : ""}`}
+                    className={`view-scroll ledger-body${wide ? " wide" : ""}${shownPanel === "에이전트 센터" ? " negotiation-panel-body" : ""}`}
                   >
                     {shownPanel === "스쿼드" && squadView(() => setPanel(null))}
                     {shownPanel === "달력" && (
@@ -1333,6 +1466,21 @@ export function GameScreen({ gameId }: { gameId: string }) {
                     )}
                     {shownPanel === "재정" && <FinanceView finance={game.views.finance} />}
                     {shownPanel === "대회" && competitionsView}
+                    {shownPanel === "에이전트 센터" && (
+                      <NegotiationPanel
+                        mode="list"
+                        onSelect={(id) => {
+                          setActiveNegotiationId(id);
+                          setPanel(null);
+                        }}
+                        gameId={gameId}
+                        view={game.views.negotiation}
+                        expiringContracts={game.views.finance.expiringContracts}
+                        blocked={busy || game.phase === "match" || pendingMatch !== null}
+                        onGame={setGame}
+                        onBusy={setNegotiationBusy}
+                      />
+                    )}
                     {shownPanel === "커리어" && (
                       <CareerView squad={game.views.squad} career={game.views.career} />
                     )}

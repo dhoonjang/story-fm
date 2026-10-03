@@ -86,6 +86,16 @@ export function IconChat({ size = 18 }: IconProps) {
   );
 }
 
+/** 협상 — 양측의 대화. */
+export function IconNegotiation({ size = 18 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M3 4h13v9H9l-4 3v-3H3z" />
+      <path d="M18 8h3v11h-3v3l-4-3h-4v-3" />
+    </svg>
+  );
+}
+
 /** 스쿼드 — 사람 둘 */
 export function IconSquad({ size = 18 }: IconProps) {
   return (

@@ -1,5 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { leagueCatalog, loadGame, saveGame, teamCatalog } from "@story-fm/engine";
+import {
+  appendNegotiationMessage,
+  openNegotiation,
+  leagueCatalog,
+  loadGame,
+  saveGame,
+  teamCatalog,
+} from "@story-fm/engine";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -561,10 +568,70 @@ describe("API — 온보딩부터 경기까지", () => {
     )!;
     const oneWord = `${word}는 좋은 선수다.`;
     state.chat.push({ role: "model", text: oneWord, toolCalls: [], at: state.date });
+    const references = theirs
+      .filter((p) => count.get(p.name) === 1 && p.id !== called.id && p.id !== wordId)
+      .slice(0, 5);
+    const [target, fullMention, idMention, hiddenTarget, hiddenMention] = references;
+    if (!target || !fullMention || !idMention || !hiddenTarget || !hiddenMention)
+      throw new Error("사전 협상 참조 fixture 부족");
+    const opened = openNegotiation(state, {
+      playerId: target.id,
+      buyerId: state.userTeamId,
+      kind: "transfer",
+      background: "협상 대상",
+    });
+    const negotiation = state.negotiations.find((n) => n.id === opened.negotiationId);
+    if (!negotiation) throw new Error("협상 생성 실패");
+    appendNegotiationMessage(
+      state,
+      negotiation,
+      "club",
+      "gm",
+      `${fullMention.name}와 ${idMention.id}도 대안입니다.`,
+    );
+    const otherBuyer = state.finances.find(
+      (f) => f.teamId !== state.userTeamId && f.teamId !== hiddenTarget.teamId,
+    );
+    if (!otherBuyer) throw new Error("비공개 협상 구단 fixture 부족");
+    const privateOpened = openNegotiation(
+      state,
+      {
+        playerId: hiddenTarget.id,
+        buyerId: otherBuyer.teamId,
+        kind: "transfer",
+        background: "세계 협상",
+      },
+      "world",
+    );
+    const privateCase = state.negotiations.find((n) => n.id === privateOpened.negotiationId);
+    if (!privateCase) throw new Error("비공개 협상 생성 실패");
+    appendNegotiationMessage(state, privateCase, "club", "gm", hiddenMention.name);
+    const ours = state.players.find((p) => p.teamId === state.userTeamId);
+    if (!ours) throw new Error("우리 선수 fixture 부족");
+    const sellerOpened = openNegotiation(state, {
+      playerId: ours.id,
+      buyerId: otherBuyer.teamId,
+      kind: "transfer",
+      background: "매각 협상",
+    });
+    const sellerCase = state.negotiations.find((n) => n.id === sellerOpened.negotiationId);
+    if (!sellerCase) throw new Error("매각 협상 생성 실패");
+    appendNegotiationMessage(
+      state,
+      sellerCase,
+      "player",
+      "gm",
+      `${hiddenMention.id}에 관한 비공개 선수 조건`,
+    );
     saveGame(state);
 
     const res = await getGame(new Request("http://test.local"), params(game.id));
     const payload = (await res.json()) as GamePayload;
+    expect(payload.playerNames[target.id]).toBe(target.name);
+    expect(payload.playerNames[fullMention.id]).toBe(fullMention.name);
+    expect(payload.playerNames[idMention.id]).toBe(idMention.name);
+    expect(payload.playerNames[hiddenTarget.id]).toBeUndefined();
+    expect(payload.playerNames[hiddenMention.id]).toBeUndefined();
     expect(payload.playerNames[called.id], "이야기가 부른 선수가 사전에 없다").toBe(called.name);
     // 자가 맞는지부터 — 화면이라면 이 낱말에 손잡이가 선다
     expect(playerIdsIn(oneWord, onScreen), "낱말 열쇠를 못 고른 테스트다").toContain(wordId);
@@ -1149,5 +1216,105 @@ describe("계측 라우트 — 히트율의 문턱", () => {
     expect(body.agents.find((a) => a.agent === "match-gm")!.cacheHitRate).toBeNull();
     expect(body.totals.billed).toBe(21_300);
     resetLlmUsage();
+  });
+});
+
+describe("협상 요청 경계", () => {
+  let id: string;
+  beforeAll(async () => {
+    const response = await createGame(
+      json({ teamId: "everton", managerName: "협상 감독", background: "분석가", seed: 872 }),
+    );
+    id = ((await response.json()) as GamePayload).id;
+  });
+  it("센터 검색은 범위를 검증하고 저장·대화·시장 검토를 바꾸지 않는다", async () => {
+    const { GET } = await import("../../app/api/games/[id]/agent-center/players/route");
+    const before = loadGame(id)!;
+    for (const query of [
+      "page=0",
+      "pageSize=51",
+      "page=1.5",
+      "name=" + "a".repeat(101),
+      "actor=world",
+      "page=1&page=2",
+    ]) {
+      expect((await GET(new Request(`http://test.local/?${query}`), params(id))).status).toBe(400);
+    }
+    const response = await GET(new Request("http://test.local/?page=1&pageSize=3"), params(id));
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      players: { id: string; kind: string }[];
+      total: number;
+      page: number;
+      pageSize: number;
+      hasMore: boolean;
+    };
+    expect(body.players.length).toBeLessThanOrEqual(3);
+    expect(body.page).toBe(1);
+    expect(body.pageSize).toBe(3);
+    expect(
+      body.players.every(
+        (p) => before.players.find((known) => known.id === p.id)?.teamId !== before.userTeamId,
+      ),
+    ).toBe(true);
+    expect(body.hasMore).toBe(body.total > 3);
+    expect((await GET(new Request("http://test.local/"), params("../invalid"))).status).toBe(400);
+    expect(
+      (await GET(new Request("http://test.local/"), params("missing-agent-center-game"))).status,
+    ).toBe(404);
+    expect(loadGame(id)).toEqual(before);
+  });
+  it("협상 조회는 세이브와 채팅을 바꾸지 않는다", async () => {
+    const { GET } = await import("../../app/api/games/[id]/negotiation/route");
+    const before = loadGame(id)!;
+    const response = await GET(new Request("http://test.local/"), params(id));
+    expect(response.status).toBe(200);
+    expect(loadGame(id)).toEqual(before);
+  });
+  it("행위자 주입을 거부하고 저장된 요청 재전송은 메시지를 중복하지 않는다", async () => {
+    const { POST } = await import("../../app/api/games/[id]/negotiation/route");
+    const state = loadGame(id)!;
+    const player = state.players.find((p) => p.teamId === state.userTeamId)!;
+    const input = {
+      requestId: "open-route-872",
+      negotiationId: null,
+      revision: 0,
+      action: {
+        kind: "open",
+        playerId: player.id,
+        buyerId: state.userTeamId,
+        negotiationKind: "renewal",
+        background: "재계약 논의",
+      },
+    };
+    expect(
+      (await POST(json({ ...input, actor: { kind: "world", partyId: player.id } }), params(id)))
+        .status,
+    ).toBe(400);
+    const first = await POST(json(input), params(id));
+    expect(first.status).toBe(200);
+    const saved = loadGame(id)!;
+    const createdCase = saved.negotiations.find((n) => n.playerId === player.id)!;
+    expect(createdCase.nextReplyOn).toBeNull();
+    expect(createdCase.messages.some((m) => m.author === "gm")).toBe(false);
+    expect(createdCase.proposals).toEqual([]);
+    expect((await POST(json(input), params(id))).status).toBe(200);
+    expect(loadGame(id)!.negotiations).toEqual(saved.negotiations);
+    expect(loadGame(id)!.chat).toEqual(saved.chat);
+    const negotiation = saved.negotiations.find((n) => n.playerId === player.id)!;
+    expect(
+      (
+        await POST(
+          json({
+            requestId: "stale-route-872",
+            negotiationId: negotiation.id,
+            revision: negotiation.revision + 1,
+            action: { kind: "message", channel: "player", text: "새 조건" },
+          }),
+          params(id),
+        )
+      ).status,
+    ).toBe(409);
+    expect(loadGame(id)!.negotiations).toEqual(saved.negotiations);
   });
 });

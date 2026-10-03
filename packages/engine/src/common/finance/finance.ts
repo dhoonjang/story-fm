@@ -438,7 +438,7 @@ export interface RecordFinanceInput {
   label: string;
   amount: number;
   ref?: LedgerEntry["ref"];
-  /** 상각만 noncash */
+  /** 자산 상각·매각 손익은 noncash */
   accounting?: "cash" | "noncash";
   time?: string;
   /** 서사가 만든 항목인가 (apply_finance_event) */
@@ -1640,9 +1640,17 @@ export function summarise(entries: LedgerEntry[]): {
    * **현금은 자산 상각을 빼고, 손익은 투자를 뺀다** (§6.1) — 현금은 살 때 한 번
    * 나가고, 손익은 쓰는 기간에 나눠 문다.
    */
-  const cashNet = incomeTotal - (expenseTotal - amount(expense, "depreciation"));
-  const pnlNet = incomeTotal - (expenseTotal - amount(expense, "capex"));
-  const revenue = incomeTotal;
+  const cashNet = entries
+    .filter((e) => !isNoncash(e))
+    .reduce((sum, e) => sum + (e.kind === "income" ? e.amount : -e.amount), 0);
+  const pnlNet =
+    incomeTotal -
+    amount(income, "transfer_income") -
+    (expenseTotal -
+      amount(expense, "capex") -
+      amount(expense, "transfer_fee") -
+      amount(expense, "signing_bonus"));
+  const revenue = incomeTotal - amount(income, "transfer_income") - amount(income, "transfer_gain");
   const wages = amount(expense, "player_wages") + amount(expense, "staff_wages");
 
   return {
@@ -1983,7 +1991,7 @@ export function seasonWageRatio(state: GameState): number {
     const at = (list: FinanceReportLine[], category: FinanceCategory) =>
       list.find((l) => l.category === category)?.amount ?? 0;
     wages += at(m.expense, "player_wages") + at(m.expense, "staff_wages");
-    revenue += m.incomeTotal;
+    revenue += m.incomeTotal - at(m.income, "transfer_income") - at(m.income, "transfer_gain");
   }
   return revenue > 0 ? wages / revenue : 0;
 }

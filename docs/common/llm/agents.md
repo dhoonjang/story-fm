@@ -27,19 +27,22 @@
 
 설정된 역할과 모델의 원본은 `config/llm.yml`이다.
 
-| 호출 / 설정 키                      | 누가 시작하는가               | 책임과 경계                                                                                              |
-| ----------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
-| 평시 GM / `gm`                      | 평시 턴                       | 서사·관계·진행·조회·`update_character`. 지시는 `tactic_orders`·`training_orders`·`finance_orders`로 전달 |
-| 매치 GM / `match-gm`                | 경기 턴                       | 확정 사건 중계·벤치 대화. `tactic_orders`·`update_character`·`finalize_match`                            |
-| 평시 전술 / `tactic-orders` (Jev)   | 평시 `tactic_orders`          | 현재 전술·선수 사실과 원문에서 명령 선택                                                                 |
-| 훈련·육성 / `training-orders` (Jev) | `training_orders`             | 훈련·육성 명령 선택                                                                                      |
-| 재정 / `finance-orders` (Jev)       | `finance_orders`              | 티켓 가격 변경                                                                                           |
-| 경기 전술 / `match-reader` (Jev)    | 경기 `tactic_orders`          | 직접 명령과 복합 전술 효과. 원문 출처와 시트는 함께 검증·적용                                            |
-| 경기 결산 / `finalize-match` (Jev)  | 마감 스킬 또는 마감 보장 경로 | 평점·성장, 코어 앵커 ± 한도. 평점 근거는 매치 GM                                                         |
-| 훈련 결산 / `training-rater` (Jev)  | 날짜 진행                     | 훈련 구간 평가, 코어 앵커 ± 한도                                                                         |
-| 이력 압축 / `history-compactor`     | 평시 이력 창 상한             | 지난 일·열린 이야기·인물 후보, 실패하면 접지 않음                                                        |
-| 로어북 편집 / `lorebook-editor`     | 두 GM이 저장한 편집 요청      | 비동기 항목 편집, 실패 시 원본·요청 보존                                                                 |
-| 온보딩 / `onboarding-judge`         | 새 게임 생성                  | 배경·구단의 첫 장면, 실패하면 생성 중단                                                                  |
+| 호출 / 설정 키                           | 누가 시작하는가                 | 책임과 경계                                                                                              |
+| ---------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 평시 GM / `gm`                           | 평시 턴                         | 서사·관계·진행·조회·`update_character`. 지시는 `tactic_orders`·`training_orders`·`finance_orders`로 전달 |
+| 매치 GM / `match-gm`                     | 경기 턴                         | 확정 사건 중계·벤치 대화. `tactic_orders`·`update_character`·`finalize_match`                            |
+| 협상 GM / `negotiation-gm`               | 협상 화면 조작·예약된 답변      | 건별 하나의 GM이 모든 상대의 판단·반응을 담당. 제안·동의·메디컬은 코어 도구로 검증                       |
+| 협상 이력 압축 / `negotiation-compactor` | 협상 이력 창 상한               | 해당 건의 쟁점·양보·거절 이유. 조건·동의 원장은 따로 보존                                                |
+| 세계 시장 / `market-planner`             | 게임 날짜 진행                  | 구단의 보강·재계약·고용 판단. 협상 개설과 고용 명령을 app에서 검증                                       |
+| 평시 전술 / `tactic-orders` (Jev)        | 평시 `tactic_orders`            | 현재 전술·선수 사실과 원문에서 명령 선택                                                                 |
+| 훈련·육성 / `training-orders` (Jev)      | `training_orders`               | 훈련·육성 명령 선택                                                                                      |
+| 재정 / `finance-orders` (Jev)            | `finance_orders`                | 티켓 가격 변경                                                                                           |
+| 경기 전술 / `match-reader` (Jev)         | 경기 `tactic_orders`            | 직접 명령과 복합 전술 효과. 원문 출처와 시트는 함께 검증·적용                                            |
+| 경기 결산 / `finalize-match` (Jev)       | 마감 스킬 또는 마감 보장 경로   | 평점·성장, 코어 앵커 ± 한도. 평점 근거는 매치 GM                                                         |
+| 훈련 결산 / `training-rater` (Jev)       | 날짜 진행                       | 훈련 구간 평가, 코어 앵커 ± 한도                                                                         |
+| 이력 압축 / `history-compactor`          | 평시 이력 창 상한               | 지난 일·열린 이야기·인물 후보, 실패하면 접지 않음                                                        |
+| 로어북 편집 / `lorebook-editor`          | 스토리·협상·경기 GM의 편집 요청 | 비동기 항목 편집, 실패 시 원본·요청 보존                                                                 |
+| 온보딩 / `onboarding-judge`              | 새 게임 생성                    | 배경·구단의 첫 장면, 실패하면 생성 중단                                                                  |
 
 ```mermaid
 flowchart TD
@@ -57,8 +60,19 @@ flowchart TD
 `tactic_orders`는 평시에는 `tactic-orders`, 경기에는 `match-reader`를 사용한다.
 라우팅은 `state.phase`가 정하지만 이 값 자체를 모델 입력에 싣지 않는다.
 
-`lorebook-editor`는 두 GM의 저장된 편집 요청을 비동기로 처리하는 생성형
+`lorebook-editor`는 스토리·협상·경기 GM의 저장된 편집 요청을 비동기로 처리하는 생성형
 에이전트다. 로어북만 갱신하며 경기·계약·재정·고용 원장을 변경하지 않는다.
+
+협상 화면은 평시 턴과 별도 API·이력을 사용한다. 하나의 건 안에서는 상대 구단·선수 측·
+내부 업무가 같은 협상 GM의 이력에 들어가고, 다른 협상의 원문은 섞지 않는다.
+메인 GM은 진행 현황과 결과를 읽고 `start_negotiation`으로 건을 열 수 있다.
+감독이 연 새 건은 입력을 기다린다. 같은 `negotiation-gm` 설정의 읽기 전용 구조화 호출이
+감독의 첫 제안 문구만 생성하고, 성공 도구 기록의 payload에 저장해 placeholder로 제공한다.
+이 호출에는 도구가 없으며 상대 발화·제안 발송·답변 예약을 만들지 않는다. 기존 건을 다시
+열면 생성 호출을 반복하지 않는다. 메인 GM의 제안 요청도 해당 건을 여는 데서 끝난다.
+협상 GM은 자연어로 논의한 조건을 유저 구단의 비구속 초안으로 정리하고 상대가 제시할
+조건을 상대 명의의 구조화 제안으로 기록한다. 유저 구단의 수락·서명은 조건 요약을 확인하는
+직접 조작으로만 기록하며, 대화의 동의 표현으로 대신하지 않는다. [협상](../../negotiation/README.md)에 세부 경계가 있다.
 
 ### 직접 지시의 적용 경계
 
@@ -628,7 +642,7 @@ confidence를 강도에 곱하지 않는다. `replace`는 새 효과 전체로 �
 
 감독 지시는 네 지시 스킬 안에서 역할별 Jev 평가로 해석한다. 역할별 명령 목록과
 도메인 문맥을 공통 컴파일러에 전달하며, 원자적 적용은 `packages/agents/src/app/workflows/instructions.ts`가
-조합한다. 런타임 의존성은 `common → {story, match} → app`이다.
+조합한다. 런타임 의존성은 `common → {story, negotiation, match} → app`이다.
 
 위임과 철회는 `player`·`kind`·`all` 범위를 명시한다. 빠진 대상을 전체로 확대하지 않는다.
 전술은 자연어와 현재 후보의 의미를 대응하고, 금액·수량은 원문의 정확한 값과 명시된

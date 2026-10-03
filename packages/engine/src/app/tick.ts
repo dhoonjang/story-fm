@@ -1,3 +1,5 @@
+import { settleNegotiations, negotiationMarketDue } from "../negotiation/negotiation";
+import { repairNegotiationSquads } from "./workflows/negotiation-squad";
 import { expireStaffContracts } from "../story/people/staff-employment";
 import {
   playerOverall,
@@ -973,13 +975,14 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
  * 90일에서 멈춘다. 상한에 걸려도 멈춤 사유는 그대로라(`stopped`) 감독은 며칠이
  * 흘렀는지로만 안다.
  */
-const MAX_REQUESTED_DAYS = 30;
+export const MAX_REQUESTED_DAYS = 30;
 
 const MAX_OPEN_ENDED_DAYS = 90;
 
 export function advanceTime(
   state: GameState,
   until: "next_match" | { days: number } | { clock: string },
+  stopForMarket = false,
 ): AdvanceOutcome {
   if (state.phase !== "idle") {
     return {
@@ -1038,6 +1041,12 @@ export function advanceTime(
     }
 
     state.date = addDays(state.date, 1);
+    const moveCount = state.moves.length;
+    settleNegotiations(state);
+    repairNegotiationSquads(
+      state,
+      state.moves.slice(moveCount).map((move) => move.fromTeamId),
+    );
     // 새 날은 하루의 시작으로 연다 — 장면의 시각은 날짜를 넘을 수 없다
     state.clock = DAY_START;
     /**
@@ -1103,9 +1112,15 @@ export function advanceTime(
       return { ok: true, events, stopped: "matchday", trained };
     }
 
-    if (needsAttention) {
+    if (needsAttention || (stopForMarket && negotiationMarketDue(state))) {
       closeDay("attention");
-      return { ok: true, events, stopped: "attention", trained };
+      return {
+        ok: true,
+        events,
+        stopped: "attention",
+        trained,
+        ...(!needsAttention ? { pendingDateEvents: true } : {}),
+      };
     }
     if (typeof until === "object" && d + 1 >= until.days) {
       closeDay("reached");
@@ -1216,6 +1231,7 @@ export function applyScenePoint(
   state: GameState,
   target: ScenePoint,
   source: ClockSource,
+  stopForMarket = false,
 ): SceneAdvance {
   const here = (): ScenePoint => ({ date: state.date, clock: clockOf(state) });
 
@@ -1244,7 +1260,7 @@ export function applyScenePoint(
   }
 
   const days = diffDays(state.date, target.date);
-  const result = advanceTime(state, { days });
+  const result = advanceTime(state, { days }, stopForMarket);
   // 목표 날짜에 닿았을 때만 시각을 옮긴다 — 중간에 멈췄으면 그 날의 시작이다
   if (state.date === target.date && minutesOfClock(target.clock) > minutesOfClock(DAY_START)) {
     state.clock = target.clock;
@@ -1269,10 +1285,12 @@ export function applyScenePoint(
 export function advanceForOperation(
   state: GameState,
   operation: TurnOperation,
+  stopForMarket = false,
 ): AdvanceOutcome | null {
   if (state.phase !== "idle") return null;
   if (operation.kind === "enter_match" || operation.kind === "match_stop") return null;
-  if (operation.kind === "skip_days") return advanceTime(state, { days: operation.days });
+  if (operation.kind === "skip_days")
+    return advanceTime(state, { days: operation.days }, stopForMarket);
   const days = diffDays(state.date, operation.date);
-  return days > 0 ? advanceTime(state, { days }) : null;
+  return days > 0 ? advanceTime(state, { days }, stopForMarket) : null;
 }

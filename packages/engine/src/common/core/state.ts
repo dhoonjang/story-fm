@@ -768,7 +768,10 @@ export function isSuspendedFor(
  */
 export function isAvailable(state: GameState, player: GamePlayer): boolean {
   return (
-    !isInjured(state, player.id) && !isSuspended(state, player.id) && !isAwayFromClub(state, player)
+    activeContract(state, player.id)?.registrationStatus !== "pending" &&
+    !isInjured(state, player.id) &&
+    !isSuspended(state, player.id) &&
+    !isAwayFromClub(state, player)
   );
 }
 
@@ -785,6 +788,7 @@ export function isAvailableFor(
   competitionId: string | null,
 ): boolean {
   return (
+    activeContract(state, player.id)?.registrationStatus !== "pending" &&
     !isInjured(state, player.id) &&
     !isSuspendedFor(state, player.id, competitionId) &&
     !isAwayFromClub(state, player)

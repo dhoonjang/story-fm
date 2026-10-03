@@ -284,6 +284,8 @@ export function pushRecordJournal(
       youth: "유스 승격",
       expiry: "계약 만료로 떠남",
       reinforcement: "합류",
+      transfer: "이적",
+      free: "자유계약 합류",
     }[move.kind];
     push(move.date, { kind: "move", text: `${name} ${label}` });
   }

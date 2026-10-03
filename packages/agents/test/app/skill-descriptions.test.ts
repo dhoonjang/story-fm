@@ -104,7 +104,7 @@ describe("규칙이 사는 자리", () => {
     for (const skill of SKILL_CATALOG) {
       expect(skill.description.length, skill.name).toBeLessThanOrEqual(600);
     }
-    expect(total).toBeLessThanOrEqual(5_900);
+    expect(total).toBeLessThanOrEqual(6_200);
   });
 
   it("GM은 직접 명령 대신 역할별 해석 스킬을 받는다", () => {
@@ -474,7 +474,7 @@ describe("출력 스키마는 제공자의 문을 지난다", () => {
    * 열은 전부 도구 없이 답한다 — GM 둘을 뺀 에이전트 이름과 목록이 하나씩 맞는다.
    * 에이전트가 하나 늘면 설정(`AGENT_NAMES`)과 이 목록 중 하나가 먼저 빨개진다.
    */
-  it("GM 둘을 뺀 에이전트 전부가 출력 스키마로 답한다 — 도구 이름은 없다", () => {
+  it("출력 스키마를 사용하는 에이전트가 선언된다", () => {
     const GMS = new Set(["gm", "match-gm"]);
     const expected = AGENT_NAMES.filter((name) => !GMS.has(name));
     expect(DECLARED.map((entry) => entry.agent).sort()).toEqual([...expected].sort());

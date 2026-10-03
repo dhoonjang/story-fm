@@ -19,6 +19,30 @@ export interface SkillCatalogEntry {
  */
 export const SKILL_CATALOG = [
   {
+    name: "start_negotiation",
+    label: CALL_LABELS.start_negotiation,
+    group: "대화·서사",
+    readOnly: false,
+    description:
+      "이적·자유계약·재계약의 새 협상 또는 진행 중인 협상을 연다. 제안 요청도 이 도구로 해당 화면을 연다. 새 협상의 첫 문구는 감독이 편집할 제안이며 발송되지 않는다. 메인 GM은 제안 발송·동의·서명을 수행하지 않는다.",
+  },
+  {
+    name: "set_transfer_list",
+    label: CALL_LABELS.set_transfer_list,
+    group: "대화·서사",
+    readOnly: false,
+    description:
+      "우리 구단 선수를 이적 명단에 등록하거나 해제한다. 선수 이름 또는 실제 id, listed 여부와 감독이 정한 정수 £ 희망 이적료 askingPrice를 전달한다. 가격을 지정하지 않으면 기존 값을 유지한다. 명단 등록은 제안·매각·동의가 아니다.",
+  },
+  {
+    name: "get_negotiations",
+    label: CALL_LABELS.get_negotiations,
+    group: "조회",
+    readOnly: true,
+    description:
+      "협상 목록의 진행·답변 대기·현재 제안과 다음 행동을 간결하게 조회한다. 대화 원문은 메인 채팅에 복제하지 않는다.",
+  },
+  {
     name: "release_staff",
     label: CALL_LABELS.release_staff,
     group: "대화·서사",
